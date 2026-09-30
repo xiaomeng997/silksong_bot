@@ -14,6 +14,11 @@ pos/box, and a labelled HUD (hud_state=True: bind orb, masks, silk spool, tool i
 Two parallax layers: far=(parallax, share) replaces the top `share` of the image (unlabelled HUD block included) with a
 second texture at that parallax, a far background above a near ground layer; the figure and the labelled HUD are
 drawn in front of both.
+
+Frame marker (ssbot.record.marker): marker="tr" (a corner) draws the pattern of the frame each capture shows, with
+12 px cells (3 px of the 160 px thumbnail), over everything and under the grain, and writes STATE "mk" as the oracle
+does. marker_off: frames whose STATE has no "mk" and whose image has no marker (the marker off); hide_marker: capture
+indices whose marker is covered by a gray patch (a marker that did not make it into the capture).
 """
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -22,6 +27,7 @@ import cv2
 import numpy as np
 
 from ssbot.ipc.framing import MsgType
+from ssbot.record import marker as mk
 from ssbot.record import synthetic as syn
 from ssbot.record.recorder import Recorder
 from ssbot.record.video import VideoRecorder
@@ -34,6 +40,7 @@ T0_NS = 5_000_000_000_000        # ~83 min of QPC uptime
 D_TRUE_NS = 23_300_000
 FRAME_CLOCK_NS = 8_000_000
 WHEN = datetime(2026, 9, 30, 12, 0, 0)
+MARKER_CELL = 12                 # client px: 3 px of the thumbnail
 
 
 @dataclass
@@ -187,7 +194,8 @@ def make(tmp_path, *, seconds: float = 25.0, seed: int = 1, parallax: float = 1.
          drop_states: set[int] = frozenset(), drop_captures: set[int] = frozenset(), still=None, jump_at=None,
          eof_jitter_ns: int = 1_000_000, cap_jitter_ns: int = 4_000_000, noise: float = 2.0, episode: str = "ep",
          hud: bool = True, hero: str | None = None, lead: float = 0.0, hud_state: bool = False,
-         labels: bool = True, far: tuple[float, float] | None = None) -> Episode:
+         labels: bool = True, far: tuple[float, float] | None = None, marker: str | None = None,
+         marker_off: set[int] = frozenset(), hide_marker: set[int] = frozenset()) -> Episode:
     """Write an episode with STATE frames 1000.. and one capture per frame (minus drop_captures). labels=False draws
     the hero and the labelled HUD but leaves them out of STATE."""
     rng = np.random.default_rng(seed + 100)
@@ -198,6 +206,7 @@ def make(tmp_path, *, seconds: float = 25.0, seed: int = 1, parallax: float = 1.
     tex = texture(1400, 2400, seed)
     tex_far = texture(1400, 2400, seed + 50) if far else None
     q = {int(f): T0_NS + int(f) * PERIOD_NS + int(rng.integers(-eof_jitter_ns, eof_jitter_ns + 1)) for f in frames}
+    geom = mk.Geometry.place(SCREEN, marker, MARKER_CELL) if marker else None
 
     rec = Recorder(None, out_dir=tmp_path, profile="TEST", episode=episode, hello=syn.hello(), when=WHEN,
                    min_free_gb=0, queue_size=1_000_000).start()
@@ -216,6 +225,9 @@ def make(tmp_path, *, seconds: float = 25.0, seed: int = 1, parallax: float = 1.
             s["hud"] = hud_state_dict()
         if jump_at is not None and i >= jump_at:
             s["game"]["scene"] = s["game"]["scene_raw"] = "Tut_02"
+        if geom is not None and int(f) not in marker_off:
+            s["mk"] = {"drawn": True, "corner": marker, "cell": MARKER_CELL, "rect": list(geom.rect),
+                       "grid": [mk.ROWS, mk.COLS], "us": 20.0}
         rec.on_raw(MsgType.STATE, syn.wire(MsgType.STATE, i + 1, s))
     rec.close()
 
@@ -238,6 +250,11 @@ def make(tmp_path, *, seconds: float = 25.0, seed: int = 1, parallax: float = 1.
             draw_hero(img, cam[j, 0], cam[j, 1], her[j, 0], her[j, 1], hero, j // 6)
         if hud_state:
             draw_hud(img)
+        if geom is not None and shown not in marker_off:
+            mk.draw(img, shown, geom)
+            if i in hide_marker:
+                x0, y0, x1, y1 = (int(v) for v in geom.rect)
+                img[y0:y1, x0:x1] = 128
         img = np.clip(img.astype(np.float32) + grain[i % len(grain)], 0, 255).astype(np.uint8)
         vid.push(img, t, ts)
         ep.capture_t.append(t)

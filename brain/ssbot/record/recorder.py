@@ -136,7 +136,8 @@ def _atomic_write_json(path: Path, obj: Any) -> None:
 class StateTracker:
     """Frame-continuity bookkeeping shared by the recorder, index rebuild and the deep check: per chunk the frame
     range, the gaps in "f" (pairs [a, b] meaning frames a+1 .. b-1 never arrived; also across chunk borders),
-    non-increasing frames, and the oracle's cumulative "drop" counter at both ends."""
+    non-increasing frames, the oracle's cumulative "drop" counter at both ends, and the STATEs with the frame marker
+    on ("mk": validation-only frames, never training data; ssbot.record.marker)."""
 
     def __init__(self) -> None:
         self.last_f: int | None = None
@@ -152,9 +153,12 @@ class StateTracker:
         self.q0 = self.q1 = None
         self.seq0 = self.seq1 = None
         self.recv0 = self.recv1 = None
+        self.mk = 0
 
-    def add(self, f: Any, drop: Any, q: Any, seq: int, recv_ns: int) -> None:
+    def add(self, f: Any, drop: Any, q: Any, seq: int, recv_ns: int, mk: Any = None) -> None:
         self.n += 1
+        if mk is not None:
+            self.mk += 1
         if self.seq0 is None:
             self.seq0, self.recv0 = seq, recv_ns
         self.seq1, self.recv1 = seq, recv_ns
@@ -183,7 +187,7 @@ class StateTracker:
     def info(self) -> dict:
         return {"n": self.n, "f0": self.f0, "f1": self.f1, "gaps": self.gaps, "nonmono": self.nonmono,
                 "nof": self.nof, "drop0": self.drop0, "drop1": self.drop1, "q0": self.q0, "q1": self.q1,
-                "seq0": self.seq0, "seq1": self.seq1, "recv0": self.recv0, "recv1": self.recv1}
+                "seq0": self.seq0, "seq1": self.seq1, "recv0": self.recv0, "recv1": self.recv1, "mk": self.mk}
 
 
 class _StreamWriter:
@@ -377,11 +381,11 @@ class Recorder:
         _, _, flags, seq, payload = formats.parse_frame(raw)
         record = formats.pack_record(recv_ns, raw)
         if stream == "state":
-            fields = formats.peek(payload, ("f", "drop", "q", "ev"), flags)
+            fields = formats.peek(payload, ("f", "drop", "q", "mk", "ev"), flags, last=formats.STATE_LAST)
             f = fields.get("f")
             self._chunk.append(record)
             self.states += 1
-            self._tracker.add(f, fields.get("drop"), fields.get("q"), seq, recv_ns)
+            self._tracker.add(f, fields.get("drop"), fields.get("q"), seq, recv_ns, fields.get("mk"))
             for ev in fields.get("ev") or ():
                 self._write_event(ev, f)
             if len(self._chunk) >= self.chunk_frames:
@@ -472,6 +476,7 @@ class ContinuityReport:
     index_consistent: bool | None = None
     cost_us: dict | None = None          # oracle STATE build cost (C14: p50 <= 300, p99 <= 1000)
     latency_ms: dict | None = None       # oracle end-of-frame -> brain reader thread
+    marked: int = 0                      # STATEs with the frame marker on: a validation recording, never training data
 
     @property
     def ok(self) -> bool:
@@ -496,6 +501,8 @@ class ContinuityReport:
         if self.duration_s:
             fps = f", {self.fps:.2f} frames/s" if self.fps else ""
             lines.append(f"duration {self.duration_s:.1f} s{fps}")
+        if self.marked:
+            lines.append(f"frame marker on in {self.marked} STATE frames: validation only, never training data")
         if self.gaps:
             shown = ", ".join(f"{a + 1}..{b - 1}" for a, b in self.gaps[:10])
             lines.append(f"first gaps: {shown}{' ...' if len(self.gaps) > 10 else ''}")
@@ -559,8 +566,8 @@ class RecordingReader:
                     tracker.reset()
                     for recv_ns, frame in formats.iter_records(raw):
                         _, _, flags, seq, payload = formats.parse_frame(frame)
-                        p = formats.peek(payload, ("f", "drop", "q"), flags)
-                        tracker.add(p.get("f"), p.get("drop"), p.get("q"), seq, recv_ns)
+                        p = formats.peek(payload, ("f", "drop", "q", "mk"), flags, last=formats.STATE_LAST)
+                        tracker.add(p.get("f"), p.get("drop"), p.get("q"), seq, recv_ns, p.get("mk"))
                     entry.update(tracker.info())
                 else:
                     recs = list(formats.iter_records(raw))
@@ -685,8 +692,8 @@ class RecordingReader:
                 tracker.reset()
                 for recv_ns, frame in formats.iter_records(self._chunk("state", e)):
                     _, _, flags, seq, payload = formats.parse_frame(frame)
-                    p = formats.peek(payload, ("f", "drop", "q", "cost_us"), flags)
-                    tracker.add(p.get("f"), p.get("drop"), p.get("q"), seq, recv_ns)
+                    p = formats.peek(payload, ("f", "drop", "q", "cost_us", "mk"), flags, last=formats.STATE_LAST)
+                    tracker.add(p.get("f"), p.get("drop"), p.get("q"), seq, recv_ns, p.get("mk"))
                     if isinstance(p.get("cost_us"), int):
                         costs.append(p["cost_us"])
                     if freq and isinstance(p.get("q"), int):
@@ -701,6 +708,7 @@ class RecordingReader:
             if lat:
                 r.latency_ms = {"p50": _pct(lat, .5), "p99": _pct(lat, .99), "max": max(lat)}
         r.states = sum(e["n"] for e in entries)
+        r.marked = sum(e.get("mk", 0) for e in entries)
         r.no_frame = sum(e.get("nof", 0) for e in entries)
         r.nonmonotonic = sum(e.get("nonmono", 0) for e in entries)
         framed = [e for e in entries if e.get("f0") is not None]

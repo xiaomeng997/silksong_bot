@@ -1,5 +1,13 @@
-"""Offline checks of the M1 alignment probe's driving (the probe itself needs the running game)."""
+"""Offline checks of the M1 alignment probe: its driving, and that the frame marker goes on for the gate run and off
+again at the end, also after an error (the probe itself needs the running game)."""
+import sys
+from pathlib import Path
+
+import pytest
+
 from ssbot.ipc.framing import mask, names
+from ssbot.ipc.oracle_link import OracleError
+from ssbot.probes import m1_align
 from ssbot.probes.m1_align import Pattern, drive
 
 
@@ -45,3 +53,91 @@ def test_drive_sends_continuous_control_every_frame_and_stops_on_a_scene_change(
     assert all(set(names(a[1])) <= {"left", "right", "jump", "dash"} for a in link.acts)
     link = FakeLink([st(100), st(101), st(102, gs=5)])
     assert drive(link, 60.0, Pattern(seed=2), progress=lambda s: None) == "left PLAYING (gs 5)"
+
+
+# ---- the frame marker: on for the gate run, off at the end, also after an error ------------------------------------
+
+class GateLink:
+    """OracleLink for main(): Hornet standing in Bonetown, 1280x720; frame.marker optionally refused."""
+
+    def __init__(self, refuse: bool = False):
+        self.hello = {"plugin": "0.1.0", "game": "1.0.30000", "instance": "0", "qpc_freq": 10_000_000,
+                      "rpcs": ["ping", "input.release", "frame.marker"]}
+        self.refuse = refuse
+        self.marker = False
+        self.calls = []
+        self.closed = False
+
+    def wait_state(self, pred=lambda s: True, timeout_s=10.0, newer_than=None):
+        s = {"f": 100, "game": {"gs": 4, "scene": "Bonetown"}, "pause": {"bench": False},
+             "hero": {"pos": [10.0, 5.0, 0.0], "hero_accepting_input": True}, "cam": {"screen": [1280.0, 720.0]},
+             "mk": {"drawn": True} if self.marker else None}
+        if not pred(s):
+            raise TimeoutError("condition not met")
+        return s
+
+    def rpc(self, name, timeout_s=10.0, **args):
+        self.calls.append((name, args))
+        if name == "frame.marker":
+            if args["on"] and self.refuse:
+                raise OracleError("probe tools are disabled in profile SHADOW")
+            self.marker = args["on"]
+        return {"on": self.marker}
+
+    def close(self):
+        self.closed = True
+
+
+class FakeRecorder:
+    def __init__(self, link, out_dir, **kw):
+        self.path = Path(out_dir)
+        self.states, self.dropped, self.closed = 0, {"state": 0}, False
+
+    def start(self):
+        return self
+
+    def close(self):
+        self.closed = True
+        return {"drops": {}, "error": None}
+
+
+class BrokenVideo:
+    def __init__(self, *a, **kw):
+        pass
+
+    def start(self):
+        raise RuntimeError("capture start: window gone")
+
+
+def _gate(monkeypatch, tmp_path, link):
+    monkeypatch.setattr(m1_align, "OracleLink", lambda instance: link)
+    monkeypatch.setattr(m1_align, "instance_window", lambda instance: 0x1234)
+    monkeypatch.setattr(m1_align, "Recorder", FakeRecorder)
+    monkeypatch.setattr(m1_align, "VideoRecorder", BrokenVideo)
+    monkeypatch.setattr(m1_align.time, "sleep", lambda s: None)
+    monkeypatch.setattr(sys, "argv", ["m1_align", "--out", str(tmp_path), "--no-load"])
+
+
+def test_marker_goes_off_after_an_error(monkeypatch, tmp_path):
+    link = GateLink()
+    _gate(monkeypatch, tmp_path, link)
+    with pytest.raises(RuntimeError, match="window gone"):
+        m1_align.main()
+    names = [(n, a.get("on")) for n, a in link.calls]
+    assert names == [("frame.marker", True), ("input.release", None), ("frame.marker", False)]
+    assert link.calls[0][1] == {"on": True, "corner": "tr", "size": 12}     # 3 px of a 320 px thumbnail at 1280
+    assert link.closed and not link.marker
+
+
+def test_refused_marker_fails_the_gate(monkeypatch, tmp_path, capsys):
+    link = GateLink(refuse=True)
+    _gate(monkeypatch, tmp_path, link)
+    assert m1_align.main() == 1
+    assert "frame marker not on" in capsys.readouterr().out
+    assert [(n, a["on"]) for n, a in link.calls] == [("frame.marker", True), ("frame.marker", False)] and link.closed
+
+
+def test_marker_cell_is_three_thumbnail_px():
+    assert m1_align.marker_cell({"cam": {"screen": [1280.0, 720.0]}}, 320) == 12
+    assert m1_align.marker_cell({"cam": {"screen": [1920.0, 1080.0]}}, 256) == 23
+    assert m1_align.marker_cell({"cam": None}, 320) == 0                  # the oracle's default

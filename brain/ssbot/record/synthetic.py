@@ -23,7 +23,7 @@ def state(f: int, *, drop: int = 0, events: list | None = None, scene: str = "Tu
     t = f / 60.0
     s = {
         "f": f, "q": q0 + f * QPC_FREQ // 60, "fc": f * 5 // 6, "fs": 1, "udt": 1 / 60, "dt": 1 / 60, "ts": 1.0,
-        "fdt": 0.02, "focus": False, "cost_us": 15 + f % 7, "drop": drop,
+        "fdt": 0.02, "focus": False, "mk": None, "cost_us": 15 + f % 7, "drop": drop,
         "cost_ex": {"ctx": 1, "base": 4, "game": 5, "pause": 2, "enqueue": 3},
         "act": {"mask": 0, "ack": 0, "applied": -1, "target": -1, "stale": 0, "lost": False},
         "ev": events or [],
