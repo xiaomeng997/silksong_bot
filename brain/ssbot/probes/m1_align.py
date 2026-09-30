@@ -20,9 +20,21 @@ driving early if the scene changes or the game leaves PLAYING.
     ..\\scripts\\uv.cmd run python -m ssbot.record.align <episode> --dump          # re-run the analysis later
 
 Prints progress every 10 s, the continuity report, the alignment report (calibrated D per clock, offset histogram,
-exclusions, anomalies, noise), writes align.json (with the verdict of both clocks) into the episode and exits 0 only
-on PASS on the gate clock (--clock, default the WGC frame clock): >= 99.5 % of the judgeable captures at offset 0,
-unjudged ones counting against it, with at least --min-informative judged captures and --min-coverage of all.
+unjudged captures by cause, exclusions, anomalies, masked share, noise), writes align.json (with the verdict of both
+clocks) into the episode and exits 0 only on PASS on the gate clock (--clock, default the WGC frame clock): >= 99.5 %
+of the judgeable captures at offset 0, unjudged ones counting against it, with at least --min-informative judged
+captures and --min-coverage of all. The analysis takes ~5 ms per capture at the default width (~20 s for 60 s).
+
+Hornet and the HUD are masked out of the registration by the recorded STATE "hero" and "hud" (the camera keeps her
+near the image centre, where she would pull every measured camera step towards 0), and so is anything else that keeps
+its pixels while the image moves. Reading a FAIL:
+    offsets -1 / +1       judged capture by capture: frames shown late / early; 1 - share estimates their share
+    excursions            runs of captures out of step and back (stale captures, periodic judder); judged one by one
+    unjudged no_window    nothing fits anywhere near: judder throughout (or the registration failed: see split)
+    unjudged cut, breaks  latency steps (the offset changes and stays), or registration glitches that could not be
+                          bridged (bridged captures were judged across glitches)
+    unjudged split        the neighbours on the two sides disagree; many of them with few anomalies point at the
+                          registration, not the timing: compare `python -m ssbot.record.align <episode> --no-mask`
 """
 import argparse
 import json

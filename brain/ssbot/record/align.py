@@ -9,7 +9,14 @@ clock, and the arrival clock's result is reported as a cross-check.
 
 1. Registration: the camera motion between consecutive captures, phase correlation of the thumbnails (Hann window;
    the peak refined by an upsampled DFT, see PhaseCorrelator), scaled to client pixels. An increment with a weak peak
-   or from a flat image (fades, black screens) is not trusted.
+   or from a flat image (fades, black screens) is not trusted. Content that does not move with the world is masked
+   out (ScreenFixed): Hornet, whom the camera keeps near the image centre (hero box widened by hero_margin and
+   projected with the frame's V/P), the HUD (STATE hud rects), letterbox bars, and textured pixels that keep their
+   value while the image moves (static_pixels). Unmasked, a figure at the centre pulls every step towards 0 by a share
+   that falls with the speed (0.76 of the step at ~1 thumbnail px per frame, 0.97 at ~3.5), which no single parallax
+   scale absorbs. A masked step is registered twice: the mask's own edges still pull by ~1 %, so the later image is
+   moved back by the first estimate and registered again, with both places of the masked content masked; at a
+   residual of ~0 that pull vanishes.
 2. Oracle camera track: per STATE frame, the image motion of the gameplay plane (z = 0) at the image centre from that
    frame's render-time V/P (the projection of tools/projector), summed into a track in client pixels. It breaks at
    scene changes, frames without a camera and camera jumps (respawns).
@@ -18,12 +25,19 @@ clock, and the arrival clock's result is reported as a cross-check.
    every integer k in [-K, K] (a absorbs parallax: the registration locks onto whichever layer dominates the image). A
    window is decisive when one k fits clearly better; that needs the camera to change speed inside it, because a
    constant offset is invisible in constant motion. Anomalies: an increment that a * the oracle increment explains at
-   no k. Two in a row whose sum is explained are one capture off (stale or glitched): they are left out of the fits.
-   Any other one (a latency step, i.e. a repeated or skipped frame after which the offset stays changed) breaks the
-   track, so no window straddles it. Captures: each capture's video position is compared with the oracle positions at
-   every k, with the track constant taken from its +-h neighbours at the offset of the nearest decisive window, if
-   every decisive window within W agrees on it, separately from the left and from the right neighbours (a
-   registration glitch next to a capture makes the two disagree: "split").
+   no k (6 sigma of the increments' own robust noise). Excursions (_excursions): two anomalies at most max_excursion
+   captures apart, or one next to an increment that only an odd k explains, whose increments sum to what the oracle
+   says: the captures between were out of step and came back (stale or glitched captures, a stale pair, periodic
+   judder). Their increments leave the fits, their sum enters them as one increment, they are nobody's neighbours,
+   and the track goes on through them. Any other anomaly (a latency step, i.e. a repeated or skipped frame after
+   which the offset stays changed; a registration glitch) breaks the track, so no window straddles it. Captures: each
+   capture's video position is compared with the oracle positions at every k, with the track constant taken from its
+   h nearest neighbours outside excursions at the offset of the nearest decisive window, if every decisive window
+   within W agrees on it, separately from the left and from the right neighbours (a registration glitch next to a
+   capture makes the two disagree: "split"). A capture whose segment is too short for a window of its own, between
+   two breaks, is bridged: it takes the offset of the windows across the breaks if they all agree and the increments
+   from one break through the other are not explained (else the captures between were off: an excursion too long to
+   pair), so that registration glitches, however dense, leave no aligned capture unjudged.
 5. Calibrating D: a coarse scan picks the D whose matching best correlates the video and oracle increments. Then every
    clearly judged capture, with true frame g in STATE row r, needs t - t_eof[r + 1] < D <= t - t_eof[r]; D becomes the
    middle of the interval most captures agree on, and step 4 runs again.
@@ -32,11 +46,14 @@ clock, and the arrival clock's result is reported as a cross-check.
    without a label), whose candidate positions around the label lie closer together than min_sep thumbnail px (a slow
    or still camera), or that no window within W could judge even with a perfect video (too few trusted increments, or
    camera motion that tells no k apart: "no_evidence"). Every other capture is judgeable, and one that was not judged
-   (no agreeing decisive window, split) counts as not at offset 0: periodic repeated or skipped frames spoil every fit
-   around them, and would otherwise vanish from the share. At least min_informative judged captures, and
+   counts as not at offset 0, or judder that spoils every fit around it would vanish from the share. The unjudged are
+   reported by cause: no_window (no decisive window within W even across breaks: judder everywhere), split, and cut (a
+   window was within reach, but only across anomalies: between a latency step and a break, inside a long excursion).
+   Anomalies are reported apart (excursions, breaks, bridged captures). Stale captures and periodic judder are judged
+   capture by capture, so 1 - share estimates the misalignment. At least min_informative judged captures, and
    min_coverage of all captures, are needed for a verdict.
 
-    python -m ssbot.record.align <episode> [--clock frame|arrival] [--json] [--dump]     (exit 1 unless PASS)
+    python -m ssbot.record.align <episode> [--clock frame|arrival] [--json] [--dump] [--no-mask]  (exit 1 unless PASS)
 """
 import argparse
 import json
@@ -56,13 +73,15 @@ from ssbot.record.video import FrameInfo, VideoReader
 
 THRESHOLD = 0.995
 
-# Per-capture status of an offsets() run. OK captures are judged; NO_WINDOW and SPLIT ones could have been judged
+# Per-capture status of an offsets() run. OK captures are judged; NO_WINDOW, SPLIT and CUT ones could have been judged
 # (they are labelled, moving and have evidence) but were not, which misalignment itself causes (periodic repeated or
-# skipped frames spoil every fit), so they count against the share. The other statuses do not depend on whether
-# video and oracle agree and are left out.
-OK, NO_LABEL, STATE_GAP, NO_WINDOW, LOW_MOTION, SPLIT, NO_EVIDENCE = range(7)
-STATUS = ("ok", "no_label", "state_gap", "no_window", "low_motion", "split", "no_evidence")
-UNJUDGED = (NO_WINDOW, SPLIT)
+# skipped frames spoil every fit; anomalies cut the track), so they count against the share. They are reported
+# apart: NO_WINDOW (nothing within reach fits: judder), SPLIT (the neighbours on the two sides disagree), CUT (a
+# window was within reach, but only across anomalies). The other statuses do not depend on whether video and oracle
+# agree and are left out.
+OK, NO_LABEL, STATE_GAP, NO_WINDOW, LOW_MOTION, SPLIT, NO_EVIDENCE, CUT = range(8)
+STATUS = ("ok", "no_label", "state_gap", "no_window", "low_motion", "split", "no_evidence", "cut")
+UNJUDGED = (NO_WINDOW, SPLIT, CUT)
 GATE_CLOCK = "frame"  # DESIGN §3.1.4: WGC SystemRelativeTime with a calibrated offset; "arrival" is the cross-check
 
 
@@ -86,6 +105,10 @@ class Params:
     threshold: float = THRESHOLD
     min_informative: int = 300
     min_coverage: float = 0.5        # judged captures must also be at least this share of all captures
+    mask: bool = True                # leave screen-fixed content out of step 1 (labels: hero, HUD; static pixels)
+    hero_margin: tuple[float, float] = (1.0, 0.75)  # world units around the hero collider (sprite, cloak, needle)
+    mask_margin: float = 0.02        # share of the image height added around every masked rect, then feathered
+    max_excursion: int = 8           # longest run of captures off and back whose anomalies pair up (else: breaks)
 
 
 # ---- inputs --------------------------------------------------------------------------------------------
@@ -102,6 +125,7 @@ class VideoMotion:
     contrast: np.ndarray     # (N,) gray std of the thumbnail
     scale: np.ndarray        # (N,) client px per thumbnail px
     src: np.ndarray          # (N, 2) client size the thumbnail was made from
+    masked: np.ndarray       # (N,) share of the thumbnail left out of the step's registration (screen-fixed content)
 
 
 class PhaseCorrelator:
@@ -130,9 +154,21 @@ class PhaseCorrelator:
         if w % 2 == 0:
             self.c[-1] = 1.0
 
-    def spectrum(self, img: np.ndarray) -> np.ndarray:
+    def spectrum(self, img: np.ndarray, weight: np.ndarray | None = None) -> np.ndarray:
+        """Spectrum of the zero-mean image under the Hann window, times `weight` (ScreenFixed) if given: the mean is
+        then taken where the weight is, so that masked content does not leave a static step behind."""
         x = img.astype(np.float64)
-        return np.fft.rfft2((x - x.mean()) * self.win)
+        if weight is None:
+            return np.fft.rfft2((x - x.mean()) * self.win)
+        w = self.win * weight
+        return np.fft.rfft2((x - (x * w).sum() / max(w.sum(), 1e-12)) * w)
+
+    def moved_back(self, img: np.ndarray, dx: float, dy: float) -> np.ndarray:
+        """The image with its content moved by (-dx, -dy) px (a Fourier shift: exact inside, wrapped at the edges,
+        where the Hann window is ~0)."""
+        X = np.fft.rfft2(img.astype(np.float64))
+        return np.fft.irfft2(X * np.exp(2j * np.pi * (self.ky[:, None] * dy + self.kx[None, :] * dx)),
+                             s=(self.h, self.w))
 
     def shift(self, A: np.ndarray, B: np.ndarray) -> tuple[float, float, float]:
         """(dx, dy, peak) of how far the content moved from the image of A to that of B."""
@@ -160,46 +196,80 @@ def _vertex(m: float, z: float, p: float) -> float:
     return 0.0 if d >= 0 else float(np.clip(0.5 * (m - p) / d, -0.5, 0.5))
 
 
+def _contrast(img: np.ndarray, weight: np.ndarray | None) -> float:
+    """Gray std of the thumbnail, where `weight` is (> 0.5) if given."""
+    if weight is None:
+        return float(img.std())
+    x = img[weight > 0.5]
+    return float(x.std()) if x.size else 0.0
+
+
 def register(frames: Iterable[tuple[FrameInfo, np.ndarray]], params: Params = Params(),
-             progress: Callable[[int], None] | None = None) -> VideoMotion:
+             progress: Callable[[int], None] | None = None, fixed: "ScreenFixed | None" = None) -> VideoMotion:
     """Phase-correlate every capture with the previous one. The correlation gives how far the content moved; the
-    camera moved the other way. params.registration "cv2" uses cv2.phaseCorrelate instead (for comparison)."""
-    t, ts, seq, inc, resp, con, scale, src, ok = [], [], [], [], [], [], [], [], []
-    prev = prev_con = prev_spec = None
+    camera moved the other way. With `fixed`, both thumbnails of a step are weighted by its mask (the same weight
+    for both), so that screen-fixed content does not pull the step towards 0. params.registration "cv2" uses
+    cv2.phaseCorrelate instead (for comparison; the mask goes into its window)."""
+    t, ts, seq, inc, resp, con, scale, src, ok, masked = [], [], [], [], [], [], [], [], [], []
+    prev = prev_t = None
+    held: tuple = (None, None, None)       # (mask key, spectrum, contrast) of the previous thumbnail
     tools: dict[tuple[int, int], Any] = {}
     use_cv2 = params.registration == "cv2"
     for i, (info, img) in enumerate(frames):
-        c = float(img.std())
+        t_img = info.frame_ns or info.arrival_ns
         sx, sy = info.src_w / info.w, info.src_h / info.h
         tool = tools.get(img.shape)
         if tool is None:
             tool = tools[img.shape] = (cv2.createHanningWindow((img.shape[1], img.shape[0]), cv2.CV_32F) if use_cv2
                                        else PhaseCorrelator(img.shape))
-        cur = img.astype(np.float32) if use_cv2 else tool.spectrum(img)
-        step, r, good = (0.0, 0.0), 0.0, False
-        if prev is not None and prev.shape == img.shape:
-            if use_cv2:
-                (dx, dy), r = cv2.phaseCorrelate(prev_spec, cur, tool)
-            else:
-                dx, dy, r = tool.shift(prev_spec, cur)
-            step = (-dx * sx, -dy * sy)
-            good = bool(np.isfinite(r) and r >= params.min_response and c >= params.min_contrast
-                        and prev_con >= params.min_contrast)
-        prev, prev_con, prev_spec = img, c, cur
+        step, r, good, share = (0.0, 0.0), 0.0, False, 0.0
+        key, weight = fixed.weight(prev_t, t_img, img.shape) if fixed is not None and prev is not None \
+            else (None, None)
+        if use_cv2:
+            cur = img.astype(np.float32)
+            c = _contrast(img, weight)
+            if prev is not None and prev.shape == img.shape:
+                win = tool if weight is None else (tool * weight).astype(np.float32)
+                (dx, dy), r = cv2.phaseCorrelate(prev.astype(np.float32), cur, win)
+                step = (-dx * sx, -dy * sy)
+                good = bool(np.isfinite(r) and r >= params.min_response and c >= params.min_contrast
+                            and _contrast(prev, weight) >= params.min_contrast)
+        else:
+            cur, c = tool.spectrum(img, weight), _contrast(img, weight)
+            if prev is not None and prev.shape == img.shape:
+                A, c0 = held[1:] if held[0] == key and held[1] is not None and held[1].shape == cur.shape \
+                    else (tool.spectrum(prev, weight), _contrast(prev, weight))
+                dx, dy, r = tool.shift(A, cur)
+                if weight is not None:
+                    # The mask is screen-fixed while the content moves: its edges still pull the peak towards 0
+                    # (~1 % of the step). Again with the later image moved back by the first estimate, the residual
+                    # is ~0, where that pull vanishes (the weight's overlap with itself is symmetric about 0).
+                    w2 = fixed.moved_weight(prev_t, t_img, img.shape, dx, dy)
+                    ex, ey, r = tool.shift(tool.spectrum(prev, w2), tool.spectrum(tool.moved_back(img, dx, dy), w2))
+                    dx, dy = dx + ex, dy + ey
+                step = (-dx * sx, -dy * sy)
+                good = bool(np.isfinite(r) and r >= params.min_response and c >= params.min_contrast
+                            and c0 >= params.min_contrast)
+            held = (key, cur, c)
+        if weight is not None:
+            share = float((weight < 0.5).mean())
+        prev, prev_t = img, t_img
         t.append(info.arrival_ns)
         ts.append(info.frame_ns)
         seq.append(info.seq)
         inc.append(step)
         resp.append(r)
-        con.append(c)
+        con.append(float(img.std()))
         scale.append(sx)
         src.append((info.src_w, info.src_h))
         ok.append(good)
+        masked.append(share)
         if progress is not None and i % 5000 == 4999:
             progress(i + 1)
     return VideoMotion(np.asarray(t, np.int64), np.asarray(ts, np.int64), np.asarray(seq, np.int64),
                        np.asarray(inc, np.float64).reshape(-1, 2), np.asarray(ok, bool), np.asarray(resp),
-                       np.asarray(con), np.asarray(scale, np.float64), np.asarray(src, np.int64).reshape(-1, 2))
+                       np.asarray(con), np.asarray(scale, np.float64), np.asarray(src, np.int64).reshape(-1, 2),
+                       np.asarray(masked, np.float64))
 
 
 @dataclass
@@ -211,6 +281,8 @@ class OracleTrack:
     seg: np.ndarray          # (R,) track segment (positions are only comparable inside one); -1 without a camera
     screen: np.ndarray       # (R, 2) cam.screen; 0 without a camera
     breaks: dict = field(default_factory=dict)   # why segments started: scene / jump / no_cam / screen
+    # (F, 6) screen-fixed content per row: row, kind (FIXED_*), x0, y0, x1, y1 as shares of cam.screen; row-sorted
+    fixed: np.ndarray = field(default_factory=lambda: np.zeros((0, 6)))
 
     def row_of(self) -> np.ndarray:
         """Dense frame -> row lookup over f[0] .. f[-1]; -1 for frames without a STATE."""
@@ -235,10 +307,61 @@ def _to_image(M: np.ndarray, pts: np.ndarray, rect: np.ndarray, screen: np.ndarr
     return np.stack([x, y], axis=1), front
 
 
-def oracle_track(states: Iterable[dict], qpc_freq: int, jump_frac: float = Params.jump_frac) -> OracleTrack:
-    """Build the track from STATE dicts (only f, q, cam and game["scene"] are read). The step of row r is the image
-    motion, between frames r - 1 and r, of the z = 0 point in front of the camera at r - 1, both under their own
-    render-time matrices: exact for zoom (fov animations) and shake, which V/P carry."""
+FIXED_HERO, FIXED_HUD, FIXED_VIEW = range(3)   # OracleTrack.fixed kinds
+
+
+def _num(v: Any) -> bool:
+    return isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
+
+
+def _hud_rects(hud: Any) -> list[list[float]]:
+    """Client-px rects [x0, y0, x1, y1] of what a STATE "hud" (HudProbe) says is on screen: masks, lifeblood masks,
+    bind orb, tool icons and the silk spool (its slot, chunk and notch centres, padded by the pitch and the chunk
+    size). Hidden or not: masking a HUD that is not drawn only costs texture."""
+    out: list[list[float]] = []
+    if not isinstance(hud, dict):
+        return out
+
+    def rect(r: Any) -> None:
+        if isinstance(r, (list, tuple)) and len(r) == 4 and all(_num(v) for v in r):
+            out.append([min(r[0], r[2]), min(r[1], r[3]), max(r[0], r[2]), max(r[1], r[3])])
+
+    for key, at in (("masks", 3), ("blue", 2), ("tools", 3)):
+        for e in hud.get(key) or []:
+            if isinstance(e, (list, tuple)) and len(e) > at:
+                rect(e[at])
+    rect(hud.get("bind_orb"))
+    sp = hud.get("spool")
+    if isinstance(sp, dict):
+        n = len(out)
+        rect(sp.get("chunk_rect"))
+        pad = float(sp["pitch"]) if _num(sp.get("pitch")) else 0.0
+        if len(out) > n:  # the spool is at least as tall as a chunk
+            c = out[-1]
+            pad = max(pad, c[2] - c[0], c[3] - c[1])
+        pts = [p for p in [*(sp.get("slots") or []), *(sp.get("chunks") or []), sp.get("notch")]
+               if isinstance(p, (list, tuple)) and len(p) >= 2 and _num(p[0]) and _num(p[1])]
+        if pts:
+            xy = np.asarray([p[:2] for p in pts], np.float64)
+            lo, hi = xy.min(axis=0) - pad, xy.max(axis=0) + pad
+            out.append([float(lo[0]), float(lo[1]), float(hi[0]), float(hi[1])])
+    return out
+
+
+def _view_bars(rect: np.ndarray) -> list[list[float]]:
+    """Shares of the screen outside the camera viewport (normalized rect x, y, w, h; y up): letterbox bars."""
+    x0, y0, x1, y1 = rect[0], 1.0 - (rect[1] + rect[3]), rect[0] + rect[2], 1.0 - rect[1]
+    bars = [[0.0, 0.0, 1.0, y0], [0.0, y1, 1.0, 1.0], [0.0, 0.0, x0, 1.0], [x1, 0.0, 1.0, 1.0]]
+    return [b for b in bars if b[2] - b[0] > 2e-3 and b[3] - b[1] > 2e-3]
+
+
+def oracle_track(states: Iterable[dict], qpc_freq: int, jump_frac: float = Params.jump_frac,
+                 hero_margin: tuple[float, float] = Params.hero_margin) -> OracleTrack:
+    """Build the track from STATE dicts (only f, q, cam, game["scene"], hero pos/box and hud are read). The step of
+    row r is the image motion, between frames r - 1 and r, of the z = 0 point in front of the camera at r - 1, both
+    under their own render-time matrices: exact for zoom (fov animations) and shake, which V/P carry. Screen-fixed
+    content per row (OracleTrack.fixed): the hero collider box widened by hero_margin world units and projected with
+    the row's V/P (the camera keeps her near the image centre), the HUD rects, and the bars outside the viewport."""
     rows: dict[int, tuple] = {}
     for s in states:
         f, q = s.get("f"), s.get("q")
@@ -247,8 +370,14 @@ def oracle_track(states: Iterable[dict], qpc_freq: int, jump_frac: float = Param
         cam = s.get("cam")
         game = s.get("game") or {}
         good = isinstance(cam, dict) and all(isinstance(cam.get(k), list) for k in ("V", "P", "rect", "screen"))
+        hero = s.get("hero")
+        box = hero.get("box") if isinstance(hero, dict) else None
+        pos = hero.get("pos") if isinstance(hero, dict) else None
+        z = pos[2] if isinstance(pos, (list, tuple)) and len(pos) >= 3 and _num(pos[2]) else 0.0
+        box = (*box, z) if isinstance(box, (list, tuple)) and len(box) == 4 and all(_num(v) for v in box) else None
         # Python ints: q * 1e9 overflows int64 (and float64 loses ms) once the machine has been up for days.
-        rows[f] = (q * 1_000_000_000 // qpc_freq, cam if good else None, game.get("scene"))
+        rows[f] = (q * 1_000_000_000 // qpc_freq, cam if good else None, game.get("scene"), box,
+                   _hud_rects(s.get("hud")))
     fs = np.asarray(sorted(rows), np.int64)
     R = len(fs)
     t_eof = np.asarray([rows[f][0] for f in fs], np.int64)
@@ -258,12 +387,16 @@ def oracle_track(states: Iterable[dict], qpc_freq: int, jump_frac: float = Param
     P16 = np.zeros((R, 16))
     rect = np.zeros((R, 4))
     screen = np.zeros((R, 2))
+    hbox = np.full((R, 5), np.nan)
     for r, f in enumerate(fs):
         cam = rows[f][1]
         if cam is not None:
             V16[r], P16[r], rect[r], screen[r] = cam["V"], cam["P"], cam["rect"], cam["screen"][:2]
+            if rows[f][3] is not None:
+                hbox[r] = rows[f][3]
     V, P = _cols(V16), _cols(P16)
     M = P @ V
+    fixed = _fixed([rows[f][4] for f in fs], M, rect, screen, has, hbox, hero_margin)
     step = np.zeros((R, 2))
     start = np.ones(R, bool)
     why = {"no_cam": 0, "scene": 0, "screen": 0, "jump": 0}
@@ -289,7 +422,146 @@ def oracle_track(states: Iterable[dict], qpc_freq: int, jump_frac: float = Param
     first = np.maximum.accumulate(np.where(start, np.arange(R), 0)) if R else np.zeros(0, np.int64)
     pos = csum - csum[first]
     pos[~has] = np.nan
-    return OracleTrack(fs, t_eof, pos, seg, np.where(has[:, None], screen, 0.0), why)
+    return OracleTrack(fs, t_eof, pos, seg, np.where(has[:, None], screen, 0.0), why, fixed)
+
+
+def _fixed(huds: list[list], M: np.ndarray, rect: np.ndarray, screen: np.ndarray, has: np.ndarray,
+           hbox: np.ndarray, margin: tuple[float, float]) -> np.ndarray:
+    """OracleTrack.fixed: per row with a camera, the hero box (x0, y0, x1, y1, z; NaN without one) widened by
+    `margin` and projected with the row's P*V (all 4 corners), its HUD rects (client px) and its letterbox bars, as
+    shares of cam.screen."""
+    R = len(has)
+    out: list[tuple] = []
+    wh = np.maximum(screen, 1.0)
+    hv = has & np.isfinite(hbox).all(axis=1)
+    if hv.any():
+        b = np.nan_to_num(hbox)
+        mx, my = margin
+        corners = []
+        for x, y in ((b[:, 0] - mx, b[:, 1] - my), (b[:, 2] + mx, b[:, 1] - my), (b[:, 0] - mx, b[:, 3] + my),
+                     (b[:, 2] + mx, b[:, 3] + my)):
+            px, front = _to_image(M, np.c_[x, y, b[:, 4], np.ones(R)], rect, screen)
+            corners.append(px / wh)
+            hv &= front
+        c = np.stack(corners)                                # (4, R, 2)
+        lo, hi = c.min(axis=0), c.max(axis=0)
+        out.extend((r, FIXED_HERO, lo[r, 0], lo[r, 1], hi[r, 0], hi[r, 1]) for r in np.flatnonzero(hv))
+    for r in np.flatnonzero(has):
+        sw, sh = wh[r]
+        out.extend((r, FIXED_HUD, x0 / sw, y0 / sh, x1 / sw, y1 / sh) for x0, y0, x1, y1 in huds[r])
+        out.extend((r, FIXED_VIEW, *bar) for bar in _view_bars(rect[r]))
+    fixed = np.asarray(out, np.float64).reshape(-1, 6)
+    return fixed[np.argsort(fixed[:, 0], kind="stable")]
+
+
+def static_pixels(frames: Iterable[tuple[FrameInfo, np.ndarray]], min_steps: int = 60
+                  ) -> dict[tuple[int, int], np.ndarray]:
+    """Screen-fixed content that no label names (an overlay, a HUD element without a rect, a figure at the image
+    centre without a hero export): per thumbnail shape, the pixels that keep their value (within 3 gray levels) in
+    >= 80 % of the steps where the image as a whole changed (median |difference| > 3), and that have texture of their
+    own (3x3 std of their mean >= 4 gray levels: masking a flat patch would only add the mask's edge as a static
+    feature). None of it depends on D. {} before min_steps such steps."""
+    acc: dict[tuple[int, int], list] = {}
+    prev = None
+    for _, img in frames:
+        if prev is not None and prev.shape == img.shape:
+            d = cv2.absdiff(img, prev)
+            if np.median(d[::4, ::4]) > 3:
+                a = acc.setdefault(img.shape, [0, np.zeros(img.shape, np.int32), np.zeros(img.shape, np.float64)])
+                a[0] += 1
+                a[1] += d <= 3
+                a[2] += img
+        prev = img
+    out = {}
+    for shape, (n, still, total) in acc.items():
+        if n < min_steps:
+            continue
+        mean = (total / n).astype(np.float32)
+        tex = np.sqrt(np.maximum(cv2.blur(mean * mean, (3, 3)) - cv2.blur(mean, (3, 3)) ** 2, 0.0))
+        m = (still >= 0.8 * n) & (tex >= 4.0)
+        if m.any():
+            out[shape] = m
+    return out
+
+
+class ScreenFixed:
+    """The weight that leaves screen-fixed content out of a registration step (register(fixed=...)): the rects of the
+    labels (OracleTrack.fixed) and the pixels that static_pixels() found. The label of a capture depends on D, which
+    is calibrated only after the registration, so a step between captures at t0 <= t1 masks what any STATE frame it
+    could show holds: every frame with t0 - before <= t_eof <= t1 + after, i.e. D anywhere in the scan range and then
+    +-K frames. Everything masked is widened by mask_margin * image height plus the feathering and set to 0 in a
+    weight of 1, which is then blurred (sigma FEATHER thumbnail px), so that the edges of the mask stay nearly as
+    smooth as the Hann window's."""
+
+    FEATHER = 1.0
+
+    def __init__(self, trk: OracleTrack, p: Params = Params(), static: dict | None = None):
+        self.t = trk.t_eof
+        self.rows = trk.fixed[:, 0].astype(np.int64)
+        self.norm = trk.fixed[:, 2:6]
+        period = int(np.median(np.diff(trk.t_eof))) if len(trk.t_eof) > 1 else 16_666_667
+        self.before = int(round(p.scan_ms[1] * 1e6)) + (p.max_offset + 1) * period
+        self.after = int(round(-p.scan_ms[0] * 1e6)) + p.max_offset * period
+        self.margin = p.mask_margin
+        self.static = {}
+        for shape, m in (static or {}).items():
+            r = int(round(self.margin * shape[0] + 2 * self.FEATHER))
+            self.static[shape] = cv2.dilate(m.astype(np.uint8), np.ones((2 * r + 1, 2 * r + 1), np.uint8)) > 0
+        self._key: tuple | None = None
+        self._weight: np.ndarray | None = None
+
+    def rects(self, t0: int, t1: int) -> np.ndarray:
+        """(n, 4) shares of the screen masked for a step between captures at t0 <= t1 (ns)."""
+        r0, r1 = np.searchsorted(self.t, [t0 - self.before, t1 + self.after + 1])
+        a, b = np.searchsorted(self.rows, [r0, r1])
+        return self.norm[a:b]
+
+    def boxes(self, t0: int, t1: int, shape: tuple[int, ...]) -> np.ndarray:
+        """(n, 4) thumbnail px [x0, y0, x1, y1) of that step, widened, clipped to the image and deduplicated."""
+        h, w = shape[:2]
+        m = self.margin * h + 2 * self.FEATHER
+        box = np.round(self.rects(t0, t1) * [w, h, w, h] + [-m, -m, m, m])
+        return self._clip(box, h, w)
+
+    @staticmethod
+    def _clip(box: np.ndarray, h: int, w: int) -> np.ndarray:
+        box = np.clip(box, 0, [w, h, w, h]).astype(np.int64)
+        return np.unique(box[(box[:, 2] > box[:, 0]) & (box[:, 3] > box[:, 1])], axis=0)
+
+    def _blurred(self, box: np.ndarray, static: np.ndarray | None, h: int, w: int) -> np.ndarray:
+        keep = np.ones((h, w), np.float32)
+        if static is not None:
+            keep[static] = 0.0
+        for x0, y0, x1, y1 in box:
+            keep[y0:y1, x0:x1] = 0.0
+        return cv2.GaussianBlur(keep, (0, 0), self.FEATHER).astype(np.float64)
+
+    def weight(self, t0: int, t1: int, shape: tuple[int, ...]) -> tuple[tuple | None, np.ndarray | None]:
+        """(key, weight (h, w) in [0, 1]) of that step; (None, None) when nothing is masked. Equal keys, equal
+        weights."""
+        h, w = shape[:2]
+        box = self.boxes(t0, t1, shape)
+        static = self.static.get((h, w))
+        if not len(box) and static is None:
+            return None, None
+        key = (h, w, box.tobytes())
+        if key != self._key:
+            self._key, self._weight = key, self._blurred(box, static, h, w)
+        return key, self._weight
+
+    def moved_weight(self, t0: int, t1: int, shape: tuple[int, ...], dx: float, dy: float) -> np.ndarray:
+        """The weight for the second pass (register), where the later capture's content was moved back by (dx, dy):
+        its screen-fixed content now lies (dx, dy) off where it was, so both places are masked in both images."""
+        h, w = shape[:2]
+        box = self.boxes(t0, t1, shape)
+        static = self.static.get((h, w))
+        if static is not None:
+            ix, iy = int(round(dx)), int(round(dy))
+            moved = np.zeros_like(static)
+            moved[max(-iy, 0):h - max(iy, 0), max(-ix, 0):w - max(ix, 0)] = \
+                static[max(iy, 0):h - max(-iy, 0), max(ix, 0):w - max(-ix, 0)]
+            static = static | moved
+        return self._blurred(self._clip(np.r_[box, box - np.round([dx, dy, dx, dy])], h, w), static, h, w)
 
 
 def match(t_cap: np.ndarray, t_eof: np.ndarray, D: int) -> np.ndarray:
@@ -312,7 +584,9 @@ class Offsets:
     resid: np.ndarray        # (N,) distance of the video position from the prediction at k, client px
     sep: np.ndarray          # (N,) distance between the predictions at the label (k = 0) and the nearest other k
     sigma: np.ndarray        # (N,) noise estimate of decisive windows, client px (NaN elsewhere)
-    anomaly: np.ndarray      # (N,) increment into capture i: 1 one capture off (left out of the fits), 2 track break
+    anomaly: np.ndarray      # (N,) increment into capture i: 1 part of an excursion (left out of the fits), 2 break
+    excursion: np.ndarray    # (N,) capture inside an excursion: off and back (anomalies paired up), judged alone
+    bridged: np.ndarray      # (N,) judged with a reference from across unpaired anomalies (registration glitches)
 
 
 def _prefix(x: np.ndarray) -> np.ndarray:
@@ -398,7 +672,8 @@ def offsets(mot: VideoMotion, trk: OracleTrack, t_cap: np.ndarray, D: int, p: Pa
     if R == 0 or N == 0:
         nothing, nan = np.zeros(N, bool), np.full(N, np.nan)
         return Offsets(int(D), np.full(N, -1), np.full(N, NO_LABEL), np.zeros(N, np.int64), nothing,
-                       np.zeros(N, np.int64), nothing, nan, nan, np.zeros(N), nan, np.zeros(N, np.int8))
+                       np.zeros(N, np.int64), nothing, nan, nan, np.zeros(N), nan, np.zeros(N, np.int8), nothing,
+                       nothing)
     L = match(t_cap, trk.t_eof, D)
     Lc = np.clip(L, 0, R - 1)
     seg0 = np.where(L >= 0, trk.seg[Lc], -1)
@@ -424,37 +699,42 @@ def offsets(mot: VideoMotion, trk: OracleTrack, t_cap: np.ndarray, D: int, p: Pa
 
     # Pass 1, on the segments as registered. Evidence does not depend on whether video and oracle agree: a capture
     # has it when a window within reach holds enough trusted increments and oracle motion that tells k = 0 from every
-    # other k. The decisive windows of this pass only give the scale and noise for the anomaly test.
+    # other k. The decisive windows of this pass only give the scale for the anomaly test.
     s1, e1 = _segments(link)
     w1 = _windows(mot.inc, O, iv, np.maximum(idx - W, s1), np.minimum(idx + W, e1), scale, p)
     _, evidence = _nearest(w1.distinct, s1, e1, W)
     ref1, has1 = _nearest(w1.decisive, s1, e1, W)
     a1 = w1.a[idx, w1.best]
     a_loc = np.where(has1, a1[ref1], float(np.median(a1[w1.decisive])) if w1.decisive.any() else 1.0)
-    noise = float(np.median(w1.sigma[w1.decisive])) if w1.decisive.any() else 0.0
 
-    # Anomalies: trusted increments that a * the oracle increment explains at no k. Two in a row whose sum is explained
-    # mean that one capture is off (stale or glitched): both leave the window fits, and the capture is judged like any
-    # other. Any other anomaly (a latency step, i.e. a repeated or skipped frame after which the offset stays changed;
-    # a registration jump) breaks the segment, so that no window or neighbour set mixes the two sides.
+    # Anomalies: trusted increments that a * the oracle increment explains at no k. Excursions (_excursions): two of
+    # them, or one and the increment next to it, whose sum is explained: captures that were out of step and came back
+    # (stale, glitched, a short run of repeated or skipped frames). Their increments leave the fits, their sum enters
+    # them as one increment, the captures inside are nobody's neighbours, and the track goes on through them. Any
+    # other anomaly (a latency step, after which the offset stays changed, or a registration glitch) breaks the
+    # segment, so that no window or neighbour set mixes the two sides.
+    # The noise is that of the increments at their best k (median of a 2-D normal's norm: 1.1774 sigma), which a
+    # minority of anomalies does not raise; the pass-1 windows hold the anomalies (a stale pair every 20 captures in
+    # a dash raised their sigma to ~3 px, and a 14 px jump no longer stood out).
+    j = np.flatnonzero(iv)
+    miss = np.linalg.norm(mot.inc[j, None, :] - a_loc[j, None, None] * O[j], axis=2).min(axis=1)
+    noise = float(np.median(miss)) / 1.1774 if len(j) else 0.0
     thr = np.maximum(0.5 * min_sep, p.outlier * noise)
     anom = np.zeros(N, bool)
-    j = np.flatnonzero(iv)
-    anom[j] = np.linalg.norm(mot.inc[j, None, :] - a_loc[j, None, None] * O[j], axis=2).min(axis=1) > thr[j]
-    j = np.flatnonzero(anom[:-1] & anom[1:])
-    single = np.zeros(N, bool)
-    if len(j):
-        two = np.linalg.norm((mot.inc[j] + mot.inc[j + 1])[:, None, :] - a_loc[j, None, None] * (O[j] + O[j + 1]),
-                             axis=2).min(axis=1)
-        single[j[two <= thr[j]]] = True
-    covered = single | np.r_[False, single[:-1]]
+    anom[j] = miss > thr[j]
+    exc, covered, (xs, xe) = _excursions(anom, iv, mot.inc, Pk, a_loc, thr, p.max_excursion)
     brk = anom & ~covered
 
-    # Pass 2: windows without the anomalies, on segments broken at them.
+    # Pass 2: windows without the anomalies, on segments broken at the unpaired ones.
     link = link & ~brk
     seg_start, seg_end = _segments(link)
     lo, hi = np.maximum(idx - W, seg_start), np.minimum(idx + W, seg_end)
-    w2 = _windows(mot.inc, O, iv & ~anom, lo, hi, scale, p)
+    U, O2 = mot.inc.copy(), O.copy()
+    Cr = _prefix(mot.inc)
+    U[xe], O2[xe] = Cr[xe + 1] - Cr[xs], Pk[xe] - Pk[xs - 1]
+    fit = iv & ~anom & ~covered
+    fit[xe] = True
+    w2 = _windows(U, O2, fit, lo, hi, scale, p)
     best, decisive = w2.best, w2.decisive
 
     # Each capture's reference: the nearest decisive window centre in its segment, at most W captures away, if every
@@ -463,22 +743,48 @@ def offsets(mot: VideoMotion, trk: OracleTrack, t_cap: np.ndarray, D: int, p: Pa
     ref, has_ref = _nearest(decisive, seg_start, seg_end, W)
     votes = _prefix((decisive[:, None] & (best[:, None] == np.arange(len(ks))[None, :])).astype(np.float64))
     has_ref &= ((votes[hi + 1] - votes[lo]) > 0).sum(axis=1) <= 1
-    ref = np.where(has_ref, ref, 0)
-    kref = best[ref]
-    a_ref = np.where(has_ref, w2.a[ref, kref], np.nan)
+    # Bridged: a capture in a segment too short for a window of its own, between two unpaired anomalies, takes its
+    # reference from the windows across them (w3: the same fits, on the segments before the breaks) if decisive ones
+    # lie within W on both sides of its segment, all agree on k, and the increments from the first break through the
+    # second are not explained at that k. If they are, the captures between were off and came back (an excursion
+    # longer than max_excursion) and stay unjudged; if not, the breaks were registration glitches, which must not
+    # leave the aligned captures between them unjudged, however many there are.
+    lo1, hi1 = np.maximum(idx - W, s1), np.minimum(idx + W, e1)
+    w3 = _windows(U, O2, fit, lo1, hi1, scale, p)
+    votes3 = _prefix((w3.decisive[:, None] & (w3.best[:, None] == np.arange(len(ks))[None, :])).astype(np.float64))
+    kinds = (votes3[hi1 + 1] - votes3[lo1]) > 0
+    dec = _prefix(w3.decisive.astype(np.float64))
+    nxt = np.minimum(seg_end + 1, N - 1)
+    bridge = (~has_ref & (kinds.sum(axis=1) == 1) & (dec[seg_start] - dec[lo1] > 0)
+              & (dec[hi1 + 1] - dec[np.minimum(seg_end + 1, hi1 + 1)] > 0)
+              & brk[seg_start] & (seg_end + 1 < N) & brk[nxt])
+    if bridge.any():
+        b = np.flatnonzero(bridge)
+        kb = np.argmax(kinds[b], axis=1)
+        s0, s9 = seg_start[b], nxt[b]
+        miss = np.linalg.norm(Cr[s9 + 1] - Cr[s0] - a_loc[s0, None] * (Pk[s9, kb] - Pk[s0 - 1, kb]), axis=1)
+        bridge[b] = miss > thr[s0] * np.sqrt((s9 - s0 + 1) / 2)
+    ref_x, _ = _nearest(w3.decisive, s1, e1, W)
+    kref = np.where(has_ref, best[ref], np.where(bridge, w3.best[ref_x], K))
+    a_ref = np.where(has_ref, w2.a[ref, kref], np.where(bridge, w3.a[ref_x, kref], np.nan))
+    has_ref |= bridge
 
-    # Video positions inside each segment; the neighbour constant c = median(video - a * oracle at kref).
+    # Video positions inside each segment; the neighbour constant c = median(video - a * oracle at kref) over the
+    # nearest h captures on each side that are not inside an excursion (those are off).
     csum = np.cumsum(np.where(link[:, None], mot.inc, 0.0), axis=0)
     Cv = csum - csum[seg_start]
+    nb = usable & ~exc
 
-    def side(ds: range) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-        res = np.full((N, len(ds), 2), np.nan)
-        for m, d in enumerate(ds):
-            j = np.clip(idx + d, 0, N - 1)
+    def side(sign: int) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        res = np.full((N, h, 2), np.nan)
+        cnt = np.zeros(N, np.int64)
+        for d in range(1, h + p.max_excursion + 1):
+            at = idx + sign * d
+            j = np.clip(at, 0, N - 1)
             pj = Pk[j, kref]
-            okj = has_ref & (idx + d >= seg_start) & (idx + d <= seg_end) & usable[j] & np.isfinite(pj[:, 0])
-            res[okj, m] = Cv[j][okj] - a_ref[okj, None] * pj[okj]
-        cnt = np.isfinite(res[..., 0]).sum(axis=1)
+            okj = has_ref & (at >= seg_start) & (at <= seg_end) & nb[j] & np.isfinite(pj[:, 0]) & (cnt < h)
+            res[okj, cnt[okj]] = Cv[j][okj] - a_ref[okj, None] * pj[okj]
+            cnt += okj
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", RuntimeWarning)  # all-NaN rows: no neighbours on this side
             c = np.nanmedian(res, axis=1)
@@ -487,8 +793,8 @@ def offsets(mot: VideoMotion, trk: OracleTrack, t_cap: np.ndarray, D: int, p: Pa
         o = np.argsort(e + 1e-9 * np.abs(ks[None, :] - ks[kref][:, None]), axis=1, kind="stable")  # ties: near kref
         return cnt >= 2, o[:, 0], e[idx, o[:, 0]], e[idx, o[:, 1]]
 
-    okL, kL, eL1, eL2 = side(range(-h, 0))
-    okR, kR, eR1, eR2 = side(range(1, h + 1))
+    okL, kL, eL1, eL2 = side(-1)
+    okR, kR, eR1, eR2 = side(1)
     k_idx = np.where(okL, kL, kR)
     split = okL & okR & (kL != kR)
     resid = np.where(okL & okR, (eL1 + eR1) / 2, np.where(okL, eL1, eR1))
@@ -503,7 +809,11 @@ def offsets(mot: VideoMotion, trk: OracleTrack, t_cap: np.ndarray, D: int, p: Pa
 
     status = np.full(N, OK)
     status[split] = SPLIT
-    status[~(okL | okR)] = NO_WINDOW
+    # Not judged: CUT when the anomalies are why (a decisive window lies within W across the breaks, or the capture is
+    # inside an excursion whose neighbours are off too), NO_WINDOW when nothing within W fits at all.
+    none = ~(okL | okR)
+    status[none] = np.where((kinds.any(axis=1) | ((votes[hi1 + 1] - votes[lo1]) > 0).any(axis=1) | exc)[none],
+                            CUT, NO_WINDOW)
     status[(status != OK) & ~evidence] = NO_EVIDENCE
     status[sep < min_sep] = LOW_MOTION
     status[gap] = STATE_GAP
@@ -511,7 +821,68 @@ def offsets(mot: VideoMotion, trk: OracleTrack, t_cap: np.ndarray, D: int, p: Pa
     return Offsets(D=int(D), label=L, status=status, k=ks[k_idx], clear=clear & (status == OK),
                    k_window=np.where(decisive, ks[best], 0), decisive=decisive & usable, a=a_ref,
                    resid=np.where(status == OK, resid, np.nan), sep=sep, sigma=w2.sigma,
-                   anomaly=np.where(covered, 1, np.where(brk, 2, 0)).astype(np.int8))
+                   anomaly=np.where(covered, 1, np.where(brk, 2, 0)).astype(np.int8), excursion=exc,
+                   bridged=bridge & (status == OK))
+
+
+def _excursions(anom: np.ndarray, iv: np.ndarray, inc: np.ndarray, Pk: np.ndarray, a: np.ndarray, thr: np.ndarray,
+                longest: int) -> tuple[np.ndarray, np.ndarray, tuple[np.ndarray, np.ndarray]]:
+    """Excursions: runs of trusted increments j .. e whose sum is explained at some k (the captures before j and at e
+    fit one offset): captures j .. e - 1 were out of step and e is back. Either both ends are anomalies, at most
+    `longest` apart with none between, or one is and the run is one capture long: a stale capture's repeated frame,
+    0 px, is "explained" by a k at which the camera had stopped, and only the step out of it stands out. (Longer runs
+    with one anomalous end would take the start of a latency step for an excursion whenever the camera stops soon
+    after it.) Of the sets of non-overlapping excursions, the one with the most anomalies inside (fewest breaks) and
+    then the fewest captures out of step: with every 3rd capture stale, (s, s + 1) and (s + 1, s + 3) both explain
+    their sums, and 1 capture in 3 out of step is the reading the fits agree with (with every 2nd capture stale the
+    two readings tie; the fits and the neighbours then judge every capture alike either way). Returns (captures
+    j .. e - 1, increments j .. e, (every j, every e))."""
+    N = len(anom)
+    exc, covered = np.zeros(N, bool), np.zeros(N, bool)
+    A = np.flatnonzero(anom)
+    runs: list[tuple[int, int]] = []
+    for q, x in enumerate(A):
+        x = int(x)
+        if q and x - A[q - 1] <= longest:
+            runs.append((int(A[q - 1]), x))
+        if x - 1 >= 1 and not anom[x - 1]:
+            runs.append((x - 1, x))
+        if x + 1 < N and not anom[x + 1]:
+            runs.append((x, x + 1))
+    if not runs:
+        return exc, covered, (np.zeros(0, np.int64), np.zeros(0, np.int64))
+    J, E = np.asarray(runs, np.int64).T
+    bad = _prefix((~iv).astype(np.float64))
+    C = _prefix(inc)
+    ok = bad[E + 1] - bad[J] == 0
+    with np.errstate(invalid="ignore"):  # Pk may be NaN where not all trusted (not ok anyway)
+        miss = np.linalg.norm((C[E + 1] - C[J])[:, None, :] - a[J, None, None] * (Pk[E] - Pk[J - 1]),
+                              axis=2).min(axis=1)
+        ok &= miss <= thr[J] * np.sqrt((E - J + 1) / 2)
+    J, E = J[ok], E[ok]
+    o = np.lexsort((J, E))
+    J, E = J[o], E[o]
+    gain = anom[J].astype(int) + anom[E].astype(int)
+    prior = np.searchsorted(E, J, side="left")   # runs before this one end before its first increment
+    # Weighted interval scheduling: best[i] = the best set among the first i runs, as (anomalies, -captures).
+    best: list[tuple[int, int]] = [(0, 0)] * (len(J) + 1)
+    take = np.zeros(len(J), bool)
+    for i in range(len(J)):
+        t = (best[prior[i]][0] + int(gain[i]), best[prior[i]][1] - int(E[i] - J[i]))
+        best[i + 1], take[i] = (t, True) if t > best[i] else (best[i], False)
+    chosen: list[int] = []
+    i = len(J)
+    while i > 0:
+        if take[i - 1]:
+            chosen.append(i - 1)
+            i = int(prior[i - 1])
+        else:
+            i -= 1
+    for i in chosen:
+        exc[J[i]:E[i]] = True
+        covered[J[i]:E[i] + 1] = True
+    c = np.asarray(sorted(chosen), np.int64)
+    return exc, covered, (J[c], E[c])
 
 
 # ---- calibration of D ----------------------------------------------------------------------------------
@@ -618,9 +989,11 @@ class ClockResult:
     share_judged: float | None = None        # zero / informative
     hist: dict = field(default_factory=dict)          # per-capture offset -> count
     window_hist: dict = field(default_factory=dict)   # decisive window offset -> count
-    unjudged_by: dict = field(default_factory=dict)   # no_window / split -> count
+    unjudged_by: dict = field(default_factory=dict)   # no_window / split / cut -> count
     excluded: dict = field(default_factory=dict)      # statuses left out -> count
-    anomalies: dict = field(default_factory=dict)     # increments left out of the fits (one capture off) / breaks
+    anomalies: dict = field(default_factory=dict)     # increments left out of the fits (excursions) / track breaks
+    excursions: dict = field(default_factory=dict)    # anomaly pairs: runs out of step and back, captures, longest
+    bridged: int = 0                         # judged with a reference from across unpaired anomalies
     lag_ms: dict | None = None               # capture time - end of the true frame
     first_nonzero: list = field(default_factory=list)
     ok: bool = False
@@ -638,6 +1011,7 @@ class AlignReport:
     period_ms: float | None = None
     trusted: int = 0                          # trusted increments
     response: dict | None = None
+    masked: dict | None = None                # steps registered with screen-fixed content masked; share masked
     track_breaks: dict | None = None
     screen: list | None = None
     src: list | None = None
@@ -669,7 +1043,7 @@ class AlignReport:
             f"{self.frames}, period {self.period_ms and round(self.period_ms, 3)} ms; client {self.src}, "
             f"cam.screen {self.screen}",
             f"registration: {self.trusted} trusted increments, response {self.response}; parallax scale a {self.scale_a};"
-            f" track breaks {self.track_breaks}",
+            f" masked {self.masked}; track breaks {self.track_breaks}",
         ]
         for c in (pr, self.alt):
             if c is None:
@@ -680,8 +1054,8 @@ class AlignReport:
             lines.append(f"  judged {c.informative} + unjudged {c.unjudged} {c.unjudged_by}: offset 0 {c.zero} = "
                          f"{pct(c.share)} (of the judged {pct(c.share_judged)}) -> {c.verdict}"
                          f"{' (' + c.reason + ')' if c.reason else ''}")
-            lines.append(f"  offsets {c.hist}; decisive windows {c.window_hist}; excluded {c.excluded}; "
-                         f"anomalies {c.anomalies}")
+            lines.append(f"  offsets {c.hist}; decisive windows {c.window_hist}; excluded {c.excluded}")
+            lines.append(f"  anomalies {c.anomalies}; excursions {c.excursions}; bridged {c.bridged}")
             if c.first_nonzero:
                 lines.append(f"  first non-zero (capture, seq, frame, k): {c.first_nonzero}")
         lines.append(f"noise: window sigma {self.noise_px}; per-capture residual {self.resid_px} (client px)")
@@ -738,6 +1112,11 @@ def calibrate(mot: VideoMotion, trk: OracleTrack, t_cap: np.ndarray, p: Params =
     res.window_hist = _hist(off.k_window[off.decisive])
     res.excluded = {STATUS[s]: int((off.status == s).sum()) for s in range(1, len(STATUS)) if s not in UNJUDGED}
     res.anomalies = {"left_out": int((off.anomaly == 1).sum()), "breaks": int((off.anomaly == 2).sum())}
+    starts = np.flatnonzero(off.excursion & ~np.r_[False, off.excursion[:-1]])
+    ends = np.flatnonzero(off.excursion & ~np.r_[off.excursion[1:], False])
+    res.excursions = {"runs": len(starts), "captures": int(off.excursion.sum()),
+                      "longest": int((ends - starts + 1).max()) if len(starts) else 0}
+    res.bridged = int(off.bridged.sum())
     sel = ok & off.clear
     if sel.any():
         rows = trk.row_of()[trk.f[off.label[sel]] + off.k[sel] - trk.f[0]]
@@ -748,9 +1127,16 @@ def calibrate(mot: VideoMotion, trk: OracleTrack, t_cap: np.ndarray, p: Params =
     res.first_nonzero = [[int(i), int(mot.seq[i]), int(trk.f[off.label[i]]), int(off.k[i])] for i in bad[:10]]
     need = max(1, p.min_informative, math.ceil(p.min_coverage * len(t_cap)))
     if judgeable and judgeable >= p.min_informative and res.share < p.threshold:
-        res.reason = f"{res.informative - res.zero} judged captures off offset 0, {res.unjudged} unjudged"
-        if res.unjudged > res.informative - res.zero:
-            res.reason += " (repeated or skipped frames leave captures unjudged)"
+        off0 = res.informative - res.zero
+        by = ", ".join(f"{k} {v}" for k, v in res.unjudged_by.items() if v)
+        res.reason = f"{off0} judged captures off offset 0, {res.unjudged} unjudged" + (f" ({by})" if by else "")
+        if res.unjudged_by["no_window"] > off0:
+            res.reason += "; no window fits around the unjudged: periodic repeated or skipped frames?"
+        ex = res.excursions
+        if ex["runs"]:
+            res.reason += f"; {ex['runs']} runs of captures out of step and back ({ex['captures']} captures)"
+        if res.anomalies["breaks"]:
+            res.reason += f"; {res.anomalies['breaks']} track breaks (latency steps or registration glitches)"
     elif res.informative < need:
         res.verdict, res.reason = "INCONCLUSIVE", (f"only {res.informative} judged captures (< {need}: at least "
                                                    f"{p.min_informative} and {p.min_coverage * 100:.0f} % of "
@@ -774,6 +1160,8 @@ def align(mot: VideoMotion, trk: OracleTrack, p: Params = Params(), clock: str =
     r = mot.response[1:]
     if len(r):
         rep.response = {"p1": round(_p(r, 1), 3), "p50": round(_p(r, 50), 3)}
+    m = mot.masked[mot.masked > 0]
+    rep.masked = {"steps": len(m), "p50": _r(_p(m, 50)), "max": _r(_p(m, 100))} if len(m) else None
     rep.track_breaks = trk.breaks
     scr = trk.screen[trk.seg >= 0]
     rep.screen = [list(map(int, s)) for s in np.unique(scr, axis=0)] if len(scr) else []
@@ -815,8 +1203,13 @@ def load(path: str | Path, p: Params = Params(), progress: Callable[[int], None]
     freq = rr.hello.get("qpc_freq") or (rr.meta.get("qpc") or {}).get("freq")
     if not freq:
         raise ValueError(f"no qpc_freq in {path / 'meta.json'}")
-    trk = oracle_track(rr.states(keys=("q", "cam", "game")), freq, p.jump_frac)
-    mot = register(vr.frames(), p, progress)
+    trk = oracle_track(rr.states(keys=("q", "cam", "game", "hero", "hud")), freq, p.jump_frac, p.hero_margin)
+    fixed = None
+    if p.mask:
+        static = static_pixels(vr.frames())
+        if len(trk.fixed) or static:
+            fixed = ScreenFixed(trk, p, static)
+    mot = register(vr.frames(), p, progress, fixed)
     return mot, trk
 
 
@@ -835,7 +1228,8 @@ def dump(path: Path, off: Offsets, mot: VideoMotion, trk: OracleTrack) -> None:
     np.savez_compressed(path, seq=mot.seq, t_arrival=mot.t_arrival, t_frame=mot.t_frame, inc=mot.inc, ok=mot.ok,
                         response=mot.response, label_row=L, label_f=np.where(L >= 0, trk.f[np.clip(L, 0, None)], -1),
                         status=off.status, k=off.k, clear=off.clear, k_window=off.k_window, decisive=off.decisive,
-                        a=off.a, resid=off.resid, sep=off.sep, anomaly=off.anomaly, D=off.D, state_f=trk.f,
+                        a=off.a, resid=off.resid, sep=off.sep, anomaly=off.anomaly, excursion=off.excursion,
+                        bridged=off.bridged, masked=mot.masked, D=off.D, state_f=trk.f,
                         state_t_eof=trk.t_eof, state_pos=trk.pos, state_seg=trk.seg)
 
 
@@ -853,11 +1247,13 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--min-coverage", type=float, default=Params.min_coverage,
                     help="judged captures needed, as a share of all captures")
     ap.add_argument("--threshold", type=float, default=THRESHOLD)
+    ap.add_argument("--no-mask", action="store_true",
+                    help="register the whole thumbnails, screen-fixed content included (to compare)")
     ap.add_argument("--json", action="store_true", help="also write align.json into the episode folder")
     ap.add_argument("--dump", action="store_true", help="also write per-capture arrays to align_frames.npz")
     a = ap.parse_args(argv)
     p = Params(max_offset=a.max_offset, window=a.window, min_sep=a.min_sep, min_informative=a.min_informative,
-               min_coverage=a.min_coverage, threshold=a.threshold)
+               min_coverage=a.min_coverage, threshold=a.threshold, mask=not a.no_mask)
     rep, off, mot, trk = align_episode(a.path, p, a.clock, a.D_ms,
                                        progress=lambda n: print(f"  registered {n} captures", file=sys.stderr))
     print(rep.format())

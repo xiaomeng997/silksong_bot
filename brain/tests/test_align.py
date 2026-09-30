@@ -1,7 +1,9 @@
 """Frame/label alignment (ssbot.record.align) on synthetic episodes with known timing (tests/align_synth.py): a
 textured world under a moving camera, STATE with render-time V/P, thumbnails with capture jitter, and injected
 faults (stale captures, periodic judder, a latency step, a wrong fixed D, parallax, drops, a scene jump, a still
-camera)."""
+camera, registration glitches), with and without a figure at the image centre and a HUD (masked out of the
+registration by their STATE labels, or found in the video)."""
+import dataclasses
 import json
 
 import cv2
@@ -128,18 +130,40 @@ def test_stale_captures_show_up_as_offset_minus_one(tmp_path):
     assert lo < pr.D_ms * MS <= hi                 # the stale minority does not move the calibration
 
 
+def _truly_off(ep, off, trk) -> tuple[float, np.ndarray]:
+    """Share of the judgeable captures (judged or counted as unjudged) that truly show another frame, and true k."""
+    tk = ep.true_k(off, trk)
+    judgeable = (off.status == align.OK) | np.isin(off.status, align.UNJUDGED)
+    return float(((tk != 0) & judgeable).sum() / judgeable.sum()), tk
+
+
 @pytest.mark.parametrize("seed, stale", [(8, range(300, 900, 2)), (8, range(300, 900, 3)), (1, range(300, 900, 2)),
                                          (8, range(300, 360, 2))])
 def test_periodic_judder_fails(tmp_path, seed, stale):
-    """Every 2nd or 3rd capture repeating the previous frame (the next one skipping a frame) spoils the window fits
-    around them: those captures cannot be judged, and they count against the share instead of vanishing from it."""
+    """Every 2nd or 3rd capture repeating the previous frame (the next one skipping a frame): each stale capture's
+    two anomalies pair up (out of step and back), its neighbours and the fits go on without it, and it is judged by
+    itself at -1. The share then tracks the truth instead of the judder spoiling every fit around it."""
     ep = S.make(tmp_path, seconds=20, seed=seed, stale=set(stale))
     rep, off, mot, trk = align.align_episode(ep.path)
     pr = rep.primary
-    assert not rep.ok and pr.verdict == "FAIL" and "unjudged" in pr.reason
-    assert pr.unjudged > len(stale) // 2 and pr.share < 0.97
+    assert not rep.ok and pr.verdict == "FAIL" and pr.share < 0.98
+    truth, tk = _truly_off(ep, off, trk)
+    ok = off.status == align.OK
+    assert (off.k == tk)[ok].mean() >= 0.95 and pr.hist.get(-1, 0) >= 0.6 * len(stale)
+    assert 1 - pr.share == pytest.approx(truth, abs=0.04)      # the misalignment estimate, not a multiple of it
+    assert pr.excursions["runs"] >= 0.5 * len(stale) and "out of step" in pr.reason
     # What is left out does not depend on the judder: the same as without it, give or take the edges.
     assert pr.excluded["no_evidence"] == 0 and pr.excluded["low_motion"] <= 220
+
+
+def test_judder_everywhere_fails_unjudged(tmp_path):
+    """Every 2nd capture stale from start to end: no fit anywhere (the anomaly noise itself is the judder), nothing
+    is judged, and every judgeable capture counts against the share."""
+    ep = S.make(tmp_path, seconds=12, seed=8, stale=set(range(1, 720, 2)))
+    rep, *_ = align.align_episode(ep.path)
+    pr = rep.primary
+    assert not rep.ok and pr.verdict == "FAIL" and pr.share < 0.05 and pr.unjudged_by["no_window"] > 300
+    assert "periodic repeated or skipped frames" in pr.reason
 
 
 def test_latency_step_is_localized(tmp_path):
@@ -227,3 +251,118 @@ def test_cv2_registration_is_selectable(clean):
     ep = clean[0]
     rep, *_ = align.align_episode(ep.path, align.Params(registration="cv2", min_sep=1.0))
     assert rep.primary.informative > 0 and rep.primary.D_ms is not None
+
+
+# ---- screen-fixed content: the hero, the HUD, and what the video shows ---------------------------------------------
+
+def test_oracle_track_collects_screen_fixed_rects():
+    cam = syn.camera(2.0, 1.0, screen=(640, 360), ppu=30.0)
+    hero = {"pos": [2.5, 1.0, 0.0], "box": [2.25, 0.5, 2.75, 1.5]}
+    s0 = {"f": 10, "q": 1_000_000, "cam": cam, "game": {"scene": "A"}, "hero": hero, "hud": S.hud_state_dict()}
+    s1 = {"f": 11, "q": 1_166_667, "cam": dict(cam, rect=[0.0, 0.1, 1.0, 0.8]), "game": {"scene": "A"},
+          "hero": None, "hud": {"masks": [None, [1, True, "Idle", None]], "spool": None, "bind_orb": [1, 2, 3]}}
+    trk = align.oracle_track([s0, s1], 10_000_000, hero_margin=(1.0, 0.5))
+    fx = trk.fixed
+    px = fx[:, 2:] * [640, 360, 640, 360]
+    hero_r = px[(fx[:, 0] == 0) & (fx[:, 1] == align.FIXED_HERO)]
+    # 0.5 u right of the camera (335 px); 0.25 + 1.0 u (37.5 px) to each side, 0.5 + 0.5 u (30 px) up and down
+    assert np.allclose(hero_r, [[297.5, 150.0, 372.5, 210.0]])
+    hud = px[(fx[:, 0] == 0) & (fx[:, 1] == align.FIXED_HUD)].round(1).tolist()
+    assert len(hud) == 5 + 1 + 2 + 2 and [16, 58, 62, 104] in hud and [70, 60, 82, 76] in hud
+    assert [65.5, 74.0, 195.5, 100.0] in hud        # the spool: slots and chunks, padded by the pitch (13 px)
+    # Row 1 is letterboxed (10 % bars at the top and bottom), has no hero and no usable HUD rect.
+    assert np.allclose(fx[fx[:, 0] == 1], [[1, align.FIXED_VIEW, 0, 0, 1, 0.1], [1, align.FIXED_VIEW, 0, 0.9, 1, 1]])
+    # A step masks what any frame it could show holds: D anywhere in the scan range, then +-K frames.
+    sf = align.ScreenFixed(trk)
+    t = int(trk.t_eof[0]) + 30_000_000
+    key, w = sf.weight(t, t + 16_666_667, (90, 160))
+    assert w[45, 84] < 0.01 and w[45, 60] > 0.99 and w[20, 10] < 0.01 and w[4, 80] < 0.01 and w[86, 80] < 0.01
+    assert sf.weight(t, t, (90, 160))[0] == key and sf.weight(t + 10**9, t + 10**9, (90, 160)) == (None, None)
+
+
+def test_static_pixels_are_screen_fixed_texture_only():
+    tex = S.texture(1400, 2400, 4)
+    checker = np.kron([[0, 255] * 5, [255, 0] * 5] * 3, np.ones((2, 2))).astype(np.uint8)[:12, :20]
+    frames = []
+    for i in range(90):
+        img = cv2.resize(S.render(tex, 0.25 * i - 11, 0.0, hud=False), (160, 90), interpolation=cv2.INTER_AREA)
+        img[40:52, 70:90] = checker   # an overlay: static, with texture
+        img[0:10, 0:30] = 128         # a flat static patch: only its edge is texture (masking it would add one)
+        frames.append((FrameInfo(i, 1000 + i, 0, 160, 90, 640, 360), img))
+    m = align.static_pixels(frames)[(90, 160)]
+    assert m[40:52, 70:90].all() and not m[0:8, 0:28].any() and not m[20:, 100:].any()
+    assert align.static_pixels(frames[:40]) == {}   # too few moving steps to tell
+
+
+@pytest.fixture(scope="module")
+def figure(tmp_path_factory):
+    """Hornet-like: a 3-pose sprite the camera keeps near the image centre (1 u behind it in its direction of travel)
+    with STATE hero pos/box, and a labelled HUD with STATE hud rects; aligned (every capture shows its label)."""
+    ep = S.make(tmp_path_factory.mktemp("figure"), seconds=20, seed=1, hero="sprite", lead=1.0, hud_state=True)
+    return ep, *align.align_episode(ep.path)
+
+
+def test_centre_figure_and_hud_are_masked_out_of_the_registration(figure, capsys):
+    ep, rep, off, mot, trk = figure
+    pr = rep.primary
+    assert rep.ok and pr.share == 1.0 and pr.unjudged == 0 and pr.hist == {0: pr.informative}
+    assert pr.anomalies == {"left_out": 0, "breaks": 0} and pr.informative >= 0.8 * rep.captures
+    assert rep.scale_a["p1"] > 0.98 and rep.scale_a["p99"] < 1.02    # no speed-dependent pull towards 0
+    assert rep.masked["steps"] == rep.captures - 1 and 0.05 < rep.masked["p50"] < 0.4
+    # Unmasked, the figure pulls every step towards 0 by a share that falls with the speed (~25 % at 1 thumbnail px
+    # per frame), the neighbours on the two sides disagree near speed changes, and the aligned recording fails.
+    assert align.main([str(ep.path), "--no-mask"]) == 1
+    assert "split" in capsys.readouterr().out
+
+
+def test_centre_figure_with_periodic_judder_fails(tmp_path):
+    ep = S.make(tmp_path, seconds=20, seed=1, stale=set(range(300, 900, 3)), hero="sprite", lead=1.0,
+                hud_state=True)
+    rep, off, mot, trk = align.align_episode(ep.path)
+    pr = rep.primary
+    truth, tk = _truly_off(ep, off, trk)
+    assert not rep.ok and pr.verdict == "FAIL" and pr.hist.get(-1, 0) > 100
+    assert 1 - pr.share == pytest.approx(truth, abs=0.06)
+    assert (off.k == tk)[off.status == align.OK].mean() >= 0.97
+
+
+def test_static_figure_without_labels_is_found_in_the_video(tmp_path):
+    """The block the camera keeps at the centre, with no hero export this time: static_pixels() finds it."""
+    ep = S.make(tmp_path, seconds=20, seed=1, hero="block", labels=False)
+    rep, *_ = align.align_episode(ep.path)
+    assert rep.ok and rep.primary.share == 1.0 and rep.masked["steps"] == rep.captures - 1
+
+
+# ---- anomalies: excursions, breaks, bridges -------------------------------------------------------------------
+
+@pytest.mark.parametrize("seed, figure", [(8, False), (4, False), (1, True)])
+def test_stale_pairs_are_one_excursion_each(tmp_path, seed, figure):
+    """Two stale captures in a row every 20 captures (~5 % off): the repeated frame at s and the skipped one at s + 2
+    pair up as one excursion, the track goes on through it, and the two captures are judged by themselves. Before,
+    each anomaly broke the track and the short segments left their aligned captures unjudged (~7x the truth)."""
+    stale = {s + d for s in range(300, 900, 20) for d in (0, 1)}
+    ep = S.make(tmp_path, seconds=20, seed=seed, stale=stale,
+                **(dict(hero="sprite", lead=1.0, hud_state=True) if figure else {}))
+    rep, off, mot, trk = align.align_episode(ep.path)
+    pr = rep.primary
+    truth, tk = _truly_off(ep, off, trk)
+    assert not rep.ok and pr.verdict == "FAIL" and 0.04 < truth < 0.07
+    assert 1 - pr.share == pytest.approx(truth, rel=0.4) and pr.unjudged <= 25
+    assert pr.excursions["runs"] >= 20 and pr.excursions["longest"] <= 2
+    assert (off.k == tk)[off.status == align.OK].all()
+
+
+def test_registration_glitches_do_not_cascade(clean):
+    """Unpaired anomalies that are registration glitches, not latency steps: two 8 captures apart, then one every 13
+    captures for 300 captures. Each breaks the track, but the captures between them take their reference from the
+    windows across the breaks, which all agree, and the increments across the breaks are not explained (a real
+    excursion's are): they are judged, not counted against the share."""
+    ep, rep, off, mot, trk = clean
+    inc = mot.inc.copy()
+    inc[500] += (6.0, 0.0)
+    inc[508] += (-2.0, 5.0)
+    inc[700:1000:13] += (4.0, 3.0)
+    bad, off2 = align.align(dataclasses.replace(mot, inc=inc), trk)
+    pr = bad.primary
+    assert bad.ok and pr.share == 1.0 and pr.unjudged == 0
+    assert pr.anomalies["breaks"] >= 20 and pr.bridged > 100 and off2.bridged[501:508].all()
