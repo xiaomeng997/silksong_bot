@@ -13,6 +13,7 @@ namespace SsOracle.Core
         public static void InstallAll(GameObject host, Harmony harmony)
         {
             Ipc.Rpc.Register("ping", args => "pong");
+            MemStats.Register();
 
             // First: SymbolCheck's report precedes every patch error, and guard refusals are known before other
             // modules install (STATE "guards").
