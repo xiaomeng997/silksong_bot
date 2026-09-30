@@ -9,8 +9,8 @@ namespace SsOracle.Crest
     /// RPC "crest.dump" (read-only; crests.md §5 a, i). Reply:
     /// <code>
     /// {frame,
-    ///  current: {crest, previous, temp, cursed, silk, config, group, override_group, crest_config, rage, reaper,
-    ///            hunter_meter, values} | {crest, previous, temp, cursed, silk} without a hero,
+    ///  current: {crest, previous, temp, cursed, silk, silk_max, config, group, override_group, crest_config, rage,
+    ///            reaper, hunter_meter, values} | {crest, previous, temp, cursed, silk} without a hero,
     ///  crests:  [{name, hidden, base, previous_version, upgraded_version, unlocked, equipped, has_custom_action,
     ///             config, config_group: {index, special, rule} | null (no hero),
     ///             slots: [{i, type, binding, locked, pos, saved: {tool, unlocked} | null}],
@@ -91,6 +91,9 @@ namespace SsOracle.Crest
                 ["silk"] = pd.silk,
             };
             if (hero == null) return d;
+            // PlayerData.CurrentSilkMax (null without ToolItemManager, SafeReads): the probe's bound for silk that idle
+            // regen added during a crest.equip run.
+            d["silk_max"] = Hero.SafeReads.TrySilkMax(pd, hero, out var silkMax) ? (object)silkMax : null;
             var cfg = hero.Config;
             if (cfg != null) AddConfig(configs, cfg, hero);
             d["config"] = CrestModule.Name(cfg);

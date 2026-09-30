@@ -13,14 +13,17 @@ Steps:
      {name, unlock}, a few frames, crest.dump (its "current") and slash.dump. A refusal is recorded and the run goes on.
   4. crest.equip {restore}: the original crest, PreviousCrestID and temp flag back, what step 3 unlocked relocked, and
      the side effects of the switches undone (saved slots, tool amounts, silk). crest.dump must then match step 1 in
-     all of these (restore_state). Only then does SaveSuppression go back as it was: a failed or unverified restore
-     leaves it on and says so (Save & Quit then writes nothing; reload the save).
+     all of these (restore_state; silk may have grown from idle Silk Heart regen, but not be lower or above the max).
+     Only then does SaveSuppression go back as it was: a failed or unverified restore, or a broken link, leaves it on
+     and says how to get back (restart the game, or Save & Quit, reload the save and run --save-suppression-off: the
+     game turns SaveSuppression off only when it starts).
   5. Writes --out (default docs/facts/<game>/crests.json) and prints the tables below. Exit code 1 when the restore
      check fails or no crest besides the equipped one could be dumped.
 
     cd brain
     ..\\scripts\\uv.cmd run python -m ssbot.probes.p17_crests [--instance 0] [--crests Wanderer,Reaper,Hunter_v2]
         [--no-unlock] [--out ../docs/facts/1.0.30000/crests.json]
+    ..\\scripts\\uv.cmd run python -m ssbot.probes.p17_crests --instance 0 --save-suppression-off
 
 Config table (every crest the game knows, from the serialized HeroControllerConfig fields, so Warrior shows its non-rage
 values): swing = max(attackCooldownTime, attackDuration) (HeroController.DidAttack sets the cooldown so), quick = the same
@@ -60,9 +63,16 @@ NEEDED_RPCS = ("crest.dump", "slash.dump", "gameplay.dump", "crest.equip", "guar
 DEFAULT_CRESTS = ("Wanderer", "Reaper", "Hunter_v2")
 SETTLE_FRAMES = 3
 EVENT_KINDS = ("hunter_meter", "guards", "save")
-ERRORS = (OracleError, TimeoutError)
-SAVE_KEPT = ("[FAIL] the save is not back to how it was, so SaveSuppression stays ON. Do not turn it off: Save & Quit "
-             "to the menu (SaveSuppression writes nothing) or close the game, then reload the save.")
+# OSError: TimeoutError, and the ConnectionError/OSError a broken link raises (OracleLink._send's sendall).
+ERRORS = (OracleError, OSError)
+# GuardState.SaveSuppression resets only when the game starts (Profile.ApplyDefaults), not on Save & Quit or a reload.
+SAVE_KEPT = ("[FAIL] SaveSuppression is still ON and the save may not be back to how it was. Do not just turn it off.\n"
+             "  Either close the game and start it again (SaveSuppression starts off),\n"
+             "  or Save & Quit to the menu (SaveSuppression writes nothing), reload the save, and then turn\n"
+             "  SaveSuppression off, which the game only does by itself when it starts:\n"
+             "    cd brain\n"
+             "    ..\\scripts\\uv.cmd run python -m ssbot.probes.p17_crests --instance {instance} "
+             "--save-suppression-off")
 
 
 # ---- pure helpers (unit-tested in tests/test_p17_crests.py) ------------------------------------------------------
@@ -288,25 +298,44 @@ def restore_state(crest_dump: dict) -> dict:
     """What crest.equip {restore} has to put back, read from one crest.dump: the crest, PreviousCrestID, the temp flag,
     silk (RefreshSilk takes what is above a lower CurrentSilkMax), the unlocked set, every crest's saved slot equips
     (SetEquippedCrest empties slots whose tool is also in an extra slot) and every tool's AmountLeft (UpdateToolCap
-    lowers it when the new crest drops Shell Satchel)."""
+    lowers it when the new crest drops Shell Satchel). silk_max (CurrentSilkMax) is silk_diff's upper bound."""
     cur = crest_dump.get("current") or {}
     return {
         "crest": cur.get("crest"),
         "previous": cur.get("previous"),
         "temp": cur.get("temp"),
         "silk": cur.get("silk"),
+        "silk_max": cur.get("silk_max"),
         "unlocked": unlocked_set(crest_dump),
         "slots": {c["name"]: [s.get("saved") for s in c.get("slots") or ()] for c in crest_dump.get("crests") or ()},
         "tool_amounts": dict(crest_dump.get("tool_amounts") or {}),
     }
 
 
+def silk_diff(before: dict, after: dict) -> str | None:
+    """A failure when silk after the restore is lower than before, or higher than the restored max. Higher but within
+    the max is fine: the oracle only ever gives silk back, and idle Silk Heart regen (HeroController.StartSilkRegen /
+    DoSilkRegen, up to CurrentSilkRegenMax) can add some while the probe runs. Without a max (an oracle that does not
+    send silk_max, or no hero) silk must be unchanged."""
+    s0, s1, top = before.get("silk"), after.get("silk"), after.get("silk_max")
+    if s1 == s0:
+        return None
+    if s0 is None or s1 is None or s1 < s0:
+        return f"restore: silk is {s1}, was {s0}"
+    if top is None or s1 > top:
+        return f"restore: silk is {s1}, was {s0}, max {top}"
+    return None
+
+
 def restore_diffs(before: dict, after: dict) -> list[str]:
-    """Failures for every restore_state field that differs after the restore."""
+    """Failures for every restore_state field that differs after the restore (silk: silk_diff)."""
     out = []
-    for key, label in (("crest", "crest"), ("previous", "PreviousCrestID"), ("temp", "temp flag"), ("silk", "silk")):
+    for key, label in (("crest", "crest"), ("previous", "PreviousCrestID"), ("temp", "temp flag")):
         if after.get(key) != before.get(key):
             out.append(f"restore: {label} is {after.get(key)}, was {before.get(key)}")
+    silk = silk_diff(before, after)
+    if silk:
+        out.append(silk)
     if after.get("unlocked") != before.get("unlocked"):
         out.append(f"restore: unlocked crests {after.get('unlocked')}, were {before.get('unlocked')}")
     slots0, slots1 = before.get("slots") or {}, after.get("slots") or {}
@@ -349,6 +378,35 @@ class EventTail:
 def settle(link, frames: int = SETTLE_FRAMES) -> None:
     f = link.frame
     link.wait_state(lambda s: True, newer_than=f + frames, timeout_s=5.0)
+
+
+def link_broken(e: BaseException) -> bool:
+    """An OSError other than a timeout: sending on the link failed (ConnectionResetError and the like), so every
+    further RPC fails too."""
+    return isinstance(e, OSError) and not isinstance(e, TimeoutError)
+
+
+def err_text(e: BaseException) -> str:
+    """str(e), with the exception type for a broken link (an OSError's text alone can be empty)."""
+    return f"{type(e).__name__}: {e}" if link_broken(e) else str(e)
+
+
+def save_suppression_on(link) -> bool:
+    """After a run that raised: whether SaveSuppression is on (guards.get); True when the link cannot tell."""
+    try:
+        return bool(link.rpc("guards.get", timeout_s=5.0).get("save_suppression"))
+    except ERRORS:
+        return True
+
+
+def save_suppression_off(link) -> int:
+    """--save-suppression-off (after SAVE_KEPT, once the save is reloaded): guards.set save_suppression=false."""
+    g = link.rpc("guards.set", save_suppression=False)
+    if g.get("save_suppression"):
+        print("[FAIL] SaveSuppression is still ON", file=sys.stderr)
+        return 1
+    print("SaveSuppression is off: the game saves again")
+    return 0
 
 
 def run(link, crests: Sequence[str], unlock: bool, log=print) -> tuple[dict, list[str]]:
@@ -395,31 +453,39 @@ def run(link, crests: Sequence[str], unlock: bool, log=print) -> tuple[dict, lis
                 entry["slash"] = link.rpc("slash.dump")
                 log(f"{name}: dumped (config {entry['current'].get('config')}, unlocked now {entry['equip'].get('unlocked')})")
             except ERRORS as e:
-                entry["error"] = str(e)
-                log(f"{name}: {e}")
+                entry["error"] = err_text(e)
+                log(f"{name}: {err_text(e)}")
+                if link_broken(e) or getattr(link, "closed", False):
+                    log("the link to the oracle is broken: no more crests")
+                    break
     finally:
         restore_failures: list[str] = []
         try:
             result["restore"] = link.rpc("crest.equip", restore=True)
         except ERRORS as e:
-            result["restore"] = {"error": str(e)}
+            result["restore"] = {"error": err_text(e)}
             # "nothing to restore": no crest.equip got as far as its snapshot, so nothing was changed.
             if equipped_any or "nothing to restore" not in str(e):
-                restore_failures.append(f"crest.equip restore failed: {e}")
+                restore_failures.append(f"crest.equip restore failed: {err_text(e)}")
         try:
             settle(link)
             after = restore_state(link.rpc("crest.dump"))
         except ERRORS as e:
-            restore_failures.append(f"restore not verified: crest.dump failed: {e}")
+            restore_failures.append(f"restore not verified: crest.dump failed: {err_text(e)}")
         else:
             result["after"] = {k: v for k, v in after.items() if k not in ("slots", "tool_amounts")}
             restore_failures.extend(restore_diffs(before, after))
         failures.extend(restore_failures)
         # Only a verified restore lets saves through again: otherwise the next bench save or autosave would write the
         # probe's crest changes into the save.
-        result["save_suppression_kept"] = bool(restore_failures)
-        if not restore_failures and not ss0:
-            link.rpc("guards.set", save_suppression=False)
+        kept = bool(restore_failures)
+        if not kept and not ss0:
+            try:
+                link.rpc("guards.set", save_suppression=False)
+            except ERRORS as e:
+                failures.append(f"SaveSuppression not turned off: guards.set failed: {err_text(e)}")
+                kept = True
+        result["save_suppression_kept"] = kept
     if not any(e.get("slash") for n, e in per.items() if n != original):
         failures.append("no crest besides the equipped one could be dumped")
     result["events"] = tail.snapshot()
@@ -433,17 +499,29 @@ def main(argv: Sequence[str] | None = None) -> int:
     ap.add_argument("--crests", default=",".join(DEFAULT_CRESTS), help="comma-separated ToolCrest names")
     ap.add_argument("--no-unlock", action="store_true", help="skip crests the save has not unlocked")
     ap.add_argument("--out", type=Path, default=None, help="default: <repo>/docs/facts/<game>/crests.json")
+    ap.add_argument("--save-suppression-off", action="store_true",
+                    help="only turn SaveSuppression off: after a [FAIL] that kept it on, once the save is reloaded")
     a = ap.parse_args(argv)
 
-    link = OracleLink(instance=a.instance)
     try:
+        link = OracleLink(instance=a.instance)
+    except (RuntimeError, OSError) as e:        # nothing has been changed in the game
+        print(f"[FAIL] no link to the oracle of instance {a.instance}: {err_text(e)}", file=sys.stderr)
+        return 2
+    try:
+        if a.save_suppression_off:
+            return save_suppression_off(link)
         missing = [r for r in NEEDED_RPCS if r not in (link.hello.get("rpcs") or ())]
         if missing:
             print(f"the oracle does not offer {missing}: deploy an SsOracle built with the Crest module", file=sys.stderr)
             return 2
         result, failures = run(link, [c.strip() for c in a.crests.split(",") if c.strip()], unlock=not a.no_unlock)
-    except (RuntimeError, TimeoutError) as e:   # OracleError is a RuntimeError
-        print(f"[FAIL] {e}", file=sys.stderr)
+    except (RuntimeError, OSError) as e:   # OracleError is a RuntimeError; TimeoutError and a broken link are OSErrors
+        print(f"[FAIL] {err_text(e)}", file=sys.stderr)
+        # run() turns every link error from its first crest.equip on into failures. One before that can still have left
+        # SaveSuppression on (a guards.set whose reply was lost), so ask the game, and assume it is on when that fails.
+        if not a.save_suppression_off and save_suppression_on(link):
+            print(SAVE_KEPT.format(instance=a.instance), file=sys.stderr)
         return 1
     finally:
         link.close()
@@ -470,7 +548,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     for f in failures:
         print(f"[FAIL] {f}")
     if result.get("save_suppression_kept"):
-        print(SAVE_KEPT)
+        print(SAVE_KEPT.format(instance=a.instance))
     if not failures:
         print("[PASS] crest, PreviousCrestID, temp flag, silk, unlocked set, saved slots and tool amounts restored")
     return 1 if failures else 0

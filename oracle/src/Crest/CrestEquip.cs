@@ -31,7 +31,8 @@ namespace SsOracle.Crest
     /// {frame, restored, crest, previous, temp, relocked: [names], slots_restored: [crest names],
     /// amounts_restored: {tool: [amount before restore, restored amount]}, silk_restored: [before, after] | null, config,
     /// group}; config/group = the hero's config right after the switch (the "TOOL EQUIPS CHANGED" handlers run
-    /// synchronously). crest.dump's current.silk and tool_amounts let the probe check the restore.
+    /// synchronously). crest.dump's current.silk, current.silk_max and tool_amounts let the probe check the restore
+    /// (silk only ever comes back: idle Silk Heart regen may have added some during the run).
     /// </summary>
     internal static class CrestEquip
     {
