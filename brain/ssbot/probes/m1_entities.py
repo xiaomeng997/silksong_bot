@@ -23,8 +23,9 @@ import msgpack
 from ssbot.ipc import ents
 from ssbot.ipc.framing import HEADER, MsgType, mask
 from ssbot.ipc.oracle_link import OracleLink
+from ssbot.probes.common import in_gameplay, load_slot, stand_up
 
-MAIN_MENU, PLAYING = 1, 4  # GlobalEnums.GameState
+PLAYING = 4  # GlobalEnums.GameState
 TARGET_P50_US, BUDGET_P99_US = 150, 1000  # package target (ents alone) and C14 p99 budget
 
 
@@ -56,21 +57,6 @@ def record(link: OracleLink, rec: Recorder, seconds: float) -> list[dict]:
     time.sleep(seconds)
     rec.active = False
     return rec.take()
-
-
-def tap(link: OracleLink, key: str) -> None:
-    link.act(link.frame + 2, mask(key), hold_frames=3)
-
-
-def load_slot_one(link: OracleLink) -> None:
-    """Best effort from the title screen: Enter (Start) then Enter (highlighted slot 1)."""
-    link.wait_state(lambda s: s["game"]["gs"] == MAIN_MENU, timeout_s=60)
-    time.sleep(1.5)
-    tap(link, "enter")
-    time.sleep(2.0)
-    tap(link, "enter")
-    link.wait_state(lambda s: s["game"]["gs"] == PLAYING, timeout_s=90)
-    time.sleep(2.0)
 
 
 def walk(link: OracleLink, key: str, seconds: float) -> None:
@@ -131,6 +117,21 @@ class Checks:
         self.lines.append(f"  {verdict:4}  {name}{': ' + detail if detail else ''}")
 
 
+def fsm_state_changes(states: list[dict]) -> int:
+    """How often an FSM listed under an included entity shows a new state (or restarted its state timer) from one
+    STATE to the next; the FSM tap must report an event for each of these."""
+    last: dict[tuple, tuple[str, float]] = {}
+    changes = 0
+    for s in states:
+        for e in s.get("ents") or ():
+            for f in e["fsms"]:
+                key = (e["iid"], f["name"])
+                if key in last and (f["state"] != last[key][0] or f["t"] < last[key][1]):
+                    changes += 1
+                last[key] = (f["state"], f["t"])
+    return changes
+
+
 def fsm_consistency(states: list[dict]) -> tuple[int, int, int, int]:
     """(chained, chain_total, agree, agree_total).
 
@@ -173,13 +174,14 @@ def main() -> int:
     if "ents" not in s:
         print('STATE has no "ents": is Entities.EntitiesModule.Install in Modules.InstallAll?')
         return 1
-    if s["game"] is None or s["game"]["gs"] != PLAYING:
+    if not in_gameplay(s):
         if args.load:
-            load_slot_one(link)
+            load_slot(link, 1)
         else:
             print("waiting for gameplay (load a save; --load does it from the title screen) ...")
-            link.wait_state(lambda s: s["game"]["gs"] == PLAYING, timeout_s=180)
+            link.wait_state(in_gameplay, timeout_s=180)
     if args.walk > 0:
+        stand_up(link)
         walk(link, "right", args.walk)
 
     rec = Recorder()
@@ -279,8 +281,14 @@ def main() -> int:
     bad_keys = [ev for ev in events if set(ev) - {"f"} != ents.FSM_EVENT_KEYS]
     checks.add("fsm event keys", not bad_keys, f"{len(bad_keys)} malformed" if bad_keys else "")
     has_fsms = any(e["fsms"] for e in seen.values())
-    checks.add("fsm events seen", (len(events) > 0) if has_fsms else None,
-               f"{len(events)}" if has_fsms else "no entity with FSMs in view")
+    moved = fsm_state_changes(states)
+    if not has_fsms:
+        checks.add("fsm events seen", None, "no entity with FSMs in view")
+    elif not moved:
+        checks.add("fsm events seen", None if not events else True,
+                   f"{len(events)}; no FSM in view changed state (an idle or hiding enemy): walk closer to wake one")
+    else:
+        checks.add("fsm events seen", len(events) > 0, f"{len(events)} events, {moved} state changes in the ents FSM lists")
     chained, chain_total, agree, agree_total = fsm_consistency(states)
     if chain_total:
         # Not exactly 100%: the per-frame cap, or an FSM that is only reported while its root is in view.

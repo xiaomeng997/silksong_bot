@@ -299,10 +299,17 @@ def section_lost(link: OracleLink) -> None:
         print(f"     pause blockers {s['pause']['blk']} set; waiting for them to clear")
         link.wait_state(lambda s: s["pause"]["blk"] == 0, timeout_s=10)
     before = link.rpc("input.stats")
-    act_and_wait(link, link.frame + 1, 0, 9400, release=False)  # then go quiet while driving
+    # Continuous control with a key down (Down: looks down, moves nothing) arms the watchdog; a bare release would
+    # not. Then go quiet while driving: the oracle must let go of Down and tap Pause.
+    act_and_wait(link, link.frame + 1, mask("down"), 9400, release=False)
     t0 = time.monotonic()
     s = link.wait_state(lambda s: s["act"]["lost"], timeout_s=3)
     print(f"     act.lost after {(time.monotonic() - t0) * 1000:.0f} ms (frame {s['f']})")
+    try:
+        released = link.wait_state(lambda s: s["act"]["mask"] == 0, timeout_s=0.5)["f"]
+    except TimeoutError:
+        released = None
+    check(released is not None, f"brain lost -> held keys released (latched mask 0 at frame {released})")
     s = link.wait_state(lambda s: s["game"]["paused"], timeout_s=3)
     after = link.rpc("input.stats")
     check(s["game"]["paused"] and after["lost_pause_taps"] == before["lost_pause_taps"] + 1,

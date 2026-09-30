@@ -177,12 +177,24 @@ class Probe:
         self.link.wait_state(lambda s: s["guards"]["hp"] == hp and s["guards"]["blue"] == blue, timeout_s=2)
 
     def settle(self, need_vulnerable: bool = True, timeout_s: float = 10.0) -> dict:
-        """PLAYING, alive, accepting input, and (optionally) out of i-frames, then a few quiet frames."""
+        """PLAYING, alive, accepting input, and (optionally) out of i-frames and able to take damage, then a few quiet
+        frames. can_take_damage is HeroController.CanTakeDamage(): false through a hazard death, whose hit the game
+        drops without a trace (TakeDamage returns early), so a case started then would test nothing."""
         s = self.link.wait_state(
             lambda s: s["game"]["gs"] == PLAYING and s["guards"]["dead"] is False and s["pause"]["hero_input"]
-            and (not need_vulnerable or not s["guards"]["inv"]), timeout_s=timeout_s)
+            and (not need_vulnerable or (not s["guards"]["inv"] and s["hero"]["can_take_damage"])), timeout_s=timeout_s)
         time.sleep(0.25)
         return s
+
+    def await_hazard_respawn(self, mark: int, timeout_s: float = 6.0) -> None:
+        """A hazard hit (blocked or not) still sends the hero through DieFromHazard and HazardRespawn. Wait for the
+        respawn's end: TakeDamage within 0.5 s of HazardRespawn's start is turned into another respawn (no damage),
+        and hero_input can read true for a few frames before the hazard death takes control."""
+        if self.watch.wait(mark, "hazard_death", 0.5) is None:
+            return
+        start = self.watch.wait(mark, "hazard_respawn", timeout_s, lambda d: d.get("phase") == "start")
+        if start is not None:
+            self.watch.wait(mark, "hazard_respawn", timeout_s, lambda d: d.get("phase") == "end" and d.get("id") == start["id"])
 
     def hurt(self, **args) -> dict:
         return self.link.rpc("hurt.special", **args)
@@ -313,6 +325,7 @@ class Probe:
                     mask_detail = f"; mask charge {sim['mask_left']}->{left} (expected {sim['mask_left_after']})"
                     if mask_ok:
                         self.mask_branches.add("consumed" if sim["mask_consumed"] else "kept")
+            self.await_hazard_respawn(mark)
             self.settle(need_vulnerable=False)
             time.sleep(0.3)
             wd = self.watch.since(mark, "would_die")

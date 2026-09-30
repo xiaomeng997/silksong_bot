@@ -171,3 +171,22 @@
 - 原版在前台时会隐藏并锁定鼠标（`InputHandler.SetCursorEnabled`、PlayMaker 动作 `SetMouseCursor`、`LanguageSelector`），用户无法操作其他窗口。
 - SsOracle 的 `TrainingEnvironment`：跳过 `SetCursorEnabled`，每帧强制显示和释放鼠标、保持 `runInBackground`，并在 Input System 中禁用鼠标设备（悬停不再影响菜单）。实测失焦后照常运行。
 - 训练阶段应改用游戏内注入输入（无需前台）。外部 SendInput 只用于最终路径的测试，测试时必须先告知用户，且操作完立即把前台还回去（`drive.py` 已实现，并会把鼠标移到游戏窗口外）。
+
+## M1 集成测试（2026-09-30，训练副本 1280×720 窗口，沙盒存档 1）
+
+| 探针 | 结果 | 要点 |
+|---|---|---|
+| m1_hero | 39 过 / 2 警告 / 0 失败 | 移动速度 8.25 u/s；hero 15 µs、cam 4 µs、hud 23 µs（p50）；叠加图目测对齐 |
+| m1_entities | 通过（敌人/伤害碰撞体已见；视野内 FSM 没换状态时事件检查跳过） | ents p50 14 µs；Bone Goomba 在 Hiding 状态不产生事件 |
+| m1_events | 30/30 | 尖刺→危险物重生 84 帧（1.4 s）；TERRAIN 每帧工作量 ≤ 441 µs |
+| m1_guards | 35 过 / 1 跳过（未装碎面具） | 10 种致死路径全部拦截；SaveSuppression 仍把计时写入 playTime |
+| m1_harness | 全过 | 存档状态重置 p50 317 ms、最大 345 ms；270 帧流式点按零丢失；掉线看门狗松键 + 暂停 |
+| m1_record | 交付率 100 %（3606/3606） | STATE 约 3 KB/帧，zstd 46 倍，0.35 MB/分钟 |
+
+集成中发现并修正的事实：
+- **HUD 面具**：`health_display` 对象自身的 MeshRenderer 是禁用的，画面上的面具是子对象 `Idle`（护符状态下是 `Idle Bound` / `Idle Hive`）。超出血量上限的面具对象仍是激活的，FSM 状态为 `Inactive`，不绘制。
+- **窗口截图**：WGC 抓的是含标题栏的可见窗口（1280×720 客户区在 1282×752 截图中的 (1, 31)）。oracle 的像素坐标都是客户区坐标，比较前先裁剪（`game_window.client_in_capture`）。
+- **时钟**：Unity Mono 的 `Stopwatch.GetTimestamp()` 在 Windows 上从进程内第一次调用开始计（`mono_100ns_ticks` 减去起始值），不能与大脑的 QueryPerformanceCounter 比较（差了约 5 小时）。STATE / 事件的 `q` 与 HELLO 的 `qpc_freq` 现在用原始 QPC（`Core.Qpc`），EOF→大脑 延迟 p50 0.09 ms、p99 0.23 ms。**此前录的人类会话（20260930_005501）的 `q` 是旧时钟，对齐视频时要另找偏移。**
+- **危险物重生**：TakeDamage 在 HazardRespawn 开始后 0.5 s 内会把环境伤害变成又一次重生（不扣血）；危险物死亡期间 `CanTakeDamage()` 为假，伤害被直接丢弃。测试伤害前要等重生结束。
+- **掉线看门狗**：只有"持续控制（hold 0）且有键按下"的 ACTION 才进入驱动状态；一次性点按和纯释放都不会，否则探针结束后会被自动按暂停。
+- 进程第一次构建 STATE 约 141 ms（JIT），只在启动时的标题画面出现一次。

@@ -43,7 +43,7 @@ namespace SsOracle.Export
         public static void Emit(string kind, Dictionary<string, object> data = null)
         {
             var frame = System.Threading.Thread.CurrentThread.ManagedThreadId == MainThreadId ? Time.frameCount : lastUpdateFrame;
-            var ev = new FrameEvent { Kind = kind, Frame = frame, Qpc = Stopwatch.GetTimestamp(), Data = data };
+            var ev = new FrameEvent { Kind = kind, Frame = frame, Qpc = Core.Qpc.Now(), Data = data };
             lock (EventLock) pendingEvents.Add(ev);
         }
 
@@ -89,7 +89,7 @@ namespace SsOracle.Export
         private void Build()
         {
             ctx.Frame = Time.frameCount;
-            ctx.QpcEndOfFrame = Stopwatch.GetTimestamp();
+            ctx.QpcEndOfFrame = Core.Qpc.Now();   // raw QPC: the brain's clock
             ctx.Gm = GameManager._instance;
             ctx.Pd = ctx.Gm != null ? ctx.Gm.playerData : null;
             ctx.Hero = HeroController.UnsafeInstance;

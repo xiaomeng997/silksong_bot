@@ -171,7 +171,7 @@ namespace SsOracle.Ipc
             w.Key("plugin"); w.Str(Core.Plugin.Version);
             w.Key("game"); w.Str(Core.Plugin.GameVersion);
             w.Key("instance"); w.Str(Guards.SaveRedirect.Instance);
-            w.Key("qpc_freq"); w.Int(System.Diagnostics.Stopwatch.Frequency);
+            w.Key("qpc_freq"); w.Int(Core.Qpc.Frequency);
             w.Key("rpcs"); var names = new List<string>(Rpc.Names); w.ArrayHeader(names.Count); foreach (var n in names) w.Str(n);
             w.Key("buttons"); w.ArrayHeader(Input.KeyboardInjector.ButtonNames.Length); foreach (var b in Input.KeyboardInjector.ButtonNames) w.Str(b);
             Send(Protocol.MsgType.Hello, w);

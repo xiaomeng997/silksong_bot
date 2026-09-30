@@ -13,8 +13,8 @@ namespace SsOracle.Input
     /// 3 frames after their target are dropped (DelayLine). When several actions fall due in one update (a burst from a
     /// lagging brain, or delays that bunch them up), each one's key edges go into the HoldFilter in arrival order and
     /// are replayed with the minimum press / release, so no press is lost to a later mask. Brain lost (§4.6, §3.7.6):
-    /// when the brain has been driving (it sent a continuous-control ACTION, hold_frames 0; one-shot presses with
-    /// hold_frames > 0 do not count) and no ACTION arrives for 250 ms (and 6 rendered frames), or it disconnects
+    /// when the brain has been driving (it sent a continuous-control ACTION with a key down, hold_frames 0; one-shot
+    /// presses with hold_frames > 0 and a bare release do not count) and no ACTION arrives for 250 ms (and 6 rendered frames), or it disconnects
     /// while driving, every key is released (queued edges dropped) and one Pause tap (2 frames down) is injected as
     /// soon as the game is PLAYING and pausable — the same blockers as STATE pause.blk — retried at most twice if the
     /// game did not pause; given up outside gameplay (title screen, no hero). The InputPathEmulator delay
@@ -134,10 +134,12 @@ namespace SsOracle.Input
                 StaleDropped++;
                 return;
             }
-            // Only continuous control ("hold until my next ACTION", hold_frames 0) commits the brain to keep sending, so
-            // only it arms the brain-lost watchdog. A one-shot press (hold_frames > 0) releases itself; probes and menu
-            // drivers that tap and then wait must not end with a surprise Pause tap once the game becomes pausable.
-            if (a.HoldFrames == 0) driving = true;
+            // Only continuous control ("hold until my next ACTION", hold_frames 0) with a key down commits the brain to
+            // keep sending, so only it arms the brain-lost watchdog. A one-shot press (hold_frames > 0) releases itself,
+            // and a bare release (mask 0) leaves nothing held; probes and menu drivers that tap or walk and then wait
+            // must not end with a surprise Pause tap once the game becomes pausable. Once driving, every ACTION (mask 0
+            // included) keeps the watchdog fed.
+            if (a.HoldFrames == 0 && a.Buttons != 0) driving = true;
             lastActionFrame = frame;
             if (BrainLost) EndLost();
         }
