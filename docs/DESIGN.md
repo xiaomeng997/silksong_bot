@@ -125,7 +125,7 @@
 | 几乎所有 boss 招式和接触伤害都是 2 格；另有 1+1、1+1+1 的形式。 | [com1] |
 | 危险物伤害：SPIKES 1、ACID 1、LAVA 2、COAL 1、COAL_SPIKES 1、ZAP 1、STEAM 2；Flame 2；Void 2 并吸丝。 | [com2] |
 | 受击和弹反 i-frame 只挡 ENEMY、NON_HAZARD、EXPLOSION：SPIKES、ACID、LAVA、PIT、COAL、ZAP、STEAM、COAL_SPIKES 都会穿透，SINK 永远生效。例外：危险物重生后 0.5 s 内再碰到非敌人危险物，只会再重生一次，不扣血。 | [com3][m0:N1] |
-| 受击 i-frame `INVUL_TIME` = 1.0 s（游戏时间；受击冻结期间 timeScale 下降，实时长度更长）。Weighted Belt 的代码默认值（代码字段 `weightedAnklet*`；WeightedAnkletTool = Weighted Belt 的名称对应待 P11 确认）：i-frame ×1.2、击退 ×0.5、拼刀后坐 2 步，装备后最大下落速度改用 `MAX_FALL_VELOCITY_WEIGHTED`；GlobalSettings 资产可能覆盖，待 P11 读取。 | [com4][probe:P11][m0:C6] |
+| 受击 i-frame `INVUL_TIME` = 1.0 s（游戏时间；受击冻结期间 timeScale 下降，实时长度更长）。Weighted Belt（中文名“负重环带”，资产名 Weighted Anklet；离线资产值 i-frame ×1.3、击退 ×0.5、水平后坐 4 步，待 P17 运行时确认 [asset]）的代码默认值（代码字段 `weightedAnklet*`）：i-frame ×1.2、击退 ×0.5、拼刀后坐 2 步，装备后最大下落速度改用 `MAX_FALL_VELOCITY_WEIGHTED`；GlobalSettings 资产可能覆盖，待 P11 读取。 | [com4][probe:P11][m0:C6] |
 | 弹反 i-frame `INVUL_TIME_PARRY` = 0.15 s（[com5] 的 0.25 s 恰好是 NailClashEffect 冻结的保持时长）；Cross Stitch 0.35 s、SILKDASH 0.5 s（由 SilkChargeEnd 设置，可能是 Sharpdart，名称对应待 P11）、QUAKE 0.4 s。下劈 i-frame 8 个物理步（长版 16 步，即 0.16/0.32 s），只挡 ENEMY，不挡 EXPLOSION、危险物和 noBounceCooldown 伤害源。**冲刺、疾跑、Bind 都没有无敌。** | [com5][probe:P11][m0 §2.5] |
 | Bind：9 丝，+3 面具，1.37 s（带 Injector Band 0.89 s）。闪光前被打断会清空**全部**丝；脚下平台消失也会打断。丢丝规则在 Bind FSM 里，代码无法确认（`BindInterrupted()` 不碰 `silk`），待 FSM 导出。 | [com6][m0 §2.5] |
 | 丝：初始上限 9，最大 18；丝技能消耗 4。 | [com7] |
@@ -865,11 +865,11 @@ A 类 = 以 2 格攻击为主的 boss 或连战；B 类 = 竞技场、小 boss�
   - **仅 A/B，默认不做：** Faydown（除非 Wardenfly 迫使）、Injector Band、Pollip Pouch。
 - **Fourth Chorus、Moorwing、Sister Splinter 的打/跳决定**在 M1 前由你的游玩和社区路线定下；凡是要打的 boss 都算 A 类，配 playbook 和门槛。
 - **永不交战：** Savage Beastfly、Skull Tyrant、Great Conchflies、Forebrothers、Groal、First Sinner、Summoned Saviour、Lumble 的骰子、所有 Act 3 内容。
-- **永不做：** 装 Barbed Bracelet；启动 Rite of Rebirth；在 GMS 竞技场按 Needolin；NMG 禁止的 glitch 或帧精确跳过。
+- **永不做：** 装 Barbed Bracelet；去 Mount Fay 取 Memory Crystal（Act 2 路线外，只在受击时触发，爆炸可能引发 Lace 等的弹反反击 [research/crests.md]）；启动 Rite of Rebirth；在 GMS 竞技场按 Needolin；NMG 禁止的 glitch 或帧精确跳过。
 
 #### 3.6.5 配装、槽位可行性与经济
 
-- **纹章：** 全程 Hunter（S15 进化）。Wanderer/Reaper 只做 A/B 测试。
+- **纹章：** 默认全程 Hunter（S15 进化为 Hunter_v2）。Wanderer 和 Reaper 是 A/B 候选，K1（M2 结束）用 S15 之后的 boss savestate（Last Judge、Lace 2，另加 Forum、Widow）比较**纹章 + 配装的组合**，每组 ≥ 200 次随机起点：先看 WOULD_DIE 上界和险情率，击杀时间次之；纹章可在工作台按 playbook 切换，结论可以按 boss 选。Wanderer 的取得（S12 后经 Cling Grip 进 Bonegrave 的 4 波竞技场，死亡为真死；或 500 念珠买 Simple Key 提早拿）、数值和代价见 [`research/crests.md`](research/crests.md) [asset][code]（2026-09-30 调研，起因是你的建议：漫游攻速快、丝多、弹刀多）。
 - **槽位（Hunter：红/蓝/黄各 1 个已解锁 + 1 个锁定）：**
   - Locket #1（S09）→ 红 2：Straight Pin + playbook 工具。
   - Locket #2（S10）→ 蓝 2：Fractured Mask + Warding 或 Magma Bell。
@@ -1666,6 +1666,7 @@ FTE 周按全职计；每周投入 15–20 h 时乘以约 2–2.7。门槛运行
 | P14 | Extras → Achievements 界面在 Steam 已初始化和未初始化时是否真的不同。按代码它会退回 shared.dat [m0:N35]。**结果：不能区分**——无 Steam 子系统的训练副本只凭沙盒 shared.dat 里的本地 `FIRST_TOOL=1` 就把该成就显示为已解锁；预检和结局核对只认 Player.log（`Steam logged in as`、`Steam stats received.`、每个成就的 `upload complete`）[probe:P14] |
 | P15 | 杀进程的语义（D13）：Die 前杀、Die 后杀、SaveGame 期间杀；致命帧 → `user{N}.dat` 落盘的耗时；Dead 是否同时写入版本备份 `user{N}_1.0.30000.dat`；死亡后 `.bak*` 轮换与 `Restore_Points` 的状态。在沙盒 Steel Soul 槽上测。**M0 已测：** 致命伤后约 142 ms `user{N}.dat` 已是 Dead；死后 +103 ms（taskkill 最快）到 +1123 ms 杀进程均留下 DEFEATED 槽；`.bak1` 保留存活状态 [probe:P15] |
 | P16（M5） | Wardenfly 捕获 + 捕获后退出，确定恢复方案 |
+| P17（M2 前） | 纹章运行时导出（清单见 [`research/crests.md`](research/crests.md) §5）：各纹章 `HeroControllerConfig`、各挥刀的伤害/产丝/`canHitSpikes`/世界坐标碰撞体、下劈 i-frame、Hunter 连击计数与清零原因、Wanderer dash-combo 与暴击冻结、槽位与 Locket、Chapel_Wanderer 入口与竞技场、Eva 的强制换装；离线资产值（`[asset]`）以此为准 |
 
 **MVP 阶梯（每级都能停下来，并有通过门槛）：**
 1. Oracle 录制 + 查看器：60 min ≥ 99.9% 帧送达。
