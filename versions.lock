@@ -32,10 +32,10 @@ loader = "BepInEx 5.4.23.4 win_x64"
 loader_zip_sha256 = "f881201b79da03e513bf97cdf39607ffa7f9e0d31a519b1aeeca8eb60f8309e7"
 
 [frozen_settings]
-# Decided during M0 (P8/P12). Not frozen yet.
-fps = "TBD"
-display_mode = "TBD"
-refresh_hz = "TBD"
+# 2026-09-29: the display (LG TV) tops out at 60 Hz, so 120 Hz is off the table.
+fps = 60
+display_mode = "1920x1080 windowed on the 4K desktop, game VSync on, DWM-composed"
+refresh_hz = 60
 language = "ZH"  # 2026-09-29: frozen to Chinese, the user's own setting
 camera_shake = "Off"
 particles = "Low"
