@@ -6,13 +6,16 @@ using UnityEngine;
 namespace SsOracle.Export
 {
     /// <summary>
-    /// M0 hello-world probe: once per second, append the core game state to a JSONL file.
-    /// Replaced by the full per-frame exporter in M1.
+    /// M0 probe: builds a snapshot of the core game state every frame (served over IPC as Latest) and
+    /// appends one per second to a JSONL file. Replaced by the full per-frame exporter in M1.
     /// </summary>
     internal sealed class StateProbe : MonoBehaviour
     {
         private const float IntervalSeconds = 1f;
         private static readonly string OutPath = @"C:\ssbot\sandbox\oracle_probe.jsonl";
+
+        /// <summary>Snapshot of the last completed frame; read from the IPC thread.</summary>
+        public static volatile string Latest;
 
         private float nextWrite;
         private StreamWriter writer;
@@ -23,11 +26,12 @@ namespace SsOracle.Export
             writer = new StreamWriter(OutPath, append: true, Encoding.UTF8) { AutoFlush = true };
         }
 
-        private void Update()
+        private void LateUpdate()
         {
+            Latest = Snapshot();
             if (Time.unscaledTime < nextWrite) return;
             nextWrite = Time.unscaledTime + IntervalSeconds;
-            writer.WriteLine(Snapshot());
+            writer.WriteLine(Latest);
         }
 
         private void OnDestroy() => writer?.Dispose();
@@ -40,6 +44,13 @@ namespace SsOracle.Export
             sb.Append(",\"frame\":").Append(Time.frameCount);
             sb.Append(",\"timeScale\":").Append(Time.timeScale.ToString("F3", inv));
             sb.Append(",\"focused\":").Append(Application.isFocused ? "true" : "false");
+            sb.Append(",\"keys\":\"").Append(string.Join(",", Input.KeyboardInjector.Latched)).Append('"');
+            var kb = UnityEngine.InputSystem.Keyboard.current;
+            sb.Append(",\"kb\":").Append(kb == null ? "null" : kb.enabled ? "\"enabled\"" : "\"disabled\"");
+            sb.Append(",\"kbEnter\":").Append(kb != null && kb.enterKey.isPressed ? "true" : "false");
+            sb.Append(",\"bg\":\"").Append(UnityEngine.InputSystem.InputSystem.settings.backgroundBehavior).Append('"');
+            var ih = GameManager._instance != null ? GameManager._instance.inputHandler : null;
+            sb.Append(",\"submit\":").Append(ih != null && ih.inputActions != null && ih.inputActions.MenuSubmit.IsPressed ? "true" : "false");
 
             // _instance, not the instance getter: the getter logs an error every call while no GameManager exists.
             var gm = GameManager._instance;
@@ -50,6 +61,13 @@ namespace SsOracle.Export
             }
 
             sb.Append(",\"state\":\"").Append(gm.GameState).Append('"');
+            var ui = gm.ui;
+            if (ui != null)
+            {
+                sb.Append(",\"menu\":\"").Append(ui.menuState).Append('"');
+                sb.Append(",\"uiState\":\"").Append(ui.uiState).Append('"');
+                sb.Append(",\"menuFading\":").Append(ui.IsFadingMenu ? "true" : "false");
+            }
             sb.Append(",\"scene\":\"").Append(gm.sceneName).Append('"');
             sb.Append(",\"playTime\":").Append(gm.PlayTime.ToString("F3", inv));
 

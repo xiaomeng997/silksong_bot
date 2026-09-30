@@ -16,6 +16,10 @@ namespace SsOracle.Core
 
         internal static ManualLogSource Log;
 
+        private Ipc.Server server;
+
+        private void OnDestroy() => server?.Stop();
+
         private void Awake()
         {
             Log = Logger;
@@ -32,7 +36,10 @@ namespace SsOracle.Core
 
             var harmony = new Harmony(Guid);
             TrainingEnvironment.Install(gameObject, harmony);
+            Input.KeyboardInjector.Install();
             gameObject.AddComponent<Export.StateProbe>();
+            server = new Ipc.Server(Ipc.Server.DefaultPort);
+            server.Start();
             Log.LogInfo($"{Name} {Version} loaded: game {gameVersion}, Unity {Application.unityVersion}");
         }
     }

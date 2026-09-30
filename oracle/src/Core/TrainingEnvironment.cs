@@ -28,6 +28,10 @@ namespace SsOracle.Core
                     InputSystem.DisableDevice(device);
             }
 
+            // The default (ResetAndDisableNonBackgroundDevices) disables the keyboard on focus loss, which
+            // would drop injected key events in unfocused instances.
+            InputSystem.settings.backgroundBehavior = InputSettings.BackgroundBehavior.IgnoreFocus;
+
             host.AddComponent<TrainingEnvironment>();
         }
 
@@ -38,9 +42,21 @@ namespace SsOracle.Core
             return false;
         }
 
+        private bool loggedOriginals;
+
         // A PlayMaker action and the language selector also touch the cursor, so re-assert every frame.
         private void LateUpdate()
         {
+            if (!loggedOriginals && InControl.InputManager.IsSetup)
+            {
+                loggedOriginals = true;
+                Plugin.Log.LogInfo($"serialized input settings: InControl.SuspendInBackground={InControl.InputManager.SuspendInBackground}, " +
+                                   $"InputSystem.updateMode={InputSystem.settings.updateMode}, runInBackground(before)={Application.runInBackground}");
+            }
+
+            // With SuspendInBackground, InControl stops updating while unfocused, so no action sees injected keys.
+            if (InControl.InputManager.SuspendInBackground)
+                InControl.InputManager.SuspendInBackground = false;
             if (!Application.runInBackground)
                 Application.runInBackground = true;
             if (!Cursor.visible || Cursor.lockState != CursorLockMode.None)

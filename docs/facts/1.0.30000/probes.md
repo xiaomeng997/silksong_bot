@@ -25,6 +25,30 @@
 - 键位与默认键盘绑定一致：Z 跳、X 攻击、C 冲刺、A 缚丝、S 飞针、D 织针曲、F 快速施放、V 嘲讽、I 背包、Tab 快速地图、M/Q/J/T 背包分页、方向键、Esc 暂停。
 - 与 Harmony 注入的轨迹对比尚未做（等 M1 的注入模块）。
 
+## P3 游戏内按键注入 — 通过（不需要前台）
+
+- 实现：`oracle/src/Input/KeyboardInjector.cs`。每次动态输入更新（`InputSystem.onBeforeUpdate`，`currentUpdateType == Dynamic`）在主线程锁存一次按键集合，向 `Keyboard.current` 排队一个完整的 `KeyboardState` 事件。游戏走的读取路径与真实按键相同：Input System → InControl `KeyBindingSource` → `HeroActions`。Python 端通过 `127.0.0.1:47631` 的行协议发送按键集合（`brain/ssbot/io/sinks/oracle_inject.py`）。
+- 训练副本需要 `InputSystem.settings.backgroundBehavior = IgnoreFocus`。默认策略会在失焦时禁用键盘，注入的事件会被丢掉。
+- 实测（`brain/ssbot/probes/p3_inject.py`，全程 `focused=false`）：
+  - 主菜单 → 存档选择 → 读取 1 号槽 → PLAYING。
+  - 暂停：PAUSED，2 s 内 PlayTime 不变。
+  - 在"继续"上回车取消暂停。
+  - 向左走 8.1 u，跳跃高度 5.24 u。
+- 坑 1：GameState 变为 MAIN_MENU 后，菜单还在入场动画中，这时按键会被忽略。脚本改为等 `ui.menuState` 到目标界面且 `IsFadingMenu == false`，再多等 0.3 s。
+- 坑 2：读档后 Hornet 先播放坐上椅子的动画，期间方向键无效（本次"向右"被吞）。后续按英雄是否接受输入来判断，不能只看时间。
+- 尚未覆盖：legacy `Input.anyKeyDown` 的调用方（过场跳过、Bellway 跳过、`IdleMemoryCleaner`），留到 M1 加垫片。
+
+## 序列化的输入设置（P11 部分）
+
+| 设置 | 1.0.30000 实际值 | 含义 |
+|---|---|---|
+| `Application.runInBackground` | **True**（原版） | 原版失焦后继续模拟，**PlayTime 继续计时** |
+| `InControl.InputManager.SuspendInBackground` | False | InControl 失焦后照常更新 |
+| `InputSystem.settings.updateMode` | ProcessEventsInDynamicUpdate | 每渲染帧采样一次按键；比一帧短的点按会丢 |
+| `InputSystem.settings.backgroundBehavior` | 默认 ResetAndDisableNonBackgroundDevices | 原版失焦时键盘被断开：Hornet 失去控制，但世界和计时器都在走 |
+
+对正式运行的影响：焦点一旦被抢走，Hornet 会站着挨打，计时器也继续走。设计中的焦点守护（每毫秒检查前台窗口、失焦后立即切回并按暂停）是必需的。
+
 ## P6 计时器（部分）
 
 | 情形 | 结果 |
@@ -33,7 +57,7 @@
 | 暂停菜单 | GameState=PAUSED，timeScale=0，PlayTime 3 s 内不变 |
 | 取消暂停 | 立即恢复计时 |
 | 保存并退出 | 确认的那一刻把会话时间写入 `playerData.playTime`（447.464 → 470.497，正好等于暂停时的 PlayTime）；之后约 3 s 保持 PAUSED、timeScale=0，然后进入 MAIN_MENU |
-| 失焦 | 训练副本（插件强制 `runInBackground=true`）失焦后继续以 60 fps 运行。**原版失焦是否继续模拟仍未测** |
+| 失焦 | 原版序列化设置 `runInBackground=True`，失焦后继续模拟、继续计时（见上表）。训练副本同样以 60 fps 运行 |
 
 仍未测：背包、Quick Map、Bellway 乘车、房间切换、片尾。
 
