@@ -7,6 +7,8 @@ dependencies = [
     "cryptography>=50.0.1",
     "msgpack>=1.2.3",
     "numpy>=2.1",
+    "psutil>=7.2.2",
+    "rerun-sdk>=0.38.1",
     "windows-capture>=2.0.1",
     "zstandard>=0.25.0",
 ]
@@ -20,3 +22,7 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["ssbot"]
+
+[tool.pytest.ini_options]
+# brain/tests (most packages) and brain/ssbot/tests (hero-cam-hud) both hold tests.
+testpaths = ["tests", "ssbot/tests"]
