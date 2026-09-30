@@ -6,20 +6,23 @@ random length, turning back towards the start whenever she gets more than --span
 changing speed, which is what the aligner needs (a constant offset is invisible in constant motion). Afterwards it
 checks STATE delivery and runs ssbot.record.align on the episode.
 
-Needs the training copy running with SsOracle (e.g. `python -m ssbot.tools.launcher -n 1`), no other brain connected
-to that instance, and Hornet in a room where the camera follows her horizontally with no enemies nearby (the Bonetown
-bench room of the sandbox save works; at the title it loads save slot 1, which must hold a sandbox save: Enter on an
-empty slot starts a new game, m0:N30). No focus needed (in-engine key injection), but the window must not be minimized
-(WGC stops delivering frames). It stops driving early if the scene changes or the game leaves PLAYING.
+Needs the training copy running with SsOracle (`python -m ssbot.tools.launcher -n 1 --detach`, or without --detach in
+a second terminal, since the launcher then waits for the game to exit; after a --detach run, quit the game and run
+`python -m ssbot.tools.launcher --restore`), no other brain connected to that instance, and Hornet in a room where the
+camera follows her horizontally with no enemies nearby (the Bonetown bench room of the sandbox save works; at the
+title it loads save slot 1, which must hold a sandbox save: Enter on an empty slot starts a new game, m0:N30). No
+focus needed (in-engine key injection), but the window must not be minimized (WGC stops delivering frames). It stops
+driving early if the scene changes or the game leaves PLAYING.
 
     cd brain
     ..\\scripts\\uv.cmd run python -m ssbot.probes.m1_align                       # 60 s on instance 0
-    ..\\scripts\\uv.cmd run python -m ssbot.probes.m1_align --seconds 300 --instance 1 --threads 1
+    ..\\scripts\\uv.cmd run python -m ssbot.probes.m1_align --seconds 300 --instance 1
     ..\\scripts\\uv.cmd run python -m ssbot.record.align <episode> --dump          # re-run the analysis later
 
 Prints progress every 10 s, the continuity report, the alignment report (calibrated D per clock, offset histogram,
-exclusions, noise), writes align.json into the episode and exits 0 only on PASS (>= 99.5 % of the informative
-captures at offset 0, at least --min-informative of them).
+exclusions, anomalies, noise), writes align.json (with the verdict of both clocks) into the episode and exits 0 only
+on PASS on the gate clock (--clock, default the WGC frame clock): >= 99.5 % of the judgeable captures at offset 0,
+unjudged ones counting against it, with at least --min-informative judged captures and --min-coverage of all.
 """
 import argparse
 import json
@@ -27,8 +30,6 @@ import random
 import sys
 import time
 from datetime import datetime
-
-import cv2  # comes with windows-capture
 
 from ssbot.ipc.framing import mask
 from ssbot.ipc.oracle_link import OracleError, OracleLink
@@ -115,10 +116,10 @@ def main() -> int:
     ap.add_argument("--span", type=float, default=6.0, help="units Hornet may stray from her start x")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--min-informative", type=int, default=align.Params.min_informative)
-    ap.add_argument("--threads", type=int, help="OpenCV threads for the analysis (1 next to other instances)")
+    ap.add_argument("--min-coverage", type=float, default=align.Params.min_coverage)
+    ap.add_argument("--clock", choices=("frame", "arrival"), default=align.GATE_CLOCK,
+                    help="gate clock (the other one is reported as a cross-check)")
     a = ap.parse_args()
-    if a.threads:
-        cv2.setNumThreads(a.threads)
 
     link = OracleLink(instance=a.instance)
     print("hello:", {k: link.hello.get(k) for k in ("plugin", "game", "instance", "qpc_freq")})
@@ -139,16 +140,17 @@ def main() -> int:
     rec = Recorder(link, out_dir=a.out, profile="PROBE", episode=f"m1_align_{datetime.now():%H%M%S}_i{a.instance}",
                    game_dir=a.game_dir, config={"probe": "m1_align", "seconds": a.seconds, "seed": a.seed,
                                                 "span": a.span, "width": a.width}).start()
-    vid = VideoRecorder(rec.path, hwnd=hwnd, width=a.width).start()
-    print(f"recording {a.seconds:.0f} s -> {rec.path} (window {hwnd:#x})")
-    t0 = time.monotonic()
+    vid = None
 
     def progress(s: dict) -> None:
         print(f"  t+{time.monotonic() - t0:5.0f} s  frame {s['f']}  STATE {rec.states} (drops {rec.dropped['state']})"
               f"  captures {vid.pushed} (drops {vid.dropped})  hero x {s['hero']['pos'][0]:.2f}")
 
     why = "error"
-    try:
+    try:  # a failing video start still releases the input and closes the recording and the link
+        vid = VideoRecorder(rec.path, hwnd=hwnd, width=a.width).start()
+        print(f"recording {a.seconds:.0f} s -> {rec.path} (window {hwnd:#x})")
+        t0 = time.monotonic()
         why = drive(link, a.seconds, Pattern(a.seed, a.span), progress)
     except (TimeoutError, OracleError) as e:
         why = f"error: {e}"
@@ -160,7 +162,7 @@ def main() -> int:
         except (OracleError, TimeoutError, OSError) as e:
             print(f"input.release failed: {e}")
         time.sleep(0.5)  # a last stretch of both streams with the camera settling
-        vsum = vid.close()
+        vsum = vid.close() if vid is not None else None
         rsum = rec.close()
         link.close()
     print(f"stopped driving: {why}")
@@ -170,7 +172,8 @@ def main() -> int:
     print(f"recorder drops {rsum['drops']}; error {rsum['error']}")
 
     print("\n== alignment ==")
-    rep, *_ = align.align_episode(rec.path, align.Params(min_informative=a.min_informative),
+    rep, *_ = align.align_episode(rec.path, align.Params(min_informative=a.min_informative,
+                                                         min_coverage=a.min_coverage), a.clock,
                                   progress=lambda n: print(f"  registered {n} captures"))
     print(rep.format())
     (rec.path / "align.json").write_text(json.dumps(rep.as_dict(), indent=1), encoding="utf-8")

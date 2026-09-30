@@ -2,8 +2,9 @@
 real Recorder (STATE with "cam") and VideoRecorder (thumbnails), so the tests exercise the on-disk formats too.
 
 Timing model: STATE frame f ends at q_f = T0 + f * PERIOD + eof jitter; its image reaches the capture callback at
-q_f + D_TRUE + capture jitter (the "frame" clock is 8 ms later). A capture listed in `stale` shows the previous frame
-under its own timestamps, as a late composition would: its true offset is -1.
+q_f + D_TRUE + capture jitter (the "frame" clock is 8-8.5 ms later). A capture listed in `stale` shows the previous
+frame under its own timestamps, as a late composition would: its true offset is -1. Every 2nd or 3rd capture stale is
+periodic judder (repeated and skipped frames); a run of them is a latency step.
 """
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -33,8 +34,13 @@ class Episode:
     capture_t: list               # arrival ns per written capture
     capture_frame: list           # game frame each capture truly shows
     capture_label: list           # game frame each capture is timed for (differs from the shown one when stale)
-    valid_D: tuple = ()           # (lo, hi]: every D in it matches every non-stale capture to its frame
+    valid_D: dict = field(default_factory=dict)  # clock -> (lo, hi]: every D in it matches every non-stale capture
     extra: dict = field(default_factory=dict)
+
+    def true_k(self, off, trk) -> np.ndarray:
+        """Per capture: the frame it shows - the frame it was matched to (only meaningful where labelled)."""
+        lab = np.where(off.label >= 0, trk.f[np.clip(off.label, 0, None)], -1)
+        return np.asarray(self.capture_frame) - lab
 
 
 def texture(h: int, w: int, seed: int) -> np.ndarray:
@@ -120,25 +126,28 @@ def make(tmp_path, *, seconds: float = 25.0, seed: int = 1, parallax: float = 1.
 
     vid = VideoRecorder(rec.path, width=THUMB, queue_size=1_000_000).start()
     ep = Episode(rec.path, q, [], [], [])
-    lo, hi = -2**62, 2**62
+    bounds = {"arrival": [-2**62, 2**62], "frame": [-2**62, 2**62]}
     grain = [rng.normal(0, noise, (SCREEN[1], SCREEN[0])).astype(np.float32) for _ in range(7)]  # sensor-like noise
     for i, f in enumerate(frames):
         if int(f) in drop_captures:
             continue
         t = q[int(f)] + D_TRUE_NS + int(rng.integers(0, cap_jitter_ns + 1))
+        ts = t + FRAME_CLOCK_NS + int(rng.integers(0, 500_000))
         shown = int(f) - 1 if i in stale and i > 0 else int(f)
         j = shown - 1000
         img = render(tex, cam[j, 0], cam[j, 1], parallax, hud).astype(np.float32)
         img = np.clip(img + grain[i % len(grain)], 0, 255).astype(np.uint8)
-        vid.push(img, t, t + FRAME_CLOCK_NS + int(rng.integers(0, 500_000)))
+        vid.push(img, t, ts)
         ep.capture_t.append(t)
         ep.capture_frame.append(shown)
         ep.capture_label.append(int(f))
         if shown == int(f):
-            hi = min(hi, t - q[int(f)])
-            if int(f) + 1 in q:
-                lo = max(lo, t - q[int(f) + 1])
+            for clock, tc in (("arrival", t), ("frame", ts)):
+                b = bounds[clock]
+                b[1] = min(b[1], tc - q[int(f)])
+                if int(f) + 1 in q:
+                    b[0] = max(b[0], tc - q[int(f) + 1])
     vid.close()
-    ep.valid_D = (lo, hi)
+    ep.valid_D = {k: tuple(v) for k, v in bounds.items()}
     ep.extra["cam"] = cam
     return ep

@@ -736,23 +736,24 @@ def _cmd_record(a: argparse.Namespace) -> int:
     rec = Recorder(link, out_dir=a.out, profile=a.profile, episode=a.episode, game_dir=a.game_dir,
                    min_free_gb=a.min_free_gb, config={"cli": sys.argv[1:]}).start()
     vid = None
-    if a.video:  # the thumbnail stream for ssbot.record.align, in the same episode folder
-        from ssbot.record.video import VideoRecorder, instance_window
-        hwnd = instance_window(a.instance)
-        if hwnd:
-            vid = VideoRecorder(rec.path, hwnd=hwnd, width=a.video_width).start()
-        else:
-            print(f"no game window found for instance {a.instance}: recording without video")
-    print(f"recording to {rec.path} for {a.seconds} s (Ctrl+C stops early)")
-    try:
+    try:  # a failing video start still closes the recording and the link
+        if a.video:  # the thumbnail stream for ssbot.record.align, in the same episode folder
+            from ssbot.record.video import VideoRecorder, instance_window
+            hwnd = instance_window(a.instance)
+            if hwnd:
+                vid = VideoRecorder(rec.path, hwnd=hwnd, width=a.video_width).start()
+            else:
+                print(f"no game window found for instance {a.instance}: recording without video")
+        print(f"recording to {rec.path} for {a.seconds} s (Ctrl+C stops early)")
         end = time.monotonic() + a.seconds
         while time.monotonic() < end and not link.closed:
             time.sleep(0.5)
     except KeyboardInterrupt:
         pass
-    vsum = vid.close() if vid is not None else None
-    summary = rec.close()
-    link.close()
+    finally:
+        vsum = vid.close() if vid is not None else None
+        summary = rec.close()
+        link.close()
     rep = RecordingReader(rec.path).check(deep=True)
     print(rep.format())
     print(f"drops {summary['drops']}")

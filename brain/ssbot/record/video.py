@@ -17,7 +17,8 @@ FRAME_HEAD (little-endian): u32 seq | i64 arrival_ns | i64 frame_ns | u16 w | u1
     seq          callback counter; a gap means frames dropped on the full queue
     arrival_ns   time.perf_counter_ns() when the callback started
     frame_ns     Frame.timespan * 100: Direct3D11CaptureFrame.SystemRelativeTime (QPC in 100 ns units). P8 found it
-                 7-10 ms after the arrival (it looks like the target present time); the aligner can use either clock
+                 7-10 ms after the arrival (it looks like the target present time); the aligner's gate clock, with
+                 the arrival as a cross-check
     w, h         thumbnail size; src_w, src_h: the client crop it was made from (normally STATE cam.screen)
 
 Cost at the default width 320 (1280x720 client): the callback ~0.4 ms p50 (cvtColor + resize), 57.6 KB per frame raw,
@@ -138,7 +139,14 @@ class VideoRecorder:
         self._thread = threading.Thread(target=self._write_loop, name="VideoRecorder.write", daemon=True)
         self._thread.start()
         if self.hwnd:
-            self._start_capture()
+            try:
+                self._start_capture()
+            except BaseException as e:  # a bad or closed hwnd, WGC unavailable: no thread or open file left behind
+                self.error = f"capture start: {e!r}"
+                self.close()
+                self._meta["status"] = "failed"
+                self._write_meta()
+                raise
         return self
 
     def _start_capture(self) -> None:

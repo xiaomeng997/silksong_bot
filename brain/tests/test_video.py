@@ -115,3 +115,18 @@ def test_one_video_per_episode(tmp_path):
     VideoRecorder(tmp_path, width=80).start().close()
     with pytest.raises(FileExistsError):
         VideoRecorder(tmp_path, width=80).start()
+
+
+def test_failed_capture_start_leaves_nothing_open(tmp_path, monkeypatch):
+    def boom(self):
+        raise OSError("no such window")
+
+    monkeypatch.setattr(VideoRecorder, "_start_capture", boom)
+    vid = VideoRecorder(tmp_path, hwnd=0x1234, width=80)
+    with pytest.raises(OSError, match="no such window"):
+        vid.start()
+    assert not vid._thread.is_alive()
+    meta = json.loads((tmp_path / META).read_text("utf-8"))
+    assert meta["status"] == "failed" and "no such window" in meta["error"]
+    (tmp_path / DATA).unlink()  # closed: Windows refuses to delete a file that is still open
+    (tmp_path / INDEX).unlink()
