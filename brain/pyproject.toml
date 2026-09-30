@@ -24,4 +24,5 @@ build-backend = "hatchling.build"
 packages = ["ssbot"]
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+# brain/tests (most packages) and brain/ssbot/tests (hero-cam-hud) both hold tests.
+testpaths = ["tests", "ssbot/tests"]

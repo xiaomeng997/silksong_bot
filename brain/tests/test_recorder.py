@@ -201,3 +201,43 @@ def test_record_from_oracle_link_over_tcp(tmp_path):
         rd._chunk("state", e) for e in rd.index("state"))))
     assert raw == b"".join(r for r in fo.sent if r[4] == MsgType.STATE)  # wire frames stored byte for byte
     assert len(list(rd.terrain())) == 1
+
+
+@pytest.mark.parametrize("piece", [1, 7, 4096, 1 << 20])
+def test_scan_frames_streams_in_bounded_pieces(piece):
+    cctx = formats.compressor()
+    frames = [cctx.compress(bytes([i]) * (100 + 997 * i)) for i in range(12)]
+    blob = b"".join(frames)
+    offs = [sum(map(len, frames[:i])) for i in range(len(frames))]
+    got = list(formats.scan_frames(io.BytesIO(blob), piece))
+    assert [(o, c) for o, c, _ in got] == [(o, len(f)) for o, f in zip(offs, frames)]
+    assert [raw for _, _, raw in got] == [bytes([i]) * (100 + 997 * i) for i in range(12)]
+    assert len(list(formats.scan_frames(blob[:-3], piece))) == 11  # torn last frame ends the scan
+    assert list(formats.scan_frames(b"", piece)) == []
+
+
+def _cli_record(tmp_path, skip=frozenset()):
+    from ssbot.record.recorder import main
+    fo = FakeOracle(skip=skip)
+
+    def feed():
+        if fo.brain_hello.wait(10):
+            time.sleep(0.3)  # let the recorder subscribe
+            fo.go.set()
+            fo.stream(range(0, 1300))
+
+    t = threading.Thread(target=feed, daemon=True)
+    t.start()
+    try:
+        return main(["record", "--instance", str(fo.instance), "--seconds", "1.5", "--out", str(tmp_path),
+                     "--episode", "cli", "--game-dir", str(tmp_path / "nogame"), "--min-free-gb", "0"])
+    finally:
+        fo.close()
+        t.join(5)
+
+
+def test_record_cli_exit_code_gates_delivery(tmp_path, capsys):
+    assert _cli_record(tmp_path / "a") == 0
+    assert "PASS" in capsys.readouterr().out
+    assert _cli_record(tmp_path / "b", skip=set(range(500, 510))) == 1  # 10 of 1300 missing: 99.23 %
+    assert "FAIL" in capsys.readouterr().out

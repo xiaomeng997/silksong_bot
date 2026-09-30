@@ -44,7 +44,8 @@ def prefs(tmp_path):
     store = FakeStore(GOLDEN)
     live: set[int] = set()
     guard = L.PrefsGuard(store, tmp_path / "golden.reg", tmp_path / "instances.json", tmp_path / "instances.lock",
-                         alive=lambda pid, created: pid in live, log=lambda s: None, keep_after=tmp_path)
+                         alive=lambda pid, created: pid in live, log=lambda s: None, keep_after=tmp_path,
+                         game_pids=lambda: sorted(live))  # every game process is one this registry started
     store.export(guard.golden)
     store.exports = 0
     return store, guard, live
@@ -110,13 +111,19 @@ def test_prepare_refuses_final_and_non_training_copies(tmp_path):
 def test_parse_reg_and_diff_ignore_session_counters():
     text = ('Windows Registry Editor Version 5.00\r\n\r\n[HKEY_CURRENT_USER\\Software\\X]\r\n'
             '"a"=dword:00000001\r\n"unity.player_sessionid_h1351336811"=hex:33,30,\\\r\n  35,00\r\n'
+            '"unity.player_session_count_h922449978"=hex:35,00\r\n'
             '"b"=hex:5a,\\\r\n  00\r\n')
     v = L.parse_reg(text)
-    assert v == {"a": "dword:00000001", "unity.player_sessionid_h1351336811": "hex:33,30,35,00", "b": "hex:5a,00"}
+    assert v == {"a": "dword:00000001", "unity.player_sessionid_h1351336811": "hex:33,30,35,00",
+                 "unity.player_session_count_h922449978": "hex:35,00", "b": "hex:5a,00"}
     w = dict(v, **{"unity.player_sessionid_h1351336811": "hex:00", "a": "dword:00000002"})
     assert L.prefs_diff(v, w) == ["a"]
-    assert L.prefs_digest(v) == L.prefs_digest(dict(reversed(list(v.items())), **{
-        "unity.player_sessionid_h1351336811": "hex:00"})) != L.prefs_digest(w)
+    # Unity bumps both counters on every launch: neither is a settings difference nor changes the digest.
+    bumped = dict(v, **{"unity.player_sessionid_h1351336811": "hex:00",
+                        "unity.player_session_count_h922449978": "hex:36,00"})
+    assert L.prefs_diff(v, bumped) == []
+    assert L.prefs_digest(v) == L.prefs_digest(dict(reversed(list(bumped.items())))) != L.prefs_digest(w)
+    assert not L.VOLATILE_PREFS.match("unity.player_session_countx_h1") and not L.VOLATILE_PREFS.match("GameLang_h1")
 
 
 def test_restores_once_when_last_instance_exits(prefs):
@@ -136,7 +143,8 @@ def test_restores_once_when_last_instance_exits(prefs):
 
 def test_two_launchers_share_one_registry(prefs, tmp_path):
     store, a, live = prefs
-    b = L.PrefsGuard(store, a.golden, a.state_path, a.lock_path, alive=a.alive, log=lambda s: None)
+    b = L.PrefsGuard(store, a.golden, a.state_path, a.lock_path, alive=a.alive, log=lambda s: None,
+                     game_pids=a.game_pids)
     a.launch(start(live, 11), 0)
     b.launch(start(live, 21), 4)
     live.discard(11)
@@ -188,9 +196,61 @@ def test_orphans_of_a_killed_launcher_are_pruned_and_restored(prefs):
 
 def test_launch_requires_golden(tmp_path):
     guard = L.PrefsGuard(FakeStore({}), tmp_path / "missing.reg", tmp_path / "i.json", tmp_path / "i.lock",
-                         alive=lambda *_: True, log=lambda s: None)
+                         alive=lambda *_: True, log=lambda s: None, game_pids=lambda: [])
     with pytest.raises(SystemExit):
         guard.launch(lambda: (1, None), 0)
+
+
+def test_same_instance_id_is_refused_while_live(prefs):
+    store, guard, live = prefs
+    guard.launch(start(live, 1), 0)
+    with pytest.raises(SystemExit, match="instance 0 is already running"):
+        guard.launch(start(live, 2), 0)  # a second `-n 2` with the default --first 0
+    assert 2 not in live and [i["pid"] for i in guard.status()["instances"]] == [1]
+    guard.launch(start(live, 3), 1)
+    live.discard(1)
+    guard.launch(start(live, 4), 0)  # id 0 is free again once its process is gone
+
+
+def test_unregistered_game_process_blocks_launch(prefs):
+    store, guard, live = prefs
+    others = [4242]  # e.g. launch_train.ps1 or a human session
+    guard.game_pids = lambda: sorted(live | set(others))
+    with pytest.raises(SystemExit, match="4242"):
+        guard.launch(start(live, 1), 0)
+    assert not live and store.restores == 0
+    others.clear()
+    guard.launch(start(live, 1), 0)
+    guard.launch(start(live, 2), 1)  # this registry's own instances are not foreign
+
+
+def test_golden_pin_is_enforced_on_launch_and_restore(prefs):
+    store, guard, live = prefs
+    guard.pin = L.file_sha256(guard.golden)
+    guard.launch(start(live, 1), 0)
+    original = guard.golden.read_bytes()
+    guard.golden.write_bytes(original + b"\r\n")  # replaced or corrupted snapshot
+    live.discard(1)
+    with pytest.raises(SystemExit, match="golden_prefs_sha256"):
+        guard.release(1)
+    st = guard.status()
+    assert store.restores == 0 and st["restore_pending"] and st["instances"] == []
+    with pytest.raises(SystemExit):
+        guard.launch(start(live, 2), 0)  # a launch would commit to a restore that must be refused
+    assert 2 not in live
+    guard.golden.write_bytes(original)
+    assert guard.reconcile() is True and store.restores == 1
+
+
+def test_golden_pin_from_versions_lock(tmp_path):
+    golden = tmp_path / "golden.reg"
+    lock = {"frozen_settings": {"golden_prefs": str(golden), "golden_prefs_sha256": "ABC123"}}
+    assert L.golden_pin(golden, lock) == "abc123"
+    assert L.golden_pin(tmp_path / "other.reg", lock) is None  # the pin is for another file
+    assert L.golden_pin(golden, {"frozen_settings": {"golden_prefs_sha256": "abc"}}) == "abc"
+    assert L.golden_pin(golden, {"frozen_settings": {}}) is None and L.golden_pin(golden, {}) is None
+    pin = L.golden_pin(L.PREFS_DIR / "golden.reg")  # the repo's own versions.lock
+    assert pin is None or len(pin) == 64
 
 
 def test_make_golden_guards(prefs):
@@ -202,9 +262,19 @@ def test_make_golden_guards(prefs):
         guard.make_golden(force=True)  # an instance is running
     live.discard(9)
     store.values["x"] = "dword:00000001"
-    assert "golden PlayerPrefs written" in guard.make_golden(force=True)
+    old = L.file_sha256(guard.golden)
+    guard.pin = old
+    msg = guard.make_golden(force=True)
+    new = L.file_sha256(guard.golden)
+    assert "golden PlayerPrefs written" in msg and new in msg and f'golden_prefs_sha256 = "{new}"' in msg
     assert L.read_reg_file(guard.golden)["x"] == "dword:00000001"
     assert not guard.status()["restore_pending"]
+    kept = list(guard.golden.parent.glob("golden.replaced_*.reg"))
+    assert len(kept) == 1 and L.file_sha256(kept[0]) == old  # the pinned snapshot is never lost
+    with pytest.raises(SystemExit, match="golden_prefs_sha256"):
+        guard.launch(start(live, 10), 0)  # until versions.lock pins the new file
+    guard.pin = new
+    guard.launch(start(live, 10), 0)
 
 
 def test_file_lock_excludes_other_holders(tmp_path):
@@ -250,10 +320,13 @@ def test_launcher_starts_registers_and_restores_on_exit(prefs, tmp_path):
     ln = L.Launcher(game, width=640, height=360, guard=guard, log_dir=tmp_path / "logs", tile=False,
                     final_dir=tmp_path / "final", popen=FakePopen, log=lambda s: None)
     with pytest.raises(SystemExit):
-        ln.preflight(2)  # boot.config still has single-instance
+        ln.preflight([0, 1])  # boot.config still has single-instance
+    ln.preflight([0])
     L.prepare_multi(game, tmp_path / "final")
-    ln.preflight(2)
+    ln.preflight([0, 1])
     insts = ln.start([0, 1])
+    with pytest.raises(SystemExit, match=r"\[1\] already running"):
+        ln.preflight([1, 2])  # a second launcher with overlapping ids
     argv, cwd = FakePopen.calls[1]
     assert argv[0] == str(game / L.EXE) and cwd == str(game)
     assert argv[1:] == L.build_args(1, 640, 360, tmp_path / "logs")
@@ -262,3 +335,25 @@ def test_launcher_starts_registers_and_restores_on_exit(prefs, tmp_path):
         x.proc.returncode = 0
     ln.wait_exit(poll_s=0.01)
     assert store.restores == 1 and all(x.released for x in insts)
+
+
+def test_preflight_counts_instances_of_other_launchers(prefs, tmp_path):
+    store, guard, live = prefs
+    game = fake_game(tmp_path / "train")  # boot.config still has single-instance=
+    ln = L.Launcher(game, guard=guard, log_dir=tmp_path / "logs", tile=False, final_dir=tmp_path / "final",
+                    popen=FakePopen, log=lambda s: None)
+    ln.preflight([0])  # alone: single-instance does no harm
+    guard.launch(start(live, 77), 3)  # another launcher's instance
+    with pytest.raises(SystemExit, match="single-instance"):
+        ln.preflight([0])  # a second player would activate the first and quit during startup
+    L.prepare_multi(game, tmp_path / "final")
+    ln.preflight([0])
+
+
+@pytest.mark.skipif(L.sys.platform != "win32", reason="Win32 window API")
+def test_window_api_takes_64_bit_handles():
+    bogus = 0xFFFFFFFF80001234  # above 32 bits: without argtypes ctypes raised OverflowError
+    assert not L.user32.IsWindowVisible(bogus)
+    assert L.window_rect(bogus) == (0, 0, 0, 0)
+    L.move_window(bogus, 10, 10)  # fails quietly (invalid handle), no exception
+    assert L.find_window(0xFFFFFFF0) == 0  # a full enumeration completes

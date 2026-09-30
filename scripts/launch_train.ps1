@@ -2,18 +2,41 @@
 # Unity writes the launch resolution back to PlayerPrefs (HKCU) on exit, and PlayerPrefs are shared by
 # every copy of the game, so we snapshot the key before launch and restore it exactly after exit.
 # Superseded for training by `python -m ssbot.tools.launcher -n N` (brain/ssbot/tools/launcher.py): per-instance
-# ports/logs/sandboxes, window tiling, and one golden-snapshot restore shared by concurrent launchers. Do not run
-# this script while that launcher has instances up: its per-launch snapshot would capture their settings.
+# ports/logs/sandboxes, window tiling, and one golden-snapshot restore shared by concurrent launchers. This script
+# refuses to run while that launcher has live instances or still owes a golden restore (its instances.json): its own
+# before/after snapshot would capture their settings or undo the launcher's restore. The launcher in turn refuses to
+# start while a game process it did not register (e.g. one started here) is running.
 param(
     [int]$Width = 1280,
     [int]$Height = 720,
-    [string]$GameDir = 'C:\ssbot\game\train'
+    [string]$GameDir = 'C:\ssbot\game\train',
+    [string]$PrefsDir = 'C:\ssbot\sandbox\prefs'
 )
 
 $ErrorActionPreference = 'Stop'
 $key = 'HKCU\Software\Team Cherry\Hollow Knight Silksong'
 $stamp = Get-Date -Format 'yyyyMMdd_HHmmss'
-$snapDir = 'C:\ssbot\sandbox\prefs'
+$snapDir = $PrefsDir
+
+# Live launcher instances: the pid is alive with the recorded creation time (epoch seconds, as psutil gives it).
+$registry = Join-Path $snapDir 'instances.json'
+if (Test-Path $registry) {
+    $state = Get-Content -Raw $registry | ConvertFrom-Json
+    $live = @($state.instances | Where-Object {
+        $p = Get-Process -Id $_.pid -ErrorAction SilentlyContinue
+        if (-not $p) { return $false }
+        if ($null -eq $_.created) { return $true }
+        try { $started = ([DateTimeOffset]$p.StartTime).ToUnixTimeMilliseconds() / 1000.0 } catch { return $true }
+        [math]::Abs($started - [double]$_.created) -le 1.0
+    })
+    if ($live.Count -gt 0) {
+        throw "refusing: $($live.Count) instance(s) of ssbot.tools.launcher are running (pids $(($live | ForEach-Object { $_.pid }) -join ', ')); wait for them or stop them first"
+    }
+    if ($state.restore_pending) {
+        throw "refusing: the launcher still owes a golden PlayerPrefs restore; run 'python -m ssbot.tools.launcher --restore' first"
+    }
+}
+
 New-Item -ItemType Directory -Force $snapDir | Out-Null
 $snapshot = Join-Path $snapDir "before_$stamp.reg"
 

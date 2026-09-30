@@ -204,3 +204,68 @@ def test_table_and_exit_code(capsys):
     out = capsys.readouterr().out
     assert "longer name  WARN    hmm" in out and C.exit_code(rs) == 0
     assert C.exit_code(rs + [C.Result("c", "FAIL")]) == 1
+
+
+@pytest.fixture
+def golden(tmp_path):
+    from tests.test_launcher import GOLDEN, FakeStore
+    store = FakeStore(GOLDEN)
+    path = tmp_path / "prefs" / "golden.reg"
+    path.parent.mkdir()
+    store.export(path)
+    lock = {"frozen_settings": {"golden_prefs": str(path), "golden_prefs_sha256": L.file_sha256(path)}}
+    return store, path, lock
+
+
+IDLE = {"live": [], "restore_pending": False}
+
+
+def prefs(golden, profile="TRAIN", registry=IDLE, lock=None):
+    store, path, pinned = golden
+    return C.check_prefs(path, profile, pinned if lock is None else lock, store=store, registry=registry)
+
+
+def test_prefs_match_golden_in_every_profile(golden):
+    for profile in ("TRAIN", "FINAL", "VANILLA"):
+        r = prefs(golden, profile)
+        assert r.status == "OK", r.detail
+    store, _, _ = golden
+    store.values["unity.player_session_count_h922449978"] = "hex:39,00"  # bumped by every launch: not a setting
+    assert prefs(golden, "FINAL").status == "OK"
+
+
+def test_prefs_difference_warns_in_training_and_fails_final(golden):
+    store, _, _ = golden
+    store.values["Screenmanager Resolution Width_h182942802"] = "dword:00000500"  # a training launch wrote it
+    assert prefs(golden, "TRAIN").status == "WARN"
+    r = prefs(golden, "FINAL")
+    assert r.status == "FAIL" and "Screenmanager Resolution Width_h182942802" in r.detail
+    assert prefs(golden, "VANILLA").status == "FAIL"
+
+
+def test_pending_restore_or_live_instance_fails_final(golden):
+    pending = {"live": [], "restore_pending": True}  # launcher --detach, or a launcher killed before release
+    assert prefs(golden, "TRAIN", pending).status == "WARN"
+    r = prefs(golden, "FINAL", pending)
+    assert r.status == "FAIL" and "--restore" in r.detail
+    running = {"live": [{"pid": 4242, "instance": 0}], "restore_pending": True}
+    assert prefs(golden, "TRAIN", running).status == "OK"
+    r = prefs(golden, "FINAL", running)
+    assert r.status == "FAIL" and "4242" in r.detail
+
+
+def test_golden_must_match_the_versions_lock_pin(golden):
+    _, path, _ = golden
+    path.write_bytes(path.read_bytes() + b"\r\n")  # replaced or corrupted golden.reg
+    for profile in ("TRAIN", "FINAL"):
+        r = prefs(golden, profile)
+        assert r.status == "FAIL" and "golden_prefs_sha256" in r.detail
+    unpinned = {"frozen_settings": {}}
+    assert prefs(golden, "TRAIN", lock=unpinned).status == "WARN"
+    assert prefs(golden, "FINAL", lock=unpinned).status == "FAIL"
+
+
+def test_prefs_check_final_without_golden_fails(tmp_path):
+    from tests.test_launcher import FakeStore
+    r = C.check_prefs(tmp_path / "golden.reg", "FINAL", {}, store=FakeStore({}), registry=IDLE)
+    assert r.status == "FAIL"

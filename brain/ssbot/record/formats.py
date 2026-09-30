@@ -19,10 +19,11 @@ end-of-frame -> brain latency. Concatenated zstd frames are a valid zstd stream:
 the raw record stream even without the index.
 """
 import base64
+import io
 import json
 import struct
 from collections.abc import Iterable, Iterator
-from typing import Any
+from typing import Any, BinaryIO
 
 import msgpack
 import zstandard
@@ -121,21 +122,33 @@ def decompress_chunk(data: bytes) -> bytes:
     return zstandard.ZstdDecompressor().decompress(data, max_output_size=1 << 31)
 
 
-def scan_frames(data: bytes) -> Iterator[tuple[int, int, bytes]]:
-    """(offset, compressed length, decompressed bytes) of every zstd frame in a file; used to rebuild a lost index.
-    A truncated last frame (recorder killed mid-write) ends the scan."""
+def scan_frames(src: bytes | BinaryIO, piece: int = 1 << 20) -> Iterator[tuple[int, int, bytes]]:
+    """(offset, compressed length, decompressed bytes) of every zstd frame in a file (bytes or a binary file object
+    at the first frame); used to rebuild a lost index. Input is fed in pieces of at most `piece` bytes, so the cost is
+    linear in the file size and only one piece plus one decompressed frame are held at a time. A truncated last frame
+    (recorder killed mid-write) ends the scan."""
+    f = io.BytesIO(src) if isinstance(src, (bytes, bytearray, memoryview)) else src
     dctx = zstandard.ZstdDecompressor()
     pos = 0
-    while pos < len(data):
+    carry = b""  # bytes read past the end of the previous frame
+    while True:
         obj = dctx.decompressobj()
-        try:
-            out = obj.decompress(data[pos:])
-        except zstandard.ZstdError:
-            return
-        if not obj.eof:
-            return
-        clen = len(data) - pos - len(obj.unused_data)
-        yield pos, clen, out
+        out: list[bytes] = []
+        fed = 0
+        while True:
+            buf, carry = (carry, b"") if carry else (f.read(piece), b"")
+            if not buf:
+                return  # clean end between frames, or a truncated last frame
+            try:
+                out.append(obj.decompress(buf))
+            except zstandard.ZstdError:
+                return
+            fed += len(buf)
+            if obj.eof:
+                carry = obj.unused_data
+                break
+        clen = fed - len(carry)
+        yield pos, clen, b"".join(out)
         pos += clen
 
 

@@ -16,6 +16,10 @@ several launchers run, all launchers share one registry of live instances (insta
 whoever sees the last registered instance gone restores the GOLDEN snapshot, exactly once per generation. A process
 start and its registration happen under the same lock, so a restore can never overlap a starting instance.
 Instances orphaned by a killed launcher are pruned (pid + creation time) by the next launcher or by --restore.
+golden.reg must hash to versions.lock [frozen_settings].golden_prefs_sha256: launch and restore refuse otherwise, so a
+replaced or corrupted snapshot never spreads into later sessions (§2.7). A launch also refuses while a game process
+that no launcher registered is running (scripts/launch_train.ps1, a human session, your own game), because its
+PlayerPrefs write on exit would race the golden restore.
 """
 import argparse
 import ctypes
@@ -29,6 +33,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import tomllib
 from collections.abc import Callable
 from ctypes import wintypes
 from dataclasses import dataclass, field
@@ -37,6 +42,7 @@ from pathlib import Path
 from typing import Protocol
 
 from ssbot.ipc.framing import port as ipc_port
+from ssbot.record.recorder import file_sha256, find_repo_root
 
 TRAIN_DIR = Path(r"C:\ssbot\game\train")
 FINAL_DIR = Path(r"C:\ssbot\game\final")
@@ -47,8 +53,9 @@ BOOT_BACKUP_SUFFIX = ".ssbot-orig"
 PREFS_KEY = r"HKCU\Software\Team Cherry\Hollow Knight Silksong"
 PREFS_DIR = Path(r"C:\ssbot\sandbox\prefs")
 LOG_DIR = Path(r"C:\ssbot\sandbox\logs")
-# Unity bumps these on every launch; they are not settings.
-VOLATILE_PREFS = re.compile(r"^unity\.player_session(count|id)_h\d+$")
+# Unity bumps these on every launch; they are not settings (unity.player_session_count_h922449978 - note the
+# underscore - and unity.player_sessionid_h1351336811).
+VOLATILE_PREFS = re.compile(r"^unity\.player_session(_count|id)_h\d+$")
 
 
 # ---- arguments and layout ------------------------------------------------------------------------------
@@ -200,7 +207,8 @@ def prefs_diff(a: dict[str, str], b: dict[str, str], volatile: re.Pattern = VOLA
 
 
 def prefs_digest(values: dict[str, str], volatile: re.Pattern = VOLATILE_PREFS) -> str:
-    """Order-independent hash of the settings (session counters excluded): the value to pin in versions.lock."""
+    """Order-independent hash of the settings (session counters excluded), to compare two exports by content.
+    versions.lock pins the golden.reg file itself instead (golden_prefs_sha256 = sha256 of its bytes)."""
     stable = {k: v for k, v in values.items() if not volatile.match(k)}
     return hashlib.sha256(json.dumps(stable, sort_keys=True).encode()).hexdigest()
 
@@ -210,6 +218,26 @@ def current_prefs(store: PrefsStore) -> dict[str, str]:
         p = Path(d) / "now.reg"
         store.export(p)
         return read_reg_file(p)
+
+
+def _same_path(a: str | Path, b: str | Path) -> bool:
+    return os.path.normcase(os.path.abspath(a)) == os.path.normcase(os.path.abspath(b))
+
+
+def golden_pin(golden: Path, lock: dict | None = None) -> str | None:
+    """versions.lock [frozen_settings].golden_prefs_sha256 (lowercase), or None when the lock pins no hash or pins a
+    different file (golden_prefs) than `golden`. lock: a parsed versions.lock; None reads the repo's."""
+    if lock is None:
+        root = find_repo_root()
+        try:
+            lock = tomllib.loads((root / "versions.lock").read_text("utf-8")) if root else {}
+        except (OSError, tomllib.TOMLDecodeError):
+            lock = {}
+    fs = lock.get("frozen_settings", {})
+    pin, pinned_path = fs.get("golden_prefs_sha256"), fs.get("golden_prefs")
+    if not pin or (pinned_path and not _same_path(pinned_path, golden)):
+        return None
+    return str(pin).lower()
 
 
 # ---- cross-launcher instance registry ------------------------------------------------------------------
@@ -280,16 +308,27 @@ def process_created(pid: int) -> float | None:
         return None
 
 
+def running_game_pids(exe: str = EXE) -> list[int]:
+    """Pids of every running game process (any copy: training, final, human session)."""
+    import psutil
+    name = exe.lower()
+    return sorted(p.pid for p in psutil.process_iter(["name"]) if (p.info.get("name") or "").lower() == name)
+
+
 class PrefsGuard:
     """Shared record of live training instances; restores the golden PlayerPrefs once, when the last one is gone.
 
     instances.json: {"instances": [{"pid", "created", "instance", "launcher", "started"}],
                      "restore_pending": bool, "restores": int, "last_restore": str | None}
+
+    pin: the sha256 golden.reg must have (versions.lock golden_prefs_sha256); launch and restore refuse on a mismatch.
+    None only warns (a lock without the pin); PrefsGuard.default reads it from versions.lock.
     """
 
     def __init__(self, store: PrefsStore, golden: Path, state_path: Path, lock_path: Path,
                  alive: Callable[[int, float | None], bool] = process_alive,
-                 log: Callable[[str], None] = print, keep_after: Path | None = None):
+                 log: Callable[[str], None] = print, keep_after: Path | None = None, pin: str | None = None,
+                 game_pids: Callable[[], list[int]] = running_game_pids):
         self.store = store
         self.golden = Path(golden)
         self.state_path = Path(state_path)
@@ -297,11 +336,31 @@ class PrefsGuard:
         self.alive = alive
         self.log = log
         self.keep_after = keep_after  # directory for an "after_<stamp>.reg" export before each restore (forensics)
+        self.pin = pin.lower() if pin else None
+        self.game_pids = game_pids
+        self._unpinned_logged = False
 
     @classmethod
-    def default(cls, prefs_dir: Path = PREFS_DIR) -> "PrefsGuard":
-        return cls(RegPrefsStore(), prefs_dir / "golden.reg", prefs_dir / "instances.json",
-                   prefs_dir / "instances.lock", keep_after=prefs_dir)
+    def default(cls, prefs_dir: Path = PREFS_DIR, lock: dict | None = None) -> "PrefsGuard":
+        golden = prefs_dir / "golden.reg"
+        return cls(RegPrefsStore(), golden, prefs_dir / "instances.json", prefs_dir / "instances.lock",
+                   keep_after=prefs_dir, pin=golden_pin(golden, lock))
+
+    def verify_golden(self) -> str:
+        """sha256 of golden.reg; SystemExit when it is missing or differs from the pin."""
+        if not self.golden.is_file():
+            raise SystemExit(f"no golden PlayerPrefs snapshot at {self.golden}; run --make-golden first")
+        digest = file_sha256(self.golden)
+        if self.pin is None:
+            if not self._unpinned_logged:
+                self._unpinned_logged = True
+                self.log(f"[prefs] WARNING versions.lock pins no golden_prefs_sha256 for {self.golden} "
+                         f"(sha256 {digest}); the snapshot is not verified")
+        elif digest != self.pin:
+            raise SystemExit(f"refusing: {self.golden} has sha256 {digest}, versions.lock [frozen_settings] "
+                             f"golden_prefs_sha256 is {self.pin}. Put the pinned snapshot back, or pin the new one "
+                             f"deliberately")
+        return digest
 
     def lock(self) -> FileLock:
         return FileLock(self.lock_path)
@@ -331,6 +390,11 @@ class PrefsGuard:
     def _restore_if_last(self, d: dict) -> bool:
         if d["instances"] or not d["restore_pending"]:
             return False
+        try:
+            self.verify_golden()
+        except SystemExit as e:  # restore_pending stays set: --restore once golden.reg is right again
+            self.log(f"[prefs] RESTORE REFUSED: {e}")
+            raise
         if self.keep_after is not None:
             try:
                 self.store.export(Path(self.keep_after) / f"after_{datetime.now():%Y%m%d_%H%M%S}.reg")
@@ -349,12 +413,24 @@ class PrefsGuard:
 
     def launch(self, start: Callable[[], tuple[int, float | None]], instance: int) -> int:
         """Run start() (which starts one game process and returns (pid, creation time)) and register it, under the
-        lock. A pending restore of an earlier generation (orphaned instances now dead) is done first."""
-        if not self.golden.is_file():
-            raise SystemExit(f"no golden PlayerPrefs snapshot at {self.golden}; run --make-golden first")
+        lock. A pending restore of an earlier generation (orphaned instances now dead) is done first. Refuses an
+        unverified golden.reg, an instance id that is already live (its port, log and sandbox are taken), and game
+        processes no launcher registered."""
+        self.verify_golden()  # a launch commits to a later restore, so refuse before starting anything
         with self.lock():
             d = self._read()
             self._prune(d)
+            same = [i for i in d["instances"] if i["instance"] == instance]
+            if same:
+                raise SystemExit(f"refusing: instance {instance} is already running (pid {same[0]['pid']}, launcher "
+                                 f"{same[0].get('launcher')}): its port {ipc_port(instance)}, log and sandbox saves "
+                                 f"are taken; pick other ids with --first")
+            registered = {i["pid"] for i in d["instances"]}
+            foreign = [p for p in self.game_pids() if p not in registered]
+            if foreign:
+                raise SystemExit(f"refusing: game process(es) {foreign} were not started by this launcher "
+                                 f"(launch_train.ps1, a human session or your own game); their PlayerPrefs write on "
+                                 f"exit would race the golden restore. Quit them first")
             self._restore_if_last(d)
             pid, created = start()
             d["instances"].append({"pid": pid, "created": created, "instance": instance, "launcher": os.getpid(),
@@ -380,9 +456,13 @@ class PrefsGuard:
 
     def status(self) -> dict:
         with self.lock():
-            d = self._read()
-            d["live"] = [i for i in d["instances"] if self.alive(i["pid"], i.get("created"))]
-            return d
+            return self.peek()
+
+    def peek(self) -> dict:
+        """status() without the lock, for read-only checks (compat): instances.json is only ever replaced whole."""
+        d = self._read()
+        d["live"] = [i for i in d["instances"] if self.alive(i["pid"], i.get("created"))]
+        return d
 
     def make_golden(self, force: bool = False) -> str:
         with self.lock():
@@ -393,19 +473,44 @@ class PrefsGuard:
             if self.golden.exists() and not force:
                 raise SystemExit(f"{self.golden} exists; pass --force to replace it")
             self.golden.parent.mkdir(parents=True, exist_ok=True)
+            old = None
+            if self.golden.exists():  # keep the replaced snapshot: it may be the pinned one
+                old = self.golden.with_name(f"{self.golden.stem}.replaced_{datetime.now():%Y%m%d_%H%M%S}.reg")
+                os.replace(self.golden, old)
             self.store.export(self.golden)
             d["restore_pending"] = False
             self._write(d)
         values = read_reg_file(self.golden)
-        return f"golden PlayerPrefs written to {self.golden} ({len(values)} values, digest {prefs_digest(values)})"
+        digest = file_sha256(self.golden)
+        msg = (f"golden PlayerPrefs written to {self.golden} ({len(values)} values, sha256 {digest})"
+               + (f"; previous snapshot kept as {old.name}" if old else ""))
+        if self.pin is None:
+            return msg + f"\npin it in versions.lock [frozen_settings]: golden_prefs_sha256 = \"{digest}\""
+        if self.pin != digest:
+            return msg + (f"\nversions.lock pins {self.pin}: set [frozen_settings] golden_prefs_sha256 = \"{digest}\" "
+                          f"and commit it; until then launch and restore refuse this snapshot")
+        return msg + "; matches versions.lock"
 
 
 # ---- windows and ports (Win32) -------------------------------------------------------------------------
 
 if sys.platform == "win32":
-    user32 = ctypes.WinDLL("user32", use_last_error=True)
-    user32.GetWindowThreadProcessId.restype = wintypes.DWORD
+    user32 = ctypes.WinDLL("user32", use_last_error=True)  # a private instance: these prototypes stay local
     WNDENUMPROC = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+    # Full prototypes: without argtypes ctypes passes a Python int as a C int, and a HWND above 0xFFFFFFFF would raise
+    # OverflowError (inside the EnumWindows callback it would silently stop the enumeration).
+    for _name, _res, _args in (
+            ("EnumWindows", wintypes.BOOL, (WNDENUMPROC, wintypes.LPARAM)),
+            ("GetWindowThreadProcessId", wintypes.DWORD, (wintypes.HWND, wintypes.LPDWORD)),
+            ("IsWindowVisible", wintypes.BOOL, (wintypes.HWND,)),
+            ("GetClassNameW", ctypes.c_int, (wintypes.HWND, wintypes.LPWSTR, ctypes.c_int)),
+            ("GetWindowRect", wintypes.BOOL, (wintypes.HWND, ctypes.POINTER(wintypes.RECT))),
+            ("SetWindowPos", wintypes.BOOL, (wintypes.HWND, wintypes.HWND, ctypes.c_int, ctypes.c_int, ctypes.c_int,
+                                             ctypes.c_int, wintypes.UINT)),
+            ("SystemParametersInfoW", wintypes.BOOL, (wintypes.UINT, wintypes.UINT, wintypes.LPVOID, wintypes.UINT)),
+            ("SetProcessDPIAware", wintypes.BOOL, ())):
+        _fn = getattr(user32, _name)
+        _fn.restype, _fn.argtypes = _res, _args
 
 
 def set_dpi_aware() -> None:
@@ -451,7 +556,7 @@ def work_area() -> tuple[int, int, int, int]:
 
 def move_window(hwnd: int, x: int, y: int) -> None:
     SWP_NOSIZE, SWP_NOZORDER, SWP_NOACTIVATE = 0x0001, 0x0004, 0x0010
-    user32.SetWindowPos(hwnd, 0, x, y, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE)
+    user32.SetWindowPos(hwnd, None, x, y, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE)
 
 
 def port_listening(port: int, pid: int | None = None) -> bool:
@@ -504,10 +609,19 @@ class Launcher:
         self.log = log
         self.instances: list[Instance] = []
 
-    def preflight(self, count: int) -> None:
+    def preflight(self, indices: list[int]) -> None:
+        """Fail fast before starting anything (launch() repeats the instance checks under the lock)."""
         assert_training_copy(self.game_dir, self.final_dir)
-        if count > 1 and single_instance_enabled(self.game_dir):
-            raise SystemExit(f"{boot_config(self.game_dir)} has single-instance=; run --prepare-multi first")
+        self.guard.verify_golden()
+        live = self.guard.status()["live"]
+        taken = sorted({i["instance"] for i in live} & set(indices))
+        if taken:
+            raise SystemExit(f"refusing: instance(s) {taken} already running; pick other ids with --first")
+        # Instances started by other launchers count too: with single-instance= a second player just activates the
+        # first and quits during startup.
+        if len(indices) + len(live) > 1 and single_instance_enabled(self.game_dir):
+            raise SystemExit(f"{boot_config(self.game_dir)} has single-instance= and {len(live)} instance(s) already "
+                             f"running; run --prepare-multi first")
         try:
             diff = prefs_diff(current_prefs(self.guard.store), read_reg_file(self.guard.golden))
             if diff:
@@ -603,10 +717,11 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="python -m ssbot.tools.launcher", description=__doc__.split("\n")[0])
     act = ap.add_mutually_exclusive_group(required=True)
     act.add_argument("-n", "--count", type=int, help="launch N instances (instance ids --first .. --first+N-1)")
-    act.add_argument("--make-golden", action="store_true", help="export the current PlayerPrefs as golden.reg")
+    act.add_argument("--make-golden", action="store_true",
+                     help="export the current PlayerPrefs as golden.reg (then pin its sha256 in versions.lock)")
     act.add_argument("--prepare-multi", action="store_true", help="drop single-instance from the training copy")
     act.add_argument("--unprepare-multi", action="store_true", help="restore the original boot.config")
-    act.add_argument("--status", action="store_true", help="show the shared instance registry")
+    act.add_argument("--status", action="store_true", help="show the shared instance registry and golden.reg")
     act.add_argument("--restore", action="store_true", help="prune dead instances; restore golden if none left")
     ap.add_argument("--first", type=int, default=0)
     ap.add_argument("--width", type=int, default=1280)
@@ -632,7 +747,10 @@ def main(argv: list[str] | None = None) -> int:
         print(unprepare_multi(a.game_dir))
         return 0
     if a.status:
-        print(json.dumps(guard.status(), indent=1))
+        s = guard.status()
+        s["golden"] = {"path": str(guard.golden), "pin": guard.pin,
+                       "sha256": file_sha256(guard.golden) if guard.golden.is_file() else None}
+        print(json.dumps(s, indent=1))
         return 0
     if a.restore:
         restored = guard.reconcile()
@@ -643,9 +761,10 @@ def main(argv: list[str] | None = None) -> int:
     set_dpi_aware()
     launcher = Launcher(a.game_dir, width=a.width, height=a.height, guard=guard, log_dir=a.log_dir,
                         tile=not a.no_tile, extra=tuple(a.extra))
-    launcher.preflight(a.count)
+    indices = list(range(a.first, a.first + a.count))
+    launcher.preflight(indices)
     try:
-        launcher.start(list(range(a.first, a.first + a.count)))
+        launcher.start(indices)
         launcher.wait_ready(a.ready_timeout)
         print(f"{'inst':>4} {'pid':>7} {'port':>6} {'ready s':>8}  window        log")
         for x in launcher.instances:

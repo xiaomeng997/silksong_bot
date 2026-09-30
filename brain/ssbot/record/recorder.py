@@ -549,26 +549,26 @@ class RecordingReader:
 
     def _rebuild_index(self, stream: str) -> list[dict]:
         """Scan the zstd frames when the index is missing or does not cover the data file (recorder killed)."""
-        blob = (self.path / data_name(stream)).read_bytes()
         entries = []
         tracker = StateTracker()  # reset() per chunk keeps last_f, so gaps across chunk borders are found too
-        for i, (off, clen, raw) in enumerate(formats.scan_frames(blob)):
-            entry = {"i": i, "off": off, "clen": clen, "ulen": len(raw)}
-            if stream == "state":
-                tracker.reset()
-                for recv_ns, frame in formats.iter_records(raw):
+        with (self.path / data_name(stream)).open("rb") as f:  # streamed: a 60-min file is never held whole
+            for i, (off, clen, raw) in enumerate(formats.scan_frames(f)):
+                entry = {"i": i, "off": off, "clen": clen, "ulen": len(raw)}
+                if stream == "state":
+                    tracker.reset()
+                    for recv_ns, frame in formats.iter_records(raw):
+                        _, _, flags, seq, payload = formats.parse_frame(frame)
+                        p = formats.peek(payload, ("f", "drop", "q"), flags)
+                        tracker.add(p.get("f"), p.get("drop"), p.get("q"), seq, recv_ns)
+                    entry.update(tracker.info())
+                else:
+                    recs = list(formats.iter_records(raw))
+                    recv_ns, frame = recs[0]
                     _, _, flags, seq, payload = formats.parse_frame(frame)
-                    p = formats.peek(payload, ("f", "drop", "q"), flags)
-                    tracker.add(p.get("f"), p.get("drop"), p.get("q"), seq, recv_ns)
-                entry.update(tracker.info())
-            else:
-                recs = list(formats.iter_records(raw))
-                recv_ns, frame = recs[0]
-                _, _, flags, seq, payload = formats.parse_frame(frame)
-                p = formats.peek(payload, ("f", "frame", "scene"), flags)
-                entry.update(n=len(recs), after_f=self._state_frame_at(recv_ns), f=p.get("f", p.get("frame")),
-                             scene=p.get("scene"), seq=seq, recv=recv_ns)
-            entries.append(entry)
+                    p = formats.peek(payload, ("f", "frame", "scene"), flags)
+                    entry.update(n=len(recs), after_f=self._state_frame_at(recv_ns), f=p.get("f", p.get("frame")),
+                                 scene=p.get("scene"), seq=seq, recv=recv_ns)
+                entries.append(entry)
         return entries
 
     def _state_frame_at(self, recv_ns: int) -> int | None:
@@ -733,7 +733,7 @@ def _cmd_record(a: argparse.Namespace) -> int:
 
     link = OracleLink(instance=a.instance)
     rec = Recorder(link, out_dir=a.out, profile=a.profile, episode=a.episode, game_dir=a.game_dir,
-                   config={"cli": sys.argv[1:]}).start()
+                   min_free_gb=a.min_free_gb, config={"cli": sys.argv[1:]}).start()
     print(f"recording to {rec.path} for {a.seconds} s (Ctrl+C stops early)")
     try:
         end = time.monotonic() + a.seconds
@@ -743,9 +743,14 @@ def _cmd_record(a: argparse.Namespace) -> int:
         pass
     summary = rec.close()
     link.close()
-    print(RecordingReader(rec.path).check(deep=True).format())
+    rep = RecordingReader(rec.path).check(deep=True)
+    print(rep.format())
     print(f"drops {summary['drops']}")
-    return 0
+    if summary["error"]:
+        print(f"recorder error: {summary['error']}")
+    # Exit 1 below the delivery threshold, on an index that disagrees with the data, or on a recorder error, so a
+    # script can gate the M1 metric on this command as on `check`.
+    return 0 if rep.ok and rep.index_consistent is not False and not summary["error"] else 1
 
 
 def _cmd_check(a: argparse.Namespace) -> int:
@@ -773,13 +778,14 @@ def _cmd_info(a: argparse.Namespace) -> int:
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="python -m ssbot.record.recorder", description=__doc__.split("\n")[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
-    r = sub.add_parser("record", help="record from a running oracle")
+    r = sub.add_parser("record", help="record from a running oracle (exit 1 below threshold or on an error)")
     r.add_argument("--instance", type=int, default=0)
     r.add_argument("--seconds", type=float, default=60.0)
     r.add_argument("--out", default=str(DEFAULT_OUT))
     r.add_argument("--profile", default="TRAIN")
     r.add_argument("--episode")
     r.add_argument("--game-dir", default=r"C:\ssbot\game\train")
+    r.add_argument("--min-free-gb", type=float, default=200.0, help="refuse to start / stop below this free space")
     r.set_defaults(fn=_cmd_record)
     c = sub.add_parser("check", help="frame continuity of a recording (exit 1 below threshold)")
     c.add_argument("path")

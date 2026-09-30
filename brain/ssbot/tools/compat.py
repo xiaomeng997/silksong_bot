@@ -1,8 +1,10 @@
-"""compat v1 (DESIGN §3.10 compat suite): items 1 (game copies vs versions.lock, no loader in FINAL), 3 (SymbolCheck
-through the oracle), 7 (real save folder unchanged, real `default` absent) and part of 8 (disk, microcode, gamepads);
-PlayerPrefs are compared with the launcher's golden snapshot as a warning only (item 2 proper is not in v1).
+"""compat v1 (DESIGN §3.10 compat suite): items 1 (game copies vs versions.lock, no loader in FINAL), 2 without the
+options-page OCR (golden PlayerPrefs hash pinned in versions.lock; current PlayerPrefs vs golden, which FAILs only
+under --profile FINAL/VANILLA), 3 (SymbolCheck through the oracle), 7 (real save folder unchanged, real `default`
+absent) and part of 8 (disk, microcode, gamepads).
 
     python -m ssbot.tools.compat                 # full check; exit 1 on any FAIL; prints a table
+    python -m ssbot.tools.compat --profile FINAL # before a FINAL/VANILLA session: PlayerPrefs must be golden
     python -m ssbot.tools.compat --quick         # skip hashing the two 7.7 GB game copies
     python -m ssbot.tools.compat snapshot        # before a session: hash the real <AccountID> save folder(s)
     python -m ssbot.tools.compat verify          # after a session: fail if anything there changed
@@ -44,6 +46,7 @@ GOLDEN_PREFS = Path(r"C:\ssbot\sandbox\prefs\golden.reg")
 REFERENCE_MANIFEST = Path(r"C:\ssbot\tools\hash_final.json")
 MIN_FREE_GB = 10.0
 MIN_MICROCODE = 0x12B  # DESIGN §2.6 hardware: 13th-gen Vmin fix
+STRICT_PREFS_PROFILES = frozenset({"FINAL", "VANILLA"})  # final-copy sessions: PlayerPrefs must be golden (§2.7)
 
 
 @dataclass
@@ -352,25 +355,57 @@ def connected_xinput_pads() -> list[int] | None:
     return [i for i in range(4) if x.XInputGetState(i, ctypes.byref(state)) == 0]
 
 
-def check_prefs(golden: Path = GOLDEN_PREFS) -> Result:
-    """PlayerPrefs vs the golden snapshot (item 2 proper, restore + OCR of the options page, is not in v1; this only
-    warns, because a user's own play session legitimately changes them until the next restore)."""
-    from ssbot.tools.launcher import RegPrefsStore, current_prefs, prefs_diff, prefs_digest, read_reg_file
+def check_prefs(golden: Path = GOLDEN_PREFS, profile: str = "TRAIN", lock: dict | None = None,
+                store=None, registry: dict | None = None) -> Result:
+    """PlayerPrefs vs the golden snapshot (item 2 without the options-page OCR, which is not in v1).
 
-    if sys.platform != "win32":
+    golden.reg must hash to versions.lock [frozen_settings].golden_prefs_sha256 in every profile. Under a training
+    profile the rest only warns, because a user's own play legitimately changes the prefs until the next restore.
+    Before a FINAL or VANILLA session (DESIGN §2.7: restore and hash first) it FAILs on a difference from golden, a
+    missing pin, a restore the launcher still owes (--detach, a killed launcher) or a live training instance.
+    store (a launcher.PrefsStore) and registry (a PrefsGuard.peek() dict) are for tests."""
+    from ssbot.tools import launcher as L
+
+    strict = profile.upper() in STRICT_PREFS_PROFILES
+    bad = "FAIL" if strict else "WARN"
+    if store is None and sys.platform != "win32":
         return Result("PlayerPrefs", "SKIP", "not Windows")
-    if not Path(golden).is_file():
-        return Result("PlayerPrefs", "WARN", f"no golden snapshot at {golden} (launcher --make-golden)")
+    golden = Path(golden)
+    if not golden.is_file():
+        return Result("PlayerPrefs", bad, f"no golden snapshot at {golden} (launcher --make-golden)")
+    fails, warns, notes = [], [], []
+    digest, pin = L.file_sha256(golden), L.golden_pin(golden, lock)
+    if pin is None:
+        (fails if strict else warns).append(f"versions.lock pins no golden_prefs_sha256 (golden.reg is {digest[:12]})")
+    elif digest != pin:
+        fails.append(f"golden.reg sha256 {digest[:12]} != versions.lock golden_prefs_sha256 {pin[:12]}: the snapshot "
+                     f"was replaced or corrupted, launcher restores refuse it")
+    else:
+        notes.append(f"golden.reg matches the pin {pin[:12]}")
+    if registry is None:
+        registry = L.PrefsGuard(L.RegPrefsStore(), golden, golden.parent / "instances.json",
+                                golden.parent / "instances.lock").peek()
+    live = registry.get("live") or []
+    if live:
+        (fails if strict else notes).append(f"{len(live)} training instance(s) live "
+                                            f"(pids {', '.join(str(i['pid']) for i in live[:6])})")
+    elif registry.get("restore_pending"):
+        (fails if strict else warns).append("a golden restore is pending (launcher --detach or a killed launcher): "
+                                            "run `python -m ssbot.tools.launcher --restore`")
     try:
-        now, gold = current_prefs(RegPrefsStore()), read_reg_file(golden)
+        diff = L.prefs_diff(L.current_prefs(store or L.RegPrefsStore()), L.read_reg_file(golden))
     except (RuntimeError, OSError) as e:
-        return Result("PlayerPrefs", "WARN", f"could not export the current PlayerPrefs: {e}")
-    diff = prefs_diff(now, gold)
-    detail = f"golden digest {prefs_digest(gold)[:12]}"
+        diff = None
+        (fails if strict else warns).append(f"could not export the current PlayerPrefs: {e}")
     if diff:
-        return Result("PlayerPrefs", "WARN", f"{len(diff)} value(s) differ from golden ({', '.join(diff[:6])}); "
-                      f"launcher --restore once no instance runs; {detail}")
-    return Result("PlayerPrefs", "OK", f"match golden; {detail}")
+        (fails if strict else warns).append(f"{len(diff)} value(s) differ from golden ({', '.join(diff[:6])}); "
+                                            f"launcher --restore once no instance runs")
+    elif diff is not None:
+        notes.append("current PlayerPrefs match golden")
+    status = "FAIL" if fails else "WARN" if warns else "OK"
+    return Result("PlayerPrefs", status, "; ".join(fails + warns + notes) + f" [profile {profile}]",
+                  {"golden_sha256": digest, "pin": pin, "live": len(live),
+                   "restore_pending": bool(registry.get("restore_pending")), "diff": diff or []})
 
 
 def check_gamepads() -> Result:
@@ -408,7 +443,7 @@ def run_checks(a: argparse.Namespace) -> list[Result]:
     results.append(check_disk([Path(r"C:\ssbot\sandbox"), (repo / "runs") if repo else Path.cwd()]))
     results.append(check_microcode())
     results.append(check_gamepads())
-    results.append(check_prefs(a.golden))
+    results.append(check_prefs(a.golden, a.profile, lock))
     return results
 
 
@@ -428,7 +463,9 @@ def exit_code(results: list[Result]) -> int:
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="python -m ssbot.tools.compat", description=__doc__.split("\n")[0])
     ap.add_argument("cmd", nargs="?", default="check", choices=("check", "snapshot", "verify"))
-    ap.add_argument("--profile", default="TRAIN", help="session profile (recorded in --json output)")
+    ap.add_argument("--profile", default="TRAIN", type=str.upper,
+                    help="session profile (TRAIN, SHADOW, REHEARSAL-SEG, REHEARSAL-FULL, VANILLA, FINAL); FINAL and "
+                         "VANILLA require golden PlayerPrefs")
     ap.add_argument("--quick", action="store_true", help="skip hashing the game copies")
     ap.add_argument("--no-oracle", action="store_true", help="skip SymbolCheck")
     ap.add_argument("--instance", type=int, default=0)
