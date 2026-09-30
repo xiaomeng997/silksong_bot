@@ -1,8 +1,11 @@
-"""Frame/label alignment (ssbot.record.align) on synthetic episodes with known timing (tests/align_synth.py): a
-textured world under a moving camera, STATE with render-time V/P, thumbnails with capture jitter, and injected
-faults (stale captures, periodic judder, a latency step, a wrong fixed D, parallax, drops, a scene jump, a still
-camera, registration glitches), with and without a figure at the image centre and a HUD (masked out of the
-registration by their STATE labels, or found in the video)."""
+"""The camera-trajectory alignment monitor (ssbot.record.align) on synthetic episodes with known timing
+(tests/align_synth.py): a textured world under a moving camera, STATE with render-time V/P, thumbnails with capture
+jitter, and injected faults (stale captures, periodic judder, a latency step, a wrong fixed D, parallax, drops, a scene
+jump, a still camera, registration glitches, runs out of step that begin while the camera stands still), with and
+without a figure at the image centre and a HUD (masked out of the registration by their STATE labels, or found in the
+video). The monitor must never judge a capture out of step at 0 and must not PASS a misaligned recording where the
+camera motion can tell; where it cannot (constant speed), the captures are uninformative, never aligned. The M1 gate
+itself is measured against the frame marker (tests/test_marker.py)."""
 import dataclasses
 import json
 
@@ -142,20 +145,21 @@ def _truly_off(ep, off, trk) -> tuple[float, np.ndarray]:
 def test_periodic_judder_fails(tmp_path, seed, stale):
     """Every 2nd or 3rd capture repeating the previous frame (the next one skipping a frame): each stale capture's
     two anomalies pair up (out of step and back), its neighbours and the fits go on without it, and it is judged by
-    itself at -1. The share then tracks the truth instead of the judder spoiling every fit around it. Every 2nd over
-    half of the recording makes half of the increments anomalous (seed 5: the median noise estimate lay among them,
-    nothing stood out, and 1 - share was 0.52 for 0.26 true)."""
+    itself at -1, instead of the judder spoiling every fit around it. Here, in a moving camera, 1 - share comes close
+    to the share truly off (not a property of the monitor in general). Every 2nd over half of the recording makes
+    half of the increments anomalous (seed 5: the median noise estimate lay among them, nothing stood out, and
+    1 - share was 0.52 for 0.26 true)."""
     ep = S.make(tmp_path, seconds=20, seed=seed, stale=set(stale))
     rep, off, mot, trk = align.align_episode(ep.path)
     pr = rep.primary
     assert not rep.ok and pr.verdict == "FAIL" and pr.share < 0.98
     truth, tk = _truly_off(ep, off, trk)
     ok = off.status == align.OK
-    assert (off.k == tk)[ok].mean() >= 0.95 and pr.hist.get(-1, 0) >= 0.6 * len(stale)
-    assert 1 - pr.share == pytest.approx(truth, abs=0.04)      # the misalignment estimate, not a multiple of it
+    assert (off.k == tk)[ok].mean() >= 0.95 and pr.hist.get(-1, 0) >= 0.5 * len(stale)
+    assert truth - 0.01 <= 1 - pr.share <= truth + 0.05
     assert pr.excursions["runs"] >= 0.5 * len(stale) and "out of step" in pr.reason
     # What is left out does not depend on the judder: the same as without it, give or take the edges.
-    assert pr.excluded["no_evidence"] == 0 and pr.excluded["low_motion"] <= 220
+    assert pr.excluded["uninformative"] == 0 and pr.excluded["low_motion"] <= 220
 
 
 def test_anomaly_noise_holds_when_half_the_increments_are_anomalies():
@@ -351,7 +355,8 @@ def test_static_figure_without_labels_is_found_in_the_video(tmp_path):
 def test_stale_pairs_are_one_excursion_each(tmp_path, seed, figure):
     """Two stale captures in a row every 20 captures (~5 % off): the repeated frame at s and the skipped one at s + 2
     pair up as one excursion, the track goes on through it, and the two captures are judged by themselves. Before,
-    each anomaly broke the track and the short segments left their aligned captures unjudged (~7x the truth)."""
+    each anomaly broke the track and the short segments left their aligned captures unjudged (~7x the truth); a pair
+    that does not pair up still leaves its segment unjudged (seed 4: ~1.6x)."""
     stale = {s + d for s in range(300, 900, 20) for d in (0, 1)}
     ep = S.make(tmp_path, seconds=20, seed=seed, stale=stale,
                 **(dict(hero="sprite", lead=1.0, hud_state=True) if figure else {}))
@@ -359,7 +364,7 @@ def test_stale_pairs_are_one_excursion_each(tmp_path, seed, figure):
     pr = rep.primary
     truth, tk = _truly_off(ep, off, trk)
     assert not rep.ok and pr.verdict == "FAIL" and 0.04 < truth < 0.07
-    assert 1 - pr.share == pytest.approx(truth, rel=0.4) and pr.unjudged <= 25
+    assert truth - 1e-9 <= 1 - pr.share <= 2 * truth and pr.unjudged <= 40
     assert pr.excursions["runs"] >= 20 and pr.excursions["longest"] <= 2
     assert (off.k == tk)[off.status == align.OK].all()
 
@@ -406,9 +411,96 @@ def test_runs_out_of_step_between_breaks_fail(tmp_path, seed, runs, kw):
     ok = off.status == align.OK
     assert not rep.ok and pr.verdict == "FAIL" and truth > 0.009
     assert not (ok & (tk != 0) & (off.k == 0)).any()     # no capture out of step judged at 0
-    assert truth - 1e-9 <= 1 - pr.share <= truth + 0.005   # the share does not understate the misalignment
+    assert 1 - pr.share >= truth - 1e-9                    # the share does not understate the misalignment
     for a, b in runs:
         assert off.anomaly[a] == off.anomaly[b] == 2 and (off.status[a:b] == align.CUT).all()
+
+
+# ---- runs out of step that no anomaly shows, and what the monitor cannot see ---------------------------------------
+
+def _velocity(monkeypatch, plan) -> None:
+    """Patch align_synth.trajectory: the camera velocity of frames a .. b - 1 set to v u/s (horizontal)."""
+    orig = S.trajectory
+
+    def traj(frames, seed, still=None, jump_at=None):
+        pos = orig(frames, seed, still, jump_at)
+        vel = np.diff(np.r_[pos[:1], pos], axis=0)
+        for a, b, v in plan:
+            vel[a:b] = (v / 60, 0.0)
+        return pos[0] + np.cumsum(vel, axis=0)
+
+    monkeypatch.setattr(S, "trajectory", traj)
+
+
+P = 400
+STAND_WALK = [(P - 6, P + 4, 0.0), (P + 4, P + 60, 8.25)]   # verify3: stand, then walk on past the run's end
+
+
+@pytest.mark.parametrize("seed, kw", [(1, {}), (4, {}), (8, {}), (3, SPRITE), (5, SPRITE), (6, SPRITE)])
+def test_run_out_of_step_from_a_standstill_does_not_pass(tmp_path, monkeypatch, seed, kw):
+    """The verifier's repro (verify3): captures 400..423 one frame late, starting while the camera stands still (the
+    repeated frame at 400 is 0 px, which the still camera explains: no anomaly), then walking at constant speed (the
+    skipped frame at 424 breaks the track). Borrowing k from windows centred on the aligned side, and the track
+    constant from equally late neighbours, judged 16-18 late captures at 0 and PASSED at 0.996-0.998 with 1.8-2 %
+    truly late. Their own windows see the stand -> walk change one frame late (explained only at k = -1) and every
+    position after it a step off: mixed, counting against the share."""
+    _velocity(monkeypatch, STAND_WALK)
+    ep = S.make(tmp_path, seconds=20, seed=seed, stale=set(range(P, P + 24)), **kw)
+    rep, off, mot, trk = align.align_episode(ep.path)
+    pr = rep.primary
+    truth, tk = _truly_off(ep, off, trk)
+    ok = off.status == align.OK
+    assert truth > 0.015 and not rep.ok and pr.verdict in ("FAIL", "INCONCLUSIVE")
+    assert not (ok & (tk != 0) & (off.k == 0)).any()          # no late capture judged at 0
+    assert (off.k == tk)[ok].all() and 1 - pr.share >= truth
+    assert pr.unjudged_by["mixed"] > 0 and not off.consistent[P + 4:P + 24].any()
+
+
+@pytest.mark.parametrize("plan, stale", [
+    ([(P - 6, P + 4, 0.0), (P + 4, P + 20, 8.25), (P + 20, P + 30, 0.0)], range(P, P + 25)),
+    ([(P - 6, P + 4, 0.0), (P + 4, P + 25, 14.0), (P + 25, P + 45, 28.0)], range(P, P + 24)),
+    ([(P - 6, P + 4, 0.0), *((P + 4 + j, P + 5 + j, 8.25 * (j + 1) / 20) for j in range(20)), (P + 24, P + 80, 8.25)],
+     range(P, P + 40))],
+    ids=["stand-walk-stand", "stand-run-dash", "stand-ramp-walk"])
+def test_hidden_runs_out_of_step_are_never_judged_at_zero(tmp_path, monkeypatch, plan, stale):
+    """The verifier's near misses and a gradual start. Stand -> walk -> stand: both ends of the run fall where the
+    camera stands still, so no anomaly shows at all (it PASSED at 0.996 before). Stand -> run -> dash: the skipped
+    frame at the run's end is explained at k = +1 by the doubling speed. Stand -> ramp -> walk: every increment of the
+    20-frame ramp lies within the noise at k = 0 (0.2 px against a 1 px threshold), but their sum is a whole step
+    while the camera moved little (the path test of align._consistent)."""
+    _velocity(monkeypatch, plan)
+    ep = S.make(tmp_path, seconds=20, seed=4, stale=set(stale))
+    rep, off, mot, trk = align.align_episode(ep.path)
+    pr = rep.primary
+    truth, tk = _truly_off(ep, off, trk)
+    ok = off.status == align.OK
+    assert truth > 0.009 and not rep.ok and pr.verdict == "FAIL"
+    assert not (ok & (tk != 0) & (off.k == 0)).any() and (off.k == tk)[ok].all()
+    assert pr.unjudged_by["mixed"] > 0
+
+
+def test_constant_speed_captures_are_uninformative_not_aligned(tmp_path, monkeypatch):
+    """The camera at constant speed for 4 s (frames 300..539): the captures more than W inside have no speed change in
+    their own window, so no video could show their offset. They are uninformative (left out and reported), never
+    judged or counted as aligned: a run one frame late deep inside (430..469) breaks the track at both ends and
+    none of it is judged. Only the breaks show it (the monitor cannot say more; the M1 gate uses the frame marker)."""
+    orig = S.trajectory
+
+    def traj(frames, seed, still=None, jump_at=None):
+        pos = orig(frames, seed, still, jump_at)
+        vel = np.diff(np.r_[pos[:1], pos], axis=0)
+        vel[300:540] = (-np.sign(pos[300, 0]) * 6.0 / 60, 0.0)   # through the middle of the texture
+        return pos[0] + np.cumsum(vel, axis=0)
+
+    monkeypatch.setattr(S, "trajectory", traj)
+    ep = S.make(tmp_path, seconds=20, seed=4, stale=set(range(430, 470)))
+    rep, off, mot, trk = align.align_episode(ep.path)
+    pr = rep.primary
+    inner = np.r_[300 + 32:430, 470:540 - 32]
+    assert (off.status[inner] == align.UNINFORMATIVE).all()
+    assert (off.status[430:470] == align.UNINFORMATIVE).all() and pr.anomalies["breaks"] >= 2
+    assert pr.excluded["uninformative"] >= len(inner) + 40 and "'uninformative'" in rep.format()
+    assert rep.ok and "track breaks" in pr.reason and "cannot judge" in pr.reason
 
 
 # ---- parallax: two layers (a known limit, to be tuned on the first in-game recordings) -----------------------------
