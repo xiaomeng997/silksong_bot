@@ -20,8 +20,9 @@ driving early if the scene changes or the game leaves PLAYING.
     ..\\scripts\\uv.cmd run python -m ssbot.record.align <episode> --dump          # re-run the analysis later
 
 Prints progress every 10 s, the continuity report, the alignment report (calibrated D per clock, offset histogram,
-unjudged captures by cause, exclusions, anomalies, masked share, noise), writes align.json (with the verdict of both
-clocks) into the episode and exits 0 only on PASS on the gate clock (--clock, default the WGC frame clock): >= 99.5 %
+unjudged captures by cause, exclusions, anomalies, masked share, registration scale by camera speed, split locations,
+noise), writes align.json (with the verdict of both clocks) and align_frames.npz (per-capture arrays, as align
+--dump) into the episode and exits 0 only on PASS on the gate clock (--clock, default the WGC frame clock): >= 99.5 %
 of the judgeable captures at offset 0, unjudged ones counting against it, with at least --min-informative judged
 captures and --min-coverage of all. The analysis takes ~5 ms per capture at the default width (~20 s for 60 s).
 
@@ -31,10 +32,19 @@ its pixels while the image moves. Reading a FAIL:
     offsets -1 / +1       judged capture by capture: frames shown late / early; 1 - share estimates their share
     excursions            runs of captures out of step and back (stale captures, periodic judder); judged one by one
     unjudged no_window    nothing fits anywhere near: judder throughout (or the registration failed: see split)
-    unjudged cut, breaks  latency steps (the offset changes and stays), or registration glitches that could not be
-                          bridged (bridged captures were judged across glitches)
+    unjudged cut, breaks  latency steps (the offset changes and stays), runs out of step too long to pair, or
+                          registration glitches: the captures between two breaks are judged only by windows of their
+                          own, never from across the breaks, so glitches can fail an aligned recording
     unjudged split        the neighbours on the two sides disagree; many of them with few anomalies point at the
-                          registration, not the timing: compare `python -m ssbot.record.align <episode> --no-mask`
+                          registration, not the timing: compare `python -m ssbot.record.align <episode> --no-mask`,
+                          and look at the scale by camera speed: two parallax layers of comparable weight (a near
+                          ground layer, a far background) make it change with the speed, and aligned recordings then
+                          FAIL on splits alone (a known limit, not tuned on synthetic data)
+
+First in-game run: record in docs/facts/<version>/probes.md the registration scale against the camera speed
+(scale_by_speed) and where the splits fall (split_at, per clock), with the layers the room shows, and keep the
+episode's align.json and align_frames.npz. The aligner's parallax handling is to be tuned on such real recordings next
+(align.py docstring, "parallax"), not on synthetic ones.
 """
 import argparse
 import json
@@ -184,11 +194,13 @@ def main() -> int:
     print(f"recorder drops {rsum['drops']}; error {rsum['error']}")
 
     print("\n== alignment ==")
-    rep, *_ = align.align_episode(rec.path, align.Params(min_informative=a.min_informative,
-                                                         min_coverage=a.min_coverage), a.clock,
-                                  progress=lambda n: print(f"  registered {n} captures"))
+    rep, off, mot, trk = align.align_episode(rec.path, align.Params(min_informative=a.min_informative,
+                                                                    min_coverage=a.min_coverage), a.clock,
+                                             progress=lambda n: print(f"  registered {n} captures"))
     print(rep.format())
     (rec.path / "align.json").write_text(json.dumps(rep.as_dict(), indent=1), encoding="utf-8")
+    if off is not None:
+        align.dump(rec.path / "align_frames.npz", off, mot, trk)
     return 0 if rep.ok else 1
 
 

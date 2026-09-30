@@ -138,11 +138,13 @@ def _truly_off(ep, off, trk) -> tuple[float, np.ndarray]:
 
 
 @pytest.mark.parametrize("seed, stale", [(8, range(300, 900, 2)), (8, range(300, 900, 3)), (1, range(300, 900, 2)),
-                                         (8, range(300, 360, 2))])
+                                         (8, range(300, 360, 2)), (5, range(300, 900, 2))])
 def test_periodic_judder_fails(tmp_path, seed, stale):
     """Every 2nd or 3rd capture repeating the previous frame (the next one skipping a frame): each stale capture's
     two anomalies pair up (out of step and back), its neighbours and the fits go on without it, and it is judged by
-    itself at -1. The share then tracks the truth instead of the judder spoiling every fit around it."""
+    itself at -1. The share then tracks the truth instead of the judder spoiling every fit around it. Every 2nd over
+    half of the recording makes half of the increments anomalous (seed 5: the median noise estimate lay among them,
+    nothing stood out, and 1 - share was 0.52 for 0.26 true)."""
     ep = S.make(tmp_path, seconds=20, seed=seed, stale=set(stale))
     rep, off, mot, trk = align.align_episode(ep.path)
     pr = rep.primary
@@ -154,6 +156,15 @@ def test_periodic_judder_fails(tmp_path, seed, stale):
     assert pr.excursions["runs"] >= 0.5 * len(stale) and "out of step" in pr.reason
     # What is left out does not depend on the judder: the same as without it, give or take the edges.
     assert pr.excluded["no_evidence"] == 0 and pr.excluded["low_motion"] <= 220
+
+
+def test_anomaly_noise_holds_when_half_the_increments_are_anomalies():
+    rng = np.random.default_rng(0)
+    clean = np.linalg.norm(rng.normal(0.0, 0.1, (1000, 2)), axis=1)      # misses of clean increments, sigma 0.1
+    assert align._noise(clean, 3.0) == pytest.approx(np.median(clean) / 1.1774) == pytest.approx(0.1, rel=0.1)
+    judder = np.r_[clean[:450], rng.uniform(3.0, 15.0, 550)]            # 55 % anomalous: the median lies among them
+    assert np.median(judder) / 1.1774 > 2.0 and align._noise(judder, 3.0) < 0.55
+    assert align._noise(np.zeros(0), 3.0) == 0.0
 
 
 def test_judder_everywhere_fails_unjudged(tmp_path):
@@ -195,6 +206,7 @@ def test_parallax_scale_and_static_hud(tmp_path):
     ep = S.make(tmp_path, seconds=15, seed=3, parallax=0.6)
     rep, *_ = align.align_episode(ep.path)
     assert rep.ok and rep.scale_a["p50"] == pytest.approx(0.6, abs=0.02)
+    assert all(v[2] == pytest.approx(0.6, abs=0.02) for v in rep.scale_by_speed.values())   # one layer: one scale
 
 
 def test_drops_on_both_sides(tmp_path):
@@ -333,7 +345,7 @@ def test_static_figure_without_labels_is_found_in_the_video(tmp_path):
     assert rep.ok and rep.primary.share == 1.0 and rep.masked["steps"] == rep.captures - 1
 
 
-# ---- anomalies: excursions, breaks, bridges -------------------------------------------------------------------
+# ---- anomalies: excursions and breaks ------------------------------------------------------------------------------
 
 @pytest.mark.parametrize("seed, figure", [(8, False), (4, False), (1, True)])
 def test_stale_pairs_are_one_excursion_each(tmp_path, seed, figure):
@@ -352,11 +364,13 @@ def test_stale_pairs_are_one_excursion_each(tmp_path, seed, figure):
     assert (off.k == tk)[off.status == align.OK].all()
 
 
-def test_registration_glitches_do_not_cascade(clean):
+def test_registration_glitches_leave_their_segments_unjudged(clean):
     """Unpaired anomalies that are registration glitches, not latency steps: two 8 captures apart, then one every 13
-    captures for 300 captures. Each breaks the track, but the captures between them take their reference from the
-    windows across the breaks, which all agree, and the increments across the breaks are not explained (a real
-    excursion's are): they are judged, not counted against the share."""
+    captures for 300 captures. Each breaks the track, and the captures between two of them, with no window of their
+    own, stay unjudged and count against the share, as a run out of step between two breaks would: from inside the
+    segment the two look alike. (Judging them from the windows across the breaks passed runs of 10-14 captures one
+    frame late: test_runs_out_of_step_between_breaks_fail.) An aligned recording may fail this way; a misaligned one
+    must never pass."""
     ep, rep, off, mot, trk = clean
     inc = mot.inc.copy()
     inc[500] += (6.0, 0.0)
@@ -364,5 +378,69 @@ def test_registration_glitches_do_not_cascade(clean):
     inc[700:1000:13] += (4.0, 3.0)
     bad, off2 = align.align(dataclasses.replace(mot, inc=inc), trk)
     pr = bad.primary
-    assert bad.ok and pr.share == 1.0 and pr.unjudged == 0
-    assert pr.anomalies["breaks"] >= 20 and pr.bridged > 100 and off2.bridged[501:508].all()
+    assert not bad.ok and pr.verdict == "FAIL" and pr.hist == {0: pr.informative}   # none judged off 0
+    assert pr.anomalies["breaks"] >= 20 and pr.unjudged_by["cut"] > 200 and "track breaks" in pr.reason
+    assert off2.anomaly[500] == off2.anomaly[508] == 2 and (off2.status[500:508] == align.CUT).all()
+
+
+SPRITE = dict(hero="sprite", lead=1.0, hud_state=True)
+
+
+@pytest.mark.parametrize("seed, runs, kw", [
+    (4, [(250, 264)], {}), (4, [(450, 460)], {}), (4, [(250, 264), (700, 714)], {}),
+    (4, [(250, 264)], SPRITE), (4, [(450, 460)], SPRITE), (4, [(250, 264), (700, 714)], SPRITE),
+    (1, [(250, 264)], dict(SPRITE, far=(0.5, 0.65)))],
+    ids=["14", "10", "two", "14-figure", "10-figure", "two-figure", "two-layer"])
+def test_runs_out_of_step_between_breaks_fail(tmp_path, seed, runs, kw):
+    """Runs of 10-14 captures one frame late (1-2.6 % of the captures), with the centre figure and the labelled HUD,
+    and in a two-layer scene: too long to pair, so the repeated frame into a run and the skipped one out of it break
+    the track. The captures between have no window of their own and their neighbours are all equally late, so they
+    stay unjudged and count against the share. Taking their offset from the windows across the breaks passed every
+    one of these at 0.995-1.0 with the late captures judged at 0: whether the increments across the breaks were
+    explained was decided with a pass-1 scale 2 % off, times a dash."""
+    stale = {i for a, b in runs for i in range(a, b)}
+    ep = S.make(tmp_path, seconds=20, seed=seed, stale=stale, **kw)
+    rep, off, mot, trk = align.align_episode(ep.path)
+    pr = rep.primary
+    truth, tk = _truly_off(ep, off, trk)
+    ok = off.status == align.OK
+    assert not rep.ok and pr.verdict == "FAIL" and truth > 0.009
+    assert not (ok & (tk != 0) & (off.k == 0)).any()     # no capture out of step judged at 0
+    assert truth - 1e-9 <= 1 - pr.share <= truth + 0.005   # the share does not understate the misalignment
+    for a, b in runs:
+        assert off.anomaly[a] == off.anomaly[b] == 2 and (off.status[a:b] == align.CUT).all()
+
+
+# ---- parallax: two layers (a known limit, to be tuned on the first in-game recordings) -----------------------------
+
+@pytest.fixture(scope="module")
+def two_layer(tmp_path_factory):
+    """The bottom half of the image at parallax 1, the top half a second texture at parallax 0.5; no figure, no HUD;
+    every capture at offset 0."""
+    ep = S.make(tmp_path_factory.mktemp("two_layer"), seconds=20, seed=1, hud=False, far=(0.5, 0.5))
+    return ep, *align.align_episode(ep.path)
+
+
+def test_scale_by_speed_reports_two_layer_parallax(two_layer, clean):
+    """What the first in-game run must record: the registration scale per camera speed. One layer gives one scale;
+    with two, the layers' correlation peaks merge or part with the speed (here 0.56 / 0.74 / 0.68 of the near layer's
+    motion at 0.5-1 / 1-2 / 2-4 thumbnail px per capture), and where the splits fall."""
+    ep, rep, off, mot, trk = two_layer
+    p50 = [v[2] for v in rep.scale_by_speed.values()]
+    assert len(p50) >= 2 and max(p50) - min(p50) > 0.1 and 0.5 < min(p50) and max(p50) < 0.9
+    pr = rep.primary
+    assert pr.split_at and sum(b - a + 1 for a, b in pr.split_at) == pr.unjudged_by["split"]
+    assert "split captures (first, last)" in rep.format()
+    assert all(abs(v[2] - 1.0) < 0.02 for v in clean[1].scale_by_speed.values()) and clean[1].primary.split_at == []
+
+
+@pytest.mark.xfail(strict=True, reason="two parallax layers of comparable weight: the registration scale depends on "
+                   "the camera speed and aligned captures SPLIT, which counts against the share (align.py docstring, "
+                   "DESIGN 3.1.4); not tuned on synthetic data, the next step is the first in-game recordings")
+def test_two_layer_parallax_aligned_recording_passes(two_layer):
+    """The verifier's repro. Every capture is at offset 0, but one scale a per window cannot absorb a scale that
+    changes with the speed: the neighbours on the two sides of speed changes disagree, and the recording FAILs at
+    0.952 on SPLIT alone (seeds 2 / 8: 0.983 / 0.971), with no anomaly. Failing an aligned recording is the safe side
+    of the gate; this test turns XPASS (strict: an error) once parallax is handled."""
+    ep, rep, off, mot, trk = two_layer
+    assert rep.ok and rep.primary.share == 1.0

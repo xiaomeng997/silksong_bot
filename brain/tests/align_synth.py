@@ -10,6 +10,10 @@ Screen-fixed content: an unlabelled HUD block in the top-left corner (hud=True),
 keeps near the image centre, like Hornet (hero="block": a static collider-sized block; "sprite": a larger 3-pose
 animation around the collider; `lead` world units behind the camera in its direction of travel) with STATE "hero"
 pos/box, and a labelled HUD (hud_state=True: bind orb, masks, silk spool, tool icons) with STATE "hud" rects.
+
+Two parallax layers: far=(parallax, share) replaces the top `share` of the image (unlabelled HUD block included) with a
+second texture at that parallax, a far background above a near ground layer; the figure and the labelled HUD are
+drawn in front of both.
 """
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -183,7 +187,7 @@ def make(tmp_path, *, seconds: float = 25.0, seed: int = 1, parallax: float = 1.
          drop_states: set[int] = frozenset(), drop_captures: set[int] = frozenset(), still=None, jump_at=None,
          eof_jitter_ns: int = 1_000_000, cap_jitter_ns: int = 4_000_000, noise: float = 2.0, episode: str = "ep",
          hud: bool = True, hero: str | None = None, lead: float = 0.0, hud_state: bool = False,
-         labels: bool = True) -> Episode:
+         labels: bool = True, far: tuple[float, float] | None = None) -> Episode:
     """Write an episode with STATE frames 1000.. and one capture per frame (minus drop_captures). labels=False draws
     the hero and the labelled HUD but leaves them out of STATE."""
     rng = np.random.default_rng(seed + 100)
@@ -192,6 +196,7 @@ def make(tmp_path, *, seconds: float = 25.0, seed: int = 1, parallax: float = 1.
     cam = trajectory(n, seed, still, jump_at)
     her = hero_track(cam, lead)
     tex = texture(1400, 2400, seed)
+    tex_far = texture(1400, 2400, seed + 50) if far else None
     q = {int(f): T0_NS + int(f) * PERIOD_NS + int(rng.integers(-eof_jitter_ns, eof_jitter_ns + 1)) for f in frames}
 
     rec = Recorder(None, out_dir=tmp_path, profile="TEST", episode=episode, hello=syn.hello(), when=WHEN,
@@ -226,6 +231,9 @@ def make(tmp_path, *, seconds: float = 25.0, seed: int = 1, parallax: float = 1.
         shown = int(f) - 1 if i in stale and i > 0 else int(f)
         j = shown - 1000
         img = render(tex, cam[j, 0], cam[j, 1], parallax, hud)
+        if far:
+            cut = int(round(far[1] * SCREEN[1]))
+            img[:cut] = render(tex_far, cam[j, 0], cam[j, 1], far[0], hud=False)[:cut]
         if hero:
             draw_hero(img, cam[j, 0], cam[j, 1], her[j, 0], her[j, 1], hero, j // 6)
         if hud_state:
