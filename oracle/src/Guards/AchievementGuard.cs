@@ -90,7 +90,9 @@ namespace SsOracle.Guards
 
         /// <summary>
         /// guards.test_achievement {key="FIRST_TOOL"} (TRAIN only, guard must be on and healthy): calls every guarded
-        /// entry point once with the key and reports how many were blocked. Proves the guard in the running game.
+        /// entry point once with the key and reports how many were blocked (6 of 6 in the training copy). Proves the
+        /// guard in the running game, including the shared.dat hook (CustomSharedData.SetBool), which the other calls
+        /// never reach because PushAchievementUnlock is blocked before it writes the key.
         /// </summary>
         internal static object TestRpc(Dictionary<string, object> args)
         {
@@ -101,34 +103,56 @@ namespace SsOracle.Guards
             var gm = GameManager._instance;
             var before = GuardState.AchievementsBlocked;
             var calls = new List<string>();
+            var expected = 0;
             if (gm != null && gm.achievementHandler != null)
             {
                 gm.achievementHandler.AwardAchievementToPlayer(key);
                 gm.achievementHandler.UpdateAchievementProgress(key, 1, 2);
                 calls.Add("AchievementHandler");
+                expected += 2;
             }
             if (Platform.Current is DesktopPlatform desktop)
             {
                 desktop.PushAchievementUnlock(key);
                 desktop.UpdateAchievementProgress(key, 1, 2);
                 calls.Add("DesktopPlatform");
+                expected += 2;
             }
             MenuStyleUnlock.Unlock(key, false);
             calls.Add("MenuStyleUnlock");
+            expected += 1;
+            // Only a real achievement key and only the CustomSharedData the hook covers: anything else would really be
+            // written to shared.dat (the hook lets non-achievement keys through by design).
+            var shared = Platform.Current != null ? Platform.Current.RoamingSharedData : null;
+            if (shared is CustomSharedData && IsAchievementKey(key))
+            {
+                shared.SetBool(key, true);
+                calls.Add("CustomSharedData.SetBool");
+                expected += 1;
+            }
             return new Dictionary<string, object>
             {
                 ["key"] = key,
                 ["calls"] = calls,
                 ["blocked"] = GuardState.AchievementsBlocked - before,
-                ["expected"] = (calls.Contains("AchievementHandler") ? 2 : 0) + (calls.Contains("DesktopPlatform") ? 2 : 0) + 1,
+                ["expected"] = expected,
             };
         }
     }
 
     /// <summary>
-    /// "Refuse to start" (DESIGN §2.7: a failed AchievementGuard patch must stop the plugin from being used): while
-    /// GuardState.Refused, GameManager.StartNewGame and ContinueGame do nothing, so no game session (and therefore
-    /// no achievement, death or save) can happen with a broken guard. Loud error plus a "session_refused" event.
+    /// "Refuse to start": GameManager.StartNewGame and ContinueGame do nothing, with a loud error and a
+    /// "session_refused" event, while
+    /// <list type="bullet">
+    /// <item>GuardState.Refused (DESIGN §2.7: a failed AchievementGuard patch must stop the plugin from being used), so
+    /// no game session (and therefore no achievement, death or save) can happen with a broken guard;</item>
+    /// <item>a non-TRAIN profile is violated (Profile.Validate, run fresh here: cheats on in SHADOW, DebugMod loaded in
+    /// REHEARSAL_FULL, a violated -ssbot-profile at startup ...), so gate evidence is never collected under a forbidden
+    /// setup;</item>
+    /// <item>(ContinueGame only) the loaded save is Steel Soul, its slot has no snapshot and taking one fails
+    /// (SteelSoulSnapshot.EnsureForContinue; DESIGN §3.1.1).</item>
+    /// </list>
+    /// A refused start from the title menu goes back to the main menu, as a failed load does in vanilla.
     /// </summary>
     internal static class SessionGate
     {
@@ -142,16 +166,37 @@ namespace SsOracle.Guards
             GuardState.SessionGateHealthy = a && b;
         }
 
-        private static bool StartNewGamePrefix() => Allow("StartNewGame");
-        private static bool ContinueGamePrefix() => Allow("ContinueGame");
+        private static bool StartNewGamePrefix(GameManager __instance) => BackToMenuUnless(__instance, Allow("StartNewGame", null));
 
-        private static bool Allow(string what)
+        private static bool ContinueGamePrefix(GameManager __instance) =>
+            BackToMenuUnless(__instance, Allow("ContinueGame", () => SteelSoulSnapshot.EnsureForContinue(__instance)));
+
+        /// <summary>The menu code hid the save-select menu before calling in; on a refusal bring the main menu back
+        /// (what LoadGameFromUIRoutine does when a load fails) instead of leaving a black screen.</summary>
+        private static bool BackToMenuUnless(GameManager gm, bool allowed)
         {
-            if (!GuardState.Refused) return true;
+            if (!allowed && gm.IsMenuScene() && gm.ui != null) gm.ui.UIGoToMainMenu();
+            return allowed;
+        }
+
+        /// <param name="extra">Further check run only when everything else passed; returns a refusal reason or null.</param>
+        private static bool Allow(string what, Func<string> extra)
+        {
+            var reasons = new List<string>(GuardState.Refusals);
+            if (!GuardState.Refused)
+            {
+                foreach (var v in Core.Profile.Validate("session " + what))
+                    reasons.Add($"profile {Core.Profile.Current}: {v}");
+                if (reasons.Count == 0 && extra != null)
+                {
+                    var why = extra();
+                    if (why != null) reasons.Add(why);
+                }
+            }
+            if (reasons.Count == 0) return true;
             GuardState.SessionsRefused++;
-            var reasons = string.Join("; ", GuardState.Refusals.ToArray());
-            Core.Plugin.Log.LogError($"SessionGate: refusing GameManager.{what} because a guard is broken: {reasons}");
-            Export.FrameExporter.Emit("session_refused", new Dictionary<string, object> { ["what"] = what, ["reasons"] = new List<string>(GuardState.Refusals) });
+            Core.Plugin.Log.LogError($"SessionGate: refusing GameManager.{what}: {string.Join("; ", reasons.ToArray())}");
+            Export.FrameExporter.Emit("session_refused", new Dictionary<string, object> { ["what"] = what, ["reasons"] = reasons });
             return false;
         }
     }

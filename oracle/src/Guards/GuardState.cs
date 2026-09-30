@@ -46,7 +46,7 @@ namespace SsOracle.Guards
         public static readonly List<string> Refusals = new List<string>();
         public static bool Refused => Refusals.Count > 0;
 
-        public static int Catastrophes, WouldDie, AchievementsBlocked, SavesSuppressed, SessionsRefused;
+        public static int Catastrophes, WouldDie, AchievementsBlocked, SavesSuppressed, SavesVetoed, SessionsRefused;
         public static Dictionary<string, object> LastCatastrophe, LastWouldDie;
 
         public static string LethalName(LethalMode m) => m == LethalMode.Block ? "block" : m == LethalMode.Observe ? "observe" : "off";
@@ -100,12 +100,14 @@ namespace SsOracle.Guards
                 ["refused"] = Refused,
                 ["refusals"] = new List<string>(Refusals),
                 ["profile"] = Core.Profile.Current.ToString(),
+                ["profile_ok"] = Core.Profile.Ok,
                 ["counts"] = new Dictionary<string, object>
                 {
                     ["catastrophe"] = Catastrophes,
                     ["would_die"] = WouldDie,
                     ["achievement_blocked"] = AchievementsBlocked,
                     ["save_suppressed"] = SavesSuppressed,
+                    ["save_vetoed"] = SavesVetoed,
                     ["session_refused"] = SessionsRefused,
                 },
                 ["last_catastrophe"] = LastCatastrophe,

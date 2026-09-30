@@ -14,7 +14,8 @@ namespace SsOracle.Core
     /// A missing hard symbol is a hard failure: <see cref="Ok"/> is false (other modules and non-TRAIN profiles check
     /// it), a loud error lists every miss, and symbols.check returns the list. Soft symbols (DebugMod's savestate and
     /// cheat members, which only TRAIN loads) are reported but never fail the check. Runs once from Install
-    /// (Plugin.Awake) and again on the first frame, when every other plugin has loaded.
+    /// (Plugin.Awake) and again on the first frame, when every other plugin has loaded; symbols.check returns the last
+    /// report and re-runs the pass only on request ({refresh: true}).
     /// </summary>
     internal static class SymbolCheck
     {
@@ -63,7 +64,9 @@ namespace SsOracle.Core
             M(GM, "PlayerDead", "float"), M(GM, "PlayerDeadFromHazard", "float"), M(GM, "HazardRespawn"),
             M(GM, "CheckCompletionAchievements"), M(GM, "AwardQueuedAchievements"), M(GM, "ReturnToMainMenu", "bool", ActB, "bool", "bool"),
             M(GM, "StartNewGame", "bool", "bool"), M(GM, "ContinueGame"), MAny(GM, "SetPlayerDataBool"), E(GM, "SceneTransitionBegan"),
-            T("GlobalEnums.GameState"), T("GlobalEnums.FreezeMomentTypes"), T("AutoSaveName"), T("SaveGameData"),
+            // FSM writers of health and freezes (EventTap health_changes / TimeSlowed, DESIGN §3.1.1).
+            M(GM, "SetPlayerDataInt", "string", "int"), M(GM, "FreezeMoment", "int"),
+            T("GlobalEnums.GameState"), T("GlobalEnums.FreezeMomentTypes"), T("AutoSaveName"), T("SaveGameData"), F("SaveGameData", "playerData"),
             T("GameConfig"), F("GameConfig", "disableSaveGame"), T("DemoHelper"), P("DemoHelper", "IsDemoMode"),
             T("Constants"), F("Constants", "GAME_VERSION"), T("CustomPlayerLoop"), P("CustomPlayerLoop", "FixedUpdateCycle"),
             T("CoreLoop"), M("CoreLoop", "InvokeNext", "Action"),
@@ -77,7 +80,8 @@ namespace SsOracle.Core
             F(PD, "hasDash"), F(PD, "hasDoubleJump"), F(PD, "completionPercentage"), F(PD, "CompletedEndings"), F(PD, "LastCompletedEnding"),
             F(PD, "Tools"), F(PD, "ToolEquips"), F(PD, "ExtraToolEquips"),
             P(PD, "CurrentMaxHealth"), P(PD, "CurrentSilkMax"), P(PD, "IsAnyCursed"), P(PD, "HasInstance"),
-            M(PD, "TakeHealth", "int", "bool", "bool"), M(PD, "SetBool", "string", "bool"), M(PD, "GetToolData", "string"), M(PD, "CountGameCompletion"),
+            M(PD, "TakeHealth", "int", "bool", "bool"), M(PD, "SetBool", "string", "bool"), M(PD, "SetInt", "string", "int"),
+            M(PD, "GetToolData", "string"), M(PD, "CountGameCompletion"),
             T("GlobalEnums.PermadeathModes"),
             T("TeamCherry.SharedUtils.VariableExtensions"),
             M("TeamCherry.SharedUtils.VariableExtensions", "SetVariable", "TeamCherry.SharedUtils.IIncludeVariableExtensions", "string", "object", "Type"),
@@ -111,12 +115,17 @@ namespace SsOracle.Core
             T("BossSceneController"), F("BossSceneController", "Instance"), P("BossSceneController", "IsBossScene"),
             T("CustomSceneManager"), P("CustomSceneManager", "HeroKeepHealth"),
             T("GlobalSettings.Gameplay"), P("GlobalSettings.Gameplay", "FracturedMaskTool"), P("GlobalSettings.Gameplay", "BarbedWireTool"),
+            P("GlobalSettings.Gameplay", "BarbedWireDamageTakenMultiplier"),
+            // HUD refresh after LethalBlock restores health.
+            T("EventRegister"), M("EventRegister", "SendEvent", "int", "UnityEngine.GameObject"), T("EventRegisterEvents"),
+            F("EventRegisterEvents", "HealthUpdate"),
             T("ToolItem"), P("ToolItem", "IsEquipped"), P("ToolItem", "SavedData"), T("ToolItemsData+Data"), F("ToolItemsData+Data", "AmountLeft"),
 
             // --- Pause and quit blockers (m0 §2.4, hook table) ---
             T("InputHandler"), F("InputHandler", "acceptingInput"), F("InputHandler", "inputActions"), P("InputHandler", "PauseAllowed"),
             M("InputHandler", "PreventPause"), M("InputHandler", "AllowPause"), M("InputHandler", "SetCursorEnabled", "bool"),
             T("UIManager"), F("UIManager", "uiState"), F("UIManager", "menuState"), P("UIManager", "IsFadingMenu"), MAny("UIManager", "ReturnToMainMenu"),
+            M("UIManager", "UIGoToMainMenu"),
             T("ScenePreloader"), P("ScenePreloader", "HasPendingOperations"),
             T("GenericMessageCanvas"), P("GenericMessageCanvas", "IsActive"), MAny("GenericMessageCanvas", "Show"),
             T("InteractManager"), P("InteractManager", "BlockingInteractable"),
@@ -247,12 +256,22 @@ namespace SsOracle.Core
             return r;
         }
 
+        /// <summary>The last full pass (startup, first frame, or an explicit refresh) and when it ran.</summary>
+        private static Report lastReport;
+        private static string lastWhen;
+
+        /// <summary>
+        /// symbols.check {refresh=false}: the report of the last pass. A pass takes ~27 ms on the main thread (a visible
+        /// hitch in gameplay), and the loaded assemblies do not change after the first frame, so only {refresh: true}
+        /// runs it again.
+        /// </summary>
         public static void Install()
         {
             Run("startup");
             Ipc.Rpc.Register("symbols.check", args =>
             {
-                var r = Run("rpc");
+                var refresh = Ipc.Rpc.Bool(args, "refresh");
+                var r = refresh || lastReport == null ? Run("rpc") : lastReport;
                 return new Dictionary<string, object>
                 {
                     ["ok"] = r.Ok,
@@ -261,6 +280,8 @@ namespace SsOracle.Core
                     ["resolved_count"] = r.Resolved,
                     ["total"] = r.Total,
                     ["us"] = r.Micros,
+                    ["when"] = lastWhen,
+                    ["cached"] = !refresh,
                 };
             });
         }
@@ -278,6 +299,8 @@ namespace SsOracle.Core
         private static Report Run(string when)
         {
             var r = Evaluate();
+            lastReport = r;
+            lastWhen = when;
             var wasOk = Ok;
             Ok = r.Ok;
             Missing = r.Missing;

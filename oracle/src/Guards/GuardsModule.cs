@@ -40,6 +40,8 @@ namespace SsOracle.Guards
         /// <summary>
         /// guards.set {lethal_block: bool | "block"|"observe"|"off", save_suppression: bool, achievement_guard: bool}.
         /// All-or-nothing: the new combination is checked against the profile and guard health before anything changes.
+        /// LethalBlock cannot leave block while a Steel Soul session runs without a snapshot of its slot (DESIGN
+        /// §3.1.1): a death would mark the only copy of the slot DEFEATED.
         /// </summary>
         private static object Set(Dictionary<string, object> args)
         {
@@ -54,6 +56,8 @@ namespace SsOracle.Guards
             var v = Core.Profile.CheckGuards(Core.Profile.Current, lethal, save, ach);
             if (save && !GuardState.SaveSuppressionHealthy) v.Add("save_suppression is unavailable (patch failed)");
             if (lethal != LethalMode.Off && !GuardState.LethalHealthy) v.Add("lethal_block is unhealthy (patch failed)");
+            if (lethal != LethalMode.Block && lethal != GuardState.Lethal && SteelSoulSnapshot.Unprotected(out var slot))
+                v.Add($"Steel Soul session in slot {slot} has no snapshot: lethal_block stays block (slot.snapshot first)");
             if (v.Count > 0) throw new InvalidOperationException("guards.set refused: " + string.Join("; ", v.ToArray()));
 
             if (lethal != GuardState.Lethal || save != GuardState.SaveSuppression || ach != GuardState.AchievementGuard)

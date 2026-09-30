@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using GlobalEnums;
 using HarmonyLib;
 
 namespace SsOracle.Guards
@@ -24,6 +25,12 @@ namespace SsOracle.Guards
     /// vanilla failure path. PreparePlayerDataForSave also flushes shared.dat (AchievementHandler.FlushRecordsToDisk);
     /// that file is in the sandbox (SaveRedirect) and AchievementGuard keeps achievement keys out of it, so it is left
     /// alone: SaveSuppression is about the slot files (user{N}.dat, backups, Restore_Points).
+    ///
+    /// The same three hooks are LethalBlock's last line, whatever the SaveSuppression switch says: while LethalBlock
+    /// blocks and permadeathMode is Dead in memory (a Steel Soul death that got past both nets, m0:N7), every save is
+    /// vetoed the same way (nothing written, callback(true), "save_vetoed"), so a queued save, an FSM SaveGame action,
+    /// a restore point or Save &amp; Quit cannot write a DEFEATED slot. A failure callback is not an option: the game
+    /// answers it with a modal SAVE_FAILED message.
     /// </summary>
     internal static class SaveSuppression
     {
@@ -67,16 +74,23 @@ namespace SsOracle.Guards
 
         private static bool SaveGamePrefix(GameManager __instance, int saveSlot, Action<bool> ogCallback, bool withAutoSave, AutoSaveName autoSaveName)
         {
+            var kind = withAutoSave ? "save+restore_point" : "save";
+            if (VetoDead(__instance.playerData, kind, saveSlot, ogCallback)) return false;
             if (!GuardState.SaveSuppression || !WouldWrite(__instance, saveSlot)) return true;
             __instance.SaveLevelState();
             prepareForSave(__instance, saveSlot);
-            Suppressed(__instance, withAutoSave ? "save+restore_point" : "save", saveSlot, autoSaveName);
+            Suppressed(__instance, kind, saveSlot, autoSaveName);
             ogCallback?.Invoke(true);
             return false;
         }
 
         private static bool RestorePointPrefix(GameManager __instance, int saveSlot, AutoSaveName autoSaveName, Action<bool> callback)
         {
+            if (VetoDead(__instance.playerData, "restore_point", saveSlot, callback))
+            {
+                if (isAutoSaveQueued != null) isAutoSaveQueued(__instance) = false;   // as vanilla does
+                return false;
+            }
             if (!GuardState.SaveSuppression || !WouldWrite(__instance, saveSlot)) return true;
             __instance.SaveLevelState();
             isAutoSaveQueued(__instance) = false;
@@ -86,12 +100,35 @@ namespace SsOracle.Guards
             return false;
         }
 
-        private static bool SaveGameDataPrefix(GameManager __instance, int saveSlot, Action<bool> ogCallback)
+        private static bool SaveGameDataPrefix(GameManager __instance, int saveSlot, SaveGameData saveData, Action<bool> ogCallback)
         {
+            // The data being written, not necessarily the live PlayerData.
+            if (VetoDead(saveData != null ? saveData.playerData : __instance.playerData, "save_data", saveSlot, ogCallback)) return false;
             if (!GuardState.SaveSuppression) return true;
             Suppressed(__instance, "save_data", saveSlot, AutoSaveName.NONE);
             ogCallback?.Invoke(true);
             return false;
+        }
+
+        /// <summary>
+        /// LethalBlock's last line (see the class summary): true (and the caller's callback answered with success) when
+        /// LethalBlock blocks and <paramref name="pd"/> is a dead Steel Soul state. Nothing of it is written or flushed.
+        /// </summary>
+        private static bool VetoDead(PlayerData pd, string kind, int slot, Action<bool> callback)
+        {
+            if (GuardState.Lethal != LethalMode.Block || pd == null || pd.permadeathMode != PermadeathModes.Dead) return false;
+            GuardState.SavesVetoed++;
+            Export.FrameExporter.Emit("save_vetoed", new Dictionary<string, object>
+            {
+                ["kind"] = kind,
+                ["slot"] = slot,
+                ["reason"] = "permadeath_dead",
+                ["stack"] = Patching.Stack(6),
+            });
+            Core.Plugin.Log.LogError($"LethalBlock: vetoed {kind} to slot {slot}: permadeathMode is Dead in memory (a Steel Soul death got " +
+                                     "past both nets); nothing written. Load a savestate or slot.restore to continue.");
+            callback?.Invoke(true);
+            return true;
         }
 
         private static void Suppressed(GameManager gm, string kind, int slot, AutoSaveName autoSave)

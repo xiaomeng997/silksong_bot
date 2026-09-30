@@ -57,6 +57,31 @@ def test_watch_requires_playing_throughout():
     assert w.stayed_playing()
 
 
+def test_death_evidence_spans_the_whole_run():
+    link = FakeLink()
+    w = Watch(link)
+    start = w.reset()
+    link.feed(state(30, 1, events=[("would_die", {"cause": "death_catch", "blocked": True}),
+                                   ("catastrophe", {"cause": "quick", "blocked": True})]))
+    assert w.death_evidence(1, start) == []  # blocked events are the guard working
+    link.feed(state(31, 1, dead=True))
+    w.reset()  # a later case starts: the per-case fields clear, the run-wide evidence stays
+    assert not w.dead_seen and w.death_evidence(1, start) == ["hero dead (cState.dead) in some STATE"]
+
+
+def test_death_evidence_sees_unblocked_would_die_and_mode_change():
+    link = FakeLink()
+    w = Watch(link)
+    start = w.reset()
+    link.feed(state(40, 1, events=[("would_die", {"cause": "damage", "blocked": False})]))
+    link.feed(state(41, 0, pdm=2, events=[("permadeath_dead", {"hp": 0})]))
+    why = w.death_evidence(1, start)
+    assert any("unblocked would_die" in x for x in why)
+    assert any("permadeathMode 1 -> [2]" in x for x in why)
+    assert any(x.startswith("permadeath_dead") for x in why)
+    assert w.death_evidence(1, len(w.events)) == ["permadeathMode 1 -> [2]"]  # only the run-wide mode set remains
+
+
 def test_slot_files_matches_the_games_naming(tmp_path):
     for name in ("user2.dat", "user2.dat.bak1", "user2.dat.bak3", "user2_1.0.30000.dat", "user2.dat.del",
                  "user.dat", "user3.dat", "user2.dat.new", "shared.dat"):

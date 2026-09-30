@@ -18,7 +18,13 @@ namespace SsOracle.Guards
     /// Every path is resolved and must lie under C:\ssbot\sandbox\; anything else is refused. Copies run on a worker
     /// thread (the RPC replies when done). Restores are refused while a game is running (the game would overwrite the
     /// files on its next save, and the save-select menu caches slot contents, P5) unless force=true.
-    /// A Steel Soul session in a slot without any snapshot is reported once ("steel_soul_unprotected").
+    ///
+    /// DESIGN §3.1.1: a Steel Soul training slot may only be used with a snapshot. SessionGate enforces it before any
+    /// damage can happen: continuing a Steel Soul save whose slot has no snapshot first takes one named "auto" (on the
+    /// main thread, during the menu fade; the files on disk are exactly the living state just loaded), and refuses the
+    /// Continue if that fails. A new Steel Soul game has nothing on disk to protect yet; until slot.snapshot is taken
+    /// for it the session counts as unprotected: reported once ("steel_soul_unprotected"), guards.set cannot take
+    /// LethalBlock out of block, hurt.special refuses hits that could kill, and non-TRAIN profiles report a violation.
     /// </summary>
     internal static class SteelSoulSnapshot
     {
@@ -64,6 +70,17 @@ namespace SsOracle.Guards
         }
 
         private static string SnapshotDir(int slot, string name) => Sandboxed(Path.Combine(SnapshotRoot, $"slot{slot}", name));
+
+        /// <summary>The slot has at least one complete snapshot (a directory holding the primary file; not a .tmp).</summary>
+        public static bool HasSnapshot(int slot)
+        {
+            var dir = Sandboxed(Path.Combine(SnapshotRoot, $"slot{slot}"));
+            if (!Directory.Exists(dir)) return false;
+            foreach (var d in Directory.GetDirectories(dir))
+                if (!d.EndsWith(".tmp", StringComparison.Ordinal) && File.Exists(Path.Combine(d, PrimaryName(slot))))
+                    return true;
+            return false;
+        }
 
         /// <summary>The slot's files and folders inside <paramref name="dir"/> (names relative to it).</summary>
         private static List<string> SlotEntries(string dir, int slot)
@@ -160,23 +177,67 @@ namespace SsOracle.Guards
         {
             var slot = Slot(args);
             var name = Name(args);
-            var src = Sandboxed(SaveDir);
-            var dst = SnapshotDir(slot, name);
-            RunIo(reply, "slot_snapshot", () =>
-            {
-                var entries = SlotEntries(src, slot);
-                if (!entries.Contains(PrimaryName(slot)))
-                    throw new FileNotFoundException($"slot {slot} has no {PrimaryName(slot)} in {src}");
-                var tmp = Sandboxed(dst + ".tmp");
-                if (Directory.Exists(tmp)) Directory.Delete(tmp, recursive: true);
-                CopyEntries(src, tmp, entries);
-                if (Directory.Exists(dst)) Directory.Delete(dst, recursive: true);
-                Directory.Move(tmp, dst);
-                return new Dictionary<string, object> { ["slot"] = slot, ["name"] = name, ["dir"] = dst, ["entries"] = entries };
-            }, () =>
+            RunIo(reply, "slot_snapshot", () => SnapshotNow(slot, name), () =>
             {
                 if (sessionSlot == slot) sessionHasSnapshot = true;
             });
+        }
+
+        /// <summary>Copies the slot's files into snapshot {name} (through a .tmp directory, so a failed copy never
+        /// replaces a good snapshot). Any thread; the caller holds <see cref="busy"/>.</summary>
+        private static Dictionary<string, object> SnapshotNow(int slot, string name)
+        {
+            var src = Sandboxed(SaveDir);
+            var dst = SnapshotDir(slot, name);
+            var entries = SlotEntries(src, slot);
+            if (!entries.Contains(PrimaryName(slot)))
+                throw new FileNotFoundException($"slot {slot} has no {PrimaryName(slot)} in {src}");
+            var tmp = Sandboxed(dst + ".tmp");
+            if (Directory.Exists(tmp)) Directory.Delete(tmp, recursive: true);
+            CopyEntries(src, tmp, entries);
+            if (Directory.Exists(dst)) Directory.Delete(dst, recursive: true);
+            Directory.Move(tmp, dst);
+            return new Dictionary<string, object> { ["slot"] = slot, ["name"] = name, ["dir"] = dst, ["entries"] = entries };
+        }
+
+        /// <summary>Name of the snapshot SessionGate takes for an unprotected Steel Soul Continue.</summary>
+        public const string AutoName = "auto";
+
+        /// <summary>
+        /// SessionGate, main thread, GameManager.ContinueGame prefix (LoadGame has already set gm.playerData and
+        /// gm.profileID): null when the session may start, else why not. A Steel Soul save whose slot has no snapshot
+        /// gets one named "auto" first.
+        /// </summary>
+        internal static string EnsureForContinue(GameManager gm)
+        {
+            var pd = gm != null ? gm.playerData : null;
+            if (pd == null || pd.permadeathMode != PermadeathModes.On) return null;
+            var slot = gm.profileID;
+            try
+            {
+                if (HasSnapshot(slot)) return null;
+                if (Interlocked.CompareExchange(ref busy, 1, 0) != 0)
+                    return $"Steel Soul slot {slot} has no snapshot and another slot operation is running; try again";
+                Dictionary<string, object> result;
+                try
+                {
+                    result = SnapshotNow(slot, AutoName);
+                }
+                finally
+                {
+                    Interlocked.Exchange(ref busy, 0);
+                }
+                result["auto"] = true;
+                Core.Plugin.Log.LogWarning($"Steel Soul slot {slot} had no snapshot: took '{AutoName}' before Continue ({result["dir"]})");
+                Export.FrameExporter.Emit("slot_snapshot", result);
+                return null;
+            }
+            catch (Exception e)
+            {
+                Core.Plugin.Log.LogError($"automatic snapshot of Steel Soul slot {slot} failed: {e}");
+                return $"Steel Soul slot {slot} has no snapshot and taking one failed ({e.GetType().Name}: {e.Message}); " +
+                       "a Steel Soul training slot may only be used with a snapshot";
+            }
         }
 
         /// <summary>slot.restore {slot, name="latest", force=false}: replace the slot's files with the snapshot.</summary>
@@ -263,7 +324,7 @@ namespace SsOracle.Guards
             try
             {
                 dir = Sandboxed(Path.Combine(SnapshotRoot, $"slot{sessionSlot}"));
-                sessionHasSnapshot = Directory.Exists(dir) && Directory.GetDirectories(dir).Length > 0;
+                sessionHasSnapshot = HasSnapshot(sessionSlot);
             }
             catch (Exception e)
             {
@@ -279,15 +340,16 @@ namespace SsOracle.Guards
         }
 
         /// <summary>
-        /// Main thread: the running session is Steel Soul and its slot has no snapshot. DESIGN §3.1.1: a Steel Soul
-        /// training slot may only be used with a snapshot, so non-TRAIN profiles treat this as a violation.
+        /// Main thread: a Steel Soul session is running (a hero exists) and its slot has no snapshot. DESIGN §3.1.1: a
+        /// Steel Soul training slot may only be used with a snapshot, so non-TRAIN profiles treat this as a violation,
+        /// guards.set keeps LethalBlock blocking and hurt.special refuses hits that could kill.
         /// </summary>
         internal static bool Unprotected(out int slot)
         {
             slot = sessionSlot;
             var gm = GameManager._instance;
             var pd = gm != null ? gm.playerData : null;
-            return sessionSteel && !sessionHasSnapshot && pd != null &&
+            return sessionSteel && !sessionHasSnapshot && pd != null && HeroController.UnsafeInstance != null &&
                    System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(pd) == sessionPdId;
         }
 

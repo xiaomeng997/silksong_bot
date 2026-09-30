@@ -43,14 +43,22 @@ namespace SsOracle.Core
     /// <item>REHEARSAL_FULL: as SEG but no savestates at all (DebugMod must not be loaded); entering Die counts as a
     /// death and the run continues.</item>
     /// <item>Every non-TRAIN profile needs SymbolCheck.Ok and healthy, non-refused guards, and a Steel Soul session
-    /// only in a slot that has a snapshot (SteelSoulSnapshot; TRAIN only gets a "steel_soul_unprotected" event).</item>
+    /// only in a slot that has a snapshot (SteelSoulSnapshot; SessionGate takes one before a Steel Soul Continue).</item>
     /// </list>
-    /// Non-TRAIN profiles are re-checked about once a second; a new violation emits "profile_violation".
+    /// Non-TRAIN profiles are checked on the first frame, about once a second and at every session start; a new
+    /// violation emits "profile_violation". While a non-TRAIN profile is violated (<see cref="Ok"/> false, including a
+    /// violated -ssbot-profile at startup) SessionGate refuses StartNewGame and ContinueGame, so no gate evidence is
+    /// collected under a forbidden setup; a violation that appears mid-session is reported, and the next session is
+    /// refused until it is fixed.
     /// </summary>
     internal static class Profile
     {
         public static ProfileName Current { get; private set; } = ProfileName.TRAIN;
         public static ProfileRules Rules => For(Current);
+
+        /// <summary>No known violation of the current profile (TRAIN: always). Non-TRAIN profiles are false until the
+        /// first-frame check ran.</summary>
+        public static bool Ok => Current == ProfileName.TRAIN || (startupChecked && violations.Count == 0);
 
         private static readonly List<string> violations = new List<string>();
         private static string lastViolationKey = "";
@@ -156,7 +164,9 @@ namespace SsOracle.Core
             {
                 // First frame: every plugin (DebugMod) has loaded, so the startup profile can be validated.
                 startupChecked = true;
-                Validate("startup");
+                if (Validate("startup").Count > 0)
+                    Plugin.Log.LogError($"profile {Current} (from -ssbot-profile) is violated: new game sessions are refused until it is fixed " +
+                                        "(or profile.set TRAIN)");
                 return;
             }
             if (Current == ProfileName.TRAIN || UnityEngine.Time.frameCount < nextCheckFrame) return;
@@ -164,15 +174,17 @@ namespace SsOracle.Core
             Validate("periodic");
         }
 
-        private static void Validate(string when)
+        /// <summary>Main thread: re-check the current profile now (SessionGate calls it before every session start).
+        /// Returns the violations (empty for TRAIN) and updates <see cref="Ok"/>.</summary>
+        internal static List<string> Validate(string when)
         {
             var v = Check(Current);
             violations.Clear();
             violations.AddRange(v);
             var key = string.Join("|", v.ToArray());
-            if (key == lastViolationKey) return;
+            if (key == lastViolationKey) return v;
             lastViolationKey = key;
-            if (v.Count == 0) return;
+            if (v.Count == 0) return v;
             Plugin.Log.LogError($"profile {Current} violated ({when}): {key}");
             Export.FrameExporter.Emit("profile_violation", new Dictionary<string, object>
             {
@@ -180,6 +192,7 @@ namespace SsOracle.Core
                 ["violations"] = new List<string>(v),
                 ["when"] = when,
             });
+            return v;
         }
 
         /// <summary>profile.set {name}: apply the profile's guard defaults and switch, or refuse with the violations.</summary>

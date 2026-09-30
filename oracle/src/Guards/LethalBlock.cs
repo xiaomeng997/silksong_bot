@@ -26,10 +26,14 @@ namespace SsOracle.Guards
     /// false from a prefix on the iterator method itself means the state machine is never created; StartCoroutine
     /// gets an empty routine instead. Emits "would_die" and leaves Hornet at &gt;= 1 HP.</item>
     /// <item>Watchers: GameManager.PlayerDead (reached only if Die ran, i.e. net 2 missed), a per-frame
-    /// permadeathMode On -&gt; Dead comparison, and "0 HP while alive" (a death that is only postponed, m0 §2.5).</item>
+    /// permadeathMode On -&gt; Dead comparison, and "0 HP while alive" (a death that is only postponed, m0 §2.5).
+    /// If both nets missed while blocking, SaveSuppression vetoes every save while permadeathMode is Dead, so the
+    /// DEFEATED state never reaches the disk.</item>
     /// </list>
-    /// Prefixes on the damage entry points only record the cause chain for attribution. CheatManager.PreventDeath is
-    /// not a substitute (it hides DoSpecialDamage and CriticalDamage completely, m0:N43).
+    /// Every health restore is followed by a HUD refresh (EventRegisterEvents.HealthUpdate, sent from the monitor), so
+    /// the masks on screen agree with PlayerData. Prefixes on the damage entry points only record the cause chain for
+    /// attribution. CheatManager.PreventDeath is not a substitute (it hides DoSpecialDamage and CriticalDamage
+    /// completely, m0:N43).
     /// </summary>
     internal static class LethalBlock
     {
@@ -145,6 +149,7 @@ namespace SsOracle.Guards
             public int Amount;
             public int Hazard;   // HazardType, -1 = n/a (kept as int: no ToString allocation per hit)
             public int Flags;    // DamagePropertyFlags
+            public int Tag;      // DamageTag.SpecialDamageTypes, -1 = n/a
             public GameObject Src;
         }
 
@@ -152,10 +157,14 @@ namespace SsOracle.Guards
         private static int causeDepth;
         private static int takeHealthDepth;
 
-        private static void Push(string kind, int amount, int hazard = -1, int flags = 0, GameObject src = null)
+        /// <summary>Outer PlayerData.TakeHealth calls so far, in every mode (hurt.special reports whether a hit reached
+        /// TakeHealth at all: Lucky Dice, Warding Bell, a parry or i-frames stop it before).</summary>
+        internal static int TakeHealthCalls;
+
+        private static void Push(string kind, int amount, int hazard = -1, int flags = 0, GameObject src = null, int tag = -1)
         {
             if (causeDepth < Causes.Length)
-                Causes[causeDepth] = new Cause { Kind = kind, Amount = amount, Hazard = hazard, Flags = flags, Src = src };
+                Causes[causeDepth] = new Cause { Kind = kind, Amount = amount, Hazard = hazard, Flags = flags, Tag = tag, Src = src };
             causeDepth++;
         }
 
@@ -174,7 +183,7 @@ namespace SsOracle.Guards
         private static void FrostPrefix(int damageAmount) => Push("frost", damageAmount);
         private static void ChompPrefix() => Push("chomp", 1);
         private static void TagPrefix(DamageTag.DamageTagInstance damageTagInstance) =>
-            Push("tag", damageTagInstance.amount, -1, (int)damageTagInstance.specialDamageType);
+            Push("tag", damageTagInstance.amount, tag: (int)damageTagInstance.specialDamageType);
         private static void CriticalPrefix() => Push("critical", 0);
         private static void HeroTakeHealthPrefix(int amount) => Push("hero_take_health", amount);
         private static void DeathCatchPrefix() => Push("death_catch", 0);
@@ -197,6 +206,7 @@ namespace SsOracle.Guards
         {
             // The blue-health overflow recurses into TakeHealth; the outer call already judged the whole hit.
             if (takeHealthDepth++ > 0) return true;
+            TakeHealthCalls++;
             var mode = GuardState.Lethal;
             if (mode == LethalMode.Off) return true;
 
@@ -222,6 +232,8 @@ namespace SsOracle.Guards
             d["prevent_death_cheat"] = preventDeath;
             d["net"] = 1;
             if (block && RestoreHealth(pd, null)) d["hp_restored"] = true;
+            // Observe mode lets the hit leave 0 HP; the watcher must not count that same zero-HP episode again.
+            if (!block && o.Health <= 0) net1ZeroPdId = RuntimeHelpers.GetHashCode(pd);
             Report("catastrophe", d, block);
             return !block;
         }
@@ -229,7 +241,9 @@ namespace SsOracle.Guards
         /// <summary>
         /// Leaves Hornet at &gt;= 1 HP after a veto (a hit can find her at 0 HP after a TakeQuickDamage or an FSM write).
         /// Writes GameManager's PlayerData and, if it is a different object, the hero's cached copy, which is the one
-        /// TakeDamage/DoSpecialDamage test for 0 right after TakeHealth. Never touches disablePause (m0:N43).
+        /// TakeDamage/DoSpecialDamage test for 0 right after TakeHealth. Never touches disablePause (m0:N43). A restore
+        /// queues a HUD refresh (HealthUpdate) for the monitor: the HUD may already show the 0 HP (DoSpecialDamage sends
+        /// HealthUpdate before it starts Die), and HudProbe labels must agree with PlayerData.
         /// </summary>
         private static bool RestoreHealth(PlayerData pd, HeroController hero)
         {
@@ -237,8 +251,13 @@ namespace SsOracle.Guards
             if (pd != null && pd.health < 1) { pd.health = 1; restored = true; }
             var cached = hero != null ? hero.playerData : null;
             if (cached != null && !ReferenceEquals(cached, pd) && cached.health < 1) { cached.health = 1; restored = true; }
+            if (restored) healthUpdatePending = true;
             return restored;
         }
+
+        /// <summary>Set by RestoreHealth; the monitor sends EventRegisterEvents.HealthUpdate at the end of the frame's
+        /// Tick (outside the game's damage code, so no event is sent from inside a hook).</summary>
+        private static bool healthUpdatePending;
 
         private static void TakeHealthPostfix()
         {
@@ -294,7 +313,8 @@ namespace SsOracle.Guards
             Report("would_die", d, block);
             if (!block) return true;
             Core.Plugin.Log.LogError("GameManager.PlayerDead reached while LethalBlock blocks: HeroController.Die was not stopped. " +
-                                     "Skipped the death save; the hero stays dead until a savestate load or slot.restore.");
+                                     "Skipped the death save (later saves are vetoed while permadeathMode is Dead); " +
+                                     "the hero stays dead until a savestate load or slot.restore.");
             __result = new NoOpRoutine();
             return false;
         }
@@ -313,6 +333,8 @@ namespace SsOracle.Guards
         private static PermadeathModes lastPdMode;
         private static bool zeroSeen, deadSeen;
         private static int maskRefreshFrame;
+        /// <summary>PlayerData (identity hash) that net 1 already reported reaching 0 HP (observe mode); 0 = none.</summary>
+        private static int net1ZeroPdId;
 
         /// <summary>Main thread, once per frame (GuardsMonitor.LateUpdate). A handful of field reads.</summary>
         internal static void Tick(GameManager gm, PlayerData pd, HeroController hero)
@@ -322,6 +344,8 @@ namespace SsOracle.Guards
             {
                 lastPdId = 0;
                 zeroSeen = deadSeen = false;
+                net1ZeroPdId = 0;
+                healthUpdatePending = false;
                 maskKnown = false;
                 return;
             }
@@ -337,6 +361,8 @@ namespace SsOracle.Guards
             if (hero == null)
             {
                 zeroSeen = deadSeen = false;
+                net1ZeroPdId = 0;
+                healthUpdatePending = false;
                 maskKnown = false;
                 return;
             }
@@ -353,16 +379,27 @@ namespace SsOracle.Guards
                 if (!zeroSeen)
                 {
                     zeroSeen = true;
-                    var d = Describe("health_zero_observed", pd);
-                    d["net"] = "monitor";
-                    if (block) d["hp_restored"] = true;
-                    Report("catastrophe", d, block, withStack: false);
+                    // One zero-HP episode is one catastrophe: skip it when net 1 already reported the hit that caused it.
+                    if (net1ZeroPdId != id)
+                    {
+                        var d = Describe("health_zero_observed", pd);
+                        d["net"] = "monitor";
+                        if (block) d["hp_restored"] = true;
+                        Report("catastrophe", d, block, withStack: false);
+                    }
                 }
-                if (block) pd.health = 1;
+                if (block) RestoreHealth(pd, hero);
             }
             else if (pd.health > 0)
             {
                 zeroSeen = false;
+                net1ZeroPdId = 0;
+            }
+
+            if (healthUpdatePending)
+            {
+                healthUpdatePending = false;
+                EventRegister.SendEvent(EventRegisterEvents.HealthUpdate);
             }
 
             if (Time.frameCount - maskRefreshFrame >= 30)
@@ -371,7 +408,10 @@ namespace SsOracle.Guards
 
         private static void OnPermadeathDead(PlayerData pd)
         {
-            Core.Plugin.Log.LogError("permadeathMode went On -> Dead in memory (Steel Soul death). Any later save writes a DEFEATED slot.");
+            Core.Plugin.Log.LogError("permadeathMode went On -> Dead in memory (Steel Soul death). " +
+                                     (GuardState.Lethal == LethalMode.Block
+                                         ? "LethalBlock blocks: every later save is vetoed (save_vetoed) while it stays Dead."
+                                         : "Any later save writes a DEFEATED slot."));
             Export.FrameExporter.Emit("permadeath_dead", new Dictionary<string, object> { ["hp"] = pd.health });
             if (GuardState.Lethal != LethalMode.Off && Time.frameCount - lastDieReportFrame > 30)
             {
@@ -398,7 +438,8 @@ namespace SsOracle.Guards
                 d["path"] = path;
                 d["dmg"] = c.Amount;
                 if (c.Hazard >= 0) d["hazard"] = ((HazardType)c.Hazard).ToString();
-                if (c.Flags != 0) d["flags"] = c.Flags;
+                if (c.Flags != 0) d["flags"] = c.Flags;   // DamagePropertyFlags only
+                if (c.Tag >= 0) d["tag_type"] = ((DamageTag.SpecialDamageTypes)c.Tag).ToString();
                 if (c.Src != null) d["src"] = c.Src.name;
             }
             else
