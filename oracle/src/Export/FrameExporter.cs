@@ -33,12 +33,21 @@ namespace SsOracle.Export
             Exporters.Add(exporter);
         }
 
-        /// <summary>Any thread (usually a Harmony hook on the main thread): record an event for this frame's STATE.</summary>
+        /// <summary>Time.frameCount as of the last main-thread Update, for events emitted off the main thread.</summary>
+        private static volatile int lastUpdateFrame;
+        private static readonly int MainThreadId = System.Threading.Thread.CurrentThread.ManagedThreadId;
+
+        /// <summary>Any thread (usually a Harmony hook on the main thread): record an event for this frame's STATE.
+        /// Time.frameCount is only valid on the main thread (hooks in FixedUpdate run before this frame's Update, so a
+        /// cached value would be one frame behind there); other threads get the last Update's frame.</summary>
         public static void Emit(string kind, Dictionary<string, object> data = null)
         {
-            var ev = new FrameEvent { Kind = kind, Frame = Time.frameCount, Qpc = Stopwatch.GetTimestamp(), Data = data };
+            var frame = System.Threading.Thread.CurrentThread.ManagedThreadId == MainThreadId ? Time.frameCount : lastUpdateFrame;
+            var ev = new FrameEvent { Kind = kind, Frame = frame, Qpc = Stopwatch.GetTimestamp(), Data = data };
             lock (EventLock) pendingEvents.Add(ev);
         }
+
+        private void Update() => lastUpdateFrame = Time.frameCount;
 
         private void Start() => StartCoroutine(EndOfFrameLoop());
 

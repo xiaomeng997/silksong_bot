@@ -146,7 +146,7 @@ class OracleLink:
         """Hold exactly `buttons` from target_frame on (for hold_frames frames if > 0)."""
         self._send(MsgType.ACTION, msgpack.packb([target_frame, buttons, hold_frames, ack_seq]))
 
-    def rpc_async(self, name: str, **args) -> Future:
+    def rpc_async(self, name: str, /, **args) -> Future:
         fut: Future = Future()
         with self._send_lock:
             self._rpc_id += 1
@@ -155,7 +155,7 @@ class OracleLink:
         self._send(MsgType.RPC_REQ, msgpack.packb({"id": rid, "name": name, "args": args}))
         return fut
 
-    def rpc(self, name: str, timeout_s: float = 10.0, **args):
+    def rpc(self, name: str, /, timeout_s: float = 10.0, **args):
         return self.rpc_async(name, **args).result(timeout_s)
 
     def close(self) -> None:
