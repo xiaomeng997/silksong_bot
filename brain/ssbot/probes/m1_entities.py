@@ -23,7 +23,7 @@ import msgpack
 from ssbot.ipc import ents
 from ssbot.ipc.framing import HEADER, MsgType, mask
 from ssbot.ipc.oracle_link import OracleLink
-from ssbot.probes.common import in_gameplay, load_slot, stand_up
+from ssbot.probes.common import load_slot, stand_up
 
 PLAYING = 4  # GlobalEnums.GameState
 TARGET_P50_US, BUDGET_P99_US = 150, 1000  # package target (ents alone) and C14 p99 budget
@@ -174,14 +174,15 @@ def main() -> int:
     if "ents" not in s:
         print('STATE has no "ents": is Entities.EntitiesModule.Install in Modules.InstallAll?')
         return 1
-    if not in_gameplay(s):
+    if s["game"] is None or s["game"]["gs"] != PLAYING:
         if args.load:
             load_slot(link, 1)
         else:
             print("waiting for gameplay (load a save; --load does it from the title screen) ...")
-            link.wait_state(in_gameplay, timeout_s=180)
+            link.wait_state(lambda s: s["game"]["gs"] == PLAYING, timeout_s=180)
     if args.walk > 0:
-        stand_up(link)
+        if (link.state.get("pause") or {}).get("bench"):
+            stand_up(link)  # a loaded save sits on the bench: any direction gets Hornet up
         walk(link, "right", args.walk)
 
     rec = Recorder()

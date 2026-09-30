@@ -191,3 +191,11 @@
 - **危险物重生**：TakeDamage 在 HazardRespawn 开始后 0.5 s 内会把环境伤害变成又一次重生（不扣血）；危险物死亡期间 `CanTakeDamage()` 为假，伤害被直接丢弃。测试伤害前要等重生结束。
 - **掉线看门狗**：只有"持续控制（hold 0）且有键按下"的 ACTION 才进入驱动状态；一次性点按和纯释放都不会，否则探针结束后会被自动按暂停。
 - 进程第一次构建 STATE 约 141 ms（JIT），只在启动时的标题画面出现一次。
+
+## M1 soak 准备中发现的问题（2026-09-30）
+
+- **多实例同时启动的竞争**：两个实例同时启动时，BepInEx 预加载器都在类型初始化里写 `BepInEx\config\BepInEx.cfg`（`ConfigFile.Save`），输的一方出现文件共享冲突，预加载器崩溃（游戏根目录 `preloader_*.log`），该实例**以原版运行**：没有 oracle，也没有存档重定向。启动器现在逐个启动，每个等上一个的 oracle 开始监听。
+- **AppConfig.ini**：游戏的 `ConfigManager.LoadConfig` 每次启动都读一次 `persistentDataPath\AppConfig.ini` 并原样写回（`[Accessibility] ReducedCameraShake/ReducedControllerRumble`）。它不经过 `DesktopPlatform`，所以存档重定向拦不住：M0 以来每次启动训练副本都改写了真实 `LocalLow\Team Cherry\Hollow Knight Silksong\AppConfig.ini`（内容不变）。SaveRedirect 现在把 `LoadConfig/SaveConfig` 里对 `_path` 的读取换成 `<沙盒>\AppConfig.ini`，已在游戏内验证真实文件不再被触碰。
+- **DebugMod 数据目录**：DebugMod 把 `Settings.json`、`Savestates 1.0`、`Savestate Packs` 放在 `persistentDataPath\DebugModData`（真实 LocalLow）。它在 SsOracle 之前加载，Awake 里的 `CreateDirectory` 在首次启动时（9-29 21:59）已在真实目录建了空文件夹。SaveRedirect 现在把 DebugMod 里所有读取这三个路径字段的方法（13 个）转到 `<沙盒>\DebugModData`；savestate 读取照常（p50 327 ms）。
+- **一个原版运行的实例就足以写真实目录**：冒烟测试中预加载器失败的那个实例在标题画面就改写了 `AppConfig.ini`。训练副本没有"模组没加载就拒绝运行"的保护；目前靠启动器等端口就绪（超时则杀掉）兜底。
+- **WHEA**：System 日志里 10 条硬件纠错（ID 2/19）全部在 9-02（BIOS 1836 之前）；9-29 20:46–21:13 的 3 条是 ID 3 信息级（重启时记录）。soak 只看运行期间新出现的 1–3 级事件。
