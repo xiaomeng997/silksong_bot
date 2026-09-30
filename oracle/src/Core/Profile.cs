@@ -269,6 +269,10 @@ namespace SsOracle.Core
             }
             var dmg = t.GetField("extraNailDamage", all);
             if (dmg != null && dmg.FieldType == typeof(int) && (int)dmg.GetValue(null) != 0) on.Add("extraNailDamage");
+            // The hitbox overlay (hitbox.show, or DebugMod's own bind) draws over the game image: vision would see it.
+            var settings = t.GetProperty("settings", all)?.GetValue(null, null);
+            var show = settings?.GetType().GetProperty("ShowHitBoxes");
+            if (show != null && show.PropertyType == typeof(int) && (int)show.GetValue(settings, null) != 0) on.Add("ShowHitBoxes");
             return on;
         }
     }

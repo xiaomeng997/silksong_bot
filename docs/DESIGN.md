@@ -384,6 +384,12 @@ FrameLabel {                                   # 字段来源见 m0 §3.1
 
 **每个构建做一次校准：** 打开 DebugMod 碰撞箱渲染 2,000 帧，与我们的投影比较。要求平均 IoU ≥ 0.95、顶点误差 ≤ 1.5 px。这些帧用完即删。
 
+M1 实现（`brain/ssbot/probes/m1_projection.py` + `ssbot/tools/projection_check.py`；oracle RPC `hitbox.show`、`projection.sample`，见 `oracle/src/Train/ProjectionSample.cs`）：
+- 顶点误差：`projection.sample` 在主相机 `onPreRender`（与 STATE V/P 同一时刻）对同一帧的碰撞体顶点调用 Unity 自己的 `WorldToScreenPoint`，与 projector 在该帧 STATE `cam` 上的结果比较，门槛 p99 ≤ 1.5 px。
+- IoU：按颜色找出截图中 DebugMod 的线（只在它报告画线的位置附近找），填充成区域，与 oracle 标签多边形（TERRAIN 实体/危险物按碰撞体 id、STATE ents 按完全相同的轮廓、英雄 box）逐个比较；门槛取更严的 **p5 ≥ 0.95**。只比较截图前后几帧都静止的多边形（截图对应哪一帧只能确定到 ±1–2 帧）。
+- DebugMod 的画法（1.1.2）决定了比较方式：在 `OnGUI` 里用 `Camera.main` 投影，此时 `CameraShakeManager` 已撤掉震屏偏移，所以震屏时它的框与精灵错开一个震屏量，比较时要把 STATE 的渲染时 V 换回无震屏的位姿；每个顶点取整到整像素；圆画成 16 边以上的折线（半径 < 64 px 时是 16 边形，对真圆 IoU 0.974）；不画 box 的 `edgeRadius`；相机渲染到缩小的 RenderTexture（CameraRenderScaled）时它按纹理像素画，框会错位。`ShowHitBoxes` 的改动只在本次运行内有效：DebugMod 只在 `Awake` 里从真实 LocalLow 的 `Settings.json` 读一次设置（早于 SaveRedirect 生效），之后的保存写进沙盒副本且不会被读回，重启即恢复 LocalLow 里的值。但重启前开着的碰撞箱会画进之后的每张截图，所以探针结束时恢复原值（中途崩溃时用 `--off`，只在 TRAIN 配置下可用，或直接重启实例）；非 TRAIN 配置把 `ShowHitBoxes` ≠ 0 当作违规。
+- 门槛只统计标签形状与 DebugMod 所画形状一致的多边形（世界坐标偏差 ≤ 0.001）。英雄 box 是 `Collider2D.bounds`（可能含 Box2D 的接触皮肤），ents 的 box 含 `edgeRadius`：这类标签单独报告偏差、IoU 与 IoU(DebugMod, oracle)，不计入门槛，以免把标签定义差异当成投影误差。可比较的多边形少于 10 个（或没有 DebugMod）时判 FAIL。
+
 #### 3.1.4 帧与标签对齐（C4）
 
 - oracle 记录 `qpc_eof`，WGC 给出 `SystemRelativeTime`（同为 QPC 时钟）。P8 发现 `Frame.timespan` 比回调到达时刻晚约 7–10 ms（像是下一次刷新的目标时间），不能当作帧产生时刻 [probe:P8]；对齐前先用下面的互相关标定这一偏移。
