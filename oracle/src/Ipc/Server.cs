@@ -13,6 +13,7 @@ namespace SsOracle.Ipc
     ///   own on|off         whether injected keys replace the physical keyboard
     ///   state              latest per-frame snapshot (JSON)
     ///   constants          engine timing settings + every primitive HeroController field (P11)
+    ///   pdget f / pdset f v  read / write a primitive PlayerData field (training-only probe setup)
     /// Every command gets one reply line: "ok", "err ...", or the JSON.
     /// </summary>
     internal sealed class Server
@@ -97,6 +98,12 @@ namespace SsOracle.Ipc
                     return Export.StateProbe.Latest ?? "{}";
                 case "constants":
                     return Core.MainThread.Run(Export.ConstantsDump.Build);
+                case "pdget":
+                    return Core.MainThread.Run(() => Train.PlayerDataEdit.Get(arg));
+                case "pdset":
+                    var parts = arg.Split(new[] { ' ' }, 2);
+                    if (parts.Length != 2) return "err pdset takes <field> <value>";
+                    return Core.MainThread.Run(() => Train.PlayerDataEdit.Set(parts[0], parts[1]));
                 default:
                     return "err unknown command";
             }

@@ -50,6 +50,7 @@ namespace SsOracle.Core
             if (!loggedOriginals && InControl.InputManager.IsSetup)
             {
                 loggedOriginals = true;
+                Guards.SaveRedirect.Verify();
                 Plugin.Log.LogInfo($"serialized input settings: InControl.SuspendInBackground={InControl.InputManager.SuspendInBackground}, " +
                                    $"InputSystem.updateMode={InputSystem.settings.updateMode}, runInBackground(before)={Application.runInBackground}");
             }

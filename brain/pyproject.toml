@@ -4,6 +4,7 @@ version = "0.0.1"
 description = "Silksong Steel Soul + Speedrunner bot (brain process)"
 requires-python = ">=3.12"
 dependencies = [
+    "cryptography>=50.0.1",
     "numpy>=2.1",
     "windows-capture>=2.0.1",
 ]

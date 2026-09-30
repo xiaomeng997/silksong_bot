@@ -35,6 +35,7 @@ namespace SsOracle.Core
             }
 
             var harmony = new Harmony(Guid);
+            Guards.SaveRedirect.Install(harmony);
             TrainingEnvironment.Install(gameObject, harmony);
             Input.KeyboardInjector.Install();
             gameObject.AddComponent<MainThread>();

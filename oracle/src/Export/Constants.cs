@@ -25,7 +25,7 @@ namespace SsOracle.Export
             sb.Append(",\"screen\":\"").Append(Screen.width).Append('x').Append(Screen.height).Append(' ').Append(Screen.fullScreenMode).Append('"');
             sb.Append(",\"inputUpdateMode\":\"").Append(UnityEngine.InputSystem.InputSystem.settings.updateMode).Append('"');
             sb.Append(",\"defaultButtonPressPoint\":").Append(UnityEngine.InputSystem.InputSystem.settings.defaultButtonPressPoint.ToString("R", inv));
-            var icm = UnityEngine.Object.FindObjectOfType<InControl.InControlManager>();
+            var icm = UnityEngine.Object.FindAnyObjectByType<InControl.InControlManager>();
             if (icm != null)
                 sb.Append(",\"inControlUpdateMode\":\"").Append(icm.updateMode).Append('"');
             sb.Append('}');

@@ -19,6 +19,30 @@
 - 存档目录：`DesktopPlatform.Awake` 在没有在线子系统时使用 `persistentDataPath\default\`，与真实的 `<SteamID>\` 目录分开。实测"保存并退出"只写了 `default\user1.dat`、`default\shared.dat`，真实目录未被写入。
 - **设置污染（新发现）：** Unity 退出时会把启动参数 `-screen-width/-screen-height/-screen-fullscreen` 写回 `HKCU\Software\Team Cherry\Hollow Knight Silksong`，所有副本共用，会改掉你自己玩时的分辨率。处理：`scripts/launch_train.ps1` 启动前导出该键，退出后删除并导入快照。实测还原后与原值 0 处差异。
 
+## P5 原版最终副本的成就 — 通过（2026-09-29）
+
+- 环境：`C:\ssbot\game\final`（原版文件 + `steam_appid.txt`=1030300，没有加载器），Steam 客户端在线。`Player.log`：`Steam initializing` → `Steam logged in as …` → `Selected online subsystem SteamOnlineSubsystem` → `Steam stats received.`。
+- 准备：原存档（骸底镇，0 念珠）在训练副本沙盒里读档，用 SsOracle `pdset geo 1000` 加念珠后保存退出；再把这个 `user2.dat` 放进真实目录 `<AccountID>\` 的 2 号槽。
+- 操作（SendInput，每一步截图）：读 2 号槽 → 按住 → 4.5 s 走到佩珀（Pebb）旁 → 上（交谈）→ Z 翻对话（首次见面要 4 次）→ 商店第一项"磁石胸针"120 → Z → 确认框（**默认"是"**）→ Z → "获得工具"提示 → Z 关闭。
+- 结果：关闭提示后 `Player.log` 出现 `Pushing achievement FIRST_TOOL` 和 `Steam achievement FIRST_TOOL (0/0) upload complete`。**原版固定副本 + `steam_appid.txt` 可以正常解锁 Steam 成就。** 成就在提示关闭时发放（商店购买走排队发放，不是购买那一刻）。本地 `shared.dat` 同时写入 `FIRST_TOOL=1`（m0:N26）。
+- 钢铁之魂解锁码：主菜单 → 额外内容 → 上下上下左右左右（每键按 80 ms、间隔 150 ms）。页面没有任何反馈；解码 `<AccountID>\shared.dat` 得到 `RecPermadeathMode=1`。
+- 收尾：2 号槽的三个文件已移到 `C:\ssbot\backups\p5_slot2_*`，真实目录只剩用户自己的 1 号槽（未改动）。
+- 教训（都已在设计中有对应条目，这里是实测）：
+  - 在商店里按 Esc 不会暂停；盲按的"下、下、回车"只移动了商店光标。每次 Submit 前必须读屏幕状态。
+  - 在主菜单打开后才放进去的存档不会被存档选择界面看到。选中该槽时，游戏把它当空槽，静默开始了一局**普通模式新游戏**（m0:N30 的实例）。当时立即结束了进程，存档文件未被覆盖。MenuDriver 必须在每次进入存档选择界面时读槽位内容再操作。
+  - 从商店退出后立刻按 Esc，按键会被丢弃（关闭动画期间不可暂停，m0:N12）。
+
+## 存档重定向（P9 ②）— 通过
+
+- `oracle/src/Guards/SaveRedirect.cs`：Harmony 转译补丁把 `DesktopPlatform.Awake` 里唯一一次 `Application.persistentDataPath` 调用换成 `C:\ssbot\sandbox\saves\<实例号>`（`-ssbot-instance N`，默认 0）。于是 user*.dat、`.bak*`、Restore_Points、shared.dat 都进入沙盒。
+- 实测：训练副本从沙盒读到 1 号槽；真实的 `persistentDataPath\default` 已删除且保持不存在。以后这个目录一旦出现，就说明最终副本的 Steam 初始化失败了（m0:N28），应当报警。
+- 备份编号实测为 `.bak1`、`.bak2` 递增（m0:C13）。
+- 未重定向：DebugMod 把自己的设置和存档点放在真实的 `LocalLow\...\DebugModData\`，不含游戏存档。默认打开的 DebugMod 界面会遮住大半画面，采集视觉数据前要在它的 `Settings.json` 里关掉。
+
+## 存档离线解码
+
+`brain/ssbot/tools/savefile.py`（只读）：BinaryFormatter 字符串 → Base64 → AES-256-ECB-PKCS7 → JSON（m0:N33）。已验证 user*.dat（`playerData` 1311 个字段加 `sceneData`）和 shared.dat（`pairs` 列表）。
+
 ## P4 SendInput — 通过（前台）
 
 - 游戏在前台时，扫描码 SendInput 能驱动菜单（回车确认）和游戏：按住"右"1.5 s，Hornet 从 x=238.78 移到 249.84。
