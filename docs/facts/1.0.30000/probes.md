@@ -182,6 +182,7 @@
 | m1_guards | 35 过 / 1 跳过（未装碎面具） | 10 种致死路径全部拦截；SaveSuppression 仍把计时写入 playTime |
 | m1_harness | 全过 | 存档状态重置 p50 317 ms、最大 345 ms；270 帧流式点按零丢失；掉线看门狗松键 + 暂停 |
 | m1_record | 交付率 100 %（3606/3606） | STATE 约 3 KB/帧，zstd 46 倍，0.35 MB/分钟 |
+| m1_record 60 分钟（M1 验收） | **交付率 100 %（216007/216007），0 丢帧** | 60.00 fps；构建 p50 81 µs、p99 123 µs、最大 417 µs；EOF→大脑 p50 0.15 ms、最大 0.60 ms；20.3 MB/小时。Hornet 在 Bonetown 静止，敌人与 FSM 负载低 |
 
 集成中发现并修正的事实：
 - **HUD 面具**：`health_display` 对象自身的 MeshRenderer 是禁用的，画面上的面具是子对象 `Idle`（护符状态下是 `Idle Bound` / `Idle Hive`）。超出血量上限的面具对象仍是激活的，FSM 状态为 `Inactive`，不绘制。
