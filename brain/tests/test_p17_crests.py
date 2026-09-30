@@ -1,6 +1,7 @@
 """Offline checks of the P17 crest probe: the pure table/extent helpers and the equip/restore flow against a fake link
 (the probe itself needs the running game)."""
 import copy
+from concurrent.futures import Future
 
 import msgpack
 import pytest
@@ -318,17 +319,22 @@ class FakeGame:
         return {"crest": name, "unlocked": newly, "config": self.config_of(name) or "Default"}
 
 
-class FakeLink:
-    """breaks_at(name, args): from the first RPC it matches on, every RPC raises what OracleLink._send's sendall does
-    on a dead socket."""
+def connection_reset():
+    return ConnectionResetError(10054, "An existing connection was forcibly closed by the remote host")
 
-    def __init__(self, game, breaks_at=None):
+
+class FakeLink:
+    """breaks_at(name, args): from the first RPC it matches on, every RPC raises error(): by default what
+    OracleLink._send's sendall does on a dead socket; error=TimeoutError is a hung oracle (OracleLink.rpc's
+    Future.result raises a TimeoutError without text)."""
+
+    def __init__(self, game, breaks_at=None, error=connection_reset):
         self.game = game
         self.hello = {"game": "1.0.30000", "plugin": "0.1.0", "rpcs": list(p17.NEEDED_RPCS)}
         self.frame = 100
         self.raw = []
         self.closed = False
-        self.breaks_at, self.broken = breaks_at, False
+        self.breaks_at, self.broken, self.error = breaks_at, False, error
 
     def subscribe_raw(self, fn):
         self.raw.append(fn)
@@ -349,7 +355,7 @@ class FakeLink:
     def rpc(self, name, /, timeout_s=10.0, **args):
         self.broken = self.broken or (self.breaks_at is not None and self.breaks_at(name, args))
         if self.broken:
-            raise ConnectionResetError(10054, "An existing connection was forcibly closed by the remote host")
+            raise self.error()
         if name == "crest.equip" and args.get("name") == "Hunter_v2":
             self.feed([("hunter_meter", {"reason": "equips_changed", "from": 4, "to": 0, "crest": "Hunter"})])
         return self.game.rpc(name, args)
@@ -360,6 +366,32 @@ class FakeLink:
 
 def guard_sets(game):
     return [a["save_suppression"] for n, a in game.calls if n == "guards.set"]
+
+
+def open_inventory(link):
+    """The inventory is open in every STATE: run() refuses before it changes anything."""
+    wait_state = link.wait_state
+
+    def inventory_open(pred=lambda s: True, timeout_s=10.0, newer_than=None):
+        s = wait_state(pred, timeout_s, newer_than)
+        s["pause"]["inv"] = True
+        return s
+
+    link.wait_state = inventory_open
+
+
+def lose_reply(link, rpc_name, applied):
+    """rpc_name gets no reply: OracleLink.rpc raises a TimeoutError without text. applied: the oracle ran it anyway."""
+    rpc = link.rpc
+
+    def lost(name, /, timeout_s=10.0, **args):
+        if name != rpc_name:
+            return rpc(name, timeout_s=timeout_s, **args)
+        if applied:
+            rpc(name, timeout_s=timeout_s, **args)
+        raise TimeoutError()
+
+    link.rpc = lost
 
 
 def test_run_dumps_each_crest_and_restores():
@@ -450,6 +482,34 @@ def test_main_says_save_suppression_stays_on(monkeypatch, tmp_path, capsys):
     text = capsys.readouterr().out
     assert p17.SAVE_KEPT.format(instance=0) in text and "[PASS]" not in text
     assert link.closed and out.exists() and game.save_suppression is True
+    # The failures and the guidance come before the write.
+    assert text.index("[FAIL] crest.equip restore failed") < text.index(p17.SAVE_KEPT.format(instance=0))
+    assert text.index(p17.SAVE_KEPT.format(instance=0)) < text.index(f"wrote {out}")
+
+
+def test_main_prints_save_kept_when_the_output_cannot_be_written(monkeypatch, tmp_path, capsys):
+    game = FakeGame(refuse_restore=True)
+    link = FakeLink(game)
+    monkeypatch.setattr(p17, "OracleLink", lambda instance: link)
+    # --out is a directory: the write fails, after the failures and SAVE_KEPT, and without a traceback.
+    assert p17.main(["--instance", "1", "--crests", "Reaper", "--out", str(tmp_path)]) == 1
+    captured = capsys.readouterr()
+    assert "[FAIL] crest.equip restore failed: InvalidOperationException: close the inventory first" in captured.out
+    assert p17.SAVE_KEPT.format(instance=1) in captured.out and "wrote" not in captured.out
+    assert f"[FAIL] could not write {tmp_path}: " in captured.err
+    assert link.closed and game.save_suppression is True
+
+    # No --out and no repo root: the same failures and guidance, then "pass --out".
+    game = FakeGame(refuse_restore=True)
+    link = FakeLink(game)
+    monkeypatch.setattr(p17, "OracleLink", lambda instance: link)
+    monkeypatch.setattr(p17, "find_repo_root", lambda: None)
+    assert p17.main(["--crests", "Reaper"]) == 2
+    captured = capsys.readouterr()
+    assert "[FAIL] restore: crest is Reaper, was Hunter" in captured.out
+    assert p17.SAVE_KEPT.format(instance=0) in captured.out and "wrote" not in captured.out
+    assert "repo root not found; pass --out" in captured.err
+    assert link.closed and game.save_suppression is True
 
 
 def test_run_accepts_silk_that_idle_regen_added():
@@ -528,23 +588,101 @@ def test_main_prints_save_kept_on_a_broken_link(monkeypatch, tmp_path, capsys):
     assert link.closed and not out_path.exists()
 
 
-def test_main_asks_the_game_before_printing_save_kept(monkeypatch, tmp_path, capsys):
-    """An early failure on a working link (the inventory is open) left SaveSuppression off: no SAVE_KEPT."""
+def test_main_no_save_kept_when_run_changed_nothing(monkeypatch, tmp_path, capsys):
+    """A failure before run() sends guards.set or crest.equip leaves the save as it was: no SAVE_KEPT, whatever
+    SaveSuppression is."""
+    for save_suppression in (False, True):    # True: the user had it on before the probe
+        game = FakeGame()
+        game.save_suppression = save_suppression
+        link = FakeLink(game)
+        open_inventory(link)
+        monkeypatch.setattr(p17, "OracleLink", lambda instance: link)
+        assert p17.main(["--crests", "Reaper", "--out", str(tmp_path / "crests.json")]) == 1
+        err = capsys.readouterr().err
+        assert "[FAIL] the inventory is open" in err and "SaveSuppression" not in err
+        assert game.save_suppression is save_suppression and game.calls == []
+
+    # The link closed right after HELLO: wait_state gives up at once, and the game cannot be asked any more.
     game = FakeGame()
-    link = FakeLink(game)
-    wait_state = link.wait_state
+    link = FakeLink(game, breaks_at=lambda name, args: True)
 
-    def inventory_open(pred=lambda s: True, timeout_s=10.0, newer_than=None):
-        s = wait_state(pred, timeout_s, newer_than)
-        s["pause"]["inv"] = True
-        return s
+    def closed(pred=lambda s: True, timeout_s=10.0, newer_than=None):
+        raise TimeoutError(f"state condition not met within {timeout_s}s (last frame -1)")
 
-    link.wait_state = inventory_open
+    link.wait_state = closed
     monkeypatch.setattr(p17, "OracleLink", lambda instance: link)
     assert p17.main(["--crests", "Reaper", "--out", str(tmp_path / "crests.json")]) == 1
-    err = capsys.readouterr().err
-    assert "[FAIL] the inventory is open" in err and "SaveSuppression" not in err
-    assert game.save_suppression is False and "crest.equip" not in [n for n, _ in game.calls]
+    assert capsys.readouterr().err == "[FAIL] state condition not met within 30.0s (last frame -1)\n"
+    assert link.closed and not (tmp_path / "crests.json").exists()
+
+    # A hung oracle before the first change: the timeout is named, and nothing more is said.
+    game = FakeGame()
+    link = FakeLink(game, breaks_at=lambda name, args: name == "gameplay.dump", error=TimeoutError)
+    monkeypatch.setattr(p17, "OracleLink", lambda instance: link)
+    assert p17.main(["--crests", "Reaper", "--out", str(tmp_path / "crests.json")]) == 1
+    assert capsys.readouterr().err == "[FAIL] TimeoutError\n"
+
+
+def test_main_asks_the_game_after_a_lost_guards_set_reply(monkeypatch, tmp_path, capsys):
+    """guards.set save_suppression=true got no reply: SAVE_KEPT only when the game says SaveSuppression is on."""
+    for applied in (True, False):
+        game = FakeGame()
+        link = FakeLink(game)
+        lose_reply(link, "guards.set", applied)
+        monkeypatch.setattr(p17, "OracleLink", lambda instance: link)
+        assert p17.main(["--crests", "Reaper", "--out", str(tmp_path / "crests.json")]) == 1
+        err = capsys.readouterr().err
+        assert err.startswith("[FAIL] TimeoutError\n")
+        assert (p17.SAVE_KEPT.format(instance=0) in err) is applied
+        assert game.save_suppression is applied and [n for n, _ in game.calls][-1] == "guards.get"
+        assert "crest.equip" not in [n for n, _ in game.calls]
+
+
+def test_run_progress_is_set_before_the_first_change():
+    progress = p17.Progress()
+    link = FakeLink(FakeGame())
+    open_inventory(link)
+    with pytest.raises(RuntimeError, match="the inventory is open"):
+        p17.run(link, ["Reaper"], unlock=True, log=lambda *_: None, progress=progress)
+    assert progress.changed is False
+
+    # The guards.set that turns SaveSuppression on counts even when it fails.
+    progress = p17.Progress()
+    link = FakeLink(FakeGame(), breaks_at=lambda name, args: name == "guards.set")
+    with pytest.raises(ConnectionResetError):
+        p17.run(link, ["Reaper"], unlock=True, log=lambda *_: None, progress=progress)
+    assert progress.changed is True
+
+    # SaveSuppression on already: no guards.set, so the first crest.equip is the first change.
+    game = FakeGame()
+    game.save_suppression = True
+    progress = p17.Progress()
+    link = FakeLink(game, breaks_at=lambda name, args: name == "crest.equip")
+    result, failures = p17.run(link, ["Reaper"], unlock=True, log=lambda *_: None, progress=progress)
+    assert progress.changed is True and result["save_suppression_kept"] is True and guard_sets(game) == []
+
+
+def test_err_text_names_the_type_when_the_text_is_empty():
+    with pytest.raises(TimeoutError) as info:
+        Future().result(timeout=0)            # what OracleLink.rpc raises when no reply comes
+    assert p17.err_text(info.value) == "TimeoutError"
+    assert p17.err_text(ConnectionError()) == "ConnectionError"
+    assert p17.err_text(OracleError("")) == "OracleError"
+    assert p17.err_text(TimeoutError("no reply to crest.dump")) == "no reply to crest.dump"
+    assert p17.err_text(OracleError("ArgumentException: no crest 'Nope'")) == "ArgumentException: no crest 'Nope'"
+    assert p17.err_text(ConnectionResetError(10054, "reset")) == "ConnectionResetError: [Errno 10054] reset"
+
+
+def test_run_names_timeouts_of_a_hung_oracle():
+    game = FakeGame()
+    link = FakeLink(game, breaks_at=lambda name, args: name == "crest.equip", error=TimeoutError)
+    result, failures = p17.run(link, ["Wanderer", "Reaper"], unlock=True, log=lambda *_: None)
+    # A timeout is no broken link: every crest is tried.
+    assert [result["crests"][n]["error"] for n in ("Wanderer", "Reaper")] == ["TimeoutError", "TimeoutError"]
+    assert failures == ["crest.equip restore failed: TimeoutError",
+                        "restore not verified: crest.dump failed: TimeoutError",
+                        "no crest besides the equipped one could be dumped"]
+    assert result["restore"] == {"error": "TimeoutError"} and result["save_suppression_kept"] is True
 
 
 def test_main_without_a_link(monkeypatch, capsys):

@@ -17,8 +17,9 @@ Steps:
      Only then does SaveSuppression go back as it was: a failed or unverified restore, or a broken link, leaves it on
      and says how to get back (restart the game, or Save & Quit, reload the save and run --save-suppression-off: the
      game turns SaveSuppression off only when it starts).
-  5. Writes --out (default docs/facts/<game>/crests.json) and prints the tables below. Exit code 1 when the restore
-     check fails or no crest besides the equipped one could be dumped.
+  5. Prints the tables below and any failures (with that guidance when SaveSuppression stays on), then writes --out
+     (default docs/facts/<game>/crests.json). Exit code 1 when the restore check fails or no crest besides the
+     equipped one could be dumped.
 
     cd brain
     ..\\scripts\\uv.cmd run python -m ssbot.probes.p17_crests [--instance 0] [--crests Wanderer,Reaper,Hunter_v2]
@@ -387,8 +388,12 @@ def link_broken(e: BaseException) -> bool:
 
 
 def err_text(e: BaseException) -> str:
-    """str(e), with the exception type for a broken link (an OSError's text alone can be empty)."""
-    return f"{type(e).__name__}: {e}" if link_broken(e) else str(e)
+    """str(e), with the exception type for a broken link, and the type alone when str(e) is empty (the TimeoutError
+    of an RPC that got no reply, OracleLink.rpc's Future.result, has no text)."""
+    text = str(e)
+    if not text:
+        return type(e).__name__
+    return f"{type(e).__name__}: {text}" if link_broken(e) else text
 
 
 def save_suppression_on(link) -> bool:
@@ -409,8 +414,19 @@ def save_suppression_off(link) -> int:
     return 0
 
 
-def run(link, crests: Sequence[str], unlock: bool, log=print) -> tuple[dict, list[str]]:
-    """Steps 1-4 of the module doc. Returns (result, failures)."""
+class Progress:
+    """How far run() got, for main when run() raises. changed is set just before the first RPC that can change the
+    game: the guards.set that turns SaveSuppression on, or (when it was on already) the first crest.equip. Set before
+    the RPC, so one whose reply was lost counts. Until then run() only read, and the save is as it was."""
+
+    def __init__(self) -> None:
+        self.changed = False
+
+
+def run(link, crests: Sequence[str], unlock: bool, log=print,
+        progress: Progress | None = None) -> tuple[dict, list[str]]:
+    """Steps 1-4 of the module doc. Returns (result, failures). progress (optional) records how far it got."""
+    progress = progress if progress is not None else Progress()
     failures: list[str] = []
     tail = EventTail(link)
     s = link.wait_state(in_gameplay, timeout_s=30.0)
@@ -439,6 +455,7 @@ def run(link, crests: Sequence[str], unlock: bool, log=print) -> tuple[dict, lis
     before = restore_state(cd0)
     ss0 = bool(link.rpc("guards.get").get("save_suppression"))
     if not ss0:
+        progress.changed = True
         link.rpc("guards.set", save_suppression=True)
     equipped_any = False
     try:
@@ -446,6 +463,7 @@ def run(link, crests: Sequence[str], unlock: bool, log=print) -> tuple[dict, lis
             entry: dict = {"equip": None, "error": None, "current": None, "slash": None}
             per[name] = entry
             try:
+                progress.changed = True
                 entry["equip"] = link.rpc("crest.equip", name=name, unlock=unlock)
                 equipped_any = True
                 settle(link)
@@ -508,6 +526,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     except (RuntimeError, OSError) as e:        # nothing has been changed in the game
         print(f"[FAIL] no link to the oracle of instance {a.instance}: {err_text(e)}", file=sys.stderr)
         return 2
+    progress = Progress()
     try:
         if a.save_suppression_off:
             return save_suppression_off(link)
@@ -515,27 +534,18 @@ def main(argv: Sequence[str] | None = None) -> int:
         if missing:
             print(f"the oracle does not offer {missing}: deploy an SsOracle built with the Crest module", file=sys.stderr)
             return 2
-        result, failures = run(link, [c.strip() for c in a.crests.split(",") if c.strip()], unlock=not a.no_unlock)
+        result, failures = run(link, [c.strip() for c in a.crests.split(",") if c.strip()], unlock=not a.no_unlock,
+                               progress=progress)
     except (RuntimeError, OSError) as e:   # OracleError is a RuntimeError; TimeoutError and a broken link are OSErrors
         print(f"[FAIL] {err_text(e)}", file=sys.stderr)
-        # run() turns every link error from its first crest.equip on into failures. One before that can still have left
-        # SaveSuppression on (a guards.set whose reply was lost), so ask the game, and assume it is on when that fails.
-        if not a.save_suppression_off and save_suppression_on(link):
+        # run() turns every link error from its first crest.equip on into failures, so this one came before it. If run()
+        # had sent the guards.set that turns SaveSuppression on, its reply may have been lost with SaveSuppression on:
+        # ask the game, and assume it is on when that fails. Before that run() only read, and the save is untouched.
+        if progress.changed and save_suppression_on(link):
             print(SAVE_KEPT.format(instance=a.instance), file=sys.stderr)
         return 1
     finally:
         link.close()
-
-    out = a.out
-    if out is None:
-        root = find_repo_root()
-        if root is None:
-            print("repo root not found; pass --out", file=sys.stderr)
-            return 2
-        out = root / "docs" / "facts" / (result.get("game") or "unknown") / "crests.json"
-    out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(json.dumps(rounded(result), indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
-    print(f"\nwrote {out}")
 
     tables = result["table"]
     print("\n== configs ==")
@@ -545,10 +555,26 @@ def main(argv: Sequence[str] | None = None) -> int:
     meter = [e for e in result["events"] if e["k"] == "hunter_meter"]
     if meter:
         print(f"\nhunter_meter events: {meter}")
+    # Failures and SAVE_KEPT come before the repo root lookup and the write, so neither can hide them.
     for f in failures:
         print(f"[FAIL] {f}")
     if result.get("save_suppression_kept"):
         print(SAVE_KEPT.format(instance=a.instance))
+
+    out = a.out
+    if out is None:
+        root = find_repo_root()
+        if root is None:
+            print("repo root not found; pass --out", file=sys.stderr)
+            return 2
+        out = root / "docs" / "facts" / (result.get("game") or "unknown") / "crests.json"
+    try:
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(json.dumps(rounded(result), indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
+    except OSError as e:
+        print(f"[FAIL] could not write {out}: {err_text(e)}", file=sys.stderr)
+        return 1
+    print(f"\nwrote {out}")
     if not failures:
         print("[PASS] crest, PreviousCrestID, temp flag, silk, unlocked set, saved slots and tool amounts restored")
     return 1 if failures else 0
