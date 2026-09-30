@@ -187,7 +187,7 @@
 集成中发现并修正的事实：
 - **HUD 面具**：`health_display` 对象自身的 MeshRenderer 是禁用的，画面上的面具是子对象 `Idle`（护符状态下是 `Idle Bound` / `Idle Hive`）。超出血量上限的面具对象仍是激活的，FSM 状态为 `Inactive`，不绘制。
 - **窗口截图**：WGC 抓的是含标题栏的可见窗口（1280×720 客户区在 1282×752 截图中的 (1, 31)）。oracle 的像素坐标都是客户区坐标，比较前先裁剪（`game_window.client_in_capture`）。
-- **时钟**：Unity Mono 的 `Stopwatch.GetTimestamp()` 在 Windows 上从进程内第一次调用开始计（`mono_100ns_ticks` 减去起始值），不能与大脑的 QueryPerformanceCounter 比较（差了约 5 小时）。STATE / 事件的 `q` 与 HELLO 的 `qpc_freq` 现在用原始 QPC（`Core.Qpc`），EOF→大脑 延迟 p50 0.09 ms、p99 0.23 ms。**此前录的人类会话（20260930_005501）的 `q` 是旧时钟，对齐视频时要另找偏移。**
+- **时钟**：Unity Mono 的 `Stopwatch.GetTimestamp()` 在 Windows 上从进程内第一次调用开始计（`mono_100ns_ticks` 减去起始值），不能与大脑的 QueryPerformanceCounter 比较（差了约 5 小时）。STATE / 事件的 `q` 与 HELLO 的 `qpc_freq` 现在用原始 QPC（`Core.Qpc`），EOF→大脑 延迟 p50 0.09 ms、p99 0.23 ms。**此前录的人类会话（20260930_005501）的 `q` 是旧时钟，对齐视频时要另找偏移。** 已离线找到（`record/align_legacy.py`，只读）：视频帧 i 显示满足 `q_ns + 偏移 ≤ pts_ns[i]` 的最新 STATE 帧，偏移 **−1939.9 ms**（`q_ns = q × 100`，pts 为 video.mkv 的容器时间戳）。依据：13 段游戏中定格（dt = 0）共 76 对"应静止"的视频帧全部静止、0 误判，相邻帧相位得分明显更低（128.8 对 86.6），帧级映射唯一；相位带 −1942.3 至 −1937.5 ms。实测规律：定格内部的帧与上一帧逐像素相同，定格后第一帧必变，但定格的**第一帧**仍会变（受击效果在上一帧渲染之后才生效）。
 - **危险物重生**：TakeDamage 在 HazardRespawn 开始后 0.5 s 内会把环境伤害变成又一次重生（不扣血）；危险物死亡期间 `CanTakeDamage()` 为假，伤害被直接丢弃。测试伤害前要等重生结束。
 - **掉线看门狗**：只有"持续控制（hold 0）且有键按下"的 ACTION 才进入驱动状态；一次性点按和纯释放都不会，否则探针结束后会被自动按暂停。
 - 进程第一次构建 STATE 约 141 ms（JIT），只在启动时的标题画面出现一次。

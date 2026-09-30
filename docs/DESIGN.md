@@ -389,6 +389,7 @@ FrameLabel {                                   # 字段来源见 m0 §3.1
 - oracle 记录 `qpc_eof`，WGC 给出 `SystemRelativeTime`（同为 QPC 时钟）。P8 发现 `Frame.timespan` 比回调到达时刻晚约 7–10 ms（像是下一次刷新的目标时间），不能当作帧产生时刻 [probe:P8]；对齐前先用下面的互相关标定这一偏移。
 - 每个捕获帧匹配"预测呈现时间 ≤ 捕获时间"的最新 `FrameLabel`。
 - 用像素配准得到的相机轨迹与 oracle 相机轨迹做互相关，**偏移为 0 的帧须 ≥ 99.5%**，否则整个会话丢弃。
+- M1 实现：`record/video.py`（WGC 窗口捕获 → 客户区灰度缩略图 + 每帧到达 QPC 与 SystemRelativeTime，zstd 分块，与 STATE 同一 episode 目录；`recorder record --video`）、`record/align.py`（半白化相位相关 + 上采样 DFT 亚像素配准；oracle 相机轨迹取自渲染时 V/P；滑窗拟合视差比例并逐帧判定偏移 k ∈ [−3, 3]；相机慢速/静止的帧和下一帧缺 STATE 的帧不计入；两种时钟各自标定 D）、`probes/m1_align.py`（驱动 Hornet 随机跑、停、冲刺、跳，录制后对齐）。合成数据上 D 落在真实可行区间内、陈旧帧逐帧检出；游戏内尚未运行。旧时钟会话（无相机导出）用 `record/align_legacy.py`：以定格（dt = 0）帧前后画面是否变化对齐帧，以标签重复/跳帧最少定相位。
 
 #### 3.1.5 标签产品
 
