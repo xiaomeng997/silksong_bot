@@ -177,6 +177,22 @@ namespace SsOracle.Core
             T("CustomSharedData"), M("CustomSharedData", "SetBool", "string", "bool"), M("CustomSharedData", "SetInt", "string", "int"),
             T("SaveRestoreHandler"), M("SaveRestoreHandler", "GetDirectoryName", "int"),
 
+            // --- abilities.grant / abilities.list (TRAIN): ability flags, silk skills, tools, crest slots (m0 §2.9) ---
+            F(PD, "hasWalljump"), F(PD, "hasBrolly"), F(PD, "hasHarpoonDash"), F(PD, "hasSuperJump"), F(PD, "hasChargeSlash"),
+            F(PD, "hasNeedolin"), F(PD, "hasNeedleThrow"), F(PD, "hasThreadSphere"), F(PD, "hasParry"), F(PD, "hasSilkCharge"),
+            F(PD, "hasSilkBomb"), F(PD, "hasSilkBossNeedle"), P(PD, "SilkSkillCost"), M(PD, "SetToolData", "string", "ToolItemsData+Data"),
+            M("ToolItemManager", "GetToolByName", "string"), M("ToolItemManager", "GetCrestByName", "string"), M("ToolItemManager", "GetAllTools"),
+            MAny("ToolItemManager", "SetEquippedTools"), M("ToolItemManager", "SendEquippedChangedEvent", "bool"),
+            M("ToolItemManager", "ReportAllBoundAttackToolsUpdated"), M("ToolItemManager", "GetToolStorageAmount", "ToolItem"),
+            M("ToolItemManager", "GetBoundAttackTool", "AttackToolBinding", "ToolEquippedReadSource"), M("ToolItemManager", "IsToolEquipped", "string"),
+            P("ToolItem", "Type"), P("ToolItem", "IsUnlockedNotHidden"), F("ToolItemsData+Data", "IsUnlocked"), F("ToolItemsData+Data", "IsHidden"),
+            T("ToolItemType"), T("AttackToolBinding"), T("ToolEquippedReadSource"), T("ToolItemTypeExtensions"),
+            T("ToolCrest"), P("ToolCrest", "Slots"), T("ToolCrest+SlotInfo"), F("ToolCrest+SlotInfo", "Type"),
+            F("ToolCrest+SlotInfo", "AttackBinding"), F("ToolCrest+SlotInfo", "IsLocked"),
+            T("ToolCrestsData+SlotData"), F("ToolCrestsData+SlotData", "EquippedTool"), F("ToolCrestsData+SlotData", "IsUnlocked"),
+            P(HC, "Config"), T("HeroControllerConfig"), P("HeroControllerConfig", "CanHarpoonDash"), P("HeroControllerConfig", "CanDoubleJump"),
+            P("HeroControllerConfig", "CanBrolly"), P("HeroControllerConfig", "CanNailCharge"), P("HeroControllerConfig", "CanPlayNeedolin"),
+
             // --- DebugMod 1.1.2 (soft: TRAIN only; savestates and cheat switches) ---
             T("DebugMod.DebugMod", soft: true), F("DebugMod.DebugMod", "infiniteHP", soft: true), F("DebugMod.DebugMod", "infiniteSilk", soft: true),
             F("DebugMod.DebugMod", "infiniteTools", soft: true), F("DebugMod.DebugMod", "playerInvincible", soft: true),

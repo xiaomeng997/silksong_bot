@@ -341,7 +341,7 @@ SilksongRL 已经有 socket 桥、`ButtonControl.get_isPressed` 注入（有缺�
   - **永不写** `timeSlowedCount`、`ignoreUnpause`、`disablePause`：oracle 只能用真实按键注入来暂停（DebugMod 的 `TIME_FORCEPAUSE` 会绕过所有门）[m0:N43]。
   - `AchievementGuard`（见 §2.7；放行 `RecPermadeathMode`）。
   - `SteelSoulSnapshot`：Steel Soul 训练槽必须开着快照才能用。
-- **Harness：** `SavestateBridge`（DebugMod API [mod9]）；`StartRandomizer`（HP、丝、x 偏移、朝向、0–60 帧等待、`Random.InitState`）；`Warp`（Benchwarp）。
+- **Harness：** `SavestateBridge`（DebugMod API [mod9]）；`StartRandomizer`（HP、丝、x 偏移、朝向、0–60 帧等待、`Random.InitState`）；`Warp`（Benchwarp）；`AbilityGrant`（`abilities.grant`/`abilities.list`，只在 TRAIN、只对沙盒存档：授予移动能力、丝技能和工具并装进纹章槽，供 soak `--abilities` 在早期存档上练全部动作 [m0 §2.9]）。
 - **Input：**
   - `KeyboardInjector`（已实现：`oracle/src/Input/KeyboardInjector.cs` [probe:P3]）：在主线程的 `InputSystem.onBeforeUpdate`（动态更新）中每帧锁存一次按键集合，用 `InputSystem.QueueStateEvent` 向 `Keyboard.current` 排队一个完整的 `KeyboardState`，覆盖**每个**逻辑按键，包括 Esc/Enter/Tab/I/[/]。游戏走与真实按键相同的读取路径（Input System → InControl `KeyBindingSource` → `HeroActions`），按电平采样、亚帧点按丢失、边沿、LastInputType 和菜单别名都一致 [m0 §3.3]。P3 实测：全程不在前台，能从主菜单读档、暂停、取消暂停、走和跳。永不在 PlayerAction/HeroActions 层注入。
   - legacy shim（M1）：把注入的按下边沿并进 `Input.anyKeyDown` 的调用者（`InputHandler.CutsceneInput`/`StagCutsceneInput`、`GameManager.UpdateEngagement`、`IdleMemoryCleaner`），否则 TRAIN 和 FINAL 的过场跳过（含 ENDING 误跳过）和 GC 卡顿不一致 [m0:N36]。M1 实现覆盖 1.0.30000 的全部 6 个调用点（另有 PlayMaker `ActionHelpers.AnyKeyDown` 和 `BossDoorChallengeCompleteUI.Update`）。注入器占用键盘时只报告注入的按下边沿，物理 legacy 键和鼠标被屏蔽（与 Input System 一侧一致：点击聚焦训练窗口不会跳过过场）；不占用键盘时就是 `Input.anyKeyDown || 注入边沿`。
