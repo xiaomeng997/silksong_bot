@@ -13,6 +13,7 @@ namespace SsOracle.Export
         {
             FrameExporter.Register(new GameExporter());
             FrameExporter.Register(new PauseExporter());
+            FrameExporter.Register(new InputExporter());
         }
     }
 

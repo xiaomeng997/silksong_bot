@@ -13,6 +13,15 @@ namespace SsOracle.Core
     {
         public static void Install(GameObject host, Harmony harmony)
         {
+            if (RunMode.Human)
+            {
+                // A person is playing: leave keyboard, mouse, cursor and focus handling exactly as in the vanilla game.
+                Input.KeyboardInjector.OwnsKeyboard = false;
+                host.AddComponent<SaveRedirectCheck>();
+                Plugin.Log.LogInfo("human mode: the oracle records only; input, cursor and focus are vanilla");
+                return;
+            }
+
             harmony.Patch(
                 AccessTools.Method(typeof(InputHandler), "SetCursorEnabled"),
                 prefix: new HarmonyMethod(typeof(TrainingEnvironment), nameof(SetCursorEnabledPrefix)));
@@ -68,6 +77,17 @@ namespace SsOracle.Core
         {
             Cursor.visible = true;
             Cursor.lockState = CursorLockMode.None;
+        }
+    }
+
+    /// <summary>Human mode still verifies that saves go to the sandbox, once the game is up.</summary>
+    internal sealed class SaveRedirectCheck : MonoBehaviour
+    {
+        private void Update()
+        {
+            if (!InControl.InputManager.IsSetup) return;
+            Guards.SaveRedirect.Verify();
+            enabled = false;
         }
     }
 }

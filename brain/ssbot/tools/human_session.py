@@ -1,0 +1,157 @@
+"""Record a person playing the training copy (DESIGN D12): every oracle STATE frame plus a 1080p screen video.
+
+    python -m ssbot.tools.human_session            # launches the game, records until the game is closed
+
+The training copy runs with -ssbot-human (the oracle only observes: vanilla keyboard/gamepad/mouse), its own
+sandbox save instance (default 9), fullscreen at 1920x1080 render resolution. When the game exits: ffmpeg is
+stopped, meta.json is written, and the golden PlayerPrefs snapshot is restored — except the gamepad backend keys
+(NativeInput/XInput/AppleMFi), which the player may have to switch on for their controller and which only affect
+gamepads (m0:C15; the final run uses no gamepad).
+"""
+import argparse
+import json
+import queue
+import subprocess
+import sys
+import threading
+import time
+from datetime import datetime
+from pathlib import Path
+
+import zstandard
+
+from ssbot.ipc.oracle_link import OracleLink
+
+GAME = Path(r"C:\ssbot\game\train\Hollow Knight Silksong.exe")
+FFMPEG = Path(r"C:\Users\Meng\AppData\Local\Microsoft\WinGet\Packages\Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe"
+              r"\ffmpeg-7.1.1-full_build\bin\ffmpeg.exe")  # 7.1.1: newer builds need NVIDIA driver >= 610
+PREFS_KEY = r"HKCU\Software\Team Cherry\Hollow Knight Silksong"
+GOLDEN = Path(r"C:\ssbot\sandbox\prefs\golden.reg")
+KEEP_PREFIXES = ("NativeInput_h", "XInput_h", "AppleMFi_h")
+
+
+class StateWriter:
+    """Appends raw IPC frames (length-prefixed, as received) to a zstd stream on a background thread."""
+
+    def __init__(self, path: Path):
+        self.q: queue.Queue[bytes | None] = queue.Queue(maxsize=3600)
+        self.dropped = 0
+        self.frames = 0
+        self._f = path.open("wb")
+        self._z = zstandard.ZstdCompressor(level=3).stream_writer(self._f)
+        self._t = threading.Thread(target=self._run, name="StateWriter", daemon=True)
+        self._t.start()
+
+    def push(self, msg_type: int, raw: bytes) -> None:
+        try:
+            self.q.put_nowait(raw)
+        except queue.Full:
+            self.dropped += 1
+
+    def _run(self) -> None:
+        while (raw := self.q.get()) is not None:
+            self._z.write(raw)
+            self.frames += 1
+
+    def close(self) -> None:
+        self.q.put(None)
+        self._t.join()
+        self._z.flush(zstandard.FLUSH_FRAME)
+        self._z.close()
+
+
+def reg(*args: str) -> None:
+    subprocess.run(["reg", *args], capture_output=True, check=True)
+
+
+def restore_golden(keep: dict[str, str]) -> None:
+    """Delete the PlayerPrefs key, import the golden snapshot, then re-apply the kept gamepad keys."""
+    reg("delete", PREFS_KEY, "/f")
+    reg("import", str(GOLDEN))
+    for name, dword in keep.items():
+        reg("add", PREFS_KEY, "/v", name, "/t", "REG_DWORD", "/d", dword, "/f")
+
+
+def gamepad_keys() -> dict[str, str]:
+    out = subprocess.run(["reg", "query", PREFS_KEY], capture_output=True, text=True).stdout
+    keep = {}
+    for line in out.splitlines():
+        parts = line.split()
+        if len(parts) == 3 and parts[0].startswith(KEEP_PREFIXES) and parts[1] == "REG_DWORD":
+            keep[parts[0]] = str(int(parts[2], 16))
+    return keep
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--instance", type=int, default=9)
+    ap.add_argument("--out", default=r"C:\ssbot\data\human")
+    ap.add_argument("--no-video", action="store_true")
+    args = ap.parse_args()
+
+    session = Path(args.out) / datetime.now().strftime("%Y%m%d_%H%M%S")
+    session.mkdir(parents=True)
+    print(f"session: {session}")
+
+    game_args = ["-ssbot-human", "-ssbot-instance", str(args.instance), "-logFile", str(session / "player.log"),
+                 "-screen-fullscreen", "1", "-screen-width", "1920", "-screen-height", "1080"]
+    game = subprocess.Popen([str(GAME), *game_args], cwd=GAME.parent)
+    print("game started; waiting for the oracle ...")
+
+    link = OracleLink(instance=args.instance, connect_timeout_s=120)
+    states = StateWriter(session / "state.raw.zst")
+    link.subscribe_raw(states.push)
+    print(f"oracle connected: {link.hello['plugin']} on {link.hello['game']}, instance {link.hello['instance']}")
+
+    video = None
+    video_start_qpc = None
+    if not args.no_video:
+        cmd = [str(FFMPEG), "-hide_banner", "-loglevel", "warning", "-stats", "-y",
+               "-f", "lavfi", "-i", "ddagrab=output_idx=0:framerate=60:draw_mouse=0",
+               "-vf", "hwdownload,format=bgra,scale=1920:1080:flags=area,format=nv12",
+               "-c:v", "hevc_nvenc", "-preset", "p5", "-tune", "hq", "-rc", "constqp", "-qp", "18", "-g", "120",
+               str(session / "video.mkv")]
+        video_start_qpc = time.perf_counter_ns()
+        video = subprocess.Popen(cmd, stdin=subprocess.PIPE, stderr=(session / "ffmpeg.log").open("wb"))
+        print("recording video ...")
+
+    start = time.time()
+    try:
+        while game.poll() is None:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        print("stopping (game still running)")
+    duration = time.time() - start
+
+    if video is not None:
+        try:
+            video.communicate(b"q", timeout=20)
+        except subprocess.TimeoutExpired:
+            video.kill()
+    link.close()
+    states.close()
+
+    keep = gamepad_keys()
+    restore_golden(keep)
+
+    meta = {
+        "started": datetime.fromtimestamp(start).isoformat(timespec="seconds"),
+        "duration_s": round(duration, 1),
+        "instance": args.instance,
+        "hello": link.hello,
+        "game_args": game_args,
+        "state_frames_written": states.frames,
+        "state_frames_dropped_by_recorder": states.dropped,
+        "last_oracle_drop_counter": (link.state or {}).get("drop"),
+        "video_start_qpc_ns": video_start_qpc,
+        "video_cmd": video.args if video is not None else None,
+        "kept_gamepad_prefs": keep,
+    }
+    (session / "meta.json").write_text(json.dumps(meta, indent=1, ensure_ascii=False), encoding="utf-8")
+    print(json.dumps({k: meta[k] for k in ("duration_s", "state_frames_written", "state_frames_dropped_by_recorder",
+                                           "last_oracle_drop_counter", "kept_gamepad_prefs")}, ensure_ascii=False))
+    sys.exit(0)
+
+
+if __name__ == "__main__":
+    main()
