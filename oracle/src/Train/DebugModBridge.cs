@@ -1,15 +1,18 @@
 using System;
 using System.Collections;
+using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
 using BepInEx.Bootstrap;
 using HarmonyLib;
+using UnityEngine;
 
 namespace SsOracle.Train
 {
     /// <summary>
     /// Reflection bridge to DebugMod's savestates (io.github.hk-speedrunning.debugmod, MIT; verified against the installed
-    /// 1.1.2 and REF\Silksong.DebugMod\SaveStates; same approach as REF\SilksongRL\...\SaveStates\DebugModSaveStates.cs).
+    /// 1.1.2 and REF\Silksong.DebugMod\SaveStates; same approach as REF\SilksongRL\...\SaveStates\DebugModSaveStates.cs),
+    /// and to its hitbox display (the reference for the projection check, see the hitbox section at the end).
     /// We use DebugMod's own capture (SaveState.Save) and restore (SaveState.Load, a coroutine we pump ourselves so we
     /// know when its tail — HUD fixes, bench and water fixes — has finished), but keep the files ourselves: DebugMod's
     /// store lives in the real LocalLow (DebugMod.ModBaseDirectory is not covered by SaveRedirect) and is organised in
@@ -203,6 +206,185 @@ namespace SsOracle.Train
             catch (Exception e)
             {
                 Core.Plugin.Log.LogWarning("DebugMod HUD refresh failed: " + (e.InnerException ?? e).Message);
+            }
+        }
+
+        // ---- hitbox display ----------------------------------------------------------------------------------------
+        //
+        // DebugMod.Hitbox (REF\Silksong.DebugMod\Hitbox, identical in the installed 1.1.2). Settings.ShowHitBoxes (0 off,
+        // 1 hitboxes, 2 all hitboxes; its setter saves Settings.json, which SaveRedirect keeps in the sandbox, so the
+        // value survives restarts) is applied by GUIController.Update in gameplay scenes: HitboxViewer.Load/Unload, and
+        // Load adds a HitboxRender whose Start fills its private "colliders" dictionary (Collider2D -> HitboxType) from
+        // Resources.FindObjectsOfTypeAll plus later hooks. HitboxRender.OnGUI (Repaint) draws every collider in it that
+        // isActiveAndEnabled, is not on layer IGNORE_RAYCAST and whose bounds overlap Camera.main's viewport, with
+        // Camera.main.WorldToScreenPoint of the collider's authored outline at that moment (after rendering, so without
+        // the camera shake CameraShakeManager adds in OnPreCull and removes in OnPostRender), each vertex rounded to an
+        // integer GUI pixel, as antialiased lines of width HitboxRender.LineWidth in the HitboxType's colour. Resolved
+        // separately from the savestate API, so either works without the other.
+
+        /// <summary>One collider DebugMod's HitboxRender knows, with its HitboxType name ("Knight", "Enemy", "Terrain",
+        /// "NonSliderTerrain", ...) and colour.</summary>
+        internal struct HitboxEntry
+        {
+            public Collider2D Col;
+            public string Type;
+            public Color Color;
+        }
+
+        /// <summary>DebugMod.Settings bools that show its UI panels (MODUI_TOGGLEALLUI flips all of them).</summary>
+        public static readonly string[] PanelSettings =
+            { "MainPanelVisible", "EnemiesPanelVisible", "ConsoleVisible", "InfoPanelVisible", "SaveStatePanelVisible" };
+
+        private static bool hitboxResolved;
+        private static PropertyInfo dmSettingsProperty, showHitBoxesProperty, viewerStateProperty, renderInstanceProperty, lineWidthProperty;
+        private static FieldInfo renderCollidersField, typeColorField;
+        private static readonly Dictionary<object, string> HitboxTypeNames = new Dictionary<object, string>();
+
+        public static string HitboxError { get; private set; } = "not resolved yet";
+
+        /// <summary>True when DebugMod is loaded and its hitbox display API is as expected; sets HitboxError otherwise.</summary>
+        public static bool ResolveHitboxes()
+        {
+            if (hitboxResolved) return true;
+            try
+            {
+                if (!Chainloader.PluginInfos.TryGetValue(Guid, out var info) || info?.Instance == null)
+                    return FailHitbox("DebugMod is not loaded (its hitbox display is the reference for the projection check)");
+                var asm = info.Instance.GetType().Assembly;
+                Version = info.Metadata.Version.ToString();
+
+                const BindingFlags inst = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+                const BindingFlags stat = BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
+                var render = asm.GetType("DebugMod.Hitbox.HitboxRender");
+                var viewer = asm.GetType("DebugMod.Hitbox.HitboxViewer");
+                var type = render?.GetNestedType("HitboxType", BindingFlags.Public | BindingFlags.NonPublic);
+                dmSettingsProperty = asm.GetType("DebugMod.DebugMod")?.GetProperty("settings", stat);
+                showHitBoxesProperty = dmSettingsProperty?.PropertyType.GetProperty("ShowHitBoxes", inst);
+                viewerStateProperty = viewer?.GetProperty("State", stat);
+                renderInstanceProperty = render?.GetProperty("Instance", stat);
+                lineWidthProperty = render?.GetProperty("LineWidth", stat);
+                renderCollidersField = render?.GetField("colliders", inst);
+                typeColorField = type?.GetField("Color", inst);
+
+                var missing = Missing(("DebugMod.settings", dmSettingsProperty), ("Settings.ShowHitBoxes", showHitBoxesProperty),
+                    ("HitboxViewer.State", viewerStateProperty), ("HitboxRender.Instance", renderInstanceProperty),
+                    ("HitboxRender.LineWidth", lineWidthProperty), ("HitboxRender.colliders", renderCollidersField),
+                    ("HitboxType.Color", typeColorField));
+                if (missing != null) return FailHitbox($"DebugMod {Version} hitbox API differs from 1.1.2: missing {missing}");
+                if (showHitBoxesProperty.PropertyType != typeof(int) || typeColorField.FieldType != typeof(Color)
+                    || !typeof(IDictionary).IsAssignableFrom(renderCollidersField.FieldType))
+                    return FailHitbox($"DebugMod {Version} hitbox API differs from 1.1.2: member types changed");
+
+                // HitboxType has one static readonly instance per kind (Knight, Enemy, ...); name them by field.
+                HitboxTypeNames.Clear();
+                foreach (var f in type.GetFields(stat))
+                {
+                    if (f.FieldType != type) continue;
+                    var v = f.GetValue(null);
+                    if (v != null) HitboxTypeNames[v] = f.Name;
+                }
+                if (HitboxTypeNames.Count == 0) return FailHitbox($"DebugMod {Version}: no HitboxType instances found");
+
+                hitboxResolved = true;
+                HitboxError = null;
+                Core.Plugin.Log.LogInfo($"DebugModBridge: using DebugMod {Version} hitbox display ({HitboxTypeNames.Count} hitbox types)");
+                return true;
+            }
+            catch (Exception e)
+            {
+                return FailHitbox("resolving DebugMod's hitbox display failed: " + e.Message);
+            }
+        }
+
+        private static bool FailHitbox(string error)
+        {
+            if (HitboxError != error) Core.Plugin.Log.LogError("DebugModBridge: " + error);
+            HitboxError = error;
+            return false;
+        }
+
+        private static object DmSettings => dmSettingsProperty.GetValue(null, null);
+
+        /// <summary>DebugMod's ShowHitBoxes setting (0 off, 1 hitboxes, 2 all). Setting it saves Settings.json and takes
+        /// effect in the next GUIController.Update of a gameplay scene.</summary>
+        public static int ShowHitboxes
+        {
+            get => (int)showHitBoxesProperty.GetValue(DmSettings, null);
+            set => showHitBoxesProperty.SetValue(DmSettings, value, null);
+        }
+
+        /// <summary>The mode HitboxViewer last loaded (0 = unloaded).</summary>
+        public static int HitboxViewerState => (int)viewerStateProperty.GetValue(null, null);
+
+        /// <summary>The live HitboxRender, or null (hitboxes off, not a gameplay scene, or not started yet). Its static
+        /// Instance keeps pointing at a destroyed renderer, which Unity's null check catches.</summary>
+        public static UnityEngine.Object HitboxRenderer
+        {
+            get
+            {
+                var r = renderInstanceProperty.GetValue(null, null) as UnityEngine.Object;
+                return r != null ? r : null;
+            }
+        }
+
+        /// <summary>HitboxRender.LineWidth: max(0.7, Screen.width / 960 * tk2dCam.ZoomFactor) pixels (the antialiased
+        /// quad is three times as wide); null when it cannot be computed (no GameCameras).</summary>
+        public static float? HitboxLineWidth
+        {
+            get
+            {
+                try
+                {
+                    return (float)lineWidthProperty.GetValue(null, null);
+                }
+                catch (Exception)
+                {
+                    return null;
+                }
+            }
+        }
+
+        /// <summary>Every collider in <paramref name="renderer"/>'s dictionary (live or not; callers apply DebugMod's
+        /// draw filter). Main thread: OnGUI edits the dictionary.</summary>
+        public static void HitboxColliders(UnityEngine.Object renderer, List<HitboxEntry> into)
+        {
+            if (!(renderCollidersField.GetValue(renderer) is IDictionary map)) return;
+            foreach (DictionaryEntry kv in map)
+            {
+                var type = kv.Value;
+                if (type == null) continue;
+                into.Add(new HitboxEntry
+                {
+                    Col = kv.Key as Collider2D,
+                    Type = HitboxTypeNames.TryGetValue(type, out var name) ? name : "?",
+                    Color = (Color)typeColorField.GetValue(type),
+                });
+            }
+        }
+
+        /// <summary>DebugMod's UI panel visibility settings (a visible panel covers part of the game image).</summary>
+        public static Dictionary<string, object> Panels()
+        {
+            var settings = DmSettings;
+            var d = new Dictionary<string, object>();
+            foreach (var name in PanelSettings)
+            {
+                var p = settings.GetType().GetProperty(name);
+                if (p != null && p.PropertyType == typeof(bool)) d[name] = (bool)p.GetValue(settings, null);
+            }
+            return d;
+        }
+
+        /// <summary>Show or hide DebugMod's UI panels; null leaves a panel as it is (each change saves Settings.json).</summary>
+        public static void SetPanels(Func<string, bool?> visible)
+        {
+            var settings = DmSettings;
+            foreach (var name in PanelSettings)
+            {
+                var p = settings.GetType().GetProperty(name);
+                if (p == null || p.PropertyType != typeof(bool) || !p.CanWrite) continue;
+                var v = visible(name);
+                if (v.HasValue && (bool)p.GetValue(settings, null) != v.Value) p.SetValue(settings, v.Value, null);
             }
         }
     }
