@@ -1,0 +1,584 @@
+"""P17 probe: runtime crest and attack dumps (DESIGN §5 P17; the checklist is docs/research/crests.md §5, of which this
+covers a, b, c and i, plus the hunter_meter events of f that happen during the run).
+
+Preconditions: the training copy runs an SsOracle built with the Crest module (its HELLO lists crest.dump, slash.dump,
+gameplay.dump and crest.equip), profile TRAIN, a SANDBOX save is loaded and Hornet stands idle somewhere quiet with the
+inventory closed (on a bench is fine). An early save is the point: crests the save has not unlocked are unlocked for the
+run (--no-unlock skips them instead) and relocked at the end. No key is pressed and no focus is needed.
+
+Steps:
+  1. gameplay.dump, crest.dump, and slash.dump {all_groups} with the crest the save has equipped.
+  2. SaveSuppression on (guards.set) until the end, so no crest change can reach the save file even if the game saves.
+  3. For every crest of --crests (default Wanderer, Reaper, Hunter_v2) other than the equipped one: crest.equip
+     {name, unlock}, a few frames, crest.dump (its "current") and slash.dump. A refusal is recorded and the run goes on.
+  4. crest.equip {restore}: the original crest, PreviousCrestID and temp flag back, what step 3 unlocked relocked, and
+     the side effects of the switches undone (saved slots, tool amounts, silk). crest.dump must then match step 1 in
+     all of these (restore_state; silk may have grown from idle Silk Heart regen, but not be lower or above the max).
+     Only then does SaveSuppression go back as it was: a failed or unverified restore, or a broken link, leaves it on
+     and says how to get back (restart the game, or Save & Quit, reload the save and run --save-suppression-off: the
+     game turns SaveSuppression off only when it starts).
+  5. Prints the tables below and any failures (with that guidance when SaveSuppression stays on), then writes --out
+     (default docs/facts/<game>/crests.json). Exit code 1 when the restore check fails or no crest besides the
+     equipped one could be dumped.
+
+    cd brain
+    ..\\scripts\\uv.cmd run python -m ssbot.probes.p17_crests [--instance 0] [--crests Wanderer,Reaper,Hunter_v2]
+        [--no-unlock] [--out ../docs/facts/1.0.30000/crests.json]
+    ..\\scripts\\uv.cmd run python -m ssbot.probes.p17_crests --instance 0 --save-suppression-off
+
+Config table (every crest the game knows, from the serialized HeroControllerConfig fields, so Warrior shows its non-rage
+values): swing = max(attackCooldownTime, attackDuration) (HeroController.DidAttack sets the cooldown so), quick = the same
+with quickAttackCooldownTime (Quickening), rec = attackRecoveryTime, down = downSlashType, down_rec =
+downspikeRecoveryTime (air recovery after FinishDownspike: a downspike, or a down-slash bounce), spike = downspike antic /
+time / recovery (DownSpike type only), rule = how HeroController.UpdateConfig maps the crest to a config group
+(crest.dump config_group.rule).
+
+Attack table (each dumped crest, one row per attack slot of slash.dump): src = hero (HeroController swings it) or group
+(an FSM does: dash stab, charge, taunt, and a Custom-type crest's down slashes, whose rows keep down_slash_event); the
+damager SetConfigGroup paired with the slot (else the attack object's own, else the first using nail damage). dmg =
+nailDamageMultiplier ("x") or a flat damageDealt ("="), times damageMultiplier, then damage_mult_per_hit when set; silk
+= silkGeneration; spk = NailAttackBase.canHitSpikes (false: a clash hurts Hornet for 1, DamageHero.cs:399); par = the
+swing clashes with enemy attacks (not doesNotParry, DamageHero.cs:384); crit = Wanderer crits can apply
+(DamageEnemies.cs:1022: attackType Nail and not doesNotCriticalHit, on the first hit, or the object is tagged "Nail
+Attack"); multi = multi-hitter steps / hits; dsa = HeroDownAttack present (the downspike bounce and its i-frames);
+fwd/up/dn/back = extents of that damager's colliders from the hero's pivot in world units, forward = the facing
+direction, using the swing-time outline when NailAttackBase rescales the attack at swing start (without Long Needle);
+clash = forward extent of the attack's "Clash Tink" collider (what has to touch an enemy attack for a clash).
+"""
+import argparse
+import datetime as dt
+import json
+import sys
+import threading
+from collections.abc import Iterable, Sequence
+from pathlib import Path
+
+import msgpack
+
+from ssbot.ipc.framing import HEADER, MsgType
+from ssbot.ipc.oracle_link import OracleError, OracleLink
+from ssbot.probes.common import in_gameplay
+from ssbot.record.recorder import find_repo_root
+
+NEEDED_RPCS = ("crest.dump", "slash.dump", "gameplay.dump", "crest.equip", "guards.get", "guards.set")
+DEFAULT_CRESTS = ("Wanderer", "Reaper", "Hunter_v2")
+SETTLE_FRAMES = 3
+EVENT_KINDS = ("hunter_meter", "guards", "save")
+# OSError: TimeoutError, and the ConnectionError/OSError a broken link raises (OracleLink._send's sendall).
+ERRORS = (OracleError, OSError)
+# GuardState.SaveSuppression resets only when the game starts (Profile.ApplyDefaults), not on Save & Quit or a reload.
+SAVE_KEPT = ("[FAIL] SaveSuppression is still ON and the save may not be back to how it was. Do not just turn it off.\n"
+             "  Either close the game and start it again (SaveSuppression starts off),\n"
+             "  or Save & Quit to the menu (SaveSuppression writes nothing), reload the save, and then turn\n"
+             "  SaveSuppression off, which the game only does by itself when it starts:\n"
+             "    cd brain\n"
+             "    ..\\scripts\\uv.cmd run python -m ssbot.probes.p17_crests --instance {instance} "
+             "--save-suppression-off")
+
+
+# ---- pure helpers (unit-tested in tests/test_p17_crests.py) ------------------------------------------------------
+
+def crest_order(current: str | None, requested: Iterable[str]) -> list[str]:
+    """The equipped crest first, then the requested ones in order, without repeats."""
+    out = [current] if current else []
+    for name in requested:
+        if name and name not in out:
+            out.append(name)
+    return out
+
+
+def extents(shapes: Iterable[dict], hero_pos: Sequence[float], facing: int) -> dict | None:
+    """{fwd, back, up, dn}: how far the shapes reach from the hero's pivot, forward = the facing direction (+1 right).
+    Negative means the shapes do not reach that side of the pivot. A vertex with a radius (circle centre, rounded box
+    or edge) counts as a disc."""
+    hx, hy = hero_pos[0], hero_pos[1]
+    fwd = back = up = dn = None
+    for s in shapes:
+        v = s.get("v") or ()
+        r = float(s.get("r") or 0.0)
+        for i in range(0, len(v) - 1, 2):
+            x = (v[i] - hx) * facing
+            y = v[i + 1] - hy
+            fwd = x + r if fwd is None else max(fwd, x + r)
+            back = -x + r if back is None else max(back, -x + r)
+            up = y + r if up is None else max(up, y + r)
+            dn = -y + r if dn is None else max(dn, -y + r)
+    if fwd is None:
+        return None
+    return {"fwd": fwd, "back": back, "up": up, "dn": dn}
+
+
+def collider_shapes(colliders: Iterable[dict] | None) -> list[dict]:
+    """The outlines of slash.dump colliders, the swing-time one where the oracle sent it."""
+    shapes: list[dict] = []
+    for c in colliders or ():
+        shapes.extend(c.get("shapes_swing") or c.get("shapes") or ())
+    return shapes
+
+
+def damager_shapes(damager: dict | None) -> list[dict]:
+    """Every collider outline of one damager."""
+    return collider_shapes((damager or {}).get("colliders"))
+
+
+def primary_damager(attack: dict) -> dict | None:
+    """The damager SetConfigGroup paired with the slot, else the one on the attack object, else the first using nail
+    damage, else the first."""
+    ds = attack.get("damagers") or []
+    for key in ("damager", "path"):
+        want = attack.get(key)
+        if want:
+            for d in ds:
+                if d.get("path") == want:
+                    return d
+    for d in ds:
+        if d.get("use_nail_damage"):
+            return d
+    return ds[0] if ds else None
+
+
+def primary_nail(attack: dict) -> dict | None:
+    """The NailAttackBase on the attack object itself, else the first below it."""
+    ns = attack.get("nail") or []
+    for n in ns:
+        if n.get("path") == attack.get("path"):
+            return n
+    return ns[0] if ns else None
+
+
+def damage_text(d: dict | None) -> str:
+    if d is None:
+        return "-"
+    text = f"x{d.get('nail_damage_mult', 0):g}" if d.get("use_nail_damage") else f"={d.get('damage_dealt', 0)}"
+    mult = d.get("damage_mult")
+    if mult is not None and abs(mult - 1.0) > 1e-6:
+        text += f"*{mult:g}"
+    per_hit = d.get("damage_mult_per_hit")
+    if per_hit:
+        text += "[" + ",".join(f"{m:g}" for m in per_hit) + "]"
+    return text
+
+
+def config_of(crest: dict, crest_dump: dict) -> str | None:
+    """The HeroControllerConfig a crest runs with: its own, or the group UpdateConfig falls back to (configs[0])."""
+    if crest.get("config"):
+        return crest["config"]
+    index = (crest.get("config_group") or {}).get("index")
+    for g in crest_dump.get("groups") or ():
+        if g.get("kind") == "configs" and g.get("index") == index:
+            return g.get("config")
+    return None
+
+
+def _max(*xs):
+    xs = [x for x in xs if x is not None]
+    return max(xs) if xs else None
+
+
+def config_row(crest: dict, crest_dump: dict) -> dict:
+    name = config_of(crest, crest_dump)
+    f = ((crest_dump.get("configs") or {}).get(name) or {}).get("fields") or {}
+    dur = f.get("attackDuration")
+    down = f.get("downSlashType")
+    spike = None
+    if down == "DownSpike":
+        spike = [f.get("downspikeAnticTime"), f.get("downspikeTime"), f.get("downspikeRecoveryTime")]
+    return {
+        "crest": crest["name"],
+        "unlocked": crest.get("unlocked"),
+        "config": name,
+        "rule": (crest.get("config_group") or {}).get("rule"),
+        "swing": _max(f.get("attackCooldownTime"), dur),
+        "quick": _max(f.get("quickAttackCooldownTime"), dur),
+        "duration": dur,
+        "cooldown": f.get("attackCooldownTime"),
+        "recovery": f.get("attackRecoveryTime"),
+        "down": down,
+        "down_recovery": f.get("downspikeRecoveryTime"),
+        "spike": spike,
+        "dash_stab": f.get("dashStabTime"),
+    }
+
+
+def attack_rows(crest: str, slash: dict) -> list[dict]:
+    hero = slash.get("hero") or {}
+    pos, facing = hero.get("pos") or (0.0, 0.0), hero.get("facing") or 1
+    rows = []
+    for a in slash.get("attacks") or ():
+        d = primary_damager(a)
+        n = primary_nail(a)
+        ext = extents(damager_shapes(d), pos, facing) or {}
+        clash = extents(collider_shapes((n or {}).get("clash_tink")), pos, facing)
+        multi = None
+        if d is not None and d.get("multi_hitter"):
+            multi = f"{d.get('steps_per_hit')}/{d.get('hits_until_death')}"
+        crit = None
+        if d is not None and d.get("does_not_critical_hit") is not None:
+            crit = bool(d.get("nail_tag")) or (d.get("attack_type") == "Nail" and not d["does_not_critical_hit"])
+        rows.append({
+            "crest": crest,
+            "slot": a.get("slot"),
+            "source": a.get("source"),
+            "object": a.get("go"),
+            "down_slash_event": a.get("down_slash_event"),
+            "active": a.get("active"),
+            "dmg": damage_text(d),
+            "silk": d.get("silk_generation") if d else None,
+            "spikes": n.get("can_hit_spikes") if n else None,
+            "parry": None if d is None else not d.get("does_not_parry"),
+            "crit": crit,
+            "multi": multi,
+            "dsa": bool(a.get("down_attacks")),
+            "fwd": ext.get("fwd"),
+            "up": ext.get("up"),
+            "dn": ext.get("dn"),
+            "back": ext.get("back"),
+            "clash": clash.get("fwd") if clash else None,
+            "clash_extents": clash,
+        })
+    return rows
+
+
+def build_tables(result: dict) -> dict:
+    crest_dump = result.get("crest_dump") or {}
+    configs = [config_row(c, crest_dump) for c in crest_dump.get("crests") or ()]
+    attacks = []
+    for name, entry in (result.get("crests") or {}).items():
+        if entry.get("slash"):
+            attacks.extend(attack_rows(name, entry["slash"]))
+    return {"configs": configs, "attacks": attacks}
+
+
+def _cell(v) -> str:
+    if v is None:
+        return "-"
+    if isinstance(v, bool):
+        return "y" if v else "n"
+    if isinstance(v, float):
+        return f"{v:.3f}".rstrip("0").rstrip(".") if abs(v) < 1000 else f"{v:.0f}"
+    if isinstance(v, (list, tuple)):
+        return "/".join(_cell(x) for x in v)
+    return str(v)
+
+
+def format_table(rows: Sequence[dict], columns: Sequence[tuple[str, str]]) -> str:
+    """Plain fixed-width table: columns = [(key, header)]."""
+    cells = [[h for _, h in columns]] + [[_cell(r.get(k)) for k, _ in columns] for r in rows]
+    widths = [max(len(row[i]) for row in cells) for i in range(len(columns))]
+    lines = ["  ".join(c.ljust(w) for c, w in zip(row, widths)).rstrip() for row in cells]
+    lines.insert(1, "  ".join("-" * w for w in widths))
+    return "\n".join(lines)
+
+
+CONFIG_COLUMNS = (("crest", "crest"), ("unlocked", "unl"), ("config", "config"), ("rule", "rule"), ("swing", "swing"),
+                  ("quick", "quick"), ("duration", "dur"), ("cooldown", "cd"), ("recovery", "rec"), ("down", "down"),
+                  ("down_recovery", "down_rec"), ("spike", "spike a/t/r"), ("dash_stab", "dstab"))
+ATTACK_COLUMNS = (("crest", "crest"), ("slot", "slot"), ("source", "src"), ("object", "object"), ("dmg", "dmg"), ("silk", "silk"),
+                  ("spikes", "spk"), ("parry", "par"), ("crit", "crit"), ("multi", "multi"), ("dsa", "dsa"),
+                  ("fwd", "fwd"), ("up", "up"), ("dn", "dn"), ("back", "back"), ("clash", "clash"))
+
+
+def rounded(v, nd: int = 5):
+    """Floats rounded for the JSON file (msgpack float32 values print as 0.30000001192092896 otherwise)."""
+    if isinstance(v, float):
+        return round(v, nd)
+    if isinstance(v, dict):
+        return {k: rounded(x, nd) for k, x in v.items()}
+    if isinstance(v, (list, tuple)):
+        return [rounded(x, nd) for x in v]
+    if isinstance(v, bytes):
+        return v.hex()
+    return v
+
+
+def unlocked_set(crest_dump: dict) -> list[str]:
+    return sorted(c["name"] for c in crest_dump.get("crests") or () if c.get("unlocked"))
+
+
+def restore_state(crest_dump: dict) -> dict:
+    """What crest.equip {restore} has to put back, read from one crest.dump: the crest, PreviousCrestID, the temp flag,
+    silk (RefreshSilk takes what is above a lower CurrentSilkMax), the unlocked set, every crest's saved slot equips
+    (SetEquippedCrest empties slots whose tool is also in an extra slot) and every tool's AmountLeft (UpdateToolCap
+    lowers it when the new crest drops Shell Satchel). silk_max (CurrentSilkMax) is silk_diff's upper bound."""
+    cur = crest_dump.get("current") or {}
+    return {
+        "crest": cur.get("crest"),
+        "previous": cur.get("previous"),
+        "temp": cur.get("temp"),
+        "silk": cur.get("silk"),
+        "silk_max": cur.get("silk_max"),
+        "unlocked": unlocked_set(crest_dump),
+        "slots": {c["name"]: [s.get("saved") for s in c.get("slots") or ()] for c in crest_dump.get("crests") or ()},
+        "tool_amounts": dict(crest_dump.get("tool_amounts") or {}),
+    }
+
+
+def silk_diff(before: dict, after: dict) -> str | None:
+    """A failure when silk after the restore is lower than before, or higher than the restored max. Higher but within
+    the max is fine: the oracle only ever gives silk back, and idle Silk Heart regen (HeroController.StartSilkRegen /
+    DoSilkRegen, up to CurrentSilkRegenMax) can add some while the probe runs. Without a max (an oracle that does not
+    send silk_max, or no hero) silk must be unchanged."""
+    s0, s1, top = before.get("silk"), after.get("silk"), after.get("silk_max")
+    if s1 == s0:
+        return None
+    if s0 is None or s1 is None or s1 < s0:
+        return f"restore: silk is {s1}, was {s0}"
+    if top is None or s1 > top:
+        return f"restore: silk is {s1}, was {s0}, max {top}"
+    return None
+
+
+def restore_diffs(before: dict, after: dict) -> list[str]:
+    """Failures for every restore_state field that differs after the restore (silk: silk_diff)."""
+    out = []
+    for key, label in (("crest", "crest"), ("previous", "PreviousCrestID"), ("temp", "temp flag")):
+        if after.get(key) != before.get(key):
+            out.append(f"restore: {label} is {after.get(key)}, was {before.get(key)}")
+    silk = silk_diff(before, after)
+    if silk:
+        out.append(silk)
+    if after.get("unlocked") != before.get("unlocked"):
+        out.append(f"restore: unlocked crests {after.get('unlocked')}, were {before.get('unlocked')}")
+    slots0, slots1 = before.get("slots") or {}, after.get("slots") or {}
+    for name in sorted(set(slots0) | set(slots1)):
+        if slots1.get(name) != slots0.get(name):
+            out.append(f"restore: saved slots of {name} are {slots1.get(name)}, were {slots0.get(name)}")
+    amounts0, amounts1 = before.get("tool_amounts") or {}, after.get("tool_amounts") or {}
+    changed = {t: f"{amounts1.get(t)} (was {amounts0.get(t)})" for t in sorted(set(amounts0) | set(amounts1))
+               if amounts1.get(t) != amounts0.get(t)}
+    if changed:
+        out.append(f"restore: tool amounts {changed}")
+    return out
+
+
+# ---- in-game run --------------------------------------------------------------------------------------------------
+
+class EventTail:
+    """Collects the STATE events of EVENT_KINDS on the link's reader thread (hunter_meter resets during crest switches,
+    the SaveSuppression switch and any save the game attempts)."""
+
+    def __init__(self, link) -> None:
+        self._lock = threading.Lock()
+        self.events: list[dict] = []
+        link.subscribe_raw(self._on_raw)
+
+    def _on_raw(self, msg_type: int, raw: bytes) -> None:
+        if msg_type != MsgType.STATE:
+            return
+        s = msgpack.unpackb(raw[HEADER.size:], raw=False, strict_map_key=False)
+        with self._lock:
+            for e in s.get("ev") or ():
+                if e.get("k") in EVENT_KINDS:
+                    self.events.append({"k": e["k"], "f": e.get("f"), **(e.get("d") or {})})
+
+    def snapshot(self) -> list[dict]:
+        with self._lock:
+            return list(self.events)
+
+
+def settle(link, frames: int = SETTLE_FRAMES) -> None:
+    f = link.frame
+    link.wait_state(lambda s: True, newer_than=f + frames, timeout_s=5.0)
+
+
+def link_broken(e: BaseException) -> bool:
+    """An OSError other than a timeout: sending on the link failed (ConnectionResetError and the like), so every
+    further RPC fails too."""
+    return isinstance(e, OSError) and not isinstance(e, TimeoutError)
+
+
+def err_text(e: BaseException) -> str:
+    """str(e), with the exception type for a broken link, and the type alone when str(e) is empty (the TimeoutError
+    of an RPC that got no reply, OracleLink.rpc's Future.result, has no text)."""
+    text = str(e)
+    if not text:
+        return type(e).__name__
+    return f"{type(e).__name__}: {text}" if link_broken(e) else text
+
+
+def save_suppression_on(link) -> bool:
+    """After a run that raised: whether SaveSuppression is on (guards.get); True when the link cannot tell."""
+    try:
+        return bool(link.rpc("guards.get", timeout_s=5.0).get("save_suppression"))
+    except ERRORS:
+        return True
+
+
+def save_suppression_off(link) -> int:
+    """--save-suppression-off (after SAVE_KEPT, once the save is reloaded): guards.set save_suppression=false."""
+    g = link.rpc("guards.set", save_suppression=False)
+    if g.get("save_suppression"):
+        print("[FAIL] SaveSuppression is still ON", file=sys.stderr)
+        return 1
+    print("SaveSuppression is off: the game saves again")
+    return 0
+
+
+class Progress:
+    """How far run() got, for main when run() raises. changed is set just before the first RPC that can change the
+    game: the guards.set that turns SaveSuppression on, or (when it was on already) the first crest.equip. Set before
+    the RPC, so one whose reply was lost counts. Until then run() only read, and the save is as it was."""
+
+    def __init__(self) -> None:
+        self.changed = False
+
+
+def run(link, crests: Sequence[str], unlock: bool, log=print,
+        progress: Progress | None = None) -> tuple[dict, list[str]]:
+    """Steps 1-4 of the module doc. Returns (result, failures). progress (optional) records how far it got."""
+    progress = progress if progress is not None else Progress()
+    failures: list[str] = []
+    tail = EventTail(link)
+    s = link.wait_state(in_gameplay, timeout_s=30.0)
+    if (s.get("pause") or {}).get("inv"):
+        raise RuntimeError("the inventory is open: close it first")
+    hello = link.hello or {}
+    result: dict = {
+        "probe": "P17",
+        "game": hello.get("game"),
+        "plugin": hello.get("plugin"),
+        "captured": dt.datetime.now().isoformat(timespec="seconds"),
+        "scene": (s.get("game") or {}).get("scene"),
+        "unlock": unlock,
+    }
+    result["gameplay"] = link.rpc("gameplay.dump")
+    cd0 = link.rpc("crest.dump")
+    result["crest_dump"] = cd0
+    original = cd0["current"]["crest"]
+    unlocked0 = unlocked_set(cd0)
+    log(f"equipped: {original}; unlocked: {', '.join(unlocked0)}")
+    first = link.rpc("slash.dump", all_groups=True)
+    result["all_groups"] = first.pop("groups", [])
+    per: dict = {original: {"equip": None, "error": None, "current": cd0["current"], "slash": first}}
+    result["crests"] = per
+
+    before = restore_state(cd0)
+    ss0 = bool(link.rpc("guards.get").get("save_suppression"))
+    if not ss0:
+        progress.changed = True
+        link.rpc("guards.set", save_suppression=True)
+    equipped_any = False
+    try:
+        for name in crest_order(original, crests)[1:]:
+            entry: dict = {"equip": None, "error": None, "current": None, "slash": None}
+            per[name] = entry
+            try:
+                progress.changed = True
+                entry["equip"] = link.rpc("crest.equip", name=name, unlock=unlock)
+                equipped_any = True
+                settle(link)
+                entry["current"] = link.rpc("crest.dump")["current"]
+                entry["slash"] = link.rpc("slash.dump")
+                log(f"{name}: dumped (config {entry['current'].get('config')}, unlocked now {entry['equip'].get('unlocked')})")
+            except ERRORS as e:
+                entry["error"] = err_text(e)
+                log(f"{name}: {err_text(e)}")
+                if link_broken(e) or getattr(link, "closed", False):
+                    log("the link to the oracle is broken: no more crests")
+                    break
+    finally:
+        restore_failures: list[str] = []
+        try:
+            result["restore"] = link.rpc("crest.equip", restore=True)
+        except ERRORS as e:
+            result["restore"] = {"error": err_text(e)}
+            # "nothing to restore": no crest.equip got as far as its snapshot, so nothing was changed.
+            if equipped_any or "nothing to restore" not in str(e):
+                restore_failures.append(f"crest.equip restore failed: {err_text(e)}")
+        try:
+            settle(link)
+            after = restore_state(link.rpc("crest.dump"))
+        except ERRORS as e:
+            restore_failures.append(f"restore not verified: crest.dump failed: {err_text(e)}")
+        else:
+            result["after"] = {k: v for k, v in after.items() if k not in ("slots", "tool_amounts")}
+            restore_failures.extend(restore_diffs(before, after))
+        failures.extend(restore_failures)
+        # Only a verified restore lets saves through again: otherwise the next bench save or autosave would write the
+        # probe's crest changes into the save.
+        kept = bool(restore_failures)
+        if not kept and not ss0:
+            try:
+                link.rpc("guards.set", save_suppression=False)
+            except ERRORS as e:
+                failures.append(f"SaveSuppression not turned off: guards.set failed: {err_text(e)}")
+                kept = True
+        result["save_suppression_kept"] = kept
+    if not any(e.get("slash") for n, e in per.items() if n != original):
+        failures.append("no crest besides the equipped one could be dumped")
+    result["events"] = tail.snapshot()
+    result["table"] = build_tables(result)
+    return result, failures
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--instance", type=int, default=0)
+    ap.add_argument("--crests", default=",".join(DEFAULT_CRESTS), help="comma-separated ToolCrest names")
+    ap.add_argument("--no-unlock", action="store_true", help="skip crests the save has not unlocked")
+    ap.add_argument("--out", type=Path, default=None, help="default: <repo>/docs/facts/<game>/crests.json")
+    ap.add_argument("--save-suppression-off", action="store_true",
+                    help="only turn SaveSuppression off: after a [FAIL] that kept it on, once the save is reloaded")
+    a = ap.parse_args(argv)
+
+    try:
+        link = OracleLink(instance=a.instance)
+    except (RuntimeError, OSError) as e:        # nothing has been changed in the game
+        print(f"[FAIL] no link to the oracle of instance {a.instance}: {err_text(e)}", file=sys.stderr)
+        return 2
+    progress = Progress()
+    try:
+        if a.save_suppression_off:
+            return save_suppression_off(link)
+        missing = [r for r in NEEDED_RPCS if r not in (link.hello.get("rpcs") or ())]
+        if missing:
+            print(f"the oracle does not offer {missing}: deploy an SsOracle built with the Crest module", file=sys.stderr)
+            return 2
+        result, failures = run(link, [c.strip() for c in a.crests.split(",") if c.strip()], unlock=not a.no_unlock,
+                               progress=progress)
+    except (RuntimeError, OSError) as e:   # OracleError is a RuntimeError; TimeoutError and a broken link are OSErrors
+        print(f"[FAIL] {err_text(e)}", file=sys.stderr)
+        # run() turns every link error from its first crest.equip on into failures, so this one came before it. If run()
+        # had sent the guards.set that turns SaveSuppression on, its reply may have been lost with SaveSuppression on:
+        # ask the game, and assume it is on when that fails. Before that run() only read, and the save is untouched.
+        if progress.changed and save_suppression_on(link):
+            print(SAVE_KEPT.format(instance=a.instance), file=sys.stderr)
+        return 1
+    finally:
+        link.close()
+
+    tables = result["table"]
+    print("\n== configs ==")
+    print(format_table(tables["configs"], CONFIG_COLUMNS))
+    print("\n== attacks (extents in world units from the hero pivot; forward = facing) ==")
+    print(format_table(tables["attacks"], ATTACK_COLUMNS))
+    meter = [e for e in result["events"] if e["k"] == "hunter_meter"]
+    if meter:
+        print(f"\nhunter_meter events: {meter}")
+    # Failures and SAVE_KEPT come before the repo root lookup and the write, so neither can hide them.
+    for f in failures:
+        print(f"[FAIL] {f}")
+    if result.get("save_suppression_kept"):
+        print(SAVE_KEPT.format(instance=a.instance))
+
+    out = a.out
+    if out is None:
+        root = find_repo_root()
+        if root is None:
+            print("repo root not found; pass --out", file=sys.stderr)
+            return 2
+        out = root / "docs" / "facts" / (result.get("game") or "unknown") / "crests.json"
+    try:
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(json.dumps(rounded(result), indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
+    except OSError as e:
+        print(f"[FAIL] could not write {out}: {err_text(e)}", file=sys.stderr)
+        return 1
+    print(f"\nwrote {out}")
+    if not failures:
+        print("[PASS] crest, PreviousCrestID, temp flag, silk, unlocked set, saved slots and tool amounts restored")
+    return 1 if failures else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

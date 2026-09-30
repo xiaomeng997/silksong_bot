@@ -30,6 +30,7 @@ namespace SsOracle.Events
                 PdModeTap.Rebaseline();
                 GateTap.Reset();
                 DamageTap.ResetBlocked();
+                HunterMeterTap.Rebaseline();
                 try { BrainConnected?.Invoke(); }
                 catch (Exception e) { Core.Plugin.Log.LogError("EventTap: BrainConnected handler failed: " + e); }
             }
@@ -42,6 +43,7 @@ namespace SsOracle.Events
             var gm = GameManager._instance;
             // Bookkeeping that must not pile up while no brain is connected (all are a few field reads).
             DamageCtx.ResetIfStale();
+            HunterMeterTap.ResetIfStale();
             FreezeTap.Poll(gm);
             FlowTap.Poll(gm);
             if (!Tap.Active) return;
@@ -50,6 +52,7 @@ namespace SsOracle.Events
             PdModeTap.Observe(pd, "poll");
             GateTap.Poll(gm, pd);
             DamageTap.PollBlocked();
+            HunterMeterTap.Poll(HeroController.UnsafeInstance);
             PollUs = Tap.Us(t0, Stopwatch.GetTimestamp());
         }
     }

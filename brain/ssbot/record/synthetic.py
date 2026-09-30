@@ -37,7 +37,7 @@ def state(f: int, *, drop: int = 0, events: list | None = None, scene: str = "Tu
     if hero:
         s["hero"] = {"pos": [20.0 + 5 * math.sin(t), 10.0 + abs(math.sin(2 * t))], "vel": [5 * math.cos(t), 0.0],
                      "facing": 1, "health": 5 - (f // 300) % 3, "maxHealth": 5, "healthBlue": 0,
-                     "silk": (f // 60) % 10, "silk_max": 9}
+                     "silk": (f // 60) % 10, "silk_max": 9, "hunter_meter": 0}
     if ents:
         x = 30.0 + 3 * math.cos(t)
         s["ents"] = [{"iid": 1, "type_key": "Crawler", "category": "enemy", "pos": [x, 9.0], "hp": 10,

@@ -24,9 +24,19 @@ namespace SsOracle.SceneDump
         private static readonly PhysicsShapeGroup2D Group = new PhysicsShapeGroup2D();
 
         /// <summary>Appends the shapes of <paramref name="col"/> to <paramref name="into"/>; returns the vertex count added.</summary>
-        public static int Extract(Collider2D col, List<Shape> into)
+        public static int Extract(Collider2D col, List<Shape> into) => Extract(col, col.transform.localToWorldMatrix, -1f, into);
+
+        /// <summary>
+        /// As <see cref="Extract(Collider2D, List{Shape})"/>, but placed with <paramref name="m"/> instead of the collider's
+        /// own localToWorldMatrix (crest dumps: a slash as NailAttackBase scales it when the swing starts). Circles scale by
+        /// the longer of m's two axes. The physics fallback ignores <paramref name="m"/>.
+        /// </summary>
+        public static int Extract(Collider2D col, Matrix4x4 m, List<Shape> into) =>
+            Extract(col, m, Mathf.Max(new Vector2(m.m00, m.m10).magnitude, new Vector2(m.m01, m.m11).magnitude), into);
+
+        /// <summary><paramref name="circleScale"/> &lt; 0: the transform's lossyScale (read only for circles).</summary>
+        private static int Extract(Collider2D col, Matrix4x4 m, float circleScale, List<Shape> into)
         {
-            var m = col.transform.localToWorldMatrix;
             var off = col.offset;
             switch (col)
             {
@@ -57,10 +67,14 @@ namespace SsOracle.SceneDump
                     return Points.Count >= 2 ? Add(into, "edge", m, off, e.edgeRadius) : 0;
                 case CircleCollider2D c:
                 {
-                    var s = col.transform.lossyScale;
+                    if (circleScale < 0f)
+                    {
+                        var s = col.transform.lossyScale;
+                        circleScale = Mathf.Max(Mathf.Abs(s.x), Mathf.Abs(s.y));
+                    }
                     Points.Clear();
                     Points.Add(Vector2.zero);
-                    return Add(into, "circle", m, off, c.radius * Mathf.Max(Mathf.Abs(s.x), Mathf.Abs(s.y)));
+                    return Add(into, "circle", m, off, c.radius * circleScale);
                 }
                 case CapsuleCollider2D cap:
                 {

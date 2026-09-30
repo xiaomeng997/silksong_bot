@@ -123,6 +123,10 @@ def check_hero(s: dict, schema: dict, enums: dict) -> None:
     print(f"  hero_state={names[h['hero_state']]} transition={enums['transition_state'][h['transition_state']]} "
           f"damage_mode={enums['damage_mode'][h['damage_mode']]} can={h['can']}")
     check("fractured_mask exported", h.get("fractured_mask") is not None, str(h.get("fractured_mask")))
+    meter = h.get("hunter_meter")
+    check("hunter_meter exported (>= 0; > 0 only with Hunter_v2/v3)",
+          isinstance(meter, int) and meter >= 0 and (meter == 0 or h.get("crest") in ("Hunter_v2", "Hunter_v3")),
+          f"{meter} ({h.get('crest')})")
     tools, amounts = h["tools"], h["tool_amounts"]
     # One entry per crest slot (nil = empty slot, like GetEquippedToolsForCrest), then the filled extra slots.
     check("tools/tool_amounts aligned per slot",

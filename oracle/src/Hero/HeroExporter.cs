@@ -13,6 +13,10 @@ namespace SsOracle.Hero
     /// when GameManager.playerData exists; they come from ctx.Pd (= GameManager._instance.playerData), never from
     /// hero.playerData, which is a cache refreshed only on Start/Respawn (m0 §2.7).
     ///
+    /// "hunter_meter" is the Hunter combo meter (HeroController.HunterUpgState.CurrentMeterHits): it counts nail hits
+    /// that generate silk while Hunter_v2/v3 is equipped (nail damage multipliers from the Gameplay.HunterCombo* thresholds
+    /// on, RPC gameplay.dump) and stays 0 for every other crest; each reset is a "hunter_meter" event (Events.HunterMeterTap).
+    ///
     /// Enum-valued keys are ints; names come from RPC "schema.hero". The cState bitset order comes from RPC
     /// "schema.cstate". Can*() predicates are limited to side-effect-free ones: CanJump() zeroes the ledge buffer
     /// and raycasts, CanDoubleJump() queues wall-jump interrupts, CanThrowTool() fires failure events, so they
@@ -70,6 +74,7 @@ namespace SsOracle.Hero
             K(w, "can", ref n); WriteCan(w, hero);
             K(w, "anim", ref n); WriteAnim(w, hero);
             K(w, "spell", ref n); WriteSpell(w, hero);
+            K(w, "hunter_meter", ref n); w.Int(Events.HunterMeterTap.Meter(hero));
 
             if (pd != null)
             {

@@ -47,8 +47,9 @@ namespace SsOracle.Guards
         /// <summary>How many DebugMod methods now use the sandbox (-1: DebugMod not loaded).</summary>
         public static int DebugModMethodsRedirected => debugModMethods;
 
-        /// <summary>DesktopPlatform.Awake took its save root from the sandbox, so every save of this process lands in
-        /// <see cref="SandboxRoot"/>. Training edits of PlayerData (abilities.grant) require it.</summary>
+        /// <summary>True once DesktopPlatform.Awake took the sandbox root: every save file of this process is a sandbox
+        /// file (tools that edit PlayerData, crest.equip and abilities.grant, check it, since the edit reaches disk with the
+        /// next save).</summary>
         public static bool Redirected => redirected;
 
         public static void Install(Harmony harmony)
