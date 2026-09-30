@@ -11,7 +11,8 @@ current chunk and compresses every CHUNK_FRAMES frames into one independent zstd
     summary = rec.close()
     report = RecordingReader(rec.path).check(deep=True)   # M1 metric: >= 99.9 % frame delivery over 60 min
 
-CLI:  python -m ssbot.record.recorder record --seconds 60 | check <dir> [--deep] | info <dir>
+CLI:  python -m ssbot.record.recorder record --seconds 60 [--video] | check <dir> [--deep] | info <dir>
+      (--video adds the instance window's thumbnail stream of ssbot.record.video, for ssbot.record.align)
 """
 import argparse
 import ctypes
@@ -734,6 +735,14 @@ def _cmd_record(a: argparse.Namespace) -> int:
     link = OracleLink(instance=a.instance)
     rec = Recorder(link, out_dir=a.out, profile=a.profile, episode=a.episode, game_dir=a.game_dir,
                    min_free_gb=a.min_free_gb, config={"cli": sys.argv[1:]}).start()
+    vid = None
+    if a.video:  # the thumbnail stream for ssbot.record.align, in the same episode folder
+        from ssbot.record.video import VideoRecorder, instance_window
+        hwnd = instance_window(a.instance)
+        if hwnd:
+            vid = VideoRecorder(rec.path, hwnd=hwnd, width=a.video_width).start()
+        else:
+            print(f"no game window found for instance {a.instance}: recording without video")
     print(f"recording to {rec.path} for {a.seconds} s (Ctrl+C stops early)")
     try:
         end = time.monotonic() + a.seconds
@@ -741,11 +750,15 @@ def _cmd_record(a: argparse.Namespace) -> int:
             time.sleep(0.5)
     except KeyboardInterrupt:
         pass
+    vsum = vid.close() if vid is not None else None
     summary = rec.close()
     link.close()
     rep = RecordingReader(rec.path).check(deep=True)
     print(rep.format())
     print(f"drops {summary['drops']}")
+    if vsum is not None:
+        print(f"video: {vsum['written']} frames, {vsum['dropped']} dropped, callback us {vsum['callback_us']}"
+              f"{', error ' + vsum['error'] if vsum['error'] else ''}")
     if summary["error"]:
         print(f"recorder error: {summary['error']}")
     # Exit 1 below the delivery threshold, on an index that disagrees with the data, or on a recorder error, so a
@@ -786,6 +799,8 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("--episode")
     r.add_argument("--game-dir", default=r"C:\ssbot\game\train")
     r.add_argument("--min-free-gb", type=float, default=200.0, help="refuse to start / stop below this free space")
+    r.add_argument("--video", action="store_true", help="also record the gray thumbnail video (ssbot.record.video)")
+    r.add_argument("--video-width", type=int, default=320)
     r.set_defaults(fn=_cmd_record)
     c = sub.add_parser("check", help="frame continuity of a recording (exit 1 below threshold)")
     c.add_argument("path")

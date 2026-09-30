@@ -46,6 +46,27 @@ def state(f: int, *, drop: int = 0, events: list | None = None, scene: str = "Tu
     return s
 
 
+def camera(x: float, y: float, *, screen: tuple[int, int] = (1280, 720), ppu: float = 40.0, dist: float = 38.1
+           ) -> dict:
+    """STATE "cam" of a perspective camera at (x, y, -dist) looking along +z, like the game's main camera, scaled so a
+    unit on the z = 0 plane spans `ppu` px. V/P are column-major (CameraExporter.WriteMatrix): V = worldToCameraMatrix
+    (camera space looks down -z), P = OpenGL-style projectionMatrix."""
+    w, h = screen
+    f = 2.0 * dist * ppu / h           # cot(fov / 2): ppu = f * h / (2 * dist) on the z = 0 plane
+    near, far = 0.3, 1000.0
+    V = [[1, 0, 0, -x], [0, 1, 0, -y], [0, 0, -1, -dist], [0, 0, 0, 1]]
+    P = [[f * h / w, 0, 0, 0], [0, f, 0, 0], [0, 0, (far + near) / (near - far), 2 * far * near / (near - far)],
+         [0, 0, -1, 0]]
+
+    def col_major(m):
+        return [float(m[r][c]) for c in range(4) for r in range(4)]
+
+    return {"src": 1, "cb_us": 1.0, "V": col_major(V), "P": col_major(P), "pos": [x, y, -dist],
+            "pos_eof": [x, y, -dist], "shake": [0.0, 0.0], "rect": [0.0, 0.0, 1.0, 1.0],
+            "pixel_rect": [0.0, 0.0, float(w), float(h)], "rt": None, "screen": [float(w), float(h)],
+            "fov": math.degrees(2 * math.atan(1 / f)), "ortho": False, "ortho_size": 5.0, "is_camera_main": True}
+
+
 def terrain(scene: str = "Tut_01") -> dict:
     return {"scene": scene, "variant": "",
             "solids": [[[0, 0], [60, 0], [60, 8], [0, 8]], [[0, 8], [2, 8], [2, 30], [0, 30]]],
