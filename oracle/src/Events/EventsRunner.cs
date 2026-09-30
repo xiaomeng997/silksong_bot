@@ -27,7 +27,9 @@ namespace SsOracle.Events
             {
                 // Values that changed while nobody listened are not events: start from what is there now.
                 HpTap.Rebaseline();
+                PdModeTap.Rebaseline();
                 GateTap.Reset();
+                DamageTap.ResetBlocked();
                 try { BrainConnected?.Invoke(); }
                 catch (Exception e) { Core.Plugin.Log.LogError("EventTap: BrainConnected handler failed: " + e); }
             }
@@ -38,13 +40,16 @@ namespace SsOracle.Events
         {
             var t0 = Stopwatch.GetTimestamp();
             var gm = GameManager._instance;
-            // Bookkeeping that must not pile up while no brain is connected (both are a few field reads).
+            // Bookkeeping that must not pile up while no brain is connected (all are a few field reads).
             DamageCtx.ResetIfStale();
             FreezeTap.Poll(gm);
+            FlowTap.Poll(gm);
             if (!Tap.Active) return;
             var pd = gm != null ? gm.playerData : null;
             HpTap.Observe(pd, "poll", false);
+            PdModeTap.Observe(pd, "poll");
             GateTap.Poll(gm, pd);
+            DamageTap.PollBlocked();
             PollUs = Tap.Us(t0, Stopwatch.GetTimestamp());
         }
     }
@@ -52,7 +57,8 @@ namespace SsOracle.Events
     /// <summary>
     /// STATE "tap": {n: last event sequence number, hp: [health, healthBlue], gates: GateTap bits (1 disable_pause,
     /// 2 disable_save_quit, 4 disable_inventory, 8 inventory_open, 16 pause_allowed, 32 msg_canvas), freezes: open
-    /// FreezeMoment count, poll_us: this frame's poll cost, hooks_failed: hooks that could not be installed}.
+    /// FreezeMoment count, respawns: open hazard respawns, poll_us: this frame's poll cost, hooks_failed: hooks
+    /// that could not be installed}.
     /// </summary>
     internal sealed class TapExporter : Export.IExporter
     {
@@ -60,13 +66,14 @@ namespace SsOracle.Events
 
         public void Write(Ipc.MsgPackWriter w, Export.FrameContext ctx)
         {
-            w.MapHeader(6);
+            w.MapHeader(7);
             w.Key("n"); w.Int(Tap.Seq);
             w.Key("hp");
             if (ctx.Pd != null) { w.ArrayHeader(2); w.Int(ctx.Pd.health); w.Int(ctx.Pd.healthBlue); }
             else w.Nil();
             w.Key("gates"); w.UInt(GateTap.Bits);
             w.Key("freezes"); w.Int(FreezeTap.OpenCount);
+            w.Key("respawns"); w.Int(FlowTap.OpenRespawnCount);
             w.Key("poll_us"); w.Int(EventsRunner.PollUs);
             w.Key("hooks_failed"); w.Int(Tap.FailedHooks);
         }

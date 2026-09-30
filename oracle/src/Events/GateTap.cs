@@ -1,5 +1,4 @@
 using System.Collections.Generic;
-using System.Runtime.CompilerServices;
 using HarmonyLib;
 
 namespace SsOracle.Events
@@ -21,7 +20,8 @@ namespace SsOracle.Events
 
         // -1 = unknown (the next poll baselines silently), else 0/1.
         private static readonly sbyte[] Last = { -1, -1, -1, -1, -1, -1 };
-        private static int gmId, pdId;
+        private static readonly PdIdentity Identity = new PdIdentity();
+        private static int gmId;
 
         /// <summary>Current gate values as bits (1 << gate), for the "tap" STATE section.</summary>
         public static uint Bits
@@ -82,11 +82,10 @@ namespace SsOracle.Events
                 return;
             }
             var g = gm.GetInstanceID();
-            var p = RuntimeHelpers.GetHashCode(pd);
-            if (g != gmId || p != pdId)
+            var samePd = Identity.Same(pd);
+            if (g != gmId || !samePd)
             {
                 gmId = g;
-                pdId = p;
                 Reset();
             }
             Observe(DisablePause, pd.disablePause, "poll", true, false);

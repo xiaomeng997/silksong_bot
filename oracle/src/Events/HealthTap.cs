@@ -1,5 +1,4 @@
 using System.Collections.Generic;
-using System.Runtime.CompilerServices;
 using GlobalEnums;
 using HarmonyLib;
 using UnityEngine;
@@ -15,8 +14,8 @@ namespace SsOracle.Events
     /// </summary>
     internal static class HpTap
     {
+        private static readonly PdIdentity Identity = new PdIdentity();
         private static bool baselined;
-        private static int pdId;
         private static int lastH, lastB;
 
         // Outermost TakeHealth call (it recurses once when blue health overflows).
@@ -53,12 +52,10 @@ namespace SsOracle.Events
         public static void Observe(PlayerData pd, string src, bool withCaller, Dictionary<string, object> extra = null, bool force = false)
         {
             if (pd == null) return;
-            var id = RuntimeHelpers.GetHashCode(pd);
             int h = pd.health, b = pd.healthBlue;
-            if (!baselined || id != pdId)
+            if (!Identity.Same(pd) || !baselined)
             {
                 baselined = true;
-                pdId = id;
                 lastH = h;
                 lastB = b;
                 return;
@@ -165,15 +162,64 @@ namespace SsOracle.Events
     }
 
     /// <summary>
+    /// "pd_mode": every change of PlayerData.permadeathMode (m0 §3.1 MVP hooks: LethalBlock's second net watches
+    /// this write). HeroController.Die writes On -> Dead before its first yield (m0:N7), i.e. synchronously inside
+    /// the TakeDamage / DoSpecialDamage / CheckDeathCatch call that started it, so those postfixes check it while
+    /// their damage context is still open; the per-frame poll catches any other writer. Diffs against the last
+    /// observed value, so each change is reported once; a different PlayerData instance only re-baselines.
+    /// </summary>
+    internal static class PdModeTap
+    {
+        private static readonly PdIdentity Identity = new PdIdentity();
+        private static bool baselined;
+        private static PermadeathModes last;
+
+        /// <summary>Forget the baseline (brain reconnected): the next observation is silent.</summary>
+        public static void Rebaseline() => baselined = false;
+
+        public static void Observe(PlayerData pd, string src)
+        {
+            if (pd == null) return;
+            var mode = pd.permadeathMode;
+            if (!Identity.Same(pd) || !baselined)
+            {
+                baselined = true;
+                last = mode;
+                return;
+            }
+            if (mode == last) return;
+            var from = last;
+            last = mode;
+            if (!Tap.Active) return;
+            var d = Tap.Data(10);
+            d["from"] = EnumName<PermadeathModes>.Of(from);
+            d["to"] = EnumName<PermadeathModes>.Of(mode);
+            d["src"] = src;
+            var gm = GameManager._instance;
+            if (gm != null) d["scene"] = gm.sceneName;
+            d["h"] = pd.health;
+            DamageCtx.Fill(d);
+            Tap.Attribute(d, false);
+            Tap.Emit("pd_mode", d);
+        }
+    }
+
+    /// <summary>
     /// What is hurting Hornet right now: set by the TakeDamage / special-damage prefixes and cleared by their
     /// postfixes, so a TakeHealth underneath can name its hazard and source without parsing the stack. A small
-    /// stack because ApplyTagDamage(Frost) -> TakeFrostDamage -> DoSpecialDamage nests.
+    /// stack because ApplyTagDamage(Frost) -> TakeFrostDamage -> DoSpecialDamage nests. TakeDamage runs on every
+    /// physics step of a contact, so its push stores the source object and the enum; names are only formatted
+    /// when an event is actually emitted.
     /// </summary>
     internal static class DamageCtx
     {
         private struct Frame
         {
-            public string Kind, Hazard, Source;
+            public string Kind;
+            public bool HasHazard;
+            public HazardType Hazard;
+            public GameObject SourceGo;
+            public string Source;
             public bool Reported;
         }
 
@@ -183,9 +229,18 @@ namespace SsOracle.Events
 
         public static int Depth => depth;
 
-        public static void Push(string kind, string hazard, string source)
+        /// <summary>A special-damage entry point; <paramref name="source"/> is already a name (the executing FSM).</summary>
+        public static void Push(string kind, string source)
         {
-            if (depth < Stack.Length) Stack[depth] = new Frame { Kind = kind, Hazard = hazard, Source = source };
+            if (depth < Stack.Length) Stack[depth] = new Frame { Kind = kind, Source = source };
+            depth++;
+            pushedFrame = Time.frameCount;
+        }
+
+        /// <summary>HeroController.TakeDamage: no string work here.</summary>
+        public static void PushDamage(HazardType hazard, GameObject source)
+        {
+            if (depth < Stack.Length) Stack[depth] = new Frame { Kind = "damage", HasHazard = true, Hazard = hazard, SourceGo = source };
             depth++;
             pushedFrame = Time.frameCount;
         }
@@ -195,7 +250,10 @@ namespace SsOracle.Events
         {
             if (depth <= 0) return false;
             depth--;
-            return depth < Stack.Length && Stack[depth].Reported;
+            if (depth >= Stack.Length) return false;
+            var reported = Stack[depth].Reported;
+            Stack[depth] = default; // do not keep the source object alive
+            return reported;
         }
 
         /// <summary>Name of the outermost special-damage entry point, e.g. "TakeQuickDamage".</summary>
@@ -211,36 +269,45 @@ namespace SsOracle.Events
             if (depth <= 0) return;
             var f = Stack[0];
             d["ctx"] = f.Kind;
-            if (f.Hazard != null) d["hazard_type"] = f.Hazard;
-            if (f.Source != null) d["source"] = f.Source;
+            if (f.HasHazard) d["hazard_type"] = EnumName<HazardType>.Of(f.Hazard);
+            var source = f.Source ?? DamageTap.NameOf(f.SourceGo);
+            if (source != null) d["source"] = source;
         }
 
         /// <summary>Per frame: a context left open by an exception must not leak into the next frame.</summary>
         public static void ResetIfStale()
         {
-            if (depth != 0 && pushedFrame != Time.frameCount) depth = 0;
+            if (depth == 0 || pushedFrame == Time.frameCount) return;
+            for (var i = 0; i < depth && i < Stack.Length; i++) Stack[i] = default;
+            depth = 0;
         }
     }
 
     /// <summary>
-    /// "damage" (HeroController.TakeDamage prefix), "special_damage" (every non-TakeDamage path that takes
-    /// health, m0:N2), "die" (Die prefix, observe only), "hazard_death" (DieFromHazard) and "player_dead".
+    /// "damage" (HeroController.TakeDamage prefix), "damage_blocked" (collapsed no-op attempts, see
+    /// <see cref="Blocked"/>), "special_damage" (every non-TakeDamage path that takes health, m0:N2), "die" (Die
+    /// prefix, observe only), "death_catch" (CheckDeathCatch prefix), "hazard_death" (DieFromHazard) and
+    /// "player_dead".
     /// </summary>
     internal static class DamageTap
     {
+        private static readonly AccessTools.FieldRef<HeroController, double> LastHazardRespawnTime =
+            AccessTools.FieldRefAccess<HeroController, double>("lastHazardRespawnTime");
+
         public static void Install(Harmony h)
         {
             var hc = typeof(HeroController);
             Tap.Patch(h, hc, "TakeDamage", new[] { typeof(GameObject), typeof(CollisionSide), typeof(int), typeof(HazardType), typeof(DamagePropertyFlags) },
-                typeof(DamageTap), nameof(TakeDamagePrefix), nameof(PopPostfix));
+                typeof(DamageTap), nameof(TakeDamagePrefix), nameof(TakeDamagePostfix));
             Tap.Patch(h, hc, "TakeQuickDamage", new[] { typeof(int), typeof(bool), typeof(bool) }, typeof(DamageTap), nameof(QuickPrefix), nameof(EntryPostfix));
             Tap.Patch(h, hc, "TakeFrostDamage", new[] { typeof(int) }, typeof(DamageTap), nameof(FrostPrefix), nameof(EntryPostfix));
             Tap.Patch(h, hc, "TakeChompDamage", new System.Type[0], typeof(DamageTap), nameof(ChompPrefix), nameof(EntryPostfix));
             Tap.Patch(h, hc, "ApplyTagDamage", new[] { typeof(DamageTag.DamageTagInstance) }, typeof(DamageTap), nameof(TagPrefix), nameof(EntryPostfix));
             Tap.Patch(h, hc, "DoSpecialDamage", new[] { typeof(int), typeof(bool), typeof(string), typeof(bool), typeof(bool), typeof(bool), typeof(bool) },
-                typeof(DamageTap), nameof(DoSpecialDamagePrefix));
+                typeof(DamageTap), nameof(DoSpecialDamagePrefix), nameof(DoSpecialDamagePostfix));
             Tap.Patch(h, hc, "CriticalDamage", new System.Type[0], typeof(DamageTap), nameof(CriticalPrefix), nameof(PopPostfix));
             Tap.Patch(h, hc, "Die", new[] { typeof(bool), typeof(bool) }, typeof(DamageTap), nameof(DiePrefix));
+            Tap.Patch(h, hc, "CheckDeathCatch", new System.Type[0], typeof(DamageTap), nameof(CheckDeathCatchPrefix), nameof(CheckDeathCatchPostfix));
             Tap.Patch(h, hc, "DieFromHazard", new[] { typeof(HazardType), typeof(float) }, typeof(DamageTap), nameof(DieFromHazardPrefix));
             Tap.Patch(h, typeof(GameManager), "PlayerDead", new[] { typeof(float) }, typeof(DamageTap), nameof(PlayerDeadPrefix));
         }
@@ -252,31 +319,69 @@ namespace SsOracle.Events
             return gm != null ? gm.playerData : null;
         }
 
-        private static string NameOf(GameObject go)
+        public static string NameOf(GameObject go)
         {
             if (go == null) return null;
             var p = go.transform.parent;
             return p != null ? p.name + "/" + go.name : go.name;
         }
 
+        // ---- TakeDamage -----------------------------------------------------------------------------------
+
+        /// <summary>
+        /// Why an attempt is a no-op, or null if it gets past the gates. Mirrors the returns at the top of
+        /// HeroController.TakeDamage (1.0.30000 HeroController.cs:5282-5372), in order: Self damage while an
+        /// interactable blocks; amount &lt;= 0 (only a DamageHero "damaged" callback runs); then the i-frame gate. The
+        /// branch between the last two (a hazard within 0.5 s of a hazard respawn respawns again) is not a no-op.
+        /// HeroBox calls TakeDamage on every physics step of a contact, so most attempts during i-frames end here.
+        /// </summary>
+        private static string Blocked(HeroController hc, int amount, HazardType hazard, DamagePropertyFlags flags, out bool reRespawn)
+        {
+            reRespawn = false;
+            if ((flags & DamagePropertyFlags.Self) != 0 && InteractManager.BlockingInteractable != null) return "interact";
+            if (amount <= 0) return "zero";
+            var cs = hc.cState;
+            if (!cs.hazardDeath && hazard != HazardType.ENEMY && hazard != HazardType.NON_HAZARD && hazard != HazardType.EXPLOSION &&
+                Time.timeAsDouble - LastHazardRespawnTime(hc) <= 0.5)
+            {
+                reRespawn = true;
+                return null;
+            }
+            if (hazard == HazardType.SINK || hc.CanTakeDamage()) return null;
+            var pd = Pd();
+            var blocked = (!cs.Invulnerable && !(hc.parryInvulnTimer > 0f)) || cs.hazardDeath || (pd != null && pd.isInvincible) ||
+                          CheatManager.Invincibility == CheatManager.InvincibilityStates.FullInvincible ||
+                          hazard == HazardType.ENEMY || hazard == HazardType.NON_HAZARD || hazard == HazardType.EXPLOSION ||
+                          HeroInvincibilitySource.IsActive;
+            return blocked ? "iframes" : null;
+        }
+
         private static void TakeDamagePrefix(HeroController __instance, GameObject go, CollisionSide damageSide, int damageAmount,
                                              HazardType hazardType, DamagePropertyFlags damagePropertyFlags)
         {
-            var source = NameOf(go);
-            DamageCtx.Push("damage", hazardType.ToString(), source);
+            DamageCtx.PushDamage(hazardType, go);
             if (!Tap.Active) return;
+            var why = Blocked(__instance, damageAmount, hazardType, damagePropertyFlags, out var reRespawn);
+            if (why != null)
+            {
+                BlockedHits.Add(go, hazardType, damageAmount, damageSide, damagePropertyFlags, why);
+                return;
+            }
+            // This attempt gets through: first report the blocked ones before it, so the order stays readable.
+            BlockedHits.FlushAll("hit");
             var pd = Pd();
-            var d = Tap.Data(16);
-            d["source"] = source;
-            d["side"] = damageSide.ToString();
+            var d = Tap.Data(18);
+            d["source"] = NameOf(go);
+            d["side"] = EnumName<CollisionSide>.Of(damageSide);
             d["amount"] = damageAmount;
-            d["hazard"] = hazardType.ToString();
+            d["hazard"] = EnumName<HazardType>.Of(hazardType);
             d["flags"] = (int)damagePropertyFlags;
-            d["flag_names"] = damagePropertyFlags.ToString();
+            d["flag_names"] = EnumName<DamagePropertyFlags>.Of(damagePropertyFlags);
             d["can_take"] = __instance.CanTakeDamage();
             d["invuln"] = __instance.cState.Invulnerable;
             d["parry_t"] = __instance.parryInvulnTimer;
             d["recoiling"] = __instance.cState.recoiling;
+            if (reRespawn) d["re_respawn"] = true;
             if (pd != null)
             {
                 d["h"] = pd.health;
@@ -286,18 +391,128 @@ namespace SsOracle.Events
             Tap.Emit("damage", d);
         }
 
+        private static void TakeDamagePostfix()
+        {
+            // Die (started inside TakeDamage) writes permadeathMode before its first yield (m0:N7).
+            PdModeTap.Observe(Pd(), "TakeDamage");
+            DamageCtx.Pop();
+        }
+
+        /// <summary>Per frame (EventsRunner.LateUpdate): report contacts whose blocked attempts have stopped.</summary>
+        public static void PollBlocked() => BlockedHits.Poll();
+
+        /// <summary>Brain (re)connected: blocked attempts from before are not reported.</summary>
+        public static void ResetBlocked() => BlockedHits.Clear();
+
+        /// <summary>
+        /// Blocked TakeDamage attempts collapsed per (source object, hazard, reason) into one "damage_blocked"
+        /// event {source, hazard, why, n, amount (largest), side, flags, first_f, last_f, end}. A group ends
+        /// ("ended") when a physics step passes without an attempt from it (contact over, or the hero stopped
+        /// being hit), when an attempt gets through ("hit": i-frames over), or when the table is full ("full").
+        /// </summary>
+        private static class BlockedHits
+        {
+            private struct Group
+            {
+                public int GoId;
+                public HazardType Hazard;
+                public string Why, Name;
+                public CollisionSide Side;
+                public DamagePropertyFlags Flags;
+                public int Count, MaxAmount;
+                public long FirstFrame, LastFrame;
+                public double LastFixed;
+            }
+
+            private static readonly Group[] Groups = new Group[8];
+            private static int count;
+
+            public static void Add(GameObject go, HazardType hazard, int amount, CollisionSide side, DamagePropertyFlags flags, string why)
+            {
+                var id = go != null ? go.GetInstanceID() : 0;
+                var frame = Time.frameCount;
+                var fixedTime = Time.fixedTimeAsDouble;
+                for (var i = 0; i < count; i++)
+                {
+                    ref var g = ref Groups[i];
+                    if (g.GoId != id || g.Hazard != hazard || g.Why != why) continue;
+                    g.Count++;
+                    if (amount > g.MaxAmount) g.MaxAmount = amount;
+                    g.LastFrame = frame;
+                    g.LastFixed = fixedTime;
+                    return;
+                }
+                if (count == Groups.Length) Flush(0, "full");
+                Groups[count++] = new Group
+                {
+                    GoId = id, Hazard = hazard, Why = why, Name = NameOf(go), Side = side, Flags = flags, Count = 1, MaxAmount = amount,
+                    FirstFrame = frame, LastFrame = frame, LastFixed = fixedTime,
+                };
+            }
+
+            public static void Poll()
+            {
+                if (count == 0) return;
+                // Time.fixedTimeAsDouble is the start of the latest physics step: a group whose last attempt is
+                // older got no attempt in that step. No step (pause, freeze at timeScale 0) keeps groups open.
+                var fixedTime = Time.fixedTimeAsDouble;
+                for (var i = count - 1; i >= 0; i--)
+                    if (fixedTime > Groups[i].LastFixed) Flush(i, "ended");
+            }
+
+            public static void FlushAll(string end)
+            {
+                while (count > 0) Flush(0, end);
+            }
+
+            public static void Clear()
+            {
+                for (var i = 0; i < count; i++) Groups[i] = default;
+                count = 0;
+            }
+
+            private static void Flush(int i, string end)
+            {
+                var g = Groups[i];
+                for (var j = i + 1; j < count; j++) Groups[j - 1] = Groups[j];
+                Groups[--count] = default;
+                if (!Tap.Active) return;
+                var d = Tap.Data(12);
+                d["source"] = g.Name;
+                d["hazard"] = EnumName<HazardType>.Of(g.Hazard);
+                d["why"] = g.Why;
+                d["n"] = g.Count;
+                d["amount"] = g.MaxAmount;
+                d["side"] = EnumName<CollisionSide>.Of(g.Side);
+                d["flags"] = (int)g.Flags;
+                d["first_f"] = g.FirstFrame;
+                d["last_f"] = g.LastFrame;
+                d["end"] = end;
+                Tap.Emit("damage_blocked", d);
+            }
+        }
+
+        // ---- special damage -------------------------------------------------------------------------------
+
         private static void PopPostfix() => DamageCtx.Pop();
 
         // Entry points only open a context; DoSpecialDamage reports (once), or EntryPostfix reports that the
         // entry never reached it (e.g. TakeQuickDamage cancelled right after a hazard respawn).
-        private static void QuickPrefix() => DamageCtx.Push("special:TakeQuickDamage", null, Tap.FsmNow());
-        private static void FrostPrefix() => DamageCtx.Push("special:TakeFrostDamage", null, Tap.FsmNow());
-        private static void ChompPrefix() => DamageCtx.Push("special:TakeChompDamage", null, Tap.FsmNow());
+        private static void QuickPrefix() => DamageCtx.Push("special:TakeQuickDamage", ExecutingFsm());
+        private static void FrostPrefix() => DamageCtx.Push("special:TakeFrostDamage", ExecutingFsm());
+        private static void ChompPrefix() => DamageCtx.Push("special:TakeChompDamage", ExecutingFsm());
+
+        private static readonly Dictionary<DamageTag.SpecialDamageTypes, string> TagKinds = new Dictionary<DamageTag.SpecialDamageTypes, string>();
 
         private static void TagPrefix(DamageTag.DamageTagInstance damageTagInstance)
         {
-            DamageCtx.Push("special:ApplyTagDamage:" + damageTagInstance.specialDamageType, null, Tap.FsmNow());
+            var type = damageTagInstance.specialDamageType;
+            if (!TagKinds.TryGetValue(type, out var kind)) TagKinds[type] = kind = "special:ApplyTagDamage:" + type;
+            DamageCtx.Push(kind, ExecutingFsm());
         }
+
+        /// <summary>The executing FSM as a context source; nothing to format while no brain would see it.</summary>
+        private static string ExecutingFsm() => Tap.Active ? Tap.FsmNow() : null;
 
         private static void EntryPostfix()
         {
@@ -336,9 +551,11 @@ namespace SsOracle.Events
             Tap.Emit("special_damage", d);
         }
 
+        private static void DoSpecialDamagePostfix() => PdModeTap.Observe(Pd(), "DoSpecialDamage");
+
         private static void CriticalPrefix(HeroController __instance)
         {
-            DamageCtx.Push("special:CriticalDamage", null, Tap.FsmNow());
+            DamageCtx.Push("special:CriticalDamage", ExecutingFsm());
             DamageCtx.MarkReported();
             if (!Tap.Active) return;
             var pd = Pd();
@@ -353,6 +570,8 @@ namespace SsOracle.Events
             Tap.Emit("special_damage", d);
         }
 
+        // ---- death ----------------------------------------------------------------------------------------
+
         private static void DiePrefix(HeroController __instance, bool nonLethal, bool frostDeath)
         {
             if (!Tap.Active) return;
@@ -365,7 +584,7 @@ namespace SsOracle.Events
             if (pd != null)
             {
                 d["h"] = pd.health;
-                d["pd_mode"] = pd.permadeathMode.ToString();
+                d["pd_mode"] = EnumName<PermadeathModes>.Of(pd.permadeathMode);
             }
             if (gm != null && gm.sm != null) d["memory"] = gm.IsMemoryScene();
             DamageCtx.Fill(d);
@@ -373,11 +592,36 @@ namespace SsOracle.Events
             Tap.Emit("die", d);
         }
 
+        /// <summary>
+        /// CheckDeathCatch (only from DamageHeroDirectly(V2) with no damager, m0:C4) starts Die when health is
+        /// already 0 and Hornet is not dead: "catch" says whether this call will.
+        /// </summary>
+        private static void CheckDeathCatchPrefix(HeroController __instance)
+        {
+            if (!Tap.Active) return;
+            var pd = Pd();
+            var d = Tap.Data(10);
+            var dead = __instance.cState.dead;
+            d["dead"] = dead;
+            if (pd != null)
+            {
+                d["h"] = pd.health;
+                d["hb"] = pd.healthBlue;
+                d["catch"] = !dead && pd.health <= 0;
+                d["pd_mode"] = EnumName<PermadeathModes>.Of(pd.permadeathMode);
+            }
+            DamageCtx.Fill(d);
+            Tap.Attribute(d, true);
+            Tap.Emit("death_catch", d);
+        }
+
+        private static void CheckDeathCatchPostfix() => PdModeTap.Observe(Pd(), "CheckDeathCatch");
+
         private static void DieFromHazardPrefix(HeroController __instance, HazardType hazardType)
         {
             if (!Tap.Active) return;
             var d = Tap.Data(6);
-            d["hazard"] = hazardType.ToString();
+            d["hazard"] = EnumName<HazardType>.Of(hazardType);
             var pd = Pd();
             if (pd != null) d["h"] = pd.health;
             DamageCtx.Fill(d);
@@ -393,7 +637,7 @@ namespace SsOracle.Events
             if (pd != null)
             {
                 d["h"] = pd.health;
-                d["pd_mode"] = pd.permadeathMode.ToString();
+                d["pd_mode"] = EnumName<PermadeathModes>.Of(pd.permadeathMode);
             }
             Tap.Emit("player_dead", d);
         }

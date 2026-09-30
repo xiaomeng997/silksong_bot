@@ -4,10 +4,11 @@ oracle/src/SceneDump, oracle/src/Progress).
 TERRAIN (one per gameplay room, on connect, on RPC "scene.dump"):
     {seq, reason, frame, transition, scene_raw, scene, scenes, loaded, cam, sm, cutscene,
      solids:  [{id, go, layer, on, body, flags, shapes}],        # TERRAIN / SOFT_TERRAIN colliders
-     hazards: [{id, go, on, hazard, damage, flags, tink, trigger, body, shapes}],
+     hazards: [{id, go, src, on, hazard, damage, flags, tink, trigger, body, shapes}],
+              # src "dh" (DamageHero) or "fsm" (the legacy 'damages_hero' FSM, which HeroBox checks first; flags 0)
      gates, respawns, preloaders, battles, frost, no_clamber, cam_locks, harpoon, cogs, cutscene_info
          (each present only when the room has one): [{go, on, pos, shapes?, aabb?, ...}],
-     layers, stats}
+     layers, stats {objects, colliders_seen, verts, slices, frames, work_ms, ms}}
     gates:      + target, entry, side, door, inactive, non_hazard, listed, respawn?
     preloaders: + loads, started, has_trigger, trigger_on?, test_ok?, gate_white, gate_black
                   (shapes = the activate trigger's; no trigger = loads in Start; m0:C8)
@@ -18,11 +19,14 @@ TERRAIN (one per gameplay room, on connect, on RPC "scene.dump"):
 PROGRESS (<= 2 Hz; full snapshot on connect, PlayerData replacement and RPC "progress.full"):
     {seq, frame, full, reason, scene, t_live, changed: {field: value}}
     + when full: crest, tools, tool_equips, extra_equips, equipped, fields
+    + in a diff whose tool data changed (Tools as GetToolData reads them, ToolEquips, ExtraToolEquips): crest,
+      tools, tool_equips, extra_equips, equipped (complete sections, replacing the previous ones)
+    A full snapshot is read at "frame" and written over a few frames.
 
 STATE "ev": [{k, f, q, d}] with d["n"] a per-process event sequence number (gaps = events lost with a
 dropped STATE). Events found by the per-frame poll (src "poll") are stamped with the frame they were seen in.
-STATE sections: "tap" {n, hp, gates, freezes, poll_us, hooks_failed}, "room" {seq, transition, current, busy},
-"prog" {seq, pending, chunk, fields, ok}.
+STATE sections: "tap" {n, hp, gates, freezes, respawns, poll_us, hooks_failed}, "room" {seq, transition, current,
+busy, work_us (the TERRAIN dump's main-thread work in this frame)}, "prog" {seq, pending, chunk, fields, building, ok}.
 
 Event kinds (k) and payload keys (d); "fsm" = "GameObject/Fsm/State:Action" when a PlayMaker FSM was executing,
 "caller" = up to 6 managed frames, innermost first:
@@ -30,16 +34,26 @@ Event kinds (k) and payload keys (d); "fsm" = "GameObject/Fsm/State:Action" when
                   IncrementInt | DecrementInt | SetVariable | HeroItemsState.Apply | direct | poll), ctx?, hazard_type?,
                   source?, caller?, fsm?; TakeHealth adds amount, lifeblood, allow_mask_break, mask_left, mask_broke,
                   mask_saved
-    damage        source, side, amount, hazard, flags, flag_names, can_take, invuln, parry_t, recoiling, h, hb
+    damage        source, side, amount, hazard, flags, flag_names, can_take, invuln, parry_t, recoiling, h, hb,
+                  re_respawn? (a hazard within 0.5 s of a hazard respawn: respawns again)  (attempts past the gates)
+    damage_blocked source, hazard, why, n, amount, side, flags, first_f, last_f, end (ended | hit | full)
+                  (TakeDamage no-ops of one contact, collapsed: HeroBox retries every physics step. why: iframes = its
+                  invulnerability gate (i-frames, recoil, parry timer, hazard death, invincibility), zero = amount 0,
+                  interact = Self damage while an interactable blocks)
     special_damage method, amount, event, can_die, allow_mask_break, just_take_health, frost, transitioning, h, hb
                   (or method + reached_special=False when the entry point never reached DoSpecialDamage)
     die           non_lethal, frost, dead_already, h, pd_mode, memory, ctx?, caller      (attempt; guards may block)
+    death_catch   dead, h, hb, catch (this call starts Die), pd_mode, ctx?, caller, fsm?
+    pd_mode       from, to, src (TakeDamage | DoSpecialDamage | CheckDeathCatch | poll), scene, h, ctx?, hazard_type?,
+                  source?, fsm?                                                (every permadeathMode change)
     hazard_death  hazard, h, ctx?
     player_dead   wait, h, pd_mode
     gs            from, to, from_i, to_i, scene
     scene_leave   from_raw, from, to, gate, first_level, seq
     scene_enter   scene_raw, scene, gate, gameplay, state, seq, pos            (once per transition)
-    hazard_respawn phase start (scene, from, marker) | end (scene, pos)
+    hazard_respawn phase start (id, scene, from, marker, open) | end (id, reason, scene, pos, ms, frames)
+                  end reason: done | transition (no ground point: it began a scene transition) | exception | disposed |
+                  room_left | no_game_manager | game_manager_rebuilt; "end" comes from the coroutine's last step
     freeze        phase start (id, type, down, wait, up, speed, caller?) | end (id, type, ms, frames, reason)
                   type = FreezeMomentTypes name, or "direct:<caller>" (e.g. the hero's own damage freeze)
     pause_gate    gate (disable_pause | disable_save_quit | disable_inventory | inventory_open | pause_allowed |
@@ -129,6 +143,7 @@ class Hazard:
     trigger: bool
     body: int
     shapes: list[Shape]
+    src: str = "dh"
 
 
 @dataclass
@@ -152,7 +167,7 @@ class Terrain:
         solids = [Solid(s["id"], s["go"], s["layer"], s["on"], s["body"], s["flags"], _shapes(s["shapes"]))
                   for s in msg.get("solids", ())]
         hazards = [Hazard(h["id"], h["go"], h["on"], h["hazard"], h["damage"], h["flags"], h["tink"], h["trigger"],
-                          h["body"], _shapes(h["shapes"])) for h in msg.get("hazards", ())]
+                          h["body"], _shapes(h["shapes"]), h.get("src", "dh")) for h in msg.get("hazards", ())]
         zones = {}
         for key in ZONE_KEYS:
             items = []
@@ -206,14 +221,16 @@ class ProgressMirror:
         changed = msg.get("changed", {})
         if msg.get("full"):
             self.fields = dict(changed)
+            self.full_seq = msg["seq"]
+        else:
+            self.fields.update(changed)
+        # Full snapshots always carry the tool sections; diffs carry them (complete) when the tool data changed.
+        if "tools" in msg:
             self.tools = msg.get("tools", {})
             self.crest = msg.get("crest", {})
             self.tool_equips = msg.get("tool_equips", {})
             self.extra_equips = msg.get("extra_equips", {})
             self.equipped = msg.get("equipped", [])
-            self.full_seq = msg["seq"]
-        else:
-            self.fields.update(changed)
         self.seq = msg["seq"]
         self.messages += 1
         return changed

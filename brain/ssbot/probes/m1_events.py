@@ -7,12 +7,17 @@ save used by P3/P6/P7) and nothing else connected to IPC v1. The game does not n
     uv run python -m ssbot.probes.m1_events [--walk left|right] [--walk-seconds 25]
 
 Steps: connect IPC v1 (expects a full PROGRESS, and a TERRAIN if already in a room) -> load slot 1 if at the
-menu (gs edges, scene_enter, TERRAIN, PROGRESS pd_swap) -> leave the bench -> 'hurt 1 ENEMY' on the debug line
-server (damage, hp with caller, freeze start/end, disable_pause edges) -> heal with pdset (hp from the poll) ->
-pause and unpause (pause_allowed edges from PreventPause/AllowPause) -> walk (--walk, default left) through a
-room transition (scene_leave, scene_enter, TERRAIN for the new room) -> RPC scene.dump and progress.full. Prints
-PASS/FAIL per check, message sizes, STATE cost (cost_us and cost_ex per section) and event counts. Exit code 1 on
-any FAIL.
+menu (gs edges, scene_enter, TERRAIN, PROGRESS pd_swap) -> leave the bench and wait until Hornet can be hurt
+(accepting input, off the bench, nothing blocking pause) -> 'hurt 1 ENEMY' on the debug line server (damage, hp
+with caller, freeze start/end, disable_pause edges) -> heal with pdset (hp from the poll) -> 'hurt 1 SPIKES'
+(hazard_death, hazard_respawn start and its end from the coroutine's last step >= 0.3 s later, disable_pause on
+before the start and off in the end's frame, no scene_enter) and heal again -> pause and unpause (pause_allowed
+edges from PreventPause/AllowPause) -> walk (--walk, default left) through a room transition (scene_leave,
+scene_enter, TERRAIN for the new room) -> RPC scene.dump and progress.full. Prints PASS/FAIL per check, message
+sizes, STATE cost (cost_us and cost_ex per section), the TERRAIN dump's work per frame (room.work_us) and event
+counts. Exit code 1 on any FAIL.
+
+Needs a save where one SPIKES hit is not lethal (slot 1 is healed back to its starting health before it).
 """
 import argparse
 import sys
@@ -42,6 +47,8 @@ class Recorder:
         self.cost_us: list[int] = []
         self.cost_ex: dict[str, list[int]] = defaultdict(list)
         self.poll_us: list[int] = []
+        self.room_work_us: list[int] = []
+        self.main_us: list[int] = []  # STATE build + tap poll + TERRAIN dump work, per STATE
         self.last_tap: dict = {}
         link.subscribe_raw(self._on_raw)
 
@@ -55,10 +62,14 @@ class Recorder:
                 self.cost_us.append(msg.get("cost_us", 0))
                 for k, v in (msg.get("cost_ex") or {}).items():
                     self.cost_ex[k].append(v)
-                tap = msg.get("tap")
+                tap = msg.get("tap") or {}
                 if tap:
                     self.last_tap = tap
                     self.poll_us.append(tap.get("poll_us", 0))
+                room = msg.get("room") or {}
+                if room:
+                    self.room_work_us.append(room.get("work_us", 0))
+                self.main_us.append(msg.get("cost_us", 0) + tap.get("poll_us", 0) + room.get("work_us", 0))
                 self.events.add_state(msg)
             elif msg_type == MsgType.TERRAIN:
                 self.terrains.append((now, len(raw), Terrain.decode(msg)))
@@ -97,6 +108,19 @@ def pct(values, q):
 
 def brief(e: dict, keys) -> str:
     return " ".join(f"{k}={e.get(k)}" for k in keys if k in e)
+
+
+def ready(s: dict) -> bool:
+    """Hornet can be hurt: playing, accepting input, off the bench and nothing blocking pause (blk == 0)."""
+    p = s["pause"]
+    return s["game"]["gs"] == PLAYING and p["hero_input"] and not p["bench"] and p["blk"] == 0
+
+
+def wait_ready(link: OracleLink, timeout_s: float) -> dict | None:
+    try:
+        return link.wait_state(ready, timeout_s)
+    except TimeoutError:
+        return None
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -144,14 +168,22 @@ def main(argv: list[str] | None = None) -> int:
     else:
         print("  already in game")
 
-    # Wake up / get control, then step off the bench.
+    # Wake up / get control, then step off the bench. A hit is only taken once the hero is out of the bench
+    # exit (CanTakeDamage is false before), so wait for a STATE that says so.
     link.wait_state(lambda s: s["game"]["gs"] == PLAYING and s["pause"]["hero_input"], 30)
     time.sleep(2.0)
-    c.tap("left", 0.3)
-    time.sleep(1.0)
+    s = None
+    for _ in range(3):
+        c.tap("left", 0.3)
+        s = wait_ready(link, 4)
+        if s:
+            break
+    ck.check("hero ready (input, off the bench, blk == 0)", s,
+             "" if s else f"last pause section {(link.state or {}).get('pause')}")
+    time.sleep(0.5)
 
     print("\n== hurt 1 ENEMY ==")
-    s = link.wait_state(lambda s: (s["pause"]["blk"] & 1) == 0, 10)  # disablePause off
+    s = wait_ready(link, 10) or link.wait_state(timeout_s=2)
     hp0 = s["tap"]["hp"]
     f0 = s["f"]
     reply = c._call("hurt 1 ENEMY")
@@ -159,7 +191,8 @@ def main(argv: list[str] | None = None) -> int:
     time.sleep(2.0)
     dmg = rec.events.of("damage", since_frame=f0)
     ck.check("damage event", any(e.get("hazard") == "ENEMY" for e in dmg),
-             brief(dmg[0], ("source", "side", "amount", "hazard", "can_take", "invuln")) if dmg else "none")
+             brief(dmg[0], ("source", "side", "amount", "hazard", "can_take", "invuln")) if dmg else
+             "none; blocked: " + "; ".join(brief(e, ("hazard", "why", "n")) for e in rec.events.of("damage_blocked", since_frame=f0)))
     hp = [e for e in rec.events.of("hp", since_frame=f0) if e["delta"] < 0 or e["blue_delta"] < 0]
     ck.check("hp event from TakeHealth", any(e["src"] == "TakeHealth" and e.get("hazard_type") == "ENEMY" for e in hp),
              brief(hp[0], ("h", "hb", "delta", "blue_delta", "src", "hazard_type", "mask_broke", "mask_saved")) if hp else "none")
@@ -179,6 +212,39 @@ def main(argv: list[str] | None = None) -> int:
     c._call(f"pdset health {hp0[0]}")
     heal = rec.wait(lambda: next((e for e in rec.events.of("hp", since_frame=f0) if e["delta"] > 0), None), 2)
     ck.check("hp event from poll", heal and heal["src"] == "poll", brief(heal or {}, ("h", "delta", "src")))
+
+    print("\n== hurt 1 SPIKES (hazard death and respawn) ==")
+    s = wait_ready(link, 10)
+    ck.check("hero ready for the spikes hit", s, "" if s else f"last pause section {(link.state or {}).get('pause')}")
+    s = s or link.wait_state(timeout_s=2)
+    f0 = s["f"]
+    reply = c._call("hurt 1 SPIKES")
+    print("  hurt ->", reply)
+    end = rec.wait(lambda: next((e for e in rec.events.of("hazard_respawn", since_frame=f0) if e["phase"] == "end"), None), 15)
+    time.sleep(0.5)
+    hd = rec.events.of("hazard_death", since_frame=f0)
+    ck.check("hazard_death SPIKES", any(e["hazard"] == "SPIKES" for e in hd), "; ".join(brief(e, ("hazard", "h")) for e in hd))
+    hp = [e for e in rec.events.of("hp", since_frame=f0) if e["delta"] < 0 or e["blue_delta"] < 0]
+    ck.check("hp event from TakeHealth (SPIKES)", any(e["src"] == "TakeHealth" and e.get("hazard_type") == "SPIKES" for e in hp),
+             brief(hp[0], ("h", "delta", "src", "hazard_type")) if hp else "none")
+    start = next((e for e in rec.events.of("hazard_respawn", since_frame=f0) if e["phase"] == "start"), None)
+    ck.check("hazard_respawn start", start, brief(start or {}, ("f", "id", "scene", "from", "marker", "open")))
+    span = end["f"] - start["f"] if start and end else None
+    # HeroController.HazardRespawn: WaitForSeconds(0.3) plus the respawn animation before its last step.
+    ck.check("hazard_respawn end from the coroutine (done, >= 18 frames and >= 0.3 s after the start)",
+             start and end and end["id"] == start["id"] and end["reason"] == "done" and span >= 18 and end["ms"] >= 300,
+             f"span {span} frames; " + brief(end or {}, ("f", "id", "reason", "ms", "frames", "pos")))
+    dp = [e for e in rec.events.of("pause_gate", since_frame=f0) if e["gate"] == "disable_pause"]
+    on = next((e for e in dp if e["value"]), None)
+    off = next((e for e in dp if not e["value"] and on is not None and e["f"] >= on["f"]), None)
+    ck.check("disable_pause on before the start, off in the end's frame",
+             on and off and start and end and on["f"] <= start["f"] and off["f"] == end["f"],
+             "; ".join(brief(e, ("f", "value", "src")) for e in dp))
+    extra = rec.events.of("scene_enter", since_frame=f0)
+    ck.check("no scene_enter from the hazard respawn", not extra, "; ".join(brief(e, ("f", "scene_raw", "seq")) for e in extra))
+    f1 = link.frame
+    c._call(f"pdset health {hp0[0]}")
+    rec.wait(lambda: next((e for e in rec.events.of("hp", since_frame=f1) if e["delta"] > 0), None), 2)
 
     print("\n== pause / unpause ==")
     link.wait_state(lambda s: s["pause"]["blk"] == 0, 10)
@@ -255,7 +321,13 @@ def main(argv: list[str] | None = None) -> int:
         v = rec.cost_ex[k]
         print(f"  cost_ex[{k:<8}] p50 {pct(v, .5):>4}  p99 {pct(v, .99):>4}  max {max(v):>5} us")
     print(f"  tap.poll_us p50 {pct(rec.poll_us, .5)}  p99 {pct(rec.poll_us, .99)}  max {max(rec.poll_us, default=0)}")
+    busy = [v for v in rec.room_work_us if v > 0]
+    print(f"  room.work_us (frames with TERRAIN work: {len(busy)}) p50 {pct(busy, .5)}  max {max(busy, default=0)}")
     ck.check("STATE build p50 <= 300 us, p99 <= 1000 us (C14)", pct(rec.cost_us, .5) <= 300 and pct(rec.cost_us, .99) <= 1000)
+    ck.check("TERRAIN dump work per frame <= 600 us", max(busy, default=0) <= 600, f"max {max(busy, default=0)} us")
+    ck.check("STATE build + tap poll + TERRAIN work p50 <= 300 us, p99 <= 1000 us",
+             pct(rec.main_us, .5) <= 300 and pct(rec.main_us, .99) <= 1000,
+             f"p50 {pct(rec.main_us, .5)} p99 {pct(rec.main_us, .99)} max {max(rec.main_us, default=0)}")
     gates = rec.last_tap.get("gates", 0)
     print("  last gates:", [g for g, b in GATE_BITS.items() if gates & b])
 

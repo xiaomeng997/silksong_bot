@@ -201,4 +201,41 @@ namespace SsOracle.Events
         /// <summary>Microseconds between two Stopwatch timestamps.</summary>
         public static long Us(long fromQpc, long toQpc) => (toQpc - fromQpc) * 1_000_000 / Stopwatch.Frequency;
     }
+
+    /// <summary>
+    /// Which PlayerData instance one consumer saw last. A weak reference compared with ReferenceEquals: it never
+    /// keeps the object alive or uses it across frames (m0:N42), and unlike RuntimeHelpers.GetHashCode it cannot
+    /// mistake a new PlayerData for the old one (Mono's identity hash comes from the address, and the non-moving
+    /// GC can put a new PlayerData where a freed one lived). Each consumer owns its own instance. Main thread only.
+    /// </summary>
+    internal sealed class PdIdentity
+    {
+        private readonly WeakReference<PlayerData> last = new WeakReference<PlayerData>(null);
+
+        /// <summary>True if <paramref name="pd"/> is the instance passed last time; otherwise remembers it and returns false.</summary>
+        public bool Same(PlayerData pd)
+        {
+            if (last.TryGetTarget(out var seen) && ReferenceEquals(seen, pd)) return true;
+            last.SetTarget(pd);
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Enum names cached per value: Enum.ToString boxes and reflects on every call (and builds a new string for a
+    /// [Flags] combination), which hooks on hot paths such as TakeDamage cannot afford.
+    /// </summary>
+    internal static class EnumName<T> where T : struct, Enum
+    {
+        private static readonly Dictionary<T, string> Names = new Dictionary<T, string>();
+
+        public static string Of(T value)
+        {
+            lock (Names)
+            {
+                if (!Names.TryGetValue(value, out var s)) Names[value] = s = value.ToString();
+                return s;
+            }
+        }
+    }
 }

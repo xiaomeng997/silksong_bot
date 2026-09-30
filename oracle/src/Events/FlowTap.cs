@@ -18,16 +18,35 @@ namespace SsOracle.Events
     /// </summary>
     internal static class FlowTap
     {
+        private struct Respawn
+        {
+            public long StartQpc;
+            public long StartFrame;
+            public int Transition;
+            public bool Transitioned;
+        }
+
         private static int transitionSeq;
         private static int enteredSeq = -1;
-        private static bool hazardRespawnPending;
+        private static bool leaving;
+        private static int leavingSceneHandle;
         private static long saveSeq;
+
+        // Open HeroController.HazardRespawn coroutines (usually one; the 0.5 s re-respawn in TakeDamage can overlap).
+        private static readonly Dictionary<int, Respawn> OpenRespawns = new Dictionary<int, Respawn>();
+        private static readonly List<int> Closing = new List<int>();
+        private static int nextRespawnId;
+        private static int respawnStepDepth;
+        private static int respawnGmId;
 
         /// <summary>Raised on the main thread when a new room has finished entering (not for hazard respawns).</summary>
         public static event Action<GameManager> RoomEntered;
 
         /// <summary>Raised on the main thread when a scene transition begins.</summary>
         public static event Action RoomLeaving;
+
+        /// <summary>Hazard respawns in progress (STATE "tap".respawns).</summary>
+        public static int OpenRespawnCount => OpenRespawns.Count;
 
         public static void Install(Harmony h)
         {
@@ -52,8 +71,8 @@ namespace SsOracle.Events
         {
             if (__state == newState || !Tap.Active) return;
             var d = Tap.Data(8);
-            d["from"] = __state.ToString();
-            d["to"] = newState.ToString();
+            d["from"] = EnumName<GameState>.Of(__state);
+            d["to"] = EnumName<GameState>.Of(newState);
             d["from_i"] = (int)__state;
             d["to_i"] = (int)newState;
             d["scene"] = __instance.sceneName;
@@ -65,7 +84,20 @@ namespace SsOracle.Events
         private static void OnSceneTransitionBegan(SceneLoad sceneLoad)
         {
             transitionSeq++;
-            hazardRespawnPending = false;
+            // Until the next scene is active, FinishedEnteringScene calls belong to the room being left.
+            leaving = true;
+            leavingSceneHandle = SceneManager.GetActiveScene().handle;
+            if (OpenRespawns.Count > 0)
+            {
+                Closing.Clear();
+                Closing.AddRange(OpenRespawns.Keys);
+                foreach (var id in Closing)
+                {
+                    var r = OpenRespawns[id];
+                    r.Transitioned = true;
+                    OpenRespawns[id] = r;
+                }
+            }
             try { RoomLeaving?.Invoke(); }
             catch (Exception e) { Core.Plugin.Log.LogError("EventTap: RoomLeaving handler failed: " + e); }
             if (!Tap.Active) return;
@@ -81,41 +113,94 @@ namespace SsOracle.Events
             Tap.Emit("scene_leave", d);
         }
 
-        private static void HazardRespawnPostfix(HeroController __instance)
+        /// <summary>
+        /// HeroController.HazardRespawn is a coroutine: this postfix runs when it is created (GameManager.EnterHero,
+        /// or KillOnContact), so it reports "start" and wraps the iterator; <see cref="RespawnTracker"/> reports
+        /// "end" when the coroutine finishes, i.e. after its last step has cleared cState.hazardRespawning and
+        /// disablePause and called FinishedEnteringScene (HeroController.cs:7325-7394).
+        /// </summary>
+        private static void HazardRespawnPostfix(HeroController __instance, ref IEnumerator __result)
         {
-            hazardRespawnPending = true;
-            if (!Tap.Active) return;
+            if (__result == null) return;
             var gm = GameManager._instance;
+            if (OpenRespawns.Count == 0) respawnGmId = gm != null ? gm.GetInstanceID() : 0;
+            var id = ++nextRespawnId;
+            OpenRespawns[id] = new Respawn { StartQpc = Stopwatch.GetTimestamp(), StartFrame = Time.frameCount, Transition = transitionSeq };
+            __result = new RespawnTracker(__result, id);
+            if (!Tap.Active) return;
             var pd = gm != null ? gm.playerData : null;
-            var d = Tap.Data(6);
+            var d = Tap.Data(8);
             d["phase"] = "start";
+            d["id"] = id;
             d["scene"] = gm != null ? gm.sceneName : null;
             d["from"] = (Vector2)__instance.transform.position;
             if (pd != null) d["marker"] = (Vector2)pd.hazardRespawnLocation;
+            d["open"] = OpenRespawns.Count;
             Tap.Emit("hazard_respawn", d);
         }
 
         /// <summary>
-        /// Called once per room entry and once at the end of every hazard respawn (m0 §2.7). The first call after
-        /// each SceneTransitionBegan is "scene_enter"; one after HazardRespawn is "hazard_respawn" end; any other
-        /// repeat is dropped.
+        /// "hazard_respawn" end. reason: "done" (the coroutine finished), "transition" (it finished after a scene
+        /// transition began: with no ground point it starts one itself, HeroController.cs:7331-7345), "exception",
+        /// "disposed", "room_left" (still open when the next room finished entering, e.g. its owner was
+        /// destroyed), "no_game_manager" / "game_manager_rebuilt".
+        /// </summary>
+        private static void EndRespawn(int id, string reason)
+        {
+            if (!OpenRespawns.TryGetValue(id, out var r)) return;
+            OpenRespawns.Remove(id);
+            if (reason == "done" && r.Transitioned) reason = "transition";
+            if (!Tap.Active) return;
+            var gm = GameManager._instance;
+            var hero = HeroController.UnsafeInstance;
+            var d = Tap.Data(10);
+            d["phase"] = "end";
+            d["id"] = id;
+            d["reason"] = reason;
+            d["scene"] = gm != null ? gm.sceneName : null;
+            if (hero != null) d["pos"] = (Vector2)hero.transform.position;
+            d["ms"] = Tap.Us(r.StartQpc, Stopwatch.GetTimestamp()) / 1000.0;
+            d["frames"] = Time.frameCount - r.StartFrame;
+            Tap.Emit("hazard_respawn", d);
+        }
+
+        private static void EndRespawns(string reason, bool onlyFromEarlierRooms)
+        {
+            Closing.Clear();
+            foreach (var kv in OpenRespawns)
+                if (!onlyFromEarlierRooms || kv.Value.Transition != transitionSeq) Closing.Add(kv.Key);
+            foreach (var id in Closing) EndRespawn(id, reason);
+        }
+
+        /// <summary>Per frame (EventsRunner.LateUpdate, connected or not): close respawns whose GameManager is gone.</summary>
+        public static void Poll(GameManager gm)
+        {
+            var id = gm != null ? gm.GetInstanceID() : 0;
+            if (OpenRespawns.Count > 0)
+            {
+                if (gm == null) EndRespawns("no_game_manager", false);
+                else if (id != respawnGmId) EndRespawns("game_manager_rebuilt", false);
+            }
+            respawnGmId = id;
+        }
+
+        /// <summary>
+        /// GameManager.FinishedEnteringScene runs once per room entry, but also twice per hazard respawn: right
+        /// after EnterHero starts the HazardRespawn coroutine (GameManager.cs:3349-3353) and again from the
+        /// coroutine's last step (HeroController.FinishedEnteringScene, HeroController.cs:9306). The first call
+        /// after each SceneTransitionBegan with the new scene active is "scene_enter". Ignored: calls from inside a
+        /// HazardRespawn step, calls while the scene being left is still the active one (a HazardRespawn with no
+        /// ground point begins a transition, then EnterHero still calls this for the old room), and repeats.
         /// </summary>
         private static void FinishedEnteringScenePostfix(GameManager __instance)
         {
-            if (hazardRespawnPending)
-            {
-                hazardRespawnPending = false;
-                if (!Tap.Active) return;
-                var hero = HeroController.UnsafeInstance;
-                var e = Tap.Data(6);
-                e["phase"] = "end";
-                e["scene"] = __instance.sceneName;
-                if (hero != null) e["pos"] = (Vector2)hero.transform.position;
-                Tap.Emit("hazard_respawn", e);
-                return;
-            }
+            if (respawnStepDepth > 0) return;
+            if (leaving && SceneManager.GetActiveScene().handle == leavingSceneHandle) return;
             if (enteredSeq == transitionSeq) return;
             enteredSeq = transitionSeq;
+            leaving = false;
+            // A hazard respawn from a room that was left cannot finish in a meaningful way any more.
+            if (OpenRespawns.Count > 0) EndRespawns("room_left", true);
             var gameplay = __instance.IsGameplayScene();
             if (Tap.Active)
             {
@@ -124,7 +209,7 @@ namespace SsOracle.Events
                 d["scene"] = __instance.sceneName;
                 d["gate"] = __instance.entryGateName;
                 d["gameplay"] = gameplay;
-                d["state"] = __instance.GameState.ToString();
+                d["state"] = EnumName<GameState>.Of(__instance.GameState);
                 d["seq"] = transitionSeq;
                 var hero = HeroController.UnsafeInstance;
                 if (hero != null) d["pos"] = (Vector2)hero.transform.position;
@@ -140,6 +225,50 @@ namespace SsOracle.Events
 
         /// <summary>True once the current room has finished entering (and no transition has begun since).</summary>
         public static bool RoomIsEntered => enteredSeq == transitionSeq;
+
+        /// <summary>Passes the HazardRespawn iterator through unchanged and reports when it completes.</summary>
+        private sealed class RespawnTracker : IEnumerator, IDisposable
+        {
+            private readonly IEnumerator inner;
+            private readonly int id;
+
+            public RespawnTracker(IEnumerator inner, int id)
+            {
+                this.inner = inner;
+                this.id = id;
+            }
+
+            public object Current => inner.Current;
+
+            public bool MoveNext()
+            {
+                bool more;
+                respawnStepDepth++;
+                try
+                {
+                    more = inner.MoveNext();
+                }
+                catch
+                {
+                    EndRespawn(id, "exception");
+                    throw;
+                }
+                finally
+                {
+                    respawnStepDepth--;
+                }
+                if (!more) EndRespawn(id, "done");
+                return more;
+            }
+
+            public void Reset() => inner.Reset();
+
+            public void Dispose()
+            {
+                (inner as IDisposable)?.Dispose();
+                EndRespawn(id, "disposed");
+            }
+        }
 
         // ---- saves (observe only: the guards package owns suppression) ---------------------------------------
 
@@ -223,7 +352,7 @@ namespace SsOracle.Events
                 d["caller"] = Tap.Caller(12);
                 d["executing_fsm"] = Tap.FsmNow();
                 d["candidates"] = CompletionCallers();
-                d["active_fsms"] = ActiveFsms(400);
+                d["active_fsms"] = ActiveFsms(400, 200);
             }
             catch (Exception e)
             {
@@ -282,8 +411,9 @@ namespace SsOracle.Events
         }
 
         /// <summary>
-        /// FSMs with an action that calls CheckCompletionAchievements by name (CallMethodProper, CallMethod,
-        /// SendMessage), in any state, with the state they are in now. Best effort; runs once per ending.
+        /// FSMs with an action that calls CheckCompletionAchievements by name (the CallMethod and SendMessage
+        /// families, see <see cref="CallsCheckCompletion"/>), in any state, with the state they are in now. Best
+        /// effort; runs once per ending.
         /// </summary>
         private static List<object> CompletionCallers()
         {
@@ -324,6 +454,7 @@ namespace SsOracle.Events
             return found;
         }
 
+        /// <summary>Every 1.0.30000 PlayMaker action that calls a method by name on a GameObject or behaviour.</summary>
         private static bool CallsCheckCompletion(FsmStateAction a)
         {
             const string Name = "CheckCompletionAchievements";
@@ -331,31 +462,45 @@ namespace SsOracle.Events
             {
                 case CallMethodProper p: return p.methodName != null && p.methodName.Value == Name;
                 case CallMethod m: return m.methodName != null && m.methodName.Value == Name;
+                case CallMethodOnExit x: return x.methodName != null && x.methodName.Value == Name;
                 case SendMessage s: return s.functionCall != null && s.functionCall.FunctionName == Name;
+                case SendMessageV2 v: return v.functionCall != null && v.functionCall.FunctionName == Name;
+                case SendMessageDelay sd: return sd.functionCall != null && sd.functionCall.FunctionName == Name;
+                case SendMessageOnExit so: return so.functionCall != null && so.functionCall.FunctionName == Name;
+                case SendMessageByTag t: return t.message != null && t.message.Value == Name;
                 default: return false;
             }
         }
 
         /// <summary>
-        /// "scene:GameObject/Fsm/State@t" of up to <paramref name="max"/> enabled FSMs, the active scene's first
-        /// (the caller is most likely there), then the rest (DontDestroyOnLoad, additive scenes).
+        /// "scene:GameObject/Fsm/State@t" of enabled FSMs: up to <paramref name="maxActive"/> in the active scene
+        /// (the caller is most likely there), then up to <paramref name="maxOther"/> elsewhere (DontDestroyOnLoad,
+        /// additive scenes), each part ending in "... +N more" when cut.
         /// </summary>
-        private static List<object> ActiveFsms(int max)
+        private static List<object> ActiveFsms(int maxActive, int maxOther)
         {
             var list = new List<object>();
             var active = SceneManager.GetActiveScene();
             for (var pass = 0; pass < 2; pass++)
             {
+                var max = pass == 0 ? maxActive : maxOther;
+                int listed = 0, skipped = 0;
                 foreach (var fsm in PlayMakerFSM.FsmList)
                 {
-                    if (list.Count >= max) return list;
                     if (fsm == null || !fsm.isActiveAndEnabled) continue;
                     var scene = fsm.gameObject.scene;
                     if ((scene == active) != (pass == 0)) continue;
+                    if (listed >= max)
+                    {
+                        skipped++;
+                        continue;
+                    }
+                    listed++;
                     var t = fsm.Fsm != null && fsm.Fsm.ActiveState != null ? fsm.Fsm.ActiveState.StateTime : -1f;
                     list.Add(scene.name + ":" + fsm.gameObject.name + "/" + fsm.FsmName + "/" + fsm.ActiveStateName + "@" +
                              t.ToString("F2", System.Globalization.CultureInfo.InvariantCulture));
                 }
+                if (skipped > 0) list.Add((pass == 0 ? "active scene" : "other scenes") + " ... +" + skipped + " more");
             }
             return list;
         }

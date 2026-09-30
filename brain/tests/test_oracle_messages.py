@@ -27,6 +27,9 @@ def _terrain_payload():
         "hazards": [
             {"id": -200, "go": "Spikes", "on": True, "hazard": "SPIKES", "damage": 1, "flags": 0, "tink": True,
              "trigger": True, "body": 0, "shapes": [{"k": "box", "v": _bin([[3, 2], [5, 2], [5, 2.5], [3, 2.5]])}]},
+            {"id": -201, "go": "Acid", "src": "fsm", "on": True, "hazard": "ACID", "damage": 1, "flags": 0,
+             "tink": False, "trigger": True, "body": 0,
+             "shapes": [{"k": "poly", "v": _bin([[6, 0], [9, 0], [9, 1], [6, 1]])}]},
         ],
         "gates": [{"go": "left1", "on": True, "pos": [0.5, 3.0], "target": "Bone_04", "entry": "right1",
                    "side": "left", "door": False, "shapes": [{"k": "box", "v": _bin([[0, 2], [1, 2], [1, 5], [0, 5]])}],
@@ -58,7 +61,8 @@ def test_terrain_decode():
     assert poly.closed and poly.verts.shape == (4, 2) and poly.verts.dtype == np.float32
     edge = t.solids[1].shapes[0]
     assert not edge.closed and abs(edge.radius - 0.1) < 1e-6
-    assert t.hazards[0].hazard == "SPIKES" and t.hazards[0].tink
+    assert t.hazards[0].hazard == "SPIKES" and t.hazards[0].tink and t.hazards[0].src == "dh"
+    assert t.hazards[1].src == "fsm" and t.hazards[1].hazard == "ACID" and t.hazards[1].shapes[0].closed
     assert t.zones["gates"][0]["target"] == "Bone_04"
     assert t.zones["gates"][0]["shapes"][0].verts[2].tolist() == [1.0, 5.0]
     assert t.zones["respawns"] == []
@@ -95,6 +99,22 @@ def test_progress_mirror():
     changed = m.apply({"seq": 3, "frame": 40, "full": False, "reason": "diff", "scene": "Tut_01", "t_live": 1.6,
                        "changed": {"health": 4}})
     assert changed == {"health": 4} and m.fields["health"] == 4 and m.fields["geo"] == 12 and m.seq == 3
+    assert m.tools["Straight Pin"]["amount"] == 3  # a diff without tool sections keeps them
+
+
+def test_progress_mirror_tool_diff():
+    m = ProgressMirror()
+    m.apply({"seq": 1, "frame": 5, "full": True, "reason": "connect", "scene": "Tut_01", "t_live": 1.0,
+             "changed": {"geo": 1}, "crest": {"current": "Hunter", "previous": None},
+             "tools": {"Straight Pin": {"unlocked": True, "amount": 3}}, "tool_equips": {}, "extra_equips": {},
+             "equipped": ["Straight Pin"], "fields": 1})
+    # A tool amount change (toolAmountsOverride included) arrives as a diff with complete tool sections.
+    changed = m.apply({"seq": 2, "frame": 60, "full": False, "reason": "diff", "scene": "Tut_01", "t_live": 2.0,
+                       "changed": {}, "crest": {"current": "Hunter", "previous": None},
+                       "tools": {"Straight Pin": {"unlocked": True, "amount": 1}}, "tool_equips": {},
+                       "extra_equips": {}, "equipped": ["Straight Pin"]})
+    assert changed == {} and m.tools["Straight Pin"]["amount"] == 1 and m.fields == {"geo": 1}
+    assert m.full_seq == 1 and m.seq == 2
 
 
 def test_event_log_counts_lost_events():
