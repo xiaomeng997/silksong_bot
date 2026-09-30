@@ -11,6 +11,8 @@ namespace SsOracle.Input
     /// keys (Input System -> InControl KeyBindingSource -> HeroActions): level-sampled isPressed, the same
     /// WasPressed edges, the same keyboard menu aliases. Queued last in the update, it also masks whatever
     /// the physical keyboard is doing, so typing in another window never reaches a training instance.
+    /// Between the requested set and the latch sits the HoldFilter (minimum press / release, left-right exclusion;
+    /// DESIGN C19, m0:N37), which the final SendInput sink enforces too, so both paths drop the same taps.
     /// The legacy Input.anyKeyDown callers are covered by LegacyInputShim.
     /// </summary>
     internal static class KeyboardInjector
@@ -31,6 +33,7 @@ namespace SsOracle.Input
         };
 
         private const uint LeftBit = 1u << 20, RightBit = 1u << 21;
+        public const uint PauseBit = 1u << 14;
 
         private static readonly Dictionary<string, int> Bit = BuildBitIndex();
 
@@ -38,17 +41,42 @@ namespace SsOracle.Input
         private static uint latched;
         private static Key[] latchedKeys = new Key[0];
 
+        /// <summary>Main thread only (OnBeforeUpdate and RPC handlers).</summary>
+        public static readonly HoldFilter Filter = new HoldFilter(LeftBit, RightBit);
+
         /// <summary>When false, the real keyboard works as usual (for playing the training copy by hand).</summary>
         public static volatile bool OwnsKeyboard = true;
 
         /// <summary>The button mask the game saw in the current frame (main thread only).</summary>
         public static uint LatchedMask => latched;
         public static Key[] Latched => latchedKeys;
+        /// <summary>The button set last asked for (by an ACTION, the debug protocol or the harness).</summary>
+        public static uint RequestedMask => requested;
 
         public static void Install() => InputSystem.onBeforeUpdate += OnBeforeUpdate;
 
-        /// <summary>Thread-safe: replace the held button set; takes effect at the next dynamic input update.</summary>
+        /// <summary>Thread-safe: replace the held button set; takes effect at the next dynamic input update
+        /// (subject to the minimum press / release frames). Only the last set before that update is seen.</summary>
         public static bool TrySetMask(uint mask, out string error)
+        {
+            if (!Validate(mask, out error)) return false;
+            requested = mask;
+            return true;
+        }
+
+        /// <summary>Main thread only (ActionScheduler, before the latch): like TrySetMask, but the set's key edges are
+        /// queued in the HoldFilter at once, so every set applied within one input update keeps its edges (a press
+        /// followed by its release in the same update is still latched for the minimum press, as inputd holds it).</summary>
+        public static bool TryQueueMask(uint mask, out string error)
+        {
+            if (!Validate(mask, out error)) return false;
+            Filter.Push(requested);   // a set another caller made since the last latch keeps its edges too
+            Filter.Push(mask);
+            requested = mask;
+            return true;
+        }
+
+        private static bool Validate(uint mask, out string error)
         {
             if ((mask & LeftBit) != 0 && (mask & RightBit) != 0)
             {
@@ -60,7 +88,6 @@ namespace SsOracle.Input
                 error = $"unknown button bits 0x{mask >> ButtonNames.Length << ButtonNames.Length:x}";
                 return false;
             }
-            requested = mask;
             error = null;
             return true;
         }
@@ -81,21 +108,34 @@ namespace SsOracle.Input
             return TrySetMask(mask, out error);
         }
 
+        /// <summary>Thread-safe: request an empty set, an ordinary release edge (edges already queued in the HoldFilter
+        /// still play out).</summary>
         public static void ReleaseAll() => requested = 0;
+
+        /// <summary>Main thread only: release every key as soon as the minimum press allows and drop every edge still
+        /// queued in the HoldFilter, so no press requested earlier fires later (brain lost, input.release, harness
+        /// operations and their no-input waits).</summary>
+        public static void ReleaseAllNow()
+        {
+            requested = 0;
+            Filter.ReleaseAll();
+        }
 
         private static void OnBeforeUpdate()
         {
             // Latch once per frame on the main thread; fixed and before-render updates reuse the frame's set.
             if (InputState.currentUpdateType != InputUpdateType.Dynamic) return;
             ActionScheduler.Tick(UnityEngine.Time.frameCount);
-            var mask = requested;
+            var mask = Filter.Step(requested);
             if (mask != latched)
             {
                 latched = mask;
                 latchedKeys = ToKeys(mask);
             }
-            LegacyInputShim.OnLatched(latched);
-            if (!OwnsKeyboard) return;
+            var owns = OwnsKeyboard;
+            // The legacy shim must only report edges the game actually receives.
+            LegacyInputShim.OnLatched(owns ? latched : 0);
+            if (!owns) return;
             var keyboard = Keyboard.current;
             if (keyboard == null) return;
             InputSystem.QueueStateEvent(keyboard, new KeyboardState(latchedKeys));
@@ -115,5 +155,17 @@ namespace SsOracle.Input
             for (var i = 0; i < ButtonNames.Length; i++) d[ButtonNames[i]] = i;
             return d;
         }
+
+        /// <summary>Counters for the input.stats RPC (main thread).</summary>
+        public static Dictionary<string, object> DescribeFilter() => new Dictionary<string, object>
+        {
+            ["min_press_frames"] = Filter.MinPressFrames,
+            ["min_release_frames"] = Filter.MinReleaseFrames,
+            ["holds_extended"] = Filter.HoldsExtended,
+            ["presses_deferred"] = Filter.PressesDeferred,
+            ["lr_deferred"] = Filter.ExclusiveDeferred,
+            ["taps_collapsed"] = Filter.TapsCollapsed,
+            ["pending_edges"] = Filter.PendingToggles,
+        };
     }
 }
