@@ -6,12 +6,14 @@
 |---|---|
 | `[xxxN]` | [`research/claims.txt`](research/claims.txt) 中的结论编号（详细内容和来源 URL 见 [`research/research.json`](research/research.json)） |
 | `[VER]` | [`research/claims.txt`](research/claims.txt) 的 VERIFICATION 段。两处冲突时以它为准 |
-| `[dec]` | 来自发布版 1.0.28324 反编译，需在 M0 用 1.0.30000 复核。本次定稿时在本地反编译中抽查确认了以下几处：`PauseGameToggle` 的 `TimeSlowed`/`GenericMessageCanvas` 分支、`PauseAllowed` 与两处 `WaitForSecondsRealtime(0.3f)`、`MenuButtonSaveQuitListCondition` 中的 `disableSaveQuit`、`HeroController.CriticalDamage`、`CogMultiHitter` |
+| `[dec]` | 来自发布版 1.0.28324 反编译，需在 M0 用 1.0.30000 复核。本次定稿时在本地反编译中抽查确认了以下几处：`PauseGameToggle` 的 `TimeSlowed`/`GenericMessageCanvas` 分支、`PauseAllowed` 与两处 `WaitForSecondsRealtime(0.3f)`、`MenuButtonSaveQuitListCondition` 中的 `disableSaveQuit`、`HeroController.CriticalDamage`、`CogMultiHitter`。M0 已核对的条目改标 `[m0:…]`，未核对的见 m0 §2.8 |
+| `[m0:C#]` / `[m0:N#]` | [`facts/1.0.30000/m0.md`](facts/1.0.30000/m0.md) §1.1（C1–C18，设计说法已变化）/ §1.2（N1–N43，新发现）的条目，基于 1.0.30000 反编译，带"文件:行号"证据。引用该文件其他部分时写 "m0 §x" |
+| `[probe:Pn]` | [`facts/1.0.30000/probes.md`](facts/1.0.30000/probes.md) 中探针 Pn 的运行时实测；HeroController 常量全表见同目录 `hero_constants.json` |
 | `[local:…]` | 调研时下载的 wiki 页面摘录（未收入仓库；对应页面见 hollowknight.wiki） |
 | `[SW]` | Switch 可行性检查，见 [`research/switch.json`](research/switch.json) |
 | `[待验证 Pn]` | 待验证项，编号对应 §5 的探针 |
 
-本次定稿没有做新的网络调研，只查阅了本地已有的反编译和 wiki 摘录。
+本次定稿没有做新的网络调研，只查阅了本地已有的反编译和 wiki 摘录。2026-09-29 按 M0 的代码核对（m0.md）和运行时探针（probes.md）修订，与二者冲突的旧说法已替换。
 
 ---
 
@@ -22,16 +24,17 @@
   - 走 Bell 路线（经 Last Judge），不进 Mist。
   - 安全绕路：Fractured Mask、Weighted Belt、Warding/Magma Bell、第 7 个面具、2–3 个 Memory Locket。
   - 每个 A/B 类单元开打前，先在工作台补满状态（交战门）。
-  - 唯一的撤销手段是"暂停 → 退出到菜单 → 读档"，而且必须在致命一击之前触发。
+  - 唯一的撤销手段是"暂停 → 退出到菜单 → 读档"，而且必须在致命一击之前触发：Dead 在致命那一帧就写进内存，下一帧开始保存 [m0:N7]。
 - **时间先验。** 按当前先验，全程期望约 16,100 s（含恢复开销），P(≤17,400 s) 约 0.8。Act 1 实测后在检查点 K3 决定打一局还是两局（D4'）。
 - **架构一句话。** 训练时由 BepInEx 插件 `SsOracle` 提供精确状态、标签和裁判。正式运行时游戏是原版，只读屏幕像素（WGC），生成视觉 `WorldState`，交给同一套规则、规划器、安全过滤器和监督器，再通过 `SendInput` 按键。`FrameSource`/`ControllerSink` 是可插拔插件，Switch 版只需换成 UVC 采集卡 + RP2040。
 - **感知原则："能查的就不看"。** 地形、危险物、门、敌人行为表离线导出到 Knowledge DB。视觉只负责：场景和相机位姿、动态物体的检测与跟踪、HUD/UI、A 类 boss 与竞技场敌人的动作阶段。
 - **安全核心。**
   - 按行为的"支撑集"（可能发生的所有情况）推理，而不是按概率。
-  - `hits_to_death` 计入挂起伤害和面具失效的例外。
-  - 暂停键无条件地按/放循环，直到确认看到暂停菜单。
-  - 退出是否可用（`disableSaveQuit`、预加载）单独建成 quit map。
+  - `hits_to_death` 计入挂起伤害（DamageTag、霜冻）和面具失效的例外；危险物和 DoSpecialDamage 类伤害穿透 i-frame。
+  - 暂停键无条件按/放循环，看到暂停的最早线索（暗幕开始变暗）就停手：0.3 s 锁定一过，再按 Esc 就会解除暂停 [m0:C11]。
+  - 退出是否可用（`disableSaveQuit`、预加载；预加载一旦启动，本房间内 Quit 一直灰）单独建成 quit map。退出序列：Esc → 选中"退出至菜单" → Submit → 确认框默认"否" → 上 → Submit，每次 Submit 前读高亮项 [probe:P7]。
   - 解除暂停前必须通过冻结态检查。
+  - 焦点丢失 = 英雄失控：原版失焦后世界和计时照常运行，键盘却被断开 [probe:P6]，所以焦点守护是必需的。
 - **评估。** 按单元做序贯贝叶斯门槛：G0 训练、G1 影子、G2 分段预演、G3 全程预演，配合前兆（near-miss）故障树模型。发射条件：P10(P_run) ≥ 0.7。
 - **最大风险。**
   1. 纯视觉在 Forum 杂乱画面、暗房、闪光帧上的长尾错误。诚实估计，F1 达到发射门槛的概率约 30–50%。
@@ -61,45 +64,54 @@
 
 | 事实 | 来源 | 设计后果 |
 |---|---|---|
-| STEEL_SOUL 要求 `CheckCompletionAchievements` 被调用时 `permadeathMode > Off`。SPEEDRUN_1 要求 `playTime ≤ 18000f`，与模式无关。 | [ach1][VER] | 一局可同时拿两个。 |
+| STEEL_SOUL 要求 `CheckCompletionAchievements` 被调用时 `permadeathMode > Off`（Dead 也满足，但 Dead 存档到不了结局）。SPEEDRUN_1 要求 `playTime ≤ 18000f`（含等号），与模式和完成度无关。检查读的是最后一次 flush 的 `playerData.playTime`，不含未保存的 session 时间，也不 flush 计时。这个方法没有 C# 调用者，由序列化 FSM 按名调用，它与 Bind、保存的先后关系待 P13。 | [ach1][VER][m0 §2.1][m0:N29] | 一局可同时拿两个。按实时时间做预算是保守的。 |
 | `AwardAchievementToPlayer` 只检查四项：非 DemoMode、键在列表中、`CanAwardAchievement`、尚未解锁。没有 mod 检测。 | [VER][mod14] | 训练用 BepInEx 不会危及账号，但必须隔离，防止训练中误解锁（§2.7）。 |
 | Weaver Queen 的条件：① 存档没有 Snared Silk；② 击败 GMS 后按 **Bind**（不是 Needolin）；③ 没有被锁定在 Cursed Crest。有人类通关实例确认可以同时拿到两个成就。 | [VER] | GMS 场景中硬禁 Needolin；永不启动 Rite of Rebirth。 |
-| 在 Extras 菜单输入 上下上下左右左右 可解锁 Steel Soul，不需要先通关一次。这个代码通过 `PermadeathUnlock.Unlock` 写入共享状态记录 `RecPermadeathMode`。 | [ach4][dec] | 训练用的 AchievementGuard 对 `RecPermadeathMode` 放行。MenuDriver 先用模板确认模式选择里已经有 Steel Soul；FINAL 中不再输入代码。 |
-| Steel Soul 死亡会把 `permadeathMode` 设为 Dead 并立即保存，槽位显示 DEFEATED。杀进程无效。 | [ach5][com13] | 安全动作必须在致命一击之前完成。 |
+| 在 Extras 菜单输入 上下上下左右左右 可解锁 Steel Soul，不需要先通关一次。代码经 `PermadeathUnlock.Unlock` 把 `RecPermadeathMode` 写进 `<saveDir>/shared.dat`，所以 `<AccountID>/shared.dat` 和 `default/shared.dat` 各自独立。按错一键就清空缓冲；只在 `RecPermadeathMode == 0` 时生效。未解锁时选空槽不会出现模式菜单，而是直接静默开始 Classic。 | [ach4][m0:N32][m0:N30] | 训练用的 AchievementGuard 对 `RecPermadeathMode` 放行。P5 已在最终副本上按过一次 8 键，`<AccountID>/shared.dat` 现为 `RecPermadeathMode=1` [probe:P5]。MenuDriver 在空槽按 Submit 之前先确认当前目录已解锁 Steel Soul；FINAL 中不再输入代码。 |
+| Steel Soul 死亡：`Die` 在致命的 TakeDamage 同一次调用里设 `disablePause`，并把内存中的 `permadeathMode` 改为 Dead；下一帧 `PlayerDead` 调 `SaveGame`（后台线程序列化，几帧后落盘），Dead 同时写进版本备份 `user{N}_1.0.30000.dat`。槽位显示 DEFEATED。记忆场景（MapZone 为 MEMORY 或 CLOVER）中的死亡被强制为非致命，待逐场景运行时确认。 | [ach5][com13][m0:N7][m0:N5] | 安全动作必须在致命一击之前完成；反应式杀进程基本来不及（§3.7.7）。运行时确认之前，所有死亡都按致命处理。 |
 | Pause → Quit to Menu → 读档不算死亡。hit-freeze 期间暂停被禁用；`Die()` 会立即设置 `disablePause`。自 1.0.29242 起，暂停或存档退出被禁时 ReturnToMainMenu 会拒绝执行。 | [com13][VER] | 预判式紧急退出是唯一的撤销手段。 |
-| **暂停门控。** `InputHandler` 只在 `Pause.WasPressed && PauseAllowed && !disablePause` 时切换暂停，是边沿触发。`PauseGameToggle` 在 `TimeSlowed`（任意 FreezeMoment：EnemyDeath ≈0.10 s、NailClash ≈0.36 s、BossStun ≈0.35 s、BindBreak ≈0.51 s）或 `GenericMessageCanvas` 显示时直接 `yield break`，不给任何反馈。每次暂停或解除暂停后，`PauseAllowed` 会有 0.3 s（实时）为 false。 | [dec] | 暂停键必须无条件按/放循环；解除暂停后约 18 帧不可再暂停（§3.7）。 |
-| **退出门控。** 当 `PlayerData.disableSaveQuit` 为真或 `ScenePreloader.HasPendingOperations` 时，Save & Quit 按钮被禁用。`EmergencyReturnToMainMenu` 还要求 `!disablePause && !disableSaveQuit && PauseAllowed` 且没有阻塞交互物。`disableSaveQuit` 由 PlayMaker FSM 写入，C# 代码只在重生时清除它。 | [dec] | 用 quit map 建模；视觉识别灰色的 Quit 按钮；永不按灰色控件。 |
-| 恢复旧的 `userN.dat`、`.bak1` 或 `Restore_Points` 会同时回滚状态和 playTime。把 2 改回 1 不会回滚时间。存活的 Steel Soul 槽有 Restore Save 按钮。 | [VER] | 软件总是写备份；恢复策略由 D3 决定；MenuDriver 永远不聚焦 Restore/Clear。 |
-| 成就只在结局 FSM 调用 `CheckCompletionAchievements` 时推送一次。Steam 未初始化或中途关闭时，`PushAchievementUnlock` 只写一行日志。本版本的 `CheckAllAchievements` 是空操作，事后不会补发。 | [dec] | 最后一章前先重启 Steam 并确认在线；结局后先在 Steam 上核对成就，再碰存档。 |
-| `EndingSequence` 使用 `SKIP_INSTANT`，误按键会跳过步骤。 | [dec] | 进入 ENDING 状态后锁定输入（§3.6.1）。 |
-| 结局 1 之后，存档在最后保存点重生，时间记为结局动画结束时的值。 | [VER ev] | 片尾不计时。 |
+| **暂停门控。** `InputHandler` 只在 `acceptingInput` 为真、GameState 为 PLAYING（解除暂停时为 PAUSED）、且 `Pause.WasPressed && PauseAllowed && !disablePause` 时切换暂停，是边沿触发；门关闭时按下的暂停键直接丢弃，不排队。EXITING_LEVEL、ENTERING_LEVEL（整个走入动画）、CUTSCENE、LOADING 期间都不能暂停。`PauseGameToggle` 在 `TimeSlowed`（任意 FreezeMoment：EnemyDeath ≈0.10 s、NailClash ≈0.36 s、BossStun ≈0.35 s、BindBreak ≈0.51 s；长时类型 BossDeathSlow 1.35 s、EnemyBattleEndSlow 1.85 s、RaceWinSlow 3.8 s）或 `GenericMessageCanvas` 显示时直接 `yield break`，暂停和解除暂停都被挡住，不给任何反馈。英雄自己的受击冻结用 Hero prefab 上的 `DAMAGE_FREEZE_DOWN/WAIT/UP`（0/0.1/0.1 s），不是 HeroDamage 预设；每次会产生后坐的非致命命中还同步设 `disablePause`，冻结结束才清。每次暂停或解除暂停后，`PauseAllowed` 有 0.3 s 实时为 false（60 fps 下 18 帧）。Esc 同时绑定 Pause 和 MenuCancel：锁定一过，暂停菜单里任何一次 Esc 都会解除暂停。 | [m0:N12][m0:N13][m0:C5][m0:N8][m0:C12][m0:C11][probe:P11] | 暂停键必须无条件按/放循环，并在真实暂停后约 230 ms 内停手；暂停和解除暂停后 0.3 s 实时内都不能再切换（§3.7）。 |
+| **退出门控。** `PlayerData.disableSaveQuit` 为真或 `ScenePreloader.HasPendingOperations` 时，暂停菜单的 Save & Quit 变灰：仍然显示，但不可交互，上下导航会跳过它并回绕。按钮状态只在 `ShowMenu` 时算一次，暂停期间不刷新。PC 上预加载一旦启动，`HasPendingOperations` 就一直为真，直到目标场景的加载把它取走，所以本房间剩下的时间里 Quit 一直是灰的，暂停中也一样。退出确认的"是"在 `disablePause` 或 `disableSaveQuit` 时被静默拒绝，界面停在确认框，没有任何消息。`disableSaveQuit` 由 FSM/场景数据写入；C# 只在 `HeroRespawned` 和 `ResetCutsceneBools` 中清除它，换房间不清。 | [m0:C8][m0:N17][m0:C10][m0 §2.4] | 用 quit map 建模；视觉识别灰色的 Quit 按钮；永不按灰色控件；不按计数导航。 |
+| 写存档时先写 `user{N}.dat.new`，再用 `File.Replace` 把旧文件轮换成 `user{N}.dat.bak{K}`（K 递增；已有 3 个及以上时删编号最小的，没有固定的 `.bak1`）。每次 SaveGame 还重写版本备份 `user{N}_1.0.30000.dat`。自动存档写 `Restore_Points{N}/restoreData{K}.dat`，约保留 20 个（ACT_1/2/3 为 `NODELrestoreData{K}.dat`，不参与裁剪），包含完整的 SaveGameData 和 playTime。恢复旧文件会同时回滚状态和 playTime；把 2 改回 1 不会回滚时间。存活的 Steel Soul 槽有 Restore Save 按钮；DEFEATED 槽只显示 Clear，两次 Submit 就会删除 `user{N}.dat` 和整个 `Restore_Points{N}`（不删 `.bak*` 和版本备份）。 | [VER][m0:C13][m0:N31] | 软件总是写备份，备份和 SlotGuard 工具匹配 `user{N}.dat.bak*`；死亡后只有 `.bak*` 和 `Restore_Points` 还是存活状态。恢复策略由 D3 决定；MenuDriver 永远不聚焦 Restore/Clear，永不在 DEFEATED 槽上按 Submit。 |
+| 成就只在 `CheckCompletionAchievements` 被调用时推送一次；`CheckAllAchievements` 是空操作，事后不会补发。桌面端 `PushAchievementUnlock` 先调 Steam，然后**总是**把键写进 `<saveDir>/shared.dat`，所以 shared.dat 里的 true 不能证明 Steam 收到了。Steam 未初始化或已关闭时只记一行日志；初始化时 `SetAchievement` 不看返回值，照样记 "Pushing achievement X"，只有 "Steam achievement X (a/b) upload complete" 才表示送达。`steam_api64.dll` 存在但 `SteamAPI.Init()` 失败时，存档和 shared.dat 静默落到 `/default`。 | [m0:N26][m0:N27][m0:N28][m0 §2.1] | 最后一章前先重启 Steam，以 Player.log 确认在线（§3.6.1）；结局后两条 "upload complete" 都在、并在 Steam 上核对过，再碰存档。 |
+| `EndingSequence` 使用 `SKIP_INSTANT`：CUTSCENE 中任何 legacy `Input.anyKeyDown`（键盘或鼠标）或手柄按键都会跳过；一次按键只跳过当前子序列（且仅当它 CanSkip），不会跳过整个结局。 | [m0 §2.1] | 进入 ENDING 状态后锁定输入，OS 级按键同样会触发跳过（§3.6.1）。 |
+| 结局 1 之后，存档在最后保存点重生。结局和片尾场景（Cinematic_Ending_A..E、End_Credits、End_Game_Completion 等）都是 CUTSCENE，不计时。C# 中结局附近唯一的保存是片尾链结束后的 `ReturnToMainMenu(willSave:true)`，它会把检查之后在 GMS 场景里的时间也 flush 进去，所以槽位最终时间可能高于检查时的值，即使 SPEEDRUN_1 已触发也可能显示超过 5 h。End_Game_Completion 以 `Hh MMm SSs`（向下取整）显示 `playerData.playTime`；如果检查和这个画面之间没有保存（P13），它就是被检查值的秒级读数。 | [VER ev][m0:C18][m0:N25][m0 §2.1] | 片尾不计时。结局后以 Steam 为准核对成就，不用槽位时间判断成败。 |
 
 ### 1.3 计时器规则（速通时钟）
 
-- **规则** [ach3][VER]：当且仅当 GameState ∈ {PLAYING, ENTERING_LEVEL, EXITING_LEVEL}、库存界面关闭、且该帧耗时 < 1 s 时，执行 `playTime += Time.unscaledDeltaTime`。
-- **计时的情形：** 房间切换、引擎内的 FSM 过场/对话/boss 登场、hit-freeze（它用的是 unscaled 时间）。
-- **不计时的情形：** 暂停菜单、库存（含 Map 页）、LOADING（从主菜单继续游戏）、CUTSCENE（InGameVideo、开场动画、End_Credits 等）、≥1 s 的单帧。
-- **未知 [待验证 P6]：** Quick Map（Tab）——策略是永不使用；失去焦点——策略是永不发生；Bellway 乘车场景。
-- **成就读取的是 `playerData.playTime`，它只在保存时写入** [VER]。因此被检查的值 ≤ 实时时间，按实时时间做预算是保守的。
+- **规则** [ach3][VER][m0 §2.3]：当且仅当 GameState ∈ {PLAYING, ENTERING_LEVEL, EXITING_LEVEL}、库存界面关闭、且该帧 `unscaledDeltaTime` < 1 s（严格小于；≥ 1 s 的帧整帧丢弃，不钳位）时，执行 `sessionPlayTimer += Time.unscaledDeltaTime`，保存时再 flush 进 `playerData.playTime`。
+- **计时的情形：**
+  - 房间切换全程：场景读取、激活、卸载、GC 都计时（P6 实测一次切换墙钟 8.51 s、PlayTime 8.52 s）[m0 §2.3][probe:P6]。
+  - 引擎内的 FSM 过场/对话/boss 登场、hit-freeze（它用的是 unscaled 时间）。
+  - 独立面板：商店、Bellway 目的地地图、Ventrica 管道地图、任务板、遗物/收藏板、是/否框（GameState 保持 PLAYING）[m0:N20]。
+  - Bellway 的地图选择、上车和到站动画，以及进出视频场景的加载与卸载 [m0:N21]。
+  - 从主菜单 Continue 之后：只有加载 GlobalPool 和 Hero_Hornet prefab 那一段是 LOADING，随后的工作台场景加载、激活、GC 和醒来动画都计时 [m0:C7]。
+  - 新游戏：从 Opening_Sequence 的加载开始计时，Tut_01 的加载也计时 [m0:N23]。
+  - Quick Map（按住 Tab）：PlayTime/墙钟 = 0.998；代码路径不碰 isInventoryOpen、GameState 或 timescale，世界不冻结 [m0 §2.3][probe:P6]。
+  - 失去焦点：原版 `runInBackground = True`，失焦后继续模拟和计时 [probe:P6]。
+- **不计时的情形：** 暂停菜单；库存（含 Map 页；打开时同样冻结世界，P6 实测 PlayTime/墙钟 = 0.000）[m0:N24][probe:P6]；LOADING（只指 Continue 的 prefab 加载段）；CUTSCENE（InGameVideo、开场动画、Bellway 乘车视频及其后台加载、含 `InGameCutsceneInfo` 组件的场景、End_Credits 等）[m0:N21][m0:N22]；≥1 s 的单帧。
+- **暂停只能从 PLAYING 开始**：ENTERING_LEVEL/EXITING_LEVEL 期间的秒数一定计时，且不能暂停 [m0:N12]。
+- **未知 [待验证 P6]：** Ventrica 管道（`Cinematic_Submarine_travel`，预计与 Bellway 相同）；Bellway 和片尾尚未做运行时确认。策略不变：永不使用 Quick Map，永不失焦。
+- **成就读取的是 `playerData.playTime`，它只在保存时写入** [VER]：每次 SaveGame 和每次创建恢复点（包括静默自动存档）都会 flush [m0 §2.3]。因此被检查的值 ≤ 实时时间，按实时时间做预算是保守的。
 - **推论：**
   - 正式运行就是实时的。
   - lockstep 训练不省预算，所以已移除（C15）。
-  - 暂停状态下思考不花时间。
-  - 路线应尽量减少房间切换。
+  - 暂停状态下思考不花时间；库存打开时同样冻结且不计时，可作路线和审计的"思考态"，但不能用来退出 [m0:N24]。
+  - 路线应尽量减少房间切换：少一次切换，同时省走路时间和加载时间。
 
 ### 1.4 版本锁定与安装
 
 - **构建。** 1.0.30000：app 1030300，depot 1030301，manifest `4421626056705534276`，buildid 22479045，2026-03-24 [VER]。
 - **Sea of Sorrow。** 截至 2026-09-28 尚未发布 [VER]，但已宣布在 2026 年发布 [ach10]。项目周期 3–5 年，期间大概率会发布，所以 R8 定为"高"。
-- **运行时和工具。** Mono [mod0]；BepInEx 5.4.23.4 [mod3]；Silksong.GameLibs 1.2.0-silksong1.0.30000；DebugMod 1.1.2 [mod9]。Unity 版本未知，M0 读取。
-- **输入后端。** 自 1.0.29242 起，InControl `HeroActions` 跑在 Unity Input System 之上；高级设置里可以切回 legacy。锁定为 "Input System" [VER][mod13]。
+- **运行时和工具。** Mono [mod0]；BepInEx 5.4.23.4 [mod3]；Silksong.GameLibs 1.2.0-silksong1.0.30000；DebugMod 1.1.2 [mod9]。Unity 6000.0.50f1（uum-100966-branch1），Input System 1.14.2 [probe:P1][m0:N40]。
+- **输入后端。** InControl `HeroActions` 跑在 Unity Input System 之上 [VER][mod13]。键盘和鼠标永远走 Input System（`UnityKeyboardProvider` 总会安装）；高级手柄设置里的 NativeInput/XInput/MFi 只影响手柄后端，改动要重启才生效。注册表快照中冻结 NativeInput（当前为 1）[m0:C15]。legacy `Input.anyKeyDown` 仍用于过场跳过、`GameManager.UpdateEngagement` 和 `IdleMemoryCleaner` [m0:N36]。
 - **安装布局（修订）：**
 
 | 副本 | 获取方式 | 内容 | 启动方式 | 用途 |
 |---|---|---|---|---|
-| **最终副本** | Steam 控制台 `download_depot 1030300 1030301 4421626056705534276`（不需要把 Steam 登录交给第三方工具） | 原版文件 + `steam_appid.txt`（1030300）。**不含** `winhttp.dll`、`doorstop_config.ini`、`BepInEx/` | Steam 客户端在线时直接运行 exe | VANILLA 预演、M0-P5 成就探针、FINAL |
+| **最终副本** | Steam 控制台 `download_depot 1030300 1030301 4421626056705534276`（不需要把 Steam 登录交给第三方工具）。实际做法：直接复制当时 buildid 已确认的库副本，library/final/train 三份 2268 个文件 sha256 逐一相同 [probe:P1] | 原版文件 + `steam_appid.txt`（1030300）。**不含** `winhttp.dll`、`doorstop_config.ini`、`BepInEx/` | Steam 客户端在线时直接运行 exe | VANILLA 预演、M0-P5 成就探针、FINAL |
 | **训练副本** | 同一 depot 的另一份拷贝 | + BepInEx + SsOracle + DebugMod（+ Benchwarp）；Steam 子系统缺席（D15） | 启动脚本（按配置） | TRAIN / SHADOW / REHEARSAL，以及你自己录制的游玩 |
-| Steam 库托管副本 | Steam | — | **项目期间永不按"开始"**：一启动就会更新；没有 `steam_appid.txt` 时 `RestartAppIfNecessary` 会经 Steam 重启 [dec] | 只在 M0-P1 做哈希比对，之后卸载 |
+| Steam 库托管副本 | Steam | — | **项目期间永不按"开始"**：一启动就会更新；没有 `steam_appid.txt` 时 `RestartAppIfNecessary` 会经 Steam 重启 [m0:N28] | 只在 M0-P1 做哈希比对，之后卸载 |
 
 - **每次启动后：** 枚举进程已加载 DLL 的哈希，与 `versions.lock` 比对；OCR 标题画面上的版本号（`SetVersionNumber`）。
 - **每章之前：** 查看 Steam 新闻；备份真实存档目录。正式运行尽量在最少的自然日内完成。
@@ -112,12 +124,16 @@
 | 初始 5 个面具。Act 1 有 6 个碎片，打 Act 2 结局最多 9 个面具。4 个碎片 = +1 面具，补满一个面具会回满血。 | [com0] |
 | 几乎所有 boss 招式和接触伤害都是 2 格；另有 1+1、1+1+1 的形式。 | [com1] |
 | 危险物伤害：SPIKES 1、ACID 1、LAVA 2、COAL 1、COAL_SPIKES 1、ZAP 1、STEAM 2；Flame 2；Void 2 并吸丝。 | [com2] |
-| 危险物无视无敌帧：受击后、弹反、Sharpdart 的 i-frame 都挡不住。 | [com3] |
-| 受击 i-frame 约 1.0 s，带 Weighted Belt 约 1.3 s（推断，需实测）。 | [com4] |
-| 弹反/拼刀 0.25 s；下劈弹跳 2 个物理步（长版 10 步）。**冲刺、疾跑、Bind 都没有无敌。** | [com5] |
-| Bind：9 丝，+3 面具，1.37 s（带 Injector Band 0.89 s）。闪光前被打断会清空**全部**丝；脚下平台消失也会打断。 | [com6] |
+| 受击和弹反 i-frame 只挡 ENEMY、NON_HAZARD、EXPLOSION：SPIKES、ACID、LAVA、PIT、COAL、ZAP、STEAM、COAL_SPIKES 都会穿透，SINK 永远生效。例外：危险物重生后 0.5 s 内再碰到非敌人危险物，只会再重生一次，不扣血。 | [com3][m0:N1] |
+| 受击 i-frame `INVUL_TIME` = 1.0 s（游戏时间；受击冻结期间 timeScale 下降，实时长度更长）。Weighted Belt 的代码默认值（代码字段 `weightedAnklet*`；WeightedAnkletTool = Weighted Belt 的名称对应待 P11 确认）：i-frame ×1.2、击退 ×0.5、拼刀后坐 2 步，装备后最大下落速度改用 `MAX_FALL_VELOCITY_WEIGHTED`；GlobalSettings 资产可能覆盖，待 P11 读取。 | [com4][probe:P11][m0:C6] |
+| 弹反 i-frame `INVUL_TIME_PARRY` = 0.15 s（[com5] 的 0.25 s 恰好是 NailClashEffect 冻结的保持时长）；Cross Stitch 0.35 s、SILKDASH 0.5 s（由 SilkChargeEnd 设置，可能是 Sharpdart，名称对应待 P11）、QUAKE 0.4 s。下劈 i-frame 8 个物理步（长版 16 步，即 0.16/0.32 s），只挡 ENEMY，不挡 EXPLOSION、危险物和 noBounceCooldown 伤害源。**冲刺、疾跑、Bind 都没有无敌。** | [com5][probe:P11][m0 §2.5] |
+| Bind：9 丝，+3 面具，1.37 s（带 Injector Band 0.89 s）。闪光前被打断会清空**全部**丝；脚下平台消失也会打断。丢丝规则在 Bind FSM 里，代码无法确认（`BindInterrupted()` 不碰 `silk`），待 FSM 导出。 | [com6][m0 §2.5] |
 | 丝：初始上限 9，最大 18；丝技能消耗 4。 | [com7] |
-| Fractured Mask（Hunter's March 的 Mottled Skarr 处 260 念珠）能挡一次致命伤，坐工作台修复。例外（会失效）：Muckroach Maul、Wraith 抓取、Slubberlug 抓取、Greymoor 和 Mist 的爪形陷阱。 | [com10] |
+| Fractured Mask（Hunter's March 的 Mottled Skarr 处 260 念珠），坐工作台修复。1.0.30000 的语义：只要已装备且 `AmountLeft > 0`，致命伤一律被钳到剩 1 HP；只有 `allowFracturedMaskBreak` 为真（命中不带 MidChain 标志）时才消耗面具。所以连招中段（MidChain）的致命命中能救命且不耗面具。社区列出的失效案例（Muckroach Maul、Wraith 抓取、Slubberlug 抓取、Greymoor 和 Mist 的爪形陷阱）在 1.0.30000 上可能已部分修复，导出 DamageHero/FSM 的 flags 之前仍按失效处理。 | [com10][m0:C2] |
+| DoSpecialDamage 类伤害（酸等 DamageTag 标签、Chomp、霜冻、TakeQuickDamage）不查 i-frame，也不给 i-frame、后坐或冻结；标签栈在工作台和危险物重生后都不清除。 | [m0:N2] |
+| 拿到 Faydown 之前：`frostAmount ≥ 1` 时每 1.75 s 扣 1 HP，无视 i-frame，可以致死，也会打碎面具。拿到 Faydown 后永不结冰。 | [m0:N3] |
+| barnacle 抓取不看 i-frame、弹反和 isInvincible，后坐结束后、i-frame 还没结束时就能被抓；Underworks 锯块的 'Multihitter' FSM 同样穿透 i-frame。普通抓取遵守 i-frame。 | [m0:N4][m0 §2.5] |
+| Barbed Wire（代码 `barbedWire`；游戏内名称待 P11 名称对应确认，应即 §3.6.4 的 Barbed Bracelet）：受到的伤害 ×2（向下取整，在危险物覆盖值之后再乘）。永不装备。 | [m0:N10] |
 | 必打 boss：Moss Mother、Bell Beast、Lace 1、Widow、Last Judge、Cogwork Dancers、Trobbio、Forum 连战、Lace 2、GMS。Fourth Chorus、Moorwing、Sister Splinter 常被跳过。 | [com16] |
 | 最危险的是 Forum 连战、Dancers、Lace 2、Last Judge/Mist。人类 Steel Soul 的死因主要是危险物、1+1 抓取和连战。 | [com17][com18] |
 | Last Judge 720 HP，540 进二阶段；自 1.0.29909 起死亡爆炸为 2 格。Lace 1 250 HP，Lace 2 800 HP。Dancers 190+190，然后 220+220 两轮，最后 180。Forum 13 波，最后是 2 只 Choir Clapper（各 230 HP）。GMS 1224 HP，6 个阶段。 | [VER] |
@@ -135,15 +151,17 @@
 
 ### 1.6 需在 M0 复核的 `[dec]` 事实
 
+本表已由 [`facts/1.0.30000/m0.md`](facts/1.0.30000/m0.md) 用 1.0.30000 代码核对。设置行、存档槽 `isIncompatible`、Unscaled 时间、HUD 的 Weaver 图标这几条本轮未核对（m0 §2.8）。
+
 | 领域 | 事实 |
 |---|---|
-| 相机 | 透视 tk2d 相机；`ForceCameraAspect` 把宽高比限制在 1.6–2.39 并加黑边；HUD 用单独的正交相机。中心被限制在 x ≥ 14.6、y ≥ 8.3；可视平面约 29.2 × 16.6 u，1080p 下约 65 px/u；`lookOffset` ±6 u。 |
-| 设置 | 相机震动 On/Reduced/**Off**；`particleEffectsLevel`；`hudScaleSetting`；`brightnessAdjustment`；`targetFrameRate`；`vSync`；`showNativeAchievementPopups`。这些都存在 PlayerPrefs（HKCU 注册表）里。 |
-| Hit-freeze | `FreezeMoment` 各配置（下降/保持/上升，秒，unscaled）：HeroDamage 0.01/0.28/0.10，NailClash 0.01/0.25/0.10，BindBreak 0.01/0.40/0.10，BossStun 0/0.25/0.10，EnemyDeath 0.04/0.024/0.04。每一种都会让 `TimeSlowed` 为真，进而吞掉暂停。 |
-| 暂停/退出 | §1.2 所列门控；还包括 `InteractManager.BlockingInteractable`、`acceptingInput`、Patch 4 之后 ReturnToMainMenu 的拒绝条件，以及 `SaveGame` 失败时协程不离开关卡直接返回的分支。 |
-| 扣血路径 | `TakeHealth`（含 Fractured Mask 的逻辑：`AmountLeft`、`allowFracturedMaskBreak`）；经 `ApplyTagDamage` 的 `DoSpecialDamage`（`DamageTag` 的 startDelay/delayPerHit，例如带 Acid 标志的命中会挂上 acidDamageTag）；`TakeChompDamage`；`TakeFrostDamage`；`CriticalDamage`（HP 设为 1 并清空蓝血）；`CogMultiHitter`（先 `TakeQuickDamage(1)` 且 canDie:false，0.5 s 后 `DamageHeroDirectly`，清除无敌/弹反/下劈 i-frame，再 `TakeDamage(1, SPIKES)`）；FSM 动作 `DamageHeroDirectly`/V2（Patch 4 加入了 `CheckDeathCatch`）。 |
+| 相机 | 透视 tk2d 相机；`ForceCameraAspect` 把宽高比限制在 1.6–2.39 并加黑边；HUD 用单独的正交相机。中心被限制在 x ≥ 14.6、y ≥ 8.3；可视平面约 29.2 × 16.6 u，1080p 下约 65 px/u；`lookOffset` ±6 u。（已确认，是否真的是透视待 P11 [m0 §2.7]） |
+| 设置 | 相机震动 On/Reduced/**Off**；`particleEffectsLevel`；`hudScaleSetting`；`brightnessAdjustment`；`targetFrameRate`；`vSync`；`showNativeAchievementPopups`。这些都存在 PlayerPrefs（HKCU 注册表）里。游戏的"垂直同步"和"帧率上限"互斥：开 VSync 时 `targetFrameRate = -1`，帧率等于刷新率 [probe:P8][probe:P11]。 |
+| Hit-freeze | `FreezeMoment` 各配置（下降/保持/上升，秒，unscaled）：HeroDamage 0.01/0.28/0.10，NailClash 0.01/0.25/0.10，BindBreak 0.01/0.40/0.10，BossStun 0/0.25/0.10，EnemyDeath 0.04/0.024/0.04（已确认）。长时类型：BossDeathSlow 1.35 s（速度 0.05）、EnemyBattleEndSlow 1.85 s（每个 BattleScene 结束时，除非 noEndSlomo）、RaceWinSlow 3.8 s、BossDeathStrike 0.45 s、HeroDamageShort 0.2 s（Wanderer 暴击）、BigEnemyDeathSlow 0.14 s [m0:N13]。每一种都让 `TimeSlowed` 为真，同时吞掉暂停和解除暂停。英雄自己受击不用 HeroDamage 预设，而是调用 prefab 上的 `DAMAGE_FREEZE_DOWN/WAIT/UP` = 0/0.1/0.1 s [m0:C5][probe:P11]。 |
+| 暂停/退出 | §1.2 所列门控；还包括 `InteractManager.BlockingInteractable`（工作台处除外）、`acceptingInput`、Patch 4 之后 ReturnToMainMenu 的拒绝条件，以及退出时（`ReturnToMainMenu(willSave:true)`）保存失败后停在 PAUSED 而 `PauseAllowed` 一直为 false 的分支（§3.6.8）[m0:C9]；游戏中（如工作台）保存失败则在 PLAYING 下弹出 SAVE_FAILED MSG_CANVAS，是另一种情况（§3.6.8 另有一行）。逐条代码核对见 m0 §2.4。 |
+| 扣血路径 | `TakeHealth`（Fractured Mask 的语义见 §1.5 [m0:C2]）；经 `ApplyTagDamage` 的 `DoSpecialDamage`（`DamageTag` 的 startDelay/delayPerHit，例如带 Acid 标志的命中会挂上 acidDamageTag）；`TakeChompDamage`；`TakeFrostDamage`；`CriticalDamage`（HP 设为 1 并清空蓝血）；`CogMultiHitter`（1.0.28497 已删除双倍伤害：触发时只查 `isHeroInPosition` 和 `!isInvincible`，0.35 s（scaled）后 `DamageHeroDirectly` → `TakeDamage(1, SPIKES)`，共 1 格 + 一次危险物重生，穿透 i-frame；任一齿轮命中后所有齿轮冷却 1.0 s）[m0:C3]；FSM 动作 `DamageHeroDirectly`/V2 清除 `isInvincible`、`cState.parrying` 和下劈步数，**不清** `cState.invulnerable` 和 `parryInvulnTimer`，所以 ENEMY 类直接伤害仍被受击 i-frame 挡住，SPIKES/SINK 类穿透（Patch 4 加入了 `CheckDeathCatch`）[m0:C4]。 |
 | HUD | 每单位丝对应一个 `SilkChunk`；`HudGlobalHide`；绑定 GMS 后切换为 Weaver 面具图标和更大的线轴。 |
-| 焦点 | InControl 的 `OnApplicationFocus(false)` 只会清空输入，不会暂停游戏。原版失焦后是否继续模拟未知。 |
+| 焦点 | 原版 `Application.runInBackground = True`、InControl `SuspendInBackground = False`、Input System `backgroundBehavior` 为默认的 ResetAndDisableNonBackgroundDevices：失焦时键盘被断开，Hornet 失去控制，而世界和 PlayTime 照常运行；游戏代码不会因为失焦而暂停 [m0:C16][probe:P6][probe:P11]。 |
 | 存档槽 | `SaveSlotButton` 有 `isIncompatible` 分支（新版本碰过的存档在旧版本可能读不了）。 |
 | Unscaled 时间 | 49 个文件读取 `unscaledDeltaTime`，其中约 8 处影响玩法。只有在启用 lockstep（§3.11）时才相关。 |
 
@@ -174,11 +192,11 @@
 
 | # | 主题 | 决定 | 理由 |
 |---|---|---|---|
-| C1 | 帧率 | **60 fps、60 Hz、游戏内 VSync 开**（2026-09-29 定：LG TV 最高 60 Hz，不考虑 120 Hz）；显示模式必须无撕裂 | 计算预算 16.7 ms；物理 50 Hz [int14]；游戏开 VSync 时帧率等于刷新率（P11）；P8 实测 60 Hz 下按键 → 画面开始变化 p50 45.6 ms、最大 49.6 ms |
-| C2 | 捕获 | 只实现 WGC（无边框窗口）。只有 P8 证明 WGC 不达标时才加 DXGI | 窗口级捕获、不会被其他窗口遮挡、支持多实例；少维护一个后端 |
+| C1 | 帧率 | **60 fps、60 Hz、游戏内 VSync 开**（2026-09-29 定：LG TV 最高 60 Hz，不考虑 120 Hz）；显示模式必须无撕裂 | 计算预算 16.7 ms；物理 50 Hz（`fixedDeltaTime` = 0.02 已确认）[int14][probe:P11]；游戏开 VSync 时帧率等于刷新率（P11）；P8 实测 60 Hz 下按键 → 画面开始变化 p50 45.6 ms、最大 49.6 ms |
+| C2 | 捕获 | 只实现 WGC（窗口模式、DWM 合成，§2.6）。只有 P8 证明 WGC 不达标时才加 DXGI | 窗口级捕获、不会被其他窗口遮挡、支持多实例；少维护一个后端 |
 | C3 | PC 输入 | **默认 `SendInput`**，由独立的 `inputd` 进程发送。RP2040 为 Switch 而做，PC 上作为可选项 | RP2040 挡不住主机崩溃或焦点丢失（游戏会随主机一起死；按键只发往前台窗口），唯一多出的保护是 rt/inputd 崩溃 |
 | C4 | 帧与标签对齐 | QPC 时间戳 + 相机轨迹互相关；不往像素里烧条码 | 训练像素必须与正式运行一致 |
-| C5 | 相机模型 | 透视；保存 V/P 矩阵 | [dec] |
+| C5 | 相机模型 | 透视；保存 V/P 矩阵 | [dec]；相机组件和钳位已由 m0 §2.7 确认，是否真的是透视待 P11 读取；`fovOffset` 生效时 px/u 不是常数 |
 | C6 | 定位 | v0 = 把分割出的地形掩码与 `SceneGeometry` 碰撞栅格做配准。图集、描述子、LK 按需再加（§3.11） | 先用便宜的方案 |
 | C7 | 战斗核心 | 规则表 + 搜索规划器 + 安全过滤器 + 监督器；学习只做盾内参数调优；PPO/DAgger 移到 §3.11 | [pri9][pri10][pri11] |
 | C8 | 前摇识别 | 可观测阶段分类 + HMM，只针对 A 类 boss 和竞技场敌人 | 不训练像素无法区分的标签；缩小范围 |
@@ -189,10 +207,10 @@
 | C13 | 时间 | 硬上限 17,400 s；自底向上预算 + 调速器；K3 决定一局还是两局 | §3.6.6 |
 | C14 | Oracle 开销 | 主线程 p50 ≤ 0.3 ms、p99 ≤ 1.0 ms；帧时间 p99 相对原版 ≤ +0.5 ms | 取各方最严的组合 |
 | C15 | 训练时钟 | 只用实时，4–6 个实例；移除 lockstep 和 timeScale | 计时用 unscaled 时间，lockstep 省不了预算 [VER]；timeScale 有保真陷阱 [pri5] |
-| C16 | 死人开关 | 100 ms；菜单中解除；按/放循环直到 `inputd` 自己看到暂停菜单 | 避免单次 Esc 把菜单反向关掉 |
+| C16 | 死人开关 | 100 ms；菜单和 CUTSCENE 中解除；按/放循环，`inputd` 自己看到暂停的最早线索（暗幕开始变暗）即停手，必须在真实暂停后约 230 ms 内 | 单次 Esc 可能被丢弃；0.3 s 锁定一过，再按 Esc 就会解除暂停 [m0:C11]；CUTSCENE 中任何按键都会跳过过场 |
 | C17 | IPC | TCP 传状态和动作；不再需要帧共享内存 | 移除 TRAIN-V 后没有帧要传 |
-| C18 | 插件 | 一个 `SsOracle`，从 SilksongRL（MIT）分叉 | 复用已被验证的注入、致命取消、多实例代码 |
-| C19 | 按键保持 | PC 最短 21 ms，Switch 40 ms；暂停循环为按 ≥34 ms / 放 ≥34 ms | 保证每个边沿至少被一次输入更新看到 |
+| C18 | 插件 | 一个 `SsOracle`，从 SilksongRL（MIT）分叉 | 复用 socket、致命取消、多实例代码。输入注入改为 `InputSystem.QueueStateEvent`（§3.1.1）：SilksongRL 的注入只覆盖 ← → ↑ ↓ Z X（Extended 加 C），按控件名匹配还会命中手柄，写入帧不确定 [m0:N39] |
+| C19 | 按键保持 | PC 按帧计数：每次按下保持到看到 ≥ 2 个新帧，下限 max(34 ms, 2 × 实测帧时间)；同一键两次按下之间的松开同理。Switch 40 ms。暂停循环为按 ≥34 ms / 放 ≥34 ms | Input System 每个渲染帧采样一次按键（`ProcessEventsInDynamicUpdate`），同一次更新内的按下加松开会丢；原来的 21 ms 短于 60 fps 下的两帧 [m0:N37][probe:P11] |
 | C20 | 计时估计 | 低估 ≤ 30 s/局，高估 ≤ 300 s | 只有低估危险 |
 
 ### 2.3 运行配置
@@ -246,7 +264,7 @@ FrameSource ─► ScreenMode(+menu read, tear flag) ─┬─► HUDReader ─�
 |---|---|---|
 | `rt` | 捕获 → GPU 感知（2 个 CUDA stream、CUDA graph）→ 融合 → 监督器 → 战斗 → sink。**计算截止 p99 ≤ 12 ms/帧。** | HIGH，P 核 2–7 |
 | `planner` | 世界图、路线目标、房间内寻路、Ledger；通过无锁队列给 `rt` 发目标 | NORMAL |
-| `inputd` | 用高精度可等待定时器（约 0.5 ms）执行按键；强制最短保持；心跳看门狗；**焦点守护**（每 1 ms 轮询 `GetForegroundWindow`）；**自带暂停菜单检测**（独立的 WGC 会话，固定 ROI 模板，60 Hz）；操作员热键 Ctrl+Alt+P | TIME_CRITICAL 线程，1 个 P 核 |
+| `inputd` | 用高精度可等待定时器（约 0.5 ms）执行按键；强制最短保持；心跳看门狗；**焦点守护**（每 1 ms 轮询 `GetForegroundWindow`）；**自带暂停检测**（独立的 WGC 会话，固定 ROI 模板，60 Hz；以暗幕开始变暗为最早线索，§3.7.5）；操作员热键 Ctrl+Alt+P | TIME_CRITICAL 线程，1 个 P 核 |
 | `recorder` | NVENC 视频 + 状态/动作/事件日志；宁可丢帧也不拖慢 `rt`；有专用数据盘后**不写 C: 盘**（在那之前写 C: 上的专用目录，C: 空闲 < 200 GB 时停录） | BELOW_NORMAL，E 核 |
 | `shadow`（仅训练） | 比较视觉与 oracle，写指标 | NORMAL，E 核 |
 
@@ -257,13 +275,13 @@ FrameSource ─► ScreenMode(+menu read, tear flag) ─┬─► HUDReader ─�
 | 项目 | 设置 | 理由 |
 |---|---|---|
 | 构建 | 1.0.30000，哈希锁定 | [mod2][VER] |
-| 显示 | 游戏画面 1920×1080、16:9，以窗口模式运行在 4K@60 Hz 桌面上（P8 即在此配置下测得）；游戏内 VSync 开；关 HDR/Auto HDR。捕获发生在 PC 内部，电视自身的显示延迟不影响 bot。**模式必须无撕裂**：默认无边框 flip 模型（DWM 合成）。如果 P8 在该模式下测出撕裂，就改为 vSync 开 + 对应刷新率 | 约 65 px/u；撕裂会把 HUD 和目标拆到两帧里 |
-| 帧率 | 游戏内上限 60 fps | [pri22] |
+| 显示 | 游戏画面 1920×1080、16:9，窗口模式（DWM 合成）运行在 4K@60 Hz 桌面上（与 `versions.lock` 的 `display_mode` 一致；P8 即在此配置下测得）；游戏内 VSync 开；关 HDR/Auto HDR。捕获发生在 PC 内部，电视自身的显示延迟不影响 bot。**模式必须无撕裂**：P8 在这个冻结模式下报告撕裂率；不为零就上报并查明原因，不自行改动 60 Hz / VSync 开的冻结配置 | 约 65 px/u；撕裂会把 HUD 和目标拆到两帧里 |
+| 帧率 | 60 fps = 60 Hz 刷新 + 游戏内 VSync 开（`vSyncCount = 1`、`targetFrameRate = -1`）。不设游戏内帧率上限：它与 VSync 互斥，设了就会关掉 VSync | [pri22][probe:P8][probe:P11] |
 | 相机震动 | **Off** | 配准时没有抖动 |
 | 粒子 | **Low** | 画面更干净 |
 | HUD 缩放、亮度、着色器质量 | 固定，记录在 `versions.lock` | HUD 区域和颜色统计稳定 |
 | 原生成就弹窗、Steam/Discord/NVIDIA 叠加层、Game Bar、Windows 通知 | 全部关闭；Steam 状态设为隐身 | 屏幕上不出现入侵 |
-| 输入 | 默认键盘键位；Input System 后端；中文界面（2026-09-29 定，沿用你自己的设置；菜单 OCR 模板按中文字体做）；英文键盘布局（无输入法） | 扫描码映射有效 |
+| 输入 | 默认键盘键位（P4 核对与注册表一致 [probe:P4]）；键盘固定走 Input System，注册表快照冻结 NativeInput [m0:C15]；中文界面（2026-09-29 定，沿用你自己的设置；菜单 OCR 模板按中文字体做）；英文键盘布局（无输入法）；**PC 上不接任何手柄**（含 Switch Pro 和 RP2040 手柄模式）：活动手柄断开会自动暂停，任何手柄输入都会切换菜单的键盘别名 [m0:N19][m0:N16] | 扫描码映射有效；菜单别名和意外暂停可预测 |
 | Windows | 专注助手开；暂停更新；关闭睡眠；GPU 驱动锁版本；`SPI_SETFOREGROUNDLOCKTIMEOUT` 设为最大；关闭粘滞键/筛选键/切换键的快捷键；**章节期间拔掉鼠标**（悬停会改变菜单选中项）；调试 UI 放在第二显示器，窗口带 `WS_EX_NOACTIVATE` | 保护焦点和捕获 |
 | 硬件 | BIOS 更新到带 Intel 微码 0x12B 或更新版本 | 13 代 Vmin 不稳定问题；部分挂起比整机挂起更危险 |
 
@@ -273,11 +291,11 @@ FrameSource ─► ScreenMode(+menu read, tear flag) ─┬─► HUDReader ─�
 
 | 共享物 | 风险 | 措施 |
 |---|---|---|
-| 存档目录 `LocalLow/Team Cherry/Hollow Knight Silksong/<SteamID>/` | 训练写坏真实槽；Steel Soul 槽被覆盖 | ① 训练副本不带 Steam 子系统（D15，默认重命名 `steam_api64.dll`，或用 DisableSteam 类插件），存档自动落到 `default` 目录，成就只能本地。② SsOracle 再把存档和共享数据路径重定向到 `C:\ssbot\sandbox\<instance>\`。③ SlotGuard 作第二层。④ compat 在会话前后对真实目录做哈希。 |
-| `shared.dat`（RoamingSharedData：`RecPermadeathMode`、菜单样式、本地成就后备） | 训练误解锁；Steel Soul 解锁流程直到正式那天才第一次执行 | 同上隔离；AchievementGuard 放行 `RecPermadeathMode`，其余照常拦截。在 M0 于最终副本上输入一次 Steel Soul 代码，这是无害的。 |
-| PlayerPrefs（HKCU `Software\Team Cherry\Hollow Knight Silksong`：视频设置、所有键位） | 训练实例或你的游玩改了设置/键位，泄漏到正式运行 | 在 `versions.lock` 中保存 `.reg` 快照。每次 VANILLA/FINAL 会话前恢复并做哈希；compat 再 OCR 选项页，与黄金模板比对。 |
+| 存档目录 `LocalLow/Team Cherry/Hollow Knight Silksong/<AccountID>/`（目录名是 32 位 Steam AccountID，不是 SteamID64 [m0:C14]） | 训练写坏真实槽；Steel Soul 槽被覆盖；最终副本的 Steam 初始化失败时，存档和 shared.dat 静默落到 `default` 目录，与训练副本的默认目录相同 [m0:N28] | ① 训练副本不带 Steam 子系统（D15，重命名 `steam_api64.dll` 已由 P9 验证），不重定向时存档落到 `default` 目录，成就只能本地 [probe:P9]。② SsOracle 再把存档和共享数据路径重定向到 `C:\ssbot\sandbox\saves\<instance>\`（`-ssbot-instance N`，默认 0）：已在 `oracle/src/Guards/SaveRedirect.cs` 实现（Harmony 转译补丁替换 `DesktopPlatform.Awake` 里唯一一次 `Application.persistentDataPath` 调用，user*.dat、`.bak*`、Restore_Points、shared.dat 都进沙盒），实测通过 [probe:P9]。真实的 `persistentDataPath\default` 已删除，必须保持不存在：它一旦重新出现，就说明最终副本的 Steam 初始化失败了 [m0:N28]，compat 第 7 项报警。未重定向：DebugMod 的 `DebugModData\`（它自己的设置和存档点，不含游戏存档）仍在真实 LocalLow 下。③ SlotGuard 作第二层。④ compat 在会话前后对真实 `<AccountID>` 目录做哈希，并确认 `default` 不存在。 |
+| `shared.dat`（RoamingSharedData：`RecPermadeathMode`、菜单样式、本地成就后备） | 训练误解锁；Steel Soul 解锁流程直到正式那天才第一次执行 | 同上隔离；AchievementGuard 放行 `RecPermadeathMode`，其余照常拦截。`RecPermadeathMode` 按存档目录存放，每个目录各一份 [m0:N32]；M0 已在最终副本上输入过一次 Steel Soul 代码（无害），`<AccountID>\shared.dat` 现为 `RecPermadeathMode=1` [probe:P5]。训练沙盒里的结局预演会经 `PermaDeath_Unlock` 把 `RecPermadeathMode` 写进沙盒 shared.dat，同样无害。 |
+| PlayerPrefs（HKCU `Software\Team Cherry\Hollow Knight Silksong`：视频设置、所有键位、NativeInput/XInput、GameLang；所有副本共用） | 训练实例或你的游玩改了设置/键位，泄漏到正式运行；Unity 退出时还会把启动参数 `-screen-width/-screen-height/-screen-fullscreen` 写回该键 [probe:P9] | 在 `versions.lock` 中保存 `.reg` 快照，冻结 GameLang = ZH（界面语言定为中文）和 NativeInput [m0:N40][m0:C15]。`scripts/launch_train.ps1` 启动前导出该键，退出后删除并导入快照（P9 实测还原后 0 处差异）。每次 VANILLA/FINAL 会话前恢复并做哈希；compat 再 OCR 选项页，与黄金模板比对。 |
 | Steam Cloud | 冲突弹窗或静默回滚 | 整个项目期间对 Silksong 关闭 Steam Cloud。 |
-| 成就 | SPEEDRUN_1/STEEL_SOUL 提前解锁（不可逆） | 训练副本本身没有 Steam 通道 + AchievementGuard（同时 patch `Platform.PushAchievementUnlock`、`UpdateAchievementProgress`、`AwardAchievementToPlayer`、`MenuStyleUnlock.Unlock`，任一 patch 失败就拒绝启动）；原版预演在 GMS 前硬停。 |
+| 成就 | SPEEDRUN_1/STEEL_SOUL 提前解锁（不可逆） | 训练副本本身没有 Steam 通道 + AchievementGuard：patch `DesktopPlatform.PushAchievementUnlock`、`DesktopPlatform.UpdateAchievementProgress`、`AchievementHandler.AwardAchievementToPlayer`、`AchievementHandler.UpdateAchievementProgress`、`MenuStyleUnlock.Unlock`，并拦截或重定向 `RoamingSharedData` 写入（Push 总会写 shared.dat），任一 patch 失败就拒绝启动。`Platform.PushAchievementUnlock` 是 abstract、`Platform.UpdateAchievementProgress` 被重写且不调 base，挂在它们上面的 patch 要么失败、要么永不执行 [m0:C1][m0:N26]。原版预演在 GMS 前硬停。 |
 | 真实存档目录中的槽位 | MenuDriver 误选 Restore/Clear；继续了错误的槽 | 正式运行时该目录只留最终槽，其他槽由你手动归档；FINAL 配置里把删除/清除动作编译掉（§3.6.2）。 |
 
 ---
@@ -298,32 +316,37 @@ FrameSource ─► ScreenMode(+menu read, tear flag) ─┬─► HUDReader ─�
 
 #### 3.1.1 模块（从 SilksongRL 分叉）
 
-SilksongRL 已经有 socket 桥、`ButtonControl.get_isPressed` 注入、致命伤取消、存档抑制、`BossStateLogger`、多实例启动器 [pri1][VER]。在此基础上改造和补充：
+SilksongRL 已经有 socket 桥、`ButtonControl.get_isPressed` 注入（有缺口，见 C18 [m0:N39]）、致命伤取消、存档抑制、`BossStateLogger`、多实例启动器 [pri1][VER]。在此基础上改造和补充：
 
 - **Core：**
-  - `Plugin`：加载配置；TRAIN 下设 `runInBackground = true`。
+  - `Plugin`：加载配置；TRAIN 下保持 `runInBackground = true`（原版已是 True [probe:P11]），并设 `InputSystem.settings.backgroundBehavior = IgnoreFocus`，否则失焦时键盘被禁用，注入的事件被丢弃 [probe:P3]；跳过 `SetCursorEnabled`、释放鼠标，并在 Input System 中禁用鼠标设备（悬停会改变菜单选中项 [probe:P7]）。
   - `Profile`：拒绝被禁止的组合，例如 SHADOW 中开作弊。
   - `SymbolCheck`：按名字解析约 150 个类型/字段/方法，失败时出报告并硬失败。
 - **Export：**
-  - `HeroExporter`：位置、速度、`hero_state`、cState 位集（用 `onGround`、`isBinding`；`Invulnerable = invulnerable || invulnerableCount > 0` [VER]）、PlayerData 标量、`Can*()`。
+  - `HeroExporter`：位置、速度（`Body.linearVelocity`，不用已过时的 `Rigidbody2D.velocity`）、`hero_state`、cState 位集（用 `onGround`、`isBinding`；`Invulnerable = invulnerable || invulnerableCount > 0` [VER]；`parryInvulnTimer`、下劈步数、`isInvincible`、`HeroInvincibilitySource` 不在其中，分别导出）、PlayerData 标量（经 `GameManager.UnsafeInstance.playerData` 读取，不用 `hero.playerData` 缓存）、`Can*()`。退出时 GameManager、英雄和 PlayerData 都会重建，不跨帧缓存引用 [m0:N42][m0 §2.7]。
   - `EntityRegistry`：移植 DebugMod `HitboxRender.CategorizeHitbox` [mod6]。
   - `FsmTap`：采集**全部** FSM 的状态及停留时间、tk2d clip/帧，发出 `FSM_TRANSITION`。
   - `SceneDumper`、`ProgressExporter`（≤2 Hz）、`CameraExporter`（V/P 矩阵）、`HudProbe`、`FrameExporter`（在 `WaitForEndOfFrame` 采样）。
   - `EventTap`：
-    - TakeDamage、HealthManager.TakeDamage、EnterScene、SaveGame（含失败）、Die、工作台、拾取。
-    - **所有暂停/退出阻塞源**：`disablePause`、`TimeSlowed`（postfix 挂在 `FreezeMoment`/`FreezeMomentGC`）、`PreventPause`/`AllowPause`、`GenericMessageCanvas`、`BlockingInteractable`、`acceptingInput`、`disableSaveQuit` 的变化沿、`ScenePreloader.HasPendingOperations`、Save & Quit 按钮的 `interactable`。
+    - TakeDamage、HealthManager.TakeDamage、EnterScene、SaveGame（含失败）、Die、工作台、拾取、`GameManager.SetState`（GameState 边沿）。
+    - **所有暂停/退出阻塞源**：`disablePause`、`TimeSlowed`（postfix 挂在 `FreezeMoment(FreezeMomentTypes, Action)` 和 `FreezeMoment(float×4)`，记录类型、开始、结束）、`PreventPause`/`AllowPause`（`PauseAllowed`）、GameState、`SetIsInventoryOpen`、`UIMsgProxy.SetIsInMsg`、`GenericMessageCanvas`、`BlockingInteractable`、`acceptingInput`、`disableSaveQuit` 的变化沿（hook `PlayerData.SetBool`/`SetVariable`，按 boolName ∈ {disablePause, disableSaveQuit, disableInventory} 过滤，FSM 写入都走这两个入口）、`ScenePreloader.HasPendingOperations`、Save & Quit 按钮的 `interactable` [m0 §2.4]。
     - **每次 health/healthBlue 变化的调用栈摘要**：TakeHealth 的调用者、DoSpecialDamage、DamageTag、CriticalDamage、FSM DamageHeroDirectly、SetPlayerDataInt。
 - **Guards：**
   - `SaveRedirect` + `SlotGuard` + `SaveSuppression`（`SaveGame`/`CreateRestorePoint` 返回 false）。
   - `LethalBlock`，**两张网**：
-    1. 第一网：在 `PlayerData.TakeHealth` 前缀中**完整复刻 Fractured Mask 逻辑**（蓝血、`AmountLeft`、`allowFracturedMaskBreak`）。只有结算后 health 会变成 0 时才取消，并发出 `CATASTROPHE`。面具该碎就让它碎。
-    2. 第二网：挂在 `HeroController.Die`、`GameManager.PlayerDead`、`CheckDeathCatch`、`permadeathMode` 的写入上。即使第一网漏了，也会记 `WOULD_DIE`。
+    1. 第一网：在 `PlayerData.TakeHealth` 前缀中**完整复刻 1.0.30000 的 Fractured Mask 逻辑**：蓝血先吸收；能活 = 已装备且 `AmountLeft > 0`（致命伤钳到 1 HP）；只有 `allowFracturedMaskBreak` 为真时才消耗面具 [m0:C2]。只有结算后 health 会变成 0 时才取消，并发出 `CATASTROPHE`。面具该碎就让它碎。
+    2. 第二网：`HeroController.Die` 的前缀必须在内存写 Dead 之前生效（阻止迭代器创建）；另挂 `GameManager.PlayerDead`、`CheckDeathCatch`、`permadeathMode` 的写入。即使第一网漏了，也会记 `WOULD_DIE`。
     
-    单元测试覆盖脚本化的尖刺、齿轮、抓取、熔岩死亡。
+    单元测试覆盖脚本化的尖刺、齿轮、抓取、熔岩死亡，以及 i-frame 期间撞尖刺 [m0:N1]。`CheatManager.PreventDeath` 不能代替 LethalBlock，评估时必须关闭 [m0:N43]。
+  - **永不写** `timeSlowedCount`、`ignoreUnpause`、`disablePause`：oracle 只能用真实按键注入来暂停（DebugMod 的 `TIME_FORCEPAUSE` 会绕过所有门）[m0:N43]。
   - `AchievementGuard`（见 §2.7；放行 `RecPermadeathMode`）。
   - `SteelSoulSnapshot`：Steel Soul 训练槽必须开着快照才能用。
 - **Harness：** `SavestateBridge`（DebugMod API [mod9]）；`StartRandomizer`（HP、丝、x 偏移、朝向、0–60 帧等待、`Random.InitState`）；`Warp`（Benchwarp）。
-- **Input：** `ButtonControlPatch` 映射**每个**逻辑按键，包括 Esc/Enter/Tab/I [mod13][pri2]；`InputPathEmulator` 加观测延迟和边沿抖动。
+- **Input：**
+  - `KeyboardInjector`（已实现：`oracle/src/Input/KeyboardInjector.cs` [probe:P3]）：在主线程的 `InputSystem.onBeforeUpdate`（动态更新）中每帧锁存一次按键集合，用 `InputSystem.QueueStateEvent` 向 `Keyboard.current` 排队一个完整的 `KeyboardState`，覆盖**每个**逻辑按键，包括 Esc/Enter/Tab/I/[/]。游戏走与真实按键相同的读取路径（Input System → InControl `KeyBindingSource` → `HeroActions`），按电平采样、亚帧点按丢失、边沿、LastInputType 和菜单别名都一致 [m0 §3.3]。P3 实测：全程不在前台，能从主菜单读档、暂停、取消暂停、走和跳。永不在 PlayerAction/HeroActions 层注入。
+  - legacy shim（M1）：把注入的按下边沿并进 `Input.anyKeyDown` 的调用者（`InputHandler.CutsceneInput`/`StagCutsceneInput`、`GameManager.UpdateEngagement`、`IdleMemoryCleaner`），否则 TRAIN 和 FINAL 的过场跳过（含 ENDING 误跳过）和 GC 卡顿不一致 [m0:N36]。
+  - 后备：只作用于 Keyboard 设备、每帧锁存一次的 `ButtonControl.get_isPressed` 前缀 [mod13][pri2]。
+  - `InputPathEmulator` 加观测延迟和边沿抖动。
 - **IPC：** TCP；序列化用 MessagePack-CSharp 或固定二进制结构。**只有帧时间门槛失败时才手写优化或追求零分配。**
 
 **预算（C14）：** 主线程 p50 ≤ 0.3 ms、p99 ≤ 1.0 ms；1 h soak 中游戏帧时间 p99 相对原版 ≤ +0.5 ms（用 PresentMon 测）。
@@ -331,16 +354,20 @@ SilksongRL 已经有 socket 桥、`ButtonControl.get_isPressed` 注入、致命�
 #### 3.1.2 每帧导出（`FrameLabel` = `STATE` 消息，约 2–20 KB）
 
 ```text
-FrameLabel {
-  frame u64, qpc_eof i64, unscaled_dt/dt/time_scale f32, fixed_steps u8
-  game_state, ui_state, inventory_open, hud_hidden, cheat_flags u32
-  pause_blockers u16 {DISABLE_PAUSE, TIME_SLOWED, PAUSE_LOCKOUT, MSG_CANVAS, BLOCKING_INTERACT,
-                      NOT_ACCEPTING_INPUT}, disable_save_quit, preload_pending, savequit_interactable
-  scene, additive[], transitioning, play_time f64, permadeath_mode
+FrameLabel {                                   # 字段来源见 m0 §3.1
+  frame u64, qpc_eof i64, fixed_update_cycle u64, fixed_steps u8, unscaled_dt/dt/time_scale/fixed_dt f32
+  game_state u8, ui_state, inventory_open, hud_hidden
+  cheat_flags u32 {cheat_invincibility, hero_keep_health, tools_active_state, boss_scene_controller}
+  pause_blockers u16 {DISABLE_PAUSE, TIME_SLOWED, PAUSE_LOCKOUT (= !PauseAllowed), MSG_CANVAS, BLOCKING_INTERACT,
+                      NOT_ACCEPTING_INPUT, GAME_STATE_NOT_PLAYING}, pause_allowed, ih_accepting_input,
+  disable_save_quit, preload_pending, savequit_interactable
+  scene_raw, scene_base, additive[], transitioning, memory_scene, permadeath_mode
+  play_time_live f32, play_time_saved f32, session_timer f32, session_start f32   # PlayTime / playerData.playTime / 私有计时
   camera { pos, fov, aspect, viewport, V mat4, P mat4, shake_offset, mode, lock_area, look_offset }
-  hero { pos, vel, facing, colliders[], cState[92], hero_state, anim{clip,frame,n,fps,sprite_id},
-         health, maxHealth, healthBlue, silk, silkMax, crest, tools[], tool_amounts[], geo, shellShards,
-         invuln_sources[], fractured_mask{equipped,broken}, bind{active,t},
+  hero { pos, vel, facing, colliders[], cState[92] + 4 int, hero_state, anim{clip,frame,n,fps,sprite_id},
+         health, maxHealth, healthBlue, silk, silk_max (= CurrentSilkMax), silk_parts, crest, tools[], tool_amounts[],
+         geo, shellShards, invuln_sources[], parry_invuln_timer, is_invincible, can_take_damage,
+         fractured_mask{equipped, amount_left}, bind{active,t},
          damage_tags[{kind, ticks_left, dmg_per_tick, next_tick_s}] }
   entities [ { iid, type_key, category, layer, pos, vel, gravity_scale, hp, fsms[{name,state,t}],
                anim{…}, flipX, render_aabb, colliders[{shape, verts_world, enabled, layer,
@@ -359,7 +386,7 @@ FrameLabel {
 
 #### 3.1.4 帧与标签对齐（C4）
 
-- oracle 记录 `qpc_eof`，WGC 给出 `SystemRelativeTime`（同为 QPC 时钟）。
+- oracle 记录 `qpc_eof`，WGC 给出 `SystemRelativeTime`（同为 QPC 时钟）。P8 发现 `Frame.timespan` 比回调到达时刻晚约 7–10 ms（像是下一次刷新的目标时间），不能当作帧产生时刻 [probe:P8]；对齐前先用下面的互相关标定这一偏移。
 - 每个捕获帧匹配"预测呈现时间 ≤ 捕获时间"的最新 `FrameLabel`。
 - 用像素配准得到的相机轨迹与 oracle 相机轨迹做互相关，**偏移为 0 的帧须 ≥ 99.5%**，否则整个会话丢弃。
 
@@ -378,7 +405,7 @@ FrameLabel {
 
 #### 3.1.6 数据采集与规模
 
-所有数据在冻结配置、**最终捕获路径**下采集。视频用 NVENC HEVC CQP 16，每 10 帧另存 1 帧无损。
+所有数据在冻结配置、**最终捕获路径**下采集。视频用 NVENC HEVC CQP 16，每 10 帧另存 1 帧无损。训练副本采集前：DebugMod 界面在 `Settings.json` 里关掉，Modlist 禁用或遮掉菜单左上角区域（§3.1.8 L1）[probe:P9][probe:P14]。
 
 | 来源 | 小时 | 内容 |
 |---|---|---|
@@ -409,7 +436,7 @@ FrameLabel {
 
 | # | 泄漏 | 控制 |
 |---|---|---|
-| L1 | mod 在画面上有叠加 | 插件什么都不画。检查方法：DebugMod 冻结同一个 savestate 帧，分别在插件开/关下截图，逐像素平均差 < 1/255（CI 每个数据集构建都跑） |
+| L1 | mod 在画面上有叠加 | SsOracle 什么都不画。但训练副本的画面里还有别的 mod 叠加：菜单左上角 Modlist 画的版本和模组列表（`v1.0.30000-0.3.1 / DebugMod / SsOracle`，最终副本没有）[probe:P14]；DebugMod 界面默认打开，遮住大半画面 [probe:P9]。采集前在 DebugMod 的 `Settings.json` 里关掉界面；Modlist 要么禁用，要么在菜单帧用作训练数据前遮掉该区域。检查方法（CI 每个数据集构建都跑）：① DebugMod 冻结同一个 savestate 帧，分别在 SsOracle 开/关下截图，逐像素平均差 < 1/255；② 完整训练 mod 组合（按采集时的配置）对原版副本，同一静止画面（标题画面、菜单页、同一存档暂停中的画面），遮罩区域外逐像素平均差 < 1/255 |
 | L2 | 作弊改变了画面 | 只取消致命一击；`cheat_flags ≠ 0` 的帧只用于检测器子集 |
 | L3 | 时间统计失真 | 只用实时数据（lockstep 已移除） |
 | L4 | 划分泄漏 | 按会话划分；留出房间单独报告 |
@@ -426,7 +453,7 @@ FrameLabel {
 | `HitboxTable` | [type][clip][frame] → 碰撞多边形 |
 | 阶段表、行为表 | 每种敌人（§3.2.6、§4.4） |
 | 伤害表 | [com1][com2] + 扣血路径清单（齿轮、DamageTag、CriticalDamage 的来源） |
-| 常量 | `constants_1.0.30000.json`：INVUL_TIME、DAMAGE_FREEZE_*、RECOIL_VELOCITY、DASH_*、RUN_SPEED、固定步长、PauseAllowed 锁定时长 |
+| 常量 | `constants_1.0.30000.json`：INVUL_TIME、INVUL_TIME_PARRY/CROSS_STITCH/SILKDASH/QUAKE、DAMAGE_FREEZE_*、RECOIL_*、DOWNSPIKE_INVULNERABILITY_STEPS(_LONG)、各动作预输入步数（含 DASH_QUEUE_STEPS）、MAX_FALL_VELOCITY(_WEIGHTED)、DASH_*、RUN_SPEED、固定步长、PauseAllowed 锁定时长。M0 已从 HeroController 预制体导出一版（`docs/facts/1.0.30000/hero_constants.json`，读档后坐椅子状态的实例值；纹章、工具、状态效果可能改动其中一部分，M1 起按事件逐帧导出）[probe:P11] |
 | **quit map** | 每个场景 × 状态的 P(可暂停)、P(可退出)，含阻塞原因，来自 oracle 日志 |
 | 覆盖图、世界图、配方、playbook、交互目录、恢复表 | §3.4–3.6 |
 
@@ -450,9 +477,9 @@ TensorRT 10 FP16、静态形状、CUDA graph。最多只有一次检测在途，
 #### 3.2.2 屏幕模式与菜单读取
 
 - **模型：** MobileNetV3-S 级，224×128 + 4 个固定 crop，约 0.2 ms。
-- **类别：** PLAYING、PLAYING_HUD_HIDDEN、DIALOG、ITEM_POPUP、AREA_TITLE、BENCH、SHOP、BELLWAY_MAP、INVENTORY、QUICK_MAP、PAUSE_MENU、MAIN_MENU、SAVE_SELECT、**MODE_SELECT**、FADE、TRANSITION、CUTSCENE_VIDEO、DEATH/PERMADEATH、**ENDING**、CREDITS、**FOREIGN_WINDOW**。
+- **类别：** PLAYING、PLAYING_HUD_HIDDEN、DIALOG、ITEM_POPUP、AREA_TITLE、BENCH、SHOP、BELLWAY_MAP、INVENTORY、QUICK_MAP、PAUSE_MENU、MAIN_MENU、SAVE_SELECT、**MODE_SELECT**、FADE、TRANSITION、CUTSCENE_VIDEO、DEATH/PERMADEATH、**ENDING**、CREDITS、**FOREIGN_WINDOW**、**MSG_CANVAS**（SAVE_FAILED/SAVE_CORRUPTED 对话框 [m0 §2.4]）。
 - **菜单读取（模板 + 固定字体 OCR）：**
-  - 暂停菜单：光标所在项、**Quit 是否灰色**。
+  - 暂停菜单：光标所在项（鼠标悬停会改变选中项 [probe:P7]）、**Quit 是否灰色**、退出确认框"保存并退出？"的高亮项（默认"否"）。
   - 存档选择：光标所在槽、该槽的游戏时间/地点/Steel Soul 标记、**Restore/Clear 是否被高亮**。
   - 模式选择：是否已有 Steel Soul 选项。
 - **精度目标：**
@@ -507,7 +534,7 @@ TensorRT 10 FP16、静态形状、CUDA graph。最多只有一次检测在途，
 - **弹丸运动模型**（参数从日志拟合）：`linear`、`ballistic`、`bounce`（对 DB 地形做射线检测）、`template`（例如 Last Judge 的香炉）。
 - **命中预测：** 每个弹丸 64 个蒙特卡洛样本，10 ms 步长，1.2 s 视野，对**实际执行的**英雄受击盒轨迹做扫掠，输出 P(命中) 和 `t_hit` p05。20 个弹丸 < 0.5 ms。
 - **游戏时间：**
-  - hit-freeze 期间时间缩放为 0，持续 0.25–0.40 s，但画面帧照常到达。跟踪器按 `t_game` 推进。
+  - hit-freeze 期间时间缩放降到 0 或很低，但画面帧照常到达。英雄受击 0/0.1/0.1 s [probe:P11]，拼刀、硬直约 0.35 s，长时类型 BossDeathSlow 1.35 s（速度 0.05）、EnemyBattleEndSlow 1.85 s（0.25）、RaceWinSlow 3.8 s（0.1）[m0:N13]。跟踪器按 `t_game` 推进。
   - 检测到事件时套用对应的 FreezeMoment 配置，并用 clip 帧推进速率估计时间缩放做交叉验证。
   - **冻结期间预测也冻结。**
   - 暂停时轨迹保持不变，解除后重新验证 3 帧。
@@ -538,7 +565,7 @@ TensorRT 10 FP16、静态形状、CUDA graph。最多只有一次检测在途，
 | i-frame、冲刺冷却、挂起的 DamageTag | 事件计时器 + oracle 测得的常量；状态暗角（酸蚀/火焰/碾压）作为挂起伤害标志 |
 | 屏幕外实体 | 轨迹记忆、DB 出生点、`arena_waves`、上看/下看侦察 |
 | 屏幕外的世界标志 | 两阶段 Ledger + DB 谓词 + 可见时验证 |
-| `disablePause`、`disableSaveQuit`、预加载 | quit map 模型（§3.7.5）；暂停菜单里直接读 Quit 是否灰色 |
+| `disablePause`、`disableSaveQuit`、预加载 | quit map 模型（§3.7.5）；暂停菜单里直接读 Quit 是否灰色（暂停中不刷新，Options → 返回会重算 [m0:C8]） |
 | 死亡是否已成定局 | 只能靠预测；事后由屏幕模式检测 PermaDeath 并停机 |
 
 #### 3.2.10 融合
@@ -554,9 +581,9 @@ TensorRT 10 FP16、静态形状、CUDA graph。最多只有一次检测在途，
 - **位置：** hornet 检测框 → `sprite_id → (pivot, hurtbox)` 表精化 → 以自身按键驱动的**辨识运动学**模型（§3.5.2）→ 贴地时 y 吸附到 DB 地面 → Kalman 滤波。相对地形 p99 ≤ **0.10 u**，速度 p99 ≤ 0.5 u/s。
 - **接触面、模式：** 由运动学 + 地形推出，再用 Hornet 小状态头做一致性检查（受击、Bind、硬直）。macro-F1 ≥ 0.995。
 - **计时器：**
-  - i-frame = 受击时刻 + 实测 INVUL_TIME（有 Weighted Belt 时 ×1.3，**由库存审计确认已装备才算**），用闪烁确认。
-  - 冲刺冷却。
-  - Bind 进度；打断的判断 = clip 变化 + 丝清空 [com6]。
+  - i-frame = 受击时刻 + `INVUL_TIME` 1.0 s 游戏时间 [probe:P11]（有 Weighted Belt 时 ×1.2，这是代码默认值，资产值待 P11 [m0:C6]；**由库存审计确认已装备才算**），用闪烁确认（闪烁从受击冻结之后开始）。`Invulnerable()` 协程按 scaled 时间计数，冻结期间 timeScale 下降，所以实时长度长于游戏时间，两者都要测。i-frame 只对 ENEMY/EXPLOSION/NON_HAZARD 有效 [m0:N1]。
+  - 冲刺冷却（`DASH_COOLDOWN` 0.425 s [probe:P11]）。
+  - Bind 进度；打断的判断 = clip 变化 + 丝清空 [com6]（丢丝规则待 Bind FSM 导出）。
 
 #### 3.3.2 HUD 读取
 
@@ -565,18 +592,18 @@ TensorRT 10 FP16、静态形状、CUDA graph。最多只有一次检测在途，
 - **时间逻辑：**
   - HP 或丝的**下降立即接受**，其他变化需 2 帧一致才接受。
   - HUD 隐藏时保持上一值，改为事件记账。
-  - 交叉验证：低血暗角、冻结事件、Bind 完成（+3）。
+  - 交叉验证：冻结事件、Bind 完成（+3）。低血暗角不作 HP 线索：面具完好时 `IsHealthCritical` 返回 false，不会出现暗角 [m0 §2.5]。
 - **目标（C12）：** HP 高估 0 / 10⁶ 可见帧，且单次不超过 5 帧；面具精确 ≥ 99.95%；丝精确 ≥ 99.9%；`bind_ready` 保守一致 ≥ 99.99%。
 - **ENDING 状态下** HUD 读取切换到结局皮肤模式，不触发 Q5。
 
 #### 3.3.3 Fractured Mask 与挂起伤害
 
-- Fractured Mask：优先读 HUD 指示（P10）；否则按事件跟踪：装备（审计）→ 碎（一次按模型伤害 ≥ 剩余 HP 的命中后 HP = 1）→ 修复（坐工作台）。**UNKNOWN 按 BROKEN 处理。** 目标：≥ 200 次碎裂/修复事件中 100% 正确。
-- **挂起伤害 `pending_dmg`：** 已挂上的 DamageTag（例如酸蚀）的剩余 tick × 每 tick 伤害；在视觉中由状态暗角推断，并按保守上界计。它会被减进 `hits_to_death`。
+- Fractured Mask：优先读 HUD 指示（P10）；否则按事件跟踪：装备（审计）→ 致命命中（按模型伤害 ≥ 剩余 HP）后 HP = 1：命中不带 MidChain 标志时面具被消耗（碎），MidChain（连招中段）命中时面具**不**消耗 [m0:C2] → 修复（坐工作台）。分不清是否 MidChain 时按已碎处理。**UNKNOWN 按 BROKEN 处理。** 目标：≥ 200 次碎裂/修复事件中 100% 正确。
+- **挂起伤害 `pending_dmg`：** 所有已挂上的 DamageTag（例如酸蚀）的剩余 tick × 每 tick 伤害，加上 Faydown 之前的霜冻时钟（`frostAmount ≥ 1` 后每 1.75 s 1 HP，无视 i-frame [m0:N3]）。标签栈在工作台和危险物重生后都不清除 [m0:N2]。在视觉中由状态暗角推断，并按保守上界计。它会被减进 `hits_to_death`。
 
 #### 3.3.4 库存审计与两阶段 Ledger
 
-- **审计：** 每个工作台、每次读档后打开库存（计时停止 [ach3]），用固定字体模板 OCR 读取纹章、**已装备工具**、能力、念珠、Shell Shards、面具和丝轴碎片、Memory Locket 数。**读档后，装备、运动学配置（Weighted Belt）、货币只以审计结果为准。**
+- **审计：** 每个工作台、每次读档后打开库存（计时停止，世界冻结 [ach3][probe:P6]），用固定字体模板 OCR 读取纹章、**已装备工具**、能力、念珠、Shell Shards、面具和丝轴碎片、Memory Locket 数。**读档后，装备、运动学配置（Weighted Belt）、货币只以审计结果为准。**
 - **Ledger（两阶段）：**
   - 每个事件写盘，初始状态为 `PENDING`。
   - 屏幕上**观测到一次保存**（坐工作台、退出淡出到主菜单、存档图标）后，`PENDING` 转为 `COMMITTED`。
@@ -587,9 +614,9 @@ TensorRT 10 FP16、静态形状、CUDA graph。最多只有一次检测在途，
 
 #### 3.3.5 计时估计器（`perception/timer`）
 
-- **计时：** 屏幕模式 ∈ {PLAYING、PLAYING_HUD_HIDDEN、TRANSITION、房间间的 FADE、DIALOG、AREA_TITLE、ITEM_POPUP}，以及**未知状态**（保守起见计入）。
-- **不计时：** PAUSE_MENU、INVENTORY、MAIN_MENU、SAVE_SELECT、LOADING、CUTSCENE_VIDEO、CREDITS。
-- **校准：** 每次读档后在存档选择界面 OCR "Xh YYm"，分辨率 60 s。估计值 = max(当前估计, OCR 下限)。
+- **计时：** 屏幕模式 ∈ {PLAYING、PLAYING_HUD_HIDDEN、TRANSITION、房间间的 FADE、DIALOG、AREA_TITLE、ITEM_POPUP、SHOP、BELLWAY_MAP（独立面板，GameState 保持 PLAYING [m0:N20]）、QUICK_MAP [probe:P6]}；Continue 之后从第一个 EXITING_LEVEL 起（工作台场景加载和醒来动画）[m0:C7]；新游戏之后从第一个 EXITING_LEVEL 起 [m0:N23]；以及**未知状态**（保守起见计入）。
+- **不计时：** PAUSE_MENU、INVENTORY、MAIN_MENU、SAVE_SELECT、LOADING（只指 Continue 的 prefab 加载段）、CUTSCENE_VIDEO（含 Bellway 乘车视频 [m0:N21]）、CREDITS。
+- **校准：** 每次读档后在存档选择界面 OCR "Xh YYm"：显示值向下取整，比实际少 0–59.99 s，所以显示值本身就是下限 [m0:N25]。估计值 = max(当前估计, OCR 下限)。结局时如果看到 End_Game_Completion 的 `Hh MMm SSs`，用这个秒级读数校准估计器。
 - **验证：** 每局低估 ≤ 30 s、高估 ≤ 300 s。调速器用"估计 + 3σ"与 17,400 s 比较。
 
 ### 3.4 地图、导航与定位（你的第 3 项）
@@ -643,8 +670,8 @@ TensorRT 10 FP16、静态形状、CUDA graph。最多只有一次检测在途，
 
 #### 3.5.2 英雄运动学（从日志辨识，不靠猜）
 
-- **模型：** 混合模式（地面、空中、墙、冲刺、滑翔、攻击后坐、下劈、受击后坐、Bind）；物理子步用实测的固定步长，控制频率 60 Hz。
-- **击退包络：** 冻结 + 后坐期间，任何输入下所有可达位置，方向背离伤害来源；装备 Weighted Belt 时减半（**以审计确认已装备为准**）。
+- **模型：** 混合模式（地面、空中、墙、冲刺、滑翔、攻击后坐、下劈、受击后坐、Bind）；物理子步 0.02 s（50 Hz，已实测 [probe:P11]），控制频率 60 Hz，每帧 0–2 个物理步。
+- **击退包络：** 冻结 + 后坐期间，任何输入下所有可达位置，方向背离伤害来源；装备 Weighted Belt 时减半（代码默认 ×0.5 [m0:C6]，**以审计确认已装备为准**）。装备后最大下落速度改用 `MAX_FALL_VELOCITY_WEIGHTED`，RecoilDown 时向上速度减半，要单独辨识。
 - **执行流建模：**
   - rollout 基于**实际执行的**命令流：最短按住之后的结果，加上在最终路径上实测的帧时间抖动模型。
   - 在 TRAIN 中辨识，**再用 REHEARSAL-SEG 的实时 + 最终 sink 数据验证**。
@@ -672,7 +699,7 @@ every frame:
       roll = kin.rollout(s, c)
       Hz(c) = roll ∩ hazards ≠ ∅ or knockback_envelope(roll) ∩ (hazards ∪ soft_gates if h≤2)
       S(c)  = any(roll ∩ tube for tube in tubes if tube.in_support)
-      U(c)  = roll 经过"不可暂停/不可退出"窗口（含解除暂停后 18 帧）时按 I3 加严
+      U(c)  = roll 经过"不可暂停/不可退出"窗口（含解除暂停后 0.3 s 实时）时按 I3 加严
       V(c)  = viable_continuations(roll.end) >= 2
       P(c)  = Σ tube.p · overlap(roll, tube)
       J(c)  = 惩罚窗口伤害 + 丝 + 诱敌位置 + 节奏
@@ -703,17 +730,17 @@ every frame:
 #### 3.5.6 Bind、弹反、下劈、危险物、伤害模型扩展
 
 - **Bind 提交条件（全部满足）：** 丝 ≥ 9；HP ≤ max − 3 或 hits_to_death ≤ 2；`T_min ≥ T_bind + δ_b`（1.37 s，带 Injector Band 0.89 s；δ_b = 0.15 s + 感知余量）；不在会塌的地面上；击退包络内无危险物；**不处于 PAUSE_PENDING**。
-- **Warding Bell**（审计确认已装备才算）：δ_b 可降到 0.05 s，允许 ≤ 5% 概率暴露。
+- **Warding Bell**（审计确认已装备才算）：δ_b 可降到 0.05 s，允许 ≤ 5% 概率暴露。铃挡住的敌人命中伤害为 0，但击退和 i-frame 照常发生，击退包络照算；铃不挡危险物 [m0 §2.5]。
 - **保留 Bind 用丝：** HP < max 时丝永不低于 9；丝技能只在满血时用。
 - **补丝：** 丝 < 9 时，A/B playbook 开打前补丝，最长 90 s。
-- **弹反白名单**（全部满足）：日志里观测到过拼刀；视觉 G1 成功率 ≥ 99.5%；弹反失败不靠面具也能活（HP − D ≥ 2）。**Lace 防御姿态时永不出手。** YELLOW 档和 PAUSE_PENDING 中禁用弹反（拼刀冻结会吞掉暂停）。
-- **下劈：** 用每个纹章的下劈多边形 [com8]；落空的轨迹也必须在支撑下安全且无危险物；永不在尖刺上下劈。
+- **弹反白名单**（全部满足）：日志里观测到过拼刀；视觉 G1 成功率 ≥ 99.5%；弹反失败不靠面具也能活（HP − D ≥ 2）。**Lace 防御姿态时永不出手。** YELLOW 档和 PAUSE_PENDING 中禁用弹反（拼刀冻结会吞掉暂停）。弹反 i-frame 只有 0.15 s，且挡不住危险物 [probe:P11][m0:N1]。
+- **下劈：** 用每个纹章的下劈多边形 [com8]；下劈 i-frame 8 步（长版 16 步），只挡 ENEMY，不挡 EXPLOSION、危险物和 noBounceCooldown 伤害源 [probe:P11][m0 §2.5]；落空的轨迹也必须在支撑下安全且无危险物；永不在尖刺上下劈。
 - **危险物：** 任何 HP 下都是 ∞ 代价的墙。当 HP − D1 ≤ 危险物伤害时，击退包络不得碰到危险物。热地面宽限 0.7 s（Magma Bell +2 s）。危险平台只在支撑中无敌人且 HP ≥ 3 时进入。
 - **伤害模型扩展：**
-  - `pending_dmg` 计入。
-  - **齿轮碾压**：记为 2 格的危险事件，无视 i-frame 和弹反，其第一段不能被面具挡。
+  - `pending_dmg` 计入（含霜冻时钟）。
+  - **齿轮碾压**：触发后 0.35 s（scaled）结算 1 格 SPIKES 伤害 + 一次危险物重生，穿透 i-frame 和弹反，仍然硬避 [m0:C3]。
   - **CriticalDamage 来源**：在支撑中记为"h → 1"（不消耗面具）。
-  - 抓取类：`mask_covers = False`。
+  - 抓取类：`mask_covers = False`。barnacle 抓取不看 i-frame，后坐结束后、i-frame 结束前就能生效，不能进入"受击后"的计划 [m0:N4]。
   - 用 oracle 调用栈清单核对每个 A/B 单元是否有表外的扣血路径。
 
 #### 3.5.7 竞技场与 A 类 playbook
@@ -751,23 +778,25 @@ every frame:
 #### 3.6.1 运行管理器与 ENDING 状态
 
 - **状态机：** `MENU`、`TRAVEL`、`COMBAT`、`INTERACT`、`WAIT`、`RECOVER`、**`ENDING`**、`STOPPED`。
-- **章节：** 整局切成若干章，每章结束于"坐工作台保存 + 退出到菜单"，每章开始前跑预检（§3.10）。**最后一章（S26–S27）开始前**：重启 Steam 并确认在线 → 重新启动游戏 → 打开 Extras → Achievements（P14 已验证此界面在 Steam 未初始化时显示不同，所以这个检查能区分两种情况）→ 操作员在决策回路之外看一眼 Player.log 里有没有 "Steam stats received"。
+- **章节：** 整局切成若干章，每章结束于"坐工作台保存 + 退出到菜单"，每章开始前跑预检（§3.10）。**最后一章（S26–S27）开始前**：重启 Steam 并确认在线 → 重新启动游戏 → 预检以 Player.log 为准：必须有 "Selected online subsystem SteamOnlineSubsystem"、"Steam logged in as"、"Steam stats received."，且没有 "Steam failed to initialize" 和 "Steam shut down." [m0:N27][m0:N28] → 操作员在决策回路之外复核这几行。Extras → Achievements 界面**不能**作为 Steam 收到成就的证据：Steam 缺席或返回 null 时它退回 shared.dat，本机推送过的成就在两种情况下显示相同 [m0:N35]，P14 已确认不能区分 [probe:P14]。它最多作画面参考，不参与预检和结局核对。
 - **ENDING：** 同时满足两个条件才进入：检测到 GMS 击败线索（模板来自 oracle 记录的击败序列）**且**看到 Bind 提示。进入后：
   - Q1–Q6 和死人开关解除，只保留 PERMADEATH 和崩溃检测。
   - HUD 切换到结局皮肤模式。
   - 唯一允许的动作是交互目录里脚本化的 BIND（绕过战斗 Bind 测试；永不按 Needolin）。
-  - 之后 `neutral()`，零输入，直到看到 MAIN_MENU。
-  - 然后停机，请你在 Steam 个人资料页确认两个成就，确认前不动存档。
+  - 之后 `neutral()`，零输入，直到看到 MAIN_MENU。零输入覆盖所有来源：跳过监听 legacy `Input.anyKeyDown`（含鼠标）和手柄，OS 级按键同样会跳过当前子序列 [m0 §2.1]。
+  - 然后停机：Player.log 中 STEEL_SOUL 和 SPEEDRUN_1 都要有 "Steam achievement X (a/b) upload complete"（只有 "Pushing achievement" 不算）[m0:N27]，再请你在 Steam 个人资料页确认两个成就，确认前不动存档。不以槽位时间判断成败：片尾后的保存会把检查之后的时间也 flush 进去 [m0:C18]。
 - **结局预演：** GMS → Bind → 片尾 → 主菜单，在训练副本上用最终 sink 和纯屏幕 MenuDriver 预演 ≥ 5 次（G3 的一部分）。
 
 #### 3.6.2 MenuDriver（槽位安全）
 
 - 每一步都由屏幕模式和菜单读取验证。
-- **白名单：** 只允许聚焦"槽 N"和 Steel Soul 新游戏控件。一旦 Restore 或 Clear 被高亮，立刻 Cancel 并重新验证。**FINAL 配置中删除/清除动作被编译掉。**
+- **白名单：** 只允许聚焦"槽 N"和 Steel Soul 新游戏控件。一旦 Restore 或 Clear 被高亮，立刻 Cancel 并重新验证。**永不在 DEFEATED 槽上按 Submit**：它只显示 Clear，两次 Submit 就删档 [m0:N31]。**FINAL 配置中删除/清除动作被编译掉。**
+- **导航：** 每次 Submit 前读高亮项，不按计数导航：灰色 Quit 会被跳过并回绕 [m0:N17]，鼠标悬停也会改变选中项 [probe:P7]。菜单里不得出现游戏键：键盘下 Z = Submit，X/A = Cancel [m0:N16]。
 - **按 Enter 前：** OCR 槽 N 的游戏时间和地点，并检查 Steel Soul 标记。
+- **槽位文件只在游戏未运行时放入或移出：** 主菜单打开之后才放进存档目录的存档，存档选择界面看不到；选中该槽时游戏把它当空槽，静默开始一局普通模式新游戏 [probe:P5][m0:N30]。所以每次进入存档选择界面都先读出槽位内容再操作。
 - **读档后：** 2 s 内必须识别出 Steel Soul HUD 皮肤，否则退出。
-- **新游戏：** 先确认模式选择里已有 Steel Soul（没有才输入代码，**FINAL 中永不输入**），再确认 Steel Soul 确认画面和第一帧游戏 HUD；60 s 内任何一项不对就中止。
-- **每次退出后：** 5 s 内必须看到 MAIN_MENU，否则视为仍在游戏中（保存失败时 ReturnToMainMenu 会不离开关卡直接返回 [dec]），重新走暂停流程。
+- **新游戏：** 在空槽按 Submit 之前确认当前存档目录已解锁 Steel Soul：未解锁时不会出现模式菜单，而是直接静默开始 Classic [m0:N30]（没有才输入代码，**FINAL 中永不输入**）。全新注册表下会先弹出 overscan 和亮度校准菜单，要先处理。然后确认 Steel Soul 确认画面和第一帧游戏 HUD（钢铁面具皮肤）；60 s 内任何一项不对就中止。
+- **每次退出：** 按 §3.7.5 步骤 4 的退出序列执行。按"是"后约 0.5 s 仍停在确认框且没有开始淡出 = Patch 4 拒绝（`disablePause` 或 `disableSaveQuit`）：保持暂停，重查标志，绝不盲目解除暂停。出现 SAVE_FAILED 对话框 = 保存失败：游戏停在 PAUSED，但 `PauseAllowed` 一直为 false，Continue、Cancel、Esc 全都无效，世界冻结，按 §3.6.8 处理 [m0:C9]。重走 Esc 循环没有任何效果。
 - **MenuDriver 误删或误恢复槽位**属于基础设施事件，用章节前的备份恢复（写入 D3）。
 
 #### 3.6.3 交互子系统（`run/interact/` + 交互目录）
@@ -865,7 +894,7 @@ A 类 = 以 2 格攻击为主的 boss 或连战；B 类 = 竞技场、小 boss�
 | 补丝循环 | 500 |
 | 侦察、保守等待 | 300 |
 | 刷念珠/壳片（P50） | 300 |
-| 紧急退出恢复：约 4.5 次 × 380 s | 1,700 |
+| 紧急退出恢复：约 4.5 次 × 380 s。380 s 是 C7 之前的估计，**尚未包含** Continue 后工作台场景加载 + 醒来的计时部分 [m0:C7]（取决于硬件）；P7 测出后按每次退出加上。在此之前本行和下面的合计都是暂定值 | 1,700（暂定） |
 | **期望合计** | **≈ 16,100** |
 | σ | ≈ 1,300 |
 | P(≤ 17,400) | **≈ 0.84** |
@@ -903,9 +932,12 @@ A 类 = 以 2 格攻击为主的 boss 或连战；B 类 = 竞技场、小 boss�
 | 靠近 NPC 误触对话 / 战斗中弹出物品提示 | 屏幕模式 DIALOG/ITEM_POPUP | neutral()，按目录推进或取消 | PLAYING |
 | Bellway 到错站 | 场景 OCR | 重新规划 | — |
 | 交互静默失败 | 审计时发现 | 最多重试 2 次 → UNCERTAIN → 重新规划 | — |
-| 退出按钮灰色 | 菜单读取 | 保持暂停，每 0.5 s 重查，最长 60 s（§3.7.5） | 可退出 |
-| 退出时保存失败 | 5 s 内没到 MAIN_MENU | 重新走暂停流程 | 主菜单 |
-| 焦点被抢 | 焦点守护 | 抢回焦点 → 暂停 | 自检 |
+| 退出按钮灰色 | 菜单读取 | 保持暂停（不花时间），不被动等待：暂停中按钮状态不刷新。`disableSaveQuit` 引起的：Options → 返回让菜单重算（纯视觉，不按 Esc）。预加载引起的：本房间内不会恢复，该房间应事先按 quit map 设为 I3 提交区；否则走"离开房间"后备（§3.7.5 步骤 4）[m0:C8] | 可退出 |
+| 退出时保存失败 | SAVE_FAILED 对话框 | Submit OK → 读退出确认框的高亮项 → 有限次重试"是" → 仍失败就报警等人。等待是安全的（世界冻结），但无法原地继续游戏 [m0:C9] | 主菜单 |
+| 游戏中出现 SAVE_FAILED（工作台等保存失败） | MSG_CANVAS | 按 OK；对话框显示时 `PauseGameToggle` 拒绝执行，不走暂停循环；这次保存不算 SAVE_OBSERVED [m0 §2.4] | PLAYING |
+| 意外暂停（例如手柄断开 [m0:N19]） | PAUSE_MENU，但监督器没有请求暂停 | 按解除暂停规则（§3.7.5）检查后用 Continue + Submit 解除，或直接走退出 | PLAYING 或主菜单 |
+| 启动时 Steam 初始化失败 | Player.log 有 "Steam failed to initialize"，或缺少 "Steam logged in as" | 退出游戏 → 修复 Steam → 重启；不继续，否则存档落到 `default` [m0:N28] | 预检通过 |
+| 焦点被抢 | 焦点守护 | 松开所有键 → 抢回焦点 → 暂停循环。失焦期间原版照常模拟和计时，但键盘被断开，英雄失控 [probe:P6] | 自检 |
 | 录制器或磁盘故障 | 写入错误 | 降级为只记元数据；可用空间 < 10 GB 时暂停 | — |
 | Wardenfly 捕获 / PERMADEATH | 检测器 | 停止所有输入，报警 | 人工 |
 | 未知画面 | 屏幕模式 UNKNOWN > 0.5 s | neutral()；能暂停就暂停 | — |
@@ -932,15 +964,17 @@ def hits_to_death(hp, blue, mask_intact, ctx):
         return n
 ```
 
-- `ctx.D1` = 支撑中最坏的单次事件伤害总和（1+1 算 2，齿轮碾压算 2）。
-- `mask_covers = False` 的情形：Muckroach Maul、Wraith/Slubberlug 抓取、爪形陷阱 [com10]、GMS 网（未验证）。
+- `ctx.D1` = 支撑中最坏的单次事件伤害总和（1+1 算 2；齿轮碾压算 1，外加危险物重生 [m0:C3]）。
+- `mask_covers = False` 的情形：Muckroach Maul、Wraith/Slubberlug 抓取、爪形陷阱 [com10]、GMS 网（未验证）。导出 DamageHero/FSM 的 flags 之前这个列表不变。
+- MidChain 命中救命时不消耗面具 [m0:C2]；上面的代码总是把面具记为已用，更保守，保留。
+- 危险物和 DoSpecialDamage 类伤害无视 i-frame [m0:N1][m0:N2]：i-frame 期间不把它们从支撑中剔除。`ctx.pending_dmg` 包括霜冻时钟和所有活动标签。
 - `fractured_mask = UNKNOWN` 按已碎处理；装备状态只认审计结果。
 
 #### 3.7.2 不变式
 
 - **I1：** 在**可退出**（quit map 中暂停和退出都可达）的状态下，`hits_to_death ≥ 2`。
 - **I2：** 若 HP − D1 ≤ 危险物伤害，击退包络不得碰危险物；h ≤ 2 时门算软危险物。
-- **I3（提交区）：** 任何退出不可达超过 0.5 s 的窗口——boss 登场、升降机、剧情序列、会设 `disableSaveQuit` 的竞技场、预加载窗口、**解除暂停后的 18 帧**——只有在满血、面具完好、并且"窗口内最坏事件之后 h ≥ 2"时才能进入。每个提交区有自己的 G2 计数。
+- **I3（提交区）：** 任何退出不可达超过 0.5 s 的窗口——boss 登场、升降机、剧情序列、对话、会设 `disableSaveQuit` 的竞技场、预加载启动后本房间的剩余部分 [m0:C8]、危险物死亡序列（实测尖刺 1 格约 2.3 s 不可暂停 [probe:P7]）[m0:N9]、竞技场结束 1.85 s 和 boss 死亡 1.35 s 的慢动作 [m0:N13]、从过场/菜单/stag 场景进入 gameplay 房间后的 0.5 s（HUDCamera）[m0:N14]、**解除暂停后 0.3 s 实时**——只有在满血、面具完好、并且"窗口内最坏事件之后 h ≥ 2"时才能进入。每个提交区有自己的 G2 计数。
 - **I4：** 各模块置信度高于阈值，否则执行降级规则。
 
 #### 3.7.3 风险档
@@ -965,7 +999,7 @@ def hits_to_death(hp, blue, mask_intact, ctx):
 | Q9 | 捕获或 PERMADEATH | 停止所有输入，报警 |
 | P1 | 需要 > 3 ms 的规划（新房间组合、重新规划） | **只允许 GREEN 且在 A/B 遭遇之外，或在登记过的安全窗口内**（硬直、波间）。战斗中改用预计算的计划缓存 |
 
-- **PAUSE_PENDING 模式：** 禁止攻击、弹反、下劈、投掷工具、丝技能、Bind（凡是能触发 FreezeMoment 的动作都禁止），只允许躲避性移动，I2 照常生效。
+- **PAUSE_PENDING 模式：** 禁止所有攻击（包括会暴击的：Wanderer 暴击带 0.2 s HeroDamageShort 冻结）、弹反、下劈、投掷工具、丝技能、Bind（凡是能触发 FreezeMoment 的动作都禁止）；禁止开始任何交互（对话、门、拾取、拉杆：它们设 `BlockingInteractable` 或 `disablePause`）[m0:N15][m0 §2.4]。只允许躲避性移动，I2 照常生效。
 - **暂停不会结束威胁：** 恢复后世界从原处继续。
 
 #### 3.7.5 暂停/退出可用性模型与紧急流程
@@ -973,40 +1007,43 @@ def hits_to_death(hp, blue, mask_intact, ctx):
 **`pause_available` / `quit_available` 的组成：**
 - 屏幕模式；
 - 检测到的冻结起点 + 实测的阻塞时长分布；
-- `unpause_lockout_until`（每次暂停和解除暂停后 0.3 s）；
-- quit map：P(可暂停)、P(可退出)，按场景 × 状态，来自 oracle 记录的 `disablePause`、`TimeSlowed`、`PauseAllowed`、`GenericMessageCanvas`、`BlockingInteractable`、`disableSaveQuit`、`HasPendingOperations`、Patch 4 的拒绝条件。
+- `unpause_lockout_until`（每次暂停和解除暂停后 0.3 s 实时）；
+- quit map：P(可暂停)、P(可退出)，按场景 × 状态，来自 oracle 直接记录的 `acceptingInput`、GameState（只有 PLAYING 能暂停）、`PauseAllowed`、`disablePause`、`TimeSlowed`、`GenericMessageCanvas`、`BlockingInteractable`、`disableSaveQuit`、`HasPendingOperations`、Patch 4 的拒绝条件 [m0:N12][m0:N14]。
+- 时序约束：敌人伤害在 FixedUpdate 末尾结算，暂停在同一帧稍后的 Update 里读取，所以暂停必须在致命物理步的前一个渲染帧被处理（再加输入延迟）才能救命 [m0:N6]。受击后后坐期间 `disablePause` 为真，Q1 的暂停只能落在 [受击冻结结束, i-frame 结束] 之间 [m0:N8]；这个窗口要显式计算，并在运行时验证它总是长于"检测 + 循环延迟"。实测（敌人 1 格）：命中后 0–250 ms（15 帧）不可暂停，其间前 150 ms 世界完全冻结；250 ms 到约 1.2 s 可暂停且仍有 i-frame；受伤后 30/100/200 ms 按下的 Esc 均被丢弃，300 ms 起均生效 [probe:P7]。
 
 **流程：**
 
 1. **进入 PAUSE_PENDING。**
-2. **暂停循环（在 `inputd` 中执行）：** 按下 ≥ 34 ms（2 帧）→ 松开 ≥ 34 ms → 重复，**不管有没有检测到冻结，一直循环**，直到 `inputd` 自己的检测器和 `rt` 都确认 PAUSE_MENU（连续 3 帧），或出现 DEATH/PERMADEATH。
-3. **看到第一帧 PAUSE_MENU 后，500 ms 内不再按暂停键。** 游戏自身在暂停后 0.3 s 会忽略暂停键 [dec]，这对"检测延迟期间多按的一下"是天然去抖，由 P7 验证。P7 还要在 ≥ 200 次 hit-freeze 上测出按键是被丢弃还是被排队，以及精确的按键节奏，之后才定稿本流程。
-4. **读 Quit 按钮状态：**
-   - **可用** → Quit to Menu → 确认 → 5 s 内出现 MAIN_MENU，否则回到步骤 2。
-   - **灰色** → 保持暂停（不花时间），每 0.5 s 重查，最长 60 s（预加载会在暂停中完成）。超时后三选一：冻结态检查通过则解除暂停，以 EVADE 行动；D13 已启用且条件满足则杀进程；否则保持暂停，报警等人。**永不按灰色控件。**
+2. **暂停循环（在 `inputd` 中执行）：** 按下 ≥ 34 ms（2 帧）→ 松开 ≥ 34 ms → 重复，**不管有没有检测到冻结，一直循环**，直到看到暂停的最早线索（步骤 3），或出现 DEATH/PERMADEATH。门关闭时按下的暂停键被游戏直接丢弃，不排队 [m0:N12]，所以循环本身就是重试。
+3. **看到暂停的最早线索就停手。** Esc 同时绑定 Pause 和 MenuCancel：0.3 s 实时锁定一过，任何一次 Esc 都会解除暂停（经 InputHandler 或 `PauseMenuButton.OnCancel`），世界再跑约 0.3 s 才被下一次按键重新暂停 [m0:C11]。所以 `inputd` 必须在真实暂停后约 230 ms 内（300 ms 减去一次在途按键）停止按键。最早线索是暗幕从暂停那一帧开始变暗（60 fps 下每帧约 +0.053 alpha）和世界冻结；P8 实测 SendInput → 首个变暗的捕获帧 p50 45.6 ms、最大 49.6 ms [probe:P8]，按它停手有余量；等"完整菜单连续 3 帧"再停必然超时（菜单淡入约 0.30 s 才到 0.95 alpha）。停手后在锁定结束前用菜单淡入确认 PAUSE_MENU；未确认视为误检，立即恢复循环。
+4. **读 Quit 按钮状态**（按钮状态只在显示菜单时算一次，暂停中不刷新 [m0:C8]）：
+   - **可用** → 退出序列：选中"退出至菜单" → Submit → 确认框"保存并退出？"（默认高亮"否"）→ 上 → Submit [probe:P7]。每次 Submit 前读高亮项，不按计数：灰色 Quit 会被跳过并回绕，盲按"下、下、Submit"会落到 Continue 并解除暂停 [m0:N17]。确认后一直是 PAUSED、timeScale = 0，约 3 s 后到 MAIN_MENU，只花墙钟时间 [probe:P6][probe:P7]。按"是"后约 0.5 s 仍停在确认框且没开始淡出 = Patch 4 拒绝：保持暂停，重查标志，绝不盲目解除暂停。出现 SAVE_FAILED → §3.6.8。
+   - **灰色** → 保持暂停（不花时间），不再被动等待。`disableSaveQuit` 引起的：Options → 返回让菜单重算（纯视觉，不按 Esc）。预加载引起的：本房间内不会恢复（这个房间本应按 I3 规划）。之后三选一：冻结态检查通过则解除暂停，以 EVADE 离开房间，再暂停退出；D13 已启用且条件满足则杀进程；否则保持暂停，报警等人。**永不按灰色控件。**
 5. **主菜单 → 槽位验证 → 读档 → 验证 Steel Soul 皮肤 → 工作台（满血；读档时面具是否修复 [待验证 P7]，否则再坐一次）→ 审计 → Ledger 回滚 PENDING。**
-6. **计时代价约为 0；真正的代价是跑回原处 + 重新清场。**
+6. **计时代价：** 从暂停到主菜单不计时，但 Continue 后的工作台场景加载和醒来动画计时（取决于硬件，P7 实测）[m0:C7]；另外的代价是跑回原处 + 重新清场。
 
 **解除暂停的规则（适用于 Q5、P1、意外暂停、看门狗误触发）：**
-- 保存暂停前最后一个 `WorldState`。
-- 只有当所有支撑管道在 0.3 s + L + 0.1 s 内都够不到"按击退膨胀后的受击盒"时，才允许解除暂停。
-- 解除后 18 帧在 I1/I3 和 S(c) 中按不可暂停处理。
+- 保存暂停前最后一个 `WorldState`。暂停会松开跳跃（`HeroController.Pause()` 调 `JumpReleased()`），检查按"跳跃已松开"预测轨迹，计划缓存也不能假设跳跃在继续 [m0:N18]。
+- 只有当所有支撑管道在 0.3 s + L + 0.1 s（再加 HideMenu 淡出时长，P7 测）内都够不到"按击退膨胀后的受击盒"时，才允许解除暂停。
+- 用 Continue + Submit 解除，不用 Esc：一次 Esc 可能被 InputHandler 和菜单各处理一次。Continue 在 Submit 后一帧生效，菜单显示期间和 0.3 s 锁定内会被拒绝，所以要用视觉确认 [m0 §2.4][m0 §2.6]。
+- 解除后 0.3 s 实时在 I1/I3 和 S(c) 中按不可暂停处理。
 
 **验证（G1）：**
 - 10⁴ 次故障注入触发，**其中 ≥ 30% 落在击杀、弹反或 boss 硬直前后 ±3 帧内**；另注入灰色 Quit、焦点丢失、Steam 弹窗。
-- 要求 **0 失败**；从可暂停时刻起算，暂停生效延迟 p99.9 ≤ 6 帧。
-- 同时测退出淡出期间世界是否保持冻结。
+- 要求 **0 失败**、**非预期解除暂停 = 0** [m0:C11]；从可暂停时刻起算，暂停生效延迟 p99.9 ≤ 6 帧。
+- 退出淡出期间世界冻结：代码已确认（`ReturnToMainMenu` 不解除暂停、不改 timeScale），P7 只需复核 HP 不变、没有 unscaled 时间驱动的 FSM 危险物 [m0 §2.4]。
 
 #### 3.7.6 看门狗、死人开关、焦点守护、交战门、重试
 
 - **心跳：** `rt` 每帧给 `inputd` 发心跳。
-- **死人开关（`inputd`）：** 静默 100 ms，且最后已知画面是 PLAYING 时：松开所有键 → 按 Esc（2 帧按下 / 3 帧松开）循环，直到**自己的**检测器看到暂停菜单。**菜单可见时永不按键**；在菜单中开关解除。
+- **死人开关（`inputd`）：** 静默 100 ms，且最后已知画面是 PLAYING 时：松开所有键 → 按 Esc（2 帧按下 / 3 帧松开）循环，直到**自己的**检测器看到暂停的最早线索（暗幕开始变暗）即停手，同样必须在真实暂停后约 230 ms 内（§3.7.5 步骤 3 [m0:C11]）。**菜单可见时永不按键**；在菜单中开关解除。CUTSCENE 状态下也解除：任何按键都会跳过过场 [m0 §2.6]。
 - **Pico（可选 sink）：** 只有在 max(100 ms, 3 × 链路 p99.9 包间隔) 内收不到包、且主机最后报告的状态是"PLAYING 且菜单不可见"时，才按一次 Esc。链路抖动在 soak 中测量。
 - **焦点守护：**
   - 每 1 ms 轮询前台窗口。
   - 失去焦点时：松开所有键 → 利用 `AllowSetForegroundWindow`/`AttachThreadInput` 抢回（游戏由 `inputd` 启动）→ 验证 → 暂停循环。
-  - 50 ms 内抢不回来就报警。无论用哪种 sink，按键都只发往前台窗口。
-  - 原版失焦行为（无边框/独占）由 P6 测量。
+  - 50 ms 内抢不回来就报警。无论用哪种 sink，按键都只发往前台窗口；发送前确认前台，失败就中止，不发任何键 [probe:P8]。
+  - 原版失焦行为（已测）：`runInBackground = True`、`SuspendInBackground = False`，Input System 默认在失焦时断开键盘，所以世界和 PlayTime 继续走，Hornet 站着挨打 [m0:C16][probe:P6][probe:P11]。在 Steel Soul 下这是致命的，"永不失焦"是硬要求。
+  - 屏蔽 Shift+Tab：Steam 叠加层不会暂停游戏 [m0:C16]。
 - **交战门（任何 A/B 单元前，全部满足）：**
   - 在 playbook 指定的工作台休息过（满血、面具修复、重生点已设置、工具补充）；
   - 已装备 = playbook 要求（以审计为准）；
@@ -1023,7 +1060,8 @@ def hits_to_death(hp, blue, mask_intact, ctx):
   - (a) 在退出不可达的窗口内预测到致命一击，且 `t_hit` p05 > 杀进程延迟；
   - (b) 没有保存正在进行（无存档图标、无工作台或退出淡出）。
 - **效果：** 回到上次存档，**丢失此后的进度和 playTime**，效果上接近 SL，所以与 D3 一起决定。
-- **P15 在沙盒中验证：** Die 之前杀进程，槽位仍是存活的；Die 之后杀无效；SaveGame 期间杀对 `user#.dat` 有什么影响（D3 的备份必须能覆盖这种情况）。
+- **只能预测式：** `Die` 在致命的 TakeDamage 同一次调用里就把内存中的 permadeathMode 改为 Dead，下一帧 `PlayerDead` 开始 `SaveGame`，反应式杀进程基本无效 [m0:N7]。
+- **P15 在沙盒中验证：** Die 之前杀进程，槽位仍是存活的；Die 之后杀无效；SaveGame 期间杀对 `user{N}.dat` 有什么影响（D3 的备份必须能覆盖这种情况）；致命帧 → `user{N}.dat` 落盘的耗时（序列化 + 写盘）；Dead 是否同时写入 `user{N}_1.0.30000.dat`；死亡后 `.bak*` 和 `Restore_Points` 的状态 [m0:N7][m0:C13]。
 - **不启用时：** 保留 I3，并扩展到 quit map 找出的所有退出不可达窗口。
 
 #### 3.7.8 基础设施加固
@@ -1037,22 +1075,22 @@ def hits_to_death(hp, blue, mask_intact, ctx):
 
 #### 3.8.1 PC 捕获
 
-- **`WgcSource`：** 窗口级捕获，忽略覆盖在上面的窗口，时间戳为 QPC `SystemRelativeTime`，关闭捕获边框；经 D3D11→CUDA 零拷贝。
+- **`WgcSource`：** 窗口级捕获，忽略覆盖在上面的窗口，时间戳为 QPC `SystemRelativeTime`，关闭捕获边框；经 D3D11→CUDA 零拷贝。P8：`Frame.timespan` 比回调到达时刻晚约 7–10 ms，不能当作帧产生时刻，延迟一律以回调到达的 QPC 计；遮挡不影响捕获，最小化会停止出帧 [probe:P8]。
 - **`DxgiSource`** 只在 P8 证明 WGC 不达标时实现。
-- **P8 测量：** 无边框（vSync 开/关）× 60/144 Hz 下 present→capture 的 p50/p99；10 min 内丢帧/重复帧 < 0.1%；**撕裂率**（用 oracle 每帧相机位姿对比检查）。
+- **P8 测量：** 冻结显示配置（60 Hz、窗口模式、VSync 开）下 present→capture 的 p50/p99；10 min 内丢帧/重复帧 < 0.1%；**撕裂率**（用 oracle 每帧相机位姿对比检查）。M0 初测（游戏在后台，10 s）：58.9 fps，帧间隔 p50 16.67 ms，但 581 帧中有 12 个 33 ms 间隔（约 2%，超过 0.1% 门槛），待与前台对比 [probe:P8]。
 
 #### 3.8.2 PC 输入
 
 | Sink | 细节 |
 |---|---|
-| **`SendInputSink`（默认）** | 由 `inputd` 发出；自写 ctypes 扫描码（**不用** pydirectinput，它每次调用 sleep 100 ms [pri13]）；每个决策一次批量 `SendInput`；按键状态做差分；**最短保持 21 ms**；暂停循环按/放各 34 ms；需要焦点（焦点守护） |
+| **`SendInputSink`（默认）** | 由 `inputd` 发出；自写 ctypes 扫描码（**不用** pydirectinput，它每次调用 sleep 100 ms [pri13]）；所有键都设 `KEYEVENTF_SCANCODE`，方向键另带 E0 扩展位（否则被当成未绑定的小键盘 2/4/6/8）；每个决策一次批量 `SendInput`；按键状态做差分。**按帧计数的最短保持**：每次按下保持到看见 ≥ 2 个新帧，下限 max(34 ms, 2 × 实测帧时间)，同一键两次按下之间的松开同理 [m0:N37]。缓冲动作按住到执行或预输入窗口过期（物理步：跳 2、二段跳 10、攻击 8、冲刺 10、工具 5、飞针 8），松开 Dash/Attack/SuperDash/QuickCast 会立即清空对应队列，每个离散动作都先松开再按 [m0:N38][probe:P11]。左右互斥，同一批里先松后按；Clawline 前先松开 ↓（只按住 ↓ 时 S 是 Silk Soar）[m0:N41]。暂停循环按/放各 34 ms。菜单可见时不得漏出游戏键（Z = 确认，X/A = 取消）[m0:N16]。需要焦点（焦点守护），每次发送前确认前台 [probe:P8] |
 | `PicoHidKbdSink`（可选） | RP2040 模拟 1 kHz USB 键盘，经 USB-CDC 驱动，多约 1–2 ms；固件死人开关。主要作用是给 Switch 固件做台架测试 |
-| `OracleInjectSink` | 仅训练；`ButtonControl` 前缀 [mod13] |
+| `OracleInjectSink` | 仅训练；`InputSystem.QueueStateEvent` 注入（`KeyboardInjector`）+ legacy shim + 每帧锁存（§3.1.1）[probe:P3] |
 | 不使用 | ViGEmBus（已停止维护）、Interception |
 
-**默认键位（扫描码集 1）：** jump Z 0x2C、attack X 0x2D、dash C 0x2E、bind A 0x1E、clawline S 0x1F、needolin D 0x20、quick-cast F 0x21、taunt V 0x2F、quick map Tab 0x0F（永不使用）、inventory I 0x17、pause Esc 0x01、confirm Enter 0x1C、方向键 E0 扩展码 48/50/4B/4D。
+**默认键位（扫描码集 1）：** jump Z 0x2C、attack X 0x2D、dash C 0x2E、bind A 0x1E、clawline S 0x1F、needolin D 0x20、quick-cast F 0x21、taunt V 0x2F、quick map Tab 0x0F（永不使用）、inventory I 0x17、pause Esc 0x01、confirm Enter 0x1C、背包翻页 `[` 0x1A / `]` 0x1B、方向键 E0 扩展码 48/50/4B/4D。P4 核对与注册表中的默认键位一致 [probe:P4]。启动时从注册表推导扫描码表，并断言等于默认值 [m0 §2.6]。预检确认 PC 上没有任何手柄 [m0:N19]。
 
-P4 验证 SendInput 与 Harmony 注入在无敌人房间中产生相同轨迹。
+P4：游戏在前台时，扫描码 SendInput 能驱动菜单和游戏 [probe:P4]。与 `KeyboardInjector` 注入在无敌人房间中的轨迹对比留到 M1。
 
 #### 3.8.3 Switch（延伸，只换插件）[SW]
 
@@ -1067,15 +1105,16 @@ P4 验证 SendInput 与 Harmony 注入在无敌人房间中产生相同轨迹。
 | 阶段（ms） | PC：60 fps、60 Hz、SendInput（p50 / p99；估计值，实测见 P8） | Switch：UVC + Pico |
 |---|---|---|
 | 游戏 Update → present | 4 / 9 | – |
-| present → 帧可用 | 4 / 8（60 Hz 显示器：9 / 17） | 45 / 70 |
+| present → 帧可用 | 9 / 17 | 45 / 70 |
 | 上传 + 缩放 | 0.5 / 1 | 2 / 4 |
 | 感知（stream A；B 并行） | 5 / 7 | 5 / 7 |
 | 跟踪 + HMM + 融合 | 1 / 2 | 1 / 2 |
 | 战术 + 规划 + 过滤 + 监督 | 2 / 3 | 2 / 3 |
 | sink → 设备 | 0.2 / 1 | 3 / 10 |
 | 等待下一次输入轮询 | 8 / 16.7 | 8 / 16 + 1 帧 |
-| **合计** | **≈ 25 / ≈ 48 → 目标 p99 ≤ 60** | **≈ 70–110 → 计划 p99 ≤ 130** |
+| **合计** | **≈ 30 / ≈ 57 → 目标 p99 ≤ 60** | **≈ 70–110 → 计划 p99 ≤ 130** |
 
+- **P8 实测（60 Hz）：** SendInput Esc → 第一帧画面开始变暗（回调时刻）p50 45.6 ms、p90 46.3 ms、最大 49.6 ms（10 次）；→ 画面变暗 30 %（含暂停菜单淡入）p50 约 95 ms（30 次）[probe:P8]。45.6 ms 包含输入采样、暂停协程自身的帧数、渲染、DWM 合成、WGC 捕获和 Python 回调，不含计算；比表中 p50 估计高，加上约 8–10 ms 计算后接近 60 ms 上限。M1 的延迟工具改用即时反应的刺激（如开始奔跑）重测。
 - 物理量化对任何代理（包括 oracle）额外带来 0–20 ms。
 - 规划器从 `state_at(now + L)` 出发，L 按 FrameSource × Sink 实测（PC 约 3 帧）。
 - GPU 争用门槛：bot 运行时游戏帧时间 p99 ≤ +0.5 ms。
@@ -1164,7 +1203,7 @@ OracleBackend → ObservabilityFilter(VISION_EQUIVALENT) → 简单噪声 → De
 | playTime 估计 | 低估 / 高估 | ≤ 30 s / ≤ 300 s | — |
 | 延迟 | 端到端 p99；计算 p99 | ≤ 60 ms；≤ 12 ms | ≤ 70 ms；≤ 12 ms |
 | 游戏帧时间 | p99 增量 | ≤ +0.5 ms | — |
-| 泄漏 | 插件开/关像素差 | < 1/255 | < 1/255 |
+| 泄漏 | 插件开/关像素差；训练 mod 组合对原版像素差（遮罩区外，L1） | < 1/255 | < 1/255 |
 
 #### 3.9.6 全程存活模型
 
@@ -1207,8 +1246,8 @@ OracleBackend → ObservabilityFilter(VISION_EQUIVALENT) → 简单噪声 → De
 4. 每个 sink 的输入冒烟测试，**覆盖所有动作键**：训练副本在测试房间里验证各自效果；最终副本在工作台房间验证移动 Δx ±5%、跳跃、攻击、库存开关、暂停开关。
 5. 视觉黄金集 2,000 帧；标题画面 SSIM ≥ 0.98。
 6. 50 次延迟回环。
-7. 守卫探针；存档目录哈希不变。
-8. 环境检查：Steam 在线、Cloud 关、可用空间 ≥ 10 GB、微码版本、Game Bar/通知/粘滞键快捷键已关、鼠标已拔。
+7. 守卫探针；存档目录哈希不变；真实的 `persistentDataPath\default` 不存在（出现即报警：最终副本的 Steam 初始化失败，存档和 shared.dat 落到了 `default` [m0:N28][probe:P9]）。
+8. 环境检查：Steam 在线（FINAL/VANILLA 看 Player.log 的 Steam 行，§3.6.1）、Cloud 关、可用空间 ≥ 10 GB、微码版本、Game Bar/通知/粘滞键快捷键已关、鼠标已拔、没有任何手柄 [m0:N19]。
 
 **存储：** 4 h 的正式运行约 15–25 GB。
 
@@ -1246,14 +1285,17 @@ class Src(IntEnum): ORACLE=0; VISION=1; DB=2; LEDGER=3; PREDICTED=4; EVENT=5; AU
 class Screen(IntEnum):
     PLAYING=0; PLAYING_HUD_HIDDEN=1; DIALOG=2; ITEM_POPUP=3; AREA_TITLE=4; BENCH=5; SHOP=6
     BELLWAY_MAP=7; INVENTORY=8; QUICK_MAP=9; PAUSE_MENU=10; MAIN_MENU=11; SAVE_SELECT=12; MODE_SELECT=13
-    FADE=14; TRANSITION=15; CUTSCENE_VIDEO=16; DEATH=17; ENDING=18; CREDITS=19; FOREIGN_WINDOW=20; UNKNOWN=31
+    FADE=14; TRANSITION=15; CUTSCENE_VIDEO=16; DEATH=17; ENDING=18; CREDITS=19; FOREIGN_WINDOW=20
+    MSG_CANVAS=21; UNKNOWN=31                                            # MSG_CANVAS：SAVE_FAILED 等对话框
 class PauseBlock(IntFlag):
     DISABLE_PAUSE=1; TIME_SLOWED=2; PAUSE_LOCKOUT=4; MSG_CANVAS=8; BLOCKING_INTERACT=16
     NOT_ACCEPTING_INPUT=32; DISABLE_SAVEQUIT=64; PRELOAD_PENDING=128; FOCUS_LOST=256
+    GAME_STATE_NOT_PLAYING=512           # PAUSE_LOCKOUT = !PauseAllowed（0.3 s 锁定、HUDCamera 0.5 s、ReturnToMainMenu）
 class Kind(IntEnum): ENEMY=0; BOSS=1; PROJECTILE=2; ENEMY_ATTACK=3; HAZARD_DYN=4; HERO_ATTACK=5
     PICKUP=6; NPC=7; BREAKABLE=8; LEVER=9; PLATFORM_MOVING=10; HOOK=11; HELPER=12; UNKNOWN=15
 class Hazard(IntEnum): ENEMY=0; SPIKES=1; ACID=2; LAVA=3; COAL=4; COAL_SPIKES=5; ZAP=6; STEAM=7
-    RESPAWN_PIT=8; EXPLOSION=9; NON_HAZARD=10; COG=11; OTHER=15
+    RESPAWN_PIT=8; EXPLOSION=9; NON_HAZARD=10; COG=11; PIT=12; SINK=13; OTHER=15
+    # PIT 穿透 i-frame、SINK 永远生效（§1.5、§3.3.1 [m0:N1]）；OTHER 只作兜底
 class FM(IntEnum): NOT_EQUIPPED=0; INTACT=1; BROKEN=2; UNKNOWN=3        # UNKNOWN 按 BROKEN 处理
 
 class E(Struct, Generic[T]):
@@ -1274,11 +1316,13 @@ class MenuRead(Struct):                 # V：模板 + OCR；O：UI 状态
 
 class PlayTimeEst(Struct):
     live_s: float; sigma_s: float; counting: bool; last_calib_s: float | None
+    saved_s: float | None               # O：playerData.playTime（最后一次 flush，成就检查读它）；live 对应 GameManager.PlayTime
 
 class Game(Struct):
     screen: E[Screen]; menu: MenuRead | None
     game_state: int | None                              # O
     scene: E[str]; scene_variant: E[str]; entry_gate: str | None; transitioning: bool
+    memory_scene: bool | None                            # O：IsMemoryScene()，死亡非致命（待确认）
     pause_available: E[bool]; quit_available: E[bool]    # V：quit map + 冻结检测；O：精确
     pause_blockers: int                                  # PauseBlock 位掩码（V 为推断）
     unpause_lockout_until_s: float                       # 暂停/解除暂停后 0.3 s
@@ -1311,9 +1355,9 @@ class ToolSlot(Struct): tool_id: str; ammo: E[int]; ammo_max: int
 
 class Resources(Struct):
     hp: E[int]; hp_max: E[int]; blue: E[int]
-    silk: E[int]; silk_max: E[int]; silk_hearts: int; bind_ready: E[bool]
+    silk: E[int]; silk_max: E[int]; silk_hearts: int; bind_ready: E[bool]   # silk_max = CurrentSilkMax（断轴 9、诅咒 3）
     fractured_mask: E[FM]; magma_ready: E[bool] | None
-    pending_dmg: E[int]                                  # 已挂上的 DamageTag 剩余伤害（保守上界）
+    pending_dmg: E[int]                                  # 已挂上的 DamageTag 剩余伤害 + 霜冻时钟（保守上界）
     status: frozenset[str]                               # ACID, FLAME, GRIND, FROST, ...
     crest: E[str]; equipped: list[str]                   # 只来自库存审计（Src.AUDIT）
     tools: list[ToolSlot]
@@ -1481,7 +1525,9 @@ scene: <Bone Bottom Pebb scene>
 steps:
   - {input: "INTERACT(UP)", expect: {screen: DIALOG}, timeout_s: 3}
   - {input: "ADVANCE", expect: {screen: SHOP}, timeout_s: 5}
-  - {input: "SELECT_BY_OCR('Mask Shard')", expect: {ocr_price: 300}, timeout_s: 5}
+  # OCR 文本跟随冻结的中文界面（§2.6）：条目写与语言无关的物品键，运行时从游戏的 ZH 本地化表解析为商店里显示的中文名，
+  # 并用录制的商店画面核对；不写英文标签
+  - {input: "SELECT_BY_OCR(item: mask_shard)", expect: {ocr_price: 300}, timeout_s: 5}
   - {input: "CONFIRM", expect: {event: PURCHASE, rosaries_delta: -300}, timeout_s: 3}
   - {input: "EXIT_SHOP", expect: {screen: PLAYING}, timeout_s: 5}
 ```
@@ -1534,12 +1580,13 @@ class PadCommand(Struct):
     target_frame: int | None = None; min_hold_ms: float | None = None; issued_qpc_ns: int = 0
 
 class ControllerSink(Protocol):
-    info: "SinkInfo"            # name, keymap, min_hold_ms (PC 21 / Switch 40), latency, needs_focus
+    info: "SinkInfo"            # name, keymap, min_hold（PC：≥ 2 个新帧且 ≥ max(34 ms, 2×帧时间) / Switch 40 ms）, latency, needs_focus
     def open(self, cfg: dict) -> None: ...
     def apply(self, cmd: PadCommand) -> "Receipt": ...
     def neutral(self) -> None: ...
     def pause_loop(self, press_ms: float = 34, release_ms: float = 34) -> "PauseResult": ...
-        # 在 inputd 内执行；直到 inputd 自身检测器 + rt 同时确认 PAUSE_MENU 3 帧，或 DEATH；之后 500 ms 不再按
+        # 在 inputd 内执行；看到暂停最早线索（暗幕变暗）即停，须在真实暂停后约 230 ms 内；
+        # 锁定结束前确认 PAUSE_MENU，未确认则恢复循环；或 DEATH（§3.7.5）
     def heartbeat(self, screen: Screen, menu_visible: bool) -> None: ...
     def arm_deadman(self, armed: bool) -> None: ...
     def close(self) -> None: ...
@@ -1579,7 +1626,7 @@ FTE 周按全职计；每周投入 15–20 h 时乘以约 2–2.7。门槛运行
 
 | 里程碑 | 交付物 | 退出标准 | 预估工作量（FTE 周） | 验证的风险 |
 |---|---|---|---|---|
-| **M0** 探针、锁版、隔离 | 用 `download_depot` 下载两份副本；Steam 库副本哈希比对后卸载；change-list 差异 + 定点反编译；hello-world 插件；`docs/facts/1.0.30000/m0.md`；冻结配置 + 注册表快照；BIOS 微码；延迟测量 v0 | P1–P12、P14、P15 有答案；P3/P5/P7/P8 为绿；无撕裂显示模式已定；训练副本在无 Steam 子系统下能运行且存档落在沙盒 | 2 | R4 R7 R8 R9 R10 R13 R21 R26 |
+| **M0** 探针、锁版、隔离 | 两份固定副本（计划用 `download_depot`；实际：直接复制 buildid 已确认的库副本，三份 2268 个文件 sha256 一致 [probe:P1]；库副本未卸载，自动更新为默认，它更新不影响固定副本，按 R8 从不启动）；change-list 差异 + 定点反编译；hello-world 插件；`docs/facts/1.0.30000/m0.md`；冻结配置 + 注册表快照；BIOS 微码；延迟测量 v0 | P1–P12、P14、P15 有答案；P3/P5/P7/P8 为绿；无撕裂显示模式已定；训练副本在无 Steam 子系统下能运行且存档落在沙盒 | 2 | R4 R7 R8 R9 R10 R13 R21 R26 |
 | **M1** 精简 Oracle v1 | SilksongRL 分叉：导出（含暂停/退出阻塞、扣血调用栈、V/P、HUD 矩形）、守卫（SaveRedirect、LethalBlock 双网、AchievementGuard 白名单）、savestate 桥 + 随机化、多实例启动器、录制器、Rerun、compat v1；**P13 结局探针** | 60 min 录制 ≥ 99.9% 帧送达；p50 ≤ 0.3 / p99 ≤ 1.0 ms；帧时间 +0.5 ms / 1 h；投影 IoU ≥ 0.95、顶点 ≤ 1.5 px；对齐 ≥ 99.5%；4 实例 12 h soak、重置 ≤ 2 s、沙盒外 0 写入；LethalBlock 单元测试（尖刺/齿轮/抓取/熔岩）全过 | 4 | R9 R10 R11 R23 |
 | **M2** Oracle 实时战斗 spike → **K1** | 运动学辨识；行为表与阶段工具；预测器、规划器（承诺按住时序）、安全过滤器、监督器 v1（暂停循环、PAUSE_PENDING、冻结态检查、quit map v0）；ObservabilityFilter + DelayLine + 简单噪声；Bell Beast + **Forum**（+ Lace 2 如有时间），用社区 savestate | 运动学验收；Bell Beast 500 次随机起点 0 WOULD_DIE、≥ 90% 通过；Forum ≥ 70% 通过且 WOULD_DIE ≤ 1%（时间盒内）；每个 A 类攻击 ≥ 200 次记录 | 6 | R2 R4 R5 |
 | **M3** 精简视觉 spike → **K2** | 数据：Moss Grotto→Bell Beast、Forum、Lace 2、1 个暗房（约 80k 帧）；视觉 v0 全部头；TensorRT 管线；WGC；回环延迟报告 | §3.9.5 spike 门槛（**含 Forum 的威胁和前摇指标**） | 6 | R1 R3 R12 R16 |
@@ -1594,25 +1641,25 @@ FTE 周按全职计；每周投入 15–20 h 时乘以约 2–2.7。门槛运行
 - **OR1**（M5 结束，oracle 驱动的全流程 bot）：原始约 41，含余量约 62 FTE 周。经你同意后，它也能以 F3 方式直接拿成就。
 - F2 大约省 4 周，F3 大约省 12–15 周。
 
-**M0/M1 探针**（在手动玩 PC 版之前完成）：
+**M0/M1 探针**（在手动玩 PC 版之前完成）。M0 结果（记录在 [`facts/1.0.30000/probes.md`](facts/1.0.30000/probes.md)）：P1、P3（QueueStateEvent 注入的基本路径）、P4（前台）、P5、P9（无 Steam 运行、存档重定向）通过；P14 已回答（成就界面不能区分，只认 Player.log）；P15 已回答（死后杀进程无效，D13 关）；P7 已测受伤后的不可暂停窗口；P6、P7、P8、P11 部分完成；P10、P12 推迟到 M1/M3（需要碎裂面具和真实的感知负载）；P9 的多实例和每实例内存仍未测；P2 的代码核对是 [`facts/1.0.30000/m0.md`](facts/1.0.30000/m0.md)，其 §4 列出各探针还需运行时确认的事项。
 
 | # | 探针 |
 |---|---|
-| P1 | 用 Steam 控制台下载两份副本；确认 buildid 22479045 和哈希一致；记录 Unity 版本；之后卸载库副本 |
-| P2 | 从 EylonShachmon change-list 找出 1.0.28324→1.0.30000 的差异，只反编译涉及的文件，覆盖：`IncreaseGameTimer`、`CheckCompletionAchievements` 及其调用者、`AwardAchievementToPlayer`、`Die`/`PlayerDead`、`TakeDamage`/`TakeHealth`（含面具逻辑）、**所有扣血写入点**、**暂停门控**、**`disableSaveQuit` 的全部 FSM 写入动作（导出后与路线场景对应）**、`ScenePreloader`、ReturnToMainMenu 的保存失败分支、`EndingSequence`、`SteamOnlineSubsystem`、每一条 `[dec]` 事实、是否有 120 帧选项 |
-| P3 | Harmony 注入所有逻辑按键（含 Pause/Tab/I/Enter/菜单导航）；输入后端不是 legacy |
-| P4 | SendInput：前台有效、后台无效、亚帧点按会丢；与 Harmony 的轨迹等价 |
-| P5 | **在最终副本本身**（原版 + `steam_appid.txt`，无任何加载器，叠加层和原生弹窗关闭）拿一个便宜成就（FIRST_TOOL 或 FIRST_SILK_SKILL）；输入一次 Steel Soul 代码；之后由你手动归档该槽 |
-| P6 | 计时器：逐帧记录 `PlayTime`，覆盖暂停、库存、**Quick Map**、**失焦（无边框/独占）**、切换、对话、**Bellway 乘车**、退出 → 读档、片尾；同时测原版失焦时是否继续模拟 |
-| P7 | 暂停与退出：按键到进入暂停的帧数；**≥ 200 次 hit-freeze 上按键是丢弃还是排队**；精确的循环节奏；击杀、拼刀、硬直冻结的阻塞时长；0.3 s 锁定；`disablePause` 时长分布；**运行时的 `disableSaveQuit` 来源和 Quit 灰色的状态**；灰色 Quit 在暂停中是否会刷新；退出淡出期间世界是否冻结；退出 → 继续的墙钟和计时时间；重生点；念珠是否保留；读档后丝量；读档时面具是否修复；保存失败分支 |
-| P8 | WGC × 显示模式 × 60/144 Hz：present→capture 的 p50/p99；丢帧/重复 < 0.1%；**撕裂率**；200 次回环 |
-| P9 | 多实例；无 Steam 子系统的运行方式（D15）；存档重定向；每实例内存 |
+| P1 | 用 Steam 控制台下载两份副本；确认 buildid 22479045 和哈希一致；记录 Unity 版本；之后卸载库副本。**已通过**：实际直接复制库副本，library/final/train 三份 2268 个文件 sha256 一致，Unity `6000.0.50f1-uum-100966-branch1` [probe:P1]。库副本未卸载（自动更新为默认，它更新不影响两份固定副本；按 R8 从不启动它），卸载不再是必需步骤 |
+| P2 | 从 EylonShachmon change-list 找出 1.0.28324→1.0.30000 的差异，只反编译涉及的文件，覆盖：`IncreaseGameTimer`、`CheckCompletionAchievements` 及其调用者、`AwardAchievementToPlayer`、`Die`/`PlayerDead`、`TakeDamage`/`TakeHealth`（含面具逻辑）、**所有扣血写入点**、**暂停门控**、**`disableSaveQuit` 的全部 FSM 写入动作（导出后与路线场景对应）**、`ScenePreloader`、ReturnToMainMenu 的保存失败分支、`EndingSequence`、`SteamOnlineSubsystem`、每一条 `[dec]` 事实、帧率设置（VSync 与帧率上限，P8 已查：二者互斥）。结果见 m0.md |
+| P3 | 游戏内注入所有逻辑按键（含 Pause/Tab/I/Enter/[/]/菜单导航）。QueueStateEvent 注入已通过（菜单导航/Enter、读档、Esc 暂停、Continue 解除、走、跳，全程不在前台）[probe:P3]。余下：Tab、I、[、] 未测；键盘过滤的 isPressed 注入（后备方案，m0 §4 P3 ①）未测；legacy `Input.anyKeyDown` shim（过场跳过、Stag 跳过、UpdateEngagement、IdleMemoryCleaner）；`NativeInput=1` 是否生效；FSM 中的 PlayerInput*/Gamepad* 动作 |
+| P4 | SendInput：前台有效（已通过 [probe:P4]）、后台无效、亚帧点按会丢；扫描码 vs 仅 VK、方向键带与不带 E0；按住时长与丢键率；与 `KeyboardInjector` 注入的轨迹等价 |
+| P5 | **在最终副本本身**（原版 + `steam_appid.txt`，无任何加载器，叠加层和原生弹窗关闭）拿一个便宜成就（FIRST_TOOL 或 FIRST_SILK_SKILL）；输入一次 Steel Soul 代码；之后由你手动归档该槽。**已通过（2026-09-29）**：Player.log 有 `Steam stats received.` 和 `Steam achievement FIRST_TOOL (0/0) upload complete`（在商店"获得工具"提示关闭时发放）；在"额外内容"页输入代码后 `<AccountID>\shared.dat` 的 `RecPermadeathMode=1`；用过的 2 号槽已移到 `C:\ssbot\backups\` [probe:P5]。余下：解锁后选空槽是否出现模式菜单；stats 收到之前 SetAchievement 是否成功 |
+| P6 | 计时器：逐帧记录 `PlayTime`，覆盖暂停、库存、**Quick Map**、**失焦**、切换、对话、**Bellway 乘车**、Ventrica、独立面板（商店、任务板、Bellway/管道地图、是/否框）、含 `InGameCutsceneInfo` 的场景、新游戏的计时起点 [m0:N23]、退出 → 读档、片尾。M0 已测：暂停不计时、库存 0.000、Quick Map 0.998、切换全程计时、原版失焦继续模拟和计时 [probe:P6] |
+| P7 | 暂停与退出：按键到进入暂停的帧数；**确认门关闭时暂停键被丢弃**（代码已给出答案 [m0:N12]）；精确的循环节奏；暂停菜单中一次 Esc 是干净解除还是解除后又暂停，X/A 是否解除暂停，Continue 解除的一帧延迟；从暂停生效到检测器看到最早线索的延迟，须在 230 ms 预算内 [m0:C11]；击杀、拼刀、硬直冻结的阻塞时长；0.3 s 锁定；`disablePause` 时长分布；**运行时的 `disableSaveQuit` 来源和 Quit 灰色的状态**；Options → 返回能否刷新灰色 Quit；确认框的"否"回到哪个菜单（是否重算 Quit）；保存失败后 `PauseAllowed` 保持 false、第二次"是"能否保存；退出淡出期间世界冻结（代码已确认，只需复核）；退出 → 继续的墙钟和计时时间（C7）；HUDCamera 0.5 s 锁定；重生点；念珠是否保留；读档后丝量；读档时面具是否修复。M0 已测：退出序列与确认框默认"否"、鼠标悬停改变选中项、退出过程一直 PAUSED 且 timeScale = 0；受伤后不可暂停窗口：敌人 1 格约 250 ms、尖刺 1 格约 2.3 s，门关闭时按键被丢弃 [probe:P7] |
+| P8 | WGC × 冻结显示配置（60 Hz、窗口、VSync 开）：present→capture 的 p50/p99；丢帧/重复 < 0.1%；**撕裂率**；暂停最早线索的检测延迟（P7 的 230 ms 预算的一部分）；200 次回环。M0 已测：SendInput → 首个变化帧 p50 45.6 ms、最大 49.6 ms；后台约 2% 的 33 ms 帧间隔 [probe:P8] |
+| P9 | 多实例；无 Steam 子系统的运行方式（D15）；存档重定向；每实例内存。M0 已通过：无 Steam 运行（`No online subsystems packaged.`）、存档重定向到 `C:\ssbot\sandbox\saves\<instance>\`、PlayerPrefs 快照还原 [probe:P9]。余下：多实例、每实例内存 |
 | P10 | Fractured Mask 的 HUD 指示；Steel Soul HUD 皮肤 |
-| P11 | 常量：INVUL_TIME、DAMAGE_FREEZE_*、RECOIL_VELOCITY、INVUL_TIME_PARRY、DASH_*、RUN_SPEED、`fixedDeltaTime`、Input System 更新模式 |
-| P12 | 推理负载下 60 fps 的帧时间 |
-| P13（M1） | 结局：训练副本加载社区 GMS savestate，AchievementGuard 设为只记录。记录 `CheckCompletionAchievements` 和 `SaveGame` 相对于 Bind、结局动画、End_Credits 的帧位置；被检查的 playTime 值；跳过片尾是否有影响 |
-| P14 | Extras → Achievements 界面在 Steam 已初始化和未初始化时的显示差异，确保预检能区分两种情况 |
-| P15 | 杀进程的语义（D13）：Die 前杀、Die 后杀、SaveGame 期间杀，在沙盒 Steel Soul 槽上测 |
+| P11 | 序列化值（完整清单见 m0 §4）。**Hero prefab**：M0 已导出 `hero_constants.json`（INVUL_TIME 1.0 s、INVUL_TIME_PARRY 0.15 s、下劈 8/16 步、DASH_QUEUE_STEPS 10、DAMAGE_FREEZE 0/0.1/0.1、DASH_COOLDOWN 0.425 s、`fixedDeltaTime` 0.02）[probe:P11]；余下 acidDamageTag/frostWaterDamageTag 资产值。**全局**：已读 runInBackground、SuspendInBackground、InputSystem updateMode/backgroundBehavior、InControl updateMode [probe:P11]；余下 Physics2D.simulationMode、MENU_FADE_SPEED、tk2dCamera 投影类型和 initialFov、各组件每帧调用顺序。**资产**：Gameplay（weightedAnklet*、lavaBell 冷却、barbedWire 倍率、currencyCaps）、GameConfig（useSaveEncryption 等）、AchievementsList 是否含 STEEL_SOUL/SPEEDRUN_1。**逐场景**：MEMORY/CLOVER 与 ForceNotMemory、HeroKeepHealth、FrostSpeed/FrostRegions、PIT/SINK 伤害、带 TinkEffect 的尖刺、BossSceneController、ScenePreloader 与 activateTrigger、InGameCutsceneInfo、noEndSlomo。**FSM 导出**：disablePause/disableSaveQuit/disableInventory 写入、SetInputHandlerSkipMode、FreezeMoment 类型、特殊扣血动作和 DamageHeroDirectly 的调用者、Bind FSM、路线敌人的 DamageHero flags（核对 [com10]）、CogMultiHitter 的 WOUND START、Underworks 锯。**外部裁判**：为 1.0.30000 重新推导 Mono 字段偏移。**名称对应表**（WeightedAnkletTool = Weighted Belt、LavaBellTool = Magma Bell、bellBindFSM = Warding Bell、SilkChargeEnd = Sharpdart、MultibindTool = Multibinder，另加 barbedWire = Barbed Bracelet）一并确认 |
+| P12 | 推理负载下 60 fps 的帧时间；超过 21 ms 的帧出现频率（影响点按 [m0:N37]）；长时间暂停时 IdleMemoryCleaner 的 GC 卡顿 |
+| P13（M1） | 结局：训练副本加载社区 GMS savestate，AchievementGuard 设为只记录。记录哪个 FSM 调用 `CheckCompletionAchievements`，它和 `SaveGame` 相对于 Bind、`SetEndingCompleted`、结局动画、End_Credits 的帧位置；被检查的 playTime 值；是否位于可跳过步骤内；跳过片尾是否有影响；Ending A 是否显示 End_Game_Completion（秒级读数 [m0:N25]）；Ending A 之后同一存档能否重打 GMS 并再次触发检查（Steam 故障时唯一的补救途径） |
+| P14 | Extras → Achievements 界面在 Steam 已初始化和未初始化时是否真的不同。按代码它会退回 shared.dat [m0:N35]。**结果：不能区分**——无 Steam 子系统的训练副本只凭沙盒 shared.dat 里的本地 `FIRST_TOOL=1` 就把该成就显示为已解锁；预检和结局核对只认 Player.log（`Steam logged in as`、`Steam stats received.`、每个成就的 `upload complete`）[probe:P14] |
+| P15 | 杀进程的语义（D13）：Die 前杀、Die 后杀、SaveGame 期间杀；致命帧 → `user{N}.dat` 落盘的耗时；Dead 是否同时写入版本备份 `user{N}_1.0.30000.dat`；死亡后 `.bak*` 轮换与 `Restore_Points` 的状态。在沙盒 Steel Soul 槽上测。**M0 已测：** 致命伤后约 142 ms `user{N}.dat` 已是 Dead；死后 +103 ms（taskkill 最快）到 +1123 ms 杀进程均留下 DEFEATED 槽；`.bak1` 保留存活状态 [probe:P15] |
 | P16（M5） | Wardenfly 捕获 + 捕获后退出，确定恢复方案 |
 
 **MVP 阶梯（每级都能停下来，并有通过门槛）：**
@@ -1644,7 +1691,7 @@ FTE 周按全职计；每周投入 15–20 h 时乘以约 2–2.7。门槛运行
 | R1 | 视觉漏看前摇、威胁或 HUD | H / H | oracle 大规模标注；可观测阶段 HMM；与表中判定框求并；回退阶梯 | M3 spike |
 | R2 | 难点单元死亡率高于约 1% | H / H | 禁入区；助战者；Cogfly；配装；保守变体；绕路 A/B | M2 |
 | R3 | 训练与正式运行的差距（延迟、输入语义、执行时序） | M / H | 回环实测；承诺按住时序；在实时数据上验证运动学；G2 | P4、P8；M6 CI |
-| R4 | 暂停/退出不可用或迟到（TimeSlowed、0.3 s 锁定、`disableSaveQuit`、预加载） | M / H | 无条件循环；PAUSE_PENDING；quit map；I1/I3；灰色 Quit 策略；D13 | P7；G1 注入 |
+| R4 | 暂停/退出不可用或迟到（TimeSlowed、0.3 s 锁定、`disableSaveQuit`、预加载），或循环停得太晚导致非预期解除暂停 [m0:C11] | M / H | 无条件循环 + 最早线索停手；PAUSE_PENDING；quit map；I1/I3；灰色 Quit 策略；D13 | P7；G1 注入 |
 | R5 | 爆发或绕过面具的伤害（抓取、GMS 网、齿轮、DamageTag、Critical） | M / H | 挂起伤害；`mask_covers`；路线回避；爆发前兆必须为 0 | P2 扣血清单；M2 日志 |
 | R6 | 危险物、击退致死（人类的主要死因 [com18]） | M / H | 危险物即墙；击退包络；I2；门作软危险物 | M4：0 次命中 |
 | R7 | `[dec]` 事实在 1.0.30000 上不同 | M / M | 复核；数据驱动的校准 | P2 |
@@ -1653,7 +1700,7 @@ FTE 周按全职计；每周投入 15–20 h 时乘以约 2–2.7。门槛运行
 | R10 | 训练损坏真实存档 | L / H | 重定向、SlotGuard、哈希、备份 | M1 |
 | R11 | 标签或特权信息泄漏 | M / H | 防火墙；import 禁令；像素差；ObservabilityFilter | M1/M3 CI |
 | R12 | 相关性失败（例如某个暗房） | M / H | Q4 异常项；按房间报告；暗房清单 | M6 |
-| R13 | 环境中断（焦点、UAC、更新、弹窗、ACCESS_LOST） | M / H | 焦点守护；预检设置；拔鼠标；分章；恢复表 | 24 h soak |
+| R13 | 环境中断（焦点、UAC、更新、弹窗、ACCESS_LOST）；失焦时英雄失控而世界和计时照常 [probe:P6] | M / H | 焦点守护；预检设置；拔鼠标；不接手柄；分章；恢复表 | 24 h soak |
 | R14 | 经济短缺（念珠、壳片） | M / M | P10 收入；刷取循环；变体降级 | M5 |
 | R15 | Wardenfly 捕获 | L / H | 标记边不可行；删除 S16；捕获检测器 | P16 |
 | R16 | GPU 争用 | L / M | +0.5 ms 门槛；训练时间窗与门槛运行错开 | P12、M3 |
@@ -1687,16 +1734,16 @@ M0 之前只需要决定 D8、D9、D15。
 | D4 | 中途判断速通已不可能 | 继续拿钢铁之魂，速通以后 Classic 单独打 / 放弃重来 | **继续** | M8 前 |
 | **D4'** | 一局还是两局 | 一局（默认）/ 两局：Steel Soul 局取消调速器和精密计时，保留所有安全绕路；另打一次 Classic 速通，它同时充当原版到片尾的全程预演，允许死亡 | 在 K3 按实测决定；K3 条件不满足时推荐两局 | K3（M5） |
 | D5 | PC 正式运行的输入设备 | SendInput（inputd）/ RP2040 USB 键盘 | **SendInput**。RP2040 只多挡 rt/inputd 崩溃，挡不住主机崩溃和焦点丢失；它为 Switch 而做，届时如果通过等价测试也可在 PC 上使用 | M7 |
-| D6 | 章节之间能否由操作员从存档文件读 playTime | 能 / 不能 | **不能**。用存档选择界面 OCR，600 s 余量覆盖其分钟级分辨率 | M5 |
+| D6 | 章节之间能否由操作员从存档文件读 playTime | 能 / 不能 | **不能**。用存档选择界面 OCR，600 s 余量覆盖其分钟级分辨率（向下取整，少 0–59.99 s）。补充：存档加密的固定密钥在代码中可见，技术上可以离线读出 playTime [m0:N33]；End_Game_Completion 提供秒级读数 [m0:N25]。决定仍由你来做 | M5 |
 | D7 | 音频作为额外传感器 | 关 / 开 | **关**。只有在前摇确实模糊、而声音能区分时再考虑 | K2 |
 | D8 | 正式运行前会解锁哪些成就 | 接受：P5 的一个便宜成就 + 原版预演中的进度成就 | **接受**。除 P5 外永不手动玩最终副本；到片尾的预演只在训练副本上做 | **已定（2026-09-29）：接受。** 你说这份 PC 版专门给 bot 用 |
 | D9 | 硬件 | 显示器：现有 LG TV（最高 60 Hz），不换；第二显示器（放调试界面，可选）；数据盘：现有 980 PRO 2 TB 够用到 M3，M6 前再加一块 2 TB NVMe；BIOS：原为 1402（2023-09，微码 0x11D），2026-09-29 已更新到 1836（微码 0x133，含 Vmin 修复）；更新前 9-02 曾出现 P-core 0 的 WHEA 纠错，需在 M0 soak 中复查；以后再买 RP2040 和采集卡 | ~~现在就更新 BIOS~~ 已完成（2026-09-29）；M0 soak 后复查 WHEA；显示器保持 60 Hz（最高 60 Hz）；NVMe 等到 M3 结束再买 | M0 |
 | D10 | 帧率 | 60 | **已定：60**（显示器最高 60 Hz，2026-09-29） | — |
 | D11 | Switch 延伸 | 做 / 不做 | M8 之后再说；只是演示（本地成就） | M8 后 |
 | D12 | 你自己录制的 PC 游玩（30–40 h） | 做 / 不做 | **做**，在训练副本上（无 Steam 子系统，含 1–2 个 Steel Soul 训练槽）；同时是交互目录的素材 | M1–M3 |
-| **D13** | 预测式杀进程作为最后防线 | 关 / 开 | **默认关**。它超出了"只发按键"，效果接近 SL，与 D3 一起决定；P15 先把语义测清楚 | M7 |
+| **D13** | 预测式杀进程作为最后防线 | 关 / 开 | **已定：关**（2026-09-29）。P15：死后约 142 ms 已写盘，而视觉确认死亡就要约 46 ms，死后杀进程必然太晚；预测式杀进程与紧急暂停退出没有实质区别 [probe:P15] | — |
 | **D14** | 最终副本的身份 | 固定 depot 文件夹 + `steam_appid.txt`（推荐）/ Steam 库副本（仅当届时仍是 1.0.30000） | **固定 depot**。请确认 `steam_appid.txt` 在你看来不算"修改"（它不改游戏代码，只告诉 Steamworks 应用 ID） | M0 / M7 |
-| **D15** | 训练副本如何脱离 Steam | 重命名 `steam_api64.dll` / DisableSteam 类插件 / `steam_appid.txt = 480` | 先试**重命名**（P9 验证能否启动、存档是否落到 `default`），不行再用插件；480 只作最后手段 | M0 |
+| **D15** | 训练副本如何脱离 Steam | 重命名 `steam_api64.dll` / DisableSteam 类插件 / `steam_appid.txt = 480` | **重命名**：P9 已验证能启动，日志为 "No online subsystems packaged."，不经 Steam 重启，存档落到 `default` [probe:P9]。插件和 480 只作后备 | M0 |
 
 ---
 
@@ -1715,7 +1762,7 @@ M0 之前只需要决定 D8、D9、D15。
 
 | 来源 | 取用内容 |
 |---|---|
-| SilksongRL（MIT） | **插件骨架**：socket、ButtonControl 注入、存档抑制、BossStateLogger、多实例启动器 |
+| SilksongRL（MIT） | **插件骨架**：socket、存档抑制、BossStateLogger、多实例启动器；它的 ButtonControl 注入只作后备（§3.1.1），LethalDamagePatch 要按 [m0:C2] 重写（完整复刻蓝血和面具；它的 `pd.health - amount > 0` 忽略二者，m0 §2.5） |
 | DebugMod（MIT） | savestate、`CategorizeHitbox`、FreezeMoment hook 写法 |
 | EylonShachmon/Silksong-change-list | P2 的版本差异 |
 | Silksong.Benchwarp、Archipelago APWorld、zerounit AP logic | 世界图 |
@@ -1738,7 +1785,7 @@ silksong_bot/
     src/Core/{Plugin,Profile,SymbolCheck}.cs
     src/Export/{Hero,EntityRegistry,FsmTap,SceneDumper,Progress,EventTap,PauseQuitTap,HealthTap,
                 Camera,HudProbe,FrameExporter,Schema}.cs
-    src/Input/{InjectTable,ButtonControlPatch,InputPathEmulator}.cs
+    src/Input/{InjectTable,KeyboardInjector,ButtonControlPatch(后备),InputPathEmulator}.cs
     src/Train/{SavestateBridge,StartRandomizer,Warp}.cs
     src/Guards/{SaveRedirect,SlotGuard,SaveSuppression,LethalBlockTakeHealth,LethalBlockDieNet,
                 AchievementGuard,SteelSoulSnapshot}.cs
@@ -1836,6 +1883,9 @@ silksong_bot/
 | 41 | scope | 复用现有项目 | 采纳：分叉 SilksongRL；标准序列化；P2 基于 change-list；VANILLA 外部只读裁判 | §3.1.1、§8 |
 | 42 | scope | 缺少退出标准 | 采纳：MVP 通过门槛；M5 经济与交互条件；A 类覆盖度；正式运行失败后的策略；删去 M3 的"≥10× 实时" | §5 |
 | 43 | scope | CPU 稳定性、单 GPU、撕裂 | 采纳：微码、训练时间窗或云 GPU、无边框 + WGC、撕裂检查 | §2.6、§3.1.6、§3.8.1 |
+| 44 | M0 代码核对（m0.md）+ 运行时探针（probes.md），2026-09-29 | 1.0.28324 的说法在 1.0.30000 上有 18 处要改（C1–C18），另有 43 项新发现（N1–N43）；探针给出实测常量和失焦行为 | 采纳 m0 §5 的修改和探针结果。推翻的旧结论：#37 的"0.3 s 锁定天然去抖"（锁定后 Esc 会解除暂停，改为最早线索停手）；#3 的"18 帧"改为 0.3 s 实时；#2/#18 的"灰色 Quit 轮询 60 s""5 s 内到主菜单否则重走暂停"改为 Options → 返回、I3 预规划和 SAVE_FAILED 流程；§1.6 焦点行的"失焦只清空输入"改为实测行为（世界和计时继续，英雄失控） | §0、§1.2–§1.6、§2、§3、§5、§6、D6、D15 |
+| 45 | 用户决定（2026-09-29）与 m0 冲突 | m0:N40 和 m0 §5 第 14 条要求 FINAL 前设 GameLang = EN | 不采纳：界面语言冻结为中文，菜单模板和 OCR 按中文做 | §2.6、§2.7 |
+| 46 | 用户决定（2026-09-29）与 m0 冲突 | m0:C12 和 m0 §5 第 4 条写"120 fps 下 36 帧" | 不采纳：显示器最高 60 Hz，只写 60 fps 下 18 帧 | §1.2 |
 
 ---
 
