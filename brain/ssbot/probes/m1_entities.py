@@ -7,7 +7,8 @@ From brain/:
     uv run python -m ssbot.probes.m1_entities [--load] [--walk SECONDS] [--seconds 10] [--instance 0]
 
 Prints entity counts per category, one full entity, cost_ex["ents"] p50/p99 and the FSM events seen, then one
-PASS/FAIL/SKIP line per check. Exit code 1 if any check fails.
+PASS/FAIL/SKIP line per check. Exit code 1 if any check fails. With --walk the enemy checks are required (FAIL, not
+SKIP, when nothing is found): the walk is meant to bring enemies into view.
 """
 import argparse
 import json
@@ -198,13 +199,19 @@ def main() -> int:
     seen: dict[int, dict] = {}
     per_frame = []
     schema_errors: list[str] = []
+    dup_frames: list[int] = []
     for st in with_ents:
         per_frame.append(len(st["ents"]))
+        iids = [e["iid"] for e in st["ents"]]
+        if len(set(iids)) != len(iids):
+            dup_frames.append(st["f"])
         for e in st["ents"]:
             seen[e["iid"]] = e
             if len(schema_errors) < 5:
                 schema_errors += [f"{e.get('type_key')}: {m}" for m in ents.validate_entity(e)]
     checks.add("entity schema", not schema_errors, "; ".join(schema_errors[:5]))
+    checks.add("iids unique within each STATE", not dup_frames,
+               f"{len(dup_frames)} STATEs with a repeated iid, first f{dup_frames[0]}" if dup_frames else "")
     cats = ents.count_categories(seen.values())
     print(f"\nentities per frame: mean {statistics.fmean(per_frame) if per_frame else 0:.1f}, max {max(per_frame, default=0)}")
     print(f"distinct entities over {args.seconds:.0f} s by category: {dict(cats)}")
@@ -215,8 +222,30 @@ def main() -> int:
     if sample:
         print("\none full entity (last seen; long vertex lists cut):")
         print_entity(sample)
-    enemies = cats.get("enemy", 0)
-    checks.add("enemies in view", enemies > 0 or None, f"{enemies} distinct" if enemies else "none in view; try --walk 4")
+    # Without --walk the view may legitimately be empty (SKIP); with it, enemies are the point (FAIL).
+    required = args.walk > 0
+    absent = False if required else None
+    hint = "" if required else "; try --walk 4"
+    hm_bit = ents.SRC_BITS["health_manager"]
+    enemies = [e for e in seen.values() if e["src"] & hm_bit and e["hp"] is not None]
+    checks.add("enemies in view (health_manager with hp)", bool(enemies) or absent,
+               f"{len(enemies)} distinct, {cats.get('enemy', 0)} categorized enemy" if enemies else "none in view" + hint)
+    damage_cols = [c for e in seen.values() for c in e["colliders"] if c["damage"] is not None]
+    threats = sum(ents.is_threat(c) for c in damage_cols)
+    checks.add("damage colliders seen", bool(damage_cols) or absent,
+               f"{len(damage_cols)} ({threats} armed)" if damage_cols else "no collider with a damage map" + hint)
+    hazards = [e for e in seen.values() if e["category"] == "hazard"]
+    print(f"hazards: {len(hazards)} distinct, by type_key {dict(Counter(e['type_key'] for e in hazards).most_common(8))}")
+    if hazards:
+        # A hazard is a damage source by construction; nearly all have their damage on a collider of their own
+        # (a DamageHero without a collider cannot touch the hero).
+        no_src = [e["type_key"] for e in hazards if not e["src"] & ents.DAMAGE_SRC]
+        with_dmg = sum(1 for e in hazards if any(c["damage"] is not None for c in e["colliders"]))
+        checks.add("hazards carry damage", not no_src and with_dmg >= 0.9 * len(hazards),
+                   f"{with_dmg}/{len(hazards)} with a damage collider"
+                   + (f"; without a damage src bit: {sorted(set(no_src))[:5]}" if no_src else ""))
+    else:
+        checks.add("hazards carry damage", None, "no hazard in view")
 
     # ---- cost -------------------------------------------------------------------------------------------
     cost = [st["cost_ex"]["ents"] for st in states if "ents" in (st.get("cost_ex") or {})]
@@ -240,11 +269,13 @@ def main() -> int:
     for (obj, fsm), n in by_fsm.most_common(10):
         print(f"   {n:4d}  {obj} / {fsm}")
     for ev in events[:12]:
-        after = f" (after {ev['t_in_prev']:.2f} s)" if ev["t_in_prev"] is not None else " (start)"
+        after = (f" (after t {ev['t_in_prev']:.2f} s, rt {ev['rt_in_prev']:.2f} s)" if ev["t_in_prev"] is not None
+                 and ev.get("rt_in_prev") is not None else " (start)")
         print(f"   f{ev['f']} {ev['obj']}/{ev['fsm']}: {ev['from']} -> {ev['to']}{after}")
-    bad_t = [ev for ev in events if (ev["from"] is None) != (ev["t_in_prev"] is None)
-             or (ev["t_in_prev"] is not None and ev["t_in_prev"] < 0)]
-    checks.add("fsm event t_in_prev (>= 0, null exactly on starts)", not bad_t, f"{len(bad_t)} bad" if bad_t else "")
+    bad_t = [ev for ev in events for k in ("t_in_prev", "rt_in_prev")
+             if (ev["from"] is None) != (ev.get(k) is None) or (ev.get(k) is not None and ev[k] < 0)]
+    checks.add("fsm event t_in_prev / rt_in_prev (>= 0, null exactly on starts)", not bad_t,
+               f"{len(bad_t)} bad" if bad_t else "")
     bad_keys = [ev for ev in events if set(ev) - {"f"} != ents.FSM_EVENT_KEYS]
     checks.add("fsm event keys", not bad_keys, f"{len(bad_keys)} malformed" if bad_keys else "")
     has_fsms = any(e["fsms"] for e in seen.values())
@@ -266,7 +297,8 @@ def main() -> int:
             g = link.rpc("fsm.graph", iid=target[0], fsm=target[1])
             names = {st["name"] for st in g["states"]}
             n_tr = sum(len(st["transitions"]) for st in g["states"]) + len(g["global"])
-            dangling = {to for st in g["states"] for to in st["transitions"].values()} - names
+            targets = {to for st in g["states"] for to in st["transitions"].values()} | set(g["global"].values())
+            dangling = targets - names - {"", None}  # a transition without a target state is unwired, not dangling
             print(f"\nfsm.graph {g['obj']}/{g['fsm']} (template {g['template']}): {len(names)} states, {n_tr} transitions, "
                   f"start {g['start']}, active {g['active']}, {len(g['events'])} events")
             for st in g["states"][:8]:

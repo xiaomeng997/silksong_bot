@@ -9,10 +9,12 @@ namespace SsOracle.Entities
     /// <summary>
     /// FSM_TRANSITION events (DESIGN §3.1.1 FsmTap, §3.10 fsm.parquet): a Harmony prefix on the private
     /// HutongGames.PlayMaker.Fsm.EnterState(FsmState), the single entry point of every state (m0 §3 PlayMaker
-    /// row). Emits FrameExporter event "fsm" {iid, ent, obj, fsm, from, to, t_in_prev}:
+    /// row). Emits FrameExporter event "fsm" {iid, ent, obj, fsm, from, to, t_in_prev, rt_in_prev}:
     ///   iid = GameObject holding the FSM, ent = its entity root (HealthManager ancestor, else DamageHero
     ///   ancestor, else itself), obj = GameObject name, from = null on a (re)start, t_in_prev = FsmState.StateTime
-    ///   of the state being left, null with from (PlayMaker stops counting once a state's actions have all finished).
+    ///   of the state being left (scaled; PlayMaker stops counting once a state's actions have all finished),
+    ///   rt_in_prev = its FsmState.StateRealTime (unscaled seconds since it was entered, never stops); both null
+    ///   with from. Exact scaled dwell = the game time between this event's frame and the one that entered from.
     /// A prefix, not a postfix: OnEnter can chain further transitions inside EnterState, and the events must
     /// come out in the order the states were entered; and a self-transition resets StateTime in OnEnter.
     /// By default only FSMs of entities of interest are reported (HealthManager or DamageHero ancestor, a
@@ -22,11 +24,15 @@ namespace SsOracle.Entities
     {
         public static bool Enabled = true;
         public static bool All;
-        public static long Emitted, Dropped;
+        public static long Emitted, Dropped, Deferred;
 
         /// <summary>Scene loads start thousands of FSMs in one frame; cap what one STATE can carry.</summary>
         private const int MaxPerFrame = 512;
-        private static int frame = -1, perFrame;
+        /// <summary>...and cap the owner lookups (two GetComponentInParent each) so a load frame is not a
+        /// multi-millisecond spike. An FSM over the cap is looked up at its next state entry; the entry itself is
+        /// not reported (counted in Deferred). On a load frame these are almost all start events (from == null).</summary>
+        private const int MaxResolvesPerFrame = 64;
+        private static int frame = -1, perFrame, resolves;
         private static int errorsLogged;
 
         private sealed class Info
@@ -42,12 +48,11 @@ namespace SsOracle.Entities
 
         public static void Install(Harmony harmony)
         {
-            var target = AccessTools.Method(typeof(Fsm), "EnterState", new[] { typeof(FsmState) });
-            if (target == null)
-            {
-                Core.Plugin.Log.LogError("FsmTap: HutongGames.PlayMaker.Fsm.EnterState(FsmState) not found; no fsm events");
-                return;
-            }
+            // Hard failure on a missing symbol (m0 §3 general rule): Harmony would bind ___activeStateEntered lazily.
+            var target = AccessTools.DeclaredMethod(typeof(Fsm), "EnterState", new[] { typeof(FsmState) });
+            var entered = AccessTools.Field(typeof(Fsm), "activeStateEntered");
+            if (target == null || entered == null || entered.FieldType != typeof(bool))
+                throw new MissingMemberException("FsmTap: HutongGames.PlayMaker.Fsm.EnterState(FsmState) or bool Fsm.activeStateEntered not found");
             harmony.Patch(target, prefix: new HarmonyMethod(typeof(FsmTap), nameof(EnterStatePrefix)));
         }
 
@@ -55,6 +60,15 @@ namespace SsOracle.Entities
         public static void ClearCache() => Infos.Clear();
 
         public static int CacheSize => Infos.Count;
+
+        private static void NewFrame()
+        {
+            var f = Time.frameCount;
+            if (f == frame) return;
+            frame = f;
+            perFrame = 0;
+            resolves = 0;
+        }
 
         // ___activeStateEntered is still the value from before this entry: false on Start/restart (no ExitState ran,
         // PreviousActiveState is stale), true on a normal SwitchState (ExitState just set PreviousActiveState).
@@ -67,15 +81,19 @@ namespace SsOracle.Entities
             try
             {
                 if (!Infos.TryGetValue(__instance, out var info))
+                {
+                    NewFrame();
+                    if (resolves >= MaxResolvesPerFrame)
+                    {
+                        Deferred++;
+                        return;
+                    }
+                    resolves++;
                     Infos[__instance] = info = Resolve(__instance);
+                }
                 if (!All && !info.Interest && !EntityRegistry.IsIncludedRoot(info.EntIid)) return;
 
-                var f = Time.frameCount;
-                if (f != frame)
-                {
-                    frame = f;
-                    perFrame = 0;
-                }
+                NewFrame();
                 if (++perFrame > MaxPerFrame)
                 {
                     Dropped++;
@@ -93,6 +111,7 @@ namespace SsOracle.Entities
                     ["from"] = prev?.Name,
                     ["to"] = state.Name,
                     ["t_in_prev"] = prev != null ? (object)prev.StateTime : null,
+                    ["rt_in_prev"] = prev != null ? (object)prev.StateRealTime : null,
                 });
                 Emitted++;
             }

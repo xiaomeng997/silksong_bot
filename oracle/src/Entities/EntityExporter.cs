@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using GlobalEnums;
+using HutongGames.PlayMaker;
 using UnityEngine;
 
 namespace SsOracle.Entities
@@ -9,10 +10,13 @@ namespace SsOracle.Entities
     /// STATE "ents" (DESIGN §3.1.2 entities[]): every threat-relevant object within the main camera's view of the
     /// z = 0 plane plus EntityRegistry.Margin, one map per entity:
     ///   iid, type_key, category, src (Src bits), layer, pos [x,y,z], vel [x,y] | nil, gravity_scale | nil,
-    ///   hp | nil, is_dead | nil, inv | nil (HealthManager.IsInvincible), fsms [{name, state, t}], anim {clip, frame, n} | nil,
+    ///   hp | nil, is_dead | nil, inv | nil (HealthManager.IsInvincible), fsms [{name, state, t, rt}], anim {clip, frame, n} | nil,
     ///   flipX, render_aabb [minx, miny, maxx, maxy] | nil,
     ///   colliders [{kind, verts_world [x0, y0, x1, y1, ...], enabled, layer, r (circles only), damage | nil}]
     /// damage = {dealt, eff, hazard_type, flags, parry, parryable, can_cause_damage}; see WriteDamage.
+    /// fsms[].t = FsmState.StateTime (scaled; PlayMaker stops it once all of the state's actions have finished),
+    /// fsms[].rt = FsmState.StateRealTime (unscaled seconds since the state was entered; never stops, but also runs
+    /// through pauses and hit-stop). Exact scaled dwell times come from the "fsm" event frames (FsmTap).
     /// Unity is only touched before the first byte is written (EntityRegistry.Collect, then a gather pass where a
     /// failure drops one entity), so a destroyed object can never leave a half-written msgpack value behind,
     /// which would cost the whole STATE and disable the exporter.
@@ -20,9 +24,15 @@ namespace SsOracle.Entities
     internal sealed class EntityExporter : Export.IExporter
     {
         /// <summary>DamageHero parry bits ("parry"). CLASH: canClashTink, a nail hit tinks off it (hero recoils,
-        /// NailClash). FORCE: forceParry, a 0-damage touch still runs HeroController.CheckParry. COUNTER: hazard ENEMY,
-        /// the only type the Cross Stitch parry stance (cState.parrying) catches (HeroController.TakeDamage).</summary>
+        /// NailClash; DamageHero.TryClashTinkCollider). FORCE: an enabled DamageHero with forceParry, a 0-damage touch
+        /// still runs HeroController.CheckParry (HeroBox.TakeDamageFromDamager). COUNTER: hazard ENEMY, the only type
+        /// the Cross Stitch parry stance (cState.parrying, needs hasParry) catches (HeroController.TakeDamage,
+        /// CheckParry). "parryable" is CLASH or FORCE only: COUNTER holds for nearly every enemy hitbox.</summary>
         public const int ParryClash = 1, ParryForce = 2, ParryCounter = 4;
+
+        /// <summary>The "parryable" flag: the source itself reacts to the nail or forces a parry check (DESIGN
+        /// §3.1.2 damage.parryable, forceParry / canClashTink semantics). The Cross Stitch counter is bit COUNTER.</summary>
+        public static bool Parryable(int parry) => (parry & (ParryClash | ParryForce)) != 0;
 
         public string Key => "ents";
 
@@ -64,6 +74,8 @@ namespace SsOracle.Entities
         private readonly List<string> fsmNames = new List<string>(64);
         private readonly List<string> fsmStates = new List<string>(64);
         private readonly List<float> fsmTimes = new List<float>(64);
+        private readonly List<float> fsmRealTimes = new List<float>(64);
+        private float realNow;  // FsmTime.RealtimeSinceStartup, the clock of FsmState.StateRealTime
         private readonly List<Vector2> points = new List<Vector2>(64);
         private static int errorsLogged;
 
@@ -84,6 +96,7 @@ namespace SsOracle.Entities
             var b = cam.ViewportToWorldPoint(new Vector3(1f, 1f, dist));
 
             EntityRegistry.Now = Time.timeAsDouble;
+            realNow = FsmTime.RealtimeSinceStartup;
             try
             {
                 EntityRegistry.Collect((int)ctx.Frame, Mathf.Min(a.x, b.x), Mathf.Min(a.y, b.y), Mathf.Max(a.x, b.x), Mathf.Max(a.y, b.y));
@@ -103,6 +116,7 @@ namespace SsOracle.Entities
             fsmNames.Clear();
             fsmStates.Clear();
             fsmTimes.Clear();
+            fsmRealTimes.Clear();
             var included = EntityRegistry.Included;
             for (var i = 0; i < included.Count; i++)
                 Gather(included[i]);
@@ -155,6 +169,7 @@ namespace SsOracle.Entities
                     fsmNames.Add(fsm.Name);
                     fsmStates.Add(st?.Name);
                     fsmTimes.Add(st != null ? st.StateTime : 0f);
+                    fsmRealTimes.Add(st != null ? realNow - st.RealStartTime : 0f);
                 }
                 s.FN = fsmNames.Count - f0;
 
@@ -200,6 +215,7 @@ namespace SsOracle.Entities
                 fsmNames.RemoveRange(f0, nf);
                 fsmStates.RemoveRange(f0, nf);
                 fsmTimes.RemoveRange(f0, nf);
+                fsmRealTimes.RemoveRange(f0, nf);
                 if (errorsLogged++ < 10)
                     Core.Plugin.Log.LogWarning($"ents: skipped entity {e.Iid} '{e.TypeKey}': {ex.GetType().Name}: {ex.Message}");
             }
@@ -402,10 +418,11 @@ namespace SsOracle.Entities
             w.ArrayHeader(s.FN);
             for (var i = s.F0; i < s.F0 + s.FN; i++)
             {
-                w.MapHeader(3);
+                w.MapHeader(4);
                 w.Key("name"); w.Str(fsmNames[i]);
                 w.Key("state"); w.Str(fsmStates[i]);
                 w.Key("t"); w.Float(fsmTimes[i]);
+                w.Key("rt"); w.Float(fsmRealTimes[i]);
             }
             w.Key("anim");
             if (s.Clip != null)
@@ -453,7 +470,7 @@ namespace SsOracle.Entities
         /// dealt: DamageHero.damageDealt as HeroBox reads it (0 while the component is disabled), or the
         /// 'damages_hero' FSM's damageDealt int. eff: see Effective; -1 when only an FSM knows. hazard_type:
         /// GlobalEnums.HazardType (-1 unknown). flags: DamagePropertyFlags (SilkAcid 1, NonLethal 2, Flame 4,
-        /// Void 8, Acid 16, Self 32, MidChain 64). parry: Parry* bits; parryable = CLASH or COUNTER.
+        /// Void 8, Acid 16, Self 32, MidChain 64). parry: Parry* bits; parryable = CLASH or FORCE (see Parryable).
         /// can_cause_damage: DamageHero.CanCauseDamage (false during the post-hit or down-spike cooldown).
         /// </summary>
         private static void WriteDamage(Ipc.MsgPackWriter w, ColSnap c)
@@ -464,7 +481,7 @@ namespace SsOracle.Entities
             w.Key("hazard_type"); w.Int(c.Haz);
             w.Key("flags"); w.Int(c.Flags);
             w.Key("parry"); w.Int(c.Parry);
-            w.Key("parryable"); w.Bool((c.Parry & (ParryClash | ParryCounter)) != 0);
+            w.Key("parryable"); w.Bool(Parryable(c.Parry));
             w.Key("can_cause_damage"); w.Bool(c.CanCause);
         }
     }

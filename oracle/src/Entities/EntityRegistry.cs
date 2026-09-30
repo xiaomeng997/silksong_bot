@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Reflection;
 using System.Runtime.CompilerServices;
 using GlobalEnums;
 using HarmonyLib;
@@ -28,9 +29,11 @@ namespace SsOracle.Entities
         public Transform Tr;
         public int Kind;                 // Src bit
         public Entity Owner;             // the HealthManager ancestor's entity, else the source's own; resolved on first activity
+        public int Epoch = -1;           // scene epoch Owner was resolved in; a scene change invalidates it
         public bool OwnRoot;             // Owner is this source's own GameObject
         public float Extent;             // pivot-to-collider-edge distance, widens the view test for big static hazards
         public bool Dead;
+        public int LiveIdx = -1;         // index in EntityRegistry's live DamageHero list, -1 when not in it
     }
 
     /// <summary>One collider of an entity and the damage source on the collider's own GameObject (HeroBox reads
@@ -49,8 +52,8 @@ namespace SsOracle.Entities
         public bool MultiWounder;
     }
 
-    /// <summary>Per-root component cache. Rebuilt when first included, when a new source joins it, and every
-    /// RefreshFrames while in view; dropped on scene change or when the root is destroyed.</summary>
+    /// <summary>Per-root component cache. Rebuilt when first included (or first measured, see Collect), when a new
+    /// source joins it, and every RefreshFrames while in view; dropped on scene change or when the root is destroyed.</summary>
     internal sealed class Entity
     {
         public int Iid;
@@ -82,12 +85,14 @@ namespace SsOracle.Entities
 
     /// <summary>
     /// Finds the threat-relevant objects in view each frame (DESIGN §3.1.1 EntityRegistry, m0 §3 "EntityRegistry
-    /// full"). Sources: HealthManager's active list (OnEnable/OnDisable maintained), DamageHero's private static
-    /// registry _damageHeroes (every awake DamageHero, active or not), PlayMaker FSMs named 'damages_hero' or
+    /// full"). Sources: HealthManager's active list (OnEnable/OnDisable maintained), every awake DamageHero (the
+    /// game's private registry _damageHeroes, tracked through hooks), PlayMaker FSMs named 'damages_hero' or
     /// templated 'hornet_multi_wounder', and CogMultiHitters. The game's own collections are read, never scanned
-    /// for: the registry is mirrored into a flat list only when a DamageHero wakes or dies, FSM and cog sources
-    /// arrive through OnEnable/Awake hooks. Per frame the work is one activeInHierarchy + position per candidate,
-    /// and the component caches are rebuilt only for entities that enter the view. Main thread only.
+    /// for. DamageHero sources are kept by postfixes on Awake / OnEnable / OnDisable / OnDestroy, so only the
+    /// ones whose GameObject may be active are looked at per frame (pooled, inactive projectiles cost nothing);
+    /// the registry itself is only read once at start and when it holds more than the hooks reported. FSM and
+    /// cog sources arrive through Awake hooks. Per frame the work is one activeInHierarchy + position per live
+    /// candidate, and the component caches are rebuilt only for entities that enter the view. Main thread only.
     /// </summary>
     internal static class EntityRegistry
     {
@@ -98,10 +103,13 @@ namespace SsOracle.Entities
         public const float Margin = 6f;
         private const int RefreshFrames = 600;        // periodic child-collider rescan while in view
         private const int MaxPeriodicRefreshes = 2;   // per frame; first-sight builds are not limited
+        private const float PrefetchPad = 14f;        // never-measured enemies within view + Margin + this get measured
+        private const int MaxPrefetches = 4;          // per frame
         private const int SweepFrames = 300;
         private const int MaxCollidersPerEntity = 64;
         public const int MaxEntities = 128;
 
+        // Resolved once in Install; a missing symbol stops the plugin (m0 §3 general rule, DESIGN §3.1.1 SymbolCheck).
         private static List<HealthManager> activeHealthManagers;
         private static Dictionary<GameObject, DamageHero> damageHeroes;
         private static AccessTools.FieldRef<DamageHero, double> damageAllowedTime;
@@ -110,10 +118,16 @@ namespace SsOracle.Entities
 
         private static readonly Dictionary<int, Entity> EntitiesByRoot = new Dictionary<int, Entity>();
         private static readonly Dictionary<HealthManager, Entity> HmEntities = new Dictionary<HealthManager, Entity>(RefComparer<HealthManager>.Instance);
-        private static readonly Dictionary<UnityEngine.Object, Source> SourcesByComp = new Dictionary<UnityEngine.Object, Source>(RefComparer<UnityEngine.Object>.Instance);
+
+        // DamageHero sources live as long as their component: made in Awake (or by ReconcileDh), dropped in OnDestroy.
+        // They survive scene changes; Source.Epoch invalidates their owner instead.
+        private static readonly Dictionary<DamageHero, Source> DhSources = new Dictionary<DamageHero, Source>(RefComparer<DamageHero>.Instance);
+        // The DamageHero sources whose GameObject may be active (see the hooks); the only ones looked at per frame.
+        private static readonly List<Source> LiveDh = new List<Source>();
+
+        // FSM and cog sources: fed by hooks, rebuilt on scene change.
+        private static readonly Dictionary<UnityEngine.Object, Source> ExtraByComp = new Dictionary<UnityEngine.Object, Source>(RefComparer<UnityEngine.Object>.Instance);
         private static readonly HashSet<int> ExtraSourceGos = new HashSet<int>();
-        private static List<Source> dhSources = new List<Source>();
-        private static List<Source> dhSourcesNext = new List<Source>();
         private static readonly List<Source> ExtraSources = new List<Source>();
         private static readonly List<PlayMakerFSM> PendingFsms = new List<PlayMakerFSM>();
         private static readonly List<CogMultiHitter> PendingCogs = new List<CogMultiHitter>();
@@ -124,6 +138,7 @@ namespace SsOracle.Entities
         private static readonly List<Collider2D> ColScratch = new List<Collider2D>();
         private static readonly List<ColliderSlot> SlotScratch = new List<ColliderSlot>();
         private static readonly List<UnityEngine.Object> KeyScratch = new List<UnityEngine.Object>();
+        private static readonly List<DamageHero> DhKeyScratch = new List<DamageHero>();
         private static readonly List<int> IntScratch = new List<int>();
         private static readonly List<HealthManager> HmKeyScratch = new List<HealthManager>();
 
@@ -131,72 +146,129 @@ namespace SsOracle.Entities
         public static readonly List<Entity> Included = new List<Entity>();
         private static readonly HashSet<int> IncludedRoots = new HashSet<int>();
 
-        private static bool dhDirty = true, sceneDirty, seeded;
-        private static int lastDhCount = -1;
+        private static bool sceneDirty, seeded, dhSeeded;
+        private static int epoch;
         private static int nextSweep;
-        private static int periodicRefreshes;
+        private static int periodicRefreshes, prefetches;
+        private static float viewMinX, viewMinY, viewMaxX, viewMaxY;  // camera view + Margin, this frame
 
         // Counters for ents.stats.
-        public static long Rebuilds, Refreshes, Capped;
+        public static long Reconciles, Refreshes, Prefetches, Capped;
 
         public static double Now;  // Time.timeAsDouble of the frame being exported (DamageHero.CanCauseDamage)
 
         public static void Install(Harmony harmony)
         {
-            activeHealthManagers = AccessTools.Field(typeof(HealthManager), "_activeHealthManagers")?.GetValue(null) as List<HealthManager>;
-            if (activeHealthManagers == null)
-                Core.Plugin.Log.LogError("EntityRegistry: HealthManager._activeHealthManagers not found; no enemies in 'ents'");
-            damageHeroes = AccessTools.Field(typeof(DamageHero), "_damageHeroes")?.GetValue(null) as Dictionary<GameObject, DamageHero>;
-            if (damageHeroes == null)
-                Core.Plugin.Log.LogError("EntityRegistry: DamageHero._damageHeroes not found; no damage sources in 'ents'");
-            damageAllowedTime = FieldRef<DamageHero, double>("damageAllowedTime");
-            cogCanDamageTime = FieldRef<CogMultiHitter, double>("canDamageTime");
-            pmFsm = FieldRef<PlayMakerFSM, Fsm>("fsm");
-
-            Postfix(harmony, AccessTools.Method(typeof(DamageHero), "Awake"), nameof(DamageHeroChanged), "DamageHero.Awake");
-            Postfix(harmony, AccessTools.Method(typeof(DamageHero), "OnDestroy"), nameof(DamageHeroChanged), "DamageHero.OnDestroy");
-            Postfix(harmony, AccessTools.Method(typeof(PlayMakerFSM), "OnEnable"), nameof(FsmEnabled), "PlayMakerFSM.OnEnable");
-            Postfix(harmony, AccessTools.Method(typeof(PlayMakerFSM), "SetFsmTemplate", new[] { typeof(FsmTemplate) }), nameof(FsmTemplateSet), "PlayMakerFSM.SetFsmTemplate");
-            Postfix(harmony, AccessTools.Method(typeof(CogMultiHitter), "Awake"), nameof(CogAwake), "CogMultiHitter.Awake");
+            // Resolve every symbol before patching anything, and fail hard with the full list: a renamed field
+            // would otherwise leave "ents" silently empty and poison the labels.
+            var missing = new List<string>();
+            activeHealthManagers = StaticField<List<HealthManager>>(typeof(HealthManager), "_activeHealthManagers", missing);
+            damageHeroes = StaticField<Dictionary<GameObject, DamageHero>>(typeof(DamageHero), "_damageHeroes", missing);
+            damageAllowedTime = FieldRef<DamageHero, double>("damageAllowedTime", missing);
+            cogCanDamageTime = FieldRef<CogMultiHitter, double>("canDamageTime", missing);
+            pmFsm = FieldRef<PlayMakerFSM, Fsm>("fsm", missing);
+            var patches = new List<KeyValuePair<MethodInfo, string>>
+            {
+                Target(typeof(DamageHero), "Awake", null, nameof(DamageHeroAwake), missing),
+                Target(typeof(DamageHero), "OnEnable", null, nameof(DamageHeroEnabled), missing),
+                Target(typeof(DamageHero), "OnDisable", null, nameof(DamageHeroDisabled), missing),
+                Target(typeof(DamageHero), "OnDestroy", null, nameof(DamageHeroDestroyed), missing),
+                Target(typeof(PlayMakerFSM), "Awake", null, nameof(FsmAwake), missing),
+                Target(typeof(PlayMakerFSM), "SetFsmTemplate", new[] { typeof(FsmTemplate) }, nameof(FsmTemplateSet), missing),
+                Target(typeof(CogMultiHitter), "Awake", null, nameof(CogAwake), missing),
+            };
+            if (missing.Count > 0)
+                throw new MissingMemberException("EntityRegistry: game symbols not found: " + string.Join(", ", missing.ToArray()));
+            foreach (var p in patches)
+                harmony.Patch(p.Key, postfix: new HarmonyMethod(typeof(EntityRegistry), p.Value));
         }
 
-        private static AccessTools.FieldRef<T, TF> FieldRef<T, TF>(string name) where T : class
+        private static T StaticField<T>(Type type, string name, List<string> missing) where T : class
         {
-            try
-            {
+            var v = AccessTools.Field(type, name)?.GetValue(null) as T;
+            if (v == null) missing.Add($"{type.Name}.{name}");
+            return v;
+        }
+
+        private static AccessTools.FieldRef<T, TF> FieldRef<T, TF>(string name, List<string> missing) where T : class
+        {
+            if (AccessTools.Field(typeof(T), name)?.FieldType == typeof(TF))
                 return AccessTools.FieldRefAccess<T, TF>(name);
-            }
-            catch (Exception e)
-            {
-                Core.Plugin.Log.LogError($"EntityRegistry: {typeof(T).Name}.{name} not found ({e.Message})");
-                return null;
-            }
+            missing.Add($"{typeof(T).Name}.{name} ({typeof(TF).Name})");
+            return null;
         }
 
-        private static void Postfix(Harmony harmony, System.Reflection.MethodInfo target, string patch, string what)
+        private static KeyValuePair<MethodInfo, string> Target(Type type, string method, Type[] args, string patch, List<string> missing)
         {
-            if (target == null)
-            {
-                Core.Plugin.Log.LogError($"EntityRegistry: {what} not found; its sources are missed");
-                return;
-            }
-            harmony.Patch(target, postfix: new HarmonyMethod(typeof(EntityRegistry), patch));
+            var m = AccessTools.DeclaredMethod(type, method, args);
+            if (m == null) missing.Add($"{type.Name}.{method}");
+            return new KeyValuePair<MethodInfo, string>(m, patch);
         }
 
         // ---- hooks (main thread; must never throw into game code) ------------------------------------------
 
-        private static void DamageHeroChanged() => dhDirty = true;
+        /// <summary>Awake runs with the GameObject active, also for a disabled component (which gets no OnEnable).</summary>
+        private static void DamageHeroAwake(DamageHero __instance)
+        {
+            try
+            {
+                AddLive(DhSource(__instance));
+            }
+            catch (Exception) { }
+        }
 
-        private static void FsmEnabled(PlayMakerFSM __instance)
+        private static void DamageHeroEnabled(DamageHero __instance)
+        {
+            try
+            {
+                AddLive(DhSource(__instance));
+            }
+            catch (Exception) { }
+        }
+
+        /// <summary>
+        /// Unity calls OnDisable both for a component disable (enabled is already false) and for a GameObject
+        /// deactivation or destroy (enabled is still true). Only the latter takes the source off the live list:
+        /// HeroBox still touches a disabled DamageHero (as 0 damage, "dealt" 0 here), and a disabled component gets
+        /// no OnEnable when its GameObject is reactivated.
+        /// </summary>
+        private static void DamageHeroDisabled(DamageHero __instance)
+        {
+            try
+            {
+                if (__instance.enabled && DhSources.TryGetValue(__instance, out var s)) RemoveLive(s);
+            }
+            catch (Exception) { }
+        }
+
+        private static void DamageHeroDestroyed(DamageHero __instance)
+        {
+            try
+            {
+                if (!DhSources.TryGetValue(__instance, out var s)) return;
+                DhSources.Remove(__instance);
+                s.Dead = true;
+                RemoveLive(s);
+            }
+            catch (Exception) { }
+        }
+
+        /// <summary>Awake rather than OnEnable: HeroBox (FSMUtility.ContainsFSM) also takes damage from a disabled
+        /// 'damages_hero' FSM, and a pooled FSM that re-enables is already known.</summary>
+        private static void FsmAwake(PlayMakerFSM __instance)
         {
             try
             {
                 if (DamageKindOf(__instance) == 0) return;
                 if (PendingFsms.Count >= MaxPending)
                 {
-                    // No brain has drained the queue for a long time (pooled damagers re-enable): rescan instead.
-                    PendingFsms.Clear();
-                    seeded = false;
+                    // No brain has drained the queue for a long time: forget what died, else rescan instead.
+                    PendingFsms.RemoveAll(f => f == null);
+                    if (PendingFsms.Count >= MaxPending)
+                    {
+                        PendingFsms.Clear();
+                        seeded = false;
+                    }
                 }
                 PendingFsms.Add(__instance);
             }
@@ -228,7 +300,7 @@ namespace SsOracle.Entities
             FsmTap.ClearCache();
         }
 
-        public static Fsm FsmOf(PlayMakerFSM f) => pmFsm != null ? pmFsm(f) : f.Fsm;
+        public static Fsm FsmOf(PlayMakerFSM f) => pmFsm(f);
 
         /// <summary>Src.DamagesHeroFsm / Src.MultiWounder for FSMs that hurt the hero, else 0.</summary>
         private static int DamageKindOf(PlayMakerFSM f)
@@ -240,8 +312,8 @@ namespace SsOracle.Entities
             return 0;
         }
 
-        public static bool CanCauseDamage(DamageHero dh) => damageAllowedTime == null ? dh.CanCauseDamage : Now >= damageAllowedTime(dh);
-        public static bool CogCanDamage(CogMultiHitter cog) => cogCanDamageTime == null || Now >= cogCanDamageTime(cog);
+        public static bool CanCauseDamage(DamageHero dh) => Now >= damageAllowedTime(dh);
+        public static bool CogCanDamage(CogMultiHitter cog) => Now >= cogCanDamageTime(cog);
 
         public static bool IsIncludedRoot(int iid) => IncludedRoots.Contains(iid);
 
@@ -252,78 +324,93 @@ namespace SsOracle.Entities
         {
             if (sceneDirty) ResetForScene();
             if (!seeded) Seed();
-            if (damageHeroes != null && (dhDirty || damageHeroes.Count != lastDhCount)) RebuildDhMirror();
+            if (!dhSeeded) ReconcileDh();
             if (PendingFsms.Count > 0 || PendingCogs.Count > 0 || PendingTemplates.Count > 0) DrainPending();
             if (frame >= nextSweep) Sweep(frame);
 
             Included.Clear();
             IncludedRoots.Clear();
             periodicRefreshes = 0;
-            minX -= Margin; minY -= Margin; maxX += Margin; maxY += Margin;
+            prefetches = 0;
+            viewMinX = minX - Margin;
+            viewMinY = minY - Margin;
+            viewMaxX = maxX + Margin;
+            viewMaxY = maxY + Margin;
 
-            if (activeHealthManagers != null)
+            // Copy first: nothing here should enable objects, but the list belongs to the game.
+            HmScratch.Clear();
+            for (var i = 0; i < activeHealthManagers.Count; i++) HmScratch.Add(activeHealthManagers[i]);  // AddRange allocates
+            for (var i = 0; i < HmScratch.Count; i++)
             {
-                // Copy first: nothing here should enable objects, but the list belongs to the game.
-                HmScratch.Clear();
-                for (var i = 0; i < activeHealthManagers.Count; i++) HmScratch.Add(activeHealthManagers[i]);  // AddRange allocates
-                for (var i = 0; i < HmScratch.Count; i++)
+                var hm = HmScratch[i];
+                if (hm == null) continue;
+                var e = HmEntity(hm);
+                if (e.IncludedFrame == frame) continue;
+                var p = e.Tr.position;
+                var pad = e.Extent;
+                if (e.CachedFrame == int.MinValue && prefetches < MaxPrefetches && !InView(p, 0f) && InView(p, PrefetchPad))
                 {
-                    var hm = HmScratch[i];
-                    if (hm == null) continue;
-                    var e = HmEntity(hm);
-                    if (e.IncludedFrame == frame) continue;
-                    var p = e.Tr.position;
-                    var pad = e.Extent;
-                    if (p.x >= minX - pad && p.x <= maxX + pad && p.y >= minY - pad && p.y <= maxY + pad)
-                        Include(e, p, frame);
+                    // Never measured, so Extent is still 0: a big enemy's pivot can lie well outside the view while
+                    // its body or attack colliders are inside. Measure it now; it is a one-off per enemy and scene.
+                    prefetches++;
+                    Prefetches++;
+                    SafeRefresh(e, frame);
+                    pad = e.Extent;
                 }
+                if (InView(p, pad)) Include(e, p, frame);
             }
-            Pass(dhSources, frame, minX, minY, maxX, maxY);
-            Pass(ExtraSources, frame, minX, minY, maxX, maxY);
+            Pass(LiveDh, true, frame);
+            Pass(ExtraSources, false, frame);
 
             if (Included.Count > MaxEntities)
             {
                 // Keep the ones nearest the view centre; a crowd this big is a spawner gone wild or a debug scene.
                 Capped++;
-                centre = new Vector2((minX + maxX) * 0.5f, (minY + maxY) * 0.5f);
+                centre = new Vector2((viewMinX + viewMaxX) * 0.5f, (viewMinY + viewMaxY) * 0.5f);
                 Included.Sort(ByDistance);
                 for (var i = MaxEntities; i < Included.Count; i++) IncludedRoots.Remove(Included[i].Iid);
                 Included.RemoveRange(MaxEntities, Included.Count - MaxEntities);
             }
         }
 
+        private static bool InView(Vector3 p, float pad) =>
+            p.x >= viewMinX - pad && p.x <= viewMaxX + pad && p.y >= viewMinY - pad && p.y <= viewMaxY + pad;
+
         private static Vector2 centre;
         private static readonly Comparison<Entity> ByDistance = (a, b) =>
             ((Vector2)a.Pos - centre).sqrMagnitude.CompareTo(((Vector2)b.Pos - centre).sqrMagnitude);
 
-        private static void Pass(List<Source> sources, int frame, float minX, float minY, float maxX, float maxY)
+        /// <param name="live">sources is LiveDh: dead entries are taken out on the spot.</param>
+        private static void Pass(List<Source> sources, bool live, int frame)
         {
             for (var i = 0; i < sources.Count; i++)
             {
                 var s = sources[i];
-                if (s.Dead) continue;
-                var owner = s.Owner;
-                if (owner != null && owner.IncludedFrame == frame) continue;  // already exported with its owner
-                if (s.Go == null)
+                if (s.Dead || s.Go == null)
                 {
                     s.Dead = true;
+                    if (live && RemoveLive(s)) i--;  // the last entry moved into i
                     continue;
                 }
+                var owner = s.Epoch == epoch ? s.Owner : null;
+                if (owner != null && owner.IncludedFrame == frame) continue;  // already exported with its owner
                 if (!s.Go.activeInHierarchy) continue;
                 if (owner == null || owner.Go == null) owner = ResolveOwner(s);
+                if (owner.IncludedFrame == frame) continue;  // just resolved to an entity selected earlier this frame
                 var p = s.Tr.position;
-                var pad = s.OwnRoot && owner.Extent > s.Extent ? owner.Extent : s.Extent;
-                if (p.x < minX - pad || p.x > maxX + pad || p.y < minY - pad || p.y > maxY + pad) continue;
+                if (!InView(p, s.OwnRoot && owner.Extent > s.Extent ? owner.Extent : s.Extent)) continue;
                 Include(owner, s.OwnRoot ? p : owner.Tr.position, frame);
             }
         }
 
+        /// <summary>Callers skip entities whose IncludedFrame is this frame; IncludedRoots is the last guard that an
+        /// iid appears once per STATE.</summary>
         private static void Include(Entity e, Vector3 pos, int frame)
         {
             e.IncludedFrame = frame;
+            if (!IncludedRoots.Add(e.Iid)) return;
             e.Pos = pos;
             Included.Add(e);
-            IncludedRoots.Add(e.Iid);
             if (e.Dirty || e.CachedFrame == int.MinValue)
                 SafeRefresh(e, frame);
             else if (frame - e.CachedFrame > RefreshFrames && periodicRefreshes < MaxPeriodicRefreshes)
@@ -375,27 +462,82 @@ namespace SsOracle.Entities
         }
 
         /// <summary>Cheap on purpose: a scene wakes hundreds of pooled DamageHeroes that may never activate.</summary>
-        private static Source MakeSource(UnityEngine.Object comp, GameObject go, int kind)
+        private static Source DhSource(DamageHero dh)
         {
-            var s = new Source { Comp = comp, Go = go, Tr = go.transform, Kind = kind };
-            SourcesByComp[comp] = s;
+            if (DhSources.TryGetValue(dh, out var s)) return s;
+            var go = dh.gameObject;
+            s = new Source { Comp = dh, Go = go, Tr = go.transform, Kind = Src.DamageHero };
+            DhSources[dh] = s;
             return s;
         }
 
-        /// <summary>First time the source is seen active: find its entity (grouping rule, see OwnedBy).</summary>
+        private static Source ExtraSource(UnityEngine.Object comp, GameObject go, int kind)
+        {
+            var s = new Source { Comp = comp, Go = go, Tr = go.transform, Kind = kind };
+            ExtraByComp[comp] = s;
+            ExtraSources.Add(s);
+            ExtraSourceGos.Add(go.GetInstanceID());
+            return s;
+        }
+
+        private static void AddLive(Source s)
+        {
+            if (s.LiveIdx >= 0 || s.Dead) return;
+            s.LiveIdx = LiveDh.Count;
+            LiveDh.Add(s);
+        }
+
+        /// <summary>O(1): the last entry takes the removed one's place.</summary>
+        private static bool RemoveLive(Source s)
+        {
+            var i = s.LiveIdx;
+            if (i < 0) return false;
+            var last = LiveDh.Count - 1;
+            var moved = LiveDh[last];
+            LiveDh[i] = moved;
+            moved.LiveIdx = i;
+            LiveDh.RemoveAt(last);
+            s.LiveIdx = -1;
+            return true;
+        }
+
+        /// <summary>First time the source is seen active in this scene: find its entity (grouping rule, see OwnedBy).</summary>
         private static Entity ResolveOwner(Source s)
         {
             var go = s.Go;
             var hm = go.GetComponentInParent<HealthManager>(true);
+            var owner = hm != null ? HmEntity(hm) : EntityForRoot(go);
+            s.Owner = owner;
+            s.Epoch = epoch;
             s.OwnRoot = hm == null;
-            s.Owner = hm != null ? HmEntity(hm) : EntityForRoot(go);
-            s.Owner.Dirty = true;  // its collider list may now include this source's colliders
+            s.Extent = 0f;
             if (hm == null)
             {
                 var col = go.GetComponent<Collider2D>();
                 if (col != null) s.Extent = ExtentAround(col.bounds, s.Tr.position);
             }
-            return s.Owner;
+            // A source that woke (or was added) after the owner's last rebuild is not in its collider list yet. One
+            // that was there already needs no rebuild: Refresh scans inactive children too.
+            if (owner.CachedFrame != int.MinValue && !owner.Dirty && !Knows(owner, s))
+                owner.Dirty = true;
+            return owner;
+        }
+
+        /// <summary>The entity's cached colliders already carry this source's damage.</summary>
+        private static bool Knows(Entity e, Source s)
+        {
+            var anySlot = false;
+            foreach (var slot in e.Colliders)
+            {
+                if (!ReferenceEquals(slot.Go, s.Go)) continue;
+                anySlot = true;
+                if (ReferenceEquals(slot.Dh, s.Comp) || ReferenceEquals(slot.DmgFsm, s.Comp) || ReferenceEquals(slot.Cog, s.Comp)
+                    || slot.DmgFsm != null  // HeroBox order: a 'damages_hero' FSM hides the GameObject's other damage
+                    || (s.Kind == Src.MultiWounder && slot.MultiWounder))
+                    return true;
+            }
+            // A root without a collider of its own adds nothing to the list (Refresh read the root's components).
+            return !anySlot && ReferenceEquals(s.Go, e.Go);
         }
 
         private static float ExtentAround(Bounds b, Vector3 pivot)
@@ -406,24 +548,22 @@ namespace SsOracle.Entities
             return Mathf.Max(dx, dy);
         }
 
-        private static void RebuildDhMirror()
+        /// <summary>
+        /// DamageHeroes the hooks did not report (awake before Install, or a hook that did not run): read the game's
+        /// registry. Once at the first exported frame, then only when the registry holds more than we know
+        /// (two DamageHeroes on one GameObject make the registry smaller, never larger).
+        /// </summary>
+        private static void ReconcileDh()
         {
-            Rebuilds++;
-            dhDirty = false;
-            lastDhCount = damageHeroes.Count;
-            dhSourcesNext.Clear();
+            dhSeeded = true;
+            Reconciles++;
             foreach (var kv in damageHeroes)
             {
-                var go = kv.Key;
                 var dh = kv.Value;
-                if (go == null || dh == null) continue;
-                if (!SourcesByComp.TryGetValue(dh, out var s) || s.Dead)
-                    s = MakeSource(dh, go, Src.DamageHero);
-                dhSourcesNext.Add(s);
+                if (dh == null || DhSources.ContainsKey(dh)) continue;
+                var s = DhSource(dh);
+                if (s.Go.activeInHierarchy) AddLive(s);
             }
-            var t = dhSources;
-            dhSources = dhSourcesNext;
-            dhSourcesNext = t;
         }
 
         private static void DrainPending()
@@ -432,7 +572,7 @@ namespace SsOracle.Entities
             {
                 var f = PendingTemplates[i];
                 if (f == null) continue;
-                if (SourcesByComp.TryGetValue(f, out var s) && !s.Dead && s.Owner != null) s.Owner.Dirty = true;
+                if (ExtraByComp.TryGetValue(f, out var s) && !s.Dead && s.Epoch == epoch && s.Owner != null) s.Owner.Dirty = true;
                 PendingFsms.Add(f);  // it may have just become a damage source
             }
             PendingTemplates.Clear();
@@ -444,30 +584,26 @@ namespace SsOracle.Entities
                 try { kind = DamageKindOf(f); }
                 catch (Exception) { continue; }
                 if (kind == 0) continue;
-                if (SourcesByComp.TryGetValue(f, out var s) && !s.Dead)
+                if (ExtraByComp.TryGetValue(f, out var s) && !s.Dead)
                 {
-                    // Re-enabled (pooled) or re-templated: the source is known.
-                    if (s.Kind != kind && s.Owner != null) s.Owner.Dirty = true;
+                    // Re-templated, or queued twice: the source is known.
+                    if (s.Kind != kind && s.Epoch == epoch && s.Owner != null) s.Owner.Dirty = true;
                     s.Kind = kind;
                     continue;
                 }
-                var go = f.gameObject;
-                ExtraSources.Add(MakeSource(f, go, kind));
-                ExtraSourceGos.Add(go.GetInstanceID());
+                ExtraSource(f, f.gameObject, kind);
             }
             PendingFsms.Clear();
             for (var i = 0; i < PendingCogs.Count; i++)
             {
                 var c = PendingCogs[i];
-                if (c == null || SourcesByComp.ContainsKey(c)) continue;
-                var go = c.gameObject;
-                ExtraSources.Add(MakeSource(c, go, Src.Cog));
-                ExtraSourceGos.Add(go.GetInstanceID());
+                if (c == null || ExtraByComp.ContainsKey(c)) continue;
+                ExtraSource(c, c.gameObject, Src.Cog);
             }
             PendingCogs.Clear();
         }
 
-        /// <summary>Once: FSM sources enabled before our hooks were installed.</summary>
+        /// <summary>Once: FSM sources awake before our hooks were installed (enabled ones; FsmList has no others).</summary>
         private static void Seed()
         {
             seeded = true;
@@ -481,15 +617,32 @@ namespace SsOracle.Entities
             }
         }
 
-        /// <summary>Forget destroyed objects (instance ids are never reused, so this only bounds memory).</summary>
+        /// <summary>Forget destroyed objects (instance ids are never reused, so this only bounds memory), and catch
+        /// DamageHeroes whose hooks were missed.</summary>
         private static void Sweep(int frame)
         {
             nextSweep = frame + SweepFrames;
+
             ExtraSources.RemoveAll(s => s.Dead || s.Go == null);
             KeyScratch.Clear();
-            foreach (var kv in SourcesByComp)
+            foreach (var kv in ExtraByComp)
                 if (kv.Value.Dead || kv.Key == null) KeyScratch.Add(kv.Key);
-            foreach (var k in KeyScratch) SourcesByComp.Remove(k);
+            foreach (var k in KeyScratch) ExtraByComp.Remove(k);
+            ExtraSourceGos.Clear();
+            foreach (var s in ExtraSources) ExtraSourceGos.Add(s.Go.GetInstanceID());
+
+            DhKeyScratch.Clear();
+            foreach (var kv in DhSources)
+                if (kv.Key == null) DhKeyScratch.Add(kv.Key);
+            foreach (var k in DhKeyScratch)
+            {
+                var s = DhSources[k];
+                s.Dead = true;
+                RemoveLive(s);
+                DhSources.Remove(k);
+            }
+            if (damageHeroes.Count > DhSources.Count) ReconcileDh();
+
             IntScratch.Clear();
             foreach (var kv in EntitiesByRoot)
                 if (kv.Value.Go == null) IntScratch.Add(kv.Key);
@@ -503,6 +656,7 @@ namespace SsOracle.Entities
         private static void ResetForScene()
         {
             sceneDirty = false;
+            epoch++;  // every Source.Owner from before is stale
             // Hook-fed sources that survive the scene change (DontDestroyOnLoad, additive scenes) are re-fed.
             foreach (var s in ExtraSources)
             {
@@ -512,13 +666,11 @@ namespace SsOracle.Entities
             }
             ExtraSources.Clear();
             ExtraSourceGos.Clear();
-            dhSources.Clear();
-            SourcesByComp.Clear();
+            ExtraByComp.Clear();
             EntitiesByRoot.Clear();
             HmEntities.Clear();
             Included.Clear();
             IncludedRoots.Clear();
-            dhDirty = true;
             FsmTap.ClearCache();
         }
 
@@ -670,7 +822,9 @@ namespace SsOracle.Entities
         public static GameObject FindGo(int iid)
         {
             if (EntitiesByRoot.TryGetValue(iid, out var e) && e.Go != null) return e.Go;
-            foreach (var s in SourcesByComp.Values)
+            foreach (var s in DhSources.Values)
+                if (!s.Dead && s.Go != null && s.Go.GetInstanceID() == iid) return s.Go;
+            foreach (var s in ExtraSources)
                 if (!s.Dead && s.Go != null && s.Go.GetInstanceID() == iid) return s.Go;
             return null;
         }
@@ -679,12 +833,14 @@ namespace SsOracle.Entities
         {
             ["included"] = Included.Count,
             ["entities_cached"] = EntitiesByRoot.Count,
-            ["hm_active"] = activeHealthManagers?.Count ?? -1,
-            ["dh_registry"] = damageHeroes?.Count ?? -1,
-            ["dh_sources"] = dhSources.Count,
+            ["hm_active"] = activeHealthManagers.Count,
+            ["dh_registry"] = damageHeroes.Count,
+            ["dh_known"] = DhSources.Count,
+            ["dh_live"] = LiveDh.Count,
             ["extra_sources"] = ExtraSources.Count,
-            ["mirror_rebuilds"] = Rebuilds,
+            ["reconciles"] = Reconciles,
             ["refreshes"] = Refreshes,
+            ["prefetches"] = Prefetches,
             ["capped_frames"] = Capped,
         };
     }

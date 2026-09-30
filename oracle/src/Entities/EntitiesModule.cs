@@ -7,7 +7,8 @@ namespace SsOracle.Entities
 {
     /// <summary>
     /// Entities and FSMs (DESIGN §3.1.1 EntityRegistry + FsmTap, §3.1.2 entities[], §4.6 get_fsm_graph):
-    /// STATE "ents", event "fsm", RPCs "fsm.graph", "fsmtap.set" and "ents.stats".
+    /// STATE "ents", event "fsm", RPCs "fsm.graph", "fsmtap.set" and "ents.stats". Install throws when a game
+    /// symbol is missing, which stops the plugin (m0 §3: a symbol mismatch is a hard failure, not empty labels).
     /// </summary>
     internal static class EntitiesModule
     {
@@ -31,6 +32,7 @@ namespace SsOracle.Entities
                     ["all"] = FsmTap.All,
                     ["emitted"] = FsmTap.Emitted,
                     ["dropped"] = FsmTap.Dropped,
+                    ["deferred"] = FsmTap.Deferred,
                     ["cached"] = FsmTap.CacheSize,
                 };
             });

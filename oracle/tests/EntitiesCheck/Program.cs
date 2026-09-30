@@ -6,7 +6,7 @@ using UnityEngine;
 
 /// <summary>
 /// Offline checks of the Entities module's pure helpers: type_key suffix stripping, the effective-damage rule
-/// (HeroController.TakeDamage hazard overrides) and the collider outline math. Everything that needs the engine
+/// (HeroController.TakeDamage hazard overrides), the parryable rule and the collider outline math. Everything that needs the engine
 /// (collider getters, transforms) is left to the in-game probe brain/ssbot/probes/m1_entities.py.
 /// </summary>
 internal static class Program
@@ -28,6 +28,7 @@ internal static class Program
     {
         TypeKeys();
         EffectiveDamage();
+        Parry();
         Geometry();
         Console.WriteLine(fails == 0 ? "ALL OK" : $"{fails} FAILED");
         return fails == 0 ? 0 : 1;
@@ -59,6 +60,16 @@ internal static class Program
         Eq(E(5, HazardType.PIT), 5, "PIT uses dealt");
         Eq(E(1, HazardType.COAL_SPIKES), 1, "COAL_SPIKES 1");
         Eq(E(4, HazardType.ZAP), 1, "ZAP 1");
+    }
+
+    private static void Parry()
+    {
+        // parryable follows forceParry / canClashTink; the Cross Stitch counter (hazard ENEMY) is only a bit.
+        Eq(EntityExporter.Parryable(EntityExporter.ParryClash), true, "CLASH is parryable");
+        Eq(EntityExporter.Parryable(EntityExporter.ParryForce), true, "FORCE is parryable");
+        Eq(EntityExporter.Parryable(EntityExporter.ParryCounter), false, "COUNTER alone is not parryable");
+        Eq(EntityExporter.Parryable(0), false, "no bits, not parryable");
+        Eq(EntityExporter.Parryable(EntityExporter.ParryClash | EntityExporter.ParryCounter), true, "CLASH + COUNTER");
     }
 
     private static float[] Aabb(List<float> v)
