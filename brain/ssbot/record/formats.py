@@ -67,9 +67,14 @@ def decode(payload: bytes | memoryview, flags: int = 0) -> Any:
     return msgpack.unpackb(payload_bytes(payload, flags), raw=False, strict_map_key=False)
 
 
-def peek(payload: bytes | memoryview, keys: Iterable[str], flags: int = 0) -> dict:
+STATE_LAST = "ev"   # the last key of the STATE base section (oracle/src/Export/FrameExporter.cs)
+
+
+def peek(payload: bytes | memoryview, keys: Iterable[str], flags: int = 0, last: str | None = None) -> dict:
     """Decode only the given top-level keys of a msgpack map, skipping everything else (the STATE base fields
-    come first, so f/drop/ev are found long before the large exporter sections). Returns {} for a non-map."""
+    come first, so f/drop/ev are found long before the large exporter sections). `last`: stop after this key even
+    if not every key was found (STATE_LAST ends the STATE base section: a base key that an older oracle did not
+    write is then not searched for through every exporter section). Returns {} for a non-map."""
     wanted = set(keys)
     out: dict = {}
     u = msgpack.Unpacker(raw=False, strict_map_key=False, max_buffer_size=MAX_MESSAGE)
@@ -86,6 +91,8 @@ def peek(payload: bytes | memoryview, keys: Iterable[str], flags: int = 0) -> di
                 break
         else:
             u.skip()
+        if k == last:
+            break
     return out
 
 

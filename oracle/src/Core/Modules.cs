@@ -24,6 +24,7 @@ namespace SsOracle.Core
             }
 
             Export.BasicExporters.Register();              // game, pause, input
+            Export.FrameMarker.Install(host);              // frame.marker (STATE "mk" is a base field)
             Hero.HeroModule.Install(host, harmony);        // hero, cam, hud
             Entities.EntitiesModule.Install(host, harmony); // ents; FSM transition events
             Events.EventsModule.Install(host, harmony);    // tap, room, prog; TERRAIN and PROGRESS messages

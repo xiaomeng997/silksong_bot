@@ -241,3 +241,32 @@ def test_record_cli_exit_code_gates_delivery(tmp_path, capsys):
     assert "PASS" in capsys.readouterr().out
     assert _cli_record(tmp_path / "b", skip=set(range(500, 510))) == 1  # 10 of 1300 missing: 99.23 %
     assert "FAIL" in capsys.readouterr().out
+
+
+def test_record_cli_closes_the_recording_when_the_video_fails(tmp_path, monkeypatch):
+    from ssbot.ipc import oracle_link
+    from ssbot.record import video
+    from ssbot.record.recorder import main
+    closed = []
+
+    class Link(OracleLink):
+        def close(self):
+            closed.append(True)
+            super().close()
+
+    def boom(self):
+        raise OSError("capture failed")
+
+    monkeypatch.setattr(oracle_link, "OracleLink", Link)
+    monkeypatch.setattr(video, "instance_window", lambda instance: 0x1234)
+    monkeypatch.setattr(video.VideoRecorder, "_start_capture", boom)
+    fo = FakeOracle()
+    try:
+        with pytest.raises(OSError, match="capture failed"):
+            main(["record", "--instance", str(fo.instance), "--seconds", "30", "--out", str(tmp_path), "--episode",
+                  "v", "--game-dir", str(tmp_path / "nogame"), "--min-free-gb", "0", "--video"])
+    finally:
+        fo.close()
+    ep = next(tmp_path.glob("*/TRAIN/v"))
+    assert json.loads((ep / "meta.json").read_text("utf-8"))["status"] == "closed" and closed
+    assert json.loads((ep / "video.json").read_text("utf-8"))["status"] == "failed"

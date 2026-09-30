@@ -11,7 +11,8 @@ current chunk and compresses every CHUNK_FRAMES frames into one independent zstd
     summary = rec.close()
     report = RecordingReader(rec.path).check(deep=True)   # M1 metric: >= 99.9 % frame delivery over 60 min
 
-CLI:  python -m ssbot.record.recorder record --seconds 60 | check <dir> [--deep] | info <dir>
+CLI:  python -m ssbot.record.recorder record --seconds 60 [--video] | check <dir> [--deep] | info <dir>
+      (--video adds the instance window's thumbnail stream of ssbot.record.video, for ssbot.record.align)
 """
 import argparse
 import ctypes
@@ -135,7 +136,8 @@ def _atomic_write_json(path: Path, obj: Any) -> None:
 class StateTracker:
     """Frame-continuity bookkeeping shared by the recorder, index rebuild and the deep check: per chunk the frame
     range, the gaps in "f" (pairs [a, b] meaning frames a+1 .. b-1 never arrived; also across chunk borders),
-    non-increasing frames, and the oracle's cumulative "drop" counter at both ends."""
+    non-increasing frames, the oracle's cumulative "drop" counter at both ends, and the STATEs with the frame marker
+    on ("mk": validation-only frames, never training data; ssbot.record.marker)."""
 
     def __init__(self) -> None:
         self.last_f: int | None = None
@@ -151,9 +153,12 @@ class StateTracker:
         self.q0 = self.q1 = None
         self.seq0 = self.seq1 = None
         self.recv0 = self.recv1 = None
+        self.mk = 0
 
-    def add(self, f: Any, drop: Any, q: Any, seq: int, recv_ns: int) -> None:
+    def add(self, f: Any, drop: Any, q: Any, seq: int, recv_ns: int, mk: Any = None) -> None:
         self.n += 1
+        if mk is not None:
+            self.mk += 1
         if self.seq0 is None:
             self.seq0, self.recv0 = seq, recv_ns
         self.seq1, self.recv1 = seq, recv_ns
@@ -182,7 +187,7 @@ class StateTracker:
     def info(self) -> dict:
         return {"n": self.n, "f0": self.f0, "f1": self.f1, "gaps": self.gaps, "nonmono": self.nonmono,
                 "nof": self.nof, "drop0": self.drop0, "drop1": self.drop1, "q0": self.q0, "q1": self.q1,
-                "seq0": self.seq0, "seq1": self.seq1, "recv0": self.recv0, "recv1": self.recv1}
+                "seq0": self.seq0, "seq1": self.seq1, "recv0": self.recv0, "recv1": self.recv1, "mk": self.mk}
 
 
 class _StreamWriter:
@@ -376,11 +381,11 @@ class Recorder:
         _, _, flags, seq, payload = formats.parse_frame(raw)
         record = formats.pack_record(recv_ns, raw)
         if stream == "state":
-            fields = formats.peek(payload, ("f", "drop", "q", "ev"), flags)
+            fields = formats.peek(payload, ("f", "drop", "q", "mk", "ev"), flags, last=formats.STATE_LAST)
             f = fields.get("f")
             self._chunk.append(record)
             self.states += 1
-            self._tracker.add(f, fields.get("drop"), fields.get("q"), seq, recv_ns)
+            self._tracker.add(f, fields.get("drop"), fields.get("q"), seq, recv_ns, fields.get("mk"))
             for ev in fields.get("ev") or ():
                 self._write_event(ev, f)
             if len(self._chunk) >= self.chunk_frames:
@@ -471,6 +476,7 @@ class ContinuityReport:
     index_consistent: bool | None = None
     cost_us: dict | None = None          # oracle STATE build cost (C14: p50 <= 300, p99 <= 1000)
     latency_ms: dict | None = None       # oracle end-of-frame -> brain reader thread
+    marked: int = 0                      # STATEs with the frame marker on: a validation recording, never training data
 
     @property
     def ok(self) -> bool:
@@ -495,6 +501,8 @@ class ContinuityReport:
         if self.duration_s:
             fps = f", {self.fps:.2f} frames/s" if self.fps else ""
             lines.append(f"duration {self.duration_s:.1f} s{fps}")
+        if self.marked:
+            lines.append(f"frame marker on in {self.marked} STATE frames: validation only, never training data")
         if self.gaps:
             shown = ", ".join(f"{a + 1}..{b - 1}" for a, b in self.gaps[:10])
             lines.append(f"first gaps: {shown}{' ...' if len(self.gaps) > 10 else ''}")
@@ -558,8 +566,8 @@ class RecordingReader:
                     tracker.reset()
                     for recv_ns, frame in formats.iter_records(raw):
                         _, _, flags, seq, payload = formats.parse_frame(frame)
-                        p = formats.peek(payload, ("f", "drop", "q"), flags)
-                        tracker.add(p.get("f"), p.get("drop"), p.get("q"), seq, recv_ns)
+                        p = formats.peek(payload, ("f", "drop", "q", "mk"), flags, last=formats.STATE_LAST)
+                        tracker.add(p.get("f"), p.get("drop"), p.get("q"), seq, recv_ns, p.get("mk"))
                     entry.update(tracker.info())
                 else:
                     recs = list(formats.iter_records(raw))
@@ -684,8 +692,8 @@ class RecordingReader:
                 tracker.reset()
                 for recv_ns, frame in formats.iter_records(self._chunk("state", e)):
                     _, _, flags, seq, payload = formats.parse_frame(frame)
-                    p = formats.peek(payload, ("f", "drop", "q", "cost_us"), flags)
-                    tracker.add(p.get("f"), p.get("drop"), p.get("q"), seq, recv_ns)
+                    p = formats.peek(payload, ("f", "drop", "q", "cost_us", "mk"), flags, last=formats.STATE_LAST)
+                    tracker.add(p.get("f"), p.get("drop"), p.get("q"), seq, recv_ns, p.get("mk"))
                     if isinstance(p.get("cost_us"), int):
                         costs.append(p["cost_us"])
                     if freq and isinstance(p.get("q"), int):
@@ -700,6 +708,7 @@ class RecordingReader:
             if lat:
                 r.latency_ms = {"p50": _pct(lat, .5), "p99": _pct(lat, .99), "max": max(lat)}
         r.states = sum(e["n"] for e in entries)
+        r.marked = sum(e.get("mk", 0) for e in entries)
         r.no_frame = sum(e.get("nof", 0) for e in entries)
         r.nonmonotonic = sum(e.get("nonmono", 0) for e in entries)
         framed = [e for e in entries if e.get("f0") is not None]
@@ -734,18 +743,31 @@ def _cmd_record(a: argparse.Namespace) -> int:
     link = OracleLink(instance=a.instance)
     rec = Recorder(link, out_dir=a.out, profile=a.profile, episode=a.episode, game_dir=a.game_dir,
                    min_free_gb=a.min_free_gb, config={"cli": sys.argv[1:]}).start()
-    print(f"recording to {rec.path} for {a.seconds} s (Ctrl+C stops early)")
-    try:
+    vid = None
+    try:  # a failing video start still closes the recording and the link
+        if a.video:  # the thumbnail stream for ssbot.record.align, in the same episode folder
+            from ssbot.record.video import VideoRecorder, instance_window
+            hwnd = instance_window(a.instance)
+            if hwnd:
+                vid = VideoRecorder(rec.path, hwnd=hwnd, width=a.video_width).start()
+            else:
+                print(f"no game window found for instance {a.instance}: recording without video")
+        print(f"recording to {rec.path} for {a.seconds} s (Ctrl+C stops early)")
         end = time.monotonic() + a.seconds
         while time.monotonic() < end and not link.closed:
             time.sleep(0.5)
     except KeyboardInterrupt:
         pass
-    summary = rec.close()
-    link.close()
+    finally:
+        vsum = vid.close() if vid is not None else None
+        summary = rec.close()
+        link.close()
     rep = RecordingReader(rec.path).check(deep=True)
     print(rep.format())
     print(f"drops {summary['drops']}")
+    if vsum is not None:
+        print(f"video: {vsum['written']} frames, {vsum['dropped']} dropped, callback us {vsum['callback_us']}"
+              f"{', error ' + vsum['error'] if vsum['error'] else ''}")
     if summary["error"]:
         print(f"recorder error: {summary['error']}")
     # Exit 1 below the delivery threshold, on an index that disagrees with the data, or on a recorder error, so a
@@ -786,6 +808,8 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("--episode")
     r.add_argument("--game-dir", default=r"C:\ssbot\game\train")
     r.add_argument("--min-free-gb", type=float, default=200.0, help="refuse to start / stop below this free space")
+    r.add_argument("--video", action="store_true", help="also record the gray thumbnail video (ssbot.record.video)")
+    r.add_argument("--video-width", type=int, default=320)
     r.set_defaults(fn=_cmd_record)
     c = sub.add_parser("check", help="frame continuity of a recording (exit 1 below threshold)")
     c.add_argument("path")

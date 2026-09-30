@@ -28,6 +28,11 @@ namespace SsOracle.Ipc
             get { var c = conn; return c != null && c.HelloReceived; }
         }
 
+        /// <summary>Incremented for every accepted brain connection: state that belongs to one brain (the frame marker)
+        /// compares it to the value it saw when it was turned on, so a quick reconnect cannot inherit it.</summary>
+        public int Generation => Volatile.Read(ref generation);
+        private int generation;
+
         /// <summary>One brain connection with its own outbox: a writer thread left over from an earlier connection must
         /// never take (and silently drop) frames meant for the next one.</summary>
         private sealed class Connection
@@ -126,6 +131,7 @@ namespace SsOracle.Ipc
                 catch { return; }
                 tc.NoDelay = true;
                 var c = new Connection(tc);
+                Interlocked.Increment(ref generation);
                 conn = c;
                 Core.Plugin.Log.LogInfo("IPC v1 brain connected");
                 var writer = new Thread(() => WriteLoop(c)) { IsBackground = true, Name = "SsOracle.Ipc.Write" };
