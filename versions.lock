@@ -1,0 +1,43 @@
+# Pinned game build and environment for the Silksong bot. Every session checks against this file.
+# Game copies live outside the repo under C:\ssbot\game\{final,train}.
+
+[game]
+version = "1.0.30000"
+steam_app = 1030300
+depot = 1030301
+manifest = "4421626056705534276"
+buildid = 22479045
+unity = "6000.0.50f1-uum-100966-branch1"
+scripting_backend = "Mono"
+file_count = 2268
+# sha256 over the sorted {relative_path: sha256} map produced by scripts/hash_game.py (vanilla files only)
+tree_sha256 = "98c73d67d33073d65781937151a01d36f05440ee0cca58159bcd37d250356996"
+
+[game.files]
+"Hollow Knight Silksong_Data/Managed/Assembly-CSharp.dll" = "70713bb2b1f1b0c4c6b7007fa6a8446cf79818cb5e308c48c094c4d1de7114bb"
+"UnityPlayer.dll" = "5eadaec116a9810c68a3c67bc9ad07c6f233badeb06533987ce27deff471b21d"
+"Hollow Knight Silksong.exe" = "5957b04989de6e242938f5ee0fc745a5b1af42da8cca44b0e6f8daf30d836496"
+"Hollow Knight Silksong_Data/Plugins/x86_64/steam_api64.dll" = "1add7f151fa644870a735ae86e68d1f019f296130d8e7c0a7ed3ecc7482dccbc"
+
+[copies.final]
+path = 'C:\ssbot\game\final'
+# vanilla files + steam_appid.txt (1030300); no loader
+extra_files = ["steam_appid.txt"]
+
+[copies.train]
+path = 'C:\ssbot\game\train'
+# D15: steam_api64.dll renamed to steam_api64.dll.disabled -> "No online subsystems packaged", saves go to the default folder
+steam_detached = "rename steam_api64.dll"
+loader = "BepInEx 5.4.23.4 win_x64"
+loader_zip_sha256 = "f881201b79da03e513bf97cdf39607ffa7f9e0d31a519b1aeeca8eb60f8309e7"
+
+[frozen_settings]
+# Decided during M0 (P8/P12). Not frozen yet.
+fps = "TBD"
+display_mode = "TBD"
+refresh_hz = "TBD"
+language = "ZH"  # 2026-09-29: frozen to Chinese, the user's own setting
+camera_shake = "Off"
+particles = "Low"
+input_backend = "Input System (default)"
+key_bindings = "default keyboard"

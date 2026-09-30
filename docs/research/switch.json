@@ -1,0 +1,129 @@
+{
+ "switch_has_ingame_achievements": "Yes. Nintendo has no platform-level achievements, but on Switch and Switch 2 Silksong has its own Achievements screen on the main menu. It holds the same 52 achievements as Steam, Xbox and PSN, including Steel Soul (\"finish the game in Steel Soul mode\") and Steel Heart (100% and Steel Soul). Some older wiki text calls these in-game \"Feats\"; Nintendo Life calls the menu \"Achievements\". The decompiled PC code agrees: MenuButtonAchievementListCondition.cs shows the in-game list whenever the platform has no native achievements dialog. Only Xbox and the Microsoft Store (GameCoreOnlineSubsystem) report having one. MenuAchievement.cs line 78 also has hidden-achievement text that is used only on Switch (HIDDEN_ACHIEVEMENT_ALT). Unlocks are saved only on the console and are tied to that Switch user profile, so nothing reaches Nintendo, Steam or any public or checkable record. A finished Steel Soul run does leave visible marks in the game. The ending unlocks the \"COMPLETED_STEEL\" menu style (MenuStyleUnlock.cs line 16, when permadeathMode==1). The save slot keeps showing the Steel Soul health frame, the completion % and the ending icons. A run that dies shows a broken steel orb and a \"Defeated\" slot instead.",
+ "findings": [
+  {
+   "claim": "On Switch and Switch 2, Silksong's achievements are kept by the game itself and listed on the main menu, because Nintendo has no achievement system. The list is the same 52 achievements as other platforms, including 'Steel Soul' (finish in Steel Soul mode) and 'Steel Heart' (100% and Steel Soul).",
+   "sources": [
+    "https://www.nintendolife.com/guides/hollow-knight-silksong-all-achievements",
+    "https://hollowknight.wiki/w/Achievements_(Silksong)"
+   ],
+   "confidence": "high"
+  },
+  {
+   "claim": "The decompiled code backs this up. MenuButtonAchievementListCondition.IsFulfilled() shows the in-game Achievements button when !Platform.Current.HasNativeAchievementsDialog. The base Platform class returns false, and only GameCoreOnlineSubsystem (Xbox/MS Store) returns true, so Steam, GOG and Switch all show the in-game list. MenuAchievement.cs line 78 swaps in 'HIDDEN_ACHIEVEMENT_ALT' text when Application.platform == RuntimePlatform.Switch, so hidden achievements stay hidden on Switch with no peek option. Caveat: the repo is the PC launch build 1.0.28324 (Constants.GAME_VERSION), and the Switch-specific Platform class was stripped from it.",
+   "sources": [
+    "https://github.com/ROWANIVERSON-debug/decompiled-silksong/blob/HEAD/Assembly-CSharp/MenuButtonAchievementListCondition.cs",
+    "https://github.com/ROWANIVERSON-debug/decompiled-silksong/blob/HEAD/Assembly-CSharp/MenuAchievement.cs",
+    "https://github.com/ROWANIVERSON-debug/decompiled-silksong/blob/HEAD/Assembly-CSharp/GameCoreOnlineSubsystem.cs",
+    "https://github.com/ROWANIVERSON-debug/decompiled-silksong/blob/HEAD/Assembly-CSharp/Constants.cs"
+   ],
+   "confidence": "high"
+  },
+  {
+   "claim": "A Steel Soul completion leaves visible marks beyond the achievement entry. (1) At the ending, MenuStyleUnlock also calls Unlock(\"COMPLETED_STEEL\") if permadeathMode==1, which saves a Steel Soul menu style in RoamingSharedData. (2) SaveSlotButton draws a surviving Steel Soul save with steelsoulMode:true health, the completion % once Farsight is unlocked, and SaveSlotCompletionIcons for the endings reached (Act2Regular, Act2Cursed, Act2SoulSnare, Act3Ending). (3) A run that dies shows brokenSteelOrb and SlotState.Defeated instead. (4) PermadeathUnlock writes the global status record RecPermadeathMode=1. These are PC-code findings; Switch is assumed to behave the same because the UI code is shared.",
+   "sources": [
+    "https://github.com/ROWANIVERSON-debug/decompiled-silksong/blob/HEAD/Assembly-CSharp/MenuStyleUnlock.cs",
+    "https://github.com/ROWANIVERSON-debug/decompiled-silksong/blob/HEAD/Assembly-CSharp/UnityEngine.UI/SaveSlotButton.cs",
+    "https://github.com/ROWANIVERSON-debug/decompiled-silksong/blob/HEAD/Assembly-CSharp/SaveSlotCompletionIcons.cs",
+    "https://github.com/ROWANIVERSON-debug/decompiled-silksong/blob/HEAD/Assembly-CSharp/PermadeathUnlock.cs"
+   ],
+   "confidence": "medium"
+  },
+  {
+   "claim": "Switch achievement unlocks exist only in the game's local save data for that Switch user. Nintendo accounts have no achievements, and there is no link to Steam, Xbox or PSN. So there is no public, checkable record. The only proof is the in-game list, save-slot and menu-style screen itself, shown in screenshots or captured video.",
+   "sources": [
+    "https://hollowknight.wiki/w/Achievements_(Silksong)",
+    "https://github.com/ROWANIVERSON-debug/decompiled-silksong/blob/HEAD/Assembly-CSharp/AchievementHandler.cs"
+   ],
+   "confidence": "high"
+  },
+  {
+   "claim": "PC version: 1.0.30000 (Patch 5; adds Traditional Chinese, German script updates and a Pale Lake bench) came out on Steam around 16-24 March 2026. At the time it was 'live on PC, coming soon to consoles'. Team Cherry calls it the last significant update before the free Sea of Sorrow expansion. Sources still give Sea of Sorrow only a '2026' date and show no release yet.",
+   "sources": [
+    "https://www.teamcherry.com.au/blog/silksong-patch-5",
+    "https://store.steampowered.com/news/app/1030300/view/528748148995130140",
+    "https://hollowknight.wiki/w/Updates_(Silksong)",
+    "https://nintendoeverything.com/hollow-knight-silksong-update-5-announced-patch-notes/"
+   ],
+   "confidence": "high"
+  },
+  {
+   "claim": "Switch version: community cheat and mod releases from mid-2026 are labelled 'Silksong 1.0.30000 Nintendo Switch' (for example a Switch cheat video dated 08/06/2026, and a GBAtemp Switch mod for v1.0.30000). So the Switch appears to be on the same 1.0.30000 build as PC now. However, I found no official Switch patch-notes article, and the Perfectly Nintendo update tracker still lists 1.0.29242 as latest, which may be out of date. Earlier console builds used their own version numbers (1.0.28716 and 1.0.29354 were console-only). The title screen shows the version number (SetVersionNumber.cs), so read it on the actual console to be sure.",
+   "sources": [
+    "https://www.youtube.com/watch?v=l6NKIFK89N8",
+    "https://gbatemp.net/threads/release-hollow-knight-silksong-v1-0-30000-visual-camera-tweaks-mod-no-blur-no-vignette-no-herolight-jitter-free-zoom.684584/",
+    "https://www.perfectly-nintendo.com/hollow-knight-silksong-switch-switch-2-all-the-updates/",
+    "https://github.com/ROWANIVERSON-debug/decompiled-silksong/blob/HEAD/Assembly-CSharp/SetVersionNumber.cs"
+   ],
+   "confidence": "medium"
+  },
+  {
+   "claim": "Resolution and frame rate: Switch 1 runs 720p at 60fps both docked and handheld. Switch 2 in TV mode runs either 2160p at 60fps or 1080p at 120fps (the 120 mode needs a 120Hz display). Switch 2 handheld defaults to 1080p at 120fps. Load times on Switch 2 are about twice as fast. Short hit-stop freezes are intentional game design, not slowdown.",
+   "sources": [
+    "https://www.gonintendo.com/contents/52518-hollow-knight-silksong-video-compares-the-switch-and-switch-2-version",
+    "https://twistedvoxel.com/hollow-knight-silksong-switch-2-vs-switch-comparison-highlights-huge-gap-in-resolution-and-performance/",
+    "https://www.nintendolife.com/news/2025/08/hollow-knight-silksong-offers-buttery-smooth-performance-on-switch-2",
+    "https://www.gamesradar.com/games/action/hollow-knight-silksongs-nintendo-switch-2-performance-is-staggering-with-a-120hz-tv-mode-that-lets-you-carve-your-way-through-hollownest-like-a-hot-knife-through-butter/"
+   ],
+   "confidence": "high"
+  },
+  {
+   "claim": "Wired USB emulation: the standard approach pretends to be the HORI 'POKKEN CONTROLLER' (VID 0x0F0D, PID 0x0092), which the Switch treats like a Pro Controller. Two established projects: progmem/shinyquagsire23 Switch-Fightstick (LUFA; ATmega32U4/16U2, Teensy 2.0++, Arduino UNO R3/Micro; 5ms endpoint interval), and GP2040-CE on RP2040/Pico (Switch mode uses the same descriptor with bInterval 1 and claims under 1ms firmware latency). A GP2040-CE maintainer reports its Switch mode works natively on Switch 2 with no auth dongle.",
+   "sources": [
+    "https://github.com/progmem/Switch-Fightstick",
+    "https://github.com/OpenStickCommunity/GP2040-CE/blob/main/headers/drivers/switch/SwitchDescriptors.h",
+    "https://gp2040-ce.info/faq/faq-general/",
+    "https://x.com/TheTrain24/status/1930708458514554980"
+   ],
+   "confidence": "high"
+  },
+  {
+   "claim": "How fast the console actually reads a controller matters more than the firmware. Switch 1 polls wired controllers at a steady 125Hz (8ms). Switch 2 switches between 125Hz and 62.5Hz, so the smallest reliable step is 8-16ms. ESP32 wireless emulation needs about 15ms. Pokemon Automation adds that buttons should be held about 40ms for the console to register a press reliably. Some Switch 2 system menus need 48ms, and some overlapping-button tricks from Switch 1 no longer work.",
+   "sources": [
+    "https://raw.githubusercontent.com/PokemonAutomation/pokemonautomation.github.io/main/docs/Programs/NintendoSwitch/Switch2Notes.md",
+    "https://pokemonautomation.github.io/SetupGuide/ControllerGuide.html"
+   ],
+   "confidence": "high"
+  },
+  {
+   "claim": "Ready-made PC-to-microcontroller stacks: Pokemon Automation firmware covers RP2040/RP2350 and Pico W/Pico 2 W over UART as wired controllers, Pico W over USB and ESP32 as wireless Pro Controller/Joy-Con, and ESP32-S3 as a wired Pro Controller. It has an 'NS2 Wired Controller' profile for Switch 2 and has dropped Arduino/Teensy. The main Chinese option is EasyCon (伊机控): a serial protocol to Arduino/STM32/ESP32 boards, OpenCV image recognition, and a Switch 2 remote app (easyworld/switchpad).",
+   "sources": [
+    "https://pokemonautomation.github.io/index.html",
+    "https://pokemonautomation.github.io/SetupGuide/Controllers/Controller-PicoW-USB.html",
+    "https://github.com/EasyConNS/EasyCon",
+    "https://github.com/easyworld/switchpad"
+   ],
+   "confidence": "medium"
+  },
+  {
+   "claim": "Bluetooth emulation options. NXBT (Linux/BlueZ, pretends to be a Pro Controller) has a 120Hz input loop; its web app adds under 8ms lag, and switching out of the 'Change Grip/Order' screen is fragile. A user reported NXBT working on a Switch 2 in September 2025. NUXBT is a maintained fork with a 132Hz loop. joycontrol (Poohl fork) targets 60Hz for the Pro Controller, needed fixes after Switch firmware 12, and runs into shared WiFi/BT bus problems on a Raspberry Pi. Bluetooth adds jitter and a risk of disconnects, which is bad for a permadeath run.",
+   "sources": [
+    "https://github.com/Brikwerk/nxbt",
+    "https://github.com/hannahbee91/nuxbt",
+    "https://github.com/darthcloud/BlueRetro/issues/1309",
+    "https://github.com/Poohl/joycontrol",
+    "https://github.com/Brikwerk/nxbt/issues/18"
+   ],
+   "confidence": "medium"
+  },
+  {
+   "claim": "Capture card latency (UVC). Elgato HD60 X measured about 62.7ms average at 1080p60 and 44.3ms at 1080p120. MS2130-based USB3 cards: about 50ms reported, with other tests at 90-130ms in the OBS preview. Old MS2109 USB2 clones (1080p30 MJPEG only): 170-220ms. Elgato cards can wash out colours on Switch 2: set HDMI Color Range to Bypass and EDID to Display, and turn off Switch 2 TV HDR.",
+   "sources": [
+    "https://www.hyperhdr.eu/2022/07/elgato-game-capture-hd60x-review.html",
+    "https://github.com/awawa-dev/HyperHDR/discussions/729",
+    "https://forum.videohelp.com/threads/407889-MS2130-chipset-the-new-low-budget-Hdmi-capture-card-killer",
+    "https://raw.githubusercontent.com/PokemonAutomation/pokemonautomation.github.io/main/docs/Programs/NintendoSwitch/Switch2Notes.md"
+   ],
+   "confidence": "medium"
+  },
+  {
+   "claim": "Estimated reaction loop, from the figures above (my estimate): capture about 45-65ms, plus the bot's own processing, plus 8-16ms controller polling, plus one game frame (16.7ms on Switch 1 at 60fps, 8.3ms on Switch 2 at 120fps). That comes to roughly 70-110ms from a frame being drawn to the game acting on the bot's input, if a USB3 card and a wired microcontroller are used. That is about 4-7 frames at 60fps, noticeably worse than reading the game state directly on PC.",
+   "sources": [
+    "https://www.hyperhdr.eu/2022/07/elgato-game-capture-hd60x-review.html",
+    "https://raw.githubusercontent.com/PokemonAutomation/pokemonautomation.github.io/main/docs/Programs/NintendoSwitch/Switch2Notes.md"
+   ],
+   "confidence": "low"
+  }
+ ],
+ "recommendation": "A bot-played Switch run can earn the achievements only in a narrow sense. The game records unlocks in its own main-menu Achievements list. A microcontroller posing as a HORI Pokken or Pro Controller looks like any other controller to the console, so bot inputs unlock achievements the same way a human's do. A Steel Soul clear also shows on screen: the Steel Soul and Steel Heart entries, the COMPLETED_STEEL menu style, and a surviving Steel Soul save slot with ending icons and completion %. None of this is platform-level or independently checkable. It lives in the local Switch save with no Nintendo, Steam or PSN record, and hidden entries stay hidden on Switch. For proof, record the whole run plus the final Achievements, save-slot and title-screen version (1.0.30000 expected) as video.\n\nIf the goal is official, visible achievements, use the Steam build instead. It is also far easier, because game state can be read directly with no capture card.\n\nIf Switch is still wanted, the practical setup is:\n- a Switch 2 in docked 1080p120 mode;\n- a USB3 UVC capture card that can do 1080p120, or an MS2130 card at 1080p60, with HDR off and the Elgato colour settings above;\n- an RP2040/Pico running GP2040-CE-style HORI Pokken emulation or Pokemon Automation's wired or NS2-wired firmware, driven from the PC over USB serial or UART.\n\nAvoid Bluetooth (NXBT or joycontrol) for combat because of jitter and disconnects. Allow 16ms or more between input changes, since Switch 2 polls at 62.5-125Hz. Expect about 70-110ms of reaction lag in total."
+}

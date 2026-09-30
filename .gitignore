@@ -1,0 +1,13 @@
+# Game files, decompiled game code and datasets never go in the repo
+/data/
+/runs/
+/models/
+*.dll
+*.pdb
+bin/
+obj/
+.venv/
+__pycache__/
+*.pyc
+.vs/
+.idea/

@@ -1,0 +1,42 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Training-only BepInEx 5 plugin. Never installed into the final game copy. -->
+  <PropertyGroup>
+    <TargetFramework>net472</TargetFramework>
+    <AssemblyName>SsOracle</AssemblyName>
+    <RootNamespace>SsOracle</RootNamespace>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <Deterministic>true</Deterministic>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <GameDir Condition="'$(GameDir)' == ''">C:\ssbot\game\train</GameDir>
+    <Managed>$(GameDir)\Hollow Knight Silksong_Data\Managed</Managed>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="src\**\*.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies.net472" Version="1.0.3" PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="BepInEx" HintPath="$(GameDir)\BepInEx\core\BepInEx.dll" Private="false" />
+    <Reference Include="0Harmony" HintPath="$(GameDir)\BepInEx\core\0Harmony.dll" Private="false" />
+    <Reference Include="Assembly-CSharp" HintPath="$(Managed)\Assembly-CSharp.dll" Private="false" />
+    <Reference Include="Assembly-CSharp-firstpass" HintPath="$(Managed)\Assembly-CSharp-firstpass.dll" Private="false" />
+    <Reference Include="PlayMaker" HintPath="$(Managed)\PlayMaker.dll" Private="false" />
+    <Reference Include="TeamCherry.TK2D" HintPath="$(Managed)\TeamCherry.TK2D.dll" Private="false" />
+    <Reference Include="TeamCherry.SharedUtils" HintPath="$(Managed)\TeamCherry.SharedUtils.dll" Private="false" />
+    <Reference Include="UnityEngine" HintPath="$(Managed)\UnityEngine.dll" Private="false" />
+    <Reference Include="UnityEngine.CoreModule" HintPath="$(Managed)\UnityEngine.CoreModule.dll" Private="false" />
+    <Reference Include="UnityEngine.Physics2DModule" HintPath="$(Managed)\UnityEngine.Physics2DModule.dll" Private="false" />
+    <Reference Include="Unity.InputSystem" HintPath="$(Managed)\Unity.InputSystem.dll" Private="false" />
+    <Reference Include="netstandard" HintPath="$(Managed)\netstandard.dll" Private="false" />
+  </ItemGroup>
+
+  <Target Name="DeployToTrainingCopy" AfterTargets="Build">
+    <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(GameDir)\BepInEx\plugins\SsOracle" />
+  </Target>
+</Project>
