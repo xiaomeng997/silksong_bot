@@ -1,6 +1,9 @@
 # Launch the training copy in a small window without leaving any trace in the user's game settings.
 # Unity writes the launch resolution back to PlayerPrefs (HKCU) on exit, and PlayerPrefs are shared by
 # every copy of the game, so we snapshot the key before launch and restore it exactly after exit.
+# Superseded for training by `python -m ssbot.tools.launcher -n N` (brain/ssbot/tools/launcher.py): per-instance
+# ports/logs/sandboxes, window tiling, and one golden-snapshot restore shared by concurrent launchers. Do not run
+# this script while that launcher has instances up: its per-launch snapshot would capture their settings.
 param(
     [int]$Width = 1280,
     [int]$Height = 720,
