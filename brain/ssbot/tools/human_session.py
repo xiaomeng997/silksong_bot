@@ -3,8 +3,8 @@
     python -m ssbot.tools.human_session            # launches the game, records until the game is closed
 
 The training copy runs with -ssbot-human (the oracle only observes: vanilla keyboard/gamepad/mouse), its own
-sandbox save instance (default 9), fullscreen at 1920x1080 render resolution. When the game exits: ffmpeg is
-stopped, meta.json is written, and the golden PlayerPrefs snapshot is restored — except the gamepad backend keys
+sandbox save instance (default 9), fullscreen at 1920x1080 render resolution. Before launch and when the game
+exits, the golden PlayerPrefs snapshot is applied; on exit ffmpeg is stopped and meta.json written. The gamepad keys
 (NativeInput/XInput/AppleMFi), which the player may have to switch on for their controller and which only affect
 gamepads (m0:C15; the final run uses no gamepad).
 """
@@ -23,8 +23,9 @@ import zstandard
 from ssbot.ipc.oracle_link import OracleLink
 
 GAME = Path(r"C:\ssbot\game\train\Hollow Knight Silksong.exe")
-FFMPEG = Path(r"C:\Users\Meng\AppData\Local\Microsoft\WinGet\Packages\Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe"
-              r"\ffmpeg-9.0.2-full_build\bin\ffmpeg.exe")  # NVENC API 13.1: needs NVIDIA driver >= 610 (617.14 installed)
+# A copy outside AppData (see brain/uv.toml): the winget install may only exist inside the Claude app's package view.
+# ffmpeg 9.0.2: its NVENC API 13.1 needs NVIDIA driver >= 610 (617.14 installed).
+FFMPEG = Path(r"C:\ssbot\tools\ffmpeg\bin\ffmpeg.exe")
 PREFS_KEY = r"HKCU\Software\Team Cherry\Hollow Knight Silksong"
 GOLDEN = Path(r"C:\ssbot\sandbox\prefs\golden.reg")
 KEEP_PREFIXES = ("NativeInput_h", "XInput_h", "AppleMFi_h")
@@ -95,6 +96,9 @@ def main() -> None:
 
     game_args = ["-ssbot-human", "-ssbot-instance", str(args.instance), "-logFile", str(session / "player.log"),
                  "-screen-fullscreen", "1", "-screen-width", "1920", "-screen-height", "1080"]
+    # Start from the frozen settings too, whatever the registry currently holds (the player's own launches, or a
+    # registry view that differs between the Claude app and Explorer).
+    restore_golden(gamepad_keys())
     game = subprocess.Popen([str(GAME), *game_args], cwd=GAME.parent)
     print("game started; waiting for the oracle ...")
 

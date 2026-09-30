@@ -1,0 +1,7 @@
+# Keep uv's cache outside %LOCALAPPDATA%. Processes started from the Claude desktop app (an MSIX package) have their
+# AppData writes redirected into the package's private folder, so anything that must also work when started from
+# Explorer (e.g. scripts/play_human.bat) has to live elsewhere. The managed Python location can only be set through
+# the UV_PYTHON_INSTALL_DIR environment variable: always run uv through scripts/uv.cmd, which sets it to
+# C:\ssbot\tools\uv-python.
+cache-dir = "C:\\ssbot\\tools\\uv-cache"
+python-preference = "only-managed"
