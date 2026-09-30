@@ -318,7 +318,7 @@ def test_launcher_starts_registers_and_restores_on_exit(prefs, tmp_path):
     game = fake_game(tmp_path / "train")
     FakePopen.calls = []
     ln = L.Launcher(game, width=640, height=360, guard=guard, log_dir=tmp_path / "logs", tile=False,
-                    final_dir=tmp_path / "final", popen=FakePopen, log=lambda s: None)
+                    final_dir=tmp_path / "final", popen=FakePopen, log=lambda s: None, listening=lambda port, pid: True)
     with pytest.raises(SystemExit):
         ln.preflight([0, 1])  # boot.config still has single-instance
     ln.preflight([0])
@@ -335,6 +335,28 @@ def test_launcher_starts_registers_and_restores_on_exit(prefs, tmp_path):
         x.proc.returncode = 0
     ln.wait_exit(poll_s=0.01)
     assert store.restores == 1 and all(x.released for x in insts)
+
+
+def test_start_waits_for_each_instance_to_listen_before_the_next(prefs, tmp_path):
+    store, guard, _ = prefs
+    game = fake_game(tmp_path / "train")
+    L.prepare_multi(game, tmp_path / "final")
+    FakePopen.calls = []
+    asked = []
+
+    def listening(port, pid):  # instance 0 listens on its second poll; nothing else is asked before it does
+        asked.append((port, len(FakePopen.calls)))
+        return len(asked) >= 2
+
+    ln = L.Launcher(game, guard=guard, log_dir=tmp_path / "logs", tile=False, final_dir=tmp_path / "final",
+                    popen=FakePopen, log=lambda s: None, listening=listening)
+    insts = ln.start([0, 1])
+    assert [x.index for x in insts] == [0, 1]
+    assert asked == [(L.ipc_port(0), 1), (L.ipc_port(0), 1)]  # polled instance 0 while only it was started
+    assert len(FakePopen.calls) == 2
+    for x in insts:
+        x.proc.returncode = 0
+    ln.wait_exit(poll_s=0.01)
 
 
 def test_preflight_counts_instances_of_other_launchers(prefs, tmp_path):

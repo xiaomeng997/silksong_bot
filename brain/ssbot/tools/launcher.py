@@ -597,7 +597,8 @@ class Launcher:
     def __init__(self, game_dir: Path = TRAIN_DIR, *, width: int = 1280, height: int = 720,
                  guard: PrefsGuard | None = None, log_dir: Path = LOG_DIR, tile: bool = True,
                  extra: tuple[str, ...] = (), final_dir: Path = FINAL_DIR, popen=subprocess.Popen,
-                 log: Callable[[str], None] = print):
+                 log: Callable[[str], None] = print,
+                 listening: Callable[[int, int | None], bool] = port_listening):
         self.game_dir = Path(game_dir)
         self.width, self.height = width, height
         self.guard = guard or PrefsGuard.default()
@@ -607,6 +608,7 @@ class Launcher:
         self.final_dir = Path(final_dir)
         self.popen = popen
         self.log = log
+        self.listening = listening
         self.instances: list[Instance] = []
 
     def preflight(self, indices: list[int]) -> None:
@@ -630,10 +632,18 @@ class Launcher:
         except (FileNotFoundError, RuntimeError) as e:
             self.log(f"[prefs] could not compare with golden: {e}")
 
-    def start(self, indices: list[int]) -> list[Instance]:
+    def start(self, indices: list[int], stagger_timeout_s: float = 120.0) -> list[Instance]:
+        """Start the instances one at a time: each waits until the one before it listens on its IPC port (SsOracle
+        loads after BepInEx and the other plugins). Started together, two BepInEx preloaders race on
+        BepInEx/config/BepInEx.cfg (ConfigFile.Save in the Preloader type initializer); the loser gets a sharing
+        violation and runs without mods, so its oracle never listens (preloader_*.log in the game folder; seen
+        2026-09-30 with 2 instances). A previous instance that does not listen in time is left to wait_ready."""
         self.log_dir.mkdir(parents=True, exist_ok=True)
         exe = self.game_dir / EXE
+        prev: Instance | None = None
         for i in indices:
+            if prev is not None:
+                self._wait_listening(prev, stagger_timeout_s)
             args = build_args(i, self.width, self.height, self.log_dir, self.extra)
             holder: list[subprocess.Popen] = []
 
@@ -646,7 +656,17 @@ class Launcher:
             inst = Instance(i, pid, holder[0], ipc_port(i), self.log_dir / f"player_{i}.log")
             self.instances.append(inst)
             self.log(f"[launch] instance {i}: pid {pid}, port {inst.port}, log {inst.log}")
+            prev = inst
         return list(self.instances)
+
+    def _wait_listening(self, x: Instance, timeout_s: float) -> bool:
+        deadline = time.monotonic() + timeout_s
+        while time.monotonic() < deadline:
+            if x.proc.poll() is not None or self.listening(x.port, x.pid):
+                return True
+            time.sleep(0.2)
+        self.log(f"[launch] instance {x.index} not listening after {timeout_s:.0f} s; starting the next one anyway")
+        return False
 
     def wait_ready(self, timeout_s: float = 180.0) -> None:
         """Tile each window as it appears (re-applied while Unity settles its own position), then wait for every
@@ -676,7 +696,7 @@ class Launcher:
                         move_window(x.hwnd, *x.pos)
                         placed_at[x.index] = time.monotonic()
                 window_done = area is None or x.hwnd or time.monotonic() - x.started > 30
-                if window_done and port_listening(x.port, x.pid):
+                if window_done and self.listening(x.port, x.pid):
                     x.ready_s = time.monotonic() - x.started
                     pending.remove(x)
                     self.log(f"[ready] instance {x.index}: port {x.port} listening after {x.ready_s:.1f} s"
