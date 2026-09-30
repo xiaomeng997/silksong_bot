@@ -24,7 +24,7 @@ from ssbot.ipc.oracle_link import OracleLink
 
 GAME = Path(r"C:\ssbot\game\train\Hollow Knight Silksong.exe")
 FFMPEG = Path(r"C:\Users\Meng\AppData\Local\Microsoft\WinGet\Packages\Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe"
-              r"\ffmpeg-7.1.1-full_build\bin\ffmpeg.exe")  # 7.1.1: newer builds need NVIDIA driver >= 610
+              r"\ffmpeg-9.0.2-full_build\bin\ffmpeg.exe")  # NVENC API 13.1: needs NVIDIA driver >= 610 (617.14 installed)
 PREFS_KEY = r"HKCU\Software\Team Cherry\Hollow Knight Silksong"
 GOLDEN = Path(r"C:\ssbot\sandbox\prefs\golden.reg")
 KEEP_PREFIXES = ("NativeInput_h", "XInput_h", "AppleMFi_h")

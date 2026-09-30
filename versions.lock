@@ -46,3 +46,8 @@ golden_prefs_sha256 = "fc41b9c5427b4e23ec60af1f16808a6b497507eded5704b90c9224b05
 # DebugMod panels hidden by default (DebugModData/Settings.json; F2 toggles)
 input_backend = "Input System (default)"
 key_bindings = "default keyboard"
+
+[environment]
+nvidia_driver = "617.14"   # updated 2026-09-30 (was 591.86); P8 latency was measured on 591.86
+ffmpeg = "9.0.2 (Gyan full build, winget)"   # NVENC API 13.1 needs driver >= 610
+bios = "ASUS TUF GAMING Z790-PLUS WIFI 1836, microcode 0x133"
