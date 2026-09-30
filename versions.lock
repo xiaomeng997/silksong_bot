@@ -37,7 +37,12 @@ fps = 60
 display_mode = "1920x1080 windowed on the 4K desktop, game VSync on, DWM-composed"
 refresh_hz = 60
 language = "ZH"  # 2026-09-29: frozen to Chinese, the user's own setting
-camera_shake = "Off"
-particles = "Low"
+camera_shake = "Off"      # CameraShakeSetting = 2
+particles = "Low"         # VidParticles = 0
+native_achievement_popups = "Off"  # GameNativePopups = 0 (in-game popup overlay)
+# Golden PlayerPrefs snapshot (HKCU\Software\Team Cherry\Hollow Knight Silksong), restored after every training session
+golden_prefs = 'C:\ssbot\sandbox\prefs\golden.reg'
+golden_prefs_sha256 = "fc41b9c5427b4e23ec60af1f16808a6b497507eded5704b90c9224b056ea0469"
+# DebugMod panels hidden by default (DebugModData/Settings.json; F2 toggles)
 input_backend = "Input System (default)"
 key_bindings = "default keyboard"
