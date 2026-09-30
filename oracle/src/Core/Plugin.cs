@@ -37,6 +37,7 @@ namespace SsOracle.Core
             var harmony = new Harmony(Guid);
             TrainingEnvironment.Install(gameObject, harmony);
             Input.KeyboardInjector.Install();
+            gameObject.AddComponent<MainThread>();
             gameObject.AddComponent<Export.StateProbe>();
             server = new Ipc.Server(Ipc.Server.DefaultPort);
             server.Start();

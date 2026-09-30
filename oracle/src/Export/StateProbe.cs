@@ -82,6 +82,7 @@ namespace SsOracle.Export
                 sb.Append(",\"savedPlayTime\":").Append(pd.playTime.ToString("F3", inv));
                 sb.Append(",\"disablePause\":").Append(pd.disablePause ? "true" : "false");
                 sb.Append(",\"disableSaveQuit\":").Append(pd.disableSaveQuit ? "true" : "false");
+                sb.Append(",\"inventoryOpen\":").Append(pd.isInventoryOpen ? "true" : "false");
             }
 
             var hero = HeroController.SilentInstance;

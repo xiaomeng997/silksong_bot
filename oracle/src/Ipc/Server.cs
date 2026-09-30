@@ -12,6 +12,7 @@ namespace SsOracle.Ipc
     ///   keys [k1,k2,...]   hold exactly these keys from the next frame on (no argument = release all)
     ///   own on|off         whether injected keys replace the physical keyboard
     ///   state              latest per-frame snapshot (JSON)
+    ///   constants          engine timing settings + every primitive HeroController field (P11)
     /// Every command gets one reply line: "ok", "err ...", or the JSON.
     /// </summary>
     internal sealed class Server
@@ -94,6 +95,8 @@ namespace SsOracle.Ipc
                     return "ok";
                 case "state":
                     return Export.StateProbe.Latest ?? "{}";
+                case "constants":
+                    return Core.MainThread.Run(Export.ConstantsDump.Build);
                 default:
                     return "err unknown command";
             }

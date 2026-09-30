@@ -59,7 +59,33 @@
 | 保存并退出 | 确认的那一刻把会话时间写入 `playerData.playTime`（447.464 → 470.497，正好等于暂停时的 PlayTime）；之后约 3 s 保持 PAUSED、timeScale=0，然后进入 MAIN_MENU |
 | 失焦 | 原版序列化设置 `runInBackground=True`，失焦后继续模拟、继续计时（见上表）。训练副本同样以 60 fps 运行 |
 
-仍未测：背包、Quick Map、Bellway 乘车、房间切换、片尾。
+| 背包（I） | `isInventoryOpen=true`，PlayTime/墙钟 = **0.000**，关闭后恢复 |
+| 快速地图（按住 Tab） | PlayTime/墙钟 = **0.998**，照常计时（该存档可能尚无地图，界面内容未核对） |
+| 房间切换（骸底镇 → Tut_01） | 墙钟 8.51 s，PlayTime 8.52 s：切换全程计时 |
+
+仍未测：Bellway 乘车、片尾。脚本：`brain/ssbot/probes/p6_p11.py`，逐帧轨迹写入 `C:\ssbot\sandbox\p6_trace.csv`。
+
+## P11 序列化常量 — 通过（HeroController 预制体值）
+
+完整导出：[`hero_constants.json`](hero_constants.json)，由 SsOracle 的 `constants` 命令生成，内容为 HeroController 上所有基本类型字段加引擎设置。
+
+| 常量 | 实际值 | 设计原估计 |
+|---|---|---|
+| `Time.fixedDeltaTime` | 0.02（50 Hz 物理） | 0.02 ✓ |
+| `INVUL_TIME` | 1.0 s | 约 1.0 s ✓ |
+| `INVUL_TIME_PARRY` | **0.15 s** | 0.25 s ✗ |
+| `INVUL_TIME_CROSS_STITCH` / `SILKDASH` / `QUAKE` | 0.35 / 0.5 / 0.4 s | — |
+| `DOWNSPIKE_INVULNERABILITY_STEPS` / `_LONG` | **8 / 16 步**（0.16 / 0.32 s） | 2 / 10 步 ✗ |
+| `DASH_TIME` / `DASH_COOLDOWN` / `DASH_SPEED` | 0.1 s / 0.425 s / 28 | — |
+| `RUN_SPEED` / `WALK_SPEED` | 8.25 / 5 | — |
+| `JUMP_SPEED` / `JUMP_STEPS` / `JUMP_STEPS_MIN` | 18.6 / 8 / 2 | — |
+| 预输入窗口（物理步） | 跳 2、二段跳 10、攻击 8、冲刺 **10**、工具 5、飞针 8 | 冲刺原为"未知" |
+| `DAMAGE_FREEZE_DOWN/WAIT/UP` | 0 / 0.1 / 0.1 | 设计表格 HeroDamage 0.01/0.28/0.10（来自 FreezeMoment，二者不是同一个东西，待核） |
+| `RECOIL_HOR_VELOCITY` / `_LONG` / `RECOIL_DURATION` | 3.75 / 16 / 0.2 s | — |
+
+引擎设置：`vSyncCount=1`、`targetFrameRate=-1`，即**帧率等于显示器刷新率**。电视切到 120 Hz，游戏就会跑 120 帧。设计要求固定 60 fps，所以：要么保持 60 Hz，要么在游戏选项里找到帧率上限（P8/P12 核实）。InControl `updateMode=Default`（每渲染帧更新一次），`defaultButtonPressPoint=0.5`。
+
+注意：这些是读档后、坐椅子状态下的实例值，纹章、工具、状态效果可能在运行时改动其中一部分。M1 起按事件逐帧导出。
 
 ## P7 暂停与退出（部分）
 
