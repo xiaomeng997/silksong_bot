@@ -526,9 +526,9 @@ def test_scale_by_speed_reports_two_layer_parallax(two_layer, clean):
     assert all(abs(v[2] - 1.0) < 0.02 for v in clean[1].scale_by_speed.values()) and clean[1].primary.split_at == []
 
 
-@pytest.mark.xfail(strict=True, reason="two parallax layers of comparable weight: the registration scale depends on "
-                   "the camera speed and aligned captures SPLIT, which counts against the share (align.py docstring, "
-                   "DESIGN 3.1.4); not tuned on synthetic data, the next step is the first in-game recordings")
+@pytest.mark.xfail(strict=True, reason="parallax background layers: the registration scale depends on the camera "
+                   "speed, so aligned captures come out MIXED or SPLIT (align.py docstring, DESIGN 3.1.4); the monitor "
+                   "only flags sessions until it is tuned on the first in-game recordings scored against the marker")
 def test_two_layer_parallax_aligned_recording_passes(two_layer):
     """The verifier's repro. Every capture is at offset 0, but one scale a per window cannot absorb a scale that
     changes with the speed: the neighbours on the two sides of speed changes disagree, and the recording FAILs at

@@ -86,8 +86,11 @@ correlation peaks merge at some speeds and part at others. Synthetic, the bottom
 at 0.5, no figure (seed 1): median 0.56 / 0.74 / 0.68 of the near layer's motion at 0.5-1 / 1-2 / 2-4 thumbnail px
 per capture; the near layer on the bottom 35 %, with the figure: 0.63 / 0.54 at 1-2 / 2-4. Such windows are not
 consistent (mixed) and the neighbours on the two sides of a speed change disagree (split), so aligned recordings of
-such rooms FAIL (tests/test_align.py::test_two_layer_parallax_aligned_recording_passes, xfail). That errs on the safe
-side, and it is not tuned on synthetic data: the first in-game run with the marker scores the monitor's verdicts
+such rooms FAIL (tests/test_align.py::test_two_layer_parallax_aligned_recording_passes, xfail). The reach is wider than
+"comparable weight": a far layer at parallax 0.9 on the top half, or at 0.5 on only the top 30 %, leaves aligned
+recordings at 0.09-0.14 with 85-92 % of the judgeable captures mixed. Until the monitor is tuned, its FAIL therefore
+flags a session (DESIGN §3.1.4) instead of discarding it; the gate is the frame marker (ssbot.record.marker). It is not
+tuned on synthetic data: the first in-game run with the marker scores the monitor's verdicts
 against the truth (ssbot.record.marker.score_monitor) and records the registration scale against the camera speed
 (AlignReport.scale_by_speed) and where the splits fall (ClockResult.split_at; the probe also keeps the per-capture
 arrays), and the next step is to tune on those recordings.

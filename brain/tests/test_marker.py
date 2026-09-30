@@ -275,3 +275,27 @@ def test_marker_is_masked_for_the_monitor_and_the_cli(tmp_path, capsys):
     saved = json.loads((ep.path / "marker.json").read_text("utf-8"))
     assert saved["ok"] is True and saved["verdicts"] == {"frame": "PASS", "arrival": "PASS"}
     assert saved["monitor"]["false_aligned"] == 0 and saved["primary"]["hist"] == {"0": saved["primary"]["decoded"]}
+
+
+def test_gate_sample_size_counts_only_captures_judged_against_the_marker():
+    # The marker drawn in only 100 frames: 2899 captures are left out as marker_off, so the sample is 100, not 2999.
+    rep, _ = mk.exact(_stream(n=3000, off=set(range(1100, 4000)))[0])
+    g = rep.primary
+    assert g.verdict == "INCONCLUSIVE" and not g.ok
+    assert g.decoded + g.missing < 1000 and "judged against the marker" in g.reason
+
+
+def test_marker_going_off_during_the_run_is_inconclusive_or_noted():
+    # Off around 15 % of the captures: the gate did not see the whole recording.
+    rep, _ = mk.exact(_stream(n=3000, off=set(range(3550, 4000)))[0])
+    assert rep.primary.verdict == "INCONCLUSIVE" and "went off during the run" in rep.primary.reason
+    # Off around 5 %: still judged on the rest, with a note.
+    rep, _ = mk.exact(_stream(n=3000, off=set(range(3850, 4000)))[0])
+    assert rep.primary.verdict == "PASS" and "not judged" in rep.primary.reason
+
+
+def test_undecodable_marker_next_to_a_dropped_state_counts_against_the_share():
+    tr = _stream(n=3000, hidden=set(range(500, 2500, 7)), drop_states=set(range(503, 2503, 7)))[0]
+    rep, _ = mk.exact(tr)
+    g = rep.primary
+    assert g.missing >= 280 and g.excluded["marker_off"] < 10

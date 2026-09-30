@@ -435,9 +435,20 @@ def exact_clock(tr: Truth, clock: str, *, D: int | None = None, max_offset: int 
     gap = labelled & ~((nxt < len(row_of)) & (row_of[np.clip(nxt, 0, len(row_of) - 1)] >= 0))
     counted = labelled & ~gap
     decoded = counted & (g >= 0)
-    # A missing marker counts against the share only where it was drawn in every frame the capture could show.
+    # A missing marker counts against the share only where it was drawn in every frame the capture could show. A frame
+    # whose STATE was dropped counts as drawn when the nearest STATEs before and after it were drawn: an undecodable
+    # marker next to a dropped STATE must not leave the share.
+    drawn_rel = np.zeros(len(row_of), bool)
+    drawn_rel[tr.f - tr.f[0]] = tr.drawn
+    known = row_of >= 0
+    if not known.all():
+        idx = np.arange(len(row_of))
+        prev = np.maximum.accumulate(np.where(known, idx, -1))
+        nxt_known = np.minimum.accumulate(np.where(known, idx, len(row_of))[::-1])[::-1]
+        both = ~known & (prev >= 0) & (nxt_known < len(row_of))
+        drawn_rel[both] = drawn_rel[prev[both]] & drawn_rel[np.clip(nxt_known[both], 0, len(row_of) - 1)]
     drawn = np.zeros(len(row_of) + 2 * max_offset + 2, bool)
-    drawn[tr.f - tr.f[0] + max_offset + 1] = tr.drawn
+    drawn[max_offset + 1:max_offset + 1 + len(row_of)] = drawn_rel
     near = np.ones(N, bool)
     for k in range(-max_offset, max_offset + 1):
         near &= drawn[np.clip(tr.f[Lc] - tr.f[0] + k + max_offset + 1, 0, len(drawn) - 1)]
@@ -461,11 +472,20 @@ def exact_clock(tr: Truth, clock: str, *, D: int | None = None, max_offset: int 
     res.first_nonzero = [[int(i), int(tr.seq[i]), int(tr.f[Lc[i]]), int(k[i])] for i in bad[:10]]
     judged = res.decoded + res.missing
     res.share = res.zero / judged if judged else None
-    if res.counted < min_captures:
+    marker_off = res.excluded["marker_off"]
+    # The sample is what the share is computed over (decoded + missing), not every labelled capture: captures whose
+    # marker was never drawn around their label are left out of the share, so they cannot count towards its size.
+    if judged < min_captures:
         res.verdict = "INCONCLUSIVE"
-        res.reason = f"only {res.counted} counted captures (< {min_captures})"
+        res.reason = f"only {judged} captures judged against the marker (< {min_captures}; {marker_off} without a marker)"
+    elif marker_off > 0.10 * res.counted:
+        res.verdict = "INCONCLUSIVE"
+        res.reason = (f"the marker was off around {marker_off} of {res.counted} captures (> 10 %): it went off during the "
+                      f"run, so the gate did not see the whole recording")
     elif res.share is not None and res.share >= threshold:
         res.verdict, res.ok = "PASS", True
+        if marker_off > 0.01 * res.counted:
+            res.reason = f"note: the marker was off around {marker_off} of {res.counted} captures; those are not judged"
     else:
         res.reason = f"{res.decoded - res.zero} decoded captures off their label, {res.missing} missing markers"
     return res, arrays

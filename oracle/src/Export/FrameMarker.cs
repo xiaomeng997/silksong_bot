@@ -45,6 +45,7 @@ namespace SsOracle.Export
         private static int cell;
         private static int rx0, ry0, rx1, ry1;   // client px of the last drawn marker
         private static long drawnFrame = -1;
+        private static int ownerGeneration = -1;  // FramedServer.Generation of the brain that turned the marker on
         private static long costTicks;
 
         private readonly bool[] white = new bool[MarkerCode.GridW * MarkerCode.GridH];
@@ -81,7 +82,9 @@ namespace SsOracle.Export
             var t0 = Stopwatch.GetTimestamp();
             GUI.depth = GuiDepth;
             var server = Ipc.FramedServer.Instance;
-            if (server == null || !server.Connected)
+            // The connection that turned it on must still be the current one: another brain queued on the port gets
+            // connected within a frame of the old one closing, so Connected alone would hand it the marker.
+            if (server == null || !server.Connected || server.Generation != ownerGeneration)
             {
                 SetOff("brain disconnected");
                 return;
@@ -159,6 +162,7 @@ namespace SsOracle.Export
             cell = size > 0 ? size : MarkerCode.DefaultCell(Screen.height);
             var was = on;
             on = true;
+            ownerGeneration = Ipc.FramedServer.Instance != null ? Ipc.FramedServer.Instance.Generation : -1;
             instance.enabled = true;
             if (!was)
             {
