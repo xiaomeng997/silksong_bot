@@ -37,7 +37,12 @@
     <Reference Include="netstandard" HintPath="$(Managed)\netstandard.dll" Private="false" />
   </ItemGroup>
 
-  <Target Name="DeployToTrainingCopy" AfterTargets="Build" Condition="'$(Deploy)' != 'false'">
+  <!-- C:\ssbot\sandbox\NO_DEPLOY blocks deployment (a soak or another long run is using the training copy; replacing
+       the plugin under it would also count as a write outside the sandbox). -->
+  <Target Name="DeployToTrainingCopy" AfterTargets="Build" Condition="'$(Deploy)' != 'false' And !Exists('C:\ssbot\sandbox\NO_DEPLOY')">
     <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(GameDir)\BepInEx\plugins\SsOracle" />
+  </Target>
+  <Target Name="DeployBlocked" AfterTargets="Build" Condition="'$(Deploy)' != 'false' And Exists('C:\ssbot\sandbox\NO_DEPLOY')">
+    <Warning Text="Not deployed: C:\ssbot\sandbox\NO_DEPLOY exists (a long run is using the training copy)." />
   </Target>
 </Project>
