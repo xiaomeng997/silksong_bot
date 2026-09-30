@@ -246,7 +246,7 @@ def check_move(link: OracleLink) -> None:
         moved = dx * sign > 0.5
         check(f"{button}: vel.x follows the motion", best_v > 0.5 if moved else True,
               f"max vel.x*sign {best_v:.2f}, dx {dx:+.2f}")
-        check(f"{button}: moved", moved, f"dx {dx:+.2f} (blocked by a wall?)", warn_only=True)
+        check(f"{button}: moved", moved, f"dx {dx:+.2f}" + ("" if moved else " (blocked by a wall?)"), warn_only=True)
 
 
 def main() -> int:
