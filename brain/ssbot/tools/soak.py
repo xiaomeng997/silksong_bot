@@ -2,6 +2,7 @@
 
     python -m ssbot.tools.soak --instances 4 --hours 12          # the M1 exit run
     python -m ssbot.tools.soak --instances 2 --minutes 4         # smoke test
+    python -m ssbot.tools.soak --instances 2 --minutes 10 --abilities all   # full-ability mode (below)
     (create <out>/STOP to end a run early; the report is still written)
 
 Supervisor (this process): refuses while any game process runs; verifies golden PlayerPrefs; drops single-instance
@@ -23,6 +24,27 @@ silence of HANG_S seconds while the link is open is a hang (exit 3); a closed li
 get back into gameplay are exit 5. The supervisor treats 3 and 5 as a hung game (kill + relaunch) and 4 as a crash.
 
 Nothing here connects to an instance other than its own worker: IPC v1 serves one brain per instance.
+
+Full-ability mode (--abilities movement|combat|all; the early sandbox save has none of these): after entering gameplay
+and BEFORE its savestate, each worker turns save suppression on (guards.set), calls the oracle's training-only
+abilities.grant (oracle/src/Train/AbilityGrant.cs), waits until STATE shows the grant (hero.can dash / harpoon /
+super_jump for movement, the equipped skill and tool in hero.tools for combat) and logs one "abilities" line; the
+savestate then carries the grant, so every reset keeps it. movement = Swift Step (dash, sprint), Cling Grip, Drifter's
+Cloak, Faydown Cloak, Clawline, Silk Soar; combat = Needle Strike, all six silk skills (one equipped: SKILL_ROTATION by
+instance, or --ability-skill) and a thrown tool (TOOL_ROTATION by instance, or --ability-tools); all = both + Needolin.
+The policy adds (ability_keys): dash more often, sometimes held (sprint); jump sometimes held long (double jump, then
+glide); clawline (S), never together with down (S with only down held is Silk Soar, m0:N41); a Silk Soar macro (down,
+then S; left/right released); attack sometimes held 100-150 frames (Needle Strike); quickcast (F) without a direction
+for the Neutral-bound skill or tool; a down + quickcast macro when a tool is bound to Down. Still never up, pause,
+inventory, map, quick map, journal, quests, the tools pane, Enter, the pane keys, Needolin or taunt.
+Risks of these keys: silk skills cost 4 silk and randomize_start draws 0-9, so some casts fail (a HUD flash, nothing
+else); tools have limited uses and run out within an episode (the reset refills them; an empty tool just fails);
+Clawline and Silk Soar carry Hornet much further, often into the next room (more cross-scene resets, which take
+longer); Needle Strike, Clawline and the skills break more of the room (the savestate restores it); a failed grant does
+not stop the soak but fails its "abilities" check. Save suppression keeps the grant out of the sandbox slot files every
+soak starts from. Without --abilities nothing of this runs and the policy draws exactly the same numbers as before.
+Evidence per episode (ability mode only): presses started per key and macro, frames per ability cState flag (dashing,
+isSprinting, doubleJumping, floating, wallSliding ...), hero animation clips and Spell Control states, tool amounts.
 """
 import argparse
 import ctypes
@@ -40,6 +62,7 @@ import time
 import traceback
 from collections import Counter
 from ctypes import wintypes
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -92,31 +115,137 @@ class JsonLog:
 # Worker
 # =====================================================================================================================
 
-BIT = {name: mask(name) for name in ("left", "right", "jump", "attack", "dash", "down", "bind")}
+BIT = {name: mask(name) for name in ("left", "right", "jump", "attack", "dash", "down", "bind", "clawline", "quickcast")}
+
+Holds = tuple[tuple[float, int, int], ...]
+# Press patterns: key -> (start probability per idle frame, hold options). A hold option is (weight, min, max): the key
+# stays down for 1 + randint(min, max) frames, then rests 3 frames. With one option no weight is drawn, so the default
+# patterns draw exactly the numbers they always did (the default soak is unchanged).
+DEFAULT_KEYS: dict[str, tuple[float, Holds]] = {
+    "jump": (0.05, ((1.0, 2, 24),)), "attack": (0.06, ((1.0, 2, 4),)), "dash": (0.012, ((1.0, 2, 4),)),
+    "down": (0.01, ((1.0, 10, 40),)), "bind": (0.0015, ((1.0, 2, 4),)),
+}
+ABILITY_MODES = ("movement", "combat", "all")
+# Silk skills (ToolItem name -> in-game name) and simple thrown tools; ability workers take one of each by instance, so
+# a 4-instance soak covers four of each. Tools left out: Rosary Cannon (spends rosaries), Pimpilo (its blast), and the
+# ones with custom actions, buffs, silk costs or summons (Screw Attack, Conch Drill, Silk Snare, Flintstone, Flea Brew,
+# Lifeblood Syringe, Extractor, Lightning Rod, Cogwork Flier, WebShot).
+SKILLS = {"Silk Spear": "Silkspear", "Thread Sphere": "Thread Storm", "Parry": "Cross Stitch",
+          "Silk Charge": "Sharpdart", "Silk Bomb": "Rune Rage", "Silk Boss Needle": "Pale Nails"}
+SKILL_ROTATION = tuple(SKILLS)
+TOOL_ROTATION = ("Straight Pin", "Tri Pin", "Sting Shard", "Curve Claws", "Tack", "Shakra Ring")
+# Never started while down is held, and down never starts under them: S with only down held is Silk Soar, not Clawline
+# (m0:N41), and QuickCast with down throws the Down-bound tool. Their down variants are macros.
+NOT_WITH_DOWN = ("clawline", "quickcast")
+# Keys no policy presses: up (NPC dialogue, benches, doors), pause, the inventory / map / journal / quests / tools
+# screens and quick map, the menu keys (Enter, pane switches), Needolin (NPCs answer it, some objects start scripted
+# sequences) and taunt.
+FORBIDDEN_KEYS = ("up", "pause", "inventory", "map", "quickmap", "journal", "quests", "tools", "enter", "paneleft",
+                  "paneright", "needolin", "taunt")
+# hero.can flags a movement grant must turn true (the others do not depend on a grant: CanThrowTool(false), CanCast).
+MOVEMENT_CAN = ("dash", "harpoon", "super_jump")
+
+
+@dataclass(frozen=True)
+class Macro:
+    """A fixed press sequence, one mask per frame. Starts only when no key is held and the movement run has lasted two
+    frames; left/right stay released for its length and a new run starts after it. Its keys rest 3 frames afterwards."""
+    name: str
+    p: float
+    frames: tuple[int, ...]
+
+    @property
+    def keys(self) -> tuple[str, ...]:
+        m = 0
+        for f in self.frames:
+            m |= f
+        return tuple(k for k, b in BIT.items() if m & b)
+
+
+_DOWN, _CLAW, _CAST = BIT["down"], BIT["clawline"], BIT["quickcast"]
+SILK_SOAR = Macro("silk_soar", 0.002, (_DOWN, _DOWN, _DOWN | _CLAW, _DOWN | _CLAW, _DOWN | _CLAW, _DOWN))
+DOWN_CAST = Macro("down_cast", 0.004, (_DOWN, _DOWN, _DOWN | _CAST, _DOWN | _CAST, _DOWN | _CAST, _DOWN))
+
+
+def ability_keys(mode: str | None, bindings: dict | None = None) -> tuple[dict[str, tuple[float, Holds]], tuple[Macro, ...]]:
+    """Press patterns and macros of an ability mode (None: the default soak). bindings: abilities.grant's "bindings"
+    (what QuickCast throws per held direction); QuickCast is only pressed for a direction that throws something.
+      movement: dash more often, 30 % of presses held 15-90 frames (sprint); 15 % of jumps held 30-80 frames (the double
+                jump, then the glide, which lasts while jump is held); clawline 2-6 frames; the Silk Soar macro.
+      combat:   5 % of attacks held 100-150 frames (Needle Strike charges for 0.3 + 1.35 s and strikes on release);
+                quickcast 2-4 frames with no direction (the Neutral-bound skill or tool); the down + quickcast macro when
+                a tool is bound to Down.
+      all:      both."""
+    keys = dict(DEFAULT_KEYS)
+    if mode is None:
+        return keys, ()
+    if mode not in ABILITY_MODES:
+        raise ValueError(f"ability mode must be one of {ABILITY_MODES}, not {mode!r}")
+    macros: list[Macro] = []
+    if mode in ("movement", "all"):
+        keys["jump"] = (0.05, ((0.85, 2, 24), (0.15, 30, 80)))
+        keys["dash"] = (0.02, ((0.7, 2, 4), (0.3, 15, 90)))
+        keys["clawline"] = (0.008, ((1.0, 2, 6),))
+        macros.append(SILK_SOAR)
+    if mode in ("combat", "all"):
+        keys["attack"] = (0.06, ((0.95, 2, 4), (0.05, 100, 150)))
+        b = bindings or {}
+        if b.get("neutral"):
+            keys["quickcast"] = (0.01, ((1.0, 2, 4),))
+        if b.get("down"):
+            macros.append(DOWN_CAST)
+    return keys, tuple(macros)
 
 
 class Policy:
     """Random play with some persistence: runs of movement, presses of varied length with releases in between (the
     oracle's minimum press/release is 2 frames), occasional down (down-attacks in the air). Never up (NPC dialogue,
-    benches, doors), pause, inventory, map or tools."""
+    benches, doors), pause, inventory, map or tools (FORBIDDEN_KEYS). keys / macros: ability_keys (default: the
+    DEFAULT_KEYS patterns, no macros). counts: presses started per key and macro; macro: name of the macro that made
+    the last mask (None otherwise)."""
 
-    def __init__(self, rng: random.Random):
+    def __init__(self, rng: random.Random, keys: dict | None = None, macros: tuple[Macro, ...] = ()):
         self.r = rng
+        self.keys = DEFAULT_KEYS if keys is None else keys
+        self.macros = tuple(macros)
         self.move: str | None = None
         self.move_left = 0
-        self.timers = {"jump": 0, "attack": 0, "dash": 0, "down": 0, "bind": 0}
-        self.rest = {k: 0 for k in self.timers}
+        self.move_run = 0
+        self.timers = {k: 0 for k in self.keys}
+        self.rest = {k: 0 for k in self.keys}
+        self.macro_only = sorted({k for mac in self.macros for k in mac.keys} - set(self.keys))
+        for k in self.macro_only:
+            self.rest[k] = 0
+        self.script: list[int] = []
+        self.script_keys: tuple[str, ...] = ()
+        self.macro: str | None = None
+        self.counts: Counter = Counter()
 
     def step(self) -> int:
         r = self.r
+        if (not self.script and self.macros and not any(self.timers.values())
+                and (self.move is None or self.move_run >= 2)):
+            for mac in self.macros:
+                if all(self.rest[k] == 0 for k in mac.keys) and r.random() < mac.p:
+                    self.script, self.script_keys, self.macro = list(mac.frames), mac.keys, mac.name
+                    self.counts[mac.name] += 1
+                    self.move_left = 0
+                    break
+        if self.script:
+            m = self.script.pop(0)
+            if not self.script:
+                for k in self.script_keys:
+                    self.rest[k] = 3
+            return m
+        self.macro = None
         if self.move_left <= 0:
             self.move = r.choices(("left", "right", None), (0.42, 0.42, 0.16))[0]
             self.move_left = r.randint(8, 100)
+            self.move_run = 0
         self.move_left -= 1
-        starts = {"jump": (0.05, 2, 24), "attack": (0.06, 2, 4), "dash": (0.012, 2, 4), "down": (0.01, 10, 40),
-                  "bind": (0.0015, 2, 4)}
+        self.move_run += 1
         m = BIT[self.move] if self.move else 0
-        for k, (p, lo, hi) in starts.items():
+        for k, (p, holds) in self.keys.items():
             if self.timers[k] > 0:
                 self.timers[k] -= 1
                 m |= BIT[k]
@@ -124,14 +253,75 @@ class Policy:
                     self.rest[k] = 3
             elif self.rest[k] > 0:
                 self.rest[k] -= 1
-            elif r.random() < p:
-                self.timers[k] = r.randint(lo, hi)
+            elif not self._blocked(k, m) and r.random() < p:
+                self.timers[k] = self._hold(holds)
+                self.counts[k] += 1
                 m |= BIT[k]
+        for k in self.macro_only:
+            if self.rest[k] > 0:
+                self.rest[k] -= 1
         return m
+
+    def _blocked(self, k: str, m: int) -> bool:
+        """NOT_WITH_DOWN keys never start while down is held (down comes first in the key order, so m has it), and down
+        never starts under them. No draw is skipped for the default keys."""
+        if k == "down":
+            return any(self.timers.get(x, 0) for x in NOT_WITH_DOWN)
+        return k in NOT_WITH_DOWN and bool(m & BIT["down"])
+
+    def _hold(self, holds: Holds) -> int:
+        if len(holds) == 1:
+            return self.r.randint(holds[0][1], holds[0][2])
+        _, lo, hi = self.r.choices(holds, [h[0] for h in holds])[0]
+        return self.r.randint(lo, hi)
+
+
+def ability_request(mode: str, instance: int, tools: str | None = None, skill: str | None = None) -> dict:
+    """abilities.grant arguments for worker `instance`. movement grants the flags only; combat and all add one silk
+    skill to equip and the thrown tools (comma-separated names; "" = none), by default one of each per instance
+    (SKILL_ROTATION, TOOL_ROTATION), with unlock_slots: a crest whose only unlocked Red slot is bound to Up (never
+    pressed) may then use its locked one, unlocked as a Memory Locket would."""
+    if mode not in ABILITY_MODES:
+        raise ValueError(f"ability mode must be one of {ABILITY_MODES}, not {mode!r}")
+    req: dict = {"set": mode}
+    if mode == "movement":
+        return req
+    req["skill"] = skill or SKILL_ROTATION[instance % len(SKILL_ROTATION)]
+    req["tools"] = ([t.strip() for t in tools.split(",") if t.strip()] if tools is not None
+                    else [TOOL_ROTATION[instance % len(TOOL_ROTATION)]])
+    req["unlock_slots"] = True
+    return req
+
+
+def expected_can(mode: str) -> tuple[str, ...]:
+    """hero.can flags STATE must show as true after a grant of `mode`."""
+    return MOVEMENT_CAN if mode in ("movement", "all") else ()
+
+
+def granted_equips(res: dict) -> list[str]:
+    """Names from an abilities.grant reply's "requested" (skill, then tools) that sit in a slot of the current crest."""
+    in_slots = {s.get("tool") for s in res.get("slots") or () if s.get("tool")}
+    return [n for n in res.get("requested") or () if n in in_slots]
+
+
+def ability_gaps(s: dict | None, want_can: tuple[str, ...], want_tools: list[str]) -> list[str]:
+    """What a STATE does not show yet of a grant: hero.can flags that are not true, equipped names absent from
+    hero.tools. Empty = verified."""
+    hero = (s or {}).get("hero") or {}
+    can = hero.get("can") or {}
+    have = {t for t in hero.get("tools") or () if t}
+    return [f"can.{k}" for k in want_can if can.get(k) is not True] + [f"tool {t}" for t in want_tools if t not in have]
+
+
+# cState flags that show a granted ability in use (ability mode evidence; names from schema.cstate).
+EVIDENCE_CSTATE = ("dashing", "airDashing", "isSprinting", "doubleJumping", "floating", "wallSliding", "wallClinging",
+                   "wallJumping", "nailCharging", "isToolThrowing")
 
 
 class FrameStats:
-    """Per-frame counters from the raw STATE stream (reader thread). take() returns and resets the window."""
+    """Per-frame counters from the raw STATE stream (reader thread). take() returns and resets the window. After
+    track_abilities (ability mode only) the window also counts EVIDENCE_CSTATE flags, hero animation clips and Spell
+    Control states."""
 
     def __init__(self):
         self._lock = threading.Lock()
@@ -139,7 +329,13 @@ class FrameStats:
         self.last_rx = time.monotonic()
         self.total_frames = 0
         self.total_gaps = 0
+        self.ability_bits: dict[str, int] | None = None
         self._reset()
+
+    def track_abilities(self, cstate_names: list[str]) -> None:
+        """cstate_names: schema.cstate "bools" (the bit order of hero.cstate)."""
+        with self._lock:
+            self.ability_bits = {n: i for i, n in enumerate(cstate_names) if n in EVIDENCE_CSTATE}
 
     def _reset(self) -> None:
         self.frames = 0
@@ -155,6 +351,22 @@ class FrameStats:
         self.events: Counter = Counter()
         self.dead_seen = False
         self.min_hp: int | None = None
+        self.ab_cstate: Counter = Counter()
+        self.ab_clips: Counter = Counter()
+        self.ab_spell: Counter = Counter()
+
+    def _count_abilities(self, hero: dict) -> None:
+        words = hero.get("cstate")
+        if words:
+            for name, i in self.ability_bits.items():
+                if (i >> 6) < len(words) and (words[i >> 6] >> (i & 63)) & 1:
+                    self.ab_cstate[name] += 1
+        clip = (hero.get("anim") or {}).get("clip")
+        if clip:
+            self.ab_clips[clip] += 1
+        spell = hero.get("spell")
+        if spell:
+            self.ab_spell[spell[0]] += 1
 
     def on_raw(self, msg_type: int, raw: bytes) -> None:
         if msg_type != MsgType.STATE:
@@ -203,6 +415,8 @@ class FrameStats:
             hp = g.get("hp")
             if isinstance(hp, int):
                 self.min_hp = hp if self.min_hp is None else min(self.min_hp, hp)
+            if self.ability_bits is not None and s.get("hero"):
+                self._count_abilities(s["hero"])
 
     def take(self) -> dict:
         with self._lock:
@@ -219,6 +433,9 @@ class FrameStats:
                  "play_frames": n, "udt_mean_ms": round(self.udt_sum / n, 3) if n else None, "udt_p99_ms": p99,
                  "udt_max_ms": round(self.udt_max, 1), "cost_max_us": self.cost_max, "drop_counter": self.drop_counter,
                  "events": dict(self.events), "dead_seen": self.dead_seen, "min_hp": self.min_hp}
+            if self.ability_bits is not None:
+                d["abilities"] = {"cstate": dict(self.ab_cstate), "clips": dict(self.ab_clips.most_common(20)),
+                                  "spell": dict(self.ab_spell.most_common(10))}
             self._reset()
             return d
 
@@ -249,6 +466,10 @@ class Worker:
         self.rec_started = 0.0
         self.segment = 0
         self.episode = 0
+        self.abilities: str | None = getattr(args, "abilities", None)
+        self.ability_args = (ability_request(self.abilities, self.i, getattr(args, "ability_tools", None),
+                                             getattr(args, "ability_skill", None)) if self.abilities else None)
+        self.keys, self.macros = ability_keys(None)  # grant_abilities sets the ability patterns
 
     # ---- plumbing ----------------------------------------------------------------------------------------------------
 
@@ -353,6 +574,38 @@ class Worker:
             self.log.write(kind="note", note="paused before reset (brain-lost tap?)", f=s.get("f"))
             self.unpause()
 
+    def grant_abilities(self) -> None:
+        """--abilities, in gameplay and before the savestate: save suppression on (the grant must never reach the
+        sandbox slot files every soak starts from), abilities.grant, then wait until STATE shows it. One "abilities"
+        line; a failure is logged (ok false, which fails the report's abilities check) and the soak goes on. The policy
+        gets the ability patterns either way, QuickCast only for the directions the grant says throw something."""
+        rec = {"kind": "abilities", "mode": self.abilities, "request": self.ability_args, "ok": False}
+        bindings = {}
+        try:
+            self.stats.track_abilities(self.rpc("schema.cstate", timeout_s=10)["bools"])
+            if "abilities.grant" not in (self.link.hello.get("rpcs") or ()):
+                raise OracleError("this SsOracle has no abilities.grant (build and deploy the plugin once no soak runs)")
+            g = self.rpc("guards.set", timeout_s=10, save_suppression=True)
+            if not (g or {}).get("save_suppression"):
+                raise OracleError(f"save suppression did not turn on: {g}")
+            res = self.rpc("abilities.grant", timeout_s=30, **self.ability_args)
+            bindings = res.get("bindings") or {}
+            want_can, want_tools = expected_can(self.abilities), granted_equips(res)
+            rec.update(grant=res, want_can=want_can, want_tools=want_tools)
+            gaps = [f"unplaced: {u}" for u in res.get("unplaced") or ()]
+            try:
+                rec["verified_f"] = self.wait(lambda s: not ability_gaps(s, want_can, want_tools), 5.0)["f"]
+            except TimeoutError:
+                s = self.link.state or {}
+                gaps += ability_gaps(s, want_can, want_tools)
+                rec["can"] = (s.get("hero") or {}).get("can")
+            rec.update(ok=not gaps, gaps=gaps)
+        except (OracleError, TimeoutError, KeyError, TypeError) as e:
+            rec["error"] = f"{type(e).__name__}: {e}"
+        self.keys, self.macros = ability_keys(self.abilities, bindings)
+        rec.update(keys=sorted(self.keys), macros=[m.name for m in self.macros])
+        self.log.write(**rec)
+
     # ---- episodes ----------------------------------------------------------------------------------------------------
 
     def reset(self) -> dict:
@@ -381,7 +634,7 @@ class Worker:
         raise WorkerExit(EXIT_STUCK, f"savestate.load failed 4 times: {errors}")
 
     def play(self, seconds: float) -> dict:
-        policy = Policy(self.rng)
+        policy = Policy(self.rng, self.keys, self.macros)
         last = self.link.frame
         end = last + int(seconds * 60)
         acts = 0
@@ -409,7 +662,10 @@ class Worker:
                 self.rpc("input.release", timeout_s=10)
             except (OracleError, TimeoutError):
                 pass
-        return {"acts": acts, "end_frame": last, "interrupted": interrupted}
+        out = {"acts": acts, "end_frame": last, "interrupted": interrupted}
+        if self.abilities:
+            out["presses"] = dict(policy.counts)
+        return out
 
     def episode_once(self) -> None:
         self.episode += 1
@@ -429,6 +685,10 @@ class Worker:
         rec.update(self.play(secs))
         g = self.link.state or {}
         rec["scene_end"] = (g.get("game") or {}).get("scene")
+        if self.abilities:
+            hero = g.get("hero") or {}
+            rec["silk_end"] = hero.get("silk")
+            rec["tools_end"] = {t: a for t, a in zip(hero.get("tools") or (), hero.get("tool_amounts") or ()) if t}
         rec["stats"] = self.stats.take()
         try:
             st = self.rpc("input.stats", timeout_s=10)
@@ -443,6 +703,12 @@ class Worker:
                                  "profile": gd.get("profile"), "refusals": gd.get("refusals")}
             except (OracleError, TimeoutError) as e:
                 rec["guards_error"] = str(e)
+            if self.abilities:  # the reset keeps the grant: the savestate carries it
+                try:
+                    ab = self.rpc("abilities.list", timeout_s=10)
+                    rec["abilities"] = {k: ab.get(k) for k in ("sets", "bindings", "save_suppression")}
+                except (OracleError, TimeoutError) as e:
+                    rec["abilities_error"] = str(e)
         self.log.write(**rec)
 
     def run(self) -> int:
@@ -452,6 +718,8 @@ class Worker:
             self.link.subscribe_raw(self.stats.on_raw)
             self.log.write(kind="hello", hello={k: self.link.hello.get(k) for k in ("plugin", "game", "instance")})
             self.enter_gameplay()
+            if self.abilities:
+                self.grant_abilities()  # before the savestate, so every reset keeps the grant
             # One savestate per soak and instance, taken once: a restarted worker (its game may have been left
             # anywhere) reuses it instead of capturing wherever Hornet happens to be.
             listed = self.rpc("savestate.list", timeout_s=30)
@@ -772,6 +1040,32 @@ class KillOnCloseJob:
 # =====================================================================================================================
 
 
+def worker_command(args, i: int, out: Path, deadline: float) -> list[str]:
+    """Command line of the worker process for instance i (the ability options pass through)."""
+    cmd = [sys.executable, "-m", "ssbot.tools.soak", "--worker", str(i), "--out", str(out), "--deadline", f"{deadline:.0f}"]
+    if getattr(args, "abilities", None):
+        cmd += ["--abilities", args.abilities]
+        if args.ability_tools is not None:
+            cmd += ["--ability-tools", args.ability_tools]
+        if args.ability_skill:
+            cmd += ["--ability-skill", args.ability_skill]
+    return cmd
+
+
+def ability_evidence(episodes: list[dict]) -> dict:
+    """Ability mode: presses, cState flag frames, clips and Spell Control states summed over all episode windows."""
+    presses, cstate, clips, spell = Counter(), Counter(), Counter(), Counter()
+    for e in episodes:
+        presses.update(e.get("presses") or {})
+        for key in ("stats_between", "stats"):
+            a = (e.get(key) or {}).get("abilities") or {}
+            cstate.update(a.get("cstate") or {})
+            clips.update(a.get("clips") or {})
+            spell.update(a.get("spell") or {})
+    return {"presses": dict(presses), "cstate_frames": dict(cstate), "clips": dict(clips.most_common(30)),
+            "spell_states": dict(spell.most_common(15))}
+
+
 class Supervisor:
     def __init__(self, args):
         from ssbot.tools.launcher import Launcher, PrefsGuard
@@ -904,9 +1198,8 @@ class Supervisor:
             old.close()
         f = (self.out / f"worker_{i}.log").open("ab")
         self.worker_logs[i] = f
-        self.workers[i] = subprocess.Popen(
-            [sys.executable, "-m", "ssbot.tools.soak", "--worker", str(i), "--out", str(self.out),
-             "--deadline", f"{self.deadline:.0f}"], cwd=str(BRAIN_DIR), stdout=f, stderr=subprocess.STDOUT)
+        self.workers[i] = subprocess.Popen(worker_command(self.args, i, self.out, self.deadline), cwd=str(BRAIN_DIR),
+                                           stdout=f, stderr=subprocess.STDOUT)
         self.job.assign(self.workers[i])
         self.say(f"worker {i} started (pid {self.workers[i].pid})")
 
@@ -987,7 +1280,8 @@ class Supervisor:
     # ---- run -------------------------------------------------------------------------------------------------------
 
     def run(self) -> int:
-        self.say(f"soak: {self.n} instance(s) {self.indices}, {self.duration_s / 3600:.2f} h, out {self.out}")
+        self.say(f"soak: {self.n} instance(s) {self.indices}, {self.duration_s / 3600:.2f} h, out {self.out}"
+                 + (f", abilities {self.args.abilities}" if getattr(self.args, "abilities", None) else ""))
         (self.out / "args.json").write_text(json.dumps(vars(self.args), indent=1), encoding="utf-8")
         self.preconditions()
         whea0 = whea_events()
@@ -1113,7 +1407,7 @@ class Supervisor:
             except Exception as e:  # noqa: BLE001
                 orphan_segments.append({"path": str(d), "error": repr(e)})
 
-        episodes, segments, exits, notes, reset_errors, segment_errors = [], [], [], [], [], []
+        episodes, segments, exits, notes, reset_errors, segment_errors, grants = [], [], [], [], [], [], []
         for i in self.indices:
             p = self.out / f"worker_{i}.jsonl"
             if not p.exists():
@@ -1124,8 +1418,8 @@ class Supervisor:
                 except json.JSONDecodeError:
                     continue
                 r["instance"] = i
-                {"episode": episodes, "segment": segments, "exit": exits, "note": notes,
-                 "reset_error": reset_errors, "segment_error": segment_errors}.get(r.get("kind"), []).append(r)
+                {"episode": episodes, "segment": segments, "exit": exits, "note": notes, "reset_error": reset_errors,
+                 "segment_error": segment_errors, "abilities": grants}.get(r.get("kind"), []).append(r)
         # A reset is the whole savestate.load step as training sees it: retries and unpausing included.
         resets = [e["reset_total_ms"] for e in episodes if "reset_total_ms" in e]
         same = [e["reset_total_ms"] for e in episodes if "reset_total_ms" in e and not e.get("cross_scene")]
@@ -1239,6 +1533,10 @@ class Supervisor:
             "every instance kept producing episodes (no gap > 10 min)": not idle_gaps,
             "no WHEA hardware errors during the run": "error" not in whea_new and whea_new.get("count") == 0,
         }
+        abilities = getattr(self.args, "abilities", None)
+        if abilities:
+            checks[f"abilities '{abilities}' granted and seen in STATE on every instance (every worker start)"] = (
+                set(self.indices) <= {g["instance"] for g in grants} and all(g.get("ok") for g in grants))
         rep = {
             "out": str(self.out), "started": datetime.fromtimestamp(t_start).isoformat(timespec="seconds"),
             "ended": now_iso(), "hours": round((time.time() - t_start) / 3600, 2), "instances": self.indices,
@@ -1268,6 +1566,12 @@ class Supervisor:
                        "violations_and_review": {c: [[p, i] for p, i in v[:200]] for c, v in violations.items()},
                        "snapshot_diff": snap_diff},
         }
+        if abilities:
+            rep["abilities"] = {
+                "mode": abilities, "evidence": ability_evidence(episodes),
+                "grants": [{k: g.get(k) for k in ("instance", "t", "ok", "error", "gaps", "request", "keys", "macros")}
+                           | {k: (g.get("grant") or {}).get(k) for k in ("changed", "unplaced", "bindings", "slots", "config")}
+                           for g in grants]}
         (self.out / "report.json").write_text(json.dumps(rep, indent=1, ensure_ascii=False, default=str), encoding="utf-8")
         other = sorted(by_class.get("other", []), key=lambda x: -x[1].get("count", 1) if isinstance(x[1], dict) else 0)
         (self.out / "writes_other.json").write_text(json.dumps([[p, i] for p, i in other[:5000]], indent=0, default=str), encoding="utf-8")
@@ -1283,6 +1587,14 @@ class Supervisor:
                  f"  WHEA hardware errors during the run: {whea_new.get('count', whea_new)} (all-time {whea1.get('count')})",
                  f"  writes by class: {rep['writes']['by_class_counts']}",
                  *[f"  {c}: {p}  {i}" for c, v in violations.items() for p, i in v[:30]]]
+        if abilities:
+            ev = rep["abilities"]["evidence"]
+            lines += [f"  abilities {abilities}: grants ok {sum(1 for g in grants if g.get('ok'))}/{len(grants)}; "
+                      f"presses {ev['presses']}; cState frames {ev['cstate_frames']}",
+                      f"  abilities: spell states {ev['spell_states']}; clips {ev['clips']}",
+                      *[f"  abilities i{g['instance']}: {g.get('error') or g.get('gaps') or 'ok'}; bindings "
+                        f"{(g.get('grant') or {}).get('bindings')}; unplaced {(g.get('grant') or {}).get('unplaced')}"
+                        for g in grants]]
         (self.out / "summary.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
         print("\n".join(lines), flush=True)
         return 0 if rep["pass"] else 1
@@ -1320,7 +1632,7 @@ class Supervisor:
         return out
 
 
-def main() -> int:
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--instances", type=int, default=4)
     ap.add_argument("--first", type=int, default=0)
@@ -1329,13 +1641,29 @@ def main() -> int:
     ap.add_argument("--width", type=int, default=1280)
     ap.add_argument("--height", type=int, default=720)
     ap.add_argument("--out", default=str(RUNS))
+    ap.add_argument("--abilities", choices=ABILITY_MODES,
+                    help="grant these abilities before each worker's savestate and play with their keys (see above)")
+    ap.add_argument("--ability-tools", metavar="NAMES",
+                    help='comma-separated ToolItem names for combat/all ("" = none; default one of '
+                         f'{", ".join(TOOL_ROTATION)} by instance)')
+    ap.add_argument("--ability-skill", metavar="NAME",
+                    help=f"silk skill to equip for combat/all (default one of {', '.join(SKILL_ROTATION)} by instance)")
     ap.add_argument("--worker", type=int, help=argparse.SUPPRESS)
     ap.add_argument("--deadline", type=float, help=argparse.SUPPRESS)
-    args = ap.parse_args()
+    args = ap.parse_args(argv)
+    if (args.ability_tools is not None or args.ability_skill) and args.abilities not in ("combat", "all"):
+        ap.error("--ability-tools and --ability-skill need --abilities combat or all")
+    if args.ability_skill and args.ability_skill.lower() not in {n.lower() for kv in SKILLS.items() for n in kv}:
+        ap.error(f"--ability-skill must be one of {', '.join(f'{k} ({v})' for k, v in SKILLS.items())}")
+    if args.worker is None and args.hours <= 0 and args.minutes <= 0:
+        ap.error("give --hours and/or --minutes")
+    return args
+
+
+def main() -> int:
+    args = parse_args()
     if args.worker is not None:
         return Worker(args).run()
-    if args.hours <= 0 and args.minutes <= 0:
-        ap.error("give --hours and/or --minutes")
     return Supervisor(args).run()
 
 
