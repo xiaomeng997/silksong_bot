@@ -51,3 +51,4 @@ key_bindings = "default keyboard"
 nvidia_driver = "617.14"   # updated 2026-09-30 (was 591.86); P8 latency was measured on 591.86
 ffmpeg = "9.0.2 (Gyan full build, winget)"   # NVENC API 13.1 needs driver >= 610
 bios = "ASUS TUF GAMING Z790-PLUS WIFI 1836, microcode 0x133"
+presentmon = "2.6.0 console, C:\ssbot\tools\presentmon\PresentMon-2.6.0-x64.exe, sha256 b2a706bc6ad475749e3b7e3409263aa1e6906d45bdcf993f6dbc0f660188f1af, Authenticode Intel Corporation"   # frame time (M1: +0.5 ms / 1 h vs vanilla)
