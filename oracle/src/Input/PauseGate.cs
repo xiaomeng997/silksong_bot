@@ -6,7 +6,9 @@ namespace SsOracle.Input
     /// Whether a Pause key press would be accepted right now: the same blocker bits as STATE "pause.blk"
     /// (Export.PauseExporter; DESIGN §3.1.2 pause_blockers; m0 §2.4, N12, N14). A press while any bit is set is
     /// dropped by the game, not queued. Read-only: the oracle pauses only through real key injection and never writes
-    /// disablePause / timeSlowedCount / ignoreUnpause (m0:N43).
+    /// disablePause / timeSlowedCount / ignoreUnpause (m0:N43). Meant as the single definition of those bits: until
+    /// PauseExporter calls Blockers too, the two must be kept identical (same order as GameManager.PauseGameToggle plus
+    /// InputHandler's PauseAllowed / acceptingInput gates).
     /// </summary>
     internal static class PauseGate
     {

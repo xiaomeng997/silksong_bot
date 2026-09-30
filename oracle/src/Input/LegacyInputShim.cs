@@ -15,7 +15,10 @@ namespace SsOracle.Input
     /// (including an accidental ENDING skip) and in the idle GC stall. Each call site is transpiled to AnyKeyDownAt(site),
     /// which ORs in the injected key-down edge of this frame. While the injector owns the keyboard the physical legacy
     /// keys and mouse are masked too, like the Input System side (a click that focuses a training window must not skip
-    /// its cutscene).
+    /// its cutscene). PlayMaker's AnyKey / WaitAnyKey reach Input.anyKeyDown through the tiny ActionHelpers.AnyKeyDown;
+    /// it is patched in Plugin.Awake, before any FSM action has been JIT-compiled, and MonoMod pins a detoured method
+    /// with inlining disabled, so no caller should hold an inlined copy of the original. That site is verified in game
+    /// only when an AnyKey FSM runs (its injected_hits in input.stats; the probe prints them).
     /// </summary>
     internal static partial class LegacyInputShim
     {
@@ -64,8 +67,11 @@ namespace SsOracle.Input
 
         public static void Install(Harmony harmony)
         {
-            // Input lives in UnityEngine.InputLegacyModule, which the project does not reference at compile time.
-            var inputType = AccessTools.TypeByName("UnityEngine.Input");
+            // Input lives in UnityEngine.InputLegacyModule, which the project does not reference at compile time. Naming
+            // the assembly loads it even if nothing has touched it yet at Plugin.Awake (a bare type-name search only
+            // sees assemblies that are already loaded).
+            var inputType = Type.GetType("UnityEngine.Input, UnityEngine.InputLegacyModule", false)
+                            ?? AccessTools.TypeByName("UnityEngine.Input");
             legacyGetter = inputType != null ? AccessTools.PropertyGetter(inputType, "anyKeyDown") : null;
             if (legacyGetter == null)
             {

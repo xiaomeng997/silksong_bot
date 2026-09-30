@@ -56,8 +56,27 @@ namespace SsOracle.Input
         public static void Install() => InputSystem.onBeforeUpdate += OnBeforeUpdate;
 
         /// <summary>Thread-safe: replace the held button set; takes effect at the next dynamic input update
-        /// (subject to the minimum press / release frames).</summary>
+        /// (subject to the minimum press / release frames). Only the last set before that update is seen.</summary>
         public static bool TrySetMask(uint mask, out string error)
+        {
+            if (!Validate(mask, out error)) return false;
+            requested = mask;
+            return true;
+        }
+
+        /// <summary>Main thread only (ActionScheduler, before the latch): like TrySetMask, but the set's key edges are
+        /// queued in the HoldFilter at once, so every set applied within one input update keeps its edges (a press
+        /// followed by its release in the same update is still latched for the minimum press, as inputd holds it).</summary>
+        public static bool TryQueueMask(uint mask, out string error)
+        {
+            if (!Validate(mask, out error)) return false;
+            Filter.Push(requested);   // a set another caller made since the last latch keeps its edges too
+            Filter.Push(mask);
+            requested = mask;
+            return true;
+        }
+
+        private static bool Validate(uint mask, out string error)
         {
             if ((mask & LeftBit) != 0 && (mask & RightBit) != 0)
             {
@@ -69,7 +88,6 @@ namespace SsOracle.Input
                 error = $"unknown button bits 0x{mask >> ButtonNames.Length << ButtonNames.Length:x}";
                 return false;
             }
-            requested = mask;
             error = null;
             return true;
         }
@@ -90,7 +108,18 @@ namespace SsOracle.Input
             return TrySetMask(mask, out error);
         }
 
+        /// <summary>Thread-safe: request an empty set, an ordinary release edge (edges already queued in the HoldFilter
+        /// still play out).</summary>
         public static void ReleaseAll() => requested = 0;
+
+        /// <summary>Main thread only: release every key as soon as the minimum press allows and drop every edge still
+        /// queued in the HoldFilter, so no press requested earlier fires later (brain lost, input.release, harness
+        /// operations and their no-input waits).</summary>
+        public static void ReleaseAllNow()
+        {
+            requested = 0;
+            Filter.ReleaseAll();
+        }
 
         private static void OnBeforeUpdate()
         {

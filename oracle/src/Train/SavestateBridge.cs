@@ -17,12 +17,18 @@ namespace SsOracle.Train
     ///   ("name" may also be sent as "state")
     ///   savestate.save {name}              capture now; writes C:\ssbot\sandbox\savestates\&lt;name&gt;.json (DebugMod format,
     ///                                      shared by all instances; a DebugMod JSON copied there works too)
-    ///   savestate.load {name, timeout?}    answers only when the load has finished: DebugMod's coroutine (incl. its HUD
+    ///   savestate.load {name, timeout?, force?}
+    ///                                      answers only when the load has finished: DebugMod's coroutine (incl. its HUD
     ///                                      fixes) is done, the hero exists, GameState is PLAYING, the scene has been
     ///                                      entered. Reports the duration. "dm:&lt;page&gt;/&lt;slot&gt;" loads from DebugMod's own
     ///                                      store (read-only), e.g. community packs imported through DebugMod's UI.
     ///   savestate.list                     our files + DebugMod's filled slots
     /// Parsed states are cached per file (size + mtime), so a reset does not re-parse the JSON.
+    /// A death is never saved and never silently undone: save refuses a dead hero (cState.dead, permadeathMode Dead or
+    /// hp 0), a state captured dead is never loaded, and a load over a dead hero (which DebugMod would quietly revive:
+    /// its LoadImpl aborts the death coroutines and restores permadeathMode from the file) is refused unless force is
+    /// set, and then logged as an error and reported as a "harness" event {op: "death_reset"} before loading.
+    /// On a timeout the reply fails at once, but the harness stays busy (ACTIONs ignored) until DebugMod's load ends.
     /// </summary>
     internal static class SavestateBridge
     {
@@ -78,6 +84,9 @@ namespace SsOracle.Train
             if (gm == null || hero == null) throw new InvalidOperationException("no game loaded (no GameManager or hero)");
             if (gm.GameState != GameState.PLAYING || gm.IsInSceneTransition || hero.cState.transitioning)
                 throw new InvalidOperationException($"not in a steady gameplay state (GameState {gm.GameState}, transition {gm.IsInSceneTransition || hero.cState.transitioning})");
+            var death = DeathState(hero, gm.playerData);
+            if (death != null)
+                throw new InvalidOperationException($"refusing to save a dead hero ({death}); LethalBlock should have prevented this death");
 
             var sw = System.Diagnostics.Stopwatch.StartNew();
             var state = DebugModBridge.Capture(name);
@@ -116,6 +125,7 @@ namespace SsOracle.Train
             if (name == null) { reply.Fail("name is required"); return; }
             if (!DebugModBridge.Resolve()) { reply.Fail(DebugModBridge.Error); return; }
             var timeout = Rpc.Double(args, "timeout", DefaultTimeoutS);
+            var force = Rpc.Bool(args, "force");
             object state;
             try
             {
@@ -126,10 +136,17 @@ namespace SsOracle.Train
                 reply.Fail(e.Message);
                 return;
             }
-            HarnessRunner.Run("savestate.load", reply, op => LoadBody(op, name, state, timeout));
+            var gm = GameManager._instance;
+            var death = DeathState(HeroController.UnsafeInstance, gm != null ? gm.playerData : null);
+            if (death != null && !force)
+            {
+                reply.Fail(DeadRefusal(death));
+                return;
+            }
+            HarnessRunner.Run("savestate.load", reply, op => LoadBody(op, name, state, timeout, force));
         }
 
-        private static IEnumerator LoadBody(HarnessOp op, string name, object state, double timeoutS)
+        private static IEnumerator LoadBody(HarnessOp op, string name, object state, double timeoutS, bool force)
         {
             // DebugMod refuses while the hero is transitioning (SaveStateManager.LoadLockout); wait that out briefly.
             string why;
@@ -143,8 +160,27 @@ namespace SsOracle.Train
                 yield return null;
             }
 
+            // Checked again right before DebugMod runs: the hero may have died during the wait above.
+            var gmNow = GameManager._instance;
+            var death = DeathState(HeroController.UnsafeInstance, gmNow != null ? gmNow.playerData : null);
+            if (death != null)
+            {
+                if (!force)
+                {
+                    op.Error = DeadRefusal(death);
+                    yield break;
+                }
+                Core.Plugin.Log.LogError($"savestate.load '{name}' with force over a DEAD hero ({death}): the load undoes a death that slipped past LethalBlock");
+                Export.FrameExporter.Emit("harness", new Dictionary<string, object>
+                {
+                    ["op"] = "death_reset", ["name"] = name, ["death"] = death, ["scene"] = gmNow != null ? gmNow.sceneName : null,
+                });
+            }
+
             var startMs = op.Clock.ElapsedMilliseconds;
             var pump = new HarnessRunner.Pump();
+            // If this body gives up (timeout, settle failure), DebugMod's load keeps running: keep brain input out of it.
+            op.BusyWhile = () => !pump.Done || DebugModBridge.LoadInProgress;
             HarnessRunner.Start(pump.Run(DebugModBridge.LoadCoroutine(state)));
             while (!pump.Done)
             {
@@ -207,8 +243,26 @@ namespace SsOracle.Train
                 ["hero_input"] = hero.acceptingInput,
                 ["time_scale"] = Time.timeScale,
                 ["safe_loading"] = DebugModBridge.SafeLoading,
+                ["death_reset"] = death != null,
             };
         }
+
+        /// <summary>Why the hero counts as dead (null when alive or when there is no hero, e.g. at the title screen, where
+        /// PlayerData is not a run's): the death coroutine has started (cState.dead), the Steel Soul death is already in
+        /// memory (permadeathMode Dead), or health reached 0.</summary>
+        private static string DeathState(HeroController hero, PlayerData pd)
+        {
+            if (hero == null) return null;
+            string why = null;
+            if (hero.cState.dead) why = "cState.dead";
+            if (pd != null && pd.permadeathMode == PermadeathModes.Dead) why = (why == null ? "" : why + ", ") + "permadeathMode Dead";
+            if (pd != null && pd.health <= 0) why = (why == null ? "" : why + ", ") + "hp " + pd.health;
+            return why;
+        }
+
+        private static string DeadRefusal(string death) =>
+            $"the hero is dead ({death}), a death LethalBlock did not stop; savestate.load will not quietly undo it. " +
+            "Pass force=true to reset anyway (logged as an error and reported as a 'harness' death_reset event)";
 
         private static string CannotStartLoad()
         {
@@ -243,17 +297,27 @@ namespace SsOracle.Train
             if (dm.Success)
             {
                 var state = DebugModBridge.FileState(int.Parse(dm.Groups[1].Value), int.Parse(dm.Groups[2].Value));
-                return state ?? throw new FileNotFoundException($"DebugMod slot {name} is empty");
+                return Alive(name, state ?? throw new FileNotFoundException($"DebugMod slot {name} is empty"));
             }
             if (!NamePattern.IsMatch(name)) throw new ArgumentException($"bad savestate name '{name}'");
             var path = PathOf(name);
             var info = new FileInfo(path);
             if (!info.Exists) throw new FileNotFoundException($"no savestate '{name}' ({path})");
             if (Cache.TryGetValue(name, out var c) && c.Length == info.Length && c.WriteTimeUtc == info.LastWriteTimeUtc)
-                return c.State;
+                return Alive(name, c.State);
             var parsed = DebugModBridge.FromJson(File.ReadAllText(path));
             Cache[name] = new Cached { Length = info.Length, WriteTimeUtc = info.LastWriteTimeUtc, State = parsed };
-            return parsed;
+            return Alive(name, parsed);
+        }
+
+        /// <summary>A state captured after a Steel Soul death (or at 0 HP) would load a dead run: refuse it.</summary>
+        private static object Alive(string name, object state)
+        {
+            var pd = DebugModBridge.SavedPlayerData(state);
+            if (pd == null) throw new InvalidDataException($"savestate '{name}' has no player data");
+            if (pd.permadeathMode == PermadeathModes.Dead || pd.health <= 0)
+                throw new InvalidDataException($"savestate '{name}' was captured dead (permadeathMode {pd.permadeathMode}, hp {pd.health}); refusing to load it");
+            return state;
         }
 
         private static string PathOf(string name) => Path.Combine(Folder, name + ".json");

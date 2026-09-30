@@ -12,7 +12,8 @@ namespace SsOracle.Input
     ///                        min_press_frames?, min_release_frames?}  -> the active model (no args = query)
     ///   input.stats   -> scheduler, hold-filter, brain-lost and legacy-shim counters
     ///   input.release -> release every key and stop driving (disarms the brain-lost Pause; call before disconnecting)
-    /// Emulation settings last for one brain connection; a new connection starts oracle-exact (0 delay, 2/1 frames).
+    /// Emulation settings last for one brain connection; a new connection starts oracle-exact (0 delay, minimum press
+    /// and release 2/2 frames as C19).
     /// </summary>
     internal static class InputModule
     {

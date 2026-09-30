@@ -5,13 +5,15 @@ namespace SsOracle.Input
     /// keys once per rendered frame, so a press and release inside one update is lost, and a re-press of the same key
     /// needs a sampled release in between. Every edge the caller asks for is kept and replayed in order: a release is
     /// held back until the key has been down for MinPressFrames latched frames, a press until it has been up for
-    /// MinReleaseFrames. Left and right are never latched together (N41: MoveVector cancels but both IsPressed stay
-    /// true), so a press of one waits for the release of the other. Pure logic (no Unity), main thread only.
+    /// MinReleaseFrames (C19: both 2 frames, as the final inputd sink holds them). Left and right are never latched
+    /// together (N41: MoveVector cancels but both IsPressed stay true), so a press of one waits for the release of the
+    /// other. Several key sets may be pushed within one latched frame (Push); their edges all queue up. Pure logic
+    /// (no Unity), main thread only.
     /// </summary>
     internal sealed class HoldFilter
     {
         public const int DefaultMinPressFrames = 2;
-        public const int DefaultMinReleaseFrames = 1;
+        public const int DefaultMinReleaseFrames = 2;
 
         /// <summary>Queued toggles per key beyond which the oldest press+release pair is dropped, so a caller that
         /// toggles faster than the limits allow cannot build up unbounded input lag.</summary>
@@ -36,7 +38,8 @@ namespace SsOracle.Input
         public long PressesDeferred { get; private set; }
         /// <summary>Presses held back because the opposite direction was still latched.</summary>
         public long ExclusiveDeferred { get; private set; }
-        /// <summary>Press+release pairs dropped (queue overflow, or a tap that could never be latched).</summary>
+        /// <summary>Presses dropped before they were latched: queue overflow, a tap that could never be latched, or
+        /// a queued press cancelled by ReleaseAll.</summary>
         public long TapsCollapsed { get; private set; }
 
         public uint Desired => desired;
@@ -65,23 +68,35 @@ namespace SsOracle.Input
             MinReleaseFrames = minReleaseFrames < 1 ? 1 : minReleaseFrames;
         }
 
+        /// <summary>The caller now wants <paramref name="want"/>: queue one edge per key that differs from the last
+        /// wanted set. Nothing is latched until Step, so several sets pushed in one frame all keep their edges.</summary>
+        public void Push(uint want)
+        {
+            var changed = want ^ desired;
+            if (changed == 0) return;
+            desired = want;
+            for (var i = 0; i < Bits; i++)
+            {
+                if ((changed & (1u << i)) == 0) continue;
+                if (++pending[i] > MaxPendingToggles)
+                {
+                    pending[i] -= 2;
+                    TapsCollapsed++;
+                }
+            }
+        }
+
         /// <summary>One latched frame: the caller's wanted key set in, the key set the game sees this frame out.</summary>
         public uint Step(uint want)
         {
-            var changed = want ^ desired;
-            desired = want;
+            Push(want);
             var next = latched;
             uint pressedNow = 0;
 
             for (var i = 0; i < Bits; i++)
             {
-                var bit = 1u << i;
-                if ((changed & bit) != 0 && ++pending[i] > MaxPendingToggles)
-                {
-                    pending[i] -= 2;
-                    TapsCollapsed++;
-                }
                 if (pending[i] == 0) continue;
+                var bit = 1u << i;
 
                 if ((latched & bit) != 0)
                 {
@@ -132,6 +147,28 @@ namespace SsOracle.Input
             }
             latched = next;
             return latched;
+        }
+
+        /// <summary>Want nothing, and drop every queued edge: a latched key keeps only its release (still held to
+        /// MinPressFrames), a key that is up stays up. For brain lost, input.release and harness operations, where a
+        /// press queued earlier must not fire later (e.g. inside randomize_start's no-input wait).</summary>
+        public void ReleaseAll()
+        {
+            desired = 0;
+            for (var i = 0; i < Bits; i++)
+            {
+                var down = (latched & (1u << i)) != 0;
+                var keep = down ? 1 : 0;
+                if (pending[i] == keep) continue;
+                // Queued edges alternate starting with a release when the key is down, with a press when it is up.
+                TapsCollapsed += down ? pending[i] / 2 : (pending[i] + 1) / 2;
+                pending[i] = keep;
+                if (!down)
+                {
+                    deferred[i] = false;
+                    exclusiveWaiting[i] = false;
+                }
+            }
         }
 
         /// <summary>Un-latch a press made this frame that collides with the opposite direction. If the caller no longer

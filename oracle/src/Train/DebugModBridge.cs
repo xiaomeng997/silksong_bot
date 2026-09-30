@@ -26,7 +26,7 @@ namespace SsOracle.Train
         private static ConstructorInfo saveStateCtor, dataCtor;
         private static MethodInfo saveMethod, loadMethod, isSetMethod, beforeSerialize, afterDeserialize, getFileState;
         private static PropertyInfo loadingProperty, numPagesProperty;
-        private static FieldInfo dataField, identifierField, sceneField, posField;
+        private static FieldInfo dataField, identifierField, sceneField, posField, savedPdField;
         private static MethodInfo refreshMasks, refreshSpool;
         private static PropertyInfo settingsProperty;
         private static Func<object, bool, string> toJson;
@@ -66,18 +66,22 @@ namespace SsOracle.Train
                 identifierField = dataType.GetField("saveStateIdentifier", inst);
                 sceneField = dataType.GetField("saveScene", inst);
                 posField = dataType.GetField("savePos", inst);
+                savedPdField = dataType.GetField("savedPd", inst);
                 getFileState = managerType.GetMethod("GetFileState", stat, null, new[] { typeof(int), typeof(int) }, null);
                 numPagesProperty = managerType.GetProperty("NumPages", stat);
 
                 var missing = Missing(("SaveState()", saveStateCtor), ("SaveStateData()", dataCtor), ("Save", saveMethod),
                     ("Load", loadMethod), ("IsSet", isSetMethod), ("loadingSavestate", loadingProperty), ("data", dataField),
                     ("BeforeSerialize", beforeSerialize), ("AfterDeserialize", afterDeserialize),
-                    ("saveStateIdentifier", identifierField), ("saveScene", sceneField), ("savePos", posField));
+                    ("saveStateIdentifier", identifierField), ("saveScene", sceneField), ("savePos", posField),
+                    ("savedPd", savedPdField));
                 if (missing != null) return Fail($"DebugMod {Version} savestate API differs from 1.1.2: missing {missing}");
                 if (loadMethod.ReturnType != typeof(IEnumerator)) return Fail("DebugMod SaveState.Load is not a coroutine");
 
-                // JsonUtility lives in UnityEngine.JSONSerializeModule, which the project does not reference.
-                var json = AccessTools.TypeByName("UnityEngine.JsonUtility");
+                // JsonUtility lives in UnityEngine.JSONSerializeModule, which the project does not reference; naming the
+                // assembly loads it even if nothing has touched it yet.
+                var json = Type.GetType("UnityEngine.JsonUtility, UnityEngine.JSONSerializeModule", false)
+                           ?? AccessTools.TypeByName("UnityEngine.JsonUtility");
                 var to = json?.GetMethod("ToJson", BindingFlags.Static | BindingFlags.Public, null, new[] { typeof(object), typeof(bool) }, null);
                 var from = json?.GetMethod("FromJsonOverwrite", BindingFlags.Static | BindingFlags.Public, null, new[] { typeof(string), typeof(object) }, null);
                 if (to == null || from == null) return Fail("UnityEngine.JsonUtility not found");
@@ -166,6 +170,9 @@ namespace SsOracle.Train
         public static string Identifier(object state) => identifierField.GetValue(dataField.GetValue(state)) as string;
         public static string Scene(object state) => sceneField.GetValue(dataField.GetValue(state)) as string;
         public static UnityEngine.Vector3 Position(object state) => (UnityEngine.Vector3)posField.GetValue(dataField.GetValue(state));
+
+        /// <summary>The PlayerData captured in the state (DebugMod restores all of it on load, permadeathMode included).</summary>
+        public static PlayerData SavedPlayerData(object state) => savedPdField.GetValue(dataField.GetValue(state)) as PlayerData;
 
         /// <summary>DebugMod's "safe savestate loading" (loads a dummy scene first; slower resets). Null if unknown.</summary>
         public static bool? SafeLoading

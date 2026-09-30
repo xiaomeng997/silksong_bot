@@ -14,15 +14,24 @@ namespace SsOracle.Train
         public readonly int StartFrame = Time.frameCount;
         public string Error;
         public Dictionary<string, object> Result;
+
+        /// <summary>Set by a body that leaves work running beside it (a DebugMod load it timed out on): after the reply,
+        /// the harness stays busy (ACTIONs ignored, watchdog off) while this returns true, up to DrainCapS.</summary>
+        public Func<bool> BusyWhile;
     }
 
     /// <summary>
     /// Runs multi-frame harness operations (savestate load, randomized start) as coroutines on the plugin host, one at
     /// a time. While one runs, ActionScheduler ignores ACTIONs and the brain-lost watchdog, so no key is held into the
-    /// new episode and a slow load is not mistaken for a dead brain. The RPC is answered only when the body finishes.
+    /// new episode and a slow load is not mistaken for a dead brain. The RPC is answered only when the body finishes;
+    /// if the body leaves work running (HarnessOp.BusyWhile, e.g. a DebugMod load that outlived its timeout), the
+    /// harness stays busy after the reply until that work ends.
     /// </summary>
     internal sealed class HarnessRunner : MonoBehaviour
     {
+        /// <summary>Longest time the harness stays busy after the reply for work the body left running.</summary>
+        private const double DrainCapS = 60;
+
         private static HarnessRunner instance;
 
         /// <summary>Name of the running operation, or null.</summary>
@@ -67,20 +76,46 @@ namespace SsOracle.Train
                     }
                     yield return current;
                 }
+
+                if (op.Error != null)
+                {
+                    Core.Plugin.Log.LogWarning($"{op.Name}: {op.Error}");
+                    reply.Fail(op.Error);
+                }
+                else
+                {
+                    reply.Ok(op.Result);
+                }
+
+                // The reply may go out early, but brain input must not reach a scene load that is still running.
+                if (op.BusyWhile != null && StillBusy(op))
+                {
+                    Busy = op.Name + " (finishing after the reply)";
+                    var drain = Stopwatch.StartNew();
+                    while (StillBusy(op) && drain.Elapsed.TotalSeconds <= DrainCapS) yield return null;
+                    if (drain.Elapsed.TotalSeconds > DrainCapS)
+                        Core.Plugin.Log.LogError($"{op.Name}: work still running {DrainCapS:0} s after the reply; accepting ACTIONs again");
+                    else
+                        Core.Plugin.Log.LogInfo($"{op.Name}: finished {drain.ElapsedMilliseconds} ms after the reply");
+                }
             }
             finally
             {
                 Busy = null;
                 Input.ActionScheduler.HarnessEnd();
             }
-            if (op.Error != null)
+        }
+
+        private static bool StillBusy(HarnessOp op)
+        {
+            try
             {
-                Core.Plugin.Log.LogWarning($"{op.Name}: {op.Error}");
-                reply.Fail(op.Error);
+                return op.BusyWhile();
             }
-            else
+            catch (Exception e)
             {
-                reply.Ok(op.Result);
+                Core.Plugin.Log.LogError($"{op.Name}: busy check failed: {e.Message}");
+                return false;
             }
         }
 

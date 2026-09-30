@@ -344,9 +344,9 @@ SilksongRL 已经有 socket 桥、`ButtonControl.get_isPressed` 注入（有缺�
 - **Harness：** `SavestateBridge`（DebugMod API [mod9]）；`StartRandomizer`（HP、丝、x 偏移、朝向、0–60 帧等待、`Random.InitState`）；`Warp`（Benchwarp）。
 - **Input：**
   - `KeyboardInjector`（已实现：`oracle/src/Input/KeyboardInjector.cs` [probe:P3]）：在主线程的 `InputSystem.onBeforeUpdate`（动态更新）中每帧锁存一次按键集合，用 `InputSystem.QueueStateEvent` 向 `Keyboard.current` 排队一个完整的 `KeyboardState`，覆盖**每个**逻辑按键，包括 Esc/Enter/Tab/I/[/]。游戏走与真实按键相同的读取路径（Input System → InControl `KeyBindingSource` → `HeroActions`），按电平采样、亚帧点按丢失、边沿、LastInputType 和菜单别名都一致 [m0 §3.3]。P3 实测：全程不在前台，能从主菜单读档、暂停、取消暂停、走和跳。永不在 PlayerAction/HeroActions 层注入。
-  - legacy shim（M1）：把注入的按下边沿并进 `Input.anyKeyDown` 的调用者（`InputHandler.CutsceneInput`/`StagCutsceneInput`、`GameManager.UpdateEngagement`、`IdleMemoryCleaner`），否则 TRAIN 和 FINAL 的过场跳过（含 ENDING 误跳过）和 GC 卡顿不一致 [m0:N36]。
+  - legacy shim（M1）：把注入的按下边沿并进 `Input.anyKeyDown` 的调用者（`InputHandler.CutsceneInput`/`StagCutsceneInput`、`GameManager.UpdateEngagement`、`IdleMemoryCleaner`），否则 TRAIN 和 FINAL 的过场跳过（含 ENDING 误跳过）和 GC 卡顿不一致 [m0:N36]。M1 实现覆盖 1.0.30000 的全部 6 个调用点（另有 PlayMaker `ActionHelpers.AnyKeyDown` 和 `BossDoorChallengeCompleteUI.Update`）。注入器占用键盘时只报告注入的按下边沿，物理 legacy 键和鼠标被屏蔽（与 Input System 一侧一致：点击聚焦训练窗口不会跳过过场）；不占用键盘时就是 `Input.anyKeyDown || 注入边沿`。
   - 后备：只作用于 Keyboard 设备、每帧锁存一次的 `ButtonControl.get_isPressed` 前缀 [mod13][pri2]。
-  - `InputPathEmulator` 加观测延迟和边沿抖动。
+  - `InputPathEmulator` 加观测延迟和边沿抖动（`input.latency_model`：每个 ACTION 按到达顺序抽一次延迟，动作不互相超车）。同一帧到期的多个 ACTION，每个的按键边沿都按顺序进入最短保持过滤（C19：按下和同键两次按下之间的松开都 ≥ 2 帧），不会被后到的掩码吞掉。
 - **IPC：** TCP；序列化用 MessagePack-CSharp 或固定二进制结构。**只有帧时间门槛失败时才手写优化或追求零分配。**
 
 **预算（C14）：** 主线程 p50 ≤ 0.3 ms、p99 ≤ 1.0 ms；1 h soak 中游戏帧时间 p99 相对原版 ≤ +0.5 ms（用 PresentMon 测）。
@@ -1617,6 +1617,11 @@ class PerceptionBackend(Protocol):
 | `RPC_REQ/RES` | ↔ | `set_latency_model`、`savestate.load/save`、`randomize_start`、`set_guards`、`warp`、`dump_scene`、`get_fsm_graph`、`dump_quit_blockers`、`ping` | 小 |
 
 oracle 从不阻塞：动作在第一个 ≥ `target_frame` 的帧生效，超过 3 帧的旧动作丢弃；250 ms 收不到 ACTION 就松开所有键并暂停。
+
+M1 实现的细化（brain lost，只在 brain 正在驱动时生效）：
+- 看门狗同时要求 250 ms 和 ≥ 6 个渲染帧没有 ACTION，主线程卡顿（场景加载、GC）饿死 STATE 时不会误判；驱动中断开连接也算 brain lost。
+- 先松开所有键并丢弃排队的边沿，然后等 `pause.blk == 0`（且背包未打开）时按一次 Pause（按住 2 帧）。20 帧后仍未 PAUSED 就再按，最多 3 次：`PauseGameToggle` 在读到按键的同一帧就置 PAUSED，所以重按不会取消暂停。标题画面或没有英雄时放弃。
+- brain 主动结束（断开前、空闲前、局间工作前）调用 `input.release`：松开所有键、停止驱动，不按 Pause。任何发过 ACTION 之后要空闲的客户端都必须先调它，否则游戏中会被暂停。savestate.load / randomize_start 运行期间忽略 ACTION，看门狗暂停。
 
 ---
 
