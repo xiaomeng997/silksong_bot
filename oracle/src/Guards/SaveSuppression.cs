@@ -21,7 +21,9 @@ namespace SsOracle.Guards
     /// method would freeze playerData.playTime and break the timer model and the SPEEDRUN_1 check in training, so the
     /// in-memory part still runs (SaveLevelState, PreparePlayerDataForSave; restore points also clear the autosave
     /// queue) and only the serialization and file writes are skipped. Invalid slots and disableSaveGame keep their
-    /// vanilla failure path.
+    /// vanilla failure path. PreparePlayerDataForSave also flushes shared.dat (AchievementHandler.FlushRecordsToDisk);
+    /// that file is in the sandbox (SaveRedirect) and AchievementGuard keeps achievement keys out of it, so it is left
+    /// alone: SaveSuppression is about the slot files (user{N}.dat, backups, Restore_Points).
     /// </summary>
     internal static class SaveSuppression
     {

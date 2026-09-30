@@ -18,8 +18,9 @@ class FakeLink:
         self.fn(MsgType.STATE, encode(MsgType.STATE, seq, msgpack.packb(state)))
 
 
-def state(frame, hp, dead=False, pdm=1, events=()):
+def state(frame, hp, dead=False, pdm=1, events=(), gs=4):
     return {"f": frame, "guards": {"hp": hp, "dead": dead, "pdm": pdm},
+            "game": {"gs": gs} if gs is not None else None,
             "ev": [{"k": k, "f": frame, "q": 0, "d": d} for k, d in events]}
 
 
@@ -38,6 +39,22 @@ def test_watch_collects_events_and_worst_state():
     assert w.dead_seen and w.pdm_seen == {1, 2}
     mark = w.reset()
     assert w.since(mark) == [] and w.min_hp is None and not w.dead_seen
+
+
+def test_watch_requires_playing_throughout():
+    link = FakeLink()
+    w = Watch(link)
+    w.reset()
+    link.feed(state(20, 1))
+    link.feed(state(21, 1))
+    assert w.stayed_playing()
+    link.feed(state(22, 1, gs=6))  # EXITING_LEVEL: a death respawn or PermaDeath load
+    assert not w.stayed_playing()
+    w.reset()
+    link.feed(state(23, 1, gs=None))  # no GameManager (Save & Quit)
+    assert not w.stayed_playing()
+    w.reset()
+    assert w.stayed_playing()
 
 
 def test_slot_files_matches_the_games_naming(tmp_path):

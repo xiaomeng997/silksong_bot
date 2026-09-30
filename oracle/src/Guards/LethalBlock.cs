@@ -15,9 +15,12 @@ namespace SsOracle.Guards
     /// <list type="bullet">
     /// <item>Net 1, PlayerData.TakeHealth prefix: replays 1.0.30000's TakeHealth on copies of its inputs (blue health
     /// absorbs first and overflows recursively; the Fractured Mask saves when equipped and AmountLeft &gt; 0, clamping
-    /// to 1 HP, and is consumed only when allowFracturedMaskBreak). Only when the replay reaches 0 HP is the call
-    /// cancelled and a "catastrophe" emitted; a mask that should break is left to break. This also covers the paths
-    /// that never enter TakeDamage (TakeQuickDamage can leave 0 HP without dying, frost, chomp, tags, critical).</item>
+    /// to 1 HP, and is consumed only when allowFracturedMaskBreak). Only when the replay ends at 0 HP is the call
+    /// cancelled (health left as it was, raised to 1 if already 0) and a "catastrophe" emitted; a mask that should
+    /// break is left to break, and under the PreventDeath cheat (vanilla ends at 1 HP) the hit is recorded, not
+    /// cancelled. This also covers the paths that never enter TakeDamage (TakeQuickDamage can leave 0 HP without dying,
+    /// frost, chomp, tags, critical). After a cancelled TakeDamage hit the rest of TakeDamage runs as for any
+    /// non-lethal hit (recoil and i-frames, or a hazard respawn for spikes/lava), so Hornet is left in a normal state.</item>
     /// <item>Net 2, HeroController.Die prefix: Die is an iterator whose body runs synchronously up to its first yield
     /// inside StartCoroutine, and that body already writes disablePause and permadeathMode = Dead (m0:N7). Returning
     /// false from a prefix on the iterator method itself means the state machine is never created; StartCoroutine
@@ -207,7 +210,9 @@ namespace SsOracle.Guards
             o = Simulate(pd.health, pd.maxHealth, cur, pd.healthBlue, maskEq, maskLeft, amount, allowFracturedMaskBreak, preventDeath);
             if (!o.ReachesZero) return true;
 
-            var block = mode == LethalMode.Block;
+            // Under the PreventDeath cheat vanilla itself ends at 1 HP, not 0: record the lethal hit, never cancel it
+            // (cancelling would leave more HP than vanilla). The cheat is TRAIN-only and never replaces this guard.
+            var block = mode == LethalMode.Block && o.Health <= 0;
             var d = Describe("take_health", pd);
             d["amount"] = amount;
             d["lifeblood"] = hasBlueHealth;
@@ -216,13 +221,23 @@ namespace SsOracle.Guards
             d["mask_left"] = maskLeft;
             d["prevent_death_cheat"] = preventDeath;
             d["net"] = 1;
-            if (block && pd.health < 1)
-            {
-                pd.health = 1;
-                d["hp_restored"] = true;
-            }
+            if (block && RestoreHealth(pd, null)) d["hp_restored"] = true;
             Report("catastrophe", d, block);
             return !block;
+        }
+
+        /// <summary>
+        /// Leaves Hornet at &gt;= 1 HP after a veto (a hit can find her at 0 HP after a TakeQuickDamage or an FSM write).
+        /// Writes GameManager's PlayerData and, if it is a different object, the hero's cached copy, which is the one
+        /// TakeDamage/DoSpecialDamage test for 0 right after TakeHealth. Never touches disablePause (m0:N43).
+        /// </summary>
+        private static bool RestoreHealth(PlayerData pd, HeroController hero)
+        {
+            var restored = false;
+            if (pd != null && pd.health < 1) { pd.health = 1; restored = true; }
+            var cached = hero != null ? hero.playerData : null;
+            if (cached != null && !ReferenceEquals(cached, pd) && cached.health < 1) { cached.health = 1; restored = true; }
+            return restored;
         }
 
         private static void TakeHealthPostfix()
@@ -248,11 +263,7 @@ namespace SsOracle.Guards
             d["frost"] = frostDeath;
             d["already_dead"] = __instance.cState.dead;
             d["memory"] = gm != null && gm.sm != null && gm.IsMemoryScene();
-            if (block && pd != null && pd.health < 1)
-            {
-                pd.health = 1;
-                d["hp_restored"] = true;
-            }
+            if (block && RestoreHealth(pd, __instance)) d["hp_restored"] = true;
             lastDieReportFrame = Time.frameCount;
             Report("would_die", d, block);
             if (!block) return true;

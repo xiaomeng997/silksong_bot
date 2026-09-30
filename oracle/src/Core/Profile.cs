@@ -42,7 +42,8 @@ namespace SsOracle.Core
     /// SaveSuppression (starts come from real Continue), savestates allowed.</item>
     /// <item>REHEARSAL_FULL: as SEG but no savestates at all (DebugMod must not be loaded); entering Die counts as a
     /// death and the run continues.</item>
-    /// <item>Every non-TRAIN profile needs SymbolCheck.Ok and healthy, non-refused guards.</item>
+    /// <item>Every non-TRAIN profile needs SymbolCheck.Ok and healthy, non-refused guards, and a Steel Soul session
+    /// only in a slot that has a snapshot (SteelSoulSnapshot; TRAIN only gets a "steel_soul_unprotected" event).</item>
     /// </list>
     /// Non-TRAIN profiles are re-checked about once a second; a new violation emits "profile_violation".
     /// </summary>
@@ -143,6 +144,8 @@ namespace SsOracle.Core
             }
             if (!r.Savestates && DebugModLoaded())
                 v.Add($"{p} allows no savestates, but DebugMod is loaded");
+            if (Guards.SteelSoulSnapshot.Unprotected(out var slot))
+                v.Add($"Steel Soul session in slot {slot} has no snapshot (slot.snapshot first)");
             return v;
         }
 

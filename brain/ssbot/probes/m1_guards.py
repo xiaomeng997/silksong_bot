@@ -13,7 +13,9 @@ Offline pre-check without the game: oracle/tools/symcheck (symbols, TakeHealth r
     uv run python -m ssbot.probes.m1_guards [--instance 0] [--skip-save] [--skip-snapshot] [--skip-profile]
 
 Health is set through the debug line server ("pdset health N" on 127.0.0.1:47631+instance); damage goes through the
-game's own entry points via the hurt.special RPC. Every check prints PASS / FAIL / SKIP; exit code 1 on any FAIL.
+game's own entry points via the hurt.special RPC. "No death" means, over the whole case: GameState stays PLAYING (a
+hazard respawn does; a death goes on to a scene load), cState.dead never set, permadeathMode unchanged, HP >= 1 in
+every STATE, and no would_die. Every check prints PASS / FAIL / SKIP; exit code 1 on any FAIL.
 
 Fractured Mask semantics being asserted (1.0.30000, m0:C2): after blue health absorbs, a hit that would reach 0 HP is
 survived at exactly 1 HP when the mask is equipped and AmountLeft > 0, whatever allowFracturedMaskBreak says; the flag
@@ -51,6 +53,7 @@ class Watch:
         self.dead_seen = False
         self.min_hp: int | None = None
         self.pdm_seen: set[int] = set()
+        self.gs_seen: set[int | None] = set()
         link.subscribe_raw(self._on_raw)
 
     def _on_raw(self, msg_type: int, raw: bytes) -> None:
@@ -58,6 +61,7 @@ class Watch:
             return
         s = msgpack.unpackb(raw[HEADER.size:], raw=False, strict_map_key=False)
         g = s.get("guards") or {}
+        game = s.get("game")
         with self._lock:
             for e in s.get("ev") or ():
                 self.events.append((e["f"], e["k"], e.get("d") or {}))
@@ -67,13 +71,20 @@ class Watch:
                 self.min_hp = g["hp"] if self.min_hp is None else min(self.min_hp, g["hp"])
             if g.get("pdm") is not None:
                 self.pdm_seen.add(g["pdm"])
+            # A hazard respawn stays PLAYING; a death goes on to a scene load (EXITING_LEVEL) or the PermaDeath scene.
+            self.gs_seen.add(game.get("gs") if game else None)
 
     def reset(self) -> int:
         with self._lock:
             self.dead_seen = False
             self.min_hp = None
             self.pdm_seen = set()
+            self.gs_seen = set()
             return len(self.events)
+
+    def stayed_playing(self) -> bool:
+        with self._lock:
+            return self.gs_seen <= {PLAYING}
 
     def since(self, mark: int, *kinds: str) -> list[tuple[int, str, dict]]:
         with self._lock:
@@ -212,13 +223,15 @@ class Probe:
             time.sleep(0.3)
             wd = self.watch.since(mark, "would_die")
             g = self.g()
-            alive = not self.watch.dead_seen and not wd and g["hp"] >= 1 and (self.watch.min_hp or 0) >= 1
+            alive = (not self.watch.dead_seen and not wd and g["hp"] >= 1 and (self.watch.min_hp or 0) >= 1
+                     and self.watch.stayed_playing())
             same_mode = g["pdm"] == self.pdm0 and self.watch.pdm_seen <= {self.pdm0}
             invuln_ok = res["invuln_before"] or not expect_invuln
             self.check(f"net 1: {name}", ok and alive and same_mode and invuln_ok,
                        f"{detail}; invulnerable at the hit {res['invuln_before']}; "
                        f"hp {res['hp_before']}->{res['hp_after']}, min hp seen {self.watch.min_hp}, dead seen "
-                       f"{self.watch.dead_seen}, would_die {len(wd)}, permadeath {self.pdm0}->{g['pdm']}")
+                       f"{self.watch.dead_seen}, would_die {len(wd)}, game states {sorted(self.watch.gs_seen, key=str)}, "
+                       f"permadeath {self.pdm0}->{g['pdm']}")
         except (OracleError, TimeoutError) as e:
             self.check(f"net 1: {name}", False, f"{type(e).__name__}: {e}")
 
@@ -276,9 +289,10 @@ class Probe:
             g = self.g()
             self.check("net 2: CheckDeathCatch at 0 HP -> Die blocked, would_die, HP restored",
                        ev is not None and ev["blocked"] and ev.get("net") == 2 and res["hp_after"] >= 1 and not res["dead"]
-                       and not self.watch.dead_seen and g["pdm"] == self.pdm0,
+                       and not self.watch.dead_seen and g["pdm"] == self.pdm0 and self.watch.stayed_playing(),
                        f"event {ev and {k: ev.get(k) for k in ('cause', 'path', 'net', 'blocked', 'hp_restored')}}, "
-                       f"hp_after {res['hp_after']}, dead {res['dead']}, permadeath {g['pdm']}")
+                       f"hp_after {res['hp_after']}, dead {res['dead']}, game states {sorted(self.watch.gs_seen, key=str)}, "
+                       f"permadeath {g['pdm']}")
         except (OracleError, TimeoutError) as e:
             self.check("net 2: CheckDeathCatch", False, f"{type(e).__name__}: {e}")
 

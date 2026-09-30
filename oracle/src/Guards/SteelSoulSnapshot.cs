@@ -115,28 +115,43 @@ namespace SsOracle.Guards
             }
         }
 
-        /// <summary>Runs file work off the main thread; one operation at a time.</summary>
-        private static void RunIo(Ipc.Rpc.Reply reply, string what, Func<Dictionary<string, object>> work)
+        /// <summary>
+        /// Runs file work off the main thread, one operation at a time. The event, the reply and
+        /// <paramref name="onMain"/> (bookkeeping read by the monitor) run back on the main thread: Emit reads
+        /// Time.frameCount, which Unity only allows there.
+        /// </summary>
+        private static void RunIo(Ipc.Rpc.Reply reply, string what, Func<Dictionary<string, object>> work, Action onMain = null)
         {
             if (Interlocked.CompareExchange(ref busy, 1, 0) != 0) { reply.Fail("another slot operation is running"); return; }
             ThreadPool.QueueUserWorkItem(_ =>
             {
+                Dictionary<string, object> result = null;
+                Exception error = null;
                 try
                 {
-                    var result = work();
+                    result = work();
                     Core.Plugin.Log.LogInfo($"{what}: {result["dir"]}");
-                    Export.FrameExporter.Emit(what, result);
-                    reply.Ok(result);
                 }
                 catch (Exception e)
                 {
+                    error = e;
                     Core.Plugin.Log.LogError($"{what} failed: {e}");
-                    reply.Fail(e.GetType().Name + ": " + e.Message);
                 }
                 finally
                 {
                     Interlocked.Exchange(ref busy, 0);
                 }
+                GuardsMonitor.Post(() =>
+                {
+                    if (error != null)
+                    {
+                        reply.Fail(error.GetType().Name + ": " + error.Message);
+                        return;
+                    }
+                    onMain?.Invoke();
+                    if (what != "slot_list") Export.FrameExporter.Emit(what, result);  // only changes are events
+                    reply.Ok(result);
+                });
             });
         }
 
@@ -157,8 +172,10 @@ namespace SsOracle.Guards
                 CopyEntries(src, tmp, entries);
                 if (Directory.Exists(dst)) Directory.Delete(dst, recursive: true);
                 Directory.Move(tmp, dst);
-                if (sessionSlot == slot) sessionHasSnapshot = true;
                 return new Dictionary<string, object> { ["slot"] = slot, ["name"] = name, ["dir"] = dst, ["entries"] = entries };
+            }, () =>
+            {
+                if (sessionSlot == slot) sessionHasSnapshot = true;
             });
         }
 
@@ -259,6 +276,19 @@ namespace SsOracle.Guards
                 Core.Plugin.Log.LogWarning($"Steel Soul session in slot {sessionSlot} has no snapshot (slot.snapshot before risky training)");
                 Export.FrameExporter.Emit("steel_soul_unprotected", new Dictionary<string, object> { ["slot"] = sessionSlot, ["dir"] = dir });
             }
+        }
+
+        /// <summary>
+        /// Main thread: the running session is Steel Soul and its slot has no snapshot. DESIGN §3.1.1: a Steel Soul
+        /// training slot may only be used with a snapshot, so non-TRAIN profiles treat this as a violation.
+        /// </summary>
+        internal static bool Unprotected(out int slot)
+        {
+            slot = sessionSlot;
+            var gm = GameManager._instance;
+            var pd = gm != null ? gm.playerData : null;
+            return sessionSteel && !sessionHasSnapshot && pd != null &&
+                   System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(pd) == sessionPdId;
         }
 
         internal static Dictionary<string, object> SessionInfo() => new Dictionary<string, object>

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using HarmonyLib;
 using UnityEngine;
@@ -116,6 +117,11 @@ namespace SsOracle.Guards
     internal sealed class GuardsMonitor : MonoBehaviour
     {
         private bool first = true;
+        private static readonly ConcurrentQueue<Action> Posted = new ConcurrentQueue<Action>();
+
+        /// <summary>Any thread: run <paramref name="work"/> on the main thread at the next LateUpdate (the slot
+        /// snapshot workers use it for FrameExporter.Emit, which reads Time.frameCount).</summary>
+        public static void Post(Action work) => Posted.Enqueue(work);
 
         private void LateUpdate()
         {
@@ -123,6 +129,11 @@ namespace SsOracle.Guards
             {
                 first = false;
                 Core.SymbolCheck.LateCheck();
+            }
+            while (Posted.TryDequeue(out var work))
+            {
+                try { work(); }
+                catch (Exception e) { Core.Plugin.Log.LogError("guards posted work failed: " + e); }
             }
             var gm = GameManager._instance;
             var pd = gm != null ? gm.playerData : null;

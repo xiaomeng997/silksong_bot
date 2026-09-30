@@ -145,6 +145,17 @@ namespace SsOracle.Core
             T("ForceCameraAspect"), P("ForceCameraAspect", "CurrentViewportAspect"), P("ForceCameraAspect", "CurrentMainCamFov"),
             P("ForceCameraAspect", "CurrentMainCamHeightMult"),
             T("SilkSpool"), P("SilkSpool", "Instance"),
+            F("CameraController", "xLimit"), F("CameraController", "yLimit"), F("CameraController", "atSceneBounds"),
+            F("ForceCameraAspect", "fovOffset"), F(HC, "current_velocity"), E(HC, "OnHeroInstanceSet"),
+
+            // --- SceneDumper, HudProbe, pause-menu Quit state (m0 §3.1-3.2, planned M1-M5) ---
+            T("WorldInfo"), F("WorldInfo", "SubSceneNameSuffixes"), T("RespawnMarker"), P("RespawnMarker", "Markers"), T("TinkEffect"),
+            F("CustomSceneManager", "mapZone"), P("CustomSceneManager", "ForceNotMemory"), P("CustomSceneManager", "FrostSpeed"),
+            T("InGameCutsceneInfo"), P("InGameCutsceneInfo", "IsInCutscene"), T("BattleScene"), F("BattleScene", "noEndSlomo"),
+            T("SceneData"), F("SceneData", "persistentBools"), F("SceneData", "persistentInts"), P("SceneData", "PersistentBools"),
+            T("HudCanvas"), P("HudCanvas", "IsVisible"), P("GameCameras", "IsHudVisible"),
+            T("HudGlobalHide"), P("HudGlobalHide", "IsHidden"), P("HudGlobalHide", "IsReduced"),
+            T("MenuButtonSaveQuitListCondition"), M("MenuButtonSaveQuitListCondition", "IsFulfilled"),
 
             // --- Achievements, shared data, save files (AchievementGuard m0:C1/N26; SaveRedirect; snapshots m0:C13) ---
             T("Platform"), P("Platform", "Current"), P("Platform", "RoamingSharedData"),
