@@ -298,9 +298,9 @@ namespace SsOracle.Train
         /// The slot for a tool of <paramref name="type"/>, or -1 (pure: replayed offline by tools/symcheck). Candidates:
         /// slots of that type that are usable (unlocked, or any with <paramref name="unlockSlots"/>) and free or holding
         /// a tool not in <paramref name="keep"/>. Lowest key wins, then the lowest index: +1000 bound to Up (the soak
-        /// never presses it), +500 another slot with the same binding already holds an attack tool (only the first in
-        /// slot order is ever thrown: ToolItemManager.GetToolForBinding), +100 locked, +10 Down (Neutral first), +1
-        /// occupied. Bindings only count for attack types (Red, Skill).
+        /// never casts with up held), +500 another slot with the same binding already holds an attack tool (only the
+        /// first in slot order is ever thrown: ToolItemManager.GetToolForBinding), +100 locked, +10 Down (Neutral
+        /// first), +1 occupied. Bindings only count for attack types (Red, Skill).
         /// </summary>
         internal static int ChooseSlot(ToolItemType type, ToolCrest.SlotInfo[] infos, List<string> names, bool[] usable,
             ICollection<string> keep, bool unlockSlots, Func<string, bool> isAttackTool)
@@ -394,9 +394,10 @@ namespace SsOracle.Train
 
             var slots = new List<object>();
             var crest = ToolItemManager.GetCrestByName(pd.CurrentCrestID);
+            List<ToolCrestsData.SlotData> saved = null;
             if (crest != null && crest.Slots != null)
             {
-                var saved = pd.ToolEquips.GetData(crest.name).Slots;
+                saved = pd.ToolEquips.GetData(crest.name).Slots;
                 for (var i = 0; i < crest.Slots.Length; i++)
                 {
                     var info = crest.Slots[i];
@@ -427,9 +428,10 @@ namespace SsOracle.Train
                 ["tools"] = tools,
                 ["crest"] = pd.CurrentCrestID,
                 ["slots"] = slots,
-                // What QuickCast throws per held direction now (the HUD's read: no Up/Down -> Neutral fallback, which
-                // the throw itself applies).
-                ["bindings"] = new Dictionary<string, object>
+                // What QuickCast throws per held direction, from PlayerData (no Up/Down -> Neutral fallback, which the
+                // throw itself applies), and the game's cached read of the same (the HUD's; see Bindings).
+                ["bindings"] = Bindings(crest, saved),
+                ["bindings_cached"] = new Dictionary<string, object>
                 {
                     ["neutral"] = Bound(AttackToolBinding.Neutral),
                     ["up"] = Bound(AttackToolBinding.Up),
@@ -449,6 +451,30 @@ namespace SsOracle.Train
                 ["silk_skill_cost"] = pd.SilkSkillCost,
                 ["save_redirected"] = Guards.SaveRedirect.Redirected,
                 ["save_suppression"] = Guards.GuardState.SaveSuppression,
+            };
+        }
+
+        /// <summary>The attack tool per binding as ToolItemManager.GetBoundAttackTool rebuilds it from PlayerData: the
+        /// first equipped attack tool (Red, Skill) in slot order whose slot has that binding (GetToolForBinding). The
+        /// game caches the result and rebuilds it only after SetEquippedTools, a tool override, ReplaceToolEquips or a
+        /// crest change; a DebugMod savestate load does none of these, so the cache (bindings_cached) can still name
+        /// the tools of the state before the load. The custom tool override (Neutral only) is not modelled.</summary>
+        private static Dictionary<string, object> Bindings(ToolCrest crest, List<ToolCrestsData.SlotData> saved)
+        {
+            var bound = new string[3];
+            if (crest != null && crest.Slots != null && saved != null)
+                for (var i = 0; i < Math.Min(crest.Slots.Length, saved.Count); i++)
+                {
+                    var name = saved[i].EquippedTool;
+                    var b = (int)crest.Slots[i].AttackBinding;
+                    if (string.IsNullOrEmpty(name) || b < 0 || b > 2 || bound[b] != null) continue;
+                    if (IsAttackTool(name)) bound[b] = name;
+                }
+            return new Dictionary<string, object>
+            {
+                ["neutral"] = bound[(int)AttackToolBinding.Neutral],
+                ["up"] = bound[(int)AttackToolBinding.Up],
+                ["down"] = bound[(int)AttackToolBinding.Down],
             };
         }
 
