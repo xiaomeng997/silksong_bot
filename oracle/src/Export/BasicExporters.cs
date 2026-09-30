@@ -91,14 +91,7 @@ namespace SsOracle.Export
             if (gm == null || pd == null || ih == null) { w.Nil(); return; }
 
             var blocking = InteractManager.BlockingInteractable != null;
-            uint blk = 0;
-            if (pd.disablePause) blk |= 1;
-            if (gm.TimeSlowed) blk |= 2;
-            if (!ih.PauseAllowed) blk |= 4;
-            if (GenericMessageCanvas.IsActive) blk |= 8;
-            if (blocking && !pd.atBench) blk |= 16;
-            if (!ih.acceptingInput) blk |= 32;
-            if (gm.GameState != GlobalEnums.GameState.PLAYING) blk |= 64;
+            var blk = Input.PauseGate.Blockers(gm, pd);   // one definition of the pause gate, shared with the input harness
 
             w.MapHeader(8);
             w.Key("blk"); w.UInt(blk);

@@ -21,13 +21,13 @@ from pathlib import Path
 import zstandard
 
 from ssbot.ipc.oracle_link import OracleLink
+from ssbot.tools.launcher import PrefsGuard, process_created
 
 GAME = Path(r"C:\ssbot\game\train\Hollow Knight Silksong.exe")
 # A copy outside AppData (see brain/uv.toml): the winget install may only exist inside the Claude app's package view.
 # ffmpeg 9.0.2: its NVENC API 13.1 needs NVIDIA driver >= 610 (617.14 installed).
 FFMPEG = Path(r"C:\ssbot\tools\ffmpeg\bin\ffmpeg.exe")
 PREFS_KEY = r"HKCU\Software\Team Cherry\Hollow Knight Silksong"
-GOLDEN = Path(r"C:\ssbot\sandbox\prefs\golden.reg")
 KEEP_PREFIXES = ("NativeInput_h", "XInput_h", "AppleMFi_h")
 
 
@@ -65,10 +65,8 @@ def reg(*args: str) -> None:
     subprocess.run(["reg", *args], capture_output=True, check=True)
 
 
-def restore_golden(keep: dict[str, str]) -> None:
-    """Delete the PlayerPrefs key, import the golden snapshot, then re-apply the kept gamepad keys."""
-    reg("delete", PREFS_KEY, "/f")
-    reg("import", str(GOLDEN))
+def reapply_gamepad_keys(keep: dict[str, str]) -> None:
+    """The golden snapshot carries the frozen gamepad backend; keep the player's choice on top of it."""
     for name, dword in keep.items():
         reg("add", PREFS_KEY, "/v", name, "/t", "REG_DWORD", "/d", dword, "/f")
 
@@ -96,10 +94,22 @@ def main() -> None:
 
     game_args = ["-ssbot-human", "-ssbot-instance", str(args.instance), "-logFile", str(session / "player.log"),
                  "-screen-fullscreen", "1", "-screen-width", "1920", "-screen-height", "1080"]
-    # Start from the frozen settings too, whatever the registry currently holds (the player's own launches, or a
-    # registry view that differs between the Claude app and Explorer).
-    restore_golden(gamepad_keys())
-    game = subprocess.Popen([str(GAME), *game_args], cwd=GAME.parent)
+    # Register with the training launcher's PrefsGuard, so a human session and bot instances never race on the shared
+    # PlayerPrefs: it refuses while other game processes run, and restores the golden snapshot once, when the last
+    # registered instance is gone. We also start from the frozen settings, whatever the registry holds now (the
+    # player's own launches, or a registry view that differs between the Claude app and Explorer).
+    guard = PrefsGuard.default()
+    keep = gamepad_keys()
+    game_holder: dict = {}
+
+    def start() -> tuple[int, float | None]:
+        guard.store.restore(guard.golden)
+        reapply_gamepad_keys(keep)
+        game_holder["p"] = subprocess.Popen([str(GAME), *game_args], cwd=GAME.parent)
+        return game_holder["p"].pid, process_created(game_holder["p"].pid)
+
+    guard.launch(start, instance=args.instance)
+    game = game_holder["p"]
     print("game started; waiting for the oracle ...")
 
     link = OracleLink(instance=args.instance, connect_timeout_s=120)
@@ -136,7 +146,8 @@ def main() -> None:
     states.close()
 
     keep = gamepad_keys()
-    restore_golden(keep)
+    if guard.release(game.pid):  # golden restored: this was the last registered instance
+        reapply_gamepad_keys(keep)
 
     meta = {
         "started": datetime.fromtimestamp(start).isoformat(timespec="seconds"),

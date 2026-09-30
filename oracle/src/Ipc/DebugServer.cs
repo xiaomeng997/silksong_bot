@@ -89,6 +89,7 @@ namespace SsOracle.Ipc
             switch (cmd)
             {
                 case "keys":
+                    if (!Core.Profile.Rules.Injection) return $"err key injection is disabled in profile {Core.Profile.Current}";
                     var names = arg.Length == 0 ? new string[0] : arg.Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries);
                     return Input.KeyboardInjector.TrySetKeys(names, out var error) ? "ok" : "err " + error;
                 case "own":
@@ -102,12 +103,19 @@ namespace SsOracle.Ipc
                 case "trace":
                     return int.TryParse(arg, out var n) && n > 0 ? Export.StateProbe.StartTrace(n) : "err trace takes <frames>";
                 case "hurt":
+                    if (!Core.Profile.Rules.ProbeTools) return $"err probe tools are disabled in profile {Core.Profile.Current}";
                     return Core.MainThread.Run(() => Train.HeroDamage.Hurt(arg));
                 case "pdget":
                     return Core.MainThread.Run(() => Train.PlayerDataEdit.Get(arg));
                 case "pdset":
+                    if (!Core.Profile.Rules.ProbeTools) return $"err probe tools are disabled in profile {Core.Profile.Current}";
                     var parts = arg.Split(new[] { ' ' }, 2);
                     if (parts.Length != 2) return "err pdset takes <field> <value>";
+                    // The line server must never be a way around the guards: no Steel Soul state edits, and no lethal
+                    // health unless LethalBlock is blocking (with it off or observing, 0 HP is not restored).
+                    if (parts[0] == "permadeathMode") return "err permadeathMode is never edited through the debug server";
+                    if (parts[0] == "health" && int.TryParse(parts[1], out var hp) && hp <= 0 && Guards.GuardState.Lethal != Guards.LethalMode.Block)
+                        return "err health <= 0 is refused unless lethal_block is 'block'";
                     return Core.MainThread.Run(() => Train.PlayerDataEdit.Set(parts[0], parts[1]));
                 default:
                     return "err unknown command";

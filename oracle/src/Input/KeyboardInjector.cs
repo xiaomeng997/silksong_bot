@@ -132,7 +132,8 @@ namespace SsOracle.Input
                 latched = mask;
                 latchedKeys = ToKeys(mask);
             }
-            var owns = OwnsKeyboard;
+            // REHEARSAL profiles drive the final sink (SendInput), never the in-engine injector.
+            var owns = OwnsKeyboard && Core.Profile.Rules.Injection;
             // The legacy shim must only report edges the game actually receives.
             LegacyInputShim.OnLatched(owns ? latched : 0);
             if (!owns) return;

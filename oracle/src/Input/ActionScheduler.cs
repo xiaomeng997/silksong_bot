@@ -70,6 +70,7 @@ namespace SsOracle.Input
         /// <summary>IPC reader thread: payload is a msgpack array [target_frame, buttons, hold_frames, ack_seq].</summary>
         public static void Enqueue(byte[] body, int offset, int count)
         {
+            if (!Core.Profile.Rules.Injection) return;  // REHEARSAL profiles: ACTIONs go through the final sink instead
             if (!(new Ipc.MsgPackReader(body, offset, count).Read() is List<object> a) || a.Count < 4) return;
             Incoming.Enqueue(new DelayLine.Item
             {

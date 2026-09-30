@@ -65,18 +65,20 @@ namespace SsOracle.Core
         private static int nextCheckFrame;
         private static bool startupChecked;
 
+        // One immutable instance per profile: Rules is read every frame (input latch), so it must not allocate.
+        private static readonly ProfileRules ShadowRules = new ProfileRules { Lethal = Guards.LethalMode.Block, LethalFixed = true, SaveSuppressionAllowed = true, AchievementGuardRequired = true, Savestates = true, Injection = true };
+        private static readonly ProfileRules RehearsalSegRules = new ProfileRules { Lethal = Guards.LethalMode.Observe, LethalFixed = true, AchievementGuardRequired = true, Savestates = true };
+        private static readonly ProfileRules RehearsalFullRules = new ProfileRules { Lethal = Guards.LethalMode.Observe, LethalFixed = true, AchievementGuardRequired = true };
+        private static readonly ProfileRules TrainRules = new ProfileRules { Lethal = Guards.LethalMode.Block, SaveSuppressionAllowed = true, CheatsAllowed = true, Savestates = true, Injection = true, ProbeTools = true };
+
         public static ProfileRules For(ProfileName p)
         {
             switch (p)
             {
-                case ProfileName.SHADOW:
-                    return new ProfileRules { Lethal = Guards.LethalMode.Block, LethalFixed = true, SaveSuppressionAllowed = true, AchievementGuardRequired = true, Savestates = true, Injection = true };
-                case ProfileName.REHEARSAL_SEG:
-                    return new ProfileRules { Lethal = Guards.LethalMode.Observe, LethalFixed = true, AchievementGuardRequired = true, Savestates = true };
-                case ProfileName.REHEARSAL_FULL:
-                    return new ProfileRules { Lethal = Guards.LethalMode.Observe, LethalFixed = true, AchievementGuardRequired = true };
-                default:
-                    return new ProfileRules { Lethal = Guards.LethalMode.Block, SaveSuppressionAllowed = true, CheatsAllowed = true, Savestates = true, Injection = true, ProbeTools = true };
+                case ProfileName.SHADOW: return ShadowRules;
+                case ProfileName.REHEARSAL_SEG: return RehearsalSegRules;
+                case ProfileName.REHEARSAL_FULL: return RehearsalFullRules;
+                default: return TrainRules;
             }
         }
 

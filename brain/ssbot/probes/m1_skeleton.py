@@ -35,6 +35,7 @@ def main() -> None:
     print(f"ACTION target {target} applied at frame {s['act']['applied']} (lag {s['act']['applied'] - target}), mask {s['act']['mask']}")
     s = link.wait_state(lambda s: s["act"]["mask"] == 0, timeout_s=2)
     print(f"released by frame {s['f']}")
+    link.rpc("input.release")  # stop driving, or the brain-lost watchdog taps Pause once we go idle
     time.sleep(1.5)
     print("menu now:", link.state["game"]["menu"])
     link.close()
