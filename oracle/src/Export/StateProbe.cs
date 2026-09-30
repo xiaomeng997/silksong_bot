@@ -1,3 +1,4 @@
+using System;
 using System.Globalization;
 using System.IO;
 using System.Text;
@@ -26,9 +27,32 @@ namespace SsOracle.Export
             writer = new StreamWriter(OutPath, append: true, Encoding.UTF8) { AutoFlush = true };
         }
 
+        private static volatile int traceFrames;
+        private static volatile string tracePath;
+        private StreamWriter traceWriter;
+
+        /// <summary>Record the snapshot of each of the next <paramref name="frames"/> frames to a JSONL file.</summary>
+        public static string StartTrace(int frames)
+        {
+            tracePath = Path.Combine(@"C:\ssbot\sandbox", $"trace_{DateTime.Now:HHmmss_fff}.jsonl");
+            traceFrames = frames;
+            return "ok " + tracePath;
+        }
+
         private void LateUpdate()
         {
             Latest = Snapshot();
+            if (traceFrames > 0)
+            {
+                if (traceWriter == null)
+                    traceWriter = new StreamWriter(tracePath, append: false, Encoding.UTF8);
+                traceWriter.WriteLine(Latest);
+                if (--traceFrames == 0)
+                {
+                    traceWriter.Dispose();
+                    traceWriter = null;
+                }
+            }
             if (Time.unscaledTime < nextWrite) return;
             nextWrite = Time.unscaledTime + IntervalSeconds;
             writer.WriteLine(Latest);
@@ -61,6 +85,12 @@ namespace SsOracle.Export
             }
 
             sb.Append(",\"state\":\"").Append(gm.GameState).Append('"');
+            // Pause gates (m0:N12, pause-toggle-gates): all must allow for an Esc press to pause.
+            var gih = gm.inputHandler;
+            sb.Append(",\"pauseAllowed\":").Append(gih != null && gih.PauseAllowed ? "true" : "false");
+            sb.Append(",\"acceptingInput\":").Append(gih != null && gih.acceptingInput ? "true" : "false");
+            sb.Append(",\"timeSlowed\":").Append(gm.TimeSlowed ? "true" : "false");
+            sb.Append(",\"blockingInteractable\":").Append(InteractManager.BlockingInteractable != null ? "true" : "false");
             var ui = gm.ui;
             if (ui != null)
             {

@@ -14,6 +14,7 @@ namespace SsOracle.Ipc
     ///   state              latest per-frame snapshot (JSON)
     ///   constants          engine timing settings + every primitive HeroController field (P11)
     ///   pdget f / pdset f v  read / write a primitive PlayerData field (training-only probe setup)
+    ///   hurt n Hazard [side] HeroController.TakeDamage(n, Hazard) through the real damage path (P7/P15)
     /// Every command gets one reply line: "ok", "err ...", or the JSON.
     /// </summary>
     internal sealed class Server
@@ -98,6 +99,10 @@ namespace SsOracle.Ipc
                     return Export.StateProbe.Latest ?? "{}";
                 case "constants":
                     return Core.MainThread.Run(Export.ConstantsDump.Build);
+                case "trace":
+                    return int.TryParse(arg, out var n) && n > 0 ? Export.StateProbe.StartTrace(n) : "err trace takes <frames>";
+                case "hurt":
+                    return Core.MainThread.Run(() => Train.HeroDamage.Hurt(arg));
                 case "pdget":
                     return Core.MainThread.Run(() => Train.PlayerDataEdit.Get(arg));
                 case "pdset":
