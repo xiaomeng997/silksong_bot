@@ -68,3 +68,8 @@
 - l. Weave_10（Eva）的 `AutoEquipCrestV4` 是否强制换回 Hunter_v2（wiki 称 Patch 3 修了卸工具的问题）；最简单的规避是进 S15 前在工作台换回 Hunter。
 - m. Wanderer 的 HUD/菜单模板：线轴框、"幸运"动画、存档槽线轴（普通 + Steel）、`wanderer_*` 攻击动画。
 - n. 各 Memory Locket 的确切位置和价格；Bellhart 的 Locket 是否在 Widow 之前就卖（有单一来源称 Greymoor 车站附近可拾取一个）。
+
+**工具（2026-09-30 写好，soak 结束后运行）：** SsOracle 的 `Crest` 模块和 `Events/HunterMeterTap.cs`，探针 `brain/ssbot/probes/p17_crests.py`。
+- 覆盖：a（`crest.dump`：每个纹章的配置；`config_group.rule` 说明 UpdateConfig 怎样把纹章映射到配置组，纹章没有自己的 HeroConfig 时走 configs[0]）、b（`slash.dump`：当前配置组的每个攻击对象，DamageEnemies 字段、`canHitSpikes`、HeroDownAttack、碰撞体世界坐标，禁用的也算；`all_groups` 附带所有配置组）、c（`gameplay.dump`）、f 的清零原因（STATE `hero.hunter_meter` + `hunter_meter` 事件：damage、special_damage、max_health、maggoted、equips_changed、crest_reset、hero_rebuilt、unknown）、i（槽位的静态 `locked` 与存档的 `saved.unlocked` 并列）。
+- 代码看不出、要运行时回答的：坐工作台是否调用 `HeroController.MaxHealth()`（由工作台 FSM 决定，看 `hunter_meter` 事件的 reason）；Custom 下劈（`crestAttacksFSM` 的 DownSlashEvent）和 Wanderer dash-combo（Sprint FSM 的 `WANDERER DASH COMBO`）用哪些对象。冲刺刺、蓄力斩由 FSM 经 `GetHeroAttackObject` 从 CurrentConfigGroup 取（不走覆盖组）[code]。d、e、g、h、j–n 需要实际打斗或跑路线，不在本探针里。
+- 运行：训练副本读一个沙盒早期存档，Hornet 站定、背包关闭，然后 `cd brain` → `..\scripts\uv.cmd run python -m ssbot.probes.p17_crests`。探针全程打开 SaveSuppression，逐个 `crest.equip`（Wanderer、Reaper、Hunter_v2，存档没有的先解锁），每个导出，最后 `crest.equip {restore}` 换回原纹章并重新上锁，写 `docs/facts/1.0.30000/crests.json` 并打印对比表。

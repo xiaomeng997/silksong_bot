@@ -29,6 +29,7 @@ namespace SsOracle.Core
             Events.EventsModule.Install(host, harmony);    // tap, room, prog; TERRAIN and PROGRESS messages
             Input.InputModule.Install(host, harmony);      // legacy anyKeyDown shim, latency model
             Train.TrainModule.Install(host, harmony);      // savestates, randomized starts
+            Crest.CrestModule.Install(host, harmony);      // crest/attack dumps, crest.equip (P17)
         }
     }
 }

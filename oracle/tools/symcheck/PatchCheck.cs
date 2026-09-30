@@ -4,7 +4,7 @@ using System.Reflection;
 // target with the same name and type; __instance must accept the declaring type; __result must match the return type.
 // Harmony binds prefix arguments by name, so a mismatch would only surface as a patch failure inside the game.
 // Keep the list in sync with the Install methods in oracle/src/Guards (LethalBlock, AchievementGuard, SessionGate,
-// SaveSuppression).
+// SaveSuppression) and Events.HunterMeterTap.
 static class PatchCheck
 {
     const BindingFlags All = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static;
@@ -48,6 +48,14 @@ static class PatchCheck
         ("GameManager", "CreateRestorePoint", new[] { "System.Int32", "AutoSaveName", "System.Action`1[System.Boolean]" }, "SsOracle.Guards.SaveSuppression", "RestorePointPrefix"),
         ("GameManager", "SaveGameData", new[] { "System.Int32", "SaveGameData", "System.Boolean", "System.Action`1[System.Boolean]" }, "SsOracle.Guards.SaveSuppression", "SaveGameDataPrefix"),
         ("GameManager", "PreparePlayerDataForSave", new[] { "System.Int32" }, "SsOracle.Guards.SaveSuppression", null),
+        // Events.HunterMeterTap (P17): reset sites of the Hunter combo meter.
+        ("HeroController", "TakeDamage", new[] { "UnityEngine.GameObject", "GlobalEnums.CollisionSide", "System.Int32", "GlobalEnums.HazardType", "GlobalEnums.DamagePropertyFlags" }, "SsOracle.Events.HunterMeterTap", "DamagePrefix"),
+        ("HeroController", "DoSpecialDamage", new[] { "System.Int32", "System.Boolean", "System.String", "System.Boolean", "System.Boolean", "System.Boolean", "System.Boolean" }, "SsOracle.Events.HunterMeterTap", "SpecialPrefix"),
+        ("HeroController", "MaxHealth", new string[0], "SsOracle.Events.HunterMeterTap", "MaxHealthPrefix"),
+        ("HeroController", "SetIsMaggoted", new[] { "System.Boolean" }, "SsOracle.Events.HunterMeterTap", "MaggotedPrefix"),
+        ("HeroController", "ResetAllCrestState", new[] { "System.Boolean" }, "SsOracle.Events.HunterMeterTap", "CrestResetPrefix"),
+        ("ToolItemManager", "SendEquippedChangedEvent", new[] { "System.Boolean" }, "SsOracle.Events.HunterMeterTap", "EquipsPrefix"),
+        ("ToolItemManager", "SendEquippedChangedEvent", new[] { "System.Boolean" }, "SsOracle.Events.HunterMeterTap", "ExitPostfix"),
     };
 
     public static int Run()

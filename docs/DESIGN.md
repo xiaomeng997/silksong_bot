@@ -367,7 +367,7 @@ FrameLabel {                                   # 字段来源见 m0 §3.1
   hero { pos, vel, facing, colliders[], cState[92] + 4 int, hero_state, anim{clip,frame,n,fps,sprite_id},
          health, maxHealth, healthBlue, silk, silk_max (= CurrentSilkMax), silk_parts, crest, tools[], tool_amounts[],
          geo, shellShards, invuln_sources[], parry_invuln_timer, is_invincible, can_take_damage,
-         fractured_mask{equipped, amount_left}, bind{active,t},
+         fractured_mask{equipped, amount_left}, bind{active,t}, hunter_meter,   # Hunter 连击计数，清零为 hunter_meter 事件
          damage_tags[{kind, ticks_left, dmg_per_tick, next_tick_s}] }
   entities [ { iid, type_key, category, layer, pos, vel, gravity_scale, hp, fsms[{name,state,t}],
                anim{…}, flipX, render_aabb, colliders[{shape, verts_world, enabled, layer,
@@ -1666,7 +1666,7 @@ FTE 周按全职计；每周投入 15–20 h 时乘以约 2–2.7。门槛运行
 | P14 | Extras → Achievements 界面在 Steam 已初始化和未初始化时是否真的不同。按代码它会退回 shared.dat [m0:N35]。**结果：不能区分**——无 Steam 子系统的训练副本只凭沙盒 shared.dat 里的本地 `FIRST_TOOL=1` 就把该成就显示为已解锁；预检和结局核对只认 Player.log（`Steam logged in as`、`Steam stats received.`、每个成就的 `upload complete`）[probe:P14] |
 | P15 | 杀进程的语义（D13）：Die 前杀、Die 后杀、SaveGame 期间杀；致命帧 → `user{N}.dat` 落盘的耗时；Dead 是否同时写入版本备份 `user{N}_1.0.30000.dat`；死亡后 `.bak*` 轮换与 `Restore_Points` 的状态。在沙盒 Steel Soul 槽上测。**M0 已测：** 致命伤后约 142 ms `user{N}.dat` 已是 Dead；死后 +103 ms（taskkill 最快）到 +1123 ms 杀进程均留下 DEFEATED 槽；`.bak1` 保留存活状态 [probe:P15] |
 | P16（M5） | Wardenfly 捕获 + 捕获后退出，确定恢复方案 |
-| P17（M2 前） | 纹章运行时导出（清单见 [`research/crests.md`](research/crests.md) §5）：各纹章 `HeroControllerConfig`、各挥刀的伤害/产丝/`canHitSpikes`/世界坐标碰撞体、下劈 i-frame、Hunter 连击计数与清零原因、Wanderer dash-combo 与暴击冻结、槽位与 Locket、Chapel_Wanderer 入口与竞技场、Eva 的强制换装；离线资产值（`[asset]`）以此为准 |
+| P17（M2 前） | 纹章运行时导出（清单见 [`research/crests.md`](research/crests.md) §5）：各纹章 `HeroControllerConfig`、各挥刀的伤害/产丝/`canHitSpikes`/世界坐标碰撞体、下劈 i-frame、Hunter 连击计数与清零原因、Wanderer dash-combo 与暴击冻结、槽位与 Locket、Chapel_Wanderer 入口与竞技场、Eva 的强制换装；离线资产值（`[asset]`）以此为准。**工具已就绪（2026-09-30，未运行）：** oracle RPC `crest.dump`、`slash.dump`、`gameplay.dump`、`crest.equip`（仅 TRAIN），STATE `hero.hunter_meter` 与 `hunter_meter` 事件；探针 `brain/ssbot/probes/p17_crests.py` 写 `facts/1.0.30000/crests.json` |
 
 **MVP 阶梯（每级都能停下来，并有通过门槛）：**
 1. Oracle 录制 + 查看器：60 min ≥ 99.9% 帧送达。

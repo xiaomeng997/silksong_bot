@@ -47,6 +47,10 @@ namespace SsOracle.Guards
         /// <summary>How many DebugMod methods now use the sandbox (-1: DebugMod not loaded).</summary>
         public static int DebugModMethodsRedirected => debugModMethods;
 
+        /// <summary>True once DesktopPlatform.Awake took the sandbox root: every save file of this process is a sandbox
+        /// file (tools that edit PlayerData check it, since the edit reaches disk with the next save).</summary>
+        public static bool Redirected => redirected;
+
         public static void Install(Harmony harmony)
         {
             var awake = AccessTools.Method(typeof(DesktopPlatform), "Awake");
