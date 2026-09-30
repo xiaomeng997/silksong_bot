@@ -544,6 +544,17 @@ def main(argv: Sequence[str] | None = None) -> int:
         if progress.changed and save_suppression_on(link):
             print(SAVE_KEPT.format(instance=a.instance), file=sys.stderr)
         return 1
+    except KeyboardInterrupt:
+        # Ctrl+C (often pressed when the oracle hangs) can land after the game was changed and before, or during, the
+        # restore: the same guidance, then the conventional exit code.
+        print("[FAIL] interrupted", file=sys.stderr)
+        try:
+            kept = progress.changed and save_suppression_on(link)
+        except KeyboardInterrupt:
+            kept = progress.changed
+        if kept:
+            print(SAVE_KEPT.format(instance=a.instance), file=sys.stderr)
+        return 130
     finally:
         link.close()
 

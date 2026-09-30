@@ -692,3 +692,29 @@ def test_main_without_a_link(monkeypatch, capsys):
     monkeypatch.setattr(p17, "OracleLink", refused)
     assert p17.main(["--instance", "1"]) == 2
     assert "[FAIL] no link to the oracle of instance 1: ConnectionRefusedError" in capsys.readouterr().err
+
+
+def test_main_ctrl_c_after_a_change_prints_the_guidance(monkeypatch, tmp_path, capsys):
+    # Ctrl+C lands in the crest loop after SaveSuppression went on and Reaper was equipped; every later RPC is
+    # interrupted too (a hung oracle and a second Ctrl+C), so main cannot even ask the game.
+    game = FakeGame()
+    dumps = []
+
+    def second_slash_dump(name, args):  # the first dumps the crest the save came with, before anything changes
+        dumps.append(name) if name == "slash.dump" else None
+        return name == "slash.dump" and len(dumps) == 2
+
+    link = FakeLink(game, breaks_at=second_slash_dump, error=KeyboardInterrupt)
+    monkeypatch.setattr(p17, "OracleLink", lambda instance: link)
+    assert p17.main(["--instance", "2", "--crests", "Reaper", "--out", str(tmp_path / "c.json")]) == 130
+    err = capsys.readouterr().err
+    assert "[FAIL] interrupted" in err and p17.SAVE_KEPT.format(instance=2) in err
+    assert link.closed and game.save_suppression is True
+
+
+def test_main_ctrl_c_before_any_change_says_nothing_about_the_save(monkeypatch, tmp_path, capsys):
+    link = FakeLink(FakeGame(), breaks_at=lambda name, args: name == "crest.dump", error=KeyboardInterrupt)
+    monkeypatch.setattr(p17, "OracleLink", lambda instance: link)
+    assert p17.main(["--crests", "Reaper", "--out", str(tmp_path / "c.json")]) == 130
+    err = capsys.readouterr().err
+    assert "[FAIL] interrupted" in err and p17.SAVE_KEPT.format(instance=0) not in err
