@@ -56,6 +56,9 @@ Event kinds (k) and payload keys (d); "fsm" = "GameObject/Fsm/State:Action" when
                   room_left | no_game_manager | game_manager_rebuilt; "end" comes from the coroutine's last step
     freeze        phase start (id, type, down, wait, up, speed, caller?) | end (id, type, ms, frames, reason)
                   type = FreezeMomentTypes name, or "direct:<caller>" (e.g. the hero's own damage freeze)
+    hunter_meter  reason, from, to, crest, caller? (crest_reset), fsm?         (the Hunter combo meter, STATE
+                  hero.hunter_meter, went down, i.e. was reset. reason: damage | special_damage | max_health | maggoted |
+                  equips_changed | crest_reset (hero Awake, FixUpSaveState) | hero_rebuilt | unknown (seen by the poll))
     pause_gate    gate (disable_pause | disable_save_quit | disable_inventory | inventory_open | pause_allowed |
                   msg_canvas | in_msg), value, src (hook name or "poll"), key? (msg_canvas), object? (in_msg)
     save          phase begin (id, kind save|restore_point, slot, auto, auto_name, t_saved, t_live, caller) |

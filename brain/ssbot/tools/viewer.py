@@ -6,7 +6,7 @@
 Shows, as far as the recording has them:
   world/            hero position + per-scene trajectory, entity collider polygons ("ents"), TERRAIN polygons.
                     World y is negated when logged, so up is up in Rerun's y-down 2D view.
-  series/hero       hp, max hp, blue hp, silk, silk max          series/time    t_live, t_saved, t_sess
+  series/hero       hp, max hp, blue hp, silk, silk max, hunter meter   series/time    t_live, t_saved, t_sess
   series/oracle     STATE build cost_us, time scale, oracle drop counter
   states/           GameState, scene, focus, and one lane per pause blocker bit ("pause.blk")
   events            every STATE event as a text log line
@@ -44,6 +44,7 @@ SERIES: dict[str, tuple[P, ...]] = {
     "series/hero/hp_blue": (("hero", "healthBlue"), ("hero", "health_blue"), ("hero", "blue"), ("pd", "healthBlue")),
     "series/hero/silk": (("hero", "silk"), ("pd", "silk"), ("player", "silk")),
     "series/hero/silk_max": (("hero", "silk_max"), ("hero", "silkMax"), ("pd", "silk_max"), ("pd", "silkMax")),
+    "series/hero/hunter_meter": (("hero", "hunter_meter"),),
     "series/time/t_live": (("game", "t_live"),),
     "series/time/t_saved": (("game", "t_saved"),),
     "series/time/t_sess": (("game", "t_sess"),),
