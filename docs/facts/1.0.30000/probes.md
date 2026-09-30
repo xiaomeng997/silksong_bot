@@ -32,6 +32,12 @@
   - 在主菜单打开后才放进去的存档不会被存档选择界面看到。选中该槽时，游戏把它当空槽，静默开始了一局**普通模式新游戏**（m0:N30 的实例）。当时立即结束了进程，存档文件未被覆盖。MenuDriver 必须在每次进入存档选择界面时读槽位内容再操作。
   - 从商店退出后立刻按 Esc，按键会被丢弃（关闭动画期间不可暂停，m0:N12）。
 
+## P14 成就界面能否证明 Steam 在线 — 不能（2026-09-29）
+
+- 训练副本（没有 Steam 子系统）的沙盒 `shared.dat` 里只有本地记录 `FIRST_TOOL=1`。主菜单 → 成就界面把"利器傍身 / 获得首个工具"显示为已解锁，其余为灰色。
+- 结论：成就界面按 `IsAchievementUnlocked` 显示，Steam 不在时退回本地 `shared.dat`（m0:N26/N35）。它在"Steam 在线"和"只有本地记录"两种情况下看起来一样，不能作为 Steam 收到成就的证据。预检和结局核对只以 `Player.log` 为准：`Steam logged in as`、`Steam stats received.`，以及每个成就的 `upload complete`。
+- 附带：训练副本的菜单左上角有 Modlist 画出的版本和模组列表（`v1.0.30000-0.3.1 / DebugMod / SsOracle`），最终副本没有。采集菜单画面做训练数据时要遮掉这块区域。
+
 ## 存档重定向（P9 ②）— 通过
 
 - `oracle/src/Guards/SaveRedirect.cs`：Harmony 转译补丁把 `DesktopPlatform.Awake` 里唯一一次 `Application.persistentDataPath` 调用换成 `C:\ssbot\sandbox\saves\<实例号>`（`-ssbot-instance N`，默认 0）。于是 user*.dat、`.bak*`、Restore_Points、shared.dat 都进入沙盒。
