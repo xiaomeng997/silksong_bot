@@ -1,5 +1,6 @@
 """Find and focus the Silksong window."""
 import ctypes
+import time
 from ctypes import wintypes
 
 user32 = ctypes.WinDLL("user32", use_last_error=True)
@@ -35,15 +36,37 @@ def park_cursor_outside(hwnd: int) -> None:
         user32.SetCursorPos(left + 20, bottom + 20)
 
 
-def focus(hwnd: int) -> bool:
-    """Bring the game to the foreground. Windows may refuse; the caller must check is_foreground."""
+kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+user32.GetWindowThreadProcessId.restype = wintypes.DWORD
+
+
+def focus(hwnd: int, attempts: int = 5) -> bool:
+    """Bring the game to the foreground and confirm it. Returns False if Windows refused every attempt;
+    callers must never send keys in that case, or the keys land in whatever window the user is in."""
     SW_RESTORE = 9
-    user32.ShowWindow(hwnd, SW_RESTORE)
-    # Pressing and releasing Alt lets a background process take the foreground (foreground lock rule).
-    user32.keybd_event(0x12, 0, 0, 0)
-    user32.keybd_event(0x12, 0, 2, 0)
-    user32.SetForegroundWindow(hwnd)
-    return is_foreground(hwnd)
+    for _ in range(attempts):
+        if is_foreground(hwnd):
+            return True
+        user32.ShowWindow(hwnd, SW_RESTORE)
+        # Windows only lets the process that owns the foreground (or received the last input) change it.
+        # Temporarily sharing the foreground thread's input state satisfies that rule.
+        fg = user32.GetForegroundWindow()
+        fg_thread = user32.GetWindowThreadProcessId(fg, None) if fg else 0
+        me = kernel32.GetCurrentThreadId()
+        attached = bool(fg_thread) and fg_thread != me and user32.AttachThreadInput(me, fg_thread, True)
+        try:
+            user32.keybd_event(0x12, 0, 0, 0)  # Alt tap: also unlocks SetForegroundWindow
+            user32.keybd_event(0x12, 0, 2, 0)
+            user32.BringWindowToTop(hwnd)
+            user32.SetForegroundWindow(hwnd)
+        finally:
+            if attached:
+                user32.AttachThreadInput(me, fg_thread, False)
+        for _ in range(10):
+            if is_foreground(hwnd):
+                return True
+            time.sleep(0.02)
+    return False
 
 
 def rect(hwnd: int) -> tuple[int, int, int, int]:

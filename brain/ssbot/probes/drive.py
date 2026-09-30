@@ -16,10 +16,8 @@ def _hwnd() -> int:
     if not hwnd:
         sys.exit("game window not found")
     game_window.park_cursor_outside(hwnd)
-    if not game_window.is_foreground(hwnd) and not game_window.focus(hwnd):
-        time.sleep(0.2)
-        if not game_window.is_foreground(hwnd):
-            sys.exit("could not focus the game window")
+    if not game_window.focus(hwnd):
+        sys.exit("could not focus the game window; no keys sent")
     return hwnd
 
 
