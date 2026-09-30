@@ -17,14 +17,21 @@ namespace SsOracle.Crest
     /// which must be on). The Cursed and Cloakless crests need force=true.</item>
     /// <item>{restore: true}: undo every crest.equip since the first one on this PlayerData: equip the crest that was
     /// equipped then (same path), put PreviousCrestID and IsCurrentCrestTemp back, and relock what unlock=true unlocked
-    /// (its PlayerData.ToolEquips entry goes back to what it was, or away).</item>
+    /// (its PlayerData.ToolEquips entry goes back to what it was, or away). The bench path has side effects that the
+    /// first crest.equip snapshots and restore puts back too: SetEquippedCrest empties, in the crest it equips, every
+    /// slot whose tool is also in an extra slot (the saved slots of every crest come back), its UpdateToolCap lowers
+    /// every tool's AmountLeft to the new storage cap (a crest without Shell Satchel: the amounts come back), and
+    /// SendEquippedChangedEvent's HeroController.RefreshSilk takes the silk above the new CurrentSilkMax (a crest without
+    /// Spool Extender: PlayerData.AddSilk gives it back, capped at the restored max).</item>
     /// </list>
     /// Refused unless the profile allows probe tools, saves are redirected to the sandbox (the change reaches disk with
     /// the next save), the guards are not refused, a Steel Soul session has a snapshot, a hero exists and the inventory is
     /// closed. The edit is in memory only; the probe keeps SaveSuppression on while it runs so nothing it did is saved.
     /// Reply: {frame, crest, from, previous, temp, unlocked: [names], at_bench, config, group} or, for restore,
-    /// {frame, restored, crest, previous, temp, relocked: [names], config, group}; config/group = the hero's config
-    /// right after the switch (the "TOOL EQUIPS CHANGED" handlers run synchronously).
+    /// {frame, restored, crest, previous, temp, relocked: [names], slots_restored: [crest names],
+    /// amounts_restored: {tool: [amount before restore, restored amount]}, silk_restored: [before, after] | null, config,
+    /// group}; config/group = the hero's config right after the switch (the "TOOL EQUIPS CHANGED" handlers run
+    /// synchronously). crest.dump's current.silk and tool_amounts let the probe check the restore.
     /// </summary>
     internal static class CrestEquip
     {
@@ -41,7 +48,12 @@ namespace SsOracle.Crest
             public WeakReference<PlayerData> Pd;
             public string Crest, Previous;
             public bool Temp;
+            public int Silk;
             public readonly List<Unlocked> Unlocked = new List<Unlocked>();
+            /// <summary>Saved slots of every crest that has an entry (copies: SetEquippedCrest edits the list in place).</summary>
+            public readonly Dictionary<string, List<ToolCrestsData.SlotData>> Slots = new Dictionary<string, List<ToolCrestsData.SlotData>>();
+            /// <summary>AmountLeft of every tool as PlayerData.GetToolData reports it (what UpdateToolCap compares).</summary>
+            public readonly Dictionary<string, int> Amounts = new Dictionary<string, int>();
 
             public bool Of(PlayerData pd) => Pd.TryGetTarget(out var p) && ReferenceEquals(p, pd);
         }
@@ -71,8 +83,7 @@ namespace SsOracle.Crest
             if ((crest == Gameplay.CursedCrest || crest == Gameplay.CloaklessCrest) && !Ipc.Rpc.Bool(args, "force"))
                 throw new InvalidOperationException($"'{name}' is a story crest (curse / Slab); pass force=true");
 
-            if (snap == null || !snap.Of(pd))
-                snap = new Snapshot { Pd = new WeakReference<PlayerData>(pd), Crest = pd.CurrentCrestID, Previous = pd.PreviousCrestID, Temp = pd.IsCurrentCrestTemp };
+            if (snap == null || !snap.Of(pd)) snap = Take(pd);
             var from = pd.CurrentCrestID;
             var unlocked = new List<string>();
             if (!CrestModule.SavedCrest(pd, crest.name, out _).IsUnlocked)
@@ -97,6 +108,24 @@ namespace SsOracle.Crest
                 ["config"] = CrestModule.Name(hero.Config),
                 ["group"] = CrestDump.CurrentGroupIndex(hero),
             };
+        }
+
+        private static Snapshot Take(PlayerData pd)
+        {
+            var s = new Snapshot
+            {
+                Pd = new WeakReference<PlayerData>(pd), Crest = pd.CurrentCrestID, Previous = pd.PreviousCrestID,
+                Temp = pd.IsCurrentCrestTemp, Silk = pd.silk,
+            };
+            foreach (var c in ToolItemManager.GetAllCrests())
+            {
+                if (c == null) continue;
+                var data = CrestModule.SavedCrest(pd, c.name, out var present);
+                if (present && data.Slots != null) s.Slots[c.name] = new List<ToolCrestsData.SlotData>(data.Slots);
+            }
+            foreach (var t in ToolItemManager.GetAllTools())
+                if (t != null) s.Amounts[t.name] = pd.GetToolData(t.name).AmountLeft;
+            return s;
         }
 
         /// <summary>ToolCrest.Unlock, recording first the saved data of every crest in the upgrade chain it may unlock.</summary>
@@ -141,9 +170,21 @@ namespace SsOracle.Crest
                 else pd.ToolEquips.SetData(u.Name, default);
                 relocked.Add(u.Name);
             }
+            var slots = RestoreSlots(pd, s);
+            var amounts = RestoreAmounts(pd, s);
             pd.PreviousCrestID = s.Previous;
             pd.IsCurrentCrestTemp = s.Temp;
-            if (changed) ToolItemManager.SendEquippedChangedEvent(force: true);
+            if (changed || slots.Count > 0 || amounts.Count > 0) ToolItemManager.SendEquippedChangedEvent(force: true);
+            // After the event, whose RefreshSilk has run against the original crest's CurrentSilkMax. PlayerData.AddSilk
+            // (capped at that max) rather than HeroController.AddSilk, whose bind reminder may set SeenBindPrompt.
+            object silk = null;
+            if (pd.silk < s.Silk)
+            {
+                var before = pd.silk;
+                pd.AddSilk(s.Silk - before);
+                if (SilkSpool.Instance != null) SilkSpool.Instance.RefreshSilk(SilkSpool.SilkAddSource.Normal, SilkSpool.SilkTakeSource.Normal);
+                silk = new[] { before, pd.silk };
+            }
             snap = null;
             return new Dictionary<string, object>
             {
@@ -153,9 +194,59 @@ namespace SsOracle.Crest
                 ["previous"] = pd.PreviousCrestID,
                 ["temp"] = pd.IsCurrentCrestTemp,
                 ["relocked"] = relocked,
+                ["slots_restored"] = slots,
+                ["amounts_restored"] = amounts,
+                ["silk_restored"] = silk,
                 ["config"] = CrestModule.Name(hero.Config),
                 ["group"] = CrestDump.CurrentGroupIndex(hero),
             };
+        }
+
+        /// <summary>Puts back the saved slots of every crest restore did not relock (in place, as SetEquippedCrest edits them).</summary>
+        private static List<string> RestoreSlots(PlayerData pd, Snapshot s)
+        {
+            var restored = new List<string>();
+            foreach (var kv in s.Slots)
+            {
+                if (s.Unlocked.Exists(u => u.Name == kv.Key)) continue;
+                var data = CrestModule.SavedCrest(pd, kv.Key, out _);
+                if (data.Slots != null && SameSlots(data.Slots, kv.Value)) continue;
+                if (data.Slots != null)
+                {
+                    data.Slots.Clear();
+                    data.Slots.AddRange(kv.Value);
+                }
+                else
+                {
+                    data.Slots = new List<ToolCrestsData.SlotData>(kv.Value);
+                    pd.ToolEquips.SetData(kv.Key, data);
+                }
+                restored.Add(kv.Key);
+            }
+            return restored;
+        }
+
+        private static bool SameSlots(List<ToolCrestsData.SlotData> a, List<ToolCrestsData.SlotData> b)
+        {
+            if (a.Count != b.Count) return false;
+            for (var i = 0; i < a.Count; i++)
+                if (a[i].IsUnlocked != b[i].IsUnlocked || (a[i].EquippedTool ?? "") != (b[i].EquippedTool ?? "")) return false;
+            return true;
+        }
+
+        /// <summary>Puts back every tool's AmountLeft through Get/SetToolData, as UpdateToolCap changed it: {tool: [now, restored]}.</summary>
+        private static Dictionary<string, object> RestoreAmounts(PlayerData pd, Snapshot s)
+        {
+            var restored = new Dictionary<string, object>();
+            foreach (var kv in s.Amounts)
+            {
+                var data = pd.GetToolData(kv.Key);
+                if (data.AmountLeft == kv.Value) continue;
+                restored[kv.Key] = new[] { data.AmountLeft, kv.Value };
+                data.AmountLeft = kv.Value;
+                pd.SetToolData(kv.Key, data);
+            }
+            return restored;
         }
 
         private static ToolCrestsData.Data Copy(ToolCrestsData.Data d) => new ToolCrestsData.Data

@@ -9,8 +9,8 @@ namespace SsOracle.Crest
     /// RPC "crest.dump" (read-only; crests.md §5 a, i). Reply:
     /// <code>
     /// {frame,
-    ///  current: {crest, previous, temp, cursed, config, group, override_group, crest_config, rage, reaper, hunter_meter,
-    ///            values} | {crest, previous, temp, cursed} without a hero,
+    ///  current: {crest, previous, temp, cursed, silk, config, group, override_group, crest_config, rage, reaper,
+    ///            hunter_meter, values} | {crest, previous, temp, cursed, silk} without a hero,
     ///  crests:  [{name, hidden, base, previous_version, upgraded_version, unlocked, equipped, has_custom_action,
     ///             config, config_group: {index, special, rule} | null (no hero),
     ///             slots: [{i, type, binding, locked, pos, saved: {tool, unlocked} | null}],
@@ -18,7 +18,8 @@ namespace SsOracle.Crest
     ///  groups:  [{index, kind: "configs" | "special", config, active_root, root_active, objects: {normal, alt, up, alt_up,
     ///             down, alt_down, wall, dash_stab, dash_stab_alt, charge, taunt}}]      (empty without a hero),
     ///  configs: {config name: {name, type, fields: {serialized field: value}, values: {...} | null}},
-    ///  extra_equips: {slot id: tool}}
+    ///  extra_equips: {slot id: tool},
+    ///  tool_amounts: {tool: AmountLeft}}     (every tool, PlayerData.GetToolData: what a crest switch's UpdateToolCap caps)
     /// </code>
     /// How the hero picks a config (HeroController.UpdateConfig, 1.0.30000 :1801): crestConfig = the equipped crest's
     /// HeroConfig (ResetAllCrestState); a null crestConfig means configs[0]; otherwise the first group in "configs" whose
@@ -75,6 +76,7 @@ namespace SsOracle.Crest
                 ["groups"] = groups,
                 ["configs"] = configs,
                 ["extra_equips"] = ExtraEquips(pd),
+                ["tool_amounts"] = ToolAmounts(pd),
             };
         }
 
@@ -86,6 +88,7 @@ namespace SsOracle.Crest
                 ["previous"] = pd.PreviousCrestID,
                 ["temp"] = pd.IsCurrentCrestTemp,
                 ["cursed"] = ToolItemManager.IsCursed,
+                ["silk"] = pd.silk,
             };
             if (hero == null) return d;
             var cfg = hero.Config;
@@ -295,6 +298,14 @@ namespace SsOracle.Crest
             ["can_harpoon_dash"] = c.CanHarpoonDash,
             ["force_bare_inventory"] = c.ForceBareInventory,
         };
+
+        private static Dictionary<string, object> ToolAmounts(PlayerData pd)
+        {
+            var d = new Dictionary<string, object>();
+            foreach (var t in ToolItemManager.GetAllTools())
+                if (t != null) d[t.name] = pd.GetToolData(t.name).AmountLeft;
+            return d;
+        }
 
         private static Dictionary<string, object> ExtraEquips(PlayerData pd)
         {

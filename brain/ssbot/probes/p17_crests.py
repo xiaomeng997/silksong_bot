@@ -11,8 +11,10 @@ Steps:
   2. SaveSuppression on (guards.set) until the end, so no crest change can reach the save file even if the game saves.
   3. For every crest of --crests (default Wanderer, Reaper, Hunter_v2) other than the equipped one: crest.equip
      {name, unlock}, a few frames, crest.dump (its "current") and slash.dump. A refusal is recorded and the run goes on.
-  4. crest.equip {restore}: the original crest, PreviousCrestID and temp flag back, what step 3 unlocked relocked;
-     crest.dump must then show the original crest and the unlocked set of step 1. SaveSuppression back as it was.
+  4. crest.equip {restore}: the original crest, PreviousCrestID and temp flag back, what step 3 unlocked relocked, and
+     the side effects of the switches undone (saved slots, tool amounts, silk). crest.dump must then match step 1 in
+     all of these (restore_state). Only then does SaveSuppression go back as it was: a failed or unverified restore
+     leaves it on and says so (Save & Quit then writes nothing; reload the save).
   5. Writes --out (default docs/facts/<game>/crests.json) and prints the tables below. Exit code 1 when the restore
      check fails or no crest besides the equipped one could be dumped.
 
@@ -27,16 +29,17 @@ downspikeRecoveryTime (air recovery after FinishDownspike: a downspike, or a dow
 time / recovery (DownSpike type only), rule = how HeroController.UpdateConfig maps the crest to a config group
 (crest.dump config_group.rule).
 
-Attack table (each dumped crest, one row per attack slot of slash.dump): the damager SetConfigGroup paired with the slot
-(else the attack object's own, else the first using nail damage). dmg = nailDamageMultiplier ("x") or a flat
-damageDealt ("="), times damageMultiplier, then damage_mult_per_hit when set; silk = silkGeneration; spk =
-NailAttackBase.canHitSpikes (false: a clash hurts Hornet for 1, DamageHero.cs:399); par = the swing clashes with enemy
-attacks (not doesNotParry, DamageHero.cs:384); crit = Wanderer crits can apply (DamageEnemies.cs:1022: attackType Nail
-and not doesNotCriticalHit, on the first hit, or the object is tagged "Nail Attack"); multi = multi-hitter steps / hits;
-dsa = HeroDownAttack present (the downspike bounce and its i-frames); fwd/up/dn/back = extents of that damager's
-colliders from the hero's pivot in world units, forward = the facing direction, using the swing-time outline when
-NailAttackBase rescales the attack at swing start (without Long Needle); clash = forward extent of the attack's
-"Clash Tink" collider (what has to touch an enemy attack for a clash).
+Attack table (each dumped crest, one row per attack slot of slash.dump): src = hero (HeroController swings it) or group
+(an FSM does: dash stab, charge, taunt, and a Custom-type crest's down slashes, whose rows keep down_slash_event); the
+damager SetConfigGroup paired with the slot (else the attack object's own, else the first using nail damage). dmg =
+nailDamageMultiplier ("x") or a flat damageDealt ("="), times damageMultiplier, then damage_mult_per_hit when set; silk
+= silkGeneration; spk = NailAttackBase.canHitSpikes (false: a clash hurts Hornet for 1, DamageHero.cs:399); par = the
+swing clashes with enemy attacks (not doesNotParry, DamageHero.cs:384); crit = Wanderer crits can apply
+(DamageEnemies.cs:1022: attackType Nail and not doesNotCriticalHit, on the first hit, or the object is tagged "Nail
+Attack"); multi = multi-hitter steps / hits; dsa = HeroDownAttack present (the downspike bounce and its i-frames);
+fwd/up/dn/back = extents of that damager's colliders from the hero's pivot in world units, forward = the facing
+direction, using the swing-time outline when NailAttackBase rescales the attack at swing start (without Long Needle);
+clash = forward extent of the attack's "Clash Tink" collider (what has to touch an enemy attack for a clash).
 """
 import argparse
 import datetime as dt
@@ -58,6 +61,8 @@ DEFAULT_CRESTS = ("Wanderer", "Reaper", "Hunter_v2")
 SETTLE_FRAMES = 3
 EVENT_KINDS = ("hunter_meter", "guards", "save")
 ERRORS = (OracleError, TimeoutError)
+SAVE_KEPT = ("[FAIL] the save is not back to how it was, so SaveSuppression stays ON. Do not turn it off: Save & Quit "
+             "to the menu (SaveSuppression writes nothing) or close the game, then reload the save.")
 
 
 # ---- pure helpers (unit-tested in tests/test_p17_crests.py) ------------------------------------------------------
@@ -204,6 +209,7 @@ def attack_rows(crest: str, slash: dict) -> list[dict]:
             "slot": a.get("slot"),
             "source": a.get("source"),
             "object": a.get("go"),
+            "down_slash_event": a.get("down_slash_event"),
             "active": a.get("active"),
             "dmg": damage_text(d),
             "silk": d.get("silk_generation") if d else None,
@@ -256,7 +262,7 @@ def format_table(rows: Sequence[dict], columns: Sequence[tuple[str, str]]) -> st
 CONFIG_COLUMNS = (("crest", "crest"), ("unlocked", "unl"), ("config", "config"), ("rule", "rule"), ("swing", "swing"),
                   ("quick", "quick"), ("duration", "dur"), ("cooldown", "cd"), ("recovery", "rec"), ("down", "down"),
                   ("down_recovery", "down_rec"), ("spike", "spike a/t/r"), ("dash_stab", "dstab"))
-ATTACK_COLUMNS = (("crest", "crest"), ("slot", "slot"), ("object", "object"), ("dmg", "dmg"), ("silk", "silk"),
+ATTACK_COLUMNS = (("crest", "crest"), ("slot", "slot"), ("source", "src"), ("object", "object"), ("dmg", "dmg"), ("silk", "silk"),
                   ("spikes", "spk"), ("parry", "par"), ("crit", "crit"), ("multi", "multi"), ("dsa", "dsa"),
                   ("fwd", "fwd"), ("up", "up"), ("dn", "dn"), ("back", "back"), ("clash", "clash"))
 
@@ -276,6 +282,43 @@ def rounded(v, nd: int = 5):
 
 def unlocked_set(crest_dump: dict) -> list[str]:
     return sorted(c["name"] for c in crest_dump.get("crests") or () if c.get("unlocked"))
+
+
+def restore_state(crest_dump: dict) -> dict:
+    """What crest.equip {restore} has to put back, read from one crest.dump: the crest, PreviousCrestID, the temp flag,
+    silk (RefreshSilk takes what is above a lower CurrentSilkMax), the unlocked set, every crest's saved slot equips
+    (SetEquippedCrest empties slots whose tool is also in an extra slot) and every tool's AmountLeft (UpdateToolCap
+    lowers it when the new crest drops Shell Satchel)."""
+    cur = crest_dump.get("current") or {}
+    return {
+        "crest": cur.get("crest"),
+        "previous": cur.get("previous"),
+        "temp": cur.get("temp"),
+        "silk": cur.get("silk"),
+        "unlocked": unlocked_set(crest_dump),
+        "slots": {c["name"]: [s.get("saved") for s in c.get("slots") or ()] for c in crest_dump.get("crests") or ()},
+        "tool_amounts": dict(crest_dump.get("tool_amounts") or {}),
+    }
+
+
+def restore_diffs(before: dict, after: dict) -> list[str]:
+    """Failures for every restore_state field that differs after the restore."""
+    out = []
+    for key, label in (("crest", "crest"), ("previous", "PreviousCrestID"), ("temp", "temp flag"), ("silk", "silk")):
+        if after.get(key) != before.get(key):
+            out.append(f"restore: {label} is {after.get(key)}, was {before.get(key)}")
+    if after.get("unlocked") != before.get("unlocked"):
+        out.append(f"restore: unlocked crests {after.get('unlocked')}, were {before.get('unlocked')}")
+    slots0, slots1 = before.get("slots") or {}, after.get("slots") or {}
+    for name in sorted(set(slots0) | set(slots1)):
+        if slots1.get(name) != slots0.get(name):
+            out.append(f"restore: saved slots of {name} are {slots1.get(name)}, were {slots0.get(name)}")
+    amounts0, amounts1 = before.get("tool_amounts") or {}, after.get("tool_amounts") or {}
+    changed = {t: f"{amounts1.get(t)} (was {amounts0.get(t)})" for t in sorted(set(amounts0) | set(amounts1))
+               if amounts1.get(t) != amounts0.get(t)}
+    if changed:
+        out.append(f"restore: tool amounts {changed}")
+    return out
 
 
 # ---- in-game run --------------------------------------------------------------------------------------------------
@@ -335,6 +378,7 @@ def run(link, crests: Sequence[str], unlock: bool, log=print) -> tuple[dict, lis
     per: dict = {original: {"equip": None, "error": None, "current": cd0["current"], "slash": first}}
     result["crests"] = per
 
+    before = restore_state(cd0)
     ss0 = bool(link.rpc("guards.get").get("save_suppression"))
     if not ss0:
         link.rpc("guards.set", save_suppression=True)
@@ -354,23 +398,27 @@ def run(link, crests: Sequence[str], unlock: bool, log=print) -> tuple[dict, lis
                 entry["error"] = str(e)
                 log(f"{name}: {e}")
     finally:
+        restore_failures: list[str] = []
         try:
             result["restore"] = link.rpc("crest.equip", restore=True)
         except ERRORS as e:
             result["restore"] = {"error": str(e)}
-            if equipped_any:
-                failures.append(f"crest.equip restore failed: {e}")
-        settle(link)
-        cd1 = link.rpc("crest.dump")
-        crest1, unlocked1 = cd1["current"]["crest"], unlocked_set(cd1)
-        result["after"] = {"crest": crest1, "previous": cd1["current"].get("previous"), "unlocked": unlocked1}
-        if crest1 != original:
-            failures.append(f"restore: crest is {crest1}, was {original}")
-        if unlocked1 != unlocked0:
-            failures.append(f"restore: unlocked crests {unlocked1}, were {unlocked0}")
-        if cd1["current"].get("previous") != cd0["current"].get("previous"):
-            failures.append(f"restore: PreviousCrestID {cd1['current'].get('previous')}, was {cd0['current'].get('previous')}")
-        if not ss0:
+            # "nothing to restore": no crest.equip got as far as its snapshot, so nothing was changed.
+            if equipped_any or "nothing to restore" not in str(e):
+                restore_failures.append(f"crest.equip restore failed: {e}")
+        try:
+            settle(link)
+            after = restore_state(link.rpc("crest.dump"))
+        except ERRORS as e:
+            restore_failures.append(f"restore not verified: crest.dump failed: {e}")
+        else:
+            result["after"] = {k: v for k, v in after.items() if k not in ("slots", "tool_amounts")}
+            restore_failures.extend(restore_diffs(before, after))
+        failures.extend(restore_failures)
+        # Only a verified restore lets saves through again: otherwise the next bench save or autosave would write the
+        # probe's crest changes into the save.
+        result["save_suppression_kept"] = bool(restore_failures)
+        if not restore_failures and not ss0:
             link.rpc("guards.set", save_suppression=False)
     if not any(e.get("slash") for n, e in per.items() if n != original):
         failures.append("no crest besides the equipped one could be dumped")
@@ -421,8 +469,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"\nhunter_meter events: {meter}")
     for f in failures:
         print(f"[FAIL] {f}")
+    if result.get("save_suppression_kept"):
+        print(SAVE_KEPT)
     if not failures:
-        print("[PASS] original crest, PreviousCrestID and unlocked set restored")
+        print("[PASS] crest, PreviousCrestID, temp flag, silk, unlocked set, saved slots and tool amounts restored")
     return 1 if failures else 0
 
 

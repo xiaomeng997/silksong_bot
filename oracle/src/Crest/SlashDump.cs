@@ -16,8 +16,10 @@ namespace SsOracle.Crest
     /// copies from the current group, or from the override group where that has the object (:1863-1878). "alt" is used
     /// on every second swing in the same direction within AttackRecoveryTime + ALT_ATTACK_RESET; "wall" while wall
     /// sliding (unless Toolmaster). The down slot follows Config.DownSlashType: DownSpike -> the Downspike component,
-    /// Slash -> a NailSlash, Custom -> none (crestAttacksFSM runs Config.DownSlashEvent; the objects live in that FSM).
-    /// source "hero".</item>
+    /// Slash -> a NailSlash, Custom -> none (crestAttacksFSM runs Config.DownSlashEvent). source "hero".</item>
+    /// <item>Custom down slash: down/alt_down still get the group's DownSlashObject/AltDownSlashObject, paired with the
+    /// hero's downSlashDamager/altDownSlashDamager (ConfigGroup.Setup binds those for every type), with
+    /// down_slash_event. source "group" (an FSM swings them; which objects the FSM itself spawns is not visible here).</item>
     /// <item>dash_stab, dash_stab_alt, charge, taunt: FSMs fetch them with GetHeroAttackObject, which reads
     /// CurrentConfigGroup (never the override group). source "group".</item>
     /// </list>
@@ -26,7 +28,8 @@ namespace SsOracle.Crest
     /// {frame, crest, config, group, down_slash_type, down_slash_event (Custom only), nail_damage, nail_upgrades,
     ///  long_needle: {equipped, multiplier}, hero: {pos, facing, scale, box},
     ///  attacks: [attack], groups: [{index, kind, config, attacks: [attack]}]   (groups only with all_groups)}
-    /// attack   = {slot, source, go, path, active, component, damager, nail: [nail], damagers: [damager], down_attacks: [path]}
+    /// attack   = {slot, source, go, path, active, component, damager, nail: [nail], damagers: [damager], down_attacks: [path],
+    ///             down_slash_event (Custom down/alt_down only)}
     /// nail     = {path, type, can_hit_spikes, scale, scale_now, anim, clip: {name, fps, frames, wrap, events: [[i, info]]},
     ///             extra_damager, clash_tink: [collider], fields}
     /// damager  = {path, tag, nail_tag, enabled, active, attack_type, use_nail_damage, nail_damage_mult, damage_dealt,
@@ -94,6 +97,8 @@ namespace SsOracle.Crest
                 foreach (var s in DownSpikes) AddHeroSlot(attacks, s, hero);
             else if (cfg != null && cfg.DownSlashType == HeroControllerConfig.DownSlashTypes.Slash)
                 foreach (var s in DownSlashes) AddHeroSlot(attacks, s, hero);
+            else if (cfg != null && cfg.DownSlashType == HeroControllerConfig.DownSlashTypes.Custom)
+                AddCustomDown(attacks, hero, cfg.DownSlashEvent);
             var group = hero.CurrentConfigGroup;
             if (group != null) AddFsmObjects(attacks, group, root);
 
@@ -144,6 +149,28 @@ namespace SsOracle.Crest
             if (attack == null) return;
             var damager = s.Damager != null ? s.Damager(hero) : null;
             into.Add(Attack(s.Slot, "hero", attack.gameObject, hero.transform, attack, damager));
+        }
+
+        /// <summary>
+        /// Custom down slash: no NailSlash/Downspike slot, but ConfigGroup.Setup still takes DownSlashDamager and
+        /// AltDownSlashDamager from DownSlashObject/AltDownSlashObject for every type and SetConfigGroup copies them into
+        /// the hero (:1873). Listed as source "group" (swung by crestAttacksFSM's DownSlashEvent, not by
+        /// HeroController.DownAttack) with that event, from the object carrying the paired damager (the current group's
+        /// object unless an override group supplied it).
+        /// </summary>
+        private static void AddCustomDown(List<object> into, HeroController hero, string downSlashEvent)
+        {
+            var g = hero.CurrentConfigGroup;
+            for (var i = 0; i < DownSlashes.Length; i++)
+            {
+                var s = DownSlashes[i];
+                var damager = s.Damager != null ? s.Damager(hero) : null;
+                var go = damager != null ? damager.gameObject : g == null ? null : i == 0 ? g.DownSlashObject : g.AltDownSlashObject;
+                if (go == null) continue;
+                var a = Attack(s.Slot, "group", go, hero.transform, go.GetComponent<NailAttackBase>(), damager);
+                a["down_slash_event"] = downSlashEvent;
+                into.Add(a);
+            }
         }
 
         private static void AddFsmObjects(List<object> into, HeroController.ConfigGroup g, Transform root)

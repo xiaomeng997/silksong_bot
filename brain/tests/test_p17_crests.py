@@ -143,8 +143,19 @@ def test_attack_rows_and_tables():
     assert down["dsa"] and down["dmg"] == "x1[1,0.5]" and down["dn"] == pytest.approx(3.0)
     text = p17.format_table(rows, p17.ATTACK_COLUMNS)
     lines = text.splitlines()
-    assert lines[0].split()[:3] == ["crest", "slot", "object"] and set(lines[1]) <= {"-", " "}
+    assert lines[0].split()[:4] == ["crest", "slot", "src", "object"] and set(lines[1]) <= {"-", " "}
     assert "Wanderer" in lines[2] and "3" in lines[2] and len(lines) == 4
+
+
+def test_custom_down_slash_rows_are_flagged():
+    slash = slash_dump("Witch", 3.0)
+    down = slash["attacks"][1]
+    down.update(source="group", component=None, down_slash_event="WITCH DOWN")
+    rows = p17.attack_rows("Witch", slash)
+    assert [(r["slot"], r["source"], r["down_slash_event"]) for r in rows] == [
+        ("normal", "hero", None), ("down", "group", "WITCH DOWN")]
+    assert rows[1]["dmg"] == "x1[1,0.5]" and rows[1]["dn"] == pytest.approx(3.0)
+    assert "group" in p17.format_table(rows, p17.ATTACK_COLUMNS).splitlines()[3].split()
 
 
 def test_crest_order_and_rounded():
@@ -153,38 +164,78 @@ def test_crest_order_and_rounded():
     assert p17.rounded({"a": [0.30000001192092896, (1, 2.123456789)], "b": b"\x01"}) == {"a": [0.3, [1, 2.12346]], "b": "01"}
 
 
+def test_restore_state_and_diffs():
+    dump = {"current": {"crest": "Hunter", "previous": "Wanderer", "temp": False, "silk": 12},
+            "crests": [{"name": "Hunter", "unlocked": True, "slots": [{"i": 0, "saved": {"tool": "Compass", "unlocked": True}}]},
+                       {"name": "Reaper", "unlocked": False, "slots": [{"i": 0, "saved": None}]}],
+            "tool_amounts": {"Straight Pin": 10, "Compass": 0}}
+    before = p17.restore_state(dump)
+    assert before == {"crest": "Hunter", "previous": "Wanderer", "temp": False, "silk": 12, "unlocked": ["Hunter"],
+                      "slots": {"Hunter": [{"tool": "Compass", "unlocked": True}], "Reaper": [None]},
+                      "tool_amounts": {"Straight Pin": 10, "Compass": 0}}
+    assert p17.restore_diffs(before, copy.deepcopy(before)) == []
+    after = copy.deepcopy(before)
+    after.update(temp=True, silk=9)
+    after["slots"]["Hunter"][0]["tool"] = None
+    after["tool_amounts"]["Straight Pin"] = 7
+    assert p17.restore_diffs(before, after) == [
+        "restore: temp flag is True, was False",
+        "restore: silk is 9, was 12",
+        "restore: saved slots of Hunter are [{'tool': None, 'unlocked': True}], were [{'tool': 'Compass', 'unlocked': True}]",
+        "restore: tool amounts {'Straight Pin': '7 (was 10)'}",
+    ]
+
+
 # ---- the equip / restore flow against a fake oracle ----------------------------------------------------------------
 
 class FakeGame:
-    """Just enough of crest.dump / slash.dump / crest.equip / guards.* to drive p17.run."""
+    """Just enough of crest.dump / slash.dump / crest.equip / guards.* to drive p17.run. crest.equip follows CrestEquip:
+    errors carry the exception type (Rpc.Invoke), the snapshot is taken before the unlock check, and the bench path's
+    side effects are there: leaving Hunter (it carries Shell Satchel and Spool Extender) caps Straight Pin and silk the
+    way UpdateToolCap and RefreshSilk do, and equipping Hunter empties its Compass slot (Compass is also in an extra
+    slot), which restore puts back unless restore_extras is off."""
 
     CONFIGS = {"Default": config("Default", 0.35, 0.41, 0.15, down="DownSpike"),
                "Wanderer": config("Wanderer", 0.25, 0.3, 0.1), "Reaper": config("Reaper", 0.3, 0.35, 0.12)}
 
-    def __init__(self, relock=True):
-        self.crest, self.previous = "Hunter", "Wanderer"
+    def __init__(self, relock=True, restore_extras=True, refuse_restore=False, dump_fails_after_restore=False):
+        self.crest, self.previous, self.temp = "Hunter", "Wanderer", False
         self.unlocked = {"Hunter": True, "Hunter_v2": False, "Wanderer": False, "Reaper": False}
+        self.slots = {"Hunter": [{"tool": "Straight Pin", "unlocked": True}, {"tool": "Compass", "unlocked": True}]}
+        self.silk = 12
+        self.amounts = {"Straight Pin": 10, "Compass": 0}
         self.snapshot = None
+        self.restore_called = False
         self.save_suppression = False
-        self.relock = relock
+        self.relock, self.restore_extras, self.refuse_restore = relock, restore_extras, refuse_restore
+        self.dump_fails_after_restore = dump_fails_after_restore
         self.calls = []
 
     def config_of(self, name):
         return {"Wanderer": "Wanderer", "Reaper": "Reaper"}.get(name)
 
     def crest_dump(self):
-        crests = [crest_entry(n, u, self.config_of(n), {"Wanderer": 1, "Reaper": 2}.get(n, 0),
-                              "match" if self.config_of(n) else "no_config:configs[0]") for n, u in self.unlocked.items()]
+        crests = []
+        for n, u in self.unlocked.items():
+            e = crest_entry(n, u, self.config_of(n), {"Wanderer": 1, "Reaper": 2}.get(n, 0),
+                            "match" if self.config_of(n) else "no_config:configs[0]")
+            saved = self.slots.get(n)
+            e["slots"] = [{"i": i, "saved": copy.deepcopy(saved[i]) if saved else None} for i in range(2)]
+            crests.append(e)
         return {"frame": 1, "crests": crests,
-                "current": {"crest": self.crest, "previous": self.previous, "config": self.config_of(self.crest) or "Default"},
+                "current": {"crest": self.crest, "previous": self.previous, "temp": self.temp, "silk": self.silk,
+                            "config": self.config_of(self.crest) or "Default"},
                 "groups": [{"index": i, "kind": "configs", "config": c} for i, c in enumerate(("Default", "Wanderer", "Reaper"))],
-                "configs": copy.deepcopy(self.CONFIGS), "extra_equips": {}}
+                "configs": copy.deepcopy(self.CONFIGS), "extra_equips": {"extra_0": "Compass"},
+                "tool_amounts": dict(self.amounts)}
 
     def rpc(self, name, args):
         self.calls.append((name, args))
         if name == "gameplay.dump":
             return {"asset": "Global Gameplay Settings", "hunter": {"combo_hits": 6}}
         if name == "crest.dump":
+            if self.restore_called and self.dump_fails_after_restore:
+                raise TimeoutError("no reply to crest.dump")
             return self.crest_dump()
         if name == "slash.dump":
             d = slash_dump(self.crest, {"Wanderer": 2.9}.get(self.crest, 3.0))
@@ -198,28 +249,45 @@ class FakeGame:
             return {"save_suppression": self.save_suppression}
         if name == "crest.equip":
             return self.equip(args)
-        raise OracleError(f"unknown rpc '{name}'")
+        raise OracleError(f"ArgumentException: unknown rpc '{name}'")
+
+    def switch(self, name):
+        """ToolItemManager.SetEquippedCrest + SendEquippedChangedEvent, with their side effects."""
+        if name == "Hunter":
+            self.slots["Hunter"][1]["tool"] = None
+        elif self.crest == "Hunter":
+            self.amounts["Straight Pin"] = min(self.amounts["Straight Pin"], 7)
+            self.silk = min(self.silk, 9)
+        if name != self.crest:
+            self.previous, self.crest, self.temp = self.crest, name, False
 
     def equip(self, args):
         if args.get("restore"):
+            self.restore_called = True
             if self.snapshot is None:
-                raise OracleError("nothing to restore: crest.equip changed nothing on this PlayerData")
-            crest, previous, unlocked = self.snapshot
-            self.crest, self.previous = crest, previous
+                raise OracleError("InvalidOperationException: nothing to restore: crest.equip changed nothing on this PlayerData")
+            if self.refuse_restore:
+                raise OracleError("InvalidOperationException: close the inventory first")
+            snap, self.snapshot = self.snapshot, None
+            self.switch(snap["crest"])
+            self.previous, self.temp = snap["previous"], snap["temp"]
             if self.relock:
-                self.unlocked = unlocked
-            self.snapshot = None
-            return {"restored": True, "crest": self.crest}
+                self.unlocked = snap["unlocked"]
+            if self.restore_extras:
+                self.slots, self.amounts, self.silk = snap["slots"], snap["amounts"], snap["silk"]
+            return {"restored": True, "crest": self.crest, "previous": self.previous, "temp": self.temp}
         name = args["name"]
         if name not in self.unlocked:
-            raise OracleError(f"no crest '{name}'")
-        if not self.unlocked[name] and not args.get("unlock"):
-            raise OracleError(f"crest '{name}' is not unlocked on this save (pass unlock=true)")
+            raise OracleError(f"ArgumentException: no crest '{name}'")
         if self.snapshot is None:
-            self.snapshot = (self.crest, self.previous, dict(self.unlocked))
+            self.snapshot = {"crest": self.crest, "previous": self.previous, "temp": self.temp,
+                             "unlocked": dict(self.unlocked), "slots": copy.deepcopy(self.slots),
+                             "amounts": dict(self.amounts), "silk": self.silk}
+        if not self.unlocked[name] and not args.get("unlock"):
+            raise OracleError(f"InvalidOperationException: crest '{name}' is not unlocked on this save (pass unlock=true)")
         newly = [] if self.unlocked[name] else [name]
         self.unlocked[name] = True
-        self.previous, self.crest = self.crest, name
+        self.switch(name)
         return {"crest": name, "unlocked": newly, "config": self.config_of(name) or "Default"}
 
 
@@ -229,6 +297,7 @@ class FakeLink:
         self.hello = {"game": "1.0.30000", "plugin": "0.1.0", "rpcs": list(p17.NEEDED_RPCS)}
         self.frame = 100
         self.raw = []
+        self.closed = False
 
     def subscribe_raw(self, fn):
         self.raw.append(fn)
@@ -251,6 +320,13 @@ class FakeLink:
             self.feed([("hunter_meter", {"reason": "equips_changed", "from": 4, "to": 0, "crest": "Hunter"})])
         return self.game.rpc(name, args)
 
+    def close(self):
+        self.closed = True
+
+
+def guard_sets(game):
+    return [a["save_suppression"] for n, a in game.calls if n == "guards.set"]
+
 
 def test_run_dumps_each_crest_and_restores():
     game = FakeGame()
@@ -258,13 +334,13 @@ def test_run_dumps_each_crest_and_restores():
     assert failures == []
     per = result["crests"]
     assert list(per) == ["Hunter", "Wanderer", "Reaper", "Hunter_v2", "Nope"]
-    assert per["Nope"]["error"] == "no crest 'Nope'" and per["Nope"]["slash"] is None
+    assert per["Nope"]["error"] == "ArgumentException: no crest 'Nope'" and per["Nope"]["slash"] is None
     assert per["Wanderer"]["equip"]["unlocked"] == ["Wanderer"] and per["Wanderer"]["current"]["config"] == "Wanderer"
     assert result["all_groups"] and "groups" not in per["Hunter"]["slash"]
-    assert result["after"] == {"crest": "Hunter", "previous": "Wanderer", "unlocked": ["Hunter"]}
-    assert game.save_suppression is False
-    sets = [a["save_suppression"] for n, a in game.calls if n == "guards.set"]
-    assert sets == [True, False]
+    assert result["after"] == {"crest": "Hunter", "previous": "Wanderer", "temp": False, "silk": 12, "unlocked": ["Hunter"]}
+    assert game.slots["Hunter"][1]["tool"] == "Compass" and game.amounts["Straight Pin"] == 10
+    assert result["save_suppression_kept"] is False and game.save_suppression is False
+    assert guard_sets(game) == [True, False]
     # Save suppression goes on before the first crest.equip and off after the restore.
     names = [n for n, _ in game.calls]
     assert names.index("guards.set") < names.index("crest.equip")
@@ -277,17 +353,65 @@ def test_run_dumps_each_crest_and_restores():
     assert [e["reason"] for e in result["events"] if e["k"] == "hunter_meter"] == ["equips_changed"]
 
 
-def test_run_without_unlock_dumps_nothing_and_says_so():
+def test_run_without_unlock_restores_an_unchanged_snapshot():
     game = FakeGame()
     game.save_suppression = True           # already on: the probe must leave it on
     result, failures = p17.run(FakeLink(game), ["Wanderer"], unlock=False, log=lambda *_: None)
-    assert "not unlocked" in result["crests"]["Wanderer"]["error"]
+    assert result["crests"]["Wanderer"]["error"].startswith("InvalidOperationException: crest 'Wanderer' is not unlocked")
+    # The oracle took its snapshot before refusing, so the restore succeeds and changes nothing.
+    assert result["restore"]["restored"] is True and result["save_suppression_kept"] is False
+    assert failures == ["no crest besides the equipped one could be dumped"]
+    assert game.save_suppression is True and guard_sets(game) == []
+
+
+def test_run_with_only_unknown_crests_has_nothing_to_restore():
+    game = FakeGame()
+    result, failures = p17.run(FakeLink(game), ["Nope"], unlock=True, log=lambda *_: None)
     assert "nothing to restore" in result["restore"]["error"]
     assert failures == ["no crest besides the equipped one could be dumped"]
-    assert game.save_suppression is True and not [c for c in game.calls if c[0] == "guards.set"]
+    assert result["save_suppression_kept"] is False and guard_sets(game) == [True, False]
 
 
-def test_run_reports_a_restore_that_did_not_relock():
+def test_run_reports_a_restore_that_did_not_relock_and_keeps_saves_off():
     game = FakeGame(relock=False)
-    _, failures = p17.run(FakeLink(game), ["Reaper"], unlock=True, log=lambda *_: None)
+    result, failures = p17.run(FakeLink(game), ["Reaper"], unlock=True, log=lambda *_: None)
     assert failures == ["restore: unlocked crests ['Hunter', 'Reaper'], were ['Hunter']"]
+    assert result["save_suppression_kept"] is True
+    assert game.save_suppression is True and guard_sets(game) == [True]
+
+
+def test_run_checks_the_side_effects_of_the_switches():
+    game = FakeGame(restore_extras=False)
+    result, failures = p17.run(FakeLink(game), ["Reaper"], unlock=True, log=lambda *_: None)
+    assert failures == [
+        "restore: silk is 9, was 12",
+        "restore: saved slots of Hunter are [{'tool': 'Straight Pin', 'unlocked': True}, {'tool': None, 'unlocked': True}], "
+        "were [{'tool': 'Straight Pin', 'unlocked': True}, {'tool': 'Compass', 'unlocked': True}]",
+        "restore: tool amounts {'Straight Pin': '7 (was 10)'}",
+    ]
+    assert result["save_suppression_kept"] is True and game.save_suppression is True
+
+
+def test_run_keeps_saves_off_when_the_restore_is_refused_or_unverified():
+    game = FakeGame(refuse_restore=True)
+    result, failures = p17.run(FakeLink(game), ["Reaper"], unlock=True, log=lambda *_: None)
+    assert failures[0] == "crest.equip restore failed: InvalidOperationException: close the inventory first"
+    assert "restore: crest is Reaper, was Hunter" in failures
+    assert result["save_suppression_kept"] is True and guard_sets(game) == [True]
+
+    game = FakeGame(dump_fails_after_restore=True)
+    result, failures = p17.run(FakeLink(game), ["Reaper"], unlock=True, log=lambda *_: None)
+    assert result["restore"]["restored"] is True
+    assert failures == ["restore not verified: crest.dump failed: no reply to crest.dump"]
+    assert result["save_suppression_kept"] is True and game.save_suppression is True and "after" not in result
+
+
+def test_main_says_save_suppression_stays_on(monkeypatch, tmp_path, capsys):
+    game = FakeGame(refuse_restore=True)
+    link = FakeLink(game)
+    monkeypatch.setattr(p17, "OracleLink", lambda instance: link)
+    out = tmp_path / "crests.json"
+    assert p17.main(["--crests", "Reaper", "--out", str(out)]) == 1
+    text = capsys.readouterr().out
+    assert p17.SAVE_KEPT in text and "[PASS]" not in text
+    assert link.closed and out.exists() and game.save_suppression is True
