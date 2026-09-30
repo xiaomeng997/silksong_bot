@@ -73,3 +73,26 @@ def rect(hwnd: int) -> tuple[int, int, int, int]:
     r = wintypes.RECT()
     user32.GetWindowRect(hwnd, ctypes.byref(r))
     return r.left, r.top, r.right, r.bottom
+
+
+class _Point(ctypes.Structure):
+    _fields_ = [("x", ctypes.c_long), ("y", ctypes.c_long)]
+
+
+_DWMWA_EXTENDED_FRAME_BOUNDS = 9
+
+
+def client_in_capture(hwnd: int) -> tuple[int, int, int, int]:
+    """(x, y, w, h) of the client area (the game image) inside a Windows Graphics Capture frame of the window.
+    WGC captures the visible frame (DWM extended frame bounds, which excludes the invisible resize borders that
+    GetWindowRect includes), so the offset is ClientToScreen(0, 0) minus that frame's origin."""
+    frame = wintypes.RECT()
+    hr = ctypes.windll.dwmapi.DwmGetWindowAttribute(wintypes.HWND(hwnd), _DWMWA_EXTENDED_FRAME_BOUNDS,
+                                                   ctypes.byref(frame), ctypes.sizeof(frame))
+    if hr != 0:
+        user32.GetWindowRect(hwnd, ctypes.byref(frame))
+    origin = _Point(0, 0)
+    user32.ClientToScreen(hwnd, ctypes.byref(origin))
+    client = wintypes.RECT()
+    user32.GetClientRect(hwnd, ctypes.byref(client))
+    return origin.x - frame.left, origin.y - frame.top, client.right - client.left, client.bottom - client.top

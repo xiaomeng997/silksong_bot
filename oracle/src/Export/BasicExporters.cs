@@ -35,10 +35,11 @@ namespace SsOracle.Export
             var pd = ctx.Pd;
             var ui = gm.ui;
 
-            w.MapHeader(19);
+            w.MapHeader(20);
             w.Key("gs"); w.UInt((ulong)gm.GameState);
             w.Key("ui"); if (ui != null) w.UInt((ulong)ui.uiState); else w.Nil();
             w.Key("menu"); if (ui != null) w.UInt((ulong)ui.menuState); else w.Nil();
+            w.Key("fading"); w.Bool(ui != null && ui.IsFadingMenu);   // menus ignore input while they fade (P3)
             w.Key("paused"); w.Bool(gm.isPaused);
             w.Key("slowed"); w.Int(TimeSlowedCount(gm));
             w.Key("transition"); w.Bool(gm.IsInSceneTransition);

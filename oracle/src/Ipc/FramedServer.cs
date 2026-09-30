@@ -23,19 +23,37 @@ namespace SsOracle.Ipc
         /// <summary>STATE frames dropped because the brain did not keep up (frame-delivery metric).</summary>
         public long DroppedStates => Interlocked.Read(ref droppedStates);
         public long SentStates => Interlocked.Read(ref sentStates);
-        public bool Connected => client != null && helloReceived;
+        public bool Connected
+        {
+            get { var c = conn; return c != null && c.HelloReceived; }
+        }
+
+        /// <summary>One brain connection with its own outbox: a writer thread left over from an earlier connection must
+        /// never take (and silently drop) frames meant for the next one.</summary>
+        private sealed class Connection
+        {
+            public readonly TcpClient Client;
+            public readonly BlockingCollection<byte[]> Outbox = new BlockingCollection<byte[]>(new ConcurrentQueue<byte[]>());
+            public int QueuedStates;
+            public volatile bool HelloReceived;
+            public Connection(TcpClient client) => Client = client;
+
+            /// <summary>False once the connection has ended (its outbox is closed).</summary>
+            public bool TryAdd(byte[] frame)
+            {
+                try { Outbox.Add(frame); return true; }
+                catch (InvalidOperationException) { return false; }
+            }
+        }
 
         private int port;
         private TcpListener listener;
         private Thread acceptThread;
         private volatile bool running;
-        private volatile TcpClient client;
-        private volatile bool helloReceived;
+        private volatile Connection conn;
         private long droppedStates, sentStates;
         private uint seq;
 
-        private readonly BlockingCollection<byte[]> outbox = new BlockingCollection<byte[]>(new ConcurrentQueue<byte[]>());
-        private int queuedStates;
         private readonly ConcurrentQueue<Action> mainThreadWork = new ConcurrentQueue<Action>();
 
         public static FramedServer Install(GameObject host, string instance)
@@ -61,29 +79,33 @@ namespace SsOracle.Ipc
         {
             running = false;
             try { listener?.Stop(); } catch { }
-            try { client?.Close(); } catch { }
-            outbox.CompleteAdding();
+            var c = conn;
+            if (c != null)
+            {
+                try { c.Client.Close(); } catch { }
+                c.Outbox.CompleteAdding();
+            }
         }
 
-        /// <summary>Main thread: queue a finished STATE payload. Drops the oldest queued STATE when full.</summary>
+        /// <summary>Main thread: queue a finished STATE payload. Drops the newest STATE when the queue is full.</summary>
         public void EnqueueState(MsgPackWriter payload)
         {
-            if (!Connected) return;
+            var c = conn;
+            if (c == null || !c.HelloReceived) return;
             var frame = Protocol.Frame(Protocol.MsgType.State, unchecked(seq++), payload.Buffer, payload.Length);
-            if (Interlocked.Increment(ref queuedStates) > MaxQueuedStates)
+            if (Interlocked.Increment(ref c.QueuedStates) > MaxQueuedStates || !c.TryAdd(frame))
             {
-                Interlocked.Decrement(ref queuedStates);
+                Interlocked.Decrement(ref c.QueuedStates);
                 Interlocked.Increment(ref droppedStates);
-                return;
             }
-            outbox.Add(frame);
         }
 
-        /// <summary>Any thread: send a non-STATE message (TERRAIN, PROGRESS, RPC_RES). Never dropped.</summary>
+        /// <summary>Any thread: send a non-STATE message (TERRAIN, PROGRESS, RPC_RES) on the current connection.</summary>
         public void Send(Protocol.MsgType type, MsgPackWriter payload)
         {
-            if (client == null) return;
-            outbox.Add(Protocol.Frame(type, unchecked(seq++), payload.Buffer, payload.Length));
+            var c = conn;
+            if (c == null) return;
+            c.TryAdd(Protocol.Frame(type, unchecked(seq++), payload.Buffer, payload.Length));
         }
 
         private void Update()
@@ -99,39 +121,36 @@ namespace SsOracle.Ipc
         {
             while (running)
             {
-                TcpClient c;
-                try { c = listener.AcceptTcpClient(); }
+                TcpClient tc;
+                try { tc = listener.AcceptTcpClient(); }
                 catch { return; }
-                c.NoDelay = true;
-                client = c;
-                helloReceived = false;
+                tc.NoDelay = true;
+                var c = new Connection(tc);
+                conn = c;
                 Core.Plugin.Log.LogInfo("IPC v1 brain connected");
                 var writer = new Thread(() => WriteLoop(c)) { IsBackground = true, Name = "SsOracle.Ipc.Write" };
                 writer.Start();
                 SendHello();
                 try { ReadLoop(c); }
                 catch (Exception e) when (running) { Core.Plugin.Log.LogWarning("IPC v1 read ended: " + e.Message); }
-                client = null;
-                helloReceived = false;
-                try { c.Close(); } catch { }
-                // Drain what is left for the dead connection.
-                while (outbox.TryTake(out var f)) if (f.Length > 4 && f[4] == (byte)Protocol.MsgType.State) Interlocked.Decrement(ref queuedStates);
+                conn = null;
+                c.Outbox.CompleteAdding();  // the writer drains nothing more and exits
+                try { tc.Close(); } catch { }
                 mainThreadWork.Enqueue(() => Input.ActionScheduler.OnBrainDisconnected());
                 Core.Plugin.Log.LogInfo("IPC v1 brain disconnected");
             }
         }
 
-        private void WriteLoop(TcpClient c)
+        private void WriteLoop(Connection c)
         {
-            var stream = c.GetStream();
             try
             {
-                foreach (var frame in outbox.GetConsumingEnumerable())
+                var stream = c.Client.GetStream();
+                foreach (var frame in c.Outbox.GetConsumingEnumerable())
                 {
-                    if (client != c) return;
                     if (frame[4] == (byte)Protocol.MsgType.State)
                     {
-                        Interlocked.Decrement(ref queuedStates);
+                        Interlocked.Decrement(ref c.QueuedStates);
                         Interlocked.Increment(ref sentStates);
                     }
                     stream.Write(frame, 0, frame.Length);
@@ -158,11 +177,11 @@ namespace SsOracle.Ipc
             Send(Protocol.MsgType.Hello, w);
         }
 
-        private void ReadLoop(TcpClient c)
+        private void ReadLoop(Connection c)
         {
-            var stream = c.GetStream();
+            var stream = c.Client.GetStream();
             var lenBuf = new byte[4];
-            while (running && client == c)
+            while (running && conn == c)
             {
                 ReadExactly(stream, lenBuf, 4);
                 var length = BitConverter.ToInt32(lenBuf, 0);
@@ -178,7 +197,7 @@ namespace SsOracle.Ipc
                 switch (type)
                 {
                     case Protocol.MsgType.Hello:
-                        helloReceived = true;
+                        c.HelloReceived = true;
                         break;
                     case Protocol.MsgType.Action:
                         Input.ActionScheduler.Enqueue(body, Protocol.HeaderBytes, length - Protocol.HeaderBytes);

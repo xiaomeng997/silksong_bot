@@ -55,8 +55,7 @@ namespace SsOracle.Hero
         {
             public PlayMakerFSM Fsm;
             public GameObject Go;
-            public Renderer R;
-            public bool ChildR;
+            public Renderer[] Faces;
             public FsmInt Number;
         }
 
@@ -169,7 +168,7 @@ namespace SsOracle.Hero
                 w.Int(number);
                 w.Bool(active);
                 w.Str(state);
-                WriteRenderer(w, view, active && ChildShown(m.ChildR, m.R), m.R);
+                WriteRenderer(w, view, active, ShownFace(m.Faces));
             }
         }
 
@@ -379,8 +378,7 @@ namespace SsOracle.Hero
                 {
                     Fsm = f,
                     Go = f.gameObject,
-                    R = ElementSprite(f, out var child),
-                    ChildR = child,
+                    Faces = MaskFaces(f),
                     Number = f.FsmVariables.FindFsmInt("Health Number"),
                 });
             }
@@ -424,9 +422,8 @@ namespace SsOracle.Hero
         }
 
         /// <summary>
-        /// The sprite that draws a mask or lifeblood element: its own MeshRenderer/SpriteRenderer, else the first one
-        /// below it (inactive children included, since the element may be hidden at rebuild time). Skips the
-        /// HealthSpecialHealIndicator overlays that sit under each mask with their renderer disabled by default.
+        /// The sprite that draws a lifeblood element: its own MeshRenderer/SpriteRenderer, else the first one below
+        /// it (inactive children included, since the element may be hidden at rebuild time).
         /// </summary>
         private static Renderer ElementSprite(Component c, out bool child)
         {
@@ -439,6 +436,36 @@ namespace SsOracle.Hero
                     child = true;
                     return r;
                 }
+            return null;
+        }
+
+        /// <summary>
+        /// Children that draw a mask's face, in order of preference, then the mask's own renderer. On 1.0.30000 the
+        /// "health_display" object's own MeshRenderer is disabled and the face is the "Idle" child (hud.dump,
+        /// 2026-09-30); the "Bound"/"Hive" variants replace it in those states. Overlay children (Fractured Mask,
+        /// Barbed Wire, heal indicators, effects) are never candidates: their bounds are not the mask.
+        /// </summary>
+        private static readonly string[] MaskFaceNames = { "Idle", "Idle Bound", "Idle Hive" };
+
+        private static Renderer[] MaskFaces(Component c)
+        {
+            var faces = new List<Renderer>(MaskFaceNames.Length + 1);
+            foreach (var name in MaskFaceNames)
+            {
+                var t = c.transform.Find(name);
+                var r = t != null ? OwnSprite(t) : null;
+                if (r != null) faces.Add(r);
+            }
+            var own = OwnSprite(c);
+            if (own != null) faces.Add(own);
+            return faces.ToArray();
+        }
+
+        /// <summary>The first face that is drawn this frame (active and enabled), or null.</summary>
+        private static Renderer ShownFace(Renderer[] faces)
+        {
+            foreach (var r in faces)
+                if (r != null && r.enabled && r.gameObject.activeInHierarchy) return r;
             return null;
         }
 

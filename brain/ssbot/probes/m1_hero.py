@@ -27,6 +27,7 @@ import msgpack
 
 from ssbot.ipc.framing import HEADER, MsgType, mask
 from ssbot.ipc.oracle_link import OracleLink
+from ssbot.probes.common import in_gameplay, load_slot
 from ssbot.tools import cstate, projector
 
 GS_PLAYING = 4
@@ -54,15 +55,8 @@ def hold(link: OracleLink, buttons: int, frames: int) -> None:
 
 
 def load_save(link: OracleLink) -> dict:
-    print("not in gameplay: loading the highlighted save slot from the title")
-    link.wait_state(lambda s: s["game"]["menu"] == MENU_MAIN, timeout_s=90)
-    time.sleep(1.0)  # the menu ignores input while it fades in (P3)
-    tap(link, "enter")
-    link.wait_state(lambda s: s["game"]["menu"] == MENU_SAVE_PROFILES, timeout_s=10)
-    time.sleep(1.0)
-    tap(link, "enter")
-    return link.wait_state(lambda s: s["game"]["gs"] == GS_PLAYING and s["hero"] is not None
-                           and s["hero"]["hero_accepting_input"], timeout_s=120)
+    print("not in gameplay: loading save slot 1 from the title")
+    return load_slot(link, 1)
 
 
 def collect(link: OracleLink, seconds: float) -> list[dict]:
@@ -194,8 +188,14 @@ def check_hud(states: list[dict]) -> None:
           f"{len(masks)} found, {len(active)} active, max_health {h['max_health']}; states {[m[2] for m in active]}")
     ok, detail = mask_states_follow_health(masks, h["health"], h["max_health"])
     check("mask FSM states separate full from empty masks", bool(ok), detail, warn_only=ok is None or soft)
-    rects = [m[3] for m in active if m[3] is not None]
-    check("active masks have rects", len(rects) == len(active) > 0, f"{len(rects)}/{len(active)}", warn_only=soft)
+    # Mask objects past max_health stay active in the FSM state "Inactive" and draw nothing (1.0.30000).
+    drawn = [m for m in active if 1 <= m[0] <= h["max_health"]]
+    rects = [m[3] for m in drawn if m[3] is not None]
+    check("masks 1..max_health have rects", len(rects) == len(drawn) == h["max_health"] > 0,
+          f"{len(rects)}/{len(drawn)} (max_health {h['max_health']})", warn_only=soft)
+    extra = [m for m in active if m[0] > h["max_health"]]
+    check("masks past max_health are Inactive without rects",
+          all(m[2] == "Inactive" and m[3] is None for m in extra), f"{[(m[0], m[2], m[3]) for m in extra]}", warn_only=soft)
     if box and rects:
         check("mask rects inside the screen", all(inside(r[0], r[1], box) and inside(r[2], r[3], box) for r in rects),
               str([[round(v) for v in r] for r in rects[:6]]), warn_only=soft)
@@ -286,6 +286,7 @@ def save_overlay(link: OracleLink, path: str) -> None:
     icons (cyan). Written next to the capture as <path>_overlay.png for a by-eye check of V/P and the HUD rects."""
     import cv2  # comes with windows-capture; only needed here
 
+    from ssbot.io import game_window
     from ssbot.probes import shot
 
     shot.grab(path)
@@ -293,12 +294,15 @@ def save_overlay(link: OracleLink, path: str) -> None:
     img = cv2.imread(path)
     if not check("screenshot captured", img is not None, path, warn_only=True):
         return
+    # A windowed capture includes the title bar and borders; the oracle's pixels are client-area pixels.
+    x, y, w, hgt = game_window.client_in_capture(game_window.find())
+    img = img[y:y + hgt, x:x + w].copy()
+    cv2.imwrite(path, img)
     h, c, hud = s["hero"], s["cam"], s["hud"]
     if c is not None:
         sw, sh = c["screen"]
-        check("capture size == cam.screen", (img.shape[1], img.shape[0]) == (sw, sh),
-              f"capture {img.shape[1]}x{img.shape[0]}, screen {sw}x{sh} (a window frame shifts the overlay)",
-              warn_only=True)
+        check("client area == cam.screen", (img.shape[1], img.shape[0]) == (sw, sh),
+              f"client {img.shape[1]}x{img.shape[0]} at ({x}, {y}) in the capture, screen {sw}x{sh}")
 
     def box(r, color, t=2):
         if r is not None:
@@ -419,7 +423,7 @@ def main() -> int:
             print("FAIL: not in gameplay and --no-load given")
             return 1
         s = load_save(link)
-    link.wait_state(lambda s: s["hero"] is not None and s["hero"]["hero_accepting_input"], timeout_s=30)
+    link.wait_state(in_gameplay, timeout_s=30)  # a loaded save starts on the bench: no hero input until a key
     time.sleep(1.0)
 
     states = [x for x in collect(link, args.seconds) if x["hero"] is not None]
