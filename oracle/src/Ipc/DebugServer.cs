@@ -8,7 +8,7 @@ using System.Threading;
 namespace SsOracle.Ipc
 {
     /// <summary>
-    /// M0 line protocol on 127.0.0.1 (one client at a time). Replaced by the framed TCP protocol in M1.
+    /// Debug line protocol on 127.0.0.1:47631 (one client at a time), kept next to IPC v1 for manual probes.
     ///   keys [k1,k2,...]   hold exactly these keys from the next frame on (no argument = release all)
     ///   own on|off         whether injected keys replace the physical keyboard
     ///   state              latest per-frame snapshot (JSON)
@@ -17,7 +17,7 @@ namespace SsOracle.Ipc
     ///   hurt n Hazard [side] HeroController.TakeDamage(n, Hazard) through the real damage path (P7/P15)
     /// Every command gets one reply line: "ok", "err ...", or the JSON.
     /// </summary>
-    internal sealed class Server
+    internal sealed class DebugServer
     {
         public const int DefaultPort = 47631;
 
@@ -26,16 +26,16 @@ namespace SsOracle.Ipc
         private volatile bool running;
         private TcpListener listener;
 
-        public Server(int port) => this.port = port;
+        public DebugServer(int port) => this.port = port;
 
         public void Start()
         {
             running = true;
             listener = new TcpListener(IPAddress.Loopback, port);
             listener.Start();
-            thread = new Thread(AcceptLoop) { IsBackground = true, Name = "SsOracle.Ipc" };
+            thread = new Thread(AcceptLoop) { IsBackground = true, Name = "SsOracle.DebugIpc" };
             thread.Start();
-            Core.Plugin.Log.LogInfo($"IPC listening on 127.0.0.1:{port}");
+            Core.Plugin.Log.LogInfo($"debug IPC listening on 127.0.0.1:{port}");
         }
 
         public void Stop()
@@ -96,7 +96,7 @@ namespace SsOracle.Ipc
                     Input.KeyboardInjector.OwnsKeyboard = arg == "on";
                     return "ok";
                 case "state":
-                    return Export.StateProbe.Latest ?? "{}";
+                    return Core.MainThread.Run(Export.StateProbe.Snapshot);
                 case "constants":
                     return Core.MainThread.Run(Export.ConstantsDump.Build);
                 case "trace":

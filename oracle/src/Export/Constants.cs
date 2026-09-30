@@ -30,7 +30,7 @@ namespace SsOracle.Export
                 sb.Append(",\"inControlUpdateMode\":\"").Append(icm.updateMode).Append('"');
             sb.Append('}');
 
-            var hero = HeroController.SilentInstance;
+            var hero = HeroController.UnsafeInstance;
             if (hero != null)
             {
                 sb.Append(",\"hero\":");

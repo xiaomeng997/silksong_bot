@@ -30,7 +30,7 @@ namespace SsOracle.Train
                 return "err " + e.Message;
             }
 
-            var hero = HeroController.SilentInstance;
+            var hero = HeroController.UnsafeInstance;
             if (hero == null) return "err no hero";
             var frame = UnityEngine.Time.frameCount;
             Core.Plugin.Log.LogWarning($"hurt {amount} {hazard} from {side} at frame {frame} (training probe)");

@@ -11,14 +11,15 @@ namespace SsOracle.Core
     {
         public const string Guid = "ssbot.oracle";
         public const string Name = "SsOracle";
-        public const string Version = "0.0.1";
+        public const string Version = "0.1.0";
         public const string ExpectedGameVersion = "1.0.30000";
 
         internal static ManualLogSource Log;
+        internal static string GameVersion { get; private set; }
 
-        private Ipc.Server server;
+        private Ipc.DebugServer debugServer;
 
-        private void OnDestroy() => server?.Stop();
+        private void OnDestroy() => debugServer?.Stop();
 
         private void Awake()
         {
@@ -26,10 +27,10 @@ namespace SsOracle.Core
 
             // Constants.GAME_VERSION is a const and would be inlined at compile time, so read it from the loaded assembly.
             var field = typeof(Constants).GetField("GAME_VERSION", BindingFlags.Public | BindingFlags.Static);
-            var gameVersion = field?.GetRawConstantValue() as string;
-            if (gameVersion != ExpectedGameVersion)
+            GameVersion = field?.GetRawConstantValue() as string;
+            if (GameVersion != ExpectedGameVersion)
             {
-                Log.LogError($"Game version {gameVersion ?? "<unknown>"} != pinned {ExpectedGameVersion}; SsOracle disabled.");
+                Log.LogError($"Game version {GameVersion ?? "<unknown>"} != pinned {ExpectedGameVersion}; SsOracle disabled.");
                 enabled = false;
                 return;
             }
@@ -40,9 +41,12 @@ namespace SsOracle.Core
             Input.KeyboardInjector.Install();
             gameObject.AddComponent<MainThread>();
             gameObject.AddComponent<Export.StateProbe>();
-            server = new Ipc.Server(Ipc.Server.DefaultPort);
-            server.Start();
-            Log.LogInfo($"{Name} {Version} loaded: game {gameVersion}, Unity {Application.unityVersion}");
+            Modules.InstallAll(gameObject, harmony);
+            gameObject.AddComponent<Export.FrameExporter>();
+            Ipc.FramedServer.Install(gameObject, Guards.SaveRedirect.Instance);
+            debugServer = new Ipc.DebugServer(Ipc.DebugServer.DefaultPort + Ipc.Protocol.Port(Guards.SaveRedirect.Instance) - Ipc.Protocol.BasePort);
+            debugServer.Start();
+            Log.LogInfo($"{Name} {Version} loaded: game {GameVersion}, Unity {Application.unityVersion}, instance {Guards.SaveRedirect.Instance}");
         }
     }
 }

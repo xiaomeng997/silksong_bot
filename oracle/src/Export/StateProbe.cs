@@ -15,7 +15,7 @@ namespace SsOracle.Export
         private const float IntervalSeconds = 1f;
         private static readonly string OutPath = @"C:\ssbot\sandbox\oracle_probe.jsonl";
 
-        /// <summary>Snapshot of the last completed frame; read from the IPC thread.</summary>
+        /// <summary>Last snapshot built (1 Hz or while tracing); the debug "state" command builds a fresh one.</summary>
         public static volatile string Latest;
 
         private float nextWrite;
@@ -41,6 +41,9 @@ namespace SsOracle.Export
 
         private void LateUpdate()
         {
+            // Built only when needed (tracing, the 1 Hz log); the debug "state" command builds it on demand.
+            var logDue = Time.unscaledTime >= nextWrite;
+            if (traceFrames <= 0 && !logDue) return;
             Latest = Snapshot();
             if (traceFrames > 0)
             {
@@ -53,14 +56,14 @@ namespace SsOracle.Export
                     traceWriter = null;
                 }
             }
-            if (Time.unscaledTime < nextWrite) return;
+            if (!logDue) return;
             nextWrite = Time.unscaledTime + IntervalSeconds;
             writer.WriteLine(Latest);
         }
 
         private void OnDestroy() => writer?.Dispose();
 
-        private static string Snapshot()
+        internal static string Snapshot()
         {
             var inv = CultureInfo.InvariantCulture;
             var sb = new StringBuilder(256);
@@ -115,7 +118,7 @@ namespace SsOracle.Export
                 sb.Append(",\"inventoryOpen\":").Append(pd.isInventoryOpen ? "true" : "false");
             }
 
-            var hero = HeroController.SilentInstance;
+            var hero = HeroController.UnsafeInstance;
             if (hero != null)
             {
                 var p = hero.transform.position;
