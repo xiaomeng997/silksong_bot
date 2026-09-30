@@ -77,7 +77,7 @@ namespace SsOracle.Hero
                 K(w, "max_health", ref n); w.Int(pd.maxHealth);
                 K(w, "health_blue", ref n); w.Int(pd.healthBlue);
                 K(w, "silk", ref n); w.Int(pd.silk);
-                K(w, "silk_max", ref n); Int(w, pd, SilkMax);
+                K(w, "silk_max", ref n); WriteSilkMax(w, pd, hero);
                 K(w, "silk_parts", ref n); w.Int(pd.silkParts);
                 K(w, "silk_regen_max", ref n); w.Int(pd.silkRegenMax);
                 K(w, "spool_broken", ref n); w.Bool(pd.IsSilkSpoolBroken);
@@ -86,14 +86,15 @@ namespace SsOracle.Hero
                 K(w, "crest", ref n); w.Str(pd.CurrentCrestID);
                 K(w, "any_cursed", ref n); Pred(w, pd, AnyCursed);
                 K(w, "is_invincible", ref n); w.Bool(pd.isInvincible);
-                K(w, "fractured_mask", ref n); WriteFracturedMask(w, pd);
+                K(w, "fractured_mask", ref n); WriteFracturedMask(w, pd, hero);
                 CollectTools(pd, out var extra);
                 K(w, "tools", ref n);
                 w.ArrayHeader(toolNames.Count);
                 foreach (var t in toolNames) w.Str(t);
                 K(w, "tool_amounts", ref n);
                 w.ArrayHeader(toolAmounts.Count);
-                foreach (var a in toolAmounts) w.Int(a);
+                for (var i = 0; i < toolAmounts.Count; i++)
+                    if (toolNames[i] != null) w.Int(toolAmounts[i]); else w.Nil();
                 K(w, "tools_extra", ref n); w.Int(extra);
                 K(w, "respawn", ref n);
                 w.MapHeader(6);
@@ -127,7 +128,6 @@ namespace SsOracle.Hero
         private static readonly Func<HeroController, bool> CanCast = h => h.CanCast();
         private static readonly Func<HeroController, bool> CanInput = h => h.CanInput();
         private static readonly Func<PlayerData, bool> AnyCursed = pd => pd.IsAnyCursed;
-        private static readonly Func<PlayerData, int> SilkMax = pd => pd.CurrentSilkMax;
 
         /// <summary>Evaluate before writing, so an exception (e.g. a null Config mid-load) costs only this value.</summary>
         private void Pred<T>(MsgPackWriter w, T target, Func<T, bool> f)
@@ -138,12 +138,17 @@ namespace SsOracle.Hero
             w.Bool(v);
         }
 
-        private void Int<T>(MsgPackWriter w, T target, Func<T, int> f)
+        /// <summary>
+        /// PlayerData.CurrentSilkMax, or nil while ToolItemManager (or PlayerData.instance) is missing: the getter
+        /// goes through the spool extender's IsEquipped, which would search the scene then (SafeReads).
+        /// </summary>
+        private void WriteSilkMax(MsgPackWriter w, PlayerData pd, HeroController hero)
         {
+            bool ok;
             int v;
-            try { v = f(target); }
+            try { ok = SafeReads.TrySilkMax(pd, hero, out v); }
             catch (Exception e) { LogOnce(e); w.Nil(); return; }
-            w.Int(v);
+            if (ok) w.Int(v); else w.Nil();
         }
 
         private void LogOnce(Exception e)
@@ -238,10 +243,10 @@ namespace SsOracle.Hero
         /// <summary>
         /// {equipped, amount_left} with the same predicate PlayerData.TakeHealth uses: FracturedMaskTool.IsEquipped
         /// (false while cursed or while tools are in the Cutscene state) and its saved AmountLeft (m0:C2).
-        /// IsEquipped goes through ManagerSingleton&lt;ToolItemManager&gt;.Instance, so it is only read when the
-        /// manager exists (otherwise the getter would search the scene).
+        /// IsEquipped goes through ManagerSingleton&lt;ToolItemManager&gt;.Instance, HeroController.instance and
+        /// PlayerData.instance, so it is only read when SafeReads.ToolsReadable (otherwise nil).
         /// </summary>
-        private void WriteFracturedMask(MsgPackWriter w, PlayerData pd)
+        private void WriteFracturedMask(MsgPackWriter w, PlayerData pd, HeroController hero)
         {
             bool? equipped;
             int amount;
@@ -254,7 +259,7 @@ namespace SsOracle.Hero
                     maskToolRef = tool;
                     maskToolName = tool.name;
                 }
-                equipped = ManagerSingleton<ToolItemManager>.UnsafeInstance != null ? tool.IsEquipped : (bool?)null;
+                equipped = SafeReads.ToolsReadable(hero) ? tool.IsEquipped : (bool?)null;
                 amount = pd.GetToolData(maskToolName).AmountLeft;
             }
             catch (Exception e) { LogOnce(e); w.Nil(); return; }
@@ -264,9 +269,11 @@ namespace SsOracle.Hero
         }
 
         /// <summary>
-        /// Equipped tools = the slots of ToolEquips[CurrentCrestID] (the list GetEquippedToolsForCrest maps) followed
-        /// by the filled ExtraToolEquips slots, each with its saved AmountLeft (m0 §2.7). Read straight from PlayerData
-        /// to avoid the LINQ/ToList allocations of ToolItemManager.GetEquippedToolsForCrest. Empty slots are skipped.
+        /// Equipped tools with the semantics of ToolItemManager.GetCurrentEquippedTools (m0 §2.7): one entry per slot
+        /// of ToolEquips[CurrentCrestID] in slot order, nil for an empty slot (GetEquippedToolsForCrest keeps nulls, and
+        /// the slot index is what fixes the slot's type and Up/Neutral/Down binding), followed by the filled
+        /// ExtraToolEquips slots (counted by tools_extra). Amounts are the saved AmountLeft, nil for an empty slot.
+        /// Read straight from PlayerData to avoid the LINQ/ToList allocations of the ToolItemManager methods.
         /// </summary>
         private void CollectTools(PlayerData pd, out int extra)
         {
@@ -288,7 +295,11 @@ namespace SsOracle.Hero
                     var dict = ExtraSlots(pd.ExtraToolEquips);
                     if (dict != null)
                         foreach (var kv in dict)
-                            if (Add(pd, kv.Value.EquippedTool)) extra++;
+                            if (!string.IsNullOrEmpty(kv.Value.EquippedTool))
+                            {
+                                Add(pd, kv.Value.EquippedTool);
+                                extra++;
+                            }
                 }
             }
             catch (Exception e)
@@ -300,12 +311,17 @@ namespace SsOracle.Hero
             }
         }
 
-        private bool Add(PlayerData pd, string tool)
+        /// <summary>One slot: an empty slot is kept as a null name (written as nil in both arrays).</summary>
+        private void Add(PlayerData pd, string tool)
         {
-            if (string.IsNullOrEmpty(tool)) return false;
+            if (string.IsNullOrEmpty(tool))
+            {
+                toolNames.Add(null);
+                toolAmounts.Add(0);
+                return;
+            }
             toolNames.Add(tool);
             toolAmounts.Add(pd.GetToolData(tool).AmountLeft);
-            return true;
         }
     }
 }

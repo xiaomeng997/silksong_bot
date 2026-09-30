@@ -17,8 +17,8 @@ namespace SsOracle.Hero
     /// The HUD is not uGUI: masks are tk2d sprites driven by one "health_display" FSM each (FsmInt "Health
     /// Number"), found under GameCameras.hudCanvasSlideOut (the "Hud Canvas"); the silk spool is SilkSpool.Instance
     /// whose chunks sit at chunkParent-local x = firstChunk_x + i*chunkDistance_x. Object lookups are cached and
-    /// rebuilt only when the HUD root changes, the scene changes, maxHealth/healthBlue change or a cached object
-    /// dies, so the per-frame cost is a few native reads per element.
+    /// rebuilt only when the HUD root changes, the scene changes, maxHealth/healthBlue change (each followed by one
+    /// delayed re-check) or a cached object dies, so the per-frame cost is a few native reads per element.
     /// </summary>
     internal sealed class HudProbe : IExporter
     {
@@ -27,6 +27,7 @@ namespace SsOracle.Hero
         private const int MaxSlots = 40;
         private const int RetryFrames = 120;
         private const int MinRebuildFrames = 10;
+        private const int FollowUpFrames = 45;
 
         private static readonly AccessTools.FieldRef<SilkSpool, List<SilkChunk>> SilkChunks =
             Refs.Field<SilkSpool, List<SilkChunk>>("silkChunks");
@@ -46,6 +47,8 @@ namespace SsOracle.Hero
             Refs.Field<RadialHudIcon, SpriteRenderer>("icon");
         private static readonly AccessTools.FieldRef<ToolHudIcon, AttackToolBinding> IconBinding =
             Refs.Field<ToolHudIcon, AttackToolBinding>("binding");
+        private static readonly AccessTools.FieldRef<BlueHealth, bool> BlueIsActive =
+            Refs.Field<BlueHealth, bool>("isActive");
         private static readonly FieldInfo HudCanvasInstance = AccessTools.Field(typeof(HudCanvas), "instance");
 
         private sealed class MaskSlot
@@ -53,6 +56,7 @@ namespace SsOracle.Hero
             public PlayMakerFSM Fsm;
             public GameObject Go;
             public Renderer R;
+            public bool ChildR;
             public FsmInt Number;
         }
 
@@ -68,8 +72,10 @@ namespace SsOracle.Hero
 
         private sealed class BlueSlot
         {
+            public BlueHealth B;
             public GameObject Go;
             public Renderer R;
+            public bool ChildR;
         }
 
         private readonly List<MaskSlot> masks = new List<MaskSlot>();
@@ -126,7 +132,7 @@ namespace SsOracle.Hero
             w.Key("cam"); WriteCam(w, hudCam, view);
             w.Key("masks"); WriteMasks(w, view);
             w.Key("blue"); WriteBlue(w, view);
-            w.Key("spool"); WriteSpool(w, gc, pd, view);
+            w.Key("spool"); WriteSpool(w, gc, pd, ctx.Hero, view);
             w.Key("bind_orb"); WriteBindOrb(w, view);
             w.Key("tools"); WriteTools(w, view);
         }
@@ -163,23 +169,31 @@ namespace SsOracle.Hero
                 w.Int(number);
                 w.Bool(active);
                 w.Str(state);
-                WriteRenderer(w, view, active, m.R);
+                WriteRenderer(w, view, active && ChildShown(m.ChildR, m.R), m.R);
             }
         }
 
-        /// <summary>Lifeblood masks (BlueHealth components under the HUD): [active, rect|nil].</summary>
+        /// <summary>
+        /// Lifeblood masks (BlueHealth components under the HUD): [shown, live|nil, rect|nil]. "shown" is
+        /// activeInHierarchy; "live" is BlueHealth.isActive, the flag the game counts in BlueHealth.ActiveCount
+        /// (MarkActive/MarkInactive), which can differ from "shown" while the FSM animates a mask in or out.
+        /// </summary>
         private void WriteBlue(MsgPackWriter w, CamView view)
         {
             w.ArrayHeader(blues.Count);
             foreach (var b in blues)
             {
-                if (b.Go == null) { invalid = true; w.Nil(); continue; }
+                if (b.Go == null || b.B == null) { invalid = true; w.Nil(); continue; }
                 var active = b.Go.activeInHierarchy;
-                w.ArrayHeader(2);
+                w.ArrayHeader(3);
                 w.Bool(active);
-                WriteRenderer(w, view, active, b.R);
+                if (BlueIsActive != null) w.Bool(BlueIsActive(b.B)); else w.Nil();
+                WriteRenderer(w, view, active && ChildShown(b.ChildR, b.R), b.R);
             }
         }
+
+        /// <summary>A renderer found below the element (ElementSprite fallback) must itself be active to have bounds.</summary>
+        private static bool ChildShown(bool child, Renderer r) => !child || r == null || r.gameObject.activeInHierarchy;
 
         private static void WriteRenderer(MsgPackWriter w, CamView view, bool active, Renderer r)
         {
@@ -191,9 +205,10 @@ namespace SsOracle.Hero
         /// Silk spool: "parts" bits (1 spool shown, 2 normal, 4 broken, 8 cursed parent active), "slots" = image
         /// centres of chunk positions 0..CurrentSilkMax-1, "pitch" = px between slots, "chunks" = centres of the
         /// chunks currently shown (one per silk, regen chunks included), "chunk_rect" = rect of the first chunk,
-        /// "notch" = the bind-cost notch centre.
+        /// "notch" = the bind-cost notch centre. Without a hero (menus, loads, Save &amp; Quit) the slot count is
+        /// CurrentSilkMaxBasic, because CurrentSilkMax would search for the tool manager and the hero (SafeReads).
         /// </summary>
-        private void WriteSpool(MsgPackWriter w, GameCameras gc, PlayerData pd, CamView view)
+        private void WriteSpool(MsgPackWriter w, GameCameras gc, PlayerData pd, HeroController hero, CamView view)
         {
             var sp = SilkSpool.Instance;
             if (sp == null) sp = gc.silkSpool;
@@ -208,8 +223,12 @@ namespace SsOracle.Hero
             var slotCount = 9;
             if (pd != null)
             {
-                try { slotCount = Mathf.Clamp(pd.CurrentSilkMax, 0, MaxSlots); }
-                catch (Exception) { slotCount = 9; }
+                try
+                {
+                    if (!SafeReads.TrySilkMax(pd, hero, out slotCount)) slotCount = pd.CurrentSilkMaxBasic;
+                    slotCount = Mathf.Clamp(slotCount, 0, MaxSlots);
+                }
+                catch (Exception e) { LogOnce(e); slotCount = 9; }
             }
 
             w.MapHeader(6);
@@ -310,7 +329,10 @@ namespace SsOracle.Hero
         /// <summary>
         /// Rebuild on a new HUD root or scene, on maxHealth changes and on healthBlue rising above what was seen
         /// (masks may be spawned), at most every MinRebuildFrames when a cached object died (Save &amp; Quit
-        /// teardown), and every RetryFrames while the HUD has no masks yet (menus, loads).
+        /// teardown), and every RetryFrames while the HUD has no masks yet (menus, loads). A structural trigger
+        /// fires in the frame PlayerData changes, but the HUD FSMs may spawn or reparent the new mask or lifeblood
+        /// object a few frames later while the old objects stay alive (nothing would mark the cache invalid), so
+        /// every structural rebuild schedules one more, FollowUpFrames later.
         /// </summary>
         private void EnsureCache(GameManager gm, GameCameras gc, PlayerData pd, long frame)
         {
@@ -319,7 +341,7 @@ namespace SsOracle.Hero
                              || (pd != null && (pd.maxHealth != builtMaxHealth || pd.healthBlue > builtBlue));
             var due = (invalid && frame >= lastRebuild + MinRebuildFrames) || frame >= nextRetry;
             if (!structural && !due) return;
-            Rebuild(gm, gc, pd, frame);
+            Rebuild(gm, gc, pd, frame, structural);
         }
 
         private void ClearCache()
@@ -338,7 +360,7 @@ namespace SsOracle.Hero
             if (errorsLogged++ < 5) Core.Plugin.Log.LogWarning("hud probe: " + e.GetType().Name + ": " + e.Message);
         }
 
-        private void Rebuild(GameManager gm, GameCameras gc, PlayerData pd, long frame)
+        private void Rebuild(GameManager gm, GameCameras gc, PlayerData pd, long frame, bool structural)
         {
             ClearCache();
             invalid = false;
@@ -357,7 +379,8 @@ namespace SsOracle.Hero
                 {
                     Fsm = f,
                     Go = f.gameObject,
-                    R = OwnSprite(f),
+                    R = ElementSprite(f, out var child),
+                    ChildR = child,
                     Number = f.FsmVariables.FindFsmInt("Health Number"),
                 });
             }
@@ -373,7 +396,7 @@ namespace SsOracle.Hero
                 });
 
             foreach (var b in root.GetComponentsInChildren<BlueHealth>(true))
-                blues.Add(new BlueSlot { Go = b.gameObject, R = OwnSprite(b) });
+                blues.Add(new BlueSlot { B = b, Go = b.gameObject, R = ElementSprite(b, out var child), ChildR = child });
 
             var orb = root.GetComponentInChildren<BindOrbHudFrame>(true);
             if (orb != null)
@@ -383,8 +406,11 @@ namespace SsOracle.Hero
                     if (IsSprite(r) && bindOrbRenderers.Count < 32) bindOrbRenderers.Add(r);
             }
 
-            // Menus have a HUD root but may have no masks yet: retry periodically, not every frame.
-            nextRetry = masks.Count == 0 ? frame + RetryFrames : long.MaxValue;
+            // Menus have a HUD root but may have no masks yet: retry periodically, not every frame. After a
+            // structural trigger, look once more when late-spawned HUD objects have appeared (see EnsureCache).
+            nextRetry = masks.Count == 0 ? frame + RetryFrames
+                      : structural ? frame + FollowUpFrames
+                      : long.MaxValue;
         }
 
         /// <summary>Sprites only: particle/trail renderers have bounds unrelated to the drawn HUD element.</summary>
@@ -395,6 +421,25 @@ namespace SsOracle.Hero
             Renderer r = c.GetComponent<MeshRenderer>();
             if (r == null) r = c.GetComponent<SpriteRenderer>();
             return r;
+        }
+
+        /// <summary>
+        /// The sprite that draws a mask or lifeblood element: its own MeshRenderer/SpriteRenderer, else the first one
+        /// below it (inactive children included, since the element may be hidden at rebuild time). Skips the
+        /// HealthSpecialHealIndicator overlays that sit under each mask with their renderer disabled by default.
+        /// </summary>
+        private static Renderer ElementSprite(Component c, out bool child)
+        {
+            child = false;
+            var own = OwnSprite(c);
+            if (own != null) return own;
+            foreach (var r in c.GetComponentsInChildren<Renderer>(true))
+                if (IsSprite(r) && r.GetComponent<HealthSpecialHealIndicator>() == null)
+                {
+                    child = true;
+                    return r;
+                }
+            return null;
         }
 
         private static Renderer FirstSprite(Component c)

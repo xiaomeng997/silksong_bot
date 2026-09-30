@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using HarmonyLib;
 using SsOracle.Export;
 using SsOracle.Ipc;
@@ -12,6 +13,10 @@ namespace SsOracle.Hero
     /// the shake offset it added in OnPreCull (it restores localPosition in OnPostRender), so the end-of-frame
     /// worldToCameraMatrix is not the one that produced the image. The render-time V/P are what the projector
     /// (DESIGN §3.1.3) and the HUD rectangles need. Only GameCameras.mainCamera and .hudCamera are captured.
+    ///
+    /// The callback runs for every camera render, outside FrameExporter's measured window, so it returns at once
+    /// while no brain is connected (STATE is not built then either) and sums its own per-frame cost, which
+    /// CameraExporter reports as cam["cb_us"] (C14 accounting).
     /// </summary>
     internal static class RenderCapture
     {
@@ -27,6 +32,9 @@ namespace SsOracle.Hero
         private static bool installed;
         private static int errors;
 
+        /// <summary>Stopwatch ticks spent in OnPreRender during frame CostFrame (all cameras).</summary>
+        private static long costTicks, costFrame = -1;
+
         public static void Install()
         {
             if (installed) return;
@@ -34,8 +42,15 @@ namespace SsOracle.Hero
             installed = true;
         }
 
+        /// <summary>Main-thread microseconds spent in the capture callbacks of frame `frame` (0 if none ran).</summary>
+        public static float CostUs(long frame) =>
+            costFrame == frame ? (float)(costTicks * 1_000_000.0 / Stopwatch.Frequency) : 0f;
+
         private static void OnPreRender(Camera cam)
         {
+            var server = Ipc.FramedServer.Instance;
+            if (server == null || !server.Connected) return;
+            var t0 = Stopwatch.GetTimestamp();
             try
             {
                 var gm = GameManager._instance;
@@ -48,6 +63,16 @@ namespace SsOracle.Hero
             catch (Exception e)
             {
                 if (errors++ < 5) Core.Plugin.Log.LogWarning("render capture: " + e.Message);
+            }
+            finally
+            {
+                long frame = Time.frameCount;
+                if (costFrame != frame)
+                {
+                    costFrame = frame;
+                    costTicks = 0;
+                }
+                costTicks += Stopwatch.GetTimestamp() - t0;
             }
         }
 
@@ -163,7 +188,8 @@ namespace SsOracle.Hero
     /// <summary>
     /// STATE "cam" (DESIGN §3.1.2 camera; m0 §3.1 camera and §2.7 camera rows). The camera is
     /// GameManager._instance.gameCams.mainCamera (Camera.main as fallback). "V"/"P" are the render-time matrices
-    /// when "src" == 1 (see RenderCapture), otherwise the end-of-frame ones. Projection of a world point:
+    /// when "src" == 1 (see RenderCapture), otherwise the end-of-frame ones. "cb_us" is this frame's main-thread
+    /// cost of the RenderCapture callbacks (all cameras), which cost_us/cost_ex do not include. Projection of a world point:
     /// clip = P*V*[x, y, z, 1]; ndc = clip.xyz / clip.w; image_x = (rect.x + (ndc.x+1)/2*rect.w)*screen.w;
     /// image_y = screen.h - (rect.y + (ndc.y+1)/2*rect.h)*screen.h (top-left origin).
     /// </summary>
@@ -194,6 +220,7 @@ namespace SsOracle.Hero
             var at = w.BeginMap16();
             var n = 0;
             K(w, "src", ref n); w.Int(view.FromRender ? 1 : 0);
+            K(w, "cb_us", ref n); w.Float(RenderCapture.CostUs(ctx.Frame));
             K(w, "V", ref n); CamView.WriteMatrix(w, view.V);
             K(w, "P", ref n); CamView.WriteMatrix(w, view.P);
             K(w, "pos", ref n); w.Vec3(view.Pos.x, view.Pos.y, view.Pos.z);
