@@ -5,13 +5,18 @@ Needs the training copy (SsOracle with RPCs hitbox.show / projection.sample, ora
 DebugMod) in gameplay, TRAIN profile, windowed and not minimized (Windows Graphics Capture stops for a minimized window;
 a covered one is fine). No focus needed and no keys are sent. Put Hornet where terrain (and ideally an enemy or a
 hazard) is in view and leave her idle: only polygons that sit still on screen around each capture are compared.
-1920x1080 gives bigger polygons, so vertex rounding costs less IoU than at 1280x720.
+1920x1080 gives bigger polygons, so vertex rounding costs less IoU than at 1280x720, but a 1920x1080 window (client
+area plus title bar) only fits on a desktop larger than 1080p; on a 1080p monitor use 1600x900. The client area must
+equal the game's Screen size (STATE cam.screen), or every capture is skipped with a warning and the run fails. The
+probe measures the window in physical pixels (DPI-aware, like the launcher), so display scaling does not matter; the
+warning means the window does not show the whole game image (e.g. it is larger than the desktop): relaunch at a size
+that fits.
 
     cd brain
     ..\\scripts\\uv.cmd run python -m ssbot.probes.m1_projection --shot m1_projection.png
     ..\\scripts\\uv.cmd run python -m ssbot.probes.m1_projection --rounds 10 --json m1_projection.json
     ..\\scripts\\uv.cmd run python -m ssbot.probes.m1_projection --vertex-only   # no DebugMod display, no capture
-    ..\\scripts\\uv.cmd run python -m ssbot.probes.m1_projection --off           # only switch DebugMod's hitboxes off
+    ..\\scripts\\uv.cmd run python -m ssbot.probes.m1_projection --off           # switch DebugMod's hitboxes off (TRAIN)
 
 Steps: (a) vertex check: projection.sample returns, for the colliders of one frame, world vertices and Unity's own
 Camera.WorldToScreenPoint taken when the main camera renders (the V/P the STATE of that frame carries); projector.py on
@@ -23,13 +28,20 @@ DebugMod draws). Each capture is assigned the newest STATE whose end-of-frame QP
 same clock); since the frame actually on screen may be a frame or two older, a polygon counts only if it sat still
 (0.3 px) from --window frames before that STATE to the sample's frame. projection_check pairs each drawn collider with
 the oracle label (TERRAIN solid / hazard by collider id, STATE ents collider by identical outline, hero box), finds
-DebugMod's lines by colour near the outlines it reports and reports IoU per polygon. PASS when the IoU p5 >= 0.95 over
-all compared polygons and the vertex p99 <= 1.5 px. Finally DebugMod's ShowHitBoxes and UI panels are put back as they
-were (they persist in the sandbox's DebugModData\\Settings.json: after a crash run --off, since hitboxes left on would
-draw over every later capture; non-TRAIN profiles refuse them).
+DebugMod's lines by colour near the outlines it reports and reports IoU per polygon. The IoU gate takes the polygons
+whose label is the shape DebugMod draws (projection_check.LABEL_EXACT); labels of another shape (the hero box is
+Collider2D.bounds, an ents box includes edgeRadius) are reported apart, with their offset and IoU(DebugMod, oracle), so
+a label-definition difference does not pass for a projection error. PASS when at least MIN_POLYS such polygon-frames
+were compared, their IoU p5 >= 0.95 and the vertex p99 <= 1.5 px; without --vertex-only, a missing DebugMod display or
+no compared polygons is a FAIL. Finally DebugMod's ShowHitBoxes and UI panels are put back as they were. They last
+only until the game restarts (DebugMod reads its Settings.json once at startup, from LocalLow, before SaveRedirect sends
+its saves to the sandbox copy, which is never read back), but until then hitboxes left on draw over every capture:
+after a crash run --off (hitbox.show changes DebugMod only in the TRAIN profile) or restart the instance. Non-TRAIN
+profiles count ShowHitBoxes != 0 as a violation.
 
 Residual error sources (reported, not corrected): DebugMod rounds each vertex to a whole pixel and strokes circles as
-16+ chords; a box's edgeRadius is in the ents outline but not in DebugMod's drawing; the antialiased line's centre
+16+ chords; a box's edgeRadius is in the ents outline but not in DebugMod's drawing (outside the gate, see above);
+Collider2D.bounds (the hero box) may include Box2D's contact skin (same); the antialiased line's centre
 pixels over a bright or similar-coloured background shift the found edge by about half a pixel; the image may show an
 older frame than the STATE assigned to it (only still polygons count); DebugMod projects with the camera after the shake
 is removed, so during a shake its boxes are off the sprites by the shake (compared in that pose here); the camera may
@@ -41,6 +53,7 @@ each sample one frame a few ms.
 import argparse
 import dataclasses
 import json
+import math
 import sys
 import threading
 import time
@@ -56,6 +69,7 @@ from ssbot.probes.common import in_gameplay
 from ssbot.tools import projection_check as pc
 
 results: list[tuple[str, str, str]] = []
+MIN_POLYS = 10  # polygon-frames (label = the drawn shape) the IoU gate needs; fewer is a FAIL, not a pass by default
 
 
 def check(name: str, ok: bool, detail: str = "", warn_only: bool = False) -> bool:
@@ -200,6 +214,8 @@ def run_round(link: OracleLink, rec: Recorder, totals: Totals, terrain: Terrain,
         totals.warnings.add("camera or hero never held still for 20 frames; moving polygons are left out")
     caps = shot.grab_frames(args.frames)
     sample, s_state = take_sample(link, rec, totals, "debugmod")
+    if not caps:
+        totals.counts["round without a captured frame (window minimized?)"] += 1
     if s_state is None or not caps:
         return None
     # Labels are matched in the sample's frame, where DebugMod's outlines and the STATE are exactly simultaneous.
@@ -229,7 +245,10 @@ def run_round(link: OracleLink, rec: Recorder, totals: Totals, terrain: Terrain,
             continue
         screen = tuple(int(v) for v in ref["cam"]["screen"])
         if (img.shape[1], img.shape[0]) != screen:
-            totals.warnings.add(f"client area {img.shape[1]}x{img.shape[0]} != cam.screen {screen[0]}x{screen[1]} (crop or DPI)")
+            totals.counts["client area != cam.screen"] += 1
+            totals.warnings.add(f"client area {img.shape[1]}x{img.shape[0]} != cam.screen {screen[0]}x{screen[1]}: captures "
+                                "skipped; the window does not show the game's whole Screen (e.g. a window larger than the "
+                                "desktop), relaunch it at a size that fits")
             continue
         keep = []
         for p in fresh:
@@ -314,8 +333,13 @@ def report(totals: Totals, vertex_only: bool) -> dict:
 
     print("\n== IoU (DebugMod's outlines in the capture vs oracle polygons) ==")
     polys = totals.polys
-    st = pc.summarize(r.iou for r in polys)
-    print(f"  compared: {len(polys)} polygon-frames; left out: {dict(totals.counts)}")
+    # The gate compares the projection only where the label is the shape DebugMod draws; elsewhere IoU also measures
+    # the label's own difference (hero bounds skin, edgeRadius, moved TERRAIN), reported below with its offset.
+    exact = [r for r in polys if r.offset <= pc.LABEL_EXACT]
+    other = [r for r in polys if r.offset > pc.LABEL_EXACT]
+    st = pc.summarize(r.iou for r in exact)
+    print(f"  compared: {len(polys)} polygon-frames, {len(exact)} of them labelled with the drawn shape; "
+          f"left out: {dict(totals.counts)}")
     print(f"  drawn but not labelled by the oracle: {dict(totals.unmatched) or '-'}; skipped: {dict(totals.skipped) or '-'}")
     if totals.coverage:
         print(f"  segmentation: centreline coverage p50 {np.median(totals.coverage):.3f}, line core "
@@ -324,13 +348,23 @@ def report(totals: Totals, vertex_only: bool) -> dict:
               float(np.median(totals.coverage)) >= 0.8, f"p50 {np.median(totals.coverage):.3f}", warn_only=True)
         check("capture is not offset (best shift (0, 0))", set(totals.shifts) == {(0, 0)}, str(dict(totals.shifts)),
               warn_only=True)
-    check("at least 10 polygons compared", len(polys) >= 10, f"{len(polys)}", warn_only=True)
+    check(f"at least {MIN_POLYS} polygon-frames compared (label = the drawn shape)", len(exact) >= MIN_POLYS,
+          f"{len(exact)} of {len(polys)}")
+    if exact:
+        check(f"IoU p5 >= {pc.IOU_MIN} (label = the drawn shape)", st["p5"] >= pc.IOU_MIN, fmt_stats(st))
+    if other:
+        so = pc.summarize(r.iou for r in other)
+        check(f"IoU p5 >= {pc.IOU_MIN} where the label is another shape (not gated)", so["p5"] >= pc.IOU_MIN,
+              f"{fmt_stats(so)}; offset up to {max(r.offset for r in other):.4g} u, {sorted({r.type for r in other})}",
+              warn_only=True)
     if polys:
-        check(f"IoU p5 >= {pc.IOU_MIN}", st["p5"] >= pc.IOU_MIN, fmt_stats(st))
-        for key in sorted({r.type for r in polys}):
-            print(f"    {key:16s} {fmt_stats(pc.summarize(r.iou for r in polys if r.type == key))}")
-        for key in sorted({r.src for r in polys}):
-            print(f"    src {key:12s} {fmt_stats(pc.summarize(r.iou for r in polys if r.src == key))}")
+        print("  by type and source (label offset: world units from the drawn outline; geom: IoU(DebugMod, oracle)):")
+        for name, groups in (("", sorted({r.type for r in polys})), ("src ", sorted({r.src for r in polys}))):
+            for key in groups:
+                rs = [r for r in polys if (r.src if name else r.type) == key]
+                print(f"    {name + key:16s} {fmt_stats(pc.summarize(r.iou for r in rs))}; geom p50 "
+                      f"{np.median([r.iou_geom for r in rs]):.3f}; offset p50 {np.median([r.offset for r in rs]):.2g} "
+                      f"max {max(r.offset for r in rs):.2g} u; {sum(r.offset > pc.LABEL_EXACT for r in rs)} not gated")
         dm = pc.summarize(r.iou_dm for r in polys)
         geom = pc.summarize(r.iou_geom for r in polys)
         print(f"  IoU(capture, DebugMod's vertices) {fmt_stats(dm)}")
@@ -344,10 +378,13 @@ def report(totals: Totals, vertex_only: bool) -> dict:
         print("  worst:")
         for r in sorted(polys, key=lambda r: r.iou)[:10]:
             print(f"    {r.key:>14s} {r.type:16s} {r.src:8s} iou {r.iou:.3f} (dm {r.iou_dm:.3f}, geom {r.iou_geom:.3f}) "
-                  f"area {r.area} px{' LEAK' if r.leak else ''}")
-        out.update(iou=st, iou_dm=dm, iou_geom=geom, leaks=leaks,
+                  f"area {r.area} px, offset {r.offset:.2g} u{'' if r.offset <= pc.LABEL_EXACT else ' (not gated)'}"
+                  f"{' LEAK' if r.leak else ''}")
+        out.update(iou=st, iou_all=pc.summarize(r.iou for r in polys), iou_not_gated=pc.summarize(r.iou for r in other),
+                   iou_dm=dm, iou_geom=geom, leaks=leaks,
                    polys=[{"key": r.key, "type": r.type, "src": r.src, "iou": r.iou, "iou_dm": r.iou_dm, "iou_geom": r.iou_geom,
-                           "area": r.area, "colour": r.colour, "leak": r.leak} for r in polys])
+                           "area": r.area, "colour": r.colour, "leak": r.leak,
+                           "offset": r.offset if math.isfinite(r.offset) else None} for r in polys])
     out.update(left_out=dict(totals.counts), unmatched=dict(totals.unmatched), skipped=dict(totals.skipped))
     return out
 
@@ -376,8 +413,14 @@ def main() -> int:
         print(f"FAIL: RPCs missing {sorted(missing)}: is this SsOracle build older than ProjectionSample?")
         return 1
     if args.off:
-        print("hitbox.show off ->", link.rpc("hitbox.show", on=False))
-        link.close()
+        try:
+            print("hitbox.show off ->", link.rpc("hitbox.show", on=False))
+        except OracleError as e:
+            print(f"FAIL: {e}\n  hitbox.show changes DebugMod only in the TRAIN profile (profile.set TRAIN), or restart the "
+                  "instance: DebugMod then reloads ShowHitBoxes and its panels from LocalLow's Settings.json")
+            return 1
+        finally:
+            link.close()
         return 0
 
     rec = Recorder(link)
@@ -394,14 +437,18 @@ def main() -> int:
         try:
             status = link.rpc("hitbox.show")
         except OracleError as e:
-            print(f"  DebugMod's hitbox display is unavailable ({e}); vertex check only")
+            # Still measure the vertices, but the IoU half of the M1 check did not run: that is no pass.
+            check("DebugMod's hitbox display available (the IoU check needs it; --vertex-only skips it)", False, str(e))
+            print("  vertex check only")
             vertex_only = True
 
     last = None
     try:
         if not vertex_only:
             from ssbot.io import game_window
+            from ssbot.tools.launcher import set_dpi_aware
 
+            set_dpi_aware()  # client rect in physical pixels, like the WGC frame (else a scaled desktop skips every capture)
             hwnd = game_window.find()
             if not hwnd:
                 print("FAIL: game window not found")
@@ -413,7 +460,12 @@ def main() -> int:
             if not check("TERRAIN of this room received", terrain is not None, str(terrain.summary() if terrain else dump)):
                 return 1
             ui = {} if args.keep_ui else {"ui": False}
-            on = link.rpc("hitbox.show", on=True, timeout_s=10, **ui)
+            try:
+                on = link.rpc("hitbox.show", on=True, timeout_s=10, **ui)
+            except OracleError as e:
+                check("DebugMod's hitbox display switched on", False,
+                      f"{e} (hitbox.show changes DebugMod only in the TRAIN profile)")
+                return 1
             if not check("DebugMod's hitbox display running", on["render"] and on["settled"],
                          f"state {on['state']}, {on['colliders']} colliders, line width {on['line_width']}, panels {on['panels']}"):
                 return 1
@@ -431,10 +483,13 @@ def main() -> int:
     finally:
         if status is not None:
             try:
-                back = link.rpc("hitbox.show", mode=status["show"], panels=status["panels"], timeout_s=10)
-                print(f"\nDebugMod restored: ShowHitBoxes {back['show']}, panels {back['panels']}")
+                now = link.rpc("hitbox.show")  # nothing to put back when switching on was refused (not TRAIN)
+                if (now["show"], now["panels"]) != (status["show"], status["panels"]):
+                    back = link.rpc("hitbox.show", mode=status["show"], panels=status["panels"], timeout_s=10)
+                    print(f"\nDebugMod restored: ShowHitBoxes {back['show']}, panels {back['panels']}")
             except Exception as e:  # noqa: BLE001 - the user must hear about this whatever it was
-                print(f"\n!! could not restore DebugMod's hitbox display ({e}); run with --off, and check its UI panels")
+                print(f"\n!! could not restore DebugMod's hitbox display ({e}); run with --off (TRAIN profile) or restart "
+                      "the instance, and check its UI panels")
 
     if last is not None and args.shot:
         print("\n== images ==")

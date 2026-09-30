@@ -20,8 +20,10 @@ namespace SsOracle.Train
     ///       started (outside gameplay scenes at once, since DebugMod draws nothing there), or at the timeout with
     ///       settled false. Reply {show, state, render, colliders, line_width, gameplay, panels, settled, frames, version}
     ///       plus prev {show, panels} when it changed something. Without arguments it only reports (any profile). Both
-    ///       settings persist in the sandbox's DebugModData\Settings.json, so callers switch them back: a hitbox overlay
-    ///       left on would leak into every later capture (DESIGN §3.1.8 L1; non-TRAIN profiles refuse it).
+    ///       settings last until the game restarts (DebugMod reads its Settings.json only in Awake, from LocalLow, before
+    ///       SaveRedirect sends its saves to the sandbox copy, which nothing reads back), so callers switch them back: a
+    ///       hitbox overlay left on would leak into every later capture of the session (DESIGN §3.1.8 L1; non-TRAIN
+    ///       profiles count ShowHitBoxes != 0 as a violation).
     ///   projection.sample {source? = auto|debugmod|physics, max? = 2000}
     ///       Read-only. Unity's own Camera.WorldToScreenPoint of collider outlines for the frame the request arrives in,
     ///       so the brain can compare it with ssbot/tools/projector.py on the STATE of that frame ("frame" = STATE "f"):
@@ -115,7 +117,7 @@ namespace SsOracle.Train
             if (before != mode)
             {
                 DebugModBridge.ShowHitboxes = mode;
-                Core.Plugin.Log.LogWarning($"hitbox.show: DebugMod ShowHitBoxes {before} -> {mode} (training probe; saved in the sandbox Settings.json)");
+                Core.Plugin.Log.LogWarning($"hitbox.show: DebugMod ShowHitBoxes {before} -> {mode} (training probe; lasts until the game restarts)");
             }
             if (args.ContainsKey("ui"))
             {

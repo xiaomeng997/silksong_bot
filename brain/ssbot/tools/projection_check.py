@@ -15,7 +15,11 @@ OpenCV draws with pixel centres on integers, so cv = image - 0.5.
 For one captured frame (hitboxes on) and the STATE of that frame:
   1. match_sample pairs each collider DebugMod drew (RPC projection.sample, source debugmod) with the oracle's own label
      polygon: TERRAIN solids (by collider id), STATE ents colliders (float-identical outline "o"), TERRAIN hazards (id),
-     the STATE hero box (Knight). Types the oracle does not label (Attack, Gate, Trigger, ...) are left out.
+     the STATE hero box (Knight). Types the oracle does not label (Attack, Gate, Trigger, ...) are left out. Each
+     pair records how far the label's world outline is from the one DebugMod draws (Poly.offset): up to float noise
+     the same shape, or a label that is another shape (the hero box is Collider2D.bounds, possibly with Box2D's
+     contact skin; an ents box includes the edgeRadius DebugMod leaves out; TERRAIN moved since the room dump), whose
+     IoU then measures that difference as well as the projection.
   2. segment finds DebugMod's line pixels by colour, with the palette measured on the capture along the outlines
      DebugMod says it drew, and only near those outlines (NEAR_PX), so scene pixels of a palette colour elsewhere
      (Hornet's red cloak is close to "Enemy") are not taken for lines.
@@ -180,9 +184,13 @@ class Poly:
     ref: tuple = ()             # ("ents", iid, k) | ("terrain" | "hazard", id, shape) | ("hero",)
     stale: float = 0.0          # world distance between DebugMod's outline and the label's (TERRAIN is a room dump)
     dm: np.ndarray = field(default_factory=lambda: np.zeros((0, 2)))   # DebugMod's GUI outline (dm_outline)
+    offset: float = 0.0         # label_offset: how far the label's shape is from the drawn one, any source (world units)
 
 
 STALE_MAX = 0.05  # world units: a label further from DebugMod's outline than this is out of date, not a projection error
+# World units: a label within this of DebugMod's drawn outline is the drawn shape (float noise is ~1e-5; 1e-3 u is
+# about 0.06 px at 1080p, ~60 px/u). Only those labels make the IoU gate a test of the projection alone.
+LABEL_EXACT = 1e-3
 
 
 def match_sample(sample: dict, state: dict, terrain=None) -> tuple[list[Poly], Counter, Counter]:
@@ -214,8 +222,21 @@ def match_sample(sample: dict, state: dict, terrain=None) -> tuple[list[Poly], C
             continue
         p.key, p.type = f"{c['id']}/{c['path']}", t
         p.dm, _ = dm_outline(c, screen_h)
+        p.offset = label_offset(p, c)
         polys.append(p)
     return polys, unmatched, skipped
+
+
+def label_offset(p: Poly, c: dict) -> float:
+    """World distance between the outline DebugMod draws for sampled collider c ("w") and the label p in the same
+    frame: the largest distance from a drawn vertex to the nearest label vertex; circles: centre distance plus the
+    radius difference. Above LABEL_EXACT the label is another shape than the drawn one."""
+    w = np.asarray(c["w"], dtype=np.float64).reshape(-1, 2)
+    if p.kind == "circle":
+        return float(np.hypot(*(p.world[0] - w[0])) + abs(p.radius - np.hypot(*(w[1] - w[0]))))
+    if len(p.world) != len(w):
+        return math.inf
+    return float(np.max(np.min(np.linalg.norm(w[:, None] - p.world[None], axis=2), axis=1)))
 
 
 def _ents_poly(c: dict, ents: list) -> Poly | None:
@@ -557,6 +578,7 @@ class PolyResult:
     box: tuple[int, int, int, int] = (0, 0, 0, 0)   # crop (x0, y0, x1, y1) of d and o
     d: np.ndarray | None = field(repr=False, default=None)   # kept by evaluate_frame(keep_masks=True)
     o: np.ndarray | None = field(repr=False, default=None)
+    offset: float = 0.0         # Poly.offset (world units): above LABEL_EXACT the label is another shape than the drawn one
 
 
 def _bbox(pts: np.ndarray, radius: float, pad: float, shape: tuple[int, int]) -> tuple[int, int, int, int]:
@@ -619,7 +641,7 @@ def evaluate_poly(fs: FreeSpace, line: np.ndarray, cls: np.ndarray, type_index: 
     area = int(np.count_nonzero(o))
     return PolyResult(p.key, p.type, p.src, iou(d, o), iou(d, m), iou(m, o), area, colour,
                       bool(np.count_nonzero(d) > 3 * max(area, 1)), img_pts, img_radius, box,
-                      d if keep_masks else None, o if keep_masks else None)
+                      d if keep_masks else None, o if keep_masks else None, p.offset)
 
 
 @dataclass

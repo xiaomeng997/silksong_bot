@@ -212,8 +212,9 @@ namespace SsOracle.Train
         // ---- hitbox display ----------------------------------------------------------------------------------------
         //
         // DebugMod.Hitbox (REF\Silksong.DebugMod\Hitbox, identical in the installed 1.1.2). Settings.ShowHitBoxes (0 off,
-        // 1 hitboxes, 2 all hitboxes; its setter saves Settings.json, which SaveRedirect keeps in the sandbox, so the
-        // value survives restarts) is applied by GUIController.Update in gameplay scenes: HitboxViewer.Load/Unload, and
+        // 1 hitboxes, 2 all hitboxes; its setter saves Settings.json, which SaveRedirect sends to the sandbox copy, but
+        // DebugMod reads its settings only in Awake, from LocalLow and before the redirect, so a change lasts until the
+        // game restarts) is applied by GUIController.Update in gameplay scenes: HitboxViewer.Load/Unload, and
         // Load adds a HitboxRender whose Start fills its private "colliders" dictionary (Collider2D -> HitboxType) from
         // Resources.FindObjectsOfTypeAll plus later hooks. HitboxRender.OnGUI (Repaint) draws every collider in it that
         // isActiveAndEnabled, is not on layer IGNORE_RAYCAST and whose bounds overlap Camera.main's viewport, with
@@ -305,8 +306,9 @@ namespace SsOracle.Train
 
         private static object DmSettings => dmSettingsProperty.GetValue(null, null);
 
-        /// <summary>DebugMod's ShowHitBoxes setting (0 off, 1 hitboxes, 2 all). Setting it saves Settings.json and takes
-        /// effect in the next GUIController.Update of a gameplay scene.</summary>
+        /// <summary>DebugMod's ShowHitBoxes setting (0 off, 1 hitboxes, 2 all). Setting it saves Settings.json (the sandbox
+        /// copy, never read back: it lasts until the game restarts) and takes effect in the next GUIController.Update of
+        /// a gameplay scene.</summary>
         public static int ShowHitboxes
         {
             get => (int)showHitBoxesProperty.GetValue(DmSettings, null);

@@ -318,6 +318,26 @@ def test_match_sample_leaves_moved_terrain_as_stale():
     assert stale["100/0"] == pytest.approx(math.hypot(0.5, 0.5), abs=1e-4) and stale["101/0"] < 1e-5
 
 
+def test_label_offset_tells_the_drawn_shape_from_another_label_shape():
+    scene = Scene()
+    polys, _, _ = pc.match_sample(scene.sample, scene.state, scene.terrain)
+    assert max(p.offset for p in polys) < pc.LABEL_EXACT               # every label here is the drawn shape
+    # An ents box with edgeRadius (in "o" and verts_world, not in what DebugMod draws) and a hero box that is
+    # Collider2D.bounds with Box2D's contact skin: still matched, but as another shape.
+    er, skin = 0.05, 0.01
+    o = f32(box_bl(13.0 - er, 3.0 - er, 15.2 + er, 4.1 + er))
+    enemy = next(c for c in scene.sample["cols"] if c["id"] == 2)
+    enemy["o"], enemy["er"] = o, er
+    scene.state["ents"][0]["colliders"][0]["verts_world"] = o
+    x0, y0, x1, y1 = scene.state["hero"]["box"]
+    scene.state["hero"]["box"] = [x0 - skin, y0 - skin, x1 + skin, y1 + skin]
+    polys, _, _ = pc.match_sample(scene.sample, scene.state, scene.terrain)
+    by_key = {p.key: p for p in polys}
+    assert by_key["2/0"].src == "ents" and by_key["2/0"].offset == pytest.approx(er * math.sqrt(2), rel=1e-3)
+    assert by_key["1/0"].src == "hero" and by_key["1/0"].offset == pytest.approx(skin * math.sqrt(2), rel=1e-3)
+    assert all(p.offset < pc.LABEL_EXACT for k, p in by_key.items() if k not in ("1/0", "2/0"))
+
+
 def test_frame_for_capture_takes_the_newest_frame_ended_before_the_callback():
     freq = 10_000_000
     q = {f: 1_000_000 + f * freq // 60 for f in range(100, 110)}
@@ -410,6 +430,33 @@ def test_a_gap_in_an_outline_leaks_and_is_flagged():
     knight = next(r for r in rep.results if r.key == "1/0")
     assert knight.leak and knight.iou < 0.5
     assert knight.d is not None and knight.d.shape == knight.o.shape
+
+
+def test_report_gates_only_labels_of_the_drawn_shape(monkeypatch, capsys):
+    """A hero box larger than the drawn one (bounds with a contact skin, 0.8 px a side here) scores below 0.95 and
+    would sink p5, but it is a label-definition difference: reported with its offset, outside the gate."""
+    from ssbot.probes import m1_projection
+
+    monkeypatch.setattr(m1_projection, "results", [])
+    scene = Scene()
+    skin = 0.02
+    x0, y0, x1, y1 = scene.state["hero"]["box"]
+    scene.state["hero"]["box"] = [x0 - skin, y0 - skin, x1 + skin, y1 + skin]
+    polys, _, _ = scene.polys()
+    rep = pc.evaluate_frame(scene.capture, polys, scene.cam, scene.sample)
+    assert iou_by_key(rep)["1/0"] < pc.IOU_MIN
+    totals = m1_projection.Totals()
+    totals.polys = rep.results * 2
+    out = m1_projection.report(totals, vertex_only=False)
+    assert out["iou"]["n"] == 16 and out["iou"]["p5"] >= pc.IOU_MIN
+    assert out["iou_not_gated"]["n"] == 2 and out["iou_all"]["p5"] < pc.IOU_MIN
+    assert [p["offset"] > pc.LABEL_EXACT for p in out["polys"]].count(True) == 2
+    levels = {name: level for level, name, _ in m1_projection.results}
+    assert levels[f"at least {m1_projection.MIN_POLYS} polygon-frames compared (label = the drawn shape)"] == "PASS"
+    assert levels[f"IoU p5 >= {pc.IOU_MIN} (label = the drawn shape)"] == "PASS"
+    assert levels[f"IoU p5 >= {pc.IOU_MIN} where the label is another shape (not gated)"] == "WARN"
+    text = capsys.readouterr().out
+    assert "Knight" in text and "2 not gated" in text
 
 
 # ---- the probe against a fake oracle --------------------------------------------------------------------------------
@@ -537,20 +584,42 @@ def test_probe_vertex_check_end_to_end(monkeypatch, capsys, tmp_path, error_px, 
     oracle = ProjectionOracle(error_px)
     out = tmp_path / "m1_projection.json"
     monkeypatch.setattr("sys.argv", ["m1_projection", "--instance", str(oracle.instance), "--vertex-samples", "4",
-                                     "--json", str(out)])
+                                     "--vertex-only", "--json", str(out)])
     monkeypatch.setattr(m1_projection, "results", [])
     try:
         assert m1_projection.main() == code
     finally:
         oracle.close()
-    text = capsys.readouterr().out
-    assert "vertex check only" in text                     # hitbox.show failed: no DebugMod
+    assert not [a for name, a in oracle.calls if name == "hitbox.show"]   # --vertex-only leaves DebugMod alone
     import json
 
     numbers = json.loads(out.read_text())
     assert numbers["samples"] == 4
     assert numbers["vertex_render"]["p99"] == pytest.approx(error_px, abs=1e-3)
     assert numbers["vertex_eof"]["max"] < 1e-3            # the end-of-frame points were not displaced
+
+
+def test_probe_without_debugmods_display_measures_vertices_but_fails(monkeypatch, capsys, tmp_path):
+    """No --vertex-only: the IoU half of the M1 check cannot run, so good vertices alone are no PASS."""
+    from ssbot.probes import m1_projection
+
+    oracle = ProjectionOracle()                             # hitbox.show fails like an oracle without DebugMod
+    out = tmp_path / "m1_projection.json"
+    monkeypatch.setattr("sys.argv", ["m1_projection", "--instance", str(oracle.instance), "--vertex-samples", "2",
+                                     "--json", str(out)])
+    monkeypatch.setattr(m1_projection, "results", [])
+    try:
+        assert m1_projection.main() == 1
+    finally:
+        oracle.close()
+    text = capsys.readouterr().out
+    assert "vertex check only" in text and any(line.startswith("FAIL: ") for line in text.splitlines())
+    fails = [name for level, name, _ in m1_projection.results if level == "FAIL"]
+    assert fails == ["DebugMod's hitbox display available (the IoU check needs it; --vertex-only skips it)"]
+    import json
+
+    numbers = json.loads(out.read_text())
+    assert numbers["samples"] == 2 and numbers["vertex_render"]["p99"] < 1e-3
 
 
 def test_probe_iou_end_to_end(monkeypatch, capsys, tmp_path):
@@ -568,6 +637,7 @@ def test_probe_iou_end_to_end(monkeypatch, capsys, tmp_path):
     monkeypatch.setattr(shot, "grab_frames", grab_frames)
     monkeypatch.setattr(game_window, "find", lambda: 1)
     monkeypatch.setattr(game_window, "client_in_capture", lambda hwnd: (0, 0, W, H))
+    monkeypatch.setattr("ssbot.tools.launcher.set_dpi_aware", lambda: None)
     monkeypatch.setattr(m1_projection, "results", [])
     out, png = tmp_path / "m1.json", tmp_path / "m1.png"
     monkeypatch.setattr("sys.argv", ["m1_projection", "--instance", str(oracle.instance), "--rounds", "2", "--frames", "2",
@@ -589,4 +659,37 @@ def test_probe_iou_end_to_end(monkeypatch, capsys, tmp_path):
     shows = [a for name, a in oracle.calls if name == "hitbox.show"]
     assert shows[0] == {} and shows[1] == {"on": True, "ui": False}
     assert shows[-1] == {"mode": 0, "panels": ProjectionOracle.PANELS}
+    assert (oracle.show, oracle.panels) == (0, ProjectionOracle.PANELS)
+
+
+def test_probe_iou_fails_when_no_polygon_is_compared(monkeypatch, capsys, tmp_path):
+    """Every capture skipped (here: a client area that does not match cam.screen, as a window larger than the desktop
+    gives): good vertices alone must not make the M1 check PASS."""
+    from ssbot.io import game_window
+    from ssbot.probes import m1_projection, shot
+
+    oracle = ProjectionOracle(debugmod=True)
+    capture = oracle.scene.capture
+    monkeypatch.setattr(shot, "grab_frames", lambda n, timeout_s=3.0, hwnd=None: [(time.perf_counter_ns(), capture.copy())])
+    monkeypatch.setattr(game_window, "find", lambda: 1)
+    monkeypatch.setattr(game_window, "client_in_capture", lambda hwnd: (0, 0, W, H - 20))
+    monkeypatch.setattr("ssbot.tools.launcher.set_dpi_aware", lambda: None)
+    monkeypatch.setattr(m1_projection, "results", [])
+    out = tmp_path / "m1.json"
+    monkeypatch.setattr("sys.argv", ["m1_projection", "--instance", str(oracle.instance), "--rounds", "1", "--frames", "1",
+                                     "--vertex-samples", "1", "--still-s", "2", "--json", str(out)])
+    try:
+        code = m1_projection.main()
+    finally:
+        oracle.close()
+    text = capsys.readouterr().out
+    assert code == 1, text
+    assert "client area 960x520 != cam.screen 960x540" in text
+    fails = [name for level, name, _ in m1_projection.results if level == "FAIL"]
+    assert fails == [f"at least {m1_projection.MIN_POLYS} polygon-frames compared (label = the drawn shape)"]
+    import json
+
+    numbers = json.loads(out.read_text())
+    assert "iou" not in numbers and numbers["left_out"]["client area != cam.screen"] == 1
+    assert numbers["vertex_render"]["p99"] < 1e-3
     assert (oracle.show, oracle.panels) == (0, ProjectionOracle.PANELS)
