@@ -17,11 +17,13 @@ that crashed or hung, and a worker that died, counting each; at the end stops th
 Worker (--worker N, one process per instance): connects to the oracle, loads save slot 1 and stands up, saves a
 savestate "soak_iN" there, then loops episodes until the deadline: savestate.load (the reset; timed), randomize_start
 (seed N*1e6 + episode), 8-30 s of random play driven frame by frame (continuous control: left/right runs, jump, attack,
-dash, down, rare bind; never up/pause/menus, so no NPC dialogue or menus open), input.release. Everything the oracle
-sends is recorded (ssbot.record.Recorder, profile SOAK, a new segment every hour). Per episode one JSON line: reset
-times, what the randomizer applied, frames and gaps, frame-time hitches, guard events, brain-lost events. A STATE
-silence of HANG_S seconds while the link is open is a hang (exit 3); a closed link is exit 4; failures to reset or to
-get back into gameplay are exit 5. The supervisor treats 3 and 5 as a hung game (kill + relaunch) and 4 as a crash.
+dash, up, down, rare bind; up and down only pressed with left or right held, so no NPC dialogue, bench or door opens
+(InteractManager.cs:244); never pause/menus), input.release. Everything the oracle sends is recorded
+(ssbot.record.Recorder, profile SOAK, a new segment every hour). Per episode one JSON line: reset times, what the
+randomizer applied, frames and gaps, frame-time hitches, guard events, interactions opened (pause.interact rising
+edges), brain-lost events. A STATE silence of HANG_S seconds while the link is open is a hang (exit 3); a closed link
+is exit 4; failures to reset or to get back into gameplay are exit 5; an ability grant that failed is exit 6. The
+supervisor treats 3 and 5 as a hung game (kill + relaunch), 4 as a crash and 6 as final for that instance (left down).
 
 Nothing here connects to an instance other than its own worker: IPC v1 serves one brain per instance.
 
@@ -29,20 +31,22 @@ Full-ability mode (--abilities movement|combat|all; the early sandbox save has n
 and BEFORE its savestate, each worker turns save suppression on (guards.set), calls the oracle's training-only
 abilities.grant (oracle/src/Train/AbilityGrant.cs), waits until STATE shows the grant (hero.can dash / harpoon /
 super_jump for movement, the equipped skill and tool in hero.tools for combat) and logs one "abilities" line; the
-savestate then carries the grant, so every reset keeps it. movement = Swift Step (dash, sprint), Cling Grip, Drifter's
-Cloak, Faydown Cloak, Clawline, Silk Soar; combat = Needle Strike, all six silk skills (one equipped: SKILL_ROTATION by
-instance, or --ability-skill) and a thrown tool (TOOL_ROTATION by instance, or --ability-tools); all = both + Needolin.
-The policy adds (ability_keys): dash more often, sometimes held (sprint); jump sometimes held long (double jump, then
-glide); clawline (S), never together with down (S with only down held is Silk Soar, m0:N41); a Silk Soar macro (down,
-then S; left/right released); attack sometimes held 100-150 frames (Needle Strike); quickcast (F) without a direction
-for the Neutral-bound skill or tool; a down + quickcast macro when a tool is bound to Down. Still never up, pause,
-inventory, map, quick map, journal, quests, the tools pane, Enter, the pane keys, Needolin or taunt.
+savestate then carries the grant, so every reset keeps it. A grant that still fails after GRANT_TRIES attempts (or
+leaves the skill or tool where QuickCast never throws it here) takes no savestate: the worker exits 6 and the
+supervisor leaves that instance down. movement = Swift Step (dash, sprint), Cling Grip, Drifter's Cloak, Faydown Cloak,
+Clawline, Silk Soar; combat = Needle Strike, all six silk skills (one equipped: SKILL_ROTATION by instance, or
+--ability-skill) and a thrown tool (TOOL_ROTATION by instance, or --ability-tools); all = both + Needolin.
+The policy adds (ability_keys): dash more often, sometimes held (sprint); a jump / double jump / glide macro (each air
+action needs a new press); clawline (S), never together with up or down (S with only down held is Silk Soar, m0:N41);
+a Silk Soar macro (down pressed with left/right held, left/right released, then S); attack sometimes held 105-150
+frames (Needle Strike); quickcast (F) without a direction for the Neutral-bound skill or tool; a down + quickcast macro
+when a tool is bound to Down. Still never pause, inventory, map, quick map, journal, quests, the tools pane, Enter, the
+pane keys, Needolin or taunt, and up / down only interaction-safe.
 Risks of these keys: silk skills cost 4 silk and randomize_start draws 0-9, so some casts fail (a HUD flash, nothing
 else); tools have limited uses and run out within an episode (the reset refills them; an empty tool just fails);
 Clawline and Silk Soar carry Hornet much further, often into the next room (more cross-scene resets, which take
-longer); Needle Strike, Clawline and the skills break more of the room (the savestate restores it); a failed grant does
-not stop the soak but fails its "abilities" check. Save suppression keeps the grant out of the sandbox slot files every
-soak starts from. Without --abilities nothing of this runs and the policy draws exactly the same numbers as before.
+longer); Needle Strike, Clawline and the skills break more of the room (the savestate restores it). Save suppression
+keeps the grant out of the sandbox slot files every soak starts from. Without --abilities nothing of this runs.
 Evidence per episode (ability mode only): presses started per key and macro, frames per ability cState flag (dashing,
 isSprinting, doubleJumping, floating, wallSliding ...), hero animation clips and Spell Control states, tool amounts.
 """
@@ -72,7 +76,8 @@ from ssbot.ipc.framing import HEADER, MsgType, mask
 from ssbot.ipc.oracle_link import OracleError, OracleLink
 
 HANG_S = 15.0
-EXIT_HANG, EXIT_LINK_CLOSED, EXIT_STUCK = 3, 4, 5
+EXIT_HANG, EXIT_LINK_CLOSED, EXIT_STUCK, EXIT_NO_GRANT = 3, 4, 5, 6
+GRANT_TRIES = 3
 SANDBOX = Path(r"C:\ssbot\sandbox")
 SAVES = SANDBOX / "saves"
 BRAIN_DIR = Path(__file__).resolve().parents[2]
@@ -115,16 +120,22 @@ class JsonLog:
 # Worker
 # =====================================================================================================================
 
-BIT = {name: mask(name) for name in ("left", "right", "jump", "attack", "dash", "down", "bind", "clawline", "quickcast")}
+BIT = {name: mask(name) for name in ("left", "right", "jump", "attack", "dash", "up", "down", "bind", "clawline",
+                                     "quickcast")}
 
 Holds = tuple[tuple[float, int, int], ...]
 # Press patterns: key -> (start probability per idle frame, hold options). A hold option is (weight, min, max): the key
-# stays down for 1 + randint(min, max) frames, then rests 3 frames. With one option no weight is drawn, so the default
-# patterns draw exactly the numbers they always did (the default soak is unchanged).
+# stays down for 1 + randint(min, max) frames, then rests 3 frames. With one option no weight is drawn.
+# up / down are interaction-safe: InteractManager (1.0.30000, InteractManager.cs:244) starts an interaction (NPC
+# dialogue, bench, door) on Up.WasPressed or Down.WasPressed with neither Left nor Right pressed while
+# HeroController.CanInteract() (grounded, idle or running, not attacking: HeroController.cs:8001). So up / down only
+# start inside a left/right run held since the previous frame, and the run is stretched to outlast the hold
+# (Policy._blocked); up + attack is an up-slash, down + attack in the air a down-slash.
 DEFAULT_KEYS: dict[str, tuple[float, Holds]] = {
     "jump": (0.05, ((1.0, 2, 24),)), "attack": (0.06, ((1.0, 2, 4),)), "dash": (0.012, ((1.0, 2, 4),)),
-    "down": (0.01, ((1.0, 10, 40),)), "bind": (0.0015, ((1.0, 2, 4),)),
+    "up": (0.008, ((1.0, 8, 30),)), "down": (0.01, ((1.0, 10, 40),)), "bind": (0.0015, ((1.0, 2, 4),)),
 }
+VERTICAL = ("up", "down")
 ABILITY_MODES = ("movement", "combat", "all")
 # Silk skills (ToolItem name -> in-game name) and simple thrown tools; ability workers take one of each by instance, so
 # a 4-instance soak covers four of each. Tools left out: Rosary Cannon (spends rosaries), Pimpilo (its blast), and the
@@ -134,47 +145,67 @@ SKILLS = {"Silk Spear": "Silkspear", "Thread Sphere": "Thread Storm", "Parry": "
           "Silk Charge": "Sharpdart", "Silk Bomb": "Rune Rage", "Silk Boss Needle": "Pale Nails"}
 SKILL_ROTATION = tuple(SKILLS)
 TOOL_ROTATION = ("Straight Pin", "Tri Pin", "Sting Shard", "Curve Claws", "Tack", "Shakra Ring")
-# Never started while down is held, and down never starts under them: S with only down held is Silk Soar, not Clawline
-# (m0:N41), and QuickCast with down throws the Down-bound tool. Their down variants are macros.
-NOT_WITH_DOWN = ("clawline", "quickcast")
-# Keys no policy presses: up (NPC dialogue, benches, doors), pause, the inventory / map / journal / quests / tools
-# screens and quick map, the menu keys (Enter, pane switches), Needolin (NPCs answer it, some objects start scripted
-# sequences) and taunt.
-FORBIDDEN_KEYS = ("up", "pause", "inventory", "map", "quickmap", "journal", "quests", "tools", "enter", "paneleft",
+# Never started while up or down is held, and neither starts under them: S with only down held is Silk Soar, not
+# Clawline (m0:N41), and QuickCast with up / down throws the Up- / Down-bound tool. Their down variants are macros.
+NOT_WITH_VERTICAL = ("clawline", "quickcast")
+# Keys no policy presses: pause, the inventory / map / journal / quests / tools screens and quick map, the menu keys
+# (Enter, pane switches), Needolin (NPCs answer it, some objects start scripted sequences) and taunt. (up / down only
+# as above: never an interaction.)
+FORBIDDEN_KEYS = ("pause", "inventory", "map", "quickmap", "journal", "quests", "tools", "enter", "paneleft",
                   "paneright", "needolin", "taunt")
 # hero.can flags a movement grant must turn true (the others do not depend on a grant: CanThrowTool(false), CanCast).
 MOVEMENT_CAN = ("dash", "harpoon", "super_jump")
 
 
+_SIDE = 1 << 30  # in a macro mask: the left/right key of the run the macro starts in (not a button)
+
+
 @dataclass(frozen=True)
 class Macro:
-    """A fixed press sequence, one mask per frame. Starts only when no key is held and the movement run has lasted two
-    frames; left/right stay released for its length and a new run starts after it. Its keys rest 3 frames afterwards."""
+    """A press sequence: steps of (mask, min, max), each mask held for randint(min, max) frames (no draw when min ==
+    max); _SIDE stands for the left/right key of the run it starts in. Starts only inside a left/right run held for two
+    frames and with no key held, so an up/down press in it starts with left/right held (the interaction rule above);
+    left/right are as its masks say for its length and a new run starts after it. Its keys rest 3 frames afterwards."""
     name: str
     p: float
-    frames: tuple[int, ...]
+    steps: tuple[tuple[int, int, int], ...]
 
     @property
     def keys(self) -> tuple[str, ...]:
         m = 0
-        for f in self.frames:
+        for f, _, _ in self.steps:
             m |= f
         return tuple(k for k, b in BIT.items() if m & b)
 
+    def expand(self, r: random.Random, side: int) -> list[int]:
+        out: list[int] = []
+        for m, lo, hi in self.steps:
+            if m & _SIDE:
+                m = m & ~_SIDE | side
+            out += [m] * (lo if lo == hi else r.randint(lo, hi))
+        return out
 
-_DOWN, _CLAW, _CAST = BIT["down"], BIT["clawline"], BIT["quickcast"]
-SILK_SOAR = Macro("silk_soar", 0.002, (_DOWN, _DOWN, _DOWN | _CLAW, _DOWN | _CLAW, _DOWN | _CLAW, _DOWN))
-DOWN_CAST = Macro("down_cast", 0.004, (_DOWN, _DOWN, _DOWN | _CAST, _DOWN | _CAST, _DOWN | _CAST, _DOWN))
+
+_JUMP, _DOWN, _CLAW, _CAST = BIT["jump"], BIT["down"], BIT["clawline"], BIT["quickcast"]
+# Down pressed with the run's left/right still held, released 2 frames before S: S then sees only down (Silk Soar,
+# IsPressingOnlyDown, m0:N41).
+SILK_SOAR = Macro("silk_soar", 0.002, ((_DOWN | _SIDE, 2, 2), (_DOWN, 2, 2), (_DOWN | _CLAW, 3, 3), (_DOWN, 1, 1)))
+# QuickCast with down held throws the Down-bound tool whatever left/right do (GetWillThrowTool).
+DOWN_CAST = Macro("down_cast", 0.004, ((_DOWN | _SIDE, 2, 2), (_DOWN | _SIDE | _CAST, 3, 3), (_DOWN | _SIDE, 1, 1)))
+# Jump, double jump, glide: the double jump and the glide start only on a new jump press in the air, and the glide ends
+# when jump is released (HeroController.cs:8601-8626, 8415-8423), so a long first press does neither.
+AIR_JUMPS = Macro("air_jumps", 0.004, ((_JUMP | _SIDE, 4, 8), (_SIDE, 3, 6), (_JUMP | _SIDE, 4, 8), (_SIDE, 3, 6),
+                                       (_JUMP | _SIDE, 30, 80)))
 
 
 def ability_keys(mode: str | None, bindings: dict | None = None) -> tuple[dict[str, tuple[float, Holds]], tuple[Macro, ...]]:
     """Press patterns and macros of an ability mode (None: the default soak). bindings: abilities.grant's "bindings"
     (what QuickCast throws per held direction); QuickCast is only pressed for a direction that throws something.
-      movement: dash more often, 30 % of presses held 15-90 frames (sprint); 15 % of jumps held 30-80 frames (the double
-                jump, then the glide, which lasts while jump is held); clawline 2-6 frames; the Silk Soar macro.
-      combat:   5 % of attacks held 100-150 frames (Needle Strike charges for 0.3 + 1.35 s and strikes on release);
-                quickcast 2-4 frames with no direction (the Neutral-bound skill or tool); the down + quickcast macro when
-                a tool is bound to Down.
+      movement: dash more often, 30 % of presses held 15-90 frames (sprint); the jump / double jump / glide macro;
+                clawline 2-6 frames; the Silk Soar macro.
+      combat:   5 % of attacks held 105-150 frames (Needle Strike: the charge starts once the attack has ended, about
+                102 frames in all, and strikes on release); quickcast 2-4 frames with no direction (the Neutral-bound
+                skill or tool); the down + quickcast macro when a tool is bound to Down.
       all:      both."""
     keys = dict(DEFAULT_KEYS)
     if mode is None:
@@ -183,12 +214,11 @@ def ability_keys(mode: str | None, bindings: dict | None = None) -> tuple[dict[s
         raise ValueError(f"ability mode must be one of {ABILITY_MODES}, not {mode!r}")
     macros: list[Macro] = []
     if mode in ("movement", "all"):
-        keys["jump"] = (0.05, ((0.85, 2, 24), (0.15, 30, 80)))
         keys["dash"] = (0.02, ((0.7, 2, 4), (0.3, 15, 90)))
         keys["clawline"] = (0.008, ((1.0, 2, 6),))
-        macros.append(SILK_SOAR)
+        macros += [AIR_JUMPS, SILK_SOAR]
     if mode in ("combat", "all"):
-        keys["attack"] = (0.06, ((0.95, 2, 4), (0.05, 100, 150)))
+        keys["attack"] = (0.06, ((0.95, 2, 4), (0.05, 105, 150)))
         b = bindings or {}
         if b.get("neutral"):
             keys["quickcast"] = (0.01, ((1.0, 2, 4),))
@@ -199,10 +229,11 @@ def ability_keys(mode: str | None, bindings: dict | None = None) -> tuple[dict[s
 
 class Policy:
     """Random play with some persistence: runs of movement, presses of varied length with releases in between (the
-    oracle's minimum press/release is 2 frames), occasional down (down-attacks in the air). Never up (NPC dialogue,
-    benches, doors), pause, inventory, map or tools (FORBIDDEN_KEYS). keys / macros: ability_keys (default: the
-    DEFAULT_KEYS patterns, no macros). counts: presses started per key and macro; macro: name of the macro that made
-    the last mask (None otherwise)."""
+    oracle's minimum press/release is 2 frames), occasional up and down (up-slashes, down-attacks in the air), each
+    pressed only with left or right held since the previous frame and kept held to its release, so they never start an
+    NPC dialogue, a bench or a door. Never pause, inventory, map or tools (FORBIDDEN_KEYS). keys / macros: ability_keys
+    (default: the DEFAULT_KEYS patterns, no macros). counts: presses started per key and macro; macro: name of the
+    macro that made the last mask (None otherwise)."""
 
     def __init__(self, rng: random.Random, keys: dict | None = None, macros: tuple[Macro, ...] = ()):
         self.r = rng
@@ -224,10 +255,10 @@ class Policy:
     def step(self) -> int:
         r = self.r
         if (not self.script and self.macros and not any(self.timers.values())
-                and (self.move is None or self.move_run >= 2)):
+                and self.move is not None and self.move_run >= 2):
             for mac in self.macros:
                 if all(self.rest[k] == 0 for k in mac.keys) and r.random() < mac.p:
-                    self.script, self.script_keys, self.macro = list(mac.frames), mac.keys, mac.name
+                    self.script, self.script_keys, self.macro = mac.expand(r, BIT[self.move]), mac.keys, mac.name
                     self.counts[mac.name] += 1
                     self.move_left = 0
                     break
@@ -257,17 +288,23 @@ class Policy:
                 self.timers[k] = self._hold(holds)
                 self.counts[k] += 1
                 m |= BIT[k]
+                if k in VERTICAL:  # the left/right run outlasts the hold: no new run until it is released
+                    self.move_left = max(self.move_left, self.timers[k])
         for k in self.macro_only:
             if self.rest[k] > 0:
                 self.rest[k] -= 1
         return m
 
     def _blocked(self, k: str, m: int) -> bool:
-        """NOT_WITH_DOWN keys never start while down is held (down comes first in the key order, so m has it), and down
-        never starts under them. No draw is skipped for the default keys."""
-        if k == "down":
-            return any(self.timers.get(x, 0) for x in NOT_WITH_DOWN)
-        return k in NOT_WITH_DOWN and bool(m & BIT["down"])
+        """up / down start only inside a left/right run held since the previous frame (a press edge the latch sees
+        together with left/right even if the run's own edge lagged a frame), never together with each other or under a
+        NOT_WITH_VERTICAL key; NOT_WITH_VERTICAL keys never start while up or down is held (both come first in the key
+        order, so m has them)."""
+        if k in VERTICAL:
+            other = "down" if k == "up" else "up"
+            return (self.move is None or self.move_run < 2 or bool(m & BIT[other]) or self.timers.get(other, 0) > 0
+                    or any(self.timers.get(x, 0) for x in NOT_WITH_VERTICAL))
+        return k in NOT_WITH_VERTICAL and bool(m & (BIT["up"] | BIT["down"]))
 
     def _hold(self, holds: Holds) -> int:
         if len(holds) == 1:
@@ -304,6 +341,18 @@ def granted_equips(res: dict) -> list[str]:
     return [n for n in res.get("requested") or () if n in in_slots]
 
 
+def unreachable(res: dict) -> list[str]:
+    """Requested attack items (skill, Red tools) of an abilities.grant reply that the soak never throws: QuickCast is
+    pressed only without a direction and in the down macro, so an item must be what "bindings" (read from PlayerData)
+    names for neutral or down; one bound to Up, or behind an earlier attack tool with the same binding (only the first
+    in slot order is thrown: ToolItemManager.GetToolForBinding), is never used."""
+    b = res.get("bindings") or {}
+    reach = {b.get("neutral"), b.get("down")} - {None}
+    want = set(res.get("requested") or ())
+    return [f"{s['tool']} (slot {s.get('index')}: {s.get('type')} {s.get('binding')})" for s in res.get("slots") or ()
+            if s.get("tool") in want and s.get("type") in ("Red", "Skill") and s["tool"] not in reach]
+
+
 def ability_gaps(s: dict | None, want_can: tuple[str, ...], want_tools: list[str]) -> list[str]:
     """What a STATE does not show yet of a grant: hero.can flags that are not true, equipped names absent from
     hero.tools. Empty = verified."""
@@ -319,14 +368,16 @@ EVIDENCE_CSTATE = ("dashing", "airDashing", "isSprinting", "doubleJumping", "flo
 
 
 class FrameStats:
-    """Per-frame counters from the raw STATE stream (reader thread). take() returns and resets the window. After
-    track_abilities (ability mode only) the window also counts EVIDENCE_CSTATE flags, hero animation clips and Spell
-    Control states."""
+    """Per-frame counters from the raw STATE stream (reader thread). take() returns and resets the window. interacts:
+    rising edges of STATE pause.interact (InteractManager.BlockingInteractable: an NPC dialogue, bench or door the
+    policy started; the previous value carries across windows). After track_abilities (ability mode only) the window
+    also counts EVIDENCE_CSTATE flags, hero animation clips and Spell Control states."""
 
     def __init__(self):
         self._lock = threading.Lock()
         self.last_f: int | None = None
         self.last_rx = time.monotonic()
+        self.last_interact: bool | None = None
         self.total_frames = 0
         self.total_gaps = 0
         self.ability_bits: dict[str, int] | None = None
@@ -351,6 +402,7 @@ class FrameStats:
         self.events: Counter = Counter()
         self.dead_seen = False
         self.min_hp: int | None = None
+        self.interacts = 0
         self.ab_cstate: Counter = Counter()
         self.ab_clips: Counter = Counter()
         self.ab_spell: Counter = Counter()
@@ -415,6 +467,11 @@ class FrameStats:
             hp = g.get("hp")
             if isinstance(hp, int):
                 self.min_hp = hp if self.min_hp is None else min(self.min_hp, hp)
+            it = (s.get("pause") or {}).get("interact")
+            if isinstance(it, bool):  # no pause map (a load): keep the last value
+                if it and self.last_interact is False:
+                    self.interacts += 1
+                self.last_interact = it
             if self.ability_bits is not None and s.get("hero"):
                 self._count_abilities(s["hero"])
 
@@ -432,7 +489,8 @@ class FrameStats:
             d = {"frames": self.frames, "gaps": self.gaps, "missing": self.missing, "hitches": self.hitches,
                  "play_frames": n, "udt_mean_ms": round(self.udt_sum / n, 3) if n else None, "udt_p99_ms": p99,
                  "udt_max_ms": round(self.udt_max, 1), "cost_max_us": self.cost_max, "drop_counter": self.drop_counter,
-                 "events": dict(self.events), "dead_seen": self.dead_seen, "min_hp": self.min_hp}
+                 "events": dict(self.events), "dead_seen": self.dead_seen, "min_hp": self.min_hp,
+                 "interacts": self.interacts}
             if self.ability_bits is not None:
                 d["abilities"] = {"cstate": dict(self.ab_cstate), "clips": dict(self.ab_clips.most_common(20)),
                                   "spell": dict(self.ab_spell.most_common(10))}
@@ -574,11 +632,32 @@ class Worker:
             self.log.write(kind="note", note="paused before reset (brain-lost tap?)", f=s.get("f"))
             self.unpause()
 
-    def grant_abilities(self) -> None:
+    def grant_abilities(self) -> bool:
         """--abilities, in gameplay and before the savestate: save suppression on (the grant must never reach the
-        sandbox slot files every soak starts from), abilities.grant, then wait until STATE shows it. One "abilities"
-        line; a failure is logged (ok false, which fails the report's abilities check) and the soak goes on. The policy
-        gets the ability patterns either way, QuickCast only for the directions the grant says throw something."""
+        sandbox slot files every soak starts from), abilities.grant, then wait until STATE shows it. Up to GRANT_TRIES
+        attempts, 2 s apart with a stand_up in between (the grant is refused during a load, a transition or a harness
+        operation). One "abilities" line (the earlier attempts' failures in "retries"). The policy gets the ability
+        patterns, QuickCast only for the directions the grant says throw something. Returns ok; the caller takes no
+        savestate without it."""
+        from ssbot.probes.common import stand_up
+
+        retries = []
+        for attempt in range(1, GRANT_TRIES + 1):
+            rec, bindings = self._grant_once()
+            if rec["ok"] or attempt == GRANT_TRIES:
+                break
+            retries.append(rec.get("error") or rec.get("gaps"))
+            time.sleep(2.0)
+            try:
+                stand_up(self.link, timeout_s=10)
+            except TimeoutError:
+                self.check_alive()
+        self.keys, self.macros = ability_keys(self.abilities, bindings)
+        rec.update(attempts=attempt, retries=retries, keys=sorted(self.keys), macros=[m.name for m in self.macros])
+        self.log.write(**rec)
+        return rec["ok"]
+
+    def _grant_once(self) -> tuple[dict, dict]:
         rec = {"kind": "abilities", "mode": self.abilities, "request": self.ability_args, "ok": False}
         bindings = {}
         try:
@@ -593,6 +672,7 @@ class Worker:
             want_can, want_tools = expected_can(self.abilities), granted_equips(res)
             rec.update(grant=res, want_can=want_can, want_tools=want_tools)
             gaps = [f"unplaced: {u}" for u in res.get("unplaced") or ()]
+            gaps += [f"never thrown: {u}" for u in unreachable(res)]
             try:
                 rec["verified_f"] = self.wait(lambda s: not ability_gaps(s, want_can, want_tools), 5.0)["f"]
             except TimeoutError:
@@ -602,9 +682,7 @@ class Worker:
             rec.update(ok=not gaps, gaps=gaps)
         except (OracleError, TimeoutError, KeyError, TypeError) as e:
             rec["error"] = f"{type(e).__name__}: {e}"
-        self.keys, self.macros = ability_keys(self.abilities, bindings)
-        rec.update(keys=sorted(self.keys), macros=[m.name for m in self.macros])
-        self.log.write(**rec)
+        return rec, bindings
 
     # ---- episodes ----------------------------------------------------------------------------------------------------
 
@@ -706,7 +784,8 @@ class Worker:
             if self.abilities:  # the reset keeps the grant: the savestate carries it
                 try:
                     ab = self.rpc("abilities.list", timeout_s=10)
-                    rec["abilities"] = {k: ab.get(k) for k in ("sets", "bindings", "save_suppression")}
+                    rec["abilities"] = {k: ab.get(k) for k in ("sets", "bindings", "bindings_cached",
+                                                               "save_suppression")}
                 except (OracleError, TimeoutError) as e:
                     rec["abilities_error"] = str(e)
         self.log.write(**rec)
@@ -718,8 +797,10 @@ class Worker:
             self.link.subscribe_raw(self.stats.on_raw)
             self.log.write(kind="hello", hello={k: self.link.hello.get(k) for k in ("plugin", "game", "instance")})
             self.enter_gameplay()
-            if self.abilities:
-                self.grant_abilities()  # before the savestate, so every reset keeps the grant
+            # Before the savestate, so every reset keeps the grant. A savestate without it would be reused by every
+            # later start of this worker (resets would undo any later grant): none is taken, the supervisor gives up.
+            if self.abilities and not self.grant_abilities():
+                raise WorkerExit(EXIT_NO_GRANT, "abilities not granted (see the abilities line); no savestate taken")
             # One savestate per soak and instance, taken once: a restarted worker (its game may have been left
             # anywhere) reuses it instead of capturing wherever Hornet happens to be.
             listed = self.rpc("savestate.list", timeout_s=30)
@@ -1241,6 +1322,15 @@ class Supervisor:
             self.down.add(i)
             self.say(f"instance {i}: relaunch failed ({type(e).__name__}: {e}); leaving it down")
 
+    def give_up(self, i: int, why: str) -> None:
+        """Leave instance i down without a relaunch: its worker already retried, and a fresh game gets the same
+        answer (plugin, profile, crest). The run goes on with the others and its report fails."""
+        x = self.current(i)
+        if x is not None:
+            self.stop_game(x)
+        self.down.add(i)
+        self.say(f"instance {i}: {why}; leaving it down")
+
     def poll(self) -> None:
         for i in self.indices:
             if i in self.down:
@@ -1254,6 +1344,9 @@ class Supervisor:
                 code = w.returncode
                 if code in (EXIT_HANG, EXIT_STUCK):
                     self.relaunch(i, f"worker reported {'hang' if code == EXIT_HANG else 'stuck'} (exit {code})")
+                elif code == EXIT_NO_GRANT:
+                    self.give_up(i, f"abilities not granted after {GRANT_TRIES} attempts (exit {code}; see "
+                                    f"worker_{i}.jsonl)")
                 elif code == EXIT_LINK_CLOSED:
                     self.relaunch(i, "oracle link closed with the game still running")
                 elif time.time() < self.deadline - 60:
@@ -1443,7 +1536,12 @@ class Supervisor:
         hourly: dict[int, list] = {}  # hour since start -> [(udt_mean, play_frames, udt_p99)]
         death_kinds = ("hero_dead", "player_dead", "permadeath_dead")
         dead = []
+        interacts, interact_eps = Counter(), []  # pause.interact rising edges: dialogues / benches / doors opened
         for e in episodes:
+            n = sum((e.get(key) or {}).get("interacts") or 0 for key in ("stats_between", "stats"))
+            if n:
+                interacts[e["instance"]] += n
+                interact_eps.append({k: e.get(k) for k in ("instance", "ep", "t", "scene_end")} | {"interacts": n})
             for key in ("stats_between", "stats"):
                 st = e.get(key) or {}
                 ev.update(st.get("events") or {})
@@ -1517,6 +1615,7 @@ class Supervisor:
             "no failed savestate.load": not reset_errors,
             "no brain-lost events (workers kept up at 60 Hz)": lost_total == 0,
             "no death seen (LethalBlock blocks every lethal hit)": not dead,
+            "no accidental interactions (pause.interact rising edges == 0)": not interacts,
             "0 writes outside the sandbox (no VIOLATION paths; every watcher ran without overflow)":
                 not any("VIOLATION" in c for c in violations)
                 and all(w["started"] and not w["error"] and not w["overflows"] for w in watch),
@@ -1555,6 +1654,8 @@ class Supervisor:
             "segments": [{k: s.get(k) for k in ("instance", "path", "delivery", "expected", "received", "missing", "ok", "drops", "error")} for s in seg_rows],
             "bad_segments": bad_segments[:50], "delivery_windows": judged,
             "events": dict(ev), "deaths_seen": dead[:50], "brain_lost_events_last": lost,
+            "interactions": {"total": sum(interacts.values()), "per_instance": dict(interacts),
+                             "episodes": interact_eps[:50]},
             "crashes": self.crashes, "relaunches": dict(self.relaunches), "worker_restarts": dict(self.worker_restarts),
             "worker_exits": exits, "notes": notes[:50],
             "memory": mem,
@@ -1569,7 +1670,8 @@ class Supervisor:
         if abilities:
             rep["abilities"] = {
                 "mode": abilities, "evidence": ability_evidence(episodes),
-                "grants": [{k: g.get(k) for k in ("instance", "t", "ok", "error", "gaps", "request", "keys", "macros")}
+                "grants": [{k: g.get(k) for k in ("instance", "t", "ok", "error", "gaps", "attempts", "retries",
+                                                  "request", "keys", "macros")}
                            | {k: (g.get("grant") or {}).get(k) for k in ("changed", "unplaced", "bindings", "slots", "config")}
                            for g in grants]}
         (self.out / "report.json").write_text(json.dumps(rep, indent=1, ensure_ascii=False, default=str), encoding="utf-8")
@@ -1580,6 +1682,8 @@ class Supervisor:
                  f"  reset ms p50 {rep['reset_ms']['p50']} p99 {rep['reset_ms']['p99']} max {rep['reset_ms']['max']} (n {len(resets)}); "
                  f"same scene {rep['reset_ms']['same_scene']}; cross scene {rep['reset_ms']['cross_scene']}",
                  f"  brain-lost events {lost_total}; episodes cut short by a pause {len(interrupted)}; failed loads {len(reset_errors)}",
+                 f"  accidental interactions (pause.interact rising edges): {sum(interacts.values())} "
+                 f"per instance {dict(interacts)} in {len(interact_eps)} episodes",
                  f"  delivery per segment: min {min(deliveries) if deliveries else None} over {len(deliveries)} segments",
                  f"  hitches > {HITCH_MS} ms in steady gameplay: {hitches} of {play_frames} frames; frame time {json.dumps(frame_time)}",
                  f"  events {dict(ev)}; crashes {len(self.crashes)}, relaunches {dict(self.relaunches)}, worker restarts {dict(self.worker_restarts)}",
