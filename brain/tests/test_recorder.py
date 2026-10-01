@@ -13,7 +13,7 @@ from ssbot.ipc.framing import MsgType
 from ssbot.ipc.oracle_link import OracleLink
 from ssbot.record import formats
 from ssbot.record import synthetic as syn
-from ssbot.record.recorder import Recorder, RecordingReader
+from ssbot.record.recorder import ContinuityReport, Recorder, RecordingReader
 from tests.fake_oracle import FakeOracle
 
 WHEN = datetime(2026, 9, 30, 12, 0, 0)
@@ -298,3 +298,19 @@ def test_record_cli_closes_the_recording_when_the_video_fails(tmp_path, monkeypa
     ep = next(tmp_path.glob("*/TRAIN/v"))
     assert json.loads((ep / "meta.json").read_text("utf-8"))["status"] == "closed" and closed
     assert json.loads((ep / "video.json").read_text("utf-8"))["status"] == "failed"
+
+
+def test_continuity_report_says_what_marked_frames_are_worth():
+    """Frames with the marker on are training data only where the capture path masked them and the guard found no
+    marker outside the mask; an unmasked (format-1) video of them is validation data only."""
+    lb = {"captures": 10, "marker": 10, "timestamp": 0, "share": 1.0, "decoded_in_capture": True, "decode": {"ok": 10},
+          "masked": True, "mask_mismatch": 0, "training_safe": True}
+    line = (lambda r: next(x for x in r.format().splitlines() if x.startswith("frame marker on")))
+    assert line(ContinuityReport(marked=10, labels=lb)).endswith("no marker outside the mask: training data")
+    assert "NOT training data: 3 captures" in line(ContinuityReport(marked=10, labels=dict(lb, mask_mismatch=3,
+                                                                                         training_safe=False)))
+    assert "VALIDATION data only" in line(ContinuityReport(marked=10, labels=dict(lb, masked=False,
+                                                                                 decoded_in_capture=False)))
+    assert "not guarded" in line(ContinuityReport(marked=10, labels=dict(lb, training_safe=None)))
+    assert "no video in this episode" in line(ContinuityReport(marked=10))
+    assert not any(x.startswith("frame marker on") for x in ContinuityReport().format().splitlines())

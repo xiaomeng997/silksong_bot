@@ -383,7 +383,27 @@ def test_episode_truth_is_the_frame_each_capture_shows(marked):
     check = RecordingReader(ep.path).check()
     assert "frame marker on in 1190 STATE frames" in check.format()
     assert check.labels == {"captures": 1200, "marker": 1187, "timestamp": 13, "share": 1187 / 1200,
-                            "decoded_in_capture": True, "decode": {"ok": 1187, "absent": 13}}
+                            "decoded_in_capture": True, "decode": {"ok": 1187, "absent": 13}, "masked": True,
+                            "mask_mismatch": 0, "training_safe": True}
+    assert "masked in the capture path, no marker outside the mask: training data" in check.format()
+    assert rep.mask == {"masked": True, "mask_mismatch": 0, "training_safe": True, "states_outside": 0, "outside": []}
+    assert "training_safe True" in rep.format()
+
+
+def test_mask_report_flags_states_with_the_marker_outside_the_mask(marked):
+    """After the fact, every marker place a STATE reported is mapped into the video's client size as the guard maps
+    it: an older plugin's 12 px marker (in px of a 1280x720 render, shown in the 640x360 client) lies outside the
+    mask, so the episode is not training data even where no capture was flagged."""
+    ep = marked[0]
+    vr = mk.VideoReader(ep.path)
+    nominal = {(tuple(map(float, vmask.marker_rect(*S.SCREEN))), S.SCREEN): 1190}
+    assert mk.mask_report(vr, nominal)["training_safe"] is True
+    old = dict(nominal) | {((1100.0, 12.0, 1268.0, 60.0), (1280, 720)): 7}
+    m = mk.mask_report(vr, old)
+    assert m["states_outside"] == 7 and m["training_safe"] is False and m["outside"][0][2] == list(S.SCREEN)
+    notes = mk.mask_notes(m, 1197)
+    assert len(notes) == 1 and notes[0].startswith("NOT training data (mask_mismatch)")
+    assert mk.mask_notes(dict(m, masked=False), 1197)[0].startswith("the video is unmasked")
 
 
 def test_monitor_scored_against_the_truth(marked):
@@ -427,6 +447,10 @@ def test_legacy_recordings_decode_from_the_thumbnails(tmp_path):
                                                                                "absent": 1}
     ok = arrays["shown"] >= 0
     assert (arrays["shown"][ok] == np.asarray(ep.capture_frame)[ok]).all() and rep.ok
+    # The marker is in the unmasked thumbnails: validation data only, never training data.
+    assert rep.mask["masked"] is False and rep.mask["training_safe"] is False
+    assert any("VALIDATION data only" in n for n in rep.notes)
+    assert "VALIDATION data only" in RecordingReader(ep.path).check().format()
     with pytest.raises(ValueError, match="mask's corner"):
         S.make(tmp_path / "x", seconds=1, marker="bl")
 

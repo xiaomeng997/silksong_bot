@@ -206,7 +206,7 @@ def main() -> int:
         rec = Recorder(link, out_dir=a.out, profile="PROBE", episode=f"m1_align_{datetime.now():%H%M%S}_i{a.instance}",
                        game_dir=a.game_dir, config={"probe": "m1_align", "seconds": a.seconds, "seed": a.seed,
                                                     "span": a.span, "width": a.width, "marker": True}).start()
-        vid = VideoRecorder(rec.path, hwnd=hwnd, width=a.width, marker=True).start()
+        vid = VideoRecorder(rec.path, hwnd=hwnd, width=a.width, marker=True, states=lambda: link.state).start()
         print(f"recording {a.seconds:.0f} s -> {rec.path} (window {hwnd:#x})")
         t0 = time.monotonic()
         why = drive(link, a.seconds, Pattern(a.seed, a.span), progress)

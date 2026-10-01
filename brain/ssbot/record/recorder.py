@@ -479,7 +479,7 @@ class ContinuityReport:
     cost_us: dict | None = None          # oracle STATE build cost (C14: p50 <= 300, p99 <= 1000)
     latency_ms: dict | None = None       # oracle end-of-frame -> brain reader thread
     marked: int = 0                      # STATEs with the frame marker on (training data only through the mask)
-    labels: dict | None = None           # the video's label sources (VideoReader.labels); None without a video
+    labels: dict | None = None           # the video's label sources and mask (VideoReader.labels); None without one
 
     @property
     def ok(self) -> bool:
@@ -491,6 +491,24 @@ class ContinuityReport:
         d["gap_count"] = len(self.gaps)
         d["ok"] = self.ok
         return d
+
+    def marker_verdict(self) -> str:
+        """What the frames with the marker on are worth, from the video's mask (VideoReader.labels): training data
+        only where the capture path masked them and the guard found no marker outside the mask; a video recorded
+        before the mask (format 1, e.g. the 2026-09-30 in-game m1_align run with 12 px cells) is validation only."""
+        lb = self.labels
+        if lb is None:
+            return ("no video in this episode; an image of these frames is training data only through the vision mask "
+                    "(ssbot.vision.mask) and only where the marker lies inside it")
+        if not lb.get("masked"):
+            return ("the video is unmasked (format 1 or mask off): its thumbnails hold the marker, VALIDATION data only, "
+                    "never training data")
+        if lb.get("mask_mismatch"):
+            return (f"NOT training data: {lb['mask_mismatch']} captures had the marker outside the vision mask "
+                    f"(blanked too, mask_mismatch)")
+        if lb.get("training_safe") is None:
+            return "masked in the capture path but not guarded against STATE mk: training data only once checked"
+        return "masked in the capture path, no marker outside the mask: training data"
 
     def format(self) -> str:
         lines = [
@@ -504,15 +522,14 @@ class ContinuityReport:
         if self.duration_s:
             fps = f", {self.fps:.2f} frames/s" if self.fps else ""
             lines.append(f"duration {self.duration_s:.1f} s{fps}")
-        if self.marked:
-            lines.append(f"frame marker on in {self.marked} STATE frames: their images are training data only with the "
-                         f"vision mask applied (ssbot.vision.mask)")
+        if self.marked or (self.labels or {}).get("mask_mismatch"):
+            lines.append(f"frame marker on in {self.marked} STATE frames: {self.marker_verdict()}")
         if self.labels:
             lb = self.labels
             share = f"{lb['share'] * 100:.3f} %" if lb["share"] is not None else "n/a"
             lines.append(f"video {lb['captures']} captures: marker labels {lb['marker']} ({share}), timestamp labels "
                          f"{lb['timestamp']}{'' if lb['decoded_in_capture'] else ' (marker not read in the capture path)'};"
-                         f" decode {lb['decode']}")
+                         f" decode {lb['decode']}; masked {lb.get('masked')}, mask_mismatch {lb.get('mask_mismatch', 0)}")
         if self.gaps:
             shown = ", ".join(f"{a + 1}..{b - 1}" for a, b in self.gaps[:10])
             lines.append(f"first gaps: {shown}{' ...' if len(self.gaps) > 10 else ''}")
@@ -778,7 +795,8 @@ def _cmd_record(a: argparse.Namespace) -> int:
             from ssbot.record.video import VideoRecorder, instance_window
             hwnd = instance_window(a.instance)
             if hwnd:
-                vid = VideoRecorder(rec.path, hwnd=hwnd, width=a.video_width, marker=marked).start()
+                vid = VideoRecorder(rec.path, hwnd=hwnd, width=a.video_width, marker=marked,
+                                    states=lambda: link.state).start()
             else:
                 print(f"no game window found for instance {a.instance}: recording without video")
         print(f"recording to {rec.path} for {a.seconds} s (Ctrl+C stops early)")
@@ -802,7 +820,8 @@ def _cmd_record(a: argparse.Namespace) -> int:
     if vsum is not None:
         print(f"video: {vsum['written']} frames, {vsum['dropped']} dropped, callback us {vsum['callback_us']}, "
               f"marker labels {vsum['marker']['labelled']} (share {vsum['marker']['share']}, decode + mask us "
-              f"{vsum['marker']['decode_mask_us']}){', error ' + vsum['error'] if vsum['error'] else ''}")
+              f"{vsum['marker']['decode_mask_us']}), mask_mismatch {vsum['mask_mismatch']}, training_safe "
+              f"{vsum['training_safe']}{', error ' + vsum['error'] if vsum['error'] else ''}")
     if summary["error"]:
         print(f"recorder error: {summary['error']}")
     # Exit 1 below the delivery threshold, on an index that disagrees with the data, or on a recorder error, so a

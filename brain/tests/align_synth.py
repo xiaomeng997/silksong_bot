@@ -18,7 +18,7 @@ drawn in front of both.
 Frame marker (ssbot.record.marker): marker="tr" (the vision mask's corner) draws the pattern of the frame each capture
 shows with the mask's cell (3 px at 360p), over everything and under the grain, writes STATE "mk" as the oracle does,
 and records with VideoRecorder(marker=True), which reads it from the full-size image and masks it before the thumbnail
-is made. legacy_marker=True instead draws it with 12 px cells (3 px of the 160 px thumbnail) in any corner and stores
+is made, its mask guard reading the STATE of the capture's label frame. legacy_marker=True instead draws it with 12 px cells (3 px of the 160 px thumbnail) in any corner and stores
 it in unmasked thumbnails, as recordings did before the capture path read it. marker_off: frames whose STATE has no
 "mk" and whose image has no marker (the marker off); hide_marker: capture indices whose marker is covered by a gray
 patch (a marker that did not make it into the capture).
@@ -216,6 +216,7 @@ def make(tmp_path, *, seconds: float = 25.0, seed: int = 1, parallax: float = 1.
 
     rec = Recorder(None, out_dir=tmp_path, profile="TEST", episode=episode, hello=syn.hello(), when=WHEN,
                    min_free_gb=0, queue_size=1_000_000).start()
+    marks = {}                       # frame -> STATE "mk"
     for i, f in enumerate(frames):
         if int(f) in drop_states:
             continue
@@ -232,14 +233,16 @@ def make(tmp_path, *, seconds: float = 25.0, seed: int = 1, parallax: float = 1.
         if jump_at is not None and i >= jump_at:
             s["game"]["scene"] = s["game"]["scene_raw"] = "Tut_02"
         if geom is not None and int(f) not in marker_off:
-            s["mk"] = {"drawn": True, "corner": marker, "cell": int(geom.cell), "rect": list(geom.rect),
-                       "grid": [mk.ROWS, mk.COLS], "us": 20.0}
+            s["mk"] = marks[int(f)] = {"drawn": True, "corner": marker, "cell": int(geom.cell),
+                                       "rect": list(geom.rect), "screen": list(SCREEN), "grid": [mk.ROWS, mk.COLS],
+                                       "us": 20.0}
         rec.on_raw(MsgType.STATE, syn.wire(MsgType.STATE, i + 1, s))
     rec.close()
 
     in_capture = geom is not None and not legacy_marker
-    vid = VideoRecorder(rec.path, width=THUMB, queue_size=1_000_000, marker=in_capture,
-                        mask=not legacy_marker).start()
+    newest: list[dict] = [{}]        # the STATE the mask guard sees: the capture's label frame's
+    vid = VideoRecorder(rec.path, width=THUMB, queue_size=1_000_000, marker=in_capture, mask=not legacy_marker,
+                        states=(lambda: newest[0]) if in_capture else None).start()
     ep = Episode(rec.path, q, [], [], [])
     bounds = {"arrival": [-2**62, 2**62], "frame": [-2**62, 2**62]}
     grain = [rng.normal(0, noise, (SCREEN[1], SCREEN[0])).astype(np.float32) for _ in range(7)]  # sensor-like noise
@@ -264,6 +267,7 @@ def make(tmp_path, *, seconds: float = 25.0, seed: int = 1, parallax: float = 1.
                 x0, y0, x1, y1 = (int(v) for v in geom.rect)
                 img[y0:y1, x0:x1] = 128
         img = np.clip(img.astype(np.float32) + grain[i % len(grain)], 0, 255).astype(np.uint8)
+        newest[0] = {"f": int(f), "mk": marks.get(int(f))}
         vid.push(img, t, ts)
         ep.capture_t.append(t)
         ep.capture_frame.append(shown)

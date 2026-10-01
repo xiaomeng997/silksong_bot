@@ -6,9 +6,13 @@ small black and white pattern that encodes Time.frameCount, the number STATE "f"
 (oracle/src/Export/FrameMarker.cs draws it in OnGUI, after every camera and every other GUI, before the end-of-frame
 STATE is built). The video recorder reads it from the full-resolution capture (FullResDecoder, in
 ssbot.record.video's capture path) and then fills the vision mask (ssbot.vision.mask) over it before the thumbnail is
-made, so no marker pixel is ever stored; the final, vanilla run fills the same rect. Marked recordings ARE training
-data, valid only with the mask applied: training pixels equal final-run pixels. STATE "mk" is non-nil while the
-marker is on (RecordingReader.check counts those frames).
+made, so no marker pixel is ever stored; the final, vanilla run fills the same rect. Marked recordings are training
+data only through the mask: training pixels equal final-run pixels. Where the oracle reports the marker outside the
+mask (STATE "mk" rect and screen, mapped into the capture), the capture path's guard blanks it too and flags the
+capture mask_mismatch, and mask_report() checks every STATE after the fact: such an episode is not training data.
+Recordings from before the mask (video format 1: 12 px cells in unmasked thumbnails, e.g. the 2026-09-30 in-game
+m1_align run) are validation data only. STATE "mk" is non-nil while the marker is on (RecordingReader.check counts
+those frames).
 
 Layout (oracle/src/Export/MarkerCode.cs is the same code; tests pin both to the same vectors): a grid of
 (ROWS + 2) x (COLS + 2) square cells of `cell` client px, `cell` px in from one corner of the client area, drawn with
@@ -66,7 +70,7 @@ import numpy as np
 from ssbot.ipc.oracle_link import OracleError
 from ssbot.record import align
 from ssbot.record.recorder import RecordingReader
-from ssbot.record.video import MARK_STATUS, VideoReader
+from ssbot.record.video import MARK_STATUS, VideoReader, inside, marker_box, marker_screen
 from ssbot.vision import mask as vmask
 
 ROWS, COLS = 2, 12
@@ -355,23 +359,29 @@ class Truth:
     t_eof: np.ndarray        # (R,) ns
     drawn: np.ndarray        # (R,) the marker was drawn in that frame (STATE mk.drawn)
     in_capture: bool = False   # value / status read in the capture path (the video index), not from thumbnails
+    places: dict = field(default_factory=dict)   # (mk rect, render size) -> STATE frames that report it
 
 
-def _state_rows(path: Path) -> tuple[np.ndarray, np.ndarray, np.ndarray, list]:
+def _state_rows(path: Path) -> tuple[np.ndarray, np.ndarray, np.ndarray, list, dict]:
     rr = RecordingReader(path)
     freq = rr.hello.get("qpc_freq") or (rr.meta.get("qpc") or {}).get("freq")
     if not freq:
         raise ValueError(f"no qpc_freq in {path / 'meta.json'}")
     rows: dict[int, tuple] = {}
-    for s in rr.states(keys=("q", "mk")):
+    places: dict[tuple, int] = {}
+    for s in rr.states(keys=("q", "mk", "cam")):
         f, q = s.get("f"), s.get("q")
         if isinstance(f, int) and isinstance(q, int) and f not in rows:
             mk = s.get("mk")
             rows[f] = (q * 1_000_000_000 // freq, isinstance(mk, dict) and mk.get("drawn") is True,
                        Geometry.from_state(mk))
+            r = mk.get("rect") if isinstance(mk, dict) else None
+            if isinstance(r, (list, tuple)) and len(r) == 4 and all(isinstance(v, (int, float)) for v in r):
+                key = (tuple(float(v) for v in r), marker_screen(s))
+                places[key] = places.get(key, 0) + 1
     fs = sorted(rows)
     return (np.asarray(fs, np.int64), np.asarray([rows[f][0] for f in fs], np.int64),
-            np.asarray([rows[f][1] for f in fs], bool), [rows[f][2] for f in fs])
+            np.asarray([rows[f][1] for f in fs], bool), [rows[f][2] for f in fs], places)
 
 
 def read_truth(path: str | Path, lag_ns: int = 30_000_000) -> Truth:
@@ -383,10 +393,11 @@ def read_truth(path: str | Path, lag_ns: int = 30_000_000) -> Truth:
     vr = VideoReader(path)
     if not vr.exists():
         raise FileNotFoundError(f"no video in {path}")
-    f, t_eof, drawn, geoms = _state_rows(path)
+    f, t_eof, drawn, geoms, places = _state_rows(path)
     if vr.marked:
         tm = vr.times()
-        return Truth(tm["seq"], tm["t"], tm["ts"], tm["mk"], tm["mks"], f, t_eof, drawn, in_capture=True)
+        return Truth(tm["seq"], tm["t"], tm["ts"], tm["mk"], tm["mks"], f, t_eof, drawn, in_capture=True,
+                     places=places)
     have = np.flatnonzero([g is not None for g in geoms])
     # Per STATE row, the nearest row with a geometry (before or after).
     nearest = have[np.clip(np.searchsorted(have, np.arange(len(f))), 0, len(have) - 1)] if len(have) else None
@@ -410,7 +421,47 @@ def read_truth(path: str | Path, lag_ns: int = 30_000_000) -> Truth:
         val.append(-1 if d.value is None else d.value)
         st.append(DECODE_STATUS.index(d.status))
     return Truth(np.asarray(seq, np.int64), np.asarray(ta, np.int64), np.asarray(tf, np.int64),
-                 np.asarray(val, np.int64), np.asarray(st, np.int64), f, t_eof, drawn)
+                 np.asarray(val, np.int64), np.asarray(st, np.int64), f, t_eof, drawn, places=places)
+
+
+def mask_report(vr: VideoReader, places: dict) -> dict:
+    """Whether the episode's images may be training data: the video's mask and guard (VideoReader.labels: masked,
+    captures flagged mask_mismatch, training_safe) and, after the fact, every marker place a STATE reported
+    (Truth.places) mapped into each client size of the video (video.json crops; the whole frame where the crop fell
+    back), as the guard maps it: "states_outside" counts the STATE frames whose marker lay outside the mask, which a
+    capture may show (the guard samples STATE once per capture)."""
+    lb = vr.labels() or {}
+    out = {"masked": vr.masked, "mask_mismatch": lb.get("mask_mismatch", 0), "training_safe": lb.get("training_safe"),
+           "states_outside": 0, "outside": []}
+    crops = [(tuple(a), tuple(b)) for a, b in vr.meta.get("crops") or ()]
+    if not crops:  # a recording that was not closed: the first capture's client size
+        for info, _ in vr.frames():
+            crops = [((info.src_w, info.src_h), (0, 0, info.src_w, info.src_h))]
+            break
+    fallback = {tuple(v) for v in vr.meta.get("fallback") or ()}
+    for (rect, screen), n in places.items():
+        for frame, (_, _, cw, ch) in crops:
+            box = marker_box(rect, screen, (cw, ch), frame if frame in fallback else None)
+            if box is not None and not (vr.masked and inside(box, vmask.mask_rect(cw, ch))):
+                out["states_outside"] += n
+                out["outside"].append([list(rect), list(screen) if screen else None, [cw, ch]])
+                break
+    if out["states_outside"]:
+        out["training_safe"] = False
+    return out
+
+
+def mask_notes(m: dict, marker_frames: int) -> list[str]:
+    """The exact report's notes on mask_report()."""
+    if marker_frames and not m["masked"]:
+        return ["the video is unmasked (format 1 or mask off): its thumbnails hold the marker; VALIDATION data only, "
+                "never training data"]
+    if m["mask_mismatch"] or m["states_outside"]:
+        return [f"NOT training data (mask_mismatch): {m['mask_mismatch']} captures had the marker outside the vision "
+                f"mask (blanked too), {m['states_outside']} STATE frames report it outside the mask"]
+    if marker_frames and m["training_safe"] is None:
+        return ["the capture path did not guard the mask against STATE mk (no states): not checked"]
+    return []
 
 
 # ---- exact report --------------------------------------------------------------------------------------------------
@@ -463,6 +514,7 @@ class ExactReport:
     decode: dict = field(default_factory=dict)          # decode status -> captures
     decoded_in_capture: bool = False        # read in the capture path (video index), else from the thumbnails
     labels: dict = field(default_factory=dict)          # Labels.summary(): label source -> captures, marker share
+    mask: dict = field(default_factory=dict)            # mask_report(): training data or not
     shown_steps: dict = field(default_factory=dict)     # decoded frame(i) - decoded frame(i - 1) -> count
     duplicates: int = 0                     # consecutive captures showing the same frame
     skips: int = 0                          # frames between consecutive captures that neither shows
@@ -490,9 +542,13 @@ class ExactReport:
     def format(self) -> str:
         pct = (lambda x: f"{x * 100:.3f} %" if x is not None else "n/a")
         lb = self.labels
+        m = self.mask
         lines = [f"captures {self.captures} ({self.seq_gaps} dropped by the video recorder), STATE {self.states}, "
                  f"marker drawn in {self.marker_frames} frames; decode {self.decode} "
                  f"({'in the capture path' if self.decoded_in_capture else 'from the thumbnails'})",
+                 f"mask: masked {m.get('masked')}, captures flagged mask_mismatch {m.get('mask_mismatch')}, STATE "
+                 f"frames with the marker outside it {m.get('states_outside')} -> training_safe "
+                 f"{m.get('training_safe')}",
                  f"labels: marker {lb.get('marker')}, timestamp {lb.get('timestamp')}, none {lb.get('none')} "
                  f"(marker share {pct(lb.get('marker_share'))})",
                  f"shown frame steps between consecutive captures {self.shown_steps}: duplicates {self.duplicates}, "
@@ -792,6 +848,8 @@ def exact_episode(path: str | Path, clock: str = align.GATE_CLOCK, *, D_ms: floa
     tr = read_truth(path)
     rep, arrays = exact(tr, clock, D_ms=D_ms, threshold=threshold, min_captures=min_captures)
     rep.path = str(path)
+    rep.mask = mask_report(VideoReader(path), tr.places)
+    rep.notes.extend(mask_notes(rep.mask, rep.marker_frames))
     return rep, arrays, tr
 
 
@@ -806,15 +864,6 @@ def monitor_against_truth(path: str | Path, rep: ExactReport, arrays: dict, p: a
 
 
 # ---- turning it on -------------------------------------------------------------------------------------------------
-
-def marker_screen(s: dict) -> tuple[int, int] | None:
-    """The render size STATE "mk" rect is in px of: mk "screen" (SsOracle since 2026-09-30), else cam "screen" (the
-    same Screen size); None when neither is known."""
-    for v in ((s.get("mk") or {}).get("screen"), (s.get("cam") or {}).get("screen")):
-        if isinstance(v, (list, tuple)) and len(v) == 2 and all(isinstance(x, (int, float)) and x > 0 for x in v):
-            return int(v[0]), int(v[1])
-    return None
-
 
 def marker_on(link, timeout_s: float = 5.0) -> dict:
     """Turn the frame marker on for a recorded session (RPC frame.marker in mask.CORNER) and wait until a STATE says

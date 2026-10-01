@@ -12,16 +12,33 @@ disk costs counted drops, never a stalled capture thread. A writer thread packs 
 independent zstd frame per chunk, like the STATE stream (ssbot.record.formats). This is a cheap, lossless stream for
 labels and image registration; the training video (NVENC HEVC, DESIGN §3.1.6) is to take the same masked image.
 
+The mask guard (states=, e.g. lambda: link.state): the mask is placed from the client crop's size alone, so it covers
+the marker only where the oracle draws the marker the mask expects. Each capture therefore checks the oracle's own
+report of where it drew it (STATE "mk" rect, in px of mk "screen", the render size) mapped into this capture
+(marker_box: Unity scales a render that is not its window's size to fill the client, aspect kept; when the client
+crop fell back to the whole frame, the client's place in it is unknown and the box is every place the marker could
+be). Every rect a STATE reported within the last GUARD_NS counts (a capture shows a frame ~3 behind the newest STATE,
+and the guard samples STATEs only once per capture), and any of them that is not inside the applied mask (another
+cell, an older SsOracle's 12 px marker, a render scaled past the mask's share, a crop that fell back, no mask at all)
+is filled too, and the capture is flagged "mm" (mask_mismatch: not training data); so is the session (video.json
+"training_safe" false). A marker pixel is never stored silently. Without states the guard cannot run ("training_safe"
+null): tests and replays only.
+
 Files, in the episode folder the Recorder writes (VideoRecorder is its sibling and shares the folder):
     video.gray.zst       chunks; a decompressed chunk is a sequence of records, each FRAME_HEAD + h * w gray bytes
     video.index.jsonl    one line per chunk: off, clen, ulen, n, and per frame "seq", "t" (arrival ns), "ts" (frame ns),
-                         "mk" (decoded frame modulo 65536, -1 if none) and "mks" (MARK_STATUS index: why not)
-    video.json           capture settings (hwnd, crops, width), QPC frequency, start/end, counts, drops, callback cost;
-                         "marker" (decoded in the capture path or not, captures per decode status, the share labelled
-                         by the marker, decode + mask cost) and "mask" (corner, fill, rect per client size)
+                         "mk" (decoded frame modulo 65536, -1 if none), "mks" (MARK_STATUS index: why not) and "mm"
+                         (1: mask_mismatch)
+    video.json           capture settings (hwnd, crops, the frame sizes whose crop fell back, width), QPC frequency,
+                         start/end, counts, drops, callback cost; "marker" (decoded in the capture path or not, captures
+                         per decode status, the share labelled by the marker, decode + mask cost), "mask" (corner, fill,
+                         share, rect per client size, guard on or not, the marker boxes found outside it),
+                         "mask_mismatch" (captures flagged) and "training_safe" (masked, guarded, nothing flagged)
 
-FRAME_HEAD (format 2, little-endian): u32 seq | i64 arrival_ns | i64 frame_ns | u16 w | u16 h | u16 src_w | u16 src_h
-| i32 mk | u8 mks (format 1, FRAME_HEAD_V1, ends after src_h: no decode in the capture path, no mask)
+FRAME_HEAD (format 3, little-endian): u32 seq | i64 arrival_ns | i64 frame_ns | u16 w | u16 h | u16 src_w | u16 src_h
+| i32 mk | u8 mks | u8 mm (format 2, FRAME_HEAD_V2, ends after mks: no guard; format 1, FRAME_HEAD_V1, after src_h: no
+decode in the capture path, no mask; its marked recordings, e.g. the 2026-09-30 in-game m1_align run with 12 px cells,
+hold the marker in their thumbnails and are validation data only)
     seq          callback counter; a gap means frames dropped on the full queue
     arrival_ns   time.perf_counter_ns() when the callback started
     frame_ns     Frame.timespan * 100: Direct3D11CaptureFrame.SystemRelativeTime (QPC in 100 ns units). P8 found it
@@ -29,20 +46,22 @@ FRAME_HEAD (format 2, little-endian): u32 seq | i64 arrival_ns | i64 frame_ns | 
                  the arrival as a cross-check
     w, h         thumbnail size; src_w, src_h: the client crop it was made from (normally STATE cam.screen)
     mk, mks      the marker read from the full-resolution crop: frame modulo 65536 (-1 unless mks is "ok"), status
+    mm           1 when a marker rect the oracle reported lay outside the mask: filled as well, not training data
 
 Cost at the default width 320 (1280x720 client): the callback ~0.35 ms p50 (cvtColor + resize), of which reading
 the marker and filling the mask take ~0.03 ms (1080p: ~0.06 of ~0.9 ms; a capture without a marker, which runs the
-search, ~0.25 ms; tests/test_video.py measures them), 57.6 KB per frame raw, ~1.5-2 MB/s on disk at 60 fps after zstd
+search, ~0.25 ms; the mask guard adds ~0.005-0.01 ms; tests/test_video.py measures them), 57.6 KB per frame raw, ~1.5-2 MB/s on disk at 60 fps after zstd
 level 1 (~3 ms per 60-frame chunk on the writer thread): 4 instances are fine for alignment runs of minutes. Lower
 `width` for long sessions.
 
     rec = Recorder(link, profile="PROBE", episode="align_0001").start()
     marker_on(link)                                  # ssbot.record.marker: training sessions carry the marker
-    vid = VideoRecorder(rec.path, hwnd=instance_window(0), marker=True).start()
+    vid = VideoRecorder(rec.path, hwnd=instance_window(0), marker=True, states=lambda: link.state).start()
     ...
     vid.close(); rec.close()
 """
 import json
+import math
 import os
 import queue
 import struct
@@ -50,7 +69,7 @@ import threading
 import time
 import traceback
 from array import array
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -65,15 +84,57 @@ from ssbot.vision import mask as vmask
 DATA = "video.gray.zst"
 INDEX = "video.index.jsonl"
 META = "video.json"
-FORMAT = 2
-FRAME_HEAD = struct.Struct("<Iqq4HiB")
+FORMAT = 3
+FRAME_HEAD = struct.Struct("<Iqq4HiBB")
+FRAME_HEAD_V2 = struct.Struct("<Iqq4HiB")
 FRAME_HEAD_V1 = struct.Struct("<Iqq4H")
+HEADS = {1: FRAME_HEAD_V1, 2: FRAME_HEAD_V2, 3: FRAME_HEAD}
+GUARD_NS = 500_000_000   # a marker rect a STATE reported is checked against the mask in the captures this long after
 CHUNK_FRAMES = 60
 DEFAULT_WIDTH = 320
 # Per-capture marker status (FRAME_HEAD / index "mks"): ssbot.record.marker's decode statuses, and "off": not read in
 # the capture path (marker=False, or a format-1 video).
 MARK_STATUS = ("ok", "absent", "unclear", "check", "no_geometry", "off")
 MARK_OK, MARK_OFF = MARK_STATUS.index("ok"), MARK_STATUS.index("off")
+
+
+def marker_screen(s: dict) -> tuple[int, int] | None:
+    """The render size STATE "mk" rect is in px of: mk "screen" (SsOracle since 2026-09-30), else cam "screen" (the
+    same Screen size); None when neither is known."""
+    for v in ((s.get("mk") or {}).get("screen"), (s.get("cam") or {}).get("screen")):
+        if isinstance(v, (list, tuple)) and len(v) == 2 and all(isinstance(x, (int, float)) and x > 0 for x in v):
+            return int(v[0]), int(v[1])
+    return None
+
+
+def marker_box(rect, screen: tuple[int, int] | None, client: tuple[int, int],
+               frame: tuple[int, int] | None = None) -> tuple[int, int, int, int] | None:
+    """Where the oracle's marker (STATE mk rect, px of the render `screen`; None: the client's size) lies in a client
+    image of size `client`, rounded outward; None for an empty rect. A render of another size is scaled to fill the
+    client, aspect kept and centred (Unity's fullscreen window), and the box then grows by the scale (rounded up, at
+    least 1 px) for the interpolation's blur. frame (w, h): the client crop fell back to the whole capture frame, so
+    the client's place in it is unknown: the box is the union of the marker's places over every position of an
+    unscaled render inside the frame, or the whole frame if the render does not fit."""
+    x0, y0, x1, y1 = (float(v) for v in rect)
+    if not (x1 > x0 and y1 > y0):
+        return None
+    rw, rh = screen or client
+    if frame is not None:
+        fw, fh = frame
+        if rw > fw or rh > fh:
+            return 0, 0, fw, fh
+        return math.floor(x0), math.floor(y0), math.ceil(x1) + fw - rw, math.ceil(y1) + fh - rh
+    cw, ch = client
+    if (rw, rh) == (cw, ch):
+        return math.floor(x0), math.floor(y0), math.ceil(x1), math.ceil(y1)
+    k = min(cw / rw, ch / rh)
+    ox, oy, b = (cw - rw * k) / 2, (ch - rh * k) / 2, max(1, math.ceil(k))
+    return (math.floor(ox + x0 * k) - b, math.floor(oy + y0 * k) - b, math.ceil(ox + x1 * k) + b,
+            math.ceil(oy + y1 * k) + b)
+
+
+def inside(box: tuple[int, int, int, int], rect: tuple[int, int, int, int]) -> bool:
+    return rect[0] <= box[0] and rect[1] <= box[1] and box[2] <= rect[2] and box[3] <= rect[3]
 
 
 def _qpc_freq() -> int:
@@ -101,11 +162,13 @@ def instance_window(instance: int) -> int:
 class VideoRecorder:
     """Writes video.* into `path` from a WGC capture of `hwnd`, or from push() calls (tests, replays). marker=True
     reads the frame marker from every capture (the session turned it on: ssbot.record.marker.marker_on); mask=False
-    stores the thumbnails unmasked, which only a capture without the marker may do (comparisons, legacy tests)."""
+    stores the thumbnails unmasked, which only a capture without the marker may do (comparisons, legacy tests).
+    states: the newest STATE (lambda: link.state) for the mask guard; every live capture passes it."""
 
     def __init__(self, path: str | Path, hwnd: int | None = None, *, width: int = DEFAULT_WIDTH,
                  crop: tuple[int, int, int, int] | None = None, chunk_frames: int = CHUNK_FRAMES, level: int = 1,
-                 queue_size: int = 240, marker: bool = False, mask: bool = True):
+                 queue_size: int = 240, marker: bool = False, mask: bool = True,
+                 states: Callable[[], dict | None] | None = None):
         if marker and not mask:
             raise ValueError("a capture with the frame marker must be masked (ssbot.vision.mask)")
         self.path = Path(path)
@@ -117,6 +180,7 @@ class VideoRecorder:
         self.queue_size = queue_size
         self.marker = marker
         self.mask = mask
+        self.states = states
         self._decoder = None
         if marker:
             from ssbot.record.marker import FullResDecoder  # marker imports this module
@@ -127,11 +191,15 @@ class VideoRecorder:
         self._thread: threading.Thread | None = None
         self._control = None
         self._crops: dict[tuple[int, int], tuple[int, int, int, int]] = {}
+        self._fallback: set[tuple[int, int]] = set()   # frame sizes whose client crop fell back to the whole frame
+        self._seen: dict[tuple, int] = {}              # (rect, screen) a STATE reported -> last arrival_ns
+        self._boxes: dict[tuple, tuple] = {}           # (rect, screen, frame size, crop) -> (box, inside the mask)
+        self.outside: set[tuple[int, int, int, int]] = set()   # marker boxes found outside the mask (first 50)
         self._data = None
         self._index = None
         self._cctx = formats.compressor(level)
         self._chunk: list[bytes] = []
-        self._chunk_info: dict[str, list] = {"seq": [], "t": [], "ts": [], "mk": [], "mks": []}
+        self._chunk_info: dict[str, list] = {"seq": [], "t": [], "ts": [], "mk": [], "mks": [], "mm": []}
         self._meta: dict = {}
         self.summary: dict | None = None
 
@@ -149,6 +217,7 @@ class VideoRecorder:
         self.capture_closed = False
         self.error: str | None = None
         self.marks = [0] * len(MARK_STATUS)
+        self.mismatch = 0
         self._cost_ns = array("q")
         self._mark_ns = array("q")
 
@@ -166,8 +235,8 @@ class VideoRecorder:
             "queue_size": self.queue_size,
             "marker": {"decode": self.marker, "corner": vmask.CORNER if self.marker else None,
                        "status": list(MARK_STATUS)},
-            "mask": {"corner": vmask.CORNER, "fill": vmask.FILL, "margin_cells": vmask.MARGIN_CELLS} if self.mask
-            else None,
+            "mask": {"corner": vmask.CORNER, "fill": vmask.FILL, "share": [str(vmask.SHARE_W), str(vmask.SHARE_H)],
+                     "guard": self.states is not None} if self.mask else None,
             "qpc": {"freq": _qpc_freq(), "perf_ns_start": time.perf_counter_ns(), "perf_ns_end": None},
             "wall": {"start": datetime.now().isoformat(timespec="milliseconds"), "end": None},
         }
@@ -216,8 +285,8 @@ class VideoRecorder:
 
     def push(self, image: np.ndarray, arrival_ns: int, frame_ns: int = 0) -> None:
         """One captured frame: BGRA (h, w, 4), BGR (h, w, 3) or gray (h, w) uint8. Any thread; never blocks.
-        Crops, converts, reads the marker, masks and downscales here, because a WGC frame buffer does not outlive
-        the callback; the caller's image is never written to."""
+        Crops, converts, reads the marker, masks (and blanks a marker the guard finds outside the mask) and downscales
+        here, because a WGC frame buffer does not outlive the callback; the caller's image is never written to."""
         if not self._accepting:
             return
         t0 = time.perf_counter_ns()
@@ -230,7 +299,7 @@ class VideoRecorder:
             own = view.ndim == 3
             if own:
                 view = cv2.cvtColor(view, cv2.COLOR_BGRA2GRAY if view.shape[2] == 4 else cv2.COLOR_BGR2GRAY)
-            elif self.mask:
+            elif self.mask or self.states is not None:
                 view, own = view.copy(), True
             t1 = time.perf_counter_ns()
             mk, mks = -1, MARK_OFF
@@ -239,6 +308,7 @@ class VideoRecorder:
                 mk, mks = (d.value, MARK_OK) if d.value is not None else (-1, MARK_STATUS.index(d.status))
             if self.mask:
                 vmask.apply(view)
+            mm = self._guard(view, int(arrival_ns), (w, h), (x, y, cw, ch)) if self.states is not None else 0
             t2 = time.perf_counter_ns()
             tw = min(self.width, cw)
             th = max(1, round(tw * ch / cw))
@@ -253,11 +323,40 @@ class VideoRecorder:
                 traceback.print_exc()
             return
         try:
-            self._q.put_nowait((seq, int(arrival_ns), int(frame_ns), small, cw, ch, mk, mks))
+            self._q.put_nowait((seq, int(arrival_ns), int(frame_ns), small, cw, ch, mk, mks, mm))
         except queue.Full:
             self.dropped += 1
         self._mark_ns.append(t2 - t1)
         self._cost_ns.append(time.perf_counter_ns() - t0)
+
+    def _guard(self, view: np.ndarray, t: int, frame: tuple[int, int], crop: tuple[int, int, int, int]) -> int:
+        """The mask guard (module docstring): fills every marker box a STATE reported within GUARD_NS that is not
+        inside this capture's mask; returns mm (1: one was)."""
+        st = self.states()
+        mk = st.get("mk") if isinstance(st, dict) else None
+        if isinstance(mk, dict):
+            r = mk.get("rect")
+            if isinstance(r, (list, tuple)) and len(r) == 4 and all(isinstance(v, (int, float)) for v in r):
+                self._seen[(tuple(float(v) for v in r), marker_screen(st))] = t
+        mm = 0
+        for key, seen in list(self._seen.items()):
+            if t - seen > GUARD_NS:
+                del self._seen[key]
+                continue
+            got = self._boxes.get((key, frame, crop))
+            if got is None:
+                cw, ch = crop[2], crop[3]
+                box = marker_box(key[0], key[1], (cw, ch), frame if frame in self._fallback else None)
+                got = self._boxes[(key, frame, crop)] = (box, box is None or (
+                    self.mask and inside(box, vmask.mask_rect(cw, ch))))
+            box, ok = got
+            if not ok:
+                h, w = view.shape
+                view[max(0, box[1]):min(h, box[3]), max(0, box[0]):min(w, box[2])] = vmask.FILL
+                mm = 1
+                if len(self.outside) < 50:
+                    self.outside.add(box)
+        return mm
 
     def _crop_for(self, w: int, h: int) -> tuple[int, int, int, int]:
         """The client area inside a w x h capture; looked up again whenever the capture size changes (resize)."""
@@ -269,8 +368,9 @@ class VideoRecorder:
                 crop = client_in_capture(self.hwnd)
             if crop is None or crop[2] <= 0 or crop[3] <= 0 or crop[0] < 0 or crop[1] < 0 \
                     or crop[0] + crop[2] > w or crop[1] + crop[3] > h:
-                if crop is not None:
+                if crop is not None:  # (no crop and no window: push() gets client images)
                     print(f"[video] client area {crop} does not fit a {w}x{h} capture; keeping the whole frame")
+                    self._fallback.add((w, h))
                 crop = (0, 0, w, h)
             self._crops[(w, h)] = tuple(int(v) for v in crop)
         return crop
@@ -304,7 +404,8 @@ class VideoRecorder:
             return {"p50": at(.5), "p99": at(.99), "max": at(1.0)}
 
         meta = self._meta
-        meta.update(status="closed", crops=[[list(k), list(v)] for k, v in self._crops.items()], pushed=self.pushed,
+        meta.update(status="closed", crops=[[list(k), list(v)] for k, v in self._crops.items()],
+                    fallback=sorted(list(k) for k in self._fallback), pushed=self.pushed,
                     written=self.written, dropped=self.dropped, late=self.late, failed=self.failed,
                     max_queue=self.max_queue, chunks=self.chunks, bytes=self.bytes, raw_bytes=self.raw_bytes,
                     capture_closed=self.capture_closed, callback_us=pct(self._cost_ns), error=self.error)
@@ -314,6 +415,9 @@ class VideoRecorder:
                               decode_mask_us=pct(self._mark_ns))
         if meta["mask"] is not None:
             meta["mask"]["rects"] = [[[w, h], list(vmask.mask_rect(w, h))] for _, _, w, h in self._crops.values()]
+            meta["mask"]["outside"] = sorted(list(b) for b in self.outside)
+        meta["mask_mismatch"] = self.mismatch
+        meta["training_safe"] = training_safe(meta, self.mismatch)
         meta["qpc"]["perf_ns_end"] = time.perf_counter_ns()
         meta["wall"]["end"] = datetime.now().isoformat(timespec="milliseconds")
         self._write_meta()
@@ -321,6 +425,7 @@ class VideoRecorder:
                                             "bytes", "raw_bytes", "callback_us", "error")}
         self.summary["marker"] = {k: meta["marker"][k] for k in ("decode", "counts", "labelled", "share",
                                                                  "decode_mask_us")}
+        self.summary.update(mask_mismatch=self.mismatch, training_safe=meta["training_safe"])
         self.summary["path"] = str(self.path)
         return self.summary
 
@@ -358,15 +463,17 @@ class VideoRecorder:
         self._index.close()
 
     def _add(self, seq: int, arrival_ns: int, frame_ns: int, small: np.ndarray, src_w: int, src_h: int,
-             mk: int = -1, mks: int = MARK_OFF) -> None:
+             mk: int = -1, mks: int = MARK_OFF, mm: int = 0) -> None:
         h, w = small.shape
-        self._chunk.append(FRAME_HEAD.pack(seq, arrival_ns, frame_ns, w, h, src_w, src_h, mk, mks) + small.tobytes())
+        self._chunk.append(FRAME_HEAD.pack(seq, arrival_ns, frame_ns, w, h, src_w, src_h, mk, mks, mm)
+                           + small.tobytes())
         info = self._chunk_info
         info["seq"].append(seq)
         info["t"].append(arrival_ns)
         info["ts"].append(frame_ns)
         info["mk"].append(mk)
         info["mks"].append(mks)
+        info["mm"].append(mm)
         if len(self._chunk) >= self.chunk_frames:
             self._flush()
 
@@ -388,8 +495,18 @@ class VideoRecorder:
         self.raw_bytes += len(raw)
         for s in self._chunk_info["mks"]:
             self.marks[s] += 1
+        self.mismatch += sum(self._chunk_info["mm"])
         self._chunk = []
-        self._chunk_info = {"seq": [], "t": [], "ts": [], "mk": [], "mks": []}
+        self._chunk_info = {"seq": [], "t": [], "ts": [], "mk": [], "mks": [], "mm": []}
+
+
+def training_safe(meta: dict, mismatch: int) -> bool | None:
+    """A video's images may be training data: masked in the capture path (format >= 2) and no capture flagged
+    mask_mismatch; None when nothing flagged it but the guard did not run (no STATE to check against)."""
+    m = meta.get("mask") if int(meta.get("format", FORMAT)) >= 2 else None
+    if not m or mismatch:
+        return False
+    return True if m.get("guard") else None
 
 
 # ---- reader --------------------------------------------------------------------------------------------
@@ -403,13 +520,14 @@ class FrameInfo:
     h: int
     src_w: int
     src_h: int
-    mk: int = -1            # decoded frame modulo 65536 (format 2)
+    mk: int = -1            # decoded frame modulo 65536 (format >= 2)
     mks: int = MARK_OFF     # MARK_STATUS index
+    mm: int = 0             # 1: mask_mismatch (format 3)
 
 
 def iter_frames(buf: bytes | memoryview, head: struct.Struct = FRAME_HEAD) -> Iterator[tuple[FrameInfo, np.ndarray]]:
     """(header, gray thumbnail) for every record of a decompressed chunk; the array is a view into buf. head:
-    FRAME_HEAD_V1 for a format-1 video."""
+    HEADS[format] (FRAME_HEAD_V1 / _V2 for a format-1 / format-2 video)."""
     mv = memoryview(buf)
     pos, end = 0, len(mv)
     while pos < end:
@@ -432,7 +550,7 @@ class VideoReader:
         meta = self.path / META
         self.meta: dict[str, Any] = json.loads(meta.read_text("utf-8")) if meta.is_file() else {}
         self.format = int(self.meta.get("format", FORMAT))
-        self.head = FRAME_HEAD_V1 if self.format == 1 else FRAME_HEAD
+        self.head = HEADS[self.format]
         self.rebuilt = False
         self._index = self._load_index()
 
@@ -475,6 +593,8 @@ class VideoReader:
                          "ts": [h.frame_ns for h in heads]}
                 if self.format >= 2:
                     entry.update(mk=[h.mk for h in heads], mks=[h.mks for h in heads])
+                if self.format >= 3:
+                    entry.update(mm=[h.mm for h in heads])
                 entries.append(entry)
         return entries
 
@@ -488,24 +608,33 @@ class VideoReader:
             yield from iter_frames(self.chunk(e), self.head)
 
     def times(self) -> dict[str, np.ndarray]:
-        """Per frame, from the index alone: seq, arrival_ns ("t"), frame_ns ("ts"), and the marker read in the
-        capture path, "mk" and "mks" (format 1: -1 and "off"), as int64 arrays."""
+        """Per frame, from the index alone: seq, arrival_ns ("t"), frame_ns ("ts"), the marker read in the capture
+        path, "mk" and "mks" (format 1: -1 and "off"), and "mm" (mask_mismatch; 0 before format 3), as int64 arrays."""
         out = {k: np.fromiter((v for e in self._index for v in e[k]), np.int64) for k in ("seq", "t", "ts")}
         n = len(out["seq"])
-        for k, none in (("mk", -1), ("mks", MARK_OFF)):
+        for k, none in (("mk", -1), ("mks", MARK_OFF), ("mm", 0)):
             have = all(k in e for e in self._index)
             out[k] = np.fromiter((v for e in self._index for v in e[k]), np.int64) if have and n \
                 else np.full(n, none, np.int64)
         return out
 
+    @property
+    def masked(self) -> bool:
+        """The capture path filled the vision mask before storing (format >= 2, VideoRecorder mask=True)."""
+        return self.format >= 2 and bool(self.meta.get("mask"))
+
     def labels(self) -> dict | None:
         """The session's label sources, from the index alone (RecordingReader.check, the reports): captures, how
         many carry a marker label (read in the capture path: exact) and how many fall back to their timestamp
-        label, captures per decode status, the marker-labelled share. None without a video."""
+        label, captures per decode status, the marker-labelled share; whether the thumbnails were masked, how many
+        captures the guard flagged mask_mismatch, and training_safe (video.training_safe). None without a video."""
         if not self.exists():
             return None
-        mks = self.times()["mks"]
+        tm = self.times()
+        mks = tm["mks"]
         n, ok = len(mks), int((mks == MARK_OK).sum())
         v, c = np.unique(mks, return_counts=True)
+        mm = int(tm["mm"].sum())
         return {"captures": n, "marker": ok, "timestamp": n - ok, "share": ok / n if n else None,
-                "decoded_in_capture": self.marked, "decode": {MARK_STATUS[int(a)]: int(b) for a, b in zip(v, c)}}
+                "decoded_in_capture": self.marked, "decode": {MARK_STATUS[int(a)]: int(b) for a, b in zip(v, c)},
+                "masked": self.masked, "mask_mismatch": mm, "training_safe": training_safe(self.meta, mm)}

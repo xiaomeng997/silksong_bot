@@ -132,6 +132,7 @@ def test_marker_goes_off_after_an_error(monkeypatch, tmp_path):
     assert names == [("frame.marker", True), ("input.release", None), ("frame.marker", False)]
     assert link.calls[0][1] == {"on": True, "corner": "tr"}        # the oracle's default cell: the mask's
     assert BrokenVideo.made[-1]["marker"] is True                    # read in the capture path, masked
+    assert callable(BrokenVideo.made[-1]["states"])                  # and guarded against STATE mk
     assert link.closed and not link.marker
 
 
