@@ -585,3 +585,30 @@ def test_marker_on_turns_the_marker_off_when_it_fails(why):
     with pytest.raises(KeyboardInterrupt):
         mk.marker_on(link)
     assert link.calls[-1] == ("frame.marker", {"on": False})
+
+
+def test_marker_on_turns_the_marker_off_when_the_first_reply_is_lost():
+    # The oracle applied the request, but its reply missed the timeout (or the wait was interrupted): marker_on must
+    # still turn it off, so a session declared unmarked never carries a drawn marker.
+    class LostReply(MarkerLink):
+        def rpc(self, name, timeout_s=10.0, **args):
+            r = super().rpc(name, timeout_s, **args)
+            if args.get("on") and len([c for c in self.calls if c[1].get("on")]) == 1:
+                raise TimeoutError()
+            return r
+
+    link = LostReply()
+    with pytest.raises(TimeoutError):
+        mk.marker_on(link, timeout_s=0.1)
+    assert link.calls[-1] == ("frame.marker", {"on": False}) and link.cell is None
+
+
+def test_a_decode_that_unwraps_to_a_negative_frame_is_implausible():
+    tr, _, shown = _stream(n=2000)
+    value = tr.value.copy()
+    value[500] = (shown[500] + 40000) % mk.MODULUS     # unwraps 25536 frames before the shown frame: below 0
+    bad = replace(tr, value=value)
+    clean = mk.reject_implausible(bad)
+    assert clean.status[500] == mk.IMPLAUSIBLE and clean.value[500] == -1
+    lb = mk.capture_labels(bad)
+    assert np.asarray(mk.LABEL_SOURCES)[lb.source][500] == "timestamp"

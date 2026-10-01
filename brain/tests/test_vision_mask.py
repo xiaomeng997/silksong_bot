@@ -100,3 +100,12 @@ def test_apply_fills_exactly_the_rect_in_place():
     gray = rng.integers(1, 256, (1080, 1920), dtype=np.uint8)
     vmask.apply(gray)
     assert (gray == 0).sum() == 78 * 33
+
+
+def test_sizes_where_only_the_marker_floor_fits_are_unsupported():
+    mask = vmask
+    # 16:10 in some height bands needs the marker plus MARGIN_CELLS cells, not the normalized share.
+    for w, h in ((1152, 720), (1600, 1000), (1512, 945)):
+        assert not mask.supported(w, h)
+    for w, h in ((1280, 720), (1920, 1080), (2560, 1440), (3840, 2160), (1366, 768), (1920, 1200)):
+        assert mask.supported(w, h)

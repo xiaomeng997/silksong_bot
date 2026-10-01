@@ -15,13 +15,13 @@ The mask is ONE normalized rect, the same share of the image at every supported 
 (4.06 %) of the width and SHARE_H = 11/360 (3.06 %) of the height, from the corner CORNER (top right), rounded
 outward to whole px. Those fractions are whole px at every multiple of 640x360, so the rect is exactly the same share
 at the project's sizes: 52 x 22 px at 1280x720 (training windows), 78 x 33 at 1920x1080 (the final run's capture and
-the human sessions' video), 104 x 44 at 2560x1440, 156 x 66 at 3840x2160; elsewhere it is within a pixel of that share
-(1366x768: 56 x 24). It is 0.12 % of the image. Supported sizes: client height >= MIN_HEIGHT (720) and an aspect of
-16:10 or wider; there the rect holds the marker plus the capture path's decoder search (SEARCH_PX on its inner sides)
-with room to spare, tests/test_vision_mask.py checks both, and a model input of any size made from such an image
-shows the same masked share. Below that height (only the synthetic test clients, e.g. 640x360) or on a narrower
-aspect the marker's minimum cell would not fit the share, so the rect grows to the marker plus MARGIN_CELLS cells on
-its inner sides; no model input is ever made at such a size.
+the human sessions' video), 104 x 44 at 2560x1440, 156 x 66 at 3840x2160; at other supported sizes it is within a pixel
+of that share (1366x768: 56 x 24). It is 0.12 % of the image. Supported sizes (supported()): client height >=
+MIN_HEIGHT (720) where the normalized rect itself holds the marker plus the capture path's decoder search (SEARCH_PX on
+its inner sides): every 16:9 size from 720p up, and wider ones; tests/test_vision_mask.py checks both. Some narrower
+sizes (16:10 in a few height bands, e.g. 1152x720, 1600x1000) need the marker plus MARGIN_CELLS cells instead, which is
+not the normalized share: they are unsupported, like everything below 720 px (only the synthetic test clients, e.g.
+640x360); no model input is ever made at such a size.
 
 Geometry (client px, origin top-left, x1 / y1 exclusive), the same as oracle/src/Export/MarkerCode.cs Place and
 DefaultCell:
@@ -33,8 +33,9 @@ DefaultCell:
 
 The binding size is 720p: the 3 px cell is 1/240 of the height there (1/270 at 1080p), so the marker plus the search
 takes 48 x 18 px of the 52 x 22 px rect (4 px to spare on each inner side); at 1080p 63 x 23 of 78 x 33. Because the
-share is the same everywhere, a marker drawn at any supported render size and scaled to another output size (a 720p
-render in a 1080p window, DPI scaling) still lies inside that output's mask, though it no longer decodes.
+share is the same everywhere, a marker drawn at a supported render size and scaled to another supported size of the same
+aspect (a 720p render in a 1080p window, DPI scaling) still lies inside that output's mask, though it no longer decodes;
+a change of aspect (pillar- or letterboxing) can move it out, which the guards below flag.
 
 The cell size. The video recorder decodes the marker from the full-resolution capture (ssbot.record.video), which WGC
 copies pixel for pixel from the window's client area (the game renders at its window size, and the capture side is
@@ -105,9 +106,19 @@ def mask_rect(width: int, height: int, corner: str = CORNER) -> tuple[int, int, 
     return x0, y0, x1, y1
 
 
+def _normalized_size(width: int, height: int) -> tuple[int, int]:
+    return (-(-width * SHARE_W.numerator // SHARE_W.denominator), -(-height * SHARE_H.numerator // SHARE_H.denominator))
+
+
 def supported(width: int, height: int) -> bool:
-    """A client size at which the mask is the normalized rect (the same share as at every other supported size)."""
-    return height >= MIN_HEIGHT and width * 10 >= height * 16
+    """A client size at which the mask is the normalized rect (the same share as at every other supported size) and
+    holds the marker plus the decoder's search: at least MIN_HEIGHT tall and the marker floor not binding."""
+    if height < MIN_HEIGHT:
+        return False
+    nw, nh = _normalized_size(width, height)
+    x0, y0, x1, y1 = marker_rect(width, height)
+    fits = (x1 - x0) + cell_px(height) + SEARCH_PX <= nw and (y1 - y0) + cell_px(height) + SEARCH_PX <= nh
+    return fits and mask_size(width, height) == (nw, nh)
 
 
 def apply(img: np.ndarray, fill: int = FILL) -> np.ndarray:

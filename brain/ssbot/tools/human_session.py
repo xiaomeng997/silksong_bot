@@ -15,7 +15,11 @@ training session does: a 56 x 16 px pattern at the top right of the 1920x1080 re
 (printed, and meta.json "marker": on, cell, rect, render size, or why not). The screen video is ffmpeg ddagrab of the
 desktop scaled to 1920x1080 through ssbot.tools.human_video.ffmpeg_cmd: the vision mask's rect of that output (and
 the marker's box, should the oracle's report map it elsewhere: mask_mismatch) is filled before encoding, so
-video.mkv holds no marker pixel, and that corner alone goes losslessly to corner.mkv. meta.json "video" records the
+video.mkv holds no marker pixel as long as the game window keeps the placement it had when the video started, and that
+corner alone goes losslessly to corner.mkv. The filter graph is fixed at the start: switching the game between
+fullscreen and a window (Alt+Enter, the options menu), changing its resolution or moving it to another monitor
+mid-session moves the marker out of the filled rect, so do not change display settings while recording (a change
+seen by the 1 s placement poll flags the session mask_mismatch; one undone within a second goes unseen). meta.json "video" records the
 output, the render size, the game window's client rect and the desktop size (polled every second: "placements"), the
 filled rects and the corner. At the end the marker goes off (also after an error or Ctrl+C; the oracle turns it off
 when the link closes anyway), and human_video.labels decodes the corner frame by frame: labels.npz (per video frame:

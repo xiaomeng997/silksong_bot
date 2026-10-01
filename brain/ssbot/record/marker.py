@@ -660,7 +660,8 @@ def reject_implausible(tr: Truth, clock: str = align.GATE_CLOCK, D: int | None =
     if not len(tr.f) or not (tr.value >= 0).any():
         return tr
     g = truth_frames(tr, t_cap)
-    ok = g >= 0
+    # Decoded at all (value >= 0); a decode that unwraps to a negative frame is simply out of range, not "no marker".
+    ok = tr.value >= 0
     bad = ok & ((g < tr.f[0]) | (g > tr.f[-1]))
     if D is None and not (clock == "frame" and (t_cap == 0).any()):
         D = _calibrate(tr, t_cap, _rows(tr, np.where(bad, -1, g))[1]).D
@@ -935,8 +936,13 @@ def marker_on(link, timeout_s: float = 5.0) -> dict:
     def rect(s: dict) -> list[float]:
         return [float(v) for v in (s["mk"].get("rect") or ())]
 
-    res = link.rpc("frame.marker", on=True, corner=vmask.CORNER)
     try:
+        # Inside the try: a reply lost to a timeout (or an interrupt while waiting) may still have turned it on. An
+        # explicit refusal (OracleError) means it is off: nothing to undo.
+        try:
+            res = link.rpc("frame.marker", on=True, corner=vmask.CORNER)
+        except OracleError as e:
+            raise _Refused(e) from e
         s = link.wait_state(lambda s: drawn(s) and marker_screen(s) is not None, timeout_s=timeout_s)
         w, h = marker_screen(s)
         want = [float(v) for v in vmask.marker_rect(w, h)]
@@ -945,6 +951,8 @@ def marker_on(link, timeout_s: float = 5.0) -> dict:
             res["resent"] = True
             link.wait_state(lambda s: drawn(s) and marker_screen(s) == (w, h) and rect(s) == want, timeout_s=timeout_s)
         res = dict(res or {}, screen=[w, h], rect=want)
+    except _Refused as r:
+        raise r.error
     except BaseException:
         try:
             marker_off(link)
@@ -952,6 +960,14 @@ def marker_on(link, timeout_s: float = 5.0) -> dict:
             pass
         raise
     return res
+
+
+class _Refused(Exception):
+    """marker_on: the oracle refused the first request, so the marker never went on."""
+
+    def __init__(self, error: OracleError):
+        super().__init__(str(error))
+        self.error = error
 
 
 def marker_off(link) -> dict:
