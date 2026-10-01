@@ -1,11 +1,14 @@
-"""Frame marker: ground truth for frame/label alignment (DESIGN §3.1.4 C4; the M1 alignment gate, >= 99.5 %).
+"""Frame marker: the exact label of every training capture (DESIGN §3.1.4 C4; the M1 alignment gate, >= 99.5 %).
 
-In a validation-only session the oracle draws, into every image it renders while the marker is on (RPC
-"frame.marker", training profiles only), a small black and white pattern that encodes Time.frameCount: the number
-STATE "f" carries for that frame (oracle/src/Export/FrameMarker.cs draws it in OnGUI, after every camera and every
-other GUI, before the end-of-frame STATE is built). STATE "mk" is non-nil while it is on, so a recording made with it
-is identifiable (RecordingReader.check reports it): it is validation data and never training data. The rule "no
-barcode in the pixels" (C4) holds for everything the bot learns from.
+Training sessions turn the oracle's frame marker on (marker_on: RPC "frame.marker", profile TRAIN only, refused under
+-ssbot-human): while it is on, every image the game renders carries, in the top-right corner of the client area, a
+small black and white pattern that encodes Time.frameCount, the number STATE "f" carries for that frame
+(oracle/src/Export/FrameMarker.cs draws it in OnGUI, after every camera and every other GUI, before the end-of-frame
+STATE is built). The video recorder reads it from the full-resolution capture (FullResDecoder, in
+ssbot.record.video's capture path) and then fills the vision mask (ssbot.vision.mask) over it before the thumbnail is
+made, so no marker pixel is ever stored; the final, vanilla run fills the same rect. Marked recordings ARE training
+data, valid only with the mask applied: training pixels equal final-run pixels. STATE "mk" is non-nil while the
+marker is on (RecordingReader.check counts those frames).
 
 Layout (oracle/src/Export/MarkerCode.cs is the same code; tests pin both to the same vectors): a grid of
 (ROWS + 2) x (COLS + 2) square cells of `cell` client px, `cell` px in from one corner of the client area, drawn with
@@ -17,26 +20,38 @@ a one-cell black border. Grid row gr = 0 .. ROWS + 1 (top to bottom), column gc 
     gc = 2 .. COLS - 1: bit j = (gc - 2) + (gr - 1) * (COLS - 2), j = 0 .. 19:
         j = 0 .. 15   bit j of the frame number (LSB first; the frame modulo 65536)
         j = 16 .. 19  bit j - 16 of crc4 of those 16 bits (x^4 + x + 1, MSB first)
-With the default cell (screen height / 60: 12 px at 720p, 18 at 1080p) a cell spans 3 px of a 320 px wide thumbnail.
+The default cell is ssbot.vision.mask.cell_px(client height) = max(3, round(height / 270)): 3 px at 720p, 4 at 1080p
+(why: that module's docstring), placed where mask.marker_rect says.
 
-Decoding (decode): the cell centres follow from STATE "mk" rect and cell and the thumbnail's scale (FrameInfo w / src_w);
-a search over +-1.5 thumbnail px absorbs a client crop a few px off. Each cell is the mean of 3 x 3 bilinear samples
-over its inner 40 %. The border and the black sync cells give the black level, the white sync cells the white level;
-the pattern is "absent" unless every border and sync cell lies on its side of the middle by a quarter of the contrast
-(and the contrast is >= MIN_CONTRAST), "unclear" if a data cell does not, "check" if the crc fails. The 16 bits are
-unwrapped to the frame nearest a reference (the capture's label).
+Decoding. FullResDecoder (the capture path): each cell is the mean of its centre pixels at full resolution, at the
+shift that decoded last, else at every integer shift within +-SEARCH_PX px. decode() (recordings made before the
+marker was read in the capture path: the pattern was drawn with large cells and stored in the thumbnails): the cell
+centres follow from STATE "mk" rect and cell and the thumbnail's scale (FrameInfo w / src_w), a search over +-1.5
+thumbnail px, each cell the mean of 3 x 3 bilinear samples over its inner 40 %. Both judge alike (_judge): the
+border and the black sync cells give the black level, the white sync cells the white level; the pattern is "absent"
+unless every border and sync cell lies on its side of the middle by a quarter of the contrast (and the contrast is
+>= MIN_CONTRAST), "unclear" if a data cell does not, "check" if the crc fails. A capture shows the frame its marker
+says (a wrong frame would need a clean pattern of another frame, i.e. the image of that frame), so a decoded marker
+is the capture's exact label. The 16 bits are unwrapped to the frame nearest a reference (the timestamp label).
 
-The exact report (exact): D is calibrated from the truth (align.agree_interval: the D most captures agree on, over
-the decoded frames), then every capture gets its label (align.match) and its offset k = decoded frame - label.
-Counted: labelled captures whose label's next frame has a STATE (as in the monitor). A counted capture without a
-decodable marker although the marker was drawn in every frame within max_offset of its label is "missing" and counts
-against the share: the gate may fail an aligned recording, never pass a misaligned one. Share = captures at offset 0 /
-(decoded + missing); PASS >= threshold with >= min_captures counted, INCONCLUSIVE below. Also: the offset histogram,
-duplicates (consecutive captures that show the same frame) and skips (frames between two consecutive captures that
-no capture shows), frames never captured, the lag from end of frame to capture, and the arrival clock as a
-cross-check. score_monitor compares the correlation monitor (ssbot.record.align) with the truth capture by capture.
+Labels (capture_labels): the decoded frame where the marker decoded (label_source "marker"); otherwise the timestamp
+label, align.match with D calibrated on the decoded captures (label_source "timestamp", flagged: the 2026-09-30
+in-game run had only 95.8 % of the timestamp labels right, probes.md); "none" without either. Sessions without the
+marker (a person's play) have timestamp labels only.
 
-    python -m ssbot.record.marker <episode> [--json] [--monitor]   (exit 1 unless PASS)
+The exact report (exact). The gate (LabelGate): the share of the judged captures that carry a marker label, judged =
+counted captures (labelled, whose label's next frame has a STATE, as in the monitor) around whose label the marker
+was drawn in every frame within max_offset: a judged capture without a decoded marker ("missing") falls back to its
+timestamp label and counts against the share. PASS >= threshold with >= min_captures judged, INCONCLUSIVE below or
+when the marker was off around > 10 % of the counted captures. The timestamp labels against the truth, per clock
+(ExactClock): D calibrated from the truth (align.agree_interval: the D most captures agree on, over the decoded
+frames), every capture's offset k = decoded frame - timestamp label, the share at offset 0 over decoded + missing (what
+an unmarked session's labels are worth), the offset histogram, the lag from end of frame to capture, and the arrival
+clock as a cross-check. Also: duplicates (consecutive captures that show the same frame), skips (frames between two
+consecutive captures that no capture shows) and frames never captured. score_monitor compares the correlation
+monitor (ssbot.record.align) with the truth capture by capture.
+
+    python -m ssbot.record.marker <episode> [--json] [--monitor] [--labels]   (exit 1 unless the gate PASSes)
 """
 import argparse
 import json
@@ -50,15 +65,18 @@ import numpy as np
 
 from ssbot.record import align
 from ssbot.record.recorder import RecordingReader
-from ssbot.record.video import VideoReader
+from ssbot.record.video import MARK_STATUS, VideoReader
+from ssbot.vision import mask as vmask
 
 ROWS, COLS = 2, 12
 DATA_BITS, CHECK_BITS = 16, 4
 MODULUS = 1 << DATA_BITS
-CORNERS = ("tl", "tr", "bl", "br")
+CORNERS = vmask.CORNERS
 MIN_CONTRAST = 64.0     # gray levels between the white and the black cells
 CLARITY = 0.25          # every cell at least this share of the contrast away from the middle
-SEARCH = 1.5            # thumbnail px searched around the expected position, both axes
+SEARCH = 1.5            # thumbnail px searched around the expected position, both axes (decode)
+SEARCH_PX = 3           # client px searched around the expected position, both axes (FullResDecoder; <= the mask's
+                        # margin, so every marker it finds lies inside the mask)
 THRESHOLD = align.THRESHOLD
 
 
@@ -101,6 +119,7 @@ def _structure() -> tuple[np.ndarray, np.ndarray, np.ndarray]:
 
 
 BLACK, WHITE, DATA = _structure()
+_MID = (int(BLACK.sum()) // 2 - 1, int(BLACK.sum()) // 2)   # the middle two of the 34 always-black cells
 
 
 @dataclass(frozen=True)
@@ -115,14 +134,12 @@ class Geometry:
         return (self.x0, self.y0, self.x0 + (COLS + 2) * self.cell, self.y0 + (ROWS + 2) * self.cell)
 
     @staticmethod
-    def place(screen: tuple[int, int], corner: str = "tr", cell: int | None = None) -> "Geometry":
-        """The oracle's placement (FrameMarker.cs): `cell` px from the two edges of `corner`; cell defaults to
-        max(4, round(screen height / 60))."""
+    def place(screen: tuple[int, int], corner: str = vmask.CORNER, cell: int | None = None) -> "Geometry":
+        """The oracle's placement (FrameMarker.cs, ssbot.vision.mask.marker_rect): `cell` px from the two edges of
+        `corner`; cell defaults to mask.cell_px(screen height)."""
         w, h = screen
-        c = cell or max(4, round(h / 60))
-        gw, gh = (COLS + 2) * c, (ROWS + 2) * c
-        x0 = c if corner[1] == "l" else w - c - gw
-        y0 = c if corner[0] == "t" else h - c - gh
+        c = cell or vmask.cell_px(h)
+        x0, y0, _, _ = vmask.marker_rect(w, h, corner, c)
         return Geometry(float(x0), float(y0), float(c))
 
     @staticmethod
@@ -155,7 +172,7 @@ class Decoded:
     value: int | None        # frame number modulo 65536; None unless status == "ok"
     status: str              # ok | absent | unclear | check
     contrast: float = 0.0
-    shift: tuple[float, float] = (0.0, 0.0)   # thumbnail px from the expected position
+    shift: tuple[float, float] = (0.0, 0.0)   # from the expected position: thumbnail px (decode), client px (full res)
 
 
 _SUB = np.array([0.3, 0.5, 0.7])
@@ -179,22 +196,36 @@ def _sample(img: np.ndarray, geom: Geometry, sx: float, sy: float, shifts: np.nd
 def _levels(cells: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Per shift: black level, white level, and the worst margin of the always-black / always-white cells
     (as a share of the contrast; > 0: every one on its side of the middle)."""
-    blk = np.median(cells[:, BLACK], axis=1)
-    wht = cells[:, WHITE].mean(axis=1)
+    b = cells[:, BLACK]
+    w = cells[:, WHITE]
+    # The median of the black cells (an even count: the mean of the middle two), by partition: np.median costs ~10x
+    # more, and this runs for every capture (FullResDecoder).
+    p = np.partition(b, _MID, axis=1)
+    blk = (p[:, _MID[0]] + p[:, _MID[1]]) / 2
+    wht = w.mean(axis=1)
     con = np.maximum(wht - blk, 1e-6)
     mid = (wht + blk) / 2
-    worst = np.minimum((mid[:, None] - cells[:, BLACK]).min(axis=1), (cells[:, WHITE] - mid[:, None]).min(axis=1))
+    worst = np.minimum(mid - b.max(axis=1), w.min(axis=1) - mid)
     return blk, wht, worst / con
 
 
-def decode(img: np.ndarray, geom: Geometry, scale: tuple[float, float], search: float = SEARCH) -> Decoded:
-    """Decode the marker from a gray thumbnail (or a full-size gray image: scale (1, 1)); scale = thumbnail px per
-    client px (FrameInfo w / src_w, h / src_h)."""
-    sx, sy = scale
-    steps = np.arange(-search, search + 1e-9, 0.5)
+def _shifts(search: float, step: float) -> np.ndarray:
+    """(n, 2) shifts (x, y) within +-search, nearest first (ties keep the nearer one in argmax)."""
+    steps = np.arange(-search, search + 1e-9, step)
     shifts = np.stack(np.meshgrid(steps, steps, indexing="ij"), -1).reshape(-1, 2)
-    shifts = shifts[np.argsort(np.hypot(shifts[:, 0], shifts[:, 1]), kind="stable")]   # ties: nearest first
-    cells = _sample(img, geom, sx, sy, shifts)
+    return shifts[np.argsort(np.hypot(shifts[:, 0], shifts[:, 1]), kind="stable")]
+
+
+_BITS = np.arange(DATA_BITS)
+_CBITS = np.arange(CHECK_BITS)
+# Flat (row-major) cell indices and bit weights for _judge_one.
+_BLACK_I, _WHITE_I, _DATA_I = (np.flatnonzero(m.ravel()) for m in (BLACK, WHITE, DATA))
+_W_DATA, _W_CHECK = 1 << _BITS, 1 << _CBITS
+
+
+def _judge(cells: np.ndarray, shifts: np.ndarray) -> Decoded:
+    """The pattern in (len(shifts), ROWS + 2, COLS + 2) cell means: the shift whose border and sync cells are
+    clearest, then its data cells."""
     blk, wht, worst = _levels(cells)
     b = int(np.argmax(worst))
     con = float(wht[b] - blk[b])
@@ -206,11 +237,98 @@ def decode(img: np.ndarray, geom: Geometry, scale: tuple[float, float], search: 
     if (np.abs(data - mid) < CLARITY * con).any():
         return Decoded(None, "unclear", con, sh)
     bj = (data > mid).astype(np.int64).reshape(-1)
-    value = int((bj[:DATA_BITS] << np.arange(DATA_BITS)).sum())
-    check = int((bj[DATA_BITS:] << np.arange(CHECK_BITS)).sum())
+    value = int((bj[:DATA_BITS] << _BITS).sum())
+    check = int((bj[DATA_BITS:] << _CBITS).sum())
     if check != crc4(value):
         return Decoded(None, "check", con, sh)
     return Decoded(value, "ok", con, sh)
+
+
+def _judge_one(cells: np.ndarray, shift: tuple[float, float]) -> Decoded:
+    """_judge for a single shift, from (ROWS + 2) * (COLS + 2) row-major cell means, in about a third of the numpy
+    calls: FullResDecoder's steady state runs it for every capture, on caches that the gray conversion has just
+    flushed. Same levels, checks and result as _judge (tests/test_marker.py compares them)."""
+    b = cells[_BLACK_I]
+    p = np.partition(b, _MID)
+    blk = (float(p[_MID[0]]) + float(p[_MID[1]])) / 2
+    w0, w1 = float(cells[_WHITE_I[0]]), float(cells[_WHITE_I[1]])
+    wht = (w0 + w1) / 2
+    con = wht - blk
+    mid = (wht + blk) / 2
+    sh = (float(shift[0]), float(shift[1]))
+    if con < MIN_CONTRAST or min(mid - float(b.max()), min(w0, w1) - mid) / max(con, 1e-6) < CLARITY:
+        return Decoded(None, "absent", con, sh)
+    data = cells[_DATA_I]                                  # j = (gc - 2) + (gr - 1) * (COLS - 2)
+    if float(np.abs(data - mid).min()) < CLARITY * con:
+        return Decoded(None, "unclear", con, sh)
+    bits = data > mid
+    value = int(_W_DATA @ bits[:DATA_BITS])
+    if int(_W_CHECK @ bits[DATA_BITS:]) != crc4(value):
+        return Decoded(None, "check", con, sh)
+    return Decoded(value, "ok", con, sh)
+
+
+def decode(img: np.ndarray, geom: Geometry, scale: tuple[float, float], search: float = SEARCH) -> Decoded:
+    """Decode the marker from a gray thumbnail (or a full-size gray image: scale (1, 1)); scale = thumbnail px per
+    client px (FrameInfo w / src_w, h / src_h). For recordings whose thumbnails hold the marker (made before it was
+    read in the capture path, with cells of ~3 thumbnail px); FullResDecoder is the capture path's."""
+    sx, sy = scale
+    shifts = _shifts(search, 0.5)
+    return _judge(_sample(img, geom, sx, sy, shifts), shifts)
+
+
+class FullResDecoder:
+    """Reads the marker from full-resolution gray client images in the capture path (ssbot.record.video), where the
+    vision mask expects it: corner mask.CORNER, cells of mask.cell_px(height), mask.marker_rect. A cell is the mean of
+    its centre pixels (a third of the cell trimmed from each side: the middle px of 3, 2 x 2 of 4, 4 x 4 of 8); the
+    exact pixels WGC delivers need no interpolation. The shift that decoded last is tried alone first (one gather of
+    56 cells: the steady state); when that fails, every integer shift within +-search px, nearest first. A region with
+    less than MIN_CONTRAST between its darkest and brightest pixel (a black screen, a fade) is "absent" without the
+    search. Levels and checks as decode(). One instance per capture thread."""
+
+    def __init__(self, corner: str = vmask.CORNER, search: int = SEARCH_PX):
+        self.corner = corner
+        self.search = search
+        self.shift = (0, 0)
+        self._geo: dict[tuple[int, int], tuple] = {}
+
+    def _prepare(self, w: int, h: int) -> tuple:
+        c = vmask.cell_px(h)
+        x0, y0, x1, y1 = vmask.marker_rect(w, h, self.corner, c)
+        inner = np.arange(c // 3, c - c // 3)
+        shifts = _shifts(self.search, 1.0).astype(np.int64)
+        ys = y0 + np.arange(ROWS + 2)[:, None] * c + inner                      # (ROWS + 2, k)
+        xs = x0 + np.arange(COLS + 2)[:, None] * c + inner                      # (COLS + 2, k)
+        Y = np.clip(ys[None] + shifts[:, 1, None, None], 0, h - 1)             # (S, ROWS + 2, k)
+        X = np.clip(xs[None] + shifts[:, 0, None, None], 0, w - 1)             # (S, COLS + 2, k)
+        Y = Y[:, :, None, :, None]                                             # (S, ROWS + 2, 1, k, 1)
+        X = X[:, None, :, None, :]                                             # (S, 1, COLS + 2, 1, k)
+        full = (len(shifts), ROWS + 2, COLS + 2, len(inner), len(inner))
+        Y1, X1 = (np.broadcast_to(a, full).reshape(len(shifts), -1, len(inner) ** 2) for a in (Y, X))  # (S, cells, k*k)
+        s = self.search
+        region = (slice(max(0, y0 - s), min(h, y1 + s)), slice(max(0, x0 - s), min(w, x1 + s)))
+        at = {(int(dx), int(dy)): i for i, (dx, dy) in enumerate(shifts)}
+        return shifts, Y, X, Y1.copy(), X1.copy(), region, at
+
+    def decode(self, gray: np.ndarray) -> Decoded:
+        """The marker in a gray client image (h, w) uint8."""
+        h, w = gray.shape
+        g = self._geo.get((w, h))
+        if g is None:
+            g = self._geo[(w, h)] = self._prepare(w, h)
+        shifts, Y, X, Y1, X1, region, at = g
+        i = at.get(self.shift, 0)
+        d = _judge_one(gray[Y1[i], X1[i]].mean(axis=1), shifts[i])
+        if d.status == "ok":
+            return d
+        r = gray[region]
+        lo, hi = int(r.min()), int(r.max())
+        if hi - lo < MIN_CONTRAST:
+            return Decoded(None, "absent", float(hi - lo))
+        d = _judge(gray[Y, X].mean(axis=(-1, -2)), shifts)
+        if d.status == "ok":
+            self.shift = (int(d.shift[0]), int(d.shift[1]))
+        return d
 
 
 def unwrap(value: int, ref: int) -> int:
@@ -220,7 +338,7 @@ def unwrap(value: int, ref: int) -> int:
 
 # ---- the episode's truth -------------------------------------------------------------------------------------------
 
-DECODE_STATUS = ("ok", "absent", "unclear", "check", "no_geometry")
+DECODE_STATUS = MARK_STATUS     # ok, absent, unclear, check, no_geometry, off (not read in the capture path)
 
 
 @dataclass
@@ -235,6 +353,7 @@ class Truth:
     f: np.ndarray            # (R,) STATE frames, ascending
     t_eof: np.ndarray        # (R,) ns
     drawn: np.ndarray        # (R,) the marker was drawn in that frame (STATE mk.drawn)
+    in_capture: bool = False   # value / status read in the capture path (the video index), not from thumbnails
 
 
 def _state_rows(path: Path) -> tuple[np.ndarray, np.ndarray, np.ndarray, list]:
@@ -255,13 +374,18 @@ def _state_rows(path: Path) -> tuple[np.ndarray, np.ndarray, np.ndarray, list]:
 
 
 def read_truth(path: str | Path, lag_ns: int = 30_000_000) -> Truth:
-    """Decode every capture of an episode. The geometry comes from the STATE row that ended lag_ns before the
-    capture (any frame near it: the marker only moves when the window is resized), or the nearest row with one."""
+    """The decoded marker of every capture of an episode: from the video index where the capture path read it
+    (VideoReader.marked), else decoded from the thumbnails (older recordings), with the geometry of the STATE row
+    that ended lag_ns before the capture (any frame near it: the marker only moves when the window is resized), or
+    the nearest row with one."""
     path = Path(path)
     vr = VideoReader(path)
     if not vr.exists():
         raise FileNotFoundError(f"no video in {path}")
     f, t_eof, drawn, geoms = _state_rows(path)
+    if vr.marked:
+        tm = vr.times()
+        return Truth(tm["seq"], tm["t"], tm["ts"], tm["mk"], tm["mks"], f, t_eof, drawn, in_capture=True)
     have = np.flatnonzero([g is not None for g in geoms])
     # Per STATE row, the nearest row with a geometry (before or after).
     nearest = have[np.clip(np.searchsorted(have, np.arange(len(f))), 0, len(have) - 1)] if len(have) else None
@@ -313,6 +437,22 @@ class ExactClock:
 
 
 @dataclass
+class LabelGate:
+    """The M1 alignment gate with the marker in training (DESIGN §3.1.4): of the judged captures (counted, the marker
+    drawn in every frame within max_offset of the label), the share whose label is their decoded marker (exact). The
+    others ("missing") fall back to their timestamp label, flagged, and count against the share."""
+    judged: int = 0
+    marker: int = 0                          # judged with a decoded marker: exact labels
+    missing: int = 0                         # judged without one: timestamp labels
+    missing_by: dict = field(default_factory=dict)    # decode status of the missing
+    marker_off: int = 0                      # counted, no marker around the label: timestamp labels, not judged
+    share: float | None = None
+    ok: bool = False
+    verdict: str = "FAIL"
+    reason: str = ""
+
+
+@dataclass
 class ExactReport:
     path: str = ""
     captures: int = 0
@@ -320,6 +460,8 @@ class ExactReport:
     states: int = 0
     marker_frames: int = 0                  # STATE frames with the marker drawn
     decode: dict = field(default_factory=dict)          # decode status -> captures
+    decoded_in_capture: bool = False        # read in the capture path (video index), else from the thumbnails
+    labels: dict = field(default_factory=dict)          # Labels.summary(): label source -> captures, marker share
     shown_steps: dict = field(default_factory=dict)     # decoded frame(i) - decoded frame(i - 1) -> count
     duplicates: int = 0                     # consecutive captures showing the same frame
     skips: int = 0                          # frames between consecutive captures that neither shows
@@ -327,31 +469,42 @@ class ExactReport:
     never_captured: int = 0                 # frames in the decoded range that no capture shows (STATE frames only)
     threshold: float = THRESHOLD
     min_captures: int = 0
-    primary: ExactClock | None = None
+    gate: LabelGate | None = None
+    primary: ExactClock | None = None       # the timestamp labels against the truth, on the gate clock
     alt: ExactClock | None = None
     monitor: dict | None = None             # score_monitor
     notes: list = field(default_factory=list)
 
     @property
     def ok(self) -> bool:
-        return self.primary is not None and self.primary.ok
+        return self.gate is not None and self.gate.ok
 
     def as_dict(self) -> dict:
         d = asdict(self)
         d["ok"] = self.ok
+        d["verdict"] = self.gate.verdict if self.gate else "FAIL"
         d["verdicts"] = {c.clock: c.verdict for c in (self.primary, self.alt) if c is not None}
         return d
 
     def format(self) -> str:
         pct = (lambda x: f"{x * 100:.3f} %" if x is not None else "n/a")
+        lb = self.labels
         lines = [f"captures {self.captures} ({self.seq_gaps} dropped by the video recorder), STATE {self.states}, "
-                 f"marker drawn in {self.marker_frames} frames; decode {self.decode}",
+                 f"marker drawn in {self.marker_frames} frames; decode {self.decode} "
+                 f"({'in the capture path' if self.decoded_in_capture else 'from the thumbnails'})",
+                 f"labels: marker {lb.get('marker')}, timestamp {lb.get('timestamp')}, none {lb.get('none')} "
+                 f"(marker share {pct(lb.get('marker_share'))})",
                  f"shown frame steps between consecutive captures {self.shown_steps}: duplicates {self.duplicates}, "
                  f"skipped frames {self.skips}, backwards {self.backwards}; frames never captured {self.never_captured}"]
+        g = self.gate
+        if g is not None:
+            lines.append(f"[gate] judged {g.judged}: marker labels {g.marker} + missing {g.missing} {g.missing_by} = "
+                         f"{pct(g.share)} -> {g.verdict}{' (' + g.reason + ')' if g.reason else ''}; marker off "
+                         f"around {g.marker_off} counted captures (timestamp labels, not judged)")
         for c in (self.primary, self.alt):
             if c is None:
                 continue
-            tag = "gate" if c is self.primary else "cross-check"
+            tag = "timestamp labels" if c is self.primary else "timestamp labels, cross-check"
             lines.append(f"[{c.clock} clock, {tag}] D {c.D_ms and round(c.D_ms, 3)} ms, interval {c.D_interval_ms} "
                          f"agreed by {c.D_agree}; lag {c.lag_ms}")
             lines.append(f"  counted {c.counted}: decoded {c.decoded} + missing {c.missing} {c.missing_by}; offset 0 "
@@ -370,10 +523,11 @@ class ExactReport:
                          f"not seen {m['off_unseen']}; unjudged by truth {m['unjudged']}; left out by truth "
                          f"{m['excluded']}")
         lines.extend(f"note: {n}" for n in self.notes)
-        pr = self.primary
-        lines.append(f"{'PASS' if self.ok else pr.verdict if pr else 'FAIL'}: {pct(pr.share if pr else None)} of the "
-                     f"counted captures show their label's frame on the {pr.clock if pr else '?'} clock (threshold "
-                     f"{self.threshold * 100:.1f} %; >= {self.min_captures} counted)")
+        pr, g = self.primary, self.gate
+        lines.append(f"{g.verdict if g else 'FAIL'}: {pct(g.share if g else None)} of the judged captures carry their "
+                     f"marker label (threshold {self.threshold * 100:.1f} %; >= {self.min_captures} judged); "
+                     f"timestamp labels alone: {pct(pr.share if pr else None)} at offset 0 on the "
+                     f"{pr.clock if pr else '?'} clock ({pr.verdict if pr else 'n/a'})")
         return "\n".join(lines)
 
 
@@ -399,10 +553,42 @@ def truth_frames(tr: Truth, t_cap: np.ndarray, lag_ns: int = 30_000_000) -> np.n
     return out
 
 
+def _rows(tr: Truth, g: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """(dense frame -> STATE row lookup over f[0] .. f[-1], the STATE row of each capture's shown frame g or -1)."""
+    row_of = np.full(int(tr.f[-1] - tr.f[0]) + 1, -1, np.int64)
+    row_of[tr.f - tr.f[0]] = np.arange(len(tr.f))
+    inside = (g >= tr.f[0]) & (g <= tr.f[-1])
+    return row_of, np.where(inside, row_of[np.clip(g - tr.f[0], 0, len(row_of) - 1)], -1)
+
+
+def _calibrate(tr: Truth, t_cap: np.ndarray, grow: np.ndarray) -> align.Sweep:
+    """D of the timestamp labels from the truth: the interval most decoded captures agree on."""
+    sel = np.flatnonzero(grow >= 0)
+    return align.agree_interval(t_cap[sel], grow[sel], tr.t_eof)
+
+
+def _verdict(judged: int, good: int, counted: int, marker_off: int, threshold: float, min_captures: int
+             ) -> tuple[str, bool, str]:
+    """(verdict, ok, reason) of good / judged; the reason of a plain FAIL is the caller's."""
+    # The sample is what the share is computed over (judged), not every labelled capture: captures whose marker was
+    # never drawn around their label are left out of the share, so they cannot count towards its size.
+    if judged < min_captures:
+        return "INCONCLUSIVE", False, (f"only {judged} captures judged against the marker (< {min_captures}; "
+                                       f"{marker_off} without a marker)")
+    if marker_off > 0.10 * counted:
+        return "INCONCLUSIVE", False, (f"the marker was off around {marker_off} of {counted} captures (> 10 %): it "
+                                       f"went off during the run, so the gate did not see the whole recording")
+    if judged and good / judged >= threshold:
+        note = (f"note: the marker was off around {marker_off} of {counted} captures; those are not judged"
+                if marker_off > 0.01 * counted else "")
+        return "PASS", True, note
+    return "FAIL", False, ""
+
+
 def exact_clock(tr: Truth, clock: str, *, D: int | None = None, max_offset: int = align.Params.max_offset,
                 threshold: float = THRESHOLD, min_captures: int = 1000) -> tuple[ExactClock, dict]:
-    """The exact report of one capture clock. Returns (result, per-capture arrays: label row, k, counted, missing,
-    frame shown)."""
+    """The timestamp labels of one capture clock against the truth. Returns (result, per-capture arrays: label row,
+    k, counted, missing, frame shown)."""
     res = ExactClock(clock)
     t_cap = tr.t_arrival if clock == "arrival" else tr.t_frame
     N, R = len(t_cap), len(tr.f)
@@ -413,13 +599,9 @@ def exact_clock(tr: Truth, clock: str, *, D: int | None = None, max_offset: int 
         return res, arrays
     g = truth_frames(tr, t_cap)
     arrays["shown"] = g
-    row_of = np.full(int(tr.f[-1] - tr.f[0]) + 1, -1, np.int64)
-    row_of[tr.f - tr.f[0]] = np.arange(R)
-    inside = (g >= tr.f[0]) & (g <= tr.f[-1])
-    grow = np.where(inside, row_of[np.clip(g - tr.f[0], 0, len(row_of) - 1)], -1)
+    row_of, grow = _rows(tr, g)
     if D is None:
-        sel = np.flatnonzero(grow >= 0)
-        sw = align.agree_interval(t_cap[sel], grow[sel], tr.t_eof)
+        sw = _calibrate(tr, t_cap, grow)
         if sw.D is None:
             res.reason = "no decoded marker to calibrate on"
             return res, arrays
@@ -472,34 +654,83 @@ def exact_clock(tr: Truth, clock: str, *, D: int | None = None, max_offset: int 
     res.first_nonzero = [[int(i), int(tr.seq[i]), int(tr.f[Lc[i]]), int(k[i])] for i in bad[:10]]
     judged = res.decoded + res.missing
     res.share = res.zero / judged if judged else None
-    marker_off = res.excluded["marker_off"]
-    # The sample is what the share is computed over (decoded + missing), not every labelled capture: captures whose
-    # marker was never drawn around their label are left out of the share, so they cannot count towards its size.
-    if judged < min_captures:
-        res.verdict = "INCONCLUSIVE"
-        res.reason = f"only {judged} captures judged against the marker (< {min_captures}; {marker_off} without a marker)"
-    elif marker_off > 0.10 * res.counted:
-        res.verdict = "INCONCLUSIVE"
-        res.reason = (f"the marker was off around {marker_off} of {res.counted} captures (> 10 %): it went off during the "
-                      f"run, so the gate did not see the whole recording")
-    elif res.share is not None and res.share >= threshold:
-        res.verdict, res.ok = "PASS", True
-        if marker_off > 0.01 * res.counted:
-            res.reason = f"note: the marker was off around {marker_off} of {res.counted} captures; those are not judged"
-    else:
+    res.verdict, res.ok, res.reason = _verdict(judged, res.zero, res.counted, res.excluded["marker_off"], threshold,
+                                               min_captures)
+    if res.verdict == "FAIL":
         res.reason = f"{res.decoded - res.zero} decoded captures off their label, {res.missing} missing markers"
     return res, arrays
 
 
+def label_gate(c: ExactClock, threshold: float = THRESHOLD, min_captures: int = 1000) -> LabelGate:
+    """The gate from the counts of the gate clock's exact report (its counted, decoded and missing captures)."""
+    g = LabelGate(judged=c.decoded + c.missing, marker=c.decoded, missing=c.missing, missing_by=dict(c.missing_by),
+                  marker_off=c.excluded.get("marker_off", 0))
+    if c.D_ms is None:  # nothing decoded to calibrate the timestamp labels on, or no captures / STATE at all
+        g.reason = c.reason
+        return g
+    g.share = g.marker / g.judged if g.judged else None
+    g.verdict, g.ok, g.reason = _verdict(g.judged, g.marker, c.counted, g.marker_off, threshold, min_captures)
+    if g.verdict == "FAIL":
+        g.reason = f"{g.missing} judged captures without a decoded marker fall back to their timestamp label"
+    return g
+
+
+# ---- labels --------------------------------------------------------------------------------------------------------
+
+LABEL_SOURCES = ("marker", "timestamp", "none")
+MARKER_LABEL, TIMESTAMP_LABEL, NO_LABEL = range(3)
+
+
+@dataclass
+class Labels:
+    """Per capture (video order): the STATE frame it shows, by its label, and where the label comes from."""
+    seq: np.ndarray          # (N,) capture callback counter
+    frame: np.ndarray        # (N,) label frame, -1 without one
+    source: np.ndarray       # (N,) index into LABEL_SOURCES
+    clock: str               # the timestamp labels' clock
+    D_ms: float | None       # their capture offset
+
+    def summary(self) -> dict:
+        n = len(self.frame)
+        c = {s: int((self.source == i).sum()) for i, s in enumerate(LABEL_SOURCES)}
+        return {"captures": n, **c, "marker_share": c["marker"] / n if n else None, "clock": self.clock,
+                "D_ms": None if self.D_ms is None else round(self.D_ms, 3)}
+
+
+def capture_labels(tr: Truth, clock: str = align.GATE_CLOCK, D_ms: float | None = None) -> Labels:
+    """The label of every capture: its decoded marker where it has one (exact), else its timestamp label
+    (align.match on `clock` with D_ms, or with D calibrated on the decoded captures), flagged as such; none when
+    neither exists (no decoded capture to calibrate on and no D_ms, or a capture before the first STATE)."""
+    t_cap = tr.t_arrival if clock == "arrival" else tr.t_frame
+    N = len(t_cap)
+    frame, source = np.full(N, -1, np.int64), np.full(N, NO_LABEL, np.int64)
+    if N == 0 or len(tr.f) == 0:
+        return Labels(tr.seq, frame, source, clock, D_ms)
+    g = truth_frames(tr, t_cap)
+    D = None if D_ms is None else int(round(D_ms * 1e6))
+    if D is None and (g >= 0).any():
+        D = _calibrate(tr, t_cap, _rows(tr, g)[1]).D
+    if D is not None:
+        L = align.match(t_cap, tr.t_eof, D)
+        ts = L >= 0
+        frame[ts], source[ts] = tr.f[L[ts]], TIMESTAMP_LABEL
+    ok = g >= 0
+    frame[ok], source[ok] = g[ok], MARKER_LABEL
+    return Labels(tr.seq, frame, source, clock, None if D is None else D / 1e6)
+
+
 def exact(tr: Truth, clock: str = align.GATE_CLOCK, *, D_ms: float | None = None,
           threshold: float = THRESHOLD, min_captures: int = 1000) -> tuple[ExactReport, dict]:
-    """The exact report: the gate clock and, when D is calibrated, the other clock as a cross-check."""
+    """The exact report: the label gate, the per-capture label sources, the timestamp labels on the gate clock and,
+    when D is calibrated, on the other clock as a cross-check."""
     rep = ExactReport(captures=len(tr.seq), states=len(tr.f), marker_frames=int(tr.drawn.sum()),
-                      threshold=threshold, min_captures=min_captures)
+                      threshold=threshold, min_captures=min_captures, decoded_in_capture=tr.in_capture)
     rep.seq_gaps = int(np.clip(np.diff(tr.seq) - 1, 0, None).sum()) if len(tr.seq) > 1 else 0
     rep.decode = {DECODE_STATUS[s]: n for s, n in _hist(tr.status).items()}
     D = None if D_ms is None else int(round(D_ms * 1e6))
     rep.primary, arrays = exact_clock(tr, clock, D=D, threshold=threshold, min_captures=min_captures)
+    rep.gate = label_gate(rep.primary, threshold, min_captures)
+    rep.labels = capture_labels(tr, clock, rep.primary.D_ms).summary()
     other = "arrival" if clock == "frame" else "frame"
     if D is None and not (other == "frame" and (tr.t_frame == 0).any()):
         rep.alt, _ = exact_clock(tr, other, threshold=threshold, min_captures=min_captures)
@@ -573,6 +804,39 @@ def monitor_against_truth(path: str | Path, rep: ExactReport, arrays: dict, p: a
     return mrep, off, mot, trk
 
 
+# ---- turning it on -------------------------------------------------------------------------------------------------
+
+def marker_on(link, timeout_s: float = 5.0) -> dict:
+    """Turn the frame marker on for a training session (RPC frame.marker in mask.CORNER) and wait until a STATE says
+    it was drawn. It must be the marker the mask covers and the capture path decodes (mask.marker_rect of the client,
+    STATE cam.screen): the oracle draws its default cell, which an older SsOracle sets larger (screen height / 60),
+    so a STATE with another rect gets the cell sent explicitly, which it then keeps until the marker goes off (it does
+    not follow a resize). Returns the RPC reply, with "resent" when the cell had to be sent. Raises OracleError when
+    the oracle refuses (profile without probe tools, -ssbot-human), TimeoutError when no STATE shows the marker."""
+    def drawn(s: dict) -> bool:
+        return (s.get("mk") or {}).get("drawn") is True
+
+    def rect(s: dict) -> list[float]:
+        return [float(v) for v in (s["mk"].get("rect") or ())]
+
+    res = link.rpc("frame.marker", on=True, corner=vmask.CORNER)
+    s = link.wait_state(drawn, timeout_s=timeout_s)
+    screen = (s.get("cam") or {}).get("screen")
+    if screen and screen[0] and screen[1]:
+        w, h = int(screen[0]), int(screen[1])
+        want = [float(v) for v in vmask.marker_rect(w, h)]
+        if rect(s) != want:
+            res = dict(link.rpc("frame.marker", on=True, corner=vmask.CORNER, size=vmask.cell_px(h)) or {})
+            res["resent"] = True
+            link.wait_state(lambda s: drawn(s) and rect(s) == want, timeout_s=timeout_s)
+    return res
+
+
+def marker_off(link) -> dict:
+    """RPC frame.marker off (the oracle also turns it off by itself when the link closes)."""
+    return link.rpc("frame.marker", on=False)
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="python -m ssbot.record.marker", description=__doc__.split("\n")[0])
     ap.add_argument("path", help="episode folder with state.* and video.* recorded with the frame marker on")
@@ -582,14 +846,21 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--min-captures", type=int, default=1000)
     ap.add_argument("--monitor", action="store_true", help="also run the correlation monitor and score it")
     ap.add_argument("--json", action="store_true", help="also write marker.json into the episode folder")
+    ap.add_argument("--labels", action="store_true",
+                    help="also write labels.npz (per capture: seq, label frame, label source) into the episode folder")
     a = ap.parse_args(argv)
-    rep, arrays, _ = exact_episode(a.path, a.clock, D_ms=a.D_ms, threshold=a.threshold, min_captures=a.min_captures)
+    rep, arrays, tr = exact_episode(a.path, a.clock, D_ms=a.D_ms, threshold=a.threshold, min_captures=a.min_captures)
     if a.monitor:
         mrep, *_ = monitor_against_truth(a.path, rep, arrays, clock=a.clock)
         print(mrep.format() + "\n")
     print(rep.format())
     if a.json:
         (Path(a.path) / "marker.json").write_text(json.dumps(rep.as_dict(), indent=1), encoding="utf-8")
+    if a.labels:
+        lb = capture_labels(tr, a.clock, rep.primary.D_ms)
+        np.savez_compressed(Path(a.path) / "labels.npz", seq=lb.seq, frame=lb.frame, source=lb.source,
+                            sources=np.asarray(LABEL_SOURCES), clock=lb.clock, D_ms=np.nan if lb.D_ms is None
+                            else lb.D_ms)
     return 0 if rep.ok else 1
 
 

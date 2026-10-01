@@ -137,7 +137,7 @@ class StateTracker:
     """Frame-continuity bookkeeping shared by the recorder, index rebuild and the deep check: per chunk the frame
     range, the gaps in "f" (pairs [a, b] meaning frames a+1 .. b-1 never arrived; also across chunk borders),
     non-increasing frames, the oracle's cumulative "drop" counter at both ends, and the STATEs with the frame marker
-    on ("mk": validation-only frames, never training data; ssbot.record.marker)."""
+    on ("mk": their images are training data only through the vision mask; ssbot.record.marker)."""
 
     def __init__(self) -> None:
         self.last_f: int | None = None
@@ -476,7 +476,8 @@ class ContinuityReport:
     index_consistent: bool | None = None
     cost_us: dict | None = None          # oracle STATE build cost (C14: p50 <= 300, p99 <= 1000)
     latency_ms: dict | None = None       # oracle end-of-frame -> brain reader thread
-    marked: int = 0                      # STATEs with the frame marker on: a validation recording, never training data
+    marked: int = 0                      # STATEs with the frame marker on (training data only through the mask)
+    labels: dict | None = None           # the video's label sources (VideoReader.labels); None without a video
 
     @property
     def ok(self) -> bool:
@@ -502,7 +503,14 @@ class ContinuityReport:
             fps = f", {self.fps:.2f} frames/s" if self.fps else ""
             lines.append(f"duration {self.duration_s:.1f} s{fps}")
         if self.marked:
-            lines.append(f"frame marker on in {self.marked} STATE frames: validation only, never training data")
+            lines.append(f"frame marker on in {self.marked} STATE frames: their images are training data only with the "
+                         f"vision mask applied (ssbot.vision.mask)")
+        if self.labels:
+            lb = self.labels
+            share = f"{lb['share'] * 100:.3f} %" if lb["share"] is not None else "n/a"
+            lines.append(f"video {lb['captures']} captures: marker labels {lb['marker']} ({share}), timestamp labels "
+                         f"{lb['timestamp']}{'' if lb['decoded_in_capture'] else ' (marker not read in the capture path)'};"
+                         f" decode {lb['decode']}")
         if self.gaps:
             shown = ", ".join(f"{a + 1}..{b - 1}" for a, b in self.gaps[:10])
             lines.append(f"first gaps: {shown}{' ...' if len(self.gaps) > 10 else ''}")
@@ -679,11 +687,18 @@ class RecordingReader:
         d = self.meta.get("drops") or {}
         return int((d.get("queue") or {}).get("state", 0)) + int(d.get("disk", 0)) + int(d.get("failed", 0))
 
+    def video_labels(self) -> dict | None:
+        """Label sources of the episode's video (ssbot.record.video: marker labels read in the capture path, the rest
+        timestamp labels), from its index alone; None without a video."""
+        from ssbot.record.video import VideoReader
+        return VideoReader(self.path).labels()
+
     def check(self, deep: bool = False, threshold: float = DELIVERY_THRESHOLD) -> ContinuityReport:
         """Frame continuity from the index (cheap), or with deep=True from the data itself, which also verifies
         every chunk decompresses, cross-checks the index, and adds build-cost and latency percentiles."""
         entries = self._index["state"]
         r = ContinuityReport(threshold=threshold, recorder_drops=self._recorder_drops(), deep=deep)
+        r.labels = self.video_labels()
         if deep:
             tracker = StateTracker()
             fresh, costs, lat = [], [], []

@@ -1,10 +1,11 @@
 """Camera-trajectory alignment MONITOR of a recorded episode (DESIGN §3.1.4 C4).
 
-The monitor is not the M1 alignment gate. The gate (>= 99.5 % of the captures at offset 0) is measured against ground
-truth in a validation-only session: the oracle draws a frame marker into every image (RPC "frame.marker", STATE
-"mk"), ssbot.record.marker decodes it and compares it with the timestamp labels, and such recordings are never
-training data. The monitor runs on every session, without a marker, and checks the timestamp labels against the
-camera motion wherever the camera motion can tell. What it can and cannot see:
+The monitor is not the M1 alignment gate. Training sessions carry the oracle's frame marker (RPC "frame.marker", STATE
+"mk"), which the capture path reads and masks (ssbot.record.video, ssbot.vision.mask): a capture whose marker decoded
+is labelled exactly, and the gate is the share of such captures (ssbot.record.marker). The monitor checks timestamp
+labels against the camera motion wherever the camera motion can tell: those of sessions without the marker (a
+person's play) and of the captures whose marker did not decode; it flags a session, never discards it. AlignReport
+.labels says how many captures carry which label. What it can and cannot see:
 
 - A constant offset is invisible while the camera stands still or moves at constant speed. A capture is judged only by
   its own window (the +-W captures around it, in its own track segment), and only when the camera changes speed in
@@ -38,8 +39,9 @@ for each clock, and the arrival clock's result is reported as a cross-check.
    the peak refined by an upsampled DFT, see PhaseCorrelator), scaled to client pixels. An increment with a weak peak
    or from a flat image (fades, black screens) is not trusted. Content that does not move with the world is masked
    out (ScreenFixed): Hornet, whom the camera keeps near the image centre (hero box widened by hero_margin and
-   projected with the frame's V/P), the HUD (STATE hud rects), the frame marker (STATE mk rect), letterbox bars, and
-   textured pixels that keep their value while the image moves (static_pixels). Unmasked, a figure at the centre
+   projected with the frame's V/P), the HUD (STATE hud rects), the frame marker (STATE mk rect), the vision mask's
+   corner where the capture path filled it (video.json "mask"), letterbox bars, and textured pixels that keep their
+   value while the image moves (static_pixels). Unmasked, a figure at the centre
    pulls every step towards 0 by a share that falls with the speed (0.76 of the step at ~1 thumbnail px per frame,
    0.97 at ~3.5), which no single parallax scale absorbs. A masked step is registered twice: the mask's own edges
    still pull by ~1 %, so the later image is moved back by the first estimate and registered again, with both places
@@ -112,6 +114,7 @@ import numpy as np
 
 from ssbot.record.recorder import RecordingReader
 from ssbot.record.video import FrameInfo, VideoReader
+from ssbot.vision import mask as vmask
 
 THRESHOLD = 0.995
 
@@ -126,8 +129,8 @@ THRESHOLD = 0.995
 OK, NO_LABEL, STATE_GAP, NO_WINDOW, LOW_MOTION, SPLIT, UNINFORMATIVE, CUT, MIXED = range(9)
 STATUS = ("ok", "no_label", "state_gap", "no_window", "low_motion", "split", "uninformative", "cut", "mixed")
 UNJUDGED = (NO_WINDOW, SPLIT, CUT, MIXED)
-GATE_CLOCK = "frame"  # DESIGN §3.1.4: WGC SystemRelativeTime with a calibrated offset, for the gate (ssbot.record.marker)
-                      # and the monitor alike; "arrival" is the cross-check
+GATE_CLOCK = "frame"  # DESIGN §3.1.4: WGC SystemRelativeTime with a calibrated offset, for timestamp labels (the
+                      # fallback of ssbot.record.marker) and the monitor alike; "arrival" is the cross-check
 
 
 @dataclass
@@ -550,14 +553,17 @@ class ScreenFixed:
     could show holds: every frame with t0 - before <= t_eof <= t1 + after, i.e. D anywhere in the scan range and then
     +-K frames. Everything masked is widened by mask_margin * image height plus the feathering and set to 0 in a
     weight of 1, which is then blurred (sigma FEATHER thumbnail px), so that the edges of the mask stay nearly as
-    smooth as the Hann window's."""
+    smooth as the Hann window's. `always`: rects masked in every step (shares of the client), the vision mask's
+    corner where the capture path filled it (the fill's edge is screen-fixed, and flat, so static_pixels skips it)."""
 
     FEATHER = 1.0
 
-    def __init__(self, trk: OracleTrack, p: Params = Params(), static: dict | None = None):
+    def __init__(self, trk: OracleTrack, p: Params = Params(), static: dict | None = None,
+                 always: list | None = None):
         self.t = trk.t_eof
         self.rows = trk.fixed[:, 0].astype(np.int64)
         self.norm = trk.fixed[:, 2:6]
+        self.always = np.asarray(always or [], np.float64).reshape(-1, 4)
         period = int(np.median(np.diff(trk.t_eof))) if len(trk.t_eof) > 1 else 16_666_667
         self.before = int(round(p.scan_ms[1] * 1e6)) + (p.max_offset + 1) * period
         self.after = int(round(-p.scan_ms[0] * 1e6)) + p.max_offset * period
@@ -573,7 +579,7 @@ class ScreenFixed:
         """(n, 4) shares of the screen masked for a step between captures at t0 <= t1 (ns)."""
         r0, r1 = np.searchsorted(self.t, [t0 - self.before, t1 + self.after + 1])
         a, b = np.searchsorted(self.rows, [r0, r1])
-        return self.norm[a:b]
+        return np.r_[self.norm[a:b], self.always] if len(self.always) else self.norm[a:b]
 
     def boxes(self, t0: int, t1: int, shape: tuple[int, ...]) -> np.ndarray:
         """(n, 4) thumbnail px [x0, y0, x1, y1) of that step, widened, clipped to the image and deduplicated."""
@@ -1140,6 +1146,7 @@ class AlignReport:
     scale_by_speed: dict | None = None        # registration scale per camera speed (thumbnail px/capture): parallax
     noise_px: dict | None = None
     resid_px: dict | None = None
+    labels: dict | None = None                # the video's label sources (VideoReader.labels): marker / timestamp
     threshold: float = THRESHOLD
     min_informative: int = 0
     min_coverage: float = 0.0
@@ -1184,6 +1191,11 @@ class AlignReport:
             if c.first_nonzero:
                 lines.append(f"  first non-zero (capture, seq, frame, k): {c.first_nonzero}")
         lines.append(f"noise: window sigma {self.noise_px}; per-capture residual {self.resid_px} (client px)")
+        if self.labels:
+            lb = self.labels
+            lines.append(f"labels: {lb['marker']} of {lb['captures']} captures carry a marker label "
+                         f"({pct(lb['share'])}, exact); the monitor's verdict concerns the {lb['timestamp']} timestamp "
+                         f"labels")
         lines.extend(f"note: {n}" for n in self.notes)
         lines.append(f"{'PASS' if self.ok else pr.verdict if pr else 'FAIL'} (monitor): "
                      f"{pct(pr.share if pr else None)} of the judgeable captures judged at offset 0 on the "
@@ -1372,10 +1384,21 @@ def load(path: str | Path, p: Params = Params(), progress: Callable[[int], None]
     fixed = None
     if p.mask:
         static = static_pixels(vr.frames())
-        if len(trk.fixed) or static:
-            fixed = ScreenFixed(trk, p, static)
+        always = _vision_mask(vr)
+        if len(trk.fixed) or static or always:
+            fixed = ScreenFixed(trk, p, static, always)
     mot = register(vr.frames(), p, progress, fixed)
     return mot, trk
+
+
+def _vision_mask(vr: VideoReader) -> list[list[float]]:
+    """The vision mask's rect as shares of the client, per client size, where the capture path filled it."""
+    if not vr.meta.get("mask"):
+        return []
+    sizes = {tuple(r[0]) for r in vr.meta["mask"].get("rects") or ()}
+    if not sizes:  # a recording that was not closed: the first capture's client size
+        sizes = {(info.src_w, info.src_h) for info, _ in zip(vr.frames(), range(1))}
+    return [[x0 / w, y0 / h, x1 / w, y1 / h] for w, h in sizes for x0, y0, x1, y1 in [vmask.mask_rect(w, h)]]
 
 
 def align_episode(path: str | Path, p: Params = Params(), clock: str = GATE_CLOCK, D_ms: float | None = None,
@@ -1384,6 +1407,7 @@ def align_episode(path: str | Path, p: Params = Params(), clock: str = GATE_CLOC
     mot, trk = load(path, p, progress)
     rep, off = align(mot, trk, p, clock, D_ms)
     rep.path = str(path)
+    rep.labels = VideoReader(path).labels()
     return rep, off, mot, trk
 
 

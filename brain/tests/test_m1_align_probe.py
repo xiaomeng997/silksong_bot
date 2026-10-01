@@ -1,5 +1,6 @@
-"""Offline checks of the M1 alignment probe: its driving, and that the frame marker goes on for the gate run and off
-again at the end, also after an error (the probe itself needs the running game)."""
+"""Offline checks of the M1 alignment probe: its driving, and that the frame marker goes on for the gate run (the
+vision mask's marker, read in the capture path) and off again at the end, also after an error (the probe itself needs
+the running game)."""
 import sys
 from pathlib import Path
 
@@ -9,6 +10,7 @@ from ssbot.ipc.framing import mask, names
 from ssbot.ipc.oracle_link import OracleError
 from ssbot.probes import m1_align
 from ssbot.probes.m1_align import Pattern, drive
+from ssbot.vision import mask as vmask
 
 
 def test_pattern_changes_speed_and_stays_near_the_start():
@@ -69,9 +71,10 @@ class GateLink:
         self.closed = False
 
     def wait_state(self, pred=lambda s: True, timeout_s=10.0, newer_than=None):
+        mk = {"drawn": True, "cell": 3, "rect": [float(v) for v in vmask.marker_rect(1280, 720)]}
         s = {"f": 100, "game": {"gs": 4, "scene": "Bonetown"}, "pause": {"bench": False},
              "hero": {"pos": [10.0, 5.0, 0.0], "hero_accepting_input": True}, "cam": {"screen": [1280.0, 720.0]},
-             "mk": {"drawn": True} if self.marker else None}
+             "mk": mk if self.marker else None}
         if not pred(s):
             raise TimeoutError("condition not met")
         return s
@@ -102,8 +105,10 @@ class FakeRecorder:
 
 
 class BrokenVideo:
+    made = []
+
     def __init__(self, *a, **kw):
-        pass
+        BrokenVideo.made.append(kw)
 
     def start(self):
         raise RuntimeError("capture start: window gone")
@@ -125,7 +130,8 @@ def test_marker_goes_off_after_an_error(monkeypatch, tmp_path):
         m1_align.main()
     names = [(n, a.get("on")) for n, a in link.calls]
     assert names == [("frame.marker", True), ("input.release", None), ("frame.marker", False)]
-    assert link.calls[0][1] == {"on": True, "corner": "tr", "size": 12}     # 3 px of a 320 px thumbnail at 1280
+    assert link.calls[0][1] == {"on": True, "corner": "tr"}        # the oracle's default cell: the mask's
+    assert BrokenVideo.made[-1]["marker"] is True                    # read in the capture path, masked
     assert link.closed and not link.marker
 
 
@@ -135,9 +141,3 @@ def test_refused_marker_fails_the_gate(monkeypatch, tmp_path, capsys):
     assert m1_align.main() == 1
     assert "frame marker not on" in capsys.readouterr().out
     assert [(n, a["on"]) for n, a in link.calls] == [("frame.marker", True), ("frame.marker", False)] and link.closed
-
-
-def test_marker_cell_is_three_thumbnail_px():
-    assert m1_align.marker_cell({"cam": {"screen": [1280.0, 720.0]}}, 320) == 12
-    assert m1_align.marker_cell({"cam": {"screen": [1920.0, 1080.0]}}, 256) == 23
-    assert m1_align.marker_cell({"cam": None}, 320) == 0                  # the oracle's default

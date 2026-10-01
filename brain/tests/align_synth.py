@@ -15,10 +15,13 @@ Two parallax layers: far=(parallax, share) replaces the top `share` of the image
 second texture at that parallax, a far background above a near ground layer; the figure and the labelled HUD are
 drawn in front of both.
 
-Frame marker (ssbot.record.marker): marker="tr" (a corner) draws the pattern of the frame each capture shows, with
-12 px cells (3 px of the 160 px thumbnail), over everything and under the grain, and writes STATE "mk" as the oracle
-does. marker_off: frames whose STATE has no "mk" and whose image has no marker (the marker off); hide_marker: capture
-indices whose marker is covered by a gray patch (a marker that did not make it into the capture).
+Frame marker (ssbot.record.marker): marker="tr" (the vision mask's corner) draws the pattern of the frame each capture
+shows with the mask's cell (3 px at 360p), over everything and under the grain, writes STATE "mk" as the oracle does,
+and records with VideoRecorder(marker=True), which reads it from the full-size image and masks it before the thumbnail
+is made. legacy_marker=True instead draws it with 12 px cells (3 px of the 160 px thumbnail) in any corner and stores
+it in unmasked thumbnails, as recordings did before the capture path read it. marker_off: frames whose STATE has no
+"mk" and whose image has no marker (the marker off); hide_marker: capture indices whose marker is covered by a gray
+patch (a marker that did not make it into the capture).
 """
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -40,7 +43,7 @@ T0_NS = 5_000_000_000_000        # ~83 min of QPC uptime
 D_TRUE_NS = 23_300_000
 FRAME_CLOCK_NS = 8_000_000
 WHEN = datetime(2026, 9, 30, 12, 0, 0)
-MARKER_CELL = 12                 # client px: 3 px of the thumbnail
+LEGACY_MARKER_CELL = 12          # client px: 3 px of the thumbnail
 
 
 @dataclass
@@ -195,7 +198,8 @@ def make(tmp_path, *, seconds: float = 25.0, seed: int = 1, parallax: float = 1.
          eof_jitter_ns: int = 1_000_000, cap_jitter_ns: int = 4_000_000, noise: float = 2.0, episode: str = "ep",
          hud: bool = True, hero: str | None = None, lead: float = 0.0, hud_state: bool = False,
          labels: bool = True, far: tuple[float, float] | None = None, marker: str | None = None,
-         marker_off: set[int] = frozenset(), hide_marker: set[int] = frozenset()) -> Episode:
+         marker_off: set[int] = frozenset(), hide_marker: set[int] = frozenset(), legacy_marker: bool = False
+         ) -> Episode:
     """Write an episode with STATE frames 1000.. and one capture per frame (minus drop_captures). labels=False draws
     the hero and the labelled HUD but leaves them out of STATE."""
     rng = np.random.default_rng(seed + 100)
@@ -206,7 +210,9 @@ def make(tmp_path, *, seconds: float = 25.0, seed: int = 1, parallax: float = 1.
     tex = texture(1400, 2400, seed)
     tex_far = texture(1400, 2400, seed + 50) if far else None
     q = {int(f): T0_NS + int(f) * PERIOD_NS + int(rng.integers(-eof_jitter_ns, eof_jitter_ns + 1)) for f in frames}
-    geom = mk.Geometry.place(SCREEN, marker, MARKER_CELL) if marker else None
+    if marker and not legacy_marker and marker != mk.vmask.CORNER:
+        raise ValueError(f"the capture path reads the marker in the mask's corner ({mk.vmask.CORNER}) only")
+    geom = mk.Geometry.place(SCREEN, marker, LEGACY_MARKER_CELL if legacy_marker else None) if marker else None
 
     rec = Recorder(None, out_dir=tmp_path, profile="TEST", episode=episode, hello=syn.hello(), when=WHEN,
                    min_free_gb=0, queue_size=1_000_000).start()
@@ -226,12 +232,14 @@ def make(tmp_path, *, seconds: float = 25.0, seed: int = 1, parallax: float = 1.
         if jump_at is not None and i >= jump_at:
             s["game"]["scene"] = s["game"]["scene_raw"] = "Tut_02"
         if geom is not None and int(f) not in marker_off:
-            s["mk"] = {"drawn": True, "corner": marker, "cell": MARKER_CELL, "rect": list(geom.rect),
+            s["mk"] = {"drawn": True, "corner": marker, "cell": int(geom.cell), "rect": list(geom.rect),
                        "grid": [mk.ROWS, mk.COLS], "us": 20.0}
         rec.on_raw(MsgType.STATE, syn.wire(MsgType.STATE, i + 1, s))
     rec.close()
 
-    vid = VideoRecorder(rec.path, width=THUMB, queue_size=1_000_000).start()
+    in_capture = geom is not None and not legacy_marker
+    vid = VideoRecorder(rec.path, width=THUMB, queue_size=1_000_000, marker=in_capture,
+                        mask=not legacy_marker).start()
     ep = Episode(rec.path, q, [], [], [])
     bounds = {"arrival": [-2**62, 2**62], "frame": [-2**62, 2**62]}
     grain = [rng.normal(0, noise, (SCREEN[1], SCREEN[0])).astype(np.float32) for _ in range(7)]  # sensor-like noise
