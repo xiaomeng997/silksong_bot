@@ -1,0 +1,11023 @@
+{
+ "schema": 1,
+ "enemy": "BellBeast",
+ "build": "1.0.30000",
+ "scene": "Bone_05",
+ "boss_type": "Bone Beast",
+ "hp": 150,
+ "fsms": [
+  "Control"
+ ],
+ "phases": {
+  "P1": {
+   "desc": "from the wake until the Rage pattern ends"
+  },
+  "P2": {
+   "desc": "after Rage End (DropBell M2 joins Bell Burst and Leap)",
+   "entered_at": "Rage End",
+   "boss_hp_at_entry": {
+    "p0_5": 47.5,
+    "p5": 55.0,
+    "p50": 70.0,
+    "p95": 75.0,
+    "p99_5": 75.0,
+    "min": 45.0,
+    "max": 75.0,
+    "n": 99
+   }
+  }
+ },
+ "sources": [
+  {
+   "id": "20261001_121446_BellBeast_data/i0/ep0",
+   "kind": "rec",
+   "f0": 42545,
+   "f1": 56170,
+   "outcome": "CLEAR",
+   "frames": 13626,
+   "gaps": 0,
+   "game_s": 216.44,
+   "instances": 44,
+   "died": true
+  },
+  {
+   "id": "20261001_121446_BellBeast_data/i0/ep1",
+   "kind": "rec",
+   "f0": 56532,
+   "f1": 69089,
+   "outcome": "CLEAR",
+   "frames": 12558,
+   "gaps": 0,
+   "game_s": 199.6,
+   "instances": 40,
+   "died": true
+  },
+  {
+   "id": "20261001_122249_BellBeast_data/i0/ep0",
+   "kind": "rec",
+   "f0": 71512,
+   "f1": 81400,
+   "outcome": "CLEAR",
+   "frames": 9889,
+   "gaps": 0,
+   "game_s": 155.97,
+   "instances": 31,
+   "died": true
+  },
+  {
+   "id": "20261001_122249_BellBeast_data/i0/ep1",
+   "kind": "rec",
+   "f0": 81762,
+   "f1": 92272,
+   "outcome": "CLEAR",
+   "frames": 10511,
+   "gaps": 0,
+   "game_s": 166.99,
+   "instances": 33,
+   "died": true
+  },
+  {
+   "id": "20261001_122249_BellBeast_data/i0/ep2",
+   "kind": "rec",
+   "f0": 92634,
+   "f1": 101237,
+   "outcome": "CLEAR",
+   "frames": 8604,
+   "gaps": 0,
+   "game_s": 137.0,
+   "instances": 27,
+   "died": true
+  },
+  {
+   "id": "20261001_122249_BellBeast_data/i0/ep3",
+   "kind": "rec",
+   "f0": 101604,
+   "f1": 115057,
+   "outcome": "CLEAR",
+   "frames": 13454,
+   "gaps": 0,
+   "game_s": 211.64,
+   "instances": 44,
+   "died": true
+  },
+  {
+   "id": "20261001_122249_BellBeast_data/i0/ep5",
+   "kind": "rec",
+   "f0": 115554,
+   "f1": 129955,
+   "outcome": "STUCK",
+   "frames": 14402,
+   "gaps": 0,
+   "game_s": 230.04,
+   "instances": 47,
+   "died": false
+  },
+  {
+   "id": "20261001_122249_BellBeast_data/i0/ep6",
+   "kind": "rec",
+   "f0": 130313,
+   "f1": 137794,
+   "outcome": "CLEAR",
+   "frames": 7482,
+   "gaps": 0,
+   "game_s": 118.24,
+   "instances": 23,
+   "died": true
+  },
+  {
+   "id": "20261001_122249_BellBeast_data/i0/ep7",
+   "kind": "rec",
+   "f0": 138155,
+   "f1": 148288,
+   "outcome": "CLEAR",
+   "frames": 10134,
+   "gaps": 0,
+   "game_s": 161.14,
+   "instances": 32,
+   "died": true
+  },
+  {
+   "id": "20261001_122249_BellBeast_data/i0/ep8",
+   "kind": "rec",
+   "f0": 148648,
+   "f1": 161560,
+   "outcome": "CLEAR",
+   "frames": 12913,
+   "gaps": 0,
+   "game_s": 205.7,
+   "instances": 42,
+   "died": true
+  },
+  {
+   "id": "20261001_122249_BellBeast_data/i0/ep9",
+   "kind": "rec",
+   "f0": 161919,
+   "f1": 172774,
+   "outcome": "CLEAR",
+   "frames": 10856,
+   "gaps": 0,
+   "game_s": 172.31,
+   "instances": 35,
+   "died": true
+  },
+  {
+   "id": "20261001_122249_BellBeast_data/i0/ep10",
+   "kind": "rec",
+   "f0": 173134,
+   "f1": 183877,
+   "outcome": "CLEAR",
+   "frames": 10744,
+   "gaps": 0,
+   "game_s": 169.93,
+   "instances": 34,
+   "died": true
+  },
+  {
+   "id": "20261001_122249_BellBeast_data/i0/ep11",
+   "kind": "rec",
+   "f0": 184236,
+   "f1": 196164,
+   "outcome": "CLEAR",
+   "frames": 11929,
+   "gaps": 0,
+   "game_s": 189.81,
+   "instances": 38,
+   "died": true
+  },
+  {
+   "id": "20261001_122249_BellBeast_data/i0/ep12",
+   "kind": "rec",
+   "f0": 196526,
+   "f1": 206820,
+   "outcome": "CLEAR",
+   "frames": 10295,
+   "gaps": 0,
+   "game_s": 162.32,
+   "instances": 33,
+   "died": true
+  },
+  {
+   "id": "20261001_122249_BellBeast_data/i0/ep13",
+   "kind": "rec",
+   "f0": 207178,
+   "f1": 220256,
+   "outcome": "CLEAR",
+   "frames": 13079,
+   "gaps": 0,
+   "game_s": 207.71,
+   "instances": 43,
+   "died": true
+  },
+  {
+   "id": "20261001_122249_BellBeast_data/i0/ep14",
+   "kind": "rec",
+   "f0": 220617,
+   "f1": 231268,
+   "outcome": "CLEAR",
+   "frames": 10652,
+   "gaps": 0,
+   "game_s": 167.68,
+   "instances": 34,
+   "died": true
+  },
+  {
+   "id": "20261001_122249_BellBeast_data/i0/ep15",
+   "kind": "rec",
+   "f0": 231630,
+   "f1": 242418,
+   "outcome": "CLEAR",
+   "frames": 10789,
+   "gaps": 0,
+   "game_s": 171.8,
+   "instances": 35,
+   "died": true
+  },
+  {
+   "id": "20261001_122249_BellBeast_data/i0/ep16",
+   "kind": "rec",
+   "f0": 242778,
+   "f1": 254756,
+   "outcome": "CLEAR",
+   "frames": 11979,
+   "gaps": 0,
+   "game_s": 188.51,
+   "instances": 38,
+   "died": true
+  },
+  {
+   "id": "20261001_122249_BellBeast_data/i0/ep17",
+   "kind": "rec",
+   "f0": 255125,
+   "f1": 266331,
+   "outcome": "CLEAR",
+   "frames": 11207,
+   "gaps": 0,
+   "game_s": 177.42,
+   "instances": 36,
+   "died": true
+  },
+  {
+   "id": "20261001_122249_BellBeast_data/i0/ep19",
+   "kind": "rec",
+   "f0": 266833,
+   "f1": 276087,
+   "outcome": "CLEAR",
+   "frames": 9255,
+   "gaps": 0,
+   "game_s": 146.05,
+   "instances": 29,
+   "died": true
+  },
+  {
+   "id": "20261001_122249_BellBeast_data/i0/ep20",
+   "kind": "rec",
+   "f0": 276446,
+   "f1": 286493,
+   "outcome": "CLEAR",
+   "frames": 10048,
+   "gaps": 0,
+   "game_s": 160.31,
+   "instances": 32,
+   "died": true
+  },
+  {
+   "id": "20261001_122249_BellBeast_data/i0/ep21",
+   "kind": "rec",
+   "f0": 286854,
+   "f1": 297350,
+   "outcome": "CLEAR",
+   "frames": 10497,
+   "gaps": 0,
+   "game_s": 167.47,
+   "instances": 34,
+   "died": true
+  },
+  {
+   "id": "20261001_122249_BellBeast_data/i0/ep22",
+   "kind": "rec",
+   "f0": 297711,
+   "f1": 307608,
+   "outcome": "CLEAR",
+   "frames": 9898,
+   "gaps": 0,
+   "game_s": 156.09,
+   "instances": 31,
+   "died": true
+  },
+  {
+   "id": "20261001_122249_BellBeast_data/i0/ep23",
+   "kind": "rec",
+   "f0": 307968,
+   "f1": 318111,
+   "outcome": "CLEAR",
+   "frames": 10144,
+   "gaps": 0,
+   "game_s": 160.96,
+   "instances": 32,
+   "died": true
+  },
+  {
+   "id": "20261001_122249_BellBeast_data/i0/ep24",
+   "kind": "rec",
+   "f0": 318469,
+   "f1": 330467,
+   "outcome": "CLEAR",
+   "frames": 11999,
+   "gaps": 0,
+   "game_s": 190.61,
+   "instances": 39,
+   "died": true
+  },
+  {
+   "id": "20261001_122249_BellBeast_data/i1/ep0",
+   "kind": "rec",
+   "f0": 1745,
+   "f1": 15102,
+   "outcome": "CLEAR",
+   "frames": 13358,
+   "gaps": 0,
+   "game_s": 211.69,
+   "instances": 43,
+   "died": true
+  },
+  {
+   "id": "20261001_122249_BellBeast_data/i1/ep1",
+   "kind": "rec",
+   "f0": 15468,
+   "f1": 26140,
+   "outcome": "CLEAR",
+   "frames": 10673,
+   "gaps": 0,
+   "game_s": 168.88,
+   "instances": 34,
+   "died": true
+  },
+  {
+   "id": "20261001_122249_BellBeast_data/i1/ep2",
+   "kind": "rec",
+   "f0": 26500,
+   "f1": 36339,
+   "outcome": "CLEAR",
+   "frames": 9840,
+   "gaps": 0,
+   "game_s": 155.65,
+   "instances": 31,
+   "died": true
+  },
+  {
+   "id": "20261001_122249_BellBeast_data/i1/ep3",
+   "kind": "rec",
+   "f0": 36701,
+   "f1": 47290,
+   "outcome": "CLEAR",
+   "frames": 10590,
+   "gaps": 0,
+   "game_s": 168.4,
+   "instances": 34,
+   "died": true
+  },
+  {
+   "id": "20261001_122249_BellBeast_data/i1/ep4",
+   "kind": "rec",
+   "f0": 47651,
+   "f1": 62052,
+   "outcome": "STUCK",
+   "frames": 14402,
+   "gaps": 0,
+   "game_s": 229.55,
+   "instances": 47,
+   "died": false
+  },
+  {
+   "id": "20261001_122249_BellBeast_data/i1/ep5",
+   "kind": "rec",
+   "f0": 62400,
+   "f1": 73664,
+   "outcome": "CLEAR",
+   "frames": 11265,
+   "gaps": 0,
+   "game_s": 178.65,
+   "instances": 36,
+   "died": true
+  },
+  {
+   "id": "20261001_122249_BellBeast_data/i1/ep6",
+   "kind": "rec",
+   "f0": 74025,
+   "f1": 83694,
+   "outcome": "CLEAR",
+   "frames": 9670,
+   "gaps": 0,
+   "game_s": 154.18,
+   "instances": 31,
+   "died": true
+  },
+  {
+   "id": "20261001_122249_BellBeast_data/i1/ep7",
+   "kind": "rec",
+   "f0": 84057,
+   "f1": 98458,
+   "outcome": "STUCK",
+   "frames": 14402,
+   "gaps": 0,
+   "game_s": 228.8,
+   "instances": 46,
+   "died": false
+  },
+  {
+   "id": "20261001_122249_BellBeast_data/i1/ep8",
+   "kind": "rec",
+   "f0": 98812,
+   "f1": 107007,
+   "outcome": "CLEAR",
+   "frames": 8196,
+   "gaps": 0,
+   "game_s": 129.33,
+   "instances": 26,
+   "died": true
+  },
+  {
+   "id": "20261001_122249_BellBeast_data/i1/ep9",
+   "kind": "rec",
+   "f0": 107368,
+   "f1": 118912,
+   "outcome": "CLEAR",
+   "frames": 11545,
+   "gaps": 0,
+   "game_s": 181.87,
+   "instances": 37,
+   "died": true
+  },
+  {
+   "id": "20261001_122249_BellBeast_data/i1/ep10",
+   "kind": "rec",
+   "f0": 119273,
+   "f1": 129186,
+   "outcome": "CLEAR",
+   "frames": 9914,
+   "gaps": 0,
+   "game_s": 157.27,
+   "instances": 32,
+   "died": true
+  },
+  {
+   "id": "20261001_122249_BellBeast_data/i1/ep11",
+   "kind": "rec",
+   "f0": 129547,
+   "f1": 141173,
+   "outcome": "CLEAR",
+   "frames": 11627,
+   "gaps": 0,
+   "game_s": 183.85,
+   "instances": 37,
+   "died": true
+  },
+  {
+   "id": "20261001_122249_BellBeast_data/i1/ep12",
+   "kind": "rec",
+   "f0": 141534,
+   "f1": 154626,
+   "outcome": "CLEAR",
+   "frames": 13093,
+   "gaps": 0,
+   "game_s": 206.48,
+   "instances": 42,
+   "died": true
+  },
+  {
+   "id": "20261001_122249_BellBeast_data/i1/ep13",
+   "kind": "rec",
+   "f0": 154989,
+   "f1": 166149,
+   "outcome": "CLEAR",
+   "frames": 11161,
+   "gaps": 0,
+   "game_s": 178.28,
+   "instances": 36,
+   "died": true
+  },
+  {
+   "id": "20261001_122249_BellBeast_data/i1/ep14",
+   "kind": "rec",
+   "f0": 166512,
+   "f1": 174553,
+   "outcome": "CLEAR",
+   "frames": 8042,
+   "gaps": 0,
+   "game_s": 128.0,
+   "instances": 25,
+   "died": true
+  },
+  {
+   "id": "20261001_122249_BellBeast_data/i1/ep15",
+   "kind": "rec",
+   "f0": 174913,
+   "f1": 184298,
+   "outcome": "CLEAR",
+   "frames": 9386,
+   "gaps": 0,
+   "game_s": 149.01,
+   "instances": 30,
+   "died": true
+  },
+  {
+   "id": "20261001_122249_BellBeast_data/i1/ep16",
+   "kind": "rec",
+   "f0": 184659,
+   "f1": 199060,
+   "outcome": "STUCK",
+   "frames": 14402,
+   "gaps": 0,
+   "game_s": 230.1,
+   "instances": 47,
+   "died": false
+  },
+  {
+   "id": "20261001_122249_BellBeast_data/i1/ep17",
+   "kind": "rec",
+   "f0": 199412,
+   "f1": 208317,
+   "outcome": "CLEAR",
+   "frames": 8906,
+   "gaps": 0,
+   "game_s": 139.54,
+   "instances": 28,
+   "died": true
+  },
+  {
+   "id": "20261001_122249_BellBeast_data/i1/ep19",
+   "kind": "rec",
+   "f0": 208816,
+   "f1": 221274,
+   "outcome": "CLEAR",
+   "frames": 12459,
+   "gaps": 0,
+   "game_s": 198.38,
+   "instances": 40,
+   "died": true
+  },
+  {
+   "id": "20261001_122249_BellBeast_data/i1/ep20",
+   "kind": "rec",
+   "f0": 221635,
+   "f1": 229716,
+   "outcome": "CLEAR",
+   "frames": 8082,
+   "gaps": 0,
+   "game_s": 127.88,
+   "instances": 25,
+   "died": true
+  },
+  {
+   "id": "20261001_122249_BellBeast_data/i1/ep21",
+   "kind": "rec",
+   "f0": 230084,
+   "f1": 242106,
+   "outcome": "CLEAR",
+   "frames": 12023,
+   "gaps": 0,
+   "game_s": 189.5,
+   "instances": 39,
+   "died": true
+  },
+  {
+   "id": "20261001_122249_BellBeast_data/i1/ep22",
+   "kind": "rec",
+   "f0": 242466,
+   "f1": 256867,
+   "outcome": "STUCK",
+   "frames": 14402,
+   "gaps": 0,
+   "game_s": 230.06,
+   "instances": 46,
+   "died": false
+  },
+  {
+   "id": "20261001_122249_BellBeast_data/i1/ep23",
+   "kind": "rec",
+   "f0": 257218,
+   "f1": 266817,
+   "outcome": "CLEAR",
+   "frames": 9600,
+   "gaps": 0,
+   "game_s": 150.99,
+   "instances": 30,
+   "died": true
+  },
+  {
+   "id": "20261001_122249_BellBeast_data/i1/ep24",
+   "kind": "rec",
+   "f0": 267175,
+   "f1": 274579,
+   "outcome": "CLEAR",
+   "frames": 7405,
+   "gaps": 0,
+   "game_s": 117.66,
+   "instances": 23,
+   "died": true
+  },
+  {
+   "id": "20261001_122249_BellBeast_data/i2/ep0",
+   "kind": "rec",
+   "f0": 1743,
+   "f1": 11437,
+   "outcome": "CLEAR",
+   "frames": 9695,
+   "gaps": 0,
+   "game_s": 153.22,
+   "instances": 31,
+   "died": true
+  },
+  {
+   "id": "20261001_122249_BellBeast_data/i2/ep1",
+   "kind": "rec",
+   "f0": 11805,
+   "f1": 24197,
+   "outcome": "CLEAR",
+   "frames": 12393,
+   "gaps": 0,
+   "game_s": 196.44,
+   "instances": 40,
+   "died": true
+  },
+  {
+   "id": "20261001_122249_BellBeast_data/i2/ep2",
+   "kind": "rec",
+   "f0": 24556,
+   "f1": 35104,
+   "outcome": "CLEAR",
+   "frames": 10549,
+   "gaps": 0,
+   "game_s": 167.13,
+   "instances": 34,
+   "died": true
+  },
+  {
+   "id": "20261001_122249_BellBeast_data/i2/ep3",
+   "kind": "rec",
+   "f0": 35465,
+   "f1": 49866,
+   "outcome": "STUCK",
+   "frames": 14402,
+   "gaps": 0,
+   "game_s": 229.92,
+   "instances": 47,
+   "died": false
+  },
+  {
+   "id": "20261001_122249_BellBeast_data/i2/ep4",
+   "kind": "rec",
+   "f0": 50219,
+   "f1": 60953,
+   "outcome": "CLEAR",
+   "frames": 10735,
+   "gaps": 0,
+   "game_s": 170.38,
+   "instances": 35,
+   "died": true
+  },
+  {
+   "id": "20261001_122249_BellBeast_data/i2/ep5",
+   "kind": "rec",
+   "f0": 61314,
+   "f1": 75715,
+   "outcome": "STUCK",
+   "frames": 14402,
+   "gaps": 0,
+   "game_s": 230.46,
+   "instances": 48,
+   "died": false
+  },
+  {
+   "id": "20261001_122249_BellBeast_data/i2/ep6",
+   "kind": "rec",
+   "f0": 76066,
+   "f1": 90467,
+   "outcome": "STUCK",
+   "frames": 14402,
+   "gaps": 0,
+   "game_s": 227.39,
+   "instances": 47,
+   "died": false
+  },
+  {
+   "id": "20261001_122249_BellBeast_data/i2/ep7",
+   "kind": "rec",
+   "f0": 90825,
+   "f1": 100746,
+   "outcome": "CLEAR",
+   "frames": 9922,
+   "gaps": 0,
+   "game_s": 157.37,
+   "instances": 32,
+   "died": true
+  },
+  {
+   "id": "20261001_122249_BellBeast_data/i2/ep8",
+   "kind": "rec",
+   "f0": 101108,
+   "f1": 112869,
+   "outcome": "CLEAR",
+   "frames": 11762,
+   "gaps": 0,
+   "game_s": 185.85,
+   "instances": 38,
+   "died": true
+  },
+  {
+   "id": "20261001_122249_BellBeast_data/i2/ep9",
+   "kind": "rec",
+   "f0": 113230,
+   "f1": 125810,
+   "outcome": "CLEAR",
+   "frames": 12581,
+   "gaps": 0,
+   "game_s": 199.89,
+   "instances": 41,
+   "died": true
+  },
+  {
+   "id": "20261001_122249_BellBeast_data/i2/ep10",
+   "kind": "rec",
+   "f0": 126171,
+   "f1": 140572,
+   "outcome": "STUCK",
+   "frames": 14402,
+   "gaps": 0,
+   "game_s": 229.85,
+   "instances": 47,
+   "died": false
+  },
+  {
+   "id": "20261001_122249_BellBeast_data/i2/ep11",
+   "kind": "rec",
+   "f0": 140926,
+   "f1": 148942,
+   "outcome": "CLEAR",
+   "frames": 8017,
+   "gaps": 0,
+   "game_s": 126.72,
+   "instances": 25,
+   "died": true
+  },
+  {
+   "id": "20261001_122249_BellBeast_data/i2/ep12",
+   "kind": "rec",
+   "f0": 149303,
+   "f1": 161946,
+   "outcome": "CLEAR",
+   "frames": 12644,
+   "gaps": 0,
+   "game_s": 199.76,
+   "instances": 41,
+   "died": true
+  },
+  {
+   "id": "20261001_122249_BellBeast_data/i2/ep13",
+   "kind": "rec",
+   "f0": 162314,
+   "f1": 172945,
+   "outcome": "CLEAR",
+   "frames": 10632,
+   "gaps": 0,
+   "game_s": 167.58,
+   "instances": 33,
+   "died": true
+  },
+  {
+   "id": "20261001_122249_BellBeast_data/i2/ep14",
+   "kind": "rec",
+   "f0": 173308,
+   "f1": 187709,
+   "outcome": "STUCK",
+   "frames": 14402,
+   "gaps": 0,
+   "game_s": 231.45,
+   "instances": 48,
+   "died": false
+  },
+  {
+   "id": "20261001_122249_BellBeast_data/i2/ep15",
+   "kind": "rec",
+   "f0": 188061,
+   "f1": 195686,
+   "outcome": "CLEAR",
+   "frames": 7626,
+   "gaps": 0,
+   "game_s": 121.93,
+   "instances": 24,
+   "died": true
+  },
+  {
+   "id": "20261001_122249_BellBeast_data/i2/ep16",
+   "kind": "rec",
+   "f0": 196049,
+   "f1": 207364,
+   "outcome": "CLEAR",
+   "frames": 11316,
+   "gaps": 0,
+   "game_s": 180.21,
+   "instances": 37,
+   "died": true
+  },
+  {
+   "id": "20261001_122249_BellBeast_data/i2/ep17",
+   "kind": "rec",
+   "f0": 207725,
+   "f1": 222126,
+   "outcome": "STUCK",
+   "frames": 14402,
+   "gaps": 0,
+   "game_s": 230.08,
+   "instances": 47,
+   "died": false
+  },
+  {
+   "id": "20261001_122249_BellBeast_data/i2/ep18",
+   "kind": "rec",
+   "f0": 222481,
+   "f1": 233767,
+   "outcome": "CLEAR",
+   "frames": 11287,
+   "gaps": 0,
+   "game_s": 178.73,
+   "instances": 36,
+   "died": true
+  },
+  {
+   "id": "20261001_122249_BellBeast_data/i2/ep19",
+   "kind": "rec",
+   "f0": 234129,
+   "f1": 243688,
+   "outcome": "CLEAR",
+   "frames": 9560,
+   "gaps": 0,
+   "game_s": 151.75,
+   "instances": 30,
+   "died": true
+  },
+  {
+   "id": "20261001_122249_BellBeast_data/i2/ep20",
+   "kind": "rec",
+   "f0": 244048,
+   "f1": 254786,
+   "outcome": "CLEAR",
+   "frames": 10739,
+   "gaps": 0,
+   "game_s": 169.97,
+   "instances": 34,
+   "died": true
+  },
+  {
+   "id": "20261001_122249_BellBeast_data/i2/ep21",
+   "kind": "rec",
+   "f0": 255147,
+   "f1": 262276,
+   "outcome": "CLEAR",
+   "frames": 7130,
+   "gaps": 0,
+   "game_s": 113.08,
+   "instances": 22,
+   "died": true
+  },
+  {
+   "id": "20261001_122249_BellBeast_data/i2/ep22",
+   "kind": "rec",
+   "f0": 262636,
+   "f1": 271021,
+   "outcome": "CLEAR",
+   "frames": 8386,
+   "gaps": 0,
+   "game_s": 131.42,
+   "instances": 26,
+   "died": true
+  },
+  {
+   "id": "20261001_122249_BellBeast_data/i2/ep23",
+   "kind": "rec",
+   "f0": 271382,
+   "f1": 285799,
+   "outcome": "CLEAR",
+   "frames": 14418,
+   "gaps": 0,
+   "game_s": 228.47,
+   "instances": 47,
+   "died": true
+  },
+  {
+   "id": "20261001_122249_BellBeast_data/i2/ep24",
+   "kind": "rec",
+   "f0": 286156,
+   "f1": 298623,
+   "outcome": "CLEAR",
+   "frames": 12468,
+   "gaps": 0,
+   "game_s": 197.45,
+   "instances": 40,
+   "died": true
+  },
+  {
+   "id": "20261001_122249_BellBeast_data/i3/ep0",
+   "kind": "rec",
+   "f0": 1740,
+   "f1": 12545,
+   "outcome": "CLEAR",
+   "frames": 10806,
+   "gaps": 0,
+   "game_s": 170.93,
+   "instances": 34,
+   "died": true
+  },
+  {
+   "id": "20261001_122249_BellBeast_data/i3/ep1",
+   "kind": "rec",
+   "f0": 12905,
+   "f1": 23276,
+   "outcome": "CLEAR",
+   "frames": 10372,
+   "gaps": 0,
+   "game_s": 164.24,
+   "instances": 33,
+   "died": true
+  },
+  {
+   "id": "20261001_122249_BellBeast_data/i3/ep2",
+   "kind": "rec",
+   "f0": 23637,
+   "f1": 33201,
+   "outcome": "CLEAR",
+   "frames": 9565,
+   "gaps": 0,
+   "game_s": 150.62,
+   "instances": 30,
+   "died": true
+  },
+  {
+   "id": "20261001_122249_BellBeast_data/i3/ep3",
+   "kind": "rec",
+   "f0": 33563,
+   "f1": 42249,
+   "outcome": "CLEAR",
+   "frames": 8687,
+   "gaps": 0,
+   "game_s": 138.27,
+   "instances": 27,
+   "died": true
+  },
+  {
+   "id": "20261001_122249_BellBeast_data/i3/ep4",
+   "kind": "rec",
+   "f0": 42611,
+   "f1": 53722,
+   "outcome": "CLEAR",
+   "frames": 11112,
+   "gaps": 0,
+   "game_s": 175.42,
+   "instances": 36,
+   "died": true
+  },
+  {
+   "id": "20261001_122249_BellBeast_data/i3/ep5",
+   "kind": "rec",
+   "f0": 54084,
+   "f1": 65095,
+   "outcome": "CLEAR",
+   "frames": 11012,
+   "gaps": 0,
+   "game_s": 174.64,
+   "instances": 35,
+   "died": true
+  },
+  {
+   "id": "20261001_122249_BellBeast_data/i3/ep6",
+   "kind": "rec",
+   "f0": 65456,
+   "f1": 75013,
+   "outcome": "CLEAR",
+   "frames": 9558,
+   "gaps": 0,
+   "game_s": 152.49,
+   "instances": 30,
+   "died": true
+  },
+  {
+   "id": "20261001_122249_BellBeast_data/i3/ep7",
+   "kind": "rec",
+   "f0": 75373,
+   "f1": 89286,
+   "outcome": "CLEAR",
+   "frames": 13914,
+   "gaps": 0,
+   "game_s": 220.64,
+   "instances": 45,
+   "died": true
+  },
+  {
+   "id": "20261001_122249_BellBeast_data/i3/ep9",
+   "kind": "rec",
+   "f0": 89787,
+   "f1": 97917,
+   "outcome": "CLEAR",
+   "frames": 8131,
+   "gaps": 0,
+   "game_s": 129.04,
+   "instances": 25,
+   "died": true
+  },
+  {
+   "id": "20261001_122249_BellBeast_data/i3/ep10",
+   "kind": "rec",
+   "f0": 98278,
+   "f1": 111442,
+   "outcome": "CLEAR",
+   "frames": 13165,
+   "gaps": 0,
+   "game_s": 209.13,
+   "instances": 43,
+   "died": true
+  },
+  {
+   "id": "20261001_122249_BellBeast_data/i3/ep11",
+   "kind": "rec",
+   "f0": 111803,
+   "f1": 121508,
+   "outcome": "CLEAR",
+   "frames": 9706,
+   "gaps": 0,
+   "game_s": 153.17,
+   "instances": 31,
+   "died": true
+  },
+  {
+   "id": "20261001_122249_BellBeast_data/i3/ep12",
+   "kind": "rec",
+   "f0": 121869,
+   "f1": 133391,
+   "outcome": "CLEAR",
+   "frames": 11523,
+   "gaps": 0,
+   "game_s": 183.56,
+   "instances": 37,
+   "died": true
+  },
+  {
+   "id": "20261001_122249_BellBeast_data/i3/ep13",
+   "kind": "rec",
+   "f0": 133759,
+   "f1": 144934,
+   "outcome": "CLEAR",
+   "frames": 11176,
+   "gaps": 0,
+   "game_s": 176.15,
+   "instances": 36,
+   "died": true
+  },
+  {
+   "id": "20261001_122249_BellBeast_data/i3/ep14",
+   "kind": "rec",
+   "f0": 145294,
+   "f1": 157074,
+   "outcome": "CLEAR",
+   "frames": 11781,
+   "gaps": 0,
+   "game_s": 186.07,
+   "instances": 38,
+   "died": true
+  },
+  {
+   "id": "20261001_122249_BellBeast_data/i3/ep15",
+   "kind": "rec",
+   "f0": 157436,
+   "f1": 170323,
+   "outcome": "CLEAR",
+   "frames": 12888,
+   "gaps": 0,
+   "game_s": 204.85,
+   "instances": 42,
+   "died": true
+  },
+  {
+   "id": "20261001_122249_BellBeast_data/i3/ep16",
+   "kind": "rec",
+   "f0": 170686,
+   "f1": 185034,
+   "outcome": "CLEAR",
+   "frames": 14349,
+   "gaps": 0,
+   "game_s": 226.91,
+   "instances": 47,
+   "died": true
+  },
+  {
+   "id": "20261001_122249_BellBeast_data/i3/ep17",
+   "kind": "rec",
+   "f0": 185396,
+   "f1": 193315,
+   "outcome": "CLEAR",
+   "frames": 7920,
+   "gaps": 0,
+   "game_s": 126.11,
+   "instances": 25,
+   "died": true
+  },
+  {
+   "id": "20261001_122249_BellBeast_data/i3/ep18",
+   "kind": "rec",
+   "f0": 193675,
+   "f1": 203264,
+   "outcome": "CLEAR",
+   "frames": 9590,
+   "gaps": 0,
+   "game_s": 151.7,
+   "instances": 30,
+   "died": true
+  },
+  {
+   "id": "20261001_122249_BellBeast_data/i3/ep19",
+   "kind": "rec",
+   "f0": 203625,
+   "f1": 218043,
+   "outcome": "CLEAR",
+   "frames": 14419,
+   "gaps": 0,
+   "game_s": 230.01,
+   "instances": 47,
+   "died": true
+  },
+  {
+   "id": "20261001_122249_BellBeast_data/i3/ep20",
+   "kind": "rec",
+   "f0": 218403,
+   "f1": 230157,
+   "outcome": "CLEAR",
+   "frames": 11755,
+   "gaps": 0,
+   "game_s": 186.38,
+   "instances": 38,
+   "died": true
+  },
+  {
+   "id": "20261001_122249_BellBeast_data/i3/ep21",
+   "kind": "rec",
+   "f0": 230524,
+   "f1": 243371,
+   "outcome": "CLEAR",
+   "frames": 12848,
+   "gaps": 0,
+   "game_s": 204.27,
+   "instances": 42,
+   "died": true
+  },
+  {
+   "id": "20261001_122249_BellBeast_data/i3/ep22",
+   "kind": "rec",
+   "f0": 243732,
+   "f1": 253449,
+   "outcome": "CLEAR",
+   "frames": 9718,
+   "gaps": 0,
+   "game_s": 154.16,
+   "instances": 31,
+   "died": true
+  },
+  {
+   "id": "20261001_122249_BellBeast_data/i3/ep23",
+   "kind": "rec",
+   "f0": 253812,
+   "f1": 264191,
+   "outcome": "CLEAR",
+   "frames": 10380,
+   "gaps": 0,
+   "game_s": 164.24,
+   "instances": 33,
+   "died": true
+  },
+  {
+   "id": "20261001_122249_BellBeast_data/i3/ep24",
+   "kind": "rec",
+   "f0": 264550,
+   "f1": 276417,
+   "outcome": "CLEAR",
+   "frames": 11868,
+   "gaps": 0,
+   "game_s": 188.3,
+   "instances": 38,
+   "died": true
+  },
+  {
+   "id": "human/20260930_210337",
+   "kind": "human",
+   "f0": 64000,
+   "f1": 68460,
+   "outcome": null,
+   "frames": 4461,
+   "gaps": 0,
+   "game_s": 73.36,
+   "instances": 13,
+   "died": true
+  }
+ ],
+ "graph": {
+  "fsm": "Control",
+  "alpha": 0.5,
+  "n_worst": 30,
+  "states": [
+   "Bell Burst?",
+   "Burst Antic",
+   "Burst Out",
+   "Burst Pos",
+   "Burst Recovery",
+   "Charge",
+   "Charge Antic",
+   "Charge Emerge",
+   "Charge End",
+   "Choose 1st Pattern",
+   "Choose Dir",
+   "Death Broadcast",
+   "Descending",
+   "Dig In",
+   "Dormant",
+   "Emerge Antic C",
+   "Emerge Antic L",
+   "Fire Bells",
+   "Leap Land",
+   "Leap Out",
+   "Move Choice",
+   "Ptn L",
+   "Ptn R",
+   "Rage Antic",
+   "Rage Burst",
+   "Rage End",
+   "Rage Pos",
+   "Rage Roar",
+   "Rage Rumble",
+   "Rage Submerge",
+   "Rage?",
+   "Roar End",
+   "Set L",
+   "Set R",
+   "Submerged",
+   "Submerged Init"
+  ],
+  "starts": {},
+  "from": {
+   "Bell Burst?": {
+    "n": 3329,
+    "successors": {
+     "Choose Dir": 2140,
+     "Burst Pos": 1189
+    },
+    "worst_case": false,
+    "p_unseen": 0.0002,
+    "kills": {}
+   },
+   "Burst Antic": {
+    "n": 1188,
+    "successors": {
+     "Fire Bells": 1188
+    },
+    "worst_case": false,
+    "p_unseen": 0.0004,
+    "kills": {}
+   },
+   "Burst Out": {
+    "n": 1160,
+    "successors": {
+     "Burst Recovery": 1160
+    },
+    "worst_case": false,
+    "p_unseen": 0.0004,
+    "kills": {
+     "Death Broadcast": 26
+    }
+   },
+   "Burst Pos": {
+    "n": 1189,
+    "successors": {
+     "Burst Antic": 1189
+    },
+    "worst_case": false,
+    "p_unseen": 0.0004,
+    "kills": {}
+   },
+   "Burst Recovery": {
+    "n": 1160,
+    "successors": {
+     "Submerged": 1160
+    },
+    "worst_case": false,
+    "p_unseen": 0.0004,
+    "kills": {}
+   },
+   "Charge": {
+    "n": 1123,
+    "successors": {
+     "Charge End": 1123
+    },
+    "worst_case": false,
+    "p_unseen": 0.0004,
+    "kills": {
+     "Death Broadcast": 14
+    }
+   },
+   "Charge Antic": {
+    "n": 1137,
+    "successors": {
+     "Charge": 1137
+    },
+    "worst_case": false,
+    "p_unseen": 0.0004,
+    "kills": {
+     "Death Broadcast": 10
+    }
+   },
+   "Charge Emerge": {
+    "n": 1147,
+    "successors": {
+     "Charge Antic": 1147
+    },
+    "worst_case": false,
+    "p_unseen": 0.0004,
+    "kills": {
+     "Death Broadcast": 10
+    }
+   },
+   "Charge End": {
+    "n": 1119,
+    "successors": {
+     "Dig In": 1119
+    },
+    "worst_case": false,
+    "p_unseen": 0.0004,
+    "kills": {
+     "Death Broadcast": 4
+    }
+   },
+   "Choose 1st Pattern": {
+    "n": 99,
+    "successors": {
+     "Ptn R": 51,
+     "Ptn L": 48
+    },
+    "worst_case": false,
+    "p_unseen": 0.005,
+    "kills": {}
+   },
+   "Choose Dir": {
+    "n": 2140,
+    "successors": {
+     "Set L": 1094,
+     "Set R": 1046
+    },
+    "worst_case": false,
+    "p_unseen": 0.0002,
+    "kills": {}
+   },
+   "Descending": {
+    "n": 1070,
+    "successors": {
+     "Leap Land": 1070
+    },
+    "worst_case": false,
+    "p_unseen": 0.0005,
+    "kills": {
+     "Death Broadcast": 5
+    }
+   },
+   "Dig In": {
+    "n": 2175,
+    "successors": {
+     "Submerged": 2175
+    },
+    "worst_case": false,
+    "p_unseen": 0.0002,
+    "kills": {
+     "Death Broadcast": 4
+    }
+   },
+   "Dormant": {
+    "n": 99,
+    "successors": {
+     "Submerged Init": 99
+    },
+    "worst_case": false,
+    "p_unseen": 0.005,
+    "kills": {}
+   },
+   "Emerge Antic C": {
+    "n": 1157,
+    "successors": {
+     "Charge Emerge": 1157
+    },
+    "worst_case": false,
+    "p_unseen": 0.0004,
+    "kills": {}
+   },
+   "Emerge Antic L": {
+    "n": 1081,
+    "successors": {
+     "Leap Out": 1081
+    },
+    "worst_case": false,
+    "p_unseen": 0.0005,
+    "kills": {}
+   },
+   "Fire Bells": {
+    "n": 1188,
+    "successors": {
+     "Burst Out": 1188
+    },
+    "worst_case": false,
+    "p_unseen": 0.0004,
+    "kills": {}
+   },
+   "Leap Land": {
+    "n": 1060,
+    "successors": {
+     "Dig In": 1060
+    },
+    "worst_case": false,
+    "p_unseen": 0.0005,
+    "kills": {
+     "Death Broadcast": 10
+    }
+   },
+   "Leap Out": {
+    "n": 1075,
+    "successors": {
+     "Descending": 1075
+    },
+    "worst_case": false,
+    "p_unseen": 0.0005,
+    "kills": {
+     "Death Broadcast": 5
+    }
+   },
+   "Move Choice": {
+    "n": 2140,
+    "successors": {
+     "Emerge Antic L": 1082,
+     "Emerge Antic C": 1058
+    },
+    "worst_case": false,
+    "p_unseen": 0.0002,
+    "kills": {}
+   },
+   "Ptn L": {
+    "n": 48,
+    "successors": {
+     "Rage End": 48
+    },
+    "worst_case": false,
+    "p_unseen": 0.0102,
+    "kills": {}
+   },
+   "Ptn R": {
+    "n": 51,
+    "successors": {
+     "Rage End": 51
+    },
+    "worst_case": false,
+    "p_unseen": 0.0096,
+    "kills": {}
+   },
+   "Rage Antic": {
+    "n": 99,
+    "successors": {
+     "Rage Burst": 99
+    },
+    "worst_case": false,
+    "p_unseen": 0.005,
+    "kills": {}
+   },
+   "Rage Burst": {
+    "n": 99,
+    "successors": {
+     "Rage Roar": 99
+    },
+    "worst_case": false,
+    "p_unseen": 0.005,
+    "kills": {}
+   },
+   "Rage End": {
+    "n": 99,
+    "successors": {
+     "Submerged": 99
+    },
+    "worst_case": false,
+    "p_unseen": 0.005,
+    "kills": {}
+   },
+   "Rage Pos": {
+    "n": 99,
+    "successors": {
+     "Rage Antic": 99
+    },
+    "worst_case": false,
+    "p_unseen": 0.005,
+    "kills": {}
+   },
+   "Rage Roar": {
+    "n": 99,
+    "successors": {
+     "Roar End": 99
+    },
+    "worst_case": false,
+    "p_unseen": 0.005,
+    "kills": {}
+   },
+   "Rage Rumble": {
+    "n": 99,
+    "successors": {
+     "Choose 1st Pattern": 99
+    },
+    "worst_case": false,
+    "p_unseen": 0.005,
+    "kills": {}
+   },
+   "Rage Submerge": {
+    "n": 99,
+    "successors": {
+     "Rage Rumble": 99
+    },
+    "worst_case": false,
+    "p_unseen": 0.005,
+    "kills": {}
+   },
+   "Rage?": {
+    "n": 3428,
+    "successors": {
+     "Bell Burst?": 3329,
+     "Rage Pos": 99
+    },
+    "worst_case": false,
+    "p_unseen": 0.0001,
+    "kills": {}
+   },
+   "Roar End": {
+    "n": 99,
+    "successors": {
+     "Rage Submerge": 99
+    },
+    "worst_case": false,
+    "p_unseen": 0.005,
+    "kills": {}
+   },
+   "Set L": {
+    "n": 1094,
+    "successors": {
+     "Move Choice": 1094
+    },
+    "worst_case": false,
+    "p_unseen": 0.0005,
+    "kills": {}
+   },
+   "Set R": {
+    "n": 1046,
+    "successors": {
+     "Move Choice": 1046
+    },
+    "worst_case": false,
+    "p_unseen": 0.0005,
+    "kills": {}
+   },
+   "Submerged": {
+    "n": 3428,
+    "successors": {
+     "Rage?": 3428
+    },
+    "worst_case": false,
+    "p_unseen": 0.0001,
+    "kills": {}
+   },
+   "Submerged Init": {
+    "n": 99,
+    "successors": {
+     "Emerge Antic C": 99
+    },
+    "worst_case": false,
+    "p_unseen": 0.005,
+    "kills": {}
+   }
+  },
+  "edges": [
+   {
+    "from": "Bell Burst?",
+    "to": "Choose Dir",
+    "n": 2140,
+    "p": 0.6427,
+    "p_mle": 0.6428,
+    "low_n": false
+   },
+   {
+    "from": "Bell Burst?",
+    "to": "Burst Pos",
+    "n": 1189,
+    "p": 0.3572,
+    "p_mle": 0.3572,
+    "low_n": false
+   },
+   {
+    "from": "Burst Antic",
+    "to": "Fire Bells",
+    "n": 1188,
+    "p": 0.9996,
+    "p_mle": 1.0,
+    "low_n": false
+   },
+   {
+    "from": "Burst Out",
+    "to": "Burst Recovery",
+    "n": 1160,
+    "p": 0.9996,
+    "p_mle": 1.0,
+    "low_n": false
+   },
+   {
+    "from": "Burst Out",
+    "to": "Death Broadcast",
+    "n": 26,
+    "kill": true
+   },
+   {
+    "from": "Burst Pos",
+    "to": "Burst Antic",
+    "n": 1189,
+    "p": 0.9996,
+    "p_mle": 1.0,
+    "low_n": false
+   },
+   {
+    "from": "Burst Recovery",
+    "to": "Submerged",
+    "n": 1160,
+    "p": 0.9996,
+    "p_mle": 1.0,
+    "low_n": false
+   },
+   {
+    "from": "Charge",
+    "to": "Charge End",
+    "n": 1123,
+    "p": 0.9996,
+    "p_mle": 1.0,
+    "low_n": false
+   },
+   {
+    "from": "Charge",
+    "to": "Death Broadcast",
+    "n": 14,
+    "kill": true
+   },
+   {
+    "from": "Charge Antic",
+    "to": "Charge",
+    "n": 1137,
+    "p": 0.9996,
+    "p_mle": 1.0,
+    "low_n": false
+   },
+   {
+    "from": "Charge Antic",
+    "to": "Death Broadcast",
+    "n": 10,
+    "kill": true
+   },
+   {
+    "from": "Charge Emerge",
+    "to": "Charge Antic",
+    "n": 1147,
+    "p": 0.9996,
+    "p_mle": 1.0,
+    "low_n": false
+   },
+   {
+    "from": "Charge Emerge",
+    "to": "Death Broadcast",
+    "n": 10,
+    "kill": true
+   },
+   {
+    "from": "Charge End",
+    "to": "Dig In",
+    "n": 1119,
+    "p": 0.9996,
+    "p_mle": 1.0,
+    "low_n": false
+   },
+   {
+    "from": "Charge End",
+    "to": "Death Broadcast",
+    "n": 4,
+    "kill": true
+   },
+   {
+    "from": "Choose 1st Pattern",
+    "to": "Ptn R",
+    "n": 51,
+    "p": 0.5124,
+    "p_mle": 0.5152,
+    "low_n": false
+   },
+   {
+    "from": "Choose 1st Pattern",
+    "to": "Ptn L",
+    "n": 48,
+    "p": 0.4826,
+    "p_mle": 0.4848,
+    "low_n": false
+   },
+   {
+    "from": "Choose Dir",
+    "to": "Set L",
+    "n": 1094,
+    "p": 0.5111,
+    "p_mle": 0.5112,
+    "low_n": false
+   },
+   {
+    "from": "Choose Dir",
+    "to": "Set R",
+    "n": 1046,
+    "p": 0.4887,
+    "p_mle": 0.4888,
+    "low_n": false
+   },
+   {
+    "from": "Descending",
+    "to": "Leap Land",
+    "n": 1070,
+    "p": 0.9995,
+    "p_mle": 1.0,
+    "low_n": false
+   },
+   {
+    "from": "Descending",
+    "to": "Death Broadcast",
+    "n": 5,
+    "kill": true
+   },
+   {
+    "from": "Dig In",
+    "to": "Submerged",
+    "n": 2175,
+    "p": 0.9998,
+    "p_mle": 1.0,
+    "low_n": false
+   },
+   {
+    "from": "Dig In",
+    "to": "Death Broadcast",
+    "n": 4,
+    "kill": true
+   },
+   {
+    "from": "Dormant",
+    "to": "Submerged Init",
+    "n": 99,
+    "p": 0.995,
+    "p_mle": 1.0,
+    "low_n": false
+   },
+   {
+    "from": "Emerge Antic C",
+    "to": "Charge Emerge",
+    "n": 1157,
+    "p": 0.9996,
+    "p_mle": 1.0,
+    "low_n": false
+   },
+   {
+    "from": "Emerge Antic L",
+    "to": "Leap Out",
+    "n": 1081,
+    "p": 0.9995,
+    "p_mle": 1.0,
+    "low_n": false
+   },
+   {
+    "from": "Fire Bells",
+    "to": "Burst Out",
+    "n": 1188,
+    "p": 0.9996,
+    "p_mle": 1.0,
+    "low_n": false
+   },
+   {
+    "from": "Leap Land",
+    "to": "Dig In",
+    "n": 1060,
+    "p": 0.9995,
+    "p_mle": 1.0,
+    "low_n": false
+   },
+   {
+    "from": "Leap Land",
+    "to": "Death Broadcast",
+    "n": 10,
+    "kill": true
+   },
+   {
+    "from": "Leap Out",
+    "to": "Descending",
+    "n": 1075,
+    "p": 0.9995,
+    "p_mle": 1.0,
+    "low_n": false
+   },
+   {
+    "from": "Leap Out",
+    "to": "Death Broadcast",
+    "n": 5,
+    "kill": true
+   },
+   {
+    "from": "Move Choice",
+    "to": "Emerge Antic L",
+    "n": 1082,
+    "p": 0.5055,
+    "p_mle": 0.5056,
+    "low_n": false
+   },
+   {
+    "from": "Move Choice",
+    "to": "Emerge Antic C",
+    "n": 1058,
+    "p": 0.4943,
+    "p_mle": 0.4944,
+    "low_n": false
+   },
+   {
+    "from": "Ptn L",
+    "to": "Rage End",
+    "n": 48,
+    "p": 0.9898,
+    "p_mle": 1.0,
+    "low_n": false
+   },
+   {
+    "from": "Ptn R",
+    "to": "Rage End",
+    "n": 51,
+    "p": 0.9904,
+    "p_mle": 1.0,
+    "low_n": false
+   },
+   {
+    "from": "Rage Antic",
+    "to": "Rage Burst",
+    "n": 99,
+    "p": 0.995,
+    "p_mle": 1.0,
+    "low_n": false
+   },
+   {
+    "from": "Rage Burst",
+    "to": "Rage Roar",
+    "n": 99,
+    "p": 0.995,
+    "p_mle": 1.0,
+    "low_n": false
+   },
+   {
+    "from": "Rage End",
+    "to": "Submerged",
+    "n": 99,
+    "p": 0.995,
+    "p_mle": 1.0,
+    "low_n": false
+   },
+   {
+    "from": "Rage Pos",
+    "to": "Rage Antic",
+    "n": 99,
+    "p": 0.995,
+    "p_mle": 1.0,
+    "low_n": false
+   },
+   {
+    "from": "Rage Roar",
+    "to": "Roar End",
+    "n": 99,
+    "p": 0.995,
+    "p_mle": 1.0,
+    "low_n": false
+   },
+   {
+    "from": "Rage Rumble",
+    "to": "Choose 1st Pattern",
+    "n": 99,
+    "p": 0.995,
+    "p_mle": 1.0,
+    "low_n": false
+   },
+   {
+    "from": "Rage Submerge",
+    "to": "Rage Rumble",
+    "n": 99,
+    "p": 0.995,
+    "p_mle": 1.0,
+    "low_n": false
+   },
+   {
+    "from": "Rage?",
+    "to": "Bell Burst?",
+    "n": 3329,
+    "p": 0.9708,
+    "p_mle": 0.9711,
+    "low_n": false
+   },
+   {
+    "from": "Rage?",
+    "to": "Rage Pos",
+    "n": 99,
+    "p": 0.029,
+    "p_mle": 0.0289,
+    "low_n": false
+   },
+   {
+    "from": "Roar End",
+    "to": "Rage Submerge",
+    "n": 99,
+    "p": 0.995,
+    "p_mle": 1.0,
+    "low_n": false
+   },
+   {
+    "from": "Set L",
+    "to": "Move Choice",
+    "n": 1094,
+    "p": 0.9995,
+    "p_mle": 1.0,
+    "low_n": false
+   },
+   {
+    "from": "Set R",
+    "to": "Move Choice",
+    "n": 1046,
+    "p": 0.9995,
+    "p_mle": 1.0,
+    "low_n": false
+   },
+   {
+    "from": "Submerged",
+    "to": "Rage?",
+    "n": 3428,
+    "p": 0.9999,
+    "p_mle": 1.0,
+    "low_n": false
+   },
+   {
+    "from": "Submerged Init",
+    "to": "Emerge Antic C",
+    "n": 99,
+    "p": 0.995,
+    "p_mle": 1.0,
+    "low_n": false
+   }
+  ],
+  "static_graph": false,
+  "global_targets": [],
+  "branching": [
+   "Bell Burst?",
+   "Choose 1st Pattern",
+   "Choose Dir",
+   "Move Choice",
+   "Rage?"
+  ]
+ },
+ "dwell_s": {
+  "Bell Burst?": {
+   "p0_5": 0.0,
+   "p5": 0.0,
+   "p50": 0.0,
+   "p95": 0.0,
+   "p99_5": 0.0,
+   "min": 0.0,
+   "max": 0.0,
+   "n": 3329,
+   "state_time_s": {
+    "p0_5": 0.0,
+    "p5": 0.0,
+    "p50": 0.0,
+    "p95": 0.0,
+    "p99_5": 0.0,
+    "min": 0.0,
+    "max": 0.0,
+    "n": 3329
+   },
+   "frames": {
+    "p0_5": 0.0,
+    "p5": 0.0,
+    "p50": 0.0,
+    "p95": 0.0,
+    "p99_5": 0.0,
+    "min": 0.0,
+    "max": 0.0,
+    "n": 3329
+   },
+   "instant": true,
+   "worst_case": false,
+   "max_abs_dwell_minus_state_time": 0.0,
+   "by_successor": {
+    "Choose Dir": {
+     "p0_5": 0.0,
+     "p5": 0.0,
+     "p50": 0.0,
+     "p95": 0.0,
+     "p99_5": 0.0,
+     "min": 0.0,
+     "max": 0.0,
+     "n": 2140
+    },
+    "Burst Pos": {
+     "p0_5": 0.0,
+     "p5": 0.0,
+     "p50": 0.0,
+     "p95": 0.0,
+     "p99_5": 0.0,
+     "min": 0.0,
+     "max": 0.0,
+     "n": 1189
+    }
+   }
+  },
+  "Burst Antic": {
+   "p0_5": 1.2,
+   "p5": 1.2,
+   "p50": 1.2166,
+   "p95": 1.2167,
+   "p99_5": 1.2167,
+   "min": 1.2,
+   "max": 1.2169,
+   "n": 1188,
+   "state_time_s": {
+    "p0_5": 1.2,
+    "p5": 1.2,
+    "p50": 1.2166,
+    "p95": 1.2167,
+    "p99_5": 1.2167,
+    "min": 1.2,
+    "max": 1.2169,
+    "n": 1188
+   },
+   "frames": {
+    "p0_5": 72.0,
+    "p5": 72.0,
+    "p50": 73.0,
+    "p95": 73.0,
+    "p99_5": 84.0,
+    "min": 72.0,
+    "max": 84.0,
+    "n": 1188
+   },
+   "instant": false,
+   "worst_case": false,
+   "max_abs_dwell_minus_state_time": 0.0
+  },
+  "Burst Out": {
+   "p0_5": 0.8999,
+   "p5": 0.9,
+   "p50": 0.9083,
+   "p95": 0.9167,
+   "p99_5": 0.9167,
+   "min": 0.8999,
+   "max": 0.9168,
+   "n": 1160,
+   "state_time_s": {
+    "p0_5": 0.8999,
+    "p5": 0.9,
+    "p50": 0.9083,
+    "p95": 0.9167,
+    "p99_5": 0.9167,
+    "min": 0.8999,
+    "max": 0.9168,
+    "n": 1160
+   },
+   "frames": {
+    "p0_5": 54.0,
+    "p5": 54.0,
+    "p50": 55.0,
+    "p95": 66.0,
+    "p99_5": 66.0,
+    "min": 54.0,
+    "max": 83.0,
+    "n": 1160
+   },
+   "instant": false,
+   "worst_case": false,
+   "max_abs_dwell_minus_state_time": 0.0
+  },
+  "Burst Pos": {
+   "p0_5": 0.0,
+   "p5": 0.0,
+   "p50": 0.0,
+   "p95": 0.0,
+   "p99_5": 0.0,
+   "min": 0.0,
+   "max": 0.0,
+   "n": 1189,
+   "state_time_s": {
+    "p0_5": 0.0,
+    "p5": 0.0,
+    "p50": 0.0,
+    "p95": 0.0,
+    "p99_5": 0.0,
+    "min": 0.0,
+    "max": 0.0,
+    "n": 1189
+   },
+   "frames": {
+    "p0_5": 0.0,
+    "p5": 0.0,
+    "p50": 0.0,
+    "p95": 0.0,
+    "p99_5": 0.0,
+    "min": 0.0,
+    "max": 0.0,
+    "n": 1189
+   },
+   "instant": true,
+   "worst_case": false,
+   "max_abs_dwell_minus_state_time": 0.0
+  },
+  "Burst Recovery": {
+   "p0_5": 1.0,
+   "p5": 1.0,
+   "p50": 1.0083,
+   "p95": 1.0167,
+   "p99_5": 1.0167,
+   "min": 1.0,
+   "max": 1.0167,
+   "n": 1160,
+   "state_time_s": {
+    "p0_5": 1.0,
+    "p5": 1.0,
+    "p50": 1.0083,
+    "p95": 1.0167,
+    "p99_5": 1.0167,
+    "min": 1.0,
+    "max": 1.0167,
+    "n": 1160
+   },
+   "frames": {
+    "p0_5": 60.0,
+    "p5": 60.0,
+    "p50": 71.0,
+    "p95": 72.0,
+    "p99_5": 72.0,
+    "min": 60.0,
+    "max": 72.0,
+    "n": 1160
+   },
+   "instant": false,
+   "worst_case": false,
+   "max_abs_dwell_minus_state_time": 0.0
+  },
+  "Charge": {
+   "p0_5": 0.8825,
+   "p5": 0.8832,
+   "p50": 0.8834,
+   "p95": 0.8917,
+   "p99_5": 0.8918,
+   "min": 0.8805,
+   "max": 0.8948,
+   "n": 1123,
+   "state_time_s": {
+    "p0_5": 0.8825,
+    "p5": 0.8832,
+    "p50": 0.8834,
+    "p95": 0.8917,
+    "p99_5": 0.8918,
+    "min": 0.8805,
+    "max": 0.8948,
+    "n": 1123
+   },
+   "frames": {
+    "p0_5": 53.0,
+    "p5": 53.0,
+    "p50": 53.0,
+    "p95": 65.0,
+    "p99_5": 65.0,
+    "min": 53.0,
+    "max": 83.0,
+    "n": 1123
+   },
+   "instant": false,
+   "worst_case": false,
+   "max_abs_dwell_minus_state_time": 0.0
+  },
+  "Charge Antic": {
+   "p0_5": 0.5833,
+   "p5": 0.5833,
+   "p50": 0.5994,
+   "p95": 0.6,
+   "p99_5": 0.6,
+   "min": 0.5833,
+   "max": 0.6001,
+   "n": 1137,
+   "state_time_s": {
+    "p0_5": 0.5833,
+    "p5": 0.5833,
+    "p50": 0.5994,
+    "p95": 0.6,
+    "p99_5": 0.6,
+    "min": 0.5833,
+    "max": 0.6001,
+    "n": 1137
+   },
+   "frames": {
+    "p0_5": 35.0,
+    "p5": 35.0,
+    "p50": 36.0,
+    "p95": 47.0,
+    "p99_5": 47.0,
+    "min": 35.0,
+    "max": 65.0,
+    "n": 1137
+   },
+   "instant": false,
+   "worst_case": false,
+   "max_abs_dwell_minus_state_time": 0.0
+  },
+  "Charge Emerge": {
+   "p0_5": 0.7333,
+   "p5": 0.7333,
+   "p50": 0.7417,
+   "p95": 0.75,
+   "p99_5": 0.75,
+   "min": 0.7332,
+   "max": 0.7501,
+   "n": 1147,
+   "state_time_s": {
+    "p0_5": 0.7333,
+    "p5": 0.7333,
+    "p50": 0.7417,
+    "p95": 0.75,
+    "p99_5": 0.75,
+    "min": 0.7332,
+    "max": 0.7501,
+    "n": 1147
+   },
+   "frames": {
+    "p0_5": 44.0,
+    "p5": 44.0,
+    "p50": 45.0,
+    "p95": 56.0,
+    "p99_5": 56.0,
+    "min": 44.0,
+    "max": 74.0,
+    "n": 1147
+   },
+   "instant": false,
+   "worst_case": false,
+   "max_abs_dwell_minus_state_time": 0.0
+  },
+  "Charge End": {
+   "p0_5": 0.1499,
+   "p5": 0.15,
+   "p50": 0.1666,
+   "p95": 0.1667,
+   "p99_5": 0.1667,
+   "min": 0.1499,
+   "max": 0.175,
+   "n": 1119,
+   "state_time_s": {
+    "p0_5": 0.1499,
+    "p5": 0.15,
+    "p50": 0.1666,
+    "p95": 0.1667,
+    "p99_5": 0.1667,
+    "min": 0.1499,
+    "max": 0.175,
+    "n": 1119
+   },
+   "frames": {
+    "p0_5": 9.0,
+    "p5": 9.0,
+    "p50": 10.0,
+    "p95": 10.0,
+    "p99_5": 14.7,
+    "min": 9.0,
+    "max": 21.0,
+    "n": 1119
+   },
+   "instant": false,
+   "worst_case": false,
+   "max_abs_dwell_minus_state_time": 0.0
+  },
+  "Choose 1st Pattern": {
+   "p0_5": 0.0,
+   "p5": 0.0,
+   "p50": 0.0,
+   "p95": 0.0,
+   "p99_5": 0.0,
+   "min": 0.0,
+   "max": 0.0,
+   "n": 99,
+   "state_time_s": {
+    "p0_5": 0.0,
+    "p5": 0.0,
+    "p50": 0.0,
+    "p95": 0.0,
+    "p99_5": 0.0,
+    "min": 0.0,
+    "max": 0.0,
+    "n": 99
+   },
+   "frames": {
+    "p0_5": 0.0,
+    "p5": 0.0,
+    "p50": 0.0,
+    "p95": 0.0,
+    "p99_5": 0.0,
+    "min": 0.0,
+    "max": 0.0,
+    "n": 99
+   },
+   "instant": true,
+   "worst_case": false,
+   "max_abs_dwell_minus_state_time": 0.0,
+   "by_successor": {
+    "Ptn L": {
+     "p0_5": 0.0,
+     "p5": 0.0,
+     "p50": 0.0,
+     "p95": 0.0,
+     "p99_5": 0.0,
+     "min": 0.0,
+     "max": 0.0,
+     "n": 48
+    },
+    "Ptn R": {
+     "p0_5": 0.0,
+     "p5": 0.0,
+     "p50": 0.0,
+     "p95": 0.0,
+     "p99_5": 0.0,
+     "min": 0.0,
+     "max": 0.0,
+     "n": 51
+    }
+   }
+  },
+  "Choose Dir": {
+   "p0_5": 0.0,
+   "p5": 0.0,
+   "p50": 0.0,
+   "p95": 0.0,
+   "p99_5": 0.0,
+   "min": 0.0,
+   "max": 0.0,
+   "n": 2140,
+   "state_time_s": {
+    "p0_5": 0.0,
+    "p5": 0.0,
+    "p50": 0.0,
+    "p95": 0.0,
+    "p99_5": 0.0,
+    "min": 0.0,
+    "max": 0.0,
+    "n": 2140
+   },
+   "frames": {
+    "p0_5": 0.0,
+    "p5": 0.0,
+    "p50": 0.0,
+    "p95": 0.0,
+    "p99_5": 0.0,
+    "min": 0.0,
+    "max": 0.0,
+    "n": 2140
+   },
+   "instant": true,
+   "worst_case": false,
+   "max_abs_dwell_minus_state_time": 0.0,
+   "by_successor": {
+    "Set R": {
+     "p0_5": 0.0,
+     "p5": 0.0,
+     "p50": 0.0,
+     "p95": 0.0,
+     "p99_5": 0.0,
+     "min": 0.0,
+     "max": 0.0,
+     "n": 1046
+    },
+    "Set L": {
+     "p0_5": 0.0,
+     "p5": 0.0,
+     "p50": 0.0,
+     "p95": 0.0,
+     "p99_5": 0.0,
+     "min": 0.0,
+     "max": 0.0,
+     "n": 1094
+    }
+   }
+  },
+  "Descending": {
+   "p0_5": 0.65,
+   "p5": 0.6667,
+   "p50": 0.6833,
+   "p95": 0.6917,
+   "p99_5": 0.6918,
+   "min": 0.6499,
+   "max": 0.6919,
+   "n": 1070,
+   "state_time_s": {
+    "p0_5": 0.65,
+    "p5": 0.6667,
+    "p50": 0.6833,
+    "p95": 0.6917,
+    "p99_5": 0.6918,
+    "min": 0.6499,
+    "max": 0.6919,
+    "n": 1070
+   },
+   "frames": {
+    "p0_5": 41.0,
+    "p5": 41.0,
+    "p50": 41.0,
+    "p95": 53.0,
+    "p99_5": 53.0,
+    "min": 41.0,
+    "max": 53.0,
+    "n": 1070
+   },
+   "instant": false,
+   "worst_case": false,
+   "max_abs_dwell_minus_state_time": 0.0
+  },
+  "Dig In": {
+   "p0_5": 0.4,
+   "p5": 0.4,
+   "p50": 0.4167,
+   "p95": 0.4333,
+   "p99_5": 0.4334,
+   "min": 0.3999,
+   "max": 0.4335,
+   "n": 2175,
+   "state_time_s": {
+    "p0_5": 0.4,
+    "p5": 0.4,
+    "p50": 0.4167,
+    "p95": 0.4333,
+    "p99_5": 0.4334,
+    "min": 0.3999,
+    "max": 0.4335,
+    "n": 2175
+   },
+   "frames": {
+    "p0_5": 24.0,
+    "p5": 24.0,
+    "p50": 25.0,
+    "p95": 26.0,
+    "p99_5": 36.1,
+    "min": 24.0,
+    "max": 37.0,
+    "n": 2175
+   },
+   "instant": false,
+   "worst_case": false,
+   "max_abs_dwell_minus_state_time": 0.0
+  },
+  "Emerge Antic C": {
+   "p0_5": 1.0,
+   "p5": 1.0,
+   "p50": 1.0166,
+   "p95": 1.0167,
+   "p99_5": 1.0167,
+   "min": 1.0,
+   "max": 1.0168,
+   "n": 1157,
+   "state_time_s": {
+    "p0_5": 1.0,
+    "p5": 1.0,
+    "p50": 1.0166,
+    "p95": 1.0167,
+    "p99_5": 1.0167,
+    "min": 1.0,
+    "max": 1.0168,
+    "n": 1157
+   },
+   "frames": {
+    "p0_5": 60.0,
+    "p5": 60.0,
+    "p50": 61.0,
+    "p95": 61.0,
+    "p99_5": 72.0,
+    "min": 60.0,
+    "max": 72.0,
+    "n": 1157
+   },
+   "instant": false,
+   "worst_case": false,
+   "max_abs_dwell_minus_state_time": 0.0
+  },
+  "Emerge Antic L": {
+   "p0_5": 1.0,
+   "p5": 1.0,
+   "p50": 1.0166,
+   "p95": 1.0167,
+   "p99_5": 1.0167,
+   "min": 1.0,
+   "max": 1.0168,
+   "n": 1081,
+   "state_time_s": {
+    "p0_5": 1.0,
+    "p5": 1.0,
+    "p50": 1.0166,
+    "p95": 1.0167,
+    "p99_5": 1.0167,
+    "min": 1.0,
+    "max": 1.0168,
+    "n": 1081
+   },
+   "frames": {
+    "p0_5": 60.0,
+    "p5": 60.0,
+    "p50": 61.0,
+    "p95": 61.0,
+    "p99_5": 72.0,
+    "min": 60.0,
+    "max": 72.0,
+    "n": 1081
+   },
+   "instant": false,
+   "worst_case": false,
+   "max_abs_dwell_minus_state_time": 0.0
+  },
+  "Fire Bells": {
+   "p0_5": 0.0,
+   "p5": 0.0,
+   "p50": 0.0,
+   "p95": 0.0,
+   "p99_5": 0.0,
+   "min": 0.0,
+   "max": 0.0,
+   "n": 1188,
+   "state_time_s": {
+    "p0_5": 0.0,
+    "p5": 0.0,
+    "p50": 0.0,
+    "p95": 0.0,
+    "p99_5": 0.0,
+    "min": 0.0,
+    "max": 0.0,
+    "n": 1188
+   },
+   "frames": {
+    "p0_5": 0.0,
+    "p5": 0.0,
+    "p50": 0.0,
+    "p95": 0.0,
+    "p99_5": 0.0,
+    "min": 0.0,
+    "max": 0.0,
+    "n": 1188
+   },
+   "instant": true,
+   "worst_case": false,
+   "max_abs_dwell_minus_state_time": 0.0
+  },
+  "Leap Land": {
+   "p0_5": 1.0666,
+   "p5": 1.0667,
+   "p50": 1.075,
+   "p95": 1.0834,
+   "p99_5": 1.1,
+   "min": 1.0666,
+   "max": 1.1,
+   "n": 1060,
+   "state_time_s": {
+    "p0_5": 1.0666,
+    "p5": 1.0667,
+    "p50": 1.075,
+    "p95": 1.0834,
+    "p99_5": 1.1,
+    "min": 1.0666,
+    "max": 1.1,
+    "n": 1060
+   },
+   "frames": {
+    "p0_5": 64.0,
+    "p5": 64.0,
+    "p50": 65.0,
+    "p95": 76.0,
+    "p99_5": 87.0,
+    "min": 64.0,
+    "max": 88.0,
+    "n": 1060
+   },
+   "instant": false,
+   "worst_case": false,
+   "max_abs_dwell_minus_state_time": 0.0
+  },
+  "Leap Out": {
+   "p0_5": 0.8167,
+   "p5": 0.8167,
+   "p50": 0.825,
+   "p95": 0.8333,
+   "p99_5": 0.8334,
+   "min": 0.8,
+   "max": 0.8358,
+   "n": 1075,
+   "state_time_s": {
+    "p0_5": 0.8167,
+    "p5": 0.8167,
+    "p50": 0.825,
+    "p95": 0.8333,
+    "p99_5": 0.8334,
+    "min": 0.8,
+    "max": 0.8358,
+    "n": 1075
+   },
+   "frames": {
+    "p0_5": 49.0,
+    "p5": 49.0,
+    "p50": 50.0,
+    "p95": 61.0,
+    "p99_5": 61.0,
+    "min": 49.0,
+    "max": 61.0,
+    "n": 1075
+   },
+   "instant": false,
+   "worst_case": false,
+   "max_abs_dwell_minus_state_time": 0.0
+  },
+  "Move Choice": {
+   "p0_5": 0.0,
+   "p5": 0.0,
+   "p50": 0.0,
+   "p95": 0.0,
+   "p99_5": 0.0,
+   "min": 0.0,
+   "max": 0.0,
+   "n": 2140,
+   "state_time_s": {
+    "p0_5": 0.0,
+    "p5": 0.0,
+    "p50": 0.0,
+    "p95": 0.0,
+    "p99_5": 0.0,
+    "min": 0.0,
+    "max": 0.0,
+    "n": 2140
+   },
+   "frames": {
+    "p0_5": 0.0,
+    "p5": 0.0,
+    "p50": 0.0,
+    "p95": 0.0,
+    "p99_5": 0.0,
+    "min": 0.0,
+    "max": 0.0,
+    "n": 2140
+   },
+   "instant": true,
+   "worst_case": false,
+   "max_abs_dwell_minus_state_time": 0.0,
+   "by_successor": {
+    "Emerge Antic L": {
+     "p0_5": 0.0,
+     "p5": 0.0,
+     "p50": 0.0,
+     "p95": 0.0,
+     "p99_5": 0.0,
+     "min": 0.0,
+     "max": 0.0,
+     "n": 1082
+    },
+    "Emerge Antic C": {
+     "p0_5": 0.0,
+     "p5": 0.0,
+     "p50": 0.0,
+     "p95": 0.0,
+     "p99_5": 0.0,
+     "min": 0.0,
+     "max": 0.0,
+     "n": 1058
+    }
+   }
+  },
+  "Ptn L": {
+   "p0_5": 7.5001,
+   "p5": 7.5038,
+   "p50": 7.5083,
+   "p95": 7.5166,
+   "p99_5": 7.5166,
+   "min": 7.5,
+   "max": 7.5166,
+   "n": 48,
+   "state_time_s": {
+    "p0_5": 7.5001,
+    "p5": 7.5038,
+    "p50": 7.5083,
+    "p95": 7.5166,
+    "p99_5": 7.5166,
+    "min": 7.5,
+    "max": 7.5166,
+    "n": 48
+   },
+   "frames": {
+    "p0_5": 450.2,
+    "p5": 451.0,
+    "p50": 472.0,
+    "p95": 491.5,
+    "p99_5": 496.0,
+    "min": 450.0,
+    "max": 496.0,
+    "n": 48
+   },
+   "instant": false,
+   "worst_case": false,
+   "max_abs_dwell_minus_state_time": 0.0
+  },
+  "Ptn R": {
+   "p0_5": 7.5,
+   "p5": 7.5,
+   "p50": 7.5083,
+   "p95": 7.5166,
+   "p99_5": 7.5166,
+   "min": 7.5,
+   "max": 7.5166,
+   "n": 51,
+   "state_time_s": {
+    "p0_5": 7.5,
+    "p5": 7.5001,
+    "p50": 7.5083,
+    "p95": 7.5166,
+    "p99_5": 7.5166,
+    "min": 7.5,
+    "max": 7.5166,
+    "n": 51
+   },
+   "frames": {
+    "p0_5": 451.0,
+    "p5": 451.0,
+    "p50": 473.0,
+    "p95": 495.0,
+    "p99_5": 496.0,
+    "min": 451.0,
+    "max": 496.0,
+    "n": 51
+   },
+   "instant": false,
+   "worst_case": false,
+   "max_abs_dwell_minus_state_time": 0.0
+  },
+  "Rage Antic": {
+   "p0_5": 1.2,
+   "p5": 1.2,
+   "p50": 1.2166,
+   "p95": 1.2167,
+   "p99_5": 1.2167,
+   "min": 1.2,
+   "max": 1.2167,
+   "n": 99,
+   "state_time_s": {
+    "p0_5": 1.2,
+    "p5": 1.2,
+    "p50": 1.2166,
+    "p95": 1.2167,
+    "p99_5": 1.2167,
+    "min": 1.2,
+    "max": 1.2167,
+    "n": 99
+   },
+   "frames": {
+    "p0_5": 72.0,
+    "p5": 72.0,
+    "p50": 73.0,
+    "p95": 73.0,
+    "p99_5": 73.0,
+    "min": 72.0,
+    "max": 73.0,
+    "n": 99
+   },
+   "instant": false,
+   "worst_case": false,
+   "max_abs_dwell_minus_state_time": 0.0
+  },
+  "Rage Burst": {
+   "p0_5": 0.0833,
+   "p5": 0.0833,
+   "p50": 0.0833,
+   "p95": 0.0917,
+   "p99_5": 0.0917,
+   "min": 0.0833,
+   "max": 0.0917,
+   "n": 99,
+   "state_time_s": {
+    "p0_5": 0.0833,
+    "p5": 0.0833,
+    "p50": 0.0833,
+    "p95": 0.0917,
+    "p99_5": 0.0917,
+    "min": 0.0833,
+    "max": 0.0917,
+    "n": 99
+   },
+   "frames": {
+    "p0_5": 5.0,
+    "p5": 5.0,
+    "p50": 5.0,
+    "p95": 17.0,
+    "p99_5": 17.0,
+    "min": 5.0,
+    "max": 17.0,
+    "n": 99
+   },
+   "instant": false,
+   "worst_case": false,
+   "max_abs_dwell_minus_state_time": 0.0
+  },
+  "Rage End": {
+   "p0_5": 0.0,
+   "p5": 0.0,
+   "p50": 0.0,
+   "p95": 0.0,
+   "p99_5": 0.0,
+   "min": 0.0,
+   "max": 0.0,
+   "n": 99,
+   "state_time_s": {
+    "p0_5": 0.0,
+    "p5": 0.0,
+    "p50": 0.0,
+    "p95": 0.0,
+    "p99_5": 0.0,
+    "min": 0.0,
+    "max": 0.0,
+    "n": 99
+   },
+   "frames": {
+    "p0_5": 0.0,
+    "p5": 0.0,
+    "p50": 0.0,
+    "p95": 0.0,
+    "p99_5": 0.0,
+    "min": 0.0,
+    "max": 0.0,
+    "n": 99
+   },
+   "instant": true,
+   "worst_case": false,
+   "max_abs_dwell_minus_state_time": 0.0
+  },
+  "Rage Pos": {
+   "p0_5": 1.0,
+   "p5": 1.0,
+   "p50": 1.0166,
+   "p95": 1.0167,
+   "p99_5": 1.0167,
+   "min": 1.0,
+   "max": 1.0167,
+   "n": 99,
+   "state_time_s": {
+    "p0_5": 1.0,
+    "p5": 1.0,
+    "p50": 1.0166,
+    "p95": 1.0167,
+    "p99_5": 1.0167,
+    "min": 1.0,
+    "max": 1.0167,
+    "n": 99
+   },
+   "frames": {
+    "p0_5": 60.0,
+    "p5": 60.0,
+    "p50": 61.0,
+    "p95": 61.0,
+    "p99_5": 61.0,
+    "min": 60.0,
+    "max": 61.0,
+    "n": 99
+   },
+   "instant": false,
+   "worst_case": false,
+   "max_abs_dwell_minus_state_time": 0.0
+  },
+  "Rage Roar": {
+   "p0_5": 1.5,
+   "p5": 1.5,
+   "p50": 1.5083,
+   "p95": 1.5167,
+   "p99_5": 1.5167,
+   "min": 1.5,
+   "max": 1.5167,
+   "n": 99,
+   "state_time_s": {
+    "p0_5": 1.5,
+    "p5": 1.5,
+    "p50": 1.5083,
+    "p95": 1.5167,
+    "p99_5": 1.5167,
+    "min": 1.5,
+    "max": 1.5167,
+    "n": 99
+   },
+   "frames": {
+    "p0_5": 90.0,
+    "p5": 90.0,
+    "p50": 101.0,
+    "p95": 102.0,
+    "p99_5": 113.5,
+    "min": 90.0,
+    "max": 114.0,
+    "n": 99
+   },
+   "instant": false,
+   "worst_case": false,
+   "max_abs_dwell_minus_state_time": 0.0
+  },
+  "Rage Rumble": {
+   "p0_5": 2.0,
+   "p5": 2.0,
+   "p50": 2.0166,
+   "p95": 2.0167,
+   "p99_5": 2.0167,
+   "min": 2.0,
+   "max": 2.0167,
+   "n": 99,
+   "state_time_s": {
+    "p0_5": 2.0,
+    "p5": 2.0,
+    "p50": 2.0166,
+    "p95": 2.0167,
+    "p99_5": 2.0167,
+    "min": 2.0,
+    "max": 2.0167,
+    "n": 99
+   },
+   "frames": {
+    "p0_5": 120.0,
+    "p5": 120.0,
+    "p50": 121.0,
+    "p95": 121.0,
+    "p99_5": 121.0,
+    "min": 120.0,
+    "max": 121.0,
+    "n": 99
+   },
+   "instant": false,
+   "worst_case": false,
+   "max_abs_dwell_minus_state_time": 0.0
+  },
+  "Rage Submerge": {
+   "p0_5": 1.0,
+   "p5": 1.0,
+   "p50": 1.0166,
+   "p95": 1.0167,
+   "p99_5": 1.0167,
+   "min": 1.0,
+   "max": 1.0167,
+   "n": 99,
+   "state_time_s": {
+    "p0_5": 1.0,
+    "p5": 1.0,
+    "p50": 1.0166,
+    "p95": 1.0167,
+    "p99_5": 1.0167,
+    "min": 1.0,
+    "max": 1.0167,
+    "n": 99
+   },
+   "frames": {
+    "p0_5": 60.0,
+    "p5": 60.0,
+    "p50": 61.0,
+    "p95": 61.0,
+    "p99_5": 61.0,
+    "min": 60.0,
+    "max": 61.0,
+    "n": 99
+   },
+   "instant": false,
+   "worst_case": false,
+   "max_abs_dwell_minus_state_time": 0.0
+  },
+  "Rage?": {
+   "p0_5": 0.0,
+   "p5": 0.0,
+   "p50": 0.0,
+   "p95": 0.0,
+   "p99_5": 0.0,
+   "min": 0.0,
+   "max": 0.0,
+   "n": 3428,
+   "state_time_s": {
+    "p0_5": 0.0,
+    "p5": 0.0,
+    "p50": 0.0,
+    "p95": 0.0,
+    "p99_5": 0.0,
+    "min": 0.0,
+    "max": 0.0,
+    "n": 3428
+   },
+   "frames": {
+    "p0_5": 0.0,
+    "p5": 0.0,
+    "p50": 0.0,
+    "p95": 0.0,
+    "p99_5": 0.0,
+    "min": 0.0,
+    "max": 0.0,
+    "n": 3428
+   },
+   "instant": true,
+   "worst_case": false,
+   "max_abs_dwell_minus_state_time": 0.0,
+   "by_successor": {
+    "Bell Burst?": {
+     "p0_5": 0.0,
+     "p5": 0.0,
+     "p50": 0.0,
+     "p95": 0.0,
+     "p99_5": 0.0,
+     "min": 0.0,
+     "max": 0.0,
+     "n": 3329
+    },
+    "Rage Pos": {
+     "p0_5": 0.0,
+     "p5": 0.0,
+     "p50": 0.0,
+     "p95": 0.0,
+     "p99_5": 0.0,
+     "min": 0.0,
+     "max": 0.0,
+     "n": 99
+    }
+   }
+  },
+  "Roar End": {
+   "p0_5": 0.2333,
+   "p5": 0.2333,
+   "p50": 0.2499,
+   "p95": 0.25,
+   "p99_5": 0.2501,
+   "min": 0.2333,
+   "max": 0.2501,
+   "n": 99,
+   "state_time_s": {
+    "p0_5": 0.2333,
+    "p5": 0.2333,
+    "p50": 0.2499,
+    "p95": 0.25,
+    "p99_5": 0.2501,
+    "min": 0.2333,
+    "max": 0.2501,
+    "n": 99
+   },
+   "frames": {
+    "p0_5": 14.0,
+    "p5": 14.0,
+    "p50": 15.0,
+    "p95": 15.0,
+    "p99_5": 20.6,
+    "min": 14.0,
+    "max": 26.0,
+    "n": 99
+   },
+   "instant": false,
+   "worst_case": false,
+   "max_abs_dwell_minus_state_time": 0.0
+  },
+  "Set L": {
+   "p0_5": 0.0,
+   "p5": 0.0,
+   "p50": 0.0,
+   "p95": 0.0,
+   "p99_5": 0.0,
+   "min": 0.0,
+   "max": 0.0,
+   "n": 1094,
+   "state_time_s": {
+    "p0_5": 0.0,
+    "p5": 0.0,
+    "p50": 0.0,
+    "p95": 0.0,
+    "p99_5": 0.0,
+    "min": 0.0,
+    "max": 0.0,
+    "n": 1094
+   },
+   "frames": {
+    "p0_5": 0.0,
+    "p5": 0.0,
+    "p50": 0.0,
+    "p95": 0.0,
+    "p99_5": 0.0,
+    "min": 0.0,
+    "max": 0.0,
+    "n": 1094
+   },
+   "instant": true,
+   "worst_case": false,
+   "max_abs_dwell_minus_state_time": 0.0
+  },
+  "Set R": {
+   "p0_5": 0.0,
+   "p5": 0.0,
+   "p50": 0.0,
+   "p95": 0.0,
+   "p99_5": 0.0,
+   "min": 0.0,
+   "max": 0.0,
+   "n": 1046,
+   "state_time_s": {
+    "p0_5": 0.0,
+    "p5": 0.0,
+    "p50": 0.0,
+    "p95": 0.0,
+    "p99_5": 0.0,
+    "min": 0.0,
+    "max": 0.0,
+    "n": 1046
+   },
+   "frames": {
+    "p0_5": 0.0,
+    "p5": 0.0,
+    "p50": 0.0,
+    "p95": 0.0,
+    "p99_5": 0.0,
+    "min": 0.0,
+    "max": 0.0,
+    "n": 1046
+   },
+   "instant": true,
+   "worst_case": false,
+   "max_abs_dwell_minus_state_time": 0.0
+  },
+  "Submerged": {
+   "p0_5": 1.0,
+   "p5": 1.0,
+   "p50": 1.0166,
+   "p95": 1.0167,
+   "p99_5": 1.0167,
+   "min": 1.0,
+   "max": 1.0173,
+   "n": 3428,
+   "state_time_s": {
+    "p0_5": 1.0,
+    "p5": 1.0,
+    "p50": 1.0166,
+    "p95": 1.0167,
+    "p99_5": 1.0167,
+    "min": 1.0,
+    "max": 1.0173,
+    "n": 3428
+   },
+   "frames": {
+    "p0_5": 60.0,
+    "p5": 60.0,
+    "p50": 61.0,
+    "p95": 71.0,
+    "p99_5": 72.0,
+    "min": 60.0,
+    "max": 89.0,
+    "n": 3428
+   },
+   "instant": false,
+   "worst_case": false,
+   "max_abs_dwell_minus_state_time": 0.0
+  },
+  "Submerged Init": {
+   "p0_5": 2.0,
+   "p5": 2.0147,
+   "p50": 2.0147,
+   "p95": 2.0166,
+   "p99_5": 2.0167,
+   "min": 2.0,
+   "max": 2.0167,
+   "n": 99,
+   "state_time_s": {
+    "p0_5": 2.0,
+    "p5": 2.0146,
+    "p50": 2.0146,
+    "p95": 2.0166,
+    "p99_5": 2.0167,
+    "min": 2.0,
+    "max": 2.0167,
+    "n": 99
+   },
+   "frames": {
+    "p0_5": 120.0,
+    "p5": 121.0,
+    "p50": 121.0,
+    "p95": 121.0,
+    "p99_5": 124.0,
+    "min": 120.0,
+    "max": 124.0,
+    "n": 99
+   },
+   "instant": false,
+   "worst_case": false,
+   "max_abs_dwell_minus_state_time": 0.0
+  }
+ },
+ "decisions": {
+  "Bell Burst?": {
+   "n": 3329,
+   "to": {
+    "Choose Dir": 2140,
+    "Burst Pos": 1189
+   },
+   "worst_case": false,
+   "boss_ref": {
+    "last": 3329
+   },
+   "dist_bins_u": [
+    0.0,
+    3.0,
+    6.0,
+    10.0,
+    99.0
+   ],
+   "by_dist_bin": {
+    "0": {
+     "Choose Dir": 423,
+     "Burst Pos": 234
+    },
+    "1": {
+     "Choose Dir": 396,
+     "Burst Pos": 263
+    },
+    "2": {
+     "Choose Dir": 681,
+     "Burst Pos": 322
+    },
+    "3": {
+     "Choose Dir": 640,
+     "Burst Pos": 370
+    }
+   },
+   "by_side": {
+    "L": {
+     "Choose Dir": 1068,
+     "Burst Pos": 597
+    },
+    "R": {
+     "Choose Dir": 1072,
+     "Burst Pos": 592
+    }
+   },
+   "by_hero_third": {
+    "C": {
+     "Choose Dir": 760,
+     "Burst Pos": 377
+    },
+    "E": {
+     "Choose Dir": 711,
+     "Burst Pos": 404
+    },
+    "W": {
+     "Choose Dir": 669,
+     "Burst Pos": 408
+    }
+   },
+   "by_phase": {
+    "P1": {
+     "Choose Dir": 1118,
+     "Burst Pos": 450
+    },
+    "P2": {
+     "Burst Pos": 739,
+     "Choose Dir": 1022
+    }
+   },
+   "context": {
+    "Choose Dir": {
+     "dx": {
+      "p0_5": -22.199,
+      "p5": -15.124,
+      "p50": 0.083,
+      "p95": 15.781,
+      "p99_5": 22.936,
+      "min": -27.925,
+      "max": 23.924,
+      "n": 2140
+     },
+     "dy": {
+      "p0_5": -1.922,
+      "p5": -1.922,
+      "p50": -1.922,
+      "p95": 2.661,
+      "p99_5": 3.437,
+      "min": -1.928,
+      "max": 4.502,
+      "n": 2140
+     },
+     "hero_x": {
+      "p0_5": 70.87,
+      "p5": 74.647,
+      "p50": 85.792,
+      "p95": 96.059,
+      "p99_5": 99.971,
+      "min": 69.473,
+      "max": 101.737,
+      "n": 2140
+     },
+     "boss_hp": {
+      "p0_5": 5.0,
+      "p5": 10.0,
+      "p50": 80.0,
+      "p95": 140.0,
+      "p99_5": 150.0,
+      "min": 5.0,
+      "max": 150.0,
+      "n": 2140
+     }
+    },
+    "Burst Pos": {
+     "dx": {
+      "p0_5": -22.757,
+      "p5": -15.753,
+      "p50": -0.149,
+      "p95": 16.17,
+      "p99_5": 22.556,
+      "min": -24.241,
+      "max": 23.323,
+      "n": 1189
+     },
+     "dy": {
+      "p0_5": -1.922,
+      "p5": -1.922,
+      "p50": -1.922,
+      "p95": 2.794,
+      "p99_5": 3.473,
+      "min": -1.923,
+      "max": 4.586,
+      "n": 1189
+     },
+     "hero_x": {
+      "p0_5": 70.52,
+      "p5": 74.831,
+      "p50": 84.968,
+      "p95": 95.948,
+      "p99_5": 100.119,
+      "min": 69.676,
+      "max": 101.737,
+      "n": 1189
+     },
+     "boss_hp": {
+      "p0_5": 5.0,
+      "p5": 10.0,
+      "p50": 60.0,
+      "p95": 115.0,
+      "p99_5": 120.0,
+      "min": 5.0,
+      "max": 120.0,
+      "n": 1189
+     }
+    }
+   }
+  },
+  "Choose 1st Pattern": {
+   "n": 99,
+   "to": {
+    "Ptn R": 51,
+    "Ptn L": 48
+   },
+   "worst_case": false,
+   "boss_ref": {
+    "last": 99
+   },
+   "dist_bins_u": [
+    0.0,
+    3.0,
+    6.0,
+    10.0,
+    99.0
+   ],
+   "by_dist_bin": {
+    "0": {
+     "Ptn L": 16,
+     "Ptn R": 13
+    },
+    "1": {
+     "Ptn L": 22,
+     "Ptn R": 21
+    },
+    "2": {
+     "Ptn R": 14,
+     "Ptn L": 7
+    },
+    "3": {
+     "Ptn L": 3,
+     "Ptn R": 3
+    }
+   },
+   "by_side": {
+    "L": {
+     "Ptn L": 23,
+     "Ptn R": 34
+    },
+    "R": {
+     "Ptn L": 25,
+     "Ptn R": 17
+    }
+   },
+   "by_hero_third": {
+    "C": {
+     "Ptn L": 21,
+     "Ptn R": 21
+    },
+    "E": {
+     "Ptn L": 16,
+     "Ptn R": 10
+    },
+    "W": {
+     "Ptn R": 20,
+     "Ptn L": 11
+    }
+   },
+   "by_phase": {
+    "P1": {
+     "Ptn L": 48,
+     "Ptn R": 51
+    }
+   },
+   "context": {
+    "Ptn L": {
+     "dx": {
+      "p0_5": -11.455,
+      "p5": -9.633,
+      "p50": 0.774,
+      "p95": 6.695,
+      "p99_5": 9.438,
+      "min": -11.723,
+      "max": 9.767,
+      "n": 48
+     },
+     "dy": {
+      "p0_5": -1.922,
+      "p5": -1.922,
+      "p50": -1.922,
+      "p95": 2.252,
+      "p99_5": 2.732,
+      "min": -1.922,
+      "max": 2.791,
+      "n": 48
+     },
+     "hero_x": {
+      "p0_5": 74.755,
+      "p5": 76.577,
+      "p50": 86.984,
+      "p95": 92.905,
+      "p99_5": 95.648,
+      "min": 74.487,
+      "max": 95.977,
+      "n": 48
+     },
+     "boss_hp": {
+      "p0_5": 46.175,
+      "p5": 56.75,
+      "p50": 70.0,
+      "p95": 75.0,
+      "p99_5": 75.0,
+      "min": 45.0,
+      "max": 75.0,
+      "n": 48
+     }
+    },
+    "Ptn R": {
+     "dx": {
+      "p0_5": -12.004,
+      "p5": -10.081,
+      "p50": -3.292,
+      "p95": 7.791,
+      "p99_5": 8.89,
+      "min": -12.13,
+      "max": 8.947,
+      "n": 51
+     },
+     "dy": {
+      "p0_5": -1.922,
+      "p5": -1.922,
+      "p50": -1.921,
+      "p95": 2.835,
+      "p99_5": 3.453,
+      "min": -1.922,
+      "max": 3.464,
+      "n": 51
+     },
+     "hero_x": {
+      "p0_5": 74.206,
+      "p5": 76.129,
+      "p50": 82.918,
+      "p95": 94.001,
+      "p99_5": 95.1,
+      "min": 74.08,
+      "max": 95.157,
+      "n": 51
+     },
+     "boss_hp": {
+      "p0_5": 50.0,
+      "p5": 55.0,
+      "p50": 70.0,
+      "p95": 75.0,
+      "p99_5": 75.0,
+      "min": 50.0,
+      "max": 75.0,
+      "n": 51
+     }
+    }
+   }
+  },
+  "Choose Dir": {
+   "n": 2140,
+   "to": {
+    "Set L": 1094,
+    "Set R": 1046
+   },
+   "worst_case": false,
+   "boss_ref": {
+    "last": 2140
+   },
+   "dist_bins_u": [
+    0.0,
+    3.0,
+    6.0,
+    10.0,
+    99.0
+   ],
+   "by_dist_bin": {
+    "0": {
+     "Set L": 212,
+     "Set R": 211
+    },
+    "1": {
+     "Set R": 205,
+     "Set L": 191
+    },
+    "2": {
+     "Set R": 326,
+     "Set L": 355
+    },
+    "3": {
+     "Set L": 336,
+     "Set R": 304
+    }
+   },
+   "by_side": {
+    "L": {
+     "Set L": 479,
+     "Set R": 589
+    },
+    "R": {
+     "Set R": 457,
+     "Set L": 615
+    }
+   },
+   "by_hero_third": {
+    "C": {
+     "Set R": 360,
+     "Set L": 400
+    },
+    "E": {
+     "Set L": 287,
+     "Set R": 424
+    },
+    "W": {
+     "Set L": 407,
+     "Set R": 262
+    }
+   },
+   "by_phase": {
+    "P1": {
+     "Set R": 547,
+     "Set L": 571
+    },
+    "P2": {
+     "Set R": 499,
+     "Set L": 523
+    }
+   },
+   "context": {
+    "Set R": {
+     "dx": {
+      "p0_5": -21.325,
+      "p5": -15.345,
+      "p50": -1.759,
+      "p95": 15.276,
+      "p99_5": 23.032,
+      "min": -27.925,
+      "max": 23.776,
+      "n": 1046
+     },
+     "dy": {
+      "p0_5": -1.922,
+      "p5": -1.922,
+      "p50": -1.922,
+      "p95": 2.613,
+      "p99_5": 3.472,
+      "min": -1.928,
+      "max": 4.502,
+      "n": 1046
+     },
+     "hero_x": {
+      "p0_5": 70.735,
+      "p5": 75.038,
+      "p50": 87.725,
+      "p95": 96.694,
+      "p99_5": 100.276,
+      "min": 69.473,
+      "max": 101.737,
+      "n": 1046
+     },
+     "boss_hp": {
+      "p0_5": 5.0,
+      "p5": 15.0,
+      "p50": 80.0,
+      "p95": 145.0,
+      "p99_5": 150.0,
+      "min": 5.0,
+      "max": 150.0,
+      "n": 1046
+     }
+    },
+    "Set L": {
+     "dx": {
+      "p0_5": -22.298,
+      "p5": -14.913,
+      "p50": 1.611,
+      "p95": 16.282,
+      "p99_5": 22.833,
+      "min": -23.164,
+      "max": 23.924,
+      "n": 1094
+     },
+     "dy": {
+      "p0_5": -1.922,
+      "p5": -1.922,
+      "p50": -1.922,
+      "p95": 2.742,
+      "p99_5": 3.414,
+      "min": -1.923,
+      "max": 3.589,
+      "n": 1094
+     },
+     "hero_x": {
+      "p0_5": 70.99,
+      "p5": 74.329,
+      "p50": 83.667,
+      "p95": 95.166,
+      "p99_5": 99.681,
+      "min": 70.298,
+      "max": 100.14,
+      "n": 1094
+     },
+     "boss_hp": {
+      "p0_5": 5.0,
+      "p5": 10.0,
+      "p50": 80.0,
+      "p95": 140.0,
+      "p99_5": 150.0,
+      "min": 5.0,
+      "max": 150.0,
+      "n": 1094
+     }
+    }
+   }
+  },
+  "Move Choice": {
+   "n": 2140,
+   "to": {
+    "Emerge Antic L": 1082,
+    "Emerge Antic C": 1058
+   },
+   "worst_case": false,
+   "boss_ref": {
+    "last": 2140
+   },
+   "dist_bins_u": [
+    0.0,
+    3.0,
+    6.0,
+    10.0,
+    99.0
+   ],
+   "by_dist_bin": {
+    "0": {
+     "Emerge Antic L": 196,
+     "Emerge Antic C": 227
+    },
+    "1": {
+     "Emerge Antic L": 177,
+     "Emerge Antic C": 219
+    },
+    "2": {
+     "Emerge Antic L": 351,
+     "Emerge Antic C": 330
+    },
+    "3": {
+     "Emerge Antic L": 358,
+     "Emerge Antic C": 282
+    }
+   },
+   "by_side": {
+    "L": {
+     "Emerge Antic C": 530,
+     "Emerge Antic L": 538
+    },
+    "R": {
+     "Emerge Antic L": 544,
+     "Emerge Antic C": 528
+    }
+   },
+   "by_hero_third": {
+    "C": {
+     "Emerge Antic L": 406,
+     "Emerge Antic C": 354
+    },
+    "E": {
+     "Emerge Antic C": 370,
+     "Emerge Antic L": 341
+    },
+    "W": {
+     "Emerge Antic C": 334,
+     "Emerge Antic L": 335
+    }
+   },
+   "by_phase": {
+    "P1": {
+     "Emerge Antic L": 576,
+     "Emerge Antic C": 542
+    },
+    "P2": {
+     "Emerge Antic L": 506,
+     "Emerge Antic C": 516
+    }
+   },
+   "context": {
+    "Emerge Antic L": {
+     "dx": {
+      "p0_5": -21.171,
+      "p5": -15.285,
+      "p50": 0.272,
+      "p95": 16.199,
+      "p99_5": 22.833,
+      "min": -23.002,
+      "max": 23.505,
+      "n": 1082
+     },
+     "dy": {
+      "p0_5": -1.922,
+      "p5": -1.922,
+      "p50": -1.922,
+      "p95": 2.515,
+      "p99_5": 3.397,
+      "min": -1.928,
+      "max": 3.589,
+      "n": 1082
+     },
+     "hero_x": {
+      "p0_5": 70.977,
+      "p5": 74.724,
+      "p50": 85.524,
+      "p95": 96.185,
+      "p99_5": 99.897,
+      "min": 69.473,
+      "max": 101.737,
+      "n": 1082
+     },
+     "boss_hp": {
+      "p0_5": 5.0,
+      "p5": 10.0,
+      "p50": 80.0,
+      "p95": 145.0,
+      "p99_5": 150.0,
+      "min": 5.0,
+      "max": 150.0,
+      "n": 1082
+     }
+    },
+    "Emerge Antic C": {
+     "dx": {
+      "p0_5": -22.292,
+      "p5": -14.888,
+      "p50": -0.106,
+      "p95": 15.433,
+      "p99_5": 23.033,
+      "min": -27.925,
+      "max": 23.924,
+      "n": 1058
+     },
+     "dy": {
+      "p0_5": -1.922,
+      "p5": -1.922,
+      "p50": -1.922,
+      "p95": 2.761,
+      "p99_5": 3.49,
+      "min": -1.923,
+      "max": 4.502,
+      "n": 1058
+     },
+     "hero_x": {
+      "p0_5": 70.816,
+      "p5": 74.472,
+      "p50": 86.135,
+      "p95": 96.04,
+      "p99_5": 99.929,
+      "min": 69.473,
+      "max": 101.465,
+      "n": 1058
+     },
+     "boss_hp": {
+      "p0_5": 5.0,
+      "p5": 10.0,
+      "p50": 80.0,
+      "p95": 140.0,
+      "p99_5": 150.0,
+      "min": 5.0,
+      "max": 150.0,
+      "n": 1058
+     }
+    }
+   }
+  },
+  "Rage?": {
+   "n": 3428,
+   "to": {
+    "Bell Burst?": 3329,
+    "Rage Pos": 99
+   },
+   "worst_case": false,
+   "boss_ref": {
+    "last": 3428
+   },
+   "dist_bins_u": [
+    0.0,
+    3.0,
+    6.0,
+    10.0,
+    99.0
+   ],
+   "by_dist_bin": {
+    "0": {
+     "Bell Burst?": 657,
+     "Rage Pos": 29
+    },
+    "1": {
+     "Bell Burst?": 659,
+     "Rage Pos": 20
+    },
+    "2": {
+     "Bell Burst?": 1003,
+     "Rage Pos": 22
+    },
+    "3": {
+     "Bell Burst?": 1010,
+     "Rage Pos": 28
+    }
+   },
+   "by_side": {
+    "L": {
+     "Bell Burst?": 1665,
+     "Rage Pos": 44
+    },
+    "R": {
+     "Bell Burst?": 1664,
+     "Rage Pos": 55
+    }
+   },
+   "by_hero_third": {
+    "C": {
+     "Bell Burst?": 1137,
+     "Rage Pos": 35
+    },
+    "E": {
+     "Bell Burst?": 1115,
+     "Rage Pos": 29
+    },
+    "W": {
+     "Bell Burst?": 1077,
+     "Rage Pos": 35
+    }
+   },
+   "by_phase": {
+    "P1": {
+     "Bell Burst?": 1568,
+     "Rage Pos": 99
+    },
+    "P2": {
+     "Bell Burst?": 1761
+    }
+   },
+   "context": {
+    "Bell Burst?": {
+     "dx": {
+      "p0_5": -22.388,
+      "p5": -15.375,
+      "p50": -0.013,
+      "p95": 15.892,
+      "p99_5": 22.861,
+      "min": -27.925,
+      "max": 23.924,
+      "n": 3329
+     },
+     "dy": {
+      "p0_5": -1.922,
+      "p5": -1.922,
+      "p50": -1.922,
+      "p95": 2.694,
+      "p99_5": 3.476,
+      "min": -1.928,
+      "max": 4.586,
+      "n": 3329
+     },
+     "hero_x": {
+      "p0_5": 70.778,
+      "p5": 74.704,
+      "p50": 85.483,
+      "p95": 95.99,
+      "p99_5": 100.043,
+      "min": 69.473,
+      "max": 101.737,
+      "n": 3329
+     },
+     "boss_hp": {
+      "p0_5": 5.0,
+      "p5": 10.0,
+      "p50": 70.0,
+      "p95": 140.0,
+      "p99_5": 150.0,
+      "min": 5.0,
+      "max": 150.0,
+      "n": 3329
+     }
+    },
+    "Rage Pos": {
+     "dx": {
+      "p0_5": -21.349,
+      "p5": -16.689,
+      "p50": 1.041,
+      "p95": 15.379,
+      "p99_5": 17.281,
+      "min": -21.605,
+      "max": 17.55,
+      "n": 99
+     },
+     "dy": {
+      "p0_5": -1.922,
+      "p5": -1.922,
+      "p50": -1.922,
+      "p95": 2.025,
+      "p99_5": 3.388,
+      "min": -1.922,
+      "max": 3.407,
+      "n": 99
+     },
+     "hero_x": {
+      "p0_5": 71.755,
+      "p5": 75.33,
+      "p50": 83.564,
+      "p95": 95.314,
+      "p99_5": 98.838,
+      "min": 70.958,
+      "max": 99.097,
+      "n": 99
+     },
+     "boss_hp": {
+      "p0_5": 60.0,
+      "p5": 64.5,
+      "p50": 75.0,
+      "p95": 75.0,
+      "p99_5": 75.0,
+      "min": 60.0,
+      "max": 75.0,
+      "n": 99
+     }
+    }
+   }
+  }
+ },
+ "observable_phases": {
+  "Emerge Antic C": {
+   "fsm_states": [
+    "Emerge Antic C"
+   ],
+   "families": [
+    "BB_CHARGE"
+   ],
+   "ttd_s": {
+    "p0_5": 1.0666,
+    "p5": 1.0667,
+    "p50": 1.0833,
+    "p95": 1.7565,
+    "p99_5": 1.7666,
+    "min": 1.0666,
+    "max": 1.7667,
+    "n": 1157
+   },
+   "parryable": false
+  },
+  "Charge Emerge": {
+   "fsm_states": [
+    "Charge Emerge"
+   ],
+   "families": [
+    "BB_CHARGE"
+   ],
+   "ttd_s": {
+    "p0_5": 0.0666,
+    "p5": 0.0666,
+    "p50": 0.0833,
+    "p95": 0.7416,
+    "p99_5": 0.75,
+    "min": 0.0666,
+    "max": 0.7501,
+    "n": 1157
+   },
+   "parryable": false
+  },
+  "Charge Antic": {
+   "fsm_states": [
+    "Charge Antic"
+   ],
+   "families": [
+    "BB_CHARGE"
+   ],
+   "ttd_s": {
+    "p0_5": 0.0,
+    "p5": 0.0,
+    "p50": 0.0,
+    "p95": 0.0,
+    "p99_5": 0.0,
+    "min": 0.0,
+    "max": 0.0,
+    "n": 1147
+   },
+   "parryable": false
+  },
+  "Charge": {
+   "fsm_states": [
+    "Charge"
+   ],
+   "families": [
+    "BB_CHARGE"
+   ],
+   "ttd_s": {
+    "p0_5": 0.0,
+    "p5": 0.0,
+    "p50": 0.0,
+    "p95": 0.0,
+    "p99_5": 0.3993,
+    "min": 0.0,
+    "max": 0.5,
+    "n": 1137
+   },
+   "parryable": false
+  },
+  "Charge End": {
+   "fsm_states": [
+    "Charge End"
+   ],
+   "families": [
+    "BB_CHARGE"
+   ],
+   "ttd_s": {
+    "p0_5": 0.0,
+    "p5": 0.0,
+    "p50": 0.0,
+    "p95": 0.0,
+    "p99_5": 0.0,
+    "min": 0.0,
+    "max": 0.0,
+    "n": 1121
+   },
+   "parryable": false
+  },
+  "Dig In": {
+   "fsm_states": [
+    "Dig In"
+   ],
+   "families": [
+    "BB_CHARGE",
+    "BB_LEAP"
+   ],
+   "ttd_s": {
+    "p0_5": 0.0,
+    "p5": 0.0,
+    "p50": 0.0,
+    "p95": 0.0,
+    "p99_5": 0.0,
+    "min": 0.0,
+    "max": 0.0,
+    "n": 1117
+   },
+   "parryable": false
+  },
+  "Emerge Antic L": {
+   "fsm_states": [
+    "Emerge Antic L"
+   ],
+   "families": [
+    "BB_LEAP"
+   ],
+   "ttd_s": {
+    "p0_5": 1.0,
+    "p5": 1.0,
+    "p50": 1.0166,
+    "p95": 1.0167,
+    "p99_5": 1.0167,
+    "min": 1.0,
+    "max": 1.0168,
+    "n": 1081
+   },
+   "parryable": false
+  },
+  "Leap Out": {
+   "fsm_states": [
+    "Leap Out"
+   ],
+   "families": [
+    "BB_LEAP"
+   ],
+   "ttd_s": {
+    "p0_5": 0.0,
+    "p5": 0.0,
+    "p50": 0.0,
+    "p95": 0.0,
+    "p99_5": 0.0,
+    "min": 0.0,
+    "max": 0.0,
+    "n": 1081
+   },
+   "parryable": false
+  },
+  "Descending": {
+   "fsm_states": [
+    "Descending"
+   ],
+   "families": [
+    "BB_LEAP"
+   ],
+   "ttd_s": {
+    "p0_5": 0.0,
+    "p5": 0.0,
+    "p50": 0.0,
+    "p95": 0.0,
+    "p99_5": 0.0,
+    "min": 0.0,
+    "max": 0.0,
+    "n": 1075
+   },
+   "parryable": false
+  },
+  "Leap Land": {
+   "fsm_states": [
+    "Leap Land"
+   ],
+   "families": [
+    "BB_LEAP"
+   ],
+   "ttd_s": {
+    "p0_5": 0.0,
+    "p5": 0.0,
+    "p50": 0.0,
+    "p95": 0.0,
+    "p99_5": 0.0,
+    "min": 0.0,
+    "max": 0.0,
+    "n": 1070
+   },
+   "parryable": false
+  },
+  "Burst Pos": {
+   "fsm_states": [
+    "Burst Pos"
+   ],
+   "families": [
+    "BB_BURST"
+   ],
+   "ttd_s": {
+    "p0_5": 1.2,
+    "p5": 1.2,
+    "p50": 1.2166,
+    "p95": 1.2167,
+    "p99_5": 1.2167,
+    "min": 1.2,
+    "max": 1.2169,
+    "n": 1188
+   },
+   "parryable": false
+  },
+  "Burst Antic": {
+   "fsm_states": [
+    "Burst Antic"
+   ],
+   "families": [
+    "BB_BURST"
+   ],
+   "ttd_s": {
+    "p0_5": 1.2,
+    "p5": 1.2,
+    "p50": 1.2166,
+    "p95": 1.2167,
+    "p99_5": 1.2167,
+    "min": 1.2,
+    "max": 1.2169,
+    "n": 1188
+   },
+   "parryable": false
+  },
+  "Fire Bells": {
+   "fsm_states": [
+    "Fire Bells"
+   ],
+   "families": [
+    "BB_BURST"
+   ],
+   "ttd_s": {
+    "p0_5": 0.0,
+    "p5": 0.0,
+    "p50": 0.0,
+    "p95": 0.0,
+    "p99_5": 0.0,
+    "min": 0.0,
+    "max": 0.0,
+    "n": 1188
+   },
+   "parryable": false
+  },
+  "Burst Out": {
+   "fsm_states": [
+    "Burst Out"
+   ],
+   "families": [
+    "BB_BURST"
+   ],
+   "ttd_s": {
+    "p0_5": 0.0,
+    "p5": 0.0,
+    "p50": 0.0,
+    "p95": 0.0,
+    "p99_5": 0.0,
+    "min": 0.0,
+    "max": 0.0,
+    "n": 1188
+   },
+   "parryable": false
+  },
+  "Burst Recovery": {
+   "fsm_states": [
+    "Burst Recovery"
+   ],
+   "families": [
+    "BB_BURST"
+   ],
+   "ttd_s": {
+    "p0_5": 0.0,
+    "p5": 0.0,
+    "p50": 0.0,
+    "p95": 0.0,
+    "p99_5": 0.0,
+    "min": 0.0,
+    "max": 0.0,
+    "n": 1160
+   },
+   "parryable": false
+  },
+  "Rage Pos": {
+   "fsm_states": [
+    "Rage Pos"
+   ],
+   "families": [
+    "BB_RAGE"
+   ],
+   "ttd_s": {
+    "p0_5": 2.2,
+    "p5": 2.2166,
+    "p50": 2.2332,
+    "p95": 2.2333,
+    "p99_5": 2.2333,
+    "min": 2.2,
+    "max": 2.2333,
+    "n": 99
+   },
+   "parryable": false
+  },
+  "Rage Antic": {
+   "fsm_states": [
+    "Rage Antic"
+   ],
+   "families": [
+    "BB_RAGE"
+   ],
+   "ttd_s": {
+    "p0_5": 1.2,
+    "p5": 1.2,
+    "p50": 1.2166,
+    "p95": 1.2167,
+    "p99_5": 1.2167,
+    "min": 1.2,
+    "max": 1.2167,
+    "n": 99
+   },
+   "parryable": false
+  },
+  "Rage Burst": {
+   "fsm_states": [
+    "Rage Burst"
+   ],
+   "families": [
+    "BB_RAGE"
+   ],
+   "ttd_s": {
+    "p0_5": 0.0,
+    "p5": 0.0,
+    "p50": 0.0,
+    "p95": 0.0,
+    "p99_5": 0.0,
+    "min": 0.0,
+    "max": 0.0,
+    "n": 99
+   },
+   "parryable": false
+  },
+  "Rage Roar": {
+   "fsm_states": [
+    "Rage Roar"
+   ],
+   "families": [
+    "BB_RAGE"
+   ],
+   "ttd_s": {
+    "p0_5": 0.0,
+    "p5": 0.0,
+    "p50": 0.0,
+    "p95": 0.0,
+    "p99_5": 0.0,
+    "min": 0.0,
+    "max": 0.0,
+    "n": 99
+   },
+   "parryable": false
+  },
+  "Roar End": {
+   "fsm_states": [
+    "Roar End"
+   ],
+   "families": [
+    "BB_RAGE"
+   ],
+   "ttd_s": {
+    "p0_5": 0.0,
+    "p5": 0.0,
+    "p50": 0.0,
+    "p95": 0.0,
+    "p99_5": 0.0,
+    "min": 0.0,
+    "max": 0.0,
+    "n": 99
+   },
+   "parryable": false
+  },
+  "Rage Submerge": {
+   "fsm_states": [
+    "Rage Submerge"
+   ],
+   "families": [
+    "BB_RAGE"
+   ],
+   "ttd_s": {
+    "p0_5": 4.2333,
+    "p5": 4.2499,
+    "p50": 4.2666,
+    "p95": 4.2833,
+    "p99_5": 4.2833,
+    "min": 4.2333,
+    "max": 4.2833,
+    "n": 99
+   },
+   "parryable": false
+  },
+  "Rage Rumble": {
+   "fsm_states": [
+    "Rage Rumble"
+   ],
+   "families": [
+    "BB_RAGE"
+   ],
+   "ttd_s": {
+    "p0_5": 3.2333,
+    "p5": 3.2499,
+    "p50": 3.2519,
+    "p95": 3.2666,
+    "p99_5": 3.2667,
+    "min": 3.2333,
+    "max": 3.2667,
+    "n": 99
+   },
+   "parryable": false
+  },
+  "Choose 1st Pattern": {
+   "fsm_states": [
+    "Choose 1st Pattern"
+   ],
+   "families": [
+    "BB_RAGE"
+   ],
+   "ttd_s": {
+    "p0_5": 1.2333,
+    "p5": 1.2333,
+    "p50": 1.2499,
+    "p95": 1.25,
+    "p99_5": 1.25,
+    "min": 1.2333,
+    "max": 1.25,
+    "n": 99
+   },
+   "parryable": false
+  },
+  "Ptn L": {
+   "fsm_states": [
+    "Ptn L"
+   ],
+   "families": [
+    "BB_RAGE"
+   ],
+   "ttd_s": {
+    "p0_5": 1.2333,
+    "p5": 1.2333,
+    "p50": 1.2499,
+    "p95": 1.25,
+    "p99_5": 1.25,
+    "min": 1.2333,
+    "max": 1.25,
+    "n": 48
+   },
+   "parryable": false
+  },
+  "Rage End": {
+   "fsm_states": [
+    "Rage End"
+   ],
+   "families": [
+    "BB_RAGE"
+   ],
+   "ttd_s": {
+    "p0_5": 0.0,
+    "p5": 0.0,
+    "p50": 0.0,
+    "p95": 0.0,
+    "p99_5": 0.0,
+    "min": 0.0,
+    "max": 0.0,
+    "n": 51
+   },
+   "parryable": false
+  },
+  "Ptn R": {
+   "fsm_states": [
+    "Ptn R"
+   ],
+   "families": [
+    "BB_RAGE"
+   ],
+   "ttd_s": {
+    "p0_5": 1.2333,
+    "p5": 1.2333,
+    "p50": 1.2499,
+    "p95": 1.25,
+    "p99_5": 1.25,
+    "min": 1.2333,
+    "max": 1.25,
+    "n": 51
+   },
+   "parryable": false
+  }
+ },
+ "attacks": {
+  "BB_CHARGE": {
+   "start_states": [
+    "Emerge Antic C"
+   ],
+   "states": [
+    "Emerge Antic C",
+    "Charge Emerge",
+    "Charge Antic",
+    "Charge",
+    "Charge End",
+    "Dig In"
+   ],
+   "n": 1157,
+   "n_by_phase": {
+    "P1": 641,
+    "P2": 516
+   },
+   "n_by_dir": {
+    "-": 99,
+    "Set L": 538,
+    "Set R": 520
+   },
+   "ends": {
+    "rest": 1118,
+    "death": 39
+   },
+   "mirrored": true,
+   "boss_hp_at_start": {
+    "p0_5": 5.0,
+    "p5": 10.0,
+    "p50": 80.0,
+    "p95": 140.0,
+    "p99_5": 150.0,
+    "min": 5.0,
+    "max": 150.0,
+    "n": 1058
+   },
+   "duration_s": {
+    "p0_5": 3.7749,
+    "p5": 3.7834,
+    "p50": 3.8084,
+    "p95": 3.8333,
+    "p99_5": 3.8416,
+    "min": 3.7667,
+    "max": 3.8417,
+    "n": 1118
+   },
+   "tail_s": {
+    "p0_5": 1.5,
+    "p5": 3.7832,
+    "p50": 3.8083,
+    "p95": 3.8333,
+    "p99_5": 3.8416,
+    "min": 1.1,
+    "max": 3.8417,
+    "n": 1157
+   },
+   "state_entry_s": {
+    "Emerge Antic C": {
+     "p0_5": 0.0,
+     "p5": 0.0,
+     "p50": 0.0,
+     "p95": 0.0,
+     "p99_5": 0.0,
+     "min": 0.0,
+     "max": 0.0,
+     "n": 1157
+    },
+    "Charge Emerge": {
+     "p0_5": 1.0,
+     "p5": 1.0,
+     "p50": 1.0166,
+     "p95": 1.0167,
+     "p99_5": 1.0167,
+     "min": 1.0,
+     "max": 1.0168,
+     "n": 1157
+    },
+    "Charge Antic": {
+     "p0_5": 1.7333,
+     "p5": 1.7342,
+     "p50": 1.7501,
+     "p95": 1.7666,
+     "p99_5": 1.7667,
+     "min": 1.7333,
+     "max": 1.7667,
+     "n": 1147
+    },
+    "Charge": {
+     "p0_5": 2.3167,
+     "p5": 2.3324,
+     "p50": 2.3499,
+     "p95": 2.3666,
+     "p99_5": 2.3667,
+     "min": 2.3166,
+     "max": 2.3667,
+     "n": 1137
+    },
+    "Charge End": {
+     "p0_5": 3.2082,
+     "p5": 3.2166,
+     "p50": 3.2334,
+     "p95": 3.2582,
+     "p99_5": 3.2583,
+     "min": 3.1999,
+     "max": 3.2586,
+     "n": 1123
+    },
+    "Dig In": {
+     "p0_5": 3.3582,
+     "p5": 3.3667,
+     "p50": 3.3916,
+     "p95": 3.4166,
+     "p99_5": 3.425,
+     "min": 3.35,
+     "max": 3.4251,
+     "n": 1119
+    }
+   },
+   "ttd_s": {
+    "start": {
+     "p0_5": 1.0666,
+     "p5": 1.0667,
+     "p50": 1.0833,
+     "p95": 1.7565,
+     "p99_5": 1.7666,
+     "min": 1.0666,
+     "max": 1.7667,
+     "n": 1157
+    },
+    "Emerge Antic C": {
+     "p0_5": 1.0666,
+     "p5": 1.0667,
+     "p50": 1.0833,
+     "p95": 1.7565,
+     "p99_5": 1.7666,
+     "min": 1.0666,
+     "max": 1.7667,
+     "n": 1157
+    },
+    "Charge Emerge": {
+     "p0_5": 0.0666,
+     "p5": 0.0666,
+     "p50": 0.0833,
+     "p95": 0.7416,
+     "p99_5": 0.75,
+     "min": 0.0666,
+     "max": 0.7501,
+     "n": 1157
+    },
+    "Charge Antic": {
+     "p0_5": 0.0,
+     "p5": 0.0,
+     "p50": 0.0,
+     "p95": 0.0,
+     "p99_5": 0.0,
+     "min": 0.0,
+     "max": 0.0,
+     "n": 1147
+    },
+    "Charge": {
+     "p0_5": 0.0,
+     "p5": 0.0,
+     "p50": 0.0,
+     "p95": 0.0,
+     "p99_5": 0.3993,
+     "min": 0.0,
+     "max": 0.5,
+     "n": 1137
+    },
+    "Charge End": {
+     "p0_5": 0.0,
+     "p5": 0.0,
+     "p50": 0.0,
+     "p95": 0.0,
+     "p99_5": 0.0,
+     "min": 0.0,
+     "max": 0.0,
+     "n": 1121
+    },
+    "Dig In": {
+     "p0_5": 0.0,
+     "p5": 0.0,
+     "p50": 0.0,
+     "p95": 0.0,
+     "p99_5": 0.0,
+     "min": 0.0,
+     "max": 0.0,
+     "n": 1117
+    }
+   },
+   "anchor": {
+    "frame": "boss position at its first export in the instance",
+    "t_s": {
+     "p0_5": 1.0,
+     "p5": 1.0,
+     "p50": 1.0166,
+     "p95": 1.0167,
+     "p99_5": 1.0167,
+     "min": 1.0,
+     "max": 1.0168,
+     "n": 1157
+    },
+    "missing": 0,
+    "by_dir": {
+     "-": {
+      "n": 99,
+      "mirror": {
+       "-1": 99
+      },
+      "x": {
+       "p0_5": 95.72,
+       "p5": 95.72,
+       "p50": 95.72,
+       "p95": 95.72,
+       "p99_5": 95.72,
+       "min": 95.72,
+       "max": 95.72,
+       "n": 99
+      },
+      "y": {
+       "p0_5": 5.49,
+       "p5": 5.49,
+       "p50": 5.49,
+       "p95": 5.49,
+       "p99_5": 5.49,
+       "min": 5.49,
+       "max": 5.49,
+       "n": 99
+      },
+      "flipX": {
+       "True": 99
+      },
+      "x_minus_hero_x": {
+       "p0_5": 0.1442,
+       "p5": 0.7962,
+       "p50": 4.1354,
+       "p95": 7.7548,
+       "p99_5": 8.1734,
+       "min": -0.1276,
+       "max": 8.2024,
+       "n": 99
+      }
+     },
+     "Set L": {
+      "n": 538,
+      "mirror": {
+       "1": 538
+      },
+      "x": {
+       "p0_5": 75.03,
+       "p5": 75.03,
+       "p50": 75.03,
+       "p95": 75.03,
+       "p99_5": 75.03,
+       "min": 75.03,
+       "max": 75.03,
+       "n": 538
+      },
+      "y": {
+       "p0_5": 5.49,
+       "p5": 5.49,
+       "p50": 5.49,
+       "p95": 5.49,
+       "p99_5": 5.49,
+       "min": 5.49,
+       "max": 5.49,
+       "n": 538
+      },
+      "flipX": {
+       "False": 538
+      },
+      "x_minus_hero_x": {
+       "p0_5": -24.7375,
+       "p5": -20.4246,
+       "p50": -8.7151,
+       "p95": 0.8421,
+       "p99_5": 4.0043,
+       "min": -25.1101,
+       "max": 4.7318,
+       "n": 538
+      }
+     },
+     "Set R": {
+      "n": 520,
+      "mirror": {
+       "-1": 520
+      },
+      "x": {
+       "p0_5": 95.72,
+       "p5": 95.72,
+       "p50": 95.72,
+       "p95": 95.72,
+       "p99_5": 95.72,
+       "min": 95.72,
+       "max": 95.72,
+       "n": 520
+      },
+      "y": {
+       "p0_5": 5.49,
+       "p5": 5.49,
+       "p50": 5.49,
+       "p95": 5.49,
+       "p99_5": 5.49,
+       "min": 5.49,
+       "max": 5.49,
+       "n": 520
+      },
+      "flipX": {
+       "True": 520
+      },
+      "x_minus_hero_x": {
+       "p0_5": -4.5162,
+       "p5": -0.7858,
+       "p50": 7.5535,
+       "p95": 20.7616,
+       "p99_5": 24.9529,
+       "min": -5.7449,
+       "max": 26.2468,
+       "n": 520
+      }
+     }
+    }
+   },
+   "select": {
+    "dist": "|hero x - boss x| at the decision, boss x = last exported",
+    "dist_bins_u": [
+     0.0,
+     3.0,
+     6.0,
+     10.0,
+     99.0
+    ],
+    "counts": {
+     "P1": [
+      122,
+      109,
+      158,
+      153
+     ],
+     "P2": [
+      105,
+      110,
+      172,
+      129
+     ]
+    }
+   },
+   "hits_taken": {
+    "n": 1118,
+    "by_source": {
+     "Bone Beast/PolyCollider": 693,
+     "Boss Scene/Bone Beast": 425
+    },
+    "by_state": {
+     "Charge": 515,
+     "Charge Emerge": 415,
+     "Charge Antic": 178,
+     "Charge End": 9,
+     "Dig In": 1
+    }
+   },
+   "coverage": {
+    "n": 1157,
+    "target": 200,
+    "ok": true
+   },
+   "hitboxes": [
+    {
+     "state": "Charge",
+     "source": "Bone Beast:poly7",
+     "frame": "anchor",
+     "n": 1137,
+     "phases": {
+      "P1": 641,
+      "P2": 496
+     },
+     "t0_state": 0.0,
+     "t1_state": 0.8781,
+     "t0": 2.3166,
+     "t1": 3.2418,
+     "t_on_state": {
+      "p0_5": 0.0,
+      "p5": 0.0,
+      "p50": 0.0,
+      "p95": 0.0,
+      "p99_5": 0.3993,
+      "min": 0.0,
+      "max": 0.5,
+      "n": 1137
+     },
+     "t_off_state": {
+      "p0_5": 0.3666,
+      "p5": 0.6167,
+      "p50": 0.8667,
+      "p95": 0.875,
+      "p99_5": 0.8751,
+      "min": 0.1667,
+      "max": 0.8781,
+      "n": 1137
+     },
+     "t_on": {
+      "p0_5": 2.3167,
+      "p5": 2.3331,
+      "p50": 2.3499,
+      "p95": 2.3666,
+      "p99_5": 2.7519,
+      "min": 2.3166,
+      "max": 2.8582,
+      "n": 1137
+     },
+     "t_off": {
+      "p0_5": 2.7082,
+      "p5": 2.9816,
+      "p50": 3.2166,
+      "p95": 3.2403,
+      "p99_5": 3.2417,
+      "min": 2.5333,
+      "max": 3.2418,
+      "n": 1137
+     },
+     "x": [
+      -6.139,
+      23.989
+     ],
+     "y": [
+      -3.648,
+      -0.591
+     ],
+     "dmg": [
+      2
+     ],
+     "eff": [
+      2
+     ],
+     "type": [
+      "ENEMY"
+     ],
+     "flags": [],
+     "parry": [
+      "counter"
+     ],
+     "parryable": false
+    },
+    {
+     "state": "Charge Antic",
+     "source": "Bone Beast:poly7",
+     "frame": "anchor",
+     "n": 1147,
+     "phases": {
+      "P1": 641,
+      "P2": 506
+     },
+     "t0_state": 0.0,
+     "t1_state": 0.5833,
+     "t0": 1.7333,
+     "t1": 2.35,
+     "t_on_state": {
+      "p0_5": 0.0,
+      "p5": 0.0,
+      "p50": 0.0,
+      "p95": 0.0,
+      "p99_5": 0.0,
+      "min": 0.0,
+      "max": 0.0,
+      "n": 1147
+     },
+     "t_off_state": {
+      "p0_5": 0.1743,
+      "p5": 0.5667,
+      "p50": 0.5828,
+      "p95": 0.5833,
+      "p99_5": 0.5833,
+      "min": 0.0667,
+      "max": 0.5833,
+      "n": 1147
+     },
+     "t_on": {
+      "p0_5": 1.7333,
+      "p5": 1.7342,
+      "p50": 1.7501,
+      "p95": 1.7666,
+      "p99_5": 1.7667,
+      "min": 1.7333,
+      "max": 1.7667,
+      "n": 1147
+     },
+     "t_off": {
+      "p0_5": 1.9325,
+      "p5": 2.3083,
+      "p50": 2.3333,
+      "p95": 2.3499,
+      "p99_5": 2.35,
+      "min": 1.8167,
+      "max": 2.35,
+      "n": 1147
+     },
+     "x": [
+      -6.139,
+      4.741
+     ],
+     "y": [
+      -3.648,
+      -0.591
+     ],
+     "dmg": [
+      2
+     ],
+     "eff": [
+      2
+     ],
+     "type": [
+      "ENEMY"
+     ],
+     "flags": [],
+     "parry": [
+      "counter"
+     ],
+     "parryable": false
+    },
+    {
+     "state": "Charge Emerge",
+     "source": "Bone Beast:box",
+     "frame": "anchor",
+     "n": 1058,
+     "phases": {
+      "P1": 542,
+      "P2": 516
+     },
+     "t0_state": 0.0666,
+     "t1_state": 0.7334,
+     "t0": 1.0666,
+     "t1": 1.75,
+     "t_on_state": {
+      "p0_5": 0.0666,
+      "p5": 0.0666,
+      "p50": 0.0833,
+      "p95": 0.0834,
+      "p99_5": 0.0834,
+      "min": 0.0666,
+      "max": 0.7076,
+      "n": 1058
+     },
+     "t_off_state": {
+      "p0_5": 0.4714,
+      "p5": 0.7166,
+      "p50": 0.725,
+      "p95": 0.7333,
+      "p99_5": 0.7333,
+      "min": 0.0667,
+      "max": 0.7334,
+      "n": 1058
+     },
+     "t_on": {
+      "p0_5": 1.0666,
+      "p5": 1.0667,
+      "p50": 1.0833,
+      "p95": 1.1,
+      "p99_5": 1.1,
+      "min": 1.0666,
+      "max": 1.7232,
+      "n": 1058
+     },
+     "t_off": {
+      "p0_5": 1.4833,
+      "p5": 1.7167,
+      "p50": 1.7334,
+      "p95": 1.75,
+      "p99_5": 1.75,
+      "min": 1.0833,
+      "max": 1.75,
+      "n": 1058
+     },
+     "x": [
+      -6.156,
+      3.031
+     ],
+     "y": [
+      -3.75,
+      1.422
+     ],
+     "dmg": [
+      2
+     ],
+     "eff": [
+      2
+     ],
+     "type": [
+      "ENEMY"
+     ],
+     "flags": [],
+     "parry": [
+      "counter"
+     ],
+     "parryable": false
+    },
+    {
+     "state": "Charge End",
+     "source": "Bone Beast:box",
+     "frame": "anchor",
+     "n": 1121,
+     "phases": {
+      "P1": 639,
+      "P2": 482
+     },
+     "t0_state": 0.0,
+     "t1_state": 0.1583,
+     "t0": 3.1999,
+     "t1": 3.4085,
+     "t_on_state": {
+      "p0_5": 0.0,
+      "p5": 0.0,
+      "p50": 0.0,
+      "p95": 0.0,
+      "p99_5": 0.0,
+      "min": 0.0,
+      "max": 0.0,
+      "n": 1121
+     },
+     "t_off_state": {
+      "p0_5": 0.1332,
+      "p5": 0.1333,
+      "p50": 0.1499,
+      "p95": 0.15,
+      "p99_5": 0.15,
+      "min": 0.0167,
+      "max": 0.1583,
+      "n": 1121
+     },
+     "t_on": {
+      "p0_5": 3.2082,
+      "p5": 3.2166,
+      "p50": 3.2334,
+      "p95": 3.2582,
+      "p99_5": 3.2583,
+      "min": 3.1999,
+      "max": 3.2586,
+      "n": 1121
+     },
+     "t_off": {
+      "p0_5": 3.3334,
+      "p5": 3.35,
+      "p50": 3.375,
+      "p95": 3.4,
+      "p99_5": 3.4083,
+      "min": 3.2583,
+      "max": 3.4085,
+      "n": 1121
+     },
+     "x": [
+      14.064,
+      27.179
+     ],
+     "y": [
+      -3.891,
+      0.297
+     ],
+     "dmg": [
+      2
+     ],
+     "eff": [
+      2
+     ],
+     "type": [
+      "ENEMY"
+     ],
+     "flags": [],
+     "parry": [
+      "counter"
+     ],
+     "parryable": false
+    },
+    {
+     "state": "Dig In",
+     "source": "Bone Beast:box",
+     "frame": "anchor",
+     "n": 1117,
+     "phases": {
+      "P1": 639,
+      "P2": 478
+     },
+     "t0_state": 0.0,
+     "t1_state": 0.3333,
+     "t0": 3.35,
+     "t1": 3.7417,
+     "t_on_state": {
+      "p0_5": 0.0,
+      "p5": 0.0,
+      "p50": 0.0,
+      "p95": 0.0,
+      "p99_5": 0.0,
+      "min": 0.0,
+      "max": 0.0,
+      "n": 1117
+     },
+     "t_off_state": {
+      "p0_5": 0.3,
+      "p5": 0.3,
+      "p50": 0.3167,
+      "p95": 0.3333,
+      "p99_5": 0.3333,
+      "min": 0.1332,
+      "max": 0.3333,
+      "n": 1117
+     },
+     "t_on": {
+      "p0_5": 3.3582,
+      "p5": 3.3667,
+      "p50": 3.3916,
+      "p95": 3.4166,
+      "p99_5": 3.425,
+      "min": 3.35,
+      "max": 3.4251,
+      "n": 1117
+     },
+     "t_off": {
+      "p0_5": 3.6749,
+      "p5": 3.6903,
+      "p50": 3.7083,
+      "p95": 3.7333,
+      "p99_5": 3.7416,
+      "min": 3.5445,
+      "max": 3.7417,
+      "n": 1117
+     },
+     "x": [
+      16.998,
+      26.632
+     ],
+     "y": [
+      -3.719,
+      0.547
+     ],
+     "dmg": [
+      2
+     ],
+     "eff": [
+      2
+     ],
+     "type": [
+      "ENEMY"
+     ],
+     "flags": [],
+     "parry": [
+      "counter"
+     ],
+     "parryable": false
+    }
+   ],
+   "reach_union": {
+    "anchor": {
+     "npz": "BB_CHARGE/anchor",
+     "frame": "anchor",
+     "n_instances": 1157,
+     "extent": [
+      -6.2,
+      -3.9,
+      27.2,
+      1.45
+     ],
+     "active_s": [
+      1.0667,
+      3.75
+     ],
+     "cells": 51855,
+     "boxes": [
+      [
+       16.1,
+       -3.9,
+       27.2,
+       -3.75
+      ],
+      [
+       -6.2,
+       -3.75,
+       3.05,
+       -3.65
+      ],
+      [
+       14.05,
+       -3.75,
+       27.2,
+       -3.65
+      ],
+      [
+       -6.2,
+       -3.65,
+       27.2,
+       -0.8
+      ],
+      [
+       -3.75,
+       -0.8,
+       27.2,
+       -0.6
+      ],
+      [
+       -3.7,
+       -0.6,
+       27.2,
+       -0.55
+      ],
+      [
+       -3.7,
+       -0.55,
+       2.75,
+       -0.3
+      ],
+      [
+       16.1,
+       -0.55,
+       27.2,
+       0.3
+      ],
+      [
+       -3.7,
+       -0.3,
+       2.2,
+       0.65
+      ],
+      [
+       16.95,
+       0.3,
+       26.65,
+       0.5
+      ],
+      [
+       19.1,
+       0.5,
+       26.65,
+       0.55
+      ],
+      [
+       -3.0,
+       0.65,
+       2.2,
+       1.0
+      ],
+      [
+       -2.85,
+       1.0,
+       1.8,
+       1.15
+      ],
+      [
+       -2.85,
+       1.15,
+       1.55,
+       1.45
+      ]
+     ]
+    }
+   }
+  },
+  "BB_LEAP": {
+   "start_states": [
+    "Emerge Antic L"
+   ],
+   "states": [
+    "Emerge Antic L",
+    "Leap Out",
+    "Descending",
+    "Leap Land",
+    "Dig In"
+   ],
+   "n": 1082,
+   "n_by_phase": {
+    "P1": 576,
+    "P2": 506
+   },
+   "n_by_dir": {
+    "Set R": 526,
+    "Set L": 556
+   },
+   "ends": {
+    "rest": 1057,
+    "death": 23,
+    "fight_end": 2
+   },
+   "mirrored": true,
+   "boss_hp_at_start": {
+    "p0_5": 5.0,
+    "p5": 10.0,
+    "p50": 80.0,
+    "p95": 145.0,
+    "p99_5": 150.0,
+    "min": 5.0,
+    "max": 150.0,
+    "n": 1082
+   },
+   "duration_s": {
+    "p0_5": 3.9833,
+    "p5": 3.9917,
+    "p50": 4.0166,
+    "p95": 4.0333,
+    "p99_5": 4.0416,
+    "min": 3.975,
+    "max": 4.0416,
+    "n": 1057
+   },
+   "tail_s": {
+    "p0_5": 1.6071,
+    "p5": 3.9917,
+    "p50": 4.0331,
+    "p95": 5.2916,
+    "p99_5": 5.3083,
+    "min": 0.1,
+    "max": 5.3249,
+    "n": 1082
+   },
+   "state_entry_s": {
+    "Emerge Antic L": {
+     "p0_5": 0.0,
+     "p5": 0.0,
+     "p50": 0.0,
+     "p95": 0.0,
+     "p99_5": 0.0,
+     "min": 0.0,
+     "max": 0.0,
+     "n": 1082
+    },
+    "Leap Out": {
+     "p0_5": 1.0,
+     "p5": 1.0,
+     "p50": 1.0166,
+     "p95": 1.0167,
+     "p99_5": 1.0167,
+     "min": 1.0,
+     "max": 1.0168,
+     "n": 1081
+    },
+    "Descending": {
+     "p0_5": 1.8167,
+     "p5": 1.8249,
+     "p50": 1.8415,
+     "p95": 1.85,
+     "p99_5": 1.85,
+     "min": 1.8166,
+     "max": 1.85,
+     "n": 1075
+    },
+    "Leap Land": {
+     "p0_5": 2.4833,
+     "p5": 2.5,
+     "p50": 2.5249,
+     "p95": 2.5416,
+     "p99_5": 2.5417,
+     "min": 2.4667,
+     "max": 2.5418,
+     "n": 1070
+    },
+    "Dig In": {
+     "p0_5": 3.5666,
+     "p5": 3.575,
+     "p50": 3.5999,
+     "p95": 3.6166,
+     "p99_5": 3.6249,
+     "min": 3.5583,
+     "max": 3.625,
+     "n": 1060
+    }
+   },
+   "ttd_s": {
+    "start": {
+     "p0_5": 1.0,
+     "p5": 1.0,
+     "p50": 1.0166,
+     "p95": 1.0167,
+     "p99_5": 1.0167,
+     "min": 1.0,
+     "max": 1.0168,
+     "n": 1081
+    },
+    "Emerge Antic L": {
+     "p0_5": 1.0,
+     "p5": 1.0,
+     "p50": 1.0166,
+     "p95": 1.0167,
+     "p99_5": 1.0167,
+     "min": 1.0,
+     "max": 1.0168,
+     "n": 1081
+    },
+    "Leap Out": {
+     "p0_5": 0.0,
+     "p5": 0.0,
+     "p50": 0.0,
+     "p95": 0.0,
+     "p99_5": 0.0,
+     "min": 0.0,
+     "max": 0.0,
+     "n": 1081
+    },
+    "Descending": {
+     "p0_5": 0.0,
+     "p5": 0.0,
+     "p50": 0.0,
+     "p95": 0.0,
+     "p99_5": 0.0,
+     "min": 0.0,
+     "max": 0.0,
+     "n": 1075
+    },
+    "Leap Land": {
+     "p0_5": 0.0,
+     "p5": 0.0,
+     "p50": 0.0,
+     "p95": 0.0,
+     "p99_5": 0.0,
+     "min": 0.0,
+     "max": 0.0,
+     "n": 1070
+    },
+    "Dig In": {
+     "p0_5": 0.0,
+     "p5": 0.0,
+     "p50": 0.0,
+     "p95": 0.0,
+     "p99_5": 0.0,
+     "min": 0.0,
+     "max": 0.0,
+     "n": 1060
+    }
+   },
+   "anchor": {
+    "frame": "boss position at its first export in the instance",
+    "t_s": {
+     "p0_5": 1.0,
+     "p5": 1.0,
+     "p50": 1.0166,
+     "p95": 1.0167,
+     "p99_5": 1.0167,
+     "min": 1.0,
+     "max": 1.0168,
+     "n": 1081
+    },
+    "missing": 1,
+    "by_dir": {
+     "Set L": {
+      "n": 556,
+      "mirror": {
+       "1": 556
+      },
+      "x": {
+       "p0_5": 75.03,
+       "p5": 75.03,
+       "p50": 75.03,
+       "p95": 75.03,
+       "p99_5": 75.03,
+       "min": 75.03,
+       "max": 75.03,
+       "n": 555
+      },
+      "y": {
+       "p0_5": 0.99,
+       "p5": 0.99,
+       "p50": 0.99,
+       "p95": 0.99,
+       "p99_5": 0.99,
+       "min": 0.99,
+       "max": 0.99,
+       "n": 555
+      },
+      "flipX": {
+       "False": 555,
+       "None": 1
+      },
+      "x_minus_hero_x": {
+       "p0_5": -23.5213,
+       "p5": -19.4268,
+       "p50": -8.577,
+       "p95": 0.6632,
+       "p99_5": 3.9729,
+       "min": -25.007,
+       "max": 4.167,
+       "n": 555
+      }
+     },
+     "Set R": {
+      "n": 526,
+      "mirror": {
+       "-1": 526
+      },
+      "x": {
+       "p0_5": 95.72,
+       "p5": 95.72,
+       "p50": 95.72,
+       "p95": 95.72,
+       "p99_5": 95.72,
+       "min": 95.72,
+       "max": 95.72,
+       "n": 526
+      },
+      "y": {
+       "p0_5": 0.99,
+       "p5": 0.99,
+       "p50": 0.99,
+       "p95": 0.99,
+       "p99_5": 0.99,
+       "min": 0.99,
+       "max": 0.99,
+       "n": 526
+      },
+      "flipX": {
+       "True": 526
+      },
+      "x_minus_hero_x": {
+       "p0_5": -4.4842,
+       "p5": -1.4096,
+       "p50": 8.1803,
+       "p95": 20.2216,
+       "p99_5": 24.6117,
+       "min": -6.0171,
+       "max": 26.2467,
+       "n": 526
+      }
+     }
+    }
+   },
+   "select": {
+    "dist": "|hero x - boss x| at the decision, boss x = last exported",
+    "dist_bins_u": [
+     0.0,
+     3.0,
+     6.0,
+     10.0,
+     99.0
+    ],
+    "counts": {
+     "P1": [
+      94,
+      85,
+      186,
+      211
+     ],
+     "P2": [
+      102,
+      92,
+      165,
+      147
+     ]
+    }
+   },
+   "hits_taken": {
+    "n": 1497,
+    "by_source": {
+     "Bone Beast/LeapCollider": 923,
+     "Boss Scene/Bone Beast": 456,
+     "BoneBeast DropBell M2": 118
+    },
+    "by_state": {
+     "Leap Out": 536,
+     "Leap Land": 417,
+     "Descending": 387,
+     "_tail": 111,
+     "Dig In": 46
+    }
+   },
+   "coverage": {
+    "n": 1082,
+    "target": 200,
+    "ok": true
+   },
+   "hitboxes": [
+    {
+     "state": "Descending",
+     "source": "Bone Beast:poly9",
+     "frame": "anchor",
+     "n": 1075,
+     "phases": {
+      "P1": 576,
+      "P2": 499
+     },
+     "t0_state": 0.0,
+     "t1_state": 0.6752,
+     "t0": 1.8166,
+     "t1": 2.5251,
+     "t_on_state": {
+      "p0_5": 0.0,
+      "p5": 0.0,
+      "p50": 0.0,
+      "p95": 0.0,
+      "p99_5": 0.0,
+      "min": 0.0,
+      "max": 0.0,
+      "n": 1075
+     },
+     "t_off_state": {
+      "p0_5": 0.6499,
+      "p5": 0.6584,
+      "p50": 0.6667,
+      "p95": 0.675,
+      "p99_5": 0.6751,
+      "min": 0.35,
+      "max": 0.6752,
+      "n": 1075
+     },
+     "t_on": {
+      "p0_5": 1.8167,
+      "p5": 1.8249,
+      "p50": 1.8415,
+      "p95": 1.85,
+      "p99_5": 1.85,
+      "min": 1.8166,
+      "max": 1.85,
+      "n": 1075
+     },
+     "t_off": {
+      "p0_5": 2.475,
+      "p5": 2.4915,
+      "p50": 2.5082,
+      "p95": 2.5249,
+      "p99_5": 2.525,
+      "min": 2.2,
+      "max": 2.5251,
+      "n": 1075
+     },
+     "x": [
+      4.277,
+      25.185
+     ],
+     "y": [
+      1.057,
+      11.638
+     ],
+     "dmg": [
+      2
+     ],
+     "eff": [
+      2
+     ],
+     "type": [
+      "ENEMY"
+     ],
+     "flags": [],
+     "parry": [
+      "counter"
+     ],
+     "parryable": false
+    },
+    {
+     "state": "Dig In",
+     "source": "Bone Beast:box",
+     "frame": "anchor",
+     "n": 1060,
+     "phases": {
+      "P1": 576,
+      "P2": 484
+     },
+     "t0_state": 0.0,
+     "t1_state": 0.3333,
+     "t0": 3.5583,
+     "t1": 3.9416,
+     "t_on_state": {
+      "p0_5": 0.0,
+      "p5": 0.0,
+      "p50": 0.0,
+      "p95": 0.0,
+      "p99_5": 0.0,
+      "min": 0.0,
+      "max": 0.0,
+      "n": 1060
+     },
+     "t_off_state": {
+      "p0_5": 0.2999,
+      "p5": 0.3001,
+      "p50": 0.3167,
+      "p95": 0.3333,
+      "p99_5": 0.3333,
+      "min": 0.15,
+      "max": 0.3333,
+      "n": 1060
+     },
+     "t_on": {
+      "p0_5": 3.5666,
+      "p5": 3.575,
+      "p50": 3.5999,
+      "p95": 3.6166,
+      "p99_5": 3.6249,
+      "min": 3.5583,
+      "max": 3.625,
+      "n": 1060
+     },
+     "t_off": {
+      "p0_5": 3.8833,
+      "p5": 3.8917,
+      "p50": 3.9166,
+      "p95": 3.9333,
+      "p99_5": 3.9416,
+      "min": 3.7666,
+      "max": 3.9416,
+      "n": 1060
+     },
+     "x": [
+      17.656,
+      26.424
+     ],
+     "y": [
+      0.781,
+      5.047
+     ],
+     "dmg": [
+      2
+     ],
+     "eff": [
+      2
+     ],
+     "type": [
+      "ENEMY"
+     ],
+     "flags": [],
+     "parry": [
+      "counter"
+     ],
+     "parryable": false
+    },
+    {
+     "state": "Dig In",
+     "source": "BoneBeast DropBell M2:circle",
+     "frame": "world",
+     "n": 483,
+     "phases": {
+      "P2": 483
+     },
+     "t0_state": 0.15,
+     "t1_state": 0.4335,
+     "t0": 3.725,
+     "t1": 4.0416,
+     "t_on_state": {
+      "p0_5": 0.15,
+      "p5": 0.15,
+      "p50": 0.1667,
+      "p95": 0.1833,
+      "p99_5": 0.1833,
+      "min": 0.15,
+      "max": 0.1834,
+      "n": 483
+     },
+     "t_off_state": {
+      "p0_5": 0.4,
+      "p5": 0.4001,
+      "p50": 0.4167,
+      "p95": 0.4333,
+      "p99_5": 0.4334,
+      "min": 0.2333,
+      "max": 0.4335,
+      "n": 483
+     },
+     "t_on": {
+      "p0_5": 3.7333,
+      "p5": 3.7417,
+      "p50": 3.7666,
+      "p95": 3.7833,
+      "p99_5": 3.7916,
+      "min": 3.725,
+      "max": 3.7917,
+      "n": 483
+     },
+     "t_off": {
+      "p0_5": 3.9784,
+      "p5": 3.9923,
+      "p50": 4.0166,
+      "p95": 4.0333,
+      "p99_5": 4.0416,
+      "min": 3.825,
+      "max": 4.0416,
+      "n": 483
+     },
+     "x": [
+      79.93,
+      90.465
+     ],
+     "y": [
+      4.934,
+      15.014
+     ],
+     "dmg": [
+      2
+     ],
+     "eff": [
+      2
+     ],
+     "type": [
+      "ENEMY"
+     ],
+     "flags": [],
+     "parry": [
+      "counter"
+     ],
+     "parryable": false
+    },
+    {
+     "state": "Leap Land",
+     "source": "Bone Beast:box",
+     "frame": "anchor",
+     "n": 1070,
+     "phases": {
+      "P1": 576,
+      "P2": 494
+     },
+     "t0_state": 0.0,
+     "t1_state": 1.0833,
+     "t0": 2.4667,
+     "t1": 3.6083,
+     "t_on_state": {
+      "p0_5": 0.0,
+      "p5": 0.0,
+      "p50": 0.0,
+      "p95": 0.0,
+      "p99_5": 0.0,
+      "min": 0.0,
+      "max": 0.0,
+      "n": 1070
+     },
+     "t_off_state": {
+      "p0_5": 0.2557,
+      "p5": 1.05,
+      "p50": 1.0584,
+      "p95": 1.0682,
+      "p99_5": 1.0833,
+      "min": 0.0167,
+      "max": 1.0833,
+      "n": 1070
+     },
+     "t_on": {
+      "p0_5": 2.4833,
+      "p5": 2.5,
+      "p50": 2.5249,
+      "p95": 2.5416,
+      "p99_5": 2.5417,
+      "min": 2.4667,
+      "max": 2.5418,
+      "n": 1070
+     },
+     "t_off": {
+      "p0_5": 2.7832,
+      "p5": 3.5583,
+      "p50": 3.5833,
+      "p95": 3.5999,
+      "p99_5": 3.6083,
+      "min": 2.5334,
+      "max": 3.6083,
+      "n": 1070
+     },
+     "x": [
+      15.998,
+      27.689
+     ],
+     "y": [
+      0.609,
+      5.625
+     ],
+     "dmg": [
+      2
+     ],
+     "eff": [
+      2
+     ],
+     "type": [
+      "ENEMY"
+     ],
+     "flags": [],
+     "parry": [
+      "counter"
+     ],
+     "parryable": false
+    },
+    {
+     "state": "Leap Out",
+     "source": "Bone Beast:poly9",
+     "frame": "anchor",
+     "n": 1081,
+     "phases": {
+      "P1": 576,
+      "P2": 505
+     },
+     "t0_state": 0.0,
+     "t1_state": 0.8192,
+     "t0": 1.0,
+     "t1": 1.8334,
+     "t_on_state": {
+      "p0_5": 0.0,
+      "p5": 0.0,
+      "p50": 0.0,
+      "p95": 0.0,
+      "p99_5": 0.0,
+      "min": 0.0,
+      "max": 0.0,
+      "n": 1081
+     },
+     "t_off_state": {
+      "p0_5": 0.7,
+      "p5": 0.8,
+      "p50": 0.8083,
+      "p95": 0.8167,
+      "p99_5": 0.8167,
+      "min": 0.1,
+      "max": 0.8192,
+      "n": 1081
+     },
+     "t_on": {
+      "p0_5": 1.0,
+      "p5": 1.0,
+      "p50": 1.0166,
+      "p95": 1.0167,
+      "p99_5": 1.0167,
+      "min": 1.0,
+      "max": 1.0168,
+      "n": 1081
+     },
+     "t_off": {
+      "p0_5": 1.71,
+      "p5": 1.8083,
+      "p50": 1.8249,
+      "p95": 1.8333,
+      "p99_5": 1.8333,
+      "min": 1.1166,
+      "max": 1.8334,
+      "n": 1081
+     },
+     "x": [
+      -5.953,
+      16.307
+     ],
+     "y": [
+      -3.075,
+      11.655
+     ],
+     "dmg": [
+      2
+     ],
+     "eff": [
+      2
+     ],
+     "type": [
+      "ENEMY"
+     ],
+     "flags": [],
+     "parry": [
+      "counter"
+     ],
+     "parryable": false
+    },
+    {
+     "state": "_tail",
+     "source": "BoneBeast DropBell M2:circle",
+     "frame": "world",
+     "n": 483,
+     "phases": {
+      "P2": 483
+     },
+     "t0_state": 0.0028,
+     "t1_state": 1.2999,
+     "t0": 3.8337,
+     "t1": 5.3249,
+     "t_on_state": {
+      "p0_5": 0.0069,
+      "p5": 0.0167,
+      "p50": 0.0167,
+      "p95": 0.0167,
+      "p99_5": 0.0168,
+      "min": 0.0028,
+      "max": 0.0168,
+      "n": 483
+     },
+     "t_off_state": {
+      "p0_5": 0.2209,
+      "p5": 1.2166,
+      "p50": 1.2333,
+      "p95": 1.2833,
+      "p99_5": 1.2999,
+      "min": 0.0167,
+      "max": 1.2999,
+      "n": 483
+     },
+     "t_on": {
+      "p0_5": 3.995,
+      "p5": 4.0089,
+      "p50": 4.0333,
+      "p95": 4.0499,
+      "p99_5": 4.0583,
+      "min": 3.8337,
+      "max": 4.0583,
+      "n": 483
+     },
+     "t_off": {
+      "p0_5": 4.2159,
+      "p5": 5.2249,
+      "p50": 5.25,
+      "p95": 5.2999,
+      "p99_5": 5.3137,
+      "min": 3.8867,
+      "max": 5.3249,
+      "n": 483
+     },
+     "x": [
+      75.289,
+      95.105
+     ],
+     "y": [
+      -8.14,
+      13.836
+     ],
+     "dmg": [
+      2
+     ],
+     "eff": [
+      2
+     ],
+     "type": [
+      "ENEMY"
+     ],
+     "flags": [],
+     "parry": [
+      "counter"
+     ],
+     "parryable": false
+    }
+   ],
+   "reach_union": {
+    "anchor": {
+     "npz": "BB_LEAP/anchor",
+     "frame": "anchor",
+     "n_instances": 1081,
+     "extent": [
+      -6.0,
+      -3.1,
+      27.7,
+      11.7
+     ],
+     "active_s": [
+      1.0,
+      3.9333
+     ],
+     "cells": 105576,
+     "boxes": [
+      [
+       -6.0,
+       -3.1,
+       -0.8,
+       -2.7
+      ],
+      [
+       -6.0,
+       -2.7,
+       1.2,
+       -2.3
+      ],
+      [
+       -6.0,
+       -2.3,
+       2.4,
+       -1.9
+      ],
+      [
+       -6.0,
+       -1.9,
+       3.6,
+       -1.5
+      ],
+      [
+       -6.0,
+       -1.5,
+       4.8,
+       -1.1
+      ],
+      [
+       -6.0,
+       -1.1,
+       6.0,
+       -0.3
+      ],
+      [
+       -5.6,
+       -0.3,
+       5.6,
+       0.1
+      ],
+      [
+       -5.6,
+       0.1,
+       6.4,
+       0.9
+      ],
+      [
+       17.6,
+       0.5,
+       28.0,
+       0.9
+      ],
+      [
+       -5.2,
+       0.9,
+       6.4,
+       1.7
+      ],
+      [
+       15.6,
+       0.9,
+       28.0,
+       2.9
+      ],
+      [
+       -5.2,
+       1.7,
+       6.8,
+       2.1
+      ],
+      [
+       -4.8,
+       2.1,
+       6.8,
+       2.5
+      ],
+      [
+       -4.8,
+       2.5,
+       7.2,
+       3.7
+      ],
+      [
+       15.2,
+       2.9,
+       28.0,
+       3.3
+      ],
+      [
+       14.0,
+       3.3,
+       28.0,
+       3.7
+      ],
+      [
+       -4.4,
+       3.7,
+       7.2,
+       4.1
+      ],
+      [
+       13.2,
+       3.7,
+       28.0,
+       4.1
+      ],
+      [
+       -4.4,
+       4.1,
+       7.6,
+       4.9
+      ],
+      [
+       12.8,
+       4.1,
+       28.0,
+       4.5
+      ],
+      [
+       12.4,
+       4.5,
+       28.0,
+       4.9
+      ],
+      [
+       -4.0,
+       4.9,
+       8.0,
+       5.3
+      ],
+      [
+       12.0,
+       4.9,
+       27.6,
+       5.3
+      ],
+      [
+       -3.6,
+       5.3,
+       8.0,
+       6.1
+      ],
+      [
+       11.6,
+       5.3,
+       27.6,
+       5.7
+      ],
+      [
+       11.2,
+       5.7,
+       22.8,
+       6.1
+      ],
+      [
+       -3.2,
+       6.1,
+       8.4,
+       6.5
+      ],
+      [
+       10.8,
+       6.1,
+       22.4,
+       6.5
+      ],
+      [
+       -3.2,
+       6.5,
+       8.8,
+       6.9
+      ],
+      [
+       10.4,
+       6.5,
+       22.0,
+       6.9
+      ],
+      [
+       -2.8,
+       6.9,
+       8.8,
+       7.3
+      ],
+      [
+       10.0,
+       6.9,
+       21.6,
+       7.3
+      ],
+      [
+       -2.4,
+       7.3,
+       21.2,
+       7.7
+      ],
+      [
+       -2.0,
+       7.7,
+       20.8,
+       8.1
+      ],
+      [
+       -1.2,
+       8.1,
+       20.4,
+       8.5
+      ],
+      [
+       -0.8,
+       8.5,
+       19.6,
+       8.9
+      ],
+      [
+       -0.4,
+       8.9,
+       19.2,
+       9.3
+      ],
+      [
+       0.4,
+       9.3,
+       18.8,
+       9.7
+      ],
+      [
+       0.8,
+       9.7,
+       18.0,
+       10.1
+      ],
+      [
+       1.6,
+       10.1,
+       17.2,
+       10.5
+      ],
+      [
+       2.4,
+       10.5,
+       16.4,
+       10.9
+      ],
+      [
+       3.2,
+       10.9,
+       15.6,
+       11.3
+      ],
+      [
+       4.4,
+       11.3,
+       14.4,
+       11.7
+      ]
+     ]
+    },
+    "world": {
+     "npz": "BB_LEAP/world",
+     "frame": "world",
+     "n_instances": 483,
+     "extent": [
+      75.25,
+      -8.15,
+      95.15,
+      15.05
+     ],
+     "active_s": [
+      3.7167,
+      5.3167
+     ],
+     "cells": 154103,
+     "boxes": [
+      [
+       75.95,
+       -8.15,
+       85.15,
+       -8.05
+      ],
+      [
+       85.65,
+       -8.15,
+       94.45,
+       -8.05
+      ],
+      [
+       75.85,
+       -8.05,
+       85.25,
+       -7.95
+      ],
+      [
+       85.55,
+       -8.05,
+       94.55,
+       -7.95
+      ],
+      [
+       75.75,
+       -7.95,
+       85.35,
+       -7.85
+      ],
+      [
+       85.45,
+       -7.95,
+       94.65,
+       -7.85
+      ],
+      [
+       75.65,
+       -7.85,
+       94.75,
+       -7.75
+      ],
+      [
+       75.55,
+       -7.75,
+       94.85,
+       -7.65
+      ],
+      [
+       75.45,
+       -7.65,
+       94.95,
+       -7.55
+      ],
+      [
+       75.35,
+       -7.55,
+       95.05,
+       -7.45
+      ],
+      [
+       75.25,
+       -7.45,
+       95.15,
+       -6.25
+      ],
+      [
+       75.35,
+       -6.25,
+       95.05,
+       -5.35
+      ],
+      [
+       75.45,
+       -5.35,
+       94.95,
+       -3.55
+      ],
+      [
+       75.55,
+       -3.55,
+       94.85,
+       -2.75
+      ],
+      [
+       75.65,
+       -2.75,
+       94.75,
+       -1.85
+      ],
+      [
+       75.75,
+       -1.85,
+       94.65,
+       -1.05
+      ],
+      [
+       75.85,
+       -1.05,
+       94.55,
+       0.45
+      ],
+      [
+       75.95,
+       0.45,
+       94.45,
+       1.15
+      ],
+      [
+       76.05,
+       1.15,
+       94.35,
+       1.85
+      ],
+      [
+       76.15,
+       1.85,
+       94.25,
+       2.55
+      ],
+      [
+       76.25,
+       2.55,
+       94.15,
+       3.75
+      ],
+      [
+       76.35,
+       3.75,
+       94.05,
+       4.15
+      ],
+      [
+       76.45,
+       4.15,
+       93.95,
+       4.75
+      ],
+      [
+       76.55,
+       4.75,
+       93.85,
+       5.25
+      ],
+      [
+       76.65,
+       5.25,
+       93.75,
+       6.25
+      ],
+      [
+       76.75,
+       6.25,
+       93.65,
+       6.65
+      ],
+      [
+       76.85,
+       6.65,
+       93.55,
+       7.15
+      ],
+      [
+       76.95,
+       7.15,
+       93.45,
+       7.55
+      ],
+      [
+       77.05,
+       7.55,
+       93.35,
+       8.25
+      ],
+      [
+       77.15,
+       8.25,
+       93.25,
+       8.55
+      ],
+      [
+       77.25,
+       8.55,
+       93.15,
+       8.85
+      ],
+      [
+       77.35,
+       8.85,
+       93.05,
+       9.15
+      ],
+      [
+       77.45,
+       9.15,
+       92.95,
+       9.55
+      ],
+      [
+       77.55,
+       9.55,
+       92.85,
+       9.75
+      ],
+      [
+       77.65,
+       9.75,
+       92.75,
+       9.95
+      ],
+      [
+       77.75,
+       9.95,
+       92.65,
+       10.15
+      ],
+      [
+       77.85,
+       10.15,
+       92.55,
+       10.25
+      ],
+      [
+       77.95,
+       10.25,
+       92.45,
+       10.35
+      ],
+      [
+       78.05,
+       10.35,
+       92.35,
+       10.45
+      ],
+      [
+       78.15,
+       10.45,
+       92.25,
+       10.55
+      ],
+      [
+       78.25,
+       10.55,
+       92.15,
+       10.65
+      ],
+      [
+       78.35,
+       10.65,
+       92.05,
+       10.75
+      ],
+      [
+       78.45,
+       10.75,
+       91.95,
+       10.85
+      ],
+      [
+       78.55,
+       10.85,
+       91.85,
+       10.95
+      ],
+      [
+       78.65,
+       10.95,
+       91.75,
+       11.05
+      ],
+      [
+       78.75,
+       11.05,
+       91.65,
+       11.15
+      ],
+      [
+       79.85,
+       11.15,
+       90.55,
+       14.35
+      ],
+      [
+       79.95,
+       14.35,
+       90.45,
+       14.45
+      ],
+      [
+       80.05,
+       14.45,
+       90.35,
+       14.55
+      ],
+      [
+       80.15,
+       14.55,
+       90.25,
+       14.65
+      ],
+      [
+       80.25,
+       14.65,
+       90.15,
+       14.75
+      ],
+      [
+       80.35,
+       14.75,
+       90.05,
+       14.85
+      ],
+      [
+       80.45,
+       14.85,
+       89.95,
+       14.95
+      ],
+      [
+       80.55,
+       14.95,
+       89.85,
+       15.05
+      ]
+     ]
+    }
+   }
+  },
+  "BB_BURST": {
+   "start_states": [
+    "Burst Pos"
+   ],
+   "states": [
+    "Burst Pos",
+    "Burst Antic",
+    "Fire Bells",
+    "Burst Out",
+    "Burst Recovery"
+   ],
+   "n": 1189,
+   "n_by_phase": {
+    "P1": 450,
+    "P2": 739
+   },
+   "n_by_dir": {
+    "-": 1189
+   },
+   "ends": {
+    "rest": 1160,
+    "fight_end": 3,
+    "death": 26
+   },
+   "mirrored": false,
+   "boss_hp_at_start": {
+    "p0_5": 5.0,
+    "p5": 10.0,
+    "p50": 60.0,
+    "p95": 115.0,
+    "p99_5": 120.0,
+    "min": 5.0,
+    "max": 120.0,
+    "n": 1189
+   },
+   "duration_s": {
+    "p0_5": 3.1083,
+    "p5": 3.1084,
+    "p50": 3.1332,
+    "p95": 3.1417,
+    "p99_5": 3.15,
+    "min": 3.1082,
+    "max": 3.15,
+    "n": 1160
+   },
+   "tail_s": {
+    "p0_5": 1.5763,
+    "p5": 3.8365,
+    "p50": 4.4415,
+    "p95": 4.4916,
+    "p99_5": 4.5082,
+    "min": 1.1333,
+    "max": 4.5084,
+    "n": 1189
+   },
+   "state_entry_s": {
+    "Burst Pos": {
+     "p0_5": 0.0,
+     "p5": 0.0,
+     "p50": 0.0,
+     "p95": 0.0,
+     "p99_5": 0.0,
+     "min": 0.0,
+     "max": 0.0,
+     "n": 1189
+    },
+    "Burst Antic": {
+     "p0_5": 0.0,
+     "p5": 0.0,
+     "p50": 0.0,
+     "p95": 0.0,
+     "p99_5": 0.0,
+     "min": 0.0,
+     "max": 0.0,
+     "n": 1189
+    },
+    "Fire Bells": {
+     "p0_5": 1.2,
+     "p5": 1.2,
+     "p50": 1.2166,
+     "p95": 1.2167,
+     "p99_5": 1.2167,
+     "min": 1.2,
+     "max": 1.2169,
+     "n": 1188
+    },
+    "Burst Out": {
+     "p0_5": 1.2,
+     "p5": 1.2,
+     "p50": 1.2166,
+     "p95": 1.2167,
+     "p99_5": 1.2167,
+     "min": 1.2,
+     "max": 1.2169,
+     "n": 1188
+    },
+    "Burst Recovery": {
+     "p0_5": 2.1,
+     "p5": 2.1083,
+     "p50": 2.1249,
+     "p95": 2.1333,
+     "p99_5": 2.1333,
+     "min": 2.0999,
+     "max": 2.1334,
+     "n": 1160
+    }
+   },
+   "ttd_s": {
+    "start": {
+     "p0_5": 1.2,
+     "p5": 1.2,
+     "p50": 1.2166,
+     "p95": 1.2167,
+     "p99_5": 1.2167,
+     "min": 1.2,
+     "max": 1.2169,
+     "n": 1188
+    },
+    "Burst Pos": {
+     "p0_5": 1.2,
+     "p5": 1.2,
+     "p50": 1.2166,
+     "p95": 1.2167,
+     "p99_5": 1.2167,
+     "min": 1.2,
+     "max": 1.2169,
+     "n": 1188
+    },
+    "Burst Antic": {
+     "p0_5": 1.2,
+     "p5": 1.2,
+     "p50": 1.2166,
+     "p95": 1.2167,
+     "p99_5": 1.2167,
+     "min": 1.2,
+     "max": 1.2169,
+     "n": 1188
+    },
+    "Fire Bells": {
+     "p0_5": 0.0,
+     "p5": 0.0,
+     "p50": 0.0,
+     "p95": 0.0,
+     "p99_5": 0.0,
+     "min": 0.0,
+     "max": 0.0,
+     "n": 1188
+    },
+    "Burst Out": {
+     "p0_5": 0.0,
+     "p5": 0.0,
+     "p50": 0.0,
+     "p95": 0.0,
+     "p99_5": 0.0,
+     "min": 0.0,
+     "max": 0.0,
+     "n": 1188
+    },
+    "Burst Recovery": {
+     "p0_5": 0.0,
+     "p5": 0.0,
+     "p50": 0.0,
+     "p95": 0.0,
+     "p99_5": 0.0,
+     "min": 0.0,
+     "max": 0.0,
+     "n": 1160
+    }
+   },
+   "anchor": {
+    "frame": "boss position at its first export in the instance",
+    "t_s": {
+     "p0_5": 1.2,
+     "p5": 1.2,
+     "p50": 1.2166,
+     "p95": 1.2167,
+     "p99_5": 1.2167,
+     "min": 1.2,
+     "max": 1.2169,
+     "n": 1188
+    },
+    "missing": 1,
+    "by_dir": {
+     "-": {
+      "n": 1189,
+      "mirror": {
+       "1": 1189
+      },
+      "x": {
+       "p0_5": 81.2609,
+       "p5": 81.6378,
+       "p50": 85.9467,
+       "p95": 90.6588,
+       "p99_5": 91.1701,
+       "min": 81.2314,
+       "max": 91.2071,
+       "n": 1188
+      },
+      "y": {
+       "p0_5": 5.49,
+       "p5": 5.49,
+       "p50": 5.49,
+       "p95": 5.49,
+       "p99_5": 5.49,
+       "min": 5.49,
+       "max": 5.49,
+       "n": 1188
+      },
+      "flipX": {
+       "False": 560,
+       "True": 628,
+       "None": 1
+      },
+      "x_minus_hero_x": {
+       "p0_5": -17.2776,
+       "p5": -11.3062,
+       "p50": 0.789,
+       "p95": 12.5258,
+       "p99_5": 18.0956,
+       "min": -18.7234,
+       "max": 20.0156,
+       "n": 1188
+      }
+     }
+    }
+   },
+   "select": {
+    "dist": "|hero x - boss x| at the decision, boss x = last exported",
+    "dist_bins_u": [
+     0.0,
+     3.0,
+     6.0,
+     10.0,
+     99.0
+    ],
+    "counts": {
+     "P1": [
+      90,
+      90,
+      133,
+      137
+     ],
+     "P2": [
+      144,
+      173,
+      189,
+      233
+     ]
+    }
+   },
+   "hits_taken": {
+    "n": 1504,
+    "by_source": {
+     "Boss Scene/BoneBeast AtkBell L": 618,
+     "Boss Scene/BoneBeast AtkBell R": 537,
+     "BoneBeast DropBell M2": 175,
+     "Boss Scene/Bone Beast": 174
+    },
+    "by_state": {
+     "Burst Recovery": 780,
+     "Burst Out": 542,
+     "_tail": 182
+    }
+   },
+   "coverage": {
+    "n": 1189,
+    "target": 200,
+    "ok": true
+   },
+   "hitboxes": [
+    {
+     "state": "Burst Out",
+     "source": "Bone Beast:box",
+     "frame": "anchor",
+     "n": 1188,
+     "phases": {
+      "P1": 450,
+      "P2": 738
+     },
+     "t0_state": 0.0,
+     "t1_state": 0.8167,
+     "t0": 1.2,
+     "t1": 2.0333,
+     "t_on_state": {
+      "p0_5": 0.0,
+      "p5": 0.0,
+      "p50": 0.0,
+      "p95": 0.0,
+      "p99_5": 0.0,
+      "min": 0.0,
+      "max": 0.0,
+      "n": 1188
+     },
+     "t_off_state": {
+      "p0_5": 0.3145,
+      "p5": 0.8,
+      "p50": 0.8083,
+      "p95": 0.8167,
+      "p99_5": 0.8167,
+      "min": 0.0833,
+      "max": 0.8167,
+      "n": 1188
+     },
+     "t_on": {
+      "p0_5": 1.2,
+      "p5": 1.2,
+      "p50": 1.2166,
+      "p95": 1.2167,
+      "p99_5": 1.2167,
+      "min": 1.2,
+      "max": 1.2169,
+      "n": 1188
+     },
+     "t_off": {
+      "p0_5": 1.5311,
+      "p5": 2.0,
+      "p50": 2.0249,
+      "p95": 2.0333,
+      "p99_5": 2.0333,
+      "min": 1.2999,
+      "max": 2.0333,
+      "n": 1188
+     },
+     "x": [
+      -2.594,
+      2.594
+     ],
+     "y": [
+      -3.531,
+      1.766
+     ],
+     "dmg": [
+      2
+     ],
+     "eff": [
+      2
+     ],
+     "type": [
+      "ENEMY"
+     ],
+     "flags": [],
+     "parry": [
+      "counter"
+     ],
+     "parryable": false
+    },
+    {
+     "state": "Burst Out",
+     "source": "BoneBeast AtkBell L:circle",
+     "frame": "anchor",
+     "n": 1188,
+     "phases": {
+      "P1": 450,
+      "P2": 738
+     },
+     "t0_state": 0.0,
+     "t1_state": 0.9,
+     "t0": 1.2,
+     "t1": 2.1167,
+     "t_on_state": {
+      "p0_5": 0.0,
+      "p5": 0.0,
+      "p50": 0.0,
+      "p95": 0.0,
+      "p99_5": 0.0,
+      "min": 0.0,
+      "max": 0.0,
+      "n": 1188
+     },
+     "t_off_state": {
+      "p0_5": 0.3312,
+      "p5": 0.8833,
+      "p50": 0.8917,
+      "p95": 0.9,
+      "p99_5": 0.9,
+      "min": 0.1,
+      "max": 0.9,
+      "n": 1188
+     },
+     "t_on": {
+      "p0_5": 1.2,
+      "p5": 1.2,
+      "p50": 1.2166,
+      "p95": 1.2167,
+      "p99_5": 1.2167,
+      "min": 1.2,
+      "max": 1.2169,
+      "n": 1188
+     },
+     "t_off": {
+      "p0_5": 1.5478,
+      "p5": 2.0834,
+      "p50": 2.1082,
+      "p95": 2.1166,
+      "p99_5": 2.1167,
+      "min": 1.3166,
+      "max": 2.1167,
+      "n": 1188
+     },
+     "x": [
+      -4.174,
+      -0.726
+     ],
+     "y": [
+      -5.81,
+      7.299
+     ],
+     "dmg": [
+      2
+     ],
+     "eff": [
+      2
+     ],
+     "type": [
+      "ENEMY"
+     ],
+     "flags": [],
+     "parry": [
+      "counter"
+     ],
+     "parryable": false
+    },
+    {
+     "state": "Burst Out",
+     "source": "BoneBeast AtkBell R:circle",
+     "frame": "anchor",
+     "n": 1188,
+     "phases": {
+      "P1": 450,
+      "P2": 738
+     },
+     "t0_state": 0.0,
+     "t1_state": 0.9,
+     "t0": 1.2,
+     "t1": 2.1167,
+     "t_on_state": {
+      "p0_5": 0.0,
+      "p5": 0.0,
+      "p50": 0.0,
+      "p95": 0.0,
+      "p99_5": 0.0,
+      "min": 0.0,
+      "max": 0.0,
+      "n": 1188
+     },
+     "t_off_state": {
+      "p0_5": 0.3312,
+      "p5": 0.8833,
+      "p50": 0.8917,
+      "p95": 0.9,
+      "p99_5": 0.9,
+      "min": 0.1,
+      "max": 0.9,
+      "n": 1188
+     },
+     "t_on": {
+      "p0_5": 1.2,
+      "p5": 1.2,
+      "p50": 1.2166,
+      "p95": 1.2167,
+      "p99_5": 1.2167,
+      "min": 1.2,
+      "max": 1.2169,
+      "n": 1188
+     },
+     "t_off": {
+      "p0_5": 1.5478,
+      "p5": 2.0834,
+      "p50": 2.1082,
+      "p95": 2.1166,
+      "p99_5": 2.1167,
+      "min": 1.3166,
+      "max": 2.1167,
+      "n": 1188
+     },
+     "x": [
+      0.726,
+      4.174
+     ],
+     "y": [
+      -5.81,
+      7.299
+     ],
+     "dmg": [
+      2
+     ],
+     "eff": [
+      2
+     ],
+     "type": [
+      "ENEMY"
+     ],
+     "flags": [],
+     "parry": [
+      "counter"
+     ],
+     "parryable": false
+    },
+    {
+     "state": "Burst Recovery",
+     "source": "BoneBeast AtkBell L:circle",
+     "frame": "anchor",
+     "n": 1160,
+     "phases": {
+      "P1": 450,
+      "P2": 710
+     },
+     "t0_state": 0.0,
+     "t1_state": 1.0167,
+     "t0": 2.0999,
+     "t1": 3.15,
+     "t_on_state": {
+      "p0_5": 0.0,
+      "p5": 0.0,
+      "p50": 0.0,
+      "p95": 0.0,
+      "p99_5": 0.0,
+      "min": 0.0,
+      "max": 0.2833,
+      "n": 1160
+     },
+     "t_off_state": {
+      "p0_5": 1.0,
+      "p5": 1.0,
+      "p50": 1.0083,
+      "p95": 1.0167,
+      "p99_5": 1.0167,
+      "min": 0.9083,
+      "max": 1.0167,
+      "n": 1160
+     },
+     "t_on": {
+      "p0_5": 2.1,
+      "p5": 2.1083,
+      "p50": 2.1249,
+      "p95": 2.1333,
+      "p99_5": 2.1333,
+      "min": 2.0999,
+      "max": 2.4166,
+      "n": 1160
+     },
+     "t_off": {
+      "p0_5": 3.1082,
+      "p5": 3.1084,
+      "p50": 3.1332,
+      "p95": 3.1417,
+      "p99_5": 3.1499,
+      "min": 3.0416,
+      "max": 3.15,
+      "n": 1160
+     },
+     "x": [
+      -14.674,
+      -1.626
+     ],
+     "y": [
+      -3.8,
+      3.614
+     ],
+     "dmg": [
+      2
+     ],
+     "eff": [
+      2
+     ],
+     "type": [
+      "ENEMY"
+     ],
+     "flags": [],
+     "parry": [
+      "counter"
+     ],
+     "parryable": false
+    },
+    {
+     "state": "Burst Recovery",
+     "source": "BoneBeast AtkBell R:circle",
+     "frame": "anchor",
+     "n": 1160,
+     "phases": {
+      "P1": 450,
+      "P2": 710
+     },
+     "t0_state": 0.0,
+     "t1_state": 1.0167,
+     "t0": 2.0999,
+     "t1": 3.15,
+     "t_on_state": {
+      "p0_5": 0.0,
+      "p5": 0.0,
+      "p50": 0.0,
+      "p95": 0.0,
+      "p99_5": 0.0,
+      "min": 0.0,
+      "max": 0.0,
+      "n": 1160
+     },
+     "t_off_state": {
+      "p0_5": 0.9249,
+      "p5": 1.0,
+      "p50": 1.0083,
+      "p95": 1.0167,
+      "p99_5": 1.0167,
+      "min": 0.9083,
+      "max": 1.0167,
+      "n": 1160
+     },
+     "t_on": {
+      "p0_5": 2.1,
+      "p5": 2.1083,
+      "p50": 2.1249,
+      "p95": 2.1333,
+      "p99_5": 2.1333,
+      "min": 2.0999,
+      "max": 2.1334,
+      "n": 1160
+     },
+     "t_off": {
+      "p0_5": 3.0416,
+      "p5": 3.1083,
+      "p50": 3.1325,
+      "p95": 3.1417,
+      "p99_5": 3.15,
+      "min": 3.0333,
+      "max": 3.15,
+      "n": 1160
+     },
+     "x": [
+      1.626,
+      14.674
+     ],
+     "y": [
+      -3.8,
+      3.614
+     ],
+     "dmg": [
+      2
+     ],
+     "eff": [
+      2
+     ],
+     "type": [
+      "ENEMY"
+     ],
+     "flags": [],
+     "parry": [
+      "counter"
+     ],
+     "parryable": false
+    },
+    {
+     "state": "Burst Recovery",
+     "source": "BoneBeast DropBell M2:circle",
+     "frame": "world",
+     "n": 710,
+     "phases": {
+      "P2": 710
+     },
+     "t0_state": 0.8167,
+     "t1_state": 1.0167,
+     "t0": 2.9416,
+     "t1": 3.15,
+     "t_on_state": {
+      "p0_5": 0.8209,
+      "p5": 0.825,
+      "p50": 0.8417,
+      "p95": 0.8583,
+      "p99_5": 0.8666,
+      "min": 0.8167,
+      "max": 0.8667,
+      "n": 710
+     },
+     "t_off_state": {
+      "p0_5": 1.0,
+      "p5": 1.0,
+      "p50": 1.0083,
+      "p95": 1.0167,
+      "p99_5": 1.0167,
+      "min": 1.0,
+      "max": 1.0167,
+      "n": 710
+     },
+     "t_on": {
+      "p0_5": 2.9416,
+      "p5": 2.9499,
+      "p50": 2.9587,
+      "p95": 2.975,
+      "p99_5": 2.9833,
+      "min": 2.9416,
+      "max": 2.9833,
+      "n": 710
+     },
+     "t_off": {
+      "p0_5": 3.1082,
+      "p5": 3.1084,
+      "p50": 3.1332,
+      "p95": 3.1417,
+      "p99_5": 3.15,
+      "min": 3.1082,
+      "max": 3.15,
+      "n": 710
+     },
+     "x": [
+      79.95,
+      90.46
+     ],
+     "y": [
+      7.614,
+      15.014
+     ],
+     "dmg": [
+      2
+     ],
+     "eff": [
+      2
+     ],
+     "type": [
+      "ENEMY"
+     ],
+     "flags": [],
+     "parry": [
+      "counter"
+     ],
+     "parryable": false
+    },
+    {
+     "state": "_tail",
+     "source": "BoneBeast AtkBell L:circle",
+     "frame": "anchor",
+     "n": 1178,
+     "phases": {
+      "P1": 449,
+      "P2": 729
+     },
+     "t0_state": 0.0001,
+     "t1_state": 1.2,
+     "t0": 1.3168,
+     "t1": 4.3251,
+     "t_on_state": {
+      "p0_5": 0.0087,
+      "p5": 0.0167,
+      "p50": 0.0167,
+      "p95": 0.0167,
+      "p99_5": 0.0167,
+      "min": 0.0001,
+      "max": 0.0168,
+      "n": 1178
+     },
+     "t_off_state": {
+      "p0_5": 0.0333,
+      "p5": 0.0975,
+      "p50": 0.7167,
+      "p95": 1.175,
+      "p99_5": 1.1844,
+      "min": 0.0139,
+      "max": 1.2,
+      "n": 1178
+     },
+     "t_on": {
+      "p0_5": 1.5549,
+      "p5": 3.125,
+      "p50": 3.1497,
+      "p95": 3.1583,
+      "p99_5": 3.1666,
+      "min": 1.3168,
+      "max": 3.1666,
+      "n": 1178
+     },
+     "t_off": {
+      "p0_5": 1.6078,
+      "p5": 3.2249,
+      "p50": 3.8417,
+      "p95": 4.3082,
+      "p99_5": 4.3249,
+      "min": 1.357,
+      "max": 4.3251,
+      "n": 1178
+     },
+     "x": [
+      -28.594,
+      -0.826
+     ],
+     "y": [
+      -3.8,
+      7.299
+     ],
+     "dmg": [
+      2
+     ],
+     "eff": [
+      2
+     ],
+     "type": [
+      "ENEMY"
+     ],
+     "flags": [],
+     "parry": [
+      "counter"
+     ],
+     "parryable": false
+    },
+    {
+     "state": "_tail",
+     "source": "BoneBeast AtkBell R:circle",
+     "frame": "anchor",
+     "n": 1155,
+     "phases": {
+      "P1": 438,
+      "P2": 717
+     },
+     "t0_state": 0.0001,
+     "t1_state": 1.2,
+     "t0": 1.3168,
+     "t1": 4.3249,
+     "t_on_state": {
+      "p0_5": 0.0087,
+      "p5": 0.0167,
+      "p50": 0.0167,
+      "p95": 0.0167,
+      "p99_5": 0.0167,
+      "min": 0.0001,
+      "max": 0.0168,
+      "n": 1155
+     },
+     "t_off_state": {
+      "p0_5": 0.0167,
+      "p5": 0.0666,
+      "p50": 0.6832,
+      "p95": 1.1667,
+      "p99_5": 1.1834,
+      "min": 0.0167,
+      "max": 1.2,
+      "n": 1155
+     },
+     "t_on": {
+      "p0_5": 1.5511,
+      "p5": 3.125,
+      "p50": 3.1497,
+      "p95": 3.1583,
+      "p99_5": 3.1666,
+      "min": 1.3168,
+      "max": 3.1666,
+      "n": 1155
+     },
+     "t_off": {
+      "p0_5": 1.604,
+      "p5": 3.1916,
+      "p50": 3.8082,
+      "p95": 4.3082,
+      "p99_5": 4.3186,
+      "min": 1.357,
+      "max": 4.3249,
+      "n": 1155
+     },
+     "x": [
+      0.826,
+      28.834
+     ],
+     "y": [
+      -3.8,
+      7.299
+     ],
+     "dmg": [
+      2
+     ],
+     "eff": [
+      2
+     ],
+     "type": [
+      "ENEMY"
+     ],
+     "flags": [],
+     "parry": [
+      "counter"
+     ],
+     "parryable": false
+    },
+    {
+     "state": "_tail",
+     "source": "BoneBeast DropBell M2:circle",
+     "frame": "world",
+     "n": 709,
+     "phases": {
+      "P2": 709
+     },
+     "t0_state": 0.0028,
+     "t1_state": 1.3838,
+     "t0": 3.1248,
+     "t1": 4.5084,
+     "t_on_state": {
+      "p0_5": 0.0167,
+      "p5": 0.0167,
+      "p50": 0.0167,
+      "p95": 0.0167,
+      "p99_5": 0.0167,
+      "min": 0.0028,
+      "max": 0.0168,
+      "n": 709
+     },
+     "t_off_state": {
+      "p0_5": 1.2833,
+      "p5": 1.2999,
+      "p50": 1.3167,
+      "p95": 1.3667,
+      "p99_5": 1.3833,
+      "min": 0.0333,
+      "max": 1.3838,
+      "n": 709
+     },
+     "t_on": {
+      "p0_5": 3.1249,
+      "p5": 3.125,
+      "p50": 3.1498,
+      "p95": 3.1583,
+      "p99_5": 3.1666,
+      "min": 3.1248,
+      "max": 3.1666,
+      "n": 709
+     },
+     "t_off": {
+      "p0_5": 4.4166,
+      "p5": 4.4249,
+      "p50": 4.45,
+      "p95": 4.4916,
+      "p99_5": 4.5083,
+      "min": 3.1584,
+      "max": 4.5084,
+      "n": 709
+     },
+     "x": [
+      75.473,
+      95.061
+     ],
+     "y": [
+      -8.14,
+      11.344
+     ],
+     "dmg": [
+      2
+     ],
+     "eff": [
+      2
+     ],
+     "type": [
+      "ENEMY"
+     ],
+     "flags": [],
+     "parry": [
+      "counter"
+     ],
+     "parryable": false
+    }
+   ],
+   "reach_union": {
+    "anchor": {
+     "npz": "BB_BURST/anchor",
+     "frame": "anchor",
+     "n_instances": 1188,
+     "extent": [
+      -28.6,
+      -5.85,
+      28.85,
+      7.35
+     ],
+     "active_s": [
+      1.2,
+      4.3333
+     ],
+     "cells": 94302,
+     "boxes": [
+      [
+       -3.0,
+       -5.85,
+       -1.0,
+       -5.45
+      ],
+      [
+       1.0,
+       -5.85,
+       3.0,
+       -5.45
+      ],
+      [
+       -3.4,
+       -5.45,
+       -0.6,
+       -3.85
+      ],
+      [
+       0.6,
+       -5.45,
+       3.4,
+       -3.85
+      ],
+      [
+       -24.2,
+       -3.85,
+       -22.2,
+       -3.45
+      ],
+      [
+       -19.4,
+       -3.85,
+       -17.0,
+       -3.45
+      ],
+      [
+       -14.2,
+       -3.85,
+       -11.8,
+       -3.45
+      ],
+      [
+       -9.0,
+       -3.85,
+       -7.0,
+       -3.45
+      ],
+      [
+       -4.2,
+       -3.85,
+       4.2,
+       -3.45
+      ],
+      [
+       7.0,
+       -3.85,
+       9.0,
+       -3.45
+      ],
+      [
+       11.8,
+       -3.85,
+       14.2,
+       -3.45
+      ],
+      [
+       17.0,
+       -3.85,
+       19.4,
+       -3.45
+      ],
+      [
+       22.2,
+       -3.85,
+       24.2,
+       -3.45
+      ],
+      [
+       -28.2,
+       -3.45,
+       -26.6,
+       -3.05
+      ],
+      [
+       -24.6,
+       -3.45,
+       -21.4,
+       -3.05
+      ],
+      [
+       -19.8,
+       -3.45,
+       -16.6,
+       -3.05
+      ],
+      [
+       -14.6,
+       -3.45,
+       -11.4,
+       -3.05
+      ],
+      [
+       -9.8,
+       -3.45,
+       -6.6,
+       -3.05
+      ],
+      [
+       -4.6,
+       -3.45,
+       4.6,
+       -3.05
+      ],
+      [
+       6.6,
+       -3.45,
+       9.8,
+       -3.05
+      ],
+      [
+       11.4,
+       -3.45,
+       14.6,
+       -3.05
+      ],
+      [
+       16.6,
+       -3.45,
+       19.8,
+       -3.05
+      ],
+      [
+       21.4,
+       -3.45,
+       24.6,
+       -3.05
+      ],
+      [
+       26.6,
+       -3.45,
+       28.6,
+       -3.05
+      ],
+      [
+       -28.6,
+       -3.05,
+       -25.8,
+       -2.65
+      ],
+      [
+       -25.4,
+       -3.05,
+       -21.0,
+       -2.65
+      ],
+      [
+       -20.2,
+       -3.05,
+       -15.8,
+       -2.65
+      ],
+      [
+       -15.4,
+       -3.05,
+       -10.6,
+       -2.65
+      ],
+      [
+       -10.2,
+       -3.05,
+       -5.8,
+       -2.65
+      ],
+      [
+       -5.4,
+       -3.05,
+       5.4,
+       -2.65
+      ],
+      [
+       5.8,
+       -3.05,
+       10.2,
+       -2.65
+      ],
+      [
+       10.6,
+       -3.05,
+       15.4,
+       -2.65
+      ],
+      [
+       15.8,
+       -3.05,
+       20.2,
+       -2.65
+      ],
+      [
+       21.0,
+       -3.05,
+       25.4,
+       -2.65
+      ],
+      [
+       25.8,
+       -3.05,
+       29.0,
+       -2.65
+      ],
+      [
+       -28.6,
+       -2.65,
+       29.0,
+       -1.05
+      ],
+      [
+       -28.6,
+       -1.05,
+       28.6,
+       -0.65
+      ],
+      [
+       -28.2,
+       -0.65,
+       -8.2,
+       -0.25
+      ],
+      [
+       -7.8,
+       -0.65,
+       7.8,
+       -0.25
+      ],
+      [
+       8.2,
+       -0.65,
+       28.2,
+       -0.25
+      ],
+      [
+       -27.4,
+       -0.25,
+       -23.8,
+       0.15
+      ],
+      [
+       -22.6,
+       -0.25,
+       -18.6,
+       0.15
+      ],
+      [
+       -17.4,
+       -0.25,
+       -13.8,
+       0.15
+      ],
+      [
+       -12.6,
+       -0.25,
+       -8.6,
+       0.15
+      ],
+      [
+       -7.4,
+       -0.25,
+       7.4,
+       0.15
+      ],
+      [
+       8.6,
+       -0.25,
+       12.6,
+       0.15
+      ],
+      [
+       13.8,
+       -0.25,
+       17.4,
+       0.15
+      ],
+      [
+       18.6,
+       -0.25,
+       22.6,
+       0.15
+      ],
+      [
+       23.8,
+       -0.25,
+       27.4,
+       0.15
+      ],
+      [
+       -4.6,
+       0.15,
+       4.6,
+       2.15
+      ],
+      [
+       -4.2,
+       2.15,
+       -0.6,
+       3.75
+      ],
+      [
+       0.6,
+       2.15,
+       4.2,
+       3.75
+      ],
+      [
+       -4.2,
+       3.75,
+       -1.0,
+       6.95
+      ],
+      [
+       1.0,
+       3.75,
+       4.2,
+       6.95
+      ],
+      [
+       -3.8,
+       6.95,
+       -1.4,
+       7.35
+      ],
+      [
+       1.4,
+       6.95,
+       3.8,
+       7.35
+      ]
+     ]
+    },
+    "world": {
+     "npz": "BB_BURST/world",
+     "frame": "world",
+     "n_instances": 710,
+     "extent": [
+      75.45,
+      -8.15,
+      95.1,
+      15.05
+     ],
+     "active_s": [
+      2.9333,
+      4.5167
+     ],
+     "cells": 153273,
+     "boxes": [
+      [
+       76.15,
+       -8.15,
+       85.05,
+       -8.05
+      ],
+      [
+       85.25,
+       -8.15,
+       94.45,
+       -8.05
+      ],
+      [
+       76.05,
+       -8.05,
+       94.55,
+       -7.95
+      ],
+      [
+       75.95,
+       -7.95,
+       94.65,
+       -7.85
+      ],
+      [
+       75.85,
+       -7.85,
+       94.75,
+       -7.75
+      ],
+      [
+       75.75,
+       -7.75,
+       94.85,
+       -7.65
+      ],
+      [
+       75.65,
+       -7.65,
+       94.95,
+       -7.55
+      ],
+      [
+       75.55,
+       -7.55,
+       95.05,
+       -7.45
+      ],
+      [
+       75.45,
+       -7.45,
+       95.15,
+       -6.25
+      ],
+      [
+       75.55,
+       -6.25,
+       95.05,
+       -5.65
+      ],
+      [
+       75.45,
+       -5.65,
+       95.05,
+       -5.35
+      ],
+      [
+       75.45,
+       -5.35,
+       94.95,
+       -4.45
+      ],
+      [
+       75.55,
+       -4.45,
+       94.85,
+       -3.55
+      ],
+      [
+       75.65,
+       -3.55,
+       94.75,
+       -1.85
+      ],
+      [
+       75.75,
+       -1.85,
+       94.65,
+       -1.05
+      ],
+      [
+       75.85,
+       -1.05,
+       94.55,
+       -0.25
+      ],
+      [
+       75.95,
+       -0.25,
+       94.45,
+       0.45
+      ],
+      [
+       76.05,
+       0.45,
+       94.35,
+       1.85
+      ],
+      [
+       76.15,
+       1.85,
+       94.25,
+       2.55
+      ],
+      [
+       76.25,
+       2.55,
+       94.15,
+       3.15
+      ],
+      [
+       76.35,
+       3.15,
+       94.05,
+       3.85
+      ],
+      [
+       76.45,
+       3.85,
+       93.95,
+       4.65
+      ],
+      [
+       76.55,
+       4.65,
+       93.85,
+       5.25
+      ],
+      [
+       76.65,
+       5.25,
+       93.75,
+       5.75
+      ],
+      [
+       76.75,
+       5.75,
+       93.65,
+       6.25
+      ],
+      [
+       76.85,
+       6.25,
+       93.55,
+       7.05
+      ],
+      [
+       76.95,
+       7.05,
+       93.45,
+       7.55
+      ],
+      [
+       77.05,
+       7.55,
+       93.35,
+       7.95
+      ],
+      [
+       77.15,
+       7.95,
+       93.25,
+       8.25
+      ],
+      [
+       77.25,
+       8.25,
+       93.15,
+       8.85
+      ],
+      [
+       77.35,
+       8.85,
+       93.05,
+       9.15
+      ],
+      [
+       77.45,
+       9.15,
+       92.95,
+       9.45
+      ],
+      [
+       77.55,
+       9.45,
+       92.85,
+       9.65
+      ],
+      [
+       77.65,
+       9.65,
+       92.75,
+       9.95
+      ],
+      [
+       77.75,
+       9.95,
+       92.65,
+       10.05
+      ],
+      [
+       77.85,
+       10.05,
+       92.55,
+       10.25
+      ],
+      [
+       77.95,
+       10.25,
+       92.45,
+       10.35
+      ],
+      [
+       78.05,
+       10.35,
+       92.35,
+       10.45
+      ],
+      [
+       78.15,
+       10.45,
+       92.25,
+       10.55
+      ],
+      [
+       78.25,
+       10.55,
+       92.15,
+       10.65
+      ],
+      [
+       78.35,
+       10.65,
+       92.05,
+       10.75
+      ],
+      [
+       78.45,
+       10.75,
+       91.95,
+       10.85
+      ],
+      [
+       78.55,
+       10.85,
+       91.85,
+       10.95
+      ],
+      [
+       78.65,
+       10.95,
+       91.75,
+       11.05
+      ],
+      [
+       78.85,
+       11.05,
+       91.55,
+       11.15
+      ],
+      [
+       79.95,
+       11.15,
+       90.55,
+       14.35
+      ],
+      [
+       80.05,
+       14.35,
+       90.45,
+       14.45
+      ],
+      [
+       80.15,
+       14.45,
+       90.35,
+       14.55
+      ],
+      [
+       80.25,
+       14.55,
+       90.25,
+       14.65
+      ],
+      [
+       80.25,
+       14.65,
+       90.15,
+       14.75
+      ],
+      [
+       80.35,
+       14.75,
+       90.05,
+       14.85
+      ],
+      [
+       80.45,
+       14.85,
+       89.95,
+       14.95
+      ],
+      [
+       80.55,
+       14.95,
+       89.85,
+       15.05
+      ]
+     ]
+    }
+   }
+  },
+  "BB_RAGE": {
+   "start_states": [
+    "Rage Pos"
+   ],
+   "states": [
+    "Rage Pos",
+    "Rage Antic",
+    "Rage Burst",
+    "Rage Roar",
+    "Roar End",
+    "Rage Submerge",
+    "Rage Rumble",
+    "Choose 1st Pattern",
+    "Ptn L",
+    "Rage End",
+    "Ptn R"
+   ],
+   "n": 99,
+   "n_by_phase": {
+    "P1": 99
+   },
+   "n_by_dir": {
+    "-": 99
+   },
+   "ends": {
+    "rest": 99
+   },
+   "mirrored": false,
+   "boss_hp_at_start": {
+    "p0_5": 60.0,
+    "p5": 64.5,
+    "p50": 75.0,
+    "p95": 75.0,
+    "p99_5": 75.0,
+    "min": 60.0,
+    "max": 75.0,
+    "n": 99
+   },
+   "duration_s": {
+    "p0_5": 14.5632,
+    "p5": 14.5747,
+    "p50": 14.5998,
+    "p95": 14.6248,
+    "p99_5": 14.6331,
+    "min": 14.5601,
+    "max": 14.6332,
+    "n": 99
+   },
+   "tail_s": {
+    "p0_5": 14.5632,
+    "p5": 14.5748,
+    "p50": 15.0498,
+    "p95": 15.109,
+    "p99_5": 15.1542,
+    "min": 14.5601,
+    "max": 15.1665,
+    "n": 99
+   },
+   "state_entry_s": {
+    "Rage Pos": {
+     "p0_5": 0.0,
+     "p5": 0.0,
+     "p50": 0.0,
+     "p95": 0.0,
+     "p99_5": 0.0,
+     "min": 0.0,
+     "max": 0.0,
+     "n": 99
+    },
+    "Rage Antic": {
+     "p0_5": 1.0,
+     "p5": 1.0,
+     "p50": 1.0166,
+     "p95": 1.0167,
+     "p99_5": 1.0167,
+     "min": 1.0,
+     "max": 1.0167,
+     "n": 99
+    },
+    "Rage Burst": {
+     "p0_5": 2.2,
+     "p5": 2.2166,
+     "p50": 2.2332,
+     "p95": 2.2333,
+     "p99_5": 2.2333,
+     "min": 2.2,
+     "max": 2.2333,
+     "n": 99
+    },
+    "Rage Roar": {
+     "p0_5": 2.2833,
+     "p5": 2.2999,
+     "p50": 2.3165,
+     "p95": 2.3249,
+     "p99_5": 2.325,
+     "min": 2.2833,
+     "max": 2.325,
+     "n": 99
+    },
+    "Roar End": {
+     "p0_5": 3.7874,
+     "p5": 3.7999,
+     "p50": 3.8166,
+     "p95": 3.8333,
+     "p99_5": 3.8416,
+     "min": 3.7833,
+     "max": 3.8416,
+     "n": 99
+    },
+    "Rage Submerge": {
+     "p0_5": 4.0333,
+     "p5": 4.0416,
+     "p50": 4.0665,
+     "p95": 4.0832,
+     "p99_5": 4.0833,
+     "min": 4.0333,
+     "max": 4.0833,
+     "n": 99
+    },
+    "Rage Rumble": {
+     "p0_5": 5.0416,
+     "p5": 5.0499,
+     "p50": 5.0749,
+     "p95": 5.0999,
+     "p99_5": 5.0999,
+     "min": 5.0416,
+     "max": 5.0999,
+     "n": 99
+    },
+    "Choose 1st Pattern": {
+     "p0_5": 7.0582,
+     "p5": 7.0583,
+     "p50": 7.0915,
+     "p95": 7.1091,
+     "p99_5": 7.1166,
+     "min": 7.0582,
+     "max": 7.1166,
+     "n": 99
+    },
+    "Ptn L": {
+     "p0_5": 7.0582,
+     "p5": 7.0582,
+     "p50": 7.0833,
+     "p95": 7.1082,
+     "p99_5": 7.1165,
+     "min": 7.0582,
+     "max": 7.1165,
+     "n": 48
+    },
+    "Rage End": {
+     "p0_5": 14.5632,
+     "p5": 14.5747,
+     "p50": 14.5998,
+     "p95": 14.6248,
+     "p99_5": 14.6331,
+     "min": 14.5601,
+     "max": 14.6332,
+     "n": 99
+    },
+    "Ptn R": {
+     "p0_5": 7.0582,
+     "p5": 7.0665,
+     "p50": 7.0915,
+     "p95": 7.1123,
+     "p99_5": 7.1166,
+     "min": 7.0582,
+     "max": 7.1166,
+     "n": 51
+    }
+   },
+   "ttd_s": {
+    "start": {
+     "p0_5": 2.2,
+     "p5": 2.2166,
+     "p50": 2.2332,
+     "p95": 2.2333,
+     "p99_5": 2.2333,
+     "min": 2.2,
+     "max": 2.2333,
+     "n": 99
+    },
+    "Rage Pos": {
+     "p0_5": 2.2,
+     "p5": 2.2166,
+     "p50": 2.2332,
+     "p95": 2.2333,
+     "p99_5": 2.2333,
+     "min": 2.2,
+     "max": 2.2333,
+     "n": 99
+    },
+    "Rage Antic": {
+     "p0_5": 1.2,
+     "p5": 1.2,
+     "p50": 1.2166,
+     "p95": 1.2167,
+     "p99_5": 1.2167,
+     "min": 1.2,
+     "max": 1.2167,
+     "n": 99
+    },
+    "Rage Burst": {
+     "p0_5": 0.0,
+     "p5": 0.0,
+     "p50": 0.0,
+     "p95": 0.0,
+     "p99_5": 0.0,
+     "min": 0.0,
+     "max": 0.0,
+     "n": 99
+    },
+    "Rage Roar": {
+     "p0_5": 0.0,
+     "p5": 0.0,
+     "p50": 0.0,
+     "p95": 0.0,
+     "p99_5": 0.0,
+     "min": 0.0,
+     "max": 0.0,
+     "n": 99
+    },
+    "Roar End": {
+     "p0_5": 0.0,
+     "p5": 0.0,
+     "p50": 0.0,
+     "p95": 0.0,
+     "p99_5": 0.0,
+     "min": 0.0,
+     "max": 0.0,
+     "n": 99
+    },
+    "Rage Submerge": {
+     "p0_5": 4.2333,
+     "p5": 4.2499,
+     "p50": 4.2666,
+     "p95": 4.2833,
+     "p99_5": 4.2833,
+     "min": 4.2333,
+     "max": 4.2833,
+     "n": 99
+    },
+    "Rage Rumble": {
+     "p0_5": 3.2333,
+     "p5": 3.2499,
+     "p50": 3.2519,
+     "p95": 3.2666,
+     "p99_5": 3.2667,
+     "min": 3.2333,
+     "max": 3.2667,
+     "n": 99
+    },
+    "Choose 1st Pattern": {
+     "p0_5": 1.2333,
+     "p5": 1.2333,
+     "p50": 1.2499,
+     "p95": 1.25,
+     "p99_5": 1.25,
+     "min": 1.2333,
+     "max": 1.25,
+     "n": 99
+    },
+    "Ptn L": {
+     "p0_5": 1.2333,
+     "p5": 1.2333,
+     "p50": 1.2499,
+     "p95": 1.25,
+     "p99_5": 1.25,
+     "min": 1.2333,
+     "max": 1.25,
+     "n": 48
+    },
+    "Rage End": {
+     "p0_5": 0.0,
+     "p5": 0.0,
+     "p50": 0.0,
+     "p95": 0.0,
+     "p99_5": 0.0,
+     "min": 0.0,
+     "max": 0.0,
+     "n": 51
+    },
+    "Ptn R": {
+     "p0_5": 1.2333,
+     "p5": 1.2333,
+     "p50": 1.2499,
+     "p95": 1.25,
+     "p99_5": 1.25,
+     "min": 1.2333,
+     "max": 1.25,
+     "n": 51
+    }
+   },
+   "anchor": {
+    "frame": "boss position at its first export in the instance",
+    "t_s": {
+     "p0_5": 2.2,
+     "p5": 2.2166,
+     "p50": 2.2332,
+     "p95": 2.2333,
+     "p99_5": 2.2333,
+     "min": 2.2,
+     "max": 2.2333,
+     "n": 99
+    },
+    "missing": 0,
+    "by_dir": {
+     "-": {
+      "n": 99,
+      "mirror": {
+       "1": 99
+      },
+      "x": {
+       "p0_5": 86.21,
+       "p5": 86.21,
+       "p50": 86.21,
+       "p95": 86.21,
+       "p99_5": 86.21,
+       "min": 86.21,
+       "max": 86.21,
+       "n": 99
+      },
+      "y": {
+       "p0_5": 5.49,
+       "p5": 5.49,
+       "p50": 5.49,
+       "p95": 5.49,
+       "p99_5": 5.49,
+       "min": 5.49,
+       "max": 5.49,
+       "n": 99
+      },
+      "flipX": {
+       "False": 41,
+       "True": 58
+      },
+      "x_minus_hero_x": {
+       "p0_5": -12.6281,
+       "p5": -9.1041,
+       "p50": 2.6461,
+       "p95": 10.8803,
+       "p99_5": 14.4553,
+       "min": -12.8871,
+       "max": 15.2518,
+       "n": 99
+      }
+     }
+    }
+   },
+   "select": {
+    "dist": "|hero x - boss x| at the decision, boss x = last exported",
+    "dist_bins_u": [
+     0.0,
+     3.0,
+     6.0,
+     10.0,
+     99.0
+    ],
+    "counts": {
+     "P1": [
+      29,
+      20,
+      22,
+      28
+     ]
+    }
+   },
+   "hits_taken": {
+    "n": 261,
+    "by_source": {
+     "BoneBeast DropBell M": 77,
+     "Boss Scene/Bone Beast": 66,
+     "BoneBeast DropBell L": 50,
+     "BoneBeast DropBell R": 26,
+     "BoneBeast DropBell M2": 22,
+     "BoneBeast DropBell L2": 14,
+     "BoneBeast DropBell R2": 6
+    },
+    "by_state": {
+     "Ptn R": 104,
+     "Ptn L": 85,
+     "Rage Roar": 52,
+     "Rage Burst": 13,
+     "_tail": 6,
+     "Roar End": 1
+    }
+   },
+   "coverage": {
+    "n": 99,
+    "target": 200,
+    "ok": false
+   },
+   "hitboxes": [
+    {
+     "state": "Ptn L",
+     "source": "BoneBeast DropBell L:circle",
+     "frame": "world",
+     "n": 48,
+     "phases": {
+      "P1": 48
+     },
+     "t0_state": 1.9916,
+     "t1_state": 7.2998,
+     "t0": 9.0498,
+     "t1": 14.3913,
+     "t_on_state": {
+      "p0_5": 1.9916,
+      "p5": 1.9945,
+      "p50": 2.0,
+      "p95": 2.0167,
+      "p99_5": 2.0167,
+      "min": 1.9916,
+      "max": 2.0167,
+      "n": 48
+     },
+     "t_off_state": {
+      "p0_5": 7.0705,
+      "p5": 7.2249,
+      "p50": 7.2417,
+      "p95": 7.2832,
+      "p99_5": 7.2959,
+      "min": 7.025,
+      "max": 7.2998,
+      "n": 48
+     },
+     "t_on": {
+      "p0_5": 9.0498,
+      "p5": 9.0582,
+      "p50": 9.0915,
+      "p95": 9.1165,
+      "p99_5": 9.1229,
+      "min": 9.0498,
+      "max": 9.1249,
+      "n": 48
+     },
+     "t_off": {
+      "p0_5": 14.167,
+      "p5": 14.2998,
+      "p50": 14.3335,
+      "p95": 14.3718,
+      "p99_5": 14.3874,
+      "min": 14.1332,
+      "max": 14.3913,
+      "n": 48
+     },
+     "x": [
+      67.236,
+      86.729
+     ],
+     "y": [
+      -8.14,
+      15.014
+     ],
+     "dmg": [
+      2
+     ],
+     "eff": [
+      2
+     ],
+     "type": [
+      "ENEMY"
+     ],
+     "flags": [],
+     "parry": [
+      "counter"
+     ],
+     "parryable": false
+    },
+    {
+     "state": "Ptn L",
+     "source": "BoneBeast DropBell M2:circle",
+     "frame": "world",
+     "n": 48,
+     "phases": {
+      "P1": 48
+     },
+     "t0_state": 3.4916,
+     "t1_state": 5.0416,
+     "t0": 10.5498,
+     "t1": 12.1331,
+     "t_on_state": {
+      "p0_5": 3.4916,
+      "p5": 3.4916,
+      "p50": 3.5083,
+      "p95": 3.5166,
+      "p99_5": 3.5166,
+      "min": 3.4916,
+      "max": 3.5166,
+      "n": 48
+     },
+     "t_off_state": {
+      "p0_5": 4.9603,
+      "p5": 4.9749,
+      "p50": 4.9916,
+      "p95": 5.0333,
+      "p99_5": 5.0396,
+      "min": 4.9584,
+      "max": 5.0416,
+      "n": 48
+     },
+     "t_on": {
+      "p0_5": 10.5518,
+      "p5": 10.5582,
+      "p50": 10.5916,
+      "p95": 10.6219,
+      "p99_5": 10.6248,
+      "min": 10.5498,
+      "max": 10.6248,
+      "n": 48
+     },
+     "t_off": {
+      "p0_5": 12.0351,
+      "p5": 12.0415,
+      "p50": 12.083,
+      "p95": 12.1219,
+      "p99_5": 12.1331,
+      "min": 12.0332,
+      "max": 12.1331,
+      "n": 48
+     },
+     "x": [
+      75.48,
+      94.865
+     ],
+     "y": [
+      -8.14,
+      15.014
+     ],
+     "dmg": [
+      2
+     ],
+     "eff": [
+      2
+     ],
+     "type": [
+      "ENEMY"
+     ],
+     "flags": [],
+     "parry": [
+      "counter"
+     ],
+     "parryable": false
+    },
+    {
+     "state": "Ptn L",
+     "source": "BoneBeast DropBell M:circle",
+     "frame": "world",
+     "n": 48,
+     "phases": {
+      "P1": 48
+     },
+     "t0_state": 1.2333,
+     "t1_state": 6.5499,
+     "t0": 8.2915,
+     "t1": 13.6497,
+     "t_on_state": {
+      "p0_5": 1.2333,
+      "p5": 1.2333,
+      "p50": 1.2499,
+      "p95": 1.25,
+      "p99_5": 1.25,
+      "min": 1.2333,
+      "max": 1.25,
+      "n": 48
+     },
+     "t_off_state": {
+      "p0_5": 6.4748,
+      "p5": 6.4778,
+      "p50": 6.4999,
+      "p95": 6.5391,
+      "p99_5": 6.5479,
+      "min": 6.4748,
+      "max": 6.5499,
+      "n": 48
+     },
+     "t_on": {
+      "p0_5": 8.2915,
+      "p5": 8.2927,
+      "p50": 8.3332,
+      "p95": 8.3581,
+      "p99_5": 8.3645,
+      "min": 8.2915,
+      "max": 8.3665,
+      "n": 48
+     },
+     "t_off": {
+      "p0_5": 13.5414,
+      "p5": 13.5498,
+      "p50": 13.5914,
+      "p95": 13.634,
+      "p99_5": 13.6478,
+      "min": 13.5414,
+      "max": 13.6497,
+      "n": 48
+     },
+     "x": [
+      75.617,
+      94.729
+     ],
+     "y": [
+      -8.14,
+      15.014
+     ],
+     "dmg": [
+      2
+     ],
+     "eff": [
+      2
+     ],
+     "type": [
+      "ENEMY"
+     ],
+     "flags": [],
+     "parry": [
+      "counter"
+     ],
+     "parryable": false
+    },
+    {
+     "state": "Ptn L",
+     "source": "BoneBeast DropBell R2:circle",
+     "frame": "world",
+     "n": 48,
+     "phases": {
+      "P1": 48
+     },
+     "t0_state": 4.2334,
+     "t1_state": 5.8,
+     "t0": 11.3081,
+     "t1": 12.9165,
+     "t_on_state": {
+      "p0_5": 4.2342,
+      "p5": 4.2417,
+      "p50": 4.2582,
+      "p95": 4.2666,
+      "p99_5": 4.2666,
+      "min": 4.2334,
+      "max": 4.2666,
+      "n": 48
+     },
+     "t_off_state": {
+      "p0_5": 5.7036,
+      "p5": 5.7141,
+      "p50": 5.7415,
+      "p95": 5.775,
+      "p99_5": 5.798,
+      "min": 5.7021,
+      "max": 5.8,
+      "n": 48
+     },
+     "t_on": {
+      "p0_5": 11.3082,
+      "p5": 11.3165,
+      "p50": 11.3415,
+      "p95": 11.3665,
+      "p99_5": 11.3811,
+      "min": 11.3081,
+      "max": 11.3831,
+      "n": 48
+     },
+     "t_off": {
+      "p0_5": 12.7915,
+      "p5": 12.7915,
+      "p50": 12.8247,
+      "p95": 12.8773,
+      "p99_5": 12.9106,
+      "min": 12.7915,
+      "max": 12.9165,
+      "n": 48
+     },
+     "x": [
+      84.958,
+      104.101
+     ],
+     "y": [
+      -8.14,
+      15.014
+     ],
+     "dmg": [
+      2
+     ],
+     "eff": [
+      2
+     ],
+     "type": [
+      "ENEMY"
+     ],
+     "flags": [],
+     "parry": [
+      "counter"
+     ],
+     "parryable": false
+    },
+    {
+     "state": "Ptn L",
+     "source": "BoneBeast DropBell R:circle",
+     "frame": "world",
+     "n": 48,
+     "phases": {
+      "P1": 48
+     },
+     "t0_state": 2.7333,
+     "t1_state": 4.275,
+     "t0": 9.7998,
+     "t1": 11.3747,
+     "t_on_state": {
+      "p0_5": 2.7353,
+      "p5": 2.7416,
+      "p50": 2.7583,
+      "p95": 2.7666,
+      "p99_5": 2.7667,
+      "min": 2.7333,
+      "max": 2.7667,
+      "n": 48
+     },
+     "t_off_state": {
+      "p0_5": 4.2082,
+      "p5": 4.2166,
+      "p50": 4.2334,
+      "p95": 4.2582,
+      "p99_5": 4.275,
+      "min": 4.2082,
+      "max": 4.275,
+      "n": 48
+     },
+     "t_on": {
+      "p0_5": 9.8022,
+      "p5": 9.8165,
+      "p50": 9.8414,
+      "p95": 9.8665,
+      "p99_5": 9.8812,
+      "min": 9.7998,
+      "max": 9.8831,
+      "n": 48
+     },
+     "t_off": {
+      "p0_5": 11.2703,
+      "p5": 11.2915,
+      "p50": 11.3247,
+      "p95": 11.3552,
+      "p99_5": 11.3708,
+      "min": 11.2664,
+      "max": 11.3747,
+      "n": 48
+     },
+     "x": [
+      84.834,
+      103.537
+     ],
+     "y": [
+      -8.14,
+      15.014
+     ],
+     "dmg": [
+      2
+     ],
+     "eff": [
+      2
+     ],
+     "type": [
+      "ENEMY"
+     ],
+     "flags": [],
+     "parry": [
+      "counter"
+     ],
+     "parryable": false
+    },
+    {
+     "state": "Ptn R",
+     "source": "BoneBeast DropBell L2:circle",
+     "frame": "world",
+     "n": 51,
+     "phases": {
+      "P1": 51
+     },
+     "t0_state": 4.2416,
+     "t1_state": 5.7916,
+     "t0": 11.3082,
+     "t1": 12.8997,
+     "t_on_state": {
+      "p0_5": 4.2416,
+      "p5": 4.2458,
+      "p50": 4.2582,
+      "p95": 4.2666,
+      "p99_5": 4.2667,
+      "min": 4.2416,
+      "max": 4.2667,
+      "n": 51
+     },
+     "t_off_state": {
+      "p0_5": 5.6477,
+      "p5": 5.7207,
+      "p50": 5.7416,
+      "p95": 5.7749,
+      "p99_5": 5.7874,
+      "min": 5.6248,
+      "max": 5.7916,
+      "n": 51
+     },
+     "t_on": {
+      "p0_5": 11.3103,
+      "p5": 11.3247,
+      "p50": 11.3498,
+      "p95": 11.3665,
+      "p99_5": 11.3811,
+      "min": 11.3082,
+      "max": 11.3832,
+      "n": 51
+     },
+     "t_off": {
+      "p0_5": 12.7352,
+      "p5": 12.7997,
+      "p50": 12.8331,
+      "p95": 12.8707,
+      "p99_5": 12.8956,
+      "min": 12.7164,
+      "max": 12.8997,
+      "n": 51
+     },
+     "x": [
+      67.433,
+      86.712
+     ],
+     "y": [
+      -8.14,
+      15.014
+     ],
+     "dmg": [
+      2
+     ],
+     "eff": [
+      2
+     ],
+     "type": [
+      "ENEMY"
+     ],
+     "flags": [],
+     "parry": [
+      "counter"
+     ],
+     "parryable": false
+    },
+    {
+     "state": "Ptn R",
+     "source": "BoneBeast DropBell L:circle",
+     "frame": "world",
+     "n": 51,
+     "phases": {
+      "P1": 51
+     },
+     "t0_state": 2.7334,
+     "t1_state": 7.5,
+     "t0": 9.7999,
+     "t1": 14.6165,
+     "t_on_state": {
+      "p0_5": 2.7334,
+      "p5": 2.7375,
+      "p50": 2.7582,
+      "p95": 2.7666,
+      "p99_5": 2.7667,
+      "min": 2.7334,
+      "max": 2.7667,
+      "n": 51
+     },
+     "t_off_state": {
+      "p0_5": 7.4833,
+      "p5": 7.4834,
+      "p50": 7.4916,
+      "p95": 7.4999,
+      "p99_5": 7.4999,
+      "min": 7.4833,
+      "max": 7.5,
+      "n": 51
+     },
+     "t_on": {
+      "p0_5": 9.802,
+      "p5": 9.8165,
+      "p50": 9.8498,
+      "p95": 9.8665,
+      "p99_5": 9.8748,
+      "min": 9.7999,
+      "max": 9.8749,
+      "n": 51
+     },
+     "t_off": {
+      "p0_5": 14.5519,
+      "p5": 14.5622,
+      "p50": 14.5831,
+      "p95": 14.6082,
+      "p99_5": 14.6165,
+      "min": 14.5498,
+      "max": 14.6165,
+      "n": 51
+     },
+     "x": [
+      67.418,
+      86.012
+     ],
+     "y": [
+      -8.14,
+      15.014
+     ],
+     "dmg": [
+      2
+     ],
+     "eff": [
+      2
+     ],
+     "type": [
+      "ENEMY"
+     ],
+     "flags": [],
+     "parry": [
+      "counter"
+     ],
+     "parryable": false
+    },
+    {
+     "state": "Ptn R",
+     "source": "BoneBeast DropBell M2:circle",
+     "frame": "world",
+     "n": 51,
+     "phases": {
+      "P1": 51
+     },
+     "t0_state": 3.4833,
+     "t1_state": 5.0499,
+     "t0": 10.5582,
+     "t1": 12.1498,
+     "t_on_state": {
+      "p0_5": 3.4854,
+      "p5": 3.4924,
+      "p50": 3.5001,
+      "p95": 3.5166,
+      "p99_5": 3.5167,
+      "min": 3.4833,
+      "max": 3.5167,
+      "n": 51
+     },
+     "t_off_state": {
+      "p0_5": 4.9666,
+      "p5": 4.9708,
+      "p50": 4.9834,
+      "p95": 5.0291,
+      "p99_5": 5.0457,
+      "min": 4.9666,
+      "max": 5.0499,
+      "n": 51
+     },
+     "t_on": {
+      "p0_5": 10.5603,
+      "p5": 10.5706,
+      "p50": 10.5915,
+      "p95": 10.6207,
+      "p99_5": 10.6311,
+      "min": 10.5582,
+      "max": 10.6332,
+      "n": 51
+     },
+     "t_off": {
+      "p0_5": 12.0352,
+      "p5": 12.0498,
+      "p50": 12.0748,
+      "p95": 12.1207,
+      "p99_5": 12.1477,
+      "min": 12.0332,
+      "max": 12.1498,
+      "n": 51
+     },
+     "x": [
+      75.824,
+      94.83
+     ],
+     "y": [
+      -8.14,
+      15.014
+     ],
+     "dmg": [
+      2
+     ],
+     "eff": [
+      2
+     ],
+     "type": [
+      "ENEMY"
+     ],
+     "flags": [],
+     "parry": [
+      "counter"
+     ],
+     "parryable": false
+    },
+    {
+     "state": "Ptn R",
+     "source": "BoneBeast DropBell M:circle",
+     "frame": "world",
+     "n": 51,
+     "phases": {
+      "P1": 51
+     },
+     "t0_state": 1.2333,
+     "t1_state": 6.55,
+     "t0": 8.2916,
+     "t1": 13.6499,
+     "t_on_state": {
+      "p0_5": 1.2333,
+      "p5": 1.2333,
+      "p50": 1.2499,
+      "p95": 1.25,
+      "p99_5": 1.25,
+      "min": 1.2333,
+      "max": 1.25,
+      "n": 51
+     },
+     "t_off_state": {
+      "p0_5": 6.4666,
+      "p5": 6.4748,
+      "p50": 6.5082,
+      "p95": 6.5336,
+      "p99_5": 6.5479,
+      "min": 6.4666,
+      "max": 6.55,
+      "n": 51
+     },
+     "t_on": {
+      "p0_5": 8.2937,
+      "p5": 8.3082,
+      "p50": 8.3332,
+      "p95": 8.354,
+      "p99_5": 8.3644,
+      "min": 8.2916,
+      "max": 8.3664,
+      "n": 51
+     },
+     "t_off": {
+      "p0_5": 13.5415,
+      "p5": 13.5539,
+      "p50": 13.5997,
+      "p95": 13.629,
+      "p99_5": 13.6457,
+      "min": 13.5414,
+      "max": 13.6499,
+      "n": 51
+     },
+     "x": [
+      75.46,
+      94.601
+     ],
+     "y": [
+      -8.14,
+      15.014
+     ],
+     "dmg": [
+      2
+     ],
+     "eff": [
+      2
+     ],
+     "type": [
+      "ENEMY"
+     ],
+     "flags": [],
+     "parry": [
+      "counter"
+     ],
+     "parryable": false
+    },
+    {
+     "state": "Ptn R",
+     "source": "BoneBeast DropBell R:circle",
+     "frame": "world",
+     "n": 51,
+     "phases": {
+      "P1": 51
+     },
+     "t0_state": 1.9833,
+     "t1_state": 7.2999,
+     "t0": 9.0499,
+     "t1": 14.3998,
+     "t_on_state": {
+      "p0_5": 1.9833,
+      "p5": 1.9834,
+      "p50": 2.0,
+      "p95": 2.0166,
+      "p99_5": 2.0166,
+      "min": 1.9833,
+      "max": 2.0166,
+      "n": 51
+     },
+     "t_off_state": {
+      "p0_5": 7.2167,
+      "p5": 7.2248,
+      "p50": 7.2416,
+      "p95": 7.2874,
+      "p99_5": 7.2979,
+      "min": 7.2167,
+      "max": 7.2999,
+      "n": 51
+     },
+     "t_on": {
+      "p0_5": 9.0499,
+      "p5": 9.0665,
+      "p50": 9.0915,
+      "p95": 9.1165,
+      "p99_5": 9.1291,
+      "min": 9.0499,
+      "max": 9.1332,
+      "n": 51
+     },
+     "t_off": {
+      "p0_5": 14.2935,
+      "p5": 14.2999,
+      "p50": 14.3412,
+      "p95": 14.3748,
+      "p99_5": 14.3956,
+      "min": 14.2915,
+      "max": 14.3998,
+      "n": 51
+     },
+     "x": [
+      84.52,
+      103.978
+     ],
+     "y": [
+      -8.14,
+      15.014
+     ],
+     "dmg": [
+      2
+     ],
+     "eff": [
+      2
+     ],
+     "type": [
+      "ENEMY"
+     ],
+     "flags": [],
+     "parry": [
+      "counter"
+     ],
+     "parryable": false
+    },
+    {
+     "state": "Rage Burst",
+     "source": "Bone Beast:box",
+     "frame": "anchor",
+     "n": 99,
+     "phases": {
+      "P1": 99
+     },
+     "t0_state": 0.0,
+     "t1_state": 0.0751,
+     "t0": 2.2,
+     "t1": 2.3083,
+     "t_on_state": {
+      "p0_5": 0.0,
+      "p5": 0.0,
+      "p50": 0.0,
+      "p95": 0.0,
+      "p99_5": 0.0,
+      "min": 0.0,
+      "max": 0.0,
+      "n": 99
+     },
+     "t_off_state": {
+      "p0_5": 0.0666,
+      "p5": 0.0666,
+      "p50": 0.0667,
+      "p95": 0.075,
+      "p99_5": 0.0751,
+      "min": 0.0666,
+      "max": 0.0751,
+      "n": 99
+     },
+     "t_on": {
+      "p0_5": 2.2,
+      "p5": 2.2166,
+      "p50": 2.2332,
+      "p95": 2.2333,
+      "p99_5": 2.2333,
+      "min": 2.2,
+      "max": 2.2333,
+      "n": 99
+     },
+     "t_off": {
+      "p0_5": 2.2666,
+      "p5": 2.2832,
+      "p50": 2.2999,
+      "p95": 2.3083,
+      "p99_5": 2.3083,
+      "min": 2.2666,
+      "max": 2.3083,
+      "n": 99
+     },
+     "x": [
+      -2.031,
+      2.031
+     ],
+     "y": [
+      -3.531,
+      1.516
+     ],
+     "dmg": [
+      2
+     ],
+     "eff": [
+      2
+     ],
+     "type": [
+      "ENEMY"
+     ],
+     "flags": [],
+     "parry": [
+      "counter"
+     ],
+     "parryable": false
+    },
+    {
+     "state": "Rage End",
+     "source": "BoneBeast DropBell L:circle",
+     "frame": "world",
+     "n": 51,
+     "phases": {
+      "P1": 51
+     },
+     "t0_state": 0.0,
+     "t1_state": 0.0,
+     "t0": 14.5664,
+     "t1": 14.6332,
+     "t_on_state": {
+      "p0_5": 0.0,
+      "p5": 0.0,
+      "p50": 0.0,
+      "p95": 0.0,
+      "p99_5": 0.0,
+      "min": 0.0,
+      "max": 0.0,
+      "n": 51
+     },
+     "t_off_state": {
+      "p0_5": 0.0,
+      "p5": 0.0,
+      "p50": 0.0,
+      "p95": 0.0,
+      "p99_5": 0.0,
+      "min": 0.0,
+      "max": 0.0,
+      "n": 51
+     },
+     "t_on": {
+      "p0_5": 14.5685,
+      "p5": 14.5789,
+      "p50": 14.5998,
+      "p95": 14.6248,
+      "p99_5": 14.6331,
+      "min": 14.5664,
+      "max": 14.6332,
+      "n": 51
+     },
+     "t_off": {
+      "p0_5": 14.5685,
+      "p5": 14.5789,
+      "p50": 14.5998,
+      "p95": 14.6248,
+      "p99_5": 14.6331,
+      "min": 14.5664,
+      "max": 14.6332,
+      "n": 51
+     },
+     "x": [
+      68.981,
+      83.128
+     ],
+     "y": [
+      6.698,
+      10.06
+     ],
+     "dmg": [
+      2
+     ],
+     "eff": [
+      2
+     ],
+     "type": [
+      "ENEMY"
+     ],
+     "flags": [],
+     "parry": [
+      "counter"
+     ],
+     "parryable": false
+    },
+    {
+     "state": "Rage Roar",
+     "source": "Bone Beast:box",
+     "frame": "anchor",
+     "n": 99,
+     "phases": {
+      "P1": 99
+     },
+     "t0_state": 0.0,
+     "t1_state": 1.5,
+     "t0": 2.2833,
+     "t1": 3.8249,
+     "t_on_state": {
+      "p0_5": 0.0,
+      "p5": 0.0,
+      "p50": 0.0,
+      "p95": 0.0,
+      "p99_5": 0.0,
+      "min": 0.0,
+      "max": 0.0,
+      "n": 99
+     },
+     "t_off_state": {
+      "p0_5": 1.4833,
+      "p5": 1.4834,
+      "p50": 1.4917,
+      "p95": 1.5,
+      "p99_5": 1.5,
+      "min": 1.4833,
+      "max": 1.5,
+      "n": 99
+     },
+     "t_on": {
+      "p0_5": 2.2833,
+      "p5": 2.2999,
+      "p50": 2.3165,
+      "p95": 2.3249,
+      "p99_5": 2.325,
+      "min": 2.2833,
+      "max": 2.325,
+      "n": 99
+     },
+     "t_off": {
+      "p0_5": 3.7707,
+      "p5": 3.7833,
+      "p50": 3.8,
+      "p95": 3.8166,
+      "p99_5": 3.8249,
+      "min": 3.7667,
+      "max": 3.8249,
+      "n": 99
+     },
+     "x": [
+      -2.203,
+      2.203
+     ],
+     "y": [
+      -3.531,
+      1.766
+     ],
+     "dmg": [
+      2
+     ],
+     "eff": [
+      2
+     ],
+     "type": [
+      "ENEMY"
+     ],
+     "flags": [],
+     "parry": [
+      "counter"
+     ],
+     "parryable": false
+    },
+    {
+     "state": "Roar End",
+     "source": "Bone Beast:box",
+     "frame": "anchor",
+     "n": 99,
+     "phases": {
+      "P1": 99
+     },
+     "t0_state": 0.0,
+     "t1_state": 0.15,
+     "t0": 3.7833,
+     "t1": 3.9833,
+     "t_on_state": {
+      "p0_5": 0.0,
+      "p5": 0.0,
+      "p50": 0.0,
+      "p95": 0.0,
+      "p99_5": 0.0,
+      "min": 0.0,
+      "max": 0.0,
+      "n": 99
+     },
+     "t_off_state": {
+      "p0_5": 0.1333,
+      "p5": 0.1333,
+      "p50": 0.1334,
+      "p95": 0.15,
+      "p99_5": 0.15,
+      "min": 0.1333,
+      "max": 0.15,
+      "n": 99
+     },
+     "t_on": {
+      "p0_5": 3.7874,
+      "p5": 3.7999,
+      "p50": 3.8166,
+      "p95": 3.8333,
+      "p99_5": 3.8416,
+      "min": 3.7833,
+      "max": 3.8416,
+      "n": 99
+     },
+     "t_off": {
+      "p0_5": 3.9291,
+      "p5": 3.9407,
+      "p50": 3.9583,
+      "p95": 3.9832,
+      "p99_5": 3.9833,
+      "min": 3.925,
+      "max": 3.9833,
+      "n": 99
+     },
+     "x": [
+      -2.594,
+      2.594
+     ],
+     "y": [
+      -3.531,
+      0.594
+     ],
+     "dmg": [
+      2
+     ],
+     "eff": [
+      2
+     ],
+     "type": [
+      "ENEMY"
+     ],
+     "flags": [],
+     "parry": [
+      "counter"
+     ],
+     "parryable": false
+    },
+    {
+     "state": "_tail",
+     "source": "BoneBeast DropBell L:circle",
+     "frame": "world",
+     "n": 51,
+     "phases": {
+      "P1": 51
+     },
+     "t0_state": 0.0167,
+     "t1_state": 0.5333,
+     "t0": 14.5831,
+     "t1": 15.1665,
+     "t_on_state": {
+      "p0_5": 0.0167,
+      "p5": 0.0167,
+      "p50": 0.0167,
+      "p95": 0.0167,
+      "p99_5": 0.0167,
+      "min": 0.0167,
+      "max": 0.0167,
+      "n": 51
+     },
+     "t_off_state": {
+      "p0_5": 0.45,
+      "p5": 0.4666,
+      "p50": 0.4833,
+      "p95": 0.525,
+      "p99_5": 0.5333,
+      "min": 0.4499,
+      "max": 0.5333,
+      "n": 51
+     },
+     "t_on": {
+      "p0_5": 14.5852,
+      "p5": 14.5955,
+      "p50": 14.6164,
+      "p95": 14.6415,
+      "p99_5": 14.6498,
+      "min": 14.5831,
+      "max": 14.6498,
+      "n": 51
+     },
+     "t_off": {
+      "p0_5": 15.0373,
+      "p5": 15.0498,
+      "p50": 15.083,
+      "p95": 15.1247,
+      "p99_5": 15.1602,
+      "min": 15.0331,
+      "max": 15.1665,
+      "n": 51
+     },
+     "x": [
+      67.061,
+      84.968
+     ],
+     "y": [
+      -8.14,
+      9.815
+     ],
+     "dmg": [
+      2
+     ],
+     "eff": [
+      2
+     ],
+     "type": [
+      "ENEMY"
+     ],
+     "flags": [],
+     "parry": [
+      "counter"
+     ],
+     "parryable": false
+    }
+   ],
+   "reach_union": {
+    "anchor": {
+     "npz": "BB_RAGE/anchor",
+     "frame": "anchor",
+     "n_instances": 99,
+     "extent": [
+      -2.6,
+      -3.55,
+      2.6,
+      1.8
+     ],
+     "active_s": [
+      2.2,
+      3.9833
+     ],
+     "cells": 10342,
+     "boxes": [
+      [
+       -2.6,
+       -3.55,
+       2.6,
+       -1.4
+      ],
+      [
+       -2.45,
+       -1.4,
+       2.45,
+       0.6
+      ],
+      [
+       -2.25,
+       0.6,
+       2.25,
+       1.05
+      ],
+      [
+       -1.9,
+       1.05,
+       1.9,
+       1.8
+      ]
+     ]
+    },
+    "world": {
+     "npz": "BB_RAGE/world",
+     "frame": "world",
+     "n_instances": 99,
+     "extent": [
+      67.05,
+      -8.15,
+      104.15,
+      15.05
+     ],
+     "active_s": [
+      8.2833,
+      15.1667
+     ],
+     "cells": 315530,
+     "boxes": [
+      [
+       67.65,
+       -8.15,
+       103.65,
+       -7.95
+      ],
+      [
+       67.45,
+       -7.95,
+       103.85,
+       -7.75
+      ],
+      [
+       67.25,
+       -7.75,
+       104.05,
+       -7.55
+      ],
+      [
+       67.05,
+       -7.55,
+       104.25,
+       -6.15
+      ],
+      [
+       67.05,
+       -6.15,
+       104.05,
+       -3.55
+      ],
+      [
+       67.05,
+       -3.55,
+       103.85,
+       -2.75
+      ],
+      [
+       67.25,
+       -2.75,
+       103.85,
+       -0.95
+      ],
+      [
+       67.45,
+       -0.95,
+       103.65,
+       0.45
+      ],
+      [
+       67.45,
+       0.45,
+       103.45,
+       1.25
+      ],
+      [
+       67.65,
+       1.25,
+       103.45,
+       2.65
+      ],
+      [
+       67.85,
+       2.65,
+       103.25,
+       3.85
+      ],
+      [
+       67.85,
+       3.85,
+       103.05,
+       4.25
+      ],
+      [
+       68.05,
+       4.25,
+       103.05,
+       5.25
+      ],
+      [
+       68.25,
+       5.25,
+       102.85,
+       6.25
+      ],
+      [
+       68.25,
+       6.25,
+       102.65,
+       6.65
+      ],
+      [
+       68.45,
+       6.65,
+       102.65,
+       7.65
+      ],
+      [
+       68.65,
+       7.65,
+       102.45,
+       8.25
+      ],
+      [
+       68.65,
+       8.25,
+       102.25,
+       8.65
+      ],
+      [
+       68.85,
+       8.65,
+       102.25,
+       9.25
+      ],
+      [
+       69.05,
+       9.25,
+       102.05,
+       9.65
+      ],
+      [
+       69.05,
+       9.65,
+       101.85,
+       9.85
+      ],
+      [
+       69.25,
+       9.85,
+       101.85,
+       10.05
+      ],
+      [
+       69.25,
+       10.05,
+       101.65,
+       10.25
+      ],
+      [
+       69.45,
+       10.25,
+       101.45,
+       10.45
+      ],
+      [
+       69.65,
+       10.45,
+       101.25,
+       10.65
+      ],
+      [
+       69.85,
+       10.65,
+       101.25,
+       10.85
+      ],
+      [
+       70.05,
+       10.85,
+       101.05,
+       11.05
+      ],
+      [
+       70.25,
+       11.05,
+       100.65,
+       11.25
+      ],
+      [
+       71.45,
+       11.25,
+       99.65,
+       14.45
+      ],
+      [
+       71.65,
+       14.45,
+       99.45,
+       14.65
+      ],
+      [
+       71.85,
+       14.65,
+       99.25,
+       14.85
+      ],
+      [
+       72.05,
+       14.85,
+       99.05,
+       15.05
+      ]
+     ]
+    }
+   }
+  }
+ },
+ "support_transitions": {
+  "Bell Burst?": [
+   "Burst Pos",
+   "Choose Dir"
+  ],
+  "Burst Antic": [
+   "Fire Bells"
+  ],
+  "Burst Out": [
+   "Burst Recovery",
+   "Death Broadcast"
+  ],
+  "Burst Pos": [
+   "Burst Antic"
+  ],
+  "Burst Recovery": [
+   "Submerged"
+  ],
+  "Charge": [
+   "Charge End",
+   "Death Broadcast"
+  ],
+  "Charge Antic": [
+   "Charge",
+   "Death Broadcast"
+  ],
+  "Charge Emerge": [
+   "Charge Antic",
+   "Death Broadcast"
+  ],
+  "Charge End": [
+   "Death Broadcast",
+   "Dig In"
+  ],
+  "Choose 1st Pattern": [
+   "Ptn L",
+   "Ptn R"
+  ],
+  "Choose Dir": [
+   "Set L",
+   "Set R"
+  ],
+  "Descending": [
+   "Death Broadcast",
+   "Leap Land"
+  ],
+  "Dig In": [
+   "Death Broadcast",
+   "Submerged"
+  ],
+  "Dormant": [
+   "Submerged Init"
+  ],
+  "Emerge Antic C": [
+   "Charge Emerge"
+  ],
+  "Emerge Antic L": [
+   "Leap Out"
+  ],
+  "Fire Bells": [
+   "Burst Out"
+  ],
+  "Leap Land": [
+   "Death Broadcast",
+   "Dig In"
+  ],
+  "Leap Out": [
+   "Death Broadcast",
+   "Descending"
+  ],
+  "Move Choice": [
+   "Emerge Antic C",
+   "Emerge Antic L"
+  ],
+  "Ptn L": [
+   "Rage End"
+  ],
+  "Ptn R": [
+   "Rage End"
+  ],
+  "Rage Antic": [
+   "Rage Burst"
+  ],
+  "Rage Burst": [
+   "Rage Roar"
+  ],
+  "Rage End": [
+   "Submerged"
+  ],
+  "Rage Pos": [
+   "Rage Antic"
+  ],
+  "Rage Roar": [
+   "Roar End"
+  ],
+  "Rage Rumble": [
+   "Choose 1st Pattern"
+  ],
+  "Rage Submerge": [
+   "Rage Rumble"
+  ],
+  "Rage?": [
+   "Bell Burst?",
+   "Rage Pos"
+  ],
+  "Roar End": [
+   "Rage Submerge"
+  ],
+  "Set L": [
+   "Move Choice"
+  ],
+  "Set R": [
+   "Move Choice"
+  ],
+  "Submerged": [
+   "Rage?"
+  ],
+  "Submerged Init": [
+   "Emerge Antic C"
+  ]
+ },
+ "entities": {
+  "Bone Beast": {
+   "category": "enemy",
+   "src": [
+    "health_manager",
+    "damage_hero"
+   ],
+   "layers": [
+    11
+   ],
+   "colliders": {
+    "poly7": 108630,
+    "box": 484818,
+    "poly9": 106713
+   },
+   "radius": [],
+   "boss": true,
+   "by_state": {
+    "Burst Out": {
+     "frames": 69894,
+     "enabled box": 0.912
+    },
+    "Charge": {
+     "frames": 65943,
+     "enabled poly7": 0.95
+    },
+    "Charge Antic": {
+     "frames": 42687,
+     "enabled poly7": 0.995
+    },
+    "Charge Emerge": {
+     "frames": 55455,
+     "enabled box": 0.824
+    },
+    "Charge End": {
+     "frames": 10785,
+     "enabled box": 0.998
+    },
+    "Descending": {
+     "frames": 47407,
+     "enabled poly9": 1.0
+    },
+    "Dig In": {
+     "frames": 55067,
+     "enabled box": 0.8
+    },
+    "Leap Land": {
+     "frames": 74228,
+     "enabled box": 1.0
+    },
+    "Leap Out": {
+     "frames": 59306,
+     "enabled poly9": 0.999
+    },
+    "Rage Burst": {
+     "frames": 646,
+     "enabled box": 1.0
+    },
+    "Rage Roar": {
+     "frames": 9544,
+     "enabled box": 1.0
+    },
+    "Roar End": {
+     "frames": 1454,
+     "enabled box": 0.654
+    }
+   },
+   "armed": 0,
+   "armed_by_family": {},
+   "armed_at_boss_state": {},
+   "lifetime_s": {
+    "n": 0
+   },
+   "end": {},
+   "world_frame": false
+  },
+  "BoneBeast AtkBell L": {
+   "category": "hazard",
+   "src": [
+    "damage_hero",
+    "projectile"
+   ],
+   "layers": [
+    17
+   ],
+   "colliders": {
+    "circle": 265186
+   },
+   "radius": [
+    1.274
+   ],
+   "boss": false,
+   "by_state": {
+    "Bounce": {
+     "frames": 4729,
+     "enabled": 1.0,
+     "enabled circle": 1.0
+    },
+    "Dormant": {
+     "frames": 63066
+    },
+    "First Bounce": {
+     "frames": 1160,
+     "enabled": 0.998,
+     "enabled circle": 0.998
+    },
+    "In Air": {
+     "frames": 109962,
+     "enabled": 1.0,
+     "enabled circle": 1.0
+    },
+    "Launch": {
+     "frames": 21799,
+     "enabled": 0.999,
+     "enabled circle": 0.999
+    },
+    "Launched Up": {
+     "frames": 64470,
+     "enabled": 0.997,
+     "enabled circle": 0.997
+    }
+   },
+   "armed": 1188,
+   "armed_by_family": {
+    "BB_BURST": 1188
+   },
+   "armed_at_boss_state": {
+    "Burst Out": 1188
+   },
+   "lifetime_s": {
+    "p0_5": 0.3928,
+    "p5": 1.9917,
+    "p50": 2.6333,
+    "p95": 3.0916,
+    "p99_5": 3.1083,
+    "min": 0.1404,
+    "max": 3.1084,
+    "n": 1188
+   },
+   "end": {
+    "left view": 1000,
+    "disarmed": 157,
+    "fight_end": 31
+   },
+   "world_frame": false
+  },
+  "BoneBeast AtkBell R": {
+   "category": "hazard",
+   "src": [
+    "damage_hero",
+    "projectile"
+   ],
+   "layers": [
+    17
+   ],
+   "colliders": {
+    "circle": 243674
+   },
+   "radius": [
+    1.274
+   ],
+   "boss": false,
+   "by_state": {
+    "Bounce": {
+     "frames": 4548,
+     "enabled": 1.0,
+     "enabled circle": 1.0
+    },
+    "Dormant": {
+     "frames": 45730
+    },
+    "First Bounce": {
+     "frames": 1160,
+     "enabled": 0.999,
+     "enabled circle": 0.999
+    },
+    "In Air": {
+     "frames": 105967,
+     "enabled": 1.0,
+     "enabled circle": 1.0
+    },
+    "Launch": {
+     "frames": 21799,
+     "enabled": 0.999,
+     "enabled circle": 0.999
+    },
+    "Launched Up": {
+     "frames": 64470,
+     "enabled": 0.998,
+     "enabled circle": 0.998
+    }
+   },
+   "armed": 1188,
+   "armed_by_family": {
+    "BB_BURST": 1188
+   },
+   "armed_at_boss_state": {
+    "Burst Out": 1188
+   },
+   "lifetime_s": {
+    "p0_5": 0.3928,
+    "p5": 1.9249,
+    "p50": 2.5916,
+    "p95": 3.0916,
+    "p99_5": 3.1082,
+    "min": 0.1404,
+    "max": 3.1083,
+    "n": 1188
+   },
+   "end": {
+    "disarmed": 130,
+    "left view": 1027,
+    "fight_end": 31
+   },
+   "world_frame": false
+  },
+  "BoneBeast DropBell L": {
+   "category": "hazard",
+   "src": [
+    "damage_hero",
+    "projectile"
+   ],
+   "layers": [
+    17
+   ],
+   "colliders": {
+    "circle": 1093963
+   },
+   "radius": [
+    1.274
+   ],
+   "boss": false,
+   "by_state": {
+    "Air": {
+     "frames": 4494,
+     "enabled": 1.0,
+     "enabled circle": 1.0
+    },
+    "Antic": {
+     "frames": 15647
+    },
+    "Bounce Air": {
+     "frames": 11352,
+     "enabled": 1.0,
+     "enabled circle": 1.0
+    },
+    "Dormant": {
+     "frames": 1059526
+    },
+    "Submerge": {
+     "frames": 2944,
+     "enabled": 1.0,
+     "enabled circle": 1.0
+    }
+   },
+   "armed": 198,
+   "armed_by_family": {
+    "BB_RAGE": 198
+   },
+   "armed_at_boss_state": {
+    "Ptn R": 102,
+    "Ptn L": 96
+   },
+   "lifetime_s": {
+    "p0_5": 2.6973,
+    "p5": 2.7083,
+    "p50": 2.7251,
+    "p95": 2.7749,
+    "p99_5": 2.7833,
+    "min": 2.525,
+    "max": 2.7833,
+    "n": 198
+   },
+   "end": {
+    "left view": 155,
+    "disarmed": 43
+   },
+   "world_frame": true
+  },
+  "BoneBeast DropBell L2": {
+   "category": "hazard",
+   "src": [
+    "damage_hero",
+    "projectile"
+   ],
+   "layers": [
+    17
+   ],
+   "colliders": {
+    "circle": 1098675
+   },
+   "radius": [
+    1.274
+   ],
+   "boss": false,
+   "by_state": {
+    "Air": {
+     "frames": 1164,
+     "enabled": 1.0,
+     "enabled circle": 1.0
+    },
+    "Antic": {
+     "frames": 4022
+    },
+    "Bounce Air": {
+     "frames": 2986,
+     "enabled": 1.0,
+     "enabled circle": 1.0
+    },
+    "Dormant": {
+     "frames": 1089714
+    },
+    "Submerge": {
+     "frames": 789,
+     "enabled": 1.0,
+     "enabled circle": 1.0
+    }
+   },
+   "armed": 51,
+   "armed_by_family": {
+    "BB_RAGE": 51
+   },
+   "armed_at_boss_state": {
+    "Ptn R": 51
+   },
+   "lifetime_s": {
+    "p0_5": 2.6374,
+    "p5": 2.7083,
+    "p50": 2.725,
+    "p95": 2.7666,
+    "p99_5": 2.775,
+    "min": 2.6166,
+    "max": 2.775,
+    "n": 51
+   },
+   "end": {
+    "left view": 34,
+    "disarmed": 17
+   },
+   "world_frame": true
+  },
+  "BoneBeast DropBell M": {
+   "category": "hazard",
+   "src": [
+    "damage_hero",
+    "projectile"
+   ],
+   "layers": [
+    17
+   ],
+   "colliders": {
+    "circle": 1093991
+   },
+   "radius": [
+    1.274
+   ],
+   "boss": false,
+   "by_state": {
+    "Air": {
+     "frames": 4658,
+     "enabled": 1.0,
+     "enabled circle": 1.0
+    },
+    "Antic": {
+     "frames": 15263
+    },
+    "Bounce Air": {
+     "frames": 11346,
+     "enabled": 1.0,
+     "enabled circle": 1.0
+    },
+    "Dormant": {
+     "frames": 1059587
+    },
+    "Submerge": {
+     "frames": 3137,
+     "enabled": 1.0,
+     "enabled circle": 1.0
+    }
+   },
+   "armed": 198,
+   "armed_by_family": {
+    "BB_RAGE": 198
+   },
+   "armed_at_boss_state": {
+    "Ptn R": 102,
+    "Ptn L": 96
+   },
+   "lifetime_s": {
+    "p0_5": 2.7,
+    "p5": 2.7083,
+    "p50": 2.7333,
+    "p95": 2.7749,
+    "p99_5": 2.7833,
+    "min": 2.6999,
+    "max": 2.7834,
+    "n": 198
+   },
+   "end": {
+    "left view": 128,
+    "disarmed": 70
+   },
+   "world_frame": true
+  },
+  "BoneBeast DropBell M2": {
+   "category": "hazard",
+   "src": [
+    "damage_hero",
+    "projectile"
+   ],
+   "layers": [
+    17
+   ],
+   "colliders": {
+    "circle": 1060727
+   },
+   "radius": [
+    1.274
+   ],
+   "boss": false,
+   "by_state": {
+    "Air": {
+     "frames": 29433,
+     "enabled": 1.0,
+     "enabled circle": 1.0
+    },
+    "Antic": {
+     "frames": 105859
+    },
+    "Bounce Air": {
+     "frames": 71625,
+     "enabled": 1.0,
+     "enabled circle": 1.0
+    },
+    "Cancel": {
+     "frames": 1403
+    },
+    "Dormant": {
+     "frames": 832887
+    },
+    "Submerge": {
+     "frames": 19520,
+     "enabled": 1.0,
+     "enabled circle": 1.0
+    }
+   },
+   "armed": 1315,
+   "armed_by_family": {
+    "BB_RAGE": 99,
+    "BB_BURST": 722,
+    "BB_LEAP": 494
+   },
+   "armed_at_boss_state": {
+    "Burst Out": 722,
+    "Leap Land": 494,
+    "Ptn R": 51,
+    "Ptn L": 48
+   },
+   "lifetime_s": {
+    "p0_5": 0.2378,
+    "p5": 2.7083,
+    "p50": 2.725,
+    "p95": 2.7749,
+    "p99_5": 2.7833,
+    "min": 0.095,
+    "max": 2.7916,
+    "n": 1315
+   },
+   "end": {
+    "left view": 838,
+    "disarmed": 446,
+    "fight_end": 31
+   },
+   "world_frame": true
+  },
+  "BoneBeast DropBell R": {
+   "category": "hazard",
+   "src": [
+    "damage_hero",
+    "projectile"
+   ],
+   "layers": [
+    17
+   ],
+   "colliders": {
+    "circle": 1095477
+   },
+   "radius": [
+    1.274
+   ],
+   "boss": false,
+   "by_state": {
+    "Air": {
+     "frames": 3433,
+     "enabled": 1.0,
+     "enabled circle": 1.0
+    },
+    "Antic": {
+     "frames": 11823
+    },
+    "Bounce Air": {
+     "frames": 8616,
+     "enabled": 1.0,
+     "enabled circle": 1.0
+    },
+    "Dormant": {
+     "frames": 1069328
+    },
+    "Submerge": {
+     "frames": 2277,
+     "enabled": 1.0,
+     "enabled circle": 1.0
+    }
+   },
+   "armed": 150,
+   "armed_by_family": {
+    "BB_RAGE": 150
+   },
+   "armed_at_boss_state": {
+    "Ptn R": 102,
+    "Ptn L": 48
+   },
+   "lifetime_s": {
+    "p0_5": 2.6999,
+    "p5": 2.7083,
+    "p50": 2.7251,
+    "p95": 2.7737,
+    "p99_5": 2.7833,
+    "min": 2.6999,
+    "max": 2.7833,
+    "n": 150
+   },
+   "end": {
+    "left view": 116,
+    "disarmed": 34
+   },
+   "world_frame": true
+  },
+  "BoneBeast DropBell R2": {
+   "category": "hazard",
+   "src": [
+    "damage_hero",
+    "projectile"
+   ],
+   "layers": [
+    17
+   ],
+   "colliders": {
+    "circle": 1098741
+   },
+   "radius": [
+    1.274
+   ],
+   "boss": false,
+   "by_state": {
+    "Air": {
+     "frames": 1089,
+     "enabled": 1.0,
+     "enabled circle": 1.0
+    },
+    "Antic": {
+     "frames": 3806
+    },
+    "Bounce Air": {
+     "frames": 2736,
+     "enabled": 1.0,
+     "enabled circle": 1.0
+    },
+    "Dormant": {
+     "frames": 1090395
+    },
+    "Submerge": {
+     "frames": 715,
+     "enabled": 1.0,
+     "enabled circle": 1.0
+    }
+   },
+   "armed": 48,
+   "armed_by_family": {
+    "BB_RAGE": 48
+   },
+   "armed_at_boss_state": {
+    "Ptn L": 48
+   },
+   "lifetime_s": {
+    "p0_5": 2.7,
+    "p5": 2.7043,
+    "p50": 2.725,
+    "p95": 2.7638,
+    "p99_5": 2.7814,
+    "min": 2.7,
+    "max": 2.7834,
+    "n": 48
+   },
+   "end": {
+    "left view": 41,
+    "disarmed": 7
+   },
+   "world_frame": true
+  }
+ },
+ "coverage": {
+  "logged_instances_min": 99,
+  "target": 200,
+  "families": {
+   "BB_CHARGE": {
+    "n": 1157,
+    "by_phase": {
+     "P1": 641,
+     "P2": 516
+    },
+    "target": 200,
+    "missing": 0
+   },
+   "BB_LEAP": {
+    "n": 1082,
+    "by_phase": {
+     "P1": 576,
+     "P2": 506
+    },
+    "target": 200,
+    "missing": 0
+   },
+   "BB_BURST": {
+    "n": 1189,
+    "by_phase": {
+     "P1": 450,
+     "P2": 739
+    },
+    "target": 200,
+    "missing": 0
+   },
+   "BB_RAGE": {
+    "n": 99,
+    "by_phase": {
+     "P1": 99
+    },
+    "target": 200,
+    "missing": 101
+   }
+  },
+  "fsm_edges_extracted": true,
+  "edges_n_lt_30": [],
+  "states_n_lt_30": [],
+  "hero_x_at_transitions": {
+   "p0_5": 70.82,
+   "p5": 74.92,
+   "p50": 85.66,
+   "p95": 95.81,
+   "p99_5": 99.9,
+   "min": 69.47,
+   "max": 101.74,
+   "n": 35910
+  },
+  "hits_outside_attacks": [],
+  "fights": 99,
+  "frames": 1100363,
+  "game_s": 17456.9,
+  "counters": {}
+ },
+ "templates": {
+  "cell_u": 0.05,
+  "bin_s": 0.016666666666666666,
+  "file": "BellBeast_hitboxes.npz",
+  "keys": "<family>/<frame> (t from the attack start), <family>/<state>/<frame> (t from the state's entry; _tail = after the attack ended, t from its end)",
+  "frames": {
+   "anchor": "x' = mirror * (x - anchor x), y' = y - anchor y",
+   "world": "world coordinates (arena-fixed hazards)"
+  },
+  "instance_columns": [
+   "f_start",
+   "phase",
+   "mirror",
+   "dir",
+   "anchor_x",
+   "anchor_y",
+   "anchor_t",
+   "hero_x",
+   "hero_y",
+   "boss_hp",
+   "dur_s",
+   "tail_s",
+   "hits",
+   "end"
+  ],
+  "instance_codes": {
+   "phase": [
+    "P1",
+    "P2"
+   ],
+   "dir": "dir_states value, 0 = none",
+   "end": {
+    "rest": 0,
+    "death": 1,
+    "chain": 2,
+    "fight_end": 3
+   }
+  },
+  "arrays": "<family>/instances (n, columns), state_t (n, states: s from the start, nan = not entered), state_f (entry frames, -1), state_names, fights, boss_path (t, n, x_min, x_max, y_min, y_max, x_mean, y_mean; anchor frame)"
+ },
+ "spec": {
+  "attack_starts": {
+   "Emerge Antic C": "BB_CHARGE",
+   "Emerge Antic L": "BB_LEAP",
+   "Burst Pos": "BB_BURST",
+   "Rage Pos": "BB_RAGE"
+  },
+  "decision_states": [
+   "Submerged Init",
+   "Submerged",
+   "Rage?",
+   "Bell Burst?",
+   "Choose Dir",
+   "Set L",
+   "Set R",
+   "Move Choice"
+  ],
+  "dir_states": {
+   "Set L": 1,
+   "Set R": -1
+  },
+  "directed": [
+   "BB_CHARGE",
+   "BB_LEAP"
+  ],
+  "phase_marks": {
+   "Rage End": "P2"
+  },
+  "world_fixed": [
+   "BoneBeast DropBell"
+  ],
+  "rest_states": [
+   "Init",
+   "Dormant"
+  ],
+  "dist_bins_u": [
+   0.0,
+   3.0,
+   6.0,
+   10.0,
+   99.0
+  ],
+  "tail_max_s": 6.0
+ }
+}
