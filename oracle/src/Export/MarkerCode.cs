@@ -4,8 +4,8 @@ namespace SsOracle.Export
 {
     /// <summary>
     /// The frame marker's code and placement (DESIGN §3.1.4 C4), without Unity: FrameMarker draws it,
-    /// brain/ssbot/record/marker.py decodes it, and oracle/tests/MarkerCheck and brain/tests/test_marker.py pin both
-    /// to the same vectors. A (Rows + 2) x (Cols + 2) grid of square cells with a one-cell black border; grid row gr
+    /// brain/ssbot/record/marker.py decodes it, brain/ssbot/vision/mask.py places it (cell size, rect) and masks it,
+    /// and oracle/tests/MarkerCheck and brain/tests/test_marker.py pin them to the same vectors. A (Rows + 2) x (Cols + 2) grid of square cells with a one-cell black border; grid row gr
     /// (top to bottom), column gc (left to right), true = white:
     /// <list type="bullet">
     /// <item>border (gr 0 or Rows + 1, gc 0 or Cols + 1): black</item>
@@ -47,9 +47,12 @@ namespace SsOracle.Export
             }
         }
 
-        /// <summary>Default cell size: 3 px of a 320 px wide thumbnail of a 16:9 client (12 px at 720p, 18 at
-        /// 1080p). Math.Round rounds half to even, as Python's round does.</summary>
-        public static int DefaultCell(int screenHeight) => Math.Max(4, (int)Math.Round(screenHeight / 60.0));
+        /// <summary>Default cell size, ssbot.vision.mask.cell_px: max(3, round(height / 270)), 3 px at 720p, 4 at
+        /// 1080p, 5 at 1440p. The brain reads the marker from the full-resolution capture, where a 3 px cell still
+        /// has a centre pixel with its own cell on both sides, and masks that corner out of every image a model sees
+        /// (training and the final run), so the marker stays small. Math.Round rounds half to even, as Python's round
+        /// does.</summary>
+        public static int DefaultCell(int screenHeight) => Math.Max(3, (int)Math.Round(screenHeight / 270.0));
 
         /// <summary>Top-left corner (client px, top-left origin) of the grid in corner 0 tl, 1 tr, 2 bl, 3 br,
         /// `cell` px in from both edges.</summary>

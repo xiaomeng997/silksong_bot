@@ -6,14 +6,20 @@ using UnityEngine;
 namespace SsOracle.Export
 {
     /// <summary>
-    /// Training-only frame marker (DESIGN §3.1.4 C4; the M1 alignment gate's ground truth): while it is on, every
-    /// rendered image carries MarkerCode's pattern of Time.frameCount in one corner, the same number STATE "f" carries
-    /// for that frame, so brain/ssbot/record/marker.py can read which frame each captured image shows. RPC
-    /// "frame.marker" {on, corner?: tl|tr|bl|br, size?: cell px} turns it on or off; on is refused unless the profile
-    /// allows probe tools and outside -ssbot-human (a person's session is training data). It turns itself off when the
-    /// brain disconnects or the profile stops allowing probe tools, so a killed probe cannot leave it on. While it is
-    /// on, STATE "mk" is non-nil ({drawn, corner, cell, rect, grid, us}; FrameExporter), and "marker" events mark the
-    /// switches: a recording with the marker is identifiable and is never training data.
+    /// Training-only frame marker (DESIGN §3.1.4 C4; the exact label of every training capture and the M1 alignment
+    /// gate's ground truth): while it is on, every rendered image carries MarkerCode's pattern of Time.frameCount in
+    /// one corner, the same number STATE "f" carries for that frame, so the brain reads which frame each captured
+    /// image shows (brain/ssbot/record/marker.py, in the video recorder's capture path). Training sessions turn it on
+    /// (the recorder, the soak workers, the M1 probes: marker_on) in the top-right corner with the default cell,
+    /// exactly where brain/ssbot/vision/mask.py masks every image a model sees, in training and in the final vanilla
+    /// run: a marked recording IS training data, valid only with that mask applied (the capture path fills it before
+    /// any thumbnail is stored). Other corners and sizes are for probes. RPC "frame.marker" {on, corner?: tl|tr|bl|br,
+    /// size?: cell px} turns it on or off; on is refused unless the profile allows probe tools, and under -ssbot-human
+    /// (a person's session is recorded without it: its screen video has no capture path that masks it, and its labels
+    /// are timestamp labels). It turns itself off when the brain that turned it on disconnects (connection
+    /// generation) or the profile stops allowing probe tools, so a killed session cannot leave it on. While it is on,
+    /// STATE "mk" is non-nil ({drawn, corner, cell, rect, grid, us}; FrameExporter), and "marker" events mark the
+    /// switches: a recording says which of its frames carry the marker.
     ///
     /// Why OnGUI: the game renders with the built-in pipeline. The main camera may render into CameraRenderScaled's
     /// texture, which another camera blits to the screen; the HUD camera (clear flags Depth) draws the HUD's tk2d
@@ -72,7 +78,7 @@ namespace SsOracle.Export
         {
             why = null;
             if (!Core.Profile.Rules.ProbeTools) why = $"probe tools are disabled in profile {Core.Profile.Current}";
-            else if (Core.RunMode.Human) why = "-ssbot-human: a person's session is training data";
+            else if (Core.RunMode.Human) why = "-ssbot-human: a person's session is recorded without the marker (timestamp labels)";
             return why == null;
         }
 
@@ -166,7 +172,7 @@ namespace SsOracle.Export
             instance.enabled = true;
             if (!was)
             {
-                Core.Plugin.Log.LogWarning($"frame marker ON ({CornerNames[corner]}, {cell} px cells): validation only, never training data");
+                Core.Plugin.Log.LogWarning($"frame marker ON ({CornerNames[corner]}, {cell} px cells): its images are training data only with the vision mask applied");
                 FrameExporter.Emit("marker", new Dictionary<string, object>
                 {
                     ["on"] = true, ["corner"] = CornerNames[corner], ["cell"] = cell,

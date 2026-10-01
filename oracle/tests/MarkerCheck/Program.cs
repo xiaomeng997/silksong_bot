@@ -53,15 +53,21 @@ internal static class Program
         int[] crcs = { 0, 3, 6, 3, 3, 1, 5 };
         for (var i = 0; i < values.Length; i++)
             Check(MarkerCode.Crc4(values[i]) == crcs[i], $"crc4({values[i]}) = {MarkerCode.Crc4(values[i])}");
-        // Placement: 12 px cells at 720p (3 px of a 320 px thumbnail), 13 at 768 (12.8 rounds up), 18 at 1080p.
+        // Placement (brain/ssbot/vision/mask.py; the same table in brain/tests/test_marker.py): max(3, round(h / 270))
+        // px cells, 3 at 720p, 768 (2.84 rounds up) and 900, 4 at 1080p, 5 at 1440p, 8 at 2160p, 3 at least.
         MarkerCode.Place(1280, 720, 1, MarkerCode.DefaultCell(720), out var x, out var y);
-        Check(MarkerCode.DefaultCell(720) == 12 && x == 1100 && y == 12, $"1280x720 tr: cell 12 at ({x}, {y})");
+        Check(MarkerCode.DefaultCell(720) == 3 && x == 1235 && y == 3, $"1280x720 tr: cell 3 at ({x}, {y})");
         MarkerCode.Place(1920, 1080, 2, MarkerCode.DefaultCell(1080), out x, out y);
-        Check(MarkerCode.DefaultCell(1080) == 18 && x == 18 && y == 990, $"1920x1080 bl: cell 18 at ({x}, {y})");
+        Check(MarkerCode.DefaultCell(1080) == 4 && x == 4 && y == 1060, $"1920x1080 bl: cell 4 at ({x}, {y})");
         MarkerCode.Place(1366, 768, 1, MarkerCode.DefaultCell(768), out x, out y);
-        Check(MarkerCode.DefaultCell(768) == 13 && x == 1171 && y == 13, $"1366x768 tr: cell 13 at ({x}, {y})");
+        Check(MarkerCode.DefaultCell(768) == 3 && x == 1321 && y == 3, $"1366x768 tr: cell 3 at ({x}, {y})");
         MarkerCode.Place(1600, 900, 3, MarkerCode.DefaultCell(900), out x, out y);
-        Check(MarkerCode.DefaultCell(900) == 15 && x == 1375 && y == 825, $"1600x900 br: cell 15 at ({x}, {y})");
+        Check(MarkerCode.DefaultCell(900) == 3 && x == 1555 && y == 885, $"1600x900 br: cell 3 at ({x}, {y})");
+        MarkerCode.Place(2560, 1440, 1, MarkerCode.DefaultCell(1440), out x, out y);
+        Check(MarkerCode.DefaultCell(1440) == 5 && x == 2485 && y == 5, $"2560x1440 tr: cell 5 at ({x}, {y})");
+        MarkerCode.Place(3840, 2160, 1, MarkerCode.DefaultCell(2160), out x, out y);
+        Check(MarkerCode.DefaultCell(2160) == 8 && x == 3720 && y == 8, $"3840x2160 tr: cell 8 at ({x}, {y})");
+        Check(MarkerCode.DefaultCell(360) == 3, $"640x360: cell {MarkerCode.DefaultCell(360)} (the minimum)");
         Console.WriteLine(fails == 0 ? "ALL OK" : $"{fails} FAILED");
         return fails == 0 ? 0 : 1;
     }

@@ -115,7 +115,7 @@ namespace SsOracle.Export
             w.Key("ts"); w.Float(Time.timeScale);
             w.Key("fdt"); w.Float(Time.fixedDeltaTime);
             w.Key("focus"); w.Bool(Application.isFocused);
-            w.Key("mk"); FrameMarker.Write(w, ctx.Frame);   // nil unless the frame marker is on (validation only)
+            w.Key("mk"); FrameMarker.Write(w, ctx.Frame);   // nil unless the frame marker is on (training sessions)
             w.Key("cost_us"); w.Int(lastCostTicks * 1_000_000 / Stopwatch.Frequency);  // previous frame's build cost
             w.Key("drop"); w.Int(Ipc.FramedServer.Instance.DroppedStates);
             w.Key("cost_ex"); WriteSectionCosts(w);
