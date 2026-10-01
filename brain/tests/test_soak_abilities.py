@@ -249,7 +249,10 @@ def test_parse_args_and_worker_command():
     assert a.abilities is None and a.ability_tools is None and a.ability_skill is None
     cmd = S.worker_command(a, 2, S.RUNS / "x", 1_790_000_000.4)
     assert cmd == [sys.executable, "-m", "ssbot.tools.soak", "--worker", "2", "--out", str(S.RUNS / "x"),
-                   "--deadline", "1790000000"]  # the default soak's worker command, unchanged
+                   "--deadline", "1790000000"]  # the default soak's worker command, unchanged (marker on)
+    assert a.no_marker is False and S.parse_args(cmd[3:]).no_marker is False
+    off = S.worker_command(S.parse_args(["--minutes", "5", "--no-marker"]), 0, S.RUNS, 1.0)
+    assert off[-1] == "--no-marker" and S.parse_args(off[3:]).no_marker is True
     a = S.parse_args(["--minutes", "5", "--instances", "2", "--abilities", "all", "--ability-tools", "Tack,Tri Pin",
                       "--ability-skill", "Thread Storm"])
     cmd = S.worker_command(a, 1, S.RUNS / "x", 1_790_000_000)
@@ -348,7 +351,8 @@ class FakeLink:
         self.calls: list[tuple[str, dict]] = []
         self.answers = {"schema.cstate": {"bools": ["facingRight", "onGround", "dashing"], "words": 1},
                         "guards.set": {"save_suppression": suppress}, "abilities.grant": grant,
-                        "input.release": {}, "savestate.list": {"states": []}, "savestate.save": {}}
+                        "input.release": {}, "savestate.list": {"states": []}, "savestate.save": {},
+                        "frame.marker": {"on": True, "corner": "tr", "cell": 3}}
 
     def rpc(self, name, /, timeout_s=10.0, **args):
         self.calls.append((name, args))
@@ -498,3 +502,47 @@ def test_worker_takes_no_savestate_without_the_grant(tmp_path, monkeypatch, ok):
         assert code == S.EXIT_NO_GRANT == exit_line["code"] and "no savestate" in exit_line["why"]
         assert not calls(link, "savestate.list") and not calls(link, "savestate.save")
         assert len(calls(link, "abilities.grant")) == S.GRANT_TRIES
+
+
+# ---- the frame marker: on in every worker, as in every training session -------------------------------------------
+
+def test_frame_stats_count_marked_frames():
+    st = S.FrameStats()
+    for f, mk in enumerate([None, {"drawn": True}, {"drawn": False}, {"drawn": True}], 1):
+        st.on_raw(MsgType.STATE, state_frame(f, {}, mk=mk))
+    assert st.take()["marked"] == 2 and st.take()["marked"] == 0
+
+
+def test_worker_turns_the_marker_on_and_survives_a_refusal(tmp_path):
+    w = worker(tmp_path, None, 1)
+    drawn = standing(9) | {"mk": {"drawn": True, "corner": "tr", "cell": 3}}
+    w.link = FakeLink(drawn, None)
+    w.turn_marker_on()
+    w.link = FakeLink(standing(9), None)
+    w.link.answers["frame.marker"] = S.OracleError("-ssbot-human: a person's session is recorded without the marker")
+    w.turn_marker_on()
+    w.link = FakeLink(standing(9), None)                     # accepted, but no STATE shows it
+    w.turn_marker_on()
+    w.log.close()
+    lines = [x for x in log_lines(tmp_path) if x["kind"] == "marker"]
+    assert [(x["on"], x.get("cell")) for x in lines] == [(True, 3), (False, None), (False, None)]
+    assert "ssbot-human" in lines[1]["error"] and lines[2]["error"].startswith("TimeoutError")
+
+
+@pytest.mark.parametrize("no_marker", [False, True])
+def test_worker_run_turns_the_marker_on_after_entering_gameplay(tmp_path, monkeypatch, no_marker):
+    link = FakeLink(standing(7) | {"mk": {"drawn": True}}, None, rpcs=())
+    order = []
+    monkeypatch.setattr(S, "OracleLink", lambda instance, connect_timeout_s: link)
+    monkeypatch.setattr(S.Worker, "enter_gameplay", lambda self: order.append("gameplay"))
+    monkeypatch.setattr(S.Worker, "start_segment", lambda self: None)
+    monkeypatch.setattr(S.Worker, "done", lambda self: True)
+    args = argparse.Namespace(worker=1, out=str(tmp_path), deadline=time.time() + 3600, abilities=None,
+                              ability_tools=None, ability_skill=None, no_marker=no_marker)
+    assert S.Worker(args).run() == 0
+    names = [c[0] for c in link.calls]
+    if no_marker:
+        assert "frame.marker" not in names
+    else:
+        assert names[:1] == ["frame.marker"] and names.index("frame.marker") < names.index("savestate.list")
+        assert [x for x in log_lines(tmp_path) if x["kind"] == "marker"][0]["on"] is True

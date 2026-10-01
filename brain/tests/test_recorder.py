@@ -216,21 +216,31 @@ def test_scan_frames_streams_in_bounded_pieces(piece):
     assert list(formats.scan_frames(b"", piece)) == []
 
 
-def _cli_record(tmp_path, skip=frozenset()):
+def _cli_record(tmp_path, skip=frozenset(), marker=False, args=(), oracle=None):
     from ssbot.record.recorder import main
-    fo = FakeOracle(skip=skip)
+    fo = FakeOracle(skip=skip, marker=marker)
+    if oracle is not None:
+        oracle.append(fo)
 
     def feed():
+        start = 0
         if fo.brain_hello.wait(10):
+            if marker and "--no-marker" not in args:  # the CLI waits for a STATE that shows the marker first
+                deadline = time.monotonic() + 10
+                while fo.mk is None and time.monotonic() < deadline:
+                    time.sleep(0.01)
+                fo.go.set()
+                fo.stream(range(0, 5))
+                start = 5
             time.sleep(0.3)  # let the recorder subscribe
             fo.go.set()
-            fo.stream(range(0, 1300))
+            fo.stream(range(start, start + 1300))
 
     t = threading.Thread(target=feed, daemon=True)
     t.start()
     try:
         return main(["record", "--instance", str(fo.instance), "--seconds", "1.5", "--out", str(tmp_path),
-                     "--episode", "cli", "--game-dir", str(tmp_path / "nogame"), "--min-free-gb", "0"])
+                     "--episode", "cli", "--game-dir", str(tmp_path / "nogame"), "--min-free-gb", "0", *args])
     finally:
         fo.close()
         t.join(5)
@@ -241,6 +251,24 @@ def test_record_cli_exit_code_gates_delivery(tmp_path, capsys):
     assert "PASS" in capsys.readouterr().out
     assert _cli_record(tmp_path / "b", skip=set(range(500, 510))) == 1  # 10 of 1300 missing: 99.23 %
     assert "FAIL" in capsys.readouterr().out
+
+
+def test_record_cli_turns_the_frame_marker_on(tmp_path, capsys):
+    """A training recording carries the frame marker (on before the recorder starts, off at the end); --no-marker
+    and an oracle without it leave the recording unmarked, saying why."""
+    fos = []
+    assert _cli_record(tmp_path / "on", marker=True, oracle=fos) == 0
+    meta = json.loads(next((tmp_path / "on").glob("*/TRAIN/cli/meta.json")).read_text("utf-8"))
+    assert meta["config"]["marker"] is True and meta["continuity"]["marked"] == meta["continuity"]["states"] > 0
+    names = [(n, a.get("on")) for n, a in fos[-1].rpcs]
+    assert names == [("frame.marker", True), ("frame.marker", False)] and "frame marker on" in capsys.readouterr().out
+    assert _cli_record(tmp_path / "off", marker=True, args=["--no-marker"], oracle=fos) == 0
+    meta = json.loads(next((tmp_path / "off").glob("*/TRAIN/cli/meta.json")).read_text("utf-8"))
+    assert meta["config"]["marker"] is False and meta["config"]["unmarked_why"] == "--no-marker" and not fos[-1].rpcs
+    assert _cli_record(tmp_path / "refused") == 0
+    meta = json.loads(next((tmp_path / "refused").glob("*/TRAIN/cli/meta.json")).read_text("utf-8"))
+    assert meta["config"]["marker"] is False and "unknown rpc" in meta["config"]["unmarked_why"]
+    assert "timestamp labels only" in capsys.readouterr().out
 
 
 def test_record_cli_closes_the_recording_when_the_video_fails(tmp_path, monkeypatch):

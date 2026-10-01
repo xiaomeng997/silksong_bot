@@ -11,8 +11,10 @@ current chunk and compresses every CHUNK_FRAMES frames into one independent zstd
     summary = rec.close()
     report = RecordingReader(rec.path).check(deep=True)   # M1 metric: >= 99.9 % frame delivery over 60 min
 
-CLI:  python -m ssbot.record.recorder record --seconds 60 [--video] | check <dir> [--deep] | info <dir>
-      (--video adds the instance window's thumbnail stream of ssbot.record.video, for ssbot.record.align)
+CLI:  python -m ssbot.record.recorder record --seconds 60 [--video] [--no-marker] | check <dir> [--deep] | info <dir>
+      (--video adds the instance window's thumbnail stream of ssbot.record.video; a training recording turns the
+      oracle's frame marker on first, which the video's capture path reads as each capture's exact label and masks:
+      ssbot.record.marker; --no-marker, or an oracle that refuses it, leaves timestamp labels only)
 """
 import argparse
 import ctypes
@@ -753,18 +755,30 @@ class RecordingReader:
 # ---- CLI -----------------------------------------------------------------------------------------------
 
 def _cmd_record(a: argparse.Namespace) -> int:
-    from ssbot.ipc.oracle_link import OracleLink
+    from ssbot.ipc.oracle_link import OracleError, OracleLink
+    from ssbot.record.marker import marker_off, marker_on
 
     link = OracleLink(instance=a.instance)
+    marked, unmarked_why = False, "--no-marker"
+    if a.marker:  # every training recording carries the marker (DESIGN §3.1.4); a refusal leaves timestamp labels
+        try:
+            res = marker_on(link)
+            marked, unmarked_why = True, None
+            print(f"frame marker on ({res.get('corner')}, {res.get('cell')} px cells"
+                  f"{', cell sent explicitly' if res.get('resent') else ''})")
+        except (OracleError, TimeoutError) as e:
+            unmarked_why = f"{type(e).__name__}: {e}"
+            print(f"frame marker not on ({unmarked_why}): the video gets timestamp labels only")
     rec = Recorder(link, out_dir=a.out, profile=a.profile, episode=a.episode, game_dir=a.game_dir,
-                   min_free_gb=a.min_free_gb, config={"cli": sys.argv[1:]}).start()
+                   min_free_gb=a.min_free_gb,
+                   config={"cli": sys.argv[1:], "marker": marked, "unmarked_why": unmarked_why}).start()
     vid = None
     try:  # a failing video start still closes the recording and the link
-        if a.video:  # the thumbnail stream for ssbot.record.align, in the same episode folder
+        if a.video:  # the thumbnail stream (labels, ssbot.record.align), in the same episode folder
             from ssbot.record.video import VideoRecorder, instance_window
             hwnd = instance_window(a.instance)
             if hwnd:
-                vid = VideoRecorder(rec.path, hwnd=hwnd, width=a.video_width).start()
+                vid = VideoRecorder(rec.path, hwnd=hwnd, width=a.video_width, marker=marked).start()
             else:
                 print(f"no game window found for instance {a.instance}: recording without video")
         print(f"recording to {rec.path} for {a.seconds} s (Ctrl+C stops early)")
@@ -776,13 +790,19 @@ def _cmd_record(a: argparse.Namespace) -> int:
     finally:
         vsum = vid.close() if vid is not None else None
         summary = rec.close()
+        if marked:
+            try:
+                marker_off(link)
+            except (OracleError, TimeoutError, OSError) as e:  # it goes off when the link closes anyway
+                print(f"frame marker off failed ({e})")
         link.close()
     rep = RecordingReader(rec.path).check(deep=True)
     print(rep.format())
     print(f"drops {summary['drops']}")
     if vsum is not None:
-        print(f"video: {vsum['written']} frames, {vsum['dropped']} dropped, callback us {vsum['callback_us']}"
-              f"{', error ' + vsum['error'] if vsum['error'] else ''}")
+        print(f"video: {vsum['written']} frames, {vsum['dropped']} dropped, callback us {vsum['callback_us']}, "
+              f"marker labels {vsum['marker']['labelled']} (share {vsum['marker']['share']}, decode + mask us "
+              f"{vsum['marker']['decode_mask_us']}){', error ' + vsum['error'] if vsum['error'] else ''}")
     if summary["error"]:
         print(f"recorder error: {summary['error']}")
     # Exit 1 below the delivery threshold, on an index that disagrees with the data, or on a recorder error, so a
@@ -825,6 +845,8 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("--min-free-gb", type=float, default=200.0, help="refuse to start / stop below this free space")
     r.add_argument("--video", action="store_true", help="also record the gray thumbnail video (ssbot.record.video)")
     r.add_argument("--video-width", type=int, default=320)
+    r.add_argument("--no-marker", dest="marker", action="store_false",
+                   help="leave the oracle's frame marker off (default: on, as in every training recording)")
     r.set_defaults(fn=_cmd_record)
     c = sub.add_parser("check", help="frame continuity of a recording (exit 1 below threshold)")
     c.add_argument("path")

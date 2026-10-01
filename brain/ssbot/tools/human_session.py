@@ -7,6 +7,11 @@ sandbox save instance (default 9), fullscreen at 1920x1080 render resolution. Be
 exits, the golden PlayerPrefs snapshot is applied; on exit ffmpeg is stopped and meta.json written. The gamepad keys
 (NativeInput/XInput/AppleMFi), which the player may have to switch on for their controller and which only affect
 gamepads (m0:C15; the final run uses no gamepad).
+
+Labels (DESIGN §3.1.4): the oracle refuses the frame marker under -ssbot-human, so this session's frames carry
+timestamp labels only (meta.json "labels": "timestamp"; the camera-trajectory monitor ssbot.record.align flags their
+alignment). The screen video is stored as captured: like every image a model sees, its frames get the vision mask
+(ssbot.vision.mask.apply, on the full-resolution frame) before any other preprocessing when a dataset is built.
 """
 import argparse
 import json
@@ -160,6 +165,9 @@ def main() -> None:
         "last_oracle_drop_counter": (link.state or {}).get("drop"),
         "video_start_qpc_ns": video_start_qpc,
         "video_cmd": video.args if video is not None else None,
+        # No frame marker under -ssbot-human: timestamp labels only, and the video is unmasked (mask at dataset build).
+        "labels": "timestamp",
+        "video_masked": False,
         "kept_gamepad_prefs": keep,
     }
     (session / "meta.json").write_text(json.dumps(meta, indent=1, ensure_ascii=False), encoding="utf-8")

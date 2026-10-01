@@ -24,6 +24,10 @@ randomizer applied, frames and gaps, frame-time hitches, guard events, interacti
 edges), brain-lost events. A STATE silence of HANG_S seconds while the link is open is a hang (exit 3); a closed link
 is exit 4; failures to reset or to get back into gameplay are exit 5; an ability grant that failed is exit 6. The
 supervisor treats 3 and 5 as a hung game (kill + relaunch), 4 as a crash and 6 as final for that instance (left down).
+After entering gameplay every worker turns the oracle's frame marker on, as every training session does
+(ssbot.record.marker.marker_on: the vision mask's corner and cell; --no-marker leaves it off): one "marker" line, and
+a refusal is logged, never fatal. The oracle turns it off when the worker's link closes, so a restarted worker turns
+it on again; the episodes count the frames whose STATE says it was drawn, and the report sums them.
 
 Nothing here connects to an instance other than its own worker: IPC v1 serves one brain per instance.
 
@@ -403,6 +407,7 @@ class FrameStats:
         self.dead_seen = False
         self.min_hp: int | None = None
         self.interacts = 0
+        self.marked = 0            # STATE mk.drawn: the frame marker was drawn in that frame
         self.ab_cstate: Counter = Counter()
         self.ab_clips: Counter = Counter()
         self.ab_spell: Counter = Counter()
@@ -453,6 +458,9 @@ class FrameStats:
             c = s.get("cost_us")
             if isinstance(c, int):
                 self.cost_max = max(self.cost_max, c)
+            mk = s.get("mk")
+            if isinstance(mk, dict) and mk.get("drawn") is True:
+                self.marked += 1
             self.drop_counter = s.get("drop", self.drop_counter)
             for e in s.get("ev") or ():
                 k = e.get("k")
@@ -490,7 +498,7 @@ class FrameStats:
                  "play_frames": n, "udt_mean_ms": round(self.udt_sum / n, 3) if n else None, "udt_p99_ms": p99,
                  "udt_max_ms": round(self.udt_max, 1), "cost_max_us": self.cost_max, "drop_counter": self.drop_counter,
                  "events": dict(self.events), "dead_seen": self.dead_seen, "min_hp": self.min_hp,
-                 "interacts": self.interacts}
+                 "interacts": self.interacts, "marked": self.marked}
             if self.ability_bits is not None:
                 d["abilities"] = {"cstate": dict(self.ab_cstate), "clips": dict(self.ab_clips.most_common(20)),
                                   "spell": dict(self.ab_spell.most_common(10))}
@@ -528,6 +536,7 @@ class Worker:
         self.ability_args = (ability_request(self.abilities, self.i, getattr(args, "ability_tools", None),
                                              getattr(args, "ability_skill", None)) if self.abilities else None)
         self.keys, self.macros = ability_keys(None)  # grant_abilities sets the ability patterns
+        self.marker = not getattr(args, "no_marker", False)
 
     # ---- plumbing ----------------------------------------------------------------------------------------------------
 
@@ -631,6 +640,20 @@ class Worker:
         if (s.get("game") or {}).get("paused"):
             self.log.write(kind="note", note="paused before reset (brain-lost tap?)", f=s.get("f"))
             self.unpause()
+
+    def turn_marker_on(self) -> None:
+        """The frame marker on, as in every training session (ssbot.record.marker.marker_on); one "marker" line. A
+        refusal (a profile without probe tools, -ssbot-human) or a marker no STATE shows is logged, not fatal: the
+        soak does not depend on it."""
+        from ssbot.record.marker import marker_on
+
+        try:
+            res = marker_on(self.link)
+            self.log.write(kind="marker", on=True, corner=res.get("corner"), cell=res.get("cell"),
+                           resent=bool(res.get("resent")), f=self.link.frame)
+        except (OracleError, TimeoutError) as e:
+            self.check_alive()
+            self.log.write(kind="marker", on=False, error=f"{type(e).__name__}: {e}", f=self.link.frame)
 
     def grant_abilities(self) -> bool:
         """--abilities, in gameplay and before the savestate: save suppression on (the grant must never reach the
@@ -797,6 +820,8 @@ class Worker:
             self.link.subscribe_raw(self.stats.on_raw)
             self.log.write(kind="hello", hello={k: self.link.hello.get(k) for k in ("plugin", "game", "instance")})
             self.enter_gameplay()
+            if self.marker:
+                self.turn_marker_on()
             # Before the savestate, so every reset keeps the grant. A savestate without it would be reused by every
             # later start of this worker (resets would undo any later grant): none is taken, the supervisor gives up.
             if self.abilities and not self.grant_abilities():
@@ -1124,8 +1149,10 @@ class KillOnCloseJob:
 
 
 def worker_command(args, i: int, out: Path, deadline: float) -> list[str]:
-    """Command line of the worker process for instance i (the ability options pass through)."""
+    """Command line of the worker process for instance i (the ability and marker options pass through)."""
     cmd = [sys.executable, "-m", "ssbot.tools.soak", "--worker", str(i), "--out", str(out), "--deadline", f"{deadline:.0f}"]
+    if getattr(args, "no_marker", False):
+        cmd.append("--no-marker")
     if getattr(args, "abilities", None):
         cmd += ["--abilities", args.abilities]
         if args.ability_tools is not None:
@@ -1502,7 +1529,7 @@ class Supervisor:
             except Exception as e:  # noqa: BLE001
                 orphan_segments.append({"path": str(d), "error": repr(e)})
 
-        episodes, segments, exits, notes, reset_errors, segment_errors, grants = [], [], [], [], [], [], []
+        episodes, segments, exits, notes, reset_errors, segment_errors, grants, markers = [], [], [], [], [], [], [], []
         for i in self.indices:
             p = self.out / f"worker_{i}.jsonl"
             if not p.exists():
@@ -1514,7 +1541,7 @@ class Supervisor:
                     continue
                 r["instance"] = i
                 {"episode": episodes, "segment": segments, "exit": exits, "note": notes, "reset_error": reset_errors,
-                 "segment_error": segment_errors, "abilities": grants}.get(r.get("kind"), []).append(r)
+                 "segment_error": segment_errors, "abilities": grants, "marker": markers}.get(r.get("kind"), []).append(r)
         # A reset is the whole savestate.load step as training sees it: retries and unpausing included.
         resets = [e["reset_total_ms"] for e in episodes if "reset_total_ms" in e]
         same = [e["reset_total_ms"] for e in episodes if "reset_total_ms" in e and not e.get("cross_scene")]
@@ -1533,7 +1560,7 @@ class Supervisor:
                 last_by_run[run] = v
             lost_total += sum(last_by_run.values())
         ev = Counter()
-        hitches = frames = gaps = play_frames = 0
+        hitches = frames = gaps = play_frames = marked = 0
         udt_sum = 0.0
         hourly: dict[int, list] = {}  # hour since start -> [(udt_mean, play_frames, udt_p99)]
         death_kinds = ("hero_dead", "player_dead", "permadeath_dead")
@@ -1550,6 +1577,7 @@ class Supervisor:
                 hitches += st.get("hitches", 0)
                 frames += st.get("frames", 0)
                 gaps += st.get("gaps", 0)
+                marked += st.get("marked", 0)
                 if st.get("dead_seen") or any((st.get("events") or {}).get(k) for k in death_kinds):
                     dead.append({k: e.get(k) for k in ("instance", "ep", "t", "scene_end")})
                 if st.get("play_frames") and st.get("udt_mean_ms") is not None:
@@ -1653,6 +1681,10 @@ class Supervisor:
             "brain_lost_events": lost_total, "episodes_interrupted_by_pause": len(interrupted), "idle_gaps": idle_gaps,
             "frames_seen_by_workers": frames, "worker_seen_gaps": gaps, "hitches_over_25ms_in_gameplay": hitches,
             "frame_time_steady_gameplay": frame_time,
+            "marker": {"on": not getattr(self.args, "no_marker", False), "frames_drawn": marked, "frames_seen": frames,
+                       "share": round(marked / frames, 5) if frames else None,
+                       "starts": [{k: m.get(k) for k in ("instance", "t", "on", "cell", "resent", "error")}
+                                  for m in markers[:50]]},
             "segments": [{k: s.get(k) for k in ("instance", "path", "delivery", "expected", "received", "missing", "ok", "drops", "error")} for s in seg_rows],
             "bad_segments": bad_segments[:50], "delivery_windows": judged,
             "events": dict(ev), "deaths_seen": dead[:50], "brain_lost_events_last": lost,
@@ -1692,6 +1724,8 @@ class Supervisor:
                  f"per instance {dict(interacts)} in {len(interact_eps)} episodes",
                  f"  delivery per segment: min {min(deliveries) if deliveries else None} over {len(deliveries)} segments",
                  f"  hitches > {HITCH_MS} ms in steady gameplay: {hitches} of {play_frames} frames; frame time {json.dumps(frame_time)}",
+                 f"  frame marker drawn in {marked} of {frames} frames seen; turned on {sum(1 for m in markers if m.get('on'))}"
+                 f"/{len(markers)} worker starts{'' if rep['marker']['on'] else ' (--no-marker)'}",
                  f"  events {dict(ev)}; crashes {len(self.crashes)}, relaunches {dict(self.relaunches)}, worker restarts {dict(self.worker_restarts)}",
                  f"  memory: {json.dumps(mem)}",
                  f"  WHEA hardware errors during the run: {whea_new.get('count', whea_new)} (all-time {whea1.get('count')})",
@@ -1758,6 +1792,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                          f'{", ".join(TOOL_ROTATION)} by instance)')
     ap.add_argument("--ability-skill", metavar="NAME",
                     help=f"silk skill to equip for combat/all (default one of {', '.join(SKILL_ROTATION)} by instance)")
+    ap.add_argument("--no-marker", action="store_true",
+                    help="leave the oracle's frame marker off (default: on, as in every training session)")
     ap.add_argument("--worker", type=int, help=argparse.SUPPRESS)
     ap.add_argument("--deadline", type=float, help=argparse.SUPPRESS)
     args = ap.parse_args(argv)
