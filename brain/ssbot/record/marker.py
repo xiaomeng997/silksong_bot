@@ -1,18 +1,20 @@
-"""Frame marker: the exact label of every training capture (DESIGN §3.1.4 C4; the M1 alignment gate, >= 99.5 %).
+"""Frame marker: the exact label of every training capture and human play frame (DESIGN §3.1.4 C4, D12; the M1
+alignment gate, >= 99.5 %).
 
-Training sessions turn the oracle's frame marker on (marker_on: RPC "frame.marker", profile TRAIN only, refused under
--ssbot-human): while it is on, every image the game renders carries, in the top-right corner of the client area, a
-small black and white pattern that encodes Time.frameCount, the number STATE "f" carries for that frame
-(oracle/src/Export/FrameMarker.cs draws it in OnGUI, after every camera and every other GUI, before the end-of-frame
-STATE is built). The video recorder reads it from the full-resolution capture (FullResDecoder, in
-ssbot.record.video's capture path) and then fills the vision mask (ssbot.vision.mask) over it before the thumbnail is
-made, so no marker pixel is ever stored; the final, vanilla run fills the same rect. Marked recordings are training
-data only through the mask: training pixels equal final-run pixels. Where the oracle reports the marker outside the
-mask (STATE "mk" rect and screen, mapped into the capture), the capture path's guard blanks it too and flags the
-capture mask_mismatch, and mask_report() checks every STATE after the fact: such an episode is not training data.
-Recordings from before the mask (video format 1: 12 px cells in unmasked thumbnails, e.g. the 2026-09-30 in-game
-m1_align run) are validation data only. STATE "mk" is non-nil while the marker is on (RecordingReader.check counts
-those frames).
+Training sessions and a person's play sessions (ssbot.tools.human_session) turn the oracle's frame marker on (marker_on:
+RPC "frame.marker", profiles with probe tools; SsOracle before 2026-09-30 refused it under -ssbot-human): while it is
+on, every image the game renders carries, in the top-right corner of the client area, a small black and white pattern
+that encodes Time.frameCount, the number STATE "f" carries for that frame (oracle/src/Export/FrameMarker.cs draws it in
+OnGUI, after every camera and every other GUI, before the end-of-frame STATE is built). The video recorder reads it from
+the full-resolution capture (FullResDecoder, in ssbot.record.video's capture path) and then fills the vision mask
+(ssbot.vision.mask) over it before the thumbnail is made, so no marker pixel is ever stored; the final, vanilla run
+fills the same rect. A human session's ffmpeg fills it in its 1920x1080 video before encoding and keeps the corner
+losslessly for decoding (ssbot.tools.human_video, FullResDecoder on the crop). Marked recordings are training data only
+through the mask: training pixels equal final-run pixels. Where the oracle reports the marker outside the mask (STATE
+"mk" rect and screen, mapped into the capture), the capture path's guard blanks it too and flags the capture
+mask_mismatch, and mask_report() checks every STATE after the fact: such an episode is not training data. Recordings
+from before the mask (video format 1: 12 px cells in unmasked thumbnails, e.g. the 2026-09-30 in-game m1_align run) are
+validation data only. STATE "mk" is non-nil while the marker is on (RecordingReader.check counts those frames).
 
 Layout (oracle/src/Export/MarkerCode.cs is the same code; tests pin both to the same vectors): a grid of
 (ROWS + 2) x (COLS + 2) square cells of `cell` client px, `cell` px in from one corner of the client area, drawn with
@@ -45,7 +47,8 @@ The 16 bits are unwrapped to the frame nearest a reference (the STATE frame that
 Labels (capture_labels): the decoded frame where the marker decoded and is plausible (label_source "marker"); otherwise
 the timestamp label, align.match with D calibrated on the decoded captures (label_source "timestamp", flagged: the
 2026-09-30 in-game run had only 95.8 % of the timestamp labels right, probes.md); "none" without either. Sessions
-without the marker (a person's play) have timestamp labels only.
+without the marker (--no-marker, an oracle that refuses it, human sessions before 2026-09-30) have timestamp labels
+only.
 
 The exact report (exact). The gate (LabelGate): the share of the judged captures that carry a marker label, judged =
 counted captures (labelled, whose label's next frame has a STATE, as in the monitor) around whose label the marker
@@ -293,38 +296,48 @@ class FullResDecoder:
     exact pixels WGC delivers need no interpolation. The shift that decoded last is tried alone first (one gather of
     56 cells: the steady state); when that fails, every integer shift within +-search px, nearest first. A region with
     less than MIN_CONTRAST between its darkest and brightest pixel (a black screen, a fade) is "absent" without the
-    search. Levels and checks as decode(). One instance per capture thread."""
+    search. Levels and checks as decode(). It also reads a crop of a client image (a human session's corner stream,
+    ssbot.tools.human_video): the same cells at the same client px, offset by the crop's origin. One instance per
+    capture thread."""
 
     def __init__(self, corner: str = vmask.CORNER, search: int = SEARCH_PX):
         self.corner = corner
         self.search = search
         self.shift = (0, 0)
-        self._geo: dict[tuple[int, int], tuple] = {}
+        self._geo: dict[tuple, tuple] = {}
 
-    def _prepare(self, w: int, h: int) -> tuple:
+    def _prepare(self, w: int, h: int, ox: int = 0, oy: int = 0, iw: int | None = None, ih: int | None = None
+                 ) -> tuple:
+        """Gather indices for a w x h client, in px of an iw x ih image whose top-left is client px (ox, oy)."""
+        iw, ih = iw or w, ih or h
         c = vmask.cell_px(h)
         x0, y0, x1, y1 = vmask.marker_rect(w, h, self.corner, c)
+        x0, y0, x1, y1 = x0 - ox, y0 - oy, x1 - ox, y1 - oy
         inner = np.arange(c // 3, c - c // 3)
         shifts = _shifts(self.search, 1.0).astype(np.int64)
         ys = y0 + np.arange(ROWS + 2)[:, None] * c + inner                      # (ROWS + 2, k)
         xs = x0 + np.arange(COLS + 2)[:, None] * c + inner                      # (COLS + 2, k)
-        Y = np.clip(ys[None] + shifts[:, 1, None, None], 0, h - 1)             # (S, ROWS + 2, k)
-        X = np.clip(xs[None] + shifts[:, 0, None, None], 0, w - 1)             # (S, COLS + 2, k)
+        Y = np.clip(ys[None] + shifts[:, 1, None, None], 0, ih - 1)            # (S, ROWS + 2, k)
+        X = np.clip(xs[None] + shifts[:, 0, None, None], 0, iw - 1)            # (S, COLS + 2, k)
         Y = Y[:, :, None, :, None]                                             # (S, ROWS + 2, 1, k, 1)
         X = X[:, None, :, None, :]                                             # (S, 1, COLS + 2, 1, k)
         full = (len(shifts), ROWS + 2, COLS + 2, len(inner), len(inner))
         Y1, X1 = (np.broadcast_to(a, full).reshape(len(shifts), -1, len(inner) ** 2) for a in (Y, X))  # (S, cells, k*k)
         s = self.search
-        region = (slice(max(0, y0 - s), min(h, y1 + s)), slice(max(0, x0 - s), min(w, x1 + s)))
+        region = (slice(max(0, y0 - s), min(ih, y1 + s)), slice(max(0, x0 - s), min(iw, x1 + s)))
         at = {(int(dx), int(dy)): i for i, (dx, dy) in enumerate(shifts)}
         return shifts, Y, X, Y1.copy(), X1.copy(), region, at
 
-    def decode(self, gray: np.ndarray) -> Decoded:
-        """The marker in a gray client image (h, w) uint8."""
-        h, w = gray.shape
-        g = self._geo.get((w, h))
+    def decode(self, gray: np.ndarray, client: tuple[int, int] | None = None, origin: tuple[int, int] = (0, 0)
+               ) -> Decoded:
+        """The marker in a gray client image (h, w) uint8; or, with client (w, h), in a crop of such a client whose
+        top-left is client px `origin` (it must hold the marker and the search: the mask's rect does)."""
+        ih, iw = gray.shape
+        w, h = client or (iw, ih)
+        key = (w, h, origin, iw, ih)
+        g = self._geo.get(key)
         if g is None:
-            g = self._geo[(w, h)] = self._prepare(w, h)
+            g = self._geo[key] = self._prepare(w, h, origin[0], origin[1], iw, ih)
         shifts, Y, X, Y1, X1, region, at = g
         i = at.get(self.shift, 0)
         d = _judge_one(gray[Y1[i], X1[i]].mean(axis=1), shifts[i])

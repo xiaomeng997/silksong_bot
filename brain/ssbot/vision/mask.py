@@ -1,8 +1,8 @@
 """The vision mask: the first preprocessing step of every image a vision model sees, in training and in the final run
 (DESIGN §3.1.4 C4, §3.2.1).
 
-Training captures carry the oracle's frame marker (oracle/src/Export/FrameMarker.cs, decoded by ssbot.record.marker);
-the final, vanilla run never does. So that training pixels equal final-run pixels, every
+Training captures and a person's play sessions carry the oracle's frame marker (oracle/src/Export/FrameMarker.cs,
+decoded by ssbot.record.marker); the final, vanilla run never does. So that training pixels equal final-run pixels, every
 client image, marked or not, has mask_rect() filled with FILL before anything else happens to it (resize, crops,
 color conversion, augmentation): the marker's pixels never reach a model, and the masked corner looks the same in
 training and in the final run. Apply it to the whole client area at capture resolution, as WGC delivers it (or to
@@ -38,14 +38,17 @@ render in a 1080p window, DPI scaling) still lies inside that output's mask, tho
 
 The cell size. The video recorder decodes the marker from the full-resolution capture (ssbot.record.video), which WGC
 copies pixel for pixel from the window's client area (the game renders at its window size, and the capture side is
-DPI-aware), and FrameMarker draws it with point filtering at integer client px: every cell is a square of one value.
-3 px is the smallest cell with a centre pixel that has a whole pixel of its own cell on each side, so a client crop
-up to 1 px off still reads every cell at the expected place, and the decoder's search covers +-SEARCH_PX
-(ssbot.record.marker.FullResDecoder); a 2 px cell has no centre, and 1 px off mixes every cell with its neighbour.
-The cell cannot be the same share at every size (it is whole px, at least 3); the mask is. If something scales the
-image after all (a render resolution other than the window's, DPI virtualization), the marker is no longer where the
-decoder expects it: the decode fails and the capture falls back to its timestamp label, flagged; a marker is never
-read as another frame (CRC, sync and clarity checks).
+DPI-aware), and FrameMarker draws it with point filtering at integer client px: every cell is a square of one value. A
+3 px cell is the smallest with a centre pixel that has a whole pixel of its own cell on each side, so a client crop up
+to 1 px off still reads every cell at the expected place, and the decoder's search covers +-SEARCH_PX
+(ssbot.record.marker.FullResDecoder); a 2 px cell has no centre, and 1 px off mixes every cell with its neighbour. The
+cell cannot be the same share at every size (it is whole px, at least 3); the mask is. If something scales the image
+after all (a render resolution other than the window's, DPI virtualization), the marker is no longer where the decoder
+expects it: the decode fails and the capture falls back to its timestamp label, flagged; a marker is never read as
+another frame (CRC, sync and clarity checks, and a decode far from the capture's timestamp label is rejected:
+marker.reject_implausible). Where the oracle reports the marker outside the mask (STATE "mk" rect, mapped into the
+image), it is filled too and the image flagged mask_mismatch, not training data (the capture path's guard,
+ssbot.record.video; a human session's video, ssbot.tools.human_video).
 
 The corner (CORNER, top right), from the HUD layout (a person's 405 s session of 2026-09-30 sampled every 15 s,
 gameplay, menus and dialogue; the M1 probes' recordings): top left holds the HUD (bind orb, silk spool, masks; tools

@@ -1,11 +1,11 @@
 """Camera-trajectory alignment MONITOR of a recorded episode (DESIGN §3.1.4 C4).
 
 The monitor is not the M1 alignment gate. Training sessions carry the oracle's frame marker (RPC "frame.marker", STATE
-"mk"), which the capture path reads and masks (ssbot.record.video, ssbot.vision.mask): a capture whose marker decoded
-is labelled exactly, and the gate is the share of such captures (ssbot.record.marker). The monitor checks timestamp
-labels against the camera motion wherever the camera motion can tell: those of sessions without the marker (a
-person's play) and of the captures whose marker did not decode; it flags a session, never discards it. AlignReport
-.labels says how many captures carry which label. What it can and cannot see:
+"mk"), which the capture path reads and masks (ssbot.record.video, ssbot.vision.mask): a capture whose marker decoded is
+labelled exactly, and the gate is the share of such captures (ssbot.record.marker). The monitor checks timestamp labels
+against the camera motion wherever the camera motion can tell: those of sessions without the marker (--no-marker, a
+refusal, human sessions before 2026-09-30) and of the captures whose marker did not decode; it flags a session, never
+discards it. AlignReport.labels says how many captures carry which label. What it can and cannot see:
 
 - A constant offset is invisible while the camera stands still or moves at constant speed. A capture is judged only by
   its own window (the +-W captures around it, in its own track segment), and only when the camera changes speed in

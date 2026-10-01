@@ -184,7 +184,7 @@ def main() -> int:
     try:
         print("frame marker:", marker.marker_on(link))
     except (OracleError, TimeoutError) as e:
-        print(f"FAIL: frame marker not on ({e}); the gate needs it (profile TRAIN, not -ssbot-human)")
+        print(f"FAIL: frame marker not on ({e}); the gate needs it (profile TRAIN)")
         try:
             marker.marker_off(link)
         except (OracleError, TimeoutError, OSError):
