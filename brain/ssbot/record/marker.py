@@ -75,8 +75,8 @@ CORNERS = vmask.CORNERS
 MIN_CONTRAST = 64.0     # gray levels between the white and the black cells
 CLARITY = 0.25          # every cell at least this share of the contrast away from the middle
 SEARCH = 1.5            # thumbnail px searched around the expected position, both axes (decode)
-SEARCH_PX = 3           # client px searched around the expected position, both axes (FullResDecoder; <= the mask's
-                        # margin, so every marker it finds lies inside the mask)
+SEARCH_PX = vmask.SEARCH_PX   # client px searched around the expected position, both axes (FullResDecoder; the
+                              # mask holds the marker plus this, so every marker it finds lies inside the mask)
 THRESHOLD = align.THRESHOLD
 
 
