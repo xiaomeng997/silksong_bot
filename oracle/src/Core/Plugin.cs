@@ -37,6 +37,13 @@ namespace SsOracle.Core
 
             var harmony = new Harmony(Guid);
             Guards.SaveRedirect.Install(harmony);
+            if (RunMode.Minimal)
+            {
+                // Near-vanilla baseline for the frame-time comparison: saves stay in the sandbox, nothing else runs.
+                if (RunMode.MinimalLoadSlot > 0) gameObject.AddComponent<MinimalAutoLoad>();
+                Log.LogWarning($"{Name} {Version} in MINIMAL mode (save redirect only), instance {Guards.SaveRedirect.Instance}");
+                return;
+            }
             TrainingEnvironment.Install(gameObject, harmony);
             Input.KeyboardInjector.Install();
             gameObject.AddComponent<MainThread>();
