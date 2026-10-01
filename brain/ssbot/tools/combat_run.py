@@ -80,6 +80,7 @@ def worker(a: argparse.Namespace) -> int:
     deadline = time.monotonic() + a.hours * 3600 if a.hours else None
     counts: Counter = Counter()
     k = 0
+    fails_in_row = 0
     try:
         while k < a.episodes and (deadline is None or time.monotonic() < deadline):
             if not a.no_record and k % a.rotate == 0:
@@ -104,8 +105,9 @@ def worker(a: argparse.Namespace) -> int:
             print(f"[i{a.instance} ep{k}] {rec.outcome:12s} {rec.ingame_s or 0:6.1f}s hits {rec.hits} wd {rec.would_die} "
                   f"boss_hp {rec.boss_hp_end} {atk} {rec.reason or ''}", flush=True)
             k += 1
-            if rec.outcome == "HARNESS_FAIL" and counts["HARNESS_FAIL"] >= 5:
-                print(f"[i{a.instance}] 5 harness failures, stopping", flush=True)
+            fails_in_row = fails_in_row + 1 if rec.outcome == "HARNESS_FAIL" else 0
+            if fails_in_row >= 5:
+                print(f"[i{a.instance}] 5 harness failures in a row, stopping", flush=True)
                 break
             if link.closed:
                 break

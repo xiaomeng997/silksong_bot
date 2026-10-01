@@ -72,6 +72,17 @@ def _idle(ctx: Ctx, frames: int) -> dict:
     return s
 
 
+def _hold(ctx: Ctx, button: int, frames: int) -> dict:
+    link = ctx.link
+    last = link.frame
+    s = link.state
+    for _ in range(frames):
+        link.act(last + 2, button, hold_frames=0)
+        s = link.wait_state(newer_than=last, timeout_s=1.0)
+        last = s["f"]
+    return s
+
+
 def bell_beast_intro(ctx: Ctx) -> int:
     """Walk to the vines, cut them with Silkspear, walk on until the boss wakes. Returns the wake frame."""
     tap = ctx.tap
@@ -79,14 +90,22 @@ def bell_beast_intro(ctx: Ctx) -> int:
     s = _idle(ctx, 8)
     if s["hero"]["silk"] < 4:
         raise RuntimeError(f"intro: silk {s['hero']['silk']} < 4, cannot cut the vines")
-    cut_from = len(tap.freezes)
+    # The cast is held inside the per-frame loop: a one-shot press next to the loop's per-frame releases can be
+    # overridden by them (5 % of the first data run's intros never cast: silk stayed 9). Retried while silk is unspent.
     link = ctx.link
-    link.act(link.frame + 2, mask("quickcast"), hold_frames=4)
-    deadline = time.monotonic() + 2.0
-    while time.monotonic() < deadline and not any("Vines" in str(f.get("fsm")) for f in tap.freezes[cut_from:]):
-        _idle(ctx, 2)
-    cut = any("Vines" in str(f.get("fsm")) for f in tap.freezes[cut_from:])
-    ctx.log.append({"vines_cut": cut, "silk_after": link.state["hero"]["silk"]})
+    cut_from = len(tap.freezes)
+    cut = False
+    for attempt in range(3):
+        silk0 = link.state["hero"]["silk"]
+        _hold(ctx, mask("quickcast"), 4)
+        deadline = time.monotonic() + 1.5
+        while time.monotonic() < deadline and not cut:
+            s = _idle(ctx, 2)
+            cut = any("Vines" in str(f.get("fsm")) for f in tap.freezes[cut_from:])
+        ctx.log.append({"attempt": attempt, "vines_cut": cut, "silk_after": link.state["hero"]["silk"]})
+        if cut or link.state["hero"]["silk"] < silk0:
+            break
+        _idle(ctx, 10)
     if not cut:
         raise RuntimeError("intro: the Silkspear cast did not cut the vines")
     _idle(ctx, 20)
