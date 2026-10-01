@@ -34,28 +34,32 @@ its FSM is out of the rest states or one of its damage colliders is enabled; it 
 it armed and is followed after that instance ends until it disarms, stays out of the export for ABSENT_CLOSE_F frames
 (left the view), or tail_max_s passes. Entities armed when a fight's scan starts are ambient and never attributed.
 
-Measured on Bell Beast (trial run 20261001_121446, 2 data-policy episodes, plus the person's fight of 2026-09-30;
-the built knowledge/1.0.30000/enemies/BellBeast.json adds the closed recordings of the 20261001_122249 run):
+Measured on Bell Beast (knowledge/1.0.30000/enemies/BellBeast.json, 2026-10-01: 99 fights = the trial run
+20261001_121446 (2 data-policy episodes), the 96 episodes of the first closed recordings of run 20261001_122249, and
+the person's fight of 2026-09-30; 1.10 M frames, 17,457 s of game time; 3527 attack instances):
 - The decision chain Submerged -> Rage? -> Bell Burst? -> Choose Dir -> Set L|R -> Move Choice -> attack start runs
   within one frame after Submerged's 1.000-1.017 s. Set L / Set R name the side the boss emerges on (x 75.03 /
-  95.72; y 5.49 for the charge, 0.99 for the leap; flipX False / True) and it attacks toward the other side:
-  Set L -> mirror +1, Set R -> mirror -1. The first attack after the wake comes straight from Submerged Init (no Set
-  state; its direction comes from flipX at the anchor). Bell Burst? -> Burst Pos: 6 of 37 decisions in P1, 21 of 54
-  in P2. Rage? -> Rage Pos exactly once per fight, at boss HP 70-75 (never at >= 80).
+  95.72; y 5.49 for the charge, 0.99 for the leap; flipX False / True, every time) and it attacks toward the other
+  side: Set L -> mirror +1, Set R -> mirror -1. The first attack after the wake comes straight from Submerged Init
+  (no Set state; direction from flipX at the anchor): a charge from the right in 99 of 99 fights.
+- Choices: Bell Burst? -> Burst Pos 450 / 1568 in P1, 739 / 1761 in P2; Set L 1094 / Set R 1046; Emerge Antic C
+  1058 / L 1082; Ptn L 48 / Ptn R 51. Rage? -> Rage Pos exactly once per fight, at the first decision with boss HP
+  <= 75 (observed 60-75; no P1 attack starts at <= 75).
 - The FSM's own StateTime (fsm event t_in_prev) equals the frame-time dwell for every Control state (max difference
-  0.0 s over 30k frames).
+  0.0 s over 1.1 M frames).
 - The boss is not in "ents" (not in the HealthManager active list) from Submerged through the antic states (Emerge
-  Antic C/L, Burst Antic, Rage Pos/Antic), so the anchor is its first exported position: Charge Emerge 1.00-1.02 s,
-  Leap Out 1.00-1.02 s, Burst Out 1.20-1.22 s, Rage Burst 2.23 s after the start. The burst emerges anywhere in
-  x 81.3-91.2, unrelated to the hero (anchor - hero x p5..p95 -12.7..13.8 u).
+  Antic C/L, Burst Antic, Rage Pos/Antic), so the anchor is its first exported position: Charge Emerge and Leap Out
+  1.00-1.02 s, Burst Out 1.20-1.22 s, Rage Burst 2.2 s after the start. The burst emerges anywhere in x 81.2-91.2,
+  unrelated to the hero (anchor - hero x p5..p95 -11.3..12.5 u).
 - Boss colliders: a body box ("Boss Scene/Bone Beast" in damage events) and one poly, 7 points while charging,
   9 points while leaping ("PolyCollider", "LeapCollider"); all 2 masks, hazard ENEMY, parry bits COUNTER only.
 - AtkBell L / R (hazard; damage_hero + projectile; circle r 1.274) are launched by Fire Bells from the boss x -+ 2,
   bounce along the floor at 12 u/s and stay armed 2.6 s (p50) until they leave the export, outliving the attack.
 - DropBell L/L2/M/M2/R/R2 (hazard; damage_hero, some frames + projectile; circle r 1.274) hang at y 13.74; the
   collider is enabled from Air (falling) through Bounce Air / Submerge, 2.7 s (p50) after Position. The Rage pattern
-  (Ptn L / Ptn R) drops them in sequence; after the Rage (phase P2) Burst Out and Leap Land also drop M2, whose x
-  moves in Position, and it is still bouncing when the next attack starts.
+  (Ptn L / Ptn R) drops them in sequence; after the Rage (phase P2) Burst Out (722 of 739) and Leap Land (494 of
+  506) also drop M2, whose x moves in Position, and it is still bouncing when the next attack starts.
+- The hero ranged over x 69.5-101.7 (at Control transitions), wider than encounters.BELL_BEAST.arena_x.
 """
 import bisect
 import functools
@@ -291,6 +295,16 @@ def fight_events(fight: Fight, kinds: tuple[str, ...] = ("fsm", "damage")) -> It
                 yield ev.get("f", s["f"]), ev["k"], ev.get("d") or {}
 
 
+def static_edges(graph: dict | None) -> tuple[set[tuple[str, str]], set[str]]:
+    """(from, to) edges of an FSM graph in the oracle's RPC "fsm.graph" shape ({states: [{name, transitions
+    {event: to}}], global {event: to}}), and the targets of its global transitions."""
+    if not graph:
+        return set(), set()
+    edges = {(st["name"], to) for st in graph.get("states") or () for to in (st.get("transitions") or {}).values()
+             if to}
+    return edges, {to for to in (graph.get("global") or {}).values() if to}
+
+
 # ---- per-fight scan ----------------------------------------------------------------------------------------
 
 @dataclass(slots=True)
@@ -516,7 +530,8 @@ class FightScanner:
             if any(seg.end is None and seg.type_key in src for seg in inst.ents):
                 owner = inst
                 break
-        owner = owner or self.cur
+        # else the current attack, else one that ended this frame (the kill's own hit lands after the transition)
+        owner = owner or self.cur or next((i for i in reversed(self.done) if i.f_end == f), None)
         if owner is None:
             self.b.counters["hits outside attacks"] += 1
             self.b.loose_hits.append((self.fight, f, src, self.ctl))
@@ -684,8 +699,9 @@ class BehaviourBuilder:
     """Accumulates scanned fights into the behaviour tables and the space-time templates."""
 
     def __init__(self, spec: BehaviourSpec, cell: float = hb.CELL_U, bin_s: float = hb.BIN_S,
-                 keep_paths: bool = False):
+                 keep_paths: bool = False, fsm_graph: dict | None = None):
         self.spec, self.cell, self.bin_s, self.keep_paths = spec, cell, bin_s, keep_paths
+        self.fsm_graph = fsm_graph  # the Control FSM's static graph (oracle RPC "fsm.graph"), if dumped
         self.transitions: list[Transition] = []
         self.dwells: list[Dwell] = []
         self.instances: list[_InstSummary] = []
@@ -832,7 +848,11 @@ class BehaviourBuilder:
         kills: dict[str, Counter] = defaultdict(Counter)
         for (a, b), n in edges.items():
             (kills if b in spec.death_states else out_by)[a][b] += n
-        states = sorted({s for e in edges for s in e} | {t.to for t in self.transitions})
+        st_edges, st_global = static_edges(self.fsm_graph)
+        for a, b in st_edges - set(edges):  # in the FSM, never logged: support, and a Dirichlet outcome with n = 0
+            (kills if b in spec.death_states else out_by)[a][b] += 0
+        states = sorted({s for e in edges for s in e} | {t.to for t in self.transitions} |
+                        {s for e in st_edges for s in e})
         from_rows = {}
         edge_rows = []
         for a in sorted(set(out_by) | set(kills)):
@@ -841,14 +861,18 @@ class BehaviourBuilder:
             from_rows[a] = {"n": n, "successors": dict(out_by[a].most_common()), "worst_case": n < N_WORST,
                             "p_unseen": _r(p_unseen), "kills": dict(kills[a])}
             for b, c in out_by[a].most_common():
-                edge_rows.append({"from": a, "to": b, "n": c, "p": _r(p[b]), "p_mle": _r(c / n),
-                                  "low_n": c < N_WORST})
+                row = {"from": a, "to": b, "n": c, "p": _r(p[b]), "p_mle": _r(c / n) if n else None,
+                       "low_n": c < N_WORST}
+                if c == 0:
+                    row["static_only"] = True
+                edge_rows.append(row)
             for b, c in kills[a].items():
                 edge_rows.append({"from": a, "to": b, "n": c, "kill": True})
         starts = Counter(t.to for t in self.transitions if t.frm is None)
         return {"fsm": spec.control_fsm, "alpha": ALPHA, "n_worst": N_WORST, "states": states, "starts": dict(starts),
-                "from": from_rows, "edges": edge_rows,
-                "branching": sorted(a for a, c in out_by.items() if len(c) >= 2)}
+                "from": from_rows, "edges": edge_rows, "static_graph": self.fsm_graph is not None,
+                "global_targets": sorted(st_global),
+                "branching": sorted(a for a, c in out_by.items() if sum(1 for v in c.values() if v) >= 2)}
 
     def dwell(self) -> dict:
         by: dict[str, list[Dwell]] = defaultdict(list)
@@ -884,8 +908,9 @@ class BehaviourBuilder:
         out = {}
         for st in branching:
             trs = [t for t in self.transitions if t.frm == st and t.to not in self.spec.death_states]
-            row = {"n": len(trs), "to": dict(Counter(t.to for t in trs).most_common()), "worst_case": len(trs) < N_WORST,
-                   "boss_ref": dict(Counter(t.boss_seen for t in trs)), "dist_bins_u": list(edges)}
+            row = {"n": len(trs), "to": dict(Counter(t.to for t in trs).most_common()),
+                   "worst_case": len(trs) < N_WORST, "boss_ref": dict(Counter(t.boss_seen for t in trs)),
+                   "dist_bins_u": list(edges)}
             by_bin: dict[str, Counter] = defaultdict(Counter)
             by_side: dict[str, Counter] = defaultdict(Counter)
             by_third: dict[str, Counter] = defaultdict(Counter)
@@ -1030,6 +1055,9 @@ class BehaviourBuilder:
                 "edges_n_lt_30": [f"{e['from']} -> {e['to']} ({e['n']})" for e in graph["edges"]
                                   if e["n"] < N_WORST and not e.get("kill")],
                 "states_n_lt_30": [f"{s} ({r['n']})" for s, r in graph["from"].items() if r["worst_case"]],
+                "hero_x_at_transitions": quantiles([t.hero_x for t in self.transitions], 2),
+                "hits_outside_attacks": [{"fight": h[0], "f": h[1], "source": h[2], "control": h[3]}
+                                         for h in self.loose_hits[:20]],
                 "fights": len(self.fights), "frames": sum(f["frames"] for f in self.fights),
                 "game_s": _r(sum(f["game_s"] or 0 for f in self.fights), 1),
                 "counters": dict(self.counters.most_common())}

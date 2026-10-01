@@ -114,6 +114,7 @@ class Synth:
                              category="enemy", flip=m < 0)
             if die and j == 5:
                 self.to("Dead")
+                self.hit("Test Boss/Body")  # same frame as the kill, after the transition
                 self.idle(10)
                 return
             if j == 10:
@@ -244,7 +245,7 @@ def test_synthetic_templates_follow_the_mirrored_dash(synth):
 def test_synthetic_hits_and_entities(synth):
     b, _ = synth
     t = b.tables()
-    assert t["attacks"]["A"]["hits_taken"] == {"n": 4, "by_source": {"Test Boss/Body": 4}, "by_state": {"Dash": 4}}
+    assert t["attacks"]["A"]["hits_taken"] == {"n": 5, "by_source": {"Test Boss/Body": 5}, "by_state": {"Dash": 5}}
     assert t["attacks"]["B"]["hits_taken"]["by_state"] == {bt.TAIL: 3}
     rock = t["entities"]["Rock"]
     assert rock["armed"] == 3 and rock["armed_by_family"] == {"B": 3} and rock["armed_at_boss_state"] == {"Throw": 3}
@@ -274,6 +275,20 @@ def test_synthetic_write_and_report(synth, tmp_path):
     assert np.allclose(path[:, 2], path[:, 3])  # mirrored Set L / Set R paths coincide in the anchor frame
     text = report(tables)
     assert any(line.split()[:2] == ["A", "5"] for line in text.splitlines()) and "195 missing" in text
+
+
+def test_static_fsm_graph_adds_unlogged_edges():
+    choose = {"A": "Set L", "B": "Set R", "C": "Antic B", "D": "Antic C"}
+    graph = {"states": [{"name": "Choose", "transitions": choose},
+                        {"name": "Antic C", "transitions": {"FINISHED": "Idle"}}],
+             "global": {"DEATH": "Dead"}}
+    b = bt.BehaviourBuilder(SPEC, fsm_graph=graph)
+    b.scan_states(Synth().fight(PLAN), "synth")
+    g = b.tables()["graph"]
+    row = next(e for e in g["edges"] if e["from"] == "Choose" and e["to"] == "Antic C")
+    assert row["n"] == 0 and row["static_only"] and row["p"] == round(0.5 / (8 + 0.5 * 5), 4)
+    assert g["global_targets"] == ["Dead"] and "Antic C" in b.tables()["support_transitions"]["Choose"]
+    assert "Antic C" in b.tables()["support_transitions"] and g["branching"] == ["Choose"]
 
 
 def test_per_instance_paths_on_request():

@@ -4,7 +4,7 @@ coverage against the M2 exit target (>= 200 logged instances per A-class attack,
     cd brain
     ../scripts/uv.cmd run python -m ssbot.tools.behaviour_build C:/ssbot/data/runs/m2/<run> [<run> ...]
         [--human C:/ssbot/data/human/20260930_210337:64000:68460] [--encounter BellBeast]
-        [--out ../knowledge/1.0.30000/enemies] [--max-fights N] [--report-only] [--paths]
+        [--out ../knowledge/1.0.30000/enemies] [--max-fights N] [--report-only] [--paths] [--fsm-graph G.json]
 
 Each run contributes one fight per AttemptRecord (<run>/attempts_i*.jsonl, frames f_wake..f_end) whose recording is
 closed; recordings a live run is still writing are skipped and listed. --human SESSION:F0:F1 adds a human session's
@@ -16,6 +16,7 @@ Cost (2026-10-01, i9-13900K, one core): about 0.15 ms per STATE frame decoded an
 data episode (13k frames) and ~30 s to stream to frame 64000 of the 2.2 GB human session.
 """
 import argparse
+import json
 import sys
 import time
 from pathlib import Path
@@ -62,6 +63,9 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--max-fights", type=int, default=0, help="stop after this many fights (0 = all)")
     ap.add_argument("--report-only", action="store_true", help="do not write the knowledge files")
     ap.add_argument("--include-open", action="store_true", help="also read recordings still being written")
+    ap.add_argument("--fsm-graph", type=Path, default=None,
+                    help="the Control FSM's static graph (JSON of oracle RPC fsm.graph): never-logged edges join the "
+                         "support")
     ap.add_argument("--paths", action="store_true",
                     help="also store every instance's boss trajectory (<family>/paths; large, for analysis)")
     a = ap.parse_args(argv)
@@ -77,7 +81,8 @@ def main(argv: list[str] | None = None) -> int:
     if not fights:
         print("no fights to scan", *skipped, sep="\n  ", file=sys.stderr)
         return 1
-    b = BehaviourBuilder(SPECS[a.encounter], keep_paths=a.paths)
+    graph = json.loads(a.fsm_graph.read_text("utf-8")) if a.fsm_graph else None
+    b = BehaviourBuilder(SPECS[a.encounter], keep_paths=a.paths, fsm_graph=graph)
     t_all = time.perf_counter()
     for i, fight in enumerate(fights):
         t0 = time.perf_counter()
