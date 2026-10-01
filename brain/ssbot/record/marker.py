@@ -63,6 +63,7 @@ from typing import Any
 import cv2  # comes with windows-capture
 import numpy as np
 
+from ssbot.ipc.oracle_link import OracleError
 from ssbot.record import align
 from ssbot.record.recorder import RecordingReader
 from ssbot.record.video import MARK_STATUS, VideoReader
@@ -806,13 +807,26 @@ def monitor_against_truth(path: str | Path, rep: ExactReport, arrays: dict, p: a
 
 # ---- turning it on -------------------------------------------------------------------------------------------------
 
+def marker_screen(s: dict) -> tuple[int, int] | None:
+    """The render size STATE "mk" rect is in px of: mk "screen" (SsOracle since 2026-09-30), else cam "screen" (the
+    same Screen size); None when neither is known."""
+    for v in ((s.get("mk") or {}).get("screen"), (s.get("cam") or {}).get("screen")):
+        if isinstance(v, (list, tuple)) and len(v) == 2 and all(isinstance(x, (int, float)) and x > 0 for x in v):
+            return int(v[0]), int(v[1])
+    return None
+
+
 def marker_on(link, timeout_s: float = 5.0) -> dict:
-    """Turn the frame marker on for a training session (RPC frame.marker in mask.CORNER) and wait until a STATE says
-    it was drawn. It must be the marker the mask covers and the capture path decodes (mask.marker_rect of the client,
-    STATE cam.screen): the oracle draws its default cell, which an older SsOracle sets larger (screen height / 60),
-    so a STATE with another rect gets the cell sent explicitly, which it then keeps until the marker goes off (it does
-    not follow a resize). Returns the RPC reply, with "resent" when the cell had to be sent. Raises OracleError when
-    the oracle refuses (profile without probe tools, -ssbot-human), TimeoutError when no STATE shows the marker."""
+    """Turn the frame marker on for a recorded session (RPC frame.marker in mask.CORNER) and wait until a STATE says
+    it was drawn where the mask covers it and the capture path decodes it: mask.marker_rect of the render size
+    (marker_screen: STATE mk.screen, else cam.screen; a STATE without either does not count, so the check is never
+    skipped). The oracle draws its default cell, which an older SsOracle sets larger (screen height / 60), so a STATE
+    with another rect gets the cell sent explicitly, which it then keeps until the marker goes off (it does not follow
+    a resize: the capture path's guard, ssbot.record.video, blanks and flags a marker outside the mask). Returns the
+    RPC reply with "screen" and "rect" (as checked) and "resent" when the cell had to be sent. Raises OracleError when
+    the oracle refuses (profile without probe tools; SsOracle before 2026-09-30 also under -ssbot-human), TimeoutError
+    when no STATE shows the marker in place. On any failure after the oracle accepted the RPC (also an interrupt) it
+    turns the marker off again before raising, so a session that goes on unmarked never carries a drawn marker."""
     def drawn(s: dict) -> bool:
         return (s.get("mk") or {}).get("drawn") is True
 
@@ -820,15 +834,21 @@ def marker_on(link, timeout_s: float = 5.0) -> dict:
         return [float(v) for v in (s["mk"].get("rect") or ())]
 
     res = link.rpc("frame.marker", on=True, corner=vmask.CORNER)
-    s = link.wait_state(drawn, timeout_s=timeout_s)
-    screen = (s.get("cam") or {}).get("screen")
-    if screen and screen[0] and screen[1]:
-        w, h = int(screen[0]), int(screen[1])
+    try:
+        s = link.wait_state(lambda s: drawn(s) and marker_screen(s) is not None, timeout_s=timeout_s)
+        w, h = marker_screen(s)
         want = [float(v) for v in vmask.marker_rect(w, h)]
         if rect(s) != want:
             res = dict(link.rpc("frame.marker", on=True, corner=vmask.CORNER, size=vmask.cell_px(h)) or {})
             res["resent"] = True
-            link.wait_state(lambda s: drawn(s) and rect(s) == want, timeout_s=timeout_s)
+            link.wait_state(lambda s: drawn(s) and marker_screen(s) == (w, h) and rect(s) == want, timeout_s=timeout_s)
+        res = dict(res or {}, screen=[w, h], rect=want)
+    except BaseException:
+        try:
+            marker_off(link)
+        except (OracleError, TimeoutError, OSError):  # it goes off when the link closes anyway
+            pass
+        raise
     return res
 
 

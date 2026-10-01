@@ -643,8 +643,8 @@ class Worker:
 
     def turn_marker_on(self) -> None:
         """The frame marker on, as in every training session (ssbot.record.marker.marker_on); one "marker" line. A
-        refusal (a profile without probe tools, -ssbot-human) or a marker no STATE shows is logged, not fatal: the
-        soak does not depend on it."""
+        refusal (a profile without probe tools) or a marker no STATE shows in place is logged, not fatal: the soak
+        does not depend on it (marker_on has turned such a marker off again)."""
         from ssbot.record.marker import marker_on
 
         try:

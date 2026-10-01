@@ -506,6 +506,9 @@ def test_worker_takes_no_savestate_without_the_grant(tmp_path, monkeypatch, ok):
 
 # ---- the frame marker: on in every worker, as in every training session -------------------------------------------
 
+# STATE "mk" of the default marker on a 1280x720 render, as SsOracle reports it.
+MK_720 = {"drawn": True, "corner": "tr", "cell": 3, "rect": [1235.0, 3.0, 1277.0, 15.0], "screen": [1280, 720]}
+
 def test_frame_stats_count_marked_frames():
     st = S.FrameStats()
     for f, mk in enumerate([None, {"drawn": True}, {"drawn": False}, {"drawn": True}], 1):
@@ -515,14 +518,15 @@ def test_frame_stats_count_marked_frames():
 
 def test_worker_turns_the_marker_on_and_survives_a_refusal(tmp_path):
     w = worker(tmp_path, None, 1)
-    drawn = standing(9) | {"mk": {"drawn": True, "corner": "tr", "cell": 3}}
+    drawn = standing(9) | {"mk": MK_720}
     w.link = FakeLink(drawn, None)
     w.turn_marker_on()
     w.link = FakeLink(standing(9), None)
     w.link.answers["frame.marker"] = S.OracleError("-ssbot-human: a person's session is recorded without the marker")
     w.turn_marker_on()
-    w.link = FakeLink(standing(9), None)                     # accepted, but no STATE shows it
+    w.link = FakeLink(standing(9), None)                     # accepted, but no STATE shows it: turned off again
     w.turn_marker_on()
+    assert [(n, a.get("on")) for n, a in w.link.calls] == [("frame.marker", True), ("frame.marker", False)]
     w.log.close()
     lines = [x for x in log_lines(tmp_path) if x["kind"] == "marker"]
     assert [(x["on"], x.get("cell")) for x in lines] == [(True, 3), (False, None), (False, None)]
@@ -531,7 +535,7 @@ def test_worker_turns_the_marker_on_and_survives_a_refusal(tmp_path):
 
 @pytest.mark.parametrize("no_marker", [False, True])
 def test_worker_run_turns_the_marker_on_after_entering_gameplay(tmp_path, monkeypatch, no_marker):
-    link = FakeLink(standing(7) | {"mk": {"drawn": True}}, None, rpcs=())
+    link = FakeLink(standing(7) | {"mk": MK_720}, None, rpcs=())
     order = []
     monkeypatch.setattr(S, "OracleLink", lambda instance, connect_timeout_s: link)
     monkeypatch.setattr(S.Worker, "enter_gameplay", lambda self: order.append("gameplay"))

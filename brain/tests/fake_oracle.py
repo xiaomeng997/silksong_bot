@@ -79,7 +79,8 @@ class FakeOracle:
                         args = payload.get("args") or {}
                         cell = args.get("size") or vmask.cell_px(720)
                         self.mk = {"drawn": True, "corner": "tr", "cell": cell, "grid": [2, 12], "us": 1.0,
-                                   "rect": [float(v) for v in vmask.marker_rect(1280, 720, "tr", cell)]} \
+                                   "rect": [float(v) for v in vmask.marker_rect(1280, 720, "tr", cell)],
+                                   "screen": [1280, 720]} \
                             if args.get("on") else None
                         res = {"id": payload["id"], "ok": True, "result": {"on": self.mk is not None, "corner": "tr",
                                                                             "cell": cell}}

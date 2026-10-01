@@ -461,10 +461,14 @@ def test_undecodable_marker_next_to_a_dropped_state_counts_against_the_share():
 # ---- turning it on ------------------------------------------------------------------------------------------------
 
 class MarkerLink:
-    """OracleLink for marker_on: the oracle's default cell is `default` (SsOracle before 2026-09-30: height / 60)."""
+    """OracleLink for marker_on: the oracle's default cell is `default` (SsOracle before 2026-09-30: height / 60).
+    screen_in: where STATE gives the render size ("mk": mk.screen, "cam": cam.screen only, as before 2026-09-30, or
+    None); draws=False: no STATE ever shows the marker drawn; obeys=False: an explicit cell is ignored."""
 
-    def __init__(self, default=vmask.cell_px, refuse: str | None = None, screen=(1280, 720)):
+    def __init__(self, default=vmask.cell_px, refuse: str | None = None, screen=(1280, 720), screen_in="mk",
+                 draws=True, obeys=True):
         self.default, self.refuse, self.screen = default, refuse, screen
+        self.screen_in, self.draws, self.obeys = screen_in, draws, obeys
         self.calls = []
         self.cell = None
 
@@ -472,16 +476,19 @@ class MarkerLink:
         self.calls.append((name, args))
         if self.refuse and args.get("on"):
             raise OracleError(self.refuse)
-        self.cell = (args.get("size") or self.default(self.screen[1])) if args.get("on") else None
+        size = args.get("size") if self.obeys else None
+        self.cell = (size or self.default(self.screen[1])) if args.get("on") else None
         return {"on": bool(args.get("on")), "corner": "tr", "cell": self.cell}
 
     def wait_state(self, pred=lambda s: True, timeout_s=10.0, newer_than=None):
         w, h = self.screen
         mk_ = None
         if self.cell:
-            mk_ = {"drawn": True, "corner": "tr", "cell": self.cell, "grid": [2, 12],
+            mk_ = {"drawn": self.draws, "corner": "tr", "cell": self.cell, "grid": [2, 12],
                    "rect": [float(v) for v in vmask.marker_rect(w, h, "tr", self.cell)]}
-        s = {"f": 100, "cam": {"screen": [float(w), float(h)]}, "mk": mk_}
+            if self.screen_in == "mk":
+                mk_["screen"] = [w, h]
+        s = {"f": 100, "cam": {"screen": [float(w), float(h)]} if self.screen_in == "cam" else None, "mk": mk_}
         if not pred(s):
             raise TimeoutError("condition not met")
         return s
@@ -491,11 +498,37 @@ def test_marker_on_draws_the_masks_marker():
     link = MarkerLink()
     res = mk.marker_on(link)
     assert link.calls == [("frame.marker", {"on": True, "corner": "tr"})] and res["cell"] == 3 and "resent" not in res
-    # An older plugin draws its larger default: the mask's cell is sent explicitly.
-    old = MarkerLink(default=lambda h: max(4, round(h / 60)), screen=(1920, 1080))
+    assert res["screen"] == [1280, 720] and res["rect"] == [1235.0, 3.0, 1277.0, 15.0]
+    # An older plugin draws its larger default, and gives the render size only in cam: the mask's cell is sent.
+    old = MarkerLink(default=lambda h: max(4, round(h / 60)), screen=(1920, 1080), screen_in="cam")
     res = mk.marker_on(old)
     assert old.calls == [("frame.marker", {"on": True, "corner": "tr"}),
                          ("frame.marker", {"on": True, "corner": "tr", "size": 4})] and res["resent"]
     assert mk.marker_off(old) == {"on": False, "corner": "tr", "cell": None}
     with pytest.raises(OracleError, match="ssbot-human"):
         mk.marker_on(MarkerLink(refuse="-ssbot-human: a person's session is recorded without the marker"))
+    assert mk.marker_screen({"mk": {"screen": [0, 0]}, "cam": {"screen": [1280.0, 720.0]}}) == (1280, 720)
+    assert mk.marker_screen({"mk": {"rect": [1, 2, 3, 4]}, "cam": None}) is None
+
+
+@pytest.mark.parametrize("why", ["never drawn", "no render size", "cell ignored"])
+def test_marker_on_turns_the_marker_off_when_it_fails(why):
+    """Once the oracle accepted frame.marker, any failure turns it off again: a session declared unmarked never
+    carries a drawn marker (no STATE shows it drawn; no STATE says the render size, so its rect cannot be checked;
+    an older plugin that ignores the explicit cell keeps its large marker)."""
+    link = {"never drawn": lambda: MarkerLink(draws=False),
+            "no render size": lambda: MarkerLink(screen_in=None),
+            "cell ignored": lambda: MarkerLink(default=lambda h: max(4, round(h / 60)), obeys=False)}[why]()
+    with pytest.raises(TimeoutError):
+        mk.marker_on(link)
+    assert link.calls[0] == ("frame.marker", {"on": True, "corner": "tr"})
+    assert link.calls[-1] == ("frame.marker", {"on": False}) and link.cell is None
+
+    class Interrupted(MarkerLink):
+        def wait_state(self, *a, **k):
+            raise KeyboardInterrupt
+
+    link = Interrupted()
+    with pytest.raises(KeyboardInterrupt):
+        mk.marker_on(link)
+    assert link.calls[-1] == ("frame.marker", {"on": False})
