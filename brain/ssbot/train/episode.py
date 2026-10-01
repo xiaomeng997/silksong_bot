@@ -139,6 +139,30 @@ def _rand(link: OracleLink, **args) -> dict:
     return {k: r.get(k) for k in ("seed", "hp", "silk", "dx", "facing", "wait_frames")} if isinstance(r, dict) else r
 
 
+def wait_settled(link: OracleLink, scene: str, still_frames: int = 10, tol_u: float = 0.01,
+                 timeout_s: float = 20.0) -> dict:
+    """The first STATE after a savestate load from which the hero stays put for `still_frames` frames, in `scene`,
+    accepting input. hero_accepting_input alone is not enough: after a load the game can still be moving the hero
+    for a while with velocity 0 and can.cast true (2026-10-01, first Bell Beast data run: 17 frames sliding from x 88.3
+    back to the savestate's 78.0 at 0.63 u/frame), and a Silkspear pressed then was ignored (4 of 85 intros)."""
+    deadline = time.monotonic() + timeout_s
+    last = link.frame
+    anchor, still = None, 0
+    while time.monotonic() < deadline:
+        s = link.wait_state(newer_than=last, timeout_s=2.0)
+        last = s["f"]
+        ok = (s.get("game") or {}).get("scene") == scene and s["hero"]["hero_accepting_input"]
+        x, y = s["hero"]["pos"][0], s["hero"]["pos"][1]
+        if ok and anchor is not None and abs(x - anchor[0]) <= tol_u and abs(y - anchor[1]) <= tol_u:
+            still += 1
+            if still >= still_frames:
+                return s
+        else:
+            still = 0
+        anchor = (x, y) if ok else None
+    raise TimeoutError(f"hero not settled in {scene} within {timeout_s} s")
+
+
 def boss_entity(s: dict, boss_type: str) -> dict | None:
     for e in s.get("ents") or ():
         if e["type_key"] == boss_type:
@@ -180,8 +204,7 @@ def _run(link: OracleLink, enc: Encounter, tap: FightTap, policy, cfg: EpisodeCo
     else:
         raise RuntimeError(f"savestate.load failed 3 times: {errors}")
     tap.reset()
-    s = link.wait_state(lambda s: (s.get("game") or {}).get("scene") == enc.scene
-                        and s["hero"]["hero_accepting_input"], timeout_s=20)
+    s = wait_settled(link, enc.scene)
     rec.f_reset = s["f"]
     _rand(link, seed=cfg.seed, wait_frames=[0, 10])
     ctx = Ctx(link=link, tap=tap)

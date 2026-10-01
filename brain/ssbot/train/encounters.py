@@ -90,8 +90,10 @@ def bell_beast_intro(ctx: Ctx) -> int:
     s = _idle(ctx, 8)
     if s["hero"]["silk"] < 4:
         raise RuntimeError(f"intro: silk {s['hero']['silk']} < 4, cannot cut the vines")
-    # The cast is held inside the per-frame loop: a one-shot press next to the loop's per-frame releases can be
-    # overridden by them (5 % of the first data run's intros never cast: silk stayed 9). Retried while silk is unspent.
+    # 4 of the first data run's 85 intros never cast (silk stayed 9): the load was still sliding the hero back to the
+    # savestate's x, so the walk ended at once and the press came while the game was moving her (the episode now
+    # waits for the hero to settle first, ssbot.train.episode.wait_settled). The cast locks her for ~73 frames
+    # (1.2 s); a press that is eaten anyway is retried while silk is unspent.
     link = ctx.link
     cut_from = len(tap.freezes)
     cut = False
