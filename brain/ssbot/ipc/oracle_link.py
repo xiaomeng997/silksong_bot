@@ -43,6 +43,7 @@ class OracleLink:
         self._state_cv = threading.Condition()
         self._state: dict | None = None
         self._raw_subscribers: list[Callable[[int, bytes], None]] = []
+        self._state_subscribers: list[Callable[[dict], None]] = []
         self.hello: dict | None = None
         self._hello_event = threading.Event()
         self.closed = False
@@ -61,6 +62,11 @@ class OracleLink:
     def subscribe_raw(self, fn: Callable[[int, bytes], None]) -> None:
         """fn(msg_type, whole_frame_bytes) for every STATE/TERRAIN/PROGRESS message, on the reader thread."""
         self._raw_subscribers.append(fn)
+
+    def subscribe_state(self, fn: Callable[[dict], None]) -> None:
+        """fn(state) for every decoded STATE, in order, on the reader thread (keep it short: it delays the reader).
+        Unlike `state`/wait_state, which only see the latest STATE, no frame and so no event ("ev") is skipped."""
+        self._state_subscribers.append(fn)
 
     def _recv_exact(self, n: int) -> bytes:
         buf = bytearray()
@@ -86,6 +92,8 @@ class OracleLink:
                         fn(msg_type, head + body)
                 if msg_type == MsgType.STATE:
                     state = msgpack.unpackb(payload, raw=False, strict_map_key=False)
+                    for fn in self._state_subscribers:
+                        fn(state)
                     with self._state_cv:
                         self._state = state
                         self._state_cv.notify_all()
