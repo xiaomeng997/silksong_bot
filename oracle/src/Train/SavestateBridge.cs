@@ -37,6 +37,18 @@ namespace SsOracle.Train
         private const double PreLoadWaitS = 5;
         private const int HeroInputGraceFrames = 30;
 
+        /// <summary>
+        /// Every DebugMod savestate load leaves two unreferenced material instances behind ("Sprites-Default (Instance)"
+        /// and "Cherry-Sprites-Default (Instance)", made by Renderer.material in the reloaded scene), about 100 KB each of
+        /// private memory: about +21 MB per 100 loads, +35 MB/h per instance in the M1 soak (probes/mem_growth,
+        /// 2026-09-30). The game frees such assets on its own scene transitions; DebugMod's load path does not. So every
+        /// UnloadEvery loads the load step also runs Resources.UnloadUnusedAssets and waits for it, inside the reset (no
+        /// brain input runs then), which freed all of them in game.
+        /// </summary>
+        private const int UnloadEvery = 25;
+        private const double UnloadTimeoutS = 5;
+        private static int loadsSinceUnload;
+
         private static readonly Regex NamePattern = new Regex(@"^[A-Za-z0-9][A-Za-z0-9_.\-]{0,79}$");
         private static readonly Regex DmPattern = new Regex(@"^dm:(\d+)/(\d)$");
         private static readonly Regex ScenePattern = new Regex("\"saveScene\"\\s*:\\s*\"([^\"]*)\"");
@@ -216,6 +228,17 @@ namespace SsOracle.Train
                 yield return null;
             }
 
+            long unloadMs = -1;
+            if (++loadsSinceUnload >= UnloadEvery)
+            {
+                loadsSinceUnload = 0;
+                var t0 = op.Clock.ElapsedMilliseconds;
+                var unload = Resources.UnloadUnusedAssets();
+                while (!unload.isDone && (op.Clock.ElapsedMilliseconds - t0) < UnloadTimeoutS * 1000)
+                    yield return null;
+                unloadMs = op.Clock.ElapsedMilliseconds - t0;
+            }
+
             var gm = GameManager._instance;
             var hero = HeroController.UnsafeInstance;
             if (gm == null || hero == null)
@@ -234,6 +257,7 @@ namespace SsOracle.Train
                 ["ms"] = ms,
                 ["dm_ms"] = dmMs,
                 ["settle_ms"] = ms - startMs - dmMs,
+                ["unload_ms"] = unloadMs,                   // -1: no unused-asset unload on this load
                 ["frames"] = Time.frameCount - op.StartFrame,
                 ["frame"] = (long)Time.frameCount,
                 ["pos"] = hero.transform.position,

@@ -6,7 +6,7 @@ using UnityEngine.Profiling;
 namespace SsOracle.Core
 {
     /// <summary>
-    /// RPC "mem.stats" {objects=false, gc=false}: where this process's memory is, to attribute the slow growth the M1 soak saw
+    /// RPC "mem.stats" {objects=false, gc=false, unload=false}: where this process's memory is, to attribute the slow growth the M1 soak saw
     /// (private bytes about +35 MB/h per instance at about 730 savestate loads/h, 2026-09-30). Managed heap and GC
     /// counts, Unity's allocator totals, the sizes of the oracle's own per-scene caches, and with objects=true the number
     /// of loaded Unity objects per type (Resources.FindObjectsOfTypeAll: slow, tens of ms; never per frame). Read-only.
@@ -44,6 +44,10 @@ namespace SsOracle.Core
 
         private static object Describe(Dictionary<string, object> args)
         {
+            // unload=true: start Resources.UnloadUnusedAssets (asynchronous; sample again a second later to see what it
+            // freed). The game does this on its own scene transitions; a DebugMod savestate load may not.
+            if (args.ContainsKey("unload") && Ipc.Rpc.Bool(args, "unload"))
+                Resources.UnloadUnusedAssets();
             // gc=true: a full collection first, so managed growth that survives it is retained, not garbage not yet
             // collected (one hitch of some ms; a probe tool, not for play).
             if (args.ContainsKey("gc") && Ipc.Rpc.Bool(args, "gc"))
@@ -78,6 +82,20 @@ namespace SsOracle.Core
                     counts[t.Name] = (long)Resources.FindObjectsOfTypeAll(t).Length;
                 counts["Object"] = (long)Resources.FindObjectsOfTypeAll(typeof(UnityEngine.Object)).Length;
                 d["objects"] = counts;
+                // The most common Material names (an instance made by Renderer.material is named "<shared> (Instance)"):
+                // which component makes the materials that pile up.
+                var names = new Dictionary<string, long>();
+                foreach (var m in Resources.FindObjectsOfTypeAll(typeof(Material)))
+                {
+                    var n = m.name ?? "";
+                    names[n] = names.TryGetValue(n, out var c) ? c + 1 : 1;
+                }
+                var top = new List<KeyValuePair<string, long>>(names);
+                top.Sort((a, b) => b.Value.CompareTo(a.Value));
+                var materials = new Dictionary<string, object>();
+                for (var i = 0; i < top.Count && i < 15; i++)
+                    materials[top[i].Key] = top[i].Value;
+                d["materials_top"] = materials;
                 d["objects_ms"] = (System.Diagnostics.Stopwatch.GetTimestamp() - t0) * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
             }
             return d;
