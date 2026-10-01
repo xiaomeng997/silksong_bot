@@ -6,6 +6,7 @@ label gate and the exact report on synthetic timestamp streams with known offset
 episodes with the marker read in the capture path (and in thumbnails, as before), against which the correlation
 monitor (ssbot.record.align) is scored, and marker_on."""
 import json
+from dataclasses import replace
 
 import cv2
 import numpy as np
@@ -347,6 +348,34 @@ def test_label_sources_marker_else_timestamp():
     assert mk.capture_labels(blind).summary()["none"] == 500
     ts = mk.capture_labels(blind, D_ms=(D_TRUE + FRAME_CLOCK) / MS).summary()
     assert ts["timestamp"] == 500 and ts["marker_share"] == 0.0
+
+
+def test_implausible_markers_fall_back_to_their_timestamp_label():
+    """Something drawn over the data cells alone can pass the 4-bit crc as another frame. A decoded marker more than
+    max_offset frames from its capture's timestamp label, or outside the session's STATE frame range, is rejected
+    ("implausible"): the capture falls back to its timestamp label, and the gate counts it as missing. Captures one
+    frame late (offset -1) and up to max_offset off stay marker labels."""
+    tr, _, shown = _stream(n=2000, stale={50})
+    wrong = {300: 12345, 900: -777, 1500: 4, 1990: 40}   # decoded - shown frame (1990: past the last STATE)
+    near = {1200: 3, 1700: -2}                             # within max_offset: a plausible marker
+    value = tr.value.copy()
+    for i, d in (wrong | near).items():
+        value[i] = (shown[i] + d) % mk.MODULUS
+    bad = replace(tr, value=value)
+    lb = mk.capture_labels(bad)
+    src = np.asarray(mk.LABEL_SOURCES)[lb.source]
+    assert set(np.flatnonzero(src == "timestamp")) == set(wrong) and src[50] == "marker"
+    assert all(lb.frame[i] == shown[i] + d for i, d in near.items())
+    clean = mk.reject_implausible(bad)
+    assert set(np.flatnonzero(clean.status == mk.IMPLAUSIBLE)) == set(wrong)
+    assert (clean.value[list(wrong)] == -1).all()
+    assert mk.reject_implausible(tr) is tr                        # nothing to reject: the same truth
+    # A fixed D (one frame late labels) moves the window with it: offsets are judged against those labels.
+    D = int(round(mk.exact(tr)[0].primary.D_ms * 1e6))
+    assert set(np.flatnonzero(mk.reject_implausible(bad, D=D).status == mk.IMPLAUSIBLE)) == set(wrong)
+    rep_, _ = mk.exact(bad)
+    assert rep_.decode["implausible"] == len(wrong) and rep_.gate.missing_by == {"implausible": len(wrong)}
+    assert rep_.gate.missing == len(wrong) and rep_.labels["timestamp"] == len(wrong) and rep_.labels["none"] == 0
 
 
 # ---- synthetic episodes with the marker drawn ----------------------------------------------------------------------

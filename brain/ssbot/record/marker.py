@@ -35,13 +35,17 @@ thumbnail px, each cell the mean of 3 x 3 bilinear samples over its inner 40 %. 
 border and the black sync cells give the black level, the white sync cells the white level; the pattern is "absent"
 unless every border and sync cell lies on its side of the middle by a quarter of the contrast (and the contrast is
 >= MIN_CONTRAST), "unclear" if a data cell does not, "check" if the crc fails. A capture shows the frame its marker
-says (a wrong frame would need a clean pattern of another frame, i.e. the image of that frame), so a decoded marker
-is the capture's exact label. The 16 bits are unwrapped to the frame nearest a reference (the timestamp label).
+says: a wrong frame needs a clean pattern of another frame, i.e. the image of that frame, or something drawn over
+the data cells alone that the 4-bit crc lets through (synthetic occluders over the data cells: ~2 % of the "ok"
+decodes, frames thousands off). So a decoded marker becomes the capture's exact label only when it is plausible
+(reject_implausible): within max_offset frames (align.Params, 3) of the capture's timestamp label and inside the
+session's STATE frame range; otherwise its status is "implausible" and the capture falls back to its timestamp label.
+The 16 bits are unwrapped to the frame nearest a reference (the STATE frame that ended just before the capture).
 
-Labels (capture_labels): the decoded frame where the marker decoded (label_source "marker"); otherwise the timestamp
-label, align.match with D calibrated on the decoded captures (label_source "timestamp", flagged: the 2026-09-30
-in-game run had only 95.8 % of the timestamp labels right, probes.md); "none" without either. Sessions without the
-marker (a person's play) have timestamp labels only.
+Labels (capture_labels): the decoded frame where the marker decoded and is plausible (label_source "marker"); otherwise
+the timestamp label, align.match with D calibrated on the decoded captures (label_source "timestamp", flagged: the
+2026-09-30 in-game run had only 95.8 % of the timestamp labels right, probes.md); "none" without either. Sessions
+without the marker (a person's play) have timestamp labels only.
 
 The exact report (exact). The gate (LabelGate): the share of the judged captures that carry a marker label, judged =
 counted captures (labelled, whose label's next frame has a STATE, as in the monitor) around whose label the marker
@@ -60,7 +64,7 @@ monitor (ssbot.record.align) with the truth capture by capture.
 import argparse
 import json
 import sys
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -343,7 +347,8 @@ def unwrap(value: int, ref: int) -> int:
 
 # ---- the episode's truth -------------------------------------------------------------------------------------------
 
-DECODE_STATUS = MARK_STATUS     # ok, absent, unclear, check, no_geometry, off (not read in the capture path)
+# ok, absent, unclear, check, no_geometry, off (not read in the capture path), implausible (reject_implausible)
+DECODE_STATUS = MARK_STATUS
 
 
 @dataclass
@@ -624,6 +629,36 @@ def _calibrate(tr: Truth, t_cap: np.ndarray, grow: np.ndarray) -> align.Sweep:
     return align.agree_interval(t_cap[sel], grow[sel], tr.t_eof)
 
 
+IMPLAUSIBLE = DECODE_STATUS.index("implausible")
+
+
+def _clock(tr: Truth, clock: str) -> np.ndarray:
+    return tr.t_arrival if clock == "arrival" else tr.t_frame
+
+
+def reject_implausible(tr: Truth, clock: str = align.GATE_CLOCK, D: int | None = None,
+                       max_offset: int = align.Params.max_offset) -> Truth:
+    """The truth without decoded markers that cannot be their capture's frame: more than max_offset frames from the
+    capture's timestamp label (align.match on `clock` with D ns; D None: calibrated on the decoded captures, which
+    agree_interval makes robust to a few wrong ones), or outside the session's STATE frame range. Those get value -1
+    and status "implausible", so their label falls back to the timestamp label and the gate counts them as missing.
+    Returns tr itself when nothing is rejected."""
+    t_cap = _clock(tr, clock)
+    if not len(tr.f) or not (tr.value >= 0).any():
+        return tr
+    g = truth_frames(tr, t_cap)
+    ok = g >= 0
+    bad = ok & ((g < tr.f[0]) | (g > tr.f[-1]))
+    if D is None and not (clock == "frame" and (t_cap == 0).any()):
+        D = _calibrate(tr, t_cap, _rows(tr, np.where(bad, -1, g))[1]).D
+    if D is not None:
+        L = align.match(t_cap, tr.t_eof, D)
+        bad |= ok & (L >= 0) & (np.abs(g - tr.f[np.clip(L, 0, None)]) > max_offset)
+    if not bad.any():
+        return tr
+    return replace(tr, value=np.where(bad, -1, tr.value), status=np.where(bad, IMPLAUSIBLE, tr.status))
+
+
 def _verdict(judged: int, good: int, counted: int, marker_off: int, threshold: float, min_captures: int
              ) -> tuple[str, bool, str]:
     """(verdict, ok, reason) of good / judged; the reason of a plain FAIL is the caller's."""
@@ -754,17 +789,20 @@ class Labels:
                 "D_ms": None if self.D_ms is None else round(self.D_ms, 3)}
 
 
-def capture_labels(tr: Truth, clock: str = align.GATE_CLOCK, D_ms: float | None = None) -> Labels:
-    """The label of every capture: its decoded marker where it has one (exact), else its timestamp label
-    (align.match on `clock` with D_ms, or with D calibrated on the decoded captures), flagged as such; none when
-    neither exists (no decoded capture to calibrate on and no D_ms, or a capture before the first STATE)."""
-    t_cap = tr.t_arrival if clock == "arrival" else tr.t_frame
+def capture_labels(tr: Truth, clock: str = align.GATE_CLOCK, D_ms: float | None = None,
+                   max_offset: int = align.Params.max_offset) -> Labels:
+    """The label of every capture: its decoded marker where it has one and it is plausible (exact;
+    reject_implausible), else its timestamp label (align.match on `clock` with D_ms, or with D calibrated on the
+    decoded captures), flagged as such; none when neither exists (no decoded capture to calibrate on and no D_ms, or
+    a capture before the first STATE)."""
+    t_cap = _clock(tr, clock)
     N = len(t_cap)
     frame, source = np.full(N, -1, np.int64), np.full(N, NO_LABEL, np.int64)
     if N == 0 or len(tr.f) == 0:
         return Labels(tr.seq, frame, source, clock, D_ms)
-    g = truth_frames(tr, t_cap)
     D = None if D_ms is None else int(round(D_ms * 1e6))
+    tr = reject_implausible(tr, clock, D, max_offset)
+    g = truth_frames(tr, t_cap)
     if D is None and (g >= 0).any():
         D = _calibrate(tr, t_cap, _rows(tr, g)[1]).D
     if D is not None:
@@ -779,12 +817,14 @@ def capture_labels(tr: Truth, clock: str = align.GATE_CLOCK, D_ms: float | None 
 def exact(tr: Truth, clock: str = align.GATE_CLOCK, *, D_ms: float | None = None,
           threshold: float = THRESHOLD, min_captures: int = 1000) -> tuple[ExactReport, dict]:
     """The exact report: the label gate, the per-capture label sources, the timestamp labels on the gate clock and,
-    when D is calibrated, on the other clock as a cross-check."""
+    when D is calibrated, on the other clock as a cross-check. Implausible markers (reject_implausible, on the gate
+    clock) are left out of the truth first: they count as missing ("implausible" in the decode statuses)."""
+    D = None if D_ms is None else int(round(D_ms * 1e6))
+    tr = reject_implausible(tr, clock, D)
     rep = ExactReport(captures=len(tr.seq), states=len(tr.f), marker_frames=int(tr.drawn.sum()),
                       threshold=threshold, min_captures=min_captures, decoded_in_capture=tr.in_capture)
     rep.seq_gaps = int(np.clip(np.diff(tr.seq) - 1, 0, None).sum()) if len(tr.seq) > 1 else 0
     rep.decode = {DECODE_STATUS[s]: n for s, n in _hist(tr.status).items()}
-    D = None if D_ms is None else int(round(D_ms * 1e6))
     rep.primary, arrays = exact_clock(tr, clock, D=D, threshold=threshold, min_captures=min_captures)
     rep.gate = label_gate(rep.primary, threshold, min_captures)
     rep.labels = capture_labels(tr, clock, rep.primary.D_ms).summary()

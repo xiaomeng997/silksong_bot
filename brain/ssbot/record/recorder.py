@@ -501,8 +501,8 @@ class ContinuityReport:
             return ("no video in this episode; an image of these frames is training data only through the vision mask "
                     "(ssbot.vision.mask) and only where the marker lies inside it")
         if not lb.get("masked"):
-            return ("the video is unmasked (format 1 or mask off): its thumbnails hold the marker, VALIDATION data only, "
-                    "never training data")
+            return ("the video is unmasked (format 1 or mask off): its thumbnails hold the marker, VALIDATION data "
+                    "only, never training data")
         if lb.get("mask_mismatch"):
             return (f"NOT training data: {lb['mask_mismatch']} captures had the marker outside the vision mask "
                     f"(blanked too, mask_mismatch)")
@@ -529,7 +529,8 @@ class ContinuityReport:
             share = f"{lb['share'] * 100:.3f} %" if lb["share"] is not None else "n/a"
             lines.append(f"video {lb['captures']} captures: marker labels {lb['marker']} ({share}), timestamp labels "
                          f"{lb['timestamp']}{'' if lb['decoded_in_capture'] else ' (marker not read in the capture path)'};"
-                         f" decode {lb['decode']}; masked {lb.get('masked')}, mask_mismatch {lb.get('mask_mismatch', 0)}")
+                         f" decode {lb['decode']}; masked {lb.get('masked')}, mask_mismatch "
+                         f"{lb.get('mask_mismatch', 0)}")
         if self.gaps:
             shown = ", ".join(f"{a + 1}..{b - 1}" for a, b in self.gaps[:10])
             lines.append(f"first gaps: {shown}{' ...' if len(self.gaps) > 10 else ''}")

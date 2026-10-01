@@ -48,11 +48,11 @@ hold the marker in their thumbnails and are validation data only)
     mk, mks      the marker read from the full-resolution crop: frame modulo 65536 (-1 unless mks is "ok"), status
     mm           1 when a marker rect the oracle reported lay outside the mask: filled as well, not training data
 
-Cost at the default width 320 (1280x720 client): the callback ~0.35 ms p50 (cvtColor + resize), of which reading
-the marker and filling the mask take ~0.03 ms (1080p: ~0.06 of ~0.9 ms; a capture without a marker, which runs the
-search, ~0.25 ms; the mask guard adds ~0.005-0.01 ms; tests/test_video.py measures them), 57.6 KB per frame raw, ~1.5-2 MB/s on disk at 60 fps after zstd
-level 1 (~3 ms per 60-frame chunk on the writer thread): 4 instances are fine for alignment runs of minutes. Lower
-`width` for long sessions.
+Cost at the default width 320 (1280x720 client): the callback ~0.35 ms p50 (cvtColor + resize), of which reading the
+marker and filling the mask take ~0.03 ms (1080p: ~0.06 of ~0.9 ms; a capture without a marker, which runs the search,
+~0.25 ms; the mask guard adds ~0.005-0.01 ms; tests/test_video.py measures them), 57.6 KB per frame raw, ~1.5-2 MB/s on
+disk at 60 fps after zstd level 1 (~3 ms per 60-frame chunk on the writer thread): 4 instances are fine for alignment
+runs of minutes. Lower `width` for long sessions.
 
     rec = Recorder(link, profile="PROBE", episode="align_0001").start()
     marker_on(link)                                  # ssbot.record.marker: training sessions carry the marker
@@ -93,8 +93,9 @@ GUARD_NS = 500_000_000   # a marker rect a STATE reported is checked against the
 CHUNK_FRAMES = 60
 DEFAULT_WIDTH = 320
 # Per-capture marker status (FRAME_HEAD / index "mks"): ssbot.record.marker's decode statuses, and "off": not read in
-# the capture path (marker=False, or a format-1 video).
-MARK_STATUS = ("ok", "absent", "unclear", "check", "no_geometry", "off")
+# the capture path (marker=False, or a format-1 video). "implausible" is never stored: the analysis
+# (marker.reject_implausible) gives it to a decoded marker that cannot be the capture's frame.
+MARK_STATUS = ("ok", "absent", "unclear", "check", "no_geometry", "off", "implausible")
 MARK_OK, MARK_OFF = MARK_STATUS.index("ok"), MARK_STATUS.index("off")
 
 

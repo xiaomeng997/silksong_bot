@@ -18,10 +18,10 @@ drawn in front of both.
 Frame marker (ssbot.record.marker): marker="tr" (the vision mask's corner) draws the pattern of the frame each capture
 shows with the mask's cell (3 px at 360p), over everything and under the grain, writes STATE "mk" as the oracle does,
 and records with VideoRecorder(marker=True), which reads it from the full-size image and masks it before the thumbnail
-is made, its mask guard reading the STATE of the capture's label frame. legacy_marker=True instead draws it with 12 px cells (3 px of the 160 px thumbnail) in any corner and stores
-it in unmasked thumbnails, as recordings did before the capture path read it. marker_off: frames whose STATE has no
-"mk" and whose image has no marker (the marker off); hide_marker: capture indices whose marker is covered by a gray
-patch (a marker that did not make it into the capture).
+is made, its mask guard reading the STATE of the capture's label frame. legacy_marker=True instead draws it with 12 px
+cells (3 px of the 160 px thumbnail) in any corner and stores it in unmasked thumbnails, as recordings did before the
+capture path read it. marker_off: frames whose STATE has no "mk" and whose image has no marker (the marker off);
+hide_marker: capture indices whose marker is covered by a gray patch (a marker that did not make it into the capture).
 """
 from dataclasses import dataclass, field
 from datetime import datetime
