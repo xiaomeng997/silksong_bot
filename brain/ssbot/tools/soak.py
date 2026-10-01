@@ -933,6 +933,8 @@ _MINE = [
     (r"\\\.claude(\\|$)", "Claude Code"),
     (r"\\appdata\\local\\packages\\claude_[^\\]+(\\(?!localcache\\)[^\\]+.*)?$", "Claude app package (not LocalCache)"),
     (r"\\appdata\\local\\temp\\claude(\\|$)", "Claude scratch"),
+    # pytest's tmp_path trees: the brain tests build fake game folders there (the 2026-09-30 soak saw 15,640 of them).
+    (r"\\appdata\\local\\temp\\pytest-of-[^\\]+(\\|$)", "test temp (pytest)"),
 ]
 # MSIX: a process started from the Claude desktop app may have its new AppData files redirected into the app's
 # package LocalCache. Such paths are classified as the AppData path they stand for.
@@ -1665,6 +1667,10 @@ class Supervisor:
             "writes": {"watchers": [{k: w[k] for k in ("root", "started", "error", "overflows")} | {"paths": len(w["paths"])} for w in watch],
                        "by_class_counts": {c: len(v) for c, v in sorted(by_class.items())},
                        "violations_and_review": {c: [[p, i] for p, i in v[:200]] for c, v in violations.items()},
+                       # Every path of those classes, folded to its first 7 path components: a class with thousands
+                       # of entries is still fully accounted for (the 200 above are only the first by name).
+                       "violations_and_review_dirs": {c: dict(Counter("\\".join(p.split("\\")[:7]) for p, _ in v).most_common())
+                                                      for c, v in violations.items()},
                        "snapshot_diff": snap_diff},
         }
         if abilities:
