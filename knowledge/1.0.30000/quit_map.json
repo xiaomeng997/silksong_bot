@@ -1,0 +1,4977 @@
+{
+ "version": 0,
+ "build": "1.0.30000",
+ "generated": "2026-10-01T13:06:17",
+ "code_rev": "63bc28a",
+ "builder": "ssbot.tools.quit_map_build",
+ "params": {
+  "entry_s": 1.0,
+  "hurt0_s": 0.3,
+  "hurt1_s": 1.2,
+  "hazard_tail_s": 0.5,
+  "hazard_max_s": 4.0,
+  "long_s": 0.5,
+  "keep_long": 12
+ },
+ "keys": [
+  "transition",
+  "entry",
+  "hazard",
+  "hurt0",
+  "freeze",
+  "hurt1",
+  "interact",
+  "inventory",
+  "free"
+ ],
+ "sources": [
+  {
+   "name": "human/20260930_210337",
+   "kind": "human",
+   "frames": 159471,
+   "samples": 157937,
+   "s": 2641.17
+  },
+  {
+   "name": "20261001_121446_BellBeast_data/i0_000",
+   "kind": "train",
+   "frames": 26892,
+   "samples": 26892,
+   "s": 448.23
+  }
+ ],
+ "global_by_key": {
+  "transition": {
+   "s": 161.942,
+   "frames": 9205,
+   "p_pause": 0.0,
+   "p_quit": 0.0
+  },
+  "entry": {
+   "s": 93.363,
+   "frames": 5584,
+   "p_pause": 0.99554,
+   "p_quit": 0.99554
+  },
+  "hazard": {
+   "s": 22.483,
+   "frames": 1341,
+   "p_pause": 0.18236,
+   "p_quit": 0.18236
+  },
+  "hurt0": {
+   "s": 44.764,
+   "frames": 2686,
+   "p_pause": 0.23902,
+   "p_quit": 0.23902
+  },
+  "freeze": {
+   "s": 17.915,
+   "frames": 1075,
+   "p_pause": 0.0,
+   "p_quit": 0.0
+  },
+  "hurt1": {
+   "s": 127.885,
+   "frames": 7673,
+   "p_pause": 0.99361,
+   "p_quit": 0.99361
+  },
+  "interact": {
+   "s": 268.947,
+   "frames": 16137,
+   "p_pause": 0.06401,
+   "p_quit": 0.06401
+  },
+  "free": {
+   "s": 2352.099,
+   "frames": 141128,
+   "p_pause": 0.98528,
+   "p_quit": 0.98528
+  }
+ },
+ "scenes": {
+  "Ant_05b": {
+   "s": 55.349,
+   "frames": 3318,
+   "p_pause": 0.9196,
+   "p_quit": 0.9196,
+   "by_key": {
+    "transition": {
+     "s": 1.0,
+     "frames": 57,
+     "p_pause": 0.0,
+     "p_quit": 0.0
+    },
+    "entry": {
+     "s": 1.0,
+     "frames": 60,
+     "p_pause": 1.0,
+     "p_quit": 1.0
+    },
+    "hurt0": {
+     "s": 1.883,
+     "frames": 113,
+     "p_pause": 0.23892,
+     "p_quit": 0.23892
+    },
+    "freeze": {
+     "s": 2.017,
+     "frames": 121,
+     "p_pause": 0.0,
+     "p_quit": 0.0
+    },
+    "hurt1": {
+     "s": 5.384,
+     "frames": 323,
+     "p_pause": 1.0,
+     "p_quit": 1.0
+    },
+    "free": {
+     "s": 44.066,
+     "frames": 2644,
+     "p_pause": 1.0,
+     "p_quit": 1.0
+    }
+   },
+   "blockers_s": {
+    "DISABLE_PAUSE": 1.433,
+    "GAME_STATE": 1.0,
+    "TIME_SLOWED": 3.45
+   },
+   "dsq_s": 0.0,
+   "preload_s": 0.0,
+   "pause_windows": {
+    "n": 10,
+    "censored": 0,
+    "total_s": 4.333,
+    "p50_s": 0.233,
+    "p95_s": 1.433,
+    "max_s": 1.883,
+    "by_key": {
+     "transition": {
+      "n": 1,
+      "p50_s": 0.883,
+      "max_s": 0.883
+     },
+     "hurt0": {
+      "n": 6,
+      "p50_s": 0.233,
+      "max_s": 0.25
+     },
+     "freeze": {
+      "n": 3,
+      "p50_s": 0.067,
+      "max_s": 1.883
+     }
+    }
+   },
+   "quit_windows": {
+    "n": 10,
+    "censored": 0,
+    "total_s": 4.333,
+    "p50_s": 0.233,
+    "p95_s": 1.433,
+    "max_s": 1.883,
+    "by_key": {
+     "transition": {
+      "n": 1,
+      "p50_s": 0.883,
+      "max_s": 0.883
+     },
+     "hurt0": {
+      "n": 6,
+      "p50_s": 0.233,
+      "max_s": 0.25
+     },
+     "freeze": {
+      "n": 3,
+      "p50_s": 0.067,
+      "max_s": 1.883
+     }
+    }
+   },
+   "long_windows": [
+    {
+     "src": "human/20260930_210337",
+     "f0": 121712,
+     "s": 1.883,
+     "key": "freeze",
+     "cause": "freeze:EnemyBattleEndSlow",
+     "bits": [
+      "TIME_SLOWED"
+     ],
+     "censored": false
+    }
+   ]
+  },
+  "Aspid_01": {
+   "s": 10.583,
+   "frames": 629,
+   "p_pause": 0.64095,
+   "p_quit": 0.64095,
+   "by_key": {
+    "transition": {
+     "s": 1.9,
+     "frames": 108,
+     "p_pause": 0.0,
+     "p_quit": 0.0
+    },
+    "entry": {
+     "s": 2.017,
+     "frames": 121,
+     "p_pause": 1.0,
+     "p_quit": 1.0
+    },
+    "interact": {
+     "s": 1.9,
+     "frames": 114,
+     "p_pause": 0.0,
+     "p_quit": 0.0
+    },
+    "free": {
+     "s": 4.767,
+     "frames": 286,
+     "p_pause": 1.0,
+     "p_quit": 1.0
+    }
+   },
+   "blockers_s": {
+    "BLOCKING_INTERACT": 1.9,
+    "GAME_STATE": 1.9
+   },
+   "dsq_s": 0.0,
+   "preload_s": 0.0,
+   "pause_windows": {
+    "n": 3,
+    "censored": 0,
+    "total_s": 3.733,
+    "p50_s": 0.983,
+    "p95_s": 1.808,
+    "max_s": 1.9,
+    "by_key": {
+     "transition": {
+      "n": 2,
+      "p50_s": 0.917,
+      "max_s": 0.983
+     },
+     "interact": {
+      "n": 1,
+      "p50_s": 1.9,
+      "max_s": 1.9
+     }
+    }
+   },
+   "quit_windows": {
+    "n": 3,
+    "censored": 0,
+    "total_s": 3.733,
+    "p50_s": 0.983,
+    "p95_s": 1.808,
+    "max_s": 1.9,
+    "by_key": {
+     "transition": {
+      "n": 2,
+      "p50_s": 0.917,
+      "max_s": 0.983
+     },
+     "interact": {
+      "n": 1,
+      "p50_s": 1.9,
+      "max_s": 1.9
+     }
+    }
+   },
+   "long_windows": [
+    {
+     "src": "human/20260930_210337",
+     "f0": 31471,
+     "s": 1.9,
+     "key": "interact",
+     "cause": null,
+     "bits": [
+      "BLOCKING_INTERACT"
+     ],
+     "censored": false
+    }
+   ]
+  },
+  "Bellshrine": {
+   "s": 17.883,
+   "frames": 1069,
+   "p_pause": 0.66076,
+   "p_quit": 0.66076,
+   "by_key": {
+    "transition": {
+     "s": 2.8,
+     "frames": 164,
+     "p_pause": 0.0,
+     "p_quit": 0.0
+    },
+    "entry": {
+     "s": 3.017,
+     "frames": 181,
+     "p_pause": 1.0,
+     "p_quit": 1.0
+    },
+    "freeze": {
+     "s": 0.133,
+     "frames": 8,
+     "p_pause": 0.0,
+     "p_quit": 0.0
+    },
+    "interact": {
+     "s": 6.983,
+     "frames": 419,
+     "p_pause": 0.55132,
+     "p_quit": 0.55132
+    },
+    "free": {
+     "s": 4.95,
+     "frames": 297,
+     "p_pause": 1.0,
+     "p_quit": 1.0
+    }
+   },
+   "blockers_s": {
+    "BLOCKING_INTERACT": 0.333,
+    "DISABLE_PAUSE": 2.8,
+    "GAME_STATE": 2.8,
+    "TIME_SLOWED": 0.133
+   },
+   "dsq_s": 0.0,
+   "preload_s": 0.0,
+   "pause_windows": {
+    "n": 7,
+    "censored": 0,
+    "total_s": 6.167,
+    "p50_s": 0.95,
+    "p95_s": 2.26,
+    "max_s": 2.8,
+    "by_key": {
+     "transition": {
+      "n": 3,
+      "p50_s": 0.95,
+      "max_s": 1.0
+     },
+     "freeze": {
+      "n": 1,
+      "p50_s": 0.133,
+      "max_s": 0.133
+     },
+     "interact": {
+      "n": 3,
+      "p50_s": 0.167,
+      "max_s": 2.8
+     }
+    }
+   },
+   "quit_windows": {
+    "n": 7,
+    "censored": 0,
+    "total_s": 6.167,
+    "p50_s": 0.95,
+    "p95_s": 2.26,
+    "max_s": 2.8,
+    "by_key": {
+     "transition": {
+      "n": 3,
+      "p50_s": 0.95,
+      "max_s": 1.0
+     },
+     "freeze": {
+      "n": 1,
+      "p50_s": 0.133,
+      "max_s": 0.133
+     },
+     "interact": {
+      "n": 3,
+      "p50_s": 0.167,
+      "max_s": 2.8
+     }
+    }
+   },
+   "long_windows": [
+    {
+     "src": "human/20260930_210337",
+     "f0": 83125,
+     "s": 2.8,
+     "key": "interact",
+     "cause": null,
+     "bits": [
+      "DISABLE_PAUSE"
+     ],
+     "censored": false
+    }
+   ]
+  },
+  "Bellshrine_05": {
+   "s": 8.1,
+   "frames": 482,
+   "p_pause": 0.81276,
+   "p_quit": 0.81276,
+   "by_key": {
+    "transition": {
+     "s": 1.233,
+     "frames": 70,
+     "p_pause": 0.0,
+     "p_quit": 0.0
+    },
+    "entry": {
+     "s": 2.017,
+     "frames": 121,
+     "p_pause": 1.0,
+     "p_quit": 1.0
+    },
+    "freeze": {
+     "s": 0.133,
+     "frames": 8,
+     "p_pause": 0.0,
+     "p_quit": 0.0
+    },
+    "interact": {
+     "s": 2.55,
+     "frames": 153,
+     "p_pause": 0.94116,
+     "p_quit": 0.94116
+    },
+    "free": {
+     "s": 2.167,
+     "frames": 130,
+     "p_pause": 1.0,
+     "p_quit": 1.0
+    }
+   },
+   "blockers_s": {
+    "BLOCKING_INTERACT": 0.15,
+    "GAME_STATE": 1.233,
+    "TIME_SLOWED": 0.133
+   },
+   "dsq_s": 0.0,
+   "preload_s": 0.0,
+   "pause_windows": {
+    "n": 4,
+    "censored": 0,
+    "total_s": 1.517,
+    "p50_s": 0.383,
+    "p95_s": 0.617,
+    "max_s": 0.617,
+    "by_key": {
+     "transition": {
+      "n": 2,
+      "p50_s": 0.617,
+      "max_s": 0.617
+     },
+     "freeze": {
+      "n": 1,
+      "p50_s": 0.133,
+      "max_s": 0.133
+     },
+     "interact": {
+      "n": 1,
+      "p50_s": 0.15,
+      "max_s": 0.15
+     }
+    }
+   },
+   "quit_windows": {
+    "n": 4,
+    "censored": 0,
+    "total_s": 1.517,
+    "p50_s": 0.383,
+    "p95_s": 0.617,
+    "max_s": 0.617,
+    "by_key": {
+     "transition": {
+      "n": 2,
+      "p50_s": 0.617,
+      "max_s": 0.617
+     },
+     "freeze": {
+      "n": 1,
+      "p50_s": 0.133,
+      "max_s": 0.133
+     },
+     "interact": {
+      "n": 1,
+      "p50_s": 0.15,
+      "max_s": 0.15
+     }
+    }
+   },
+   "long_windows": []
+  },
+  "Belltown_basement_03": {
+   "s": 7.467,
+   "frames": 443,
+   "p_pause": 0.8683,
+   "p_quit": 0.8683,
+   "by_key": {
+    "transition": {
+     "s": 0.983,
+     "frames": 54,
+     "p_pause": 0.0,
+     "p_quit": 0.0
+    },
+    "entry": {
+     "s": 1.017,
+     "frames": 61,
+     "p_pause": 1.0,
+     "p_quit": 1.0
+    },
+    "free": {
+     "s": 5.467,
+     "frames": 328,
+     "p_pause": 1.0,
+     "p_quit": 1.0
+    }
+   },
+   "blockers_s": {
+    "GAME_STATE": 0.983
+   },
+   "dsq_s": 0.0,
+   "preload_s": 0.0,
+   "pause_windows": {
+    "n": 1,
+    "censored": 0,
+    "total_s": 0.95,
+    "p50_s": 0.95,
+    "p95_s": 0.95,
+    "max_s": 0.95,
+    "by_key": {
+     "transition": {
+      "n": 1,
+      "p50_s": 0.95,
+      "max_s": 0.95
+     }
+    }
+   },
+   "quit_windows": {
+    "n": 1,
+    "censored": 0,
+    "total_s": 0.95,
+    "p50_s": 0.95,
+    "p95_s": 0.95,
+    "max_s": 0.95,
+    "by_key": {
+     "transition": {
+      "n": 1,
+      "p50_s": 0.95,
+      "max_s": 0.95
+     }
+    }
+   },
+   "long_windows": []
+  },
+  "Bellway_01": {
+   "s": 26.466,
+   "frames": 1584,
+   "p_pause": 0.71474,
+   "p_quit": 0.71474,
+   "by_key": {
+    "transition": {
+     "s": 1.75,
+     "frames": 101,
+     "p_pause": 0.0,
+     "p_quit": 0.0
+    },
+    "entry": {
+     "s": 2.017,
+     "frames": 121,
+     "p_pause": 1.0,
+     "p_quit": 1.0
+    },
+    "interact": {
+     "s": 4.75,
+     "frames": 285,
+     "p_pause": 0.0,
+     "p_quit": 0.0
+    },
+    "free": {
+     "s": 17.95,
+     "frames": 1077,
+     "p_pause": 0.9415,
+     "p_quit": 0.9415
+    }
+   },
+   "blockers_s": {
+    "BLOCKING_INTERACT": 4.75,
+    "DISABLE_PAUSE": 1.9,
+    "GAME_STATE": 1.75
+   },
+   "dsq_s": 0.0,
+   "preload_s": 0.0,
+   "pause_windows": {
+    "n": 4,
+    "censored": 0,
+    "total_s": 9.483,
+    "p50_s": 1.342,
+    "p95_s": 4.961,
+    "max_s": 5.583,
+    "by_key": {
+     "transition": {
+      "n": 1,
+      "p50_s": 1.217,
+      "max_s": 1.217
+     },
+     "interact": {
+      "n": 3,
+      "p50_s": 1.433,
+      "max_s": 5.583
+     }
+    }
+   },
+   "quit_windows": {
+    "n": 4,
+    "censored": 0,
+    "total_s": 9.483,
+    "p50_s": 1.342,
+    "p95_s": 4.961,
+    "max_s": 5.583,
+    "by_key": {
+     "transition": {
+      "n": 1,
+      "p50_s": 1.217,
+      "max_s": 1.217
+     },
+     "interact": {
+      "n": 3,
+      "p50_s": 1.433,
+      "max_s": 5.583
+     }
+    }
+   },
+   "long_windows": [
+    {
+     "src": "human/20260930_210337",
+     "f0": 81017,
+     "s": 5.583,
+     "key": "interact",
+     "cause": null,
+     "bits": [
+      "DISABLE_PAUSE",
+      "BLOCKING_INTERACT",
+      "NOT_ACCEPTING_INPUT",
+      "GAME_STATE"
+     ],
+     "censored": false
+    },
+    {
+     "src": "human/20260930_210337",
+     "f0": 80603,
+     "s": 1.433,
+     "key": "interact",
+     "cause": null,
+     "bits": [
+      "BLOCKING_INTERACT"
+     ],
+     "censored": false
+    },
+    {
+     "src": "human/20260930_210337",
+     "f0": 80788,
+     "s": 1.25,
+     "key": "interact",
+     "cause": null,
+     "bits": [
+      "BLOCKING_INTERACT"
+     ],
+     "censored": false
+    }
+   ]
+  },
+  "Bellway_02": {
+   "s": 19.35,
+   "frames": 1159,
+   "p_pause": 0.75969,
+   "p_quit": 0.75969,
+   "by_key": {
+    "transition": {
+     "s": 1.017,
+     "frames": 59,
+     "p_pause": 0.0,
+     "p_quit": 0.0
+    },
+    "entry": {
+     "s": 1.0,
+     "frames": 60,
+     "p_pause": 1.0,
+     "p_quit": 1.0
+    },
+    "interact": {
+     "s": 3.633,
+     "frames": 218,
+     "p_pause": 0.0,
+     "p_quit": 0.0
+    },
+    "free": {
+     "s": 13.7,
+     "frames": 822,
+     "p_pause": 1.0,
+     "p_quit": 1.0
+    }
+   },
+   "blockers_s": {
+    "BLOCKING_INTERACT": 3.633,
+    "GAME_STATE": 1.017
+   },
+   "dsq_s": 0.0,
+   "preload_s": 0.0,
+   "pause_windows": {
+    "n": 2,
+    "censored": 0,
+    "total_s": 4.767,
+    "p50_s": 2.383,
+    "p95_s": 3.508,
+    "max_s": 3.633,
+    "by_key": {
+     "transition": {
+      "n": 1,
+      "p50_s": 1.133,
+      "max_s": 1.133
+     },
+     "interact": {
+      "n": 1,
+      "p50_s": 3.633,
+      "max_s": 3.633
+     }
+    }
+   },
+   "quit_windows": {
+    "n": 2,
+    "censored": 0,
+    "total_s": 4.767,
+    "p50_s": 2.383,
+    "p95_s": 3.508,
+    "max_s": 3.633,
+    "by_key": {
+     "transition": {
+      "n": 1,
+      "p50_s": 1.133,
+      "max_s": 1.133
+     },
+     "interact": {
+      "n": 1,
+      "p50_s": 3.633,
+      "max_s": 3.633
+     }
+    }
+   },
+   "long_windows": [
+    {
+     "src": "human/20260930_210337",
+     "f0": 107899,
+     "s": 3.633,
+     "key": "interact",
+     "cause": null,
+     "bits": [
+      "BLOCKING_INTERACT"
+     ],
+     "censored": false
+    }
+   ]
+  },
+  "Bone_01": {
+   "s": 188.131,
+   "frames": 11275,
+   "p_pause": 0.92302,
+   "p_quit": 0.92302,
+   "by_key": {
+    "transition": {
+     "s": 2.567,
+     "frames": 141,
+     "p_pause": 0.0,
+     "p_quit": 0.0
+    },
+    "entry": {
+     "s": 2.35,
+     "frames": 141,
+     "p_pause": 1.0,
+     "p_quit": 1.0
+    },
+    "hurt0": {
+     "s": 2.483,
+     "frames": 149,
+     "p_pause": 0.13423,
+     "p_quit": 0.13423
+    },
+    "freeze": {
+     "s": 2.167,
+     "frames": 130,
+     "p_pause": 0.0,
+     "p_quit": 0.0
+    },
+    "hurt1": {
+     "s": 6.017,
+     "frames": 361,
+     "p_pause": 0.86427,
+     "p_quit": 0.86427
+    },
+    "interact": {
+     "s": 3.633,
+     "frames": 218,
+     "p_pause": 0.0,
+     "p_quit": 0.0
+    },
+    "free": {
+     "s": 168.915,
+     "frames": 10135,
+     "p_pause": 0.98135,
+     "p_quit": 0.98135
+    }
+   },
+   "blockers_s": {
+    "BLOCKING_INTERACT": 3.633,
+    "DISABLE_PAUSE": 6.1,
+    "GAME_STATE": 2.567,
+    "TIME_SLOWED": 4.317
+   },
+   "dsq_s": 0.0,
+   "preload_s": 4.333,
+   "pause_windows": {
+    "n": 14,
+    "censored": 0,
+    "total_s": 14.05,
+    "p50_s": 0.25,
+    "p95_s": 3.966,
+    "max_s": 4.583,
+    "by_key": {
+     "transition": {
+      "n": 2,
+      "p50_s": 0.958,
+      "max_s": 0.967
+     },
+     "hurt0": {
+      "n": 8,
+      "p50_s": 0.25,
+      "max_s": 4.583
+     },
+     "freeze": {
+      "n": 3,
+      "p50_s": 0.067,
+      "max_s": 0.133
+     },
+     "interact": {
+      "n": 1,
+      "p50_s": 3.633,
+      "max_s": 3.633
+     }
+    }
+   },
+   "quit_windows": {
+    "n": 14,
+    "censored": 0,
+    "total_s": 14.05,
+    "p50_s": 0.25,
+    "p95_s": 3.966,
+    "max_s": 4.583,
+    "by_key": {
+     "transition": {
+      "n": 2,
+      "p50_s": 0.958,
+      "max_s": 0.967
+     },
+     "hurt0": {
+      "n": 8,
+      "p50_s": 0.25,
+      "max_s": 4.583
+     },
+     "freeze": {
+      "n": 3,
+      "p50_s": 0.067,
+      "max_s": 0.133
+     },
+     "interact": {
+      "n": 1,
+      "p50_s": 3.633,
+      "max_s": 3.633
+     }
+    }
+   },
+   "long_windows": [
+    {
+     "src": "human/20260930_210337",
+     "f0": 6841,
+     "s": 4.583,
+     "key": "hurt0",
+     "cause": "freeze:HeroDamage",
+     "bits": [
+      "DISABLE_PAUSE",
+      "TIME_SLOWED",
+      "GAME_STATE",
+      "PRELOAD"
+     ],
+     "censored": false
+    },
+    {
+     "src": "human/20260930_210337",
+     "f0": 13450,
+     "s": 3.633,
+     "key": "interact",
+     "cause": null,
+     "bits": [
+      "BLOCKING_INTERACT"
+     ],
+     "censored": false
+    },
+    {
+     "src": "human/20260930_210337",
+     "f0": 12219,
+     "s": 1.9,
+     "key": "hurt0",
+     "cause": "freeze:EnemyBattleEndSlow",
+     "bits": [
+      "DISABLE_PAUSE",
+      "TIME_SLOWED"
+     ],
+     "censored": false
+    },
+    {
+     "src": "human/20260930_210337",
+     "f0": 6077,
+     "s": 0.533,
+     "key": "hurt0",
+     "cause": "freeze:direct:HeroController.StartRecoil",
+     "bits": [
+      "DISABLE_PAUSE",
+      "TIME_SLOWED"
+     ],
+     "censored": false
+    }
+   ]
+  },
+  "Bone_01b": {
+   "s": 35.5,
+   "frames": 2127,
+   "p_pause": 0.97324,
+   "p_quit": 0.97324,
+   "by_key": {
+    "transition": {
+     "s": 0.95,
+     "frames": 54,
+     "p_pause": 0.0,
+     "p_quit": 0.0
+    },
+    "entry": {
+     "s": 1.017,
+     "frames": 61,
+     "p_pause": 1.0,
+     "p_quit": 1.0
+    },
+    "free": {
+     "s": 33.533,
+     "frames": 2012,
+     "p_pause": 1.0,
+     "p_quit": 1.0
+    }
+   },
+   "blockers_s": {
+    "GAME_STATE": 0.95
+   },
+   "dsq_s": 0.0,
+   "preload_s": 0.0,
+   "pause_windows": {
+    "n": 1,
+    "censored": 0,
+    "total_s": 0.933,
+    "p50_s": 0.933,
+    "p95_s": 0.933,
+    "max_s": 0.933,
+    "by_key": {
+     "transition": {
+      "n": 1,
+      "p50_s": 0.933,
+      "max_s": 0.933
+     }
+    }
+   },
+   "quit_windows": {
+    "n": 1,
+    "censored": 0,
+    "total_s": 0.933,
+    "p50_s": 0.933,
+    "p95_s": 0.933,
+    "max_s": 0.933,
+    "by_key": {
+     "transition": {
+      "n": 1,
+      "p50_s": 0.933,
+      "max_s": 0.933
+     }
+    }
+   },
+   "long_windows": []
+  },
+  "Bone_01c": {
+   "s": 51.149,
+   "frames": 3062,
+   "p_pause": 0.86119,
+   "p_quit": 0.86119,
+   "by_key": {
+    "transition": {
+     "s": 1.917,
+     "frames": 108,
+     "p_pause": 0.0,
+     "p_quit": 0.0
+    },
+    "entry": {
+     "s": 1.25,
+     "frames": 75,
+     "p_pause": 1.0,
+     "p_quit": 1.0
+    },
+    "interact": {
+     "s": 4.867,
+     "frames": 292,
+     "p_pause": 0.0,
+     "p_quit": 0.0
+    },
+    "free": {
+     "s": 43.116,
+     "frames": 2587,
+     "p_pause": 0.99266,
+     "p_quit": 0.99266
+    }
+   },
+   "blockers_s": {
+    "BLOCKING_INTERACT": 4.867,
+    "GAME_STATE": 1.917,
+    "NOT_ACCEPTING_INPUT": 0.2,
+    "PAUSE_LOCKOUT": 0.317
+   },
+   "dsq_s": 0.0,
+   "preload_s": 0.0,
+   "pause_windows": {
+    "n": 4,
+    "censored": 0,
+    "total_s": 7.067,
+    "p50_s": 0.942,
+    "p95_s": 4.279,
+    "max_s": 4.867,
+    "by_key": {
+     "transition": {
+      "n": 2,
+      "p50_s": 0.942,
+      "max_s": 0.95
+     },
+     "interact": {
+      "n": 1,
+      "p50_s": 4.867,
+      "max_s": 4.867
+     },
+     "free": {
+      "n": 1,
+      "p50_s": 0.317,
+      "max_s": 0.317
+     }
+    }
+   },
+   "quit_windows": {
+    "n": 4,
+    "censored": 0,
+    "total_s": 7.067,
+    "p50_s": 0.942,
+    "p95_s": 4.279,
+    "max_s": 4.867,
+    "by_key": {
+     "transition": {
+      "n": 2,
+      "p50_s": 0.942,
+      "max_s": 0.95
+     },
+     "interact": {
+      "n": 1,
+      "p50_s": 4.867,
+      "max_s": 4.867
+     },
+     "free": {
+      "n": 1,
+      "p50_s": 0.317,
+      "max_s": 0.317
+     }
+    }
+   },
+   "long_windows": [
+    {
+     "src": "human/20260930_210337",
+     "f0": 15664,
+     "s": 4.867,
+     "key": "interact",
+     "cause": null,
+     "bits": [
+      "BLOCKING_INTERACT"
+     ],
+     "censored": false
+    }
+   ]
+  },
+  "Bone_02": {
+   "s": 52.599,
+   "frames": 3154,
+   "p_pause": 0.9718,
+   "p_quit": 0.9718,
+   "by_key": {
+    "transition": {
+     "s": 0.933,
+     "frames": 54,
+     "p_pause": 0.0,
+     "p_quit": 0.0
+    },
+    "entry": {
+     "s": 1.017,
+     "frames": 61,
+     "p_pause": 1.0,
+     "p_quit": 1.0
+    },
+    "hurt0": {
+     "s": 0.633,
+     "frames": 38,
+     "p_pause": 0.23679,
+     "p_quit": 0.23679
+    },
+    "freeze": {
+     "s": 0.067,
+     "frames": 4,
+     "p_pause": 0.0,
+     "p_quit": 0.0
+    },
+    "hurt1": {
+     "s": 1.8,
+     "frames": 108,
+     "p_pause": 1.0,
+     "p_quit": 1.0
+    },
+    "free": {
+     "s": 48.149,
+     "frames": 2889,
+     "p_pause": 1.0,
+     "p_quit": 1.0
+    }
+   },
+   "blockers_s": {
+    "DISABLE_PAUSE": 0.483,
+    "GAME_STATE": 0.933,
+    "TIME_SLOWED": 0.55
+   },
+   "dsq_s": 0.0,
+   "preload_s": 0.0,
+   "pause_windows": {
+    "n": 4,
+    "censored": 0,
+    "total_s": 1.65,
+    "p50_s": 0.242,
+    "p95_s": 0.972,
+    "max_s": 1.1,
+    "by_key": {
+     "transition": {
+      "n": 1,
+      "p50_s": 1.1,
+      "max_s": 1.1
+     },
+     "hurt0": {
+      "n": 2,
+      "p50_s": 0.242,
+      "max_s": 0.25
+     },
+     "freeze": {
+      "n": 1,
+      "p50_s": 0.067,
+      "max_s": 0.067
+     }
+    }
+   },
+   "quit_windows": {
+    "n": 4,
+    "censored": 0,
+    "total_s": 1.65,
+    "p50_s": 0.242,
+    "p95_s": 0.972,
+    "max_s": 1.1,
+    "by_key": {
+     "transition": {
+      "n": 1,
+      "p50_s": 1.1,
+      "max_s": 1.1
+     },
+     "hurt0": {
+      "n": 2,
+      "p50_s": 0.242,
+      "max_s": 0.25
+     },
+     "freeze": {
+      "n": 1,
+      "p50_s": 0.067,
+      "max_s": 0.067
+     }
+    }
+   },
+   "long_windows": []
+  },
+  "Bone_03": {
+   "s": 71.283,
+   "frames": 4268,
+   "p_pause": 0.94833,
+   "p_quit": 0.94833,
+   "by_key": {
+    "transition": {
+     "s": 3.0,
+     "frames": 171,
+     "p_pause": 0.0,
+     "p_quit": 0.0
+    },
+    "entry": {
+     "s": 2.467,
+     "frames": 148,
+     "p_pause": 1.0,
+     "p_quit": 1.0
+    },
+    "hurt0": {
+     "s": 0.633,
+     "frames": 38,
+     "p_pause": 0.23685,
+     "p_quit": 0.23685
+    },
+    "freeze": {
+     "s": 0.2,
+     "frames": 12,
+     "p_pause": 0.0,
+     "p_quit": 0.0
+    },
+    "hurt1": {
+     "s": 1.8,
+     "frames": 108,
+     "p_pause": 1.0,
+     "p_quit": 1.0
+    },
+    "free": {
+     "s": 63.183,
+     "frames": 3791,
+     "p_pause": 1.0,
+     "p_quit": 1.0
+    }
+   },
+   "blockers_s": {
+    "DISABLE_PAUSE": 0.483,
+    "GAME_STATE": 3.0,
+    "TIME_SLOWED": 0.683
+   },
+   "dsq_s": 0.0,
+   "preload_s": 0.0,
+   "pause_windows": {
+    "n": 7,
+    "censored": 0,
+    "total_s": 3.733,
+    "p50_s": 0.25,
+    "p95_s": 1.095,
+    "max_s": 1.15,
+    "by_key": {
+     "transition": {
+      "n": 3,
+      "p50_s": 0.967,
+      "max_s": 1.15
+     },
+     "hurt0": {
+      "n": 2,
+      "p50_s": 0.242,
+      "max_s": 0.25
+     },
+     "freeze": {
+      "n": 2,
+      "p50_s": 0.1,
+      "max_s": 0.133
+     }
+    }
+   },
+   "quit_windows": {
+    "n": 7,
+    "censored": 0,
+    "total_s": 3.733,
+    "p50_s": 0.25,
+    "p95_s": 1.095,
+    "max_s": 1.15,
+    "by_key": {
+     "transition": {
+      "n": 3,
+      "p50_s": 0.967,
+      "max_s": 1.15
+     },
+     "hurt0": {
+      "n": 2,
+      "p50_s": 0.242,
+      "max_s": 0.25
+     },
+     "freeze": {
+      "n": 2,
+      "p50_s": 0.1,
+      "max_s": 0.133
+     }
+    }
+   },
+   "long_windows": []
+  },
+  "Bone_04": {
+   "s": 64.799,
+   "frames": 3858,
+   "p_pause": 0.75154,
+   "p_quit": 0.75154,
+   "by_key": {
+    "transition": {
+     "s": 2.3,
+     "frames": 108,
+     "p_pause": 0.0,
+     "p_quit": 0.0
+    },
+    "entry": {
+     "s": 2.017,
+     "frames": 121,
+     "p_pause": 1.0,
+     "p_quit": 1.0
+    },
+    "freeze": {
+     "s": 0.4,
+     "frames": 24,
+     "p_pause": 0.0,
+     "p_quit": 0.0
+    },
+    "interact": {
+     "s": 15.2,
+     "frames": 912,
+     "p_pause": 0.11842,
+     "p_quit": 0.11842
+    },
+    "free": {
+     "s": 44.883,
+     "frames": 2693,
+     "p_pause": 1.0,
+     "p_quit": 1.0
+    }
+   },
+   "blockers_s": {
+    "BLOCKING_INTERACT": 13.4,
+    "GAME_STATE": 2.3,
+    "TIME_SLOWED": 0.4
+   },
+   "dsq_s": 0.0,
+   "preload_s": 0.0,
+   "pause_windows": {
+    "n": 7,
+    "censored": 0,
+    "total_s": 16.067,
+    "p50_s": 0.15,
+    "p95_s": 9.615,
+    "max_s": 13.25,
+    "by_key": {
+     "transition": {
+      "n": 2,
+      "p50_s": 1.133,
+      "max_s": 1.133
+     },
+     "freeze": {
+      "n": 3,
+      "p50_s": 0.133,
+      "max_s": 0.133
+     },
+     "interact": {
+      "n": 2,
+      "p50_s": 6.7,
+      "max_s": 13.25
+     }
+    }
+   },
+   "quit_windows": {
+    "n": 7,
+    "censored": 0,
+    "total_s": 16.067,
+    "p50_s": 0.15,
+    "p95_s": 9.615,
+    "max_s": 13.25,
+    "by_key": {
+     "transition": {
+      "n": 2,
+      "p50_s": 1.133,
+      "max_s": 1.133
+     },
+     "freeze": {
+      "n": 3,
+      "p50_s": 0.133,
+      "max_s": 0.133
+     },
+     "interact": {
+      "n": 2,
+      "p50_s": 6.7,
+      "max_s": 13.25
+     }
+    }
+   },
+   "long_windows": [
+    {
+     "src": "human/20260930_210337",
+     "f0": 26691,
+     "s": 13.25,
+     "key": "interact",
+     "cause": null,
+     "bits": [
+      "BLOCKING_INTERACT"
+     ],
+     "censored": false
+    }
+   ]
+  },
+  "Bone_05": {
+   "s": 606.143,
+   "frames": 36356,
+   "p_pause": 0.93788,
+   "p_quit": 0.93788,
+   "by_key": {
+    "transition": {
+     "s": 5.226,
+     "frames": 300,
+     "p_pause": 0.0,
+     "p_quit": 0.0
+    },
+    "entry": {
+     "s": 6.398,
+     "frames": 384,
+     "p_pause": 0.93494,
+     "p_quit": 0.93494
+    },
+    "hurt0": {
+     "s": 31.081,
+     "frames": 1865,
+     "p_pause": 0.24933,
+     "p_quit": 0.24933
+    },
+    "freeze": {
+     "s": 5.132,
+     "frames": 308,
+     "p_pause": 0.0,
+     "p_quit": 0.0
+    },
+    "hurt1": {
+     "s": 89.419,
+     "frames": 5365,
+     "p_pause": 1.0,
+     "p_quit": 1.0
+    },
+    "interact": {
+     "s": 2.5,
+     "frames": 150,
+     "p_pause": 0.0,
+     "p_quit": 0.0
+    },
+    "free": {
+     "s": 466.387,
+     "frames": 27984,
+     "p_pause": 0.99775,
+     "p_quit": 0.99775
+    }
+   },
+   "blockers_s": {
+    "BLOCKING_INTERACT": 2.5,
+    "DISABLE_PAUSE": 25.115,
+    "GAME_STATE": 5.226,
+    "TIME_SLOWED": 29.052
+   },
+   "dsq_s": 0.0,
+   "preload_s": 0.0,
+   "pause_windows": {
+    "n": 117,
+    "censored": 1,
+    "total_s": 41.09,
+    "p50_s": 0.233,
+    "p95_s": 0.8,
+    "max_s": 9.25,
+    "by_key": {
+     "transition": {
+      "n": 6,
+      "p50_s": 0.85,
+      "max_s": 0.967
+     },
+     "hurt0": {
+      "n": 99,
+      "p50_s": 0.233,
+      "max_s": 0.25
+     },
+     "freeze": {
+      "n": 11,
+      "p50_s": 0.133,
+      "max_s": 1.622
+     },
+     "interact": {
+      "n": 1,
+      "p50_s": 9.25,
+      "max_s": 9.25
+     }
+    }
+   },
+   "quit_windows": {
+    "n": 117,
+    "censored": 1,
+    "total_s": 41.09,
+    "p50_s": 0.233,
+    "p95_s": 0.8,
+    "max_s": 9.25,
+    "by_key": {
+     "transition": {
+      "n": 6,
+      "p50_s": 0.85,
+      "max_s": 0.967
+     },
+     "hurt0": {
+      "n": 99,
+      "p50_s": 0.233,
+      "max_s": 0.25
+     },
+     "freeze": {
+      "n": 11,
+      "p50_s": 0.133,
+      "max_s": 1.622
+     },
+     "interact": {
+      "n": 1,
+      "p50_s": 9.25,
+      "max_s": 9.25
+     }
+    }
+   },
+   "long_windows": [
+    {
+     "src": "human/20260930_210337",
+     "f0": 76222,
+     "s": 9.25,
+     "key": "interact",
+     "cause": null,
+     "bits": [
+      "DISABLE_PAUSE",
+      "BLOCKING_INTERACT",
+      "NOT_ACCEPTING_INPUT",
+      "GAME_STATE"
+     ],
+     "censored": false
+    },
+    {
+     "src": "20261001_121446_BellBeast_data/i0_000",
+     "f0": 56112,
+     "s": 1.622,
+     "key": "freeze",
+     "cause": "freeze:BossDeathSlow",
+     "bits": [
+      "TIME_SLOWED",
+      "GAME_STATE"
+     ],
+     "censored": false
+    },
+    {
+     "src": "human/20260930_210337",
+     "f0": 68400,
+     "s": 1.383,
+     "key": "freeze",
+     "cause": "freeze:BossDeathSlow",
+     "bits": [
+      "TIME_SLOWED"
+     ],
+     "censored": false
+    },
+    {
+     "src": "20261001_121446_BellBeast_data/i0_000",
+     "f0": 69031,
+     "s": 0.982,
+     "key": "freeze",
+     "cause": "freeze:BossDeathSlow",
+     "bits": [
+      "TIME_SLOWED"
+     ],
+     "censored": true
+    }
+   ]
+  },
+  "Bone_05b": {
+   "s": 35.9,
+   "frames": 2148,
+   "p_pause": 0.91783,
+   "p_quit": 0.91783,
+   "by_key": {
+    "transition": {
+     "s": 2.7,
+     "frames": 156,
+     "p_pause": 0.0,
+     "p_quit": 0.0
+    },
+    "entry": {
+     "s": 3.033,
+     "frames": 182,
+     "p_pause": 1.0,
+     "p_quit": 1.0
+    },
+    "hurt0": {
+     "s": 0.3,
+     "frames": 18,
+     "p_pause": 0.16672,
+     "p_quit": 0.16672
+    },
+    "hurt1": {
+     "s": 0.917,
+     "frames": 55,
+     "p_pause": 1.0,
+     "p_quit": 1.0
+    },
+    "free": {
+     "s": 28.95,
+     "frames": 1737,
+     "p_pause": 1.0,
+     "p_quit": 1.0
+    }
+   },
+   "blockers_s": {
+    "DISABLE_PAUSE": 0.25,
+    "GAME_STATE": 2.7,
+    "TIME_SLOWED": 0.25
+   },
+   "dsq_s": 0.0,
+   "preload_s": 0.0,
+   "pause_windows": {
+    "n": 4,
+    "censored": 0,
+    "total_s": 3.2,
+    "p50_s": 0.958,
+    "p95_s": 1.026,
+    "max_s": 1.033,
+    "by_key": {
+     "transition": {
+      "n": 3,
+      "p50_s": 0.983,
+      "max_s": 1.033
+     },
+     "hurt0": {
+      "n": 1,
+      "p50_s": 0.25,
+      "max_s": 0.25
+     }
+    }
+   },
+   "quit_windows": {
+    "n": 4,
+    "censored": 0,
+    "total_s": 3.2,
+    "p50_s": 0.958,
+    "p95_s": 1.026,
+    "max_s": 1.033,
+    "by_key": {
+     "transition": {
+      "n": 3,
+      "p50_s": 0.983,
+      "max_s": 1.033
+     },
+     "hurt0": {
+      "n": 1,
+      "p50_s": 0.25,
+      "max_s": 0.25
+     }
+    }
+   },
+   "long_windows": []
+  },
+  "Bone_07": {
+   "s": 97.949,
+   "frames": 5865,
+   "p_pause": 0.87426,
+   "p_quit": 0.87426,
+   "by_key": {
+    "transition": {
+     "s": 2.817,
+     "frames": 159,
+     "p_pause": 0.0,
+     "p_quit": 0.0
+    },
+    "entry": {
+     "s": 3.05,
+     "frames": 183,
+     "p_pause": 1.0,
+     "p_quit": 1.0
+    },
+    "hazard": {
+     "s": 5.617,
+     "frames": 335,
+     "p_pause": 0.18101,
+     "p_quit": 0.18101
+    },
+    "freeze": {
+     "s": 1.133,
+     "frames": 68,
+     "p_pause": 0.0,
+     "p_quit": 0.0
+    },
+    "interact": {
+     "s": 3.767,
+     "frames": 226,
+     "p_pause": 0.0,
+     "p_quit": 0.0
+    },
+    "free": {
+     "s": 81.566,
+     "frames": 4894,
+     "p_pause": 1.0,
+     "p_quit": 1.0
+    }
+   },
+   "blockers_s": {
+    "BLOCKING_INTERACT": 3.767,
+    "DISABLE_PAUSE": 4.6,
+    "GAME_STATE": 2.817,
+    "TIME_SLOWED": 1.6
+   },
+   "dsq_s": 0.0,
+   "preload_s": 0.0,
+   "pause_windows": {
+    "n": 16,
+    "censored": 0,
+    "total_s": 12.35,
+    "p50_s": 0.133,
+    "p95_s": 2.292,
+    "max_s": 2.317,
+    "by_key": {
+     "transition": {
+      "n": 3,
+      "p50_s": 0.933,
+      "max_s": 0.983
+     },
+     "hazard": {
+      "n": 2,
+      "p50_s": 2.3,
+      "max_s": 2.317
+     },
+     "freeze": {
+      "n": 9,
+      "p50_s": 0.133,
+      "max_s": 0.133
+     },
+     "interact": {
+      "n": 2,
+      "p50_s": 1.883,
+      "max_s": 1.9
+     }
+    }
+   },
+   "quit_windows": {
+    "n": 16,
+    "censored": 0,
+    "total_s": 12.35,
+    "p50_s": 0.133,
+    "p95_s": 2.292,
+    "max_s": 2.317,
+    "by_key": {
+     "transition": {
+      "n": 3,
+      "p50_s": 0.933,
+      "max_s": 0.983
+     },
+     "hazard": {
+      "n": 2,
+      "p50_s": 2.3,
+      "max_s": 2.317
+     },
+     "freeze": {
+      "n": 9,
+      "p50_s": 0.133,
+      "max_s": 0.133
+     },
+     "interact": {
+      "n": 2,
+      "p50_s": 1.883,
+      "max_s": 1.9
+     }
+    }
+   },
+   "long_windows": [
+    {
+     "src": "human/20260930_210337",
+     "f0": 89031,
+     "s": 2.317,
+     "key": "hazard",
+     "cause": "hazard_death:SPIKES",
+     "bits": [
+      "DISABLE_PAUSE",
+      "TIME_SLOWED"
+     ],
+     "censored": false
+    },
+    {
+     "src": "human/20260930_210337",
+     "f0": 88850,
+     "s": 2.283,
+     "key": "hazard",
+     "cause": "hazard_death:SPIKES",
+     "bits": [
+      "DISABLE_PAUSE",
+      "TIME_SLOWED"
+     ],
+     "censored": false
+    },
+    {
+     "src": "human/20260930_210337",
+     "f0": 90849,
+     "s": 1.9,
+     "key": "interact",
+     "cause": null,
+     "bits": [
+      "BLOCKING_INTERACT"
+     ],
+     "censored": false
+    },
+    {
+     "src": "human/20260930_210337",
+     "f0": 90195,
+     "s": 1.867,
+     "key": "interact",
+     "cause": null,
+     "bits": [
+      "BLOCKING_INTERACT"
+     ],
+     "censored": false
+    }
+   ]
+  },
+  "Bone_08": {
+   "s": 38.633,
+   "frames": 2309,
+   "p_pause": 0.88481,
+   "p_quit": 0.88481,
+   "by_key": {
+    "transition": {
+     "s": 3.95,
+     "frames": 228,
+     "p_pause": 0.0,
+     "p_quit": 0.0
+    },
+    "entry": {
+     "s": 4.067,
+     "frames": 244,
+     "p_pause": 1.0,
+     "p_quit": 1.0
+    },
+    "interact": {
+     "s": 0.5,
+     "frames": 30,
+     "p_pause": 0.0,
+     "p_quit": 0.0
+    },
+    "free": {
+     "s": 30.116,
+     "frames": 1807,
+     "p_pause": 1.0,
+     "p_quit": 1.0
+    }
+   },
+   "blockers_s": {
+    "BLOCKING_INTERACT": 0.5,
+    "DISABLE_PAUSE": 0.867,
+    "GAME_STATE": 3.95
+   },
+   "dsq_s": 0.0,
+   "preload_s": 0.0,
+   "pause_windows": {
+    "n": 4,
+    "censored": 0,
+    "total_s": 4.283,
+    "p50_s": 0.967,
+    "p95_s": 1.366,
+    "max_s": 1.433,
+    "by_key": {
+     "transition": {
+      "n": 3,
+      "p50_s": 0.95,
+      "max_s": 0.983
+     },
+     "interact": {
+      "n": 1,
+      "p50_s": 1.433,
+      "max_s": 1.433
+     }
+    }
+   },
+   "quit_windows": {
+    "n": 4,
+    "censored": 0,
+    "total_s": 4.283,
+    "p50_s": 0.967,
+    "p95_s": 1.366,
+    "max_s": 1.433,
+    "by_key": {
+     "transition": {
+      "n": 3,
+      "p50_s": 0.95,
+      "max_s": 0.983
+     },
+     "interact": {
+      "n": 1,
+      "p50_s": 1.433,
+      "max_s": 1.433
+     }
+    }
+   },
+   "long_windows": [
+    {
+     "src": "human/20260930_210337",
+     "f0": 98691,
+     "s": 1.433,
+     "key": "interact",
+     "cause": null,
+     "bits": [
+      "DISABLE_PAUSE",
+      "BLOCKING_INTERACT",
+      "GAME_STATE"
+     ],
+     "censored": false
+    }
+   ]
+  },
+  "Bone_09": {
+   "s": 46.133,
+   "frames": 2764,
+   "p_pause": 0.9104,
+   "p_quit": 0.9104,
+   "by_key": {
+    "transition": {
+     "s": 0.917,
+     "frames": 52,
+     "p_pause": 0.0,
+     "p_quit": 0.0
+    },
+    "entry": {
+     "s": 1.017,
+     "frames": 61,
+     "p_pause": 1.0,
+     "p_quit": 1.0
+    },
+    "hazard": {
+     "s": 2.95,
+     "frames": 176,
+     "p_pause": 0.17513,
+     "p_quit": 0.17513
+    },
+    "hurt0": {
+     "s": 0.933,
+     "frames": 56,
+     "p_pause": 0.23219,
+     "p_quit": 0.23219
+    },
+    "freeze": {
+     "s": 0.067,
+     "frames": 4,
+     "p_pause": 0.0,
+     "p_quit": 0.0
+    },
+    "hurt1": {
+     "s": 2.7,
+     "frames": 162,
+     "p_pause": 1.0,
+     "p_quit": 1.0
+    },
+    "free": {
+     "s": 37.55,
+     "frames": 2253,
+     "p_pause": 1.0,
+     "p_quit": 1.0
+    }
+   },
+   "blockers_s": {
+    "DISABLE_PAUSE": 3.15,
+    "GAME_STATE": 0.917,
+    "TIME_SLOWED": 1.217
+   },
+   "dsq_s": 0.0,
+   "preload_s": 0.0,
+   "pause_windows": {
+    "n": 6,
+    "censored": 0,
+    "total_s": 4.167,
+    "p50_s": 0.242,
+    "p95_s": 2.063,
+    "max_s": 2.433,
+    "by_key": {
+     "transition": {
+      "n": 1,
+      "p50_s": 0.95,
+      "max_s": 0.95
+     },
+     "hazard": {
+      "n": 1,
+      "p50_s": 2.433,
+      "max_s": 2.433
+     },
+     "hurt0": {
+      "n": 3,
+      "p50_s": 0.233,
+      "max_s": 0.25
+     },
+     "freeze": {
+      "n": 1,
+      "p50_s": 0.067,
+      "max_s": 0.067
+     }
+    }
+   },
+   "quit_windows": {
+    "n": 6,
+    "censored": 0,
+    "total_s": 4.167,
+    "p50_s": 0.242,
+    "p95_s": 2.063,
+    "max_s": 2.433,
+    "by_key": {
+     "transition": {
+      "n": 1,
+      "p50_s": 0.95,
+      "max_s": 0.95
+     },
+     "hazard": {
+      "n": 1,
+      "p50_s": 2.433,
+      "max_s": 2.433
+     },
+     "hurt0": {
+      "n": 3,
+      "p50_s": 0.233,
+      "max_s": 0.25
+     },
+     "freeze": {
+      "n": 1,
+      "p50_s": 0.067,
+      "max_s": 0.067
+     }
+    }
+   },
+   "long_windows": [
+    {
+     "src": "human/20260930_210337",
+     "f0": 105032,
+     "s": 2.433,
+     "key": "hazard",
+     "cause": "freeze:EnemyDeath",
+     "bits": [
+      "DISABLE_PAUSE",
+      "TIME_SLOWED"
+     ],
+     "censored": false
+    }
+   ]
+  },
+  "Bone_11": {
+   "s": 41.666,
+   "frames": 2495,
+   "p_pause": 0.9504,
+   "p_quit": 0.9504,
+   "by_key": {
+    "transition": {
+     "s": 1.833,
+     "frames": 105,
+     "p_pause": 0.0,
+     "p_quit": 0.0
+    },
+    "entry": {
+     "s": 2.033,
+     "frames": 122,
+     "p_pause": 1.0,
+     "p_quit": 1.0
+    },
+    "hurt0": {
+     "s": 0.317,
+     "frames": 19,
+     "p_pause": 0.26317,
+     "p_quit": 0.26317
+    },
+    "hurt1": {
+     "s": 0.9,
+     "frames": 54,
+     "p_pause": 1.0,
+     "p_quit": 1.0
+    },
+    "free": {
+     "s": 36.583,
+     "frames": 2195,
+     "p_pause": 1.0,
+     "p_quit": 1.0
+    }
+   },
+   "blockers_s": {
+    "DISABLE_PAUSE": 0.233,
+    "GAME_STATE": 1.833,
+    "TIME_SLOWED": 0.233
+   },
+   "dsq_s": 0.0,
+   "preload_s": 0.0,
+   "pause_windows": {
+    "n": 3,
+    "censored": 0,
+    "total_s": 2.333,
+    "p50_s": 0.95,
+    "p95_s": 1.13,
+    "max_s": 1.15,
+    "by_key": {
+     "transition": {
+      "n": 2,
+      "p50_s": 1.05,
+      "max_s": 1.15
+     },
+     "hurt0": {
+      "n": 1,
+      "p50_s": 0.233,
+      "max_s": 0.233
+     }
+    }
+   },
+   "quit_windows": {
+    "n": 3,
+    "censored": 0,
+    "total_s": 2.333,
+    "p50_s": 0.95,
+    "p95_s": 1.13,
+    "max_s": 1.15,
+    "by_key": {
+     "transition": {
+      "n": 2,
+      "p50_s": 1.05,
+      "max_s": 1.15
+     },
+     "hurt0": {
+      "n": 1,
+      "p50_s": 0.233,
+      "max_s": 0.233
+     }
+    }
+   },
+   "long_windows": []
+  },
+  "Bone_11b": {
+   "s": 14.417,
+   "frames": 863,
+   "p_pause": 0.93526,
+   "p_quit": 0.93526,
+   "by_key": {
+    "transition": {
+     "s": 0.933,
+     "frames": 54,
+     "p_pause": 0.0,
+     "p_quit": 0.0
+    },
+    "entry": {
+     "s": 1.017,
+     "frames": 61,
+     "p_pause": 1.0,
+     "p_quit": 1.0
+    },
+    "free": {
+     "s": 12.467,
+     "frames": 748,
+     "p_pause": 1.0,
+     "p_quit": 1.0
+    }
+   },
+   "blockers_s": {
+    "GAME_STATE": 0.933
+   },
+   "dsq_s": 0.0,
+   "preload_s": 0.0,
+   "pause_windows": {
+    "n": 1,
+    "censored": 0,
+    "total_s": 0.917,
+    "p50_s": 0.917,
+    "p95_s": 0.917,
+    "max_s": 0.917,
+    "by_key": {
+     "transition": {
+      "n": 1,
+      "p50_s": 0.917,
+      "max_s": 0.917
+     }
+    }
+   },
+   "quit_windows": {
+    "n": 1,
+    "censored": 0,
+    "total_s": 0.917,
+    "p50_s": 0.917,
+    "p95_s": 0.917,
+    "max_s": 0.917,
+    "by_key": {
+     "transition": {
+      "n": 1,
+      "p50_s": 0.917,
+      "max_s": 0.917
+     }
+    }
+   },
+   "long_windows": []
+  },
+  "Bone_12": {
+   "s": 67.366,
+   "frames": 4040,
+   "p_pause": 0.75186,
+   "p_quit": 0.75186,
+   "by_key": {
+    "transition": {
+     "s": 0.933,
+     "frames": 54,
+     "p_pause": 0.0,
+     "p_quit": 0.0
+    },
+    "entry": {
+     "s": 1.017,
+     "frames": 61,
+     "p_pause": 1.0,
+     "p_quit": 1.0
+    },
+    "hurt0": {
+     "s": 0.3,
+     "frames": 18,
+     "p_pause": 0.27771,
+     "p_quit": 0.27771
+    },
+    "hurt1": {
+     "s": 0.917,
+     "frames": 55,
+     "p_pause": 1.0,
+     "p_quit": 1.0
+    },
+    "interact": {
+     "s": 17.767,
+     "frames": 1066,
+     "p_pause": 0.12383,
+     "p_quit": 0.12383
+    },
+    "free": {
+     "s": 46.433,
+     "frames": 2786,
+     "p_pause": 1.0,
+     "p_quit": 1.0
+    }
+   },
+   "blockers_s": {
+    "BLOCKING_INTERACT": 12.05,
+    "DISABLE_PAUSE": 9.2,
+    "GAME_STATE": 0.933,
+    "TIME_SLOWED": 0.217
+   },
+   "dsq_s": 0.0,
+   "preload_s": 0.0,
+   "pause_windows": {
+    "n": 7,
+    "censored": 0,
+    "total_s": 16.917,
+    "p50_s": 1.883,
+    "p95_s": 5.5,
+    "max_s": 6.25,
+    "by_key": {
+     "transition": {
+      "n": 1,
+      "p50_s": 1.133,
+      "max_s": 1.133
+     },
+     "hurt0": {
+      "n": 1,
+      "p50_s": 0.217,
+      "max_s": 0.217
+     },
+     "interact": {
+      "n": 5,
+      "p50_s": 3.517,
+      "max_s": 6.25
+     }
+    }
+   },
+   "quit_windows": {
+    "n": 7,
+    "censored": 0,
+    "total_s": 16.917,
+    "p50_s": 1.883,
+    "p95_s": 5.5,
+    "max_s": 6.25,
+    "by_key": {
+     "transition": {
+      "n": 1,
+      "p50_s": 1.133,
+      "max_s": 1.133
+     },
+     "hurt0": {
+      "n": 1,
+      "p50_s": 0.217,
+      "max_s": 0.217
+     },
+     "interact": {
+      "n": 5,
+      "p50_s": 3.517,
+      "max_s": 6.25
+     }
+    }
+   },
+   "long_windows": [
+    {
+     "src": "human/20260930_210337",
+     "f0": 99401,
+     "s": 6.25,
+     "key": "interact",
+     "cause": null,
+     "bits": [
+      "DISABLE_PAUSE",
+      "BLOCKING_INTERACT"
+     ],
+     "censored": false
+    },
+    {
+     "src": "human/20260930_210337",
+     "f0": 99875,
+     "s": 3.75,
+     "key": "interact",
+     "cause": null,
+     "bits": [
+      "BLOCKING_INTERACT"
+     ],
+     "censored": false
+    },
+    {
+     "src": "human/20260930_210337",
+     "f0": 101412,
+     "s": 3.517,
+     "key": "interact",
+     "cause": null,
+     "bits": [
+      "DISABLE_PAUSE"
+     ],
+     "censored": false
+    },
+    {
+     "src": "human/20260930_210337",
+     "f0": 102235,
+     "s": 1.883,
+     "key": "interact",
+     "cause": null,
+     "bits": [
+      "BLOCKING_INTERACT"
+     ],
+     "censored": false
+    }
+   ]
+  },
+  "Bone_14": {
+   "s": 60.716,
+   "frames": 3639,
+   "p_pause": 0.97996,
+   "p_quit": 0.97996,
+   "by_key": {
+    "transition": {
+     "s": 0.967,
+     "frames": 54,
+     "p_pause": 0.0,
+     "p_quit": 0.0
+    },
+    "entry": {
+     "s": 1.017,
+     "frames": 61,
+     "p_pause": 1.0,
+     "p_quit": 1.0
+    },
+    "hurt0": {
+     "s": 0.317,
+     "frames": 19,
+     "p_pause": 0.21052,
+     "p_quit": 0.21052
+    },
+    "hurt1": {
+     "s": 0.9,
+     "frames": 54,
+     "p_pause": 1.0,
+     "p_quit": 1.0
+    },
+    "free": {
+     "s": 57.516,
+     "frames": 3451,
+     "p_pause": 1.0,
+     "p_quit": 1.0
+    }
+   },
+   "blockers_s": {
+    "DISABLE_PAUSE": 0.25,
+    "GAME_STATE": 0.967,
+    "TIME_SLOWED": 0.25
+   },
+   "dsq_s": 0.0,
+   "preload_s": 0.0,
+   "pause_windows": {
+    "n": 2,
+    "censored": 0,
+    "total_s": 1.217,
+    "p50_s": 0.608,
+    "p95_s": 0.931,
+    "max_s": 0.967,
+    "by_key": {
+     "transition": {
+      "n": 1,
+      "p50_s": 0.967,
+      "max_s": 0.967
+     },
+     "hurt0": {
+      "n": 1,
+      "p50_s": 0.25,
+      "max_s": 0.25
+     }
+    }
+   },
+   "quit_windows": {
+    "n": 2,
+    "censored": 0,
+    "total_s": 1.217,
+    "p50_s": 0.608,
+    "p95_s": 0.931,
+    "max_s": 0.967,
+    "by_key": {
+     "transition": {
+      "n": 1,
+      "p50_s": 0.967,
+      "max_s": 0.967
+     },
+     "hurt0": {
+      "n": 1,
+      "p50_s": 0.25,
+      "max_s": 0.25
+     }
+    }
+   },
+   "long_windows": []
+  },
+  "Bone_19": {
+   "s": 53.116,
+   "frames": 3183,
+   "p_pause": 0.89426,
+   "p_quit": 0.89426,
+   "by_key": {
+    "transition": {
+     "s": 0.983,
+     "frames": 57,
+     "p_pause": 0.0,
+     "p_quit": 0.0
+    },
+    "entry": {
+     "s": 1.0,
+     "frames": 60,
+     "p_pause": 1.0,
+     "p_quit": 1.0
+    },
+    "hazard": {
+     "s": 5.583,
+     "frames": 333,
+     "p_pause": 0.18209,
+     "p_quit": 0.18209
+    },
+    "freeze": {
+     "s": 0.067,
+     "frames": 4,
+     "p_pause": 0.0,
+     "p_quit": 0.0
+    },
+    "free": {
+     "s": 45.483,
+     "frames": 2729,
+     "p_pause": 1.0,
+     "p_quit": 1.0
+    }
+   },
+   "blockers_s": {
+    "DISABLE_PAUSE": 4.567,
+    "GAME_STATE": 0.983,
+    "TIME_SLOWED": 0.517
+   },
+   "dsq_s": 0.0,
+   "preload_s": 0.0,
+   "pause_windows": {
+    "n": 4,
+    "censored": 0,
+    "total_s": 5.533,
+    "p50_s": 1.583,
+    "p95_s": 2.295,
+    "max_s": 2.3,
+    "by_key": {
+     "transition": {
+      "n": 1,
+      "p50_s": 0.9,
+      "max_s": 0.9
+     },
+     "hazard": {
+      "n": 2,
+      "p50_s": 2.283,
+      "max_s": 2.3
+     },
+     "freeze": {
+      "n": 1,
+      "p50_s": 0.067,
+      "max_s": 0.067
+     }
+    }
+   },
+   "quit_windows": {
+    "n": 4,
+    "censored": 0,
+    "total_s": 5.533,
+    "p50_s": 1.583,
+    "p95_s": 2.295,
+    "max_s": 2.3,
+    "by_key": {
+     "transition": {
+      "n": 1,
+      "p50_s": 0.9,
+      "max_s": 0.9
+     },
+     "hazard": {
+      "n": 2,
+      "p50_s": 2.283,
+      "max_s": 2.3
+     },
+     "freeze": {
+      "n": 1,
+      "p50_s": 0.067,
+      "max_s": 0.067
+     }
+    }
+   },
+   "long_windows": [
+    {
+     "src": "human/20260930_210337",
+     "f0": 93286,
+     "s": 2.3,
+     "key": "hazard",
+     "cause": "hazard_death:SPIKES",
+     "bits": [
+      "DISABLE_PAUSE",
+      "TIME_SLOWED"
+     ],
+     "censored": false
+    },
+    {
+     "src": "human/20260930_210337",
+     "f0": 93464,
+     "s": 2.267,
+     "key": "hazard",
+     "cause": "hazard_death:SPIKES",
+     "bits": [
+      "DISABLE_PAUSE",
+      "TIME_SLOWED"
+     ],
+     "censored": false
+    }
+   ]
+  },
+  "Bone_East_01": {
+   "s": 55.083,
+   "frames": 3264,
+   "p_pause": 0.81513,
+   "p_quit": 0.81513,
+   "by_key": {
+    "transition": {
+     "s": 3.083,
+     "frames": 144,
+     "p_pause": 0.0,
+     "p_quit": 0.0
+    },
+    "entry": {
+     "s": 3.017,
+     "frames": 181,
+     "p_pause": 1.0,
+     "p_quit": 1.0
+    },
+    "freeze": {
+     "s": 0.2,
+     "frames": 12,
+     "p_pause": 0.0,
+     "p_quit": 0.0
+    },
+    "interact": {
+     "s": 6.9,
+     "frames": 414,
+     "p_pause": 0.0,
+     "p_quit": 0.0
+    },
+    "free": {
+     "s": 41.883,
+     "frames": 2513,
+     "p_pause": 1.0,
+     "p_quit": 1.0
+    }
+   },
+   "blockers_s": {
+    "BLOCKING_INTERACT": 6.9,
+    "GAME_STATE": 3.083,
+    "TIME_SLOWED": 0.2
+   },
+   "dsq_s": 0.0,
+   "preload_s": 0.0,
+   "pause_windows": {
+    "n": 6,
+    "censored": 0,
+    "total_s": 9.717,
+    "p50_s": 0.8,
+    "p95_s": 5.429,
+    "max_s": 6.9,
+    "by_key": {
+     "transition": {
+      "n": 3,
+      "p50_s": 0.967,
+      "max_s": 1.017
+     },
+     "freeze": {
+      "n": 2,
+      "p50_s": 0.1,
+      "max_s": 0.133
+     },
+     "interact": {
+      "n": 1,
+      "p50_s": 6.9,
+      "max_s": 6.9
+     }
+    }
+   },
+   "quit_windows": {
+    "n": 6,
+    "censored": 0,
+    "total_s": 9.717,
+    "p50_s": 0.8,
+    "p95_s": 5.429,
+    "max_s": 6.9,
+    "by_key": {
+     "transition": {
+      "n": 3,
+      "p50_s": 0.967,
+      "max_s": 1.017
+     },
+     "freeze": {
+      "n": 2,
+      "p50_s": 0.1,
+      "max_s": 0.133
+     },
+     "interact": {
+      "n": 1,
+      "p50_s": 6.9,
+      "max_s": 6.9
+     }
+    }
+   },
+   "long_windows": [
+    {
+     "src": "human/20260930_210337",
+     "f0": 127789,
+     "s": 6.9,
+     "key": "interact",
+     "cause": null,
+     "bits": [
+      "BLOCKING_INTERACT"
+     ],
+     "censored": false
+    }
+   ]
+  },
+  "Bone_East_02": {
+   "s": 24.833,
+   "frames": 1488,
+   "p_pause": 0.97517,
+   "p_quit": 0.97517,
+   "by_key": {
+    "transition": {
+     "s": 0.617,
+     "frames": 35,
+     "p_pause": 0.0,
+     "p_quit": 0.0
+    },
+    "entry": {
+     "s": 1.0,
+     "frames": 60,
+     "p_pause": 1.0,
+     "p_quit": 1.0
+    },
+    "free": {
+     "s": 23.216,
+     "frames": 1393,
+     "p_pause": 1.0,
+     "p_quit": 1.0
+    }
+   },
+   "blockers_s": {
+    "GAME_STATE": 0.617
+   },
+   "dsq_s": 0.0,
+   "preload_s": 0.0,
+   "pause_windows": {
+    "n": 1,
+    "censored": 0,
+    "total_s": 0.65,
+    "p50_s": 0.65,
+    "p95_s": 0.65,
+    "max_s": 0.65,
+    "by_key": {
+     "transition": {
+      "n": 1,
+      "p50_s": 0.65,
+      "max_s": 0.65
+     }
+    }
+   },
+   "quit_windows": {
+    "n": 1,
+    "censored": 0,
+    "total_s": 0.65,
+    "p50_s": 0.65,
+    "p95_s": 0.65,
+    "max_s": 0.65,
+    "by_key": {
+     "transition": {
+      "n": 1,
+      "p50_s": 0.65,
+      "max_s": 0.65
+     }
+    }
+   },
+   "long_windows": []
+  },
+  "Bone_East_02b": {
+   "s": 28.933,
+   "frames": 1732,
+   "p_pause": 0.9591,
+   "p_quit": 0.9591,
+   "by_key": {
+    "transition": {
+     "s": 0.65,
+     "frames": 35,
+     "p_pause": 0.0,
+     "p_quit": 0.0
+    },
+    "entry": {
+     "s": 1.017,
+     "frames": 61,
+     "p_pause": 1.0,
+     "p_quit": 1.0
+    },
+    "hurt0": {
+     "s": 0.617,
+     "frames": 37,
+     "p_pause": 0.24326,
+     "p_quit": 0.24326
+    },
+    "freeze": {
+     "s": 0.067,
+     "frames": 4,
+     "p_pause": 0.0,
+     "p_quit": 0.0
+    },
+    "hurt1": {
+     "s": 1.8,
+     "frames": 108,
+     "p_pause": 1.0,
+     "p_quit": 1.0
+    },
+    "free": {
+     "s": 24.783,
+     "frames": 1487,
+     "p_pause": 1.0,
+     "p_quit": 1.0
+    }
+   },
+   "blockers_s": {
+    "DISABLE_PAUSE": 0.467,
+    "GAME_STATE": 0.65,
+    "TIME_SLOWED": 0.533
+   },
+   "dsq_s": 0.0,
+   "preload_s": 0.0,
+   "pause_windows": {
+    "n": 4,
+    "censored": 0,
+    "total_s": 1.183,
+    "p50_s": 0.233,
+    "p95_s": 0.587,
+    "max_s": 0.65,
+    "by_key": {
+     "transition": {
+      "n": 1,
+      "p50_s": 0.65,
+      "max_s": 0.65
+     },
+     "hurt0": {
+      "n": 2,
+      "p50_s": 0.233,
+      "max_s": 0.233
+     },
+     "freeze": {
+      "n": 1,
+      "p50_s": 0.067,
+      "max_s": 0.067
+     }
+    }
+   },
+   "quit_windows": {
+    "n": 4,
+    "censored": 0,
+    "total_s": 1.183,
+    "p50_s": 0.233,
+    "p95_s": 0.587,
+    "max_s": 0.65,
+    "by_key": {
+     "transition": {
+      "n": 1,
+      "p50_s": 0.65,
+      "max_s": 0.65
+     },
+     "hurt0": {
+      "n": 2,
+      "p50_s": 0.233,
+      "max_s": 0.233
+     },
+     "freeze": {
+      "n": 1,
+      "p50_s": 0.067,
+      "max_s": 0.067
+     }
+    }
+   },
+   "long_windows": []
+  },
+  "Bone_East_03": {
+   "s": 56.833,
+   "frames": 3402,
+   "p_pause": 0.94399,
+   "p_quit": 0.94399,
+   "by_key": {
+    "transition": {
+     "s": 1.9,
+     "frames": 106,
+     "p_pause": 0.0,
+     "p_quit": 0.0
+    },
+    "entry": {
+     "s": 1.883,
+     "frames": 113,
+     "p_pause": 1.0,
+     "p_quit": 1.0
+    },
+    "hurt0": {
+     "s": 1.25,
+     "frames": 75,
+     "p_pause": 0.24001,
+     "p_quit": 0.24001
+    },
+    "freeze": {
+     "s": 0.333,
+     "frames": 20,
+     "p_pause": 0.0,
+     "p_quit": 0.0
+    },
+    "hurt1": {
+     "s": 3.617,
+     "frames": 217,
+     "p_pause": 1.0,
+     "p_quit": 1.0
+    },
+    "free": {
+     "s": 47.849,
+     "frames": 2871,
+     "p_pause": 1.0,
+     "p_quit": 1.0
+    }
+   },
+   "blockers_s": {
+    "DISABLE_PAUSE": 0.95,
+    "GAME_STATE": 1.9,
+    "TIME_SLOWED": 1.283
+   },
+   "dsq_s": 0.0,
+   "preload_s": 0.0,
+   "pause_windows": {
+    "n": 9,
+    "censored": 0,
+    "total_s": 3.283,
+    "p50_s": 0.233,
+    "p95_s": 1.003,
+    "max_s": 1.017,
+    "by_key": {
+     "transition": {
+      "n": 2,
+      "p50_s": 1.0,
+      "max_s": 1.017
+     },
+     "hurt0": {
+      "n": 4,
+      "p50_s": 0.233,
+      "max_s": 0.25
+     },
+     "freeze": {
+      "n": 3,
+      "p50_s": 0.133,
+      "max_s": 0.133
+     }
+    }
+   },
+   "quit_windows": {
+    "n": 9,
+    "censored": 0,
+    "total_s": 3.283,
+    "p50_s": 0.233,
+    "p95_s": 1.003,
+    "max_s": 1.017,
+    "by_key": {
+     "transition": {
+      "n": 2,
+      "p50_s": 1.0,
+      "max_s": 1.017
+     },
+     "hurt0": {
+      "n": 4,
+      "p50_s": 0.233,
+      "max_s": 0.25
+     },
+     "freeze": {
+      "n": 3,
+      "p50_s": 0.133,
+      "max_s": 0.133
+     }
+    }
+   },
+   "long_windows": []
+  },
+  "Bone_East_04": {
+   "s": 69.332,
+   "frames": 4153,
+   "p_pause": 0.94567,
+   "p_quit": 0.94567,
+   "by_key": {
+    "transition": {
+     "s": 2.933,
+     "frames": 169,
+     "p_pause": 0.0,
+     "p_quit": 0.0
+    },
+    "entry": {
+     "s": 3.017,
+     "frames": 181,
+     "p_pause": 1.0,
+     "p_quit": 1.0
+    },
+    "hurt0": {
+     "s": 0.933,
+     "frames": 56,
+     "p_pause": 0.24992,
+     "p_quit": 0.24992
+    },
+    "freeze": {
+     "s": 0.133,
+     "frames": 8,
+     "p_pause": 0.0,
+     "p_quit": 0.0
+    },
+    "hurt1": {
+     "s": 2.683,
+     "frames": 161,
+     "p_pause": 1.0,
+     "p_quit": 1.0
+    },
+    "free": {
+     "s": 59.633,
+     "frames": 3578,
+     "p_pause": 1.0,
+     "p_quit": 1.0
+    }
+   },
+   "blockers_s": {
+    "DISABLE_PAUSE": 0.7,
+    "GAME_STATE": 2.933,
+    "TIME_SLOWED": 0.833
+   },
+   "dsq_s": 0.0,
+   "preload_s": 0.0,
+   "pause_windows": {
+    "n": 8,
+    "censored": 0,
+    "total_s": 3.733,
+    "p50_s": 0.233,
+    "p95_s": 0.988,
+    "max_s": 1.0,
+    "by_key": {
+     "transition": {
+      "n": 3,
+      "p50_s": 0.967,
+      "max_s": 1.0
+     },
+     "hurt0": {
+      "n": 3,
+      "p50_s": 0.233,
+      "max_s": 0.233
+     },
+     "freeze": {
+      "n": 2,
+      "p50_s": 0.067,
+      "max_s": 0.067
+     }
+    }
+   },
+   "quit_windows": {
+    "n": 8,
+    "censored": 0,
+    "total_s": 3.733,
+    "p50_s": 0.233,
+    "p95_s": 0.988,
+    "max_s": 1.0,
+    "by_key": {
+     "transition": {
+      "n": 3,
+      "p50_s": 0.967,
+      "max_s": 1.0
+     },
+     "hurt0": {
+      "n": 3,
+      "p50_s": 0.233,
+      "max_s": 0.233
+     },
+     "freeze": {
+      "n": 2,
+      "p50_s": 0.067,
+      "max_s": 0.067
+     }
+    }
+   },
+   "long_windows": []
+  },
+  "Bone_East_04b": {
+   "s": 27.9,
+   "frames": 1670,
+   "p_pause": 0.91637,
+   "p_quit": 0.91637,
+   "by_key": {
+    "transition": {
+     "s": 1.817,
+     "frames": 105,
+     "p_pause": 0.0,
+     "p_quit": 0.0
+    },
+    "entry": {
+     "s": 2.017,
+     "frames": 121,
+     "p_pause": 1.0,
+     "p_quit": 1.0
+    },
+    "hurt0": {
+     "s": 0.317,
+     "frames": 19,
+     "p_pause": 0.21055,
+     "p_quit": 0.21055
+    },
+    "freeze": {
+     "s": 0.267,
+     "frames": 16,
+     "p_pause": 0.0,
+     "p_quit": 0.0
+    },
+    "hurt1": {
+     "s": 0.9,
+     "frames": 54,
+     "p_pause": 1.0,
+     "p_quit": 1.0
+    },
+    "free": {
+     "s": 22.583,
+     "frames": 1355,
+     "p_pause": 1.0,
+     "p_quit": 1.0
+    }
+   },
+   "blockers_s": {
+    "DISABLE_PAUSE": 0.25,
+    "GAME_STATE": 1.817,
+    "TIME_SLOWED": 0.517
+   },
+   "dsq_s": 0.0,
+   "preload_s": 0.0,
+   "pause_windows": {
+    "n": 5,
+    "censored": 0,
+    "total_s": 2.483,
+    "p50_s": 0.25,
+    "p95_s": 0.983,
+    "max_s": 0.983,
+    "by_key": {
+     "transition": {
+      "n": 2,
+      "p50_s": 0.983,
+      "max_s": 0.983
+     },
+     "hurt0": {
+      "n": 1,
+      "p50_s": 0.25,
+      "max_s": 0.25
+     },
+     "freeze": {
+      "n": 2,
+      "p50_s": 0.133,
+      "max_s": 0.133
+     }
+    }
+   },
+   "quit_windows": {
+    "n": 5,
+    "censored": 0,
+    "total_s": 2.483,
+    "p50_s": 0.25,
+    "p95_s": 0.983,
+    "max_s": 0.983,
+    "by_key": {
+     "transition": {
+      "n": 2,
+      "p50_s": 0.983,
+      "max_s": 0.983
+     },
+     "hurt0": {
+      "n": 1,
+      "p50_s": 0.25,
+      "max_s": 0.25
+     },
+     "freeze": {
+      "n": 2,
+      "p50_s": 0.133,
+      "max_s": 0.133
+     }
+    }
+   },
+   "long_windows": []
+  },
+  "Bone_East_05": {
+   "s": 48.033,
+   "frames": 2872,
+   "p_pause": 0.44969,
+   "p_quit": 0.44969,
+   "by_key": {
+    "transition": {
+     "s": 1.967,
+     "frames": 108,
+     "p_pause": 0.0,
+     "p_quit": 0.0
+    },
+    "entry": {
+     "s": 1.267,
+     "frames": 76,
+     "p_pause": 1.0,
+     "p_quit": 1.0
+    },
+    "freeze": {
+     "s": 0.133,
+     "frames": 8,
+     "p_pause": 0.0,
+     "p_quit": 0.0
+    },
+    "interact": {
+     "s": 24.333,
+     "frames": 1460,
+     "p_pause": 0.0,
+     "p_quit": 0.0
+    },
+    "free": {
+     "s": 20.333,
+     "frames": 1220,
+     "p_pause": 1.0,
+     "p_quit": 1.0
+    }
+   },
+   "blockers_s": {
+    "BLOCKING_INTERACT": 24.333,
+    "DISABLE_PAUSE": 7.183,
+    "GAME_STATE": 1.967,
+    "TIME_SLOWED": 0.133
+   },
+   "dsq_s": 0.0,
+   "preload_s": 0.0,
+   "pause_windows": {
+    "n": 4,
+    "censored": 0,
+    "total_s": 26.366,
+    "p50_s": 0.95,
+    "p95_s": 20.828,
+    "max_s": 24.333,
+    "by_key": {
+     "transition": {
+      "n": 2,
+      "p50_s": 0.95,
+      "max_s": 0.967
+     },
+     "freeze": {
+      "n": 1,
+      "p50_s": 0.133,
+      "max_s": 0.133
+     },
+     "interact": {
+      "n": 1,
+      "p50_s": 24.333,
+      "max_s": 24.333
+     }
+    }
+   },
+   "quit_windows": {
+    "n": 4,
+    "censored": 0,
+    "total_s": 26.366,
+    "p50_s": 0.95,
+    "p95_s": 20.828,
+    "max_s": 24.333,
+    "by_key": {
+     "transition": {
+      "n": 2,
+      "p50_s": 0.95,
+      "max_s": 0.967
+     },
+     "freeze": {
+      "n": 1,
+      "p50_s": 0.133,
+      "max_s": 0.133
+     },
+     "interact": {
+      "n": 1,
+      "p50_s": 24.333,
+      "max_s": 24.333
+     }
+    }
+   },
+   "long_windows": [
+    {
+     "src": "human/20260930_210337",
+     "f0": 124703,
+     "s": 24.333,
+     "key": "interact",
+     "cause": null,
+     "bits": [
+      "DISABLE_PAUSE",
+      "BLOCKING_INTERACT"
+     ],
+     "censored": false
+    }
+   ]
+  },
+  "Bone_East_07": {
+   "s": 13.117,
+   "frames": 780,
+   "p_pause": 0.90216,
+   "p_quit": 0.90216,
+   "by_key": {
+    "transition": {
+     "s": 1.283,
+     "frames": 70,
+     "p_pause": 0.0,
+     "p_quit": 0.0
+    },
+    "entry": {
+     "s": 2.033,
+     "frames": 122,
+     "p_pause": 1.0,
+     "p_quit": 1.0
+    },
+    "free": {
+     "s": 9.8,
+     "frames": 588,
+     "p_pause": 1.0,
+     "p_quit": 1.0
+    }
+   },
+   "blockers_s": {
+    "GAME_STATE": 1.283
+   },
+   "dsq_s": 0.0,
+   "preload_s": 0.0,
+   "pause_windows": {
+    "n": 2,
+    "censored": 0,
+    "total_s": 2.017,
+    "p50_s": 1.008,
+    "p95_s": 1.031,
+    "max_s": 1.033,
+    "by_key": {
+     "transition": {
+      "n": 2,
+      "p50_s": 1.008,
+      "max_s": 1.033
+     }
+    }
+   },
+   "quit_windows": {
+    "n": 2,
+    "censored": 0,
+    "total_s": 2.017,
+    "p50_s": 1.008,
+    "p95_s": 1.031,
+    "max_s": 1.033,
+    "by_key": {
+     "transition": {
+      "n": 2,
+      "p50_s": 1.008,
+      "max_s": 1.033
+     }
+    }
+   },
+   "long_windows": []
+  },
+  "Bone_East_08": {
+   "s": 20.666,
+   "frames": 1237,
+   "p_pause": 0.95,
+   "p_quit": 0.95,
+   "by_key": {
+    "transition": {
+     "s": 1.033,
+     "frames": 59,
+     "p_pause": 0.0,
+     "p_quit": 0.0
+    },
+    "entry": {
+     "s": 1.017,
+     "frames": 61,
+     "p_pause": 1.0,
+     "p_quit": 1.0
+    },
+    "free": {
+     "s": 18.616,
+     "frames": 1117,
+     "p_pause": 1.0,
+     "p_quit": 1.0
+    }
+   },
+   "blockers_s": {
+    "GAME_STATE": 1.033
+   },
+   "dsq_s": 0.0,
+   "preload_s": 0.0,
+   "pause_windows": {
+    "n": 1,
+    "censored": 0,
+    "total_s": 0.633,
+    "p50_s": 0.633,
+    "p95_s": 0.633,
+    "max_s": 0.633,
+    "by_key": {
+     "transition": {
+      "n": 1,
+      "p50_s": 0.633,
+      "max_s": 0.633
+     }
+    }
+   },
+   "quit_windows": {
+    "n": 1,
+    "censored": 0,
+    "total_s": 0.633,
+    "p50_s": 0.633,
+    "p95_s": 0.633,
+    "max_s": 0.633,
+    "by_key": {
+     "transition": {
+      "n": 1,
+      "p50_s": 0.633,
+      "max_s": 0.633
+     }
+    }
+   },
+   "long_windows": []
+  },
+  "Bone_East_09": {
+   "s": 33.266,
+   "frames": 1992,
+   "p_pause": 0.93237,
+   "p_quit": 0.93237,
+   "by_key": {
+    "transition": {
+     "s": 1.75,
+     "frames": 101,
+     "p_pause": 0.0,
+     "p_quit": 0.0
+    },
+    "entry": {
+     "s": 2.033,
+     "frames": 122,
+     "p_pause": 1.0,
+     "p_quit": 1.0
+    },
+    "interact": {
+     "s": 0.5,
+     "frames": 30,
+     "p_pause": 0.0,
+     "p_quit": 0.0
+    },
+    "free": {
+     "s": 28.983,
+     "frames": 1739,
+     "p_pause": 1.0,
+     "p_quit": 1.0
+    }
+   },
+   "blockers_s": {
+    "BLOCKING_INTERACT": 0.5,
+    "DISABLE_PAUSE": 0.867,
+    "GAME_STATE": 1.75
+   },
+   "dsq_s": 0.0,
+   "preload_s": 0.0,
+   "pause_windows": {
+    "n": 2,
+    "censored": 0,
+    "total_s": 2.45,
+    "p50_s": 1.225,
+    "p95_s": 1.427,
+    "max_s": 1.45,
+    "by_key": {
+     "transition": {
+      "n": 1,
+      "p50_s": 1.0,
+      "max_s": 1.0
+     },
+     "interact": {
+      "n": 1,
+      "p50_s": 1.45,
+      "max_s": 1.45
+     }
+    }
+   },
+   "quit_windows": {
+    "n": 2,
+    "censored": 0,
+    "total_s": 2.45,
+    "p50_s": 1.225,
+    "p95_s": 1.427,
+    "max_s": 1.45,
+    "by_key": {
+     "transition": {
+      "n": 1,
+      "p50_s": 1.0,
+      "max_s": 1.0
+     },
+     "interact": {
+      "n": 1,
+      "p50_s": 1.45,
+      "max_s": 1.45
+     }
+    }
+   },
+   "long_windows": [
+    {
+     "src": "human/20260930_210337",
+     "f0": 143942,
+     "s": 1.45,
+     "key": "interact",
+     "cause": null,
+     "bits": [
+      "DISABLE_PAUSE",
+      "BLOCKING_INTERACT",
+      "GAME_STATE"
+     ],
+     "censored": false
+    }
+   ]
+  },
+  "Bone_East_12": {
+   "s": 133.832,
+   "frames": 8025,
+   "p_pause": 0.90062,
+   "p_quit": 0.90062,
+   "by_key": {
+    "transition": {
+     "s": 1.25,
+     "frames": 70,
+     "p_pause": 0.0,
+     "p_quit": 0.0
+    },
+    "entry": {
+     "s": 1.5,
+     "frames": 90,
+     "p_pause": 1.0,
+     "p_quit": 1.0
+    },
+    "hurt0": {
+     "s": 0.6,
+     "frames": 36,
+     "p_pause": 0.19457,
+     "p_quit": 0.19457
+    },
+    "freeze": {
+     "s": 3.8,
+     "frames": 228,
+     "p_pause": 0.0,
+     "p_quit": 0.0
+    },
+    "hurt1": {
+     "s": 1.8,
+     "frames": 108,
+     "p_pause": 1.0,
+     "p_quit": 1.0
+    },
+    "interact": {
+     "s": 5.717,
+     "frames": 343,
+     "p_pause": 0.0,
+     "p_quit": 0.0
+    },
+    "free": {
+     "s": 119.165,
+     "frames": 7150,
+     "p_pause": 0.9828,
+     "p_quit": 0.9828
+    }
+   },
+   "blockers_s": {
+    "BLOCKING_INTERACT": 5.717,
+    "DISABLE_PAUSE": 8.25,
+    "GAME_STATE": 1.25,
+    "TIME_SLOWED": 4.283
+   },
+   "dsq_s": 0.0,
+   "preload_s": 0.0,
+   "pause_windows": {
+    "n": 15,
+    "censored": 0,
+    "total_s": 13.283,
+    "p50_s": 0.383,
+    "p95_s": 3.298,
+    "max_s": 7.767,
+    "by_key": {
+     "transition": {
+      "n": 2,
+      "p50_s": 0.617,
+      "max_s": 0.617
+     },
+     "hurt0": {
+      "n": 2,
+      "p50_s": 0.242,
+      "max_s": 0.25
+     },
+     "freeze": {
+      "n": 10,
+      "p50_s": 0.383,
+      "max_s": 1.383
+     },
+     "free": {
+      "n": 1,
+      "p50_s": 7.767,
+      "max_s": 7.767
+     }
+    }
+   },
+   "quit_windows": {
+    "n": 15,
+    "censored": 0,
+    "total_s": 13.283,
+    "p50_s": 0.383,
+    "p95_s": 3.298,
+    "max_s": 7.767,
+    "by_key": {
+     "transition": {
+      "n": 2,
+      "p50_s": 0.617,
+      "max_s": 0.617
+     },
+     "hurt0": {
+      "n": 2,
+      "p50_s": 0.242,
+      "max_s": 0.25
+     },
+     "freeze": {
+      "n": 10,
+      "p50_s": 0.383,
+      "max_s": 1.383
+     },
+     "free": {
+      "n": 1,
+      "p50_s": 7.767,
+      "max_s": 7.767
+     }
+    }
+   },
+   "long_windows": [
+    {
+     "src": "human/20260930_210337",
+     "f0": 129235,
+     "s": 7.767,
+     "key": "free",
+     "cause": null,
+     "bits": [
+      "DISABLE_PAUSE",
+      "BLOCKING_INTERACT"
+     ],
+     "censored": false
+    },
+    {
+     "src": "human/20260930_210337",
+     "f0": 135375,
+     "s": 1.383,
+     "key": "freeze",
+     "cause": "freeze:BossDeathSlow",
+     "bits": [
+      "TIME_SLOWED"
+     ],
+     "censored": false
+    }
+   ]
+  },
+  "Bone_East_14": {
+   "s": 163.098,
+   "frames": 9768,
+   "p_pause": 0.92367,
+   "p_quit": 0.92367,
+   "by_key": {
+    "transition": {
+     "s": 2.9,
+     "frames": 156,
+     "p_pause": 0.0,
+     "p_quit": 0.0
+    },
+    "entry": {
+     "s": 4.05,
+     "frames": 243,
+     "p_pause": 1.0,
+     "p_quit": 1.0
+    },
+    "hurt0": {
+     "s": 0.917,
+     "frames": 55,
+     "p_pause": 0.23639,
+     "p_quit": 0.23639
+    },
+    "freeze": {
+     "s": 0.6,
+     "frames": 36,
+     "p_pause": 0.0,
+     "p_quit": 0.0
+    },
+    "hurt1": {
+     "s": 2.733,
+     "frames": 164,
+     "p_pause": 1.0,
+     "p_quit": 1.0
+    },
+    "interact": {
+     "s": 7.95,
+     "frames": 477,
+     "p_pause": 0.0,
+     "p_quit": 0.0
+    },
+    "free": {
+     "s": 143.948,
+     "frames": 8637,
+     "p_pause": 0.99792,
+     "p_quit": 0.99792
+    }
+   },
+   "blockers_s": {
+    "BLOCKING_INTERACT": 7.95,
+    "DISABLE_PAUSE": 0.7,
+    "GAME_STATE": 2.9,
+    "NOT_ACCEPTING_INPUT": 0.2,
+    "PAUSE_LOCKOUT": 0.3,
+    "TIME_SLOWED": 1.3
+   },
+   "dsq_s": 0.0,
+   "preload_s": 0.0,
+   "pause_windows": {
+    "n": 16,
+    "censored": 0,
+    "total_s": 11.833,
+    "p50_s": 0.267,
+    "p95_s": 2.087,
+    "max_s": 2.1,
+    "by_key": {
+     "transition": {
+      "n": 3,
+      "p50_s": 0.667,
+      "max_s": 0.967
+     },
+     "hurt0": {
+      "n": 3,
+      "p50_s": 0.233,
+      "max_s": 0.233
+     },
+     "freeze": {
+      "n": 5,
+      "p50_s": 0.133,
+      "max_s": 0.133
+     },
+     "interact": {
+      "n": 4,
+      "p50_s": 1.992,
+      "max_s": 2.1
+     },
+     "free": {
+      "n": 1,
+      "p50_s": 0.3,
+      "max_s": 0.3
+     }
+    }
+   },
+   "quit_windows": {
+    "n": 16,
+    "censored": 0,
+    "total_s": 11.833,
+    "p50_s": 0.267,
+    "p95_s": 2.087,
+    "max_s": 2.1,
+    "by_key": {
+     "transition": {
+      "n": 3,
+      "p50_s": 0.667,
+      "max_s": 0.967
+     },
+     "hurt0": {
+      "n": 3,
+      "p50_s": 0.233,
+      "max_s": 0.233
+     },
+     "freeze": {
+      "n": 5,
+      "p50_s": 0.133,
+      "max_s": 0.133
+     },
+     "interact": {
+      "n": 4,
+      "p50_s": 1.992,
+      "max_s": 2.1
+     },
+     "free": {
+      "n": 1,
+      "p50_s": 0.3,
+      "max_s": 0.3
+     }
+    }
+   },
+   "long_windows": [
+    {
+     "src": "human/20260930_210337",
+     "f0": 148584,
+     "s": 2.1,
+     "key": "interact",
+     "cause": null,
+     "bits": [
+      "BLOCKING_INTERACT"
+     ],
+     "censored": false
+    },
+    {
+     "src": "human/20260930_210337",
+     "f0": 149150,
+     "s": 2.083,
+     "key": "interact",
+     "cause": null,
+     "bits": [
+      "BLOCKING_INTERACT"
+     ],
+     "censored": false
+    },
+    {
+     "src": "human/20260930_210337",
+     "f0": 145970,
+     "s": 1.9,
+     "key": "interact",
+     "cause": null,
+     "bits": [
+      "BLOCKING_INTERACT"
+     ],
+     "censored": false
+    },
+    {
+     "src": "human/20260930_210337",
+     "f0": 147045,
+     "s": 1.867,
+     "key": "interact",
+     "cause": null,
+     "bits": [
+      "BLOCKING_INTERACT"
+     ],
+     "censored": false
+    }
+   ]
+  },
+  "Bone_East_14b": {
+   "s": 4.217,
+   "frames": 240,
+   "p_pause": 0.45848,
+   "p_quit": 0.45848,
+   "by_key": {
+    "transition": {
+     "s": 2.283,
+     "frames": 124,
+     "p_pause": 0.0,
+     "p_quit": 0.0
+    },
+    "entry": {
+     "s": 1.933,
+     "frames": 116,
+     "p_pause": 1.0,
+     "p_quit": 1.0
+    }
+   },
+   "blockers_s": {
+    "GAME_STATE": 2.283
+   },
+   "dsq_s": 0.0,
+   "preload_s": 0.0,
+   "pause_windows": {
+    "n": 3,
+    "censored": 0,
+    "total_s": 2.267,
+    "p50_s": 0.65,
+    "p95_s": 0.935,
+    "max_s": 0.967,
+    "by_key": {
+     "transition": {
+      "n": 3,
+      "p50_s": 0.65,
+      "max_s": 0.967
+     }
+    }
+   },
+   "quit_windows": {
+    "n": 3,
+    "censored": 0,
+    "total_s": 2.267,
+    "p50_s": 0.65,
+    "p95_s": 0.935,
+    "max_s": 0.967,
+    "by_key": {
+     "transition": {
+      "n": 3,
+      "p50_s": 0.65,
+      "max_s": 0.967
+     }
+    }
+   },
+   "long_windows": []
+  },
+  "Bone_East_15": {
+   "s": 7.167,
+   "frames": 426,
+   "p_pause": 0.86512,
+   "p_quit": 0.86512,
+   "by_key": {
+    "transition": {
+     "s": 0.967,
+     "frames": 54,
+     "p_pause": 0.0,
+     "p_quit": 0.0
+    },
+    "entry": {
+     "s": 1.0,
+     "frames": 60,
+     "p_pause": 1.0,
+     "p_quit": 1.0
+    },
+    "free": {
+     "s": 5.2,
+     "frames": 312,
+     "p_pause": 1.0,
+     "p_quit": 1.0
+    }
+   },
+   "blockers_s": {
+    "GAME_STATE": 0.967
+   },
+   "dsq_s": 0.0,
+   "preload_s": 0.0,
+   "pause_windows": {
+    "n": 1,
+    "censored": 0,
+    "total_s": 0.933,
+    "p50_s": 0.933,
+    "p95_s": 0.933,
+    "max_s": 0.933,
+    "by_key": {
+     "transition": {
+      "n": 1,
+      "p50_s": 0.933,
+      "max_s": 0.933
+     }
+    }
+   },
+   "quit_windows": {
+    "n": 1,
+    "censored": 0,
+    "total_s": 0.933,
+    "p50_s": 0.933,
+    "p95_s": 0.933,
+    "max_s": 0.933,
+    "by_key": {
+     "transition": {
+      "n": 1,
+      "p50_s": 0.933,
+      "max_s": 0.933
+     }
+    }
+   },
+   "long_windows": []
+  },
+  "Bone_East_21": {
+   "s": 9.217,
+   "frames": 548,
+   "p_pause": 0.34358,
+   "p_quit": 0.34358,
+   "by_key": {
+    "transition": {
+     "s": 0.983,
+     "frames": 54,
+     "p_pause": 0.0,
+     "p_quit": 0.0
+    },
+    "entry": {
+     "s": 1.017,
+     "frames": 61,
+     "p_pause": 1.0,
+     "p_quit": 1.0
+    },
+    "interact": {
+     "s": 5.067,
+     "frames": 304,
+     "p_pause": 0.0,
+     "p_quit": 0.0
+    },
+    "free": {
+     "s": 2.15,
+     "frames": 129,
+     "p_pause": 1.0,
+     "p_quit": 1.0
+    }
+   },
+   "blockers_s": {
+    "BLOCKING_INTERACT": 5.067,
+    "GAME_STATE": 0.983
+   },
+   "dsq_s": 0.0,
+   "preload_s": 0.0,
+   "pause_windows": {
+    "n": 2,
+    "censored": 0,
+    "total_s": 5.7,
+    "p50_s": 2.85,
+    "p95_s": 4.845,
+    "max_s": 5.067,
+    "by_key": {
+     "transition": {
+      "n": 1,
+      "p50_s": 0.633,
+      "max_s": 0.633
+     },
+     "interact": {
+      "n": 1,
+      "p50_s": 5.067,
+      "max_s": 5.067
+     }
+    }
+   },
+   "quit_windows": {
+    "n": 2,
+    "censored": 0,
+    "total_s": 5.7,
+    "p50_s": 2.85,
+    "p95_s": 4.845,
+    "max_s": 5.067,
+    "by_key": {
+     "transition": {
+      "n": 1,
+      "p50_s": 0.633,
+      "max_s": 0.633
+     },
+     "interact": {
+      "n": 1,
+      "p50_s": 5.067,
+      "max_s": 5.067
+     }
+    }
+   },
+   "long_windows": [
+    {
+     "src": "human/20260930_210337",
+     "f0": 140714,
+     "s": 5.067,
+     "key": "interact",
+     "cause": null,
+     "bits": [
+      "BLOCKING_INTERACT"
+     ],
+     "censored": false
+    }
+   ]
+  },
+  "Bone_East_Umbrella": {
+   "s": 20.216,
+   "frames": 1210,
+   "p_pause": 0.29349,
+   "p_quit": 0.29349,
+   "by_key": {
+    "transition": {
+     "s": 0.95,
+     "frames": 54,
+     "p_pause": 0.0,
+     "p_quit": 0.0
+    },
+    "entry": {
+     "s": 1.017,
+     "frames": 61,
+     "p_pause": 1.0,
+     "p_quit": 1.0
+    },
+    "interact": {
+     "s": 14.483,
+     "frames": 869,
+     "p_pause": 0.0794,
+     "p_quit": 0.0794
+    },
+    "free": {
+     "s": 3.767,
+     "frames": 226,
+     "p_pause": 1.0,
+     "p_quit": 1.0
+    }
+   },
+   "blockers_s": {
+    "BLOCKING_INTERACT": 13.333,
+    "DISABLE_PAUSE": 0.017,
+    "GAME_STATE": 0.95
+   },
+   "dsq_s": 0.0,
+   "preload_s": 0.0,
+   "pause_windows": {
+    "n": 3,
+    "censored": 0,
+    "total_s": 14.45,
+    "p50_s": 1.117,
+    "p95_s": 11.977,
+    "max_s": 13.183,
+    "by_key": {
+     "transition": {
+      "n": 1,
+      "p50_s": 1.117,
+      "max_s": 1.117
+     },
+     "interact": {
+      "n": 2,
+      "p50_s": 6.667,
+      "max_s": 13.183
+     }
+    }
+   },
+   "quit_windows": {
+    "n": 3,
+    "censored": 0,
+    "total_s": 14.45,
+    "p50_s": 1.117,
+    "p95_s": 11.977,
+    "max_s": 13.183,
+    "by_key": {
+     "transition": {
+      "n": 1,
+      "p50_s": 1.117,
+      "max_s": 1.117
+     },
+     "interact": {
+      "n": 2,
+      "p50_s": 6.667,
+      "max_s": 13.183
+     }
+    }
+   },
+   "long_windows": [
+    {
+     "src": "human/20260930_210337",
+     "f0": 144137,
+     "s": 13.183,
+     "key": "interact",
+     "cause": null,
+     "bits": [
+      "BLOCKING_INTERACT"
+     ],
+     "censored": false
+    }
+   ]
+  },
+  "Bonetown": {
+   "s": 156.648,
+   "frames": 9351,
+   "p_pause": 0.75061,
+   "p_quit": 0.75061,
+   "by_key": {
+    "transition": {
+     "s": 3.267,
+     "frames": 166,
+     "p_pause": 0.0,
+     "p_quit": 0.0
+    },
+    "entry": {
+     "s": 4.317,
+     "frames": 241,
+     "p_pause": 1.0,
+     "p_quit": 1.0
+    },
+    "hurt0": {
+     "s": 0.3,
+     "frames": 18,
+     "p_pause": 0.16662,
+     "p_quit": 0.16662
+    },
+    "freeze": {
+     "s": 0.133,
+     "frames": 8,
+     "p_pause": 0.0,
+     "p_quit": 0.0
+    },
+    "hurt1": {
+     "s": 0.917,
+     "frames": 55,
+     "p_pause": 1.0,
+     "p_quit": 1.0
+    },
+    "interact": {
+     "s": 36.466,
+     "frames": 2188,
+     "p_pause": 0.02879,
+     "p_quit": 0.02879
+    },
+    "free": {
+     "s": 111.249,
+     "frames": 6675,
+     "p_pause": 1.0,
+     "p_quit": 1.0
+    }
+   },
+   "blockers_s": {
+    "BLOCKING_INTERACT": 35.416,
+    "DISABLE_PAUSE": 1.25,
+    "GAME_STATE": 3.267,
+    "NOT_ACCEPTING_INPUT": 0.25,
+    "TIME_SLOWED": 0.383
+   },
+   "dsq_s": 0.0,
+   "preload_s": 0.0,
+   "pause_windows": {
+    "n": 9,
+    "censored": 0,
+    "total_s": 39.7,
+    "p50_s": 0.967,
+    "p95_s": 18.556,
+    "max_s": 23.283,
+    "by_key": {
+     "transition": {
+      "n": 3,
+      "p50_s": 0.967,
+      "max_s": 0.983
+     },
+     "hurt0": {
+      "n": 1,
+      "p50_s": 0.25,
+      "max_s": 0.25
+     },
+     "freeze": {
+      "n": 1,
+      "p50_s": 0.133,
+      "max_s": 0.133
+     },
+     "interact": {
+      "n": 4,
+      "p50_s": 6.483,
+      "max_s": 23.283
+     }
+    }
+   },
+   "quit_windows": {
+    "n": 9,
+    "censored": 0,
+    "total_s": 39.7,
+    "p50_s": 0.967,
+    "p95_s": 18.556,
+    "max_s": 23.283,
+    "by_key": {
+     "transition": {
+      "n": 3,
+      "p50_s": 0.967,
+      "max_s": 0.983
+     },
+     "hurt0": {
+      "n": 1,
+      "p50_s": 0.25,
+      "max_s": 0.25
+     },
+     "freeze": {
+      "n": 1,
+      "p50_s": 0.133,
+      "max_s": 0.133
+     },
+     "interact": {
+      "n": 4,
+      "p50_s": 6.483,
+      "max_s": 23.283
+     }
+    }
+   },
+   "long_windows": [
+    {
+     "src": "human/20260930_210337",
+     "f0": 78655,
+     "s": 23.283,
+     "key": "interact",
+     "cause": null,
+     "bits": [
+      "BLOCKING_INTERACT"
+     ],
+     "censored": false
+    },
+    {
+     "src": "human/20260930_210337",
+     "f0": 77820,
+     "s": 11.467,
+     "key": "interact",
+     "cause": null,
+     "bits": [
+      "BLOCKING_INTERACT"
+     ],
+     "censored": false
+    },
+    {
+     "src": "human/20260930_210337",
+     "f0": 80228,
+     "s": 1.5,
+     "key": "interact",
+     "cause": null,
+     "bits": [
+      "DISABLE_PAUSE",
+      "BLOCKING_INTERACT",
+      "GAME_STATE"
+     ],
+     "censored": false
+    }
+   ]
+  },
+  "Cinematic_Stag_travel": {
+   "s": 6.667,
+   "frames": 388,
+   "p_pause": 0.0,
+   "p_quit": 0.0,
+   "by_key": {
+    "transition": {
+     "s": 6.667,
+     "frames": 388,
+     "p_pause": 0.0,
+     "p_quit": 0.0
+    }
+   },
+   "blockers_s": {
+    "DISABLE_PAUSE": 6.667,
+    "GAME_STATE": 6.667,
+    "NOT_ACCEPTING_INPUT": 0.333
+   },
+   "dsq_s": 0.0,
+   "preload_s": 0.0,
+   "pause_windows": {
+    "n": 0,
+    "censored": 0
+   },
+   "quit_windows": {
+    "n": 0,
+    "censored": 0
+   },
+   "long_windows": []
+  },
+  "Dock_01": {
+   "s": 18.583,
+   "frames": 1108,
+   "p_pause": 0.89687,
+   "p_quit": 0.89687,
+   "by_key": {
+    "transition": {
+     "s": 1.917,
+     "frames": 108,
+     "p_pause": 0.0,
+     "p_quit": 0.0
+    },
+    "entry": {
+     "s": 2.017,
+     "frames": 121,
+     "p_pause": 1.0,
+     "p_quit": 1.0
+    },
+    "free": {
+     "s": 14.65,
+     "frames": 879,
+     "p_pause": 1.0,
+     "p_quit": 1.0
+    }
+   },
+   "blockers_s": {
+    "GAME_STATE": 1.917
+   },
+   "dsq_s": 0.0,
+   "preload_s": 0.0,
+   "pause_windows": {
+    "n": 2,
+    "censored": 0,
+    "total_s": 1.95,
+    "p50_s": 0.975,
+    "p95_s": 1.118,
+    "max_s": 1.133,
+    "by_key": {
+     "transition": {
+      "n": 2,
+      "p50_s": 0.975,
+      "max_s": 1.133
+     }
+    }
+   },
+   "quit_windows": {
+    "n": 2,
+    "censored": 0,
+    "total_s": 1.95,
+    "p50_s": 0.975,
+    "p95_s": 1.118,
+    "max_s": 1.133,
+    "by_key": {
+     "transition": {
+      "n": 2,
+      "p50_s": 0.975,
+      "max_s": 1.133
+     }
+    }
+   },
+   "long_windows": []
+  },
+  "Dock_08": {
+   "s": 13.917,
+   "frames": 832,
+   "p_pause": 0.93173,
+   "p_quit": 0.93173,
+   "by_key": {
+    "transition": {
+     "s": 0.95,
+     "frames": 54,
+     "p_pause": 0.0,
+     "p_quit": 0.0
+    },
+    "entry": {
+     "s": 1.017,
+     "frames": 61,
+     "p_pause": 1.0,
+     "p_quit": 1.0
+    },
+    "free": {
+     "s": 11.95,
+     "frames": 717,
+     "p_pause": 1.0,
+     "p_quit": 1.0
+    }
+   },
+   "blockers_s": {
+    "GAME_STATE": 0.95
+   },
+   "dsq_s": 0.0,
+   "preload_s": 0.0,
+   "pause_windows": {
+    "n": 1,
+    "censored": 0,
+    "total_s": 0.95,
+    "p50_s": 0.95,
+    "p95_s": 0.95,
+    "max_s": 0.95,
+    "by_key": {
+     "transition": {
+      "n": 1,
+      "p50_s": 0.95,
+      "max_s": 0.95
+     }
+    }
+   },
+   "quit_windows": {
+    "n": 1,
+    "censored": 0,
+    "total_s": 0.95,
+    "p50_s": 0.95,
+    "p95_s": 0.95,
+    "max_s": 0.95,
+    "by_key": {
+     "transition": {
+      "n": 1,
+      "p50_s": 0.95,
+      "max_s": 0.95
+     }
+    }
+   },
+   "long_windows": []
+  },
+  "Memory_Silk_Heart_BellBeast": {
+   "s": 81.916,
+   "frames": 4912,
+   "p_pause": 0.66389,
+   "p_quit": 0.66389,
+   "by_key": {
+    "transition": {
+     "s": 0.683,
+     "frames": 38,
+     "p_pause": 0.0,
+     "p_quit": 0.0
+    },
+    "entry": {
+     "s": 1.0,
+     "frames": 60,
+     "p_pause": 1.0,
+     "p_quit": 1.0
+    },
+    "freeze": {
+     "s": 0.133,
+     "frames": 8,
+     "p_pause": 0.0,
+     "p_quit": 0.0
+    },
+    "free": {
+     "s": 80.099,
+     "frames": 4806,
+     "p_pause": 0.66646,
+     "p_quit": 0.66646
+    }
+   },
+   "blockers_s": {
+    "DISABLE_PAUSE": 26.85,
+    "GAME_STATE": 0.683,
+    "TIME_SLOWED": 0.133
+   },
+   "dsq_s": 0.0,
+   "preload_s": 0.0,
+   "pause_windows": {
+    "n": 1,
+    "censored": 0,
+    "total_s": 27.633,
+    "p50_s": 27.633,
+    "p95_s": 27.633,
+    "max_s": 27.633,
+    "by_key": {
+     "free": {
+      "n": 1,
+      "p50_s": 27.633,
+      "max_s": 27.633
+     }
+    }
+   },
+   "quit_windows": {
+    "n": 1,
+    "censored": 0,
+    "total_s": 27.633,
+    "p50_s": 27.633,
+    "p95_s": 27.633,
+    "max_s": 27.633,
+    "by_key": {
+     "free": {
+      "n": 1,
+      "p50_s": 27.633,
+      "max_s": 27.633
+     }
+    }
+   },
+   "long_windows": [
+    {
+     "src": "human/20260930_210337",
+     "f0": 73336,
+     "s": 27.633,
+     "key": "free",
+     "cause": null,
+     "bits": [
+      "DISABLE_PAUSE",
+      "TIME_SLOWED",
+      "GAME_STATE"
+     ],
+     "censored": false
+    }
+   ]
+  },
+  "Menu_Title": {
+   "s": 67.766,
+   "frames": 3937,
+   "p_pause": 0.0,
+   "p_quit": 0.0,
+   "by_key": {
+    "transition": {
+     "s": 67.766,
+     "frames": 3937,
+     "p_pause": 0.0,
+     "p_quit": 0.0
+    }
+   },
+   "blockers_s": {
+    "GAME_STATE": 67.766,
+    "NOT_ACCEPTING_INPUT": 14.283,
+    "PAUSE_LOCKOUT": 2.15,
+    "TIME_SLOWED": 0.433
+   },
+   "dsq_s": 0.0,
+   "preload_s": 0.0,
+   "pause_windows": {
+    "n": 1,
+    "censored": 1,
+    "total_s": 14.317,
+    "p50_s": 14.317,
+    "p95_s": 14.317,
+    "max_s": 14.317,
+    "by_key": {
+     "transition": {
+      "n": 1,
+      "p50_s": 14.317,
+      "max_s": 14.317
+     }
+    }
+   },
+   "quit_windows": {
+    "n": 1,
+    "censored": 1,
+    "total_s": 14.317,
+    "p50_s": 14.317,
+    "p95_s": 14.317,
+    "max_s": 14.317,
+    "by_key": {
+     "transition": {
+      "n": 1,
+      "p50_s": 14.317,
+      "max_s": 14.317
+     }
+    }
+   },
+   "long_windows": []
+  },
+  "Mosstown_01": {
+   "s": 71.883,
+   "frames": 4305,
+   "p_pause": 0.95548,
+   "p_quit": 0.95548,
+   "by_key": {
+    "transition": {
+     "s": 2.817,
+     "frames": 161,
+     "p_pause": 0.0,
+     "p_quit": 0.0
+    },
+    "entry": {
+     "s": 3.033,
+     "frames": 182,
+     "p_pause": 1.0,
+     "p_quit": 1.0
+    },
+    "hurt0": {
+     "s": 0.317,
+     "frames": 19,
+     "p_pause": 0.21054,
+     "p_quit": 0.21054
+    },
+    "freeze": {
+     "s": 0.133,
+     "frames": 8,
+     "p_pause": 0.0,
+     "p_quit": 0.0
+    },
+    "hurt1": {
+     "s": 0.883,
+     "frames": 53,
+     "p_pause": 1.0,
+     "p_quit": 1.0
+    },
+    "free": {
+     "s": 64.699,
+     "frames": 3882,
+     "p_pause": 1.0,
+     "p_quit": 1.0
+    }
+   },
+   "blockers_s": {
+    "DISABLE_PAUSE": 0.25,
+    "GAME_STATE": 2.817,
+    "TIME_SLOWED": 0.383
+   },
+   "dsq_s": 0.0,
+   "preload_s": 0.0,
+   "pause_windows": {
+    "n": 5,
+    "censored": 0,
+    "total_s": 3.283,
+    "p50_s": 0.917,
+    "p95_s": 1.027,
+    "max_s": 1.05,
+    "by_key": {
+     "transition": {
+      "n": 3,
+      "p50_s": 0.933,
+      "max_s": 1.05
+     },
+     "hurt0": {
+      "n": 1,
+      "p50_s": 0.25,
+      "max_s": 0.25
+     },
+     "freeze": {
+      "n": 1,
+      "p50_s": 0.133,
+      "max_s": 0.133
+     }
+    }
+   },
+   "quit_windows": {
+    "n": 5,
+    "censored": 0,
+    "total_s": 3.283,
+    "p50_s": 0.917,
+    "p95_s": 1.027,
+    "max_s": 1.05,
+    "by_key": {
+     "transition": {
+      "n": 3,
+      "p50_s": 0.933,
+      "max_s": 1.05
+     },
+     "hurt0": {
+      "n": 1,
+      "p50_s": 0.25,
+      "max_s": 0.25
+     },
+     "freeze": {
+      "n": 1,
+      "p50_s": 0.133,
+      "max_s": 0.133
+     }
+    }
+   },
+   "long_windows": []
+  },
+  "Mosstown_02": {
+   "s": 192.414,
+   "frames": 11516,
+   "p_pause": 0.73781,
+   "p_quit": 0.73781,
+   "by_key": {
+    "transition": {
+     "s": 6.0,
+     "frames": 333,
+     "p_pause": 0.0,
+     "p_quit": 0.0
+    },
+    "entry": {
+     "s": 5.283,
+     "frames": 317,
+     "p_pause": 1.0,
+     "p_quit": 1.0
+    },
+    "hazard": {
+     "s": 5.633,
+     "frames": 336,
+     "p_pause": 0.18343,
+     "p_quit": 0.18343
+    },
+    "hurt0": {
+     "s": 0.633,
+     "frames": 38,
+     "p_pause": 0.26318,
+     "p_quit": 0.26318
+    },
+    "freeze": {
+     "s": 0.467,
+     "frames": 28,
+     "p_pause": 0.0,
+     "p_quit": 0.0
+    },
+    "hurt1": {
+     "s": 1.8,
+     "frames": 108,
+     "p_pause": 1.0,
+     "p_quit": 1.0
+    },
+    "interact": {
+     "s": 38.916,
+     "frames": 2335,
+     "p_pause": 0.0,
+     "p_quit": 0.0
+    },
+    "free": {
+     "s": 133.682,
+     "frames": 8021,
+     "p_pause": 1.0,
+     "p_quit": 1.0
+    }
+   },
+   "blockers_s": {
+    "BLOCKING_INTERACT": 38.916,
+    "DISABLE_PAUSE": 13.867,
+    "GAME_STATE": 6.0,
+    "TIME_SLOWED": 1.417
+   },
+   "dsq_s": 0.0,
+   "preload_s": 0.0,
+   "pause_windows": {
+    "n": 17,
+    "censored": 0,
+    "total_s": 49.983,
+    "p50_s": 0.883,
+    "p95_s": 9.213,
+    "max_s": 36.8,
+    "by_key": {
+     "transition": {
+      "n": 6,
+      "p50_s": 0.933,
+      "max_s": 0.95
+     },
+     "hazard": {
+      "n": 2,
+      "p50_s": 2.3,
+      "max_s": 2.317
+     },
+     "hurt0": {
+      "n": 2,
+      "p50_s": 0.233,
+      "max_s": 0.233
+     },
+     "freeze": {
+      "n": 5,
+      "p50_s": 0.067,
+      "max_s": 0.133
+     },
+     "interact": {
+      "n": 2,
+      "p50_s": 19.458,
+      "max_s": 36.8
+     }
+    }
+   },
+   "quit_windows": {
+    "n": 17,
+    "censored": 0,
+    "total_s": 49.983,
+    "p50_s": 0.883,
+    "p95_s": 9.213,
+    "max_s": 36.8,
+    "by_key": {
+     "transition": {
+      "n": 6,
+      "p50_s": 0.933,
+      "max_s": 0.95
+     },
+     "hazard": {
+      "n": 2,
+      "p50_s": 2.3,
+      "max_s": 2.317
+     },
+     "hurt0": {
+      "n": 2,
+      "p50_s": 0.233,
+      "max_s": 0.233
+     },
+     "freeze": {
+      "n": 5,
+      "p50_s": 0.067,
+      "max_s": 0.133
+     },
+     "interact": {
+      "n": 2,
+      "p50_s": 19.458,
+      "max_s": 36.8
+     }
+    }
+   },
+   "long_windows": [
+    {
+     "src": "human/20260930_210337",
+     "f0": 35340,
+     "s": 36.8,
+     "key": "interact",
+     "cause": null,
+     "bits": [
+      "DISABLE_PAUSE",
+      "BLOCKING_INTERACT"
+     ],
+     "censored": false
+    },
+    {
+     "src": "human/20260930_210337",
+     "f0": 49794,
+     "s": 2.317,
+     "key": "hazard",
+     "cause": "hazard_death:SPIKES",
+     "bits": [
+      "DISABLE_PAUSE",
+      "TIME_SLOWED"
+     ],
+     "censored": false
+    },
+    {
+     "src": "human/20260930_210337",
+     "f0": 50349,
+     "s": 2.283,
+     "key": "hazard",
+     "cause": "hazard_death:SPIKES",
+     "bits": [
+      "DISABLE_PAUSE",
+      "TIME_SLOWED"
+     ],
+     "censored": false
+    },
+    {
+     "src": "human/20260930_210337",
+     "f0": 38950,
+     "s": 2.117,
+     "key": "interact",
+     "cause": null,
+     "bits": [
+      "BLOCKING_INTERACT"
+     ],
+     "censored": false
+    }
+   ]
+  },
+  "Mosstown_02c": {
+   "s": 93.166,
+   "frames": 5583,
+   "p_pause": 0.35724,
+   "p_quit": 0.35724,
+   "by_key": {
+    "transition": {
+     "s": 1.9,
+     "frames": 108,
+     "p_pause": 0.0,
+     "p_quit": 0.0
+    },
+    "entry": {
+     "s": 2.033,
+     "frames": 122,
+     "p_pause": 1.0,
+     "p_quit": 1.0
+    },
+    "hazard": {
+     "s": 2.7,
+     "frames": 161,
+     "p_pause": 0.19136,
+     "p_quit": 0.19136
+    },
+    "interact": {
+     "s": 60.566,
+     "frames": 3634,
+     "p_pause": 0.0787,
+     "p_quit": 0.0787
+    },
+    "free": {
+     "s": 25.966,
+     "frames": 1558,
+     "p_pause": 1.0,
+     "p_quit": 1.0
+    }
+   },
+   "blockers_s": {
+    "BLOCKING_INTERACT": 52.083,
+    "DISABLE_PAUSE": 11.1,
+    "GAME_STATE": 1.9,
+    "TIME_SLOWED": 0.133
+   },
+   "dsq_s": 0.0,
+   "preload_s": 0.0,
+   "pause_windows": {
+    "n": 9,
+    "censored": 0,
+    "total_s": 59.933,
+    "p50_s": 1.333,
+    "p95_s": 27.7,
+    "max_s": 34.966,
+    "by_key": {
+     "transition": {
+      "n": 2,
+      "p50_s": 0.975,
+      "max_s": 0.983
+     },
+     "hazard": {
+      "n": 1,
+      "p50_s": 2.183,
+      "max_s": 2.183
+     },
+     "interact": {
+      "n": 6,
+      "p50_s": 1.858,
+      "max_s": 34.966
+     }
+    }
+   },
+   "quit_windows": {
+    "n": 9,
+    "censored": 0,
+    "total_s": 59.933,
+    "p50_s": 1.333,
+    "p95_s": 27.7,
+    "max_s": 34.966,
+    "by_key": {
+     "transition": {
+      "n": 2,
+      "p50_s": 0.975,
+      "max_s": 0.983
+     },
+     "hazard": {
+      "n": 1,
+      "p50_s": 2.183,
+      "max_s": 2.183
+     },
+     "interact": {
+      "n": 6,
+      "p50_s": 1.858,
+      "max_s": 34.966
+     }
+    }
+   },
+   "long_windows": [
+    {
+     "src": "human/20260930_210337",
+     "f0": 43193,
+     "s": 34.966,
+     "key": "interact",
+     "cause": null,
+     "bits": [
+      "DISABLE_PAUSE",
+      "BLOCKING_INTERACT"
+     ],
+     "censored": false
+    },
+    {
+     "src": "human/20260930_210337",
+     "f0": 42110,
+     "s": 16.8,
+     "key": "interact",
+     "cause": null,
+     "bits": [
+      "BLOCKING_INTERACT"
+     ],
+     "censored": false
+    },
+    {
+     "src": "human/20260930_210337",
+     "f0": 45960,
+     "s": 2.383,
+     "key": "interact",
+     "cause": null,
+     "bits": [
+      "DISABLE_PAUSE"
+     ],
+     "censored": false
+    },
+    {
+     "src": "human/20260930_210337",
+     "f0": 46883,
+     "s": 2.183,
+     "key": "hazard",
+     "cause": "freeze:EnemyDeath",
+     "bits": [
+      "DISABLE_PAUSE",
+      "TIME_SLOWED"
+     ],
+     "censored": false
+    },
+    {
+     "src": "human/20260930_210337",
+     "f0": 45774,
+     "s": 1.333,
+     "key": "interact",
+     "cause": null,
+     "bits": [
+      "DISABLE_PAUSE"
+     ],
+     "censored": false
+    }
+   ]
+  }
+ }
+}
