@@ -6,20 +6,24 @@ using UnityEngine;
 namespace SsOracle.Export
 {
     /// <summary>
-    /// Training-only frame marker (DESIGN §3.1.4 C4; the exact label of every training capture and the M1 alignment
-    /// gate's ground truth): while it is on, every rendered image carries MarkerCode's pattern of Time.frameCount in
-    /// one corner, the same number STATE "f" carries for that frame, so the brain reads which frame each captured
-    /// image shows (brain/ssbot/record/marker.py, in the video recorder's capture path). Training sessions turn it on
-    /// (the recorder, the soak workers, the M1 probes: marker_on) in the top-right corner with the default cell,
-    /// exactly where brain/ssbot/vision/mask.py masks every image a model sees, in training and in the final vanilla
-    /// run: a marked recording IS training data, valid only with that mask applied (the capture path fills it before
-    /// any thumbnail is stored). Other corners and sizes are for probes. RPC "frame.marker" {on, corner?: tl|tr|bl|br,
-    /// size?: cell px} turns it on or off; on is refused unless the profile allows probe tools, and under -ssbot-human
-    /// (a person's session is recorded without it: its screen video has no capture path that masks it, and its labels
-    /// are timestamp labels). It turns itself off when the brain that turned it on disconnects (connection
-    /// generation) or the profile stops allowing probe tools, so a killed session cannot leave it on. While it is on,
-    /// STATE "mk" is non-nil ({drawn, corner, cell, rect, grid, us}; FrameExporter), and "marker" events mark the
-    /// switches: a recording says which of its frames carry the marker.
+    /// Frame marker for recorded sessions (DESIGN §3.1.4 C4, D12; the exact label of every training capture and human
+    /// play frame, and the M1 alignment gate's ground truth): while it is on, every rendered image carries MarkerCode's
+    /// pattern of Time.frameCount in one corner, the same number STATE "f" carries for that frame, so the brain reads
+    /// which frame each captured image shows (brain/ssbot/record/marker.py, in the video recorder's capture path and in
+    /// a human session's post-processing). Training sessions (the recorder, the soak workers, the M1 probes) and human
+    /// sessions (brain/ssbot/tools/human_session.py, under -ssbot-human) turn it on with marker_on in the top-right
+    /// corner with the default cell, inside the rect brain/ssbot/vision/mask.py masks in every image a model sees, in
+    /// training and in the final vanilla run: a marked recording is training data only where its stored images went
+    /// through that mask (the capture path fills it before any thumbnail is stored; a human session's ffmpeg fills it
+    /// before encoding). Where this marker was drawn outside the mask (another cell or screen size, a render scaled to
+    /// its window) the brain blanks it too and flags those images "mask_mismatch": not training data. Recordings made
+    /// before the mask (video format 1: 12 px cells stored in unmasked thumbnails, e.g. the 2026-09-30 in-game m1_align
+    /// run) are validation only. Other corners and sizes are for probes. RPC "frame.marker" {on, corner?: tl|tr|bl|br,
+    /// size?: cell px} turns it on or off; on is refused unless the profile allows probe tools. It turns itself off
+    /// when the brain that turned it on disconnects (connection generation) or the profile stops allowing probe tools,
+    /// so a killed session cannot leave it on. While it is on, STATE "mk" is non-nil ({drawn, corner, cell, rect,
+    /// screen, grid, us}; FrameExporter: rect in px of screen, the Screen size it was drawn on), and "marker" events
+    /// mark the switches: a recording says which of its frames carry the marker.
     ///
     /// Why OnGUI: the game renders with the built-in pipeline. The main camera may render into CameraRenderScaled's
     /// texture, which another camera blits to the screen; the HUD camera (clear flags Depth) draws the HUD's tk2d
@@ -50,6 +54,7 @@ namespace SsOracle.Export
         private static int cellArg;              // 0: MarkerCode.DefaultCell of the current screen height
         private static int cell;
         private static int rx0, ry0, rx1, ry1;   // client px of the last drawn marker
+        private static int sw0, sh0;             // Screen size it was drawn on (the render size, px of rx0 ..)
         private static long drawnFrame = -1;
         private static int ownerGeneration = -1;  // FramedServer.Generation of the brain that turned the marker on
         private static long costTicks;
@@ -74,11 +79,13 @@ namespace SsOracle.Export
             if (tex != null) Destroy(tex);
         }
 
+        /// <summary>Profiles with probe tools only. Allowed under -ssbot-human too: the marker is tiny, draws over
+        /// nothing the player needs (top-right corner) and the session's video is masked like a training capture
+        /// (DESIGN D12).</summary>
         private static bool Allowed(out string why)
         {
             why = null;
             if (!Core.Profile.Rules.ProbeTools) why = $"probe tools are disabled in profile {Core.Profile.Current}";
-            else if (Core.RunMode.Human) why = "-ssbot-human: a person's session is recorded without the marker (timestamp labels)";
             return why == null;
         }
 
@@ -120,6 +127,8 @@ namespace SsOracle.Export
             ry0 = y0;
             rx1 = x0 + w * cell;
             ry1 = y0 + h * cell;
+            sw0 = sw;
+            sh0 = sh;
             drawnFrame = frame;
             costTicks = Stopwatch.GetTimestamp() - t0;
         }
@@ -128,11 +137,12 @@ namespace SsOracle.Export
         public static void Write(Ipc.MsgPackWriter w, long frame)
         {
             if (!on) { w.Nil(); return; }
-            w.MapHeader(6);
+            w.MapHeader(7);
             w.Key("drawn"); w.Bool(drawnFrame == frame);
             w.Key("corner"); w.Str(CornerNames[corner]);
             w.Key("cell"); w.Int(cell);
             w.Key("rect"); w.ArrayHeader(4); w.Float(rx0); w.Float(ry0); w.Float(rx1); w.Float(ry1);
+            w.Key("screen"); w.ArrayHeader(2); w.Int(sw0); w.Int(sh0);
             w.Key("grid"); w.ArrayHeader(2); w.Int(MarkerCode.Rows); w.Int(MarkerCode.Cols);
             w.Key("us"); w.Float((float)(costTicks * 1_000_000.0 / Stopwatch.Frequency));
         }
@@ -172,7 +182,7 @@ namespace SsOracle.Export
             instance.enabled = true;
             if (!was)
             {
-                Core.Plugin.Log.LogWarning($"frame marker ON ({CornerNames[corner]}, {cell} px cells): its images are training data only with the vision mask applied");
+                Core.Plugin.Log.LogWarning($"frame marker ON ({CornerNames[corner]}, {cell} px cells): its images are training data only where the vision mask covers it");
                 FrameExporter.Emit("marker", new Dictionary<string, object>
                 {
                     ["on"] = true, ["corner"] = CornerNames[corner], ["cell"] = cell,
@@ -197,6 +207,7 @@ namespace SsOracle.Export
             ["corner"] = CornerNames[corner],
             ["cell"] = on ? cell : cellArg,
             ["rect"] = on && drawnFrame >= 0 ? new List<object> { rx0, ry0, rx1, ry1 } : null,
+            ["screen"] = on && drawnFrame >= 0 ? new List<object> { sw0, sh0 } : null,
             ["grid"] = new List<object> { MarkerCode.Rows, MarkerCode.Cols },
             ["bits"] = new List<object> { MarkerCode.DataBits, MarkerCode.CheckBits },
         };
