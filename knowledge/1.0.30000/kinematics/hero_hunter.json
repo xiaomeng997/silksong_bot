@@ -1,0 +1,561 @@
+{
+ "build": "1.0.30000",
+ "crest": "Hunter",
+ "fdt": 0.0199999921,
+ "frame_time": 0.0166656,
+ "gravity": 60.0,
+ "run_speed": 8.25,
+ "jump_speed": 18.6,
+ "jump_steps": 8,
+ "jump_steps_min": 2,
+ "jump_queue_steps": 2,
+ "attack_queue_steps": 8,
+ "tool_queue_steps": 5,
+ "jump_release_mult": 0.5,
+ "air_hang_gravity": 0.1,
+ "air_hang_accel": 5.0,
+ "max_fall": 30.0,
+ "airborne_lift": 0.02,
+ "half_width": 0.25,
+ "foot": 1.5527,
+ "head": 0.5262,
+ "skin": 0.015,
+ "attack_duration": 0.35,
+ "attack_cooldown": 0.41,
+ "attack_recovery": 0.15,
+ "recoil_velocity": 3.75,
+ "recoil_steps": 8,
+ "ds_antic": 0.1,
+ "ds_time": 0.1,
+ "ds_speed": 26.0,
+ "ds_recovery": 0.25,
+ "ds_land_recovery": 0.166666672,
+ "ds_antic_decel": 0.8,
+ "ds_antic_vy_min": -12.0,
+ "ds_antic_vy_max": 12.0,
+ "ds_end_vy": -10.0,
+ "pogo_jump_steps": 4,
+ "pogo_jumped_steps": -20,
+ "bounce_steps": 6,
+ "hurt_velocity": 15.0,
+ "hurt_vy_ratio": 0.5,
+ "hurt_recoil_time": 0.2,
+ "hurt_wait": 0.1,
+ "hurt_ramp": 0.1,
+ "hurt_wait_skip": 1,
+ "invul_time": 1.0,
+ "cast_antic": 0.26,
+ "cast_throw": 0.45007,
+ "cast_catch": 0.14998,
+ "cast_decay": 0.9,
+ "cast_decay_ground": 0.85,
+ "cast_vy_cap": 12.0,
+ "cast_catch_speed": 21.0,
+ "cast_catch_decay": 0.7,
+ "cast_silk": 4,
+ "bind_time": 1.3666,
+ "bind_decay": 0.85,
+ "bind_vy_cap": 7.5,
+ "bind_vy_cap_down": 12.0,
+ "bind_end_vy": -0.25,
+ "bind_silk": 9,
+ "silk_max": 9,
+ "lock_decay": 0.86,
+ "ledge_steps": 4,
+ "land_slop_lo": 0.0082,
+ "land_slop_hi": 0.0053,
+ "input_jump_lag": 1,
+ "scenes": {
+  "Bone_05": {
+   "enable": [
+    "Threaded Bell Gate",
+    "Threaded Bell Gate (1)"
+   ],
+   "disable": [
+    "Wall"
+   ]
+  }
+ },
+ "source": {
+  "scenes.Bone_05": "kin_fit: hero boxes against the room-entry TERRAIN dump",
+  "foot": "kin_fit: pos.y - box bottom at rest (n=72744)",
+  "head": "kin_fit: box top - pos.y at rest (n=72744)",
+  "half_width": "kin_fit: half box width at rest (n=72744)",
+  "skin": "kin_fit: box bottom - floor segment at rest (n=502)",
+  "frame_time": "kin_fit: mean unscaled frame time at time scale 1 (p1 0.01665, p99 0.01674) (n=267300)",
+  "gravity": "kin_fit: falling steps, dvy / fdt (n=42588)",
+  "run_speed": "kin_fit: grounded |vx| with one direction held (n=37163)",
+  "jump_speed": "kin_fit: vy + g fdt on rising jump steps (n=17840)",
+  "jump_steps": "kin_fit: full-hold jumps: rise steps - 1 (JUMP_STEPS: Jump() runs while jump_steps <= JUMP_STEPS); counts {1: 55, 2: 117, 3: 126, 4: 125, 5: 144, 6: 125, 7: 123, 8: 124, 9: 1671} (n=2610)",
+  "pogo_jump_steps": "kin_fit: pogo rise steps {1: 1, 4: 1, 5: 47} -> start jump_steps (n=49)",
+  "jump_release_mult": "kin_fit: vy ratio on step-less frames with jump released (n=1663)",
+  "air_hang_gravity": "kin_fit: smallest post-apex scale minus one ramp step (StartAirHang, then += accel * fdt before the step) (n=2771)",
+  "recoil_velocity": "kin_fit: |vx| in nail recoil without input push (n=3447)",
+  "recoil_steps": "kin_fit: steps after the hit frame {0: 20, 1: 15, 2: 5, 3: 7, 4: 2, 5: 5, 6: 3, 7: 6, 8: 352} (n=415)",
+  "ds_antic_decel": "kin_fit: vx ratio per antic step (n=233)",
+  "ds_antic_vy_min": "kin_fit: lowest vy at a down-attack press (n=115)",
+  "ds_speed": "kin_fit: |v| components while spiking (n=746)",
+  "hurt_velocity": "kin_fit: |dx| / (steps fdt) over the damage recoil (n=1086)",
+  "hurt_vy_ratio": "kin_fit: (dy / dx) over the recoil (n=1086)",
+  "cast_antic": "kin_fit: antic: threshold in (0.2501, 0.2664], runs [0.2664, 0.2664, 0.2667, 0.2667, 0.2667, 0.2664, 0.2664, 0.2667, 0.2667, 0.2666, 0.2664, 0.2667, 0.2666, 0.2667, 0.2664, 0.2667, 0.2667, 0.2666, 0.2664, 0.2667, 0.2667, 0.2667, 0.2667, 0.2664, 0.2667, 0.2667, 0.2667, 0.2667, 0.2667, 0.2666, 0.2664, 0.2667, 0.2667, 0.2667, 0.2667, 0.2664, 0.2666, 0.2667, 0.2667, 0.2667, 0.2664, 0.2666, 0.2667, 0.2668, 0.2666, 0.2664, 0.2667, 0.2666, 0.2667, 0.2667, 0.2664, 0.2667, 0.2666, 0.2666, 0.2667, 0.2664, 0.2667, 0.2666, 0.2664, 0.2666, 0.2667, 0.2664, 0.2667, 0.2666, 0.2667, 0.2664, 0.2667, 0.2666, 0.2664, 0.2667, 0.2667, 0.2666, 0.2667, 0.2664, 0.2667, 0.2666, 0.2666, 0.2667, 0.2667, 0.2667, 0.2664, 0.2666, 0.2667, 0.2666, 0.2664, 0.2666, 0.2667, 0.2666, 0.2668, 0.2667, 0.2664, 0.2667, 0.2666, 0.2667, 0.2667, 0.2664, 0.2664, 0.2666, 0.2668, 0.2668, 0.2667, 0.2664, 0.2667, 0.2666, 0.2667, 0.2667, 0.2664, 0.2667, 0.2667, 0.2666, 0.2666, 0.2664, 0.2667, 0.2666, 0.2666, 0.2667] (n=116)",
+  "cast_throw": "kin_fit: throw: threshold in (0.4333, 0.4333], runs [0.45, 0.4334, 0.4333, 0.4499, 0.45, 0.4334, 0.4334, 0.4334, 0.45, 0.45, 0.4334, 0.4499, 0.45, 0.4334, 0.45, 0.4334, 0.45, 0.4499, 0.4333, 0.4334, 0.4333, 0.45, 0.45, 0.45, 0.4334, 0.4334, 0.45, 0.4334, 0.4499, 0.4499, 0.45, 0.45, 0.4333, 0.45, 0.45, 0.4334, 0.4333, 0.45, 0.4499, 0.45, 0.4334, 0.4333, 0.4334, 0.45, 0.4334, 0.4334, 0.45, 0.4499, 0.4334, 0.4333, 0.4499, 0.4333, 0.4334, 0.4333, 0.4334, 0.4334, 0.4333, 0.45, 0.4501, 0.4334, 0.4499, 0.4334, 0.45, 0.4333, 0.4495, 0.45, 0.4499, 0.4499, 0.45, 0.45, 0.4333, 0.45, 0.4334, 0.45, 0.45, 0.45, 0.45, 0.4333, 0.4333, 0.4499] (n=80)",
+  "cast_catch": "kin_fit: catch: threshold in (0.1500, 0.1499], runs [0.1665, 0.1665, 0.15, 0.1666, 0.15, 0.1665, 0.1666, 0.15, 0.1501, 0.1665, 0.15, 0.15, 0.15, 0.1665, 0.1667, 0.1666, 0.1666, 0.1665, 0.15, 0.1501, 0.1666, 0.1666, 0.1665, 0.1667, 0.15, 0.1501, 0.1666, 0.1667, 0.1666, 0.1665, 0.15, 0.15, 0.15, 0.15, 0.1665, 0.15, 0.1666, 0.15, 0.1665, 0.1666, 0.15, 0.1667, 0.1666, 0.1665, 0.1667, 0.15, 0.1666, 0.15, 0.1665, 0.1667, 0.15, 0.15, 0.1665, 0.1666, 0.1666, 0.1665, 0.15, 0.15, 0.1665, 0.15, 0.15, 0.15, 0.1665, 0.1667, 0.1667, 0.1665, 0.1667, 0.15, 0.1666, 0.1666, 0.1665, 0.1667, 0.15, 0.1667, 0.1667, 0.15, 0.15, 0.1665, 0.15, 0.1499, 0.15, 0.1665, 0.1666, 0.1499, 0.15, 0.15, 0.1665, 0.1667, 0.1499, 0.1666, 0.15, 0.1665, 0.1665, 0.15, 0.15, 0.1666, 0.1667, 0.1665, 0.1667, 0.1501, 0.1666, 0.1665, 0.1666, 0.15, 0.15, 0.15, 0.1665, 0.1666, 0.1667, 0.1667, 0.1667] (n=111)",
+  "cast_decay": "kin_fit: vx ratio per step in an air antic (n=577)",
+  "cast_decay_ground": "kin_fit: vx ratio per step in a ground antic (n=276)",
+  "cast_vy_cap": "kin_fit: |vy| at clipped air cast presses / decay (both directions: [1.28, 12.0, 12.0, 12.0, 12.0, 12.0]...) (n=34)",
+  "cast_catch_speed": "kin_fit: |vx| when the catch starts (n=111)",
+  "cast_catch_decay": "kin_fit: vx ratio per catch step (n=812)",
+  "bind_decay": "kin_fit: vx ratio per step in an air bind (n=64)",
+  "bind_vy_cap": "kin_fit: |vy| at clipped air bind presses / decay (rising) (n=2)",
+  "bind_vy_cap_down": "kin_fit: |vy| at clipped air bind presses / decay (falling) (n=2)",
+  "bind_time": "kin_fit: Bind: scaled time relinquished (n=7)",
+  "bind_end_vy": "kin_fit: vy in the first frame after a bind (n=7)",
+  "lock_decay": "kin_fit: vx ratio per step while another FSM holds control (n=475)",
+  "land_slop_lo": "kin_fit: late contacts end in [-0.0077, 0.0048] (n=140)",
+  "land_slop_hi": "kin_fit: upper edge of the late-contact band (n=140)",
+  "input_jump_lag": "kin_fit: residual jump-bit lag after the shift {-3: 4, -2: 2, -1: 7, 0: 652, 2: 7} (n=672)",
+  "fdt": "decompiled HeroController / crest config (docs/facts/1.0.30000 hero_constants.json, crests.json) or a code constant; not refitted",
+  "jump_steps_min": "decompiled HeroController / crest config (docs/facts/1.0.30000 hero_constants.json, crests.json) or a code constant; not refitted",
+  "jump_queue_steps": "decompiled HeroController / crest config (docs/facts/1.0.30000 hero_constants.json, crests.json) or a code constant; not refitted",
+  "attack_queue_steps": "decompiled HeroController / crest config (docs/facts/1.0.30000 hero_constants.json, crests.json) or a code constant; not refitted",
+  "tool_queue_steps": "decompiled HeroController / crest config (docs/facts/1.0.30000 hero_constants.json, crests.json) or a code constant; not refitted",
+  "air_hang_accel": "decompiled HeroController / crest config (docs/facts/1.0.30000 hero_constants.json, crests.json) or a code constant; not refitted",
+  "max_fall": "decompiled HeroController / crest config (docs/facts/1.0.30000 hero_constants.json, crests.json) or a code constant; not refitted",
+  "airborne_lift": "decompiled HeroController / crest config (docs/facts/1.0.30000 hero_constants.json, crests.json) or a code constant; not refitted",
+  "attack_duration": "decompiled HeroController / crest config (docs/facts/1.0.30000 hero_constants.json, crests.json) or a code constant; not refitted",
+  "attack_cooldown": "decompiled HeroController / crest config (docs/facts/1.0.30000 hero_constants.json, crests.json) or a code constant; not refitted",
+  "attack_recovery": "decompiled HeroController / crest config (docs/facts/1.0.30000 hero_constants.json, crests.json) or a code constant; not refitted",
+  "ds_antic": "decompiled HeroController / crest config (docs/facts/1.0.30000 hero_constants.json, crests.json) or a code constant; not refitted",
+  "ds_time": "decompiled HeroController / crest config (docs/facts/1.0.30000 hero_constants.json, crests.json) or a code constant; not refitted",
+  "ds_recovery": "decompiled HeroController / crest config (docs/facts/1.0.30000 hero_constants.json, crests.json) or a code constant; not refitted",
+  "ds_land_recovery": "decompiled HeroController / crest config (docs/facts/1.0.30000 hero_constants.json, crests.json) or a code constant; not refitted",
+  "ds_antic_vy_max": "decompiled HeroController / crest config (docs/facts/1.0.30000 hero_constants.json, crests.json) or a code constant; not refitted",
+  "ds_end_vy": "decompiled HeroController / crest config (docs/facts/1.0.30000 hero_constants.json, crests.json) or a code constant; not refitted",
+  "pogo_jumped_steps": "decompiled HeroController / crest config (docs/facts/1.0.30000 hero_constants.json, crests.json) or a code constant; not refitted",
+  "bounce_steps": "decompiled HeroController / crest config (docs/facts/1.0.30000 hero_constants.json, crests.json) or a code constant; not refitted",
+  "hurt_recoil_time": "decompiled HeroController / crest config (docs/facts/1.0.30000 hero_constants.json, crests.json) or a code constant; not refitted",
+  "hurt_wait": "decompiled HeroController / crest config (docs/facts/1.0.30000 hero_constants.json, crests.json) or a code constant; not refitted",
+  "hurt_ramp": "decompiled HeroController / crest config (docs/facts/1.0.30000 hero_constants.json, crests.json) or a code constant; not refitted",
+  "hurt_wait_skip": "decompiled HeroController / crest config (docs/facts/1.0.30000 hero_constants.json, crests.json) or a code constant; not refitted",
+  "invul_time": "decompiled HeroController / crest config (docs/facts/1.0.30000 hero_constants.json, crests.json) or a code constant; not refitted",
+  "cast_silk": "decompiled HeroController / crest config (docs/facts/1.0.30000 hero_constants.json, crests.json) or a code constant; not refitted",
+  "bind_silk": "decompiled HeroController / crest config (docs/facts/1.0.30000 hero_constants.json, crests.json) or a code constant; not refitted",
+  "silk_max": "decompiled HeroController / crest config (docs/facts/1.0.30000 hero_constants.json, crests.json) or a code constant; not refitted",
+  "ledge_steps": "decompiled HeroController / crest config (docs/facts/1.0.30000 hero_constants.json, crests.json) or a code constant; not refitted"
+ },
+ "fit": {
+  "data": {
+   "value": [
+    {
+     "source": "C:/ssbot/data/runs/m2/20261001_121446_BellBeast_data/rec/2026-10-01/TRAIN/i0_000",
+     "frames": 26892,
+     "mask": "act"
+    },
+    {
+     "source": "C:/ssbot/data/runs/m2/20261001_122249_BellBeast_data/rec/2026-10-01/TRAIN/i0_000",
+     "frames": 259302,
+     "mask": "act"
+    },
+    {
+     "source": "C:/ssbot/data/human/20260930_210337",
+     "frames": 159471,
+     "mask": "input"
+    }
+   ],
+   "n": 445665,
+   "note": "traces used"
+  },
+  "scene:Bone_05": {
+   "value": {
+    "enable": [
+     "Threaded Bell Gate",
+     "Threaded Bell Gate (1)"
+    ],
+    "disable": [
+     "Wall"
+    ]
+   },
+   "n": 259068,
+   "note": "solids inferred from logged boxes"
+  },
+  "foot": {
+   "value": 1.5527,
+   "n": 72744,
+   "spread": null,
+   "note": "pos.y - box bottom at rest"
+  },
+  "head": {
+   "value": 0.5262,
+   "n": 72744,
+   "spread": null,
+   "note": "box top - pos.y at rest"
+  },
+  "half_width": {
+   "value": 0.25,
+   "n": 72744,
+   "spread": null,
+   "note": "half box width at rest"
+  },
+  "skin": {
+   "value": 0.015,
+   "n": 502,
+   "spread": 0.0,
+   "note": "box bottom - floor segment at rest"
+  },
+  "frame_time": {
+   "value": 0.0166656,
+   "n": 267300,
+   "spread": null,
+   "note": "mean unscaled frame time at time scale 1 (p1 0.01665, p99 0.01674)"
+  },
+  "gravity": {
+   "value": 60.0,
+   "n": 42588,
+   "spread": 0.0,
+   "note": "falling steps, dvy / fdt"
+  },
+  "run_speed": {
+   "value": 8.25,
+   "n": 37163,
+   "spread": 0.0,
+   "note": "grounded |vx| with one direction held"
+  },
+  "jump_speed": {
+   "value": 18.6,
+   "n": 17840,
+   "spread": 0.0,
+   "note": "vy + g fdt on rising jump steps"
+  },
+  "jump_steps": {
+   "value": 8,
+   "n": 2610,
+   "spread": null,
+   "note": "full-hold jumps: rise steps - 1 (JUMP_STEPS: Jump() runs while jump_steps <= JUMP_STEPS); counts {1: 55, 2: 117, 3: 126, 4: 125, 5: 144, 6: 125, 7: 123, 8: 124, 9: 1671}"
+  },
+  "pogo_jump_steps": {
+   "value": 4,
+   "n": 49,
+   "spread": null,
+   "note": "pogo rise steps {1: 1, 4: 1, 5: 47} -> start jump_steps"
+  },
+  "jump_release_mult": {
+   "value": 0.5,
+   "n": 1663,
+   "spread": 0.0,
+   "note": "vy ratio on step-less frames with jump released"
+  },
+  "max_fall_observed": {
+   "value": 31.2,
+   "n": 113344,
+   "note": "fastest NORMAL fall; MAX_FALL_VELOCITY 30 binds only if reached"
+  },
+  "air_hang_scales": {
+   "value": [
+    [
+     0.2,
+     298
+    ],
+    [
+     0.3,
+     272
+    ],
+    [
+     0.4,
+     253
+    ],
+    [
+     0.5,
+     234
+    ],
+    [
+     0.6,
+     206
+    ],
+    [
+     0.7,
+     180
+    ],
+    [
+     0.8,
+     160
+    ],
+    [
+     1.0,
+     1032
+    ]
+   ],
+   "n": 2771,
+   "note": "gravity scales seen right after the apex, jump held"
+  },
+  "air_hang_gravity": {
+   "value": 0.1,
+   "n": 2771,
+   "spread": null,
+   "note": "smallest post-apex scale minus one ramp step (StartAirHang, then += accel * fdt before the step)"
+  },
+  "recoil_velocity": {
+   "value": 3.75,
+   "n": 3447,
+   "spread": null,
+   "note": "|vx| in nail recoil without input push"
+  },
+  "recoil_steps": {
+   "value": 8,
+   "n": 415,
+   "spread": null,
+   "note": "steps after the hit frame {0: 20, 1: 15, 2: 5, 3: 7, 4: 2, 5: 5, 6: 3, 7: 6, 8: 352}"
+  },
+  "ds_antic_runs": {
+   "value": [
+    [
+     0.117,
+     59
+    ],
+    [
+     0.1,
+     44
+    ],
+    [
+     0.05,
+     3
+    ],
+    [
+     0.083,
+     3
+    ]
+   ],
+   "n": 115,
+   "note": "scaled seconds in the antic (prefab 0.1 kept)"
+  },
+  "ds_antic_decel": {
+   "value": 0.8,
+   "n": 233,
+   "spread": null,
+   "note": "vx ratio per antic step"
+  },
+  "ds_antic_vy_at_press": {
+   "value": [
+    -12.0,
+    -11.55,
+    -11.47,
+    -11.25,
+    -11.02,
+    -10.72,
+    -10.42,
+    -10.27,
+    -10.12,
+    -9.97,
+    -9.82,
+    -9.75
+   ],
+   "n": 115,
+   "note": "vy right after the press (clamp)"
+  },
+  "ds_antic_vy_min": {
+   "value": -12.0,
+   "n": 115,
+   "spread": null,
+   "note": "lowest vy at a down-attack press"
+  },
+  "ds_speed": {
+   "value": 26.0,
+   "n": 746,
+   "spread": null,
+   "note": "|v| components while spiking"
+  },
+  "ds_spike_steps": {
+   "value": {
+    "0": 36,
+    "1": 8,
+    "2": 5,
+    "3": 5,
+    "4": 1,
+    "5": 5,
+    "6": 42
+   },
+   "n": 102,
+   "note": "steps in a spike (incl. cut)"
+  },
+  "ds_end_vy_seen": {
+   "value": [
+    [
+     -10.0,
+     40
+    ],
+    [
+     -8.8,
+     52
+    ],
+    [
+     1.2,
+     1
+    ]
+   ],
+   "n": 93,
+   "note": "vy + g fdt in the frame after a spike (code: -10)"
+  },
+  "damage_events": {
+   "value": {
+    "damage": 1114,
+    "knockbacks": 1086
+   },
+   "n": 1086,
+   "note": "oracle damage events vs StartRecoil (recoilFrozen onsets)"
+  },
+  "hurt_freeze_frames": {
+   "value": {
+    "13": 167,
+    "14": 670,
+    "15": 249
+   },
+   "n": 1086,
+   "note": "damage frame -> recoil start; FreezeMoment replay right in 1086/1086"
+  },
+  "hurt_velocity": {
+   "value": 15.0,
+   "n": 1086,
+   "spread": null,
+   "note": "|dx| / (steps fdt) over the damage recoil"
+  },
+  "hurt_vy_ratio": {
+   "value": 0.5,
+   "n": 1086,
+   "spread": null,
+   "note": "(dy / dx) over the recoil"
+  },
+  "hurt_recoil_frames": {
+   "value": {
+    "13": 438,
+    "14": 643,
+    "28": 3,
+    "29": 1,
+    "47": 1
+   },
+   "n": 1086,
+   "note": "frames with the recoiling flag (RECOIL_DURATION 0.2 s, float32 dt sum)"
+  },
+  "cast_antic": {
+   "value": 0.26,
+   "n": 116,
+   "spread": null,
+   "note": "antic: threshold in (0.2501, 0.2664], runs [0.2664, 0.2664, 0.2667, 0.2667, 0.2667, 0.2664, 0.2664, 0.2667, 0.2667, 0.2666, 0.2664, 0.2667, 0.2666, 0.2667, 0.2664, 0.2667, 0.2667, 0.2666, 0.2664, 0.2667, 0.2667, 0.2667, 0.2667, 0.2664, 0.2667, 0.2667, 0.2667, 0.2667, 0.2667, 0.2666, 0.2664, 0.2667, 0.2667, 0.2667, 0.2667, 0.2664, 0.2666, 0.2667, 0.2667, 0.2667, 0.2664, 0.2666, 0.2667, 0.2668, 0.2666, 0.2664, 0.2667, 0.2666, 0.2667, 0.2667, 0.2664, 0.2667, 0.2666, 0.2666, 0.2667, 0.2664, 0.2667, 0.2666, 0.2664, 0.2666, 0.2667, 0.2664, 0.2667, 0.2666, 0.2667, 0.2664, 0.2667, 0.2666, 0.2664, 0.2667, 0.2667, 0.2666, 0.2667, 0.2664, 0.2667, 0.2666, 0.2666, 0.2667, 0.2667, 0.2667, 0.2664, 0.2666, 0.2667, 0.2666, 0.2664, 0.2666, 0.2667, 0.2666, 0.2668, 0.2667, 0.2664, 0.2667, 0.2666, 0.2667, 0.2667, 0.2664, 0.2664, 0.2666, 0.2668, 0.2668, 0.2667, 0.2664, 0.2667, 0.2666, 0.2667, 0.2667, 0.2664, 0.2667, 0.2667, 0.2666, 0.2666, 0.2664, 0.2667, 0.2666, 0.2666, 0.2667]"
+  },
+  "cast_throw": {
+   "value": 0.45007,
+   "n": 80,
+   "spread": null,
+   "note": "throw: threshold in (0.4333, 0.4333], runs [0.45, 0.4334, 0.4333, 0.4499, 0.45, 0.4334, 0.4334, 0.4334, 0.45, 0.45, 0.4334, 0.4499, 0.45, 0.4334, 0.45, 0.4334, 0.45, 0.4499, 0.4333, 0.4334, 0.4333, 0.45, 0.45, 0.45, 0.4334, 0.4334, 0.45, 0.4334, 0.4499, 0.4499, 0.45, 0.45, 0.4333, 0.45, 0.45, 0.4334, 0.4333, 0.45, 0.4499, 0.45, 0.4334, 0.4333, 0.4334, 0.45, 0.4334, 0.4334, 0.45, 0.4499, 0.4334, 0.4333, 0.4499, 0.4333, 0.4334, 0.4333, 0.4334, 0.4334, 0.4333, 0.45, 0.4501, 0.4334, 0.4499, 0.4334, 0.45, 0.4333, 0.4495, 0.45, 0.4499, 0.4499, 0.45, 0.45, 0.4333, 0.45, 0.4334, 0.45, 0.45, 0.45, 0.45, 0.4333, 0.4333, 0.4499]"
+  },
+  "cast_catch": {
+   "value": 0.14998,
+   "n": 111,
+   "spread": null,
+   "note": "catch: threshold in (0.1500, 0.1499], runs [0.1665, 0.1665, 0.15, 0.1666, 0.15, 0.1665, 0.1666, 0.15, 0.1501, 0.1665, 0.15, 0.15, 0.15, 0.1665, 0.1667, 0.1666, 0.1666, 0.1665, 0.15, 0.1501, 0.1666, 0.1666, 0.1665, 0.1667, 0.15, 0.1501, 0.1666, 0.1667, 0.1666, 0.1665, 0.15, 0.15, 0.15, 0.15, 0.1665, 0.15, 0.1666, 0.15, 0.1665, 0.1666, 0.15, 0.1667, 0.1666, 0.1665, 0.1667, 0.15, 0.1666, 0.15, 0.1665, 0.1667, 0.15, 0.15, 0.1665, 0.1666, 0.1666, 0.1665, 0.15, 0.15, 0.1665, 0.15, 0.15, 0.15, 0.1665, 0.1667, 0.1667, 0.1665, 0.1667, 0.15, 0.1666, 0.1666, 0.1665, 0.1667, 0.15, 0.1667, 0.1667, 0.15, 0.15, 0.1665, 0.15, 0.1499, 0.15, 0.1665, 0.1666, 0.1499, 0.15, 0.15, 0.1665, 0.1667, 0.1499, 0.1666, 0.15, 0.1665, 0.1665, 0.15, 0.15, 0.1666, 0.1667, 0.1665, 0.1667, 0.1501, 0.1666, 0.1665, 0.1666, 0.15, 0.15, 0.15, 0.1665, 0.1666, 0.1667, 0.1667, 0.1667]"
+  },
+  "cast_decay": {
+   "value": 0.9,
+   "n": 577,
+   "spread": null,
+   "note": "vx ratio per step in an air antic"
+  },
+  "cast_decay_ground": {
+   "value": 0.85,
+   "n": 276,
+   "spread": null,
+   "note": "vx ratio per step in a ground antic"
+  },
+  "cast_vy_cap": {
+   "value": 12.0,
+   "n": 34,
+   "spread": null,
+   "note": "|vy| at clipped air cast presses / decay (both directions: [1.28, 12.0, 12.0, 12.0, 12.0, 12.0]...)"
+  },
+  "cast_catch_speed": {
+   "value": 21.0,
+   "n": 111,
+   "spread": null,
+   "note": "|vx| when the catch starts"
+  },
+  "cast_catch_decay": {
+   "value": 0.7,
+   "n": 812,
+   "spread": null,
+   "note": "vx ratio per catch step"
+  },
+  "bind_decay": {
+   "value": 0.85,
+   "n": 64,
+   "spread": null,
+   "note": "vx ratio per step in an air bind"
+  },
+  "bind_vy_cap": {
+   "value": 7.5,
+   "n": 2,
+   "spread": null,
+   "note": "|vy| at clipped air bind presses / decay (rising)"
+  },
+  "bind_vy_cap_down": {
+   "value": 12.0,
+   "n": 2,
+   "spread": null,
+   "note": "|vy| at clipped air bind presses / decay (falling)"
+  },
+  "bind_time": {
+   "value": 1.3666,
+   "n": 7,
+   "spread": null,
+   "note": "Bind: scaled time relinquished"
+  },
+  "bind_runs": {
+   "value": [
+    1.35,
+    1.3666,
+    1.3667,
+    1.3666,
+    1.35,
+    1.382,
+    1.3666
+   ],
+   "n": 7,
+   "note": "scaled s per bind"
+  },
+  "bind_end_vy": {
+   "value": -0.25,
+   "n": 7,
+   "spread": null,
+   "note": "vy in the first frame after a bind"
+  },
+  "lock_decay": {
+   "value": 0.86,
+   "n": 475,
+   "spread": null,
+   "note": "vx ratio per step while another FSM holds control"
+  },
+  "land_slop_lo": {
+   "value": 0.0082,
+   "n": 140,
+   "spread": null,
+   "note": "late contacts end in [-0.0077, 0.0048]"
+  },
+  "land_slop_hi": {
+   "value": 0.0053,
+   "n": 140,
+   "spread": null,
+   "note": "upper edge of the late-contact band"
+  },
+  "landings": {
+   "value": {
+    "same_step": 3012,
+    "next_step": 140
+   },
+   "n": 3152,
+   "note": "contact resolved in the landing step vs the next one"
+  },
+  "input_jump_lag": {
+   "value": 1,
+   "n": 672,
+   "spread": null,
+   "note": "residual jump-bit lag after the shift {-3: 4, -2: 2, -1: 7, 0: 652, 2: 7}"
+  }
+ }
+}
