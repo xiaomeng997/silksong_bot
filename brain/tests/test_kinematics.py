@@ -304,6 +304,10 @@ def test_hold_filter_carries_its_state_across_calls():
           "age": st.age[0].tolist()}
     synced, _ = km.hold_filter(commanded[2:], km.HoldState.from_hf(hf))   # STATE act.hf, when the oracle sends it
     assert np.array_equal(synced, full[2:])
+    from_act, _ = km.hold_filter(commanded[2:], km.HoldState.from_act({"mask": hf["latched"], "hf": hf}))
+    assert np.array_equal(from_act, full[2:])
+    old, _ = km.hold_filter(commanded[2:], km.HoldState.from_act({"mask": hf["latched"]}))   # pre-M2 oracle
+    assert not np.array_equal(old, full[2:])                             # the mask alone misses the queued edges
     lr, _ = km.hold_filter(np.array([km.B_LEFT, km.B_LEFT | km.B_RIGHT, km.B_RIGHT, km.B_RIGHT, km.B_RIGHT]))
     assert not any((m & km.B_LEFT) and (m & km.B_RIGHT) for m in lr)    # never both directions
 

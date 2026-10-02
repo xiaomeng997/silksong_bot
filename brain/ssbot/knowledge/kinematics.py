@@ -1243,6 +1243,19 @@ class HoldState:
                   ints(hf.get("age"), _AGE_LONG)[None])
         return one.repeat(n)
 
+    @classmethod
+    def from_act(cls, act: dict | None, n: int = 1) -> "HoldState":
+        """From a STATE "act" section: act.hf when the oracle exports it (exact), else the latched act.mask taken
+        as settled (no queued edges, long ages), an approximation (oracle tests/InputLogicCheck, 1200 random cut
+        points: 59 273 latched frames differ after it, 0 after act.hf), so a planner that sends the ACTIONs keeps
+        its own HoldState in step instead (hold_filter returns it)."""
+        act = act or {}
+        hf = act.get("hf")
+        if isinstance(hf, dict):
+            return cls.from_hf(hf, n)
+        m = int(act.get("mask") or 0)
+        return cls.from_hf({"latched": m, "desired": m}, n)
+
     def repeat(self, n: int) -> "HoldState":
         return HoldState(*(np.repeat(a[:1] if len(a) == 1 else a, n if len(a) == 1 else 1, axis=0)
                            for a in (self.latched, self.desired, self.pending, self.age)))
