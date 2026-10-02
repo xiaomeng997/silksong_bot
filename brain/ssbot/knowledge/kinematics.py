@@ -2653,10 +2653,10 @@ class StateTracker:
 
 # ---- runtime residual monitor (DESIGN §3.5.2) -----------------------------------------------------------------
 
-# alarm levels of ResidualMonitor over its last 600 windows at 30 frames, with room below the worst of 808 k frames of
-# held-out play (trial i0_000, live i1_000, i2_001, i3_000: rolling share within 0.892 at its lowest, at most 58
-# windows more than 0.5 u outside the hull, both after clusters of pogo / recoil / hit windows the model misses); a
-# broken model (0.3 u off) drops the share towards 0 within the window
+# alarm levels of ResidualMonitor over its last 600 windows at 30 frames (misses allowed: (1 - 0.85) * 600 = 90), with
+# room above the worst of 837 k frames of held-out play (trial i0_000, live i1_000, i2_001, i3_000; kin_check --monitor:
+# at most 65 windows missing the hull, 58 by more than 0.5 u, after clusters of pogo / recoil / hit windows the model
+# misses); a broken model (0.3 u off) misses every window
 MONITOR_ALARM_WITHIN = 0.85
 MONITOR_ALARM_FAR = 80
 
@@ -2682,10 +2682,11 @@ class ResidualMonitor:
     needs) the state is "unknown" and confidence() None; pass it to safety.invariants.i4 only when it is not None (a
     missing module counts as below its threshold). "degraded" when, among the last `window` scored windows at the
     longest horizon, more than (1 - alarm_within) * window miss the hull by tol or more than alarm_far by far_u
-    (counts, so a ring still filling after a reset is not judged on a few windows). Held-out play (trial i0_000, live i1_000, i2_001, i3_000: 808 k frames, 808 k windows scored at 30
-    frames, 1.2 % dropped) puts 99.4-99.8 % of the windows inside the hull (by recording; the nominal lane: 85-89 %),
-    and never trips the alarm levels (MONITOR_ALARM_*); a model 0.3 u off trips it within the window (test). Cost:
-    about 0.17 ms per frame (one compiled rollout of the due anchors, 9 lanes), plus StateTracker.push under 0.1 ms."""
+    (counts, so a ring still filling after a reset is not judged on a few windows). Held-out play (kin_check
+    --monitor on trial i0_000, live i1_000, i2_001, i3_000: 837 k frames, 815 k windows scored at 30 frames, 1.1 %
+    dropped) puts 99.36-99.79 % of the windows inside the hull by recording (the nominal lane 90.0-91.2 %, at 1 frame
+    99.9 %) and never reaches "degraded"; a model 0.3 u off does within the window (test). Cost: about 0.17 ms per
+    frame (one compiled rollout of the due anchors, 9 lanes), plus StateTracker.push under 0.1 ms."""
 
     def __init__(self, params: HeroParams, terrain: Terrain2D | None = None, horizons: tuple[int, ...] = (1, 6, 30),
                  tol: float = 0.1, window: int = 600, min_n: int = 60, alarm_within: float = MONITOR_ALARM_WITHIN,
