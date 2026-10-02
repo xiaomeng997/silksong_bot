@@ -211,3 +211,41 @@ def test_hull_points_cover_wide_boxes():
                 for fy in np.linspace(0, 1, 7):
                     qx, qy = x0[i, k] + fx * w[i, k], y0[i, k] + fy * h[i, k]
                     assert any(abs(qx - a) <= hx + 1e-9 and abs(qy - b) <= hy + 1e-9 for a, b in P)
+
+
+def test_adaptive_horizon_and_jump_commitment_through_a_charge(model, tpls, params, arena):
+    """A charge from the right in its wind-up, the hero 14 u in front of the anchor: the tactics ask for a horizon
+    to the charge's end, the planner rolls the dodge set that far and finds a safe jump timing; once a jump is
+    pressed its hold is kept on the next ticks."""
+    an = model.anchor("BB_CHARGE", "Set R")
+    fc = Forecaster(model, ORACLE, margin=MARGIN, templates=tpls)
+    planner = Planner(params, arena, PlannerConfig(threads=4))
+    tac = Tactics(load_playbook())
+    x = an.x - 14.0
+    S0 = kin.initial_state(params, x, 2.015 + params.foot, facing=1)
+    for tau in (0.2, 0.4):
+        fc.tracker.state, fc.tracker.t_entry = "Charge Antic", -tau
+        fc.tracker.roots = lambda origin, tau=tau: ([Root("Charge Antic", -tau, -tau, Ctx(
+            "BB_CHARGE", "Set R", an, "P1", False), current=True)], True)
+        f = fc.forecast(2.0, 0.0)
+        prefs = tac.decide(world(x), f, None, 3)
+        assert prefs.horizon_frames > planner.cfg.T
+        planner.reset()
+        r = planner.tick(world(x), S0, kin.HoldState.idle(1), np.zeros(1, np.int64), f, prefs,
+                         FilterContext.from_world(world(x), None, 3))
+        assert r.S == 0 and not r.forced_risk and r.n == len(planner.cands_long.cmd)
+    # commitment: a plan that pressed jump keeps it held while a kept plan is safe
+    fc.tracker.roots = lambda origin: ([], True)
+    f = fc.forecast(2.0, 0.0)
+    prefs = tac.decide(world(85.0), f, None, 3)
+    planner.reset()
+    planner.jump_until = planner.ticks + 20
+    r = planner.tick(world(85.0), kin.initial_state(params, 85.0, 2.015 + params.foot), kin.HoldState.idle(1),
+                     np.full(1, kin.B_JUMP, np.int64), f, prefs, FilterContext.from_world(world(85.0), None, 3))
+    assert (r.cmd[:19] & kin.B_JUMP).all()
+
+
+def test_tail_check_runs_for_a_fresh_choice(model, tpls, params, arena):
+    planner = Planner(params, arena, PlannerConfig(threads=4))
+    r, _ = tick(planner, model, tpls, params, [], 85.0)
+    assert r.tail_ok is True
