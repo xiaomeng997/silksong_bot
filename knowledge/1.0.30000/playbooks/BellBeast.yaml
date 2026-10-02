@@ -25,6 +25,13 @@ stance:
   # so stand where every branch can still be escaped: between both charge emergences (x' -6..4.8 from 75.03 / 95.72)
   # and outside both leap landing zones (91-102.8 from the left anchor, 67.9-79.7 from the right one).
   hidden_x: 85.4
+  # Vision-equivalent view without a burst cue (stage C): the burst position is unseen until the eruption, which
+  # nothing escapes within about 4 u of it (bx - 3.75 .. bx + 4.0), while a charge or leap that emerges near the hero
+  # is unescapable too (from the left anchor up to x 80.5 / 82.5, from the right one from 90 / 88). Planner ticks 4
+  # frames after the boss is first drawn, hero idle at x (ssbot.tools.reactability, 2026-10-02): the chance that the
+  # attack chosen underground is one the hero cannot escape is lowest at x 83 (0.157 with the P1 burst share 0.262,
+  # 0.248 with the P2 share 0.414) against 0.21 / 0.33 at 85.5.
+  hidden_x_vision: 83.0
   # Engage from just outside the support: the planner's own S check decides; this only biases the end position.
   engage_reach_u: 1.6     # stand this far from the boss box: the side slash reaches 2.81 u forward of the hurtbox
                           # centre (crests.json, P17); the support check stops the hero at its edge anyway
@@ -61,6 +68,8 @@ prepare:
   - {state: Burst Antic, x_prime: 10.0, side: hero}
   - {state: Fire Bells, x_prime: 10.0, side: hero}
   - {state: Burst Out, x_prime: 10.0, side: hero}
+  - {state: burst, x_prime: 10.0, side: hero}
+  - {state: burst_tell, x_prime: 10.0, side: hero}     # the hypothetical cue (PlannerPolicy view degraded_tell)
   # vision-equivalent view: the observable phase stands for the state (a leap is seen only once it is in the air)
   - {state: leap, x_prime: 12.0, side: attack}
 

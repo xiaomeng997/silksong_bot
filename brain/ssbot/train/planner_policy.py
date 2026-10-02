@@ -1,6 +1,7 @@
 """PlannerPolicy: the M2 combat stack as a run_episode policy (W3 + W4 integration; DESIGN §3.5, §3.7, §3.9.2).
 
     pol = PlannerPolicy(view="oracle")             # stage B; view="degraded": stage C (DegradedOracleBackend)
+                                                    # view="degraded_tell": stage C with a hypothetical burst cue
     pol.attach(link)                                # once per link: the TERRAIN tap
     run_episode(link, BELL_BEAST, tap, pol, cfg, rec)   # reset(rng, enc) per episode, act(state, tap) -> mask per STATE
 
@@ -53,6 +54,10 @@ HORIZON_S = 2.0                       # forecast horizon: the risk map's and the
 UNPRED_LAG = 3
 LOG_BEFORE, LOG_AFTER = 90, 10
 LOG_ALL = os.environ.get("SSBOT_LOG_ALL") == "1"     # debugging: every tick to the decision log
+# view "degraded_tell": an experiment, not a vision fact (ObservabilityFilter tells): the Bell Beast's burst position
+# shown while it is underground in Burst Antic (1.2 s before the eruption, as the oracle view knows it)
+BURST_TELL = {"Bone Beast": {"Burst Antic": "burst_tell"}}
+VIEWS = ("oracle", "degraded", "degraded_tell")
 
 
 class TerrainTap:
@@ -90,6 +95,8 @@ class PlannerPolicy:
         # the template dilation (cv2) uses every core by default: a worker starting next to running ones starved
         # them past the oracle's 250 ms brain-lost watchdog (run 20261002_050217: three games paused at once)
         cv2.setNumThreads(2)
+        if view not in VIEWS:
+            raise ValueError(f"unknown view {view!r}")
         self.view = view
         self.threads = threads
         self.params = HeroParams.load()
@@ -109,6 +116,8 @@ class PlannerPolicy:
         self.pb = load_playbook(enemy)
         self.fc.no_hurtbox = self.pb.no_hurtbox
         self.tac = Tactics(self.pb)
+        if view == "degraded" and self.pb.hidden_x_vision is not None:
+            self.tac.hidden_x = self.pb.hidden_x_vision      # no burst cue: the stance with the least unreactable risk
         self.planner: Planner | None = None
         self.terrain_tap: TerrainTap | None = None
         self.terrain: Terrain2D | None = None
@@ -166,7 +175,8 @@ class PlannerPolicy:
             self.k = 0
         else:
             self.backend = DegradedOracleBackend(OracleBackend(bosses=[self.spec]),
-                                                 ObservabilityFilter(bosses=[self.spec]))
+                                                 ObservabilityFilter(bosses=[self.spec], tells=BURST_TELL
+                                                                     if self.view == "degraded_tell" else None))
             self.k = self.backend.reset(seed)
         if self.terrain_tap is not None:
             msg = self.terrain_tap.wait(enc.scene, timeout_s=5.0)

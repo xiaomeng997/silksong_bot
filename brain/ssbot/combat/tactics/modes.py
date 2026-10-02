@@ -62,6 +62,7 @@ class TacticPrefs:
 class Tactics:
     def __init__(self, pb: Playbook):
         self.pb = pb
+        self.hidden_x = pb.hidden_x         # HOLD's stance (PlannerPolicy: pb.hidden_x_vision without a burst cue)
         x0, x1 = pb.arena_x
         self.xs = np.arange(x0, x1 + 1e-9, GRID_U)
 
@@ -100,7 +101,7 @@ class Tactics:
         hero = ws.hero.pos.v
         hp, max_hp, silk = ws.res.hp.v, ws.res.hp_max.v, ws.res.silk.v
         risk = self.risk_map(f)
-        prefs = TacticPrefs(HOLD, pb.hidden_x, wts, risk_x=self.xs, risk=risk)
+        prefs = TacticPrefs(HOLD, self.hidden_x, wts, risk_x=self.xs, risk=risk)
         if d is not None and d.restrictions.max_punish_hits is not None:
             prefs.max_hits = d.restrictions.max_punish_hits
         box, ok = f.boss_box(np.zeros(1))
@@ -154,6 +155,6 @@ class Tactics:
             return prefs
         # the next attack unknown: the playbook's stance, moved only as far as the future coverage is worth (a corner
         # chosen for a slightly lower coverage was where a leap then emerged: run 20261002_042404, i1 ep0)
-        cost = risk + HOLD_PULL * np.abs(self.xs - pb.hidden_x)
+        cost = risk + HOLD_PULL * np.abs(self.xs - self.hidden_x)
         prefs.stance_x = float(self.xs[int(np.argmin(cost))])
         return prefs

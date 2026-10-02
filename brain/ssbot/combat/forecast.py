@@ -82,9 +82,12 @@ BELL_TTL_S = 8.0                   # a disarmed bell (left the export, back to D
 
 # observable phase -> the Control state its first frame is (the root of the forecast walk)
 PHASE_ROOT = {"emerge": "Charge Emerge", "charge_antic": "Charge Antic", "charge": "Charge", "leap": "Leap Out",
-              "burst": "Burst Out", "roar": "Rage Burst", "roar_end": "Roar End"}
+              "burst": "Burst Out", "roar": "Rage Burst", "roar_end": "Roar End", "burst_tell": "Burst Antic"}
 PHASE_FAMILY = {"emerge": "BB_CHARGE", "charge_antic": "BB_CHARGE", "charge": "BB_CHARGE", "leap": "BB_LEAP",
-                "burst": "BB_BURST", "roar": "BB_RAGE", "roar_end": "BB_RAGE"}
+                "burst": "BB_BURST", "roar": "BB_RAGE", "roar_end": "BB_RAGE", "burst_tell": "BB_BURST"}
+# a hypothetical cue of the burst position while it is underground (ObservabilityFilter tells; an experiment): the
+# entity's x is the hidden transform's, which is the burst anchor (oracle view: 81 of 81 bursts)
+TELL_PHASES = frozenset(("burst_tell",))
 RECOVER_ROOT = {"BB_CHARGE": "Charge End", "BB_LEAP": "Leap Land"}
 # the state a hidden phase starts in, by the last drawn family (None: before the first emergence)
 HIDE_ROOT = {"BB_CHARGE": "Submerged", "BB_LEAP": "Submerged", "BB_BURST": "Burst Recovery", "BB_RAGE": "Rage Submerge"}
@@ -492,7 +495,8 @@ class BossTracker:
                 fam = PHASE_FAMILY.get(ph)
                 if ph == "recover":
                     fam = self.last_family if self.last_family in RECOVER_ROOT else None
-                if fam is not None and fam != self.last_family or ph in ("emerge", "leap", "burst", "roar") \
+                if fam is not None and fam != self.last_family or ph in ("emerge", "leap", "burst", "roar",
+                                                                         *TELL_PHASES) \
                         and prev in (HIDDEN, None, "recover", "roar_end"):
                     self._anchor_sum = []
                     self.last_anchor = None
@@ -509,13 +513,19 @@ class BossTracker:
         if fam is None:
             return
         f = m.families[fam]
-        if fam == "BB_BURST" and boss.pos.conf > 0 and not self._anchor_sum:
-            # the box follows the sprite frame (live i2_002 f605393-605452: box centre x 89.93 -> 91.57 while the
-            # transform stays at 90.47), so only the first drawn frame has the fixed offset of the behaviour table
-            dx = f.box_offset.get(bool(boss.flip_x), (0.0, 0.0))[0]
-            self._anchor_sum.append(boss.pos.v[0] - dx)
-            ax = float(self._anchor_sum[0])
-            self.last_anchor = Anchor(ax, f.anchor_y if f.anchor_y is not None else boss.pos.v[1] + 2.68, 1)
+        if fam == "BB_BURST":
+            # set once per burst and kept to its end (an earlier version fell through to the family's named anchor,
+            # which a burst has none of, from the second drawn frame on: the whole burst range for the rest of the
+            # burst, FORCED_RISK in every stage C burst, run 20261002_060151)
+            if boss.pos.conf > 0 and not self._anchor_sum:
+                if ph in TELL_PHASES:
+                    self._anchor_sum.append(boss.pos.v[0])
+                else:
+                    # the box follows the sprite frame (live i2_002 f605393-605452: box centre x 89.93 -> 91.57 while
+                    # the transform stays at 90.47), so only the first drawn frame has the behaviour table's offset
+                    self._anchor_sum.append(boss.pos.v[0] - f.box_offset.get(bool(boss.flip_x), (0.0, 0.0))[0])
+                y = f.anchor_y if f.anchor_y is not None else boss.pos.v[1] + 2.68
+                self.last_anchor = Anchor(float(self._anchor_sum[0]), y, 1)
         elif f.directed:
             self.last_anchor = m.anchor(fam, "Set R" if boss.flip_x else "Set L")
         else:

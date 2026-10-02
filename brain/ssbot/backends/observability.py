@@ -50,6 +50,12 @@ Rule: no value in the output may depend on something pixels cannot show. Per fra
     "NeedleThrow Throwing" (Silk Spear): Hunter crest, needle level 0 (DEFAULT_ATTACK_DAMAGE).
   - FSM state -> observable phase through the caller's table (BossSpec.phases or phase_map; default "unknown"),
     with t_in_phase counted from the observable phase change.
+  - Hypothetical tells (tells, off by default; an experiment, not a vision fact): {type_key: {FSM state: phase}}.
+    A boss held hidden while the oracle exports it in a listed state shows that phase and its transform x (conf 1;
+    y stays the last seen one), as if vision saw a cue where it will come out. Nothing shows the Bell Beast's burst
+    position before the eruption in this view (M2 stage C, run 20261002_060151: 16 of 16 episodes ended at the first
+    burst); `tells={"Bone Beast": {"Burst Antic": "burst_tell"}}` measures what such a cue would be worth. Whether
+    the game draws one (dust, rumble) is for the vision work to establish.
   - Exact timers (HeroState fields tagged timer=True) -> None until the vision-side timer models exist.
   - playTime -> wall clock: calibrated once from the first frame (standing in for the save-slot read, sigma
     calib_sigma_s; the slot shows h:mm), then advanced by the QPC wall clock while the game would count it
@@ -421,7 +427,7 @@ class ObservabilityFilter:
                  hit_damage: float = 5.0, attack_damage: Mapping[str, float] | None = None, hit_sigma: float = 0.5,
                  ttl_s: dict[Kind, float] | None = None, margin_px: float = 0.0, calib_sigma_s: float = 30.0,
                  drift: float = 1e-3, quit_map: QuitMapLike | None = None, min_p: float = 0.99,
-                 box_table: BoxTable | None = None):
+                 box_table: BoxTable | None = None, tells: Mapping[str, Mapping[str, str]] | None = None):
         if profile not in (ORACLE, VISION_EQUIVALENT):
             raise ValueError(f"unknown profile {profile!r}")
         self.profile = profile
@@ -439,6 +445,7 @@ class ObservabilityFilter:
         self.quit_map = quit_map
         self.min_p = min_p
         self.boxes = box_table if box_table is not None else BoxTable.load()   # knowledge: survives reset()
+        self.tells = {k: dict(v) for k, v in (tells or {}).items()}
         self.reset()
 
     def reset(self) -> None:
@@ -488,10 +495,12 @@ class ObservabilityFilter:
         frac, inside = self._visibility(out)
         visible: list[Entity] = []
         gone_inside: dict[int, bool] = {}          # id -> the oracle exports it hidden
+        exported: dict[int, Entity] = {}           # the oracle's copy of an entity gone inside (hypothetical tells)
         outside: set[int] = set()
         for e, fv, pin in zip(out.entities, frac, inside):
             if e.hidden or (fv <= 0.0 and not image_extent(e) and pin):
                 gone_inside[e.id] = e.hidden
+                exported[e.id] = e
             elif fv <= 0.0:
                 outside.add(e.id)
             else:
@@ -550,7 +559,7 @@ class ObservabilityFilter:
                 del self._seen[iid]               # (seen digging in and still exported hidden: no TTL)
                 continue
             if seen.state == "hidden":
-                ents.append(self._hidden(seen, t, age))
+                ents.append(self._hidden(seen, t, age, exported.get(iid)))
                 unobs |= Unobs.VANISHED_IN_VIEW
             else:
                 ents.append(self._ghost(seen, age))
@@ -658,9 +667,21 @@ class ObservabilityFilter:
                       facing=g.facing, hp_est=self._hp(g.id, self.hp_max.get(g.type_key.v)) if g.hp_est else None,
                       visible_frac=0.0, last_seen_ms=age_ms, flip_x=g.flip_x)
 
-    def _hidden(self, seen: _Seen, t: float, age: float) -> Entity:
-        """Gone inside the image (dug in, put away): it exists, its position is unknown (conf 0)."""
+    def _hidden(self, seen: _Seen, t: float, age: float, cur: Entity | None = None) -> Entity:
+        """Gone inside the image (dug in, put away): it exists, its position is unknown (conf 0), unless a
+        hypothetical tell (self.tells) shows its state and x."""
         g = seen.ent
+        tell = None
+        if cur is not None and cur.phase is not None and cur.phase.top:
+            tell = self.tells.get(g.type_key.v, {}).get(cur.phase.top)
+        if tell is not None:
+            return Entity(id=g.id, kind=g.kind, type_key=g.type_key,
+                          pos=E((float(cur.pos.v[0]), float(g.pos.v[1])), sigma=g.pos.sigma, conf=1.0,
+                                src=Src.PREDICTED, age_ms=0.0),
+                          vel=unknown((0.0, 0.0)), facing=g.facing,
+                          phase=PhasePost(topk=[(tell, 1.0)], t_in_phase=self._phase_time(g.id, tell, t)),
+                          hp_est=self._hp(g.id, self.hp_max.get(g.type_key.v)) if g.hp_est else None,
+                          visible_frac=0.0, last_seen_ms=age * 1000.0, hidden=True, flip_x=g.flip_x)
         phase = None
         if g.phase is not None:
             ph = self._phase.get(g.id)

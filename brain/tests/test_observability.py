@@ -382,6 +382,32 @@ def test_oracle_hidden_boss_is_kept_past_the_ttl(wake):
     assert boss(out).visible_frac > 0 and not boss(out).hidden and boss(out).phase.t_in_phase == 0.0
 
 
+def test_a_hypothetical_tell_shows_the_listed_state_and_x(wake):
+    """tells (an experiment, off by default): a hidden boss in a listed FSM state shows that phase and its x."""
+    from ssbot.core.worldstate import PhasePost
+    i = next(i for i, w in enumerate(wake) if boss(w) is not None)
+    outs = {}
+    for tells in (None, {"Bone Beast": {"Burst Antic": "burst_tell"}}):
+        f = ObservabilityFilter(bosses=[BELL_BEAST], tells=tells)
+        f.apply(wake[i])
+        seq = []
+        for k, st in enumerate(("Submerged", "Burst Antic", "Burst Antic")):
+            w = copy.deepcopy(wake[i + 1 + k])
+            b = boss(w)
+            b.hidden, b.dmg_boxes, b.body_polys, b.render_box, b.visible_frac = True, [], [], None, 0.0
+            b.pos = E((88.0, -12.51))
+            b.phase = PhasePost(topk=[(st, 1.0)])
+            seq.append(boss(f.apply(w)))
+        outs[tells is not None] = seq
+    assert all(b.hidden and b.pos.conf == 0.0 and b.phase.top == obs.HIDDEN_PHASE for b in outs[False])
+    told = outs[True]
+    assert told[0].phase.top == obs.HIDDEN_PHASE and told[0].pos.conf == 0.0
+    for b in told[1:]:
+        assert b.hidden and b.dmg_boxes == [] and b.phase.top == "burst_tell" and b.pos.conf == 1.0
+        assert b.pos.v[0] == 88.0 and b.pos.v[1] != -12.51         # x only: y stays the last seen one
+    assert told[2].phase.t_in_phase > told[1].phase.t_in_phase == 0.0
+
+
 def test_off_screen_changes_are_not_seen(wake):
     """A ghost that digs in off-screen stays a ghost (vision did not see it go); a boss that dug in in view and comes
     back up off-screen stays hidden (vision did not see it come back)."""

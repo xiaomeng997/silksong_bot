@@ -160,3 +160,40 @@ def test_support_set_names_instances(model, templates):
     fc.tracker.roots = lambda origin: ([], False)
     sup = fc.forecast(1.0, 0.0).support_set()
     assert not sup.known and not sup.certified_empty
+
+
+def test_ve_burst_anchor_lasts_the_burst_and_a_tell_sets_it_underground(model, templates):
+    """Vision-equivalent tracker: the burst anchor comes from the first drawn frame (box offset) and stays for the
+    whole burst (an earlier version lost it from the second frame on); a hypothetical tell phase (ObservabilityFilter
+    tells) sets it from the hidden transform x before the eruption, and the walk starts in Burst Antic there."""
+    from ssbot.core.worldstate import E, Entity, Kind, PhasePost, WorldState
+    off = model.families["BB_BURST"].box_offset.get(False, (0.0, 0.0))[0]
+
+    def frame(t, phase, x, tau, hidden=False, conf=1.0):
+        ws = WorldState()
+        ws.stamp.t_game_s = t
+        ws.entities = [Entity(id=7, kind=Kind.BOSS, type_key=E("Bone Beast"), pos=E((x, 3.0), conf=conf),
+                              phase=PhasePost(topk=[(phase, 1.0)], t_in_phase=tau), hidden=hidden,
+                              visible_frac=0.0 if hidden else 1.0)]
+        return ws
+
+    for told in (False, True):
+        fc = _fc(model, templates, VISION_EQUIVALENT)
+        trk = fc.tracker
+        trk.seen = True
+        fc.update(frame(10.0, "hidden", 0.0, 0.0, hidden=True, conf=0.0))
+        assert trk.last_anchor is None or trk.last_family != "BB_BURST"
+        t = 11.0
+        if told:
+            fc.update(frame(t, "burst_tell", 88.0, 0.0, hidden=True))
+            assert trk.state == "burst_tell" and trk.last_anchor.x == 88.0
+            roots, ok = trk.roots(t)
+            assert ok and roots[0].state == "Burst Antic" and roots[0].ctx.anchor.x == 88.0
+            assert {p.anchor for p in fc.forecast(2.0).placements if p.anchor is not None} == {(88.0, 5.49)}
+            t += 1.2
+        for k in range(3):
+            fc.update(frame(t + k * BIN, "burst", 88.0 + off + 0.4 * k, k * BIN))
+            assert trk.state == "burst" and trk.last_anchor is not None and trk.last_anchor.x == pytest.approx(88.0)
+        fc.update(frame(t + 0.95, "hidden", 0.0, 0.0, hidden=True, conf=0.0))
+        roots, _ = trk.roots(t + 0.95)
+        assert roots[0].state == "Burst Recovery" and roots[0].ctx.anchor.x == pytest.approx(88.0)
