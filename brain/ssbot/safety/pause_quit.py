@@ -30,13 +30,15 @@ cue cannot stop the loop; loop_alert_s and false_cue_alert raise the alert from 
 Latency. Every observation has a capture time t, every key an emission time now (the same clock). A menu decision uses
 only fresh frames (capture time strictly later than the last frame used) captured after the last tap's release plus
 input_latency_max_s plus one frame, i.e. frames that must already show every key sent; repeated stale frames never
-count twice. After a navigation tap the highlight must be seen to change from its pre-tap value; when it reads the same
-on stable_frames such frames and the round trip (input + observation latency maxima + nav_margin_s) has passed, the tap
+count twice. The guarantee is as good as that bound: the tests run the machine with its bounds at the sim's maxima,
+and again at the 0.1 s defaults against up to 24 frames as a stress check. After a navigation tap the highlight must
+be seen to change from its pre-tap value; when it reads the same on stable_frames such frames and the round trip (input + observation latency maxima + nav_margin_s) has passed, the tap
 had no effect (the end of a non-wrapping list, or a dropped tap) and the direction flips for that step. The exit prompt
 lists Yes above No, so No -> Yes is Up (probe P7); ties on a wrapping list go the direct way. tests/test_pause_loop.py
-runs 10^4 randomized full quits with up to 16 frames of input + observation latency, capture stalls that repeat a frame
-for up to 4 steps, time-based key sampling with 33 ms frames, non-wrapping prompts and Options, and persistent false
-cues, plus 2x10^3 navigations on an already paused game with up to 24 frames: no wrong Submit, no unintended unpause.
+runs 10^4 randomized full quits (input + observation latency up to 14 frames, capture stalls, time-based key sampling
+with 33 ms frames, prompts that do or do not wrap, false cues) and 2x10^3 menu walks on an already paused game with up
+to 24 frames and stalls repeating a frame for up to 4 steps (non-wrapping Options included): no wrong Submit, no
+unintended unpause. Without the post-tap cut the same 14-frame quits Submit a wrong item in 1025 of 2000 (335 unpause).
 
 Timing facts this relies on:
 - a Pause press while the pause gate is closed is dropped, not queued (m0:N12): the loop is the retry;
@@ -133,8 +135,10 @@ class PauseQuitConfig:
     budget_s: float = 0.23           # pressing must stop within this of the real pause
     loop_alert_s: float = 5.0        # still looping this long: alert (and keep looping)
     false_cue_alert: int = 3         # this many false cues: alert (and keep looping)
-    input_latency_max_s: float = 0.10   # p99.9 key emission -> game sample on the active input path
-    obs_latency_max_s: float = 0.10     # p99.9 frame capture -> this machine, capture stalls included
+    input_latency_max_s: float = 0.10   # p99.9 key emission -> capture time of the first frame that can show its
+    #                                     effect, on the active input path (probe P8, Esc -> first darkened capture:
+    #                                     max 49.6 ms); frames captured later than tap end + this + frame_s count
+    obs_latency_max_s: float = 0.10     # p99.9 capture -> this machine, capture stalls included (waits only)
     frame_s: float = 1 / 60          # one game frame (the frame that samples a key, before it shows the effect)
     stable_frames: int = 2           # fresh, post-tap frames that must read the same highlight
     nav_margin_s: float = 0.15       # beyond the round trip before a navigation tap counts as having had no effect
@@ -268,8 +272,9 @@ class PauseQuit:
         if self.state not in HELD_STATES:
             return False
         self.goal = GOAL_QUIT
+        self.now = max(self.now, t)
         if self.state == "REFUSED":
-            self._begin_plan(t, [_Step(M_EXIT_PROMPT, "yes", "quitting")], "quit")
+            self._begin_plan([_Step(M_EXIT_PROMPT, "yes", "quitting")], "quit")
         else:
             self._enter(t, "READ_QUIT")
         return True
@@ -457,7 +462,6 @@ class PauseQuit:
             self.t_confirm = c.t
             self._note(self.now, "confirmed", c.menu)
             self._enter(self.now, "READ_QUIT")
-            self._read_t0 = None
             return NO_KEYS
         if c.t - self.t_cue > self.cfg.confirm_window_s:
             self.false_cues += 1
@@ -635,7 +639,6 @@ class PauseQuit:
                 return self._menu(c, True)
             if self._after_plan == "refresh":
                 self._enter(self.now, "READ_QUIT")
-                self._read_t0 = None
                 return NO_KEYS
             self._fail(f"plan {self._after_plan} ended without its effect")
             return NO_KEYS
@@ -734,6 +737,8 @@ class PauseQuit:
     def _enter(self, t: float, state: str) -> None:
         self.state = state
         self._phase_t = t
+        if state == "READ_QUIT":
+            self._read_t0 = None          # the read waits on frames from now on
         self._note(t, "state", state)
 
     def _finish(self, t: float, outcome: str) -> None:

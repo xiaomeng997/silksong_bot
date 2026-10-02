@@ -119,7 +119,8 @@ class PauseSim:
     # ---- input path ------------------------------------------------------------------------------------------------
 
     def emit(self, keys: frozenset[str], now: float | None = None) -> None:
-        """Keys the machine chose at `now` (default: this frame's time); they arrive input_lat frames later, in order."""
+        """Keys the machine chose at `now` (default: this frame's time); they arrive input_lat frames later, in
+        order."""
         cfg = self.cfg
         now = self.t if now is None else now
         arrival = max(self._last_arrival, now + cfg.input_lat * cfg.frame_s + self.r.uniform(0, cfg.input_jitter_s))

@@ -116,7 +116,8 @@ def _quit_cfg(r: random.Random, seed: int, **over) -> SimConfig:
 def test_full_quit_randomized_never_submits_a_wrong_item():
     """10^4 full quits: input latency 1-8 frames plus observation latency up to 14 frames in all (the loop's own limit
     is about 17 frames: past that its last press lands after the 0.3 s lockout), capture stalls, prompts that do or
-    do not wrap, random initial highlight, oracle or vision cues with false cues: the only Submits are Quit, then Yes."""
+    do not wrap, random initial highlight, oracle or vision cues with false cues: the only Submits are Quit, then
+    Yes."""
     r = random.Random(11)
     flips = 0
     for seed in range(10_000):
@@ -324,6 +325,25 @@ def test_patch4_refusal_stays_paused():
     assert m.outcome == pq.UNPAUSED
     assert sim.log.submits[4:] == [("exit_prompt", "no"), ("pause", "continue")]
     assert sim.log.esc_unpauses == []
+
+
+def test_refused_then_quit_again_once_the_flags_clear():
+    sim = PauseSim(SimConfig(gate_closed_frames=10, refuse_yes=True, input_lat=4, obs_lat=4))
+    m = _machine(sim=sim.cfg)
+    run(m, sim, 3000, until=lambda m, s: m.state == "REFUSED")
+    sim.cfg.refuse_yes = False                  # disablePause / disableSaveQuit cleared (re-checked by the caller)
+    assert m.request_quit(sim.t) and not m.request_quit(sim.t)
+    run(m, sim, 1500, until=lambda m, s: m.done)
+    assert m.outcome == pq.QUIT and sim.gs == "MAIN_MENU"
+    assert set(sim.log.submits) == set(QUIT_SUBMITS) and sim.log.esc_unpauses == []
+    # from a held pause (goal PAUSE): the Quit item is read again, then the quit
+    sim = PauseSim(SimConfig(gate_closed_frames=10))
+    m = _machine(pq.GOAL_PAUSE)
+    run(m, sim, 600, until=lambda m, s: m.state == "HOLD")
+    run(m, sim, 120)
+    assert m.request_quit(sim.t)
+    run(m, sim, 1500, until=lambda m, s: m.done)
+    assert m.outcome == pq.QUIT and sim.log.submits == QUIT_SUBMITS
 
 
 def test_held_states_follow_a_quit_that_proceeds_and_the_quit_has_a_deadline():

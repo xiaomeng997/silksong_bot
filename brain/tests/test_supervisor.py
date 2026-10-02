@@ -1,18 +1,20 @@
-"""Supervisor v1 (DESIGN §3.7.3-3.7.4): tiers, triggers Q1-Q9, the Q4 latch and risk integral, PAUSE_PENDING and
-YELLOW restrictions, P1, and the §3.5.6 gates. Bell Beast numbers: 5 masks, every attack 2 masks."""
+"""Supervisor v1 (DESIGN §3.7.3-3.7.4): tiers, triggers Q1-Q9, the Q4 latch and risk integral, explicit support,
+an unknown hero, the primitive allowlists (PAUSE_PENDING / YELLOW / EVADE_EXIT), P1, and the §3.5.6 gates. Bell Beast
+numbers: 5 masks, every attack 2 masks; the boss root iid 529544 (trial run 20261001_121446)."""
 import ast
 from pathlib import Path
 
+from ssbot.core.primitives import ALL, DAMAGING, EVASIVE, N_PRIM, Prim
 from ssbot.safety import supervisor as sv
-from ssbot.safety.hits_to_death import MASK_INTACT, MASK_NONE, SupportEvent
+from ssbot.safety.hits_to_death import MASK_INTACT, MASK_NONE, UNBOUNDED, SupportEvent
 from ssbot.safety.supervisor import Supervisor, SupervisorConfig, SupervisorInput
 
-BODY = SupportEvent("Bone Beast", 2)
-BELL_L = SupportEvent("BoneBeast DropBell L", 2)
+BODY = SupportEvent("Bone Beast", 2, instance=529544)
+BELL_L = SupportEvent("BoneBeast DropBell L", 2, instance=529628)
 
 
 def _inp(**kw) -> SupervisorInput:
-    base = dict(t=10.0, hp=5, max_hp=5, mask=MASK_NONE, support=(BODY,), plan_s=0)
+    base = dict(t=10.0, hp=5, max_hp=5, mask=MASK_NONE, support=(BODY,), support_known=True, plan_s=0)
     base.update(kw)
     return SupervisorInput(**base)
 
@@ -21,31 +23,44 @@ def test_tiers_from_h_and_plan():
     s = Supervisor()
     d = s.step(_inp())
     assert (d.tier, d.h, d.pause_pending, d.triggers) == ("GREEN", 3, False, ())
-    assert d.long_planning_ok and "PARRY" not in d.forbidden
+    assert d.long_planning_ok and d.allows("ATTACK(side)") and d.allows("SILKSKILL(1)")
     assert s.step(_inp(plan_s=1)).tier == "YELLOW"
     assert s.step(_inp(plan_s=None)).tier == "YELLOW"              # no plan yet: not proven safe
     d = s.step(_inp(hp=4))                                         # 4 -> 2 -> dead: h = 2
     assert d.tier == "YELLOW" and d.h == 2
     r = d.restrictions
     assert r.heal_first and r.max_punish_hits == 1 and r.no_parry and r.no_killing_blow and r.no_new_fights
-    assert "PARRY" in d.forbidden and "ATTACK_SIDE" not in d.forbidden
+    assert d.allows("ATTACK(side)") and not d.allows("SILKSKILL(0)")   # below full HP: no silk skills
     d = s.step(_inp(hp=4, next_hit_may_kill=True, over_hazard=True))
-    assert {"ATTACK_SIDE", "TOOL", "SILKSKILL", "ATTACK_DOWN"} <= d.forbidden and "DASH" not in d.forbidden
+    assert not d.allowed & DAMAGING and not d.allows("ATTACK(down)") and d.allows("DASH")
 
 
 def test_q1_low_h_is_a_sticky_pause_pending_quit():
     s = Supervisor()
     d = s.step(_inp(hp=2))
     assert d.tier == "RED" and "Q1" in d.triggers and d.pause_pending and d.quit_requested
-    assert d.forbidden == sv.PAUSE_PENDING_FORBIDDEN
-    assert not d.forbidden & {"MOVE", "JUMP", "DASH", "WAIT", "ABORT"}
-    assert {"ATTACK_SIDE", "ATTACK_DOWN", "PARRY", "TOOL", "SILKSKILL", "BIND", "INTERACT", "CLAWLINE"} <= d.forbidden
+    assert d.allowed == EVASIVE
+    for name in ("MOVE", "JUMP(12)", "JUMP(max)", "DOUBLEJUMP", "DASH", "WALLJUMP", "GLIDE", "WAIT", "WAIT(4)",
+                 "ABORT"):
+        assert d.allows(name), name
+    # the review's names: none passes while a pause is pending, known or not
+    for name in ("ATTACK", "TOOL(0)", "SILKSKILL(1)", "ATTACK(down)", "ATTACK(side)", "HARPOON", "BIND", "CLAWLINE",
+                 "INTERACT(UP)", "NEEDOLIN_PLAY(30)", "HIT_TARGET(lever)", "PARRY", "", "TOOL"):
+        assert not d.allows(name), name
     # healing back (a heal during the loop) does not lift PAUSE_PENDING: a pause does not end the threat
     d = s.step(_inp(hp=5))
     assert d.pause_pending and d.tier == "RED" and d.quit_requested
     s.notify_paused()
     d = s.step(_inp(hp=5))
-    assert d.paused and not d.pause_pending and d.forbidden == sv.PRIMITIVES
+    assert d.paused and not d.pause_pending and d.allowed == frozenset() and d.forbidden == ALL
+    assert not d.allowed_mask.any()
+
+
+def test_allowed_mask_matches_the_allowlist():
+    d = Supervisor().step(_inp(hp=4, next_hit_may_kill=True))
+    m = d.allowed_mask
+    assert m.shape == (N_PRIM,) and m.dtype == bool
+    assert {Prim(i) for i in range(N_PRIM) if m[i]} == set(d.allowed)
 
 
 def test_q1_fractured_mask_just_broken_at_one_hp():
@@ -78,6 +93,69 @@ def test_q3_h2_with_dangerous_support():
             assert "Q1" in d.triggers, support
 
 
+def test_q3_counts_entity_instances_not_collider_names():
+    """Review: the body's colliders ('Bone Beast/PolyCollider', '/LeapCollider') are one instance; two enemies of
+    one type_key are two."""
+    one = (SupportEvent("Bone Beast/PolyCollider", 2, instance=529544),
+           SupportEvent("Bone Beast/LeapCollider", 2, instance=529544), SupportEvent("Boss Scene/Bone Beast", 2,
+                                                                                    instance=529544))
+    assert not Supervisor().step(_inp(hp=3, support=one)).triggers
+    two = (SupportEvent("Choir Clapper", 2, instance=11), SupportEvent("Choir Clapper", 2, instance=12))
+    assert "Q3" in Supervisor().step(_inp(hp=3, support=two)).triggers
+    assert sv.q3_threat(two) == "2 threat instances in support"
+    # without instance ids the source string stands in
+    assert sv.q3_threat((SupportEvent("a", 2), SupportEvent("b", 2))) is not None
+
+
+def test_unknown_support_is_never_safe():
+    """Review: a missing support used to read as UNBOUNDED / GREEN at 1 HP."""
+    d = Supervisor().step(_inp(hp=1, support=(), support_known=False))
+    assert d.h == 1 and "Q1" in d.triggers and d.pause_pending and not d.support_known and d.tier == "RED"
+    # the default input is unknown support
+    d = Supervisor().step(SupervisorInput(t=1.0, hp=1, max_hp=5))
+    assert "Q1" in d.triggers and not d.allows("ATTACK(side)")
+    # unknown at full HP: D1 >= max(1, the encounter's worst known damage); the mask is not trusted; never GREEN
+    bb = SupervisorConfig(worst_known_damage=2)
+    d = Supervisor(bb).step(_inp(support=(), support_known=False, mask=MASK_INTACT))
+    assert d.h == 3 and d.tier == "YELLOW" and not d.long_planning_ok
+    assert Supervisor().step(_inp(support=(), support_known=False)).h == 5      # floor 1 by default
+    # h = 2 with an unknown support is a Q3 quit
+    d = Supervisor(bb).step(_inp(hp=3, support=(), support_known=False))
+    assert d.h == 2 and "Q3" in d.triggers and d.pause_pending
+    # damage taken this attempt raises the floor
+    s = Supervisor()
+    assert s.step(_inp(hp=3, support=(), support_known=False)).h == 3
+    assert s.step(_inp(hp=3, support=(), support_known=False, damage_taken=2)).h == 2
+    # a known support event larger than the floor sets D1
+    d = Supervisor().step(_inp(support=(SupportEvent("x", 3),), support_known=False))
+    assert d.h == 2
+    # only a certified empty support is "nothing can hurt"
+    d = Supervisor().step(_inp(hp=1, support=(), support_known=True))
+    assert d.h == UNBOUNDED and d.tier == "GREEN"
+
+
+def test_missing_hero_is_unknown_not_zero_hp():
+    """Review: 3 913 loading / main-menu frames without a hero section mapped to hp 0 and latched Q1."""
+    s = Supervisor()
+    d = s.step(SupervisorInput(t=0.0, support=(BODY,), support_known=True, plan_s=0))
+    assert d.h is None and not d.hero_known and not d.triggers and not d.pause_pending and d.tier == "YELLOW"
+    for i in range(1, 25):
+        d = s.step(SupervisorInput(t=i / 60, support=(BODY,), support_known=True, plan_s=0))
+    assert "Q5" in d.triggers and d.on_paused == sv.SELF_CHECK and not d.quit_requested    # never seen > 300 ms
+    # known at 5 HP, then lost: h 3 from the last known hero, no Q5 (h >= 3)
+    s = Supervisor()
+    s.step(_inp())
+    for i in range(30):
+        d = s.step(_inp(hp=None, max_hp=None))
+    assert d.h == 3 and not d.hero_known and not d.triggers
+    # lost at 4 HP (h 2): Q5 after 300 ms
+    s = Supervisor()
+    s.step(_inp(hp=4))
+    ds = [s.step(_inp(hp=None, max_hp=None)) for _ in range(25)]
+    assert "Q5" not in ds[10].triggers and "Q5" in ds[-1].triggers
+    assert sv.input_from_state({"f": 1, "game": {"scene": "Bone_05"}}, 0.0).hp is None
+
+
 def test_q4_unpredicted_hits_quit_at_the_next_pausable_green_frame():
     s = Supervisor()
     assert not s.step(_inp(unpredicted_hits=1)).triggers
@@ -86,7 +164,9 @@ def test_q4_unpredicted_hits_quit_at_the_next_pausable_green_frame():
     assert d.mark_retrain and d.conservative_variant and d.restrictions.no_parry
     d = s.step(_inp(pausable=False))                                 # GREEN but not pausable
     assert not d.pause_pending and "Q4" in d.triggers
-    d = s.step(_inp())                                               # GREEN and pausable
+    d = s.step(_inp())                                               # pausability unknown: not yet
+    assert not d.pause_pending
+    d = s.step(_inp(pausable=True))                                  # GREEN and pausable
     assert d.pause_pending and d.quit_requested and d.on_paused == sv.QUIT
 
 
@@ -125,7 +205,7 @@ def test_q7_focus_q8_watchdog_q9_stop():
     d = Supervisor().step(_inp(watchdog=True))
     assert d.pause_pending and d.on_paused == sv.DIAGNOSE and d.alert
     d = Supervisor().step(_inp(permadeath=True, hp=1))
-    assert d.stop_input and d.alert and not d.pause_pending and d.forbidden == sv.PRIMITIVES
+    assert d.stop_input and d.alert and not d.pause_pending and d.allowed == frozenset()
     d = Supervisor().step(_inp(capture_lost=True))
     assert d.stop_input and "Q9" in d.triggers
 
@@ -136,6 +216,49 @@ def test_q7_focus_q8_watchdog_q9_stop():
     assert s.step(_inp(t=21)).on_paused == sv.DIAGNOSE
 
 
+def test_q7_focus_only_with_a_foreground_sink():
+    """Review: TRAIN runs 4-6 instances under OracleInjectSink, at most one focused; STATE focus is no Q7 there."""
+    s = {"f": 1, "focus": False, "hero": {"health": 5, "max_health": 5}, "pause": {"blk": 0}}
+    inp = sv.input_from_state(s, 1.0, support=(BODY,), plan_s=0)
+    assert not inp.focus_lost
+    d = Supervisor().step(inp)
+    assert d.tier == "GREEN" and not d.pause_pending
+    assert sv.input_from_state(s, 1.0, foreground_sink=True).focus_lost
+    s["focus"] = True
+    assert not sv.input_from_state(s, 1.0, foreground_sink=True).focus_lost
+
+
+def test_evade_exit_latch_after_a_greyed_quit():
+    """§3.7.5 step 4: Quit greyed, frozen check passed -> unpause, EVADE out of the room, pause and quit. The quit
+    triggers must not re-arm in that room (review: they did on the next frame)."""
+    s = Supervisor()
+    d = s.step(_inp(hp=2, scene="Bone_05"))
+    assert d.pause_pending and "Q1" in d.triggers
+    s.notify_paused()
+    s.notify_resumed(sv.RESUME_EVADE_EXIT, scene="Bone_05", t=10.0)
+    for i in range(30):
+        d = s.step(_inp(t=10.0 + i / 60, hp=2, scene="Bone_05", quittable=False))
+        assert d.evade_exit and not d.pause_pending and d.allowed == EVASIVE and "Q1" in d.triggers, i
+    # the next room: the latch ends and Q1 arms there
+    d = s.step(_inp(t=11.0, hp=2, scene="Bone_06", quittable=False))
+    assert not d.evade_exit and d.pause_pending and d.quit_requested
+    assert any("EVADE_EXIT" in r for r in d.reasons)
+    # quit available again in the same room ends it too
+    s = Supervisor()
+    s.notify_resumed(sv.RESUME_EVADE_EXIT, scene="Bone_05", t=0.0)
+    assert s.step(_inp(t=0.1, hp=2, scene="Bone_05", quittable=False)).evade_exit
+    assert s.step(_inp(t=0.2, hp=2, scene="Bone_05", quittable=True)).pause_pending
+    # a timeout alerts and re-arms
+    s = Supervisor(SupervisorConfig(evade_exit_timeout_s=5.0))
+    s.notify_resumed(sv.RESUME_EVADE_EXIT, scene="Bone_05", t=0.0)
+    d = s.step(_inp(t=6.0, hp=2, scene="Bone_05", quittable=False))
+    assert d.alert and d.pause_pending and not d.evade_exit
+    # a self-check resume latches nothing
+    s = Supervisor()
+    s.notify_resumed(sv.RESUME_SELF_CHECK)
+    assert not s.step(_inp()).evade_exit
+
+
 def test_p1_long_planning():
     assert Supervisor().step(_inp()).long_planning_ok
     assert not Supervisor().step(_inp(in_encounter=True)).long_planning_ok
@@ -144,8 +267,8 @@ def test_p1_long_planning():
 
 
 def test_silk_skills_only_at_full_hp():
-    assert "SILKSKILL" in Supervisor().step(_inp(hp=4, max_hp=5, support=())).forbidden
-    assert "SILKSKILL" not in Supervisor().step(_inp()).forbidden
+    assert not Supervisor().step(_inp(hp=4, max_hp=5, support=())).allows(Prim.SILKSKILL)
+    assert Supervisor().step(_inp()).allows(Prim.SILKSKILL)
 
 
 def test_input_from_state():
@@ -156,12 +279,18 @@ def test_input_from_state():
          "pause": {"blk": 3, "dsq": False, "preload": False}}
     inp = sv.input_from_state(s, t=12.0, support=(BODY,), plan_s=0)
     assert (inp.hp, inp.max_hp, inp.blue, inp.mask, inp.pausable, inp.quittable) == (2, 5, 0, MASK_NONE, False, False)
+    assert inp.support_known
     d = Supervisor().step(inp)
     assert "Q1" in d.triggers and d.pause_pending
     s["pause"]["blk"] = 0
-    s["focus"] = False
     inp = sv.input_from_state(s, t=12.0)
-    assert inp.pausable and inp.quittable and inp.focus_lost and inp.support == ()
+    assert inp.pausable and inp.quittable and inp.support == () and not inp.support_known
+    assert not sv.input_from_state(s, 12.0, support=(BODY,), support_known=False).support_known
+    # oracle hero.tags (cross-module decision 5): pending damage; damage events this frame
+    s["hero"]["tags"] = [{"kind": "acid", "dmg_left": 1, "t_left": 0.5}, {"kind": "frost", "dmg_left": 1}]
+    s["ev"] = [{"k": "damage", "d": {"amount": 2, "hazard": "ENEMY"}}]
+    inp = sv.input_from_state(s, 12.0, support=(BODY,))
+    assert inp.pending_dmg == 2 and inp.damage_taken == 2
 
 
 def test_bind_gate():
@@ -174,6 +303,9 @@ def test_bind_gate():
     assert sv.bind_allowed(**{**ok, "t_min_s": 1.1, "injector_band": True}).ok
     assert not sv.bind_allowed(**{**ok, "t_min_s": 1.6, "perception_margin_s": 0.1}).ok
     assert sv.bind_allowed(**{**ok, "t_min_s": 1.45, "warding_bell": True, "p_exposed": 0.04}).ok
+    # Warding Bell keeps the perception margin (review: it used to be a flat 0.05 s)
+    assert not sv.bind_allowed(**{**ok, "t_min_s": 1.45, "warding_bell": True, "perception_margin_s": 0.1}).ok
+    assert sv.bind_allowed(**{**ok, "t_min_s": 1.53, "warding_bell": True, "perception_margin_s": 0.1}).ok
     assert not sv.bind_allowed(**{**ok, "warding_bell": True, "p_exposed": 0.06}).ok
     assert not sv.bind_allowed(**{**ok, "p_exposed": 0.01}).ok
     for flag in ("pause_pending", "collapsing_ground", "hazard_in_envelope", "cursed"):
@@ -185,6 +317,7 @@ def test_parry_gate():
     assert not sv.parry_allowed(False, 5, 0, 2, "GREEN", False).ok
     assert not sv.parry_allowed(True, 3, 0, 2, "GREEN", False).ok      # a failed parry leaves 1
     assert sv.parry_allowed(True, 3, 1, 2, "GREEN", False).ok
+    assert not sv.parry_allowed(True, 4, 0, 2, "GREEN", False, pending_dmg=1).ok   # review: pending damage counts
     assert not sv.parry_allowed(True, 5, 0, 2, "YELLOW", False).ok
     assert not sv.parry_allowed(True, 5, 0, 2, "GREEN", True).ok
     assert not sv.parry_allowed(True, 5, 0, 2, "GREEN", False, lace_guard=True).ok
@@ -192,11 +325,22 @@ def test_parry_gate():
     assert sv.parry_allowed(True, 5, 0, 2, "GREEN", False, vision_success=0.996).ok
 
 
-def test_down_slash_and_silk_gates():
+def test_down_slash_gate_agrees_with_step():
+    """Review: down_slash_allowed allowed a non-spike hazard in GREEN while step() forbade it; one rule now."""
+    for spikes in (False, True):
+        for hazard in (False, True):
+            for hp, tier in ((5, "GREEN"), (4, "YELLOW")):
+                d = Supervisor().step(_inp(hp=hp, over_spikes=spikes, over_hazard=hazard))
+                assert d.tier == tier
+                assert d.allows("ATTACK(down)") == sv.down_slash_allowed(spikes, hazard, tier, False).ok, \
+                    (spikes, hazard, tier)
     assert not sv.down_slash_allowed(True, True, "GREEN", False).ok
     assert sv.down_slash_allowed(False, True, "GREEN", False).ok
     assert not sv.down_slash_allowed(False, True, "YELLOW", False).ok
     assert not sv.down_slash_allowed(False, False, "GREEN", True).ok
+
+
+def test_silk_gate():
     assert sv.silk_spend_allowed(9, 4, 5, 5).ok
     assert not sv.silk_spend_allowed(9, 4, 4, 5).ok                    # skill below full HP
     assert not sv.silk_spend_allowed(12, 4, 4, 5, skill=False).ok      # would leave 8 < 9
@@ -207,7 +351,7 @@ def test_safety_package_never_imports_ipc_or_an_oracle_backend():
     """DESIGN §8.2 import firewall for safety/."""
     root = Path(__file__).resolve().parents[1] / "ssbot" / "safety"
     files = list(root.glob("*.py"))
-    assert len(files) >= 7
+    assert len(files) >= 8
     for p in files:
         for node in ast.walk(ast.parse(p.read_text("utf-8"))):
             if isinstance(node, ast.Import):

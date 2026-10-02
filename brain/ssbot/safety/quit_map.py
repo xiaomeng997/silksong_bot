@@ -12,8 +12,12 @@ of reach, from the oracle's STATE "pause" / "game" fields in recordings.
 Per frame (real time = STATE udt): pause available = pause.blk == 0 (the PauseGate: a Pause press now pauses);
 quit available = that and the Quit item enabled (!disableSaveQuit and no pending ScenePreloader, which is also what
 Patch 4 checks besides disablePause). Paused frames, frames without a game and frames between a hero death and the
-next scene entry are not samples. A window open during a harness operation (savestate.load, randomize_start: STATE
-event "harness") or closed within that operation's duration, or cut by a hero death, is censored: it is not gameplay.
+next scene entry are not samples. A harness operation (STATE event "harness": savestate.load, randomize_start,
+death_reset) is not gameplay: the samples of its duration ("ms", logged when it ends, plus 2 frames) are taken back,
+the frames after it are no samples until the pause gate first opens (a savestate load in the middle of a boss-death
+slow motion leaves the slow motion running in the reloaded room: 23 frames of TIME_SLOWED "entry" per episode in the
+live run 20261001_122249), and a window open during the operation or closed within its duration is censored, as is a
+window cut by a hero death.
 A window that starts in a transition (GameState not PLAYING) is split where PLAYING resumes, and the PLAYING part is
 kept as a window of the new scene (typically key "entry": a boss intro or the HUDCamera lock after a cutscene).
 A window's cause is the highest-priority event of its first frames (hazard death > hazard damage > enemy damage >
@@ -30,11 +34,19 @@ the first that applies wins:
   interact    a BlockingInteractable (dialogue, doors, shops)
   inventory   the inventory is open
   free        anything else
-MEASURED_PLACEHOLDER
+Built 2026-10-01 (tools/quit_map_build.py) from the person's session 20260930_210337 (2 637 s) and the closed
+recordings of the Bell Beast runs 20261001_121446 (trial, 448 s) and 20261001_122249 (live, 12 recordings, 48 808 s):
+51.9 k s of samples in 48 scenes. P(pause) by key over all scenes: entry 1.0, hazard 0.182, hurt0 0.244, freeze 0,
+hurt1 1.0, interact 0.064, free 0.999. Bone_05 hurt0 windows: n = 11 504, p50 0.233 s, p95 0.25 s (probe P7: 0.25 s),
+max 0.55 s (a hit during a Bind: the BindBreak freeze, live i2_000 f76332). Longest window per §3.7.2 kind: hazard
+death SPIKES 2.317 s, ACID 2.183 s, LAVA 2.433 s; BossDeathSlow 1.383 s; EnemyBattleEndSlow 1.883 s (every BossDeathSlow
+of the live run runs through the next savestate.load and is censored). No disableSaveQuit and no pending ScenePreloader
+in any sample, so P(quit) = P(pause) everywhere.
 The builder works on STATE dicts; tools/quit_map_build.py feeds it recordings (only the keys in STATE_KEYS are needed,
 so a reader can skip the heavy sections).
 """
 import json
+from collections import deque
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
@@ -51,8 +63,14 @@ DEATH_EVENTS = ("hero_dead", "player_dead", "permadeath_dead")
 # cause label prefix -> priority (higher wins among the events of a window's first frames)
 _PRIORITY = {"hazard_death": 6, "hazard_damage": 5, "damage": 4, "special_damage": 3, "catastrophe": 3, "freeze": 2,
              "gs": 1, "scene_enter": 1}
+CAUSE_S = 2.5 / 60       # events this close before (or after) a window's first frame name its cause
+RECENT_S = 40.0          # closed windows a harness operation can still censor (savestate.load times out at 30 s)
 # commit-zone kind of a window cause (QuitMap.kind_max_s)
 _KIND_OF_FREEZE = {"BossDeathSlow": "boss_death_slowmo", "EnemyBattleEndSlow": "arena_end_slowmo"}
+
+
+def _prio(label: str | None) -> int:
+    return -1 if label is None else _PRIORITY.get(label.split(":")[0], 0)
 
 
 def cause_kind(cause: str | None, key: str | None = None) -> tuple[str | None, str | None]:
@@ -112,6 +130,7 @@ class _Window:
     preload: bool = False
     censored: bool = False      # cut by the end of the samples (pause, end of recording, death) or overlapping a
     #                             harness operation: not a gameplay window
+    t0: float = 0.0             # builder clock at the window's first frame
     t_end: float = 0.0          # builder clock at the window's last frame
 
     def row(self) -> dict:
@@ -149,7 +168,9 @@ class QuitMapBuilder:
         self.hazard_end_t: float | None = None
         self.dead = False
         self._causes: list[tuple[float, int, str]] = []      # (t, priority, label) of the last frames' events
-        self._recent: list[_Window] = []                     # windows closed in the last second (harness censoring)
+        self._recent: list[_Window] = []                     # windows closed lately (harness censoring)
+        self._hist: deque = deque()                          # recent samples (t, scene, key, dt, ok, quit_ok, ...)
+        self.harness_hold = False                            # after a harness op, until the pause gate opens
         self.win_pause: _Window | None = None
         self.win_quit: _Window | None = None
 
@@ -176,7 +197,8 @@ class QuitMapBuilder:
 
     def _censor_harness(self, d: dict) -> None:
         """A harness operation: windows open now, or closed while it ran (its "ms", plus 2 frames), are not
-        gameplay (trial f56112: a BossDeathSlow window ran through a savestate.load)."""
+        gameplay (trial f56112: a BossDeathSlow window ran through a savestate.load); the samples of that span are
+        taken back and the frames after it are held out until the pause gate opens."""
         since = self.t - float(d.get("ms") or 0.0) / 1000.0 - 2 / 60
         for w in self._recent:
             if w.t_end >= since:
@@ -185,6 +207,26 @@ class QuitMapBuilder:
             w = getattr(self, attr)
             if w is not None:
                 w.censored = True
+        while self._hist and self._hist[-1][0] >= since:
+            self._count(*self._hist.pop()[1:], sign=-1)
+        self.harness_hold = True
+
+    def _count(self, scene: str, key: str, dt: float, pause_ok: bool, quit_ok: bool, blk: int, dsq: bool,
+               preload: bool, sign: int = 1) -> None:
+        """Add (sign 1) or take back (sign -1) one sample."""
+        sc = self.scenes.setdefault(scene, _Scene())
+        a = sc.acc.setdefault(key, _Acc())
+        a.s += sign * dt
+        a.frames += sign
+        a.pause_s += sign * dt * pause_ok
+        a.quit_s += sign * dt * quit_ok
+        for bit, name in gc.BLK_NAMES.items():
+            if blk & bit:
+                sc.bits_s[name] = sc.bits_s.get(name, 0.0) + sign * dt
+        sc.dsq_s += sign * dt * dsq
+        sc.preload_s += sign * dt * preload
+        self._src["samples"] += sign
+        self._src["s"] += sign * dt
 
     def _events(self, s: dict) -> None:
         for ev in s.get("ev") or ():
@@ -225,7 +267,7 @@ class QuitMapBuilder:
 
     def _cause(self) -> str | None:
         """Highest-priority event label of this frame and the last two (latest on ties)."""
-        self._causes = [c for c in self._causes if self.t - c[0] <= 2.5 / 60]
+        self._causes = [c for c in self._causes if self.t - c[0] <= CAUSE_S]
         return max(self._causes, key=lambda c: (c[1], c[0]))[2] if self._causes else None
 
     def _key(self, g: dict, p: dict) -> str:
@@ -260,27 +302,28 @@ class QuitMapBuilder:
         src["frames"] += 1
         dt = float(s.get("udt") or 0.0)
         self.t += dt
-        self._recent = [w for w in self._recent if self.t - w.t_end <= 1.0]
+        self._recent = [w for w in self._recent if self.t - w.t_end <= RECENT_S]
+        while self._hist and self.t - self._hist[0][0] > RECENT_S:
+            self._hist.popleft()
         g, p = s.get("game"), s.get("pause")
         self._events(s)
         if not g or not p or g.get("gs") == gc.GS_PAUSED or not g.get("scene") or self.dead:
             self._close(censored=True)
             return
+        blk = int(p.get("blk") or 0)
+        if self.harness_hold:
+            if blk:
+                self._close(censored=True)
+                return
+            self.harness_hold = False
         scene = g["scene"]
         key = self._key(g, p)
-        blk = int(p.get("blk") or 0)
         dsq, preload = bool(p.get("dsq")), bool(p.get("preload"))
         pause_ok = blk == 0
         quit_ok = pause_ok and not dsq and not preload
-        sc = self.scenes.setdefault(scene, _Scene())
-        sc.acc.setdefault(key, _Acc()).add(dt, pause_ok, quit_ok)
-        for bit, name in gc.BLK_NAMES.items():
-            if blk & bit:
-                sc.bits_s[name] = sc.bits_s.get(name, 0.0) + dt
-        sc.dsq_s += dt * dsq
-        sc.preload_s += dt * preload
-        src["samples"] += 1
-        src["s"] += dt
+        sample = (scene, key, dt, pause_ok, quit_ok, blk, dsq, preload)
+        self._count(*sample)
+        self._hist.append((self.t,) + sample)
         cause = self._cause()
         for attr, ok in (("win_pause", pause_ok), ("win_quit", quit_ok)):
             w = getattr(self, attr)
@@ -290,8 +333,10 @@ class QuitMapBuilder:
             if ok:
                 continue
             if w is None:   # otherwise a window runs on through scene changes and belongs to the scene it started in
-                w = _Window(src=src["name"], scene=scene, f0=int(s.get("f") or 0), key=key, cause=cause)
+                w = _Window(src=src["name"], scene=scene, f0=int(s.get("f") or 0), key=key, cause=cause, t0=self.t)
                 setattr(self, attr, w)
+            elif cause != w.cause and self.t - w.t0 <= CAUSE_S and _prio(cause) > _prio(w.cause):
+                w.cause = cause            # a higher-priority event in the window's first frames (hazard after freeze)
             w.s += dt
             w.t_end = self.t
             w.bits |= blk

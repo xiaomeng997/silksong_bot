@@ -23,7 +23,7 @@ probed length and the longest window of that kind in quit map v0 (knowledge/1.0.
 further when the map has seen longer:
   hazard_death       2.45 (spikes 1 mask 2.27-2.32 s, LAVA 2.43 s: disablePause from DieFromHazard to
                            FinishedEnteringScene; probe P7). Its worst event is the hazard damage plus D1 (an enemy
-                           hit right after the respawn) unless a window Ctx is given
+                           hit right after the respawn), the mask not trusted, unless a window Ctx is given
   arena_end_slowmo   1.9  (EnemyBattleEndSlow 0.1 / 1.0 / 0.75 at 0.25 speed, m0:N13; quit map 1.88-1.90 s)
   boss_death_slowmo  1.4  (BossDeathSlow 0.1 / 1.15 / 0.1 at 0.05 speed, m0:N13; quit map 1.38 s)
   room_entry         0.5  (HUDCamera.OnEnable PreventPause, entering from a cutscene, menu or stag scene; m0:N14)
@@ -133,7 +133,8 @@ def i3(zone: CommitZone, hp: int, max_hp: int, blue: int, mask: str, ctx: Ctx) -
         why.append(f"Fractured Mask {mask}")
     worst = zone.window
     if worst is None:
-        worst = replace(ctx, D1=ctx.D1 + zone.hazard_damage) if zone.kind == "hazard_death" else ctx
+        hazard = zone.kind == "hazard_death"
+        worst = replace(ctx, D1=ctx.D1 + zone.hazard_damage, mask_covers=False) if hazard else ctx
     h_after = hits_to_death_after(hp, blue, mask == MASK_INTACT, worst, ctx)
     if h_after < 2:
         why.append(f"h {h_after} < 2 after the window's worst event")
