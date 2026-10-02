@@ -251,6 +251,43 @@ def tails(T: int) -> np.ndarray:
     return out
 
 
+def pogo_grid(T: int) -> tuple[np.ndarray, np.ndarray, list[str]]:
+    """The fine pogo grid (the person: a low enough jump needs an early release): waits 0-20 frames (step 4), jump
+    holds 2-12 frames (every frame), the down press 2-20 frames into the jump (every frame), side key either way, a
+    second press 22 frames after the first. Returns masks [M, T], spike frame estimates [M] (press + the 6-frame
+    antic, from the plan's start) and names; the planner keeps the few whose spike meets the boss's predicted path."""
+    rows, t_spike, names = [], [], []
+    for d in ("L", "R"):
+        for w in range(0, 21, 4):
+            for h in range(2, 13):
+                for a in range(2, 21):
+                    m = _seq(T)
+                    m[w:w + h] |= B_JUMP
+                    m[w + a:] |= DIRS[d]
+                    for a2 in (a, a + 22):
+                        if w + a2 + 4 < T:
+                            m[w + a2:w + a2 + 6] |= B_DOWN
+                            m[w + a2 + 1:w + a2 + 1 + PRESS] |= B_ATTACK
+                    rows.append(m)
+                    t_spike.append(w + a + 7)
+                    names.append(f"w{w}h{h}p{a}{d}")
+    return np.array(rows), np.array(t_spike, np.int64), names
+
+
+def with_extra(cs: CandidateSet, cmd: np.ndarray, names: list[str], first_name: str = "POGO") -> CandidateSet:
+    """cs plus extra candidates (first piece first_name, continuation name each)."""
+    if not len(cmd):
+        return cs
+    k = len(cmd)
+    bits = _bits(frozenset({Prim.JUMP, Prim.WAIT, Prim.MOVE, Prim.ATTACK_DOWN}))
+    return CandidateSet(np.concatenate([cs.cmd, cmd[:, :cs.T]]),
+                        np.concatenate([cs.first, np.full(k, len(cs.first_names), np.int64)]),
+                        np.concatenate([cs.cont, len(cs.cont_names) + np.arange(k)]),
+                        list(cs.first_names) + [first_name], list(cs.cont_names) + list(names),
+                        np.concatenate([cs.prim_bits, np.full(k, bits, np.int64)]),
+                        np.concatenate([cs.bind, np.zeros(k, bool)]), cs.T)
+
+
 def truncate(cs: CandidateSet, T: int) -> CandidateSet:
     """The same candidates over their first T frames."""
     return CandidateSet(cs.cmd[:, :T], cs.first, cs.cont, cs.first_names, cs.cont_names, cs.prim_bits, cs.bind, T)

@@ -17,6 +17,8 @@ latest first contact > max J; FORCED_RISK when no allowed candidate has S = 0.
   attack bounces her with its i-frames (Planner._hit_effects re-rolls those candidates with the event, twice, so a
   second slash is scored from where the first recoil left her); safe only if the miss branch is too. The long set carries
   jump-then-down-attack candidates for charges.
+- Jump release: a pressed jump's hold is committed only release_latency (4) frames ahead; a later tick may move a
+  release further out (DESIGN 3.5.4 refined: the height follows the boss's approach, e.g. a low hop for a pogo).
 - Adaptive horizon (M2 plan): when the tactics ask for more than T frames (a committed charge), the dodge set
   candidates.build_long rolls out to the end of the attack, up to 2 s (live run 20261002_045049: with 0.8 s, jumps
   that cleared a charge's front half came down on its back half, 5 hits).
@@ -111,7 +113,10 @@ class PlannerConfig:
     variants: str = "bounds"
     max_points: int = 2        # grid points per axis for a hull wider than one point covers
     predict_log: bool = True   # record the chosen plan's attack predictions at each press (predict_audit)
-    attack_model: str = "v2"   # "v1": the first attack windows and no slash recoil (the audit's before)
+    attack_model: str = "v2"
+    release_latency: int = 4   # frames a planned jump release must lie ahead to be moved (the path latency, 2-4)
+    pogo_k: int = 48           # fine-grid pogo candidates kept per tick (pruned by the boss's predicted path)
+    pogo_lanes_k: int = 16     # pogo plans checked lane by lane per tick (the rest are rejected)   # "v1": the first attack windows and no slash recoil (the audit's before)
     tail_k: int = 2            # safe candidates checked for a way on beyond the horizon (0: off; one chunk)
 
 
@@ -203,6 +208,7 @@ class Planner:
         self.cands = cmod.build(self.cfg.T)
         self.cands_nc = cmod.no_control(self.cands)
         self.cands_long = cmod.build_long(self.cfg.T_long)
+        self._grid = None
         self._has_up = ((self.cands.cmd & B_UP) != 0).any(axis=1) & ((self.cands.cmd & B_ATTACK) != 0).any(axis=1)
         self.tails = cmod.tails(self.cfg.T)
         self.bind = cmod.bind_macro(self.cfg.T_bind)
@@ -252,6 +258,7 @@ class Planner:
         T_req = int(min(max(prefs.horizon_frames, 0), cfg.T_long))
         if T_req > cfg.T:
             cs = cmod.truncate(self.cands_long, T_req)          # adaptive horizon: through a committed long attack
+            cs = self._pogo_pick(cs, f, start, T_req)
         else:
             cs = self.cands_nc if mode0 in NO_CONTROL_MODES else self.cands
         N0, T = len(cs.cmd), cs.T
@@ -312,7 +319,11 @@ class Planner:
         rem = self.jump_until - self.ticks
         keep = np.ones(N, bool)
         if rem > 0:
-            w = cmd[:, :min(rem, T)]
+            # the committed hold binds only the next release_latency frames (and the hold filter's minimum press,
+            # which the rollout applies): a later release can move while it is still that far ahead, so the jump's
+            # height follows the boss's approach (a refinement of DESIGN 3.5.4; the executed stream still equals
+            # the rolled-out one, the frames already sent are the prefix)
+            w = cmd[:, :min(rem, T, cfg.release_latency)]
             keep = ((w & B_JUMP) != 0).all(axis=1) & ((w & B_QUICKCAST) == 0).all(axis=1)
         safe = ok & ~S & ~hz
         first = np.append(cs.first, -1) if cont else cs.first
@@ -476,8 +487,16 @@ class Planner:
             S[sub] |= s_hit[sub]
         # a pogo plan stands only if the down spike connects in every timing lane (DESIGN 3.5.6: a miss lands the hero
         # on the boss): its lanes rolled out with the bounce, a lane whose spike meets no hurtbox rejects it (S)
-        pg = np.flatnonzero(rows_all & ((ev & kin.EV_POGO) != 0).any(axis=1))
-        self.pogo_log = {"generated": int(len(pg)), "lane_miss": 0, "accepted": 0}
+        pg_all = np.flatnonzero(rows_all & ((ev & kin.EV_POGO) != 0).any(axis=1))
+        self.pogo_log = {"generated": int(len(pg_all)), "lane_miss": 0, "accepted": 0}
+        # the lanes only for those the bounce branch leaves safe (the rest are rejected anyway), at most pogo_lanes_k
+        # of them (the earliest bounces): the per-lane check costs about 0.1 ms a candidate
+        pg = pg_all[~s_hit[pg_all]]
+        if len(pg) > self.cfg.pogo_lanes_k:
+            first_bounce = np.argmax((ev[pg] & kin.EV_POGO) != 0, axis=1)
+            drop = pg[np.argsort(first_bounce, kind="stable")[self.cfg.pogo_lanes_k:]]
+            S[drop] = True
+            pg = pg[np.argsort(first_bounce, kind="stable")[:self.cfg.pogo_lanes_k]]
         if len(pg):
             rl = kin.rollout(start, latched[pg], self.params, self.terrain, events=ev[pg], variants=self.cfg.variants,
                              lanes=True)
@@ -523,6 +542,28 @@ class Planner:
         start = kin.initial_state(self.params, 85.0, 2.015 + self.params.foot)
         kin.rollout(start, lat, self.params, self.terrain, events=np.zeros((1, T1 - 1), np.int64),
                     variants=self.cfg.variants, lanes=True)
+
+    def _pogo_pick(self, cs, f: Forecast, start, T: int):
+        """The fine pogo grid pruned by the boss's predicted path: the pogo_k grid rows whose spike frame finds the
+        boss's predicted hurtbox nearest the hero in x (within 3 u), added to the tick's candidates."""
+        if self.cfg.pogo_k <= 0:
+            return cs
+        if self._grid is None or self._grid[0].shape[1] < T:
+            self._grid = cmod.pogo_grid(max(T, self.cfg.T_long))
+        g_cmd, g_ts, g_names = self._grid
+        tk = np.arange(T + 1, dtype=np.float64) * self.params.frame_time
+        boss, okb = f.boss_box(tk)
+        if not okb.any():
+            return cs
+        hx = float(np.asarray(start).reshape(kin.K, -1)[kin.PX, 0])
+        ts = np.minimum(g_ts, T)
+        cx = 0.5 * (boss[ts, 0] + boss[ts, 2])
+        d = np.where(okb[ts], np.abs(cx - hx), np.inf)
+        rows = np.flatnonzero(d < 3.0)
+        if not len(rows):
+            return cs
+        rows = rows[np.argsort(d[rows], kind="stable")[:self.cfg.pogo_k]]
+        return cmod.with_extra(cs, g_cmd[rows, :T], [g_names[r] for r in rows])
 
     # ---- prediction record (the attack-outcome audit) ---------------------------------------------------------------
 
