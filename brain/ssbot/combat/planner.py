@@ -1,13 +1,17 @@
 """L1 planner (DESIGN §3.5.4; M2 W4): every frame, roll every candidate out through the kinematics' timing lanes and
 choose lexicographically: not Hz > not Hz_soft > not U > S = 0 > keeps the committed jump hold > comfort > V > min P >
-latest first contact > max J;
-FORCED_RISK when no allowed candidate has S = 0 (then the probability, and among equals the plan whose first contact
-comes last: a plan certain to be hit is otherwise ranked by its score, and "wait, then go" re-chosen every frame never
-leaves; live run 20261002_041819). A pressed jump commits its hold schedule (§3.5.4): plans that release it early
-or cast rank below the ones that keep it while one of those is safe (live run 20261002_044711: a plan switch released
-a charge jump after 8 frames, a Silkspear cast then held the hero at the charge's height). Comfort is S again against templates grown by a further margin: among safe plans the
-ones with clearance win, whatever they score (live run 20261002_035118: a plan safe by millimetres in the air over a
-rolling attack bell lost all 26 safe continuations in one frame of drift, and the bell hit).
+latest first contact > max J; FORCED_RISK when no allowed candidate has S = 0.
+- FORCED_RISK ranks by the probability, then by the latest first contact: a plan certain to be hit was otherwise
+  ranked by its score, and "wait, then go" re-chosen every frame never left (live run 20261002_041819).
+- A pressed jump commits its hold schedule (§3.5.4): plans that release it early or cast rank below the ones that
+  keep it while one of those is safe (live run 20261002_044711: a plan switch released a charge jump after 8 frames,
+  a Silkspear cast then held the hero at the charge's height).
+- Comfort is S again against templates grown by a further margin: among safe plans the ones with clearance win,
+  whatever they score (live run 20261002_035118: a plan safe by millimetres in the air over a rolling attack bell lost
+  all 26 safe continuations in one frame of drift, and the bell hit).
+- Adaptive horizon (M2 plan): when the tactics ask for more than T frames (a committed charge), the dodge set
+  candidates.build_long rolls out to the end of the attack, up to 2 s (live run 20261002_045049: with 0.8 s, jumps
+  that cleared a charge's front half came down on its back half, 5 hits).
 
     planner = Planner(params, terrain)
     r = planner.tick(ws, start, hold, prefix, forecast, prefs, ctx)    # r.mask: the commanded mask for the next free
@@ -39,7 +43,11 @@ the Bind macro when the tactics want it, over a longer horizon):
             hits x 3, wasted attacks, jump presses, the end position's distance to the tactics' stance, its future
             support coverage (the tactics' risk map: the terminal value), facing the boss, ending on the floor, and
             a bonus for carrying on the previous plan (hysteresis).
-Cost (13900K, 4 threads): see tests/test_planner.py and the stage-A numbers in the M2 report.
+Cost (13900K, 8 threads, ssbot.tools.planner_bench open loop over 5,951 ticks of live recording i2_002, 4 game
+instances idling): planner p50 1.68 / p99 3.73 ms (rollout 0.90 / 1.99, support 0.42 / 1.71, hold filter + veto
+0.18 / 0.55, scoring 0.06 / 0.31, probabilities and Bind 0.02 / 0.78), the whole tick with forecast and tactics p50
+2.03 / p99 4.34 ms. The replayed hero is the data policy's, often in contact (FORCED_RISK, hit-stop); in the planner's
+own fights the probabilities are rarely needed.
 """
 import math
 import time
@@ -70,7 +78,7 @@ DOWN = (-0.69, 1.41, -1.96, 0.32)
 SPEAR = (0.3, 11.0, -0.8, 0.8)
 SPEAR_DELAY_F = 16             # Silkspear antic 0.26 s before the needle flies
 ACTIVE_F = 6                   # frames an attack box counts from its start (scoring)
-COMFORT_FRAMES = 48           # the comfort check covers the whole horizon (24 frames lost safe plans in run 20261002_045049)
+COMFORT_FRAMES = 48           # the comfort check covers the whole horizon (24 frames: run 20261002_045049 hits)
 NO_CONTROL_MODES = (kin.M_HURT_FREEZE, kin.M_HURT_RECOIL, kin.M_CAST, kin.M_BIND, kin.M_LOCKED)
 
 

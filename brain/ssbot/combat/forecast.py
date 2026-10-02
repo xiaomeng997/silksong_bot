@@ -22,10 +22,24 @@ hero hurtbox plus a margin, so a point test of the hurtbox centre is an overlap 
 graph from the current state: each state's entry is an interval (the logged dwell min / max of the states before it
 accumulate), and the state's template is placed once per 1/60 s bin of that interval (each placement keeps its own
 +-1 bin for the export lag). Branches (burst / charge / leap, left / right, rage) are all placed; the walk stops past
-the
-horizon. An attack's anchor is used when it is known (Set L / Set R fixed at x 75.03 / 95.72, the rage at 86.21, a
-burst once seen), else the world_all template of the state (every logged anchor). The horizon is adaptive: at least
-0.8 s, and as long as the planner's longest candidate (a Bind needs 1.37 s + 0.15 s).
+the horizon. An attack's anchor is used when it is known (Set L / Set R fixed at x 75.03 / 95.72, the rage at 86.21;
+a burst's from the boss's hidden x underground, which is its anchor: live runs 2026-10-02, 81 of 81 bursts and 336 of
+336 charges / leaps exactly; in the vision view from its first drawn frame), else the world_all template of the state
+(every logged anchor). The horizon is the caller's: at least 0.8 s (the policy asks 2 s: the Bind macro, the tactics'
+risk map and the planner's adaptive horizon through a charge).
+Tails: an attack that ends into the decision chain leaves the boss underground, so only what outlives it is placed
+from its end (attack bells, DropBell M2 in P2); the tail templates also hold the body of instances killed mid-attack,
+placed only after a death. A tracker that starts mid-attack (the start state missed) roots the walk in every family
+with that state. Drop bells (oracle view): they hang in the export all fight and arm (FSM out of Dormant) at least
+1.2 s before they can hurt, so an armed bell gets its own self template at its arming position and time, and the
+drop-bell unions of the rage pattern and of P2 (Ptn L / R, Rage End, the M2 world templates) count only from that lead
+on (Placement.t_from); a bell seen armed without its arming makes them count from the start again.
+
+Measured (stage A, ssbot.tools.support_recall, 2026-10-02): a held-out behaviour build without live recordings i2_002 /
+i3_002 and the trial run (C:/ssbot/data/m2_heldout/tables), contacts of those fights (every "damage" frame and every
+frame of a "damage_blocked" stretch) inside the support forecast L frames earlier, box of frame c or c - 1 (the
+planner's pairing), margin 0: 35 live fights 23,896 / 23,896 and 2 trial fights 1,795 / 1,795 for L = 2, 3 and 4, in
+both views.
 
 Views. ORACLE: the Control FSM state and time in state (Entity.phase, and the FSM_TRANSITION events, which also arrive
 while the boss is not exported: before its first emergence). VISION_EQUIVALENT: the observable phase
@@ -35,7 +49,8 @@ Submerged, after "burst" Burst Recovery (the bells still rolling), after "roar_e
 emergence the wake chain (Submerged Init 2.0 s, then a charge from the right: the first attack of every logged fight).
 An observable phase's entry is known to +-1 frame (a transition frame can show the next clip early), a hidden boss's
 position is unknown (both charge / leap anchors, the burst's world_all), a burst's anchor comes from the box centre
-(fixed offset +-0.539, -2.68 by flipX; averaged over the frames seen), a charge's or leap's from its facing.
+(fixed offset +-0.539, -2.68 by flipX, on its first drawn frame only: the box follows the sprite frames after it), a
+charge's or leap's from its facing.
 A boss lost over the image edge (a ghost: no phase) coasts: the last known state stays the root, and its successors
 come in as their entry intervals pass.
 

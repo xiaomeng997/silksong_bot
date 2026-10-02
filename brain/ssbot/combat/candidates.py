@@ -5,7 +5,8 @@ A candidate is a commanded button mask per frame over the horizon, built from a 
 that is executed: the planner re-plans every frame) and a continuation (frames 4..T-1) that shows the first primitive
 leaves a safe way on. Front-dense: the continuations are a library of whole-horizon behaviours (stay, run, jump now
 or after a wait, attack, run then jump ...) rather than two more 4-frame levels, so 21 first primitives x 17
-continuations (357) stay well within the 512-rollout budget while still holding the jump timings a charge or a rolling bell
+continuations (357) stay well within the 512-rollout budget while still holding the jump timings a charge or a
+rolling bell
 needs (the planner re-plans each frame, so finer timing comes from the next tick). A JUMP(h) holds jump h frames from
 its start whatever comes after (a committed hold; the kinematics' HoldFilter replays min press / release).
 
