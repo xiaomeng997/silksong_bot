@@ -210,6 +210,12 @@ class Forecast:
         planner's preference for clearance; Forecaster(comfort=...))."""
         return self._occ(self.placements, x, y, np.asarray(tk, np.float64), comfort)
 
+    def occupied_without(self, x, y, tk, exclude: str) -> np.ndarray:
+        """occupied() without the placements whose only source is the entity type `exclude` (a bell disarmed by a
+        down attack: its DamageHero cooldown; a placement shared with other sources still counts)."""
+        pl = [p for p in self.placements if not (p.sources and all(src.endswith(exclude) for src in p.sources))]
+        return self._occ(pl, x, y, np.asarray(tk, np.float64))
+
     def node_hits(self, x, y, tk) -> np.ndarray:
         """[nodes, N] bool: contact with each node's own placements."""
         x = np.asarray(x, np.float64)

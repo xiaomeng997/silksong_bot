@@ -235,15 +235,15 @@ class Planner:
 
     # ---- S -----------------------------------------------------------------------------------------------------------
 
-    def _contacts(self, f: Forecast, bound: np.ndarray, tk: np.ndarray, skip: np.ndarray, comfort: bool = False
-                  ) -> np.ndarray:
+    def _contacts(self, f: Forecast, bound: np.ndarray, tk: np.ndarray, skip: np.ndarray, comfort: bool = False,
+                  exclude: str | None = None) -> np.ndarray:
         """[N, T1] contact of the lanes' hull with the support. A hull a point covers (the templates are dilated by
         the hurtbox plus the margin) is tested at its centre; a wider one at a grid of 2 points along each wide axis
         (sub-boxes the dilation covers), wider still counts as contact. One query: the first point of every frame,
         plus extra layers for the rows with a wide frame (NaN where a frame needs fewer points: skipped)."""
         hx, hy = f.fc.half
         X, Y, rows, too_wide = _hull_points(np.ascontiguousarray(bound), hx, hy, self.cfg.max_points)
-        hit = f.occupied(X, Y, tk, comfort)
+        hit = f.occupied(X, Y, tk, comfort) if exclude is None else f.occupied_without(X, Y, tk, exclude)
         N = bound.shape[0]
         occ = hit[:N].copy()
         if len(rows):
@@ -523,7 +523,21 @@ class Planner:
         s_hit = np.zeros(N, bool)
         if len(sub):
             skip = ((cur.flags_all[sub] & F_INVULN) != 0) if enemy_only else np.zeros(cur.flags_all[sub].shape, bool)
-            s_hit[sub] = self._contacts(f, cur.bound[sub], tk, skip).any(axis=1)
+            occ = self._contacts(f, cur.bound[sub], tk, skip)
+            # a down attack that met a bell disarms it for damage_cooldown_s (HeroDownAttack.ContinueBounceTrigger ->
+            # DamageHero.SetCooldown(0.5); side and up tinks do not): from the bounce frame on, that bell's own
+            # placements do not count for that long
+            for ti in np.unique(pogo_tgt[sub]):
+                g = tgts[int(ti)] if ti > 0 else None
+                if g is None or g.cooldown_s <= 0:
+                    continue
+                r = np.flatnonzero(pogo_tgt[sub] == ti)
+                occ_x = self._contacts(f, cur.bound[sub[r]], tk, skip[r], exclude=g.name)
+                b0 = np.argmax((ev[sub[r]] & kin.EV_POGO) != 0, axis=1)
+                win = ((np.arange(tk.shape[0])[None, :] >= b0[:, None]) &
+                       (tk[None, :] <= tk[b0][:, None] + g.cooldown_s))
+                occ[r] = np.where(win, occ_x, occ[r])
+            s_hit[sub] = occ.any(axis=1)
             S[sub] |= s_hit[sub]
         # a pogo plan stands only if the down spike connects in every timing lane (DESIGN 3.5.6: a miss lands the hero
         # on the boss, or on the bell): its lanes rolled out with the bounce, a lane whose first spike meets no hurtbox
@@ -585,7 +599,7 @@ class Planner:
             spec = f.fc.targets.spec_of(pth.type_key) if hasattr(f.fc, "targets") else None
             out.append(_Target(np.ascontiguousarray(pth.box), np.ascontiguousarray(pth.ok), P0, S0, B0, cbox,
                                np.ascontiguousarray(pth.cert), P1, S1, B1, spec.recoil if spec else True,
-                               pth.type_key))
+                               pth.type_key, spec.cooldown_s if spec else 0.0))
         if not okb.any() and len(out) == 1:
             return []
         return out
@@ -940,14 +954,14 @@ class _Target:
     polygons around base (moved by box - base); c*: the certain form the pogo gate uses."""
 
     def __init__(self, box, ok, polys, starts, base, cbox=None, cok=None, cpolys=None, cstarts=None, cbase=None,
-                 recoil: bool = True, name: str = "boss"):
+                 recoil: bool = True, name: str = "boss", cooldown_s: float = 0.0):
         self.box, self.ok, self.polys, self.starts, self.base = box, ok, polys, starts, base
         self.cbox = box if cbox is None else cbox
         self.cok = ok if cok is None else cok
         self.cpolys = polys if cpolys is None else cpolys
         self.cstarts = starts if cstarts is None else cstarts
         self.cbase = base if cbase is None else cbase
-        self.recoil, self.name = recoil, name
+        self.recoil, self.name, self.cooldown_s = recoil, name, cooldown_s
 
 
 class _View:
