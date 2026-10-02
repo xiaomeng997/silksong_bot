@@ -29,30 +29,30 @@ from ssbot.knowledge.kinematics import (
     P_DS_TIME, P_DS_VYMAX, P_DS_VYMIN, P_FDT, P_FOOT, P_G, P_HEAD, P_HURT_RAMP, P_HURT_SKIP, P_HURT_T, P_HURT_V,
     P_HURT_VY, P_HURT_WAIT, P_HW, P_INV_T, P_JQ, P_JSTEPS, P_JSTEPS_MIN, P_JUMP, P_LEDGE, P_LIFT, P_LOCK_DECAY,
     P_MAXFALL, P_POGO_J, P_POGO_JD, P_QQ, P_RDOWN_HALF, P_REL, P_RSTEPS, P_RUN, P_RV, P_SILK_MAX, P_SKIN, P_SLOP_HI,
-    P_SLOP_LO, PHASE, PREV, PX, PY, QQ, QX, QY, RDIR, RSTEPS, SILK, SX, SY, TOL, TOUCH, TS, VX, VY)
+    P_SLOP_LO, PHASE, PREV, PX, PY, QQ, QX, QY, RDIR, RSTEPS, SILK, SX, SY, TOL, TOUCH, TS, TT_HEAD, VX, VY, ALO, AHI, LANDQ)
 
 
-@njit(cache=True, inline="always")
+@njit(cache=True, inline="always", error_model="numpy")
 def f32(a):
     return np.float64(np.float32(a))
 
 
-@njit(cache=True, inline="always")
+@njit(cache=True, inline="always", error_model="numpy")
 def ge32(a, c):
     return np.float32(a) >= np.float32(c)
 
 
-@njit(cache=True, inline="always")
+@njit(cache=True, inline="always", error_model="numpy")
 def gt32(a, c):
     return np.float32(a) > np.float32(c)
 
 
-@njit(cache=True, inline="always")
+@njit(cache=True, inline="always", error_model="numpy")
 def relinq(m):
     return m == M_DS_ANTIC or m == M_DS_SPIKE or m == M_CAST or m == M_BIND or m == M_LOCKED
 
 
-@njit(cache=True, inline="always")
+@njit(cache=True, inline="always", error_model="numpy")
 def noinput(m):
     return m == M_HURT_FREEZE or m == M_HURT_RECOIL
 
@@ -61,12 +61,14 @@ def noinput(m):
 # The terrain reaches the kernel as one packed float64 array TT (Terrain2D.packed(): segments plus an x-bucket index,
 # each bucket listing the floors / ceilings whose x extent and the walls whose x falls in it); the queries visit only
 # the buckets their tests can pass in, and take scalars plus TT so the per-step calls carry one array, not seven.
-# TT header: nh, nv, buckets, x0, 1 / width, bucket starts (h), ids (h), bucket starts (v), ids (v), vseg offset;
-# hseg rows (y, x0, x1) from TT_H, vseg rows (x, y0, y1) from TT[9].
-TT_H = 10
+# TT header (TT_HEAD entries): nh, nv, buckets, x0, 1 / width, bucket starts (h), ids (h), bucket starts (v), ids (v),
+# vseg offset, ns, slope offset, bucket starts (slopes), ids (slopes); hseg rows (y, x0, x1) from TT_H, vseg rows
+# (x, y0, y1) from TT[9], slope rows (x0, y0, x1, y1) from TT[11] (the rollout does not collide them; the knockback
+# bound does, see ssbot.knowledge.knockback).
+TT_H = TT_HEAD
 
 
-@njit(cache=True, inline="always")
+@njit(cache=True, inline="always", error_model="numpy")
 def _buckets(lo, hi, TT):
     """Bucket range [b0, b1] covering x in [lo, hi] (b0 > b1: none)."""
     nb = np.int64(TT[2])
@@ -79,7 +81,7 @@ def _buckets(lo, hi, TT):
     return max(b0, np.int64(0)), min(b1, nb - 1)
 
 
-@njit(cache=True, inline="always")
+@njit(cache=True, inline="always", error_model="numpy")
 def move_x(px, py, dx, hw, skin, foot, head, TT):
     nx = px + dx
     if TT[1] == 0:
@@ -115,7 +117,7 @@ def move_x(px, py, dx, hw, skin, foot, head, TT):
     return max(min(nx, rx), lx), hit
 
 
-@njit(cache=True, inline="always")
+@njit(cache=True, inline="always", error_model="numpy")
 def move_y(px, py, dy, hw, skin, foot, head, slop_lo, slop_hi, TT):
     ny = py + dy
     if TT[0] == 0:
@@ -152,7 +154,7 @@ def move_y(px, py, dy, hw, skin, foot, head, slop_lo, slop_hi, TT):
     return min(max(ny, dn), up), landed, touch and not landed, bumped
 
 
-@njit(cache=True, inline="always")
+@njit(cache=True, inline="always", error_model="numpy")
 def on_ground(px, py, hw, skin, foot, TT):
     if TT[0] == 0:
         return False
@@ -171,7 +173,7 @@ def on_ground(px, py, hw, skin, foot, TT):
 
 # ---- one physics step, contact events, one Update ---------------------------------------------------------------
 
-@njit(cache=True)
+@njit(cache=True, error_model="numpy")
 def fixed_step(x, P, TT):
     fdt = P[P_FDT]
     hw = P[P_HW]
@@ -317,11 +319,11 @@ def fixed_step(x, P, TT):
         x[DS_REC] = 0.0
         x[GS] = 1.0
         x[VY] = P[P_DS_ENDVY]
-    if (lands or land_sp) and not was and x[MOVE] == 0:
-        x[DS_REC] = -1.0
+    if (lands or land_sp) and not was:
+        x[LANDQ] = 1.0
 
 
-@njit(cache=True, inline="always")
+@njit(cache=True, inline="always", error_model="numpy")
 def apply_events(x, ev, P):
     mode = x[MODE]
     rlq = relinq(mode)
@@ -381,7 +383,7 @@ def apply_events(x, ev, P):
         x[MODE] = M_NORMAL
 
 
-@njit(cache=True, inline="always")
+@njit(cache=True, inline="always", error_model="numpy")
 def hero_jump(x, P):
     x[JUMPING] = 1.0
     x[JSTEPS] = 0.0
@@ -398,7 +400,7 @@ def hero_jump(x, P):
         x[ATTACKING] = 0.0
 
 
-@njit(cache=True, inline="always")
+@njit(cache=True, inline="always", error_model="numpy")
 def do_attack(x, mask, P):
     want = 1.0 if (mask & B_RIGHT) != 0 else (-1.0 if (mask & B_LEFT) != 0 else 0.0)
     if want != 0:
@@ -419,7 +421,7 @@ def do_attack(x, mask, P):
         x[JSTEPS] = 0.0
 
 
-@njit(cache=True)
+@njit(cache=True, error_model="numpy")
 def update(x, mask, ev, dt, udt, P):
     mode = x[MODE]
     mode0 = mode
@@ -443,6 +445,9 @@ def update(x, mask, ev, dt, udt, P):
             x[AQ] = -1.0
         if (mask & B_QUICKCAST) == 0:
             x[QQ] = -1.0
+    if x[LANDQ] > 0 and x[MOVE] == 0:
+        x[DS_REC] = -1.0
+    x[LANDQ] = 0.0
 
     if mode == M_HURT_RECOIL:
         if ge32(x[MODE_T], P[P_HURT_T]):
@@ -467,7 +472,8 @@ def update(x, mask, ev, dt, udt, P):
         hero_jump(x, P)
     downish = (mask & B_DOWN) != 0 and (mask & B_UP) == 0
     can_down = x[BOUNCE] < 0 and x[DS_REC] < 0
-    can_attack = normal and x[ATTACKING] <= 0 and x[ATK_CD] <= 0 and (not downish or can_down)
+    bind_first = normal and (pressed & B_BIND) != 0 and x[SILK] >= P[P_BIND_SILK]
+    can_attack = normal and x[ATTACKING] <= 0 and x[ATK_CD] <= 0 and (not downish or can_down) and not bind_first
     ap = (pressed & B_ATTACK) != 0
     if ap and not can_attack:
         x[AQ] = 0.0
@@ -506,7 +512,7 @@ def update(x, mask, ev, dt, udt, P):
     can_jump = normal and x[JUMPING] <= 0 and x[BOUNCE] < 0 and x[DS_REC] < 0 and (ground or x[LEDGE] > 0)
     if normal and jheld and x[JQ] >= 0 and x[JQ] <= P[P_JQ] and can_jump:
         hero_jump(x, P)
-    can_attack = normal and x[ATTACKING] <= 0 and x[ATK_CD] <= 0 and (not downish or can_down)
+    can_attack = normal and x[ATTACKING] <= 0 and x[ATK_CD] <= 0 and (not downish or can_down) and not bind_first
     if normal and (mask & B_ATTACK) != 0 and x[AQ] >= 0 and x[AQ] <= P[P_AQ] and can_attack:
         do_attack(x, mask, P)
     normal = x[MODE] == M_NORMAL
@@ -592,7 +598,7 @@ def update(x, mask, ev, dt, udt, P):
     x[PREV] = np.float64(mask)
 
 
-@njit(cache=True, inline="always")
+@njit(cache=True, inline="always", error_model="numpy")
 def flags_of(x):
     m = x[MODE]
     f = 0
@@ -615,22 +621,37 @@ def flags_of(x):
 
 
 # ---- the frame loop -------------------------------------------------------------------------------------------
+# Lane i runs command sequence r = i // V under variant v = i % V. Inputs broadcast instead of being copied per lane:
+# S0 [K, n] or [K, 1]; events [n, T] or [0, 0] (none); udts [1 or n, 1 or T]; dts / fss [n, T] (logged timing) or
+# [0, 0]; per variant v: P[v] (parameter row), ft_v[v] (> 0: that unscaled frame time for every frame) and
+# alpha_sel[v] (0 the estimate, 1 the low end of the phase interval minus alpha_margin, 2 the high end plus it).
 
-@njit(cache=True)
-def lane(i, S0, masks, events, dts, fss, udts, P, TT, phys, rend, vel, modes, flags, final):
-    x = S0[:, i].copy()
-    p = P[i] if P.shape[0] > 1 else P[0]
+@njit(cache=True, error_model="numpy")
+def lane(i, V, S0, masks, events, dts, fss, udts, ft_v, alpha_sel, alpha_margin, P, TT,
+         phys, rend, vel, modes, flags, box, final):
+    r = i // V
+    v = i % V
+    x = S0[:, r if S0.shape[1] > 1 else 0].copy()
+    if alpha_sel[v] == 1:
+        x[ALPHA] = max(x[ALO] - alpha_margin, 0.0)
+    elif alpha_sel[v] == 2:
+        x[ALPHA] = x[AHI] + alpha_margin
+    p = P[v] if P.shape[0] > 1 else P[0]
     T = masks.shape[1]
     logged = dts.shape[1] == T and T > 0
+    has_ev = events.shape[0] > 0
+    ur = r if udts.shape[0] > 1 else 0
+    uc = udts.shape[1] > 1
     fdt = p[P_FDT]
+    hw, foot, head = p[P_HW], p[P_FOOT], p[P_HEAD]
     for t in range(T + 1):
         if t > 0:
-            m = masks[i, t - 1]
-            ev = events[i, t - 1]
-            udt = udts[i, t - 1]
+            m = masks[r, t - 1]
+            ev = events[r, t - 1] if has_ev else np.int64(0)
+            udt = ft_v[v] if ft_v[v] > 0 else udts[ur, t - 1 if uc else 0]
             if logged:
-                dt = dts[i, t - 1]
-                steps = np.int64(fss[i, t - 1])
+                dt = dts[r, t - 1]
+                steps = np.int64(fss[r, t - 1])
                 x[ALPHA] = x[ALPHA] + dt / fdt - steps
             else:
                 dt = f32(udt * x[TS])
@@ -650,32 +671,183 @@ def lane(i, S0, masks, events, dts, fss, udts, P, TT, phys, rend, vel, modes, fl
         vel[i, t, 1] = x[VY]
         modes[i, t] = np.int32(x[MODE])
         flags[i, t] = flags_of(x)
+        box[i, t, 0] = x[PX] - hw
+        box[i, t, 1] = x[PY] - foot
+        box[i, t, 2] = x[PX] + hw
+        box[i, t, 3] = x[PY] + head
     final[:, i] = x
 
 
-@njit(cache=True)
-def simulate(S0, masks, events, dts, fss, udts, P, TT):
-    n, T = masks.shape
-    phys = np.empty((n, T + 1, 2))
-    rend = np.empty((n, T + 1, 2))
-    vel = np.empty((n, T + 1, 2))
-    modes = np.empty((n, T + 1), dtype=np.int32)
-    flags = np.empty((n, T + 1), dtype=np.int32)
-    final = np.empty_like(S0)
-    for i in range(n):
-        lane(i, S0, masks, events, dts, fss, udts, P, TT, phys, rend, vel, modes, flags, final)
-    return phys, rend, vel, modes, flags, final
+@njit(cache=True, error_model="numpy")
+def _alloc(nl, T, K):
+    return (np.empty((nl, T + 1, 2)), np.empty((nl, T + 1, 2)), np.empty((nl, T + 1, 2)),
+            np.empty((nl, T + 1), dtype=np.int32), np.empty((nl, T + 1), dtype=np.int32), np.empty((nl, T + 1, 4)),
+            np.empty((K, nl)))
 
 
-@njit(cache=True, parallel=True)
-def simulate_par(S0, masks, events, dts, fss, udts, P, TT):
-    n, T = masks.shape
-    phys = np.empty((n, T + 1, 2))
-    rend = np.empty((n, T + 1, 2))
-    vel = np.empty((n, T + 1, 2))
-    modes = np.empty((n, T + 1), dtype=np.int32)
-    flags = np.empty((n, T + 1), dtype=np.int32)
-    final = np.empty_like(S0)
-    for i in prange(n):
-        lane(i, S0, masks, events, dts, fss, udts, P, TT, phys, rend, vel, modes, flags, final)
-    return phys, rend, vel, modes, flags, final
+@njit(cache=True, error_model="numpy")
+def simulate(S0, masks, events, dts, fss, udts, ft_v, alpha_sel, alpha_margin, P, TT):
+    V = ft_v.shape[0]
+    nl = masks.shape[0] * V
+    phys, rend, vel, modes, flags, box, final = _alloc(nl, masks.shape[1], S0.shape[0])
+    for i in range(nl):
+        lane(i, V, S0, masks, events, dts, fss, udts, ft_v, alpha_sel, alpha_margin, P, TT,
+             phys, rend, vel, modes, flags, box, final)
+    return phys, rend, vel, modes, flags, box, final
+
+
+@njit(cache=True, parallel=True, error_model="numpy")
+def simulate_par(S0, masks, events, dts, fss, udts, ft_v, alpha_sel, alpha_margin, P, TT):
+    V = ft_v.shape[0]
+    nl = masks.shape[0] * V
+    phys, rend, vel, modes, flags, box, final = _alloc(nl, masks.shape[1], S0.shape[0])
+    for i in prange(nl):
+        lane(i, V, S0, masks, events, dts, fss, udts, ft_v, alpha_sel, alpha_margin, P, TT,
+             phys, rend, vel, modes, flags, box, final)
+    return phys, rend, vel, modes, flags, box, final
+
+
+# ---- knockback bound per query (ssbot.knowledge.knockback) -----------------------------------------------------
+
+@njit(cache=True, inline="always", error_model="numpy")
+def seg_box(ax, ay, bx, by, x0, y0, x1, y1):
+    """Segment (a, b) meets the box (closed)."""
+    if max(ax, bx) < x0 or min(ax, bx) > x1 or max(ay, by) < y0 or min(ay, by) > y1:
+        return False
+    dx, dy = bx - ax, by - ay
+    s0 = dx * (y0 - ay) - dy * (x0 - ax)
+    s1 = dx * (y0 - ay) - dy * (x1 - ax)
+    s2 = dx * (y1 - ay) - dy * (x0 - ax)
+    s3 = dx * (y1 - ay) - dy * (x1 - ax)
+    if s0 > 0 and s1 > 0 and s2 > 0 and s3 > 0:
+        return False
+    if s0 < 0 and s1 < 0 and s2 < 0 and s3 < 0:
+        return False
+    return True
+
+
+@njit(cache=True, error_model="numpy")
+def near(x0, y0, x1, y1, TT, axis):
+    """(an axis-aligned segment meets the box (only looked for when axis), a slope segment meets it)."""
+    b0, b1 = _buckets(x0, x1, TT)
+    hit_axis = False
+    if axis:
+        st, ids = np.int64(TT[5]), np.int64(TT[6])
+        for b in range(b0, b1 + 1):
+            for q in range(np.int64(TT[st + b]), np.int64(TT[st + b + 1])):
+                j = TT_H + 3 * np.int64(TT[ids + q])
+                if y0 <= TT[j] <= y1 and TT[j + 1] <= x1 and TT[j + 2] >= x0:
+                    hit_axis = True
+                    break
+            if hit_axis:
+                break
+        if not hit_axis:
+            st, ids, ov = np.int64(TT[7]), np.int64(TT[8]), np.int64(TT[9])
+            for b in range(b0, b1 + 1):
+                for q in range(np.int64(TT[st + b]), np.int64(TT[st + b + 1])):
+                    j = ov + 3 * np.int64(TT[ids + q])
+                    if x0 <= TT[j] <= x1 and TT[j + 1] <= y1 and TT[j + 2] >= y0:
+                        hit_axis = True
+                        break
+                if hit_axis:
+                    break
+    if TT[10] == 0:
+        return hit_axis, False
+    st, ids, os_ = np.int64(TT[12]), np.int64(TT[13]), np.int64(TT[11])
+    for b in range(b0, b1 + 1):
+        for q in range(np.int64(TT[st + b]), np.int64(TT[st + b + 1])):
+            j = os_ + 4 * np.int64(TT[ids + q])
+            if seg_box(TT[j], TT[j + 1], TT[j + 2], TT[j + 3], x0, y0, x1, y1):
+                return hit_axis, True
+    return hit_axis, False
+
+
+@njit(cache=True, error_model="numpy")
+def kb_one(m, boxes, sx, sy, n_max, n_hi, offsets, swept_off, free, ctl_min, hw, skin, foot, head, slop_lo,
+           slop_hi, TT, margin, clip, per_frame, swept, frames, flags, hull):
+    """One query of knockback.knockback_boxes (the rules are documented there)."""
+    F = n_hi.shape[0] - 1
+    x0, y0, x1, y1 = boxes[m, 0], boxes[m, 1], boxes[m, 2], boxes[m, 3]
+    r = skin + 0.06 + margin          # room for move_x's TOL and the skin around the unclipped path
+    axis, slope = near(x0 + min(0.0, n_max * sx) - r, y0 + min(0.0, n_max * sy) - r,
+                       x1 + max(0.0, n_max * sx) + r, y1 + max(0.0, n_max * sy) + r, TT, clip)
+    if not axis and not slope:
+        flags[m] = 0
+        for c in range(4):
+            swept[m, c] = boxes[m, c] + swept_off[c]
+        if per_frame:
+            for k in range(F + 1):
+                for c in range(4):
+                    frames[m, k, c] = boxes[m, c] + offsets[k, c]
+        return
+    flags[m] = 1
+    L = math.hypot(sx, sy)
+    g = skin + margin
+    px0 = 0.5 * (x0 + x1)
+    py0 = y0 + foot
+    px, py = px0, py0
+    hull[0, 0], hull[0, 1], hull[0, 2], hull[0, 3] = x0, y0, x1, y1
+    sc = n_max                        # the last step known to be clear of every slope
+    if slope:
+        _, touch = near(x0 - g, y0 - g, x1 + g, y1 + g, TT, False)
+        if touch:
+            sc = 0
+    bx0, by0, bx1, by1 = x0, y0, x1, y1
+    for s in range(1, n_max + 1):
+        if s <= sc:
+            qx0, qy0, qx1, qy1 = bx0, by0, bx1, by1
+            px, _ = move_x(px, py, sx, hw, skin, foot, head, TT)
+            py, _, _, _ = move_y(px, py, sy, hw, skin, foot, head, slop_lo, slop_hi, TT)
+            bx0, by0 = x0 + (px - px0), y0 + (py - py0)
+            bx1, by1 = x1 + (px - px0), y1 + (py - py0)
+            if slope:
+                _, touch = near(min(qx0, bx0) - g, min(qy0, by0) - g, max(qx1, bx1) + g, max(qy1, by1) + g,
+                                TT, False)
+                if touch:
+                    sc = s - 1
+                    bx0, by0, bx1, by1 = qx0, qy0, qx1, qy1
+        if s <= sc:
+            hull[s, 0] = min(hull[s - 1, 0], bx0)
+            hull[s, 1] = min(hull[s - 1, 1], by0)
+            hull[s, 2] = max(hull[s - 1, 2], bx1)
+            hull[s, 3] = max(hull[s - 1, 3], by1)
+        else:                         # along a slope: anywhere within (s - sc) step lengths of the last clear box
+            d = (s - sc) * L
+            hull[s, 0] = min(hull[sc, 0], bx0 - d)
+            hull[s, 1] = min(hull[sc, 1], by0 - d)
+            hull[s, 2] = max(hull[sc, 2], bx1 + d)
+            hull[s, 3] = max(hull[sc, 3], by1 + d)
+    if sc < n_max:
+        flags[m] |= 2
+    swept[m, 0], swept[m, 1] = hull[n_max, 0] - margin, hull[n_max, 1] - margin
+    swept[m, 2], swept[m, 3] = hull[n_max, 2] + margin, hull[n_max, 3] + margin
+    if per_frame:
+        for k in range(F + 1):
+            if k >= ctl_min:
+                for c in range(4):
+                    frames[m, k, c] = swept[m, c] + free[k, c]
+            else:
+                n = min(n_hi[k], n_max)
+                frames[m, k, 0], frames[m, k, 1] = hull[n, 0] - margin, hull[n, 1] - margin
+                frames[m, k, 2], frames[m, k, 3] = hull[n, 2] + margin, hull[n, 3] + margin
+
+
+@njit(cache=True, error_model="numpy")
+def kb_query(boxes, sx, sy, n_max, n_hi, offsets, swept_off, free, ctl_min, hw, skin, foot, head, slop_lo, slop_hi,
+             TT, margin, clip, per_frame, swept, frames, flags):
+    hull = np.empty((n_max + 1, 4))
+    for m in range(boxes.shape[0]):
+        kb_one(m, boxes, sx, sy, n_max, n_hi, offsets, swept_off, free, ctl_min, hw, skin, foot, head, slop_lo,
+               slop_hi, TT, margin, clip, per_frame, swept, frames, flags, hull)
+
+
+@njit(cache=True, parallel=True, error_model="numpy")
+def kb_query_par(boxes, sx, sy, n_max, n_hi, offsets, swept_off, free, ctl_min, hw, skin, foot, head, slop_lo,
+                 slop_hi, TT, margin, clip, per_frame, swept, frames, flags, chunks):
+    M = boxes.shape[0]
+    size = (M + chunks - 1) // chunks
+    for c in prange(chunks):
+        hull = np.empty((n_max + 1, 4))
+        for m in range(c * size, min(M, (c + 1) * size)):
+            kb_one(m, boxes, sx, sy, n_max, n_hi, offsets, swept_off, free, ctl_min, hw, skin, foot, head, slop_lo,
+                   slop_hi, TT, margin, clip, per_frame, swept, frames, flags, hull)

@@ -124,10 +124,11 @@ DEFAULT_PARAMS = REPO / "knowledge" / "1.0.30000" / "kinematics" / "hero_hunter.
  TS,              # time scale the next frame runs at (nominal timing; logged runs take dt from the log)
  QQ,              # quickcast (tool / Silkspear) queue steps (-1: not queuing)
  ALO, AHI,        # feasible interval of ALPHA (the timing-variant lanes start from its ends)
- K) = range(44)
+ LANDQ,           # landed in this frame's physics steps: its Update decides idle (recovery ends) or run (it stays)
+ K) = range(45)
 ROW_NAMES = ("px py qx qy sx sy vx vy alpha gs face ground mode mode_t mode_n jumping jsteps jdsteps jq aq airhang "
              "attacking atk_t atk_cd rdir rsteps ds_hs ds_rec bounce hvx hvy move jheld prev silk inv_t ledge touch "
-             "phase ts qq alo ahi").split()
+             "phase ts qq alo ahi landq").split()
 assert len(ROW_NAMES) == K
 
 M_NORMAL, M_DS_ANTIC, M_DS_SPIKE, M_HURT_FREEZE, M_HURT_RECOIL, M_CAST, M_BIND, M_LOCKED = range(8)
@@ -152,6 +153,7 @@ B_UP, B_DOWN, B_LEFT, B_RIGHT = 1 << 18, 1 << 19, 1 << 20, 1 << 21
 EPS = 1e-4       # open-interval margin for overlap tests
 TOL = 0.05       # a box this far inside a face still counts as in front of it (Box2D leaves ~2 mm at seams)
 GTOL = 8e-3      # ground probe (covers the touch band of _move_y)
+TT_HEAD = 14     # header length of Terrain2D.packed() (layout in kin_jit)
 
 
 # ---- parameters -----------------------------------------------------------------------------------------------
@@ -234,16 +236,22 @@ class HeroParams:
     weighted_invuln_mult: float = 1.3
     weighted_recoil_steps: int = 4
     max_fall_weighted: float = 38.0
-    # frame-time jitter model (kin_fit: unscaled frame times at time scale 1 of the bot recordings)
-    frame_time_lo: float = 0.01665    # every frame is at least this long
-    frame_time_hi: float = 0.0170     # above the p99.99 of ordinary frames; longer ones are hitches
-    hitch_max: float = 0.034          # longest frame the envelope bounds allow (observed max 0.0320 s)
-    hitch_rate: float = 3.6e-5        # frames longer than 0.018 s, per frame
-    hitches_per_window: int = 2       # hitches the envelope allows in one recoil (they come in clusters)
+    # frame-time jitter model (kin_fit: unscaled gameplay frame times of the bot recordings)
+    frame_time_lo: float = 0.016649993    # no frame is shorter (the frame limiter)
+    frame_time_hi: float = 0.0170         # p99.99 of the frame time: the rollout's timing lanes run between lo and hi
+    frame_time_max: float = 0.018         # the envelope bound: every frame but the hitches is at most this long
+    hitch_max: float = 0.040              # and a hitch at most this long (observed max 0.0369 s in 2.96 M frames)
+    hitch_rate: float = 2.9e-5            # frames longer than frame_time_max, per frame
+    hitches_per_window: int = 2           # most frames above frame_time_max in any 65 frames (recoil + margin)
     # Silkspear phases that end one frame apart with no timer explaining it (the needle's way back): the
     # rollout's variant lanes take each value, [threshold, share of the logged throws]
+    # how far the variant lanes move the timer thresholds (Variant); chosen on live i0_000, the fit recording:
+    # variant-hull coverage 99.05 / 99.03 / 98.94 % of covered windows at 0.5 / 1 / 2 ms
+    timer_bias: float = 0.0005
+    alpha_margin: float = 0.01            # phase lanes: the feasible phase interval widened by this (frame drift)
     cast_throw_variants: list = field(default_factory=lambda: [[0.42, 0.5], [0.44, 0.5]])
     cast_catch_variants: list = field(default_factory=lambda: [[0.14, 0.5], [0.16, 0.5]])
+    bind_time_variants: list = field(default_factory=list)     # Bind lengths one frame apart, as the cast phases
     jump_heights: list = field(default_factory=list)   # per jump hold length: logged and model apex spread
     scenes: dict = field(default_factory=dict)       # scene -> {"enable": [go names], "disable": [go names]}
     source: dict = field(default_factory=dict)       # key -> provenance note
@@ -281,17 +289,20 @@ class HeroParams:
         p.rdown_halve = 1
         return p
 
-    def cast_variant(self, which: str) -> tuple[float, float]:
-        """(throw, catch) thresholds of a Silkspear variant: "nominal" (the shipped values), "short" or "long"."""
+    def cast_variant(self, which: str) -> tuple[float, float, float]:
+        """(Silkspear throw, catch, Bind) thresholds of a variant: "nominal" (the shipped values), "short" or "long"
+        (the shortest or the longest of the logged variants)."""
         if which == "nominal":
-            return self.cast_throw, self.cast_catch
+            return self.cast_throw, self.cast_catch, self.bind_time
         th = sorted(v[0] for v in self.cast_throw_variants) or [self.cast_throw]
         ca = sorted(v[0] for v in self.cast_catch_variants) or [self.cast_catch]
-        return (th[0], ca[0]) if which == "short" else (th[-1], ca[-1])
+        bi = sorted(v[0] for v in self.bind_time_variants) or [self.bind_time]
+        return (th[0], ca[0], bi[0]) if which == "short" else (th[-1], ca[-1], bi[-1])
 
     def jitter(self) -> dict:
         return {"frame_time": self.frame_time, "lo": self.frame_time_lo, "hi": self.frame_time_hi,
-                "hitch_max": self.hitch_max, "hitch_rate": self.hitch_rate, "hitches": self.hitches_per_window}
+                "max": self.frame_time_max, "hitch_max": self.hitch_max, "hitch_rate": self.hitch_rate,
+                "hitches": self.hitches_per_window}
 
     def to_json(self) -> dict:
         return asdict(self)
@@ -344,13 +355,15 @@ class Terrain2D:
     _grid: np.ndarray | None = field(default=None, repr=False, compare=False)
 
     def packed(self, width: float = 1.0) -> np.ndarray:
-        """The segments and an x-bucket index of them in one float64 array, for the compiled rollout (layout in
-        kin_jit: a bucket lists the floors / ceilings whose x extent and the walls whose x falls in it, with a 0.02 u
-        margin, so a query looks at a handful of segments instead of all of them). Built once per terrain."""
+        """The segments and an x-bucket index of them in one float64 array, for the compiled rollout and the
+        knockback queries (layout in kin_jit: a bucket lists the floors / ceilings whose x extent, the walls whose x
+        and the slopes whose x extent falls in it, with a 0.02 u margin, so a query looks at a handful of segments
+        instead of all of them). Built once per terrain."""
         if self._grid is None:
             h = np.ascontiguousarray(self.hseg, dtype=np.float64).reshape(-1, 3)
             v = np.ascontiguousarray(self.vseg, dtype=np.float64).reshape(-1, 3)
-            xs = np.concatenate([h[:, 1], h[:, 2], v[:, 0]])
+            sl = np.ascontiguousarray(self.slopes, dtype=np.float64).reshape(-1, 4)
+            xs = np.concatenate([h[:, 1], h[:, 2], v[:, 0], sl[:, 0], sl[:, 2]])
             x0 = float(xs.min()) - 1.0 if len(xs) else 0.0
             nb = int(np.ceil((float(xs.max()) + 1.0 - x0) / width)) + 1 if len(xs) else 0
             b = lambda x: int(np.floor((x - x0) / width))  # noqa: E731
@@ -366,15 +379,20 @@ class Terrain2D:
 
             hst, hix = csr([(b(r[1] - 0.02), b(r[2] + 0.02)) for r in h])
             vst, vix = csr([(b(r[0] - 0.02), b(r[0] + 0.02)) for r in v])
-            o_h = 10
+            sst, six = csr([(b(min(r[0], r[2]) - 0.02), b(max(r[0], r[2]) + 0.02)) for r in sl])
+            o_h = TT_HEAD
             o_v = o_h + h.size
-            o_hs = o_v + v.size
+            o_s = o_v + v.size
+            o_hs = o_s + sl.size
             o_hi = o_hs + len(hst)
             o_vs = o_hi + len(hix)
             o_vi = o_vs + len(vst)
-            head = [len(h), len(v), nb, x0, 1.0 / width, o_hs, o_hi, o_vs, o_vi, o_v]
+            o_ss = o_vi + len(vix)
+            o_si = o_ss + len(sst)
+            head = [len(h), len(v), nb, x0, 1.0 / width, o_hs, o_hi, o_vs, o_vi, o_v, len(sl), o_s, o_ss, o_si]
+            assert len(head) == TT_HEAD
             self._grid = np.ascontiguousarray(np.concatenate([np.array(head, dtype=np.float64), h.ravel(), v.ravel(),
-                                                              hst, hix, vst, vix]))
+                                                              sl.ravel(), hst, hix, vst, vix, sst, six]))
         return self._grid
 
     def open(self) -> "Terrain2D":
@@ -674,9 +692,10 @@ def _fixed_step(X, P, hseg, vseg):
     X[DS_REC] = np.where(land_sp, 0.0, X[DS_REC])
     X[GS] = np.where(land_sp, 1.0, X[GS])
     X[VY] = np.where(land_sp, P[P_DS_ENDVY], X[VY])
-    # landing into idle (no move input) ends a downspike recovery at once (HeroAnimationController.UpdateState,
-    # airborne -> idle); landing into a run keeps it for DOWNSPIKE_LAND_RECOVERY_TIME (live run: 0 vs 1-9 frames)
-    X[DS_REC] = np.where((lands | land_sp) & ~was & (X[MOVE] == 0), -1.0, X[DS_REC])
+    # landing into idle ends a downspike recovery at once, into a run it lasts DOWNSPIKE_LAND_RECOVERY_TIME
+    # (HeroAnimationController.UpdateState, airborne -> idle / run): decided in this frame's Update, on the input
+    # read there (the move input of the spike's own frames is stale: LookForInput does not run while relinquished)
+    X[LANDQ] = np.where((lands | land_sp) & ~was, 1.0, X[LANDQ])
 
 
 def _apply_events(X, ev, P):
@@ -789,6 +808,8 @@ def _update(X, mask, ev, dt, udt, P):
     X[JQ] = np.where(rel, -1.0, X[JQ])
     X[AQ] = np.where(accept & ((mask & B_ATTACK) == 0), -1.0, X[AQ])
     X[QQ] = np.where(accept & ((mask & B_QUICKCAST) == 0), -1.0, X[QQ])
+    X[DS_REC] = np.where((X[LANDQ] > 0) & (X[MOVE] == 0), -1.0, X[DS_REC])
+    X[LANDQ] = 0.0
 
     # hero_state branch: in no_input the damage recoil times out here (recoilTimer < RECOIL_DURATION ? += dt :
     # CancelDamageRecoil: v = 0, gravity back, control back), before LookForQueueInput can start a queued action;
@@ -815,7 +836,9 @@ def _update(X, mask, ev, dt, udt, P):
     can_atk_action = normal & (X[ATTACKING] <= 0)
     downish = ((mask & B_DOWN) != 0) & ((mask & B_UP) == 0)
     can_down = (X[BOUNCE] < 0) & (X[DS_REC] < 0)
-    can_attack = can_atk_action & (X[ATK_CD] <= 0) & (~downish | can_down)
+    # a Bind pressed in the same frame wins over the attack (its FSM takes control first; live run: 2 of 2)
+    bind_first = normal & ((pressed & B_BIND) != 0) & (X[SILK] >= P[P_BIND_SILK])
+    can_attack = can_atk_action & (X[ATK_CD] <= 0) & (~downish | can_down) & ~bind_first
     ap = (pressed & B_ATTACK) != 0
     go = ap & can_attack
     X[AQ] = np.where(ap & ~can_attack, 0.0, X[AQ])
@@ -851,7 +874,7 @@ def _update(X, mask, ev, dt, udt, P):
     can_jump = normal & (X[JUMPING] <= 0) & (X[BOUNCE] < 0) & (X[DS_REC] < 0) & (ground | (X[LEDGE] > 0))
     go = normal & jheld & (X[JQ] >= 0) & (X[JQ] <= P[P_JQ]) & can_jump
     _hero_jump(X, go, P)
-    can_attack = normal & (X[ATTACKING] <= 0) & (X[ATK_CD] <= 0) & (~downish | can_down)
+    can_attack = normal & (X[ATTACKING] <= 0) & (X[ATK_CD] <= 0) & (~downish | can_down) & ~bind_first
     go = normal & ((mask & B_ATTACK) != 0) & (X[AQ] >= 0) & (X[AQ] <= P[P_AQ]) & can_attack
     _do_attack(X, go, mask, P)
     normal = X[MODE] == M_NORMAL
@@ -1014,40 +1037,58 @@ class Rollout:
 
 @dataclass(frozen=True, slots=True)
 class Variant:
-    """One timing lane. alpha: the start phase ("est", or the "lo" / "hi" end of its feasible interval);
-    frame_time: unscaled frame time of every future frame ("mean" HeroParams.frame_time, "lo", "hi" the jitter
-    model's ends); cast: Silkspear throw / catch frame counts ("nominal", "short", "long")."""
+    """One timing lane. The game's timers compare float32 sums of frame times with thresholds that sit on exact
+    multiples of 1/60 s (antic 0.1, hit-stop wait 0.1 and ramp 0.1, damage recoil 0.2, attack 0.35 ...), so the
+    frame-time jitter (p99.99 0.0170 s against a mean of 0.016666 s) decides whether such a phase ends on frame N or
+    N + 1, and the history cannot tell which (the frame times are not predictable: live run, 2.96 M frames). A lane
+    moves the thresholds by -+ HeroParams.timer_bias, with its own sign for each link of the longest chain of such
+    timers, the damage hit-stop wait, its ramp (GameManager.FreezeMoment, unscaled time) and every timer on scaled
+    time (recoil, antic, recovery, attack, Bind): `timers` = (wait, ramp, scaled). alpha: the start phase ("est", or
+    the "lo" / "hi" end of its feasible interval widened by HeroParams.alpha_margin); frame_time: unscaled frame
+    time of every future frame ("mean", or the jitter model's "lo" / "hi", which also moves the physics phase);
+    cast: the Silkspear throw / catch thresholds ("nominal", "short", "long", HeroParams.cast_variant)."""
     name: str
     alpha: str = "est"
     frame_time: str = "mean"
     cast: str = "nominal"
+    timers: tuple = (0, 0, 0)
 
 
+def _lane(t: tuple) -> Variant:
+    early = t[2] < 0
+    return Variant("".join("-+"[x > 0] for x in t), "hi" if early else "lo", "mean", "short" if early else "long", t)
+
+
+_SIGNS = tuple((a, b, c) for a in (-1, 1) for b in (-1, 1) for c in (-1, 1))
 NOMINAL = (Variant("nominal"),)
-# the known +-1 frame branches move together: an earlier phase, longer frames (timers reach their thresholds a frame
-# sooner: antic 6 instead of 7 frames, hit-stop 13 instead of 14) and the short Silkspear phases, or all the other way
-BOUNDS = (Variant("nominal"), Variant("early", "hi", "hi", "short"), Variant("late", "lo", "lo", "long"))
-FULL = (Variant("nominal"),) + tuple(Variant(f"{a}/{f}/{c}", a, f, c) for a in ("lo", "hi") for f in ("lo", "hi")
-                                     for c in ("short", "long"))
-VARIANT_SETS = {"nominal": NOMINAL, "bounds": BOUNDS, "full": FULL}
+# fast: every threshold a frame sooner (later), the phase at the top (bottom) of its interval, short (long) Silkspear
+FAST = (Variant("nominal"), _lane((-1, -1, -1)), _lane((1, 1, 1)))
+# bounds: every combination of the three links, so a hit-stop that ends early and a recoil that ends late are covered
+BOUNDS = (Variant("nominal"),) + tuple(_lane(t) for t in _SIGNS)
+FULL = (Variant("nominal"),) + tuple(Variant(f"{a}/{_lane(t).name}", a, "mean", _lane(t).cast, t)
+                                     for a in ("lo", "hi") for t in _SIGNS)
+VARIANT_SETS = {"nominal": NOMINAL, "fast": FAST, "bounds": BOUNDS, "full": FULL}
+_SCALED_TIMERS = ("P_ATK_DUR", "P_ATK_CD", "P_DS_ANTIC", "P_DS_REC", "P_DS_LREC", "P_HURT_T", "P_CAST_ANTIC",
+                  "P_BIND_T")
 
 
-def _variant_lanes(S0: np.ndarray, params: HeroParams, variants: tuple[Variant, ...]
-                   ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Lane-major (row r * V + v) start states, frame times and parameter rows for the variants of S0 [K, N]."""
-    n, V = S0.shape[1], len(variants)
-    S = np.repeat(S0, V, axis=1)
-    ft = np.empty(n * V)
-    Pv = np.empty((V, NP))
-    base = params.vector()
+def _variant_rows(params: HeroParams, variants: tuple[Variant, ...]
+                  ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Per variant: parameter row [V, NP], frame time [V] (0: the caller's), phase selector [V]."""
+    V = len(variants)
+    Pv = np.repeat(params.vector()[None, :], V, axis=0)
+    ft = np.zeros(V)
+    sel = np.zeros(V, dtype=np.int64)
+    scaled = [globals()[k] for k in _SCALED_TIMERS]
     for v, var in enumerate(variants):
-        lanes = slice(v, None, V)
-        if var.alpha != "est":
-            S[ALPHA, lanes] = S0[ALO if var.alpha == "lo" else AHI]
-        ft[lanes] = {"mean": params.frame_time, "lo": params.frame_time_lo, "hi": params.frame_time_hi}[var.frame_time]
-        Pv[v] = base
-        Pv[v, P_CAST_THROW], Pv[v, P_CAST_CATCH] = params.cast_variant(var.cast)
-    return S, ft, np.tile(Pv, (n, 1))
+        sel[v] = {"est": 0, "lo": 1, "hi": 2}[var.alpha]
+        ft[v] = {"mean": params.frame_time, "lo": params.frame_time_lo, "hi": params.frame_time_hi}[var.frame_time]
+        Pv[v, P_CAST_THROW], Pv[v, P_CAST_CATCH], Pv[v, P_BIND_T] = params.cast_variant(var.cast)
+        tw, tr, ts = var.timers
+        Pv[v, P_HURT_WAIT] += tw * params.timer_bias
+        Pv[v, P_HURT_RAMP] += tr * params.timer_bias
+        Pv[v, scaled] += ts * params.timer_bias
+    return Pv, np.asarray(ft, dtype=np.float32).astype(np.float64), sel
 
 
 def rollout(start: np.ndarray, masks: np.ndarray, params: HeroParams, terrain: Terrain2D | None = None,
@@ -1063,47 +1104,40 @@ def rollout(start: np.ndarray, masks: np.ndarray, params: HeroParams, terrain: T
     [N, T] logged scaled dt and physics steps per frame (replay only: the planner does not know them); without them
     the timing is nominal: dt = udt times the model's time scale, steps from the phase; udt: unscaled frame time, a
     scalar or [T] / [N, T] (None: params.frame_time, the measured mean frame time, not exactly 1/60 s).
-    variants: "bounds" / "full" / a tuple of Variant (nominal timing only): V lanes per sequence (var_*), their
-    per-frame hull in `bound`. backend: "numba" (the compiled loop, kin_jit), "numpy" (the reference), "auto";
-    threads > 1 runs the lanes in parallel (numba)."""
+    variants: "fast" / "bounds" / "full" / a tuple of Variant (nominal timing only): V lanes per sequence (var_*),
+    their per-frame hull in `bound`; the main arrays hold the first (nominal) lane. backend: "numba" (the compiled
+    loop, kin_jit), "numpy" (the reference), "auto"; threads > 1 runs the lanes in parallel (numba)."""
     masks = np.ascontiguousarray(masks, dtype=np.int64)
     if masks.ndim == 1:
         masks = masks[None, :]
     n, T = masks.shape
     S0 = np.asarray(start, dtype=np.float64)
-    if S0.ndim == 1:
-        S0 = np.repeat(S0[:, None], n, axis=1)
-    elif S0.shape[1] == 1 and n > 1:
-        S0 = np.repeat(S0, n, axis=1)
-    if S0.shape != (K, n):
-        raise ValueError(f"start state {S0.shape}, expected ({K}, {n})")
-    ev = np.zeros((n, T), dtype=np.int64) if events is None else np.broadcast_to(
-        np.asarray(events, dtype=np.int64), (n, T))
+    S0 = S0[:, None] if S0.ndim == 1 else S0
+    if S0.shape[0] != K or S0.shape[1] not in (1, n):
+        raise ValueError(f"start state {S0.shape}, expected ({K}, {n}) or ({K}, 1)")
+    S0 = np.ascontiguousarray(S0)
+    ev = np.zeros((0, 0), dtype=np.int64) if events is None else np.ascontiguousarray(
+        np.broadcast_to(np.asarray(events, dtype=np.int64), (n, T)))
     if isinstance(variants, str):
         variants = VARIANT_SETS[variants]
-    V = len(variants) if variants else 1
+    variants = tuple(variants) if variants else ()
     if variants and dt is not None:
         raise ValueError("timing variants need nominal timing (dt / fs None)")
-    terrain = terrain or Terrain2D.empty()
+    V = len(variants) or 1
     if variants:
-        S0, ft, P = _variant_lanes(S0, params, tuple(variants))
-        masks = np.repeat(masks, V, axis=0)
-        ev = np.repeat(ev, V, axis=0)
-        udts = np.repeat(np.asarray(ft, dtype=np.float32).astype(np.float64)[:, None], T, axis=1)
+        P, ft_v, sel = _variant_rows(params, variants)
     else:
-        P = params.vector()[None, :]
-        u = params.frame_time if udt is None else udt
-        udts = np.broadcast_to(np.asarray(u, dtype=np.float32).astype(np.float64), (n, T))
-    nl = masks.shape[0]
+        P, ft_v, sel = params.vector()[None, :], np.zeros(1), np.zeros(1, dtype=np.int64)
+    u = np.asarray(params.frame_time if udt is None else udt, dtype=np.float32).astype(np.float64)
+    udts = np.ascontiguousarray(u.reshape(1, 1) if u.ndim == 0 else (u[None, :] if u.ndim == 1 else u))
+    if udts.shape[0] not in (1, n) or udts.shape[1] not in (1, T):
+        raise ValueError(f"udt {udts.shape} does not broadcast to ({n}, {T})")
     if dt is not None:
-        dts = np.ascontiguousarray(np.broadcast_to(np.asarray(dt, dtype=np.float64), (nl, T)))
-        fss = np.ascontiguousarray(np.broadcast_to(np.asarray(fs, dtype=np.float64), (nl, T)))
+        dts = np.ascontiguousarray(np.broadcast_to(np.asarray(dt, dtype=np.float64), (n, T)))
+        fss = np.ascontiguousarray(np.broadcast_to(np.asarray(fs, dtype=np.float64), (n, T)))
     else:
-        dts = fss = np.zeros((nl, 0))
-    ev = np.ascontiguousarray(ev)
-    udts = np.ascontiguousarray(udts)
-    hseg = np.ascontiguousarray(terrain.hseg, dtype=np.float64)
-    vseg = np.ascontiguousarray(terrain.vseg, dtype=np.float64)
+        dts = fss = np.zeros((0, 0))
+    terrain = terrain or Terrain2D.empty()
     use_jit = HAVE_NUMBA if backend == "auto" else backend == "numba"
     if use_jit:
         from ssbot.knowledge import kin_jit
@@ -1111,38 +1145,52 @@ def rollout(start: np.ndarray, masks: np.ndarray, params: HeroParams, terrain: T
             import numba
             numba.set_num_threads(threads)
         fn = kin_jit.simulate_par if threads > 1 else kin_jit.simulate
-        phys, rend, vel, modes, flags, X = fn(np.ascontiguousarray(S0), masks, ev, dts, fss, udts,
-                                              np.ascontiguousarray(P), terrain.packed())
+        phys, rend, vel, modes, flags, box, X = fn(S0, masks, ev, dts, fss, udts, ft_v, sel, params.alpha_margin,
+                                                   P, terrain.packed())
     else:
-        phys, rend, vel, modes, flags, X = _simulate_rows(S0, masks, ev, dts, fss, udts, P, hseg, vseg)
-    box = np.empty(phys.shape[:2] + (4,))
-    box[..., 0] = phys[..., 0] - params.half_width
-    box[..., 1] = phys[..., 1] - params.foot
-    box[..., 2] = phys[..., 0] + params.half_width
-    box[..., 3] = phys[..., 1] + params.head
+        phys, rend, vel, modes, flags, box, X = _simulate_lanes(S0, masks, ev, dts, fss, udts, ft_v, sel,
+                                                                params.alpha_margin, P, terrain)
     if not variants:
         return Rollout(phys, rend, vel, modes, flags, X, box)
     vb = box.reshape(n, V, T + 1, 4)
     bound = np.concatenate([vb[..., :2].min(axis=1), vb[..., 2:].max(axis=1)], axis=-1)
-    sel = slice(0, None, V)
-    return Rollout(phys[sel], rend[sel], vel[sel], modes[sel], flags[sel], X[:, sel], box[sel], tuple(variants),
+    sl = slice(0, None, V)
+    return Rollout(phys[sl], rend[sl], vel[sl], modes[sl], flags[sl], X[:, sl], box[sl], variants,
                    vb, modes.reshape(n, V, T + 1), flags.reshape(n, V, T + 1), bound)
 
 
-def _simulate_rows(S0, masks, ev, dts, fss, udts, P, hseg, vseg):
-    """The NumPy reference over lanes that may carry their own parameter rows (P [1 or N, NP])."""
-    if P.shape[0] == 1:
-        return _simulate(S0, masks, ev, dts, fss, udts, P[0], hseg, vseg)
+def _simulate_lanes(S0, masks, ev, dts, fss, udts, ft_v, sel, alpha_margin, P, terrain):
+    """The NumPy reference: the broadcast inputs of kin_jit.simulate expanded to one column per lane (lane r * V + v),
+    run per parameter row with _simulate."""
     n, T = masks.shape
-    out = [np.empty((n, T + 1, 2)), np.empty((n, T + 1, 2)), np.empty((n, T + 1, 2)),
-           np.empty((n, T + 1), dtype=np.int32), np.empty((n, T + 1), dtype=np.int32), np.empty_like(S0)]
-    rows, inv = np.unique(P, axis=0, return_inverse=True)
-    for r in range(len(rows)):
-        idx = np.flatnonzero(inv.ravel() == r)
-        res = _simulate(S0[:, idx], masks[idx], ev[idx], dts[idx], fss[idx], udts[idx], rows[r], hseg, vseg)
+    V = len(ft_v)
+    nl = n * V
+    lane_r = np.repeat(np.arange(n), V)
+    lane_v = np.tile(np.arange(V), n)
+    S = np.ascontiguousarray(np.broadcast_to(S0, (K, n))[:, lane_r])
+    S[ALPHA] = np.where(sel[lane_v] == 1, np.maximum(S[ALO] - alpha_margin, 0.0),
+                        np.where(sel[lane_v] == 2, S[AHI] + alpha_margin, S[ALPHA]))
+    m = masks[lane_r]
+    e = ev[lane_r] if ev.shape[0] else np.zeros((nl, T), dtype=np.int64)
+    u = np.broadcast_to(udts, (n, T))[lane_r]
+    u = np.where(ft_v[lane_v][:, None] > 0, ft_v[lane_v][:, None], u)
+    d = dts[lane_r] if dts.shape[1] else np.zeros((nl, 0))
+    f = fss[lane_r] if fss.shape[1] else np.zeros((nl, 0))
+    out = [np.empty((nl, T + 1, 2)), np.empty((nl, T + 1, 2)), np.empty((nl, T + 1, 2)),
+           np.empty((nl, T + 1), dtype=np.int32), np.empty((nl, T + 1), dtype=np.int32), np.empty((nl, T + 1, 4)),
+           np.empty((K, nl))]
+    hseg = np.ascontiguousarray(terrain.hseg, dtype=np.float64)
+    vseg = np.ascontiguousarray(terrain.vseg, dtype=np.float64)
+    for v in range(V):
+        idx = np.flatnonzero(lane_v == v)
+        pv = P[v] if P.shape[0] > 1 else P[0]
+        res = _simulate(S[:, idx], m[idx], e[idx], d[idx], f[idx], u[idx], pv, hseg, vseg)
         for o, x in zip(out[:5], res[:5]):
             o[idx] = x
-        out[5][:, idx] = res[5]
+        ph = res[0]
+        out[5][idx] = np.stack([ph[..., 0] - pv[P_HW], ph[..., 1] - pv[P_FOOT], ph[..., 0] + pv[P_HW],
+                                ph[..., 1] + pv[P_HEAD]], axis=-1)
+        out[6][:, idx] = res[5]
     return tuple(out)
 
 
@@ -1285,10 +1333,18 @@ _CS_USED = ("facingRight", "onGround", "jumping", "attacking", "upAttacking", "d
 
 
 MK_HARNESS, MK_HAZARD, MK_SCENE, MK_FREEZE, MK_DEATH, MK_SLIDE = 1, 2, 4, 8, 16, 32
+# FreezeMoment starts per frame (oracle "freeze" events, Trace.freeze bits). Every StartRecoil comes with an
+# EnemyDeath freeze in the same frame (live i0_000: 1974 / 1974), which ends inside the hit-stop and changes nothing;
+# the others hold the time scale down while the hero model's clock runs on (MK_FREEZE).
+FZ_RECOIL, FZ_ENEMY_DEATH, FZ_BIND_BREAK, FZ_BOSS_DEATH, FZ_BOSS_STUN, FZ_QUICK, FZ_OTHER = (1 << i for i in range(7))
+_FZ_TYPES = {"EnemyDeath": FZ_ENEMY_DEATH, "BindBreak": FZ_BIND_BREAK, "BossDeathSlow": FZ_BOSS_DEATH,
+             "BossStun": FZ_BOSS_STUN, "QuickFreeze": FZ_QUICK}
+FZ_NAMES = {FZ_RECOIL: "StartRecoil", FZ_ENEMY_DEATH: "EnemyDeath", FZ_BIND_BREAK: "BindBreak",
+            FZ_BOSS_DEATH: "BossDeathSlow", FZ_BOSS_STUN: "BossStun", FZ_QUICK: "QuickFreeze", FZ_OTHER: "other"}
 # hero.tm (oracle STATE, when exported): HeroController timers, in this order as Trace.tm columns
 TM_KEYS = ("inv", "recoil", "recoil_steps", "dash_cd", "atk_cd", "atk_t", "tool_cd", "jump_steps", "jumped_steps",
            "ds", "ds_rec", "grav", "qj", "qa", "qt")
-SLIDE_SPAN = (-5, 40)   # frames around a savestate.load harness event searched for the load's slide
+SLIDE_SPAN = (-20, 40)  # rows around a savestate.load event searched for its slide (logged ~12 frames late)
 _MARK_KINDS = {"harness": MK_HARNESS, "hazard_respawn": MK_HAZARD, "hazard_death": MK_HAZARD,
                "scene_enter": MK_SCENE, "scene_leave": MK_SCENE, "die": MK_DEATH, "hero_dead": MK_DEATH,
                "player_dead": MK_DEATH}
@@ -1329,6 +1385,7 @@ class Trace:
     mask_source: str = "act"
     tm: np.ndarray | None = None          # [n, len(TM_KEYS)] hero.tm when exported (NaN where missing)
     alpha_log: np.ndarray | None = None   # [n] hero.alpha when exported (NaN where missing)
+    freeze: np.ndarray | None = None      # [n] FZ_* bits of the FreezeMoments started in that frame
 
     def __len__(self) -> int:
         return len(self.f)
@@ -1368,7 +1425,7 @@ class Trace:
         scenes: dict = {}
         cols: dict[str, list] = {k: [] for k in ("f", "fs", "dt", "udt", "ts", "pos", "phys", "vel", "facing",
                                                  "hero_state", "relinq", "cs", "act", "inp", "silk", "hp", "clip",
-                                                 "spell", "dmg", "marks", "box", "valid", "scene")}
+                                                 "spell", "dmg", "marks", "box", "valid", "scene", "freeze")}
         nan2 = [np.nan, np.nan]
         nan_tm = [np.nan] * len(TM_KEYS)
         tm_rows: list = []
@@ -1395,18 +1452,23 @@ class Trace:
             cols["scene"].append(scenes.setdefault(g.get("scene"), len(scenes)))
             dmg = 0
             mk = 0
+            fz = 0
             for ev in s.get("ev") or ():
                 k = ev.get("k")
                 d = ev.get("d") or {}
                 if k == "damage":
                     side = d.get("side")
                     dmg = -1 if side == "left" else 1 if side == "right" else dmg
-                elif k == "freeze" and d.get("phase") == "start" and "StartRecoil" not in str(d.get("type")):
-                    mk |= MK_FREEZE
+                elif k == "freeze" and d.get("phase") == "start":
+                    typ = str(d.get("type"))
+                    fz |= FZ_RECOIL if "StartRecoil" in typ else _FZ_TYPES.get(typ, FZ_OTHER)
                 else:
                     mk |= _MARK_KINDS.get(k, 0)
+            if fz & ~(FZ_RECOIL | FZ_ENEMY_DEATH) or (fz & FZ_ENEMY_DEATH and not fz & FZ_RECOIL):
+                mk |= MK_FREEZE
             cols["dmg"].append(dmg)
             cols["marks"].append(mk)
+            cols["freeze"].append(fz)
             if not h or not h.get("box") or not h.get("cstate"):
                 for k, v in (("pos", nan2), ("phys", nan2), ("vel", nan2), ("box", nan2 * 2), ("facing", 0),
                              ("hero_state", -1), ("relinq", False), ("cs", [False] * len(bit)), ("silk", 0), ("hp", 0),
@@ -1460,7 +1522,7 @@ class Trace:
                  valid=arr["valid"].astype(bool),
                  scene=arr["scene"].astype(np.int32), clips=list(clips), spells=list(spells), scenes=list(scenes),
                  mask_source=mask_source, tm=tm_arr if np.isfinite(tm_arr).any() else None,
-                 alpha_log=al if np.isfinite(al).any() else None)
+                 alpha_log=al if np.isfinite(al).any() else None, freeze=arr["freeze"].astype(np.int16))
         mark_load_slides(tr, loads, params)
         return tr
 

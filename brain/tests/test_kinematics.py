@@ -1,6 +1,9 @@
 """Hero kinematics model (ssbot.knowledge.kinematics): synthetic checks of the integrator, the collision and the
-mode machine against the decompiled HeroController rules, plus a replay of a real Bell Beast slice
-(tests/fixtures/kin_bellbeast_trial.npz: frames 45240-51240 of the trial run 20261001_121446 i0_000)."""
+mode machine against the decompiled HeroController rules, the compiled build against the NumPy reference, the input
+filter's state, the variant lanes, the estimator's use of exported timers, and acceptance under the planner's
+information set on held-out play: tests/fixtures/kin_bellbeast_trial.npz (frames 45240-51240 of the trial run
+20261001_121446 i0_000) and kin_live_heldout.npz (live run 20261001_122249 i1_000 around a hit during Bind and a
+BossDeathSlow kill, i2_002 around a hit under the sloped roof); the parameters are fitted on live i0_000 only."""
 import random
 from pathlib import Path
 
@@ -12,6 +15,12 @@ from ssbot.knowledge.kinematics import HeroParams, Terrain2D
 from ssbot.tools import cstate as cst
 
 FIXTURE = Path(__file__).parent / "fixtures" / "kin_bellbeast_trial.npz"
+LIVE = Path(__file__).parent / "fixtures" / "kin_live_heldout.npz"
+# measured on the fixtures with the shipped parameters (fitted on live i0_000), minus a margin: share of covered
+# windows within 0.1 u after 0.5 s, nominal lane (plain primitives, all) and inside the variant lanes' hull
+# (trial 0.9915 / 0.9042 / 0.9896; live fixture 0.9865 / 0.8698 / 0.9567, its windows crowd around rare events)
+ACCEPT = {"trial": {"plain": 0.985, "planner": 0.89, "bounds": 0.98},
+          "live": {"plain": 0.98, "planner": 0.85, "bounds": 0.94}}
 FT = 1 / 60
 REST = 2.0 + 0.015 + 1.5527          # body y standing on a floor at y = 2 (Bone_05: 3.5677)
 
@@ -214,26 +223,89 @@ def test_lanes_are_independent(p):
         one = km.rollout(s, masks[i:i + 1], p, terrain)
         assert np.array_equal(both.phys[i], one.phys[0])
         assert np.array_equal(both.mode[i], one.mode[0])
-    assert km.HAVE_NUMBA or km._SIM is km._simulate         # the NumPy path is the one exercised here
 
 
-def test_knockback_envelope_spreads_only_in_timing_and_stops_at_walls(p):
+def test_rollout_returns_collider_boxes_and_bounding_variant_lanes(p):
+    """Decision 1 (collider boxes and centres) and decision 4 (variant lanes for the +-1 frame branches)."""
     terrain = Terrain2D.from_boxes([floor()])
     s = km.initial_state(p, 10.0, REST)
-    env = km.knockback_envelope(s, "left", p, terrain)
-    ctl = env.control_frame()
-    assert 25 <= ctl <= 31
-    reach = env.union[:, 2].max() - (10.0 + p.half_width)
-    assert 2.95 <= reach <= 3.65                                          # 10 to 12 steps of 0.3 u
-    assert 1.45 <= env.union[:, 3].max() - (REST + p.head) <= 1.85        # and 0.15 u up per step
-    assert env.union[:, 0].min() == pytest.approx(10.0 - p.half_width)   # never towards the impact
-    right = km.knockback_envelope(s, "right", p, terrain)
-    assert (10.0 - p.half_width) - right.union[:, 0].min() == pytest.approx(reach)   # mirrored
-    walled = km.knockback_envelope(s, "left", p, Terrain2D.from_boxes([floor(), (11.5, 0.0, 13.0, 20.0)]))
-    assert walled.union[:, 2].max() <= 11.5 - p.skin + 1e-9
-    free = km.knockback_envelope(s, "left", p, terrain, extra_frames=20)
-    assert free.boxes.shape[0] > env.boxes.shape[0]                       # input classes after control returns
-    assert (free.union[-1, 2] - free.union[-1, 0]) > (env.union[-1, 2] - env.union[-1, 0])
+    masks = np.array([[km.B_JUMP | km.B_RIGHT] * 12 + [km.B_DOWN | km.B_ATTACK] * 3 + [0] * 33,
+                      [km.B_RIGHT] * 48])
+    plain = km.rollout(s, masks, p, terrain)
+    assert plain.box.shape == (2, 49, 4)
+    assert np.allclose(plain.centre[..., 0], plain.phys[..., 0])
+    assert np.allclose(plain.box[..., 3] - plain.box[..., 1], p.foot + p.head)
+    for name, n_lanes in (("fast", 3), ("bounds", 9), ("full", 17)):
+        r = km.rollout(s, masks, p, terrain, variants=name)
+        assert r.var_box.shape == (2, n_lanes, 49, 4)
+        assert np.array_equal(r.box, plain.box)                      # lane 0 is the nominal lane
+        assert (r.bound[..., :2] <= r.var_box[..., :2].min(axis=1) + 1e-12).all()
+        assert (r.bound[..., 2:] >= r.var_box[..., 2:].max(axis=1) - 1e-12).all()
+    r = km.rollout(s, masks, p, terrain, variants="bounds")
+    antic = (r.var_mode[0] == km.M_DS_ANTIC).sum(axis=1)
+    assert set(antic.tolist()) >= {6, 7}                             # both antic lengths among the lanes
+    with pytest.raises(ValueError, match="nominal timing"):
+        km.rollout(s, masks, p, terrain, variants="bounds", dt=np.full(48, FT), fs=np.ones(48))
+
+
+def test_compiled_rollout_matches_the_numpy_reference(p):
+    """kin_jit is the per-lane scalar build of _fixed_step / _apply_events / _update: bit-identical outputs on random
+    buttons and events, every variant lane and logged timing (the reference stays the readable version)."""
+    from ssbot.tools.kin_check import load_fixture
+    tr, terrains = load_fixture(FIXTURE)
+    terrain = terrains["Bone_05"]
+    rng = np.random.default_rng(7)
+    n, T = 96, 40
+    idx = rng.integers(10, len(tr) - T - 1, n)
+    S = km.estimate_state(tr, idx, p, terrain=terrain)
+    masks = np.zeros((n, T), dtype=np.int64)
+    for b in (km.B_JUMP, km.B_ATTACK, km.B_LEFT, km.B_RIGHT, km.B_DOWN, km.B_UP, km.B_QUICKCAST, km.B_BIND):
+        masks |= np.where(rng.random((n, T)) < 0.25, b, 0)
+    pool = [km.EV_RECOIL_L, km.EV_RECOIL_R, km.EV_POGO, km.EV_HURT_L, km.EV_HURT_R, km.EV_SILK, km.EV_RECOIL_DOWN,
+            km.EV_CATCH, km.EV_LOCK, km.EV_UNLOCK]
+    ev = np.where(rng.random((n, T)) < 0.03, rng.choice(pool, (n, T)), 0)
+    I = idx[:, None] + np.arange(1, T + 1)[None]
+    cases = [{}, {"events": ev}, {"events": ev, "variants": "bounds"}, {"udt": rng.uniform(0.0166, 0.02, (n, T))},
+             {"events": km.derive_events(tr)[I], "dt": tr.dt[I], "fs": tr.fs[I], "udt": tr.udt[I]}]
+    for kw in cases:
+        a = km.rollout(S, masks, p, terrain, backend="numpy", **kw)
+        b = km.rollout(S, masks, p, terrain, backend="numba", **kw)
+        for name in ("phys", "pos", "vel", "mode", "flags", "box", "final"):
+            assert np.array_equal(getattr(a, name), getattr(b, name)), (name, list(kw))
+
+
+def test_compiled_rollout_fits_the_planner_batch(p):
+    """DESIGN §3.5.4: 512 candidates x 48 frames. Generous bound (catches a fallback to the NumPy path, which takes
+    ~70 ms); the measured figures are in the kinematics module docstring."""
+    import time
+    terrain = Terrain2D.from_boxes([floor()])
+    s = km.initial_state(p, 50.0, REST)
+    masks = np.random.default_rng(0).choice([0, km.B_RIGHT, km.B_JUMP | km.B_LEFT, km.B_ATTACK], (512, 48))
+    km.rollout(s, masks, p, terrain)
+    t0 = time.perf_counter()
+    for _ in range(5):
+        km.rollout(s, masks, p, terrain)
+    assert (time.perf_counter() - t0) / 5 < 0.03
+
+
+def test_hold_filter_carries_its_state_across_calls():
+    """A planner that replans every frame passes the filter state it keeps in step with the ACTIONs it sent: the
+    suffix then latches exactly as the full history does (from an idle filter it would re-press two frames early)."""
+    J = km.B_JUMP
+    commanded = np.array([J, 0, J, J, J, 0])
+    full, _ = km.hold_filter(commanded)
+    assert [int(m != 0) for m in full] == [1, 1, 0, 0, 1, 1]
+    _, st = km.hold_filter(commanded[:2])
+    rest, _ = km.hold_filter(commanded[2:], st)
+    assert np.array_equal(rest, full[2:])
+    naive, _ = km.hold_filter(commanded[2:])
+    assert not np.array_equal(naive, full[2:])
+    hf = {"latched": int(st.mask()[0]), "desired": int(commanded[1]), "pending": st.pending[0].tolist(),
+          "age": st.age[0].tolist()}
+    synced, _ = km.hold_filter(commanded[2:], km.HoldState.from_hf(hf))   # STATE act.hf, when the oracle sends it
+    assert np.array_equal(synced, full[2:])
+    lr, _ = km.hold_filter(np.array([km.B_LEFT, km.B_LEFT | km.B_RIGHT, km.B_RIGHT, km.B_RIGHT, km.B_RIGHT]))
+    assert not any((m & km.B_LEFT) and (m & km.B_RIGHT) for m in lr)    # never both directions
 
 
 # ---- terrain --------------------------------------------------------------------------------------------------
@@ -290,11 +362,20 @@ def test_excitation_probe_plans_stay_left_of_the_trigger(p):
     kinds = {kx.draw(rng, True).kind for _ in range(400)}
     assert {"jump_hold", "down_attack", "turnaround", "silkspear", "bind", "hurt", "jump_queue"} <= kinds
     terrain = Terrain2D.from_boxes([floor(60, 110), (67.2, 0.0, 69.2, 14.0), (102.0, 0.0, 104.0, 14.0)])
-    for seed in range(5):
-        t = kx.plan(random.Random(seed), _state(0, 78.0, REST), (p, terrain), hurt=False)
-        S = km.estimate_state(km.Trace.from_states([_state(0, 78.0, REST)], p), [0], p, terrain=terrain)
+    S = km.estimate_state(km.Trace.from_states([_state(0, 78.0, REST)], p), [0], p, terrain=terrain)
+    hurt_trials = 0
+    for seed in range(8):
+        t = kx.plan(random.Random(seed), _state(0, 78.0, REST), (p, terrain), hurt=True)
         r = km.rollout(S, np.array(t.masks + [0] * kx.SETTLE_FRAMES)[None], p, terrain)
         assert kx.X_SAFE[0] <= r.phys[0, :, 0].min() and r.phys[0, :, 0].max() <= kx.X_SAFE[1]
+        if t.hurt:                      # the plan was checked with the hit on every frame it can land on
+            hurt_trials += 1
+            assert kx.safe(S, t, p, terrain)
+    # standing 3.5 u from the trigger is safe, but not with a hit from the left: the 4.2 u knockback carries her past
+    S2 = km.estimate_state(km.Trace.from_states([_state(0, 82.0, REST)], p), [0], p, terrain=terrain)
+    assert kx.safe(S2, kx.Trial("rest", {}, [0] * 30, None), p, terrain)
+    assert kx.safe(S2, kx.Trial("hurt", {}, [0] * 30, {"frame": 10, "side": "right"}), p, terrain)
+    assert not kx.safe(S2, kx.Trial("hurt", {}, [0] * 30, {"frame": 10, "side": "left"}), p, terrain)
 
 
 # ---- the real slice -------------------------------------------------------------------------------------------
@@ -329,17 +410,43 @@ def test_estimator_reads_the_body_and_replays_every_hit_stop(real, p):
     assert len(hits) >= 15 and ok == len(hits)
 
 
-def test_acceptance_on_the_real_slice(real, p):
+def test_acceptance_on_the_held_out_trial_slice(real):
+    """Decision 3: start state from the history only, the planner's timing; logged events stand in for the threat
+    layer. The trial run is held out (the parameters are fitted on live i0_000). The thresholds are the measured
+    figures minus a margin, not the 99 % target, which the planner setting does not reach for the event-driven
+    primitives (hit-stop and recoil end on one of two frames that the frame jitter decides)."""
     from ssbot.tools.kin_check import check_knockback, check_trace, summarize
     tr, terrains = real
+    p = HeroParams.load()                                         # the shipped values, frame time included
     res = check_trace(tr, terrains, p, horizon=30, tol=0.1)
     rep = summarize([res], 0.1, 30)
-    assert rep["with_events"]["covered"]["phys"]["within"] >= 0.99            # the DESIGN §3.5.2 target
-    assert rep["with_events"]["by_category"]["plain"]["phys"]["within"] == 1.0
-    assert rep["input_only"]["by_category"]["plain"]["phys"]["within"] == 1.0
-    assert rep["with_events"]["by_category"]["recovering"]["phys"]["within"] == 1.0
+    assert rep["windows"] == len(tr) - 30                                    # every window counted
+    pe, pb, re_ = rep["planner_events"], rep["planner_bounds"], rep["replay_events"]
+    assert pe["by_category"]["plain"]["phys"]["within"] >= ACCEPT["trial"]["plain"]
+    assert pe["covered"]["phys"]["within"] >= ACCEPT["trial"]["planner"]
+    assert pb["covered"]["phys"]["within"] >= ACCEPT["trial"]["bounds"]
+    assert re_["covered"]["phys"]["within"] >= 0.99                           # the model itself, logged timing
     kb = check_knockback(tr, terrains, p)
-    assert kb["hits"] >= 15 and kb["inside"] == 1.0
+    assert kb["checked"] >= 15 and kb["ok"] and not kb["misses"]
+
+
+def test_acceptance_on_held_out_live_play_with_a_hit_during_bind():
+    """Live run i1_000 (not used by kin_fit) around a hit during Bind (BindBreak holds the time scale at 0 for 0.4 s
+    after the recoil started), a BossDeathSlow kill, and i2_002's hit in Bind under the sloped Roof Collider: the
+    knockback envelope contains every no-input frame of all three; nominal timing per primitive as measured."""
+    from ssbot.tools.kin_check import check_knockback, check_trace, load_fixture, summarize
+    tr, terrains = load_fixture(LIVE)
+    p = HeroParams.load()
+    kb = check_knockback(tr, terrains, p)
+    assert kb["checked"] >= 3 and kb["ok"] and not kb["misses"]
+    assert kb["delayed_hits"] >= 2 and kb["slope_bound"] >= 1
+    assert {"BindBreak", "BossDeathSlow"} <= set(kb["concurrent_freezes"])
+    rep = summarize([check_trace(tr, terrains, p)], 0.1, 30)
+    assert "world_freeze" in rep["categories"] and "uncovered:invalid" in rep["categories"]   # the seams
+    pe, pb = rep["planner_events"], rep["planner_bounds"]
+    assert pe["by_category"]["plain"]["phys"]["within"] >= ACCEPT["live"]["plain"]
+    assert pe["covered"]["phys"]["within"] >= ACCEPT["live"]["planner"]
+    assert pb["covered"]["phys"]["within"] >= ACCEPT["live"]["bounds"]
 
 
 def test_fit_recovers_the_constants_from_the_slice(real):
@@ -357,3 +464,78 @@ def test_fit_recovers_the_constants_from_the_slice(real):
     assert f.p.skin == pytest.approx(0.015, abs=1e-3)
     assert f.p.hurt_velocity == pytest.approx(15.0, abs=0.01)
     assert kin_fit._threshold([(0.2498, 0.2664), (0.2499, 0.2667)])[0] == 0.25
+
+
+def test_estimator_takes_the_exported_timers_and_phase(p):
+    """Decision 5: hero.tm / hero.alpha replace the reconstruction where STATE carries them."""
+    plain = [_state(i, 10.0, REST) for i in range(4)]
+    S0 = km.estimate_state(km.Trace.from_states(plain, p), [3], p)
+    tm = {"inv": 0.4, "recoil": 0.0, "recoil_steps": 0, "dash_cd": 0, "atk_cd": 0.2, "atk_t": 0.1, "tool_cd": 0,
+          "jump_steps": 0, "jumped_steps": 7, "ds": 0.0, "ds_rec": -1, "grav": 0.3, "qj": 2, "qa": -1, "qt": -1}
+    rich = [dict(s, hero=dict(s["hero"], tm=tm, alpha=0.375)) for s in plain]
+    tr = km.Trace.from_states(rich, p)
+    assert tr.tm is not None and tr.alpha_log is not None
+    S = km.estimate_state(tr, [3], p)
+    assert S[km.ALPHA, 0] == S[km.ALO, 0] == S[km.AHI, 0] == 0.375
+    assert (S[km.GS, 0], S[km.INV_T, 0], S[km.ATK_CD, 0], S[km.JDSTEPS, 0], S[km.JQ, 0]) == (0.3, 0.4, 0.2, 7, 2)
+    assert S0[km.AHI, 0] - S0[km.ALO, 0] > 0.1                 # without hero.alpha the phase is an interval
+
+
+def test_savestate_load_slide_is_marked_and_not_scored(p):
+    """2026-10-01: after a savestate load the game can slide the hero back to the saved position with velocity 0
+    (up to 17 frames at ~0.63 u/frame); those frames are MK_SLIDE and their windows uncovered:slide."""
+    from ssbot.tools.kin_check import categorize
+    states = [_state(i, 72.0, REST) for i in range(10)]
+    states[9]["ev"] = [{"k": "harness", "d": {"op": "savestate.load", "name": "bellbeast_arena"}}]
+    states += [_state(10 + i, 72.0 + 0.6 * (i + 1), REST) for i in range(10)]
+    states += [_state(20 + i, 78.0, REST) for i in range(40)]
+    tr = km.Trace.from_states(states, p)
+    slid = (tr.marks & km.MK_SLIDE) != 0
+    assert slid[10:20].all() and not slid[25:].any()
+    modes = km.classify_modes(tr)
+    _, labels = categorize(tr, 30, modes, km.derive_events(tr, modes), {"Bone_05": Terrain2D.empty()})
+    assert labels[0] == "uncovered:slide" and labels[-1] != "uncovered:slide"
+
+
+def test_windows_are_counted_never_dropped(real, p):
+    """Every row with a full horizon after it is one window; invalid frames and gaps are labelled, not skipped."""
+    from ssbot.tools.kin_check import categorize
+    tr, terrains = real
+    tr = tr.slice(0, 600)
+    tr.valid = tr.valid.copy()
+    tr.valid[100] = False
+    tr.f = tr.f.copy()
+    tr.f[400:] += 7
+    modes = km.classify_modes(tr)
+    starts, labels = categorize(tr, 30, modes, km.derive_events(tr, modes), terrains)
+    assert len(starts) == len(tr) - 30
+    assert (labels[70:101] == "uncovered:invalid").all()
+    assert (labels[370:400] == "uncovered:gap").all()
+
+
+def test_residual_monitor_scores_executed_predictions(p):
+    """DESIGN §3.5.2: the runtime residual monitor compares what the executed lane predicted with what happened."""
+    mon = km.ResidualMonitor(horizons=(1, 6), window=50, min_n=5, hard_u=0.5)
+    for f in range(40):
+        mon.predict(f, np.array([[f, 0.0]] + [[f + h + 0.01 * (h == 6), 0.0] for h in range(1, 7)]))
+        mon.observe(f, (float(f), 0.0))
+    st = mon.status()
+    assert st["ok"] and st["horizons"][1]["within"] == 1.0 and st["horizons"][6]["max"] == pytest.approx(0.01)
+    mon.predict(40, np.array([[40.0, 0.0]] + [[40.0 + h, 0.0] for h in range(1, 7)]))
+    mon.invalidate()                                           # an unpredicted hit: not the model's miss
+    assert mon.dropped >= 2
+    mon.predict(41, np.array([[41.0, 0.0]] + [[41.0 + h, 0.0] for h in range(1, 7)]))
+    mon.observe(42, (43.0, 0.0))                               # 1 u off
+    assert not mon.status()["ok"] and mon.confidence() == 0.0
+
+
+def test_shipped_params_carry_the_jitter_model_and_the_jump_spread(p):
+    """kin_fit products the planner and the hazard margin read: the frame-time jitter model (2.96 M frames), the
+    variant-valued Silkspear phases and the apex spread per jump hold."""
+    q = HeroParams.load()
+    assert q.frame_time_lo <= 0.01665 < q.frame_time < q.frame_time_hi < q.frame_time_max <= q.hitch_max
+    assert q.hitch_max >= 0.0369 and q.hitches_per_window == 2
+    assert len(q.cast_throw_variants) == 2 and len(q.cast_catch_variants) == 2
+    holds = {j["hold"]: j for j in q.jump_heights}
+    assert len(holds) >= 15 and all(j["spread"] < 0.5 for j in holds.values())
+    assert holds[max(holds)]["logged"][2] == pytest.approx(5.456, abs=0.05)       # a full jump
