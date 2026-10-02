@@ -516,19 +516,14 @@ class Planner:
         if len(pg):
             rl = kin.rollout(start, latched[pg], self.params, self.terrain, events=ev[pg], variants=self.cfg.variants,
                              lanes=True)
-            V = rl.var_box.shape[1]
+            conn = np.zeros(len(pg), np.bool_)
+            _lanes_connect(np.ascontiguousarray(rl.var_box), np.ascontiguousarray(rl.var_flags),
+                           np.ascontiguousarray(rl.var_mode), np.ascontiguousarray(latched[pg]), face0,
+                           np.ascontiguousarray(boss, np.float64), np.ascontiguousarray(okb),
+                           np.ascontiguousarray(polys, np.float64), np.ascontiguousarray(starts, np.int64), base,
+                           WINDOWS[self.cfg.attack_model], conn)
             for n, c in enumerate(pg):
-                ok_all = True
-                for v in range(V):
-                    lst = _attacks_of(np.ascontiguousarray(rl.var_box[n, v]), np.ascontiguousarray(rl.var_flags[n, v]),
-                                      np.ascontiguousarray(rl.var_mode[n, v]), np.ascontiguousarray(latched[c]), face0,
-                                      np.ascontiguousarray(boss, np.float64), np.ascontiguousarray(okb),
-                                      np.ascontiguousarray(polys, np.float64), np.ascontiguousarray(starts, np.int64),
-                                      base, WINDOWS[self.cfg.attack_model])
-                    first_ds = next(((kd, j) for kd, k, j in lst if kd == 3), None)
-                    if first_ds is None or first_ds[1] < 0:
-                        ok_all = False
-                        break
+                ok_all = bool(conn[n])
                 if not ok_all:
                     S[c] = True
                     self.pogo_log["lane_miss"] += 1
@@ -831,6 +826,29 @@ MACRO_MARGIN = 5.0             # J (half a hit) another plan needs over a starte
 
 def _is_macro(name: str) -> bool:
     return "_hop" in name or "_ds" in name or name.startswith("POGO+")
+
+
+@numba.njit(cache=True, parallel=True)
+def _lanes_connect(var_box, var_flags, var_mode, lat, face0, boss, okb, polys, starts, base, win, out):
+    """Per candidate: the first down spike meets the boss's predicted hurtbox in every timing lane (the pogo gate),
+    compiled: the Python loop over candidates and lanes cost about 0.1 ms a candidate."""
+    n, V = var_box.shape[0], var_box.shape[1]
+    for c in numba.prange(n):
+        ok = True
+        for v in range(V):
+            lst = _attacks_of(var_box[c, v], var_flags[c, v], var_mode[c, v], lat[c], face0, boss, okb, polys,
+                              starts, base, win)
+            got = False
+            seen = False
+            for kd, _k, j in lst:
+                if kd == 3:
+                    seen = True
+                    got = j >= 0
+                    break
+            if not (seen and got):
+                ok = False
+                break
+        out[c] = ok
 
 
 class _View:
