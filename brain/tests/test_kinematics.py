@@ -272,9 +272,11 @@ def test_compiled_rollout_matches_the_numpy_reference(p):
     for b in (km.B_JUMP, km.B_ATTACK, km.B_LEFT, km.B_RIGHT, km.B_DOWN, km.B_UP, km.B_QUICKCAST, km.B_BIND):
         masks |= np.where(rng.random((n, T)) < 0.25, b, 0)
     pool = [km.EV_RECOIL_L, km.EV_RECOIL_R, km.EV_POGO, km.EV_HURT_L, km.EV_HURT_R, km.EV_SILK, km.EV_RECOIL_DOWN,
-            km.EV_CATCH, km.EV_LOCK, km.EV_UNLOCK]
+            km.EV_CATCH, km.EV_LOCK, km.EV_UNLOCK, km.EV_FZ_BOSS_DEATH, km.EV_FZ_BOSS_STUN, km.EV_FZ_QUICK,
+            km.EV_FZ_ENEMY_DEATH, km.EV_FZ_BIND_BREAK]
     ev = np.where(rng.random((n, T)) < 0.03, rng.choice(pool, (n, T)), 0)
     I = idx[:, None] + np.arange(1, T + 1)[None]
+    S[km.SILK] = 9                                                   # binds happen, hits in them start BindBreak
     cases = [{}, {"events": ev}, {"events": ev, "variants": "bounds"}, {"udt": rng.uniform(0.0166, 0.02, (n, T))},
              {"events": km.derive_events(tr)[I], "dt": tr.dt[I], "fs": tr.fs[I], "udt": tr.udt[I]}]
     for kw in cases:
@@ -461,6 +463,39 @@ def test_acceptance_on_held_out_live_play_with_a_hit_during_bind():
     assert pe["by_category"]["plain"]["phys"]["within"] >= ACCEPT["live"]["plain"]
     assert pe["covered"]["phys"]["within"] >= ACCEPT["live"]["planner"]
     assert pb["covered"]["phys"]["within"] >= ACCEPT["live"]["bounds"]
+
+
+def test_world_freezes_from_the_hero_state_and_from_events(p):
+    """Freezes other than the hero's hit-stop (GameManager.FreezeMoment presets): a hit during the Bind charge starts
+    BindBreak by itself (held-out live i1_000 f 153335: the recoil waits 12 more frames; nominal timing, logged events
+    only: within one recoil step, against 3.7 u without the rule), and a BossDeathSlow announced as EV_FZ_BOSS_DEATH
+    (f 73606) is followed exactly; the bounds lanes hold the logged box throughout."""
+    from ssbot.tools.kin_check import load_fixture
+    tr, terrains = load_fixture(LIVE)
+    terrain = terrains["Bone_05"]
+    q = HeroParams.load()
+    ev = km.derive_events(tr)
+    assert not (ev & km.EV_FZ_BIND_BREAK).any()                  # never an event: the model starts it itself
+    for f0, start, worst in ((153335, -5, 0.34), (73606, -5, 0.01)):
+        i = int(np.flatnonzero(tr.f == f0)[0])
+        I = np.arange(i + start + 1, i + start + 46)
+        S = km.estimate_state(tr, [i + start], q, terrain=terrain)
+        logged = 0.5 * (tr.box[I, :2] + tr.box[I, 2:])
+        r = km.rollout(S, tr.mask[I][None], q, terrain, events=ev[I][None])
+        assert np.linalg.norm(r.centre[0, 1:] - logged, axis=1).max() < worst, f0
+        b = km.rollout(S, tr.mask[I][None], q, terrain, events=ev[I][None], variants="bounds").bound[0, 1:]
+        lb = tr.box[I]
+        assert (b[:, :2] <= lb[:, :2] + 1e-3).all() and (b[:, 2:] >= lb[:, 2:] - 1e-3).all(), f0   # float32 boxes
+    i = int(np.flatnonzero(tr.f == 153335)[0])
+    I = np.arange(i - 4, i + 41)
+    no_rule = HeroParams.load()
+    no_rule.bind_break_before = 0.0
+    S = km.estimate_state(tr, [i - 5], no_rule, terrain=terrain)
+    r = km.rollout(S, tr.mask[I][None], no_rule, terrain, events=ev[I][None])
+    assert np.linalg.norm(r.centre[0, 1:] - 0.5 * (tr.box[I, :2] + tr.box[I, 2:]), axis=1).max() > 3.0
+    # mid-freeze starts: the estimator replays the freeze from its logged start (the recoil still waiting)
+    S = km.estimate_state(tr, [i + 18], q, terrain=terrain)
+    assert S[km.WF_PH, 0] == 1 and S[km.TS, 0] == 1.0 and S[km.MODE, 0] == km.M_HURT_RECOIL
 
 
 def test_fit_recovers_the_constants_from_the_slice(real):

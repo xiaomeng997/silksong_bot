@@ -29,7 +29,13 @@ from ssbot.knowledge.kinematics import (
     P_DS_TIME, P_DS_VYMAX, P_DS_VYMIN, P_FDT, P_FOOT, P_G, P_HEAD, P_HURT_RAMP, P_HURT_SKIP, P_HURT_T, P_HURT_V,
     P_HURT_VY, P_HURT_WAIT, P_HW, P_INV_T, P_JQ, P_JSTEPS, P_JSTEPS_MIN, P_JUMP, P_LEDGE, P_LIFT, P_LOCK_DECAY,
     P_MAXFALL, P_POGO_J, P_POGO_JD, P_QQ, P_RDOWN_HALF, P_REL, P_RSTEPS, P_RUN, P_RV, P_SILK_MAX, P_SKIN, P_SLOP_HI,
-    P_SLOP_LO, PHASE, PREV, PX, PY, QQ, QX, QY, RDIR, RSTEPS, SILK, SX, SY, TOL, TOUCH, TS, TT_HEAD, VX, VY, ALO, AHI, LANDQ)
+    P_SLOP_LO, PHASE, PREV, PX, PY, QQ, QX, QY, RDIR, RSTEPS, SILK, SX, SY, TOL, TOUCH, TS, TT_HEAD, VX, VY, ALO, AHI, LANDQ,
+    WF_PH, WF_T, WF_S, WF_DOWN, WF_WAIT, WF_UP, WF_TGT, P_BIND_BREAK, P_WF_BW, P_WF_BU, EV_FZ_BIND_BREAK, FREEZE_PRESETS,
+    WF_ORDER)
+
+# world freeze presets in start order (kinematics.WF_ORDER): event bit, rampDown, wait, rampUp, target
+_WF = np.array([[float(b), *FREEZE_PRESETS[b]] for b in WF_ORDER])
+_WF_BB = int(EV_FZ_BIND_BREAK)
 
 
 @njit(cache=True, inline="always", error_model="numpy")
@@ -324,8 +330,74 @@ def fixed_step(x, P, TT):
 
 
 @njit(cache=True, inline="always", error_model="numpy")
+def lerp32(a, b, t):
+    t = min(max(t, 0.0), 1.0)
+    a32, b32 = np.float32(a), np.float32(b)
+    return np.float64(a32 + (b32 - a32) * np.float32(t))
+
+
+@njit(cache=True, inline="always", error_model="numpy")
+def wf_start(x, down, wait, up, tgt):
+    x[WF_DOWN] = down
+    x[WF_WAIT] = wait
+    x[WF_UP] = up
+    x[WF_TGT] = tgt
+    x[WF_T] = 0.0
+    if down > 0:
+        x[WF_PH] = 10.0
+        x[WF_S] = 1.0
+    else:
+        x[WF_PH] = 11.0
+        x[WF_S] = f32(tgt)
+
+
+@njit(cache=True, inline="always", error_model="numpy")
+def wf_step(x, udt, P):
+    ph = x[WF_PH]
+    if ph >= 10:
+        x[WF_PH] = ph - 10
+        return
+    if ph < 0:
+        return
+    t = f32(x[WF_T] + udt)
+    tgt = x[WF_TGT]
+    if ph == 0:
+        if np.float32(t) < np.float32(x[WF_DOWN]):
+            x[WF_S] = lerp32(1.0, tgt, t / max(x[WF_DOWN], 1e-12))
+            x[WF_T] = t
+        else:
+            x[WF_S] = f32(tgt)
+            x[WF_T] = 0.0
+            x[WF_PH] = 1.0
+    elif ph == 1:
+        if ge32(t, x[WF_WAIT] + P[P_WF_BW]):
+            x[WF_T] = 0.0
+            if x[WF_UP] <= 0:
+                x[WF_S] = 1.0
+                x[WF_PH] = -1.0
+            else:
+                x[WF_S] = f32(tgt)
+                x[WF_PH] = 2.0
+        else:
+            x[WF_T] = t
+    elif ph == 2:
+        if ge32(t, x[WF_UP] + P[P_WF_BU]):
+            x[WF_S] = 1.0
+            x[WF_PH] = -1.0
+            x[WF_T] = t
+        else:
+            x[WF_S] = lerp32(tgt, 1.0, t / max(x[WF_UP], 1e-12))
+            x[WF_T] = t
+
+
+@njit(cache=True, inline="always", error_model="numpy")
 def apply_events(x, ev, P):
     mode = x[MODE]
+    bb = (ev & (EV_HURT_L | EV_HURT_R)) != 0 and mode == M_BIND and x[MODE_T] < P[P_BIND_BREAK]
+    for j in range(_WF.shape[0]):
+        bit = np.int64(_WF[j, 0])
+        if (ev & bit) != 0 or (bb and bit == _WF_BB):
+            wf_start(x, _WF[j, 1], _WF[j, 2], _WF[j, 3], _WF[j, 4])
     rlq = relinq(mode)
     rec_ok = x[RDIR] == 0 and not rlq and not noinput(mode)
     if rec_ok and (ev & EV_RECOIL_L) != 0:
@@ -596,6 +668,7 @@ def update(x, mask, ev, dt, udt, P):
         x[MODE_T] = f32(x[MODE_T] + dt)
     x[INV_T] = max(f32(x[INV_T] - dt), 0.0)
     x[PREV] = np.float64(mask)
+    wf_step(x, udt, P)
 
 
 @njit(cache=True, inline="always", error_model="numpy")
@@ -661,7 +734,7 @@ def run_lane(r, v, o, S0, masks, events, dts, fss, udts, ft_v, alpha_sel, alpha_
                 steps = np.int64(fss[r, t - 1])
                 x[ALPHA] = x[ALPHA] + dt / fdt - steps
             else:
-                dt = f32(udt * x[TS])
+                dt = f32(udt * (x[TS] if x[WF_S] == 1.0 else x[TS] * x[WF_S]))
                 a = x[ALPHA] + dt / fdt
                 steps = np.int64(math.floor(a + 1e-9))
                 x[ALPHA] = a - steps

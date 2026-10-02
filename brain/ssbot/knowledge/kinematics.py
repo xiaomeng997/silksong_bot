@@ -168,10 +168,14 @@ DEFAULT_PARAMS = REPO / "knowledge" / "1.0.30000" / "kinematics" / "hero_hunter.
  QQ,              # quickcast (tool / Silkspear) queue steps (-1: not queuing)
  ALO, AHI,        # feasible interval of ALPHA (the timing-variant lanes start from its ends)
  LANDQ,           # landed in this frame's physics steps: its Update decides idle (recovery ends) or run (it stays)
- K) = range(45)
+ WF_PH, WF_T,     # world freeze (GameManager.FreezeMoment other than the hero's hit-stop): phase -1 none, 0 ramp down,
+                  # 1 wait, 2 ramp up (+10: started in this frame, the coroutine's first step done), timer (unscaled)
+ WF_S,            # its time-scale factor (the effective scale is TS * WF_S: TimeManager multiplies the controls)
+ WF_DOWN, WF_WAIT, WF_UP, WF_TGT,   # its preset (FREEZE_PRESETS)
+ K) = range(52)
 ROW_NAMES = ("px py qx qy sx sy vx vy alpha gs face ground mode mode_t mode_n jumping jsteps jdsteps jq aq airhang "
              "attacking atk_t atk_cd rdir rsteps ds_hs ds_rec bounce hvx hvy move jheld prev silk inv_t ledge touch "
-             "phase ts qq alo ahi landq").split()
+             "phase ts qq alo ahi landq wf_ph wf_t wf_s wf_down wf_wait wf_up wf_tgt").split()
 assert len(ROW_NAMES) == K
 
 M_NORMAL, M_DS_ANTIC, M_DS_SPIKE, M_HURT_FREEZE, M_HURT_RECOIL, M_CAST, M_BIND, M_LOCKED = range(8)
@@ -180,11 +184,23 @@ RELINQUISHED = (M_DS_ANTIC, M_DS_SPIKE, M_CAST, M_BIND, M_LOCKED)    # controlRe
 NO_INPUT = (M_HURT_FREEZE, M_HURT_RECOIL)                             # hero_state no_input
 
 # contact events (bit flags per frame; applied after the frame's physics steps, before its Update)
-EV_RECOIL_L, EV_RECOIL_R, EV_POGO, EV_HURT_L, EV_HURT_R, EV_LOCK, EV_UNLOCK, EV_CATCH, EV_SILK, EV_RECOIL_DOWN = \
-    (1 << i for i in range(10))
+EV_RECOIL_L, EV_RECOIL_R, EV_POGO, EV_HURT_L, EV_HURT_R, EV_LOCK, EV_UNLOCK, EV_CATCH, EV_SILK, EV_RECOIL_DOWN, \
+    EV_FZ_BOSS_DEATH, EV_FZ_BOSS_STUN, EV_FZ_QUICK, EV_FZ_ENEMY_DEATH, EV_FZ_BIND_BREAK = (1 << i for i in range(15))
+# world freezes a rollout can be told about (the threat layer predicts them: a killing blow, a stun, a small enemy's
+# death; BindBreak also starts by itself on a hit during the Bind charge): GameManager.FreezeMoment presets
+# (rampDown, wait, rampUp, target speed; GameManager.cs 5092-5141)
+FREEZE_PRESETS = {EV_FZ_BOSS_DEATH: (0.1, 1.15, 0.1, 0.05), EV_FZ_BOSS_STUN: (0.0, 0.25, 0.1, 0.0),
+                  EV_FZ_QUICK: (0.0001, 0.02, 0.0001, 0.0001), EV_FZ_ENEMY_DEATH: (0.04, 0.024, 0.04, 0.0),
+                  EV_FZ_BIND_BREAK: (0.01, 0.4, 0.1, 0.0)}
+# start order within a frame, shortest first: when two start together the model keeps the longer one (in the game
+# both run and their scales multiply; logged only for EnemyDeath with every hit, which ends inside the hit-stop)
+WF_ORDER = (EV_FZ_QUICK, EV_FZ_ENEMY_DEATH, EV_FZ_BOSS_STUN, EV_FZ_BIND_BREAK, EV_FZ_BOSS_DEATH)
+EV_FZ_ANY = EV_FZ_BOSS_DEATH | EV_FZ_BOSS_STUN | EV_FZ_QUICK | EV_FZ_ENEMY_DEATH | EV_FZ_BIND_BREAK
 EVENT_NAMES = {EV_RECOIL_L: "recoil_l", EV_RECOIL_R: "recoil_r", EV_POGO: "pogo", EV_HURT_L: "hurt_l",
                EV_HURT_R: "hurt_r", EV_LOCK: "lock", EV_UNLOCK: "unlock", EV_CATCH: "catch", EV_SILK: "silk",
-               EV_RECOIL_DOWN: "recoil_down"}
+               EV_RECOIL_DOWN: "recoil_down", EV_FZ_BOSS_DEATH: "freeze_boss_death",
+               EV_FZ_BOSS_STUN: "freeze_boss_stun", EV_FZ_QUICK: "freeze_quick", EV_FZ_ENEMY_DEATH: "freeze_enemy_death",
+               EV_FZ_BIND_BREAK: "freeze_bind_break"}
 
 # rollout flags
 F_GROUND, F_JUMPING, F_ATTACKING, F_RECOIL, F_RELINQ, F_INVULN, F_NO_INPUT = (1 << i for i in range(7))
@@ -266,6 +282,9 @@ class HeroParams:
     bind_vy_cap_down: float = 12.0
     bind_end_vy: float = -0.25
     bind_silk: int = 9
+    bind_break_before: float = 1.2    # a hit in the first this many s of a Bind (the charge) starts BindBreak
+    wf_bias_wait: float = 0.0         # world-freeze wait / ramp-up thresholds moved by the timing lanes (Variant)
+    wf_bias_up: float = 0.0
     silk_max: int = 9
     lock_decay: float = 0.86
     ledge_steps: int = 4
@@ -311,7 +330,8 @@ class HeroParams:
               "cast_throw", "cast_catch", "cast_decay", "cast_decay_ground", "cast_vy_cap", "cast_catch_speed",
               "cast_catch_decay", "cast_silk", "bind_time", "bind_decay", "bind_vy_cap",
               "bind_vy_cap_down", "bind_end_vy", "bind_silk",
-              "silk_max", "lock_decay", "ledge_steps", "land_slop_lo", "land_slop_hi", "rdown_halve")
+              "silk_max", "lock_decay", "ledge_steps", "land_slop_lo", "land_slop_hi", "rdown_halve",
+              "bind_break_before", "wf_bias_wait", "wf_bias_up")
 
     def vector(self) -> np.ndarray:
         return np.array([float(getattr(self, k)) for k in self.VECTOR], dtype=np.float64)
@@ -376,7 +396,7 @@ class HeroParams:
  P_HURT_T, P_HURT_WAIT, P_HURT_RAMP, P_HURT_SKIP, P_INV_T, P_CAST_ANTIC, P_CAST_THROW, P_CAST_CATCH, P_CAST_DECAY,
  P_CAST_DECAY_G, P_CAST_VYCAP, P_CAST_CSPEED, P_CAST_CDECAY, P_CAST_SILK, P_BIND_T, P_BIND_DECAY, P_BIND_VYCAP,
  P_BIND_VYDOWN, P_BIND_ENDVY, P_BIND_SILK, P_SILK_MAX, P_LOCK_DECAY, P_LEDGE, P_SLOP_LO, P_SLOP_HI, P_RDOWN_HALF,
- NP) = range(64)
+ P_BIND_BREAK, P_WF_BW, P_WF_BU, NP) = range(67)
 assert NP == len(HeroParams.VECTOR)
 
 
@@ -784,9 +804,61 @@ def _fixed_step(X, P, hseg, vseg):
     X[LANDQ] = np.where((lands | land_sp) & ~was, 1.0, X[LANDQ])
 
 
+def _wf_start(X, on, preset):
+    """GameManager.FreezeMoment started in this frame (other than the hero's own hit-stop): its coroutine runs to the
+    first yield at once (SetTimeScale ramp down: scale lerp(1, target, 0) = 1; with no ramp down the target at once
+    and the wait loop's first step)."""
+    down, wait, up, tgt = preset
+    X[WF_DOWN] = np.where(on, down, X[WF_DOWN])
+    X[WF_WAIT] = np.where(on, wait, X[WF_WAIT])
+    X[WF_UP] = np.where(on, up, X[WF_UP])
+    X[WF_TGT] = np.where(on, tgt, X[WF_TGT])
+    X[WF_T] = np.where(on, 0.0, X[WF_T])
+    X[WF_PH] = np.where(on, 10.0 if down > 0 else 11.0, X[WF_PH])
+    X[WF_S] = np.where(on, 1.0 if down > 0 else float(np.float32(tgt)), X[WF_S])
+
+
+def _lerp32(a, b, t):
+    """Mathf.Lerp in float32 (t clamped to [0, 1])."""
+    a32, b32 = a.astype(np.float32), b.astype(np.float32)
+    t32 = np.clip(t, 0.0, 1.0).astype(np.float32)
+    return (a32 + (b32 - a32) * t32).astype(np.float64)
+
+
+def _wf_step(X, udt, P):
+    """One frame of the world freeze coroutine (after Update): ramp down, wait, ramp up, each a float32 timer of
+    unscaled time; the lanes move the wait / ramp-up thresholds by P_WF_BW / P_WF_BU."""
+    ph = X[WF_PH]
+    fresh = ph >= 10
+    X[WF_PH] = np.where(fresh, ph - 10, ph)
+    ph = np.where(fresh, -2.0, X[WF_PH])          # started this frame: no step
+    t = np.where(ph >= 0, _f32(X[WF_T] + udt), X[WF_T])
+    tgt = X[WF_TGT]
+    one = np.ones_like(tgt)
+    d0 = ph == 0
+    end0 = d0 & ~(t.astype(np.float32) < X[WF_DOWN].astype(np.float32))
+    X[WF_S] = np.where(d0 & ~end0, _lerp32(one, tgt, t / np.maximum(X[WF_DOWN], 1e-12)), X[WF_S])
+    X[WF_S] = np.where(end0, _f32(tgt), X[WF_S])
+    w1 = ph == 1
+    end1 = w1 & _ge32(t, X[WF_WAIT] + P[P_WF_BW])
+    up0 = end1 & (X[WF_UP] <= 0)
+    X[WF_S] = np.where(end1, np.where(up0, 1.0, _f32(tgt)), X[WF_S])
+    u2 = ph == 2
+    end2 = u2 & _ge32(t, X[WF_UP] + P[P_WF_BU])
+    X[WF_S] = np.where(u2 & ~end2, _lerp32(tgt, one, t / np.maximum(X[WF_UP], 1e-12)), X[WF_S])
+    X[WF_S] = np.where(end2, 1.0, X[WF_S])
+    X[WF_T] = np.where(end0 | end1, 0.0, np.where(ph >= 0, t, X[WF_T]))
+    X[WF_PH] = np.where(end0, 1.0, np.where(end1, np.where(up0, -1.0, 2.0), np.where(end2, -1.0, X[WF_PH])))
+
+
 def _apply_events(X, ev, P):
     """Contact events of this frame (after its physics steps)."""
     mode = X[MODE]
+    # a hit during the Bind charge also starts GameManager's BindBreak freeze (22 of 22 logged hits in the charge,
+    # 0 of 1 in the burst; the Bind FSM calls FreezeMoment(BindBreak))
+    bb = ((ev & (EV_HURT_L | EV_HURT_R)) != 0) & (mode == M_BIND) & (X[MODE_T] < P[P_BIND_BREAK])
+    for bit in WF_ORDER:
+        _wf_start(X, ((ev & bit) != 0) | (bb if bit == EV_FZ_BIND_BREAK else False), FREEZE_PRESETS[bit])
     relinq = _isin(mode, RELINQUISHED)
     rec_ok = (X[RDIR] == 0) & ~relinq & ~_isin(mode, NO_INPUT)
     for bit, d in ((EV_RECOIL_L, -1.0), (EV_RECOIL_R, 1.0)):
@@ -1035,6 +1107,7 @@ def _update(X, mask, ev, dt, udt, P):
     X[MODE_T] = np.where(X[MODE] == M_LOCKED, _f32(X[MODE_T] + dt), X[MODE_T])
     X[INV_T] = np.maximum(_f32(X[INV_T] - dt), 0.0)
     X[PREV] = mask.astype(np.float64)
+    _wf_step(X, udt, P)
 
 
 def _flags(X) -> np.ndarray:
@@ -1074,7 +1147,7 @@ def _simulate(S0, masks, events, dts, fss, udts, P, hseg, vseg):
                 steps = fss[:, t - 1].astype(np.int64)
                 X[ALPHA] = X[ALPHA] + dt / fdt - steps
             else:
-                dt = _f32(udt * X[TS])
+                dt = _f32(udt * np.where(X[WF_S] == 1.0, X[TS], X[TS] * X[WF_S]))
                 a = X[ALPHA] + dt / fdt
                 steps = np.floor(a + 1e-9).astype(np.int64)
                 X[ALPHA] = a - steps
@@ -1177,27 +1250,30 @@ def _variant_rows(params: HeroParams, variants: tuple[Variant, ...]
         tw, tr, ts = var.timers
         Pv[v, P_HURT_WAIT] += tw * params.timer_bias
         Pv[v, P_HURT_RAMP] += tr * params.timer_bias
+        Pv[v, P_WF_BW] += tw * params.timer_bias          # a world freeze's wait / ramp up: the same unscaled links
+        Pv[v, P_WF_BU] += tr * params.timer_bias
         Pv[v, scaled] += ts * params.timer_bias
     return Pv, np.asarray(ft, dtype=np.float32).astype(np.float64), sel
 
 
 def _lane_runs(P: np.ndarray, ft_v: np.ndarray, sel: np.ndarray, S0: np.ndarray, ev: np.ndarray, n: int
                ) -> np.ndarray:
-    """[n, V] bool: which lanes a sequence has to run. Lanes that differ only in the hit-stop links (wait, ramp)
-    give identical results for a sequence that never enters the hit-stop (start mode not HURT_FREEZE, no EV_HURT
-    event): of "bounds" (9 lanes) such a sequence runs 3."""
+    """[n, V] bool: which lanes a sequence has to run. Lanes that differ only in the unscaled-time links (hit-stop
+    and world-freeze wait and ramp) give identical results for a sequence that meets neither (start mode not
+    HURT_FREEZE, no world freeze running, no EV_HURT or EV_FZ_* event): of "bounds" (9 lanes) such a sequence
+    runs 3."""
     V = len(ft_v)
     key = P.copy()
-    key[:, [P_HURT_WAIT, P_HURT_RAMP]] = 0.0
+    key[:, [P_HURT_WAIT, P_HURT_RAMP, P_WF_BW, P_WF_BU]] = 0.0
     dup = np.zeros(V, dtype=bool)
     for v in range(1, V):
         dup[v] = any(not dup[w] and ft_v[w] == ft_v[v] and sel[w] == sel[v] and np.array_equal(key[w], key[v])
                      for w in range(v))
     run = np.ones((n, V), dtype=bool)
     if dup.any():
-        hurt = np.broadcast_to(S0[MODE] == M_HURT_FREEZE, (n,)).copy()
+        hurt = np.broadcast_to((S0[MODE] == M_HURT_FREEZE) | (S0[WF_PH] >= 0), (n,)).copy()
         if ev.shape[0]:
-            hurt |= ((ev & (EV_HURT_L | EV_HURT_R)) != 0).any(axis=1)
+            hurt |= ((ev & (EV_HURT_L | EV_HURT_R | EV_FZ_ANY)) != 0).any(axis=1)
         run[:, dup] = hurt[:, None]
     return run
 
@@ -1459,6 +1535,8 @@ def initial_state(params: HeroParams, x: float, y: float, *, vx: float = 0.0, vy
     S[SILK] = silk
     S[JDSTEPS] = 100.0
     S[TS] = 1.0
+    S[WF_PH] = -1.0
+    S[WF_S] = 1.0
     return S
 
 
@@ -1756,6 +1834,53 @@ def _freeze_replay(tr: Trace, params: HeroParams) -> np.ndarray:
     return out
 
 
+def _wf_row(st: np.ndarray, start_bits: int, udt: float, P: np.ndarray) -> np.ndarray:
+    """One frame of the world-freeze rows (WF_PH .. WF_TGT as a [7] array, after the frame's Update) for the
+    estimator and the tracker: the model's own _wf_start / _wf_step on one lane."""
+    X = np.zeros((K, 1))
+    X[WF_PH:WF_TGT + 1, 0] = st
+    for bit in WF_ORDER:
+        if start_bits & bit:
+            _wf_start(X, np.array([True]), FREEZE_PRESETS[bit])
+    _wf_step(X, np.array([udt]), P)
+    return X[WF_PH:WF_TGT + 1, 0].copy() if X[WF_PH, 0] >= 0 else WF_IDLE.copy()
+
+
+WF_IDLE = np.array([-1.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0])     # WF_PH .. WF_TGT of no world freeze
+
+
+def _wf_replay(tr: Trace, modes: np.ndarray, params: HeroParams) -> np.ndarray:
+    """[n, 7] world-freeze rows per logged frame, replayed from the logged FreezeMoment starts (BindBreak from a
+    hit during the Bind charge, as the model starts it) with the logged unscaled frame times."""
+    n = len(tr)
+    out = np.repeat(WF_IDLE[None], n, axis=0)
+    if n == 0:
+        return out
+    starts = _freeze_events(tr.freeze.astype(np.int64)) if tr.freeze is not None else np.zeros(n, dtype=np.int64)
+    hit = _onset(tr.flag("recoilFrozen"))
+    P = params.vector()
+    st = WF_IDLE.copy()
+    mode_t = None
+    for i in range(n):
+        bits = int(starts[i])
+        if hit[i] and i > 0 and modes[i - 1] == M_BIND:
+            if mode_t is None:
+                mode_t = _bind_time(tr, modes)
+            if mode_t[i - 1] < params.bind_break_before:
+                bits |= EV_FZ_BIND_BREAK
+        if bits == 0 and st[0] < 0:
+            continue
+        st = _wf_row(st, bits, float(tr.udt[i]), P)
+        out[i] = st
+    return out
+
+
+def _bind_time(tr: Trace, modes: np.ndarray) -> np.ndarray:
+    """Scaled s in Bind at each row (the model's MODE_T in BIND: float32 dt summed from the frame after entry)."""
+    m_on = np.r_[True, modes[1:] != modes[:-1]]
+    return _since32(m_on, tr.dt, include_onset=False)
+
+
 def classify_modes(tr: Trace) -> np.ndarray:
     """Model mode per logged frame (M_*), from cstate, hero_state and the animation."""
     n = len(tr)
@@ -1799,6 +1924,19 @@ def derive_events(tr: Trace, modes: np.ndarray | None = None) -> np.ndarray:
     locked = modes == M_LOCKED
     ev[_onset(locked)] |= EV_LOCK
     ev[_onset(~locked) & np.r_[False, locked[:-1]]] |= EV_UNLOCK
+    if tr.freeze is not None:
+        ev |= _freeze_events(tr.freeze.astype(np.int64))
+    return ev
+
+
+def _freeze_events(fz):
+    """EV_FZ_* bits from the logged FreezeMoment starts (Trace.freeze): the world freezes the threat layer has to
+    announce; EnemyDeath only without a hit in the same frame (with one it ends inside the hit-stop), BindBreak
+    never (the model starts it from the hit during the Bind charge)."""
+    ev = np.where((fz & FZ_BOSS_DEATH) != 0, EV_FZ_BOSS_DEATH, 0) | np.where((fz & FZ_BOSS_STUN) != 0,
+                                                                             EV_FZ_BOSS_STUN, 0)
+    ev |= np.where((fz & FZ_QUICK) != 0, EV_FZ_QUICK, 0)
+    ev |= np.where(((fz & FZ_ENEMY_DEATH) != 0) & ((fz & FZ_RECOIL) == 0), EV_FZ_ENEMY_DEATH, 0)
     return ev
 
 
@@ -1934,6 +2072,12 @@ def state_table(tr: Trace, params: HeroParams, modes: np.ndarray | None = None,
     left = np.float32(params.invul_time) - _since32(_onset(inv), dt, include_onset=False)
     S[INV_T] = np.where(inv[idx] & np.isfinite(left[idx]), np.maximum(left[idx], 0.0), 0.0)
     S[LEDGE] = 0.0
+    # world freezes: their rows, and the hero's own part of the time scale where one runs (the logged ts is the
+    # product of both)
+    wf = _wf_replay(tr, modes, params)[idx]
+    S[WF_PH:WF_TGT + 1] = wf.T
+    act = wf[:, 0] >= 0
+    S[TS] = np.where(act, np.where(frz, fz[:, 3], 1.0), S[TS])
     _apply_exported(tr, S, md, params)
     return S
 
@@ -2120,6 +2264,7 @@ class StateTracker:
         self._tm_prev = np.full(len(TM_KEYS), np.nan)
         self._slide_left = 0
         self._other_in_hitstop = False
+        self._wf = WF_IDLE.copy()
 
     # -- one row ---------------------------------------------------------------------------------------------------
     def push(self, s: dict) -> None:
@@ -2371,6 +2516,15 @@ class StateTracker:
         left = float(_F32(p.invul_time)) - ac["inv"]
         S[INV_T] = max(left, 0.0) if inv and np.isfinite(left) else 0.0
         S[LEDGE] = 0.0
+        # world freezes (_wf_replay)
+        bits = int(_freeze_events(np.array([int(r["freeze"])], dtype=np.int64))[0])
+        if on("recoilFrozen") and not first and pmd == M_BIND and pr["t_after"] < p.bind_break_before:
+            bits |= EV_FZ_BIND_BREAK
+        if bits or self._wf[0] >= 0:
+            self._wf = _wf_row(self._wf, bits, float(r["udt"]), P)
+        S[WF_PH:WF_TGT + 1] = self._wf
+        if self._wf[0] >= 0:
+            S[TS] = out[3] if md == M_HURT_FREEZE else 1.0
         # exported timers and phase (_apply_exported)
         if np.isfinite(r["alpha"]):
             S[ALPHA] = S[ALO] = S[AHI] = r["alpha"]
@@ -2421,17 +2575,19 @@ class StateTracker:
             ev |= EV_LOCK
         if md != M_LOCKED and pmd == M_LOCKED:
             ev |= EV_UNLOCK
+        ev |= bits & ~EV_FZ_BIND_BREAK
         # does the model own this frame's motion (kin_check categories)
         if r.get("load"):
             self._slide_left = SLIDE_SPAN[1]
         slide = self._slide_left > 0
         self._slide_left = max(self._slide_left - 1, 0)
-        other = (r["marks"] & MK_FREEZE) != 0
+        # a freeze the model has no preset for, or a BindBreak its rule did not start
+        other = (r["freeze"] & FZ_OTHER) != 0 or ((r["freeze"] & FZ_BIND_BREAK) != 0 and not bits & EV_FZ_BIND_BREAK)
         if md == M_HURT_FREEZE:
             self._other_in_hitstop = self._other_in_hitstop or other or bool(pr.get("other", False))
         elif pmd != M_HURT_FREEZE:
             self._other_in_hitstop = False
-        world = (r["ts"] < 0.999 and md != M_HURT_FREEZE) or other or self._other_in_hitstop
+        world = (r["ts"] < 0.999 and md != M_HURT_FREEZE and self._wf[0] < 0) or other or self._other_in_hitstop
         bad_marks = (r["marks"] & (MK_HARNESS | MK_HAZARD | MK_SCENE | MK_DEATH)) != 0
         valid = bool(r["valid"]) and np.isfinite(r["box"][0])
         gap = not first and r["f"] != pr["f"] + 1
@@ -2447,7 +2603,7 @@ class StateTracker:
         self.events = ev
         self.f, self.box, self.mask, self.udt = r["f"], r["box"], mask, r["udt"]
         self._p = {"cs": cs, "mask": mask, "mode": md, "phys": phys, "vel": r["vel"], "silk": r["silk"],
-                   "clip": r["clip"], "cph": cph, "f": r["f"], "other": other}
+                   "clip": r["clip"], "cph": cph, "f": r["f"], "other": other, "t_after": ac["t_after"]}
         self.n += 1
 
     def state(self) -> np.ndarray:
