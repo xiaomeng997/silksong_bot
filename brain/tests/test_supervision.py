@@ -7,9 +7,10 @@ import copy
 from ssbot.ipc.framing import BIT
 from ssbot.safety import game_codes as gc
 from ssbot.safety import pause_quit as pq
+from ssbot.safety.hits_to_death import SupportEvent, SupportSet
 from ssbot.safety.pause_window import PauseWindowMonitor
 from ssbot.safety.supervisor import SupervisorConfig
-from ssbot.train.supervision import SupervisedControl, entity_support
+from ssbot.train.supervision import SupervisedControl, entity_support, next_hit_may_kill
 from tests import worldstate_fixture as wf
 
 PAUSE = 1 << BIT["pause"]
@@ -17,7 +18,8 @@ BB = SupervisorConfig(worst_known_damage=2)          # Bell Beast: every attack 
 
 
 def _control(**kw) -> SupervisedControl:
-    return SupervisedControl(support=lambda s: entity_support(s, worst_damage=2), cfg=BB, **kw)
+    kw.setdefault("support", lambda s: entity_support(s, worst_damage=2))
+    return SupervisedControl(BB, **kw)
 
 
 def test_q1_at_two_hp_hands_the_keys_to_the_pause_loop():
@@ -84,8 +86,9 @@ def test_focus_counts_only_with_a_foreground_sink():
 
 def test_entity_support_keys_instances_on_iid():
     s = next(x for x in wf.window(0) if x["f"] == 56777)
-    events, known = entity_support(s, worst_damage=2)
-    assert not known
+    ss = entity_support(s, worst_damage=2)
+    events = ss.events
+    assert not ss.known and not ss.certified
     body = [e for e in events if e.source == "Bone Beast"]
     assert len(body) == 1 and body[0].instance == wf.BOSS_IID and body[0].damage == 2 and not body[0].hazard
     assert len({e.instance for e in events}) == len(events)
@@ -95,11 +98,25 @@ def test_entity_support_keys_instances_on_iid():
                   {"iid": 9, "type_key": "Spikes", "colliders": [
                       {"enabled": True,
                        "damage": {"dealt": 1, "eff": 1, "hazard_type": 2, "can_cause_damage": True}}]}]}
-    ev, _ = entity_support(h, worst_damage=2)
+    ev = entity_support(h, worst_damage=2).events
     assert [(e.instance, e.damage, e.hazard) for e in ev] == [(7, 2, False), (9, 2, True)]
-    # a certified callable result is taken as known
-    sc = SupervisedControl(support=lambda s: (), cfg=BB)
-    assert sc.step(wf.window(0)[0]).decision.support_known
+    assert not entity_support({"ents": []}, worst_damage=2, known=True).certified    # never certified empty
+
+
+def test_support_is_certified_only_explicitly():
+    """Review: a bare sequence (a forecaster dropout returning [], a callable not wired yet) was certified by its type
+    and read as UNBOUNDED / GREEN. Only SupportSet / (events, True) certify, and an empty one needs certified_empty."""
+    s0 = wf.window(0)[0]
+    body = SupportEvent("Bone Beast", 2, instance=wf.BOSS_IID)
+    for fn, known in ((lambda s: [], False), (lambda s: (), False), (lambda s: None, False),
+                      (lambda s: [body], False), (lambda s: ((), True), False), (lambda s: SupportSet((), True), False),
+                      (lambda s: ((body,), True), True), (lambda s: SupportSet((body,), True), True),
+                      (lambda s: SupportSet((), True, certified_empty=True), True)):
+        assert _control(support=fn).step(s0).decision.support_known is known, fn
+    # the review's case: support=lambda s: [] on the fixture; the random start drops the hero to 2 HP at 56533
+    sc = _control(support=lambda s: [])
+    first = next((s["f"], r) for s in wf.window(0) if (r := sc.step(s)).mask is not None)
+    assert first[0] == 56533 and "Q1" in first[1].decision.triggers and first[1].decision.h == 1
 
 
 def test_pause_window_monitor_on_the_fixture_hits():
@@ -136,3 +153,122 @@ def test_pause_window_monitor_alerts_on_a_short_window():
     mon.update(st(0, 0, 0.0, [{"k": "damage", "d": {"source": "x"}}]))
     mon.update(st(1, 0, 0.0))
     assert mon.windows[0].no_effect and mon.windows[0].window_s == 0.0 and not mon.alerts
+
+
+def test_next_hit_may_kill_from_state():
+    """YELLOW's no-killing-blow rule (§3.7.3) needs next_hit_may_kill: a threat root with 0 < hp <= the hero's largest
+    hit (floor 5, Bell Beast's measured nail hit; raised by STATE "hit" events)."""
+    boss = {"iid": 1, "type_key": "Bone Beast", "hp": 5, "is_dead": False, "colliders": [
+        {"enabled": True, "damage": {"dealt": 2, "eff": 2, "hazard_type": 1, "can_cause_damage": True}}]}
+    s = {"ents": [boss]}
+    assert next_hit_may_kill(s, 5) and not next_hit_may_kill(s, 4)
+    assert not next_hit_may_kill({"ents": [{**boss, "hp": 0}]}, 5)
+    assert not next_hit_may_kill({"ents": [{**boss, "is_dead": True}]}, 5)
+    assert not next_hit_may_kill({"ents": [{"iid": 2, "type_key": "Pot", "hp": 1, "colliders": []}]}, 5)  # no threat
+    assert next_hit_may_kill({"ents": [{"iid": 3, "type_key": "Bone Beast", "hp": 3, "hidden": True}]}, 5)
+    # through the glue: 5 HP and unknown support is YELLOW (h 3) with no trigger; the boss in reach of a kill
+    # removes every damaging primitive, an explicit planner value wins, and a "hit" event raises the reach
+    st = {"f": 1, "q": 166_667, "pause": {"blk": 0}, "ev": [], "ents": [boss],
+          "hero": {"health": 5, "max_health": 5, "health_blue": 0,
+                   "fractured_mask": {"equipped": False, "amount_left": 0}}}
+    d = _control().step(st).decision
+    assert d.tier == "YELLOW" and not d.triggers and not d.allows("ATTACK(side)") and d.allows("DASH")
+    assert _control().step(st, next_hit_may_kill=False).decision.allows("ATTACK(side)")
+    st["ents"] = [{**boss, "hp": 8}]
+    sc = _control()
+    assert sc.step(st).decision.allows("ATTACK(side)")
+    st["ev"] = [{"k": "hit", "d": {"ent": 1, "dmg": 8}}]
+    assert not sc.step(st).decision.allows("ATTACK(side)") and sc.hero_hit == 8
+
+
+def _playing(f: int) -> dict:
+    return {"f": f, "q": f * 166_667, "ts": 1.0, "ev": [], "ents": [],
+            "game": {"gs": gc.GS_PLAYING, "ui": 4, "menu": 6, "fading": False, "paused": False, "pd_mode": 0,
+                     "scene": "Bone_05"},
+            "pause": {"blk": 0, "dsq": False, "preload": False},
+            "hero": {"health": 5, "max_health": 5, "health_blue": 0,
+                     "fractured_mask": {"equipped": False, "amount_left": 0}}}
+
+
+def test_held_pause_resumes_and_the_next_pending_starts_a_new_loop():
+    """Review: without always_quit a goal-PAUSE pause held forever (no API) and the machine was never replaced, so a
+    later PAUSE_PENDING never pressed. Stand-in game: an ACTION applies 2 frames after its STATE; a Pause edge while
+    playing pauses; an Enter edge on the ready pause menu with Continue highlighted, after the lockout, unpauses."""
+    enter = 1 << BIT["enter"]
+    sc = _control(always_quit=False)
+    sent: dict[int, int] = {}
+    paused_at, resumed, outcomes, first_pq = None, False, [], None
+    for f in range(400):
+        m, prev = sent.get(f, 0), sent.get(f - 1, 0)
+        if paused_at is None and m & PAUSE and not prev & PAUSE:
+            paused_at = f
+        elif paused_at is not None and m & enter and not prev & enter and f - paused_at >= 19:
+            paused_at = None
+        if paused_at is None:
+            st = _playing(f)
+        else:
+            st = _paused(_playing(paused_at), f - paused_at) | {"f": f, "q": f * 166_667}
+            st["menu"] = {"sel": "continue", "quit_ok": True}
+        kw = {"frame_age_ms": 60.0} if f in (5, 300) else {}
+        r = sc.step(st, **kw)
+        sent[f + 2] = r.mask or 0
+        outcomes.append(r.outcome)
+        if f == 5:
+            first_pq = sc.pq
+            assert r.decision.pause_pending and not r.decision.quit_requested and first_pq.goal == pq.GOAL_PAUSE
+        if sc.held and not resumed:
+            assert r.outcome == pq.PAUSED and sc.sup.paused and r.mask == 0
+            assert sc.resume()
+            resumed = True
+        if f == 299:
+            assert pq.UNPAUSED in outcomes and sc.pq is None and not sc.sup.paused and not r.decision.pause_pending
+        if f == 300:
+            assert sc.pq is not None and sc.pq is not first_pq and sc.pq.state == "LOOP" and r.mask == PAUSE
+    assert resumed and sc.held and sc.pq is not first_pq     # the second pause is held too: quit() now
+    assert sc.quit() and sc.pq.goal == pq.GOAL_QUIT
+
+
+def test_alerts_reach_the_harness():
+    """Review: the pause-window monitor's alerts were not returned. A parry-length i-frame window alerts at the gate
+    opening, through Supervised.alerts."""
+    sc = _control()
+    hero = {"health": 5, "max_health": 5, "health_blue": 0, "invulnerable": True,
+            "fractured_mask": {"equipped": False, "amount_left": 0}}
+
+    def st(f, blk, inv, ev=()):
+        return {"f": f, "q": f * 166_667, "ev": list(ev), "pause": {"blk": blk}, "ents": [],
+                "game": {"paused": False, "scene": "Bone_05"}, "hero": {**hero, "tm": {"inv": inv}}}
+    r = sc.step(st(0, 3, 1.2, [{"k": "damage", "d": {"source": "x", "amount": 1}}]))
+    assert not r.alerts
+    for f in range(1, 15):
+        sc.step(st(f, 3, 1.0))
+    r = sc.step(st(15, 0, 0.12))
+    assert any(a.startswith("pause window: Q1 pause window after the hit at frame 0") for a in r.alerts), r.alerts
+
+
+def test_pause_window_accounts_for_every_hit():
+    """Round-2 review: 29 hits never reached the gate opening and were never checked. A hit superseded by another
+    while the gate is shut, a "damage" event that never closed the gate, a hit whose i-frames end with the gate still
+    shut (window 0: alert) and a window still open at the end of the attempt (censored)."""
+    def st(f, blk, inv, ev=()):
+        return {"f": f, "q": f * 166_667, "ev": list(ev), "pause": {"blk": blk}, "game": {"paused": False},
+                "hero": {"invulnerable": inv > 0, "tm": {"inv": inv}}}
+    hit = [{"k": "damage", "d": {"source": "x"}}]
+    mon = PauseWindowMonitor()
+    mon.update(st(0, 3, 1.2, hit))
+    mon.update(st(1, 3, 1.1))
+    mon.update(st(2, 3, 1.2, hit))              # a second hit with the gate shut: the first is superseded
+    assert mon.windows[0].superseded and not mon.windows[0].no_effect and not mon.alerts
+    mon = PauseWindowMonitor()
+    mon.update(st(0, 0, 0.0, hit))
+    mon.update(st(1, 0, 0.0, hit))              # the first never closed the gate: it did not land
+    assert mon.windows[0].no_effect and not mon.alerts
+    mon = PauseWindowMonitor()
+    mon.update(st(0, 66, 1.0, hit))
+    for f in range(1, 70):
+        mon.update(st(f, 66, max(0.0, 1.0 - f / 60)))
+    w = mon.windows[0]
+    assert w.t_open is None and w.window_s == 0.0 and mon.alerts and "frame 0" in mon.alerts[0]
+    mon = PauseWindowMonitor()
+    mon.update(st(0, 3, 1.2, hit))
+    assert mon.finish().censored and not mon.alerts and mon.open is None

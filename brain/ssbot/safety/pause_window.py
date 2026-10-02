@@ -19,6 +19,13 @@ i-frames end 1.10-2.08 s after it, and the window is at least 0.945 s (p50 0.950
 250 ms to about 1.2 s (§3.7.5). A "damage" event at 1 HP that LethalBlock swallowed in data mode (no recoil, the gate
 never closes, no i-frames: 18 of 2265) is marked no_effect and never alerts. A parry's i-frames are only 0.15 s (probe
 P11): a hit then leaves a much shorter window, which is what the alert is for.
+
+Every hit is accounted for (round-2 review: 29 hits never reached t_open and were never checked). A "damage" event
+followed by another before the gate opened is superseded when the gate had closed (the next hit's window is the one
+that counts) and no_effect when it never closed (live 20261001_122249 i0_000: 17 such events, bursts on consecutive
+frames at a constant HP, e.g. f71709-71715 at 4 HP and f84420-84427 at 2 HP). A hit whose i-frames end while the gate
+is still shut has no Q1 window at all: window 0, which alerts (live i0_000 f206760: blk TIME_SLOWED | GAME_STATE for the
+whole 1.10 s of i-frames, at 5 HP). finish() closes a window still open at the end of an attempt as censored.
 """
 from dataclasses import dataclass, field
 
@@ -34,14 +41,16 @@ class HitWindow:
     t_pause: float | None = None         # a pause landed (game.paused)
     gate_closed: bool = False            # the PauseGate closed after the hit (every hit that lands does)
     no_effect: bool = False              # neither the gate closed nor i-frames started: the hit did not land
+    superseded: bool = False             # another hit came while the gate was still shut: its window counts instead
+    censored: bool = False               # the attempt ended with the window still open
     closed: bool = False
 
     @property
     def window_s(self) -> float | None:
+        if self.t_open is None:          # the gate never opened: no window once the i-frames are over
+            return 0.0 if self.t_iframes_end is not None else None
         end = self.t_iframes_end if self.t_iframes_end is not None else self.t_iframes_est
-        if self.t_open is None or end is None:
-            return None
-        return end - self.t_open
+        return None if end is None else end - self.t_open
 
     def row(self) -> dict:
         def rel(t: float | None) -> float | None:
@@ -49,7 +58,7 @@ class HitWindow:
         return {"f_hit": self.f_hit, "source": self.source, "open_s": rel(self.t_open),
                 "iframes_end_s": rel(self.t_iframes_end), "iframes_est_s": rel(self.t_iframes_est),
                 "pause_s": rel(self.t_pause), "window_s": None if self.window_s is None else round(self.window_s, 4),
-                "no_effect": self.no_effect}
+                "no_effect": self.no_effect, "superseded": self.superseded, "censored": self.censored}
 
 
 @dataclass(slots=True)
@@ -67,7 +76,9 @@ class PauseWindowMonitor:
 
     def _check(self, w: HitWindow, final: bool) -> None:
         ws = w.window_s
-        if not w.no_effect and ws is not None and ws < self.need_s and (final or w.t_iframes_end is None):
+        if w.no_effect or w.superseded or w.censored:
+            return
+        if ws is not None and ws < self.need_s and (final or w.t_iframes_end is None):
             msg = (f"Q1 pause window after the hit at frame {w.f_hit}: {ws:.3f} s < detect + loop "
                    f"{self.need_s:.3f} s")
             if msg not in self.alerts:
@@ -81,6 +92,14 @@ class PauseWindowMonitor:
             self.windows.append(w)
             self.open = None
 
+    def finish(self) -> HitWindow | None:
+        """The attempt ended: close a window that is still open, as censored (no alert)."""
+        w = self.open
+        if w is not None:
+            w.censored = True
+            self._close()
+        return w
+
     def update(self, s: dict) -> HitWindow | None:
         """Feed one STATE; returns the window that closed on it, if any."""
         t = (s.get("q") or 0) / self.qpc_freq
@@ -89,6 +108,8 @@ class PauseWindowMonitor:
         if hits:
             if self.open is not None:     # a hit inside the previous window (a hazard, a grab): that one ends here
                 done = self.open
+                if done.t_open is None:
+                    done.superseded, done.no_effect = done.gate_closed, not done.gate_closed
                 self._close()
             d = hits[0].get("d") or {}
             self.open = HitWindow(f_hit=int(s.get("f") or 0), t_hit=t, source=d.get("source"),
