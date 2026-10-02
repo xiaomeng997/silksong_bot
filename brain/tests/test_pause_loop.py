@@ -1,7 +1,9 @@
 """Pause loop and quit sequence (ssbot.safety.pause_quit) against a simulated game (tests/pause_sim.py): the G1 criteria
 of DESIGN §3.7.5 (no unintended unpause, pressing stops within the 230 ms budget, pause within a few frames of the
-gate opening) over randomized trials with persistent false cues, then the menu paths under large latency, capture
-stalls and non-wrapping lists (no wrong Submit), greyed Quit, Patch 4 refusal, Continue + Submit, emulated quits."""
+gate opening, p99.9 <= 6 frames) over randomized trials with persistent false cues, slow menu readers and unmeasured
+detectors, then the menu paths under large latency, capture stalls and non-wrapping lists (no wrong Submit), latency
+past the configured bound (ALERT, never a wrong Submit), greyed Quit (oracle Options items without a role included),
+Patch 4 refusal, Continue + Submit, emulated quits, and one mutation test per protection."""
 import random
 
 import pytest

@@ -39,7 +39,10 @@ unpaused (N = 12: 65 of 400, N = 24: 400 of 400); now 0 of 400 for readers 3-24 
 400 trials each). A rejected dim cue is ignored until the dim stops rising or the world is seen stopped (a pause may
 have joined the fade); the menu cue needs a stopped world, so it re-arms only at the next stop: one false cue per
 hit-stop, never a loop stuck by a persistent misread. loop_alert_s and false_cue_alert raise the alert from LOOP and
-CONFIRM alike.
+CONFIRM alike. G1 loop test, 10^4 trials (oracle or vision, readers 3-18 frames behind, dimmer or motion unmeasured in
+some, false cues in 60 % of vision trials): 0 unintended unpauses; pause latency from the pausable moment p50 2, p99 5,
+p99.9 6, max 7 frames (4 of 9341 above 6); last press after the pause p99 102 ms, max 151 ms; with a false cue at most
+26 frames.
 
 Latency. Every observation has a capture time t, every key an emission time now (the same clock). A menu decision uses
 only fresh frames (capture time strictly later than the last frame used) captured after the last tap's release plus
