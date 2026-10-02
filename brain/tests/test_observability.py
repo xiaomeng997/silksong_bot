@@ -136,27 +136,40 @@ def test_pause_cues_lockout_hit_and_quit_map(wake):
     assert qm.key == "interact" and not v.game.pause_available.v and v.game.pause_blockers & 512
 
 
+def _speed_profile(ws: list[WorldState], rate) -> list[WorldState]:
+    """Copies of ws whose game time runs at rate(k) x real time from frame k on (no events)."""
+    out = [copy.deepcopy(w) for w in ws]
+    t = out[0].stamp.t_game_s
+    for k, w in enumerate(out):
+        w.events = []
+        if k:
+            t += rate(k) * (w.stamp.t_sample_qpc_ns - out[k - 1].stamp.t_sample_qpc_ns) / 1e9
+            w.stamp.t_game_s = t
+    return out
+
+
 def test_slow_motion_blocks_pause_without_a_freeze_event(wake, wake_v):
     """The trial run's case: BossDeathSlow (time scale 0.05) running on across a savestate load, so the filter (reset
-    per episode) never saw its FREEZE start. The world visibly runs slow: TIME_SLOWED until SLOW_HOLD_S after."""
+    per episode) never saw its FREEZE start. Speed is read over SLOW_WINDOW frames: slowed until a full reading shows
+    full speed, then held SLOW_HOLD_S. A slow-motion onset mid-run is seen late (no exact per-frame time scale)."""
     i = next(i for i in range(len(wake_v) - 40) if all(w.game.pause_available.v for w in wake_v[i:i + 40]))
-    ws = [copy.deepcopy(w) for w in wake[i:i + 40]]
-    for w in ws:
-        w.events = []
-    q0, t0 = ws[0].stamp.t_sample_qpc_ns, ws[0].stamp.t_game_s
-    for k, w in enumerate(ws):                                   # 5 % speed (as in BossDeathSlow), then full speed
-        dq = (w.stamp.t_sample_qpc_ns - q0) / 1e9
-        w.stamp.t_game_s = t0 + (0.05 * dq if k < 20 else ws[19].stamp.t_game_s - t0 + dq - (
-            ws[19].stamp.t_sample_qpc_ns - q0) / 1e9)
+    ws = _speed_profile(wake[i:i + 40], lambda k: 0.05 if k < 20 else 1.0)
     f = ObservabilityFilter(bosses=[BELL_BEAST])
     out = [f.apply(w) for w in ws]
-    slow_end = ws[19].stamp.t_sample_qpc_ns / 1e9 + obs.SLOW_HOLD_S
-    assert out[0].game.pause_blockers & 2                                   # no speed reading yet: as if slowed
-    for w, v in zip(ws[1:], out[1:]):
-        q = w.stamp.t_sample_qpc_ns / 1e9
-        assert bool(v.game.pause_blockers & 2) == (q < slow_end)            # TIME_SLOWED
-        assert v.game.pause_available.v == (q >= slow_end)
-    assert not out[-1].game.pause_blockers
+    slowed = [bool(v.game.pause_blockers & 2) for v in out]                  # TIME_SLOWED
+    q = [w.stamp.t_sample_qpc_ns / 1e9 for w in ws]
+    t = [w.stamp.t_game_s for w in ws]
+    n = obs.SLOW_WINDOW
+    slow_read = [k < n or t[k] - t[k - n] < obs.SLOW_RATE * (q[k] - q[k - n]) for k in range(40)]
+    for k in range(40):
+        assert slowed[k] == any(slow_read[j] and q[k] < q[j] + obs.SLOW_HOLD_S for j in range(k + 1)), k
+        assert out[k].game.pause_available.v == (not slowed[k])
+    assert all(slowed[:20]) and not out[-1].game.pause_blockers
+    onset = _speed_profile(wake[i:i + 40], lambda k: 1.0 if k < 20 else 0.05)
+    f = ObservabilityFilter(bosses=[BELL_BEAST])
+    out = [f.apply(w) for w in onset]
+    first = next(k for k in range(20, 40) if out[k].game.pause_blockers & 2)
+    assert first == 21 and out[20].game.pause_available.v                 # the onset frame itself is missed
 
 
 # ---- damage boxes ---------------------------------------------------------------------------------------------

@@ -30,9 +30,11 @@ Rule: no value in the output may depend on something pixels cannot show. Per fra
   - Pause / quit availability and blockers are rebuilt from vision cues (DESIGN §3.7.5): screen mode (a dialogue
     box blocks); the 0.3 s real-time lockout after its own PAUSE_ON/OFF edges; < 0.3 s since a hit taken (trial
     run: the first pausable frame after a hit came 0.215-0.250 s later in 99 of 101 hits; probe P7: 0.25 s); a
-    running freeze (FREEZE start/end) or a world visibly running slow (game time over real time < SLOW_RATE across a
-    frame, held SLOW_HOLD_S; also the first frame, before any speed reading): it catches the slow motion whose start
-    the filter never saw, e.g. BossDeathSlow running on across a savestate load; a hazard death until 1.0 s after
+    running freeze (FREEZE start/end) or a world visibly running slow, which catches the slow motion whose start the
+    filter never saw, e.g. BossDeathSlow running on across a savestate load. The speed stands in for a motion-based
+    estimate: game time over real time summed over the last SLOW_WINDOW frames (not the exact per-frame time scale),
+    so an onset is seen late (a drop to 0.05 x shows on its second slow frame) and the first SLOW_WINDOW frames, with
+    no full reading yet, count as slowed; TIME_SLOWED is held SLOW_HOLD_S after the last slow reading; a hazard death until 1.0 s after
     the hazard respawn; < 0.5 s after a scene entry or a return to gameplay; the hurt mode. Without a quit map,
     quit_available is False with conf 0 except in the pause menu with a menu read; with one (quit_map.p_pause /
     p_quit(scene, key), ssbot.safety.quit_map keys) both need P >= min_p. The blockers carry only VISION_BLOCKS
@@ -79,6 +81,7 @@ check.
 """
 import json
 import math
+from collections import deque
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -124,8 +127,9 @@ HAZARD_BLOCK_S = 1.0         # after a hazard respawn (FinishedEnteringScene cle
 ENTRY_BLOCK_S = 0.5          # after a scene entry (HUDCamera PreventPause 0.5 s, m0:N14)
 HURT1_S = 1.2                # quit-map key "hurt1" ends here (i-frames)
 FREEZE_MAX_S = 5.0           # a freeze start without its end stops counting after this long (RaceWinSlow 3.8 s)
-SLOW_RATE = 0.75             # game time over real time below this across a frame: the world visibly slows down
-SLOW_HOLD_S = 0.1            # TIME_SLOWED is kept this long after the last slow frame (the ramp back to full speed)
+SLOW_RATE = 0.75             # game time over real time below this over the window: the world visibly slows down
+SLOW_WINDOW = 4              # frames the speed estimate averages over (its detection latency)
+SLOW_HOLD_S = 0.1            # TIME_SLOWED is kept this long after the last slow reading (the ramp back to full speed)
 PAUSE_CONF = 0.9             # pause_available conf without a quit map
 CONF_MAX = 0.99              # an inferred availability is never certain (est fields keep conf < 1)
 
@@ -447,6 +451,7 @@ class ObservabilityFilter:
         self._freeze_q: list[float] = []
         self._slow_until = -math.inf
         self._tq_prev: tuple[float, float] | None = None     # (game time, QPC s) of the previous frame
+        self._rates: deque[tuple[float, float]] = deque(maxlen=SLOW_WINDOW)   # (game dt, real dt) per frame
         self._gameplay_prev: bool | None = None
 
     # ---- per frame ---------------------------------------------------------------------------------------------
@@ -677,13 +682,12 @@ class ObservabilityFilter:
             self._paused = screen == Screen.PAUSE_MENU
         self._freeze_q = [x for x in self._freeze_q if q - x < FREEZE_MAX_S]
         t = ws.stamp.t_game_s
-        if self._tq_prev is None:              # no speed reading yet: as if slowed
-            self._slow_until = q + SLOW_HOLD_S
-        else:                                  # the world runs slow: a freeze or slow motion whose start was not seen
-            dt_game, dq = t - self._tq_prev[0], q - self._tq_prev[1]
-            if dq > 0.0 and dt_game < SLOW_RATE * dq:
-                self._slow_until = q + SLOW_HOLD_S
+        if self._tq_prev is not None and q > self._tq_prev[1]:
+            self._rates.append((t - self._tq_prev[0], q - self._tq_prev[1]))
         self._tq_prev = (t, q)
+        if len(self._rates) < SLOW_WINDOW or \
+                sum(g for g, _ in self._rates) < SLOW_RATE * sum(r for _, r in self._rates):
+            self._slow_until = q + SLOW_HOLD_S      # no full speed reading yet, or the world runs slow
         gameplay = screen in GAMEPLAY
         if gameplay and self._gameplay_prev is False:
             self._entry_q = q
