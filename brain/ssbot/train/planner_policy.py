@@ -218,6 +218,7 @@ class PlannerPolicy:
         self.outcome_reason: str | None = None
         self.pause_owned = False
         self.wake_sent = False
+        self.first_pending_reasons: list[str] = []
         self.ring: deque = deque(maxlen=LOG_BEFORE)
         self.log_after = 0
         self.counts: Counter = Counter()
@@ -316,6 +317,8 @@ class PlannerPolicy:
         self.pause_owned = self.sc.pq is not None
         if r.decision.pause_pending and self.first_pending_f is None:
             self.first_pending_f = f
+            self.first_pending_reasons = list(r.decision.reasons)     # what started the pause (the end's reasons
+            #                                                           include what the quit itself caused, e.g. Q5)
         mask = res.mask if r.mask is None else r.mask
         if r.outcome is not None and r.outcome in TERMINAL and self.episode_outcome is None:
             self.episode_outcome = "QUIT"
@@ -427,6 +430,7 @@ class PlannerPolicy:
                 "plan_ms_p50": q(self.plan_ms, 50), "plan_ms_p99": q(self.plan_ms, 99),
                 "unpredicted": self.unpredicted, "hits_taken": self.hits_taken,
                 "forced_risk_ticks": len(self.forced_frames), "forced_first": self.forced_frames[:20],
-                "first_pending_f": self.first_pending_f, "outcome_reason": self.outcome_reason,
+                "first_pending_f": self.first_pending_f, "first_pending_reasons": self.first_pending_reasons,
+                "outcome_reason": self.outcome_reason,
                 "alerts": list(self.sc.alerts), "anchor_log": tr.anchor_log[-40:],
                 "real_quit": self.real_quit_stats()}
