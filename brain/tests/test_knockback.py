@@ -99,25 +99,33 @@ def test_walls_clip_and_slopes_widen(p):
     # a ceiling sloping down to the right, as Bone_05's Roof Collider: Box2D slides the box along it, downwards
     # (live i2_002 f 693717: v = (12.98, -2.60) under a 0.2 slope), out of the axis-aligned path's hull
     air = np.array([10.0, 5.0, 10.5, 7.079])
-    a, b = (8.0, 8.2), (16.0, 5.0)
-    roof = Terrain2D.from_outlines([np.array([a, b, (16.0, 12.0), (8.0, 12.0)])], [True])
     base = Terrain2D.from_boxes([floor()])
-    terrain = Terrain2D(np.concatenate([base.hseg, roof.hseg]), np.concatenate([base.vseg, roof.vseg]), roof.slopes)
-    env = kb.knockback_envelope(air, "left", p, terrain)
     axis = kb.knockback_envelope(air, "left", p, base)
-    assert env.flags & kb.KF_SLOPE
-    slope = (b[1] - a[1]) / (b[0] - a[0])
-    t = np.array([1.0, slope]) / np.hypot(1.0, slope)
     d = np.array([p.hurt_velocity, p.hurt_velocity * p.hurt_vy_ratio]) * p.fdt
-    box = air.copy()
-    for _ in range(kb.recoil_timing(p).n_max):
-        nxt = box + np.r_[d, d]
-        if nxt[3] > a[1] + (nxt[2] - a[0]) * slope - p.skin:      # slide: keep the tangential part of the step
-            nxt = box + np.r_[t * (d @ t), t * (d @ t)]
-        box = nxt
-        s_ = env.swept
-        assert s_[0] <= box[0] and s_[1] <= box[1] and box[2] <= s_[2] and box[3] <= s_[3]
-    assert box[1] < axis.swept[1] - 0.5                            # outside what the axis-aligned rule allows
+    n = kb.recoil_timing(p).n_max
+    lowest = np.inf
+    for drop in (0.5, 1.5, 3.2, 6.0, -1.0):                   # ceilings falling (or rising) to the right
+        a, b = (8.0, 8.2), (16.0, 8.2 - drop)
+        roof = Terrain2D.from_outlines([np.array([a, b, (16.0, 12.0), (8.0, 12.0)])], [True])
+        terrain = Terrain2D(np.concatenate([base.hseg, roof.hseg]), np.concatenate([base.vseg, roof.vseg]),
+                            roof.slopes)
+        env = kb.knockback_envelope(air, "left", p, terrain)
+        assert env.flags & kb.KF_SLOPE
+        slope = (b[1] - a[1]) / (b[0] - a[0])
+        t = np.array([1.0, slope]) / np.hypot(1.0, slope)
+        box = air.copy()
+        for _ in range(n):
+            nxt = box + np.r_[d, d]
+            if nxt[3] > a[1] + (nxt[2] - a[0]) * slope - p.skin:      # slide: keep the tangential part of the step
+                nxt = box + np.r_[t * max(d @ t, 0.0), t * max(d @ t, 0.0)]
+            box = nxt
+            s_ = env.swept
+            assert s_[0] <= box[0] and s_[1] <= box[1] and box[2] <= s_[2] and box[3] <= s_[3]
+        lowest = min(lowest, box[1])
+        disk = air + np.r_[n * d / 2 - n * np.hypot(*d) / 2, n * d / 2 + n * np.hypot(*d) / 2] + \
+            np.r_[-1, -1, 1, 1] * kb.CONTACT_SLOP
+        assert (env.swept[:2] >= disk[:2] - 1e-9).all() and (env.swept[2:] <= disk[2:] + 1e-9).all()
+    assert lowest < axis.swept[1] - 0.5                            # outside what the axis-aligned rule allows
 
 
 def test_batched_queries_match_single_ones_and_the_open_air_table(p):
@@ -142,6 +150,39 @@ def test_batched_queries_match_single_ones_and_the_open_air_table(p):
     assert (loose[..., :2] <= swept[..., :2] + 1e-12).all() and (loose[..., 2:] >= swept[..., 2:] - 1e-12).all()
     par, _, _ = kb.knockback_boxes(boxes, "right", p, terrain, threads=2)
     assert np.array_equal(par, swept)
+
+
+def test_candidate_hull_bounds_every_frame_and_side(p):
+    """knockback_hull (the planner's per-tick query) contains, per candidate, the swept hull of a hit in each valid
+    frame from either side, terrain-clipped or not; open air: exactly their unclipped union."""
+    from ssbot.tools.kin_check import load_fixture
+    _, terrains = load_fixture(FIXTURE)
+    terrain = terrains["Bone_05"]
+    assert len(terrain.slopes)                                       # the Roof Collider
+    rng = np.random.default_rng(5)
+    N, T1 = 64, 49
+    x = np.cumsum(rng.uniform(-0.2, 0.2, (N, T1)), axis=1) + rng.uniform(70.0, 100.0, (N, 1))
+    y = np.clip(np.cumsum(rng.uniform(-0.15, 0.15, (N, T1)), axis=1) + rng.uniform(2.015, 12.0, (N, 1)), 2.015, None)
+    boxes = np.stack([x - 0.25, y, x + 0.25, y + 2.0789], axis=-1)
+    valid = rng.random((N, T1)) < 0.8
+    valid[0] = False
+    hull, flags = kb.knockback_hull(boxes, p, terrain, valid=valid)
+    assert hull[0, 0] > hull[0, 2]                                   # no frame can be hit: empty
+    assert (flags & kb.KF_SLOPE).any() and not (flags & kb.KF_SLOPE).all()
+    for side in ("left", "right"):
+        for clip in (True, False):
+            sw, _, _ = kb.knockback_boxes(boxes, side, p, terrain, clip=clip)
+            for i in range(1, N):
+                s = sw[i, valid[i]]
+                assert (hull[i, :2] <= s[:, :2].min(axis=0) + 1e-12).all()
+                assert (hull[i, 2:] >= s[:, 2:].max(axis=0) - 1e-12).all()
+    op = np.flatnonzero(flags == 0)[1:]
+    sw = [kb.knockback_boxes(boxes[op], s, p, terrain, clip=False)[0] for s in ("left", "right")]
+    for j, i in enumerate(op):
+        u = np.concatenate([w[j, valid[i]] for w in sw])
+        assert np.allclose(hull[i], np.r_[u[:, :2].min(axis=0), u[:, 2:].max(axis=0)])
+    par, _ = kb.knockback_hull(boxes, p, terrain, valid=valid, threads=2)
+    assert np.array_equal(par, hull)
 
 
 def test_weighted_anklet_halves_the_push(p):

@@ -29,10 +29,17 @@ box. Three effects the axis-aligned path does not carry are added (all from the 
 logged hits): Box2D depenetration and skin intrusion move the box up to 0.0108 u off the path (a hit while landing
 pushed back out of the floor once the steps resume, a recoil into an arena gate stopping 9 mm short of the skin), so
 every box is dilated by CONTACT_SLOP; a sloped ceiling turns the recoil along itself (i2_002 f 693717, a hit in Bind
-under Bone_05's "Roof Collider": v = (12.98, -2.60), downwards), so from the last step before the path can touch a
-slope the bound grows by one step length per step in every direction; a blocker the terrain dump does not have (an
-enemy body, a gate missing from the dump: human session, Ant_05b) can stop the path at any point, which the hull
-already covers before control returns.
+under Bone_05's "Roof Collider": v = (12.98, -2.60), downwards, which is exactly the projection of (15, 7.5) on
+the slope's tangent); a blocker the terrain dump does not have (an enemy body, a gate missing from the dump: human
+session, Ant_05b) can stop the path at any point, which the hull already covers before control returns.
+
+Slopes. DoRecoilMovement sets the velocity to the recoil vector s every step and the contact solver (static terrain,
+no friction, rotation frozen) leaves its projection on the cone of allowed velocities; such a projection p satisfies
+p . (s - p) = 0 (Moreau), i.e. lies on the circle with diameter [0, s]. So n steps move the box by a point of the
+disk with centre n s / 2 and radius n |s| / 2, whatever walls, ceilings and slopes it meets, and the disks of
+fewer steps lie inside it. From the last step before the walked axis-aligned path can touch a slope, the bound is the
+box there plus that disk of the remaining steps (bounding box), then CONTACT_SLOP. Pushed right: x from -0.23 to
+4.13 u, y from -1.2 to 3.2 u after 13 steps, against 0 to 3.9 u and 0 to 1.95 u in open air.
 
 Validity after control returns: union[k] covers every input only for k < ctl_min (the earliest frame any timing gives
 control back: 24 with two hitches, 26 to 29 without). From ctl_min on it is the swept hull grown by an any-input reach
@@ -43,8 +50,10 @@ control rolls its own candidates out from the observed state instead. Beyond FRA
 Batched form (decision 4). knockback_table holds the open-air offsets per side (and Weighted Anklet): union[k] =
 hit box + offsets[k], swept = hit box + swept_offset; unclipped, so a superset of the clipped path wherever no slope
 is in reach. knockback_boxes runs the compiled per-query kernel: open air from the table, the clipped path (and the
-slope rule) for the queries that have terrain in reach (flags say which). A planner can bound a whole candidate at
-once with hull_t(roll.box[i, t]) + swept_offset and refine only the candidates that touch a hazard.
+slope rule) for the queries that have terrain in reach (flags say which): 512 x 49 hit boxes take 7.7 ms on one
+core (13900K), 1.7 ms on four. knockback_hull is the planner's per-tick form: per candidate the hull of its frames
+plus the swept offsets of both sides (the slope disk when a slope is in reach), 0.15 ms (p99 0.3 ms) for 512 x 49
+on one core; a planner refines with knockback_boxes only the candidates whose hull touches a hazard.
 """
 from __future__ import annotations
 
@@ -241,6 +250,41 @@ def knockback_boxes(hit_boxes: np.ndarray, side: str, params: HeroParams, terrai
         kin_jit.kb_query(*args)
     return (swept.reshape(shape + (4,)), frames.reshape(shape + (F + 1, 4)) if per_frame else None,
             flags.reshape(shape))
+
+
+def knockback_hull(boxes: np.ndarray, params: HeroParams, terrain: Terrain2D | None = None,
+                   sides: tuple[str, ...] = ("left", "right"), weighted: bool | None = None,
+                   valid: np.ndarray | None = None, threads: int = 1) -> tuple[np.ndarray, np.ndarray]:
+    """The planner's Hz(c) query (DESIGN §3.5.4), one call per tick: for candidate boxes [N, T+1, 4] (Rollout.box),
+    (hull [N, 4], flags [N]): per candidate the union, over its frames and the given impact sides, of the no-input
+    swept hull of a hit in that frame. valid [N, T+1] bool limits the frames a hit can land on (None: all; e.g.
+    ~(Rollout.flags & F_INVULN) for damage that respects i-frames, all frames for hazards). A candidate with no valid
+    frame gets an empty box (x0 > x1). Unclipped open air (frame hull + swept offsets: walls and ceilings only shorten
+    the path) unless a slope lies within that; then the frame hull plus the projection disk of n_max steps per side
+    (flags KF_SLOPE; see the module docstring). The frames after control returns are not in it: a planner that is
+    hit replans from the observed state."""
+    b = np.ascontiguousarray(np.asarray(boxes, dtype=np.float64))
+    if b.ndim == 2:
+        b = b[None]
+    tables = [knockback_table(params, s, weighted) for s in sides]
+    sx = np.array([t.step[0] for t in tables])
+    sy = np.array([t.step[1] for t in tables])
+    n_max = np.array([t.timing.n_max for t in tables], dtype=np.int64)
+    swept_off = np.ascontiguousarray(np.stack([t.swept_offset for t in tables]))
+    v = np.zeros((0, 0), dtype=np.bool_) if valid is None else np.ascontiguousarray(np.broadcast_to(
+        np.asarray(valid, dtype=np.bool_), b.shape[:2]))
+    out = np.empty((len(b), 4))
+    flags = np.zeros(len(b), dtype=np.int32)
+    from ssbot.knowledge import kin_jit
+    args = (b, v, sx, sy, n_max, swept_off, params.skin, (terrain or Terrain2D.empty()).packed(), CONTACT_SLOP, out,
+            flags)
+    if threads > 1:
+        import numba
+        numba.set_num_threads(threads)
+        kin_jit.kb_hull_par(*args)
+    else:
+        kin_jit.kb_hull(*args)
+    return out, flags
 
 
 @dataclass(slots=True)

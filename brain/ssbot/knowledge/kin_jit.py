@@ -811,12 +811,13 @@ def kb_one(m, boxes, sx, sy, n_max, n_hi, offsets, swept_off, free, ctl_min, hw,
             hull[s, 1] = min(hull[s - 1, 1], by0)
             hull[s, 2] = max(hull[s - 1, 2], bx1)
             hull[s, 3] = max(hull[s - 1, 3], by1)
-        else:                         # along a slope: anywhere within (s - sc) step lengths of the last clear box
-            d = (s - sc) * L
-            hull[s, 0] = min(hull[sc, 0], bx0 - d)
-            hull[s, 1] = min(hull[sc, 1], by0 - d)
-            hull[s, 2] = max(hull[sc, 2], bx1 + d)
-            hull[s, 3] = max(hull[sc, 3], by1 + d)
+        else:                         # along a slope: the last clear box plus the disk of j contact-projected steps
+            j = s - sc
+            cx, cy, rr = 0.5 * j * sx, 0.5 * j * sy, 0.5 * j * L
+            hull[s, 0] = min(hull[sc, 0], bx0 + cx - rr)
+            hull[s, 1] = min(hull[sc, 1], by0 + cy - rr)
+            hull[s, 2] = max(hull[sc, 2], bx1 + cx + rr)
+            hull[s, 3] = max(hull[sc, 3], by1 + cy + rr)
     if sc < n_max:
         flags[m] |= 2
     swept[m, 0], swept[m, 1] = hull[n_max, 0] - margin, hull[n_max, 1] - margin
@@ -851,3 +852,55 @@ def kb_query_par(boxes, sx, sy, n_max, n_hi, offsets, swept_off, free, ctl_min, 
         for m in range(c * size, min(M, (c + 1) * size)):
             kb_one(m, boxes, sx, sy, n_max, n_hi, offsets, swept_off, free, ctl_min, hw, skin, foot, head, slop_lo,
                    slop_hi, TT, margin, clip, per_frame, swept, frames, flags, hull)
+
+
+@njit(cache=True, error_model="numpy")
+def kb_hull_one(i, boxes, valid, sx, sy, n_max, swept_off, skin, TT, margin, out, flags):
+    """knockback.knockback_hull for candidate i: the frame hull of its boxes plus every side's open-air swept offset;
+    when a slope lies within that bound, plus every side's contact-projection disk of n_max steps instead."""
+    T1 = boxes.shape[1]
+    S = sx.shape[0]
+    use_valid = valid.shape[0] > 0
+    h0, h1, h2, h3 = np.inf, np.inf, -np.inf, -np.inf
+    for t in range(T1):
+        if use_valid and not valid[i, t]:
+            continue
+        h0 = min(h0, boxes[i, t, 0])
+        h1 = min(h1, boxes[i, t, 1])
+        h2 = max(h2, boxes[i, t, 2])
+        h3 = max(h3, boxes[i, t, 3])
+    flags[i] = 0
+    if h0 > h2:                       # no frame a hit can land on
+        out[i, 0], out[i, 1], out[i, 2], out[i, 3] = h0, h1, h2, h3
+        return
+    o0, o1, o2, o3 = np.inf, np.inf, -np.inf, -np.inf
+    for s in range(S):
+        o0 = min(o0, swept_off[s, 0])
+        o1 = min(o1, swept_off[s, 1])
+        o2 = max(o2, swept_off[s, 2])
+        o3 = max(o3, swept_off[s, 3])
+    r = skin + 0.06 + margin
+    _, slope = near(h0 + o0 - r, h1 + o1 - r, h2 + o2 + r, h3 + o3 + r, TT, False)
+    if slope:
+        flags[i] = 2
+        for s in range(S):
+            n = n_max[s]
+            L = math.hypot(sx[s], sy[s])
+            cx, cy, rr = 0.5 * n * sx[s], 0.5 * n * sy[s], 0.5 * n * L
+            o0 = min(o0, cx - rr - margin)
+            o1 = min(o1, cy - rr - margin)
+            o2 = max(o2, cx + rr + margin)
+            o3 = max(o3, cy + rr + margin)
+    out[i, 0], out[i, 1], out[i, 2], out[i, 3] = h0 + o0, h1 + o1, h2 + o2, h3 + o3
+
+
+@njit(cache=True, error_model="numpy")
+def kb_hull(boxes, valid, sx, sy, n_max, swept_off, skin, TT, margin, out, flags):
+    for i in range(boxes.shape[0]):
+        kb_hull_one(i, boxes, valid, sx, sy, n_max, swept_off, skin, TT, margin, out, flags)
+
+
+@njit(cache=True, parallel=True, error_model="numpy")
+def kb_hull_par(boxes, valid, sx, sy, n_max, swept_off, skin, TT, margin, out, flags):
+    for i in prange(boxes.shape[0]):
+        kb_hull_one(i, boxes, valid, sx, sy, n_max, swept_off, skin, TT, margin, out, flags)
