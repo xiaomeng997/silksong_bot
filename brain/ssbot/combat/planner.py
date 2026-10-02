@@ -76,9 +76,9 @@ from ssbot.core.primitives import Prim
 from ssbot.core.worldstate import WorldState
 from ssbot.knowledge import kinematics as kin
 from ssbot.knowledge.knockback import knockback_hull
-from ssbot.knowledge.kinematics import (B_ATTACK, B_BIND, B_JUMP, B_LEFT, B_QUICKCAST, B_RIGHT, B_UP, F_ATTACKING,
-                                        F_GROUND, F_INVULN, M_CAST, M_DS_ANTIC, M_DS_SPIKE, M_NORMAL, HeroParams,
-                                        HoldState, Terrain2D)
+from ssbot.knowledge.kinematics import (B_ATTACK, B_BIND, B_DOWN, B_JUMP, B_LEFT, B_QUICKCAST, B_RIGHT, B_UP,
+                                        F_ATTACKING, F_GROUND, F_INVULN, M_CAST, M_DS_ANTIC, M_DS_SPIKE, M_NORMAL,
+                                        HeroParams, HoldState, Terrain2D)
 
 # Hunter attack boxes relative to the hurtbox centre in the facing frame (+x forward), crests.json P17 clash_tink
 # polygons (captured facing left): side x [-0.12, 2.81] y [-0.62, 1.52]; up x [-1.23, 0.85] y [-0.04, 3.33];
@@ -225,6 +225,7 @@ class Planner:
         self.pogo_log = {"generated": 0, "lane_miss": 0, "accepted": 0}   # last tick's pogo plans: every lane
         #                                                                     connects or rejected (S)
         self.jump_until = -1          # tick until which the pressed jump's hold schedule is committed
+        self.macro_until = -1         # tick until which a started macro (pogo chain) is kept (MACRO_MARGIN)
         self.prev_tail_ok = False
 
     # ---- S -----------------------------------------------------------------------------------------------------------
@@ -349,7 +350,14 @@ class Planner:
             res = PlanResult(int(sel_cmd[0]), idx, name, 0, False, 0.0, 1e3, True, n=N + 1,
                              n_allowed=int(ok.sum()) + 1, n_safe=int(safe.sum()) + 1, cmd=sel_cmd, path=bind_res[1])
         elif ok.any():
-            order = np.lexsort((-J, -t_hit, Pc, ~V, S2, ~keep, S, U, hz_soft, hz))
+            # a started macro (a pogo chain: hop, down press, bounce, second press) is kept while it stays safe,
+            # unless another plan beats it by MACRO_MARGIN: re-planned every tick, 2,433 chosen pogo plans of live
+            # run 20261002_105845 were all replaced before their down press and none was sent
+            mkeep = np.ones(N, bool)
+            if cont and self.macro_until > self.ticks:
+                mkeep = J >= J[N - 1] + MACRO_MARGIN
+                mkeep[N - 1] = True
+            order = np.lexsort((-J, -t_hit, Pc, ~V, S2, ~mkeep, ~keep, S, U, hz_soft, hz))
             order = order[ok[order]]
             i = int(order[0])
             tail_ok = None
@@ -399,6 +407,12 @@ class Planner:
                 self.jump_until = self.ticks + (int(np.argmin(held != 0)) if (held == 0).any() else len(held))
         else:
             self.jump_until = -1                                      # released (or aborted): nothing committed
+        if _is_macro(res.name):
+            # committed until the chain's last planned press has gone out and the bounce had time (+12 frames)
+            last = np.flatnonzero((sel_cmd & B_DOWN) != 0)
+            self.macro_until = self.ticks + (int(last[-1]) + 12 if len(last) else 0)
+        elif res.name != "CONTINUE":
+            self.macro_until = -1
         self.prev_cmd = sel_cmd
         self.prev_name = res.name
         self.ticks += 1
@@ -809,6 +823,13 @@ def _attacks_of(box, flags, mode, lat, face0, boss, okb, polys, starts, base, wi
                 break
         out.append((kind, k, hit))
     return out
+
+
+MACRO_MARGIN = 5.0             # J (half a hit) another plan needs over a started macro to replace it
+
+
+def _is_macro(name: str) -> bool:
+    return "_hop" in name or "_ds" in name or name.startswith("POGO+")
 
 
 class _View:
