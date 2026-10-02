@@ -11,7 +11,7 @@ to hold, plus the pause / quit availability model and an oracle-mode cue adapter
                                                    # DEAD, KILL_REQUESTED, ALERT (holding: PAUSED, GREYED, REFUSED)
 
 Flow (§3.7.5): LOOP presses Pause for >= 2 frames and >= 34 ms, releases as long, unconditionally, until the earliest
-pause cue or a death; then it stops at once and CONFIRMs the pause before the lockout ends, else the cue was false and
+pause cue or a death; then it stops at once and CONFIRMs the pause; a cue that the evidence contradicts was false and
 the loop resumes. Once confirmed it reads the Quit item: available -> highlight "Quit to menu" -> Submit -> the "save
 and quit?" prompt (default "No") -> Up to "Yes" -> Submit; greyed -> stays paused, refreshes the menu once through
 Options -> Back when the cause may be disableSaveQuit, then waits for resolve_greyed(); after "Yes", still on the prompt
@@ -19,26 +19,46 @@ with no fade-out refusal_s after the Submit took effect = the Patch 4 refusal: s
 Unpausing is Continue + Submit after the 0.3 s lockout, never Esc. The machine only ever holds pause (in LOOP) or
 enter / up / down (on a ready menu): Esc also cancels menus, and in menus Z submits and X / A cancel (m0:N16).
 
-Cues. The earliest cue is one of: the oracle's paused flag; a pause menu over a frozen world (vision; with the dimmer
-up when it is measured); the dimmer's alpha-rise signature, alpha >= dim_cue after dim_rise_frames consecutive rises
-of about DIM_RATE x the capture interval (0.053 per 60 fps frame; m0:C11). A dark room, a fade or a low-health effect
-reads as a constant or differently rising "dim" and never makes a cue, and an additive dark baseline does not hide a
-real pause (the rise is relative). A cue source that proved false (no confirmation within confirm_window_s of capture
-time) is ignored until it clears (dim stops rising, the menu reading changes, the flag drops), so a persistent false
-cue cannot stop the loop; loop_alert_s and false_cue_alert raise the alert from LOOP and CONFIRM alike.
+Cues. The earliest cue is one of: the oracle's paused flag; the dimmer's alpha-rise signature, alpha >= dim_cue after
+dim_rise_frames consecutive rises of about DIM_RATE x the capture interval (0.053 per 60 fps frame; m0:C11); a pause
+menu over a world seen stopped (vision; frozen None, motion not measured, is not stopped) with the dim at least
+menu_dim_rise above its baseline, the lowest reading of the last dim_base_window_s, when the dimmer is measured. A dark
+room, a fade or a low-health effect reads as a constant or differently rising dim, and a misread menu over a dark room
+or a static scene is no rise above the baseline: neither makes a cue. Only on the loop's first frame (no history: the
+game may already be paused, and a press would unpause it) does an absolute dim at the 0.8 plateau stand in.
+
+Confirmation (vision) needs two independent detectors, and a cue is rejected only on positive contrary evidence, never
+on a timer: a world seen moving on moving_reject_frames fresh frames, or the dimmer leaving the pause trajectory
+(falling dim_drop_tol below its peak since the cue, or under base + plateau_min plateau_check_s after it). The vision
+pipeline's motion detector must therefore ignore the menu and the dimmer. Confirmed by: the menu reader with the dimmer
+on its trajectory; the reader, or the full dimmer rise, with a stopped world held for confirm_hold_s (longer than any
+hit-stop); after confirm_max_s with nothing against it, the pause is taken as real when a second detector agreed at
+least once, else resumed. Round-2 review: a 0.15 s confirm window declared real pauses false whenever the reader was
+slower than about 10 frames, and the resumed presses unpaused (N = 12: 65 of 400, N = 24: 400 of 400); now 0 of 400
+for readers 3-24 frames behind (tests/test_pause_loop.py, 400 trials each). A rejected dim cue is ignored until the dim
+stops rising or the world is seen stopped (a pause may have joined the fade); the menu cue needs a stopped world, so it
+re-arms only at the next stop: one false cue per hit-stop, never a loop stuck by a persistent misread. loop_alert_s and
+false_cue_alert raise the alert from LOOP and CONFIRM alike.
 
 Latency. Every observation has a capture time t, every key an emission time now (the same clock). A menu decision uses
 only fresh frames (capture time strictly later than the last frame used) captured after the last tap's release plus
 input_latency_max_s plus one frame, i.e. frames that must already show every key sent; repeated stale frames never
-count twice. The guarantee is as good as that bound: the tests run the machine with its bounds at the sim's maxima,
-and again at the 0.1 s defaults against up to 24 frames as a stress check. After a navigation tap the highlight must
-be seen to change from its pre-tap value; when it reads the same on stable_frames such frames and the round trip (input + observation latency maxima + nav_margin_s) has passed, the tap
-had no effect (the end of a non-wrapping list, or a dropped tap) and the direction flips for that step. The exit prompt
-lists Yes above No, so No -> Yes is Up (probe P7); ties on a wrapping list go the direct way. tests/test_pause_loop.py
-runs 10^4 randomized full quits (input + observation latency up to 14 frames, capture stalls, time-based key sampling
-with 33 ms frames, prompts that do or do not wrap, false cues) and 2x10^3 menu walks on an already paused game with up
-to 24 frames and stalls repeating a frame for up to 4 steps (non-wrapping Options included): no wrong Submit, no
-unintended unpause. Without the post-tap cut the same 14-frame quits Submit a wrong item in 1025 of 2000 (335 unpause).
+count twice. After a navigation tap the highlight must be seen to change from its pre-tap value; when it reads the same
+on stable_frames such frames and the round trip (input + observation latency maxima + nav_margin_s) has passed, the
+tap had no effect (the end of a non-wrapping list, or a dropped tap) and the direction flips for that step. A flip is
+also what a broken latency bound looks like (round-2 review: input 14 / observation 20 frames against the 0.1 s bounds
+gave 19 of 40 wrong Submits): after one, the reading must hold for flip_settle_rtts round trips past the last tap
+before anything else is pressed, and a change meanwhile, with no tap in flight, ends in ALERT, never a Submit. The exit
+prompt lists Yes above No, so No -> Yes is Up (probe P7); ties on a wrapping list go the direct way; an UNLABELLED item
+(an Options entry the oracle cannot name) goes Down, towards Back, without flipping. tests/test_pause_loop.py runs 10^4
+randomized full quits (input + observation latency up to 14 frames, capture stalls, time-based key sampling with 33 ms
+frames, prompts that do or do not wrap, false cues) and 2x10^3 menu walks on an already paused game with up to 24
+frames and stalls repeating a frame for up to 4 steps: no wrong Submit, no unintended unpause. Past the configured
+bound (input 13-20 / observation 12-20 frames, 0.1 s bounds, 200 walks) still no wrong Submit and no unpause: the walk
+quits or ends ALERT. Mutations (2000 of those quits unless said): the post-tap cut and the change-wait guard the same
+stale frames, so removing either alone gives 0 wrong Submits and removing both 854 (322 unpause); removing the flip
+settle gives 140 wrong Submits (41 unpause) in 160 walks past the bound, 0 with it; the round-2 timed confirm gives
+31 / 160 / 375 unpauses in 400 pauses with a reader 12 / 18 / 24 frames behind, 0 with the current rule.
 
 Timing facts this relies on:
 - a Pause press while the pause gate is closed is dropped, not queued (m0:N12): the loop is the retry;
@@ -63,7 +83,10 @@ Timing facts this relies on:
 Oracle mode (cues_from_state) reads the STATE "menu" section while paused {sel, quit_ok, dim, alpha, ignore_unpause,
 quitting} when present and falls back to derived values without it: the Quit state from pause.dsq / pause.preload (the
 condition the menu evaluates), the quit start from PreventPause on the prompt (which also stays set after a SAVE_FAILED,
-m0:C9). Without "sel" the highlight is unknown and a real quit never starts (no blind Submit): training uses
+m0:C9). sel passes through as the highlight (any name, so a later export of the selectable's GameObject name works);
+MenuExporter names only Back on Options, so with the section present a nil sel on a ready Options menu reads
+UNLABELLED, which the greyed refresh walks Down to Back (round-2 review: it failed "highlight unreadable on options").
+Without "sel" the highlight is unknown and a real quit never starts (no blind Submit): training uses
 emulate_quit, where a confirmed pause ends a GOAL_QUIT run as QUIT_EMULATED, or QUIT_EMULATED_GREYED /
 REFUSED_EMULATED / QUIT_EMULATED_UNKNOWN when the real quit would have been greyed, refused (disablePause set) or
 could not be read, so training does not overstate quit success.
