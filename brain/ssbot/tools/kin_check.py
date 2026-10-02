@@ -26,7 +26,8 @@ Every window lands in exactly one category (first match of the last applicable r
 hero absent, paused or not in gameplay; gap: missing frames; slide: a savestate load still moving the hero back;
 harness teleports, hazard respawns, scene changes, deaths, control taken by another FSM, no terrain for the scene,
 nail-charge arts), world_freeze (the time scale is below 1 outside the hero's own hit-stop: boss stun, boss death
-slow-motion, BindBreak after a hit during Bind; the threat layer has to announce these, the model cannot), hitch (a
+slow-motion, BindBreak after a hit during Bind: the model runs them from the logged freeze starts, EV_FZ_*, and
+BindBreak from the hit during the Bind charge), hitch (a
 frame longer than the jitter model's frame_time_max: rate 3.1e-5 per frame, left to the residual monitor), hurt (a
 damage knockback inside), contact (nail recoil, recoil down, pogo or an early Silkspear catch inside), recovering
 (starts in the damage freeze / recoil), bind, cast, downspike, plain:<primitive> (jump, attack, air, run, idle).
@@ -39,6 +40,11 @@ from the logged hit box: every no-input frame k must lie inside union[k] and the
 control returns (up to the table length) inside union[k]; no-input frames past the table (stacked freezes) are
 checked against the swept hull and counted. Each escaping hit is listed with its concurrent freezes;
 hits that cannot be checked are counted by reason. The exit code is 1 when any hit escapes.
+
+--monitor replays each source through the live path (kinematics.StateTracker + ResidualMonitor, one frame at a time,
+about 0.2 ms per frame) and reports what the runtime monitor would have said: windows scored and dropped, the share
+inside the lanes' hull per horizon, the lowest rolling share and the most far-off windows in any 600, and the frames
+it spent "degraded" (the calibration of MONITOR_ALARM_*).
 """
 from __future__ import annotations
 
@@ -378,6 +384,50 @@ def check_knockback(tr: Trace, terrains: dict[str, Terrain2D], params: HeroParam
     return res
 
 
+# ---- runtime monitor ------------------------------------------------------------------------------------------
+
+def check_monitor(tr: Trace, terrains: dict[str, Terrain2D], params: HeroParams) -> dict:
+    """The trace through StateTracker + ResidualMonitor frame by frame, a fresh pair per scene."""
+    H = 30
+    scored: Counter = Counter()
+    states: Counter = Counter()
+    dropped = 0
+    roll_within, roll_far = [], []
+    trk = mon = None
+    scene = None
+    terrain = None
+    for i in range(len(tr)):
+        if tr.scene[i] != scene:
+            if mon is not None:
+                scored.update(mon.scored)
+                dropped += mon.dropped
+            scene = tr.scene[i]
+            terrain = terrains.get(tr.scenes[scene])
+            trk, mon = km.StateTracker(params, terrain), km.ResidualMonitor(params, terrain)
+        r = tr.row(i)
+        if terrain is None:
+            r["valid"] = False
+        trk.push_row(r)
+        k0 = mon.scored[H]
+        mon.update(trk)
+        if mon.scored[H] > k0:
+            st = mon.status()
+            states[st["state"]] += 1
+            a = st["horizons"][H]
+            if a["n"] >= mon.window:
+                roll_within.append(a["within"])
+                roll_far.append(a["far"])
+    if mon is not None:
+        scored.update(mon.scored)
+        dropped += mon.dropped
+    out = {"frames": len(tr), "scored": {int(h): n for h, n in scored.items()}, "dropped": dropped,
+           "states": dict(states)}
+    if roll_within:
+        out["rolling_within_min"] = round(float(min(roll_within)), 4)
+        out["rolling_far_max"] = int(max(roll_far))
+    return out
+
+
 # ---- report ---------------------------------------------------------------------------------------------------
 
 def summarize(results: list[dict], tol: float, horizon: int) -> dict:
@@ -448,6 +498,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--json", default=None, help="write the report here")
     ap.add_argument("--worst", type=int, default=10, help="list the worst covered windows (planner_events)")
     ap.add_argument("--no-windows", action="store_true", help="knockback section only")
+    ap.add_argument("--monitor", action="store_true", help="also replay the runtime residual monitor")
     a = ap.parse_args(argv)
     params = HeroParams.load(a.params)
     results = []
@@ -457,6 +508,9 @@ def main(argv: list[str] | None = None) -> int:
         res = check_trace(tr, terrains, params, a.horizon, a.tol) if not a.no_windows else \
             {"labels": np.array([], dtype=object)}
         res["knockback"] = check_knockback(tr, terrains, params)
+        if a.monitor:
+            res["monitor"] = check_monitor(tr, terrains, params)
+            print(f"   monitor {json.dumps(res['monitor'])}", file=sys.stderr)
         res["source"] = src
         results.append(res)
         print(f"{src}: {len(tr)} frames, {len(res['labels'])} windows, {time.time() - t0:.1f} s", file=sys.stderr)
@@ -470,6 +524,8 @@ def main(argv: list[str] | None = None) -> int:
                           file=sys.stderr)
     rep = summarize(results, a.tol, a.horizon) if not a.no_windows else \
         {"knockback": [r["knockback"] for r in results], "windows": 0, "horizon_frames": a.horizon, "tol_u": a.tol}
+    if a.monitor:
+        rep["monitor"] = [r["monitor"] for r in results]
     rep["sources"] = a.sources
     rep["params"] = a.params
     print(format_report(rep))

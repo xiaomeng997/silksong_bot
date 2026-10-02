@@ -573,18 +573,6 @@ def test_windows_are_counted_never_dropped(real, p):
     assert (labels[370:400] == "uncovered:gap").all()
 
 
-def _trace_row(tr, i: int) -> dict:
-    """Row i of a Trace in StateTracker.push_row terms."""
-    return {"f": int(tr.f[i]), "fs": int(tr.fs[i]), "dt": float(tr.dt[i]), "udt": float(tr.udt[i]),
-            "ts": float(tr.ts[i]), "phys": tr.phys[i], "vel": tr.vel[i], "box": tr.box[i], "facing": int(tr.facing[i]),
-            "hero_state": int(tr.hero_state[i]), "relinq": bool(tr.relinq[i]), "cs": tr.cs[i],
-            "mask": int(tr.mask[i]), "silk": int(tr.silk[i]), "clip": tr.clips[tr.clip[i]],
-            "spell": tr.spells[tr.spell[i]], "dmg": int(tr.dmg[i]), "marks": int(tr.marks[i]),
-            "freeze": int(tr.freeze[i]) if tr.freeze is not None else 0, "valid": bool(tr.valid[i]),
-            "tm": tr.tm[i] if tr.tm is not None else np.full(len(km.TM_KEYS), np.nan),
-            "alpha": float(tr.alpha_log[i]) if tr.alpha_log is not None else np.nan, "load": False}
-
-
 @pytest.mark.parametrize("path", [FIXTURE, LIVE])
 def test_state_tracker_matches_the_batch_estimator_row_for_row(path):
     """The planner's per-tick state (StateTracker, O(1) per frame) is estimate_state of the whole history at the
@@ -598,7 +586,9 @@ def test_state_tracker_matches_the_batch_estimator_row_for_row(path):
     ev = km.derive_events(tr)
     trk = km.StateTracker(q, terrain)
     for i in range(len(tr)):
-        trk.push_row(_trace_row(tr, i))
+        r = tr.row(i)
+        r["load"] = False                       # the batch estimator has no slide rule (StateTracker.modelled only)
+        trk.push_row(r)
         same = (trk.S == ref[:, i]) | (np.isnan(trk.S) & np.isnan(ref[:, i]))
         assert same.all(), (i, [km.ROW_NAMES[j] for j in np.flatnonzero(~same)])
         assert trk.events == ev[i], i

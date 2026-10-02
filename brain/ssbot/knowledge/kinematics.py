@@ -1,18 +1,21 @@
 """Hero kinematics for the planner (M2 W1; DESIGN §3.5.2, §3.5.4, §3.5.6): a hybrid-mode model of Hornet's motion,
 re-derived from the decompiled HeroController (1.0.30000) and identified on logged play, a batched rollout with 2D
 collision against the scene's static terrain (compiled: ssbot.knowledge.kin_jit), timing-variant lanes for the
-+-1 frame branches, the input filter, and a runtime residual monitor. The damage-knockback envelope is in
-ssbot.knowledge.knockback.
++-1 frame branches, the input filter, a per-frame state tracker and a runtime residual monitor. The damage-knockback
+envelope is in ssbot.knowledge.knockback.
 
     params = HeroParams.load()                                  # knowledge/1.0.30000/kinematics/hero_hunter.json
     terrain = Terrain2D.from_message(terrain_msg, params.scene("Bone_05"))   # RecordingReader.terrain() payload
-    trace = Trace.from_states(states, params)                   # STATE history (oracle or recording)
-    start = estimate_state(trace, [len(trace) - 1], params, terrain=terrain)  # [K, 1] state at the last frame
-    hold = HoldState.from_act(states[-1]["act"])                # or the planner's own, kept in step with its ACTIONs
+    trk = StateTracker(params, terrain); trk.push(state)        # every STATE: O(1), 0.05 ms
+    start = trk.state()                                         # [K, 1]: estimate_state(Trace.from_states(history),
+                                                                #   [last row], params, terrain=terrain), bit for bit
+    hold = HoldState.from_act(state["act"])                     # or the planner's own, kept in step with its ACTIONs
     latched, hold_next = hold_filter(commanded, hold)           # commanded masks [N, T] -> what the game will read
     roll = rollout(start, latched, params, terrain, threads=4)  # roll.box [N, T+1, 4] collider boxes, roll.centre
-    roll = rollout(start, latched[:k], params, terrain, variants="bounds")   # roll.bound: hull of the timing lanes
-    hull, flags = knockback.knockback_hull(roll.box, params, terrain)        # Hz(c): every hit along each candidate
+    roll = rollout(start, latched, params, terrain, variants="bounds", threads=4)   # roll.bound / flags_all: the
+                                                                #   timing lanes' per-frame hull (the support form)
+    hull, flags = knockback.knockback_hull(roll.box, params, terrain, udt_history=udts)   # Hz(c), KF_UNKNOWN
+    mon = ResidualMonitor(params, terrain); mon.update(trk); mon.confidence()   # I4 "kinematics"; None: unknown
 
 Positions follow cross-module decision 1: Rollout.box is the hero collider (STATE hero.box), Rollout.centre its
 centre (WorldState HeroState.pos); Rollout.pos is the rendered transform (pos_transform).
@@ -39,9 +42,12 @@ variant lanes' hull; the event-driven primitives miss it in every setting. Most 
 113 369 covered windows) reaches 89.1 % nominal, 90.0 % in the lanes' hull: plain movement 92.6 %, as the "input"
 stream is not the exact latched mask.
 
-Planner cost (13900K, Bone_05 terrain, 512 candidates x 48 frames): nominal rollout p50 2.2 ms / p99 3.2 ms on one
-core, p50 0.46 / p99 1.2 ms with threads=4; the "fast" lanes (3 per candidate) p50 2.9 ms and the "bounds" lanes (9)
-p50 7.3 ms on four threads, so a planner rolls out the lanes for a short list only; knockback_hull p99 0.15 ms.
+Planner cost (13900K, Bone_05 terrain, 512 candidates x 48 frames, measured with other work on the machine): the
+nominal rollout p50 2.3 ms / p99 3.0 ms on one core, p50 0.47 / p99 0.8 ms with threads=4; the "bounds" lanes in the
+planner's form (lanes=False: no per-lane arrays, and a candidate that meets no hit-stop or world freeze runs 3 of the
+9, the others being identical for it) p50 1.4-1.5 ms / p99 1.9-2.2 ms with threads=4 (6.8 ms on one core), the
+"fast" lanes the same; knockback_hull p99 0.15 ms; the start state from StateTracker 0.05 ms per frame (rebuilding it
+from a 240-frame STATE tail costs 2.5 ms). So every candidate can carry its lanes' hull within the 3 ms budget.
 
 Time base (trial run, 26 892 STATE frames; ssbot.tools.kin_fit):
 - Physics steps at fdt = 0.02 s of scaled time under the render (mean frame 0.0166662 s, p1 0.01665, p99 0.01671).
@@ -82,14 +88,26 @@ Modes and what drives them (all from HeroController.FixedUpdate / Update unless 
               per step, gravity on). Throw and catch end on one of two frames with no timer explaining which (live
               i0_000: throw 26 / 27 frames 46 / 54 %, catch 9 / 10 frames 41 / 59 %): variant-valued thresholds
               (HeroParams.cast_throw_variants / cast_catch_variants, the variant lanes take both).
-  BIND        Bind (9 silk): 1.35 or 1.37 s (bind_time_variants, 67 / 33 %); air v *= 0.85 per step (rising vy
-              capped at 7.5), gravity off.
+  BIND        Bind (9 silk): 1.34, 1.36 or 1.37 s (81 / 82 / 83 frames, bind_time_variants: 28 / 56 / 17 % of
+              18 binds of live i0_000 and i0-3_002; the 37 binds of the 8 held-out recordings fall in the same three
+              intervals); air v *= 0.85 per step (rising vy capped at 7.5), gravity off. A hit in the first 1.2 s
+              (the charge, before BindBurst) also starts the BindBreak world freeze.
   LOCKED      control taken by another FSM (the boss roar): vx *= 0.86 per step, gravity on.
+World freezes (rows WF_*): GameManager.FreezeMoment coroutines other than the hero's own hit-stop, each a time-scale
+control that TimeManager multiplies into Time.timeScale: ramp down to the target over rampDown, wait, ramp back up,
+on float32 sums of unscaled time (presets FREEZE_PRESETS, GameManager.cs 5092-5141: BindBreak 0.01 / 0.4 / 0.1 to 0,
+BossDeathSlow 0.1 / 1.15 / 0.1 to 0.05, BossStun 0 / 0.25 / 0.1, QuickFreeze, EnemyDeath). The model's time scale is
+TS (the hero's hit-stop) times WF_S. BindBreak follows from the hero's own state: a hit during the Bind charge (22 of
+22 logged, 0 of 1 in the burst) keeps the scale at 0 for 0.4 s, so the recoil waits about 12 frames after the
+hit-stop (live i1_000 f 153335: nominal error 0.34 u, 3.7 u without it). The others come with the boss (killing
+blow, stun, a small enemy's death): EV_FZ_* events, which the threat layer announces as it does contacts. The
+estimator replays a running freeze from its logged start.
 Contact events do not follow from the buttons; a rollout takes them as an optional per-frame array (the threat layer
 predicts them; ssbot.tools.kin_check injects the logged ones): EV_RECOIL_L/R (a nail hit: vx = -+3.75 now and for
 8 more steps), EV_POGO (a down attack hit: jump steps from 4, jumped_steps -20), EV_HURT_L/R (impact from that
 side), EV_RECOIL_DOWN (an up slash hit: the rise stops), EV_CATCH (the Silkspear needle came back early), EV_SILK
-(+1 silk from a hit: Bind and Silkspear need it), EV_LOCK / EV_UNLOCK.
+(+1 silk from a hit: Bind and Silkspear need it), EV_LOCK / EV_UNLOCK, EV_FZ_BOSS_DEATH / BOSS_STUN / QUICK /
+ENEMY_DEATH (a world freeze starts).
 
 Collision moves the hero box (0.5 x 2.079, foot 1.5527 below hero.pos) along x then y against axis-aligned terrain
 segments with a 0.015 u skin (standing box bottom 2.0150 over the Bone_05 floor at 2.0; arena gate faces 69.208 /
@@ -102,13 +120,15 @@ that touches the floor ends there. Sloped edges are not collided by the rollout:
 
 Timing lanes (Variant): the frame time is not predictable from the history, so a +-1 frame branch cannot be
 resolved, only carried. The lanes move every float32 timer threshold by -+ timer_bias (0.5 ms: each link of the
-hit-stop wait / ramp / scaled-timer chain with its own sign), start the physics phase at either end of its feasible
-interval (+- alpha_margin) and take the short or long Silkspear and Bind variants; Rollout.bound is their per-frame
-hull. The frame-time jitter model (kin_fit over 2.83 M gameplay frames of all bot recordings: frame_time mean
-0.016666 s, shortest 0.01665, p99.99 0.01698, at most 2 frames above 0.018 s in any 65, longest 0.0369 s, rate
-3.1e-5 per frame above 0.018 s) sets the lanes' frame times and the knockback bound; a window with a hitch is left
-to the residual monitor (ResidualMonitor, DESIGN §3.5.2: residuals of the executed lane at 1 / 6 / 30 frames, I4
-confidence to the supervisor). HeroParams.jump_heights holds the apex height per jump hold length, logged (min,
+unscaled wait / ramp chain, hit-stop and world freeze alike, and the scaled timers, with its own sign), start the
+physics phase at either end of its feasible interval (+- alpha_margin) and take the short or long Silkspear and Bind
+variants; Rollout.bound is their per-frame hull, flags_all / flags_any their flags. The frame-time jitter model
+(kin_fit over 2.83 M gameplay frames of all bot recordings: frame_time mean 0.016666 s, shortest 0.01665, p99.99
+0.01698, at most 2 frames above 0.018 s in any 65, longest 0.0369 s, rate 3.1e-5 per frame above 0.018 s) sets the
+lanes' frame times and the knockback bound (knockback.TimingGuard checks it at run time). ResidualMonitor (DESIGN
+§3.5.2, I4 "kinematics") re-rolls the executed masks and observed events from anchor states and checks the observed
+box against the lanes' hull at 1 / 6 / 30 frames; frames the model does not own (StateTracker.modelled: harness,
+scene, locked, nail arts, unexplained freezes, hitches) drop their windows. HeroParams.jump_heights holds the apex height per jump hold length, logged (min,
 median, max) against the model over the phase and frame time: the hold -> height spread for the hazard margin
 (0.05-0.35 u, the 50 Hz steps falling differently among the frames; the model range holds every logged apex of
 live i0_000 within 4 mm).
@@ -1620,6 +1640,19 @@ class Trace:
         z = np.load(path, allow_pickle=False)
         meta = json.loads(str(z["meta"]))
         return cls(**{k: z[k] for k in z.files if k != "meta"}, **meta)
+
+    def row(self, i: int) -> dict:
+        """Row i in StateTracker.push_row terms (replaying a recording through the live path)."""
+        return {"f": int(self.f[i]), "fs": int(self.fs[i]), "dt": float(self.dt[i]), "udt": float(self.udt[i]),
+                "ts": float(self.ts[i]), "phys": self.phys[i], "vel": self.vel[i], "box": self.box[i],
+                "facing": int(self.facing[i]), "hero_state": int(self.hero_state[i]), "relinq": bool(self.relinq[i]),
+                "cs": self.cs[i], "mask": int(self.mask[i]), "silk": int(self.silk[i]),
+                "clip": self.clips[self.clip[i]], "spell": self.spells[self.spell[i]], "dmg": int(self.dmg[i]),
+                "marks": int(self.marks[i]), "freeze": int(self.freeze[i]) if self.freeze is not None else 0,
+                "valid": bool(self.valid[i]),
+                "tm": self.tm[i] if self.tm is not None else np.full(len(TM_KEYS), np.nan),
+                "alpha": float(self.alpha_log[i]) if self.alpha_log is not None else np.nan,
+                "load": bool(self.marks[i] & MK_SLIDE)}
 
     def slice(self, i0: int, i1: int) -> "Trace":
         d = {}
