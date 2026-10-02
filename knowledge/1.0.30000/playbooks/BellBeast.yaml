@@ -48,6 +48,13 @@ punish:
 # through Burst Out and a bell hit in 6 of 6 QUITs of run 20261002_041819. 10 u leaves room to jump the rolling bell;
 # Burst Out is not a punish window.
 prepare:
+  # A charge: wait 14 u in front of its anchor and jump it in place (hold 48 frames): 17 safe jump timings there
+  # against the charge's support (margins 0.15 / 0.25 u, Bone_05 walls), landing 13.8 u out, next to where the
+  # boss stops (root box from x' 16.8); jumping towards the charge lands behind it, 20 u from the punish window.
+  - {state: Emerge Antic C, x_prime: 14.0, side: attack}
+  - {state: Charge Emerge, x_prime: 14.0, side: attack}
+  - {state: Charge Antic, x_prime: 14.0, side: attack}
+  - {state: Charge, x_prime: 14.0, side: attack}
   - {state: Emerge Antic L, x_prime: 12.0, side: attack}
   - {state: Leap Out, x_prime: 12.0, side: attack}
   - {state: Descending, x_prime: 12.0, side: attack}
