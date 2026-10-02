@@ -39,7 +39,7 @@ BoneBeast DropBell:
                   Tink D 2: 1}
     bounces:
       - {vx: random, vx_mag: 4.0, vy: 30.0}   # Bounce Up: Bounce X (RandomFloatEither -4 / 4 at Drop), vy 30
-      - {stop: true, rest_s: 0.75}             # Submerge (0.75 s at the floor, collider on), then Dormant
+      - {stop: true, rest_s: 0.75}             # Submerge: sinks through the floor keeping vx, 0.75 s (collider on)
   # a side slash (TINK RIGHT / LEFT, Air and Bounce Air only) sets the next bounce's side away from the hitter and
   # vx to 5-10 that way; a down spike (TINK DOWN) clamps vy <= 0
   redirect: {side: {bounce_vx: 4.0, vx_min: 5.0, vx_max: 10.0, states: [Air, Bounce Air]}, down: {vy_max: 0.0}}

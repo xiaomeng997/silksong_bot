@@ -87,12 +87,11 @@ def simulate(spec: TargetSpec, x: float, y: float, vx: float, vy: float, nb: int
     xs, ys, det = np.empty(n), np.empty(n), np.ones(n, bool)
     known = True
     gone = False
-    resting = False
     for i in range(n):
         if life_s is not None and ts[i] > life_s:
             gone = True
         xs[i], ys[i], det[i] = x, y, known and not gone
-        if gone or resting:
+        if gone:
             continue
         vy -= spec.g * STEP_S
         x += vx * STEP_S
@@ -100,11 +99,11 @@ def simulate(spec: TargetSpec, x: float, y: float, vx: float, vy: float, nb: int
         if spec.ground_y is not None and y <= spec.ground_y and vy < 0 and nb < len(spec.bounces):
             b = spec.bounces[nb]
             if b.get("stop"):
-                # it stays where it landed for rest_s (a drop bell's Submerge, collider still on), then leaves
-                y, vx, vy = spec.ground_y, 0.0, 0.0
+                # Submerge: set onto the floor, then it sinks through it keeping its velocity (vx, falling) for rest_s
+                # with the collider on, then leaves (recording i3_002 f 648090: 78.46, 3.18 -> 78.14, 0.56 in 5 frames)
+                y = spec.ground_y
                 life_s = min(life_s if life_s is not None else math.inf, ts[i] + float(b.get("rest_s", 0.0)))
                 nb = len(spec.bounces)
-                resting = True
                 continue
             y = spec.ground_y
             vy = float(b["vy"])

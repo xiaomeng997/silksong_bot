@@ -60,6 +60,7 @@ from the WorldState's frame (stamp.t_game_s). The planner's rollout frame k is a
 import functools
 import json
 import math
+import os
 from pathlib import Path
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, replace
@@ -83,10 +84,12 @@ DROP_BELL = "BoneBeast DropBell"
 # the exact path's time slack: a hit lands in the physics step after the recorded position (fixture hit 62131: the bell
 # 0.11 u short of the hurtbox in the hit frame's STATE), and hit-stop frames still step (game time vs steps, 0.37 u)
 DET_SLACK_S = (-0.04, -0.02, 0.0, 0.02, 0.04)
-# off: held-out support recall (support_recall, i2_002 / i3_002, lags 2-4, oracle) lost 28 contacts with it, all
-# DropBell M2 (boss states Ptn L 9, Submerged 7, Burst Antic 6, Emerge Antic 6); the logged unions stay until those
-# are explained (hit-stop time, contacts in i-frame stretches)
-DET_REPLACE = False
+# contact skin: held-out hit i3_002 f 603438 registered with the bell circle 0.004 u short of the recorded hurtbox
+# (Box2D contact offset and polygon skin); the logged unions carry such slack implicitly
+DET_SKIN_U = 0.1
+# held-out recall (support_recall i2_002 / i3_002, held-out tables, lags 2-4, oracle): 100 % with the Submerge sink and
+# the skin (28 misses before: a resting Submerge, contact skin)
+DET_REPLACE = os.environ.get("SSBOT_DET_BELLS", "1") != "0"   # SSBOT_DET_BELLS=0: the logged unions (A/B)
 DET_STATES = frozenset({"Drop", "Air", "Bounce Up", "Bounce Air", "Submerge", "Tink Right", "Tink R Min", "Tink Left",
                         "Tink L Min", "Tink D", "Tink Right 2", "Tink R Min 2", "Tink Left 2", "Tink L Min 2", "Tink D 2"})   # world-fixed hazards with self templates (entities.<tk>.self_template)
 REST_STATES = ("Init", "Dormant")
@@ -235,17 +238,16 @@ class Forecast:
             if exclude is not None and tk_.endswith(exclude):
                 continue
             sides = (1, -1) if nb < len(sp.bounces) and sp.bounces[nb].get("vx") == "random" else (0,)
+            if rest is not None:
+                nb = len(sp.bounces)          # in Submerge: sinking, no more floor contacts
             for sd in sides:
                 for dt in DET_SLACK_S:
                     t = np.maximum(tk + dt, 0.0)
-                    if rest is not None:
-                        cx, cy = np.full(len(tk), bx), np.full(len(tk), by)
-                        ok = t <= rest
-                    else:
-                        cx, cy, ok = simulate(sp, bx, by, vx, vy, nb, None, t, side=sd)
+                    cx, cy, ok = simulate(sp, bx, by, vx, vy, nb, rest, t, side=sd)
                     dx = np.maximum(np.abs(x - cx) - hx, 0.0)
                     dy = np.maximum(np.abs(y - cy) - hy, 0.0)
-                    out |= ((dx * dx + dy * dy) <= sp.r * sp.r) & ok
+                    rr = sp.r + DET_SKIN_U
+                    out |= ((dx * dx + dy * dy) <= rr * rr) & ok
         return out
 
     def occupied_without(self, x, y, tk, exclude: str) -> np.ndarray:
