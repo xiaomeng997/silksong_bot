@@ -9,34 +9,70 @@ Live, OracleLink.subscribe_state sees every STATE on the reader thread; give the
     q = queue.SimpleQueue(); link.subscribe_state(q.put)
     backend = OracleBackend(source=q.get); ws = backend.step()
 
+Positions (§4.1, the shared reference): HeroState.pos is the hurtbox centre (hero.box = HeroController.Bounds; live
+Bell Beast run 20261001_122249, 2.15 M STATEs: 0.17-0.84 u below the transform from max to p1, mean 0.51 u, up to
+3.9 u in the rest). Entity.pos is the centre of the main body collider: the collider
+named like the entity root when the oracle exports collider names (the root's own collider), else the first exported
+collider (GetComponentsInChildren lists the root's colliders first, and EntityExporter always exports root colliders,
+disabled or not); with no collider, the render_aabb centre; else the transform. Live run: the Bell Beast's first
+collider is its root box in 918,108 of 932,222 exported frames, whose centre is 0.68-4.01 u from the transform (mean
+2.27 u); the rest are its first emergence after a savestate load (9,799 frames with no collider, then 4,315 with only
+the charge polygon: the exporter's collider cache catching up), where only collider names tell the root box apart.
+The transforms are kept as pos_transform (O).
+
 feed() must see every STATE in order: events ride on the STATE of their frame (a dropped STATE takes its events with
 it; the gap shows in perception.dropped_frames), and these fields need memory:
   - Stamp.t_game_s: sum of the scaled dt, so it stands still through freezes and pauses (dt is 0 there).
   - Game.unpause_lockout_until_s: 0.3 s real time (QPC) after every pause/unpause edge (m0:C12).
-  - HeroState timers, from cState edges plus the prefab constants (docs/facts/<build>/hero_constants.json), since the
-    oracle exports no remaining times: iframes_left = INVUL_TIME - game time since cState.invulnerable rose, which is
-    how HeroController.Invulnerable() counts (scaled deltaTime; measured: the sum of dt from rise to fall is 0.992 s
-    for 96 of 98 rises after a hit in the trial run, INVUL_TIME 1.0 minus the rise frame); recoil_left =
-    RECOIL_DURATION from cState.recoiling (measured 0.200-0.217 s); dash_cd_left = DASH_COOLDOWN from a dash start;
-    action_lock_left = what is left of the attack/throw animation clip.
+  - HeroState timers: exact from the oracle's hero.tm when it is exported (inv, recoil, dash_cd, atk_cd). Without it,
+    from cState edges plus the prefab constants (docs/facts/<build>/hero_constants.json): iframes_left =
+    INVUL_TIME - game time since cState.invulnerable rose, which is how HeroController.Invulnerable() counts (scaled
+    deltaTime; trial run: the sum of dt from rise to fall is 0.992 s for 96 of 98 rises after a hit); recoil_left =
+    RECOIL_DURATION from cState.recoiling (measured 0.200-0.217 s); dash_cd_left = DASH_COOLDOWN from a dash start,
+    0 exactly when can.dash is true (CanDash needs dashCooldownTimer <= 0), and conf 0.5 when can.dash is false with
+    no dash in the last DASH_COOLDOWN (the timer has other writers: shuttlecock 0.1, short pogo 0.1, wall jump
+    0.05, HeroController.cs:7792, 4610, 8787); action_lock_left = what is left of the attack/throw clip.
   - Entity velocity by finite difference when the entity has no rigidbody (vel nil), acceleration always so.
-  - Entity kind is sticky per iid: the oracle's projectile src bit is a heuristic that comes and goes ("BoneBeast
-    AtkBell R" carries it in 2270 of its 2439 frames, "AtkBell L" in 2258 of 2808), so the most specific kind seen
-    so far is kept.
-  - HIT_DEALT from enemy HP drops between consecutive STATEs: the oracle has no hit-dealt event (oracle/src has no
-    HealthManager.TakeDamage tap). Measured: every Hunter nail hit on the Bell Beast took exactly 5 HP (27 drops in
-    the trial episode, 29 in the person's fight); the killing blow shows no drop, because the entity leaves "ents" in
-    the frame its Control FSM enters "Death Broadcast" (Silkspear from 15 HP in the trial run): ENEMY_KILLED comes from
-    the boss's death states (BossSpec) or is_dead rising.
+  - Entity kind holds PROJECTILE for PROJECTILE_HOLD_S after the projectile src bit was last seen. The bit is
+    "no HealthManager and a dynamic Rigidbody2D or the PROJECTILES layer" (EntityRegistry.cs:726), evaluated when
+    the oracle's entity cache refreshes: on the trial run "BoneBeast AtkBell L" carries it in 3917 of 5918 frames
+    in runs of p50 176 frames, with gaps of p50 86 frames (a bell resting between throws); falling DropBells carry
+    it from their drop until the bell has settled and the entity cache refreshes (trial run: 2,689 of the 3,215
+    DropBell PROJECTILE frames are at rest, |vel| < 0.05 u/s). Kind follows the bit with a short hold instead of
+    keeping it for the episode.
+  - HIT_DEALT: from the oracle's "hit" events when the stream has them (killing blows and hits on unexported enemies
+    included; ENEMY_KILLED once, on the killing blow hp_before > 0 >= hp_after; by_hero False for environmental
+    attack types, as the event covers every source). Older recordings: from enemy HP drops between consecutive
+    STATEs (every Hunter nail hit on the Bell Beast took 5 HP: 56 of 56 drops on the trial run; the killing blow shows
+    no drop because the
+    boss leaves "ents" in the frame its Control FSM enters "Death Broadcast", so ENEMY_KILLED also comes from the
+    BossSpec death states or is_dead rising).
+  - HIT_TAKEN.amount: masks lost (health + blue): the TakeHealth "hp" event that follows the "damage" event, or for
+    a lethal hit LethalBlock cancelled, the catastrophe / would_die "dmg"; the raw TakeDamage argument is amount_raw
+    (O). Trial run: 8 hits took 2 masks, 91 lethal hits were cancelled (dmg 2); live i1_001 + i3_000: all 2,135
+    hits 2 masks. TakeDamage calls a later gate rejected (no health, no recoil) are DAMAGE_BLOCKED, not hits: 28 pogo
+    hits in those live files, 2 during a bind on the trial run (see _hits_taken).
+  - Bind outcome: DONE when the hero "spell" FSM reached "Bind Burst" during isBinding (trial run: Bind Air ->
+    Binding -> Bind Burst -> Cooldown in all 4 binds), or HP rose; else BROKEN. Live run: 36 DONE (+3 masks each),
+    17 BROKEN (HP unchanged).
+  - HitDealt.hero_anim: the hero's animation clip at the hit, or while the hero is hurt the clip before the hurt (a
+    spear still in flight when the hero is hit lands during "Stun"), so the vision path can price a hit by what the
+    bot did. Live run: all 460 hits carrying "NeedleThrow Throwing" (the Silk Spear) took 15 HP, the other 4,081 took
+    5 HP.
   - FSM_TRANSITION.hero_rel_pos and the time in the current FSM state (game time since the transition event; the
     exported StateTime stops once a state's actions have finished).
 
-Cost on the trial run (2 episodes, 26.9k STATEs, 13900K): p50 77-92 us, p99 373-435 us per STATE.
+Cost per STATE on live i1_001 + i3_000 (546,770 STATEs, 13900K, two processes in parallel): p50 93-94 us, p99
+173-175 us.
 
 Contact and mode come from the cState bits (field order: RPC "schema.cstate", or the facts copy cstate_schema.json).
-A wall contact's side is taken from the facing, which BeginWallSlide sets towards the wall (HeroController.cs:8468-8479);
-the oracle does not export touchingWallL/R.
+The wall side comes from hero.wall [touchingWallL, touchingWallR] when exported; without it, from the facing when
+wall sliding or clinging (BeginWallSlide faces the wall, HeroController.cs:8468-8479), and from the facing with conf
+0.5 when the hero only touches a wall (collision sets touchingWallL/R regardless of facing, cs:11487-11499).
+DamageBox flags IGNORES_IFRAMES / IGNORES_PARRY follow HeroController.TakeDamage (worldstate.IFRAME_BLOCKED,
+PARRY_BLOCKED); cog sources are Hazard.COG, which goes through both.
 """
+import functools
 import json
 import math
 import time
@@ -45,11 +81,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from ssbot.core.bosses import BossSpec
-from ssbot.core.worldstate import (BIND_SILK, FM, BindOutcome, CameraPose, DamageBox, E, Entity, EnemyKilled, Ev, Event,
-                                   Freeze, FsmTransition, Game, GateEdge, Hazard, HeroState, HitDealt, HitTaken, Info,
-                                   Kind, Lethal, PauseBlock, PerceptionHealth, PhasePost, PlayTimeEst, Resources,
-                                   SceneEnter, SceneLeave, Screen, Src, Stamp, TerrainRef, ToolSlot, WorldState,
-                                   unknown)
+from ssbot.core.worldstate import (BIND_SILK, FM, IFRAME_BLOCKED, PARRY_BLOCKED, BindOutcome, CameraPose, DamageBox, E,
+                                   Entity, EnemyKilled, Ev, Event, Freeze, FsmTransition, Game, Gate, GateEdge, Hazard,
+                                   HeroState, HitDealt, HitTaken, Info, Kind, Lethal, MenuRead, PauseBlock,
+                                   PerceptionHealth, PhasePost, PlayTimeEst, Resources, SceneEnter, SceneLeave, Screen,
+                                   Src, Stamp, TerrainRef, ToolSlot, WorldState, unknown)
 from ssbot.ipc.ents import DAMAGE_FLAGS, HAZARD_TYPES, PARRY_BITS, PARRYABLE, SRC_BITS, is_threat
 
 BUILD = "1.0.30000"
@@ -58,6 +94,7 @@ QPC_FREQ = 10_000_000              # HELLO "qpc_freq" on this machine
 PAUSE_LOCKOUT_S = 0.3              # WaitForSecondsRealtime(0.3f) after PauseGameToggle (m0:C12)
 FRAME_S = 1.0 / 60.0
 MAX_GAP_FRAMES = 30                # a longer gap in the STATE stream (reconnect, recording cut) resets entity memory
+PROJECTILE_HOLD_S = 0.25           # game time a PROJECTILE kind outlives the last frame with the projectile bit
 
 # Prefab values (docs/facts/1.0.30000/hero_constants.json, probe P11); the file wins when it is there.
 HERO_DEFAULTS = {"INVUL_TIME": 1.0, "INVUL_TIME_PARRY": 0.15, "RECOIL_DURATION": 0.2, "DASH_COOLDOWN": 0.425}
@@ -75,6 +112,9 @@ _BLK_MAP = ((1, PauseBlock.DISABLE_PAUSE), (2, PauseBlock.TIME_SLOWED), (4, Paus
 BLK_DISABLE_PAUSE = 1
 
 HAZARD_OF: dict[str, Hazard] = {n: Hazard[n] if n in Hazard.__members__ else Hazard.OTHER for n in HAZARD_TYPES}
+BIND_DONE_STATES = frozenset(("Bind Burst",))      # hero "spell" FSM: the heal is applied in this state
+# AttackTypes (decompiled AttackTypes.cs) that only the environment deals: a "hit" with one is not the hero's
+ENV_ATTACKS = frozenset(("Acid", "Splatter", "RuinsWater", "Lava", "Coal", "Trap", "Spikes"))
 
 _CS = ("onGround", "touchingWall", "wallSliding", "wallClinging", "wallScrambling", "swimming", "hazardDeath",
        "hazardRespawning", "dead", "dashing", "airDashing", "backDashing", "superDashing", "shadowDashing", "floating",
@@ -88,9 +128,6 @@ _ATTACK = ("attacking", "upAttacking", "downAttacking", "downSpikeAntic", "downS
            "parrying", "nailCharging")
 _NAIL_RECOIL = ("recoilingLeft", "recoilingRight", "recoilingDrill")
 _STATUS = (("inAcid", "ACID"), ("isFrosted", "FROST"), ("isMaggoted", "MAGGOTED"))
-
-# Kind refinement order for the sticky per-iid kind (a later entry never gives way to an earlier one).
-_KIND_RANK = {Kind.UNKNOWN: 0, Kind.ENEMY_ATTACK: 1, Kind.HAZARD_DYN: 1, Kind.PROJECTILE: 2}
 
 
 def load_facts(name: str, build: str = BUILD) -> dict | None:
@@ -112,17 +149,30 @@ def hero_constants(build: str = BUILD) -> dict[str, float]:
     return {k: float(hero.get(k, v)) for k, v in HERO_DEFAULTS.items()}
 
 
-def damage_flags(d: dict) -> frozenset[str]:
-    """DamageBox.flags of a collider "damage" map (parry bits, DamagePropertyFlags, hazard type)."""
+def box_hazard(d: dict | None, cog: bool = False) -> Hazard:
+    """Hazard of a collider "damage" map; a cog source (src bit) is COG whatever its DamageHero says."""
+    if cog:
+        return Hazard.COG
+    h = (d or {}).get("hazard_type")
+    if h is None or not 0 <= h < len(HAZARD_TYPES):
+        return Hazard.OTHER
+    return HAZARD_OF[HAZARD_TYPES[h]]
+
+
+def damage_flags(d: dict, cog: bool = False) -> frozenset[str]:
+    """DamageBox.flags of a collider "damage" map (parry bits, DamagePropertyFlags, the TakeDamage gate)."""
+    return _flags(d.get("parry") or 0, d.get("flags") or 0, box_hazard(d, cog), (d.get("eff") or 0) < 0)
+
+
+@functools.lru_cache(maxsize=1024)
+def _flags(parry: int, fl: int, hz: Hazard, amount_fsm: bool) -> frozenset[str]:
     out = []
-    parry = d.get("parry") or 0
     if parry & PARRYABLE:
         out.append("PARRYABLE")
     if parry & PARRY_BITS["clash"]:
         out.append("DEFLECTABLE")
     if parry & PARRY_BITS["counter"]:
         out.append("COUNTER")
-    fl = d.get("flags") or 0
     if fl & DAMAGE_FLAGS["flame"]:
         out.append("FLAME")
     if fl & DAMAGE_FLAGS["void"]:
@@ -131,16 +181,17 @@ def damage_flags(d: dict) -> frozenset[str]:
         out.append("TAG_ACID")
     if fl & DAMAGE_FLAGS["non_lethal"]:
         out.append("NON_LETHAL")
-    h = d.get("hazard_type")
-    if h is not None and 0 <= h < len(HAZARD_TYPES) and HAZARD_TYPES[h] in ("PIT", "SINK"):
+    if hz not in IFRAME_BLOCKED:
         out.append("IGNORES_IFRAMES")
-    if (d.get("eff") or 0) < 0:
+    if hz not in PARRY_BLOCKED:
+        out.append("IGNORES_PARRY")
+    if amount_fsm:
         out.append("AMOUNT_FSM")
     return frozenset(out)
 
 
 def entity_kind(e: dict, bosses: frozenset[str] | dict = frozenset()) -> Kind:
-    """Kind of one exported entity from its category and src bits (one frame; OracleBackend keeps it sticky)."""
+    """Kind of one exported entity from its category and src bits (one frame; OracleBackend adds a short hold)."""
     tk, cat, src = e["type_key"], e["category"], e.get("src") or 0
     if tk in bosses:
         return Kind.BOSS
@@ -165,8 +216,77 @@ def entity_kind(e: dict, bosses: frozenset[str] | dict = frozenset()) -> Kind:
     return Kind.UNKNOWN
 
 
+def type_key_of(name: str) -> str:
+    """EntityRegistry.TypeKey: strip trailing "(Clone)" and " (n)" suffixes, repeatedly."""
+    end = len(name)
+    while True:
+        while end > 0 and name[end - 1] == " ":
+            end -= 1
+        if end >= 7 and name[end - 7:end] == "(Clone)":
+            end -= 7
+            continue
+        if end >= 3 and name[end - 1] == ")":
+            i = end - 2
+            while i >= 0 and name[i].isdigit():
+                i -= 1
+            if 0 <= i < end - 2 and name[i] == "(":
+                end = i
+                continue
+        break
+    return name if end == 0 else name[:end]
+
+
 def _pts(flat: Sequence[float]) -> list[tuple[float, float]]:
     return list(zip(flat[0::2], flat[1::2]))
+
+
+def _centre(flat: Sequence[float]) -> tuple[float, float]:
+    xs, ys = flat[0::2], flat[1::2]
+    return (min(xs) + max(xs)) * 0.5, (min(ys) + max(ys)) * 0.5
+
+
+def main_collider(e: dict) -> dict | None:
+    """The entity's main body collider (§4.1): the one named like the root when names are exported, else the first
+    exported collider. None when there is none (or names say the root has none)."""
+    cols = [c for c in e.get("colliders") or () if c.get("verts_world")]
+    if not cols:
+        return None
+    if any(c.get("name") is not None for c in cols):
+        tk = e.get("type_key") or ""
+        return next((c for c in cols if c.get("name") is not None and type_key_of(c["name"]) == tk), None)
+    return cols[0]
+
+
+def damage_boxes(e: dict) -> list[DamageBox]:
+    """One DamageBox per exported collider with a "damage" map; active = enabled and able to deal damage now."""
+    cog = bool((e.get("src") or 0) & SRC_BITS["cog"])
+    out = []
+    for c in e.get("colliders") or ():
+        d = c.get("damage")
+        if d is not None:
+            eff, dealt = int(d.get("eff") or 0), int(d.get("dealt") or 0)
+            out.append(DamageBox(poly=_pts(c["verts_world"]), active=is_threat(c), hazard=box_hazard(d, cog),
+                                 flags=damage_flags(d, cog), name=c.get("name"),
+                                 dmg_seq=(eff,) if eff > 0 else (dealt,) if dealt > 0 else ()))
+    return out
+
+
+def entity_pos_ref(e: dict) -> tuple[tuple[float, float], tuple]:
+    """(Entity.pos per §4.1, which reference it is): main body collider centre, else render_aabb centre, else the
+    transform. Hidden entities (state_fields_m2.md §6: colliders always [], render_aabb nil when inactive) follow the
+    same rule. Velocity is not differenced across a change of reference (a 1-3 u jump, not motion)."""
+    c = main_collider(e)
+    if c is not None:
+        return _centre(c["verts_world"]), ("collider", c.get("name"), len(c["verts_world"]))
+    r = e.get("render_aabb")
+    if r:
+        return ((r[0] + r[2]) * 0.5, (r[1] + r[3]) * 0.5), ("render",)
+    return (float(e["pos"][0]), float(e["pos"][1])), ("transform",)
+
+
+def entity_pos(e: dict) -> tuple[float, float]:
+    """Entity.pos per §4.1: main body collider centre, else render_aabb centre, else the transform."""
+    return entity_pos_ref(e)[0]
 
 
 @dataclass(slots=True)
@@ -178,7 +298,8 @@ class _Track:
     t: float
     hp: int | None
     dead: bool
-    killed: bool = False
+    proj_t: float = -math.inf      # game time the projectile bit was last seen
+    ref: tuple = ()                # which reference pos is (entity_pos_ref)
 
 
 @dataclass(slots=True)
@@ -192,8 +313,10 @@ class _HeroMemory:
     dash_t0: float = -math.inf
     bind: bool = False
     bind_hp0: int = 0
+    bind_burst: bool = False
     hit_t: float = -math.inf          # game time of the last HIT_TAKEN
     dead: bool = False
+    hp_total: int | None = None       # health + blue of the previous STATE (PlayerData exported)
 
 
 @dataclass(slots=True)
@@ -205,8 +328,10 @@ class _Memory:
     focus: bool | None = None
     lockout_until: float = 0.0
     t_live: float | None = None
+    hit_events: bool = False          # the stream carries oracle "hit" events: HIT_DEALT comes from them
     hero: _HeroMemory = field(default_factory=_HeroMemory)
     tracks: dict[int, _Track] = field(default_factory=dict)
+    killed: set[int] = field(default_factory=set)      # iids ENEMY_KILLED was reported for (with or without a track)
     fsm_entry: dict[tuple[int, str], float] = field(default_factory=dict)
 
 
@@ -231,6 +356,7 @@ class OracleBackend:
         self.k = constants or hero_constants()
         self.clock = clock
         self.m = _Memory()
+        self._hero_clip: str | None = None     # the hero's last animation clip outside the hurt mode
 
     def reset(self) -> None:
         """Forget all memory (new episode / reconnect)."""
@@ -258,24 +384,33 @@ class OracleBackend:
         if scene != m.scene or gap > MAX_GAP_FRAMES:    # entity memory does not survive a room change or a long gap
             m.scene = scene
             m.tracks.clear()
+            m.killed.clear()
             m.fsm_entry.clear()
 
         derived: list[Event] = []
-        evs = s.get("ev") or ()
-        if any(ev.get("k") in ("damage", "special_damage") for ev in evs):
-            m.hero.hit_t = m.t_game       # the hit's i-frames start in the same STATE (StartRecoil)
+        evs = list(s.get("ev") or ())
+        if not m.hit_events and any(ev.get("k") == "hit" for ev in evs):
+            m.hit_events = True
         hd = s.get("hero")
-        hero, res = self._hero(hd, p, f, derived)
+        cs = self._cs(hd["cstate"]) if hd else {}
+        hp_prev = m.hero.hp_total
+        hp_now = int(hd["health"]) + int(hd.get("health_blue") or 0) if hd and hd.get("health") is not None else None
+        taken = self._hits_taken(evs, cs, hp_prev, hp_now)
+        if taken:
+            m.hero.hit_t = m.t_game       # the hit's i-frames start in the same STATE (StartRecoil)
+        hero, res = self._hero(hd, cs, p, f, derived)
+        if hero.mode.v != "hurt" or self._hero_clip is None:     # a hit landing while the hero is hurt was dealt
+            self._hero_clip = ((hd or {}).get("anim") or {}).get("clip")    # by the action before (a spear in flight)
         hero_xy = hero.pos.v if hd else None
         ents, by_type = self._entities(s.get("ents") or (), f, hero_xy, derived)
-        oracle_events = self._events(evs, f, hero_xy, ents, by_type)
+        oracle_events = self._events(evs, f, hero_xy, ents, by_type, taken, cs)
         game = self._game(s, g, p, hd, f, t_real, derived)
 
         cam = self._cam(s.get("cam"))
         stamp = Stamp(frame=f, t_sample_qpc_ns=t_ns, t_pub_qpc_ns=self.clock() if self.clock else t_ns,
                       t_game_s=m.t_game, backend=self.backend, config_fp=self.config_fp)
         return WorldState(stamp=stamp, game=game, cam=cam, hero=hero, res=res, entities=ents, threats=[],
-                          terrain=TerrainRef(scene=scene or ""), events=oracle_events + derived,
+                          terrain=self._terrain(scene, s.get("room")), events=oracle_events + derived,
                           perception=PerceptionHealth(dropped_frames=gap))
 
     # ---- hero --------------------------------------------------------------------------------------------------
@@ -285,30 +420,43 @@ class OracleBackend:
             raise ValueError(f"{len(words)} cstate words for {len(self.cstate_names)} fields: wrong cstate schema")
         return {n: bool((words[w] >> b) & 1) for n, (w, b) in self._bit.items()}
 
-    def _hero(self, h: dict | None, p: dict, f: int, out: list[Event]) -> tuple[HeroState, Resources]:
-        m, hm, k = self.m, self.m.hero, self.k
+    @staticmethod
+    def _contact(cs: dict[str, bool], wall: Sequence | None, facing: int) -> E[str]:
+        if cs.get("hazardDeath") or cs.get("hazardRespawning"):
+            return E("HAZARD")
+        if cs.get("swimming"):
+            return E("WATER")
+        if cs.get("onGround"):
+            return E("GROUND")
+        sliding = cs.get("wallSliding") or cs.get("wallClinging")
+        if wall is not None and len(wall) >= 2 and (wall[0] or wall[1]):
+            if wall[0] and wall[1]:
+                return E("WALL_L" if facing < 0 else "WALL_R")
+            return E("WALL_L" if wall[0] else "WALL_R")
+        if sliding:
+            return E("WALL_L" if facing < 0 else "WALL_R")
+        if cs.get("touchingWall"):
+            return E("WALL_L" if facing < 0 else "WALL_R", conf=0.5, src=Src.PREDICTED)
+        return E("AIR")
+
+    def _hero(self, h: dict | None, cs: dict[str, bool], p: dict, f: int, out: list[Event]
+              ) -> tuple[HeroState, Resources]:
+        m, hm = self.m, self.m.hero
         if h is None:
             self.m.hero = _HeroMemory(hit_t=hm.hit_t)
             return HeroState(), Resources()
         t = m.t_game
-        cs = self._cs(h["cstate"])
         hm.dead = cs.get("dead", False)
-        x, y = float(h["pos"][0]), float(h["pos"][1])
+        tx, ty = float(h["pos"][0]), float(h["pos"][1])
         vel = h.get("vel")
         facing = int(h.get("facing") or 1)
         box = h.get("box")
-        hurtbox = [(box[0], box[1]), (box[2], box[1]), (box[2], box[3]), (box[0], box[3])] if box else []
-
-        if cs.get("hazardDeath") or cs.get("hazardRespawning"):
-            contact = "HAZARD"
-        elif cs.get("swimming"):
-            contact = "WATER"
-        elif cs.get("onGround"):
-            contact = "GROUND"
-        elif cs.get("wallSliding") or cs.get("wallClinging") or cs.get("touchingWall"):
-            contact = "WALL_L" if facing < 0 else "WALL_R"
+        if box:
+            hurtbox = [(box[0], box[1]), (box[2], box[1]), (box[2], box[3]), (box[0], box[3])]
+            pos = ((box[0] + box[2]) * 0.5, (box[1] + box[3]) * 0.5)
         else:
-            contact = "AIR"
+            hurtbox, pos = [], (tx, ty)
+        contact = self._contact(cs, h.get("wall"), facing)
 
         def any_of(names: Sequence[str]) -> bool:
             return any(cs.get(n) for n in names)
@@ -319,7 +467,7 @@ class OracleBackend:
         elif cs.get("transitioning") or cs.get("isInCutsceneMovement") or (
                 no_input and h.get("control_relinquished") and not (cs.get("recoiling") or cs.get("recoilFrozen"))):
             mode = "cutscene"
-        elif cs.get("recoilFrozen") or cs.get("recoiling") or cs.get("dead") or contact == "HAZARD":
+        elif cs.get("recoilFrozen") or cs.get("recoiling") or cs.get("dead") or contact.v == "HAZARD":
             mode = "hurt"
         elif cs.get("isBinding"):
             mode = "bind"
@@ -340,14 +488,62 @@ class OracleBackend:
         else:
             mode = "air"
 
-        # i-frames: Invulnerable() counts invulnerableDuration down with scaled deltaTime from StartInvulnerable.
+        tm = h.get("tm") if isinstance(h.get("tm"), dict) else None
+        iframes, recoil, dash_cd, lock = self._timers(h, cs, tm, no_input, any_of(_ATTACK), any_of(_DASH[:3]))
+
+        hp = int(h["health"]) if h.get("health") is not None else None
+        binding = "NONE"
+        spell = h.get("spell")
+        spell_state = spell[0] if isinstance(spell, (list, tuple)) and spell else None
+        if cs.get("isBinding"):
+            binding = "IN_PROGRESS"
+            if not hm.bind:
+                hm.bind_hp0 = hp or 0
+                hm.bind_burst = False
+                out.append(Event(Ev.BIND_START, f, t, BindOutcome(hp or 0, hp or 0)))
+            if spell_state in BIND_DONE_STATES:
+                hm.bind_burst = True
+        elif hm.bind:
+            ok = hm.bind_burst or spell_state in BIND_DONE_STATES or (hp is not None and hp > hm.bind_hp0)
+            binding = "DONE" if ok else "INTERRUPTED"
+            out.append(Event(Ev.BIND_DONE if ok else Ev.BIND_BROKEN, f, t, BindOutcome(hm.bind_hp0, hp or 0)))
+        hm.bind = bool(cs.get("isBinding"))
+        hm.hp_total = hp + int(h.get("health_blue") or 0) if hp is not None else None
+
+        alpha = h.get("alpha")
+        hero = HeroState(
+            pos=E(pos), vel=E((float(vel[0]), float(vel[1]))) if vel else unknown((0.0, 0.0)),
+            facing=E(facing), hurtbox=hurtbox, contact=contact, mode=E(mode), iframes_left=iframes,
+            recoil_left=recoil, dash_cd_left=dash_cd, action_lock_left=lock, binding=E(binding),
+            can=dict(h["can"]) if h.get("can") else None, pos_transform=(tx, ty),
+            tm={kk: float(v) for kk, v in tm.items() if isinstance(v, (int, float))} if tm is not None else None,
+            phys_alpha=float(alpha) if alpha is not None else None)
+        return hero, self._resources(h, cs, hp)
+
+    def _timers(self, h: dict, cs: dict[str, bool], tm: dict | None, no_input: bool, attacking: bool, dash: bool
+                ) -> tuple[E[float], E[float], E[float], E[float]]:
+        """iframes_left, recoil_left, dash_cd_left, action_lock_left (exact from hero.tm when it is there)."""
+        m, hm, k = self.m, self.m.hero, self.k
+        t = m.t_game
         inv = cs.get("invulnerable", False)
         if inv and not hm.inv:
             hm.inv_t0 = t
             hm.inv_dur = k["INVUL_TIME"] if t - hm.hit_t <= 2 * FRAME_S else None
         hm.inv = inv
+        rec = cs.get("recoiling", False)
+        if rec and not hm.rec:
+            hm.rec_t0 = t
+        hm.rec = rec
+        if dash and not hm.dash:
+            hm.dash_t0 = t
+        hm.dash = dash
         parry_t = float(h.get("parry_invuln_timer") or 0.0)
-        if inv and hm.inv_dur is not None:
+
+        # i-frames: Invulnerable() counts invulnerableDuration down with scaled deltaTime from StartInvulnerable.
+        tm_inv = float(tm["inv"]) if tm is not None and tm.get("inv") is not None else None
+        if tm_inv is not None and (tm_inv > 0.0 or not inv):
+            iframes = E(max(tm_inv, parry_t))
+        elif inv and hm.inv_dur is not None:
             left = max(0.0, hm.inv_dur - (t - hm.inv_t0))
             iframes = E(max(left, parry_t), sigma=FRAME_S, conf=0.9, src=Src.PREDICTED)
         elif inv:   # invulnerable for a reason with no known duration (hazard respawn, bind, cutscene ...)
@@ -360,52 +556,71 @@ class OracleBackend:
         else:
             iframes = E(0.0)
 
-        rec = cs.get("recoiling", False)
-        if rec and not hm.rec:
-            hm.rec_t0 = t
-        hm.rec = rec
-        if cs.get("recoilFrozen"):
+        if tm is not None and tm.get("recoil") is not None:
+            recoil = E(max(0.0, float(tm["recoil"])))
+        elif cs.get("recoilFrozen"):
             recoil = E(k["RECOIL_DURATION"], sigma=FRAME_S, conf=0.8, src=Src.PREDICTED)
         elif rec and no_input:
             recoil = E(max(0.0, k["RECOIL_DURATION"] - (t - hm.rec_t0)), sigma=FRAME_S, conf=0.9, src=Src.PREDICTED)
         else:
             recoil = E(0.0)
 
-        dash = any_of(_DASH[:3])
-        if dash and not hm.dash:
-            hm.dash_t0 = t
-        hm.dash = dash
-        dash_cd = E(max(0.0, k["DASH_COOLDOWN"] - (t - hm.dash_t0)), sigma=FRAME_S, conf=0.8, src=Src.PREDICTED)
+        can_dash = (h.get("can") or {}).get("dash")
+        if tm is not None and tm.get("dash_cd") is not None:
+            dash_cd = E(max(0.0, float(tm["dash_cd"])))
+        elif can_dash is True:
+            dash_cd = E(0.0)
+        else:
+            left = max(0.0, k["DASH_COOLDOWN"] - (t - hm.dash_t0))
+            dash_cd = E(left, sigma=FRAME_S, conf=0.8, src=Src.PREDICTED) if left > 0 or can_dash is None else \
+                E(0.0, sigma=0.1, conf=0.5, src=Src.PREDICTED)
 
         anim = h.get("anim") or {}
-        if any_of(_ATTACK):
+        clip_left = 0.0
+        if attacking:
             fps, n = float(anim.get("fps") or 0.0), int(anim.get("n") or 0)
-            left = max(0.0, n / fps - float(anim.get("t") or 0.0)) if fps > 0 else 0.0
-            lock = E(left, sigma=0.05, conf=0.5, src=Src.PREDICTED)
+            clip_left = max(0.0, n / fps - float(anim.get("t") or 0.0)) if fps > 0 else 0.0
+        if tm is not None and tm.get("atk_cd") is not None:
+            cd = max(0.0, float(tm["atk_cd"]))
+            lock = E(max(cd, clip_left), sigma=0.05, conf=0.8, src=Src.PREDICTED) if clip_left > cd else E(cd)
+        elif attacking:
+            lock = E(clip_left, sigma=0.05, conf=0.5, src=Src.PREDICTED)
         else:
             lock = E(0.0, conf=0.8, src=Src.PREDICTED)
+        return iframes, recoil, dash_cd, lock
 
-        hp = int(h.get("health") or 0)
-        binding = "NONE"
-        if cs.get("isBinding"):
-            binding = "IN_PROGRESS"
-            if not hm.bind:
-                hm.bind_hp0 = hp
-                out.append(Event(Ev.BIND_START, f, t, BindOutcome(hp, hp)))
-        elif hm.bind:
-            ok = hp > hm.bind_hp0
-            binding = "DONE" if ok else "INTERRUPTED"
-            out.append(Event(Ev.BIND_DONE if ok else Ev.BIND_BROKEN, f, t, BindOutcome(hm.bind_hp0, hp)))
-        hm.bind = bool(cs.get("isBinding"))
+    @staticmethod
+    def _pending(h: dict, cs: dict[str, bool], hp_total: int | None) -> E[int]:
+        """Resources.pending_dmg: what attached DamageTags and the frost clock can still deal (masks, an upper bound;
+        hero.tags, docs/facts/1.0.30000/state_fields_m2.md §4: nil = no TagDamageTaker, [] = no tag). A tag without a
+        hit limit (dmg_left -1: swimming in frost water) or with an unreadable dmg_left, the frost clock
+        (cState.isFrosted: 1 HP every 1.75 s through i-frames while frostAmount >= 1, HeroController.cs:2697-2762,
+        m0:N3) and a stream without hero.tags are unbounded or unknown: conf 0 and v = health + blue, lethal by itself
+        where hits_to_death subtracts it (as safety.hits_to_death.pending_from_tags reads hero.tags)."""
+        lethal = int(hp_total) if hp_total is not None else 0
+        if "tags" not in h:
+            return E(lethal, sigma=math.inf, conf=0.0, src=Src.UNKNOWN)
+        if cs.get("isFrosted"):
+            return E(lethal, sigma=math.inf, conf=0.0, src=Src.PREDICTED)
+        tags = h["tags"]
+        if tags is None:
+            return E(0)
+        total = 0
+        for tg in tags if isinstance(tags, list) else (None,):
+            d = tg.get("dmg_left") if isinstance(tg, dict) else None
+            if isinstance(d, bool) or not isinstance(d, (int, float)) or d < 0:
+                return E(lethal, sigma=math.inf, conf=0.0, src=Src.PREDICTED)
+            total += int(d)
+        return E(total)
 
-        hero = HeroState(
-            pos=E((x, y)), vel=E((float(vel[0]), float(vel[1]))) if vel else unknown((0.0, 0.0)),
-            facing=E(facing), hurtbox=hurtbox, contact=E(contact), mode=E(mode), iframes_left=iframes,
-            recoil_left=recoil, dash_cd_left=dash_cd, action_lock_left=lock, binding=E(binding),
-            can=dict(h["can"]) if h.get("can") else None)
-        return hero, self._resources(h, cs, hp)
-
-    def _resources(self, h: dict, cs: dict[str, bool], hp: int) -> Resources:
+    def _resources(self, h: dict, cs: dict[str, bool], hp: int | None) -> Resources:
+        status = set(tag for n, tag in _STATUS if cs.get(n))
+        tags = h.get("tags")
+        if isinstance(tags, list):
+            status.update(str(tg.get("kind") or "TAG").upper() for tg in tags if isinstance(tg, dict))
+        pending = self._pending(h, cs, hp + int(h.get("health_blue") or 0) if hp is not None else None)
+        if hp is None:          # HeroExporter writes PlayerData keys only when pd != null (a load in progress)
+            return Resources(pending_dmg=pending, status=frozenset(status))
         fm = h.get("fractured_mask")
         if not fm or fm.get("equipped") is None:
             fm_v = E(FM.UNKNOWN, conf=0.0, src=Src.UNKNOWN)
@@ -413,7 +628,10 @@ class OracleBackend:
             fm_v = E(FM.NOT_EQUIPPED if not fm["equipped"] else FM.INTACT if fm["amount_left"] > 0 else FM.BROKEN)
         names = h.get("tools") or []
         amounts = h.get("tool_amounts") or []
-        tools = [ToolSlot(tool_id=n, ammo=E(int(a or 0))) for n, a in zip(names, amounts) if n]
+        maxes = h.get("tool_max") or []
+        tools = [ToolSlot(tool_id=n, ammo=E(int(amounts[i] or 0)) if i < len(amounts) else unknown(0),
+                          ammo_max=int(maxes[i] or 0) if i < len(maxes) and maxes[i] is not None else 0)
+                 for i, n in enumerate(names) if n]
         silk_max = h.get("silk_max")
         silk = int(h.get("silk") or 0)
         can = h.get("can") or {}
@@ -422,8 +640,7 @@ class OracleBackend:
             silk=E(silk), silk_max=E(int(silk_max)) if silk_max is not None else unknown(0),
             silk_hearts=int(h.get("silk_regen_max") or 0),
             bind_ready=E(bool(can["bind"]) and silk >= BIND_SILK) if can.get("bind") is not None else unknown(False),
-            fractured_mask=fm_v, pending_dmg=unknown(0),
-            status=frozenset(tag for n, tag in _STATUS if cs.get(n)),
+            fractured_mask=fm_v, pending_dmg=pending, status=frozenset(status),
             crest=E(h.get("crest") or ""), equipped=[t.tool_id for t in tools], tools=tools,
             rosaries=E(int(h.get("geo") or 0)), shell_shards=E(int(h.get("shell_shards") or 0)))
 
@@ -441,39 +658,32 @@ class OracleBackend:
             seen.add(iid)
             tk = e["type_key"]
             tr = m.tracks.get(iid)
+            src = e.get("src") or 0
             kind = entity_kind(e, self.bosses)
-            if tr is not None and _KIND_RANK.get(tr.kind, 3) > _KIND_RANK.get(kind, 3) and kind in _KIND_RANK:
-                kind = tr.kind
-            px, py = float(e["pos"][0]), float(e["pos"][1])
+            proj_t = t if src & SRC_BITS["projectile"] else tr.proj_t if tr is not None else -math.inf
+            if kind in (Kind.ENEMY_ATTACK, Kind.UNKNOWN) and t - proj_t <= PROJECTILE_HOLD_S:
+                kind = Kind.PROJECTILE
+            hidden = bool(e.get("hidden"))
+            (px, py), ref = entity_pos_ref(e)
             dtg = t - tr.t if tr is not None else 0.0
+            same_ref = tr is not None and tr.ref == ref
             if e.get("vel") is not None:
                 vel = E((float(e["vel"][0]), float(e["vel"][1])))
-            elif tr is not None and dtg > 0:
+            elif same_ref and dtg > 0:
                 vel = E(((px - tr.pos[0]) / dtg, (py - tr.pos[1]) / dtg), sigma=0.1, conf=0.7, src=Src.PREDICTED)
             elif tr is not None:
-                vel = E(tr.vel, sigma=0.1, conf=0.7, src=Src.PREDICTED)
+                vel = E(tr.vel, sigma=0.1 if same_ref else 1.0, conf=0.7 if same_ref else 0.3, src=Src.PREDICTED)
             else:
                 vel = unknown((0.0, 0.0))
-            acc = ((vel.v[0] - tr.vel[0]) / dtg, (vel.v[1] - tr.vel[1]) / dtg) if tr is not None and dtg > 0 \
+            acc = ((vel.v[0] - tr.vel[0]) / dtg, (vel.v[1] - tr.vel[1]) / dtg) if same_ref and dtg > 0 \
                 else (0.0, 0.0)
             vx = vel.v[0]
+            flip = bool(e.get("flipX"))
             facing = E(1 if vx > 0 else -1, conf=0.6, src=Src.PREDICTED) if abs(vx) > 0.1 else \
-                E(-1 if e.get("flipX") else 1, conf=0.3, src=Src.PREDICTED)
+                E(-1 if flip else 1, conf=0.3, src=Src.PREDICTED)
 
-            body, boxes = [], []
-            cog = bool((e.get("src") or 0) & SRC_BITS["cog"])
-            for c in e.get("colliders") or ():
-                pts = _pts(c["verts_world"])
-                if c.get("enabled"):
-                    body.append(pts)
-                d = c.get("damage")
-                if d is not None:
-                    eff, dealt = int(d.get("eff") or 0), int(d.get("dealt") or 0)
-                    h = d.get("hazard_type")
-                    hazard = Hazard.COG if cog else HAZARD_OF.get(HAZARD_TYPES[h], Hazard.OTHER) \
-                        if h is not None and 0 <= h < len(HAZARD_TYPES) else Hazard.OTHER
-                    boxes.append(DamageBox(poly=pts, active=is_threat(c), hazard=hazard, flags=damage_flags(d),
-                                           dmg_seq=(eff,) if eff > 0 else (dealt,) if dealt > 0 else ()))
+            body = [_pts(c["verts_world"]) for c in e.get("colliders") or () if c.get("enabled")]
+            boxes = damage_boxes(e)
 
             fsm = []
             for fs in e.get("fsms") or ():
@@ -488,17 +698,23 @@ class OracleBackend:
 
             hp = e.get("hp")
             dead = bool(e.get("is_dead"))
-            if tr is not None and tr.hp is not None and hp is not None and hp < tr.hp:
-                out.append(Event(Ev.HIT_DEALT, f, t, HitDealt(iid, tk, float(tr.hp - hp), float(hp))))
-            killed = tr.killed if tr is not None else False
-            if dead and not killed:
+            if not m.hit_events and tr is not None and tr.hp is not None and hp is not None and hp < tr.hp:
+                out.append(Event(Ev.HIT_DEALT, f, t, HitDealt(iid, tk, float(tr.hp - hp), float(hp),
+                                                              hero_anim=self._hero_clip)))
+            if dead and iid not in m.killed:
                 out.append(Event(Ev.ENEMY_KILLED, f, t, EnemyKilled(iid, tk)))
-                killed = True
-            m.tracks[iid] = _Track(tk, kind, (px, py), vel.v, t, hp, dead, killed)
+                m.killed.add(iid)
+            m.tracks[iid] = _Track(tk, kind, (px, py), vel.v, t, hp, dead, proj_t, ref)
 
+            anim = e.get("anim")
+            ra = e.get("render_aabb")
             ent = Entity(id=iid, kind=kind, type_key=E(tk), pos=E((px, py)), vel=vel, acc=acc, facing=facing,
                          body_polys=body, dmg_boxes=boxes, phase=phase,
-                         hp_est=E(float(hp)) if hp is not None else None, fsm=fsm, visible_frac=1.0)
+                         hp_est=E(float(hp)) if hp is not None else None, fsm=fsm,
+                         visible_frac=0.0 if hidden else 1.0,
+                         anim=(str(anim.get("clip")), int(anim.get("frame") or 0)) if anim else None,
+                         render_box=(float(ra[0]), float(ra[1]), float(ra[2]), float(ra[3])) if ra else None,
+                         flip_x=flip, hidden=hidden, pos_transform=(float(e["pos"][0]), float(e["pos"][1])))
             result.append(ent)
             by_type.setdefault(tk, []).append(ent)
         for iid in [i for i, tr in m.tracks.items() if i not in seen and t - tr.t > self.TRACK_TTL_S]:
@@ -511,11 +727,12 @@ class OracleBackend:
 
     def _resolve_source(self, path: str | None, by_type: dict[str, list[Entity]],
                         hero_xy: tuple[float, float] | None) -> tuple[str | None, int | None]:
-        """("Boss Scene/BoneBeast AtkBell R", ...) -> the type_key it names and the nearest such entity's id."""
+        """("Boss Scene/BoneBeast AtkBell R", ...) -> the type_key it names and the nearest such entity's id;
+        (None, None) when no part of the path names a known entity type (the path stays in caller_path, O)."""
         if not path:
             return None, None
         for part in reversed(path.split("/")):
-            cands = by_type.get(part)
+            cands = [c for c in by_type.get(part, ()) if not c.hidden]
             if cands:
                 if hero_xy is None or len(cands) == 1:
                     return part, cands[0].id
@@ -524,30 +741,76 @@ class OracleBackend:
             for tr_iid, tr in self.m.tracks.items():
                 if tr.type_key == part:
                     return part, tr_iid
-        return path, None
+        return None, None
 
-    def _events(self, evs: Iterable[dict], f: int, hero_xy: tuple[float, float] | None, ents: list[Entity],
-                by_type: dict[str, list[Entity]]) -> list[Event]:
+    @staticmethod
+    def _hit_amount(evs: Sequence[dict], i: int, n_hits: int, hp_prev: int | None, hp_now: int | None) -> int:
+        """Masks the damage event evs[i] took: the TakeHealth "hp" event or the cancelled-lethal event that follows
+        it (before the next damage event); else the STATE's HP drop when it is the frame's only hit; else 0."""
+        for ev in evs[i + 1:]:
+            k = ev.get("k")
+            d = ev.get("d") or {}
+            if k in ("damage", "special_damage"):
+                break
+            if k == "hp" and "amount" in d:
+                return max(0, -int(d.get("delta") or 0) - int(d.get("blue_delta") or 0))
+            if k in ("catastrophe", "would_die") and d.get("blocked"):
+                return int(d.get("dmg", d.get("amount")) or 0)
+        if n_hits == 1 and hp_prev is not None and hp_now is not None:
+            return max(0, hp_prev - hp_now)
+        return 0
+
+    @classmethod
+    def _hits_taken(cls, evs: Sequence[dict], cs: dict[str, bool], hp_prev: int | None, hp_now: int | None
+                    ) -> dict[int, int]:
+        """Index of every "damage" / "special_damage" event that took effect -> the masks it took. The oracle's no-op
+        filter (HealthTap Blocked) mirrors only TakeDamage's i-frame gate; later gates return without effect too:
+        downspike invulnerability on a pogo, the parry window, evading, shadow dash, HAZARD_ONLY damage mode
+        (HeroController.cs:5374-5410). Live run i3_000: all 10 "damage" events with no health taken were pogo hits,
+        HP unchanged; trial run: 2 during a bind. A hit took effect when it took health, was a lethal hit LethalBlock
+        cancelled, or put the hero into recoil in its STATE with no other hit of the STATE taking health (0-mask
+        hits that go through: Warding Bell bind shield, Lucky Dice, cs:5413-5446). The others become DAMAGE_BLOCKED."""
+        n_hits = sum(ev.get("k") in ("damage", "special_damage") for ev in evs)
+        amounts: dict[int, int] = {}
+        for i, ev in enumerate(evs):
+            k = ev.get("k")
+            if k == "damage" or (k == "special_damage" and (ev.get("d") or {}).get("reached_special") is not False):
+                amounts[i] = cls._hit_amount(evs, i, n_hits, hp_prev, hp_now)
+        recoil = bool(cs.get("recoilFrozen") or cs.get("recoiling") or cs.get("hazardDeath") or cs.get("dead"))
+        zero_ok = recoil and not any(a > 0 for a in amounts.values())
+        return {i: a for i, a in amounts.items() if a > 0 or zero_ok or evs[i].get("k") == "special_damage"}
+
+    def _events(self, evs: Sequence[dict], f: int, hero_xy: tuple[float, float] | None, ents: list[Entity],
+                by_type: dict[str, list[Entity]], taken: dict[int, int], cs: dict[str, bool]) -> list[Event]:
         m = self.m
         t = m.t_game
         out: list[Event] = []
-        for ev in evs:
+        for i, ev in enumerate(evs):
             k = ev.get("k")
             d = ev.get("d") or {}
             fe = int(ev.get("f", f))
-            if k == "damage":
+            if k == "damage" and i not in taken:
+                why = "pogo" if any(cs.get(n) for n in _POGO + ("downSpiking",)) else \
+                    "bind" if cs.get("isBinding") else "gate"
+                out.append(Event(Ev.DAMAGE_BLOCKED, fe, t, Info({
+                    "source": d.get("source"), "hazard": d.get("hazard"), "why": why, "n": 1,
+                    "amount": d.get("amount"), "end": "rejected"})))
+            elif k == "damage":
                 st, sid = self._resolve_source(d.get("source"), by_type, hero_xy)
-                m.hero.hit_t = t
+                raw = d.get("amount")
                 out.append(Event(Ev.HIT_TAKEN, fe, t, HitTaken(
-                    amount=int(d.get("amount") or 0), hazard=HAZARD_OF.get(str(d.get("hazard")), Hazard.OTHER),
-                    source_type=st, source_id=sid, caller_path=d.get("source"))))
+                    amount=taken[i], hazard=HAZARD_OF.get(str(d.get("hazard")), Hazard.OTHER),
+                    source_type=st, source_id=sid, caller_path=d.get("source"),
+                    amount_raw=int(raw) if raw is not None else None)))
             elif k == "special_damage":
-                if d.get("reached_special") is False:
+                if i not in taken:
                     continue
-                m.hero.hit_t = t
+                raw = d.get("amount")
                 out.append(Event(Ev.HIT_TAKEN, fe, t, HitTaken(
-                    amount=int(d.get("amount") or 0), hazard=Hazard.OTHER, source_type=d.get("method"),
-                    caller_path=d.get("fsm") or d.get("method"))))
+                    amount=taken[i], hazard=Hazard.OTHER, source_type=None,
+                    caller_path=d.get("fsm") or d.get("method"), amount_raw=int(raw) if raw is not None else None)))
+            elif k == "hit":
+                out.extend(self._hit_dealt(d, fe, t))
             elif k in ("catastrophe", "would_die"):
                 out.append(Event(Ev.CATASTROPHE if k == "catastrophe" else Ev.WOULD_DIE, fe, t, Lethal(
                     path=d.get("path") or d.get("cause"), blocked=d.get("blocked"),
@@ -580,8 +843,39 @@ class OracleBackend:
             elif k == "harness" and d.get("op") == "savestate.load":
                 # the scene was rebuilt in place: entity and hero memory are stale (iids change on a load)
                 m.tracks.clear()
+                m.killed.clear()
                 m.fsm_entry.clear()
                 m.hero = _HeroMemory()
+        return out
+
+    def _hit_dealt(self, d: dict, fe: int, t: float) -> list[Event]:
+        """Oracle "hit" (HealthManager damage from any source, state_fields_m2.md §8) -> HIT_DEALT, plus ENEMY_KILLED
+        for the killing blow: hp_before > 0 >= hp_after (later hits on the corpse carry dead too but kill nothing).
+        by_hero: the exported flag when there is one, else False for attack types only the environment deals (lava,
+        spikes, acid ...: AttackTypes), else unknown (None)."""
+        ent = d.get("ent")
+        if ent is None:
+            return []
+        m = self.m
+        iid = int(ent)
+        tr = m.tracks.get(iid)
+        tk = d.get("type_key") or (tr.type_key if tr is not None else "")
+        dmg, hp_before, hp_after = d.get("dmg"), d.get("hp_before"), d.get("hp_after")
+        if hp_before is not None and hp_after is not None:
+            killing = hp_before > 0 >= hp_after
+        else:
+            killing = bool(d.get("dead")) and iid not in m.killed
+        attack = d.get("attack")
+        by_hero = d.get("hero") if isinstance(d.get("hero"), bool) else False if attack in ENV_ATTACKS else None
+        out = [Event(Ev.HIT_DEALT, fe, t, HitDealt(
+            iid, tk, float(dmg) if dmg is not None else None, float(hp_after) if hp_after is not None else None,
+            attack=attack, crit=d.get("crit"), killing=killing, hero_anim=self._hero_clip if by_hero is not False
+            else None, src=d.get("src"), by_hero=by_hero))]
+        if killing and iid not in m.killed:
+            out.append(Event(Ev.ENEMY_KILLED, fe, t, EnemyKilled(iid, tk)))
+            m.killed.add(iid)
+        if tr is not None and hp_after is not None:
+            tr.hp = int(hp_after)
         return out
 
     def _fsm_event(self, d: dict, fe: int, t: float, hero_xy: tuple[float, float] | None, ents: list[Entity]
@@ -607,13 +901,12 @@ class OracleBackend:
             hero_rel_pos=rel, t_in_prev=d.get("t_in_prev")))]
         spec = self.bosses.get(tk) if tk else None
         if spec is not None and fsm == spec.control_fsm and d.get("to") in spec.death_states:
-            if tr is None or not tr.killed:
+            if ent_iid not in m.killed:
                 out.append(Event(Ev.ENEMY_KILLED, fe, t, EnemyKilled(ent_iid, tk)))
-                if tr is not None:
-                    tr.killed = True
+                m.killed.add(ent_iid)
         return out
 
-    # ---- game, camera ------------------------------------------------------------------------------------------
+    # ---- game, camera, terrain ---------------------------------------------------------------------------------
 
     def _game(self, s: dict, g: dict, p: dict, hd: dict | None, f: int, t_real: float, out: list[Event]) -> Game:
         m = self.m
@@ -647,7 +940,7 @@ class OracleBackend:
         counting = t_live is not None and m.t_live is not None and t_live > m.t_live
         m.t_live = t_live
         return Game(
-            screen=E(self._screen(g, p, s.get("hud"), hd is not None and m.hero.dead, raw)), menu=None,
+            screen=E(self._screen(g, p, s.get("hud"), hd is not None and m.hero.dead, raw)), menu=self._menu(s),
             game_state=gs,
             scene=E(g.get("scene") or ""), scene_variant=unknown(""), entry_gate=g.get("gate"),
             transitioning=bool(g.get("transition")), memory_scene=g.get("memory"),
@@ -656,9 +949,21 @@ class OracleBackend:
             play_time=PlayTimeEst(live_s=float(t_live or 0.0), counting=counting, saved_s=g.get("t_saved")))
 
     @staticmethod
+    def _menu(s: dict) -> MenuRead | None:
+        """Oracle STATE "menu" (while paused) -> MenuRead: the highlighted item and whether Quit is greyed."""
+        mn = s.get("menu")
+        if not isinstance(mn, dict):
+            return None
+        q = mn.get("quit_ok")
+        return MenuRead(cursor_item=mn.get("sel"), quit_greyed=(not q) if q is not None else None)
+
+    @staticmethod
     def _screen(g: dict, p: dict, hud: dict | None, dead: bool, raw_blk: int) -> Screen:
-        """Only what the oracle exports: DIALOG, ITEM_POPUP, AREA_TITLE, SHOP, BELLWAY_MAP, QUICK_MAP, FADE, ENDING
-        and CREDITS have no source yet and come out as their nearest exported state."""
+        """Only what the oracle exports: ITEM_POPUP, AREA_TITLE, SHOP, BELLWAY_MAP, QUICK_MAP, ENDING and CREDITS
+        have no source yet and come out as their nearest exported state; DIALOG stands for any active
+        BlockingInteractable (pause.interact: dialogue, doors, shops), which blocks pausing. TRANSITION is GameState
+        LOADING (play time stands still); entering / exiting a level is FADE (GameManager.IncreaseGameTimer counts
+        it)."""
         if not g:
             return Screen.UNKNOWN
         gs, ui, menu = g.get("gs"), g.get("ui"), g.get("menu")
@@ -671,14 +976,18 @@ class OracleBackend:
             return Screen.PAUSE_MENU
         if dead:
             return Screen.DEATH
-        if gs in (GS_LOADING, GS_ENTERING, GS_EXITING) or g.get("transition"):
+        if gs == GS_LOADING:
             return Screen.TRANSITION
+        if gs in (GS_ENTERING, GS_EXITING) or g.get("transition"):
+            return Screen.FADE
         if gs == GS_CUTSCENE:
             return Screen.CUTSCENE_VIDEO
         if p.get("inv"):
             return Screen.INVENTORY
         if p.get("bench"):
             return Screen.BENCH
+        if p.get("interact"):
+            return Screen.DIALOG
         if gs == GS_PLAYING:
             return Screen.PLAYING_HUD_HIDDEN if (hud or {}).get("hidden") else Screen.PLAYING
         return Screen.UNKNOWN
@@ -693,3 +1002,21 @@ class OracleBackend:
                           sigma_xy=0.0, reliable=c.get("src") == 1, src=Src.ORACLE,
                           viewport=tuple(c.get("rect") or (0.0, 0.0, 1.0, 1.0)),
                           screen=tuple(c["screen"]) if c.get("screen") else None)
+
+    @staticmethod
+    def _terrain(scene: str | None, room: dict | None) -> TerrainRef:
+        """Battle / arena gates and other solids whose state changed since the TERRAIN snapshot (oracle room.gates)
+        as the dynamic terrain deltas. room.gates nil (the room snapshot is not ready) or absent is unknown (None),
+        never "no gates"; [] is no watched solid."""
+        raw = (room or {}).get("gates")
+        if not isinstance(raw, list):
+            return TerrainRef(scene=scene or "", gates=None)
+        gates = []
+        for gt in raw:
+            box = gt.get("box")
+            if box and len(box) == 4:
+                gid = gt.get("id")
+                gates.append(Gate(name=str(gt.get("name") or ""), enabled=bool(gt.get("enabled")),
+                                  box=(float(box[0]), float(box[1]), float(box[2]), float(box[3])),
+                                  solid_id=int(gid) if gid is not None else None))
+        return TerrainRef(scene=scene or "", dynamic_deltas=[(g.name, g.enabled) for g in gates], gates=gates)

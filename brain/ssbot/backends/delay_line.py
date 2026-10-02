@@ -6,6 +6,16 @@ prior 2/3/4 frames with weights 0.3/0.5/0.2 (seeded, so an episode replays with 
 
     delay = DelayLine(seed=episode_seed)        # or delay.reset(seed) at each episode start
     ws = delay.push(noise.apply(filt.apply(backend.feed(state))))   # None for the first k STATEs
+    link.act(delay.live_frame + lead, ...)      # ACTION.target_frame: from the live frame, never ws.stamp.frame
+
+The None contract: push() (and DegradedOracleBackend.feed / step) returns None exactly while the line fills, the first
+k STATEs of an episode; a PerceptionBackend consumer must treat None as "no observation yet" (§4.5). After that every
+call returns a WorldState.
+
+ACTION.target_frame must come from the live (newest) frame, delay.live_frame, not from the delayed ws.stamp.frame:
+the oracle's DelayLine.Accept drops an ACTION whose target is more than 3 frames behind its arrival frame, so with
+k = 4 a target of ws.stamp.frame + 2 arrives at least 4 + brain latency frames later and is dropped, which the real
+SendInput path never does.
 
 Action side (the oracle, oracle/src/Input/{LatencyModel,DelayLine,InputModule}.cs): RPC "input.latency_model" with
 {delay_frames, jitter_frames, seed, dist?: [[frames, weight], ...], min_press_frames?, min_release_frames?}; it
@@ -47,11 +57,19 @@ class DelayLine:
         rng = np.random.default_rng(seed)
         self.k = int(rng.choice(self.frames, p=self.weights))
         self._buf: deque[WorldState] = deque(maxlen=self.k + 1)
+        self.live_frame: int | None = None          # newest STATE frame pushed: the base for ACTION.target_frame
+        self.live_qpc_ns: int | None = None
         return self.k
+
+    @property
+    def ready(self) -> bool:
+        return len(self._buf) > self.k
 
     def push(self, ws: WorldState) -> WorldState | None:
         """Add this frame's WorldState; return the one from k STATEs ago (None while the line fills)."""
         self._buf.append(ws)
+        self.live_frame = ws.stamp.frame
+        self.live_qpc_ns = ws.stamp.t_sample_qpc_ns
         if len(self._buf) <= self.k:
             return None
         out = self._buf[0]

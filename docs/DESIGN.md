@@ -1855,7 +1855,7 @@ silksong_bot/
 ```
 
 **CI 规则：**
-- import 防火墙：`perception/`、`combat/`、`nav/`、`run/`、`safety/` 不得 import `ipc/` 或 `backends/oracle_backend`；正式运行模块只接受 `VisionView`。
+- import 防火墙：`perception/`、`combat/`、`nav/`、`run/`、`safety/`、`vision/` 不得直接或间接 import `ipc/`、`oracle/`、`record/`、`backends/oracle_backend` 或 `backends/degraded`（`tests/test_import_firewall.py` 按 AST 建全树的 import 图检查）；正式运行模块只接受 `VisionView`。
 - 每次构建数据集都跑像素泄漏测试。
 - 每次改动知识或路线都跑 `route_check.py`。
 - 每个会话前跑 compat 套件。

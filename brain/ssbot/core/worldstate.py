@@ -2,22 +2,37 @@
 
 Backends: OracleBackend (training, exact), DegradedOracleBackend (= OracleBackend -> ObservabilityFilter -> SimpleNoise
 -> DelayLine, the simulated final path of §3.9.2) and, from M3, VisionBackend. Conventions (§4.1): world units u of
-the current scene (+x right, +y up, positions are collider centres), seconds, QPC nanoseconds, damage in masks.
-Estimated values are wrapped in E (value, sigma, calibrated confidence, source, age).
+the current scene (+x right, +y up), seconds, QPC nanoseconds, damage in masks. Estimated values are wrapped in E
+(value, sigma, calibrated confidence, source, age).
+
+Position reference (§4.1, binding for every backend and for the kinematics / behaviour tables): HeroState.pos is the
+centre of the hero's hurtbox (HeroController.Bounds, the collider: it follows the physics body, the rendered transform
+is interpolated and lags it); Entity.pos is the centre of the entity's main body collider when it has one (its root
+collider, see OracleBackend), else the centre of its render_aabb, else the transform. The transform positions stay
+available as O fields (pos_transform). Measured on the live Bell Beast run 20261001_122249 (2.15 M STATEs): the hurtbox
+centre is 0.17-0.84 u below the hero transform (max to p1; mean 0.51 u); the boss's root box centre is 0.68-4.01 u from
+its transform (mean 2.27 u).
 
 Observability is machine-readable: every field carries metadata["obs"] = V (vision provides it), O (oracle only; None
 in a VISION_EQUIVALENT view) or D (derived by shared code from V fields). Fields that hold an exact timer in the oracle
 path also carry metadata["timer"] = True; the ObservabilityFilter sets those to None until the vision-side timer
-models exist (§3.9.2 "精确计时器 -> 模型估计"). Event kinds carry their own observability in EVENT_OBS, and event
-payloads mark their fields the same way.
+models exist (§3.9.2 "精确计时器 -> 模型估计"). Fields whose §4.2 note reads "V: estimate / inferred, O: exact"
+(pause and quit availability, pause blockers, boss HP, damage-box activity, bind readiness, pending tag damage, and
+the crest / equipment that §4.2 takes from the inventory audit only) carry
+metadata["est"] = True: the oracle path fills them exactly and the ObservabilityFilter must rebuild them from what
+vision can observe, so in a VISION_EQUIVALENT view an E-valued est field never has src ORACLE. Event kinds carry their
+own observability in EVENT_OBS, and event payloads mark their fields the same way.
 
     ws.view("VISION_EQUIVALENT")    # copy with every O field None and O-only events removed
     observability(HeroState)        # {"pos": "V", ..., "can": "O"}
+    estimate_fields(Game)           # ("pause_available", "quit_available", "pause_blockers")
 
 Deviations from the §4.2 text, all additive: CameraPose.viewport/screen (needed to project into the image),
 Game.unobservable is an Unobs bit set, Event payloads are typed dataclasses, Ev.SCENE_LEAVE / HAZARD_RESPAWN /
-DAMAGE_BLOCKED / FREEZE.phase exist because the oracle reports them. Wire format: msgspec is not installed (2026-10),
-so these are dataclasses(slots=True); the C# side does not mirror them (the oracle sends STATE dicts, the backend maps).
+DAMAGE_BLOCKED / FREEZE.phase exist because the oracle reports them, and the extras pos_transform, Entity.anim /
+render_box / flip_x / hidden, HeroState.tm / phys_alpha, DamageBox.name, TerrainRef.gates (Gate). Wire format: plain
+dataclasses(slots=True) (msgspec is installed since 2026-10 but nothing serialises WorldStates yet); the C# side does
+not mirror them (the oracle sends STATE dicts, the backend maps).
 """
 import math
 from dataclasses import MISSING, dataclass, field, fields, is_dataclass
@@ -29,6 +44,7 @@ SCHEMA_VERSION = 2
 V, O, D = "V", "O", "D"
 OBS = "obs"
 TIMER = "timer"
+EST = "est"
 
 ORACLE, VISION_EQUIVALENT = "ORACLE", "VISION_EQUIVALENT"
 PROFILES = (ORACLE, VISION_EQUIVALENT)
@@ -39,9 +55,14 @@ Poly = list[Vec2]
 BIND_SILK = 9          # a bind takes the full 9-silk spool (Bind FSM; ssbot.train.data_policy binds only with 9)
 
 
-def fld(obs: str, default: Any = MISSING, *, factory: Any = MISSING, timer: bool = False) -> Any:
-    """A dataclass field tagged with its observability (V/O/D) and, for exact timers, timer=True."""
-    md = {OBS: obs, TIMER: True} if timer else {OBS: obs}
+def fld(obs: str, default: Any = MISSING, *, factory: Any = MISSING, timer: bool = False, est: bool = False) -> Any:
+    """A dataclass field tagged with its observability (V/O/D); timer=True for exact timers, est=True for values that
+    are exact in the oracle path and an estimate in the vision path."""
+    md: dict[str, Any] = {OBS: obs}
+    if timer:
+        md[TIMER] = True
+    if est:
+        md[EST] = True
     if factory is not MISSING:
         return field(default_factory=factory, metadata=md)
     if default is not MISSING:
@@ -105,6 +126,10 @@ class PauseBlock(IntFlag):
 
 
 PAUSE_ONLY = PauseBlock(PauseBlock.DISABLE_SAVEQUIT | PauseBlock.PRELOAD_PENDING)   # bits that do not block a pause
+# Bits a vision path can infer (its own pause edges, the screen mode, focus, a hit / freeze / hazard-death cue); the
+# rest (BLOCKING_INTERACT, NOT_ACCEPTING_INPUT, DISABLE_SAVEQUIT, PRELOAD_PENDING) are PlayerData / UI internals.
+VISION_BLOCKS = PauseBlock(PauseBlock.DISABLE_PAUSE | PauseBlock.TIME_SLOWED | PauseBlock.PAUSE_LOCKOUT
+                           | PauseBlock.MSG_CANVAS | PauseBlock.FOCUS_LOST | PauseBlock.GAME_STATE_NOT_PLAYING)
 
 
 class Kind(IntEnum):
@@ -125,7 +150,8 @@ class Kind(IntEnum):
 
 
 class Hazard(IntEnum):
-    """PIT goes through i-frames and SINK always applies (§1.5, §3.3.1 [m0:N1]); OTHER is the fallback only."""
+    """GlobalEnums.HazardType plus COG and OTHER (the fallback only). Which types hit i-frames and the parry stance
+    stop is in IFRAME_BLOCKED / PARRY_BLOCKED below (HeroController.TakeDamage, m0:N1)."""
     ENEMY = 0
     SPIKES = 1
     ACID = 2
@@ -141,6 +167,17 @@ class Hazard(IntEnum):
     PIT = 12
     SINK = 13
     OTHER = 15
+
+
+# HeroController.TakeDamage (decompiled 1.0.30000, HeroController.cs:5369, m0:N1): with !CanTakeDamage() because of hit
+# or parry i-frames (cState.Invulnerable, parryInvulnTimer > 0; CanTakeDamage is false for both, cs:11217) a hit
+# returns early only for ENEMY, NON_HAZARD and EXPLOSION; SPIKES, ACID, LAVA, PIT, COAL, ZAP, STEAM, COAL_SPIKES and
+# RESPAWN_PIT go through, SINK always applies. Cogs deal TakeDamage(1, SPIKES) after 0.35 s (CogMultiHitter.cs:176,
+# m0:C3). The parry stance (cState.parrying) parries ENEMY only (cs:5391); the parry counter (parryAttack) also stops
+# EXPLOSION, which IGNORES_PARRY still marks (it refers to the stance: a superset). OTHER (unknown) is in neither set,
+# so a box of unknown type is treated as going through both (a support superset).
+IFRAME_BLOCKED = frozenset((Hazard.ENEMY, Hazard.NON_HAZARD, Hazard.EXPLOSION))
+PARRY_BLOCKED = frozenset((Hazard.ENEMY,))
 
 
 class FM(IntEnum):
@@ -160,6 +197,10 @@ class Unobs(IntFlag):
     PLAYTIME_WALL = 16        # PlayTimeEst.live_s advanced by the wall clock
     NOISE = 32                # SimpleNoise applied
     DELAYED = 64              # DelayLine applied
+    VANISHED_IN_VIEW = 128    # an entity disappeared inside the image (underground boss): kept with hidden=True
+    PAUSE_INFERRED = 256      # pause/quit availability and blockers rebuilt from observable cues
+    BOXES_FROM_TABLE = 512    # damage boxes from the type's box table, all active (activity not observable)
+    DETECTION_MISSED = 1024   # SimpleNoise dropped a detection; the track coasts
 
 
 # ---- E[T] ---------------------------------------------------------------------------------------------------
@@ -221,9 +262,10 @@ class Game:
     entry_gate: str | None = fld(D, None)
     transitioning: bool = fld(V, False)
     memory_scene: bool | None = fld(O, None)            # IsMemoryScene(): death not fatal (to confirm)
-    pause_available: E[bool] = fld(V, factory=lambda: unknown(False))   # V: quit map + freeze detection; O: exact
-    quit_available: E[bool] = fld(V, factory=lambda: unknown(False))
-    pause_blockers: int = fld(D, 0)                     # PauseBlock bits (V: inferred)
+    # V: quit map + freeze detection (src PREDICTED); O: exact. True while already paused (a Pause press is moot).
+    pause_available: E[bool] = fld(V, factory=lambda: unknown(False), est=True)
+    quit_available: E[bool] = fld(V, factory=lambda: unknown(False), est=True)
+    pause_blockers: int = fld(D, 0, est=True)           # PauseBlock bits (V: inferred, only VISION_BLOCKS bits)
     unpause_lockout_until_s: float = fld(D, 0.0)        # QPC seconds: 0.3 s real time after each pause / unpause
     focus_ok: bool = fld(V, True)
     permadeath_mode: int | None = fld(O, None)          # V: slot check + HUD skin
@@ -263,20 +305,23 @@ class PhasePost:
 
 @dataclass(slots=True)
 class HeroState:
-    pos: E[Vec2] = fld(V, factory=lambda: unknown((0.0, 0.0)))
+    pos: E[Vec2] = fld(V, factory=lambda: unknown((0.0, 0.0)))   # hurtbox (collider) centre, §4.1
     vel: E[Vec2] = fld(V, factory=lambda: unknown((0.0, 0.0)))
     facing: E[int] = fld(V, factory=lambda: unknown(1))
     hurtbox: list[Vec2] = fld(V, factory=list)
     contact: E[str] = fld(V, factory=lambda: unknown("AIR"))      # GROUND|WALL_L|WALL_R|AIR|WATER|HAZARD
     mode: E[str] = fld(V, factory=lambda: unknown("air"))         # ground|air|wall|dash|glide|attack|pogo|bind|hurt|
     #                                                                recoil|bench|cutscene
-    iframes_left: E[float] | None = fld(D, None, timer=True)
-    recoil_left: E[float] | None = fld(D, None, timer=True)
-    dash_cd_left: E[float] | None = fld(D, None, timer=True)
-    action_lock_left: E[float] | None = fld(D, None, timer=True)
+    iframes_left: E[float] | None = fld(D, None, timer=True)      # hit + parry i-frames (TakeDamage's gate)
+    recoil_left: E[float] | None = fld(D, None, timer=True)       # damage recoil
+    dash_cd_left: E[float] | None = fld(D, None, timer=True)      # dashCooldownTimer
+    action_lock_left: E[float] | None = fld(D, None, timer=True)  # attack_cooldown, or the attack clip still to run
     binding: E[str] = fld(V, factory=lambda: unknown("NONE"))     # NONE|IN_PROGRESS|INTERRUPTED|DONE
     committed_primitive: tuple[str, int] | None = fld(D, None)    # (primitive, hold frames left)
     can: dict[str, bool] | None = fld(O, None)
+    pos_transform: Vec2 | None = fld(O, None)                     # the hero transform (rendered, interpolated)
+    tm: dict[str, float] | None = fld(O, None)                    # oracle hero.tm timers verbatim (kinematics start)
+    phys_alpha: float | None = fld(O, None)                       # oracle hero.alpha: physics phase in [0, 1)
 
 
 @dataclass(slots=True)
@@ -294,13 +339,15 @@ class Resources:
     silk: E[int] = fld(V, factory=lambda: unknown(0))
     silk_max: E[int] = fld(V, factory=lambda: unknown(0))    # CurrentSilkMax (broken spool 9, cursed 3)
     silk_hearts: int = fld(V, 0)
-    bind_ready: E[bool] = fld(D, factory=lambda: unknown(False))
+    bind_ready: E[bool] = fld(D, factory=lambda: unknown(False), est=True)
     fractured_mask: E[FM] = fld(V, factory=lambda: unknown(FM.UNKNOWN))
     magma_ready: E[bool] | None = fld(V, None)
-    pending_dmg: E[int] = fld(D, factory=lambda: unknown(0))  # remaining damage of attached DamageTags + frost clock
+    # remaining damage of attached DamageTags + frost clock (an upper bound). conf 0 = unknown or unbounded (a tag
+    # without a hit limit, the frost clock): v is then health + blue, lethal by itself, so reading v never fails open
+    pending_dmg: E[int] = fld(D, factory=lambda: unknown(0), est=True)
     status: frozenset[str] = fld(V, frozenset())                # ACID, FLAME, GRIND, FROST, ...
-    crest: E[str] = fld(V, factory=lambda: unknown(""))        # from the inventory audit only (Src.AUDIT)
-    equipped: list[str] = fld(V, factory=list)
+    crest: E[str] = fld(V, factory=lambda: unknown(""), est=True)    # from the inventory audit only (Src.AUDIT)
+    equipped: list[str] = fld(V, factory=list, est=True)
     tools: list[ToolSlot] = fld(V, factory=list)
     rosaries: E[int] = fld(V, factory=lambda: unknown(0))
     shell_shards: E[int] = fld(V, factory=lambda: unknown(0))
@@ -311,12 +358,13 @@ class Resources:
 @dataclass(slots=True)
 class DamageBox:
     poly: list[Vec2] = fld(D, factory=list)
-    active: bool = fld(D, False)
+    active: bool = fld(D, False, est=True)        # O path: collider enabled and can_cause_damage; vision: from tables
     dmg_seq: tuple[int, ...] = fld(D, ())
     hazard: Hazard = fld(D, Hazard.OTHER)
     flags: frozenset[str] = fld(D, frozenset())   # PARRYABLE DEFLECTABLE COUNTER FLAME VOID MASK_BYPASS IGNORES_IFRAMES
     #                                               IGNORES_PARRY FIRST_NO_MASK CRITICAL GRAB TAG_ACID NON_LETHAL
     #                                               AMOUNT_FSM (the amount is known only to an FSM)
+    name: str | None = fld(O, None)               # collider GameObject name (oracle colliders[].name)
 
 
 @dataclass(slots=True)
@@ -324,7 +372,7 @@ class Entity:
     id: int = fld(V, 0)
     kind: Kind = fld(V, Kind.UNKNOWN)
     type_key: E[str] = fld(V, factory=lambda: unknown(""))
-    pos: E[Vec2] = fld(V, factory=lambda: unknown((0.0, 0.0)))
+    pos: E[Vec2] = fld(V, factory=lambda: unknown((0.0, 0.0)))   # main body collider centre (§4.1); conf 0 = unknown
     vel: E[Vec2] = fld(V, factory=lambda: unknown((0.0, 0.0)))
     acc: Vec2 = fld(D, (0.0, 0.0))
     facing: E[int] = fld(V, factory=lambda: unknown(1))
@@ -332,10 +380,16 @@ class Entity:
     dmg_boxes: list[DamageBox] = fld(D, factory=list)
     phase: PhasePost | None = fld(D, None)          # A-class bosses / arena enemies only
     keepout: list[Vec2] | None = fld(D, None)       # ordinary enemies: reach union from the tables
-    hp_est: E[float] | None = fld(D, None)
+    hp_est: E[float] | None = fld(D, None, est=True)
     fsm: list[tuple[str, str, float]] | None = fld(O, None)   # (fsm, state, game time in state)
-    visible_frac: float = fld(V, 1.0)
+    visible_frac: float = fld(V, 1.0)               # share of the entity's image extent inside the image
     last_seen_ms: float = fld(V, 0.0)
+    anim: tuple[str, int] | None = fld(V, None)     # (clip, frame): the cue observable phases are keyed on
+    render_box: tuple[float, float, float, float] | None = fld(V, None)   # sprite bounds x0, y0, x1, y1 (world)
+    flip_x: bool = fld(V, False)                    # sprite mirrored (exported flipX)
+    hidden: bool = fld(V, False)                    # known to exist but not drawn: underground boss, or it vanished
+    #                                                 inside the image (vision); no boxes, pos conf 0 in the vision path
+    pos_transform: Vec2 | None = fld(O, None)       # the root transform
 
 
 @dataclass(slots=True)
@@ -371,11 +425,20 @@ class PerceptionHealth:
 
 
 @dataclass(slots=True)
+class Gate:                                          # oracle room.gates item (state_fields_m2.md §11)
+    name: str = fld(V, "")                           # collider GameObject name ("Threaded Bell Gate", "Wall")
+    enabled: bool = fld(V, False)                    # the solid is there now (an arena gate: closed)
+    box: tuple[float, float, float, float] = fld(V, (0.0, 0.0, 0.0, 0.0))    # x0, y0, x1, y1 world AABB
+    solid_id: int | None = fld(O, None)              # TERRAIN solids[].id: the snapshot solid it updates
+
+
+@dataclass(slots=True)
 class TerrainRef:
     scene: str = fld(V, "")
     variant: str = fld(V, "")
     db_version: str = fld(V, "")
-    dynamic_deltas: list[tuple[str, bool]] = fld(V, factory=list)
+    dynamic_deltas: list[tuple[str, bool]] = fld(V, factory=list)      # (battle gate name, closed)
+    gates: list[Gate] | None = fld(V, None)          # None: unknown (no export, or the room snapshot is not ready)
 
 
 # ---- events (§4.2 "事件") -------------------------------------------------------------------------------------
@@ -436,11 +499,13 @@ EVENT_OBS: dict[Ev, str] = {k: V for k in Ev} | {
 
 @dataclass(slots=True)
 class HitTaken:
-    amount: int = fld(V, 0)                       # masks lost, as the HUD shows them
+    amount: int = fld(V, 0)                       # masks lost (health + blue) as the HUD shows them; for a lethal hit
+    #                                               cancelled by LethalBlock (training) the masks it would have taken
     hazard: Hazard = fld(D, Hazard.OTHER)
-    source_type: str | None = fld(D, None)        # entity type_key when it could be resolved, else the object path
+    source_type: str | None = fld(D, None)        # entity type_key when it could be resolved, else None
     source_id: int | None = fld(D, None)
     caller_path: str | None = fld(O, None)        # the game object path or the C# method that dealt it
+    amount_raw: int | None = fld(O, None)         # TakeDamage's damageAmount before the game's remapping
 
 
 @dataclass(slots=True)
@@ -449,6 +514,12 @@ class HitDealt:
     type_key: str = fld(V, "")
     amount: float | None = fld(O, None)           # vision sees the hit flash, not the damage
     hp_after: float | None = fld(O, None)
+    attack: str | None = fld(V, None)             # AttackTypes name (oracle "hit".attack: "Nail", "Generic", ...)
+    crit: bool | None = fld(O, None)
+    killing: bool = fld(V, False)                 # the killing blow (hp_before > 0 >= hp_after; the death is visible)
+    hero_anim: str | None = fld(V, None)          # the hero's animation clip at the hit (its own action, on screen)
+    src: str | None = fld(V, None)                # the attacking object ("Slash", a tool): the bot knows what it used
+    by_hero: bool | None = fld(V, None)           # the hero dealt it (False: environment; None: not known)
 
 
 @dataclass(slots=True)
@@ -573,36 +644,95 @@ def timer_fields(cls: type) -> tuple[str, ...]:
     return tuple(name for name, _, t in _spec(cls) if t)
 
 
+_EST: dict[type, tuple[str, ...]] = {}
+
+
+def estimate_fields(cls: type) -> tuple[str, ...]:
+    """Fields tagged est=True: exact in the oracle path, rebuilt from observable cues in the vision path."""
+    s = _EST.get(cls)
+    if s is None:
+        s = _EST[cls] = tuple(f.name for f in fields(cls) if f.metadata.get(EST))
+    return s
+
+
 SCHEMA_CLASSES: tuple[type, ...] = (
     Stamp, MenuRead, PlayTimeEst, Game, CameraPose, PhasePost, HeroState, ToolSlot, Resources, DamageBox, Entity,
-    Threat, PerceptionHealth, TerrainRef, WorldState, Event, HitTaken, HitDealt, EnemyKilled, Freeze, FsmTransition,
-    SceneEnter, SceneLeave, Lethal, GateEdge, BindOutcome, Info)
+    Threat, PerceptionHealth, Gate, TerrainRef, WorldState, Event, HitTaken, HitDealt, EnemyKilled, Freeze,
+    FsmTransition, SceneEnter, SceneLeave, Lethal, GateEdge, BindOutcome, Info)
 
-_ATOMS = (int, float, str, bool, bytes, Enum, frozenset, type(None))
+_ATOM, _TUPLE, _LIST, _DICT, _DC, _OTHER = range(6)
+_DISPATCH: dict[type, int] = {int: _ATOM, float: _ATOM, str: _ATOM, bool: _ATOM, bytes: _ATOM, type(None): _ATOM,
+                              frozenset: _ATOM, tuple: _TUPLE, list: _LIST, dict: _DICT}
+_PLAN: dict[type, tuple[tuple[str, int], ...]] = {}     # per dataclass: (field, 0 copy / 1 None / 2 WorldState events)
+
+
+def _kind(t: type) -> int:
+    k = _DISPATCH.get(t)
+    if k is None:
+        if issubclass(t, (Enum, int, float, str, bytes, frozenset)):
+            k = _ATOM
+        elif is_dataclass(t):
+            k = _DC
+        elif issubclass(t, tuple):
+            k = _TUPLE
+        elif issubclass(t, list):
+            k = _LIST
+        elif issubclass(t, dict):
+            k = _DICT
+        else:
+            k = _OTHER
+        _DISPATCH[t] = k
+    return k
+
+
+def _plan(cls: type) -> tuple[tuple[str, int], ...]:
+    p = _PLAN.get(cls)
+    if p is None:
+        p = _PLAN[cls] = tuple((name, 1 if obs == O else 2 if (cls is WorldState and name == "events") else 0)
+                               for name, obs, _ in _spec(cls))
+    return p
+
+
+def _atomic_tuple(x: Any) -> bool:
+    """A tuple whose first and last elements are atoms: polygon points, (fsm, state, t), (name, p), (gate, on).
+    Lists of them are taken as homogeneous, which every list in the schema is."""
+    return type(x) is tuple and (not x or (_DISPATCH.get(type(x[0])) == _ATOM and _DISPATCH.get(type(x[-1])) == _ATOM))
 
 
 def strip_o(obj: Any) -> Any:
     """Deep copy of obj with O fields None (dataclasses recursively, inside lists, tuples and dicts); events whose
-    kind is O in EVENT_OBS are dropped."""
-    if isinstance(obj, _ATOMS):
+    kind is O in EVENT_OBS are dropped. Tuples of atoms are immutable and shared, not copied."""
+    cls = type(obj)
+    k = _DISPATCH.get(cls)
+    if k is None:
+        k = _kind(cls)
+    if k == _ATOM:
         return obj
-    if is_dataclass(obj):
-        cls = type(obj)
-        kw = {}
-        for name, obs, _ in _spec(cls):
-            if obs == O:
-                kw[name] = None
-            elif name == "events" and cls is WorldState:
-                kw[name] = [strip_o(e) for e in obj.events if EVENT_OBS.get(e.kind, V) != O]
+    if k == _DC:
+        if cls is E:            # the commonest record: skip the generic walk
+            v = obj.v
+            kv = _DISPATCH.get(type(v))
+            if not (kv == _ATOM or (kv == _TUPLE and _atomic_tuple(v))):
+                v = strip_o(v)
+            return E(v, obj.sigma, obj.conf, obj.src, obj.age_ms)
+        vals = []
+        for name, mode in _PLAN.get(cls) or _plan(cls):
+            if mode == 0:
+                v = getattr(obj, name)
+                vals.append(v if _DISPATCH.get(type(v)) == _ATOM else strip_o(v))
+            elif mode == 1:
+                vals.append(None)
             else:
-                kw[name] = strip_o(getattr(obj, name))
-        return cls(**kw)
-    if isinstance(obj, list):
+                vals.append([strip_o(e) for e in obj.events if EVENT_OBS.get(e.kind, V) != O])
+        return cls(*vals)
+    if k == _LIST:
+        if obj and _atomic_tuple(obj[0]):
+            return list(obj)
         return [strip_o(x) for x in obj]
-    if isinstance(obj, tuple):
-        return obj if not obj or isinstance(obj[0], (int, float, str)) else tuple(strip_o(x) for x in obj)
-    if isinstance(obj, dict):
-        return {k: strip_o(v) for k, v in obj.items()}
+    if k == _TUPLE:
+        return obj if _atomic_tuple(obj) else tuple(strip_o(x) for x in obj)
+    if k == _DICT:
+        return {key: strip_o(v) for key, v in obj.items()}
     return obj
 
 
@@ -622,3 +752,23 @@ def iter_fields(obj: Any, path: str = "") -> Iterator[tuple[str, str, bool, Any]
         for k, x in obj.items():
             if is_dataclass(x):
                 yield from iter_fields(x, f"{path}[{k!r}]")
+
+
+def iter_estimates(obj: Any, path: str = "") -> Iterator[tuple[str, Any]]:
+    """(path, value) of every est=True field reachable from obj (see estimate_fields), depth first."""
+    if is_dataclass(obj) and not isinstance(obj, type):
+        est = estimate_fields(type(obj))
+        for name, _, _ in _spec(type(obj)):
+            v = getattr(obj, name)
+            p = f"{path}.{name}" if path else name
+            if name in est:
+                yield p, v
+            yield from iter_estimates(v, p)
+    elif isinstance(obj, (list, tuple)):
+        for i, x in enumerate(obj):
+            if is_dataclass(x):
+                yield from iter_estimates(x, f"{path}[{i}]")
+    elif isinstance(obj, dict):
+        for k, x in obj.items():
+            if is_dataclass(x):
+                yield from iter_estimates(x, f"{path}[{k!r}]")
