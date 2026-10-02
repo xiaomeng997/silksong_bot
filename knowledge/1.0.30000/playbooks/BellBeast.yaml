@@ -70,8 +70,13 @@ prepare:
   - {state: Burst Out, x_prime: 10.0, side: hero}
   - {state: burst, x_prime: 10.0, side: hero}
   - {state: burst_tell, x_prime: 10.0, side: hero}     # the hypothetical cue (PlannerPolicy view degraded_tell)
-  # vision-equivalent view: the observable phase stands for the state (a leap is seen only once it is in the air)
+  # vision-equivalent view: the observable phase stands for the state (a leap is seen only once it is in the air);
+  # without the charge phases here the vision view met a charge from the hidden stance, 8 u in front of the left
+  # anchor, and came down in it (run 20261002_061751, i0 ep0)
   - {state: leap, x_prime: 12.0, side: attack}
+  - {state: emerge, x_prime: 14.0, side: attack}
+  - {state: charge_antic, x_prime: 14.0, side: attack}
+  - {state: charge, x_prime: 14.0, side: attack}
 
 # Adaptive horizon (M2 plan): while a charge is committed, the planner rolls its dodges out to the end of the Charge
 # (its longest logged dwells) plus 0.3 s, up to 2 s. With the 0.8 s horizon, jumps that cleared the charge's front
