@@ -62,7 +62,7 @@ import numba
 import numpy as np
 
 from ssbot.combat import candidates as cmod
-from ssbot.combat.forecast import Forecast
+from ssbot.combat.forecast import body_shape, Forecast
 from ssbot.combat.holdfilter import hold_filter_jit
 from ssbot.combat.safety_filter import REASONS, FilterContext, hazard_flags, unpausable, veto
 from ssbot.combat.tactics.modes import TacticPrefs
@@ -234,6 +234,15 @@ class Planner:
         if cont:
             rows.append(cmod.continue_plan(self.prev_cmd, 1, T)[None])
         cmd = np.concatenate(rows)
+        rem0 = self.jump_until - self.ticks
+        if rem0 > 0:
+            # a slash keeps the committed jump held (an up-slash into a leaping boss above the hero): without it every
+            # attack released the jump and ranked below the plans that keep it (the person saw side slashes under a
+            # leap; live run 20261002_064001: in Leap Out 56 fresh side slashes hit 6 times, 52 up-slashes 37 times)
+            att = np.array([n.startswith("ATTACK") for n in cs.first_names])[cs.first]
+            if att.any():
+                cmd = cmd.copy()
+                cmd[:N0][att, :min(rem0, T)] |= B_JUMP
         N = len(cmd)
         full = np.empty((N, P + T), np.int64)
         full[:, :P] = prefix
@@ -419,6 +428,12 @@ class Planner:
         N, T1 = roll.flags.shape
         face0 = 1 if start.reshape(kin.K, -1)[kin.FACE, 0] >= 0 else -1
         boss, okb = f.boss_box(tk)
+        polys, starts = body_shape(f.boss)
+        base = np.array([boss[0, 0], boss[0, 1]]) if len(boss) else np.zeros(2)
+        if len(polys):
+            # boss_box moves the box along the mean path; the polygons move with it (offset from frame 0)
+            b0 = _box_of(polys)
+            base = np.array([b0[0], b0[1]])
         wv = np.array([w.get("hit", 10.0), w.get("waste", 0.6), w.get("jump", 0.15), w.get("stance", 0.6),
                        w.get("risk", 3.0), w.get("face", 0.3), w.get("ground", 0.2), w.get("cast_waste", 2.0)])
         boss_x = prefs.boss_x if prefs.boss_x is not None else np.nan
@@ -432,7 +447,8 @@ class Planner:
                       np.ascontiguousarray(roll.mode), np.ascontiguousarray(latched), face0,
                       np.ascontiguousarray(boss, np.float64), np.ascontiguousarray(okb), wv, float(prefs.stance_x),
                       np.ascontiguousarray(rx, np.float64), np.ascontiguousarray(rv, np.float64), boss_x, max_hits,
-                      J, hits, near)
+                      np.ascontiguousarray(polys, np.float64), np.ascontiguousarray(starts, np.int64),
+                      np.ascontiguousarray(base, np.float64), J, hits, near)
         boss_hp = f.fc.tracker.ctx.hp
         may_kill = near if (boss_hp is not None and boss_hp <= SPEAR_DAMAGE) else np.zeros(N, bool)
         return J, hits, may_kill
@@ -441,17 +457,71 @@ class Planner:
 SPEAR_DAMAGE = 15.0
 
 
+def _box_of(polys: np.ndarray) -> tuple[float, float, float, float]:
+    return float(polys[:, 0].min()), float(polys[:, 1].min()), float(polys[:, 0].max()), float(polys[:, 1].max())
+
+
+@numba.njit(cache=True)
+def _seg_hits_rect(x0, y0, x1, y1, rx0, ry0, rx1, ry1):
+    # Liang-Barsky: does the segment (x0, y0)-(x1, y1) meet the rectangle?
+    dx, dy = x1 - x0, y1 - y0
+    t0, t1 = 0.0, 1.0
+    for pp, qq in ((-dx, x0 - rx0), (dx, rx1 - x0), (-dy, y0 - ry0), (dy, ry1 - y0)):
+        if pp == 0.0:
+            if qq < 0.0:
+                return False
+        else:
+            r = qq / pp
+            if pp < 0.0:
+                if r > t1:
+                    return False
+                if r > t0:
+                    t0 = r
+            else:
+                if r < t0:
+                    return False
+                if r < t1:
+                    t1 = r
+    return True
+
+
+@numba.njit(cache=True)
+def _rect_meets_polys(rx0, ry0, rx1, ry1, polys, starts, dx, dy):
+    """The rectangle meets one of the polygons (moved by dx, dy): an edge crosses it or it lies inside one."""
+    for p in range(len(starts) - 1):
+        a, b = starts[p], starts[p + 1]
+        inside = False
+        cx, cy = 0.5 * (rx0 + rx1), 0.5 * (ry0 + ry1)
+        j = b - 1
+        for i in range(a, b):
+            xi, yi = polys[i, 0] + dx, polys[i, 1] + dy
+            xj, yj = polys[j, 0] + dx, polys[j, 1] + dy
+            if _seg_hits_rect(xj, yj, xi, yi, rx0, ry0, rx1, ry1):
+                return True
+            if (yi > cy) != (yj > cy) and cx < (xj - xi) * (cy - yi) / (yj - yi) + xi:
+                inside = not inside
+            j = i
+        if inside:
+            return True
+    return False
+
+
 @numba.njit(cache=True, inline="always")
-def _ov(cx, cy, face, fx0, fx1, y0, y1, b0, b1, b2, b3):
+def _ov(cx, cy, face, fx0, fx1, y0, y1, b0, b1, b2, b3, polys, starts, dx, dy):
     if face > 0:
         ax0, ax1 = cx + fx0, cx + fx1
     else:
         ax0, ax1 = cx - fx1, cx - fx0
-    return ax0 < b2 and ax1 > b0 and cy + y0 < b3 and cy + y1 > b1
+    if not (ax0 < b2 and ax1 > b0 and cy + y0 < b3 and cy + y1 > b1):
+        return False
+    if len(starts) < 2:
+        return True
+    return _rect_meets_polys(ax0, cy + y0, ax1, cy + y1, polys, starts, dx, dy)
 
 
 @numba.njit(cache=True, parallel=True)
-def _score_kernel(box, flags, mode, latched, face0, boss, okb, wv, stance_x, rx, rv, boss_x, max_hits, J, hits, near):
+def _score_kernel(box, flags, mode, latched, face0, boss, okb, wv, stance_x, rx, rv, boss_x, max_hits, polys, starts,
+                  base, J, hits, near):
     """J per candidate (the module docstring's terms) on the nominal lane; hits: predicted boss hits (Silkspear x 3);
     near: an attack starts with the boss within 1 u of its box (a possible killing blow, U)."""
     N, T1 = flags.shape
@@ -509,20 +579,24 @@ def _score_kernel(box, flags, mode, latched, face0, boss, okb, wv, stance_x, rx,
                     if not okb[j]:
                         continue
                     bx = boss[j]
+                    ddx, ddy = bx[0] - base[0], bx[1] - base[1]
                     if up:
-                        if _ov(cxs[j], cys[j], fc[j], UP[0], UP[1], UP[2], UP[3], bx[0], bx[1], bx[2], bx[3]):
+                        if _ov(cxs[j], cys[j], fc[j], UP[0], UP[1], UP[2], UP[3], bx[0], bx[1], bx[2], bx[3], polys,
+                               starts, ddx, ddy):
                             got = True
-                    elif _ov(cxs[j], cys[j], fc[j], SIDE[0], SIDE[1], SIDE[2], SIDE[3], bx[0], bx[1], bx[2], bx[3]):
+                    elif _ov(cxs[j], cys[j], fc[j], SIDE[0], SIDE[1], SIDE[2], SIDE[3], bx[0], bx[1], bx[2], bx[3],
+                             polys, starts, ddx, ddy):
                         got = True
                     if _ov(cxs[j], cys[j], fc[j], SIDE[0] - 1.0, SIDE[1] + 1.0, SIDE[2] - 1.0, SIDE[3] + 1.0, bx[0],
-                           bx[1], bx[2], bx[3]):
+                           bx[1], bx[2], bx[3], polys, starts, ddx, ddy):
                         nr = True
                 if got:
                     h += 1.0
             elif dsk:
                 for j in range(k, min(T1, k + 10)):
                     if okb[j] and _ov(cxs[j], cys[j], fc[j], DOWN[0], DOWN[1], DOWN[2], DOWN[3], boss[j, 0],
-                                      boss[j, 1], boss[j, 2], boss[j, 3]):
+                                      boss[j, 1], boss[j, 2], boss[j, 3], polys, starts, boss[j, 0] - base[0],
+                                      boss[j, 1] - base[1]):
                         got = True
                         nr = True
                 if got:
@@ -530,7 +604,8 @@ def _score_kernel(box, flags, mode, latched, face0, boss, okb, wv, stance_x, rx,
             else:
                 j = k + SPEAR_DELAY_F
                 if j < T1 and okb[j] and _ov(cxs[j], cys[j], fc[j], SPEAR[0], SPEAR[1], SPEAR[2], SPEAR[3],
-                                             boss[j, 0], boss[j, 1], boss[j, 2], boss[j, 3]):
+                                             boss[j, 0], boss[j, 1], boss[j, 2], boss[j, 3], polys, starts,
+                                             boss[j, 0] - base[0], boss[j, 1] - base[1]):
                     h += 3.0
                     nr = True
                 else:

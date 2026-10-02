@@ -275,3 +275,17 @@ def test_the_spear_scores_only_along_the_throw(model, tpls, params, arena):
     J, hits, _ = planner._score(ws, roll, latched, start, f, prefs, 0, tk)
     assert hits.tolist() == [3.0, 0.0, 0.0]
     assert J[0] > J[1] + 25.0 and J[0] > J[2] + 25.0
+
+
+def test_hits_land_on_the_boss_polygon_not_its_box():
+    """Nail hits are scored against the boss's enabled collider polygons (Leap Out: LeapCollider, a 9-vertex shape
+    whose bounding box is 11.7 x 3.8 u): a slash in the box's empty corner scores nothing."""
+    from ssbot.combat.planner import _rect_meets_polys
+    leap = np.array([2.64, 1.04, 0.3, 1.24, -1.61, 0.73, -3.82, -0.77, -5.81, -2.63, -5.94, -3.08, -0.03, -2.61, 5.58,
+                     -0.67, 4.31, 0.54]).reshape(-1, 2) + (80.0, 10.0)
+    starts = np.array([0, len(leap)])
+    # the box's upper-left corner (x 74.1-76, y 10.5-11.2) is empty; the middle of the body is not
+    assert not _rect_meets_polys(74.1, 10.4, 76.0, 11.2, leap, starts, 0.0, 0.0)
+    assert _rect_meets_polys(79.0, 9.5, 81.0, 10.5, leap, starts, 0.0, 0.0)          # inside the body
+    assert _rect_meets_polys(84.0, 8.0, 86.5, 9.6, leap, starts, 0.0, 0.0)           # across its right edge
+    assert not _rect_meets_polys(84.0, 8.0, 86.5, 9.6, leap, starts, 0.0, 5.0)       # moved up 5 u

@@ -319,9 +319,23 @@ class Forecast:
         return box, ok
 
 
+def body_shape(e: Entity | None) -> tuple[np.ndarray, np.ndarray]:
+    """The boss's enabled collider polygons as flat vertices [V, 2] and starts [P + 1] (scoring: nail hits land on
+    them). During an attack the root box is disabled and the attack polygon takes the hits (live run 20261002_064001:
+    Leap Out / Descending have only LeapCollider enabled, a 9-vertex shape whose box is 11.7 x 3.8 u, the root box
+    2.2 x 1.8 u disabled; Charge only PolyCollider); its bounding box credited side, up and down slashes alike, while
+    side slashes in Leap Out hit 6 times of 56. Vision view: the render box as a rectangle."""
+    polys = [np.asarray(p, np.float64).reshape(-1, 2) for p in (e.body_polys if e is not None else ()) if len(p) >= 3]
+    if not polys:
+        return np.zeros((0, 2)), np.zeros(1, np.int64)
+    starts = np.zeros(len(polys) + 1, np.int64)
+    starts[1:] = np.cumsum([len(q) for q in polys])
+    return np.concatenate(polys), starts
+
+
 def _body_box(e: Entity) -> tuple[float, float, float, float] | None:
     if e.body_polys:
-        p = np.asarray(e.body_polys[0], np.float64)
+        p = np.concatenate([np.asarray(q, np.float64).reshape(-1, 2) for q in e.body_polys])
         return float(p[:, 0].min()), float(p[:, 1].min()), float(p[:, 0].max()), float(p[:, 1].max())
     if e.render_box is not None:
         return e.render_box
@@ -564,6 +578,11 @@ class BossTracker:
         if fam is None:
             return
         f = m.families[fam]
+        root = PHASE_ROOT.get(ph)
+        if self.t_start is None and root in f.entry:
+            # the attack began this long before the phase's first state (the family's logged entry offsets): the
+            # boss box then moves along the family's mean path for scoring (Forecast.boss_box)
+            self.t_start = t - tau - TELL_DELAY.get(ph, 0.0) - f.entry[root][0]
         if fam == "BB_BURST":
             # set once per burst and kept to its end (an earlier version fell through to the family's named anchor,
             # which a burst has none of, from the second drawn frame on: the whole burst range for the rest of the

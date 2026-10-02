@@ -61,7 +61,10 @@ punish:
 # rolls out at about 11 u/s, bouncing up to 4.85 u: support/ent/BoneBeast AtkBell R/self). Waiting 5.5 u beside the
 # burst to punish it (first version) put the hero where the falling bell's support met the eruption's: FORCED_RISK
 # through Burst Out and a bell hit in 6 of 6 QUITs of run 20261002_041819. 10 u leaves room to jump the rolling bell;
-# Burst Out became a punish window again on 2026-10-02 (see punish).
+# Burst Out became a punish window again on 2026-10-02 (see punish), and the burst stance moved to 4.5 u beside the
+# burst point (the person: wait at its side, hit twice, dodge the bells): the eruption covers x' -3.5..3.5 for its
+# first 0.15 s; planner ticks with the hero standing at x' -4.5 / -4.0 find 153-174 safe candidates 0.6 and 1.0 s
+# before the eruption and 73-153 in its first 0.1 s (synthetic Bone_05, margins 0.15 / 0.25 u).
 prepare:
   # A charge: wait 14 u in front of its anchor and jump it in place (hold 48 frames): 17 safe jump timings there
   # against the charge's support (margins 0.15 / 0.25 u, Bone_05 walls), landing 13.8 u out, next to where the
@@ -73,17 +76,17 @@ prepare:
   - {state: Emerge Antic L, x_prime: 12.0, side: attack}
   - {state: Leap Out, x_prime: 12.0, side: attack}
   - {state: Descending, x_prime: 12.0, side: attack}
-  - {state: Burst Antic, x_prime: 10.0, side: hero}
-  - {state: Fire Bells, x_prime: 10.0, side: hero}
-  - {state: Burst Out, x_prime: 10.0, side: hero}
-  - {state: burst, x_prime: 10.0, side: hero}
-  - {state: burst_tell, x_prime: 10.0, side: hero}     # the first burst-cue experiment (view degraded_tell)
+  - {state: Burst Antic, x_prime: 4.5, side: hero}
+  - {state: Fire Bells, x_prime: 4.5, side: hero}
+  - {state: Burst Out, x_prime: 4.5, side: hero}
+  - {state: burst, x_prime: 4.5, side: hero}
+  - {state: burst_tell, x_prime: 4.5, side: hero}     # the first burst-cue experiment (view degraded_tell)
   # the dust cues (PlannerPolicy view degraded_dust): dust at an anchor (charge or leap), low (charge), tall (leap),
   # in the burst range (burst)
   - {state: dust, x_prime: 13.0, side: attack}
   - {state: dust_low, x_prime: 14.0, side: attack}
   - {state: dust_tall, x_prime: 12.0, side: attack}
-  - {state: dust_burst, x_prime: 10.0, side: hero}
+  - {state: dust_burst, x_prime: 4.5, side: hero}
   # vision-equivalent view: the observable phase stands for the state (a leap is seen only once it is in the air);
   # without the charge phases here the vision view met a charge from the hidden stance, 8 u in front of the left
   # anchor, and came down in it (run 20261002_061751, i0 ep0)
