@@ -214,3 +214,42 @@ def test_committed_keeps_the_current_attack_and_tails_only(model, templates):
     f = fc.forecast(5.0, 0.0)                    # long enough for the next attack (Dig In, Submerged 1 s, antic 1 s)
     kept = f.committed().placements
     assert kept and {p.key.split("/")[1] for p in kept} == {"BB_CHARGE"} and len(kept) < len(f.placements)
+
+
+def test_ve_dust_cues_start_the_walk_in_the_antic(model, templates):
+    """Dust cues (ObservabilityFilter tells, PlannerPolicy DUST_TELL): dust at an anchor roots both a charge and a
+    leap from that side, entered TELL_DELAY earlier; low / tall dust one of them; dust in the burst range a burst at
+    its x."""
+    from ssbot.combat.forecast import TELL_DELAY, TELL_SLACK_S
+    from ssbot.core.worldstate import E, Entity, Kind, PhasePost, WorldState
+
+    def frame(t, phase, x, tau):
+        ws = WorldState()
+        ws.stamp.t_game_s = t
+        ws.entities = [Entity(id=7, kind=Kind.BOSS, type_key=E("Bone Beast"), pos=E((x, 3.0), conf=1.0),
+                              phase=PhasePost(topk=[(phase, 1.0)], t_in_phase=tau), hidden=True, visible_frac=0.0)]
+        return ws
+
+    fc = _fc(model, templates, VISION_EQUIVALENT)
+    trk = fc.tracker
+    trk.seen = True
+    fc.update(frame(10.0, "hidden", 0.0, 0.0))
+    fc.update(frame(11.3, "dust", 95.72, 0.0))
+    roots, ok = trk.roots(11.3)
+    assert ok and {(r.state, r.ctx.family, r.ctx.direction) for r in roots} == {
+        ("Emerge Antic C", "BB_CHARGE", "Set R"), ("Emerge Antic L", "BB_LEAP", "Set R")}
+    for r in roots:
+        assert r.ctx.anchor.x == pytest.approx(95.72) and r.p == 0.5
+        assert r.e_lo == pytest.approx(-0.3 - 0.1) and r.e_hi == pytest.approx(-0.3 + 0.1)
+    fc.update(frame(11.6, "dust_tall", 95.72, 0.0))
+    roots, _ = trk.roots(11.6)
+    assert [(r.state, r.ctx.family, r.ctx.direction, r.ctx.anchor.x) for r in roots] == [
+        ("Emerge Antic L", "BB_LEAP", "Set R", pytest.approx(95.72))]
+    assert roots[0].e_lo == pytest.approx(-TELL_DELAY["dust_tall"] - TELL_SLACK_S["dust_tall"])
+    fc = _fc(model, templates, VISION_EQUIVALENT)
+    fc.tracker.seen = True
+    fc.update(frame(20.0, "hidden", 0.0, 0.0))
+    fc.update(frame(21.3, "dust_burst", 84.2, 0.0))
+    roots, _ = fc.tracker.roots(21.3)
+    assert [(r.state, r.ctx.family, r.ctx.anchor.x) for r in roots] == [("Burst Antic", "BB_BURST", 84.2)]
+    assert {p.anchor for p in fc.forecast(2.0).placements if p.anchor is not None} == {(84.2, 5.49)}

@@ -28,7 +28,7 @@ class Playbook:
     bind_hp_missing_min: int
     hit_damage: dict[str, float]
     no_hurtbox: frozenset[str] = frozenset()
-    hidden_x_vision: float | None = None     # the hidden stance when the burst position is not seen (stage C)
+    hidden_x_vision: float | None = None     # the hidden stance in the vision view without the dust cues
     prepare: dict[str, tuple[float, str]] = field(default_factory=dict)   # state -> (x' from the anchor, side)
     long_horizon: dict = field(default_factory=dict)   # states, until, extra_s, map (observable phase -> state)
     weights: dict[str, float] = field(default_factory=lambda: dict(DEFAULT_WEIGHTS))

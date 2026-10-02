@@ -82,12 +82,24 @@ BELL_TTL_S = 8.0                   # a disarmed bell (left the export, back to D
 
 # observable phase -> the Control state its first frame is (the root of the forecast walk)
 PHASE_ROOT = {"emerge": "Charge Emerge", "charge_antic": "Charge Antic", "charge": "Charge", "leap": "Leap Out",
-              "burst": "Burst Out", "roar": "Rage Burst", "roar_end": "Roar End", "burst_tell": "Burst Antic"}
+              "burst": "Burst Out", "roar": "Rage Burst", "roar_end": "Roar End", "burst_tell": "Burst Antic",
+              "dust_low": "Emerge Antic C", "dust_tall": "Emerge Antic L", "dust_burst": "Burst Antic"}
 PHASE_FAMILY = {"emerge": "BB_CHARGE", "charge_antic": "BB_CHARGE", "charge": "BB_CHARGE", "leap": "BB_LEAP",
-                "burst": "BB_BURST", "roar": "BB_RAGE", "roar_end": "BB_RAGE", "burst_tell": "BB_BURST"}
-# a hypothetical cue of the burst position while it is underground (ObservabilityFilter tells; an experiment): the
-# entity's x is the hidden transform's, which is the burst anchor (oracle view: 81 of 81 bursts)
-TELL_PHASES = frozenset(("burst_tell",))
+                "burst": "BB_BURST", "roar": "BB_RAGE", "roar_end": "BB_RAGE", "burst_tell": "BB_BURST",
+                "dust_low": "BB_CHARGE", "dust_tall": "BB_LEAP", "dust_burst": "BB_BURST"}
+# Underground cues (ObservabilityFilter tells; hypotheses until M3 measures tell_lead_vision in shadow mode). The
+# entity's x is the hidden transform's: the burst anchor (oracle view: 81 of 81 bursts) or the emergence anchor.
+# Screenshots C:/ssbot/sandbox/m2_tells (ssbot.probes.m2_tells): nothing at +0.1 s, dust where it will come up from
+# +0.3 s after Emerge Antic C / L and Burst Antic; low for a charge, a tall column with debris for a leap, told apart
+# for certain at +0.6 s. "dust": at an anchor, charge or leap not yet told; "dust_low" / "dust_tall": a charge / a
+# leap; "dust_burst": inside the burst range (bursts erupt at x 81.2-91.2, charges and leaps at the anchors 75.03 /
+# 95.72). The antic began TELL_DELAY before the cue, give or take TELL_SLACK_S (when vision would first see it).
+# "burst_tell": the burst position from the antic's first frame, the first experiment (run 20261002_061942).
+TELL_PHASES = frozenset(("burst_tell", "dust", "dust_low", "dust_tall", "dust_burst"))
+EMERGE_TELLS = frozenset(("dust", "dust_low", "dust_tall"))
+TELL_DELAY = {"burst_tell": 0.0, "dust": 0.3, "dust_low": 0.6, "dust_tall": 0.6, "dust_burst": 0.3}
+TELL_SLACK_S = {"burst_tell": BIN, "dust": 0.1, "dust_low": 0.1, "dust_tall": 0.1, "dust_burst": 0.1}
+DUST_ROOTS = (("BB_CHARGE", "Emerge Antic C"), ("BB_LEAP", "Emerge Antic L"))
 RECOVER_ROOT = {"BB_CHARGE": "Charge End", "BB_LEAP": "Leap Land"}
 # the state a hidden phase starts in, by the last drawn family (None: before the first emergence)
 HIDE_ROOT = {"BB_CHARGE": "Submerged", "BB_LEAP": "Submerged", "BB_BURST": "Burst Recovery", "BB_RAGE": "Rage Submerge"}
@@ -334,6 +346,7 @@ class BossTracker:
         self.last_family: str | None = None    # VE: family of the last drawn phase
         self.last_anchor: Anchor | None = None
         self.t_hide: float | None = None
+        self.tell_dir: str | None = None       # VE: the anchor side of the last emergence dust
         self.coasting = False                  # VE: no phase this frame (a ghost)
         self._anchor_sum: list[float] = []
         self.t = 0.0
@@ -512,7 +525,7 @@ class BossTracker:
                     self._anchor_sum = []
                     self.last_anchor = None
                     self.t_start = None
-                self.last_family = fam if fam is not None else self.last_family
+                self.last_family = fam if fam is not None else (None if ph == "dust" else self.last_family)
                 if ph == "roar":
                     self.ctx.raged = True
                 if ph == "roar_end":
@@ -520,6 +533,12 @@ class BossTracker:
         if ph == HIDDEN:
             return
         self.seen = True
+        if ph in EMERGE_TELLS and boss.pos.conf > 0:
+            xl, xr = m.anchor("BB_CHARGE", "Set L").x, m.anchor("BB_CHARGE", "Set R").x
+            self.tell_dir = "Set L" if boss.pos.v[0] < 0.5 * (xl + xr) else "Set R"
+            if ph == "dust":
+                self.last_anchor = m.anchor("BB_CHARGE", self.tell_dir)     # charge and leap share the anchors
+                return
         fam = self.last_family
         if fam is None:
             return
@@ -538,7 +557,8 @@ class BossTracker:
                 y = f.anchor_y if f.anchor_y is not None else boss.pos.v[1] + 2.68
                 self.last_anchor = Anchor(float(self._anchor_sum[0]), y, 1)
         elif f.directed:
-            self.last_anchor = m.anchor(fam, "Set R" if boss.flip_x else "Set L")
+            told = ph in TELL_PHASES and self.tell_dir is not None
+            self.last_anchor = m.anchor(fam, self.tell_dir if told else ("Set R" if boss.flip_x else "Set L"))
         else:
             self.last_anchor = m.anchor(fam, None)
 
@@ -605,10 +625,19 @@ class BossTracker:
                 ctx = replace(base, family=f, anchor=self.last_anchor if f == fam else None)
                 out.append(Root(RECOVER_ROOT[f], lo, hi, ctx, 1.0 / len(fams)))
             return out, True
+        direction = None
+        if self.state in TELL_PHASES:
+            d, sl = TELL_DELAY[self.state], TELL_SLACK_S[self.state]
+            lo, hi = e - d - sl, e - d + sl
+            if self.state in EMERGE_TELLS:
+                direction = self.tell_dir
+            if self.state == "dust":
+                return [Root(st, lo, hi, replace(base, family=f, direction=direction, anchor=m.anchor(f, direction)),
+                             1.0 / len(DUST_ROOTS)) for f, st in DUST_ROOTS], True
         st = PHASE_ROOT.get(self.state)
         if st is None:
             return [], False
-        ctx = replace(base, family=PHASE_FAMILY[self.state], anchor=self.last_anchor)
+        ctx = replace(base, family=PHASE_FAMILY[self.state], anchor=self.last_anchor, direction=direction)
         return [Root(st, lo, hi, ctx)], True
 
     def drawn_left(self, origin_t: float) -> float:

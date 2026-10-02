@@ -1,7 +1,7 @@
 """PlannerPolicy: the M2 combat stack as a run_episode policy (W3 + W4 integration; DESIGN §3.5, §3.7, §3.9.2).
 
     pol = PlannerPolicy(view="oracle")             # stage B; view="degraded": stage C (DegradedOracleBackend)
-                                                    # view="degraded_tell": stage C with a hypothetical burst cue
+                                                    # "degraded_dust": stage C with the dust cues
     pol.attach(link)                                # once per link: the TERRAIN tap
     run_episode(link, BELL_BEAST, tap, pol, cfg, rec)   # reset(rng, enc) per episode, act(state, tap) -> mask per STATE
 
@@ -54,10 +54,18 @@ HORIZON_S = 2.0                       # forecast horizon: the risk map's and the
 UNPRED_LAG = 3
 LOG_BEFORE, LOG_AFTER = 90, 10
 LOG_ALL = os.environ.get("SSBOT_LOG_ALL") == "1"     # debugging: every tick to the decision log
-# view "degraded_tell": an experiment, not a vision fact (ObservabilityFilter tells): the Bell Beast's burst position
-# shown while it is underground in Burst Antic (1.2 s before the eruption, as the oracle view knows it)
+# Underground cues for the vision view (ObservabilityFilter tells; hypotheses until M3 measures tell_lead_vision in
+# shadow mode). DUST_TELL: the emergence dust the person reported (2026-10-02), seen in screenshots of instance 3
+# (C:/ssbot/sandbox/m2_tells, ssbot.probes.m2_tells: 10 charges, 12 leaps from both anchors, 9 bursts): none at
+# +0.1 s after Emerge Antic C / L or Burst Antic, dust where the boss will come up from +0.3 s, low for a charge, a
+# tall column with debris for a leap, told apart for certain at +0.6 s (the emergence antics last 1.0 s, the burst's
+# 1.2 s). BURST_TELL: the burst position from the antic's first frame, the first experiment (run 20261002_061942).
+DUST_TELL = {"Bone Beast": {"Emerge Antic C": [(0.3, "dust"), (0.6, "dust_low")],
+                            "Emerge Antic L": [(0.3, "dust"), (0.6, "dust_tall")],
+                            "Burst Antic": [(0.3, "dust_burst")]}}
 BURST_TELL = {"Bone Beast": {"Burst Antic": "burst_tell"}}
-VIEWS = ("oracle", "degraded", "degraded_tell")
+TELLS = {"degraded": None, "degraded_dust": DUST_TELL, "degraded_tell": BURST_TELL}
+VIEWS = ("oracle", "degraded", "degraded_dust", "degraded_tell")
 
 
 class TerrainTap:
@@ -117,7 +125,7 @@ class PlannerPolicy:
         self.fc.no_hurtbox = self.pb.no_hurtbox
         self.tac = Tactics(self.pb)
         if view == "degraded" and self.pb.hidden_x_vision is not None:
-            self.tac.hidden_x = self.pb.hidden_x_vision      # no burst cue: the stance with the least unreactable risk
+            self.tac.hidden_x = self.pb.hidden_x_vision      # no cues: the stance with the least unreactable risk
         self.planner: Planner | None = None
         self.terrain_tap: TerrainTap | None = None
         self.terrain: Terrain2D | None = None
@@ -175,8 +183,7 @@ class PlannerPolicy:
             self.k = 0
         else:
             self.backend = DegradedOracleBackend(OracleBackend(bosses=[self.spec]),
-                                                 ObservabilityFilter(bosses=[self.spec], tells=BURST_TELL
-                                                                     if self.view == "degraded_tell" else None))
+                                                 ObservabilityFilter(bosses=[self.spec], tells=TELLS[self.view]))
             self.k = self.backend.reset(seed)
         if self.terrain_tap is not None:
             msg = self.terrain_tap.wait(enc.scene, timeout_s=5.0)

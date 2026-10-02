@@ -683,3 +683,21 @@ def test_degraded_backend_end_to_end():
     assert again.reset(21) == k
     outs2 = [again.feed(s) for s in states]
     assert [o.hero.pos.v for o in outs2[k:]] == [o.hero.pos.v for o in outs[k:]]
+
+
+def test_delayed_tells_follow_the_time_in_state(wake):
+    """tells with delays: the phase of the last entry whose delay the oracle's time in the state has reached."""
+    from ssbot.core.worldstate import PhasePost
+    i = next(i for i, w in enumerate(wake) if boss(w) is not None)
+    f = ObservabilityFilter(bosses=[BELL_BEAST],
+                            tells={"Bone Beast": {"Emerge Antic L": [(0.3, "dust"), (0.6, "dust_tall")]}})
+    f.apply(wake[i])
+    seen = []
+    for k, tau in enumerate((0.1, 0.3, 0.5, 0.6, 0.9)):
+        w = copy.deepcopy(wake[i + 1 + k])
+        b = boss(w)
+        b.hidden, b.dmg_boxes, b.body_polys, b.render_box, b.visible_frac = True, [], [], None, 0.0
+        b.pos = E((95.72, -12.51))
+        b.phase = PhasePost(topk=[("Emerge Antic L", 1.0)], t_in_phase=tau)
+        seen.append(boss(f.apply(w)).phase.top)
+    assert seen == [obs.HIDDEN_PHASE, "dust", "dust", "dust_tall", "dust_tall"]

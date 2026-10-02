@@ -226,7 +226,7 @@ def main(argv: list[str] | None = None) -> int:
         p.add_argument("--rotate", type=int, default=25)
         p.add_argument("--seed", type=int, default=0)
         p.add_argument("--no-record", action="store_true")
-        p.add_argument("--view", choices=("oracle", "degraded", "degraded_tell"), default="oracle")
+        p.add_argument("--view", choices=("oracle", "degraded", "degraded_dust", "degraded_tell"), default="oracle")
         p.add_argument("--threads", type=int, default=8)
         if name == "run":
             p.add_argument("--instances", default="0")

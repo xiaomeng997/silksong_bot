@@ -50,12 +50,15 @@ Rule: no value in the output may depend on something pixels cannot show. Per fra
     "NeedleThrow Throwing" (Silk Spear): Hunter crest, needle level 0 (DEFAULT_ATTACK_DAMAGE).
   - FSM state -> observable phase through the caller's table (BossSpec.phases or phase_map; default "unknown"),
     with t_in_phase counted from the observable phase change.
-  - Hypothetical tells (tells, off by default; an experiment, not a vision fact): {type_key: {FSM state: phase}}.
-    A boss held hidden while the oracle exports it in a listed state shows that phase and its transform x (conf 1;
-    y stays the last seen one), as if vision saw a cue where it will come out. Nothing shows the Bell Beast's burst
-    position before the eruption in this view (M2 stage C, run 20261002_060151: 16 of 16 episodes ended at the first
-    burst); `tells={"Bone Beast": {"Burst Antic": "burst_tell"}}` measures what such a cue would be worth. Whether
-    the game draws one (dust, rumble) is for the vision work to establish.
+  - Tells (tells, off by default): {type_key: {FSM state: phase | [(delay_s, phase), ...]}}. A boss held hidden
+    while the oracle exports it in a listed state shows the phase of the last entry whose delay its time in that
+    state has reached, and its transform x (conf 1; y stays the last seen one): a cue vision sees where it will come
+    out. Hypotheses until M3 measures tell_lead_vision in shadow mode. The Bell Beast's emergence dust (the person's
+    report, 2026-10-02; screenshots C:/ssbot/sandbox/m2_tells, ssbot.probes.m2_tells: nothing at +0.1 s after
+    Emerge Antic C / L, dust at the anchor's side at +0.3 s, low for a charge and a tall column with debris for a
+    leap, plain at +0.6 s): planner_policy.DUST_TELL. The burst position: nothing seen in this view (M2 stage C, run
+    20261002_060151: 16 of 16 episodes ended at the first burst); planner_policy.BURST_TELL only measures what a cue
+    would be worth.
   - Exact timers (HeroState fields tagged timer=True) -> None until the vision-side timer models exist.
   - playTime -> wall clock: calibrated once from the first frame (standing in for the save-slot read, sigma
     calib_sigma_s; the slot shows h:mm), then advanced by the QPC wall clock while the game would count it
@@ -673,7 +676,12 @@ class ObservabilityFilter:
         g = seen.ent
         tell = None
         if cur is not None and cur.phase is not None and cur.phase.top:
-            tell = self.tells.get(g.type_key.v, {}).get(cur.phase.top)
+            spec = self.tells.get(g.type_key.v, {}).get(cur.phase.top)
+            if isinstance(spec, str):
+                tell = spec
+            elif spec:
+                due = [ph for d, ph in spec if cur.phase.t_in_phase >= d - 1e-6]
+                tell = due[-1] if due else None
         if tell is not None:
             return Entity(id=g.id, kind=g.kind, type_key=g.type_key,
                           pos=E((float(cur.pos.v[0]), float(g.pos.v[1])), sigma=g.pos.sigma, conf=1.0,

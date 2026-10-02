@@ -13,7 +13,8 @@ c - 1 at t_(c-1) is inside the forecast's support, the forecast being made from 
 by the hero hurtbox (plus --margin), the box centre tested.
 
 Views: "oracle" feeds OracleBackend; "ve" adds the ObservabilityFilter (the vision-equivalent view; no noise and no
-delay here: the lag L stands for the delay). Two passes per recording: the events alone give the contact frames, then
+delay here: the lag L stands for the delay), "ve_dust" with the dust cues (planner_policy.DUST_TELL). Two passes per
+recording: the events alone give the contact frames, then
 the backend, filter and tracker run over every frame and forecast only at the frames some contact needs.
 --table points the forecaster at another behaviour build (a held-out build: C:/ssbot/data/m2_heldout/tables holds
 one without i2_002 / i3_002 and the trial run).
@@ -79,7 +80,10 @@ def run_fight(fight: dict, fc, view: str, lags: list[int], stats: dict, misses: 
         for L in lags:
             need[c - L].append(c)
     backend = OracleBackend(bosses=bosses)
-    filt = ObservabilityFilter(bosses=bosses) if view == "ve" else None
+    filt = None
+    if view in ("ve", "ve_dust"):
+        from ssbot.train.planner_policy import DUST_TELL
+        filt = ObservabilityFilter(bosses=bosses, tells=DUST_TELL if view == "ve_dust" else None)
     fc.reset()
     t_of: dict[int, float] = {}
     box_of: dict[int, tuple] = {}
@@ -91,7 +95,7 @@ def run_fight(fight: dict, fc, view: str, lags: list[int], stats: dict, misses: 
         ws = backend.feed(s)
         if filt is not None:
             ws = filt.apply(ws)
-        if f == f0 and view == "ve":
+        if f == f0 and view != "oracle":
             fc.notify_wake(ws.stamp.t_game_s)
         fc.update(ws)
         t_of[f] = ws.stamp.t_game_s

@@ -25,7 +25,7 @@ stance:
   # so stand where every branch can still be escaped: between both charge emergences (x' -6..4.8 from 75.03 / 95.72)
   # and outside both leap landing zones (91-102.8 from the left anchor, 67.9-79.7 from the right one).
   hidden_x: 85.4
-  # Vision-equivalent view without a burst cue (stage C): the burst position is unseen until the eruption, which
+  # Vision-equivalent view without the dust cues (stage C): the burst position is unseen until the eruption, which
   # nothing escapes within about 4 u of it (bx - 3.75 .. bx + 4.0), while a charge or leap that emerges near the hero
   # is unescapable too (from the left anchor up to x 80.5 / 82.5, from the right one from 90 / 88). Planner ticks 4
   # frames after the boss is first drawn, hero idle at x (ssbot.tools.reactability, 2026-10-02): the chance that the
@@ -69,7 +69,13 @@ prepare:
   - {state: Fire Bells, x_prime: 10.0, side: hero}
   - {state: Burst Out, x_prime: 10.0, side: hero}
   - {state: burst, x_prime: 10.0, side: hero}
-  - {state: burst_tell, x_prime: 10.0, side: hero}     # the hypothetical cue (PlannerPolicy view degraded_tell)
+  - {state: burst_tell, x_prime: 10.0, side: hero}     # the first burst-cue experiment (view degraded_tell)
+  # the dust cues (PlannerPolicy view degraded_dust): dust at an anchor (charge or leap), low (charge), tall (leap),
+  # in the burst range (burst)
+  - {state: dust, x_prime: 13.0, side: attack}
+  - {state: dust_low, x_prime: 14.0, side: attack}
+  - {state: dust_tall, x_prime: 12.0, side: attack}
+  - {state: dust_burst, x_prime: 10.0, side: hero}
   # vision-equivalent view: the observable phase stands for the state (a leap is seen only once it is in the air);
   # without the charge phases here the vision view met a charge from the hidden stance, 8 u in front of the left
   # anchor, and came down in it (run 20261002_061751, i0 ep0)
@@ -83,10 +89,10 @@ prepare:
 # half looked safe and landed on its back half (live run 20261002_045049: 5 hits, all charges). Observable phases map
 # to their first state for the vision-equivalent view.
 long_horizon:
-  states: [Emerge Antic C, Charge Emerge, Charge Antic, Charge, emerge, charge_antic, charge]
+  states: [Emerge Antic C, Charge Emerge, Charge Antic, Charge, emerge, charge_antic, charge, dust_low]
   until: Charge
   extra_s: 0.3
-  map: {emerge: Charge Emerge, charge_antic: Charge Antic, charge: Charge}
+  map: {emerge: Charge Emerge, charge_antic: Charge Antic, charge: Charge, dust_low: Emerge Antic C}
 
 # The boss's root box (its hurtbox) is disabled while it emerges and winds up a charge (live i2_002: Charge Emerge
 # and Charge Antic every frame enabled False), so no hit can land there; scoring ignores those states.
