@@ -489,7 +489,10 @@ def test_unknown_types_get_no_hp(wake):
 
 
 def test_phase_from_the_callers_table(wake, wake_v):
-    assert {boss(w).phase.top for w in wake_v if boss(w) is not None and boss(w).visible_frac > 0} == {"unknown"}
+    plain = filtered(wake, bosses=[BossSpec("Bone Beast", "Control", ("Death Broadcast",), 150.0)])
+    assert {boss(w).phase.top for w in plain if boss(w) is not None and boss(w).visible_frac > 0} == {"unknown"}
+    seen = {boss(w).phase.top for w in wake_v if boss(w) is not None and boss(w).visible_frac > 0}
+    assert seen and seen <= set(BELL_BEAST.phases.values())
     spec = BossSpec("Bone Beast", "Control", ("Death Broadcast",), 150.0,
                     phases={"Charge Antic": "charge_antic", "Charge": "charge"})
     out = filtered(wake, bosses=[spec])
