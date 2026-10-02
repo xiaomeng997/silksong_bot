@@ -37,11 +37,15 @@ oracle's circumscribed octagons, which already over-cover the circle.
 Export lag: the exported geometry and the physics contact differ by up to one frame (trial run, 101 hits: 31 overlap
 only the geometry of the hit frame, 4 only that of the frame before), so raw templates are queried with tol_bins >= 1
 (enforced). Support templates (key prefix "support/", written by the behaviour builder) have the +-1 bin and the
-validated contact residual (behaviour_tables, attacks.<A>.residual_u) baked in (t_pad, pad_x / pad_y in the meta);
+validated contact residual (behaviour_tables, attacks.<A>.residual_u: each logged hero box at its own frame's time,
+the pairing this query makes) baked in (t_pad, pad_x / pad_y in the meta);
 planner templates are those dilated once more by the hero hurtbox half-extents plus a margin (HERO_HALF_U = 0.25 x
 1.0394 u: STATE hero.box is 0.5 x 2.0789 u on all 2.87 M frames of the Bell Beast build, behaviour_tables
 coverage.hero_box_u; the kinematics model's half_width and foot + head agree), so testing one point, the hero
 collider centre, is a conservative box-overlap test.
+
+Static templates (ambient hazards, armed when a scan started: key _ambient/world) hold one time-invariant bin, the
+union over every frame the hazard was armed, and are in support at every time t.
 
 Storage (.npz, no pickle): per template "<key>/bits" (nt, ny, ceil(nx / 8)) uint8 (np.packbits along x, cropped to
 the occupied cells) and "<key>/meta" (META_FIELDS); other arrays (boss paths, instance tables) ride along under their
@@ -50,12 +54,18 @@ box of an attack that crosses the whole arena. The Bell Beast file (5.9 MB) hold
 viewer) and 71 support templates, 208 MB of packed bits once loaded (the 15 s Rage world templates are most of it).
 
 Planner hot path (DESIGN §3.5.4: <= 512 candidates x 48 frames, p99 <= 3 ms per tick): SupportQuery packs every
-template's bits into one buffer once; per tick it takes placements (template, time offset, anchor, mirror) and runs one
-numba kernel over [N, T] centres (parity with the NumPy reference _query_ref is tested). On the committed Bell Beast
-support (2026-10-01, i9-13900K, tests/test_hitbox_tables.py): planner_templates of the 11 family templates takes
-0.7 s (all 71: 1.6 s, 234 MB); 512 x 48 centres against 16 world_all placements in their active windows p50 1.0 ms,
-p99 1.3-1.8 ms (4 placements: p99 0.6 ms, 32: 1.9 ms). The cost grows with the placements that are active at the
-queried times, so W3 should place only what is in support.
+template's bits into one buffer once and refuses templates not dilated by the hero hurtbox (a point test on bare
+support is a centre-only test); per tick it takes placements (template, time offset, anchor, mirror) and runs one
+numba kernel over the candidates time-major (parity with the NumPy reference _query_ref is tested). A placement costs
+nothing at time steps outside its stored bins or on empty bins; otherwise every candidate pays a branch-free test
+(about 0.09 ms per placement for 512 x 48 candidates inside the template's grid and none flagged), and a time step
+whose candidates are mostly flagged already skips them. On the committed Bell Beast support (2026-10-01, i9-13900K,
+tests/test_hitbox_tables.py): planner_templates of the 11 family templates takes 0.7 s (all 71: 1.6 s, 234 MB);
+512 x 48 centres against 16 world_all placements in their active windows, 91 % flagged: p50 0.7 ms, p99 1.1 ms; 16
+Rage placements with no candidate flagged: p50 1.4 ms, p99 1.9 ms. So the query alone fills the 3 ms tick at about 32
+placements that are active at the queried times with every candidate in reach: W3 places only what is in support at
+those times (one placement per attack instance in support, not one per possible anchor; the anchor support of a
+variable-anchor attack is its world_all template).
 """
 import math
 from collections.abc import Iterable, Sequence
@@ -717,4 +727,4 @@ class SupportQuery:
         if self._place:
             boff, im, fm = self.arrays()
             _query_kernel(self.bits, boff, im, fm, self.full, tk, xt, yt, out)
-        return out.T
+        return np.ascontiguousarray(out.T)
