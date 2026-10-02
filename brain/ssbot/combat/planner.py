@@ -92,10 +92,11 @@ SPEAR = (0.3, 11.0, -0.8, 0.8)
 # hurtbox predicted for those frames (Forecast.boss_box along the family's mean path), not the press frame's: an
 # earlier version scored the up-slash over frames 0-5 and the down spike from its antic on, and none of 112 down
 # presses hit.
-SIDE_WIN = (0, 6)              # [from, to) frames after the attack start
-UP_WIN = (2, 8)
-SPEAR_WIN = (17, 20)
 SPEAR_DELAY_F = 18             # Silkspear: the needle hits 18-19 frames after the cast starts
+# [side, up, down spike (from, to; to 0: the spike frames only), Silkspear]; v1 = the first model, for the audit's
+# before / after (PlannerConfig.attack_model): up 0-5, the down spike from its antic for 10 frames, the needle at 16
+WINDOWS = {"v2": np.array([[0, 6], [2, 8], [0, 0], [17, 20]], np.int64),
+           "v1": np.array([[0, 6], [0, 6], [0, 10], [16, 17]], np.int64)}
 TAIL_CHUNK = 2                # candidates per tail check batch
 COMFORT_FRAMES = 48           # the comfort check covers the whole horizon (24 frames: run 20261002_045049 hits)
 NO_CONTROL_MODES = (kin.M_HURT_FREEZE, kin.M_HURT_RECOIL, kin.M_CAST, kin.M_BIND, kin.M_LOCKED)
@@ -109,6 +110,8 @@ class PlannerConfig:
     threads: int = 4
     variants: str = "bounds"
     max_points: int = 2        # grid points per axis for a hull wider than one point covers
+    predict_log: bool = True   # record the chosen plan's attack predictions at each press (predict_audit)
+    attack_model: str = "v2"   # "v1": the first attack windows and no slash recoil (the audit's before)
     tail_k: int = 2            # safe candidates checked for a way on beyond the horizon (0: off; one chunk)
 
 
@@ -133,6 +136,7 @@ class PlanResult:
     t_ms: dict = field(default_factory=dict)
     alternatives: list = field(default_factory=list)
     tail_ok: bool | None = None             # the chosen plan's end has a safe way on beyond the horizon (None: unchecked)
+    attacks: list | None = None             # its attack predictions at a press (Planner._predict_attacks)
     attack: tuple | None = None             # its first attack scored as a hit: (kind, start frame, predicted boss box
     #                                         [x0, y0, x1, y1] at the active frame) for the whiff audit
     vetoes: dict = field(default_factory=dict)
@@ -358,6 +362,9 @@ class Planner:
             if fh[i] >= 0 and len(bb):
                 jj = min(int(fh[i]) + {1: 3, 2: 5, 3: 8, 4: 18}[int(fk[i])], len(bb) - 1)
                 res.attack = (int(fk[i]), int(fh[i]), [round(float(v), 2) for v in bb[jj]])
+            if cfg.predict_log and (sel_cmd[0] & (B_ATTACK | B_QUICKCAST)) and not (prefix[-1:] & (B_ATTACK |
+                                                                                             B_QUICKCAST)).any():
+                res.attacks = self._predict_attacks(f, start, latched[i], i, tk, P)
             for j in order[1:6]:
                 nm = "CONTINUE" if cont and j == N - 1 else cs.name(int(j))
                 res.alternatives.append((nm, int(S[j]), round(float(Pc[j]), 3), round(float(J[j]), 2)))
@@ -405,6 +412,7 @@ class Planner:
         Returns the rollout to score J on (the hit branch where one is predicted)."""
         self.last_pogo = 0
         self.last_recoil = 0
+        self._fx_ev = None
         modes = roll.mode
         if not (((roll.flags & F_ATTACKING) != 0).any() or (modes == M_DS_SPIKE).any()):
             return roll
@@ -427,7 +435,9 @@ class Planner:
                         np.ascontiguousarray(cur.mode), np.ascontiguousarray(latched), face0,
                         np.ascontiguousarray(boss, np.float64), np.ascontiguousarray(okb),
                         np.ascontiguousarray(polys, np.float64), np.ascontiguousarray(starts, np.int64), base, after,
-                        hit_f, kind)
+                        hit_f, kind, WINDOWS[self.cfg.attack_model])
+            if self.cfg.attack_model == "v1":
+                hit_f[kind != 3] = -1      # the first model predicted the pogo only
             rows = np.flatnonzero(hit_f >= 0)
             if not len(rows):
                 break
@@ -447,11 +457,54 @@ class Planner:
             bound, fall = cur.bound.copy(), cur.flags_all.copy()
             box[sub], flags[sub], mode[sub], bound[sub], fall[sub] = rh.box, rh.flags, rh.mode, rh.bound, rh.flags_all
             cur = _View(box, flags, mode, bound, fall)
+        self._fx_ev = ev
         sub = np.flatnonzero(rows_all)
         if len(sub):
             skip = ((cur.flags_all[sub] & F_INVULN) != 0) if enemy_only else np.zeros(cur.flags_all[sub].shape, bool)
             S[sub] |= self._contacts(f, cur.bound[sub], tk, skip).any(axis=1)
         return cur
+
+    # ---- prediction record (the attack-outcome audit) ---------------------------------------------------------------
+
+    def _predict_attacks(self, f: Forecast, start, lat: np.ndarray, i: int, tk: np.ndarray, P: int) -> list:
+        """Every attack of the chosen plan as [kind, start frame (from the forecast origin), predicted hit,
+        p (share of the timing lanes that hit), hit frame (or the window's middle), predicted boss boxes there and
+        0.25 / 0.5 s later, effect],
+        on a lanes rollout of that one plan with its predicted hit events (ssbot.tools.predict_audit matches them to
+        the recording). Kinds 1 side, 2 up, 3 down spike, 4 Silkspear; effects recoil / recoil_down / pogo / none."""
+        boss, okb = f.boss_box(tk)
+        polys, starts = body_shape(f.boss)
+        b0 = _box_of(polys) if len(polys) else (boss[0] if len(boss) else np.zeros(4))
+        ev = self._fx_ev[i:i + 1] if self._fx_ev is not None and i < len(self._fx_ev) else None
+        r = kin.rollout(start, lat[None], self.params, self.terrain, events=ev, variants=self.cfg.variants,
+                        lanes=True)
+        face0 = 1 if start.reshape(kin.K, -1)[kin.FACE, 0] >= 0 else -1
+        V = r.var_box.shape[1]
+        out = {}
+        for v in range(V):
+            lst = _attacks_of(np.ascontiguousarray(r.var_box[0, v]), np.ascontiguousarray(r.var_flags[0, v]),
+                              np.ascontiguousarray(r.var_mode[0, v]), np.ascontiguousarray(lat), face0,
+                              np.ascontiguousarray(boss, np.float64), np.ascontiguousarray(okb),
+                              np.ascontiguousarray(polys, np.float64), np.ascontiguousarray(starts, np.int64),
+                              np.array([b0[0], b0[1]]), WINDOWS[self.cfg.attack_model])
+            for kind, k, j in lst:
+                e = out.setdefault((int(kind), int(k)), [0, -1, 0])
+                e[2] += 1
+                if j >= 0:
+                    e[0] += 1
+                    if v == 0:
+                        e[1] = int(j)
+        rec = []
+        for (kind, k), (nh, j0, n) in sorted(out.items(), key=lambda kv: kv[0][1]):
+            jj = j0 if j0 >= 0 else min(k + {1: 3, 2: 5, 3: 8, 4: 18}[kind], len(boss) - 1)
+            eff = ("recoil" if kind == 1 else "recoil_down" if kind == 2 else "pogo" if kind == 3 else "none") \
+                if j0 >= 0 else "none"
+            bxs = []
+            for d in (0, 15, 30):          # the predicted boss box at the active frame, +0.25 s and +0.5 s
+                q = min(jj + d, len(boss) - 1)
+                bxs.append([round(float(x), 2) for x in boss[q]] if okb[q] and jj + d < len(boss) else None)
+            rec.append([kind, k, j0 >= 0, round(nh / V, 2), jj, bxs, eff])
+        return rec
 
     # ---- beyond the horizon ----------------------------------------------------------------------------------------
 
@@ -534,7 +587,8 @@ class Planner:
                       np.ascontiguousarray(boss, np.float64), np.ascontiguousarray(okb), wv, float(prefs.stance_x),
                       np.ascontiguousarray(rx, np.float64), np.ascontiguousarray(rv, np.float64), boss_x, max_hits,
                       np.ascontiguousarray(polys, np.float64), np.ascontiguousarray(starts, np.int64),
-                      np.ascontiguousarray(base, np.float64), J, hits, near, first_hit, first_kind)
+                      np.ascontiguousarray(base, np.float64), J, hits, near, first_hit, first_kind,
+                      WINDOWS[self.cfg.attack_model])
         self._audit = (first_hit, first_kind, boss)
         boss_hp = f.fc.tracker.ctx.hp
         may_kill = near if (boss_hp is not None and boss_hp <= SPEAR_DAMAGE) else np.zeros(N, bool)
@@ -606,6 +660,55 @@ def _ov(cx, cy, face, fx0, fx1, y0, y1, b0, b1, b2, b3, polys, starts, dx, dy):
     return _rect_meets_polys(ax0, cy + y0, ax1, cy + y1, polys, starts, dx, dy)
 
 
+@numba.njit(cache=True)
+def _attacks_of(box, flags, mode, lat, face0, boss, okb, polys, starts, base, win):
+    """One lane's attacks: (kind, start frame, hit frame or -1), windows and boxes as in _score_kernel."""
+    T1 = mode.shape[0]
+    out = []
+    face = face0
+    fc = np.empty(T1, np.int64)
+    fc[0] = face
+    for k in range(1, T1):
+        m = lat[k - 1]
+        d = 1 if m & B_RIGHT else (-1 if m & B_LEFT else 0)
+        if d != 0:
+            starts_cast = mode[k] == M_CAST and mode[k - 1] != M_CAST
+            free = mode[k - 1] == M_NORMAL and (flags[k - 1] & F_ATTACKING) == 0
+            if starts_cast or free:
+                face = d
+        fc[k] = face
+    for k in range(1, T1):
+        att = (flags[k] & F_ATTACKING) != 0 and (flags[k - 1] & F_ATTACKING) == 0
+        dsk = mode[k] == M_DS_SPIKE and mode[k - 1] != M_DS_SPIKE
+        cst = mode[k] == M_CAST and mode[k - 1] != M_CAST
+        if not (att or dsk or cst):
+            continue
+        hit = -1
+        if att:
+            up = (lat[k - 1] & B_UP) != 0
+            kind = 2 if up else 1
+            w0, w1 = (win[1, 0], win[1, 1]) if up else (win[0, 0], win[0, 1])
+            g = UP if up else SIDE
+        elif dsk:
+            kind, w0, w1, g = 3, 0, (8 if win[2, 1] == 0 else win[2, 1]), DOWN
+        else:
+            kind, w0, w1, g = 4, win[3, 0], win[3, 1], SPEAR
+        for j in range(k + w0, min(T1, k + w1)):
+            if kind == 3 and win[2, 1] == 0 and mode[j] != M_DS_SPIKE:
+                continue
+            if not okb[j]:
+                continue
+            cx = 0.5 * (box[j, 0] + box[j, 2])
+            cy = 0.5 * (box[j, 1] + box[j, 3])
+            bx = boss[j]
+            if _ov(cx, cy, fc[j], g[0], g[1], g[2], g[3], bx[0], bx[1], bx[2], bx[3], polys, starts, bx[0] - base[0],
+                   bx[1] - base[1]):
+                hit = j
+                break
+        out.append((kind, k, hit))
+    return out
+
+
 class _View:
     """The parts of a Rollout the scoring reads, for a rollout patched with hit branches."""
 
@@ -614,7 +717,7 @@ class _View:
 
 
 @numba.njit(cache=True, parallel=True)
-def _first_hits(box, flags, mode, latched, face0, boss, okb, polys, starts, base, after, hit_f, kind):
+def _first_hits(box, flags, mode, latched, face0, boss, okb, polys, starts, base, after, hit_f, kind, win):
     """Per candidate, the first frame after `after` at which an attack's active box meets the boss's predicted
     hurtbox (windows as in _score_kernel), and its kind: 0 side slash facing left, 1 facing right, 2 up-slash,
     3 down spike; -1 none. Silkspear hits move nothing."""
@@ -642,7 +745,7 @@ def _first_hits(box, flags, mode, latched, face0, boss, okb, polys, starts, base
                 continue
             if att:
                 up = (latched[c, k - 1] & B_UP) != 0
-                w0, w1 = UP_WIN if up else SIDE_WIN
+                w0, w1 = (win[1, 0], win[1, 1]) if up else (win[0, 0], win[0, 1])
                 for j in range(k + w0, min(T1, k + w1)):
                     if j <= after[c] or not okb[j]:
                         continue
@@ -673,7 +776,7 @@ def _first_hits(box, flags, mode, latched, face0, boss, okb, polys, starts, base
 
 @numba.njit(cache=True, parallel=True)
 def _score_kernel(box, flags, mode, latched, face0, boss, okb, wv, stance_x, rx, rv, boss_x, max_hits, polys, starts,
-                  base, J, hits, near, first_hit, first_kind):
+                  base, J, hits, near, first_hit, first_kind, win):
     """J per candidate (the module docstring's terms) on the nominal lane; hits: predicted boss hits (Silkspear x 3);
     near: an attack starts with the boss within 1 u of its box (a possible killing blow, U)."""
     N, T1 = flags.shape
@@ -727,7 +830,7 @@ def _score_kernel(box, flags, mode, latched, face0, boss, okb, wv, stance_x, rx,
             up = (latched[c, k - 1] & B_UP) != 0
             got = False
             if att:
-                w0, w1 = UP_WIN if up else SIDE_WIN
+                w0, w1 = (win[1, 0], win[1, 1]) if up else (win[0, 0], win[0, 1])
                 for j in range(k + w0, min(T1, k + w1)):
                     if not okb[j]:
                         continue
@@ -748,8 +851,8 @@ def _score_kernel(box, flags, mode, latched, face0, boss, okb, wv, stance_x, rx,
                     if first_hit[c] < 0:
                         first_hit[c], first_kind[c] = k, 2 if up else 1
             elif dsk:
-                for j in range(k, min(T1, k + 16)):
-                    if mode[c, j] == M_DS_SPIKE and okb[j] and _ov(cxs[j], cys[j], fc[j], DOWN[0], DOWN[1], DOWN[2], DOWN[3], boss[j, 0],
+                for j in range(k, min(T1, k + (16 if win[2, 1] == 0 else win[2, 1]))):
+                    if (win[2, 1] != 0 or mode[c, j] == M_DS_SPIKE) and okb[j] and _ov(cxs[j], cys[j], fc[j], DOWN[0], DOWN[1], DOWN[2], DOWN[3], boss[j, 0],
                                       boss[j, 1], boss[j, 2], boss[j, 3], polys, starts, boss[j, 0] - base[0],
                                       boss[j, 1] - base[1]):
                         got = True
@@ -759,7 +862,7 @@ def _score_kernel(box, flags, mode, latched, face0, boss, okb, wv, stance_x, rx,
                     if first_hit[c] < 0:
                         first_hit[c], first_kind[c] = k, 3
             else:
-                for j in range(k + SPEAR_WIN[0], min(T1, k + SPEAR_WIN[1])):
+                for j in range(k + win[3, 0], min(T1, k + win[3, 1])):
                     if okb[j] and _ov(cxs[j], cys[j], fc[j], SPEAR[0], SPEAR[1], SPEAR[2], SPEAR[3], boss[j, 0],
                                       boss[j, 1], boss[j, 2], boss[j, 3], polys, starts, boss[j, 0] - base[0],
                                       boss[j, 1] - base[1]):

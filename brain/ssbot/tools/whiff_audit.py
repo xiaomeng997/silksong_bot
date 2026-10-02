@@ -8,7 +8,7 @@ Needs SSBOT_LOG_ALL=1 decision logs (every tick) with the planner's "attack" rec
 plan's first attack scored as a hit: kind, start frame from the forecast origin, the predicted boss box at its
 active frame). A press is the decision whose sent mask (applied at f + 2) newly holds attack or quickcast; the scored
 attack belongs to it when its start frame is that press's frame. Its active frame is fo + start + the kind's offset
-(side 3, up 5, down spike 8, Silkspear 18 frames: planner.SIDE_WIN / UP_WIN / SPEAR_WIN); the actual boss box is the
+(side 3, up 5, down spike 8, Silkspear 18 frames: planner.WINDOWS["v2"]); the actual boss box is the
 bounding box of the boss's enabled colliders in the recorded STATE of that frame. A hit is a "hit" event on the boss
 with the kind's source (Slash / AltSlash, UpSlash, DownSpike*, Needle Damage) within 2 frames after the window.
 Presses the planner did not score as hits (no attack record, or one for a later press) are counted apart.

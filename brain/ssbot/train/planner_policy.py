@@ -41,7 +41,7 @@ from ssbot.combat.planner import Planner, PlannerConfig
 from ssbot.combat.safety_filter import FilterContext
 from ssbot.combat.tactics import Tactics, load_playbook
 from ssbot.core.bosses import BOSSES
-from ssbot.core.worldstate import ORACLE, VISION_EQUIVALENT
+from ssbot.core.worldstate import ORACLE, VISION_EQUIVALENT, Ev
 from ssbot.ipc.framing import BIT
 from ssbot.knowledge import kinematics as kin
 from ssbot.knowledge.kinematics import HeroParams, HoldState, StateTracker, Terrain2D
@@ -99,6 +99,46 @@ class TerrainTap:
             return v[1] if v else None
 
 
+class AttackMonitor:
+    """Runtime check of the attack-outcome model (the attack half of I4 "planner", DESIGN 3.7.2): every attack the
+    planner predicted to hit, at the press, is resolved after its window against the hit events the view shows (any
+    hit on the boss in [start + window, end + 2 frames]). confidence() is the share of predicted hits that landed over
+    the last `window` resolved ones, over the share the model is calibrated to (expected), capped at 1; None before
+    min_n. The policy scales J's hit credit by it and limits punishes to one hit below `tighten` (YELLOW's rule)."""
+
+    WINDOWS = {1: (0, 6), 2: (2, 8), 3: (0, 16), 4: (17, 20)}
+
+    def __init__(self, window: int = 40, min_n: int = 10, expected: float = 0.85, tighten: float = 0.5):
+        self.window, self.min_n, self.expected, self.tighten = window, min_n, expected, tighten
+        self.reset()
+
+    def reset(self) -> None:
+        self.pending: list[tuple[int, int]] = []      # (window start, window end) absolute frames, predicted hits
+        self.hit_frames: deque = deque(maxlen=64)
+        self.results: deque = deque(maxlen=self.window)
+
+    def predict(self, fo: int, attacks: list | None) -> None:
+        for kind, k, hit, _p, _j, _box, _eff in attacks or ():
+            if hit:
+                w0, w1 = self.WINDOWS[kind]
+                self.pending.append((fo + k + w0, fo + k + w1 + 2))
+
+    def observe(self, f: int, hit_frames) -> None:
+        self.hit_frames.extend(hit_frames)
+        keep = []
+        for a, b in self.pending:
+            if f <= b + 2:
+                keep.append((a, b))
+            else:
+                self.results.append(any(a <= h <= b for h in self.hit_frames))
+        self.pending = keep
+
+    def confidence(self) -> float | None:
+        if len(self.results) < self.min_n:
+            return None
+        return round(min(1.0, (sum(self.results) / len(self.results)) / self.expected), 3)
+
+
 class PlannerPolicy:
     def __init__(self, view: str = "oracle", threads: int = 8, enemy: str = "BellBeast", log_dir: Path | None = None,
                  instance: int = 0, real_quit_p: float = 0.0):
@@ -139,6 +179,7 @@ class PlannerPolicy:
         self.episode = -1
         self.sc = SupervisedControl(cfg=SupervisorConfig(worst_known_damage=2), support=lambda s: self._support)
         self.real_quit_p = real_quit_p
+        self.atk_mon = AttackMonitor()
         self._pq_emulated = self.sc.pq_cfg
         self.real_quit = False
         self._support = None
@@ -200,11 +241,14 @@ class PlannerPolicy:
                 self.terrain = Terrain2D.from_message(msg, self.params.scene(enc.scene))
         self.terrain = self.terrain or Terrain2D.empty()
         if self.planner is None:
-            self.planner = Planner(self.params, self.terrain, PlannerConfig(threads=self.threads))
+            self.planner = Planner(self.params, self.terrain, PlannerConfig(
+                threads=self.threads, attack_model=os.environ.get("SSBOT_ATTACK_MODEL", "v2")))
         self.planner.terrain = self.terrain
         self.planner.reset()
         self.trk = StateTracker(self.params, self.terrain)
         self.fc.reset()
+        self.atk_mon.reset()
+        self._fam_state = None
         # real quits (--real-quit p): this episode's confirmed pause runs the whole quit sequence to the main menu
         self.real_quit = self.real_quit_p > 0 and rng.random() < self.real_quit_p
         self.sc.pq_cfg = replace(self._pq_emulated, emulate_quit=not self.real_quit)
@@ -304,12 +348,20 @@ class PlannerPolicy:
         d = self.decision
         h = d.h if d is not None else None
         prefs = self.tac.decide(ws, fcast, d, h)
+        self.atk_mon.observe(fo, [ev.frame for ev in ws.events if ev.kind == Ev.HIT_DEALT])
+        conf = self.atk_mon.confidence()
+        if conf is not None:
+            # the attack model drifting: its hit credit counts for less, and below `tighten` punishes take one hit
+            prefs.weights = dict(prefs.weights, hit=prefs.weights.get("hit", 10.0) * max(0.3, conf))
+            if conf < self.atk_mon.tighten:
+                prefs.max_hits = 1 if prefs.max_hits is None else min(prefs.max_hits, 1)
         ctx = FilterContext.from_world(ws, d, h, want_bind=prefs.want_bind)
         hold = HoldState.from_act(raw.get("act"))
         prefix = np.array([self.sent.get(fr, 0) for fr in range(fo + 1, f + 2)], np.int64)
         t1 = time.perf_counter()
         res = self.planner.tick(ws, self._start_state(ws, raw), hold, prefix, fcast, prefs, ctx)
         self.planner_last = res
+        self.atk_mon.predict(fo, res.attacks)
         t2 = time.perf_counter()
         unpred = self._unpredicted(raw, fo)
         r = self.sc.step(s, plan_s=res.S, forced_risk=res.forced_risk, unpredicted_hits=unpred, p_death=res.P)
@@ -352,6 +404,7 @@ class PlannerPolicy:
                "sup_mask": r.mask is not None, "tier": r.decision.tier, "h": r.decision.h,
                "pending": r.decision.pause_pending, "triggers": list(r.decision.triggers), "unpred": unpred,
                "ms": round(res.t_ms.get("total", 0.0), 3), "tail": res.tail_ok, "attack": res.attack,
+               "attacks": res.attacks, "atk_conf": self.atk_mon.confidence(), "fam_p": self._fam_p(fcast),
                "path": None if res.path is None else np.round(res.path[::4, :], 3).tolist()}
         self.ring.append(rec)
         hit = any(ev.get("k") in ("damage", "catastrophe", "would_die") for ev in s.get("ev") or ())
@@ -376,6 +429,25 @@ class PlannerPolicy:
             with self.log_path.open("a", encoding="utf-8") as fh:
                 fh.write(json.dumps(rec) + "\n")
             self.ring.clear()
+
+    UNDECIDED = frozenset(("Submerged", "Submerged Init", "Burst Recovery", "Rage Submerge", "hidden"))
+
+    def _fam_p(self, fcast) -> dict | None:
+        """The threat half of the audit: at the first tick of an underground phase, the walk's probability of each
+        family for the next attack (sum of p over its start nodes), for predict_audit's calibration."""
+        st = self.fc.tracker.state
+        first = st in self.UNDECIDED and st != self._fam_state
+        self._fam_state = st
+        if not first:
+            return None
+        m = self.model
+        out: dict[str, float] = {}
+        for n in fcast.nodes:
+            fam = m.attack_starts.get(n.state)
+            if fam is not None:
+                out[fam] = out.get(fam, 0.0) + n.p
+        tot = sum(out.values())
+        return {k: round(v / tot, 3) for k, v in out.items()} if tot > 0 else None
 
     def _real_quit_step(self, s: dict, f: int) -> int:
         """A confirmed pause in a real-quit episode: only the pause machine acts (menus, the exit prompt, the
