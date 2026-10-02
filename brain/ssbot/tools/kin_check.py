@@ -15,8 +15,9 @@ only (estimate_state, causal phase interval): what the planner knows at decision
                   layer, which has to predict them at run time (nail recoil, recoil down, pogo, damage, silk gain,
                   early Silkspear catch, external lock). The acceptance figure.
   planner_inputs  the same without events: what the buttons alone determine.
-  planner_bounds  planner_events with the timing variant lanes (kinematics.BOUNDS: phase and frame time at the ends
-                  of their ranges, the short and long Silkspear phases): the logged box must lie inside the lanes'
+  planner_bounds  planner_events with the timing variant lanes (kinematics.BOUNDS: the float32 timer thresholds
+                  moved by -+ timer_bias per link of the hit-stop chain, the phase at the ends of its feasible
+                  interval, the short and long Silkspear / Bind variants): the logged box must lie inside the lanes'
                   per-frame hull dilated by tol (a support-style check of the variants, reported beside the hull size).
   replay_events   logged dt, udt and physics steps of the future frames plus logged events: the model's own fidelity,
                   with information the planner does not have (reported, never the acceptance figure).
@@ -26,10 +27,11 @@ hero absent, paused or not in gameplay; gap: missing frames; slide: a savestate 
 harness teleports, hazard respawns, scene changes, deaths, control taken by another FSM, no terrain for the scene,
 nail-charge arts), world_freeze (the time scale is below 1 outside the hero's own hit-stop: boss stun, boss death
 slow-motion, BindBreak after a hit during Bind; the threat layer has to announce these, the model cannot), hitch (a
-frame longer than the jitter model's frame_time_max: rate 2.9e-5 per frame, left to the residual monitor), hurt (a damage knockback inside), contact (nail recoil, recoil down, pogo or an early Silkspear catch inside),
-recovering (starts in the damage freeze / recoil), bind, cast, downspike, plain:<primitive> (jump, attack, air,
-run, idle). Nothing is dropped: uncovered windows are counted by reason and the "all" figures count them as misses;
-"covered" leaves out only the uncovered ones. Arena gates (scene overrides "enable") are world state: a window runs
+frame longer than the jitter model's frame_time_max: rate 3.1e-5 per frame, left to the residual monitor), hurt (a
+damage knockback inside), contact (nail recoil, recoil down, pogo or an early Silkspear catch inside), recovering
+(starts in the damage freeze / recoil), bind, cast, downspike, plain:<primitive> (jump, attack, air, run, idle).
+Nothing is dropped: uncovered windows are counted by reason and the "all" figures count them as misses; "covered"
+leaves out only the uncovered ones. Arena gates (scene overrides "enable") are world state: a window runs
 with them closed unless a logged box of that window overlaps one.
 
 The knockback section checks every logged hit (StartRecoil: recoilFrozen onset) against knockback.knockback_boxes
