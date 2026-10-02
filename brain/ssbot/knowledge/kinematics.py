@@ -110,7 +110,8 @@ blow, stun, a small enemy's death): EV_FZ_* events, which the threat layer annou
 estimator replays a running freeze from its logged start.
 Contact events do not follow from the buttons; a rollout takes them as an optional per-frame array (the threat layer
 predicts them; ssbot.tools.kin_check injects the logged ones): EV_RECOIL_L/R (a nail hit: vx = -+3.75 now and for
-8 more steps), EV_POGO (a down attack hit: jump steps from 4, jumped_steps -20), EV_HURT_L/R (impact from that
+8 more steps), EV_POGO (a down attack hit: jump steps from 4, jumped_steps -20, pogo_invul i-frames against enemies;
+the planner predicts it from the boss's hurtbox), EV_HURT_L/R (impact from that
 side), EV_RECOIL_DOWN (an up slash hit: the rise stops), EV_CATCH (the Silkspear needle came back early), EV_SILK
 (+1 silk from a hit: Bind and Silkspear need it), EV_LOCK / EV_UNLOCK, EV_FZ_BOSS_DEATH / BOSS_STUN / QUICK /
 ENEMY_DEATH (a world freeze starts).
@@ -286,6 +287,8 @@ class HeroParams:
     pogo_jump_steps: int = 4
     pogo_jumped_steps: int = -20
     bounce_steps: int = 6
+    pogo_invul: float = 0.16       # a down attack's hit: i-frames against enemies, 8 physics steps of 0.02 s (16 in
+    #                                the long form; the shorter one assumed), coordinator note 2026-10-02
     hurt_velocity: float = 15.0
     hurt_vy_ratio: float = 0.5
     hurt_recoil_time: float = 0.2
@@ -357,7 +360,7 @@ class HeroParams:
               "cast_catch_decay", "cast_silk", "bind_time", "bind_decay", "bind_vy_cap",
               "bind_vy_cap_down", "bind_end_vy", "bind_silk",
               "silk_max", "lock_decay", "ledge_steps", "land_slop_lo", "land_slop_hi", "rdown_halve",
-              "bind_break_before", "wf_bias_wait", "wf_bias_up")
+              "bind_break_before", "wf_bias_wait", "wf_bias_up", "pogo_invul")
 
     def vector(self) -> np.ndarray:
         return np.array([float(getattr(self, k)) for k in self.VECTOR], dtype=np.float64)
@@ -422,7 +425,7 @@ class HeroParams:
  P_HURT_T, P_HURT_WAIT, P_HURT_RAMP, P_HURT_SKIP, P_INV_T, P_CAST_ANTIC, P_CAST_THROW, P_CAST_CATCH, P_CAST_DECAY,
  P_CAST_DECAY_G, P_CAST_VYCAP, P_CAST_CSPEED, P_CAST_CDECAY, P_CAST_SILK, P_BIND_T, P_BIND_DECAY, P_BIND_VYCAP,
  P_BIND_VYDOWN, P_BIND_ENDVY, P_BIND_SILK, P_SILK_MAX, P_LOCK_DECAY, P_LEDGE, P_SLOP_LO, P_SLOP_HI, P_RDOWN_HALF,
- P_BIND_BREAK, P_WF_BW, P_WF_BU, NP) = range(67)
+ P_BIND_BREAK, P_WF_BW, P_WF_BU, P_POGO_INV, NP) = range(68)
 assert NP == len(HeroParams.VECTOR)
 
 
@@ -932,6 +935,7 @@ def _apply_events(X, ev, P):
     X[PY] = np.where(pogo & (X[GROUND] > 0), X[PY] + P[P_LIFT], X[PY])
     X[GROUND] = np.where(pogo, 0.0, X[GROUND])
     X[JQ] = np.where(pogo, -1.0, X[JQ])
+    X[INV_T] = np.where(pogo, np.maximum(X[INV_T], P[P_POGO_INV]), X[INV_T])
     for bit, side in ((EV_HURT_L, -1.0), (EV_HURT_R, 1.0)):
         on = (ev & bit) != 0
         X[MODE] = np.where(on, M_HURT_FREEZE, X[MODE])

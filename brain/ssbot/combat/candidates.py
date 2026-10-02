@@ -169,9 +169,9 @@ LONG_FIRST = ("WAIT", "MOVE(L)", "MOVE(R)", "JUMP(48)N", "JUMP(48)L", "JUMP(48)R
 def build_long(T: int) -> CandidateSet:
     """The adaptive-horizon set (M2 plan: the horizon runs to the end of a committed long attack): dodging only, over
     T frames (up to 2 s): waits of 4-32 frames before a full jump in place, or 8-24 before one with a side key, runs
-    and stops. With the standard 0.8 s horizon a jump that clears the first half of a charge looked safe and came down
-    on its second half (live run 20261002_045049: 5 of 5 charge hits); 6 x 22 = 132 candidates keep the tick cost of
-    the standard set."""
+    and stops, and jumps followed 22 or 30 frames later by a down attack either way (the pogo macro). With the standard
+    0.8 s horizon a jump that clears the first half of a charge looked safe and came down on its second half (live run
+    20261002_045049: 5 of 5 charge hits); 6 x 34 = 204 candidates."""
     firsts = [x for x in _first_pieces() if x.name in LONG_FIRST]
     n = T - FIRST
     conts = [Piece("idle", _seq(n), frozenset({Prim.WAIT}))]
@@ -194,6 +194,18 @@ def build_long(T: int) -> CandidateSet:
             m[w:] = DIRS[d]
             m[w:w + 48] |= B_JUMP
             conts.append(Piece(f"wait{w}_jump{d}", m, frozenset({Prim.JUMP, Prim.WAIT, Prim.MOVE})))
+    # jump over the charge, then a down attack on its back (the person: pogo off it; DESIGN 3.5.6: the planner
+    # predicts the bounce only where the down attack meets the boss's hurtbox, and the miss branch must be safe too)
+    for d in ("L", "R"):
+        for w in (4, 12, 20):
+            for a in (22, 30):
+                m = _seq(n)
+                m[w:w + 48] |= B_JUMP
+                m[w + a:] |= DIRS[d]
+                m[w + a:w + a + 6] |= B_DOWN
+                m[w + a + 1:w + a + 1 + PRESS] |= B_ATTACK
+                conts.append(Piece(f"wait{w}_jump_ds{a}{d}", m,
+                                   frozenset({Prim.JUMP, Prim.WAIT, Prim.MOVE, Prim.ATTACK_DOWN})))
     N = len(firsts) * len(conts)
     cmd = np.zeros((N, T), np.int64)
     first = np.zeros(N, np.int64)

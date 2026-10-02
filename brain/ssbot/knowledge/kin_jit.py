@@ -28,7 +28,7 @@ from ssbot.knowledge.kinematics import (
     P_CAST_SILK, P_CAST_THROW, P_CAST_VYCAP, P_DS_ANTIC, P_DS_DECEL, P_DS_ENDVY, P_DS_LREC, P_DS_REC, P_DS_SPEED,
     P_DS_TIME, P_DS_VYMAX, P_DS_VYMIN, P_FDT, P_FOOT, P_G, P_HEAD, P_HURT_RAMP, P_HURT_SKIP, P_HURT_T, P_HURT_V,
     P_HURT_VY, P_HURT_WAIT, P_HW, P_INV_T, P_JQ, P_JSTEPS, P_JSTEPS_MIN, P_JUMP, P_LEDGE, P_LIFT, P_LOCK_DECAY,
-    P_MAXFALL, P_POGO_J, P_POGO_JD, P_QQ, P_RDOWN_HALF, P_REL, P_RSTEPS, P_RUN, P_RV, P_SILK_MAX, P_SKIN, P_SLOP_HI,
+    P_MAXFALL, P_POGO_INV, P_POGO_J, P_POGO_JD, P_QQ, P_RDOWN_HALF, P_REL, P_RSTEPS, P_RUN, P_RV, P_SILK_MAX, P_SKIN, P_SLOP_HI,
     P_SLOP_LO, PHASE, PREV, PX, PY, QQ, QX, QY, RDIR, RSTEPS, SILK, SX, SY, TOL, TOUCH, TS, TT_HEAD, VX, VY, ALO, AHI,
     LANDQ, WF_PH, WF_T, WF_S, WF_DOWN, WF_WAIT, WF_UP, WF_TGT, P_BIND_BREAK, P_WF_BW, P_WF_BU, EV_FZ_BIND_BREAK,
     FREEZE_PRESETS, WF_ORDER)
@@ -426,6 +426,7 @@ def apply_events(x, ev, P):
             x[PY] = x[PY] + P[P_LIFT]
         x[GROUND] = 0.0
         x[JQ] = -1.0
+        x[INV_T] = max(x[INV_T], P[P_POGO_INV])
     for b in range(2):
         bit = EV_HURT_L if b == 0 else EV_HURT_R
         side = -1.0 if b == 0 else 1.0
