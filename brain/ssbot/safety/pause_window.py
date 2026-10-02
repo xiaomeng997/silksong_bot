@@ -22,12 +22,19 @@ P11): a hit then leaves a much shorter window, which is what the alert is for.
 
 Every hit is accounted for (round-2 review: 29 hits never reached t_open and were never checked). A "damage" event
 followed by another before the gate opened is superseded when the gate had closed (the next hit's window is the one
-that counts) and no_effect when it never closed (live 20261001_122249 i0_000: 17 such events, bursts on consecutive
-frames at a constant HP, e.g. f71709-71715 at 4 HP and f84420-84427 at 2 HP). A hit whose i-frames end while the gate
-is still shut has no Q1 window at all: window 0, which alerts (live i0_000 f206760: blk TIME_SLOWED | GAME_STATE for the
-whole 1.10 s of i-frames, at 5 HP). finish() closes a window still open at the end of an attempt as censored.
+that counts) and no_effect when it never closed (bursts of events on consecutive frames at a constant HP, e.g. live
+20261001_122249 i0_000 f71709-71715 at 4 HP and f84420-84427 at 2 HP: LethalBlock and i-frame repeats). A window whose
+gate is still shut when the game leaves PLAYING (GameState blocker: the episode's scene reload) is censored, as is one
+still open at finish(): live i0_000 f206760 and i2_000 f270961 are lethal hits at 1 HP that LethalBlock swallowed
+during the boss's BossDeathSlow (TIME_SLOWED) right before the reload. A hit whose i-frames end with the gate still
+shut and the game still PLAYING has no Q1 window at all: window 0, which alerts. With these rules the three recordings
+above give 2268 hits: 2218 checked (window min 0.945 s), 45 no_effect, 5 censored, 0 superseded, 0 alerts.
 """
 from dataclasses import dataclass, field
+
+from ssbot.safety import game_codes as gc
+
+_ENDED = gc.BLK_GAME_STATE | gc.BLK_NO_GAME
 
 
 @dataclass(slots=True)
@@ -122,6 +129,10 @@ class PauseWindowMonitor:
         tm = hero.get("tm") if isinstance(hero.get("tm"), dict) else None
         inv = hero.get("invulnerable") if tm is None or tm.get("inv") is None else float(tm["inv"]) > 0
         blk = (s.get("pause") or {}).get("blk")
+        if w.t_open is None and isinstance(blk, int) and blk & _ENDED and not (s.get("game") or {}).get("paused"):
+            w.censored = True             # the game left PLAYING with the gate still shut: the attempt is over
+            self._close()
+            return w
         w.gate_closed |= bool(blk)
         if w.t_open is None and blk == 0:
             w.t_open = t

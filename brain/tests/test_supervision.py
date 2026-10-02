@@ -264,11 +264,16 @@ def test_pause_window_accounts_for_every_hit():
     mon.update(st(1, 0, 0.0, hit))              # the first never closed the gate: it did not land
     assert mon.windows[0].no_effect and not mon.alerts
     mon = PauseWindowMonitor()
-    mon.update(st(0, 66, 1.0, hit))
+    mon.update(st(0, 2, 1.0, hit))              # TIME_SLOWED for the whole i-frames, still PLAYING: no window
     for f in range(1, 70):
-        mon.update(st(f, 66, max(0.0, 1.0 - f / 60)))
+        mon.update(st(f, 2, max(0.0, 1.0 - f / 60)))
     w = mon.windows[0]
     assert w.t_open is None and w.window_s == 0.0 and mon.alerts and "frame 0" in mon.alerts[0]
+    mon = PauseWindowMonitor()                  # live i0_000 f206760: the episode reload ends it with the gate shut
+    mon.update(st(0, 3, 1.0, hit))
+    mon.update(st(1, 2, 0.9))
+    mon.update(st(2, 66, 0.9))
+    assert mon.windows[0].censored and not mon.alerts
     mon = PauseWindowMonitor()
     mon.update(st(0, 3, 1.2, hit))
     assert mon.finish().censored and not mon.alerts and mon.open is None
