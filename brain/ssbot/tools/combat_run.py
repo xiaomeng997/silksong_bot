@@ -81,10 +81,12 @@ def worker(a: argparse.Namespace) -> int:
     rev = git_rev()
     fp = hashlib.sha256(json.dumps([enc.name, a.policy, a.mode, a.view, rev], sort_keys=True).encode()).hexdigest()[:12]
     from ssbot.train.episode import unpause
-    for _ in range(3):                   # a previous run may have left it paused (a QUIT, or the oracle's brain-lost
-        s0 = link.wait_state(lambda s: s.get("game") is not None, timeout_s=120)   # watchdog, which pauses a
-        if (s0.get("game") or {}).get("paused") and (s0.get("game") or {}).get("scene"):   # moment after the
-            unpause(link)                                                              # last ACTION)
+    deadline = time.monotonic() + 30     # a previous run may have left it paused (a QUIT, or the oracle's
+    while time.monotonic() < deadline:   # brain-lost watchdog, which pauses a moment after the last ACTION)
+        s0 = link.wait_state(lambda s: s.get("game") is not None, timeout_s=120)
+        if not ((s0.get("game") or {}).get("paused") and (s0.get("game") or {}).get("scene")):
+            break
+        unpause(link)
         time.sleep(0.6)
     load_slot(link, 1)
     stand_up(link)

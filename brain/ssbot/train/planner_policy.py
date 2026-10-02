@@ -84,8 +84,12 @@ class TerrainTap:
 class PlannerPolicy:
     def __init__(self, view: str = "oracle", threads: int = 8, enemy: str = "BellBeast", log_dir: Path | None = None,
                  instance: int = 0):
+        import cv2
         import numba
         numba.set_num_threads(threads)
+        # the template dilation (cv2) uses every core by default: a worker starting next to running ones starved
+        # them past the oracle's 250 ms brain-lost watchdog (run 20261002_050217: three games paused at once)
+        cv2.setNumThreads(2)
         self.view = view
         self.threads = threads
         self.params = HeroParams.load()

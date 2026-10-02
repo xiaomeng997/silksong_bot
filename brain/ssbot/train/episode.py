@@ -167,22 +167,28 @@ def wait_settled(link: OracleLink, scene: str, still_frames: int = 10, tol_u: fl
 
 def unpause(link: OracleLink, tries: int = 4) -> bool:
     """After an emulated quit the game is held in the pause menu with Continue highlighted (safety.pause_quit stops
-    there): Submit (enter) past the 0.3 s real-time lockout until the game runs again."""
+    there): Submit (enter) past the 0.3 s real-time lockout until the game runs again. The tap is a one-shot press
+    (hold_frames > 0) and the inputs are released after: a continuous-control ACTION would arm the oracle's brain-lost
+    watchdog, which pauses the game again 250 ms after the last ACTION (ActionScheduler)."""
     from ssbot.ipc.framing import mask
+    ok = False
     for _ in range(tries):
         s = link.state or {}
         if not (s.get("game") or {}).get("paused"):
-            return True
+            ok = True
+            break
         time.sleep(0.5)
         f = link.frame
-        link.act(f + 2, mask("enter"), hold_frames=0)
-        link.wait_state(newer_than=f + 4, timeout_s=2.0)
-        link.act(link.frame + 2, 0, hold_frames=0)
+        link.act(f + 2, mask("enter"), hold_frames=3)
         try:
             link.wait_state(lambda s: not (s.get("game") or {}).get("paused"), timeout_s=1.5)
         except TimeoutError:
             continue
-    return not ((link.state or {}).get("game") or {}).get("paused")
+    try:
+        link.rpc("input.release", timeout_s=10)
+    except (OracleError, TimeoutError, OSError):
+        pass
+    return ok or not ((link.state or {}).get("game") or {}).get("paused")
 
 
 def boss_entity(s: dict, boss_type: str) -> dict | None:
@@ -212,6 +218,10 @@ def run_episode(link: OracleLink, enc: Encounter, tap: FightTap, policy, cfg: Ep
 
 def _run(link: OracleLink, enc: Encounter, tap: FightTap, policy, cfg: EpisodeConfig, rec: AttemptRecord) -> None:
     errors = []
+    if ((link.state or {}).get("game") or {}).get("paused"):
+        # left paused by the last episode (an emulated quit not yet resumed, or the oracle's brain-lost watchdog after
+        # a stall of this worker): resume before the reset, or every episode after it fails "paused unasked"
+        unpause(link)
     for attempt in range(3):
         t0 = time.perf_counter()
         try:
