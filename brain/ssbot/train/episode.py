@@ -14,7 +14,9 @@ Outcomes (AttemptRecord.outcome):
   WOULD_DIE     a lethal hit (LethalBlock "catastrophe" / "would_die"); in mode "eval" the episode ends there, in mode
                 "data" (behaviour logging, the hero kept alive at >= 1 HP by LethalBlock) it is counted and play goes on;
   QUIT          the supervisor's pause-and-quit path ended the episode (a policy with a supervisor sets
-                episode_outcome = "QUIT"; training emulates the quit, then the harness unpauses with Continue);
+                episode_outcome = "QUIT"; training emulates the quit, then the harness unpauses with Continue, or,
+                when the policy runs a real quit (real_quit_active), the game goes to the main menu and the harness
+                neither checks the scene meanwhile nor unpauses after);
   STUCK         no outcome within the encounter's timebox after the wake;
   HARNESS_FAIL  the reset, the intro or the link failed, or the game paused or left the scene unasked.
 """
@@ -274,10 +276,11 @@ def _run(link: OracleLink, enc: Encounter, tap: FightTap, policy, cfg: EpisodeCo
         if tap.lethal and cfg.mode == "eval":
             rec.outcome, rec.reason = WOULD_DIE, "lethal hit"
             break
+        quitting = getattr(policy, "real_quit_active", False)     # a real quit: menus, then the main menu
         if game.get("paused") and not getattr(policy, "pause_owned", False):
             rec.outcome, rec.reason = HARNESS_FAIL, f"paused unasked at frame {last}"
             break
-        if game.get("scene") != enc.scene:
+        if game.get("scene") != enc.scene and not quitting:
             rec.outcome, rec.reason = HARNESS_FAIL, f"left the scene: {game.get('scene')}"
             break
         if (last - (tap.wake_frame or rec.f_reset)) / 60.0 > timebox:
@@ -289,8 +292,8 @@ def _run(link: OracleLink, enc: Encounter, tap: FightTap, policy, cfg: EpisodeCo
             rec.outcome, rec.reason = QUIT, getattr(policy, "outcome_reason", None)
             break
     rec.f_end = last
-    if rec.outcome == QUIT:
-        unpause(link)
+    if rec.outcome == QUIT and not getattr(policy, "real_quit_active", False):
+        unpause(link)      # an emulated quit left the game paused (a real one ends on the main menu: no Continue)
 
 
 def _summarise(tap: FightTap, rec: AttemptRecord, s: dict, enc: Encounter) -> None:

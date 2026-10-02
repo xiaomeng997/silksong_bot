@@ -27,6 +27,7 @@ import os
 import random
 import time
 from collections import Counter, deque
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
@@ -41,6 +42,7 @@ from ssbot.combat.safety_filter import FilterContext
 from ssbot.combat.tactics import Tactics, load_playbook
 from ssbot.core.bosses import BOSSES
 from ssbot.core.worldstate import ORACLE, VISION_EQUIVALENT
+from ssbot.ipc.framing import BIT
 from ssbot.knowledge import kinematics as kin
 from ssbot.knowledge.kinematics import HeroParams, HoldState, StateTracker, Terrain2D
 from ssbot.safety.pause_quit import TERMINAL
@@ -99,7 +101,7 @@ class TerrainTap:
 
 class PlannerPolicy:
     def __init__(self, view: str = "oracle", threads: int = 8, enemy: str = "BellBeast", log_dir: Path | None = None,
-                 instance: int = 0):
+                 instance: int = 0, real_quit_p: float = 0.0):
         import cv2
         import numba
         numba.set_num_threads(threads)
@@ -136,6 +138,9 @@ class PlannerPolicy:
         self.log_path = (Path(log_dir) / f"decisions_i{instance}.jsonl") if log_dir else None
         self.episode = -1
         self.sc = SupervisedControl(cfg=SupervisorConfig(worst_known_damage=2), support=lambda s: self._support)
+        self.real_quit_p = real_quit_p
+        self._pq_emulated = self.sc.pq_cfg
+        self.real_quit = False
         self._support = None
 
     def attach(self, link) -> None:
@@ -200,6 +205,10 @@ class PlannerPolicy:
         self.planner.reset()
         self.trk = StateTracker(self.params, self.terrain)
         self.fc.reset()
+        # real quits (--real-quit p): this episode's confirmed pause runs the whole quit sequence to the main menu
+        self.real_quit = self.real_quit_p > 0 and rng.random() < self.real_quit_p
+        self.sc.pq_cfg = replace(self._pq_emulated, emulate_quit=not self.real_quit)
+        self.rq: dict = {"armed": self.real_quit, "submits": [], "menus": []}
         self.sc.reset()
         self.sent: dict[int, int] = {}
         self.raw: dict[int, dict] = {}
@@ -273,6 +282,8 @@ class PlannerPolicy:
     def act(self, s: dict, tap=None) -> int:
         t0 = time.perf_counter()
         f = s["f"]
+        if self.real_quit_active:
+            return self._real_quit_step(s, f)
         self.raw[f] = s
         for old in [k for k in self.raw if k < f - 12]:
             del self.raw[old]
@@ -363,6 +374,50 @@ class PlannerPolicy:
                 fh.write(json.dumps(rec) + "\n")
             self.ring.clear()
 
+    def _real_quit_step(self, s: dict, f: int) -> int:
+        """A confirmed pause in a real-quit episode: only the pause machine acts (menus, the exit prompt, the
+        quit to the main menu); the oracle's own menu export records what each Submit landed on."""
+        r = self.sc.step(s)
+        mask = int(r.mask or 0)
+        menu = s.get("menu") or {}
+        g = s.get("game") or {}
+        key = (g.get("menu"), menu.get("sel"))
+        if not self.rq["menus"] or self.rq["menus"][-1][1:] != list(key):
+            self.rq["menus"].append([f, *key])
+        if mask & (1 << BIT["enter"]):
+            sub = [x for x in self.sc.pq.log if x[1] == "submit"]
+            want = sub[-1][2].split(":", 1)[1] if sub else None
+            if not self.rq["submits"] or self.rq["submits"][-1][0] < f - 6:
+                self.rq["submits"].append([f, menu.get("sel"), want])
+        if r.outcome is not None and r.outcome in TERMINAL and self.episode_outcome is None:
+            self.episode_outcome = "QUIT"
+            self.outcome_reason = f"{r.outcome}: {'; '.join(r.decision.reasons) or 'supervisor'}"
+        self.sent[f + 2] = mask
+        return mask
+
+    @property
+    def real_quit_active(self) -> bool:
+        """A real quit is under way (the pause confirmed in a real-quit episode)."""
+        return bool(self.real_quit and self.sc.pq is not None and self.sc.pq.t_confirm is not None)
+
+    def real_quit_stats(self) -> dict | None:
+        """Pause latency, menu steps and the checks of a real quit (None: not a real-quit episode)."""
+        if not self.rq.get("armed"):
+            return None
+        pq = self.sc.pq
+        out = dict(self.rq)
+        if pq is not None:
+            out.update(outcome=pq.outcome, presses=pq.presses, false_cues=pq.false_cues, nav_flips=pq.nav_flips,
+                       unexpected_unpauses=pq.unexpected_unpauses,
+                       pause_latency_s=None if pq.t_confirm is None or pq.t_start is None
+                       else round(pq.t_confirm - pq.t_start, 3),
+                       steps=[[round(t - (pq.t_start or 0.0), 3), k, d] for t, k, d in pq.log
+                              if k in ("cue", "confirmed", "nav", "nav_no_effect", "submit", "submit_lost", "quitting",
+                                       "done", "fail", "unexpected_unpause", "refused", "greyed")])
+        out["wrong_submits"] = sum(1 for _, got, want in self.rq["submits"] if want is not None and got != want)
+        out["main_menu"] = bool(pq is not None and pq.outcome == "QUIT")
+        return out
+
     def stats(self) -> dict:
         q = (lambda v, p: round(float(np.percentile(v, p)), 3) if v else None)
         tr = self.fc.tracker
@@ -373,4 +428,5 @@ class PlannerPolicy:
                 "unpredicted": self.unpredicted, "hits_taken": self.hits_taken,
                 "forced_risk_ticks": len(self.forced_frames), "forced_first": self.forced_frames[:20],
                 "first_pending_f": self.first_pending_f, "outcome_reason": self.outcome_reason,
-                "alerts": list(self.sc.alerts), "anchor_log": tr.anchor_log[-40:]}
+                "alerts": list(self.sc.alerts), "anchor_log": tr.anchor_log[-40:],
+                "real_quit": self.real_quit_stats()}

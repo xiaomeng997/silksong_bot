@@ -53,13 +53,13 @@ def git_rev() -> str | None:
 
 
 def make_policy(name: str, view: str = "oracle", run_dir: Path | None = None, instance: int = 0,
-                threads: int = 8):
+                threads: int = 8, real_quit: float = 0.0):
     if name == "data":
         from ssbot.train.data_policy import DataPolicy
         return DataPolicy()
     if name == "planner":
         from ssbot.train.planner_policy import PlannerPolicy
-        return PlannerPolicy(view=view, threads=threads, log_dir=run_dir, instance=instance)
+        return PlannerPolicy(view=view, threads=threads, log_dir=run_dir, instance=instance, real_quit_p=real_quit)
     raise SystemExit(f"unknown policy {name}")
 
 
@@ -86,7 +86,7 @@ def worker(a: argparse.Namespace) -> int:
     out = (run_dir / f"attempts_i{a.instance}.jsonl").open("a", encoding="utf-8", newline="\n")
     link = OracleLink(instance=a.instance, connect_timeout_s=120)
     tap = FightTap(link, enc)
-    policy = make_policy(a.policy, a.view, run_dir, a.instance, a.threads)
+    policy = make_policy(a.policy, a.view, run_dir, a.instance, a.threads, a.real_quit)
     if hasattr(policy, "attach"):
         policy.attach(link)
     if hasattr(policy, "warmup"):
@@ -139,6 +139,13 @@ def worker(a: argparse.Namespace) -> int:
             print(f"[i{a.instance} ep{k}] {rec.outcome:12s} {rec.ingame_s or 0:6.1f}s hits {rec.hits} wd {rec.would_die} "
                   f"boss_hp {rec.boss_hp_end} {atk} {rec.reason or ''}", flush=True)
             k += 1
+            rq = (d.get("policy") or {}).get("real_quit")
+            if rq and (rq.get("main_menu") or rq.get("steps")):
+                # a real quit left the game on (or on its way to) the main menu: back into the sandbox slot
+                load_slot(link, 1)
+                stand_up(link)
+                if not link.rpc("guards.set", save_suppression=True)["save_suppression"]:
+                    raise SystemExit("save suppression could not be turned on")
             fails_in_row = fails_in_row + 1 if rec.outcome == "HARNESS_FAIL" else 0
             if fails_in_row >= 5:
                 print(f"[i{a.instance}] 5 harness failures in a row, stopping", flush=True)
@@ -164,7 +171,7 @@ def run(a: argparse.Namespace) -> int:
         cmd = [sys.executable, "-m", "ssbot.tools.combat_run", "_worker", "--instance", str(i), "--run-dir",
                str(run_dir), "--encounter", a.encounter, "--mode", a.mode, "--policy", a.policy, "--episodes",
                str(a.episodes), "--hours", str(a.hours or 0), "--rotate", str(a.rotate), "--seed", str(a.seed),
-               "--view", a.view, "--threads", str(a.threads)]
+               "--view", a.view, "--threads", str(a.threads), "--real-quit", str(a.real_quit)]
         if a.no_record:
             cmd.append("--no-record")
         log = (run_dir / f"worker_i{i}.log").open("w", encoding="utf-8")
@@ -240,6 +247,19 @@ def summary(run_dir: Path, more: list[Path] | None = None, write: bool = True) -
             out["unpredicted_hits"] = sum(len(p.get("unpredicted") or ()) for p in pol)
             out["episodes_with_forced_risk"] = sum(1 for p in pol if p.get("forced_risk_ticks"))
             out["forced_risk_ticks"] = sum(p.get("forced_risk_ticks") or 0 for p in pol)
+            rq = [p["real_quit"] for p in pol if p.get("real_quit")]
+            fired = [q for q in rq if q.get("steps")]
+            if rq:
+                lat = sorted(q["pause_latency_s"] for q in fired if q.get("pause_latency_s") is not None)
+                menu_s = sorted(next((t for t, k, _ in q["steps"] if k == "done"), None) or 0.0 for q in fired)
+                out["real_quits"] = {"armed": len(rq), "paused": len(fired),
+                                     "main_menu": sum(1 for q in fired if q.get("main_menu")),
+                                     "pause_latency_s_p50": lat[len(lat) // 2] if lat else None,
+                                     "pause_latency_s_max": lat[-1] if lat else None,
+                                     "to_main_menu_s_max": menu_s[-1] if menu_s else None,
+                                     "submits": sum(len(q.get("submits") or ()) for q in fired),
+                                     "wrong_submits": sum(q.get("wrong_submits") or 0 for q in fired),
+                                     "unexpected_unpauses": sum(q.get("unexpected_unpauses") or 0 for q in fired)}
             p99 = sorted(p["plan_ms_p99"] for p in pol if p.get("plan_ms_p99") is not None)
             p50 = sorted(p["plan_ms_p50"] for p in pol if p.get("plan_ms_p50") is not None)
             out["plan_ms_p50_median"] = p50[len(p50) // 2] if p50 else None
@@ -268,6 +288,9 @@ def main(argv: list[str] | None = None) -> int:
         p.add_argument("--no-record", action="store_true")
         p.add_argument("--view", choices=("oracle", "degraded", "degraded_dust", "degraded_tell"), default="oracle")
         p.add_argument("--threads", type=int, default=8)
+        p.add_argument("--real-quit", type=float, default=0.0,
+                       help="probability that a confirmed supervisor pause quits for real (menu, Yes, main menu), "
+                            "then the worker reloads sandbox slot 1 and the savestate")
         if name == "run":
             p.add_argument("--instances", default="0")
         else:
