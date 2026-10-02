@@ -6,8 +6,7 @@ that is executed: the planner re-plans every frame) and a continuation (frames 4
 leaves a safe way on. Front-dense: the continuations are a library of whole-horizon behaviours (stay, run, jump now
 or after a wait, attack, run then jump ...) rather than two more 4-frame levels, so 21 first primitives x 17
 continuations (357) stay well within the 512-rollout budget while still holding the jump timings a charge or a
-rolling bell
-needs (the planner re-plans each frame, so finer timing comes from the next tick). A JUMP(h) holds jump h frames from
+rolling bell needs (the planner re-plans each frame, so finer timing comes from the next tick). A JUMP(h) holds jump h frames from
 its start whatever comes after (a committed hold; the kinematics' HoldFilter replays min press / release).
 
 Bell Beast vocabulary (the savestate hero has no dash, double jump, wall jump or glide): MOVE(L/R), WAIT, JUMP(hold
