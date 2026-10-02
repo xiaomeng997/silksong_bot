@@ -15,7 +15,8 @@ from ssbot.backends.noise_simple import NoiseConfig, SimpleNoise
 from ssbot.backends.observability import BoxTable, ObservabilityFilter
 from ssbot.backends.oracle_backend import OracleBackend
 from ssbot.core.bosses import BELL_BEAST, BossSpec
-from ssbot.core.worldstate import (O, ORACLE, VISION_BLOCKS, DamageBox, E, Entity, Ev, Event, Hazard, HitDealt, Kind,
+from ssbot.core.worldstate import (O, ORACLE, VISION_BLOCKS, DamageBox, E, EnemyKilled, Entity, Ev, Event, Hazard,
+                                   HitDealt, Kind,
                                    Screen, Src, Unobs, WorldState, iter_estimates, iter_fields)
 from tests import worldstate_fixture as fx
 
@@ -451,6 +452,21 @@ def test_kill_zeroes_and_drops_the_track():
     assert out[i].stamp.frame == 69029
     assert boss(out[i - 1]) is not None and boss(out[i - 1]).hp_est.v == 145.0   # one hit seen in this window
     assert all(boss(w) is None for w in out[i:])
+
+
+def test_a_kill_vision_cannot_see_is_dropped(wake):
+    i = next(i for i, w in enumerate(wake) if boss(w) is not None)
+    f = ObservabilityFilter(bosses=[BELL_BEAST])
+    f.apply(wake[i])
+    f.apply(_camera_away(wake[i + 1], 200.0))                       # the boss went off-screen (a ghost) ...
+    away = _camera_away(wake[i + 2], 200.0)
+    away.events.append(Event(Ev.ENEMY_KILLED, away.stamp.frame, away.stamp.t_game_s,
+                             EnemyKilled(fx.BOSS_IID, "Bone Beast")))
+    away.events.append(Event(Ev.ENEMY_KILLED, away.stamp.frame, away.stamp.t_game_s, EnemyKilled(999999, "Bug")))
+    out = f.apply(away)                                              # ... and an enemy never exported dies
+    assert not [e for e in out.events if e.kind == Ev.ENEMY_KILLED]
+    g = boss(out)
+    assert g is not None and g.visible_frac == 0.0 and g.hp_est.v == 150.0
 
 
 def test_unknown_types_get_no_hp(wake):

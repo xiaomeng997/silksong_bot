@@ -39,6 +39,9 @@ Rule: no value in the output may depend on something pixels cannot show. Per fra
     quit_available is False with conf 0 except in the pause menu with a menu read; with one (quit_map.p_pause /
     p_quit(scene, key), ssbot.safety.quit_map keys) both need P >= min_p. The blockers carry only VISION_BLOCKS
     bits. src PREDICTED.
+  - ENEMY_KILLED passes only for a target visible in this frame or the one before (the Bell Beast leaves the export
+    in the frame it dies, its corpse still on screen); a kill off-screen or underground is not seen and its track
+    lives on until the TTL.
   - Boss HP -> hit-count estimate: a HIT_DEALT on a visible entity counts (amount is O); hp_est = hp_max - sum of
     the per-attack damage (attack_damage[HitDealt.src], else [attack], else the longest key prefixing
     HitDealt.hero_anim, else hit_damage), sigma = hit_sigma * sqrt(hits); a hit the hero did not deal (by_hero False)
@@ -501,7 +504,11 @@ class ObservabilityFilter:
                 self._var[iid] = self._var.get(iid, 0.0) + var
                 self._dmg[iid] = self._dmg.get(iid, 0.0) + dmg
             elif ev.kind == Ev.ENEMY_KILLED:
-                self._killed.add(ev.data.target_id)
+                iid = ev.data.target_id
+                prev = self._seen.get(iid)
+                if iid not in vis_ids and (prev is None or prev.state != "visible"):
+                    continue     # a kill vision cannot see: off-screen, underground or never seen (it stays a track)
+                self._killed.add(iid)
             events.append(ev)
         out.events = events
 
