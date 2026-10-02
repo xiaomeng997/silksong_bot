@@ -132,7 +132,8 @@ def draw(rng: random.Random, hurt: bool) -> Trial:
 
 def safe(S: np.ndarray, t: Trial, params, terrain) -> bool:
     """The trial keeps the hero (collider centre) inside X_SAFE: its rollout with every timing variant and, for a hurt
-    trial, the rollout with the hit on each frame of HURT_SPAN plus the knockback envelope of each such hit."""
+    trial, the rollouts (every timing variant) with the hit on each frame of HURT_SPAN plus the knockback envelope of
+    each such hit."""
     from ssbot.knowledge import kinematics as km
     from ssbot.knowledge.knockback import knockback_boxes
     masks = np.array(t.masks + _seg(0, SETTLE_FRAMES), dtype=np.int64)[None]
@@ -152,8 +153,8 @@ def safe(S: np.ndarray, t: Trial, params, terrain) -> bool:
     ev = np.zeros((len(frames), T), dtype=np.int64)
     for j, f in enumerate(frames):
         ev[j, f] = bit
-    rh = km.rollout(S, np.repeat(masks, len(frames), axis=0), params, terrain, events=ev)
-    if not ok(rh.box[..., 0].min(), rh.box[..., 2].max()):
+    rh = km.rollout(S, np.repeat(masks, len(frames), axis=0), params, terrain, events=ev, variants="bounds")
+    if not ok(rh.bound[..., 0].min(), rh.bound[..., 2].max()):         # after control returns too, every lane
         return False
     hit_boxes = np.stack([r.bound[0, f + 1] for f in frames])     # the variants' hull: a superset of each lane
     swept, _, _ = knockback_boxes(hit_boxes, t.hurt["side"], params, terrain)
