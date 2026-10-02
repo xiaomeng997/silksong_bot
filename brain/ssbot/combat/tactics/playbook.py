@@ -8,7 +8,7 @@ import yaml
 REPO = Path(__file__).resolve().parents[4]
 PLAYBOOKS = REPO / "knowledge" / "1.0.30000" / "playbooks"
 
-DEFAULT_WEIGHTS = {"hit": 10.0, "stance": 0.6, "risk": 3.0, "waste": 0.6, "face": 0.3, "ground": 0.2, "cont": 0.4,
+DEFAULT_WEIGHTS = {"hit": 10.0, "stance": 0.6, "risk": 3.0, "waste": 0.6, "face": 0.3, "ground": 0.2, "cont": 0.15,
                    "jump": 0.15}
 
 
@@ -27,6 +27,7 @@ class Playbook:
     bind_states: frozenset[str]
     bind_hp_missing_min: int
     hit_damage: dict[str, float]
+    no_hurtbox: frozenset[str] = frozenset()
     weights: dict[str, float] = field(default_factory=lambda: dict(DEFAULT_WEIGHTS))
 
     @classmethod
@@ -44,6 +45,7 @@ class Playbook:
                    bind_states=frozenset(bind.get("states") or ()),
                    bind_hp_missing_min=int(bind.get("hp_missing_min", 2)),
                    hit_damage={k: float(v) for k, v in (d.get("hit_damage") or {"nail": 5}).items()},
+                   no_hurtbox=frozenset(d.get("no_hurtbox") or ()),
                    weights=DEFAULT_WEIGHTS | {k: float(v) for k, v in (d.get("weights") or {}).items()})
 
 

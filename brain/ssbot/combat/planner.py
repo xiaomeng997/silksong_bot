@@ -12,7 +12,7 @@ reads oracle fields); `prefix` the commanded masks already sent for frames f+1 .
 f+P+1 and the rollout covers the prefix too (§3.5.4 `state_at(now + L)` on the executed command stream); `hold` the
 oracle HoldFilter state at f (STATE act.hf, exact), which the compiled hold filter (combat.holdfilter) continues.
 
-Per candidate (candidates.build: 25 first primitives x 18 continuations = 450, plus the previous plan carried on, plus
+Per candidate (candidates.build: 21 first primitives x 22 continuations = 462, plus the previous plan carried on, plus
 the Bind macro when the tactics want it, over a longer horizon):
   rollout   kinematics.rollout(variants="bounds"): the 9 timing lanes' per-frame hull (`bound`), the support form of
             the M2 kinematics acceptance; the nominal lane scores.
@@ -387,7 +387,13 @@ def _score_kernel(box, flags, mode, latched, face0, boss, okb, wv, stance_x, rx,
         waste = max(presses - h, 0.0)
         x_end = cxs[T1 - 1]
         r = np.interp(x_end, rx, rv)
-        v = wv[0] * h - wv[1] * waste - wv[2] * jumps - wv[3] * abs(x_end - stance_x) - wv[4] * r
+        # distance to the stance over the whole horizon, not only at its end: "wait, then run there" re-planned every
+        # frame never gets there (live run 20261002_032738: the hero stood 4 u short of every Leap Land punish)
+        d_mean = 0.0
+        for k in range(T1):
+            d_mean += abs(cxs[k] - stance_x)
+        d_mean /= T1
+        v = wv[0] * h - wv[1] * waste - wv[2] * jumps - wv[3] * (0.5 * abs(x_end - stance_x) + 0.5 * d_mean)             - wv[4] * r
         if boss_x == boss_x:
             want = 1 if boss_x > x_end else -1
             if fc[T1 - 1] == want:

@@ -59,6 +59,9 @@ SUP_HORIZON_S = 0.8          # what the supervisor's support covers (hits_to_dea
 VE_ENTRY_SLACK = 1           # bins of slack on an observable phase's entry (a transition frame shows a clip early)
 MAX_NODES = 400
 HIDDEN, UNKNOWN = "hidden", "unknown"
+DROP_BELL = "BoneBeast DropBell"   # world-fixed hazards with self templates (behaviour_tables entities.<tk>.self_template)
+REST_STATES = ("Init", "Dormant")
+BELL_TTL_S = 8.0                   # a disarmed bell (left the export, back to Dormant) is forgotten after this
 
 # observable phase -> the Control state its first frame is (the root of the forecast walk)
 PHASE_ROOT = {"emerge": "Charge Emerge", "charge_antic": "Charge Antic", "charge": "Charge", "leap": "Leap Out",
@@ -103,6 +106,7 @@ class Placement:
     t_on: float                        # active interval relative to the origin
     t_off: float
     sources: frozenset[str]
+    t_from: float = -math.inf          # ignored for query times before this (drop-bell unions, see Forecaster)
 
 
 @dataclass(slots=True)
@@ -142,25 +146,40 @@ class Forecast:
             q.place(p.key, p.t_ref, p.anchor, p.mirror)
         return q
 
+    def _occ(self, placements: list[Placement], x, y, tk: np.ndarray) -> np.ndarray:
+        x = np.asarray(x, np.float64)
+        y = np.asarray(y, np.float64)
+        out = np.zeros(x.shape, bool)
+        cuts = sorted({p.t_from for p in placements if tk[0] < p.t_from <= tk[-1]})
+        edges = [-math.inf] + cuts + [math.inf]
+        for a, b in zip(edges, edges[1:]):
+            sel = np.flatnonzero((tk >= a) & (tk < b))
+            if not len(sel):
+                continue
+            t_lo, t_hi = tk[sel[0]], tk[sel[-1]]
+            act = [p for p in placements if p.t_from <= t_lo and p.t_off >= t_lo - BIN and p.t_on <= t_hi + BIN]
+            if not act:
+                continue
+            q = self._query(act)
+            xs, ys, ts = x[:, sel], y[:, sel], tk[sel]
+            out[:, sel] = query_par(q, xs, ys, ts) if x.shape[0] >= 64 else q.query(xs, ys, ts)
+        return out
+
     def occupied(self, x, y, tk) -> np.ndarray:
         """[N, T] bool: the hurtbox (grown by the forecaster's margin) centred at (x, y) [N, T] at tk [T] game s from
         the origin overlaps some support tube."""
-        tk = np.asarray(tk, np.float64)
-        active = [p for p in self.placements if p.t_off >= tk.min() - BIN and p.t_on <= tk.max() + BIN]
-        q = self._query(active)
-        if np.asarray(x).shape[0] >= 64:
-            return query_par(q, x, y, tk)
-        return q.query(x, y, tk)
+        return self._occ(self.placements, x, y, np.asarray(tk, np.float64))
 
     def node_hits(self, x, y, tk) -> np.ndarray:
         """[nodes, N] bool: contact with each node's own placements."""
         x = np.asarray(x, np.float64)
+        tk = np.asarray(tk, np.float64)
         out = np.zeros((len(self.nodes), x.shape[0]), bool)
         by_node: dict[int, list[Placement]] = {}
         for p in self.placements:
             by_node.setdefault(p.node, []).append(p)
         for nid, ps in by_node.items():
-            out[nid] = self._query(ps).query(x, y, tk).any(axis=1)
+            out[nid] = self._occ(ps, x, y, tk).any(axis=1)
         return out
 
     def prob(self, x, y, tk) -> np.ndarray:
@@ -189,7 +208,7 @@ class Forecast:
     def active_sources(self, t0: float = 0.0, t1: float = SUP_HORIZON_S) -> frozenset[str]:
         out: set[str] = set()
         for p in self.placements:
-            if p.t_off >= t0 and p.t_on <= t1:
+            if p.t_off >= t0 and max(p.t_on, p.t_from) <= t1:
                 out |= p.sources
         return frozenset(out)
 
@@ -235,6 +254,8 @@ class Forecast:
         box[:] = bb
         t_left = tr.drawn_left(self.origin_t)
         ok[:] = tk <= t_left
+        if tr.state in self.fc.no_hurtbox:
+            ok[:] = False
         fam = tr.ctx.family
         f = self.fc.model.families.get(fam) if fam else None
         if f is not None and f.path is not None and tr.t_start is not None and tr.ctx.anchor is not None:
@@ -285,9 +306,13 @@ class BossTracker:
         self._anchor_sum: list[float] = []
         self.t = 0.0
         self.hidden_x: dict[str, float] = {}   # ORACLE: the hidden boss's x per state of this attack (anchor check)
-        self.ends: list[tuple[str, Anchor | None, float, float, str | None]] = []   # last attacks' ends: (family,
-        #                                         anchor, t_end lo, t_end hi, phase): their tails (bells) outlive them
+        self.ends: list[tuple] = []   # last attacks' ends: (family, anchor, t_end lo, t_end hi, phase, by a death):
+        #                               their tails (bells; the body too when the boss died mid-attack) outlive them
         self._drawn_anchor: tuple | None = None
+        self.n_attacks = 0
+        self.bells: dict[int, tuple[str, float, tuple[float, float]]] = {}   # ORACLE: armed drop bells: (type,
+        #                                                                    arm time, arm position)
+        self.bells_unknown = False             # an armed drop bell whose arming was not seen
         self.anchor_log: list[tuple[str, float, float]] = []   # ORACLE: (family, hidden x, drawn transform x)
 
     # ---- ORACLE -------------------------------------------------------------------------------------------------
@@ -298,7 +323,7 @@ class BossTracker:
         self.state, self.t_entry = state, t
         if state in m.death_states:
             if self.ctx.family is not None and not self.dead:     # the bells of a killed attack roll on: its tail
-                self._ended(self.ctx.family, self.ctx.anchor, t, t)
+                self._ended(self.ctx.family, self.ctx.anchor, t, t, death=True)
             self.dead = True
             return
         if state == "Submerged Init":
@@ -308,10 +333,13 @@ class BossTracker:
             self.ctx.direction = state
         if state in m.attack_starts:
             fam = m.attack_starts[state]
+            if self.ctx.direction is None and self.n_attacks == 0 and self.t_wake is not None:
+                self.ctx.direction = "-"          # the first attack after the wake (its Set state came before us)
             self.ctx.family = fam
             self.ctx.anchor = m.anchor(fam, self.ctx.direction)
             self.t_start = t
             self.hidden_x = {}
+            self.n_attacks += 1
         elif state in m.decision_states and prev is not None and prev not in m.decision_states:
             if self.ctx.family is not None:
                 self._ended(self.ctx.family, self.ctx.anchor, t, t)
@@ -323,8 +351,8 @@ class BossTracker:
         if state in m.phase_marks:
             self.ctx.phase = m.phase_marks[state]
 
-    def _ended(self, family: str, anchor: Anchor | None, t_lo: float, t_hi: float) -> None:
-        self.ends = (self.ends + [(family, anchor, t_lo, t_hi, self.ctx.phase)])[-2:]
+    def _ended(self, family: str, anchor: Anchor | None, t_lo: float, t_hi: float, death: bool = False) -> None:
+        self.ends = (self.ends + [(family, anchor, t_lo, t_hi, self.ctx.phase, death)])[-2:]
 
     def update(self, ws: WorldState) -> Entity | None:
         m = self.model
@@ -338,9 +366,10 @@ class BossTracker:
         for ev in ws.events:
             if ev.kind == Ev.ENEMY_KILLED and ev.data is not None and ev.data.type_key == m.boss_type                     and not self.dead:
                 if self.view == ORACLE and self.ctx.family is not None:
-                    self._ended(self.ctx.family, self.ctx.anchor, ev.t_game_s, ev.t_game_s)
+                    self._ended(self.ctx.family, self.ctx.anchor, ev.t_game_s, ev.t_game_s, death=True)
                 elif self.view != ORACLE and self.state not in (None, HIDDEN) and self.last_family is not None:
-                    self._ended(self.last_family, self.last_anchor, ev.t_game_s - BIN, ev.t_game_s + BIN)
+                    self._ended(self.last_family, self.last_anchor, ev.t_game_s - BIN, ev.t_game_s + BIN,
+                                death=True)
                 self.dead = True
         if self.view == ORACLE:
             self._update_oracle(ws, boss, t)
@@ -357,6 +386,7 @@ class BossTracker:
                 if d.from_state in ("Dormant", "Init") and self.t_wake is None:
                     self.t_wake = ev.t_game_s
                 self._enter(d.to_state, ev.t_game_s)
+        self._bells(ws, t)
         if boss is None:
             return
         if boss.phase is not None and boss.phase.top:
@@ -379,10 +409,38 @@ class BossTracker:
             ax, ay = boss.pos_transform
             hx = next(iter(self.hidden_x.values()), math.nan)
             self.anchor_log.append((fam, hx, float(ax)))
-            if m.anchor(fam, self.ctx.direction) is None:
-                f = m.families[fam]
-                mirror = f.mirror if not f.directed else (-1 if boss.flip_x else 1)
-                self.ctx.anchor = Anchor(float(ax), float(ay), mirror)
+            f = m.families[fam]
+            if f.directed and self.ctx.anchor is None:
+                # direction missed (the tracker started after the Set state): the facing tells it (Set L flipX
+                # False, Set R True in every logged instance)
+                self.ctx.anchor = m.anchor(fam, "Set R" if boss.flip_x else "Set L")
+            elif m.anchor(fam, self.ctx.direction) is None and not f.directed:
+                self.ctx.anchor = Anchor(float(ax), float(ay), f.mirror)
+
+    def _bells(self, ws: WorldState, t: float) -> None:
+        """ORACLE: drop bells hang in the export all fight (FSM Dormant) and arm (leave Dormant: Antic, the shake)
+        about 1.2 s before they can hurt (self templates start 1.217 s after arming). Arm time and position (the
+        transform: they hang still while shaking) make their self template placeable."""
+        seen = set()
+        unknown = False
+        for e in ws.entities:
+            tk = e.type_key.v
+            if not tk.startswith(DROP_BELL) or not e.fsm:
+                continue
+            st, tau = e.fsm[0][1], e.fsm[0][2]
+            if st in REST_STATES:
+                self.bells.pop(e.id, None)     # disarmed: the same bell object re-arms for a later drop
+                continue
+            seen.add(e.id)
+            if e.id not in self.bells:
+                if st == "Antic" and e.pos_transform is not None:
+                    self.bells[e.id] = (tk, t - tau, (float(e.pos_transform[0]), float(e.pos_transform[1])))
+                else:
+                    unknown = True
+        for iid in [i for i in self.bells if i not in seen]:
+            if t - self.bells[iid][1] > BELL_TTL_S:
+                del self.bells[iid]
+        self.bells_unknown = unknown
 
     # ---- VISION_EQUIVALENT ----------------------------------------------------------------------------------------
 
@@ -537,9 +595,14 @@ class Forecaster:
         self.meta = {k: (t.t0, t.t1) for k, t in templates.items()}
         # half-extents of the box a point test covers (the templates' dilation)
         self.half = (hb.HERO_HALF_U[0] + self.margin[0], hb.HERO_HALF_U[1] + self.margin[1])
+        # earliest damage after a drop bell arms (its self template's first occupied bin, padding included)
+        leads = [t.active()[0] for k, t in templates.items() if k.startswith(f"{hb.SUPPORT}ent/{DROP_BELL}")
+                 and t.active() is not None]
+        self.bell_lead = (min(leads) - BIN) if leads else -math.inf
         self.query = hb.SupportQuery(templates, hero_half=hb.HERO_HALF_U)
         self.tracker = BossTracker(model, view)
         self.boss: Entity | None = None
+        self.no_hurtbox: frozenset[str] = frozenset()     # states / phases with the body box disabled (playbook)
         self.t = 0.0
 
     def reset(self) -> None:
@@ -565,26 +628,50 @@ class Forecaster:
         placements: list[Placement] = []
         for r in roots:
             self._walk(r.state, r.e_lo, r.e_hi, replace(r.ctx), r.p, -1, H, nodes, placements, r.current, 0)
-        for fam, anchor, lo, hi, phase in self.tracker.ends:
+        tr = self.tracker
+        if self.view == ORACLE and tr.bells:
+            nid = len(nodes)
+            nodes.append(Node(nid, "bells", 0.0, 0.0, None, 1.0, -1, None))
+            for iid, (tk, t_arm, pos) in tr.bells.items():
+                key = f"{hb.SUPPORT}ent/{tk}/self"
+                if key not in self.meta:
+                    continue
+                t0, t1 = self.meta[key]
+                e = t_arm - origin
+                if e + t1 < -BIN or e + t0 > H + BIN:
+                    continue
+                placements.append(Placement(key, -e, pos, 1, nid, e + t0, e + t1, frozenset({tk})))
+        for fam, anchor, lo, hi, phase, death in self.tracker.ends:
             nid = len(nodes)
             nodes.append(Node(nid, TAIL, lo - origin, hi - origin, fam, 1.0, -1, anchor))
             self._place(fam, TAIL, lo - origin, hi - origin, Ctx(family=fam, anchor=anchor, phase=phase), nid, H,
-                        placements)
+                        placements, death_tail=death)
         if not roots and self.tracker.dead:
             known = True
         return Forecast(self, origin, H, nodes, placements, known, roots, self.boss)
 
     def _place(self, fam: str, state: str, e_lo: float, e_hi: float, ctx: Ctx, node: int, H: float,
-               out: list[Placement]) -> None:
+               out: list[Placement], death_tail: bool = False) -> None:
         m = self.model
         f = m.families[fam]
+        ws = f.world_sources.get(state, frozenset())
+        p2 = ctx.phase == "P1" and ws and ws <= f.p2_only.get(state, frozenset())
         if ctx.anchor is not None:
             frames = ["anchor"]
-            ws = f.world_sources.get(state, frozenset())
-            if not (ctx.phase == "P1" and ws and ws <= f.p2_only.get(state, frozenset())):
+            if not p2:
                 frames.append("world")
         else:
             frames = ["world_all"]
+        if state == TAIL and not death_tail:
+            # An attack that ended into the decision chain left the boss underground: its tail is what outlives it
+            # (attack bells, drop bells). The tail templates also hold the body of instances killed mid-attack
+            # (support/BB_CHARGE/_tail: 66 instances, no tail source logged), which only a death end places.
+            anchored = f.sources.get(TAIL, frozenset()) - ws - {m.boss_type}
+            world = ws if not p2 else frozenset()
+            if ctx.anchor is not None:
+                frames = (["anchor"] if anchored else []) + (["world"] if world else [])
+            else:
+                frames = ["world_all"] if (anchored or world) else []
         srcs = f.sources.get(state, frozenset())
         if ctx.phase == "P1":
             srcs = srcs - f.p2_only.get(state, frozenset())
@@ -599,11 +686,21 @@ class Forecaster:
             t0, t1 = self.meta[key]
             anchor = (ctx.anchor.x, ctx.anchor.y) if fr == "anchor" else None
             mirror = ctx.anchor.mirror if fr == "anchor" else 1
+            # a union of drop-bell falls: in the oracle view every armed bell has its own self template, and a bell
+            # not armed yet cannot hurt sooner than its arming lead, so the union only counts from then on
+            allsrc = f.sources.get(state, frozenset())
+            fsrc = ws if fr == "world" else (allsrc - ws if fr == "anchor" else allsrc)
+            t_from = -math.inf
+            if self.view == ORACLE and fsrc and all(x.startswith(DROP_BELL) for x in fsrc) \
+                    and not self.tracker.bells_unknown:
+                t_from = self.bell_lead
             for e in es:
                 on, off = e + t0, e + t1
                 if off < -BIN or on > H + BIN:
                     continue
-                out.append(Placement(key, -e, anchor, mirror, node, on, off, srcs))
+                if t_from > H + BIN:
+                    continue
+                out.append(Placement(key, -e, anchor, mirror, node, on, off, srcs, t_from))
 
     def _walk(self, state: str, e_lo: float, e_hi: float, ctx: Ctx, p: float, parent: int, H: float,
               nodes: list[Node], out: list[Placement], current: bool, depth: int) -> None:

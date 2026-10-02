@@ -76,8 +76,14 @@ def worker(a: argparse.Namespace) -> int:
     policy = make_policy(a.policy, a.view, run_dir, a.instance, a.threads)
     if hasattr(policy, "attach"):
         policy.attach(link)
+    if hasattr(policy, "warmup"):
+        print(f"[i{a.instance}] policy warm-up {policy.warmup():.1f} s", flush=True)
     rev = git_rev()
     fp = hashlib.sha256(json.dumps([enc.name, a.policy, a.mode, a.view, rev], sort_keys=True).encode()).hexdigest()[:12]
+    from ssbot.train.episode import unpause
+    s0 = link.wait_state(lambda s: s.get("game") is not None, timeout_s=120)
+    if (s0.get("game") or {}).get("paused") and (s0.get("game") or {}).get("scene"):
+        unpause(link)                    # a previous run left it in the pause menu (brain-lost watchdog, a QUIT)
     load_slot(link, 1)
     stand_up(link)
     if not link.rpc("guards.set", save_suppression=True)["save_suppression"]:

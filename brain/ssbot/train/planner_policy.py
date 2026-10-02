@@ -22,6 +22,7 @@ FORCED_RISK and supervisor pause, and 10 after, for ssbot.tools.postmortem.
 """
 import json
 import math
+import os
 import random
 import time
 from collections import Counter, deque
@@ -50,6 +51,7 @@ NOISE_K = 3.0                         # stage C: + k * sigma of the hero / boss 
 HORIZON_S = 2.0                       # forecast horizon: the risk map's and the Bind's
 UNPRED_LAG = 3
 LOG_BEFORE, LOG_AFTER = 90, 10
+LOG_ALL = os.environ.get("SSBOT_LOG_ALL") == "1"     # debugging: every tick to the decision log
 
 
 class TerrainTap:
@@ -99,6 +101,7 @@ class PlannerPolicy:
             fview = VISION_EQUIVALENT
         self.fc = Forecaster(self.model, fview, margin=margin, templates=load_planner_templates(self.model, margin))
         self.pb = load_playbook(enemy)
+        self.fc.no_hurtbox = self.pb.no_hurtbox
         self.tac = Tactics(self.pb)
         self.planner: Planner | None = None
         self.terrain_tap: TerrainTap | None = None
@@ -111,6 +114,41 @@ class PlannerPolicy:
     def attach(self, link) -> None:
         self.terrain_tap = TerrainTap(link)
         self.link = link
+
+    def warmup(self) -> float:
+        """Compile every numba path before the first episode (a first call mid-fight compiles for seconds, and the
+        oracle's brain-lost watchdog pauses the game after 250 ms without an ACTION): a synthetic tick at h = 2 next to
+        an arena gate (knockback hull), inside the support (FORCED_RISK: probabilities), with a Bind wanted, and with
+        the hero in hit-stop (the no-control candidates)."""
+        from ssbot.combat.boss_model import Anchor
+        from ssbot.combat.forecast import Ctx, Root
+        from ssbot.combat.tactics import TacticPrefs
+        from ssbot.core.worldstate import E, Gate, WorldState
+        t0 = time.perf_counter()
+        terrain = Terrain2D.from_boxes([(60.0, 0.0, 110.0, 2.0), (67.2, 0.0, 69.2, 14.0), (102.0, 0.0, 104.0, 14.0)])
+        planner = Planner(self.params, terrain, PlannerConfig(threads=self.threads))
+        fc = self.fc
+        roots = fc.tracker.roots
+        an = self.model.anchor("BB_CHARGE", "Set L")
+        for x, mode in ((76.0, kin.M_NORMAL), (80.0, kin.M_NORMAL), (85.0, kin.M_HURT_FREEZE)):
+            fc.tracker.roots = lambda origin: ([Root("Charge Antic", -0.3, -0.3, Ctx(
+                family="BB_CHARGE", direction="Set L", anchor=an, phase="P1", raged=False, hp=100.0), current=True)],
+                True)
+            f = fc.forecast(HORIZON_S, 0.0)
+            ws = WorldState()
+            ws.hero.pos = E((x, 3.0544))
+            ws.res.hp, ws.res.hp_max, ws.res.silk = E(3), E(5), E(9)
+            ws.terrain.gates = [Gate("Gate", True, (67.2, 0.0, 69.2, 14.0))]
+            prefs = self.tac.decide(ws, f, None, 2)
+            prefs.want_bind = True
+            ctx = FilterContext.from_world(ws, None, 2, want_bind=True)
+            S = kin.initial_state(self.params, x, 2.015 + self.params.foot, mode=mode)
+            planner.tick(ws, S, HoldState.idle(1), np.zeros(1, np.int64), f, prefs, ctx)
+            f.prob(np.full((3, 5), x), np.full((3, 5), 3.05), np.arange(5) * 0.0167)
+            f.t_min(x, 3.05)
+        fc.tracker.roots = roots
+        fc.reset()
+        return time.perf_counter() - t0
 
     # ---- per episode -----------------------------------------------------------------------------------------
 
@@ -278,6 +316,11 @@ class PlannerPolicy:
         if r.decision.pause_pending:
             self.counts["_pend_logged"] = 1
         if self.log_path is None:
+            return
+        if LOG_ALL:
+            with self.log_path.open("a", encoding="utf-8") as fh:
+                fh.write(json.dumps(rec) + "\n")
+            self.ring.clear()
             return
         if event:
             with self.log_path.open("a", encoding="utf-8") as fh:

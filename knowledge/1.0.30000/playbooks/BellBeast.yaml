@@ -26,19 +26,22 @@ stance:
   # and outside both leap landing zones (91-102.8 from the left anchor, 67.9-79.7 from the right one).
   hidden_x: 85.4
   # Engage from just outside the support: the planner's own S check decides; this only biases the end position.
-  engage_reach_u: 2.3     # Hunter side slash reaches 2.81 u forward of the hurtbox centre (crests.json, P17)
+  engage_reach_u: 1.6     # stand this far from the boss box: the side slash reaches 2.81 u forward of the hurtbox
+                          # centre (crests.json, P17); the support check stops the hero at its edge anyway
   risk_horizon_s: [0.4, 2.0]
 
 # Punish windows: Control states in which the boss is drawn, committed to a state of known length and in reach of a
 # safe position. Observable phases (VISION_EQUIVALENT) carry the same names through ssbot.core.bosses.
 punish:
-  - {state: Charge Emerge, phase: emerge, note: "emerging at its anchor 0.73 s; the charge follows: keep a jump ready"}
-  - {state: Charge Antic, phase: charge_antic, note: "0.60 s wind-up at the anchor"}
   - {state: Charge End, phase: recover, note: "stopped at the far wall"}
   - {state: Dig In, phase: recover, note: "0.40-0.43 s, then underground"}
   - {state: Leap Land, phase: recover, note: "1.07-1.10 s on the floor 16-27.75 u from its anchor"}
   - {state: Burst Out, phase: burst, note: "0.90 s erupted at the burst x; the bells roll out both ways"}
   - {state: Rage Roar, phase: roar, note: "1.5 s roaring at x 86.21"}
+
+# The boss's root box (its hurtbox) is disabled while it emerges and winds up a charge (live i2_002: Charge Emerge
+# and Charge Antic every frame enabled False), so no hit can land there; scoring ignores those states.
+no_hurtbox: [Charge Emerge, Charge Antic, emerge, charge_antic]
 
 # Bind (HEAL) only where the support allows the whole Bind (DESIGN §3.5.6 commit test: T_min >= 1.37 + 0.15 s at the
 # hero's position, silk >= 9, HP <= max - 3 or h <= 2, not PAUSE_PENDING); these are the states where it usually holds
@@ -54,5 +57,5 @@ weights:
   waste: 0.6              # per attack press that hits nothing
   face: 0.3               # facing the boss at the end
   ground: 0.2             # on the floor at the end
-  cont: 0.4               # keeping the previous plan (hysteresis)
+  cont: 0.15              # keeping the previous plan (hysteresis)
   jump: 0.15              # per jump press (no needless hopping)
