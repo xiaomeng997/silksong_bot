@@ -29,16 +29,17 @@ game may already be paused, and a press would unpause it) does an absolute dim a
 
 Confirmation (vision) needs two independent detectors, and a cue is rejected only on positive contrary evidence, never
 on a timer: a world seen moving on moving_reject_frames fresh frames, or the dimmer leaving the pause trajectory
-(falling dim_drop_tol below its peak since the cue, or under base + plateau_min plateau_check_s after it). The vision
-pipeline's motion detector must therefore ignore the menu and the dimmer. Confirmed by: the menu reader with the dimmer
-on its trajectory; the reader, or the full dimmer rise, with a stopped world held for confirm_hold_s (longer than any
-hit-stop); after confirm_max_s with nothing against it, the pause is taken as real when a second detector agreed at
-least once, else resumed. Round-2 review: a 0.15 s confirm window declared real pauses false whenever the reader was
-slower than about 10 frames, and the resumed presses unpaused (N = 12: 65 of 400, N = 24: 400 of 400); now 0 of 400
-for readers 3-24 frames behind (tests/test_pause_loop.py, 400 trials each). A rejected dim cue is ignored until the dim
-stops rising or the world is seen stopped (a pause may have joined the fade); the menu cue needs a stopped world, so it
-re-arms only at the next stop: one false cue per hit-stop, never a loop stuck by a persistent misread. loop_alert_s and
-false_cue_alert raise the alert from LOOP and CONFIRM alike.
+(falling dim_drop_tol below its peak since the cue, or under base + plateau_min plateau_check_s after it) while neither
+the menu nor a stopped world has been seen since the cue. The vision pipeline's motion detector must therefore ignore
+the menu and the dimmer. Confirmed by: the menu reader with the dimmer on its trajectory; the reader, or the full dimmer
+rise, with a stopped world held for confirm_hold_s (longer than any hit-stop); after confirm_max_s with nothing against
+it, the pause is taken as real when a second detector agreed at least once, else resumed. Round-2 review: a 0.15 s
+confirm window declared real pauses false whenever the reader was slower than about 10 frames, and the resumed presses
+unpaused (N = 12: 65 of 400, N = 24: 400 of 400); now 0 of 400 for readers 3-24 frames behind (tests/test_pause_loop.py,
+400 trials each). A rejected dim cue is ignored until the dim stops rising or the world is seen stopped (a pause may
+have joined the fade); the menu cue needs a stopped world, so it re-arms only at the next stop: one false cue per
+hit-stop, never a loop stuck by a persistent misread. loop_alert_s and false_cue_alert raise the alert from LOOP and
+CONFIRM alike.
 
 Latency. Every observation has a capture time t, every key an emission time now (the same clock). A menu decision uses
 only fresh frames (capture time strictly later than the last frame used) captured after the last tap's release plus
@@ -303,7 +304,7 @@ class PauseQuit:
         self._sig_t = None
         self._suppressed = set()
         self._cue_base = None
-        self._settle = None
+        self._settle, self._settle_armed = None, False
         self._note(t, "start", goal)
 
     def upgrade_to_quit(self, t: float) -> bool:
@@ -478,23 +479,24 @@ class PauseQuit:
 
     def _trajectory(self, c: PauseCues) -> str:
         """The dimmer since the cue against a real pause (alpha + 3.2/s from the pause frame to base + 0.8, then flat,
-        never falling while paused; m0:C11): "none" (not measured, or no baseline), "broken" (fell more than
-        dim_drop_tol below its peak, or still under base + plateau_min plateau_check_s after the cue), "full" (at
-        base + plateau_min or above), else "rising"."""
+        never falling while paused; m0:C11): "none" (not measured, or no baseline), "fell" (more than dim_drop_tol
+        below its peak since the cue), "low" (still under base + plateau_min plateau_check_s after the cue), "full"
+        (at base + plateau_min or above), else "rising"."""
         b, cfg = self._cue_base, self.cfg
         if c.dim is None or b is None:
             return "none"
         self._cue_max = max(self._cue_max, c.dim)
         if c.dim < self._cue_max - cfg.dim_drop_tol:
-            return "broken"
+            return "fell"
         if c.dim - b >= cfg.plateau_min:
             return "full"
-        return "broken" if c.t - self.t_cue >= cfg.plateau_check_s else "rising"
+        return "low" if c.t - self.t_cue >= cfg.plateau_check_s else "rising"
 
     def _verdict(self, c: PauseCues) -> str | None:
         """CONFIRM on a fresh frame: "confirm", "reject" (resume pressing) or None (keep waiting, pressing nothing).
         Oracle: the paused flag decides. Vision: a cue is rejected only on positive evidence that the game is not
-        paused (the world moving on moving_reject_frames frames, or the dimmer leaving the pause trajectory), never on
+        paused (the world moving on moving_reject_frames frames; or the dimmer leaving the pause trajectory while no
+        other detector agrees, so a miscalibrated dim reading cannot overrule a stopped world or a seen menu), never on
         a timer: once the 0.3 s lockout is over a press would unpause a real pause whose menu the reader has not seen
         yet (round-2 review: readers slower than about 10 frames unpaused up to 400 of 400 trials with the old 0.15 s
         confirm window). Confirmation needs two independent detectors: the menu reader with the dimmer on its pause
@@ -509,12 +511,12 @@ class PauseQuit:
         if self._moving >= cfg.moving_reject_frames:
             return "reject"
         tr = self._trajectory(c)
-        if tr == "broken":
-            return "reject"
         menu, stopped = c.menu in PAUSE_MENUS, c.frozen is True
         if menu and tr in ("rising", "full"):
             return "confirm"
         self._second |= menu or stopped
+        if tr in ("fell", "low") and not self._second:
+            return "reject"
         self._hold_menu = (self._hold_menu if self._hold_menu is not None else c.t) if menu and stopped else None
         self._hold_dim = (self._hold_dim if self._hold_dim is not None else c.t) if tr == "full" and stopped else None
         if any(h is not None and c.t - h >= cfg.confirm_hold_s for h in (self._hold_menu, self._hold_dim)):

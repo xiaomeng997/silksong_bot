@@ -226,8 +226,8 @@ def test_oracle_options_items_without_a_role_still_reach_back():
     walks Down (Back is last, wrapping or not) without flipping, waiting a full round trip per tap, and Submits only
     on Back."""
     for wraps in (True, False):
-        sim = PauseSim(SimConfig(gate_closed_frames=20, quit_greyed=True, greyed_cause="dsq", dsq_clears_on_refresh=True,
-                                 options_wraps=wraps, options_unlabelled=True))
+        sim = PauseSim(SimConfig(gate_closed_frames=20, quit_greyed=True, greyed_cause="dsq",
+                                 dsq_clears_on_refresh=True, options_wraps=wraps, options_unlabelled=True))
         m = _machine()
         run(m, sim, 4000, until=lambda m, s: m.done)
         assert m.outcome == pq.QUIT and m.nav_flips == 0, (wraps, m.log[-6:])
