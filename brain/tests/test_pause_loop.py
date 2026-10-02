@@ -55,13 +55,28 @@ def _false_cues(r: random.Random, closed: int) -> dict:
     return {}
 
 
+def _vision_reader(r: random.Random) -> dict:
+    """A vision trial's detectors: the menu reader 3-18 frames behind the pause (round-2 review: readers slower than
+    about 10 frames made the old 0.15 s confirm window unpause), and in 10 % each the dimmer or the motion unmeasured
+    (the menu cue alone needs a fast reader to stop within the budget, so those keep the 3-frame reader)."""
+    x = r.random()
+    if x < 0.1:
+        return {"measure_dim": False}
+    out = {"menu_reader_frames": r.randint(3, 18)}
+    if x < 0.2:
+        out["measure_motion"] = False
+    return out
+
+
 def test_loop_randomized_never_unpauses_and_stops_within_budget():
     """10^4 trials (the G1 count): pause gate closed for 0-150 frames plus up to 3 more closures, input latency 1-6
     frames, observation latency 0-6 frames, capture stalls of up to 2 frames in 30 % of trials, frame jitter and 2 %
-    long frames with time-based key sampling, oracle or vision cues, and in 60 % of vision trials a false cue
-    (flash, dark baseline, persistent dimmer-like fade, misread pause menu with a hit-stop)."""
+    long frames with time-based key sampling, oracle or vision cues (menu reader 3-18 frames slow, dimmer or motion
+    unmeasured in some), and in 60 % of vision trials a false cue (flash, dark baseline, persistent dimmer-like fade,
+    misread pause menu with a hit-stop). G1: no unintended unpause, pressing stops within 230 ms of the pause, pause
+    latency from the pausable moment p99.9 <= 6 frames."""
     r = random.Random(7)
-    worst_stop, lat_ok, lat_n, worst_lat, worst_false = 0.0, 0, 0, 0, 0
+    worst_stop, lat_n, lat_over, worst_lat, worst_false = 0.0, 0, 0, 0, 0
     for seed in range(10_000):
         closed = r.randint(0, 150)
         closures, f = [], closed
@@ -71,10 +86,10 @@ def test_loop_randomized_never_unpauses_and_stops_within_budget():
             closures.append((f, f + n))
             f += n
         vision = r.random() < 0.5
+        extra = {**_vision_reader(r), **_false_cues(r, closed)} if vision else {}
         cfg = SimConfig(seed=seed, gate_closed_frames=closed, closures=tuple(closures), input_lat=r.randint(1, 6),
                         obs_lat=r.randint(0, 6), stall_p=0.03 if r.random() < 0.3 else 0.0, stall_max=2,
-                        vision=vision, initial_highlight=r.choice(PAUSE_ITEMS), **(_false_cues(r, closed) if vision
-                                                                                    else {}))
+                        vision=vision, initial_highlight=r.choice(PAUSE_ITEMS), **extra)
         sim = PauseSim(cfg)
         m = _machine(pq.GOAL_PAUSE, sim=cfg)
         res = run(m, sim, 1500, until=lambda m, s: _held(m))
@@ -92,13 +107,13 @@ def test_loop_randomized_never_unpauses_and_stops_within_budget():
         latency = sim.paused_f - max(_open_since(cfg, sim.paused_f), int(cfg.input_lat) + 1)
         if m.false_cues == 0:
             lat_n += 1
-            lat_ok += latency <= 6
+            lat_over += latency > 6
             worst_lat = max(worst_lat, latency)
         else:
             worst_false = max(worst_false, latency)
     assert worst_stop < 0.2
-    assert worst_lat <= 7 and lat_ok / lat_n >= 0.99, (worst_lat, lat_ok / lat_n)
-    assert worst_false <= 7 + 12
+    assert lat_over <= 0.001 * lat_n and worst_lat <= 7, (lat_over, lat_n, worst_lat)     # G1: p99.9 <= 6 frames
+    assert worst_false <= 7 + 30, worst_false   # a false cue costs its hit-stop or, motion unmeasured, 0.4 s
 
 
 def _quit_cfg(r: random.Random, seed: int, **over) -> SimConfig:
@@ -145,9 +160,11 @@ def _paused_sim(cfg: SimConfig) -> PauseSim:
 def test_navigation_with_24_frames_of_latency_and_stalls(bounds):
     """2x10^3 menu walks on a paused game with input latency 0-12 frames, observation latency 0-12 frames and capture
     stalls repeating a frame for up to 4 steps: plain quits, and greyed-by-disableSaveQuit menus refreshed through
-    Options (wrapping or not) -> Back. With the machine's latency bounds set to the sim's maxima ("measured"), and left
-    at the 0.1 s defaults, well under the worst case here ("default"): no wrong Submit, no unpause either way."""
+    Options (wrapping or not) -> Back. With the machine's latency bounds set to the sim's maxima ("measured") every
+    walk quits. Left at the 0.1 s defaults, below the real latency in many walks ("default"): no wrong Submit and no
+    unpause either; a walk whose flipped tap shows the bound broken ends ALERT (14 of 2000)."""
     r = random.Random(23 if bounds == "measured" else 29)
+    alerts = 0
     for seed in range(2000):
         il, ol = r.randint(0, 12), r.randint(0, 12)
         greyed = r.random() < 0.3
@@ -159,9 +176,15 @@ def test_navigation_with_24_frames_of_latency_and_stalls(bounds):
         m = _machine(t0=sim.t, sim=cfg if bounds == "measured" else None)
         run(m, sim, 6000, until=lambda m, s: m.done)
         want = ([("pause", "options"), ("options", "back")] if greyed else []) + QUIT_SUBMITS
-        assert sim.log.submits == want, (seed, cfg, sim.log.submits, m.log[-10:])
         assert sim.log.esc_unpauses == [] and sim.log.continue_unpauses == [], (seed, cfg)
+        if bounds == "default" and m.outcome == pq.ALERT:
+            assert sim.log.submits == want[:len(sim.log.submits)], (seed, cfg, sim.log.submits, m.log[-10:])
+            assert any("latency above the configured bound" in d for _, k, d in m.log if k == "fail"), m.log[-4:]
+            alerts += 1
+            continue
+        assert sim.log.submits == want, (seed, cfg, sim.log.submits, m.log[-10:])
         assert m.outcome == pq.QUIT, (seed, cfg, m.log[-6:])
+    assert alerts <= 40 and (bounds == "default" or alerts == 0)
 
 
 def test_reviewer_case_nine_frames_of_latency():
@@ -195,6 +218,26 @@ def test_exit_prompt_no_to_yes_is_up_and_a_dead_tap_flips_direction(monkeypatch)
         m = _machine(sim=sim.cfg)
         run(m, sim, 3000, until=lambda m, s: m.done)
         assert m.outcome == pq.QUIT and sim.log.submits == QUIT_SUBMITS and m.nav_flips == 1, m.log
+
+
+def test_oracle_options_items_without_a_role_still_reach_back():
+    """Round-2 review: the oracle names only Back on Options (sel nil for Game, Audio, ...), so the greyed-by-dsq
+    refresh failed 'highlight unreadable on options'. cues_from_state reads such an item as UNLABELLED; the machine
+    walks Down (Back is last, wrapping or not) without flipping, waiting a full round trip per tap, and Submits only
+    on Back."""
+    for wraps in (True, False):
+        sim = PauseSim(SimConfig(gate_closed_frames=20, quit_greyed=True, greyed_cause="dsq", dsq_clears_on_refresh=True,
+                                 options_wraps=wraps, options_unlabelled=True))
+        m = _machine()
+        run(m, sim, 4000, until=lambda m, s: m.done)
+        assert m.outcome == pq.QUIT and m.nav_flips == 0, (wraps, m.log[-6:])
+        assert sim.log.submits == [("pause", "options"), ("options", "back")] + QUIT_SUBMITS
+    assert pq._direction(pq.M_OPTIONS, pq.UNLABELLED, "back") == pq.DOWN
+    paused = dict(gs=gc.GS_PAUSED, ui=5, menu=gc.MENU_OPTIONS_MENU, fading=False, blk=64)
+    assert cues_from_state(_state(1, **paused, extra={"sel": None})).highlight == pq.UNLABELLED
+    assert cues_from_state(_state(1, **paused, extra={"sel": "back"})).highlight == "back"
+    assert cues_from_state(_state(1, **paused, extra={"sel": "GameButton"})).highlight == "GameButton"   # names pass
+    assert cues_from_state(_state(1, **paused)).highlight is None          # no STATE "menu" section: unknown
 
 
 def test_options_without_wrap_reaches_back_by_flipping():
@@ -235,6 +278,134 @@ def test_persistent_false_cues_never_stop_the_loop():
         t_p = sim.log.pauses[0]
         assert max(s - t_p for s in res.press_starts if s >= t_p) <= 0.23
         assert sim.paused_f - 150 <= 7 + 12 * false_cues, (over, sim.paused_f)
+
+
+@pytest.mark.parametrize("reader", [9, 12, 15, 18, 24])
+def test_slow_menu_reader_never_unpauses(reader):
+    """Round-2 review: with the vision menu visible to the reader only N frames after the pause, the 0.15 s confirm
+    window declared real pauses false and resumed pressing: N = 12 unpaused 65 of 400 trials, N = 24 400 of 400. The
+    dimmer on its pause trajectory over a stopped world now keeps the loop from pressing until the reader confirms."""
+    r = random.Random(reader)
+    for seed in range(150):
+        cfg = SimConfig(seed=seed, gate_closed_frames=r.randint(0, 60), input_lat=r.randint(1, 6),
+                        obs_lat=r.randint(0, 6), vision=True, menu_reader_frames=reader,
+                        dark_base=r.choice((0.0, 0.0, r.uniform(0.03, 0.5))))
+        sim = PauseSim(cfg)
+        m = _machine(pq.GOAL_PAUSE, sim=cfg)
+        res = run(m, sim, 1500, until=lambda m, s: _held(m))
+        assert m.outcome == pq.PAUSED and sim.log.esc_unpauses == [] and m.false_cues == 0, (seed, cfg, m.log[-6:])
+        t_p = sim.log.pauses[0]
+        assert max((x - t_p for x in res.press_starts if x >= t_p), default=0.0) <= 0.23
+
+
+def test_misread_menu_needs_independent_evidence():
+    """Round-2 review (F2, menu variant): a pause menu misread with motion unmeasured (frozen None), or over a dark
+    room (a constant dim 0.75 is no rise above the baseline), never stops the loop; nor does one over a hit-stop
+    once the world moves again."""
+    for frozen, dim in ((None, None), (None, 0.75), (True, 0.75)):
+        m = _machine(pq.GOAL_PAUSE)
+        keys = [m.step(PauseCues(t=i / 60, dim=dim, frozen=False)) for i in range(30)]     # gameplay, then the misread
+        keys += [m.step(PauseCues(t=i / 60, menu=pq.M_PAUSE, frozen=frozen, dim=dim)) for i in range(30, 630)]
+        starts = sum(1 for a, b in zip([frozenset()] + keys, keys) if "pause" in b and "pause" not in a)
+        assert starts >= 95 and m.state == "LOOP" and m.false_cues == 0, (frozen, dim, starts, m.log[-4:])
+        assert any(k == "loop_alert" for _, k, _ in m.log)
+    # over hit-stops (frozen for 9 frames out of every 60, dim not measured): one false cue per hit-stop, rejected
+    # two moving frames after it, and the loop keeps pressing in between
+    m = _machine(pq.GOAL_PAUSE)
+    keys = [m.step(PauseCues(t=i / 60, menu=pq.M_PAUSE, frozen=i % 60 < 9)) for i in range(600)]
+    starts = sum(1 for a, b in zip([frozenset()] + keys, keys) if "pause" in b and "pause" not in a)
+    assert m.false_cues == 10 and starts >= 60 and m.state == "LOOP" and m.alert
+    # the loop's first frame has no history: a menu over a stopped world with the dimmer at its plateau (or not
+    # measured) is taken as a pause already in place (a press would unpause it), confirmed after confirm_hold_s and
+    # then held or quit; a menu that never becomes ready ends in an alert, never in a press
+    for dim in (None, 0.8):
+        m = _machine(pq.GOAL_PAUSE)
+        keys = [m.step(PauseCues(t=i / 60, menu=pq.M_PAUSE, frozen=True, dim=dim)) for i in range(300)]
+        assert not any(keys) and m.outcome == pq.ALERT and any("not ready" in d for _, k, d in m.log if k == "fail")
+
+
+def test_beyond_the_latency_bound_alerts_and_never_submits_a_wrong_item():
+    """Round-2 review: past input_latency_max_s, a late first tap and the flipped counter-tap both acted and the
+    Submit landed on a wrong item, Continue included (input 14 / observation 20 frames: 19 of 40 wrong, 2 unpaused;
+    20 / 12: 40 of 40, 14 unpaused). After a flip the reading must now hold for two round trips past the last tap; a
+    change meanwhile is the bound broken: ALERT."""
+    outcomes = {pq.QUIT: 0, pq.ALERT: 0}
+    for il, ol in ((14, 20), (16, 12), (16, 20), (20, 12)):
+        for seed in range(40):
+            cfg = SimConfig(seed=seed, start_paused=True, input_lat=il, obs_lat=ol, vision=seed % 2 == 0,
+                            initial_highlight=PAUSE_ITEMS[seed % 3], prompt_wraps=seed % 4 < 2, quit_frames=20)
+            sim = _paused_sim(cfg)
+            m = _machine(t0=sim.t)
+            run(m, sim, 6000, until=lambda m, s: m.done)
+            assert sim.log.submits == QUIT_SUBMITS[:len(sim.log.submits)], (il, ol, seed, sim.log.submits)
+            assert sim.log.esc_unpauses == [] and sim.log.continue_unpauses == [], (il, ol, seed)
+            assert m.outcome in outcomes, (il, ol, seed, m.log[-4:])
+            outcomes[m.outcome] += 1
+    assert outcomes[pq.ALERT] > 0 and outcomes[pq.QUIT] > 0, outcomes
+
+
+def _quits_with_mutation(monkeypatch, n: int, **patch) -> tuple[int, int]:
+    """(wrong-Submit quits, unpaused quits) of n randomized full quits at up to 14 frames of latency, with the
+    machine's bounds at the sim's maxima and the given PauseQuit methods replaced."""
+    for name, fn in patch.items():
+        monkeypatch.setattr(PauseQuit, name, fn)
+    r = random.Random(11)
+    wrong = unpaused = 0
+    for seed in range(n):
+        cfg = _quit_cfg(r, 10_000 + seed)
+        sim = PauseSim(cfg)
+        m = _machine(sim=cfg)
+        run(m, sim, 3000, until=lambda m, s: m.done)
+        wrong += sim.log.submits != QUIT_SUBMITS[:len(sim.log.submits)]
+        unpaused += bool(sim.log.esc_unpauses or sim.log.continue_unpauses)
+    monkeypatch.undo()
+    return wrong, unpaused
+
+
+def test_mutations_of_the_menu_protections(monkeypatch):
+    """Each protection removed in turn, against the scenario it exists for. The post-tap cut and the change-wait guard
+    the same stale frames, so each alone suffices in the randomized quits (removing the cut alone: 0 wrong of 300)
+    and only removing both fails; the flip settle is what keeps a broken latency bound from a wrong Submit."""
+    assert _quits_with_mutation(monkeypatch, 300) == (0, 0)
+    assert _quits_with_mutation(monkeypatch, 300, _tap_cut=lambda self, t: float("-inf")) == (0, 0)
+    wrong, _ = _quits_with_mutation(monkeypatch, 300, _tap_cut=lambda self, t: float("-inf"),
+                                    _unmoved=lambda self, hl: False)
+    assert wrong >= 30, wrong
+    monkeypatch.setattr(PauseQuit, "_settling", lambda self, c, hl: False)
+    wrong = 0
+    for il, ol in ((14, 20), (20, 12)):
+        for seed in range(40):
+            sim = _paused_sim(SimConfig(seed=seed, start_paused=True, input_lat=il, obs_lat=ol,
+                                        initial_highlight=PAUSE_ITEMS[seed % 3], quit_frames=20))
+            m = _machine(t0=sim.t)
+            run(m, sim, 6000, until=lambda m, s: m.done)
+            wrong += sim.log.submits != QUIT_SUBMITS[:len(sim.log.submits)]
+    assert wrong >= 10, wrong
+
+
+def test_mutation_of_the_confirm_rule(monkeypatch):
+    """The round-2 rule (a cue not confirmed by the reader within 0.15 s is false) against a 24-frame reader."""
+    def timed(self, c):
+        if c.paused is not None:
+            return "confirm" if c.paused else "reject"
+        if c.menu in pq.PAUSE_MENUS and c.frozen is not False:
+            return "confirm"
+        return "reject" if c.t - self.t_cue > 0.15 else None
+    counts = {}
+    for name, patch in (("timed", {"_verdict": timed}), ("current", {})):
+        for k, fn in patch.items():
+            monkeypatch.setattr(PauseQuit, k, fn)
+        unpaused = 0
+        for seed in range(60):
+            cfg = SimConfig(seed=seed, gate_closed_frames=seed % 40, input_lat=3, obs_lat=3, vision=True,
+                            menu_reader_frames=24)
+            sim = PauseSim(cfg)
+            m = _machine(pq.GOAL_PAUSE, sim=cfg)
+            run(m, sim, 600, until=lambda m, s: _held(m))
+            unpaused += bool(sim.log.esc_unpauses)
+        counts[name] = unpaused
+        monkeypatch.undo()
+    assert counts["timed"] >= 30 and counts["current"] == 0, counts
 
 
 def test_false_dim_flash_resumes_the_loop():

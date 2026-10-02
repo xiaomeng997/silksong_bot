@@ -448,7 +448,8 @@ class PauseQuit:
                 sup.discard("paused")
             if "menu" in sup and c.menu not in PAUSE_MENUS:
                 sup.discard("menu")
-            if "dim" in sup and (c.dim is None or c.dim < cfg.dim_cue or not self._dim_rising(1)):
+            if "dim" in sup and (c.dim is None or c.dim < cfg.dim_cue or not self._dim_rising(1)
+                                 or c.frozen is True):   # the world stopped since: a pause may have joined the fade
                 sup.discard("dim")
         return src - sup
 
