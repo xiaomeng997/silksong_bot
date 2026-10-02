@@ -85,6 +85,7 @@ def audit_run(run: Path, every: int, episodes: int) -> dict:
     win = pl.WINDOWS["v2"]
     stats = defaultdict(Counter)
     wins = defaultdict(Counter)
+    lanes_ok = defaultdict(Counter)
     samples = 0
     for ap in sorted(run.glob("attempts_i*.jsonl")):
         inst = int(ap.stem.split("_i")[1])
@@ -174,6 +175,21 @@ def audit_run(run: Path, every: int, episodes: int) -> dict:
                     stats[(group, kind)]["safe_hitting"] += int(nh > 0 and safe)
                     if safe and nh > best:
                         best, best_name = nh, name
+                if group in ("charge", "charge_end"):
+                    # the pogo question: which (hold, press) combinations bounce in EVERY timing lane, head-on (the
+                    # boss running at the hero) or from behind (the planner's gate)
+                    bvx = (boss.get("vel") or [0, 0])[0]
+                    side = "head_on" if bvx and np.sign(bvx) == np.sign(hx - boss["pos"][0]) else "behind"
+                    dn = [k for k, nm in enumerate(names) if nm.startswith("down|")]
+                    rl = kin.rollout(start, latched[dn], params, terrain, variants="bounds", lanes=True)
+                    conn = np.zeros(len(dn), np.bool_)
+                    pl._lanes_connect(np.ascontiguousarray(rl.var_box), np.ascontiguousarray(rl.var_flags),
+                                      np.ascontiguousarray(rl.var_mode), np.ascontiguousarray(latched[dn]), face,
+                                      bbox[:T + 1], okb[:T + 1], flat, starts, base, win, conn)
+                    stats[(group, f"pogo_{side}")]["samples"] += 1
+                    stats[(group, f"pogo_{side}")]["any_all_lanes"] += int(conn.any())
+                    for k in np.flatnonzero(conn):
+                        lanes_ok[side][names[dn[k]].split("|", 2)[2]] += 1
                 bot = sum(1 for h in hits if fut[0]["f"] <= h <= fut[0]["f"] + T)
                 stats[(group, "bot")]["samples"] += 1
                 stats[(group, "bot")]["hit_samples"] += int(bot > 0)
@@ -182,7 +198,8 @@ def audit_run(run: Path, every: int, episodes: int) -> dict:
                     stats[(group, "missed")]["missed"] += 1
                     wins[group][f"{best_name} ({best} hit{'s' if best > 1 else ''})"] += 1
     return {"samples": samples, "table": {f"{g}/{o}": dict(v) for (g, o), v in sorted(stats.items())},
-            "winning_combos": {g: dict(c.most_common(6)) for g, c in wins.items()}}
+            "winning_combos": {g: dict(c.most_common(6)) for g, c in wins.items()},
+            "pogo_all_lanes_combos": {k: dict(c.most_common(10)) for k, c in lanes_ok.items()}}
 
 
 def human(path: Path, f0: int, f1: int) -> dict:
