@@ -58,7 +58,9 @@ Time. Templates count game time (1/60 s bins; game time stands still in hit-stop
 from the WorldState's frame (stamp.t_game_s). The planner's rollout frame k is at tk = k * frame_time.
 """
 import functools
+import json
 import math
+from pathlib import Path
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, replace
 
@@ -286,6 +288,35 @@ class Forecast:
 
     # ---- J helpers ----------------------------------------------------------------------------------------------
 
+    def _hurt_box(self) -> tuple[float, float, float, float] | None:
+        """The boss's hittable box now: its enabled colliders (oracle view), or in the vision view the hurtbox table's
+        median box for the observable phase and its time (ssbot.tools.hurtbox_table) at the observed position, the
+        sprite's render box only where the table has nothing."""
+        b = self.boss
+        if b is None:
+            return None
+        tab = self.fc.hurtbox
+        st = self.fc.tracker.state
+        if self.fc.view != ORACLE and tab and st in tab and self.fc.tracker.t_entry is not None:
+            bins = tab[st]
+            k = str(min(int(max(0.0, self.origin_t - self.fc.tracker.t_entry) / 0.1), max(int(x) for x in bins)))
+            m = (bins.get(k) or bins[min(bins, key=lambda x: abs(int(x) - int(k)))])["median"]
+            x0, y0, x1, y1 = m
+            if b.flip_x:
+                x0, x1 = -x1, -x0
+            px, py = b.pos.v
+            return px + x0, py + y0, px + x1, py + y1
+        return _body_box(b)
+
+    def body_polys(self) -> tuple[np.ndarray, np.ndarray]:
+        """body_shape of the boss, or the vision view's table box as a rectangle (scoring)."""
+        if self.fc.view != ORACLE and self.fc.hurtbox:
+            bb = self._hurt_box()
+            if bb is not None:
+                x0, y0, x1, y1 = bb
+                return np.array([[x0, y0], [x1, y0], [x1, y1], [x0, y1]], np.float64), np.array([0, 4], np.int64)
+        return body_shape(self.boss)
+
     def boss_box(self, tk: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         """Nominal boss hurtbox [T, 4] (x0, y0, x1, y1) and hittable [T] along the most likely path (scoring only):
         the current body box moved along the family's logged mean path, hittable while the boss stays drawn."""
@@ -296,7 +327,7 @@ class Forecast:
         b = self.boss
         if b is None or b.hidden or b.visible_frac <= 0.0 and self.fc.view != ORACLE:
             return box, ok
-        bb = _body_box(b)
+        bb = self._hurt_box()
         if bb is None:
             return box, ok
         box[:] = bb
@@ -739,6 +770,7 @@ class Forecaster:
         self.boss: Entity | None = None
         self.no_hurtbox: frozenset[str] = frozenset()     # states / phases with the body box disabled (playbook)
         self.bell_tells = False        # VE: the drop bells' cue is in the view (ObservabilityFilter tells)
+        self.hurtbox: dict | None = None   # VE: the boss's hittable box per phase (load_hurtbox; scoring only)
         self.t = 0.0
 
     def reset(self) -> None:
@@ -912,6 +944,13 @@ class Forecaster:
             pb = m.p_burst[ctx.phase]
             return [(s, pb if s == "Burst Pos" else 1.0 - pb) for s, _ in succ]
         return succ
+
+
+def load_hurtbox(path: str | Path | None = None) -> dict:
+    """The hurtbox-per-phase table (ssbot.tools.hurtbox_table): {phase: {time bin: {median, p10, p90, n}}}."""
+    p = Path(path) if path else Path(__file__).resolve().parents[3] / "knowledge" / "1.0.30000" / "enemies" / \
+        "BellBeast_hurtbox.json"
+    return json.loads(p.read_text("utf-8"))["phases"] if p.exists() else {}
 
 
 def margin_xy(margin: float | tuple[float, float]) -> tuple[float, float]:

@@ -419,7 +419,7 @@ class Planner:
         boss, okb = f.boss_box(tk)
         if not okb.any():
             return roll
-        polys, starts = body_shape(f.boss)
+        polys, starts = f.body_polys()
         b0 = _box_of(polys) if len(polys) else boss[0]
         base = np.array([b0[0], b0[1]])
         face0 = 1 if start.reshape(kin.K, -1)[kin.FACE, 0] >= 0 else -1
@@ -473,7 +473,7 @@ class Planner:
         on a lanes rollout of that one plan with its predicted hit events (ssbot.tools.predict_audit matches them to
         the recording). Kinds 1 side, 2 up, 3 down spike, 4 Silkspear; effects recoil / recoil_down / pogo / none."""
         boss, okb = f.boss_box(tk)
-        polys, starts = body_shape(f.boss)
+        polys, starts = f.body_polys()
         b0 = _box_of(polys) if len(polys) else (boss[0] if len(boss) else np.zeros(4))
         ev = self._fx_ev[i:i + 1] if self._fx_ev is not None and i < len(self._fx_ev) else None
         r = kin.rollout(start, lat[None], self.params, self.terrain, events=ev, variants=self.cfg.variants,
@@ -565,7 +565,7 @@ class Planner:
         N, T1 = roll.flags.shape
         face0 = 1 if start.reshape(kin.K, -1)[kin.FACE, 0] >= 0 else -1
         boss, okb = f.boss_box(tk)
-        polys, starts = body_shape(f.boss)
+        polys, starts = f.body_polys()
         base = np.array([boss[0, 0], boss[0, 1]]) if len(boss) else np.zeros(2)
         if len(polys):
             # boss_box moves the box along the mean path; the polygons move with it (offset from frame 0)

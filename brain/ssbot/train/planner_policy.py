@@ -36,7 +36,7 @@ from ssbot.backends.degraded import DegradedOracleBackend
 from ssbot.backends.observability import ObservabilityFilter
 from ssbot.backends.oracle_backend import OracleBackend
 from ssbot.combat.boss_model import BossModel
-from ssbot.combat.forecast import Forecaster, load_planner_templates
+from ssbot.combat.forecast import Forecaster, load_hurtbox, load_planner_templates
 from ssbot.combat.planner import Planner, PlannerConfig
 from ssbot.combat.safety_filter import FilterContext
 from ssbot.combat.tactics import Tactics, load_playbook
@@ -169,6 +169,8 @@ class PlannerPolicy:
         self.pb = load_playbook(enemy)
         self.fc.no_hurtbox = self.pb.no_hurtbox
         self.fc.bell_tells = view == "degraded_dust"
+        if fview != ORACLE:
+            self.fc.hurtbox = load_hurtbox()     # vision: the hittable box per phase, not the sprite's
         self.tac = Tactics(self.pb)
         if view == "degraded" and self.pb.hidden_x_vision is not None:
             self.tac.hidden_x = self.pb.hidden_x_vision      # no cues: the stance with the least unreactable risk
