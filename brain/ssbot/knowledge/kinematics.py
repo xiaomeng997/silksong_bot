@@ -1925,10 +1925,19 @@ def _apply_exported(tr: Trace, S: np.ndarray, md: np.ndarray, params: HeroParams
     put(MODE_T, col["ds"], (md == M_DS_ANTIC) | (md == M_DS_SPIKE))
     put(DS_REC, col["ds_rec"], S[DS_REC] >= 0)
     put(GS, col["grav"])
-    # queue counters: the oracle exports the step count while the queue flag is on and -1 otherwise
-    for row, k in ((JQ, "qj"), (AQ, "qa"), (QQ, "qt")):
+    # queue counters: the oracle exports the raw jumpQueueSteps / attackQueueSteps / toolThrowQueueSteps (>= 0;
+    # docs/facts/1.0.30000/state_fields_m2.md section 1), not the jumpQueuing / attackQueuing / toolThrowQueueing
+    # flags: a release clears the flag and leaves the count (HeroController.cs 8427-8450), so a count alone does not
+    # say the queue is on. It replaces the reconstructed count where the reconstruction has the queue on, or where it
+    # grew in this frame's physics steps with the button still held (FixedUpdate counts only while queuing, 3203-3226:
+    # a press queued before the history starts)
+    for row, k, bit in ((JQ, "qj", B_JUMP), (AQ, "qa", B_ATTACK), (QQ, "qt", B_QUICKCAST)):
         v = col[k]
-        S[row] = np.where(np.isfinite(v), np.where(v >= 0, v, -1.0), S[row])
+        before = np.r_[np.nan, v[:-1]]
+        with np.errstate(invalid="ignore"):
+            grew = np.isfinite(before) & (v > before) & ((tr.mask & bit) != 0)
+        on = np.isfinite(v) & ((S[row] >= 0) | grew)
+        S[row] = np.where(on, np.maximum(v, 0.0), S[row])
 
 
 def _replay_gravity(tr: Trace, modes: np.ndarray, params: HeroParams) -> tuple[np.ndarray, np.ndarray]:

@@ -471,18 +471,29 @@ def test_fit_recovers_the_constants_from_the_slice(real):
 
 
 def test_estimator_takes_the_exported_timers_and_phase(p):
-    """Decision 5: hero.tm / hero.alpha replace the reconstruction where STATE carries them."""
+    """Decision 5: hero.tm / hero.alpha replace the reconstruction where STATE carries them. The queue counters
+    are the raw step counts (>= 0, stale after a release: state_fields_m2.md section 1), so they count only where
+    the queue is on."""
     plain = [_state(i, 10.0, REST) for i in range(4)]
     S0 = km.estimate_state(km.Trace.from_states(plain, p), [3], p)
     tm = {"inv": 0.4, "recoil": 0.0, "recoil_steps": 0, "dash_cd": 0, "atk_cd": 0.2, "atk_t": 0.1, "tool_cd": 0,
-          "jump_steps": 0, "jumped_steps": 7, "ds": 0.0, "ds_rec": -1, "grav": 0.3, "qj": 2, "qa": -1, "qt": -1}
+          "jump_steps": 0, "jumped_steps": 7, "ds": 0.0, "ds_rec": -1, "grav": 0.3, "qj": 0, "qa": 5, "qt": 0}
     rich = [dict(s, hero=dict(s["hero"], tm=tm, alpha=0.375)) for s in plain]
     tr = km.Trace.from_states(rich, p)
     assert tr.tm is not None and tr.alpha_log is not None
     S = km.estimate_state(tr, [3], p)
     assert S[km.ALPHA, 0] == S[km.ALO, 0] == S[km.AHI, 0] == 0.375
-    assert (S[km.GS, 0], S[km.INV_T, 0], S[km.ATK_CD, 0], S[km.JDSTEPS, 0], S[km.JQ, 0]) == (0.3, 0.4, 0.2, 7, 2)
+    assert (S[km.GS, 0], S[km.INV_T, 0], S[km.ATK_CD, 0], S[km.JDSTEPS, 0]) == (0.3, 0.4, 0.2, 7)
+    assert (S[km.JQ, 0], S[km.AQ, 0], S[km.QQ, 0]) == (-1, -1, -1)      # no button held: stale counts, no queue
     assert S0[km.AHI, 0] - S0[km.ALO, 0] > 0.1                 # without hero.alpha the phase is an interval
+    # jump pressed in the air at frame 2 and held: the reconstruction has the queue on, the export gives the count;
+    # an attack held since before the history whose count grows is taken as queued too
+    air = [_state(i, 10.0, REST + 3.0, act=(km.B_JUMP if i >= 2 else 0) | km.B_ATTACK, onGround=False)
+           for i in range(4)]
+    for i, s in enumerate(air):
+        s["hero"] = dict(s["hero"], tm=dict(tm, qj=max(i - 2, 0), qa=3 + i, qt=4), alpha=0.375)
+    S = km.estimate_state(km.Trace.from_states(air, p), [3], p)
+    assert (S[km.JQ, 0], S[km.AQ, 0], S[km.QQ, 0]) == (1, 6, -1)
 
 
 def test_savestate_load_slide_is_marked_and_not_scored(p):
