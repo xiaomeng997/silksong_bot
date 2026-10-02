@@ -101,6 +101,8 @@ SPEAR_DELAY_F = 18             # Silkspear: the needle hits 18-19 frames after t
 WINDOWS = {"v2": np.array([[0, 6], [2, 8], [0, 0], [17, 20]], np.int64),
            "v1": np.array([[0, 6], [0, 6], [0, 10], [16, 17]], np.int64)}
 TAIL_CHUNK = 2                # candidates per tail check batch
+LOCK_EXTRA = 48               # frames a plan locked at the horizon's end is rolled on (a Silkspear locks ~73 frames)
+LOCK_AFTER = 8                # ... and checked this many frames after the lock ends
 COMFORT_FRAMES = 48           # the comfort check covers the whole horizon (24 frames: run 20261002_045049 hits)
 NO_CONTROL_MODES = (kin.M_HURT_FREEZE, kin.M_HURT_RECOIL, kin.M_CAST, kin.M_BIND, kin.M_LOCKED)
 
@@ -300,6 +302,7 @@ class Planner:
         occ = self._contacts(f, roll.bound, tk, skip)
         S = occ.any(axis=1)
         roll_j = self._hit_effects(f, start, latched, roll, tk, S, enemy_only)
+        self._lock_check(f, roll, hold_end, S, P + T, enemy_only)
         t_hit = np.where(S, occ.argmax(axis=1), T1)        # first contact frame (FORCED_RISK: later is better)
         S2 = S.copy()
         if f.fc.query_c is not None:
@@ -331,6 +334,7 @@ class Planner:
             w = cmd[:, :min(rem, T, cfg.release_latency)]
             keep = ((w & B_JUMP) != 0).all(axis=1) & ((w & B_QUICKCAST) == 0).all(axis=1)
         safe = ok & ~S & ~hz
+        self.last_safe, self.last_cs = safe, cs      # audits (which candidates were safe this tick)
         first = np.append(cs.first, -1) if cont else cs.first
         V = np.zeros(N, bool)
         counts = np.bincount(first[:N0][safe[:N0]], minlength=len(cs.first_names))
@@ -673,6 +677,32 @@ class Planner:
         return rec
 
     # ---- beyond the horizon ----------------------------------------------------------------------------------------
+
+    def _lock_check(self, f: Forecast, roll, hold_end: HoldState, S: np.ndarray, T0: int, enemy_only: bool) -> None:
+        """A plan still locked at the horizon's end (a Silkspear: M_CAST, about 73 frames, the hero hanging in the air)
+        is safe only if the lock's remaining frames are: rolled on with no input for LOCK_EXTRA frames (gate run
+        20261002_125420 i2 ep 8: air casts were S = 0 over the 48 frames ahead, a drop bell bounced into the hero 4
+        frames after the lock ended, 60 frames after the press; replayed, all 42 cast candidates were safe 2 ticks
+        before the press). S is updated in place."""
+        rows = np.flatnonzero((roll.mode[:, -1] == M_CAST) & ~S)
+        if not len(rows):
+            return
+        start = roll.final[:, rows]
+        hs = HoldState(*(np.asarray(a)[rows] for a in (hold_end.latched, hold_end.desired, hold_end.pending,
+                                                        hold_end.age)))
+        latched, _ = hold_filter_jit(np.zeros((len(rows), LOCK_EXTRA), np.int64), hs)
+        tr = kin.rollout(start, latched, self.params, self.terrain, variants=self.cfg.variants,
+                         threads=self.cfg.threads)
+        tk = (T0 + np.arange(LOCK_EXTRA + 1, dtype=np.float64)) * self.params.frame_time
+        skip = ((tr.flags_all & F_INVULN) != 0) if enemy_only else np.zeros(tr.flags_all.shape, bool)
+        # only the frames still in the lock and the few after it (the way on is the tail check's job)
+        free = tr.mode != M_CAST
+        free_at = np.where(free.any(axis=1), np.argmax(free, axis=1), LOCK_EXTRA + 1)
+        upto = np.minimum(free_at + LOCK_AFTER, LOCK_EXTRA + 1)
+        occ = self._contacts(f, tr.bound, tk, skip)
+        occ &= np.arange(LOCK_EXTRA + 1)[None, :] < upto[:, None]
+        S[rows] |= occ.any(axis=1)
+        self.last_lock = (int(len(rows)), int(occ.any(axis=1).sum()))
 
     def _tail_pick(self, f: Forecast, roll, hold_end: HoldState, ranked: np.ndarray, T0: int, default: int
                    ) -> tuple[int, bool | None]:
