@@ -2699,6 +2699,8 @@ class ResidualMonitor:
         self.err = {h: np.full(window, np.nan) for h in self.horizons}
         self.k = {h: 0 for h in self.horizons}
         self.scored = {h: 0 for h in self.horizons}
+        self.inside = {h: 0 for h in self.horizons}           # all-time counts within tol: hull, nominal lane
+        self.nominal_inside = {h: 0 for h in self.horizons}
         self.dropped = 0
         self.last_f: int | None = None
 
@@ -2751,6 +2753,8 @@ class ResidualMonitor:
                 self.err[h][slot] = float(np.hypot(*(0.5 * (n[:2] + n[2:]) - c)))
                 self.k[h] += 1
                 self.scored[h] += 1
+                self.inside[h] += int(e <= self.tol)
+                self.nominal_inside[h] += int(self.err[h][slot] <= self.tol)
         for a in [a for a in self.anchors if frame - a >= H]:
             del self.anchors[a]
 

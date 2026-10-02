@@ -671,6 +671,16 @@ def test_residual_monitor_scores_the_executed_stream(p):
     assert off.confidence() is None
 
 
+def test_live_path_replay_never_alarms_on_held_out_play():
+    """kin_check --monitor on the held-out live fixture (a hit during Bind, a boss kill, the roof slope): the
+    tracker + monitor path scores almost every window, keeps the hull share high and never reports degraded."""
+    from ssbot.tools.kin_check import check_monitor, load_fixture
+    tr, terrains = load_fixture(LIVE)
+    rep = check_monitor(tr, terrains, HeroParams.load())
+    assert rep["scored"][30] > 0.9 * len(tr) and rep["inside"][30] > 0.98 and rep["inside"][1] > 0.99
+    assert "degraded" not in rep["states"] and rep["rolling_within_min"] >= km.MONITOR_ALARM_WITHIN
+
+
 def test_shipped_params_carry_the_jitter_model_and_the_jump_spread(p):
     """kin_fit products the planner and the hazard margin read: the frame-time jitter model (2.83 M frames), the
     variant-valued Silkspear phases and the apex spread per jump hold."""

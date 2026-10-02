@@ -390,6 +390,8 @@ def check_monitor(tr: Trace, terrains: dict[str, Terrain2D], params: HeroParams)
     """The trace through StateTracker + ResidualMonitor frame by frame, a fresh pair per scene."""
     H = 30
     scored: Counter = Counter()
+    inside: Counter = Counter()
+    nominal: Counter = Counter()
     states: Counter = Counter()
     dropped = 0
     roll_within, roll_far = [], []
@@ -400,6 +402,8 @@ def check_monitor(tr: Trace, terrains: dict[str, Terrain2D], params: HeroParams)
         if tr.scene[i] != scene:
             if mon is not None:
                 scored.update(mon.scored)
+                inside.update(mon.inside)
+                nominal.update(mon.nominal_inside)
                 dropped += mon.dropped
             scene = tr.scene[i]
             terrain = terrains.get(tr.scenes[scene])
@@ -419,8 +423,12 @@ def check_monitor(tr: Trace, terrains: dict[str, Terrain2D], params: HeroParams)
                 roll_far.append(a["far"])
     if mon is not None:
         scored.update(mon.scored)
+        inside.update(mon.inside)
+        nominal.update(mon.nominal_inside)
         dropped += mon.dropped
     out = {"frames": len(tr), "scored": {int(h): n for h, n in scored.items()}, "dropped": dropped,
+           "inside": {int(h): round(inside[h] / n, 5) for h, n in scored.items() if n},
+           "nominal_inside": {int(h): round(nominal[h] / n, 5) for h, n in scored.items() if n},
            "states": dict(states)}
     if roll_within:
         out["rolling_within_min"] = round(float(min(roll_within)), 4)
