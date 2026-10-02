@@ -8,8 +8,9 @@ Rule: no value in the output may depend on something pixels cannot show. Per fra
   - O fields -> None and O-only events dropped (WorldState.view("VISION_EQUIVALENT"): FSM states, `can`, game state,
     saved play time, LethalBlock events, pause-gate flags, transforms, collider names ...).
   - Visibility: each entity's image extent (its render_aabb plus its active damage boxes when exported, else its
-    enabled colliders) is projected with the frame's camera (ssbot.tools.projector) and clipped to the camera viewport; visible_frac is the visible
-    area share. An entity with neither (no drawn root renderer, no enabled collider) is not drawn.
+    enabled colliders) is projected with the frame's camera (ssbot.tools.projector) and clipped to the camera
+    viewport; visible_frac is the visible area share. An entity with neither (no drawn root renderer, no enabled
+    collider) is not drawn.
   - Entities that stop being visible: if at least half of it was visible in its last visible frame and it is not
     now projected outside the image (oracle ents[].hidden, not drawn any more, or gone from the export), it vanished
     in view: no tracker loses a mostly visible object over the edge in one frame -> a boss or enemy stays as a hidden
@@ -34,11 +35,11 @@ Rule: no value in the output may depend on something pixels cannot show. Per fra
     filter never saw, e.g. BossDeathSlow running on across a savestate load. The speed stands in for a motion-based
     estimate: game time over real time summed over the last SLOW_WINDOW frames (not the exact per-frame time scale),
     so an onset is seen late (a drop to 0.05 x shows on its second slow frame) and the first SLOW_WINDOW frames, with
-    no full reading yet, count as slowed; TIME_SLOWED is held SLOW_HOLD_S after the last slow reading; a hazard death until 1.0 s after
-    the hazard respawn; < 0.5 s after a scene entry or a return to gameplay; the hurt mode. Without a quit map,
-    quit_available is False with conf 0 except in the pause menu with a menu read; with one (quit_map.p_pause /
-    p_quit(scene, key), ssbot.safety.quit_map keys) both need P >= min_p. The blockers carry only VISION_BLOCKS
-    bits. src PREDICTED.
+    no full reading yet, count as slowed; TIME_SLOWED is held SLOW_HOLD_S after the last slow reading; a hazard
+    death until 1.0 s after the hazard respawn; < 0.5 s after a scene entry or a return to gameplay; the hurt mode.
+    Without a quit map, quit_available is False with conf 0 except in the pause menu with a menu read; with one
+    (quit_map.p_pause / p_quit(scene, key), ssbot.safety.quit_map keys) both need P >= min_p. The blockers carry
+    only VISION_BLOCKS bits. src PREDICTED.
   - ENEMY_KILLED passes only for a target visible in this frame or the one before (the Bell Beast leaves the export
     in the frame it dies, its corpse still on screen); a kill off-screen or underground is not seen and its track
     lives on until the TTL.

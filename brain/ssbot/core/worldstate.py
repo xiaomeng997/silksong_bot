@@ -657,8 +657,8 @@ def estimate_fields(cls: type) -> tuple[str, ...]:
 
 SCHEMA_CLASSES: tuple[type, ...] = (
     Stamp, MenuRead, PlayTimeEst, Game, CameraPose, PhasePost, HeroState, ToolSlot, Resources, DamageBox, Entity,
-    Threat, PerceptionHealth, Gate, TerrainRef, WorldState, Event, HitTaken, HitDealt, EnemyKilled, Freeze, FsmTransition,
-    SceneEnter, SceneLeave, Lethal, GateEdge, BindOutcome, Info)
+    Threat, PerceptionHealth, Gate, TerrainRef, WorldState, Event, HitTaken, HitDealt, EnemyKilled, Freeze,
+    FsmTransition, SceneEnter, SceneLeave, Lethal, GateEdge, BindOutcome, Info)
 
 _ATOM, _TUPLE, _LIST, _DICT, _DC, _OTHER = range(6)
 _DISPATCH: dict[type, int] = {int: _ATOM, float: _ATOM, str: _ATOM, bool: _ATOM, bytes: _ATOM, type(None): _ATOM,

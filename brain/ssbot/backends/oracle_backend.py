@@ -42,8 +42,9 @@ it; the gap shows in perception.dropped_frames), and these fields need memory:
     keeping it for the episode.
   - HIT_DEALT: from the oracle's "hit" events when the stream has them (killing blows and hits on unexported enemies
     included; ENEMY_KILLED once, on the killing blow hp_before > 0 >= hp_after; by_hero False for environmental
-    attack types, as the event covers every source). Older recordings: from enemy HP drops between consecutive STATEs (every Hunter
-    nail hit on the Bell Beast took 5 HP: 56 of 56 drops on the trial run; the killing blow shows no drop because the
+    attack types, as the event covers every source). Older recordings: from enemy HP drops between consecutive
+    STATEs (every Hunter nail hit on the Bell Beast took 5 HP: 56 of 56 drops on the trial run; the killing blow shows
+    no drop because the
     boss leaves "ents" in the frame its Control FSM enters "Death Broadcast", so ENEMY_KILLED also comes from the
     BossSpec death states or is_dead rising).
   - HIT_TAKEN.amount: masks lost (health + blue): the TakeHealth "hp" event that follows the "damage" event, or for
@@ -787,7 +788,8 @@ class OracleBackend:
             d = ev.get("d") or {}
             fe = int(ev.get("f", f))
             if k == "damage" and i not in taken:
-                why = "pogo" if any(cs.get(n) for n in _POGO + ("downSpiking",)) else                     "bind" if cs.get("isBinding") else "gate"
+                why = "pogo" if any(cs.get(n) for n in _POGO + ("downSpiking",)) else \
+                    "bind" if cs.get("isBinding") else "gate"
                 out.append(Event(Ev.DAMAGE_BLOCKED, fe, t, Info({
                     "source": d.get("source"), "hazard": d.get("hazard"), "why": why, "n": 1,
                     "amount": d.get("amount"), "end": "rejected"})))
