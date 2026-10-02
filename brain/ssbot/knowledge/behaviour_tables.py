@@ -85,10 +85,17 @@ data-policy episodes), the 263 closed fights of run 20261001_122249 (i0..i3_000.
   fewer than 30 logged exits.
 - 184,521 contacts (11,676 hits, 172,845 i-frame-blocked frames): none uncovered, none unexplained, none outside an
   attack; 1,297 (170 hits) had no exported collider and were explained by the first charge's export hole (13,679 holed
-  Charge Emerge frames over 266 fights, plus 70 Charge End / Dig In frames in the person's fight). Residual max:
-  Charge 0, Leap 0.153 (anchor) / 0.163 u (world_all), Burst 0.096 / 0.106, Rage 0.086; self templates 0-0.110 u.
-  Held out by recording: every contact lies inside the full build's support for the family sets, all but 2 of
-  184,521 for the per-state sets (both within +-4 bins), every one for the self templates.
+  Charge Emerge frames over 266 fights, plus 70 Charge End / Dig In frames in the person's fight). Residual max
+  (each hero box at its own frame's time): Charge 0, Leap 0.153 (anchor) / 0.163 u (world_all), Burst 0.126 / 0.136,
+  Rage 0 (Ptn L per-state 0.065); self templates 0-0.127 u (AtkBell L 0.127, R 0.109, DropBell L2 0.107); p99 0
+  everywhere. The old pairing (box of f-1 at t_f) gave Burst 0.096 and AtkBell R 0.010, and the planner's query then
+  missed five contacts (tests/fixtures/bellbeast_planner_contacts.msgpack.zst). Held out by recording: 184,516 of
+  184,521 contacts inside the full build's support for the anchor and world_all sets (5 up to 0.214 u away), 184,520
+  / 184,519 for the per-state sets, all within +-4 bins; all 69,133 for the self templates.
+- Hitbox presence counts only instances without an export hole in the state: the Charge Emerge body box is enabled in
+  every one (P1 and P2 1.0; the 267 holed first charges are n_export_holes, not "box absent").
+- Body box centre minus the anchor (attacks.<A>.anchor.body_offset.by_dir_flip) is fixed per facing: Burst (+0.539,
+  -2.68) with flipX False, (-0.539, -2.68) with flipX True, so Entity.pos converts to the anchor without a sweep.
 - STATE hero.box is 0.5 x 2.0789 u on all 2.87 M frames (hitbox_tables.HERO_HALF_U).
 - The decision chain Submerged -> Rage? -> Bell Burst? -> Choose Dir -> Set L|R -> Move Choice -> attack start runs
   within one frame after Submerged's 1.000-1.017 s. Set L / Set R name the side the boss emerges on (x 75.03 /

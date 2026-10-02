@@ -18,10 +18,10 @@ Exit codes: 0 ok; 1 nothing to scan; 3 validation failed (a contact farther than
 occupancy, a contact whose source had no exported damage collider and no export hole near it, or a contact outside
 every attack): nothing is written unless --allow-failed-validation (then coverage.validation.ok is false in the file).
 
-Cost (2026-10-01, i9-13900K, one core, the committed Bell Beast build): scanning 2.87 M STATE frames of 266 fights
-took 638 s (0.22 ms per frame, ~2.4 s per data episode; the human session's range streams in 2 s), and finishing the
-templates, validating 184,521 contacts in sample and held out, dilating, testing the decision covariates and writing
-took 117 s.
+Cost (2026-10-01, i9-13900K, one core, the committed Bell Beast build at adda74a): scanning 2.87 M STATE frames of
+266 fights took 656 s (0.23 ms per frame, ~2.5 s per data episode; the human session's range streams in 2 s), and
+finishing the templates, validating 184,521 contacts in sample and held out, dilating, testing the decision
+covariates and writing took 130 s (786 s in all).
 """
 import argparse
 import json
