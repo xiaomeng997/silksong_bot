@@ -628,9 +628,16 @@ def flags_of(x):
 
 @njit(cache=True, error_model="numpy")
 def lane(i, V, S0, masks, events, dts, fss, udts, ft_v, alpha_sel, alpha_margin, P, TT,
-         phys, rend, vel, modes, flags, box, final):
-    r = i // V
-    v = i % V
+         phys, rend, vel, modes, flags, box, final, nob, nof):
+    run_lane(i // V, i % V, i, S0, masks, events, dts, fss, udts, ft_v, alpha_sel, alpha_margin, P, TT,
+             phys, rend, vel, modes, flags, box, final, nob, nof, nof)
+
+
+@njit(cache=True, error_model="numpy")
+def run_lane(r, v, o, S0, masks, events, dts, fss, udts, ft_v, alpha_sel, alpha_margin, P, TT,
+             phys, rend, vel, modes, flags, box, final, bound, f_all, f_any):
+    """Command sequence r under variant v. o >= 0: write the full per-frame outputs to row o; bound / f_all / f_any
+    with rows: fold this lane's box into bound[r] (min / max) and its flags into f_all[r] (AND) / f_any[r] (OR)."""
     x = S0[:, r if S0.shape[1] > 1 else 0].copy()
     if alpha_sel[v] == 1:
         x[ALPHA] = max(x[ALO] - alpha_margin, 0.0)
@@ -663,19 +670,29 @@ def lane(i, V, S0, masks, events, dts, fss, udts, ft_v, alpha_sel, alpha_margin,
                 fixed_step(x, p, TT)
             apply_events(x, ev, p)
             update(x, m, ev, dt, udt, p)
-        phys[i, t, 0] = x[PX]
-        phys[i, t, 1] = x[PY]
-        rend[i, t, 0] = x[QX] + x[ALPHA] * (x[SX] - x[QX])
-        rend[i, t, 1] = x[QY] + x[ALPHA] * (x[SY] - x[QY])
-        vel[i, t, 0] = x[VX]
-        vel[i, t, 1] = x[VY]
-        modes[i, t] = np.int32(x[MODE])
-        flags[i, t] = flags_of(x)
-        box[i, t, 0] = x[PX] - hw
-        box[i, t, 1] = x[PY] - foot
-        box[i, t, 2] = x[PX] + hw
-        box[i, t, 3] = x[PY] + head
-    final[:, i] = x
+        fl = flags_of(x)
+        if o >= 0:
+            phys[o, t, 0] = x[PX]
+            phys[o, t, 1] = x[PY]
+            rend[o, t, 0] = x[QX] + x[ALPHA] * (x[SX] - x[QX])
+            rend[o, t, 1] = x[QY] + x[ALPHA] * (x[SY] - x[QY])
+            vel[o, t, 0] = x[VX]
+            vel[o, t, 1] = x[VY]
+            modes[o, t] = np.int32(x[MODE])
+            flags[o, t] = fl
+            box[o, t, 0] = x[PX] - hw
+            box[o, t, 1] = x[PY] - foot
+            box[o, t, 2] = x[PX] + hw
+            box[o, t, 3] = x[PY] + head
+        if bound.shape[0] > 0:
+            bound[r, t, 0] = min(bound[r, t, 0], x[PX] - hw)
+            bound[r, t, 1] = min(bound[r, t, 1], x[PY] - foot)
+            bound[r, t, 2] = max(bound[r, t, 2], x[PX] + hw)
+            bound[r, t, 3] = max(bound[r, t, 3], x[PY] + head)
+            f_all[r, t] &= fl
+            f_any[r, t] |= fl
+    if o >= 0:
+        final[:, o] = x
 
 
 @njit(cache=True, error_model="numpy")
@@ -690,9 +707,10 @@ def simulate(S0, masks, events, dts, fss, udts, ft_v, alpha_sel, alpha_margin, P
     V = ft_v.shape[0]
     nl = masks.shape[0] * V
     phys, rend, vel, modes, flags, box, final = _alloc(nl, masks.shape[1], S0.shape[0])
+    nob, nof = np.zeros((0, 1, 4)), np.zeros((0, 1), dtype=np.int32)
     for i in range(nl):
         lane(i, V, S0, masks, events, dts, fss, udts, ft_v, alpha_sel, alpha_margin, P, TT,
-             phys, rend, vel, modes, flags, box, final)
+             phys, rend, vel, modes, flags, box, final, nob, nof)
     return phys, rend, vel, modes, flags, box, final
 
 
@@ -701,10 +719,60 @@ def simulate_par(S0, masks, events, dts, fss, udts, ft_v, alpha_sel, alpha_margi
     V = ft_v.shape[0]
     nl = masks.shape[0] * V
     phys, rend, vel, modes, flags, box, final = _alloc(nl, masks.shape[1], S0.shape[0])
+    nob, nof = np.zeros((0, 1, 4)), np.zeros((0, 1), dtype=np.int32)
     for i in prange(nl):
         lane(i, V, S0, masks, events, dts, fss, udts, ft_v, alpha_sel, alpha_margin, P, TT,
-             phys, rend, vel, modes, flags, box, final)
+             phys, rend, vel, modes, flags, box, final, nob, nof)
     return phys, rend, vel, modes, flags, box, final
+
+
+# The planner's form of the timing lanes: per command sequence, the nominal lane (variant 0) in full and every lane
+# folded into the per-frame hull and flag AND / OR, without per-lane arrays. run[r, v] False skips a lane that
+# duplicates another for that sequence (kinematics.rollout decides: lanes that differ only in the hit-stop links when
+# the sequence never enters the hit-stop).
+
+@njit(cache=True, error_model="numpy")
+def _bound_one(ri, run, S0, masks, events, dts, fss, udts, ft_v, alpha_sel, alpha_margin, P, TT,
+               phys, rend, vel, modes, flags, box, final, bound, f_all, f_any):
+    r = np.int64(ri)                  # a prange index can be unsigned: keep `r or -1` an integer
+    for t in range(bound.shape[1]):
+        bound[r, t, 0] = np.inf
+        bound[r, t, 1] = np.inf
+        bound[r, t, 2] = -np.inf
+        bound[r, t, 3] = -np.inf
+        f_all[r, t] = -1
+        f_any[r, t] = 0
+    for v in range(ft_v.shape[0]):
+        if run[r, v]:
+            run_lane(r, v, r if v == 0 else np.int64(-1), S0, masks, events, dts, fss, udts, ft_v, alpha_sel, alpha_margin,
+                     P, TT, phys, rend, vel, modes, flags, box, final, bound, f_all, f_any)
+
+
+@njit(cache=True, error_model="numpy")
+def _alloc_bound(n, T, K):
+    return (np.empty((n, T + 1, 4)), np.empty((n, T + 1), dtype=np.int32), np.empty((n, T + 1), dtype=np.int32))
+
+
+@njit(cache=True, error_model="numpy")
+def simulate_bound(S0, masks, events, dts, fss, udts, ft_v, alpha_sel, alpha_margin, P, TT, run):
+    n, T = masks.shape
+    phys, rend, vel, modes, flags, box, final = _alloc(n, T, S0.shape[0])
+    bound, f_all, f_any = _alloc_bound(n, T, S0.shape[0])
+    for r in range(n):
+        _bound_one(r, run, S0, masks, events, dts, fss, udts, ft_v, alpha_sel, alpha_margin, P, TT,
+                   phys, rend, vel, modes, flags, box, final, bound, f_all, f_any)
+    return phys, rend, vel, modes, flags, box, final, bound, f_all, f_any
+
+
+@njit(cache=True, parallel=True, error_model="numpy")
+def simulate_bound_par(S0, masks, events, dts, fss, udts, ft_v, alpha_sel, alpha_margin, P, TT, run):
+    n, T = masks.shape
+    phys, rend, vel, modes, flags, box, final = _alloc(n, T, S0.shape[0])
+    bound, f_all, f_any = _alloc_bound(n, T, S0.shape[0])
+    for r in prange(n):
+        _bound_one(r, run, S0, masks, events, dts, fss, udts, ft_v, alpha_sel, alpha_margin, P, TT,
+                   phys, rend, vel, modes, flags, box, final, bound, f_all, f_any)
+    return phys, rend, vel, modes, flags, box, final, bound, f_all, f_any
 
 
 # ---- knockback bound per query (ssbot.knowledge.knockback) -----------------------------------------------------

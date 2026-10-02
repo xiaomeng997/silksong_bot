@@ -235,13 +235,23 @@ def test_rollout_returns_collider_boxes_and_bounding_variant_lanes(p):
     assert plain.box.shape == (2, 49, 4)
     assert np.allclose(plain.centre[..., 0], plain.phys[..., 0])
     assert np.allclose(plain.box[..., 3] - plain.box[..., 1], p.foot + p.head)
+    ev = np.zeros((2, 48), dtype=np.int64)
+    ev[1, 20] = km.EV_HURT_L                                         # one sequence enters the hit-stop
     for name, n_lanes in (("fast", 3), ("bounds", 9), ("full", 17)):
-        r = km.rollout(s, masks, p, terrain, variants=name)
+        r = km.rollout(s, masks, p, terrain, events=ev, variants=name, lanes=True)
         assert r.var_box.shape == (2, n_lanes, 49, 4)
-        assert np.array_equal(r.box, plain.box)                      # lane 0 is the nominal lane
+        assert np.array_equal(r.box, km.rollout(s, masks, p, terrain, events=ev).box)   # lane 0 is the nominal lane
         assert (r.bound[..., :2] <= r.var_box[..., :2].min(axis=1) + 1e-12).all()
         assert (r.bound[..., 2:] >= r.var_box[..., 2:].max(axis=1) - 1e-12).all()
-    r = km.rollout(s, masks, p, terrain, variants="bounds")
+        # the planner's form: no per-lane arrays, duplicate lanes skipped, the same hull and flags
+        for th in (1, 4):
+            c = km.rollout(s, masks, p, terrain, events=ev, variants=name, threads=th)
+            assert c.var_box is None
+            for a in ("box", "phys", "pos", "vel", "mode", "flags", "final", "bound", "flags_all", "flags_any"):
+                assert np.array_equal(getattr(c, a), getattr(r, a)), (name, a)
+        run = km._lane_runs(*km._variant_rows(p, km.VARIANT_SETS[name]), s[:, None], ev, 2)
+        assert run[1].all() and run[0].sum() == {"fast": 3, "bounds": 3, "full": 5}[name]
+    r = km.rollout(s, masks, p, terrain, variants="bounds", lanes=True)
     antic = (r.var_mode[0] == km.M_DS_ANTIC).sum(axis=1)
     assert set(antic.tolist()) >= {6, 7}                             # both antic lengths among the lanes
     with pytest.raises(ValueError, match="nominal timing"):

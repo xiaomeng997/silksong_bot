@@ -1101,7 +1101,9 @@ def _simulate(S0, masks, events, dts, fss, udts, P, hseg, vseg):
 @dataclass(slots=True)
 class Rollout:
     """Rollout of N command sequences over T frames; index 0 is the start frame. With timing variants, the main
-    arrays hold variant 0 (the nominal lane) and var_* hold every lane, bound their per-frame hull."""
+    arrays hold variant 0 (the nominal lane), bound the per-frame hull of every lane's box, flags_all / flags_any the
+    per-frame AND / OR of their flags (F_INVULN in flags_all: invulnerable in every lane), and with lanes=True var_*
+    hold every lane."""
     phys: np.ndarray     # [N, T+1, 2] body position, hero.pos coordinates (x centre, y = box bottom + foot)
     pos: np.ndarray      # [N, T+1, 2] rendered transform (STATE hero.pos; O-tagged pos_transform in WorldState)
     vel: np.ndarray      # [N, T+1, 2]
@@ -1114,6 +1116,8 @@ class Rollout:
     var_mode: np.ndarray | None = None    # [N, V, T+1]
     var_flags: np.ndarray | None = None   # [N, V, T+1]
     bound: np.ndarray | None = None       # [N, T+1, 4] hull of the variant boxes per frame
+    flags_all: np.ndarray | None = None   # [N, T+1] F_* bits set in every lane
+    flags_any: np.ndarray | None = None   # [N, T+1] F_* bits set in some lane
 
     @property
     def centre(self) -> np.ndarray:
@@ -1177,10 +1181,31 @@ def _variant_rows(params: HeroParams, variants: tuple[Variant, ...]
     return Pv, np.asarray(ft, dtype=np.float32).astype(np.float64), sel
 
 
+def _lane_runs(P: np.ndarray, ft_v: np.ndarray, sel: np.ndarray, S0: np.ndarray, ev: np.ndarray, n: int
+               ) -> np.ndarray:
+    """[n, V] bool: which lanes a sequence has to run. Lanes that differ only in the hit-stop links (wait, ramp)
+    give identical results for a sequence that never enters the hit-stop (start mode not HURT_FREEZE, no EV_HURT
+    event): of "bounds" (9 lanes) such a sequence runs 3."""
+    V = len(ft_v)
+    key = P.copy()
+    key[:, [P_HURT_WAIT, P_HURT_RAMP]] = 0.0
+    dup = np.zeros(V, dtype=bool)
+    for v in range(1, V):
+        dup[v] = any(not dup[w] and ft_v[w] == ft_v[v] and sel[w] == sel[v] and np.array_equal(key[w], key[v])
+                     for w in range(v))
+    run = np.ones((n, V), dtype=bool)
+    if dup.any():
+        hurt = np.broadcast_to(S0[MODE] == M_HURT_FREEZE, (n,)).copy()
+        if ev.shape[0]:
+            hurt |= ((ev & (EV_HURT_L | EV_HURT_R)) != 0).any(axis=1)
+        run[:, dup] = hurt[:, None]
+    return run
+
+
 def rollout(start: np.ndarray, masks: np.ndarray, params: HeroParams, terrain: Terrain2D | None = None,
             events: np.ndarray | None = None, dt: np.ndarray | None = None, fs: np.ndarray | None = None,
             udt: float | np.ndarray | None = None, variants: tuple[Variant, ...] | str | None = None,
-            backend: str = "auto", threads: int = 1) -> Rollout:
+            backend: str = "auto", threads: int = 1, lanes: bool = False) -> Rollout:
     """Predict N button sequences of T frames from a model state.
 
     start: [K] or [K, N] model state (estimate_state / initial_state); masks: [N, T] latched ACTION masks for the
@@ -1190,9 +1215,11 @@ def rollout(start: np.ndarray, masks: np.ndarray, params: HeroParams, terrain: T
     [N, T] logged scaled dt and physics steps per frame (replay only: the planner does not know them); without them
     the timing is nominal: dt = udt times the model's time scale, steps from the phase; udt: unscaled frame time, a
     scalar or [T] / [N, T] (None: params.frame_time, the measured mean frame time, not exactly 1/60 s).
-    variants: "fast" / "bounds" / "full" / a tuple of Variant (nominal timing only): V lanes per sequence (var_*),
-    their per-frame hull in `bound`; the main arrays hold the first (nominal) lane. backend: "numba" (the compiled
-    loop, kin_jit), "numpy" (the reference), "auto"; threads > 1 runs the lanes in parallel (numba)."""
+    variants: "fast" / "bounds" / "full" / a tuple of Variant (nominal timing only): V lanes per sequence, their
+    per-frame hull in `bound` and flag AND / OR in flags_all / flags_any; the main arrays hold the first (nominal)
+    lane; lanes=True also returns every lane (var_*; the planner does not need them: without, the compiled path keeps
+    no per-lane arrays and skips lanes that duplicate another, _lane_runs). backend: "numba" (the compiled loop,
+    kin_jit), "numpy" (the reference), "auto"; threads > 1 runs the sequences in parallel (numba)."""
     masks = np.ascontiguousarray(masks, dtype=np.int64)
     if masks.ndim == 1:
         masks = masks[None, :]
@@ -1225,6 +1252,17 @@ def rollout(start: np.ndarray, masks: np.ndarray, params: HeroParams, terrain: T
         dts = fss = np.zeros((0, 0))
     terrain = terrain or Terrain2D.empty()
     use_jit = HAVE_NUMBA if backend == "auto" else backend == "numba"
+    if variants and use_jit and not lanes:
+        from ssbot.knowledge import kin_jit
+        if threads > 1:
+            import numba
+            numba.set_num_threads(threads)
+        run = _lane_runs(P, ft_v, sel, S0, ev, n)
+        fn = kin_jit.simulate_bound_par if threads > 1 else kin_jit.simulate_bound
+        phys, rend, vel, modes, flags, box, X, bound, f_all, f_any = fn(
+            S0, masks, ev, dts, fss, udts, ft_v, sel, params.alpha_margin, P, terrain.packed(), run)
+        return Rollout(phys, rend, vel, modes, flags, X, box, variants, bound=bound, flags_all=f_all,
+                       flags_any=f_any)
     if use_jit:
         from ssbot.knowledge import kin_jit
         if threads > 1:
@@ -1240,9 +1278,11 @@ def rollout(start: np.ndarray, masks: np.ndarray, params: HeroParams, terrain: T
         return Rollout(phys, rend, vel, modes, flags, X, box)
     vb = box.reshape(n, V, T + 1, 4)
     bound = np.concatenate([vb[..., :2].min(axis=1), vb[..., 2:].max(axis=1)], axis=-1)
+    vf = flags.reshape(n, V, T + 1)
     sl = slice(0, None, V)
     return Rollout(phys[sl], rend[sl], vel[sl], modes[sl], flags[sl], X[:, sl], box[sl], variants,
-                   vb, modes.reshape(n, V, T + 1), flags.reshape(n, V, T + 1), bound)
+                   vb, modes.reshape(n, V, T + 1), vf, bound, np.bitwise_and.reduce(vf, axis=1),
+                   np.bitwise_or.reduce(vf, axis=1))
 
 
 def _simulate_lanes(S0, masks, ev, dts, fss, udts, ft_v, sel, alpha_margin, P, terrain):
