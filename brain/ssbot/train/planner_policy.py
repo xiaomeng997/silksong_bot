@@ -290,6 +290,15 @@ class PlannerPolicy:
 
     def _start_state(self, ws, raw: dict) -> np.ndarray:
         S = self.trk.state().copy()
+        # a hit the hero took after the WorldState's frame (stage C sees the world 2-4 frames late; the hero knows
+        # it was hit at once) starts her i-frames, which block enemy damage: without them every plan of the first
+        # ticks after a hit met the support, and Q6 ended the attempt (stage C run 20261002_102538: the 4 Q6 quits
+        # checked were FORCED_RISK on the hit frame itself with the start state's INV_T 0, the hero invulnerable)
+        fo = int(raw.get("f", 0)) if raw else 0
+        hit_f = [f for f in sorted(self.raw) if f > fo for ev in (self.raw[f].get("ev") or ()) if ev.get("k") == "damage"]
+        if hit_f:
+            Sv = S.reshape(kin.K, -1)
+            Sv[kin.INV_T] = np.maximum(Sv[kin.INV_T], self.params.invul_time + (hit_f[-1] - fo) * self.params.frame_time)
         if self.view != "oracle":
             b = (raw.get("hero") or {}).get("box")
             if b:
