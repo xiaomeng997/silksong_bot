@@ -246,6 +246,19 @@ def test_a_polygon_across_the_image_is_visible(wake):
     assert Polygon(e.dmg_boxes[0].poly).intersects(Polygon(w.hero.hurtbox))
 
 
+def test_an_active_box_across_the_image_makes_its_entity_visible(wake):
+    """The root sprite off-screen, its active damage box (a beam from the emitter through the hero) in the image."""
+    w = copy.deepcopy(wake[-1])
+    hx, hy = w.hero.pos.v
+    beam = [(hx - 30, hy - 0.5), (hx + 1, hy - 0.5), (hx + 1, hy + 0.5), (hx - 30, hy + 0.5)]
+    w.entities.append(Entity(id=-9, kind=Kind.HAZARD_DYN, type_key=E("Zap Beam"), pos=E((hx - 30, hy)),
+                             render_box=(hx - 31, hy - 1, hx - 29, hy + 1),
+                             dmg_boxes=[DamageBox(poly=beam, active=True, hazard=Hazard.ZAP)]))
+    out = ObservabilityFilter(bosses=[BELL_BEAST], box_table=BoxTable()).apply(w)
+    e = next(x for x in out.entities if x.id == -9)
+    assert e.visible_frac > 0 and any(Polygon(d.poly).intersects(Polygon(w.hero.hurtbox)) for d in e.dmg_boxes)
+
+
 def test_clip_kernel_matches_the_reference_and_shapely():
     rng = np.random.default_rng(3)
     polys, owner = [], []

@@ -7,8 +7,8 @@
 Rule: no value in the output may depend on something pixels cannot show. Per frame:
   - O fields -> None and O-only events dropped (WorldState.view("VISION_EQUIVALENT"): FSM states, `can`, game state,
     saved play time, LethalBlock events, pause-gate flags, transforms, collider names ...).
-  - Visibility: each entity's image extent (its render_aabb when exported, else its enabled colliders) is projected
-    with the frame's camera (ssbot.tools.projector) and clipped to the camera viewport; visible_frac is the visible
+  - Visibility: each entity's image extent (its render_aabb plus its active damage boxes when exported, else its
+    enabled colliders) is projected with the frame's camera (ssbot.tools.projector) and clipped to the camera viewport; visible_frac is the visible
     area share. An entity with neither (no drawn root renderer, no enabled collider) is not drawn.
   - Entities that stop being visible: if at least half of it was visible in its last visible frame and it is not
     now projected outside the image (oracle ents[].hidden, not drawn any more, or gone from the export), it vanished
@@ -275,11 +275,13 @@ def _rect_poly(r: tuple[float, float, float, float]) -> list[tuple[float, float]
 
 
 def image_extent(e: Entity) -> list[list[tuple[float, float]]]:
-    """What a detector would see of e: its sprite bounds when exported, else its enabled colliders; [] = not drawn."""
+    """What a detector would see of e: its sprite bounds (the root renderer only, EntityRegistry.cs:691) plus its
+    active damage boxes (a beam or slash effect is drawn; live i1_001 f352306: render box 72.26-73.84 x 1.76-2.24,
+    damage box 72.44-75.44 x 1.96-4.07), else its enabled colliders; [] = not drawn."""
     if e.hidden:
         return []
     if e.render_box is not None:
-        return [_rect_poly(e.render_box)]
+        return [_rect_poly(e.render_box)] + [b.poly for b in e.dmg_boxes if b.active and len(b.poly) >= 2]
     return [p for p in e.body_polys if len(p) >= 2]
 
 
