@@ -12,9 +12,10 @@ state until the return to a decision state, ssbot.knowledge.behaviour_tables) is
 a tick at every state entry; decision states are grey; a hit taken is a red tick above the row (dark red when the
 source is not the boss itself); the kill is a black bar. Reads a recording's events.jsonl (no STATE decoding).
 
-snapshots: per family and frame ("anchor": the boss's frame, faced +x; "world": arena-fixed hazards), panels of the
-union occupancy within consecutive windows of --every s after the attack start over the reach union (light grey),
-with the boss's mean anchor-frame position in the window (cross) and a 5 u grid.
+snapshots: per family and frame ("anchor": the boss's frame, faced +x; "world": arena-fixed hazards; "world_all":
+everything in world coordinates), panels of the raw (logged) union occupancy within consecutive windows of --every s
+after the attack start (+-1 frame of export lag) over the reach union (light grey), with the boss's mean anchor-frame
+position in the window (cross) and a 5 u grid.
 """
 import argparse
 import sys
@@ -126,7 +127,7 @@ def panel(tpl: hb.SpaceTimeTemplate, t0: float, t1: float, scale: float, color, 
           label: str) -> np.ndarray:
     """One snapshot: reach (light grey), occupancy in [t0, t1) (colour), 5 u grid, boss mean position (cross)."""
     reach = tpl.reach()
-    occ = tpl.occupancy(t0, max(t0, t1 - tpl.bin_s / 2), tol_bins=0)
+    occ = tpl.occupancy(t0, max(t0, t1 - tpl.bin_s / 2), tol_bins=1)  # +-1 frame of export lag (raw templates)
     h, w = int(np.ceil(tpl.ny * scale)), int(np.ceil(tpl.nx * scale))
     img = np.full((tpl.ny, tpl.nx, 3), 255, np.uint8)
     img[reach] = (225, 225, 225)
@@ -152,10 +153,11 @@ def panel(tpl: hb.SpaceTimeTemplate, t0: float, t1: float, scale: float, color, 
 
 def snapshots(a: argparse.Namespace) -> int:
     tpls, extra = hb.load_templates(a.npz)
+    tpls = {k: v for k, v in tpls.items() if not k.startswith((hb.SUPPORT, "_"))}  # raw (logged) occupancy only
     fams = a.family or sorted({k.split("/")[0] for k in tpls})
     blocks = []
     for fam in fams:
-        for frame in hb.FRAMES:
+        for frame in (*hb.FRAMES, "world_all"):
             tpl = tpls.get(f"{fam}/{frame}")
             if tpl is None:
                 continue
@@ -164,7 +166,7 @@ def snapshots(a: argparse.Namespace) -> int:
             while act and (act[1] + every) / every > a.max_panels:
                 every *= 2
             starts = np.arange(0.0, (act[1] if act else 0.0) + 1e-9, every)
-            starts = [t for t in starts if tpl.occupancy(t, t + every - tpl.bin_s / 2, tol_bins=0).any()]
+            starts = [t for t in starts if tpl.occupancy(t, t + every - tpl.bin_s / 2, tol_bins=1).any()]
             scale = min(a.panel_px / tpl.nx, a.panel_px / tpl.ny)
             path = extra.get(f"{fam}/boss_path") if frame == "anchor" else None
             panels = [panel(tpl, t, t + every, scale, family_color(fam), path, f"{t:.2f}-{t + every:.2f}s")
