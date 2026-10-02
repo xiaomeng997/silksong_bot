@@ -76,12 +76,30 @@ def report(tables: dict) -> str:
             lines.append(f"  residual {fam}: " + ", ".join(
                 f"{k} p99 {sets[k]['p99']} max {sets[k]['max']} u (n {sets[k]['n']})" for k in ("anchor", "world_all")
                 if k in sets))
+    if v:
+        for name, h in v.get("heldout", {}).items():
+            if isinstance(h, dict):
+                lines.append(f"  held out ({name}): {h['within_radius']} of {h['n']} contacts inside the support "
+                             f"({h.get('within_radius_t4')} with +-4 bins)")
+    for tk, e in tables.get("entities", {}).items():
+        st = e.get("self_template")
+        if st:
+            h = st["holdout"]
+            lines.append(f"  self template {tk}: radius {st['radius_u']} u, {st['contacts']} contacts; held out "
+                         f"{h.get('within_radius')} of {h.get('n')} inside")
     eh = cov.get("export_holes") or {}
     if eh.get("frames"):
         lines.append(f"export holes (exported without colliders, frames): {eh['frames']}; {eh['instances']} instances")
+    hb = cov.get("hero_box_u") or {}
+    if hb.get("n"):
+        lines.append(f"hero box w {hb['w']} h {hb['h']} u over {hb['n']} frames: planner half-extents "
+                     f"{'ok' if hb['ok'] else 'TOO SMALL'}")
     for st, d in tables.get("decisions", {}).items():
         sig = {n: f"{r['p']:.2g}" for n, r in d["tests"].items() if r.get("significant")}
-        lines.append(f"decision {st} (n {d['n']}): kept {d['conditioners'] or '-'}; significant {sig or '-'}")
+        ho = d.get("heldout") or {}
+        lines.append(f"decision {st} (n {d['n']}): kept {d['conditioners'] or '-'}; held-out log loss "
+                     f"{ho.get('logloss_conditioned')} vs {ho.get('logloss_unconditional')} unconditional; "
+                     f"significant {sig or '-'}")
     if cov["counters"]:
         lines.append("counters:")
         lines += [f"  {k}: {v}" for k, v in cov["counters"].items()]

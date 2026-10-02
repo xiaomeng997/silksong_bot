@@ -359,9 +359,54 @@ def test_export_hole_is_flagged_and_left_out_of_statistics():
     assert v["ok"] and v["no_exported_collider_explained_by_export_hole"] == {
         "n": 1, "damage": 1, "by_source": {"Boss Scene/Test Boss": 1}}
     assert t["attacks"]["A"]["ttd_s"]["Dash"]["n"] == 4  # the holed instance is left out
+    holes = t["attacks"]["A"]["export_holes"]
+    assert holes["states"] == {"Dash": 1} and holes["frames"] == 5
+    assert holes["ttd_left_out"] == {"start": 1, "Antic A": 1, "Dash": 1}  # every span containing a hole frame
     assert t["entities"]["Test Boss"]["by_state"]["Dash"]["no_colliders"] == 5
     hole_hit = next(c for c in b.contacts if c.hole)
     assert hole_hit.res["anchor"] == 0.0  # the other instances' geometry covers it
+
+
+def test_self_templates_follow_each_hazard_from_where_it_armed(synth):
+    b, _ = synth
+    built = b.build()
+    rock = built.support["support/ent/Rock/self"]
+    assert rock.frame == "anchor" and rock.n_instances == 3
+    k = np.arange(40)  # the Rock falls 0.1 u per frame from where it armed, wherever that is
+    assert rock.contains(k * DT, 0.0, -0.1 * k, tol_bins=0).all()
+    assert not rock.contains(k * DT, 0.0, -0.1 * k + 1.5, tol_bins=0).any()
+    ent = built.tables["entities"]["Rock"]
+    assert ent["arm_pos"]["support"] == {"n": 3, "x": [10.0, 10.0], "y": [8.0, 8.0]}
+    assert ent["arm_pos"]["by_owner_state"]["B / Throw"]["t_since_state_entry_s"] == [0.0, 0.0]
+    st = ent["self_template"]
+    assert st["npz"] == "support/ent/Rock/self" and st["contacts"] == 3 and st["max"] == 0.0
+    shard = built.tables["entities"]["Shard"]["arm_pos"]["support"]
+    assert shard["x"] == [16.0, 16.0]
+    rock_hits = [c for c in b.contacts if c.tk == "Rock"]
+    assert rock_hits and all(c.res["self:Rock"] == 0.0 for c in rock_hits)
+
+
+def test_choice_history_covariates_find_a_forced_repeat_rule():
+    """A SendRandomEventV3-like choice: 50/50, but an outcome missed twice in a row is forced. The per-state miss
+    counters are kept, the hero's position is not, and the held-out log loss improves."""
+    rng = np.random.default_rng(8)
+    b = bt.BehaviourBuilder(SPEC)
+    for fight in range(40):
+        local: list[str] = []
+        for i in range(30):
+            miss = {o: next((j for j, x in enumerate(reversed(local)) if x == o), None) for o in ("Set L", "Set R")}
+            forced = [o for o, m in miss.items() if m is not None and m >= 2]
+            to = forced[0] if forced else ("Set L" if rng.random() < 0.5 else "Set R")
+            b.transitions.append(bt.Transition(f"f{fight}", i, float(i), "Choose", to, 0.0, float(rng.uniform(0, 30)),
+                                               0.0, None, None, None, 50, "P1", None, 0, {}, None, None, fight % 2,
+                                               tuple(local)))
+            local.append(to)
+    d = b.decisions(["Choose"])["Choose"]
+    assert set(d["conditioners"]) <= {"miss_Set L", "miss_Set R", "choice_run"} and d["conditioners"]
+    assert not d["tests"]["hero_x"]["significant"]
+    assert d["heldout"]["logloss_conditioned"] < d["heldout"]["logloss_unconditional"] - 0.05
+    forced = [g for g in d["table"].values() if g["n"] >= 30 and max(g["p"].values()) > 0.95]
+    assert forced  # the forced cells are found
 
 
 def test_unexplained_hit_fails_the_build(tmp_path):
@@ -386,7 +431,9 @@ def test_synthetic_write_and_report(synth, tmp_path):
     info = data["build_info"]
     assert info["npz_sha256"] == bt._sha256(npz) and set(info["code"]) >= {"sha", "dirty"}
     tpls, extra = hb.load_templates(npz)
-    assert {"A/anchor", "B/world", "B/anchor", "A/Dash/anchor", "A/world_all", "support/A/anchor"} <= set(tpls)
+    assert {"A/anchor", "B/world", "B/anchor", "support/A/Dash/anchor", "A/world_all", "support/A/anchor",
+            "support/ent/Rock/self"} <= set(tpls)
+    assert "A/Dash/anchor" not in tpls  # per-state and self templates are stored as support only
     assert extra["A/instances"].shape == (5, len(bt.INSTANCE_COLUMNS))
     assert list(extra["A/state_names"]) == ["Antic A", "Dash", "Recover"]
     assert np.allclose(extra["A/state_t"][:4, 1], 20 * DT)
@@ -480,6 +527,32 @@ def test_small_statistics():
     assert res["method"] == "chi2" and res["p"] < 1e-6
     small = bt.independence_test(np.array([0, 1, 0, 1, 0, 0]), np.array([0, 1, 0, 1, 1, 0]), n_perm=200)
     assert small["method"].startswith("permutation") and 0.0 < small["p"] <= 1.0
+
+
+def test_permutation_kernel_matches_reference_and_resolves_small_p():
+    rng = np.random.default_rng(6)
+    n = 400
+    s = rng.integers(0, 3, n)
+    x = rng.integers(0, 4, n)
+    y = (rng.random(n) < np.where(x == 3, 0.9, 0.2)).astype(np.int64)  # depends on x
+    order = np.argsort(s, kind="stable")
+    ys, xs, ss = y[order], x[order], s[order]
+    starts = np.searchsorted(ss, np.arange(4)).astype(np.int64)
+    g = bt.g_stat(y, x, s, 2, 4, 3)[0]
+    for g_obs in (g, 0.5 * g, 2.0):
+        a = bt._perm_exceed(ys, xs, ss, starts, 2, 4, 3, g_obs, 300, 11)
+        b = bt.perm_exceed_ref(ys, xs, ss, starts, 2, 4, 3, g_obs, 300, 11)
+        assert a == b
+    # a strong dependence with sparse cells: the permutation p reaches below a Holm threshold over 100 tests
+    yy = np.array([0] * 60 + [1] * 6)   # exact p = 1 / C(66, 6) ~ 1e-8
+    xx = np.array([0] * 60 + [1] * 6)
+    res = bt.independence_test(yy, xx, n_perm=500, n_perm_max=20000)
+    assert res["method"] == "permutation (20000)" and res["p"] < 0.01 / 100
+    # within strata the permutation keeps each stratum's labels: a y that only depends on s is not significant
+    s2 = np.repeat([0, 1], 50)
+    y2 = np.concatenate([np.zeros(48, np.int64), np.ones(2, np.int64), np.ones(48, np.int64), np.zeros(2, np.int64)])
+    x2 = rng.integers(0, 2, 100)
+    assert bt.independence_test(y2, x2, s2, n_perm=2000)["p"] > 0.05
 
 
 def test_match_source_is_exact():

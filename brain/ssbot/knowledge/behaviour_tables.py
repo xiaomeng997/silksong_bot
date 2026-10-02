@@ -93,6 +93,7 @@ from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import numba
 import numpy as np
 
 from ssbot.ipc.ents import DAMAGE_FLAGS, DAMAGE_SRC, PARRY_BITS, SRC_BITS, bits, hazard_name, is_threat
@@ -109,13 +110,18 @@ TARGET_INSTANCES = 200        # M2 exit: >= 200 logged instances per A-class att
 ABSENT_CLOSE_F = 30           # an armed entity missing from the export this long has left the view
 STATE_KEYS = ("dt", "hero", "ents", "ev")
 TAIL = "_tail"
+SELF = "ent"                  # self templates: ent/<type_key>/self
 R_FAIL_U = 0.5                # a contact farther than this from its family's occupancy is a support hole
 R_SEARCH_U = 1.0
 LAG_F = 2                     # a contact's source must show an exported damage collider within f-2..f
 RING_F = 1800                 # frames of per-frame contact context kept (blocked stretches are reported late)
 ALPHA_TEST = 0.01             # family-wise level of the decision covariate tests (Holm)
+RUN_CAP, SINCE_CAP = 4, 5     # history covariate levels: run 1..4+, attacks since 0..5+ / never
+HELD_LL_GAIN = 1e-3           # a conditioner is kept only if it lowers the held-out log loss by this (nats)
 N_FOLDS = 2                   # held-out folds of recordings for the residual on unseen instances
+HELD_T_BINS = 4               # held-out residual also measured with +-4 bins (67 ms): spatial gap vs timing spread
 N_PERM = 2000
+N_PERM_MAX = 50000
 EVENT_KINDS = ("fsm", "damage", "damage_blocked", "hit")
 
 
@@ -149,7 +155,7 @@ class BehaviourSpec:
     world_fixed: tuple[str, ...]       # type_key prefixes of arena-fixed hazards (world-frame templates)
     rest_states: tuple[str, ...] = ("Init", "Dormant")   # FSM states of a hazard entity that mean "not armed"
     flip_mirror: tuple[int, int] = (1, -1)               # mirror for flipX False / True when no direction state
-    dist_bins_u: tuple[float, ...] = (0.0, 3.0, 6.0, 10.0, 99.0)   # bins of the distance covariate (tested, not assumed)
+    dist_bins_u: tuple[float, ...] = (0.0, 3.0, 6.0, 10.0, 99.0)   # distance covariate bins (tested, not assumed)
     arena_x: tuple[float, float] = (0.0, 0.0)
     floor_y: float = 0.0
     tail_max_s: float = 6.0
@@ -242,46 +248,114 @@ def chi2_sf(x: float, df: int) -> float:
     return min(1.0, math.exp(lead) * h)
 
 
-def g_stat(y: np.ndarray, x: np.ndarray, s: np.ndarray, ky: int, kx: int, ks: int) -> tuple[float, int, float]:
+def g_stat(y: np.ndarray, x: np.ndarray, s: np.ndarray, ky: int, kx: int,
+           ks: int) -> tuple[float, int, float, float]:
     """G statistic of independence of codes y and x within strata s, its degrees of freedom (non-empty rows and
-    columns per stratum) and the smallest expected count."""
+    columns per stratum), the smallest expected count and the share of expected counts below 5 (strata with at
+    least two rows and columns)."""
     n = np.bincount((s * kx + x) * ky + y, minlength=ks * kx * ky).reshape(ks, kx, ky).astype(np.float64)
-    g, df, emin = 0.0, 0, math.inf
-    for t in n:
-        tot = t.sum()
-        if tot == 0:
+    tot = n.sum(axis=(1, 2))
+    r, c = n.sum(axis=2), n.sum(axis=1)
+    e = r[:, :, None] * c[:, None, :] / np.where(tot > 0, tot, 1.0)[:, None, None]
+    nz = n > 0
+    g = 2.0 * float((n[nz] * np.log(n[nz] / e[nz])).sum())
+    rows, cols = (r > 0).sum(axis=1), (c > 0).sum(axis=1)
+    live = tot > 0
+    df = int(((rows - 1) * (cols - 1))[live].sum())
+    cells = (live & (rows > 1) & (cols > 1))[:, None, None] & (r > 0)[:, :, None] & (c > 0)[:, None, :]
+    if not cells.any():
+        return g, df, math.inf, 0.0
+    ec = e[cells]
+    return g, df, float(ec.min()), float((ec < 5.0).mean())
+
+
+@numba.njit(cache=True)
+def _g_table(n: np.ndarray) -> float:
+    g = 0.0
+    ks, kx, ky = n.shape
+    for k in range(ks):
+        tot = 0.0
+        for i in range(kx):
+            for j in range(ky):
+                tot += n[k, i, j]
+        if tot == 0.0:
             continue
-        r, c = t.sum(axis=1), t.sum(axis=0)
-        rows, cols = r > 0, c > 0
-        df += (int(rows.sum()) - 1) * (int(cols.sum()) - 1)
-        e = np.outer(r, c) / tot
-        nz = t > 0
-        g += 2.0 * float((t[nz] * np.log(t[nz] / e[nz])).sum())
-        if rows.sum() > 1 and cols.sum() > 1:
-            emin = min(emin, float(e[np.ix_(rows, cols)].min()))
-    return g, df, emin
+        for i in range(kx):
+            r = 0.0
+            for j in range(ky):
+                r += n[k, i, j]
+            for j in range(ky):
+                if n[k, i, j] > 0.0:
+                    c = 0.0
+                    for i2 in range(kx):
+                        c += n[k, i2, j]
+                    g += n[k, i, j] * math.log(n[k, i, j] * tot / (r * c))
+    return 2.0 * g
+
+
+@numba.njit(cache=True)
+def _perm_exceed(ys: np.ndarray, xs: np.ndarray, ss: np.ndarray, starts: np.ndarray, ky: int, kx: int, ks: int,
+                 g_obs: float, n_perm: int, seed: int) -> int:
+    """Permutations (y shuffled within each stratum; arrays sorted by stratum, starts = stratum offsets) whose G
+    reaches g_obs."""
+    np.random.seed(seed)
+    y = ys.copy()
+    n = np.zeros((ks, kx, ky))
+    ge = 0
+    for _ in range(n_perm):
+        for k in range(ks):
+            a, b = starts[k], starts[k + 1]
+            for i in range(b - 1, a, -1):
+                j = a + np.random.randint(0, i - a + 1)
+                y[i], y[j] = y[j], y[i]
+        n[:] = 0.0
+        for i in range(y.shape[0]):
+            n[ss[i], xs[i], y[i]] += 1.0
+        if _g_table(n) >= g_obs - 1e-9:
+            ge += 1
+    return ge
+
+
+def perm_exceed_ref(ys: np.ndarray, xs: np.ndarray, ss: np.ndarray, starts: np.ndarray, ky: int, kx: int, ks: int,
+                    g_obs: float, n_perm: int, seed: int) -> int:
+    """Python reference of _perm_exceed (same shuffles, parity test)."""
+    return _perm_exceed.py_func(ys, xs, ss, starts, ky, kx, ks, g_obs, n_perm, seed)
 
 
 def independence_test(y: np.ndarray, x: np.ndarray, s: np.ndarray | None = None, n_perm: int = N_PERM,
-                      seed: int = 0) -> dict:
-    """G-test of y independent of x given strata s; a Monte Carlo permutation test (y shuffled within strata) when
-    an expected count is below 5. Codes are small non-negative ints."""
-    s = np.zeros_like(y) if s is None else s
+                      seed: int = 0, n_perm_max: int = N_PERM_MAX) -> dict:
+    """G-test of y independent of x given strata s: chi2 when the expected counts allow it (Cochran: none below 1,
+    at most 20 % below 5), else a Monte Carlo permutation test (y shuffled within strata, numba): n_perm
+    permutations, extended to n_perm_max while p < 0.05, so the smallest p (1 / (n_perm_max + 1)) can pass a Holm
+    correction over the ~100 tests of a build. Codes are small ints >= 0."""
+    y, x = np.asarray(y, np.int64), np.asarray(x, np.int64)
+    s = np.zeros_like(y) if s is None else np.asarray(s, np.int64)
     ky, kx, ks = int(y.max()) + 1, int(x.max()) + 1, int(s.max()) + 1
-    g, df, emin = g_stat(y, x, s, ky, kx, ks)
+    g, df, emin, small = g_stat(y, x, s, ky, kx, ks)
     if df == 0:
         return {"G": _r(g), "df": 0, "p": 1.0, "method": "none (one level)"}
-    if emin >= 5.0:
+    if emin >= 1.0 and small <= 0.2:
         return {"G": _r(g), "df": df, "p": chi2_sf(g, df), "method": "chi2"}
-    rng = np.random.default_rng(seed)
-    order_s = np.argsort(s, kind="stable")
-    ge = 0
-    for _ in range(n_perm):
-        perm = np.lexsort((rng.random(len(y)), s))
-        yp = np.empty_like(y)
-        yp[order_s] = y[perm]
-        ge += g_stat(yp, x, s, ky, kx, ks)[0] >= g - 1e-9
-    return {"G": _r(g), "df": df, "p": (1 + ge) / (1 + n_perm), "method": f"permutation ({n_perm})"}
+    order = np.argsort(s, kind="stable")
+    ys, xs, ss = y[order], x[order], s[order]
+    starts = np.searchsorted(ss, np.arange(ks + 1)).astype(np.int64)
+    ge = done = 0
+    for target in (n_perm, max(n_perm, n_perm_max)):
+        if done and (1 + ge) / (1 + done) >= 0.05:
+            break
+        ge += _perm_exceed(ys, xs, ss, starts, ky, kx, ks, g, target - done, seed + done)
+        done = target
+    return {"G": _r(g), "df": df, "p": (1 + ge) / (1 + done), "method": f"permutation ({done})"}
+
+
+def _cap_tail(values: list, cap: int, min_n: int = N_WORST) -> tuple[list, int]:
+    """Ordinal history levels as strings: ints >= k become "k+", with k the largest cap' <= cap whose tail holds at
+    least min_n values (sparse tails would force permutation tests); non-int levels ("never", "none") are kept."""
+    ints = Counter(v for v in values if isinstance(v, int))
+    k = max(1, cap)
+    while k > 1 and sum(n for v, n in ints.items() if v >= k) < min_n:
+        k -= 1
+    return [v if not isinstance(v, int) else (str(v) if v < k else f"{k}+") for v in values], k
 
 
 def holm(p: list[float]) -> list[float]:
@@ -478,6 +552,10 @@ class Transition:
     prev: str | None = None  # family of the previous attack of the fight
     run: int = 0             # how many attacks in a row were of that family
     since: dict = field(default_factory=dict)   # family -> attacks since its last instance (absent: never)
+    prev_mirror: int | None = None   # mirror of the last directed attack (+1 faced +x)
+    last_seen: tuple | None = None   # (x, y) of the boss's last non-hidden export (history, not its position now)
+    fold: int = 0                    # held-out fold of the recording
+    local: tuple = ()                # earlier outcomes of this same state in the fight, oldest first
 
     @property
     def dx(self) -> float | None:
@@ -524,6 +602,9 @@ class EntitySeg:
     last_f: int = 0
     last_t: float = 0.0
     end: str | None = None
+    arm_T: float = 0.0           # game time since the scan start when it armed
+    arm_pos: tuple = (0.0, 0.0)  # its transform position then (the origin of its "self" template)
+    uid: int = 0                 # unique over the build (BehaviourBuilder.arming)
 
 
 @dataclass(slots=True)
@@ -553,6 +634,7 @@ class Instance:
     ents: list = field(default_factory=list)       # EntitySeg
     t_last: float = 0.0                             # last sample / tail time (s since start)
     holes: int = 0                                  # frames a damage entity of it was exported without colliders
+    hole_t: list = field(default_factory=list)      # s since start of those frames
     fold: int = 0                                   # held-out fold of its recording (BehaviourBuilder.validate)
 
     def state_at(self, t: float) -> tuple[str, float]:
@@ -583,6 +665,8 @@ class Contact:
     boxes: list              # hero boxes (x0, y0, x1, y1) at f-1 and f
     exported: bool           # the source had a support_threat collider in f-2..f
     hole: bool               # the source was exported without colliders in f-2..f
+    T: float = 0.0           # game time since the scan start
+    arm: tuple | None = None   # (arm_T, arm_pos) of a non-boss source's armed stretch (its "self" template)
     res: dict = field(default_factory=dict)   # template set -> residual (u; inf = none within R_SEARCH_U)
 
 
@@ -592,6 +676,7 @@ class _Frame:
     box: tuple | None
     cur: Instance | None
     owners: dict             # type_key -> owning instance of an armed entity
+    armed: dict              # type_key -> (arm_T, arm_pos) of its armed stretch
     threat: set              # type_keys (and (type_key, collider name)) with a support_threat collider
     holes: set               # type_keys exported without colliders while not hidden
     ended: Instance | None = None   # the instance that ended on this frame (a kill frame's contact belongs to it)
@@ -610,6 +695,8 @@ class FightScanner:
         self.hero_box: tuple | None = None
         self.boss_now: dict | None = None       # the boss entity exported and not hidden this frame
         self.boss_hidden: tuple | None = None   # (x, y) when exported hidden this frame
+        self.boss_last: tuple | None = None     # (x, y) of the last non-hidden export
+        self.last_mirror: int | None = None     # mirror of the last directed attack
         self.boss_hp: int | None = None
         self.ctl: str | None = None
         self.ctl_t: float | None = None
@@ -622,6 +709,7 @@ class FightScanner:
         self.ambient: set[int] = set()
         self.dead = False
         self.hist: list[str] = []
+        self.local: dict[str, list[str]] = defaultdict(list)   # Control state -> its outcomes so far
         self.known: set[str] = {spec.boss_type}
         self.ring: dict[int, _Frame] = {}
         self.pending: list[tuple] = []
@@ -648,6 +736,8 @@ class FightScanner:
             self.hero = (float(pos[0]), float(pos[1]))
         box = hero.get("box")
         self.hero_box = (float(box[0]), float(box[1]), float(box[2]), float(box[3])) if box else None
+        if self.hero_box is not None:
+            self.b.hero_box_size(self.hero_box)
         ents = s.get("ents") or []
         boss = None
         self.boss_hidden = None
@@ -659,8 +749,10 @@ class FightScanner:
                 elif boss is None:
                     boss = e
         self.boss_now = boss
-        if boss is not None and boss.get("hp") is not None:
-            self.boss_hp = boss.get("hp")
+        if boss is not None:
+            self.boss_last = (float(boss["pos"][0]), float(boss["pos"][1]))
+            if boss.get("hp") is not None:
+                self.boss_hp = boss.get("hp")
         for ev in s.get("ev") or ():
             k, d = ev.get("k"), ev.get("d") or {}
             if k == "fsm" and d.get("fsm") == self.spec.control_fsm and self._is_boss(d.get("obj")):
@@ -677,8 +769,8 @@ class FightScanner:
         if self.cur is not None and self.boss_hidden is not None and self.cur.anchor_hidden is None \
                 and self.cur.anchor is None:
             self.cur.anchor_hidden = (*self.boss_hidden, self.T - self.cur.t_start)
-        owners = self._entities(f, ents, first, threat, holes)
-        self.ring[f] = _Frame(self.T, self.hero_box, self.cur, owners, threat, holes, self.ended_now)
+        owners, armed = self._entities(f, ents, first, threat, holes)
+        self.ring[f] = _Frame(self.T, self.hero_box, self.cur, owners, armed, threat, holes, self.ended_now)
         self.ended_now = None
         self.ring.pop(f - RING_F, None)
         if self.pending:
@@ -704,7 +796,8 @@ class FightScanner:
                 break
             run += 1
         return Transition(self.fight, f, self.T, frm, to, t_in_prev, hx, hy, bx, by, self.boss_hidden, self.boss_hp,
-                          self.phase, self.hist[-1] if self.hist else None, run, since)
+                          self.phase, self.hist[-1] if self.hist else None, run, since, self.last_mirror,
+                          self.boss_last, self.fold, tuple(self.local[frm]) if frm else ())
 
     def _control(self, f: int, d: dict) -> None:
         spec = self.spec
@@ -713,6 +806,8 @@ class FightScanner:
             return
         tr = self._context(f, frm, to, d.get("t_in_prev"))
         self.b.transitions.append(tr)
+        if frm is not None and to not in spec.death_states:
+            self.local[frm].append(to)
         if frm is not None and frm == self.ctl and self.ctl_t is not None and to not in spec.death_states:
             self.b.dwells.append(Dwell(frm, self.T - self.ctl_t, d.get("t_in_prev"), to, f - self.ctl_f, self.phase))
         self.ctl, self.ctl_t, self.ctl_f = to, self.T, f
@@ -730,6 +825,8 @@ class FightScanner:
                                 dir=self.dir if fam in spec.directed else None, mirror=mirror,
                                 states=[(to, f, 0.0)], ctx=tr, hero_start=self.hero, boss_hp=self.boss_hp,
                                 fold=self.fold)
+            if fam in spec.directed and mirror is not None:
+                self.last_mirror = mirror
             self.hist.append(fam)
             self.dir = None
         elif to in spec.decision_states:
@@ -801,8 +898,12 @@ class FightScanner:
                 if owner is not None:
                     t = fr.T - owner.t_start
                     st, ts = owner.state_at(t)
+                arm = None
+                if tk is not None and tk != self.spec.boss_type:
+                    arm = next((self.ring[g].armed[tk] for g in range(ff, ff - LAG_F - 1, -1)
+                                if g in self.ring and tk in self.ring[g].armed), None)
                 self.b.contacts.append(Contact(kind, ff, self.fight, src, tk, owner, t, st, ts, boxes, exported,
-                                               hole))
+                                               hole, fr.T, arm))
         self.pending = []
 
     # ---- colliders ----
@@ -842,6 +943,7 @@ class FightScanner:
             self.b.holes[(tk, str(self.ctl))] += 1
             if cur is not None:
                 cur.holes += 1
+                cur.hole_t.append(self.T - cur.t_start)
         if cur is None:
             if threats:
                 self.b.counters[f"boss damage colliders outside attacks ({self.ctl})"] += 1
@@ -857,6 +959,8 @@ class FightScanner:
                                None if not ra else ((ra[0] + ra[2]) / 2 - bx, (ra[1] + ra[3]) / 2 - by))
             if cur.mirror is None:
                 cur.mirror = self.spec.flip_mirror[1 if cur.anchor_flip else 0]
+                if cur.family in self.spec.directed:
+                    self.last_mirror = cur.mirror
         cur.path.append((t, bx, by))
         for c in threats:
             self._sample(cur, tk, c, False)
@@ -894,7 +998,8 @@ class FightScanner:
                 owner = self.cur
                 world = tk.startswith(spec.world_fixed)
                 t_on = self.T - owner.t_start if owner else self.T
-                seg = self.segs[iid] = EntitySeg(iid, tk, world, t_on, self.ctl, owner, last_f=f, last_t=t_on)
+                seg = self.segs[iid] = EntitySeg(iid, tk, world, t_on, self.ctl, owner, last_f=f, last_t=t_on,
+                                                 arm_T=self.T, arm_pos=(float(e["pos"][0]), float(e["pos"][1])))
                 if owner is not None:
                     owner.ents.append(seg)
                 else:
@@ -907,21 +1012,27 @@ class FightScanner:
                 self._close(seg, "disarmed")
                 continue
             seg.last_t = self.T - seg.owner.t_start if seg.owner else self.T
+            for c in threats:
+                self.b.self_sample(seg, self.T - seg.arm_T, c, self.fold)
             if seg.owner is not None:
                 if isinstance(e.get("colliders"), list) and not e["colliders"]:
                     seg.owner.holes += 1
+                    seg.owner.hole_t.append(seg.last_t)
                 for c in threats:
                     self._sample(seg.owner, tk, c, seg.world)
-        owners = {}
+        owners, armed = {}, {}
         for iid, seg in list(self.segs.items()):
             if iid not in seen and f - seg.last_f > ABSENT_CLOSE_F:
                 self._close(seg, "left view")
-            elif seg.owner is not None and seg.owner.t_end is not None and \
+                continue
+            if seg.owner is not None and seg.owner.t_end is not None and \
                     self.T - seg.owner.t_start - seg.owner.t_end > spec.tail_max_s:
                 self._close(seg, "tail cap")
-            elif seg.owner is not None:
+                continue
+            if seg.owner is not None:
                 owners[seg.type_key] = seg.owner
-        return owners
+            armed[seg.type_key] = (seg.arm_T, seg.arm_pos)
+        return owners, armed
 
     def _close(self, seg: EntitySeg, why: str) -> None:
         seg.end = why
@@ -999,9 +1110,11 @@ class _InstSummary:
     hits: list
     n_samples: int
     sources: list
-    ttd: dict                # state -> s from its entry to the next enabled damage collider
+    ttd: dict                # state -> s from its entry to the next enabled damage collider (export holes left out)
     ttd_start: float | None
     holes: int
+    hole_states: frozenset   # states with export-hole frames (their windows and spanning ttd are left out)
+    ttd_holed: frozenset     # ttd entries left out because an export hole lies in their span ("start" included)
     path: np.ndarray | None  # (n, 3) t, x', y' (anchor frame)
     windows: list            # [(state, src, frame, t_on, t_off, x0, y0, x1, y1)] in the template frame
 
@@ -1041,6 +1154,15 @@ class BehaviourBuilder:
         self._built: Built | None = None
         self.recordings: dict[str, int] = {}
         self._folds: dict[str, dict[int, hb.SpaceTimeTemplate]] = {}
+        self.hero_box: list[float] = [math.inf, -math.inf, math.inf, -math.inf, 0]   # w min/max, h min/max, n
+        self.arm_at: dict[str, list] = defaultdict(list)   # type_key -> [(x, y, owner family, boss state)]
+        self._n_self = 0
+
+    def hero_box_size(self, box: tuple) -> None:
+        w, h = box[2] - box[0], box[3] - box[1]
+        hb_ = self.hero_box
+        hb_[0], hb_[1], hb_[2], hb_[3] = min(hb_[0], w), max(hb_[1], w), min(hb_[2], h), max(hb_[3], h)
+        hb_[4] += 1
 
     # ---- input ----
 
@@ -1056,7 +1178,7 @@ class BehaviourBuilder:
         sc.close()
         info = {"id": fight.id, "kind": fight.kind, "path": str(fight.path), "f0": fight.f0, "f1": fight.f1,
                 "outcome": fight.outcome, "frames": sc.frames, "gaps": sc.gaps, "game_s": _r(sc.T, 2),
-                "instances": len(self.instances) - n0, "died": sc.dead}
+                "instances": len(self.instances) - n0, "died": sc.dead, "fold": fold}
         self.fights.append(info)
         return info
 
@@ -1103,6 +1225,19 @@ class BehaviourBuilder:
 
     def arming(self, seg: EntitySeg, owner: Instance | None) -> None:
         self.segs.append((seg, owner.family if owner else None))
+        ts = owner.state_at(seg.t_on)[1] if owner is not None else None
+        self.arm_at[seg.type_key].append((*seg.arm_pos, owner.family if owner else None, seg.trigger, ts))
+        self._n_self += 1
+        seg.uid = self._n_self  # unique over fights: the instance id of its self-template samples
+
+    def self_sample(self, seg: EntitySeg, t: float, c: dict, fold: int) -> None:
+        """One enabled damage collider of an armed entity relative to where it armed, t s after arming: its "self"
+        template (ent/<type_key>/self, anchor frame with the arming position as anchor, mirror 1)."""
+        v = np.asarray(c["verts_world"], np.float64).reshape(-1, 2) - seg.arm_pos
+        r = hb.rasterize(v, self.cell)
+        if r is not None:
+            self._acc(f"{SELF}/{seg.type_key}", "anchor", f"self@{fold}").add_patch(
+                int(round(t / self.bin_s)), *r, instance=seg.uid)
 
     def ambient_sample(self, tk: str, threats: list) -> None:
         """An ambient (armed at the scan start) hazard's colliders: a time-less world-frame template."""
@@ -1147,7 +1282,7 @@ class BehaviourBuilder:
                 st_bins.append((seg_t[j - 1][0], int(round((smp.t - seg_t[j - 1][1]) / self.bin_s))))
             self._acc(fam, "world", f"world_all@{inst.fold}").add_patch(bt, *rw, instance=iid)
             for st, bs in st_bins:
-                self._acc(f"{fam}/{st}", "world", "world_all").add_patch(bs, *rw, instance=iid)
+                self._acc(f"{fam}/{st}", "world", f"world_all@{inst.fold}").add_patch(bs, *rw, instance=iid)
             if smp.world:
                 verts, frame, r = smp.verts, "world", rw
             elif inst.anchor is not None:
@@ -1158,7 +1293,7 @@ class BehaviourBuilder:
                 continue
             self._acc(fam, frame, f"{frame}@{inst.fold}").add_patch(bt, *r, instance=iid)
             for st, bs in st_bins:
-                self._acc(f"{fam}/{st}", frame).add_patch(bs, *r, instance=iid)
+                self._acc(f"{fam}/{st}", frame, f"{frame}@{inst.fold}").add_patch(bs, *r, instance=iid)
             first_dmg = smp.t if first_dmg is None else min(first_dmg, smp.t)
             w = per_src.get((smp.state, smp.src))
             vmin, vmax = verts.min(axis=0), verts.max(axis=0)
@@ -1174,9 +1309,9 @@ class BehaviourBuilder:
                     w[8].add(smp.name)
         if skipped:
             self.counters["anchor-frame samples without an anchor (world_all only)"] += skipped
-        clean = inst.holes == 0
-        if not clean:
-            self.counters["instances with export holes (left out of ttd / window statistics)"] += 1
+        hole_states = frozenset(inst.state_at(t)[0] for t in inst.hole_t)
+        if hole_states:
+            self.counters["instances with export holes (those states left out of ttd / window statistics)"] += 1
         wins = []
         for (state, src), w in per_src.items():
             wins.append((state, src, w[7], w[2], w[3], *w[4].tolist(), *w[5].tolist()))
@@ -1188,7 +1323,7 @@ class BehaviourBuilder:
             info["dmg"] |= w[6]
             info["names"] |= w[8]
             info["phases"][inst.phase] += 1
-            if clean:
+            if state not in hole_states:
                 self.windows[(fam, state, src)].append((w[0], w[1], w[2], w[3], inst.phase))
             else:
                 info["holes"] += 1
@@ -1200,80 +1335,108 @@ class BehaviourBuilder:
             pa = self.paths[fam]
             for t, x, y in path:
                 pa.add(int(round(t / self.bin_s)), x, y)
-        # time to damage: from each state entry (and the start) to the next enabled damage collider of the instance
+        # time to damage: from each state entry (and the start) to the next enabled damage collider of the instance;
+        # left out when a frame exported without colliders lies in that span (the damage may have started earlier)
         times = np.sort(np.array([s.t for s in inst.samples], np.float64))
-        ttd = {}
+        hole_t = np.sort(np.array(inst.hole_t, np.float64))
+
+        def holed(t0: float, t1: float) -> bool:
+            k = int(np.searchsorted(hole_t, t0 - edge))
+            return k < len(hole_t) and hole_t[k] <= t1 + edge
+
+        ttd, ttd_holed = {}, set()
         for st, _, ts in inst.states:
             i = int(np.searchsorted(times, ts - 1e-6))
-            if i < len(times) and st not in ttd:
+            if st in ttd or st in ttd_holed:
+                continue
+            end = float(times[i]) if i < len(times) else (inst.t_end or ts)
+            if holed(ts, end):
+                ttd_holed.add(st)
+            elif i < len(times):
                 ttd[st] = float(times[i] - ts) if times[i] > ts else 0.0
+        ttd_start = None if first_dmg is None else float(first_dmg)
+        if holed(0.0, ttd_start if ttd_start is not None else (inst.t_end or 0.0)):
+            ttd_holed.add("start")
+            ttd_start = None
         t_tail = max([inst.t_end or 0.0, inst.t_last] + [s.t_off for s in inst.ents if s.t_off is not None])
         self.instances.append(_InstSummary(
             fam, inst.phase, inst.fight, inst.f_start, inst.dir, inst.mirror, inst.anchor, inst.anchor_t,
             inst.anchor_flip, inst.anchor_body, inst.anchor_hidden, inst.hero_start, inst.boss_hp, inst.ctx,
             list(inst.states), inst.t_end, inst.end, t_tail, inst.hits, len(inst.samples),
-            sorted({s.src for s in inst.samples}), ttd, None if first_dmg is None else float(first_dmg), inst.holes,
+            sorted({s.src for s in inst.samples}), ttd, ttd_start, inst.holes, hole_states, frozenset(ttd_holed),
             path.astype(np.float32) if path is not None else None, wins))
         inst.samples = []
 
     # ---- validation --------------------------------------------------------------------------------------
 
     @staticmethod
-    def contact_sets(c: Contact) -> dict[str, list[tuple[str, bool, float]]]:
-        """Template sets a contact is checked against: name -> [(raw key, anchored, template time)]."""
+    def contact_sets(c: Contact) -> dict[str, list[tuple]]:
+        """Template sets a contact is checked against: name -> [(raw key, anchor or None (world), mirror, template
+        time)]; an anchor-frame member of an instance whose anchor was never seen is skipped (anchor None, key in
+        anchor frame: marked by mirror 0)."""
         fam = c.inst.family
-        sets = {"anchor": [(f"{fam}/anchor", True, c.t), (f"{fam}/world", False, c.t)],
-                "world_all": [(f"{fam}/world_all", False, c.t)]}
+        a, m = c.inst.anchor, c.inst.mirror or 1
+        anc = (a, m) if a is not None else (None, 0)
+        sets = {"anchor": [(f"{fam}/anchor", *anc, c.t), (f"{fam}/world", None, 1, c.t)],
+                "world_all": [(f"{fam}/world_all", None, 1, c.t)]}
         if c.state is not None:
-            sets[f"state:{c.state}"] = [(f"{fam}/{c.state}/anchor", True, c.ts), (f"{fam}/{c.state}/world", False,
+            sets[f"state:{c.state}"] = [(f"{fam}/{c.state}/anchor", *anc, c.ts), (f"{fam}/{c.state}/world", None, 1,
                                                                                   c.ts)]
-            sets[f"state_world_all:{c.state}"] = [(f"{fam}/{c.state}/world_all", False, c.ts)]
+            sets[f"state_world_all:{c.state}"] = [(f"{fam}/{c.state}/world_all", None, 1, c.ts)]
+        if c.arm is not None:
+            sets[f"self:{c.tk}"] = [(f"{SELF}/{c.tk}/self", c.arm[1], 1, c.T - c.arm[0])]
         return sets
 
+    @staticmethod
+    def _residual(c: Contact, members: list, lookup, tol: int = 1) -> tuple[float, bool]:
+        """(distance from the contact's hero boxes to the nearest occupied cell of the members' templates at their
+        time +- tol bins, whether any member template was usable); lookup(key) -> templates to search."""
+        d, usable = math.inf, False
+        for key, anchor, mirror, t in members:
+            if anchor is None and mirror == 0:
+                continue
+            for tpl in lookup(key):
+                usable = True
+                for box in c.boxes:
+                    b = hb.box_to_anchor(box, anchor, mirror) if anchor is not None else box
+                    d = min(d, tpl.box_distance(t, b, tol_bins=tol, r_max=R_SEARCH_U))
+                    if d == 0.0:
+                        return 0.0, True
+        return d, usable
+
     def validate(self, raw: dict[str, hb.SpaceTimeTemplate]) -> dict:
-        """Residual of every contact per template set; the dilation radius of every raw template; failures."""
+        """Residual of every contact per template set (in sample, and held out against the other folds' logged
+        occupancy); the dilation radius of every raw template; failures."""
         radius: dict[str, float] = {}
         per_set: dict[tuple, list] = defaultdict(list)       # (family, set) -> residuals
-        heldout: dict[tuple, list] = defaultdict(list)       # (family, set) -> residuals to the other fold's occupancy
-        fails, outside, unexplained = [], [], []
+        heldout: dict[tuple, list] = defaultdict(list)       # (family, set) -> (residual, residual +- HELD_T_BINS,
+        fails, outside, unexplained = [], [], []             #                  member keys)
+        own = lambda k: [raw[k]] if k in raw else []  # noqa: E731
         for c in self.contacts:
             if c.inst is None:
                 outside.append(c)
                 continue
             if not c.exported and not c.hole:
                 unexplained.append(c)
+            if not c.boxes:
+                continue
+            others = lambda k: [t for fd, t in self._folds.get(k, {}).items() if fd != c.inst.fold]  # noqa: E731
             for name, members in self.contact_sets(c).items():
-                d = math.inf
-                usable = False
-                for key, anchored, t in members:
-                    tpl = raw.get(key)
-                    if tpl is None or (anchored and c.inst.anchor is None):
-                        continue
-                    usable = True
-                    for box in c.boxes:
-                        b = hb.box_to_anchor(box, c.inst.anchor, c.inst.mirror or 1) if anchored else box
-                        d = min(d, tpl.box_distance(t, b, tol_bins=1, r_max=R_SEARCH_U))
-                if not usable or not c.boxes:
+                d, usable = self._residual(c, members, own)
+                if not usable:
                     continue
                 c.res[name] = d
                 per_set[(c.inst.family, name)].append(d)
                 if d <= R_FAIL_U:
-                    for key, _, _ in members:
-                        radius[key] = max(radius.get(key, 0.0), d)
-                elif name in ("anchor", "world_all"):
+                    for key, *_ in members:
+                        if key in raw:
+                            radius[key] = max(radius.get(key, 0.0), d)
+                else:
                     fails.append((c, name, d))
-                if name in ("anchor", "world_all"):  # held out: the other folds' recordings only
-                    dh, usable = math.inf, False
-                    for key, anchored, t in members:
-                        for fold, tpl in self._folds.get(key, {}).items():
-                            if fold == c.inst.fold or (anchored and c.inst.anchor is None):
-                                continue
-                            usable = True
-                            for box in c.boxes:
-                                b = hb.box_to_anchor(box, c.inst.anchor, c.inst.mirror or 1) if anchored else box
-                                dh = min(dh, tpl.box_distance(t, b, tol_bins=1, r_max=R_SEARCH_U))
-                    if usable:
-                        heldout[(c.inst.family, name)].append(dh)
+                dh, usable = self._residual(c, members, others)
+                if usable:
+                    dt = self._residual(c, members, others, HELD_T_BINS)[0] if dh > 0.0 else 0.0
+                    heldout[(c.inst.family, name)].append((dh, dt, tuple(m[0] for m in members if m[0] in raw)))
         fam_r: dict[str, float] = defaultdict(float)
         for key, r in radius.items():
             fam_r[key.split("/")[0]] = max(fam_r[key.split("/")[0]], r)
@@ -1365,14 +1528,22 @@ class BehaviourBuilder:
 
     # ---- decision covariates ----
 
-    def _covariates(self, trs: list[Transition]) -> tuple[dict[str, list], dict]:
+    def _covariates(self, trs: list[Transition], outs: list[str]) -> tuple[dict[str, list], dict]:
         """Decision-time covariate levels per transition (None = not available) and their definitions."""
         spec = self.spec
         fams = self.families()
-        hx = [t.hero_x for t in trs if t.hero_x is not None]
-        lo, hi = (min(hx), max(hx)) if hx else (0.0, 1.0)
-        w = (hi - lo) / 3.0 or 1.0
-        edges = [lo + w, hi - w]
+
+        def thirds(xs: list) -> tuple[list[float], float, float]:
+            v = [x for x in xs if x is not None]
+            lo, hi = (min(v), max(v)) if v else (0.0, 1.0)
+            w = (hi - lo) / 3.0 or 1.0
+            return [lo + w, hi - w], lo, hi
+
+        def third(x: float | None, edges: list[float]) -> str | None:
+            return None if x is None else "W" if x < edges[0] else "E" if x >= edges[1] else "C"
+
+        hx_e, hx_lo, hx_hi = thirds([t.hero_x for t in trs])
+        ls_e, ls_lo, ls_hi = thirds([t.last_seen[0] if t.last_seen else None for t in trs])
         cov: dict[str, list] = defaultdict(list)
         for t in trs:
             vis = t.boss_x is not None and t.hero_x is not None
@@ -1382,24 +1553,49 @@ class BehaviourBuilder:
                 cov["dist_hidden"].append(dist_bin(abs(t.hero_x - t.boss_hidden[0]), spec.dist_bins_u))
             else:
                 cov["dist_hidden"].append(None)
-            cov["hero_x"].append(None if t.hero_x is None else
-                                 ("W" if t.hero_x < edges[0] else "E" if t.hero_x >= edges[1] else "C"))
+            cov["hero_x"].append(third(t.hero_x, hx_e))
             cov["phase"].append(t.phase)
             cov["boss_hp"].append(None if t.boss_hp is None else
                                   f"q{min(4, max(1, math.ceil(4 * t.boss_hp / spec.hp)))}")
             cov["prev"].append(t.prev or "none")
-            cov["run"].append("none" if t.prev is None else str(min(t.run, 3)) + ("+" if t.run >= 3 else ""))
+            cov["run"].append("none" if t.prev is None else t.run)
+            cov["prev_dir"].append({1: "faced +x", -1: "faced -x"}.get(t.prev_mirror, "none"))
+            cov["last_seen_x"].append(third(t.last_seen[0], ls_e) if t.last_seen else None)
             for fam in fams:
                 k = t.since.get(fam)
-                cov[f"since_{fam}"].append("never" if k is None else (str(k) if k < 3 else "3+"))
+                cov[f"since_{fam}"].append("never" if k is None else k)
+            loc = t.local
+            cov["last_choice"].append(loc[-1] if loc else "none")
+            run = 0
+            for o in reversed(loc):
+                if o != loc[-1]:
+                    break
+                run += 1
+            cov["choice_run"].append(run if loc else "none")
+            for o in outs:
+                k = next((j for j, x in enumerate(reversed(loc)) if x == o), None)
+                cov[f"miss_{o}"].append("never" if k is None else k)
+        caps = {}
+        for name, cap in [("run", RUN_CAP), ("choice_run", RUN_CAP)] + \
+                [(f"since_{fam}", SINCE_CAP) for fam in fams] + [(f"miss_{o}", SINCE_CAP) for o in outs]:
+            cov[name], caps[name] = _cap_tail(cov[name], cap)
         defs = {"dist_visible": f"|hero x - boss x| bin of {list(spec.dist_bins_u)} u, boss exported and not hidden",
                 "side_visible": "hero left (L) / right (R) of the visible boss",
                 "dist_hidden": "|hero x - hidden boss x| bin (oracle-only ents[].hidden position)",
-                "hero_x": f"hero world-x third over the observed range {_r(lo, 2)}..{_r(hi, 2)} (edges "
-                          f"{[_r(e, 2) for e in edges]})",
+                "hero_x": f"hero world-x third over the observed range {_r(hx_lo, 2)}..{_r(hx_hi, 2)} (edges "
+                          f"{[_r(e, 2) for e in hx_e]})",
                 "phase": "encounter phase", "boss_hp": f"boss HP quarter of {spec.hp} (q1 <= 25 %)",
-                "prev": "family of the previous attack of the fight", "run": "consecutive attacks of that family",
-                **{f"since_{fam}": f"attacks since the last {fam} (0 = the previous one)" for fam in fams}}
+                "prev": "family of the previous attack of the fight",
+                "run": f"consecutive attacks of that family (top level {caps['run']}+)",
+                "prev_dir": "facing of the last directed attack (history)",
+                "last_seen_x": f"third of the boss's last non-hidden x over {_r(ls_lo, 2)}..{_r(ls_hi, 2)} (history: "
+                               f"where it was last seen, not where it is)",
+                **{f"since_{fam}": f"attacks since the last {fam} (0 = the previous one; top level "
+                                   f"{caps[f'since_{fam}']}+)" for fam in fams},
+                "last_choice": "this state's previous outcome in the fight",
+                "choice_run": f"times in a row this state chose that outcome (top level {caps['choice_run']}+)",
+                **{f"miss_{o}": f"decisions of this state since it last chose {o} (0 = the previous one; top level "
+                                f"{caps[f'miss_{o}']}+)" for o in outs}}
         return cov, defs
 
     def decisions(self, branching: list[str]) -> dict:
@@ -1407,9 +1603,10 @@ class BehaviourBuilder:
         for st in branching:
             trs = [t for t in self.transitions if t.frm == st and t.to not in self.spec.death_states]
             outs = sorted({t.to for t in trs})
-            cov, defs = self._covariates(trs)
+            cov, defs = self._covariates(trs, outs)
             y_all = np.array([outs.index(t.to) for t in trs], np.int64)
-            row = {"n": len(trs), "to": dict(Counter(t.to for t in trs).most_common()), "worst_case": len(trs) < N_WORST,
+            row = {"n": len(trs), "to": dict(Counter(t.to for t in trs).most_common()),
+                   "worst_case": len(trs) < N_WORST,
                    "probability_only": True, "covariates": defs, "tests": {}, "untestable": {}}
             for name, levels in cov.items():
                 ok = np.array([v is not None for v in levels])
@@ -1438,6 +1635,7 @@ class BehaviourBuilder:
         for st, (row, trs, cov, outs) in rows.items():
             cand = sorted((n for n, r in row["tests"].items() if r["significant"]), key=lambda n: row["tests"][n]["p"])
             kept: list[str] = []
+            ll_best = self._decision_heldout(trs, cov, [], outs).get("logloss_conditioned")
             for name in cand:
                 if kept:
                     ok = np.array([all(cov[k][i] is not None for k in kept + [name]) for i in range(len(trs))])
@@ -1452,6 +1650,11 @@ class BehaviourBuilder:
                     row["tests"][name]["p_given"] = res["p"]
                     if res["p"] >= ALPHA_TEST / max(1, len(cand)):
                         continue
+                ll = self._decision_heldout(trs, cov, kept + [name], outs).get("logloss_conditioned")
+                row["tests"][name]["heldout_logloss_with"] = ll
+                if ll is not None and ll_best is not None and ll >= ll_best - HELD_LL_GAIN:
+                    continue   # significant in sample, no better on held-out recordings: too many cells for the data
+                ll_best = ll
                 kept.append(name)
             row["conditioners"] = kept
             table = {}
@@ -1465,8 +1668,39 @@ class BehaviourBuilder:
                 table[g] = {"n": sum(cnt.values()), "counts": dict(cnt), "p": {k: _r(v) for k, v in p.items()},
                             "p_unseen": _r(pu), "low_n": sum(cnt.values()) < N_WORST}
             row["table"] = table
+            row["heldout"] = self._decision_heldout(trs, cov, kept, outs)
             out[st] = row
         return out
+
+    @staticmethod
+    def _decision_heldout(trs: list[Transition], cov: dict, kept: list[str], outs: list[str]) -> dict:
+        """Mean log loss (nats per decision) of the choices of each recording fold under the tables fitted on the
+        other folds, conditioned on the kept covariates vs unconditional (a cell unseen in training falls back to the
+        unconditional table). The conditioners themselves were selected on all recordings."""
+        folds = sorted({t.fold for t in trs})
+        if len(folds) < 2:
+            return {"n": 0, "note": "one fold"}
+        ll_c = ll_u = 0.0
+        n = 0
+        for f in folds:
+            groups: dict[tuple, Counter] = defaultdict(Counter)
+            uc: Counter = Counter()
+            for i, t in enumerate(trs):
+                if t.fold != f:
+                    uc[t.to] += 1
+                    groups[tuple(cov[k][i] for k in kept)][t.to] += 1
+            pu = dirichlet({o: uc.get(o, 0) for o in outs})[0]
+            for i, t in enumerate(trs):
+                if t.fold != f:
+                    continue
+                key = tuple(cov[k][i] for k in kept)
+                g = groups.get(key) if None not in key else None
+                pc = dirichlet({o: g.get(o, 0) for o in outs})[0] if g else pu
+                ll_c -= math.log(pc[t.to])
+                ll_u -= math.log(pu[t.to])
+                n += 1
+        return {"n": n, "folds": len(folds), "logloss_conditioned": _r(ll_c / n), "logloss_unconditional": _r(ll_u / n),
+                "note": "nats per decision on held-out recordings; conditioners selected on all recordings"}
 
     # ---- attacks ----
 
@@ -1475,7 +1709,7 @@ class BehaviourBuilder:
         out = {}
         for fam in self.families():
             ins = [i for i in self.instances if i.family == fam]
-            clean = [i for i in ins if i.holes == 0]
+            holed = [i for i in ins if i.holes]
             states = list(dict.fromkeys(st for i in ins for st, _, _ in i.states))
             starts = sorted({i.states[0][0] for i in ins})
             anchor = {"frame": "boss transform position (STATE ents[].pos) at its first non-hidden export in the "
@@ -1496,12 +1730,7 @@ class BehaviourBuilder:
                     "x": quantiles(ax), "y": quantiles(ay), "flipX": dict(Counter(str(i.anchor_flip) for i in v)),
                     "x_minus_hero_x": quantiles([i.anchor[0] - i.hero_start[0] for i in v
                                                  if i.anchor and i.hero_start])}
-            bo = [i.anchor_body[0] for i in ins if i.anchor_body and i.anchor_body[0] is not None]
-            ro = [i.anchor_body[1] for i in ins if i.anchor_body and i.anchor_body[1] is not None]
-            anchor["body_offset"] = {"box_centre_dx": quantiles([o[0] for o in bo], 3),
-                                     "box_centre_dy": quantiles([o[1] for o in bo], 3),
-                                     "render_centre_dx": quantiles([o[0] for o in ro], 3),
-                                     "render_centre_dy": quantiles([o[1] for o in ro], 3)}
+            anchor["body_offset"] = self._body_offsets(ins)
             hid = [i for i in ins if i.anchor_hidden and i.anchor]
             anchor["hidden"] = {"n": len(hid), "desc": "first hidden export (ents[].hidden) before the anchor",
                                 "t_s": quantiles([i.anchor_hidden[2] for i in hid]),
@@ -1513,19 +1742,24 @@ class BehaviourBuilder:
                 for _, st, src, _, _ in i.hits:
                     hits[src] += 1
                     hits_state[st] += 1
-            ttd = {st: quantiles([i.ttd[st] for i in clean if st in i.ttd]) for st in states}
+            ttd = {st: quantiles([i.ttd[st] for i in ins if st in i.ttd]) for st in states}
+            ttd_out = Counter(st for i in ins for st in i.ttd_holed)
             row = {
                 "start_states": starts, "states": states, "n": len(ins),
                 "n_by_phase": dict(Counter(i.phase for i in ins)), "n_by_dir": dict(Counter(i.dir or "-" for i in ins)),
                 "ends": dict(Counter(i.end for i in ins)), "mirrored": fam in spec.directed,
-                "export_holes": {"instances": len(ins) - len(clean),
-                                 "note": "left out of ttd_s and hitbox t_on/t_off statistics, kept in the templates"},
+                "export_holes": {"instances": len(holed), "frames": sum(i.holes for i in ins),
+                                 "states": dict(Counter(st for i in holed for st in i.hole_states)),
+                                 "ttd_left_out": dict(ttd_out),
+                                 "note": "frames a damage entity of the instance was exported without colliders: the "
+                                         "hitbox windows of those states and every ttd span containing such a frame "
+                                         "are left out of the statistics; the templates keep the instance"},
                 "boss_hp_at_start": quantiles([i.boss_hp for i in ins], 1),
                 "duration_s": quantiles([i.t_end for i in ins if i.end == "rest"]),
                 "tail_s": quantiles([i.t_tail for i in ins]),
                 "state_entry_s": {st: quantiles([ts for i in ins for s2, _, ts in i.states if s2 == st])
                                   for st in states},
-                "ttd_s": {"start": quantiles([i.ttd_start for i in clean]), **ttd},
+                "ttd_s": {"start": quantiles([i.ttd_start for i in ins]), **ttd},
                 "anchor": anchor,
                 "select": {"probability_only": True, "counts_by_phase": dict(Counter(i.phase for i in ins)),
                            "decided_at": "decisions[<state>] (covariates tested; no distance bins assumed)"},
@@ -1540,6 +1774,29 @@ class BehaviourBuilder:
                 row["reach_union"] = {k.split("/")[-1]: v for k, v in reach.items()
                                       if k.count("/") == 1 and k.split("/")[0] == fam}
             out[fam] = row
+        return out
+
+    @staticmethod
+    def _body_offsets(ins: list[_InstSummary]) -> dict:
+        """Body box centre and render_aabb centre minus the anchor on the anchor frame, in the anchor frame (x' =
+        mirror * dx), per direction: anchor = Entity.pos (body collider centre, DESIGN §4.1) - offset. A conservative
+        placement takes the support (min / max), not the quantiles."""
+        out: dict = {"frame": "anchor: dx' = mirror * (centre x - anchor x), dy = centre y - anchor y", "by_dir": {}}
+        by = defaultdict(list)
+        for i in ins:
+            if i.anchor_body:
+                by[i.dir or "-"].append(i)
+        for d, v in sorted(by.items()):
+            row = {}
+            for j, name in ((0, "box_centre"), (1, "render_centre")):
+                o = [((i.mirror or 1) * i.anchor_body[j][0], i.anchor_body[j][1]) for i in v
+                     if i.anchor_body[j] is not None]
+                if o:
+                    xs, ys = [a for a, _ in o], [b for _, b in o]
+                    row[name] = {"support": {"dx": [_r(min(xs), 3), _r(max(xs), 3)],
+                                             "dy": [_r(min(ys), 3), _r(max(ys), 3)]},
+                                 "dx": quantiles(xs, 3), "dy": quantiles(ys, 3)}
+            out["by_dir"][d] = row
         return out
 
     def _residual_rows(self, fam: str, val: dict) -> dict:
@@ -1560,34 +1817,35 @@ class BehaviourBuilder:
                 by_src[c.src].append(c.res["anchor"])
         radius = {k: {"u": _r(r, 4), "from": why} for k, (r, why) in sorted(val["radius"].items())
                   if k.split("/")[0] == fam}
-        held = {}
-        for (f, name), ds in sorted(val["heldout"].items()):
-            if f != fam:
-                continue
-            v = np.array(ds, np.float64)
-            fin = v[np.isfinite(v)]
-            r_set = val["radius"].get(f"{fam}/{'anchor' if name == 'anchor' else 'world_all'}", (0.0, ""))[0]
-            held[name] = {"n": int(v.size), "within_radius": int((v <= r_set + 1e-9).sum()), "radius": _r(r_set),
-                          "p99": _r(float(np.quantile(fin, 0.99)) if fin.size else None),
-                          "max": _r(float(fin.max()) if fin.size else None), "beyond_r_fail": int((v > R_FAIL_U).sum())}
+        held = {name: _held_row(items, val["radius"]) for (f, name), items in sorted(val["heldout"].items())
+                if f == fam}
         return {"desc": "distance (u) from the hero hurtbox at f-1 / f to the family's logged occupancy at t +- 1 bin, "
                         "per template set; support templates are dilated by the set's max (radius) and +-1 bin",
                 "sets": sets,
                 "holdout": {"desc": f"the same distance to the occupancy logged in the other recordings only "
-                                    f"({N_FOLDS} folds by recording): coverage of unseen instances", **held},
+                                    f"({N_FOLDS} folds by recording, each built from about half the instances): "
+                                    f"coverage of unseen instances. within_radius: inside the support of the full "
+                                    f"build; within_radius_t{HELD_T_BINS}: also with +-{HELD_T_BINS} bins of timing "
+                                    f"slack", **held},
                 "by_source_anchor": {s: {"n": len(d), "p99": _r(float(np.quantile(d, 0.99))), "max": _r(max(d))}
                                      for s, d in sorted(by_src.items()) if np.isfinite(d).all()},
                 "radius": radius}
 
     def _hitboxes(self, fam: str) -> list[dict]:
+        """Per (state, source): windows (+-1 frame of export lag), extent, damage; presence = share of the instances
+        entering the state (per phase) in which the source was enabled there; n = instances in the window statistics,
+        n_export_holes = instances left out of them (an export hole in that state)."""
         rows = []
         lag = self.bin_s
-        entered = Counter(st for i in self.instances if i.family == fam for st in {s for s, _, _ in i.states})
-        entered[TAIL] = sum(1 for i in self.instances if i.family == fam)
+        ins = [i for i in self.instances if i.family == fam]
+        entered = Counter((st, i.phase) for i in ins for st in {s for s, _, _ in i.states} | {TAIL})
         for (f, state, src), info in sorted(self.src_info.items()):
             if f != fam:
                 continue
             seen = sum(info["phases"].values())
+            n_in = sum(n for (st, _), n in entered.items() if st == state)
+            pres = {ph: _r(info["phases"].get(ph, 0) / n, 3) for (st, ph), n in sorted(entered.items())
+                    if st == state and n}
             ws = self.windows.get((f, state, src)) or []
             w = np.array([x[:4] for x in ws], np.float64).reshape(-1, 4)
             dealt = sorted({d[0] for d in info["dmg"] if d[0] is not None})
@@ -1598,19 +1856,20 @@ class BehaviourBuilder:
             lo, hi = info["lo"], info["hi"]
             row = {"state": state, "source": src, "names": sorted(info["names"]), "frame": info["frame"],
                    "n": len(ws), "n_export_holes": info["holes"], "phases": dict(info["phases"]),
-                   "presence": _r(seen / entered[state], 3) if entered.get(state) else None}
+                   "presence": _r(seen / n_in, 3) if n_in else None, "presence_by_phase": pres}
             if len(w):
                 row.update({"t0_state": _r(float(w[:, 0].min()) - lag), "t1_state": _r(float(w[:, 1].max()) + lag),
                             "t0": _r(float(w[:, 2].min()) - lag), "t1": _r(float(w[:, 3].max()) + lag),
                             "t_on_state": quantiles(w[:, 0]), "t_off_state": quantiles(w[:, 1]),
                             "t_on": quantiles(w[:, 2]), "t_off": quantiles(w[:, 3])})
-            row.update({"x": [_r(float(lo[0]), 3), _r(float(hi[0]), 3)], "y": [_r(float(lo[1]), 3), _r(float(hi[1]), 3)],
+            row.update({"x": [_r(float(lo[0]), 3), _r(float(hi[0]), 3)],
+                        "y": [_r(float(lo[1]), 3), _r(float(hi[1]), 3)],
                         "dmg": dealt, "eff": eff, "type": haz, "flags": flags, "parry": parry,
                         "parryable": "clash" in parry or "force" in parry})
             rows.append(row)
         return rows
 
-    def entities(self) -> dict:
+    def entities(self, val: dict | None = None) -> dict:
         out = {}
         seg_by = defaultdict(list)
         for seg, fam in self.segs:
@@ -1634,7 +1893,48 @@ class BehaviourBuilder:
                 "lifetime_s": quantiles([s.t_off - s.t_on for s, _ in segs if s.t_off is not None]),
                 "end": dict(Counter(str(s.end) for s, _ in segs)),
                 "world_frame": tk.startswith(self.spec.world_fixed)}
+            if self.arm_at.get(tk):
+                out[tk]["arm_pos"] = self._arm_pos(tk)
+            if val is not None and f"{SELF}/{tk}/self" in val["radius"]:
+                out[tk]["self_template"] = self._self_row(tk, val)
         return out
+
+    def _arm_pos(self, tk: str) -> dict:
+        """Where and when the entity armed (transform position; s since the entry of the owner's Control state then):
+        the support (min / max) a self template is swept over before the entity is seen arming (dilated by half the
+        x / y ranges about their centre, the time range added as time bins), per owner family and boss state;
+        quantiles are probability only."""
+        rows = self.arm_at[tk]
+        by = defaultdict(list)
+        for x, y, fam, trig, ts in rows:
+            by[f"{fam} / {trig}"].append((x, y, ts))
+
+        def sup(v):
+            xs, ys, ts = [a[0] for a in v], [a[1] for a in v], [a[2] for a in v if a[2] is not None]
+            out = {"n": len(v), "x": [_r(min(xs), 3), _r(max(xs), 3)], "y": [_r(min(ys), 3), _r(max(ys), 3)]}
+            if ts:
+                out["t_since_state_entry_s"] = [_r(min(ts)), _r(max(ts))]
+            return out
+
+        return {"support": sup([r[:2] + (None,) for r in rows]),
+                "by_owner_state": {k: sup(v) for k, v in sorted(by.items())},
+                "x": quantiles([r[0] for r in rows], 3), "y": quantiles([r[1] for r in rows], 3),
+                "probability_only": ["x", "y"]}
+
+    def _self_row(self, tk: str, val: dict) -> dict:
+        key = f"{SELF}/{tk}/self"
+        r, why = val["radius"][key]
+        name = f"self:{tk}"
+        ds = [d for (fam, n), v in val["per_set"].items() if n == name for d in v]
+        held = [h for (fam, n), v in val["heldout"].items() if n == name for h in v]
+        v = np.array(ds, np.float64)
+        fin = v[np.isfinite(v)]
+        return {"npz": hb.SUPPORT + key, "frame": "anchor = the arming position (STATE ents[].pos), mirror 1; t = s "
+                                                  "since arming",
+                "radius_u": _r(r), "radius_from": why, "contacts": int(v.size),
+                "p99": _r(float(np.quantile(fin, 0.99))) if fin.size else None,
+                "max": _r(float(fin.max())) if fin.size else None,
+                "holdout": _held_row(held, val["radius"]) if held else {"n": 0}}
 
     def phases(self) -> dict:
         out = {k: {"desc": v} for k, v in self.spec.phases.items()}
@@ -1644,7 +1944,8 @@ class BehaviourBuilder:
         return out
 
     def _contact_row(self, c: Contact, d: float | None = None) -> dict:
-        return {"fight": c.fight, "f": c.f, "kind": c.kind, "source": c.src, "family": c.inst.family if c.inst else None,
+        return {"fight": c.fight, "f": c.f, "kind": c.kind, "source": c.src,
+                "family": c.inst.family if c.inst else None,
                 "state": c.state, "t": _r(c.t), "exported": c.exported, "export_hole": c.hole,
                 "residual_u": None if d is None else (_r(d) if math.isfinite(d) else "inf")}
 
@@ -1655,17 +1956,15 @@ class BehaviourBuilder:
         fails = val["fails"]
         hole_c = [c for c in cs if not c.exported and c.hole]
         ok = not fails and not unexpl and not val["outside"]
-        ho = {}
-        for (fam, name), ds in val["heldout"].items():
-            v = np.array(ds, np.float64)
-            r_set = val["radius"].get(f"{fam}/{name}", (0.0, ""))[0]
-            row = ho.setdefault(name, {"n": 0, "within_radius": 0, "beyond_r_fail": 0})
-            row["n"] += int(v.size)
-            row["within_radius"] += int((v <= r_set + 1e-9).sum())
-            row["beyond_r_fail"] += int((v > R_FAIL_U).sum())
+        ho: dict[str, list] = defaultdict(list)
+        for (fam, name), items in val["heldout"].items():
+            ho[name.split(":")[0]].extend(items)
         return {
             "heldout": {"desc": f"{N_FOLDS} folds by recording: contacts against the other fold's logged occupancy; "
-                                f"within_radius = inside the support radius of the full build", **ho},
+                                f"within_radius = inside the support radius of the full build; "
+                                f"within_radius_t{HELD_T_BINS} = also with +-{HELD_T_BINS} bins of timing slack; "
+                                f"state / state_world_all pool the per-state sets",
+                        **{k: _held_row(v, val["radius"]) for k, v in sorted(ho.items())}},
             "ok": ok, "r_fail_u": R_FAIL_U, "lag_frames": LAG_F,
             "contacts": len(cs), "damage": len(dmg), "blocked_frames": len(cs) - len(dmg),
             "no_hero_box": sum(1 for c in cs if not c.boxes),
@@ -1675,8 +1974,7 @@ class BehaviourBuilder:
             "uncovered": {"n": len(fails), "first": [{**self._contact_row(c, d), "set": name}
                                                     for c, name, d in fails[:20]]},
             "outside_attacks": {"n": len(val["outside"]), "first": [self._contact_row(c) for c in val["outside"][:20]]},
-            "uncovered_per_state_sets": sum(1 for c in cs for k, d in c.res.items()
-                                            if k.startswith("state") and d > R_FAIL_U),
+            "uncovered_by_set": dict(Counter(name.split(":")[0] for _, name, _ in fails)),
         }
 
     def coverage(self, attacks: dict, graph: dict, val: dict | None) -> dict:
@@ -1698,11 +1996,26 @@ class BehaviourBuilder:
                 "export_holes": {"desc": "frames a damage entity was exported (not hidden) with colliders == [], by "
                                          "type_key and Control / own FSM state", "frames": dict(holes),
                                  "instances": sum(1 for i in self.instances if i.holes)},
+                "partial_presence": {
+                    "desc": "sources enabled in 90-99.9 % of the instances entering a state (per phase): candidates "
+                            "for export gaps the empty-collider check does not see (or a source that left the view)",
+                    "rows": [f"{fam} / {h['state']} / {h['source']} / {ph}: {p}" for fam, a in attacks.items()
+                             for h in a["hitboxes"] for ph, p in h["presence_by_phase"].items() if 0.9 <= p < 1.0]},
+                "hero_box_u": self._hero_box_row(),
                 "validation": self.validation_summary(val) if val is not None else None,
                 "ambient_frames": dict(self.ambient_frames),
                 "fights": len(self.fights), "frames": sum(f["frames"] for f in self.fights),
                 "game_s": _r(sum(f["game_s"] or 0 for f in self.fights), 1),
                 "counters": dict(self.counters.most_common())}
+
+    def _hero_box_row(self) -> dict:
+        """The logged hero hurtbox (STATE hero.box) against the half-extents the planner templates assume."""
+        w0, w1, h0, h1, n = self.hero_box
+        if not n:
+            return {"n": 0}
+        hx, hy = hb.HERO_HALF_U
+        return {"n": int(n), "w": [_r(w0), _r(w1)], "h": [_r(h0), _r(h1)], "half_u_assumed": [hx, hy],
+                "ok": bool(w1 <= 2 * hx + 1e-3 and h1 <= 2 * hy + 1e-3)}
 
     def raw_templates(self) -> dict[str, hb.SpaceTimeTemplate]:
         """Finished raw templates; the family-level ones are the union of their per-fold parts (kept in _folds)."""
@@ -1756,17 +2069,21 @@ class BehaviourBuilder:
             "schema": SCHEMA, "enemy": spec.enemy, "build": BUILD, "scene": spec.scene, "boss_type": spec.boss_type,
             "hp": spec.hp, "fsms": sorted({spec.control_fsm}), "phases": self.phases(),
             "sources": self.fights, "graph": g, "dwell_s": self.dwell(), "decisions": self.decisions(g["branching"]),
-            "observable_phases": obs, "attacks": atk, "support_transitions": support_tr, "entities": self.entities(),
+            "observable_phases": obs, "attacks": atk, "support_transitions": support_tr, "entities": self.entities(val),
             "coverage": self.coverage(atk, g, val),
             "templates": {
                 "cell_u": self.cell, "bin_s": self.bin_s, "file": f"{spec.enemy}_hitboxes.npz",
                 "keys": "<family>/<frame> (t from the attack start), <family>/<state>/<frame> (t from the state's "
                         "entry; _tail = after the attack ended, t from its end); frame anchor | world (arena-fixed "
                         "hazards) | world_all (every collider of the family in world coordinates: the support before "
-                        "the anchor or the side is known); _ambient/world: hazards armed when a scan started",
-                "support": "support/<key>: the raw template dilated by attacks.<A>.residual_u.radius[<key>] and +-1 "
-                           "time bin; these are the support (DESIGN §3.5.3). For the planner: "
-                           "hitbox_tables.planner_templates (+ hero hurtbox half-extents and margin) and SupportQuery",
+                        "the anchor or the side is known); ent/<type_key>/self: one hazard entity relative to where "
+                        "it armed (anchor = its position then, mirror 1, t from arming; entities.<tk>.self_template, "
+                        "arm_pos); _ambient/world: hazards armed when a scan started",
+                "support": "support/<key>: the logged occupancy dilated by its validated residual (attacks.<A>."
+                           "residual_u.radius[<key>], entities.<tk>.self_template.radius_u) and +-1 time bin; these "
+                           "are the support (DESIGN §3.5.3). The npz also keeps the logged family templates "
+                           "(<family>/<frame>, for the viewer). For the planner: hitbox_tables.planner_templates (+ "
+                           "hero hurtbox half-extents and margin) and SupportQuery",
                 "hero_half_u": list(hb.HERO_HALF_U),
                 "frames": {"anchor": "x' = mirror * (x - anchor x), y' = y - anchor y (anchor = boss transform)",
                            "world": "world coordinates"},
@@ -1849,9 +2166,12 @@ class BehaviourBuilder:
             raise ValidationFailed(f"{v['uncovered']['n']} uncovered, {v['unexplained']['n']} unexplained, "
                                    f"{v['outside_attacks']['n']} outside-attack contacts: "
                                    f"{(v['uncovered']['first'] + v['unexplained']['first'])[:3]}")
+        from ssbot.record.recorder import find_repo_root, git_info
+        code = git_info(find_repo_root())  # before the outputs are written: their own change is not "dirty" code
         out_dir.mkdir(parents=True, exist_ok=True)
-        npz = hb.save_templates(out_dir / f"{self.spec.enemy}_hitboxes.npz", {**b.raw, **b.support}, b.extra)
-        tables["build_info"] = provenance(self.fights, npz)
+        raw = {k: v for k, v in b.raw.items() if k.count("/") == 1}  # logged family templates (viewer); the rest
+        npz = hb.save_templates(out_dir / f"{self.spec.enemy}_hitboxes.npz", {**raw, **b.support}, b.extra)
+        tables["build_info"] = provenance(self.fights, npz, code)
         js = out_dir / f"{self.spec.enemy}.json"
         js.write_text(json.dumps(tables, indent=1, default=_json_default) + "\n", encoding="utf-8")
         return js, npz, tables
@@ -1874,11 +2194,13 @@ def _sha256(path: Path) -> str | None:
         return None
 
 
-def provenance(fights: list[dict], npz: Path | None) -> dict:
-    """Code revision, dirty flag, inputs (status and hashes of each recording's meta.json and index / raw state),
-    and the npz sha256 (DESIGN §3.1.9: knowledge files are versioned, with hashes)."""
+def provenance(fights: list[dict], npz: Path | None, code: dict | None = None) -> dict:
+    """Code revision, dirty flag (tracked files; taken before the outputs are written when given), inputs (status and
+    hashes of each recording's meta.json and index / raw state), and the npz sha256 (DESIGN §3.1.9: knowledge files
+    are versioned, with hashes)."""
     from ssbot.record.recorder import find_repo_root, git_info
-    root = find_repo_root()
+    if code is None:
+        code = git_info(find_repo_root())
     inputs: dict[str, dict] = {}
     for f in fights:
         p = Path(f.get("path") or ".")
@@ -1887,7 +2209,8 @@ def provenance(fights: list[dict], npz: Path | None) -> dict:
         r = inputs.get(str(p))
         if r is None:
             r = inputs[str(p)] = {"kind": f["kind"], "status": recording_status(p) if f["kind"] == "rec" else None,
-                                  "meta_sha256": _sha256(p / "meta.json"), "fights": 0, "frames": [f["f0"], f["f1"]]}
+                                  "meta_sha256": _sha256(p / "meta.json"), "fights": 0, "frames": [f["f0"], f["f1"]],
+                                  "fold": f.get("fold")}
             if f["kind"] == "rec":
                 r["state_index_sha256"] = _sha256(p / "state.index.jsonl")
                 r["events_sha256"] = _sha256(p / "events.jsonl")
@@ -1897,7 +2220,7 @@ def provenance(fights: list[dict], npz: Path | None) -> dict:
         r["frames"] = [min(r["frames"][0], f["f0"]), max(r["frames"][1], f["f1"])]
     import cv2
     import numba
-    return {"code": git_info(root), "built_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+    return {"code": code, "built_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
             "versions": {"numpy": np.__version__, "numba": numba.__version__, "cv2": cv2.__version__},
             "inputs": inputs, "npz_sha256": _sha256(npz) if npz else None}
 
@@ -1939,6 +2262,20 @@ def coarse_boxes(t: hb.SpaceTimeTemplate, max_boxes: int = 64) -> np.ndarray:
     b[:, [0, 2]] += t.ix0
     b[:, [1, 3]] += t.iy0
     return b * t.cell
+
+
+def _held_row(items: list[tuple], radius: dict[str, tuple]) -> dict:
+    """Held-out residuals (residual, residual with +-HELD_T_BINS, member keys) against the support radius of the
+    full build (the smallest radius among the set's templates)."""
+    v = np.array([i[0] for i in items], np.float64)
+    vt = np.array([i[1] for i in items], np.float64)
+    r = np.array([min((radius[k][0] for k in i[2] if k in radius), default=0.0) for i in items], np.float64)
+    fin = v[np.isfinite(v)]
+    return {"n": int(v.size), "within_radius": int((v <= r + 1e-9).sum()),
+            f"within_radius_t{HELD_T_BINS}": int((vt <= r + 1e-9).sum()),
+            "p99": _r(float(np.quantile(fin, 0.99))) if fin.size else None,
+            "max": (_r(float(v.max())) if np.isfinite(v).all() else "inf") if v.size else None,
+            "beyond_r_fail": int((v > R_FAIL_U).sum()), f"beyond_r_fail_t{HELD_T_BINS}": int((vt > R_FAIL_U).sum())}
 
 
 def _json_default(o):
