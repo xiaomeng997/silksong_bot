@@ -255,3 +255,28 @@ def test_escaping_hits_are_listed_and_fail_the_run(p, tmp_path):
     tr.box[i + kb.FRAMES + 5] += np.array([0.0, -1.0, 0.0, -1.0])        # 1 u below the path
     rep = kin_check.check_knockback(tr, terrains, p)
     assert not rep["ok"] and rep["misses"][0]["k"] == kb.FRAMES + 5
+
+
+def test_frame_time_guard_marks_the_bound_unknown(p):
+    """The bound assumes the jitter model (no frame above hitch_max, at most hitches_per_window above frame_time_max
+    in 65); a history that breaks it makes the support unknown until 65 conforming frames have passed."""
+    ok = np.full(200, p.frame_time)
+    assert kb.timing_ok(ok, p)
+    stall = ok.copy()
+    stall[150] = 0.09                                         # an autosave-like stall
+    assert not kb.timing_ok(stall, p) and kb.timing_ok(stall[:150], p)
+    three = ok.copy()
+    three[[150, 160, 170]] = 0.02                            # three slow frames in 65
+    assert not kb.timing_ok(three, p) and kb.timing_ok(np.r_[three, ok[:kb.FRAMES + 1]], p)
+    v = kb.timing_violations(stall, p)
+    assert not v[:150].any() and v[150:].all()
+    g = kb.TimingGuard(p)
+    assert not g.support_known                                # no evidence yet
+    known = [g.update(u) for u in np.r_[stall, ok]]
+    assert known[149] and not any(known[150:150 + kb.FRAMES + 1]) and known[150 + kb.FRAMES + 1]
+    box = np.array([10.0, 2.015, 10.5, 4.094])
+    _, fl = kb.knockback_hull(box[None, None], p, udt_history=stall)
+    _, fl_ok = kb.knockback_hull(box[None, None], p, udt_history=ok)
+    assert fl[0] & kb.KF_UNKNOWN and not fl_ok[0] & kb.KF_UNKNOWN
+    assert not kb.knockback_envelope(box, "left", p, udt_history=stall).support_known
+    assert kb.knockback_envelope(box, "left", p).support_known

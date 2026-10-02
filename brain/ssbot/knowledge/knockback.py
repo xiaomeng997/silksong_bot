@@ -5,7 +5,9 @@ checked against every logged hit (ssbot.tools.kin_check, knockback section), not
     env = knockback_envelope(hit_box, "left", params, terrain)    # one hit: env.union[k], env.swept, env.touches
     swept, per_frame, flags = knockback_boxes(roll.box, "left", params, terrain)   # every frame of every plan
     table = knockback_table(params, "left"); roll.box + table.swept_offset          # open air, no call at all
-    hull, flags = knockback_hull(roll.box, params, terrain)       # planner tick: per candidate, every frame, both sides
+    hull, flags = knockback_hull(roll.box, params, terrain, udt_history=udts)   # planner tick: per candidate,
+                                                                    # every frame, both sides; KF_UNKNOWN: no support
+    guard = TimingGuard(params); guard.update(udt)                # the same frame-time check, frame by frame
 
 What the game does (HeroController.StartRecoil / FixedUpdate / Update, 1.0.30000, decompiled HeroController.cs
 9611-9661): StartRecoil zeroes the velocity, switches gravity off, clears onGround and sets hero_state no_input, then
@@ -45,6 +47,12 @@ way, so Terrain2D lists the AABB sides of circles, capsules and shapes with an e
 x from -0.25 to 4.45 u, y from -1.30 to 3.40 u after the 14 steps of n_max, against 0 to 4.2 u and 0 to 2.1 u in
 open air.
 
+Validity at run time: the bound holds only while the frame-time model does, and nothing guarantees that (gameplay
+frames next to harness operations reach 0.090 s, and 5 frames above 0.018 s in 65: live i1-3_000 f 1392-1393). One
+90 ms frame in a recoil puts the box 0.28 u outside the swept hull and gives control back at frame 22. timing_ok and
+TimingGuard check the recent history; knockback_hull / knockback_envelope flag KF_UNKNOWN (Envelope.support_known
+False) when given a history that breaks it, which the planner and the supervisor treat as unknown, never safe.
+
 Validity after control returns: union[k] covers every input only for k < ctl_min (the earliest frame any timing gives
 control back: 23 with two hitches, 26 to 29 without). From ctl_min on it is the swept hull grown by an any-input reach
 (|vx| <= the fastest modelled horizontal speed, the downspike's 26 u/s; vy up to the jump speed, down to the maximum
@@ -72,7 +80,8 @@ from ssbot.knowledge.kinematics import HeroParams, Terrain2D
 
 FRAMES = 64          # table length: the longest logged no-input period after a hit is 47 frames (live i0_000)
 CONTACT_SLOP = 0.02  # u: Box2D depenetration / skin intrusion; max observed 0.0108 u over 11 561 logged hits
-KF_TERRAIN, KF_SLOPE = 1, 2   # knockback_boxes flags: clipped path computed, slope in reach (bound dilated)
+# flags: clipped path computed, slope in reach (bound dilated), support unknown (the frame-time model failed lately)
+KF_TERRAIN, KF_SLOPE, KF_UNKNOWN = 1, 2, 4
 SIDES = {"left": 1, "right": -1, "top": 0, "bottom": 0}   # impact side -> push direction
 
 
@@ -155,6 +164,53 @@ def recoil_timing(params: HeroParams) -> Timing:
     if params.hitches_per_window > 2:
         raise ValueError("the exhaustive hitch placement covers at most 2 hitches per recoil")
     return _timing_cached(tuple((k, getattr(params, k)) for k in _TIMING_KEYS))
+
+
+def timing_violations(udt: np.ndarray, params: HeroParams) -> np.ndarray:
+    """[n] bool per frame of an unscaled frame-time history (gameplay frames, oldest first): the jitter model the
+    bound assumes fails in the FRAMES + 1 frames ending there (a frame above hitch_max, or more than
+    hitches_per_window frames above frame_time_max)."""
+    u = np.asarray(udt, dtype=np.float64).ravel()
+    w = np.ones(FRAMES + 1, dtype=np.int64)
+    long_ = np.convolve((u > params.hitch_max).astype(np.int64), w)[:len(u)]
+    slow = np.convolve((u > params.frame_time_max).astype(np.int64), w)[:len(u)]
+    return (long_ > 0) | (slow > params.hitches_per_window)
+
+
+def timing_ok(udt: np.ndarray, params: HeroParams) -> bool:
+    """The bound's frame-time model held over the last FRAMES + 1 frames of the history (support known)."""
+    u = np.asarray(udt, dtype=np.float64).ravel()[-(FRAMES + 1):]
+    return not (bool((u > params.hitch_max).any()) or
+                int((u > params.frame_time_max).sum()) > params.hitches_per_window)
+
+
+class TimingGuard:
+    """Run-time check of the bound's frame-time assumption, fed one unscaled frame time per gameplay frame:
+    support_known is False from a violation until FRAMES + 1 conforming frames have passed (and before the first
+    frame). The bound is a superset only while the model holds (one 90 ms frame in a recoil puts the box 0.28 u
+    outside the swept hull and gives control back at frame 22, before ctl_min; such frames are logged next to harness
+    operations: live i1_000 f 1392, 0.0875 s), so the planner treats Hz(c) and the supervisor I2 as unknown (never
+    safe) while it is False; knockback_hull / knockback_envelope flag KF_UNKNOWN when given the history. On the 14
+    logged sources (3.11 M valid gameplay frames, 11 561 hits) it is False for 402 frames (0.013 %), all within 130
+    frames of a harness operation or scene change, and at no hit frame."""
+
+    def __init__(self, params: HeroParams):
+        self.params = params
+        self.hist = np.zeros(FRAMES + 1)
+        self.n = 0
+        self.ok = False
+        self.unknown_frames = 0
+
+    def update(self, udt: float) -> bool:
+        self.hist[self.n % len(self.hist)] = float(udt)
+        self.n += 1
+        self.ok = timing_ok(self.hist[:min(self.n, len(self.hist))], self.params)
+        self.unknown_frames += int(not self.ok)
+        return self.ok
+
+    @property
+    def support_known(self) -> bool:
+        return self.ok
 
 
 @dataclass(frozen=True, slots=True)
@@ -258,7 +314,8 @@ def knockback_boxes(hit_boxes: np.ndarray, side: str, params: HeroParams, terrai
 
 def knockback_hull(boxes: np.ndarray, params: HeroParams, terrain: Terrain2D | None = None,
                    sides: tuple[str, ...] = ("left", "right"), weighted: bool | None = None,
-                   valid: np.ndarray | None = None, threads: int = 1) -> tuple[np.ndarray, np.ndarray]:
+                   valid: np.ndarray | None = None, threads: int = 1, udt_history: np.ndarray | None = None
+                   ) -> tuple[np.ndarray, np.ndarray]:
     """The planner's Hz(c) query (DESIGN §3.5.4), one call per tick: for candidate boxes [N, T+1, 4] (Rollout.box),
     (hull [N, 4], flags [N]): per candidate the union, over its frames and the given impact sides, of the no-input
     swept hull of a hit in that frame. valid [N, T+1] bool limits the frames a hit can land on (None: all; e.g.
@@ -266,7 +323,8 @@ def knockback_hull(boxes: np.ndarray, params: HeroParams, terrain: Terrain2D | N
     frame gets an empty box (x0 > x1). Unclipped open air (frame hull + swept offsets: walls and ceilings only shorten
     the path) unless a slope lies within that; then the frame hull plus the projection disk of n_max steps per side
     (flags KF_SLOPE; see the module docstring). The frames after control returns are not in it: a planner that is
-    hit replans from the observed state."""
+    hit replans from the observed state. udt_history: the recent unscaled frame times; when the frame-time model
+    failed in the last FRAMES + 1 of them, every candidate is flagged KF_UNKNOWN (the hull is no support then)."""
     b = np.ascontiguousarray(np.asarray(boxes, dtype=np.float64))
     if b.ndim == 2:
         b = b[None]
@@ -288,6 +346,8 @@ def knockback_hull(boxes: np.ndarray, params: HeroParams, terrain: Terrain2D | N
         kin_jit.kb_hull_par(*args)
     else:
         kin_jit.kb_hull(*args)
+    if udt_history is not None and not timing_ok(udt_history, params):
+        flags |= KF_UNKNOWN
     return out, flags
 
 
@@ -301,6 +361,11 @@ class Envelope:
     ctl_min: int
     n_hi: np.ndarray         # [F+1]
     flags: int               # KF_* bits
+
+    @property
+    def support_known(self) -> bool:
+        """False when the frame-time model failed lately (KF_UNKNOWN): the envelope is no support then."""
+        return not self.flags & KF_UNKNOWN
 
     def control_frame(self) -> int:
         return self.ctl_min
@@ -328,10 +393,12 @@ class Envelope:
 
 
 def knockback_envelope(hit_box: np.ndarray, side: str, params: HeroParams, terrain: Terrain2D | None = None,
-                       weighted: bool | None = None) -> Envelope:
+                       weighted: bool | None = None, udt_history: np.ndarray | None = None) -> Envelope:
     """Envelope of one hit taken from `side` ("left" / "right": the impact side, as in the oracle "damage" event)
-    by a hero whose collider in the hit frame is hit_box (x0, y0, x1, y1), e.g. Rollout.box[i, t] or STATE hero.box."""
+    by a hero whose collider in the hit frame is hit_box (x0, y0, x1, y1), e.g. Rollout.box[i, t] or STATE hero.box.
+    udt_history: as in knockback_hull (KF_UNKNOWN, Envelope.support_known)."""
     table = knockback_table(params, side, weighted)
     swept, frames, flags = knockback_boxes(np.asarray(hit_box, dtype=np.float64)[None], side, params, terrain,
                                            per_frame=True, table=table)
-    return Envelope(side, frames[0], swept[0], table.timing.ctl_min, table.timing.n_hi.copy(), int(flags[0]))
+    fl = int(flags[0]) | (KF_UNKNOWN if udt_history is not None and not timing_ok(udt_history, params) else 0)
+    return Envelope(side, frames[0], swept[0], table.timing.ctl_min, table.timing.n_hi.copy(), fl)
