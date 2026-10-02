@@ -1,21 +1,59 @@
 """Hero kinematics for the planner (M2 W1; DESIGN §3.5.2, §3.5.4, §3.5.6): a hybrid-mode model of Hornet's motion,
-re-derived from the decompiled HeroController (1.0.30000) and identified on logged play, a vectorised rollout with
-2D collision against the scene's static terrain, and the damage-knockback envelope.
+re-derived from the decompiled HeroController (1.0.30000) and identified on logged play, a batched rollout with 2D
+collision against the scene's static terrain (compiled: ssbot.knowledge.kin_jit), timing-variant lanes for the
++-1 frame branches, the input filter, a per-frame state tracker and a runtime residual monitor. The damage-knockback
+envelope is in ssbot.knowledge.knockback.
 
     params = HeroParams.load()                                  # knowledge/1.0.30000/kinematics/hero_hunter.json
     terrain = Terrain2D.from_message(terrain_msg, params.scene("Bone_05"))   # RecordingReader.terrain() payload
-    trace = Trace.from_states(states, params)                   # STATE history (oracle or recording)
-    start = estimate_state(trace, [len(trace) - 1], params, terrain=terrain)  # [K, 1] state at the last frame
-    roll = rollout(start, masks, params, terrain)               # masks [N, T] ACTION button masks for frames 1..T
-    roll.phys[:, T], roll.pos[:, T]                             # collider position / rendered position after T frames
-    env = knockback_envelope(start, "left", params, terrain)    # boxes reachable after a hit from the left
+    trk = StateTracker(params, terrain); trk.push(state)        # every STATE: O(1), under 0.1 ms
+    start = trk.state()                                         # [K, 1]: estimate_state(Trace.from_states(history),
+                                                                #   [last row], params, terrain=terrain), bit for bit
+    hold = HoldState.from_act(state["act"])                     # or the planner's own, kept in step with its ACTIONs
+    latched, hold_next = hold_filter(commanded, hold)           # commanded masks [N, T] -> what the game will read
+    roll = rollout(start, latched, params, terrain, threads=4)  # roll.box [N, T+1, 4] collider boxes, roll.centre
+    roll = rollout(start, latched, params, terrain, variants="bounds", threads=4)   # roll.bound / flags_all: the
+                                                                #   timing lanes' per-frame hull (the support form)
+    hull, flags = knockback.knockback_hull(roll.box, params, terrain, udt_history=udts)   # Hz(c), KF_UNKNOWN
+    mon = ResidualMonitor(params, terrain); mon.update(trk); mon.confidence()   # I4 "kinematics"; None: unknown
 
-Acceptance (ssbot.tools.kin_check, 30-frame windows, logged timing and contact events): trial run 20261001_121446
-i0_000 (26 438 covered windows): 99.92 % within 0.1 u of the logged collider after 0.5 s, 99.59 % of all windows
-(the rest: harness teleports and a boss roar that takes control); training run 20261001_122249 i0_000 (closed
-recordings, 254 004 covered windows): 99.47 %, 98.98 % of all; a person's Bell Beast session (20260930_210337,
-Bone_05, 6 901 covered windows): 100 %. All 99 damage knockbacks of the trial stay inside the envelope (worst
-excursion 1.4 mm); 99.63 % of the 27 322 no-input frames after the training run's 987 hits do.
+Positions follow cross-module decision 1: Rollout.box is the hero collider (STATE hero.box), Rollout.centre its
+centre (WorldState HeroState.pos); Rollout.pos is the rendered transform (pos_transform).
+
+Acceptance (ssbot.tools.kin_check, every 30-frame window, collider centre within 0.1 u after 0.5 s; decision 3:
+start state from the history up to the window start only, causal phase, nominal timing; parameters fitted on live
+20261001_122249 i0_000, the Bind lengths on i0_000 + i0-3_002; 2026-10-01 after the world-freeze model). Held out:
+the trial run 20261001_121446 i0_000 and live i1-3_000, i0-3_001 (8 recordings, 1 915 915 windows, 38 640
+uncovered and counted as misses in "all": control taken by another FSM 25 667, invalid 6 950, harness 6 015,
+savestate slide 8):
+  nominal lane, logged contact and freeze events standing in for the threat layer: 89.8 % of covered windows
+    (89.1 % of all); plain primitives 99.6 % (run 99.5, jump 99.4, air 99.6, attack 99.1, idle 99.99), cast 93.0,
+    bind 96.6, contact (nail recoil, pogo, recoil down, early catch) 80.5, downspike 77.0, hurt 66.3, recovering
+    (starting in the hit-stop or recoil) 55.7, world_freeze (BindBreak, BossDeathSlow, boss stun) 70.7 (60.3 before
+    the world-freeze model), hitch 80.6;
+  the same without events (the buttons alone): 80.1 %;
+  inside the hull of the 9 "bounds" timing lanes dilated by 0.1 u (hull spread p50 0, p95 0.39, p99 0.65 u):
+    99.22 % of covered windows (98.32 % of all; plain 99.89, hurt 99.65, recovering 98.7, downspike 98.0, contact
+    97.6, cast 97.0, bind 98.1, world_freeze 73.7, hitch 87.3);
+  replay with the logged dt / physics steps (information the planner does not have): 99.42 %.
+The fit recording gives the same (89.7 / 99.25 %), and so do the later live recordings i0-3_002 (89.6 / 99.22 %).
+So the DESIGN §3.5.2 target (99 % within 0.1 u) is met by the nominal point prediction for plain movement only, and
+in the planner's information set no point prediction can meet it overall: most nominal misses are one physics step,
+3 615 of the 4 630 missed hurt windows of live i1_000 f < 120 000 are 0.32-0.36 u off (one recoil step, 0.335 u),
+644 two steps; hit-stop (13 / 14 / 15 frames) and recoil (13 / 14) end on frames that frame times of 0.01665 against
+1/60 s decide, which the history does not predict (with the future frame times, the replay: 99.4 %). What the model
+delivers at 99 % is the support form, the lanes' hull (Rollout.bound), which the planner checks and the residual
+monitor watches; restating the M2 exit item that way (hull containment, with the hull spread in the hazard margin)
+is the lead's decision. A person's session (20260930_210337, "input" masks, 113 369 covered windows) reaches 90.0 %
+nominal, 91.0 % in the lanes' hull: plain movement 92.6 %, as the "input" stream is not the exact latched mask.
+
+Planner cost (13900K, Bone_05 terrain, 512 candidates x 48 frames, measured with other work on the machine): the
+nominal rollout p50 2.3 ms / p99 3.0 ms on one core, p50 0.47 / p99 0.8 ms with threads=4; the "bounds" lanes in the
+planner's form (lanes=False: no per-lane arrays, and a candidate that meets no hit-stop or world freeze runs 3 of the
+9, the others being identical for it) p50 1.4-1.5 ms / p99 1.9-2.2 ms with threads=4 (6.8 ms on one core), the
+"fast" lanes the same; knockback_hull p99 0.15 ms; the start state from StateTracker under 0.1 ms per frame
+(push_row 0.06 ms; rebuilding it from a 240-frame STATE tail costs 2.5 ms). So every candidate can carry its lanes'
+hull within the 3 ms budget, the knockback hull included.
 
 Time base (trial run, 26 892 STATE frames; ssbot.tools.kin_fit):
 - Physics steps at fdt = 0.02 s of scaled time under the render (mean frame 0.0166662 s, p1 0.01665, p99 0.01671).
@@ -48,32 +86,63 @@ Modes and what drives them (all from HeroController.FixedUpdate / Update unless 
               touching the floor ends it at once.
   HURT_FREEZE damage hit-stop (GameManager.FreezeMoment 0 / 0.1 / 0.1): v = 0, gravity off; the wait sums udt from
               the second frame after the hit, then the time scale ramps back to 1 over 0.1 s of udt (replayed
-              exactly: 99 of 99 logged hits).
+              exactly with the logged udt: 987 of 987 hits of live i0_000).
   HURT_RECOIL v = (+-15, 7.5) away from the impact side until recoilTimer reaches RECOIL_DURATION 0.2 s, then v = 0,
               gravity back, control back (before LookForQueueInput, so a queued attack starts in that frame).
   CAST        Silkspear (Spell FSM, quickcast, 4 silk): antic 0.26 s (air v *= 0.9 per step, rising vy capped at
-              12; ground vx *= 0.85), throw 0.43 s (still), catch 0.15 s (v = (-21 facing, 0), vx *= 0.7 per step,
-              gravity on).
-  BIND        Bind (9 silk): about 1.37 s; air v *= 0.85 per step (rising vy capped at 7.5), gravity off.
+              12; ground vx *= 0.85), throw (still) until the needle is back, catch (v = (-21 facing, 0), vx *= 0.7
+              per step, gravity on). Throw and catch end on one of two frames with no timer explaining which (live
+              i0_000: throw 26 / 27 frames 46 / 54 %, catch 9 / 10 frames 41 / 59 %): variant-valued thresholds
+              (HeroParams.cast_throw_variants / cast_catch_variants, the variant lanes take both).
+  BIND        Bind (9 silk): 1.34, 1.36 or 1.37 s (81 / 82 / 83 frames, bind_time_variants: 28 / 56 / 17 % of
+              18 binds of live i0_000 and i0-3_002; the 37 binds of the 8 held-out recordings fall in the same three
+              intervals); air v *= 0.85 per step (rising vy capped at 7.5), gravity off. A hit in the first 1.2 s
+              (the charge, before BindBurst) also starts the BindBreak world freeze.
   LOCKED      control taken by another FSM (the boss roar): vx *= 0.86 per step, gravity on.
+World freezes (rows WF_*): GameManager.FreezeMoment coroutines other than the hero's own hit-stop, each a time-scale
+control that TimeManager multiplies into Time.timeScale: ramp down to the target over rampDown, wait, ramp back up,
+on float32 sums of unscaled time (presets FREEZE_PRESETS, GameManager.cs 5092-5141: BindBreak 0.01 / 0.4 / 0.1 to 0,
+BossDeathSlow 0.1 / 1.15 / 0.1 to 0.05, BossStun 0 / 0.25 / 0.1, QuickFreeze, EnemyDeath). The model's time scale is
+TS (the hero's hit-stop) times WF_S. BindBreak follows from the hero's own state: a hit during the Bind charge (22 of
+22 logged, 0 of 1 in the burst) keeps the scale at 0 for 0.4 s, so the recoil waits about 12 frames after the
+hit-stop (live i1_000 f 153335: nominal error 0.34 u, 3.7 u without it). The others come with the boss (killing
+blow, stun, a small enemy's death): EV_FZ_* events, which the threat layer announces as it does contacts. The
+estimator replays a running freeze from its logged start.
 Contact events do not follow from the buttons; a rollout takes them as an optional per-frame array (the threat layer
 predicts them; ssbot.tools.kin_check injects the logged ones): EV_RECOIL_L/R (a nail hit: vx = -+3.75 now and for
 8 more steps), EV_POGO (a down attack hit: jump steps from 4, jumped_steps -20), EV_HURT_L/R (impact from that
 side), EV_RECOIL_DOWN (an up slash hit: the rise stops), EV_CATCH (the Silkspear needle came back early), EV_SILK
-(+1 silk from a hit: Bind and Silkspear need it), EV_LOCK / EV_UNLOCK.
+(+1 silk from a hit: Bind and Silkspear need it), EV_LOCK / EV_UNLOCK, EV_FZ_BOSS_DEATH / BOSS_STUN / QUICK /
+ENEMY_DEATH (a world freeze starts).
 
 Collision moves the hero box (0.5 x 2.079, foot 1.5527 below hero.pos) along x then y against axis-aligned terrain
 segments with a 0.015 u skin (standing box bottom 2.0150 over the Bone_05 floor at 2.0; arena gate faces 69.208 /
 102.002 against hero x 69.473 / 101.737). Box2D details that move positions by more than a few mm are kept: a fall
-that ends within [-0.0075, +0.004] u of the resting height parks there and makes contact a step later (18 of 288
-landings), contacts are found before the move (walking off a ledge sinks from the next step), a spike that touches
-the floor ends there.
+that ends within [-0.0082, +0.0053] u of the resting height parks there and makes contact a step later (122 of 2 865
+landings of live i0_000), contacts are found before the move (walking off a ledge sinks from the next step), a spike
+that touches the floor ends there. Sloped edges are not collided by the rollout: Bone_05 has them only in the roof
+(y >= 13.9 inside the arena), out of reach of a jump from the floor but not of a pogo off the boss or a knockback
+(live i2_002 f 693717); the knockback bound handles them, a rollout up there is off (the residual monitor sees it).
 
-Implementation: the model state is one float64 array [K, N] (rows below) and the parameters one float64 vector, so
-the step functions are plain array code (np.where on lane vectors, no Python objects) that numba can compile once
-it is installed: _SIM is the hook; the NumPy path is the one the tests run. Rollout cost on this machine (13900K, one
-core): a 512 x 48 planner batch takes 70 ms against the full Bone_05 terrain, 56 ms with it cropped to the arena;
-the DESIGN budget (p99 3 ms) needs the njit build.
+Timing lanes (Variant): the frame time is not predictable from the history, so a +-1 frame branch cannot be
+resolved, only carried. The lanes move every float32 timer threshold by -+ timer_bias (0.5 ms: each link of the
+unscaled wait / ramp chain, hit-stop and world freeze alike, and the scaled timers, with its own sign), start the
+physics phase at either end of its feasible interval (+- alpha_margin) and take the short or long Silkspear and Bind
+variants; Rollout.bound is their per-frame hull, flags_all / flags_any their flags. The frame-time jitter model
+(kin_fit over 2.83 M gameplay frames of all bot recordings: frame_time mean 0.016666 s, shortest 0.01665, p99.99
+0.01698, at most 2 frames above 0.018 s in any 65, longest 0.0369 s, rate 3.1e-5 per frame above 0.018 s) sets the
+lanes' frame times and the knockback bound (knockback.TimingGuard checks it at run time). ResidualMonitor (DESIGN
+§3.5.2, I4 "kinematics") re-rolls the executed masks and observed events from anchor states and checks the observed
+box against the lanes' hull at 1 / 6 / 30 frames; frames the model does not own (StateTracker.modelled: harness,
+scene, locked, nail arts, unexplained freezes, hitches) drop their windows. HeroParams.jump_heights holds the apex
+height per jump hold length, logged (min, median, max) against the model over the phase and frame time: the hold ->
+height spread for the hazard margin (0.05-0.35 u, the 50 Hz steps falling differently among the frames; the model
+range holds every logged apex of live i0_000 within 4 mm).
+
+Implementation: the model state is one float64 array [K, N] (rows below) and the parameters one float64 vector. The
+NumPy functions here (_fixed_step, _apply_events, _update, _simulate) are the readable reference, array code over
+lanes; kin_jit is the same rules per lane as numba-compiled scalar code, which rollout() uses (backend "auto"), and
+the tests check both give identical arrays.
 """
 from __future__ import annotations
 
@@ -84,7 +153,7 @@ from typing import Any, Iterable
 
 import numpy as np
 
-try:  # pragma: no cover - not installed on the training machine yet
+try:  # pragma: no cover - numba 0.68 is installed; the NumPy reference works without it
     import numba  # noqa: F401
     HAVE_NUMBA = True
 except ImportError:
@@ -123,10 +192,16 @@ DEFAULT_PARAMS = REPO / "knowledge" / "1.0.30000" / "kinematics" / "hero_hunter.
  PHASE,           # sub-phase: hit-stop 0 wait / 1 ramp; Silkspear 0 antic / 1 throw / 2 catch
  TS,              # time scale the next frame runs at (nominal timing; logged runs take dt from the log)
  QQ,              # quickcast (tool / Silkspear) queue steps (-1: not queuing)
- K) = range(42)
+ ALO, AHI,        # feasible interval of ALPHA (the timing-variant lanes start from its ends)
+ LANDQ,           # landed in this frame's physics steps: its Update decides idle (recovery ends) or run (it stays)
+ WF_PH, WF_T,     # world freeze (GameManager.FreezeMoment other than the hero's hit-stop): phase -1 none, 0 ramp down,
+                  # 1 wait, 2 ramp up (+10: started in this frame, the coroutine's first step done), timer (unscaled)
+ WF_S,            # its time-scale factor (the effective scale is TS * WF_S: TimeManager multiplies the controls)
+ WF_DOWN, WF_WAIT, WF_UP, WF_TGT,   # its preset (FREEZE_PRESETS)
+ K) = range(52)
 ROW_NAMES = ("px py qx qy sx sy vx vy alpha gs face ground mode mode_t mode_n jumping jsteps jdsteps jq aq airhang "
              "attacking atk_t atk_cd rdir rsteps ds_hs ds_rec bounce hvx hvy move jheld prev silk inv_t ledge touch "
-             "phase ts qq").split()
+             "phase ts qq alo ahi landq wf_ph wf_t wf_s wf_down wf_wait wf_up wf_tgt").split()
 assert len(ROW_NAMES) == K
 
 M_NORMAL, M_DS_ANTIC, M_DS_SPIKE, M_HURT_FREEZE, M_HURT_RECOIL, M_CAST, M_BIND, M_LOCKED = range(8)
@@ -135,11 +210,23 @@ RELINQUISHED = (M_DS_ANTIC, M_DS_SPIKE, M_CAST, M_BIND, M_LOCKED)    # controlRe
 NO_INPUT = (M_HURT_FREEZE, M_HURT_RECOIL)                             # hero_state no_input
 
 # contact events (bit flags per frame; applied after the frame's physics steps, before its Update)
-EV_RECOIL_L, EV_RECOIL_R, EV_POGO, EV_HURT_L, EV_HURT_R, EV_LOCK, EV_UNLOCK, EV_CATCH, EV_SILK, EV_RECOIL_DOWN = \
-    (1 << i for i in range(10))
+EV_RECOIL_L, EV_RECOIL_R, EV_POGO, EV_HURT_L, EV_HURT_R, EV_LOCK, EV_UNLOCK, EV_CATCH, EV_SILK, EV_RECOIL_DOWN, \
+    EV_FZ_BOSS_DEATH, EV_FZ_BOSS_STUN, EV_FZ_QUICK, EV_FZ_ENEMY_DEATH, EV_FZ_BIND_BREAK = (1 << i for i in range(15))
+# world freezes a rollout can be told about (the threat layer predicts them: a killing blow, a stun, a small enemy's
+# death; BindBreak also starts by itself on a hit during the Bind charge): GameManager.FreezeMoment presets
+# (rampDown, wait, rampUp, target speed; GameManager.cs 5092-5141)
+FREEZE_PRESETS = {EV_FZ_BOSS_DEATH: (0.1, 1.15, 0.1, 0.05), EV_FZ_BOSS_STUN: (0.0, 0.25, 0.1, 0.0),
+                  EV_FZ_QUICK: (0.0001, 0.02, 0.0001, 0.0001), EV_FZ_ENEMY_DEATH: (0.04, 0.024, 0.04, 0.0),
+                  EV_FZ_BIND_BREAK: (0.01, 0.4, 0.1, 0.0)}
+# start order within a frame, shortest first: when two start together the model keeps the longer one (in the game
+# both run and their scales multiply; logged only for EnemyDeath with every hit, which ends inside the hit-stop)
+WF_ORDER = (EV_FZ_QUICK, EV_FZ_ENEMY_DEATH, EV_FZ_BOSS_STUN, EV_FZ_BIND_BREAK, EV_FZ_BOSS_DEATH)
+EV_FZ_ANY = EV_FZ_BOSS_DEATH | EV_FZ_BOSS_STUN | EV_FZ_QUICK | EV_FZ_ENEMY_DEATH | EV_FZ_BIND_BREAK
 EVENT_NAMES = {EV_RECOIL_L: "recoil_l", EV_RECOIL_R: "recoil_r", EV_POGO: "pogo", EV_HURT_L: "hurt_l",
                EV_HURT_R: "hurt_r", EV_LOCK: "lock", EV_UNLOCK: "unlock", EV_CATCH: "catch", EV_SILK: "silk",
-               EV_RECOIL_DOWN: "recoil_down"}
+               EV_RECOIL_DOWN: "recoil_down", EV_FZ_BOSS_DEATH: "freeze_boss_death",
+               EV_FZ_BOSS_STUN: "freeze_boss_stun", EV_FZ_QUICK: "freeze_quick",
+               EV_FZ_ENEMY_DEATH: "freeze_enemy_death", EV_FZ_BIND_BREAK: "freeze_bind_break"}
 
 # rollout flags
 F_GROUND, F_JUMPING, F_ATTACKING, F_RECOIL, F_RELINQ, F_INVULN, F_NO_INPUT = (1 << i for i in range(7))
@@ -151,6 +238,8 @@ B_UP, B_DOWN, B_LEFT, B_RIGHT = 1 << 18, 1 << 19, 1 << 20, 1 << 21
 EPS = 1e-4       # open-interval margin for overlap tests
 TOL = 0.05       # a box this far inside a face still counts as in front of it (Box2D leaves ~2 mm at seams)
 GTOL = 8e-3      # ground probe (covers the touch band of _move_y)
+TT_HEAD = 14     # header length of Terrain2D.packed() (layout in kin_jit)
+ROUND_MIN = 0.02  # edge radius below which a shape counts as sharp (Box2D's own polygon skin is 0.01)
 
 
 # ---- parameters -----------------------------------------------------------------------------------------------
@@ -219,12 +308,40 @@ class HeroParams:
     bind_vy_cap_down: float = 12.0
     bind_end_vy: float = -0.25
     bind_silk: int = 9
+    bind_break_before: float = 1.2    # a hit in the first this many s of a Bind (the charge) starts BindBreak
+    wf_bias_wait: float = 0.0         # world-freeze wait / ramp-up thresholds moved by the timing lanes (Variant)
+    wf_bias_up: float = 0.0
     silk_max: int = 9
     lock_decay: float = 0.86
     ledge_steps: int = 4
     land_slop_lo: float = 0.0075
     land_slop_hi: float = 0.004
     input_jump_lag: int = 1
+    rdown_halve: int = 0              # RecoilDown halves a rise instead of stopping it (Weighted Anklet)
+    # Weighted Anklet (Gameplay asset, docs/facts/1.0.30000/crests.json "weighted_anklet"; HeroController.cs
+    # StartRecoil 9615-9621, Recoil 6568-6578, RecoilDown 6655-6672, GetMaxFallVelocity 4866-4872)
+    weighted: bool = False            # True: the values below are applied (with_weighted())
+    weighted_knockback_mult: float = 0.5
+    weighted_invuln_mult: float = 1.3
+    weighted_recoil_steps: int = 4
+    max_fall_weighted: float = 38.0
+    # frame-time jitter model (kin_fit: unscaled gameplay frame times of the bot recordings)
+    frame_time_lo: float = 0.016649993    # no frame is shorter (the frame limiter)
+    frame_time_hi: float = 0.0170         # p99.99 of the frame time: the rollout's timing lanes run between lo and hi
+    frame_time_max: float = 0.018         # the envelope bound: every frame but the hitches is at most this long
+    hitch_max: float = 0.040              # and a hitch at most this long (observed max 0.0369 s in 2.83 M frames)
+    hitch_rate: float = 2.9e-5            # frames longer than frame_time_max, per frame
+    hitches_per_window: int = 2           # most frames above frame_time_max in any 65 frames (recoil + margin)
+    # Silkspear phases that end one frame apart with no timer explaining it (the needle's way back): the
+    # rollout's variant lanes take each value, [threshold, share of the logged throws]
+    # how far the variant lanes move the timer thresholds (Variant); chosen on live i0_000, the fit recording:
+    # variant-hull coverage 99.05 / 99.03 / 98.94 % of covered windows at 0.5 / 1 / 2 ms
+    timer_bias: float = 0.0005
+    alpha_margin: float = 0.01            # phase lanes: the feasible phase interval widened by this (frame drift)
+    cast_throw_variants: list = field(default_factory=lambda: [[0.42, 0.5], [0.44, 0.5]])
+    cast_catch_variants: list = field(default_factory=lambda: [[0.14, 0.5], [0.16, 0.5]])
+    bind_time_variants: list = field(default_factory=list)     # Bind lengths one frame apart, as the cast phases
+    jump_heights: list = field(default_factory=list)   # per jump hold length: logged and model apex spread
     scenes: dict = field(default_factory=dict)       # scene -> {"enable": [go names], "disable": [go names]}
     source: dict = field(default_factory=dict)       # key -> provenance note
     fit: dict = field(default_factory=dict)          # kin_fit summary (measured values, residuals, data used)
@@ -239,13 +356,43 @@ class HeroParams:
               "cast_throw", "cast_catch", "cast_decay", "cast_decay_ground", "cast_vy_cap", "cast_catch_speed",
               "cast_catch_decay", "cast_silk", "bind_time", "bind_decay", "bind_vy_cap",
               "bind_vy_cap_down", "bind_end_vy", "bind_silk",
-              "silk_max", "lock_decay", "ledge_steps", "land_slop_lo", "land_slop_hi")
+              "silk_max", "lock_decay", "ledge_steps", "land_slop_lo", "land_slop_hi", "rdown_halve",
+              "bind_break_before", "wf_bias_wait", "wf_bias_up")
 
     def vector(self) -> np.ndarray:
         return np.array([float(getattr(self, k)) for k in self.VECTOR], dtype=np.float64)
 
     def scene(self, name: str) -> dict:
         return self.scenes.get(name, {})
+
+    def with_weighted(self, on: bool = True) -> "HeroParams":
+        """A copy with the Weighted Anklet equipped (knockback x0.5, i-frames x1.3, nail recoil 4 steps, max fall
+        38, RecoilDown halves the rise). Not identified on logs yet: the bot runs never equipped it."""
+        p = HeroParams.from_json(self.to_json())
+        if not on or self.weighted:
+            return p
+        p.weighted = True
+        p.hurt_velocity = self.hurt_velocity * self.weighted_knockback_mult
+        p.invul_time = self.invul_time * self.weighted_invuln_mult
+        p.recoil_steps = self.weighted_recoil_steps
+        p.max_fall = self.max_fall_weighted
+        p.rdown_halve = 1
+        return p
+
+    def cast_variant(self, which: str) -> tuple[float, float, float]:
+        """(Silkspear throw, catch, Bind) thresholds of a variant: "nominal" (the shipped values), "short" or "long"
+        (the shortest or the longest of the logged variants)."""
+        if which == "nominal":
+            return self.cast_throw, self.cast_catch, self.bind_time
+        th = sorted(v[0] for v in self.cast_throw_variants) or [self.cast_throw]
+        ca = sorted(v[0] for v in self.cast_catch_variants) or [self.cast_catch]
+        bi = sorted(v[0] for v in self.bind_time_variants) or [self.bind_time]
+        return (th[0], ca[0], bi[0]) if which == "short" else (th[-1], ca[-1], bi[-1])
+
+    def jitter(self) -> dict:
+        return {"frame_time": self.frame_time, "lo": self.frame_time_lo, "hi": self.frame_time_hi,
+                "max": self.frame_time_max, "hitch_max": self.hitch_max, "hitch_rate": self.hitch_rate,
+                "hitches": self.hitches_per_window}
 
     def to_json(self) -> dict:
         return asdict(self)
@@ -274,7 +421,8 @@ class HeroParams:
  P_DS_LREC, P_DS_DECEL, P_DS_VYMIN, P_DS_VYMAX, P_DS_ENDVY, P_POGO_J, P_POGO_JD, P_BOUNCE, P_HURT_V, P_HURT_VY,
  P_HURT_T, P_HURT_WAIT, P_HURT_RAMP, P_HURT_SKIP, P_INV_T, P_CAST_ANTIC, P_CAST_THROW, P_CAST_CATCH, P_CAST_DECAY,
  P_CAST_DECAY_G, P_CAST_VYCAP, P_CAST_CSPEED, P_CAST_CDECAY, P_CAST_SILK, P_BIND_T, P_BIND_DECAY, P_BIND_VYCAP,
- P_BIND_VYDOWN, P_BIND_ENDVY, P_BIND_SILK, P_SILK_MAX, P_LOCK_DECAY, P_LEDGE, P_SLOP_LO, P_SLOP_HI, NP) = range(63)
+ P_BIND_VYDOWN, P_BIND_ENDVY, P_BIND_SILK, P_SILK_MAX, P_LOCK_DECAY, P_LEDGE, P_SLOP_LO, P_SLOP_HI, P_RDOWN_HALF,
+ P_BIND_BREAK, P_WF_BW, P_WF_BU, NP) = range(67)
 assert NP == len(HeroParams.VECTOR)
 
 
@@ -284,7 +432,8 @@ assert NP == len(HeroParams.VECTOR)
 class Terrain2D:
     """Static collision geometry as axis-aligned segments: hseg rows (y, x0, x1) block vertical motion, vseg rows
     (x, y0, y1) horizontal motion. Sloped edges are kept in `slopes` (x0, y0, x1, y1) and not collided yet (none in
-    the Bone_05 arena). Built from a TERRAIN message: every outline of every solid that is on (or listed in
+    the Bone_05 arena), together with the AABB sides of round shapes (shape_outline), which only the knockback bound
+    reads. Built from a TERRAIN message: every outline of every solid that is on (or listed in
     overrides["enable"]) and not listed in overrides["disable"]; the dump is taken at room entry, so arena gates
     that close later are off in it and stale ones on (Bone_05: the "Threaded Bell Gate" pair closes for the fight,
     "Wall" is gone; HeroParams.scenes)."""
@@ -294,6 +443,48 @@ class Terrain2D:
     names: list = field(default_factory=list)
     gates: np.ndarray = field(default_factory=lambda: np.zeros((0, 4)))   # AABBs of overrides["enable"] solids
     n_base: tuple = (-1, -1)          # hseg / vseg rows before the gate rows (-1: no gates)
+    _grid: np.ndarray | None = field(default=None, repr=False, compare=False)
+
+    def packed(self, width: float = 1.0) -> np.ndarray:
+        """The segments and an x-bucket index of them in one float64 array, for the compiled rollout and the
+        knockback queries (layout in kin_jit: a bucket lists the floors / ceilings whose x extent, the walls whose x
+        and the slopes whose x extent falls in it, with a 0.02 u margin, so a query looks at a handful of segments
+        instead of all of them). Built once per terrain."""
+        if self._grid is None:
+            h = np.ascontiguousarray(self.hseg, dtype=np.float64).reshape(-1, 3)
+            v = np.ascontiguousarray(self.vseg, dtype=np.float64).reshape(-1, 3)
+            sl = np.ascontiguousarray(self.slopes, dtype=np.float64).reshape(-1, 4)
+            xs = np.concatenate([h[:, 1], h[:, 2], v[:, 0], sl[:, 0], sl[:, 2]])
+            x0 = float(xs.min()) - 1.0 if len(xs) else 0.0
+            nb = int(np.ceil((float(xs.max()) + 1.0 - x0) / width)) + 1 if len(xs) else 0
+            b = lambda x: int(np.floor((x - x0) / width))  # noqa: E731
+
+            def csr(ranges: list[tuple[int, int]]) -> tuple[np.ndarray, np.ndarray]:
+                lists: list[list[int]] = [[] for _ in range(nb)]
+                for j, (lo, hi) in enumerate(ranges):
+                    for k in range(max(lo, 0), min(hi, nb - 1) + 1):
+                        lists[k].append(j)
+                start = np.zeros(nb + 1)
+                start[1:] = np.cumsum([len(x) for x in lists])
+                return start, np.array([j for x in lists for j in x], dtype=np.float64)
+
+            hst, hix = csr([(b(r[1] - 0.02), b(r[2] + 0.02)) for r in h])
+            vst, vix = csr([(b(r[0] - 0.02), b(r[0] + 0.02)) for r in v])
+            sst, six = csr([(b(min(r[0], r[2]) - 0.02), b(max(r[0], r[2]) + 0.02)) for r in sl])
+            o_h = TT_HEAD
+            o_v = o_h + h.size
+            o_s = o_v + v.size
+            o_hs = o_s + sl.size
+            o_hi = o_hs + len(hst)
+            o_vs = o_hi + len(hix)
+            o_vi = o_vs + len(vst)
+            o_ss = o_vi + len(vix)
+            o_si = o_ss + len(sst)
+            head = [len(h), len(v), nb, x0, 1.0 / width, o_hs, o_hi, o_vs, o_vi, o_v, len(sl), o_s, o_ss, o_si]
+            assert len(head) == TT_HEAD
+            self._grid = np.ascontiguousarray(np.concatenate([np.array(head, dtype=np.float64), h.ravel(), v.ravel(),
+                                                              sl.ravel(), hst, hix, vst, vix, sst, six]))
+        return self._grid
 
     def open(self) -> "Terrain2D":
         """The same scene with the arena gates open (before or after the fight)."""
@@ -322,9 +513,14 @@ class Terrain2D:
         return cls.from_outlines(outlines, closed=[True] * len(outlines))
 
     @classmethod
-    def from_outlines(cls, outlines: list[np.ndarray], closed: list[bool], names: list | None = None
-                      ) -> "Terrain2D":
+    def from_outlines(cls, outlines: list[np.ndarray], closed: list[bool], names: list | None = None,
+                      rounded: Iterable[tuple[float, float, float, float]] = ()) -> "Terrain2D":
+        """rounded: AABBs (x0, y0, x1, y1) of round geometry (circles, capsules, edge radii) whose four sides are
+        added to `slopes`: the rollout does not collide them, and the knockback bound switches to its
+        contact-projection rule before the path can reach them."""
         h, v, s = [], [], []
+        for a, b, c, d in rounded:
+            s.extend(((a, b, c, b), (c, b, c, d), (c, d, a, d), (a, d, a, b)))
         for pts, cl in zip(outlines, closed):
             pts = np.asarray(pts, dtype=np.float64)
             n = len(pts)
@@ -341,28 +537,64 @@ class Terrain2D:
         arr = lambda rows, w: np.array(rows, dtype=np.float64).reshape(-1, w)  # noqa: E731
         return cls(arr(h, 3), arr(v, 3), arr(s, 4), list(names or []))
 
+    @staticmethod
+    def shape_outline(kind: str, verts: np.ndarray, radius: float = 0.0
+                      ) -> tuple[np.ndarray | None, bool, tuple[float, float, float, float] | None]:
+        """(outline for the rollout or None, closed, AABB of its round part or None) of one TERRAIN shape
+        (oracle/src/SceneDump/ColliderGeometry.cs). Box2D deflects a push along a round surface as along a slope, so
+        circles (1 vertex = centre, radius r: the circumscribed octagon, whose flat faces sit at r), capsules (the
+        outline is their bounding box, or 2 centres + radius from the physics fallback: that box grown by r) and
+        shapes with an edge radius above ROUND_MIN also report their AABB grown by the radius (Bone_05 has none: box,
+        edge and poly shapes, radius 0); unknown kinds fail closed as that AABB (a box for the rollout, round for the
+        bound)."""
+        v = np.asarray(verts, dtype=np.float64).reshape(-1, 2)
+        r = max(float(radius or 0.0), 0.0)
+        if not len(v):
+            return None, False, None
+        lo, hi = v.min(axis=0) - r, v.max(axis=0) + r
+        aabb = (float(lo[0]), float(lo[1]), float(hi[0]), float(hi[1]))
+        box = np.array([[lo[0], lo[1]], [hi[0], lo[1]], [hi[0], hi[1]], [lo[0], hi[1]]])
+        if kind == "circle":
+            if r <= 0:
+                return None, False, None
+            ang = np.pi / 8 + np.arange(8) * np.pi / 4
+            oct_ = v[0][None, :] + (r / np.cos(np.pi / 8)) * np.stack([np.cos(ang), np.sin(ang)], axis=1)
+            return oct_, True, aabb
+        if kind == "capsule":
+            return box, True, aabb
+        if kind in ("box", "poly", "edge"):
+            if len(v) < 2:
+                return None, False, None
+            if r > ROUND_MIN:
+                return (box if kind == "box" else v), kind != "edge", aabb
+            return v, kind != "edge", None
+        return box, True, aabb
+
     @classmethod
     def from_message(cls, msg: dict, overrides: dict | None = None) -> "Terrain2D":
-        """From a decoded TERRAIN payload (RecordingReader.terrain() / OracleLink)."""
+        """From a decoded TERRAIN payload (RecordingReader.terrain() / OracleLink). Round shapes: shape_outline."""
         from ssbot.oracle.messages import Terrain
         t = msg if isinstance(msg, Terrain) else Terrain.decode(msg)
         ov = overrides or {}
         enable, disable = set(ov.get("enable", ())), set(ov.get("disable", ()))
-        parts: dict[bool, tuple[list, list, list]] = {False: ([], [], []), True: ([], [], [])}
+        parts: dict[bool, tuple[list, list, list, list]] = {False: ([], [], [], []), True: ([], [], [], [])}
         boxes = []
         for sol in t.solids:
             if sol.go in disable or not (sol.on or sol.go in enable):
                 continue
             gate = (not sol.on) and sol.go in enable
             for sh in sol.shapes:
-                if len(sh.verts) < 2 or sh.kind == "circle":
+                outline, closed, rnd = cls.shape_outline(sh.kind, sh.verts, getattr(sh, "radius", 0.0))
+                if outline is None:
                     continue
-                o, c, n = parts[gate]
-                o.append(sh.verts)
-                c.append(sh.closed)
+                o, c, n, rd = parts[gate]
+                o.append(outline)
+                c.append(closed)
                 n.append(sol.go)
+                if rnd is not None:
+                    rd.append(rnd)
                 if gate:
-                    boxes.append((*sh.verts.min(axis=0), *sh.verts.max(axis=0)))
+                    boxes.append((*outline.min(axis=0), *outline.max(axis=0)))
         base = cls.from_outlines(*parts[False])
         if not boxes:
             return base
@@ -592,14 +824,67 @@ def _fixed_step(X, P, hseg, vseg):
     X[DS_REC] = np.where(land_sp, 0.0, X[DS_REC])
     X[GS] = np.where(land_sp, 1.0, X[GS])
     X[VY] = np.where(land_sp, P[P_DS_ENDVY], X[VY])
-    # landing into idle (no move input) ends a downspike recovery at once (HeroAnimationController.UpdateState,
-    # airborne -> idle); landing into a run keeps it for DOWNSPIKE_LAND_RECOVERY_TIME (live run: 0 vs 1-9 frames)
-    X[DS_REC] = np.where((lands | land_sp) & ~was & (X[MOVE] == 0), -1.0, X[DS_REC])
+    # landing into idle ends a downspike recovery at once, into a run it lasts DOWNSPIKE_LAND_RECOVERY_TIME
+    # (HeroAnimationController.UpdateState, airborne -> idle / run): decided in this frame's Update, on the input
+    # read there (the move input of the spike's own frames is stale: LookForInput does not run while relinquished)
+    X[LANDQ] = np.where((lands | land_sp) & ~was, 1.0, X[LANDQ])
+
+
+def _wf_start(X, on, preset):
+    """GameManager.FreezeMoment started in this frame (other than the hero's own hit-stop): its coroutine runs to the
+    first yield at once (SetTimeScale ramp down: scale lerp(1, target, 0) = 1; with no ramp down the target at once
+    and the wait loop's first step)."""
+    down, wait, up, tgt = preset
+    X[WF_DOWN] = np.where(on, down, X[WF_DOWN])
+    X[WF_WAIT] = np.where(on, wait, X[WF_WAIT])
+    X[WF_UP] = np.where(on, up, X[WF_UP])
+    X[WF_TGT] = np.where(on, tgt, X[WF_TGT])
+    X[WF_T] = np.where(on, 0.0, X[WF_T])
+    X[WF_PH] = np.where(on, 10.0 if down > 0 else 11.0, X[WF_PH])
+    X[WF_S] = np.where(on, 1.0 if down > 0 else float(np.float32(tgt)), X[WF_S])
+
+
+def _lerp32(a, b, t):
+    """Mathf.Lerp in float32 (t clamped to [0, 1])."""
+    a32, b32 = a.astype(np.float32), b.astype(np.float32)
+    t32 = np.clip(t, 0.0, 1.0).astype(np.float32)
+    return (a32 + (b32 - a32) * t32).astype(np.float64)
+
+
+def _wf_step(X, udt, P):
+    """One frame of the world freeze coroutine (after Update): ramp down, wait, ramp up, each a float32 timer of
+    unscaled time; the lanes move the wait / ramp-up thresholds by P_WF_BW / P_WF_BU."""
+    ph = X[WF_PH]
+    fresh = ph >= 10
+    X[WF_PH] = np.where(fresh, ph - 10, ph)
+    ph = np.where(fresh, -2.0, X[WF_PH])          # started this frame: no step
+    t = np.where(ph >= 0, _f32(X[WF_T] + udt), X[WF_T])
+    tgt = X[WF_TGT]
+    one = np.ones_like(tgt)
+    d0 = ph == 0
+    end0 = d0 & ~(t.astype(np.float32) < X[WF_DOWN].astype(np.float32))
+    X[WF_S] = np.where(d0 & ~end0, _lerp32(one, tgt, t / np.maximum(X[WF_DOWN], 1e-12)), X[WF_S])
+    X[WF_S] = np.where(end0, _f32(tgt), X[WF_S])
+    w1 = ph == 1
+    end1 = w1 & _ge32(t, X[WF_WAIT] + P[P_WF_BW])
+    up0 = end1 & (X[WF_UP] <= 0)
+    X[WF_S] = np.where(end1, np.where(up0, 1.0, _f32(tgt)), X[WF_S])
+    u2 = ph == 2
+    end2 = u2 & _ge32(t, X[WF_UP] + P[P_WF_BU])
+    X[WF_S] = np.where(u2 & ~end2, _lerp32(tgt, one, t / np.maximum(X[WF_UP], 1e-12)), X[WF_S])
+    X[WF_S] = np.where(end2, 1.0, X[WF_S])
+    X[WF_T] = np.where(end0 | end1, 0.0, np.where(ph >= 0, t, X[WF_T]))
+    X[WF_PH] = np.where(end0, 1.0, np.where(end1, np.where(up0, -1.0, 2.0), np.where(end2, -1.0, X[WF_PH])))
 
 
 def _apply_events(X, ev, P):
     """Contact events of this frame (after its physics steps)."""
     mode = X[MODE]
+    # a hit during the Bind charge also starts GameManager's BindBreak freeze (22 of 22 logged hits in the charge,
+    # 0 of 1 in the burst; the Bind FSM calls FreezeMoment(BindBreak))
+    bb = ((ev & (EV_HURT_L | EV_HURT_R)) != 0) & (mode == M_BIND) & (X[MODE_T] < P[P_BIND_BREAK])
+    for bit in WF_ORDER:
+        _wf_start(X, ((ev & bit) != 0) | (bb if bit == EV_FZ_BIND_BREAK else False), FREEZE_PRESETS[bit])
     relinq = _isin(mode, RELINQUISHED)
     rec_ok = (X[RDIR] == 0) & ~relinq & ~_isin(mode, NO_INPUT)
     for bit, d in ((EV_RECOIL_L, -1.0), (EV_RECOIL_R, 1.0)):
@@ -608,10 +893,11 @@ def _apply_events(X, ev, P):
         X[RSTEPS] = np.where(on, P[P_RSTEPS], X[RSTEPS])
         X[VX] = np.where(on, d * P[P_RV], X[VX])
     # HeroController.RecoilDown (an up slash that hit): CancelJump, rising velocity cut to RECOIL_DOWN_VELOCITY 0
+    # (halved instead with the Weighted Anklet)
     down = ((ev & EV_RECOIL_DOWN) != 0) & ~relinq
     X[JUMPING] = np.where(down, 0.0, X[JUMPING])
     X[JSTEPS] = np.where(down, 0.0, X[JSTEPS])
-    X[VY] = np.where(down & (X[VY] > 0), 0.0, X[VY])
+    X[VY] = np.where(down & (X[VY] > 0), X[VY] * 0.5 if P[P_RDOWN_HALF] > 0 else 0.0, X[VY])
     pogo = (ev & EV_POGO) != 0
     X[MODE] = np.where(pogo, M_NORMAL, X[MODE])
     X[JUMPING] = np.where(pogo, 1.0, X[JUMPING])
@@ -706,6 +992,8 @@ def _update(X, mask, ev, dt, udt, P):
     X[JQ] = np.where(rel, -1.0, X[JQ])
     X[AQ] = np.where(accept & ((mask & B_ATTACK) == 0), -1.0, X[AQ])
     X[QQ] = np.where(accept & ((mask & B_QUICKCAST) == 0), -1.0, X[QQ])
+    X[DS_REC] = np.where((X[LANDQ] > 0) & (X[MOVE] == 0), -1.0, X[DS_REC])
+    X[LANDQ] = 0.0
 
     # hero_state branch: in no_input the damage recoil times out here (recoilTimer < RECOIL_DURATION ? += dt :
     # CancelDamageRecoil: v = 0, gravity back, control back), before LookForQueueInput can start a queued action;
@@ -732,7 +1020,9 @@ def _update(X, mask, ev, dt, udt, P):
     can_atk_action = normal & (X[ATTACKING] <= 0)
     downish = ((mask & B_DOWN) != 0) & ((mask & B_UP) == 0)
     can_down = (X[BOUNCE] < 0) & (X[DS_REC] < 0)
-    can_attack = can_atk_action & (X[ATK_CD] <= 0) & (~downish | can_down)
+    # a Bind pressed in the same frame wins over the attack (its FSM takes control first; live run: 2 of 2)
+    bind_first = normal & ((pressed & B_BIND) != 0) & (X[SILK] >= P[P_BIND_SILK])
+    can_attack = can_atk_action & (X[ATK_CD] <= 0) & (~downish | can_down) & ~bind_first
     ap = (pressed & B_ATTACK) != 0
     go = ap & can_attack
     X[AQ] = np.where(ap & ~can_attack, 0.0, X[AQ])
@@ -768,7 +1058,7 @@ def _update(X, mask, ev, dt, udt, P):
     can_jump = normal & (X[JUMPING] <= 0) & (X[BOUNCE] < 0) & (X[DS_REC] < 0) & (ground | (X[LEDGE] > 0))
     go = normal & jheld & (X[JQ] >= 0) & (X[JQ] <= P[P_JQ]) & can_jump
     _hero_jump(X, go, P)
-    can_attack = normal & (X[ATTACKING] <= 0) & (X[ATK_CD] <= 0) & (~downish | can_down)
+    can_attack = normal & (X[ATTACKING] <= 0) & (X[ATK_CD] <= 0) & (~downish | can_down) & ~bind_first
     go = normal & ((mask & B_ATTACK) != 0) & (X[AQ] >= 0) & (X[AQ] <= P[P_AQ]) & can_attack
     _do_attack(X, go, mask, P)
     normal = X[MODE] == M_NORMAL
@@ -843,6 +1133,7 @@ def _update(X, mask, ev, dt, udt, P):
     X[MODE_T] = np.where(X[MODE] == M_LOCKED, _f32(X[MODE_T] + dt), X[MODE_T])
     X[INV_T] = np.maximum(_f32(X[INV_T] - dt), 0.0)
     X[PREV] = mask.astype(np.float64)
+    _wf_step(X, udt, P)
 
 
 def _flags(X) -> np.ndarray:
@@ -882,7 +1173,7 @@ def _simulate(S0, masks, events, dts, fss, udts, P, hseg, vseg):
                 steps = fss[:, t - 1].astype(np.int64)
                 X[ALPHA] = X[ALPHA] + dt / fdt - steps
             else:
-                dt = _f32(udt * X[TS])
+                dt = _f32(udt * np.where(X[WF_S] == 1.0, X[TS], X[TS] * X[WF_S]))
                 a = X[ALPHA] + dt / fdt
                 steps = np.floor(a + 1e-9).astype(np.int64)
                 X[ALPHA] = a - steps
@@ -908,83 +1199,325 @@ def _simulate(S0, masks, events, dts, fss, udts, P, hseg, vseg):
 
 @dataclass(slots=True)
 class Rollout:
-    phys: np.ndarray     # [N, T+1, 2] collider (body) position, hero.pos coordinates
-    pos: np.ndarray      # [N, T+1, 2] rendered position (STATE hero.pos)
+    """Rollout of N command sequences over T frames; index 0 is the start frame. With timing variants, the main
+    arrays hold variant 0 (the nominal lane), bound the per-frame hull of every lane's box, flags_all / flags_any the
+    per-frame AND / OR of their flags (F_INVULN in flags_all: invulnerable in every lane), and with lanes=True var_*
+    hold every lane."""
+    phys: np.ndarray     # [N, T+1, 2] body position, hero.pos coordinates (x centre, y = box bottom + foot)
+    pos: np.ndarray      # [N, T+1, 2] rendered transform (STATE hero.pos; O-tagged pos_transform in WorldState)
     vel: np.ndarray      # [N, T+1, 2]
     mode: np.ndarray     # [N, T+1] M_* codes
     flags: np.ndarray    # [N, T+1] F_* bits
     final: np.ndarray    # [K, N] model state after the last frame
+    box: np.ndarray      # [N, T+1, 4] collider AABB (x0, y0, x1, y1), as STATE hero.box
+    variants: tuple = ()             # Variant per lane of the var_* arrays
+    var_box: np.ndarray | None = None     # [N, V, T+1, 4]
+    var_mode: np.ndarray | None = None    # [N, V, T+1]
+    var_flags: np.ndarray | None = None   # [N, V, T+1]
+    bound: np.ndarray | None = None       # [N, T+1, 4] hull of the variant boxes per frame
+    flags_all: np.ndarray | None = None   # [N, T+1] F_* bits set in every lane
+    flags_any: np.ndarray | None = None   # [N, T+1] F_* bits set in some lane
 
-    def box(self, params: HeroParams) -> np.ndarray:
-        """Collider AABBs [N, T+1, 4] (x0, y0, x1, y1), as STATE hero.box."""
-        x, y = self.phys[..., 0], self.phys[..., 1]
-        return np.stack([x - params.half_width, y - params.foot, x + params.half_width, y + params.head], axis=-1)
+    @property
+    def centre(self) -> np.ndarray:
+        """[N, T+1, 2] collider centre: WorldState HeroState.pos (cross-module decision 1)."""
+        return 0.5 * (self.box[..., :2] + self.box[..., 2:])
+
+
+@dataclass(frozen=True, slots=True)
+class Variant:
+    """One timing lane. The game's timers compare float32 sums of frame times with thresholds that sit on exact
+    multiples of 1/60 s (antic 0.1, hit-stop wait 0.1 and ramp 0.1, damage recoil 0.2, attack 0.35 ...), so the
+    frame-time jitter (p99.99 0.0170 s against a mean of 0.016666 s) decides whether such a phase ends on frame N or
+    N + 1, and the history cannot tell which (the frame times are not predictable: live run, 2.83 M frames). A lane
+    moves the thresholds by -+ HeroParams.timer_bias, with its own sign for each link of the longest chain of such
+    timers, the damage hit-stop wait, its ramp (GameManager.FreezeMoment, unscaled time) and every timer on scaled
+    time (recoil, antic, recovery, attack, Bind): `timers` = (wait, ramp, scaled). alpha: the start phase ("est", or
+    the "lo" / "hi" end of its feasible interval widened by HeroParams.alpha_margin); frame_time: unscaled frame
+    time of every future frame ("mean", or the jitter model's "lo" / "hi", which also moves the physics phase);
+    cast: the Silkspear throw / catch thresholds ("nominal", "short", "long", HeroParams.cast_variant)."""
+    name: str
+    alpha: str = "est"
+    frame_time: str = "mean"
+    cast: str = "nominal"
+    timers: tuple = (0, 0, 0)
+
+
+def _lane(t: tuple) -> Variant:
+    early = t[2] < 0
+    return Variant("".join("-+"[x > 0] for x in t), "hi" if early else "lo", "mean", "short" if early else "long", t)
+
+
+_SIGNS = tuple((a, b, c) for a in (-1, 1) for b in (-1, 1) for c in (-1, 1))
+NOMINAL = (Variant("nominal"),)
+# fast: every threshold a frame sooner (later), the phase at the top (bottom) of its interval, short (long) Silkspear
+FAST = (Variant("nominal"), _lane((-1, -1, -1)), _lane((1, 1, 1)))
+# bounds: every combination of the three links, so a hit-stop that ends early and a recoil that ends late are covered
+BOUNDS = (Variant("nominal"),) + tuple(_lane(t) for t in _SIGNS)
+FULL = (Variant("nominal"),) + tuple(Variant(f"{a}/{_lane(t).name}", a, "mean", _lane(t).cast, t)
+                                     for a in ("lo", "hi") for t in _SIGNS)
+VARIANT_SETS = {"nominal": NOMINAL, "fast": FAST, "bounds": BOUNDS, "full": FULL}
+_SCALED_TIMERS = ("P_ATK_DUR", "P_ATK_CD", "P_DS_ANTIC", "P_DS_REC", "P_DS_LREC", "P_HURT_T", "P_CAST_ANTIC",
+                  "P_BIND_T")
+
+
+def _variant_rows(params: HeroParams, variants: tuple[Variant, ...]
+                  ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Per variant: parameter row [V, NP], frame time [V] (0: the caller's), phase selector [V]."""
+    V = len(variants)
+    Pv = np.repeat(params.vector()[None, :], V, axis=0)
+    ft = np.zeros(V)
+    sel = np.zeros(V, dtype=np.int64)
+    scaled = [globals()[k] for k in _SCALED_TIMERS]
+    for v, var in enumerate(variants):
+        sel[v] = {"est": 0, "lo": 1, "hi": 2}[var.alpha]
+        ft[v] = {"mean": params.frame_time, "lo": params.frame_time_lo, "hi": params.frame_time_hi}[var.frame_time]
+        Pv[v, P_CAST_THROW], Pv[v, P_CAST_CATCH], Pv[v, P_BIND_T] = params.cast_variant(var.cast)
+        tw, tr, ts = var.timers
+        Pv[v, P_HURT_WAIT] += tw * params.timer_bias
+        Pv[v, P_HURT_RAMP] += tr * params.timer_bias
+        Pv[v, P_WF_BW] += tw * params.timer_bias          # a world freeze's wait / ramp up: the same unscaled links
+        Pv[v, P_WF_BU] += tr * params.timer_bias
+        Pv[v, scaled] += ts * params.timer_bias
+    return Pv, np.asarray(ft, dtype=np.float32).astype(np.float64), sel
+
+
+def _lane_runs(P: np.ndarray, ft_v: np.ndarray, sel: np.ndarray, S0: np.ndarray, ev: np.ndarray, n: int
+               ) -> np.ndarray:
+    """[n, V] bool: which lanes a sequence has to run. Lanes that differ only in the unscaled-time links (hit-stop
+    and world-freeze wait and ramp) give identical results for a sequence that meets neither (start mode not
+    HURT_FREEZE, no world freeze running, no EV_HURT or EV_FZ_* event): of "bounds" (9 lanes) such a sequence
+    runs 3."""
+    V = len(ft_v)
+    key = P.copy()
+    key[:, [P_HURT_WAIT, P_HURT_RAMP, P_WF_BW, P_WF_BU]] = 0.0
+    dup = np.zeros(V, dtype=bool)
+    for v in range(1, V):
+        dup[v] = any(not dup[w] and ft_v[w] == ft_v[v] and sel[w] == sel[v] and np.array_equal(key[w], key[v])
+                     for w in range(v))
+    run = np.ones((n, V), dtype=bool)
+    if dup.any():
+        hurt = np.broadcast_to((S0[MODE] == M_HURT_FREEZE) | (S0[WF_PH] >= 0), (n,)).copy()
+        if ev.shape[0]:
+            hurt |= ((ev & (EV_HURT_L | EV_HURT_R | EV_FZ_ANY)) != 0).any(axis=1)
+        run[:, dup] = hurt[:, None]
+    return run
 
 
 def rollout(start: np.ndarray, masks: np.ndarray, params: HeroParams, terrain: Terrain2D | None = None,
             events: np.ndarray | None = None, dt: np.ndarray | None = None, fs: np.ndarray | None = None,
-            udt: float | np.ndarray | None = None) -> Rollout:
+            udt: float | np.ndarray | None = None, variants: tuple[Variant, ...] | str | None = None,
+            backend: str = "auto", threads: int = 1, lanes: bool = False) -> Rollout:
     """Predict N button sequences of T frames from a model state.
 
-    start: [K] or [K, N] model state (estimate_state / initial_state); masks: [N, T] ACTION masks for the frames
-    after the start frame (index 0 = next frame), applied as the oracle does (an ACTION for target frame F is latched
-    for F, read by Update in F); events: [N, T] EV_* bits (None: none); dt, fs: [T] or [N, T] logged scaled dt and
-    physics steps per frame (None: nominal timing: dt = udt times the model's time scale, which the damage hit-stop
-    drives); udt: unscaled frame time, a scalar or [T] / [N, T] (logged; it times the hit-stop either way; None:
-    params.frame_time, the measured mean frame time of the game, which is not exactly 1/60 s)."""
-    masks = np.asarray(masks, dtype=np.int64)
+    start: [K] or [K, N] model state (estimate_state / initial_state); masks: [N, T] latched ACTION masks for the
+    frames after the start frame (index 0 = next frame; hold_filter turns commanded masks into latched ones), applied
+    as the oracle does (an ACTION for target frame F is latched for F, read by Update in F); events: [N, T] EV_*
+    bits (None: none; at run time the threat layer supplies them or the planner branches on them); dt, fs: [T] or
+    [N, T] logged scaled dt and physics steps per frame (replay only: the planner does not know them); without them
+    the timing is nominal: dt = udt times the model's time scale, steps from the phase; udt: unscaled frame time, a
+    scalar or [T] / [N, T] (None: params.frame_time, the measured mean frame time, not exactly 1/60 s).
+    variants: "fast" / "bounds" / "full" / a tuple of Variant (nominal timing only): V lanes per sequence, their
+    per-frame hull in `bound` and flag AND / OR in flags_all / flags_any; the main arrays hold the first (nominal)
+    lane; lanes=True also returns every lane (var_*; the planner does not need them: without, the compiled path keeps
+    no per-lane arrays and skips lanes that duplicate another, _lane_runs). backend: "numba" (the compiled loop,
+    kin_jit), "numpy" (the reference), "auto"; threads > 1 runs the sequences in parallel (numba)."""
+    masks = np.ascontiguousarray(masks, dtype=np.int64)
     if masks.ndim == 1:
         masks = masks[None, :]
     n, T = masks.shape
     S0 = np.asarray(start, dtype=np.float64)
-    if S0.ndim == 1:
-        S0 = np.repeat(S0[:, None], n, axis=1)
-    elif S0.shape[1] == 1 and n > 1:
-        S0 = np.repeat(S0, n, axis=1)
-    if S0.shape != (K, n):
-        raise ValueError(f"start state {S0.shape}, expected ({K}, {n})")
-    ev = np.zeros((n, T), dtype=np.int64) if events is None else np.broadcast_to(
-        np.asarray(events, dtype=np.int64), (n, T)).copy()
-    if dt is not None:
-        dts = np.broadcast_to(np.asarray(dt, dtype=np.float64), (n, T)).copy()
-        fss = np.broadcast_to(np.asarray(fs, dtype=np.float64), (n, T)).copy()
+    S0 = S0[:, None] if S0.ndim == 1 else S0
+    if S0.shape[0] != K or S0.shape[1] not in (1, n):
+        raise ValueError(f"start state {S0.shape}, expected ({K}, {n}) or ({K}, 1)")
+    S0 = np.ascontiguousarray(S0)
+    ev = np.zeros((0, 0), dtype=np.int64) if events is None else np.ascontiguousarray(
+        np.broadcast_to(np.asarray(events, dtype=np.int64), (n, T)))
+    if isinstance(variants, str):
+        variants = VARIANT_SETS[variants]
+    variants = tuple(variants) if variants else ()
+    if variants and dt is not None:
+        raise ValueError("timing variants need nominal timing (dt / fs None)")
+    V = len(variants) or 1
+    if variants:
+        P, ft_v, sel = _variant_rows(params, variants)
     else:
-        dts = np.zeros((n, 0))
-        fss = np.zeros((n, 0))
-    udt = params.frame_time if udt is None else udt
-    udts = np.broadcast_to(np.asarray(udt, dtype=np.float32).astype(np.float64), (n, T)).copy()
+        P, ft_v, sel = params.vector()[None, :], np.zeros(1), np.zeros(1, dtype=np.int64)
+    u = np.asarray(params.frame_time if udt is None else udt, dtype=np.float32).astype(np.float64)
+    udts = np.ascontiguousarray(u.reshape(1, 1) if u.ndim == 0 else (u[None, :] if u.ndim == 1 else u))
+    if udts.shape[0] not in (1, n) or udts.shape[1] not in (1, T):
+        raise ValueError(f"udt {udts.shape} does not broadcast to ({n}, {T})")
+    if dt is not None:
+        dts = np.ascontiguousarray(np.broadcast_to(np.asarray(dt, dtype=np.float64), (n, T)))
+        fss = np.ascontiguousarray(np.broadcast_to(np.asarray(fs, dtype=np.float64), (n, T)))
+    else:
+        dts = fss = np.zeros((0, 0))
     terrain = terrain or Terrain2D.empty()
-    P = params.vector()
-    phys, rend, vel, modes, flags, X = _SIM(S0, masks, ev, dts, fss, udts, P, terrain.hseg, terrain.vseg)
-    return Rollout(phys, rend, vel, modes, flags, X)
+    use_jit = HAVE_NUMBA if backend == "auto" else backend == "numba"
+    if variants and use_jit and not lanes:
+        from ssbot.knowledge import kin_jit
+        if threads > 1:
+            import numba
+            numba.set_num_threads(threads)
+        run = _lane_runs(P, ft_v, sel, S0, ev, n)
+        fn = kin_jit.simulate_bound_par if threads > 1 else kin_jit.simulate_bound
+        phys, rend, vel, modes, flags, box, X, bound, f_all, f_any = fn(
+            S0, masks, ev, dts, fss, udts, ft_v, sel, params.alpha_margin, P, terrain.packed(), run)
+        return Rollout(phys, rend, vel, modes, flags, X, box, variants, bound=bound, flags_all=f_all,
+                       flags_any=f_any)
+    if use_jit:
+        from ssbot.knowledge import kin_jit
+        if threads > 1:
+            import numba
+            numba.set_num_threads(threads)
+        fn = kin_jit.simulate_par if threads > 1 else kin_jit.simulate
+        phys, rend, vel, modes, flags, box, X = fn(S0, masks, ev, dts, fss, udts, ft_v, sel, params.alpha_margin,
+                                                   P, terrain.packed())
+    else:
+        phys, rend, vel, modes, flags, box, X = _simulate_lanes(S0, masks, ev, dts, fss, udts, ft_v, sel,
+                                                                params.alpha_margin, P, terrain)
+    if not variants:
+        return Rollout(phys, rend, vel, modes, flags, X, box)
+    vb = box.reshape(n, V, T + 1, 4)
+    bound = np.concatenate([vb[..., :2].min(axis=1), vb[..., 2:].max(axis=1)], axis=-1)
+    vf = flags.reshape(n, V, T + 1)
+    sl = slice(0, None, V)
+    return Rollout(phys[sl], rend[sl], vel[sl], modes[sl], flags[sl], X[:, sl], box[sl], variants,
+                   vb, modes.reshape(n, V, T + 1), vf, bound, np.bitwise_and.reduce(vf, axis=1),
+                   np.bitwise_or.reduce(vf, axis=1))
 
 
-_SIM = _simulate   # an @numba.njit build of _simulate (and the helpers it calls) goes here once numba is installed
+def _simulate_lanes(S0, masks, ev, dts, fss, udts, ft_v, sel, alpha_margin, P, terrain):
+    """The NumPy reference: the broadcast inputs of kin_jit.simulate expanded to one column per lane (lane r * V + v),
+    run per parameter row with _simulate."""
+    n, T = masks.shape
+    V = len(ft_v)
+    nl = n * V
+    lane_r = np.repeat(np.arange(n), V)
+    lane_v = np.tile(np.arange(V), n)
+    S = np.ascontiguousarray(np.broadcast_to(S0, (K, n))[:, lane_r])
+    S[ALPHA] = np.where(sel[lane_v] == 1, np.maximum(S[ALO] - alpha_margin, 0.0),
+                        np.where(sel[lane_v] == 2, S[AHI] + alpha_margin, S[ALPHA]))
+    m = masks[lane_r]
+    e = ev[lane_r] if ev.shape[0] else np.zeros((nl, T), dtype=np.int64)
+    u = np.broadcast_to(udts, (n, T))[lane_r]
+    u = np.where(ft_v[lane_v][:, None] > 0, ft_v[lane_v][:, None], u)
+    d = dts[lane_r] if dts.shape[1] else np.zeros((nl, 0))
+    f = fss[lane_r] if fss.shape[1] else np.zeros((nl, 0))
+    out = [np.empty((nl, T + 1, 2)), np.empty((nl, T + 1, 2)), np.empty((nl, T + 1, 2)),
+           np.empty((nl, T + 1), dtype=np.int32), np.empty((nl, T + 1), dtype=np.int32), np.empty((nl, T + 1, 4)),
+           np.empty((K, nl))]
+    hseg = np.ascontiguousarray(terrain.hseg, dtype=np.float64)
+    vseg = np.ascontiguousarray(terrain.vseg, dtype=np.float64)
+    for v in range(V):
+        idx = np.flatnonzero(lane_v == v)
+        pv = P[v] if P.shape[0] > 1 else P[0]
+        res = _simulate(S[:, idx], m[idx], e[idx], d[idx], f[idx], u[idx], pv, hseg, vseg)
+        for o, x in zip(out[:5], res[:5]):
+            o[idx] = x
+        ph = res[0]
+        out[5][idx] = np.stack([ph[..., 0] - pv[P_HW], ph[..., 1] - pv[P_FOOT], ph[..., 0] + pv[P_HW],
+                                ph[..., 1] + pv[P_HEAD]], axis=-1)
+        out[6][:, idx] = res[5]
+    return tuple(out)
+
+
+# ---- the input path: oracle HoldFilter ------------------------------------------------------------------------
 
 N_BUTTONS = 22
 _LEFT_BIT, _RIGHT_BIT = 20, 21
+_AGE_LONG = 1 << 20
 
 
-def hold_filter(masks: np.ndarray, min_press: int = 2, min_release: int = 2, max_pending: int = 3) -> np.ndarray:
-    """The button masks the game latches for commanded masks [N, T] (oracle/src/Input/HoldFilter.cs, which the final
-    SendInput sink enforces too): every requested edge is kept and replayed in order, a release waits until the key
-    has been down min_press latched frames, a press until it has been up min_release frames, left and right are never
-    latched together, and more than max_pending queued toggles of one key drop the oldest press + release pair.
-    rollout() takes latched masks; a planner passes its commands through this first (logged "act" masks already
-    are latched). Starts from all keys up for a long time."""
+@dataclass(slots=True)
+class HoldState:
+    """oracle/src/Input/HoldFilter.cs state per lane: the latched and wanted key sets, queued edges and latched age
+    per key. (deferred / exclusiveWaiting only feed the filter's counters.) The planner keeps one in step with the
+    ACTIONs it sends (hold_filter returns the next one) or rebuilds it from STATE act.hf."""
+    latched: np.ndarray      # [n, 22] bool
+    desired: np.ndarray      # [n, 22] bool
+    pending: np.ndarray      # [n, 22] int
+    age: np.ndarray          # [n, 22] int
+
+    @classmethod
+    def idle(cls, n: int = 1) -> "HoldState":
+        """All keys up for a long time (an empty filter)."""
+        z = np.zeros((n, N_BUTTONS), dtype=bool)
+        return cls(z, z.copy(), np.zeros((n, N_BUTTONS), dtype=np.int64), np.full((n, N_BUTTONS), _AGE_LONG))
+
+    @classmethod
+    def from_hf(cls, hf: dict, n: int = 1) -> "HoldState":
+        """From STATE act.hf {latched, desired, pending, age}: latched / desired as button masks (or per-key bool
+        lists), pending / age as per-key lists (or {button index: value} maps; missing keys: 0 pending, long age)."""
+        def bits(v) -> np.ndarray:
+            if isinstance(v, (list, tuple)):
+                a = np.zeros(N_BUTTONS, dtype=bool)
+                a[:min(len(v), N_BUTTONS)] = np.asarray(v[:N_BUTTONS], dtype=bool)
+                return a
+            return ((int(v or 0) >> np.arange(N_BUTTONS)) & 1).astype(bool)
+
+        def ints(v, default: int) -> np.ndarray:
+            a = np.full(N_BUTTONS, default, dtype=np.int64)
+            if isinstance(v, dict):
+                for k, x in v.items():
+                    if 0 <= int(k) < N_BUTTONS:
+                        a[int(k)] = int(x)
+            elif isinstance(v, (list, tuple)):
+                m = min(len(v), N_BUTTONS)
+                a[:m] = np.asarray(v[:m], dtype=np.int64)
+            return a
+
+        one = cls(bits(hf.get("latched"))[None], bits(hf.get("desired"))[None], ints(hf.get("pending"), 0)[None],
+                  ints(hf.get("age"), _AGE_LONG)[None])
+        return one.repeat(n)
+
+    @classmethod
+    def from_act(cls, act: dict | None, n: int = 1) -> "HoldState":
+        """From a STATE "act" section: act.hf when the oracle exports it (exact), else the latched act.mask taken
+        as settled (no queued edges, long ages), an approximation (oracle tests/InputLogicCheck, 1200 random cut
+        points: 59 273 latched frames differ after it, 0 after act.hf), so a planner that sends the ACTIONs keeps
+        its own HoldState in step instead (hold_filter returns it)."""
+        act = act or {}
+        hf = act.get("hf")
+        if isinstance(hf, dict):
+            return cls.from_hf(hf, n)
+        m = int(act.get("mask") or 0)
+        return cls.from_hf({"latched": m, "desired": m}, n)
+
+    def repeat(self, n: int) -> "HoldState":
+        return HoldState(*(np.repeat(a[:1] if len(a) == 1 else a, n if len(a) == 1 else 1, axis=0)
+                           for a in (self.latched, self.desired, self.pending, self.age)))
+
+    def copy(self) -> "HoldState":
+        return HoldState(self.latched.copy(), self.desired.copy(), self.pending.copy(), self.age.copy())
+
+    def mask(self) -> np.ndarray:
+        """[n] latched button masks."""
+        return (self.latched.astype(np.int64) << np.arange(N_BUTTONS, dtype=np.int64)).sum(axis=1)
+
+
+def hold_filter(masks: np.ndarray, state: HoldState | None = None, min_press: int = 2, min_release: int = 2,
+                max_pending: int = 3) -> tuple[np.ndarray, HoldState]:
+    """(latched masks, filter state after the last frame) for commanded masks [N, T] (or [T]) fed to
+    oracle/src/Input/HoldFilter.cs from `state` (None: idle; a one-lane state is shared by every lane). The filter
+    (which the final SendInput sink enforces too) keeps every requested edge and replays it in order: a release
+    waits until the key has been down min_press latched frames, a press until it has been up min_release frames,
+    left and right are never latched together, and more than max_pending queued toggles of one key drop the oldest
+    press + release pair. rollout() takes latched masks (logged "act" masks already are latched). ReleaseAll
+    (input.release, harness operations) is not modelled."""
     masks = np.asarray(masks, dtype=np.int64)
     one = masks.ndim == 1
     masks = masks[None] if one else masks
     n, T = masks.shape
+    st = (state or HoldState.idle(1)).copy()
+    if len(st.latched) == 1 and n > 1:
+        st = st.repeat(n)
     shift = np.arange(N_BUTTONS, dtype=np.int64)
-    latched = np.zeros((n, N_BUTTONS), dtype=bool)
-    desired = np.zeros((n, N_BUTTONS), dtype=bool)
-    pending = np.zeros((n, N_BUTTONS), dtype=np.int64)
-    age = np.full((n, N_BUTTONS), 1 << 20, dtype=np.int64)
+    latched, desired, pending, age = st.latched, st.desired, st.pending, st.age
     out = np.zeros((n, T), dtype=np.int64)
     for t in range(T):
         want = ((masks[:, t:t + 1] >> shift) & 1).astype(bool)
-        pending += want != desired
+        pending = pending + (want != desired)
         desired = want
         pending = np.where(pending > max_pending, pending - 2, pending)
         nxt = latched.copy()
@@ -993,7 +1526,7 @@ def hold_filter(masks: np.ndarray, min_press: int = 2, min_release: int = 2, max
         prs = has & ~latched & (age >= min_release)
         nxt[rel] = False
         nxt[prs] = True
-        pending -= (rel | prs)
+        pending = pending - (rel | prs)
         both = nxt[:, _LEFT_BIT] & nxt[:, _RIGHT_BIT]
         for b in (_LEFT_BIT, _RIGHT_BIT):
             rv = both & prs[:, b]
@@ -1002,10 +1535,11 @@ def hold_filter(masks: np.ndarray, min_press: int = 2, min_release: int = 2, max
             stale = rv & ~desired[:, b]
             pending[stale, b] = 0
         toggled = nxt != latched
-        age = np.where(toggled, 1, np.minimum(age + 1, 1 << 20))
+        age = np.where(toggled, 1, np.minimum(age + 1, _AGE_LONG))
         latched = nxt
         out[:, t] = (latched.astype(np.int64) << shift).sum(axis=1)
-    return out[0] if one else out
+    new = HoldState(latched, desired, pending, age)
+    return (out[0] if one else out), new
 
 
 def initial_state(params: HeroParams, x: float, y: float, *, vx: float = 0.0, vy: float = 0.0, facing: int = 1,
@@ -1015,7 +1549,7 @@ def initial_state(params: HeroParams, x: float, y: float, *, vx: float = 0.0, vy
     S[[PX, QX, SX]] = x
     S[[PY, QY, SY]] = y
     S[VX], S[VY] = vx, vy
-    S[ALPHA] = alpha
+    S[ALPHA] = S[ALO] = S[AHI] = alpha
     S[GS] = 1.0
     S[FACE] = 1.0 if facing >= 0 else -1.0
     S[GROUND] = 1.0 if ground else 0.0
@@ -1027,6 +1561,8 @@ def initial_state(params: HeroParams, x: float, y: float, *, vx: float = 0.0, vy
     S[SILK] = silk
     S[JDSTEPS] = 100.0
     S[TS] = 1.0
+    S[WF_PH] = -1.0
+    S[WF_S] = 1.0
     return S
 
 
@@ -1039,7 +1575,19 @@ _CS_USED = ("facingRight", "onGround", "jumping", "attacking", "upAttacking", "d
             "transitioning", "wallSliding", "dashing", "parrying")
 
 
-MK_HARNESS, MK_HAZARD, MK_SCENE, MK_FREEZE, MK_DEATH = 1, 2, 4, 8, 16
+MK_HARNESS, MK_HAZARD, MK_SCENE, MK_FREEZE, MK_DEATH, MK_SLIDE = 1, 2, 4, 8, 16, 32
+# FreezeMoment starts per frame (oracle "freeze" events, Trace.freeze bits). Every StartRecoil comes with an
+# EnemyDeath freeze in the same frame (live i0_000: 1974 / 1974), which ends inside the hit-stop and changes nothing;
+# the others hold the time scale down while the hero model's clock runs on (MK_FREEZE).
+FZ_RECOIL, FZ_ENEMY_DEATH, FZ_BIND_BREAK, FZ_BOSS_DEATH, FZ_BOSS_STUN, FZ_QUICK, FZ_OTHER = (1 << i for i in range(7))
+_FZ_TYPES = {"EnemyDeath": FZ_ENEMY_DEATH, "BindBreak": FZ_BIND_BREAK, "BossDeathSlow": FZ_BOSS_DEATH,
+             "BossStun": FZ_BOSS_STUN, "QuickFreeze": FZ_QUICK}
+FZ_NAMES = {FZ_RECOIL: "StartRecoil", FZ_ENEMY_DEATH: "EnemyDeath", FZ_BIND_BREAK: "BindBreak",
+            FZ_BOSS_DEATH: "BossDeathSlow", FZ_BOSS_STUN: "BossStun", FZ_QUICK: "QuickFreeze", FZ_OTHER: "other"}
+# hero.tm (oracle STATE, when exported): HeroController timers, in this order as Trace.tm columns
+TM_KEYS = ("inv", "recoil", "recoil_steps", "dash_cd", "atk_cd", "atk_t", "tool_cd", "jump_steps", "jumped_steps",
+           "ds", "ds_rec", "grav", "qj", "qa", "qt")
+SLIDE_SPAN = (-20, 40)  # rows around a savestate.load event searched for its slide (logged ~12 frames late)
 _MARK_KINDS = {"harness": MK_HARNESS, "hazard_respawn": MK_HAZARD, "hazard_death": MK_HAZARD,
                "scene_enter": MK_SCENE, "scene_leave": MK_SCENE, "die": MK_DEATH, "hero_dead": MK_DEATH,
                "player_dead": MK_DEATH}
@@ -1078,6 +1626,9 @@ class Trace:
     spells: list
     scenes: list
     mask_source: str = "act"
+    tm: np.ndarray | None = None          # [n, len(TM_KEYS)] hero.tm when exported (NaN where missing)
+    alpha_log: np.ndarray | None = None   # [n] hero.alpha when exported (NaN where missing)
+    freeze: np.ndarray | None = None      # [n] FZ_* bits of the FreezeMoments started in that frame
 
     def __len__(self) -> int:
         return len(self.f)
@@ -1086,7 +1637,7 @@ class Trace:
         return self.cs[:, _CS_USED.index(name)]
 
     def save(self, path: str | Path) -> None:
-        d = {f.name: getattr(self, f.name) for f in fields(self)}
+        d = {f.name: getattr(self, f.name) for f in fields(self) if getattr(self, f.name) is not None}
         meta = {k: d.pop(k) for k in ("clips", "spells", "scenes", "mask_source")}
         np.savez_compressed(path, meta=json.dumps(meta), **d)
 
@@ -1095,6 +1646,19 @@ class Trace:
         z = np.load(path, allow_pickle=False)
         meta = json.loads(str(z["meta"]))
         return cls(**{k: z[k] for k in z.files if k != "meta"}, **meta)
+
+    def row(self, i: int) -> dict:
+        """Row i in StateTracker.push_row terms (replaying a recording through the live path)."""
+        return {"f": int(self.f[i]), "fs": int(self.fs[i]), "dt": float(self.dt[i]), "udt": float(self.udt[i]),
+                "ts": float(self.ts[i]), "phys": self.phys[i], "vel": self.vel[i], "box": self.box[i],
+                "facing": int(self.facing[i]), "hero_state": int(self.hero_state[i]), "relinq": bool(self.relinq[i]),
+                "cs": self.cs[i], "mask": int(self.mask[i]), "silk": int(self.silk[i]),
+                "clip": self.clips[self.clip[i]], "spell": self.spells[self.spell[i]], "dmg": int(self.dmg[i]),
+                "marks": int(self.marks[i]), "freeze": int(self.freeze[i]) if self.freeze is not None else 0,
+                "valid": bool(self.valid[i]),
+                "tm": self.tm[i] if self.tm is not None else np.full(len(TM_KEYS), np.nan),
+                "alpha": float(self.alpha_log[i]) if self.alpha_log is not None else np.nan,
+                "load": bool(self.marks[i] & MK_SLIDE)}
 
     def slice(self, i0: int, i1: int) -> "Trace":
         d = {}
@@ -1117,11 +1681,23 @@ class Trace:
         scenes: dict = {}
         cols: dict[str, list] = {k: [] for k in ("f", "fs", "dt", "udt", "ts", "pos", "phys", "vel", "facing",
                                                  "hero_state", "relinq", "cs", "act", "inp", "silk", "hp", "clip",
-                                                 "spell", "dmg", "marks", "box", "valid", "scene")}
+                                                 "spell", "dmg", "marks", "box", "valid", "scene", "freeze")}
         nan2 = [np.nan, np.nan]
+        nan_tm = [np.nan] * len(TM_KEYS)
+        tm_rows: list = []
+        alpha_rows: list = []
+        loads: list = []
         for s in states:
             h = s.get("hero")
             g = s.get("game") or {}
+            tm = (h or {}).get("tm")
+            tm_rows.append([float(tm[k]) if isinstance(tm, dict) and tm.get(k) is not None else np.nan
+                            for k in TM_KEYS] if tm else nan_tm)
+            a = (h or {}).get("alpha")
+            alpha_rows.append(float(a) if a is not None else np.nan)
+            if any(e.get("k") == "harness" and (e.get("d") or {}).get("op") == "savestate.load"
+                   for e in s.get("ev") or ()):
+                loads.append(len(cols["f"]))
             cols["f"].append(s["f"])
             cols["fs"].append(s.get("fs") or 0)
             cols["dt"].append(s.get("dt") or 0.0)
@@ -1132,18 +1708,23 @@ class Trace:
             cols["scene"].append(scenes.setdefault(g.get("scene"), len(scenes)))
             dmg = 0
             mk = 0
+            fz = 0
             for ev in s.get("ev") or ():
                 k = ev.get("k")
                 d = ev.get("d") or {}
                 if k == "damage":
                     side = d.get("side")
                     dmg = -1 if side == "left" else 1 if side == "right" else dmg
-                elif k == "freeze" and d.get("phase") == "start" and "StartRecoil" not in str(d.get("type")):
-                    mk |= MK_FREEZE
+                elif k == "freeze" and d.get("phase") == "start":
+                    typ = str(d.get("type"))
+                    fz |= FZ_RECOIL if "StartRecoil" in typ else _FZ_TYPES.get(typ, FZ_OTHER)
                 else:
                     mk |= _MARK_KINDS.get(k, 0)
+            if fz & ~(FZ_RECOIL | FZ_ENEMY_DEATH) or (fz & FZ_ENEMY_DEATH and not fz & FZ_RECOIL):
+                mk |= MK_FREEZE
             cols["dmg"].append(dmg)
             cols["marks"].append(mk)
+            cols["freeze"].append(fz)
             if not h or not h.get("box") or not h.get("cstate"):
                 for k, v in (("pos", nan2), ("phys", nan2), ("vel", nan2), ("box", nan2 * 2), ("facing", 0),
                              ("hero_state", -1), ("relinq", False), ("cs", [False] * len(bit)), ("silk", 0), ("hp", 0),
@@ -1183,18 +1764,47 @@ class Trace:
                 j = inp & B_JUMP
                 mask = (mask & ~B_JUMP) | j | np.concatenate([j[lag:], np.zeros(lag, dtype=np.int64)])
         arr = {k: np.asarray(v) for k, v in cols.items()}
-        return cls(f=arr["f"].astype(np.int64), fs=arr["fs"].astype(np.int64), dt=arr["dt"].astype(np.float64),
-                   udt=arr["udt"].astype(np.float64), ts=arr["ts"].astype(np.float64),
-                   pos=arr["pos"].astype(np.float64).reshape(-1, 2), phys=arr["phys"].astype(np.float64).reshape(-1, 2),
-                   vel=arr["vel"].astype(np.float64).reshape(-1, 2), facing=arr["facing"].astype(np.int8),
-                   hero_state=arr["hero_state"].astype(np.int16), relinq=arr["relinq"].astype(bool),
-                   cs=arr["cs"].astype(bool).reshape(-1, len(_CS_USED)), mask=mask, silk=arr["silk"].astype(np.int16),
-                   hp=arr["hp"].astype(np.int16), clip=arr["clip"].astype(np.int32),
-                   spell=arr["spell"].astype(np.int32), dmg=arr["dmg"].astype(np.int8),
-                   marks=arr["marks"].astype(np.int16), box=arr["box"].astype(np.float64).reshape(-1, 4),
-                   valid=arr["valid"].astype(bool),
-                   scene=arr["scene"].astype(np.int32), clips=list(clips), spells=list(spells), scenes=list(scenes),
-                   mask_source=mask_source)
+        tm_arr = np.asarray(tm_rows, dtype=np.float64).reshape(-1, len(TM_KEYS))
+        al = np.asarray(alpha_rows, dtype=np.float64)
+        tr = cls(f=arr["f"].astype(np.int64), fs=arr["fs"].astype(np.int64), dt=arr["dt"].astype(np.float64),
+                 udt=arr["udt"].astype(np.float64), ts=arr["ts"].astype(np.float64),
+                 pos=arr["pos"].astype(np.float64).reshape(-1, 2), phys=arr["phys"].astype(np.float64).reshape(-1, 2),
+                 vel=arr["vel"].astype(np.float64).reshape(-1, 2), facing=arr["facing"].astype(np.int8),
+                 hero_state=arr["hero_state"].astype(np.int16), relinq=arr["relinq"].astype(bool),
+                 cs=arr["cs"].astype(bool).reshape(-1, len(_CS_USED)), mask=mask, silk=arr["silk"].astype(np.int16),
+                 hp=arr["hp"].astype(np.int16), clip=arr["clip"].astype(np.int32),
+                 spell=arr["spell"].astype(np.int32), dmg=arr["dmg"].astype(np.int8),
+                 marks=arr["marks"].astype(np.int16), box=arr["box"].astype(np.float64).reshape(-1, 4),
+                 valid=arr["valid"].astype(bool),
+                 scene=arr["scene"].astype(np.int32), clips=list(clips), spells=list(spells), scenes=list(scenes),
+                 mask_source=mask_source, tm=tm_arr if np.isfinite(tm_arr).any() else None,
+                 alpha_log=al if np.isfinite(al).any() else None, freeze=arr["freeze"].astype(np.int16))
+        mark_load_slides(tr, loads, params)
+        return tr
+
+
+def mark_load_slides(tr: Trace, loads: Iterable[int], params: HeroParams) -> int:
+    """MK_SLIDE on the frames where a savestate load is still moving the hero back to the saved position: the box
+    moves with velocity 0 and no physics step (2026-10-01, trial run f 56185-56193: 0.60 u per frame towards x 78,
+    for up to 17 frames around the 'savestate.load' harness event; ssbot.train.episode.wait_settled). Searched in
+    SLIDE_SPAN around each load row; the frames between the first and the last such motion are marked. Returns the
+    number of frames marked."""
+    n = len(tr)
+    if n < 2:
+        return 0
+    d = np.abs(np.diff(tr.box[:, :2], axis=0))
+    v = np.maximum(np.abs(tr.vel[1:]), np.abs(tr.vel[:-1]))
+    allowed = v * (np.maximum(tr.fs[1:], 0)[:, None] * params.fdt) + 0.05
+    bad = np.r_[False, ((d > allowed) & np.isfinite(d)).any(axis=1)]
+    marked = 0
+    for i in loads:
+        lo, hi = max(i + SLIDE_SPAN[0], 0), min(i + SLIDE_SPAN[1], n)
+        idx = np.flatnonzero(bad[lo:hi]) + lo
+        if len(idx):
+            sel = slice(idx[0], idx[-1] + 1)
+            marked += int(np.sum((tr.marks[sel] & MK_SLIDE) == 0))
+            tr.marks[sel] |= MK_SLIDE
+    return marked
 
 
 # ---- state estimation from a trace ----------------------------------------------------------------------------
@@ -1263,6 +1873,53 @@ def _freeze_replay(tr: Trace, params: HeroParams) -> np.ndarray:
     return out
 
 
+def _wf_row(st: np.ndarray, start_bits: int, udt: float, P: np.ndarray) -> np.ndarray:
+    """One frame of the world-freeze rows (WF_PH .. WF_TGT as a [7] array, after the frame's Update) for the
+    estimator and the tracker: the model's own _wf_start / _wf_step on one lane."""
+    X = np.zeros((K, 1))
+    X[WF_PH:WF_TGT + 1, 0] = st
+    for bit in WF_ORDER:
+        if start_bits & bit:
+            _wf_start(X, np.array([True]), FREEZE_PRESETS[bit])
+    _wf_step(X, np.array([udt]), P)
+    return X[WF_PH:WF_TGT + 1, 0].copy() if X[WF_PH, 0] >= 0 else WF_IDLE.copy()
+
+
+WF_IDLE = np.array([-1.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0])     # WF_PH .. WF_TGT of no world freeze
+
+
+def _wf_replay(tr: Trace, modes: np.ndarray, params: HeroParams) -> np.ndarray:
+    """[n, 7] world-freeze rows per logged frame, replayed from the logged FreezeMoment starts (BindBreak from a
+    hit during the Bind charge, as the model starts it) with the logged unscaled frame times."""
+    n = len(tr)
+    out = np.repeat(WF_IDLE[None], n, axis=0)
+    if n == 0:
+        return out
+    starts = _freeze_events(tr.freeze.astype(np.int64)) if tr.freeze is not None else np.zeros(n, dtype=np.int64)
+    hit = _onset(tr.flag("recoilFrozen"))
+    P = params.vector()
+    st = WF_IDLE.copy()
+    mode_t = None
+    for i in range(n):
+        bits = int(starts[i])
+        if hit[i] and i > 0 and modes[i - 1] == M_BIND:
+            if mode_t is None:
+                mode_t = _bind_time(tr, modes)
+            if mode_t[i - 1] < params.bind_break_before:
+                bits |= EV_FZ_BIND_BREAK
+        if bits == 0 and st[0] < 0:
+            continue
+        st = _wf_row(st, bits, float(tr.udt[i]), P)
+        out[i] = st
+    return out
+
+
+def _bind_time(tr: Trace, modes: np.ndarray) -> np.ndarray:
+    """Scaled s in Bind at each row (the model's MODE_T in BIND: float32 dt summed from the frame after entry)."""
+    m_on = np.r_[True, modes[1:] != modes[:-1]]
+    return _since32(m_on, tr.dt, include_onset=False)
+
+
 def classify_modes(tr: Trace) -> np.ndarray:
     """Model mode per logged frame (M_*), from cstate, hero_state and the animation."""
     n = len(tr)
@@ -1306,17 +1963,33 @@ def derive_events(tr: Trace, modes: np.ndarray | None = None) -> np.ndarray:
     locked = modes == M_LOCKED
     ev[_onset(locked)] |= EV_LOCK
     ev[_onset(~locked) & np.r_[False, locked[:-1]]] |= EV_UNLOCK
+    if tr.freeze is not None:
+        ev |= _freeze_events(tr.freeze.astype(np.int64))
+    return ev
+
+
+def _freeze_events(fz):
+    """EV_FZ_* bits from the logged FreezeMoment starts (Trace.freeze): the world freezes the threat layer has to
+    announce; EnemyDeath only without a hit in the same frame (with one it ends inside the hit-stop), BindBreak
+    never (the model starts it from the hit during the Bind charge)."""
+    ev = np.where((fz & FZ_BOSS_DEATH) != 0, EV_FZ_BOSS_DEATH, 0) | np.where((fz & FZ_BOSS_STUN) != 0,
+                                                                             EV_FZ_BOSS_STUN, 0)
+    ev |= np.where((fz & FZ_QUICK) != 0, EV_FZ_QUICK, 0)
+    ev |= np.where(((fz & FZ_ENEMY_DEATH) != 0) & ((fz & FZ_RECOIL) == 0), EV_FZ_ENEMY_DEATH, 0)
     return ev
 
 
 def estimate_state(tr: Trace, idx: Iterable[int] | np.ndarray, params: HeroParams,
                    modes: np.ndarray | None = None, alpha: np.ndarray | None = None,
-                   terrain: Terrain2D | None = None, table: np.ndarray | None = None) -> np.ndarray:
+                   terrain: Terrain2D | None = None, table: np.ndarray | None = None,
+                   causal: bool = True) -> np.ndarray:
     """Model state [K, len(idx)] at the end of the given trace rows, from the logged pose, velocity and cstate, with
-    the hidden timers (jump steps, attack time, recoil steps, mode time) counted from the flags' onsets. `table`
-    (state_table of the same trace) saves recomputing the per-frame columns when many rows are estimated."""
+    the hidden timers (jump steps, attack time, recoil steps, mode time) counted from the flags' onsets. Every row
+    uses only the frames up to it (the planner's information set; causal=False takes the physics phase from the
+    whole trace, for replays). `table` (state_table of the same trace) saves recomputing the per-frame columns when
+    many rows are estimated. hero.tm / hero.alpha replace the reconstructed timers and phase where exported."""
     idx = np.asarray(list(idx) if not isinstance(idx, np.ndarray) else idx, dtype=np.int64)
-    table = state_table(tr, params, modes, alpha) if table is None else table
+    table = state_table(tr, params, modes, alpha, causal) if table is None else table
     S = table[:, idx].copy()
     if terrain is not None:     # falling body parked on a floor without contact yet (see _move_y)
         near = _on_ground(S[PX], S[PY], params.vector(), terrain.hseg)
@@ -1325,12 +1998,16 @@ def estimate_state(tr: Trace, idx: Iterable[int] | np.ndarray, params: HeroParam
 
 
 def state_table(tr: Trace, params: HeroParams, modes: np.ndarray | None = None,
-                alpha: np.ndarray | None = None) -> np.ndarray:
-    """Model state [K, len(tr)] at the end of every trace row (terrain contact left out, see estimate_state)."""
+                alpha: np.ndarray | None = None, causal: bool = True) -> np.ndarray:
+    """Model state [K, len(tr)] at the end of every trace row (terrain contact left out, see estimate_state). Each
+    row depends on that row and the ones before it only (with causal=False the phase uses the whole trace)."""
     n = len(tr)
     idx = np.arange(n)
     modes = classify_modes(tr) if modes is None else modes
-    alpha = phase(tr) if alpha is None else alpha
+    if alpha is None:
+        alpha, a_lo, a_hi = phase_interval(tr, params.fdt, causal=causal)
+    else:
+        a_lo = a_hi = alpha
     steps = tr.fs.astype(np.float64)
     dt = tr.dt
     S = np.zeros((K, len(idx)))
@@ -1344,6 +2021,7 @@ def state_table(tr: Trace, params: HeroParams, modes: np.ndarray | None = None,
     S[QX], S[QY] = q[:, 0], q[:, 1]
     S[VX], S[VY] = tr.vel[idx, 0], tr.vel[idx, 1]
     S[ALPHA] = alpha[idx]
+    S[ALO], S[AHI] = a_lo[idx], a_hi[idx]
     S[FACE] = np.where(tr.facing[idx] >= 0, 1.0, -1.0)
     ground = tr.flag("onGround")
     S[GROUND] = ground[idx]
@@ -1433,7 +2111,56 @@ def state_table(tr: Trace, params: HeroParams, modes: np.ndarray | None = None,
     left = np.float32(params.invul_time) - _since32(_onset(inv), dt, include_onset=False)
     S[INV_T] = np.where(inv[idx] & np.isfinite(left[idx]), np.maximum(left[idx], 0.0), 0.0)
     S[LEDGE] = 0.0
+    # world freezes: their rows, and the hero's own part of the time scale where one runs (the logged ts is the
+    # product of both)
+    wf = _wf_replay(tr, modes, params)[idx]
+    S[WF_PH:WF_TGT + 1] = wf.T
+    act = wf[:, 0] >= 0
+    S[TS] = np.where(act, np.where(frz, fz[:, 3], 1.0), S[TS])
+    _apply_exported(tr, S, md, params)
     return S
+
+
+def _apply_exported(tr: Trace, S: np.ndarray, md: np.ndarray, params: HeroParams) -> None:
+    """Replace reconstructed rows by the oracle's own values where STATE carries them (hero.tm, hero.alpha;
+    cross-module decision 5). Reconstruction errors they remove: the phase interval (the alpha lanes collapse to
+    one), gravity scale after air hang, the queue step counters (a press queued before the window), nail and damage
+    recoil left, attack and downspike timers when a flag onset was missed (pause, scene load, first frame)."""
+    if tr.alpha_log is not None:
+        a = tr.alpha_log
+        ok = np.isfinite(a)
+        for r in (ALPHA, ALO, AHI):
+            S[r] = np.where(ok, a, S[r])
+    if tr.tm is None:
+        return
+    col = {k: tr.tm[:, i] for i, k in enumerate(TM_KEYS)}
+
+    def put(row: int, v: np.ndarray, where: np.ndarray | bool = True) -> None:
+        S[row] = np.where(np.isfinite(v) & where, v, S[row])
+
+    put(INV_T, np.maximum(col["inv"], 0.0))
+    put(MODE_T, params.hurt_recoil_time - col["recoil"], md == M_HURT_RECOIL)
+    put(RSTEPS, col["recoil_steps"], S[RDIR] != 0)
+    put(ATK_CD, np.maximum(col["atk_cd"], 0.0))
+    put(ATK_T, col["atk_t"], S[ATTACKING] > 0)
+    put(JSTEPS, col["jump_steps"], S[JUMPING] > 0)
+    put(JDSTEPS, col["jumped_steps"])
+    put(MODE_T, col["ds"], (md == M_DS_ANTIC) | (md == M_DS_SPIKE))
+    put(DS_REC, col["ds_rec"], S[DS_REC] >= 0)
+    put(GS, col["grav"])
+    # queue counters: the oracle exports the raw jumpQueueSteps / attackQueueSteps / toolThrowQueueSteps (>= 0;
+    # docs/facts/1.0.30000/state_fields_m2.md section 1), not the jumpQueuing / attackQueuing / toolThrowQueueing
+    # flags: a release clears the flag and leaves the count (HeroController.cs 8427-8450), so a count alone does not
+    # say the queue is on. It replaces the reconstructed count where the reconstruction has the queue on, or where it
+    # grew in this frame's physics steps with the button still held (FixedUpdate counts only while queuing, 3203-3226:
+    # a press queued before the history starts)
+    for row, k, bit in ((JQ, "qj", B_JUMP), (AQ, "qa", B_ATTACK), (QQ, "qt", B_QUICKCAST)):
+        v = col[k]
+        before = np.r_[np.nan, v[:-1]]
+        with np.errstate(invalid="ignore"):
+            grew = np.isfinite(before) & (v > before) & ((tr.mask & bit) != 0)
+        on = np.isfinite(v) & ((S[row] >= 0) | grew)
+        S[row] = np.where(on, np.maximum(v, 0.0), S[row])
 
 
 def _replay_gravity(tr: Trace, modes: np.ndarray, params: HeroParams) -> tuple[np.ndarray, np.ndarray]:
@@ -1474,9 +2201,16 @@ def _replay_gravity(tr: Trace, modes: np.ndarray, params: HeroParams) -> tuple[n
     return gs, hang
 
 
-def phase(tr: Trace, fdt: float | None = None) -> np.ndarray:
-    """Render phase alpha per frame from the logged dt / fs sequence: alpha_n = alpha_{n-1} + dt_n / fdt - fs_n must
-    stay in [0, 1); the feasible interval for alpha is propagated forward and backward and its midpoint taken."""
+def phase(tr: Trace, fdt: float | None = None, causal: bool = False) -> np.ndarray:
+    """Render phase alpha per frame (the midpoint of phase_interval)."""
+    return phase_interval(tr, fdt, causal)[0]
+
+
+def phase_interval(tr: Trace, fdt: float | None = None, causal: bool = True
+                   ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """(midpoint, lo, hi) of the feasible render phase per frame from the logged dt / fs sequence: alpha_n =
+    alpha_{n-1} + dt_n / fdt - fs_n must stay in [0, 1). The interval is propagated forward (causal: what the
+    planner knows at that frame) and, with causal=False, also backward from the later frames (replays only)."""
     fdt = fdt or FDT
     n = len(tr)
     inc = tr.dt / fdt - tr.fs
@@ -1490,77 +2224,573 @@ def phase(tr: Trace, fdt: float | None = None) -> np.ndarray:
             a_lo, a_hi = 0.0, 1.0           # inconsistent (pause, scene load): restart
         a_lo, a_hi = max(a_lo, 0.0), min(a_hi, 1.0)
         lo[i], hi[i] = a_lo, a_hi
-    b_lo, b_hi = lo[-1], hi[-1]
-    for i in range(n - 2, -1, -1):          # backward
-        b_lo, b_hi = b_lo - inc[i + 1], b_hi - inc[i + 1]
-        c_lo, c_hi = max(b_lo, lo[i]), min(b_hi, hi[i])
-        if c_lo <= c_hi:
-            lo[i], hi[i] = c_lo, c_hi
-        b_lo, b_hi = lo[i], hi[i]
-    return 0.5 * (lo + hi)
+    if not causal and n:
+        b_lo, b_hi = lo[-1], hi[-1]
+        for i in range(n - 2, -1, -1):      # backward
+            b_lo, b_hi = b_lo - inc[i + 1], b_hi - inc[i + 1]
+            c_lo, c_hi = max(b_lo, lo[i]), min(b_hi, hi[i])
+            if c_lo <= c_hi:
+                lo[i], hi[i] = c_lo, c_hi
+            b_lo, b_hi = lo[i], hi[i]
+    return 0.5 * (lo + hi), lo, hi
 
 
-# ---- knockback envelope (DESIGN §3.5.2) -----------------------------------------------------------------------
+# ---- incremental state tracker (the planner's per-tick start state) -------------------------------------------
 
-@dataclass(slots=True)
-class Envelope:
-    """Collider boxes the hero can occupy after a hit, per frame from the hit frame (index 0 = the hit frame):
-    boxes [V, T+1, 4] one trajectory per variant (physics phase x frame time x input class), union [T+1, 4] their
-    bounding box per frame, no_input [T+1] True while every variant is still in the hit-stop or the recoil."""
-    side: str
-    boxes: np.ndarray
-    union: np.ndarray
-    no_input: np.ndarray
-
-    def control_frame(self) -> int:
-        """First frame after the hit at which some variant has control again."""
-        free = np.flatnonzero(~self.no_input)
-        return int(free[0]) if len(free) else len(self.no_input)
+_F32 = np.float32
 
 
-ENVELOPE_FRAME_TIMES = (0.01665, 1 / 60, 0.01671)    # p1 / mean / p99 of the logged unscaled frame time
+def _acc32(acc: float, onset: bool, x: float, include: bool) -> float:
+    """One step of _since32: the float32 running sum since the last onset (inf before any)."""
+    if onset:
+        return float(_F32(x)) if include else 0.0
+    if not np.isfinite(acc):
+        return acc
+    return float(_F32(_F32(acc) + _F32(x)))
 
 
-def knockback_envelope(start: np.ndarray, side: str, params: HeroParams, terrain: Terrain2D | None = None,
-                       extra_frames: int = 0, alphas: Iterable[float] = (0.0, 0.2, 0.4, 0.6, 0.8),
-                       frame_times: Iterable[float] = ENVELOPE_FRAME_TIMES) -> Envelope:
-    """Reachable collider boxes after a hit taken from `side` ("left" / "right": the impact side, as in the oracle
-    "damage" event) to a hero in the state `start` (the frame before the hit), under any input (DESIGN §3.5.2).
+def _acc(acc: float, onset: bool, x: float, include: bool) -> float:
+    """One step of _since (float64; used with integer counts only)."""
+    if onset:
+        return float(x) if include else 0.0
+    return acc + x
 
-    The hit-stop and the damage recoil take no input (hero_state no_input), so until control returns the spread
-    comes only from timing: the physics phase at the hit (10 to 12 recoil steps) and the frame times (the hit-stop
-    lasts 13 to 15 frames: FreezeMoment sums unscaled time). The recoil moves (+-15, 7.5) u/s away from the impact
-    side for RECOIL_DURATION 0.2 s (3.0 u by 1.5 u in open air), stopped by walls and ceilings; the logged hits of
-    the trial run follow it (ssbot.tools.kin_check, knockback section). With extra_frames, the variants continue
-    under the 6 bang-bang input classes (left / none / right, jump held or not) for that many frames after the
-    longest no-input period. Weighted Anklet (knockback x0.5, gameplay "weighted_anklet") is not modelled: check the
-    loadout audit before relying on the envelope with it equipped."""
-    ev_bit = EV_HURT_L if side == "left" else EV_HURT_R
-    T0 = 34                                   # hit-stop (<= 15) + recoil (<= 14) + margin
-    T = T0 + int(extra_frames)
-    inputs = [0] if not extra_frames else [m | j for m in (0, B_LEFT, B_RIGHT) for j in (0, B_JUMP)]
-    S0 = np.asarray(start, dtype=np.float64).reshape(K, -1)[:, :1]
-    lanes, masks, udts = [], [], []
-    for a in alphas:
-        for u in frame_times:
-            for m in inputs:
-                s = S0.copy()
-                s[ALPHA] = a
-                s[TS] = 1.0
-                lanes.append(s)
-                masks.append(np.full(T, m, dtype=np.int64))
-                udts.append(np.full(T, u))
-    S = np.concatenate(lanes, axis=1)
-    masks = np.stack(masks)
-    ev = np.zeros_like(masks)
-    ev[:, 0] = ev_bit
-    # the hit is applied in frame 1 of the rollout (= the hit frame): shift so index 0 is the frame before
-    r = rollout(S, masks, params, terrain, events=ev, udt=np.stack(udts))
-    boxes = r.box(params)[:, 1:]
-    noinp = ((r.flags & F_NO_INPUT) != 0)[:, 1:].all(axis=0)
-    union = np.stack([boxes[..., 0].min(axis=0), boxes[..., 1].min(axis=0), boxes[..., 2].max(axis=0),
-                      boxes[..., 3].max(axis=0)], axis=-1)
-    return Envelope(side, boxes, union, noinp)
+
+class StateTracker:
+    """The model state at the latest frame of a live STATE stream, updated in O(1) per frame: the same rows that
+    state_table / estimate_state give for the last row of the whole history (tests check every row of the fixtures),
+    without re-reading a history window every tick (Trace.from_states + estimate_state on a 240-frame tail cost
+    about 2.5 ms per tick in Python; a push is under 0.1 ms, push_row 0.06 ms). It also gives the frame's contact
+    events (derive_events) and whether the model owns the frame's motion (`modelled`, the rules of kin_check's
+    categories: not a harness operation, scene change, hazard respawn, death or savestate slide, not locked by
+    another FSM or charging a nail art, no time-scale change the hit-stop and world-freeze model does not explain,
+    no hitch above frame_time_max), which ResidualMonitor needs.
+
+        trk = StateTracker(params, terrain)
+        trk.push(state)                       # every STATE (act.mask is the latched ACTION the game read)
+        start = trk.state()                   # [K, 1], as estimate_state(trace, [last row], params, terrain=terrain)
+
+    Masks come from act.mask (exact for the bot; the "input" stream needs a frame of look-ahead, Trace.from_states).
+    Gaps (dropped STATEs) are not filled, as in state_table."""
+
+    def __init__(self, params: HeroParams, terrain: Terrain2D | None = None, names: list[str] | None = None):
+        self.params = params
+        self.P = params.vector()
+        self.terrain = terrain
+        names = names or cstate_names()
+        self._bit = [names.index(n) for n in _CS_USED]
+        self._fl = {n: i for i, n in enumerate(_CS_USED)}
+        self.n = 0
+        self.S = np.zeros(K)
+        self.events = 0
+        self.modelled = False
+        self.f = -1
+        self.box = np.full(4, np.nan)
+        self.mask = 0
+        self.udt = 0.0
+        self._p: dict[str, Any] = {}         # previous row
+        self._a_lo, self._a_hi = 0.0, 1.0
+        self._q = None
+        self._phys0 = None
+        self._acc = {k: np.inf for k in ("j", "pogo", "q_j", "q_a", "q_t", "atk_t", "atk_cd", "rsteps", "ds_rec",
+                                         "bounce", "t_in", "t_after", "st_after", "mode_n", "cast_t", "inv")}
+        self._last_q = {JQ: -1, AQ: -1, QQ: -1}
+        self._last_kill = {JQ: -1, AQ: -1, QQ: -1}
+        self._g, self._h = 1.0, 0.0
+        self._ds_face = 0.0
+        self._ds_seen = False
+        self._dmg_side = 0.0
+        self._fz: list[list] = []            # active hit-stop replays [ph, t, ts, k]
+        self._tm_prev = np.full(len(TM_KEYS), np.nan)
+        self._slide_left = 0
+        self._other_in_hitstop = False
+        self._wf = WF_IDLE.copy()
+
+    # -- one row ---------------------------------------------------------------------------------------------------
+    def push(self, s: dict) -> None:
+        """One STATE dict (as Trace.from_states reads it)."""
+        h = s.get("hero")
+        g = s.get("game") or {}
+        tm = (h or {}).get("tm")
+        tm_row = np.array([float(tm[k]) if isinstance(tm, dict) and tm.get(k) is not None else np.nan
+                           for k in TM_KEYS]) if tm else np.full(len(TM_KEYS), np.nan)
+        a = (h or {}).get("alpha")
+        load = False
+        dmg, mk, fz = 0, 0, 0
+        for ev in s.get("ev") or ():
+            k = ev.get("k")
+            d = ev.get("d") or {}
+            if k == "harness" and d.get("op") == "savestate.load":
+                load = True
+            if k == "damage":
+                side = d.get("side")
+                dmg = -1 if side == "left" else 1 if side == "right" else dmg
+            elif k == "freeze" and d.get("phase") == "start":
+                typ = str(d.get("type"))
+                fz |= FZ_RECOIL if "StartRecoil" in typ else _FZ_TYPES.get(typ, FZ_OTHER)
+            else:
+                mk |= _MARK_KINDS.get(k, 0)
+        if fz & ~(FZ_RECOIL | FZ_ENEMY_DEATH) or (fz & FZ_ENEMY_DEATH and not fz & FZ_RECOIL):
+            mk |= MK_FREEZE
+        row: dict[str, Any] = {"f": s["f"], "fs": int(s.get("fs") or 0), "dt": float(s.get("dt") or 0.0),
+                               "udt": float(s.get("udt") or 0.0),
+                               "ts": float(s.get("ts", 1.0) if s.get("ts") is not None else 1.0),
+                               "mask": int((s.get("act") or {}).get("mask", 0) or 0), "dmg": dmg, "marks": mk,
+                               "freeze": fz, "tm": tm_row, "alpha": float(a) if a is not None else np.nan,
+                               "load": load}
+        if not h or not h.get("box") or not h.get("cstate"):
+            row.update(phys=np.array([np.nan, np.nan]), vel=np.array([np.nan, np.nan]), box=np.full(4, np.nan),
+                       facing=0, hero_state=-1, relinq=False, cs=np.zeros(len(self._bit), dtype=bool), silk=0,
+                       clip=None, spell=None, valid=False)
+        else:
+            b = h["box"]
+            words = h["cstate"]
+            pause = s.get("pause") or {}
+            row.update(phys=np.array([0.5 * (b[0] + b[2]), b[1] + self.params.foot]),
+                       vel=np.asarray(h.get("vel") or [0.0, 0.0], dtype=np.float64)[:2],
+                       box=np.asarray(b[:4], dtype=np.float64), facing=int(h.get("facing", 1)),
+                       hero_state=int(h.get("hero_state", -1)), relinq=bool(h.get("control_relinquished")),
+                       cs=np.array([bool((words[i >> 6] >> (i & 63)) & 1) for i in self._bit]),
+                       silk=int(h.get("silk") or 0), clip=(h.get("anim") or {}).get("clip"),
+                       spell=(h.get("spell") or [None])[0],
+                       valid=g.get("gs", 4) == 4 and not g.get("paused") and not pause.get("inv", False))
+        self.push_row(row)
+
+    def push_row(self, r: dict) -> None:
+        """One row in Trace terms: f, fs, dt, udt, ts, phys [2], vel [2], box [4], facing, hero_state, relinq,
+        cs [len(_CS_USED)] bool, mask, silk, clip, spell (names), dmg, marks, freeze, valid, tm [15] (NaN: not
+        exported), alpha (NaN: not exported), load (a savestate.load harness op in this frame)."""
+        p, P, pr = self.params, self.P, self._p
+        i = self.n
+        first = i == 0
+        cs = r["cs"]
+        fl = lambda name: bool(cs[self._fl[name]])  # noqa: E731
+        was = (lambda name: bool(pr["cs"][self._fl[name]])) if not first else (lambda name: False)  # noqa: E731
+        steps = float(r["fs"])
+        dt = float(r["dt"])
+        mask = int(r["mask"])
+        pmask = 0 if first else int(pr["mask"])
+        # mode (classify_modes)
+        hs7 = r["hero_state"] == HS_NO_INPUT
+        md = M_NORMAL
+        if r["relinq"]:
+            md = M_LOCKED
+        if r["clip"] in CAST_CLIPS and (r["relinq"] or hs7):
+            md = M_CAST
+        if (fl("isBinding") or r["spell"] in BIND_SPELLS) and (r["relinq"] or hs7):
+            md = M_BIND
+        if fl("downSpikeAntic"):
+            md = M_DS_ANTIC
+        if fl("downSpiking"):
+            md = M_DS_SPIKE
+        if fl("recoiling") and hs7:
+            md = M_HURT_RECOIL
+        if fl("recoilFrozen"):
+            md = M_HURT_FREEZE
+        pmd = None if first else pr["mode"]
+        on = lambda name: fl(name) and not was(name)  # noqa: E731
+        S = np.zeros(K)
+        # phase interval, forward (phase_interval, causal)
+        if not first:
+            inc = dt / p.fdt - steps
+            self._a_lo, self._a_hi = self._a_lo + inc, self._a_hi + inc
+        if not np.isfinite(self._a_lo) or self._a_hi <= 0.0 or self._a_lo >= 1.0 or self._a_lo > self._a_hi:
+            self._a_lo, self._a_hi = 0.0, 1.0
+        self._a_lo, self._a_hi = max(self._a_lo, 0.0), min(self._a_hi, 1.0)
+        S[ALPHA], S[ALO], S[AHI] = 0.5 * (self._a_lo + self._a_hi), self._a_lo, self._a_hi
+        # pose
+        phys = r["phys"]
+        if first:
+            self._phys0 = phys.copy()
+            self._q = phys.copy()
+        if steps > 0:
+            self._q = (pr["phys"] if not first else self._phys0).copy()
+        S[PX], S[PY] = phys
+        S[SX], S[SY] = phys
+        S[QX], S[QY] = self._q
+        S[VX], S[VY] = r["vel"]
+        S[FACE] = 1.0 if r["facing"] >= 0 else -1.0
+        ground = fl("onGround")
+        S[GROUND] = float(ground)
+        S[MODE] = md
+        S[SILK] = r["silk"]
+        S[PREV] = mask
+        S[MOVE] = (1.0 if mask & B_RIGHT else 0.0) - (1.0 if mask & B_LEFT else 0.0)
+        S[JHELD] = float((mask & B_JUMP) != 0)
+        # jumps
+        ac = self._acc
+        jumping = fl("jumping")
+        j_on = on("jumping")
+        pogo_on = on("downSpikeBouncing")
+        ac["j"] = _acc(ac["j"], j_on, steps, False)
+        ac["pogo"] = _acc(ac["pogo"], j_on, float(pogo_on), True)
+        pogo_j = ac["pogo"] > 0
+        S[JUMPING] = float(jumping)
+        S[JSTEPS] = ((p.pogo_jump_steps if pogo_j else 0) + ac["j"]) if jumping else 0.0
+        jd = (p.pogo_jumped_steps if pogo_j else 0) + ac["j"]
+        S[JDSTEPS] = jd if np.isfinite(jd) else 100.0
+        att = fl("attacking")
+        a_on = on("attacking")
+        ds_on = on("downSpikeAntic")
+        # input queues
+        castbind = md in (M_CAST, M_BIND)
+        c_on = castbind and not (pmd in (M_CAST, M_BIND))
+        for row, bit, started, key in ((JQ, B_JUMP, j_on, "q_j"), (AQ, B_ATTACK, a_on or ds_on, "q_a"),
+                                       (QQ, B_QUICKCAST, c_on, "q_t")):
+            held = (mask & bit) != 0
+            q_on = held and not (pmask & bit) and not started
+            if q_on:
+                self._last_q[row] = i
+            if not held or started:
+                self._last_kill[row] = i
+            ac[key] = _acc(ac[key], q_on, steps, False)
+            alive = self._last_q[row] >= 0 and self._last_q[row] > self._last_kill[row]
+            S[row] = ac[key] if alive else -1.0
+        # gravity scale and air hang (_replay_gravity)
+        g, hh = self._g, self._h
+        relq = md in RELINQUISHED
+        noinp = md in NO_INPUT
+        if md == M_CAST and r["clip"] == "NeedleThrow Catch":
+            g = 1.0
+        elif md in (M_DS_ANTIC, M_DS_SPIKE, M_HURT_FREEZE, M_HURT_RECOIL, M_CAST, M_BIND):
+            g = 0.0
+        elif not first and pmd in (M_DS_ANTIC, M_DS_SPIKE, M_HURT_FREEZE, M_HURT_RECOIL, M_CAST, M_BIND):
+            g = 1.0
+        jheld_prev = ((pmask if not first else mask) & B_JUMP) != 0
+        for _ in range(int(r["fs"])):
+            vy = r["vel"][1]
+            if hh <= 0 and not ground and vy < 0:
+                if not relq and not noinp:
+                    g = p.air_hang_gravity
+                hh = 1.0
+            if ground:
+                hh = 0.0
+            ctl = not relq and not noinp
+            if ctl and g < 1.0:
+                g += p.air_hang_accel * p.fdt
+            if ctl and g < 1.0 and not jheld_prev:
+                g = 1.0
+            g = min(g, 1.0)
+        self._g, self._h = g, hh
+        S[GS], S[AIRHANG] = g, hh
+        # attacks
+        S[ATTACKING] = float(att)
+        ac["atk_t"] = _acc32(ac["atk_t"], a_on, dt, False)
+        S[ATK_T] = ac["atk_t"] if att else 0.0
+        ac["atk_cd"] = _acc32(ac["atk_cd"], a_on or ds_on, dt, True)
+        cd = float(_F32(p.attack_cooldown)) - ac["atk_cd"]
+        S[ATK_CD] = max(cd, 0.0) if np.isfinite(cd) else 0.0
+        # nail recoil
+        rl, rr = fl("recoilingLeft"), fl("recoilingRight")
+        ac["rsteps"] = _acc(ac["rsteps"], on("recoilingLeft") or on("recoilingRight"), steps, False)
+        S[RDIR] = -1.0 if rl else (1.0 if rr else 0.0)
+        S[RSTEPS] = max(p.recoil_steps - ac["rsteps"], 0.0) if S[RDIR] != 0 else 0.0
+        # downspike
+        if ds_on:
+            self._ds_face = 1.0 if r["facing"] >= 0 else -1.0
+            self._ds_seen = True
+        S[DS_HS] = self._ds_face * p.ds_speed if self._ds_seen else 0.0
+        rec = fl("downSpikeRecovery")
+        ac["ds_rec"] = _acc32(ac["ds_rec"], on("downSpikeRecovery"), dt, True)
+        S[DS_REC] = ac["ds_rec"] if rec else -1.0
+        bnc = fl("downSpikeBouncing")
+        ac["bounce"] = _acc(ac["bounce"], pogo_on, steps, False)
+        S[BOUNCE] = ac["bounce"] if bnc else -1.0
+        # time in mode
+        m_on = first or md != pmd
+        ac["t_in"] = _acc32(ac["t_in"], m_on, dt, True)
+        ac["t_after"] = _acc32(ac["t_after"], m_on, dt, False)
+        ac["st_after"] = _acc32(ac["st_after"], m_on, steps * float(_F32(p.fdt)), False)
+        ac["mode_n"] = _acc(ac["mode_n"], m_on, 1.0, False)
+        mt = ac["st_after"] if md == M_DS_SPIKE else (ac["t_in"] if md == M_DS_ANTIC else ac["t_after"])
+        S[MODE_T] = mt if np.isfinite(mt) else 0.0
+        S[MODE_N] = ac["mode_n"] if np.isfinite(ac["t_after"]) else 0.0
+        S[TS] = r["ts"]
+        # hit-stop replay (_freeze_replay): the latest hit's replay wins
+        if on("recoilFrozen"):
+            self._fz.append([0, _F32(0.0), 0.0, 0])
+        out = (0.0, 0.0, 0.0, 1.0)
+        keep = []
+        u = _F32(r["udt"])
+        for st in self._fz:
+            ph, t, tsv, k = st
+            res = None
+            ended = False
+            if ph == 0 and k >= p.hurt_wait_skip + 1:
+                t = _F32(t + u)
+                if t >= _F32(p.hurt_wait):
+                    ph, t = 1, _F32(0.0)
+                    res = (ph, 0.0, k + 1, tsv)
+            elif ph == 1:
+                t = _F32(t + u)
+                tsv = min(float(t) / p.hurt_ramp, 1.0)
+                if t >= _F32(p.hurt_ramp):
+                    res = (2, 0.0, k + 1, 1.0)
+                    ended = True
+            if res is None:
+                res = (ph, float(t), k + 1, tsv)
+            out = res
+            k += 1
+            if not ended and k < 40:
+                keep.append([ph, t, tsv, k])
+        self._fz = keep
+        if md == M_HURT_FREEZE:
+            S[PHASE] = min(out[0], 1.0)
+            S[MODE_T] = out[1]
+            S[MODE_N] = out[2]
+        if on("recoilFrozen"):
+            self._dmg_side = float(r["dmg"] if r["dmg"] != 0 else (1 if r["facing"] >= 0 else -1))
+        S[HVX] = -self._dmg_side * p.hurt_velocity
+        S[HVY] = p.hurt_velocity * p.hurt_vy_ratio
+        # Silkspear phase
+        cph = 1.0 if r["clip"] == "NeedleThrow Throwing" else (2.0 if r["clip"] == "NeedleThrow Catch" else 0.0)
+        cast = md == M_CAST
+        p_on = cast and (pmd != M_CAST or cph != pr.get("cph", 0.0))
+        ac["cast_t"] = _acc32(ac["cast_t"], p_on, dt, False)
+        if cast:
+            S[PHASE] = cph
+            if np.isfinite(ac["cast_t"]):
+                S[MODE_T] = ac["cast_t"]
+        inv = fl("invulnerable")
+        ac["inv"] = _acc32(ac["inv"], on("invulnerable"), dt, False)
+        left = float(_F32(p.invul_time)) - ac["inv"]
+        S[INV_T] = max(left, 0.0) if inv and np.isfinite(left) else 0.0
+        S[LEDGE] = 0.0
+        # world freezes (_wf_replay)
+        bits = int(_freeze_events(np.array([int(r["freeze"])], dtype=np.int64))[0])
+        if on("recoilFrozen") and not first and pmd == M_BIND and pr["t_after"] < p.bind_break_before:
+            bits |= EV_FZ_BIND_BREAK
+        if bits or self._wf[0] >= 0:
+            self._wf = _wf_row(self._wf, bits, float(r["udt"]), P)
+        S[WF_PH:WF_TGT + 1] = self._wf
+        if self._wf[0] >= 0:
+            S[TS] = out[3] if md == M_HURT_FREEZE else 1.0
+        # exported timers and phase (_apply_exported)
+        if np.isfinite(r["alpha"]):
+            S[ALPHA] = S[ALO] = S[AHI] = r["alpha"]
+        tmv = np.asarray(r["tm"], dtype=np.float64)
+        if np.isfinite(tmv).any():
+            col = dict(zip(TM_KEYS, tmv))
+
+            def put(row: int, v: float, where: bool = True) -> None:
+                if np.isfinite(v) and where:
+                    S[row] = v
+
+            put(INV_T, max(col["inv"], 0.0) if np.isfinite(col["inv"]) else np.nan)
+            put(MODE_T, p.hurt_recoil_time - col["recoil"], md == M_HURT_RECOIL)
+            put(RSTEPS, col["recoil_steps"], S[RDIR] != 0)
+            put(ATK_CD, max(col["atk_cd"], 0.0) if np.isfinite(col["atk_cd"]) else np.nan)
+            put(ATK_T, col["atk_t"], S[ATTACKING] > 0)
+            put(JSTEPS, col["jump_steps"], S[JUMPING] > 0)
+            put(JDSTEPS, col["jumped_steps"])
+            put(MODE_T, col["ds"], md in (M_DS_ANTIC, M_DS_SPIKE))
+            put(DS_REC, col["ds_rec"], S[DS_REC] >= 0)
+            put(GS, col["grav"])
+            for row, k, j, bit in ((JQ, "qj", 12, B_JUMP), (AQ, "qa", 13, B_ATTACK), (QQ, "qt", 14, B_QUICKCAST)):
+                v, before = col[k], self._tm_prev[j]
+                grew = np.isfinite(before) and np.isfinite(v) and v > before and (mask & bit) != 0
+                if np.isfinite(v) and (S[row] >= 0 or grew):
+                    S[row] = max(v, 0.0)
+        self._tm_prev = tmv
+        # contact events (derive_events)
+        ev = 0
+        if on("recoilingLeft"):
+            ev |= EV_RECOIL_L
+        if on("recoilingRight"):
+            ev |= EV_RECOIL_R
+        if pogo_on:
+            ev |= EV_POGO
+        if r["clip"] == "NeedleThrow Catch" and pr.get("clip") != "NeedleThrow Catch" and md == M_CAST:
+            ev |= EV_CATCH
+        if not first and r["silk"] > pr["silk"]:
+            ev |= EV_SILK
+        vy, vy0 = r["vel"][1], (0.0 if first else pr["vel"][1])
+        rising = vy0 > 0 or ((was("jumping") if not first else False) and r["fs"] > 0)
+        if (vy == 0 and rising and not ground and md == M_NORMAL and pmd == M_NORMAL and
+                (att or fl("upAttacking"))):
+            ev |= EV_RECOIL_DOWN
+        if on("recoilFrozen"):
+            ev |= EV_HURT_L if self._dmg_side < 0 else EV_HURT_R
+        if md == M_LOCKED and pmd != M_LOCKED:
+            ev |= EV_LOCK
+        if md != M_LOCKED and pmd == M_LOCKED:
+            ev |= EV_UNLOCK
+        ev |= bits & ~EV_FZ_BIND_BREAK
+        # does the model own this frame's motion (kin_check categories)
+        if r.get("load"):
+            self._slide_left = SLIDE_SPAN[1]
+        slide = self._slide_left > 0
+        self._slide_left = max(self._slide_left - 1, 0)
+        # a freeze the model has no preset for, or a BindBreak its rule did not start
+        other = (r["freeze"] & FZ_OTHER) != 0 or ((r["freeze"] & FZ_BIND_BREAK) != 0 and not bits & EV_FZ_BIND_BREAK)
+        if md == M_HURT_FREEZE:
+            self._other_in_hitstop = self._other_in_hitstop or other or bool(pr.get("other", False))
+        elif pmd != M_HURT_FREEZE:
+            self._other_in_hitstop = False
+        world = (r["ts"] < 0.999 and md != M_HURT_FREEZE and self._wf[0] < 0) or other or self._other_in_hitstop
+        bad_marks = (r["marks"] & (MK_HARNESS | MK_HAZARD | MK_SCENE | MK_DEATH)) != 0
+        valid = bool(r["valid"]) and np.isfinite(r["box"][0])
+        gap = not first and r["f"] != pr["f"] + 1
+        self.modelled = bool(valid and not gap and not bad_marks and not slide and md != M_LOCKED and
+                             not fl("nailCharging") and not world and r["udt"] <= p.frame_time_max)
+        if md != M_HURT_FREEZE and pmd == M_HURT_FREEZE:
+            self._other_in_hitstop = False
+        # terrain contact (estimate_state)
+        if self.terrain is not None:
+            near = _on_ground(S[PX:PX + 1], S[PY:PY + 1], P, self.terrain.hseg)[0]
+            S[TOUCH] = float(near and S[GROUND] <= 0 and S[VY] < 0)
+        self.S = S
+        self.events = ev
+        self.f, self.box, self.mask, self.udt = r["f"], r["box"], mask, r["udt"]
+        self._p = {"cs": cs, "mask": mask, "mode": md, "phys": phys, "vel": r["vel"], "silk": r["silk"],
+                   "clip": r["clip"], "cph": cph, "f": r["f"], "other": other, "t_after": ac["t_after"]}
+        self.n += 1
+
+    def state(self) -> np.ndarray:
+        """[K, 1] model state at the latest frame."""
+        return self.S[:, None].copy()
+
+
+# ---- runtime residual monitor (DESIGN §3.5.2) -----------------------------------------------------------------
+
+# alarm levels of ResidualMonitor over its last 600 windows at 30 frames (misses allowed: (1 - 0.85) * 600 = 90), with
+# room above the worst of 837 k frames of held-out play (trial i0_000, live i1_000, i2_001, i3_000; kin_check --monitor:
+# at most 65 windows missing the hull, 58 by more than 0.5 u, after clusters of pogo / recoil / hit windows the model
+# misses); a broken model (0.3 u off) misses every window
+MONITOR_ALARM_WITHIN = 0.85
+MONITOR_ALARM_FAR = 80
+
+
+class ResidualMonitor:
+    """Runtime residual monitor (DESIGN §3.5.2; I4 confidence "kinematics", DESIGN §3.7.2). It checks the claim the
+    planner relies on, on the commands that were executed: from the model state at an anchor frame a it re-rolls the
+    latched masks the game read (STATE act.mask) and the contact events it observed (the threat layer's job at plan
+    time) at nominal timing with the timing lanes, and asks whether the observed collider box h frames later lies in
+    the lanes' hull dilated by tol (Rollout.bound, variants "bounds"). Re-rolling the executed stream makes replans
+    irrelevant: a plan abandoned after one frame is never scored. Frames the model does not own (StateTracker
+    .modelled False: harness operations, scene changes, hazard respawns, deaths, savestate slides, control taken by
+    another FSM, nail arts, world freezes, hitches above frame_time_max, gaps) drop every anchor whose window holds
+    them. The nominal lane's centre error is reported beside it (a point prediction misses one-step timing branches
+    the history cannot resolve, so it is no alarm criterion).
+
+        mon = ResidualMonitor(params, terrain)
+        trk.push(state); mon.update(trk)       # each STATE: score the anchors whose horizon ends now, anchor this one
+        mon.status()                           # per horizon: n, within, p99, max; "state": unknown / ok / degraded
+        mon.confidence()                       # share within at the longest horizon; None while unknown
+
+    Unknown is never safe: before min_n scored windows (after construction or reset(), which a new scene or terrain
+    needs) the state is "unknown" and confidence() None; pass it to safety.invariants.i4 only when it is not None (a
+    missing module counts as below its threshold). "degraded" when, among the last `window` scored windows at the
+    longest horizon, more than (1 - alarm_within) * window miss the hull by tol or more than alarm_far by far_u
+    (counts, so a ring still filling after a reset is not judged on a few windows). Held-out play (kin_check
+    --monitor on trial i0_000, live i1_000, i2_001, i3_000: 837 k frames, 815 k windows scored at 30 frames, 1.1 %
+    dropped) puts 99.36-99.79 % of the windows inside the hull by recording (the nominal lane 90.0-91.2 %, at 1 frame
+    99.9 %) and never reaches "degraded"; a model 0.3 u off does within the window (test). Cost: about 0.17 ms per
+    frame (one compiled rollout of the due anchors, 9 lanes), plus StateTracker.push under 0.1 ms."""
+
+    def __init__(self, params: HeroParams, terrain: Terrain2D | None = None, horizons: tuple[int, ...] = (1, 6, 30),
+                 tol: float = 0.1, window: int = 600, min_n: int = 60, alarm_within: float = MONITOR_ALARM_WITHIN,
+                 far_u: float = 0.5, alarm_far: int = MONITOR_ALARM_FAR, variants: str | tuple = "bounds",
+                 stride: int = 1):
+        self.params, self.terrain = params, terrain
+        self.horizons = tuple(sorted(horizons))
+        self.tol, self.window, self.min_n = tol, window, min_n
+        self.alarm_within, self.far_u, self.alarm_far = alarm_within, far_u, alarm_far
+        self.variants, self.stride = variants, max(int(stride), 1)
+        self.anchors: dict[int, np.ndarray] = {}
+        self.cmd: dict[int, tuple[int, int]] = {}
+        self.exc = {h: np.full(window, np.nan) for h in self.horizons}
+        self.err = {h: np.full(window, np.nan) for h in self.horizons}
+        self.k = {h: 0 for h in self.horizons}
+        self.scored = {h: 0 for h in self.horizons}
+        self.inside = {h: 0 for h in self.horizons}           # all-time counts within tol: hull, nominal lane
+        self.nominal_inside = {h: 0 for h in self.horizons}
+        self.dropped = 0
+        self.last_f: int | None = None
+
+    def reset(self) -> None:
+        """Forget everything (a new scene: other terrain, other evidence)."""
+        self.__init__(self.params, self.terrain, self.horizons, self.tol, self.window, self.min_n, self.alarm_within,
+                      self.far_u, self.alarm_far, self.variants, self.stride)
+
+    def anchor(self, frame: int, state: np.ndarray) -> None:
+        """The model state at `frame` (StateTracker.state() / estimate_state), after observe(frame, ...)."""
+        if frame % self.stride == 0:
+            S = np.asarray(state, dtype=np.float64)
+            self.anchors[frame] = (S[:, 0] if S.ndim == 2 else S).copy()
+
+    def invalidate(self) -> None:
+        """Drop every pending anchor (the caller knows the motion is not the model's)."""
+        self.dropped += len(self.anchors)
+        self.anchors.clear()
+
+    def observe(self, frame: int, box: np.ndarray, mask: int, events: int = 0, modelled: bool = True) -> None:
+        """One STATE: the collider box, the latched mask the game read and the contact events of `frame`."""
+        if self.last_f is not None and frame != self.last_f + 1:
+            self.invalidate()
+        self.last_f = frame
+        self.cmd[frame] = (int(mask), int(events))
+        H = self.horizons[-1]
+        for f in [f for f in self.cmd if f < frame - H]:
+            del self.cmd[f]
+        if not modelled or not np.isfinite(np.asarray(box, dtype=np.float64)).all():
+            self.invalidate()
+            return
+        due = [(a, frame - a) for a in self.anchors if frame - a in self.horizons]
+        if due:
+            T = max(h for _, h in due)
+            masks = np.zeros((len(due), T), dtype=np.int64)
+            ev = np.zeros((len(due), T), dtype=np.int64)
+            for j, (a, h) in enumerate(due):
+                for t in range(h):
+                    masks[j, t], ev[j, t] = self.cmd[a + 1 + t]
+            start = np.stack([self.anchors[a] for a, _ in due], axis=1)
+            r = rollout(start, masks, self.params, self.terrain, events=ev, variants=self.variants)
+            b = np.asarray(box, dtype=np.float64)
+            c = 0.5 * (b[:2] + b[2:])
+            for j, (a, h) in enumerate(due):
+                u = r.bound[j, h]
+                e = max(u[0] - b[0], u[1] - b[1], b[2] - u[2], b[3] - u[3], 0.0)
+                n = r.box[j, h]
+                slot = self.k[h] % self.window
+                self.exc[h][slot] = e
+                self.err[h][slot] = float(np.hypot(*(0.5 * (n[:2] + n[2:]) - c)))
+                self.k[h] += 1
+                self.scored[h] += 1
+                self.inside[h] += int(e <= self.tol)
+                self.nominal_inside[h] += int(self.err[h][slot] <= self.tol)
+        for a in [a for a in self.anchors if frame - a >= H]:
+            del self.anchors[a]
+
+    def update(self, trk: "StateTracker") -> None:
+        """observe() the tracker's latest frame, then anchor its state."""
+        self.observe(trk.f, trk.box, trk.mask, trk.events, trk.modelled)
+        if trk.modelled:
+            self.anchor(trk.f, trk.S)
+
+    def status(self) -> dict[str, Any]:
+        out: dict[str, Any] = {"horizons": {}, "dropped": self.dropped}
+        for h in self.horizons:
+            e = self.exc[h][np.isfinite(self.exc[h])]
+            d = self.err[h][np.isfinite(self.err[h])]
+            out["horizons"][h] = {"n": int(len(e)), "scored": self.scored[h],
+                                  "within": float(np.mean(e <= self.tol)) if len(e) else None,
+                                  "misses": int(np.sum(e > self.tol)), "far": int(np.sum(e > self.far_u)),
+                                  "p99": float(np.percentile(e, 99)) if len(e) else None,
+                                  "max": float(e.max()) if len(e) else None,
+                                  "nominal_within": float(np.mean(d <= self.tol)) if len(d) else None}
+        acc = out["horizons"][self.horizons[-1]]
+        if acc["n"] < self.min_n:
+            out["state"], out["confidence"] = "unknown", None
+        else:
+            # counts, not shares, so a ring that is still filling (after a reset) is not judged on a few windows
+            good = acc["misses"] <= (1.0 - self.alarm_within) * self.window and acc["far"] <= self.alarm_far
+            out["state"], out["confidence"] = ("ok" if good else "degraded"), acc["within"]
+        out["ok"] = out["state"] == "ok"
+        return out
+
+    def confidence(self) -> float | None:
+        return self.status()["confidence"]
 
 
 def describe_state(S: np.ndarray, i: int = 0) -> dict[str, Any]:

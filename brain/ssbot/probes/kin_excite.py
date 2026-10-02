@@ -20,9 +20,12 @@ recording (ssbot.record.recorder.Recorder) plus <recording>/kin_trials.jsonl wit
 
 Safety: needs a free training instance (it loads savestates and drives input); never run it while a data job owns
 the instances. Save suppression is turned on before the first load and left on (the savestate carries progress the
-sandbox slot must not get). --hurt uses the oracle debug server's "hurt" command (HeroController.TakeDamage, the
-real hit-stop and recoil; training only) on --debug-port (default 47631 + instance: check the instance's log) and
-heals with "pdset health 5" after each such trial.
+sandbox slot must not get). --hurt hits Hornet through the main link's hurt.special RPC (kind "damage", 1 mask,
+HazardType ENEMY, the given impact side: HeroController.TakeDamage, so the real hit-stop and recoil; TRAIN profile
+only) with LethalBlock set to block; every trial reloads the savestate and randomize_start puts HP back to 5. The
+plan of a hurt trial is rolled out with the hit on every frame the RPC can land on (HURT_SPAN around the requested
+one) and the knockback envelope of each such hit (ssbot.knowledge.knockback, the conservative bound) must stay inside
+X_SAFE too.
 """
 from __future__ import annotations
 
@@ -31,7 +34,6 @@ import json
 import random
 import sys
 import threading
-import time
 from dataclasses import asdict, dataclass, field
 
 import numpy as np
@@ -43,6 +45,7 @@ SAVESTATE = "bellbeast_arena"
 SCENE = "Bone_05"
 X_SAFE = (70.0, 85.5)
 SETTLE_FRAMES = 45
+HURT_SPAN = (-2, 6)     # frames around the requested one the hurt.special hit can land on (RPC on the main thread)
 
 M_NONE = 0
 M_L, M_R = mask("left"), mask("right")
@@ -127,6 +130,37 @@ def draw(rng: random.Random, hurt: bool) -> Trial:
     return Trial(kind, p, m, h)
 
 
+def safe(S: np.ndarray, t: Trial, params, terrain) -> bool:
+    """The trial keeps the hero (collider centre) inside X_SAFE: its rollout with every timing variant and, for a hurt
+    trial, the rollouts (every timing variant) with the hit on each frame of HURT_SPAN plus the knockback envelope of
+    each such hit."""
+    from ssbot.knowledge import kinematics as km
+    from ssbot.knowledge.knockback import knockback_boxes
+    masks = np.array(t.masks + _seg(0, SETTLE_FRAMES), dtype=np.int64)[None]
+    T = masks.shape[1]
+    hw = params.half_width
+
+    def ok(x0: float, x1: float) -> bool:
+        return bool(x0 + hw >= X_SAFE[0] and x1 - hw <= X_SAFE[1])
+
+    r = km.rollout(S, masks, params, terrain, variants="bounds")
+    if not ok(r.bound[0, :, 0].min(), r.bound[0, :, 2].max()):
+        return False
+    if not t.hurt:
+        return True
+    bit = km.EV_HURT_L if t.hurt["side"] == "left" else km.EV_HURT_R
+    frames = [f for f in range(t.hurt["frame"] + HURT_SPAN[0], t.hurt["frame"] + HURT_SPAN[1] + 1) if 0 <= f < T]
+    ev = np.zeros((len(frames), T), dtype=np.int64)
+    for j, f in enumerate(frames):
+        ev[j, f] = bit
+    rh = km.rollout(S, np.repeat(masks, len(frames), axis=0), params, terrain, events=ev, variants="bounds")
+    if not ok(rh.bound[..., 0].min(), rh.bound[..., 2].max()):         # after control returns too, every lane
+        return False
+    hit_boxes = np.stack([r.bound[0, f + 1] for f in frames])     # the variants' hull: a superset of each lane
+    swept, _, _ = knockback_boxes(hit_boxes, t.hurt["side"], params, terrain)
+    return ok(swept[:, 0].min(), swept[:, 2].max())
+
+
 def plan(rng: random.Random, state: dict, model, hurt: bool, tries: int = 20) -> Trial:
     """Draw trials until the model keeps the hero inside X_SAFE (and patch jump-queue re-presses to land timing)."""
     from ssbot.knowledge import kinematics as km
@@ -136,23 +170,20 @@ def plan(rng: random.Random, state: dict, model, hurt: bool, tries: int = 20) ->
     for i in range(tries):
         t = draw(rng, hurt)
         t.redraws = i
-        masks = np.array(t.masks + _seg(0, SETTLE_FRAMES), dtype=np.int64)
-        r = km.rollout(S, masks[None], params, terrain)
         if t.kind == "jump_queue":
+            masks = np.array(t.masks + _seg(0, SETTLE_FRAMES), dtype=np.int64)
+            r = km.rollout(S, masks[None], params, terrain)
             land = np.flatnonzero((r.flags[0, 1:] & km.F_GROUND) != 0)
             land = land[land > t.params["k"]]
             if len(land):
                 at = max(int(land[0]) - t.params["early"], t.params["k"] + 1)
                 t.masks[at:at + 6] = [M_J | t.params["mv"]] * 6
-                masks = np.array(t.masks + _seg(0, SETTLE_FRAMES), dtype=np.int64)
-                r = km.rollout(S, masks[None], params, terrain)
-        x = r.phys[0, :, 0]
-        if x.min() >= X_SAFE[0] and x.max() <= X_SAFE[1]:
+        if safe(S, t, params, terrain):
             return t
     return Trial("rest", {}, _seg(0, 30), None, redraws=tries)
 
 
-def run_trial(link: OracleLink, t: Trial, debug=None) -> Trial:
+def run_trial(link: OracleLink, t: Trial) -> Trial:
     masks = t.masks + _seg(0, SETTLE_FRAMES)
     last = link.frame
     t0 = None
@@ -167,8 +198,9 @@ def run_trial(link: OracleLink, t: Trial, debug=None) -> Trial:
         if 0 <= k < len(masks):
             link.act(last + 2, masks[k], hold_frames=0)
             i = k + 1
-        if t.hurt and debug is not None and k == t.hurt["frame"]:
-            debug._call(f"hurt 1 ENEMY {t.hurt['side']}")
+        if t.hurt and k == t.hurt["frame"] and "landed" not in t.hurt:
+            res = link.rpc("hurt.special", kind="damage", amount=1, hazard="ENEMY", side=t.hurt["side"])
+            t.hurt["landed"] = res.get("frame")
     link.act(link.frame + 2, 0, hold_frames=0)
     t.f1 = link.frame
     return t
@@ -181,8 +213,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--trials", type=int, default=300)
     ap.add_argument("--savestate", default=SAVESTATE)
     ap.add_argument("--out", default=r"C:\ssbot\data\runs\m2\kin_excite")
-    ap.add_argument("--hurt", action="store_true", help="include damage knockback trials (debug server)")
-    ap.add_argument("--debug-port", type=int, default=None)
+    ap.add_argument("--hurt", action="store_true", help="include damage knockback trials (hurt.special RPC)")
     a = ap.parse_args(argv)
 
     from ssbot.knowledge.kinematics import HeroParams, Terrain2D
@@ -192,15 +223,13 @@ def main(argv: list[str] | None = None) -> int:
     params = HeroParams.load()
     rng = random.Random(a.seed)
     link = OracleLink(instance=a.instance, connect_timeout_s=120)
-    debug = None
-    if a.hurt:
-        from ssbot.io.sinks.oracle_inject import OracleClient
-        debug = OracleClient(port=a.debug_port or 47631 + a.instance)
     rec = None
     try:
         load_slot(link, 1)
         stand_up(link)
         link.rpc("guards.set", save_suppression=True)
+        if a.hurt:
+            link.rpc("guards.set", lethal_block="block")
         terrains = TerrainTap(link)
         rec = Recorder(link, out_dir=a.out, profile="TRAIN", episode=f"kin_excite_s{a.seed}",
                        config={"probe": "kin_excite", "seed": a.seed, "trials": a.trials, "hurt": a.hurt}).start()
@@ -219,10 +248,7 @@ def main(argv: list[str] | None = None) -> int:
             t = plan(rng, s, (params, terrain), a.hurt)
             t.seed = a.seed
             t.start = {"pos": s["hero"]["pos"][:2], "silk": s["hero"]["silk"], "facing": s["hero"]["facing"]}
-            run_trial(link, t, debug)
-            if t.hurt and debug is not None:
-                time.sleep(1.5)
-                debug._call("pdset health 5")
+            run_trial(link, t)
             log.write(json.dumps(asdict(t)) + "\n")
             log.flush()
             print(f"{n:4d} {t.kind:18s} {t.params} frames {t.f0}-{t.f1}", flush=True)

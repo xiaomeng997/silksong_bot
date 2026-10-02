@@ -4,19 +4,23 @@
     cd brain
     ../scripts/uv.cmd run python -m ssbot.tools.kin_fit <source> [<source> ...] [--out <json>] [--dry-run]
 
-Sources as in ssbot.tools.kin_check (recordings, human sessions, fixtures). Each constant starts from the decompiled
+Sources as in ssbot.tools.kin_check (recordings, human sessions, fixtures); --timing names the recordings of the
+frame-time jitter model (default: the bot sources). Each constant starts from the decompiled
 prefab / crest value (HeroParams defaults: hero_constants.json, crests.json) and is replaced by the measured one
 when the bot logs hold enough clean samples; `source` in the JSON names which, `fit` keeps the sample counts and
 spreads. Measured from the trace itself (no model in the loop):
-  frame time, gravity, run speed, jump speed and rise steps, release multiplier, air-hang ramp (terminal velocity is
+  the frame-time jitter model (mean, shortest, p99.99, the envelope's ordinary bound, hitch length and rate);
+  gravity, run speed, jump speed and rise steps, release multiplier, air-hang ramp (terminal velocity is
   only reported: 30 u/s was not reached in the trial run);
   collider box (foot, head, half width) and the floor skin against the scene's terrain;
   nail recoil speed and steps; down-attack decay, vy clamp and spike speed (the 0.1 s antic and spike timers stay
   at the crest values: their frame counts follow the float32 timer sums, see ssbot.knowledge.kinematics);
   pogo rise steps; damage recoil vector (the hit-stop is not fitted: its FreezeMoment replay is checked against
   every logged hit instead);
-  Silkspear phase thresholds (FSM wait times: the roundest float32 value inside every logged phase interval),
-  decays and catch speed; Bind length, decay and vy cap; the external-lock decay; the landing contact band;
+  Silkspear phase thresholds (FSM wait times: the roundest float32 value inside every logged phase interval; the
+  throw and the catch end on one of two frames, so they are variant-valued with the share of each), decays and catch
+  speed; the apex height per jump hold, logged against the model (the spread the hazard margin needs); Bind length
+  (variant-valued like the throw), decay and vy cap; the external-lock decay; the landing contact band;
   the jump-bit lag of the "input" exporter (human sessions);
   per scene played by the bot, the solids that were really on during play (the TERRAIN dump is taken at room
   entry; Bone_05: the "Threaded Bell Gate" pair is closed for the fight, "Wall" is gone).
@@ -77,12 +81,6 @@ class Fit:
 
 
 def fit_motion(tr: Trace, modes: np.ndarray, f: Fit) -> None:
-    run = tr.valid & (tr.ts == 1.0) & (tr.udt > 0) & np.r_[False, np.diff(tr.f) == 1]
-    if run.sum() > 100:
-        u = tr.udt[run].astype(np.float64)
-        p1, p99 = np.percentile(u, [1, 99])
-        f.set("frame_time", _rnd(float(np.mean(u[u < 0.025])), 7), int(run.sum()),
-              f"mean unscaled frame time at time scale 1 (p1 {p1:.5f}, p99 {p99:.5f})")
     one = _single_step(tr)
     prev = np.r_[0, np.arange(len(tr) - 1)]
     normal = (modes == km.M_NORMAL) & (modes[prev] == km.M_NORMAL)
@@ -351,18 +349,32 @@ def fit_casts(tr: Trace, modes: np.ndarray, f: Fit) -> None:
                 if tr.fs[k] == 1 and abs(tr.vel[k - 1, 0]) > 0.5:
                     cdecay.append(tr.vel[k, 0] / tr.vel[k - 1, 0])
     # the throw ends when the needle is back (26 or 27 frames for a full throw, earlier when it hits something
-    # close): no single timer explains it, so the default is the longest full throw and the logged catch (EV_CATCH)
-    # ends the shorter ones in replays; a planner should treat the catch frame as +-1 frame uncertain
+    # close) and the catch after 9 or 10 frames: no single threshold explains either, so both are variant-valued
+    # (one threshold per frame-count cluster, with its share of the logged runs; the rollout's variant lanes take the
+    # shortest and the longest, the nominal lane the most common) and the logged catch (EV_CATCH) ends the shorter
+    # throws in replays
     iv[2] = [x for x in iv[2] if x[1] > 0.3] or iv[2]
     for key, name, what in ((1, "cast_antic", "antic"), (2, "cast_throw", "throw"), (3, "cast_catch", "catch")):
         t, r = _threshold(iv[key])
         if t is None:
             continue
-        if key == 2:
-            t = max(b for _, b in iv[key])
-        f.set(name, _rnd(t, 5), len(iv[key]),
-              f"{what}: threshold in ({r[0]:.4f}, {r[1]:.4f}], runs {np.round([b for _, b in iv[key]], 4).tolist()}",
-              min_n=1)
+        runs = np.round([b for _, b in iv[key]], 4).tolist()
+        if key in (2, 3):
+            frames = np.round(np.array([b for _, b in iv[key]]) / f.p.frame_time).astype(int)
+            variants = []
+            for nfr in sorted(set(frames.tolist())):
+                cl = [x for x, k in zip(iv[key], frames) if k == nfr]
+                tc, _ = _threshold(cl)
+                variants.append([_rnd(tc, 5), round(len(cl) / len(frames), 3), int(nfr), len(cl)])
+            variants = [v for v in variants if v[3] >= 2] or variants
+            share = sum(v[3] for v in variants)
+            f.fit[f"{name}_variants"] = {"value": variants, "n": share,
+                                         "note": f"{what}: [threshold, share, frames, n] per frame-count cluster"}
+            if len(variants) > 1:
+                setattr(f.p, f"{name}_variants", [[v[0], round(v[3] / share, 3)] for v in variants])
+                f.source[f"{name}_variants"] = f"kin_fit: {what} runs per frame count (n={share})"
+            t = max(variants, key=lambda v: v[3])[0]
+        f.set(name, _rnd(t, 5), len(iv[key]), f"{what}: threshold in ({r[0]:.4f}, {r[1]:.4f}], runs {runs}", min_n=1)
     if decay:
         f.set("cast_decay", _rnd(np.median(decay), 4), len(decay), "vx ratio per step in an air antic", min_n=5)
     if gdecay:
@@ -377,11 +389,10 @@ def fit_casts(tr: Trace, modes: np.ndarray, f: Fit) -> None:
         f.set("cast_catch_speed", _rnd(np.median(cspeed), 3), len(cspeed), "|vx| when the catch starts", min_n=1)
     if cdecay:
         f.set("cast_catch_decay", _rnd(np.median(cdecay), 4), len(cdecay), "vx ratio per catch step", min_n=3)
-    bdur, bend, bdec = [], [], []
+    bend, bdec = [], []
     for a, b in _runs(modes == km.M_BIND):
         if b >= len(tr) or tr.flag("recoilFrozen")[a:b + 1].any():
             continue
-        bdur.append(float(np.sum(tr.dt[a + 1:b + 1].astype(np.float32), dtype=np.float32)))
         if modes[b] == km.M_NORMAL:
             bend.append(tr.vel[b, 1])
         if not ground[a]:
@@ -396,9 +407,6 @@ def fit_casts(tr: Trace, modes: np.ndarray, f: Fit) -> None:
         if bcap:
             f.set(key, _rnd(np.median(bcap), 3), len(bcap),
                   f"|vy| at clipped air bind presses / decay ({'rising' if sign > 0 else 'falling'})", min_n=1)
-    if bdur:
-        f.set("bind_time", _rnd(np.median(bdur), 4), len(bdur), "Bind: scaled time relinquished", min_n=1)
-        f.fit["bind_runs"] = {"value": [round(x, 4) for x in bdur], "n": len(bdur), "note": "scaled s per bind"}
     if bend:
         f.set("bind_end_vy", _rnd(np.median(bend), 3), len(bend), "vy in the first frame after a bind", min_n=1)
     lk = modes == km.M_LOCKED
@@ -408,6 +416,127 @@ def fit_casts(tr: Trace, modes: np.ndarray, f: Fit) -> None:
             rat.append(tr.vel[k, 0] / tr.vel[k - 1, 0])
     if rat:
         f.set("lock_decay", _rnd(np.median(rat), 4), len(rat), "vx ratio per step while another FSM holds control")
+
+
+def fit_bind_lengths(tr: Trace, modes: np.ndarray, f: Fit) -> None:
+    """Bind length: one float32 threshold per logged frame count (81 / 82 / 83 frames: variant-valued like the
+    Silkspear phases); the nominal value is the most frequent one. Binds are rare in the bot runs (3 in live i0_000),
+    so run_fit takes them from its `phases` sources."""
+    bdur, biv = [], []
+    for a, b in _runs(modes == km.M_BIND):
+        if b >= len(tr) or tr.flag("recoilFrozen")[a:b + 1].any():
+            continue
+        c = np.cumsum(tr.dt[a + 1:b + 1].astype(np.float32), dtype=np.float32)
+        bdur.append(float(c[-1]))
+        biv.append((float(c[-2]) if len(c) > 1 else 0.0, float(c[-1])))
+    if not bdur:
+        return
+    f.fit["bind_runs"] = {"value": [round(x, 4) for x in bdur], "n": len(bdur), "note": "scaled s per bind"}
+    frames = np.round(np.array(bdur) / f.p.frame_time).astype(int)
+    var = []
+    for nfr in sorted(set(frames.tolist())):
+        tc, _ = _threshold([x for x, k in zip(biv, frames) if k == nfr])
+        share = round(float(np.mean(frames == nfr)), 3)
+        if var and var[-1][0] == _rnd(tc, 5):     # a threshold on a knife edge serves two frame counts
+            var[-1][1] = round(var[-1][1] + share, 3)
+        else:
+            var.append([_rnd(tc, 5), share])
+    best = max(var, key=lambda v: v[1])[0]
+    f.set("bind_time", best, len(bdur), "Bind: the most frequent length's threshold (float32 dt sum)", min_n=1)
+    if len(var) > 1:
+        f.p.bind_time_variants = var
+        f.source["bind_time_variants"] = f"kin_fit: Bind runs per frame count (n={len(bdur)})"
+
+
+def fit_jitter(traces: list[Trace], f: Fit, hitches: int = 2) -> None:
+    """The frame-time jitter model: unscaled frame times of the gameplay frames (valid, consecutive, at least 120
+    frames from a harness operation, scene change, hazard respawn or death). frame_time is the mean (the planner's
+    nominal frame), frame_time_lo the shortest frame (the limiter), frame_time_hi the p99.99 (the rollout's timing
+    lanes), frame_time_max the smallest bound that at most `hitches` frames of any 65 exceed (the knockback envelope's
+    ordinary frame) and hitch_max the longest frame seen, rounded up to the next 5 ms above it."""
+    us, counts = [], {}
+    grid = (0.017, 0.0175, 0.018, 0.019, 0.020, 0.025)
+    for tr in traces:
+        bad = (tr.marks & (km.MK_HARNESS | km.MK_SCENE | km.MK_HAZARD | km.MK_DEATH | km.MK_SLIDE)) != 0
+        near = np.convolve(bad.astype(float), np.ones(241), mode="same") > 0
+        ok = tr.valid & ~near & np.r_[False, np.diff(tr.f) == 1] & np.r_[False, tr.valid[:-1]] & (tr.udt > 0)
+        u = np.where(ok, tr.udt, 0.0)
+        us.append(tr.udt[ok])
+        for g in grid:
+            w = np.convolve((u > g).astype(float), np.ones(65), mode="full")[:len(u)]
+            counts[g] = max(counts.get(g, 0), int(w.max()) if len(w) else 0)
+    u = np.concatenate(us) if us else np.zeros(0)
+    if len(u) < 1000:
+        return
+    mx = next((g for g in grid if counts[g] <= hitches), grid[-1])
+    f.set("frame_time", _rnd(float(np.mean(u[u < 0.025])), 7), len(u), "mean unscaled gameplay frame time")
+    f.set("frame_time_lo", float(np.float32(u.min())), len(u), "shortest frame (frame limiter)")
+    f.set("frame_time_hi", _rnd(np.percentile(u, 99.99), 5), len(u), "p99.99 frame time")
+    f.set("frame_time_max", mx, len(u), f"at most {hitches} frames of any 65 are longer (per bound: {counts})")
+    f.set("hitch_max", round(float(np.ceil((u.max() + 1e-4) / 0.005) * 0.005), 3), len(u),
+          f"longest frame {u.max():.4f} s, rounded up to the next 5 ms")
+    f.set("hitch_rate", float(f"{np.mean(u > mx):.2e}"), len(u), f"frames longer than {mx} s, per frame")
+    f.set("hitches_per_window", hitches, len(u), "frames above frame_time_max in any 65 (see frame_time_max)")
+    f.fit["frame_times"] = {"value": {"p1": _rnd(np.percentile(u, 1), 6), "p50": _rnd(np.percentile(u, 50), 6),
+                                      "p99": _rnd(np.percentile(u, 99), 6), "max": _rnd(u.max(), 4),
+                                      "over_18ms": int((u > 0.018).sum())},
+                            "n": int(len(u)), "note": "gameplay frames of the timing sources"}
+
+
+def fit_jump_heights(tr: Trace, modes: np.ndarray, f: Fit, max_hold: int = 32) -> None:
+    """Apex height above the takeoff per jump hold (latched frames of the jump button from the takeoff frame; 32 and
+    more is a full jump: the rise is cut only while vy > 0), logged against the model from rest over the physics
+    phase (400 values) and the jitter model's shortest, mean and p99.99 frame times (DESIGN §3.5.2: the hold ->
+    height spread goes into the hazard margin). The spread is the physics phase: where the 50 Hz steps fall among
+    the 60 Hz frames decides how many full-speed rise steps a hold gets (live i0_000 f 299681: 6 steps in a 6-frame
+    hold, which needs the phase inside a 0.0015-wide window, 0.19 u above the 5-step jumps). Clean jumps only: from the ground, NORMAL mode,
+    no contact event and no second jump press up to the apex (a re-press while rising stops the release cut)."""
+    ev = km.derive_events(tr, modes) & ~km.EV_SILK
+    jm = (tr.mask & km.B_JUMP) != 0
+    ground = tr.flag("onGround")
+    by: dict[int, list[float]] = {}
+    for i in np.flatnonzero(km._onset(tr.flag("jumping"))):
+        if i < 3 or not ground[i - 1] or not tr.valid[i - 1]:
+            continue
+        h = 0                     # latched jump frames from the takeoff frame on (a queued press counts from there)
+        while i + h < len(tr) and jm[i + h]:
+            h += 1
+        if h == 0:
+            continue
+        apex, k = tr.box[i - 1, 1], i
+        clean = True
+        while k < min(len(tr), i + 90):
+            if not tr.valid[k] or modes[k] != km.M_NORMAL or ev[k] or tr.marks[k] or tr.f[k] - tr.f[k - 1] != 1 or \
+                    (k >= i + h and jm[k]):
+                clean = False
+                break
+            apex = max(apex, tr.box[k, 1])
+            if tr.vel[k, 1] < 0 and tr.box[k, 1] < apex - 1e-6:
+                break
+            k += 1
+        if clean:
+            by.setdefault(min(h, max_hold), []).append(float(apex - tr.box[i - 1, 1]))
+    if not by:
+        return
+    terrain = km.Terrain2D.from_boxes([(0.0, 0.0, 200.0, 2.0)])
+    rest = 2.0 + f.p.skin + f.p.foot
+    alphas = np.tile((np.arange(400) + 0.5) / 400, 3)
+    udt = np.repeat([f.p.frame_time_lo, f.p.frame_time, f.p.frame_time_hi], 400)
+    out = []
+    for h in sorted(by):
+        a = np.array(by[h])
+        S = np.repeat(km.initial_state(f.p, 50.0, rest)[:, None], len(alphas), axis=1)
+        S[km.ALPHA] = alphas
+        masks = np.repeat(np.array([[km.B_JUMP] * h + [0] * 90], dtype=np.int64), len(alphas), axis=0)
+        r = km.rollout(S, masks, f.p, terrain, udt=np.repeat(udt[:, None], masks.shape[1], axis=1))
+        m = r.box[:, :, 1].max(axis=1) - (rest - f.p.foot)
+        out.append({"hold": int(h), "n": int(len(a)), "logged": [_rnd(a.min()), _rnd(np.median(a)), _rnd(a.max())],
+                    "model": [_rnd(m.min()), _rnd(m.max())], "spread": _rnd(a.max() - a.min()),
+                    "outside_model": _rnd(max(m.min() - a.min(), a.max() - m.max(), 0.0))})
+    f.p.jump_heights = out
+    f.fit["jump_heights"] = {"value": out, "n": int(sum(len(v) for v in by.values())),
+                             "note": f"apex above takeoff per jump hold (frames, {max_hold} = {max_hold} or more)"}
+    f.source["jump_heights"] = "kin_fit: clean ground jumps of the bot traces against the model over the phase"
 
 
 def fit_landing(tr: Trace, terrains: dict, f: Fit) -> None:
@@ -509,13 +638,25 @@ def infer_scene_overrides(tr: Trace, terrain_msgs: dict, f: Fit) -> None:
             f.source[f"scenes.{name}"] = "kin_fit: hero boxes against the room-entry TERRAIN dump"
 
 
-def run_fit(sources: list[str], params: HeroParams) -> Fit:
+def run_fit(sources: list[str], params: HeroParams, timing: list[str] | None = None,
+            phases: list[str] | None = None) -> Fit:
+    """Fit on `sources`; the frame-time jitter model on `timing` (default: the bot sources), a property of the machine
+    and the frame limiter rather than of the hero, so it may use every recording without fitting the held-out play;
+    the Bind length variants on `phases` (default: the bot sources; rare events, so more recordings than the fit:
+    2026-10-01 live i0_000 + i0-3_002, keeping the held-out ones out)."""
     f = Fit(params)
     traces = []
     for src in sources:
         tr, terrains = load_source(src, params)
         traces.append((src, tr, terrains, _terrain_msgs(src)))
-    f.fit["data"] = {"value": [{"source": s, "frames": len(t), "mask": t.mask_source} for s, t, _, _ in traces],
+    timing_traces = [t for _, t, _, _ in traces if t.mask_source == "act"] if timing is None else \
+        [load_source(src, params)[0] for src in timing]
+    fit_jitter(timing_traces, f)
+    f.fit["timing_data"] = {"value": [Path(s).as_posix() for s in (timing or [s for s, t, _, _ in traces
+                                                                            if t.mask_source == "act"])],
+                            "n": sum(len(t) for t in timing_traces), "note": "traces of the jitter model"}
+    f.fit["data"] = {"value": [{"source": Path(s).as_posix(), "frames": len(t), "mask": t.mask_source}
+                               for s, t, _, _ in traces],
                      "n": sum(len(t) for _, t, _, _ in traces), "note": "traces used"}
     bot = [x for x in traces if x[1].mask_source == "act"] or traces
     # scene overrides from the bot runs only: a person's playthrough crosses rooms in every state (gates open and
@@ -535,7 +676,15 @@ def run_fit(sources: list[str], params: HeroParams) -> Fit:
     fit_downspike(tr, modes, f)
     fit_hurt(tr, modes, f)
     fit_casts(tr, modes, f)
+    if phases:
+        ptr = _concat([load_source(src, params)[0] for src in phases])
+        fit_bind_lengths(ptr, km.classify_modes(ptr), f)
+        f.fit["phase_data"] = {"value": [Path(s).as_posix() for s in phases], "n": len(ptr),
+                               "note": "traces of the Bind length variants"}
+    else:
+        fit_bind_lengths(tr, modes, f)
     fit_landing(tr, terrains, f)
+    fit_jump_heights(tr, modes, f)
     for _, t, _, _ in traces:
         fit_input_lag(t, f)
     return f
@@ -596,9 +745,13 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--base", default=None, help="start from this params JSON instead of the prefab defaults")
     ap.add_argument("--out", default=str(km.DEFAULT_PARAMS))
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--timing", nargs="*", default=None, help="sources of the frame-time jitter model (default: the "
+                                                               "bot sources being fitted)")
+    ap.add_argument("--phases", nargs="*", default=None, help="sources of the Bind length variants (default: the bot "
+                                                              "sources being fitted)")
     a = ap.parse_args(argv)
     params = HeroParams.load(a.base) if a.base else HeroParams()
-    f = run_fit(a.sources, params)
+    f = run_fit(a.sources, params, a.timing, a.phases)
     for k in HeroParams.VECTOR:
         f.source.setdefault(k, "decompiled HeroController / crest config (docs/facts/1.0.30000 hero_constants.json, "
                                "crests.json) or a code constant; not refitted")
