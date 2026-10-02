@@ -22,25 +22,30 @@ centre (WorldState HeroState.pos); Rollout.pos is the rendered transform (pos_tr
 
 Acceptance (ssbot.tools.kin_check, every 30-frame window, collider centre within 0.1 u after 0.5 s; decision 3:
 start state from the history up to the window start only, causal phase, nominal timing; parameters fitted on live
-20261001_122249 i0_000 only). Held out: the trial run 20261001_121446 i0_000 and live i1-3_000, i0-3_001 (8
-recordings, 1 915 915 windows, 38 640 uncovered and counted: control taken by another FSM 25 667, invalid 6 950,
-harness 6 015, savestate slide 8):
-  nominal lane, logged contact events standing in for the threat layer: 89.7 % of covered windows (89.0 % of all);
-    plain primitives 99.6 % (run 99.5, jump 99.4, air 99.6, attack 99.1, idle 99.99), cast 93.0, bind 97.0, contact
-    (nail recoil, pogo, recoil down, early catch) 80.5, downspike 77.0, hurt 66.3, recovering (starting in the
-    hit-stop or recoil) 55.7, world_freeze (BindBreak, BossDeathSlow, boss stun) 60.3, hitch 80.6;
-  the same without events (the buttons alone): 80.0 % (contact 18.2, hurt 12.8);
-  inside the hull of the 9 "bounds" timing lanes dilated by 0.1 u: 99.06 % (plain 99.89, hurt 99.65, recovering
-    98.7, downspike 98.0, contact 97.6, cast 97.0, bind 98.1, world_freeze 61.3, hitch 87.3);
+20261001_122249 i0_000, the Bind lengths on i0_000 + i0-3_002; 2026-10-01 after the world-freeze model). Held out:
+the trial run 20261001_121446 i0_000 and live i1-3_000, i0-3_001 (8 recordings, 1 915 915 windows, 38 640
+uncovered and counted as misses in "all": control taken by another FSM 25 667, invalid 6 950, harness 6 015,
+savestate slide 8):
+  nominal lane, logged contact and freeze events standing in for the threat layer: 89.8 % of covered windows
+    (89.1 % of all); plain primitives 99.6 % (run 99.5, jump 99.4, air 99.6, attack 99.1, idle 99.99), cast 93.0,
+    bind 96.6, contact (nail recoil, pogo, recoil down, early catch) 80.5, downspike 77.0, hurt 66.3, recovering
+    (starting in the hit-stop or recoil) 55.7, world_freeze (BindBreak, BossDeathSlow, boss stun) 70.7 (60.3 before
+    the world-freeze model), hitch 80.6;
+  the same without events (the buttons alone): 80.1 %;
+  inside the hull of the 9 "bounds" timing lanes dilated by 0.1 u (hull spread p50 0, p95 0.39, p99 0.65 u):
+    99.22 % of covered windows (98.32 % of all; plain 99.89, hurt 99.65, recovering 98.7, downspike 98.0, contact
+    97.6, cast 97.0, bind 98.1, world_freeze 73.7, hitch 87.3);
   replay with the logged dt / physics steps (information the planner does not have): 99.42 %.
-The fit recording gives the same (89.6 / 99.06 %), and so do the later live recordings i0-3_002 (89.5 / 99.07 %).
-So the 99 % target is met by the nominal lane for plain movement only, and overall only as containment in the
-variant lanes' hull; the event-driven primitives miss it in every setting. Most nominal misses are one physics step:
+The fit recording gives the same (89.7 / 99.25 %), and so do the later live recordings i0-3_002 (89.6 / 99.22 %).
+So the DESIGN §3.5.2 target (99 % within 0.1 u) is met by the nominal point prediction for plain movement only, and
+in the planner's information set no point prediction can meet it overall: most nominal misses are one physics step,
 3 615 of the 4 630 missed hurt windows of live i1_000 f < 120 000 are 0.32-0.36 u off (one recoil step, 0.335 u),
-644 two steps: hit-stop (13 / 14 / 15 frames) and recoil (13 / 14) end on frames that frame times of 0.01665 against
-1/60 s decide, and those are not predictable from the history. A person's session (20260930_210337, "input" masks,
-113 369 covered windows) reaches 89.1 % nominal, 90.0 % in the lanes' hull: plain movement 92.6 %, as the "input"
-stream is not the exact latched mask.
+644 two steps; hit-stop (13 / 14 / 15 frames) and recoil (13 / 14) end on frames that frame times of 0.01665 against
+1/60 s decide, which the history does not predict (with the future frame times, the replay: 99.4 %). What the model
+delivers at 99 % is the support form, the lanes' hull (Rollout.bound), which the planner checks and the residual
+monitor watches; restating the M2 exit item that way (hull containment, with the hull spread in the hazard margin)
+is the lead's decision. A person's session (20260930_210337, "input" masks, 113 369 covered windows) reaches 90.0 %
+nominal, 91.0 % in the lanes' hull: plain movement 92.6 %, as the "input" stream is not the exact latched mask.
 
 Planner cost (13900K, Bone_05 terrain, 512 candidates x 48 frames, measured with other work on the machine): the
 nominal rollout p50 2.3 ms / p99 3.0 ms on one core, p50 0.47 / p99 0.8 ms with threads=4; the "bounds" lanes in the
