@@ -182,3 +182,32 @@ def test_soft_gates_at_h2(model, tpls, params, arena):
     assert r.S == 0 and not r.Hz                                              # Hz soft ranks below; chosen plan
     r, _ = tick(planner, model, tpls, params, [], 85.0, hp=3, h=2, gates=True)
     assert r.S == 0
+
+
+def test_hull_points_cover_wide_boxes():
+    """Every hull box is covered by the union of its query points grown by the point coverage (hx, hy); boxes wider
+    than 2 points cover are flagged too_wide; frames that need fewer points get NaN (skipped by the query)."""
+    from ssbot.combat.planner import _hull_points
+    rng = np.random.default_rng(5)
+    hx, hy = 0.4, 1.2894
+    n, t = 40, 30
+    x0 = rng.uniform(70, 100, (n, t))
+    y0 = rng.uniform(2, 10, (n, t))
+    w = rng.choice([0.5, 0.7, 0.9, 1.5, 2.0], (n, t))
+    h = rng.choice([2.08, 2.4, 3.0, 5.0, 6.0], (n, t))
+    bound = np.stack([x0, y0, x0 + w, y0 + h], -1)
+    X, Y, rows, too_wide = _hull_points(bound, hx, hy, 2)
+    assert (too_wide == ((w > 4 * hx + 1e-9) | (h > 4 * hy + 1e-9))).all()
+    pts = [(X[:n], Y[:n])] + [(np.full((n, t), np.nan), np.full((n, t), np.nan)) for _ in range(3)]
+    for layer in range(3):
+        blk = slice(n + layer * len(rows), n + (layer + 1) * len(rows))
+        pts[layer + 1][0][rows], pts[layer + 1][1][rows] = X[blk], Y[blk]
+    for i in range(n):
+        for k in range(t):
+            if too_wide[i, k]:
+                continue
+            P = [(px[i, k], py[i, k]) for px, py in pts if not np.isnan(px[i, k])]
+            for fx in np.linspace(0, 1, 7):
+                for fy in np.linspace(0, 1, 7):
+                    qx, qy = x0[i, k] + fx * w[i, k], y0[i, k] + fy * h[i, k]
+                    assert any(abs(qx - a) <= hx + 1e-9 and abs(qy - b) <= hy + 1e-9 for a, b in P)

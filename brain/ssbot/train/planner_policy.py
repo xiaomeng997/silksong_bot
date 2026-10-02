@@ -202,7 +202,7 @@ class PlannerPolicy:
         if self.wake_sent or tap is None or tap.wake_frame is None:
             return
         dt = (s["f"] - tap.wake_frame) * self.params.frame_time
-        self.fc.notify_wake(ws.stamp.t_game_s - dt - (self.k * self.params.frame_time))
+        self.fc.notify_wake(ws.stamp.t_game_s - dt + self.k * self.params.frame_time)   # ws is k frames old
         self.wake_sent = True
 
     def _start_state(self, ws, raw: dict) -> np.ndarray:

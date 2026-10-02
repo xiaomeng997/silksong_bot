@@ -521,7 +521,9 @@ class BossTracker:
         if self.t_wake is None:
             return []
         e = self.t_wake - origin_t
-        return [Root("Submerged Init", e - BIN, e + BIN, Ctx(direction="-", phase="P1", raged=False, hp=self.ctx.hp))]
+        # the wake comes from the episode's frame count (+-2 bins: game time and frames part in a hit-stop)
+        return [Root("Submerged Init", e - 2 * BIN, e + 2 * BIN,
+                     Ctx(direction="-", phase="P1", raged=False, hp=self.ctx.hp))]
 
     def _roots_oracle(self, origin_t: float) -> tuple[list[Root], bool]:
         if self.state is None or self.t_entry is None:
