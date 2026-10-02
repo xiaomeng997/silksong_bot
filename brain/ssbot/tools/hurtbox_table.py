@@ -8,12 +8,15 @@ the hurtbox (stage C run 20261002_083740: 23 % of side slashes hit, 0 % of up-sl
 oracle view). This builds, from oracle recordings, the bounding box of the boss's enabled colliders relative to its
 position (x mirrored when the sprite is flipped) per observable phase (core.bosses BELL_BEAST.phases) and per 0.1 s
 of time in the phase, as median and 10th / 90th percentiles, to knowledge/1.0.30000/enemies/BellBeast_hurtbox.json.
-The vision view places the median box at the observed position (Forecast.boss_box / body_shape).
+With a single enabled collider (attacks: PolyCollider, LeapCollider) the median polygon too ("poly", vertex-wise):
+in a leap the collider's box covers corners the 9-vertex shape does not, and side slashes under a leap scored as
+hits that never landed (stage C run 20261002_093052: 332 predicted, 0 hit). The vision view places the polygon, else
+the median box, at the observed position (Forecast.body_polys).
 """
 import argparse
 import json
 import sys
-from collections import defaultdict
+from collections import Counter, defaultdict
 from pathlib import Path
 
 import numpy as np
@@ -27,6 +30,7 @@ def build(runs: list[Path], max_frames: int) -> dict:
     from ssbot.record.recorder import RecordingReader
     phases = dict(BELL_BEAST.phases)
     acc = defaultdict(list)
+    polys = defaultdict(list)
     n = 0
     prev_state, t_in = None, 0
     for run in runs:
@@ -52,7 +56,13 @@ def build(runs: list[Path], max_frames: int) -> dict:
                 x0, x1 = v[:, 0].min() - px, v[:, 0].max() - px
                 if b.get("flipX"):
                     x0, x1 = -x1, -x0
-                acc[(ph, min(int(t_in / 60 / BIN_S), 30))].append((x0, v[:, 1].min() - py, x1, v[:, 1].max() - py))
+                key = (ph, min(int(t_in / 60 / BIN_S), 30))
+                acc[key].append((x0, v[:, 1].min() - py, x1, v[:, 1].max() - py))
+                if len(vs) == 1:      # the polygon itself, relative and unflipped: its box alone over-credits
+                    q = vs[0] - (px, py)
+                    if b.get("flipX"):
+                        q = q * (-1.0, 1.0)
+                    polys[key].append(q)
                 n += 1
                 if n >= max_frames:
                     break
@@ -65,6 +75,11 @@ def build(runs: list[Path], max_frames: int) -> dict:
             "n": len(a), "median": np.round(np.median(a, axis=0), 3).tolist(),
             "p10": np.round(np.percentile(a, 10, axis=0), 3).tolist(),
             "p90": np.round(np.percentile(a, 90, axis=0), 3).tolist()}
+        qs = polys.get((ph, b)) or []
+        if qs:
+            nv = Counter(len(q) for q in qs).most_common(1)[0][0]
+            same = np.array([q for q in qs if len(q) == nv])
+            out["phases"][ph][str(b)]["poly"] = np.round(np.median(same, axis=0), 3).tolist()
     return out
 
 

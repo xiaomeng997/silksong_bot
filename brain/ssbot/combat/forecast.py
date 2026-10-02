@@ -308,8 +308,24 @@ class Forecast:
             return px + x0, py + y0, px + x1, py + y1
         return _body_box(b)
 
+    def _table_entry(self) -> dict | None:
+        tab, st = self.fc.hurtbox, self.fc.tracker.state
+        if self.fc.view == ORACLE or not tab or st not in tab or self.fc.tracker.t_entry is None:
+            return None
+        bins = tab[st]
+        k = str(min(int(max(0.0, self.origin_t - self.fc.tracker.t_entry) / 0.1), max(int(x) for x in bins)))
+        return bins.get(k) or bins[min(bins, key=lambda x: abs(int(x) - int(k)))]
+
     def body_polys(self) -> tuple[np.ndarray, np.ndarray]:
-        """body_shape of the boss, or the vision view's table box as a rectangle (scoring)."""
+        """body_shape of the boss, or in the vision view the hurtbox table's polygon (else its box) for the phase
+        at the observed position, mirrored with the sprite (scoring)."""
+        ent = self._table_entry()
+        if ent is not None and ent.get("poly") and self.boss is not None:
+            q = np.asarray(ent["poly"], np.float64)
+            if self.boss.flip_x:
+                q = q * (-1.0, 1.0)
+            q = q + self.boss.pos.v
+            return q, np.array([0, len(q)], np.int64)
         if self.fc.view != ORACLE and self.fc.hurtbox:
             bb = self._hurt_box()
             if bb is not None:
