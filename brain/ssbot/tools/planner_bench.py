@@ -53,7 +53,8 @@ def main(argv: list[str] | None = None) -> int:
     terrain = terrain or Terrain2D.empty()
     model = BossModel.load()
     view = ORACLE if a.view == "oracle" else VISION_EQUIVALENT
-    fc = Forecaster(model, view, margin=(0.15, 0.25))
+    fc = Forecaster(model, view, margin=(0.15, 0.25), comfort=(0.25, 0.25))
+    fc.no_hurtbox = load_playbook().no_hurtbox
     pb = load_playbook()
     tac = Tactics(pb)
     planner = Planner(params, terrain, PlannerConfig(threads=a.threads))

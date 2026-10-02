@@ -168,8 +168,10 @@ def load_attempts(run_dir: Path) -> list[dict]:
     return rows
 
 
-def summary(run_dir: Path) -> dict:
-    rows = load_attempts(run_dir)
+def summary(run_dir: Path, more: list[Path] | None = None, write: bool = True) -> dict:
+    """Outcome counts and the planner's numbers of one run (written to <run>/summary.json), or of several pooled
+    (`summary RUN [RUN ...]`, printed only)."""
+    rows = load_attempts(run_dir) + [r for d in more or () for r in load_attempts(d)]
     out: dict = {"episodes": len(rows), "outcomes": dict(Counter(r["outcome"] for r in rows))}
     if rows:
         attacks: Counter = Counter()
@@ -201,7 +203,8 @@ def summary(run_dir: Path) -> dict:
             out["plan_ms_p99_max"] = p99[-1] if p99 else None
             out["quit_reasons"] = dict(Counter((r.get("reason") or "")[:80] for r in rows
                                                if r["outcome"] == "QUIT").most_common(10))
-    (run_dir / "summary.json").write_text(json.dumps(out, indent=1), encoding="utf-8")
+    if write and not more:
+        (run_dir / "summary.json").write_text(json.dumps(out, indent=1), encoding="utf-8")
     print(json.dumps(out, indent=1))
     return out
 
@@ -228,12 +231,13 @@ def main(argv: list[str] | None = None) -> int:
             p.add_argument("--run-dir", required=True)
     s = sub.add_parser("summary")
     s.add_argument("run_dir", type=Path)
+    s.add_argument("more", type=Path, nargs="*", help="more runs pooled with the first")
     a = ap.parse_args(argv)
     if a.cmd == "run":
         return run(a)
     if a.cmd == "_worker":
         return worker(a)
-    summary(a.run_dir)
+    summary(a.run_dir, a.more)
     return 0
 
 

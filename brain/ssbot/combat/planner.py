@@ -67,6 +67,7 @@ DOWN = (-0.69, 1.41, -1.96, 0.32)
 SPEAR = (0.3, 11.0, -0.8, 0.8)
 SPEAR_DELAY_F = 16             # Silkspear antic 0.26 s before the needle flies
 ACTIVE_F = 6                   # frames an attack box counts from its start (scoring)
+COMFORT_FRAMES = 24           # the comfort check covers the first 0.4 s after the prefix
 NO_CONTROL_MODES = (kin.M_HURT_FREEZE, kin.M_HURT_RECOIL, kin.M_CAST, kin.M_BIND, kin.M_LOCKED)
 
 
@@ -187,8 +188,10 @@ class Planner:
         S2 = S.copy()
         if f.fc.query_c is not None:
             rows = np.flatnonzero(ok & ~S)
+            tc = min(T1, COMFORT_FRAMES + P + 1)      # clearance matters for the drift of the next frames
             if len(rows):
-                S2[rows] = self._contacts(f, roll.bound[rows], tk, skip[rows], comfort=True).any(axis=1)
+                S2[rows] = self._contacts(f, roll.bound[rows, :tc], tk[:tc], skip[rows, :tc], comfort=True
+                                          ).any(axis=1)
         t3 = time.perf_counter()
         hz = np.zeros(N, bool)
         hz_soft = np.zeros(N, bool)
