@@ -68,7 +68,7 @@ import numpy as np
 
 from ssbot.combat.boss_model import TAIL, Anchor, BossModel
 from ssbot.combat.fastquery import query_par
-from ssbot.combat.pogo_targets import TargetTracker
+from ssbot.combat.pogo_targets import TargetTracker, simulate
 from ssbot.core.worldstate import ORACLE, VISION_EQUIVALENT, Entity, Ev, WorldState
 from ssbot.knowledge import hitbox_tables as hb
 from ssbot.safety.hits_to_death import SupportEvent, SupportSet
@@ -79,7 +79,12 @@ SUP_HORIZON_S = 0.8          # what the supervisor's support covers (hits_to_dea
 VE_ENTRY_SLACK = 1           # bins of slack on an observable phase's entry (a transition frame shows a clip early)
 MAX_NODES = 400
 HIDDEN, UNKNOWN = "hidden", "unknown"
-DROP_BELL = "BoneBeast DropBell"   # world-fixed hazards with self templates (entities.<tk>.self_template)
+DROP_BELL = "BoneBeast DropBell"
+# the exact path's time slack: a hit lands in the physics step after the recorded position (fixture hit 62131: the bell
+# 0.11 u short of the hurtbox in the hit frame's STATE), and hit-stop frames still step (game time vs steps, 0.37 u)
+DET_SLACK_S = (-0.04, -0.02, 0.0, 0.02, 0.04)
+DET_STATES = frozenset({"Drop", "Air", "Bounce Up", "Bounce Air", "Submerge", "Tink Right", "Tink R Min", "Tink Left",
+                        "Tink L Min", "Tink D", "Tink Right 2", "Tink R Min 2", "Tink Left 2", "Tink L Min 2", "Tink D 2"})   # world-fixed hazards with self templates (entities.<tk>.self_template)
 REST_STATES = ("Init", "Dormant")
 BELL_TTL_S = 8.0                   # a disarmed bell (left the export, back to Dormant) is forgotten after this
 
@@ -171,6 +176,7 @@ class Forecast:
         self.known = known
         self.roots = roots
         self.boss = boss
+        self.det: list = []           # drop bells on exact paths (Forecaster._det_bell)
         kids = {}
         for n in nodes:
             kids.setdefault(n.parent, []).append(n.id)
@@ -208,13 +214,45 @@ class Forecast:
         """[N, T] bool: the hurtbox (grown by the forecaster's margin) centred at (x, y) [N, T] at tk [T] game s from
         the origin overlaps some support tube. comfort: against the templates grown by the comfort margin too (the
         planner's preference for clearance; Forecaster(comfort=...))."""
-        return self._occ(self.placements, x, y, np.asarray(tk, np.float64), comfort)
+        tk = np.asarray(tk, np.float64)
+        out = self._occ(self.placements, x, y, tk, comfort)
+        if self.det:
+            out |= self._det_occ(np.asarray(x, np.float64), np.asarray(y, np.float64), tk, comfort)
+        return out
+
+    def _det_occ(self, x, y, tk: np.ndarray, comfort: bool = False, exclude: str | None = None) -> np.ndarray:
+        """Contact with the drop bells on exact paths (Forecaster._det_bell): the hurtbox grown like the templates'
+        dilation (comfort: and the comfort margin) meets the bell's circle on either bounce branch."""
+        out = np.zeros(np.shape(x), bool)
+        hx, hy = self.fc.half
+        if comfort and self.fc.comfort is not None:
+            hx, hy = hx + self.fc.comfort[0], hy + self.fc.comfort[1]
+        for sp, bx, by, vx, vy, nb, rest, tk_ in self.det:
+            if exclude is not None and tk_.endswith(exclude):
+                continue
+            sides = (1, -1) if nb < len(sp.bounces) and sp.bounces[nb].get("vx") == "random" else (0,)
+            for sd in sides:
+                for dt in DET_SLACK_S:
+                    t = np.maximum(tk + dt, 0.0)
+                    if rest is not None:
+                        cx, cy = np.full(len(tk), bx), np.full(len(tk), by)
+                        ok = t <= rest
+                    else:
+                        cx, cy, ok = simulate(sp, bx, by, vx, vy, nb, None, t, side=sd)
+                    dx = np.maximum(np.abs(x - cx) - hx, 0.0)
+                    dy = np.maximum(np.abs(y - cy) - hy, 0.0)
+                    out |= ((dx * dx + dy * dy) <= sp.r * sp.r) & ok
+        return out
 
     def occupied_without(self, x, y, tk, exclude: str) -> np.ndarray:
         """occupied() without the placements whose only source is the entity type `exclude` (a bell disarmed by a
         down attack: its DamageHero cooldown; a placement shared with other sources still counts)."""
         pl = [p for p in self.placements if not (p.sources and all(src.endswith(exclude) for src in p.sources))]
-        return self._occ(pl, x, y, np.asarray(tk, np.float64))
+        tk = np.asarray(tk, np.float64)
+        out = self._occ(pl, x, y, tk)
+        if self.det:
+            out |= self._det_occ(np.asarray(x, np.float64), np.asarray(y, np.float64), tk, exclude=exclude)
+        return out
 
     def node_hits(self, x, y, tk) -> np.ndarray:
         """[nodes, N] bool: contact with each node's own placements."""
@@ -869,6 +907,7 @@ class Forecaster:
         for r in roots:
             self._walk(r.state, r.e_lo, r.e_hi, replace(r.ctx), r.p, -1, H, nodes, placements, r.current, 0)
         tr = self.tracker
+        det: list = []
         if tr.bells:
             nid = len(nodes)
             nodes.append(Node(nid, "bells", 0.0, 0.0, None, 1.0, -1, None))
@@ -878,6 +917,8 @@ class Forecaster:
                 key = f"{hb.SUPPORT}ent/{tk}/self"
                 if key not in self.meta:
                     continue
+                if self._det_bell(iid, det):
+                    continue                  # falling or bounced: its exact path (two branches) replaces the template
                 t0, t1 = self.meta[key]
                 for j in range(-k, k + 1):
                     e = t_arm + j * BIN - origin
@@ -891,7 +932,30 @@ class Forecaster:
                         placements, death_tail=death)
         if not roots and self.tracker.dead:
             known = True
-        return Forecast(self, origin, H, nodes, placements, known, roots, self.boss)
+        out = Forecast(self, origin, H, nodes, placements, known, roots, self.boss)
+        out.det = det
+        return out
+
+    def _det_bell(self, iid: int, det: list) -> bool:
+        """ORACLE: an armed drop bell already falling (Drop, Air) or bounced (Bounce Air, Submerge) has an exact path
+        (pogo_targets.simulate, centre error 0.000 u over 0.8 s in game time on 2 recordings): it is support as two
+        branches, one per bounce side (p 0.5 each; the bounce speed is fixed, 4 u/s), or one once it bounced, instead
+        of the logged union of its self template."""
+        if self.view != ORACLE or self._ws is None:
+            return False
+        e = next((x for x in self._ws.entities if x.id == iid), None)
+        if e is None or not e.fsm or e.vel.conf <= 0:
+            return False
+        sp = self.targets.spec_of(e.type_key.v)
+        st = e.fsm[0][1]
+        if sp is None or st not in DET_STATES:
+            return False
+        rest = None
+        if st == "Submerge":
+            rest = max(0.0, 0.75 - e.fsm[0][2])
+        det.append((sp, float(e.pos.v[0]), float(e.pos.v[1]), float(e.vel.v[0]), float(e.vel.v[1]),
+                    int(sp.next_bounce.get(st, len(sp.bounces))), rest, e.type_key.v))
+        return True
 
     def _place(self, fam: str, state: str, e_lo: float, e_hi: float, ctx: Ctx, node: int, H: float,
                out: list[Placement], death_tail: bool = False) -> None:

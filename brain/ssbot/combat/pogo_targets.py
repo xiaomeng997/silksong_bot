@@ -76,19 +76,23 @@ def load_registry(path: Path | str | None = None) -> list[TargetSpec]:
 
 
 def simulate(spec: TargetSpec, x: float, y: float, vx: float, vy: float, nb: int, life_s: float | None,
-             tk: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Centre path sampled at tk (s) and whether it is determined there."""
+             tk: np.ndarray, side: int = 0) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Centre path sampled at tk (s, game time) and whether it is determined there. side +-1: the branch of a random
+    bounce (a drop bell's) taken to that side, so the path stays determined (one of two branches, p 0.5 each).
+    Recordings 20261001_122249 i0_002 / i3_002, time from the game's physics steps: centre error 0.000 u over 0.8 s for
+    attack bells (Launch, Launched Up through the first bounce) and drop bells (Air, Bounce Air), n 7,532 starts."""
     t_end = float(tk[-1]) if len(tk) else 0.0
     n = int(math.ceil(t_end / STEP_S)) + 2
     ts = np.arange(n) * STEP_S
     xs, ys, det = np.empty(n), np.empty(n), np.ones(n, bool)
     known = True
     gone = False
+    resting = False
     for i in range(n):
         if life_s is not None and ts[i] > life_s:
             gone = True
         xs[i], ys[i], det[i] = x, y, known and not gone
-        if gone:
+        if gone or resting:
             continue
         vy -= spec.g * STEP_S
         x += vx * STEP_S
@@ -96,13 +100,17 @@ def simulate(spec: TargetSpec, x: float, y: float, vx: float, vy: float, nb: int
         if spec.ground_y is not None and y <= spec.ground_y and vy < 0 and nb < len(spec.bounces):
             b = spec.bounces[nb]
             if b.get("stop"):
-                gone = True
+                # it stays where it landed for rest_s (a drop bell's Submerge, collider still on), then leaves
+                y, vx, vy = spec.ground_y, 0.0, 0.0
+                life_s = min(life_s if life_s is not None else math.inf, ts[i] + float(b.get("rest_s", 0.0)))
+                nb = len(spec.bounces)
+                resting = True
                 continue
             y = spec.ground_y
             vy = float(b["vy"])
             if b.get("vx") == "random":
-                vx = float(b.get("vx_mag", 0.0))
-                known = False
+                vx = float(b.get("vx_mag", 0.0)) * (side if side else 1)
+                known = known and side != 0
             elif b.get("vx") != "keep":
                 vx = math.copysign(float(b["vx"]), vx if vx != 0 else 1.0)
             if not b.get("repeat"):
