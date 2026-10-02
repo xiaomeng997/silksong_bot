@@ -251,3 +251,11 @@
 - `docs/facts/1.0.30000/cstate_schema.json`（从反编译源码推出的 HeroControllerStates 字段顺序，92 bool + 4 int）与 oracle RPC `schema.cstate` 完全一致。
 - 读档后游戏可能还要把主角滑回 savestate 位置：最多 17 帧、每帧约 0.63 u，期间速度为 0、`hero_accepting_input` 和 `can.cast` 均为真；Bell Beast 首轮数据中 85 个开场里有 4 个在这段时间按丝矛被吞。回合框架改为等主角位置连续 10 帧不变再开始（`ssbot.train.episode.wait_settled`）。
 - Bell Beast 行为采集首轮（`20261001_122249`，4 实例 3.5 h，data 策略）：263 场打到苏醒，241 CLEAR、22 超时（240 s），开场失败 17 场（旧代码）；每场约 175 s；四类攻击各 ≥ 200 次（狂暴 263）。
+
+## M2：Bell Beast 门槛（oracle，2026-10-02）
+
+- **通过**：代码固定在 0c053d9（独立工作区 C:\ssbot\gate_0c053d9），4 实例，随机起点（种子 50300–51000，各段不重叠），`--real-quit 0.2`，规划器 oracle 视图。
+- 有效 529 场：**CLEAR 516（97.5 %）**，QUIT 13（全部为挨一下后的 Q6 / Q5 按规则退出），**WOULD_DIE 0**，STUCK 0。击杀用时约 55–80 s（你的录像 69 s）。
+- 不计入：HARNESS_FAIL 5（第 5 段，离线分析抢 CPU，4 个实例同时触发失联看门狗暂停）；第 11 段 3 号实例启动失败（上一段最后一场击杀后游戏进入"丝之心"记忆场景，读档函数等主菜单超时）。两者都是测试框架问题，待修。
+- 旁证：更早的版本 6c64421（171 场）+ ab7597b（68 场）共 239 场，238 CLEAR、0 WOULD_DIE；不与门槛混计（证据按代码指纹分开）。
+- 运行目录：C:\ssbot\data\runs\m2\20261002_123347 … 20261002_150453（*_eval_planner_oracle）。
