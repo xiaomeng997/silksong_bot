@@ -116,7 +116,7 @@ class PlannerConfig:
     #                            rollout of the chosen plan: audit runs only, SSBOT_PREDICT_LOG=1)
     attack_model: str = "v2"
     release_latency: int = 4   # frames a planned jump release must lie ahead to be moved (the path latency, 2-4)
-    pogo_k: int = 48           # fine-grid pogo candidates kept per tick (pruned by the boss's predicted path)
+    pogo_k: int = 32           # fine-grid pogo candidates kept per tick (pruned by the boss's predicted path)
     pogo_lanes_k: int = 16     # pogo plans checked lane by lane per tick (the rest are rejected)   # "v1": the first attack windows and no slash recoil (the audit's before)
     tail_k: int = 2            # safe candidates checked for a way on beyond the horizon (0: off; one chunk)
 

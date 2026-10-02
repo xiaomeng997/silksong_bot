@@ -178,9 +178,9 @@ LONG_FIRST = ("WAIT", "MOVE(L)", "MOVE(R)", "JUMP(48)N", "JUMP(48)L", "JUMP(48)R
 def build_long(T: int) -> CandidateSet:
     """The adaptive-horizon set (M2 plan: the horizon runs to the end of a committed long attack): dodging only, over
     T frames (up to 2 s): waits of 4-32 frames before a full jump in place, or 8-24 before one with a side key, runs
-    and stops, and the pogo macro (low hops with an early down press and a second one after the bounce). With the
-    standard 0.8 s horizon a jump that clears the first half of a charge looked safe and came down on its second half
-    (live run 20261002_045049: 5 of 5 charge hits); 6 x 46 = 276 candidates."""
+    and stops (the pogo macro is added per tick from pogo_grid). With the standard 0.8 s horizon a jump that clears
+    the first half of a charge looked safe and came down on its second half (live run 20261002_045049: 5 of 5 charge
+    hits); 6 x 22 = 132 candidates."""
     firsts = [x for x in _first_pieces() if x.name in LONG_FIRST]
     n = T - FIRST
     conts = [Piece("idle", _seq(n), frozenset({Prim.WAIT}))]
@@ -203,22 +203,8 @@ def build_long(T: int) -> CandidateSet:
             m[w:] = DIRS[d]
             m[w:w + 48] |= B_JUMP
             conts.append(Piece(f"wait{w}_jump{d}", m, frozenset({Prim.JUMP, Prim.WAIT, Prim.MOVE})))
-    # the pogo off a charge (the person: a LOW jump and an EARLY down press, against where the boss will be when the
-    # spike is out, then a second down attack after the bounce): jump holds 6 / 11 frames, the down press 8 or 12
-    # frames into the jump, a second press 22 frames after the first. The planner predicts the bounce where the spike
-    # meets the boss's predicted hurtbox and allows the plan only when every timing lane connects (Planner._hit_effects)
-    for d in ("L", "R"):
-        for w in (0, 10, 20):
-            for h in (6, 11):
-                for a in (8, 12):
-                    m = _seq(n)
-                    m[w:w + h] |= B_JUMP
-                    m[w + a:] |= DIRS[d]
-                    for a2 in (a, a + 22):
-                        m[w + a2:w + a2 + 6] |= B_DOWN
-                        m[w + a2 + 1:w + a2 + 1 + PRESS] |= B_ATTACK
-                    conts.append(Piece(f"wait{w}_hop{h}_ds{a}{d}", m,
-                                       frozenset({Prim.JUMP, Prim.WAIT, Prim.MOVE, Prim.ATTACK_DOWN})))
+    # the pogo macro (low hops, early down press, a second press after the bounce) comes from pogo_grid, pruned per
+    # tick by the boss's predicted path (Planner._pogo_pick): a static set of hops cost 144 candidates every tick
     N = len(firsts) * len(conts)
     cmd = np.zeros((N, T), np.int64)
     first = np.zeros(N, np.int64)
