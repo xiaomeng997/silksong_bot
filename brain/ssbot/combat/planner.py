@@ -68,6 +68,7 @@ import numba
 import numpy as np
 
 from ssbot.combat import candidates as cmod
+from ssbot.combat import pogo_targets as pt
 from ssbot.combat.forecast import body_shape, Forecast
 from ssbot.combat.holdfilter import hold_filter_jit
 from ssbot.combat.safety_filter import REASONS, FilterContext, hazard_flags, unpausable, veto
@@ -222,6 +223,7 @@ class Planner:
         self._audit = (np.zeros(0, np.int64), np.zeros(0, np.int64), np.zeros((0, 4)))
         self.last_pogo = 0            # candidates with a predicted bounce in the last tick
         self.last_recoil = 0          # ... with a predicted nail recoil
+        self.last_bell_pogo = 0       # ... bouncing off a registry target (a bell)
         self._pogo_ok = np.zeros(0, bool)
         self.pogo_log = {"generated": 0, "lane_miss": 0, "accepted": 0}   # last tick's pogo plans: every lane
         #                                                                     connects or rejected (S)
@@ -455,32 +457,39 @@ class Planner:
         Returns the rollout to score J on (the hit branch where one is predicted)."""
         self.last_pogo = 0
         self.last_recoil = 0
+        self.last_bell_pogo = 0
         self._fx_ev = None
-        self.pogo_log = {"generated": 0, "lane_miss": 0, "accepted": 0}
+        self.pogo_log = {"generated": 0, "lane_miss": 0, "accepted": 0, "bell": 0}
         self._pogo_ok = np.zeros(len(latched), bool)
         modes = roll.mode
         if not (((roll.flags & F_ATTACKING) != 0).any() or (modes == M_DS_SPIKE).any()):
             return roll
-        boss, okb = f.boss_box(tk)
-        if not okb.any():
+        tgts = self._targets(f, tk)
+        if not tgts:
             return roll
-        polys, starts = f.body_polys()
-        b0 = _box_of(polys) if len(polys) else boss[0]
-        base = np.array([b0[0], b0[1]])
         face0 = 1 if start.reshape(kin.K, -1)[kin.FACE, 0] >= 0 else -1
+        win = WINDOWS[self.cfg.attack_model]
         N, T = latched.shape
         ev = np.zeros((N, T), np.int64)
         cur = _View(roll.box, roll.flags, roll.mode, roll.bound, roll.flags_all)
         after = np.full(N, -1, np.int64)
         rows_all = np.zeros(N, bool)
+        pogo_tgt = np.full(N, -1, np.int64)      # the target of a row's first predicted bounce (0: the boss)
         for _ in range(2):
             hit_f = np.full(N, -1, np.int64)
             kind = np.zeros(N, np.int64)
-            _first_hits(np.ascontiguousarray(cur.box), np.ascontiguousarray(cur.flags),
-                        np.ascontiguousarray(cur.mode), np.ascontiguousarray(latched), face0,
-                        np.ascontiguousarray(boss, np.float64), np.ascontiguousarray(okb),
-                        np.ascontiguousarray(polys, np.float64), np.ascontiguousarray(starts, np.int64), base, after,
-                        hit_f, kind, WINDOWS[self.cfg.attack_model])
+            tsel = np.full(N, -1, np.int64)
+            cb, cf, cm = (np.ascontiguousarray(cur.box), np.ascontiguousarray(cur.flags),
+                          np.ascontiguousarray(cur.mode))
+            for ti, g in enumerate(tgts):
+                hf = np.full(N, -1, np.int64)
+                kd = np.zeros(N, np.int64)
+                _first_hits(cb, cf, cm, np.ascontiguousarray(latched), face0, g.box, g.ok, g.polys, g.starts, g.base,
+                            after, hf, kd, win)
+                if not g.recoil:
+                    hf[kd != 3] = -1
+                better = (hf >= 0) & ((hit_f < 0) | (hf < hit_f))
+                hit_f[better], kind[better], tsel[better] = hf[better], kd[better], ti
             if self.cfg.attack_model == "v1":
                 hit_f[kind != 3] = -1      # the first model predicted the pogo only
             rows = np.flatnonzero(hit_f >= 0)
@@ -491,7 +500,10 @@ class Planner:
             bits = np.where(k == 3, kin.EV_POGO, np.where(k == 2, kin.EV_RECOIL_DOWN,
                                                           np.where(k == 1, kin.EV_RECOIL_L, kin.EV_RECOIL_R)))
             ev[rows, j] |= bits
+            pr = rows[(k == 3) & (pogo_tgt[rows] < 0)]
+            pogo_tgt[pr] = tsel[pr]
             self.last_pogo += int((k == 3).sum())
+            self.last_bell_pogo += int(((k == 3) & (tsel[rows] > 0)).sum())
             self.last_recoil += int((k <= 1).sum())
             after[rows] = hit_f[rows]
             rows_all[rows] = True
@@ -510,9 +522,10 @@ class Planner:
             s_hit[sub] = self._contacts(f, cur.bound[sub], tk, skip).any(axis=1)
             S[sub] |= s_hit[sub]
         # a pogo plan stands only if the down spike connects in every timing lane (DESIGN 3.5.6: a miss lands the hero
-        # on the boss): its lanes rolled out with the bounce, a lane whose spike meets no hurtbox rejects it (S)
+        # on the boss, or on the bell): its lanes rolled out with the bounce, a lane whose first spike meets no hurtbox
+        # (for a bell: its certain circle on its predicted path) rejects it (S)
         pg_all = np.flatnonzero(rows_all & ((ev & kin.EV_POGO) != 0).any(axis=1))
-        self.pogo_log = {"generated": int(len(pg_all)), "lane_miss": 0, "accepted": 0}
+        self.pogo_log = {"generated": int(len(pg_all)), "lane_miss": 0, "accepted": 0, "bell": 0}
         # the lanes only for those the bounce branch leaves safe (the rest are rejected anyway), at most pogo_lanes_k
         # of them (the earliest bounces): the per-lane check costs about 0.1 ms a candidate
         pg = pg_all[~s_hit[pg_all]]
@@ -526,11 +539,14 @@ class Planner:
             rl = kin.rollout(start, latched[pg], self.params, self.terrain, events=ev[pg], variants=self.cfg.variants,
                              lanes=True)
             conn = np.zeros(len(pg), np.bool_)
-            _lanes_connect(np.ascontiguousarray(rl.var_box), np.ascontiguousarray(rl.var_flags),
-                           np.ascontiguousarray(rl.var_mode), np.ascontiguousarray(latched[pg]), face0,
-                           np.ascontiguousarray(boss, np.float64), np.ascontiguousarray(okb),
-                           np.ascontiguousarray(polys, np.float64), np.ascontiguousarray(starts, np.int64), base,
-                           WINDOWS[self.cfg.attack_model], conn)
+            for ti in np.unique(pogo_tgt[pg]):
+                g = tgts[max(int(ti), 0)]
+                idx = np.flatnonzero(pogo_tgt[pg] == ti)
+                cn = np.zeros(len(idx), np.bool_)
+                _lanes_connect(np.ascontiguousarray(rl.var_box[idx]), np.ascontiguousarray(rl.var_flags[idx]),
+                               np.ascontiguousarray(rl.var_mode[idx]), np.ascontiguousarray(latched[pg[idx]]), face0,
+                               g.cbox, g.cok, g.cpolys, g.cstarts, g.cbase, win, cn)
+                conn[idx] = cn
             for n, c in enumerate(pg):
                 ok_all = bool(conn[n])
                 if not ok_all:
@@ -541,7 +557,34 @@ class Planner:
                     self.pogo_log["accepted"] += int(not S[c])
                     if not S[c]:
                         self._pogo_ok[c] = True
+                        self.pogo_log["bell"] += int(pogo_tgt[c] > 0)
         return cur
+
+    def _targets(self, f: Forecast, tk: np.ndarray) -> list["_Target"]:
+        """What an attack can hit in the rollout: the boss's predicted hurtbox (target 0, when drawn), then the
+        registry targets on their predicted paths (pogo_targets: bells). Each with its certain form for the pogo gate
+        (the boss's: the same; a target's: its circle minus CERT_MARGIN_U, CERT_MAX_S ahead)."""
+        out = []
+        boss, okb = f.boss_box(tk)
+        polys, starts = f.body_polys()
+        b0 = _box_of(polys) if len(polys) else boss[0]
+        base = np.array([b0[0], b0[1]])
+        bt = _Target(np.ascontiguousarray(boss, np.float64), np.ascontiguousarray(okb),
+                     np.ascontiguousarray(polys, np.float64), np.ascontiguousarray(starts, np.int64), base)
+        out.append(bt)
+        paths = f.target_paths(tk) if hasattr(f, "target_paths") else []
+        for pth in paths:
+            P0, S0, B0 = pt.octagon(pth.r)
+            m = pt.CERT_MARGIN_U
+            P1, S1, B1 = pt.octagon(pth.r - m)
+            cbox = np.ascontiguousarray(pth.box + np.array([m, m, -m, -m]))
+            spec = f.fc.targets.spec_of(pth.type_key) if hasattr(f.fc, "targets") else None
+            out.append(_Target(np.ascontiguousarray(pth.box), np.ascontiguousarray(pth.ok), P0, S0, B0, cbox,
+                               np.ascontiguousarray(pth.cert), P1, S1, B1, spec.recoil if spec else True,
+                               pth.type_key))
+        if not okb.any() and len(out) == 1:
+            return []
+        return out
 
     def warm_kernels(self) -> None:
         """Compile the hit-effect and prediction kernels and the lanes rollout before a fight: they run only when the
@@ -860,6 +903,21 @@ def _lanes_connect(var_box, var_flags, var_mode, lat, face0, boss, okb, polys, s
                 ok = False
                 break
         out[c] = ok
+
+
+class _Target:
+    """Something an attack can hit in the rollout, in the kernels' form: per-frame box [T, 4] and ok [T], the shape's
+    polygons around base (moved by box - base); c*: the certain form the pogo gate uses."""
+
+    def __init__(self, box, ok, polys, starts, base, cbox=None, cok=None, cpolys=None, cstarts=None, cbase=None,
+                 recoil: bool = True, name: str = "boss"):
+        self.box, self.ok, self.polys, self.starts, self.base = box, ok, polys, starts, base
+        self.cbox = box if cbox is None else cbox
+        self.cok = ok if cok is None else cok
+        self.cpolys = polys if cpolys is None else cpolys
+        self.cstarts = starts if cstarts is None else cstarts
+        self.cbase = base if cbase is None else cbase
+        self.recoil, self.name = recoil, name
 
 
 class _View:

@@ -1,0 +1,45 @@
+# Hit targets other than the boss's body: what a hero attack does on them (ssbot.combat.pogo_targets).
+# Keyed by type_key prefix. Every attack kind that meets an enabled collider of a target in `states`:
+#   down spike -> the standard DownspikeBounce with its i-frames (HeroDownAttack: any HERO_ATTACK-layer collider, or a
+#                 TinkEffect hit response, bounces unless a NonBouncer is active);
+#   side / up  -> the hero recoils as from the boss when `recoil` (TinkEffect.RecoilHero);
+#   damage_cooldown_s: the target's own DamageHero cannot hurt for this long after a down-attack contact
+#                 (HeroDownAttack.ContinueBounceTrigger -> DamageHero.SetCooldown(0.5); HeroBox ignores it).
+# physics: the path the target follows from its observed state (Rigidbody2D, gravity g = 60 x gravity_scale, 50 Hz
+#   physics steps), its ground contacts handled by the FSM: `bounces` in order, the state names give the index of the
+#   next one. A bounce sets vx to `vx` (a number: that speed in the current direction; "keep"; "random": +-vx_mag,
+#   the side unknown until it happens) and vy; `stop` ends the path (the target leaves).
+# Sources: decompiled HeroDownAttack / TinkEffect / DamageHero / HeroBox (1.0.30000), the Control FSMs of the scene
+#   bone_05_boss (UnityPy dump, 2026-10-02), recordings 20261001_122249_BellBeast_data (contacts: AtkBell Launch rising
+#   at vy 28.8 and In Air bounced the hero, vy 17.4).
+BoneBeast AtkBell:
+  shape: {circle: 1.274}
+  states: [Launch, Launched Up, First Bounce, In Air, Bounce]   # SetCircleCollider on at Launch, off at Dormant
+  recoil: true
+  damage_cooldown_s: 0.5
+  physics:
+    g: 66.0
+    ground_y: 2.9635          # First Bounce / Bounce SetPosition (local Ground Y -4.32)
+    next_bounce: {Launch: 0, Launched Up: 0, First Bounce: 1, In Air: 1, Bounce: 1}
+    bounces:
+      - {vx: 12.0, vy: 14.0}          # First Bounce: X Speed (+-1, L / R) x 12
+      - {vx: keep, vy: 14.0, repeat: true}
+    life_after_first_bounce_s: 2.0    # In Air: End Timer > 2 -> Dormant
+BoneBeast DropBell:
+  shape: {circle: 1.274}
+  states: [Drop, Air, Bounce Up, Bounce Air, Tink Right, Tink R Min, Tink Left, Tink L Min, Tink D, Tink Right 2,
+           Tink R Min 2, Tink Left 2, Tink L Min 2, Tink D 2, Submerge]
+  recoil: true
+  damage_cooldown_s: 0.5
+  physics:
+    g: 66.0
+    ground_y: 3.18
+    next_bounce: {Drop: 0, Air: 0, Tink Right: 0, Tink R Min: 0, Tink Left: 0, Tink L Min: 0, Tink D: 0,
+                  Bounce Up: 1, Bounce Air: 1, Tink Right 2: 1, Tink R Min 2: 1, Tink Left 2: 1, Tink L Min 2: 1,
+                  Tink D 2: 1}
+    bounces:
+      - {vx: random, vx_mag: 4.0, vy: 30.0}   # Bounce Up: Bounce X (RandomFloatEither -4 / 4 at Drop), vy 30
+      - {stop: true}                           # Submerge, then Dormant
+  # a side slash (TINK RIGHT / LEFT, Air and Bounce Air only) sets the next bounce's side away from the hitter and
+  # vx to 5-10 that way; a down spike (TINK DOWN) clamps vy <= 0
+  redirect: {side: {bounce_vx: 4.0, vx_min: 5.0, vx_max: 10.0, states: [Air, Bounce Air]}, down: {vy_max: 0.0}}

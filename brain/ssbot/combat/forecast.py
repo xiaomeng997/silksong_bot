@@ -68,6 +68,7 @@ import numpy as np
 
 from ssbot.combat.boss_model import TAIL, Anchor, BossModel
 from ssbot.combat.fastquery import query_par
+from ssbot.combat.pogo_targets import TargetTracker
 from ssbot.core.worldstate import ORACLE, VISION_EQUIVALENT, Entity, Ev, WorldState
 from ssbot.knowledge import hitbox_tables as hb
 from ssbot.safety.hits_to_death import SupportEvent, SupportSet
@@ -332,6 +333,11 @@ class Forecast:
                 x0, y0, x1, y1 = bb
                 return np.array([[x0, y0], [x1, y0], [x1, y1], [x0, y1]], np.float64), np.array([0, 4], np.int64)
         return body_shape(self.boss)
+
+    def target_paths(self, tk: np.ndarray) -> list:
+        """Registry targets (pogo_targets: bells) on their predicted paths, tk seconds from the observation."""
+        ws = self.fc._ws
+        return self.fc.targets.paths(ws, tk) if ws is not None else []
 
     def boss_box(self, tk: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         """Nominal boss hurtbox [T, 4] (x0, y0, x1, y1) and hittable [T] along the most likely path (scoring only):
@@ -820,6 +826,9 @@ class Forecaster:
                 comfort_templates = load_planner_templates(model, (mx + self.comfort[0], my + self.comfort[1]), npz)
             self.query_c = hb.SupportQuery(comfort_templates, hero_half=hb.HERO_HALF_U)
         self.tracker = BossTracker(model, view)
+        # registry hit targets (bells): their predicted paths for the planner's hit effects (pogo off a bell)
+        self.targets = TargetTracker()
+        self._ws: WorldState | None = None
         self.boss: Entity | None = None
         self.no_hurtbox: frozenset[str] = frozenset()     # states / phases with the body box disabled (playbook)
         self.bell_tells = False        # VE: the drop bells' cue is in the view (ObservabilityFilter tells)
@@ -828,6 +837,8 @@ class Forecaster:
 
     def reset(self) -> None:
         self.tracker.reset()
+        self.targets.reset()
+        self._ws = None
         self.boss = None
 
     def notify_wake(self, t_game: float) -> None:
@@ -838,6 +849,8 @@ class Forecaster:
     def update(self, ws: WorldState) -> None:
         self.t = ws.stamp.t_game_s
         self.boss = self.tracker.update(ws)
+        self.targets.update(ws, self.t)
+        self._ws = ws
 
     # ---- the walk -----------------------------------------------------------------------------------------------
 
