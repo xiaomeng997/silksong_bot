@@ -7,21 +7,35 @@ pass. Never submits on Quit: Submit is sent only on a "continue" highlight read 
     cd brain
     ../scripts/uv.cmd run python -m ssbot.tools.launcher -n 1 --detach      # an instance running the new plugin
     ../scripts/uv.cmd run python -m ssbot.probes.m2_exports [--instance 0] [--seed 3] [--skip-menu] [--skip-fight]
+        [--skip-moves] [--quit-prompt]
 
 Checks:
-  rest   act.hf: 22 pending / age entries, ints, age <= 255, latched == act.mask, latched == desired when nothing is
-         pending; hero.alpha in [0, 1); hero.wall two bools; hero.tm has its 15 keys; hero.tags a list; hero.tool_max
-         aligned with hero.tools and >= tool_amounts; room.gates lists both "Threaded Bell Gate"s, off before the fight.
+  every  act.hf: 22 pending / age entries, ints, age <= 255, latched == act.mask, latched == desired when nothing is
+  STATE  pending; hero.alpha >= 0 (nil only when fdt <= 0; frames with alpha >= 1, a long frame whose fixed steps Unity
+         capped or a ScaleTime change of fdt, are counted and may be at most 1%); hero.wall two bools; hero.tm has its
+         15 keys, inv > 0 only while hero.invulnerable; hero.tags a list; hero.tool_max aligned with hero.tools and >=
+         tool_amounts.
+  rest   room.gates lists both "Threaded Bell Gate"s, off before the fight, and room.gates_trunc is false.
   menu   Esc (only while pause.blk == 0) pauses: sel "continue", dim ~0.8, alpha ~1, quit_ok == not (dsq or preload),
          ignore_unpause false once the menu is up, quitting false; Down / Up move sel to "options" / "quit" and back;
          Submit only on a "continue" read back from the oracle unpauses (never on Quit; Esc is the fallback); the
          section stays while the dimmer fades out, then goes nil.
+         --quit-prompt (off by default): Submit on a "quit" read back from the oracle (with quit_ok true) opens the
+         return-to-menu prompt; sel must read "yes" / "no" as Up / Down move between them, quitting stays false, and
+         Esc (never Submit) leaves the prompt and then the menu.
+  moves  at rest, a left dash sets tm.dash_cd to ~DASH_COOLDOWN and it counts down to 0; a slash raises tm.atk_cd
+         and tm.atk_t; a jump raises tm.jump_steps (a FieldRef bound to the wrong member fails one of these).
   fight  hero.tm.inv ~1.0 right after a hit and non-increasing to 0 (unless hit again), recoil ~0.2 then 0; the boss
-         is exported hidden (colliders []) while underground; its first Charge Emerge exports the body box (the tk2d
-         hole fixed in EntityRegistry.SpritesChanged) and no boss hit lands on an empty-collider frame; collider names
-         include "PolyCollider" and "LeapCollider"; "hit" events: every nail hit on the boss is dmg 5, the boss hits
-         add up to its HP loss, exactly one hit takes its hp from > 0 to <= 0 (the killing blow, dead true), and
-         hit.ent is the boss's "ents" iid; room.gates: both gates enabled during the fight and "Wall" listed off.
+         is exported hidden (colliders []) while underground and never hidden once dead (hp <= 0 or Death
+         Broadcast); its first Charge Emerge exports the body box (the tk2d hole fixed in
+         EntityRegistry.SpritesChanged) and no boss hit lands on an empty-collider frame; collider names include
+         "PolyCollider" and "LeapCollider"; "hit" events against the boss's "ents" hp: every change of the exported hp
+         is explained by the hit events of that frame (their largest hp_before is the hp before the frame, their dmg
+         adds up to the change), so a dropped event or a wrong hp fails; every nail hit is dmg 5; exactly one hit
+         takes hp from > 0 to <= 0 (the killing blow, dead true); hit.ent is the boss's "ents" iid; room.gates: both
+         gates enabled during the fight and "Wall" listed off.
+Not exercised (nothing in this fight produces them; unchecked until a probe does): ApplyExtraDamage hits (poison /
+zap tags, DamageEffectTicker), hero.tags entries, a true hero.wall, menu sel "back" / "ok", menu.quitting true.
 """
 import argparse
 import sys
@@ -29,6 +43,7 @@ import threading
 import time
 from collections import Counter, defaultdict
 
+from ssbot.ipc import ents
 from ssbot.ipc.framing import BUTTONS, mask
 from ssbot.ipc.oracle_link import OracleLink
 from ssbot.probes.common import tap
@@ -44,6 +59,9 @@ MENU_KEYS = {"sel", "quit_ok", "dim", "alpha", "ignore_unpause", "quitting"}
 UNDERGROUND = ("Submerged", "Emerge Antic C", "Emerge Antic L", "Burst Antic")
 INVUL_TIME = 1.0          # HeroController.INVUL_TIME (docs/facts/1.0.30000/hero_constants.json)
 RECOIL_DURATION = 0.2
+DASH_COOLDOWN = 0.425     # HeroController.DASH_COOLDOWN (hero_constants.json); set at HeroController.cs:9147
+ALPHA_HIGH_MAX = 0.01     # share of hero STATEs that may have alpha >= 1 (long frames with capped fixed steps)
+DEAD_STATES = ("Death Broadcast",)
 
 
 def check(ok: bool, what: str) -> bool:
@@ -73,6 +91,7 @@ class Collector:
         self.n: Counter = Counter()
         self.bad: Counter = Counter()
         self.example: dict[str, tuple[int, str]] = {}
+        self.trace: list[dict] | None = None     # hero.tm per STATE while the moves checks run
         link.subscribe_state(self._on)
 
     def _fail(self, name: str, f: int, detail: str) -> None:
@@ -93,6 +112,9 @@ class Collector:
             self._validate(s, f)
             if self.recording:
                 self.rows.append(self._row(s, f))
+            if self.trace is not None:
+                hero = s.get("hero") or {}
+                self.trace.append({"f": f, "tm": dict(hero.get("tm") or {})})
 
     def _validate(self, s: dict, f: int) -> None:
         act = s.get("act") or {}
@@ -115,9 +137,17 @@ class Collector:
         if not hero:
             return
         self.n["hero"] += 1
-        a = hero.get("alpha")
-        if not (isinstance(a, float) and 0.0 <= a < 1.0):
+        a, fdt = hero.get("alpha"), s.get("fdt")
+        if a is None:
+            if not (isinstance(fdt, (int, float)) and fdt <= 0):
+                self._fail("hero.alpha", f, f"alpha nil with fdt {fdt!r}")
+        elif not isinstance(a, float) or a < 0.0:
             self._fail("hero.alpha", f, f"alpha {a!r}")
+        elif a >= 1.0:
+            # Unity caps the fixed steps of a long frame (maximumDeltaTime) and a PlayMaker ScaleTime action changes
+            # fdt mid-step: both leave alpha >= 1 legitimately. Counted here, bounded by ALPHA_HIGH_MAX in main().
+            self.n["alpha_high"] += 1
+            self.example.setdefault("alpha_high", (f, f"alpha {a} fdt {fdt}"))
         w = hero.get("wall")
         if not (isinstance(w, list) and len(w) == 2 and all(isinstance(x, bool) for x in w)):
             self._fail("hero.wall", f, f"wall {w!r}")
@@ -128,6 +158,8 @@ class Collector:
             self._fail("hero.tm", f, f"tm {tm!r}")
         elif tm["inv"] < 0 or tm["recoil"] < 0 or tm["recoil"] > RECOIL_DURATION + 1e-4:
             self._fail("hero.tm", f, f"inv {tm['inv']} recoil {tm['recoil']}")
+        elif tm["inv"] > 0 and hero.get("invulnerable") is False:
+            self._fail("hero.tm", f, f"inv {tm['inv']} while hero.invulnerable is false")
         tags = hero.get("tags")
         if not isinstance(tags, list) or any(set(t) != {"kind", "dmg_left", "t_left"} for t in tags):
             self._fail("hero.tags", f, f"tags {tags!r}")
@@ -149,12 +181,11 @@ class Collector:
         g = s.get("game") or {}
         row = {"f": f, "ctl": self.control, "paused": g.get("paused"), "inv": tm.get("inv"), "recoil": tm.get("recoil"),
                "gates": room.get("gates"), "menu": s.get("menu"), "boss": None}
-        for e in s.get("ents") or ():
-            if e.get("type_key") == BOSS:
-                cols = e.get("colliders") or []
-                row["boss"] = {"iid": e.get("iid"), "hidden": e.get("hidden"), "ncol": len(cols), "hp": e.get("hp"),
-                               "kinds": [c.get("kind") for c in cols], "names": [c.get("name") for c in cols]}
-                break
+        e = ents.boss_entity(s.get("ents"), BOSS, include_hidden=True)
+        if e is not None:
+            cols = e.get("colliders") or []
+            row["boss"] = {"iid": e.get("iid"), "hidden": e.get("hidden"), "ncol": len(cols), "hp": e.get("hp"),
+                           "kinds": [c.get("kind") for c in cols], "names": [c.get("name") for c in cols]}
         return row
 
 
@@ -176,6 +207,8 @@ def rest_checks(link: OracleLink, col: Collector) -> bool:
     g0 = gates.get(GATES[0])
     ok &= check(g0 is not None and abs(g0["box"][2] - 69.21) < 0.05,
                 f"left gate box {g0 and [round(x, 2) for x in g0['box']]} (TERRAIN dump: x 67.23-69.21)")
+    trunc = s["room"].get("gates_trunc")
+    ok &= check(trunc is False, f"room.gates_trunc false ({trunc!r})")
     hero = s["hero"]
     print("hero.tm:", hero.get("tm"))
     print("hero.tools / tool_amounts / tool_max:", hero.get("tools"), hero.get("tool_amounts"), hero.get("tool_max"))
@@ -302,6 +335,11 @@ def fight_checks(col: Collector, rec: AttemptRecord) -> bool:
     ok &= check(len(under) > 0 and len(hidden) >= 0.8 * len(under) and not leaks,
                 f"boss exported hidden underground: {len(hidden)}/{len(under)} frames, "
                 f"hidden with colliders {leaks[:5]}")
+    # A dead boss leaves "ents" (EntityRegistry.HiddenPass: hp <= 0 is a corpse, not a dig-in, even though the Bell
+    # Beast keeps isDead false while its FSM runs Death Broadcast).
+    dead_hidden = [r["f"] for r in rows if r["boss"] is not None and r["boss"]["hidden"]
+                   and ((r["boss"]["hp"] is not None and r["boss"]["hp"] <= 0) or r["ctl"] in DEAD_STATES)]
+    ok &= check(not dead_hidden, f"a dead boss is never exported hidden ({len(dead_hidden)} frames {dead_hidden[:5]})")
 
     # first Charge Emerge
     ce = []
@@ -335,12 +373,14 @@ def fight_checks(col: Collector, rec: AttemptRecord) -> bool:
           "src:", dict(Counter(d.get("src") for d in boss_hits)))
     ok &= check(bool(nail) and set(dmg) == {5}, f"every nail hit on the boss is dmg 5 ({dict(dmg)})")
     ok &= check(all(d["dmg"] == d["hp_before"] - d["hp_after"] for _, d in hits), "dmg == hp_before - hp_after")
-    hps = [r["boss"]["hp"] for r in rows if r["boss"] and r["boss"]["hp"] is not None]
-    if boss_hits and hps:
-        first_hp = boss_hits[0]["hp_before"]
-        last_hp = boss_hits[-1]["hp_after"]
-        ok &= check(sum(d["dmg"] for d in boss_hits) == first_hp - last_hp,
-                    f"boss hits add up to its HP loss ({sum(d['dmg'] for d in boss_hits)} vs {first_hp} -> {last_hp})")
+    chain = hp_chain(rows, [(f, d) for f, d in hits if d.get("type_key") == BOSS])
+    print("boss hp chain:", {k: v for k, v in chain.items() if k != "problems"})
+    # After a dropped STATE (its events are lost with it) the totals cannot add up; "gaps" counts those frames.
+    adds_up = chain["gaps"] > 0 or chain["dmg"] == chain["hp0"] - chain["hp_end"]
+    ok &= check(chain["checked"] > 0 and not chain["problems"] and adds_up,
+                f"boss ents hp is explained by its hit events: {chain['checked']} frames with hits, hits add up to "
+                f"{chain['dmg']} vs ents hp {chain['hp0']} -> {chain['hp_end']} ({chain['gaps']} after dropped "
+                f"STATEs), problems {chain['problems'][:4]}")
     # The killing blow is the one hit that takes hp from > 0 to <= 0. A boss with a special death (Bell Beast) keeps
     # isDead false, so a later hit on the corpse would also say dead; it is not the killing blow.
     kill = [d for d in boss_hits if d.get("hp_before", 0) > 0 and d.get("hp_after", 1) <= 0]
@@ -363,13 +403,174 @@ def fight_checks(col: Collector, rec: AttemptRecord) -> bool:
     return ok
 
 
+def hp_chain(rows: list[dict], boss_hits: list[tuple[int, dict]]) -> dict:
+    """Checks the boss's "hit" events against its exported hp (pure). Rows and events are merged in frame order (an
+    event of frame f is in STATE f, whose hp is sampled at the end of f). For every frame with events, their largest
+    hp_before must be the hp before the frame (the last exported hp minus the events since), and every exported hp
+    must equal that running value, so an hp change without an event (a dropped "hit") or an event that disagrees with
+    the export is a problem. A mismatch right after a gap in the rows (a dropped STATE carries its events with it) is
+    counted under "gaps" instead. Returns {checked, dmg, hp0, hp_end, gaps, problems}."""
+    by_f: dict[int, list[dict]] = defaultdict(list)
+    for f, d in boss_hits:
+        by_f[f].append(d)
+    ev_fs = sorted(by_f)
+    out = {"checked": 0, "dmg": 0, "hp0": None, "hp_end": None, "gaps": 0, "problems": []}
+    known, last_f, i = None, None, 0
+
+    def events_until(f: int, gap: bool) -> None:
+        nonlocal known, i
+        while i < len(ev_fs) and ev_fs[i] <= f:
+            fe, evs = ev_fs[i], by_f[ev_fs[i]]
+            i += 1
+            top = max(d["hp_before"] for d in evs)
+            if known is not None and top != known:
+                if gap:
+                    out["gaps"] += 1
+                else:
+                    out["problems"].append(f"f{fe}: hit hp_before {top}, the boss had {known}")
+            if out["hp0"] is None:
+                out["hp0"] = top if known is None else known
+            dmg = sum(d["dmg"] for d in evs)
+            known = top - dmg
+            out["checked"] += 1
+            out["dmg"] += dmg
+            out["hp_end"] = known
+
+    for r in rows:
+        f = r["f"]
+        gap = last_f is not None and f - last_f > 1
+        last_f = f
+        events_until(f, gap)
+        hp = r["boss"]["hp"] if r["boss"] is not None else None
+        if hp is None:
+            continue
+        if known is not None and hp != known:
+            if gap:
+                out["gaps"] += 1
+            else:
+                out["problems"].append(f"f{f}: ents hp {hp}, the hits so far leave {known}")
+        if out["hp0"] is None:
+            out["hp0"] = hp
+        known = hp
+        out["hp_end"] = hp
+    events_until(1 << 62, False)
+    if out["hp0"] is None:
+        out["hp0"] = out["hp_end"] = 0
+    return out
+
+
+def _trace(link: OracleLink, col: Collector, buttons: int, hold: int, frames: int) -> list[dict]:
+    """hero.tm on every STATE from just before a press of `buttons` (held `hold` frames) until `frames` after it."""
+    link.wait_state(lambda s: s["hero"]["hero_accepting_input"] and (s.get("pause") or {}).get("blk") == 0,
+                    timeout_s=10.0)
+    with col.lock:
+        col.trace = []
+    target = link.frame + 2
+    link.act(target, buttons, hold_frames=hold)
+    try:
+        link.wait_state(lambda s: s["f"] >= target + frames, timeout_s=10.0)
+    finally:
+        with col.lock:
+            tr, col.trace = col.trace, None
+    return [t for t in tr if t["f"] >= target - 1]
+
+
+def move_checks(link: OracleLink, col: Collector) -> bool:
+    """A dash, a slash and a jump at rest move their own timers (a FieldRef bound to another member would not)."""
+    ok = True
+    tr = _trace(link, col, mask("left", "dash"), 4, 60)
+    dash = [t["tm"].get("dash_cd") for t in tr if t["tm"].get("dash_cd") is not None]
+    peak = max(dash[:20], default=None)
+    after = dash[dash.index(peak):] if peak is not None else []
+    mono = all(b <= a + 1e-6 for a, b in zip(after, after[1:]))
+    # dashCooldownTimer is decremented while > 0 (HeroController.cs:2298-2300), so it ends a little below 0.
+    ok &= check(peak is not None and DASH_COOLDOWN - 0.1 <= peak <= DASH_COOLDOWN + 1e-3 and mono and after[-1] <= 0.0,
+                f"tm.dash_cd after a dash: peak {peak} (DASH_COOLDOWN {DASH_COOLDOWN}), non-increasing {mono}, "
+                f"ends {after[-1] if after else None}")
+    time.sleep(0.5)
+    tr = _trace(link, col, mask("attack"), 3, 40)
+    atk_cd = max((t["tm"].get("atk_cd") or 0.0 for t in tr), default=0.0)
+    atk_t = max((t["tm"].get("atk_t") or 0.0 for t in tr), default=0.0)
+    ok &= check(atk_cd > 0.0 and atk_t > 0.0, f"tm.atk_cd {atk_cd} and tm.atk_t {atk_t} rise after a slash")
+    time.sleep(0.5)
+    tr = _trace(link, col, mask("jump"), 10, 40)
+    steps = max((t["tm"].get("jump_steps") or 0 for t in tr), default=0)
+    ok &= check(steps > 0, f"tm.jump_steps rises in a jump (max {steps})")
+    time.sleep(1.0)
+    return ok
+
+
+def quit_prompt_checks(link: OracleLink) -> bool:
+    """Opt-in: open the return-to-menu prompt (Submit only on a "quit" read back with quit_ok true), read sel on its
+    two buttons, leave with Esc. Never Submit inside the prompt."""
+    ok = True
+    link.wait_state(lambda s: (s.get("pause") or {}).get("blk") == 0 and s["hero"]["hero_accepting_input"],
+                    timeout_s=10.0)
+    tap(link, "pause")
+    try:
+        m = wait_menu(link, lambda m, s: m["alpha"] >= 0.99 and not m["ignore_unpause"] and m["quit_ok"] is not None,
+                      timeout_s=3.0)["menu"]
+    except TimeoutError:
+        return check(False, "quit prompt: the pause menu did not come up")
+    if not m["quit_ok"]:
+        tap(link, "pause")
+        return check(False, "quit prompt: Quit is greyed out here, not tried")
+    for _ in range(4):
+        if link.state["menu"]["sel"] == "quit":
+            break
+        before = link.state["menu"]["sel"]
+        tap(link, "down")
+        try:
+            wait_menu(link, lambda m, s: m["sel"] != before, timeout_s=2.0)
+        except TimeoutError:
+            pass
+        time.sleep(0.15)
+    s = link.wait_state(lambda s: True, newer_than=link.frame)
+    if (s.get("menu") or {}).get("sel") != "quit":
+        tap(link, "pause")
+        return check(False, f"quit prompt: could not highlight Quit ({(s.get('menu') or {}).get('sel')!r})")
+    tap(link, "enter")
+    seen = []
+    try:
+        s = wait_menu(link, lambda m, s: m["sel"] in ("yes", "no"), timeout_s=3.0)
+        seen.append(s["menu"]["sel"])
+        for key in ("up", "down", "down", "up"):
+            before = link.state["menu"]["sel"]
+            tap(link, key)
+            try:
+                s = wait_menu(link, lambda m, s: m["sel"] != before, timeout_s=1.0)
+            except TimeoutError:
+                s = link.state
+            seen.append((s.get("menu") or {}).get("sel"))
+            time.sleep(0.15)
+    except TimeoutError:
+        pass
+    quitting = (link.state.get("menu") or {}).get("quitting")
+    ok &= check({"yes", "no"} <= set(seen) and set(seen) <= {"yes", "no"} and quitting is False,
+                f"quit prompt: sel moves between yes and no ({seen}), quitting {quitting}")
+    tap(link, "pause")                                   # Cancel: back to the pause menu
+    try:
+        s = wait_menu(link, lambda m, s: m["sel"] not in ("yes", "no"), timeout_s=3.0)
+        ok &= check(s["menu"]["quitting"] is False, f"quit prompt: Esc leaves it (sel {s['menu']['sel']!r})")
+    except TimeoutError:
+        ok &= check(False, "quit prompt: Esc did not leave it")
+    tap(link, "pause")
+    try:
+        link.wait_state(lambda s: not s["game"]["paused"], timeout_s=3.0)
+    except TimeoutError:
+        ok &= check(False, "quit prompt: Esc did not unpause")
+    return ok
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--instance", type=int, default=0)
     ap.add_argument("--seed", type=int, default=3)
     ap.add_argument("--timebox", type=float, default=300.0, help="STUCK after this many seconds from the wake")
     ap.add_argument("--skip-menu", action="store_true")
+    ap.add_argument("--skip-moves", action="store_true")
     ap.add_argument("--skip-fight", action="store_true")
+    ap.add_argument("--quit-prompt", action="store_true", help="also open the Quit prompt (Submit on Quit, Esc out)")
     a = ap.parse_args(argv)
     link = OracleLink(instance=a.instance, connect_timeout_s=120)
     ftap = FightTap(link, BELL_BEAST)
@@ -380,6 +581,10 @@ def main(argv: list[str] | None = None) -> int:
         ok &= rest_checks(link, col)
         if not a.skip_menu:
             ok &= menu_checks(link)
+            if a.quit_prompt:
+                ok &= quit_prompt_checks(link)
+        if not a.skip_moves:
+            ok &= move_checks(link, col)        # may wake the boss; the episode below reloads the savestate
         if not a.skip_fight:
             rec = AttemptRecord(unit=BELL_BEAST.name, stage="probe", profile="TRAIN", build="1.0.30000", code_rev=None,
                                 config_fp="m2_exports", start_kind="savestate", mode="data", seed=a.seed)
@@ -394,6 +599,9 @@ def main(argv: list[str] | None = None) -> int:
             n = col.n["act.hf" if name == "act.hf" else "hero"]
             ok &= check(n > 0 and col.bad[name] == 0,
                         f"{name}: {n - col.bad[name]}/{n} STATEs valid {col.example.get(name, '')}")
+        high = col.n["alpha_high"]
+        ok &= check(high <= ALPHA_HIGH_MAX * max(1, col.n["hero"]),
+                    f"hero.alpha >= 1 on {high}/{col.n['hero']} STATEs (long frames) {col.example.get('alpha_high', '')}")
         print(f"frames touching a wall: {col.n['wall_touch']}, with an active damage tag: {col.n['tags_active']}, "
               f"tool_max nil: {col.n['tool_max_nil']}")
         print("ents.stats:", link.rpc("ents.stats"))

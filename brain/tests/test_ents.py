@@ -116,6 +116,20 @@ def test_m2_hidden_and_collider_names():
     assert ents.is_hidden(_entity()) is False   # recordings before the M2 oracle have no "hidden"
 
 
+def test_boss_entity_skips_hidden():
+    hidden = _entity(iid=-1, type_key="Bone Beast", hidden=True, colliders=[], render_aabb=None)
+    other = _entity(iid=-2)
+    state = _roundtrip({"ents": [other, hidden]})
+    # an M2 oracle exports the boss hidden while underground: "in ents" no longer means "active"
+    assert ents.boss_entity(state["ents"], "Bone Beast") is None
+    assert ents.boss_entity(state["ents"], "Bone Beast", include_hidden=True)["iid"] == -1
+    visible = _entity(iid=-3, type_key="Bone Beast")
+    assert ents.boss_entity([hidden, visible], "Bone Beast")["iid"] == -3
+    old = _entity(iid=-4, type_key="Bone Beast")             # recordings before the M2 oracle: no "hidden" key
+    assert ents.boss_entity([old], "Bone Beast")["iid"] == -4
+    assert ents.boss_entity(None, "Bone Beast") is None
+
+
 def test_hit_events():
     hit = {"ent": -510942, "type_key": "Bone Beast", "dmg": 5, "dealt": 5, "attack": "Nail", "src": "Slash",
            "hp_before": 5, "hp_after": 0, "dead": True, "crit": False, "n": 812}

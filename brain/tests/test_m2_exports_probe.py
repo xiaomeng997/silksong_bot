@@ -1,6 +1,7 @@
 """The m2_exports probe's checks on synthetic data, in process (no socket, no game): the per-STATE validation accepts a
-complete M2 STATE and flags each missing or malformed field of an older one, and fight_checks passes a consistent
-Bell Beast fight and fails when one claim breaks."""
+complete M2 STATE and flags each missing or malformed field of an older one, fight_checks passes a consistent Bell
+Beast fight and fails when one claim breaks (each mutation below is a regression the probe must catch), and hp_chain
+ties the "hit" events to the exported hp."""
 import copy
 
 from ssbot.ipc.framing import BUTTONS
@@ -23,9 +24,9 @@ def _state(f: int = 100) -> dict:
     n = len(BUTTONS)
     tm = {k: 0 for k in probe.TM_KEYS} | {"inv": 0.0, "recoil": 0.0, "grav": 1.0}
     return {
-        "f": f,
+        "f": f, "fdt": 0.02,
         "act": {"mask": 1, "hf": {"pending": [0] * n, "age": [255] * n, "latched": 1, "desired": 1}},
-        "hero": {"alpha": 0.4, "wall": [False, True], "tm": tm,
+        "hero": {"alpha": 0.4, "wall": [False, True], "tm": tm, "invulnerable": False,
                  "tags": [{"kind": "Acid", "dmg_left": 2, "t_left": 0.3}],
                  "tools": ["Straight Pin", None], "tool_amounts": [7, None], "tool_max": [12, None]},
     }
@@ -53,12 +54,37 @@ def test_validate_flags_each_field():
     assert col.n["tool_max_nil"] == 1
     bad = _state()
     bad["act"]["hf"]["latched"] = 3                          # latched != act.mask
-    bad["hero"]["alpha"] = 1.0                               # outside [0, 1)
+    bad["hero"]["alpha"] = -0.1                              # before the fixed clock: never valid
     bad["hero"]["tm"]["recoil"] = 0.5                        # above RECOIL_DURATION
     bad["hero"]["tool_amounts"] = [13, None]                 # above tool_max
     col = _collector()
     col._on(bad)
     assert set(col.bad) == {"act.hf", "hero.alpha", "hero.tm", "hero.tool_max"}
+
+
+def test_validate_alpha_and_inv():
+    col = _collector()
+    s = _state()
+    s["hero"]["alpha"], s["fdt"] = None, 0.0                 # timeScale 0 (ScaleTime): fixedDeltaTime 0, alpha nil
+    col._on(s)
+    s = _state(101)
+    s["hero"]["alpha"] = 1.3                                 # a long frame whose fixed steps Unity capped: counted
+    col._on(s)
+    assert not col.bad and col.n["alpha_high"] == 1
+    s = _state(102)
+    s["hero"]["alpha"] = None                                # nil while fixedDeltaTime is 0.02: broken
+    col._on(s)
+    assert set(col.bad) == {"hero.alpha"}
+    col = _collector()
+    s = _state()
+    s["hero"]["tm"]["inv"] = 0.8                             # StartInvulnerable timers after SceneInit cleared the flag
+    col._on(s)
+    assert set(col.bad) == {"hero.tm"} and "invulnerable is false" in col.example["hero.tm"][1]
+    s = _state(101)
+    s["hero"]["tm"]["inv"], s["hero"]["invulnerable"] = 0.8, True
+    col = _collector()
+    col._on(s)
+    assert not col.bad
 
 
 def _fight() -> tuple[probe.Collector, AttemptRecord]:
@@ -160,6 +186,54 @@ def test_fight_checks_catch_each_broken_claim(capsys):
     def stuck(col, rec):
         rec.outcome = STUCK
     assert "did not end in CLEAR" in broken(stuck)
+
+    def first_hit_dropped(col, rec):             # a hook path that misses the first hit: hp drops with no event
+        col.hits.pop(0)
+    assert "explained by its hit events" in broken(first_hit_dropped)
+
+    def ents_hp_disagrees(col, rec):             # the export's hp and a self-consistent hit chain disagree
+        for r in col.rows:
+            if 100 <= r["f"] < 140:
+                r["boss"] = dict(r["boss"], hp=6)
+    assert "explained by its hit events" in broken(ents_hp_disagrees)
+
+    def hit_before_ents_hp(col, rec):            # hp_before is not the hp the boss had before the frame
+        f, d = col.hits[1]
+        col.hits[1] = (f, dict(d, hp_before=7, hp_after=2, dmg=5))
+    assert "explained by its hit events" in broken(hit_before_ents_hp)
+
+    def corpse_hidden(col, rec):                 # fix #4 regressed: the dead boss exported hidden in Death Broadcast
+        for r in col.rows:
+            if r["f"] >= 300:
+                r["boss"] = {"iid": -42, "hidden": True, "ncol": 0, "hp": 0, "kinds": [], "names": []}
+    assert "a dead boss is never exported hidden" in broken(corpse_hidden)
+
+    def hidden_in_death_broadcast(col, rec):     # hp still > 0 but the FSM is in its death state
+        for r in col.rows:
+            if r["f"] >= 300:
+                r["boss"] = {"iid": -42, "hidden": True, "ncol": 0, "hp": 5, "kinds": [], "names": []}
+                r["ctl"] = "Death Broadcast"
+    out = broken(hidden_in_death_broadcast)
+    assert "a dead boss is never exported hidden" in out
+
+
+def test_hp_chain_same_frame_overkill_and_gaps():
+    rows = [{"f": f, "boss": {"hp": 10 if f < 5 else -3}} for f in range(10)]
+    hits = [(5, {"hp_before": 7, "hp_after": -3, "dmg": 10}),     # nested tag hit reported first (inner)
+            (5, {"hp_before": 10, "hp_after": 7, "dmg": 3})]      # then the outer call's own part
+    out = probe.hp_chain(rows, hits)
+    assert out["problems"] == [] and out["checked"] == 1 and out["dmg"] == 13 and (out["hp0"], out["hp_end"]) == (10, -3)
+    # the boss leaves "ents" on the killing frame: the events alone carry the chain to the end
+    rows = [{"f": f, "boss": {"hp": 10} if f < 5 else None} for f in range(10)]
+    out = probe.hp_chain(rows, [(5, {"hp_before": 10, "hp_after": -5, "dmg": 15})])
+    assert out["problems"] == [] and out["hp_end"] == -5 and out["dmg"] == out["hp0"] - out["hp_end"]
+    # a dropped STATE (frame 5 missing, its event lost with it) is a gap, not a problem
+    rows = [{"f": f, "boss": {"hp": 10 if f < 5 else 5}} for f in range(10) if f != 5]
+    out = probe.hp_chain(rows, [])
+    assert out["problems"] == [] and out["gaps"] == 1
+    # without the gap the same hp change is a problem
+    rows = [{"f": f, "boss": {"hp": 10 if f < 5 else 5}} for f in range(10)]
+    assert probe.hp_chain(rows, [])["problems"] == ["f5: ents hp 5, the hits so far leave 10"]
 
 
 def test_fight_checks_need_hits_and_names(capsys):

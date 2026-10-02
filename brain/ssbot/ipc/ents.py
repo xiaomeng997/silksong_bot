@@ -20,7 +20,7 @@ a dead boss still leaves "ents"), e.g. the Bell Beast while underground (Submerg
 Recovery, Rage Pos/Antic). It keeps pos, flipX, fsms, anim and hp; colliders is always [] and render_aabb is None
 unless the GameObject is still active. An entity that an active damage source of its own pulls into the export is
 never hidden, so hiding never drops a threat collider. Read it as e.get("hidden", False); code that took "in ents"
-to mean "active" (boss lookups by type_key, collider-coverage checks) must skip hidden entities.
+to mean "active" (boss lookups by type_key, collider-coverage checks) must skip hidden entities: boss_entity() does.
 Collider: kind, name (M2: the collider's GameObject name, e.g. "PolyCollider", "LeapCollider", or the root's own name
 for a collider on the root; every path of a polygon has the same name), verts_world (flat x0, y0, x1, y1, ...),
 enabled, layer, r (circles), damage|None.
@@ -98,6 +98,17 @@ def is_threat(c: dict) -> bool:
 def is_hidden(e: dict) -> bool:
     """A seen HealthManager root whose HealthManager is inactive now (M2 oracle; False for older recordings)."""
     return bool(e.get("hidden"))
+
+
+def boss_entity(ents: Iterable[dict] | None, type_key: str, include_hidden: bool = False) -> dict | None:
+    """The first entity of `type_key` in a STATE's "ents" list. By default only an active one: before the M2 oracle
+    "in ents" meant "active", and code written then (boss lookups, collider coverage) must not pick up the hidden
+    entity the M2 oracle exports while the boss is underground (no colliders, at its root transform). include_hidden
+    also returns a hidden one, whose pos, fsms and hp are still valid."""
+    for e in ents or ():
+        if e.get("type_key") == type_key and (include_hidden or not is_hidden(e)):
+            return e
+    return None
 
 
 def fsm_events(state: dict) -> list[dict]:
