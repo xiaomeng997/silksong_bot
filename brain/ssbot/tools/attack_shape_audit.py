@@ -50,6 +50,7 @@ def main(argv: list[str] | None = None) -> int:
         return np.concatenate(vs), np.cumsum([0] + [len(q) for q in vs]).astype(np.int64)
 
     conf = {"rect": Counter(), "poly": Counter()}
+    by_state: Counter = Counter()
     lead = {"rect": [], "poly": []}
     n = 0
     for inst in (int(x) for x in a.instances.split(",")):
@@ -88,13 +89,23 @@ def main(argv: list[str] | None = None) -> int:
                         first["poly"] = k
                     if over:
                         break
+                bst = next((((e.get("fsms") or [{}])[0].get("state")) for e in S[i].get("ents") or ()
+                            if e.get("type_key") == "Bone Beast"), None)
+                last_hit = next((k for k in range(1, 90) if i - k >= 0 for e in S[i - k].get("ev") or ()
+                                 if e.get("k") == "hit"), None)
                 for m in ("rect", "poly"):
                     pred, act = first[m] is not None, hit_k is not None
-                    conf[m][("TP" if act else "FP") if pred else ("FN" if act else "TN")] += 1
+                    cell = ("TP" if act else "FP") if pred else ("FN" if act else "TN")
+                    conf[m][cell] += 1
+                    if m == "poly" and cell in ("TP", "FP"):
+                        by_state[(cell, bst)] += 1
+                        if last_hit is not None and last_hit < 30:
+                            by_state[(cell, f"boss hit {last_hit // 5 * 5}-{last_hit // 5 * 5 + 4} frames before")] += 1
                     if pred and act:
                         lead[m].append(first[m] - hit_k)
     out = {"spikes": n, "confusion": {m: dict(c) for m, c in conf.items()},
-           "contact_minus_hit_frames": {m: dict(Counter(v)) for m, v in lead.items()}}
+           "contact_minus_hit_frames": {m: dict(Counter(v)) for m, v in lead.items()},
+           "poly_by_boss_state": {f"{c}/{st}": v for (c, st), v in sorted(by_state.items(), key=str)}}
     print(json.dumps(out, indent=1))
     if a.json:
         a.json.write_text(json.dumps(out, indent=1), "utf-8")

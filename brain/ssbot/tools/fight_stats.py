@@ -51,6 +51,7 @@ def at(fs: list[int], st: list, f: int, tol: int = 6):
 def collect(runs: list[Path]) -> dict:
     dealt = Counter()
     taken = Counter()
+    tinks = Counter()
     taken_src = Counter()
     attacks = Counter()
     episodes = 0
@@ -73,6 +74,12 @@ def collect(runs: list[Path]) -> dict:
                         taken_src[(g, s)] += 1
             for ev_p in run.glob(f"rec/*/*/i{inst}_*/events.jsonl"):
                 for line in ev_p.open():
+                    if '"fsm"' in line and "DropBell" in line and '"to": "Tink' in line:
+                        # a hit on a drop bell (no HealthManager, no hit event): its FSM's Tink state, Right / Left
+                        # from a side slash (the redirect), D from a down attack (a pogo off it)
+                        to = json.loads(line)["data"].get("to", "")
+                        tinks["side" if ("Right" in to or "Left" in to or " R " in to or " L " in to) else "down"] += 1
+                        continue
                     if '"hit"' not in line:
                         continue
                     e = json.loads(line)
@@ -84,6 +91,7 @@ def collect(runs: list[Path]) -> dict:
                         continue
                     dealt[(GROUP_OF.get(s, "other"), d.get("src"))] += 1
     charges = attacks.get("Charge Antic", 0)
+    p2 = attacks.get("Rage Antic", 0)
     bursts = attacks.get("Burst Antic", 0)
     leaps = attacks.get("Leap Out", 0)
     pogos = sum(v for (g, src), v in dealt.items() if g in ("charge", "charge_end") and "Down" in str(src))
@@ -96,6 +104,8 @@ def collect(runs: list[Path]) -> dict:
            if bursts else None,
            "hits_dealt_per_leap_in_air": round(sum(v for (g, _), v in dealt.items() if g == "leap") / leaps, 3)
            if leaps else None,
+           "drop_bell_tinks": dict(tinks), "p2_fights": p2,
+           "drop_bell_side_hits_per_p2_fight": round(tinks.get("side", 0) / p2, 3) if p2 else None,
            "hits_taken_in_charges": taken.get("charge", 0) + taken.get("charge_end", 0),
            "hits_taken_in_bursts": taken.get("burst", 0) + taken.get("burst_recovery", 0)}
     return out
