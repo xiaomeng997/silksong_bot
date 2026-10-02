@@ -83,6 +83,10 @@ DROP_BELL = "BoneBeast DropBell"
 # the exact path's time slack: a hit lands in the physics step after the recorded position (fixture hit 62131: the bell
 # 0.11 u short of the hurtbox in the hit frame's STATE), and hit-stop frames still step (game time vs steps, 0.37 u)
 DET_SLACK_S = (-0.04, -0.02, 0.0, 0.02, 0.04)
+# off: held-out support recall (support_recall, i2_002 / i3_002, lags 2-4, oracle) lost 28 contacts with it, all
+# DropBell M2 (boss states Ptn L 9, Submerged 7, Burst Antic 6, Emerge Antic 6); the logged unions stay until those
+# are explained (hit-stop time, contacts in i-frame stretches)
+DET_REPLACE = False
 DET_STATES = frozenset({"Drop", "Air", "Bounce Up", "Bounce Air", "Submerge", "Tink Right", "Tink R Min", "Tink Left",
                         "Tink L Min", "Tink D", "Tink Right 2", "Tink R Min 2", "Tink Left 2", "Tink L Min 2", "Tink D 2"})   # world-fixed hazards with self templates (entities.<tk>.self_template)
 REST_STATES = ("Init", "Dormant")
@@ -941,7 +945,7 @@ class Forecaster:
         (pogo_targets.simulate, centre error 0.000 u over 0.8 s in game time on 2 recordings): it is support as two
         branches, one per bounce side (p 0.5 each; the bounce speed is fixed, 4 u/s), or one once it bounced, instead
         of the logged union of its self template."""
-        if self.view != ORACLE or self._ws is None:
+        if not DET_REPLACE or self.view != ORACLE or self._ws is None:
             return False
         e = next((x for x in self._ws.entities if x.id == iid), None)
         if e is None or not e.fsm or e.vel.conf <= 0:
