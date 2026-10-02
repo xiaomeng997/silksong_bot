@@ -20,20 +20,17 @@ What it encodes (1.0.30000):
   oracle mode is STATE hero.fractured_mask {equipped, amount_left}.
 
 hits_to_death is the §3.7.1 code line for line, plus one guard: a support whose worst event does no damage (D1 < 1
-and no CriticalDamage, or CriticalDamage at 1 HP with D1 < 1) would loop forever, so it returns UNBOUNDED.
-hits_to_death_batch evaluates the same recurrence over NumPy arrays (planner rollouts); its scalar kernel is written so
-that numba can compile it, which happens when numba is installed (it is not on the build machine: the NumPy path is
-the tested one).
+and no CriticalDamage, or CriticalDamage at 1 HP with D1 < 1) would loop forever, so it returns UNBOUNDED. A support
+is empty here only when its producer certified it (cross-module decision 4: the supervisor adds an "unknown" event of
+max(1, worst known damage) whenever the support is not known, so a missing forecast never reads as UNBOUNDED).
+hits_to_death_batch evaluates the same recurrence for planner rollouts with a numba kernel (the default; numba is a
+dependency) or a NumPy fallback; tests/test_hits_to_death.py checks both against the scalar reference on a full grid.
 """
 from collections.abc import Iterable
 from dataclasses import dataclass, replace
 
+import numba
 import numpy as np
-
-try:  # optional: compiled scalar kernel for large batches
-    import numba
-except ImportError:  # pragma: no cover - the build machine has no numba
-    numba = None
 
 UNBOUNDED = 1 << 20   # nothing in the support can hurt (D1 < 1 and no CriticalDamage)
 
@@ -54,12 +51,14 @@ class Ctx:
 @dataclass(slots=True, frozen=True)
 class SupportEvent:
     """One worst-case event of an in-support threat tube (combat/forecast.py builds these from tube metadata)."""
-    source: str                  # threat instance (entity type_key / collider), for the multi-instance test (Q3)
+    source: str                  # what it is (entity type_key, collider), for messages
     damage: int = 1              # total damage of the event: 1+1 combos are one event of 2
     hits: int = 1                # hits making up the event (> 1: multi-hit)
     hazard: bool = False         # hazard type (SPIKES, LAVA, ...: passes i-frames, m0:N1) or a cog crush (+ respawn)
     mask_covers: bool = True     # False for the grab / Maul / claw trap list above
     critical: bool = False       # CriticalDamage (h -> 1)
+    instance: int | None = None  # threat instance for Q3's multi-instance test: the entity root iid, which every
+    #                              collider of one entity shares; None: the source string stands in
 
 
 def mask_state(fractured_mask: dict | None) -> str:
@@ -168,16 +167,13 @@ def _kernel(hp: int, blue: int, m: bool, d1: int, pending: int, covers: bool, pe
             return n
 
 
-_kernel_nb = None
-if numba is not None:  # pragma: no cover
-    _k = numba.njit(cache=True)(_kernel)
+_kernel_jit = numba.njit(cache=True)(_kernel)
 
-    @numba.njit(cache=True)
-    def _batch_nb(hp, blue, m, d1, pending, covers, pending_covers, crit, out):
-        for i in range(hp.size):
-            out[i] = _k(hp[i], blue[i], m[i], d1[i], pending[i], covers[i], pending_covers[i], crit[i])
 
-    _kernel_nb = _batch_nb
+@numba.njit(cache=True)
+def _batch_nb(hp, blue, m, d1, pending, covers, pending_covers, crit, out):
+    for i in range(hp.size):
+        out[i] = _kernel_jit(hp[i], blue[i], m[i], d1[i], pending[i], covers[i], pending_covers[i], crit[i])
 
 
 def _batch_numpy(hp, blue, m, d1, pending, covers, pending_covers, crit) -> np.ndarray:
@@ -211,17 +207,14 @@ def _batch_numpy(hp, blue, m, d1, pending, covers, pending_covers, crit) -> np.n
 
 def hits_to_death_batch(hp, blue, mask_intact, d1, pending=0, mask_covers=True, pending_mask_covers=False,
                         critical=False, use_numba: bool | None = None) -> np.ndarray:
-    """hits_to_death element-wise over broadcast arrays (int64 result, same shape as the broadcast inputs)."""
+    """hits_to_death element-wise over broadcast arrays (int64 result, same shape as the broadcast inputs); the numba
+    kernel unless use_numba is False (the NumPy reference)."""
     arrs = np.broadcast_arrays(np.asarray(hp, np.int64), np.asarray(blue, np.int64), np.asarray(mask_intact, bool),
                                np.asarray(d1, np.int64), np.asarray(pending, np.int64), np.asarray(mask_covers, bool),
                                np.asarray(pending_mask_covers, bool), np.asarray(critical, bool))
-    if use_numba is None:
-        use_numba = _kernel_nb is not None
-    if use_numba:
-        if _kernel_nb is None:
-            raise RuntimeError("numba is not installed")
-        flat = [np.ascontiguousarray(a).ravel() for a in arrs]   # pragma: no cover
-        out = np.empty(flat[0].size, np.int64)                   # pragma: no cover
-        _kernel_nb(*flat, out)                                   # pragma: no cover
-        return out.reshape(arrs[0].shape)                        # pragma: no cover
-    return _batch_numpy(*(np.array(a) for a in arrs))
+    if use_numba is False:
+        return _batch_numpy(*(np.array(a) for a in arrs))
+    flat = [np.ascontiguousarray(a).ravel() for a in arrs]
+    out = np.empty(flat[0].size, np.int64)
+    _batch_nb(*flat, out)
+    return out.reshape(arrs[0].shape)
