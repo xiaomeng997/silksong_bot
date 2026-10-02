@@ -1,6 +1,8 @@
 """L1 planner (DESIGN §3.5.4; M2 W4): every frame, roll every candidate out through the kinematics' timing lanes and
-choose lexicographically: not Hz > not Hz_soft > not U > S = 0 > V > min P > max J; FORCED_RISK when no allowed
-candidate has S = 0.
+choose lexicographically: not Hz > not Hz_soft > not U > S = 0 > comfort > V > min P > max J; FORCED_RISK when no
+allowed candidate has S = 0. Comfort is S again against templates grown by a further margin: among safe plans the
+ones with clearance win, whatever they score (live run 20261002_035118: a plan safe by millimetres in the air over a
+rolling attack bell lost all 26 safe continuations in one frame of drift, and the bell hit).
 
     planner = Planner(params, terrain)
     r = planner.tick(ws, start, hold, prefix, forecast, prefs, ctx)    # r.mask: the commanded mask for the next free
@@ -116,12 +118,13 @@ class Planner:
 
     # ---- S -----------------------------------------------------------------------------------------------------------
 
-    def _contacts(self, f: Forecast, bound: np.ndarray, tk: np.ndarray, skip: np.ndarray) -> np.ndarray:
+    def _contacts(self, f: Forecast, bound: np.ndarray, tk: np.ndarray, skip: np.ndarray, comfort: bool = False
+                  ) -> np.ndarray:
         """[N, T1] contact of the lanes' hull with the support, hull wider than a point covers: grid points."""
         hx, hy = f.fc.half
         x0, y0, x1, y1 = bound[..., 0], bound[..., 1], bound[..., 2], bound[..., 3]
         cx, cy = 0.5 * (x0 + x1), 0.5 * (y0 + y1)
-        occ = f.occupied(cx, cy, tk)
+        occ = f.occupied(cx, cy, tk, comfort)
         w, h = x1 - x0, y1 - y0
         nx = np.ceil(w / (2 * hx) - 1e-9).astype(np.int64)
         ny = np.ceil(h / (2 * hy) - 1e-9).astype(np.int64)
@@ -137,7 +140,8 @@ class Planner:
                     fy = np.where(ny[rows] > 1, y0[rows] + (j + 0.5) * h[rows] / mp, cy[rows])
                     px.append(fx)
                     py.append(fy)
-            sub = f.occupied(np.concatenate(px), np.concatenate(py), tk).reshape(mp * mp, len(rows), -1).any(axis=0)
+            sub = f.occupied(np.concatenate(px), np.concatenate(py), tk, comfort).reshape(mp * mp, len(rows), -1
+                                                                                      ).any(axis=0)
             occ[rows] |= sub & wide[rows]
         occ &= ~skip
         occ[:, 0] = False
@@ -177,6 +181,11 @@ class Planner:
         skip = ((roll.flags_all & F_INVULN) != 0) if enemy_only else np.zeros((N, T1), bool)
         occ = self._contacts(f, roll.bound, tk, skip)
         S = occ.any(axis=1)
+        S2 = S.copy()
+        if f.fc.query_c is not None:
+            rows = np.flatnonzero(ok & ~S)
+            if len(rows):
+                S2[rows] = self._contacts(f, roll.bound[rows], tk, skip[rows], comfort=True).any(axis=1)
         t3 = time.perf_counter()
         hz = np.zeros(N, bool)
         hz_soft = np.zeros(N, bool)
@@ -211,7 +220,7 @@ class Planner:
             res = PlanResult(int(sel_cmd[0]), idx, name, 0, False, 0.0, 1e3, True, n=N + 1,
                              n_allowed=int(ok.sum()) + 1, n_safe=int(safe.sum()) + 1, cmd=sel_cmd, path=bind_res[1])
         elif ok.any():
-            order = np.lexsort((-J, Pc, ~V, S, U, hz_soft, hz))
+            order = np.lexsort((-J, Pc, ~V, S2, S, U, hz_soft, hz))
             order = order[ok[order]]
             i = int(order[0])
             sel_cmd = cmd[i]

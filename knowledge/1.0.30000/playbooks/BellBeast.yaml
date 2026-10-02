@@ -39,6 +39,17 @@ punish:
   - {state: Burst Out, phase: burst, note: "0.90 s erupted at the burst x; the bells roll out both ways"}
   - {state: Rage Roar, phase: roar, note: "1.5 s roaring at x 86.21"}
 
+# Pre-positioning before a punish window, in the attack's anchor frame (x' along the attack from its anchor; side
+# "attack": the attack's own direction, "hero": the side the hero is on). Live runs 2026-10-02 (3 CLEARs, 225-239 s):
+# 40 of 58 hits were dealt in Leap Land, mostly one per landing, the hero arriving from the arena middle late.
+# The leap lands its body at x' 16.6-26.6 (root box) after sweeping x' 12.5-27 at the landing frame; the burst erupts
+# x' -4.5..4.5 and fires a bell each way along the floor.
+prepare:
+  - {state: Emerge Antic L, x_prime: 12.0, side: attack}
+  - {state: Leap Out, x_prime: 12.0, side: attack}
+  - {state: Descending, x_prime: 12.0, side: attack}
+  - {state: Burst Antic, x_prime: 5.5, side: hero}
+
 # The boss's root box (its hurtbox) is disabled while it emerges and winds up a charge (live i2_002: Charge Emerge
 # and Charge Antic every frame enabled False), so no hit can land there; scoring ignores those states.
 no_hurtbox: [Charge Emerge, Charge Antic, emerge, charge_antic]

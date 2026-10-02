@@ -47,6 +47,7 @@ from ssbot.safety.supervisor import SupervisorConfig
 from ssbot.train.supervision import SupervisedControl
 
 MARGIN_ORACLE = (0.15, 0.25)          # DESIGN §3.5.3 m = 0.15 u; y + 0.10 u so a jump's lane spread fits one point
+COMFORT = (0.25, 0.25)                # preferred extra clearance (planner: S = 0 > comfort > V > J)
 NOISE_K = 3.0                         # stage C: + k * sigma of the hero / boss position noise
 HORIZON_S = 2.0                       # forecast horizon: the risk map's and the Bind's
 UNPRED_LAG = 3
@@ -99,7 +100,8 @@ class PlannerPolicy:
             s = NOISE_K * math.hypot(SIGMA_HERO_U, SIGMA_POS_U[Kind.BOSS])
             margin = (MARGIN_ORACLE[0] + s, MARGIN_ORACLE[1] + s)
             fview = VISION_EQUIVALENT
-        self.fc = Forecaster(self.model, fview, margin=margin, templates=load_planner_templates(self.model, margin))
+        self.fc = Forecaster(self.model, fview, margin=margin, templates=load_planner_templates(self.model, margin),
+                             comfort=COMFORT)
         self.pb = load_playbook(enemy)
         self.fc.no_hurtbox = self.pb.no_hurtbox
         self.tac = Tactics(self.pb)
@@ -191,6 +193,7 @@ class PlannerPolicy:
         self.hits_taken: list[int] = []
         self.forced_frames: list[int] = []
         self.first_pending_f: int | None = None
+        self.planner_last = None
         self.enc = enc
 
     # ---- per STATE ---------------------------------------------------------------------------------------------
@@ -269,6 +272,7 @@ class PlannerPolicy:
         prefix = np.array([self.sent.get(fr, 0) for fr in range(fo + 1, f + 2)], np.int64)
         t1 = time.perf_counter()
         res = self.planner.tick(ws, self._start_state(ws, raw), hold, prefix, fcast, prefs, ctx)
+        self.planner_last = res
         t2 = time.perf_counter()
         unpred = self._unpredicted(raw, fo)
         r = self.sc.step(s, plan_s=res.S, forced_risk=res.forced_risk, unpredicted_hits=unpred, p_death=res.P)

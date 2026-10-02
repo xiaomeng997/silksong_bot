@@ -8,6 +8,9 @@ Modes:
           (T_min >= 1.37 + 0.15 s from the forecast's support, no PAUSE_PENDING): the planner gets the Bind macro.
   ENGAGE  the boss is drawn in a punish window of the playbook: the stance is just outside its body on the hero's side,
           where the support's future coverage is lowest, and hits score fully.
+  PREPARE the boss is committed to an attack whose punish window is ahead (a leap in its antic or flight, a burst
+          underground at a known x): the stance is the playbook's spot in the attack's anchor frame (12 u along the leap,
+          5.5 u beside the burst on the hero's side), pulled to low future coverage.
   EVADE   the support reaches the hero's spot within the evade horizon: the stance is the floor position with the
           least future coverage, hits score little.
   HOLD    anything else (the boss underground): the playbook's hidden stance, pulled to low future coverage.
@@ -26,7 +29,7 @@ from ssbot.core.primitives import Prim
 from ssbot.core.worldstate import WorldState
 from ssbot.safety.supervisor import BIND_SILK, SupervisorDecision, bind_allowed
 
-ENGAGE, EVADE, HEAL, HOLD = "ENGAGE", "EVADE", "HEAL", "HOLD"
+ENGAGE, EVADE, HEAL, HOLD, PREPARE = "ENGAGE", "EVADE", "HEAL", "HOLD", "PREPARE"
 GRID_U = 0.5
 EVADE_S = 0.6
 
@@ -101,6 +104,17 @@ class Tactics:
             x_eng = b0 - pb.engage_reach_u if side < 0 else b1 + pb.engage_reach_u
             cost = risk + 0.3 * np.abs(self.xs - x_eng) / max(1.0, pb.engage_reach_u)
             prefs.mode, prefs.stance_x = ENGAGE, float(self.xs[int(np.argmin(cost))])
+            return prefs
+        prep = pb.prepare.get(state) if state else None
+        anchor = f.fc.tracker.ctx.anchor if f.fc.view == "ORACLE" else f.fc.tracker.last_anchor
+        if prep is not None and anchor is not None:
+            # stand where the coming punish window starts (the leap's landing side, beside the burst), in the
+            # attack's anchor frame; the support check keeps the hero out of the attack on the way
+            xp, side = prep
+            m = anchor.mirror if side == "attack" else (1.0 if hero[0] >= anchor.x else -1.0)
+            x_prep = anchor.x + m * xp
+            cost = risk + 0.3 * np.abs(self.xs - x_prep)
+            prefs.mode, prefs.stance_x = PREPARE, float(self.xs[int(np.argmin(cost))])
             return prefs
         soon = f.t_min(hero[0], pb.hero_y, t_max=EVADE_S)
         if soon < EVADE_S or here > 0.25:

@@ -41,6 +41,7 @@ come in as their entry intervals pass.
 Time. Templates count game time (1/60 s bins; game time stands still in hit-stop and pauses); offsets are game seconds
 from the WorldState's frame (stamp.t_game_s). The planner's rollout frame k is at tk = k * frame_time.
 """
+import functools
 import math
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, replace
@@ -139,14 +140,14 @@ class Forecast:
 
     # ---- queries ------------------------------------------------------------------------------------------------
 
-    def _query(self, placements: Iterable[Placement]) -> hb.SupportQuery:
-        q = self.fc.query
+    def _query(self, placements: Iterable[Placement], comfort: bool = False) -> hb.SupportQuery:
+        q = self.fc.query_c if comfort and self.fc.query_c is not None else self.fc.query
         q.clear()
         for p in placements:
             q.place(p.key, p.t_ref, p.anchor, p.mirror)
         return q
 
-    def _occ(self, placements: list[Placement], x, y, tk: np.ndarray) -> np.ndarray:
+    def _occ(self, placements: list[Placement], x, y, tk: np.ndarray, comfort: bool = False) -> np.ndarray:
         x = np.asarray(x, np.float64)
         y = np.asarray(y, np.float64)
         out = np.zeros(x.shape, bool)
@@ -160,15 +161,16 @@ class Forecast:
             act = [p for p in placements if p.t_from <= t_lo and p.t_off >= t_lo - BIN and p.t_on <= t_hi + BIN]
             if not act:
                 continue
-            q = self._query(act)
+            q = self._query(act, comfort)
             xs, ys, ts = x[:, sel], y[:, sel], tk[sel]
             out[:, sel] = query_par(q, xs, ys, ts) if x.shape[0] >= 64 else q.query(xs, ys, ts)
         return out
 
-    def occupied(self, x, y, tk) -> np.ndarray:
+    def occupied(self, x, y, tk, comfort: bool = False) -> np.ndarray:
         """[N, T] bool: the hurtbox (grown by the forecaster's margin) centred at (x, y) [N, T] at tk [T] game s from
-        the origin overlaps some support tube."""
-        return self._occ(self.placements, x, y, np.asarray(tk, np.float64))
+        the origin overlaps some support tube. comfort: against the templates grown by the comfort margin too (the
+        planner's preference for clearance; Forecaster(comfort=...))."""
+        return self._occ(self.placements, x, y, np.asarray(tk, np.float64), comfort)
 
     def node_hits(self, x, y, tk) -> np.ndarray:
         """[nodes, N] bool: contact with each node's own placements."""
@@ -396,8 +398,15 @@ class BossTracker:
             else:
                 self.t_entry = t - tau
         if boss.hidden:
-            if self.ctx.family is not None:
+            fam = self.ctx.family
+            if fam is not None:
                 self.hidden_x[self.state or ""] = boss.pos.v[0]
+                f = m.families[fam]
+                # the burst's x is set underground at Burst Pos and the boss erupts there: the hidden x is the
+                # anchor (live runs 2026-10-02: 81 of 81 bursts exactly, and 336 of 336 charges / leaps at their
+                # fixed anchors), known 1.2 s before the eruption
+                if self.ctx.anchor is None and not f.directed and f.anchor_y is not None and self.state != f.start:
+                    self.ctx.anchor = Anchor(float(boss.pos.v[0]), f.anchor_y, f.mirror)
             return
         self.seen = True
         fam = self.ctx.family
@@ -518,6 +527,12 @@ class BossTracker:
             return r, bool(r)
         e = self.t_entry - origin_t
         ctx = replace(self.ctx)
+        fams = [f.name for f in self.model.families.values() if self.state in f.states]
+        if ctx.family is None and fams:
+            # the attack's start was missed (the tracker began mid-attack): every family with this state, its fixed
+            # anchor when it has one, else world_all
+            return [Root(self.state, e, e, replace(ctx, family=fam, anchor=self.model.anchor(fam, ctx.direction)),
+                         1.0 / len(fams), current=True) for fam in fams], True
         return [Root(self.state, e, e, ctx, current=True)], True
 
     def _roots_ve(self, origin_t: float) -> tuple[list[Root], bool]:
@@ -583,7 +598,9 @@ class Forecaster:
     Bell Beast per-state templates)."""
 
     def __init__(self, model: BossModel, view: str = ORACLE, margin: float | tuple[float, float] = 0.0,
-                 templates: dict[str, hb.SpaceTimeTemplate] | None = None, npz: str | None = None):
+                 templates: dict[str, hb.SpaceTimeTemplate] | None = None, npz: str | None = None,
+                 comfort: float | tuple[float, float] | None = None,
+                 comfort_templates: dict[str, hb.SpaceTimeTemplate] | None = None):
         if view not in (ORACLE, VISION_EQUIVALENT):
             raise ValueError(view)
         self.model = model
@@ -600,6 +617,15 @@ class Forecaster:
                  and t.active() is not None]
         self.bell_lead = (min(leads) - BIN) if leads else -math.inf
         self.query = hb.SupportQuery(templates, hero_half=hb.HERO_HALF_U)
+        # comfort: the same templates grown by an extra margin, a preference above the score (clearance against the
+        # one-frame drift of a plan that is safe by millimetres)
+        self.comfort = None if comfort is None else margin_xy(comfort)
+        self.query_c = None
+        if self.comfort is not None:
+            if comfort_templates is None:
+                mx, my = self.margin
+                comfort_templates = load_planner_templates(model, (mx + self.comfort[0], my + self.comfort[1]), npz)
+            self.query_c = hb.SupportQuery(comfort_templates, hero_half=hb.HERO_HALF_U)
         self.tracker = BossTracker(model, view)
         self.boss: Entity | None = None
         self.no_hurtbox: frozenset[str] = frozenset()     # states / phases with the body box disabled (playbook)
@@ -677,7 +703,7 @@ class Forecaster:
             srcs = srcs - f.p2_only.get(state, frozenset())
         n = int(math.floor((e_hi - e_lo) / BIN + 1e-6)) + 1
         es = [e_lo + i * BIN for i in range(n)]
-        if es[-1] < e_hi - 1e-9:
+        if es[-1] < e_hi - 1e-3:            # a 1 ms remainder rounds to the same 1/60 s bin
             es.append(e_hi)
         for fr in frames:
             key = m.key(fam, state, fr)
@@ -779,12 +805,19 @@ def margin_xy(margin: float | tuple[float, float]) -> tuple[float, float]:
 
 def load_planner_templates(model: BossModel, margin: float | tuple[float, float] = 0.0, npz: str | None = None
                            ) -> dict[str, hb.SpaceTimeTemplate]:
+    """Cached per (enemy, margin, file): the dilation takes 1-2 s and the result is read-only."""
+    return _load_planner_templates(model.enemy, margin_xy(margin), None if npz is None else str(npz))
+
+
+@functools.lru_cache(maxsize=8)
+def _load_planner_templates(enemy: str, margin: tuple[float, float], npz: str | None
+                            ) -> dict[str, hb.SpaceTimeTemplate]:
     """The per-state and tail support templates of the model's families, dilated for a point query of the hurtbox
     centre: hero half-extents plus margin (x, y). Family-wide templates (t from the attack start) are not needed by
     the walk."""
     from ssbot.combat.boss_model import KNOWLEDGE
-    mx, my = margin_xy(margin)
-    path = npz or (KNOWLEDGE / "enemies" / f"{model.enemy}_hitboxes.npz")
+    mx, my = margin
+    path = npz or (KNOWLEDGE / "enemies" / f"{enemy}_hitboxes.npz")
     tpls, _ = hb.load_templates(path, prefix=hb.SUPPORT)
     out = {}
     for k, t in tpls.items():
