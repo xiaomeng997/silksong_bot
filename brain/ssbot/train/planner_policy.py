@@ -222,6 +222,7 @@ class PlannerPolicy:
             planner.tick(ws, S, HoldState.idle(1), np.zeros(1, np.int64), f, prefs, ctx)
             f.prob(np.full((3, 5), x), np.full((3, 5), 3.05), np.arange(5) * 0.0167)
             f.t_min(x, 3.05)
+        planner.warm_kernels()
         fc.tracker.roots = roots
         fc.reset()
         return time.perf_counter() - t0

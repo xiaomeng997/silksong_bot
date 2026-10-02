@@ -464,6 +464,28 @@ class Planner:
             S[sub] |= self._contacts(f, cur.bound[sub], tk, skip).any(axis=1)
         return cur
 
+    def warm_kernels(self) -> None:
+        """Compile the hit-effect and prediction kernels and the lanes rollout before a fight: they run only when the
+        boss is drawn and an attack is planned, and a first call mid-fight compiles past the oracle's 250 ms
+        brain-lost watchdog (run 20261002_091133: 2 episodes paused unasked 6 s in)."""
+        T1 = 49
+        box = np.zeros((1, T1, 4))
+        box[..., 2:] = 1.0
+        fl = np.zeros((1, T1), np.int32)
+        md = np.zeros((1, T1), np.int32)
+        lat = np.zeros((1, T1 - 1), np.int64)
+        boss = np.zeros((T1, 4))
+        okb = np.ones(T1, np.bool_)
+        polys = np.array([[0.0, 0.0], [1.0, 0.0], [1.0, 1.0]])
+        starts = np.array([0, 3], np.int64)
+        win = WINDOWS[self.cfg.attack_model]
+        _first_hits(box, fl, md, lat, 1, boss, okb, polys, starts, np.zeros(2), np.full(1, -1, np.int64),
+                    np.full(1, -1, np.int64), np.zeros(1, np.int64), win)
+        _attacks_of(box[0], fl[0], md[0], lat[0], 1, boss, okb, polys, starts, np.zeros(2), win)
+        start = kin.initial_state(self.params, 85.0, 2.015 + self.params.foot)
+        kin.rollout(start, lat, self.params, self.terrain, events=np.zeros((1, T1 - 1), np.int64),
+                    variants=self.cfg.variants, lanes=True)
+
     # ---- prediction record (the attack-outcome audit) ---------------------------------------------------------------
 
     def _predict_attacks(self, f: Forecast, start, lat: np.ndarray, i: int, tk: np.ndarray, P: int) -> list:
