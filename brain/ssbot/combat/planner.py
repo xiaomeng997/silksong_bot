@@ -70,13 +70,14 @@ DOWN = (-0.69, 1.41, -1.96, 0.32)
 SPEAR = (0.3, 11.0, -0.8, 0.8)
 SPEAR_DELAY_F = 16             # Silkspear antic 0.26 s before the needle flies
 ACTIVE_F = 6                   # frames an attack box counts from its start (scoring)
-COMFORT_FRAMES = 24           # the comfort check covers the first 0.4 s after the prefix
+COMFORT_FRAMES = 48           # the comfort check covers the whole horizon (24 frames lost safe plans in run 20261002_045049)
 NO_CONTROL_MODES = (kin.M_HURT_FREEZE, kin.M_HURT_RECOIL, kin.M_CAST, kin.M_BIND, kin.M_LOCKED)
 
 
 @dataclass
 class PlannerConfig:
     T: int = 48
+    T_long: int = 120          # the adaptive horizon's cap (2 s, the forecast's horizon)
     T_bind: int = 100
     threads: int = 4
     variants: str = "bounds"
@@ -165,6 +166,7 @@ class Planner:
         self.cfg = cfg or PlannerConfig()
         self.cands = cmod.build(self.cfg.T)
         self.cands_nc = cmod.no_control(self.cands)
+        self.cands_long = cmod.build_long(self.cfg.T_long)
         self.bind = cmod.bind_macro(self.cfg.T_bind)
         self.reset()
 
@@ -203,8 +205,12 @@ class Planner:
         prefix = np.asarray(prefix, np.int64).reshape(-1)
         P = len(prefix)
         mode0 = int(np.asarray(start).reshape(kin.K, -1)[kin.MODE, 0])
-        cs = self.cands_nc if mode0 in NO_CONTROL_MODES else self.cands
-        N0, T = len(cs.cmd), cfg.T
+        T_req = int(min(max(prefs.horizon_frames, 0), cfg.T_long))
+        if T_req > cfg.T:
+            cs = cmod.truncate(self.cands_long, T_req)          # adaptive horizon: through a committed long attack
+        else:
+            cs = self.cands_nc if mode0 in NO_CONTROL_MODES else self.cands
+        N0, T = len(cs.cmd), cs.T
         rows = [cs.cmd]
         cont = self.prev_cmd is not None
         if cont:

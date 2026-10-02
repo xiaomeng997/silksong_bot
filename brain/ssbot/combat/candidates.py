@@ -163,6 +163,62 @@ def build(T: int = 48) -> CandidateSet:
                         np.zeros(N, bool), T)
 
 
+LONG_FIRST = ("WAIT", "MOVE(L)", "MOVE(R)", "JUMP(48)N", "JUMP(48)L", "JUMP(48)R")
+
+
+def build_long(T: int) -> CandidateSet:
+    """The adaptive-horizon set (M2 plan: the horizon runs to the end of a committed long attack): dodging only, over
+    T frames (up to 2 s): waits of 4-32 frames before a full jump in place, or 8-24 before one with a side key, runs
+    and stops. With the standard 0.8 s horizon a jump that clears the first half of a charge looked safe and came down
+    on its second half (live run 20261002_045049: 5 of 5 charge hits); 6 x 22 = 132 candidates keep the tick cost of
+    the standard set."""
+    firsts = [x for x in _first_pieces() if x.name in LONG_FIRST]
+    n = T - FIRST
+    conts = [Piece("idle", _seq(n), frozenset({Prim.WAIT}))]
+    for d in ("L", "R"):
+        conts.append(Piece(f"run{d}", _seq(n, DIRS[d]), frozenset({Prim.MOVE})))
+        m = _seq(n)
+        m[:16] = DIRS[d]
+        conts.append(Piece(f"run{d}16_stop", m, frozenset({Prim.MOVE, Prim.WAIT})))
+    for d in ("N", "L", "R"):
+        m = _seq(n, DIRS[d])
+        m[:48] |= B_JUMP
+        conts.append(Piece(f"jump48{d}", m, frozenset({Prim.JUMP} | ({Prim.MOVE} if d != "N" else set()))))
+    for w in (4, 8, 12, 16, 20, 24, 28, 32):
+        m = _seq(n)
+        m[w:w + 48] |= B_JUMP
+        conts.append(Piece(f"wait{w}_jump", m, frozenset({Prim.JUMP, Prim.WAIT})))
+    for d in ("L", "R"):
+        for w in (8, 16, 24):
+            m = _seq(n)
+            m[w:] = DIRS[d]
+            m[w:w + 48] |= B_JUMP
+            conts.append(Piece(f"wait{w}_jump{d}", m, frozenset({Prim.JUMP, Prim.WAIT, Prim.MOVE})))
+    N = len(firsts) * len(conts)
+    cmd = np.zeros((N, T), np.int64)
+    first = np.zeros(N, np.int64)
+    cont = np.zeros(N, np.int64)
+    bits = np.zeros(N, np.int64)
+    i = 0
+    for a, fp in enumerate(firsts):
+        for b, cp in enumerate(conts):
+            cmd[i, FIRST:] = cp.masks
+            cmd[i, :FIRST] = fp.masks[:FIRST]
+            k = min(len(fp.masks), T)
+            if k > FIRST:
+                cmd[i, FIRST:k] |= fp.masks[FIRST:k] & B_JUMP
+            first[i], cont[i] = a, b
+            bits[i] = _bits(fp.prims | cp.prims)
+            i += 1
+    return CandidateSet(cmd, first, cont, [x.name for x in firsts], [x.name for x in conts], bits, np.zeros(N, bool),
+                        T)
+
+
+def truncate(cs: CandidateSet, T: int) -> CandidateSet:
+    """The same candidates over their first T frames."""
+    return CandidateSet(cs.cmd[:, :T], cs.first, cs.cont, cs.first_names, cs.cont_names, cs.prim_bits, cs.bind, T)
+
+
 NO_CONTROL_FIRST = ("WAIT", "MOVE(L)", "MOVE(R)", "JUMP(11)N", "JUMP(11)L", "JUMP(11)R")
 
 

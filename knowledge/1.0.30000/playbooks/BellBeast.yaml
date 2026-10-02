@@ -64,6 +64,16 @@ prepare:
   # vision-equivalent view: the observable phase stands for the state (a leap is seen only once it is in the air)
   - {state: leap, x_prime: 12.0, side: attack}
 
+# Adaptive horizon (M2 plan): while a charge is committed, the planner rolls its dodges out to the end of the Charge
+# (its longest logged dwells) plus 0.3 s, up to 2 s. With the 0.8 s horizon, jumps that cleared the charge's front
+# half looked safe and landed on its back half (live run 20261002_045049: 5 hits, all charges). Observable phases map
+# to their first state for the vision-equivalent view.
+long_horizon:
+  states: [Emerge Antic C, Charge Emerge, Charge Antic, Charge, emerge, charge_antic, charge]
+  until: Charge
+  extra_s: 0.3
+  map: {emerge: Charge Emerge, charge_antic: Charge Antic, charge: Charge}
+
 # The boss's root box (its hurtbox) is disabled while it emerges and winds up a charge (live i2_002: Charge Emerge
 # and Charge Antic every frame enabled False), so no hit can land there; scoring ignores those states.
 no_hurtbox: [Charge Emerge, Charge Antic, emerge, charge_antic]

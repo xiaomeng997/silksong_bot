@@ -48,6 +48,7 @@ class TacticPrefs:
     risk: np.ndarray = field(default_factory=lambda: np.zeros(0))
     boss_x: float | None = None
     t_min: float = math.inf
+    horizon_frames: int = 0          # > the planner's T: roll out this long (a committed long attack)
 
     def risk_at(self, x: np.ndarray) -> np.ndarray:
         if not len(self.risk_x):
@@ -70,6 +71,25 @@ class Tactics:
         occ = f.occupied(np.repeat(self.xs[:, None], len(tk), 1), np.full((n, len(tk)), self.pb.hero_y), tk)
         w = 1.0 / (1.0 + tk)
         return (occ * w).sum(axis=1) / w.sum()
+
+    def long_horizon(self, f: Forecast, state: str | None) -> int:
+        """Frames to roll out through the committed long attack this state is part of (playbook long_horizon: until
+        the last listed state ends, at its longest logged dwell, plus extra_s), 0 when none."""
+        lh = self.pb.long_horizon
+        if not lh or state not in lh["states"] or f.fc.tracker.t_entry is None:
+            return 0
+        m = f.fc.model
+        st = lh["map"].get(state, state)
+        t = f.fc.tracker.t_entry - f.origin_t
+        for _ in range(8):
+            info = m.states.get(st)
+            if info is None:
+                return 0
+            t += info.dwell[1]
+            if st == lh["until"] or not info.succ:
+                break
+            st = max(info.succ, key=lambda x: x[1])[0]
+        return int(math.ceil((t + lh["extra_s"]) / BIN)) if t > 0 else 0
 
     def decide(self, ws: WorldState, f: Forecast, d: SupervisorDecision | None, h: int | None) -> TacticPrefs:
         pb = self.pb
@@ -97,6 +117,7 @@ class Tactics:
                 prefs.stance_x = hero[0]
                 return prefs
         state = f.fc.tracker.state
+        prefs.horizon_frames = self.long_horizon(f, state)
         punish = state in pb.punish_states or state in pb.punish_phases
         if drawn and punish:
             b0, b1 = box[0, 0], box[0, 2]

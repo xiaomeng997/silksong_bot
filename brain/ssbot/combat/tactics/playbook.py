@@ -29,6 +29,7 @@ class Playbook:
     hit_damage: dict[str, float]
     no_hurtbox: frozenset[str] = frozenset()
     prepare: dict[str, tuple[float, str]] = field(default_factory=dict)   # state -> (x' from the anchor, side)
+    long_horizon: dict = field(default_factory=dict)   # states, until, extra_s, map (observable phase -> state)
     weights: dict[str, float] = field(default_factory=lambda: dict(DEFAULT_WEIGHTS))
 
     @classmethod
@@ -49,7 +50,15 @@ class Playbook:
                    no_hurtbox=frozenset(d.get("no_hurtbox") or ()),
                    prepare={x["state"]: (float(x["x_prime"]), str(x.get("side", "attack")))
                             for x in d.get("prepare") or ()},
+                   long_horizon=_long(d.get("long_horizon")),
                    weights=DEFAULT_WEIGHTS | {k: float(v) for k, v in (d.get("weights") or {}).items()})
+
+
+def _long(d: dict | None) -> dict:
+    if not d:
+        return {}
+    return {"states": frozenset(d["states"]), "until": d["until"], "extra_s": float(d.get("extra_s", 0.3)),
+            "map": dict(d.get("map") or {})}
 
 
 def load_playbook(enemy: str = "BellBeast", path: Path | str | None = None) -> Playbook:
