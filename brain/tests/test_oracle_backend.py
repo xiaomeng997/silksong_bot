@@ -4,8 +4,11 @@ import math
 import numpy as np
 import pytest
 
-from ssbot.backends.oracle_backend import OracleBackend, cstate_names_from_facts, damage_flags, entity_kind
+from ssbot.backends.oracle_backend import (HAZARD_OF, PROJECTILE_HOLD_S, OracleBackend, box_hazard,
+                                         cstate_names_from_facts, damage_flags, entity_kind, entity_pos, main_collider,
+                                         type_key_of)
 from ssbot.core.bosses import BELL_BEAST
+from ssbot.ipc.ents import HAZARD_TYPES
 from ssbot.core.worldstate import (FM, Ev, Hazard, Kind, PauseBlock, Screen, Src, WorldState)
 from ssbot.tools import cstate
 from tests import worldstate_fixture as fx
@@ -257,20 +260,258 @@ def test_entity_kind_table():
     assert entity_kind(_ent(category="other", colliders=[])) == Kind.UNKNOWN
 
 
-def test_kind_is_sticky_per_entity():
-    states = fx.window(0)[-3:]
+def test_kind_follows_the_projectile_bit_with_a_short_hold():
+    states = fx.window(0)[-40:]
     bell = next(e for e in states[0]["ents"] if e["type_key"] == "BoneBeast DropBell L")
     bell["src"] = 34
     wss = run(states)
-    kinds = [next(e.kind for e in w.entities if e.id == bell["iid"]) for w in wss]
-    assert kinds == [Kind.PROJECTILE] * 3
+    t0 = wss[0].stamp.t_game_s
+    for w in wss:
+        kind = next(e.kind for e in w.entities if e.id == bell["iid"])
+        assert kind == (Kind.PROJECTILE if w.stamp.t_game_s - t0 <= PROJECTILE_HOLD_S else Kind.ENEMY_ATTACK)
+    assert wss[-1].stamp.t_game_s - t0 > PROJECTILE_HOLD_S       # the hold ended inside the window
 
 
-def test_damage_flags():
-    d = {"parry": 1 | 4, "flags": 4 | 16 | 2, "hazard_type": 5, "eff": -1}
-    assert damage_flags(d) == {"PARRYABLE", "DEFLECTABLE", "COUNTER", "FLAME", "TAG_ACID", "NON_LETHAL",
-                               "IGNORES_IFRAMES", "AMOUNT_FSM"}
+# ---- the TakeDamage gate: one case per hazard type -------------------------------------------------------------
+
+@pytest.mark.parametrize("name", HAZARD_TYPES + ("cog", "unknown"))
+def test_damage_flags_follow_the_take_damage_gate(name):
+    """HeroController.cs:5369 (m0:N1): with hit or parry i-frames only ENEMY, NON_HAZARD and EXPLOSION return
+    early; the parry stance and parry i-frames stop ENEMY only (cs:5391-5398); cogs deal TakeDamage(1, SPIKES)."""
+    h = HAZARD_TYPES.index(name) if name in HAZARD_TYPES else 99 if name == "unknown" else 1
+    d = {"parry": 0, "flags": 0, "hazard_type": h, "eff": 1}
+    flags = damage_flags(d, cog=name == "cog")
+    stopped_by_iframes = name in ("ENEMY", "NON_HAZARD", "EXPLOSION")
+    assert ("IGNORES_IFRAMES" in flags) == (not stopped_by_iframes)
+    assert ("IGNORES_PARRY" in flags) == (name != "ENEMY")
+    expect = Hazard.COG if name == "cog" else Hazard.OTHER if name == "unknown" else HAZARD_OF[name]
+    assert box_hazard(d, cog=name == "cog") == expect
+
+
+def test_damage_flag_bits():
+    d = {"parry": 1 | 4, "flags": 4 | 16 | 2, "hazard_type": 1, "eff": -1}
+    assert damage_flags(d) == {"PARRYABLE", "DEFLECTABLE", "COUNTER", "FLAME", "TAG_ACID", "NON_LETHAL", "AMOUNT_FSM"}
     assert damage_flags({"parry": 2, "flags": 0, "hazard_type": 1, "eff": 2}) == {"PARRYABLE"}
+
+
+def test_cog_entity_boxes_go_through_iframes():
+    s = fx.window(0)[-1]
+    bell = next(e for e in s["ents"] if e["type_key"] == "BoneBeast DropBell L")
+    bell["src"] = 2 | 16
+    w = OracleBackend(clock=None).feed(s)
+    box = next(e for e in w.entities if e.id == bell["iid"]).dmg_boxes[0]
+    assert box.hazard == Hazard.COG and {"IGNORES_IFRAMES", "IGNORES_PARRY"} <= box.flags
+
+
+# ---- positions (§4.1) ------------------------------------------------------------------------------------------
+
+def test_positions_are_collider_centres_with_the_transform_kept(wake):
+    states = {s["f"]: s for s in fx.window(0)}
+    w = at(wake, 56830)
+    s = states[56830]
+    b = s["hero"]["box"]
+    assert w.hero.pos.v == pytest.approx(((b[0] + b[2]) / 2, (b[1] + b[3]) / 2))
+    assert w.hero.pos_transform == pytest.approx(tuple(s["hero"]["pos"][:2]))
+    assert w.hero.pos.v[1] < w.hero.pos_transform[1]                # the hurtbox centre is below the transform
+    e = next(x for x in s["ents"] if x["iid"] == fx.BOSS_IID)
+    boss = next(x for x in w.entities if x.id == fx.BOSS_IID)
+    v = e["colliders"][0]["verts_world"]
+    assert boss.pos.v == pytest.approx(((min(v[0::2]) + max(v[0::2])) / 2, (min(v[1::2]) + max(v[1::2])) / 2))
+    assert boss.pos_transform == pytest.approx(tuple(e["pos"][:2]))
+    assert boss.anim == ("Charge Loop", 1) and boss.render_box == pytest.approx(tuple(e["render_aabb"]))
+    assert boss.flip_x is True and boss.hidden is False
+
+
+def test_main_collider_rules():
+    e = {"type_key": "Bone Beast", "pos": [1.0, 2.0, 0.0], "render_aabb": [0.0, 0.0, 4.0, 2.0], "colliders": [
+        {"verts_world": [10, 10, 12, 10, 12, 14, 10, 14]}, {"verts_world": [20, 20, 22, 20, 22, 22]}]}
+    assert entity_pos(e) == (11.0, 12.0)                              # no names: the first collider
+    e["colliders"][0]["name"] = "PolyCollider"
+    e["colliders"][1]["name"] = "Bone Beast (1)"
+    assert type_key_of("Bone Beast (1)") == "Bone Beast" and type_key_of("Bell(Clone) (2)") == "Bell"
+    assert entity_pos(e) == (21.0, 21.0)                              # names: the root's own collider
+    e["colliders"][1]["name"] = "LeapCollider"
+    assert entity_pos(e) == (2.0, 1.0) and main_collider(e) is None   # no root collider: the sprite bounds
+    e["colliders"], e["render_aabb"] = [], None
+    assert entity_pos(e) == (1.0, 2.0)                                # nothing: the transform
+
+
+# ---- hits taken ---------------------------------------------------------------------------------------------
+
+def _hit_state(extra_events: list[dict], amount: int = 1, hazard: str = "LAVA", source: str = "Lava Pool/Collider"
+               ) -> list[dict]:
+    states = fx.window(0)[100:102]
+    s = states[1]
+    s["ev"] = [{"k": "damage", "f": s["f"], "q": s["q"],
+                "d": {"source": source, "amount": amount, "hazard": hazard}}] + extra_events
+    return states
+
+
+def test_hit_amount_is_the_masks_taken_not_the_raw_argument():
+    s0 = fx.window(0)[100]
+    hp = s0["hero"]["health"]
+    states = _hit_state([{"k": "hp", "d": {"amount": 2, "delta": -2, "blue_delta": 0, "src": "TakeHealth"}}])
+    states[1]["hero"]["health"] = hp - 2
+    hit = next(e.data for e in run(states)[1].events if e.kind == Ev.HIT_TAKEN)
+    assert (hit.amount, hit.amount_raw, hit.hazard) == (2, 1, Hazard.LAVA)
+    assert hit.source_type is None and hit.source_id is None          # unresolved: no object path in a D field
+    assert hit.caller_path == "Lava Pool/Collider"
+    # no TakeHealth tap: the STATE's HP drop
+    states = _hit_state([])
+    states[1]["hero"]["health"] = hp - 1
+    hit = next(e.data for e in run(states)[1].events if e.kind == Ev.HIT_TAKEN)
+    assert hit.amount == 1
+    # a cancelled hit (no HP change, no lethal block): nothing lost
+    hit = next(e.data for e in run(_hit_state([]))[1].events if e.kind == Ev.HIT_TAKEN)
+    assert hit.amount == 0 and hit.amount_raw == 1
+
+
+def test_lethal_blocked_hit_reports_its_damage(wake):
+    hit = next(e.data for e in at(wake, 56777).events if e.kind == Ev.HIT_TAKEN)
+    assert (hit.amount, hit.amount_raw) == (2, 2)
+
+
+def test_special_damage_has_no_source_type():
+    states = fx.window(0)[100:102]
+    s = states[1]
+    s["ev"] = [{"k": "special_damage", "f": s["f"], "d": {"amount": 1, "method": "TakeQuickDamage"}}]
+    hit = next(e.data for e in run(states)[1].events if e.kind == Ev.HIT_TAKEN)
+    assert hit.source_type is None and hit.caller_path == "TakeQuickDamage"
+
+
+# ---- hero ---------------------------------------------------------------------------------------------------
+
+def _hero_state(**bits) -> dict:
+    s = fx.window(0)[-1]
+    if bits:
+        b = cstate.decode(s["hero"]["cstate"], NAMES)
+        b.update(bits)
+        s["hero"]["cstate"] = cstate.encode(b, NAMES)
+    return s
+
+
+def test_dash_cooldown_uses_can_dash():
+    s = _hero_state(dashing=False, airDashing=False, backDashing=False)
+    s["hero"]["can"]["dash"] = True
+    w = OracleBackend(clock=None).feed(s)
+    assert w.hero.dash_cd_left.v == 0.0 and w.hero.dash_cd_left.src == Src.ORACLE
+    s["hero"]["can"]["dash"] = False          # no dash seen, yet CanDash is false: another writer of the timer
+    w = OracleBackend(clock=None).feed(s)
+    assert w.hero.dash_cd_left.conf == 0.5 and w.hero.dash_cd_left.sigma >= 0.1
+
+
+def test_wall_side():
+    s = _hero_state(onGround=False, touchingWall=True, wallSliding=False, wallClinging=False)
+    s["hero"]["facing"] = 1
+    w = OracleBackend(clock=None).feed(s)
+    assert w.hero.contact.v == "WALL_R" and w.hero.contact.conf == 0.5        # touching only: side unknown
+    s["hero"]["wall"] = [True, False]
+    w = OracleBackend(clock=None).feed(s)
+    assert w.hero.contact.v == "WALL_L" and w.hero.contact.conf == 1.0        # oracle hero.wall
+    s = _hero_state(onGround=False, wallSliding=True)
+    s["hero"]["facing"] = -1
+    w = OracleBackend(clock=None).feed(s)
+    assert w.hero.contact.v == "WALL_L" and w.hero.contact.conf == 1.0        # sliding faces the wall
+
+
+def test_resources_unknown_without_player_data():
+    s = fx.window(0)[0]
+    for k in ("health", "max_health", "health_blue", "silk", "silk_max", "geo", "shell_shards", "crest", "tools",
+              "tool_amounts", "fractured_mask"):
+        s["hero"].pop(k, None)
+    w = OracleBackend(clock=None).feed(s)
+    r = w.res
+    assert r.hp.src == Src.UNKNOWN and r.hp.conf == 0.0 and r.hp_max.conf == 0.0 and r.silk.conf == 0.0
+    assert r.crest.conf == 0.0 and r.tools == []
+    assert w.hero.pos.conf == 1.0                                              # the hero itself is known
+
+
+def test_bind_at_full_hp_is_done_from_the_spell_fsm():
+    states = fx.window(0)[-4:]
+    for i, s in enumerate(states[1:3]):
+        bits = cstate.decode(s["hero"]["cstate"], NAMES)
+        bits["isBinding"] = True
+        s["hero"]["cstate"] = cstate.encode(bits, NAMES)
+        s["hero"]["spell"] = ["Binding", 0.1] if i == 0 else ["Bind Burst", 0.0]
+    states[3]["hero"]["spell"] = ["Cooldown", 0.0]
+    for s in states:
+        s["hero"]["health"] = s["hero"]["max_health"]
+    wss = run(states)
+    assert [e.kind for e in wss[3].events if e.kind.name.startswith("BIND")] == [Ev.BIND_DONE]
+    states[2]["hero"]["spell"] = ["Binding", 0.2]                    # interrupted before the burst
+    wss = run(states)
+    assert [e.kind for e in wss[3].events if e.kind.name.startswith("BIND")] == [Ev.BIND_BROKEN]
+
+
+def test_new_hero_fields_when_exported():
+    s = _hero_state(invulnerable=True)
+    h = s["hero"]
+    h["tm"] = {"inv": 0.5, "recoil": 0.1, "recoil_steps": 0, "dash_cd": 0.2, "atk_cd": 0.15, "atk_t": 0.1,
+               "tool_cd": 0.0, "jump_steps": 3, "jumped_steps": 2, "ds": 0.0, "ds_rec": 0.0, "grav": 1.0,
+               "qj": 0, "qa": 0, "qt": 0}
+    h["alpha"] = 0.25
+    h["tags"] = [{"kind": "acid", "dmg_left": 2, "t_left": 1.5}, {"kind": "flame", "dmg_left": 1, "t_left": 0.5}]
+    h["tool_max"] = [None] * len(h["tools"])
+    slot = next(i for i, x in enumerate(h["tools"]) if x)
+    h["tool_max"][slot] = 12
+    w = OracleBackend(clock=None).feed(s)
+    hero = w.hero
+    assert (hero.iframes_left.v, hero.recoil_left.v, hero.dash_cd_left.v) == (0.5, 0.1, 0.2)
+    assert all(x.src == Src.ORACLE for x in (hero.iframes_left, hero.recoil_left, hero.dash_cd_left))
+    assert hero.action_lock_left.v >= 0.15 and hero.phys_alpha == 0.25 and hero.tm["jump_steps"] == 3.0
+    assert w.res.pending_dmg.v == 3 and w.res.pending_dmg.src == Src.ORACLE and {"ACID", "FLAME"} <= w.res.status
+    assert w.res.tools[0].ammo_max == 12
+
+
+def test_screen_splits_loading_from_entering():
+    s = fx.window(0)[0]
+    s["game"]["gs"] = 3
+    assert OracleBackend(clock=None).feed(s).game.screen.v == Screen.FADE
+    s["game"]["gs"] = 2
+    assert OracleBackend(clock=None).feed(s).game.screen.v == Screen.TRANSITION
+
+
+def test_menu_and_gates_when_exported():
+    s = fx.window(0)[0]
+    s["menu"] = {"sel": "quit", "quit_ok": False, "dim": 0.6, "alpha": 1.0, "ignore_unpause": False,
+                 "quitting": False}
+    s["room"] = {"gates": [{"name": "Battle Gate L", "enabled": True, "box": [70.0, 2.0, 71.0, 10.0]}]}
+    w = OracleBackend(clock=None).feed(s)
+    assert w.game.menu.cursor_item == "quit" and w.game.menu.quit_greyed is True
+    assert w.terrain.dynamic_deltas == [("Battle Gate L", True)]
+    assert w.terrain.gates == [("Battle Gate L", True, (70.0, 2.0, 71.0, 10.0))]
+
+
+# ---- entities: hidden, hit events -----------------------------------------------------------------------------
+
+def test_hidden_entity_is_exported_without_boxes():
+    states = fx.window(0)
+    i = next(i for i, s in enumerate(states) if any(e["iid"] == fx.BOSS_IID for e in s["ents"]))
+    s = states[i]
+    e = next(e for e in s["ents"] if e["iid"] == fx.BOSS_IID)
+    e.update(hidden=True, colliders=[], render_aabb=None)
+    w = OracleBackend(bosses=[BELL_BEAST], clock=None).feed(s)
+    boss = next(x for x in w.entities if x.id == fx.BOSS_IID)
+    assert boss.hidden and boss.visible_frac == 0.0 and boss.dmg_boxes == [] and boss.body_polys == []
+    assert boss.pos.v == pytest.approx(tuple(e["pos"][:2])) and boss.kind == Kind.BOSS
+
+
+def test_hit_events_give_hits_and_the_killing_blow():
+    states = fx.window(2)
+    for s in states:
+        if s["f"] == 68995:
+            s["ev"].append({"k": "hit", "f": 68995, "d": {
+                "ent": fx.BOSS_IID, "type_key": "Bone Beast", "dmg": 5, "dealt": 5, "attack": "Slash",
+                "src": "Slash", "hp_before": 20, "hp_after": 15, "dead": False, "crit": False}})
+        if s["f"] == 69029:
+            s["ev"].insert(0, {"k": "hit", "f": 69029, "d": {
+                "ent": fx.BOSS_IID, "type_key": "Bone Beast", "dmg": 15, "dealt": 15, "attack": "Silk Spear",
+                "src": "Silk Spear", "hp_before": 15, "hp_after": 0, "dead": True, "crit": False}})
+    wss = run(states)
+    hits = events(wss, Ev.HIT_DEALT)
+    assert [(f, d.amount, d.hp_after, d.attack, d.killing) for f, d in hits] == [
+        (68995, 5.0, 15.0, "Slash", False), (69029, 15.0, 0.0, "Silk Spear", True)]
+    assert [(f, d.target_id) for f, d in events(wss, Ev.ENEMY_KILLED)] == [(69029, fx.BOSS_IID)]
 
 
 def test_hero_without_state_is_unknown():
@@ -280,3 +521,5 @@ def test_hero_without_state_is_unknown():
     assert w.hero.pos.conf == 0.0 and w.res.hp.src == Src.UNKNOWN
     assert w.hero.iframes_left is None and math.isfinite(w.stamp.t_game_s)
     assert np.isfinite(w.cam.x)
+
+

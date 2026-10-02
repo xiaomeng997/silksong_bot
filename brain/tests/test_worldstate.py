@@ -105,3 +105,37 @@ def test_dataclasses_are_slotted():
     for cls in W.SCHEMA_CLASSES:
         assert "__slots__" in vars(cls), cls.__name__
     assert isinstance(W.E, type) and not isinstance(W.E, types.GenericAlias)
+
+
+def test_estimate_fields_are_the_v_estimate_values_of_the_design():
+    assert W.estimate_fields(W.Game) == ("pause_available", "quit_available", "pause_blockers")
+    assert W.estimate_fields(Entity) == ("hp_est",)
+    assert W.estimate_fields(W.DamageBox) == ("active",)
+    assert W.estimate_fields(W.Resources) == ("bind_ready", "pending_dmg")
+    ws = _full_state()
+    paths = dict(W.iter_estimates(ws))
+    assert "game.pause_available" in paths and "entities[0].hp_est" in paths
+    assert not (W.VISION_BLOCKS & (PauseBlock.DISABLE_SAVEQUIT | PauseBlock.PRELOAD_PENDING
+                                   | PauseBlock.BLOCKING_INTERACT | PauseBlock.NOT_ACCEPTING_INPUT))
+
+
+def test_take_damage_gate_sets():
+    """HeroController.TakeDamage (m0:N1): only ENEMY, NON_HAZARD and EXPLOSION stop at i-frames; parry stops ENEMY."""
+    assert W.IFRAME_BLOCKED == {W.Hazard.ENEMY, W.Hazard.NON_HAZARD, W.Hazard.EXPLOSION}
+    assert W.PARRY_BLOCKED == {W.Hazard.ENEMY}
+    for h in (W.Hazard.SINK, W.Hazard.PIT, W.Hazard.SPIKES, W.Hazard.COG, W.Hazard.OTHER):
+        assert h not in W.IFRAME_BLOCKED
+
+
+def test_view_copies_lists_and_shares_only_immutable_tuples():
+    ws = _full_state()
+    ws.entities[0].body_polys = [[(0.0, 0.0), (1.0, 0.0), (1.0, 1.0)]]
+    ws.entities[0].dmg_boxes = [W.DamageBox(poly=[(0.0, 0.0), (1.0, 1.0), (0.0, 1.0)], name="PolyCollider")]
+    ws.entities[0].pos_transform = (3.0, 4.0)
+    ws.terrain.gates = [("Battle Gate", True, (0.0, 0.0, 1.0, 5.0))]
+    v = ws.view(W.VISION_EQUIVALENT)
+    v.entities[0].body_polys[0].append((9.0, 9.0))
+    v.entities[0].dmg_boxes[0].poly.append((9.0, 9.0))
+    assert len(ws.entities[0].body_polys[0]) == 3 and len(ws.entities[0].dmg_boxes[0].poly) == 3
+    assert v.entities[0].pos_transform is None and v.entities[0].dmg_boxes[0].name is None
+    assert v.terrain.gates == ws.terrain.gates and v.terrain.gates is not ws.terrain.gates

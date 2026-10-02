@@ -3,7 +3,11 @@ path (DESIGN §3.9.2, §4.5). The oracle's action-side delay is configured separ
 
     deg = DegradedOracleBackend(OracleBackend(bosses=[BELL_BEAST]), ObservabilityFilter(bosses=[BELL_BEAST]))
     deg.reset(episode_seed)
-    ws = deg.feed(state)        # every STATE, in order; None while the delay line fills
+    ws = deg.feed(state)        # every STATE, in order; None while the delay line fills (the first k STATEs)
+    link.act(deg.live_frame + lead, ...)    # target frames from the live frame (see delay_line), not ws.stamp.frame
+
+Training only: final-run packages must not import this module (it pulls in the oracle backend; tests/
+test_import_firewall.py checks the import graph).
 """
 from collections.abc import Callable
 
@@ -33,7 +37,13 @@ class DegradedOracleBackend:
         self.noise.reset(noise_seed)
         return self.delay.reset(delay_seed)
 
+    @property
+    def live_frame(self) -> int | None:
+        """The newest STATE frame fed (what ACTION.target_frame is counted from)."""
+        return self.delay.live_frame
+
     def feed(self, state: dict) -> WorldState | None:
+        """The WorldState of k STATEs ago; None only while the delay line fills."""
         return self.delay.push(self.noise.apply(self.filt.apply(self.oracle.feed(state))))
 
     def step(self) -> WorldState | None:
