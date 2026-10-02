@@ -351,16 +351,20 @@ class Forecast:
         ok[:] = tk <= t_left
         if tr.state in self.fc.no_hurtbox:
             ok[:] = False
-        fam = tr.ctx.family
+        # the vision view's tracker keeps the attack in last_family / last_anchor (ctx is the oracle's): without them
+        # the box stood still while the boss moved (stage C run 20261002_093052, predict_audit: boss centre 7.3 u off
+        # at +0.5 s for side slashes, 9.4 u at a down spike's active frame)
+        fam = tr.ctx.family if self.fc.view == ORACLE else tr.last_family
+        anchor = tr.ctx.anchor if self.fc.view == ORACLE else tr.last_anchor
         f = self.fc.model.families.get(fam) if fam else None
-        if f is not None and f.path is not None and tr.t_start is not None and tr.ctx.anchor is not None:
+        if f is not None and f.path is not None and tr.t_start is not None and anchor is not None:
             t_att = self.origin_t - tr.t_start
             path = f.path
             xs = np.interp(t_att + tk, path[:, 0], path[:, 6])
             ys = np.interp(t_att + tk, path[:, 0], path[:, 7])
             x0 = np.interp(t_att, path[:, 0], path[:, 6])
             y0 = np.interp(t_att, path[:, 0], path[:, 7])
-            m = tr.ctx.anchor.mirror
+            m = anchor.mirror
             box[:, [0, 2]] += (m * (xs - x0))[:, None]
             box[:, [1, 3]] += (ys - y0)[:, None]
         return box, ok
