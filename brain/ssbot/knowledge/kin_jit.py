@@ -173,7 +173,7 @@ def on_ground(px, py, hw, skin, foot, TT):
 
 # ---- one physics step, contact events, one Update ---------------------------------------------------------------
 
-@njit(cache=True, error_model="numpy")
+@njit(cache=True, inline="always", error_model="numpy")
 def fixed_step(x, P, TT):
     fdt = P[P_FDT]
     hw = P[P_HW]
@@ -421,7 +421,7 @@ def do_attack(x, mask, P):
         x[JSTEPS] = 0.0
 
 
-@njit(cache=True, error_model="numpy")
+@njit(cache=True, inline="always", error_model="numpy")
 def update(x, mask, ev, dt, udt, P):
     mode = x[MODE]
     mode0 = mode
