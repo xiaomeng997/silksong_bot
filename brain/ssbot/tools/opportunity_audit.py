@@ -10,13 +10,14 @@ attack-outcome audit (predict_audit) checks only the chosen plan; this one finds
 
 Per sampled frame (every `every` frames while the boss has an enabled collider within 9 u of the hero): the hero's
 kinematic state from the recording (StateTracker, as the planner starts from it), the 2 frames of masks already sent
-(the action latency), then each option over 48 frames, nominal lane: side slash, up-slash (side key towards the
-boss), jump + side slash, jump + up-slash, jump + down attack, Silkspear, each towards the boss. An option hits when
-its attack box (planner.SIDE / UP / DOWN / SPEAR in the planner's active windows) meets the boss's enabled collider
-polygons recorded for that frame; it is safe when none of its hero boxes meets an enabled damaging collider of any
-entity recorded for that frame (hindsight: the real future, not the support). The bot's outcome is the recorded hit
-events in the same 48 frames. A missed opportunity: some safe option hits, the bot dealt none. Tables per boss
-attack group (fight_stats groups) and option.
+(the action latency), then each option of the planner's attack space over 48 frames, nominal lane (_options: side /
+up / down attacks with the side key towards, away or none, no jump or holds 6 / 11 / 24, press frames, the down
+attack's second press after a bounce, the Silkspear). Attacks are scored as the planner scores them (planner.
+_attacks_of, its windows) against the boss's recorded future (its collider box per frame, the polygon of now moved
+with it); a down hit is re-rolled with the bounce for the chain. An option is safe when none of its hero boxes meets
+an enabled damaging collider of any entity recorded for that frame (hindsight: the real future, not the support).
+The bot's outcome is the recorded hit events in the same 48 frames. A missed opportunity: some safe option hits, the
+bot dealt none; the winning combinations are listed per boss attack group (fight_stats groups).
 """
 import argparse
 import json
@@ -27,19 +28,6 @@ from pathlib import Path
 import numpy as np
 
 T = 48
-
-
-def _options(face: int):
-    from ssbot.knowledge.kinematics import B_ATTACK, B_DOWN, B_JUMP, B_LEFT, B_QUICKCAST, B_RIGHT, B_UP
-    side = B_RIGHT if face > 0 else B_LEFT
-    opts = {}
-    m = np.zeros(T, np.int64); m[0:2] = side; m[1:4] |= B_ATTACK; opts["side"] = m
-    m = np.zeros(T, np.int64); m[0:6] = side | B_UP; m[1:4] |= B_ATTACK; opts["up"] = m
-    m = np.zeros(T, np.int64); m[0:24] |= B_JUMP; m[10:12] |= side; m[11:14] |= B_ATTACK; opts["jump_side"] = m
-    m = np.zeros(T, np.int64); m[0:24] |= B_JUMP; m[8:14] |= side | B_UP; m[9:12] |= B_ATTACK; opts["jump_up"] = m
-    m = np.zeros(T, np.int64); m[0:24] |= B_JUMP; m[16:22] |= side | B_DOWN; m[17:20] |= B_ATTACK; opts["jump_down"] = m
-    m = np.zeros(T, np.int64); m[0:3] = side; m[0:3] |= B_QUICKCAST; opts["spear"] = m
-    return opts
 
 
 def _polys(e: dict) -> list[np.ndarray]:
@@ -55,6 +43,37 @@ def _meets(rect, polys) -> bool:
     return bool(_rect_meets_polys(rect[0], rect[1], rect[2], rect[3], flat, starts, 0.0, 0.0))
 
 
+def _options(face: int) -> dict:
+    """The planner's attack space around now: side and up slashes and down attacks with the side key towards the boss,
+    away or none, after no jump or a jump held 6 / 11 / 24 frames, pressed 0 / 6 / 12 frames in (down: 4-20 frames,
+    with a second down press 22 frames after the first: the chain after a bounce), and the Silkspear."""
+    from ssbot.knowledge.kinematics import B_ATTACK, B_DOWN, B_JUMP, B_LEFT, B_QUICKCAST, B_RIGHT, B_UP
+    toward = B_RIGHT if face > 0 else B_LEFT
+    away = B_LEFT if face > 0 else B_RIGHT
+    opts = {}
+    for dn, key in (("toward", toward), ("away", away), ("none", 0)):
+        for kind in ("side", "up", "down"):
+            holds = (6, 11, 24) if kind == "down" else (0, 6, 11, 24)
+            presses = (4, 8, 12, 16, 20) if kind == "down" else (0, 6, 12)
+            for hold in holds:
+                for pr in presses:
+                    m = np.zeros(T, np.int64)
+                    m[:hold] |= B_JUMP
+                    m[pr:] |= key
+                    extra = B_UP if kind == "up" else (B_DOWN if kind == "down" else 0)
+                    if kind == "up" and not key:
+                        continue                        # an up edge alone starts an interaction
+                    for p2 in ((pr, pr + 22) if kind == "down" else (pr,)):
+                        if p2 + 4 < T:
+                            m[p2:p2 + 6] |= extra
+                            m[p2 + 1:p2 + 4] |= B_ATTACK
+                    opts[f"{kind}|{dn}|hold{hold}|press{pr}"] = m
+    m = np.zeros(T, np.int64)
+    m[0:3] = toward | B_QUICKCAST
+    opts["spear|toward|hold0|press0"] = m
+    return opts
+
+
 def audit_run(run: Path, every: int, episodes: int) -> dict:
     from ssbot.combat import planner as pl
     from ssbot.knowledge import kinematics as kin
@@ -63,9 +82,9 @@ def audit_run(run: Path, every: int, episodes: int) -> dict:
     from ssbot.tools.postmortem import episode_rows, find_recording
     from ssbot.train.encounters import BELL_BEAST
     params = kin.HeroParams.load()
-    geo = {1: (pl.SIDE, 0, 6), 2: (pl.UP, 2, 8), 3: (pl.DOWN, 0, 16), 4: (pl.SPEAR, 17, 20)}
-    kind_of = {"side": 1, "up": 2, "jump_side": 1, "jump_up": 2, "jump_down": 3, "spear": 4}
+    win = pl.WINDOWS["v2"]
     stats = defaultdict(Counter)
+    wins = defaultdict(Counter)
     samples = 0
     for ap in sorted(run.glob("attempts_i*.jsonl")):
         inst = int(ap.stem.split("_i")[1])
@@ -79,8 +98,7 @@ def audit_run(run: Path, every: int, episodes: int) -> dict:
                     terrain = kin.Terrain2D.from_message(msg, params.scene(BELL_BEAST.scene))
             states = list(r.states(row["f_end"] - row["acts"], row["f_end"]))
             hits = sorted(e["frame"] for e in r.events() if e.get("kind") == "hit"
-                          and (e.get("data") or {}).get("type_key") == "Bone Beast") if hasattr(r, "events") else []
-            by_f = {s["f"]: s for s in states}
+                          and (e.get("data") or {}).get("type_key") == "Bone Beast")
             trk = kin.StateTracker(params, terrain)
             for n, s in enumerate(states):
                 trk.push(s)
@@ -90,74 +108,81 @@ def audit_run(run: Path, every: int, episodes: int) -> dict:
                 hb = (s.get("hero") or {}).get("box")
                 if boss is None or not hb or not _polys(boss):
                     continue
-                st = (boss.get("fsms") or [{}])[0].get("state")
                 hx = 0.5 * (hb[0] + hb[2])
-                bx = boss["pos"][0]
-                if abs(bx - hx) > 9.0:
+                if abs(boss["pos"][0] - hx) > 9.0:
                     continue
                 try:
                     start = trk.state().copy()
                 except Exception:
                     continue
-                face = 1 if bx >= hx else -1
-                f0 = s["f"]
-                pre = np.array([((by_f.get(f0 + k) or {}).get("act") or {}).get("mask", 0) or 0 for k in (1, 2)],
-                               np.int64)
+                st = (boss.get("fsms") or [{}])[0].get("state")
+                group = GROUP_OF.get(st, "other")
+                face = 1 if boss["pos"][0] >= hx else -1
+                fut = states[n:n + T + 3]
+                # the boss's recorded future: per frame its enabled colliders' box (the polygon of now moved with it)
+                bbox = np.zeros((T + 3, 4))
+                okb = np.zeros(T + 3, np.bool_)
+                dmg = []
+                for j, sj in enumerate(fut):
+                    bj = next((e for e in sj.get("ents") or () if e.get("type_key") == "Bone Beast"), None)
+                    pj = _polys(bj) if bj else []
+                    if pj:
+                        v = np.concatenate(pj)
+                        bbox[j] = (v[:, 0].min(), v[:, 1].min(), v[:, 0].max(), v[:, 1].max())
+                        okb[j] = True
+                    dmg.append([np.asarray(c2["verts_world"], float).reshape(-1, 2) for e in sj.get("ents") or ()
+                                for c2 in e.get("colliders") or ()
+                                if c2.get("enabled") and (c2.get("damage") or {}).get("dealt")])
+                p0 = _polys(boss)
+                flat = np.concatenate(p0)
+                starts = np.cumsum([0] + [len(q) for q in p0]).astype(np.int64)
+                base = np.array([bbox[0, 0], bbox[0, 1]])
+                pre = np.array([((fut[k] if k < len(fut) else {}).get("act") or {}).get("mask", 0) or 0
+                                for k in (1, 2)], np.int64)
                 opts = _options(face)
-                cmd = np.stack([np.concatenate([pre, m])[:T + 2] for m in opts.values()])
+                names = list(opts)
+                cmd = np.stack([np.concatenate([pre, opts[k]])[:T] for k in names])
                 latched, _ = kin.hold_filter(cmd, kin.HoldState.idle(len(cmd)))
                 roll = kin.rollout(start, latched, params, terrain)
                 samples += 1
-                group = GROUP_OF.get(st, "other")
-                any_hit = False
-                for c, name in enumerate(opts):
-                    kind = kind_of[name]
-                    g, w0, w1 = geo[kind]
-                    k0 = None
-                    for k in range(1, T + 2):
-                        if kind == 4 and roll.mode[c, k] == kin.M_CAST and roll.mode[c, k - 1] != kin.M_CAST:
-                            k0 = k
-                        elif kind == 3 and roll.mode[c, k] == kin.M_DS_SPIKE and roll.mode[c, k - 1] != kin.M_DS_SPIKE:
-                            k0 = k
-                        elif kind in (1, 2) and roll.flags[c, k] & kin.F_ATTACKING and not roll.flags[c, k - 1] \
-                                & kin.F_ATTACKING:
-                            k0 = k
-                        if k0 is not None:
-                            break
-                    hit = safe = False
-                    if k0 is not None:
-                        for j in range(k0 + w0, min(T + 2, k0 + w1)):
-                            sj = by_f.get(f0 + j)
-                            if sj is None:
-                                continue
-                            bj = next((e for e in sj.get("ents") or () if e.get("type_key") == "Bone Beast"), None)
-                            cx = 0.5 * (roll.box[c, j, 0] + roll.box[c, j, 2])
-                            cy = 0.5 * (roll.box[c, j, 1] + roll.box[c, j, 3])
-                            x0, x1 = (cx + g[0], cx + g[1]) if face > 0 else (cx - g[1], cx - g[0])
-                            if bj is not None and _meets((x0, cy + g[2], x1, cy + g[3]), _polys(bj)):
-                                hit = True
-                                break
+                best, best_name = 0, None
+                for c, name in enumerate(names):
+                    lst = pl._attacks_of(np.ascontiguousarray(roll.box[c]), np.ascontiguousarray(roll.flags[c]),
+                                         np.ascontiguousarray(roll.mode[c]), np.ascontiguousarray(latched[c]), face,
+                                         bbox[:T + 1], okb[:T + 1], flat, starts, base, win)
+                    nh = sum(1 for _, _, j in lst if j >= 0)
+                    first_ds = next((j for kd, _, j in lst if kd == 3 and j >= 0), None)
+                    if first_ds is not None:                      # the chain: the bounce, then the second press
+                        ev = np.zeros((1, latched.shape[1]), np.int64)
+                        ev[0, min(first_ds, latched.shape[1] - 1)] = kin.EV_POGO
+                        r2 = kin.rollout(start, latched[c:c + 1], params, terrain, events=ev)
+                        lst2 = pl._attacks_of(np.ascontiguousarray(r2.box[0]), np.ascontiguousarray(r2.flags[0]),
+                                              np.ascontiguousarray(r2.mode[0]), np.ascontiguousarray(latched[c]),
+                                              face, bbox[:T + 1], okb[:T + 1], flat, starts, base, win)
+                        nh = max(nh, sum(1 for _, _, j in lst2 if j >= 0))
+                        box_c = r2.box[0]
+                    else:
+                        box_c = roll.box[c]
                     safe = True
-                    for j in range(1, T + 2):
-                        sj = by_f.get(f0 + j)
-                        if sj is None:
-                            continue
-                        dmg = [p for e in sj.get("ents") or () for c2 in e.get("colliders") or ()
-                               if c2.get("enabled") and (c2.get("damage") or {}).get("dealt")
-                               for p in [np.asarray(c2["verts_world"], float).reshape(-1, 2)]]
-                        if dmg and _meets(tuple(roll.box[c, j]), dmg):
-                            safe = False
-                            break
-                    stats[(group, name)]["n"] += 1
-                    stats[(group, name)]["hit"] += hit
-                    stats[(group, name)]["safe_hit"] += hit and safe
-                    any_hit |= hit and safe
-                bot = any(f0 <= h <= f0 + T for h in hits)
-                stats[(group, "bot")]["n"] += 1
-                stats[(group, "bot")]["hit"] += bot
-                stats[(group, "missed")]["n"] += 1
-                stats[(group, "missed")]["hit"] += any_hit and not bot
-    return {"samples": samples, "table": {f"{g}/{o}": dict(v) for (g, o), v in sorted(stats.items())}}
+                    if nh:
+                        for j in range(1, min(len(dmg), box_c.shape[0])):
+                            if dmg[j] and _meets(tuple(box_c[j]), dmg[j]):
+                                safe = False
+                                break
+                    kind = name.split("|")[0]
+                    stats[(group, kind)]["n_options"] += 1
+                    stats[(group, kind)]["safe_hitting"] += int(nh > 0 and safe)
+                    if safe and nh > best:
+                        best, best_name = nh, name
+                bot = sum(1 for h in hits if fut[0]["f"] <= h <= fut[0]["f"] + T)
+                stats[(group, "bot")]["samples"] += 1
+                stats[(group, "bot")]["hit_samples"] += int(bot > 0)
+                stats[(group, "missed")]["samples"] += 1
+                if best > 0 and bot == 0:
+                    stats[(group, "missed")]["missed"] += 1
+                    wins[group][f"{best_name} ({best} hit{'s' if best > 1 else ''})"] += 1
+    return {"samples": samples, "table": {f"{g}/{o}": dict(v) for (g, o), v in sorted(stats.items())},
+            "winning_combos": {g: dict(c.most_common(6)) for g, c in wins.items()}}
 
 
 def human(path: Path, f0: int, f1: int) -> dict:
