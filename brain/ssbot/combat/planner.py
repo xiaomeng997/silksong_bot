@@ -42,7 +42,8 @@ the Bind macro when the tactics want it, over a longer horizon):
             Forecast.prob over the nominal lane.
   J         playbook weights: predicted nail hits on the boss's nominal hurtbox (Hunter slash, up slash and down
             spike boxes from docs/facts/1.0.30000/crests.json P17, active 6 frames from the attack's start), Silkspear
-            hits x 3, wasted attacks, jump presses, the end position's distance to the tactics' stance, its future
+            hits x 3, wasted attacks, Silkspear casts that hit nothing (cast_waste: 4 of the Bind's 9 silk), jump
+            presses, the end position's distance to the tactics' stance, its future
             support coverage (the tactics' risk map: the terminal value), facing the boss, ending on the floor, and
             a bonus for carrying on the previous plan (hysteresis).
 Cost (13900K, 8 threads, ssbot.tools.planner_bench open loop over 5,951 ticks of live recording i2_002, 4 game
@@ -68,8 +69,8 @@ from ssbot.core.worldstate import WorldState
 from ssbot.knowledge import kinematics as kin
 from ssbot.knowledge.knockback import knockback_hull
 from ssbot.knowledge.kinematics import (B_ATTACK, B_BIND, B_JUMP, B_LEFT, B_QUICKCAST, B_RIGHT, B_UP, F_ATTACKING,
-                                        F_GROUND, F_INVULN, M_CAST, M_DS_ANTIC, M_DS_SPIKE, HeroParams, HoldState,
-                                        Terrain2D)
+                                        F_GROUND, F_INVULN, M_CAST, M_DS_ANTIC, M_DS_SPIKE, M_NORMAL, HeroParams,
+                                        HoldState, Terrain2D)
 
 # Hunter attack boxes relative to the hurtbox centre in the facing frame (+x forward), crests.json P17 clash_tink
 # polygons (captured facing left): side x [-0.12, 2.81] y [-0.62, 1.52]; up x [-1.23, 0.85] y [-0.04, 3.33];
@@ -408,7 +409,7 @@ class Planner:
         face0 = 1 if start.reshape(kin.K, -1)[kin.FACE, 0] >= 0 else -1
         boss, okb = f.boss_box(tk)
         wv = np.array([w.get("hit", 10.0), w.get("waste", 0.6), w.get("jump", 0.15), w.get("stance", 0.6),
-                       w.get("risk", 3.0), w.get("face", 0.3), w.get("ground", 0.2)])
+                       w.get("risk", 3.0), w.get("face", 0.3), w.get("ground", 0.2), w.get("cast_waste", 2.0)])
         boss_x = prefs.boss_x if prefs.boss_x is not None else np.nan
         max_hits = float(prefs.max_hits) if prefs.max_hits is not None else np.inf
         rx = prefs.risk_x if len(prefs.risk_x) else np.zeros(1)
@@ -454,17 +455,24 @@ def _score_kernel(box, flags, mode, latched, face0, boss, okb, wv, stance_x, rx,
         cys = np.empty(T1)
         for k in range(T1):
             if k > 0:
+                # the kinematics' facing rule: a direction key turns the hero only in normal movement outside an
+                # attack, or as a cast starts (the throw goes the held way); a cast, an attack, a dive and the hurt
+                # modes keep it (an earlier version turned with every key, so a cast away from the boss followed by a
+                # run towards it scored the spear's three hits: run 20261002_064001, 123 casts away, none hit)
                 m = latched[c, k - 1]
-                if m & B_LEFT:
-                    face = -1
-                elif m & B_RIGHT:
-                    face = 1
+                d = 1 if m & B_RIGHT else (-1 if m & B_LEFT else 0)
+                if d != 0:
+                    starts_cast = mode[c, k] == M_CAST and mode[c, k - 1] != M_CAST
+                    free = mode[c, k - 1] == M_NORMAL and (flags[c, k - 1] & F_ATTACKING) == 0
+                    if starts_cast or free:
+                        face = d
             fc[k] = face
             cxs[k] = 0.5 * (box[c, k, 0] + box[c, k, 2])
             cys[k] = 0.5 * (box[c, k, 1] + box[c, k, 3])
         h = 0.0
         presses = 0
         jumps = 0
+        dry_casts = 0
         nr = False
         for k in range(T1):
             if k > 0:
@@ -514,6 +522,8 @@ def _score_kernel(box, flags, mode, latched, face0, boss, okb, wv, stance_x, rx,
                                              boss[j, 0], boss[j, 1], boss[j, 2], boss[j, 3]):
                     h += 3.0
                     nr = True
+                else:
+                    dry_casts += 1
         h = min(h, max_hits)
         waste = max(presses - h, 0.0)
         x_end = cxs[T1 - 1]
@@ -525,7 +535,7 @@ def _score_kernel(box, flags, mode, latched, face0, boss, okb, wv, stance_x, rx,
             d_mean += abs(cxs[k] - stance_x)
         d_mean /= T1
         v = (wv[0] * h - wv[1] * waste - wv[2] * jumps - wv[3] * (0.5 * abs(x_end - stance_x) + 0.5 * d_mean)
-             - wv[4] * r)
+             - wv[4] * r - wv[7] * dry_casts)
         if boss_x == boss_x:
             want = 1 if boss_x > x_end else -1
             if fc[T1 - 1] == want:

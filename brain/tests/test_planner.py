@@ -249,3 +249,29 @@ def test_tail_check_runs_for_a_fresh_choice(model, tpls, params, arena):
     planner = Planner(params, arena, PlannerConfig(threads=4))
     r, _ = tick(planner, model, tpls, params, [], 85.0)
     assert r.tail_ok is True
+
+
+def test_the_spear_scores_only_along_the_throw(model, tpls, params, arena):
+    """The Silkspear flies the way the hero faced as the cast started; keys held during the cast do not turn it
+    (run 20261002_064001: 123 casts away from the boss, none hit, all scored as three hits). A cast that hits nothing
+    costs cast_waste."""
+    from ssbot.core.worldstate import Entity, Kind
+    an = model.anchor("BB_LEAP", "Set L")
+    fc = fc_with(model, tpls, [Root("Leap Land", -0.1, -0.1, Ctx("BB_LEAP", "Set L", an, "P1", False), current=True)])
+    fc.tracker.state, fc.tracker.t_entry = "Leap Land", -0.1
+    f = fc.forecast(2.0, 0.0)
+    f.boss = Entity(id=1, kind=Kind.BOSS, type_key=E("Bone Beast"), pos=E((96.0, 4.0)),
+                    render_box=(94.0, 2.0, 98.0, 6.0), visible_frac=1.0)
+    ws = world(88.0, silk=9)
+    prefs = Tactics(load_playbook()).decide(ws, f, None, 3)
+    planner = Planner(params, arena, PlannerConfig(threads=4))
+    cs = planner.cands
+    names = ["SILKSKILL(0)R+idle", "SILKSKILL(0)L+runR", "SILKSKILL(0)L+idle"]
+    rows = [next(i for i in range(len(cs.cmd)) if cs.name(i) == n) for n in names]
+    start = kin.initial_state(params, 88.0, 2.015 + params.foot, facing=1, silk=9)
+    latched, _ = hold_filter_jit(cs.cmd[rows], kin.HoldState.idle(len(rows)))
+    roll = kin.rollout(start, latched, params, arena, variants="bounds", threads=4)
+    tk = np.arange(latched.shape[1] + 1) * params.frame_time
+    J, hits, _ = planner._score(ws, roll, latched, start, f, prefs, 0, tk)
+    assert hits.tolist() == [3.0, 0.0, 0.0]
+    assert J[0] > J[1] + 25.0 and J[0] > J[2] + 25.0
