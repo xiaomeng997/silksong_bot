@@ -355,7 +355,7 @@ class Forecast:
         # the box stood still while the boss moved (stage C run 20261002_093052, predict_audit: boss centre 7.3 u off
         # at +0.5 s for side slashes, 9.4 u at a down spike's active frame)
         fam = tr.ctx.family if self.fc.view == ORACLE else tr.last_family
-        anchor = tr.ctx.anchor if self.fc.view == ORACLE else tr.last_anchor
+        anchor = tr.ctx.anchor if self.fc.view == ORACLE else (tr.fit_anchor or tr.last_anchor)
         f = self.fc.model.families.get(fam) if fam else None
         if f is not None and f.path is not None and tr.t_start is not None and anchor is not None:
             t_att = self.origin_t - tr.t_start
@@ -416,6 +416,13 @@ class BossTracker:
         self.last_anchor: Anchor | None = None
         self.t_hide: float | None = None
         self.tell_dir: str | None = None       # VE: the anchor side of the last emergence dust
+        self.fit = getattr(self, "fit", None)  # VE: AttackFit for committed attacks (kept across resets)
+        if self.fit is not None:
+            self.fit.reset()
+        self.fit_ok = False
+        self.fit_anchor: Anchor | None = None
+        self.fit_anomalies = 0
+        self._t_start0: float | None = None
         self.coasting = False                  # VE: no phase this frame (a ghost)
         self._anchor_sum: list[float] = []
         self.t = 0.0
@@ -611,6 +618,7 @@ class BossTracker:
                     self._anchor_sum = []
                     self.last_anchor = None
                     self.t_start = None
+                    self._t_start0, self.fit_ok, self.fit_anchor = None, False, None
                 self.last_family = fam if fam is not None else (None if ph == "dust" else self.last_family)
                 if ph == "roar":
                     self.ctx.raged = True
@@ -634,6 +642,7 @@ class BossTracker:
             # the attack began this long before the phase's first state (the family's logged entry offsets): the
             # boss box then moves along the family's mean path for scoring (Forecast.boss_box)
             self.t_start = t - tau - TELL_DELAY.get(ph, 0.0) - f.entry[root][0]
+            self._t_start0 = self.t_start
         if fam == "BB_BURST":
             # set once per burst and kept to its end (an earlier version fell through to the family's named anchor,
             # which a burst has none of, from the second drawn frame on: the whole burst range for the rest of the
@@ -649,7 +658,22 @@ class BossTracker:
                 self.last_anchor = Anchor(float(self._anchor_sum[0]), y, 1)
         elif f.directed:
             told = ph in TELL_PHASES and self.tell_dir is not None
-            self.last_anchor = m.anchor(fam, self.tell_dir if told else ("Set R" if boss.flip_x else "Set L"))
+            base = m.anchor(fam, self.tell_dir if told else ("Set R" if boss.flip_x else "Set L"))
+            self.last_anchor = base
+            if self.fit is not None and ph not in TELL_PHASES and boss.pos.conf > 0 and self.t_start is not None:
+                # multi-frame fusion (combat.attack_fit): the committed attack's template fitted to every frame seen
+                # since it came up; a rejected fit keeps the phase-level estimate (broad support) and flags it
+                self.fit.start(fam, base, self._t_start0 if self._t_start0 is not None else self.t_start)
+                self.fit.observe(t, float(boss.pos.v[0]), float(boss.pos.v[1]))
+                r = self.fit.result()
+                self.fit_ok = bool(r is not None and r.ok)
+                if r is not None and not r.ok:
+                    self.fit_anomalies += 1
+                if self.fit_ok:
+                    # scoring only (Forecast.boss_box): moving the support's anchor by the fit lost 3.3 % of the
+                    # held-out contacts (support_recall ve / ve_dust 23,117 of 23,896, emerge / charge body)
+                    self.t_start = r.t_start
+                    self.fit_anchor = Anchor(base.x + r.dx, base.y, base.mirror)
         else:
             self.last_anchor = m.anchor(fam, None)
 
@@ -728,7 +752,8 @@ class BossTracker:
         st = PHASE_ROOT.get(self.state)
         if st is None:
             return [], False
-        ctx = replace(base, family=PHASE_FAMILY[self.state], anchor=self.last_anchor, direction=direction)
+        fam_r = PHASE_FAMILY[self.state]
+        ctx = replace(base, family=fam_r, anchor=self.last_anchor, direction=direction)
         return [Root(st, lo, hi, ctx)], True
 
     def drawn_left(self, origin_t: float) -> float:

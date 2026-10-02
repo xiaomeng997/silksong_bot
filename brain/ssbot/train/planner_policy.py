@@ -175,6 +175,9 @@ class PlannerPolicy:
         self.pb = load_playbook(enemy)
         self.fc.no_hurtbox = self.pb.no_hurtbox
         self.fc.bell_tells = view == "degraded_dust"
+        if fview != ORACLE and os.environ.get("SSBOT_FUSION", "1") == "1":
+            from ssbot.combat.attack_fit import AttackFit
+            self.fc.tracker.fit = AttackFit(self.model)   # multi-frame fusion of committed attacks
         if fview != ORACLE and os.environ.get("SSBOT_ATTACK_MODEL", "v2") != "v1":
             self.fc.hurtbox = load_hurtbox()     # vision: the hittable box per phase, not the sprite's (v1: the
             #                                      first attack model, for the audit's before)

@@ -22,6 +22,7 @@ one without i2_002 / i3_002 and the trial run).
 import argparse
 import json
 import math
+import os
 import sys
 import time
 from collections import Counter, defaultdict
@@ -170,6 +171,9 @@ def main(argv: list[str] | None = None) -> int:
     for v in views:
         fc = Forecaster(model, ORACLE if v == "oracle" else VISION_EQUIVALENT, margin=a.margin, templates=tpls)
         fc.bell_tells = v == "ve_dust"
+        if v != "oracle" and os.environ.get("SSBOT_FUSION", "1") == "1":
+            from ssbot.combat.attack_fit import AttackFit
+            fc.tracker.fit = AttackFit(model)      # multi-frame fusion of committed attacks (vision views)
         for i, fight in enumerate(fights):
             t1 = time.perf_counter()
             run_fight(fight, fc, v, lags, stats, misses, [BELL_BEAST])
