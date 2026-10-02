@@ -10,7 +10,9 @@ latest first contact > max J; FORCED_RISK when no allowed candidate has S = 0.
   whatever they score (live run 20261002_035118: a plan safe by millimetres in the air over a rolling attack bell lost
   all 26 safe continuations in one frame of drift, and the bell hit).
 - Beyond the horizon: of the 2 best safe plans, the first whose end state keeps a safe way on over 0.8 s more (stay,
-  run, jump) is chosen (Planner._tail_pick; a punish that ended under a bouncing drop bell, run 20261002_052118).
+  run, jump) is chosen (Planner._tail_pick; a punish that ended under a bouncing drop bell, run 20261002_052118); a
+  Silkspear still locking the hero at the horizon's end without such a way on gives way to the best safe plan that is
+  free at its end (run 20261002_064001: 2 of 3 hits were a drop bell on a hero still casting).
 - Adaptive horizon (M2 plan): when the tactics ask for more than T frames (a committed charge), the dodge set
   candidates.build_long rolls out to the end of the attack, up to 2 s (live run 20261002_045049: with 0.8 s, jumps
   that cleared a charge's front half came down on its back half, 5 hits).
@@ -305,7 +307,16 @@ class Planner:
             tail_ok = None
             carried = cont and i == N - 1 and self.prev_tail_ok
             if not forced and T <= cfg.T and cfg.tail_k > 0 and not carried:
-                i, tail_ok = self._tail_pick(f, roll, hold_end, order[safe[order]], P + T, i)
+                ranked = order[safe[order]]
+                i, tail_ok = self._tail_pick(f, roll, hold_end, ranked, P + T, i)
+                if tail_ok is False and roll.mode[i, -1] == M_CAST:
+                    # a Silkspear locks the hero ~73 frames, past the horizon: with no way on after it, take the
+                    # best safe plan that is free at its end instead (run 20261002_064001: 2 of 3 hits were a drop
+                    # bell coming down on a hero still in the cast after Leap Land)
+                    free = ranked[roll.mode[ranked, -1] != M_CAST]
+                    if len(free):
+                        j, ok_j = self._tail_pick(f, roll, hold_end, free[:1], P + T, int(free[0]))
+                        i, tail_ok = (j, ok_j) if ok_j else (int(free[0]), False)
             elif carried:
                 tail_ok = True                     # the plan kept from last tick passed its check then
             self.prev_tail_ok = bool(tail_ok)
