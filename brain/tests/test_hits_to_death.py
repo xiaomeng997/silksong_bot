@@ -76,14 +76,15 @@ def test_after_one_event():
 
 
 def test_batch_matches_scalar():
+    """numba kernel == NumPy reference == the scalar §3.7.1 code on the full grid (6336 cases)."""
     grid = list(itertools.product(range(-1, 10), range(0, 3), (False, True), range(0, 4), range(0, 3), (False, True),
                                   (False, True), (False, True)))
     a = np.array(grid, dtype=np.int64).T
-    out = hits_to_death_batch(*a, use_numba=False)
     want = [hits_to_death(hp, blue, bool(m), Ctx(D1=d1, pending_dmg=pd, mask_covers=bool(mc),
                                                 pending_mask_covers=bool(pmc), critical_in_support=bool(cr)))
             for hp, blue, m, d1, pd, mc, pmc, cr in grid]
-    assert out.tolist() == want
+    assert hits_to_death_batch(*a, use_numba=False).tolist() == want     # NumPy reference
+    assert hits_to_death_batch(*a).tolist() == want                      # numba kernel (the default path)
 
 
 def test_batch_broadcasts():

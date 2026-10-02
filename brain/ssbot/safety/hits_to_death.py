@@ -13,27 +13,27 @@ What it encodes (1.0.30000):
 - CriticalDamage leaves 1 HP (TakeHealth(health - 1)), clears blue health, never touches the mask and cannot kill by
   itself (HeroController.cs:5233-5240): in the support it is an event of h - 1 damage;
 - hazards and DoSpecialDamage ignore i-frames (m0:N1, N2): they are never dropped from the support during i-frames, and
-  pending_dmg holds the frost clock and every active DamageTag (m0:N2, N3);
+  pending_dmg holds the frost clock and every active DamageTag (m0:N2, N3). The oracle's hero.tags gives each tag's
+  dmg_left, with -1 for a tag that has no hit limit (swimming in frost water; docs/facts/1.0.30000/state_fields_m2.md
+  §4): pending_from_tags turns that, or a tag without a readable dmg_left, into lethal pending damage;
 - mask_covers = False for Muckroach Maul, Wraith / Slubberlug grabs, claw traps [com10] and the GMS web (unverified),
   until DamageHero / FSM flags are exported (m0:C2);
 - a Fractured Mask state of UNKNOWN counts as broken; equipment is believed only from the audit (§3.3.4), which in
   oracle mode is STATE hero.fractured_mask {equipped, amount_left}.
 
 hits_to_death is the §3.7.1 code line for line, plus one guard: a support whose worst event does no damage (D1 < 1
-and no CriticalDamage, or CriticalDamage at 1 HP with D1 < 1) would loop forever, so it returns UNBOUNDED.
-hits_to_death_batch evaluates the same recurrence over NumPy arrays (planner rollouts); its scalar kernel is written so
-that numba can compile it, which happens when numba is installed (it is not on the build machine: the NumPy path is
-the tested one).
+and no CriticalDamage, or CriticalDamage at 1 HP with D1 < 1) would loop forever, so it returns UNBOUNDED. A support
+is empty here only when its producer certified that explicitly (SupportSet.certified_empty; cross-module decision 4:
+the supervisor adds an "unknown" event of max(1, worst known damage) whenever the support is not certified, so a missing
+or dropped forecast never reads as UNBOUNDED).
+hits_to_death_batch evaluates the same recurrence for planner rollouts with a numba kernel (the default; numba is a
+dependency) or a NumPy fallback; tests/test_hits_to_death.py checks both against the scalar reference on a full grid.
 """
 from collections.abc import Iterable
 from dataclasses import dataclass, replace
 
+import numba
 import numpy as np
-
-try:  # optional: compiled scalar kernel for large batches
-    import numba
-except ImportError:  # pragma: no cover - the build machine has no numba
-    numba = None
 
 UNBOUNDED = 1 << 20   # nothing in the support can hurt (D1 < 1 and no CriticalDamage)
 
@@ -54,12 +54,28 @@ class Ctx:
 @dataclass(slots=True, frozen=True)
 class SupportEvent:
     """One worst-case event of an in-support threat tube (combat/forecast.py builds these from tube metadata)."""
-    source: str                  # threat instance (entity type_key / collider), for the multi-instance test (Q3)
+    source: str                  # what it is (entity type_key, collider), for messages
     damage: int = 1              # total damage of the event: 1+1 combos are one event of 2
     hits: int = 1                # hits making up the event (> 1: multi-hit)
     hazard: bool = False         # hazard type (SPIKES, LAVA, ...: passes i-frames, m0:N1) or a cog crush (+ respawn)
     mask_covers: bool = True     # False for the grab / Maul / claw trap list above
     critical: bool = False       # CriticalDamage (h -> 1)
+    instance: int | None = None  # threat instance for Q3's multi-instance test: the entity root iid, which every
+    #                              collider of one entity shares; None: the source string stands in
+
+
+@dataclass(slots=True, frozen=True)
+class SupportSet:
+    """What a support producer (the W3 forecaster, a stand-in) hands the supervisor for one frame. `known` certifies
+    `events` as a superset of what can land; an empty certified support additionally needs `certified_empty` (a
+    dropped forecast that returns no events with known=True is still unknown). Anything else is unknown support."""
+    events: tuple[SupportEvent, ...] = ()
+    known: bool = False
+    certified_empty: bool = False
+
+    @property
+    def certified(self) -> bool:
+        return self.known and (bool(self.events) or self.certified_empty)
 
 
 def mask_state(fractured_mask: dict | None) -> str:
@@ -78,6 +94,21 @@ def mask_state(fractured_mask: dict | None) -> str:
 def mask_intact(state: str) -> bool:
     """Only an audited, equipped mask with uses left counts; UNKNOWN is broken (§3.7.1)."""
     return state == MASK_INTACT
+
+
+def pending_from_tags(tags: object, hp: int, blue: int) -> tuple[int, bool]:
+    """(pending damage, unbounded) from STATE hero.tags ([{kind, dmg_left, t_left}]; nil without a TagDamageTaker,
+    [] with no tag). dmg_left >= 0 is an upper bound in masks; -1 (no hit limit), a missing or unreadable value, or an
+    unreadable item is unbounded and counts as hp + blue: lethal by itself, never a smaller number."""
+    if not isinstance(tags, (list, tuple)):
+        return 0, False
+    total = 0
+    for g in tags:
+        d = g.get("dmg_left") if isinstance(g, dict) else None
+        if isinstance(d, bool) or not isinstance(d, (int, float)) or d < 0:
+            return hp + blue, True
+        total += int(d)
+    return total, False
 
 
 def ctx_from_support(events: Iterable[SupportEvent], pending_dmg: int = 0, pending_mask_covers: bool = False) -> Ctx:
@@ -168,16 +199,13 @@ def _kernel(hp: int, blue: int, m: bool, d1: int, pending: int, covers: bool, pe
             return n
 
 
-_kernel_nb = None
-if numba is not None:  # pragma: no cover
-    _k = numba.njit(cache=True)(_kernel)
+_kernel_jit = numba.njit(cache=True)(_kernel)
 
-    @numba.njit(cache=True)
-    def _batch_nb(hp, blue, m, d1, pending, covers, pending_covers, crit, out):
-        for i in range(hp.size):
-            out[i] = _k(hp[i], blue[i], m[i], d1[i], pending[i], covers[i], pending_covers[i], crit[i])
 
-    _kernel_nb = _batch_nb
+@numba.njit(cache=True)
+def _batch_nb(hp, blue, m, d1, pending, covers, pending_covers, crit, out):
+    for i in range(hp.size):
+        out[i] = _kernel_jit(hp[i], blue[i], m[i], d1[i], pending[i], covers[i], pending_covers[i], crit[i])
 
 
 def _batch_numpy(hp, blue, m, d1, pending, covers, pending_covers, crit) -> np.ndarray:
@@ -211,17 +239,14 @@ def _batch_numpy(hp, blue, m, d1, pending, covers, pending_covers, crit) -> np.n
 
 def hits_to_death_batch(hp, blue, mask_intact, d1, pending=0, mask_covers=True, pending_mask_covers=False,
                         critical=False, use_numba: bool | None = None) -> np.ndarray:
-    """hits_to_death element-wise over broadcast arrays (int64 result, same shape as the broadcast inputs)."""
+    """hits_to_death element-wise over broadcast arrays (int64 result, same shape as the broadcast inputs); the numba
+    kernel unless use_numba is False (the NumPy reference)."""
     arrs = np.broadcast_arrays(np.asarray(hp, np.int64), np.asarray(blue, np.int64), np.asarray(mask_intact, bool),
                                np.asarray(d1, np.int64), np.asarray(pending, np.int64), np.asarray(mask_covers, bool),
                                np.asarray(pending_mask_covers, bool), np.asarray(critical, bool))
-    if use_numba is None:
-        use_numba = _kernel_nb is not None
-    if use_numba:
-        if _kernel_nb is None:
-            raise RuntimeError("numba is not installed")
-        flat = [np.ascontiguousarray(a).ravel() for a in arrs]   # pragma: no cover
-        out = np.empty(flat[0].size, np.int64)                   # pragma: no cover
-        _kernel_nb(*flat, out)                                   # pragma: no cover
-        return out.reshape(arrs[0].shape)                        # pragma: no cover
-    return _batch_numpy(*(np.array(a) for a in arrs))
+    if use_numba is False:
+        return _batch_numpy(*(np.array(a) for a in arrs))
+    flat = [np.ascontiguousarray(a).ravel() for a in arrs]
+    out = np.empty(flat[0].size, np.int64)
+    _batch_nb(*flat, out)
+    return out.reshape(arrs[0].shape)

@@ -1,8 +1,8 @@
 {
  "version": 0,
  "build": "1.0.30000",
- "generated": "2026-10-01T13:06:17",
- "code_rev": "63bc28a",
+ "generated": "2026-10-01T19:50:06",
+ "code_rev": "56698a0",
  "builder": "ssbot.tools.quit_map_build",
  "params": {
   "entry_s": 1.0,
@@ -29,29 +29,113 @@
    "name": "human/20260930_210337",
    "kind": "human",
    "frames": 159471,
-   "samples": 157937,
-   "s": 2641.17
+   "samples": 157668,
+   "s": 2636.59
   },
   {
    "name": "20261001_121446_BellBeast_data/i0_000",
    "kind": "train",
    "frames": 26892,
-   "samples": 26892,
-   "s": 448.23
+   "samples": 26836,
+   "s": 447.25
+  },
+  {
+   "name": "20261001_122249_BellBeast_data/i0_000",
+   "kind": "train",
+   "frames": 259302,
+   "samples": 258417,
+   "s": 4306.68
+  },
+  {
+   "name": "20261001_122249_BellBeast_data/i0_001",
+   "kind": "train",
+   "frames": 257665,
+   "samples": 256796,
+   "s": 4279.7
+  },
+  {
+   "name": "20261001_122249_BellBeast_data/i0_002",
+   "kind": "train",
+   "frames": 189032,
+   "samples": 188341,
+   "s": 3138.83
+  },
+  {
+   "name": "20261001_122249_BellBeast_data/i1_000",
+   "kind": "train",
+   "frames": 273201,
+   "samples": 272351,
+   "s": 4538.88
+  },
+  {
+   "name": "20261001_122249_BellBeast_data/i1_001",
+   "kind": "train",
+   "frames": 271733,
+   "samples": 270826,
+   "s": 4513.54
+  },
+  {
+   "name": "20261001_122249_BellBeast_data/i1_002",
+   "kind": "train",
+   "frames": 216438,
+   "samples": 215659,
+   "s": 3594.09
+  },
+  {
+   "name": "20261001_122249_BellBeast_data/i2_000",
+   "kind": "train",
+   "frames": 297244,
+   "samples": 296393,
+   "s": 4939.6
+  },
+  {
+   "name": "20261001_122249_BellBeast_data/i2_001",
+   "kind": "train",
+   "frames": 261743,
+   "samples": 260845,
+   "s": 4347.17
+  },
+  {
+   "name": "20261001_122249_BellBeast_data/i2_002",
+   "kind": "train",
+   "frames": 201169,
+   "samples": 200457,
+   "s": 3340.78
+  },
+  {
+   "name": "20261001_122249_BellBeast_data/i3_000",
+   "kind": "train",
+   "frames": 275037,
+   "samples": 274090,
+   "s": 4567.87
+  },
+  {
+   "name": "20261001_122249_BellBeast_data/i3_001",
+   "kind": "train",
+   "frames": 252640,
+   "samples": 251748,
+   "s": 4195.55
+  },
+  {
+   "name": "20261001_122249_BellBeast_data/i3_002",
+   "kind": "train",
+   "frames": 183497,
+   "samples": 182812,
+   "s": 3046.66
   }
  ],
  "global_by_key": {
   "transition": {
-   "s": 161.942,
-   "frames": 9205,
+   "s": 161.382,
+   "frames": 9180,
    "p_pause": 0.0,
    "p_quit": 0.0
   },
   "entry": {
-   "s": 93.363,
-   "frames": 5584,
-   "p_pause": 0.99554,
-   "p_quit": 0.99554
+   "s": 283.286,
+   "frames": 16990,
+   "p_pause": 1.0,
+   "p_quit": 1.0
   },
   "hazard": {
    "s": 22.483,
@@ -60,22 +144,22 @@
    "p_quit": 0.18236
   },
   "hurt0": {
-   "s": 44.764,
-   "frames": 2686,
-   "p_pause": 0.23902,
-   "p_quit": 0.23902
+   "s": 3594.746,
+   "frames": 215692,
+   "p_pause": 0.24364,
+   "p_quit": 0.24364
   },
   "freeze": {
-   "s": 17.915,
-   "frames": 1075,
+   "s": 362.209,
+   "frames": 21739,
    "p_pause": 0.0,
    "p_quit": 0.0
   },
   "hurt1": {
-   "s": 127.885,
-   "frames": 7673,
-   "p_pause": 0.99361,
-   "p_quit": 0.99361
+   "s": 10382.518,
+   "frames": 622966,
+   "p_pause": 1.0,
+   "p_quit": 1.0
   },
   "interact": {
    "s": 268.947,
@@ -84,10 +168,31 @@
    "p_quit": 0.06401
   },
   "free": {
-   "s": 2352.099,
-   "frames": 141128,
-   "p_pause": 0.98528,
-   "p_quit": 0.98528
+   "s": 36817.612,
+   "frames": 2209194,
+   "p_pause": 0.99914,
+   "p_quit": 0.99914
+  }
+ },
+ "kinds": {
+  "arena_end_slowmo": {
+   "n": 1,
+   "max_s": 1.883,
+   "by_hazard": {}
+  },
+  "boss_death_slowmo": {
+   "n": 2,
+   "max_s": 1.383,
+   "by_hazard": {}
+  },
+  "hazard_death": {
+   "n": 8,
+   "max_s": 2.433,
+   "by_hazard": {
+    "SPIKES": 2.317,
+    "ACID": 2.183,
+    "LAVA": 2.433
+   }
   }
  },
  "scenes": {
@@ -772,14 +877,14 @@
    ]
   },
   "Bone_01": {
-   "s": 188.131,
-   "frames": 11275,
-   "p_pause": 0.92302,
-   "p_quit": 0.92302,
+   "s": 183.731,
+   "frames": 11011,
+   "p_pause": 0.94512,
+   "p_quit": 0.94512,
    "by_key": {
     "transition": {
-     "s": 2.567,
-     "frames": 141,
+     "s": 2.533,
+     "frames": 139,
      "p_pause": 0.0,
      "p_quit": 0.0
     },
@@ -790,22 +895,22 @@
      "p_quit": 1.0
     },
     "hurt0": {
-     "s": 2.483,
-     "frames": 149,
-     "p_pause": 0.13423,
-     "p_quit": 0.13423
-    },
-    "freeze": {
      "s": 2.167,
      "frames": 130,
+     "p_pause": 0.15385,
+     "p_quit": 0.15385
+    },
+    "freeze": {
+     "s": 2.083,
+     "frames": 125,
      "p_pause": 0.0,
      "p_quit": 0.0
     },
     "hurt1": {
-     "s": 6.017,
-     "frames": 361,
-     "p_pause": 0.86427,
-     "p_quit": 0.86427
+     "s": 5.2,
+     "frames": 312,
+     "p_pause": 1.0,
+     "p_quit": 1.0
     },
     "interact": {
      "s": 3.633,
@@ -814,27 +919,27 @@
      "p_quit": 0.0
     },
     "free": {
-     "s": 168.915,
-     "frames": 10135,
-     "p_pause": 0.98135,
-     "p_quit": 0.98135
+     "s": 165.765,
+     "frames": 9946,
+     "p_pause": 1.0,
+     "p_quit": 1.0
     }
    },
    "blockers_s": {
     "BLOCKING_INTERACT": 3.633,
-    "DISABLE_PAUSE": 6.1,
-    "GAME_STATE": 2.567,
-    "TIME_SLOWED": 4.317
+    "DISABLE_PAUSE": 1.7,
+    "GAME_STATE": 2.533,
+    "TIME_SLOWED": 3.917
    },
    "dsq_s": 0.0,
-   "preload_s": 4.333,
+   "preload_s": 0.0,
    "pause_windows": {
-    "n": 14,
+    "n": 13,
     "censored": 0,
-    "total_s": 14.05,
+    "total_s": 9.467,
     "p50_s": 0.25,
-    "p95_s": 3.966,
-    "max_s": 4.583,
+    "p95_s": 2.593,
+    "max_s": 3.633,
     "by_key": {
      "transition": {
       "n": 2,
@@ -842,9 +947,9 @@
       "max_s": 0.967
      },
      "hurt0": {
-      "n": 8,
+      "n": 7,
       "p50_s": 0.25,
-      "max_s": 4.583
+      "max_s": 1.9
      },
      "freeze": {
       "n": 3,
@@ -859,12 +964,12 @@
     }
    },
    "quit_windows": {
-    "n": 14,
+    "n": 13,
     "censored": 0,
-    "total_s": 14.05,
+    "total_s": 9.467,
     "p50_s": 0.25,
-    "p95_s": 3.966,
-    "max_s": 4.583,
+    "p95_s": 2.593,
+    "max_s": 3.633,
     "by_key": {
      "transition": {
       "n": 2,
@@ -872,9 +977,9 @@
       "max_s": 0.967
      },
      "hurt0": {
-      "n": 8,
+      "n": 7,
       "p50_s": 0.25,
-      "max_s": 4.583
+      "max_s": 1.9
      },
      "freeze": {
       "n": 3,
@@ -891,20 +996,6 @@
    "long_windows": [
     {
      "src": "human/20260930_210337",
-     "f0": 6841,
-     "s": 4.583,
-     "key": "hurt0",
-     "cause": "freeze:HeroDamage",
-     "bits": [
-      "DISABLE_PAUSE",
-      "TIME_SLOWED",
-      "GAME_STATE",
-      "PRELOAD"
-     ],
-     "censored": false
-    },
-    {
-     "src": "human/20260930_210337",
      "f0": 13450,
      "s": 3.633,
      "key": "interact",
@@ -919,7 +1010,7 @@
      "f0": 12219,
      "s": 1.9,
      "key": "hurt0",
-     "cause": "freeze:EnemyBattleEndSlow",
+     "cause": "damage:ENEMY",
      "bits": [
       "DISABLE_PAUSE",
       "TIME_SLOWED"
@@ -931,7 +1022,7 @@
      "f0": 6077,
      "s": 0.533,
      "key": "hurt0",
-     "cause": "freeze:direct:HeroController.StartRecoil",
+     "cause": "damage:ENEMY",
      "bits": [
       "DISABLE_PAUSE",
       "TIME_SLOWED"
@@ -1418,38 +1509,38 @@
    ]
   },
   "Bone_05": {
-   "s": 606.143,
-   "frames": 36356,
-   "p_pause": 0.93788,
-   "p_quit": 0.93788,
+   "s": 49414.51,
+   "frames": 2965035,
+   "p_pause": 0.93794,
+   "p_quit": 0.93794,
    "by_key": {
     "transition": {
-     "s": 5.226,
-     "frames": 300,
+     "s": 4.883,
+     "frames": 282,
      "p_pause": 0.0,
      "p_quit": 0.0
     },
     "entry": {
-     "s": 6.398,
-     "frames": 384,
-     "p_pause": 0.93494,
-     "p_quit": 0.93494
+     "s": 196.321,
+     "frames": 11790,
+     "p_pause": 1.0,
+     "p_quit": 1.0
     },
     "hurt0": {
-     "s": 31.081,
-     "frames": 1865,
-     "p_pause": 0.24933,
-     "p_quit": 0.24933
+     "s": 3581.38,
+     "frames": 214890,
+     "p_pause": 0.24373,
+     "p_quit": 0.24373
     },
     "freeze": {
-     "s": 5.132,
-     "frames": 308,
+     "s": 349.509,
+     "frames": 20977,
      "p_pause": 0.0,
      "p_quit": 0.0
     },
     "hurt1": {
-     "s": 89.419,
-     "frames": 5365,
+     "s": 10344.868,
+     "frames": 620707,
      "p_pause": 1.0,
      "p_quit": 1.0
     },
@@ -1460,42 +1551,42 @@
      "p_quit": 0.0
     },
     "free": {
-     "s": 466.387,
-     "frames": 27984,
-     "p_pause": 0.99775,
-     "p_quit": 0.99775
+     "s": 34935.049,
+     "frames": 2096239,
+     "p_pause": 0.99997,
+     "p_quit": 0.99997
     }
    },
    "blockers_s": {
     "BLOCKING_INTERACT": 2.5,
-    "DISABLE_PAUSE": 25.115,
-    "GAME_STATE": 5.226,
-    "TIME_SLOWED": 29.052
+    "DISABLE_PAUSE": 2707.873,
+    "GAME_STATE": 4.883,
+    "TIME_SLOWED": 3058.014
    },
    "dsq_s": 0.0,
    "preload_s": 0.0,
    "pause_windows": {
-    "n": 117,
-    "censored": 1,
-    "total_s": 41.09,
+    "n": 11834,
+    "censored": 334,
+    "total_s": 2833.517,
     "p50_s": 0.233,
-    "p95_s": 0.8,
+    "p95_s": 0.25,
     "max_s": 9.25,
     "by_key": {
      "transition": {
-      "n": 6,
-      "p50_s": 0.85,
+      "n": 4,
+      "p50_s": 0.933,
       "max_s": 0.967
      },
      "hurt0": {
-      "n": 99,
+      "n": 11504,
       "p50_s": 0.233,
-      "max_s": 0.25
+      "max_s": 0.55
      },
      "freeze": {
-      "n": 11,
-      "p50_s": 0.133,
-      "max_s": 1.622
+      "n": 325,
+      "p50_s": 0.4,
+      "max_s": 1.383
      },
      "interact": {
       "n": 1,
@@ -1505,27 +1596,27 @@
     }
    },
    "quit_windows": {
-    "n": 117,
-    "censored": 1,
-    "total_s": 41.09,
+    "n": 11834,
+    "censored": 334,
+    "total_s": 2833.517,
     "p50_s": 0.233,
-    "p95_s": 0.8,
+    "p95_s": 0.25,
     "max_s": 9.25,
     "by_key": {
      "transition": {
-      "n": 6,
-      "p50_s": 0.85,
+      "n": 4,
+      "p50_s": 0.933,
       "max_s": 0.967
      },
      "hurt0": {
-      "n": 99,
+      "n": 11504,
       "p50_s": 0.233,
-      "max_s": 0.25
+      "max_s": 0.55
      },
      "freeze": {
-      "n": 11,
-      "p50_s": 0.133,
-      "max_s": 1.622
+      "n": 325,
+      "p50_s": 0.4,
+      "max_s": 1.383
      },
      "interact": {
       "n": 1,
@@ -1550,18 +1641,6 @@
      "censored": false
     },
     {
-     "src": "20261001_121446_BellBeast_data/i0_000",
-     "f0": 56112,
-     "s": 1.622,
-     "key": "freeze",
-     "cause": "freeze:BossDeathSlow",
-     "bits": [
-      "TIME_SLOWED",
-      "GAME_STATE"
-     ],
-     "censored": false
-    },
-    {
      "src": "human/20260930_210337",
      "f0": 68400,
      "s": 1.383,
@@ -1573,15 +1652,124 @@
      "censored": false
     },
     {
-     "src": "20261001_121446_BellBeast_data/i0_000",
-     "f0": 69031,
-     "s": 0.982,
-     "key": "freeze",
-     "cause": "freeze:BossDeathSlow",
+     "src": "20261001_122249_BellBeast_data/i2_000",
+     "f0": 76332,
+     "s": 0.55,
+     "key": "hurt0",
+     "cause": "damage:ENEMY",
      "bits": [
+      "DISABLE_PAUSE",
       "TIME_SLOWED"
      ],
-     "censored": true
+     "censored": false
+    },
+    {
+     "src": "20261001_122249_BellBeast_data/i1_002",
+     "f0": 715038,
+     "s": 0.55,
+     "key": "hurt0",
+     "cause": "damage:ENEMY",
+     "bits": [
+      "DISABLE_PAUSE",
+      "TIME_SLOWED"
+     ],
+     "censored": false
+    },
+    {
+     "src": "20261001_122249_BellBeast_data/i0_000",
+     "f0": 71792,
+     "s": 0.549,
+     "key": "hurt0",
+     "cause": "damage:ENEMY",
+     "bits": [
+      "DISABLE_PAUSE",
+      "TIME_SLOWED"
+     ],
+     "censored": false
+    },
+    {
+     "src": "20261001_122249_BellBeast_data/i0_000",
+     "f0": 138364,
+     "s": 0.549,
+     "key": "hurt0",
+     "cause": "damage:ENEMY",
+     "bits": [
+      "DISABLE_PAUSE",
+      "TIME_SLOWED"
+     ],
+     "censored": false
+    },
+    {
+     "src": "20261001_122249_BellBeast_data/i0_000",
+     "f0": 255401,
+     "s": 0.549,
+     "key": "hurt0",
+     "cause": "damage:ENEMY",
+     "bits": [
+      "DISABLE_PAUSE",
+      "TIME_SLOWED"
+     ],
+     "censored": false
+    },
+    {
+     "src": "20261001_122249_BellBeast_data/i0_001",
+     "f0": 467668,
+     "s": 0.549,
+     "key": "hurt0",
+     "cause": "damage:ENEMY",
+     "bits": [
+      "DISABLE_PAUSE",
+      "TIME_SLOWED"
+     ],
+     "censored": false
+    },
+    {
+     "src": "20261001_122249_BellBeast_data/i3_001",
+     "f0": 516898,
+     "s": 0.549,
+     "key": "hurt0",
+     "cause": "damage:ENEMY",
+     "bits": [
+      "DISABLE_PAUSE",
+      "TIME_SLOWED"
+     ],
+     "censored": false
+    },
+    {
+     "src": "20261001_122249_BellBeast_data/i3_001",
+     "f0": 332947,
+     "s": 0.533,
+     "key": "hurt0",
+     "cause": "damage:ENEMY",
+     "bits": [
+      "DISABLE_PAUSE",
+      "TIME_SLOWED"
+     ],
+     "censored": false
+    },
+    {
+     "src": "20261001_122249_BellBeast_data/i1_000",
+     "f0": 164356,
+     "s": 0.533,
+     "key": "hurt0",
+     "cause": "damage:ENEMY",
+     "bits": [
+      "DISABLE_PAUSE",
+      "TIME_SLOWED"
+     ],
+     "censored": false
+    },
+    {
+     "src": "20261001_122249_BellBeast_data/i0_002",
+     "f0": 635114,
+     "s": 0.533,
+     "key": "hurt0",
+     "cause": "damage:ENEMY",
+     "bits": [
+      "DISABLE_PAUSE",
+      "TIME_SLOWED"
+     ],
+     "censored": false
     }
    ]
   },
@@ -2047,7 +2235,7 @@
      "f0": 105032,
      "s": 2.433,
      "key": "hazard",
-     "cause": "freeze:EnemyDeath",
+     "cause": "hazard_death:LAVA",
      "bits": [
       "DISABLE_PAUSE",
       "TIME_SLOWED"
@@ -4087,14 +4275,14 @@
    ]
   },
   "Bonetown": {
-   "s": 156.648,
-   "frames": 9351,
-   "p_pause": 0.75061,
-   "p_quit": 0.75061,
+   "s": 156.465,
+   "frames": 9346,
+   "p_pause": 0.75149,
+   "p_quit": 0.75149,
    "by_key": {
     "transition": {
-     "s": 3.267,
-     "frames": 166,
+     "s": 3.083,
+     "frames": 161,
      "p_pause": 0.0,
      "p_quit": 0.0
     },
@@ -4137,8 +4325,8 @@
    },
    "blockers_s": {
     "BLOCKING_INTERACT": 35.416,
-    "DISABLE_PAUSE": 1.25,
-    "GAME_STATE": 3.267,
+    "DISABLE_PAUSE": 1.117,
+    "GAME_STATE": 3.083,
     "NOT_ACCEPTING_INPUT": 0.25,
     "TIME_SLOWED": 0.383
    },
@@ -4146,7 +4334,7 @@
    "preload_s": 0.0,
    "pause_windows": {
     "n": 9,
-    "censored": 0,
+    "censored": 3,
     "total_s": 39.7,
     "p50_s": 0.967,
     "p95_s": 18.556,
@@ -4176,7 +4364,7 @@
    },
    "quit_windows": {
     "n": 9,
-    "censored": 0,
+    "censored": 3,
     "total_s": 39.7,
     "p50_s": 0.967,
     "p95_s": 18.556,
@@ -4953,7 +5141,7 @@
      "f0": 46883,
      "s": 2.183,
      "key": "hazard",
-     "cause": "freeze:EnemyDeath",
+     "cause": "hazard_death:ACID",
      "bits": [
       "DISABLE_PAUSE",
       "TIME_SLOWED"
