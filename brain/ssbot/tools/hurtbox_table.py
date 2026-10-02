@@ -42,11 +42,15 @@ def build(runs: list[Path], max_frames: int) -> dict:
                     prev_state = None
                     continue
                 st = (b.get("fsms") or [{}])[0].get("state")
-                if st != prev_state:
-                    prev_state, t_in = st, 0
+                ph = phases.get(st)
+                # time in the OBSERVABLE phase (what the vision view counts), not in the FSM state: a leap phase spans
+                # Emerge Antic L, Leap Out and Descending, and binning by state time put Descending's high polygon at
+                # Leap Out's early times and back (stage C run 20261002_102538: side slashes under a leap, 153
+                # predicted hits, 0 landed)
+                if ph != prev_state:
+                    prev_state, t_in = ph, 0
                 else:
                     t_in += 1
-                ph = phases.get(st)
                 vs = [np.asarray(c["verts_world"], float).reshape(-1, 2) for c in b.get("colliders") or ()
                       if c.get("enabled")]
                 if ph is None or not vs or b.get("render_aabb") is None:
