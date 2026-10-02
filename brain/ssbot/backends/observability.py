@@ -47,8 +47,8 @@ Rule: no value in the output may depend on something pixels cannot show. Per fra
     (GameManager.IncreaseGameTimer, GameManager.cs:4223: PLAYING / ENTERING_LEVEL / EXITING_LEVEL with the inventory
     closed, unscaledDeltaTime < 1 s): not in the pause menu, inventory, menus, loads (TRANSITION) or video cutscenes;
     a message canvas counts unless the filter's own pause edges say the game is paused.
-  - bind_ready from the silk count (the spool is visible); pending_dmg 0 when no status tag is visible, else
-    unknown (conf 0).
+  - bind_ready from the silk count (the spool is visible); pending_dmg 0 when no damage status is visible, else
+    unknown: conf 0 and v = health + blue (lethal by itself, as the oracle path reports an unbounded tag).
 
 Measured with ObservabilityFilter reset at every savestate load and a BoxTable learnt from the trial run, on the
 live Bell Beast run 20261001_122249 (rec i<N>_000 / _001: 200 savestate episodes, 2,148,565 STATEs; held out from
@@ -108,6 +108,7 @@ NOT_COUNTING = frozenset((Screen.PAUSE_MENU, Screen.INVENTORY, Screen.MAIN_MENU,
                           Screen.MODE_SELECT, Screen.TRANSITION, Screen.CUTSCENE_VIDEO, Screen.CREDITS))
 GAMEPLAY = frozenset((Screen.PLAYING, Screen.PLAYING_HUD_HIDDEN))
 NO_BIND_MODES = frozenset(("hurt", "dash", "cutscene", "bench"))
+NO_DAMAGE_STATUS = frozenset(("MAGGOTED",))   # statuses that deal no damage (maggots block binding)
 _TIMERS = timer_fields(HeroState)
 
 # Vision-side pause cues (DESIGN §3.7.5; real seconds unless noted)
@@ -521,7 +522,10 @@ class ObservabilityFilter:
         silk = out.res.silk.v
         out.res.bind_ready = E(silk >= BIND_SILK and out.hero.mode.v not in NO_BIND_MODES, conf=0.8,
                                src=Src.PREDICTED)
-        out.res.pending_dmg = E(0, conf=0.9, src=Src.PREDICTED) if not out.res.status else unknown(0)
+        if out.res.status - NO_DAMAGE_STATUS:      # a damage status is visible, its remaining damage is not: lethal
+            out.res.pending_dmg = E(out.res.hp.v + out.res.blue.v, sigma=math.inf, conf=0.0, src=Src.PREDICTED)
+        else:
+            out.res.pending_dmg = E(0, conf=0.9, src=Src.PREDICTED)
         self._pause(out, q)
         self._play_time(out)
         out.game.unobservable = int(Unobs(out.game.unobservable) | unobs)

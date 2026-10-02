@@ -555,14 +555,36 @@ class OracleBackend:
             lock = E(0.0, conf=0.8, src=Src.PREDICTED)
         return iframes, recoil, dash_cd, lock
 
+    @staticmethod
+    def _pending(h: dict, cs: dict[str, bool], hp_total: int | None) -> E[int]:
+        """Resources.pending_dmg: what attached DamageTags and the frost clock can still deal (masks, an upper bound;
+        hero.tags, docs/facts/1.0.30000/state_fields_m2.md §4: nil = no TagDamageTaker, [] = no tag). A tag without a
+        hit limit (dmg_left -1: swimming in frost water) or with an unreadable dmg_left, the frost clock
+        (cState.isFrosted: 1 HP every 1.75 s through i-frames while frostAmount >= 1, HeroController.cs:2697-2762,
+        m0:N3) and a stream without hero.tags are unbounded or unknown: conf 0 and v = health + blue, lethal by itself
+        where hits_to_death subtracts it (as safety.hits_to_death.pending_from_tags reads hero.tags)."""
+        lethal = int(hp_total) if hp_total is not None else 0
+        if "tags" not in h:
+            return E(lethal, sigma=math.inf, conf=0.0, src=Src.UNKNOWN)
+        if cs.get("isFrosted"):
+            return E(lethal, sigma=math.inf, conf=0.0, src=Src.PREDICTED)
+        tags = h["tags"]
+        if tags is None:
+            return E(0)
+        total = 0
+        for tg in tags if isinstance(tags, list) else (None,):
+            d = tg.get("dmg_left") if isinstance(tg, dict) else None
+            if isinstance(d, bool) or not isinstance(d, (int, float)) or d < 0:
+                return E(lethal, sigma=math.inf, conf=0.0, src=Src.PREDICTED)
+            total += int(d)
+        return E(total)
+
     def _resources(self, h: dict, cs: dict[str, bool], hp: int | None) -> Resources:
         status = set(tag for n, tag in _STATUS if cs.get(n))
         tags = h.get("tags")
         if isinstance(tags, list):
-            pending = E(int(sum(max(0, int(tg.get("dmg_left") or 0)) for tg in tags)))
-            status.update(str(tg.get("kind") or "TAG").upper() for tg in tags)
-        else:
-            pending = unknown(0)
+            status.update(str(tg.get("kind") or "TAG").upper() for tg in tags if isinstance(tg, dict))
+        pending = self._pending(h, cs, hp + int(h.get("health_blue") or 0) if hp is not None else None)
         if hp is None:          # HeroExporter writes PlayerData keys only when pd != null (a load in progress)
             return Resources(pending_dmg=pending, status=frozenset(status))
         fm = h.get("fractured_mask")

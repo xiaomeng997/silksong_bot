@@ -451,6 +451,9 @@ def test_bind_ready_and_pending_damage(wake):
     w.res.pending_dmg = E(3)
     out = ObservabilityFilter().apply(w)
     assert out.res.bind_ready.v is False and out.res.pending_dmg.conf == 0.0
+    assert out.res.pending_dmg.v == w.res.hp.v + w.res.blue.v                # unknown reads as lethal
+    w.res.status = frozenset({"MAGGOTED"})                                    # no damage: nothing pending
+    assert ObservabilityFilter().apply(w).res.pending_dmg.v == 0
 
 
 # ---- noise ------------------------------------------------------------------------------------------------

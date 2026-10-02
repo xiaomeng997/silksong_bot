@@ -479,6 +479,31 @@ def test_new_hero_fields_when_exported():
     assert w.res.tools[0].ammo_max == 12
 
 
+def test_pending_damage_is_lethal_when_unbounded_or_unknown():
+    """hero.tags dmg_left -1 (no hit limit: frost water), the frost clock and a stream without hero.tags never read as
+    0 pending damage: conf 0 and v = health + blue (state_fields_m2.md §4; hits_to_death subtracts it)."""
+    s = _hero_state(isFrosted=False)
+    h = s["hero"]
+    total = h["health"] + int(h.get("health_blue") or 0)
+    h["tags"] = [{"kind": "Frost Water Tag", "dmg_left": -1, "t_left": 0.4}, {"kind": "acid", "dmg_left": 2}]
+    p = OracleBackend(clock=None).feed(s).res.pending_dmg
+    assert (p.v, p.conf) == (total, 0.0) and p.src != Src.ORACLE
+    h["tags"] = [{"kind": "acid", "dmg_left": None}]                    # unreadable
+    assert OracleBackend(clock=None).feed(s).res.pending_dmg.v == total
+    h["tags"] = None                                                     # no TagDamageTaker: nothing can attach
+    p = OracleBackend(clock=None).feed(s).res.pending_dmg
+    assert (p.v, p.conf, p.src) == (0, 1.0, Src.ORACLE)
+    h["tags"] = []
+    assert OracleBackend(clock=None).feed(s).res.pending_dmg.v == 0
+    del h["tags"]                                                        # an oracle without the export
+    p = OracleBackend(clock=None).feed(s).res.pending_dmg
+    assert (p.v, p.conf, p.src) == (total, 0.0, Src.UNKNOWN)
+    s = _hero_state(isFrosted=True)                                      # the frost clock: 1 HP every 1.75 s
+    s["hero"]["tags"] = []
+    w = OracleBackend(clock=None).feed(s)
+    assert (w.res.pending_dmg.v, w.res.pending_dmg.conf) == (total, 0.0) and "FROST" in w.res.status
+
+
 def test_screen_splits_loading_from_entering():
     s = fx.window(0)[0]
     s["game"]["gs"] = 3

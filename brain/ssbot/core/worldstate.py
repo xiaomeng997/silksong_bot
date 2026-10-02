@@ -341,7 +341,8 @@ class Resources:
     bind_ready: E[bool] = fld(D, factory=lambda: unknown(False), est=True)
     fractured_mask: E[FM] = fld(V, factory=lambda: unknown(FM.UNKNOWN))
     magma_ready: E[bool] | None = fld(V, None)
-    # remaining damage of attached DamageTags + frost clock (a conservative upper bound; unknown = assume the worst)
+    # remaining damage of attached DamageTags + frost clock (an upper bound). conf 0 = unknown or unbounded (a tag
+    # without a hit limit, the frost clock): v is then health + blue, lethal by itself, so reading v never fails open
     pending_dmg: E[int] = fld(D, factory=lambda: unknown(0), est=True)
     status: frozenset[str] = fld(V, frozenset())                # ACID, FLAME, GRIND, FROST, ...
     crest: E[str] = fld(V, factory=lambda: unknown(""))        # from the inventory audit only (Src.AUDIT)
