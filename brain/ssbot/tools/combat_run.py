@@ -74,6 +74,15 @@ def mode_config(mode: str, seed: int):
     raise SystemExit(f"unknown mode {mode}")
 
 
+def _in_game_without_control(s: dict) -> bool:
+    """A save is loaded (a scene, the hero exported, not the title or save-select menus) but Hornet takes no input:
+    a cutscene (the post-kill memory scene), a transition or a load. load_slot only knows the menus and gameplay."""
+    from ssbot.probes.common import MENU_MAIN, MENU_SAVE_PROFILES, in_gameplay
+    g = s.get("game") or {}
+    return bool(g.get("scene")) and bool(s.get("hero")) and g.get("menu") not in (MENU_MAIN, MENU_SAVE_PROFILES) \
+        and not in_gameplay(s)
+
+
 def worker(a: argparse.Namespace) -> int:
     from ssbot.ipc.oracle_link import OracleLink
     from ssbot.probes.common import load_slot, stand_up
@@ -101,7 +110,17 @@ def worker(a: argparse.Namespace) -> int:
             break
         unpause(link)
         time.sleep(0.6)
-    load_slot(link, 1)
+    s0 = link.wait_state(lambda s: s.get("game") is not None, timeout_s=120)
+    if _in_game_without_control(s0):
+        # a game is loaded but Hornet takes no input: the post-kill memory scene after a CLEAR (gate run
+        # 20261002_150453 i3: the last episode of the chunk before was a kill, and load_slot waited 60 s for a main
+        # menu that never came). The encounter's savestate loads from there, as between episodes.
+        print(f"[i{a.instance}] in a game without control (scene {(s0.get('game') or {}).get('scene')}): "
+              f"loading the savestate", flush=True)
+        link.rpc("savestate.load", timeout_s=40, name=enc.savestate, timeout=30)
+        from ssbot.train.episode import wait_settled
+        wait_settled(link, enc.scene, timeout_s=60)
+    load_slot(link, 1)                   # a no-op in gameplay
     stand_up(link)
     if not link.rpc("guards.set", save_suppression=True)["save_suppression"]:
         raise SystemExit("save suppression could not be turned on")
