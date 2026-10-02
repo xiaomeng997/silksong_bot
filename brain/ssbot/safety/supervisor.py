@@ -25,9 +25,14 @@ Tiers: GREEN h >= 3, the chosen plan has S = 0 and the support is known; YELLOW 
 the support unknown) with h >= 3; RED any trigger. Triggers (§3.7.4):
   Q1 h <= 1 (a Fractured Mask just broken at 1 HP included)                  -> PAUSE_PENDING, quit
   Q2 I2 broken and no candidate leaves the exposure within 0.2 s              -> PAUSE_PENDING, quit
-  Q3 h = 2 with a mask-bypassing, multi-hit, hazard or CriticalDamage threat, more than one threat instance (entity
-     root iid; every collider of one entity is one instance), or an unknown support
+  Q3 h = 2 with a mask-bypassing, multi-instance, hazard or CriticalDamage threat, or an unknown support
                                                                               -> PAUSE_PENDING, quit
+     "Multi-instance" (§3.7.4) is one damage event made of hits the i-frames do not separate (multi-hitters, 1+1 /
+     1+1+1 grabs: SupportEvent.hits > 1), not several ENEMY sources in support: enemy hits are 1.0 s of i-frames
+     apart, so after one 2-mask Bell Beast hit (3 HP, h = 2) the fight goes on in YELLOW (heal first with silk >= 9,
+     punish at most 1 hit, no parry, no new fights). This replaces the stricter reading (any two threat instances in
+     support), under which every hit against the Bell Beast ended the attempt (M2 runs 20261002_064001 / 072132: all
+     QUITs were Q3 "h = 2 and 2-6 threat instances").
   Q4 two unpredicted hits in one attempt, or the risk integral > 2x the training expectation
                                                                               -> quit at the next pausable GREEN frame,
                                                                                  conservative variant, retrain flag
@@ -252,9 +257,6 @@ def q3_threat(support: Sequence[SupportEvent], support_known: bool = True) -> st
             return f"{e.source} is a hazard"
         if e.critical:
             return f"{e.source} deals CriticalDamage"
-    instances = {e.instance if e.instance is not None else e.source for e in support}
-    if len(instances) > 1:
-        return f"{len(instances)} threat instances in support"
     return None
 
 

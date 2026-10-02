@@ -60,8 +60,8 @@ class SupportEvent:
     hazard: bool = False         # hazard type (SPIKES, LAVA, ...: passes i-frames, m0:N1) or a cog crush (+ respawn)
     mask_covers: bool = True     # False for the grab / Maul / claw trap list above
     critical: bool = False       # CriticalDamage (h -> 1)
-    instance: int | None = None  # threat instance for Q3's multi-instance test: the entity root iid, which every
-    #                              collider of one entity shares; None: the source string stands in
+    instance: int | None = None  # the entity root iid, which every collider of one entity shares (naming only: Q3's
+    #                              multi-instance is `hits` > 1, one event of hits the i-frames do not separate)
 
 
 @dataclass(slots=True, frozen=True)

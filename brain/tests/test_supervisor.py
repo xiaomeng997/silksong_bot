@@ -85,8 +85,8 @@ def test_q3_h2_with_dangerous_support():
     # 3 HP vs the body alone: h = 2, a single covered 2-mask source: YELLOW, not Q3
     d = Supervisor(BB).step(_inp(hp=3))
     assert d.h == 2 and d.tier == "YELLOW" and not d.triggers
-    for support in ((BODY, BELL_L),                                      # two instances
-                    (SupportEvent("Lace", 2, hits=2),),                  # 1+1
+    assert not Supervisor(BB).step(_inp(hp=3, support=(BODY, BELL_L))).triggers     # two ENEMY sources: no Q3
+    for support in ((SupportEvent("Lace", 2, hits=2),),                  # 1+1
                     (SupportEvent("spikes", 1, hazard=True), BODY),
                     (SupportEvent("Maul", 2, mask_covers=False),),
                     (SupportEvent("Judge", 1, critical=True), BODY)):
@@ -97,18 +97,21 @@ def test_q3_h2_with_dangerous_support():
             assert "Q1" in d.triggers, support
 
 
-def test_q3_counts_entity_instances_not_collider_names():
-    """Review: the body's colliders ('Bone Beast/PolyCollider', '/LeapCollider') are one instance; two enemies of
-    one type_key are two."""
-    one = (SupportEvent("Bone Beast/PolyCollider", 2, instance=529544),
-           SupportEvent("Bone Beast/LeapCollider", 2, instance=529544), SupportEvent("Boss Scene/Bone Beast", 2,
-                                                                                    instance=529544))
-    assert not Supervisor(BB).step(_inp(hp=3, support=one)).triggers
+def test_q3_multi_instance_means_one_event_of_several_hits():
+    """§3.7.4 multi-instance: one damage event made of hits the i-frames do not separate (SupportEvent.hits > 1),
+    not several ENEMY sources (their hits are 1.0 s of i-frames apart). At h = 2 against the Bell Beast's body and
+    bells the fight goes on in YELLOW with punishes limited to one hit; a 1+1 grab, a hazard, a mask bypass or
+    CriticalDamage still quit."""
+    bb = (SupportEvent("Bone Beast/PolyCollider", 2, instance=529544), SupportEvent("Boss Scene/BoneBeast AtkBell L", 2,
+                                                                                   instance=1),
+          SupportEvent("BoneBeast DropBell M2", 2, instance=2))
+    d = Supervisor(BB).step(_inp(hp=3, support=bb))
+    assert d.h == 2 and not d.triggers and d.tier == "YELLOW" and d.restrictions.max_punish_hits == 1
     two = (SupportEvent("Choir Clapper", 2, instance=11), SupportEvent("Choir Clapper", 2, instance=12))
-    assert "Q3" in Supervisor(BB).step(_inp(hp=3, support=two)).triggers
-    assert sv.q3_threat(two) == "2 threat instances in support"
-    # without instance ids the source string stands in
-    assert sv.q3_threat((SupportEvent("a", 2), SupportEvent("b", 2))) is not None
+    assert sv.q3_threat(two) is None
+    assert sv.q3_threat((SupportEvent("grab", 2, hits=2),)) == "grab is a 2-hit event"
+    # hazards, mask bypasses and CriticalDamage still quit at h = 2 (test_q3_h2_with_dangerous_support); Q1 unchanged
+    assert "Q1" in Supervisor(BB).step(_inp(hp=1, support=bb)).triggers
 
 
 def test_unknown_support_is_never_safe():
