@@ -362,6 +362,7 @@ class BossTracker:
         self.bells: dict[int, tuple[str, float, tuple[float, float]]] = {}   # ORACLE: armed drop bells: (type,
         #                                                                    arm time, arm position)
         self.bells_unknown = False             # an armed drop bell whose arming was not seen
+        self._cued: set[int] = set()           # VE: drop bells with their cue in the last frame
         self.anchor_log: list[tuple[str, float, float]] = []   # ORACLE: (family, hidden x, drawn transform x)
 
     # ---- ORACLE -------------------------------------------------------------------------------------------------
@@ -503,15 +504,16 @@ class BossTracker:
 
     def _bells_ve(self, ws: WorldState, t: float) -> None:
         """VE with the bell cue (ObservabilityFilter tells, phase "bell_dust"): arming time from the cue."""
-        seen = set()
+        cued = set()
         for e in ws.entities:
             if not e.type_key.v.startswith(DROP_BELL) or e.phase is None or e.phase.top != "bell_dust":
                 continue
-            seen.add(e.id)
-            if e.id not in self.bells:
+            cued.add(e.id)
+            if e.id not in self._cued:             # a new cue: this bell (re-)armed
                 t_arm = t - e.phase.t_in_phase - TELL_DELAY["bell_dust"]
                 self.bells[e.id] = (e.type_key.v, t_arm, (float(e.pos.v[0]), float(e.pos.v[1])))
-        for iid in [i for i in self.bells if i not in seen]:
+        self._cued = cued
+        for iid in [i for i in self.bells if i not in cued]:
             if t - self.bells[iid][1] > BELL_TTL_S:
                 del self.bells[iid]
 

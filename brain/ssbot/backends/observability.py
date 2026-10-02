@@ -457,6 +457,7 @@ class ObservabilityFilter:
         self._dmg: dict[int, float] = {}
         self._killed: set[int] = set()
         self._phase: dict[int, _Phase] = {}
+        self._told: set[int] = set()        # undrawn entities shown by a tell in the previous frame
         self._pt: list[float] | None = None      # [live_s, sigma_s, calib value]
         self._q_prev: int | None = None
         self._scene: str | None = None
@@ -572,6 +573,7 @@ class ObservabilityFilter:
             # their FSM state (an O field of the oracle's copy) and the delay say whether the cue shows yet
             listed = {e.id for e in ents}
             fsm_of = {e.id: e.fsm for e in ws.entities if e.fsm}       # the input's copy: out has no O fields
+            told = set()
             for e in out.entities:
                 fsm = fsm_of.get(e.id)
                 if e.id in listed or e.id in vis_ids or not fsm:
@@ -581,12 +583,16 @@ class ObservabilityFilter:
                     continue
                 due = [ph for d, ph in spec if fsm[0][2] >= d - 1e-6]
                 if due:
+                    if e.id not in self._told:
+                        self._phase.pop(e.id, None)     # a new cue (a drop bell re-arms): its time starts again
+                    told.add(e.id)
                     ents.append(Entity(id=e.id, kind=e.kind, type_key=e.type_key,
                                        pos=E(e.pos.v, sigma=e.pos.sigma, conf=1.0, src=Src.PREDICTED, age_ms=0.0),
                                        vel=unknown((0.0, 0.0)), facing=e.facing,
                                        phase=PhasePost(topk=[(due[-1], 1.0)],
                                                        t_in_phase=self._phase_time(e.id, due[-1], t)),
                                        visible_frac=0.0, hidden=True, flip_x=e.flip_x))
+            self._told = told
         out.entities = ents
 
         for name in _TIMERS:
