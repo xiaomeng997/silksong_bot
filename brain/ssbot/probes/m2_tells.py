@@ -11,8 +11,9 @@ the frames arriving first after +0.0 (the entry frame), +0.1, +0.3, +0.6 and +0.
 <state>_<n>_<+t>s_x<hidden x>.png, with a JSON sidecar holding the STATE frame, the boss's hidden x and the pixel
 column/row where its anchor (x, ground y 5.49) projects with that frame's camera (ssbot.tools.projector). Times are
 arrival times of the STATE and of the capture callback (both QPC, time.perf_counter_ns), so a shot is about one
-frame late. It also dumps the Control FSM's static graph (RPC fsm.graph: action type names per state) for the antic
-states.
+frame late. Drop bells (--what bells): every DropBell entering Antic (it falls about 1.25 s later), the shots named
+DropBell_<L|L2|M|M2|R|R2>_<n>, projected at the ceiling (y 13.74) above it. It also dumps the static graphs of the
+boss's and a drop bell's Control FSMs (RPC fsm.graph: action type names per state; parameters are not exported).
 """
 import argparse
 import ctypes
@@ -28,6 +29,9 @@ from pathlib import Path
 import numpy as np
 
 STATES = ("Emerge Antic C", "Emerge Antic L", "Burst Antic", "Rage Antic")
+BELL = "BoneBeast DropBell"          # drop bells: Dormant -> Antic (about 1.25 s, not drawn) -> Air (drawn, falls)
+BELL_STATES = ("Antic",)
+CEILING_Y = 13.74
 DELAYS = (0.0, 0.1, 0.3, 0.6, 0.9)
 BOSS = "Bone Beast"
 GROUND_Y = 5.49
@@ -112,25 +116,60 @@ class Shooter:
 class TellPolicy:
     """PlannerPolicy plus the screenshot trigger on Control state entries."""
 
-    def __init__(self, inner, shooter: Shooter, hwnd: int):
+    def __init__(self, inner, shooter: Shooter, hwnd: int, link=None, what: str = "all"):
         self.inner = inner
         self.shooter = shooter
         self.hwnd = hwnd
+        self.link = link
+        self.what = what
         self.prev: str | None = None
-        self.count: dict[str, int] = {s: 0 for s in STATES}
+        self.count: dict[str, int] = {s: 0 for s in STATES + ("DropBell",)}
+        self.bell_prev: dict[int, str] = {}
+        self.graphs: dict[str, object] = {}
 
     def __getattr__(self, name):
         return getattr(self.inner, name)
 
     def reset(self, rng, enc) -> None:
         self.prev = None
+        self.bell_prev = {}
         self.inner.reset(rng, enc)
+
+    def _shoot(self, s: dict, t_ns: int, tag: str, n: int, x: float, y: float, extra: dict) -> None:
+        from ssbot.io.game_window import client_in_capture
+        from ssbot.tools.projector import project_cam
+        px = None
+        if s.get("cam"):
+            xy, _ = project_cam([(x, y)], s["cam"])
+            px = [round(float(v), 1) for v in xy[0]]
+        meta = dict(extra, f=s.get("f"), x=round(x, 3), y=round(y, 3), px_render=px,
+                    render_screen=(s.get("cam") or {}).get("screen"),
+                    client_in_capture=list(client_in_capture(self.hwnd)), hero=(s.get("hero") or {}).get("pos"))
+        for d in DELAYS:
+            self.shooter.request(t_ns + int(d * 1e9), f"{tag}_{n:02d}_+{d:.1f}s_x{x:.1f}", dict(meta, delay_s=d))
+
+    def _graph(self, key: str, iid: int) -> None:
+        if key not in self.graphs and self.link is not None:
+            self.graphs[key] = self.link.rpc_async("fsm.graph", iid=iid, fsm="Control")
 
     def act(self, s: dict, tap):
         t_ns = time.perf_counter_ns()
         boss = next((e for e in s.get("ents") or () if e.get("type_key") == BOSS), None)
         st = (boss.get("fsms") or [{}])[0].get("state") if boss else None
-        if st != self.prev and st in STATES:
+        for e in s.get("ents") or ():
+            tk = e.get("type_key") or ""
+            if not tk.startswith(BELL):
+                continue
+            bst = (e.get("fsms") or [{}])[0].get("state")
+            if bst != self.bell_prev.get(e["iid"]) and bst in BELL_STATES and self.what in ("all", "bells"):
+                self.count["DropBell"] += 1
+                self._graph("DropBell", e["iid"])
+                self._shoot(s, t_ns, "DropBell_" + tk[len(BELL):].strip().replace(" ", ""), self.count["DropBell"],
+                            float(e["pos"][0]), CEILING_Y, {"state": bst, "type_key": tk})
+            self.bell_prev[e["iid"]] = bst
+        if boss is not None:
+            self._graph("Bone Beast", boss["iid"])
+        if st != self.prev and st in STATES and self.what in ("all", "boss"):
             from ssbot.io.game_window import client_in_capture
             from ssbot.tools.projector import project_cam
             self.count[st] += 1
@@ -157,6 +196,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--instance", type=int, default=3)
     ap.add_argument("--episodes", type=int, default=4)
     ap.add_argument("--out", type=Path, default=Path("C:/ssbot/sandbox/m2_tells"))
+    ap.add_argument("--what", choices=("all", "boss", "bells"), default="all")
+    ap.add_argument("--min-bells", type=int, default=12)
     a = ap.parse_args(argv)
     a.out.mkdir(parents=True, exist_ok=True)
 
@@ -180,7 +221,7 @@ def main(argv: list[str] | None = None) -> int:
     inner.attach(link)
     print(f"warm-up {inner.warmup():.1f} s", flush=True)
     shooter = Shooter(hwnd, a.out)
-    pol = TellPolicy(inner, shooter, hwnd)
+    pol = TellPolicy(inner, shooter, hwnd, link, a.what)
     tap = FightTap(link, BELL_BEAST)
     graphs_done = False
     try:
@@ -189,16 +230,19 @@ def main(argv: list[str] | None = None) -> int:
                                 config_fp="", start_kind="savestate", mode="data", seed=9000 + k)
             run_episode(link, BELL_BEAST, tap, pol, EpisodeConfig(mode="data", seed=9000 + k, dx=(-3.0, 1.0)), rec)
             print(f"ep{k}: {rec.outcome} {rec.ingame_s}s shots so far {dict(pol.count)}", flush=True)
-            if not graphs_done:
-                try:
-                    g = link.rpc("fsm.graph", timeout_s=10, obj=BOSS, fsm="Control")
-                    keep = {st["name"]: st.get("actions") for st in g.get("states", [])
-                            if st["name"] in STATES + ("Charge Emerge", "Leap Out", "Burst Out", "Submerged")}
-                    (a.out / "control_actions.json").write_text(json.dumps(keep, indent=1), "utf-8")
-                    graphs_done = True
-                except Exception as e:      # the boss object may be gone between episodes
-                    print(f"fsm.graph: {e}", flush=True)
-            if all(pol.count[s] >= 3 for s in ("Emerge Antic C", "Emerge Antic L")):
+            if not graphs_done and pol.graphs:
+                out = {}
+                for key, fut in pol.graphs.items():
+                    try:
+                        g = fut.result(timeout=10)
+                        out[key] = {st["name"]: st.get("actions") for st in g.get("states", [])}
+                    except Exception as e:
+                        out[key] = f"error: {e}"
+                (a.out / "control_actions.json").write_text(json.dumps(out, indent=1), "utf-8")
+                graphs_done = True
+            boss_ok = all(pol.count[s] >= 3 for s in ("Emerge Antic C", "Emerge Antic L")) or a.what == "bells"
+            bells_ok = pol.count["DropBell"] >= a.min_bells or a.what == "boss"
+            if boss_ok and bells_ok:
                 break
     finally:
         time.sleep(1.2)

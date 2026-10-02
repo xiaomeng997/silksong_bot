@@ -169,6 +169,7 @@ def main(argv: list[str] | None = None) -> int:
     misses: list = []
     for v in views:
         fc = Forecaster(model, ORACLE if v == "oracle" else VISION_EQUIVALENT, margin=a.margin, templates=tpls)
+        fc.bell_tells = v == "ve_dust"
         for i, fight in enumerate(fights):
             t1 = time.perf_counter()
             run_fight(fight, fc, v, lags, stats, misses, [BELL_BEAST])

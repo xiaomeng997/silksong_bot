@@ -59,10 +59,13 @@ LOG_ALL = os.environ.get("SSBOT_LOG_ALL") == "1"     # debugging: every tick to 
 # (C:/ssbot/sandbox/m2_tells, ssbot.probes.m2_tells: 10 charges, 12 leaps from both anchors, 9 bursts): none at
 # +0.1 s after Emerge Antic C / L or Burst Antic, dust where the boss will come up from +0.3 s, low for a charge, a
 # tall column with debris for a leap, told apart for certain at +0.6 s (the emergence antics last 1.0 s, the burst's
-# 1.2 s). BURST_TELL: the burst position from the antic's first frame, the first experiment (run 20261002_061942).
+# 1.2 s); a narrow dust column from the ceiling above a drop bell from +0.3 s after it arms (Antic; it falls about
+# 1.25 s after arming). BURST_TELL: the burst position from the antic's first frame, the first experiment (run
+# 20261002_061942).
 DUST_TELL = {"Bone Beast": {"Emerge Antic C": [(0.3, "dust"), (0.6, "dust_low")],
                             "Emerge Antic L": [(0.3, "dust"), (0.6, "dust_tall")],
-                            "Burst Antic": [(0.3, "dust_burst")]}}
+                            "Burst Antic": [(0.3, "dust_burst")]}} | {
+    f"BoneBeast DropBell {b}": {"Antic": [(0.3, "bell_dust")]} for b in ("L", "L2", "M", "M2", "R", "R2")}
 BURST_TELL = {"Bone Beast": {"Burst Antic": "burst_tell"}}
 TELLS = {"degraded": None, "degraded_dust": DUST_TELL, "degraded_tell": BURST_TELL}
 VIEWS = ("oracle", "degraded", "degraded_dust", "degraded_tell")
@@ -123,6 +126,7 @@ class PlannerPolicy:
                              comfort=COMFORT)
         self.pb = load_playbook(enemy)
         self.fc.no_hurtbox = self.pb.no_hurtbox
+        self.fc.bell_tells = view == "degraded_dust"
         self.tac = Tactics(self.pb)
         if view == "degraded" and self.pb.hidden_x_vision is not None:
             self.tac.hidden_x = self.pb.hidden_x_vision      # no cues: the stance with the least unreactable risk

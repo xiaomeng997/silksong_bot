@@ -97,8 +97,12 @@ PHASE_FAMILY = {"emerge": "BB_CHARGE", "charge_antic": "BB_CHARGE", "charge": "B
 # "burst_tell": the burst position from the antic's first frame, the first experiment (run 20261002_061942).
 TELL_PHASES = frozenset(("burst_tell", "dust", "dust_low", "dust_tall", "dust_burst"))
 EMERGE_TELLS = frozenset(("dust", "dust_low", "dust_tall"))
-TELL_DELAY = {"burst_tell": 0.0, "dust": 0.3, "dust_low": 0.6, "dust_tall": 0.6, "dust_burst": 0.3}
-TELL_SLACK_S = {"burst_tell": BIN, "dust": 0.1, "dust_low": 0.1, "dust_tall": 0.1, "dust_burst": 0.1}
+TELL_DELAY = {"burst_tell": 0.0, "dust": 0.3, "dust_low": 0.6, "dust_tall": 0.6, "dust_burst": 0.3, "bell_dust": 0.3}
+TELL_SLACK_S = {"burst_tell": BIN, "dust": 0.1, "dust_low": 0.1, "dust_tall": 0.1, "dust_burst": 0.1,
+                "bell_dust": 0.1}
+# A drop bell's cue: a narrow dust column from the ceiling at its x, from +0.3 s after it arms (Antic; none at +0.1 s;
+# it falls about 1.25 s after arming), screenshots C:/ssbot/sandbox/m2_tells DropBell_*. The vision view places its
+# self template from the cue (arming TELL_DELAY earlier, +-TELL_SLACK_S) like the oracle view does from the FSM.
 DUST_ROOTS = (("BB_CHARGE", "Emerge Antic C"), ("BB_LEAP", "Emerge Antic L"))
 RECOVER_ROOT = {"BB_CHARGE": "Charge End", "BB_LEAP": "Leap Land"}
 # the state a hidden phase starts in, by the last drawn family (None: before the first emergence)
@@ -497,8 +501,23 @@ class BossTracker:
 
     # ---- VISION_EQUIVALENT ----------------------------------------------------------------------------------------
 
+    def _bells_ve(self, ws: WorldState, t: float) -> None:
+        """VE with the bell cue (ObservabilityFilter tells, phase "bell_dust"): arming time from the cue."""
+        seen = set()
+        for e in ws.entities:
+            if not e.type_key.v.startswith(DROP_BELL) or e.phase is None or e.phase.top != "bell_dust":
+                continue
+            seen.add(e.id)
+            if e.id not in self.bells:
+                t_arm = t - e.phase.t_in_phase - TELL_DELAY["bell_dust"]
+                self.bells[e.id] = (e.type_key.v, t_arm, (float(e.pos.v[0]), float(e.pos.v[1])))
+        for iid in [i for i in self.bells if i not in seen]:
+            if t - self.bells[iid][1] > BELL_TTL_S:
+                del self.bells[iid]
+
     def _update_ve(self, ws: WorldState, boss: Entity | None, t: float) -> None:
         m = self.model
+        self._bells_ve(ws, t)
         self.coasting = boss is None or boss.phase is None or boss.phase.top == UNKNOWN
         if boss is None or boss.phase is None:
             return
@@ -698,6 +717,7 @@ class Forecaster:
         self.tracker = BossTracker(model, view)
         self.boss: Entity | None = None
         self.no_hurtbox: frozenset[str] = frozenset()     # states / phases with the body box disabled (playbook)
+        self.bell_tells = False        # VE: the drop bells' cue is in the view (ObservabilityFilter tells)
         self.t = 0.0
 
     def reset(self) -> None:
@@ -724,18 +744,21 @@ class Forecaster:
         for r in roots:
             self._walk(r.state, r.e_lo, r.e_hi, replace(r.ctx), r.p, -1, H, nodes, placements, r.current, 0)
         tr = self.tracker
-        if self.view == ORACLE and tr.bells:
+        if tr.bells:
             nid = len(nodes)
             nodes.append(Node(nid, "bells", 0.0, 0.0, None, 1.0, -1, None))
+            # oracle: the arming frame; vision: from the cue, +-its slack in 1/60 s steps
+            k = 0 if self.view == ORACLE else int(round(TELL_SLACK_S["bell_dust"] / BIN))
             for iid, (tk, t_arm, pos) in tr.bells.items():
                 key = f"{hb.SUPPORT}ent/{tk}/self"
                 if key not in self.meta:
                     continue
                 t0, t1 = self.meta[key]
-                e = t_arm - origin
-                if e + t1 < -BIN or e + t0 > H + BIN:
-                    continue
-                placements.append(Placement(key, -e, pos, 1, nid, e + t0, e + t1, frozenset({tk})))
+                for j in range(-k, k + 1):
+                    e = t_arm + j * BIN - origin
+                    if e + t1 < -BIN or e + t0 > H + BIN:
+                        continue
+                    placements.append(Placement(key, -e, pos, 1, nid, e + t0, e + t1, frozenset({tk})))
         for fam, anchor, lo, hi, phase, death in self.tracker.ends:
             nid = len(nodes)
             nodes.append(Node(nid, TAIL, lo - origin, hi - origin, fam, 1.0, -1, anchor))
@@ -786,9 +809,11 @@ class Forecaster:
             allsrc = f.sources.get(state, frozenset())
             fsrc = ws if fr == "world" else (allsrc - ws if fr == "anchor" else allsrc)
             t_from = -math.inf
-            if self.view == ORACLE and fsrc and all(x.startswith(DROP_BELL) for x in fsrc) \
-                    and not self.tracker.bells_unknown:
-                t_from = self.bell_lead
+            if fsrc and all(x.startswith(DROP_BELL) for x in fsrc) and not self.tracker.bells_unknown:
+                if self.view == ORACLE:
+                    t_from = self.bell_lead
+                elif self.bell_tells:      # a bell whose cue is not out yet armed less than the cue's delay ago
+                    t_from = self.bell_lead - TELL_DELAY["bell_dust"] - TELL_SLACK_S["bell_dust"]
             for e in es:
                 on, off = e + t0, e + t1
                 if off < -BIN or on > H + BIN:

@@ -567,6 +567,26 @@ class ObservabilityFilter:
             else:
                 ents.append(self._ghost(seen, age))
                 unobs |= Unobs.OFFSCREEN_HIDDEN
+        if self.tells:
+            # tells of entities that are not drawn and were never seen (drop bells hang undrawn until they fall):
+            # their FSM state (an O field of the oracle's copy) and the delay say whether the cue shows yet
+            listed = {e.id for e in ents}
+            fsm_of = {e.id: e.fsm for e in ws.entities if e.fsm}       # the input's copy: out has no O fields
+            for e in out.entities:
+                fsm = fsm_of.get(e.id)
+                if e.id in listed or e.id in vis_ids or not fsm:
+                    continue
+                spec = self.tells.get(e.type_key.v, {}).get(fsm[0][1])
+                if not spec or isinstance(spec, str):
+                    continue
+                due = [ph for d, ph in spec if fsm[0][2] >= d - 1e-6]
+                if due:
+                    ents.append(Entity(id=e.id, kind=e.kind, type_key=e.type_key,
+                                       pos=E(e.pos.v, sigma=e.pos.sigma, conf=1.0, src=Src.PREDICTED, age_ms=0.0),
+                                       vel=unknown((0.0, 0.0)), facing=e.facing,
+                                       phase=PhasePost(topk=[(due[-1], 1.0)],
+                                                       t_in_phase=self._phase_time(e.id, due[-1], t)),
+                                       visible_frac=0.0, hidden=True, flip_x=e.flip_x))
         out.entities = ents
 
         for name in _TIMERS:

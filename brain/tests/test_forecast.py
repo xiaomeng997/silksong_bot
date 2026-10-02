@@ -253,3 +253,22 @@ def test_ve_dust_cues_start_the_walk_in_the_antic(model, templates):
     roots, _ = fc.tracker.roots(21.3)
     assert [(r.state, r.ctx.family, r.ctx.anchor.x) for r in roots] == [("Burst Antic", "BB_BURST", 84.2)]
     assert {p.anchor for p in fc.forecast(2.0).placements if p.anchor is not None} == {(84.2, 5.49)}
+
+
+def test_ve_bell_cue_places_the_bells_self_template(model, templates):
+    """Drop bell cue (phase "bell_dust", PlannerPolicy DUST_TELL): the bell's self template from its arming time,
+    TELL_DELAY before the cue, +-TELL_SLACK_S; unannounced bells' unions count only from the cue's lead on."""
+    from ssbot.combat.forecast import TELL_DELAY
+    from ssbot.core.worldstate import E, Entity, Kind, PhasePost, WorldState
+    fc = _fc(model, templates, VISION_EQUIVALENT)
+    fc.bell_tells = True
+    ws = WorldState()
+    ws.stamp.t_game_s = 30.0
+    ws.entities = [Entity(id=11, kind=Kind.HAZARD_DYN, type_key=E("BoneBeast DropBell M2"), pos=E((84.5, 13.74), conf=1.0),
+                          phase=PhasePost(topk=[("bell_dust", 1.0)], t_in_phase=0.05), hidden=True, visible_frac=0.0)]
+    fc.update(ws)
+    tk, t_arm, pos = fc.tracker.bells[11]
+    assert tk == "BoneBeast DropBell M2" and t_arm == pytest.approx(30.0 - 0.05 - TELL_DELAY["bell_dust"])
+    f = fc.forecast(2.0)
+    own = [p for p in f.placements if p.key.endswith("DropBell M2/self")]
+    assert len(own) == 13 and {p.anchor for p in own} == {(84.5, 13.74)}

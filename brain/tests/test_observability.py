@@ -701,3 +701,23 @@ def test_delayed_tells_follow_the_time_in_state(wake):
         b.phase = PhasePost(topk=[("Emerge Antic L", 1.0)], t_in_phase=tau)
         seen.append(boss(f.apply(w)).phase.top)
     assert seen == [obs.HIDDEN_PHASE, "dust", "dust", "dust_tall", "dust_tall"]
+
+
+def test_a_bell_cue_shows_an_undrawn_drop_bell(wake):
+    """tells for entities never drawn (drop bells hang undrawn): from the oracle copy's FSM state and time in it."""
+    i = next((i for i, w in enumerate(wake) if any(e.type_key.v.startswith("BoneBeast DropBell") for e in w.entities)),
+             None)
+    if i is None:
+        pytest.skip("no drop bell in the fixture window")
+    f = ObservabilityFilter(bosses=[BELL_BEAST], tells={"BoneBeast DropBell M2": {"Antic": [(0.3, "bell_dust")]}})
+    out = []
+    for k, tau in enumerate((0.1, 0.35)):
+        w = copy.deepcopy(wake[i + k])
+        bell = next(e for e in w.entities if e.type_key.v.startswith("BoneBeast DropBell"))
+        bell.type_key = E("BoneBeast DropBell M2")
+        bell.fsm = [("Control", "Antic", tau)]
+        bell.render_box, bell.dmg_boxes, bell.body_polys = None, [], []
+        out.append(next((e for e in f.apply(w).entities if e.id == bell.id), None))
+    assert out[0] is None
+    assert out[1] is not None and out[1].phase.top == "bell_dust" and out[1].hidden and out[1].pos.conf == 1.0
+    assert out[1].fsm is None and out[1].dmg_boxes == []
