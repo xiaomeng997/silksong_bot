@@ -1,2 +1,3 @@
-// The offline checks in oracle/tests/EntitiesCheck call the module's pure helpers directly.
+// The offline checks in oracle/tests/EntitiesCheck call the pure helpers directly (Entities, and the M2 exports:
+// MenuExporter, GateWatch, HeroExporter.TagDmgLeft, FrameExporter.HfAgeCap).
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("EntitiesCheck")]

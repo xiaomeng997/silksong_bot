@@ -27,7 +27,7 @@ AssemblyLoadContext.Default.Resolving += (ctx, name) =>
     }
     return null;
 };
-foreach (var n in new[] { "Assembly-CSharp", "PlayMaker", "TeamCherry.TK2D", "TeamCherry.SharedUtils", "Assembly-CSharp-firstpass", "UnityEngine.CoreModule", "UnityEngine.Physics2DModule", "Unity.InputSystem" })
+foreach (var n in new[] { "Assembly-CSharp", "PlayMaker", "TeamCherry.TK2D", "TeamCherry.SharedUtils", "Assembly-CSharp-firstpass", "UnityEngine.CoreModule", "UnityEngine.Physics2DModule", "Unity.InputSystem", "UnityEngine.UI", "UnityEngine.UIModule" })
     AssemblyLoadContext.Default.LoadFromAssemblyPath(Path.Combine(managed, n + ".dll"));
 if (!args.Contains("--no-debugmod")) AssemblyLoadContext.Default.LoadFromAssemblyPath(Path.Combine(dm, "DebugMod.dll"));
 var asm = AssemblyLoadContext.Default.LoadFromAssemblyPath(oracle);

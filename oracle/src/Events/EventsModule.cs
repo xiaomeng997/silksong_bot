@@ -19,6 +19,7 @@ namespace SsOracle.Events
             FreezeTap.Install(harmony);
             FlowTap.Install(harmony);
             HunterMeterTap.Install(harmony);
+            HitTap.Install(harmony);
             host.AddComponent<EventsRunner>();
             Export.FrameExporter.Register(new TapExporter());
 

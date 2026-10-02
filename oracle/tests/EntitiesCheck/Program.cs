@@ -30,6 +30,7 @@ internal static class Program
         EffectiveDamage();
         Parry();
         Geometry();
+        M2Exports();
         Console.WriteLine(fails == 0 ? "ALL OK" : $"{fails} FAILED");
         return fails == 0 ? 0 : 1;
     }
@@ -150,5 +151,39 @@ internal static class Program
         Near(v[1], 6f, "points: offset then transform (y0)");
         Near(v[2], 6f, "points: offset then transform (x1)");
         Near(v[3], 8f, "points: offset then transform (y1)");
+    }
+
+    /// <summary>The pure parts of the M2 STATE additions (docs/facts/1.0.30000/state_fields_m2.md); the engine-side parts
+    /// are checked in game by brain/ssbot/probes/m2_exports.py.</summary>
+    private static void M2Exports()
+    {
+        // menu.sel roles
+        Eq(SsOracle.Export.MenuExporter.PauseRole(UnityEngine.UI.PauseMenuButton.PauseButtonType.Continue), "continue", "sel Continue");
+        Eq(SsOracle.Export.MenuExporter.PauseRole(UnityEngine.UI.PauseMenuButton.PauseButtonType.Options), "options", "sel Options");
+        Eq(SsOracle.Export.MenuExporter.PauseRole(UnityEngine.UI.PauseMenuButton.PauseButtonType.Quit), "quit", "sel Quit");
+        Eq(SsOracle.Export.MenuExporter.MethodRole("UIReturnToMainMenu"), "yes", "prompt Yes calls UIReturnToMainMenu");
+        Eq(SsOracle.Export.MenuExporter.MethodRole("UILeaveExitToMenuPrompt"), "no", "prompt No calls UILeaveExitToMenuPrompt");
+        Eq(SsOracle.Export.MenuExporter.MethodRole("UIGoBack"), "back", "a back button calls UIGoBack");
+        Eq(SsOracle.Export.MenuExporter.MethodRole("UIGoToOptionsMenu"), null, "anything else has no role");
+        // Every listener name the mapping uses is a real UIManager method (a rename would silently drop yes/no).
+        foreach (var name in new[] { "UIReturnToMainMenu", "UILeaveExitToMenuPrompt", "UIGoBack" })
+            Check(typeof(UIManager).GetMethod(name) != null, $"UIManager.{name} exists");
+
+        // room.gates selection: battle gates, solids off in the dump, and solids seen changed since.
+        Eq(SsOracle.SceneDump.GateWatch.IsWatched(false, true, true), false, "a solid on at the dump and on now is not listed");
+        Eq(SsOracle.SceneDump.GateWatch.IsWatched(false, false, false), true, "Bone_05 'Threaded Bell Gate' (off at entry) is listed");
+        Eq(SsOracle.SceneDump.GateWatch.IsWatched(false, true, false), true, "Bone_05 'Wall' (on at entry, gone later) is listed once seen off");
+        Eq(SsOracle.SceneDump.GateWatch.IsWatched(true, true, true), true, "a BattleScene gate is always listed");
+
+        // hero.tags dmg_left
+        Eq(SsOracle.Hero.HeroExporter.TagDmgLeft(false, 3, 2, 1), 2, "limited tag: hits left x amount");
+        Eq(SsOracle.Hero.HeroExporter.TagDmgLeft(false, 0, 0, 1), -1, "unlimited tag (frost water while swimming): -1");
+        Eq(SsOracle.Hero.HeroExporter.TagDmgLeft(true, 0, 0, 2), 2, "RemoveAfterNextHit: one more hit");
+        Eq(SsOracle.Hero.HeroExporter.TagDmgLeft(false, 5, 0, 1), 0, "limited tag with no hits left: 0");
+
+        // act.hf age cap must not hide a difference the filter acts on
+        Check(SsOracle.Export.FrameExporter.HfAgeCap >= SsOracle.Input.HoldFilter.DefaultMinPressFrames &&
+              SsOracle.Export.FrameExporter.HfAgeCap >= SsOracle.Input.HoldFilter.DefaultMinReleaseFrames,
+              "act.hf age cap is above the minimum press / release frames");
     }
 }

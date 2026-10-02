@@ -17,6 +17,13 @@ namespace SsOracle.Hero
     /// that generate silk while Hunter_v2/v3 is equipped (nail damage multipliers from the Gameplay.HunterCombo* thresholds
     /// on, RPC gameplay.dump) and stays 0 for every other crest; each reset is a "hunter_meter" event (Events.HunterMeterTap).
     ///
+    /// M2 keys (field list, sources, units and time bases: docs/facts/1.0.30000/state_fields_m2.md): "tm" (the private
+    /// timers and step counters the kinematics and i-frame models otherwise reconstruct from history), "alpha" (physics
+    /// phase), "wall" ([touchingWallL, touchingWallR]; the wall side, which facing only implies while wall-sliding),
+    /// "tags" (pending damage-tag hits) and "tool_max" (capacity aligned with "tools"). The kinematics review found the
+    /// frame-to-step jitter decides 0 or 1 physics steps per frame (fs 0 in 20.7% of trial frames), so the planner needs
+    /// alpha live rather than estimated.
+    ///
     /// Enum-valued keys are ints; names come from RPC "schema.hero". The cState bitset order comes from RPC
     /// "schema.cstate". Can*() predicates are limited to side-effect-free ones: CanJump() zeroes the ledge buffer
     /// and raycasts, CanDoubleJump() queues wall-jump interrupts, CanThrowTool() fires failure events, so they
@@ -75,6 +82,10 @@ namespace SsOracle.Hero
             K(w, "anim", ref n); WriteAnim(w, hero);
             K(w, "spell", ref n); WriteSpell(w, hero);
             K(w, "hunter_meter", ref n); w.Int(Events.HunterMeterTap.Meter(hero));
+            K(w, "alpha", ref n); WriteAlpha(w);
+            K(w, "wall", ref n); w.ArrayHeader(2); w.Bool(hero.touchingWallL); w.Bool(hero.touchingWallR);
+            K(w, "tm", ref n); WriteTimers(w, hero, cs, body);
+            K(w, "tags", ref n); WriteTags(w, hero);
 
             if (pd != null)
             {
@@ -101,6 +112,7 @@ namespace SsOracle.Hero
                 for (var i = 0; i < toolAmounts.Count; i++)
                     if (toolNames[i] != null) w.Int(toolAmounts[i]); else w.Nil();
                 K(w, "tools_extra", ref n); w.Int(extra);
+                K(w, "tool_max", ref n); WriteToolMax(w, hero);
                 K(w, "respawn", ref n);
                 w.MapHeader(6);
                 w.Key("scene"); w.Str(pd.respawnScene);
@@ -327,6 +339,188 @@ namespace SsOracle.Hero
             }
             toolNames.Add(tool);
             toolAmounts.Add(pd.GetToolData(tool).AmountLeft);
+        }
+
+        // ---- M2 additions: timers, physics phase, walls, damage tags, tool capacity ---------------------------
+
+        private static readonly AccessTools.FieldRef<HeroController, float> InvulnDuration = Refs.Field<HeroController, float>("invulnerableDuration");
+        private static readonly AccessTools.FieldRef<HeroController, float> InvulnFreeze = Refs.Field<HeroController, float>("invulnerableFreezeDuration");
+        private static readonly AccessTools.FieldRef<HeroController, float> RecoilTimer = Refs.Field<HeroController, float>("recoilTimer");
+        private static readonly AccessTools.FieldRef<HeroController, int> RecoilSteps = Refs.Field<HeroController, int>("recoilStepsLeft");
+        private static readonly AccessTools.FieldRef<HeroController, float> DashCooldown = Refs.Field<HeroController, float>("dashCooldownTimer");
+        private static readonly AccessTools.FieldRef<HeroController, float> AttackCooldown = Refs.Field<HeroController, float>("attack_cooldown");
+        private static readonly AccessTools.FieldRef<HeroController, float> AttackTime = Refs.Field<HeroController, float>("attack_time");
+        private static readonly AccessTools.FieldRef<HeroController, float> ToolCooldown = Refs.Field<HeroController, float>("throwToolCooldown");
+        private static readonly AccessTools.FieldRef<HeroController, int> JumpSteps = Refs.Field<HeroController, int>("jump_steps");
+        private static readonly AccessTools.FieldRef<HeroController, int> JumpedSteps = Refs.Field<HeroController, int>("jumped_steps");
+        private static readonly AccessTools.FieldRef<HeroController, int> JumpQueue = Refs.Field<HeroController, int>("jumpQueueSteps");
+        private static readonly AccessTools.FieldRef<HeroController, int> AttackQueue = Refs.Field<HeroController, int>("attackQueueSteps");
+        private static readonly AccessTools.FieldRef<HeroController, int> ToolQueue = Refs.Field<HeroController, int>("toolThrowQueueSteps");
+        private static readonly AccessTools.FieldRef<HeroController, TagDamageTaker> TagTaker = Refs.Field<HeroController, TagDamageTaker>("tagDamageTaker");
+        private static readonly AccessTools.FieldRef<DamageTag, int> TagAmount = Refs.Field<DamageTag, int>("damageAmount");
+
+        /// <summary>
+        /// hero.alpha: (Time.time - Time.fixedTime) / Time.fixedDeltaTime at end of frame, the phase of the physics
+        /// clock inside the current fixed step (in [0, 1) unless Unity capped the fixed steps of a long frame). Doubles,
+        /// because the float clocks lose a fifth of a 0.02 s step to rounding after about a day of play time.
+        /// </summary>
+        private static void WriteAlpha(MsgPackWriter w)
+        {
+            var fdt = Time.fixedDeltaTime;
+            if (!(fdt > 0f)) { w.Nil(); return; }
+            w.Float((float)((Time.timeAsDouble - Time.fixedTimeAsDouble) / fdt));
+        }
+
+        private static void FloatOrNil(MsgPackWriter w, AccessTools.FieldRef<HeroController, float> f, HeroController h)
+        {
+            if (f != null) w.Float(f(h)); else w.Nil();
+        }
+
+        private static void IntOrNil(MsgPackWriter w, AccessTools.FieldRef<HeroController, int> f, HeroController h)
+        {
+            if (f != null) w.Int(f(h)); else w.Nil();
+        }
+
+        /// <summary>
+        /// hero.tm: HeroController's private timers and step counters (all FieldRef reads, no Unity call except the
+        /// rigidbody's gravityScale). Time values are seconds of scaled game time (they count Time.deltaTime), step
+        /// values count FixedUpdate steps or input frames as the game does. inv = what StartInvulnerable's coroutine
+        /// has left (invulnerableFreezeDuration + invulnerableDuration, each floored at 0; after a hit INVUL_TIME 1.0,
+        /// times Gameplay.WeightedAnkletDmgInvulnMult with the anklet); the other i-frame sources stay in their own keys
+        /// (parry_invuln_timer, invulnerable_count, the downspike steps in cstate_int). recoil = damage recoil left:
+        /// RECOIL_DURATION - recoilTimer while cState.recoiling, the full RECOIL_DURATION while recoilFrozen (the hit's
+        /// FreezeMoment runs first), else 0.
+        /// </summary>
+        private static void WriteTimers(MsgPackWriter w, HeroController h, HeroControllerStates cs, Rigidbody2D body)
+        {
+            w.MapHeader(15);
+            w.Key("inv");
+            if (InvulnDuration != null && InvulnFreeze != null)
+                w.Float(Mathf.Max(0f, InvulnFreeze(h)) + Mathf.Max(0f, InvulnDuration(h)));
+            else w.Nil();
+            w.Key("recoil");
+            if (RecoilTimer != null)
+                w.Float(cs.recoiling ? Mathf.Max(0f, h.RECOIL_DURATION - RecoilTimer(h)) : cs.recoilFrozen ? h.RECOIL_DURATION : 0f);
+            else w.Nil();
+            w.Key("recoil_steps"); IntOrNil(w, RecoilSteps, h);
+            w.Key("dash_cd"); FloatOrNil(w, DashCooldown, h);
+            w.Key("atk_cd"); FloatOrNil(w, AttackCooldown, h);
+            w.Key("atk_t"); FloatOrNil(w, AttackTime, h);
+            w.Key("tool_cd"); FloatOrNil(w, ToolCooldown, h);
+            w.Key("jump_steps"); IntOrNil(w, JumpSteps, h);
+            w.Key("jumped_steps"); IntOrNil(w, JumpedSteps, h);
+            w.Key("ds"); w.Float(h.downSpikeTimer);
+            w.Key("ds_rec"); w.Float(h.downSpikeRecoveryTimer);
+            w.Key("grav"); if (body != null) w.Float(body.gravityScale); else w.Nil();
+            w.Key("qj"); IntOrNil(w, JumpQueue, h);
+            w.Key("qa"); IntOrNil(w, AttackQueue, h);
+            w.Key("qt"); IntOrNil(w, ToolQueue, h);
+        }
+
+        private struct TagSnap
+        {
+            public string Kind;
+            public int DmgLeft;
+            public float TLeft;
+        }
+
+        private readonly List<TagSnap> tagSnaps = new List<TagSnap>(4);
+        private readonly Dictionary<DamageTag, string> tagNames = new Dictionary<DamageTag, string>(Entities.RefComparer<DamageTag>.Instance);
+
+        /// <summary>
+        /// hero.tags: the hero's active damage tags (TagDamageTaker.TaggedDamage: acid, frost water, ...), each
+        /// {kind: the DamageTag asset name, dmg_left: masks still to come = hits left x the tag's damageAmount (before
+        /// Barbed Wire and the Fractured Mask; -1 for a tag without a hit limit, which ticks until its source removes it,
+        /// e.g. while swimming in frost water), t_left: seconds of scaled game time (the Time.timeAsDouble clock the tag
+        /// uses) until its next hit lands}. dmg_left and t_left are the conservative pair for hits_to_death: all the
+        /// damage still pending and the earliest moment any of it lands. nil without a TagDamageTaker.
+        /// </summary>
+        private void WriteTags(MsgPackWriter w, HeroController hero)
+        {
+            tagSnaps.Clear();
+            try
+            {
+                var taker = TagTaker != null ? TagTaker(hero) : null;
+                if (taker == null) { w.Nil(); return; }
+                if (taker.TaggedDamage is Dictionary<DamageTag, DamageTagInfo> dict && dict.Count > 0)
+                {
+                    var now = Time.timeAsDouble;
+                    foreach (var kv in dict)
+                    {
+                        var tag = kv.Key;
+                        var info = kv.Value;
+                        if (tag == null || info == null) continue;
+                        if (!tagNames.TryGetValue(tag, out var kind))
+                        {
+                            if (tagNames.Count > 64) tagNames.Clear();   // assets only; bound it anyway
+                            tagNames[tag] = kind = tag.name;
+                        }
+                        tagSnaps.Add(new TagSnap
+                        {
+                            Kind = kind,
+                            DmgLeft = TagDmgLeft(info.RemoveAfterNextHit, tag.TotalHitLimit, info.HitsLeft, TagAmount != null ? TagAmount(tag) : 1),
+                            TLeft = (float)Math.Max(0.0, info.NextHitTime - now),
+                        });
+                    }
+                }
+            }
+            catch (Exception e)
+            {
+                LogOnce(e);
+                w.Nil();
+                return;
+            }
+            w.ArrayHeader(tagSnaps.Count);
+            foreach (var t in tagSnaps)
+            {
+                w.MapHeader(3);
+                w.Key("kind"); w.Str(t.Kind);
+                w.Key("dmg_left"); w.Int(t.DmgLeft);
+                w.Key("t_left"); w.Float(t.TLeft);
+            }
+        }
+
+        /// <summary>
+        /// Damage a tag still deals (TagDamageTaker.Tick): a tag marked RemoveAfterNextHit hits once more; one with a
+        /// TotalHitLimit hits HitsLeft more times; one without a limit (HitsLeft stays 0) keeps hitting until its source
+        /// removes it, reported as -1 (unbounded).
+        /// </summary>
+        public static int TagDmgLeft(bool removeAfterNextHit, int totalHitLimit, int hitsLeft, int amount)
+        {
+            var hits = removeAfterNextHit ? 1 : totalHitLimit > 0 ? hitsLeft : -1;
+            return hits < 0 ? -1 : hits * amount;
+        }
+
+        private readonly List<int> toolMax = new List<int>(16);
+
+        /// <summary>
+        /// hero.tool_max, aligned with hero.tools: ToolItemManager.GetToolStorageAmount of each equipped tool (base
+        /// storage plus Tool Pouch upgrades and the Shell Satchel; the custom override amount for an overridden tool),
+        /// nil for an empty slot or an unknown tool name. The whole key is nil while SafeReads.ToolsReadable is false
+        /// (the getter goes through ToolItemManager.Instance and IsEquippedHud).
+        /// </summary>
+        private void WriteToolMax(MsgPackWriter w, HeroController hero)
+        {
+            toolMax.Clear();
+            try
+            {
+                if (!SafeReads.ToolsReadable(hero)) { w.Nil(); return; }
+                for (var i = 0; i < toolNames.Count; i++)
+                {
+                    var name = toolNames[i];
+                    var tool = name != null ? ToolItemManager.GetToolByName(name) : null;
+                    toolMax.Add(tool != null ? ToolItemManager.GetToolStorageAmount(tool) : -1);
+                }
+            }
+            catch (Exception e)
+            {
+                LogOnce(e);
+                w.Nil();
+                return;
+            }
+            w.ArrayHeader(toolMax.Count);
+            foreach (var m in toolMax)
+                if (m >= 0) w.Int(m); else w.Nil();
         }
     }
 }

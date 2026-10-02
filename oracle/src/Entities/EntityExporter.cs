@@ -11,9 +11,15 @@ namespace SsOracle.Entities
     /// z = 0 plane plus EntityRegistry.Margin, one map per entity:
     ///   iid, type_key, category, src (Src bits), layer, pos [x,y,z], vel [x,y] | nil, gravity_scale | nil,
     ///   hp | nil, is_dead | nil, inv | nil (HealthManager.IsInvincible), fsms [{name, state, t, rt}], anim {clip, frame, n} | nil,
-    ///   flipX, render_aabb [minx, miny, maxx, maxy] | nil,
-    ///   colliders [{kind, verts_world [x0, y0, x1, y1, ...], enabled, layer, r (circles only), damage | nil}]
+    ///   flipX, render_aabb [minx, miny, maxx, maxy] | nil, hidden,
+    ///   colliders [{kind, name, verts_world [x0, y0, x1, y1, ...], enabled, layer, r (circles only), damage | nil}]
     /// damage = {dealt, eff, hazard_type, flags, parry, parryable, can_cause_damage}; see WriteDamage.
+    /// hidden (M2): the entity is a HealthManager root exported earlier in this scene whose HealthManager is inactive
+    /// now (EntityRegistry.HiddenPass: e.g. the Bell Beast underground); it keeps pos (transform), flipX, fsms, anim and
+    /// hp, its colliders are [] and render_aabb is nil unless its GameObject is still active. An entity pulled in by an
+    /// active damage source of its own is never hidden, so no threat collider is dropped this way.
+    /// colliders[].name (M2): the collider's GameObject name ("PolyCollider", "LeapCollider", or the root's own name
+    /// for root colliders); one entry per path of a polygon, all with the same name.
     /// fsms[].t = FsmState.StateTime (scaled; PlayMaker stops it once all of the state's actions have finished),
     /// fsms[].rt = FsmState.StateRealTime (unscaled seconds since the state was entered; never stops, but also runs
     /// through pauses and hit-stop). Exact scaled dwell times come from the "fsm" event frames (FsmTap).
@@ -39,6 +45,7 @@ namespace SsOracle.Entities
         private sealed class ColSnap
         {
             public byte Kind;
+            public string Name;
             public int V0, VN;
             public bool Enabled;
             public int Layer;
@@ -62,6 +69,7 @@ namespace SsOracle.Entities
             public string Clip;
             public int Frame, FrameCount;
             public bool Flip;
+            public bool Hidden;
             public bool HasAabb;
             public float MinX, MinY, MaxX, MaxY;
         }
@@ -189,9 +197,10 @@ namespace SsOracle.Entities
 
                 var sprite = e.Sprite;
                 s.Flip = (m.m00 < 0f) ^ (sprite != null && sprite.FlipX);
+                s.Hidden = e.Hidden;
 
                 var r = e.Renderer;
-                s.HasAabb = r != null && r.enabled;
+                s.HasAabb = r != null && r.enabled && (!s.Hidden || go.activeInHierarchy);
                 if (s.HasAabb)
                 {
                     var bounds = r.bounds;
@@ -201,8 +210,9 @@ namespace SsOracle.Entities
                 }
 
                 s.C0 = c0;
-                foreach (var slot in e.Colliders)
-                    GatherCollider(slot, ref m, s.Layer);
+                if (!s.Hidden)
+                    foreach (var slot in e.Colliders)
+                        GatherCollider(slot, ref m, s.Layer);
                 s.CN = colCount - c0;
                 snapCount++;
             }
@@ -246,6 +256,7 @@ namespace SsOracle.Entities
             var c = slot.Col;
             if (c == null) return;
             if (!slot.OnRoot && !slot.Go.activeInHierarchy) return;
+            colName = slot.Name;
             var enabled = c.enabled;
             var layer = slot.OnRoot ? rootLayer : slot.Go.layer;
             var m = slot.OnRoot ? rootM : slot.Tr.localToWorldMatrix;
@@ -351,10 +362,13 @@ namespace SsOracle.Entities
             }
         }
 
+        private string colName;  // GatherCollider's current slot, for BeginCol
+
         private ColSnap BeginCol(byte kind, bool enabled, int layer, bool hasDamage, int dealt, int eff, int haz, int flags, int parry, bool can)
         {
             var cs = NextCol();
             cs.Kind = kind;
+            cs.Name = colName;
             cs.V0 = verts.Count;
             cs.VN = 0;
             cs.Enabled = enabled;
@@ -402,7 +416,7 @@ namespace SsOracle.Entities
         private void WriteEntity(Ipc.MsgPackWriter w, Snap s)
         {
             var e = s.E;
-            w.MapHeader(16);
+            w.MapHeader(17);
             w.Key("iid"); w.Int(e.Iid);
             w.Key("type_key"); w.Str(e.TypeKey);
             w.Key("category"); w.Str(e.Category);
@@ -441,6 +455,7 @@ namespace SsOracle.Entities
                 w.Float(s.MinX); w.Float(s.MinY); w.Float(s.MaxX); w.Float(s.MaxY);
             }
             else w.Nil();
+            w.Key("hidden"); w.Bool(s.Hidden);
             w.Key("colliders");
             w.ArrayHeader(s.CN);
             for (var i = s.C0; i < s.C0 + s.CN; i++)
@@ -450,8 +465,9 @@ namespace SsOracle.Entities
         private void WriteCollider(Ipc.MsgPackWriter w, ColSnap c)
         {
             var circle = c.Kind == ColliderGeometry.Circle;
-            w.MapHeader(circle ? 6 : 5);
+            w.MapHeader(circle ? 7 : 6);
             w.Key("kind"); w.Str(ColliderGeometry.KindNames[c.Kind]);
+            w.Key("name"); w.Str(c.Name ?? "");
             w.Key("verts_world");
             w.ArrayHeader(c.VN);
             for (var i = c.V0; i < c.V0 + c.VN; i++) w.Float(verts[i]);

@@ -43,6 +43,7 @@ namespace SsOracle.Entities
         public Collider2D Col;
         public GameObject Go;
         public Transform Tr;
+        public string Name;              // the collider's GameObject name (read once per rebuild: .name allocates)
         public bool OnRoot;
         public byte Shape;
         public DamageHero Dh;
@@ -53,7 +54,8 @@ namespace SsOracle.Entities
     }
 
     /// <summary>Per-root component cache. Rebuilt when first included (or first measured, see Collect), when a new
-    /// source joins it, and every RefreshFrames while in view; dropped on scene change or when the root is destroyed.</summary>
+    /// source joins it, when one of its tk2d sprites adds a collider, after a failed rebuild (RetryFrames later), and
+    /// every RefreshFrames while in view; dropped on scene change or when the root is destroyed.</summary>
     internal sealed class Entity
     {
         public int Iid;
@@ -74,6 +76,13 @@ namespace SsOracle.Entities
         public bool Dirty = true;
         public int IncludedFrame = int.MinValue;
         public Vector3 Pos;
+        public int RetryFrame = int.MaxValue;   // a failed rebuild is retried from this frame on
+        public bool Seen;                       // exported (not hidden) at least once in this scene epoch
+        public bool Hidden;                     // this frame: exported only as a seen, now inactive HealthManager root
+        // tk2d sprites owned by the entity and the colliders each had at the last rebuild (see SpritesChanged).
+        public tk2dBaseSprite[] Sprites = EntityRegistry.NoSprites;
+        public BoxCollider2D[] SpriteBox;
+        public int[] SpritePolys, SpriteEdges;
     }
 
     internal sealed class RefComparer<T> : IEqualityComparer<T> where T : class
@@ -98,6 +107,7 @@ namespace SsOracle.Entities
     {
         public static readonly PlayMakerFSM[] NoFsms = new PlayMakerFSM[0];
         public static readonly ColliderSlot[] NoColliders = new ColliderSlot[0];
+        public static readonly tk2dBaseSprite[] NoSprites = new tk2dBaseSprite[0];
 
         /// <summary>View rectangle margin in world units (DESIGN §3.1.2: view frustum + 6 u).</summary>
         public const float Margin = 6f;
@@ -108,6 +118,8 @@ namespace SsOracle.Entities
         private const int SweepFrames = 300;
         private const int MaxCollidersPerEntity = 64;
         public const int MaxEntities = 128;
+        private const int RetryFrames = 30;           // a failed rebuild is retried this many frames later
+        public const int MaxHidden = 16;              // hidden entities per frame
 
         // Resolved once in Install; a missing symbol stops the plugin (m0 §3 general rule, DESIGN §3.1.1 SymbolCheck).
         private static List<HealthManager> activeHealthManagers;
@@ -141,6 +153,10 @@ namespace SsOracle.Entities
         private static readonly List<DamageHero> DhKeyScratch = new List<DamageHero>();
         private static readonly List<int> IntScratch = new List<int>();
         private static readonly List<HealthManager> HmKeyScratch = new List<HealthManager>();
+        private static readonly List<tk2dBaseSprite> SpriteScratch = new List<tk2dBaseSprite>();
+
+        /// <summary>HealthManager entities exported at least once in this scene epoch (candidates for "hidden").</summary>
+        private static readonly List<Entity> SeenHm = new List<Entity>();
 
         /// <summary>Entities selected this frame, in selection order (enemies first).</summary>
         public static readonly List<Entity> Included = new List<Entity>();
@@ -153,7 +169,7 @@ namespace SsOracle.Entities
         private static float viewMinX, viewMinY, viewMaxX, viewMaxY;  // camera view + Margin, this frame
 
         // Counters for ents.stats.
-        public static long Reconciles, Refreshes, Prefetches, Capped;
+        public static long Reconciles, Refreshes, Prefetches, Capped, SpriteRefreshes, RefreshFailures, HiddenExports;
 
         public static double Now;  // Time.timeAsDouble of the frame being exported (DamageHero.CanCauseDamage)
 
@@ -361,6 +377,7 @@ namespace SsOracle.Entities
             }
             Pass(LiveDh, true, frame);
             Pass(ExtraSources, false, frame);
+            HiddenPass(frame);
 
             if (Included.Count > MaxEntities)
             {
@@ -410,19 +427,84 @@ namespace SsOracle.Entities
             e.IncludedFrame = frame;
             if (!IncludedRoots.Add(e.Iid)) return;
             e.Pos = pos;
+            e.Hidden = false;
             Included.Add(e);
-            if (e.Dirty || e.CachedFrame == int.MinValue)
+            if (e.Dirty || e.CachedFrame == int.MinValue || frame >= e.RetryFrame)
                 SafeRefresh(e, frame);
+            else if (SpritesChanged(e))
+            {
+                SpriteRefreshes++;
+                SafeRefresh(e, frame);
+            }
             else if (frame - e.CachedFrame > RefreshFrames && periodicRefreshes < MaxPeriodicRefreshes)
             {
                 periodicRefreshes++;
                 SafeRefresh(e, frame);
             }
+            if (!e.Seen && e.Hm != null)
+            {
+                e.Seen = true;
+                SeenHm.Add(e);
+            }
+        }
+
+        /// <summary>
+        /// "hidden" entities: a HealthManager root exported earlier in this scene whose HealthManager is now inactive
+        /// (component disabled or GameObject inactive; not dead), with no active damage source of its own pulling it in
+        /// this frame, still within the view (+ its extent). The Bell Beast spends 1.0-2.2 s of every attack like this
+        /// (Submerged, Emerge Antic, Burst Antic, Rage Pos/Antic; behaviour build, 99 fights) while its Control FSM
+        /// already fixes where it will come up. Exported without colliders (EntityExporter) and never rebuilt here.
+        /// </summary>
+        private static void HiddenPass(int frame)
+        {
+            var n = 0;
+            for (var i = 0; i < SeenHm.Count && n < MaxHidden; i++)
+            {
+                var e = SeenHm[i];
+                if (e.IncludedFrame == frame) continue;
+                var go = e.Go;
+                var hm = e.Hm;
+                if (go == null || hm == null || hm.isDead) continue;
+                if (hm.enabled && go.activeInHierarchy) continue;  // active: in "ents" when in view, never hidden
+                var p = e.Tr.position;
+                if (!InView(p, e.Extent)) continue;
+                e.IncludedFrame = frame;
+                if (!IncludedRoots.Add(e.Iid)) continue;
+                e.Pos = p;
+                e.Hidden = true;
+                Included.Add(e);
+                HiddenExports++;
+                n++;
+            }
+        }
+
+        /// <summary>
+        /// tk2dBaseSprite.UpdateCollider adds its BoxCollider2D / PolygonCollider2D / EdgeCollider2D with AddComponent the
+        /// first time the sprite shows a frame whose definition has that collider type, so a rebuild made before that
+        /// misses the collider. This is why the Bell Beast had colliders == [] through its whole first Charge Emerge after
+        /// every savestate load (trial run f42726-42769: its body box first appears 85 frames later, when an unrelated
+        /// rebuild ran; live i0_000: 1209 of 1211 first-charge frames; no rebuild had failed, the BepInEx logs of the
+        /// live run have no "cache rebuild" warning). Per frame: three managed field reads per owned sprite.
+        /// </summary>
+        private static bool SpritesChanged(Entity e)
+        {
+            var sprites = e.Sprites;
+            for (var i = 0; i < sprites.Length; i++)
+            {
+                var sp = sprites[i];
+                if (ReferenceEquals(sp, null)) continue;
+                if (!ReferenceEquals(sp.boxCollider2D, e.SpriteBox[i])) return true;
+                var polys = sp.polygonCollider2D;
+                if ((polys != null ? polys.Count : 0) != e.SpritePolys[i]) return true;
+                var edges = sp.edgeCollider2D;
+                if ((edges != null ? edges.Count : 0) != e.SpriteEdges[i]) return true;
+            }
+            return false;
         }
 
         private static int refreshErrors;
 
-        /// <summary>A failed rebuild leaves the entity exported without colliders until the next rebuild.</summary>
+        /// <summary>A failed rebuild leaves the entity exported without colliders until it is retried RetryFrames later.</summary>
         private static void SafeRefresh(Entity e, int frame)
         {
             try
@@ -433,8 +515,11 @@ namespace SsOracle.Entities
             {
                 e.Colliders = NoColliders;
                 e.Fsms = NoFsms;
+                e.Sprites = NoSprites;
                 e.CachedFrame = frame;
                 e.Dirty = false;
+                e.RetryFrame = frame + RetryFrames;
+                RefreshFailures++;
                 if (refreshErrors++ < 10)
                     Core.Plugin.Log.LogWarning($"ents: cache rebuild of {e.Iid} failed: {ex.GetType().Name}: {ex.Message}");
             }
@@ -643,6 +728,7 @@ namespace SsOracle.Entities
             }
             if (damageHeroes.Count > DhSources.Count) ReconcileDh();
 
+            SeenHm.RemoveAll(e => e.Go == null);
             IntScratch.Clear();
             foreach (var kv in EntitiesByRoot)
                 if (kv.Value.Go == null) IntScratch.Add(kv.Key);
@@ -669,6 +755,7 @@ namespace SsOracle.Entities
             ExtraByComp.Clear();
             EntitiesByRoot.Clear();
             HmEntities.Clear();
+            SeenHm.Clear();
             Included.Clear();
             IncludedRoots.Clear();
             FsmTap.ClearCache();
@@ -681,6 +768,7 @@ namespace SsOracle.Entities
             Refreshes++;
             e.CachedFrame = frame;
             e.Dirty = false;
+            e.RetryFrame = int.MaxValue;
             var go = e.Go;
             var root = e.Tr;
             e.TypeKey = TypeKey(go.name);
@@ -706,7 +794,7 @@ namespace SsOracle.Entities
                 var ct = c.transform;
                 if (!OwnedBy(ct, root, hasHm)) continue;
                 var cgo = c.gameObject;
-                var slot = new ColliderSlot { Col = c, Go = cgo, Tr = ct, OnRoot = ct == root, Shape = ColliderGeometry.ShapeOf(c) };
+                var slot = new ColliderSlot { Col = c, Go = cgo, Tr = ct, Name = cgo.name, OnRoot = ct == root, Shape = ColliderGeometry.ShapeOf(c) };
                 var dmg = ResolveDamage(slot, slot.OnRoot ? e.Fsms : null);
                 src |= dmg;
                 if (slot.OnRoot && rootCol == null) rootCol = c;
@@ -717,6 +805,7 @@ namespace SsOracle.Entities
             }
             e.Colliders = SlotScratch.Count == 0 ? NoColliders : SlotScratch.ToArray();
             e.Extent = extent;
+            SnapshotSprites(e, go, root, hasHm);
 
             // A root source without a collider of its own (the damage lives on children) still names the kind.
             if (DamageHero.TryGet(go, out _)) src |= Src.DamageHero;
@@ -727,6 +816,39 @@ namespace SsOracle.Entities
                 src |= Src.Projectile;
             e.Src = src;
             e.Category = HitboxCategory.Categorize(go, rootCol, e.Fsms, hasHm, (src & Src.Damage) != 0);
+        }
+
+        /// <summary>The entity's tk2d sprites and the colliders they had at this rebuild (SpritesChanged compares).</summary>
+        private static void SnapshotSprites(Entity e, GameObject go, Transform root, bool hasHm)
+        {
+            SpriteScratch.Clear();
+            go.GetComponentsInChildren(true, SpriteScratch);
+            var n = 0;
+            for (var i = 0; i < SpriteScratch.Count; i++)
+                if (SpriteScratch[i] != null && OwnedBy(SpriteScratch[i].transform, root, hasHm)) SpriteScratch[n++] = SpriteScratch[i];
+            if (n == 0)
+            {
+                e.Sprites = NoSprites;
+                SpriteScratch.Clear();
+                return;
+            }
+            var sprites = new tk2dBaseSprite[n];
+            var box = new BoxCollider2D[n];
+            var polys = new int[n];
+            var edges = new int[n];
+            for (var i = 0; i < n; i++)
+            {
+                var sp = SpriteScratch[i];
+                sprites[i] = sp;
+                box[i] = sp.boxCollider2D;
+                polys[i] = sp.polygonCollider2D != null ? sp.polygonCollider2D.Count : 0;
+                edges[i] = sp.edgeCollider2D != null ? sp.edgeCollider2D.Count : 0;
+            }
+            SpriteScratch.Clear();
+            e.SpriteBox = box;
+            e.SpritePolys = polys;
+            e.SpriteEdges = edges;
+            e.Sprites = sprites;
         }
 
         /// <summary>
@@ -840,8 +962,12 @@ namespace SsOracle.Entities
             ["extra_sources"] = ExtraSources.Count,
             ["reconciles"] = Reconciles,
             ["refreshes"] = Refreshes,
+            ["sprite_refreshes"] = SpriteRefreshes,
+            ["refresh_failures"] = RefreshFailures,
             ["prefetches"] = Prefetches,
             ["capped_frames"] = Capped,
+            ["seen_hm"] = SeenHm.Count,
+            ["hidden_exports"] = HiddenExports,
         };
     }
 }

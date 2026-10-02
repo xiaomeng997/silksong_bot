@@ -28,6 +28,8 @@
     <Reference Include="UnityEngine" HintPath="$(Managed)\UnityEngine.dll" />
     <Reference Include="UnityEngine.CoreModule" HintPath="$(Managed)\UnityEngine.CoreModule.dll" />
     <Reference Include="UnityEngine.Physics2DModule" HintPath="$(Managed)\UnityEngine.Physics2DModule.dll" />
+    <Reference Include="UnityEngine.UI" HintPath="$(Managed)\UnityEngine.UI.dll" />
+    <Reference Include="UnityEngine.UIModule" HintPath="$(Managed)\UnityEngine.UIModule.dll" />
     <Reference Include="netstandard" HintPath="$(Managed)\netstandard.dll" />
   </ItemGroup>
 </Project>

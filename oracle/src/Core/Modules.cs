@@ -25,6 +25,7 @@ namespace SsOracle.Core
             }
 
             Export.BasicExporters.Register();              // game, pause, input
+            Export.MenuExporter.Install(harmony);          // menu (pause menu state, quit fade)
             Export.FrameMarker.Install(host);              // frame.marker (STATE "mk" is a base field)
             Hero.HeroModule.Install(host, harmony);        // hero, cam, hud
             Entities.EntitiesModule.Install(host, harmony); // ents; FSM transition events

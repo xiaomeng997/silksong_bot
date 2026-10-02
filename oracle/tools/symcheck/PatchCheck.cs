@@ -56,6 +56,15 @@ static class PatchCheck
         ("HeroController", "ResetAllCrestState", new[] { "System.Boolean" }, "SsOracle.Events.HunterMeterTap", "CrestResetPrefix"),
         ("ToolItemManager", "SendEquippedChangedEvent", new[] { "System.Boolean" }, "SsOracle.Events.HunterMeterTap", "EquipsPrefix"),
         ("ToolItemManager", "SendEquippedChangedEvent", new[] { "System.Boolean" }, "SsOracle.Events.HunterMeterTap", "ExitPostfix"),
+        // M2: Events.HitTap ("hit" events) and Export.MenuExporter (STATE "menu").
+        ("HealthManager", "TakeDamage", new[] { "HitInstance" }, "SsOracle.Events.HitTap", "HitPrefix"),
+        ("HealthManager", "TakeDamage", new[] { "HitInstance" }, "SsOracle.Events.HitTap", "TakeDamagePostfix"),
+        ("HealthManager", "ApplyExtraDamage", new[] { "HitInstance" }, "SsOracle.Events.HitTap", "HitPrefix"),
+        ("HealthManager", "ApplyExtraDamage", new[] { "HitInstance" }, "SsOracle.Events.HitTap", "ExtraHitPostfix"),
+        ("HealthManager", "ApplyExtraDamage", new[] { "System.Int32" }, "SsOracle.Events.HitTap", "ExtraIntPrefix"),
+        ("HealthManager", "ApplyExtraDamage", new[] { "System.Int32" }, "SsOracle.Events.HitTap", "ExtraIntPostfix"),
+        ("CameraController", "FadeOut", new[] { "GlobalEnums.CameraFadeType" }, "SsOracle.Export.MenuExporter", "FadeOutPostfix"),
+        ("MenuButtonList", "SetupActive", new string[0], "SsOracle.Export.MenuExporter", "SetupActivePostfix"),
     };
 
     public static int Run()
@@ -80,6 +89,7 @@ static class PatchCheck
                     if (!pt.IsAssignableFrom(tt)) { Console.WriteLine($"  {patch}: __instance {pt} vs {tt}"); bad++; }
                     continue;
                 }
+                if (p.Name == "__state") continue;   // prefix -> postfix scratch, any type
                 if (p.Name == "__result")
                 {
                     if (pt != target.ReturnType || !p.ParameterType.IsByRef) { Console.WriteLine($"  {patch}: __result {p.ParameterType} vs {target.ReturnType}"); bad++; }
