@@ -1,21 +1,47 @@
 """Hero kinematics for the planner (M2 W1; DESIGN §3.5.2, §3.5.4, §3.5.6): a hybrid-mode model of Hornet's motion,
-re-derived from the decompiled HeroController (1.0.30000) and identified on logged play, a vectorised rollout with
-2D collision against the scene's static terrain, and the damage-knockback envelope.
+re-derived from the decompiled HeroController (1.0.30000) and identified on logged play, a batched rollout with 2D
+collision against the scene's static terrain (compiled: ssbot.knowledge.kin_jit), timing-variant lanes for the
++-1 frame branches, the input filter, and a runtime residual monitor. The damage-knockback envelope is in
+ssbot.knowledge.knockback.
 
     params = HeroParams.load()                                  # knowledge/1.0.30000/kinematics/hero_hunter.json
     terrain = Terrain2D.from_message(terrain_msg, params.scene("Bone_05"))   # RecordingReader.terrain() payload
     trace = Trace.from_states(states, params)                   # STATE history (oracle or recording)
     start = estimate_state(trace, [len(trace) - 1], params, terrain=terrain)  # [K, 1] state at the last frame
-    roll = rollout(start, masks, params, terrain)               # masks [N, T] ACTION button masks for frames 1..T
-    roll.phys[:, T], roll.pos[:, T]                             # collider position / rendered position after T frames
-    env = knockback_envelope(start, "left", params, terrain)    # boxes reachable after a hit from the left
+    hold = HoldState.from_act(states[-1]["act"])                # or the planner's own, kept in step with its ACTIONs
+    latched, hold_next = hold_filter(commanded, hold)           # commanded masks [N, T] -> what the game will read
+    roll = rollout(start, latched, params, terrain, threads=4)  # roll.box [N, T+1, 4] collider boxes, roll.centre
+    roll = rollout(start, latched[:k], params, terrain, variants="bounds")   # roll.bound: hull of the timing lanes
+    hull, flags = knockback.knockback_hull(roll.box, params, terrain)        # Hz(c): every hit along each candidate
 
-Acceptance (ssbot.tools.kin_check, 30-frame windows, logged timing and contact events): trial run 20261001_121446
-i0_000 (26 438 covered windows): 99.92 % within 0.1 u of the logged collider after 0.5 s, 99.59 % of all windows
-(the rest: harness teleports and a boss roar that takes control); training run 20261001_122249 i0_000 (closed
-recordings, 254 004 covered windows): 99.47 %, 98.98 % of all; a person's Bell Beast session (20260930_210337,
-Bone_05, 6 901 covered windows): 100 %. All 99 damage knockbacks of the trial stay inside the envelope (worst
-excursion 1.4 mm); 99.63 % of the 27 322 no-input frames after the training run's 987 hits do.
+Positions follow cross-module decision 1: Rollout.box is the hero collider (STATE hero.box), Rollout.centre its
+centre (WorldState HeroState.pos); Rollout.pos is the rendered transform (pos_transform).
+
+Acceptance (ssbot.tools.kin_check, every 30-frame window, collider centre within 0.1 u after 0.5 s; decision 3:
+start state from the history up to the window start only, causal phase, nominal timing; parameters fitted on live
+20261001_122249 i0_000 only). Held out: the trial run 20261001_121446 i0_000 and live i1-3_000, i0-3_001 (8
+recordings, 1 915 915 windows, 38 640 uncovered and counted: control taken by another FSM 25 667, invalid 6 950,
+harness 6 015, savestate slide 8):
+  nominal lane, logged contact events standing in for the threat layer: 89.7 % of covered windows (89.0 % of all);
+    plain primitives 99.6 % (run 99.5, jump 99.4, air 99.6, attack 99.1, idle 99.99), cast 93.0, bind 97.0, contact
+    (nail recoil, pogo, recoil down, early catch) 80.5, downspike 77.0, hurt 66.3, recovering (starting in the
+    hit-stop or recoil) 55.7, world_freeze (BindBreak, BossDeathSlow, boss stun) 60.3, hitch 80.6;
+  the same without events (the buttons alone): 80.0 % (contact 18.2, hurt 12.8);
+  inside the hull of the 9 "bounds" timing lanes dilated by 0.1 u: 99.06 % (plain 99.89, hurt 99.65, recovering
+    98.7, downspike 98.0, contact 97.6, cast 97.0, bind 98.1, world_freeze 61.3, hitch 87.3);
+  replay with the logged dt / physics steps (information the planner does not have): 99.42 %.
+The fit recording gives the same (89.6 / 99.06 %), and so do the later live recordings i0-3_002 (89.5 / 99.07 %).
+So the 99 % target is met by the nominal lane for plain movement only, and overall only as containment in the
+variant lanes' hull; the event-driven primitives miss it in every setting. Most nominal misses are one physics step:
+3 615 of the 4 630 missed hurt windows of live i1_000 f < 120 000 are 0.32-0.36 u off (one recoil step, 0.335 u),
+644 two steps: hit-stop (13 / 14 / 15 frames) and recoil (13 / 14) end on frames that frame times of 0.01665 against
+1/60 s decide, and those are not predictable from the history. A person's session (20260930_210337, "input" masks,
+113 369 covered windows) reaches 89.1 % nominal, 90.0 % in the lanes' hull: plain movement 92.6 %, as the "input"
+stream is not the exact latched mask.
+
+Planner cost (13900K, Bone_05 terrain, 512 candidates x 48 frames): nominal rollout p50 2.2 ms / p99 3.2 ms on one
+core, p50 0.46 / p99 1.2 ms with threads=4; the "fast" lanes (3 per candidate) p50 2.9 ms and the "bounds" lanes (9)
+p50 7.3 ms on four threads, so a planner rolls out the lanes for a short list only; knockback_hull p99 0.15 ms.
 
 Time base (trial run, 26 892 STATE frames; ssbot.tools.kin_fit):
 - Physics steps at fdt = 0.02 s of scaled time under the render (mean frame 0.0166662 s, p1 0.01665, p99 0.01671).
@@ -48,13 +74,16 @@ Modes and what drives them (all from HeroController.FixedUpdate / Update unless 
               touching the floor ends it at once.
   HURT_FREEZE damage hit-stop (GameManager.FreezeMoment 0 / 0.1 / 0.1): v = 0, gravity off; the wait sums udt from
               the second frame after the hit, then the time scale ramps back to 1 over 0.1 s of udt (replayed
-              exactly: 99 of 99 logged hits).
+              exactly with the logged udt: 987 of 987 hits of live i0_000).
   HURT_RECOIL v = (+-15, 7.5) away from the impact side until recoilTimer reaches RECOIL_DURATION 0.2 s, then v = 0,
               gravity back, control back (before LookForQueueInput, so a queued attack starts in that frame).
   CAST        Silkspear (Spell FSM, quickcast, 4 silk): antic 0.26 s (air v *= 0.9 per step, rising vy capped at
-              12; ground vx *= 0.85), throw 0.43 s (still), catch 0.15 s (v = (-21 facing, 0), vx *= 0.7 per step,
-              gravity on).
-  BIND        Bind (9 silk): about 1.37 s; air v *= 0.85 per step (rising vy capped at 7.5), gravity off.
+              12; ground vx *= 0.85), throw (still) until the needle is back, catch (v = (-21 facing, 0), vx *= 0.7
+              per step, gravity on). Throw and catch end on one of two frames with no timer explaining which (live
+              i0_000: throw 26 / 27 frames 46 / 54 %, catch 9 / 10 frames 41 / 59 %): variant-valued thresholds
+              (HeroParams.cast_throw_variants / cast_catch_variants, the variant lanes take both).
+  BIND        Bind (9 silk): 1.35 or 1.37 s (bind_time_variants, 67 / 33 %); air v *= 0.85 per step (rising vy
+              capped at 7.5), gravity off.
   LOCKED      control taken by another FSM (the boss roar): vx *= 0.86 per step, gravity on.
 Contact events do not follow from the buttons; a rollout takes them as an optional per-frame array (the threat layer
 predicts them; ssbot.tools.kin_check injects the logged ones): EV_RECOIL_L/R (a nail hit: vx = -+3.75 now and for
@@ -65,15 +94,27 @@ side), EV_RECOIL_DOWN (an up slash hit: the rise stops), EV_CATCH (the Silkspear
 Collision moves the hero box (0.5 x 2.079, foot 1.5527 below hero.pos) along x then y against axis-aligned terrain
 segments with a 0.015 u skin (standing box bottom 2.0150 over the Bone_05 floor at 2.0; arena gate faces 69.208 /
 102.002 against hero x 69.473 / 101.737). Box2D details that move positions by more than a few mm are kept: a fall
-that ends within [-0.0075, +0.004] u of the resting height parks there and makes contact a step later (18 of 288
-landings), contacts are found before the move (walking off a ledge sinks from the next step), a spike that touches
-the floor ends there.
+that ends within [-0.0082, +0.0053] u of the resting height parks there and makes contact a step later (122 of 2 865
+landings of live i0_000), contacts are found before the move (walking off a ledge sinks from the next step), a spike
+that touches the floor ends there. Sloped edges are not collided by the rollout: Bone_05 has them only in the roof
+(y >= 13.9 inside the arena), out of reach of a jump from the floor but not of a pogo off the boss or a knockback
+(live i2_002 f 693717); the knockback bound handles them, a rollout up there is off (the residual monitor sees it).
 
-Implementation: the model state is one float64 array [K, N] (rows below) and the parameters one float64 vector, so
-the step functions are plain array code (np.where on lane vectors, no Python objects) that numba can compile once
-it is installed: _SIM is the hook; the NumPy path is the one the tests run. Rollout cost on this machine (13900K, one
-core): a 512 x 48 planner batch takes 70 ms against the full Bone_05 terrain, 56 ms with it cropped to the arena;
-the DESIGN budget (p99 3 ms) needs the njit build.
+Timing lanes (Variant): the frame time is not predictable from the history, so a +-1 frame branch cannot be
+resolved, only carried. The lanes move every float32 timer threshold by -+ timer_bias (0.5 ms: each link of the
+hit-stop wait / ramp / scaled-timer chain with its own sign), start the physics phase at either end of its feasible
+interval (+- alpha_margin) and take the short or long Silkspear and Bind variants; Rollout.bound is their per-frame
+hull. The frame-time jitter model (kin_fit over 2.83 M gameplay frames of all bot recordings: frame_time mean
+0.016666 s, shortest 0.01665, p99.99 0.01698, at most 2 frames above 0.018 s in any 65, longest 0.0369 s, rate
+3.1e-5 per frame above 0.018 s) sets the lanes' frame times and the knockback bound; a window with a hitch is left
+to the residual monitor (ResidualMonitor, DESIGN §3.5.2: residuals of the executed lane at 1 / 6 / 30 frames, I4
+confidence to the supervisor). HeroParams.jump_heights holds the apex height per jump hold length, logged (min,
+median, max) against the model over the phase: the hold -> height spread for the hazard margin (0.05-0.42 u).
+
+Implementation: the model state is one float64 array [K, N] (rows below) and the parameters one float64 vector. The
+NumPy functions here (_fixed_step, _apply_events, _update, _simulate) are the readable reference, array code over
+lanes; kin_jit is the same rules per lane as numba-compiled scalar code, which rollout() uses (backend "auto"), and
+the tests check both give identical arrays.
 """
 from __future__ import annotations
 
@@ -84,7 +125,7 @@ from typing import Any, Iterable
 
 import numpy as np
 
-try:  # pragma: no cover - not installed on the training machine yet
+try:  # pragma: no cover - numba 0.68 is installed; the NumPy reference works without it
     import numba  # noqa: F401
     HAVE_NUMBA = True
 except ImportError:
