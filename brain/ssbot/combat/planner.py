@@ -1,8 +1,11 @@
 """L1 planner (DESIGN §3.5.4; M2 W4): every frame, roll every candidate out through the kinematics' timing lanes and
-choose lexicographically: not Hz > not Hz_soft > not U > S = 0 > comfort > V > min P > latest first contact > max J;
+choose lexicographically: not Hz > not Hz_soft > not U > S = 0 > keeps the committed jump hold > comfort > V > min P >
+latest first contact > max J;
 FORCED_RISK when no allowed candidate has S = 0 (then the probability, and among equals the plan whose first contact
 comes last: a plan certain to be hit is otherwise ranked by its score, and "wait, then go" re-chosen every frame never
-leaves; live run 20261002_041819). Comfort is S again against templates grown by a further margin: among safe plans the
+leaves; live run 20261002_041819). A pressed jump commits its hold schedule (§3.5.4): plans that release it early
+or cast rank below the ones that keep it while one of those is safe (live run 20261002_044711: a plan switch released
+a charge jump after 8 frames, a Silkspear cast then held the hero at the charge's height). Comfort is S again against templates grown by a further margin: among safe plans the
 ones with clearance win, whatever they score (live run 20261002_035118: a plan safe by millimetres in the air over a
 rolling attack bell lost all 26 safe continuations in one frame of drift, and the bell hit).
 
@@ -169,6 +172,7 @@ class Planner:
         self.prev_cmd: np.ndarray | None = None
         self.prev_name = ""
         self.ticks = 0
+        self.jump_until = -1          # tick until which the pressed jump's hold schedule is committed
 
     # ---- S -----------------------------------------------------------------------------------------------------------
 
@@ -243,6 +247,13 @@ class Planner:
             J[-1] += prefs.weights.get("cont", 0.0)
         U = unpausable(may_kill, ctx) if ctx.hp else np.zeros(N, bool)
         t4 = time.perf_counter()
+        # a jump's hold is committed when it is pressed (DESIGN §3.5.4): a plan that releases it early, or casts
+        # (a cast stops the rise), ranks below every plan that keeps it, unless none of those is safe (ABORT)
+        rem = self.jump_until - self.ticks
+        keep = np.ones(N, bool)
+        if rem > 0:
+            w = cmd[:, :min(rem, T)]
+            keep = ((w & B_JUMP) != 0).all(axis=1) & ((w & B_QUICKCAST) == 0).all(axis=1)
         safe = ok & ~S & ~hz
         first = np.append(cs.first, -1) if cont else cs.first
         V = np.zeros(N, bool)
@@ -266,7 +277,7 @@ class Planner:
             res = PlanResult(int(sel_cmd[0]), idx, name, 0, False, 0.0, 1e3, True, n=N + 1,
                              n_allowed=int(ok.sum()) + 1, n_safe=int(safe.sum()) + 1, cmd=sel_cmd, path=bind_res[1])
         elif ok.any():
-            order = np.lexsort((-J, -t_hit, Pc, ~V, S2, S, U, hz_soft, hz))
+            order = np.lexsort((-J, -t_hit, Pc, ~V, S2, ~keep, S, U, hz_soft, hz))
             order = order[ok[order]]
             i = int(order[0])
             sel_cmd = cmd[i]
@@ -281,6 +292,12 @@ class Planner:
             sel_cmd = np.zeros(T, np.int64)
             res = PlanResult(0, -1, "NONE", 1, True, n=N)
         res.vetoes = {REASONS[k]: int(v) for k, v in zip(*np.unique(why, return_counts=True)) if k}
+        if len(sel_cmd) and sel_cmd[0] & B_JUMP:
+            if self.jump_until <= self.ticks:                        # a new press: commit its hold
+                held = sel_cmd & B_JUMP
+                self.jump_until = self.ticks + (int(np.argmin(held != 0)) if (held == 0).any() else len(held))
+        else:
+            self.jump_until = -1                                      # released (or aborted): nothing committed
         self.prev_cmd = sel_cmd
         self.prev_name = res.name
         self.ticks += 1
