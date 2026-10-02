@@ -15,7 +15,7 @@ Modes:
           leaves free over that horizon, weighed with its later coverage, never within 5 u of a wall unless all else
           is covered (a corner the bell rolls into is no refuge), hits score little.
   HOLD    anything else (the boss underground, the next attack unknown): the playbook's hidden stance, moved by the
-          future coverage at 0.15 risk units per u. Underground in the vision view only the committed part of the
+          future coverage at 0.15 risk units per u. Underground (the boss not drawn) only the committed part of the
           forecast counts (Forecast.committed: the current attack, tails, armed bells), at 0.5 per u, and it alone
           can call EVADE: the next attack's union covers the whole floor there.
 The risk map is the support's coverage of floor positions over the playbook's risk horizon (0.4-2.0 s), earlier times
@@ -149,12 +149,14 @@ class Tactics:
             prefs.mode, prefs.stance_x = PREPARE, float(self.xs[int(np.argmin(cost))])
             return prefs
         pull = HOLD_PULL
-        if f.fc.view != ORACLE and state == HIDDEN:
-            # underground in the vision view the next attack's union covers the whole floor, so evading it or
-            # weighing it only moves the hero about; what matters is to be where every branch is reactable when the
-            # boss comes up (ssbot.tools.reactability), away from what is already decided (a burst's rolling bells).
-            # Run 20261002_061942: 3 of the first 4 hits were a leap from the near anchor while the hero, evading the
-            # union, was still on its way back from a corner after a burst.
+        underground = state == HIDDEN if f.fc.view != ORACLE else (state is not None and not f.fc.model.drawn(state))
+        if underground:
+            # underground the next attack's union covers the whole floor, so evading it or weighing it only moves the
+            # hero about; what matters is to be where every branch is reactable when the boss comes up
+            # (ssbot.tools.reactability), away from what is already decided (a burst's rolling bells). Vision view,
+            # run 20261002_061942: 3 of the first 4 hits were a leap from the near anchor while the hero, evading the
+            # union, was still on its way back from a corner after a burst; oracle view, run 20261002_062923 i3 ep2:
+            # evading in Submerged kept the hero at x 72, and the leap from the left anchor caught her.
             f = f.committed()
             risk = prefs.risk = self.risk_map(f)
             pull = HOLD_PULL_VE
