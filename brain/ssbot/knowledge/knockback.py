@@ -5,6 +5,7 @@ checked against every logged hit (ssbot.tools.kin_check, knockback section), not
     env = knockback_envelope(hit_box, "left", params, terrain)    # one hit: env.union[k], env.swept, env.touches
     swept, per_frame, flags = knockback_boxes(roll.box, "left", params, terrain)   # every frame of every plan
     table = knockback_table(params, "left"); roll.box + table.swept_offset          # open air, no call at all
+    hull, flags = knockback_hull(roll.box, params, terrain)       # planner tick: per candidate, every frame, both sides
 
 What the game does (HeroController.StartRecoil / FixedUpdate / Update, 1.0.30000, decompiled HeroController.cs
 9611-9661): StartRecoil zeroes the velocity, switches gravity off, clears onGround and sets hero_state no_input, then
