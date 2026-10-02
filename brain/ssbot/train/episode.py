@@ -22,6 +22,7 @@ import threading
 import time
 from dataclasses import asdict, dataclass, field
 
+from ssbot.ipc import ents
 from ssbot.ipc.oracle_link import OracleError, OracleLink
 from ssbot.train.encounters import Ctx, Encounter
 
@@ -164,10 +165,8 @@ def wait_settled(link: OracleLink, scene: str, still_frames: int = 10, tol_u: fl
 
 
 def boss_entity(s: dict, boss_type: str) -> dict | None:
-    for e in s.get("ents") or ():
-        if e["type_key"] == boss_type:
-            return e
-    return None
+    """The boss entity for the end-of-episode HP, hidden or not (a hidden boss's hp is still exported)."""
+    return ents.boss_entity(s.get("ents"), boss_type, include_hidden=True)
 
 
 def run_episode(link: OracleLink, enc: Encounter, tap: FightTap, policy, cfg: EpisodeConfig,

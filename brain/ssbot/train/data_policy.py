@@ -12,6 +12,7 @@ It reads the oracle's STATE directly (boss entity, hero), which only training co
 """
 import random
 
+from ssbot.ipc.ents import boss_entity
 from ssbot.ipc.framing import mask
 from ssbot.train.encounters import Encounter
 
@@ -51,11 +52,9 @@ class DataPolicy:
         enc = self.enc
         hero = s["hero"]
         hx, hy = hero["pos"][0], hero["pos"][1]
-        boss = None
-        for e in s.get("ents") or ():
-            if e["type_key"] == enc.boss_type:
-                boss = e
-                break
+        # A hidden boss (M2 oracle: underground, HealthManager off) was absent from "ents" when the policy was tuned;
+        # skipping it keeps the logged data comparable across oracle versions.
+        boss = boss_entity(s.get("ents"), enc.boss_type)
         if self.mode_left <= 0:
             self.mode = r.choices([m for m, _ in MODES], [w for _, w in MODES])[0]
             self.mode_left = r.randint(20, 90)

@@ -45,6 +45,31 @@ namespace SsOracle.Input
         public uint Desired => desired;
         public uint Latched => latched;
 
+        /// <summary>Edges of key <paramref name="bit"/> requested but not latched yet (STATE act.hf.pending).</summary>
+        public int PendingOf(int bit) => pending[bit];
+
+        /// <summary>Latched frames key <paramref name="bit"/> has been in its current state, saturating at 2^20
+        /// (STATE act.hf.age).</summary>
+        public int AgeOf(int bit) => age[bit];
+
+        /// <summary>
+        /// (desired, latched, pending, age) is the whole state that decides future output: deferred and
+        /// exclusiveWaiting only feed the counters. Restore puts a filter into a state exported by STATE act.hf, which
+        /// is how a planner replays the latch from the middle of a key stream (InputLogicCheck checks the equivalence).
+        /// </summary>
+        public void Restore(uint desiredMask, uint latchedMask, int[] pendingEdges, int[] ages)
+        {
+            desired = desiredMask;
+            latched = latchedMask;
+            for (var i = 0; i < Bits; i++)
+            {
+                pending[i] = pendingEdges != null && i < pendingEdges.Length ? pendingEdges[i] : 0;
+                age[i] = ages != null && i < ages.Length ? ages[i] : Long;
+                deferred[i] = false;
+                exclusiveWaiting[i] = false;
+            }
+        }
+
         public HoldFilter(uint exclusiveA, uint exclusiveB)
         {
             this.exclusiveA = exclusiveA;

@@ -164,13 +164,43 @@ namespace SsOracle.Export
 
         private static void WriteAction(Ipc.MsgPackWriter w)
         {
-            w.MapHeader(6);
+            w.MapHeader(7);
             w.Key("mask"); w.UInt(Input.KeyboardInjector.LatchedMask);
             w.Key("ack"); w.UInt(Input.ActionScheduler.LastAck);
             w.Key("applied"); w.Int(Input.ActionScheduler.LastAppliedFrame);
             w.Key("target"); w.Int(Input.ActionScheduler.LastAppliedTarget);
             w.Key("stale"); w.Int(Input.ActionScheduler.StaleDropped);
             w.Key("lost"); w.Bool(Input.ActionScheduler.BrainLost);
+            w.Key("hf"); WriteHoldFilter(w);
+        }
+
+        /// <summary>Ages above this are written as the cap: the filter only compares them with its minimum press /
+        /// release frames (C19: 2), so any value at or above the largest limit acts the same.</summary>
+        public const int HfAgeCap = 255;
+
+        /// <summary>
+        /// act.hf: the HoldFilter state after this frame's latch (KeyboardInjector.OnBeforeUpdate ran earlier in the
+        /// same frame), {pending: edges queued per button, age: latched frames in the current state per button (capped
+        /// at HfAgeCap), latched, desired}, arrays in ACTION button-bit order. It is the filter's complete state
+        /// (HoldFilter.Restore; checked in oracle/tests/InputLogicCheck), so a planner can replay the latch from here.
+        /// </summary>
+        private static void WriteHoldFilter(Ipc.MsgPackWriter w)
+        {
+            var hf = Input.KeyboardInjector.Filter;
+            var n = Input.KeyboardInjector.ButtonNames.Length;
+            w.MapHeader(4);
+            w.Key("pending");
+            w.ArrayHeader(n);
+            for (var i = 0; i < n; i++) w.Int(hf.PendingOf(i));
+            w.Key("age");
+            w.ArrayHeader(n);
+            for (var i = 0; i < n; i++)
+            {
+                var a = hf.AgeOf(i);
+                w.Int(a < HfAgeCap ? a : HfAgeCap);
+            }
+            w.Key("latched"); w.UInt(hf.Latched);
+            w.Key("desired"); w.UInt(hf.Desired);
         }
 
         private void WriteEvents(Ipc.MsgPackWriter w)

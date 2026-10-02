@@ -30,6 +30,7 @@ internal static class Program
         EffectiveDamage();
         Parry();
         Geometry();
+        M2Exports();
         Console.WriteLine(fails == 0 ? "ALL OK" : $"{fails} FAILED");
         return fails == 0 ? 0 : 1;
     }
@@ -150,5 +151,88 @@ internal static class Program
         Near(v[1], 6f, "points: offset then transform (y0)");
         Near(v[2], 6f, "points: offset then transform (x1)");
         Near(v[3], 8f, "points: offset then transform (y1)");
+    }
+
+    /// <summary>room.gates in a full list: an unchanged off-at-dump entry gives its slot to a changed solid; with none
+    /// left the list is marked truncated instead of silently dropping the change.</summary>
+    private static void GateOverflow()
+    {
+        var max = SsOracle.SceneDump.GateWatch.MaxListed;
+        var listed = new System.Collections.Generic.List<SsOracle.SceneDump.GateWatch.Entry>();
+        SsOracle.SceneDump.GateWatch.Entry Make(bool battle, bool changed, bool onAtDump, bool on) =>
+            new SsOracle.SceneDump.GateWatch.Entry { Battle = battle, Changed = changed, OnAtDump = onAtDump, On = on, Listed = true };
+        listed.Add(Make(true, false, false, false));                        // arena gate, still open
+        listed.Add(Make(false, false, false, true));                        // off at the dump, on now (not polled yet)
+        var idle = Make(false, false, false, false);                        // off at the dump and still off
+        listed.Add(idle);
+        while (listed.Count < max) listed.Add(Make(false, true, true, false));
+        Eq(SsOracle.SceneDump.GateWatch.EvictSlot(listed), 2, "evictable: only the unchanged off-at-dump entry");
+        var overflow = false;
+        var wall = Make(false, true, true, false);
+        wall.Listed = false;
+        Check(SsOracle.SceneDump.GateWatch.Admit(listed, wall, ref overflow) && !overflow, "a changed solid takes the idle slot");
+        Check(listed.Count == max && ReferenceEquals(listed[2], wall) && wall.Listed && !idle.Listed, "the idle entry goes back to the poll");
+        var late = Make(false, true, true, false);
+        late.Listed = false;
+        Check(!SsOracle.SceneDump.GateWatch.Admit(listed, late, ref overflow) && overflow && !late.Listed,
+              "no evictable slot: the change is not listed and the list is marked truncated");
+        var room = new System.Collections.Generic.List<SsOracle.SceneDump.GateWatch.Entry>();
+        overflow = false;
+        Check(SsOracle.SceneDump.GateWatch.Admit(room, late, ref overflow) && room.Count == 1 && !overflow, "room left: appended");
+    }
+
+    /// <summary>The pure parts of the M2 STATE additions (docs/facts/1.0.30000/state_fields_m2.md); the engine-side parts
+    /// are checked in game by brain/ssbot/probes/m2_exports.py.</summary>
+    private static void M2Exports()
+    {
+        // menu.sel roles
+        Eq(SsOracle.Export.MenuExporter.PauseRole(UnityEngine.UI.PauseMenuButton.PauseButtonType.Continue), "continue", "sel Continue");
+        Eq(SsOracle.Export.MenuExporter.PauseRole(UnityEngine.UI.PauseMenuButton.PauseButtonType.Options), "options", "sel Options");
+        Eq(SsOracle.Export.MenuExporter.PauseRole(UnityEngine.UI.PauseMenuButton.PauseButtonType.Quit), "quit", "sel Quit");
+        Eq(SsOracle.Export.MenuExporter.MethodRole("UIReturnToMainMenu"), "yes", "prompt Yes calls UIReturnToMainMenu");
+        Eq(SsOracle.Export.MenuExporter.MethodRole("UILeaveExitToMenuPrompt"), "no", "prompt No calls UILeaveExitToMenuPrompt");
+        Eq(SsOracle.Export.MenuExporter.MethodRole("UIGoBack"), "back", "a back button calls UIGoBack");
+        Eq(SsOracle.Export.MenuExporter.MethodRole("UIGoToOptionsMenu"), null, "anything else has no role");
+        // Every listener name the mapping uses is a real UIManager method (a rename would silently drop yes/no).
+        foreach (var name in new[] { "UIReturnToMainMenu", "UILeaveExitToMenuPrompt", "UIGoBack" })
+            Check(typeof(UIManager).GetMethod(name) != null, $"UIManager.{name} exists");
+
+        // room.gates selection: battle gates, solids off in the dump, and solids seen changed since.
+        Eq(SsOracle.SceneDump.GateWatch.IsWatched(false, true, true), false, "a solid on at the dump and on now is not listed");
+        Eq(SsOracle.SceneDump.GateWatch.IsWatched(false, false, false), true, "Bone_05 'Threaded Bell Gate' (off at entry) is listed");
+        Eq(SsOracle.SceneDump.GateWatch.IsWatched(false, true, false), true, "Bone_05 'Wall' (on at entry, gone later) is listed once seen off");
+        Eq(SsOracle.SceneDump.GateWatch.IsWatched(true, true, true), true, "a BattleScene gate is always listed");
+        GateOverflow();
+
+        // hero.tags dmg_left
+        Eq(SsOracle.Hero.HeroExporter.TagDmgLeft(false, 3, 2, 1), 2, "limited tag: hits left x amount");
+        Eq(SsOracle.Hero.HeroExporter.TagDmgLeft(false, 0, 0, 1), -1, "unlimited tag (frost water while swimming): -1");
+        Eq(SsOracle.Hero.HeroExporter.TagDmgLeft(true, 0, 0, 2), 2, "RemoveAfterNextHit: one more hit");
+        Eq(SsOracle.Hero.HeroExporter.TagDmgLeft(false, 5, 0, 1), 0, "limited tag with no hits left (removal queued): 0");
+        Eq(SsOracle.Hero.HeroExporter.TagDmgLeft(false, 0, 3, 2), 6, "no TotalHitLimit but a hitAmountOverride of 3: limited");
+        Eq(SsOracle.Hero.HeroExporter.TagDmgLeft(true, 4, 3, 1), 1, "RemoveAfterNextHit wins over HitsLeft");
+        Eq(SsOracle.Hero.HeroExporter.TagDmgLeft(false, 3, 2, -1), -1, "per-hit damage unknown: unbounded");
+        // masks per tag hit (DamageTag.OnHit, HeroController.DoSpecialDamage): Barbed Wire doubles non-frost tags
+        Eq(SsOracle.Hero.HeroExporter.TagHitDamage(1, false, 1f, false, 1f), 1, "tag hit without Barbed Wire: damageAmount");
+        Eq(SsOracle.Hero.HeroExporter.TagHitDamage(1, false, 1f, false, 2f), 2, "acid tag hit with Barbed Wire (x2): 2 masks");
+        Eq(SsOracle.Hero.HeroExporter.TagDmgLeft(false, 3, 2, SsOracle.Hero.HeroExporter.TagHitDamage(1, false, 1f, false, 2f)), 4,
+           "2 hits left with Barbed Wire: 4 masks, not 2");
+        Eq(SsOracle.Hero.HeroExporter.TagHitDamage(1, false, 1f, true, 2f), 1, "frost tag hit: Barbed Wire does not apply");
+        Eq(SsOracle.Hero.HeroExporter.TagHitDamage(3, false, 1f, false, 1.5f), 4, "Barbed Wire multiplier floors (3 x 1.5)");
+        Eq(SsOracle.Hero.HeroExporter.TagHitDamage(2, true, 1.25f, false, 1f), 2, "tool tag: RoundToInt(2 x 1.25) (banker's)");
+        Eq(SsOracle.Hero.HeroExporter.TagHitDamage(3, true, 1.25f, false, 2f), 8, "tool tag x Tool Kit, then Barbed Wire");
+        // hero.tm.inv: the StartInvulnerable timers count only while cState.invulnerable is set (SceneInit clears it)
+        Eq(SsOracle.Hero.HeroExporter.InvLeft(true, 0f, 0.7f), 0.7f, "inv while invulnerable: the timers");
+        Eq(SsOracle.Hero.HeroExporter.InvLeft(false, 0f, 0.7f), 0f, "inv after SceneInit cleared invulnerable: 0");
+        Eq(SsOracle.Hero.HeroExporter.InvLeft(true, -0.01f, -0.02f), 0f, "inv floors each timer at 0");
+
+        // "hit" nesting: a lag hit run inside TakeDamage on the same target reports first, the outer call its own part
+        Eq(SsOracle.Events.HitTap.OwnDamage(150, 145, 0), 5, "hit: no nesting, own = hp_before - hp_after");
+        Eq(SsOracle.Events.HitTap.OwnDamage(150, 142, 3), 5, "hit: outer call minus the nested tag hit's 3");
+
+        // act.hf age cap must not hide a difference the filter acts on
+        Check(SsOracle.Export.FrameExporter.HfAgeCap >= SsOracle.Input.HoldFilter.DefaultMinPressFrames &&
+              SsOracle.Export.FrameExporter.HfAgeCap >= SsOracle.Input.HoldFilter.DefaultMinReleaseFrames,
+              "act.hf age cap is above the minimum press / release frames");
     }
 }

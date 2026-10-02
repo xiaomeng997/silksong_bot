@@ -18,6 +18,7 @@ import argparse
 import sys
 import time
 
+from ssbot.ipc import ents
 from ssbot.ipc.framing import mask
 from ssbot.ipc.oracle_link import OracleLink
 from ssbot.probes.common import load_slot, stand_up
@@ -46,10 +47,8 @@ class ControlTracker:
 
 
 def boss(s: dict) -> dict | None:
-    for e in s.get("ents") or []:
-        if e["type_key"] == BOSS:
-            return e
-    return None
+    """The emerged boss (an M2 oracle also exports it hidden while it is underground)."""
+    return ents.boss_entity(s.get("ents"), BOSS)
 
 
 def check(ok: bool, what: str) -> bool:

@@ -95,6 +95,52 @@ def test_fsm_events_and_counts():
     assert ents.count_categories(state["ents"]) == {"enemy": 1, "hazard": 1}
 
 
+def test_m2_hidden_and_collider_names():
+    e = _entity(hidden=False)
+    for c in e["colliders"]:
+        c["name"] = "PolyCollider"
+    e = _roundtrip(e)
+    assert ents.validate_entity(e) == []
+    assert not ents.is_hidden(e)
+    # Seen boss underground: kept with pos, flipX, fsms and hp, but no colliders.
+    hidden = _roundtrip(_entity(hidden=True, colliders=[], render_aabb=None))
+    assert ents.validate_entity(hidden) == []
+    assert ents.is_hidden(hidden) and " hidden " in ents.describe(hidden)
+    assert "hidden entity with colliders" in ents.validate_entity(_entity(hidden=True))
+    assert "hidden not bool" in ents.validate_entity(_entity(hidden=1, colliders=[]))
+    bad = _entity()
+    bad["colliders"][0]["name"] = 7
+    bad["colliders"][1]["shape"] = "x"
+    joined = "\n".join(ents.validate_entity(bad))
+    assert "collider 0: name not str" in joined and "collider 1: unexpected keys ['shape']" in joined
+    assert ents.is_hidden(_entity()) is False   # recordings before the M2 oracle have no "hidden"
+
+
+def test_boss_entity_skips_hidden():
+    hidden = _entity(iid=-1, type_key="Bone Beast", hidden=True, colliders=[], render_aabb=None)
+    other = _entity(iid=-2)
+    state = _roundtrip({"ents": [other, hidden]})
+    # an M2 oracle exports the boss hidden while underground: "in ents" no longer means "active"
+    assert ents.boss_entity(state["ents"], "Bone Beast") is None
+    assert ents.boss_entity(state["ents"], "Bone Beast", include_hidden=True)["iid"] == -1
+    visible = _entity(iid=-3, type_key="Bone Beast")
+    assert ents.boss_entity([hidden, visible], "Bone Beast")["iid"] == -3
+    old = _entity(iid=-4, type_key="Bone Beast")             # recordings before the M2 oracle: no "hidden" key
+    assert ents.boss_entity([old], "Bone Beast")["iid"] == -4
+    assert ents.boss_entity(None, "Bone Beast") is None
+
+
+def test_hit_events():
+    hit = {"ent": -510942, "type_key": "Bone Beast", "dmg": 5, "dealt": 5, "attack": "Nail", "src": "Slash",
+           "hp_before": 5, "hp_after": 0, "dead": True, "crit": False, "n": 812}
+    state = _roundtrip({"f": 7, "ev": [{"k": "hit", "f": 7, "q": 1, "d": hit},
+                                       {"k": "fsm", "f": 7, "q": 2, "d": {"iid": 1}}]})
+    evs = ents.hit_events(state)
+    assert len(evs) == 1 and evs[0]["f"] == 7
+    assert set(evs[0]) - {"f", "n"} == ents.HIT_EVENT_KEYS
+    assert evs[0]["dmg"] == evs[0]["hp_before"] - evs[0]["hp_after"]
+
+
 def test_hazard_names():
     assert ents.hazard_name(2) == "SPIKES"
     assert ents.hazard_name(10) == "STEAM"

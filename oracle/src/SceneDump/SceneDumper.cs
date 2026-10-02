@@ -142,6 +142,7 @@ namespace SsOracle.SceneDump
             routine = null;
             running = false;
             ReleaseObjects();
+            GateWatch.Discard();
             FailWaiters(why);
         }
 
@@ -240,6 +241,7 @@ namespace SsOracle.SceneDump
             scannedScenes.Clear();
             scenesToScan.Clear();
             rare.Clear();
+            GateWatch.Begin();
             var verts = 0;
             var seen = 0;
             var visited = 0;
@@ -352,6 +354,7 @@ namespace SsOracle.SceneDump
             routine = null;
             LastSeq = seq;
             LastTransition = transition;
+            GateWatch.Commit(transition);
             var workMs = dumpWorkTicks * 1000.0 / Stopwatch.Frequency;
             var result = new Dictionary<string, object>
             {
@@ -373,6 +376,7 @@ namespace SsOracle.SceneDump
             running = false;
             routine = null;
             ReleaseObjects();
+            GateWatch.Discard();
             FailWaiters(why);
         }
 
@@ -512,7 +516,9 @@ namespace SsOracle.SceneDump
                 if (info.NonBouncer) flags |= FlagNonBouncer;
                 if (info.Breakable) flags |= FlagBreakable;
                 if (layer == SoftTerrainLayer) flags |= FlagSoftTerrain;
-                solids.Add(new Solid { Id = col.GetInstanceID(), Go = go.name, Layer = layer, On = on, Body = body, Flags = flags, ShapeFrom = from, ShapeTo = to });
+                var solid = new Solid { Id = col.GetInstanceID(), Go = go.name, Layer = layer, On = on, Body = body, Flags = flags, ShapeFrom = from, ShapeTo = to };
+                solids.Add(solid);
+                GateWatch.Solid(col, solid.Id, solid.Go, on, ColliderGeometry.Bounds(shapes, from, to));
             }
             if (hazard)
             {
@@ -715,7 +721,11 @@ namespace SsOracle.SceneDump
             {
                 // Arena walls are TERRAIN colliders under "gates" (in "solids", usually inactive until the fight).
                 var ids = new List<object>();
-                foreach (var c in bs.gates.GetComponentsInChildren<Collider2D>(true)) ids.Add(c.GetInstanceID());
+                foreach (var c in bs.gates.GetComponentsInChildren<Collider2D>(true))
+                {
+                    ids.Add(c.GetInstanceID());
+                    GateWatch.BattleGate(c.GetInstanceID());
+                }
                 d["gate_ids"] = ids;
             }
             Zone("battles").Add(d);
@@ -913,7 +923,10 @@ namespace SsOracle.SceneDump
 
         /// <summary>
         /// STATE "room": {seq: last TERRAIN sent, transition: the room it was for, current: transition count,
-        /// busy: a dump is in progress, work_us: the dump's main-thread work in this frame}.
+        /// busy: a dump is in progress, work_us: the dump's main-thread work in this frame, gates: the watched
+        /// battle/arena gates and other solids whose state differs from the dump, live (GateWatch; nil until the
+        /// current room's dump is done), gates_trunc: true once a changed solid could not be listed in this room, so
+        /// unlisted solids' state is unknown (nil while gates is nil)}.
         /// </summary>
         private sealed class RoomExporter : Export.IExporter
         {
@@ -921,12 +934,14 @@ namespace SsOracle.SceneDump
 
             public void Write(Ipc.MsgPackWriter w, Export.FrameContext ctx)
             {
-                w.MapHeader(5);
+                w.MapHeader(7);
                 w.Key("seq"); w.Int(LastSeq);
                 w.Key("transition"); w.Int(LastTransition);
                 w.Key("current"); w.Int(FlowTap.TransitionSeq);
                 w.Key("busy"); w.Bool(Busy);
                 w.Key("work_us"); w.Int(WorkUs(ctx.Frame));
+                w.Key("gates"); GateWatch.Write(w, FlowTap.TransitionSeq);
+                w.Key("gates_trunc"); GateWatch.WriteTruncated(w, FlowTap.TransitionSeq);
             }
         }
     }

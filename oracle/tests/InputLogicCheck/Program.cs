@@ -34,6 +34,7 @@ internal static class Program
         LeftRightNeverTogether();
         ReleaseAllDropsQueuedEdges();
         BoundedBacklog();
+        ExportedStateIsSufficient();
         LatencyModelDraws();
         DelayLineOrderAndStale();
         BunchedPressAndReleaseBothLatched();
@@ -72,6 +73,79 @@ internal static class Program
 
         public uint Frame(long frame, params (long Target, uint Buttons)[] arriving) =>
             Frame(frame, arriving.Select(x => new DelayLine.Item { TargetFrame = x.Target, Buttons = x.Buttons }));
+    }
+
+    /// <summary>
+    /// STATE act.hf = {pending, age (clamped like FrameExporter.HfAgeCap), latched, desired}: a filter restored from it
+    /// in the middle of a stream latches exactly what the original latches from then on (the planner replays the
+    /// latch from the exported state instead of from "all keys up for a long time").
+    /// </summary>
+    private static void ExportedStateIsSufficient()
+    {
+        const int cap = 255;   // FrameExporter.HfAgeCap
+        var mismatches = 0;
+        var naiveMismatches = 0;   // control: only the latched mask, as if every key had been stable for long
+        var cases = 0;
+        foreach (var limits in new[] { (2, 2), (3, 1), (1, 4) })
+        {
+            for (var seed = 0; seed < 400; seed++)
+            {
+                var rng = new Random(seed);
+                var a = new HoldFilter(Left, Right);
+                a.SetLimits(limits.Item1, limits.Item2);
+                var keys = new[] { Jump, Attack, Left, Right };
+                var wants = new List<List<uint>>();
+                for (var f = 0; f < 160; f++)
+                {
+                    var pushes = new List<uint>();
+                    var n = rng.Next(1, 4);
+                    for (var p = 0; p < n; p++)
+                    {
+                        uint m = 0;
+                        foreach (var k in keys)
+                            if (rng.NextDouble() < 0.35) m |= k;
+                        if ((m & Left) != 0 && (m & Right) != 0) m &= ~(rng.Next(2) == 0 ? Left : Right);
+                        pushes.Add(m);
+                    }
+                    wants.Add(pushes);
+                }
+                var cut = rng.Next(5, 120);
+                HoldFilter b = null, naive = null;
+                for (var f = 0; f < wants.Count; f++)
+                {
+                    if (f == cut)
+                    {
+                        var pend = new int[32];
+                        var age = new int[32];
+                        for (var i = 0; i < 32; i++)
+                        {
+                            pend[i] = a.PendingOf(i);
+                            age[i] = Math.Min(a.AgeOf(i), cap);
+                        }
+                        b = new HoldFilter(Left, Right);
+                        b.SetLimits(limits.Item1, limits.Item2);
+                        b.Restore(a.Desired, a.Latched, pend, age);
+                        naive = new HoldFilter(Left, Right);
+                        naive.SetLimits(limits.Item1, limits.Item2);
+                        naive.Restore(a.Latched, a.Latched, null, null);
+                        cases++;
+                    }
+                    var ps = wants[f];
+                    for (var p = 0; p < ps.Count - 1; p++)
+                    {
+                        a.Push(ps[p]);
+                        b?.Push(ps[p]);
+                        naive?.Push(ps[p]);
+                    }
+                    var la = a.Step(ps[ps.Count - 1]);
+                    if (b != null && b.Step(ps[ps.Count - 1]) != la) mismatches++;
+                    if (naive != null && naive.Step(ps[ps.Count - 1]) != la) naiveMismatches++;
+                }
+            }
+        }
+        Check(mismatches == 0 && naiveMismatches > 0,
+            $"act.hf state (pending, age capped at {cap}, latched, desired) restores the latch exactly: {cases} cuts, " +
+            $"{mismatches} differing frames (latched mask alone: {naiveMismatches})");
     }
 
     /// <summary>Latched runs of one key: (first frame, length).</summary>

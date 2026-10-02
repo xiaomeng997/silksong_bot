@@ -234,6 +234,38 @@ namespace SsOracle.Core
             P("GlobalSettings.Gameplay", "WandererCritChance"), P("GlobalSettings.Gameplay", "WeightedAnkletDmgInvulnMult"),
             P("GlobalSettings.Gameplay", "MossCreep1Tool"), P("GlobalSettings.Gameplay", "LongNeedleMultiplier"), P("GlobalSettings.Gameplay", "WarriorCrest"),
 
+            // --- M2 exports (docs/facts/1.0.30000/state_fields_m2.md): hero.tm / alpha / wall / tags / tool_max ---
+            F(HC, "invulnerableDuration"), F(HC, "invulnerableFreezeDuration"), F(HC, "recoilTimer"), F(HC, "recoilStepsLeft"),
+            F(HC, "dashCooldownTimer"), F(HC, "attack_cooldown"), F(HC, "attack_time"), F(HC, "throwToolCooldown"),
+            F(HC, "jump_steps"), F(HC, "jumped_steps"), F(HC, "downSpikeTimer"), F(HC, "downSpikeRecoveryTimer"),
+            F(HC, "jumpQueueSteps"), F(HC, "attackQueueSteps"), F(HC, "toolThrowQueueSteps"), F(HC, "touchingWallL"),
+            F(HC, "touchingWallR"), F(HC, "tagDamageTaker"), F(HCS, "recoilFrozen"),
+            T("TagDamageTaker"), P("TagDamageTaker", "TaggedDamage"), T("DamageTag"), F("DamageTag", "damageAmount"),
+            P("DamageTag", "TotalHitLimit"), T("DamageTagInfo"), F("DamageTagInfo", "HitsLeft"), F("DamageTagInfo", "NextHitTime"),
+            F("DamageTagInfo", "RemoveAfterNextHit"), F("DamageTag", "isToolDamage"), P("DamageTag", "SpecialDamageType"),
+            T("DamageTag+SpecialDamageTypes"), P("GlobalSettings.Gameplay", "ToolKitDamageIncrease"), F(PD, "ToolKitUpgrades"),
+            T("UnityEngine.Time"), P("UnityEngine.Time", "timeAsDouble"), P("UnityEngine.Time", "fixedTimeAsDouble"),
+            // ents[].hidden, colliders[].name, tk2d's lazily added sprite colliders (EntityRegistry.SpritesChanged)
+            T("tk2dBaseSprite"), F("tk2dBaseSprite", "boxCollider2D"), F("tk2dBaseSprite", "polygonCollider2D"),
+            F("tk2dBaseSprite", "edgeCollider2D"), MAny("tk2dBaseSprite", "UpdateCollider"),
+            // "hit" events (Events.HitTap)
+            P("HealthManager", "SendDamageTo"), M("HealthManager", "ApplyExtraDamage", "HitInstance"),
+            M("HealthManager", "ApplyExtraDamage", "int"), T("HitInstance"), F("HitInstance", "DamageDealt"), F("HitInstance", "AttackType"),
+            F("HitInstance", "Source"), F("HitInstance", "CriticalHit"), T("AttackTypes"),
+            // STATE "menu" (Export.MenuExporter)
+            T("UnityEngine.UI.PauseMenuButton"), F("UnityEngine.UI.PauseMenuButton", "pauseButtonType"),
+            T("UnityEngine.UI.PauseMenuButton+PauseButtonType"), T("UnityEngine.UI.MenuButton"), F("UnityEngine.UI.MenuButton", "OnSubmitPressed"),
+            T("MenuScreen"), F("MenuScreen", "backButton"), F("UIManager", "modalDimmer"), F("UIManager", "ignoreUnpause"),
+            F("UIManager", "fadingMenuScreen"), F("UIManager", "pauseMenuScreen"), F("UIManager", "returnMainMenuPrompt"),
+            T("MenuButtonList"), M("MenuButtonList", "SetupActive"), M("CameraController", "FadeOut", "GlobalEnums.CameraFadeType"),
+            T("GlobalEnums.CameraFadeType"), T("GlobalEnums.UIState"),
+            T("UnityEngine.EventSystems.EventSystem"), P("UnityEngine.EventSystems.EventSystem", "current"),
+            P("UnityEngine.EventSystems.EventSystem", "currentSelectedGameObject"), T("UnityEngine.EventSystems.EventTrigger"),
+            P("UnityEngine.EventSystems.EventTrigger", "triggers"), T("UnityEngine.UI.Selectable"), P("UnityEngine.UI.Selectable", "interactable"),
+            T("UnityEngine.CanvasGroup"), P("UnityEngine.CanvasGroup", "alpha"),
+            // room.gates (SceneDump.GateWatch)
+            F("BattleScene", "gates"),
+
             // --- DebugMod 1.1.2 (soft: TRAIN only; savestates and cheat switches) ---
             T("DebugMod.DebugMod", soft: true), F("DebugMod.DebugMod", "infiniteHP", soft: true), F("DebugMod.DebugMod", "infiniteSilk", soft: true),
             F("DebugMod.DebugMod", "infiniteTools", soft: true), F("DebugMod.DebugMod", "playerInvincible", soft: true),
@@ -464,7 +496,8 @@ namespace SsOracle.Core
         private static readonly string[] PreferredAssemblies =
         {
             "Assembly-CSharp", "PlayMaker", "TeamCherry.TK2D", "TeamCherry.SharedUtils", "Assembly-CSharp-firstpass",
-            "UnityEngine.CoreModule", "UnityEngine.Physics2DModule", "Unity.InputSystem", "DebugMod",
+            "UnityEngine.CoreModule", "UnityEngine.Physics2DModule", "Unity.InputSystem", "UnityEngine.UI", "UnityEngine.UIModule",
+            "DebugMod",
         };
 
         private static readonly Dictionary<string, Type> typeCache = new Dictionary<string, Type>();
