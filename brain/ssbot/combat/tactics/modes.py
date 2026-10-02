@@ -11,9 +11,10 @@ Modes:
   PREPARE the boss is committed to an attack whose punish window is ahead (a leap in its antic or flight, a burst
           underground at a known x): the stance is the playbook's spot in the attack's anchor frame (12 u along the leap,
           10 u beside the burst on the hero's side), pulled to low future coverage.
-  EVADE   the support reaches the hero's spot within the evade horizon: the stance is the floor position with the
-          least future coverage, hits score little.
-  HOLD    anything else (the boss underground): the playbook's hidden stance, pulled to low future coverage.
+  EVADE   the support reaches the hero's spot within the evade horizon (0.6 s): the stance is the nearest floor spot
+          the support leaves free over that horizon, hits score little.
+  HOLD    anything else (the boss underground, the next attack unknown): the playbook's hidden stance, moved by the
+          future coverage at 0.15 risk units per u.
 The risk map is the support's coverage of floor positions over the playbook's risk horizon (0.4-2.0 s), earlier times
 weighted more; it is the planner's terminal value too (where the horizon ends matters beyond the horizon: a leap's
 landing zone is in support from 1.4 s on). YELLOW restricts punishes to one hit (supervisor Restrictions).
@@ -32,6 +33,7 @@ from ssbot.safety.supervisor import BIND_SILK, SupervisorDecision, bind_allowed
 ENGAGE, EVADE, HEAL, HOLD, PREPARE = "ENGAGE", "EVADE", "HEAL", "HOLD", "PREPARE"
 GRID_U = 0.5
 EVADE_S = 0.6
+HOLD_PULL = 0.15               # risk units per u away from the playbook's stance (HOLD)
 
 
 @dataclass
@@ -59,10 +61,10 @@ class Tactics:
         x0, x1 = pb.arena_x
         self.xs = np.arange(x0, x1 + 1e-9, GRID_U)
 
-    def risk_map(self, f: Forecast) -> np.ndarray:
+    def risk_map(self, f: Forecast, horizon: tuple[float, float] | None = None) -> np.ndarray:
         """[len(xs)]: weighted share of the risk horizon's time bins in which a hurtbox standing on the floor at x is
         in support (weight 1 / (1 + t))."""
-        t0, t1 = self.pb.risk_horizon_s
+        t0, t1 = horizon or self.pb.risk_horizon_s
         tk = np.arange(int(t0 / BIN), int(t1 / BIN) + 1, 2) * BIN
         n = len(self.xs)
         occ = f.occupied(np.repeat(self.xs[:, None], len(tk), 1), np.full((n, len(tk)), self.pb.hero_y), tk)
@@ -94,8 +96,6 @@ class Tactics:
                 prefs.mode, prefs.want_bind = HEAL, True
                 prefs.stance_x = hero[0]
                 return prefs
-        here = float(np.interp(hero[0], self.xs, risk))
-        safest = float(self.xs[int(np.argmin(risk + 0.02 * np.abs(self.xs - hero[0])))])
         state = f.fc.tracker.state
         punish = state in pb.punish_states or state in pb.punish_phases
         if drawn and punish:
@@ -117,11 +117,16 @@ class Tactics:
             prefs.mode, prefs.stance_x = PREPARE, float(self.xs[int(np.argmin(cost))])
             return prefs
         soon = f.t_min(hero[0], pb.hero_y, t_max=EVADE_S)
-        if soon < EVADE_S or here > 0.25:
-            prefs.mode, prefs.stance_x = EVADE, safest
+        if soon < EVADE_S:
+            # imminent: the nearest floor spot the support leaves free over the evade horizon
+            near = self.risk_map(f, (0.0, EVADE_S))
+            prefs.mode = EVADE
+            prefs.stance_x = float(self.xs[int(np.argmin(near + 0.1 * np.abs(self.xs - hero[0])))])
             wts["hit"] *= 0.3
             wts["risk"] *= 2.0
             return prefs
-        cost = risk + 0.04 * np.abs(self.xs - pb.hidden_x)
+        # the next attack unknown: the playbook's stance, moved only as far as the future coverage is worth (a corner
+        # chosen for a slightly lower coverage was where a leap then emerged: run 20261002_042404, i1 ep0)
+        cost = risk + HOLD_PULL * np.abs(self.xs - pb.hidden_x)
         prefs.stance_x = float(self.xs[int(np.argmin(cost))])
         return prefs
