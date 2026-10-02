@@ -103,6 +103,7 @@ WINDOWS = {"v2": np.array([[0, 6], [2, 8], [0, 0], [17, 20]], np.int64),
 TAIL_CHUNK = 2                # candidates per tail check batch
 LOCK_EXTRA = 48               # frames a plan locked at the horizon's end is rolled on (a Silkspear locks ~73 frames)
 LOCK_AFTER = 8                # ... and checked this many frames after the lock ends
+LOCK_MODES = np.array([kin.M_CAST, kin.M_BIND, kin.M_LOCKED])   # committed locks a plan chooses
 COMFORT_FRAMES = 48           # the comfort check covers the whole horizon (24 frames: run 20261002_045049 hits)
 NO_CONTROL_MODES = (kin.M_HURT_FREEZE, kin.M_HURT_RECOIL, kin.M_CAST, kin.M_BIND, kin.M_LOCKED)
 
@@ -693,12 +694,19 @@ class Planner:
     # ---- beyond the horizon ----------------------------------------------------------------------------------------
 
     def _lock_check(self, f: Forecast, roll, hold_end: HoldState, S: np.ndarray, T0: int, enemy_only: bool) -> None:
-        """A plan still locked at the horizon's end (a Silkspear: M_CAST, about 73 frames, the hero hanging in the air)
-        is safe only if the lock's remaining frames are: rolled on with no input for LOCK_EXTRA frames (gate run
-        20261002_125420 i2 ep 8: air casts were S = 0 over the 48 frames ahead, a drop bell bounced into the hero 4
-        frames after the lock ended, 60 frames after the press; replayed, all 42 cast candidates were safe 2 ticks
-        before the press). S is updated in place."""
-        rows = np.flatnonzero((roll.mode[:, -1] == M_CAST) & ~S)
+        """A committed lock (LOCK_MODES: a Silkspear cast, about 73 frames with the hero hanging in the air; the Bind;
+        other locks) must be safe until it ends + LOCK_AFTER frames, from every tick that can choose it: a plan whose
+        lock reaches past the horizon's end - LOCK_AFTER is rolled on with no input (LOCK_EXTRA frames) and checked
+        that far (gate run 20261002_125420 i2 ep 8: air casts were S = 0 over the 48 frames ahead, a drop bell bounced
+        into the hero 4 frames after the lock ended, 60 frames after the press; replayed, all 42 cast candidates were
+        safe at the press tick, and 21 two ticks earlier, whose modelled lock ended inside the horizon). Getting away
+        after the lock is the tail check's. S is updated in place."""
+        mode = roll.mode
+        T1 = mode.shape[1]
+        lockm = np.isin(mode, LOCK_MODES)
+        anyl = lockm.any(axis=1)
+        last = np.where(anyl, T1 - 1 - np.argmax(lockm[:, ::-1], axis=1), -1)
+        rows = np.flatnonzero(anyl & (last >= T1 - 1 - LOCK_AFTER) & ~S)
         if not len(rows):
             return
         start = roll.final[:, rows]
@@ -709,10 +717,11 @@ class Planner:
                          threads=self.cfg.threads)
         tk = (T0 + np.arange(LOCK_EXTRA + 1, dtype=np.float64)) * self.params.frame_time
         skip = ((tr.flags_all & F_INVULN) != 0) if enemy_only else np.zeros(tr.flags_all.shape, bool)
-        # only the frames still in the lock and the few after it (the way on is the tail check's job)
-        free = tr.mode != M_CAST
+        free = ~np.isin(tr.mode, LOCK_MODES)
         free_at = np.where(free.any(axis=1), np.argmax(free, axis=1), LOCK_EXTRA + 1)
-        upto = np.minimum(free_at + LOCK_AFTER, LOCK_EXTRA + 1)
+        still = lockm[rows, -1]
+        upto = np.where(still, free_at + LOCK_AFTER, last[rows] + LOCK_AFTER - (T1 - 1) + 1)
+        upto = np.minimum(upto, LOCK_EXTRA + 1)
         occ = self._contacts(f, tr.bound, tk, skip)
         occ &= np.arange(LOCK_EXTRA + 1)[None, :] < upto[:, None]
         S[rows] |= occ.any(axis=1)
