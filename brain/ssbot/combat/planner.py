@@ -13,8 +13,9 @@ latest first contact > max J; FORCED_RISK when no allowed candidate has S = 0.
   run, jump) is chosen (Planner._tail_pick; a punish that ended under a bouncing drop bell, run 20261002_052118); a
   Silkspear still locking the hero at the horizon's end without such a way on gives way to the best safe plan that is
   free at its end (run 20261002_064001: 2 of 3 hits were a drop bell on a hero still casting).
-- Pogo: a down attack that meets the boss's predicted hurtbox bounces the hero with the down attack's i-frames
-  (Planner._pogo re-rolls those candidates with EV_POGO); safe only if the miss branch is too. The long set carries
+- Hit effects: a slash that meets the boss's predicted hurtbox recoils the hero, an up-slash stops her rise, a down
+  attack bounces her with its i-frames (Planner._hit_effects re-rolls those candidates with the event, twice, so a
+  second slash is scored from where the first recoil left her); safe only if the miss branch is too. The long set carries
   jump-then-down-attack candidates for charges.
 - Adaptive horizon (M2 plan): when the tactics ask for more than T frames (a committed charge), the dodge set
   candidates.build_long rolls out to the end of the attack, up to 2 s (live run 20261002_045049: with 0.8 s, jumps
@@ -207,6 +208,7 @@ class Planner:
         self.ticks = 0
         self._audit = (np.zeros(0, np.int64), np.zeros(0, np.int64), np.zeros((0, 4)))
         self.last_pogo = 0            # candidates with a predicted bounce in the last tick
+        self.last_recoil = 0          # ... with a predicted nail recoil
         self.jump_until = -1          # tick until which the pressed jump's hold schedule is committed
         self.prev_tail_ok = False
 
@@ -277,7 +279,7 @@ class Planner:
         skip = ((roll.flags_all & F_INVULN) != 0) if enemy_only else np.zeros((N, T1), bool)
         occ = self._contacts(f, roll.bound, tk, skip)
         S = occ.any(axis=1)
-        self.last_pogo = self._pogo(f, start, latched, roll, tk, S, enemy_only)
+        roll_j = self._hit_effects(f, start, latched, roll, tk, S, enemy_only)
         t_hit = np.where(S, occ.argmax(axis=1), T1)        # first contact frame (FORCED_RISK: later is better)
         S2 = S.copy()
         if f.fc.query_c is not None:
@@ -292,7 +294,7 @@ class Planner:
         if ctx.hazards or ctx.soft:
             hull, kfl = knockback_hull(roll.box, params, self.terrain, threads=cfg.threads)
             hz, hz_soft = hazard_flags(hull, kfl, ctx)
-        J, hits, may_kill = self._score(ws, roll, latched, start, f, prefs, P, tk)
+        J, hits, may_kill = self._score(ws, roll_j, latched, start, f, prefs, P, tk)
         if cont:
             J[-1] += prefs.weights.get("cont", 0.0)
         U = unpausable(may_kill, ctx) if ctx.hp else np.zeros(N, bool)
@@ -392,37 +394,64 @@ class Planner:
 
     # ---- the pogo ---------------------------------------------------------------------------------------------------
 
-    def _pogo(self, f: Forecast, start, latched: np.ndarray, roll, tk: np.ndarray, S: np.ndarray, enemy_only: bool
-              ) -> int:
-        """A down attack that meets the boss's hurtbox bounces the hero (EV_POGO: the kinematics' rebound and the
-        down attack's i-frames against enemies). The rollout does not know the boss, so candidates whose down spike
-        meets the predicted hurtbox are rolled out again with the bounce from that frame; the plan is safe only if
-        both branches are (DESIGN 3.5.6: the down attack may miss or come late). S is updated in place; returns the
-        number of candidates with a predicted bounce."""
-        if not ((roll.mode == M_DS_SPIKE).any()):
-            return 0
+    def _hit_effects(self, f: Forecast, start, latched: np.ndarray, roll, tk: np.ndarray, S: np.ndarray,
+                     enemy_only: bool):
+        """What a hit does to the hero, in the rollout: a side slash that meets the boss's predicted hurtbox in its
+        active frames recoils her away (EV_RECOIL_L/R: 3.75 u/s for 9 steps), an up-slash stops her rise
+        (EV_RECOIL_DOWN), a down spike bounces her (EV_POGO, with its i-frames against enemies). The rollout does not
+        know the boss, so candidates with a predicted hit are rolled out again with the event from that frame, twice
+        (a second hit from where the first one left her: in the burst punish the first slash's recoil made the second
+        whiff). Safety needs both branches (DESIGN 3.5.6: an attack may miss or come late): S is updated in place.
+        Returns the rollout to score J on (the hit branch where one is predicted)."""
+        self.last_pogo = 0
+        self.last_recoil = 0
+        modes = roll.mode
+        if not (((roll.flags & F_ATTACKING) != 0).any() or (modes == M_DS_SPIKE).any()):
+            return roll
         boss, okb = f.boss_box(tk)
         if not okb.any():
-            return 0
+            return roll
         polys, starts = body_shape(f.boss)
         b0 = _box_of(polys) if len(polys) else boss[0]
+        base = np.array([b0[0], b0[1]])
         face0 = 1 if start.reshape(kin.K, -1)[kin.FACE, 0] >= 0 else -1
-        hit_f = np.full(len(latched), -1, np.int64)
-        _pogo_frames(np.ascontiguousarray(roll.box), np.ascontiguousarray(roll.flags),
-                     np.ascontiguousarray(roll.mode), np.ascontiguousarray(latched), face0,
-                     np.ascontiguousarray(boss, np.float64), np.ascontiguousarray(okb),
-                     np.ascontiguousarray(polys, np.float64), np.ascontiguousarray(starts, np.int64),
-                     np.array([b0[0], b0[1]]), hit_f)
-        rows = np.flatnonzero(hit_f >= 0)
-        if not len(rows):
-            return 0
-        ev = np.zeros((len(rows), latched.shape[1]), np.int64)
-        ev[np.arange(len(rows)), np.minimum(hit_f[rows], latched.shape[1] - 1)] = kin.EV_POGO
-        rh = kin.rollout(start, latched[rows], self.params, self.terrain, events=ev, variants=self.cfg.variants,
-                         threads=self.cfg.threads)
-        skip = ((rh.flags_all & F_INVULN) != 0) if enemy_only else np.zeros(rh.flags_all.shape, bool)
-        S[rows] |= self._contacts(f, rh.bound, tk, skip).any(axis=1)
-        return int(len(rows))
+        N, T = latched.shape
+        ev = np.zeros((N, T), np.int64)
+        cur = _View(roll.box, roll.flags, roll.mode, roll.bound, roll.flags_all)
+        after = np.full(N, -1, np.int64)
+        rows_all = np.zeros(N, bool)
+        for _ in range(2):
+            hit_f = np.full(N, -1, np.int64)
+            kind = np.zeros(N, np.int64)
+            _first_hits(np.ascontiguousarray(cur.box), np.ascontiguousarray(cur.flags),
+                        np.ascontiguousarray(cur.mode), np.ascontiguousarray(latched), face0,
+                        np.ascontiguousarray(boss, np.float64), np.ascontiguousarray(okb),
+                        np.ascontiguousarray(polys, np.float64), np.ascontiguousarray(starts, np.int64), base, after,
+                        hit_f, kind)
+            rows = np.flatnonzero(hit_f >= 0)
+            if not len(rows):
+                break
+            j = np.minimum(hit_f[rows], T - 1)
+            k = kind[rows]
+            bits = np.where(k == 3, kin.EV_POGO, np.where(k == 2, kin.EV_RECOIL_DOWN,
+                                                          np.where(k == 1, kin.EV_RECOIL_L, kin.EV_RECOIL_R)))
+            ev[rows, j] |= bits
+            self.last_pogo += int((k == 3).sum())
+            self.last_recoil += int((k <= 1).sum())
+            after[rows] = hit_f[rows]
+            rows_all[rows] = True
+            sub = np.flatnonzero(rows_all)
+            rh = kin.rollout(start, latched[sub], self.params, self.terrain, events=ev[sub],
+                             variants=self.cfg.variants, threads=self.cfg.threads)
+            box, flags, mode = cur.box.copy(), cur.flags.copy(), cur.mode.copy()
+            bound, fall = cur.bound.copy(), cur.flags_all.copy()
+            box[sub], flags[sub], mode[sub], bound[sub], fall[sub] = rh.box, rh.flags, rh.mode, rh.bound, rh.flags_all
+            cur = _View(box, flags, mode, bound, fall)
+        sub = np.flatnonzero(rows_all)
+        if len(sub):
+            skip = ((cur.flags_all[sub] & F_INVULN) != 0) if enemy_only else np.zeros(cur.flags_all[sub].shape, bool)
+            S[sub] |= self._contacts(f, cur.bound[sub], tk, skip).any(axis=1)
+        return cur
 
     # ---- beyond the horizon ----------------------------------------------------------------------------------------
 
@@ -577,13 +606,23 @@ def _ov(cx, cy, face, fx0, fx1, y0, y1, b0, b1, b2, b3, polys, starts, dx, dy):
     return _rect_meets_polys(ax0, cy + y0, ax1, cy + y1, polys, starts, dx, dy)
 
 
+class _View:
+    """The parts of a Rollout the scoring reads, for a rollout patched with hit branches."""
+
+    def __init__(self, box, flags, mode, bound, flags_all):
+        self.box, self.flags, self.mode, self.bound, self.flags_all = box, flags, mode, bound, flags_all
+
+
 @numba.njit(cache=True, parallel=True)
-def _pogo_frames(box, flags, mode, latched, face0, boss, okb, polys, starts, base, hit_f):
-    """Per candidate, the first frame its down spike (M_DS_SPIKE, the crest's DownSpike box) meets the boss's
-    hurtbox, or -1; facing as in _score_kernel."""
+def _first_hits(box, flags, mode, latched, face0, boss, okb, polys, starts, base, after, hit_f, kind):
+    """Per candidate, the first frame after `after` at which an attack's active box meets the boss's predicted
+    hurtbox (windows as in _score_kernel), and its kind: 0 side slash facing left, 1 facing right, 2 up-slash,
+    3 down spike; -1 none. Silkspear hits move nothing."""
     N, T1 = mode.shape
     for c in numba.prange(N):
         face = face0
+        fc = np.empty(T1, np.int64)
+        fc[0] = face
         for k in range(1, T1):
             m = latched[c, k - 1]
             d = 1 if m & B_RIGHT else (-1 if m & B_LEFT else 0)
@@ -592,14 +631,44 @@ def _pogo_frames(box, flags, mode, latched, face0, boss, okb, polys, starts, bas
                 free = mode[c, k - 1] == M_NORMAL and (flags[c, k - 1] & F_ATTACKING) == 0
                 if starts_cast or free:
                     face = d
-            if mode[c, k] != M_DS_SPIKE or not okb[k]:
-                continue
-            cx = 0.5 * (box[c, k, 0] + box[c, k, 2])
-            cy = 0.5 * (box[c, k, 1] + box[c, k, 3])
-            if _ov(cx, cy, face, DOWN[0], DOWN[1], DOWN[2], DOWN[3], boss[k, 0], boss[k, 1], boss[k, 2], boss[k, 3],
-                   polys, starts, boss[k, 0] - base[0], boss[k, 1] - base[1]):
-                hit_f[c] = k
+            fc[k] = face
+        done = False
+        for k in range(1, T1):
+            if done:
                 break
+            att = (flags[c, k] & F_ATTACKING) != 0 and (flags[c, k - 1] & F_ATTACKING) == 0
+            dsk = mode[c, k] == M_DS_SPIKE
+            if not (att or dsk):
+                continue
+            if att:
+                up = (latched[c, k - 1] & B_UP) != 0
+                w0, w1 = UP_WIN if up else SIDE_WIN
+                for j in range(k + w0, min(T1, k + w1)):
+                    if j <= after[c] or not okb[j]:
+                        continue
+                    cx = 0.5 * (box[c, j, 0] + box[c, j, 2])
+                    cy = 0.5 * (box[c, j, 1] + box[c, j, 3])
+                    bx = boss[j]
+                    if up:
+                        ok = _ov(cx, cy, fc[j], UP[0], UP[1], UP[2], UP[3], bx[0], bx[1], bx[2], bx[3], polys, starts,
+                                 bx[0] - base[0], bx[1] - base[1])
+                    else:
+                        ok = _ov(cx, cy, fc[j], SIDE[0], SIDE[1], SIDE[2], SIDE[3], bx[0], bx[1], bx[2], bx[3], polys,
+                                 starts, bx[0] - base[0], bx[1] - base[1])
+                    if ok:
+                        hit_f[c] = j
+                        kind[c] = 2 if up else (1 if fc[j] > 0 else 0)
+                        done = True
+                        break
+            elif k > after[c] and okb[k]:
+                cx = 0.5 * (box[c, k, 0] + box[c, k, 2])
+                cy = 0.5 * (box[c, k, 1] + box[c, k, 3])
+                bx = boss[k]
+                if _ov(cx, cy, fc[k], DOWN[0], DOWN[1], DOWN[2], DOWN[3], bx[0], bx[1], bx[2], bx[3], polys, starts,
+                       bx[0] - base[0], bx[1] - base[1]):
+                    hit_f[c] = k
+                    kind[c] = 3
+                    done = True
 
 
 @numba.njit(cache=True, parallel=True)
