@@ -139,6 +139,7 @@ ABSENT_CLOSE_F = 30           # an armed entity missing from the export this lon
 STATE_KEYS = ("dt", "hero", "ents", "ev")
 TAIL = "_tail"
 SELF = "ent"                  # self templates: ent/<type_key>/self
+AMBIENT = "_ambient/world"    # hazards armed when a scan started: one time-invariant (static) world template
 R_FAIL_U = 0.5                # a contact farther than this from its family's occupancy is a support hole
 R_SEARCH_U = 1.0
 LAG_F = 2                     # a contact's source must show an exported damage collider within f-2..f
@@ -691,10 +692,14 @@ class Contact:
     state: str | None
     ts: float | None
     boxes: list              # hero boxes (x0, y0, x1, y1) at f-1 and f
-    exported: bool           # the source had a support_threat collider in f-2..f
-    hole: bool               # the source was exported without colliders in f-2..f
+    exported: bool           # the source had a support_threat collider in f-2..f (the collider it named, when the
+    hole: bool               # oracle exports collider names); hole: exported without colliders in f-2..f
     T: float = 0.0           # game time since the scan start
     arm: tuple | None = None   # (arm_T, arm_pos) of a non-boss source's armed stretch (its "self" template)
+    box_dt: list = field(default_factory=list)   # game time of each box minus T: [-(T_f - T_f-1), 0.0]
+    ambient: bool = False    # the source is an ambient hazard (armed when the scan started): _ambient/world only
+    named_gap: bool = False  # the oracle exported the source's other colliders by name, but not the one it named
+    fold: int = 0            # held-out fold of the recording
     res: dict = field(default_factory=dict)   # template set -> residual (u; inf = none within R_SEARCH_U)
 
 
@@ -705,8 +710,10 @@ class _Frame:
     cur: Instance | None
     owners: dict             # type_key -> owning instance of an armed entity
     armed: dict              # type_key -> (arm_T, arm_pos) of its armed stretch
-    threat: set              # type_keys (and (type_key, collider name)) with a support_threat collider
-    holes: set               # type_keys exported without colliders while not hidden
+    threat: set              # type_keys with a support_threat collider
+    names: dict              # type_key -> names (without "(Clone)" / " (n)") of its support_threat colliders, when
+    holes: set               #   exported; holes: type_keys exported without colliders while not hidden
+    ambient: set             # type_keys of ambient hazards armed this frame
     ended: Instance | None = None   # the instance that ended on this frame (a kill frame's contact belongs to it)
 
 
@@ -792,13 +799,14 @@ class FightScanner:
                 self.pending.append(("blocked", d["first_f"], d["last_f"], str(d.get("source"))))
             elif k == "hit" and d.get("type_key") == self.spec.boss_type and d.get("hp_after") is not None:
                 self.boss_hp = d.get("hp_after")
-        threat, holes = set(), set()
-        self._boss(f, boss, threat, holes)
+        threat, names, holes, ambient = set(), {}, set(), set()
+        self._boss(f, boss, threat, names, holes)
         if self.cur is not None and self.boss_hidden is not None and self.cur.anchor_hidden is None \
                 and self.cur.anchor is None:
             self.cur.anchor_hidden = (*self.boss_hidden, self.T - self.cur.t_start)
-        owners, armed = self._entities(f, ents, first, threat, holes)
-        self.ring[f] = _Frame(self.T, self.hero_box, self.cur, owners, armed, threat, holes, self.ended_now)
+        owners, armed = self._entities(f, ents, first, threat, names, holes, ambient)
+        self.ring[f] = _Frame(self.T, self.hero_box, self.cur, owners, armed, threat, names, holes, ambient,
+                              self.ended_now)
         self.ended_now = None
         self.ring.pop(f - RING_F, None)
         if self.pending:
@@ -902,36 +910,45 @@ class FightScanner:
     def _resolve(self, f: int) -> None:
         """Turn the contacts reported so far into Contact records (blocked stretches arrive when they end)."""
         for kind, f0, f1, src in self.pending:
-            tk, child = match_source(src, self.known)
+            tk, _ = match_source(src, self.known)
+            go = _strip_clone(str(src).split("/")[-1])  # the GameObject that dealt the damage: its collider's name
             for ff in range(f0, f1 + 1):
                 fr = self.ring.get(ff)
                 if fr is None:
                     self.b.counters["contact frames outside the scanned range"] += 1
                     continue
-                if tk is None:
+                near = [self.ring[g] for g in range(ff - LAG_F, ff + 1) if g in self.ring]
+                boss = tk == self.spec.boss_type
+                ambient = tk is not None and not boss and any(tk in r.ambient for r in near) \
+                    and not any(tk in r.armed for r in near)
+                if tk is None or ambient:
                     owner = None
-                elif tk == self.spec.boss_type:
+                elif boss:
                     owner = fr.cur
                 else:
                     owner = fr.owners.get(tk) or fr.cur
-                if owner is None:  # the frame an attack ended on (a kill): its geometry was exported until then
+                if owner is None and not ambient:  # a kill frame: the ended attack's geometry was exported until then
                     owner = next((self.ring[g].ended for g in range(ff, ff - LAG_F - 1, -1)
                                   if g in self.ring and self.ring[g].ended is not None), None)
-                near = [self.ring[g] for g in range(ff - LAG_F, ff + 1) if g in self.ring]
-                named = child is not None and any((tk, child) in r.threat for r in near)
-                exported = tk is not None and (named or any(tk in r.threat for r in near))
+                # with collider names in the export, the source must show the collider it named (the boss exported
+                # with its body box but without LeapCollider is a partial export hole, not "exported")
+                named = [r.names[tk] for r in near if tk in r.names]
+                listed = tk is not None and any(tk in r.threat for r in near)
+                exported = any(go in n for n in named) if named else listed
                 hole = tk is not None and any(tk in r.holes for r in near)
-                boxes = [r.box for r in (self.ring.get(ff - 1), fr) if r is not None and r.box is not None]
+                prev = self.ring.get(ff - 1)
+                pairs = [(r.box, r.T - fr.T) for r in (prev, fr) if r is not None and r.box is not None]
                 t = st = ts = None
                 if owner is not None:
                     t = fr.T - owner.t_start
                     st, ts = owner.state_at(t)
                 arm = None
-                if tk is not None and tk != self.spec.boss_type:
+                if tk is not None and not boss and not ambient:
                     arm = next((self.ring[g].armed[tk] for g in range(ff, ff - LAG_F - 1, -1)
                                 if g in self.ring and tk in self.ring[g].armed), None)
-                self.b.contacts.append(Contact(kind, ff, self.fight, src, tk, owner, t, st, ts, boxes, exported,
-                                               hole, fr.T, arm))
+                self.b.contacts.append(Contact(kind, ff, self.fight, src, tk, owner, t, st, ts, [b for b, _ in pairs],
+                                               exported, hole, fr.T, arm, [d for _, d in pairs], ambient,
+                                               bool(named) and not exported, self.fold))
         self.pending = []
 
     # ---- colliders ----
@@ -950,14 +967,16 @@ class FightScanner:
         inst.t_last = max(inst.t_last, t)
 
     @staticmethod
-    def _threats(e: dict, tk: str, threat: set) -> list:
+    def _threats(e: dict, tk: str, threat: set, names: dict) -> list:
         out = [c for c in e.get("colliders") or () if support_threat(c)]
         if out:
             threat.add(tk)
-            threat.update((tk, c["name"]) for c in out if c.get("name"))
+            named = {_strip_clone(c["name"]) for c in out if c.get("name")}
+            if named:
+                names.setdefault(tk, set()).update(named)
         return out
 
-    def _boss(self, f: int, boss: dict | None, threat: set, holes: set) -> None:
+    def _boss(self, f: int, boss: dict | None, threat: set, names: dict, holes: set) -> None:
         if boss is None:
             return
         tk = self.spec.boss_type
@@ -965,7 +984,7 @@ class FightScanner:
             and not boss["colliders"]
         self.b.entity_frame(boss, self.ctl, boss=True)
         cur = self.cur
-        threats = self._threats(boss, tk, threat)
+        threats = self._threats(boss, tk, threat, names)
         if hole:
             holes.add(tk)
             self.b.holes[(tk, str(self.ctl))] += 1
@@ -993,7 +1012,8 @@ class FightScanner:
         for c in threats:
             self._sample(cur, tk, c, False)
 
-    def _entities(self, f: int, ents: list, first: bool, threat: set, holes: set) -> dict:
+    def _entities(self, f: int, ents: list, first: bool, threat: set, names: dict, holes: set,
+                  ambient: set) -> tuple[dict, dict]:
         spec = self.spec
         seen = set()
         for e in ents:
@@ -1007,7 +1027,7 @@ class FightScanner:
             seen.add(iid)
             fsms = e.get("fsms") or ()
             fst = fsms[0]["state"] if fsms else None
-            threats = self._threats(e, tk, threat)
+            threats = self._threats(e, tk, threat, names)
             if isinstance(e.get("colliders"), list) and not e["colliders"]:
                 holes.add(tk)
                 self.b.holes[(tk, str(fst))] += 1
@@ -1017,7 +1037,8 @@ class FightScanner:
                 self.ambient.add(iid)
             if iid in self.ambient:
                 if armed:
-                    self.b.ambient_sample(tk, threats)
+                    ambient.add(tk)
+                    self.b.ambient_sample(tk, threats, self.fold)
                     continue
                 self.ambient.discard(iid)  # ambient only until it first disarms; a later arming is attributed
                 continue
@@ -1267,19 +1288,20 @@ class BehaviourBuilder:
             self._acc(f"{SELF}/{seg.type_key}", "anchor", f"self@{fold}").add_patch(
                 int(round(t / self.bin_s)), *r, instance=seg.uid)
 
-    def ambient_sample(self, tk: str, threats: list) -> None:
-        """An ambient (armed at the scan start) hazard's colliders: a time-less world-frame template."""
+    def ambient_sample(self, tk: str, threats: list, fold: int = 0) -> None:
+        """An ambient (armed at the scan start) hazard's colliders: the union over every armed frame, a static
+        (time-invariant) world template, in support at every t."""
         for c in threats:
             r = hb.rasterize(np.asarray(c["verts_world"], np.float64).reshape(-1, 2), self.cell)
             if r is not None:
-                self._acc("_ambient", "world").add_patch(0, *r)
+                self._acc(AMBIENT.split("/")[0], "world", f"world@{fold}", static=True).add_patch(0, *r)
         self.ambient_frames[tk] += 1
 
-    def _acc(self, key: str, frame: str, suffix: str | None = None) -> hb.TemplateAccumulator:
+    def _acc(self, key: str, frame: str, suffix: str | None = None, static: bool = False) -> hb.TemplateAccumulator:
         k = f"{key}/{suffix or frame}"
         a = self.acc.get(k)
         if a is None:
-            a = self.acc[k] = hb.TemplateAccumulator(k, frame, self.cell, self.bin_s)
+            a = self.acc[k] = hb.TemplateAccumulator(k, frame, self.cell, self.bin_s, static=static)
         return a
 
     def add_instance(self, inst: Instance) -> None:
@@ -1400,8 +1422,10 @@ class BehaviourBuilder:
     @staticmethod
     def contact_sets(c: Contact) -> dict[str, list[tuple]]:
         """Template sets a contact is checked against: name -> [(raw key, anchor or None (world), mirror, template
-        time)]; an anchor-frame member of an instance whose anchor was never seen is skipped (anchor None, key in
-        anchor frame: marked by mirror 0)."""
+        time at the contact frame)]; an anchor-frame member of an instance whose anchor was never seen is skipped
+        (anchor None, key in anchor frame: marked by mirror 0). An ambient source has its own time-invariant set."""
+        if c.ambient:
+            return {"ambient": [(AMBIENT, None, 1, 0.0)]}
         fam = c.inst.family
         a, m = c.inst.anchor, c.inst.mirror or 1
         anc = (a, m) if a is not None else (None, 0)
@@ -1417,17 +1441,19 @@ class BehaviourBuilder:
 
     @staticmethod
     def _residual(c: Contact, members: list, lookup, tol: int = 1) -> tuple[float, bool]:
-        """(distance from the contact's hero boxes to the nearest occupied cell of the members' templates at their
-        time +- tol bins, whether any member template was usable); lookup(key) -> templates to search."""
+        """(distance from the contact's hero boxes to the nearest occupied cell of the members' templates, each box
+        at its own frame's template time +- tol bins (the box of f-1 at t_f-1, the box of f at t_f: the pairing the
+        planner's query makes, so the support dilated by this residual and +-1 bin flags f-1 or f), whether any
+        member template was usable); lookup(key) -> templates to search."""
         d, usable = math.inf, False
         for key, anchor, mirror, t in members:
             if anchor is None and mirror == 0:
                 continue
             for tpl in lookup(key):
                 usable = True
-                for box in c.boxes:
+                for box, dt in zip(c.boxes, c.box_dt):
                     b = hb.box_to_anchor(box, anchor, mirror) if anchor is not None else box
-                    d = min(d, tpl.box_distance(t, b, tol_bins=tol, r_max=R_SEARCH_U))
+                    d = min(d, tpl.box_distance(t + dt, b, tol_bins=tol, r_max=R_SEARCH_U))
                     if d == 0.0:
                         return 0.0, True
         return d, usable
@@ -1441,20 +1467,24 @@ class BehaviourBuilder:
         fails, outside, unexplained = [], [], []             #                  member keys)
         own = lambda k: [raw[k]] if k in raw else []  # noqa: E731
         for c in self.contacts:
-            if c.inst is None:
+            if c.inst is None and not c.ambient:
                 outside.append(c)
                 continue
             if not c.exported and not c.hole:
                 unexplained.append(c)
             if not c.boxes:
                 continue
-            others = lambda k: [t for fd, t in self._folds.get(k, {}).items() if fd != c.inst.fold]  # noqa: E731
+            fold = c.inst.fold if c.inst is not None else c.fold
+            fam = c.inst.family if c.inst is not None else AMBIENT.split("/")[0]
+            others = lambda k: [t for fd, t in self._folds.get(k, {}).items() if fd != fold]  # noqa: E731
             for name, members in self.contact_sets(c).items():
                 d, usable = self._residual(c, members, own)
                 if not usable:
+                    if c.ambient:
+                        fails.append((c, name, math.inf))
                     continue
                 c.res[name] = d
-                per_set[(c.inst.family, name)].append(d)
+                per_set[(fam, name)].append(d)
                 if d <= R_FAIL_U:
                     for key, *_ in members:
                         if key in raw:
@@ -1464,7 +1494,7 @@ class BehaviourBuilder:
                 dh, usable = self._residual(c, members, others)
                 if usable:
                     dt = self._residual(c, members, others, HELD_T_BINS)[0] if dh > 0.0 else 0.0
-                    heldout[(c.inst.family, name)].append((dh, dt, tuple(m[0] for m in members if m[0] in raw)))
+                    heldout[(fam, name)].append((dh, dt, tuple(m[0] for m in members if m[0] in raw)))
         fam_r: dict[str, float] = defaultdict(float)
         for key, r in radius.items():
             fam_r[key.split("/")[0]] = max(fam_r[key.split("/")[0]], r)
@@ -2087,10 +2117,10 @@ class BehaviourBuilder:
             return self._built
         spec = self.spec
         raw = self.raw_templates()
-        val = self.validate({k: v for k, v in raw.items() if not k.startswith("_")})
+        val = self.validate(raw)
         support = {}
         for k, t in raw.items():
-            r = val["radius"].get(k, (0.0, ""))[0] if not k.startswith("_") else 0.0
+            r = val["radius"].get(k, (0.0, ""))[0]
             support[hb.SUPPORT + k] = t.dilated(r_disk=r, t_bins=1, key=hb.SUPPORT + k)
         reach = reach_summary({k[len(hb.SUPPORT):]: v for k, v in support.items()})
         g = self.graph()

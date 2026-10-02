@@ -72,7 +72,7 @@ TILE = 64
 SHIFT = 4  # cv2 fixed-point fraction bits for vertex coordinates
 FRAMES = ("anchor", "world")
 META_FIELDS = ("ix0", "iy0", "nx", "ny", "nt", "cell", "bin_s", "t0", "n_instances", "frame", "t_pad", "pad_x",
-               "pad_y")
+               "pad_y", "static")
 HERO_HALF_U = (0.25, 1.0394)   # STATE hero.box half-extents (0.5 x 2.0789 u on every logged frame)
 SUPPORT = "support/"
 
@@ -133,10 +133,10 @@ def rasterize(verts, cell: float = CELL_U) -> tuple[int, int, np.ndarray] | None
 class TemplateAccumulator:
     """Union of rasterised polygons per time bin, kept as TILE x TILE cell tiles keyed (bin, tile_y, tile_x)."""
 
-    def __init__(self, key: str, frame: str, cell: float = CELL_U, bin_s: float = BIN_S):
+    def __init__(self, key: str, frame: str, cell: float = CELL_U, bin_s: float = BIN_S, static: bool = False):
         if frame not in FRAMES:
             raise ValueError(f"frame {frame!r} not in {FRAMES}")
-        self.key, self.frame, self.cell, self.bin_s = key, frame, cell, bin_s
+        self.key, self.frame, self.cell, self.bin_s, self.static = key, frame, cell, bin_s, static
         self.tiles: dict[tuple[int, int, int], np.ndarray] = {}
         self.instances: set = set()
         self.polys = 0
@@ -150,7 +150,9 @@ class TemplateAccumulator:
             self.add_patch(self.bin_of(t), *r, instance=instance)
 
     def add_patch(self, b: int, ix0: int, iy0: int, patch: np.ndarray, instance=None) -> None:
-        """OR a rasterised patch (from rasterize, possibly shared between templates) into bin b."""
+        """OR a rasterised patch (from rasterize, possibly shared between templates) into bin b (bin 0 when static)."""
+        if self.static:
+            b = 0
         if instance is not None:
             self.instances.add(instance)
         self.polys += 1
@@ -196,7 +198,7 @@ class TemplateAccumulator:
             bits[b - b0] = np.packbits(plane, axis=1)
         return SpaceTimeTemplate(key=self.key, frame=self.frame, ix0=int(ix_lo), iy0=int(iy_lo), nx=nx, ny=ny,
                                  t0=b0 * self.bin_s, bits=bits, cell=self.cell, bin_s=self.bin_s,
-                                 n_instances=len(self.instances))
+                                 n_instances=len(self.instances), static=self.static)
 
 
 # ---- queries -----------------------------------------------------------------------------------------------
@@ -294,7 +296,8 @@ def rect_cells(h: float, cell: float = CELL_U) -> int:
 class SpaceTimeTemplate:
     """Bit-packed occupancy (nt, ny, nx) of one attack (or state) in its frame. Cell (iy, ix) of bin b covers
     [(ix0 + ix) * cell, (ix0 + ix + 1) * cell) x [(iy0 + iy) * cell, ...) at t = t0 + b * bin_s. t_pad > 0: each bin
-    already holds the union of its +-t_pad neighbours; pad_x / pad_y: spatial dilation already applied (u)."""
+    already holds the union of its +-t_pad neighbours; pad_x / pad_y: spatial dilation already applied (u). static:
+    one time-invariant bin, occupied at every t (ambient hazards: the union over every frame they were armed)."""
     key: str
     frame: str
     ix0: int
@@ -309,6 +312,7 @@ class SpaceTimeTemplate:
     t_pad: int = 0
     pad_x: float = 0.0
     pad_y: float = 0.0
+    static: bool = False
     _reach: np.ndarray | None = field(default=None, repr=False)
 
     @property
@@ -332,6 +336,8 @@ class SpaceTimeTemplate:
         return int(tol_bins)
 
     def bin_of(self, t) -> np.ndarray:
+        if self.static:
+            return np.zeros(np.shape(t), np.int64)
         return np.rint((np.asarray(t, np.float64) - self.t0) / self.bin_s).astype(np.int64)
 
     def cells_of(self, x, y) -> tuple[np.ndarray, np.ndarray]:
@@ -439,13 +445,15 @@ class SpaceTimeTemplate:
         """Minkowski dilation, conservative at the cell level: each bin grown by the disk of radius r_disk, then by
         the rectangle [-rx, rx] x [-ry, ry], then OR-ed with its t_bins neighbours on each side (the template gains
         t_bins bins at both ends). With rx, ry = the hero hurtbox half-extents, a point test of the hurtbox centre is
-        an overlap test of the hurtbox against the original occupancy."""
+        an overlap test of the hurtbox against the original occupancy. A static template keeps its single bin (it
+        already holds every t) and records t_bins in t_pad."""
         disk = disk_kernel(r_disk, self.cell)
         kx, ky = rect_cells(rx, self.cell), rect_cells(ry, self.cell)
         rect = np.ones((2 * ky + 1, 2 * kx + 1), np.uint8)
         gy, gx = disk.shape[0] // 2 + ky, disk.shape[1] // 2 + kx
         ny, nx = self.ny + 2 * gy, self.nx + 2 * gx
-        nt = self.nt + 2 * t_bins
+        tb = 0 if self.static else t_bins
+        nt = self.nt + 2 * tb
         planes = np.zeros((self.nt, ny, (nx + 7) // 8), np.uint8)
         buf = np.zeros((ny, nx), np.uint8)
         for b in range(self.nt):
@@ -461,18 +469,20 @@ class SpaceTimeTemplate:
                 g = cv2.dilate(g, rect, borderType=cv2.BORDER_CONSTANT, borderValue=0)
             planes[b] = np.packbits(g > 0, axis=1)
         bits = np.zeros((nt, ny, (nx + 7) // 8), np.uint8)
-        for d in range(2 * t_bins + 1):
+        for d in range(2 * tb + 1):
             bits[d:d + self.nt] |= planes
         return SpaceTimeTemplate(key=key or self.key, frame=self.frame, ix0=self.ix0 - gx, iy0=self.iy0 - gy, nx=nx,
-                                 ny=ny, t0=self.t0 - t_bins * self.bin_s, bits=bits, cell=self.cell,
+                                 ny=ny, t0=self.t0 - tb * self.bin_s, bits=bits, cell=self.cell,
                                  bin_s=self.bin_s, n_instances=self.n_instances, t_pad=self.t_pad + t_bins,
-                                 pad_x=self.pad_x + r_disk + rx, pad_y=self.pad_y + r_disk + ry)
+                                 pad_x=self.pad_x + r_disk + rx, pad_y=self.pad_y + r_disk + ry, static=self.static)
 
     def active(self) -> tuple[float, float] | None:
-        """(first, last) time with any occupied cell."""
+        """(first, last) time with any occupied cell ((-inf, inf) for a static template that has any)."""
         nz = np.flatnonzero(self.bits.reshape(self.nt, -1).any(axis=1))
         if len(nz) == 0:
             return None
+        if self.static:
+            return -math.inf, math.inf
         return self.t0 + nz[0] * self.bin_s, self.t0 + nz[-1] * self.bin_s
 
     def extent(self, mask: np.ndarray | None = None) -> tuple[float, float, float, float] | None:
@@ -498,15 +508,17 @@ class SpaceTimeTemplate:
 
     def meta(self) -> np.ndarray:
         return np.array([self.ix0, self.iy0, self.nx, self.ny, self.nt, self.cell, self.bin_s, self.t0,
-                         self.n_instances, FRAMES.index(self.frame), self.t_pad, self.pad_x, self.pad_y], np.float64)
+                         self.n_instances, FRAMES.index(self.frame), self.t_pad, self.pad_x, self.pad_y,
+                         float(self.static)], np.float64)
 
     @classmethod
     def from_arrays(cls, key: str, bits: np.ndarray, meta: np.ndarray) -> "SpaceTimeTemplate":
-        m = dict(zip(META_FIELDS, meta.tolist()))  # files from before t_pad / pad_* lack the last fields
+        m = dict(zip(META_FIELDS, meta.tolist()))  # files from before t_pad / pad_* / static lack the last fields
         return cls(key=key, frame=FRAMES[int(m["frame"])], ix0=int(m["ix0"]), iy0=int(m["iy0"]), nx=int(m["nx"]),
                    ny=int(m["ny"]), t0=float(m["t0"]), bits=np.ascontiguousarray(bits, np.uint8),
                    cell=float(m["cell"]), bin_s=float(m["bin_s"]), n_instances=int(m["n_instances"]),
-                   t_pad=int(m.get("t_pad", 0)), pad_x=float(m.get("pad_x", 0.0)), pad_y=float(m.get("pad_y", 0.0)))
+                   t_pad=int(m.get("t_pad", 0)), pad_x=float(m.get("pad_x", 0.0)), pad_y=float(m.get("pad_y", 0.0)),
+                   static=bool(m.get("static", 0.0)))
 
 
 def save_templates(path: str | Path, templates: dict[str, SpaceTimeTemplate],
@@ -545,9 +557,9 @@ def union(templates: Iterable[SpaceTimeTemplate], key: str) -> SpaceTimeTemplate
     ts = list(templates)
     if not ts:
         return None
-    if len({(t.frame, t.cell, t.bin_s, t.t_pad) for t in ts}) != 1:
-        raise ValueError("union of templates with different frame, cell, bin size or time padding")
-    acc = TemplateAccumulator(key, ts[0].frame, ts[0].cell, ts[0].bin_s)
+    if len({(t.frame, t.cell, t.bin_s, t.t_pad, t.static) for t in ts}) != 1:
+        raise ValueError("union of templates with different frame, cell, bin size, time padding or static flag")
+    acc = TemplateAccumulator(key, ts[0].frame, ts[0].cell, ts[0].bin_s, static=ts[0].static)
     for t in ts:
         b_off = int(round(t.t0 / t.bin_s))
         for b in range(t.nt):
@@ -577,26 +589,28 @@ def planner_templates(support: dict[str, SpaceTimeTemplate], hx: float = HERO_HA
 
 
 @numba.njit(cache=True)
-def _query_kernel(bits: np.ndarray, boff: np.ndarray, imeta: np.ndarray, fmeta: np.ndarray, tk: np.ndarray,
-                  x: np.ndarray, y: np.ndarray, out: np.ndarray) -> None:
-    """out[n, k] = any placement p occupied at (x[n, k], y[n, k]) and template time fmeta[p, 5] + tk[k].
-    imeta[p] = (ix0, iy0, nx, ny, nt, row bytes, mirror, anchored); fmeta[p] = (t0, bin_s, cell, ax, ay, t_ref)."""
-    n_c, n_t = x.shape
+def _query_kernel(bits: np.ndarray, boff: np.ndarray, imeta: np.ndarray, fmeta: np.ndarray, full: np.ndarray,
+                  tk: np.ndarray, xt: np.ndarray, yt: np.ndarray, out: np.ndarray) -> None:
+    """out[k, n] = any placement p occupied at (xt[k, n], yt[k, n]) and template time fmeta[p, 5] + tk[k] (time-major:
+    the inner loop over candidates reads contiguous memory). imeta[p] = (ix0, iy0, nx, ny, nt, row bytes, mirror,
+    anchored, static, offset of the template's bins in full); fmeta[p] = (t0, bin_s, cell, ax, ay, t_ref);
+    full[offset + b] = 0 when bin b is empty (skipped)."""
+    n_t, n_c = xt.shape
     n_p = boff.shape[0]
     for p in range(n_p):
         ix0, iy0, nx, ny, nt, rb = imeta[p, 0], imeta[p, 1], imeta[p, 2], imeta[p, 3], imeta[p, 4], imeta[p, 5]
-        mirror, anchored = imeta[p, 6], imeta[p, 7]
+        mirror, anchored, static, fo = imeta[p, 6], imeta[p, 7], imeta[p, 8], imeta[p, 9]
         cell, ax, ay = fmeta[p, 2], fmeta[p, 3], fmeta[p, 4]
         for k in range(n_t):
-            b = int(np.rint((fmeta[p, 5] + tk[k] - fmeta[p, 0]) / fmeta[p, 1]))
-            if b < 0 or b >= nt:
+            b = 0 if static else int(np.rint((fmeta[p, 5] + tk[k] - fmeta[p, 0]) / fmeta[p, 1]))
+            if b < 0 or b >= nt or full[fo + b] == 0:
                 continue
             base = boff[p] + b * ny * rb
             for n in range(n_c):
-                if out[n, k]:
+                if out[k, n]:
                     continue
-                xx = x[n, k]
-                yy = y[n, k]
+                xx = xt[k, n]
+                yy = yt[k, n]
                 if anchored:
                     xx = mirror * (xx - ax)
                     yy = yy - ay
@@ -605,7 +619,7 @@ def _query_kernel(bits: np.ndarray, boff: np.ndarray, imeta: np.ndarray, fmeta: 
                 if ix < 0 or ix >= nx or iy < 0 or iy >= ny:
                     continue
                 if (bits[base + iy * rb + (ix >> 3)] >> (7 - (ix & 7))) & 1:
-                    out[n, k] = True
+                    out[k, n] = True
 
 
 def _query_ref(tpls: list["SpaceTimeTemplate"], place: list[tuple], tk: np.ndarray, x: np.ndarray,
@@ -629,20 +643,29 @@ class SupportQuery:
     (t_ref = template time at the query's t = 0: s since the attack start, the state's entry or the attack's end),
     then query(x, y, tk) with x, y [N, T] collider centres and tk [T] s from now."""
 
-    def __init__(self, templates: dict[str, SpaceTimeTemplate]):
+    def __init__(self, templates: dict[str, SpaceTimeTemplate], hero_half: tuple[float, float] = HERO_HALF_U):
         for k, t in templates.items():
             if t.t_pad < 1:
                 raise ValueError(f"{k}: SupportQuery needs templates with the +-1 bin baked in (planner_templates)")
+            if t.pad_x < hero_half[0] - 1e-9 or t.pad_y < hero_half[1] - 1e-9:
+                raise ValueError(f"{k}: dilated by ({t.pad_x:.4f}, {t.pad_y:.4f}) u, less than the hero hurtbox "
+                                 f"half-extents {tuple(hero_half)}: a point test would miss overlaps "
+                                 f"(planner_templates)")
         self.keys = list(templates)
         self.index = {k: i for i, k in enumerate(self.keys)}
         self.tpls = [templates[k] for k in self.keys]
-        offs, chunks, o = [], [], 0
+        offs, foffs, chunks, fulls, o, fo = [], [], [], [], 0, 0
         for t in self.tpls:
             offs.append(o)
+            foffs.append(fo)
             chunks.append(np.ascontiguousarray(t.bits).ravel())
+            fulls.append(t.bits.reshape(t.nt, -1).any(axis=1).astype(np.uint8))
             o += chunks[-1].size
+            fo += t.nt
         self.bits = np.concatenate(chunks) if chunks else np.zeros(0, np.uint8)
+        self.full = np.concatenate(fulls) if fulls else np.zeros(0, np.uint8)
         self.offs = np.array(offs, np.int64)
+        self.foffs = np.array(foffs, np.int64)
         self.clear()
 
     def clear(self) -> None:
@@ -658,21 +681,23 @@ class SupportQuery:
     def arrays(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         n = len(self._place)
         boff = np.zeros(n, np.int64)
-        im = np.zeros((n, 8), np.int64)
+        im = np.zeros((n, 10), np.int64)
         fm = np.zeros((n, 6), np.float64)
         for j, (i, t_ref, anchor, mirror) in enumerate(self._place):
             t = self.tpls[i]
             boff[j] = self.offs[i]
-            im[j] = (t.ix0, t.iy0, t.nx, t.ny, t.nt, t.bits.shape[2], mirror, anchor is not None)
+            im[j] = (t.ix0, t.iy0, t.nx, t.ny, t.nt, t.bits.shape[2], mirror, anchor is not None, t.static,
+                     self.foffs[i])
             fm[j] = (t.t0, t.bin_s, t.cell, *(anchor or (0.0, 0.0)), t_ref)
         return boff, im, fm
 
     def query(self, x, y, tk) -> np.ndarray:
-        x = np.ascontiguousarray(x, np.float64)
-        y = np.ascontiguousarray(y, np.float64)
+        """[N, T] bool: x, y [N, T] hero collider centres at tk [T] s from now (template time t_ref + tk)."""
+        xt = np.ascontiguousarray(np.asarray(x, np.float64).T)
+        yt = np.ascontiguousarray(np.asarray(y, np.float64).T)
         tk = np.ascontiguousarray(tk, np.float64)
-        out = np.zeros(x.shape, np.bool_)
+        out = np.zeros(xt.shape, np.bool_)
         if self._place:
             boff, im, fm = self.arrays()
-            _query_kernel(self.bits, boff, im, fm, tk, x, y, out)
-        return out
+            _query_kernel(self.bits, boff, im, fm, self.full, tk, xt, yt, out)
+        return out.T

@@ -210,15 +210,17 @@ def synth():
 
 
 def _support_covers(built: bt.Built, contacts: list, frames=("anchor", "world_all", "self")) -> dict:
-    """Every contact's hero collider centre (f-1 or f) inside the planner templates (support + hurtbox) of its
-    family (or, "self", of its hazard entity placed where it armed), with the contact time as template time:
-    {frame: number of contacts not covered}; contacts with a boss source count as covered for "self"."""
+    """The planner's query of every contact: the hero collider centres of frames f-1 and f, each at its own frame's
+    time (tk = box_dt: -(T_f - T_f-1), 0), against the planner templates (support + hurtbox) of its family (or,
+    "self", of its hazard entity placed where it armed); a contact is caught when either frame is flagged.
+    {frame: number of contacts not caught}; contacts with a boss source count as caught for "self"."""
     keys = {k for k in built.support if k.count("/") == 2 or k.startswith(f"support/{bt.SELF}/")}
     plan = hb.planner_templates({k: built.support[k] for k in keys})
     q = hb.SupportQuery(plan)
     missed = {f: 0 for f in frames}
     for c in contacts:
         fam = c.inst.family
+        assert len(c.box_dt) == len(c.boxes) and c.box_dt[-1] == 0.0
         for frame in frames:
             q.clear()
             if frame == "anchor":
@@ -234,7 +236,7 @@ def _support_covers(built: bt.Built, contacts: list, frames=("anchor", "world_al
                 q.place(f"support/{fam}/world_all", c.t)
             xs = np.array([[(b[0] + b[2]) / 2 for b in c.boxes]])
             ys = np.array([[(b[1] + b[3]) / 2 for b in c.boxes]])
-            hit = q.query(xs, ys, np.zeros(len(c.boxes)))
+            hit = q.query(xs, ys, np.array(c.box_dt, np.float64))
             missed[frame] += not hit.any()
     return missed
 
