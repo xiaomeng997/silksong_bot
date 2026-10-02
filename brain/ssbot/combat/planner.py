@@ -88,6 +88,15 @@ SIDE = (-0.12, 2.81, -0.62, 1.52)
 UP = (-1.23, 0.85, -0.04, 3.33)
 DOWN = (-0.69, 1.41, -1.96, 0.32)
 SPEAR = (0.3, 11.0, -0.8, 0.8)
+# The down spike's damage collider itself (Attacks/Default/DownSlash, damager 0, crests.json P17, same frame as DOWN):
+# a diagonal sliver from the hero's back-top to a forward-low tip. DOWN, the clash polygon's bounding box, covers 0.5-1 u
+# behind and below it where nothing hits: live check 20261002_152649 (tools/attack_shape_audit), spikes whose DOWN met
+# the boss's collider without a hit came within 0.39-0.49 u of it with this polygon (head-on dives over the boss's
+# back: the planner pressed too high and the spike ended before the real shape reached the boss).
+DOWN_POLY = np.array([[-0.58, 0.32], [-0.671, -0.467], [0.544, -1.536], [1.599, -2.195], [1.155, -1.069],
+                      [0.479, 0.21]])
+DOWN_BOX = (float(DOWN_POLY[:, 0].min()), float(DOWN_POLY[:, 0].max()), float(DOWN_POLY[:, 1].min()),
+            float(DOWN_POLY[:, 1].max()))
 # When each attack's box is really out, frames after the press reaches the game (the rollout's attack / cast start),
 # measured as press -> hit event in live run 20261002_081716 (oracle, 52 episodes): Slash / AltSlash p5-p95 1-3 / 1-4
 # frames (828 of 1037 side presses hit), UpSlash 2-7 (48 of 91), the Silkspear needle 18-19 (237 of 267 casts); the
@@ -949,6 +958,80 @@ def _rect_meets_polys(rx0, ry0, rx1, ry1, polys, starts, dx, dy):
 
 
 @numba.njit(cache=True, inline="always")
+def _cross(ax, ay, bx, by, cx, cy):
+    return (bx - ax) * (cy - ay) - (by - ay) * (cx - ax)
+
+
+@numba.njit(cache=True)
+def _segs_meet(ax, ay, bx, by, cx, cy, dx, dy):
+    """Segments AB and CD meet (touching counts)."""
+    d1 = _cross(cx, cy, dx, dy, ax, ay)
+    d2 = _cross(cx, cy, dx, dy, bx, by)
+    d3 = _cross(ax, ay, bx, by, cx, cy)
+    d4 = _cross(ax, ay, bx, by, dx, dy)
+    if d1 * d2 > 0.0 or d3 * d4 > 0.0:
+        return False
+    if d1 == 0.0 and d2 == 0.0:              # collinear: their extents must overlap
+        return (min(ax, bx) <= max(cx, dx) and min(cx, dx) <= max(ax, bx) and min(ay, by) <= max(cy, dy)
+                and min(cy, dy) <= max(ay, by))
+    return True
+
+
+@numba.njit(cache=True)
+def _inside(px, py, q, a, b, dx, dy):
+    """Point inside polygon q[a:b] moved by (dx, dy) (ray casting)."""
+    inside = False
+    j = b - 1
+    for i in range(a, b):
+        xi, yi = q[i, 0] + dx, q[i, 1] + dy
+        xj, yj = q[j, 0] + dx, q[j, 1] + dy
+        if (yi > py) != (yj > py) and px < (xj - xi) * (py - yi) / (yj - yi) + xi:
+            inside = not inside
+        j = i
+    return inside
+
+
+@numba.njit(cache=True)
+def _poly_meets_polys(P, polys, starts, dx, dy):
+    """Polygon P [m, 2] meets one of the polygons (moved by dx, dy): an edge pair crosses or one lies inside."""
+    m = P.shape[0]
+    for p in range(len(starts) - 1):
+        a, b = starts[p], starts[p + 1]
+        for i in range(m):
+            i2 = (i + 1) % m
+            j = b - 1
+            for k in range(a, b):
+                if _segs_meet(P[i, 0], P[i, 1], P[i2, 0], P[i2, 1], polys[j, 0] + dx, polys[j, 1] + dy,
+                              polys[k, 0] + dx, polys[k, 1] + dy):
+                    return True
+                j = k
+        if _inside(P[0, 0], P[0, 1], polys, a, b, dx, dy):
+            return True
+        if _inside(polys[a, 0] + dx, polys[a, 1] + dy, P, 0, m, 0.0, 0.0):
+            return True
+    return False
+
+
+@numba.njit(cache=True)
+def _ov_down(cx, cy, face, b0, b1, b2, b3, polys, starts, dx, dy):
+    """The down spike's damage polygon (DOWN_POLY, mirrored with the facing) at the hurtbox centre meets the target:
+    its bounding box against the target's box first, then the polygons (a target without polygons: the box)."""
+    if face > 0:
+        ax0, ax1 = cx + DOWN_BOX[0], cx + DOWN_BOX[1]
+    else:
+        ax0, ax1 = cx - DOWN_BOX[1], cx - DOWN_BOX[0]
+    if not (ax0 < b2 and ax1 > b0 and cy + DOWN_BOX[2] < b3 and cy + DOWN_BOX[3] > b1):
+        return False
+    if len(starts) < 2:
+        return True
+    P = np.empty((DOWN_POLY.shape[0], 2))
+    for i in range(DOWN_POLY.shape[0]):
+        P[i, 0] = cx + face * DOWN_POLY[i, 0]
+        P[i, 1] = cy + DOWN_POLY[i, 1]
+    return _poly_meets_polys(P, polys, starts, dx, dy)
+
+
+@numba.njit(cache=True, inline="always")
 def _ov(cx, cy, face, fx0, fx1, y0, y1, b0, b1, b2, b3, polys, starts, dx, dy):
     if face > 0:
         ax0, ax1 = cx + fx0, cx + fx1
@@ -1002,8 +1085,13 @@ def _attacks_of(box, flags, mode, lat, face0, boss, okb, polys, starts, base, wi
             cx = 0.5 * (box[j, 0] + box[j, 2])
             cy = 0.5 * (box[j, 1] + box[j, 3])
             bx = boss[j]
-            if _ov(cx, cy, fc[j], g[0], g[1], g[2], g[3], bx[0], bx[1], bx[2], bx[3], polys, starts, bx[0] - base[0],
-                   bx[1] - base[1]):
+            if kind == 3:
+                got = _ov_down(cx, cy, fc[j], bx[0], bx[1], bx[2], bx[3], polys, starts, bx[0] - base[0],
+                               bx[1] - base[1])
+            else:
+                got = _ov(cx, cy, fc[j], g[0], g[1], g[2], g[3], bx[0], bx[1], bx[2], bx[3], polys, starts,
+                          bx[0] - base[0], bx[1] - base[1])
+            if got:
                 hit = j
                 break
         out.append((kind, k, hit))
@@ -1113,8 +1201,8 @@ def _first_hits(box, flags, mode, latched, face0, boss, okb, polys, starts, base
                 cx = 0.5 * (box[c, k, 0] + box[c, k, 2])
                 cy = 0.5 * (box[c, k, 1] + box[c, k, 3])
                 bx = boss[k]
-                if _ov(cx, cy, fc[k], DOWN[0], DOWN[1], DOWN[2], DOWN[3], bx[0], bx[1], bx[2], bx[3], polys, starts,
-                       bx[0] - base[0], bx[1] - base[1]):
+                if _ov_down(cx, cy, fc[k], bx[0], bx[1], bx[2], bx[3], polys, starts, bx[0] - base[0],
+                            bx[1] - base[1]):
                     hit_f[c] = k
                     kind[c] = 3
                     done = True
@@ -1198,9 +1286,9 @@ def _score_kernel(box, flags, mode, latched, face0, boss, okb, wv, stance_x, rx,
                         first_hit[c], first_kind[c] = k, 2 if up else 1
             elif dsk:
                 for j in range(k, min(T1, k + (16 if win[2, 1] == 0 else win[2, 1]))):
-                    if (win[2, 1] != 0 or mode[c, j] == M_DS_SPIKE) and okb[j] and _ov(cxs[j], cys[j], fc[j], DOWN[0], DOWN[1], DOWN[2], DOWN[3], boss[j, 0],
-                                      boss[j, 1], boss[j, 2], boss[j, 3], polys, starts, boss[j, 0] - base[0],
-                                      boss[j, 1] - base[1]):
+                    if (win[2, 1] != 0 or mode[c, j] == M_DS_SPIKE) and okb[j] and _ov_down(
+                            cxs[j], cys[j], fc[j], boss[j, 0], boss[j, 1], boss[j, 2], boss[j, 3], polys, starts,
+                            boss[j, 0] - base[0], boss[j, 1] - base[1]):
                         got = True
                         nr = True
                 if got:

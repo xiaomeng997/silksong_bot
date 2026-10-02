@@ -64,8 +64,10 @@ def _tick(setup, bells, hero_y=7.5, hero_vy=0.0):
 
 
 def test_the_planner_bounces_off_a_bell_below(setup):
-    # an attack bell rolling under a hero at the top of a jump (no boss drawn): down attacks meet it in every lane
-    planner, r = _tick(setup, [("BoneBeast AtkBell L", "In Air", (85.5, 4.3), (-12.0, 0.0))])
+    # an attack bell rolling towards a hero at the top of a jump (no boss drawn): down attacks meet it in every lane.
+    # The spike dives forward-down along the damage collider's diagonal sliver (planner.DOWN_POLY), so the bell is met
+    # ahead of her, not right under her (with the old bounding box a bell 0.5 u ahead at y 7.5 also passed)
+    planner, r = _tick(setup, [("BoneBeast AtkBell L", "In Air", (88.5, 4.3), (-9.0, 0.0))], hero_y=7.0)
     assert planner.last_bell_pogo > 0 and planner.pogo_log["bell"] > 0, (planner.pogo_log, r.name, r.S)
     # without the bell nothing bounces
     planner, r = _tick(setup, [])

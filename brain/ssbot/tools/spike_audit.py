@@ -74,8 +74,14 @@ def main(argv: list[str] | None = None) -> int:
                 continue
             f = s["f"]
             fo = pol.forecasts[-1][0] if pol.forecasts else f
-            ticks[f] = (fo, res.name, res.path, res.alternatives, res.S, res.J, pol.forecasts[-1][1] if pol.forecasts
-                        else None)
+            fc_now = pol.forecasts[-1][1] if pol.forecasts else None
+            snap = None
+            if fc_now is not None:
+                # the forecast's boss box and shape NOW: Forecast.boss_box reads the live tracker, so it must be
+                # evaluated at the tick (evaluated after the replay it described the episode's last state)
+                bb_all, ok_all = fc_now.boss_box(np.arange(0, 121) * pol.params.frame_time)
+                snap = (bb_all, ok_all, *fc_now.body_polys())
+            ticks[f] = (fo, res.name, res.path, res.alternatives, res.S, res.J, snap)
             if pend is not None and f + 2 >= pend[1]:
                 why["chains reached their press"] += 1
                 pend = None                              # reached the press
@@ -162,21 +168,37 @@ def main(argv: list[str] | None = None) -> int:
                     k = fs - fo
                     if path is not None and 0 <= k < len(path):
                         rec["hero_box_planned"] = [round(float(v), 2) for v in path[k]]
-                    if fcast is not None:
-                        bb, okb = fcast.boss_box(np.array([k * pol.params.frame_time]))
-                        rec["boss_box_planned"] = [round(float(v), 2) for v in bb[0]] if okb[0] else None
+                    if fcast is not None and 0 <= k < len(fcast[0]):
+                        rec["boss_box_planned"] = [round(float(v), 2) for v in fcast[0][k]] if fcast[1][k] else None
                     # the spike's 6 frames, planned against recorded: hero centre height, boss top, the DOWN box's
                     # bottom above the boss top (planned / recorded), the boss's front edge along its motion
                     rows_ = []
+                    pc, ac = [], []
                     for j in range(fs, fs + 6):
                         kk = j - fo
                         sj = by_f.get(j)
-                        if sj is None or path is None or not 0 <= kk < len(path) or fcast is None:
+                        if sj is None or path is None or not 0 <= kk < len(path) or fcast is None                                 or kk >= len(fcast[0]):
                             continue
                         bvj = boss_box(sj)
-                        bbj, okj = fcast.boss_box(np.array([kk * pol.params.frame_time]))
+                        bbj, okj = fcast[0][kk:kk + 1], fcast[1][kk:kk + 1]
                         if not bvj or not okj[0]:
                             continue
+                        # contact of the DOWN box: planned hero vs predicted shape, recorded hero vs recorded shape
+                        hp_ = path[kk]
+                        cxp, cyp = 0.5 * (hp_[0] + hp_[2]), 0.5 * (hp_[1] + hp_[3])
+                        g = pl.DOWN
+                        x0p, x1p = (cxp + g[0], cxp + g[1]) if face > 0 else (cxp - g[1], cxp - g[0])
+                        polys_p, starts_p = fcast[2], fcast[3]
+                        if len(polys_p):
+                            b0p = (polys_p[:, 0].min(), polys_p[:, 1].min())
+                            pc.append(bool(pl._rect_meets_polys(x0p, cyp + g[2], x1p, cyp + g[3], polys_p, starts_p,
+                                                                float(bbj[0, 0] - b0p[0]), float(bbj[0, 1] - b0p[1]))))
+                        hbr = sj["hero"]["box"]
+                        cxa, cya = 0.5 * (hbr[0] + hbr[2]), 0.5 * (hbr[1] + hbr[3])
+                        x0a, x1a = (cxa + g[0], cxa + g[1]) if face > 0 else (cxa - g[1], cxa - g[0])
+                        fa_ = np.concatenate(bvj)
+                        sa_ = np.cumsum([0] + [len(q) for q in bvj]).astype(np.int64)
+                        ac.append(bool(pl._rect_meets_polys(x0a, cya + g[2], x1a, cya + g[3], fa_, sa_, 0.0, 0.0)))
                         fl = np.concatenate(bvj)
                         top_a = float(fl[:, 1].max())
                         hbj = sj["hero"]["box"]
@@ -190,6 +212,8 @@ def main(argv: list[str] | None = None) -> int:
                     # [frame in spike, hero cy planned - recorded, boss top predicted - recorded, DOWN bottom above
                     #  the top planned, recorded, hero cx planned - recorded, boss cx predicted - recorded]
                     rec["spike_rows"] = rows_
+                    rec["contact_planned"] = pc
+                    rec["contact_recorded"] = ac
                 spikes.append(rec)
             prev = an
     out = {"spikes": len(spikes), "geometric_hits": sum(1 for x in spikes if x.get("geometric_hit")),
@@ -199,7 +223,7 @@ def main(argv: list[str] | None = None) -> int:
            "spike_boss_dx": [round(abs(0.5 * (x["boss_box_planned"][0] + x["boss_box_planned"][2])
                                        - 0.5 * (x["hero_box_actual"][0] + x["hero_box_actual"][2])), 1)
                              for x in spikes if x.get("boss_box_planned")],
-           "spike_cases": spikes[:4], "dropped_cases": dropped[:6]}
+           "spike_cases": spikes, "dropped_cases": dropped[:6]}
     # per approach (head-on / from behind / passed) and outcome: medians over the spike's frames of the errors
     summ = {}
     for x in spikes:
@@ -207,6 +231,8 @@ def main(argv: list[str] | None = None) -> int:
         e = summ.setdefault(key, {"n": 0, "hurt": 0, "rows": []})
         e["n"] += 1
         e["hurt"] += int(x.get("hurt_after") is not None)
+        e["planned_contact"] = e.get("planned_contact", 0) + int(any(x.get("contact_planned") or ()))
+        e["recorded_contact"] = e.get("recorded_contact", 0) + int(any(x.get("contact_recorded") or ()))
         e["rows"] += x.get("spike_rows") or []
     for key, e in summ.items():
         r = np.asarray(e.pop("rows"), float).reshape(-1, 7)
