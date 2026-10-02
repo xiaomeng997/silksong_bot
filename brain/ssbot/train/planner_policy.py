@@ -341,7 +341,8 @@ class PlannerPolicy:
     def stats(self) -> dict:
         q = (lambda v, p: round(float(np.percentile(v, p)), 3) if v else None)
         tr = self.fc.tracker
-        return {"view": self.view, "k": self.k, "modes": {k: v for k, v in self.counts.items() if not k.startswith("_")},
+        modes = {k: v for k, v in self.counts.items() if not k.startswith("_")}
+        return {"view": self.view, "k": self.k, "modes": modes,
                 "tick_ms_p50": q(self.tick_ms, 50), "tick_ms_p99": q(self.tick_ms, 99),
                 "plan_ms_p50": q(self.plan_ms, 50), "plan_ms_p99": q(self.plan_ms, 99),
                 "unpredicted": self.unpredicted, "hits_taken": self.hits_taken,

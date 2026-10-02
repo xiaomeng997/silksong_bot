@@ -9,8 +9,8 @@ Modes:
   ENGAGE  the boss is drawn in a punish window of the playbook: the stance is just outside its body on the hero's side,
           where the support's future coverage is lowest, and hits score fully.
   PREPARE the boss is committed to an attack whose punish window is ahead (a leap in its antic or flight, a burst
-          underground at a known x): the stance is the playbook's spot in the attack's anchor frame (12 u along the leap,
-          10 u beside the burst on the hero's side), pulled to low future coverage.
+          underground at a known x): the stance is the playbook's spot in the attack's anchor frame (14 u in front of
+          a charge, 12 u along a leap, 10 u beside a burst on the hero's side), pulled to low future coverage.
   EVADE   the support reaches the hero's spot within the evade horizon (0.6 s): the stance is the nearest floor spot
           the support leaves free over that horizon, hits score little.
   HOLD    anything else (the boss underground, the next attack unknown): the playbook's hidden stance, moved by the
@@ -86,8 +86,8 @@ class Tactics:
             prefs.boss_x = 0.5 * (box[0, 0] + box[0, 2])
         # HEAL: the Bind commit test at the hero's position (the Bind roots her there)
         bind_ok = d is None or d.allows(Prim.BIND)
-        if hp is not None and max_hp and silk is not None and silk >= BIND_SILK and hp <= max_hp - pb.bind_hp_missing_min \
-                and bind_ok:
+        if (hp is not None and max_hp and silk is not None and silk >= BIND_SILK
+                and hp <= max_hp - pb.bind_hp_missing_min and bind_ok):
             prefs.t_min = f.t_min(hero[0], hero[1], t_max=2.0)
             v = bind_allowed(int(silk), int(hp), int(max_hp), int(h if h is not None else 1), prefs.t_min,
                              pause_pending=bool(d is not None and d.pause_pending))

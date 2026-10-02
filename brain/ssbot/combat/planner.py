@@ -408,7 +408,8 @@ def _score_kernel(box, flags, mode, latched, face0, boss, okb, wv, stance_x, rx,
         for k in range(T1):
             d_mean += abs(cxs[k] - stance_x)
         d_mean /= T1
-        v = wv[0] * h - wv[1] * waste - wv[2] * jumps - wv[3] * (0.5 * abs(x_end - stance_x) + 0.5 * d_mean)             - wv[4] * r
+        v = (wv[0] * h - wv[1] * waste - wv[2] * jumps - wv[3] * (0.5 * abs(x_end - stance_x) + 0.5 * d_mean)
+             - wv[4] * r)
         if boss_x == boss_x:
             want = 1 if boss_x > x_end else -1
             if fc[T1 - 1] == want:

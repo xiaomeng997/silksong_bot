@@ -21,7 +21,8 @@ M2), already dilated by the validated contact residual and +-1 bin of export lag
 hero hurtbox plus a margin, so a point test of the hurtbox centre is an overlap test. The forecaster walks the Control
 graph from the current state: each state's entry is an interval (the logged dwell min / max of the states before it
 accumulate), and the state's template is placed once per 1/60 s bin of that interval (each placement keeps its own
-+-1 bin for the export lag). Branches (burst / charge / leap, left / right, rage) are all placed; the walk stops past the
++-1 bin for the export lag). Branches (burst / charge / leap, left / right, rage) are all placed; the walk stops past
+the
 horizon. An attack's anchor is used when it is known (Set L / Set R fixed at x 75.03 / 95.72, the rage at 86.21, a
 burst once seen), else the world_all template of the state (every logged anchor). The horizon is adaptive: at least
 0.8 s, and as long as the planner's longest candidate (a Bind needs 1.37 s + 0.15 s).
@@ -60,7 +61,7 @@ SUP_HORIZON_S = 0.8          # what the supervisor's support covers (hits_to_dea
 VE_ENTRY_SLACK = 1           # bins of slack on an observable phase's entry (a transition frame shows a clip early)
 MAX_NODES = 400
 HIDDEN, UNKNOWN = "hidden", "unknown"
-DROP_BELL = "BoneBeast DropBell"   # world-fixed hazards with self templates (behaviour_tables entities.<tk>.self_template)
+DROP_BELL = "BoneBeast DropBell"   # world-fixed hazards with self templates (entities.<tk>.self_template)
 REST_STATES = ("Init", "Dormant")
 BELL_TTL_S = 8.0                   # a disarmed bell (left the export, back to Dormant) is forgotten after this
 
@@ -366,7 +367,8 @@ class BossTracker:
             if boss.hp_est is not None:
                 self.ctx.hp = boss.hp_est.v
         for ev in ws.events:
-            if ev.kind == Ev.ENEMY_KILLED and ev.data is not None and ev.data.type_key == m.boss_type                     and not self.dead:
+            if (ev.kind == Ev.ENEMY_KILLED and ev.data is not None and ev.data.type_key == m.boss_type
+                    and not self.dead):
                 if self.view == ORACLE and self.ctx.family is not None:
                     self._ended(self.ctx.family, self.ctx.anchor, ev.t_game_s, ev.t_game_s, death=True)
                 elif self.view != ORACLE and self.state not in (None, HIDDEN) and self.last_family is not None:
