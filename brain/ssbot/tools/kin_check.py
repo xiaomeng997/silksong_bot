@@ -394,7 +394,7 @@ def check_monitor(tr: Trace, terrains: dict[str, Terrain2D], params: HeroParams)
     nominal: Counter = Counter()
     states: Counter = Counter()
     dropped = 0
-    roll_within, roll_far = [], []
+    roll_within, roll_far, misses_max, far_max = [], [], 0, 0
     trk = mon = None
     scene = None
     terrain = None
@@ -418,6 +418,7 @@ def check_monitor(tr: Trace, terrains: dict[str, Terrain2D], params: HeroParams)
             st = mon.status()
             states[st["state"]] += 1
             a = st["horizons"][H]
+            misses_max, far_max = max(misses_max, a["misses"]), max(far_max, a["far"])
             if a["n"] >= mon.window:
                 roll_within.append(a["within"])
                 roll_far.append(a["far"])
@@ -429,7 +430,7 @@ def check_monitor(tr: Trace, terrains: dict[str, Terrain2D], params: HeroParams)
     out = {"frames": len(tr), "scored": {int(h): n for h, n in scored.items()}, "dropped": dropped,
            "inside": {int(h): round(inside[h] / n, 5) for h, n in scored.items() if n},
            "nominal_inside": {int(h): round(nominal[h] / n, 5) for h, n in scored.items() if n},
-           "states": dict(states)}
+           "states": dict(states), "misses_max": misses_max, "far_max": far_max}
     if roll_within:
         out["rolling_within_min"] = round(float(min(roll_within)), 4)
         out["rolling_far_max"] = int(max(roll_far))

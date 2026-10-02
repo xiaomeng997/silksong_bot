@@ -2680,9 +2680,9 @@ class ResidualMonitor:
 
     Unknown is never safe: before min_n scored windows (after construction or reset(), which a new scene or terrain
     needs) the state is "unknown" and confidence() None; pass it to safety.invariants.i4 only when it is not None (a
-    missing module counts as below its threshold). "degraded" when, over the last `window` scored windows at the longest
-    horizon, the share within tol falls below alarm_within or more than alarm_far of them lie more than far_u outside
-    the hull. Held-out play (trial i0_000, live i1_000, i2_001, i3_000: 808 k frames, 808 k windows scored at 30
+    missing module counts as below its threshold). "degraded" when, among the last `window` scored windows at the
+    longest horizon, more than (1 - alarm_within) * window miss the hull by tol or more than alarm_far by far_u
+    (counts, so a ring still filling after a reset is not judged on a few windows). Held-out play (trial i0_000, live i1_000, i2_001, i3_000: 808 k frames, 808 k windows scored at 30
     frames, 1.2 % dropped) puts 99.4-99.8 % of the windows inside the hull (by recording; the nominal lane: 85-89 %),
     and never trips the alarm levels (MONITOR_ALARM_*); a model 0.3 u off trips it within the window (test). Cost:
     about 0.17 ms per frame (one compiled rollout of the due anchors, 9 lanes), plus StateTracker.push under 0.1 ms."""
@@ -2774,7 +2774,7 @@ class ResidualMonitor:
             d = self.err[h][np.isfinite(self.err[h])]
             out["horizons"][h] = {"n": int(len(e)), "scored": self.scored[h],
                                   "within": float(np.mean(e <= self.tol)) if len(e) else None,
-                                  "far": int(np.sum(e > self.far_u)),
+                                  "misses": int(np.sum(e > self.tol)), "far": int(np.sum(e > self.far_u)),
                                   "p99": float(np.percentile(e, 99)) if len(e) else None,
                                   "max": float(e.max()) if len(e) else None,
                                   "nominal_within": float(np.mean(d <= self.tol)) if len(d) else None}
@@ -2782,7 +2782,8 @@ class ResidualMonitor:
         if acc["n"] < self.min_n:
             out["state"], out["confidence"] = "unknown", None
         else:
-            good = acc["within"] >= self.alarm_within and acc["far"] <= self.alarm_far
+            # counts, not shares, so a ring that is still filling (after a reset) is not judged on a few windows
+            good = acc["misses"] <= (1.0 - self.alarm_within) * self.window and acc["far"] <= self.alarm_far
             out["state"], out["confidence"] = ("ok" if good else "degraded"), acc["within"]
         out["ok"] = out["state"] == "ok"
         return out
