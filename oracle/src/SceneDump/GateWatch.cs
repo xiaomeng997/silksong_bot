@@ -16,6 +16,11 @@ namespace SsOracle.SceneDump
     /// of the dumped outline, moved with the transform's position since the dump (rotation and scale are not
     /// followed)}. A consumer applies "enabled" over the TERRAIN solid with that id. nil until the current room's dump
     /// is done (unknown, not "no gates"); [] when nothing is watched.
+    /// The list holds MaxListed entries. Battle gates and solids seen changed stay once listed; a solid listed only
+    /// because it was off at the dump, and still is, says nothing TERRAIN does not, so a newly changed solid takes its
+    /// slot when the list is full (EvictSlot; the evicted one goes back to the poll). Only when every slot holds a
+    /// battle gate or a changed solid does a changed solid stay unlisted: room.gates_trunc (Truncated) then turns true
+    /// for the rest of the room, and a consumer must treat the state of every unlisted TERRAIN solid as unknown.
     /// Cost per frame: for each watched entry a null check, two flag reads and a transform position; for the poll two
     /// flag reads per solid; no allocation.
     /// </summary>
@@ -24,7 +29,7 @@ namespace SsOracle.SceneDump
         public const int PollPerFrame = 16;
         public const int MaxListed = 32;
 
-        private sealed class Entry
+        internal sealed class Entry
         {
             public Collider2D Col;
             public GameObject Go;
@@ -32,6 +37,7 @@ namespace SsOracle.SceneDump
             public int Id;
             public string Name;
             public bool OnAtDump, Battle, Listed, On;
+            public bool Changed;           // seen in a state different from the dump since it was (last) listed
             public Vector3 Pos0;
             public float X0, Y0, X1, Y1;   // AABB at the dump
             public float Dx, Dy;           // translation since the dump
@@ -43,8 +49,12 @@ namespace SsOracle.SceneDump
         private static readonly List<Entry> Listed = new List<Entry>(MaxListed);
         private static int committed = -1;   // FlowTap transition the committed list belongs to
         private static int cursor;
+        private static bool truncated;
 
         public static int Watched => Listed.Count;
+
+        /// <summary>True once a solid seen in a state different from the dump could not be listed in this room.</summary>
+        public static bool Truncated => truncated;
 
         // ---- dump side (SceneDumper coroutine, main thread) --------------------------------------------------
 
@@ -80,6 +90,7 @@ namespace SsOracle.SceneDump
             {
                 x.Battle = BattleIds.Contains(x.Id);
                 x.Listed = false;
+                x.Changed = false;
                 if (x.Battle && Listed.Count < MaxListed)
                 {
                     x.Listed = true;
@@ -95,6 +106,7 @@ namespace SsOracle.SceneDump
             BattleIds.Clear();
             committed = transition;
             cursor = 0;
+            truncated = false;
         }
 
         public static void Discard()
@@ -105,6 +117,45 @@ namespace SsOracle.SceneDump
 
         /// <summary>Which solids room.gates lists: battle gates, solids off in the dump, solids seen changed since.</summary>
         public static bool IsWatched(bool battle, bool onAtDump, bool onNow) => battle || !onAtDump || onNow != onAtDump;
+
+        /// <summary>
+        /// The slot a newly changed solid takes in a full list: the first entry that is neither a battle gate nor a
+        /// solid seen changed and whose state is still the dump's (pure; oracle/tests/EntitiesCheck). -1 when none.
+        /// </summary>
+        public static int EvictSlot(List<Entry> listed)
+        {
+            for (var i = 0; i < listed.Count; i++)
+            {
+                var e = listed[i];
+                if (!e.Battle && !e.Changed && e.On == e.OnAtDump) return i;
+            }
+            return -1;
+        }
+
+        /// <summary>
+        /// Lists a polled solid whose state differs from the dump (pure list logic; EntitiesCheck): appended while there
+        /// is room, else in an evictable slot, else left out and the list marked truncated. Returns whether it was listed.
+        /// </summary>
+        public static bool Admit(List<Entry> listed, Entry e, ref bool overflow)
+        {
+            if (listed.Count < MaxListed)
+            {
+                listed.Add(e);
+            }
+            else
+            {
+                var slot = EvictSlot(listed);
+                if (slot < 0)
+                {
+                    overflow = true;
+                    return false;
+                }
+                listed[slot].Listed = false;
+                listed[slot] = e;
+            }
+            e.Listed = true;
+            return true;
+        }
 
         // ---- per frame (RoomExporter) ------------------------------------------------------------------------
 
@@ -118,6 +169,7 @@ namespace SsOracle.SceneDump
             {
                 var e = Listed[i];
                 e.On = IsOn(e);
+                if (e.On != e.OnAtDump) e.Changed = true;
                 if (e.Tr != null)
                 {
                     var p = e.Tr.position;
@@ -126,17 +178,27 @@ namespace SsOracle.SceneDump
                 }
             }
             var n = entries.Count;
-            for (var k = 0; k < PollPerFrame && k < n && Listed.Count < MaxListed; k++)
+            for (var k = 0; k < PollPerFrame && k < n; k++)
             {
                 if (cursor >= n) cursor = 0;
                 var e = entries[cursor++];
                 if (e.Listed) continue;
                 var on = IsOn(e);
                 if (!IsWatched(e.Battle, e.OnAtDump, on)) continue;
+                // A full list takes only a solid whose state differs from the dump (an unchanged off-at-dump solid
+                // adds nothing to TERRAIN); the poll keeps looking at the others.
+                if (Listed.Count >= MaxListed && on == e.OnAtDump) continue;
                 e.On = on;
-                e.Listed = true;
-                Listed.Add(e);
+                e.Changed = on != e.OnAtDump;
+                Admit(Listed, e, ref truncated);
             }
+        }
+
+        /// <summary>room.gates_trunc: Truncated for the current room's committed list, nil while room.gates is nil.</summary>
+        public static void WriteTruncated(Ipc.MsgPackWriter w, int transition)
+        {
+            if (committed != transition) w.Nil();
+            else w.Bool(truncated);
         }
 
         public static void Write(Ipc.MsgPackWriter w, int transition)

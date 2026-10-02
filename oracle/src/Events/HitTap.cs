@@ -23,8 +23,8 @@ namespace SsOracle.Events
     ///             Beast, keeps isDead false and dies through its FSM, so hp is the test)
     ///   crit      HitInstance.CriticalHit
     /// Only calls that changed hp or killed are reported (an immune or zero-damage hit is not). A call nested inside
-    /// another on the same target (a lag hit with no delay) is reported first and the outer call reports only its own
-    /// part, so a target's events always add up to its hp change. Every source counts,
+    /// another on the same target (a damage tag hitting from inside TakeDamage, see below) is reported first and the
+    /// outer call reports only its own part, so a target's events always add up to its hp change. Every source counts,
     /// not only the hero: src tells them apart. Cost: two field reads per call in the prefix; the payload is built only
     /// for a real hit while a brain is connected (a handful per second in combat).
     /// </summary>
@@ -48,9 +48,12 @@ namespace SsOracle.Events
             public int Depth;
         }
 
-        // Nesting: LagHits is a coroutine, so with no start delay and a zero HitDelay its first ApplyExtraDamage runs
-        // inside the TakeDamage that started it, on the same HealthManager. The inner call reports first; the outer
-        // call then reports only its own part, so the "hit" events of one target add up to its hp change. A postfix
+        // Nesting (1.0.30000): TakeDamage lowers hp (HealthManager.cs:1299-1306), then adds the hit's poison / zap
+        // ticks with TagDamageTaker.AddDamageTagToStack (1310-1316); re-adding a tag marked RemoveAfterNextHit runs
+        // DamageTag.OnHit at once (TagDamageTaker.cs:49-53) -> HealthManager.ApplyTagDamage -> ApplyExtraDamage (1523)
+        // on the same HealthManager, inside the outer call. Lag hits never nest: DamageEnemies starts them with
+        // DoLagHits after Hit has returned (DamageEnemies.cs:834, 1305). The inner call reports first; the outer call
+        // then reports only its own part, so the "hit" events of one target add up to its hp change. A postfix
         // skipped by an exception leaves the depth high; the next top-level postfix pops back to its own depth.
         private const int MaxDepth = 8;
         private static int depth;
@@ -73,7 +76,9 @@ namespace SsOracle.Events
         }
 
         /// <summary>The part of a call's hp change that is its own: total minus what calls nested inside it on the same
-        /// target reported (pure; oracle/tests/EntitiesCheck).</summary>
+        /// target reported (pure; oracle/tests/EntitiesCheck). Assumes every nested call runs after the outer call's own
+        /// hp subtraction, as the damage-tag path above does; a nested call before it would make the outer event's
+        /// hp_after read high by the inner damage, and dead false on a killing blow.</summary>
         public static int OwnDamage(int hpBefore, int hpAfter, int innerDamage) => hpBefore - hpAfter - innerDamage;
 
         // The postfix reads hitInstance after the body ran: TakeDamage reassigns its parameter (damage scaling, crit),

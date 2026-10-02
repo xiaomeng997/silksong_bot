@@ -242,7 +242,8 @@ namespace SsOracle.Core
             F(HC, "touchingWallR"), F(HC, "tagDamageTaker"), F(HCS, "recoilFrozen"),
             T("TagDamageTaker"), P("TagDamageTaker", "TaggedDamage"), T("DamageTag"), F("DamageTag", "damageAmount"),
             P("DamageTag", "TotalHitLimit"), T("DamageTagInfo"), F("DamageTagInfo", "HitsLeft"), F("DamageTagInfo", "NextHitTime"),
-            F("DamageTagInfo", "RemoveAfterNextHit"),
+            F("DamageTagInfo", "RemoveAfterNextHit"), F("DamageTag", "isToolDamage"), P("DamageTag", "SpecialDamageType"),
+            T("DamageTag+SpecialDamageTypes"), P("GlobalSettings.Gameplay", "ToolKitDamageIncrease"), F(PD, "ToolKitUpgrades"),
             T("UnityEngine.Time"), P("UnityEngine.Time", "timeAsDouble"), P("UnityEngine.Time", "fixedTimeAsDouble"),
             // ents[].hidden, colliders[].name, tk2d's lazily added sprite colliders (EntityRegistry.SpritesChanged)
             T("tk2dBaseSprite"), F("tk2dBaseSprite", "boxCollider2D"), F("tk2dBaseSprite", "polygonCollider2D"),

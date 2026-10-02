@@ -925,7 +925,8 @@ namespace SsOracle.SceneDump
         /// STATE "room": {seq: last TERRAIN sent, transition: the room it was for, current: transition count,
         /// busy: a dump is in progress, work_us: the dump's main-thread work in this frame, gates: the watched
         /// battle/arena gates and other solids whose state differs from the dump, live (GateWatch; nil until the
-        /// current room's dump is done)}.
+        /// current room's dump is done), gates_trunc: true once a changed solid could not be listed in this room, so
+        /// unlisted solids' state is unknown (nil while gates is nil)}.
         /// </summary>
         private sealed class RoomExporter : Export.IExporter
         {
@@ -933,13 +934,14 @@ namespace SsOracle.SceneDump
 
             public void Write(Ipc.MsgPackWriter w, Export.FrameContext ctx)
             {
-                w.MapHeader(6);
+                w.MapHeader(7);
                 w.Key("seq"); w.Int(LastSeq);
                 w.Key("transition"); w.Int(LastTransition);
                 w.Key("current"); w.Int(FlowTap.TransitionSeq);
                 w.Key("busy"); w.Bool(Busy);
                 w.Key("work_us"); w.Int(WorkUs(ctx.Frame));
                 w.Key("gates"); GateWatch.Write(w, FlowTap.TransitionSeq);
+                w.Key("gates_trunc"); GateWatch.WriteTruncated(w, FlowTap.TransitionSeq);
             }
         }
     }

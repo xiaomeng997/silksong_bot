@@ -26,7 +26,9 @@ PROGRESS (<= 2 Hz; full snapshot on connect, PlayerData replacement and RPC "pro
 STATE "ev": [{k, f, q, d}] with d["n"] a per-process event sequence number (gaps = events lost with a
 dropped STATE). Events found by the per-frame poll (src "poll") are stamped with the frame they were seen in.
 STATE sections: "tap" {n, hp, gates, freezes, respawns, poll_us, hooks_failed}, "room" {seq, transition, current,
-busy, work_us (the TERRAIN dump's main-thread work in this frame)}, "prog" {seq, pending, chunk, fields, building, ok}.
+busy, work_us (the TERRAIN dump's main-thread work in this frame), gates and gates_trunc (M2: live arena gates and
+changed solids over the TERRAIN snapshot, docs/facts/1.0.30000/state_fields_m2.md section 11)}, "prog" {seq, pending,
+chunk, fields, building, ok}.
 
 Event kinds (k) and payload keys (d); "fsm" = "GameObject/Fsm/State:Action" when a PlayMaker FSM was executing,
 "caller" = up to 6 managed frames, innermost first:

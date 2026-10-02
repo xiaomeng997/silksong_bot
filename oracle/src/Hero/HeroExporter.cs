@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using GlobalSettings;
 using HarmonyLib;
 using SsOracle.Export;
 using SsOracle.Ipc;
@@ -85,7 +86,7 @@ namespace SsOracle.Hero
             K(w, "alpha", ref n); WriteAlpha(w);
             K(w, "wall", ref n); w.ArrayHeader(2); w.Bool(hero.touchingWallL); w.Bool(hero.touchingWallR);
             K(w, "tm", ref n); WriteTimers(w, hero, cs, body);
-            K(w, "tags", ref n); WriteTags(w, hero);
+            K(w, "tags", ref n); WriteTags(w, hero, pd);
 
             if (pd != null)
             {
@@ -358,6 +359,7 @@ namespace SsOracle.Hero
         private static readonly AccessTools.FieldRef<HeroController, int> ToolQueue = Refs.Field<HeroController, int>("toolThrowQueueSteps");
         private static readonly AccessTools.FieldRef<HeroController, TagDamageTaker> TagTaker = Refs.Field<HeroController, TagDamageTaker>("tagDamageTaker");
         private static readonly AccessTools.FieldRef<DamageTag, int> TagAmount = Refs.Field<DamageTag, int>("damageAmount");
+        private static readonly AccessTools.FieldRef<DamageTag, bool> TagIsTool = Refs.Field<DamageTag, bool>("isToolDamage");
 
         /// <summary>
         /// hero.alpha: (Time.time - Time.fixedTime) / Time.fixedDeltaTime at end of frame, the phase of the physics
@@ -370,6 +372,16 @@ namespace SsOracle.Hero
             if (!(fdt > 0f)) { w.Nil(); return; }
             w.Float((float)((Time.timeAsDouble - Time.fixedTimeAsDouble) / fdt));
         }
+
+        /// <summary>
+        /// hero.tm.inv (pure; oracle/tests/EntitiesCheck): the StartInvulnerable timers only count while
+        /// cState.invulnerable is set. HeroController.SceneInit clears that flag (HeroController.cs:1913) without
+        /// touching the timers, and the Invulnerable coroutine keeps counting them down (9693-9710), so after a room
+        /// change or a savestate load within a second of a hit the timers read up to ~1.0 while CanTakeDamage is true;
+        /// reporting them there would fail open.
+        /// </summary>
+        public static float InvLeft(bool invulnerable, float freeze, float duration) =>
+            invulnerable ? Mathf.Max(0f, freeze) + Mathf.Max(0f, duration) : 0f;
 
         private static void FloatOrNil(MsgPackWriter w, AccessTools.FieldRef<HeroController, float> f, HeroController h)
         {
@@ -386,7 +398,8 @@ namespace SsOracle.Hero
         /// rigidbody's gravityScale). Time values are seconds of scaled game time (they count Time.deltaTime), step
         /// values count FixedUpdate steps or input frames as the game does. inv = what StartInvulnerable's coroutine
         /// has left (invulnerableFreezeDuration + invulnerableDuration, each floored at 0; after a hit INVUL_TIME 1.0,
-        /// times Gameplay.WeightedAnkletDmgInvulnMult with the anklet); the other i-frame sources stay in their own keys
+        /// times Gameplay.WeightedAnkletDmgInvulnMult with the anklet) while cState.invulnerable is set, else 0 (see
+        /// InvLeft); the other i-frame sources stay in their own keys
         /// (parry_invuln_timer, invulnerable_count, the downspike steps in cstate_int). recoil = damage recoil left:
         /// RECOIL_DURATION - recoilTimer while cState.recoiling, the full RECOIL_DURATION while recoilFrozen (the hit's
         /// FreezeMoment runs first), else 0.
@@ -396,7 +409,7 @@ namespace SsOracle.Hero
             w.MapHeader(15);
             w.Key("inv");
             if (InvulnDuration != null && InvulnFreeze != null)
-                w.Float(Mathf.Max(0f, InvulnFreeze(h)) + Mathf.Max(0f, InvulnDuration(h)));
+                w.Float(InvLeft(cs.invulnerable, InvulnFreeze(h), InvulnDuration(h)));
             else w.Nil();
             w.Key("recoil");
             if (RecoilTimer != null)
@@ -429,15 +442,17 @@ namespace SsOracle.Hero
 
         /// <summary>
         /// hero.tags: the hero's active damage tags (TagDamageTaker.TaggedDamage: acid, frost water, ...), each
-        /// {kind: the DamageTag asset name, dmg_left: masks still to come = hits left x the tag's damageAmount (before
-        /// Barbed Wire and the Fractured Mask; -1 for a tag that does not count down, which ticks until its source
-        /// removes it, e.g. while swimming in frost water; see TagDmgLeft), t_left: seconds of scaled game time (the
-        /// Time.timeAsDouble clock the tag uses) until its next hit lands}. dmg_left and t_left are the conservative
-        /// pair for hits_to_death: all the damage still pending (Tick may also drop a limited tag without a hit while
-        /// the hero cannot take damage, so it is an upper bound) and the earliest moment any of it lands. nil without
-        /// a TagDamageTaker.
+        /// {kind: the DamageTag asset name, dmg_left: masks still to come = hits left x the masks one hit takes
+        /// (TagHitDamage: the tag's damageAmount, scaled as DamageTag.OnHit and HeroController.DoSpecialDamage scale it,
+        /// Barbed Wire included; -1 for a tag that does not count down, which ticks until its source removes it, e.g.
+        /// while swimming in frost water, see TagDmgLeft), t_left: seconds of scaled game time (the Time.timeAsDouble
+        /// clock the tag uses) until its next hit lands}. dmg_left and t_left are the conservative pair for
+        /// hits_to_death: all the damage still pending and the earliest moment any of it lands. dmg_left is an upper
+        /// bound on masks: the game can only take less (the Fractured Mask absorbs a hit, DoSpecialDamage takes nothing
+        /// while the hero is transitioning or in a cutscene, Tick drops a limited tag without a hit while the hero
+        /// cannot take damage). nil without a TagDamageTaker.
         /// </summary>
-        private void WriteTags(MsgPackWriter w, HeroController hero)
+        private void WriteTags(MsgPackWriter w, HeroController hero, PlayerData pd)
         {
             tagSnaps.Clear();
             try
@@ -447,6 +462,7 @@ namespace SsOracle.Hero
                 if (taker.TaggedDamage is Dictionary<DamageTag, DamageTagInfo> dict && dict.Count > 0)
                 {
                     var now = Time.timeAsDouble;
+                    var barbed = BarbedWireMult(hero);
                     foreach (var kv in dict)
                     {
                         var tag = kv.Key;
@@ -460,7 +476,7 @@ namespace SsOracle.Hero
                         tagSnaps.Add(new TagSnap
                         {
                             Kind = kind,
-                            DmgLeft = TagDmgLeft(info.RemoveAfterNextHit, tag.TotalHitLimit, info.HitsLeft, TagAmount != null ? TagAmount(tag) : 1),
+                            DmgLeft = TagDmgLeft(info.RemoveAfterNextHit, tag.TotalHitLimit, info.HitsLeft, HitDamage(tag, pd, barbed)),
                             TLeft = (float)Math.Max(0.0, info.NextHitTime - now),
                         });
                     }
@@ -493,7 +509,48 @@ namespace SsOracle.Hero
         public static int TagDmgLeft(bool removeAfterNextHit, int totalHitLimit, int hitsLeft, int amount)
         {
             var hits = removeAfterNextHit ? 1 : hitsLeft > 0 ? hitsLeft : totalHitLimit > 0 ? 0 : -1;
-            return hits < 0 ? -1 : hits * amount;
+            return hits < 0 || amount < 0 ? -1 : hits * amount;
+        }
+
+        /// <summary>
+        /// Masks one hit of a tag takes from the hero (pure; oracle/tests/EntitiesCheck), as 1.0.30000 computes it:
+        /// DamageTag.OnHit scales a tool tag's damageAmount to RoundToInt(amount x (1 + ToolKitUpgrades x
+        /// ToolKitDamageIncrease)) (DamageTag.cs:119-124); HeroController.ApplyTagDamage sends a frost tag to
+        /// TakeFrostDamage and any other to DoSpecialDamage, and both end in DoSpecialDamage, which floors a non-frost
+        /// amount times Gameplay.BarbedWireDamageTakenMultiplier while Barbed Wire is equipped (5171-5196).
+        /// barbedMult is 1 without Barbed Wire.
+        /// </summary>
+        public static int TagHitDamage(int amount, bool toolDamage, float toolKitFactor, bool frost, float barbedMult)
+        {
+            if (toolDamage) amount = Mathf.RoundToInt((float)amount * toolKitFactor);
+            return frost ? amount : Mathf.FloorToInt((float)amount * barbedMult);
+        }
+
+        /// <summary>
+        /// Gameplay.BarbedWireDamageTakenMultiplier when Barbed Wire is equipped, or when that cannot be read without a
+        /// singleton search (SafeReads.ToolsReadable false: counted as equipped, so dmg_left stays an upper bound);
+        /// 1 otherwise. Read only on frames with an active tag.
+        /// </summary>
+        private static float BarbedWireMult(HeroController hero)
+        {
+            var mult = Gameplay.BarbedWireDamageTakenMultiplier;
+            if (!SafeReads.ToolsReadable(hero)) return Mathf.Max(1f, mult);
+            var tool = Gameplay.BarbedWireTool;
+            return tool != null && tool.IsEquipped ? mult : 1f;
+        }
+
+        /// <summary>Masks one hit of this tag takes now; -1 (unknown, read as unbounded) when its amount cannot be read.</summary>
+        private static int HitDamage(DamageTag tag, PlayerData pd, float barbedMult)
+        {
+            if (TagAmount == null || TagIsTool == null) return -1;
+            var tool = TagIsTool(tag);
+            var kit = 1f;
+            if (tool)
+            {
+                if (pd == null) return -1;
+                kit = 1f + (float)pd.ToolKitUpgrades * Gameplay.ToolKitDamageIncrease;
+            }
+            return TagHitDamage(TagAmount(tag), tool, kit, tag.SpecialDamageType == DamageTag.SpecialDamageTypes.Frost, barbedMult);
         }
 
         private readonly List<int> toolMax = new List<int>(16);
