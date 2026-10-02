@@ -4,7 +4,8 @@ view).
 
 The whole ssbot tree is parsed (AST, every import statement including function-level ones) into a module graph:
 "import a.b.c" and "from a.b import c" also execute the packages a and a.b, and "from a.b import c" reaches the
-module a.b.c when it exists. A guarded module (brain/ssbot/{combat,safety,nav,run,perception}) fails when any path
+module a.b.c when it exists. A guarded module (brain/ssbot/{combat,safety,nav,run,perception,vision}; vision is the
+final-run preprocessing, e.g. vision/mask.py) fails when any path
 from it reaches a forbidden module: the oracle IPC (ssbot.ipc), the oracle message decoders (ssbot.oracle),
 recordings (ssbot.record), the oracle backend and the degraded backend built on it. A package that does not exist yet
 passes vacuously.
@@ -14,7 +15,7 @@ from collections import deque
 from pathlib import Path
 
 SSBOT = Path(__file__).resolve().parents[1] / "ssbot"
-GUARDED = ("combat", "safety", "nav", "run", "perception")
+GUARDED = ("combat", "safety", "nav", "run", "perception", "vision")
 FORBIDDEN = ("ssbot.ipc", "ssbot.oracle", "ssbot.record", "ssbot.backends.oracle_backend",
              "ssbot.backends.degraded")
 

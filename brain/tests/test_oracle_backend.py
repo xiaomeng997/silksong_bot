@@ -9,7 +9,7 @@ from ssbot.backends.oracle_backend import (HAZARD_OF, PROJECTILE_HOLD_S, OracleB
                                          type_key_of)
 from ssbot.core.bosses import BELL_BEAST
 from ssbot.ipc.ents import HAZARD_TYPES
-from ssbot.core.worldstate import (FM, Ev, Hazard, Kind, PauseBlock, Screen, Src, WorldState)
+from ssbot.core.worldstate import (FM, Ev, Gate, Hazard, Kind, PauseBlock, Screen, Src, WorldState)
 from ssbot.tools import cstate
 from tests import worldstate_fixture as fx
 
@@ -537,11 +537,15 @@ def test_menu_and_gates_when_exported():
     s = fx.window(0)[0]
     s["menu"] = {"sel": "quit", "quit_ok": False, "dim": 0.6, "alpha": 1.0, "ignore_unpause": False,
                  "quitting": False}
-    s["room"] = {"gates": [{"name": "Battle Gate L", "enabled": True, "box": [70.0, 2.0, 71.0, 10.0]}]}
+    s["room"] = {"gates": [{"name": "Battle Gate L", "id": 4242, "enabled": True, "box": [70.0, 2.0, 71.0, 10.0]}]}
     w = OracleBackend(clock=None).feed(s)
     assert w.game.menu.cursor_item == "quit" and w.game.menu.quit_greyed is True
     assert w.terrain.dynamic_deltas == [("Battle Gate L", True)]
-    assert w.terrain.gates == [("Battle Gate L", True, (70.0, 2.0, 71.0, 10.0))]
+    assert w.terrain.gates == [Gate("Battle Gate L", True, (70.0, 2.0, 71.0, 10.0), solid_id=4242)]
+    s["room"] = {"gates": None}                                     # the room snapshot is not ready: unknown
+    assert OracleBackend(clock=None).feed(s).terrain.gates is None
+    s["room"] = {"gates": []}                                       # nothing watched
+    assert OracleBackend(clock=None).feed(s).terrain.gates == []
 
 
 # ---- entities: hidden, hit events -----------------------------------------------------------------------------

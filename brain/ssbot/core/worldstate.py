@@ -30,7 +30,7 @@ own observability in EVENT_OBS, and event payloads mark their fields the same wa
 Deviations from the §4.2 text, all additive: CameraPose.viewport/screen (needed to project into the image),
 Game.unobservable is an Unobs bit set, Event payloads are typed dataclasses, Ev.SCENE_LEAVE / HAZARD_RESPAWN /
 DAMAGE_BLOCKED / FREEZE.phase exist because the oracle reports them, and the extras pos_transform, Entity.anim /
-render_box / flip_x / hidden, HeroState.tm / phys_alpha, DamageBox.name, TerrainRef.gates. Wire format: plain
+render_box / flip_x / hidden, HeroState.tm / phys_alpha, DamageBox.name, TerrainRef.gates (Gate). Wire format: plain
 dataclasses(slots=True) (msgspec is installed since 2026-10 but nothing serialises WorldStates yet); the C# side does
 not mirror them (the oracle sends STATE dicts, the backend maps).
 """
@@ -425,12 +425,20 @@ class PerceptionHealth:
 
 
 @dataclass(slots=True)
+class Gate:                                          # oracle room.gates item (state_fields_m2.md §11)
+    name: str = fld(V, "")                           # collider GameObject name ("Threaded Bell Gate", "Wall")
+    enabled: bool = fld(V, False)                    # the solid is there now (an arena gate: closed)
+    box: tuple[float, float, float, float] = fld(V, (0.0, 0.0, 0.0, 0.0))    # x0, y0, x1, y1 world AABB
+    solid_id: int | None = fld(O, None)              # TERRAIN solids[].id: the snapshot solid it updates
+
+
+@dataclass(slots=True)
 class TerrainRef:
     scene: str = fld(V, "")
     variant: str = fld(V, "")
     db_version: str = fld(V, "")
     dynamic_deltas: list[tuple[str, bool]] = fld(V, factory=list)      # (battle gate name, closed)
-    gates: list[tuple[str, bool, tuple[float, float, float, float]]] = fld(V, factory=list)   # + box x0, y0, x1, y1
+    gates: list[Gate] | None = fld(V, None)          # None: unknown (no export, or the room snapshot is not ready)
 
 
 # ---- events (§4.2 "事件") -------------------------------------------------------------------------------------
@@ -649,7 +657,7 @@ def estimate_fields(cls: type) -> tuple[str, ...]:
 
 SCHEMA_CLASSES: tuple[type, ...] = (
     Stamp, MenuRead, PlayTimeEst, Game, CameraPose, PhasePost, HeroState, ToolSlot, Resources, DamageBox, Entity,
-    Threat, PerceptionHealth, TerrainRef, WorldState, Event, HitTaken, HitDealt, EnemyKilled, Freeze, FsmTransition,
+    Threat, PerceptionHealth, Gate, TerrainRef, WorldState, Event, HitTaken, HitDealt, EnemyKilled, Freeze, FsmTransition,
     SceneEnter, SceneLeave, Lethal, GateEdge, BindOutcome, Info)
 
 _ATOM, _TUPLE, _LIST, _DICT, _DC, _OTHER = range(6)

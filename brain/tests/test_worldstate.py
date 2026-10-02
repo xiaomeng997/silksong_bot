@@ -132,10 +132,10 @@ def test_view_copies_lists_and_shares_only_immutable_tuples():
     ws.entities[0].body_polys = [[(0.0, 0.0), (1.0, 0.0), (1.0, 1.0)]]
     ws.entities[0].dmg_boxes = [W.DamageBox(poly=[(0.0, 0.0), (1.0, 1.0), (0.0, 1.0)], name="PolyCollider")]
     ws.entities[0].pos_transform = (3.0, 4.0)
-    ws.terrain.gates = [("Battle Gate", True, (0.0, 0.0, 1.0, 5.0))]
+    ws.terrain.gates = [W.Gate("Battle Gate", True, (0.0, 0.0, 1.0, 5.0), solid_id=7)]
     v = ws.view(W.VISION_EQUIVALENT)
     v.entities[0].body_polys[0].append((9.0, 9.0))
     v.entities[0].dmg_boxes[0].poly.append((9.0, 9.0))
     assert len(ws.entities[0].body_polys[0]) == 3 and len(ws.entities[0].dmg_boxes[0].poly) == 3
     assert v.entities[0].pos_transform is None and v.entities[0].dmg_boxes[0].name is None
-    assert v.terrain.gates == ws.terrain.gates and v.terrain.gates is not ws.terrain.gates
+    assert v.terrain.gates == [W.Gate("Battle Gate", True, (0.0, 0.0, 1.0, 5.0))] and ws.terrain.gates[0].solid_id == 7

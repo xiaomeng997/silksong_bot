@@ -37,7 +37,9 @@ it; the gap shows in perception.dropped_frames), and these fields need memory:
     "no HealthManager and a dynamic Rigidbody2D or the PROJECTILES layer" (EntityRegistry.cs:726), evaluated when
     the oracle's entity cache refreshes: on the trial run "BoneBeast AtkBell L" carries it in 3917 of 5918 frames
     in runs of p50 176 frames, with gaps of p50 86 frames (a bell resting between throws); falling DropBells carry
-    it while they fall. Kind follows the bit with a short hold instead of keeping it for the episode.
+    it from their drop until the bell has settled and the entity cache refreshes (trial run: 2,689 of the 3,215
+    DropBell PROJECTILE frames are at rest, |vel| < 0.05 u/s). Kind follows the bit with a short hold instead of
+    keeping it for the episode.
   - HIT_DEALT: from the oracle's "hit" events when the stream has them (killing blows and hits on unexported enemies
     included; ENEMY_KILLED once, on the killing blow hp_before > 0 >= hp_after; by_hero False for environmental
     attack types, as the event covers every source). Older recordings: from enemy HP drops between consecutive STATEs (every Hunter
@@ -77,7 +79,7 @@ from pathlib import Path
 
 from ssbot.core.bosses import BossSpec
 from ssbot.core.worldstate import (BIND_SILK, FM, IFRAME_BLOCKED, PARRY_BLOCKED, BindOutcome, CameraPose, DamageBox, E,
-                                   Entity, EnemyKilled, Ev, Event, Freeze, FsmTransition, Game, GateEdge, Hazard,
+                                   Entity, EnemyKilled, Ev, Event, Freeze, FsmTransition, Game, Gate, GateEdge, Hazard,
                                    HeroState, HitDealt, HitTaken, Info, Kind, Lethal, MenuRead, PauseBlock,
                                    PerceptionHealth, PhasePost, PlayTimeEst, Resources, SceneEnter, SceneLeave, Screen,
                                    Src, Stamp, TerrainRef, ToolSlot, WorldState, unknown)
@@ -999,11 +1001,18 @@ class OracleBackend:
 
     @staticmethod
     def _terrain(scene: str | None, room: dict | None) -> TerrainRef:
-        """Battle / arena gates (oracle room.gates) as the dynamic terrain deltas."""
+        """Battle / arena gates and other solids whose state changed since the TERRAIN snapshot (oracle room.gates)
+        as the dynamic terrain deltas. room.gates nil (the room snapshot is not ready) or absent is unknown (None),
+        never "no gates"; [] is no watched solid."""
+        raw = (room or {}).get("gates")
+        if not isinstance(raw, list):
+            return TerrainRef(scene=scene or "", gates=None)
         gates = []
-        for gt in (room or {}).get("gates") or ():
+        for gt in raw:
             box = gt.get("box")
             if box and len(box) == 4:
-                gates.append((str(gt.get("name") or ""), bool(gt.get("enabled")),
-                              (float(box[0]), float(box[1]), float(box[2]), float(box[3]))))
-        return TerrainRef(scene=scene or "", dynamic_deltas=[(n, on) for n, on, _ in gates], gates=gates)
+                gid = gt.get("id")
+                gates.append(Gate(name=str(gt.get("name") or ""), enabled=bool(gt.get("enabled")),
+                                  box=(float(box[0]), float(box[1]), float(box[2]), float(box[3])),
+                                  solid_id=int(gid) if gid is not None else None))
+        return TerrainRef(scene=scene or "", dynamic_deltas=[(g.name, g.enabled) for g in gates], gates=gates)
