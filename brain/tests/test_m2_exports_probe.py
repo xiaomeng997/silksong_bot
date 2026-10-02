@@ -62,6 +62,16 @@ def test_validate_flags_each_field():
     assert set(col.bad) == {"act.hf", "hero.alpha", "hero.tm", "hero.tool_max"}
 
 
+def test_cost_check(capsys):
+    col = _collector()
+    for i in range(200):
+        col._on(dict(_state(i), cost_us=120 + i % 40, cost_ex={"hero": 20, "ents": 30}))
+    assert probe.cost_check(col) and "'ents': (30, 30)" in capsys.readouterr().out
+    col._on(dict(_state(300), cost_us=5000))
+    col.cost += [1500] * 5                                   # p99 over budget
+    assert not probe.cost_check(col)
+
+
 def test_validate_alpha_and_inv():
     col = _collector()
     s = _state()

@@ -10,6 +10,8 @@ pass. Never submits on Quit: Submit is sent only on a "continue" highlight read 
         [--skip-moves] [--quit-prompt]
 
 Checks:
+  cost   STATE build cost over the whole probe within budget C14 (cost_us p50 <= 300 us, p99 <= 1000 us), with
+         cost_ex p50 / p99 per section printed (pre-M2 baseline, one instance: p50 117 us, p99 176 us).
   every  act.hf: 22 pending / age entries, ints, age <= 255, latched == act.mask, latched == desired when nothing is
   STATE  pending; hero.alpha >= 0 (nil only when fdt <= 0; frames with alpha >= 1, a long frame whose fixed steps Unity
          capped or a ScaleTime change of fdt, are counted and may be at most 1%); hero.wall two bools; hero.tm has its
@@ -61,6 +63,7 @@ INVUL_TIME = 1.0          # HeroController.INVUL_TIME (docs/facts/1.0.30000/hero
 RECOIL_DURATION = 0.2
 DASH_COOLDOWN = 0.425     # HeroController.DASH_COOLDOWN (hero_constants.json); set at HeroController.cs:9147
 ALPHA_HIGH_MAX = 0.01     # share of hero STATEs that may have alpha >= 1 (long frames with capped fixed steps)
+COST_P50_US, COST_P99_US = 300, 1000    # STATE build budget (C14)
 DEAD_STATES = ("Death Broadcast",)
 
 
@@ -92,6 +95,8 @@ class Collector:
         self.bad: Counter = Counter()
         self.example: dict[str, tuple[int, str]] = {}
         self.trace: list[dict] | None = None     # hero.tm per STATE while the moves checks run
+        self.cost: list[int] = []                    # cost_us of every STATE (the previous frame's build time)
+        self.cost_ex: dict[str, list[int]] = defaultdict(list)
         link.subscribe_state(self._on)
 
     def _fail(self, name: str, f: int, detail: str) -> None:
@@ -101,6 +106,10 @@ class Collector:
     def _on(self, s: dict) -> None:
         f = s.get("f", -1)
         with self.lock:
+            if isinstance(s.get("cost_us"), int):
+                self.cost.append(s["cost_us"])
+            for k, v in (s.get("cost_ex") or {}).items():
+                self.cost_ex[k].append(v)
             for ev in s.get("ev") or ():
                 k, d = ev.get("k"), ev.get("d") or {}
                 if k == "fsm" and d.get("fsm") == "Control" and str(d.get("obj", "")).startswith(BOSS):
@@ -403,6 +412,22 @@ def fight_checks(col: Collector, rec: AttemptRecord) -> bool:
     return ok
 
 
+def pct(xs: list, q: float):
+    if not xs:
+        return None
+    v = sorted(xs)
+    return v[min(len(v) - 1, int(q * len(v)))]
+
+
+def cost_check(col: Collector) -> bool:
+    """The STATE build cost with every M2 addition live, against the C14 budget (the reviewer's paper estimate was
+    5-10 us per frame on a 117 us p50 baseline; this measures it)."""
+    p50, p99 = pct(col.cost, 0.5), pct(col.cost, 0.99)
+    print("cost_ex p50/p99 us:", {k: (pct(v, 0.5), pct(v, 0.99)) for k, v in sorted(col.cost_ex.items())})
+    return check(p50 is not None and p50 <= COST_P50_US and p99 <= COST_P99_US,
+                 f"STATE cost_us p50 {p50} <= {COST_P50_US}, p99 {p99} <= {COST_P99_US} ({len(col.cost)} STATEs)")
+
+
 def hp_chain(rows: list[dict], boss_hits: list[tuple[int, dict]]) -> dict:
     """Checks the boss's "hit" events against its exported hp (pure). Rows and events are merged in frame order (an
     event of frame f is in STATE f, whose hp is sampled at the end of f). For every frame with events, their largest
@@ -612,6 +637,7 @@ def main(argv: list[str] | None = None) -> int:
             n = col.n["act.hf" if name == "act.hf" else "hero"]
             ok &= check(n > 0 and col.bad[name] == 0,
                         f"{name}: {n - col.bad[name]}/{n} STATEs valid {col.example.get(name, '')}")
+        ok &= cost_check(col)
         high = col.n["alpha_high"]
         ok &= check(high <= ALPHA_HIGH_MAX * max(1, col.n["hero"]),
                     f"hero.alpha >= 1 on {high}/{col.n['hero']} STATEs (long frames) {col.example.get('alpha_high', '')}")
