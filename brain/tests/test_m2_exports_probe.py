@@ -263,3 +263,27 @@ def test_fight_checks_need_hits_and_names(capsys):
     out = capsys.readouterr().out
     assert "FAIL  hero.tm.inv after a hit: the hero was never hit" in out
     assert "FAIL  collider names" in out and "FAIL  every nail hit" in out
+
+
+class StateLink:
+    """wait_state over one fixed STATE: the predicate holds at once or the wait times out."""
+
+    def __init__(self, state: dict):
+        self.state = state
+
+    def wait_state(self, pred, timeout_s: float = 10.0, newer_than: int | None = None) -> dict:
+        try:
+            if pred(self.state):
+                return self.state
+        except (KeyError, TypeError):
+            pass
+        raise TimeoutError("state condition not met")
+
+
+def test_dash_check_needs_a_dash(capsys):
+    hero = {"hero_accepting_input": True, "can": {"dash": False}}
+    assert not probe.can_dash(StateLink({"f": 1, "hero": hero}), timeout_s=0.0)
+    assert probe.can_dash(StateLink({"f": 1, "hero": hero | {"can": {"dash": True}}}), timeout_s=0.0)
+    assert not probe.can_dash(StateLink({"f": 1, "hero": {"hero_accepting_input": True}}), timeout_s=0.0)
+    probe.skip("tm.dash_cd after a dash")
+    assert capsys.readouterr().out == "SKIP  tm.dash_cd after a dash\n"

@@ -2,7 +2,7 @@
 
 > 2026-10-01。M2 跨模块决定 5 规定的 oracle 新导出：每个字段的来源成员、单位与时间基准，以及同批修复的"首次 Charge Emerge 没有碰撞体"问题。代码在 `oracle/src`，读取约定见 `brain/ssbot/ipc/ents.py`。所有新字段都是在原有 STATE 之上增加的键：旧录像里没有它们，Python 端一律用 `.get()` 读，缺失时按"未知"处理（决定 4：未知从不等于安全）。
 >
-> 游戏内验证：`brain/ssbot/probes/m2_exports.py`（实例 0，`bellbeast_arena`，逐项 PASS/FAIL）**尚未运行**（本轮禁止启动游戏）。离线已验证：所有新成员在 1.0.30000 中存在（`oracle/tools/symcheck`：630/630 个符号，41 个补丁签名 0 问题），纯逻辑部分（`tm.inv`、标签伤害、`room.gates` 满表替换、"hit" 嵌套、`act.hf` 恢复）见 `oracle/tests/EntitiesCheck`、`oracle/tests/InputLogicCheck`。探针没有覆盖的导出（本场战斗不产生它们）：`ApplyExtraDamage` 的命中（毒、电标签、`DamageEffectTicker`）、`hero.tags` 的条目、真实的 `hero.wall`、菜单 `sel` 的 "back" / "ok"、`menu.quitting` 为真；"yes" / "no" 只在可选的 `--quit-prompt` 步骤里读。
+> 游戏内验证：`brain/ssbot/probes/m2_exports.py`（实例 0，`bellbeast_arena`，逐项 PASS/FAIL）2026-10-02 运行（含菜单与一场战斗）：全部 PASS，只有 dash 一项 SKIP（该存档的英雄没有冲刺，`hero.can.dash` 为假）；首轮运行的两处失败（`ents[].hidden` 一帧未出现、静止时 `room.gates` 没有两扇门）的原因与修复见第 6、11 节。离线已验证：所有新成员在 1.0.30000 中存在（`oracle/tools/symcheck`：630/630 个符号，41 个补丁签名 0 问题），纯逻辑部分（`tm.inv`、标签伤害、`room.gates` 满表替换、"hit" 嵌套、`act.hf` 恢复）见 `oracle/tests/EntitiesCheck`、`oracle/tests/InputLogicCheck`。探针没有覆盖的导出（本场战斗不产生它们）：`ApplyExtraDamage` 的命中（毒、电标签、`DamageEffectTicker`）、`hero.tags` 的条目、真实的 `hero.wall`、菜单 `sel` 的 "back" / "ok"、`menu.quitting` 为真；"yes" / "no" 只在可选的 `--quit-prompt` 步骤里读。
 
 **约定。** 所有值都在第 f 帧的 `WaitForEndOfFrame` 采样，与该帧 STATE 的其他字段同一时刻。"缩放时间"指游戏时间（各计时器每帧减或加 `Time.deltaTime`，随 `Time.timeScale` 变慢、暂停时为 0）；"步"指 `FixedUpdate` 步（`Time.fixedDeltaTime` = 0.02 s，与 STATE 的 `fdt` 相同）或游戏读输入的帧，按游戏自己的计数方式。没有前缀的 `.cs` 在 `C:\ssbot\decomp\1.0.30000\Assembly-CSharp\` 下，`TK2D\` 指 `TeamCherry.TK2D\`。
 
@@ -153,4 +153,4 @@ STATE `room` 新增 `gates`（`oracle/src/SceneDump/GateWatch.cs`）。TERRAIN �
 | `act.hf` | 44 次数组读，44 个小整数 | ~0.3 µs |
 | 事件 `hit` | 只在命中时：前缀 2 次字段读，后缀构建字典与 2 次 `name` | 每秒几次 |
 
-合计约 5-10 µs/帧，约为单实例基线 p50 的 5-8%；4 实例负载下 p50 约 200 µs、p99 约 300 µs，仍在预算内。STATE 增大约 0.3-0.5 KB/帧（`act.hf` ~70 B、`hero.tm` ~150 B、gates 每项 ~60 B、每个碰撞体名 ~10 B）。实测数字等新插件部署后从 STATE `cost_ex` 读取。
+合计约 5-10 µs/帧，约为单实例基线 p50 的 5-8%；4 实例负载下 p50 约 200 µs、p99 约 300 µs，仍在预算内。STATE 增大约 0.3-0.5 KB/帧（`act.hf` ~70 B、`hero.tm` ~150 B、gates 每项 ~60 B、每个碰撞体名 ~10 B）。实测（2026-10-02，m2_exports 探针，单实例，7891 个 STATE，含暂停菜单与一场战斗）：`cost_us` p50 202 µs、p99 359 µs，在预算内；`cost_ex` p50/p99：`ents` 39/81 µs、`hero` 37/140、`hud` 45/84、`room` 7/11、`menu` 1/3。

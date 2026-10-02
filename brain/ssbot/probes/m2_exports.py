@@ -1,8 +1,9 @@
 """M2 oracle exports probe (cross-module decision 5; field list docs/facts/1.0.30000/state_fields_m2.md): on one
 training instance, load the Bell Beast savestate, check the new STATE fields at rest and in the pause menu, then play
 one Bell Beast episode (the encounter's intro through ssbot.train.episode.run_episode, a DataPolicy pinned to PRESS,
-mode "data" so LethalBlock keeps the hero alive) and check the combat fields. PASS/FAIL per check; exit 0 only if all
-pass. Never submits on Quit: Submit is sent only on a "continue" highlight read back from the oracle.
+mode "data" so LethalBlock keeps the hero alive) and check the combat fields. PASS/FAIL per check (SKIP for a check
+the save cannot exercise); exit 0 only if none fails. Never submits on Quit: Submit is sent only on a "continue"
+highlight read back from the oracle.
 
     cd brain
     ../scripts/uv.cmd run python -m ssbot.tools.launcher -n 1 --detach      # an instance running the new plugin
@@ -25,8 +26,9 @@ Checks:
          --quit-prompt (off by default): Submit on a "quit" read back from the oracle (with quit_ok true) opens the
          return-to-menu prompt; sel must read "yes" / "no" as Up / Down move between them, quitting stays false, and
          Esc (never Submit) leaves the prompt and then the menu.
-  moves  at rest, a left dash sets tm.dash_cd to ~DASH_COOLDOWN and it counts down to 0; a slash raises tm.atk_cd
-         and tm.atk_t; a jump raises tm.jump_steps (a FieldRef bound to the wrong member fails one of these).
+  moves  at rest, a left dash sets tm.dash_cd to ~DASH_COOLDOWN and it counts down to 0 (SKIP unless hero.can.dash:
+         the bellbeast_arena hero has no dash); a slash raises tm.atk_cd and tm.atk_t; a jump raises tm.jump_steps (a
+         FieldRef bound to the wrong member fails one of these).
   fight  hero.tm.inv ~1.0 right after a hit and non-increasing to 0 (unless hit again), recoil ~0.2 then 0; the boss
          is exported hidden (colliders []) while underground and never hidden once dead (hp <= 0 or Death
          Broadcast); its first Charge Emerge exports the body box (the tk2d hole fixed in
@@ -513,19 +515,39 @@ def _trace(link: OracleLink, col: Collector, buttons: int, hold: int, frames: in
     return [t for t in tr if t["f"] >= target - 1]
 
 
+def skip(what: str) -> None:
+    print(f"SKIP  {what}", flush=True)
+
+
+def can_dash(link: OracleLink, timeout_s: float = 2.0) -> bool:
+    """hero.can.dash (HeroController.CanDash) at rest; a dash cooldown from an earlier move clears within 0.425 s."""
+    try:
+        link.wait_state(lambda s: s["hero"]["hero_accepting_input"] and s["hero"]["can"]["dash"] is True,
+                        timeout_s=timeout_s)
+        return True
+    except TimeoutError:
+        return False
+
+
 def move_checks(link: OracleLink, col: Collector) -> bool:
-    """A dash, a slash and a jump at rest move their own timers (a FieldRef bound to another member would not)."""
+    """A dash, a slash and a jump at rest move their own timers (a FieldRef bound to another member would not). The
+    dash only where the hero can dash (the bellbeast_arena savestate's hero has no dash: hasDash false)."""
     ok = True
-    tr = _trace(link, col, mask("left", "dash"), 4, 60)
-    dash = [t["tm"].get("dash_cd") for t in tr if t["tm"].get("dash_cd") is not None]
-    peak = max(dash[:20], default=None)
-    after = dash[dash.index(peak):] if peak is not None else []
-    mono = all(b <= a + 1e-6 for a, b in zip(after, after[1:]))
-    # dashCooldownTimer is decremented while > 0 (HeroController.cs:2298-2300), so it ends a little below 0.
-    ok &= check(peak is not None and DASH_COOLDOWN - 0.1 <= peak <= DASH_COOLDOWN + 1e-3 and mono and after[-1] <= 0.0,
-                f"tm.dash_cd after a dash: peak {peak} (DASH_COOLDOWN {DASH_COOLDOWN}), non-increasing {mono}, "
-                f"ends {after[-1] if after else None}")
-    time.sleep(0.5)
+    if not can_dash(link):
+        can = ((link.state or {}).get("hero") or {}).get("can") or {}
+        skip(f"tm.dash_cd after a dash: hero.can.dash is {can.get('dash')!r} at rest (no dash in this save)")
+    else:
+        tr = _trace(link, col, mask("left", "dash"), 4, 60)
+        dash = [t["tm"].get("dash_cd") for t in tr if t["tm"].get("dash_cd") is not None]
+        peak = max(dash[:20], default=None)
+        after = dash[dash.index(peak):] if peak is not None else []
+        mono = all(b <= a + 1e-6 for a, b in zip(after, after[1:]))
+        # dashCooldownTimer is decremented while > 0 (HeroController.cs:2298-2300), so it ends a little below 0.
+        ok &= check(peak is not None and DASH_COOLDOWN - 0.1 <= peak <= DASH_COOLDOWN + 1e-3 and mono
+                    and after[-1] <= 0.0,
+                    f"tm.dash_cd after a dash: peak {peak} (DASH_COOLDOWN {DASH_COOLDOWN}), non-increasing {mono}, "
+                    f"ends {after[-1] if after else None}")
+        time.sleep(0.5)
     tr = _trace(link, col, mask("attack"), 3, 40)
     atk_cd = max((t["tm"].get("atk_cd") or 0.0 for t in tr), default=0.0)
     atk_t = max((t["tm"].get("atk_t") or 0.0 for t in tr), default=0.0)
