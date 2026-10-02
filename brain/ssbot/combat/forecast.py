@@ -164,7 +164,7 @@ class Forecast:
                 continue
             q = self._query(act, comfort)
             xs, ys, ts = x[:, sel], y[:, sel], tk[sel]
-            out[:, sel] = query_par(q, xs, ys, ts) if x.shape[0] >= 64 else q.query(xs, ys, ts)
+            out[:, sel] = query_par(q, xs, ys, ts)
         return out
 
     def occupied(self, x, y, tk, comfort: bool = False) -> np.ndarray:

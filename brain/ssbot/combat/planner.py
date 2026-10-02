@@ -16,7 +16,7 @@ reads oracle fields); `prefix` the commanded masks already sent for frames f+1 .
 f+P+1 and the rollout covers the prefix too (§3.5.4 `state_at(now + L)` on the executed command stream); `hold` the
 oracle HoldFilter state at f (STATE act.hf, exact), which the compiled hold filter (combat.holdfilter) continues.
 
-Per candidate (candidates.build: 21 first primitives x 22 continuations = 462, plus the previous plan carried on, plus
+Per candidate (candidates.build: 21 first primitives x 17 continuations = 357, plus the previous plan carried on, plus
 the Bind macro when the tactics want it, over a longer horizon):
   rollout   kinematics.rollout(variants="bounds"): the 9 timing lanes' per-frame hull (`bound`), the support form of
             the M2 kinematics acceptance; the nominal lane scores.
@@ -104,6 +104,57 @@ class PlanResult:
     hits: float = 0.0
 
 
+@numba.njit(cache=True)
+def _hull_points(bound, hx, hy, mp):
+    """Query points for hull boxes [N, T, 4]: X, Y [N + (mp*mp - 1) * R, T] (the first point of every frame, then
+    one layer per extra grid point for the R rows that have a frame wider than a point covers; NaN where a frame needs
+    fewer points), the row indices R and too_wide [N, T] (wider than mp points cover: counted as contact)."""
+    N, T = bound.shape[0], bound.shape[1]
+    gxs = np.ones((N, T), np.int64)
+    gys = np.ones((N, T), np.int64)
+    too_wide = np.zeros((N, T), np.bool_)
+    wide_row = np.zeros(N, np.bool_)
+    for n in range(N):
+        for t in range(T):
+            w = bound[n, t, 2] - bound[n, t, 0]
+            h = bound[n, t, 3] - bound[n, t, 1]
+            gx = int(np.ceil(w / (2 * hx) - 1e-9))
+            gy = int(np.ceil(h / (2 * hy) - 1e-9))
+            if gx > mp or gy > mp:
+                too_wide[n, t] = True
+            gx = min(max(gx, 1), mp)
+            gy = min(max(gy, 1), mp)
+            gxs[n, t] = gx
+            gys[n, t] = gy
+            if gx > 1 or gy > 1:
+                wide_row[n] = True
+    rows = np.flatnonzero(wide_row)
+    R = rows.shape[0]
+    L = mp * mp - 1
+    X = np.full((N + L * R, T), np.nan)
+    Y = np.full((N + L * R, T), np.nan)
+    for n in range(N):
+        for t in range(T):
+            X[n, t] = bound[n, t, 0] + 0.5 * (bound[n, t, 2] - bound[n, t, 0]) / gxs[n, t]
+            Y[n, t] = bound[n, t, 1] + 0.5 * (bound[n, t, 3] - bound[n, t, 1]) / gys[n, t]
+    for r in range(R):
+        n = rows[r]
+        for t in range(T):
+            gx, gy = gxs[n, t], gys[n, t]
+            w = bound[n, t, 2] - bound[n, t, 0]
+            h = bound[n, t, 3] - bound[n, t, 1]
+            layer = 0
+            for i in range(mp):
+                for j in range(mp):
+                    if i == 0 and j == 0:
+                        continue
+                    if i < gx and j < gy:
+                        X[N + layer * R + r, t] = bound[n, t, 0] + (i + 0.5) * w / gx
+                        Y[N + layer * R + r, t] = bound[n, t, 1] + (j + 0.5) * h / gy
+                    layer += 1
+    return X, Y, rows, too_wide
+
+
 class Planner:
     def __init__(self, params: HeroParams, terrain: Terrain2D, cfg: PlannerConfig | None = None):
         self.params = params
@@ -123,29 +174,18 @@ class Planner:
 
     def _contacts(self, f: Forecast, bound: np.ndarray, tk: np.ndarray, skip: np.ndarray, comfort: bool = False
                   ) -> np.ndarray:
-        """[N, T1] contact of the lanes' hull with the support, hull wider than a point covers: grid points."""
+        """[N, T1] contact of the lanes' hull with the support. A hull a point covers (the templates are dilated by
+        the hurtbox plus the margin) is tested at its centre; a wider one at a grid of 2 points along each wide axis
+        (sub-boxes the dilation covers), wider still counts as contact. One query: the first point of every frame,
+        plus extra layers for the rows with a wide frame (NaN where a frame needs fewer points: skipped)."""
         hx, hy = f.fc.half
-        x0, y0, x1, y1 = bound[..., 0], bound[..., 1], bound[..., 2], bound[..., 3]
-        cx, cy = 0.5 * (x0 + x1), 0.5 * (y0 + y1)
-        occ = f.occupied(cx, cy, tk, comfort)
-        w, h = x1 - x0, y1 - y0
-        nx = np.ceil(w / (2 * hx) - 1e-9).astype(np.int64)
-        ny = np.ceil(h / (2 * hy) - 1e-9).astype(np.int64)
-        wide = ((nx > 1) | (ny > 1)) & ~skip
-        if wide.any():
-            mp = self.cfg.max_points
-            occ |= wide & ((nx > mp) | (ny > mp))
-            rows = np.flatnonzero(wide.any(axis=1))
-            px, py = [], []
-            for i in range(mp):
-                for j in range(mp):
-                    fx = np.where(nx[rows] > 1, x0[rows] + (i + 0.5) * w[rows] / mp, cx[rows])
-                    fy = np.where(ny[rows] > 1, y0[rows] + (j + 0.5) * h[rows] / mp, cy[rows])
-                    px.append(fx)
-                    py.append(fy)
-            sub = f.occupied(np.concatenate(px), np.concatenate(py), tk, comfort).reshape(mp * mp, len(rows), -1
-                                                                                      ).any(axis=0)
-            occ[rows] |= sub & wide[rows]
+        X, Y, rows, too_wide = _hull_points(np.ascontiguousarray(bound), hx, hy, self.cfg.max_points)
+        hit = f.occupied(X, Y, tk, comfort)
+        N = bound.shape[0]
+        occ = hit[:N].copy()
+        if len(rows):
+            occ[rows] |= hit[N:].reshape(-1, len(rows), hit.shape[1]).any(axis=0)
+        occ |= too_wide
         occ &= ~skip
         occ[:, 0] = False
         return occ

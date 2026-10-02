@@ -40,7 +40,7 @@ def _query_par(bits, boff, imeta, fmeta, full, tk, xt, yt, out, chunks, pbox, cb
                     continue                    # the template's grid is nowhere near any candidate at this step
                 base = boff[p] + b * ny * rb
                 for n in range(c0, c1):
-                    if out[k, n]:
+                    if out[k, n] or xt[k, n] != xt[k, n]:     # done, or no point here (NaN)
                         continue
                     fx = mirror * (xt[k, n] - ax) * inv - ix0
                     fy = (yt[k, n] - ay) * inv - iy0
@@ -52,7 +52,7 @@ def _query_par(bits, boff, imeta, fmeta, full, tk, xt, yt, out, chunks, pbox, cb
 
 
 def query_par(q: SupportQuery, x, y, tk, chunks: int = CHUNKS) -> np.ndarray:
-    """[N, T] bool, the same as q.query(x, y, tk), candidates in parallel chunks."""
+    """[N, T] bool, the same as q.query(x, y, tk), candidates in parallel chunks; a NaN point is skipped (False)."""
     xt = np.ascontiguousarray(np.asarray(x, np.float64).T)
     yt = np.ascontiguousarray(np.asarray(y, np.float64).T)
     tk = np.ascontiguousarray(tk, np.float64)
@@ -68,6 +68,8 @@ def query_par(q: SupportQuery, x, y, tk, chunks: int = CHUNKS) -> np.ndarray:
         ax, ay = np.where(anch, fm[:, 3], 0.0), np.where(anch, fm[:, 4], 0.0)
         wx0, wx1 = ax + mir * gx0, ax + mir * gx1
         pbox = np.ascontiguousarray(np.stack([np.minimum(wx0, wx1), ay + gy0, np.maximum(wx0, wx1), ay + gy1], 1))
-        cbox = np.ascontiguousarray(np.stack([xt.min(axis=1), yt.min(axis=1), xt.max(axis=1), yt.max(axis=1)], 1))
+        cbox = np.ascontiguousarray(np.stack([np.fmin.reduce(xt, axis=1), np.fmin.reduce(yt, axis=1),
+                                              np.fmax.reduce(xt, axis=1), np.fmax.reduce(yt, axis=1)], 1))
+        cbox[np.isnan(cbox)] = 0.0       # a step with no point at all: nothing to test there anyway
         _query_par(q.bits, boff, im, fm, q.full, tk, xt, yt, out, min(chunks, max(1, xt.shape[1] // 8)), pbox, cbox)
     return np.ascontiguousarray(out.T)

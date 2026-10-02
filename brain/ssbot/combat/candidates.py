@@ -4,8 +4,8 @@ long moves as macro primitives).
 A candidate is a commanded button mask per frame over the horizon, built from a first primitive (frames 0-3, the part
 that is executed: the planner re-plans every frame) and a continuation (frames 4..T-1) that shows the first primitive
 leaves a safe way on. Front-dense: the continuations are a library of whole-horizon behaviours (stay, run, jump now
-or after a wait, attack, run then jump ...) rather than two more 4-frame levels, so 21 first primitives x 22
-continuations (462) stay within the 512-rollout budget while still holding the jump timings a charge or a rolling bell
+or after a wait, attack, run then jump ...) rather than two more 4-frame levels, so 21 first primitives x 17
+continuations (357) stay well within the 512-rollout budget while still holding the jump timings a charge or a rolling bell
 needs (the planner re-plans each frame, so finer timing comes from the next tick). A JUMP(h) holds jump h frames from
 its start whatever comes after (a committed hold; the kinematics' HoldFilter replays min press / release).
 
@@ -76,7 +76,9 @@ def _first_pieces() -> list[Piece]:
 def _continuations(T: int) -> list[Piece]:
     """Whole-horizon behaviours after the first primitive. Stops at several run lengths matter: with only "run to the
     end" and "wait, then run", a target 6 u away is reached without overshooting only by waiting first, and a plan
-    re-chosen every frame then waits forever (live run 20261002_033921: the hero stood 6 u from every Leap Land)."""
+    re-chosen every frame then waits forever (live run 20261002_033921: the hero stood 6 u from every Leap Land).
+    Pruned by use in 16 cleared episodes (run 20261002_042949, 122 k ticks: moving 24-frame jumps, run-then-jump and
+    the 16-frame wait-then-jump chosen in under 0.1 % of ticks each) to keep the tick in budget."""
     n = T - FIRST
     out = [Piece("idle", _seq(n), frozenset({Prim.WAIT}))]
     for d in ("L", "R"):
@@ -89,19 +91,14 @@ def _continuations(T: int) -> list[Piece]:
         m[:16] = DIRS[d]
         m[16:16 + PRESS] |= B_ATTACK
         out.append(Piece(f"run{d}16_attack", m, frozenset({Prim.MOVE, Prim.ATTACK_SIDE, Prim.WAIT})))
-    for h in (24, 48):
-        for d in ("N", "L", "R"):
+    for h, dirs in ((24, ("N",)), (48, ("N", "L", "R"))):
+        for d in dirs:
             m = _seq(n, DIRS[d])
             m[:h] |= B_JUMP
             out.append(Piece(f"jump{h}{d}", m, frozenset({Prim.JUMP} | ({Prim.MOVE} if d != "N" else set()))))
-    for d in ("L", "R"):
-        m = _seq(n, DIRS[d])
-        m[8:8 + 48] |= B_JUMP
-        out.append(Piece(f"run{d}8_jump", m, frozenset({Prim.JUMP, Prim.MOVE})))
-    for w in (8, 16):
-        m = _seq(n)
-        m[w:w + 48] |= B_JUMP
-        out.append(Piece(f"wait{w}_jump", m, frozenset({Prim.JUMP, Prim.WAIT})))
+    m = _seq(n)
+    m[8:8 + 48] |= B_JUMP
+    out.append(Piece("wait8_jump", m, frozenset({Prim.JUMP, Prim.WAIT})))
     m = _seq(n)
     m[2:2 + PRESS] |= B_ATTACK
     out.append(Piece("attack", m, frozenset({Prim.ATTACK_SIDE})))
@@ -144,7 +141,7 @@ def _bits(prims) -> int:
 
 
 def build(T: int = 48) -> CandidateSet:
-    """The standard set: every first primitive x every continuation (21 x 22 = 462 for T = 48)."""
+    """The standard set: every first primitive x every continuation (21 x 17 = 357 for T = 48)."""
     firsts, conts = _first_pieces(), _continuations(T)
     N = len(firsts) * len(conts)
     cmd = np.zeros((N, T), np.int64)
