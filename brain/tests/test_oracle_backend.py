@@ -377,8 +377,26 @@ def test_hit_amount_is_the_masks_taken_not_the_raw_argument():
     states[1]["hero"]["health"] = hp - 1
     hit = next(e.data for e in run(states)[1].events if e.kind == Ev.HIT_TAKEN)
     assert hit.amount == 1
-    # a cancelled hit (no HP change, no lethal block): nothing lost
-    hit = next(e.data for e in run(_hit_state([]))[1].events if e.kind == Ev.HIT_TAKEN)
+
+
+
+def test_a_rejected_take_damage_is_not_a_hit():
+    """A TakeDamage call a later gate rejected (downspike invulnerability on a pogo, HeroController.cs:5385): no
+    health, no recoil -> DAMAGE_BLOCKED (O), and the i-frame clock is not restarted. A 0-mask hit that puts the hero
+    into recoil (Warding Bell bind shield) is still a hit."""
+    states = _hit_state([], hazard="ENEMY", source="Bone Beast/PolyCollider")
+    bits = cstate.decode(states[1]["hero"]["cstate"], NAMES)
+    bits.update(recoiling=False, recoilFrozen=False, downSpikeBouncing=True)
+    states[1]["hero"]["cstate"] = cstate.encode(bits, NAMES)
+    b = OracleBackend(bosses=[BELL_BEAST], clock=None)
+    w = [b.feed(s) for s in states][1]
+    assert not [e for e in w.events if e.kind == Ev.HIT_TAKEN]
+    (blk,) = [e.data.d for e in w.events if e.kind == Ev.DAMAGE_BLOCKED]
+    assert blk["why"] == "pogo" and blk["end"] == "rejected"
+    assert b.m.hero.hit_t == -math.inf
+    bits.update(downSpikeBouncing=False, recoilFrozen=True)
+    states[1]["hero"]["cstate"] = cstate.encode(bits, NAMES)
+    hit = next(e.data for e in run(states)[1].events if e.kind == Ev.HIT_TAKEN)
     assert hit.amount == 0 and hit.amount_raw == 1
 
 

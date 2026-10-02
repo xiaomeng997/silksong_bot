@@ -371,19 +371,22 @@ class OracleBackend:
             m.fsm_entry.clear()
 
         derived: list[Event] = []
-        evs = s.get("ev") or ()
-        if any(ev.get("k") in ("damage", "special_damage") for ev in evs):
-            m.hero.hit_t = m.t_game       # the hit's i-frames start in the same STATE (StartRecoil)
+        evs = list(s.get("ev") or ())
         if not m.hit_events and any(ev.get("k") == "hit" for ev in evs):
             m.hit_events = True
         hd = s.get("hero")
+        cs = self._cs(hd["cstate"]) if hd else {}
         hp_prev = m.hero.hp_total
-        hero, res = self._hero(hd, p, f, derived)
+        hp_now = int(hd["health"]) + int(hd.get("health_blue") or 0) if hd and hd.get("health") is not None else None
+        taken = self._hits_taken(evs, cs, hp_prev, hp_now)
+        if taken:
+            m.hero.hit_t = m.t_game       # the hit's i-frames start in the same STATE (StartRecoil)
+        hero, res = self._hero(hd, cs, p, f, derived)
         if hero.mode.v != "hurt" or self._hero_clip is None:     # a hit landing while the hero is hurt was dealt
             self._hero_clip = ((hd or {}).get("anim") or {}).get("clip")    # by the action before (a spear in flight)
         hero_xy = hero.pos.v if hd else None
         ents, by_type = self._entities(s.get("ents") or (), f, hero_xy, derived)
-        oracle_events = self._events(evs, f, hero_xy, ents, by_type, hp_prev, m.hero.hp_total)
+        oracle_events = self._events(evs, f, hero_xy, ents, by_type, taken, cs)
         game = self._game(s, g, p, hd, f, t_real, derived)
 
         cam = self._cam(s.get("cam"))
@@ -419,13 +422,13 @@ class OracleBackend:
             return E("WALL_L" if facing < 0 else "WALL_R", conf=0.5, src=Src.PREDICTED)
         return E("AIR")
 
-    def _hero(self, h: dict | None, p: dict, f: int, out: list[Event]) -> tuple[HeroState, Resources]:
+    def _hero(self, h: dict | None, cs: dict[str, bool], p: dict, f: int, out: list[Event]
+              ) -> tuple[HeroState, Resources]:
         m, hm = self.m, self.m.hero
         if h is None:
             self.m.hero = _HeroMemory(hit_t=hm.hit_t)
             return HeroState(), Resources()
         t = m.t_game
-        cs = self._cs(h["cstate"])
         hm.dead = cs.get("dead", False)
         tx, ty = float(h["pos"][0]), float(h["pos"][1])
         vel = h.get("vel")
@@ -740,33 +743,53 @@ class OracleBackend:
             return max(0, hp_prev - hp_now)
         return 0
 
+    @classmethod
+    def _hits_taken(cls, evs: Sequence[dict], cs: dict[str, bool], hp_prev: int | None, hp_now: int | None
+                    ) -> dict[int, int]:
+        """Index of every "damage" / "special_damage" event that took effect -> the masks it took. The oracle's no-op
+        filter (HealthTap Blocked) mirrors only TakeDamage's i-frame gate; later gates return without effect too:
+        downspike invulnerability on a pogo, the parry window, evading, shadow dash, HAZARD_ONLY damage mode
+        (HeroController.cs:5374-5410). Live run i3_000: all 10 "damage" events with no health taken were pogo hits,
+        HP unchanged; trial run: 2 during a bind. A hit took effect when it took health, was a lethal hit LethalBlock
+        cancelled, or put the hero into recoil in its STATE with no other hit of the STATE taking health (0-mask
+        hits that go through: Warding Bell bind shield, Lucky Dice, cs:5413-5446). The others become DAMAGE_BLOCKED."""
+        n_hits = sum(ev.get("k") in ("damage", "special_damage") for ev in evs)
+        amounts: dict[int, int] = {}
+        for i, ev in enumerate(evs):
+            k = ev.get("k")
+            if k == "damage" or (k == "special_damage" and (ev.get("d") or {}).get("reached_special") is not False):
+                amounts[i] = cls._hit_amount(evs, i, n_hits, hp_prev, hp_now)
+        recoil = bool(cs.get("recoilFrozen") or cs.get("recoiling") or cs.get("hazardDeath") or cs.get("dead"))
+        zero_ok = recoil and not any(a > 0 for a in amounts.values())
+        return {i: a for i, a in amounts.items() if a > 0 or zero_ok or evs[i].get("k") == "special_damage"}
+
     def _events(self, evs: Sequence[dict], f: int, hero_xy: tuple[float, float] | None, ents: list[Entity],
-                by_type: dict[str, list[Entity]], hp_prev: int | None, hp_now: int | None) -> list[Event]:
+                by_type: dict[str, list[Entity]], taken: dict[int, int], cs: dict[str, bool]) -> list[Event]:
         m = self.m
         t = m.t_game
         out: list[Event] = []
-        evs = list(evs)
-        n_hits = sum(ev.get("k") in ("damage", "special_damage") for ev in evs)
         for i, ev in enumerate(evs):
             k = ev.get("k")
             d = ev.get("d") or {}
             fe = int(ev.get("f", f))
-            if k == "damage":
+            if k == "damage" and i not in taken:
+                why = "pogo" if any(cs.get(n) for n in _POGO + ("downSpiking",)) else                     "bind" if cs.get("isBinding") else "gate"
+                out.append(Event(Ev.DAMAGE_BLOCKED, fe, t, Info({
+                    "source": d.get("source"), "hazard": d.get("hazard"), "why": why, "n": 1,
+                    "amount": d.get("amount"), "end": "rejected"})))
+            elif k == "damage":
                 st, sid = self._resolve_source(d.get("source"), by_type, hero_xy)
-                m.hero.hit_t = t
                 raw = d.get("amount")
                 out.append(Event(Ev.HIT_TAKEN, fe, t, HitTaken(
-                    amount=self._hit_amount(evs, i, n_hits, hp_prev, hp_now),
-                    hazard=HAZARD_OF.get(str(d.get("hazard")), Hazard.OTHER),
+                    amount=taken[i], hazard=HAZARD_OF.get(str(d.get("hazard")), Hazard.OTHER),
                     source_type=st, source_id=sid, caller_path=d.get("source"),
                     amount_raw=int(raw) if raw is not None else None)))
             elif k == "special_damage":
-                if d.get("reached_special") is False:
+                if i not in taken:
                     continue
-                m.hero.hit_t = t
                 raw = d.get("amount")
                 out.append(Event(Ev.HIT_TAKEN, fe, t, HitTaken(
-                    amount=self._hit_amount(evs, i, n_hits, hp_prev, hp_now), hazard=Hazard.OTHER, source_type=None,
+                    amount=taken[i], hazard=Hazard.OTHER, source_type=None,
                     caller_path=d.get("fsm") or d.get("method"), amount_raw=int(raw) if raw is not None else None)))
             elif k == "hit":
                 out.extend(self._hit_dealt(d, fe, t))
