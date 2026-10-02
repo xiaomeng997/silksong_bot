@@ -137,6 +137,7 @@ class PlanResult:
     alternatives: list = field(default_factory=list)
     tail_ok: bool | None = None             # the chosen plan's end has a safe way on beyond the horizon (None: unchecked)
     attacks: list | None = None             # its attack predictions at a press (Planner._predict_attacks)
+    best_up: tuple | None = None            # the best plan with an up-slash: (name, S, V, J, hits)
     attack: tuple | None = None             # its first attack scored as a hit: (kind, start frame, predicted boss box
     #                                         [x0, y0, x1, y1] at the active frame) for the whiff audit
     vetoes: dict = field(default_factory=dict)
@@ -202,6 +203,7 @@ class Planner:
         self.cands = cmod.build(self.cfg.T)
         self.cands_nc = cmod.no_control(self.cands)
         self.cands_long = cmod.build_long(self.cfg.T_long)
+        self._has_up = ((self.cands.cmd & B_UP) != 0).any(axis=1) & ((self.cands.cmd & B_ATTACK) != 0).any(axis=1)
         self.tails = cmod.tails(self.cfg.T)
         self.bind = cmod.bind_macro(self.cfg.T_bind)
         self.reset()
@@ -358,6 +360,11 @@ class Planner:
                              bool(hz[i]), bool(U[i]), N, int(ok.sum()), int(safe.sum()), sel_cmd,
                              roll.box[i].copy(), roll.bound[i].copy(), hits=float(hits[i]))
             res.tail_ok = tail_ok
+            # the best plan with an up-slash in it, beside the chosen one (why an up-slash loses, when it does)
+            up_rows = np.flatnonzero(self._has_up[:N0]) if len(self._has_up) >= N0 and cs is self.cands else []
+            if len(up_rows):
+                bu = int(up_rows[np.lexsort((-J[up_rows], S[up_rows]))[0]])
+                res.best_up = (cs.name(bu), int(S[bu]), bool(V[bu]), round(float(J[bu]), 2), float(hits[bu]))
             fh, fk, bb = self._audit
             if fh[i] >= 0 and len(bb):
                 jj = min(int(fh[i]) + {1: 3, 2: 5, 3: 8, 4: 18}[int(fk[i])], len(bb) - 1)

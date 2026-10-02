@@ -102,6 +102,15 @@ def _continuations(T: int) -> list[Piece]:
     m = _seq(n)
     m[2:2 + PRESS] |= B_ATTACK
     out.append(Piece("attack", m, frozenset({Prim.ATTACK_SIDE})))
+    # an up-slash after the first piece (a jump's rise, up into a leaping boss): with a side key held, as the up edge
+    # alone starts an interaction. Without it a jump could only be followed by a side slash in one plan, and the
+    # person saw Hornet jump and slash sideways under every leap
+    for d in ("L", "R"):
+        for w in (2, 10):
+            m = _seq(n)
+            m[w:w + 6] = DIRS[d] | B_UP
+            m[w + 1:w + 1 + PRESS] |= B_ATTACK
+            out.append(Piece(f"upatk{w}{d}", m, frozenset({Prim.ATTACK_UP, Prim.MOVE})))
     return out
 
 
