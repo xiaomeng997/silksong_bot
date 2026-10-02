@@ -214,6 +214,18 @@ def build_long(T: int) -> CandidateSet:
                         T)
 
 
+def tails(T: int) -> np.ndarray:
+    """[6, T] commanded masks for the ways on after a plan's end (Planner._tail_pick): stay, run left, run right, a
+    full jump in place, to the left, to the right."""
+    out = np.zeros((6, T), np.int64)
+    out[1] = B_LEFT
+    out[2] = B_RIGHT
+    for i, d in ((3, 0), (4, B_LEFT), (5, B_RIGHT)):
+        out[i] = d
+        out[i, :48] |= B_JUMP
+    return out
+
+
 def truncate(cs: CandidateSet, T: int) -> CandidateSet:
     """The same candidates over their first T frames."""
     return CandidateSet(cs.cmd[:, :T], cs.first, cs.cont, cs.first_names, cs.cont_names, cs.prim_bits, cs.bind, T)

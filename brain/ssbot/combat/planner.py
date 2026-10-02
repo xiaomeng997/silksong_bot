@@ -9,6 +9,8 @@ latest first contact > max J; FORCED_RISK when no allowed candidate has S = 0.
 - Comfort is S again against templates grown by a further margin: among safe plans the ones with clearance win,
   whatever they score (live run 20261002_035118: a plan safe by millimetres in the air over a rolling attack bell lost
   all 26 safe continuations in one frame of drift, and the bell hit).
+- Beyond the horizon: of the 2 best safe plans, the first whose end state keeps a safe way on over 0.8 s more (stay,
+  run, jump) is chosen (Planner._tail_pick; a punish that ended under a bouncing drop bell, run 20261002_052118).
 - Adaptive horizon (M2 plan): when the tactics ask for more than T frames (a committed charge), the dodge set
   candidates.build_long rolls out to the end of the attack, up to 2 s (live run 20261002_045049: with 0.8 s, jumps
   that cleared a charge's front half came down on its back half, 5 hits).
@@ -78,6 +80,7 @@ DOWN = (-0.69, 1.41, -1.96, 0.32)
 SPEAR = (0.3, 11.0, -0.8, 0.8)
 SPEAR_DELAY_F = 16             # Silkspear antic 0.26 s before the needle flies
 ACTIVE_F = 6                   # frames an attack box counts from its start (scoring)
+TAIL_CHUNK = 2                # candidates per tail check batch
 COMFORT_FRAMES = 48           # the comfort check covers the whole horizon (24 frames: run 20261002_045049 hits)
 NO_CONTROL_MODES = (kin.M_HURT_FREEZE, kin.M_HURT_RECOIL, kin.M_CAST, kin.M_BIND, kin.M_LOCKED)
 
@@ -90,6 +93,7 @@ class PlannerConfig:
     threads: int = 4
     variants: str = "bounds"
     max_points: int = 2        # grid points per axis for a hull wider than one point covers
+    tail_k: int = 2            # safe candidates checked for a way on beyond the horizon (0: off; one chunk)
 
 
 @dataclass
@@ -112,6 +116,7 @@ class PlanResult:
     hull: np.ndarray | None = None
     t_ms: dict = field(default_factory=dict)
     alternatives: list = field(default_factory=list)
+    tail_ok: bool | None = None             # the chosen plan's end has a safe way on beyond the horizon (None: unchecked)
     vetoes: dict = field(default_factory=dict)
     hits: float = 0.0
 
@@ -175,6 +180,7 @@ class Planner:
         self.cands = cmod.build(self.cfg.T)
         self.cands_nc = cmod.no_control(self.cands)
         self.cands_long = cmod.build_long(self.cfg.T_long)
+        self.tails = cmod.tails(self.cfg.T)
         self.bind = cmod.bind_macro(self.cfg.T_bind)
         self.reset()
 
@@ -183,6 +189,7 @@ class Planner:
         self.prev_name = ""
         self.ticks = 0
         self.jump_until = -1          # tick until which the pressed jump's hold schedule is committed
+        self.prev_tail_ok = False
 
     # ---- S -----------------------------------------------------------------------------------------------------------
 
@@ -232,7 +239,7 @@ class Planner:
         if cont:
             ok = np.append(ok, bool(ctx.allowed_mask.all()) or self._prev_allowed(ctx))
             why = np.append(why, 0 if ok[-1] else 1)
-        latched, _ = hold_filter_jit(full, hold)
+        latched, hold_end = hold_filter_jit(full, hold)
         t1 = time.perf_counter()
         roll = kin.rollout(start, latched, params, self.terrain, variants=cfg.variants, threads=cfg.threads)
         t2 = time.perf_counter()
@@ -294,11 +301,19 @@ class Planner:
             order = np.lexsort((-J, -t_hit, Pc, ~V, S2, ~keep, S, U, hz_soft, hz))
             order = order[ok[order]]
             i = int(order[0])
+            tail_ok = None
+            carried = cont and i == N - 1 and self.prev_tail_ok
+            if not forced and T <= cfg.T and cfg.tail_k > 0 and not carried:
+                i, tail_ok = self._tail_pick(f, roll, hold_end, order[safe[order]], P + T, i)
+            elif carried:
+                tail_ok = True                     # the plan kept from last tick passed its check then
+            self.prev_tail_ok = bool(tail_ok)
             sel_cmd = cmd[i]
             name = "CONTINUE" if cont and i == N - 1 else cs.name(i)
             res = PlanResult(int(sel_cmd[0]), i, name, int(S[i]), forced, float(Pc[i]), float(J[i]), bool(V[i]),
                              bool(hz[i]), bool(U[i]), N, int(ok.sum()), int(safe.sum()), sel_cmd,
                              roll.box[i].copy(), roll.bound[i].copy(), hits=float(hits[i]))
+            res.tail_ok = tail_ok
             for j in order[1:6]:
                 nm = "CONTINUE" if cont and j == N - 1 else cs.name(int(j))
                 res.alternatives.append((nm, int(S[j]), round(float(Pc[j]), 3), round(float(J[j]), 2)))
@@ -332,6 +347,36 @@ class Planner:
         if m & B_BIND:
             need.append(Prim.BIND)
         return all(ctx.allowed_mask[int(p)] for p in need)
+
+    # ---- beyond the horizon ----------------------------------------------------------------------------------------
+
+    def _tail_pick(self, f: Forecast, roll, hold_end: HoldState, ranked: np.ndarray, T0: int, default: int
+                   ) -> tuple[int, bool | None]:
+        """V beyond the horizon: of the best tail_k safe candidates (in the lexicographic order), the first whose end
+        state still has a safe way on over a further T frames (stay, run either way, a full jump in place or either
+        way), so that a plan does not end where the next threat leaves no escape (live run 20261002_052118: a punish
+        ended under a drop bell that bounced 1.2-2.8 s after arming, beyond the 0.8 s horizon). None of them: the
+        default choice, flagged (tail_ok False)."""
+        K = int(min(self.cfg.tail_k, len(ranked)))
+        if K == 0:
+            return default, None
+        tails = self.tails
+        nt = len(tails)
+        tk = (T0 + np.arange(tails.shape[1] + 1, dtype=np.float64)) * self.params.frame_time
+        for c0 in range(0, K, TAIL_CHUNK):          # the best first: usually the first chunk settles it
+            rows = ranked[c0:min(K, c0 + TAIL_CHUNK)]
+            k = len(rows)
+            start = np.repeat(roll.final[:, rows], nt, axis=1)
+            hs = HoldState(*(np.repeat(np.asarray(a)[rows], nt, axis=0)
+                             for a in (hold_end.latched, hold_end.desired, hold_end.pending, hold_end.age)))
+            latched, _ = hold_filter_jit(np.tile(tails, (k, 1)), hs)
+            tr = kin.rollout(start, latched, self.params, self.terrain, variants=self.cfg.variants,
+                             threads=self.cfg.threads)
+            occ = self._contacts(f, tr.bound, tk, np.zeros((k * nt, tails.shape[1] + 1), bool))
+            ok = (~occ.any(axis=1)).reshape(k, nt).any(axis=1)
+            if ok.any():
+                return int(rows[int(np.argmax(ok))]), True
+        return default, False
 
     # ---- the Bind macro ------------------------------------------------------------------------------------------
 
