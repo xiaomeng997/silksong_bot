@@ -1,6 +1,6 @@
 {
  "build": "1.0.30000",
- "source": "derived from the decompiled HeroControllerStates (public bool/int instance fields, declaration order); the oracle sorts by metadata token, the same order for this class. Verify against RPC schema.cstate (ssbot.tools.cstate) when an instance is free.",
+ "source": "derived from the decompiled HeroControllerStates (public bool/int instance fields, declaration order); verified equal to the oracle RPC schema.cstate on 2026-10-01 (ssbot.probes.community_check).",
  "bools": [
   "facingRight",
   "onGround",

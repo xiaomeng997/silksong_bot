@@ -244,3 +244,10 @@
 - 沙盒外写入 0；需复核 0；PlayerPrefs 运行中只变 Screenmanager 键，结束恢复 golden；WHEA 硬件错误 0。
 
 **M1 验收项至此全部有结果**：60 min 录制交付 100 %；STATE 构建 p50 约 80–150 µs、p99 约 130–280 µs（≤ 300 / 1000 µs）；帧时间 p99 +0.107 ms（≤ +0.5 ms）；投影 IoU p5 0.998、顶点 p99 0.0003 px；对齐（帧标记）100 %；4 实例 12 h soak PASS；重置 ≤ 2 s；沙盒外 0 写入；LethalBlock 单元测试全过。未完成：P13 结局探针（需要社区 GMS savestate）。
+
+## M2：社区 savestate 与 cstate 字段表（2026-10-01）
+
+- vichisuki 的 savestate（为 1.0.29315 制作，固定在提交 `0557f703fa25`）在 1.0.30000 训练副本上读档可用：抽查 9 个 boss 页（Bell Beast、Lace 1、Widow、Last Judge、Dancers、Trobbio、High Halls/Forum 前、Lace 2 电梯、GMS），全部落在文件记录的场景和位置，读档 0.4–0.9 s（`ssbot.probes.community_check`）。全程 5 面具、Hunter。
+- `docs/facts/1.0.30000/cstate_schema.json`（从反编译源码推出的 HeroControllerStates 字段顺序，92 bool + 4 int）与 oracle RPC `schema.cstate` 完全一致。
+- 读档后游戏可能还要把主角滑回 savestate 位置：最多 17 帧、每帧约 0.63 u，期间速度为 0、`hero_accepting_input` 和 `can.cast` 均为真；Bell Beast 首轮数据中 85 个开场里有 4 个在这段时间按丝矛被吞。回合框架改为等主角位置连续 10 帧不变再开始（`ssbot.train.episode.wait_settled`）。
+- Bell Beast 行为采集首轮（`20261001_122249`，4 实例 3.5 h，data 策略）：263 场打到苏醒，241 CLEAR、22 超时（240 s），开场失败 17 场（旧代码）；每场约 175 s；四类攻击各 ≥ 200 次（狂暴 263）。
