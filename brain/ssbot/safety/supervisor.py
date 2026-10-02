@@ -10,10 +10,14 @@ primitive allowlist the planner and tactics must obey. Pure logic, 60 Hz: one Su
     # training: ssbot.train.supervision.SupervisedControl does this per STATE
 
 Support is explicit (cross-module decision 4). `support` is what the forecaster puts in support for this frame, and
-`support_known` says whether the producer certifies it as a superset of what can land. Unknown support (the default:
-a missing forecast, a dropped track, an untracked enemy) adds an "unknown" event of max(1, the encounter's worst known
-damage, the worst damage taken this attempt) that the mask may not cover, makes Q3 fire at h = 2 and keeps the tier
-below GREEN: unknown is never safe, and hits_to_death's UNBOUNDED (nothing can hurt) needs a certified empty support.
+`support_known` says whether the producer certifies it as a superset of what can land; nothing is inferred from the
+support's type or length. An empty support counts as certified only with support_empty_ok as well (a forecaster
+dropout that returns no events must not read as "nothing can hurt"). Unknown support (the default: a missing forecast,
+a dropped track, an untracked enemy) adds an "unknown" event of max(1, the encounter's worst known damage, the worst
+damage taken this attempt) that the mask may not cover, makes Q3 fire at h = 2 and keeps the tier below GREEN: unknown
+is never safe, and hits_to_death's UNBOUNDED (nothing can hurt) needs that certified empty support.
+worst_known_damage has no default: every caller states the encounter's worst single event (Bell Beast 2, from the
+11 676 logged hits; a default of 1 made an unknown support at 3 HP read h = 3 with no Q3 against Bell Beast).
 A frame without a hero (STATE "hero" missing: loads, the main menu) is unknown, not 0 HP: h is taken from the last
 known hero, and Q5 fires once the hero has been missing for hero_lost_ms with h <= 2 or never seen.
 
@@ -65,7 +69,7 @@ import numpy as np
 from ssbot.core.primitives import ALL, DAMAGING, EVASIVE, N_PRIM, Prim
 from ssbot.core.primitives import code as prim_code
 from ssbot.safety.hits_to_death import (MASK_UNKNOWN, SupportEvent, ctx_from_support, hits_to_death,
-                                        mask_intact, mask_state)
+                                        mask_intact, mask_state, pending_from_tags)
 from ssbot.safety.invariants import Verdict
 from ssbot.safety.pause_quit import availability_from_state
 
@@ -90,6 +94,8 @@ PARRY_VISION_MIN = 0.995       # vision G1 success on the attack's tell
 
 @dataclass(slots=True)
 class SupervisorConfig:
+    worst_known_damage: int                    # the encounter's / scene's worst single event (Bell Beast 2): the
+    #                                            floor of an unknown support's D1; required, no default
     q2_escape_s: float = 0.2
     q4_unpredicted_hits: int = 2
     risk_factor: float = 2.0
@@ -99,8 +105,6 @@ class SupervisorConfig:
     hud_unreadable_ms: float = 100.0
     hero_lost_ms: float = 300.0
     tear_frames: int = 3
-    worst_known_damage: int = 1                # the encounter's / scene's worst single event (Bell Beast 2): the
-    #                                            floor of an unknown support's D1
     unknown_mask_covers: bool = False          # may the Fractured Mask be trusted against an unknown threat (grabs ...)
     evade_exit_timeout_s: float = 20.0
     hooks: tuple[Callable[["SupervisorInput"], Iterable[str]], ...] = ()
@@ -116,6 +120,7 @@ class SupervisorInput:
     mask: str = MASK_UNKNOWN                   # hits_to_death.MASK_* (audit)
     support: Sequence[SupportEvent] = ()       # worst events of the in-support threat tubes now
     support_known: bool = False                # the producer certifies `support` as a superset of what can land
+    support_empty_ok: bool = False             # ... and, when `support` is empty, certifies that nothing can land
     pending_dmg: int = 0
     pending_mask_covers: bool = False
     plan_s: int | None = None                  # S of the chosen plan (0/1); None: no plan yet (treated as S = 1)
@@ -194,19 +199,17 @@ class SupervisorDecision:
             m[int(p)] = True
         return m
 
-    @property
-    def forbidden(self) -> frozenset[Prim]:
-        return ALL - self.allowed
 
-
-def input_from_state(s: dict, t: float, support: Sequence[SupportEvent] | None = None,
-                     support_known: bool | None = None, foreground_sink: bool = False, **kw) -> SupervisorInput:
+def input_from_state(s: dict, t: float, support: Sequence[SupportEvent] | None = None, *, support_known: bool,
+                     support_empty_ok: bool = False, foreground_sink: bool = False, **kw) -> SupervisorInput:
     """Oracle mode (training): the SupervisorInput fields STATE answers exactly (health, blue, max health, the audited
     Fractured Mask, pending DamageTag damage from hero.tags when exported, pause / quit availability from the
-    PauseGate, the scene, damage taken this frame). A missing hero section leaves hp None (unknown). support None means
-    unknown; a sequence is certified unless support_known says otherwise. focus counts only with a foreground sink
-    (SendInput / Pico); under OracleInjectSink the training instances run unfocused. Planner fields (plan_s,
-    forced_risk, ...) come from the caller."""
+    PauseGate, the scene, damage taken this frame). A missing hero section leaves hp None (unknown). support_known is
+    required and never inferred: support None is unknown whatever it says, and an empty support needs support_empty_ok
+    too (Supervisor.support_certified). hero.tags dmg_left -1 (no hit limit) or unreadable is lethal pending damage
+    (hits_to_death.pending_from_tags). focus counts only with a foreground sink (SendInput / Pico); under
+    OracleInjectSink the training instances run unfocused. Planner fields (plan_s, forced_risk, ...) come from the
+    caller."""
     hero = s.get("hero")
     hp = max_hp = None
     blue, mask, pending = 0, MASK_UNKNOWN, 0
@@ -215,16 +218,15 @@ def input_from_state(s: dict, t: float, support: Sequence[SupportEvent] | None =
         max_hp = int(hero["max_health"]) if hero.get("max_health") is not None else None
         blue = int(hero.get("health_blue") or 0)
         mask = mask_state(hero.get("fractured_mask"))
-        tags = hero.get("tags")
-        if tags:
-            pending = sum(int(g.get("dmg_left") or 0) for g in tags if isinstance(g, dict))
+        pending, _ = pending_from_tags(hero.get("tags"), hp, blue)
     avail = availability_from_state(s) if s.get("pause") else None
     dmg = sum(int((ev.get("d") or {}).get("amount") or 0) for ev in s.get("ev") or () if ev.get("k") == "damage")
     base = dict(t=t, dt=float(s.get("udt") or 1 / 60), hp=hp, max_hp=max_hp, blue=blue, mask=mask,
-                support=tuple(support or ()), support_known=support is not None if support_known is None
-                else support_known, pending_dmg=pending, damage_taken=dmg,
-                pausable=None if avail is None else avail.pause, quittable=None if avail is None else avail.quit,
-                scene=(s.get("game") or {}).get("scene"), focus_lost=foreground_sink and s.get("focus") is False)
+                support=tuple(support or ()), support_known=support is not None and bool(support_known),
+                support_empty_ok=support is not None and bool(support_empty_ok), pending_dmg=pending,
+                damage_taken=dmg, pausable=None if avail is None else avail.pause,
+                quittable=None if avail is None else avail.quit, scene=(s.get("game") or {}).get("scene"),
+                focus_lost=foreground_sink and s.get("focus") is False)
     base.update(kw)
     return SupervisorInput(**base)
 
@@ -285,8 +287,8 @@ class Supervisor:
     """Per-attempt state: risk integral, unpredicted hits, the last known hero, and the PAUSE_PENDING / Q4 /
     EVADE_EXIT latches."""
 
-    def __init__(self, cfg: SupervisorConfig | None = None):
-        self.cfg = cfg or SupervisorConfig()
+    def __init__(self, cfg: SupervisorConfig):
+        self.cfg = cfg
         self.reset()
 
     def reset(self) -> None:
@@ -337,15 +339,20 @@ class Supervisor:
             self.never_seen_s += inp.dt
         return self.hero
 
-    def _support(self, inp: SupervisorInput) -> tuple[SupportEvent, ...]:
+    @staticmethod
+    def support_certified(inp: SupervisorInput) -> bool:
+        """The support is known: certified by its producer, and when empty, certified empty as well."""
+        return inp.support_known and (len(inp.support) > 0 or inp.support_empty_ok)
+
+    def _support(self, inp: SupervisorInput, known: bool) -> tuple[SupportEvent, ...]:
         ev = tuple(inp.support)
-        if inp.support_known:
+        if known:
             return ev
         floor = max(1, self.cfg.worst_known_damage, self.worst_seen, max((e.damage for e in ev), default=0))
         return ev + (SupportEvent(UNKNOWN_SOURCE, floor, mask_covers=self.cfg.unknown_mask_covers),)
 
-    def _triggers(self, inp: SupervisorInput, h: int | None, hero: _Hero | None,
-                  support: Sequence[SupportEvent]) -> list[tuple[str, str]]:
+    def _triggers(self, inp: SupervisorInput, h: int | None, hero: _Hero | None, support: Sequence[SupportEvent],
+                  known: bool) -> list[tuple[str, str]]:
         cfg = self.cfg
         out: list[tuple[str, str]] = []
         if h is not None and h <= 1:
@@ -354,7 +361,7 @@ class Supervisor:
             out.append(("Q2", "I2 broken, no escape within "
                               f"{cfg.q2_escape_s} s" + ("" if inp.escape_s is None else f" ({inp.escape_s:.2f} s)")))
         if h == 2:
-            why = q3_threat(support, inp.support_known)
+            why = q3_threat(support, known)
             if why:
                 out.append(("Q3", f"h = 2 and {why}"))
         if self.unpredicted >= cfg.q4_unpredicted_hits:
@@ -419,7 +426,8 @@ class Supervisor:
         cfg = self.cfg
         self.worst_seen = max(self.worst_seen, inp.damage_taken)
         hero = self._hero(inp)
-        support = self._support(inp)
+        known = self.support_certified(inp)
+        support = self._support(inp, known)
         h = None
         if hero is not None:
             ctx = ctx_from_support(support, inp.pending_dmg, inp.pending_mask_covers)
@@ -427,14 +435,14 @@ class Supervisor:
         self.risk_integral += max(0.0, inp.p_death)
         self.unpredicted += max(0, inp.unpredicted_hits)
 
-        fired = self._triggers(inp, h, hero, support)
+        fired = self._triggers(inp, h, hero, support, known)
         evade_end = self._evade_latch(inp)
         if evade_end is not None:
             fired.append(("EVADE_EXIT", f"ended: {evade_end}"))
         ids = {tid for tid, _ in fired}
         reasons = [f"{tid}: {why}" for tid, why in fired]
         ids.discard("EVADE_EXIT")
-        tier0 = base_tier(h, inp.plan_s, inp.support_known)
+        tier0 = base_tier(h, inp.plan_s, known)
 
         if "Q9" in ids:
             self.alerted = True
@@ -442,7 +450,7 @@ class Supervisor:
                 tier=RED, h=h, pause_pending=False, quit_requested=False, on_paused=None, allowed=NOTHING,
                 restrictions=Restrictions(), triggers=tuple(sorted(ids)), reasons=tuple(reasons), paused=self.paused,
                 stop_input=True, release_all=True, alert=True, risk_integral=self.risk_integral,
-                unpredicted_hits=self.unpredicted, support_known=inp.support_known, hero_known=inp.hp is not None,
+                unpredicted_hits=self.unpredicted, support_known=known, hero_known=inp.hp is not None,
                 evade_exit=self.evade is not None)
 
         if not self.paused:
@@ -492,7 +500,7 @@ class Supervisor:
             alert=self.alerted or self.on_paused == DIAGNOSE, mark_retrain=self.q4 is not None,
             conservative_variant=self.q4 is not None,
             long_planning_ok=tier == GREEN and not self.pending and (not inp.in_encounter or inp.in_safe_window),
-            risk_integral=self.risk_integral, unpredicted_hits=self.unpredicted, support_known=inp.support_known,
+            risk_integral=self.risk_integral, unpredicted_hits=self.unpredicted, support_known=known,
             hero_known=inp.hp is not None, evade_exit=self.evade is not None)
 
 

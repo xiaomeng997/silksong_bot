@@ -4,13 +4,17 @@ numbers: 5 masks, every attack 2 masks; the boss root iid 529544 (trial run 2026
 import ast
 from pathlib import Path
 
-from ssbot.core.primitives import ALL, DAMAGING, EVASIVE, N_PRIM, Prim
+import pytest
+
+from ssbot.core.primitives import DAMAGING, EVASIVE, N_PRIM, Prim
 from ssbot.safety import supervisor as sv
 from ssbot.safety.hits_to_death import MASK_INTACT, MASK_NONE, UNBOUNDED, SupportEvent
 from ssbot.safety.supervisor import Supervisor, SupervisorConfig, SupervisorInput
 
 BODY = SupportEvent("Bone Beast", 2, instance=529544)
 BELL_L = SupportEvent("BoneBeast DropBell L", 2, instance=529628)
+BB = SupervisorConfig(worst_known_damage=2)          # Bell Beast: every attack is 2 masks
+W1 = SupervisorConfig(worst_known_damage=1)
 
 
 def _inp(**kw) -> SupervisorInput:
@@ -20,7 +24,7 @@ def _inp(**kw) -> SupervisorInput:
 
 
 def test_tiers_from_h_and_plan():
-    s = Supervisor()
+    s = Supervisor(BB)
     d = s.step(_inp())
     assert (d.tier, d.h, d.pause_pending, d.triggers) == ("GREEN", 3, False, ())
     assert d.long_planning_ok and d.allows("ATTACK(side)") and d.allows("SILKSKILL(1)")
@@ -36,7 +40,7 @@ def test_tiers_from_h_and_plan():
 
 
 def test_q1_low_h_is_a_sticky_pause_pending_quit():
-    s = Supervisor()
+    s = Supervisor(BB)
     d = s.step(_inp(hp=2))
     assert d.tier == "RED" and "Q1" in d.triggers and d.pause_pending and d.quit_requested
     assert d.allowed == EVASIVE
@@ -52,41 +56,41 @@ def test_q1_low_h_is_a_sticky_pause_pending_quit():
     assert d.pause_pending and d.tier == "RED" and d.quit_requested
     s.notify_paused()
     d = s.step(_inp(hp=5))
-    assert d.paused and not d.pause_pending and d.allowed == frozenset() and d.forbidden == ALL
+    assert d.paused and not d.pause_pending and d.allowed == frozenset()
     assert not d.allowed_mask.any()
 
 
 def test_allowed_mask_matches_the_allowlist():
-    d = Supervisor().step(_inp(hp=4, next_hit_may_kill=True))
+    d = Supervisor(BB).step(_inp(hp=4, next_hit_may_kill=True))
     m = d.allowed_mask
     assert m.shape == (N_PRIM,) and m.dtype == bool
     assert {Prim(i) for i in range(N_PRIM) if m[i]} == set(d.allowed)
 
 
 def test_q1_fractured_mask_just_broken_at_one_hp():
-    s = Supervisor()
+    s = Supervisor(BB)
     assert s.step(_inp(hp=1, mask=MASK_INTACT)).h == 2
-    d = Supervisor().step(_inp(hp=1, mask=MASK_NONE))
+    d = Supervisor(BB).step(_inp(hp=1, mask=MASK_NONE))
     assert "Q1" in d.triggers
 
 
 def test_q2_i2_without_escape():
-    assert "Q2" not in Supervisor().step(_inp(i2_violated=True, escape_s=0.15)).triggers
-    d = Supervisor().step(_inp(i2_violated=True, escape_s=0.35))
+    assert "Q2" not in Supervisor(BB).step(_inp(i2_violated=True, escape_s=0.15)).triggers
+    d = Supervisor(BB).step(_inp(i2_violated=True, escape_s=0.35))
     assert "Q2" in d.triggers and d.quit_requested
-    assert "Q2" in Supervisor().step(_inp(i2_violated=True, escape_s=None)).triggers
+    assert "Q2" in Supervisor(BB).step(_inp(i2_violated=True, escape_s=None)).triggers
 
 
 def test_q3_h2_with_dangerous_support():
     # 3 HP vs the body alone: h = 2, a single covered 2-mask source: YELLOW, not Q3
-    d = Supervisor().step(_inp(hp=3))
+    d = Supervisor(BB).step(_inp(hp=3))
     assert d.h == 2 and d.tier == "YELLOW" and not d.triggers
     for support in ((BODY, BELL_L),                                      # two instances
                     (SupportEvent("Lace", 2, hits=2),),                  # 1+1
                     (SupportEvent("spikes", 1, hazard=True), BODY),
                     (SupportEvent("Maul", 2, mask_covers=False),),
                     (SupportEvent("Judge", 1, critical=True), BODY)):
-        d = Supervisor().step(_inp(hp=3, support=support))
+        d = Supervisor(BB).step(_inp(hp=3, support=support))
         if d.h == 2:
             assert "Q3" in d.triggers and d.pause_pending, support
         else:
@@ -99,9 +103,9 @@ def test_q3_counts_entity_instances_not_collider_names():
     one = (SupportEvent("Bone Beast/PolyCollider", 2, instance=529544),
            SupportEvent("Bone Beast/LeapCollider", 2, instance=529544), SupportEvent("Boss Scene/Bone Beast", 2,
                                                                                     instance=529544))
-    assert not Supervisor().step(_inp(hp=3, support=one)).triggers
+    assert not Supervisor(BB).step(_inp(hp=3, support=one)).triggers
     two = (SupportEvent("Choir Clapper", 2, instance=11), SupportEvent("Choir Clapper", 2, instance=12))
-    assert "Q3" in Supervisor().step(_inp(hp=3, support=two)).triggers
+    assert "Q3" in Supervisor(BB).step(_inp(hp=3, support=two)).triggers
     assert sv.q3_threat(two) == "2 threat instances in support"
     # without instance ids the source string stands in
     assert sv.q3_threat((SupportEvent("a", 2), SupportEvent("b", 2))) is not None
@@ -109,55 +113,60 @@ def test_q3_counts_entity_instances_not_collider_names():
 
 def test_unknown_support_is_never_safe():
     """Review: a missing support used to read as UNBOUNDED / GREEN at 1 HP."""
-    d = Supervisor().step(_inp(hp=1, support=(), support_known=False))
+    d = Supervisor(BB).step(_inp(hp=1, support=(), support_known=False))
     assert d.h == 1 and "Q1" in d.triggers and d.pause_pending and not d.support_known and d.tier == "RED"
     # the default input is unknown support
-    d = Supervisor().step(SupervisorInput(t=1.0, hp=1, max_hp=5))
+    d = Supervisor(BB).step(SupervisorInput(t=1.0, hp=1, max_hp=5))
     assert "Q1" in d.triggers and not d.allows("ATTACK(side)")
     # unknown at full HP: D1 >= max(1, the encounter's worst known damage); the mask is not trusted; never GREEN
-    bb = SupervisorConfig(worst_known_damage=2)
-    d = Supervisor(bb).step(_inp(support=(), support_known=False, mask=MASK_INTACT))
+    d = Supervisor(BB).step(_inp(support=(), support_known=False, mask=MASK_INTACT))
     assert d.h == 3 and d.tier == "YELLOW" and not d.long_planning_ok
-    assert Supervisor().step(_inp(support=(), support_known=False)).h == 5      # floor 1 by default
-    # h = 2 with an unknown support is a Q3 quit
-    d = Supervisor(bb).step(_inp(hp=3, support=(), support_known=False))
+    assert Supervisor(W1).step(_inp(support=(), support_known=False)).h == 5
+    # h = 2 with an unknown support is a Q3 quit (review: Bell Beast at 3 HP)
+    d = Supervisor(BB).step(_inp(hp=3, support=(), support_known=False))
     assert d.h == 2 and "Q3" in d.triggers and d.pause_pending
     # damage taken this attempt raises the floor
-    s = Supervisor()
+    s = Supervisor(W1)
     assert s.step(_inp(hp=3, support=(), support_known=False)).h == 3
     assert s.step(_inp(hp=3, support=(), support_known=False, damage_taken=2)).h == 2
     # a known support event larger than the floor sets D1
-    d = Supervisor().step(_inp(support=(SupportEvent("x", 3),), support_known=False))
+    d = Supervisor(BB).step(_inp(support=(SupportEvent("x", 3),), support_known=False))
     assert d.h == 2
-    # only a certified empty support is "nothing can hurt"
-    d = Supervisor().step(_inp(hp=1, support=(), support_known=True))
-    assert d.h == UNBOUNDED and d.tier == "GREEN"
+    # review: an empty support with support_known=True (a forecaster dropout) is still unknown
+    for empty in ((), []):
+        d = Supervisor(BB).step(_inp(hp=1, support=empty, support_known=True))
+        assert d.h == 1 and "Q1" in d.triggers and not d.support_known and d.tier == "RED", empty
+        assert not d.allows("ATTACK(side)") and not d.long_planning_ok
+    # only an explicitly certified empty support is "nothing can hurt"
+    d = Supervisor(BB).step(_inp(hp=1, support=(), support_known=True, support_empty_ok=True))
+    assert d.h == UNBOUNDED and d.tier == "GREEN" and d.support_known
+    assert not Supervisor(BB).step(_inp(hp=1, support=(), support_known=False, support_empty_ok=True)).support_known
 
 
 def test_missing_hero_is_unknown_not_zero_hp():
     """Review: 3 913 loading / main-menu frames without a hero section mapped to hp 0 and latched Q1."""
-    s = Supervisor()
+    s = Supervisor(BB)
     d = s.step(SupervisorInput(t=0.0, support=(BODY,), support_known=True, plan_s=0))
     assert d.h is None and not d.hero_known and not d.triggers and not d.pause_pending and d.tier == "YELLOW"
     for i in range(1, 25):
         d = s.step(SupervisorInput(t=i / 60, support=(BODY,), support_known=True, plan_s=0))
     assert "Q5" in d.triggers and d.on_paused == sv.SELF_CHECK and not d.quit_requested    # never seen > 300 ms
     # known at 5 HP, then lost: h 3 from the last known hero, no Q5 (h >= 3)
-    s = Supervisor()
+    s = Supervisor(BB)
     s.step(_inp())
     for i in range(30):
         d = s.step(_inp(hp=None, max_hp=None))
     assert d.h == 3 and not d.hero_known and not d.triggers
     # lost at 4 HP (h 2): Q5 after 300 ms
-    s = Supervisor()
+    s = Supervisor(BB)
     s.step(_inp(hp=4))
     ds = [s.step(_inp(hp=None, max_hp=None)) for _ in range(25)]
     assert "Q5" not in ds[10].triggers and "Q5" in ds[-1].triggers
-    assert sv.input_from_state({"f": 1, "game": {"scene": "Bone_05"}}, 0.0).hp is None
+    assert sv.input_from_state({"f": 1, "game": {"scene": "Bone_05"}}, 0.0, support_known=False).hp is None
 
 
 def test_q4_unpredicted_hits_quit_at_the_next_pausable_green_frame():
-    s = Supervisor()
+    s = Supervisor(BB)
     assert not s.step(_inp(unpredicted_hits=1)).triggers
     d = s.step(_inp(hp=5, unpredicted_hits=1, plan_s=1))             # second unpredicted hit, not GREEN
     assert "Q4" in d.triggers and d.tier == "RED" and not d.pause_pending
@@ -171,47 +180,47 @@ def test_q4_unpredicted_hits_quit_at_the_next_pausable_green_frame():
 
 
 def test_q4_risk_integral_against_twice_the_expectation():
-    s = Supervisor(SupervisorConfig(expected_risk_per_s=1e-3, risk_warmup_s=5.0))
+    s = Supervisor(SupervisorConfig(2, expected_risk_per_s=1e-3, risk_warmup_s=5.0))
     # expected over the first 5 s: 5e-3, so up to 1e-2 is fine
     for i in range(9):
         assert "Q4" not in s.step(_inp(t=0.1 * i, p_death=1e-3)).triggers
     d = s.step(_inp(t=1.0, p_death=2e-3))                            # integral 1.1e-2 > 2 x 5e-3
     assert "Q4" in d.triggers and abs(d.risk_integral - 0.011) < 1e-12
-    assert "Q4" not in Supervisor().step(_inp(p_death=0.9)).triggers  # no training expectation yet
+    assert "Q4" not in Supervisor(BB).step(_inp(p_death=0.9)).triggers  # no training expectation yet
 
 
 def test_q5_perception_self_check():
     for kw in (dict(frame_age_ms=60), dict(hud_unreadable_ms=150), dict(scene_known=False),
                dict(overlay_intrusion=True), dict(tear_streak=3)):
-        d = Supervisor().step(_inp(**kw))
+        d = Supervisor(BB).step(_inp(**kw))
         assert d.triggers == ("Q5",) and d.pause_pending and d.on_paused == sv.SELF_CHECK and not d.quit_requested
-    assert not Supervisor().step(_inp(hud_unreadable_ms=150, ending=True)).triggers
-    assert not Supervisor().step(_inp(hero_lost_ms=400)).triggers          # h = 3
-    assert "Q5" in Supervisor().step(_inp(hp=4, hero_lost_ms=400)).triggers
+    assert not Supervisor(BB).step(_inp(hud_unreadable_ms=150, ending=True)).triggers
+    assert not Supervisor(BB).step(_inp(hero_lost_ms=400)).triggers          # h = 3
+    assert "Q5" in Supervisor(BB).step(_inp(hp=4, hero_lost_ms=400)).triggers
     # a quit trigger outranks the self-check
-    s = Supervisor()
+    s = Supervisor(BB)
     s.step(_inp(frame_age_ms=60))
     assert s.step(_inp(hp=2)).on_paused == sv.QUIT
 
 
 def test_q6_forced_risk_only_at_low_h():
-    assert not Supervisor().step(_inp(forced_risk=True)).triggers
-    assert "Q6" in Supervisor().step(_inp(hp=4, forced_risk=True)).triggers
+    assert not Supervisor(BB).step(_inp(forced_risk=True)).triggers
+    assert "Q6" in Supervisor(BB).step(_inp(hp=4, forced_risk=True)).triggers
 
 
 def test_q7_focus_q8_watchdog_q9_stop():
-    d = Supervisor().step(_inp(focus_lost=True))
+    d = Supervisor(BB).step(_inp(focus_lost=True))
     assert d.release_all and d.regain_focus and d.pause_pending and d.on_paused == sv.SELF_CHECK
-    d = Supervisor().step(_inp(watchdog=True))
+    d = Supervisor(BB).step(_inp(watchdog=True))
     assert d.pause_pending and d.on_paused == sv.DIAGNOSE and d.alert
-    d = Supervisor().step(_inp(permadeath=True, hp=1))
+    d = Supervisor(BB).step(_inp(permadeath=True, hp=1))
     assert d.stop_input and d.alert and not d.pause_pending and d.allowed == frozenset()
-    d = Supervisor().step(_inp(capture_lost=True))
+    d = Supervisor(BB).step(_inp(capture_lost=True))
     assert d.stop_input and "Q9" in d.triggers
 
     def hook(inp):
         return ["Q8"] if inp.t > 20 else []
-    s = Supervisor(SupervisorConfig(hooks=(hook,)))
+    s = Supervisor(SupervisorConfig(2, hooks=(hook,)))
     assert not s.step(_inp(t=10)).triggers
     assert s.step(_inp(t=21)).on_paused == sv.DIAGNOSE
 
@@ -219,19 +228,19 @@ def test_q7_focus_q8_watchdog_q9_stop():
 def test_q7_focus_only_with_a_foreground_sink():
     """Review: TRAIN runs 4-6 instances under OracleInjectSink, at most one focused; STATE focus is no Q7 there."""
     s = {"f": 1, "focus": False, "hero": {"health": 5, "max_health": 5}, "pause": {"blk": 0}}
-    inp = sv.input_from_state(s, 1.0, support=(BODY,), plan_s=0)
+    inp = sv.input_from_state(s, 1.0, support=(BODY,), support_known=True, plan_s=0)
     assert not inp.focus_lost
-    d = Supervisor().step(inp)
+    d = Supervisor(BB).step(inp)
     assert d.tier == "GREEN" and not d.pause_pending
-    assert sv.input_from_state(s, 1.0, foreground_sink=True).focus_lost
+    assert sv.input_from_state(s, 1.0, support_known=False, foreground_sink=True).focus_lost
     s["focus"] = True
-    assert not sv.input_from_state(s, 1.0, foreground_sink=True).focus_lost
+    assert not sv.input_from_state(s, 1.0, support_known=False, foreground_sink=True).focus_lost
 
 
 def test_evade_exit_latch_after_a_greyed_quit():
     """§3.7.5 step 4: Quit greyed, frozen check passed -> unpause, EVADE out of the room, pause and quit. The quit
     triggers must not re-arm in that room (review: they did on the next frame)."""
-    s = Supervisor()
+    s = Supervisor(BB)
     d = s.step(_inp(hp=2, scene="Bone_05"))
     assert d.pause_pending and "Q1" in d.triggers
     s.notify_paused()
@@ -244,31 +253,31 @@ def test_evade_exit_latch_after_a_greyed_quit():
     assert not d.evade_exit and d.pause_pending and d.quit_requested
     assert any("EVADE_EXIT" in r for r in d.reasons)
     # quit available again in the same room ends it too
-    s = Supervisor()
+    s = Supervisor(BB)
     s.notify_resumed(sv.RESUME_EVADE_EXIT, scene="Bone_05", t=0.0)
     assert s.step(_inp(t=0.1, hp=2, scene="Bone_05", quittable=False)).evade_exit
     assert s.step(_inp(t=0.2, hp=2, scene="Bone_05", quittable=True)).pause_pending
     # a timeout alerts and re-arms
-    s = Supervisor(SupervisorConfig(evade_exit_timeout_s=5.0))
+    s = Supervisor(SupervisorConfig(2, evade_exit_timeout_s=5.0))
     s.notify_resumed(sv.RESUME_EVADE_EXIT, scene="Bone_05", t=0.0)
     d = s.step(_inp(t=6.0, hp=2, scene="Bone_05", quittable=False))
     assert d.alert and d.pause_pending and not d.evade_exit
     # a self-check resume latches nothing
-    s = Supervisor()
+    s = Supervisor(BB)
     s.notify_resumed(sv.RESUME_SELF_CHECK)
     assert not s.step(_inp()).evade_exit
 
 
 def test_p1_long_planning():
-    assert Supervisor().step(_inp()).long_planning_ok
-    assert not Supervisor().step(_inp(in_encounter=True)).long_planning_ok
-    assert Supervisor().step(_inp(in_encounter=True, in_safe_window=True)).long_planning_ok
-    assert not Supervisor().step(_inp(plan_s=1)).long_planning_ok
+    assert Supervisor(BB).step(_inp()).long_planning_ok
+    assert not Supervisor(BB).step(_inp(in_encounter=True)).long_planning_ok
+    assert Supervisor(BB).step(_inp(in_encounter=True, in_safe_window=True)).long_planning_ok
+    assert not Supervisor(BB).step(_inp(plan_s=1)).long_planning_ok
 
 
 def test_silk_skills_only_at_full_hp():
-    assert not Supervisor().step(_inp(hp=4, max_hp=5, support=())).allows(Prim.SILKSKILL)
-    assert Supervisor().step(_inp()).allows(Prim.SILKSKILL)
+    assert not Supervisor(BB).step(_inp(hp=4, max_hp=5, support=())).allows(Prim.SILKSKILL)
+    assert Supervisor(BB).step(_inp()).allows(Prim.SILKSKILL)
 
 
 def test_input_from_state():
@@ -277,20 +286,49 @@ def test_input_from_state():
          "hero": {"health": 2, "max_health": 5, "health_blue": 0,
                   "fractured_mask": {"equipped": False, "amount_left": 0}},
          "pause": {"blk": 3, "dsq": False, "preload": False}}
-    inp = sv.input_from_state(s, t=12.0, support=(BODY,), plan_s=0)
+    inp = sv.input_from_state(s, t=12.0, support=(BODY,), support_known=True, plan_s=0)
     assert (inp.hp, inp.max_hp, inp.blue, inp.mask, inp.pausable, inp.quittable) == (2, 5, 0, MASK_NONE, False, False)
     assert inp.support_known
-    d = Supervisor().step(inp)
+    d = Supervisor(BB).step(inp)
     assert "Q1" in d.triggers and d.pause_pending
     s["pause"]["blk"] = 0
-    inp = sv.input_from_state(s, t=12.0)
+    inp = sv.input_from_state(s, t=12.0, support_known=False)
     assert inp.pausable and inp.quittable and inp.support == () and not inp.support_known
     assert not sv.input_from_state(s, 12.0, support=(BODY,), support_known=False).support_known
+    assert not sv.input_from_state(s, 12.0, support=None, support_known=True).support_known   # None is unknown
+    # review: support_known is a required keyword, never inferred from the support's type
+    with pytest.raises(TypeError):
+        sv.input_from_state(s, 12.0, support=(BODY,))
     # oracle hero.tags (cross-module decision 5): pending damage; damage events this frame
     s["hero"]["tags"] = [{"kind": "acid", "dmg_left": 1, "t_left": 0.5}, {"kind": "frost", "dmg_left": 1}]
     s["ev"] = [{"k": "damage", "d": {"amount": 2, "hazard": "ENEMY"}}]
-    inp = sv.input_from_state(s, 12.0, support=(BODY,))
+    inp = sv.input_from_state(s, 12.0, support=(BODY,), support_known=True)
     assert inp.pending_dmg == 2 and inp.damage_taken == 2
+    for none in ([], None):              # no tag, or no TagDamageTaker (nil)
+        s2 = {**s, "hero": {**s["hero"], "tags": none}}
+        assert sv.input_from_state(s2, 12.0, support_known=False).pending_dmg == 0
+
+
+def test_unbounded_damage_tag_is_lethal_pending_damage():
+    """Review: the oracle writes dmg_left = -1 for a tag with no hit limit (frost water; state_fields_m2.md §4). Summed
+    as -1 it raised h (hp 2, D1 1: h 3, GREEN); it is unbounded, so the pending damage is lethal by itself."""
+    s = {"f": 1, "hero": {"health": 2, "max_health": 5, "health_blue": 0,
+                          "fractured_mask": {"equipped": False, "amount_left": 0}}, "pause": {"blk": 0}}
+    one = (SupportEvent("x", 1),)
+    d = Supervisor(W1).step(sv.input_from_state(s, 1.0, support=one, support_known=True, plan_s=0))
+    assert d.h == 2 and d.tier == "YELLOW"
+    for tags in ([{"kind": "Frost", "dmg_left": -1, "t_left": 0.5}],
+                 [{"kind": "Acid", "dmg_left": 1, "t_left": 0.2}, {"kind": "Frost", "dmg_left": -1, "t_left": 0.5}],
+                 [{"kind": "Frost", "t_left": 0.5}], [{"kind": "Frost", "dmg_left": None}], ["Frost"]):
+        s["hero"]["tags"] = tags
+        inp = sv.input_from_state(s, 1.0, support=one, support_known=True, plan_s=0)
+        assert inp.pending_dmg == 2 and not inp.pending_mask_covers, tags
+        d = Supervisor(W1).step(inp)
+        assert d.h == 0 and "Q1" in d.triggers and d.pause_pending and d.tier == "RED", tags
+    # with an intact Fractured Mask the unbounded tag is still lethal (the mask is not trusted against it)
+    s["hero"]["fractured_mask"] = {"equipped": True, "amount_left": 1}
+    s["hero"]["tags"] = [{"kind": "Frost", "dmg_left": -1, "t_left": 0.5}]
+    assert Supervisor(W1).step(sv.input_from_state(s, 1.0, support=one, support_known=True)).h == 0
 
 
 def test_bind_gate():
@@ -330,7 +368,7 @@ def test_down_slash_gate_agrees_with_step():
     for spikes in (False, True):
         for hazard in (False, True):
             for hp, tier in ((5, "GREEN"), (4, "YELLOW")):
-                d = Supervisor().step(_inp(hp=hp, over_spikes=spikes, over_hazard=hazard))
+                d = Supervisor(BB).step(_inp(hp=hp, over_spikes=spikes, over_hazard=hazard))
                 assert d.tier == tier
                 assert d.allows("ATTACK(down)") == sv.down_slash_allowed(spikes, hazard, tier, False).ok, \
                     (spikes, hazard, tier)
