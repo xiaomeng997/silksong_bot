@@ -161,8 +161,11 @@ def test_navigation_with_24_frames_of_latency_and_stalls(bounds):
     """2x10^3 menu walks on a paused game with input latency 0-12 frames, observation latency 0-12 frames and capture
     stalls repeating a frame for up to 4 steps: plain quits, and greyed-by-disableSaveQuit menus refreshed through
     Options (wrapping or not) -> Back. With the machine's latency bounds set to the sim's maxima ("measured") every
-    walk quits. Left at the 0.1 s defaults, below the real latency in many walks ("default"): no wrong Submit and no
-    unpause either; a walk whose flipped tap shows the bound broken ends ALERT (14 of 2000)."""
+    walk quits. Left at the 0.1 s defaults ("default"), the input bound alone is not exceeded (the post-tap cut comes
+    0.117 s after a release that ends about 0.1 s after the press edge: about 13 frames, round-2 review), but the round
+    trip (up to 24 frames plus stalls) passes the configured 0.37 s in some walks: still no wrong Submit and no
+    unpause; a walk whose flipped tap then shows the bound broken ends ALERT (14 of 2000). The cases past the input
+    bound are test_beyond_the_latency_bound_alerts_and_never_submits_a_wrong_item."""
     r = random.Random(23 if bounds == "measured" else 29)
     alerts = 0
     for seed in range(2000):
