@@ -538,20 +538,112 @@ def test_windows_are_counted_never_dropped(real, p):
     assert (labels[370:400] == "uncovered:gap").all()
 
 
-def test_residual_monitor_scores_executed_predictions(p):
-    """DESIGN §3.5.2: the runtime residual monitor compares what the executed lane predicted with what happened."""
-    mon = km.ResidualMonitor(horizons=(1, 6), window=50, min_n=5, hard_u=0.5)
-    for f in range(40):
-        mon.predict(f, np.array([[f, 0.0]] + [[f + h + 0.01 * (h == 6), 0.0] for h in range(1, 7)]))
-        mon.observe(f, (float(f), 0.0))
+def _trace_row(tr, i: int) -> dict:
+    """Row i of a Trace in StateTracker.push_row terms."""
+    return {"f": int(tr.f[i]), "fs": int(tr.fs[i]), "dt": float(tr.dt[i]), "udt": float(tr.udt[i]),
+            "ts": float(tr.ts[i]), "phys": tr.phys[i], "vel": tr.vel[i], "box": tr.box[i], "facing": int(tr.facing[i]),
+            "hero_state": int(tr.hero_state[i]), "relinq": bool(tr.relinq[i]), "cs": tr.cs[i],
+            "mask": int(tr.mask[i]), "silk": int(tr.silk[i]), "clip": tr.clips[tr.clip[i]],
+            "spell": tr.spells[tr.spell[i]], "dmg": int(tr.dmg[i]), "marks": int(tr.marks[i]),
+            "freeze": int(tr.freeze[i]) if tr.freeze is not None else 0, "valid": bool(tr.valid[i]),
+            "tm": tr.tm[i] if tr.tm is not None else np.full(len(km.TM_KEYS), np.nan),
+            "alpha": float(tr.alpha_log[i]) if tr.alpha_log is not None else np.nan, "load": False}
+
+
+@pytest.mark.parametrize("path", [FIXTURE, LIVE])
+def test_state_tracker_matches_the_batch_estimator_row_for_row(path):
+    """The planner's per-tick state (StateTracker, O(1) per frame) is estimate_state of the whole history at the
+    last row, bit for bit, on both fixtures (a hit during Bind, a boss kill, casts, pogos); its events are
+    derive_events'."""
+    from ssbot.tools.kin_check import load_fixture
+    tr, terrains = load_fixture(path)
+    q = HeroParams.load()
+    terrain = terrains["Bone_05"]
+    ref = km.estimate_state(tr, np.arange(len(tr)), q, terrain=terrain)
+    ev = km.derive_events(tr)
+    trk = km.StateTracker(q, terrain)
+    for i in range(len(tr)):
+        trk.push_row(_trace_row(tr, i))
+        same = (trk.S == ref[:, i]) | (np.isnan(trk.S) & np.isnan(ref[:, i]))
+        assert same.all(), (i, [km.ROW_NAMES[j] for j in np.flatnonzero(~same)])
+        assert trk.events == ev[i], i
+
+
+def test_state_tracker_reads_state_dicts(p):
+    """push() parses STATE dicts as Trace.from_states does: damage and freeze events, hero.tm / hero.alpha, a
+    harness op (not the model's frame), flags."""
+    rng = np.random.default_rng(3)
+    states = []
+    for i in range(40):
+        fl = {"onGround": i < 10 or i > 30, "jumping": 10 <= i < 16, "attacking": 20 <= i < 25,
+              "recoilFrozen": 26 <= i < 29, "invulnerable": i >= 26}
+        s = _state(i, 10.0 + 0.1 * i, REST + (1.0 if 10 <= i <= 30 else 0.0), act=int(rng.choice([0, km.B_JUMP,
+                                                                                                     km.B_RIGHT])),
+                   **fl)
+        s["fs"] = int(i % 6 != 0)
+        if i == 26:
+            s["ev"] = [{"k": "damage", "d": {"side": "left"}}, {"k": "freeze", "d": {"phase": "start",
+                                                                                    "type": "BindBreak"}}]
+        if i == 33:
+            s["ev"] = [{"k": "harness", "d": {"op": "savestate.load"}}]
+        if i >= 35:
+            s["hero"] = dict(s["hero"], alpha=0.25, tm={k: 0.0 for k in km.TM_KEYS} | {"grav": 0.5, "qj": i - 35})
+        states.append(s)
+    tr = km.Trace.from_states(states, p)
+    ref = km.estimate_state(tr, np.arange(len(tr)), p)
+    ev = km.derive_events(tr)
+    trk = km.StateTracker(p)
+    for i, s in enumerate(states):
+        trk.push(s)
+        same = (trk.S == ref[:, i]) | (np.isnan(trk.S) & np.isnan(ref[:, i]))
+        assert same.all(), (i, [km.ROW_NAMES[j] for j in np.flatnonzero(~same)])
+        assert trk.events == ev[i]
+        assert trk.modelled == (i not in (26, 27, 28, 29) and i < 33), i     # BindBreak in the hit-stop, harness
+    assert trk.state().shape == (km.K, 1)
+
+
+def _play(p, terrain, masks, offset=0.0, start=None):
+    """Frame-by-frame 'game' from the model itself (nominal timing): (boxes [T+1, 4], states [T+1, K])."""
+    X = km.initial_state(p, 20.0, REST) if start is None else start
+    boxes, states = [], []
+    r = km.rollout(X, np.zeros((1, 0), dtype=np.int64), p, terrain)
+    boxes.append(r.box[0, 0])
+    states.append(X.copy())
+    for m in masks:
+        r = km.rollout(X, np.array([[m]]), p, terrain)
+        X = r.final[:, 0].copy()
+        boxes.append(r.box[0, 1] + np.array([offset, 0.0, offset, 0.0]))
+        states.append(X.copy())
+    return np.array(boxes), np.array(states)
+
+
+def test_residual_monitor_scores_the_executed_stream(p):
+    """DESIGN §3.5.2 runtime monitor: re-rolls the executed masks from each anchor and checks the observed box
+    against the lanes' hull. Unknown (None) until min_n windows; a replan never shows as a residual (the masks are
+    the executed ones); excluded frames drop their windows; a model that is off by 0.3 u is degraded."""
+    terrain = Terrain2D.from_boxes([floor()])
+    rng = np.random.default_rng(5)
+    pool = [0, km.B_RIGHT, km.B_LEFT, km.B_JUMP | km.B_RIGHT, km.B_JUMP | km.B_LEFT, km.B_ATTACK]
+    masks = np.repeat(rng.choice(pool, 60), 4)             # replanned every 4 frames, direction flips included
+    boxes, states = _play(p, terrain, masks)
+    mon = km.ResidualMonitor(p, terrain, min_n=60)
+    assert mon.confidence() is None and mon.status()["state"] == "unknown"
+    for f in range(len(masks) + 1):
+        mon.observe(f, boxes[f], int(masks[f - 1]) if f else 0, 0, modelled=f != 150)
+        mon.anchor(f, states[f])
     st = mon.status()
-    assert st["ok"] and st["horizons"][1]["within"] == 1.0 and st["horizons"][6]["max"] == pytest.approx(0.01)
-    mon.predict(40, np.array([[40.0, 0.0]] + [[40.0 + h, 0.0] for h in range(1, 7)]))
-    mon.invalidate()                                           # an unpredicted hit: not the model's miss
-    assert mon.dropped >= 2
-    mon.predict(41, np.array([[41.0, 0.0]] + [[41.0 + h, 0.0] for h in range(1, 7)]))
-    mon.observe(42, (43.0, 0.0))                               # 1 u off
-    assert not mon.status()["ok"] and mon.confidence() == 0.0
+    assert st["state"] == "ok" and mon.confidence() == 1.0
+    assert st["horizons"][30]["within"] == 1.0 and st["horizons"][30]["nominal_within"] == 1.0
+    assert st["horizons"][30]["scored"] == len(masks) + 1 - 30 - 30     # the windows over frame 150 are dropped
+    assert mon.dropped >= 30
+    off = km.ResidualMonitor(p, terrain, min_n=60)
+    boxes2, states2 = _play(p, terrain, masks, offset=0.3)
+    for f in range(len(masks) + 1):
+        off.observe(f, boxes2[f], int(masks[f - 1]) if f else 0)
+        off.anchor(f, states2[f] if f == 0 else states[f])  # the anchors' state is the model's, the boxes are not
+    assert off.status()["state"] == "degraded" and off.confidence() < 0.5
+    off.reset()
+    assert off.confidence() is None
 
 
 def test_shipped_params_carry_the_jitter_model_and_the_jump_spread(p):

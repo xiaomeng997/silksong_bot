@@ -2052,70 +2052,536 @@ def phase_interval(tr: Trace, fdt: float | None = None, causal: bool = True
     return 0.5 * (lo + hi), lo, hi
 
 
+# ---- incremental state tracker (the planner's per-tick start state) -------------------------------------------
+
+_F32 = np.float32
+
+
+def _acc32(acc: float, onset: bool, x: float, include: bool) -> float:
+    """One step of _since32: the float32 running sum since the last onset (inf before any)."""
+    if onset:
+        return float(_F32(x)) if include else 0.0
+    if not np.isfinite(acc):
+        return acc
+    return float(_F32(_F32(acc) + _F32(x)))
+
+
+def _acc(acc: float, onset: bool, x: float, include: bool) -> float:
+    """One step of _since (float64; used with integer counts only)."""
+    if onset:
+        return float(x) if include else 0.0
+    return acc + x
+
+
+class StateTracker:
+    """The model state at the latest frame of a live STATE stream, updated in O(1) per frame: the same rows that
+    state_table / estimate_state give for the last row of the whole history (tests check every row of the fixtures),
+    without re-reading a history window every tick (Trace.from_states + estimate_state on a 240-frame tail cost
+    about 2.5 ms per tick in Python; a push is about 0.1 ms). It also gives the frame's contact events (derive_events)
+    and whether the model owns the frame's motion (`modelled`, the rules of kin_check's categories: not a harness
+    operation, scene change, hazard respawn, death or savestate slide, not locked by another FSM or charging a nail
+    art, no world freeze, no hitch above frame_time_max), which ResidualMonitor needs.
+
+        trk = StateTracker(params, terrain)
+        trk.push(state)                       # every STATE (act.mask is the latched ACTION the game read)
+        start = trk.state()                   # [K, 1], as estimate_state(trace, [last row], params, terrain=terrain)
+
+    Masks come from act.mask (exact for the bot; the "input" stream needs a frame of look-ahead, Trace.from_states).
+    Gaps (dropped STATEs) are not filled, as in state_table."""
+
+    def __init__(self, params: HeroParams, terrain: Terrain2D | None = None, names: list[str] | None = None):
+        self.params = params
+        self.P = params.vector()
+        self.terrain = terrain
+        names = names or cstate_names()
+        self._bit = [names.index(n) for n in _CS_USED]
+        self._fl = {n: i for i, n in enumerate(_CS_USED)}
+        self.n = 0
+        self.S = np.zeros(K)
+        self.events = 0
+        self.modelled = False
+        self.f = -1
+        self.box = np.full(4, np.nan)
+        self.mask = 0
+        self.udt = 0.0
+        self._p: dict[str, Any] = {}         # previous row
+        self._a_lo, self._a_hi = 0.0, 1.0
+        self._q = None
+        self._phys0 = None
+        self._acc = {k: np.inf for k in ("j", "pogo", "q_j", "q_a", "q_t", "atk_t", "atk_cd", "rsteps", "ds_rec",
+                                         "bounce", "t_in", "t_after", "st_after", "mode_n", "cast_t", "inv")}
+        self._last_q = {JQ: -1, AQ: -1, QQ: -1}
+        self._last_kill = {JQ: -1, AQ: -1, QQ: -1}
+        self._g, self._h = 1.0, 0.0
+        self._ds_face = 0.0
+        self._ds_seen = False
+        self._dmg_side = 0.0
+        self._fz: list[list] = []            # active hit-stop replays [ph, t, ts, k]
+        self._tm_prev = np.full(len(TM_KEYS), np.nan)
+        self._slide_left = 0
+        self._other_in_hitstop = False
+
+    # -- one row ---------------------------------------------------------------------------------------------------
+    def push(self, s: dict) -> None:
+        """One STATE dict (as Trace.from_states reads it)."""
+        h = s.get("hero")
+        g = s.get("game") or {}
+        tm = (h or {}).get("tm")
+        tm_row = np.array([float(tm[k]) if isinstance(tm, dict) and tm.get(k) is not None else np.nan
+                           for k in TM_KEYS]) if tm else np.full(len(TM_KEYS), np.nan)
+        a = (h or {}).get("alpha")
+        load = False
+        dmg, mk, fz = 0, 0, 0
+        for ev in s.get("ev") or ():
+            k = ev.get("k")
+            d = ev.get("d") or {}
+            if k == "harness" and d.get("op") == "savestate.load":
+                load = True
+            if k == "damage":
+                side = d.get("side")
+                dmg = -1 if side == "left" else 1 if side == "right" else dmg
+            elif k == "freeze" and d.get("phase") == "start":
+                typ = str(d.get("type"))
+                fz |= FZ_RECOIL if "StartRecoil" in typ else _FZ_TYPES.get(typ, FZ_OTHER)
+            else:
+                mk |= _MARK_KINDS.get(k, 0)
+        if fz & ~(FZ_RECOIL | FZ_ENEMY_DEATH) or (fz & FZ_ENEMY_DEATH and not fz & FZ_RECOIL):
+            mk |= MK_FREEZE
+        row: dict[str, Any] = {"f": s["f"], "fs": int(s.get("fs") or 0), "dt": float(s.get("dt") or 0.0),
+                               "udt": float(s.get("udt") or 0.0),
+                               "ts": float(s.get("ts", 1.0) if s.get("ts") is not None else 1.0),
+                               "mask": int((s.get("act") or {}).get("mask", 0) or 0), "dmg": dmg, "marks": mk,
+                               "freeze": fz, "tm": tm_row, "alpha": float(a) if a is not None else np.nan,
+                               "load": load}
+        if not h or not h.get("box") or not h.get("cstate"):
+            row.update(phys=np.array([np.nan, np.nan]), vel=np.array([np.nan, np.nan]), box=np.full(4, np.nan),
+                       facing=0, hero_state=-1, relinq=False, cs=np.zeros(len(self._bit), dtype=bool), silk=0,
+                       clip=None, spell=None, valid=False)
+        else:
+            b = h["box"]
+            words = h["cstate"]
+            pause = s.get("pause") or {}
+            row.update(phys=np.array([0.5 * (b[0] + b[2]), b[1] + self.params.foot]),
+                       vel=np.asarray(h.get("vel") or [0.0, 0.0], dtype=np.float64)[:2],
+                       box=np.asarray(b[:4], dtype=np.float64), facing=int(h.get("facing", 1)),
+                       hero_state=int(h.get("hero_state", -1)), relinq=bool(h.get("control_relinquished")),
+                       cs=np.array([bool((words[i >> 6] >> (i & 63)) & 1) for i in self._bit]),
+                       silk=int(h.get("silk") or 0), clip=(h.get("anim") or {}).get("clip"),
+                       spell=(h.get("spell") or [None])[0],
+                       valid=g.get("gs", 4) == 4 and not g.get("paused") and not pause.get("inv", False))
+        self.push_row(row)
+
+    def push_row(self, r: dict) -> None:
+        """One row in Trace terms: f, fs, dt, udt, ts, phys [2], vel [2], box [4], facing, hero_state, relinq,
+        cs [len(_CS_USED)] bool, mask, silk, clip, spell (names), dmg, marks, freeze, valid, tm [15] (NaN: not
+        exported), alpha (NaN: not exported), load (a savestate.load harness op in this frame)."""
+        p, P, pr = self.params, self.P, self._p
+        i = self.n
+        first = i == 0
+        cs = r["cs"]
+        fl = lambda name: bool(cs[self._fl[name]])  # noqa: E731
+        was = (lambda name: bool(pr["cs"][self._fl[name]])) if not first else (lambda name: False)  # noqa: E731
+        steps = float(r["fs"])
+        dt = float(r["dt"])
+        mask = int(r["mask"])
+        pmask = 0 if first else int(pr["mask"])
+        # mode (classify_modes)
+        hs7 = r["hero_state"] == HS_NO_INPUT
+        md = M_NORMAL
+        if r["relinq"]:
+            md = M_LOCKED
+        if r["clip"] in CAST_CLIPS and (r["relinq"] or hs7):
+            md = M_CAST
+        if (fl("isBinding") or r["spell"] in BIND_SPELLS) and (r["relinq"] or hs7):
+            md = M_BIND
+        if fl("downSpikeAntic"):
+            md = M_DS_ANTIC
+        if fl("downSpiking"):
+            md = M_DS_SPIKE
+        if fl("recoiling") and hs7:
+            md = M_HURT_RECOIL
+        if fl("recoilFrozen"):
+            md = M_HURT_FREEZE
+        pmd = None if first else pr["mode"]
+        on = lambda name: fl(name) and not was(name)  # noqa: E731
+        S = np.zeros(K)
+        # phase interval, forward (phase_interval, causal)
+        if not first:
+            inc = dt / p.fdt - steps
+            self._a_lo, self._a_hi = self._a_lo + inc, self._a_hi + inc
+        if not np.isfinite(self._a_lo) or self._a_hi <= 0.0 or self._a_lo >= 1.0 or self._a_lo > self._a_hi:
+            self._a_lo, self._a_hi = 0.0, 1.0
+        self._a_lo, self._a_hi = max(self._a_lo, 0.0), min(self._a_hi, 1.0)
+        S[ALPHA], S[ALO], S[AHI] = 0.5 * (self._a_lo + self._a_hi), self._a_lo, self._a_hi
+        # pose
+        phys = r["phys"]
+        if first:
+            self._phys0 = phys.copy()
+            self._q = phys.copy()
+        if steps > 0:
+            self._q = (pr["phys"] if not first else self._phys0).copy()
+        S[PX], S[PY] = phys
+        S[SX], S[SY] = phys
+        S[QX], S[QY] = self._q
+        S[VX], S[VY] = r["vel"]
+        S[FACE] = 1.0 if r["facing"] >= 0 else -1.0
+        ground = fl("onGround")
+        S[GROUND] = float(ground)
+        S[MODE] = md
+        S[SILK] = r["silk"]
+        S[PREV] = mask
+        S[MOVE] = (1.0 if mask & B_RIGHT else 0.0) - (1.0 if mask & B_LEFT else 0.0)
+        S[JHELD] = float((mask & B_JUMP) != 0)
+        # jumps
+        ac = self._acc
+        jumping = fl("jumping")
+        j_on = on("jumping")
+        pogo_on = on("downSpikeBouncing")
+        ac["j"] = _acc(ac["j"], j_on, steps, False)
+        ac["pogo"] = _acc(ac["pogo"], j_on, float(pogo_on), True)
+        pogo_j = ac["pogo"] > 0
+        S[JUMPING] = float(jumping)
+        S[JSTEPS] = ((p.pogo_jump_steps if pogo_j else 0) + ac["j"]) if jumping else 0.0
+        jd = (p.pogo_jumped_steps if pogo_j else 0) + ac["j"]
+        S[JDSTEPS] = jd if np.isfinite(jd) else 100.0
+        att = fl("attacking")
+        a_on = on("attacking")
+        ds_on = on("downSpikeAntic")
+        # input queues
+        castbind = md in (M_CAST, M_BIND)
+        c_on = castbind and not (pmd in (M_CAST, M_BIND))
+        for row, bit, started, key in ((JQ, B_JUMP, j_on, "q_j"), (AQ, B_ATTACK, a_on or ds_on, "q_a"),
+                                       (QQ, B_QUICKCAST, c_on, "q_t")):
+            held = (mask & bit) != 0
+            q_on = held and not (pmask & bit) and not started
+            if q_on:
+                self._last_q[row] = i
+            if not held or started:
+                self._last_kill[row] = i
+            ac[key] = _acc(ac[key], q_on, steps, False)
+            alive = self._last_q[row] >= 0 and self._last_q[row] > self._last_kill[row]
+            S[row] = ac[key] if alive else -1.0
+        # gravity scale and air hang (_replay_gravity)
+        g, hh = self._g, self._h
+        relq = md in RELINQUISHED
+        noinp = md in NO_INPUT
+        if md == M_CAST and r["clip"] == "NeedleThrow Catch":
+            g = 1.0
+        elif md in (M_DS_ANTIC, M_DS_SPIKE, M_HURT_FREEZE, M_HURT_RECOIL, M_CAST, M_BIND):
+            g = 0.0
+        elif not first and pmd in (M_DS_ANTIC, M_DS_SPIKE, M_HURT_FREEZE, M_HURT_RECOIL, M_CAST, M_BIND):
+            g = 1.0
+        jheld_prev = ((pmask if not first else mask) & B_JUMP) != 0
+        for _ in range(int(r["fs"])):
+            vy = r["vel"][1]
+            if hh <= 0 and not ground and vy < 0:
+                if not relq and not noinp:
+                    g = p.air_hang_gravity
+                hh = 1.0
+            if ground:
+                hh = 0.0
+            ctl = not relq and not noinp
+            if ctl and g < 1.0:
+                g += p.air_hang_accel * p.fdt
+            if ctl and g < 1.0 and not jheld_prev:
+                g = 1.0
+            g = min(g, 1.0)
+        self._g, self._h = g, hh
+        S[GS], S[AIRHANG] = g, hh
+        # attacks
+        S[ATTACKING] = float(att)
+        ac["atk_t"] = _acc32(ac["atk_t"], a_on, dt, False)
+        S[ATK_T] = ac["atk_t"] if att else 0.0
+        ac["atk_cd"] = _acc32(ac["atk_cd"], a_on or ds_on, dt, True)
+        cd = float(_F32(p.attack_cooldown)) - ac["atk_cd"]
+        S[ATK_CD] = max(cd, 0.0) if np.isfinite(cd) else 0.0
+        # nail recoil
+        rl, rr = fl("recoilingLeft"), fl("recoilingRight")
+        ac["rsteps"] = _acc(ac["rsteps"], on("recoilingLeft") or on("recoilingRight"), steps, False)
+        S[RDIR] = -1.0 if rl else (1.0 if rr else 0.0)
+        S[RSTEPS] = max(p.recoil_steps - ac["rsteps"], 0.0) if S[RDIR] != 0 else 0.0
+        # downspike
+        if ds_on:
+            self._ds_face = 1.0 if r["facing"] >= 0 else -1.0
+            self._ds_seen = True
+        S[DS_HS] = self._ds_face * p.ds_speed if self._ds_seen else 0.0
+        rec = fl("downSpikeRecovery")
+        ac["ds_rec"] = _acc32(ac["ds_rec"], on("downSpikeRecovery"), dt, True)
+        S[DS_REC] = ac["ds_rec"] if rec else -1.0
+        bnc = fl("downSpikeBouncing")
+        ac["bounce"] = _acc(ac["bounce"], pogo_on, steps, False)
+        S[BOUNCE] = ac["bounce"] if bnc else -1.0
+        # time in mode
+        m_on = first or md != pmd
+        ac["t_in"] = _acc32(ac["t_in"], m_on, dt, True)
+        ac["t_after"] = _acc32(ac["t_after"], m_on, dt, False)
+        ac["st_after"] = _acc32(ac["st_after"], m_on, steps * float(_F32(p.fdt)), False)
+        ac["mode_n"] = _acc(ac["mode_n"], m_on, 1.0, False)
+        mt = ac["st_after"] if md == M_DS_SPIKE else (ac["t_in"] if md == M_DS_ANTIC else ac["t_after"])
+        S[MODE_T] = mt if np.isfinite(mt) else 0.0
+        S[MODE_N] = ac["mode_n"] if np.isfinite(ac["t_after"]) else 0.0
+        S[TS] = r["ts"]
+        # hit-stop replay (_freeze_replay): the latest hit's replay wins
+        if on("recoilFrozen"):
+            self._fz.append([0, _F32(0.0), 0.0, 0])
+        out = (0.0, 0.0, 0.0, 1.0)
+        keep = []
+        u = _F32(r["udt"])
+        for st in self._fz:
+            ph, t, tsv, k = st
+            res = None
+            ended = False
+            if ph == 0 and k >= p.hurt_wait_skip + 1:
+                t = _F32(t + u)
+                if t >= _F32(p.hurt_wait):
+                    ph, t = 1, _F32(0.0)
+                    res = (ph, 0.0, k + 1, tsv)
+            elif ph == 1:
+                t = _F32(t + u)
+                tsv = min(float(t) / p.hurt_ramp, 1.0)
+                if t >= _F32(p.hurt_ramp):
+                    res = (2, 0.0, k + 1, 1.0)
+                    ended = True
+            if res is None:
+                res = (ph, float(t), k + 1, tsv)
+            out = res
+            k += 1
+            if not ended and k < 40:
+                keep.append([ph, t, tsv, k])
+        self._fz = keep
+        if md == M_HURT_FREEZE:
+            S[PHASE] = min(out[0], 1.0)
+            S[MODE_T] = out[1]
+            S[MODE_N] = out[2]
+        if on("recoilFrozen"):
+            self._dmg_side = float(r["dmg"] if r["dmg"] != 0 else (1 if r["facing"] >= 0 else -1))
+        S[HVX] = -self._dmg_side * p.hurt_velocity
+        S[HVY] = p.hurt_velocity * p.hurt_vy_ratio
+        # Silkspear phase
+        cph = 1.0 if r["clip"] == "NeedleThrow Throwing" else (2.0 if r["clip"] == "NeedleThrow Catch" else 0.0)
+        cast = md == M_CAST
+        p_on = cast and (pmd != M_CAST or cph != pr.get("cph", 0.0))
+        ac["cast_t"] = _acc32(ac["cast_t"], p_on, dt, False)
+        if cast:
+            S[PHASE] = cph
+            if np.isfinite(ac["cast_t"]):
+                S[MODE_T] = ac["cast_t"]
+        inv = fl("invulnerable")
+        ac["inv"] = _acc32(ac["inv"], on("invulnerable"), dt, False)
+        left = float(_F32(p.invul_time)) - ac["inv"]
+        S[INV_T] = max(left, 0.0) if inv and np.isfinite(left) else 0.0
+        S[LEDGE] = 0.0
+        # exported timers and phase (_apply_exported)
+        if np.isfinite(r["alpha"]):
+            S[ALPHA] = S[ALO] = S[AHI] = r["alpha"]
+        tmv = np.asarray(r["tm"], dtype=np.float64)
+        if np.isfinite(tmv).any():
+            col = dict(zip(TM_KEYS, tmv))
+
+            def put(row: int, v: float, where: bool = True) -> None:
+                if np.isfinite(v) and where:
+                    S[row] = v
+
+            put(INV_T, max(col["inv"], 0.0) if np.isfinite(col["inv"]) else np.nan)
+            put(MODE_T, p.hurt_recoil_time - col["recoil"], md == M_HURT_RECOIL)
+            put(RSTEPS, col["recoil_steps"], S[RDIR] != 0)
+            put(ATK_CD, max(col["atk_cd"], 0.0) if np.isfinite(col["atk_cd"]) else np.nan)
+            put(ATK_T, col["atk_t"], S[ATTACKING] > 0)
+            put(JSTEPS, col["jump_steps"], S[JUMPING] > 0)
+            put(JDSTEPS, col["jumped_steps"])
+            put(MODE_T, col["ds"], md in (M_DS_ANTIC, M_DS_SPIKE))
+            put(DS_REC, col["ds_rec"], S[DS_REC] >= 0)
+            put(GS, col["grav"])
+            for row, k, j, bit in ((JQ, "qj", 12, B_JUMP), (AQ, "qa", 13, B_ATTACK), (QQ, "qt", 14, B_QUICKCAST)):
+                v, before = col[k], self._tm_prev[j]
+                grew = np.isfinite(before) and np.isfinite(v) and v > before and (mask & bit) != 0
+                if np.isfinite(v) and (S[row] >= 0 or grew):
+                    S[row] = max(v, 0.0)
+        self._tm_prev = tmv
+        # contact events (derive_events)
+        ev = 0
+        if on("recoilingLeft"):
+            ev |= EV_RECOIL_L
+        if on("recoilingRight"):
+            ev |= EV_RECOIL_R
+        if pogo_on:
+            ev |= EV_POGO
+        if r["clip"] == "NeedleThrow Catch" and pr.get("clip") != "NeedleThrow Catch" and md == M_CAST:
+            ev |= EV_CATCH
+        if not first and r["silk"] > pr["silk"]:
+            ev |= EV_SILK
+        vy, vy0 = r["vel"][1], (0.0 if first else pr["vel"][1])
+        rising = vy0 > 0 or ((was("jumping") if not first else False) and r["fs"] > 0)
+        if (vy == 0 and rising and not ground and md == M_NORMAL and pmd == M_NORMAL and
+                (att or fl("upAttacking"))):
+            ev |= EV_RECOIL_DOWN
+        if on("recoilFrozen"):
+            ev |= EV_HURT_L if self._dmg_side < 0 else EV_HURT_R
+        if md == M_LOCKED and pmd != M_LOCKED:
+            ev |= EV_LOCK
+        if md != M_LOCKED and pmd == M_LOCKED:
+            ev |= EV_UNLOCK
+        # does the model own this frame's motion (kin_check categories)
+        if r.get("load"):
+            self._slide_left = SLIDE_SPAN[1]
+        slide = self._slide_left > 0
+        self._slide_left = max(self._slide_left - 1, 0)
+        other = (r["marks"] & MK_FREEZE) != 0
+        if md == M_HURT_FREEZE:
+            self._other_in_hitstop = self._other_in_hitstop or other or bool(pr.get("other", False))
+        elif pmd != M_HURT_FREEZE:
+            self._other_in_hitstop = False
+        world = (r["ts"] < 0.999 and md != M_HURT_FREEZE) or other or self._other_in_hitstop
+        bad_marks = (r["marks"] & (MK_HARNESS | MK_HAZARD | MK_SCENE | MK_DEATH)) != 0
+        valid = bool(r["valid"]) and np.isfinite(r["box"][0])
+        gap = not first and r["f"] != pr["f"] + 1
+        self.modelled = bool(valid and not gap and not bad_marks and not slide and md != M_LOCKED and
+                             not fl("nailCharging") and not world and r["udt"] <= p.frame_time_max)
+        if md != M_HURT_FREEZE and pmd == M_HURT_FREEZE:
+            self._other_in_hitstop = False
+        # terrain contact (estimate_state)
+        if self.terrain is not None:
+            near = _on_ground(S[PX:PX + 1], S[PY:PY + 1], P, self.terrain.hseg)[0]
+            S[TOUCH] = float(near and S[GROUND] <= 0 and S[VY] < 0)
+        self.S = S
+        self.events = ev
+        self.f, self.box, self.mask, self.udt = r["f"], r["box"], mask, r["udt"]
+        self._p = {"cs": cs, "mask": mask, "mode": md, "phys": phys, "vel": r["vel"], "silk": r["silk"],
+                   "clip": r["clip"], "cph": cph, "f": r["f"], "other": other}
+        self.n += 1
+
+    def state(self) -> np.ndarray:
+        """[K, 1] model state at the latest frame."""
+        return self.S[:, None].copy()
+
+
 # ---- runtime residual monitor (DESIGN §3.5.2) -----------------------------------------------------------------
 
+MONITOR_ALARM_WITHIN = 0.97   # calibrated on held-out play (see ResidualMonitor)
+MONITOR_ALARM_FAR = 6
+
+
 class ResidualMonitor:
-    """Compares the observed collider centre with what the model predicted h frames earlier for the commands that
-    were actually executed, and reports to the supervisor (I4 confidence "kinematics", DESIGN §3.7.2).
+    """Runtime residual monitor (DESIGN §3.5.2; I4 confidence "kinematics", DESIGN §3.7.2). It checks the claim the
+    planner relies on, on the commands that were executed: from the model state at an anchor frame a it re-rolls the
+    latched masks the game read (STATE act.mask) and the contact events it observed (the threat layer's job at plan
+    time) at nominal timing with the timing lanes, and asks whether the observed collider box h frames later lies in
+    the lanes' hull dilated by tol (Rollout.bound, variants "bounds"). Re-rolling the executed stream makes replans
+    irrelevant: a plan abandoned after one frame is never scored. Frames the model does not own (StateTracker
+    .modelled False: harness operations, scene changes, hazard respawns, deaths, savestate slides, control taken by
+    another FSM, nail arts, world freezes, hitches above frame_time_max, gaps) drop every anchor whose window holds
+    them. The nominal lane's centre error is reported beside it (a point prediction misses one-step timing branches
+    the history cannot resolve, so it is no alarm criterion).
 
-        mon = ResidualMonitor()
-        mon.predict(f, roll.centre[k])          # each tick: the lane of the plan that was sent, from frame f
-        mon.observe(f, hero_centre)             # each STATE: residuals of every prediction that targets f
-        mon.invalidate()                        # an unpredicted contact event, a harness op or a scene change
-        mon.status()                            # per horizon: n, share within tol, p99, max; ok; confidence
+        mon = ResidualMonitor(params, terrain)
+        trk.push(state); mon.update(trk)       # each STATE: score the anchors whose horizon ends now, anchor this one
+        mon.status()                           # per horizon: n, within, p99, max; "state": unknown / ok / degraded
+        mon.confidence()                       # share within at the longest horizon; None while unknown
 
-    Predictions made before a contact event the plan did not contain are dropped (invalidate), not scored: the
-    monitor watches the model, the threat layer's misses are reported by the threat layer. ok goes false when the
-    share within tol at the acceptance horizon (30 frames) falls below `target` over the last `window` residuals,
-    or one residual exceeds `hard_u`."""
+    Unknown is never safe: before min_n scored windows (after construction or reset(), which a new scene or terrain
+    needs) the state is "unknown" and confidence() None; pass it to safety.invariants.i4 only when it is not None (a missing
+    module counts as below its threshold). "degraded" when, over the last `window` scored windows at the longest
+    horizon, the share within tol falls below alarm_within or more than alarm_far of them lie more than far_u outside
+    the hull. The levels are calibrated on held-out play (ssbot.tools.kin_check --monitor, module docstring)."""
 
-    def __init__(self, horizons: tuple[int, ...] = (1, 6, 30), tol: float = 0.1, window: int = 600,
-                 target: float = 0.99, hard_u: float = 0.5, min_n: int = 60):
+    def __init__(self, params: HeroParams, terrain: Terrain2D | None = None, horizons: tuple[int, ...] = (1, 6, 30),
+                 tol: float = 0.1, window: int = 600, min_n: int = 60, alarm_within: float = MONITOR_ALARM_WITHIN,
+                 far_u: float = 0.5, alarm_far: int = MONITOR_ALARM_FAR, variants: str | tuple = "bounds",
+                 stride: int = 1):
+        self.params, self.terrain = params, terrain
         self.horizons = tuple(sorted(horizons))
-        self.tol, self.window, self.target, self.hard_u, self.min_n = tol, window, target, hard_u, min_n
-        self.pending: dict[int, list[tuple[int, float, float]]] = {}     # target frame -> [(h, x, y)]
+        self.tol, self.window, self.min_n = tol, window, min_n
+        self.alarm_within, self.far_u, self.alarm_far = alarm_within, far_u, alarm_far
+        self.variants, self.stride = variants, max(int(stride), 1)
+        self.anchors: dict[int, np.ndarray] = {}
+        self.cmd: dict[int, tuple[int, int]] = {}
+        self.exc = {h: np.full(window, np.nan) for h in self.horizons}
         self.err = {h: np.full(window, np.nan) for h in self.horizons}
         self.k = {h: 0 for h in self.horizons}
-        self.n = {h: 0 for h in self.horizons}
-        self.worst = 0.0
+        self.scored = {h: 0 for h in self.horizons}
         self.dropped = 0
+        self.last_f: int | None = None
 
-    def predict(self, frame: int, centres: np.ndarray) -> None:
-        """centres [T+1, 2]: the executed lane's collider centres from `frame` (index 0) on."""
-        for h in self.horizons:
-            if h < len(centres):
-                self.pending.setdefault(frame + h, []).append((h, float(centres[h, 0]), float(centres[h, 1])))
+    def reset(self) -> None:
+        """Forget everything (a new scene: other terrain, other evidence)."""
+        self.__init__(self.params, self.terrain, self.horizons, self.tol, self.window, self.min_n, self.alarm_within,
+                      self.far_u, self.alarm_far, self.variants, self.stride)
 
-    def observe(self, frame: int, centre: tuple[float, float]) -> None:
-        for f in [f for f in self.pending if f < frame]:
-            self.dropped += len(self.pending.pop(f))       # skipped frames: nothing observed for them
-        for h, x, y in self.pending.pop(frame, ()):
-            e = float(np.hypot(centre[0] - x, centre[1] - y))
-            self.err[h][self.k[h] % self.window] = e
-            self.k[h] += 1
-            self.n[h] += 1
-            self.worst = max(self.worst, e)
+    def anchor(self, frame: int, state: np.ndarray) -> None:
+        """The model state at `frame` (StateTracker.state() / estimate_state), after observe(frame, ...)."""
+        if frame % self.stride == 0:
+            S = np.asarray(state, dtype=np.float64)
+            self.anchors[frame] = (S[:, 0] if S.ndim == 2 else S).copy()
 
     def invalidate(self) -> None:
-        self.dropped += sum(len(v) for v in self.pending.values())
-        self.pending.clear()
+        """Drop every pending anchor (the caller knows the motion is not the model's)."""
+        self.dropped += len(self.anchors)
+        self.anchors.clear()
+
+    def observe(self, frame: int, box: np.ndarray, mask: int, events: int = 0, modelled: bool = True) -> None:
+        """One STATE: the collider box, the latched mask the game read and the contact events of `frame`."""
+        if self.last_f is not None and frame != self.last_f + 1:
+            self.invalidate()
+        self.last_f = frame
+        self.cmd[frame] = (int(mask), int(events))
+        H = self.horizons[-1]
+        for f in [f for f in self.cmd if f < frame - H]:
+            del self.cmd[f]
+        if not modelled or not np.isfinite(np.asarray(box, dtype=np.float64)).all():
+            self.invalidate()
+            return
+        due = [(a, frame - a) for a in self.anchors if frame - a in self.horizons]
+        if due:
+            T = max(h for _, h in due)
+            masks = np.zeros((len(due), T), dtype=np.int64)
+            ev = np.zeros((len(due), T), dtype=np.int64)
+            for j, (a, h) in enumerate(due):
+                for t in range(h):
+                    masks[j, t], ev[j, t] = self.cmd[a + 1 + t]
+            start = np.stack([self.anchors[a] for a, _ in due], axis=1)
+            r = rollout(start, masks, self.params, self.terrain, events=ev, variants=self.variants)
+            b = np.asarray(box, dtype=np.float64)
+            c = 0.5 * (b[:2] + b[2:])
+            for j, (a, h) in enumerate(due):
+                u = r.bound[j, h]
+                e = max(u[0] - b[0], u[1] - b[1], b[2] - u[2], b[3] - u[3], 0.0)
+                n = r.box[j, h]
+                slot = self.k[h] % self.window
+                self.exc[h][slot] = e
+                self.err[h][slot] = float(np.hypot(*(0.5 * (n[:2] + n[2:]) - c)))
+                self.k[h] += 1
+                self.scored[h] += 1
+        for a in [a for a in self.anchors if frame - a >= H]:
+            del self.anchors[a]
+
+    def update(self, trk: "StateTracker") -> None:
+        """observe() the tracker's latest frame, then anchor its state."""
+        self.observe(trk.f, trk.box, trk.mask, trk.events, trk.modelled)
+        if trk.modelled:
+            self.anchor(trk.f, trk.S)
 
     def status(self) -> dict[str, Any]:
-        out: dict[str, Any] = {"horizons": {}, "dropped": self.dropped, "worst_u": round(self.worst, 4)}
+        out: dict[str, Any] = {"horizons": {}, "dropped": self.dropped}
         for h in self.horizons:
-            e = self.err[h][np.isfinite(self.err[h])]
-            out["horizons"][h] = {"n": int(len(e)), "within": float(np.mean(e <= self.tol)) if len(e) else None,
+            e = self.exc[h][np.isfinite(self.exc[h])]
+            d = self.err[h][np.isfinite(self.err[h])]
+            out["horizons"][h] = {"n": int(len(e)), "scored": self.scored[h],
+                                  "within": float(np.mean(e <= self.tol)) if len(e) else None,
+                                  "far": int(np.sum(e > self.far_u)),
                                   "p99": float(np.percentile(e, 99)) if len(e) else None,
-                                  "max": float(e.max()) if len(e) else None}
+                                  "max": float(e.max()) if len(e) else None,
+                                  "nominal_within": float(np.mean(d <= self.tol)) if len(d) else None}
         acc = out["horizons"][self.horizons[-1]]
-        enough = acc["n"] >= self.min_n
-        recent_max = max((v["max"] or 0.0) for v in out["horizons"].values())
-        out["ok"] = (not enough or acc["within"] >= self.target) and recent_max <= self.hard_u
-        out["confidence"] = (acc["within"] if enough else 1.0) if recent_max <= self.hard_u else 0.0
+        if acc["n"] < self.min_n:
+            out["state"], out["confidence"] = "unknown", None
+        else:
+            good = acc["within"] >= self.alarm_within and acc["far"] <= self.alarm_far
+            out["state"], out["confidence"] = ("ok" if good else "degraded"), acc["within"]
+        out["ok"] = out["state"] == "ok"
         return out
 
-    def confidence(self) -> float:
-        return float(self.status()["confidence"])
+    def confidence(self) -> float | None:
+        return self.status()["confidence"]
 
 
 def describe_state(S: np.ndarray, i: int = 0) -> dict[str, Any]:
