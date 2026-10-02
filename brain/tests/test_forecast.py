@@ -272,3 +272,24 @@ def test_ve_bell_cue_places_the_bells_self_template(model, templates):
     f = fc.forecast(2.0)
     own = [p for p in f.placements if p.key.endswith("DropBell M2/self")]
     assert len(own) == 13 and {p.anchor for p in own} == {(84.5, 13.74)}
+
+
+def test_attack_fit_recovers_the_start_and_rejects_another_path(model):
+    """combat.attack_fit: noisy observations along the charge template give back its start within 2 frames; a boss
+    that stands still fails the residual test (fallback to the broad support)."""
+    from ssbot.combat.attack_fit import AttackFit
+    an = model.anchor("BB_CHARGE", "Set L")
+    path = model.families["BB_CHARGE"].path
+    rng = np.random.default_rng(3)
+    ts = 10.0
+    fit = AttackFit(model)
+    fit.start("BB_CHARGE", an, ts + 0.08)                      # the phase-level guess, 5 frames late
+    for t in np.arange(ts + 2.4, ts + 3.1, 1 / 60):            # the run across the arena
+        x = an.x + an.mirror * np.interp(t - ts, path[:, 0], path[:, 6]) + rng.normal(0, 0.15)
+        fit.observe(t, x, 5.5)
+    r = fit.result()
+    assert r is not None and r.ok and abs(r.t_start - ts) <= 2 / 60 and abs(r.dx) < 0.2
+    fit.start("BB_CHARGE", an, ts)
+    for t in np.arange(ts + 2.4, ts + 3.1, 1 / 60):
+        fit.observe(t, 85.0, 5.5)
+    assert not fit.result().ok
