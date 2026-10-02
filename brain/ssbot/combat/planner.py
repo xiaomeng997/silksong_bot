@@ -228,6 +228,7 @@ class Planner:
         self.last_recoil = 0          # ... with a predicted nail recoil
         self.last_bell_pogo = 0       # ... bouncing off a registry target (a bell)
         self._pogo_ok = np.zeros(0, bool)
+        self._redirect: dict[int, tuple] = {}
         self.pogo_log = {"generated": 0, "lane_miss": 0, "accepted": 0}   # last tick's pogo plans: every lane
         #                                                                     connects or rejected (S)
         self.jump_until = -1          # tick until which the pressed jump's hold schedule is committed
@@ -245,7 +246,7 @@ class Planner:
         hx, hy = f.fc.half
         X, Y, rows, too_wide = _hull_points(np.ascontiguousarray(bound), hx, hy, self.cfg.max_points)
         if redirect is not None:
-            hit = f.occupied_redirect(X, Y, tk, *redirect)
+            hit = f.occupied_redirect(X, Y, tk, *redirect, comfort=comfort)
             if hit is None:
                 return None
         else:
@@ -326,6 +327,8 @@ class Planner:
         J, hits, may_kill = self._score(ws, roll_j, latched, start, f, prefs, P, tk)
         if cont:
             J[-1] += prefs.weights.get("cont", 0.0)
+        if self._redirect:
+            self._redirect_value(f, roll_j, tk, J, S, S2, ctx, prefs, enemy_only, min(T1, COMFORT_FRAMES + P + 1))
         U = unpausable(may_kill, ctx) if ctx.hp else np.zeros(N, bool)
         t4 = time.perf_counter()
         # a jump's hold is committed when it is pressed (DESIGN §3.5.4): a plan that releases it early, or casts
@@ -468,6 +471,10 @@ class Planner:
         self.last_pogo = 0
         self.last_recoil = 0
         self.last_bell_pogo = 0
+        self.last_redirect = 0
+        self.redirect_rows: list[int] = []        # rows whose side slash knocks a drop bell aside (audits, J)
+        self._redirect: dict[int, tuple] = {}     # ... their (bell type key, hit time, direction)
+        self.side_bell_rows = 0                   # rows whose first side slash meets a bell at all
         self._fx_ev = None
         self.pogo_log = {"generated": 0, "lane_miss": 0, "accepted": 0, "bell": 0}
         self._pogo_ok = np.zeros(len(latched), bool)
@@ -530,6 +537,7 @@ class Planner:
             box[sub], flags[sub], mode[sub], bound[sub], fall[sub] = rh.box, rh.flags, rh.mode, rh.bound, rh.flags_all
             cur = _View(box, flags, mode, bound, fall)
         self._fx_ev = ev
+        self.side_bell_rows = int((side_tgt > 0).sum())
         sub = np.flatnonzero(rows_all)
         s_hit = np.zeros(N, bool)
         if len(sub):
@@ -551,6 +559,7 @@ class Planner:
             # a side slash on a drop bell knocks it away from the hitter (TINK): its support is its one redirected
             # path instead of both bounce sides (Forecast.occupied_redirect); the slash's own safety as usual
             self.last_redirect = 0
+            self.redirect_rows = []
             for n_ in np.flatnonzero(side_tgt[sub] > 0):
                 g = tgts[int(side_tgt[sub[n_]])]
                 if not g.redirect:
@@ -561,6 +570,8 @@ class Planner:
                 if o is not None:
                     occ[n_] = o[0]
                     self.last_redirect += 1
+                    self.redirect_rows.append(int(c))
+                    self._redirect[int(c)] = (g.name, float(tk[min(side_f[c], len(tk) - 1)]), int(side_d[c]))
             s_hit[sub] = occ.any(axis=1)
             S[sub] |= s_hit[sub]
         # a pogo plan stands only if the down spike connects in every timing lane (DESIGN 3.5.6: a miss lands the hero
@@ -601,6 +612,45 @@ class Planner:
                         self._pogo_ok[c] = True
                         self.pogo_log["bell"] += int(pogo_tgt[c] > 0)
         return cur
+
+    def _redirect_value(self, f: Forecast, roll_j, tk: np.ndarray, J: np.ndarray, S: np.ndarray, S2: np.ndarray,
+                        ctx: FilterContext, prefs: TacticPrefs, enemy_only: bool, tc: int) -> None:
+        """What knocking a falling drop bell aside is worth (the person, 2026-10-02: hitting a bell shrinks the danger
+        zone; the bot only ever dodged them). For each safe redirect candidate:
+        - comfort is checked against the bell's one redirected path, not both bounce sides (against both, every
+          redirect lost the comfort rank to plans that keep clearance from the side the bell no longer takes);
+        - J gains bell_free (playbook weight, default 8; doubled outside GREEN: at h <= 2 freeing room matters more)
+          times the share of probe points near the hero (her x -4.5 .. +4.5 u every 1.5 u and the stance, at her
+          height and 3 u above, every 3 frames from the hit to the horizon's end) that the both-sides support
+          covers and the redirected one does not.
+        FORCED_RISK turned into a safe plan needs no bonus: S = 0 ranks first. J and S2 are updated in place."""
+        w = prefs.weights.get("bell_free", 8.0) * (1.0 if ctx.tier == "GREEN" else 2.0)
+        cache: dict = {}
+        for c, (name, t_hit, d) in self._redirect.items():
+            if c >= len(S) or S[c]:
+                continue
+            sk = (((roll_j.flags_all[c:c + 1, :tc] & F_INVULN) != 0) if enemy_only
+                  else np.zeros((1, tc), bool))
+            o = self._contacts(f, roll_j.bound[c:c + 1, :tc], tk[:tc], sk, comfort=True, redirect=(name, t_hit, d))
+            if o is not None:
+                S2[c] = bool(o[0].any())
+            key = (name, int(round(t_hit * 60)), d)
+            if key not in cache:
+                b0 = roll_j.box[c, 0]
+                cx, cy = 0.5 * (b0[0] + b0[2]), 0.5 * (b0[1] + b0[3])
+                xs = np.concatenate([cx + np.arange(-4.5, 4.6, 1.5), [prefs.stance_x]])
+                X = np.concatenate([xs, xs])[:, None]
+                Y = np.concatenate([np.full(len(xs), cy), np.full(len(xs), cy + 3.0)])[:, None]
+                tq = tk[(tk >= t_hit)][::3]
+                if not len(tq):
+                    cache[key] = 0.0
+                    continue
+                X = np.repeat(X, len(tq), axis=1)
+                Y = np.repeat(Y, len(tq), axis=1)
+                both = f.occupied(X, Y, tq)
+                one = f.occupied_redirect(X, Y, tq, name, t_hit, d)
+                cache[key] = 0.0 if one is None else float((both & ~one).mean())
+            J[c] += w * cache[key]
 
     def _targets(self, f: Forecast, tk: np.ndarray) -> list["_Target"]:
         """What an attack can hit in the rollout: the boss's predicted hurtbox (target 0, when drawn), then the
@@ -774,6 +824,14 @@ class Planner:
             tr = kin.rollout(start, latched, self.params, self.terrain, variants=self.cfg.variants,
                              threads=self.cfg.threads)
             occ = self._contacts(f, tr.bound, tk, np.zeros((k * nt, tails.shape[1] + 1), bool))
+            for j, c in enumerate(rows):
+                # a plan that knocked a drop bell aside goes on against its one redirected path
+                rd = self._redirect.get(int(c))
+                if rd is not None:
+                    o = self._contacts(f, tr.bound[j * nt:(j + 1) * nt], tk,
+                                       np.zeros((nt, tails.shape[1] + 1), bool), redirect=rd)
+                    if o is not None:
+                        occ[j * nt:(j + 1) * nt] = o
             ok = (~occ.any(axis=1)).reshape(k, nt).any(axis=1)
             if ok.any():
                 return int(rows[int(np.argmax(ok))]), True
