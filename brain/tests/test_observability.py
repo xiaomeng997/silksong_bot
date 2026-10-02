@@ -6,6 +6,7 @@ import json
 import numpy as np
 import pytest
 from shapely.geometry import Polygon, box as sbox
+from shapely.ops import unary_union
 
 from ssbot.backends import observability as obs
 from ssbot.backends.degraded import DegradedOracleBackend
@@ -163,10 +164,8 @@ def test_slow_motion_blocks_pause_without_a_freeze_event(wake, wake_v):
 def test_box_activity_does_not_depend_on_the_fsm(wake):
     """With the box table known, the boss's vision boxes are the same whatever its Control state, collider enables
     and which child colliders the oracle exports, and all of them are active."""
-    table = BoxTable()
-    f0 = ObservabilityFilter(bosses=[BELL_BEAST], box_table=table)
-    for w in wake:
-        f0.apply(w)
+    table = BoxTable.load()
+    assert "Bone Beast" in table.frozen
     states = fx.window(0)
     edited = fx.window(0)
     for s in edited:
@@ -190,13 +189,30 @@ def test_box_activity_does_not_depend_on_the_fsm(wake):
     assert n > 100
 
 
-def test_box_table_covers_the_hit_contacts(wake, wake_v):
-    """The logged boss hit (56777): the hero hurtbox touches a vision-view box of the source."""
-    i = next(i for i, w in enumerate(wake) if w.stamp.frame == 56777)
-    hit = next(e.data for e in wake[i].events if e.kind == Ev.HIT_TAKEN)
-    hb = Polygon(wake[i].hero.hurtbox)
-    ent = next(e for e in wake_v[i].entities if e.id == hit.source_id)
-    assert any(Polygon(d.poly).intersects(hb) for d in ent.dmg_boxes if d.active)
+def test_shipped_box_table_generalises_to_held_out_hits(wake):
+    """The shipped table (knowledge/.../box_tables.json, built from live run instance 0 only) is frozen: the filter
+    learns nothing from this run. On the trial run (held out) every active oracle box of a visible entity lies inside
+    the entity's vision boxes (698 boxes in the three windows), and the logged charge hit at 56777 touches them."""
+    table = BoxTable.load()
+    before = table.to_dict()
+    n = 0
+    for i in range(3):
+        ws = wake if i == 0 else oracle_frames(i)
+        for w, v in zip(ws, filtered(ws, box_table=table)):
+            vis = {e.id: e for e in v.entities if e.visible_frac > 0}
+            for e in w.entities:
+                if e.id not in vis:
+                    continue
+                union = unary_union([Polygon(d.poly) for d in vis[e.id].dmg_boxes]).buffer(1e-6)
+                for d in e.dmg_boxes:
+                    if d.active and len(d.poly) > 2:
+                        assert union.contains(Polygon(d.poly)), (w.stamp.frame, e.type_key.v)
+                        n += 1
+            if w.stamp.frame == 56777:
+                hit = next(x.data for x in w.events if x.kind == Ev.HIT_TAKEN)
+                ent = vis[hit.source_id]
+                assert any(Polygon(d.poly).intersects(Polygon(w.hero.hurtbox)) for d in ent.dmg_boxes)
+    assert n > 600 and table.to_dict() == before
 
 
 def test_box_table_mirrors_with_the_flip():
@@ -208,6 +224,8 @@ def test_box_table_mirrors_with_the_flip():
     assert min(x for x, _ in right) == 21.0 and max(x for x, _ in left) == 19.0 and min(y for _, y in left) == 5.0
     again = BoxTable.from_dict(json.loads(json.dumps(t.to_dict())))           # an offline table round-trips
     assert again.place("X", (20.0, 5.0), True) == t.place("X", (20.0, 5.0), True)
+    again.learn("X", (0.0, 0.0), False, [DamageBox(poly=[(50.0, 50.0), (60.0, 60.0)], hazard=Hazard.ENEMY)])
+    assert again.place("X", (20.0, 5.0), True) == t.place("X", (20.0, 5.0), True)   # frozen: not learnt online
 
 
 # ---- visibility -------------------------------------------------------------------------------------------------

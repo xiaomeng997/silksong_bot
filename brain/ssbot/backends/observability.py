@@ -21,10 +21,12 @@ Rule: no value in the output may depend on something pixels cannot show. Per fra
     off-screen.
   - Damage boxes: the box activity and which child colliders exist are FSM timing (trial run: the Bell Beast's
     charge polygon exists only in Charge Antic / Charge, its leap polygon only in Leap Out / Descending). Until the
-    hitbox tables of W2 are wired in, every visible entity carries its type's box table (BoxTable: the union, in the
-    entity's mirrored transform frame, of every damage collider of that type seen so far, one axis-aligned box per
-    collider), all active. A box's first appearance is the only timing that leaks; pass box_table= from offline
-    tables to remove that too.
+    hitbox tables of W2 are wired in, every visible entity carries its type's box table (BoxTable: one axis-aligned
+    box per collider, the union of every damage collider of that type, relative to Entity.pos and mirrored with
+    flipX), all active. The default is the shipped offline table (knowledge/1.0.30000/enemies/box_tables.json, built
+    by ssbot.tools.box_table_build from live run instance 0, i0_000 + i0_001: 516,967 STATEs), frozen, so nothing
+    about the boxes depends on the current run; only types missing from it are learnt online, where a collider's
+    first appearance still shows FSM timing.
   - Pause / quit availability and blockers are rebuilt from vision cues (DESIGN §3.7.5): screen mode (a dialogue
     box blocks); the 0.3 s real-time lockout after its own PAUSE_ON/OFF edges; < 0.3 s since a hit taken (trial
     run: the first pausable frame after a hit came 0.215-0.250 s later in 99 of 101 hits; probe P7: 0.25 s); a
@@ -74,9 +76,11 @@ The per-frame visibility kernel (polygon clipping against the viewport rectangle
 runs under @numba.njit; clip_fractions_ref is the plain reference the tests hold it to, and shapely the external
 check.
 """
+import json
 import math
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, replace
+from pathlib import Path
 from typing import Protocol
 
 import numpy as np
@@ -96,6 +100,7 @@ except ImportError:   # pragma: no cover
 # clip at the hit (the bot knows what it did). Hunter crest, needle level 0 (the M2 loadout), live Bell Beast run
 # 20261001_122249: the 460 hits dealt with "NeedleThrow Throwing" (Silk Spear) took 15 HP, the other 4,081 took 5 HP.
 DEFAULT_ATTACK_DAMAGE = {"NeedleThrow Throwing": 15.0}
+DEFAULT_BOX_TABLE = Path(__file__).resolve().parents[3] / "knowledge" / "1.0.30000" / "enemies" / "box_tables.json"
 UNKNOWN_PHASE = "unknown"
 HIDDEN_PHASE = "hidden"
 # Memory-track lifetime per kind (game seconds); placeholders until M3 measures re-detection gaps.
@@ -296,12 +301,15 @@ class _LocalBox:
 
 class BoxTable:
     """Per type_key, the union of every damage collider seen, one axis-aligned box per collider (keyed by its name
-    when exported, else its point count and rank), in the entity's frame: x mirrored when flip_x, relative to the
-    transform. Colliders mirror with the transform's negative x scale while flipX also folds in the sprite flip, so a
-    wrong guess only widens the union to both sides (still a superset of what was seen)."""
+    when exported, else its point count and rank), in the entity's frame: x mirrored when flip_x, relative to
+    Entity.pos (decision 1: the main body collider centre, else the sprite bounds centre; both visible), so vision can
+    place it. Colliders mirror with the transform's negative x scale while flipX also folds in the sprite flip, so a
+    wrong guess only widens the union to both sides (still a superset of what was seen). Types in `frozen` (an offline
+    table, see load) are not learnt online: their boxes do not depend on anything the current run showed."""
 
     def __init__(self) -> None:
         self.t: dict[str, dict[tuple, _LocalBox]] = {}
+        self.frozen: set[str] = set()
 
     @staticmethod
     def _keys(boxes: list[DamageBox]) -> list[tuple]:
@@ -315,7 +323,7 @@ class BoxTable:
         return out
 
     def learn(self, type_key: str, anchor: tuple[float, float], flip: bool, boxes: list[DamageBox]) -> None:
-        if not boxes:
+        if not boxes or type_key in self.frozen:
             return
         tab = self.t.setdefault(type_key, {})
         s = -1.0 if flip else 1.0
@@ -341,12 +349,24 @@ class BoxTable:
                 for tk, tab in self.t.items()}
 
     @classmethod
-    def from_dict(cls, d: Mapping[str, list]) -> "BoxTable":
+    def from_dict(cls, d: Mapping[str, list], frozen: bool = True) -> "BoxTable":
         bt = cls()
         for tk, rows in d.items():
             bt.t[tk] = {tuple(k): _LocalBox(list(map(float, box)), Hazard(hz), frozenset(fl), int(dmg))
                         for k, box, hz, fl, dmg in rows}
+        if frozen:
+            bt.frozen = set(bt.t)
         return bt
+
+    @classmethod
+    def load(cls, path: Path | str | None = None) -> "BoxTable":
+        """The offline table (default: the shipped knowledge/<build>/enemies/box_tables.json, built by
+        ssbot.tools.box_table_build), every type frozen; an empty table when the file is missing."""
+        p = Path(path) if path is not None else DEFAULT_BOX_TABLE
+        if not p.is_file():
+            return cls()
+        doc = json.loads(p.read_text("utf-8"))
+        return cls.from_dict(doc["types"])
 
     def place(self, type_key: str, anchor: tuple[float, float], flip: bool) -> list[DamageBox]:
         tab = self.t.get(type_key)
@@ -403,7 +423,7 @@ class ObservabilityFilter:
         self.drift = drift
         self.quit_map = quit_map
         self.min_p = min_p
-        self.boxes = box_table if box_table is not None else BoxTable()   # knowledge: survives reset()
+        self.boxes = box_table if box_table is not None else BoxTable.load()   # knowledge: survives reset()
         self.reset()
 
     def reset(self) -> None:
@@ -444,10 +464,9 @@ class ObservabilityFilter:
             self._freeze_q.clear()
         unobs = Unobs.TIMERS_DROPPED | Unobs.PLAYTIME_WALL | Unobs.PAUSE_INFERRED
 
-        src = {e.id: e for e in ws.entities}
-        for e in ws.entities:                      # tables are knowledge: learn from every exported entity
-            if not e.hidden and e.dmg_boxes and e.pos_transform is not None:
-                self.boxes.learn(e.type_key.v, e.pos_transform, e.flip_x, e.dmg_boxes)
+        for e in ws.entities:                      # types without an offline table: learn from every exported one
+            if not e.hidden and e.dmg_boxes:
+                self.boxes.learn(e.type_key.v, e.pos.v, e.flip_x, e.dmg_boxes)
 
         frac, inside = self._visibility(out)
         visible: list[Entity] = []
@@ -479,9 +498,8 @@ class ObservabilityFilter:
 
         for e in visible:
             unobs |= self._estimate(e, t)
-            o = src.get(e.id)
-            if o is not None and o.pos_transform is not None and self.boxes.t.get(e.type_key.v):
-                e.dmg_boxes = self.boxes.place(e.type_key.v, o.pos_transform, o.flip_x)
+            if self.boxes.t.get(e.type_key.v):
+                e.dmg_boxes = self.boxes.place(e.type_key.v, e.pos.v, e.flip_x)
                 unobs |= Unobs.BOXES_FROM_TABLE
             else:
                 e.dmg_boxes = [replace(b, active=True) for b in e.dmg_boxes]

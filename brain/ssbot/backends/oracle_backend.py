@@ -249,6 +249,20 @@ def main_collider(e: dict) -> dict | None:
     return cols[0]
 
 
+def damage_boxes(e: dict) -> list[DamageBox]:
+    """One DamageBox per exported collider with a "damage" map; active = enabled and able to deal damage now."""
+    cog = bool((e.get("src") or 0) & SRC_BITS["cog"])
+    out = []
+    for c in e.get("colliders") or ():
+        d = c.get("damage")
+        if d is not None:
+            eff, dealt = int(d.get("eff") or 0), int(d.get("dealt") or 0)
+            out.append(DamageBox(poly=_pts(c["verts_world"]), active=is_threat(c), hazard=box_hazard(d, cog),
+                                 flags=damage_flags(d, cog), name=c.get("name"),
+                                 dmg_seq=(eff,) if eff > 0 else (dealt,) if dealt > 0 else ()))
+    return out
+
+
 def entity_pos(e: dict) -> tuple[float, float]:
     """Entity.pos per §4.1: main body collider centre, else render_aabb centre, else the transform."""
     c = main_collider(e)
@@ -647,18 +661,8 @@ class OracleBackend:
             facing = E(1 if vx > 0 else -1, conf=0.6, src=Src.PREDICTED) if abs(vx) > 0.1 else \
                 E(-1 if flip else 1, conf=0.3, src=Src.PREDICTED)
 
-            body, boxes = [], []
-            cog = bool(src & SRC_BITS["cog"])
-            for c in e.get("colliders") or ():
-                pts = _pts(c["verts_world"])
-                if c.get("enabled"):
-                    body.append(pts)
-                d = c.get("damage")
-                if d is not None:
-                    eff, dealt = int(d.get("eff") or 0), int(d.get("dealt") or 0)
-                    boxes.append(DamageBox(poly=pts, active=is_threat(c), hazard=box_hazard(d, cog),
-                                           flags=damage_flags(d, cog), name=c.get("name"),
-                                           dmg_seq=(eff,) if eff > 0 else (dealt,) if dealt > 0 else ()))
+            body = [_pts(c["verts_world"]) for c in e.get("colliders") or () if c.get("enabled")]
+            boxes = damage_boxes(e)
 
             fsm = []
             for fs in e.get("fsms") or ():
