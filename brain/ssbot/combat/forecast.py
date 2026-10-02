@@ -184,6 +184,7 @@ class Forecast:
         self.roots = roots
         self.boss = boss
         self.det: list = []           # drop bells on exact paths (Forecaster._det_bell)
+        self.truncated = 0            # walk branches inside the horizon cut by MAX_NODES / depth
         kids = {}
         for n in nodes:
             kids.setdefault(n.parent, []).append(n.id)
@@ -955,6 +956,7 @@ class Forecaster:
         self.no_hurtbox: frozenset[str] = frozenset()     # states / phases with the body box disabled (playbook)
         self._shape_from: dict[str, str] = {}
         self.bell_tells = False        # VE: the drop bells' cue is in the view (ObservabilityFilter tells)
+        self.truncated = 0
         self.hurtbox: dict | None = None   # VE: the boss's hittable box per phase (load_hurtbox; scoring only)
         self.t = 0.0
 
@@ -990,6 +992,7 @@ class Forecaster:
     def forecast(self, horizon_s: float = MIN_HORIZON_S, origin_t: float | None = None) -> Forecast:
         H = max(MIN_HORIZON_S, horizon_s)
         origin = self.t if origin_t is None else origin_t
+        self.truncated = 0
         roots, known = self.tracker.roots(origin)
         nodes: list[Node] = []
         placements: list[Placement] = []
@@ -1023,6 +1026,7 @@ class Forecaster:
             known = True
         out = Forecast(self, origin, H, nodes, placements, known, roots, self.boss)
         out.det = det
+        out.truncated = self.truncated
         return out
 
     def _det_bell(self, iid: int, det: list) -> bool:
@@ -1103,7 +1107,10 @@ class Forecaster:
     def _walk(self, state: str, e_lo: float, e_hi: float, ctx: Ctx, p: float, parent: int, H: float,
               nodes: list[Node], out: list[Placement], current: bool, depth: int) -> None:
         m = self.model
-        if e_lo > H or len(nodes) >= MAX_NODES or depth > 40:
+        if e_lo > H:
+            return
+        if len(nodes) >= MAX_NODES or depth > 40:
+            self.truncated += 1          # a branch inside the horizon left out (tools/safe_windows counts them)
             return
         info = m.states.get(state)
         if info is None:
