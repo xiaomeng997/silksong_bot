@@ -1,6 +1,8 @@
 """L1 planner (DESIGN §3.5.4; M2 W4): every frame, roll every candidate out through the kinematics' timing lanes and
-choose lexicographically: not Hz > not Hz_soft > not U > S = 0 > comfort > V > min P > max J; FORCED_RISK when no
-allowed candidate has S = 0. Comfort is S again against templates grown by a further margin: among safe plans the
+choose lexicographically: not Hz > not Hz_soft > not U > S = 0 > comfort > V > min P > latest first contact > max J;
+FORCED_RISK when no allowed candidate has S = 0 (then the probability, and among equals the plan whose first contact
+comes last: a plan certain to be hit is otherwise ranked by its score, and "wait, then go" re-chosen every frame never
+leaves; live run 20261002_041819). Comfort is S again against templates grown by a further margin: among safe plans the
 ones with clearance win, whatever they score (live run 20261002_035118: a plan safe by millimetres in the air over a
 rolling attack bell lost all 26 safe continuations in one frame of drift, and the bell hit).
 
@@ -181,6 +183,7 @@ class Planner:
         skip = ((roll.flags_all & F_INVULN) != 0) if enemy_only else np.zeros((N, T1), bool)
         occ = self._contacts(f, roll.bound, tk, skip)
         S = occ.any(axis=1)
+        t_hit = np.where(S, occ.argmax(axis=1), T1)        # first contact frame (FORCED_RISK: later is better)
         S2 = S.copy()
         if f.fc.query_c is not None:
             rows = np.flatnonzero(ok & ~S)
@@ -220,7 +223,7 @@ class Planner:
             res = PlanResult(int(sel_cmd[0]), idx, name, 0, False, 0.0, 1e3, True, n=N + 1,
                              n_allowed=int(ok.sum()) + 1, n_safe=int(safe.sum()) + 1, cmd=sel_cmd, path=bind_res[1])
         elif ok.any():
-            order = np.lexsort((-J, Pc, ~V, S2, S, U, hz_soft, hz))
+            order = np.lexsort((-J, -t_hit, Pc, ~V, S2, S, U, hz_soft, hz))
             order = order[ok[order]]
             i = int(order[0])
             sel_cmd = cmd[i]

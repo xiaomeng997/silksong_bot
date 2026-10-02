@@ -428,6 +428,26 @@ assert NP == len(HeroParams.VECTOR)
 
 # ---- terrain --------------------------------------------------------------------------------------------------
 
+class _ShapeView:
+    """One TERRAIN shape dict as the solids loop reads it (ssbot.oracle.messages.Shape: kind, float32 verts, radius)."""
+    __slots__ = ("kind", "verts", "radius")
+
+    def __init__(self, d: dict):
+        self.kind = d["k"]
+        v = d["v"]
+        self.verts = np.frombuffer(v, dtype="<f4").reshape(-1, 2) if isinstance(v, (bytes, bytearray)) else \
+            np.asarray(v, dtype=np.float32).reshape(-1, 2)
+        self.radius = float(d.get("r", 0.0))
+
+
+class _SolidView:
+    __slots__ = ("go", "on", "shapes")
+
+    def __init__(self, d: dict):
+        self.go, self.on = d["go"], d["on"]
+        self.shapes = [_ShapeView(x) for x in d.get("shapes") or ()]
+
+
 @dataclass(slots=True)
 class Terrain2D:
     """Static collision geometry as axis-aligned segments: hseg rows (y, x0, x1) block vertical motion, vseg rows
@@ -571,15 +591,17 @@ class Terrain2D:
         return box, True, aabb
 
     @classmethod
-    def from_message(cls, msg: dict, overrides: dict | None = None) -> "Terrain2D":
-        """From a decoded TERRAIN payload (RecordingReader.terrain() / OracleLink). Round shapes: shape_outline."""
-        from ssbot.oracle.messages import Terrain
-        t = msg if isinstance(msg, Terrain) else Terrain.decode(msg)
+    def from_message(cls, msg, overrides: dict | None = None) -> "Terrain2D":
+        """From a TERRAIN payload (RecordingReader.terrain() / OracleLink: the msgpack dict) or anything with
+        .solids (ssbot.oracle.messages.Terrain). Round shapes: shape_outline. The dict is read here, not through the
+        oracle's message decoder, so the combat packages that roll this model out stay behind the import firewall
+        (tests/test_import_firewall.py); only the fields the solids need (go, on, shapes k / v / r) are read."""
+        solids = msg.solids if hasattr(msg, "solids") else [_SolidView(x) for x in msg.get("solids", ())]
         ov = overrides or {}
         enable, disable = set(ov.get("enable", ())), set(ov.get("disable", ()))
         parts: dict[bool, tuple[list, list, list, list]] = {False: ([], [], [], []), True: ([], [], [], [])}
         boxes = []
-        for sol in t.solids:
+        for sol in solids:
             if sol.go in disable or not (sol.on or sol.go in enable):
                 continue
             gate = (not sol.on) and sol.go in enable

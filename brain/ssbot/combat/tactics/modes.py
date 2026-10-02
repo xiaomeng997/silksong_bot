@@ -10,7 +10,7 @@ Modes:
           where the support's future coverage is lowest, and hits score fully.
   PREPARE the boss is committed to an attack whose punish window is ahead (a leap in its antic or flight, a burst
           underground at a known x): the stance is the playbook's spot in the attack's anchor frame (12 u along the leap,
-          5.5 u beside the burst on the hero's side), pulled to low future coverage.
+          10 u beside the burst on the hero's side), pulled to low future coverage.
   EVADE   the support reaches the hero's spot within the evade horizon: the stance is the floor position with the
           least future coverage, hits score little.
   HOLD    anything else (the boss underground): the playbook's hidden stance, pulled to low future coverage.
@@ -26,7 +26,7 @@ import numpy as np
 from ssbot.combat.forecast import BIN, Forecast
 from ssbot.combat.tactics.playbook import Playbook
 from ssbot.core.primitives import Prim
-from ssbot.core.worldstate import WorldState
+from ssbot.core.worldstate import ORACLE, WorldState
 from ssbot.safety.supervisor import BIND_SILK, SupervisorDecision, bind_allowed
 
 ENGAGE, EVADE, HEAL, HOLD, PREPARE = "ENGAGE", "EVADE", "HEAL", "HOLD", "PREPARE"
@@ -106,7 +106,7 @@ class Tactics:
             prefs.mode, prefs.stance_x = ENGAGE, float(self.xs[int(np.argmin(cost))])
             return prefs
         prep = pb.prepare.get(state) if state else None
-        anchor = f.fc.tracker.ctx.anchor if f.fc.view == "ORACLE" else f.fc.tracker.last_anchor
+        anchor = f.fc.tracker.ctx.anchor if f.fc.view == ORACLE else f.fc.tracker.last_anchor
         if prep is not None and anchor is not None:
             # stand where the coming punish window starts (the leap's landing side, beside the burst), in the
             # attack's anchor frame; the support check keeps the hero out of the attack on the way
