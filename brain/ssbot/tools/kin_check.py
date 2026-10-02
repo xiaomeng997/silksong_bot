@@ -36,7 +36,8 @@ with them closed unless a logged box of that window overlaps one.
 
 The knockback section checks every logged hit (StartRecoil: recoilFrozen onset) against knockback.knockback_boxes
 from the logged hit box: every no-input frame k must lie inside union[k] and the swept hull, and the frames after
-control returns (up to the table length) inside union[k]. Each escaping hit is listed with its concurrent freezes;
+control returns (up to the table length) inside union[k]; no-input frames past the table (stacked freezes) are
+checked against the swept hull and counted. Each escaping hit is listed with its concurrent freezes;
 hits that cannot be checked are counted by reason. The exit code is 1 when any hit escapes.
 """
 from __future__ import annotations
@@ -290,8 +291,9 @@ def check_trace(tr: Trace, terrains: dict[str, Terrain2D], params: HeroParams, h
 def check_knockback(tr: Trace, terrains: dict[str, Terrain2D], params: HeroParams, tol: float = 2e-3,
                     modes: np.ndarray | None = None) -> dict:
     """Every logged hit (recoilFrozen onset) against the envelope from its logged hit box: per hit, the no-input
-    frames inside union[k] and the swept hull, the later frames (control back, up to the table length) inside
-    union[k]. tol absorbs float noise in the logged boxes only (2 mm)."""
+    frames inside union[k] and the swept hull (past the table length, stacked freezes: the swept hull only, counted
+    as beyond_table_frames), the later frames (control back, up to the table length) inside union[k]. tol absorbs
+    float noise in the logged boxes only (2 mm)."""
     from ssbot.knowledge.knockback import knockback_boxes, knockback_table
 
     modes = km.classify_modes(tr) if modes is None else modes
@@ -325,7 +327,7 @@ def check_knockback(tr: Trace, terrains: dict[str, Terrain2D], params: HeroParam
         todo.setdefault(key, []).append((i, k_end, terrain.open() if opened else terrain))
     res = {"hits": int(len(hits)), "checked": 0, "skipped": dict(skipped), "frames": 0, "after_frames": 0,
            "misses": [], "after_misses": 0, "worst_excursion_u": 0.0, "worst_after_u": 0.0, "tol_u": tol,
-           "delayed_hits": 0, "slope_bound": 0, "concurrent_freezes": {}}
+           "delayed_hits": 0, "slope_bound": 0, "concurrent_freezes": {}, "beyond_table_frames": 0}
     conc: Counter = Counter()
     for (scene, opened, side), items in todo.items():
         terrain = items[0][2]
@@ -345,12 +347,14 @@ def check_knockback(tr: Trace, terrains: dict[str, Terrain2D], params: HeroParam
             if k_end - i > table.timing.ctl_nominal[1] + 1:
                 res["delayed_hits"] += 1
             worst, worst_k = 0.0, -1
-            for k in range(0, min(k_end - i, F) + 1):
+            for k in range(0, k_end - i + 1):
                 j = i + k
-                bj, u, s = tr.box[j], frames[m, k], swept[m]
+                bj, s = tr.box[j], swept[m]
+                u = frames[m, k] if k <= F else s       # past the table: the swept hull holds every no-input frame
                 exc = max(u[0] - bj[0], u[1] - bj[1], bj[2] - u[2], bj[3] - u[3],
                           s[0] - bj[0], s[1] - bj[1], bj[2] - s[2], bj[3] - s[3], 0.0)
                 res["frames"] += 1
+                res["beyond_table_frames"] += int(k > F)
                 if exc > worst:
                     worst, worst_k = exc, k
             res["worst_excursion_u"] = max(res["worst_excursion_u"], worst)
@@ -411,7 +415,8 @@ def format_report(rep: dict) -> str:
         lines.append(f"knockback: {kb['hits']} hits, {kb['checked']} checked (skipped {kb['skipped']}), "
                      f"{kb['frames']} no-input frames, {len(kb['misses'])} hits escape (worst {kb['worst_excursion_u']}"
                      f" u); after control {kb['after_frames']} frames, {kb['after_misses']} outside; "
-                     f"{kb['delayed_hits']} delayed hits, {kb['slope_bound']} with a slope in reach, concurrent freezes "
+                     f"{kb['delayed_hits']} delayed hits, {kb.get('beyond_table_frames', 0)} no-input frames past the "
+                     f"table, {kb['slope_bound']} with a slope in reach, concurrent freezes "
                      f"{kb['concurrent_freezes']}")
         for m in kb["misses"][:20]:
             lines.append(f"   escape f={m['f']} k={m['k']} by {m['excursion_u']} u ({m['side']}, "

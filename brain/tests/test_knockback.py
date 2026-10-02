@@ -240,3 +240,18 @@ def test_escaping_hits_are_listed_and_fail_the_run(p, tmp_path):
     kin_check.save_fixture(path, tr, terrains)
     assert kin_check.main([str(path), "--no-windows"]) == 1
     assert kin_check.main([str(FIXTURE), "--no-windows"]) == 0
+    # stacked freezes keeping her in no-input past the table: those frames are checked (swept hull) and counted
+    tr, terrains = kin_check.load_fixture(FIXTURE)
+    tr.box, tr.cs, tr.valid = tr.box.copy(), tr.cs.copy(), tr.valid.copy()
+    tr.marks = tr.marks.copy()
+    i = int(hits[np.flatnonzero(np.diff(hits) > kb.FRAMES + 60)[0]])      # a hit with no other one soon after
+    span = slice(i, i + kb.FRAMES + 10)
+    tr.cs[span, km._CS_USED.index("recoilFrozen")] = True
+    tr.box[span] = tr.box[i]
+    tr.valid[span] = True
+    tr.marks[span] = 0
+    rep = kin_check.check_knockback(tr, terrains, p)
+    assert rep["ok"] and rep["beyond_table_frames"] >= 9
+    tr.box[i + kb.FRAMES + 5] += np.array([0.0, -1.0, 0.0, -1.0])        # 1 u below the path
+    rep = kin_check.check_knockback(tr, terrains, p)
+    assert not rep["ok"] and rep["misses"][0]["k"] == kb.FRAMES + 5
