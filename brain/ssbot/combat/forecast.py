@@ -48,6 +48,7 @@ from dataclasses import dataclass, replace
 import numpy as np
 
 from ssbot.combat.boss_model import TAIL, Anchor, BossModel
+from ssbot.combat.fastquery import query_par
 from ssbot.core.worldstate import ORACLE, VISION_EQUIVALENT, Entity, Ev, WorldState
 from ssbot.knowledge import hitbox_tables as hb
 from ssbot.safety.hits_to_death import SupportEvent, SupportSet
@@ -146,7 +147,10 @@ class Forecast:
         the origin overlaps some support tube."""
         tk = np.asarray(tk, np.float64)
         active = [p for p in self.placements if p.t_off >= tk.min() - BIN and p.t_on <= tk.max() + BIN]
-        return self._query(active).query(x, y, tk)
+        q = self._query(active)
+        if np.asarray(x).shape[0] >= 64:
+            return query_par(q, x, y, tk)
+        return q.query(x, y, tk)
 
     def node_hits(self, x, y, tk) -> np.ndarray:
         """[nodes, N] bool: contact with each node's own placements."""
@@ -293,6 +297,8 @@ class BossTracker:
         prev = self.state
         self.state, self.t_entry = state, t
         if state in m.death_states:
+            if self.ctx.family is not None and not self.dead:     # the bells of a killed attack roll on: its tail
+                self._ended(self.ctx.family, self.ctx.anchor, t, t)
             self.dead = True
             return
         if state == "Submerged Init":
@@ -330,7 +336,11 @@ class BossTracker:
             if boss.hp_est is not None:
                 self.ctx.hp = boss.hp_est.v
         for ev in ws.events:
-            if ev.kind == Ev.ENEMY_KILLED and ev.data is not None and ev.data.type_key == m.boss_type:
+            if ev.kind == Ev.ENEMY_KILLED and ev.data is not None and ev.data.type_key == m.boss_type                     and not self.dead:
+                if self.view == ORACLE and self.ctx.family is not None:
+                    self._ended(self.ctx.family, self.ctx.anchor, ev.t_game_s, ev.t_game_s)
+                elif self.view != ORACLE and self.state not in (None, HIDDEN) and self.last_family is not None:
+                    self._ended(self.last_family, self.last_anchor, ev.t_game_s - BIN, ev.t_game_s + BIN)
                 self.dead = True
         if self.view == ORACLE:
             self._update_oracle(ws, boss, t)
@@ -514,19 +524,20 @@ class Forecaster:
     """Tracker + walk + one SupportQuery over the planner templates (packed once; about 2 s and 0.2-0.3 GB for the
     Bell Beast per-state templates)."""
 
-    def __init__(self, model: BossModel, view: str = ORACLE, margin: float = 0.0,
+    def __init__(self, model: BossModel, view: str = ORACLE, margin: float | tuple[float, float] = 0.0,
                  templates: dict[str, hb.SpaceTimeTemplate] | None = None, npz: str | None = None):
         if view not in (ORACLE, VISION_EQUIVALENT):
             raise ValueError(view)
         self.model = model
         self.view = view
-        self.margin = margin
+        self.margin = margin_xy(margin)
         if templates is None:
-            templates = load_planner_templates(model, margin, npz)
+            templates = load_planner_templates(model, self.margin, npz)
         self.templates = templates
         self.meta = {k: (t.t0, t.t1) for k, t in templates.items()}
-        self.query = hb.SupportQuery(templates, hero_half=(hb.HERO_HALF_U[0] + margin, hb.HERO_HALF_U[1] + margin)) \
-            if margin > 0 else hb.SupportQuery(templates)
+        # half-extents of the box a point test covers (the templates' dilation)
+        self.half = (hb.HERO_HALF_U[0] + self.margin[0], hb.HERO_HALF_U[1] + self.margin[1])
+        self.query = hb.SupportQuery(templates, hero_half=hb.HERO_HALF_U)
         self.tracker = BossTracker(model, view)
         self.boss: Entity | None = None
         self.t = 0.0
@@ -665,15 +676,27 @@ class Forecaster:
         return succ
 
 
-def load_planner_templates(model: BossModel, margin: float = 0.0, npz: str | None = None
+def margin_xy(margin: float | tuple[float, float]) -> tuple[float, float]:
+    return (float(margin), float(margin)) if isinstance(margin, (int, float)) else (float(margin[0]), float(margin[1]))
+
+
+def load_planner_templates(model: BossModel, margin: float | tuple[float, float] = 0.0, npz: str | None = None
                            ) -> dict[str, hb.SpaceTimeTemplate]:
     """The per-state and tail support templates of the model's families, dilated for a point query of the hurtbox
-    centre (hero half-extents + margin). Family-wide templates (t from the attack start) are not needed by the walk."""
+    centre: hero half-extents plus margin (x, y). Family-wide templates (t from the attack start) are not needed by
+    the walk."""
     from ssbot.combat.boss_model import KNOWLEDGE
+    mx, my = margin_xy(margin)
     path = npz or (KNOWLEDGE / "enemies" / f"{model.enemy}_hitboxes.npz")
     tpls, _ = hb.load_templates(path, prefix=hb.SUPPORT)
-    keep = {k: t for k, t in tpls.items() if k.count("/") == 3 and not k.split("/")[2].startswith("ent")}
-    return hb.planner_templates(keep, margin=margin)
+    out = {}
+    for k, t in tpls.items():
+        if k.count("/") != 3 or k.split("/")[2].startswith("ent"):
+            continue
+        if t.t_pad < 1:
+            raise ValueError(f"{k}: not a support template (no +-1 bin of export lag baked in)")
+        out[k] = t.dilated(rx=hb.HERO_HALF_U[0] + mx, ry=hb.HERO_HALF_U[1] + my, key=k)
+    return out
 
 
 def offsets(T: int, frame_time: float) -> np.ndarray:

@@ -1,0 +1,52 @@
+"""L3 playbook loader (DESIGN §3.5.7, §4.4 knowledge/<build>/playbooks/<enemy>.yaml): stance, punish windows, Bind
+states and the planner's scoring weights for one encounter. Pure data; safety rules are not in it."""
+from dataclasses import dataclass, field
+from pathlib import Path
+
+import yaml
+
+REPO = Path(__file__).resolve().parents[4]
+PLAYBOOKS = REPO / "knowledge" / "1.0.30000" / "playbooks"
+
+DEFAULT_WEIGHTS = {"hit": 10.0, "stance": 0.6, "risk": 3.0, "waste": 0.6, "face": 0.3, "ground": 0.2, "cont": 0.4,
+                   "jump": 0.15}
+
+
+@dataclass
+class Playbook:
+    enemy: str
+    boss_type: str
+    scene: str
+    arena_x: tuple[float, float]
+    hero_y: float
+    hidden_x: float
+    engage_reach_u: float
+    risk_horizon_s: tuple[float, float]
+    punish_states: frozenset[str]
+    punish_phases: frozenset[str]
+    bind_states: frozenset[str]
+    bind_hp_missing_min: int
+    hit_damage: dict[str, float]
+    weights: dict[str, float] = field(default_factory=lambda: dict(DEFAULT_WEIGHTS))
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "Playbook":
+        st = d.get("stance") or {}
+        pun = d.get("punish") or []
+        bind = d.get("bind") or {}
+        return cls(enemy=d["enemy"], boss_type=d["boss_type"], scene=d["scene"],
+                   arena_x=tuple(d["arena"]["x"]), hero_y=float(d["arena"]["hero_y"]),
+                   hidden_x=float(st.get("hidden_x", sum(d["arena"]["x"]) / 2)),
+                   engage_reach_u=float(st.get("engage_reach_u", 2.3)),
+                   risk_horizon_s=tuple(st.get("risk_horizon_s", (0.4, 2.0))),
+                   punish_states=frozenset(p["state"] for p in pun),
+                   punish_phases=frozenset(p["phase"] for p in pun if p.get("phase")),
+                   bind_states=frozenset(bind.get("states") or ()),
+                   bind_hp_missing_min=int(bind.get("hp_missing_min", 2)),
+                   hit_damage={k: float(v) for k, v in (d.get("hit_damage") or {"nail": 5}).items()},
+                   weights=DEFAULT_WEIGHTS | {k: float(v) for k, v in (d.get("weights") or {}).items()})
+
+
+def load_playbook(enemy: str = "BellBeast", path: Path | str | None = None) -> Playbook:
+    p = Path(path) if path else PLAYBOOKS / f"{enemy}.yaml"
+    return Playbook.from_dict(yaml.safe_load(p.read_text("utf-8")))

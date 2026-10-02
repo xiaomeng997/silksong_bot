@@ -13,7 +13,8 @@ Outcomes (AttemptRecord.outcome):
   CLEAR         the boss's Control FSM entered a death state (Bell Beast: "Death Broadcast");
   WOULD_DIE     a lethal hit (LethalBlock "catastrophe" / "would_die"); in mode "eval" the episode ends there, in mode
                 "data" (behaviour logging, the hero kept alive at >= 1 HP by LethalBlock) it is counted and play goes on;
-  QUIT          the supervisor's pause-and-quit path ended the episode (not used before W5);
+  QUIT          the supervisor's pause-and-quit path ended the episode (a policy with a supervisor sets
+                episode_outcome = "QUIT"; training emulates the quit, then the harness unpauses with Continue);
   STUCK         no outcome within the encounter's timebox after the wake;
   HARNESS_FAIL  the reset, the intro or the link failed, or the game paused or left the scene unasked.
 """
@@ -164,6 +165,26 @@ def wait_settled(link: OracleLink, scene: str, still_frames: int = 10, tol_u: fl
     raise TimeoutError(f"hero not settled in {scene} within {timeout_s} s")
 
 
+def unpause(link: OracleLink, tries: int = 4) -> bool:
+    """After an emulated quit the game is held in the pause menu with Continue highlighted (safety.pause_quit stops
+    there): Submit (enter) past the 0.3 s real-time lockout until the game runs again."""
+    from ssbot.ipc.framing import mask
+    for _ in range(tries):
+        s = link.state or {}
+        if not (s.get("game") or {}).get("paused"):
+            return True
+        time.sleep(0.5)
+        f = link.frame
+        link.act(f + 2, mask("enter"), hold_frames=0)
+        link.wait_state(newer_than=f + 4, timeout_s=2.0)
+        link.act(link.frame + 2, 0, hold_frames=0)
+        try:
+            link.wait_state(lambda s: not (s.get("game") or {}).get("paused"), timeout_s=1.5)
+        except TimeoutError:
+            continue
+    return not ((link.state or {}).get("game") or {}).get("paused")
+
+
 def boss_entity(s: dict, boss_type: str) -> dict | None:
     """The boss entity for the end-of-episode HP, hidden or not (a hidden boss's hp is still exported)."""
     return ents.boss_entity(s.get("ents"), boss_type, include_hidden=True)
@@ -243,7 +264,7 @@ def _run(link: OracleLink, enc: Encounter, tap: FightTap, policy, cfg: EpisodeCo
         if tap.lethal and cfg.mode == "eval":
             rec.outcome, rec.reason = WOULD_DIE, "lethal hit"
             break
-        if game.get("paused"):
+        if game.get("paused") and not getattr(policy, "pause_owned", False):
             rec.outcome, rec.reason = HARNESS_FAIL, f"paused unasked at frame {last}"
             break
         if game.get("scene") != enc.scene:
@@ -254,7 +275,12 @@ def _run(link: OracleLink, enc: Encounter, tap: FightTap, policy, cfg: EpisodeCo
             break
         link.act(last + 2, policy.act(s, tap), hold_frames=0)
         rec.acts += 1
+        if getattr(policy, "episode_outcome", None) == QUIT:
+            rec.outcome, rec.reason = QUIT, getattr(policy, "outcome_reason", None)
+            break
     rec.f_end = last
+    if rec.outcome == QUIT:
+        unpause(link)
 
 
 def _summarise(tap: FightTap, rec: AttemptRecord, s: dict, enc: Encounter) -> None:

@@ -39,10 +39,14 @@ def git_rev() -> str | None:
         return None
 
 
-def make_policy(name: str):
+def make_policy(name: str, view: str = "oracle", run_dir: Path | None = None, instance: int = 0,
+                threads: int = 8):
     if name == "data":
         from ssbot.train.data_policy import DataPolicy
         return DataPolicy()
+    if name == "planner":
+        from ssbot.train.planner_policy import PlannerPolicy
+        return PlannerPolicy(view=view, threads=threads, log_dir=run_dir, instance=instance)
     raise SystemExit(f"unknown policy {name}")
 
 
@@ -69,9 +73,11 @@ def worker(a: argparse.Namespace) -> int:
     out = (run_dir / f"attempts_i{a.instance}.jsonl").open("a", encoding="utf-8", newline="\n")
     link = OracleLink(instance=a.instance, connect_timeout_s=120)
     tap = FightTap(link, enc)
-    policy = make_policy(a.policy)
+    policy = make_policy(a.policy, a.view, run_dir, a.instance, a.threads)
+    if hasattr(policy, "attach"):
+        policy.attach(link)
     rev = git_rev()
-    fp = hashlib.sha256(json.dumps([enc.name, a.policy, a.mode, rev], sort_keys=True).encode()).hexdigest()[:12]
+    fp = hashlib.sha256(json.dumps([enc.name, a.policy, a.mode, a.view, rev], sort_keys=True).encode()).hexdigest()[:12]
     load_slot(link, 1)
     stand_up(link)
     if not link.rpc("guards.set", save_suppression=True)["save_suppression"]:
@@ -88,9 +94,11 @@ def worker(a: argparse.Namespace) -> int:
                     rec_obj.close()
                 rec_obj = Recorder(link, out_dir=run_dir / "rec", profile="TRAIN",
                                    episode=f"i{a.instance}_{k // a.rotate:03d}",
-                                   config={"encounter": enc.name, "mode": a.mode, "policy": a.policy}).start()
+                                   config={"encounter": enc.name, "mode": a.mode, "policy": a.policy,
+                                           "view": a.view}).start()
             seed = a.seed + a.instance * 1_000_000 + k
-            rec = AttemptRecord(unit=enc.name, stage="TRAIN", profile="TRAIN", build="1.0.30000", code_rev=rev,
+            rec = AttemptRecord(unit=enc.name, stage="TRAIN", profile="TRAIN" if a.view == "oracle" else "SIM_FINAL",
+                                build="1.0.30000", code_rev=rev,
                                 config_fp=fp, start_kind="savestate", mode=a.mode, seed=seed)
             run_episode(link, enc, tap, policy, mode_config(a.mode, seed), rec)
             d = asdict(rec)
@@ -121,14 +129,16 @@ def worker(a: argparse.Namespace) -> int:
 
 
 def run(a: argparse.Namespace) -> int:
-    run_dir = RUNS / f"{datetime.now():%Y%m%d_%H%M%S}_{a.encounter}_{a.mode}"
+    tag = a.mode if a.policy == "data" else f"{a.mode}_{a.policy}_{a.view}"
+    run_dir = RUNS / f"{datetime.now():%Y%m%d_%H%M%S}_{a.encounter}_{tag}"
     run_dir.mkdir(parents=True)
     (run_dir / "config.json").write_text(json.dumps(vars(a), indent=1), encoding="utf-8")
     procs = []
     for i in [int(x) for x in a.instances.split(",")]:
         cmd = [sys.executable, "-m", "ssbot.tools.combat_run", "_worker", "--instance", str(i), "--run-dir",
                str(run_dir), "--encounter", a.encounter, "--mode", a.mode, "--policy", a.policy, "--episodes",
-               str(a.episodes), "--hours", str(a.hours or 0), "--rotate", str(a.rotate), "--seed", str(a.seed)]
+               str(a.episodes), "--hours", str(a.hours or 0), "--rotate", str(a.rotate), "--seed", str(a.seed),
+               "--view", a.view, "--threads", str(a.threads)]
         if a.no_record:
             cmd.append("--no-record")
         log = (run_dir / f"worker_i{i}.log").open("w", encoding="utf-8")
@@ -168,6 +178,23 @@ def summary(run_dir: Path) -> dict:
         out["would_die_episodes"] = sum(1 for r in rows if r["would_die"])
         out["late_states_mean"] = round(sum(r.get("late_states", 0) for r in rows) / len(rows), 1)
         out["reasons"] = dict(Counter(r["reason"] for r in rows if r.get("reason")).most_common(10))
+        n = len(rows)
+        out["clear_pct"] = round(100.0 * sum(r["outcome"] == "CLEAR" for r in rows) / n, 1)
+        clear = sorted(r["ingame_s"] for r in rows if r["outcome"] == "CLEAR" and r.get("ingame_s") is not None)
+        out["time_to_kill_s"] = {"p50": clear[len(clear) // 2], "min": clear[0], "max": clear[-1]} if clear else None
+        out["hits_per_episode"] = dict(sorted(Counter(r["hits"] for r in rows).items()))
+        pol = [r.get("policy") or {} for r in rows]
+        if any(p.get("view") for p in pol):
+            out["unpredicted_hits"] = sum(len(p.get("unpredicted") or ()) for p in pol)
+            out["episodes_with_forced_risk"] = sum(1 for p in pol if p.get("forced_risk_ticks"))
+            out["forced_risk_ticks"] = sum(p.get("forced_risk_ticks") or 0 for p in pol)
+            p99 = sorted(p["plan_ms_p99"] for p in pol if p.get("plan_ms_p99") is not None)
+            p50 = sorted(p["plan_ms_p50"] for p in pol if p.get("plan_ms_p50") is not None)
+            out["plan_ms_p50_median"] = p50[len(p50) // 2] if p50 else None
+            out["plan_ms_p99_median"] = p99[len(p99) // 2] if p99 else None
+            out["plan_ms_p99_max"] = p99[-1] if p99 else None
+            out["quit_reasons"] = dict(Counter((r.get("reason") or "")[:80] for r in rows
+                                               if r["outcome"] == "QUIT").most_common(10))
     (run_dir / "summary.json").write_text(json.dumps(out, indent=1), encoding="utf-8")
     print(json.dumps(out, indent=1))
     return out
@@ -186,6 +213,8 @@ def main(argv: list[str] | None = None) -> int:
         p.add_argument("--rotate", type=int, default=25)
         p.add_argument("--seed", type=int, default=0)
         p.add_argument("--no-record", action="store_true")
+        p.add_argument("--view", choices=("oracle", "degraded"), default="oracle")
+        p.add_argument("--threads", type=int, default=8)
         if name == "run":
             p.add_argument("--instances", default="0")
         else:
