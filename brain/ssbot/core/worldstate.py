@@ -17,7 +17,8 @@ Observability is machine-readable: every field carries metadata["obs"] = V (visi
 in a VISION_EQUIVALENT view) or D (derived by shared code from V fields). Fields that hold an exact timer in the oracle
 path also carry metadata["timer"] = True; the ObservabilityFilter sets those to None until the vision-side timer
 models exist (§3.9.2 "精确计时器 -> 模型估计"). Fields whose §4.2 note reads "V: estimate / inferred, O: exact"
-(pause and quit availability, pause blockers, boss HP, damage-box activity, bind readiness, pending tag damage) carry
+(pause and quit availability, pause blockers, boss HP, damage-box activity, bind readiness, pending tag damage, and
+the crest / equipment that §4.2 takes from the inventory audit only) carry
 metadata["est"] = True: the oracle path fills them exactly and the ObservabilityFilter must rebuild them from what
 vision can observe, so in a VISION_EQUIVALENT view an E-valued est field never has src ORACLE. Event kinds carry their
 own observability in EVENT_OBS, and event payloads mark their fields the same way.
@@ -345,8 +346,8 @@ class Resources:
     # without a hit limit, the frost clock): v is then health + blue, lethal by itself, so reading v never fails open
     pending_dmg: E[int] = fld(D, factory=lambda: unknown(0), est=True)
     status: frozenset[str] = fld(V, frozenset())                # ACID, FLAME, GRIND, FROST, ...
-    crest: E[str] = fld(V, factory=lambda: unknown(""))        # from the inventory audit only (Src.AUDIT)
-    equipped: list[str] = fld(V, factory=list)
+    crest: E[str] = fld(V, factory=lambda: unknown(""), est=True)    # from the inventory audit only (Src.AUDIT)
+    equipped: list[str] = fld(V, factory=list, est=True)
     tools: list[ToolSlot] = fld(V, factory=list)
     rosaries: E[int] = fld(V, factory=lambda: unknown(0))
     shell_shards: E[int] = fld(V, factory=lambda: unknown(0))

@@ -111,7 +111,7 @@ def test_estimate_fields_are_the_v_estimate_values_of_the_design():
     assert W.estimate_fields(W.Game) == ("pause_available", "quit_available", "pause_blockers")
     assert W.estimate_fields(Entity) == ("hp_est",)
     assert W.estimate_fields(W.DamageBox) == ("active",)
-    assert W.estimate_fields(W.Resources) == ("bind_ready", "pending_dmg")
+    assert W.estimate_fields(W.Resources) == ("bind_ready", "pending_dmg", "crest", "equipped")
     ws = _full_state()
     paths = dict(W.iter_estimates(ws))
     assert "game.pause_available" in paths and "entities[0].hp_est" in paths

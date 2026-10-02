@@ -64,8 +64,22 @@ def test_no_estimate_field_keeps_src_oracle(wake_v):
             if isinstance(v, E):
                 seen.add(path.split("[")[0])
                 assert v.src != Src.ORACLE and v.conf < 1.0, (path, v)
-    assert {"game.pause_available", "game.quit_available", "res.bind_ready", "res.pending_dmg",
+    assert {"game.pause_available", "game.quit_available", "res.bind_ready", "res.pending_dmg", "res.crest",
             "entities"} <= seen
+
+
+def test_crest_comes_from_the_audit(wake):
+    f = ObservabilityFilter(bosses=[BELL_BEAST])
+    first = f.apply(copy.deepcopy(wake[0])).res
+    assert (first.crest.v, first.crest.src) == ("Hunter", Src.AUDIT) and first.crest.conf < 1.0
+    w = copy.deepcopy(wake[1])
+    w.res.crest, w.res.equipped = E("Wanderer"), ["X"]               # swapped without an audit: not seen
+    assert f.apply(w).res.crest.v == "Hunter"
+    w = copy.deepcopy(wake[2])
+    w.res.crest, w.res.equipped = E("Wanderer"), ["X"]
+    w.game.screen = E(Screen.INVENTORY)                               # the inventory shows it
+    r = f.apply(w).res
+    assert (r.crest.v, r.equipped) == ("Wanderer", ["X"])
 
 
 def test_oracle_profile_is_identity(wake):

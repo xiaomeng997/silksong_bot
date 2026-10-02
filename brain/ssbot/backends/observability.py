@@ -55,6 +55,8 @@ Rule: no value in the output may depend on something pixels cannot show. Per fra
     (GameManager.IncreaseGameTimer, GameManager.cs:4223: PLAYING / ENTERING_LEVEL / EXITING_LEVEL with the inventory
     closed, unscaledDeltaTime < 1 s): not in the pause menu, inventory, menus, loads (TRANSITION) or video cutscenes;
     a message canvas counts unless the filter's own pause edges say the game is paused.
+  - Crest and equipment: held from the last inventory audit (the first frame stands in for the pre-run audit, an
+    INVENTORY screen re-reads them), src AUDIT.
   - bind_ready from the silk count (the spool is visible); pending_dmg 0 when no damage status is visible, else
     unknown: conf 0 and v = health + blue (lethal by itself, as the oracle path reports an unbounded tag).
 
@@ -456,6 +458,7 @@ class ObservabilityFilter:
         self._tq_prev: tuple[float, float] | None = None     # (game time, QPC s) of the previous frame
         self._rates: deque[tuple[float, float]] = deque(maxlen=SLOW_WINDOW)   # (game dt, real dt) per frame
         self._gameplay_prev: bool | None = None
+        self._audit: tuple[str, list[str]] | None = None       # crest and equipment at the last inventory audit
 
     # ---- per frame ---------------------------------------------------------------------------------------------
 
@@ -560,6 +563,7 @@ class ObservabilityFilter:
             out.res.pending_dmg = E(out.res.hp.v + out.res.blue.v, sigma=math.inf, conf=0.0, src=Src.PREDICTED)
         else:
             out.res.pending_dmg = E(0, conf=0.9, src=Src.PREDICTED)
+        self._crest_audit(out)
         self._pause(out, q)
         self._play_time(out)
         out.game.unobservable = int(Unobs(out.game.unobservable) | unobs)
@@ -760,6 +764,18 @@ class ObservabilityFilter:
         if q - self._hit_q < HURT1_S:
             return "hurt1"
         return "free"
+
+    def _crest_audit(self, ws: WorldState) -> None:
+        """Crest and equipment as the last inventory audit read them (§4.2: Src.AUDIT only): the first frame with
+        PlayerData stands in for the pre-run audit, an INVENTORY screen re-reads them; a change in between (a crest
+        swap at a bench) is not seen until then."""
+        r = ws.res
+        if r.crest.conf > 0 and (self._audit is None or ws.game.screen.v == Screen.INVENTORY):
+            self._audit = (r.crest.v, list(r.equipped))
+        if self._audit is None:
+            r.crest, r.equipped = unknown(""), []
+        else:
+            r.crest, r.equipped = E(self._audit[0], conf=CONF_MAX, src=Src.AUDIT), list(self._audit[1])
 
     def _play_time(self, ws: WorldState) -> None:
         pt = ws.game.play_time
