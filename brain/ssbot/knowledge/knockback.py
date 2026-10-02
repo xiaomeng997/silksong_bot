@@ -39,7 +39,9 @@ no friction, rotation frozen) leaves its projection on the cone of allowed veloc
 p . (s - p) = 0 (Moreau), i.e. lies on the circle with diameter [0, s]. So n steps move the box by a point of the
 disk with centre n s / 2 and radius n |s| / 2, whatever walls, ceilings and slopes it meets, and the disks of
 fewer steps lie inside it. From the last step before the walked axis-aligned path can touch a slope, the bound is the
-box there plus that disk of the remaining steps (bounding box), then CONTACT_SLOP. Pushed right from the start:
+box there plus that disk of the remaining steps (bounding box), then CONTACT_SLOP. Round colliders deflect the same
+way, so Terrain2D lists the AABB sides of circles, capsules and shapes with an edge radius among the slopes
+(Terrain2D.shape_outline; Bone_05 has none). Pushed right from the start:
 x from -0.25 to 4.45 u, y from -1.30 to 3.40 u after the 14 steps of n_max, against 0 to 4.2 u and 0 to 2.1 u in
 open air.
 

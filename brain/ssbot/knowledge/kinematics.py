@@ -197,6 +197,7 @@ EPS = 1e-4       # open-interval margin for overlap tests
 TOL = 0.05       # a box this far inside a face still counts as in front of it (Box2D leaves ~2 mm at seams)
 GTOL = 8e-3      # ground probe (covers the touch band of _move_y)
 TT_HEAD = 14     # header length of Terrain2D.packed() (layout in kin_jit)
+ROUND_MIN = 0.02  # edge radius below which a shape counts as sharp (Box2D's own polygon skin is 0.01)
 
 
 # ---- parameters -----------------------------------------------------------------------------------------------
@@ -385,7 +386,8 @@ assert NP == len(HeroParams.VECTOR)
 class Terrain2D:
     """Static collision geometry as axis-aligned segments: hseg rows (y, x0, x1) block vertical motion, vseg rows
     (x, y0, y1) horizontal motion. Sloped edges are kept in `slopes` (x0, y0, x1, y1) and not collided yet (none in
-    the Bone_05 arena). Built from a TERRAIN message: every outline of every solid that is on (or listed in
+    the Bone_05 arena), together with the AABB sides of round shapes (shape_outline), which only the knockback bound
+    reads. Built from a TERRAIN message: every outline of every solid that is on (or listed in
     overrides["enable"]) and not listed in overrides["disable"]; the dump is taken at room entry, so arena gates
     that close later are off in it and stale ones on (Bone_05: the "Threaded Bell Gate" pair closes for the fight,
     "Wall" is gone; HeroParams.scenes)."""
@@ -465,9 +467,14 @@ class Terrain2D:
         return cls.from_outlines(outlines, closed=[True] * len(outlines))
 
     @classmethod
-    def from_outlines(cls, outlines: list[np.ndarray], closed: list[bool], names: list | None = None
-                      ) -> "Terrain2D":
+    def from_outlines(cls, outlines: list[np.ndarray], closed: list[bool], names: list | None = None,
+                      rounded: Iterable[tuple[float, float, float, float]] = ()) -> "Terrain2D":
+        """rounded: AABBs (x0, y0, x1, y1) of round geometry (circles, capsules, edge radii) whose four sides are
+        added to `slopes`: the rollout does not collide them, and the knockback bound switches to its
+        contact-projection rule before the path can reach them."""
         h, v, s = [], [], []
+        for a, b, c, d in rounded:
+            s.extend(((a, b, c, b), (c, b, c, d), (c, d, a, d), (a, d, a, b)))
         for pts, cl in zip(outlines, closed):
             pts = np.asarray(pts, dtype=np.float64)
             n = len(pts)
@@ -484,28 +491,64 @@ class Terrain2D:
         arr = lambda rows, w: np.array(rows, dtype=np.float64).reshape(-1, w)  # noqa: E731
         return cls(arr(h, 3), arr(v, 3), arr(s, 4), list(names or []))
 
+    @staticmethod
+    def shape_outline(kind: str, verts: np.ndarray, radius: float = 0.0
+                      ) -> tuple[np.ndarray | None, bool, tuple[float, float, float, float] | None]:
+        """(outline for the rollout or None, closed, AABB of its round part or None) of one TERRAIN shape
+        (oracle/src/SceneDump/ColliderGeometry.cs). Box2D deflects a push along a round surface as along a slope, so
+        circles (1 vertex = centre, radius r: the circumscribed octagon, whose flat faces sit at r), capsules (the
+        outline is their bounding box, or 2 centres + radius from the physics fallback: that box grown by r) and
+        shapes with an edge radius above ROUND_MIN also report their AABB grown by the radius (Bone_05 has none: box,
+        edge and poly shapes, radius 0); unknown kinds fail closed as that AABB (a box for the rollout, round for the
+        bound)."""
+        v = np.asarray(verts, dtype=np.float64).reshape(-1, 2)
+        r = max(float(radius or 0.0), 0.0)
+        if not len(v):
+            return None, False, None
+        lo, hi = v.min(axis=0) - r, v.max(axis=0) + r
+        aabb = (float(lo[0]), float(lo[1]), float(hi[0]), float(hi[1]))
+        box = np.array([[lo[0], lo[1]], [hi[0], lo[1]], [hi[0], hi[1]], [lo[0], hi[1]]])
+        if kind == "circle":
+            if r <= 0:
+                return None, False, None
+            ang = np.pi / 8 + np.arange(8) * np.pi / 4
+            oct_ = v[0][None, :] + (r / np.cos(np.pi / 8)) * np.stack([np.cos(ang), np.sin(ang)], axis=1)
+            return oct_, True, aabb
+        if kind == "capsule":
+            return box, True, aabb
+        if kind in ("box", "poly", "edge"):
+            if len(v) < 2:
+                return None, False, None
+            if r > ROUND_MIN:
+                return (box if kind == "box" else v), kind != "edge", aabb
+            return v, kind != "edge", None
+        return box, True, aabb
+
     @classmethod
     def from_message(cls, msg: dict, overrides: dict | None = None) -> "Terrain2D":
-        """From a decoded TERRAIN payload (RecordingReader.terrain() / OracleLink)."""
+        """From a decoded TERRAIN payload (RecordingReader.terrain() / OracleLink). Round shapes: shape_outline."""
         from ssbot.oracle.messages import Terrain
         t = msg if isinstance(msg, Terrain) else Terrain.decode(msg)
         ov = overrides or {}
         enable, disable = set(ov.get("enable", ())), set(ov.get("disable", ()))
-        parts: dict[bool, tuple[list, list, list]] = {False: ([], [], []), True: ([], [], [])}
+        parts: dict[bool, tuple[list, list, list, list]] = {False: ([], [], [], []), True: ([], [], [], [])}
         boxes = []
         for sol in t.solids:
             if sol.go in disable or not (sol.on or sol.go in enable):
                 continue
             gate = (not sol.on) and sol.go in enable
             for sh in sol.shapes:
-                if len(sh.verts) < 2 or sh.kind == "circle":
+                outline, closed, rnd = cls.shape_outline(sh.kind, sh.verts, getattr(sh, "radius", 0.0))
+                if outline is None:
                     continue
-                o, c, n = parts[gate]
-                o.append(sh.verts)
-                c.append(sh.closed)
+                o, c, n, rd = parts[gate]
+                o.append(outline)
+                c.append(closed)
                 n.append(sol.go)
+                if rnd is not None:
+                    rd.append(rnd)
                 if gate:
-                    boxes.append((*sh.verts.min(axis=0), *sh.verts.max(axis=0)))
+                    boxes.append((*outline.min(axis=0), *outline.max(axis=0)))
         base = cls.from_outlines(*parts[False])
         if not boxes:
             return base

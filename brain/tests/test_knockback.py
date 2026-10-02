@@ -128,6 +128,39 @@ def test_walls_clip_and_slopes_widen(p):
     assert lowest < axis.swept[1] - 0.5                            # outside what the axis-aligned rule allows
 
 
+def test_round_terrain_counts_as_a_slope_for_the_bound(p):
+    """A circle or capsule (or an unknown shape kind) deflects a push like a slope: Terrain2D keeps its AABB sides as
+    slopes, so the bound switches to the contact-projection disk near it (and ignores it far away)."""
+    def shape(kind, pts, r=0.0):
+        return {"k": kind, "v": np.asarray(pts, dtype=np.float32).tobytes(), "r": r}
+
+    def msg(*shapes):
+        return {"seq": 1, "scene_raw": "R", "scene": "R", "reason": "enter", "frame": 1, "hazards": [],
+                "solids": [{"id": 1, "go": "Floor", "layer": 8, "on": True, "body": 0, "flags": 0,
+                            "shapes": [shape("box", [[0, 0], [300, 0], [300, 2], [0, 2]])]},
+                           {"id": 2, "go": "Round", "layer": 8, "on": True, "body": 0, "flags": 0,
+                            "shapes": list(shapes)}]}
+
+    air = np.array([10.0, 5.0, 10.5, 7.079])
+    base = kb.knockback_envelope(air, "left", p, Terrain2D.from_boxes([floor()]))
+    for sh in (shape("circle", [[12.5, 8.6]], 0.8), shape("capsule", [[12.0, 8.0], [13.0, 8.0]], 0.5),
+               shape("blob", [[12.0, 8.0], [13.0, 9.0]])):
+        t = Terrain2D.from_message(msg(sh))
+        assert len(t.slopes) >= 4
+        env = kb.knockback_envelope(air, "left", p, t)
+        assert env.flags & kb.KF_SLOPE, sh["k"]
+        assert env.swept[1] < base.swept[1] - 0.05                # the disk reaches below the open-air path
+        hull, fl = kb.knockback_hull(np.repeat(air[None, None], 3, axis=1), p, t)
+        assert fl[0] & kb.KF_SLOPE
+    far = Terrain2D.from_message(msg(shape("circle", [[60.0, 8.6]], 0.8)))
+    assert not kb.knockback_envelope(air, "left", p, far).flags & kb.KF_SLOPE
+    # the circle's flat faces (circumscribed octagon) still stop a rollout; a radius-free box stays sharp
+    oct_, closed, rnd = Terrain2D.shape_outline("circle", np.array([[0.0, 0.0]]), 1.0)
+    assert closed and rnd == (-1.0, -1.0, 1.0, 1.0) and np.abs(oct_).max() == pytest.approx(1.0)
+    assert np.hypot(*oct_.T).max() == pytest.approx(1.0 / np.cos(np.pi / 8))
+    assert Terrain2D.shape_outline("box", np.array([[0, 0], [1, 0], [1, 1], [0, 1.0]]))[2] is None
+
+
 def test_batched_queries_match_single_ones_and_the_open_air_table(p):
     from ssbot.tools.kin_check import load_fixture
     _, terrains = load_fixture(FIXTURE)
