@@ -169,8 +169,9 @@ class PlannerPolicy:
         self.pb = load_playbook(enemy)
         self.fc.no_hurtbox = self.pb.no_hurtbox
         self.fc.bell_tells = view == "degraded_dust"
-        if fview != ORACLE:
-            self.fc.hurtbox = load_hurtbox()     # vision: the hittable box per phase, not the sprite's
+        if fview != ORACLE and os.environ.get("SSBOT_ATTACK_MODEL", "v2") != "v1":
+            self.fc.hurtbox = load_hurtbox()     # vision: the hittable box per phase, not the sprite's (v1: the
+            #                                      first attack model, for the audit's before)
         self.tac = Tactics(self.pb)
         if view == "degraded" and self.pb.hidden_x_vision is not None:
             self.tac.hidden_x = self.pb.hidden_x_vision      # no cues: the stance with the least unreactable risk
