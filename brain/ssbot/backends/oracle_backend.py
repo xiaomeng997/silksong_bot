@@ -9,13 +9,15 @@ Live, OracleLink.subscribe_state sees every STATE on the reader thread; give the
     q = queue.SimpleQueue(); link.subscribe_state(q.put)
     backend = OracleBackend(source=q.get); ws = backend.step()
 
-Positions (§4.1, the shared reference): HeroState.pos is the hurtbox centre (hero.box = HeroController.Bounds; trial
-run: 0.17-0.93 u below the transform, mean 0.52 u). Entity.pos is the centre of the main body collider: the collider
+Positions (§4.1, the shared reference): HeroState.pos is the hurtbox centre (hero.box = HeroController.Bounds; live
+Bell Beast run 20261001_122249, 2.15 M STATEs: 0.17-0.84 u below the transform from max to p1, mean 0.51 u, up to
+3.9 u in the rest). Entity.pos is the centre of the main body collider: the collider
 named like the entity root when the oracle exports collider names (the root's own collider), else the first exported
 collider (GetComponentsInChildren lists the root's colliders first, and EntityExporter always exports root colliders,
-disabled or not); with no collider, the render_aabb centre; else the transform. Trial run: the Bell Beast's first
-collider is its root box in 12113 of 12269 frames; the other 156 are its first emergence after a savestate load
-(89 frames with no collider, then 67 with only the charge polygon: the exporter's collider cache catching up).
+disabled or not); with no collider, the render_aabb centre; else the transform. Live run: the Bell Beast's first
+collider is its root box in 918,108 of 932,222 exported frames, whose centre is 0.68-4.01 u from the transform (mean
+2.27 u); the rest are its first emergence after a savestate load (9,799 frames with no collider, then 4,315 with only
+the charge polygon: the exporter's collider cache catching up), where only collider names tell the root box apart.
 The transforms are kept as pos_transform (O).
 
 feed() must see every STATE in order: events ride on the STATE of their frame (a dropped STATE takes its events with
@@ -43,13 +45,19 @@ it; the gap shows in perception.dropped_frames), and these fields need memory:
     BossSpec death states or is_dead rising).
   - HIT_TAKEN.amount: masks lost (health + blue): the TakeHealth "hp" event that follows the "damage" event, or for
     a lethal hit LethalBlock cancelled, the catastrophe / would_die "dmg"; the raw TakeDamage argument is amount_raw
-    (O). Trial run: 8 hits took 2 masks, 91 lethal hits were cancelled (dmg 2), 2 hits during a bind took none.
+    (O). Trial run: 8 hits took 2 masks, 91 lethal hits were cancelled (dmg 2), 2 hits during a bind took none;
+    live run: 8,345 of 8,461 hits 2 masks, 116 none.
   - Bind outcome: DONE when the hero "spell" FSM reached "Bind Burst" during isBinding (trial run: Bind Air ->
-    Binding -> Bind Burst -> Cooldown in all 4 binds), or HP rose; else BROKEN.
+    Binding -> Bind Burst -> Cooldown in all 4 binds), or HP rose; else BROKEN. Live run: 36 DONE (+3 masks each),
+    17 BROKEN (HP unchanged).
+  - HitDealt.hero_anim: the hero's animation clip at the hit, or while the hero is hurt the clip before the hurt (a
+    spear still in flight when the hero is hit lands during "Stun"), so the vision path can price a hit by what the
+    bot did. Live run: all 460 hits carrying "NeedleThrow Throwing" (the Silk Spear) took 15 HP, the other 4,081 took
+    5 HP.
   - FSM_TRANSITION.hero_rel_pos and the time in the current FSM state (game time since the transition event; the
     exported StateTime stops once a state's actions have finished).
 
-Cost on the trial run (2 episodes, 26.9k STATEs, 13900K): see tests/test_oracle_backend.py and the module report.
+Cost per STATE on the live run (2.15 M STATEs, 13900K, two processes in parallel): p50 95-96 us, p99 172-186 us.
 
 Contact and mode come from the cState bits (field order: RPC "schema.cstate", or the facts copy cstate_schema.json).
 The wall side comes from hero.wall [touchingWallL, touchingWallR] when exported; without it, from the facing when
@@ -318,6 +326,7 @@ class OracleBackend:
         self.k = constants or hero_constants()
         self.clock = clock
         self.m = _Memory()
+        self._hero_clip: str | None = None     # the hero's last animation clip outside the hurt mode
 
     def reset(self) -> None:
         """Forget all memory (new episode / reconnect)."""
@@ -356,6 +365,8 @@ class OracleBackend:
         hd = s.get("hero")
         hp_prev = m.hero.hp_total
         hero, res = self._hero(hd, p, f, derived)
+        if hero.mode.v != "hurt" or self._hero_clip is None:     # a hit landing while the hero is hurt was dealt
+            self._hero_clip = ((hd or {}).get("anim") or {}).get("clip")    # by the action before (a spear in flight)
         hero_xy = hero.pos.v if hd else None
         ents, by_type = self._entities(s.get("ents") or (), f, hero_xy, derived)
         oracle_events = self._events(evs, f, hero_xy, ents, by_type, hp_prev, m.hero.hp_total)
@@ -641,7 +652,8 @@ class OracleBackend:
             hp = e.get("hp")
             dead = bool(e.get("is_dead"))
             if not m.hit_events and tr is not None and tr.hp is not None and hp is not None and hp < tr.hp:
-                out.append(Event(Ev.HIT_DEALT, f, t, HitDealt(iid, tk, float(tr.hp - hp), float(hp))))
+                out.append(Event(Ev.HIT_DEALT, f, t, HitDealt(iid, tk, float(tr.hp - hp), float(hp),
+                                                              hero_anim=self._hero_clip)))
             killed = tr.killed if tr is not None else False
             if dead and not killed:
                 out.append(Event(Ev.ENEMY_KILLED, f, t, EnemyKilled(iid, tk)))
@@ -781,7 +793,7 @@ class OracleBackend:
         dead = bool(d.get("dead"))
         out = [Event(Ev.HIT_DEALT, fe, t, HitDealt(
             iid, tk, float(dmg) if dmg is not None else None, float(hp_after) if hp_after is not None else None,
-            attack=d.get("attack"), crit=d.get("crit"), killing=dead))]
+            attack=d.get("attack"), crit=d.get("crit"), killing=dead, hero_anim=self._hero_clip))]
         if dead and (tr is None or not tr.killed):
             out.append(Event(Ev.ENEMY_KILLED, fe, t, EnemyKilled(iid, tk)))
             if tr is not None:
@@ -872,9 +884,11 @@ class OracleBackend:
 
     @staticmethod
     def _screen(g: dict, p: dict, hud: dict | None, dead: bool, raw_blk: int) -> Screen:
-        """Only what the oracle exports: DIALOG, ITEM_POPUP, AREA_TITLE, SHOP, BELLWAY_MAP, QUICK_MAP, ENDING and
-        CREDITS have no source yet and come out as their nearest exported state. TRANSITION is GameState LOADING
-        (play time stands still); entering / exiting a level is FADE (GameManager.IncreaseGameTimer counts it)."""
+        """Only what the oracle exports: ITEM_POPUP, AREA_TITLE, SHOP, BELLWAY_MAP, QUICK_MAP, ENDING and CREDITS
+        have no source yet and come out as their nearest exported state; DIALOG stands for any active
+        BlockingInteractable (pause.interact: dialogue, doors, shops), which blocks pausing. TRANSITION is GameState
+        LOADING (play time stands still); entering / exiting a level is FADE (GameManager.IncreaseGameTimer counts
+        it)."""
         if not g:
             return Screen.UNKNOWN
         gs, ui, menu = g.get("gs"), g.get("ui"), g.get("menu")
@@ -897,6 +911,8 @@ class OracleBackend:
             return Screen.INVENTORY
         if p.get("bench"):
             return Screen.BENCH
+        if p.get("interact"):
+            return Screen.DIALOG
         if gs == GS_PLAYING:
             return Screen.PLAYING_HUD_HIDDEN if (hud or {}).get("hidden") else Screen.PLAYING
         return Screen.UNKNOWN

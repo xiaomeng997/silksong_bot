@@ -1,6 +1,7 @@
 """The simulated final path (DESIGN §3.9.2): ObservabilityFilter, SimpleNoise, DelayLine, the action-side latency
 client and DegradedOracleBackend, on real STATEs of the trial Bell Beast run (tests/worldstate_fixture.py)."""
 import copy
+import json
 
 import numpy as np
 import pytest
@@ -112,16 +113,49 @@ def test_pause_cues_lockout_hit_and_quit_map(wake):
     assert not v2.game.pause_available.v and v2.game.pause_blockers & 4          # PAUSE_LOCKOUT
 
     class QM:
+        key = None
+
         def p_pause(self, scene, key):
+            self.key = key
             return 1.0 if key == "free" else 0.0
 
         def p_quit(self, scene, key):
             return 0.995
 
-    f = ObservabilityFilter(bosses=[BELL_BEAST], quit_map=QM())
-    free = next(w for w in wake[:60] if w.game.pause_available.v)
-    v = f.apply(copy.deepcopy(free))
-    assert v.game.pause_available.v and v.game.quit_available.v and v.game.quit_available.conf == 0.995
+    qm = QM()
+    f = ObservabilityFilter(bosses=[BELL_BEAST], quit_map=qm)
+    for w in wake[:20]:
+        v = f.apply(copy.deepcopy(w))
+    i = 20
+    v = f.apply(copy.deepcopy(wake[i]))
+    assert v.game.pause_available.v and v.game.quit_available.v and v.game.quit_available.conf == obs.CONF_MAX
+    talk = copy.deepcopy(wake[i + 1])
+    talk.game.screen = E(Screen.DIALOG)                             # a dialogue box (oracle: pause.interact)
+    v = f.apply(talk)
+    assert qm.key == "interact" and not v.game.pause_available.v and v.game.pause_blockers & 512
+
+
+def test_slow_motion_blocks_pause_without_a_freeze_event(wake, wake_v):
+    """The trial run's case: BossDeathSlow (time scale 0.05) running on across a savestate load, so the filter (reset
+    per episode) never saw its FREEZE start. The world visibly runs slow: TIME_SLOWED until SLOW_HOLD_S after."""
+    i = next(i for i in range(len(wake_v) - 40) if all(w.game.pause_available.v for w in wake_v[i:i + 40]))
+    ws = [copy.deepcopy(w) for w in wake[i:i + 40]]
+    for w in ws:
+        w.events = []
+    q0, t0 = ws[0].stamp.t_sample_qpc_ns, ws[0].stamp.t_game_s
+    for k, w in enumerate(ws):                                   # 5 % speed (as in BossDeathSlow), then full speed
+        dq = (w.stamp.t_sample_qpc_ns - q0) / 1e9
+        w.stamp.t_game_s = t0 + (0.05 * dq if k < 20 else ws[19].stamp.t_game_s - t0 + dq - (
+            ws[19].stamp.t_sample_qpc_ns - q0) / 1e9)
+    f = ObservabilityFilter(bosses=[BELL_BEAST])
+    out = [f.apply(w) for w in ws]
+    slow_end = ws[19].stamp.t_sample_qpc_ns / 1e9 + obs.SLOW_HOLD_S
+    assert out[0].game.pause_blockers & 2                                   # no speed reading yet: as if slowed
+    for w, v in zip(ws[1:], out[1:]):
+        q = w.stamp.t_sample_qpc_ns / 1e9
+        assert bool(v.game.pause_blockers & 2) == (q < slow_end)            # TIME_SLOWED
+        assert v.game.pause_available.v == (q >= slow_end)
+    assert not out[-1].game.pause_blockers
 
 
 # ---- damage boxes ---------------------------------------------------------------------------------------------
@@ -149,7 +183,8 @@ def test_box_activity_does_not_depend_on_the_fsm(wake):
         if bx is None or bx.visible_frac == 0:
             continue
         assert by is not None
-        assert [(d.poly, d.active, d.flags) for d in bx.dmg_boxes] == [(d.poly, d.active, d.flags) for d in by.dmg_boxes]
+        got = [(d.poly, d.active, d.flags) for d in by.dmg_boxes]
+        assert [(d.poly, d.active, d.flags) for d in bx.dmg_boxes] == got
         assert len(bx.dmg_boxes) == len(table.t["Bone Beast"]) >= 2 and all(d.active for d in bx.dmg_boxes)
         n += 1
     assert n > 100
@@ -171,6 +206,8 @@ def test_box_table_mirrors_with_the_flip():
     right = t.place("X", (20.0, 5.0), False)[0].poly
     left = t.place("X", (20.0, 5.0), True)[0].poly
     assert min(x for x, _ in right) == 21.0 and max(x for x, _ in left) == 19.0 and min(y for _, y in left) == 5.0
+    again = BoxTable.from_dict(json.loads(json.dumps(t.to_dict())))           # an offline table round-trips
+    assert again.place("X", (20.0, 5.0), True) == t.place("X", (20.0, 5.0), True)
 
 
 # ---- visibility -------------------------------------------------------------------------------------------------
@@ -181,7 +218,8 @@ def test_a_polygon_across_the_image_is_visible(wake):
     hx, hy = w.hero.pos.v
     band = [(hx - 60, hy - 1), (hx + 60, hy - 1), (hx + 60, hy + 1), (hx - 60, hy + 1)]
     acid = Entity(id=-5, kind=Kind.HAZARD_DYN, type_key=E("Acid Band"), pos=E((hx, hy - 40)), body_polys=[band],
-                  dmg_boxes=[DamageBox(poly=band, active=True, hazard=Hazard.ACID, flags=frozenset({"IGNORES_IFRAMES"}))],
+                  dmg_boxes=[DamageBox(poly=band, active=True, hazard=Hazard.ACID,
+                                       flags=frozenset({"IGNORES_IFRAMES"}))],
                   pos_transform=(hx, hy - 40))
     w.entities.append(acid)
     out = ObservabilityFilter(bosses=[BELL_BEAST]).apply(w)
@@ -285,6 +323,29 @@ def test_oracle_hidden_boss_is_kept_past_the_ttl(wake):
     assert boss(out).visible_frac > 0 and not boss(out).hidden and boss(out).phase.t_in_phase == 0.0
 
 
+def test_off_screen_changes_are_not_seen(wake):
+    """A ghost that digs in off-screen stays a ghost (vision did not see it go); a boss that dug in in view and comes
+    back up off-screen stays hidden (vision did not see it come back)."""
+    i = next(i for i, w in enumerate(wake) if boss(w) is not None)
+    f = ObservabilityFilter(bosses=[BELL_BEAST])
+    f.apply(wake[i])
+    away = _camera_away(wake[i + 1], 200.0)
+    assert boss(f.apply(away)).hidden is False                      # off-screen: a ghost
+    under = _camera_away(wake[i + 2], 200.0)
+    b = boss(under)
+    b.hidden, b.dmg_boxes, b.body_polys, b.render_box = True, [], [], None
+    g = boss(f.apply(under))
+    assert not g.hidden and g.pos.conf > 0 and g.visible_frac == 0.0
+    f = ObservabilityFilter(bosses=[BELL_BEAST])
+    f.apply(wake[i])
+    dug = copy.deepcopy(wake[i + 1])
+    dug.entities = [e for e in dug.entities if e.id != fx.BOSS_IID]
+    assert boss(f.apply(dug)).hidden                                  # dug in in view
+    up = _camera_away(wake[i + 2], 200.0)                             # back up, but off-screen
+    h = boss(f.apply(up))
+    assert h.hidden and h.pos.conf == 0.0
+
+
 def test_a_bell_put_away_in_view_is_dropped(wake):
     i = next(i for i, w in enumerate(wake) if boss(w) is not None)
     w = copy.deepcopy(wake[i])
@@ -324,6 +385,14 @@ def test_hp_uses_the_damage_of_the_attack(wake):
     w.events.append(Event(Ev.HIT_DEALT, w.stamp.frame, w.stamp.t_game_s,
                           HitDealt(fx.BOSS_IID, "Bone Beast", 15.0, 135.0, attack="Silk Spear")))
     assert boss(f.apply(w)).hp_est.v == 135.0
+    w = copy.deepcopy(wake[i + 2])                       # no attack name: the hero's clip (the default table)
+    w.events.append(Event(Ev.HIT_DEALT, w.stamp.frame, w.stamp.t_game_s,
+                          HitDealt(fx.BOSS_IID, "Bone Beast", 15.0, 120.0, hero_anim="NeedleThrow Throwing")))
+    assert boss(f.apply(w)).hp_est.v == 120.0
+    w = copy.deepcopy(wake[i + 3])                       # a slash landing as a throw starts: still 5
+    w.events.append(Event(Ev.HIT_DEALT, w.stamp.frame, w.stamp.t_game_s,
+                          HitDealt(fx.BOSS_IID, "Bone Beast", 5.0, 115.0, hero_anim="NeedleThrow AnticA")))
+    assert boss(f.apply(w)).hp_est.v == 115.0
 
 
 def test_kill_zeroes_and_drops_the_track():

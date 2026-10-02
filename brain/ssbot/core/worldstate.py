@@ -9,8 +9,9 @@ Position reference (§4.1, binding for every backend and for the kinematics / be
 centre of the hero's hurtbox (HeroController.Bounds, the collider: it follows the physics body, the rendered transform
 is interpolated and lags it); Entity.pos is the centre of the entity's main body collider when it has one (its root
 collider, see OracleBackend), else the centre of its render_aabb, else the transform. The transform positions stay
-available as O fields (pos_transform). Measured on the trial Bell Beast run: the hurtbox centre is 0.17-0.93 u below
-the hero transform (mean 0.52 u); the boss's root box is up to 3 u from its transform.
+available as O fields (pos_transform). Measured on the live Bell Beast run 20261001_122249 (2.15 M STATEs): the hurtbox
+centre is 0.17-0.84 u below the hero transform (max to p1; mean 0.51 u); the boss's root box centre is 0.68-4.01 u from
+its transform (mean 2.27 u).
 
 Observability is machine-readable: every field carries metadata["obs"] = V (vision provides it), O (oracle only; None
 in a VISION_EQUIVALENT view) or D (derived by shared code from V fields). Fields that hold an exact timer in the oracle
@@ -168,11 +169,12 @@ class Hazard(IntEnum):
 
 
 # HeroController.TakeDamage (decompiled 1.0.30000, HeroController.cs:5369, m0:N1): with !CanTakeDamage() because of hit
-# or parry i-frames (cState.Invulnerable, parryInvulnTimer > 0) a hit returns early only for ENEMY, NON_HAZARD and
-# EXPLOSION; SPIKES, ACID, LAVA, PIT, COAL, ZAP, STEAM, COAL_SPIKES and RESPAWN_PIT go through, SINK always applies.
-# Cogs deal TakeDamage(1, SPIKES) after 0.35 s (CogMultiHitter.cs:176, m0:C3). The parry stance and parry i-frames stop
-# ENEMY only (cs:5391-5398: parryInvulnTimer > 0 && ENEMY, cState.parrying && ENEMY). OTHER (unknown) is in neither
-# set, so a box of unknown type is treated as going through both (a support superset).
+# or parry i-frames (cState.Invulnerable, parryInvulnTimer > 0; CanTakeDamage is false for both, cs:11217) a hit
+# returns early only for ENEMY, NON_HAZARD and EXPLOSION; SPIKES, ACID, LAVA, PIT, COAL, ZAP, STEAM, COAL_SPIKES and
+# RESPAWN_PIT go through, SINK always applies. Cogs deal TakeDamage(1, SPIKES) after 0.35 s (CogMultiHitter.cs:176,
+# m0:C3). The parry stance (cState.parrying) parries ENEMY only (cs:5391); the parry counter (parryAttack) also stops
+# EXPLOSION, which IGNORES_PARRY still marks (it refers to the stance: a superset). OTHER (unknown) is in neither set,
+# so a box of unknown type is treated as going through both (a support superset).
 IFRAME_BLOCKED = frozenset((Hazard.ENEMY, Hazard.NON_HAZARD, Hazard.EXPLOSION))
 PARRY_BLOCKED = frozenset((Hazard.ENEMY,))
 
@@ -317,7 +319,7 @@ class HeroState:
     committed_primitive: tuple[str, int] | None = fld(D, None)    # (primitive, hold frames left)
     can: dict[str, bool] | None = fld(O, None)
     pos_transform: Vec2 | None = fld(O, None)                     # the hero transform (rendered, interpolated)
-    tm: dict[str, float] | None = fld(O, None)                    # oracle hero.tm timers verbatim (kinematics start state)
+    tm: dict[str, float] | None = fld(O, None)                    # oracle hero.tm timers verbatim (kinematics start)
     phys_alpha: float | None = fld(O, None)                       # oracle hero.alpha: physics phase in [0, 1)
 
 
@@ -505,6 +507,7 @@ class HitDealt:
     attack: str | None = fld(V, None)             # the hero's attack (oracle "hit".attack; the bot knows what it did)
     crit: bool | None = fld(O, None)
     killing: bool = fld(V, False)                 # the hit killed (the death reaction is visible)
+    hero_anim: str | None = fld(V, None)          # the hero's animation clip at the hit (its own action, on screen)
 
 
 @dataclass(slots=True)

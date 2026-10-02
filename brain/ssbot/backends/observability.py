@@ -10,30 +10,35 @@ Rule: no value in the output may depend on something pixels cannot show. Per fra
   - Visibility: each entity's image extent (its render_aabb when exported, else its enabled colliders) is projected
     with the frame's camera (ssbot.tools.projector) and clipped to the camera viewport; visible_frac is the visible
     area share. An entity with neither (no drawn root renderer, no enabled collider) is not drawn.
-  - Entities that are not visible: projected outside the image -> memory track ("ghost": last seen position and
-    velocity, age in last_seen_ms, no polygons) until a per-kind TTL or its ENEMY_KILLED. Gone inside the image
-    (oracle ents[].hidden, not drawn any more, or left the export while at least half of it was visible: no
-    tracker loses a mostly visible object over the edge in one frame) -> a boss or enemy
-    stays as a hidden entity (hidden=True, pos conf 0, no boxes, phase "hidden": "it dug in, position unknown")
-    while the oracle still exports it hidden, else until the TTL; any other kind is dropped (a bell put away, a
-    projectile that hit something).
+  - Entities that stop being visible: if at least half of it was visible in its last visible frame and it is not
+    now projected outside the image (oracle ents[].hidden, not drawn any more, or gone from the export), it vanished
+    in view: no tracker loses a mostly visible object over the edge in one frame -> a boss or enemy stays as a hidden
+    entity (hidden=True, pos conf 0, no boxes, phase "hidden": "it dug in, position unknown") while the oracle still
+    exports it hidden, else until the TTL; any other kind is dropped (a bell put away, a projectile that hit
+    something). Otherwise vision lost it over the image edge -> memory track ("ghost": last seen position and
+    velocity, age in last_seen_ms, no polygons) until a per-kind TTL or its ENEMY_KILLED. A ghost stays a ghost and
+    a hidden entity hidden until it is visible again: vision sees neither a dig-in off-screen nor a re-emergence
+    off-screen.
   - Damage boxes: the box activity and which child colliders exist are FSM timing (trial run: the Bell Beast's
     charge polygon exists only in Charge Antic / Charge, its leap polygon only in Leap Out / Descending). Until the
     hitbox tables of W2 are wired in, every visible entity carries its type's box table (BoxTable: the union, in the
     entity's mirrored transform frame, of every damage collider of that type seen so far, one axis-aligned box per
     collider), all active. A box's first appearance is the only timing that leaks; pass box_table= from offline
     tables to remove that too.
-  - Pause / quit availability and blockers are rebuilt from vision cues (DESIGN §3.7.5): screen mode; the 0.3 s
-    real-time lockout after its own PAUSE_ON/OFF edges; < 0.3 s since a hit taken (trial run: the first pausable
-    frame after a hit came 0.215-0.250 s later in 99 of 101 hits; probe P7: 0.25 s); a running freeze (FREEZE
-    start/end; vision sees the world stop); a hazard death until 1.0 s after the hazard respawn; < 0.5 s after a
-    scene entry; the hurt mode. Trial run: every frame with pause.blk != 0 (1628 of 26892) falls under one of these.
-    Without a quit map, quit_available is False with conf 0 except in the pause menu with a menu read; with one
-    (quit_map.p_pause / p_quit(scene, key), ssbot.safety.quit_map keys) both need P >= min_p. The blockers carry only
-    VISION_BLOCKS bits. src PREDICTED.
+  - Pause / quit availability and blockers are rebuilt from vision cues (DESIGN §3.7.5): screen mode (a dialogue
+    box blocks); the 0.3 s real-time lockout after its own PAUSE_ON/OFF edges; < 0.3 s since a hit taken (trial
+    run: the first pausable frame after a hit came 0.215-0.250 s later in 99 of 101 hits; probe P7: 0.25 s); a
+    running freeze (FREEZE start/end) or a world visibly running slow (game time over real time < SLOW_RATE across a
+    frame, held SLOW_HOLD_S; also the first frame, before any speed reading): it catches the slow motion whose start
+    the filter never saw, e.g. BossDeathSlow running on across a savestate load; a hazard death until 1.0 s after
+    the hazard respawn; < 0.5 s after a scene entry or a return to gameplay; the hurt mode. Without a quit map,
+    quit_available is False with conf 0 except in the pause menu with a menu read; with one (quit_map.p_pause /
+    p_quit(scene, key), ssbot.safety.quit_map keys) both need P >= min_p. The blockers carry only VISION_BLOCKS
+    bits. src PREDICTED.
   - Boss HP -> hit-count estimate: a HIT_DEALT on a visible entity counts (amount is O); hp_est = hp_max - sum of
-    the per-attack damage (attack_damage[HitDealt.attack], else hit_damage), sigma = hit_sigma * sqrt(hits). Default
-    hit_damage 5: every Hunter nail hit on the Bell Beast took 5 HP (56 of 56 drops, trial run + the person's fight).
+    the per-attack damage (attack_damage[HitDealt.attack], else the longest key prefixing HitDealt.hero_anim, else
+    hit_damage), sigma = hit_sigma * sqrt(hits). Defaults: 5 per hit, 15 for a hit during "NeedleThrow Throwing"
+    (Silk Spear): Hunter crest, needle level 0 (DEFAULT_ATTACK_DAMAGE).
   - FSM state -> observable phase through the caller's table (BossSpec.phases or phase_map; default "unknown"),
     with t_in_phase counted from the observable phase change.
   - Exact timers (HeroState fields tagged timer=True) -> None until the vision-side timer models exist.
@@ -45,22 +50,41 @@ Rule: no value in the output may depend on something pixels cannot show. Per fra
   - bind_ready from the silk count (the spool is visible); pending_dmg 0 when no status tag is visible, else
     unknown (conf 0).
 
-Measured shares and costs: see tests/test_observability.py and the module report (the numbers depend on the
-recording; they are re-measured, not hard-coded). The per-frame visibility kernel (polygon clipping against the
-viewport rectangle, Sutherland-Hodgman, shoelace areas) runs under @numba.njit; clip_fractions_ref is the plain
-reference the tests hold it to, and shapely the external check.
+Measured with ObservabilityFilter reset at every savestate load and a BoxTable learnt from the trial run, on the
+live Bell Beast run 20261001_122249 (rec i<N>_000 / _001: 200 savestate episodes, 2,148,565 STATEs; held out from
+the pause cues and SLOW_RATE / SLOW_HOLD_S, which were set on the trial run, but not from the 15-HP Silk Spear value),
+the trial run 20261001_121446 (26,892 STATEs) and the person's fight (human/20260930_210337 frames 64275-68397):
+  - Pause: vision says pausable while the oracle's gate is closed in 0 of 2,146,430 PLAYING frames (live; trial 0,
+    person 0; without the slow-motion cue 3,458 live frames, all TIME_SLOWED). The cues close the gate in 5.8 % of
+    the frames the oracle has it open (116,404 of 2,009,327; trial 5.6 %, person 0.1 %).
+  - Visibility: the boss is outside the image in 6,704 of 932,222 exported frames (0.72 %; the old any-vertex rule
+    said 10,552): 4,308 as a ghost, 2,396 still hidden (it came back up off-screen). Of the 1,216,343 frames the
+    boss was not exported (underground, before the wake, after the kill) the vision view holds it hidden (dug in
+    while in view, position unknown) in 967,738 and as a ghost in 103,135 (it dug in off-screen or at the image
+    edge, so vision last saw it there; mean pos conf 0.88).
+  - Damage boxes: of 8,461 hits taken, the vision boxes touch the hero hurtbox in the hit frame in 8,213 (97.1 %),
+    every one of the 7,562 the oracle's own active boxes touch included, and in the frame before in 32 more; 209
+    miss both frames by at most 0.56 u (p50 0.10 u: fast bells and charges, the contact fell between frames; the
+    oracle's boxes miss by the same distance), 7 came from the boss bursting out of the ground while not exported.
+  - Boss HP: zero error in every frame the boss was visible (live 925,463 frames, 4,541 hits of which 460 Silk
+    Spear; trial 12,177; person 1,737).
+  - Cost per STATE (13900K, two measuring processes in parallel): p50 145-148 us, p99 273-289 us (OracleBackend
+    p50 95-96 us, p99 172-186 us).
+The per-frame visibility kernel (polygon clipping against the viewport rectangle, Sutherland-Hodgman, shoelace areas)
+runs under @numba.njit; clip_fractions_ref is the plain reference the tests hold it to, and shapely the external
+check.
 """
 import math
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, replace
-from typing import Any, Protocol
+from typing import Protocol
 
 import numpy as np
 
 from ssbot.core.bosses import BossSpec
 from ssbot.core.worldstate import (BIND_SILK, ORACLE, VISION_BLOCKS, VISION_EQUIVALENT, DamageBox, E, Entity, Ev,
-                                   HeroState, Kind, PauseBlock, PhasePost, Screen, Src, Unobs, WorldState,
-                                   timer_fields, unknown)
+                                   Hazard, HeroState, HitDealt, Kind, PauseBlock, PhasePost, Screen, Src, Unobs,
+                                   WorldState, timer_fields, unknown)
 from ssbot.tools.projector import mat4, project
 
 try:
@@ -68,6 +92,10 @@ try:
 except ImportError:   # pragma: no cover
     numba = None
 
+# Damage per attack for the hit-count HP estimate, keyed by HitDealt.attack or by a prefix of the hero's animation
+# clip at the hit (the bot knows what it did). Hunter crest, needle level 0 (the M2 loadout), live Bell Beast run
+# 20261001_122249: the 460 hits dealt with "NeedleThrow Throwing" (Silk Spear) took 15 HP, the other 4,081 took 5 HP.
+DEFAULT_ATTACK_DAMAGE = {"NeedleThrow Throwing": 15.0}
 UNKNOWN_PHASE = "unknown"
 HIDDEN_PHASE = "hidden"
 # Memory-track lifetime per kind (game seconds); placeholders until M3 measures re-detection gaps.
@@ -89,7 +117,10 @@ HAZARD_BLOCK_S = 1.0         # after a hazard respawn (FinishedEnteringScene cle
 ENTRY_BLOCK_S = 0.5          # after a scene entry (HUDCamera PreventPause 0.5 s, m0:N14)
 HURT1_S = 1.2                # quit-map key "hurt1" ends here (i-frames)
 FREEZE_MAX_S = 5.0           # a freeze start without its end stops counting after this long (RaceWinSlow 3.8 s)
+SLOW_RATE = 0.75             # game time over real time below this across a frame: the world visibly slows down
+SLOW_HOLD_S = 0.1            # TIME_SLOWED is kept this long after the last slow frame (the ramp back to full speed)
 PAUSE_CONF = 0.9             # pause_available conf without a quit map
+CONF_MAX = 0.99              # an inferred availability is never certain (est fields keep conf < 1)
 
 
 class QuitMapLike(Protocol):
@@ -257,7 +288,7 @@ def viewport_rect(cam, margin_px: float = 0.0) -> np.ndarray:
 @dataclass(slots=True)
 class _LocalBox:
     box: list[float]              # x0, y0, x1, y1 in the mirrored transform frame
-    hazard: Any
+    hazard: Hazard
     flags: frozenset[str]
     dmg: int
 
@@ -302,6 +333,19 @@ class BoxTable:
                 lb.box = [min(lb.box[0], bx[0]), min(lb.box[1], bx[1]), max(lb.box[2], bx[2]), max(lb.box[3], bx[3])]
                 lb.flags = lb.flags | b.flags
                 lb.dmg = max(lb.dmg, dmg)
+
+    def to_dict(self) -> dict:
+        """JSON-able form (an offline table built from earlier recordings: pass it back with from_dict)."""
+        return {tk: [[list(k), lb.box, int(lb.hazard), sorted(lb.flags), lb.dmg] for k, lb in tab.items()]
+                for tk, tab in self.t.items()}
+
+    @classmethod
+    def from_dict(cls, d: Mapping[str, list]) -> "BoxTable":
+        bt = cls()
+        for tk, rows in d.items():
+            bt.t[tk] = {tuple(k): _LocalBox(list(map(float, box)), Hazard(hz), frozenset(fl), int(dmg))
+                        for k, box, hz, fl, dmg in rows}
+        return bt
 
     def place(self, type_key: str, anchor: tuple[float, float], flip: bool) -> list[DamageBox]:
         tab = self.t.get(type_key)
@@ -349,7 +393,8 @@ class ObservabilityFilter:
         self.hp_max = {k: b.hp_max for k, b in specs.items() if b.hp_max is not None} | (hp_max or {})
         self.phase_map = {k: dict(b.phases) for k, b in specs.items()} | (phase_map or {})
         self.hit_damage = hit_damage
-        self.attack_damage = dict(attack_damage or {})
+        self.attack_damage = DEFAULT_ATTACK_DAMAGE | dict(attack_damage or {})
+        self._anim_keys = sorted(self.attack_damage, key=len, reverse=True)
         self.hit_sigma = hit_sigma
         self.ttl_s = DEFAULT_TTL_S | (ttl_s or {})
         self.margin_px = margin_px
@@ -376,6 +421,8 @@ class ObservabilityFilter:
         self._hazard_q = -math.inf
         self._entry_q = -math.inf
         self._freeze_q: list[float] = []
+        self._slow_until = -math.inf
+        self._tq_prev: tuple[float, float] | None = None     # (game time, QPC s) of the previous frame
         self._gameplay_prev: bool | None = None
 
     # ---- per frame ---------------------------------------------------------------------------------------------
@@ -423,8 +470,7 @@ class ObservabilityFilter:
                     continue     # a hit vision cannot see
                 iid = ev.data.target_id
                 self._hits[iid] = self._hits.get(iid, 0) + 1
-                self._dmg[iid] = self._dmg.get(iid, 0.0) + self.attack_damage.get(ev.data.attack or "",
-                                                                                   self.hit_damage)
+                self._dmg[iid] = self._dmg.get(iid, 0.0) + self._hit_value(ev.data)
             elif ev.kind == Ev.ENEMY_KILLED:
                 self._killed.add(ev.data.target_id)
             events.append(ev)
@@ -451,20 +497,16 @@ class ObservabilityFilter:
                 del self._seen[iid]
                 continue
             seen.oracle_hidden = gone_inside.get(iid, False)
-            if iid in gone_inside:
-                if seen.state != "hidden":
-                    seen.state, seen.t_state = "hidden", t
-            elif iid in outside:
-                if seen.state != "ghost":
-                    seen.state, seen.t_state = "ghost", t
-            elif seen.state == "visible":          # left the export: where was it last seen?
-                seen.state, seen.t_state = ("hidden" if seen.frac >= VANISH_FRAC else "ghost"), t
+            if seen.state == "visible":            # just lost: it vanished in view, or vision lost it over the edge
+                vanished = iid not in outside and seen.frac >= VANISH_FRAC    # hidden, not drawn, left the export
+                seen.state, seen.t_state = ("hidden" if vanished else "ghost"), t
+            # (a ghost stays a ghost and a hidden one hidden until seen again: vision cannot see either change)
             age = t - seen.t
             if seen.state == "hidden" and seen.ent.kind not in KEEP_HIDDEN:
                 del self._seen[iid]
                 continue
-            if age > self.ttl_s.get(seen.ent.kind, OTHER_TTL_S) and not seen.oracle_hidden:
-                del self._seen[iid]               # (an entity the oracle still exports hidden has no TTL)
+            if age > self.ttl_s.get(seen.ent.kind, OTHER_TTL_S) and not (seen.oracle_hidden and seen.state == "hidden"):
+                del self._seen[iid]               # (seen digging in and still exported hidden: no TTL)
                 continue
             if seen.state == "hidden":
                 ents.append(self._hidden(seen, t, age))
@@ -528,6 +570,17 @@ class ObservabilityFilter:
             e.phase = PhasePost(topk=[(name, 1.0)], t_in_phase=self._phase_time(e.id, name, t))
             flags |= Unobs.PHASE_FROM_TABLE
         return flags
+
+    def _hit_value(self, d: HitDealt) -> float:
+        """Damage of one hit dealt: attack_damage[attack], else the longest key prefixing the hero's clip, else
+        hit_damage."""
+        if d.attack is not None and d.attack in self.attack_damage:
+            return self.attack_damage[d.attack]
+        clip = d.hero_anim or ""
+        for k in self._anim_keys:
+            if clip.startswith(k):
+                return self.attack_damage[k]
+        return self.hit_damage
 
     def _phase_time(self, iid: int, name: str, t: float) -> float:
         ph = self._phase.get(iid)
@@ -593,6 +646,14 @@ class ObservabilityFilter:
         if self._paused is None:
             self._paused = screen == Screen.PAUSE_MENU
         self._freeze_q = [x for x in self._freeze_q if q - x < FREEZE_MAX_S]
+        t = ws.stamp.t_game_s
+        if self._tq_prev is None:              # no speed reading yet: as if slowed
+            self._slow_until = q + SLOW_HOLD_S
+        else:                                  # the world runs slow: a freeze or slow motion whose start was not seen
+            dt_game, dq = t - self._tq_prev[0], q - self._tq_prev[1]
+            if dq > 0.0 and dt_game < SLOW_RATE * dq:
+                self._slow_until = q + SLOW_HOLD_S
+        self._tq_prev = (t, q)
         gameplay = screen in GAMEPLAY
         if gameplay and self._gameplay_prev is False:
             self._entry_q = q
@@ -609,7 +670,7 @@ class ObservabilityFilter:
             blk |= PauseBlock.MSG_CANVAS
         elif not gameplay and not self._paused:
             blk |= PauseBlock.GAME_STATE_NOT_PLAYING
-        if self._freeze_q:
+        if self._freeze_q or q < self._slow_until:
             blk |= PauseBlock.TIME_SLOWED
         if q - self._hit_q < HIT_BLOCK_S or q - self._hazard_q < HAZARD_BLOCK_S or ws.hero.mode.v == "hurt" \
                 or q - self._entry_q < ENTRY_BLOCK_S:
@@ -631,9 +692,9 @@ class ObservabilityFilter:
                 pp = self.quit_map.p_pause(g.scene.v, key)
                 pq = self.quit_map.p_quit(g.scene.v, key)
                 p_ok = rules_ok and pp is not None and pp >= self.min_p
-                pause = E(p_ok, conf=pp if p_ok else 1.0 - (pp or 0.0), src=Src.PREDICTED)
+                pause = E(p_ok, conf=min(CONF_MAX, pp if p_ok else 1.0 - (pp or 0.0)), src=Src.PREDICTED)
                 q_ok = p_ok and pq is not None and pq >= self.min_p
-                quit_ = E(q_ok, conf=pq if q_ok else 1.0 - (pq or 0.0), src=Src.PREDICTED)
+                quit_ = E(q_ok, conf=min(CONF_MAX, pq if q_ok else 1.0 - (pq or 0.0)), src=Src.PREDICTED)
         g.pause_available = pause
         g.quit_available = quit_
         g.pause_blockers = int(blk)
@@ -643,6 +704,8 @@ class ObservabilityFilter:
         """The quit-map state key (ssbot.safety.quit_map) from vision cues."""
         if screen == Screen.INVENTORY:
             return "inventory"
+        if screen == Screen.DIALOG:
+            return "interact"
         if not gameplay:
             return "transition"
         if q - self._entry_q < 1.0:
@@ -651,7 +714,7 @@ class ObservabilityFilter:
             return "hazard"
         if q - self._hit_q < HIT_BLOCK_S:
             return "hurt0"
-        if self._freeze_q:
+        if self._freeze_q or q < self._slow_until:
             return "freeze"
         if q - self._hit_q < HURT1_S:
             return "hurt1"

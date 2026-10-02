@@ -103,6 +103,7 @@ def test_boss_entity_hit_dealt_and_phase(wake):
     assert len(hits) == 1
     f, d = hits[0]
     assert f == 56818 and (d.target_id, d.amount, d.hp_after) == (fx.BOSS_IID, 5.0, 145.0)
+    assert d.hero_anim == fx.window(0)[[s["f"] for s in fx.window(0)].index(56818)]["hero"]["anim"]["clip"]
     assert next(e for e in at(wake, 56830).entities if e.id == fx.BOSS_IID).hp_est.v == 145.0
     # time in phase advances by the scaled dt and restarts at each Control transition
     prev, checked = None, 0
@@ -140,6 +141,21 @@ def test_bells_are_enemy_attacks_with_damage_boxes(wake):
         box = e.dmg_boxes[0]
         assert box.hazard == Hazard.ENEMY and box.dmg_seq == (2,) and len(box.poly) == 8
         assert "COUNTER" in box.flags and "PARRYABLE" not in box.flags
+
+
+def test_a_hit_landing_while_hurt_keeps_the_action_before():
+    """The live run's case: a Silk Spear in flight hits while the hero plays "Stun" (hurt); it is still the throw."""
+    states = fx.window(2)
+    i = next(i for i, s in enumerate(states) if s["f"] == 68995)
+    states[i - 1]["hero"]["anim"]["clip"] = "NeedleThrow Throwing"
+    bits = cstate.decode(states[i]["hero"]["cstate"], NAMES)
+    bits["recoiling"] = True
+    states[i]["hero"]["cstate"] = cstate.encode(bits, NAMES)
+    states[i]["hero"]["anim"]["clip"] = "Stun"
+    w = run(states[:i + 1])[-1]
+    assert w.hero.mode.v == "hurt"
+    (hit,) = [e.data for e in w.events if e.kind == Ev.HIT_DEALT]
+    assert hit.hero_anim == "NeedleThrow Throwing"
 
 
 def test_kill_comes_from_the_death_state(kill):
@@ -277,7 +293,7 @@ def test_kind_follows_the_projectile_bit_with_a_short_hold():
 @pytest.mark.parametrize("name", HAZARD_TYPES + ("cog", "unknown"))
 def test_damage_flags_follow_the_take_damage_gate(name):
     """HeroController.cs:5369 (m0:N1): with hit or parry i-frames only ENEMY, NON_HAZARD and EXPLOSION return
-    early; the parry stance and parry i-frames stop ENEMY only (cs:5391-5398); cogs deal TakeDamage(1, SPIKES)."""
+    early; the parry stance parries ENEMY only (cs:5391); cogs deal TakeDamage(1, SPIKES)."""
     h = HAZARD_TYPES.index(name) if name in HAZARD_TYPES else 99 if name == "unknown" else 1
     d = {"parry": 0, "flags": 0, "hazard_type": h, "eff": 1}
     flags = damage_flags(d, cog=name == "cog")
@@ -469,6 +485,9 @@ def test_screen_splits_loading_from_entering():
     assert OracleBackend(clock=None).feed(s).game.screen.v == Screen.FADE
     s["game"]["gs"] = 2
     assert OracleBackend(clock=None).feed(s).game.screen.v == Screen.TRANSITION
+    s["game"]["gs"] = 4
+    s["pause"]["interact"] = True                                  # a BlockingInteractable: dialogue, door, shop
+    assert OracleBackend(clock=None).feed(s).game.screen.v == Screen.DIALOG
 
 
 def test_menu_and_gates_when_exported():
