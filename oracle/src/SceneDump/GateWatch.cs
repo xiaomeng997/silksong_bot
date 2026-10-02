@@ -15,7 +15,9 @@ namespace SsOracle.SceneDump
     /// solids[].id), enabled: Collider2D.enabled and GameObject.activeInHierarchy now, box: [x0, y0, x1, y1] world AABB
     /// of the dumped outline, moved with the transform's position since the dump (rotation and scale are not
     /// followed)}. A consumer applies "enabled" over the TERRAIN solid with that id. nil until the current room's dump
-    /// is done (unknown, not "no gates"); [] when nothing is watched.
+    /// is done (unknown, not "no gates"), and again from a sub-scene of the room loading or unloading after the dump
+    /// until the dump that follows is done (Bone_05: DebugMod's savestate load adds Bone_05_boss, which holds the gates,
+    /// after the room has entered; SceneDumper.SubSceneChanged); [] when nothing is watched.
     /// The list holds MaxListed entries. Battle gates and solids seen changed stay once listed; a solid listed only
     /// because it was off at the dump, and still is, says nothing TERRAIN does not, so a newly changed solid takes its
     /// slot when the list is full (EvictSlot; the evicted one goes back to the poll). Only when every slot holds a
@@ -114,6 +116,10 @@ namespace SsOracle.SceneDump
             Building.Clear();
             BattleIds.Clear();
         }
+
+        /// <summary>The committed list no longer covers the room (a sub-scene loaded or unloaded after the dump,
+        /// SceneDumper.SubSceneChanged): room.gates and room.gates_trunc are nil until the next Commit.</summary>
+        public static void Invalidate() => committed = -1;
 
         /// <summary>Which solids room.gates lists: battle gates, solids off in the dump, solids seen changed since.</summary>
         public static bool IsWatched(bool battle, bool onAtDump, bool onNow) => battle || !onAtDump || onNow != onAtDump;

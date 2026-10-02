@@ -203,6 +203,14 @@ internal static class Program
         Eq(SsOracle.SceneDump.GateWatch.IsWatched(false, true, false), true, "Bone_05 'Wall' (on at entry, gone later) is listed once seen off");
         Eq(SsOracle.SceneDump.GateWatch.IsWatched(true, true, true), true, "a BattleScene gate is always listed");
         GateOverflow();
+        // The room's sub-scenes (a late one is dumped again: SceneDumper.SubSceneChanged).
+        Eq(SsOracle.SceneDump.SceneDumper.IsSubScene("Bone_05_boss", "Bone_05"), true, "Bone_05_boss is a sub-scene of Bone_05");
+        Eq(SsOracle.SceneDump.SceneDumper.IsSubScene("Bone_05", "Bone_05"), false, "the room itself is not its sub-scene");
+        Eq(SsOracle.SceneDump.SceneDumper.IsSubScene("Bone_05b", "Bone_05"), false, "Bone_05b is another room");
+        Eq(SsOracle.SceneDump.SceneDumper.IsSubScene("Bone_051_boss", "Bone_05"), false, "Bone_051_boss belongs to Bone_051");
+        Eq(SsOracle.SceneDump.SceneDumper.IsSubScene("Bone_05_", "Bone_05"), false, "a bare separator is no sub-scene");
+        Eq(SsOracle.SceneDump.SceneDumper.IsSubScene("Bone_05_boss", null), false, "no room name: nothing matches");
+
         // ents[].hidden: a seen, alive HealthManager root that nothing else exports is hidden when out of sight.
         Eq(EntityRegistry.IsHidden(true, true), true, "Bell Beast submerged: HealthManager active, renderer off -> hidden");
         Eq(EntityRegistry.IsHidden(false, false), true, "HealthManager inactive -> hidden");

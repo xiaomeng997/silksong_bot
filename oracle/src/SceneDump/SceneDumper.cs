@@ -12,7 +12,8 @@ namespace SsOracle.SceneDump
 {
     /// <summary>
     /// TERRAIN message (DESIGN §4.6, §3.1.9 SceneGeometry source; field sources m0 §3.2 SceneDumper): once per
-    /// gameplay room after it has finished entering, plus on brain connect and on RPC "scene.dump". Contents:
+    /// gameplay room after it has finished entering, again when a sub-scene of the room loads or unloads after that
+    /// (reason "subscene", see SubSceneChanged), plus on brain connect and on RPC "scene.dump". Contents:
     /// every collider on the TERRAIN (and SOFT_TERRAIN) layer as world outlines, including inactive ones (arena
     /// gates), static hazards (DamageHero, or the legacy 'damages_hero' FSM that HeroBox checks first, with
     /// hazardType != ENEMY), transition gates, hazard-respawn zones, scene preloaders (they grey out Save &amp;
@@ -104,24 +105,63 @@ namespace SsOracle.SceneDump
                 if (FlowTap.RoomIsEntered) instance.Request("connect", null);
             };
             Ipc.Rpc.Register("scene.dump", (args, reply) => instance.Request("rpc", reply));
+            SceneManager.sceneLoaded += (scene, mode) => instance.SubSceneChanged(scene, "loaded");
+            SceneManager.sceneUnloaded += scene => instance.SubSceneChanged(scene, "unloaded");
             Export.FrameExporter.Register(new RoomExporter());
         }
 
-        private void Request(string why, Ipc.Rpc.Reply reply)
+        /// <summary>A sub-scene of the room "baseName" ("Bone_05_boss" of "Bone_05"; m0 §2.7); the dump scans the
+        /// active scene and these (pure; oracle/tests/EntitiesCheck).</summary>
+        public static bool IsSubScene(string name, string baseName) =>
+            !string.IsNullOrEmpty(name) && !string.IsNullOrEmpty(baseName) && name.Length > baseName.Length + 1
+            && name.StartsWith(baseName, StringComparison.Ordinal) && name[baseName.Length] == '_';
+
+        /// <summary>
+        /// A sub-scene of the current room that loads (or unloads) after the room has finished entering makes the dump
+        /// taken at entry stale, so the room is dumped again ("subscene") and room.gates is nil until that dump is
+        /// committed. DebugMod's savestate load does this: once the transition is over it loads the state's extra scenes
+        /// itself (SaveState.LoadStateCoro, LoadDuped: Bone_05_boss, which holds both "Threaded Bell Gate"s and "Wall"),
+        /// after GameManager.FinishedEnteringScene; a SceneAdditiveLoadConditional outside a SceneLoad sequence also
+        /// loads its scene from Start. m2_exports probe, 2026-10-02: a load of bellbeast_arena from Bonetown gave
+        /// TERRAIN "enter" with 28 solids and room.gates without the gates; a reload inside Bone_05 gave 31.
+        /// </summary>
+        private void SubSceneChanged(Scene scene, string what)
+        {
+            try
+            {
+                if (!FlowTap.RoomIsEntered) return; // in a transition: the entry dump comes after it
+                var gm = GameManager._instance;
+                if (gm == null || !gm.IsGameplayScene()) return;
+                var active = SceneManager.GetActiveScene();
+                if (scene == active || !IsSubScene(scene.name, gm.sceneName ?? active.name)) return;
+                Core.Plugin.Log.LogInfo($"TERRAIN: {scene.name} {what} after {gm.sceneName} was entered: dumping the room again");
+                GateWatch.Invalidate();
+                Request("subscene", null, restart: true);
+            }
+            catch (Exception e)
+            {
+                Core.Plugin.Log.LogWarning($"SceneDumper: sub-scene {what} handler failed: {e.Message}");
+            }
+        }
+
+        /// <param name="restart">A dump in progress may have listed the room's scenes already: start over.</param>
+        private void Request(string why, Ipc.Rpc.Reply reply, bool restart = false)
         {
             if (reply != null) waiters.Add(reply);
             if (!Tap.Active && waiters.Count == 0) return; // nobody would receive it
-            if (running && Time.frameCount - runningSince < StaleDumpFrames)
+            if (running && !restart && Time.frameCount - runningSince < StaleDumpFrames)
             {
                 // The dump in progress is for this room and will be sent; an RPC just waits for it.
                 return;
             }
             if (running)
             {
-                // Stale: restart below, keeping the waiters (they get this dump's result).
+                // Stale or restarted: start over below, keeping the waiters (they get the new dump's result).
                 if (routine != null) StopCoroutine(routine);
                 routine = null;
                 running = false;
+                ReleaseObjects();
+                GateWatch.Discard();
             }
             var gm = GameManager._instance;
             if (gm == null || !gm.IsGameplayScene() || !FlowTap.RoomIsEntered)
@@ -254,7 +294,7 @@ namespace SsOracle.SceneDump
                 var sc = SceneManager.GetSceneAt(i);
                 if (!sc.isLoaded) continue;
                 loaded.Add(sc.name);
-                if (sc == active || sc.name.StartsWith(baseName + "_", StringComparison.Ordinal))
+                if (sc == active || IsSubScene(sc.name, baseName))
                 {
                     scannedScenes.Add(sc.name);
                     scenesToScan.Add(sc);
@@ -925,8 +965,9 @@ namespace SsOracle.SceneDump
         /// STATE "room": {seq: last TERRAIN sent, transition: the room it was for, current: transition count,
         /// busy: a dump is in progress, work_us: the dump's main-thread work in this frame, gates: the watched
         /// battle/arena gates and other solids whose state differs from the dump, live (GateWatch; nil until the
-        /// current room's dump is done), gates_trunc: true once a changed solid could not be listed in this room, so
-        /// unlisted solids' state is unknown (nil while gates is nil)}.
+        /// current room's dump is done, and while a sub-scene that came or went after it is dumped again),
+        /// gates_trunc: true once a changed solid could not be listed in this room, so unlisted solids' state is
+        /// unknown (nil while gates is nil)}.
         /// </summary>
         private sealed class RoomExporter : Export.IExporter
         {
