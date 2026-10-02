@@ -250,6 +250,28 @@ class Forecast:
                     out |= ((dx * dx + dy * dy) <= rr * rr) & ok
         return out
 
+    def occupied_redirect(self, x, y, tk, type_key: str, t_hit: float, d: int) -> np.ndarray | None:
+        """occupied() with the drop bell `type_key` knocked aside at t_hit by a side slash moving d (+1 right): its
+        own placements replaced by its one redirected path (pogo_targets.simulate redirect). None: not applicable (the
+        bell is not on an exact path, or its random bounce comes before the hit)."""
+        ent = next((e for e in self.det if e[7] == type_key), None)
+        if ent is None:
+            return None
+        sp, bx, by, vx, vy, nb, rest, _ = ent
+        if rest is not None or "side" not in sp.redirect:
+            return None
+        tk = np.asarray(tk, np.float64)
+        out = self.occupied_without(x, y, tk, type_key)
+        hx, hy = self.fc.half
+        rr = sp.r + DET_SKIN_U
+        for dt in DET_SLACK_S:
+            t = np.maximum(tk + dt, 0.0)
+            cx, cy, ok = simulate(sp, bx, by, vx, vy, nb, None, t, side=d, redirect=(t_hit, d))
+            dx = np.maximum(np.abs(np.asarray(x) - cx) - hx, 0.0)
+            dy = np.maximum(np.abs(np.asarray(y) - cy) - hy, 0.0)
+            out |= ((dx * dx + dy * dy) <= rr * rr) & ok
+        return out
+
     def occupied_without(self, x, y, tk, exclude: str) -> np.ndarray:
         """occupied() without the placements whose only source is the entity type `exclude` (a bell disarmed by a
         down attack: its DamageHero cooldown; a placement shared with other sources still counts)."""

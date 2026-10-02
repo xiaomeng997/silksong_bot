@@ -237,14 +237,19 @@ class Planner:
     # ---- S -----------------------------------------------------------------------------------------------------------
 
     def _contacts(self, f: Forecast, bound: np.ndarray, tk: np.ndarray, skip: np.ndarray, comfort: bool = False,
-                  exclude: str | None = None) -> np.ndarray:
+                  exclude: str | None = None, redirect: tuple | None = None) -> np.ndarray | None:
         """[N, T1] contact of the lanes' hull with the support. A hull a point covers (the templates are dilated by
         the hurtbox plus the margin) is tested at its centre; a wider one at a grid of 2 points along each wide axis
         (sub-boxes the dilation covers), wider still counts as contact. One query: the first point of every frame,
         plus extra layers for the rows with a wide frame (NaN where a frame needs fewer points: skipped)."""
         hx, hy = f.fc.half
         X, Y, rows, too_wide = _hull_points(np.ascontiguousarray(bound), hx, hy, self.cfg.max_points)
-        hit = f.occupied(X, Y, tk, comfort) if exclude is None else f.occupied_without(X, Y, tk, exclude)
+        if redirect is not None:
+            hit = f.occupied_redirect(X, Y, tk, *redirect)
+            if hit is None:
+                return None
+        else:
+            hit = f.occupied(X, Y, tk, comfort) if exclude is None else f.occupied_without(X, Y, tk, exclude)
         N = bound.shape[0]
         occ = hit[:N].copy()
         if len(rows):
@@ -480,6 +485,9 @@ class Planner:
         after = np.full(N, -1, np.int64)
         rows_all = np.zeros(N, bool)
         pogo_tgt = np.full(N, -1, np.int64)      # the target of a row's first predicted bounce (0: the boss)
+        side_tgt = np.full(N, -1, np.int64)      # ... of its first side slash hit, its frame and direction
+        side_f = np.full(N, -1, np.int64)
+        side_d = np.zeros(N, np.int64)
         for _ in range(2):
             hit_f = np.full(N, -1, np.int64)
             kind = np.zeros(N, np.int64)
@@ -507,6 +515,8 @@ class Planner:
             ev[rows, j] |= bits
             pr = rows[(k == 3) & (pogo_tgt[rows] < 0)]
             pogo_tgt[pr] = tsel[pr]
+            sr = rows[(k <= 1) & (side_tgt[rows] < 0)]
+            side_tgt[sr], side_f[sr], side_d[sr] = tsel[sr], hit_f[sr], np.where(kind[sr] == 1, 1, -1)
             self.last_pogo += int((k == 3).sum())
             self.last_bell_pogo += int(((k == 3) & (tsel[rows] > 0)).sum())
             self.last_recoil += int((k <= 1).sum())
@@ -538,6 +548,19 @@ class Planner:
                 win = ((np.arange(tk.shape[0])[None, :] >= b0[:, None]) &
                        (tk[None, :] <= tk[b0][:, None] + g.cooldown_s))
                 occ[r] = np.where(win, occ_x, occ[r])
+            # a side slash on a drop bell knocks it away from the hitter (TINK): its support is its one redirected
+            # path instead of both bounce sides (Forecast.occupied_redirect); the slash's own safety as usual
+            self.last_redirect = 0
+            for n_ in np.flatnonzero(side_tgt[sub] > 0):
+                g = tgts[int(side_tgt[sub[n_]])]
+                if not g.redirect:
+                    continue
+                c = sub[n_]
+                o = self._contacts(f, cur.bound[c:c + 1], tk, skip[n_:n_ + 1],
+                                   redirect=(g.name, float(tk[min(side_f[c], len(tk) - 1)]), int(side_d[c])))
+                if o is not None:
+                    occ[n_] = o[0]
+                    self.last_redirect += 1
             s_hit[sub] = occ.any(axis=1)
             S[sub] |= s_hit[sub]
         # a pogo plan stands only if the down spike connects in every timing lane (DESIGN 3.5.6: a miss lands the hero
@@ -600,7 +623,8 @@ class Planner:
             spec = f.fc.targets.spec_of(pth.type_key) if hasattr(f.fc, "targets") else None
             out.append(_Target(np.ascontiguousarray(pth.box), np.ascontiguousarray(pth.ok), P0, S0, B0, cbox,
                                np.ascontiguousarray(pth.cert), P1, S1, B1, spec.recoil if spec else True,
-                               pth.type_key, spec.cooldown_s if spec else 0.0))
+                               pth.type_key, spec.cooldown_s if spec else 0.0,
+                               bool(spec and "side" in spec.redirect)))
         if not okb.any() and len(out) == 1:
             return []
         return out
@@ -963,14 +987,14 @@ class _Target:
     polygons around base (moved by box - base); c*: the certain form the pogo gate uses."""
 
     def __init__(self, box, ok, polys, starts, base, cbox=None, cok=None, cpolys=None, cstarts=None, cbase=None,
-                 recoil: bool = True, name: str = "boss", cooldown_s: float = 0.0):
+                 recoil: bool = True, name: str = "boss", cooldown_s: float = 0.0, redirect: bool = False):
         self.box, self.ok, self.polys, self.starts, self.base = box, ok, polys, starts, base
         self.cbox = box if cbox is None else cbox
         self.cok = ok if cok is None else cok
         self.cpolys = polys if cpolys is None else cpolys
         self.cstarts = starts if cstarts is None else cstarts
         self.cbase = base if cbase is None else cbase
-        self.recoil, self.name, self.cooldown_s = recoil, name, cooldown_s
+        self.recoil, self.name, self.cooldown_s, self.redirect = recoil, name, cooldown_s, redirect
 
 
 class _View:

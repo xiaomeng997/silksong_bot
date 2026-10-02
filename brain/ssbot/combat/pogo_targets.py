@@ -51,6 +51,7 @@ class TargetSpec:
     next_bounce: dict = field(default_factory=dict)
     bounces: list = field(default_factory=list)
     life_after_first_s: float | None = None
+    redirect: dict = field(default_factory=dict)     # what a side slash does to its path (drop bells: TINK)
 
 
 @dataclass
@@ -71,16 +72,20 @@ def load_registry(path: Path | str | None = None) -> list[TargetSpec]:
         out.append(TargetSpec(prefix, float(v["shape"]["circle"]), frozenset(v.get("states") or ()),
                               bool(v.get("recoil", True)), float(v.get("damage_cooldown_s", 0.0)),
                               float(ph.get("g", 0.0)), ph.get("ground_y"), dict(ph.get("next_bounce") or {}),
-                              list(ph.get("bounces") or []), ph.get("life_after_first_bounce_s")))
+                              list(ph.get("bounces") or []), ph.get("life_after_first_bounce_s"),
+                              dict(v.get("redirect") or {})))
     return out
 
 
 def simulate(spec: TargetSpec, x: float, y: float, vx: float, vy: float, nb: int, life_s: float | None,
-             tk: np.ndarray, side: int = 0) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+             tk: np.ndarray, side: int = 0, redirect: tuple[float, float] | None = None
+             ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Centre path sampled at tk (s, game time) and whether it is determined there. side +-1: the branch of a random
     bounce (a drop bell's) taken to that side, so the path stays determined (one of two branches, p 0.5 each).
     Recordings 20261001_122249 i0_002 / i3_002, time from the game's physics steps: centre error 0.000 u over 0.8 s for
-    attack bells (Launch, Launched Up through the first bounce) and drop bells (Air, Bounce Air), n 7,532 starts."""
+    attack bells (Launch, Launched Up through the first bounce) and drop bells (Air, Bounce Air), n 7,532 starts.
+    redirect (t, dir): a side slash meets it at t (a drop bell's TINK RIGHT / LEFT, FSM Tink Right / Tink R Min): vx
+    becomes dir x clamp(|vx|, 5, 10) and its next bounce goes that way (Bounce X = dir x 4)."""
     t_end = float(tk[-1]) if len(tk) else 0.0
     n = int(math.ceil(t_end / STEP_S)) + 2
     ts = np.arange(n) * STEP_S
@@ -88,6 +93,10 @@ def simulate(spec: TargetSpec, x: float, y: float, vx: float, vy: float, nb: int
     known = True
     gone = False
     for i in range(n):
+        if redirect is not None and ts[i] >= redirect[0]:
+            d = 1.0 if redirect[1] > 0 else -1.0
+            vx = d * min(max(abs(vx), 5.0), 10.0)
+            side, known, redirect = int(d), True, None
         if life_s is not None and ts[i] > life_s:
             gone = True
         xs[i], ys[i], det[i] = x, y, known and not gone

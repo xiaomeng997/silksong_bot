@@ -73,3 +73,35 @@ def test_the_planner_bounces_off_a_bell_below(setup):
     # a bell not in a hittable state (collider off) is no target
     planner, r = _tick(setup, [("BoneBeast DropBell M", "Antic", (85.0, 3.6), (0.0, 0.0))])
     assert planner.last_bell_pogo == 0
+
+
+def test_a_side_slash_redirects_a_falling_drop_bell(setup):
+    # a drop bell falling beside a standing hero: its exact path is the support (two bounce sides); a side slash that
+    # meets it knocks it away from the hitter, so the slash's rows are scored against the one redirected path
+    m, tpls, params, arena = setup
+    fc = Forecaster(m, ORACLE, margin=MARGIN, templates=tpls)
+    fc.tracker.roots = lambda origin: ([], True)
+    ws = WorldState()
+    ws.hero.pos = E((85.0, 3.0544))
+    ws.res.hp, ws.res.hp_max, ws.res.silk = E(5), E(5), E(3)
+    tk = "BoneBeast DropBell M2"
+    ws.entities = [Entity(id=7, kind=Kind.HAZARD_DYN, type_key=E(tk), pos=E((86.6, 5.0)), vel=E((0.0, -20.0)),
+                          fsm=[("Control", "Air", 0.2)])]
+    fc.targets.update(ws, 0.0)
+    fc._ws = ws
+    fc.tracker.bells[7] = (tk, -1.5, (86.6, 13.74))
+    f = fc.forecast(2.0, 0.0)
+    assert len(f.det) == 1
+    x = np.array([[86.6]]); y = np.array([[4.0]])
+    assert f.occupied(x, y, np.array([0.05]))[0, 0]
+    # 0.3 s on it has bounced (+-4 u/s, vy 30) to about y 8, 1.2 u to either side; knocked right at 0.02 s (5 u/s,
+    # then its bounce goes right) only the right branch is left
+    xs, ys, t3 = np.array([[85.2], [87.8]]), np.array([[8.0], [8.0]]), np.array([0.3])
+    assert f.occupied(xs, ys, t3)[:, 0].all()
+    o = f.occupied_redirect(xs, ys, t3, tk, 0.02, 1)
+    assert not o[0, 0] and o[1, 0]
+    prefs = Tactics(load_playbook()).decide(ws, f, None, 3)
+    planner = Planner(params, arena, PlannerConfig(threads=1))
+    planner.tick(ws, kin.initial_state(params, 85.0, 2.015 + params.foot), kin.HoldState.idle(1),
+                 np.zeros(1, np.int64), f, prefs, FilterContext.from_world(ws, None, 3))
+    assert planner.last_redirect > 0
