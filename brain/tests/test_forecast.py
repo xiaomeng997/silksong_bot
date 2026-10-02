@@ -197,3 +197,20 @@ def test_ve_burst_anchor_lasts_the_burst_and_a_tell_sets_it_underground(model, t
         fc.update(frame(t + 0.95, "hidden", 0.0, 0.0, hidden=True, conf=0.0))
         roots, _ = trk.roots(t + 0.95)
         assert roots[0].state == "Burst Recovery" and roots[0].ctx.anchor.x == pytest.approx(88.0)
+
+
+def test_committed_keeps_the_current_attack_and_tails_only(model, templates):
+    """Forecast.committed (tactics underground in the vision view): the next attack's branches are dropped, an ended
+    burst's bells and the current attack up to its next decision are kept."""
+    fc = _fc(model, templates, ORACLE, [Root("Submerged", -0.2, -0.2, Ctx(phase="P1", raged=True, hp=100.0))])
+    fc.tracker.ends = [("BB_BURST", Anchor(86.0, 5.49, 1), -0.5, -0.5, "P1", False)]
+    f = fc.forecast(3.0, 0.0)
+    keys = {p.key.split("/")[1] for p in f.placements}
+    assert {"BB_CHARGE", "BB_LEAP", "BB_BURST"} <= keys
+    assert {p.key for p in f.committed().placements} == {"support/BB_BURST/_tail/anchor"}
+    an = model.anchor("BB_CHARGE", "Set L")
+    fc = _fc(model, templates, ORACLE, [Root("Charge", -0.1, -0.1, Ctx("BB_CHARGE", "Set L", an, "P1", False),
+                                             current=True)])
+    f = fc.forecast(5.0, 0.0)                    # long enough for the next attack (Dig In, Submerged 1 s, antic 1 s)
+    kept = f.committed().placements
+    assert kept and {p.key.split("/")[1] for p in kept} == {"BB_CHARGE"} and len(kept) < len(f.placements)

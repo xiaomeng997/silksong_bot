@@ -15,7 +15,9 @@ Modes:
           leaves free over that horizon, weighed with its later coverage (a corner the bell rolls into is no refuge),
           hits score little.
   HOLD    anything else (the boss underground, the next attack unknown): the playbook's hidden stance, moved by the
-          future coverage at 0.15 risk units per u.
+          future coverage at 0.15 risk units per u. Underground in the vision view only the committed part of the
+          forecast counts (Forecast.committed: the current attack, tails, armed bells), at 0.5 per u, and it alone
+          can call EVADE: the next attack's union covers the whole floor there.
 The risk map is the support's coverage of floor positions over the playbook's risk horizon (0.4-2.0 s), earlier times
 weighted more; it is the planner's terminal value too (where the horizon ends matters beyond the horizon: a leap's
 landing zone is in support from 1.4 s on). YELLOW restricts punishes to one hit (supervisor Restrictions).
@@ -25,7 +27,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from ssbot.combat.forecast import BIN, Forecast
+from ssbot.combat.forecast import BIN, HIDDEN, Forecast
 from ssbot.combat.tactics.playbook import Playbook
 from ssbot.core.primitives import Prim
 from ssbot.core.worldstate import ORACLE, WorldState
@@ -35,6 +37,7 @@ ENGAGE, EVADE, HEAL, HOLD, PREPARE = "ENGAGE", "EVADE", "HEAL", "HOLD", "PREPARE
 GRID_U = 0.5
 EVADE_S = 0.6
 HOLD_PULL = 0.15               # risk units per u away from the playbook's stance (HOLD)
+HOLD_PULL_VE = 0.5             # the same underground in the vision view, against the committed threats only
 PREP_PULL = 0.12               # risk units per u away from a prepare stance (PREPARE)
 WALL_ROOM = 5.0                # prepare stances keep this far from the arena's ends
 
@@ -144,6 +147,16 @@ class Tactics:
             cost = risk + PREP_PULL * np.abs(self.xs - x_prep)
             prefs.mode, prefs.stance_x = PREPARE, float(self.xs[int(np.argmin(cost))])
             return prefs
+        pull = HOLD_PULL
+        if f.fc.view != ORACLE and state == HIDDEN:
+            # underground in the vision view the next attack's union covers the whole floor, so evading it or
+            # weighing it only moves the hero about; what matters is to be where every branch is reactable when the
+            # boss comes up (ssbot.tools.reactability), away from what is already decided (a burst's rolling bells).
+            # Run 20261002_061942: 3 of the first 4 hits were a leap from the near anchor while the hero, evading the
+            # union, was still on its way back from a corner after a burst.
+            f = f.committed()
+            risk = prefs.risk = self.risk_map(f)
+            pull = HOLD_PULL_VE
         soon = f.t_min(hero[0], pb.hero_y, t_max=EVADE_S)
         if soon < EVADE_S:
             # imminent: the nearest floor spot the support leaves free over the evade horizon
@@ -155,6 +168,6 @@ class Tactics:
             return prefs
         # the next attack unknown: the playbook's stance, moved only as far as the future coverage is worth (a corner
         # chosen for a slightly lower coverage was where a leap then emerged: run 20261002_042404, i1 ep0)
-        cost = risk + HOLD_PULL * np.abs(self.xs - self.hidden_x)
+        cost = risk + pull * np.abs(self.xs - self.hidden_x)
         prefs.stance_x = float(self.xs[int(np.argmin(cost))])
         return prefs

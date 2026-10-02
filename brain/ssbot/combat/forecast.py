@@ -226,6 +226,17 @@ class Forecast:
         i = np.flatnonzero(hit)
         return float(tk[i[0]]) if len(i) else math.inf
 
+    def committed(self) -> "Forecast":
+        """The same forecast restricted to what is already decided: the current attack up to the next decision
+        state, its tail, ended attacks' tails and armed bells (scoring and tactics only; the support is all of it).
+        In the vision view underground, the next attack's union covers the whole floor; this part does not."""
+        dec = set(self.fc.model.decision_states)
+        pre: dict[int, bool] = {}
+        for n in self.nodes:                    # the walk appends a parent before its children
+            pre[n.id] = (n.parent < 0 or pre.get(n.parent, False)) and n.state not in dec
+        kept = [p for p in self.placements if pre.get(p.node, False)]
+        return Forecast(self.fc, self.origin_t, self.horizon, self.nodes, kept, self.known, self.roots, self.boss)
+
     def active_sources(self, t0: float = 0.0, t1: float = SUP_HORIZON_S) -> frozenset[str]:
         out: set[str] = set()
         for p in self.placements:
