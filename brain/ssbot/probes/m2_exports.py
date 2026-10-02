@@ -48,7 +48,7 @@ from collections import Counter, defaultdict
 from ssbot.ipc import ents
 from ssbot.ipc.framing import BUTTONS, mask
 from ssbot.ipc.oracle_link import OracleLink
-from ssbot.probes.common import tap
+from ssbot.probes.common import load_slot, stand_up, tap
 from ssbot.train.data_policy import DataPolicy
 from ssbot.train.encounters import BELL_BEAST
 from ssbot.train.episode import CLEAR, AttemptRecord, EpisodeConfig, FightTap, run_episode, wait_settled
@@ -615,6 +615,9 @@ def main(argv: list[str] | None = None) -> int:
     col = Collector(link)
     ok = True
     try:
+        load_slot(link, 1)      # DebugMod cannot load a savestate from the title screen
+        stand_up(link)
+        link.rpc("guards.set", save_suppression=True)
         load(link, ftap)
         ok &= rest_checks(link, col)
         if not a.skip_menu:
