@@ -534,7 +534,7 @@ def test_residual_monitor_scores_executed_predictions(p):
 
 
 def test_shipped_params_carry_the_jitter_model_and_the_jump_spread(p):
-    """kin_fit products the planner and the hazard margin read: the frame-time jitter model (2.96 M frames), the
+    """kin_fit products the planner and the hazard margin read: the frame-time jitter model (2.83 M frames), the
     variant-valued Silkspear phases and the apex spread per jump hold."""
     q = HeroParams.load()
     assert q.frame_time_lo <= 0.01665 < q.frame_time < q.frame_time_hi < q.frame_time_max <= q.hitch_max

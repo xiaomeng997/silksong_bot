@@ -21,12 +21,12 @@ ceilings, never reversed; timing only decides by which frame a step happens. So 
 (k = 0 the hit frame) lies in the hull of P(0) .. P(n_hi[k]), where n_hi[k] is the most recoil steps the timing model
 allows by then: the physics phase at the recoil start at its supremum (just below 1), every frame at the jitter
 model's frame_time_max and up to hitches_per_window frames of hitch_max placed wherever they give the most steps
-(exhaustive over placements), with the game's float32 timer sums. The jitter model (kin_fit over 2.96 M gameplay
-frames of the 13 bot recordings) has no frame above 0.0369 s and never more than 2 frames above 0.018 s in any 65. Nothing bounds a delay: a
-concurrent FreezeMoment (BindBreak 0.01 / 0.4 / 0.1 after a hit during Bind, BossDeathSlow with a killing blow) holds
+(exhaustive over placements), with the game's float32 timer sums. The jitter model (kin_fit over 2.83 M gameplay
+frames of the 13 bot recordings) has no frame above 0.0369 s and never more than 2 frames above 0.018 s in any 65.
+Nothing bounds a delay: a concurrent FreezeMoment (BindBreak 0.01 / 0.4 / 0.1 after a hit during Bind, BossDeathSlow with a killing blow) holds
 the time scale at 0 while the hero sits somewhere on the path, which the hull covers because its near end is the hit
-box. Three effects the axis-aligned path does not carry are added (all from the live run 20261001_122249, 11 561
-logged hits): Box2D depenetration and skin intrusion move the box up to 0.0108 u off the path (a hit while landing
+box. Three effects the axis-aligned path does not carry are added (all seen in the 11 561 logged hits of the 13 bot
+recordings and the person's session): Box2D depenetration and skin intrusion move the box up to 0.0108 u off the path (a hit while landing
 pushed back out of the floor once the steps resume, a recoil into an arena gate stopping 9 mm short of the skin), so
 every box is dilated by CONTACT_SLOP; a sloped ceiling turns the recoil along itself (i2_002 f 693717, a hit in Bind
 under Bone_05's "Roof Collider": v = (12.98, -2.60), downwards, which is exactly the projection of (15, 7.5) on
@@ -38,11 +38,12 @@ no friction, rotation frozen) leaves its projection on the cone of allowed veloc
 p . (s - p) = 0 (Moreau), i.e. lies on the circle with diameter [0, s]. So n steps move the box by a point of the
 disk with centre n s / 2 and radius n |s| / 2, whatever walls, ceilings and slopes it meets, and the disks of
 fewer steps lie inside it. From the last step before the walked axis-aligned path can touch a slope, the bound is the
-box there plus that disk of the remaining steps (bounding box), then CONTACT_SLOP. Pushed right: x from -0.23 to
-4.13 u, y from -1.2 to 3.2 u after 13 steps, against 0 to 3.9 u and 0 to 1.95 u in open air.
+box there plus that disk of the remaining steps (bounding box), then CONTACT_SLOP. Pushed right from the start:
+x from -0.25 to 4.45 u, y from -1.30 to 3.40 u after the 14 steps of n_max, against 0 to 4.2 u and 0 to 2.1 u in
+open air.
 
 Validity after control returns: union[k] covers every input only for k < ctl_min (the earliest frame any timing gives
-control back: 24 with two hitches, 26 to 29 without). From ctl_min on it is the swept hull grown by an any-input reach
+control back: 23 with two hitches, 26 to 29 without). From ctl_min on it is the swept hull grown by an any-input reach
 (|vx| <= the fastest modelled horizontal speed, the downspike's 26 u/s; vy up to the jump speed, down to the maximum
 fall), not clipped by terrain: a valid superset that grows fast up to the table's FRAMES; a planner that regains
 control rolls its own candidates out from the observed state instead. Beyond FRAMES the table does not hold.

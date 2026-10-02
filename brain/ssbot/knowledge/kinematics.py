@@ -281,7 +281,7 @@ class HeroParams:
     frame_time_lo: float = 0.016649993    # no frame is shorter (the frame limiter)
     frame_time_hi: float = 0.0170         # p99.99 of the frame time: the rollout's timing lanes run between lo and hi
     frame_time_max: float = 0.018         # the envelope bound: every frame but the hitches is at most this long
-    hitch_max: float = 0.040              # and a hitch at most this long (observed max 0.0369 s in 2.96 M frames)
+    hitch_max: float = 0.040              # and a hitch at most this long (observed max 0.0369 s in 2.83 M frames)
     hitch_rate: float = 2.9e-5            # frames longer than frame_time_max, per frame
     hitches_per_window: int = 2           # most frames above frame_time_max in any 65 frames (recoil + margin)
     # Silkspear phases that end one frame apart with no timer explaining it (the needle's way back): the
@@ -1081,7 +1081,7 @@ class Variant:
     """One timing lane. The game's timers compare float32 sums of frame times with thresholds that sit on exact
     multiples of 1/60 s (antic 0.1, hit-stop wait 0.1 and ramp 0.1, damage recoil 0.2, attack 0.35 ...), so the
     frame-time jitter (p99.99 0.0170 s against a mean of 0.016666 s) decides whether such a phase ends on frame N or
-    N + 1, and the history cannot tell which (the frame times are not predictable: live run, 2.96 M frames). A lane
+    N + 1, and the history cannot tell which (the frame times are not predictable: live run, 2.83 M frames). A lane
     moves the thresholds by -+ HeroParams.timer_bias, with its own sign for each link of the longest chain of such
     timers, the damage hit-stop wait, its ramp (GameManager.FreezeMoment, unscaled time) and every timer on scaled
     time (recoil, antic, recovery, attack, Bind): `timers` = (wait, ramp, scaled). alpha: the start phase ("est", or
