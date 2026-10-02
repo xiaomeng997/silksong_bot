@@ -11,8 +11,9 @@ Modes:
   PREPARE the boss is committed to an attack whose punish window is ahead (a leap in its antic or flight, a burst
           underground at a known x): the stance is the playbook's spot in the attack's anchor frame (14 u in front of
           a charge, 12 u along a leap, 10 u beside a burst on the hero's side), pulled to low future coverage.
-  EVADE   the support reaches the hero's spot within the evade horizon (0.6 s): the stance is the nearest floor spot
-          the support leaves free over that horizon, hits score little.
+  EVADE   the support reaches the hero's spot within the evade horizon (0.6 s): the nearest floor spot the support
+          leaves free over that horizon, weighed with its later coverage (a corner the bell rolls into is no refuge),
+          hits score little.
   HOLD    anything else (the boss underground, the next attack unknown): the playbook's hidden stance, moved by the
           future coverage at 0.15 risk units per u.
 The risk map is the support's coverage of floor positions over the playbook's risk horizon (0.4-2.0 s), earlier times
@@ -34,6 +35,8 @@ ENGAGE, EVADE, HEAL, HOLD, PREPARE = "ENGAGE", "EVADE", "HEAL", "HOLD", "PREPARE
 GRID_U = 0.5
 EVADE_S = 0.6
 HOLD_PULL = 0.15               # risk units per u away from the playbook's stance (HOLD)
+PREP_PULL = 0.12               # risk units per u away from a prepare stance (PREPARE)
+WALL_ROOM = 5.0                # prepare stances keep this far from the arena's ends
 
 
 @dataclass
@@ -133,8 +136,11 @@ class Tactics:
             # attack's anchor frame; the support check keeps the hero out of the attack on the way
             xp, side = prep
             m = anchor.mirror if side == "attack" else (1.0 if hero[0] >= anchor.x else -1.0)
-            x_prep = anchor.x + m * xp
-            cost = risk + 0.3 * np.abs(self.xs - x_prep)
+            x0, x1 = pb.arena_x
+            # never into a corner: an attack bell rolls on into the wall and back (run 20261002_050217, i3 ep1:
+            # 10 u beside a burst at x 82.8 was 3 u from the left gate, and the bell trapped the hero there)
+            x_prep = min(max(anchor.x + m * xp, x0 + WALL_ROOM), x1 - WALL_ROOM)
+            cost = risk + PREP_PULL * np.abs(self.xs - x_prep)
             prefs.mode, prefs.stance_x = PREPARE, float(self.xs[int(np.argmin(cost))])
             return prefs
         soon = f.t_min(hero[0], pb.hero_y, t_max=EVADE_S)
@@ -142,7 +148,7 @@ class Tactics:
             # imminent: the nearest floor spot the support leaves free over the evade horizon
             near = self.risk_map(f, (0.0, EVADE_S))
             prefs.mode = EVADE
-            prefs.stance_x = float(self.xs[int(np.argmin(near + 0.1 * np.abs(self.xs - hero[0])))])
+            prefs.stance_x = float(self.xs[int(np.argmin(near + 0.5 * risk + 0.1 * np.abs(self.xs - hero[0])))])
             wts["hit"] *= 0.3
             wts["risk"] *= 2.0
             return prefs
