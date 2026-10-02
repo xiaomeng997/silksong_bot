@@ -203,6 +203,13 @@ internal static class Program
         Eq(SsOracle.SceneDump.GateWatch.IsWatched(false, true, false), true, "Bone_05 'Wall' (on at entry, gone later) is listed once seen off");
         Eq(SsOracle.SceneDump.GateWatch.IsWatched(true, true, true), true, "a BattleScene gate is always listed");
         GateOverflow();
+        // ents[].hidden: a seen, alive HealthManager root that nothing else exports is hidden when out of sight.
+        Eq(EntityRegistry.IsHidden(true, true), true, "Bell Beast submerged: HealthManager active, renderer off -> hidden");
+        Eq(EntityRegistry.IsHidden(false, false), true, "HealthManager inactive -> hidden");
+        Eq(EntityRegistry.IsHidden(true, false), false, "visible and merely out of view -> not exported");
+        // y is not tested: Submerge Y -12.51 is under the view; x 73.5 is inside a view x range 70-100 (+6 + extent).
+        Eq(EntityRegistry.InRange(73.5f, 64f - 4f, 106f + 4f), true, "x within the view's x range (+ margin + extent)");
+        Eq(EntityRegistry.InRange(120f, 64f - 4f, 106f + 4f), false, "x beyond the view's x range");
 
         // hero.tags dmg_left
         Eq(SsOracle.Hero.HeroExporter.TagDmgLeft(false, 3, 2, 1), 2, "limited tag: hits left x amount");

@@ -78,7 +78,7 @@ namespace SsOracle.Entities
         public Vector3 Pos;
         public int RetryFrame = int.MaxValue;   // a failed rebuild is retried from this frame on
         public bool Seen;                       // exported (not hidden) at least once in this scene epoch
-        public bool Hidden;                     // this frame: exported only as a seen, now inactive HealthManager root
+        public bool Hidden;                     // this frame: exported only as a seen HealthManager root now out of sight (HiddenPass)
         // tk2d sprites owned by the entity and the colliders each had at the last rebuild (see SpritesChanged).
         public tk2dBaseSprite[] Sprites = EntityRegistry.NoSprites;
         public BoxCollider2D[] SpriteBox;
@@ -449,14 +449,20 @@ namespace SsOracle.Entities
         }
 
         /// <summary>
-        /// "hidden" entities: a HealthManager root exported earlier in this scene whose HealthManager is now inactive
-        /// (component disabled or GameObject inactive; isDead false and hp &gt; 0), with no active damage source of its
-        /// own pulling it in this frame, still within the view (+ its extent). The Bell Beast spends 1.0-2.2 s of every
-        /// attack like this (behaviour build, 99 fights) while its Control FSM already fixes where it will come up; in
-        /// the trial run (2 fights) it was missing from "ents" in Submerged 5045 frames, Emerge Antic L/C 1821/1699,
-        /// Burst Antic 1768, Burst Recovery 1662, Ptn L 924, Rage Rumble/Antic/Pos/Submerge 242/146/122/122, with its
-        /// Control FSM still running (so the GameObject was active and only the HealthManager was off). Exported
-        /// without colliders (EntityExporter) and never rebuilt here.
+        /// "hidden" entities: a HealthManager root exported earlier in this scene that is alive (isDead false, hp &gt; 0)
+        /// but out of sight: its root renderer is disabled, or its HealthManager is inactive (component disabled or
+        /// GameObject inactive); nothing else pulled it into the export this frame (it is not in view, and no active
+        /// damage source of its own is), and its x lies within the view's x range (+ margin + its extent). y is not
+        /// tested: the game parks a hidden enemy off screen. The Bell Beast spends 1.0-2.2 s of every attack like this
+        /// (behaviour build, 99 fights) while its Control FSM already fixes where it will come up; in the trial run (2
+        /// fights) it was missing from "ents" in Submerged 5045 frames, Emerge Antic L/C 1821/1699, Burst Antic 1768,
+        /// Burst Recovery 1662, Ptn L 924, Rage Rumble/Antic/Pos/Submerge 242/146/122/122. Its HealthManager stays
+        /// active all along (m2_exports probe, 2026-10-02: ents.stats hm_active 1 through every dig-in): the Control
+        /// FSM's "Submerged" / "Submerged Init" / "Burst Recovery" / "Rage Submerge" states turn its MeshRenderer and
+        /// PolygonCollider off and SetPosition it to "Submerge Y" -12.51, 18 u under the floor (Ground Y 5.49) and
+        /// below the view + margin; Set L / Set R / Burst Pos move it in x down there, and Charge Emerge / Leap Out /
+        /// Burst Out / Rage Burst turn the renderer back on. Exported without colliders (EntityExporter) and never
+        /// rebuilt here.
         /// </summary>
         private static void HiddenPass(int frame)
         {
@@ -470,9 +476,11 @@ namespace SsOracle.Entities
                 // hp <= 0: a boss with a special death (Bell Beast) keeps isDead false while its FSM plays the death,
                 // and its HealthManager goes inactive in "Death Broadcast"; that is a corpse, not a submerged boss.
                 if (go == null || hm == null || hm.isDead || hm.hp <= 0) continue;
-                if (hm.enabled && go.activeInHierarchy) continue;  // active: in "ents" when in view, never hidden
+                var r = e.Renderer;
+                var rendererOff = !ReferenceEquals(r, null) && r != null && !r.enabled;
+                if (!IsHidden(hm.enabled && go.activeInHierarchy, rendererOff)) continue;  // visible and out of view: not exported
                 var p = e.Tr.position;
-                if (!InView(p, e.Extent)) continue;
+                if (!InViewX(p.x, e.Extent)) continue;
                 e.IncludedFrame = frame;
                 if (!IncludedRoots.Add(e.Iid)) continue;
                 e.Pos = p;
@@ -482,6 +490,15 @@ namespace SsOracle.Entities
                 n++;
             }
         }
+
+        /// <summary>A seen, alive HealthManager root that is not exported this frame is "hidden" when it is out of sight:
+        /// its HealthManager is inactive, or its root renderer is disabled (pure; oracle/tests/EntitiesCheck).</summary>
+        public static bool IsHidden(bool hmActive, bool rendererOff) => !hmActive || rendererOff;
+
+        private static bool InViewX(float x, float pad) => InRange(x, viewMinX - pad, viewMaxX + pad);
+
+        /// <summary>lo &lt;= x &lt;= hi (pure; EntitiesCheck).</summary>
+        public static bool InRange(float x, float lo, float hi) => x >= lo && x <= hi;
 
         /// <summary>
         /// tk2dBaseSprite.UpdateCollider adds its BoxCollider2D / PolygonCollider2D / EdgeCollider2D with AddComponent the
