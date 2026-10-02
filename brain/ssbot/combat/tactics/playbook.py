@@ -28,6 +28,7 @@ class Playbook:
     bind_hp_missing_min: int
     hit_damage: dict[str, float]
     no_hurtbox: frozenset[str] = frozenset()
+    shape_from: dict[str, str] = field(default_factory=dict)   # state -> the state whose body shape to predict with
     hidden_x_vision: float | None = None     # the hidden stance in the vision view without the dust cues
     prepare: dict[str, tuple[float, str]] = field(default_factory=dict)   # state -> (x' from the anchor, side)
     long_horizon: dict = field(default_factory=dict)   # states, until, extra_s, map (observable phase -> state)
@@ -49,6 +50,7 @@ class Playbook:
                    bind_hp_missing_min=int(bind.get("hp_missing_min", 2)),
                    hit_damage={k: float(v) for k, v in (d.get("hit_damage") or {"nail": 5}).items()},
                    no_hurtbox=frozenset(d.get("no_hurtbox") or ()),
+                   shape_from={str(k): str(v) for k, v in (d.get("shape_from") or {}).items()},
                    hidden_x_vision=float(st["hidden_x_vision"]) if st.get("hidden_x_vision") is not None else None,
                    prepare={x["state"]: (float(x["x_prime"]), str(x.get("side", "attack")))
                             for x in d.get("prepare") or ()},

@@ -140,6 +140,22 @@ def main(argv: list[str] | None = None) -> int:
                     rec["boss_box_actual"] = [round(float(flat[:, 0].min()), 2), round(float(flat[:, 1].min()), 2),
                                               round(float(flat[:, 0].max()), 2), round(float(flat[:, 1].max()), 2)]
                 rec["hero_box_actual"] = [round(v, 2) for v in hb[:4]]
+                b_now = next((e for e in s.get("ents") or () if e.get("type_key") == "Bone Beast"), None)
+                rec["boss_state"] = ((b_now or {}).get("fsms") or [{}])[0].get("state")
+                # the down attack's hit events carry src "DownSlash" (the attack object) in the event's data
+                rec["hit"] = any(str((ev.get("d") or {}).get("src", "")).startswith("Down") for j in range(fa, fs + 14)
+                                 for ev in (by_f.get(j) or {}).get("ev") or () if ev.get("k") == "hit")
+                rec["hurt_after"] = next((j - fs for j in range(fa, fs + 40)
+                                          for ev in (by_f.get(j) or {}).get("ev") or () if ev.get("k") == "damage"),
+                                         None)
+                bvx = float((b_now or {}).get("vel", [0.0, 0.0])[0])
+                face = 1 if (s["hero"].get("facing") or 1) >= 0 else -1
+                rec["approach"] = None
+                if bv and abs(bvx) > 1.0:
+                    bcx = 0.5 * (float(np.concatenate(bv)[:, 0].min()) + float(np.concatenate(bv)[:, 0].max()))
+                    ahead = np.sign(bvx) * (0.5 * (hb[0] + hb[2]) - bcx) > 0
+                    # the boss coming at the hero: head-on when she faces it, from behind when she faces away
+                    rec["approach"] = ("head_on" if face != np.sign(bvx) else "behind") if ahead else "passed"
                 if tick is not None:
                     fo, name, path, _alts, S_, J_, fcast = tick
                     rec["plan"] = name
@@ -149,6 +165,31 @@ def main(argv: list[str] | None = None) -> int:
                     if fcast is not None:
                         bb, okb = fcast.boss_box(np.array([k * pol.params.frame_time]))
                         rec["boss_box_planned"] = [round(float(v), 2) for v in bb[0]] if okb[0] else None
+                    # the spike's 6 frames, planned against recorded: hero centre height, boss top, the DOWN box's
+                    # bottom above the boss top (planned / recorded), the boss's front edge along its motion
+                    rows_ = []
+                    for j in range(fs, fs + 6):
+                        kk = j - fo
+                        sj = by_f.get(j)
+                        if sj is None or path is None or not 0 <= kk < len(path) or fcast is None:
+                            continue
+                        bvj = boss_box(sj)
+                        bbj, okj = fcast.boss_box(np.array([kk * pol.params.frame_time]))
+                        if not bvj or not okj[0]:
+                            continue
+                        fl = np.concatenate(bvj)
+                        top_a = float(fl[:, 1].max())
+                        hbj = sj["hero"]["box"]
+                        cy_a, cy_p = 0.5 * (hbj[1] + hbj[3]), 0.5 * float(path[kk][1] + path[kk][3])
+                        cx_a, cx_p = 0.5 * (hbj[0] + hbj[2]), 0.5 * float(path[kk][0] + path[kk][2])
+                        rows_.append([j - fs, round(cy_p - cy_a, 2), round(float(bbj[0, 3]) - top_a, 2),
+                                      round(cy_p + pl.DOWN[2] - float(bbj[0, 3]), 2), round(cy_a + pl.DOWN[2] - top_a, 2),
+                                      round(cx_p - cx_a, 2),
+                                      round(float(bbj[0, 0] + bbj[0, 2]) * 0.5 - 0.5 * float(fl[:, 0].min()
+                                                                                         + fl[:, 0].max()), 2)])
+                    # [frame in spike, hero cy planned - recorded, boss top predicted - recorded, DOWN bottom above
+                    #  the top planned, recorded, hero cx planned - recorded, boss cx predicted - recorded]
+                    rec["spike_rows"] = rows_
                 spikes.append(rec)
             prev = an
     out = {"spikes": len(spikes), "geometric_hits": sum(1 for x in spikes if x.get("geometric_hit")),
@@ -159,6 +200,21 @@ def main(argv: list[str] | None = None) -> int:
                                        - 0.5 * (x["hero_box_actual"][0] + x["hero_box_actual"][2])), 1)
                              for x in spikes if x.get("boss_box_planned")],
            "spike_cases": spikes[:4], "dropped_cases": dropped[:6]}
+    # per approach (head-on / from behind / passed) and outcome: medians over the spike's frames of the errors
+    summ = {}
+    for x in spikes:
+        key = f"{x.get('approach')}/{'hit' if x.get('hit') else 'miss'}"
+        e = summ.setdefault(key, {"n": 0, "hurt": 0, "rows": []})
+        e["n"] += 1
+        e["hurt"] += int(x.get("hurt_after") is not None)
+        e["rows"] += x.get("spike_rows") or []
+    for key, e in summ.items():
+        r = np.asarray(e.pop("rows"), float).reshape(-1, 7)
+        if len(r):
+            e.update({m: [round(float(np.percentile(r[:, c], p)), 2) for p in (10, 50, 90)]
+                      for c, m in ((1, "hero_cy_err"), (2, "boss_top_err"), (3, "down_above_top_planned"),
+                                   (4, "down_above_top_recorded"), (5, "hero_cx_err"), (6, "boss_cx_err"))})
+    out["by_approach"] = summ
     print(json.dumps(out, indent=1, default=str))
     if a.json:
         a.json.write_text(json.dumps(out, indent=1, default=str), "utf-8")

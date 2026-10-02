@@ -174,6 +174,7 @@ class PlannerPolicy:
                              comfort=COMFORT)
         self.pb = load_playbook(enemy)
         self.fc.no_hurtbox = self.pb.no_hurtbox
+        self.fc.shape_from = self.pb.shape_from          # the emerge predicted with the charge's shape
         self.fc.bell_tells = view == "degraded_dust"
         if fview != ORACLE and os.environ.get("SSBOT_FUSION", "1") == "1":
             from ssbot.combat.attack_fit import AttackFit

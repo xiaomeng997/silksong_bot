@@ -250,10 +250,11 @@ class Forecast:
                     out |= ((dx * dx + dy * dy) <= rr * rr) & ok
         return out
 
-    def occupied_redirect(self, x, y, tk, type_key: str, t_hit: float, d: int) -> np.ndarray | None:
+    def occupied_redirect(self, x, y, tk, type_key: str, t_hit: float, d: int, comfort: bool = False
+                          ) -> np.ndarray | None:
         """occupied() with the drop bell `type_key` knocked aside at t_hit by a side slash moving d (+1 right): its
         own placements replaced by its one redirected path (pogo_targets.simulate redirect). None: not applicable (the
-        bell is not on an exact path, or its random bounce comes before the hit)."""
+        bell is not on an exact path, or its random bounce comes before the hit). comfort: as occupied()."""
         ent = next((e for e in self.det if e[7] == type_key), None)
         if ent is None:
             return None
@@ -261,8 +262,10 @@ class Forecast:
         if rest is not None or "side" not in sp.redirect:
             return None
         tk = np.asarray(tk, np.float64)
-        out = self.occupied_without(x, y, tk, type_key)
+        out = self.occupied_without(x, y, tk, type_key, comfort)
         hx, hy = self.fc.half
+        if comfort and self.fc.comfort is not None:
+            hx, hy = hx + self.fc.comfort[0], hy + self.fc.comfort[1]
         rr = sp.r + DET_SKIN_U
         for dt in DET_SLACK_S:
             t = np.maximum(tk + dt, 0.0)
@@ -272,14 +275,14 @@ class Forecast:
             out |= ((dx * dx + dy * dy) <= rr * rr) & ok
         return out
 
-    def occupied_without(self, x, y, tk, exclude: str) -> np.ndarray:
+    def occupied_without(self, x, y, tk, exclude: str, comfort: bool = False) -> np.ndarray:
         """occupied() without the placements whose only source is the entity type `exclude` (a bell disarmed by a
         down attack: its DamageHero cooldown; a placement shared with other sources still counts)."""
         pl = [p for p in self.placements if not (p.sources and all(src.endswith(exclude) for src in p.sources))]
         tk = np.asarray(tk, np.float64)
-        out = self._occ(pl, x, y, tk)
+        out = self._occ(pl, x, y, tk, comfort)
         if self.det:
-            out |= self._det_occ(np.asarray(x, np.float64), np.asarray(y, np.float64), tk, exclude=exclude)
+            out |= self._det_occ(np.asarray(x, np.float64), np.asarray(y, np.float64), tk, comfort, exclude=exclude)
         return out
 
     def node_hits(self, x, y, tk) -> np.ndarray:
@@ -361,6 +364,22 @@ class Forecast:
 
     # ---- J helpers ----------------------------------------------------------------------------------------------
 
+    def _shape_override(self) -> list | None:
+        """ORACLE: the polygons to predict the boss with when its current state borrows a later state's shape
+        (Forecaster.shape_from: the emerge -> the charge's), at the current transform; [] when that shape is not
+        known yet (no hit is predicted then); None when the current shape stands."""
+        fc, b = self.fc, self.boss
+        if fc.view != ORACLE or b is None or not fc.shape_from:
+            return None
+        src = fc.shape_from.get(fc.tracker.state or "")
+        if src is None:
+            return None
+        q = fc.tracker.shapes.get((src, bool(b.flip_x)))
+        if q is None or b.pos_transform is None:
+            return []
+        tx, ty = b.pos_transform
+        return [p + (tx, ty) for p in q]
+
     def _hurt_box(self) -> tuple[float, float, float, float] | None:
         """The boss's hittable box now: its enabled colliders (oracle view), or in the vision view the hurtbox table's
         median box for the observable phase and its time (ssbot.tools.hurtbox_table) at the observed position, the
@@ -379,6 +398,10 @@ class Forecast:
                 x0, x1 = -x1, -x0
             px, py = b.pos.v
             return px + x0, py + y0, px + x1, py + y1
+        ov = self._shape_override()
+        if ov:
+            p = np.concatenate(ov)
+            return float(p[:, 0].min()), float(p[:, 1].min()), float(p[:, 0].max()), float(p[:, 1].max())
         return _body_box(b)
 
     def _table_entry(self) -> dict | None:
@@ -399,6 +422,11 @@ class Forecast:
                 q = q * (-1.0, 1.0)
             q = q + self.boss.pos.v
             return q, np.array([0, len(q)], np.int64)
+        ov = self._shape_override()
+        if ov:
+            starts = np.zeros(len(ov) + 1, np.int64)
+            starts[1:] = np.cumsum([len(q) for q in ov])
+            return np.concatenate(ov), starts
         if self.fc.view != ORACLE and self.fc.hurtbox:
             bb = self._hurt_box()
             if bb is not None:
@@ -422,7 +450,7 @@ class Forecast:
         if b is None or b.hidden or b.visible_frac <= 0.0 and self.fc.view != ORACLE:
             return box, ok
         bb = self._hurt_box()
-        if bb is None:
+        if bb is None or self._shape_override() == []:
             return box, ok
         box[:] = bb
         t_left = tr.drawn_left(self.origin_t)
@@ -522,6 +550,10 @@ class BossTracker:
         self.bells_unknown = False             # an armed drop bell whose arming was not seen
         self._cued: set[int] = set()           # VE: drop bells with their cue in the last frame
         self.anchor_log: list[tuple[str, float, float]] = []   # ORACLE: (family, hidden x, drawn transform x)
+        # ORACLE: body shapes seen per (state, flipX), polygons relative to the transform (kept across episodes: the
+        # same boss), for the states the playbook predicts others with (Forecaster.shape_from)
+        self.shapes: dict = getattr(self, "shapes", {})
+        self.shape_states: frozenset = getattr(self, "shape_states", frozenset())
 
     # ---- ORACLE -------------------------------------------------------------------------------------------------
 
@@ -548,6 +580,20 @@ class BossTracker:
             self.t_start = t
             self.hidden_x = {}
             self.n_attacks += 1
+        elif self.ctx.family is None and state not in m.decision_states:
+            # the attack's start state was missed (the policy began after it: live run 20261002_152649, 11 of 24
+            # episodes replayed began their first act in Emerge Antic C, 2.9 s after the wake, and first saw the boss
+            # in Charge Emerge): the one family with this state, its start placed by the logged entry offset (its
+            # middle; Charge Emerge 1.000-1.017 s after Emerge Antic C). Without it the boss box (Forecast.boss_box)
+            # stood still through the whole first charge (boss_path_audit: front edge p10 9.7 u behind at +24 frames)
+            fams = [f for f in m.families.values() if state in f.states and state in f.entry]
+            if len(fams) == 1:
+                f = fams[0]
+                self.ctx.family = f.name
+                self.ctx.anchor = m.anchor(f.name, self.ctx.direction)
+                self.t_start = t - 0.5 * (f.entry[state][0] + f.entry[state][1])
+                self.hidden_x = {}
+                self.n_attacks += 1
         elif state in m.decision_states and prev is not None and prev not in m.decision_states:
             if self.ctx.family is not None:
                 self._ended(self.ctx.family, self.ctx.anchor, t, t)
@@ -616,6 +662,10 @@ class BossTracker:
                     self.ctx.anchor = Anchor(float(boss.pos.v[0]), f.anchor_y, f.mirror)
             return
         self.seen = True
+        if self.state in self.shape_states and boss.body_polys and boss.pos_transform is not None:
+            tx, ty = boss.pos_transform
+            self.shapes[(self.state, bool(boss.flip_x))] = [np.asarray(q, np.float64).reshape(-1, 2) - (tx, ty)
+                                                             for q in boss.body_polys if len(q) >= 3]
         fam = self.ctx.family
         # A variable anchor (the burst) is the transform at the attack's first drawn frame (behaviour_tables' anchor
         # definition; the burst's transform does not move while drawn). Fixed anchors stay: a tracker that starts in
@@ -903,9 +953,20 @@ class Forecaster:
         self._ws: WorldState | None = None
         self.boss: Entity | None = None
         self.no_hurtbox: frozenset[str] = frozenset()     # states / phases with the body box disabled (playbook)
+        self._shape_from: dict[str, str] = {}
         self.bell_tells = False        # VE: the drop bells' cue is in the view (ObservabilityFilter tells)
         self.hurtbox: dict | None = None   # VE: the boss's hittable box per phase (load_hurtbox; scoring only)
         self.t = 0.0
+
+    @property
+    def shape_from(self) -> dict[str, str]:
+        """State -> the state whose body shape the boss box is predicted with (playbook shape_from, oracle view)."""
+        return self._shape_from
+
+    @shape_from.setter
+    def shape_from(self, m: dict[str, str]) -> None:
+        self._shape_from = dict(m)
+        self.tracker.shape_states = frozenset(m.values())
 
     def reset(self) -> None:
         self.tracker.reset()

@@ -54,7 +54,7 @@ def main(argv: list[str] | None = None) -> int:
     model = BossModel.load()
     view = ORACLE if a.view == "oracle" else VISION_EQUIVALENT
     fc = Forecaster(model, view, margin=(0.15, 0.25), comfort=(0.25, 0.25))
-    fc.no_hurtbox = load_playbook().no_hurtbox
+    fc.no_hurtbox, fc.shape_from = load_playbook().no_hurtbox, load_playbook().shape_from
     pb = load_playbook()
     tac = Tactics(pb)
     planner = Planner(params, terrain, PlannerConfig(threads=a.threads))

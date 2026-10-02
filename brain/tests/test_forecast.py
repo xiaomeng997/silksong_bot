@@ -293,3 +293,20 @@ def test_attack_fit_recovers_the_start_and_rejects_another_path(model):
     for t in np.arange(ts + 2.4, ts + 3.1, 1 / 60):
         fit.observe(t, 85.0, 5.5)
     assert not fit.result().ok
+
+
+def test_tracker_recovers_a_missed_attack_start(model):
+    """The policy can begin after the attack's start state (live run 20261002_152649: 11 of 24 episodes began in
+    Emerge Antic C and first saw Charge Emerge): the one family with that state is taken, its start placed by the
+    logged entry offset, so the boss box moves along the charge's path instead of standing still."""
+    from ssbot.combat.forecast import BossTracker
+    tr = BossTracker(model, ORACLE)
+    tr._enter("Charge Emerge", 10.0)
+    lo, hi = model.families["BB_CHARGE"].entry["Charge Emerge"]
+    assert tr.ctx.family == "BB_CHARGE" and tr.n_attacks == 1
+    assert abs(tr.t_start - (10.0 - 0.5 * (lo + hi))) < 1e-9
+    tr._enter("Charge Antic", 10.75)
+    assert abs(tr.t_start - (10.0 - 0.5 * (lo + hi))) < 1e-9 and tr.n_attacks == 1   # kept through the attack
+    tr2 = BossTracker(model, ORACLE)
+    tr2._enter("Dig In", 5.0)                     # in two families: left unknown (the walk roots in both)
+    assert tr2.ctx.family is None and tr2.t_start is None

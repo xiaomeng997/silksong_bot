@@ -109,6 +109,14 @@ long_horizon:
 # and Charge Antic every frame enabled False), so no hit can land there; scoring ignores those states.
 no_hurtbox: [Charge Emerge, Charge Antic, emerge, charge_antic]
 
+# The body shape the boss box is predicted with (oracle view, Forecast.boss_box: the shape moves along the family's
+# mean path): while it emerges the collider changes every animation frame (top up to 6.91 u, narrower), and the charge
+# that follows has the Charge Antic shape (one PolyCollider, x -4.74 .. +6.14 u from the transform, y 1.84 .. 4.90,
+# the same through Charge). Predicted from the emerge's own frame, the box was up to 2.0 u too tall and its front edge
+# 1.7-4.9 u behind (boss_path_audit, live run 20261002_152649); the shape is taken from this fight's last Charge Antic
+# (BossTracker.shapes), else no hit is predicted past the emerge until it is known.
+shape_from: {Charge Emerge: Charge Antic}
+
 # Bind (HEAL) only where the support allows the whole Bind (DESIGN §3.5.6 commit test: T_min >= 1.37 + 0.15 s at the
 # hero's position, silk >= 9, HP <= max - 3 or h <= 2, not PAUSE_PENDING); these are the states where it usually holds
 # away from the boss. The live test decides every time.
