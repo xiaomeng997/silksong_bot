@@ -112,7 +112,8 @@ class PlannerConfig:
     threads: int = 4
     variants: str = "bounds"
     max_points: int = 2        # grid points per axis for a hull wider than one point covers
-    predict_log: bool = True   # record the chosen plan's attack predictions at each press (predict_audit)
+    predict_log: bool = False  # record the chosen plan's attack predictions at each press (predict_audit; a lanes
+    #                            rollout of the chosen plan: audit runs only, SSBOT_PREDICT_LOG=1)
     attack_model: str = "v2"
     release_latency: int = 4   # frames a planned jump release must lie ahead to be moved (the path latency, 2-4)
     pogo_k: int = 48           # fine-grid pogo candidates kept per tick (pruned by the boss's predicted path)

@@ -117,7 +117,13 @@ class AttackMonitor:
         self.hit_frames: deque = deque(maxlen=64)
         self.results: deque = deque(maxlen=self.window)
 
-    def predict(self, fo: int, attacks: list | None) -> None:
+    def predict(self, fo: int, attacks: list | None, first: tuple | None = None) -> None:
+        """attacks: the prediction log (audit runs); otherwise the chosen plan's first attack scored as a hit
+        (PlanResult.attack, from the scoring kernel at no extra cost), counted once at its start frame."""
+        if attacks is None and first is not None:
+            kind, k, _box = first
+            if k <= 3:
+                attacks = [(kind, k, True, 1.0, k, None, "")]
         for kind, k, hit, _p, _j, _box, _eff in attacks or ():
             if hit:
                 w0, w1 = self.WINDOWS[kind]
@@ -246,7 +252,8 @@ class PlannerPolicy:
         self.terrain = self.terrain or Terrain2D.empty()
         if self.planner is None:
             self.planner = Planner(self.params, self.terrain, PlannerConfig(
-                threads=self.threads, attack_model=os.environ.get("SSBOT_ATTACK_MODEL", "v2")))
+                threads=self.threads, attack_model=os.environ.get("SSBOT_ATTACK_MODEL", "v2"),
+                predict_log=os.environ.get("SSBOT_PREDICT_LOG") == "1"))
         self.planner.terrain = self.terrain
         self.planner.reset()
         self.trk = StateTracker(self.params, self.terrain)
@@ -374,7 +381,7 @@ class PlannerPolicy:
         t1 = time.perf_counter()
         res = self.planner.tick(ws, self._start_state(ws, raw), hold, prefix, fcast, prefs, ctx)
         self.planner_last = res
-        self.atk_mon.predict(fo, res.attacks)
+        self.atk_mon.predict(fo, res.attacks, res.attack)
         t2 = time.perf_counter()
         unpred = self._unpredicted(raw, fo)
         r = self.sc.step(s, plan_s=res.S, forced_risk=res.forced_risk, unpredicted_hits=unpred, p_death=res.P)
