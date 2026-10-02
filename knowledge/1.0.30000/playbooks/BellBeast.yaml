@@ -126,3 +126,7 @@ weights:
   ground: 0.2             # on the floor at the end
   cont: 0.15              # keeping the previous plan (hysteresis)
   jump: 0.15              # per jump press (no needless hopping)
+# Dangerous cell (effect_miner on the data-policy run 20261001_122249, 263 fights): a side slash that meets an attack
+# bell in Launch (still beside the boss, rising at 28-38 u/s) got the hero hit in 44 % (AtkBell L, n 16) and 64 %
+# (AtkBell R, n 11) of contacts within 12 frames, against 6 % in matched no-contact frames. Attack bells take no path
+# change from a hit (no tink states in their FSM); only the down spike pays off on them (bounce, 0.5 s bell cooldown).
