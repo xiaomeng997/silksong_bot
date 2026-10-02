@@ -351,7 +351,7 @@ class PlannerPolicy:
                "alts": res.alternatives, "mask": int(res.mask if r.mask is None else r.mask),
                "sup_mask": r.mask is not None, "tier": r.decision.tier, "h": r.decision.h,
                "pending": r.decision.pause_pending, "triggers": list(r.decision.triggers), "unpred": unpred,
-               "ms": round(res.t_ms.get("total", 0.0), 3), "tail": res.tail_ok,
+               "ms": round(res.t_ms.get("total", 0.0), 3), "tail": res.tail_ok, "attack": res.attack,
                "path": None if res.path is None else np.round(res.path[::4, :], 3).tolist()}
         self.ring.append(rec)
         hit = any(ev.get("k") in ("damage", "catastrophe", "would_die") for ev in s.get("ev") or ())

@@ -84,8 +84,17 @@ SIDE = (-0.12, 2.81, -0.62, 1.52)
 UP = (-1.23, 0.85, -0.04, 3.33)
 DOWN = (-0.69, 1.41, -1.96, 0.32)
 SPEAR = (0.3, 11.0, -0.8, 0.8)
-SPEAR_DELAY_F = 16             # Silkspear antic 0.26 s before the needle flies
-ACTIVE_F = 6                   # frames an attack box counts from its start (scoring)
+# When each attack's box is really out, frames after the press reaches the game (the rollout's attack / cast start),
+# measured as press -> hit event in live run 20261002_081716 (oracle, 52 episodes): Slash / AltSlash p5-p95 1-3 / 1-4
+# frames (828 of 1037 side presses hit), UpSlash 2-7 (48 of 91), the Silkspear needle 18-19 (237 of 267 casts); the
+# down spike while the kinematics are in M_DS_SPIKE (after its 0.1 s antic). Each is scored against the boss's
+# hurtbox predicted for those frames (Forecast.boss_box along the family's mean path), not the press frame's: an
+# earlier version scored the up-slash over frames 0-5 and the down spike from its antic on, and none of 112 down
+# presses hit.
+SIDE_WIN = (0, 6)              # [from, to) frames after the attack start
+UP_WIN = (2, 8)
+SPEAR_WIN = (17, 20)
+SPEAR_DELAY_F = 18             # Silkspear: the needle hits 18-19 frames after the cast starts
 TAIL_CHUNK = 2                # candidates per tail check batch
 COMFORT_FRAMES = 48           # the comfort check covers the whole horizon (24 frames: run 20261002_045049 hits)
 NO_CONTROL_MODES = (kin.M_HURT_FREEZE, kin.M_HURT_RECOIL, kin.M_CAST, kin.M_BIND, kin.M_LOCKED)
@@ -123,6 +132,8 @@ class PlanResult:
     t_ms: dict = field(default_factory=dict)
     alternatives: list = field(default_factory=list)
     tail_ok: bool | None = None             # the chosen plan's end has a safe way on beyond the horizon (None: unchecked)
+    attack: tuple | None = None             # its first attack scored as a hit: (kind, start frame, predicted boss box
+    #                                         [x0, y0, x1, y1] at the active frame) for the whiff audit
     vetoes: dict = field(default_factory=dict)
     hits: float = 0.0
 
@@ -194,6 +205,7 @@ class Planner:
         self.prev_cmd: np.ndarray | None = None
         self.prev_name = ""
         self.ticks = 0
+        self._audit = (np.zeros(0, np.int64), np.zeros(0, np.int64), np.zeros((0, 4)))
         self.last_pogo = 0            # candidates with a predicted bounce in the last tick
         self.jump_until = -1          # tick until which the pressed jump's hold schedule is committed
         self.prev_tail_ok = False
@@ -340,6 +352,10 @@ class Planner:
                              bool(hz[i]), bool(U[i]), N, int(ok.sum()), int(safe.sum()), sel_cmd,
                              roll.box[i].copy(), roll.bound[i].copy(), hits=float(hits[i]))
             res.tail_ok = tail_ok
+            fh, fk, bb = self._audit
+            if fh[i] >= 0 and len(bb):
+                jj = min(int(fh[i]) + {1: 3, 2: 5, 3: 8, 4: 18}[int(fk[i])], len(bb) - 1)
+                res.attack = (int(fk[i]), int(fh[i]), [round(float(v), 2) for v in bb[jj]])
             for j in order[1:6]:
                 nm = "CONTINUE" if cont and j == N - 1 else cs.name(int(j))
                 res.alternatives.append((nm, int(S[j]), round(float(Pc[j]), 3), round(float(J[j]), 2)))
@@ -482,12 +498,15 @@ class Planner:
         J = np.zeros(N)
         hits = np.zeros(N)
         near = np.zeros(N, np.bool_)
+        first_hit = np.full(N, -1, np.int64)       # frame of the first attack scored as a hit (audit), its kind
+        first_kind = np.zeros(N, np.int64)         # 1 side, 2 up, 3 down spike, 4 Silkspear
         _score_kernel(np.ascontiguousarray(roll.box), np.ascontiguousarray(roll.flags),
                       np.ascontiguousarray(roll.mode), np.ascontiguousarray(latched), face0,
                       np.ascontiguousarray(boss, np.float64), np.ascontiguousarray(okb), wv, float(prefs.stance_x),
                       np.ascontiguousarray(rx, np.float64), np.ascontiguousarray(rv, np.float64), boss_x, max_hits,
                       np.ascontiguousarray(polys, np.float64), np.ascontiguousarray(starts, np.int64),
-                      np.ascontiguousarray(base, np.float64), J, hits, near)
+                      np.ascontiguousarray(base, np.float64), J, hits, near, first_hit, first_kind)
+        self._audit = (first_hit, first_kind, boss)
         boss_hp = f.fc.tracker.ctx.hp
         may_kill = near if (boss_hp is not None and boss_hp <= SPEAR_DAMAGE) else np.zeros(N, bool)
         return J, hits, may_kill
@@ -585,7 +604,7 @@ def _pogo_frames(box, flags, mode, latched, face0, boss, okb, polys, starts, bas
 
 @numba.njit(cache=True, parallel=True)
 def _score_kernel(box, flags, mode, latched, face0, boss, okb, wv, stance_x, rx, rv, boss_x, max_hits, polys, starts,
-                  base, J, hits, near):
+                  base, J, hits, near, first_hit, first_kind):
     """J per candidate (the module docstring's terms) on the nominal lane; hits: predicted boss hits (Silkspear x 3);
     near: an attack starts with the boss within 1 u of its box (a possible killing blow, U)."""
     N, T1 = flags.shape
@@ -639,7 +658,8 @@ def _score_kernel(box, flags, mode, latched, face0, boss, okb, wv, stance_x, rx,
             up = (latched[c, k - 1] & B_UP) != 0
             got = False
             if att:
-                for j in range(k, min(T1, k + ACTIVE_F)):
+                w0, w1 = UP_WIN if up else SIDE_WIN
+                for j in range(k + w0, min(T1, k + w1)):
                     if not okb[j]:
                         continue
                     bx = boss[j]
@@ -656,22 +676,31 @@ def _score_kernel(box, flags, mode, latched, face0, boss, okb, wv, stance_x, rx,
                         nr = True
                 if got:
                     h += 1.0
+                    if first_hit[c] < 0:
+                        first_hit[c], first_kind[c] = k, 2 if up else 1
             elif dsk:
-                for j in range(k, min(T1, k + 10)):
-                    if okb[j] and _ov(cxs[j], cys[j], fc[j], DOWN[0], DOWN[1], DOWN[2], DOWN[3], boss[j, 0],
+                for j in range(k, min(T1, k + 16)):
+                    if mode[c, j] == M_DS_SPIKE and okb[j] and _ov(cxs[j], cys[j], fc[j], DOWN[0], DOWN[1], DOWN[2], DOWN[3], boss[j, 0],
                                       boss[j, 1], boss[j, 2], boss[j, 3], polys, starts, boss[j, 0] - base[0],
                                       boss[j, 1] - base[1]):
                         got = True
                         nr = True
                 if got:
                     h += 1.0
+                    if first_hit[c] < 0:
+                        first_hit[c], first_kind[c] = k, 3
             else:
-                j = k + SPEAR_DELAY_F
-                if j < T1 and okb[j] and _ov(cxs[j], cys[j], fc[j], SPEAR[0], SPEAR[1], SPEAR[2], SPEAR[3],
-                                             boss[j, 0], boss[j, 1], boss[j, 2], boss[j, 3], polys, starts,
-                                             boss[j, 0] - base[0], boss[j, 1] - base[1]):
+                for j in range(k + SPEAR_WIN[0], min(T1, k + SPEAR_WIN[1])):
+                    if okb[j] and _ov(cxs[j], cys[j], fc[j], SPEAR[0], SPEAR[1], SPEAR[2], SPEAR[3], boss[j, 0],
+                                      boss[j, 1], boss[j, 2], boss[j, 3], polys, starts, boss[j, 0] - base[0],
+                                      boss[j, 1] - base[1]):
+                        got = True
+                        break
+                if got:
                     h += 3.0
                     nr = True
+                    if first_hit[c] < 0:
+                        first_hit[c], first_kind[c] = k, 4
                 else:
                     dry_casts += 1
         h = min(h, max_hits)
