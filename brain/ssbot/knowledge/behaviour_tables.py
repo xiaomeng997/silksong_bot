@@ -56,7 +56,12 @@ farther than R_FAIL_U from the occupancy, or whose source had no exported damage
 exported without colliders then (an export hole), makes the build fail. Damage-dealing entities exported without any
 collider while not hidden are export holes (oracle bug after a savestate load: the boss's first Charge Emerge of every
 fight has colliders == [] although its body deals damage, M2 round-1 review); instances with holes are kept in the
-templates but left out of ttd and hitbox-window statistics, and the counts are reported.
+templates but left out of ttd and hitbox-window statistics, and the counts are reported. In-sample, the residual is
+the export-vs-contact gap; to see how well the support covers instances it was not built from, recordings alternate
+between N_FOLDS folds, the family-level templates are kept per fold (the full ones are their union), and every contact
+is also measured against the other fold's occupancy (attacks.<A>.residual_u.holdout, coverage.validation.heldout).
+hitboxes[].presence is the fraction of the instances entering a state in which the source was enabled there; a source
+that is present almost always but not always can point at an export gap the empty-collider check does not see.
 
 Measured on Bell Beast (knowledge/1.0.30000/enemies/BellBeast.json, 2026-10-01: the trial run 20261001_121446
 (2 data-policy episodes), the closed recordings of run 20261001_122249, and the person's fight of 2026-09-30):
