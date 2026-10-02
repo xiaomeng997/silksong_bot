@@ -53,7 +53,9 @@ class DataPolicy:
         hx, hy = hero["pos"][0], hero["pos"][1]
         boss = None
         for e in s.get("ents") or ():
-            if e["type_key"] == enc.boss_type:
+            # A hidden boss (M2 oracle: underground, HealthManager off) was absent from "ents" when the policy was
+            # tuned; skipping it keeps the logged data comparable across oracle versions.
+            if e["type_key"] == enc.boss_type and not e.get("hidden"):
                 boss = e
                 break
         if self.mode_left <= 0:

@@ -15,11 +15,12 @@ render_aabb by the backend, DESIGN §4.1).
 fsms[].t: FsmState.StateTime (scaled; PlayMaker stops it once all of the state's actions have finished);
 fsms[].rt: FsmState.StateRealTime (unscaled seconds since entry; never stops, but runs through pauses and hit-stop).
 hidden (M2; absent in recordings made before it): True for a HealthManager root that was exported earlier in the same
-scene and whose HealthManager is inactive now (component disabled or GameObject inactive, not dead), e.g. the Bell
-Beast while underground (Submerged, Emerge Antic, Burst Antic, Rage Pos/Antic). It keeps pos, flipX, fsms, anim and
-hp; colliders is always [] and render_aabb is None unless the GameObject is still active. An entity that an active
-damage source of its own pulls into the export is never hidden, so hiding never drops a threat collider. Read it as
-e.get("hidden", False).
+scene and whose HealthManager is inactive now (component disabled or GameObject inactive; isDead false and hp > 0, so
+a dead boss still leaves "ents"), e.g. the Bell Beast while underground (Submerged, Emerge Antic, Burst Antic, Burst
+Recovery, Rage Pos/Antic). It keeps pos, flipX, fsms, anim and hp; colliders is always [] and render_aabb is None
+unless the GameObject is still active. An entity that an active damage source of its own pulls into the export is
+never hidden, so hiding never drops a threat collider. Read it as e.get("hidden", False); code that took "in ents"
+to mean "active" (boss lookups by type_key, collider-coverage checks) must skip hidden entities.
 Collider: kind, name (M2: the collider's GameObject name, e.g. "PolyCollider", "LeapCollider", or the root's own name
 for a collider on the root; every path of a polygon has the same name), verts_world (flat x0, y0, x1, y1, ...),
 enabled, layer, r (circles), damage|None.
@@ -71,7 +72,8 @@ COLLIDER_KEYS_M2 = frozenset(("name",))
 DAMAGE_KEYS = frozenset(("dealt", "eff", "hazard_type", "flags", "parry", "parryable", "can_cause_damage"))
 FSM_KEYS = frozenset(("name", "state", "t", "rt"))
 FSM_EVENT_KEYS = frozenset(("iid", "ent", "obj", "fsm", "from", "to", "t_in_prev", "rt_in_prev"))
-HIT_EVENT_KEYS = frozenset(("ent", "type_key", "dmg", "dealt", "attack", "src", "hp_before", "hp_after", "dead", "crit"))
+HIT_EVENT_KEYS = frozenset(("ent", "type_key", "dmg", "dealt", "attack", "src", "hp_before", "hp_after", "dead",
+                            "crit"))
 
 
 def bits(value: int, table: dict[str, int]) -> list[str]:

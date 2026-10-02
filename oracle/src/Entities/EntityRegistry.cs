@@ -450,10 +450,13 @@ namespace SsOracle.Entities
 
         /// <summary>
         /// "hidden" entities: a HealthManager root exported earlier in this scene whose HealthManager is now inactive
-        /// (component disabled or GameObject inactive; not dead), with no active damage source of its own pulling it in
-        /// this frame, still within the view (+ its extent). The Bell Beast spends 1.0-2.2 s of every attack like this
-        /// (Submerged, Emerge Antic, Burst Antic, Rage Pos/Antic; behaviour build, 99 fights) while its Control FSM
-        /// already fixes where it will come up. Exported without colliders (EntityExporter) and never rebuilt here.
+        /// (component disabled or GameObject inactive; isDead false and hp &gt; 0), with no active damage source of its
+        /// own pulling it in this frame, still within the view (+ its extent). The Bell Beast spends 1.0-2.2 s of every
+        /// attack like this (behaviour build, 99 fights) while its Control FSM already fixes where it will come up; in
+        /// the trial run (2 fights) it was missing from "ents" in Submerged 5045 frames, Emerge Antic L/C 1821/1699,
+        /// Burst Antic 1768, Burst Recovery 1662, Ptn L 924, Rage Rumble/Antic/Pos/Submerge 242/146/122/122, with its
+        /// Control FSM still running (so the GameObject was active and only the HealthManager was off). Exported
+        /// without colliders (EntityExporter) and never rebuilt here.
         /// </summary>
         private static void HiddenPass(int frame)
         {
@@ -464,7 +467,9 @@ namespace SsOracle.Entities
                 if (e.IncludedFrame == frame) continue;
                 var go = e.Go;
                 var hm = e.Hm;
-                if (go == null || hm == null || hm.isDead) continue;
+                // hp <= 0: a boss with a special death (Bell Beast) keeps isDead false while its FSM plays the death,
+                // and its HealthManager goes inactive in "Death Broadcast"; that is a corpse, not a submerged boss.
+                if (go == null || hm == null || hm.isDead || hm.hp <= 0) continue;
                 if (hm.enabled && go.activeInHierarchy) continue;  // active: in "ents" when in view, never hidden
                 var p = e.Tr.position;
                 if (!InView(p, e.Extent)) continue;

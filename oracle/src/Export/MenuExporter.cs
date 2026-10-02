@@ -75,6 +75,7 @@ namespace SsOracle.Export
         private MenuScreen alphaScreen;
         private CanvasGroup alphaGroup;
         private int pauseStart = int.MinValue;  // first frame of the current pause
+        private long rebindFrame = long.MinValue / 2;
         private bool wasPaused;
         private readonly Dictionary<int, string> roles = new Dictionary<int, string>();
         private static readonly List<Selectable> SelScratch = new List<Selectable>(8);
@@ -107,7 +108,8 @@ namespace SsOracle.Export
                     w.Nil();
                     return;
                 }
-                if (!ReferenceEquals(ui, uiSeen) || quitButton == null) Rebind(ui);
+                // A new UIManager, or no Quit button found yet (retried once a second, not per frame).
+                if (!ReferenceEquals(ui, uiSeen) || (quitButton == null && ctx.Frame - rebindFrame >= 60)) Rebind(ui, ctx.Frame);
                 var es = EventSystem.current;
                 var go = es != null ? es.currentSelectedGameObject : null;
                 sel = go != null ? RoleOf(go, ui) : null;
@@ -139,9 +141,10 @@ namespace SsOracle.Export
 
         /// <summary>A new UIManager (after Save &amp; Quit everything is rebuilt, m0:N42): find the pause menu's Quit
         /// button and MenuButtonList once, and forget the role cache.</summary>
-        private void Rebind(UIManager ui)
+        private void Rebind(UIManager ui, long frame)
         {
             uiSeen = ui;
+            rebindFrame = frame;
             roles.Clear();
             quitButton = null;
             pauseList = null;

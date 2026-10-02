@@ -59,7 +59,7 @@ static class PatchCheck
         // M2: Events.HitTap ("hit" events) and Export.MenuExporter (STATE "menu").
         ("HealthManager", "TakeDamage", new[] { "HitInstance" }, "SsOracle.Events.HitTap", "HitPrefix"),
         ("HealthManager", "TakeDamage", new[] { "HitInstance" }, "SsOracle.Events.HitTap", "TakeDamagePostfix"),
-        ("HealthManager", "ApplyExtraDamage", new[] { "HitInstance" }, "SsOracle.Events.HitTap", "HitPrefix"),
+        ("HealthManager", "ApplyExtraDamage", new[] { "HitInstance" }, "SsOracle.Events.HitTap", "ExtraHitPrefix"),
         ("HealthManager", "ApplyExtraDamage", new[] { "HitInstance" }, "SsOracle.Events.HitTap", "ExtraHitPostfix"),
         ("HealthManager", "ApplyExtraDamage", new[] { "System.Int32" }, "SsOracle.Events.HitTap", "ExtraIntPrefix"),
         ("HealthManager", "ApplyExtraDamage", new[] { "System.Int32" }, "SsOracle.Events.HitTap", "ExtraIntPostfix"),

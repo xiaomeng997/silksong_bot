@@ -75,11 +75,22 @@ namespace SsOracle.SceneDump
             e.Clear();
             Building.Clear();
             Listed.Clear();
+            // Battle gates first, so a room with many solids off at the dump cannot crowd them out of MaxListed.
             foreach (var x in entries)
             {
                 x.Battle = BattleIds.Contains(x.Id);
-                x.Listed = IsWatched(x.Battle, x.OnAtDump, x.OnAtDump);
-                if (x.Listed && Listed.Count < MaxListed) Listed.Add(x);
+                x.Listed = false;
+                if (x.Battle && Listed.Count < MaxListed)
+                {
+                    x.Listed = true;
+                    Listed.Add(x);
+                }
+            }
+            foreach (var x in entries)
+            {
+                if (x.Listed || !IsWatched(x.Battle, x.OnAtDump, x.OnAtDump) || Listed.Count >= MaxListed) continue;
+                x.Listed = true;
+                Listed.Add(x);
             }
             BattleIds.Clear();
             committed = transition;

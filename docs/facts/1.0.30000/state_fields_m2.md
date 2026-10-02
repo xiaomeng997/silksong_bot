@@ -43,7 +43,7 @@
 | 键 | 来源 | 单位 / 时间基准 | 说明 |
 |---|---|---|---|
 | `kind` | `DamageTag` 资产名（`Object.name`，按引用缓存） | — | 如酸液、霜水标签 |
-| `dmg_left` | `DamageTagInfo.HitsLeft`（`DamageTagInfo.cs:7`）× `DamageTag.damageAmount`（`DamageTag.cs:29`，私有） | 面具 | 还会造成的伤害，未计 Barbed Wire 与 Fractured Mask。`RemoveAfterNextHit`（13）时为 1 次 × 伤害；`totalHitLimit`（47）≤ 0 的标签不限次数（如在霜水里游泳时），直到来源移除它为止，记为 −1（无上界） |
+| `dmg_left` | `DamageTagInfo.HitsLeft`（`DamageTagInfo.cs:7`）× `DamageTag.damageAmount`（`DamageTag.cs:29`，私有） | 面具 | 还会造成的伤害，未计 Barbed Wire 与 Fractured Mask。规则按 `TagDamageTaker.Tick`（标签在 `RemoveAfterNextHit` 时、或一次命中把 `HitsLeft` 从 1 减到 0 时被移除）：`RemoveAfterNextHit`（13）→ 1 次；`HitsLeft` > 0 → `HitsLeft` 次（来自 `totalHitLimit`（47），或 `AddDamageTagToStack` 的 `hitAmountOverride`，后者即使标签本身不限次数也有效）；`HitsLeft` = 0 且标签有次数上限 → 0（最后一次已落下，移除排队中）；`HitsLeft` = 0 且不限次数 → 不递减，直到来源移除它为止（如在霜水里游泳时），记为 −1（无上界）。英雄不能受伤时 `Tick` 会不经命中直接移除有上限的标签，所以这是上界 |
 | `t_left` | max(0, `DamageTagInfo.NextHitTime`（9）− `Time.timeAsDouble`) | s，缩放时间（标签自己用的 `Time.timeAsDouble` 时钟） | 距**下一次**命中的时间 |
 
 `dmg_left` 与 `t_left` 是给 hits_to_death 的保守组合：待落下的全部伤害，以及其中最早一次落下的时刻（`TagDamageTaker.Tick`，105：到时命中，之后间隔 `delayPerHit`）。
@@ -54,9 +54,11 @@
 
 ## 6. ents[].hidden
 
-每个实体都写（bool）。为真表示：该实体是本场景中**曾经导出过**的 HealthManager 根对象，现在它的 HealthManager 不活动（组件禁用或 GameObject 不活动，且未死亡），本帧也没有它自己的活动伤害源把它拉进导出，并且仍在视野（+6 u 余量 + 自身范围）内（`EntityRegistry.HiddenPass`）。hidden 实体保留 `pos`（根变换）、`flipX`、`fsms`、`anim`、`hp`/`is_dead`/`inv`，`colliders` 恒为 []，GameObject 不活动时 `render_aabb` 为 nil。每帧最多 16 个。
+每个实体都写（bool）。为真表示：该实体是本场景中**曾经导出过**的 HealthManager 根对象，现在它的 HealthManager 不活动（组件禁用或 GameObject 不活动；`isDead` 为假且 `hp` > 0：有特殊死亡的 boss 在 "Death Broadcast" 关掉 HealthManager 时 `isDead` 仍为假，它是尸体而不是潜地，照旧离开 `ents`），本帧也没有它自己的活动伤害源把它拉进导出，并且仍在视野（+6 u 余量 + 自身范围）内（`EntityRegistry.HiddenPass`）。hidden 实体保留 `pos`（根变换）、`flipX`、`fsms`、`anim`、`hp`/`is_dead`/`inv`，`colliders` 恒为 []，GameObject 不活动时 `render_aabb` 为 nil。每帧最多 16 个。
 
-依据：行为表构建（99 场）中 Bell Beast 在 Submerged、Emerge Antic C/L、Burst Antic、Rage Pos/Antic 期间不在 `ents` 里，每次攻击 1.0-2.2 s；这时它的 Control FSM 已经决定了出土位置（Burst 的出土 x 81.2-91.2 在 Burst Pos 时就已确定，比现在早约 1.2 s）。试跑 f42894-43015：最后一帧导出位置 (73.6, 5.49) 在相机视野内，之后消失而 FSM 仍在转移，说明是 HealthManager 失活而不是出了视野。由活动伤害源拉进来的实体永远不是 hidden，所以不会因此丢掉威胁碰撞体。
+依据：行为表构建（99 场）中 Bell Beast 每次攻击有 1.0-2.2 s 不在 `ents` 里。试跑（2 场）按 Control 状态统计的缺失帧：Submerged 5045、Emerge Antic L/C 1821/1699、Burst Antic 1768、Burst Recovery 1662、Ptn L 924、Rage Rumble/Antic/Pos/Submerge 242/146/122/122，其间 Control FSM 的转移事件照常到达（FSM 只在活动的 GameObject 上运行），所以是 HealthManager 组件被关掉（`OnDisable` 把它移出 `_activeHealthManagers`，`HealthManager.cs:716`），GameObject 仍活动；这时它的 Control FSM 已经决定了出土位置（Burst 的出土 x 81.2-91.2 在 Burst Pos 时就已确定，比现在早约 1.2 s）。试跑 f42894-43015：最后一帧导出位置 (73.6, 5.49) 在相机视野内，之后消失而 FSM 仍在转移，说明是 HealthManager 失活而不是出了视野。由活动伤害源拉进来的实体永远不是 hidden，所以不会因此丢掉威胁碰撞体。
+
+**对读取方的影响**：以前"在 `ents` 里"等于"活动"，现在不是了。按 type_key 找 boss、统计碰撞体覆盖的代码要跳过 hidden 实体：`ssbot/train/data_policy.py` 已改为跳过（保持数据采集与旧 oracle 一致）；`knowledge/behaviour_tables.py`（454 行按 type_key 取 boss）与 `backends/oracle_backend.py` 由各自模块处理。
 
 ## 7. ents[].colliders[].name
 
@@ -64,7 +66,7 @@
 
 ## 8. 事件 "hit"（英雄或任何来源对 HealthManager 造成伤害）
 
-`oracle/src/Events/HitTap.cs`：前缀 + 后缀挂在 HealthManager 降低 hp 的三处：`TakeDamage(HitInstance)`（943，经 `Hit` 到达：刀、工具、法术）、`ApplyExtraDamage(HitInstance)`（1469：延迟连击与伤害标签，如毒、电）、`ApplyExtraDamage(int)`（1460：`DamageEffectTicker`）。只有 hp 变化或死亡的调用才发事件（免疫与 0 伤害不发）。所有来源都算，不只英雄：用 `src` 区分。被 `sendDamageTo` 转发时（1297-1307）记接收方。
+`oracle/src/Events/HitTap.cs`：前缀 + 后缀挂在 HealthManager 降低 hp 的三处：`TakeDamage(HitInstance)`（943，经 `Hit` 到达：刀、工具、法术）、`ApplyExtraDamage(HitInstance)`（1469：延迟连击与伤害标签，如毒、电）、`ApplyExtraDamage(int)`（1460：`DamageEffectTicker`）。只有 hp 变化或死亡的调用才发事件（免疫与 0 伤害不发）。所有来源都算，不只英雄：用 `src` 区分。被 `sendDamageTo` 转发时（1299-1306）`TakeDamage` 直接改接收方的 `hp`，不再调用接收方的 `TakeDamage`，所以记接收方、只发一次；两个 `ApplyExtraDamage` 重载（1460-1477）总是降低自身的 `hp`，不转发，记自身。嵌套：`LagHits` 是协程，没有起始延迟且 `HitDelay` 为 0 时第一下 `ApplyExtraDamage` 会在启动它的 `TakeDamage` 里面同步执行、打在同一个目标上；这时内层先发事件，外层只报它自己那部分（`HitTap.OwnDamage`），所以同一目标的 `dmg` 之和总等于它的 hp 变化。不报告的 hp 写入（不是攻击伤害）：PlayMaker 动作 `SetHP` / `SubtractHP`（脚本设定），`BlackThreadState` / `LifebloodState` 的 hp 缩放，以及 Silksong 中未用到的 `SpellFluke`；这些仍体现在 `ents[].hp` 里。
 
 | 键 | 来源 | 说明 |
 |---|---|---|
@@ -75,7 +77,7 @@
 | `attack` | `AttackTypes` 名 | `"Nail"`、`"Generic"`（`int` 重载）等 |
 | `src` | `HitInstance.Source.name` | 如英雄的 `"Slash"`、`"DownSlash"`、工具物体；没有来源为 null |
 | `hp_before`, `hp_after` | `HealthManager.hp`（229） | |
-| `dead` | `hp_after <= 0` 或调用后 `isDead` | 有特殊死亡的 boss（`hasSpecialDeath`，403/1657，如 Bell Beast）不置 `isDead`，经 FSM 死亡，所以以 hp 为准：击杀一击 `dead` 为真 |
+| `dead` | `hp_after <= 0` 或调用后 `isDead` | 有特殊死亡的 boss（`hasSpecialDeath`，403/1657，如 Bell Beast）不置 `isDead`，经 FSM 死亡，所以以 hp 为准：击杀一击 `dead` 为真。击杀一击 = `hp_before > 0` 且 `hp_after <= 0` 的那一次；之后打在尸体上的命中（若 hp 还在变）也带 `dead` 为真，但不是击杀 |
 | `crit` | `HitInstance.CriticalHit` | |
 
 另有 EventTap 的序号 `n`。时间基准：事件帧 = 调用发生的那一帧（`Time.frameCount`），与 STATE `ev` 中其他事件相同。
@@ -89,7 +91,7 @@
 | `sel` | `EventSystem.current.currentSelectedGameObject` 的角色 | `"continue"`/`"options"`/`"quit"`：`PauseMenuButton.pauseButtonType`（`UnityEngine.UI\PauseMenuButton.cs:23`）；`"yes"`/`"no"`：返回主菜单确认框的按钮，按其持久监听调用的 UIManager 方法判定（`UIReturnToMainMenu` 909 / `UILeaveExitToMenuPrompt` 899），判定不了时按在 `returnMainMenuPrompt`（251）内的高度（P7：是在否之上）；`"back"`：某个 `MenuScreen.backButton`（如选项菜单），或监听调用 `UIGoBack`；`"ok"`：`GenericMessageCanvas` 内（如 SAVE_FAILED）；没有选中或其他为 nil。按 instance id 缓存，只在选中项变化时调 `GetComponent` |
 | `quit_ok` | 暂停菜单里 Quit 按钮的 `Selectable.interactable` | 只有本次暂停中暂停菜单的 `MenuButtonList.SetupActive`（107）运行过之后才给值，之前为 nil：`ShowMenu`（2126）在暂停的下一帧才调用它，在此之前的值是上一次暂停留下的。`MenuButtonSaveQuitListCondition` 在 `disableSaveQuit` 或 `ScenePreloader.HasPendingOperations` 时把 Quit 置灰（m0:C8） |
 | `dim` | `UIManager.modalDimmer.alpha`（57） | 暂停时淡入到 0.8（`GoToPauseMenu`，1698），取消暂停时淡出到 0（`UIClosePauseMenu`，837） |
-| `alpha` | `UIManager.fadingMenuScreen`（280，私有）的 `CanvasGroup.alpha` | 最近一次 `ShowMenu` 显示的菜单屏。`ShowMenu` 一开始就设置它，早于 `menuState` 改变（人类会话中前 8 个暂停帧的 `menuState` 是旧值，安全监督审阅） |
+| `alpha` | `UIManager.fadingMenuScreen`（280，私有）的 `MenuScreen.ScreenCanvasGroup`（= 其 `GetComponent<CanvasGroup>()`，`MenuScreen.cs:28`，按屏缓存）`.alpha` | 最近一次 `ShowMenu` 显示的菜单屏。`ShowMenu` 一开始就设置它，早于 `menuState` 改变（人类会话中前 8 个暂停帧的 `menuState` 是旧值，安全监督审阅） |
 | `ignore_unpause` | `UIManager.ignoreUnpause`（274，私有） | `GoToPauseMenu` 运行期间为真，此时 Continue / Cancel 被忽略（1988） |
 | `quitting` | `CameraController.FadeOut(CameraFadeType.TO_MENU)` 已在当前 GameManager 上调用（后缀补丁） | `GameManager.ReturnToMainMenu` 已过了存档（5339 起；存档失败时在淡出前就返回，m0:C9），在 5378 开始淡出到菜单：退出已不可撤销。GameManager 换了或回到 MAIN_MENU 时清除 |
 
@@ -117,13 +119,15 @@ STATE `room` 新增 `gates`（`oracle/src/SceneDump/GateWatch.cs`）。TERRAIN �
 | `enabled` | 现在 `Collider2D.enabled && gameObject.activeInHierarchy` |
 | `box` | [x0, y0, x1, y1] 世界坐标 AABB：快照时的轮廓，按变换位置自快照以来的平移移动（不跟随旋转与缩放） |
 
-当前房间的快照完成之前为 nil（未知，不是"没有门"）；没有被监视的固体时为 []。最多 32 项。
+当前房间的快照完成之前为 nil（未知，不是"没有门"）；没有被监视的固体时为 []。最多 32 项，`BattleScene.gates` 下的先占位，所以快照时 off 的固体再多也挤不掉竞技场门；超过 32 项的其余固体不列出（读取方按 TERRAIN 状态处理）。Bone_05 没有 `BattleScene`：两扇 `"Threaded Bell Gate"` 因为快照时 off 而被监视，`"Wall"` 在轮询看到它消失后加入（试跑 TERRAIN：31 个固体，off 的还有 `"Roof Collider_Basic (1)"`）。
+
+注意与 TERRAIN 的 `gates`（场景转换门 `bot1`、`left1` 等）不是一回事。`id` 是决定 5 之外多给的键（{name, enabled, box} 之外），用来对上 TERRAIN `solids[].id`。
 
 ## 12. 修复：Bell Beast 第一次 Charge Emerge 导出 colliders == []
 
 **现象**（行为审阅）：每场战斗第一次 Charge Emerge 的整个过程中 boss 的 `colliders` 为 []，而它在造成伤害。试跑 f42726-42769 与 f56714-56758（89 帧），实跑 i0_000 1211 帧中 1209 帧，其间 22 次受击都落在这些帧上。
 
-**根因**（不是审阅猜测的 `SafeRefresh` 失败；实跑 4 个实例的 BepInEx 日志中没有任何 "cache rebuild ... failed"）：Bell Beast 的身体碰撞框不是预制体里的组件，而是 tk2d 在运行时添加的。`tk2dBaseSprite.UpdateCollider`（`TK2D\tk2dBaseSprite.cs:447`）在精灵**第一次**显示带 Box 碰撞类型的帧时才 `AddComponent<BoxCollider2D>()`（484-487；多边形 528/533、边 568/573 同理），之后按帧启用 / 禁用并改尺寸。读档重新加载场景，boss 是新对象；oracle 在它第一次出现（Charge Emerge 第 0 帧，该帧精灵没有碰撞框）时建立组件缓存，此后几帧 tk2d 才加上 BoxCollider2D，缓存不知道它。根上只有这个框，子物体 PolyCollider 当时不活动（缓存里有，但不活动的子碰撞体不导出），所以整段 Charge Emerge 都是 []。直到某个无关的重建（试跑中晚了 85 帧与 71 帧）才出现 `box8`。证据：第二次及以后的 Charge Emerge 第 0 帧就导出 `box8`（enabled = false，第 3 帧起 true，尺寸随动画帧变，正是 tk2d 精灵碰撞体的行为）；而 `GetComponentsInChildren(true)` 会找到预制体里已有的禁用组件，第一次没找到说明组件当时不存在。
+**根因**（不是审阅猜测的 `SafeRefresh` 失败：失败时 `SafeRefresh` 会把 `Fsms` 也清成空，而这些帧里 boss 的 `fsms` 照常带着 Control 状态 "Charge Emerge"；实跑 i1-i3 的 player 日志中 "cache rebuild" 警告为 0 条，i0 的日志已被之后的会话覆盖）：Bell Beast 的身体碰撞框不是预制体里的组件，而是 tk2d 在运行时添加的。`tk2dBaseSprite.UpdateCollider`（`TK2D\tk2dBaseSprite.cs:447`）在精灵**第一次**显示带 Box 碰撞类型的帧时才 `AddComponent<BoxCollider2D>()`（484-487；多边形 528/533、边 568/573 同理），之后按帧启用 / 禁用并改尺寸。读档重新加载场景，boss 是新对象；oracle 在它第一次出现（Charge Emerge 第 0 帧，该帧精灵没有碰撞框）时建立组件缓存，此后几帧 tk2d 才加上 BoxCollider2D，缓存不知道它。根上只有这个框，子物体 PolyCollider 当时不活动（缓存里有，但不活动的子碰撞体不导出），所以整段 Charge Emerge 都是 []。直到某个无关的重建（试跑中晚了 85 帧与 71 帧：f42811、f56785）才出现这个 4 顶点的 box。证据：试跑每场第一次之后的 26 次 Charge Emerge 全部在第 0 帧就导出这个 4 顶点的 box（前 4 帧 enabled = false，之后 true，尺寸随动画帧变，正是 tk2d 精灵碰撞体的行为）；而 `GetComponentsInChildren(true)` 会找到预制体里已有的禁用组件，第一次没找到说明组件当时不存在。
 
 **修复**（`oracle/src/Entities/EntityRegistry.cs`）：重建时记下实体拥有的每个 tk2d 精灵及其 `boxCollider2D` 引用、`polygonCollider2D.Count`、`edgeCollider2D.Count`（`SnapshotSprites`）；每帧对被导出的实体比较这三项（`SpritesChanged`：每个精灵三次托管字段读取，无引擎调用），变了就在同一帧重建。另外，重建失败（异常）后不再等 600 帧的周期刷新，而是 30 帧后重试（`RetryFrame`）。`ents.stats` RPC 新增 `sprite_refreshes`、`refresh_failures`、`seen_hm`、`hidden_exports`。
 
@@ -131,7 +135,7 @@ STATE `room` 新增 `gates`（`oracle/src/SceneDump/GateWatch.cs`）。TERRAIN �
 
 ## 13. 每帧开销（纸面估计）
 
-基线（试跑 i0_000，26 892 个 STATE）：构建 p50 117 µs、p99 176 µs；`hero` 段 p50 18 µs，`ents` 24 µs，`room` 0 µs。预算 C14：p50 ≤ 300 µs、p99 ≤ 1 ms。
+基线（`cost_us`，上一帧的 STATE 构建时间）：试跑 i0_000（单实例，26 892 个 STATE）p50 117 µs、p99 176 µs，`cost_ex` 中 `hero` 段 p50 18 µs，`ents` 24 µs，`room` 0 µs；实跑 i1_000（4 实例并行，273 201 个 STATE）p50 191 µs、p99 291 µs。预算 C14：p50 ≤ 300 µs、p99 ≤ 1 ms。
 
 | 新增 | 每帧读取 | 估计 |
 |---|---|---|
@@ -140,9 +144,9 @@ STATE `room` 新增 `gates`（`oracle/src/SceneDump/GateWatch.cs`）。TERRAIN �
 | `hero.tags` | 1 个 FieldRef + 属性 + `Count`；每个生效标签再加一次字典枚举（名字按引用缓存） | ~0.1 µs（无标签） |
 | `hero.tool_max` | 每个工具：`GetToolByName`（字典）+ `GetToolStorageAmount`（含 `IsEquippedHud` 的 `toolCache` 命中） | ~0.2 µs × 工具数 |
 | `ents` | 每个实体每个 tk2d 精灵 3 次托管字段读；每个"见过且未导出"的 HealthManager 实体约 6 次引擎调用（hidden 判定）；多写 `hidden` 与碰撞体 `name` | < 1 µs（Bone_05） |
-| `room.gates` | 每个被监视项约 5 次引擎调用（Bone_05 约 4 项）+ 轮询 16 × 3 次 | ~1-2 µs |
+| `room.gates` | 每个被监视项约 5 次引擎调用（Bone_05 约 4 项；上限 32 项时约 13 µs）+ 轮询 16 × 3 次 | ~1-2 µs（Bone_05） |
 | `menu` | 未暂停：`uiState`、`isPaused`、遮罩 alpha（1 次引擎调用），写 nil；暂停：再加选中项角色缓存查找、`interactable`、2 次 alpha | < 0.5 µs |
 | `act.hf` | 44 次数组读，44 个小整数 | ~0.3 µs |
 | 事件 `hit` | 只在命中时：前缀 2 次字段读，后缀构建字典与 2 次 `name` | 每秒几次 |
 
-合计约 5-10 µs/帧，约为基线 p50 的 5-8%，远低于预算。STATE 增大约 0.3-0.5 KB/帧（`act.hf` ~70 B、`hero.tm` ~150 B、gates 每项 ~60 B、每个碰撞体名 ~10 B）。实测数字等新插件部署后从 STATE `cost_ex` 读取。
+合计约 5-10 µs/帧，约为单实例基线 p50 的 5-8%；4 实例负载下 p50 约 200 µs、p99 约 300 µs，仍在预算内。STATE 增大约 0.3-0.5 KB/帧（`act.hf` ~70 B、`hero.tm` ~150 B、gates 每项 ~60 B、每个碰撞体名 ~10 B）。实测数字等新插件部署后从 STATE `cost_ex` 读取。

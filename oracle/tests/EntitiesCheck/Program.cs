@@ -179,7 +179,13 @@ internal static class Program
         Eq(SsOracle.Hero.HeroExporter.TagDmgLeft(false, 3, 2, 1), 2, "limited tag: hits left x amount");
         Eq(SsOracle.Hero.HeroExporter.TagDmgLeft(false, 0, 0, 1), -1, "unlimited tag (frost water while swimming): -1");
         Eq(SsOracle.Hero.HeroExporter.TagDmgLeft(true, 0, 0, 2), 2, "RemoveAfterNextHit: one more hit");
-        Eq(SsOracle.Hero.HeroExporter.TagDmgLeft(false, 5, 0, 1), 0, "limited tag with no hits left: 0");
+        Eq(SsOracle.Hero.HeroExporter.TagDmgLeft(false, 5, 0, 1), 0, "limited tag with no hits left (removal queued): 0");
+        Eq(SsOracle.Hero.HeroExporter.TagDmgLeft(false, 0, 3, 2), 6, "no TotalHitLimit but a hitAmountOverride of 3: limited");
+        Eq(SsOracle.Hero.HeroExporter.TagDmgLeft(true, 4, 3, 1), 1, "RemoveAfterNextHit wins over HitsLeft");
+
+        // "hit" nesting: a lag hit run inside TakeDamage on the same target reports first, the outer call its own part
+        Eq(SsOracle.Events.HitTap.OwnDamage(150, 145, 0), 5, "hit: no nesting, own = hp_before - hp_after");
+        Eq(SsOracle.Events.HitTap.OwnDamage(150, 142, 3), 5, "hit: outer call minus the nested lag hit's 3");
 
         // act.hf age cap must not hide a difference the filter acts on
         Check(SsOracle.Export.FrameExporter.HfAgeCap >= SsOracle.Input.HoldFilter.DefaultMinPressFrames &&

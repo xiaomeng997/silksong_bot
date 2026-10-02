@@ -1,7 +1,8 @@
 """M2 oracle exports probe (cross-module decision 5; field list docs/facts/1.0.30000/state_fields_m2.md): on one
-training instance, load the Bell Beast savestate, check the new STATE fields at rest and in the pause menu, then play one
-Bell Beast episode (the encounter's intro through ssbot.train.episode.run_episode, a DataPolicy pinned to PRESS, mode
-"data" so LethalBlock keeps the hero alive) and check the combat fields. PASS/FAIL per check; exit 0 only if all pass.
+training instance, load the Bell Beast savestate, check the new STATE fields at rest and in the pause menu, then play
+one Bell Beast episode (the encounter's intro through ssbot.train.episode.run_episode, a DataPolicy pinned to PRESS,
+mode "data" so LethalBlock keeps the hero alive) and check the combat fields. PASS/FAIL per check; exit 0 only if all
+pass. Never submits on Quit: Submit is sent only on a "continue" highlight read back from the oracle.
 
     cd brain
     ../scripts/uv.cmd run python -m ssbot.tools.launcher -n 1 --detach      # an instance running the new plugin
@@ -13,14 +14,14 @@ Checks:
          aligned with hero.tools and >= tool_amounts; room.gates lists both "Threaded Bell Gate"s, off before the fight.
   menu   Esc (only while pause.blk == 0) pauses: sel "continue", dim ~0.8, alpha ~1, quit_ok == not (dsq or preload),
          ignore_unpause false once the menu is up, quitting false; Down / Up move sel to "options" / "quit" and back;
-         Submit only on a "continue" read back from the oracle unpauses (never on Quit; Esc is the fallback); the section
-         stays while the dimmer fades out, then goes nil.
+         Submit only on a "continue" read back from the oracle unpauses (never on Quit; Esc is the fallback); the
+         section stays while the dimmer fades out, then goes nil.
   fight  hero.tm.inv ~1.0 right after a hit and non-increasing to 0 (unless hit again), recoil ~0.2 then 0; the boss
-         is exported hidden (colliders []) while underground; its first Charge Emerge exports the body box (the tk2d hole
-         fixed in EntityRegistry.SpritesChanged) and no boss hit lands on an empty-collider frame; collider names include
-         "PolyCollider" and "LeapCollider"; "hit" events: every nail hit on the boss is dmg 5, the boss hits add up to
-         its HP loss, and the killing blow is reported (dead, hp_after <= 0); room.gates: both gates enabled during the
-         fight and "Wall" listed off.
+         is exported hidden (colliders []) while underground; its first Charge Emerge exports the body box (the tk2d
+         hole fixed in EntityRegistry.SpritesChanged) and no boss hit lands on an empty-collider frame; collider names
+         include "PolyCollider" and "LeapCollider"; "hit" events: every nail hit on the boss is dmg 5, the boss hits
+         add up to its HP loss, exactly one hit takes its hp from > 0 to <= 0 (the killing blow, dead true), and
+         hit.ent is the boss's "ents" iid; room.gates: both gates enabled during the fight and "Wall" listed off.
 """
 import argparse
 import sys
@@ -108,7 +109,8 @@ class Collector:
             elif hf.get("latched") != act.get("mask"):
                 self._fail("act.hf", f, f"latched {hf.get('latched')} != act.mask {act.get('mask')}")
             elif not any(pend) and hf.get("latched") != hf.get("desired"):
-                self._fail("act.hf", f, f"nothing pending but latched {hf.get('latched')} != desired {hf.get('desired')}")
+                self._fail("act.hf", f,
+                           f"nothing pending but latched {hf.get('latched')} != desired {hf.get('desired')}")
         hero = s.get("hero")
         if not hero:
             return
@@ -150,7 +152,7 @@ class Collector:
         for e in s.get("ents") or ():
             if e.get("type_key") == BOSS:
                 cols = e.get("colliders") or []
-                row["boss"] = {"hidden": e.get("hidden"), "ncol": len(cols), "hp": e.get("hp"),
+                row["boss"] = {"iid": e.get("iid"), "hidden": e.get("hidden"), "ncol": len(cols), "hp": e.get("hp"),
                                "kinds": [c.get("kind") for c in cols], "names": [c.get("name") for c in cols]}
                 break
         return row
@@ -187,12 +189,14 @@ def wait_menu(link: OracleLink, pred, timeout_s: float = 3.0) -> dict:
 
 def menu_checks(link: OracleLink) -> bool:
     ok = True
-    link.wait_state(lambda s: (s.get("pause") or {}).get("blk") == 0 and s["hero"]["hero_accepting_input"], timeout_s=10.0)
+    link.wait_state(lambda s: (s.get("pause") or {}).get("blk") == 0 and s["hero"]["hero_accepting_input"],
+                    timeout_s=10.0)
     s0 = link.state
     tap(link, "pause")
     s = link.wait_state(lambda s: s["game"]["paused"], timeout_s=3.0)
     print("paused at frame", s["f"], "menu:", s.get("menu"))
-    ok &= check(s.get("menu") is not None and set(s["menu"]) == MENU_KEYS, f"menu section present with keys {MENU_KEYS}")
+    ok &= check(s.get("menu") is not None and set(s["menu"]) == MENU_KEYS,
+                f"menu section present with keys {MENU_KEYS}")
     try:
         s = wait_menu(link, lambda m, s: m["alpha"] >= 0.99 and not m["ignore_unpause"] and not s["game"]["fading"]
                       and m["quit_ok"] is not None, timeout_s=3.0)
@@ -202,7 +206,8 @@ def menu_checks(link: OracleLink) -> bool:
     print("menu up:", m)
     ok &= check(m.get("sel") == "continue", f"sel is 'continue' when the menu opens ({m.get('sel')!r})")
     ok &= check(abs((m.get("dim") or 0) - 0.8) < 0.05, f"dim ~0.8 ({m.get('dim')})")
-    ok &= check((m.get("alpha") or 0) >= 0.99 and m.get("ignore_unpause") is False, "menu faded in, ignore_unpause false")
+    ok &= check((m.get("alpha") or 0) >= 0.99 and m.get("ignore_unpause") is False,
+                "menu faded in, ignore_unpause false")
     p = s.get("pause") or s0.get("pause") or {}
     want_quit = not (p.get("dsq") or p.get("preload"))
     ok &= check(m.get("quit_ok") is want_quit, f"quit_ok {m.get('quit_ok')} == not (dsq or preload) ({want_quit})")
@@ -285,15 +290,18 @@ def fight_checks(col: Collector, rec: AttemptRecord) -> bool:
                     f"ends {after[-1] if after else None}")
         rec_s = [r["recoil"] for r in seq if r["recoil"] is not None]
         ok &= check(bool(rec_s) and max(rec_s) > 0.15 and rec_s[-1] == 0.0,
-                    f"hero.tm.recoil after the hit: max {max(rec_s) if rec_s else None}, ends {rec_s[-1] if rec_s else None}")
+                    f"hero.tm.recoil after the hit: max {max(rec_s) if rec_s else None}, "
+                    f"ends {rec_s[-1] if rec_s else None}")
 
     # hidden while underground
     seen_at = next((r["f"] for r in rows if r["boss"] is not None and not r["boss"]["hidden"]), None)
-    under = [r for r in rows if seen_at is not None and r["f"] > seen_at and r["ctl"] in UNDERGROUND and not r["paused"]]
+    under = [r for r in rows
+             if seen_at is not None and r["f"] > seen_at and r["ctl"] in UNDERGROUND and not r["paused"]]
     hidden = [r for r in under if r["boss"] is not None and r["boss"]["hidden"]]
     leaks = [r["f"] for r in rows if r["boss"] is not None and r["boss"]["hidden"] and r["boss"]["ncol"] > 0]
     ok &= check(len(under) > 0 and len(hidden) >= 0.8 * len(under) and not leaks,
-                f"boss exported hidden underground: {len(hidden)}/{len(under)} frames, hidden with colliders {leaks[:5]}")
+                f"boss exported hidden underground: {len(hidden)}/{len(under)} frames, "
+                f"hidden with colliders {leaks[:5]}")
 
     # first Charge Emerge
     ce = []
@@ -305,7 +313,8 @@ def fight_checks(col: Collector, rec: AttemptRecord) -> bool:
     empty = [r["f"] for r in ce if r["boss"] is None or r["boss"]["ncol"] == 0]
     has_box = any(r["boss"] and "box" in r["boss"]["kinds"] for r in ce)
     first_box = next((i for i, r in enumerate(ce) if r["boss"] and "box" in r["boss"]["kinds"]), None)
-    gap = [r["f"] for r in ce[first_box:] if not (r["boss"] and "box" in r["boss"]["kinds"])] if first_box is not None else []
+    gap = ([r["f"] for r in ce[first_box:] if not (r["boss"] and "box" in r["boss"]["kinds"])]
+           if first_box is not None else [])
     empty_fs = set(empty)
     bad_hits = [f for f, d in damage if BOSS in str(d.get("source")) and (f in empty_fs or f - 1 in empty_fs)]
     ok &= check(bool(ce) and has_box and not gap and len(empty) <= 6 and not bad_hits,
@@ -322,7 +331,8 @@ def fight_checks(col: Collector, rec: AttemptRecord) -> bool:
     nail = [d for d in boss_hits if d.get("attack") == "Nail"]
     dmg = Counter(d.get("dmg") for d in nail)
     print("hit events on the boss:", len(boss_hits), "nail dmg:", dict(dmg),
-          "attacks:", dict(Counter(d.get("attack") for d in boss_hits)), "src:", dict(Counter(d.get("src") for d in boss_hits)))
+          "attacks:", dict(Counter(d.get("attack") for d in boss_hits)),
+          "src:", dict(Counter(d.get("src") for d in boss_hits)))
     ok &= check(bool(nail) and set(dmg) == {5}, f"every nail hit on the boss is dmg 5 ({dict(dmg)})")
     ok &= check(all(d["dmg"] == d["hp_before"] - d["hp_after"] for _, d in hits), "dmg == hp_before - hp_after")
     hps = [r["boss"]["hp"] for r in rows if r["boss"] and r["boss"]["hp"] is not None]
@@ -331,11 +341,16 @@ def fight_checks(col: Collector, rec: AttemptRecord) -> bool:
         last_hp = boss_hits[-1]["hp_after"]
         ok &= check(sum(d["dmg"] for d in boss_hits) == first_hp - last_hp,
                     f"boss hits add up to its HP loss ({sum(d['dmg'] for d in boss_hits)} vs {first_hp} -> {last_hp})")
-    kill = [d for d in boss_hits if d.get("dead")]
+    # The killing blow is the one hit that takes hp from > 0 to <= 0. A boss with a special death (Bell Beast) keeps
+    # isDead false, so a later hit on the corpse would also say dead; it is not the killing blow.
+    kill = [d for d in boss_hits if d.get("hp_before", 0) > 0 and d.get("hp_after", 1) <= 0]
     if rec.outcome == CLEAR:
-        ok &= check(len(kill) == 1 and kill[0]["hp_after"] <= 0, f"the killing blow is reported ({kill})")
+        ok &= check(len(kill) == 1 and kill[0].get("dead") is True, f"the killing blow is reported ({kill})")
     else:
         ok &= check(False, f"killing blow: the episode did not end in CLEAR ({rec.outcome})")
+    iids = {r["boss"]["iid"] for r in rows if r["boss"]}
+    ents_of_hits = {d.get("ent") for d in boss_hits}
+    ok &= check(bool(iids) and ents_of_hits <= iids, f"hit.ent is the boss's ents iid ({ents_of_hits} vs {iids})")
 
     # gates during the fight
     fight = [r for r in rows if r["ctl"] not in (None, "Init", "Dormant", "Submerged Init") and r["gates"] is not None]
@@ -343,7 +358,8 @@ def fight_checks(col: Collector, rec: AttemptRecord) -> bool:
     wall_off = [r for r in fight if any(g["name"] == "Wall" and not g["enabled"] for g in r["gates"])]
     ok &= check(bool(fight) and len(closed) >= 0.95 * len(fight),
                 f"room.gates: both gates enabled in {len(closed)}/{len(fight)} fight frames")
-    ok &= check(bool(fight) and len(wall_off) >= 0.9 * len(fight), f"room.gates: 'Wall' listed off in {len(wall_off)}/{len(fight)}")
+    ok &= check(bool(fight) and len(wall_off) >= 0.9 * len(fight),
+                f"room.gates: 'Wall' listed off in {len(wall_off)}/{len(fight)}")
     return ok
 
 

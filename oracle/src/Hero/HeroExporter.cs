@@ -430,10 +430,12 @@ namespace SsOracle.Hero
         /// <summary>
         /// hero.tags: the hero's active damage tags (TagDamageTaker.TaggedDamage: acid, frost water, ...), each
         /// {kind: the DamageTag asset name, dmg_left: masks still to come = hits left x the tag's damageAmount (before
-        /// Barbed Wire and the Fractured Mask; -1 for a tag without a hit limit, which ticks until its source removes it,
-        /// e.g. while swimming in frost water), t_left: seconds of scaled game time (the Time.timeAsDouble clock the tag
-        /// uses) until its next hit lands}. dmg_left and t_left are the conservative pair for hits_to_death: all the
-        /// damage still pending and the earliest moment any of it lands. nil without a TagDamageTaker.
+        /// Barbed Wire and the Fractured Mask; -1 for a tag that does not count down, which ticks until its source
+        /// removes it, e.g. while swimming in frost water; see TagDmgLeft), t_left: seconds of scaled game time (the
+        /// Time.timeAsDouble clock the tag uses) until its next hit lands}. dmg_left and t_left are the conservative
+        /// pair for hits_to_death: all the damage still pending (Tick may also drop a limited tag without a hit while
+        /// the hero cannot take damage, so it is an upper bound) and the earliest moment any of it lands. nil without
+        /// a TagDamageTaker.
         /// </summary>
         private void WriteTags(MsgPackWriter w, HeroController hero)
         {
@@ -481,13 +483,16 @@ namespace SsOracle.Hero
         }
 
         /// <summary>
-        /// Damage a tag still deals (TagDamageTaker.Tick): a tag marked RemoveAfterNextHit hits once more; one with a
-        /// TotalHitLimit hits HitsLeft more times; one without a limit (HitsLeft stays 0) keeps hitting until its source
-        /// removes it, reported as -1 (unbounded).
+        /// Damage a tag still deals, by TagDamageTaker.Tick (1.0.30000): a hit removes the tag when it was marked
+        /// RemoveAfterNextHit, or when it took HitsLeft from 1 to 0. So a RemoveAfterNextHit tag hits once more; a tag
+        /// with HitsLeft &gt; 0 (set from TotalHitLimit, or from AddDamageTagToStack's hitAmountOverride even when the
+        /// tag itself has no limit) hits HitsLeft more times; HitsLeft 0 on a limited tag means its last hit landed and
+        /// the removal is queued (0); HitsLeft 0 on a tag without a limit never counts down, so it hits until its source
+        /// removes it (frost water while swimming), reported as -1 (unbounded).
         /// </summary>
         public static int TagDmgLeft(bool removeAfterNextHit, int totalHitLimit, int hitsLeft, int amount)
         {
-            var hits = removeAfterNextHit ? 1 : totalHitLimit > 0 ? hitsLeft : -1;
+            var hits = removeAfterNextHit ? 1 : hitsLeft > 0 ? hitsLeft : totalHitLimit > 0 ? 0 : -1;
             return hits < 0 ? -1 : hits * amount;
         }
 
