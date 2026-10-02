@@ -51,6 +51,7 @@ def main(argv: list[str] | None = None) -> int:
 
     conf = {"rect": Counter(), "poly": Counter()}
     by_state: Counter = Counter()
+    ap_c: Counter = Counter()
     lead = {"rect": [], "poly": []}
     n = 0
     for inst in (int(x) for x in a.instances.split(",")):
@@ -91,6 +92,24 @@ def main(argv: list[str] | None = None) -> int:
                         break
                 bst = next((((e.get("fsms") or [{}])[0].get("state")) for e in S[i].get("ents") or ()
                             if e.get("type_key") == "Bone Beast"), None)
+                # the approach at the spike's first frame: the boss coming at the hero, head-on (she faces it) or
+                # from behind (she faces away), or past her
+                be = next((e for e in S[i].get("ents") or () if e.get("type_key") == "Bone Beast"), None)
+                bpp = boss(S[i])
+                appr = "none"
+                if be is not None and bpp is not None and abs(float((be.get("vel") or [0, 0])[0])) > 1.0:
+                    bvx = float(be["vel"][0])
+                    hb0 = S[i]["hero"]["box"]
+                    bcx = 0.5 * (bpp[0][:, 0].min() + bpp[0][:, 0].max())
+                    if np.sign(bvx) * (0.5 * (hb0[0] + hb0[2]) - bcx) > 0:
+                        fc0 = 1 if (S[i]["hero"].get("facing") or 1) >= 0 else -1
+                        appr = "head_on" if fc0 != np.sign(bvx) else "behind"
+                    else:
+                        appr = "passed"
+                hurt = any(e.get("k") == "damage" for k in range(0, 40) if i + k < len(S)
+                           for e in S[i + k].get("ev") or ())
+                ap_c[(appr, "hit" if hit_k is not None else "miss")] += 1
+                ap_c[(appr, "hurt within 40 frames")] += int(hurt)
                 last_hit = next((k for k in range(1, 90) if i - k >= 0 for e in S[i - k].get("ev") or ()
                                  if e.get("k") == "hit"), None)
                 for m in ("rect", "poly"):
@@ -105,7 +124,8 @@ def main(argv: list[str] | None = None) -> int:
                         lead[m].append(first[m] - hit_k)
     out = {"spikes": n, "confusion": {m: dict(c) for m, c in conf.items()},
            "contact_minus_hit_frames": {m: dict(Counter(v)) for m, v in lead.items()},
-           "poly_by_boss_state": {f"{c}/{st}": v for (c, st), v in sorted(by_state.items(), key=str)}}
+           "poly_by_boss_state": {f"{c}/{st}": v for (c, st), v in sorted(by_state.items(), key=str)},
+           "by_approach": {f"{a_}/{o}": v for (a_, o), v in sorted(ap_c.items())}}
     print(json.dumps(out, indent=1))
     if a.json:
         a.json.write_text(json.dumps(out, indent=1), "utf-8")
