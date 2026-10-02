@@ -49,8 +49,9 @@ it; the gap shows in perception.dropped_frames), and these fields need memory:
     BossSpec death states or is_dead rising).
   - HIT_TAKEN.amount: masks lost (health + blue): the TakeHealth "hp" event that follows the "damage" event, or for
     a lethal hit LethalBlock cancelled, the catastrophe / would_die "dmg"; the raw TakeDamage argument is amount_raw
-    (O). Trial run: 8 hits took 2 masks, 91 lethal hits were cancelled (dmg 2), 2 hits during a bind took none;
-    live run: 8,345 of 8,461 hits 2 masks, 116 none.
+    (O). Trial run: 8 hits took 2 masks, 91 lethal hits were cancelled (dmg 2); live i1_001 + i3_000: all 2,135
+    hits 2 masks. TakeDamage calls a later gate rejected (no health, no recoil) are DAMAGE_BLOCKED, not hits: 28 pogo
+    hits in those live files, 2 during a bind on the trial run (see _hits_taken).
   - Bind outcome: DONE when the hero "spell" FSM reached "Bind Burst" during isBinding (trial run: Bind Air ->
     Binding -> Bind Burst -> Cooldown in all 4 binds), or HP rose; else BROKEN. Live run: 36 DONE (+3 masks each),
     17 BROKEN (HP unchanged).
@@ -61,7 +62,8 @@ it; the gap shows in perception.dropped_frames), and these fields need memory:
   - FSM_TRANSITION.hero_rel_pos and the time in the current FSM state (game time since the transition event; the
     exported StateTime stops once a state's actions have finished).
 
-Cost per STATE on the live run (2.15 M STATEs, 13900K, two processes in parallel): p50 95-96 us, p99 172-186 us.
+Cost per STATE on live i1_001 + i3_000 (546,770 STATEs, 13900K, two processes in parallel): p50 93-94 us, p99
+173-175 us.
 
 Contact and mode come from the cState bits (field order: RPC "schema.cstate", or the facts copy cstate_schema.json).
 The wall side comes from hero.wall [touchingWallL, touchingWallR] when exported; without it, from the facing when

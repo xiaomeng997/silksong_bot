@@ -61,26 +61,28 @@ Rule: no value in the output may depend on something pixels cannot show. Per fra
   - bind_ready from the silk count (the spool is visible); pending_dmg 0 when no damage status is visible, else
     unknown: conf 0 and v = health + blue (lethal by itself, as the oracle path reports an unbounded tag).
 
-Measured with ObservabilityFilter reset at every savestate load and a BoxTable learnt from the trial run, on the
-live Bell Beast run 20261001_122249 (rec i<N>_000 / _001: 200 savestate episodes, 2,148,565 STATEs; held out from
-the pause cues and SLOW_RATE / SLOW_HOLD_S, which were set on the trial run, but not from the 15-HP Silk Spear value),
-the trial run 20261001_121446 (26,892 STATEs) and the person's fight (human/20260930_210337 frames 64275-68397):
-  - Pause: vision says pausable while the oracle's gate is closed in 0 of 2,146,430 PLAYING frames (live; trial 0,
-    person 0; without the slow-motion cue 3,458 live frames, all TIME_SLOWED). The cues close the gate in 5.8 % of
-    the frames the oracle has it open (116,404 of 2,009,327; trial 5.6 %, person 0.1 %).
-  - Visibility: the boss is outside the image in 6,704 of 932,222 exported frames (0.72 %; the old any-vertex rule
-    said 10,552): 4,308 as a ghost, 2,396 still hidden (it came back up off-screen). Of the 1,216,343 frames the
-    boss was not exported (underground, before the wake, after the kill) the vision view holds it hidden (dug in
-    while in view, position unknown) in 967,738 and as a ghost in 103,135 (it dug in off-screen or at the image
-    edge, so vision last saw it there; mean pos conf 0.88).
-  - Damage boxes: of 8,461 hits taken, the vision boxes touch the hero hurtbox in the hit frame in 8,213 (97.1 %),
-    every one of the 7,562 the oracle's own active boxes touch included, and in the frame before in 32 more; 209
-    miss both frames by at most 0.56 u (p50 0.10 u: fast bells and charges, the contact fell between frames; the
-    oracle's boxes miss by the same distance), 7 came from the boss bursting out of the ground while not exported.
-  - Boss HP: zero error in every frame the boss was visible (live 925,463 frames, 4,541 hits of which 460 Silk
-    Spear; trial 12,177; person 1,737).
-  - Cost per STATE (13900K, two measuring processes in parallel): p50 145-148 us, p99 273-289 us (OracleBackend
-    p50 95-96 us, p99 172-186 us).
+Measured (2026-10-01, this version) with the filter reset at every savestate load and the shipped box table, on
+recordings held out from that table: live Bell Beast run 20261001_122249 rec i1_001 + i3_000 (50 savestate episodes,
+546,770 STATEs; the table was built from instance 0), the trial run 20261001_121446 (26,892 STATEs; SLOW_RATE and
+SLOW_HOLD_S were set on it) and the person's fight (human/20260930_210337 frames 64275-68397). An earlier version
+was measured on the whole live run (i<N>_000 / _001, 2.15 M STATEs) with the same pause, visibility and HP results.
+  - Pause: vision says pausable while the oracle's gate is closed in 0 of 546,234 live PLAYING frames (trial 0 of
+    26,872, person 0 of 4,123), with the windowed speed cue. The cues close the gate in 5.8 % of the frames the
+    oracle has it open (29,647 of 511,050; trial 5.7 %, person 0.2 %).
+  - Visibility: the boss is exported but outside the image in 1,693 of 237,586 frames (0.71 %). Of the frames it is
+    not exported (underground, before the wake, after the kill) the vision view holds it hidden (dug in while in
+    view, position unknown) in 245,761 and as a ghost in 26,683 (dug in off-screen or at the image edge; mean pos
+    conf 0.88); whole live run, earlier version: hidden 967,738, ghost 103,135.
+  - Damage boxes (shipped table, frozen): of 2,135 hits taken, the vision boxes touch the hero hurtbox in the hit
+    frame in 2,092 (98.0 %), every one of the 1,924 the oracle's own active boxes touch included, and in the frame
+    before in 7 more. The other 36 were not broken down here; on the whole live run (earlier version) such misses
+    fell between frames (at most 0.56 u, the oracle's boxes missing by the same distance) or came from the boss
+    bursting out of the ground while not exported. Trial run: all 92 oracle-touching contacts covered, 98 of 99
+    hits with the frame before; in the three test windows every active oracle box of a visible entity lies inside
+    its vision boxes.
+  - Boss HP: zero error in every frame the boss was visible (live 235,893, trial 12,177, person 1,737).
+  - Cost per STATE (13900K, two measuring processes in parallel): p50 132-133 us, p99 261-262 us (OracleBackend
+    p50 93-94 us, p99 173-175 us).
 The per-frame visibility kernel (polygon clipping against the viewport rectangle, Sutherland-Hodgman, shoelace areas)
 runs under @numba.njit; clip_fractions_ref is the plain reference the tests hold it to, and shapely the external
 check.
