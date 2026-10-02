@@ -397,11 +397,11 @@ def test_boss_hp_from_counted_hits(wake, wake_v):
 
 def test_hp_uses_the_damage_of_the_attack(wake):
     i = next(i for i, w in enumerate(wake) if boss(w) is not None)
-    f = ObservabilityFilter(bosses=[BELL_BEAST], attack_damage={"Silk Spear": 15.0})
+    f = ObservabilityFilter(bosses=[BELL_BEAST], attack_damage={"Spear": 15.0})
     f.apply(wake[i])
     w = copy.deepcopy(wake[i + 1])
     w.events.append(Event(Ev.HIT_DEALT, w.stamp.frame, w.stamp.t_game_s,
-                          HitDealt(fx.BOSS_IID, "Bone Beast", 15.0, 135.0, attack="Silk Spear")))
+                          HitDealt(fx.BOSS_IID, "Bone Beast", 15.0, 135.0, attack="Generic", src="Spear")))
     assert boss(f.apply(w)).hp_est.v == 135.0
     w = copy.deepcopy(wake[i + 2])                       # no attack name: the hero's clip (the default table)
     w.events.append(Event(Ev.HIT_DEALT, w.stamp.frame, w.stamp.t_game_s,
@@ -411,6 +411,12 @@ def test_hp_uses_the_damage_of_the_attack(wake):
     w.events.append(Event(Ev.HIT_DEALT, w.stamp.frame, w.stamp.t_game_s,
                           HitDealt(fx.BOSS_IID, "Bone Beast", 5.0, 115.0, hero_anim="NeedleThrow AnticA")))
     assert boss(f.apply(w)).hp_est.v == 115.0
+    w = copy.deepcopy(wake[i + 4])                       # lava on the boss: not priced by the hero's throw
+    w.events.append(Event(Ev.HIT_DEALT, w.stamp.frame, w.stamp.t_game_s,
+                          HitDealt(fx.BOSS_IID, "Bone Beast", 3.0, 112.0, attack="Lava", by_hero=False,
+                                   hero_anim="NeedleThrow Throwing")))
+    est = boss(f.apply(w)).hp_est
+    assert est.v == 110.0 and est.sigma == pytest.approx((3 * 0.5 ** 2 + 5.0 ** 2) ** 0.5)
 
 
 def test_kill_zeroes_and_drops_the_track():

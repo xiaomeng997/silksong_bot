@@ -39,7 +39,8 @@ it; the gap shows in perception.dropped_frames), and these fields need memory:
     in runs of p50 176 frames, with gaps of p50 86 frames (a bell resting between throws); falling DropBells carry
     it while they fall. Kind follows the bit with a short hold instead of keeping it for the episode.
   - HIT_DEALT: from the oracle's "hit" events when the stream has them (killing blows and hits on unexported enemies
-    included; ENEMY_KILLED on dead). Older recordings: from enemy HP drops between consecutive STATEs (every Hunter
+    included; ENEMY_KILLED once, on the killing blow hp_before > 0 >= hp_after; by_hero False for environmental
+    attack types, as the event covers every source). Older recordings: from enemy HP drops between consecutive STATEs (every Hunter
     nail hit on the Bell Beast took 5 HP: 56 of 56 drops on the trial run; the killing blow shows no drop because the
     boss leaves "ents" in the frame its Control FSM enters "Death Broadcast", so ENEMY_KILLED also comes from the
     BossSpec death states or is_dead rising).
@@ -107,6 +108,8 @@ BLK_DISABLE_PAUSE = 1
 
 HAZARD_OF: dict[str, Hazard] = {n: Hazard[n] if n in Hazard.__members__ else Hazard.OTHER for n in HAZARD_TYPES}
 BIND_DONE_STATES = frozenset(("Bind Burst",))      # hero "spell" FSM: the heal is applied in this state
+# AttackTypes (decompiled AttackTypes.cs) that only the environment deals: a "hit" with one is not the hero's
+ENV_ATTACKS = frozenset(("Acid", "Splatter", "RuinsWater", "Lava", "Coal", "Trap", "Spikes"))
 
 _CS = ("onGround", "touchingWall", "wallSliding", "wallClinging", "wallScrambling", "swimming", "hazardDeath",
        "hazardRespawning", "dead", "dashing", "airDashing", "backDashing", "superDashing", "shadowDashing", "floating",
@@ -283,7 +286,6 @@ class _Track:
     t: float
     hp: int | None
     dead: bool
-    killed: bool = False
     proj_t: float = -math.inf      # game time the projectile bit was last seen
 
 
@@ -316,6 +318,7 @@ class _Memory:
     hit_events: bool = False          # the stream carries oracle "hit" events: HIT_DEALT comes from them
     hero: _HeroMemory = field(default_factory=_HeroMemory)
     tracks: dict[int, _Track] = field(default_factory=dict)
+    killed: set[int] = field(default_factory=set)      # iids ENEMY_KILLED was reported for (with or without a track)
     fsm_entry: dict[tuple[int, str], float] = field(default_factory=dict)
 
 
@@ -368,6 +371,7 @@ class OracleBackend:
         if scene != m.scene or gap > MAX_GAP_FRAMES:    # entity memory does not survive a room change or a long gap
             m.scene = scene
             m.tracks.clear()
+            m.killed.clear()
             m.fsm_entry.clear()
 
         derived: list[Event] = []
@@ -683,11 +687,10 @@ class OracleBackend:
             if not m.hit_events and tr is not None and tr.hp is not None and hp is not None and hp < tr.hp:
                 out.append(Event(Ev.HIT_DEALT, f, t, HitDealt(iid, tk, float(tr.hp - hp), float(hp),
                                                               hero_anim=self._hero_clip)))
-            killed = tr.killed if tr is not None else False
-            if dead and not killed:
+            if dead and iid not in m.killed:
                 out.append(Event(Ev.ENEMY_KILLED, f, t, EnemyKilled(iid, tk)))
-                killed = True
-            m.tracks[iid] = _Track(tk, kind, (px, py), vel.v, t, hp, dead, killed, proj_t)
+                m.killed.add(iid)
+            m.tracks[iid] = _Track(tk, kind, (px, py), vel.v, t, hp, dead, proj_t)
 
             anim = e.get("anim")
             ra = e.get("render_aabb")
@@ -825,28 +828,37 @@ class OracleBackend:
             elif k == "harness" and d.get("op") == "savestate.load":
                 # the scene was rebuilt in place: entity and hero memory are stale (iids change on a load)
                 m.tracks.clear()
+                m.killed.clear()
                 m.fsm_entry.clear()
                 m.hero = _HeroMemory()
         return out
 
     def _hit_dealt(self, d: dict, fe: int, t: float) -> list[Event]:
-        """Oracle "hit" (HealthManager damage the hero dealt) -> HIT_DEALT, plus ENEMY_KILLED for a killing blow."""
+        """Oracle "hit" (HealthManager damage from any source, state_fields_m2.md §8) -> HIT_DEALT, plus ENEMY_KILLED
+        for the killing blow: hp_before > 0 >= hp_after (later hits on the corpse carry dead too but kill nothing).
+        by_hero: the exported flag when there is one, else False for attack types only the environment deals (lava,
+        spikes, acid ...: AttackTypes), else unknown (None)."""
         ent = d.get("ent")
         if ent is None:
             return []
+        m = self.m
         iid = int(ent)
-        tr = self.m.tracks.get(iid)
+        tr = m.tracks.get(iid)
         tk = d.get("type_key") or (tr.type_key if tr is not None else "")
-        dmg = d.get("dmg")
-        hp_after = d.get("hp_after")
-        dead = bool(d.get("dead"))
+        dmg, hp_before, hp_after = d.get("dmg"), d.get("hp_before"), d.get("hp_after")
+        if hp_before is not None and hp_after is not None:
+            killing = hp_before > 0 >= hp_after
+        else:
+            killing = bool(d.get("dead")) and iid not in m.killed
+        attack = d.get("attack")
+        by_hero = d.get("hero") if isinstance(d.get("hero"), bool) else False if attack in ENV_ATTACKS else None
         out = [Event(Ev.HIT_DEALT, fe, t, HitDealt(
             iid, tk, float(dmg) if dmg is not None else None, float(hp_after) if hp_after is not None else None,
-            attack=d.get("attack"), crit=d.get("crit"), killing=dead, hero_anim=self._hero_clip))]
-        if dead and (tr is None or not tr.killed):
+            attack=attack, crit=d.get("crit"), killing=killing, hero_anim=self._hero_clip if by_hero is not False
+            else None, src=d.get("src"), by_hero=by_hero))]
+        if killing and iid not in m.killed:
             out.append(Event(Ev.ENEMY_KILLED, fe, t, EnemyKilled(iid, tk)))
-            if tr is not None:
-                tr.killed = True
+            m.killed.add(iid)
         if tr is not None and hp_after is not None:
             tr.hp = int(hp_after)
         return out
@@ -874,10 +886,9 @@ class OracleBackend:
             hero_rel_pos=rel, t_in_prev=d.get("t_in_prev")))]
         spec = self.bosses.get(tk) if tk else None
         if spec is not None and fsm == spec.control_fsm and d.get("to") in spec.death_states:
-            if tr is None or not tr.killed:
+            if ent_iid not in m.killed:
                 out.append(Event(Ev.ENEMY_KILLED, fe, t, EnemyKilled(ent_iid, tk)))
-                if tr is not None:
-                    tr.killed = True
+                m.killed.add(ent_iid)
         return out
 
     # ---- game, camera, terrain ---------------------------------------------------------------------------------

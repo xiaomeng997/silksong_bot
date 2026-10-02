@@ -38,9 +38,10 @@ Rule: no value in the output may depend on something pixels cannot show. Per fra
     p_quit(scene, key), ssbot.safety.quit_map keys) both need P >= min_p. The blockers carry only VISION_BLOCKS
     bits. src PREDICTED.
   - Boss HP -> hit-count estimate: a HIT_DEALT on a visible entity counts (amount is O); hp_est = hp_max - sum of
-    the per-attack damage (attack_damage[HitDealt.attack], else the longest key prefixing HitDealt.hero_anim, else
-    hit_damage), sigma = hit_sigma * sqrt(hits). Defaults: 5 per hit, 15 for a hit during "NeedleThrow Throwing"
-    (Silk Spear): Hunter crest, needle level 0 (DEFAULT_ATTACK_DAMAGE).
+    the per-attack damage (attack_damage[HitDealt.src], else [attack], else the longest key prefixing
+    HitDealt.hero_anim, else hit_damage), sigma = hit_sigma * sqrt(hits); a hit the hero did not deal (by_hero False)
+    is not priced by the hero's clip and adds a full hit_damage of sigma. Defaults: 5 per hit, 15 for a hit during
+    "NeedleThrow Throwing" (Silk Spear): Hunter crest, needle level 0 (DEFAULT_ATTACK_DAMAGE).
   - FSM state -> observable phase through the caller's table (BossSpec.phases or phase_map; default "unknown"),
     with t_in_phase counted from the observable phase change.
   - Exact timers (HeroState fields tagged timer=True) -> None until the vision-side timer models exist.
@@ -428,7 +429,7 @@ class ObservabilityFilter:
 
     def reset(self) -> None:
         self._seen: dict[int, _Seen] = {}
-        self._hits: dict[int, int] = {}
+        self._var: dict[int, float] = {}
         self._dmg: dict[int, float] = {}
         self._killed: set[int] = set()
         self._phase: dict[int, _Phase] = {}
@@ -457,7 +458,7 @@ class ObservabilityFilter:
         if out.game.scene.v != self._scene:
             self._scene = out.game.scene.v
             self._seen.clear()
-            self._hits.clear()
+            self._var.clear()
             self._dmg.clear()
             self._killed.clear()
             self._phase.clear()
@@ -489,8 +490,9 @@ class ObservabilityFilter:
                 if ev.data.target_id not in vis_ids:
                     continue     # a hit vision cannot see
                 iid = ev.data.target_id
-                self._hits[iid] = self._hits.get(iid, 0) + 1
-                self._dmg[iid] = self._dmg.get(iid, 0.0) + self._hit_value(ev.data)
+                dmg, var = self._hit_value(ev.data)
+                self._var[iid] = self._var.get(iid, 0.0) + var
+                self._dmg[iid] = self._dmg.get(iid, 0.0) + dmg
             elif ev.kind == Ev.ENEMY_KILLED:
                 self._killed.add(ev.data.target_id)
             events.append(ev)
@@ -593,16 +595,21 @@ class ObservabilityFilter:
             flags |= Unobs.PHASE_FROM_TABLE
         return flags
 
-    def _hit_value(self, d: HitDealt) -> float:
-        """Damage of one hit dealt: attack_damage[attack], else the longest key prefixing the hero's clip, else
-        hit_damage."""
-        if d.attack is not None and d.attack in self.attack_damage:
-            return self.attack_damage[d.attack]
+    def _hit_value(self, d: HitDealt) -> tuple[float, float]:
+        """(damage, variance) of one hit dealt: attack_damage[src], else [attack], else the longest key prefixing the
+        hero's clip, else hit_damage, each with variance hit_sigma^2. A hit the hero did not deal (by_hero False:
+        lava, spikes ...) is not priced by the hero's clip: attack_damage[src] / [attack] when listed, else
+        hit_damage with a variance of hit_damage^2 (unpriced)."""
+        for key in (d.src, d.attack):
+            if key is not None and key in self.attack_damage:
+                return self.attack_damage[key], self.hit_sigma ** 2
+        if d.by_hero is False:
+            return self.hit_damage, self.hit_damage ** 2
         clip = d.hero_anim or ""
         for k in self._anim_keys:
             if clip.startswith(k):
-                return self.attack_damage[k]
-        return self.hit_damage
+                return self.attack_damage[k], self.hit_sigma ** 2
+        return self.hit_damage, self.hit_sigma ** 2
 
     def _phase_time(self, iid: int, name: str, t: float) -> float:
         ph = self._phase.get(iid)
@@ -615,8 +622,7 @@ class ObservabilityFilter:
             return None              # no prior for this type: vision cannot tell its HP
         if iid in self._killed:
             return E(0.0, conf=0.9, src=Src.EVENT)
-        n = self._hits.get(iid, 0)
-        return E(max(0.0, hp_max - self._dmg.get(iid, 0.0)), sigma=self.hit_sigma * math.sqrt(n), conf=0.8,
+        return E(max(0.0, hp_max - self._dmg.get(iid, 0.0)), sigma=math.sqrt(self._var.get(iid, 0.0)), conf=0.8,
                  src=Src.EVENT)
 
     def _ghost(self, seen: _Seen, age: float) -> Entity:

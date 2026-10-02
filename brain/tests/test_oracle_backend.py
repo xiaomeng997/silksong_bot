@@ -558,22 +558,36 @@ def test_hidden_entity_is_exported_without_boxes():
     assert boss.pos.v == pytest.approx(tuple(e["pos"][:2])) and boss.kind == Kind.BOSS
 
 
+def _hit(f: int, ent: int, before: int, after: int, attack: str = "Nail", src: str | None = "Slash", **kw) -> dict:
+    return {"k": "hit", "f": f, "d": {"ent": ent, "type_key": kw.pop("type_key", "Bone Beast"), "dmg": before - after,
+                                      "dealt": before - after, "attack": attack, "src": src, "hp_before": before,
+                                      "hp_after": after, "dead": after <= 0, "crit": False, **kw}}
+
+
 def test_hit_events_give_hits_and_the_killing_blow():
+    """state_fields_m2.md §8: "attack" is an AttackTypes name, "src" the attacking object; the killing blow is
+    hp_before > 0 >= hp_after (later corpse hits carry dead too); every source is reported."""
     states = fx.window(2)
     for s in states:
         if s["f"] == 68995:
-            s["ev"].append({"k": "hit", "f": 68995, "d": {
-                "ent": fx.BOSS_IID, "type_key": "Bone Beast", "dmg": 5, "dealt": 5, "attack": "Slash",
-                "src": "Slash", "hp_before": 20, "hp_after": 15, "dead": False, "crit": False}})
+            s["ev"].append(_hit(68995, fx.BOSS_IID, 20, 15))
         if s["f"] == 69029:
-            s["ev"].insert(0, {"k": "hit", "f": 69029, "d": {
-                "ent": fx.BOSS_IID, "type_key": "Bone Beast", "dmg": 15, "dealt": 15, "attack": "Silk Spear",
-                "src": "Silk Spear", "hp_before": 15, "hp_after": 0, "dead": True, "crit": False}})
+            s["ev"].insert(0, _hit(69029, fx.BOSS_IID, 15, 0, attack="Generic", src="Spear"))
+        if s["f"] == 69030:
+            s["ev"].append(_hit(69030, fx.BOSS_IID, 0, -5))                       # a hit on the corpse
+            s["ev"].append(_hit(69030, 999999, 3, 0, type_key="Bug"))            # an enemy never exported
+        if s["f"] == 69031:
+            s["ev"].append(_hit(69031, 999999, 0, -2, type_key="Bug"))           # its corpse
+            s["ev"].append(_hit(69031, 999998, 10, 8, attack="Lava", src="Lava Pool", type_key="Bug"))
     wss = run(states)
     hits = events(wss, Ev.HIT_DEALT)
-    assert [(f, d.amount, d.hp_after, d.attack, d.killing) for f, d in hits] == [
-        (68995, 5.0, 15.0, "Slash", False), (69029, 15.0, 0.0, "Silk Spear", True)]
-    assert [(f, d.target_id) for f, d in events(wss, Ev.ENEMY_KILLED)] == [(69029, fx.BOSS_IID)]
+    assert [(f, d.target_id, d.amount, d.attack, d.src, d.killing, d.by_hero) for f, d in hits] == [
+        (68995, fx.BOSS_IID, 5.0, "Nail", "Slash", False, None),
+        (69029, fx.BOSS_IID, 15.0, "Generic", "Spear", True, None),
+        (69030, fx.BOSS_IID, 5.0, "Nail", "Slash", False, None), (69030, 999999, 3.0, "Nail", "Slash", True, None),
+        (69031, 999999, 2.0, "Nail", "Slash", False, None), (69031, 999998, 2.0, "Lava", "Lava Pool", False, False)]
+    assert hits[-1][1].hero_anim is None and hits[0][1].hero_anim is not None
+    assert [(f, d.target_id) for f, d in events(wss, Ev.ENEMY_KILLED)] == [(69029, fx.BOSS_IID), (69030, 999999)]
 
 
 def test_hero_without_state_is_unknown():

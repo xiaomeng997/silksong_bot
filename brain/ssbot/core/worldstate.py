@@ -505,10 +505,12 @@ class HitDealt:
     type_key: str = fld(V, "")
     amount: float | None = fld(O, None)           # vision sees the hit flash, not the damage
     hp_after: float | None = fld(O, None)
-    attack: str | None = fld(V, None)             # the hero's attack (oracle "hit".attack; the bot knows what it did)
+    attack: str | None = fld(V, None)             # AttackTypes name (oracle "hit".attack: "Nail", "Generic", ...)
     crit: bool | None = fld(O, None)
-    killing: bool = fld(V, False)                 # the hit killed (the death reaction is visible)
+    killing: bool = fld(V, False)                 # the killing blow (hp_before > 0 >= hp_after; the death is visible)
     hero_anim: str | None = fld(V, None)          # the hero's animation clip at the hit (its own action, on screen)
+    src: str | None = fld(V, None)                # the attacking object ("Slash", a tool): the bot knows what it used
+    by_hero: bool | None = fld(V, None)           # the hero dealt it (False: environment; None: not known)
 
 
 @dataclass(slots=True)
