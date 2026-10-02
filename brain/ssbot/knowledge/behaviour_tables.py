@@ -53,12 +53,18 @@ only in the post-hit / down-spike cooldown, which depends on what the hero did (
 frames), so it is kept for statistics only.
 
 Validation (DESIGN §3.5.8 "inflated by the p99 residual", M2 round-1 review): every damage frame and every frame of a
-blocked contact (damage_blocked first_f..last_f) is a contact. Its distance from the hero hurtbox (STATE hero.box at
-f-1 and f) to the logged occupancy at t +- 1 bin is the residual, per template set: anchor frame + arena hazards,
-world_all, per state (both), and the source entity's self template. Support templates ("support/<key>" in the npz)
-are the logged ones dilated by the largest residual of their set and +-1 bin, so every logged contact lies inside its
-support. A contact farther than R_FAIL_U from any of its sets, outside every attack, or whose source had no exported
-damage collider in f-2..f and was not exported without colliders then (an export hole), makes the build fail.
+blocked contact (damage_blocked first_f..last_f) is a contact. Its residual, per template set (anchor frame + arena
+hazards, world_all, per state (both), the source entity's self template), is the distance from the hero hurtbox
+(STATE hero.box) to the logged occupancy, pairing each box with its own frame's time as the planner does: the box of
+f-1 at t_f-1 +- 1 bin or the box of f at t_f +- 1 bin, whichever is closer (pairing the box of f-1 with t_f +- 1 bin
+matched it against geometry from f+1, and five contacts then lay 0.014-0.059 u outside the support the planner
+queries, M2 round-2 verifier). Support templates ("support/<key>" in the npz) are the logged ones dilated by the
+largest residual of their set and +-1 bin, so the planner's query (box_k at t_k against the support plus the
+hurtbox) flags frame f-1 or f of every logged contact. A contact farther than R_FAIL_U from any of its sets, outside
+every attack, or whose source had no exported damage collider in f-2..f (with the oracle's collider names: not the
+collider the damage event named) and was not exported without colliders then (an export hole), makes the build
+fail. Ambient hazards (armed when a scan starts) form one static world template, in support at every time
+(_ambient/world); their contacts are checked against it alone.
 Damage-dealing entities exported without any collider while not hidden are export holes (oracle bug after a savestate
 load: the boss's first Charge Emerge of every fight has colliders == [] although its body deals damage, M2 round-1
 review); the hitbox windows of the holed states and every ttd span containing a holed frame are left out of the
@@ -749,6 +755,7 @@ class FightScanner:
         self.ring: dict[int, _Frame] = {}
         self.pending: list[tuple] = []
         self.ended_now: Instance | None = None
+        self.ambient_now: set[str] = set()      # type_keys of ambient hazards armed on the last frame
 
     # ---- feed ----
 
@@ -807,6 +814,7 @@ class FightScanner:
         owners, armed = self._entities(f, ents, first, threat, names, holes, ambient)
         self.ring[f] = _Frame(self.T, self.hero_box, self.cur, owners, armed, threat, names, holes, ambient,
                               self.ended_now)
+        self.ambient_now = ambient - set(armed)
         self.ended_now = None
         self.ring.pop(f - RING_F, None)
         if self.pending:
@@ -898,6 +906,9 @@ class FightScanner:
     def _hit(self, f: int, d: dict) -> None:
         src = str(d.get("source"))
         tk, _ = match_source(src, self.known)
+        if tk in self.ambient_now:   # an ambient hazard's hit belongs to no attack (validated against _ambient/world)
+            self.b.counters["hits by ambient hazards"] += 1
+            return
         owner = self._owner_now(tk, f)
         if owner is None:
             self.b.counters["hits outside attacks"] += 1
@@ -1372,8 +1383,8 @@ class BehaviourBuilder:
             info["lo"], info["hi"] = np.minimum(info["lo"], w[4]), np.maximum(info["hi"], w[5])
             info["dmg"] |= w[6]
             info["names"] |= w[8]
-            info["phases"][inst.phase] += 1
-            if state not in hole_states:
+            if state not in hole_states:   # presence and windows count the instances exported without a hole there
+                info["phases"][inst.phase] += 1
                 self.windows[(fam, state, src)].append((w[0], w[1], w[2], w[3], inst.phase))
             else:
                 info["holes"] += 1
@@ -1780,7 +1791,8 @@ class BehaviourBuilder:
             states = list(dict.fromkeys(st for i in ins for st, _, _ in i.states))
             starts = sorted({i.states[0][0] for i in ins})
             anchor = {"frame": "boss transform position (STATE ents[].pos) at its first non-hidden export in the "
-                               "instance; WorldState Entity.pos = transform + body_offset",
+                               "instance; WorldState Entity.pos = transform + body_offset (by_dir_flip: per "
+                               "direction and facing)",
                       "probability_only": ["t_s", "by_dir.*.x", "by_dir.*.y", "by_dir.*.x_minus_hero_x"],
                       "t_s": quantiles([i.anchor_t for i in ins]), "missing": sum(i.anchor is None for i in ins)}
             by_dir = defaultdict(list)
@@ -1846,24 +1858,28 @@ class BehaviourBuilder:
     @staticmethod
     def _body_offsets(ins: list[_InstSummary]) -> dict:
         """Body box centre and render_aabb centre minus the anchor on the anchor frame, in the anchor frame (x' =
-        mirror * dx), per direction: anchor = Entity.pos (body collider centre, DESIGN §4.1) - offset. A conservative
-        placement takes the support (min / max), not the quantiles."""
-        out: dict = {"frame": "anchor: dx' = mirror * (centre x - anchor x), dy = centre y - anchor y", "by_dir": {}}
-        by = defaultdict(list)
+        mirror * dx), per direction and per direction and facing (flipX at the anchor, observable): anchor =
+        Entity.pos (body collider centre, DESIGN §4.1) - offset. A conservative placement takes the support (min /
+        max) of its (direction, flipX) key, not the quantiles."""
+        out: dict = {"frame": "anchor: dx' = mirror * (centre x - anchor x), dy = centre y - anchor y", "by_dir": {},
+                     "by_dir_flip": {}}
+        by, by_flip = defaultdict(list), defaultdict(list)
         for i in ins:
             if i.anchor_body:
                 by[i.dir or "-"].append(i)
-        for d, v in sorted(by.items()):
-            row = {}
-            for j, name in ((0, "box_centre"), (1, "render_centre")):
-                o = [((i.mirror or 1) * i.anchor_body[j][0], i.anchor_body[j][1]) for i in v
-                     if i.anchor_body[j] is not None]
-                if o:
-                    xs, ys = [a for a, _ in o], [b for _, b in o]
-                    row[name] = {"support": {"dx": [_r(min(xs), 3), _r(max(xs), 3)],
-                                             "dy": [_r(min(ys), 3), _r(max(ys), 3)]},
-                                 "dx": quantiles(xs, 3), "dy": quantiles(ys, 3)}
-            out["by_dir"][d] = row
+                by_flip[f"{i.dir or '-'} / flipX={i.anchor_flip}"].append(i)
+        for grp, rows in (("by_dir", by), ("by_dir_flip", by_flip)):
+            for d, v in sorted(rows.items()):
+                row = {"n": len(v)}
+                for j, name in ((0, "box_centre"), (1, "render_centre")):
+                    o = [((i.mirror or 1) * i.anchor_body[j][0], i.anchor_body[j][1]) for i in v
+                         if i.anchor_body[j] is not None]
+                    if o:
+                        xs, ys = [a for a, _ in o], [b for _, b in o]
+                        row[name] = {"support": {"dx": [_r(min(xs), 3), _r(max(xs), 3)],
+                                                 "dy": [_r(min(ys), 3), _r(max(ys), 3)]},
+                                     "dx": quantiles(xs, 3), "dy": quantiles(ys, 3)}
+                out[grp][d] = row
         return out
 
     def _residual_rows(self, fam: str, val: dict) -> dict:
@@ -1886,8 +1902,9 @@ class BehaviourBuilder:
                   if k.split("/")[0] == fam}
         held = {name: _held_row(items, val["radius"]) for (f, name), items in sorted(val["heldout"].items())
                 if f == fam}
-        return {"desc": "distance (u) from the hero hurtbox at f-1 / f to the family's logged occupancy at t +- 1 bin, "
-                        "per template set; support templates are dilated by the set's max (radius) and +-1 bin",
+        return {"desc": "distance (u) from the hero hurtbox to the family's logged occupancy, per template set: the "
+                        "smaller of the box of f-1 at t_f-1 +- 1 bin and the box of f at t_f +- 1 bin (the planner's "
+                        "pairing); support templates are dilated by the set's max (radius) and +-1 bin",
                 "sets": sets,
                 "holdout": {"desc": f"the same distance to the occupancy logged in the other recordings only "
                                     f"({N_FOLDS} folds by recording, each built from about half the instances): "
@@ -1900,12 +1917,14 @@ class BehaviourBuilder:
 
     def _hitboxes(self, fam: str) -> list[dict]:
         """Per (state, source): windows (+-1 frame of export lag), extent, damage; presence = share of the instances
-        entering the state (per phase) in which the source was enabled there; n = instances in the window statistics,
-        n_export_holes = instances left out of them (an export hole in that state)."""
+        entering the state (per phase) without an export hole there in which the source was enabled there; n =
+        instances in the window statistics, n_export_holes = instances of the family with an export hole in that
+        state (left out of presence and windows for every source, whether or not the source showed)."""
         rows = []
         lag = self.bin_s
         ins = [i for i in self.instances if i.family == fam]
-        entered = Counter((st, i.phase) for i in ins for st in {s for s, _, _ in i.states} | {TAIL})
+        entered = Counter((st, i.phase) for i in ins for st in ({s for s, _, _ in i.states} | {TAIL}) - i.hole_states)
+        holed = Counter(st for i in ins for st in i.hole_states)
         for (f, state, src), info in sorted(self.src_info.items()):
             if f != fam:
                 continue
@@ -1922,7 +1941,7 @@ class BehaviourBuilder:
             parry = sorted({n for d in info["dmg"] if d[4] for n in bits(int(d[4]), PARRY_BITS)})
             lo, hi = info["lo"], info["hi"]
             row = {"state": state, "source": src, "names": sorted(info["names"]), "frame": info["frame"],
-                   "n": len(ws), "n_export_holes": info["holes"], "phases": dict(info["phases"]),
+                   "n": len(ws), "n_export_holes": holed.get(state, 0), "phases": dict(info["phases"]),
                    "presence": _r(seen / n_in, 3) if n_in else None, "presence_by_phase": pres}
             if len(w):
                 row.update({"t0_state": _r(float(w[:, 0].min()) - lag), "t1_state": _r(float(w[:, 1].max()) + lag),
@@ -2022,6 +2041,8 @@ class BehaviourBuilder:
         unexpl = val["unexplained"]
         fails = val["fails"]
         hole_c = [c for c in cs if not c.exported and c.hole]
+        gaps = [c for c in cs if c.named_gap]
+        amb = [c for c in cs if c.ambient]
         ok = not fails and not unexpl and not val["outside"]
         ho: dict[str, list] = defaultdict(list)
         for (fam, name), items in val["heldout"].items():
@@ -2038,6 +2059,17 @@ class BehaviourBuilder:
             "no_exported_collider_explained_by_export_hole": {"n": len(hole_c), "damage": sum(
                 c.kind == "damage" for c in hole_c), "by_source": dict(Counter(c.src for c in hole_c))},
             "unexplained": {"n": len(unexpl), "first": [self._contact_row(c) for c in unexpl[:20]]},
+            "partial_export_holes": {
+                "desc": "contacts whose source entity was exported with named damage colliders but not the one the "
+                        "damage event named (oracle ents[].colliders[].name): unexplained unless the entity was also "
+                        "exported without colliders then", "n": len(gaps),
+                "explained_by_export_hole": sum(c.hole for c in gaps),
+                "by_source": dict(Counter(c.src for c in gaps)),
+                "first": [self._contact_row(c) for c in gaps[:20]]},
+            "ambient": {"desc": f"contacts with an ambient hazard (armed when the scan started), checked against the "
+                                f"static {AMBIENT} support only", "n": len(amb),
+                        "by_source": dict(Counter(c.src for c in amb)),
+                        "radius_u": _r(val["radius"][AMBIENT][0]) if AMBIENT in val["radius"] else None},
             "uncovered": {"n": len(fails), "first": [{**self._contact_row(c, d), "set": name}
                                                     for c, name, d in fails[:20]]},
             "outside_attacks": {"n": len(val["outside"]), "first": [self._contact_row(c) for c in val["outside"][:20]]},
@@ -2145,7 +2177,7 @@ class BehaviourBuilder:
                         "hazards) | world_all (every collider of the family in world coordinates: the support before "
                         "the anchor or the side is known); ent/<type_key>/self: one hazard entity relative to where "
                         "it armed (anchor = its position then, mirror 1, t from arming; entities.<tk>.self_template, "
-                        "arm_pos); _ambient/world: hazards armed when a scan started",
+                        "arm_pos); _ambient/world: hazards armed when a scan started (static: one bin, in support at every t)",
                 "support": "support/<key>: the logged occupancy dilated by its validated residual (attacks.<A>."
                            "residual_u.radius[<key>], entities.<tk>.self_template.radius_u) and +-1 time bin; these "
                            "are the support (DESIGN §3.5.3). The npz also keeps the logged family templates "
@@ -2307,7 +2339,7 @@ def reach_summary(tpls: dict[str, hb.SpaceTimeTemplate], max_boxes: int = 64) ->
         out[key] = {"npz": hb.SUPPORT + key if t.t_pad else key, "frame": t.frame, "n_instances": t.n_instances,
                     "pad_u": _r(t.pad_x, 4), "t_pad_bins": t.t_pad,
                     "extent": [_r(v, 3) for v in ext] if ext else None,
-                    "active_s": [_r(v, 4) for v in act] if act else None,
+                    "active_s": ("always (static)" if t.static else [_r(v, 4) for v in act]) if act else None,
                     "cells": int(t.reach().sum()), "boxes": [[_r(v, 3) for v in b] for b in coarse_boxes(t, max_boxes)]}
     return out
 

@@ -284,14 +284,55 @@ def test_support_query_matches_reference_and_meets_the_budget():
     assert p99 < 3e-3  # DESIGN §3.5.4 budget for the whole tick; the query is a small part of it
     with pytest.raises(ValueError):
         hb.SupportQuery({"raw": _template([(0.0, _box(0, 0, 1, 1))])})
+    with pytest.raises(ValueError, match="hurtbox"):  # support without the hurtbox dilation: a centre-only test
+        hb.SupportQuery({"support/x": _template([(0.0, _box(0, 0, 1, 1))]).dilated(r_disk=0.1, t_bins=1)})
     with pytest.raises(ValueError):
         q.place("support/F1/world", 0.0, anchor=(0.0, 0.0))
+
+
+def test_static_template_holds_at_every_time(tmp_path):
+    """An ambient hazard's template is static: one time-invariant bin, kept through dilation, union, the npz round
+    trip and the planner query, at any template time."""
+    acc = hb.TemplateAccumulator("S/world", "world", static=True)
+    acc.add(5.0, _box(0, 0, 1, 1))
+    acc.add(-3.0, _box(2, 0, 3, 1))
+    t = acc.finish()
+    assert t.static and t.nt == 1 and t.active() == (-math.inf, math.inf)
+    assert t.contains([-100.0, 0.0, 1e4], 0.5, 0.5).all() and t.contains(7.0, 2.5, 0.5)
+    sup = t.dilated(r_disk=0.1, t_bins=1, key="support/S/world")
+    assert sup.static and sup.nt == 1 and sup.t_pad == 1
+    path = hb.save_templates(tmp_path / "s.npz", {"support/S/world": sup})
+    back = hb.load_templates(path)[0]["support/S/world"]
+    assert back.static and np.array_equal(back.bits, sup.bits)
+    u = hb.union([t, t], "U/world")
+    assert u.static and u.nt == 1
+    plan = hb.planner_templates({"support/S/world": back})
+    q = hb.SupportQuery(plan)
+    q.place("support/S/world", 1e3)
+    x = np.array([[0.5] * 4, [5.0] * 4])
+    y = np.array([[1.9] * 4, [0.5] * 4])   # the hurtbox (1.04 u half-height) reaches the box from 1.9 u
+    tk = np.array([-1.0, 0.0, 0.5, 30.0])
+    got = q.query(x, y, tk)
+    assert got[0].all() and not got[1].any()
+    assert np.array_equal(got, hb._query_ref([plan["support/S/world"]], [(0, 1e3, None, 1)], tk, x, y))
+
+
+def _timed(q, x, y, tk, n=200) -> tuple[float, float]:
+    times = []
+    for _ in range(n):
+        t0 = time.perf_counter()
+        q.query(x, y, tk)
+        times.append(time.perf_counter() - t0)
+    return float(np.median(times)), float(np.quantile(times, 0.99))
 
 
 def test_support_query_budget_on_the_committed_bell_beast_templates():
     """The planner's tick on the committed Bell Beast support (family templates + hero hurtbox): 512 x 48 hero
     collider centres against 16 placements (all four families' world-frame support, each started 0.9-1.95 s ago, so
-    the queried times fall in their active windows), checked against the NumPy reference and timed."""
+    the queried times fall in their active windows), checked against the NumPy reference and timed in two regimes:
+    candidates mostly flagged (floor to mid-air, ~90 %) and mostly clear (one placement whose bins all hold geometry
+    and candidates inside its grid that it does not flag: every candidate pays the full test, the planner's regime
+    when it searches for safe moves)."""
     sup, _ = hb.load_templates(KNOWLEDGE_NPZ, prefix=hb.SUPPORT)
     plan = hb.planner_templates({k: v for k, v in sup.items() if k.count("/") == 2})
     q = hb.SupportQuery(plan)
@@ -303,15 +344,29 @@ def test_support_query_budget_on_the_committed_bell_beast_templates():
     x, y = rng.uniform(70, 100, (512, 48)), rng.uniform(0, 10, (512, 48))  # the arena, floor to mid-air
     tk = np.arange(48) / 60.0
     got = q.query(x, y, tk)
-    assert 0.2 < got.mean() < 1.0
+    assert 0.5 < got.mean() < 1.0
     ref = hb._query_ref([plan[k] for k, _ in place], [(i, t, None, 1) for i, (_, t) in enumerate(place)], tk,
                         x[:64], y[:64])
     assert np.array_equal(got[:64], ref)
-    times = []
-    for _ in range(200):
-        t0 = time.perf_counter()
-        q.query(x, y, tk)
-        times.append(time.perf_counter() - t0)
-    p99 = float(np.quantile(times, 0.99))
-    print(f"Bell Beast support, 512 x 48 x 16 placements: p50 {np.median(times) * 1e3:.3f} ms, p99 {p99 * 1e3:.3f} ms")
+    p50, p99 = _timed(q, x, y, tk)
+    print(f"Bell Beast support, 512 x 48 x 16 placements, {got.mean():.0%} flagged: p50 {p50 * 1e3:.3f} ms, "
+          f"p99 {p99 * 1e3:.3f} ms")
+    assert p99 < 3e-3
+    # mostly clear: candidates inside the Rage world_all grid (bells and boss), at heights it does not reach then
+    rage = plan["support/BB_RAGE/world_all"]
+    x0, y0, x1, y1 = rage.bounds
+    q.clear()
+    q.place("support/BB_RAGE/world_all", 3.0)
+    xs, ys = rng.uniform(x0, x1, (512, 48)), rng.uniform(y0, y1, (512, 48))
+    clear = ~q.query(xs, ys, tk)
+    xs, ys = np.where(clear, xs, x0 + 0.01), np.where(clear, ys, y0 + 0.01)   # flagged ones moved to an empty corner
+    one = q.query(xs, ys, tk).mean()
+    q.clear()
+    for j in range(16):
+        q.place("support/BB_RAGE/world_all", 3.0 + 0.01 * j)
+    hit = q.query(xs, ys, tk).mean()
+    p50, p99 = _timed(q, xs, ys, tk)
+    print(f"Bell Beast Rage support, 512 x 48 x 16 placements, {hit:.0%} flagged: p50 {p50 * 1e3:.3f} ms, "
+          f"p99 {p99 * 1e3:.3f} ms ({p50 / 16 * 1e3:.3f} ms per placement)")
+    assert one < 0.05 and hit < 0.3
     assert p99 < 3e-3

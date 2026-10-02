@@ -341,8 +341,9 @@ class SpaceTimeTemplate:
         return np.rint((np.asarray(t, np.float64) - self.t0) / self.bin_s).astype(np.int64)
 
     def cells_of(self, x, y) -> tuple[np.ndarray, np.ndarray]:
-        ix = np.floor(np.asarray(x, np.float64) / self.cell).astype(np.int64) - self.ix0
-        iy = np.floor(np.asarray(y, np.float64) / self.cell).astype(np.int64) - self.iy0
+        inv = 1.0 / self.cell   # the planner kernel's arithmetic (1 / 0.05 is exactly 20)
+        ix = np.floor(np.asarray(x, np.float64) * inv).astype(np.int64) - self.ix0
+        iy = np.floor(np.asarray(y, np.float64) * inv).astype(np.int64) - self.iy0
         return ix, iy
 
     def plane(self, b: int) -> np.ndarray:
@@ -594,32 +595,48 @@ def _query_kernel(bits: np.ndarray, boff: np.ndarray, imeta: np.ndarray, fmeta: 
     """out[k, n] = any placement p occupied at (xt[k, n], yt[k, n]) and template time fmeta[p, 5] + tk[k] (time-major:
     the inner loop over candidates reads contiguous memory). imeta[p] = (ix0, iy0, nx, ny, nt, row bytes, mirror,
     anchored, static, offset of the template's bins in full); fmeta[p] = (t0, bin_s, cell, ax, ay, t_ref);
-    full[offset + b] = 0 when bin b is empty (skipped)."""
+    full[offset + b] = 0 when bin b is empty (skipped). A time step with most candidates still clear takes a
+    branch-free (vectorised) pass; one with most already flagged skips them one by one."""
     n_t, n_c = xt.shape
-    n_p = boff.shape[0]
-    for p in range(n_p):
+    cnt = np.zeros(n_t, np.int64)   # flagged candidates per time step
+    for p in range(boff.shape[0]):
         ix0, iy0, nx, ny, nt, rb = imeta[p, 0], imeta[p, 1], imeta[p, 2], imeta[p, 3], imeta[p, 4], imeta[p, 5]
         mirror, anchored, static, fo = imeta[p, 6], imeta[p, 7], imeta[p, 8], imeta[p, 9]
-        cell, ax, ay = fmeta[p, 2], fmeta[p, 3], fmeta[p, 4]
+        inv = 1.0 / fmeta[p, 2]
+        ax, ay = fmeta[p, 3], fmeta[p, 4]
+        if not anchored:
+            mirror, ax, ay = 1, 0.0, 0.0
         for k in range(n_t):
             b = 0 if static else int(np.rint((fmeta[p, 5] + tk[k] - fmeta[p, 0]) / fmeta[p, 1]))
-            if b < 0 or b >= nt or full[fo + b] == 0:
+            if b < 0 or b >= nt or full[fo + b] == 0 or cnt[k] == n_c:
                 continue
             base = boff[p] + b * ny * rb
-            for n in range(n_c):
-                if out[k, n]:
-                    continue
-                xx = xt[k, n]
-                yy = yt[k, n]
-                if anchored:
-                    xx = mirror * (xx - ax)
-                    yy = yy - ay
-                ix = int(np.floor(xx / cell)) - ix0
-                iy = int(np.floor(yy / cell)) - iy0
-                if ix < 0 or ix >= nx or iy < 0 or iy >= ny:
-                    continue
-                if (bits[base + iy * rb + (ix >> 3)] >> (7 - (ix & 7))) & 1:
-                    out[k, n] = True
+            c = 0
+            if 2 * cnt[k] > n_c:
+                for n in range(n_c):
+                    if out[k, n]:
+                        c += 1
+                        continue
+                    fx = mirror * (xt[k, n] - ax) * inv - ix0
+                    fy = (yt[k, n] - ay) * inv - iy0
+                    if fx < 0.0 or fy < 0.0 or fx >= nx or fy >= ny:
+                        continue
+                    ix = int(fx)
+                    if (bits[base + int(fy) * rb + (ix >> 3)] >> (7 - (ix & 7))) & 1:
+                        out[k, n] = True
+                        c += 1
+            else:
+                for n in range(n_c):
+                    fx = mirror * (xt[k, n] - ax) * inv - ix0
+                    fy = (yt[k, n] - ay) * inv - iy0
+                    ok = (fx >= 0.0) & (fy >= 0.0) & (fx < nx) & (fy < ny)
+                    ix = min(max(int(fx), 0), nx - 1)
+                    iy = min(max(int(fy), 0), ny - 1)
+                    v = (bits[base + iy * rb + (ix >> 3)] >> (7 - (ix & 7))) & 1
+                    o = out[k, n] | (ok & (v != 0))
+                    out[k, n] = o
+                    c += o
+            cnt[k] = c
 
 
 def _query_ref(tpls: list["SpaceTimeTemplate"], place: list[tuple], tk: np.ndarray, x: np.ndarray,

@@ -23,6 +23,10 @@ from ssbot.knowledge import hitbox_tables as hb
 
 FIXTURE = Path(__file__).parent / "fixtures" / "bellbeast_trial_windows.msgpack.zst"
 FIXTURE_WINDOWS = [(45780, 46660), (47820, 49120)]
+# five windows (80 KB) around the contacts the M2 round-2 verifier found outside the support under the planner's
+# per-frame query: trial i0_000 f66004, live i3_002 f574099, i1_000 f40241, i0_000 f133613, i3_000 f28372, each from
+# 120 frames before its owning attack's start to the frame its blocked stretch was reported (same trimming)
+PLANNER_FIXTURE = Path(__file__).parent / "fixtures" / "bellbeast_planner_contacts.msgpack.zst"
 KNOWLEDGE_NPZ = Path(__file__).resolve().parents[2] / "knowledge" / "1.0.30000" / "enemies" / "BellBeast_hitboxes.npz"
 DT = 1.0 / 60.0
 DMG = {"dealt": 2, "eff": 2, "hazard_type": 1, "flags": 0, "parry": 4, "parryable": False, "can_cause_damage": True}
@@ -41,9 +45,12 @@ def _box(x0, y0, x1, y1):
     return [x0, y0, x1, y0, x1, y1, x0, y1]
 
 
-def _col(verts, enabled=True, kind="box", cooldown=False):
-    return {"kind": kind, "verts_world": list(verts), "enabled": enabled, "layer": 11,
-            "damage": dict(DMG, can_cause_damage=not cooldown)}
+def _col(verts, enabled=True, kind="box", cooldown=False, name=None):
+    c = {"kind": kind, "verts_world": list(verts), "enabled": enabled, "layer": 11,
+         "damage": dict(DMG, can_cause_damage=not cooldown)}
+    if name:
+        c["name"] = name
+    return c
 
 
 def _ent(iid, tk, x, y, cols, state=None, src=2, category="hazard", flip=False):
@@ -58,9 +65,13 @@ class Synth:
     Recover B 10. Always-on Spikes are ambient; a Saw is armed when the scan starts, disarms after 10 frames and is
     armed again by the first Throw. One hit per Dash (frame 10) followed by 2 i-frame-blocked frames, one Rock hit in
     B's tail; the hero box is put on the source at every contact. hole: the first Dash is exported without
-    colliders for its first 5 frames and hits on frame 2. ghost: an extra hit from the boss during a Recover."""
+    colliders for its first 5 frames and hits on frame 2. ghost: an extra hit from the boss during a Recover. spike:
+    the ambient Spikes hit the hero during the first Throw. names: colliders carry their GameObject name (the boss's
+    body box "Test Boss", as the oracle names a root collider); claw: a hit from "Test Boss/Claw" during the first
+    Dash, a collider the export never shows (a partial export hole)."""
 
-    def __init__(self, hole: bool = False, ghost: bool = False):
+    def __init__(self, hole: bool = False, ghost: bool = False, spike: bool = False, names: bool = False,
+                 claw: bool = False, hole_frames: int = 5):
         self.f = 1000
         self.out = []
         self.ev = []
@@ -75,8 +86,10 @@ class Synth:
         self.shard_x = 0.0
         self.saw_left = 10
         self.saw_rearm = True
-        self.hole, self.ghost = hole, ghost
+        self.hole, self.ghost, self.spike, self.names, self.claw = hole, ghost, spike, names, claw
         self.n_a = 0
+        self.n_b = 0
+        self.hole_frames = hole_frames
 
     def to(self, state):
         tip = None if self.ctl is None else (self.f - self.entered) * DT
@@ -137,15 +150,19 @@ class Synth:
             if j == 0:
                 self.to("Dash")
             x = x0 + m * 0.2 * j
-            cols = [] if hole and j < 5 else [_col(_box(x - 1, 0, x + 1, 2), cooldown=j == 11)]
+            cols = [] if hole and j < self.hole_frames else [_col(_box(x - 1, 0, x + 1, 2), cooldown=j == 11,
+                                                   name="Test Boss" if self.names else None)]
             self.boss = _ent(1, "Test Boss", x, 1.0, cols, "Dash", src=3, category="enemy", flip=m < 0)
             if die and j == 5:
                 self.to("Dead")
-                self.hit("Test Boss/Body", (x, 1.0))  # same frame as the kill, after the transition
+                # same frame as the kill, after the transition
+                self.hit("Boss Scene/Test Boss" if self.names else "Test Boss/Body", (x, 1.0))
                 self.idle(10)
                 return
             if j == 10 or (hole and j == 2):
                 self.hit("Boss Scene/Test Boss", (x, 1.0))
+            elif self.claw and self.n_a == 1 and j == 20:
+                self.hit("Test Boss/Claw", (x, 1.0))
             elif j in (11, 12):
                 self.box_at = (x, 1.0)
             elif j == 13:
@@ -166,8 +183,11 @@ class Synth:
         self.shard_left, self.shard_x = 25, 16.0
         if self.saw_rearm:
             self.saw_left, self.saw_rearm = 5, False
-        for _ in range(10):
+        self.n_b += 1
+        for j in range(10):
             self.boss = _ent(1, "Test Boss", 15.0, 1.0, [], "Throw", src=1, category="enemy")
+            if self.spike and self.n_b == 1 and j == 3:
+                self.hit("Boss Scene/Spikes", (30.5, 0.5))
             self.frame()
         self.to("Recover B")
         for _ in range(10):
@@ -209,35 +229,45 @@ def synth():
     return b, info
 
 
-def _support_covers(built: bt.Built, contacts: list, frames=("anchor", "world_all", "self")) -> dict:
+FRAMES = ("anchor", "world_all", "state", "state_world_all", "self")
+
+
+def _placements(c, frame: str) -> list[tuple]:
+    """The planner's placements of a contact's support set: [(key, t_ref, anchor | None, mirror)]."""
+    fam, m = c.inst.family, c.inst.mirror or 1
+    if frame == "self":
+        return [] if c.arm is None else [(f"support/{bt.SELF}/{c.tk}/self", c.T - c.arm[0], c.arm[1], 1)]
+    if frame in ("anchor", "state"):
+        base, t = (f"support/{fam}", c.t) if frame == "anchor" else (f"support/{fam}/{c.state}", c.ts)
+        out = [(f"{base}/world", t, None, 1)]
+        if c.inst.anchor is not None:
+            out.append((f"{base}/anchor", t, c.inst.anchor, m))
+        return out
+    return [(f"support/{fam}/world_all" if frame == "world_all" else f"support/{fam}/{c.state}/world_all", c.ts if
+             frame == "state_world_all" else c.t, None, 1)]
+
+
+def _support_covers(built: bt.Built, contacts: list, frames=FRAMES) -> dict:
     """The planner's query of every contact: the hero collider centres of frames f-1 and f, each at its own frame's
-    time (tk = box_dt: -(T_f - T_f-1), 0), against the planner templates (support + hurtbox) of its family (or,
-    "self", of its hazard entity placed where it armed); a contact is caught when either frame is flagged.
-    {frame: number of contacts not caught}; contacts with a boss source count as caught for "self"."""
-    keys = {k for k in built.support if k.count("/") == 2 or k.startswith(f"support/{bt.SELF}/")}
-    plan = hb.planner_templates({k: built.support[k] for k in keys})
+    time (tk = box_dt: -(T_f - T_f-1), 0), against the planner templates (support + hurtbox) of its family, of the
+    family's state at the contact, or ("self") of its hazard entity placed where it armed; a contact is caught when
+    either frame is flagged. {frame: number of contacts not caught}; a set without a template (a boss source has no
+    self template) counts as caught."""
+    need = {k for c in contacts for fr in frames for k, *_ in _placements(c, fr)} & set(built.support)
+    plan = hb.planner_templates({k: built.support[k] for k in need})
     q = hb.SupportQuery(plan)
     missed = {f: 0 for f in frames}
     for c in contacts:
-        fam = c.inst.family
         assert len(c.box_dt) == len(c.boxes) and c.box_dt[-1] == 0.0
+        xs = np.array([[(b[0] + b[2]) / 2 for b in c.boxes]])
+        ys = np.array([[(b[1] + b[3]) / 2 for b in c.boxes]])
         for frame in frames:
             q.clear()
-            if frame == "anchor":
-                if c.inst.anchor is not None and f"support/{fam}/anchor" in plan:
-                    q.place(f"support/{fam}/anchor", c.t, c.inst.anchor, c.inst.mirror or 1)
-                if f"support/{fam}/world" in plan:
-                    q.place(f"support/{fam}/world", c.t)
-            elif frame == "self":
-                if c.arm is None:
-                    continue
-                q.place(f"support/{bt.SELF}/{c.tk}/self", c.T - c.arm[0], c.arm[1], 1)
-            else:
-                q.place(f"support/{fam}/world_all", c.t)
-            xs = np.array([[(b[0] + b[2]) / 2 for b in c.boxes]])
-            ys = np.array([[(b[1] + b[3]) / 2 for b in c.boxes]])
-            hit = q.query(xs, ys, np.array(c.box_dt, np.float64))
-            missed[frame] += not hit.any()
+            pl = [p for p in _placements(c, frame) if p[0] in plan]
+            for key, t_ref, anchor, mirror in pl:
+                q.place(key, t_ref, anchor, mirror)
+            if pl:
+                missed[frame] += not q.query(xs, ys, np.array(c.box_dt, np.float64)).any()
     return missed
 
 
@@ -339,6 +369,9 @@ def test_synthetic_hits_entities_and_cooldown_frames(synth):
     assert dash["type"] == ["ENEMY"] and dash["parry"] == ["counter"] and not dash["parryable"]
     assert t["attacks"]["A"]["coverage"] == {"n": 5, "target": 200, "ok": False}
     assert t["attacks"]["A"]["anchor"]["by_dir"]["Set L"]["support"] == {"x": [5.0, 5.0], "y": [1.0, 1.0]}
+    bo = t["attacks"]["A"]["anchor"]["body_offset"]["by_dir_flip"]   # flipX is observable: one key per facing
+    assert set(bo) == {"Set L / flipX=False", "Set R / flipX=True"} and bo["Set R / flipX=True"]["n"] == 2
+    assert bo["Set L / flipX=False"]["box_centre"]["support"] == {"dx": [0.0, 0.0], "dy": [0.0, 0.0]}
 
 
 def test_synthetic_contacts_are_validated_and_covered(synth):
@@ -352,7 +385,7 @@ def test_synthetic_contacts_are_validated_and_covered(synth):
     assert all(d == 0.0 for c in b.contacts for d in c.res.values())
     r = built.tables["attacks"]["A"]["residual_u"]
     assert r["sets"]["anchor"]["n"] == 13 and r["sets"]["anchor"]["max"] == 0.0
-    assert _support_covers(built, b.contacts) == {"anchor": 0, "world_all": 0, "self": 0}
+    assert _support_covers(built, b.contacts) == dict.fromkeys(FRAMES, 0)
     sup = built.support["support/A/anchor"]
     assert sup.t_pad == 1 and sup.contains(19 * DT, 0.0, 0.0, tol_bins=0)  # the +-1 bin is baked in
 
@@ -373,6 +406,18 @@ def test_export_hole_is_flagged_and_left_out_of_statistics():
     assert t["entities"]["Test Boss"]["by_state"]["Dash"]["no_colliders"] == 5
     hole_hit = next(c for c in b.contacts if c.hole)
     assert hole_hit.res["anchor"] == 0.0  # the other instances' geometry covers it
+
+
+def test_presence_leaves_out_instances_holed_in_that_state():
+    """The first Dash is exported without colliders throughout: its instance has no sample there, yet it must not
+    count as 'box not enabled' in Dash (presence stays 1.0) and is counted in n_export_holes."""
+    b = bt.BehaviourBuilder(SPEC)
+    b.scan_states(Synth(hole=True, hole_frames=30).fight(PLAN), "synth-hole30")
+    t = b.tables()
+    assert t["coverage"]["validation"]["ok"]
+    dash = next(h for h in t["attacks"]["A"]["hitboxes"] if h["state"] == "Dash" and h["source"] == "Test Boss:box")
+    assert dash["presence"] == 1.0 and dash["presence_by_phase"] == {"P1": 1.0}
+    assert dash["n_export_holes"] == 1 and dash["n"] == 4 and dash["phases"] == {"P1": 4}
 
 
 def test_self_templates_follow_each_hazard_from_where_it_armed(synth):
@@ -427,6 +472,43 @@ def test_unexplained_hit_fails_the_build(tmp_path):
     assert not (tmp_path / "Synth.json").exists()
     js, _, _ = b.write(tmp_path, allow_failed=True)
     assert json.loads(js.read_text("utf-8"))["coverage"]["validation"]["ok"] is False
+
+
+def test_ambient_hazard_contacts_use_the_static_ambient_support():
+    """The always-on Spikes (ambient: armed when the scan starts) hit the hero during a Throw: the contact belongs to
+    no attack, is validated against the static _ambient/world support, and that support holds at every time."""
+    b = bt.BehaviourBuilder(SPEC)
+    b.scan_states(Synth(spike=True).fight(PLAN), "synth-spike")
+    built = b.build()
+    v = built.tables["coverage"]["validation"]
+    assert v["ok"] and v["outside_attacks"]["n"] == 0 and v["ambient"]["n"] == 1 and v["contacts"] == 17
+    c = next(c for c in b.contacts if c.tk == "Spikes")
+    assert c.ambient and c.inst is None and c.arm is None and c.res == {"ambient": 0.0}
+    assert "Boss Scene/Spikes" not in built.tables["attacks"]["B"]["hits_taken"]["by_source"]
+    assert b.counters == {"hits by ambient hazards": 1}
+    sup = built.support[hb.SUPPORT + bt.AMBIENT]
+    assert sup.static and sup.nt == 1 and sup.t_pad == 1
+    q = hb.SupportQuery(hb.planner_templates({"amb": sup}))
+    tk = np.arange(48) / 60.0
+    for t_ref in (0.0, 3.0, 250.0):
+        q.clear()
+        q.place("amb", t_ref)
+        assert q.query(np.full((2, 48), 30.5), np.full((2, 48), 2.0), tk).all()  # the hurtbox reaches the spikes
+        assert not q.query(np.full((1, 48), 20.0), np.full((1, 48), 2.0), tk).any()
+
+
+def test_named_collider_missing_from_the_export_is_a_partial_hole():
+    """With collider names exported, a hit naming a collider the export does not show is not 'exported' just because
+    the entity's body box is: it is a partial export hole and fails the build."""
+    b = bt.BehaviourBuilder(SPEC)
+    b.scan_states(Synth(names=True).fight(PLAN), "synth-names")
+    v = b.tables()["coverage"]["validation"]
+    assert v["ok"] and v["partial_export_holes"]["n"] == 0 and all(c.exported for c in b.contacts)
+    b = bt.BehaviourBuilder(SPEC)
+    b.scan_states(Synth(names=True, claw=True).fight(PLAN), "synth-claw")
+    v = b.tables()["coverage"]["validation"]
+    assert not v["ok"] and v["partial_export_holes"]["n"] == 1 and v["unexplained"]["n"] == 1
+    assert v["unexplained"]["first"][0]["source"] == "Test Boss/Claw"
 
 
 def test_synthetic_write_and_report(synth, tmp_path):
@@ -687,7 +769,7 @@ def test_trial_fixture_every_contact_is_covered_by_its_support(trial):
     assert v["ok"] and v["damage"] >= 8 and v["blocked_frames"] > 50
     cs = [c for c in b.contacts if c.inst is not None and c.boxes]
     assert len(cs) == v["contacts"] - v["no_hero_box"]
-    assert _support_covers(built, cs) == {"anchor": 0, "world_all": 0, "self": 0}
+    assert _support_covers(built, cs) == dict.fromkeys(FRAMES, 0)
     for fam, a in built.tables["attacks"].items():
         r = a["residual_u"]
         assert r["sets"]["anchor"]["beyond_r_fail"] == 0, fam
@@ -706,10 +788,33 @@ def test_committed_knowledge_covers_every_fixture_contact(trial):
     built = bt.Built({}, {}, keep, {})
     cs = [c for c in b.contacts if c.inst is not None and c.boxes]
     assert len(cs) > 60
-    assert _support_covers(built, cs) == {"anchor": 0, "world_all": 0, "self": 0}
+    assert _support_covers(built, cs) == dict.fromkeys(FRAMES, 0)
     meta = json.loads(KNOWLEDGE_NPZ.with_name("BellBeast.json").read_text("utf-8"))
     assert meta["build_info"]["npz_sha256"] == bt._sha256(KNOWLEDGE_NPZ)
     assert meta["coverage"]["validation"]["ok"]
+
+
+@pytest.fixture(scope="module")
+def planner_windows():
+    data = msgpack.unpackb(zstandard.ZstdDecompressor().decompress(PLANNER_FIXTURE.read_bytes()), raw=False,
+                           strict_map_key=False)
+    b = bt.BehaviourBuilder(bt.SPECS["BellBeast"])
+    for w, states in zip(data["windows"], data["states"]):
+        b.scan_states(states, f"{Path(w['recording']).name}/{w['f0']}")
+    return b, data["windows"]
+
+
+def test_committed_knowledge_catches_the_contacts_of_the_planner_query(planner_windows):
+    """Five logged contacts lay inside the support only when the hero box of f-1 was paired with the geometry up to
+    f+1 (M2 round-2 verifier: 0.014-0.059 u outside under the planner's pairing). The residual now pairs each box
+    with its own frame's time, so the committed support catches every contact of their windows in every set, as the
+    planner queries it (box_f-1 at t_f-1, box_f at t_f)."""
+    b, wins = planner_windows
+    cs = [c for c in b.contacts if c.inst is not None and c.boxes]
+    assert {w["contact_f"] for w in wins} <= {c.f for c in cs} and len(wins) == 5
+    assert all(c.box_dt[0] < 0.0 for c in cs if len(c.boxes) == 2 and c.f in {w["contact_f"] for w in wins})
+    support, _ = hb.load_templates(KNOWLEDGE_NPZ, prefix=hb.SUPPORT)
+    assert _support_covers(bt.Built({}, {}, support, {}), cs) == dict.fromkeys(FRAMES, 0)
 
 
 # ---- fixture maker -----------------------------------------------------------------------------------------

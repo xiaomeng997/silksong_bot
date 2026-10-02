@@ -71,6 +71,10 @@ def report(tables: dict) -> str:
                      f"but an export hole {v['no_exported_collider_explained_by_export_hole']['n']}")
         lines += [f"  {c}" for c in (v["uncovered"]["first"] + v["unexplained"]["first"] +
                                      v["outside_attacks"]["first"])[:10]]
+        pg, am = v.get("partial_export_holes") or {}, v.get("ambient") or {}
+        if pg.get("n") or am.get("n"):
+            lines.append(f"  named collider missing from the export (partial holes): {pg.get('n', 0)}; ambient hazard "
+                         f"contacts: {am.get('n', 0)} (radius {am.get('radius_u')} u)")
     for fam, a in tables["attacks"].items():
         sets = (a.get("residual_u") or {}).get("sets") or {}
         if sets:
