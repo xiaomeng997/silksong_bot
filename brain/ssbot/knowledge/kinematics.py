@@ -123,10 +123,11 @@ DEFAULT_PARAMS = REPO / "knowledge" / "1.0.30000" / "kinematics" / "hero_hunter.
  PHASE,           # sub-phase: hit-stop 0 wait / 1 ramp; Silkspear 0 antic / 1 throw / 2 catch
  TS,              # time scale the next frame runs at (nominal timing; logged runs take dt from the log)
  QQ,              # quickcast (tool / Silkspear) queue steps (-1: not queuing)
- K) = range(42)
+ ALO, AHI,        # feasible interval of ALPHA (the timing-variant lanes start from its ends)
+ K) = range(44)
 ROW_NAMES = ("px py qx qy sx sy vx vy alpha gs face ground mode mode_t mode_n jumping jsteps jdsteps jq aq airhang "
              "attacking atk_t atk_cd rdir rsteps ds_hs ds_rec bounce hvx hvy move jheld prev silk inv_t ledge touch "
-             "phase ts qq").split()
+             "phase ts qq alo ahi").split()
 assert len(ROW_NAMES) == K
 
 M_NORMAL, M_DS_ANTIC, M_DS_SPIKE, M_HURT_FREEZE, M_HURT_RECOIL, M_CAST, M_BIND, M_LOCKED = range(8)
@@ -225,6 +226,25 @@ class HeroParams:
     land_slop_lo: float = 0.0075
     land_slop_hi: float = 0.004
     input_jump_lag: int = 1
+    rdown_halve: int = 0              # RecoilDown halves a rise instead of stopping it (Weighted Anklet)
+    # Weighted Anklet (Gameplay asset, docs/facts/1.0.30000/crests.json "weighted_anklet"; HeroController.cs
+    # StartRecoil 9615-9621, Recoil 6568-6578, RecoilDown 6655-6672, GetMaxFallVelocity 4866-4872)
+    weighted: bool = False            # True: the values below are applied (with_weighted())
+    weighted_knockback_mult: float = 0.5
+    weighted_invuln_mult: float = 1.3
+    weighted_recoil_steps: int = 4
+    max_fall_weighted: float = 38.0
+    # frame-time jitter model (kin_fit: unscaled frame times at time scale 1 of the bot recordings)
+    frame_time_lo: float = 0.01665    # every frame is at least this long
+    frame_time_hi: float = 0.0170     # above the p99.99 of ordinary frames; longer ones are hitches
+    hitch_max: float = 0.034          # longest frame the envelope bounds allow (observed max 0.0320 s)
+    hitch_rate: float = 3.6e-5        # frames longer than 0.018 s, per frame
+    hitches_per_window: int = 2       # hitches the envelope allows in one recoil (they come in clusters)
+    # Silkspear phases that end one frame apart with no timer explaining it (the needle's way back): the
+    # rollout's variant lanes take each value, [threshold, share of the logged throws]
+    cast_throw_variants: list = field(default_factory=lambda: [[0.42, 0.5], [0.44, 0.5]])
+    cast_catch_variants: list = field(default_factory=lambda: [[0.14, 0.5], [0.16, 0.5]])
+    jump_heights: list = field(default_factory=list)   # per jump hold length: logged and model apex spread
     scenes: dict = field(default_factory=dict)       # scene -> {"enable": [go names], "disable": [go names]}
     source: dict = field(default_factory=dict)       # key -> provenance note
     fit: dict = field(default_factory=dict)          # kin_fit summary (measured values, residuals, data used)
@@ -239,13 +259,39 @@ class HeroParams:
               "cast_throw", "cast_catch", "cast_decay", "cast_decay_ground", "cast_vy_cap", "cast_catch_speed",
               "cast_catch_decay", "cast_silk", "bind_time", "bind_decay", "bind_vy_cap",
               "bind_vy_cap_down", "bind_end_vy", "bind_silk",
-              "silk_max", "lock_decay", "ledge_steps", "land_slop_lo", "land_slop_hi")
+              "silk_max", "lock_decay", "ledge_steps", "land_slop_lo", "land_slop_hi", "rdown_halve")
 
     def vector(self) -> np.ndarray:
         return np.array([float(getattr(self, k)) for k in self.VECTOR], dtype=np.float64)
 
     def scene(self, name: str) -> dict:
         return self.scenes.get(name, {})
+
+    def with_weighted(self, on: bool = True) -> "HeroParams":
+        """A copy with the Weighted Anklet equipped (knockback x0.5, i-frames x1.3, nail recoil 4 steps, max fall
+        38, RecoilDown halves the rise). Not identified on logs yet: the bot runs never equipped it."""
+        p = HeroParams.from_json(self.to_json())
+        if not on or self.weighted:
+            return p
+        p.weighted = True
+        p.hurt_velocity = self.hurt_velocity * self.weighted_knockback_mult
+        p.invul_time = self.invul_time * self.weighted_invuln_mult
+        p.recoil_steps = self.weighted_recoil_steps
+        p.max_fall = self.max_fall_weighted
+        p.rdown_halve = 1
+        return p
+
+    def cast_variant(self, which: str) -> tuple[float, float]:
+        """(throw, catch) thresholds of a Silkspear variant: "nominal" (the shipped values), "short" or "long"."""
+        if which == "nominal":
+            return self.cast_throw, self.cast_catch
+        th = sorted(v[0] for v in self.cast_throw_variants) or [self.cast_throw]
+        ca = sorted(v[0] for v in self.cast_catch_variants) or [self.cast_catch]
+        return (th[0], ca[0]) if which == "short" else (th[-1], ca[-1])
+
+    def jitter(self) -> dict:
+        return {"frame_time": self.frame_time, "lo": self.frame_time_lo, "hi": self.frame_time_hi,
+                "hitch_max": self.hitch_max, "hitch_rate": self.hitch_rate, "hitches": self.hitches_per_window}
 
     def to_json(self) -> dict:
         return asdict(self)
@@ -274,7 +320,8 @@ class HeroParams:
  P_DS_LREC, P_DS_DECEL, P_DS_VYMIN, P_DS_VYMAX, P_DS_ENDVY, P_POGO_J, P_POGO_JD, P_BOUNCE, P_HURT_V, P_HURT_VY,
  P_HURT_T, P_HURT_WAIT, P_HURT_RAMP, P_HURT_SKIP, P_INV_T, P_CAST_ANTIC, P_CAST_THROW, P_CAST_CATCH, P_CAST_DECAY,
  P_CAST_DECAY_G, P_CAST_VYCAP, P_CAST_CSPEED, P_CAST_CDECAY, P_CAST_SILK, P_BIND_T, P_BIND_DECAY, P_BIND_VYCAP,
- P_BIND_VYDOWN, P_BIND_ENDVY, P_BIND_SILK, P_SILK_MAX, P_LOCK_DECAY, P_LEDGE, P_SLOP_LO, P_SLOP_HI, NP) = range(63)
+ P_BIND_VYDOWN, P_BIND_ENDVY, P_BIND_SILK, P_SILK_MAX, P_LOCK_DECAY, P_LEDGE, P_SLOP_LO, P_SLOP_HI, P_RDOWN_HALF,
+ NP) = range(64)
 assert NP == len(HeroParams.VECTOR)
 
 
@@ -294,6 +341,41 @@ class Terrain2D:
     names: list = field(default_factory=list)
     gates: np.ndarray = field(default_factory=lambda: np.zeros((0, 4)))   # AABBs of overrides["enable"] solids
     n_base: tuple = (-1, -1)          # hseg / vseg rows before the gate rows (-1: no gates)
+    _grid: np.ndarray | None = field(default=None, repr=False, compare=False)
+
+    def packed(self, width: float = 1.0) -> np.ndarray:
+        """The segments and an x-bucket index of them in one float64 array, for the compiled rollout (layout in
+        kin_jit: a bucket lists the floors / ceilings whose x extent and the walls whose x falls in it, with a 0.02 u
+        margin, so a query looks at a handful of segments instead of all of them). Built once per terrain."""
+        if self._grid is None:
+            h = np.ascontiguousarray(self.hseg, dtype=np.float64).reshape(-1, 3)
+            v = np.ascontiguousarray(self.vseg, dtype=np.float64).reshape(-1, 3)
+            xs = np.concatenate([h[:, 1], h[:, 2], v[:, 0]])
+            x0 = float(xs.min()) - 1.0 if len(xs) else 0.0
+            nb = int(np.ceil((float(xs.max()) + 1.0 - x0) / width)) + 1 if len(xs) else 0
+            b = lambda x: int(np.floor((x - x0) / width))  # noqa: E731
+
+            def csr(ranges: list[tuple[int, int]]) -> tuple[np.ndarray, np.ndarray]:
+                lists: list[list[int]] = [[] for _ in range(nb)]
+                for j, (lo, hi) in enumerate(ranges):
+                    for k in range(max(lo, 0), min(hi, nb - 1) + 1):
+                        lists[k].append(j)
+                start = np.zeros(nb + 1)
+                start[1:] = np.cumsum([len(x) for x in lists])
+                return start, np.array([j for x in lists for j in x], dtype=np.float64)
+
+            hst, hix = csr([(b(r[1] - 0.02), b(r[2] + 0.02)) for r in h])
+            vst, vix = csr([(b(r[0] - 0.02), b(r[0] + 0.02)) for r in v])
+            o_h = 10
+            o_v = o_h + h.size
+            o_hs = o_v + v.size
+            o_hi = o_hs + len(hst)
+            o_vs = o_hi + len(hix)
+            o_vi = o_vs + len(vst)
+            head = [len(h), len(v), nb, x0, 1.0 / width, o_hs, o_hi, o_vs, o_vi, o_v]
+            self._grid = np.ascontiguousarray(np.concatenate([np.array(head, dtype=np.float64), h.ravel(), v.ravel(),
+                                                              hst, hix, vst, vix]))
+        return self._grid
 
     def open(self) -> "Terrain2D":
         """The same scene with the arena gates open (before or after the fight)."""
@@ -608,10 +690,11 @@ def _apply_events(X, ev, P):
         X[RSTEPS] = np.where(on, P[P_RSTEPS], X[RSTEPS])
         X[VX] = np.where(on, d * P[P_RV], X[VX])
     # HeroController.RecoilDown (an up slash that hit): CancelJump, rising velocity cut to RECOIL_DOWN_VELOCITY 0
+    # (halved instead with the Weighted Anklet)
     down = ((ev & EV_RECOIL_DOWN) != 0) & ~relinq
     X[JUMPING] = np.where(down, 0.0, X[JUMPING])
     X[JSTEPS] = np.where(down, 0.0, X[JSTEPS])
-    X[VY] = np.where(down & (X[VY] > 0), 0.0, X[VY])
+    X[VY] = np.where(down & (X[VY] > 0), X[VY] * 0.5 if P[P_RDOWN_HALF] > 0 else 0.0, X[VY])
     pogo = (ev & EV_POGO) != 0
     X[MODE] = np.where(pogo, M_NORMAL, X[MODE])
     X[JUMPING] = np.where(pogo, 1.0, X[JUMPING])
@@ -908,31 +991,82 @@ def _simulate(S0, masks, events, dts, fss, udts, P, hseg, vseg):
 
 @dataclass(slots=True)
 class Rollout:
-    phys: np.ndarray     # [N, T+1, 2] collider (body) position, hero.pos coordinates
-    pos: np.ndarray      # [N, T+1, 2] rendered position (STATE hero.pos)
+    """Rollout of N command sequences over T frames; index 0 is the start frame. With timing variants, the main
+    arrays hold variant 0 (the nominal lane) and var_* hold every lane, bound their per-frame hull."""
+    phys: np.ndarray     # [N, T+1, 2] body position, hero.pos coordinates (x centre, y = box bottom + foot)
+    pos: np.ndarray      # [N, T+1, 2] rendered transform (STATE hero.pos; O-tagged pos_transform in WorldState)
     vel: np.ndarray      # [N, T+1, 2]
     mode: np.ndarray     # [N, T+1] M_* codes
     flags: np.ndarray    # [N, T+1] F_* bits
     final: np.ndarray    # [K, N] model state after the last frame
+    box: np.ndarray      # [N, T+1, 4] collider AABB (x0, y0, x1, y1), as STATE hero.box
+    variants: tuple = ()             # Variant per lane of the var_* arrays
+    var_box: np.ndarray | None = None     # [N, V, T+1, 4]
+    var_mode: np.ndarray | None = None    # [N, V, T+1]
+    var_flags: np.ndarray | None = None   # [N, V, T+1]
+    bound: np.ndarray | None = None       # [N, T+1, 4] hull of the variant boxes per frame
 
-    def box(self, params: HeroParams) -> np.ndarray:
-        """Collider AABBs [N, T+1, 4] (x0, y0, x1, y1), as STATE hero.box."""
-        x, y = self.phys[..., 0], self.phys[..., 1]
-        return np.stack([x - params.half_width, y - params.foot, x + params.half_width, y + params.head], axis=-1)
+    @property
+    def centre(self) -> np.ndarray:
+        """[N, T+1, 2] collider centre: WorldState HeroState.pos (cross-module decision 1)."""
+        return 0.5 * (self.box[..., :2] + self.box[..., 2:])
+
+
+@dataclass(frozen=True, slots=True)
+class Variant:
+    """One timing lane. alpha: the start phase ("est", or the "lo" / "hi" end of its feasible interval);
+    frame_time: unscaled frame time of every future frame ("mean" HeroParams.frame_time, "lo", "hi" the jitter
+    model's ends); cast: Silkspear throw / catch frame counts ("nominal", "short", "long")."""
+    name: str
+    alpha: str = "est"
+    frame_time: str = "mean"
+    cast: str = "nominal"
+
+
+NOMINAL = (Variant("nominal"),)
+# the known +-1 frame branches move together: an earlier phase, longer frames (timers reach their thresholds a frame
+# sooner: antic 6 instead of 7 frames, hit-stop 13 instead of 14) and the short Silkspear phases, or all the other way
+BOUNDS = (Variant("nominal"), Variant("early", "hi", "hi", "short"), Variant("late", "lo", "lo", "long"))
+FULL = (Variant("nominal"),) + tuple(Variant(f"{a}/{f}/{c}", a, f, c) for a in ("lo", "hi") for f in ("lo", "hi")
+                                     for c in ("short", "long"))
+VARIANT_SETS = {"nominal": NOMINAL, "bounds": BOUNDS, "full": FULL}
+
+
+def _variant_lanes(S0: np.ndarray, params: HeroParams, variants: tuple[Variant, ...]
+                   ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Lane-major (row r * V + v) start states, frame times and parameter rows for the variants of S0 [K, N]."""
+    n, V = S0.shape[1], len(variants)
+    S = np.repeat(S0, V, axis=1)
+    ft = np.empty(n * V)
+    Pv = np.empty((V, NP))
+    base = params.vector()
+    for v, var in enumerate(variants):
+        lanes = slice(v, None, V)
+        if var.alpha != "est":
+            S[ALPHA, lanes] = S0[ALO if var.alpha == "lo" else AHI]
+        ft[lanes] = {"mean": params.frame_time, "lo": params.frame_time_lo, "hi": params.frame_time_hi}[var.frame_time]
+        Pv[v] = base
+        Pv[v, P_CAST_THROW], Pv[v, P_CAST_CATCH] = params.cast_variant(var.cast)
+    return S, ft, np.tile(Pv, (n, 1))
 
 
 def rollout(start: np.ndarray, masks: np.ndarray, params: HeroParams, terrain: Terrain2D | None = None,
             events: np.ndarray | None = None, dt: np.ndarray | None = None, fs: np.ndarray | None = None,
-            udt: float | np.ndarray | None = None) -> Rollout:
+            udt: float | np.ndarray | None = None, variants: tuple[Variant, ...] | str | None = None,
+            backend: str = "auto", threads: int = 1) -> Rollout:
     """Predict N button sequences of T frames from a model state.
 
-    start: [K] or [K, N] model state (estimate_state / initial_state); masks: [N, T] ACTION masks for the frames
-    after the start frame (index 0 = next frame), applied as the oracle does (an ACTION for target frame F is latched
-    for F, read by Update in F); events: [N, T] EV_* bits (None: none); dt, fs: [T] or [N, T] logged scaled dt and
-    physics steps per frame (None: nominal timing: dt = udt times the model's time scale, which the damage hit-stop
-    drives); udt: unscaled frame time, a scalar or [T] / [N, T] (logged; it times the hit-stop either way; None:
-    params.frame_time, the measured mean frame time of the game, which is not exactly 1/60 s)."""
-    masks = np.asarray(masks, dtype=np.int64)
+    start: [K] or [K, N] model state (estimate_state / initial_state); masks: [N, T] latched ACTION masks for the
+    frames after the start frame (index 0 = next frame; hold_filter turns commanded masks into latched ones), applied
+    as the oracle does (an ACTION for target frame F is latched for F, read by Update in F); events: [N, T] EV_*
+    bits (None: none; at run time the threat layer supplies them or the planner branches on them); dt, fs: [T] or
+    [N, T] logged scaled dt and physics steps per frame (replay only: the planner does not know them); without them
+    the timing is nominal: dt = udt times the model's time scale, steps from the phase; udt: unscaled frame time, a
+    scalar or [T] / [N, T] (None: params.frame_time, the measured mean frame time, not exactly 1/60 s).
+    variants: "bounds" / "full" / a tuple of Variant (nominal timing only): V lanes per sequence (var_*), their
+    per-frame hull in `bound`. backend: "numba" (the compiled loop, kin_jit), "numpy" (the reference), "auto";
+    threads > 1 runs the lanes in parallel (numba)."""
+    masks = np.ascontiguousarray(masks, dtype=np.int64)
     if masks.ndim == 1:
         masks = masks[None, :]
     n, T = masks.shape
@@ -944,47 +1078,157 @@ def rollout(start: np.ndarray, masks: np.ndarray, params: HeroParams, terrain: T
     if S0.shape != (K, n):
         raise ValueError(f"start state {S0.shape}, expected ({K}, {n})")
     ev = np.zeros((n, T), dtype=np.int64) if events is None else np.broadcast_to(
-        np.asarray(events, dtype=np.int64), (n, T)).copy()
-    if dt is not None:
-        dts = np.broadcast_to(np.asarray(dt, dtype=np.float64), (n, T)).copy()
-        fss = np.broadcast_to(np.asarray(fs, dtype=np.float64), (n, T)).copy()
-    else:
-        dts = np.zeros((n, 0))
-        fss = np.zeros((n, 0))
-    udt = params.frame_time if udt is None else udt
-    udts = np.broadcast_to(np.asarray(udt, dtype=np.float32).astype(np.float64), (n, T)).copy()
+        np.asarray(events, dtype=np.int64), (n, T))
+    if isinstance(variants, str):
+        variants = VARIANT_SETS[variants]
+    V = len(variants) if variants else 1
+    if variants and dt is not None:
+        raise ValueError("timing variants need nominal timing (dt / fs None)")
     terrain = terrain or Terrain2D.empty()
-    P = params.vector()
-    phys, rend, vel, modes, flags, X = _SIM(S0, masks, ev, dts, fss, udts, P, terrain.hseg, terrain.vseg)
-    return Rollout(phys, rend, vel, modes, flags, X)
+    if variants:
+        S0, ft, P = _variant_lanes(S0, params, tuple(variants))
+        masks = np.repeat(masks, V, axis=0)
+        ev = np.repeat(ev, V, axis=0)
+        udts = np.repeat(np.asarray(ft, dtype=np.float32).astype(np.float64)[:, None], T, axis=1)
+    else:
+        P = params.vector()[None, :]
+        u = params.frame_time if udt is None else udt
+        udts = np.broadcast_to(np.asarray(u, dtype=np.float32).astype(np.float64), (n, T))
+    nl = masks.shape[0]
+    if dt is not None:
+        dts = np.ascontiguousarray(np.broadcast_to(np.asarray(dt, dtype=np.float64), (nl, T)))
+        fss = np.ascontiguousarray(np.broadcast_to(np.asarray(fs, dtype=np.float64), (nl, T)))
+    else:
+        dts = fss = np.zeros((nl, 0))
+    ev = np.ascontiguousarray(ev)
+    udts = np.ascontiguousarray(udts)
+    hseg = np.ascontiguousarray(terrain.hseg, dtype=np.float64)
+    vseg = np.ascontiguousarray(terrain.vseg, dtype=np.float64)
+    use_jit = HAVE_NUMBA if backend == "auto" else backend == "numba"
+    if use_jit:
+        from ssbot.knowledge import kin_jit
+        if threads > 1:
+            import numba
+            numba.set_num_threads(threads)
+        fn = kin_jit.simulate_par if threads > 1 else kin_jit.simulate
+        phys, rend, vel, modes, flags, X = fn(np.ascontiguousarray(S0), masks, ev, dts, fss, udts,
+                                              np.ascontiguousarray(P), terrain.packed())
+    else:
+        phys, rend, vel, modes, flags, X = _simulate_rows(S0, masks, ev, dts, fss, udts, P, hseg, vseg)
+    box = np.empty(phys.shape[:2] + (4,))
+    box[..., 0] = phys[..., 0] - params.half_width
+    box[..., 1] = phys[..., 1] - params.foot
+    box[..., 2] = phys[..., 0] + params.half_width
+    box[..., 3] = phys[..., 1] + params.head
+    if not variants:
+        return Rollout(phys, rend, vel, modes, flags, X, box)
+    vb = box.reshape(n, V, T + 1, 4)
+    bound = np.concatenate([vb[..., :2].min(axis=1), vb[..., 2:].max(axis=1)], axis=-1)
+    sel = slice(0, None, V)
+    return Rollout(phys[sel], rend[sel], vel[sel], modes[sel], flags[sel], X[:, sel], box[sel], tuple(variants),
+                   vb, modes.reshape(n, V, T + 1), flags.reshape(n, V, T + 1), bound)
 
 
-_SIM = _simulate   # an @numba.njit build of _simulate (and the helpers it calls) goes here once numba is installed
+def _simulate_rows(S0, masks, ev, dts, fss, udts, P, hseg, vseg):
+    """The NumPy reference over lanes that may carry their own parameter rows (P [1 or N, NP])."""
+    if P.shape[0] == 1:
+        return _simulate(S0, masks, ev, dts, fss, udts, P[0], hseg, vseg)
+    n, T = masks.shape
+    out = [np.empty((n, T + 1, 2)), np.empty((n, T + 1, 2)), np.empty((n, T + 1, 2)),
+           np.empty((n, T + 1), dtype=np.int32), np.empty((n, T + 1), dtype=np.int32), np.empty_like(S0)]
+    rows, inv = np.unique(P, axis=0, return_inverse=True)
+    for r in range(len(rows)):
+        idx = np.flatnonzero(inv.ravel() == r)
+        res = _simulate(S0[:, idx], masks[idx], ev[idx], dts[idx], fss[idx], udts[idx], rows[r], hseg, vseg)
+        for o, x in zip(out[:5], res[:5]):
+            o[idx] = x
+        out[5][:, idx] = res[5]
+    return tuple(out)
+
+
+# ---- the input path: oracle HoldFilter ------------------------------------------------------------------------
 
 N_BUTTONS = 22
 _LEFT_BIT, _RIGHT_BIT = 20, 21
+_AGE_LONG = 1 << 20
 
 
-def hold_filter(masks: np.ndarray, min_press: int = 2, min_release: int = 2, max_pending: int = 3) -> np.ndarray:
-    """The button masks the game latches for commanded masks [N, T] (oracle/src/Input/HoldFilter.cs, which the final
-    SendInput sink enforces too): every requested edge is kept and replayed in order, a release waits until the key
-    has been down min_press latched frames, a press until it has been up min_release frames, left and right are never
-    latched together, and more than max_pending queued toggles of one key drop the oldest press + release pair.
-    rollout() takes latched masks; a planner passes its commands through this first (logged "act" masks already
-    are latched). Starts from all keys up for a long time."""
+@dataclass(slots=True)
+class HoldState:
+    """oracle/src/Input/HoldFilter.cs state per lane: the latched and wanted key sets, queued edges and latched age
+    per key. (deferred / exclusiveWaiting only feed the filter's counters.) The planner keeps one in step with the
+    ACTIONs it sends (hold_filter returns the next one) or rebuilds it from STATE act.hf."""
+    latched: np.ndarray      # [n, 22] bool
+    desired: np.ndarray      # [n, 22] bool
+    pending: np.ndarray      # [n, 22] int
+    age: np.ndarray          # [n, 22] int
+
+    @classmethod
+    def idle(cls, n: int = 1) -> "HoldState":
+        """All keys up for a long time (an empty filter)."""
+        z = np.zeros((n, N_BUTTONS), dtype=bool)
+        return cls(z, z.copy(), np.zeros((n, N_BUTTONS), dtype=np.int64), np.full((n, N_BUTTONS), _AGE_LONG))
+
+    @classmethod
+    def from_hf(cls, hf: dict, n: int = 1) -> "HoldState":
+        """From STATE act.hf {latched, desired, pending, age}: latched / desired as button masks (or per-key bool
+        lists), pending / age as per-key lists (or {button index: value} maps; missing keys: 0 pending, long age)."""
+        def bits(v) -> np.ndarray:
+            if isinstance(v, (list, tuple)):
+                a = np.zeros(N_BUTTONS, dtype=bool)
+                a[:min(len(v), N_BUTTONS)] = np.asarray(v[:N_BUTTONS], dtype=bool)
+                return a
+            return ((int(v or 0) >> np.arange(N_BUTTONS)) & 1).astype(bool)
+
+        def ints(v, default: int) -> np.ndarray:
+            a = np.full(N_BUTTONS, default, dtype=np.int64)
+            if isinstance(v, dict):
+                for k, x in v.items():
+                    if 0 <= int(k) < N_BUTTONS:
+                        a[int(k)] = int(x)
+            elif isinstance(v, (list, tuple)):
+                m = min(len(v), N_BUTTONS)
+                a[:m] = np.asarray(v[:m], dtype=np.int64)
+            return a
+
+        one = cls(bits(hf.get("latched"))[None], bits(hf.get("desired"))[None], ints(hf.get("pending"), 0)[None],
+                  ints(hf.get("age"), _AGE_LONG)[None])
+        return one.repeat(n)
+
+    def repeat(self, n: int) -> "HoldState":
+        return HoldState(*(np.repeat(a[:1] if len(a) == 1 else a, n if len(a) == 1 else 1, axis=0)
+                           for a in (self.latched, self.desired, self.pending, self.age)))
+
+    def copy(self) -> "HoldState":
+        return HoldState(self.latched.copy(), self.desired.copy(), self.pending.copy(), self.age.copy())
+
+    def mask(self) -> np.ndarray:
+        """[n] latched button masks."""
+        return (self.latched.astype(np.int64) << np.arange(N_BUTTONS, dtype=np.int64)).sum(axis=1)
+
+
+def hold_filter(masks: np.ndarray, state: HoldState | None = None, min_press: int = 2, min_release: int = 2,
+                max_pending: int = 3) -> tuple[np.ndarray, HoldState]:
+    """(latched masks, filter state after the last frame) for commanded masks [N, T] (or [T]) fed to
+    oracle/src/Input/HoldFilter.cs from `state` (None: idle; a one-lane state is shared by every lane). The filter
+    (which the final SendInput sink enforces too) keeps every requested edge and replays it in order: a release
+    waits until the key has been down min_press latched frames, a press until it has been up min_release frames,
+    left and right are never latched together, and more than max_pending queued toggles of one key drop the oldest
+    press + release pair. rollout() takes latched masks (logged "act" masks already are latched). ReleaseAll
+    (input.release, harness operations) is not modelled."""
     masks = np.asarray(masks, dtype=np.int64)
     one = masks.ndim == 1
     masks = masks[None] if one else masks
     n, T = masks.shape
+    st = (state or HoldState.idle(1)).copy()
+    if len(st.latched) == 1 and n > 1:
+        st = st.repeat(n)
     shift = np.arange(N_BUTTONS, dtype=np.int64)
-    latched = np.zeros((n, N_BUTTONS), dtype=bool)
-    desired = np.zeros((n, N_BUTTONS), dtype=bool)
-    pending = np.zeros((n, N_BUTTONS), dtype=np.int64)
-    age = np.full((n, N_BUTTONS), 1 << 20, dtype=np.int64)
+    latched, desired, pending, age = st.latched, st.desired, st.pending, st.age
     out = np.zeros((n, T), dtype=np.int64)
     for t in range(T):
         want = ((masks[:, t:t + 1] >> shift) & 1).astype(bool)
-        pending += want != desired
+        pending = pending + (want != desired)
         desired = want
         pending = np.where(pending > max_pending, pending - 2, pending)
         nxt = latched.copy()
@@ -993,7 +1237,7 @@ def hold_filter(masks: np.ndarray, min_press: int = 2, min_release: int = 2, max
         prs = has & ~latched & (age >= min_release)
         nxt[rel] = False
         nxt[prs] = True
-        pending -= (rel | prs)
+        pending = pending - (rel | prs)
         both = nxt[:, _LEFT_BIT] & nxt[:, _RIGHT_BIT]
         for b in (_LEFT_BIT, _RIGHT_BIT):
             rv = both & prs[:, b]
@@ -1002,10 +1246,11 @@ def hold_filter(masks: np.ndarray, min_press: int = 2, min_release: int = 2, max
             stale = rv & ~desired[:, b]
             pending[stale, b] = 0
         toggled = nxt != latched
-        age = np.where(toggled, 1, np.minimum(age + 1, 1 << 20))
+        age = np.where(toggled, 1, np.minimum(age + 1, _AGE_LONG))
         latched = nxt
         out[:, t] = (latched.astype(np.int64) << shift).sum(axis=1)
-    return out[0] if one else out
+    new = HoldState(latched, desired, pending, age)
+    return (out[0] if one else out), new
 
 
 def initial_state(params: HeroParams, x: float, y: float, *, vx: float = 0.0, vy: float = 0.0, facing: int = 1,
@@ -1015,7 +1260,7 @@ def initial_state(params: HeroParams, x: float, y: float, *, vx: float = 0.0, vy
     S[[PX, QX, SX]] = x
     S[[PY, QY, SY]] = y
     S[VX], S[VY] = vx, vy
-    S[ALPHA] = alpha
+    S[ALPHA] = S[ALO] = S[AHI] = alpha
     S[GS] = 1.0
     S[FACE] = 1.0 if facing >= 0 else -1.0
     S[GROUND] = 1.0 if ground else 0.0
@@ -1039,7 +1284,11 @@ _CS_USED = ("facingRight", "onGround", "jumping", "attacking", "upAttacking", "d
             "transitioning", "wallSliding", "dashing", "parrying")
 
 
-MK_HARNESS, MK_HAZARD, MK_SCENE, MK_FREEZE, MK_DEATH = 1, 2, 4, 8, 16
+MK_HARNESS, MK_HAZARD, MK_SCENE, MK_FREEZE, MK_DEATH, MK_SLIDE = 1, 2, 4, 8, 16, 32
+# hero.tm (oracle STATE, when exported): HeroController timers, in this order as Trace.tm columns
+TM_KEYS = ("inv", "recoil", "recoil_steps", "dash_cd", "atk_cd", "atk_t", "tool_cd", "jump_steps", "jumped_steps",
+           "ds", "ds_rec", "grav", "qj", "qa", "qt")
+SLIDE_SPAN = (-5, 40)   # frames around a savestate.load harness event searched for the load's slide
 _MARK_KINDS = {"harness": MK_HARNESS, "hazard_respawn": MK_HAZARD, "hazard_death": MK_HAZARD,
                "scene_enter": MK_SCENE, "scene_leave": MK_SCENE, "die": MK_DEATH, "hero_dead": MK_DEATH,
                "player_dead": MK_DEATH}
@@ -1078,6 +1327,8 @@ class Trace:
     spells: list
     scenes: list
     mask_source: str = "act"
+    tm: np.ndarray | None = None          # [n, len(TM_KEYS)] hero.tm when exported (NaN where missing)
+    alpha_log: np.ndarray | None = None   # [n] hero.alpha when exported (NaN where missing)
 
     def __len__(self) -> int:
         return len(self.f)
@@ -1086,7 +1337,7 @@ class Trace:
         return self.cs[:, _CS_USED.index(name)]
 
     def save(self, path: str | Path) -> None:
-        d = {f.name: getattr(self, f.name) for f in fields(self)}
+        d = {f.name: getattr(self, f.name) for f in fields(self) if getattr(self, f.name) is not None}
         meta = {k: d.pop(k) for k in ("clips", "spells", "scenes", "mask_source")}
         np.savez_compressed(path, meta=json.dumps(meta), **d)
 
@@ -1119,9 +1370,21 @@ class Trace:
                                                  "hero_state", "relinq", "cs", "act", "inp", "silk", "hp", "clip",
                                                  "spell", "dmg", "marks", "box", "valid", "scene")}
         nan2 = [np.nan, np.nan]
+        nan_tm = [np.nan] * len(TM_KEYS)
+        tm_rows: list = []
+        alpha_rows: list = []
+        loads: list = []
         for s in states:
             h = s.get("hero")
             g = s.get("game") or {}
+            tm = (h or {}).get("tm")
+            tm_rows.append([float(tm[k]) if isinstance(tm, dict) and tm.get(k) is not None else np.nan
+                            for k in TM_KEYS] if tm else nan_tm)
+            a = (h or {}).get("alpha")
+            alpha_rows.append(float(a) if a is not None else np.nan)
+            if any(e.get("k") == "harness" and (e.get("d") or {}).get("op") == "savestate.load"
+                   for e in s.get("ev") or ()):
+                loads.append(len(cols["f"]))
             cols["f"].append(s["f"])
             cols["fs"].append(s.get("fs") or 0)
             cols["dt"].append(s.get("dt") or 0.0)
@@ -1183,18 +1446,47 @@ class Trace:
                 j = inp & B_JUMP
                 mask = (mask & ~B_JUMP) | j | np.concatenate([j[lag:], np.zeros(lag, dtype=np.int64)])
         arr = {k: np.asarray(v) for k, v in cols.items()}
-        return cls(f=arr["f"].astype(np.int64), fs=arr["fs"].astype(np.int64), dt=arr["dt"].astype(np.float64),
-                   udt=arr["udt"].astype(np.float64), ts=arr["ts"].astype(np.float64),
-                   pos=arr["pos"].astype(np.float64).reshape(-1, 2), phys=arr["phys"].astype(np.float64).reshape(-1, 2),
-                   vel=arr["vel"].astype(np.float64).reshape(-1, 2), facing=arr["facing"].astype(np.int8),
-                   hero_state=arr["hero_state"].astype(np.int16), relinq=arr["relinq"].astype(bool),
-                   cs=arr["cs"].astype(bool).reshape(-1, len(_CS_USED)), mask=mask, silk=arr["silk"].astype(np.int16),
-                   hp=arr["hp"].astype(np.int16), clip=arr["clip"].astype(np.int32),
-                   spell=arr["spell"].astype(np.int32), dmg=arr["dmg"].astype(np.int8),
-                   marks=arr["marks"].astype(np.int16), box=arr["box"].astype(np.float64).reshape(-1, 4),
-                   valid=arr["valid"].astype(bool),
-                   scene=arr["scene"].astype(np.int32), clips=list(clips), spells=list(spells), scenes=list(scenes),
-                   mask_source=mask_source)
+        tm_arr = np.asarray(tm_rows, dtype=np.float64).reshape(-1, len(TM_KEYS))
+        al = np.asarray(alpha_rows, dtype=np.float64)
+        tr = cls(f=arr["f"].astype(np.int64), fs=arr["fs"].astype(np.int64), dt=arr["dt"].astype(np.float64),
+                 udt=arr["udt"].astype(np.float64), ts=arr["ts"].astype(np.float64),
+                 pos=arr["pos"].astype(np.float64).reshape(-1, 2), phys=arr["phys"].astype(np.float64).reshape(-1, 2),
+                 vel=arr["vel"].astype(np.float64).reshape(-1, 2), facing=arr["facing"].astype(np.int8),
+                 hero_state=arr["hero_state"].astype(np.int16), relinq=arr["relinq"].astype(bool),
+                 cs=arr["cs"].astype(bool).reshape(-1, len(_CS_USED)), mask=mask, silk=arr["silk"].astype(np.int16),
+                 hp=arr["hp"].astype(np.int16), clip=arr["clip"].astype(np.int32),
+                 spell=arr["spell"].astype(np.int32), dmg=arr["dmg"].astype(np.int8),
+                 marks=arr["marks"].astype(np.int16), box=arr["box"].astype(np.float64).reshape(-1, 4),
+                 valid=arr["valid"].astype(bool),
+                 scene=arr["scene"].astype(np.int32), clips=list(clips), spells=list(spells), scenes=list(scenes),
+                 mask_source=mask_source, tm=tm_arr if np.isfinite(tm_arr).any() else None,
+                 alpha_log=al if np.isfinite(al).any() else None)
+        mark_load_slides(tr, loads, params)
+        return tr
+
+
+def mark_load_slides(tr: Trace, loads: Iterable[int], params: HeroParams) -> int:
+    """MK_SLIDE on the frames where a savestate load is still moving the hero back to the saved position: the box
+    moves with velocity 0 and no physics step (2026-10-01, trial run f 56185-56193: 0.60 u per frame towards x 78,
+    for up to 17 frames around the 'savestate.load' harness event; ssbot.train.episode.wait_settled). Searched in
+    SLIDE_SPAN around each load row; the frames between the first and the last such motion are marked. Returns the
+    number of frames marked."""
+    n = len(tr)
+    if n < 2:
+        return 0
+    d = np.abs(np.diff(tr.box[:, :2], axis=0))
+    v = np.maximum(np.abs(tr.vel[1:]), np.abs(tr.vel[:-1]))
+    allowed = v * (np.maximum(tr.fs[1:], 0)[:, None] * params.fdt) + 0.05
+    bad = np.r_[False, ((d > allowed) & np.isfinite(d)).any(axis=1)]
+    marked = 0
+    for i in loads:
+        lo, hi = max(i + SLIDE_SPAN[0], 0), min(i + SLIDE_SPAN[1], n)
+        idx = np.flatnonzero(bad[lo:hi]) + lo
+        if len(idx):
+            sel = slice(idx[0], idx[-1] + 1)
+            marked += int(np.sum((tr.marks[sel] & MK_SLIDE) == 0))
+            tr.marks[sel] |= MK_SLIDE
+    return marked
 
 
 # ---- state estimation from a trace ----------------------------------------------------------------------------
@@ -1311,12 +1603,15 @@ def derive_events(tr: Trace, modes: np.ndarray | None = None) -> np.ndarray:
 
 def estimate_state(tr: Trace, idx: Iterable[int] | np.ndarray, params: HeroParams,
                    modes: np.ndarray | None = None, alpha: np.ndarray | None = None,
-                   terrain: Terrain2D | None = None, table: np.ndarray | None = None) -> np.ndarray:
+                   terrain: Terrain2D | None = None, table: np.ndarray | None = None,
+                   causal: bool = True) -> np.ndarray:
     """Model state [K, len(idx)] at the end of the given trace rows, from the logged pose, velocity and cstate, with
-    the hidden timers (jump steps, attack time, recoil steps, mode time) counted from the flags' onsets. `table`
-    (state_table of the same trace) saves recomputing the per-frame columns when many rows are estimated."""
+    the hidden timers (jump steps, attack time, recoil steps, mode time) counted from the flags' onsets. Every row
+    uses only the frames up to it (the planner's information set; causal=False takes the physics phase from the
+    whole trace, for replays). `table` (state_table of the same trace) saves recomputing the per-frame columns when
+    many rows are estimated. hero.tm / hero.alpha replace the reconstructed timers and phase where exported."""
     idx = np.asarray(list(idx) if not isinstance(idx, np.ndarray) else idx, dtype=np.int64)
-    table = state_table(tr, params, modes, alpha) if table is None else table
+    table = state_table(tr, params, modes, alpha, causal) if table is None else table
     S = table[:, idx].copy()
     if terrain is not None:     # falling body parked on a floor without contact yet (see _move_y)
         near = _on_ground(S[PX], S[PY], params.vector(), terrain.hseg)
@@ -1325,12 +1620,16 @@ def estimate_state(tr: Trace, idx: Iterable[int] | np.ndarray, params: HeroParam
 
 
 def state_table(tr: Trace, params: HeroParams, modes: np.ndarray | None = None,
-                alpha: np.ndarray | None = None) -> np.ndarray:
-    """Model state [K, len(tr)] at the end of every trace row (terrain contact left out, see estimate_state)."""
+                alpha: np.ndarray | None = None, causal: bool = True) -> np.ndarray:
+    """Model state [K, len(tr)] at the end of every trace row (terrain contact left out, see estimate_state). Each
+    row depends on that row and the ones before it only (with causal=False the phase uses the whole trace)."""
     n = len(tr)
     idx = np.arange(n)
     modes = classify_modes(tr) if modes is None else modes
-    alpha = phase(tr) if alpha is None else alpha
+    if alpha is None:
+        alpha, a_lo, a_hi = phase_interval(tr, params.fdt, causal=causal)
+    else:
+        a_lo = a_hi = alpha
     steps = tr.fs.astype(np.float64)
     dt = tr.dt
     S = np.zeros((K, len(idx)))
@@ -1344,6 +1643,7 @@ def state_table(tr: Trace, params: HeroParams, modes: np.ndarray | None = None,
     S[QX], S[QY] = q[:, 0], q[:, 1]
     S[VX], S[VY] = tr.vel[idx, 0], tr.vel[idx, 1]
     S[ALPHA] = alpha[idx]
+    S[ALO], S[AHI] = a_lo[idx], a_hi[idx]
     S[FACE] = np.where(tr.facing[idx] >= 0, 1.0, -1.0)
     ground = tr.flag("onGround")
     S[GROUND] = ground[idx]
@@ -1433,7 +1733,41 @@ def state_table(tr: Trace, params: HeroParams, modes: np.ndarray | None = None,
     left = np.float32(params.invul_time) - _since32(_onset(inv), dt, include_onset=False)
     S[INV_T] = np.where(inv[idx] & np.isfinite(left[idx]), np.maximum(left[idx], 0.0), 0.0)
     S[LEDGE] = 0.0
+    _apply_exported(tr, S, md, params)
     return S
+
+
+def _apply_exported(tr: Trace, S: np.ndarray, md: np.ndarray, params: HeroParams) -> None:
+    """Replace reconstructed rows by the oracle's own values where STATE carries them (hero.tm, hero.alpha;
+    cross-module decision 5). Reconstruction errors they remove: the phase interval (the alpha lanes collapse to
+    one), gravity scale after air hang, the queue step counters (a press queued before the window), nail and damage
+    recoil left, attack and downspike timers when a flag onset was missed (pause, scene load, first frame)."""
+    if tr.alpha_log is not None:
+        a = tr.alpha_log
+        ok = np.isfinite(a)
+        for r in (ALPHA, ALO, AHI):
+            S[r] = np.where(ok, a, S[r])
+    if tr.tm is None:
+        return
+    col = {k: tr.tm[:, i] for i, k in enumerate(TM_KEYS)}
+
+    def put(row: int, v: np.ndarray, where: np.ndarray | bool = True) -> None:
+        S[row] = np.where(np.isfinite(v) & where, v, S[row])
+
+    put(INV_T, np.maximum(col["inv"], 0.0))
+    put(MODE_T, params.hurt_recoil_time - col["recoil"], md == M_HURT_RECOIL)
+    put(RSTEPS, col["recoil_steps"], S[RDIR] != 0)
+    put(ATK_CD, np.maximum(col["atk_cd"], 0.0))
+    put(ATK_T, col["atk_t"], S[ATTACKING] > 0)
+    put(JSTEPS, col["jump_steps"], S[JUMPING] > 0)
+    put(JDSTEPS, col["jumped_steps"])
+    put(MODE_T, col["ds"], (md == M_DS_ANTIC) | (md == M_DS_SPIKE))
+    put(DS_REC, col["ds_rec"], S[DS_REC] >= 0)
+    put(GS, col["grav"])
+    # queue counters: the oracle exports the step count while the queue flag is on and -1 otherwise
+    for row, k in ((JQ, "qj"), (AQ, "qa"), (QQ, "qt")):
+        v = col[k]
+        S[row] = np.where(np.isfinite(v), np.where(v >= 0, v, -1.0), S[row])
 
 
 def _replay_gravity(tr: Trace, modes: np.ndarray, params: HeroParams) -> tuple[np.ndarray, np.ndarray]:
@@ -1474,9 +1808,16 @@ def _replay_gravity(tr: Trace, modes: np.ndarray, params: HeroParams) -> tuple[n
     return gs, hang
 
 
-def phase(tr: Trace, fdt: float | None = None) -> np.ndarray:
-    """Render phase alpha per frame from the logged dt / fs sequence: alpha_n = alpha_{n-1} + dt_n / fdt - fs_n must
-    stay in [0, 1); the feasible interval for alpha is propagated forward and backward and its midpoint taken."""
+def phase(tr: Trace, fdt: float | None = None, causal: bool = False) -> np.ndarray:
+    """Render phase alpha per frame (the midpoint of phase_interval)."""
+    return phase_interval(tr, fdt, causal)[0]
+
+
+def phase_interval(tr: Trace, fdt: float | None = None, causal: bool = True
+                   ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """(midpoint, lo, hi) of the feasible render phase per frame from the logged dt / fs sequence: alpha_n =
+    alpha_{n-1} + dt_n / fdt - fs_n must stay in [0, 1). The interval is propagated forward (causal: what the
+    planner knows at that frame) and, with causal=False, also backward from the later frames (replays only)."""
     fdt = fdt or FDT
     n = len(tr)
     inc = tr.dt / fdt - tr.fs
@@ -1490,77 +1831,81 @@ def phase(tr: Trace, fdt: float | None = None) -> np.ndarray:
             a_lo, a_hi = 0.0, 1.0           # inconsistent (pause, scene load): restart
         a_lo, a_hi = max(a_lo, 0.0), min(a_hi, 1.0)
         lo[i], hi[i] = a_lo, a_hi
-    b_lo, b_hi = lo[-1], hi[-1]
-    for i in range(n - 2, -1, -1):          # backward
-        b_lo, b_hi = b_lo - inc[i + 1], b_hi - inc[i + 1]
-        c_lo, c_hi = max(b_lo, lo[i]), min(b_hi, hi[i])
-        if c_lo <= c_hi:
-            lo[i], hi[i] = c_lo, c_hi
-        b_lo, b_hi = lo[i], hi[i]
-    return 0.5 * (lo + hi)
+    if not causal and n:
+        b_lo, b_hi = lo[-1], hi[-1]
+        for i in range(n - 2, -1, -1):      # backward
+            b_lo, b_hi = b_lo - inc[i + 1], b_hi - inc[i + 1]
+            c_lo, c_hi = max(b_lo, lo[i]), min(b_hi, hi[i])
+            if c_lo <= c_hi:
+                lo[i], hi[i] = c_lo, c_hi
+            b_lo, b_hi = lo[i], hi[i]
+    return 0.5 * (lo + hi), lo, hi
 
 
-# ---- knockback envelope (DESIGN §3.5.2) -----------------------------------------------------------------------
+# ---- runtime residual monitor (DESIGN §3.5.2) -----------------------------------------------------------------
 
-@dataclass(slots=True)
-class Envelope:
-    """Collider boxes the hero can occupy after a hit, per frame from the hit frame (index 0 = the hit frame):
-    boxes [V, T+1, 4] one trajectory per variant (physics phase x frame time x input class), union [T+1, 4] their
-    bounding box per frame, no_input [T+1] True while every variant is still in the hit-stop or the recoil."""
-    side: str
-    boxes: np.ndarray
-    union: np.ndarray
-    no_input: np.ndarray
+class ResidualMonitor:
+    """Compares the observed collider centre with what the model predicted h frames earlier for the commands that
+    were actually executed, and reports to the supervisor (I4 confidence "kinematics", DESIGN §3.7.2).
 
-    def control_frame(self) -> int:
-        """First frame after the hit at which some variant has control again."""
-        free = np.flatnonzero(~self.no_input)
-        return int(free[0]) if len(free) else len(self.no_input)
+        mon = ResidualMonitor()
+        mon.predict(f, roll.centre[k])          # each tick: the lane of the plan that was sent, from frame f
+        mon.observe(f, hero_centre)             # each STATE: residuals of every prediction that targets f
+        mon.invalidate()                        # an unpredicted contact event, a harness op or a scene change
+        mon.status()                            # per horizon: n, share within tol, p99, max; ok; confidence
 
+    Predictions made before a contact event the plan did not contain are dropped (invalidate), not scored: the
+    monitor watches the model, the threat layer's misses are reported by the threat layer. ok goes false when the
+    share within tol at the acceptance horizon (30 frames) falls below `target` over the last `window` residuals,
+    or one residual exceeds `hard_u`."""
 
-ENVELOPE_FRAME_TIMES = (0.01665, 1 / 60, 0.01671)    # p1 / mean / p99 of the logged unscaled frame time
+    def __init__(self, horizons: tuple[int, ...] = (1, 6, 30), tol: float = 0.1, window: int = 600,
+                 target: float = 0.99, hard_u: float = 0.5, min_n: int = 60):
+        self.horizons = tuple(sorted(horizons))
+        self.tol, self.window, self.target, self.hard_u, self.min_n = tol, window, target, hard_u, min_n
+        self.pending: dict[int, list[tuple[int, float, float]]] = {}     # target frame -> [(h, x, y)]
+        self.err = {h: np.full(window, np.nan) for h in self.horizons}
+        self.k = {h: 0 for h in self.horizons}
+        self.n = {h: 0 for h in self.horizons}
+        self.worst = 0.0
+        self.dropped = 0
 
+    def predict(self, frame: int, centres: np.ndarray) -> None:
+        """centres [T+1, 2]: the executed lane's collider centres from `frame` (index 0) on."""
+        for h in self.horizons:
+            if h < len(centres):
+                self.pending.setdefault(frame + h, []).append((h, float(centres[h, 0]), float(centres[h, 1])))
 
-def knockback_envelope(start: np.ndarray, side: str, params: HeroParams, terrain: Terrain2D | None = None,
-                       extra_frames: int = 0, alphas: Iterable[float] = (0.0, 0.2, 0.4, 0.6, 0.8),
-                       frame_times: Iterable[float] = ENVELOPE_FRAME_TIMES) -> Envelope:
-    """Reachable collider boxes after a hit taken from `side` ("left" / "right": the impact side, as in the oracle
-    "damage" event) to a hero in the state `start` (the frame before the hit), under any input (DESIGN §3.5.2).
+    def observe(self, frame: int, centre: tuple[float, float]) -> None:
+        for f in [f for f in self.pending if f < frame]:
+            self.dropped += len(self.pending.pop(f))       # skipped frames: nothing observed for them
+        for h, x, y in self.pending.pop(frame, ()):
+            e = float(np.hypot(centre[0] - x, centre[1] - y))
+            self.err[h][self.k[h] % self.window] = e
+            self.k[h] += 1
+            self.n[h] += 1
+            self.worst = max(self.worst, e)
 
-    The hit-stop and the damage recoil take no input (hero_state no_input), so until control returns the spread
-    comes only from timing: the physics phase at the hit (10 to 12 recoil steps) and the frame times (the hit-stop
-    lasts 13 to 15 frames: FreezeMoment sums unscaled time). The recoil moves (+-15, 7.5) u/s away from the impact
-    side for RECOIL_DURATION 0.2 s (3.0 u by 1.5 u in open air), stopped by walls and ceilings; the logged hits of
-    the trial run follow it (ssbot.tools.kin_check, knockback section). With extra_frames, the variants continue
-    under the 6 bang-bang input classes (left / none / right, jump held or not) for that many frames after the
-    longest no-input period. Weighted Anklet (knockback x0.5, gameplay "weighted_anklet") is not modelled: check the
-    loadout audit before relying on the envelope with it equipped."""
-    ev_bit = EV_HURT_L if side == "left" else EV_HURT_R
-    T0 = 34                                   # hit-stop (<= 15) + recoil (<= 14) + margin
-    T = T0 + int(extra_frames)
-    inputs = [0] if not extra_frames else [m | j for m in (0, B_LEFT, B_RIGHT) for j in (0, B_JUMP)]
-    S0 = np.asarray(start, dtype=np.float64).reshape(K, -1)[:, :1]
-    lanes, masks, udts = [], [], []
-    for a in alphas:
-        for u in frame_times:
-            for m in inputs:
-                s = S0.copy()
-                s[ALPHA] = a
-                s[TS] = 1.0
-                lanes.append(s)
-                masks.append(np.full(T, m, dtype=np.int64))
-                udts.append(np.full(T, u))
-    S = np.concatenate(lanes, axis=1)
-    masks = np.stack(masks)
-    ev = np.zeros_like(masks)
-    ev[:, 0] = ev_bit
-    # the hit is applied in frame 1 of the rollout (= the hit frame): shift so index 0 is the frame before
-    r = rollout(S, masks, params, terrain, events=ev, udt=np.stack(udts))
-    boxes = r.box(params)[:, 1:]
-    noinp = ((r.flags & F_NO_INPUT) != 0)[:, 1:].all(axis=0)
-    union = np.stack([boxes[..., 0].min(axis=0), boxes[..., 1].min(axis=0), boxes[..., 2].max(axis=0),
-                      boxes[..., 3].max(axis=0)], axis=-1)
-    return Envelope(side, boxes, union, noinp)
+    def invalidate(self) -> None:
+        self.dropped += sum(len(v) for v in self.pending.values())
+        self.pending.clear()
+
+    def status(self) -> dict[str, Any]:
+        out: dict[str, Any] = {"horizons": {}, "dropped": self.dropped, "worst_u": round(self.worst, 4)}
+        for h in self.horizons:
+            e = self.err[h][np.isfinite(self.err[h])]
+            out["horizons"][h] = {"n": int(len(e)), "within": float(np.mean(e <= self.tol)) if len(e) else None,
+                                  "p99": float(np.percentile(e, 99)) if len(e) else None,
+                                  "max": float(e.max()) if len(e) else None}
+        acc = out["horizons"][self.horizons[-1]]
+        enough = acc["n"] >= self.min_n
+        recent_max = max((v["max"] or 0.0) for v in out["horizons"].values())
+        out["ok"] = (not enough or acc["within"] >= self.target) and recent_max <= self.hard_u
+        out["confidence"] = (acc["within"] if enough else 1.0) if recent_max <= self.hard_u else 0.0
+        return out
+
+    def confidence(self) -> float:
+        return float(self.status()["confidence"])
 
 
 def describe_state(S: np.ndarray, i: int = 0) -> dict[str, Any]:
