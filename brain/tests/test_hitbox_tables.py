@@ -4,6 +4,7 @@ template equals a box-overlap test), box distance, and the planner's batched num
 reference, 512 x 48 timing)."""
 import math
 import time
+from pathlib import Path
 
 import cv2
 import numpy as np
@@ -12,6 +13,7 @@ import pytest
 from ssbot.knowledge import hitbox_tables as hb
 
 C = hb.CELL_U
+KNOWLEDGE_NPZ = Path(__file__).resolve().parents[2] / "knowledge" / "1.0.30000" / "enemies" / "BellBeast_hitboxes.npz"
 
 
 def _box(x0, y0, x1, y1):
@@ -284,3 +286,32 @@ def test_support_query_matches_reference_and_meets_the_budget():
         hb.SupportQuery({"raw": _template([(0.0, _box(0, 0, 1, 1))])})
     with pytest.raises(ValueError):
         q.place("support/F1/world", 0.0, anchor=(0.0, 0.0))
+
+
+def test_support_query_budget_on_the_committed_bell_beast_templates():
+    """The planner's tick on the committed Bell Beast support (family templates + hero hurtbox): 512 x 48 hero
+    collider centres against 16 placements (all four families' world-frame support, each started 0.9-1.95 s ago, so
+    the queried times fall in their active windows), checked against the NumPy reference and timed."""
+    sup, _ = hb.load_templates(KNOWLEDGE_NPZ, prefix=hb.SUPPORT)
+    plan = hb.planner_templates({k: v for k, v in sup.items() if k.count("/") == 2})
+    q = hb.SupportQuery(plan)
+    keys = [f"support/{f}/world_all" for f in ("BB_CHARGE", "BB_LEAP", "BB_BURST", "BB_RAGE")]
+    place = [(keys[j % 4], 0.9 + 0.35 * (j // 4)) for j in range(16)]
+    for key, t_ref in place:
+        q.place(key, t_ref)
+    rng = np.random.default_rng(0)
+    x, y = rng.uniform(70, 100, (512, 48)), rng.uniform(0, 10, (512, 48))  # the arena, floor to mid-air
+    tk = np.arange(48) / 60.0
+    got = q.query(x, y, tk)
+    assert 0.2 < got.mean() < 1.0
+    ref = hb._query_ref([plan[k] for k, _ in place], [(i, t, None, 1) for i, (_, t) in enumerate(place)], tk,
+                        x[:64], y[:64])
+    assert np.array_equal(got[:64], ref)
+    times = []
+    for _ in range(200):
+        t0 = time.perf_counter()
+        q.query(x, y, tk)
+        times.append(time.perf_counter() - t0)
+    p99 = float(np.quantile(times, 0.99))
+    print(f"Bell Beast support, 512 x 48 x 16 placements: p50 {np.median(times) * 1e3:.3f} ms, p99 {p99 * 1e3:.3f} ms")
+    assert p99 < 3e-3

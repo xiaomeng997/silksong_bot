@@ -18,9 +18,10 @@ Exit codes: 0 ok; 1 nothing to scan; 3 validation failed (a contact farther than
 occupancy, a contact whose source had no exported damage collider and no export hole near it, or a contact outside
 every attack): nothing is written unless --allow-failed-validation (then coverage.validation.ok is false in the file).
 
-Cost (2026-10-01, i9-13900K, one core): about 0.25 ms per STATE frame decoded and scanned (three template frames,
-state boundaries, contact context), i.e. ~3 s per Bell Beast data episode (13k frames), ~30 s to stream to frame
-64000 of the human session, and ~20 s of template finishing, validation and dilation per 24 episodes.
+Cost (2026-10-01, i9-13900K, one core, the committed Bell Beast build): scanning 2.87 M STATE frames of 266 fights
+took 638 s (0.22 ms per frame, ~2.4 s per data episode; the human session's range streams in 2 s), and finishing the
+templates, validating 184,521 contacts in sample and held out, dilating, testing the decision covariates and writing
+took 117 s.
 """
 import argparse
 import json
@@ -137,6 +138,8 @@ def main(argv: list[str] | None = None) -> int:
         print("no fights to scan", *skipped, sep="\n  ", file=sys.stderr)
         return 1
     graph = json.loads(a.fsm_graph.read_text("utf-8")) if a.fsm_graph else None
+    from ssbot.record.recorder import find_repo_root, git_info
+    code = git_info(find_repo_root())  # the revision that runs the scan (files edited meanwhile do not count)
     b = BehaviourBuilder(SPECS[a.encounter], keep_paths=a.paths, fsm_graph=graph)
     t_all = time.perf_counter()
     for i, fight in enumerate(fights):
@@ -150,7 +153,7 @@ def main(argv: list[str] | None = None) -> int:
     rc = 0 if tables["coverage"]["validation"]["ok"] else 3
     if not a.report_only:
         try:
-            js, npz, tables = b.write(a.out or default_out(), allow_failed=a.allow_failed_validation)
+            js, npz, tables = b.write(a.out or default_out(), allow_failed=a.allow_failed_validation, code=code)
             print(f"wrote {js} ({js.stat().st_size / 1e3:.0f} KB), {npz} ({npz.stat().st_size / 1e3:.0f} KB)")
         except ValidationFailed as e:
             print(f"validation failed, nothing written: {e}", file=sys.stderr)

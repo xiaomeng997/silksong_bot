@@ -17,7 +17,12 @@ Frames: "anchor" templates are in the attacker's frame, x' = m * (x - ax), y' = 
 transform position when it first shows in the instance and m = -1 for an attack made facing left (the per-encounter
 direction table of ssbot.knowledge.behaviour_tables), so every directed template faces +x; to_anchor / from_anchor
 convert. "world" templates are in world coordinates: arena-fixed hazards (key <family>/world) and, for a support usable
-before the anchor (or the side) is known, every collider of the family (key <family>/world_all).
+before the anchor (or the side) is known, every collider of the family (key <family>/world_all). Self templates
+(ent/<type_key>/self, anchor frame) follow one hazard entity from where it armed: anchor = its transform position on
+its first armed frame, mirror 1, t from then. A falling or bouncing bell whose start varies between instances is
+covered by its self template wherever it starts (held out by recording, behaviour_tables entities.<tk>.self_template),
+while the union of the logged instances only covers the starts that were seen; before it arms, its arm position and
+time support (entities.<tk>.arm_pos) swept over the self template (dilated by half the ranges) is the support.
 
 Raster: CELL_U = 0.05 u cells on a lattice anchored at 0 (cell i covers [i, i + 1) * CELL_U), time bins of BIN_S =
 1/60 s of game time (bin k holds the samples with round(t / BIN_S) == k; game time stands still in hit-stop, so a
@@ -34,18 +39,23 @@ only the geometry of the hit frame, 4 only that of the frame before), so raw tem
 (enforced). Support templates (key prefix "support/", written by the behaviour builder) have the +-1 bin and the
 validated contact residual (behaviour_tables, attacks.<A>.residual_u) baked in (t_pad, pad_x / pad_y in the meta);
 planner templates are those dilated once more by the hero hurtbox half-extents plus a margin (HERO_HALF_U = 0.25 x
-1.0394 u: STATE hero.box is 0.5 x 2.0789 u on every frame of the trial run, the kinematics model's half_width and
-foot + head agree), so testing one point, the hero collider centre, is a conservative box-overlap test.
+1.0394 u: STATE hero.box is 0.5 x 2.0789 u on all 2.87 M frames of the Bell Beast build, behaviour_tables
+coverage.hero_box_u; the kinematics model's half_width and foot + head agree), so testing one point, the hero
+collider centre, is a conservative box-overlap test.
 
 Storage (.npz, no pickle): per template "<key>/bits" (nt, ny, ceil(nx / 8)) uint8 (np.packbits along x, cropped to
 the occupied cells) and "<key>/meta" (META_FIELDS); other arrays (boss paths, instance tables) ride along under their
 own keys. Accumulation keeps 64 x 64-cell tiles per time bin, so memory follows the occupied area, not the bounding
-box of an attack that crosses the whole arena.
+box of an attack that crosses the whole arena. The Bell Beast file (5.9 MB) holds the logged family templates (for the
+viewer) and 71 support templates, 208 MB of packed bits once loaded (the 15 s Rage world templates are most of it).
 
 Planner hot path (DESIGN §3.5.4: <= 512 candidates x 48 frames, p99 <= 3 ms per tick): SupportQuery packs every
 template's bits into one buffer once; per tick it takes placements (template, time offset, anchor, mirror) and runs one
-numba kernel over [N, T] centres (parity with the NumPy reference _query_ref is tested). 512 x 48 centres against 4
-placements: p50 0.46 ms, p99 1.5 ms (2026-10-01, i9-13900K while four game instances ran; tests/test_hitbox_tables.py).
+numba kernel over [N, T] centres (parity with the NumPy reference _query_ref is tested). On the committed Bell Beast
+support (2026-10-01, i9-13900K, tests/test_hitbox_tables.py): planner_templates of the 11 family templates takes
+0.7 s (all 71: 1.6 s, 234 MB); 512 x 48 centres against 16 world_all placements in their active windows p50 1.0 ms,
+p99 1.3-1.8 ms (4 placements: p99 0.6 ms, 32: 1.9 ms). The cost grows with the placements that are active at the
+queried times, so W3 should place only what is in support.
 """
 import math
 from collections.abc import Iterable, Sequence
@@ -63,7 +73,7 @@ SHIFT = 4  # cv2 fixed-point fraction bits for vertex coordinates
 FRAMES = ("anchor", "world")
 META_FIELDS = ("ix0", "iy0", "nx", "ny", "nt", "cell", "bin_s", "t0", "n_instances", "frame", "t_pad", "pad_x",
                "pad_y")
-HERO_HALF_U = (0.25, 1.0394)   # STATE hero.box half-extents (0.5 x 2.0789 u, every frame of the trial run)
+HERO_HALF_U = (0.25, 1.0394)   # STATE hero.box half-extents (0.5 x 2.0789 u on every logged frame)
 SUPPORT = "support/"
 
 

@@ -20,20 +20,25 @@ Output (BehaviourBuilder.build):
   dwell_s    per state game-time dwell quantiles (p0_5, p5, p50, p95, p99_5, n), from the frames of the fsm events
              (cumulative STATE "dt" = Time.deltaTime, so hit-stop counts as zero) with the FSM's own StateTime
              (t_in_prev) alongside; exits into a death state are left out.
-  decisions  every branching state: which decision-time covariates the choice depends on (probability only). Each
-             candidate (distance and side to the boss when it is visible, its hidden position when the oracle exports
-             it, hero world-x thirds over the observed range, phase, boss HP quarter, the previous attack family, its
-             run length, attacks since each family) gets a G-test of independence (Monte Carlo permutation test when
-             an expected count is < 5), Holm-corrected over all tests at ALPHA_TEST; significant ones are added in
-             order of p while they stay significant given the ones already kept (stratified test), and the choice is
-             tabulated on the kept ones. Every p-value is published. No distance bins are assumed.
+  decisions  every branching state: which decision-time covariates the choice depends on (probability only). The
+             candidates (each tagged V seen / O oracle only / D derived from what was seen before): distance and
+             side to the boss when it is visible, its hidden position when the oracle exports it, hero world-x thirds
+             over the observed range, phase, boss HP quarter, the fight's attack history (previous family, its run,
+             attacks since each family, the facing of the last directed attack, where the boss was last seen) and
+             this state's own choice history (last choice, its run, decisions since each outcome: the counters of
+             PlayMaker's SendRandomEventV3 max-repeat / max-miss rule). Each gets a G-test of independence (chi2 by
+             Cochran's rule, else a numba Monte Carlo permutation test of up to N_PERM_MAX draws), Holm-corrected over
+             all tests at ALPHA_TEST; significant ones are added in order of p while they stay significant given the
+             ones already kept (stratified test) and lower the log loss on held-out recordings (2 folds); the choice
+             is tabulated on the kept ones ("*" = the unconditional row). Every p-value and the held-out log loss are
+             published. No distance bins are assumed.
   attacks    per attack family: instance counts (by phase and direction), state sequence, durations, anchor support
-             (min/max; quantiles are probability only) and the hidden-position offset, time-to-damage per state,
-             hitbox windows (+-1 frame of export lag), damage, reach unions of the support templates and the
-             validated contact residual.
+             (min/max; quantiles are probability only), body-collider offsets in the anchor frame and the hidden-
+             position offset, time-to-damage per state, hitbox windows (+-1 frame of export lag) with presence per
+             phase, damage, reach unions of the support templates and the validated contact residual.
   entities   every damage source seen: category, src bits, collider kinds and names, FSM states with the fraction of
              exported frames their damage colliders are enabled (frames exported without colliders are counted
-             apart), what arms them, lifetimes.
+             apart), what arms them, lifetimes, where and when they arm (arm_pos) and their self template.
   build_info code revision and dirty flag, every input recording with its meta status and hashes, the npz sha256.
 The space-time templates (ssbot.knowledge.hitbox_tables) are accumulated in the same pass.
 
@@ -49,37 +54,60 @@ frames), so it is kept for statistics only.
 
 Validation (DESIGN §3.5.8 "inflated by the p99 residual", M2 round-1 review): every damage frame and every frame of a
 blocked contact (damage_blocked first_f..last_f) is a contact. Its distance from the hero hurtbox (STATE hero.box at
-f-1 and f) to the occupancy of the owning family's templates at t +- 1 bin is the residual, per template set (anchor
-frame + arena hazards; world_all; per state). Support templates ("support/<key>" in the npz) are the raw templates
-dilated by the largest residual of their set and +-1 bin, so every logged contact lies inside its support. A contact
-farther than R_FAIL_U from the occupancy, or whose source had no exported damage collider in f-2..f and was not
-exported without colliders then (an export hole), makes the build fail. Damage-dealing entities exported without any
-collider while not hidden are export holes (oracle bug after a savestate load: the boss's first Charge Emerge of every
-fight has colliders == [] although its body deals damage, M2 round-1 review); instances with holes are kept in the
-templates but left out of ttd and hitbox-window statistics, and the counts are reported. In-sample, the residual is
-the export-vs-contact gap; to see how well the support covers instances it was not built from, recordings alternate
-between N_FOLDS folds, the family-level templates are kept per fold (the full ones are their union), and every contact
-is also measured against the other fold's occupancy (attacks.<A>.residual_u.holdout, coverage.validation.heldout).
-hitboxes[].presence is the fraction of the instances entering a state in which the source was enabled there; a source
-that is present almost always but not always can point at an export gap the empty-collider check does not see.
+f-1 and f) to the logged occupancy at t +- 1 bin is the residual, per template set: anchor frame + arena hazards,
+world_all, per state (both), and the source entity's self template. Support templates ("support/<key>" in the npz)
+are the logged ones dilated by the largest residual of their set and +-1 bin, so every logged contact lies inside its
+support. A contact farther than R_FAIL_U from any of its sets, outside every attack, or whose source had no exported
+damage collider in f-2..f and was not exported without colliders then (an export hole), makes the build fail.
+Damage-dealing entities exported without any collider while not hidden are export holes (oracle bug after a savestate
+load: the boss's first Charge Emerge of every fight has colliders == [] although its body deals damage, M2 round-1
+review); the hitbox windows of the holed states and every ttd span containing a holed frame are left out of the
+statistics (the templates keep the instance), and the counts are reported. In sample the residual is the
+export-vs-contact gap; for instances the support was not built from, recordings alternate between N_FOLDS folds,
+every template is also kept per fold, and every contact is measured against the other fold's occupancy (residual_u
+.holdout, coverage.validation.heldout, also with +-HELD_T_BINS bins of timing slack).
+Self templates (ent/<type_key>/self): every armed stretch of a hazard entity relative to its position and time of
+arming. The family templates are the union of the logged instances, so a bell that starts anywhere in a range is
+covered only where some instance started; the self template follows it from wherever it starts (on 27 fights the
+Rage family template held out only 319 of 608 contacts, the bells' self templates 7,140 of 7,180; on all 266 fights
+both hold out every contact).
 
-Measured on Bell Beast (knowledge/1.0.30000/enemies/BellBeast.json, 2026-10-01: the trial run 20261001_121446
-(2 data-policy episodes), the closed recordings of run 20261001_122249, and the person's fight of 2026-09-30):
+Measured on Bell Beast (knowledge/1.0.30000/enemies/BellBeast.json, 2026-10-01: the trial run 20261001_121446 (2
+data-policy episodes), the 263 closed fights of run 20261001_122249 (i0..i3_000..002) and the person's fight of
+2026-09-30, frames 64000-68460: 266 fights, 2.87 M frames, 45,515 s of game time):
+- Instances: BB_CHARGE 3054, BB_LEAP 2821, BB_BURST 3031, BB_RAGE 266 (once per fight); no FSM edge or state with
+  fewer than 30 logged exits.
+- 184,521 contacts (11,676 hits, 172,845 i-frame-blocked frames): none uncovered, none unexplained, none outside an
+  attack; 1,297 (170 hits) had no exported collider and were explained by the first charge's export hole (13,679 holed
+  Charge Emerge frames over 266 fights, plus 70 Charge End / Dig In frames in the person's fight). Residual max:
+  Charge 0, Leap 0.153 (anchor) / 0.163 u (world_all), Burst 0.096 / 0.106, Rage 0.086; self templates 0-0.110 u.
+  Held out by recording: every contact lies inside the full build's support for the family sets, all but 2 of
+  184,521 for the per-state sets (both within +-4 bins), every one for the self templates.
+- STATE hero.box is 0.5 x 2.0789 u on all 2.87 M frames (hitbox_tables.HERO_HALF_U).
 - The decision chain Submerged -> Rage? -> Bell Burst? -> Choose Dir -> Set L|R -> Move Choice -> attack start runs
   within one frame after Submerged's 1.000-1.017 s. Set L / Set R name the side the boss emerges on (x 75.03 /
   95.72; y 5.49 for the charge, 0.99 for the leap; flipX False / True, every time) and it attacks toward the other
   side: Set L -> mirror +1, Set R -> mirror -1. The first attack after the wake comes straight from Submerged Init
   (no Set state; direction from flipX at the anchor): a charge from the right in every fight.
-- Rage? -> Rage Pos exactly once per fight, at the first decision with boss HP <= 75 (observed 60-75).
+- Decisions follow the SendRandomEventV3 counters, not distance (the boss is hidden at every decision, so distance to
+  it could not be tested on these recordings, which predate ents[].hidden): Choose Dir and Move Choice are 50/50
+  until one outcome has been missed twice, then forced (about 800 decisions per side, p >= 0.998); Bell Burst? never
+  bursts three times in a row and is forced after three misses (p 0.99), else 0.36-0.44, with fewer bursts at boss
+  HP > 75 %; held-out log loss 0.49 / 0.48 / 0.49 nats against 0.69 / 0.69 / 0.65 unconditional. Hero world x is
+  significant for Choose Dir alone (p 3e-29) and still in sample given the counters (p 3e-5), but does not lower the
+  held-out log loss, so it is not kept. Rage? -> Rage Pos exactly at the first decision of P1 with boss HP <= 75
+  (observed 60-75; held-out log loss 0.001). Choose 1st Pattern (Ptn L 134 / Ptn R 132) depends on nothing tested.
 - The FSM's own StateTime (fsm event t_in_prev) equals the frame-time dwell for every Control state.
 - The boss is not in "ents" (not in the HealthManager active list) from Submerged through the antic states, so the
   anchor is its first exported position: Charge Emerge and Leap Out 1.00-1.02 s, Burst Out 1.20-1.22 s, Rage Burst
-  2.2 s after the start. The burst emerges anywhere in x 81.2-91.2, unrelated to the hero; hence the world_all
+  2.20-2.23 s after the start. The burst emerges anywhere in x 81.2-91.2, unrelated to the hero; hence the world_all
   templates. With the oracle's ents[].hidden export the boss's underground position is recorded as anchor_hidden.
 - Boss colliders: a body box ("Boss Scene/Bone Beast" in damage events) and one poly, 7 points while charging,
   9 points while leaping ("PolyCollider", "LeapCollider"); all 2 masks, hazard ENEMY, parry bits COUNTER only.
-- AtkBell L / R (hazard; damage_hero + projectile; circle r 1.274) are launched by Fire Bells and outlive the attack;
-  DropBell L/L2/M/M2/R/R2 hang at y 13.74 and fall in the Rage pattern; in P2 Burst Out and Leap Land drop M2.
+- AtkBell L / R (hazard; damage_hero + projectile; circle r 1.274) arm on Burst Out's first frame 2 u left / right
+  of the boss and outlive the attack; DropBell L/L2/M/M2/R/R2 hang at y 13.74 and drop from an x that varies over
+  ~8 u per bell (e.g. M2 81.2-89.2): in the Rage pattern on a fixed schedule after Ptn L / Ptn R, and M2 in P2 at
+  Burst Out + 0.5 s and on Leap Land.
 """
 import bisect
 import functools
@@ -1579,12 +1607,15 @@ class BehaviourBuilder:
         for name, cap in [("run", RUN_CAP), ("choice_run", RUN_CAP)] + \
                 [(f"since_{fam}", SINCE_CAP) for fam in fams] + [(f"miss_{o}", SINCE_CAP) for o in outs]:
             cov[name], caps[name] = _cap_tail(cov[name], cap)
-        defs = {"dist_visible": f"|hero x - boss x| bin of {list(spec.dist_bins_u)} u, boss exported and not hidden",
-                "side_visible": "hero left (L) / right (R) of the visible boss",
-                "dist_hidden": "|hero x - hidden boss x| bin (oracle-only ents[].hidden position)",
+        defs = {"dist_visible": f"|hero x - boss x| bin of {list(spec.dist_bins_u)} u, boss exported and not hidden "
+                                f"(V)",
+                "side_visible": "hero left (L) / right (R) of the visible boss (V)",
+                "dist_hidden": "|hero x - hidden boss x| bin (O: the oracle's ents[].hidden position)",
                 "hero_x": f"hero world-x third over the observed range {_r(hx_lo, 2)}..{_r(hx_hi, 2)} (edges "
-                          f"{[_r(e, 2) for e in hx_e]})",
-                "phase": "encounter phase", "boss_hp": f"boss HP quarter of {spec.hp} (q1 <= 25 %)",
+                          f"{[_r(e, 2) for e in hx_e]}; V)",
+                "phase": "encounter phase (D: the phase mark is visible)",
+                "boss_hp": f"boss HP quarter of {spec.hp} (q1 <= 25 %; O: in the final run D = {spec.hp} minus the "
+                           f"damage the bot dealt)",
                 "prev": "family of the previous attack of the fight",
                 "run": f"consecutive attacks of that family (top level {caps['run']}+)",
                 "prev_dir": "facing of the last directed attack (history)",
@@ -1596,6 +1627,10 @@ class BehaviourBuilder:
                 "choice_run": f"times in a row this state chose that outcome (top level {caps['choice_run']}+)",
                 **{f"miss_{o}": f"decisions of this state since it last chose {o} (0 = the previous one; top level "
                                 f"{caps[f'miss_{o}']}+)" for o in outs}}
+        defs["observability"] = ("V: seen on screen at decision time; O: oracle only; D: derived from what was seen "
+                                 "before. The history covariates (prev, run, since_*, prev_dir, last_seen_x, "
+                                 "last_choice, choice_run, miss_*) are D: every outcome of these decisions shows as "
+                                 "the attack family and the side the boss emerges on.")
         return cov, defs
 
     def decisions(self, branching: list[str]) -> dict:
@@ -1663,6 +1698,8 @@ class BehaviourBuilder:
                 key = tuple(cov[k][i] for k in kept)
                 if all(v is not None for v in key):
                     groups["|".join(f"{k}={v}" for k, v in zip(kept, key)) or "all"][t.to] += 1
+            if kept:  # the unconditional row, for a decision whose conditioner is not observed
+                groups["*"] = Counter(t.to for t in trs)
             for g, cnt in sorted(groups.items()):
                 p, pu = dirichlet({o: cnt.get(o, 0) for o in outs})
                 table[g] = {"n": sum(cnt.values()), "counts": dict(cnt), "p": {k: _r(v) for k, v in p.items()},
@@ -2155,9 +2192,11 @@ class BehaviourBuilder:
             out[f"{fam}/fights"] = np.array([i.fight for i in ins])
         return out
 
-    def write(self, out_dir: Path, allow_failed: bool = False) -> tuple[Path, Path, dict]:
+    def write(self, out_dir: Path, allow_failed: bool = False, code: dict | None = None) -> tuple[Path, Path, dict]:
         """Write <enemy>.json and <enemy>_hitboxes.npz. Raises ValidationFailed (and writes nothing) when a contact
-        is uncovered or unexplained, unless allow_failed (then coverage.validation.ok stays false in the file)."""
+        is uncovered or unexplained, unless allow_failed (then coverage.validation.ok stays false in the file).
+        code: the git revision and dirty flag taken when the scan started (ssbot.record.recorder.git_info); taken
+        now when not given."""
         out_dir = Path(out_dir)
         b = self.build()
         tables = b.tables
@@ -2167,7 +2206,8 @@ class BehaviourBuilder:
                                    f"{v['outside_attacks']['n']} outside-attack contacts: "
                                    f"{(v['uncovered']['first'] + v['unexplained']['first'])[:3]}")
         from ssbot.record.recorder import find_repo_root, git_info
-        code = git_info(find_repo_root())  # before the outputs are written: their own change is not "dirty" code
+        if code is None:  # before the outputs are written: their own change is not "dirty" code
+            code = git_info(find_repo_root())
         out_dir.mkdir(parents=True, exist_ok=True)
         raw = {k: v for k, v in b.raw.items() if k.count("/") == 1}  # logged family templates (viewer); the rest
         npz = hb.save_templates(out_dir / f"{self.spec.enemy}_hitboxes.npz", {**raw, **b.support}, b.extra)

@@ -209,10 +209,11 @@ def synth():
     return b, info
 
 
-def _support_covers(built: bt.Built, contacts: list, frames=("anchor", "world_all")) -> dict:
+def _support_covers(built: bt.Built, contacts: list, frames=("anchor", "world_all", "self")) -> dict:
     """Every contact's hero collider centre (f-1 or f) inside the planner templates (support + hurtbox) of its
-    family, with the contact time as template time: {frame: number of contacts not covered}."""
-    keys = {k for k in built.support if k.count("/") == 2}
+    family (or, "self", of its hazard entity placed where it armed), with the contact time as template time:
+    {frame: number of contacts not covered}; contacts with a boss source count as covered for "self"."""
+    keys = {k for k in built.support if k.count("/") == 2 or k.startswith(f"support/{bt.SELF}/")}
     plan = hb.planner_templates({k: built.support[k] for k in keys})
     q = hb.SupportQuery(plan)
     missed = {f: 0 for f in frames}
@@ -225,6 +226,10 @@ def _support_covers(built: bt.Built, contacts: list, frames=("anchor", "world_al
                     q.place(f"support/{fam}/anchor", c.t, c.inst.anchor, c.inst.mirror or 1)
                 if f"support/{fam}/world" in plan:
                     q.place(f"support/{fam}/world", c.t)
+            elif frame == "self":
+                if c.arm is None:
+                    continue
+                q.place(f"support/{bt.SELF}/{c.tk}/self", c.T - c.arm[0], c.arm[1], 1)
             else:
                 q.place(f"support/{fam}/world_all", c.t)
             xs = np.array([[(b[0] + b[2]) / 2 for b in c.boxes]])
@@ -295,7 +300,8 @@ def test_synthetic_templates_follow_the_mirrored_dash(synth):
     assert not a.contains(t, -0.2 * j - 3.0, 0.0).any()
     assert tpls["A/Dash/anchor"].contains(j * DT, 0.2 * j, 0.5).all()
     wa = tpls["A/world_all"]  # world frame, both sides: usable before the side is known
-    assert wa.frame == "world" and wa.contains(t, 5.0 + 0.2 * j, 1.0).all() and wa.contains(t, 25.0 - 0.2 * j, 1.0).all()
+    assert wa.frame == "world" and wa.contains(t, 5.0 + 0.2 * j, 1.0).all()
+    assert wa.contains(t, 25.0 - 0.2 * j, 1.0).all()
     rock = tpls["B/world"]
     assert rock.frame == "world"
     k = np.arange(40)
@@ -344,7 +350,7 @@ def test_synthetic_contacts_are_validated_and_covered(synth):
     assert all(d == 0.0 for c in b.contacts for d in c.res.values())
     r = built.tables["attacks"]["A"]["residual_u"]
     assert r["sets"]["anchor"]["n"] == 13 and r["sets"]["anchor"]["max"] == 0.0
-    assert _support_covers(built, b.contacts) == {"anchor": 0, "world_all": 0}
+    assert _support_covers(built, b.contacts) == {"anchor": 0, "world_all": 0, "self": 0}
     sup = built.support["support/A/anchor"]
     assert sup.t_pad == 1 and sup.contains(19 * DT, 0.0, 0.0, tol_bins=0)  # the +-1 bin is baked in
 
@@ -507,7 +513,7 @@ def test_decision_covariates_keep_only_what_the_choice_depends_on():
         assert not d["tests"][name]["significant"], name
     assert "dist_visible" in d["untestable"] and "side_visible" in d["untestable"]
     tab = d["table"]
-    assert set(tab) == {"hero_x=W", "hero_x=C", "hero_x=E"}
+    assert set(tab) == {"hero_x=W", "hero_x=C", "hero_x=E", "*"} and tab["*"]["n"] == 600  # "*": unconditional
     assert tab["hero_x=W"]["p"]["Set L"] > 0.75 and tab["hero_x=E"]["p"]["Set L"] < 0.25
 
 
@@ -679,7 +685,7 @@ def test_trial_fixture_every_contact_is_covered_by_its_support(trial):
     assert v["ok"] and v["damage"] >= 8 and v["blocked_frames"] > 50
     cs = [c for c in b.contacts if c.inst is not None and c.boxes]
     assert len(cs) == v["contacts"] - v["no_hero_box"]
-    assert _support_covers(built, cs) == {"anchor": 0, "world_all": 0}
+    assert _support_covers(built, cs) == {"anchor": 0, "world_all": 0, "self": 0}
     for fam, a in built.tables["attacks"].items():
         r = a["residual_u"]
         assert r["sets"]["anchor"]["beyond_r_fail"] == 0, fam
@@ -694,11 +700,11 @@ def test_committed_knowledge_covers_every_fixture_contact(trial):
     hit and blocked contact of the fixture with its support templates plus the hero hurtbox."""
     b, _ = trial
     support, _ = hb.load_templates(KNOWLEDGE_NPZ, prefix=hb.SUPPORT)
-    keep = {k: v for k, v in support.items() if k.count("/") == 2}
+    keep = {k: v for k, v in support.items() if k.count("/") == 2 or k.startswith(f"support/{bt.SELF}/")}
     built = bt.Built({}, {}, keep, {})
     cs = [c for c in b.contacts if c.inst is not None and c.boxes]
     assert len(cs) > 60
-    assert _support_covers(built, cs) == {"anchor": 0, "world_all": 0}
+    assert _support_covers(built, cs) == {"anchor": 0, "world_all": 0, "self": 0}
     meta = json.loads(KNOWLEDGE_NPZ.with_name("BellBeast.json").read_text("utf-8"))
     assert meta["build_info"]["npz_sha256"] == bt._sha256(KNOWLEDGE_NPZ)
     assert meta["coverage"]["validation"]["ok"]
