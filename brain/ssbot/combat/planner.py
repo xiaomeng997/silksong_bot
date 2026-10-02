@@ -508,10 +508,11 @@ class Planner:
         # of them (the earliest bounces): the per-lane check costs about 0.1 ms a candidate
         pg = pg_all[~s_hit[pg_all]]
         if len(pg) > self.cfg.pogo_lanes_k:
-            first_bounce = np.argmax((ev[pg] & kin.EV_POGO) != 0, axis=1)
-            drop = pg[np.argsort(first_bounce, kind="stable")[self.cfg.pogo_lanes_k:]]
-            S[drop] = True
-            pg = pg[np.argsort(first_bounce, kind="stable")[:self.cfg.pogo_lanes_k]]
+            # the carried plan (the last row: CONTINUE of a started chain) is always checked, never dropped by the cap
+            first_bounce = np.argmax((ev[pg] & kin.EV_POGO) != 0, axis=1) - (pg == N - 1) * 10 ** 6
+            order = np.argsort(first_bounce, kind="stable")
+            S[pg[order[self.cfg.pogo_lanes_k:]]] = True
+            pg = pg[order[:self.cfg.pogo_lanes_k]]
         if len(pg):
             rl = kin.rollout(start, latched[pg], self.params, self.terrain, events=ev[pg], variants=self.cfg.variants,
                              lanes=True)
