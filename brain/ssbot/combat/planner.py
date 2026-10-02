@@ -707,8 +707,21 @@ class Planner:
                     np.full(1, -1, np.int64), np.zeros(1, np.int64), win)
         _attacks_of(box[0], fl[0], md[0], lat[0], 1, boss, okb, polys, starts, np.zeros(2), win)
         start = kin.initial_state(self.params, 85.0, 2.015 + self.params.foot)
-        kin.rollout(start, lat, self.params, self.terrain, events=np.zeros((1, T1 - 1), np.int64),
-                    variants=self.cfg.variants, lanes=True)
+        rl = kin.rollout(start, lat, self.params, self.terrain, events=np.zeros((1, T1 - 1), np.int64),
+                         variants=self.cfg.variants, lanes=True)
+        # the pogo lane gate and the hit kernels with a bell's octagon too: a fresh checkout has no numba cache, and
+        # these compiled mid-fight past the watchdog (live run 20261002_162847 from a new worktree: 2-3 episodes per
+        # worker "paused unasked", in the first charge and in a burst)
+        P0, S0, B0 = pt.octagon(1.274)
+        for pp, ss, bb in ((polys, starts, np.zeros(2)), (P0, S0, B0)):
+            pp, ss, bb = (np.ascontiguousarray(pp, np.float64), np.ascontiguousarray(ss, np.int64),
+                          np.ascontiguousarray(bb, np.float64))
+            cn = np.zeros(1, np.bool_)
+            _lanes_connect(np.ascontiguousarray(rl.var_box), np.ascontiguousarray(rl.var_flags),
+                           np.ascontiguousarray(rl.var_mode), np.ascontiguousarray(lat), 1, boss, okb, pp, ss, bb,
+                           win, cn)
+            _first_hits(box, fl, md, lat, 1, boss, okb, pp, ss, bb, np.full(1, -1, np.int64),
+                        np.full(1, -1, np.int64), np.zeros(1, np.int64), win)
 
     def _pogo_pick(self, cs, f: Forecast, start, T: int):
         """The fine pogo grid pruned by the boss's predicted path: the pogo_k grid rows whose spike frame finds the
