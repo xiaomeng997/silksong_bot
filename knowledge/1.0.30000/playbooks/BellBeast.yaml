@@ -44,6 +44,14 @@ punish:
   - {state: Dig In, phase: recover, note: "0.40-0.43 s, then underground"}
   - {state: Leap Land, phase: recover, note: "1.07-1.10 s on the floor 16-27.75 u from its anchor"}
   - {state: Rage Roar, phase: roar, note: "1.5 s roaring at x 86.21"}
+  # The person's experience (2026-10-02): beside the boss during the bell throw, two hits, then dodge the bells. The
+  # support agrees (margins 0.15 / 0.25 u, floor, anchor frame): the eruption covers x' -3.5..3.5 for 0.15 s, the body
+  # x' -2.5..2.5 to 0.85 s; the thrown bells land at x' +-2.5..4.5 from 0.95 s and roll out; x' +-3.5..4.5 is free
+  # from 0.2 to 0.85 s and the centre from 0.85 to 1.85 s. Planner ticks with Burst Out as a punish window find safe
+  # attack plans from x' -4.5..-3.5 from 0.25 s into it (17-127 safe candidates) and a way out over or inside the
+  # bells at 0.6 s. The first version waited 5.5 u beside the burst before the eruption (run 20261002_041819); the
+  # prepare stance stays 10 u out, the punish starts once the boss is up.
+  - {state: Burst Out, phase: burst, note: "0.9 s drawn after the eruption; bells land beside it at 0.95 s"}
 
 # Pre-positioning before a punish window, in the attack's anchor frame (x' along the attack from its anchor; side
 # "attack": the attack's own direction, "hero": the side the hero is on). Live runs 2026-10-02 (3 CLEARs, 225-239 s):
@@ -53,7 +61,7 @@ punish:
 # rolls out at about 11 u/s, bouncing up to 4.85 u: support/ent/BoneBeast AtkBell R/self). Waiting 5.5 u beside the
 # burst to punish it (first version) put the hero where the falling bell's support met the eruption's: FORCED_RISK
 # through Burst Out and a bell hit in 6 of 6 QUITs of run 20261002_041819. 10 u leaves room to jump the rolling bell;
-# Burst Out is not a punish window.
+# Burst Out became a punish window again on 2026-10-02 (see punish).
 prepare:
   # A charge: wait 14 u in front of its anchor and jump it in place (hold 48 frames): 17 safe jump timings there
   # against the charge's support (margins 0.15 / 0.25 u, Bone_05 walls), landing 13.8 u out, next to where the
@@ -110,6 +118,7 @@ weights:
   stance: 0.6             # per u from the stance at the end of the horizon
   risk: 3.0               # per unit of the end position's future support coverage
   waste: 0.6              # per attack press that hits nothing
+  cast_waste: 2.0         # per Silkspear cast that hits nothing (4 silk of the Bind's 9), on top of waste
   face: 0.3               # facing the boss at the end
   ground: 0.2             # on the floor at the end
   cont: 0.15              # keeping the previous plan (hysteresis)

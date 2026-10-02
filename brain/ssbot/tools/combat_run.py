@@ -5,6 +5,8 @@
     ../scripts/uv.cmd run python -m ssbot.tools.combat_run run --instances 0,1,2,3 --encounter BellBeast --mode data
         --episodes 50 [--hours 2] [--no-record] [--seed 0]
     ../scripts/uv.cmd run python -m ssbot.tools.combat_run summary C:/ssbot/data/runs/m2/<run>
+    ../scripts/uv.cmd run python -m ssbot.tools.combat_run stop C:/ssbot/data/runs/m2/<run>     # graceful stop
+    ../scripts/uv.cmd run python -m ssbot.tools.combat_run seal C:/ssbot/data/runs/m2/<run>     # after a hard kill
 
 run: one worker process per instance (each has its own link and recorder; the STATE stream is too heavy for one
 Python process to decode for four instances). Each worker: load sandbox slot 1 from the title if needed (DebugMod
@@ -15,6 +17,12 @@ Writes <run>/attempts_i<N>.jsonl (one AttemptRecord per line) and, unless --no-r
 
 Modes: "data" (behaviour logging: a lethal hit is counted, play goes on, random HP / silk / position at the wake),
 "eval" (a lethal hit ends the episode as WOULD_DIE; HP and silk as the route has them).
+
+Stopping: a worker ends after its current episode when <run>/STOP or the agents' stop file (STOP_FILES) exists
+(`stop` writes <run>/STOP); on Ctrl+C / Ctrl+Break it drops the episode in progress. Either way it closes its
+recorder on the way out (meta.json status "closed"). A process killed outright (TerminateProcess, taskkill /F)
+cannot: `seal` marks such recordings "aborted" (their chunks are intact; the reader rebuilds a missing index from
+the data).
 """
 import argparse
 import hashlib
@@ -29,6 +37,11 @@ from datetime import datetime
 from pathlib import Path
 
 RUNS = Path(r"C:\ssbot\data\runs\m2")
+STOP_FILES = (Path(r"C:\ssbot\sandbox\STOP_AGENTS"),)
+
+
+def stop_requested(run_dir: Path) -> bool:
+    return (run_dir / "STOP").exists() or any(f.exists() for f in STOP_FILES)
 
 
 def git_rev() -> str | None:
@@ -99,6 +112,9 @@ def worker(a: argparse.Namespace) -> int:
     fails_in_row = 0
     try:
         while k < a.episodes and (deadline is None or time.monotonic() < deadline):
+            if stop_requested(run_dir):
+                print(f"[i{a.instance}] stop requested, ending after {k} episodes", flush=True)
+                break
             if not a.no_record and k % a.rotate == 0:
                 if rec_obj is not None:
                     rec_obj.close()
@@ -156,11 +172,35 @@ def run(a: argparse.Namespace) -> int:
         print(f"worker i{i}: pid {procs[-1][1].pid}", flush=True)
     print(f"run dir: {run_dir}", flush=True)
     rc = 0
-    for i, p, log in procs:
-        rc |= p.wait()
-        log.close()
+    try:
+        for i, p, log in procs:
+            rc |= p.wait()
+            log.close()
+    except KeyboardInterrupt:          # Ctrl+C / Ctrl+Break: the workers finish their episode and close up
+        (run_dir / "STOP").write_text("interrupted\n", encoding="utf-8")
+        for i, p, log in procs:
+            try:
+                rc |= p.wait()
+            except KeyboardInterrupt:
+                pass
+            log.close()
     summary(run_dir)
     return rc
+
+
+def seal(run_dir: Path) -> int:
+    """Mark recordings a killed worker left "recording" as "aborted" (no live worker may still write them)."""
+    n = 0
+    for meta_p in sorted((run_dir / "rec").glob("*/*/*/meta.json")):
+        m = json.loads(meta_p.read_text(encoding="utf-8"))
+        if m.get("status") == "recording":
+            m["status"] = "aborted"
+            m["error"] = m.get("error") or "worker killed before it closed the recorder (sealed by combat_run seal)"
+            meta_p.write_text(json.dumps(m, indent=1), encoding="utf-8")
+            print(f"sealed {meta_p.parent}")
+            n += 1
+    print(f"{n} recording(s) sealed")
+    return 0
 
 
 def load_attempts(run_dir: Path) -> list[dict]:
@@ -236,11 +276,18 @@ def main(argv: list[str] | None = None) -> int:
     s = sub.add_parser("summary")
     s.add_argument("run_dir", type=Path)
     s.add_argument("more", type=Path, nargs="*", help="more runs pooled with the first")
+    for name in ("stop", "seal"):
+        sub.add_parser(name).add_argument("run_dir", type=Path)
     a = ap.parse_args(argv)
     if a.cmd == "run":
         return run(a)
     if a.cmd == "_worker":
         return worker(a)
+    if a.cmd == "stop":
+        (a.run_dir / "STOP").write_text("requested\n", encoding="utf-8")
+        return 0
+    if a.cmd == "seal":
+        return seal(a.run_dir)
     summary(a.run_dir, a.more)
     return 0
 
