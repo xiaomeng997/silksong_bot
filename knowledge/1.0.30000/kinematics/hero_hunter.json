@@ -53,12 +53,15 @@
  "cast_catch_speed": 21.0,
  "cast_catch_decay": 0.7,
  "cast_silk": 4,
- "bind_time": 1.3666,
+ "bind_time": 1.36,
  "bind_decay": 0.85,
  "bind_vy_cap": 7.5,
  "bind_vy_cap_down": 12.0,
  "bind_end_vy": -0.25,
  "bind_silk": 9,
+ "bind_break_before": 1.2,
+ "wf_bias_wait": 0.0,
+ "wf_bias_up": 0.0,
  "silk_max": 9,
  "lock_decay": 0.86,
  "ledge_steps": 4,
@@ -101,12 +104,16 @@
  ],
  "bind_time_variants": [
   [
-   1.35,
-   0.666
+   1.34,
+   0.278
+  ],
+  [
+   1.36,
+   0.556
   ],
   [
    1.37,
-   0.333
+   0.167
   ]
  ],
  "jump_heights": [
@@ -491,8 +498,8 @@
   "cast_catch_decay": "kin_fit: vx ratio per catch step (n=776)",
   "bind_decay": "kin_fit: vx ratio per step in an air bind (n=16)",
   "bind_vy_cap_down": "kin_fit: |vy| at clipped air bind presses / decay (falling) (n=2)",
-  "bind_time": "kin_fit: Bind: scaled time relinquished (n=3)",
-  "bind_time_variants": "kin_fit: Bind runs per frame count (n=3)",
+  "bind_time": "kin_fit thresholds: the most frequent Bind length (82 frames) of 18 binds in live i0_000 and i0-3_002 (the held-out recordings are not used)",
+  "bind_time_variants": "Bind runs per frame count, 18 binds of live i0_000 + i0-3_002: 81 / 82 / 83 frames end at float32 dt sums in (1.3333, 1.3499] / (1.3500, 1.3666] / (1.3666, 1.3820]; the 37 binds of the 8 held-out recordings fall in the same three intervals (shares 0.24 / 0.51 / 0.24)",
   "bind_end_vy": "kin_fit: vy in the first frame after a bind (n=3)",
   "lock_decay": "kin_fit: vx ratio per step while another FSM holds control (n=437)",
   "land_slop_lo": "kin_fit: late contacts end in [-0.0077, 0.0048] (n=122)",
@@ -528,7 +535,8 @@
   "bind_silk": "decompiled HeroController / crest config (docs/facts/1.0.30000 hero_constants.json, crests.json) or a code constant; not refitted",
   "silk_max": "decompiled HeroController / crest config (docs/facts/1.0.30000 hero_constants.json, crests.json) or a code constant; not refitted",
   "ledge_steps": "decompiled HeroController / crest config (docs/facts/1.0.30000 hero_constants.json, crests.json) or a code constant; not refitted",
-  "rdown_halve": "decompiled HeroController / crest config (docs/facts/1.0.30000 hero_constants.json, crests.json) or a code constant; not refitted"
+  "rdown_halve": "decompiled HeroController / crest config (docs/facts/1.0.30000 hero_constants.json, crests.json) or a code constant; not refitted",
+  "bind_break_before": "Bind charge: the first BindBurst frame comes 1.2 / 1.217 s after the Bind starts (42 binds); 22 of 22 logged hits in the charge started BindBreak, 0 of 1 in the burst (all 14 sources)"
  },
  "fit": {
   "frame_time": {
@@ -980,13 +988,9 @@
    "note": "Bind: scaled time relinquished"
   },
   "bind_runs": {
-   "value": [
-    1.35,
-    1.382,
-    1.3666
-   ],
-   "n": 3,
-   "note": "scaled s per bind"
+   "value": [],
+   "n": 18,
+   "note": "re-measured 2026-10-01 (kinematics fix round 3) on live i0_000 + i0-3_002: frames per bind {81: 5, 82: 10, 83: 3}; median dt sum 1.36664 s"
   },
   "bind_end_vy": {
    "value": -0.25,

@@ -389,13 +389,10 @@ def fit_casts(tr: Trace, modes: np.ndarray, f: Fit) -> None:
         f.set("cast_catch_speed", _rnd(np.median(cspeed), 3), len(cspeed), "|vx| when the catch starts", min_n=1)
     if cdecay:
         f.set("cast_catch_decay", _rnd(np.median(cdecay), 4), len(cdecay), "vx ratio per catch step", min_n=3)
-    bdur, bend, bdec, biv = [], [], [], []
+    bend, bdec = [], []
     for a, b in _runs(modes == km.M_BIND):
         if b >= len(tr) or tr.flag("recoilFrozen")[a:b + 1].any():
             continue
-        c = np.cumsum(tr.dt[a + 1:b + 1].astype(np.float32), dtype=np.float32)
-        bdur.append(float(c[-1]))
-        biv.append((float(c[-2]) if len(c) > 1 else 0.0, float(c[-1])))
         if modes[b] == km.M_NORMAL:
             bend.append(tr.vel[b, 1])
         if not ground[a]:
@@ -410,21 +407,6 @@ def fit_casts(tr: Trace, modes: np.ndarray, f: Fit) -> None:
         if bcap:
             f.set(key, _rnd(np.median(bcap), 3), len(bcap),
                   f"|vy| at clipped air bind presses / decay ({'rising' if sign > 0 else 'falling'})", min_n=1)
-    if bdur:
-        f.set("bind_time", _rnd(np.median(bdur), 4), len(bdur), "Bind: scaled time relinquished", min_n=1)
-        f.fit["bind_runs"] = {"value": [round(x, 4) for x in bdur], "n": len(bdur), "note": "scaled s per bind"}
-        frames = np.round(np.array(bdur) / f.p.frame_time).astype(int)
-        if len(set(frames.tolist())) > 1:
-            var = []
-            for nfr in sorted(set(frames.tolist())):
-                tc, _ = _threshold([x for x, k in zip(biv, frames) if k == nfr])
-                share = round(float(np.mean(frames == nfr)), 3)
-                if var and var[-1][0] == _rnd(tc, 5):     # a threshold on a knife edge serves two frame counts
-                    var[-1][1] = round(var[-1][1] + share, 3)
-                else:
-                    var.append([_rnd(tc, 5), share])
-            f.p.bind_time_variants = var
-            f.source["bind_time_variants"] = f"kin_fit: Bind runs per frame count (n={len(bdur)})"
     if bend:
         f.set("bind_end_vy", _rnd(np.median(bend), 3), len(bend), "vy in the first frame after a bind", min_n=1)
     lk = modes == km.M_LOCKED
@@ -434,6 +416,36 @@ def fit_casts(tr: Trace, modes: np.ndarray, f: Fit) -> None:
             rat.append(tr.vel[k, 0] / tr.vel[k - 1, 0])
     if rat:
         f.set("lock_decay", _rnd(np.median(rat), 4), len(rat), "vx ratio per step while another FSM holds control")
+
+
+def fit_bind_lengths(tr: Trace, modes: np.ndarray, f: Fit) -> None:
+    """Bind length: one float32 threshold per logged frame count (81 / 82 / 83 frames: variant-valued like the
+    Silkspear phases); the nominal value is the most frequent one. Binds are rare in the bot runs (3 in live i0_000),
+    so run_fit takes them from its `phases` sources."""
+    bdur, biv = [], []
+    for a, b in _runs(modes == km.M_BIND):
+        if b >= len(tr) or tr.flag("recoilFrozen")[a:b + 1].any():
+            continue
+        c = np.cumsum(tr.dt[a + 1:b + 1].astype(np.float32), dtype=np.float32)
+        bdur.append(float(c[-1]))
+        biv.append((float(c[-2]) if len(c) > 1 else 0.0, float(c[-1])))
+    if not bdur:
+        return
+    f.fit["bind_runs"] = {"value": [round(x, 4) for x in bdur], "n": len(bdur), "note": "scaled s per bind"}
+    frames = np.round(np.array(bdur) / f.p.frame_time).astype(int)
+    var = []
+    for nfr in sorted(set(frames.tolist())):
+        tc, _ = _threshold([x for x, k in zip(biv, frames) if k == nfr])
+        share = round(float(np.mean(frames == nfr)), 3)
+        if var and var[-1][0] == _rnd(tc, 5):     # a threshold on a knife edge serves two frame counts
+            var[-1][1] = round(var[-1][1] + share, 3)
+        else:
+            var.append([_rnd(tc, 5), share])
+    best = max(var, key=lambda v: v[1])[0]
+    f.set("bind_time", best, len(bdur), "Bind: the most frequent length's threshold (float32 dt sum)", min_n=1)
+    if len(var) > 1:
+        f.p.bind_time_variants = var
+        f.source["bind_time_variants"] = f"kin_fit: Bind runs per frame count (n={len(bdur)})"
 
 
 def fit_jitter(traces: list[Trace], f: Fit, hitches: int = 2) -> None:
@@ -626,9 +638,12 @@ def infer_scene_overrides(tr: Trace, terrain_msgs: dict, f: Fit) -> None:
             f.source[f"scenes.{name}"] = "kin_fit: hero boxes against the room-entry TERRAIN dump"
 
 
-def run_fit(sources: list[str], params: HeroParams, timing: list[str] | None = None) -> Fit:
+def run_fit(sources: list[str], params: HeroParams, timing: list[str] | None = None,
+            phases: list[str] | None = None) -> Fit:
     """Fit on `sources`; the frame-time jitter model on `timing` (default: the bot sources), a property of the machine
-    and the frame limiter rather than of the hero, so it may use every recording without fitting the held-out play."""
+    and the frame limiter rather than of the hero, so it may use every recording without fitting the held-out play;
+    the Bind length variants on `phases` (default: the bot sources; rare events, so more recordings than the fit:
+    2026-10-01 live i0_000 + i0-3_002, keeping the held-out ones out)."""
     f = Fit(params)
     traces = []
     for src in sources:
@@ -661,6 +676,13 @@ def run_fit(sources: list[str], params: HeroParams, timing: list[str] | None = N
     fit_downspike(tr, modes, f)
     fit_hurt(tr, modes, f)
     fit_casts(tr, modes, f)
+    if phases:
+        ptr = _concat([load_source(src, params)[0] for src in phases])
+        fit_bind_lengths(ptr, km.classify_modes(ptr), f)
+        f.fit["phase_data"] = {"value": [Path(s).as_posix() for s in phases], "n": len(ptr),
+                               "note": "traces of the Bind length variants"}
+    else:
+        fit_bind_lengths(tr, modes, f)
     fit_landing(tr, terrains, f)
     fit_jump_heights(tr, modes, f)
     for _, t, _, _ in traces:
@@ -725,9 +747,11 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--timing", nargs="*", default=None, help="sources of the frame-time jitter model (default: the "
                                                                "bot sources being fitted)")
+    ap.add_argument("--phases", nargs="*", default=None, help="sources of the Bind length variants (default: the bot "
+                                                              "sources being fitted)")
     a = ap.parse_args(argv)
     params = HeroParams.load(a.base) if a.base else HeroParams()
-    f = run_fit(a.sources, params, a.timing)
+    f = run_fit(a.sources, params, a.timing, a.phases)
     for k in HeroParams.VECTOR:
         f.source.setdefault(k, "decompiled HeroController / crest config (docs/facts/1.0.30000 hero_constants.json, "
                                "crests.json) or a code constant; not refitted")
