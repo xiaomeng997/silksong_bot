@@ -409,19 +409,26 @@ def hp_chain(rows: list[dict], boss_hits: list[tuple[int, dict]]) -> dict:
     hp_before must be the hp before the frame (the last exported hp minus the events since), and every exported hp
     must equal that running value, so an hp change without an event (a dropped "hit") or an event that disagrees with
     the export is a problem. A mismatch right after a gap in the rows (a dropped STATE carries its events with it) is
-    counted under "gaps" instead. Returns {checked, dmg, hp0, hp_end, gaps, problems}."""
+    counted under "gaps" instead. A new boss instance (another iid: a savestate load) restarts the chain, and the
+    totals are those of the last instance; events of another ent are ignored. The Bell Beast's hp only ever changes
+    by hits: in the trial run (26,892 STATEs, 2 fights) all 56 changes are -5 between consecutive exported frames and
+    none happens while it is not exported, apart from the reload to a fresh boss. Returns {checked, dmg, hp0, hp_end,
+    gaps, problems}."""
     by_f: dict[int, list[dict]] = defaultdict(list)
     for f, d in boss_hits:
         by_f[f].append(d)
     ev_fs = sorted(by_f)
     out = {"checked": 0, "dmg": 0, "hp0": None, "hp_end": None, "gaps": 0, "problems": []}
-    known, last_f, i = None, None, 0
+    known, last_f, iid, i = None, None, None, 0
 
     def events_until(f: int, gap: bool) -> None:
         nonlocal known, i
         while i < len(ev_fs) and ev_fs[i] <= f:
-            fe, evs = ev_fs[i], by_f[ev_fs[i]]
+            fe = ev_fs[i]
             i += 1
+            evs = [d for d in by_f[fe] if iid is None or d.get("ent") in (None, iid)]
+            if not evs:
+                continue
             top = max(d["hp_before"] for d in evs)
             if known is not None and top != known:
                 if gap:
@@ -440,6 +447,12 @@ def hp_chain(rows: list[dict], boss_hits: list[tuple[int, dict]]) -> dict:
         f = r["f"]
         gap = last_f is not None and f - last_f > 1
         last_f = f
+        new = r["boss"].get("iid") if r["boss"] is not None else None
+        if new is not None and new != iid:
+            events_until(f - 1, gap)
+            if iid is not None:                 # another instance: its own chain
+                known, out["dmg"], out["hp0"], out["hp_end"] = None, 0, None, None
+            iid = new
         events_until(f, gap)
         hp = r["boss"]["hp"] if r["boss"] is not None else None
         if hp is None:

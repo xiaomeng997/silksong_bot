@@ -234,6 +234,12 @@ def test_hp_chain_same_frame_overkill_and_gaps():
     # without the gap the same hp change is a problem
     rows = [{"f": f, "boss": {"hp": 10 if f < 5 else 5}} for f in range(10)]
     assert probe.hp_chain(rows, [])["problems"] == ["f5: ents hp 5, the hits so far leave 10"]
+    # a savestate load brings a fresh boss (another iid, full hp): a new chain; hits on another ent are ignored
+    rows = [{"f": f, "boss": {"iid": 1, "hp": 10 if f < 3 else 5}} for f in range(5)] +            [{"f": f, "boss": {"iid": 2, "hp": 10 if f < 8 else 0}} for f in range(5, 10)]
+    hits = [(3, {"ent": 1, "hp_before": 10, "hp_after": 5, "dmg": 5}), (8, {"ent": 2, "hp_before": 10, "hp_after": 0,
+            "dmg": 10}), (8, {"ent": 99, "hp_before": 40, "hp_after": 30, "dmg": 10})]
+    out = probe.hp_chain(rows, hits)
+    assert out["problems"] == [] and (out["hp0"], out["hp_end"], out["dmg"]) == (10, 0, 10)
 
 
 def test_fight_checks_need_hits_and_names(capsys):
