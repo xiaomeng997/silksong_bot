@@ -409,7 +409,7 @@ class PlannerPolicy:
                "pending": r.decision.pause_pending, "triggers": list(r.decision.triggers), "unpred": unpred,
                "ms": round(res.t_ms.get("total", 0.0), 3), "tail": res.tail_ok, "attack": res.attack,
                "attacks": res.attacks, "atk_conf": self.atk_mon.confidence(), "fam_p": self._fam_p(fcast),
-               "best_up": res.best_up, "hits": res.hits,
+               "best_up": res.best_up, "hits": res.hits, "pogo": dict(self.planner.pogo_log),
                "path": None if res.path is None else np.round(res.path[::4, :], 3).tolist()}
         self.ring.append(rec)
         hit = any(ev.get("k") in ("damage", "catastrophe", "would_die") for ev in s.get("ev") or ())

@@ -215,6 +215,8 @@ class Planner:
         self._audit = (np.zeros(0, np.int64), np.zeros(0, np.int64), np.zeros((0, 4)))
         self.last_pogo = 0            # candidates with a predicted bounce in the last tick
         self.last_recoil = 0          # ... with a predicted nail recoil
+        self.pogo_log = {"generated": 0, "lane_miss": 0, "accepted": 0}   # last tick's pogo plans: every lane
+        #                                                                     connects or rejected (S)
         self.jump_until = -1          # tick until which the pressed jump's hold schedule is committed
         self.prev_tail_ok = False
 
@@ -420,6 +422,7 @@ class Planner:
         self.last_pogo = 0
         self.last_recoil = 0
         self._fx_ev = None
+        self.pogo_log = {"generated": 0, "lane_miss": 0, "accepted": 0}
         modes = roll.mode
         if not (((roll.flags & F_ATTACKING) != 0).any() or (modes == M_DS_SPIKE).any()):
             return roll
@@ -466,9 +469,37 @@ class Planner:
             cur = _View(box, flags, mode, bound, fall)
         self._fx_ev = ev
         sub = np.flatnonzero(rows_all)
+        s_hit = np.zeros(N, bool)
         if len(sub):
             skip = ((cur.flags_all[sub] & F_INVULN) != 0) if enemy_only else np.zeros(cur.flags_all[sub].shape, bool)
-            S[sub] |= self._contacts(f, cur.bound[sub], tk, skip).any(axis=1)
+            s_hit[sub] = self._contacts(f, cur.bound[sub], tk, skip).any(axis=1)
+            S[sub] |= s_hit[sub]
+        # a pogo plan stands only if the down spike connects in every timing lane (DESIGN 3.5.6: a miss lands the hero
+        # on the boss): its lanes rolled out with the bounce, a lane whose spike meets no hurtbox rejects it (S)
+        pg = np.flatnonzero(rows_all & ((ev & kin.EV_POGO) != 0).any(axis=1))
+        self.pogo_log = {"generated": int(len(pg)), "lane_miss": 0, "accepted": 0}
+        if len(pg):
+            rl = kin.rollout(start, latched[pg], self.params, self.terrain, events=ev[pg], variants=self.cfg.variants,
+                             lanes=True)
+            V = rl.var_box.shape[1]
+            for n, c in enumerate(pg):
+                ok_all = True
+                for v in range(V):
+                    lst = _attacks_of(np.ascontiguousarray(rl.var_box[n, v]), np.ascontiguousarray(rl.var_flags[n, v]),
+                                      np.ascontiguousarray(rl.var_mode[n, v]), np.ascontiguousarray(latched[c]), face0,
+                                      np.ascontiguousarray(boss, np.float64), np.ascontiguousarray(okb),
+                                      np.ascontiguousarray(polys, np.float64), np.ascontiguousarray(starts, np.int64),
+                                      base, WINDOWS[self.cfg.attack_model])
+                    first_ds = next(((kd, j) for kd, k, j in lst if kd == 3), None)
+                    if first_ds is None or first_ds[1] < 0:
+                        ok_all = False
+                        break
+                if not ok_all:
+                    S[c] = True
+                    self.pogo_log["lane_miss"] += 1
+                else:
+                    S[c] = s_hit[c]           # every lane bounces: the miss branch does not happen in the model
+                    self.pogo_log["accepted"] += int(not S[c])
         return cur
 
     def warm_kernels(self) -> None:
