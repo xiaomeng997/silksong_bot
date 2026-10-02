@@ -542,4 +542,5 @@ def test_shipped_params_carry_the_jitter_model_and_the_jump_spread(p):
     assert len(q.cast_throw_variants) == 2 and len(q.cast_catch_variants) == 2
     holds = {j["hold"]: j for j in q.jump_heights}
     assert len(holds) >= 15 and all(j["spread"] < 0.5 for j in holds.values())
+    assert all(j["outside_model"] <= 0.005 for j in holds.values())        # the model's range holds the logged one
     assert holds[max(holds)]["logged"][2] == pytest.approx(5.456, abs=0.05)       # a full jump

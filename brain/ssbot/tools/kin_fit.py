@@ -473,8 +473,12 @@ def fit_jitter(traces: list[Trace], f: Fit, hitches: int = 2) -> None:
 
 def fit_jump_heights(tr: Trace, modes: np.ndarray, f: Fit, max_hold: int = 32) -> None:
     """Apex height above the takeoff per jump hold (latched frames of the jump button from the takeoff frame; 32 and
-    more is a full jump: the rise is cut only while vy > 0), logged against the model from rest over the physics phase (DESIGN §3.5.2: the hold -> height spread goes into the hazard
-    margin). Clean jumps only: from the ground, NORMAL mode and no contact event up to the apex."""
+    more is a full jump: the rise is cut only while vy > 0), logged against the model from rest over the physics
+    phase (400 values) and the jitter model's shortest, mean and p99.99 frame times (DESIGN §3.5.2: the hold ->
+    height spread goes into the hazard margin). The spread is the physics phase: where the 50 Hz steps fall among
+    the 60 Hz frames decides how many full-speed rise steps a hold gets (live i0_000 f 299681: 6 steps in a 6-frame
+    hold, which needs the phase inside a 0.0015-wide window, 0.19 u above the 5-step jumps). Clean jumps only: from the ground, NORMAL mode,
+    no contact event and no second jump press up to the apex (a re-press while rising stops the release cut)."""
     ev = km.derive_events(tr, modes) & ~km.EV_SILK
     jm = (tr.mask & km.B_JUMP) != 0
     ground = tr.flag("onGround")
@@ -490,7 +494,8 @@ def fit_jump_heights(tr: Trace, modes: np.ndarray, f: Fit, max_hold: int = 32) -
         apex, k = tr.box[i - 1, 1], i
         clean = True
         while k < min(len(tr), i + 90):
-            if not tr.valid[k] or modes[k] != km.M_NORMAL or ev[k] or tr.marks[k] or tr.f[k] - tr.f[k - 1] != 1:
+            if not tr.valid[k] or modes[k] != km.M_NORMAL or ev[k] or tr.marks[k] or tr.f[k] - tr.f[k - 1] != 1 or \
+                    (k >= i + h and jm[k]):
                 clean = False
                 break
             apex = max(apex, tr.box[k, 1])
@@ -503,14 +508,15 @@ def fit_jump_heights(tr: Trace, modes: np.ndarray, f: Fit, max_hold: int = 32) -
         return
     terrain = km.Terrain2D.from_boxes([(0.0, 0.0, 200.0, 2.0)])
     rest = 2.0 + f.p.skin + f.p.foot
+    alphas = np.tile((np.arange(400) + 0.5) / 400, 3)
+    udt = np.repeat([f.p.frame_time_lo, f.p.frame_time, f.p.frame_time_hi], 400)
     out = []
     for h in sorted(by):
         a = np.array(by[h])
-        alphas = np.linspace(0, 0.999, 24)
         S = np.repeat(km.initial_state(f.p, 50.0, rest)[:, None], len(alphas), axis=1)
         S[km.ALPHA] = alphas
-        masks = np.array([[km.B_JUMP] * h + [0] * 90] * len(alphas), dtype=np.int64)
-        r = km.rollout(S, masks, f.p, terrain)
+        masks = np.repeat(np.array([[km.B_JUMP] * h + [0] * 90], dtype=np.int64), len(alphas), axis=0)
+        r = km.rollout(S, masks, f.p, terrain, udt=np.repeat(udt[:, None], masks.shape[1], axis=1))
         m = r.box[:, :, 1].max(axis=1) - (rest - f.p.foot)
         out.append({"hold": int(h), "n": int(len(a)), "logged": [_rnd(a.min()), _rnd(np.median(a)), _rnd(a.max())],
                     "model": [_rnd(m.min()), _rnd(m.max())], "spread": _rnd(a.max() - a.min()),

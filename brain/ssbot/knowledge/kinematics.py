@@ -109,7 +109,9 @@ hull. The frame-time jitter model (kin_fit over 2.83 M gameplay frames of all bo
 3.1e-5 per frame above 0.018 s) sets the lanes' frame times and the knockback bound; a window with a hitch is left
 to the residual monitor (ResidualMonitor, DESIGN §3.5.2: residuals of the executed lane at 1 / 6 / 30 frames, I4
 confidence to the supervisor). HeroParams.jump_heights holds the apex height per jump hold length, logged (min,
-median, max) against the model over the phase: the hold -> height spread for the hazard margin (0.05-0.42 u).
+median, max) against the model over the phase and frame time: the hold -> height spread for the hazard margin
+(0.05-0.35 u, the 50 Hz steps falling differently among the frames; the model range holds every logged apex of
+live i0_000 within 4 mm).
 
 Implementation: the model state is one float64 array [K, N] (rows below) and the parameters one float64 vector. The
 NumPy functions here (_fixed_step, _apply_events, _update, _simulate) are the readable reference, array code over
