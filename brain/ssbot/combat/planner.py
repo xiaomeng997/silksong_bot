@@ -222,6 +222,7 @@ class Planner:
         self._audit = (np.zeros(0, np.int64), np.zeros(0, np.int64), np.zeros((0, 4)))
         self.last_pogo = 0            # candidates with a predicted bounce in the last tick
         self.last_recoil = 0          # ... with a predicted nail recoil
+        self._pogo_ok = np.zeros(0, bool)
         self.pogo_log = {"generated": 0, "lane_miss": 0, "accepted": 0}   # last tick's pogo plans: every lane
         #                                                                     connects or rejected (S)
         self.jump_until = -1          # tick until which the pressed jump's hold schedule is committed
@@ -334,6 +335,13 @@ class Planner:
         V[:N0] = counts[first[:N0]] >= 2
         if cont:
             V[-1] = safe[-1]
+        # an accepted pogo (every lane bounces, the bounce branch safe) passes the boss's body by design: the comfort
+        # margin would always rank it below plans keeping clearance, and as the only candidate of its first piece it
+        # never had V; its bounce is its way on (gate chunk 20261002_123347, 2 episodes replayed: accepted pogos in
+        # 107 of 936 charge ticks, chosen in none)
+        pz = self._pogo_ok[:N] if len(self._pogo_ok) >= N else np.zeros(N, bool)
+        S2 = np.where(pz, False, S2)
+        V = V | (pz & safe)
         bind_res = None
         if prefs.want_bind and ctx.want_bind:
             bind_res = self._bind(ws, start, hold, prefix, f, ctx)
@@ -449,6 +457,7 @@ class Planner:
         self.last_recoil = 0
         self._fx_ev = None
         self.pogo_log = {"generated": 0, "lane_miss": 0, "accepted": 0}
+        self._pogo_ok = np.zeros(len(latched), bool)
         modes = roll.mode
         if not (((roll.flags & F_ATTACKING) != 0).any() or (modes == M_DS_SPIKE).any()):
             return roll
@@ -530,6 +539,8 @@ class Planner:
                 else:
                     S[c] = s_hit[c]           # every lane bounces: the miss branch does not happen in the model
                     self.pogo_log["accepted"] += int(not S[c])
+                    if not S[c]:
+                        self._pogo_ok[c] = True
         return cur
 
     def warm_kernels(self) -> None:

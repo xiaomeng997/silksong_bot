@@ -350,7 +350,15 @@ class Forecast:
         t_left = tr.drawn_left(self.origin_t)
         ok[:] = tk <= t_left
         if tr.state in self.fc.no_hurtbox:
-            ok[:] = False
+            # no hurtbox while the boss stays in this state (its longest logged dwell), not over the whole horizon: the
+            # charge that follows the antic is hittable, and a pogo planned in the antic must see it (spike_audit on
+            # gate chunk 20261002_123347: no pogo plan was ever offered in Charge Emerge / Charge Antic)
+            st = PHASE_ROOT.get(tr.state, tr.state)
+            info = self.fc.model.states.get(st)
+            if info is None or tr.t_entry is None:
+                ok[:] = False
+            else:
+                ok[tk < tr.t_entry + info.dwell[1] - self.origin_t] = False
         # the vision view's tracker keeps the attack in last_family / last_anchor (ctx is the oracle's): without them
         # the box stood still while the boss moved (stage C run 20261002_093052, predict_audit: boss centre 7.3 u off
         # at +0.5 s for side slashes, 9.4 u at a down spike's active frame)
