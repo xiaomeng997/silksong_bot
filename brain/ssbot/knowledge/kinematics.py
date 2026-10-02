@@ -6,7 +6,7 @@ envelope is in ssbot.knowledge.knockback.
 
     params = HeroParams.load()                                  # knowledge/1.0.30000/kinematics/hero_hunter.json
     terrain = Terrain2D.from_message(terrain_msg, params.scene("Bone_05"))   # RecordingReader.terrain() payload
-    trk = StateTracker(params, terrain); trk.push(state)        # every STATE: O(1), 0.05 ms
+    trk = StateTracker(params, terrain); trk.push(state)        # every STATE: O(1), under 0.1 ms
     start = trk.state()                                         # [K, 1]: estimate_state(Trace.from_states(history),
                                                                 #   [last row], params, terrain=terrain), bit for bit
     hold = HoldState.from_act(state["act"])                     # or the planner's own, kept in step with its ACTIONs
@@ -51,8 +51,9 @@ Planner cost (13900K, Bone_05 terrain, 512 candidates x 48 frames, measured with
 nominal rollout p50 2.3 ms / p99 3.0 ms on one core, p50 0.47 / p99 0.8 ms with threads=4; the "bounds" lanes in the
 planner's form (lanes=False: no per-lane arrays, and a candidate that meets no hit-stop or world freeze runs 3 of the
 9, the others being identical for it) p50 1.4-1.5 ms / p99 1.9-2.2 ms with threads=4 (6.8 ms on one core), the
-"fast" lanes the same; knockback_hull p99 0.15 ms; the start state from StateTracker 0.05 ms per frame (rebuilding it
-from a 240-frame STATE tail costs 2.5 ms). So every candidate can carry its lanes' hull within the 3 ms budget.
+"fast" lanes the same; knockback_hull p99 0.15 ms; the start state from StateTracker under 0.1 ms per frame
+(push_row 0.06 ms; rebuilding it from a 240-frame STATE tail costs 2.5 ms). So every candidate can carry its lanes'
+hull within the 3 ms budget, the knockback hull included.
 
 Time base (trial run, 26 892 STATE frames; ssbot.tools.kin_fit):
 - Physics steps at fdt = 0.02 s of scaled time under the render (mean frame 0.0166662 s, p1 0.01665, p99 0.01671).
@@ -133,10 +134,10 @@ variants; Rollout.bound is their per-frame hull, flags_all / flags_any their fla
 lanes' frame times and the knockback bound (knockback.TimingGuard checks it at run time). ResidualMonitor (DESIGN
 §3.5.2, I4 "kinematics") re-rolls the executed masks and observed events from anchor states and checks the observed
 box against the lanes' hull at 1 / 6 / 30 frames; frames the model does not own (StateTracker.modelled: harness,
-scene, locked, nail arts, unexplained freezes, hitches) drop their windows. HeroParams.jump_heights holds the apex height per jump hold length, logged (min,
-median, max) against the model over the phase and frame time: the hold -> height spread for the hazard margin
-(0.05-0.35 u, the 50 Hz steps falling differently among the frames; the model range holds every logged apex of
-live i0_000 within 4 mm).
+scene, locked, nail arts, unexplained freezes, hitches) drop their windows. HeroParams.jump_heights holds the apex
+height per jump hold length, logged (min, median, max) against the model over the phase and frame time: the hold ->
+height spread for the hazard margin (0.05-0.35 u, the 50 Hz steps falling differently among the frames; the model
+range holds every logged apex of live i0_000 within 4 mm).
 
 Implementation: the model state is one float64 array [K, N] (rows below) and the parameters one float64 vector. The
 NumPy functions here (_fixed_step, _apply_events, _update, _simulate) are the readable reference, array code over
@@ -224,8 +225,8 @@ EV_FZ_ANY = EV_FZ_BOSS_DEATH | EV_FZ_BOSS_STUN | EV_FZ_QUICK | EV_FZ_ENEMY_DEATH
 EVENT_NAMES = {EV_RECOIL_L: "recoil_l", EV_RECOIL_R: "recoil_r", EV_POGO: "pogo", EV_HURT_L: "hurt_l",
                EV_HURT_R: "hurt_r", EV_LOCK: "lock", EV_UNLOCK: "unlock", EV_CATCH: "catch", EV_SILK: "silk",
                EV_RECOIL_DOWN: "recoil_down", EV_FZ_BOSS_DEATH: "freeze_boss_death",
-               EV_FZ_BOSS_STUN: "freeze_boss_stun", EV_FZ_QUICK: "freeze_quick", EV_FZ_ENEMY_DEATH: "freeze_enemy_death",
-               EV_FZ_BIND_BREAK: "freeze_bind_break"}
+               EV_FZ_BOSS_STUN: "freeze_boss_stun", EV_FZ_QUICK: "freeze_quick",
+               EV_FZ_ENEMY_DEATH: "freeze_enemy_death", EV_FZ_BIND_BREAK: "freeze_bind_break"}
 
 # rollout flags
 F_GROUND, F_JUMPING, F_ATTACKING, F_RECOIL, F_RELINQ, F_INVULN, F_NO_INPUT = (1 << i for i in range(7))
@@ -2259,10 +2260,11 @@ class StateTracker:
     """The model state at the latest frame of a live STATE stream, updated in O(1) per frame: the same rows that
     state_table / estimate_state give for the last row of the whole history (tests check every row of the fixtures),
     without re-reading a history window every tick (Trace.from_states + estimate_state on a 240-frame tail cost
-    about 2.5 ms per tick in Python; a push is about 0.1 ms). It also gives the frame's contact events (derive_events)
-    and whether the model owns the frame's motion (`modelled`, the rules of kin_check's categories: not a harness
-    operation, scene change, hazard respawn, death or savestate slide, not locked by another FSM or charging a nail
-    art, no world freeze, no hitch above frame_time_max), which ResidualMonitor needs.
+    about 2.5 ms per tick in Python; a push is under 0.1 ms, push_row 0.06 ms). It also gives the frame's contact
+    events (derive_events) and whether the model owns the frame's motion (`modelled`, the rules of kin_check's
+    categories: not a harness operation, scene change, hazard respawn, death or savestate slide, not locked by
+    another FSM or charging a nail art, no time-scale change the hit-stop and world-freeze model does not explain,
+    no hitch above frame_time_max), which ResidualMonitor needs.
 
         trk = StateTracker(params, terrain)
         trk.push(state)                       # every STATE (act.mask is the latched ACTION the game read)
@@ -2651,11 +2653,12 @@ class StateTracker:
 
 # ---- runtime residual monitor (DESIGN §3.5.2) -----------------------------------------------------------------
 
-# alarm levels of ResidualMonitor over its last 600 windows at 30 frames: below the worst of 808 k frames of held-out
-# play (trial i0_000, live i1_000, i2_001, i3_000: rolling share within 0.892 at its lowest, at most 58 windows more
-# than 0.5 u outside the hull, both after clusters of pogo / recoil / hit windows the model misses)
-MONITOR_ALARM_WITHIN = 0.88
-MONITOR_ALARM_FAR = 60
+# alarm levels of ResidualMonitor over its last 600 windows at 30 frames, with room below the worst of 808 k frames of
+# held-out play (trial i0_000, live i1_000, i2_001, i3_000: rolling share within 0.892 at its lowest, at most 58
+# windows more than 0.5 u outside the hull, both after clusters of pogo / recoil / hit windows the model misses); a
+# broken model (0.3 u off) drops the share towards 0 within the window
+MONITOR_ALARM_WITHIN = 0.85
+MONITOR_ALARM_FAR = 80
 
 
 class ResidualMonitor:
@@ -2676,13 +2679,13 @@ class ResidualMonitor:
         mon.confidence()                       # share within at the longest horizon; None while unknown
 
     Unknown is never safe: before min_n scored windows (after construction or reset(), which a new scene or terrain
-    needs) the state is "unknown" and confidence() None; pass it to safety.invariants.i4 only when it is not None (a missing
-    module counts as below its threshold). "degraded" when, over the last `window` scored windows at the longest
+    needs) the state is "unknown" and confidence() None; pass it to safety.invariants.i4 only when it is not None (a
+    missing module counts as below its threshold). "degraded" when, over the last `window` scored windows at the longest
     horizon, the share within tol falls below alarm_within or more than alarm_far of them lie more than far_u outside
     the hull. Held-out play (trial i0_000, live i1_000, i2_001, i3_000: 808 k frames, 808 k windows scored at 30
     frames, 1.2 % dropped) puts 99.4-99.8 % of the windows inside the hull (by recording; the nominal lane: 85-89 %),
     and never trips the alarm levels (MONITOR_ALARM_*); a model 0.3 u off trips it within the window (test). Cost:
-    about 0.17 ms per frame (one compiled rollout of the due anchors, 9 lanes), plus StateTracker.push 0.05 ms."""
+    about 0.17 ms per frame (one compiled rollout of the due anchors, 9 lanes), plus StateTracker.push under 0.1 ms."""
 
     def __init__(self, params: HeroParams, terrain: Terrain2D | None = None, horizons: tuple[int, ...] = (1, 6, 30),
                  tol: float = 0.1, window: int = 600, min_n: int = 60, alarm_within: float = MONITOR_ALARM_WITHIN,

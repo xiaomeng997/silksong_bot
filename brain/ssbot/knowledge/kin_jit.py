@@ -29,9 +29,9 @@ from ssbot.knowledge.kinematics import (
     P_DS_TIME, P_DS_VYMAX, P_DS_VYMIN, P_FDT, P_FOOT, P_G, P_HEAD, P_HURT_RAMP, P_HURT_SKIP, P_HURT_T, P_HURT_V,
     P_HURT_VY, P_HURT_WAIT, P_HW, P_INV_T, P_JQ, P_JSTEPS, P_JSTEPS_MIN, P_JUMP, P_LEDGE, P_LIFT, P_LOCK_DECAY,
     P_MAXFALL, P_POGO_J, P_POGO_JD, P_QQ, P_RDOWN_HALF, P_REL, P_RSTEPS, P_RUN, P_RV, P_SILK_MAX, P_SKIN, P_SLOP_HI,
-    P_SLOP_LO, PHASE, PREV, PX, PY, QQ, QX, QY, RDIR, RSTEPS, SILK, SX, SY, TOL, TOUCH, TS, TT_HEAD, VX, VY, ALO, AHI, LANDQ,
-    WF_PH, WF_T, WF_S, WF_DOWN, WF_WAIT, WF_UP, WF_TGT, P_BIND_BREAK, P_WF_BW, P_WF_BU, EV_FZ_BIND_BREAK, FREEZE_PRESETS,
-    WF_ORDER)
+    P_SLOP_LO, PHASE, PREV, PX, PY, QQ, QX, QY, RDIR, RSTEPS, SILK, SX, SY, TOL, TOUCH, TS, TT_HEAD, VX, VY, ALO, AHI,
+    LANDQ, WF_PH, WF_T, WF_S, WF_DOWN, WF_WAIT, WF_UP, WF_TGT, P_BIND_BREAK, P_WF_BW, P_WF_BU, EV_FZ_BIND_BREAK,
+    FREEZE_PRESETS, WF_ORDER)
 
 # world freeze presets in start order (kinematics.WF_ORDER): event bit, rampDown, wait, rampUp, target
 _WF = np.array([[float(b), *FREEZE_PRESETS[b]] for b in WF_ORDER])
@@ -817,8 +817,9 @@ def _bound_one(ri, run, S0, masks, events, dts, fss, udts, ft_v, alpha_sel, alph
         f_any[r, t] = 0
     for v in range(ft_v.shape[0]):
         if run[r, v]:
-            run_lane(r, v, r if v == 0 else np.int64(-1), S0, masks, events, dts, fss, udts, ft_v, alpha_sel, alpha_margin,
-                     P, TT, phys, rend, vel, modes, flags, box, final, bound, f_all, f_any)
+            o = r if v == 0 else np.int64(-1)
+            run_lane(r, v, o, S0, masks, events, dts, fss, udts, ft_v, alpha_sel, alpha_margin, P, TT,
+                     phys, rend, vel, modes, flags, box, final, bound, f_all, f_any)
 
 
 @njit(cache=True, error_model="numpy")
