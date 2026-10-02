@@ -266,15 +266,22 @@ def damage_boxes(e: dict) -> list[DamageBox]:
     return out
 
 
-def entity_pos(e: dict) -> tuple[float, float]:
-    """Entity.pos per §4.1: main body collider centre, else render_aabb centre, else the transform."""
+def entity_pos_ref(e: dict) -> tuple[tuple[float, float], tuple]:
+    """(Entity.pos per §4.1, which reference it is): main body collider centre, else render_aabb centre, else the
+    transform. Hidden entities (state_fields_m2.md §6: colliders always [], render_aabb nil when inactive) follow the
+    same rule. Velocity is not differenced across a change of reference (a 1-3 u jump, not motion)."""
     c = main_collider(e)
     if c is not None:
-        return _centre(c["verts_world"])
+        return _centre(c["verts_world"]), ("collider", c.get("name"), len(c["verts_world"]))
     r = e.get("render_aabb")
     if r:
-        return (r[0] + r[2]) * 0.5, (r[1] + r[3]) * 0.5
-    return float(e["pos"][0]), float(e["pos"][1])
+        return ((r[0] + r[2]) * 0.5, (r[1] + r[3]) * 0.5), ("render",)
+    return (float(e["pos"][0]), float(e["pos"][1])), ("transform",)
+
+
+def entity_pos(e: dict) -> tuple[float, float]:
+    """Entity.pos per §4.1: main body collider centre, else render_aabb centre, else the transform."""
+    return entity_pos_ref(e)[0]
 
 
 @dataclass(slots=True)
@@ -287,6 +294,7 @@ class _Track:
     hp: int | None
     dead: bool
     proj_t: float = -math.inf      # game time the projectile bit was last seen
+    ref: tuple = ()                # which reference pos is (entity_pos_ref)
 
 
 @dataclass(slots=True)
@@ -651,17 +659,18 @@ class OracleBackend:
             if kind in (Kind.ENEMY_ATTACK, Kind.UNKNOWN) and t - proj_t <= PROJECTILE_HOLD_S:
                 kind = Kind.PROJECTILE
             hidden = bool(e.get("hidden"))
-            px, py = entity_pos(e) if not hidden else (float(e["pos"][0]), float(e["pos"][1]))
+            (px, py), ref = entity_pos_ref(e)
             dtg = t - tr.t if tr is not None else 0.0
+            same_ref = tr is not None and tr.ref == ref
             if e.get("vel") is not None:
                 vel = E((float(e["vel"][0]), float(e["vel"][1])))
-            elif tr is not None and dtg > 0:
+            elif same_ref and dtg > 0:
                 vel = E(((px - tr.pos[0]) / dtg, (py - tr.pos[1]) / dtg), sigma=0.1, conf=0.7, src=Src.PREDICTED)
             elif tr is not None:
-                vel = E(tr.vel, sigma=0.1, conf=0.7, src=Src.PREDICTED)
+                vel = E(tr.vel, sigma=0.1 if same_ref else 1.0, conf=0.7 if same_ref else 0.3, src=Src.PREDICTED)
             else:
                 vel = unknown((0.0, 0.0))
-            acc = ((vel.v[0] - tr.vel[0]) / dtg, (vel.v[1] - tr.vel[1]) / dtg) if tr is not None and dtg > 0 \
+            acc = ((vel.v[0] - tr.vel[0]) / dtg, (vel.v[1] - tr.vel[1]) / dtg) if same_ref and dtg > 0 \
                 else (0.0, 0.0)
             vx = vel.v[0]
             flip = bool(e.get("flipX"))
@@ -690,7 +699,7 @@ class OracleBackend:
             if dead and iid not in m.killed:
                 out.append(Event(Ev.ENEMY_KILLED, f, t, EnemyKilled(iid, tk)))
                 m.killed.add(iid)
-            m.tracks[iid] = _Track(tk, kind, (px, py), vel.v, t, hp, dead, proj_t)
+            m.tracks[iid] = _Track(tk, kind, (px, py), vel.v, t, hp, dead, proj_t, ref)
 
             anim = e.get("anim")
             ra = e.get("render_aabb")

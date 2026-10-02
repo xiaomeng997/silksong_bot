@@ -558,6 +558,23 @@ def test_hidden_entity_is_exported_without_boxes():
     assert boss.pos.v == pytest.approx(tuple(e["pos"][:2])) and boss.kind == Kind.BOSS
 
 
+def test_hidden_entity_keeps_the_position_reference():
+    """§4.1 for hidden entities too: the render_aabb centre when it is exported; no finite-difference velocity
+    across the change of reference (collider centre -> render centre is a jump, not motion)."""
+    states = fx.window(0)
+    i = next(i for i, s in enumerate(states) if any(e["iid"] == fx.BOSS_IID and e["colliders"] for e in s["ents"]))
+    trio = states[i:i + 3]
+    for s in trio:
+        next(e for e in s["ents"] if e["iid"] == fx.BOSS_IID)["vel"] = None
+    e = next(e for e in trio[2]["ents"] if e["iid"] == fx.BOSS_IID)
+    e.update(hidden=True, colliders=[])
+    b = OracleBackend(bosses=[BELL_BEAST], clock=None)
+    _, b1, b2 = (next(x for x in w.entities if x.id == fx.BOSS_IID) for w in (b.feed(s) for s in trio))
+    r = e["render_aabb"]
+    assert b2.hidden and b2.pos.v == pytest.approx(((r[0] + r[2]) / 2, (r[1] + r[3]) / 2))
+    assert b2.vel.v == b1.vel.v and b2.vel.conf < b1.vel.conf and b2.acc == (0.0, 0.0)
+
+
 def _hit(f: int, ent: int, before: int, after: int, attack: str = "Nail", src: str | None = "Slash", **kw) -> dict:
     return {"k": "hit", "f": f, "d": {"ent": ent, "type_key": kw.pop("type_key", "Bone Beast"), "dmg": before - after,
                                       "dealt": before - after, "attack": attack, "src": src, "hp_before": before,
