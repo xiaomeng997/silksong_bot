@@ -17,18 +17,21 @@ Rules modelled (m0 §2.4, §2.6, C11, C12, N12, N17; probe P7; human session 202
   above No, ready 21 frames later, "No" highlighted); Yes starts the quit (main menu quit_frames later) unless refused
   (Patch 4) or the save fails (SAVE_FAILED, OK -> the prompt again, m0:C9); Options opens the options menu, whose Back
   returns to the pause menu and recomputes the Quit item;
-- the dimmer grows by udt x 3.2 from the pause frame to 0.8, on top of any dark baseline; the menu becomes visible to
-  a reader 3 frames in.
+- the dimmer grows by udt x 3.2 from the pause frame to 0.8, on top of any dark baseline; the pause menu becomes
+  visible to a vision reader menu_reader_frames in (3 by default; slower readers see it later, and until then see no
+  menu, no readiness and no highlight).
 Observation: the machine sees the frame obs_lat frames back; a capture stall repeats the last seen frame for up to
 stall_max steps, then the view jumps forward. Cues come in oracle form (paused flag, no dimmer) or vision form (no
-paused flag: dimmer, menu, frozen world). False cues (vision): a 4-frame dark flash, a constant dark baseline, a fade
-that rises like the dimmer and stays, a pause menu misread over the running game, world freezes (hit-stop).
+paused flag: dimmer, menu, frozen world; measure_dim / measure_motion False leave dim / frozen None). False cues
+(vision): a 4-frame dark flash, a constant dark baseline, a fade that rises like the dimmer and stays, a pause menu
+misread over the running game, world freezes (hit-stop). options_unlabelled reports Options items other than Back as
+pause_quit.UNLABELLED, as cues_from_state does with the oracle's MenuExporter (sel nil for them).
 """
 import random
 from dataclasses import dataclass, field
 
 from ssbot.safety.pause_quit import (M_EXIT_PROMPT, M_MAIN_MENU, M_NONE, M_OPTIONS, M_PAUSE, M_SAVE_FAILED,
-                                     QUIT_AVAILABLE, QUIT_GREYED, PauseCues)
+                                     QUIT_AVAILABLE, QUIT_GREYED, UNLABELLED, PauseCues)
 
 PAUSE_ITEMS = ("continue", "options", "quit")
 PROMPT_ITEMS = ("yes", "no")
@@ -71,6 +74,10 @@ class SimConfig:
     false_menu: tuple[int, int] | None = None   # frames [f0, f1) where the reader misreads a pause menu while playing
     freezes: tuple[tuple[int, int], ...] = ()   # frames [f0, f1) of a world freeze (hit-stop), gate closed
     death_at: int | None = None
+    menu_reader_frames: int = 3                 # vision: the pause menu is visible to the reader this many frames in
+    measure_dim: bool = True                    # vision: dim measured (else None)
+    measure_motion: bool = True                 # vision: frozen measured (else None)
+    options_unlabelled: bool = False            # Options items other than Back read as UNLABELLED
 
 
 @dataclass
@@ -256,8 +263,8 @@ class PauseSim:
         ready = paused and self.menu in (M_PAUSE, M_EXIT_PROMPT, M_OPTIONS, M_SAVE_FAILED) \
             and f >= self.menu_ready_f and self.gs == "PAUSED"
         menu = self.menu if paused or self.menu == M_MAIN_MENU else M_NONE
-        if cfg.vision and menu == M_PAUSE and self.paused_f is not None and f - self.paused_f < 3:
-            menu = M_NONE                     # the menu is still too faint for the reader
+        if cfg.vision and menu == M_PAUSE and self.paused_f is not None and f - self.paused_f < cfg.menu_reader_frames:
+            menu, ready = M_NONE, False       # the menu is still too faint for the reader
         if cfg.vision and not paused and cfg.false_menu is not None and cfg.false_menu[0] <= f < cfg.false_menu[1]:
             menu = M_PAUSE                    # misread: a pause menu over the running game (never ready)
         hl = None
@@ -265,16 +272,19 @@ class PauseSim:
             act = self.active_items()
             cur = self.items[self.hl]
             hl = cur if cur in act else act[0]
+            if cfg.options_unlabelled and self.menu == M_OPTIONS and hl != "back":
+                hl = UNLABELLED
         quit_state = cause = None
-        if self.menu == M_PAUSE and ready:
+        if menu == M_PAUSE and ready:
             quit_state = QUIT_GREYED if self.greyed else QUIT_AVAILABLE
             cause = cfg.greyed_cause if self.greyed else None
         dim = (self.dim if paused else 0.0) + cfg.dark_base + self.fade
         if cfg.false_dim_at is not None and cfg.false_dim_at <= f < cfg.false_dim_at + 4 and not paused:
             dim += 0.1
         self.cues.append(PauseCues(
-            t=self.t, paused=None if cfg.vision else paused, dim=round(dim, 6) if cfg.vision else None,
-            frozen=frozen, menu=menu, menu_ready=ready, highlight=hl,
+            t=self.t, paused=None if cfg.vision else paused,
+            dim=round(dim, 6) if cfg.vision and cfg.measure_dim else None,
+            frozen=frozen if not cfg.vision or cfg.measure_motion else None, menu=menu, menu_ready=ready, highlight=hl,
             quit_state=quit_state, quit_cause=cause, quitting=self.gs == "QUITTING", dead=self.dead))
         self.times.append(self.t)
 

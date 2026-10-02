@@ -90,6 +90,7 @@ QUIT, QUIT_EMULATED, UNPAUSED, DEAD, KILL_REQUESTED, ALERT = (
 QUIT_EMULATED_GREYED, QUIT_EMULATED_UNKNOWN, REFUSED_EMULATED = (
     "QUIT_EMULATED_GREYED", "QUIT_EMULATED_UNKNOWN", "REFUSED_EMULATED")
 PAUSED, GREYED, REFUSED = "PAUSED", "GREYED", "REFUSED"
+UNLABELLED = "?"   # a ready menu's selected item that has no role name (oracle: Options items other than Back)
 EMULATED = frozenset({QUIT_EMULATED, QUIT_EMULATED_GREYED, QUIT_EMULATED_UNKNOWN, REFUSED_EMULATED})
 TERMINAL = frozenset({QUIT, UNPAUSED, DEAD, KILL_REQUESTED, ALERT}) | EMULATED
 GREYED_UNPAUSE_EVADE, GREYED_KILL, GREYED_STAY = "UNPAUSE_EVADE", "KILL", "STAY"
@@ -131,7 +132,16 @@ class PauseQuitConfig:
     dim_rise_frames: int = 2         # consecutive dimmer-rate rises that make the dim cue
     dim_rate_lo: float = 0.5         # accepted rise / (DIM_RATE x capture interval); up to 3x: the dimmer over a
     dim_rate_hi: float = 3.0         # fade that happens to run at the same time
-    confirm_window_s: float = 0.15   # earliest cue -> pause confirmed within this (capture time), else a false cue
+    dim_base_window_s: float = 1.0   # the dimmer baseline is the lowest reading over this long before a frame
+    menu_dim_rise: float = 0.1       # a vision menu cue needs the dim this far above the baseline (when measured)
+    dim_drop_tol: float = 0.1        # a paused dimmer never falls: this far below its peak since the cue is no pause
+    plateau_min: float = 0.65        # ... and it reaches base + 0.8 by 0.25 s: base + this by plateau_check_s after
+    plateau_check_s: float = 0.4     # the cue, else no pause
+    moving_reject_frames: int = 2    # fresh frames of a moving world (frozen False) that reject a cue
+    confirm_hold_s: float = 0.6      # two detectors agreeing this long confirm without the third (longer than any
+    #                                  hit-stop: the BindBreak freeze, 0.55 s, is the longest in the quit map)
+    confirm_max_s: float = 2.0       # a cue neither confirmed nor contradicted this long: confirmed if a second
+    #                                  detector (menu, stopped world) agreed at least once, else rejected
     budget_s: float = 0.23           # pressing must stop within this of the real pause
     loop_alert_s: float = 5.0        # still looping this long: alert (and keep looping)
     false_cue_alert: int = 3         # this many false cues: alert (and keep looping)
@@ -142,6 +152,9 @@ class PauseQuitConfig:
     frame_s: float = 1 / 60          # one game frame (the frame that samples a key, before it shows the effect)
     stable_frames: int = 2           # fresh, post-tap frames that must read the same highlight
     nav_margin_s: float = 0.15       # beyond the round trip before a navigation tap counts as having had no effect
+    flip_settle_rtts: float = 2.0    # after a no-effect flip: the reading must hold this many round trips (plus the
+    #                                  margin) past the last tap before the next tap or Submit; a change meanwhile
+    #                                  means the latency bound was exceeded -> ALERT, never a Submit
     menu_wait_s: float = 1.5         # a menu expected after a Submit must be ready within this (measured 0.35 s)
     read_wait_s: float = 0.5         # Quit state / highlight unreadable this long on a ready menu: unknown
     max_nav: int = 12                # navigation taps toward one target
@@ -178,6 +191,7 @@ class _Step:
     navs: int = 0
     submits: int = 0
     dir: str | None = None # navigation direction, fixed for the step once chosen (flipped when a tap does nothing)
+    flipped: bool = False  # a tap of this step was judged to have had no effect
 
 
 def loop_budget_ok(detect_max_s: float, input_latency_max_s: float, cfg: PauseQuitConfig | None = None) -> bool:
@@ -232,10 +246,19 @@ class PauseQuit:
         self._after_plan = ""
         self._quit_t0 = 0.0
         self._dims: list[tuple[float, float]] = []
+        self._dim_hist: list[tuple[float, float]] = []   # fresh LOOP / CONFIRM readings, dim_base_window_s long
         self._sig_t: float | None = None  # capture time of the last frame with the dimmer's rise signature
         self._cue_src: frozenset[str] = frozenset()
         self._suppressed: set[str] = set()
         self._run_frames = 0
+        self._cue_base: float | None = None   # dimmer baseline before the cue (None: not measured / no history)
+        self._cue_max = 0.0
+        self._moving = 0
+        self._hold_menu: float | None = None  # capture time since when menu + stopped world held in CONFIRM
+        self._hold_dim: float | None = None   # ... since when the full dimmer rise + stopped world held
+        self._second = False                  # a detector other than the cue's agreed since the cue
+        self._settle: tuple[float, str] | None = None   # (until, reading) after a flip
+        self._settle_armed = False
 
     # ---- control ------------------------------------------------------------------------------------------------
 
@@ -253,8 +276,11 @@ class PauseQuit:
         self._refreshed = False
         self._save_retries = 0
         self._dims = []
+        self._dim_hist = []
         self._sig_t = None
         self._suppressed = set()
+        self._cue_base = None
+        self._settle = None
         self._note(t, "start", goal)
 
     def upgrade_to_quit(self, t: float) -> bool:
@@ -343,7 +369,7 @@ class PauseQuit:
             return self._quitting(c, fresh)
         if fresh:
             moving = c.frozen is False and not self._ending(c)
-            self._run_frames = self._run_frames + 1 if (moving if c.paused is None else self._unpaused(c)) else 0
+            self._run_frames = self._run_frames + 1 if (self._unpaused(c) or (moving and c.paused is None)) else 0
         expecting = st == "MENU" and self._plan and self._plan[0].expect == "unpaused"
         if self._world_runs(c) and not expecting:
             self.unexpected_unpauses += 1
@@ -376,28 +402,34 @@ class PauseQuit:
                 return False
         return True
 
-    def _menu_evidence(self, c: PauseCues) -> bool:
-        """A pause menu over a stopped world and, when the dimmer is measured, the dimmer rising (now or lately) or at
-        its 0.8 plateau. A menu misread over a running world, or over a hit-stop in a dark room, is not a pause."""
-        if c.menu not in PAUSE_MENUS or c.frozen is False or c.paused is False:
+    def _base(self, t: float) -> float | None:
+        """The dimmer baseline: the lowest reading over dim_base_window_s before capture time t (None: no history)."""
+        prior = [d for tt, d in self._dim_hist if tt < t]
+        return min(prior) if prior else None
+
+    def _menu_cue(self, c: PauseCues) -> bool:
+        """Vision: a pause menu over a world seen stopped (frozen None, an unmeasured world, is not stopped) with, when
+        the dimmer is measured, the dim at least menu_dim_rise above the pre-cue baseline. A misread menu over a dark
+        room or a static scene therefore never stops the loop; only on the loop's first frame (no history: the game
+        may already be paused, where a press would unpause it) does an absolute dim at the 0.8 plateau stand in."""
+        if c.paused is not None or c.menu not in PAUSE_MENUS or c.frozen is not True:
             return False
-        if c.dim is None or c.dim >= DIM_PLATEAU:
+        if c.dim is None:
             return True
-        if self._sig_t is not None and 0.0 <= c.t - self._sig_t <= self.cfg.confirm_window_s + 0.1:
-            return True
-        h = self._dims
-        if len(h) >= 2 and h[-1][0] == c.t:
-            (t0, d0), (t1, d1) = h[-2], h[-1]
-            return d1 - d0 >= self.cfg.dim_rate_lo * DIM_RATE * (t1 - t0) > 0
-        return False
+        base = self._base(c.t)
+        if base is None:
+            return c.dim >= DIM_PLATEAU
+        return c.dim - base >= self.cfg.menu_dim_rise
 
     def _observe_dim(self, c: PauseCues) -> None:
-        """A fresh frame's dimmer reading: keep the last dim_rise_frames + 1 and note the rise signature."""
+        """A fresh frame's dimmer reading: keep the last dim_rise_frames + 1 and the baseline window, and note the rise
+        signature."""
         cfg = self.cfg
         if c.dim is None:
             self._dims = []
             return
         self._dims = (self._dims + [(c.t, c.dim)])[-(cfg.dim_rise_frames + 1):]
+        self._dim_hist = [(t, d) for t, d in self._dim_hist if t >= c.t - cfg.dim_base_window_s] + [(c.t, c.dim)]
         if c.dim >= cfg.dim_cue and self._dim_rising(cfg.dim_rise_frames):
             self._sig_t = c.t
 
@@ -406,7 +438,7 @@ class PauseQuit:
         src = set()
         if c.paused is True:
             src.add("paused")
-        if self._menu_evidence(c):
+        if self._menu_cue(c):
             src.add("menu")
         if c.dim is not None and self._sig_t == c.t:
             src.add("dim")
@@ -419,6 +451,53 @@ class PauseQuit:
             if "dim" in sup and (c.dim is None or c.dim < cfg.dim_cue or not self._dim_rising(1)):
                 sup.discard("dim")
         return src - sup
+
+    def _trajectory(self, c: PauseCues) -> str:
+        """The dimmer since the cue against a real pause (alpha + 3.2/s from the pause frame to base + 0.8, then flat,
+        never falling while paused; m0:C11): "none" (not measured, or no baseline), "broken" (fell more than
+        dim_drop_tol below its peak, or still under base + plateau_min plateau_check_s after the cue), "full" (at
+        base + plateau_min or above), else "rising"."""
+        b, cfg = self._cue_base, self.cfg
+        if c.dim is None or b is None:
+            return "none"
+        self._cue_max = max(self._cue_max, c.dim)
+        if c.dim < self._cue_max - cfg.dim_drop_tol:
+            return "broken"
+        if c.dim - b >= cfg.plateau_min:
+            return "full"
+        return "broken" if c.t - self.t_cue >= cfg.plateau_check_s else "rising"
+
+    def _verdict(self, c: PauseCues) -> str | None:
+        """CONFIRM on a fresh frame: "confirm", "reject" (resume pressing) or None (keep waiting, pressing nothing).
+        Oracle: the paused flag decides. Vision: a cue is rejected only on positive evidence that the game is not
+        paused (the world moving on moving_reject_frames frames, or the dimmer leaving the pause trajectory), never on
+        a timer: once the 0.3 s lockout is over a press would unpause a real pause whose menu the reader has not seen
+        yet (round-2 review: readers slower than about 10 frames unpaused up to 400 of 400 trials with the old 0.15 s
+        confirm window). Confirmation needs two independent detectors: the menu reader with the dimmer on its pause
+        trajectory; or, for confirm_hold_s (longer than any hit-stop), the reader or the full dimmer rise with a world
+        seen stopped. After confirm_max_s with nothing against it, the pause is taken as real when a second detector
+        agreed at least once (READ_QUIT then alerts if the menu never becomes readable), else the cue was a lone
+        detector's (a dimmer-like fade with motion unmeasured) and the loop resumes."""
+        cfg = self.cfg
+        if c.paused is not None:
+            return "confirm" if c.paused else "reject"
+        self._moving = self._moving + 1 if c.frozen is False else 0
+        if self._moving >= cfg.moving_reject_frames:
+            return "reject"
+        tr = self._trajectory(c)
+        if tr == "broken":
+            return "reject"
+        menu, stopped = c.menu in PAUSE_MENUS, c.frozen is True
+        if menu and tr in ("rising", "full"):
+            return "confirm"
+        self._second |= menu or stopped
+        self._hold_menu = (self._hold_menu if self._hold_menu is not None else c.t) if menu and stopped else None
+        self._hold_dim = (self._hold_dim if self._hold_dim is not None else c.t) if tr == "full" and stopped else None
+        if any(h is not None and c.t - h >= cfg.confirm_hold_s for h in (self._hold_menu, self._hold_dim)):
+            return "confirm"
+        if c.t - self.t_cue > cfg.confirm_max_s:
+            return "confirm" if self._second else "reject"
+        return None
 
     def _loop_alerts(self, now: float) -> None:
         cfg = self.cfg
@@ -441,6 +520,11 @@ class PauseQuit:
             back = max(0.0, (c.dim - base) / DIM_RATE - self.cfg.frame_s) if "dim" in src else 0.0
             self.t_pause_est = c.t - back
             self._cue_src = frozenset(src)
+            self._cue_base = None if c.dim is None else self._base(c.t)
+            self._cue_max = c.dim or 0.0
+            self._moving = 0
+            self._hold_menu = self._hold_dim = None
+            self._second = "menu" in src      # the menu cue is already the reader plus a stopped world
             self.state = "CONFIRM"
             self._tap = None
             self._note(self.now, "cue", f"{'+'.join(sorted(src))} paused={c.paused} dim={c.dim} menu={c.menu}")
@@ -458,14 +542,16 @@ class PauseQuit:
     def _confirm(self, c: PauseCues, fresh: bool) -> frozenset[str]:
         if not fresh:
             return NO_KEYS
-        if c.paused is True or (c.paused is None and self._menu_evidence(c)):
+        v = self._verdict(c)
+        if v == "confirm":
             self.t_confirm = c.t
-            self._note(self.now, "confirmed", c.menu)
+            self._note(self.now, "confirmed", f"{c.menu} dim={c.dim} frozen={c.frozen}")
             self._enter(self.now, "READ_QUIT")
             return NO_KEYS
-        if c.t - self.t_cue > self.cfg.confirm_window_s:
+        if v == "reject":
             self.false_cues += 1
-            self._suppressed |= self._cue_src
+            self._suppressed |= self._cue_src - {"menu"}   # the menu cue needs a stopped world: it re-arms only when
+            #                                               the world stops again (one cue per hit-stop, never stuck)
             self._note(self.now, "false_cue", "+".join(sorted(self._cue_src)))
             self.state = "LOOP"
             self.t_cue = self.t_pause_est = None
@@ -543,7 +629,10 @@ class PauseQuit:
         if self._tap is not None and not self._tap.done:
             keys = self._tap_keys(self.now)
             if self._tap.done:
-                self._cut = self._tap.t_end + cfg.input_latency_max_s + cfg.frame_s
+                self._cut = self._tap_cut(self._tap.t_end)
+                if self._settle_armed:
+                    self._settle_armed = False
+                    self._settle = (self._tap.t_end + cfg.nav_margin_s + cfg.flip_settle_rtts * cfg.rtt_s, "")
             return keys
         s = self._plan[0]
         ph = self._phase
@@ -567,14 +656,18 @@ class PauseQuit:
             if c.t - self._read_t0 > cfg.read_wait_s:
                 self._fail(f"highlight unreadable on {s.menu}")
             return NO_KEYS
-        if self._pre_hl is not None and hl == self._pre_hl:
+        if self._settling(c, hl):
+            return NO_KEYS
+        if self._unmoved(hl):
             self._same += 1                 # not moved (yet): the tap had no effect only after a full round trip
             self._stable = 0
             if self._same < cfg.stable_frames or self.now - self._tap_end_t < cfg.rtt_s + cfg.nav_margin_s:
                 return NO_KEYS
-            s.dir = UP if s.dir == DOWN else DOWN
-            self.nav_flips += 1
-            self._note(self.now, "nav_no_effect", f"{s.menu}:{hl} flip to {s.dir}")
+            if hl != UNLABELLED:            # an unlabelled item may have moved to another one: go on the same way
+                s.dir = UP if s.dir == DOWN else DOWN
+                s.flipped = True
+                self.nav_flips += 1
+                self._note(self.now, "nav_no_effect", f"{s.menu}:{hl} flip to {s.dir}")
         else:
             self._stable = self._stable + 1 if hl == self._last_hl else 1
             self._last_hl = hl
@@ -594,6 +687,7 @@ class PauseQuit:
         self._note(self.now, "nav", f"{s.menu}:{hl}->{s.target} {s.dir}")
         self._read_phase(None)
         self._pre_hl = hl
+        self._settle_armed = s.flipped   # every later decision of this step waits for the reading to settle
         return self._start_tap(s.dir)
 
     def _effect(self, c: PauseCues, s: _Step, fresh: bool) -> frozenset[str]:
@@ -634,6 +728,7 @@ class PauseQuit:
                 return NO_KEYS
         elif c.menu == s.expect and c.menu_ready:
             self._plan.pop(0)
+            self._settle = None
             if self._plan:
                 self._phase, self._read_t0, self._pre_hl = "wait", c.t, None
                 return self._menu(c, True)
@@ -676,13 +771,21 @@ class PauseQuit:
     def _ending(c: PauseCues) -> bool:
         return c.quitting or c.menu in (M_MAIN_MENU, M_LOADING)
 
+    def _dim_gone(self, c: PauseCues) -> bool:
+        """The dimmer is back at the pre-pause baseline (absolute 0 when no baseline was measured)."""
+        base = self._cue_base if self._cue_base is not None else 0.0
+        return c.dim is not None and c.dim - base < self.cfg.dim_cue
+
     def _unpaused(self, c: PauseCues) -> bool:
-        """Evidence that the world runs: the oracle's flag, or (vision) a moving world with no pause menu or dimmer."""
+        """Evidence that the world runs: the oracle's flag; vision: a moving world with no pause menu or no dimmer,
+        or, while motion is unmeasured (frozen None), the menu gone and the dimmer back at its pre-cue baseline."""
         if self._ending(c):
             return False
         if c.paused is not None:
             return c.paused is False and c.menu not in PAUSE_MENUS
-        return c.frozen is False and (c.menu == M_NONE or c.dim is None or c.dim < self.cfg.dim_cue)
+        if c.frozen is False:
+            return c.menu == M_NONE or c.dim is None or self._dim_gone(c)
+        return c.frozen is None and c.menu == M_NONE and self._cue_base is not None and self._dim_gone(c)
 
     def _world_runs(self, c: PauseCues) -> bool:
         """Consecutive fresh frames prove the game is not paused: oracle 1; vision 2 with the menu and dimmer gone, or
@@ -703,6 +806,34 @@ class PauseQuit:
         self._tap = _Tap(key, self.now)
         self._phase_t = self.now
         return self._tap_keys(self.now)
+
+    def _tap_cut(self, t_end: float) -> float:
+        """Frames captured after this reflect every key sent so far (when input_latency_max_s holds)."""
+        return t_end + self.cfg.input_latency_max_s + self.cfg.frame_s
+
+    def _unmoved(self, hl: str) -> bool:
+        """The change-wait: the highlight still reads what it read before the last navigation tap."""
+        return self._pre_hl is not None and hl == self._pre_hl
+
+    def _settling(self, c: PauseCues, hl: str) -> bool:
+        """After a no-effect flip, the latency bound is in doubt (round-2 review: past it, a late first tap and the
+        flipped counter-tap both act, and a Submit lands on the wrong item, Continue included). The reading must then
+        hold on every fresh post-cut frame until the settle time; a change meanwhile, with no tap in flight, means a
+        key acted later than input_latency_max_s allows: ALERT, never a Submit."""
+        st = self._settle
+        if st is None:
+            return False
+        until, seen = st
+        if not seen:
+            self._settle = (until, hl)
+        elif hl != seen:
+            self._settle = None
+            self._fail(f"highlight moved {seen} -> {hl} with no tap in flight: latency above the configured bound")
+            return True
+        if c.t < until:
+            return True
+        self._settle = None
+        return False
 
     @property
     def _tap_end_t(self) -> float:
@@ -731,6 +862,7 @@ class PauseQuit:
 
     def _begin_plan(self, plan: list[_Step], name: str) -> None:
         self._plan, self._after_plan = plan, name
+        self._settle, self._settle_armed = None, False
         self.state = "MENU"
         self._phase, self._phase_t, self._read_t0, self._pre_hl = "wait", self.now, None, None
 
@@ -763,6 +895,8 @@ def _direction(menu: str, at: str, target: str) -> str:
     Unknown order (Options): Up for "back", the last item, else Down. The highlight is read again after every tap and a
     tap that moves nothing flips the direction, so a wrong guess costs taps, never a wrong Submit."""
     order = MENU_ORDER.get(menu)
+    if at == UNLABELLED:
+        return DOWN    # Back is the last item: Down reaches it whether the list wraps or not, with no flip to read
     if not order or at not in order or target not in order:
         return UP if target == "back" else DOWN
     i, j, n = order.index(at), order.index(target), len(order)
@@ -815,7 +949,6 @@ def availability_from_state(s: dict) -> Availability:
 
 # ---- oracle-mode cue adapter --------------------------------------------------------------------------------------
 
-_SEL_NAMES = {"continue", "options", "quit", "yes", "no", "back", "ok"}
 _DEATH_EVENTS = {"hero_dead", "player_dead", "permadeath_dead"}
 
 
@@ -842,7 +975,9 @@ def cues_from_state(s: dict, qpc_freq: float = 1e7) -> PauseCues:
     ready = ui == gc.UI_PAUSED and not g.get("fading") and not blk & gc.BLK_NOT_ACCEPTING_INPUT
     extra = s.get("menu") or {}
     sel = extra.get("sel")
-    highlight = sel if sel in _SEL_NAMES else None
+    highlight = sel if isinstance(sel, str) and sel else None
+    if highlight is None and menu == M_OPTIONS and ready and isinstance(s.get("menu"), dict):
+        highlight = UNLABELLED   # MenuExporter names only Back on Options (sel nil for Game, Audio, ...)
     quit_state = quit_cause = None
     if menu == M_PAUSE:
         if extra.get("quit_ok") is not None:
