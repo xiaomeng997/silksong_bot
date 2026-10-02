@@ -12,8 +12,8 @@ Modes:
           underground at a known x): the stance is the playbook's spot in the attack's anchor frame (14 u in front of
           a charge, 12 u along a leap, 10 u beside a burst on the hero's side), pulled to low future coverage.
   EVADE   the support reaches the hero's spot within the evade horizon (0.6 s): the nearest floor spot the support
-          leaves free over that horizon, weighed with its later coverage (a corner the bell rolls into is no refuge),
-          hits score little.
+          leaves free over that horizon, weighed with its later coverage, never within 5 u of a wall unless all else
+          is covered (a corner the bell rolls into is no refuge), hits score little.
   HOLD    anything else (the boss underground, the next attack unknown): the playbook's hidden stance, moved by the
           future coverage at 0.15 risk units per u. Underground in the vision view only the committed part of the
           forecast counts (Forecast.committed: the current attack, tails, armed bells), at 0.5 per u, and it alone
@@ -40,6 +40,7 @@ HOLD_PULL = 0.15               # risk units per u away from the playbook's stanc
 HOLD_PULL_VE = 0.5             # the same underground in the vision view, against the committed threats only
 PREP_PULL = 0.12               # risk units per u away from a prepare stance (PREPARE)
 WALL_ROOM = 5.0                # prepare stances keep this far from the arena's ends
+WALL_PEN = 1.0                 # an evade stance closer to an end than WALL_ROOM costs this (risk units)
 
 
 @dataclass
@@ -162,7 +163,13 @@ class Tactics:
             # imminent: the nearest floor spot the support leaves free over the evade horizon
             near = self.risk_map(f, (0.0, EVADE_S))
             prefs.mode = EVADE
-            prefs.stance_x = float(self.xs[int(np.argmin(near + 0.5 * risk + 0.1 * np.abs(self.xs - hero[0])))])
+            # not into a corner: a rolling attack bell runs on into the wall and comes back, so the way out is over
+            # it (stage B run 20261002_052118: 5 of 7 hits were such bells, 4 of them within 5 u of a wall; tell
+            # experiment 20261002_062635 i2 ep0 the same)
+            x0, x1 = pb.arena_x
+            wall = ((self.xs < x0 + WALL_ROOM) | (self.xs > x1 - WALL_ROOM)) * WALL_PEN
+            prefs.stance_x = float(self.xs[int(np.argmin(near + 0.5 * risk + 0.1 * np.abs(self.xs - hero[0])
+                                                         + wall))])
             wts["hit"] *= 0.3
             wts["risk"] *= 2.0
             return prefs
