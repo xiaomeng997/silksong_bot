@@ -2457,8 +2457,11 @@ class StateTracker:
 
 # ---- runtime residual monitor (DESIGN §3.5.2) -----------------------------------------------------------------
 
-MONITOR_ALARM_WITHIN = 0.97   # calibrated on held-out play (see ResidualMonitor)
-MONITOR_ALARM_FAR = 6
+# alarm levels of ResidualMonitor over its last 600 windows at 30 frames: below the worst of 808 k frames of held-out
+# play (trial i0_000, live i1_000, i2_001, i3_000: rolling share within 0.892 at its lowest, at most 58 windows more
+# than 0.5 u outside the hull, both after clusters of pogo / recoil / hit windows the model misses)
+MONITOR_ALARM_WITHIN = 0.88
+MONITOR_ALARM_FAR = 60
 
 
 class ResidualMonitor:
@@ -2482,7 +2485,10 @@ class ResidualMonitor:
     needs) the state is "unknown" and confidence() None; pass it to safety.invariants.i4 only when it is not None (a missing
     module counts as below its threshold). "degraded" when, over the last `window` scored windows at the longest
     horizon, the share within tol falls below alarm_within or more than alarm_far of them lie more than far_u outside
-    the hull. The levels are calibrated on held-out play (ssbot.tools.kin_check --monitor, module docstring)."""
+    the hull. Held-out play (trial i0_000, live i1_000, i2_001, i3_000: 808 k frames, 808 k windows scored at 30
+    frames, 1.2 % dropped) puts 99.4-99.8 % of the windows inside the hull (by recording; the nominal lane: 85-89 %),
+    and never trips the alarm levels (MONITOR_ALARM_*); a model 0.3 u off trips it within the window (test). Cost:
+    about 0.17 ms per frame (one compiled rollout of the due anchors, 9 lanes), plus StateTracker.push 0.05 ms."""
 
     def __init__(self, params: HeroParams, terrain: Terrain2D | None = None, horizons: tuple[int, ...] = (1, 6, 30),
                  tol: float = 0.1, window: int = 600, min_n: int = 60, alarm_within: float = MONITOR_ALARM_WITHIN,
