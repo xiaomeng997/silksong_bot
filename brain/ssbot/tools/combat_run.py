@@ -197,12 +197,28 @@ def worker(a: argparse.Namespace) -> int:
     return 0
 
 
+def new_run_dir(encounter: str, tag: str, root: Path | None = None, now: datetime | None = None) -> Path:
+    """Create and return <root>/<timestamp>_<encounter>_<tag>; when another run took that name in the same second,
+    <name>_2, _3, ... (two launchers started in the same second collided with FileExistsError, 2026-10-03 07:45).
+    The mkdir itself is the claim, so two processes racing for one name cannot both get it."""
+    root = RUNS if root is None else root
+    base = f"{(now or datetime.now()):%Y%m%d_%H%M%S}_{encounter}_{tag}"
+    root.mkdir(parents=True, exist_ok=True)
+    for k in range(1, 1000):
+        d = root / (base if k == 1 else f"{base}_{k}")
+        try:
+            d.mkdir()
+            return d
+        except FileExistsError:
+            continue
+    raise FileExistsError(f"no free run dir name for {root / base}")
+
+
 def run(a: argparse.Namespace) -> int:
     tag = a.mode if a.policy == "data" else f"{a.mode}_{a.policy}_{a.view}"
     if a.inject_hits > 0:
         tag += "_inject"
-    run_dir = RUNS / f"{datetime.now():%Y%m%d_%H%M%S}_{a.encounter}_{tag}"
-    run_dir.mkdir(parents=True)
+    run_dir = new_run_dir(a.encounter, tag)
     (run_dir / "config.json").write_text(json.dumps(vars(a), indent=1), encoding="utf-8")
     procs = []
     for i in [int(x) for x in a.instances.split(",")]:
