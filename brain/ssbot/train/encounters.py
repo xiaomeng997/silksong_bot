@@ -161,8 +161,14 @@ def forum_intro(ctx: Ctx) -> int:
     the battle has started (GauntletTap.wake_frame: room.battles started, or wave 0's enemies spawning). Returns the
     battle-start frame."""
     tap = ctx.tap
-    s = _walk_until(ctx, L, lambda s: tap.wake_frame is not None or s["hero"]["pos"][0] <= FORUM_START_X - 2.0,
-                    timeout_s=10.0)
+
+    def inside(s: dict) -> bool:
+        # in the trigger, or the roar cutscene has taken control (it can stop her right at its edge)
+        x = s["hero"]["pos"][0]
+        return (tap.wake_frame is not None or x <= FORUM_START_X - 1.0
+                or (x <= FORUM_START_X + 1.0 and not s["hero"]["hero_accepting_input"]))
+
+    s = _walk_until(ctx, L, inside, timeout_s=10.0)
     ctx.log.append({"walked_to_x": round(s["hero"]["pos"][0], 2), "f": s["f"]})
     link = ctx.link
     deadline = time.monotonic() + 15.0
