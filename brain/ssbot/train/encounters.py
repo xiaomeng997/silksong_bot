@@ -46,6 +46,8 @@ class Encounter:
     floor_y: float
     waves: tuple[Wave, ...] = ()       # a gauntlet's BattleScene waves (ssbot.train.gauntlet); () for a boss
     battle_name: str = ""              # its BattleScene GameObject (STATE room.battles[].name)
+    post_clear_s: float = 1.0          # the episode goes on this long after the kill (late hazards; a lethal hit
+                                       # there is still a death: ssbot.train.episode)
 
 
 @dataclass
@@ -183,10 +185,17 @@ def forum_intro(ctx: Ctx) -> int:
     return tap.wake_frame
 
 
+# After the last kill BattleScene.EndBattle runs FreezeMoment EnemyBattleEndSlow (GameManager.cs:5132: ramp to 0.25x
+# in 0.1 s, hold 1 s unscaled, back to 1x in 0.75 s: about 1.85 s of real time for 0.78 s of game time), then waits
+# 1 s + battleEndPause 2 s of game time before it sets hang04Battle and sends FORUM BATTLE END (BattleScene.cs:444):
+# about 4.1 s (245 frames) after the kill. The dying Clappers' bodies, rune slams and bombs still hurt meanwhile
+# (runs 20261002_223640 ep0 f808877 and 230325 f910457: body contacts 13 and 2 frames after the freeze), so the
+# episode runs 4.5 s past the kill. Complete gauntlets with the random data policy took 714-990 s (10 of 2026-10-02).
 FORUM = Encounter(
     name="Forum", scene="Hang_04", savestate="fo_A", boss_type="", control_fsm="Control", dormant=(),
-    death_states=(), intro=forum_intro, timebox_s=900.0, arena_x=(14.0, 49.0), floor_y=4.5677,
-    waves=FORUM_WAVES, battle_name="Battle Scene")   # gates' inner faces x 14.01 / 48.99; floor y: savestate p7_s3
+    death_states=(), intro=forum_intro, timebox_s=1500.0, arena_x=(14.0, 49.0), floor_y=4.5677,
+    waves=FORUM_WAVES, battle_name="Battle Scene",   # gates' inner faces x 14.01 / 48.99; floor y: savestate p7_s3
+    post_clear_s=4.5)
 
 
 def forum_variant(arm: str) -> Encounter:

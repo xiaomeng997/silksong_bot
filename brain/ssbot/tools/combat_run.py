@@ -69,8 +69,8 @@ def make_policy(name: str, view: str = "oracle", run_dir: Path | None = None, in
 
 
 def mode_config(mode: str, seed: int, timebox_s: float | None = None):
-    """timebox_s overrides the encounter's (data runs of the Forum: the random policy needs 550-850 s for the 14
-    waves, run 20261002_223640, and the finale comes last)."""
+    """timebox_s overrides the encounter's (the Forum's default is 1500 s: complete gauntlets with the random data
+    policy took 714-990 s, 10 episodes of the runs of 2026-10-02, and the finale comes last)."""
     from ssbot.train.episode import EpisodeConfig
     if mode == "data":
         return EpisodeConfig(mode="data", seed=seed, hp=(1, 5), silk=(0, 9), dx=(-6.0, 2.0), facing="random",

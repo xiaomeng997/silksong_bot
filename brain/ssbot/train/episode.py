@@ -10,9 +10,14 @@ wait) while the boss is still waking (Bell Beast: about 2 s submerged) -> the po
 (continuous control, hold 0) until the outcome.
 
 Outcomes (AttemptRecord.outcome):
-  CLEAR         the boss's Control FSM entered a death state (Bell Beast: "Death Broadcast");
-  WOULD_DIE     a lethal hit (LethalBlock "catastrophe" / "would_die"); in mode "eval" the episode ends there, in mode
-                "data" (behaviour logging, the hero kept alive at >= 1 HP by LethalBlock) it is counted and play goes on;
+  CLEAR         the boss's Control FSM entered a death state (Bell Beast: "Death Broadcast"; a gauntlet: the last wave
+                ended, ssbot.train.gauntlet.GauntletTap), and in mode "eval" no lethal hit came until the encounter's
+                post-clear window (Encounter.post_clear_s after the kill) was over;
+  WOULD_DIE     a lethal hit (LethalBlock "catastrophe" / "would_die"); in mode "eval" the episode ends there, also
+                when the hit comes with the kill or after it (Steel Soul: a death after the last kill still ends the
+                run; the Forum's dying Clappers and their runes still hurt for seconds); in mode "data" (behaviour
+                logging, the hero kept alive at >= 1 HP by LethalBlock) it is counted (AttemptRecord.would_die,
+                lethal_after_clear) and play goes on;
   QUIT          the supervisor's pause-and-quit path ended the episode (a policy with a supervisor sets
                 episode_outcome = "QUIT"; training emulates the quit, then the harness unpauses with Continue, or,
                 when the policy runs a real quit (real_quit_active), the game goes to the main menu and the harness
@@ -31,7 +36,7 @@ from ssbot.train.encounters import Ctx, Encounter
 from ssbot.train.gauntlet import GauntletTap
 
 CLEAR, WOULD_DIE, QUIT, STUCK, HARNESS_FAIL = "CLEAR", "WOULD_DIE", "QUIT", "STUCK", "HARNESS_FAIL"
-POST_CLEAR_FRAMES = 60   # keep recording a second after the kill (death animations, late hazards)
+POST_CLEAR_FRAMES = 60   # default post-clear window (Encounter.post_clear_s): death animations, late hazards
 PAUSE_AFTER_KILL_FRAMES = 1200   # a supervisor pause under way at the kill keeps the keys this long at most
 
 
@@ -145,6 +150,7 @@ class AttemptRecord:
     acts: int = 0
     late_states: int = 0                         # STATEs that arrived after the next one was already due (gaps)
     gauntlet: dict | None = None                 # GauntletTap.summary(): waves [{wave, f, t}], kills, allies
+    lethal_after_clear: int = 0                  # lethal-hit frames at or after the kill (in the post-clear window)
 
 
 def _rand(link: OracleLink, **args) -> dict:
@@ -265,6 +271,10 @@ def _run(link: OracleLink, enc: Encounter, tap: FightTap, policy, cfg: EpisodeCo
 
     policy.reset(random.Random(cfg.seed), enc)
     timebox = cfg.timebox_s or enc.timebox_s
+    post_f = round(getattr(enc, "post_clear_s", POST_CLEAR_FRAMES / 60.0) * 60)
+    # a gauntlet's hazards outlive the last kill (the Forum's dying Clappers, runes, bombs): the policy keeps playing
+    # through the window instead of standing still
+    act_after = getattr(policy, "act_after_clear", False) or bool(getattr(enc, "waves", ()))
     last = link.frame
     end_after = None
     while True:
@@ -289,21 +299,25 @@ def _run(link: OracleLink, enc: Encounter, tap: FightTap, policy, cfg: EpisodeCo
                 rec.reason = f"quit after the kill: {getattr(policy, 'outcome_reason', None)}"
                 end_after = last
             continue
+        if tap.lethal and cfg.mode == "eval":
+            # before the kill check: a lethal hit in the same STATE as the kill, or in the post-clear window, is a
+            # death all the same
+            rec.outcome = WOULD_DIE
+            rec.reason = "lethal hit" if tap.death_frame is None else "lethal hit at/after the kill"
+            break
         if end_after is not None:
             if last >= end_after:
                 break
-            # zeros after a kill, unless the policy asks to keep acting (the pause stress test's hit injected just
-            # after the killing blow must reach the supervisor, which then owns the keys through the block above)
-            after = getattr(policy, "act_after_clear", False) and rec.outcome == CLEAR and not rec.reason
+            # zeros after a kill, unless the policy asks to keep acting or the encounter is a gauntlet (the pause
+            # stress test's hit injected just after the killing blow must reach the supervisor, which then owns the
+            # keys through the block above)
+            after = act_after and rec.outcome == CLEAR and not rec.reason
             link.act(last + 2, policy.act(s, tap) if after else 0, hold_frames=0)
             continue
         if tap.death_frame is not None:
             rec.outcome = CLEAR
-            end_after = last + POST_CLEAR_FRAMES
+            end_after = last + post_f
             continue
-        if tap.lethal and cfg.mode == "eval":
-            rec.outcome, rec.reason = WOULD_DIE, "lethal hit"
-            break
         quitting = getattr(policy, "real_quit_active", False)     # a real quit: menus, then the main menu
         if game.get("paused") and not getattr(policy, "pause_owned", False):
             rec.outcome, rec.reason = HARNESS_FAIL, f"paused unasked at frame {last}"
@@ -320,6 +334,9 @@ def _run(link: OracleLink, enc: Encounter, tap: FightTap, policy, cfg: EpisodeCo
             rec.outcome, rec.reason = QUIT, getattr(policy, "outcome_reason", None)
             break
     rec.f_end = last
+    if cfg.mode == "eval" and rec.outcome == CLEAR and tap.lethal_frames():
+        # a lethal hit the reader thread delivered after the loop's last look (the STATE that closed the window)
+        rec.outcome, rec.reason = WOULD_DIE, "lethal hit at/after the kill"
     if rec.outcome == QUIT and not getattr(policy, "real_quit_active", False):
         unpause(link)      # an emulated quit left the game paused (a real one ends on the main menu: no Continue)
 
@@ -338,6 +355,8 @@ def _summarise(tap: FightTap, rec: AttemptRecord, s: dict, enc: Encounter) -> No
     rec.would_die = len(lf)
     rec.first_lethal_f = lf[0] if lf else None
     rec.lethal_sources = [d.get("src") or d.get("source") for _, k, d in tap.lethal if k == "catastrophe"][:10]
+    if tap.death_frame is not None:
+        rec.lethal_after_clear = sum(1 for f in lf if f >= tap.death_frame)
     if tap.wake_frame is not None and rec.f_end is not None:
         rec.ingame_s = round((rec.f_end - tap.wake_frame) / 60.0, 2)
     if isinstance(tap, GauntletTap):
