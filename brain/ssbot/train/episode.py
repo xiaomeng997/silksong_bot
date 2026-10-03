@@ -28,10 +28,16 @@ from dataclasses import asdict, dataclass, field
 from ssbot.ipc import ents
 from ssbot.ipc.oracle_link import OracleError, OracleLink
 from ssbot.train.encounters import Ctx, Encounter
+from ssbot.train.gauntlet import GauntletTap
 
 CLEAR, WOULD_DIE, QUIT, STUCK, HARNESS_FAIL = "CLEAR", "WOULD_DIE", "QUIT", "STUCK", "HARNESS_FAIL"
 POST_CLEAR_FRAMES = 60   # keep recording a second after the kill (death animations, late hazards)
 PAUSE_AFTER_KILL_FRAMES = 1200   # a supervisor pause under way at the kill keeps the keys this long at most
+
+
+def make_tap(link: OracleLink, enc: Encounter):
+    """The encounter's event tracker: GauntletTap for a multi-wave arena (enc.waves), else FightTap."""
+    return GauntletTap(link, enc) if enc.waves else FightTap(link, enc)
 
 
 class FightTap:
@@ -133,10 +139,12 @@ class AttemptRecord:
     rand: dict | None = None
     intro: list = field(default_factory=list)
     boss_hp_end: int | None = None
-    attacks: dict = field(default_factory=dict)  # Control state -> entries this episode
+    attacks: dict = field(default_factory=dict)  # Control state -> entries this episode ("<type>/<fsm>/<state>"
+                                                 # for a gauntlet)
     policy: dict = field(default_factory=dict)
     acts: int = 0
     late_states: int = 0                         # STATEs that arrived after the next one was already due (gaps)
+    gauntlet: dict | None = None                 # GauntletTap.summary(): waves [{wave, f, t}], kills, allies
 
 
 def _rand(link: OracleLink, **args) -> dict:
@@ -332,6 +340,11 @@ def _summarise(tap: FightTap, rec: AttemptRecord, s: dict, enc: Encounter) -> No
     rec.lethal_sources = [d.get("src") or d.get("source") for _, k, d in tap.lethal if k == "catastrophe"][:10]
     if tap.wake_frame is not None and rec.f_end is not None:
         rec.ingame_s = round((rec.f_end - tap.wake_frame) / 60.0, 2)
+    if isinstance(tap, GauntletTap):
+        rec.attacks = dict(tap.state_entries)
+        rec.gauntlet = tap.summary()
+        rec.boss_hp_end = None
+        return
     attacks: dict[str, int] = {}
     for _, _, to in tap.control_log:
         attacks[to] = attacks.get(to, 0) + 1

@@ -16,7 +16,7 @@ from ssbot.ipc.ents import boss_entity
 from ssbot.ipc.framing import mask
 from ssbot.train.encounters import Encounter
 
-B = {k: mask(k) for k in ("left", "right", "jump", "attack", "up", "down", "bind", "quickcast")}
+B = {k: mask(k) for k in ("left", "right", "jump", "attack", "up", "down", "bind", "quickcast", "dash")}
 MODES = (("PRESS", 0.60), ("KEEP", 0.25), ("EVADE", 0.10), ("IDLE", 0.05))
 REACH_X, REACH_Y = 2.6, 2.2      # Hunter side slash reach, roughly (slash.dump: about 2.3 u forward from the centre)
 CHARGE_STATES = ("Charge Antic", "Charge")
@@ -104,7 +104,10 @@ class DataPolicy:
             self._press("jump", r.randint(3, 24))
         if hero.get("health", 5) <= 2 and hero.get("silk", 0) >= 9 and r.random() < 0.05:
             self._press("bind", 3)
+        return self._compose(move)
 
+    def _compose(self, move: str | None) -> int:
+        """This frame's button mask from the held keys and the movement direction."""
         m = 0
         for k in B:
             if self.hold[k] > 0:
@@ -119,3 +122,135 @@ class DataPolicy:
         if m & (B["up"] | B["down"]) and not m & (B["left"] | B["right"]):
             m &= ~(B["up"] | B["down"])    # never an up/down without a side key (see the module docstring)
         return m
+
+
+G_MODES = (("PRESS", 0.48), ("KEEP", 0.22), ("EVADE", 0.10), ("IDLE", 0.05), ("CLING", 0.15))
+WALL_NEAR = 1.2          # hero centre to the arena's inner wall face when touching it, about (hero box half width 0.5)
+
+
+class GauntletDataPolicy(DataPolicy):
+    """DataPolicy for a multi-wave arena (the Forum, M2 W8): the same random modes around a sticky target picked among
+    the live enemies (nearest 60 %, else any), plus CLING (go to an arena wall, mostly the left one, jump at it and
+    hold toward it: a wall slide, or a cling with Ascendant's Grip, 1.0.30000 HeroController.cs:2230; occasional
+    attacks and re-jumps from there), so the enemies' choices are also logged against a hero on the wall, the
+    person's plan for the last wave. Silk skills and tools: quickcast now and then (neutral or with up held, so both
+    the Silkspear and a Cogfly binding get used). With helpers on, enemies die and waves advance without the hero."""
+
+    def reset(self, rng: random.Random, enc: Encounter) -> None:
+        super().reset(rng, enc)
+        self.mode_frames = {m: 0 for m, _ in G_MODES}
+        self.target_iid: int | None = None
+        self.wall = 0
+        self.targets: dict[str, int] = {}
+        self.cling_frames = 0
+        self.names: list[str] | None = None
+
+    def stats(self) -> dict:
+        return {**super().stats(), "targets": dict(self.targets), "cling_frames": self.cling_frames}
+
+    def _cstate(self, s: dict) -> dict:
+        if self.names is None:
+            import json
+            from pathlib import Path
+            p = Path(__file__).resolve().parents[3] / "docs" / "facts" / "1.0.30000" / "cstate_schema.json"
+            self.names = json.loads(p.read_text(encoding="utf-8"))["bools"]
+        from ssbot.tools.cstate import decode
+        try:
+            return decode(s["hero"]["cstate"], self.names)
+        except (KeyError, ValueError, TypeError):
+            return {}
+
+    def act(self, s: dict, tap) -> int:
+        from ssbot.train.gauntlet import live_enemies
+        r = self.r
+        enc = self.enc
+        hero = s["hero"]
+        hx, hy = hero["pos"][0], hero["pos"][1]
+        lo, hi = enc.arena_x
+        live = [e for e in live_enemies(s) if lo - 3.0 <= e["pos"][0] <= hi + 3.0 and e["pos"][1] < enc.floor_y + 25.0]
+        if self.mode_left <= 0:
+            self.mode = r.choices([m for m, _ in G_MODES], [w for _, w in G_MODES])[0]
+            self.mode_left = r.randint(30, 150) if self.mode == "CLING" else r.randint(20, 90)
+            self.keep_d = r.uniform(3.0, 10.0)
+            self.wall = -1 if r.random() < 0.8 else 1
+            if live:
+                tgt = (min(live, key=lambda e: abs(e["pos"][0] - hx) + abs(e["pos"][1] - hy)) if r.random() < 0.6
+                       else r.choice(live))
+                self.target_iid = tgt["iid"]
+        self.mode_left -= 1
+        self.mode_frames[self.mode] += 1
+        tgt = next((e for e in live if e["iid"] == self.target_iid), None)
+        if tgt is None and live:
+            tgt = min(live, key=lambda e: abs(e["pos"][0] - hx) + abs(e["pos"][1] - hy))
+            self.target_iid = tgt["iid"]
+        if tgt is not None:
+            tk = tgt.get("type_key", "?")
+            self.targets[tk] = self.targets.get(tk, 0) + 1
+        cs = self._cstate(s)
+        grounded = cs.get("onGround", hy <= enc.floor_y + 0.3)
+        move = None
+
+        if self.mode == "CLING":
+            wall_x = lo if self.wall < 0 else hi
+            toward = "left" if self.wall < 0 else "right"
+            on_wall = cs.get("wallClinging") or cs.get("wallSliding") or cs.get("touchingWall")
+            if abs(hx - wall_x) > WALL_NEAR + 1.5 and not on_wall:
+                move = toward
+                if grounded and abs(hx - wall_x) < 4.0 and r.random() < 0.3:
+                    self._press("jump", r.randint(18, 26))
+            else:
+                move = toward                      # hold toward the wall: slide, or cling with the Grip
+                if grounded:
+                    self._press("jump", r.randint(18, 26))
+                elif on_wall:
+                    self.cling_frames += 1
+                    if r.random() < 0.015:
+                        self._press("jump", r.randint(8, 16))   # wall jump: climbs, then re-grabs
+                    if r.random() < 0.04:
+                        self._press("attack", 3)
+        elif tgt is not None:
+            bx, by = tgt["pos"][0], tgt["pos"][1]
+            dx, dy = bx - hx, by - hy
+            toward = "right" if dx > 0 else "left"
+            away = "left" if dx > 0 else "right"
+            if self.mode == "PRESS":
+                move = toward if abs(dx) > 1.6 else None
+            elif self.mode == "KEEP":
+                if abs(dx) > self.keep_d + 1.0:
+                    move = toward
+                elif abs(dx) < self.keep_d - 1.0:
+                    move = away
+            elif self.mode == "EVADE":
+                move = away
+            if hx < lo + 1.0 and move == "left" or hx > hi - 1.0 and move == "right":
+                move = "right" if hx < (lo + hi) / 2 else "left"
+            if abs(dx) < REACH_X + 0.8 and abs(dy) < REACH_Y and r.random() < 0.25:
+                if (hero.get("facing", 1) > 0) != (dx > 0):
+                    move = toward
+                self._press("attack", r.randint(2, 4))
+            if 1.5 < dy < 6.0 and abs(dx) < 2.5 and r.random() < 0.12:
+                move = move or toward
+                if grounded and dy > 2.5:
+                    self._press("jump", r.randint(10, 22))
+                self._press("up", r.randint(6, 12))
+                self._press("attack", 3)
+            if not grounded and dy < -1.0 and abs(dx) < 1.8 and r.random() < 0.2:
+                move = move or toward
+                self._press("down", r.randint(6, 14))
+                self._press("attack", 3)
+            antic = any("Antic" in str(f.get("state")) for f in tgt.get("fsms") or ())
+            if antic and abs(dx) < 7.0 and grounded and r.random() < 0.15:
+                self._press("jump", r.randint(14, 24))
+            if self.mode != "IDLE" and r.random() < 0.012 and abs(dx) < 3.0:
+                self._press("dash", 3)
+            if self.mode != "IDLE" and r.random() < 0.015 and abs(dx) < 10.0:
+                if (hero.get("facing", 1) > 0) == (dx > 0):
+                    move = move or toward
+                    if r.random() < 0.5:
+                        self._press("up", 6)
+                    self._press("quickcast", 3)
+        if r.random() < 0.02 and self.mode != "CLING":
+            self._press("jump", r.randint(3, 24))
+        if hero.get("health", 5) <= 2 and hero.get("silk", 0) >= 9 and r.random() < 0.05:
+            self._press("bind", 3)
+        return self._compose(move)
