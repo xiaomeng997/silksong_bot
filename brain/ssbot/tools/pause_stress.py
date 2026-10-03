@@ -21,9 +21,10 @@ Per trial:
              hit's hit-stun), menu (hit faults only: the first frame the loop's Pause press is latched after
              PAUSE_PENDING, the frame the pause menu opens when the gate lets it: a hit landing within 3 frames of it
              closes the gate under the press); "special" when one is within +-3 frames (G1: >= 30 % of the faults)
-  latency    first pausable frame at or after the fault (STATE pause.blk 0), the supervisor's first PAUSE_PENDING
-             frame, the first Pause latch, the first paused frame (game.paused); latency = paused - first pausable,
-             in frames (G1: p99.9 <= 6); key_waits: frames the loop's press waited for the key guard
+  latency    first pausable frame (STATE pause.blk 0) of the open-gate stretch the pause came in, the supervisor's
+             first PAUSE_PENDING frame, the first Pause latch, the first paused frame (game.paused); latency =
+             paused - first pausable, in frames (G1: p99.9 <= 6); key_waits: frames the loop's press waited for the
+             key guard
   keys       menu-visible frames (from the first paused frame to the main menu) carrying a latched key (STATE
              act.hf.latched) other than Pause before the menu first accepts input, and other than Pause / Up / Down /
              Enter after (the only keys the quit sequence presses, and only on a ready menu): a planner key held or
@@ -32,7 +33,8 @@ Per trial:
              37 gate / live QUITs (20261002_123347 ... 152649) had a movement key latched 1-2 frames into the pause
              in 9 and newly pressed on the pause frame in 4. pause_key_frames_paused: the loop's own in-flight press
              after the pause (within the 230 ms budget)
-  unpauses   paused -> running transitions before the quit reached the main menu (must be 0); the machine's own
+  unpauses   paused -> running transitions before the quit reached the main menu (must be 0; real quits only: an
+             emulated quit is resumed by the harness); the machine's own
              count (real_quit.unexpected_unpauses) and its wrong Submits (real_quit.wrong_submits, must be 0)
   menu       time from the pause to the main menu (frames and seconds, STATE q)
 """
@@ -164,9 +166,21 @@ def trial(row: dict, states: list[dict], names: list[str], natural: bool = False
     off = {k: min((ff - m for m in v), key=abs) for k, v in near.items() if v}
     special = {k: v for k, v in off.items() if k in HARD and abs(v) <= SPECIAL_WINDOW}
     after = [s for s in states if s["f"] >= ff]
-    pausable = next((s["f"] for s in after if not (s.get("pause") or {}).get("blk")
-                     and not (s.get("game") or {}).get("paused")), None)
     paused = next((s["f"] for s in after if (s.get("game") or {}).get("paused")), None)
+    # pausable for good: the first frame of the open-gate stretch the pause came in (a hit after the fault closes the
+    # gate again: 20261002_162847 i2 ep 12, PAUSE_PENDING 2 frames before a hit, read 21 frames from the first open
+    # frame, 4 from the reopening)
+    pausable = None
+    for s in after:
+        if paused is not None and s["f"] >= paused:
+            break
+        if (s.get("pause") or {}).get("blk"):
+            pausable = None
+        elif pausable is None:
+            pausable = s["f"]
+    if paused is None:
+        pausable = next((s["f"] for s in after if not (s.get("pause") or {}).get("blk")
+                         and not (s.get("game") or {}).get("paused")), None)
     menu = next((s for s in after if (s.get("game") or {}).get("gs") == GS_MAIN_MENU), None)
     foreign, edges, last_edge, pause_after, unpauses, was, prev = 0, 0, None, 0, 0, False, 0
     per_key: Counter = Counter()
@@ -211,7 +225,8 @@ def trial(row: dict, states: list[dict], names: list[str], natural: bool = False
         key_waits=rq.get("key_waits"), key_waits_expired=rq.get("key_waits_expired"),
         foreign_key_frames_paused=foreign, foreign_edges_paused=edges, last_foreign_edge=last_edge,
         foreign_keys=dict(per_key), pause_frame_keys=pause_frame_keys,
-        pause_key_frames_paused=pause_after, unpauses=unpauses,
+        pause_key_frames_paused=pause_after,
+        unpauses=unpauses if rq.get("armed") else None,     # an emulated quit is resumed by the harness on purpose
         machine_unpauses=rq.get("unexpected_unpauses"), wrong_submits=rq.get("wrong_submits"),
         main_menu=menu is not None, to_menu_frames=None if menu is None or paused is None else menu["f"] - paused,
         to_menu_s=menu_s, real_quit=bool(rq.get("armed")))
