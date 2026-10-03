@@ -74,14 +74,16 @@ def test_tap_start_waves_and_end_from_kills():
     while tap.death_frame is None and n < 40:
         f += 30
         n += 1
-        link.feed({"f": f, "ev": [_ev("hit", ent=n, type_key="X", dead=True, src="WildSlash Enemy Damager")]})
+        # the Maestro's summons die too (run 20261002_221727 i2 ep0): not wave members, no DecrementEnemy
+        link.feed({"f": f, "ev": [_ev("hit", ent=1000 + n, type_key="Song Automaton Tiny", dead=True, src="Slash"),
+                                  _ev("hit", ent=n, type_key="Song Reed", dead=True, src="WildSlash Enemy Damager")]})
     assert n == 28 and tap.death_frame == f and tap.end_source == "kills"
     summ = tap.summary()
-    assert summ["wave_reached"] == 13 and summ["kills"]["n"] == 28
-    assert summ["kills"]["by_src"] == {"WildSlash Enemy Damager": 28}
+    assert summ["wave_reached"] == 13 and summ["kills"]["n"] == 56
+    assert summ["kills"]["by_src"] == {"WildSlash Enemy Damager": 28, "Slash": 28}
     # the same enemy reported dead twice counts once
-    link.feed({"f": f + 1, "ev": [_ev("hit", ent=n, type_key="X", dead=True, src="Slash")]})
-    assert tap.summary()["kills"]["n"] == 28
+    link.feed({"f": f + 1, "ev": [_ev("hit", ent=n, type_key="Song Reed", dead=True, src="Slash")]})
+    assert tap.summary()["kills"]["n"] == 56
 
 
 def test_tap_prefers_room_battles_and_the_end_freeze():

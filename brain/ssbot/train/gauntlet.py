@@ -108,6 +108,9 @@ class GauntletTap:
         # active from the load and runs its FSM before the battle); their FSM start (from None) is the activation
         later = {n for w in enc.waves[1:] for n in w.enemies}
         self._wave0 = set(enc.waves[0].enemies) - later if enc.waves else set()
+        # only wave members count for DecrementEnemy: the Maestro's summoned "Song Automaton Tiny" also die with a
+        # "hit" event (run 20261002_221727 i2 ep0: 6 of 28 kills), and counting them ended the sim's last wave early
+        self._wave_types = {t for w in enc.waves for t in w.types}
         self.reset()
         link.subscribe_state(self._on)
 
@@ -194,7 +197,7 @@ class GauntletTap:
                     if d.get("dead") and d.get("ent") not in self._dead:
                         self._dead.add(d.get("ent"))
                         self.kills.append((f, d.get("type_key"), d.get("src")))
-                        if self.wake_frame is not None:
+                        if self.wake_frame is not None and d.get("type_key") in self._wave_types:
                             if self.sim.wave < 0:
                                 self.sim.start(self.wake_frame)
                             self.sim.kill(f)
