@@ -63,6 +63,8 @@ class Playbook:
     weights: dict[str, float] = field(default_factory=lambda: dict(DEFAULT_WEIGHTS))
     bind_reserve_at_full_hp: bool = False     # bind.reserve_at_full_hp: no silk spent below 9 even at full HP
     safe_spots: tuple["SafeSpot", ...] = ()   # bind.safe_spots: where Q1a's Bind may go when it cannot be in place
+    bind_gather_hit_x: float = 1.0            # bind.gather_hit_x: the hit weight's factor while Q1a gathers silk
+    #                                           (h >= 2, below max HP, silk < 9; DESIGN §3.7.4 Q6, 2026-10-03)
 
     @classmethod
     def from_dict(cls, d: dict) -> "Playbook":
@@ -87,7 +89,8 @@ class Playbook:
                    long_horizon=_long(d.get("long_horizon")),
                    weights=DEFAULT_WEIGHTS | {k: float(v) for k, v in (d.get("weights") or {}).items()},
                    bind_reserve_at_full_hp=bool(bind.get("reserve_at_full_hp", False)),
-                   safe_spots=tuple(SafeSpot.from_dict(x) for x in bind.get("safe_spots") or ()))
+                   safe_spots=tuple(SafeSpot.from_dict(x) for x in bind.get("safe_spots") or ()),
+                   bind_gather_hit_x=float(bind.get("gather_hit_x", 1.0)))
 
 
 def _long(d: dict | None) -> dict:

@@ -74,7 +74,7 @@ from ssbot.safety.pause_quit import (GOAL_PAUSE, GOAL_QUIT, HELD_STATES, POST_HI
                                      vision_cues_from_state)
 from ssbot.safety.pause_window import PauseWindowMonitor
 from ssbot.safety.supervisor import (RESUME_SELF_CHECK, Supervisor, SupervisorConfig, SupervisorDecision,
-                                     SupervisorInput, input_from_state, input_from_world)
+                                     SupervisorInput, hero_hurt, input_from_state, input_from_world)
 
 SupportFn = Callable[[dict], object]
 
@@ -197,13 +197,19 @@ class SupervisedControl:
         self.hit_open_s = POST_HIT_OPEN_MAX_S
 
     def _see_hit(self, ws: WorldState, t_cap: float) -> None:
-        """Vision: note the capture time of a hit the delayed view shows (a HIT_TAKEN event, or the HUD's health +
-        blue lower than at the last read: a hit on a frame the live loop skipped reaches the supervisor only as the
-        lower HUD, and is then timed a frame or two late, which only delays the press)."""
+        """Vision: note the capture time of a hit the delayed view shows: a HIT_TAKEN event, or the HUD's health + blue
+        lower than at the last read (a hit on a frame the live loop skipped reaches the supervisor only as the lower
+        HUD, and is then timed a frame or two late, which only delays the press), with the hero in the hit's knockback
+        (supervisor.hero_hurt). A drop without it is frost or DamageTag damage (DoSpecialDamage's take-health path:
+        no freeze, no shut gate, no i-frames), and holding the first press for 0.285 s there would only leave the hero
+        vulnerable that long: Q1 then presses at once (fixer review 2026-10-03). The knockback shows on the hit's own
+        frame (cState.recoilFrozen in the STATE of 28 of 28 sampled hit frames) and lasts through the freeze and the
+        recoil, so a hit seen late still shows it."""
         hp = ws.res.hp
         tot = None if hp is None or hp.conf <= 0 or hp.v is None else int(hp.v) + int(_known_v(ws.res.blue) or 0)
-        hit = any(ev.kind == Ev.HIT_TAKEN for ev in ws.events) or \
+        drop = any(ev.kind == Ev.HIT_TAKEN for ev in ws.events) or \
             (tot is not None and self._hp_seen is not None and tot < self._hp_seen)
+        hit = drop and hero_hurt(ws) is True
         if tot is not None:
             self._hp_seen = tot
         if hit:
@@ -252,6 +258,25 @@ class SupervisedControl:
         """The pause stress test: a quit trigger on the next step, with no damage (Supervisor.inject)."""
         self.sup.inject(tid, why)
 
+    def h_now(self, s: dict, obs: dict | None = None, ws: WorldState | None = None) -> tuple[int | None, str | None]:
+        """(h, basis) the supervisor's step will decide for this STATE (same inputs: the current STATE in oracle mode,
+        the delayed view in vision mode), without stepping it (Supervisor.peek_h). The policy's tactics and safety
+        filter run before the step and read this, not the decision of the tick before, which on the tick a hit takes
+        h to 1 still said h 2 (fixer review 2026-10-03)."""
+        if self.vision:
+            obs = s if obs is None else obs
+            ws = self._last_ws if ws is None else ws
+            events, known, empty_ok = _support_of(None if self.support is None else self.support(obs))
+            if ws is None:
+                inp = SupervisorInput(t=0.0, support=tuple(events or ()), support_known=events is not None and known,
+                                      support_empty_ok=events is not None and empty_ok)
+            else:
+                inp = input_from_world(ws, 0.0, support=events, support_known=known, support_empty_ok=empty_ok)
+        else:
+            events, known, empty_ok = _support_of(None if self.support is None else self.support(s))
+            inp = input_from_state(s, 0.0, support=events, support_known=known, support_empty_ok=empty_ok)
+        return self.sup.peek_h(inp)
+
     def step(self, s: dict, obs: dict | None = None, ws: WorldState | None = None, inflight: Sequence[int] = (),
              **planner) -> Supervised:
         """s: the current STATE (its QPC is the clock the keys go out on). Vision mode: obs is the STATE of the frame
@@ -294,6 +319,8 @@ class SupervisedControl:
                         self.hero_hit = max(self.hero_hit, int(d))
             events, known, empty_ok = _support_of(None if self.support is None else self.support(s))
             planner.setdefault("next_hit_may_kill", next_hit_may_kill(s, self.hero_hit))
+            if ws is not None:
+                planner.setdefault("hurt", hero_hurt(ws))      # the oracle backend's ws is this STATE's frame
             inp = input_from_state(s, t_q - self.t0, support=events, support_known=known, support_empty_ok=empty_ok,
                                    foreground_sink=self.foreground_sink, **planner)
         d = self.sup.step(inp)

@@ -133,10 +133,17 @@ class Tactics:
         # HEAL (Q1a, DESIGN §3.7.4, the person's rule of 2026-10-03): with h >= 2 below max HP, heal first: the Bind
         # commit test at the hero's position (the Bind roots her there), else a verified safe spot, else fight on.
         # Never at h <= 1: that is Q1's quit in the post-hit window (a model error there is death), and an unknown h
-        # (no hero read) is no reason to Bind. The playbook's hp_missing_min still gates a Bind without the
-        # supervisor's flag (d None: tests, tools)
+        # (no hero read) is no reason to Bind. h is this tick's (PlannerPolicy: SupervisedControl.h_now), and heal
+        # first is Q1a's rule on it (the decision's own flag is a tick old). The playbook's hp_missing_min still gates
+        # a Bind without the supervisor (d None: tests, tools)
         bind_ok = d is None or d.allows(Prim.BIND)
-        heal_first = d is not None and d.restrictions.heal_first
+        heal_first = d is not None and h is not None and h >= 2 and hp is not None and max_hp is not None \
+            and hp < max_hp
+        if heal_first and silk is not None and silk < BIND_SILK:
+            # gathering silk for the heal (DESIGN §3.7.4 Q6, the person's rule of 2026-10-03: at h 2 fight on with
+            # nail hits until the Bind's silk is there): nail hits count more (playbook bind.gather_hit_x; silk skills
+            # are already off below full HP, supervisor.silk_spend_allowed)
+            wts["hit"] *= pb.bind_gather_hit_x
         if (hp is not None and max_hp and silk is not None and silk >= BIND_SILK and hp < max_hp and bind_ok
                 and h is not None and h >= 2 and (heal_first or hp <= max_hp - pb.bind_hp_missing_min)):
             pending = bool(d is not None and d.pause_pending)

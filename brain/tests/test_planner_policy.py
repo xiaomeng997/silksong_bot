@@ -91,31 +91,39 @@ def test_forced_clear_counts_frames_until_a_standing_plan_meets_the_support():
 
 
 def test_q6_waits_for_forced_risk_within_the_design_horizon():
-    """At h = 2 a FORCED_RISK whose best plan stays clear beyond H = 0.8 s (the Charge Emerge triggers of the gate /
-    live QUITs: 120 of 120 frames clear) leaves the attempt going; within H it is Q6 and the pause loop presses at
-    once (the pause key in the very mask the policy returns that tick)."""
+    """The rule before 2026-10-03 (q6_max_h 2): at h = 2 a FORCED_RISK whose best plan stays clear beyond H = 0.8 s
+    (the Charge Emerge triggers of the gate / live QUITs: 120 of 120 frames clear) leaves the attempt going; within H
+    it is Q6 and the pause loop presses at once (the pause key in the very mask the policy returns that tick). The
+    person's rule (the default, q6_max_h 1): no Q6 at h = 2 within H either, the planner's mask goes out."""
     from ssbot.ipc.framing import BIT
     from ssbot.safety.supervisor import SupervisorConfig
     from ssbot.train.supervision import SupervisedControl
     s = next(x for x in fx.window(0) if x.get("hero") and x["f"] >= 56540)
     s = dict(s, hero=dict(s["hero"], health=3), game=dict(s["game"], paused=False))
-    sc = SupervisedControl(cfg=SupervisorConfig(worst_known_damage=2), support=lambda st: None)
     from ssbot.safety.hits_to_death import SupportEvent, SupportSet
+    s2 = dict(s, f=s["f"] + 1, q=(s.get("q") or 0) + 166667)
+    sc = SupervisedControl(cfg=SupervisorConfig(worst_known_damage=2, q6_max_h=2), support=lambda st: None)
     sc.support = lambda st: SupportSet((SupportEvent("Bone Beast", 2, instance=1),), True)
     r = sc.step(s, plan_s=1, forced_risk=True, forced_clear_s=105 / 60)
     assert r.mask is None and not r.decision.pause_pending and r.decision.h == 2
-    s2 = dict(s, f=s["f"] + 1, q=(s.get("q") or 0) + 166667)
     r = sc.step(s2, plan_s=1, forced_risk=True, forced_clear_s=27 / 60)
     assert r.decision.pause_pending and "Q6" in r.decision.triggers
     assert r.mask is not None and r.mask & (1 << BIT["pause"]) and r.mask == 1 << BIT["pause"]
+    sc = SupervisedControl(cfg=SupervisorConfig(worst_known_damage=2), support=lambda st: None)
+    sc.support = lambda st: SupportSet((SupportEvent("Bone Beast", 2, instance=1),), True)
+    sc.step(s, plan_s=1, forced_risk=True, forced_clear_s=105 / 60)
+    r = sc.step(s2, plan_s=1, forced_risk=True, forced_clear_s=27 / 60)
+    assert r.mask is None and not r.decision.pause_pending and r.decision.h == 2 and not r.decision.triggers
 
 
 def test_yellow_heals_first_and_the_pause_stays_the_fallback():
     """(c) DESIGN §3.7.3 YELLOW at h = 2 (3 of 5 masks after one Bell Beast hit): with silk 9 and the §3.5.6 commit test
     passing at the hero's spot (Forecast.t_min >= 1.52 s) the tactics want the Bind, the planner's own 100-frame Bind
     rollout passes, the Bind is chosen and is no FORCED_RISK, so Q6 cannot pre-empt it; with silk 8 and the hero inside
-    an unavoidable eruption the same tick is FORCED_RISK within H and Q6 raises PAUSE_PENDING, which forbids the Bind
-    (EVASIVE only: a Bind can be broken into a 0.55 s freeze that swallows the pause)."""
+    an unavoidable eruption the same tick is FORCED_RISK within H: by the person's rule of 2026-10-03 the attempt goes
+    on (h 2, no Q6, the least risky plan, the hit weight raised for silk); under the rule before (q6_max_h 2) Q6
+    raises PAUSE_PENDING, which forbids the Bind (EVASIVE only: a Bind can be broken into a 0.55 s freeze that
+    swallows the pause)."""
     import numpy as np
 
     from ssbot.combat.boss_model import Anchor
@@ -165,7 +173,7 @@ def test_yellow_heals_first_and_the_pause_stays_the_fallback():
     assert res.name == "BIND" and res.mask & kin.B_BIND and not res.forced_risk
     d2 = step(sup, 3, res)
     assert not d2.pause_pending and "Q6" not in d2.triggers
-    # silk 8, inside the burst's eruption as it starts: no Bind, FORCED_RISK within H, Q6 -> PAUSE_PENDING
+    # silk 8, inside the burst's eruption as it starts: no Bind, FORCED_RISK within H
     burst = [Root("Burst Out", 0.0, 0.0, Ctx("BB_BURST", None, Anchor(85.0, 5.49, 1), "P1", False), current=True)]
     sup = Supervisor(SupervisorConfig(worst_known_damage=2))
     d = step(sup, 3, SimpleRes(0, False))
@@ -173,6 +181,10 @@ def test_yellow_heals_first_and_the_pause_stays_the_fallback():
     assert res.forced_risk and res.name != "BIND" and not prefs.want_bind
     clear = pol._forced_clear_f(res, f, S0, 1)
     assert clear is not None and clear * p.frame_time <= 0.8
+    d2 = step(sup, 3, res, clear * p.frame_time)
+    assert not d2.pause_pending and "Q6" not in d2.triggers and d2.h == 2 and d2.allows(Prim.BIND)
+    sup = Supervisor(SupervisorConfig(worst_known_damage=2, q6_max_h=2))      # the rule before: Q6 -> PAUSE_PENDING
+    d = step(sup, 3, SimpleRes(0, False))
     d2 = step(sup, 3, res, clear * p.frame_time)
     assert d2.pause_pending and "Q6" in d2.triggers and not d2.allows(Prim.BIND)
     # pending: the tactics no longer want the Bind even with silk 9 and room for it, and the filter vetoes it
@@ -183,6 +195,37 @@ def test_yellow_heals_first_and_the_pause_stays_the_fallback():
 class SimpleRes:
     def __init__(self, S, forced_risk):
         self.S, self.forced_risk = S, forced_risk
+
+
+@pytest.mark.parametrize("view", ["oracle", "degraded"])
+def test_the_tactics_read_this_ticks_h_not_the_decision_before(view):
+    """Fixer review 2026-10-03: the tactics and the safety filter run before the supervisor's step of the tick, and
+    used to read the decision of the tick before. On the tick the hero drops from 3 HP (h 2, heal first) to 1 HP with
+    the Bind's silk, that decision still said h 2; now they get SupervisedControl.h_now (h 1), so no Bind is wanted on
+    that tick either, and Q1 starts the pause loop on it."""
+    pol = PlannerPolicy(view=view, threads=2)
+    pol.terrain = Terrain2D.from_boxes(ARENA)
+    pol.reset(random.Random(1), BELL_BEAST)
+    seen = []
+    orig = pol.tac.decide
+
+    def spy(ws, f, d, h):
+        p = orig(ws, f, d, h)
+        seen.append((ws.res.hp.v, None if d is None else d.h, h, p.want_bind))
+        return p
+    pol.tac.decide = spy
+    states = [s for s in fx.window(0) if s.get("hero") and s["f"] >= 56540][:40]
+    drop = states[30]["f"]
+    for s in states:
+        hp = 3 if s["f"] < drop else 1
+        s = dict(s, hero=dict(s["hero"], health=hp, silk=9))
+        pol.act(s, Tap)
+        if pol.sc.pq is not None:
+            break
+    first_low = next(x for x in seen if x[0] == 1)
+    assert first_low[1] == 2 and first_low[2] == 1 and not first_low[3]   # the decision before said 2; h_now 1
+    assert all(not x[3] for x in seen if x[2] is not None and x[2] <= 1)
+    assert pol.decision.pause_pending and "Q1" in pol.decision.triggers
 
 
 def test_once_the_pause_machine_owns_the_keys_no_planner_key_reaches_the_game(tmp_path, monkeypatch):

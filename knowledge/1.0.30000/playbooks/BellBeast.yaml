@@ -137,6 +137,12 @@ bind:
   # within 2 s of the hit (ssbot.tools.quit_timeline --replay). On: every first hit finds a Bind; the cost is the
   # Silkspear's damage (3-5 casts, 45-75 of the boss's 150 HP a fight in run 152649). Decide by a live A/B.
   reserve_at_full_hp: false
+  # Gathering silk after the first hit (DESIGN §3.7.4 Q6, the person's rule of 2026-10-03: at h 2 no quit on
+  # FORCED_RISK; fight on with nail hits, no silk skills, until silk 9 and the Bind's commit test, or a second hit,
+  # which is Q1's quit in the post-hit window): the hit weight's factor while h >= 2, below max HP and silk < 9.
+  # A first value, not tuned: YELLOW still caps a punish at 1 hit, so it mostly decides whether a marginal window is
+  # taken (pause_quit.md 7.7 measures silk gathered after the hit and the Binds it buys).
+  gather_hit_x: 1.5
 
 weights:
   hit: 10.0               # per predicted nail hit on the boss (Silkspear: x 3)

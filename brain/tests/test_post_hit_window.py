@@ -13,6 +13,7 @@ from ssbot.core.worldstate import E, Ev, Event, HitTaken, WorldState
 from ssbot.ipc.framing import BIT
 from ssbot.safety import game_codes as gc
 from ssbot.safety import pause_quit as pq
+from ssbot.safety import supervisor as sv
 from ssbot.safety.hits_to_death import SupportEvent, SupportSet
 from ssbot.safety.supervisor import Q1_HIT, SupervisorConfig
 from ssbot.train.supervision import SupervisedControl
@@ -131,14 +132,20 @@ def test_no_hit_presses_at_once():
     assert run_loop(seq, 5, lambda f, s: pq.vision_cues_from_state(state(f, *s[f]), QPC)) == 5 + LEAD
 
 
-def _ws(hp: int, hit: bool, frame: int) -> WorldState:
+def _ws(hp: int, hit: bool, frame: int, hurt: bool = False) -> WorldState:
+    """The delayed view's WorldState; hurt: the hero in a hit's knockback (HeroState.mode "hurt": from the hit's own
+    frame through the freeze and the recoil)."""
     ws = WorldState()
     ws.hero.pos = E((85.0, 3.05))
+    ws.hero.mode = E("hurt" if hurt else "ground")
     ws.res.hp, ws.res.hp_max, ws.res.silk, ws.res.blue, ws.res.pending_dmg = E(hp), E(5), E(3), E(0), E(0)
     ws.stamp.frame = frame
     if hit:
         ws.events = [Event(Ev.HIT_TAKEN, frame, frame / FPS, HitTaken(amount=2))]
     return ws
+
+
+RECOIL_F = 25                              # the hurt mode's frames after a hit (freeze ~15, then the recoil)
 
 
 @pytest.mark.parametrize("k", (2, 4))
@@ -154,7 +161,7 @@ def test_supervised_control_vision_times_the_q1_press_from_the_hit(k):
         fo = f - k
         obs = state(fo, 0 if fo < hit_f else 3, 1.0 if fo < hit_f else 0.0)
         cur = state(f, 0, 1.0)
-        ws = _ws(5 if fo < hit_f else 1, fo == hit_f, fo)
+        ws = _ws(5 if fo < hit_f else 1, fo == hit_f, fo, hurt=hit_f <= fo < hit_f + RECOIL_F)
         r = sc.step(cur, obs=obs, ws=ws)
         if r.decision.pause_pending and first_pending is None:
             first_pending = f
@@ -176,10 +183,51 @@ def test_vision_hit_through_a_bind_waits_for_the_bindbreak_freeze():
     hit_f, k, first_press = 100, 3, None
     for f in range(hit_f - 10, hit_f + 50):
         fo = f - k
-        ws = _ws(3 if fo < hit_f else 1, fo == hit_f, fo)
+        ws = _ws(3 if fo < hit_f else 1, fo == hit_f, fo, hurt=hit_f <= fo < hit_f + RECOIL_F)
         ws.hero.binding = E("IN_PROGRESS" if fo < hit_f else "INTERRUPTED")
         r = sc.step(state(f, 0, 1.0), obs=state(fo, 0, 1.0), ws=ws)
         if r.mask and r.mask & PAUSE and first_press is None:
             first_press = f
     assert sc.hit_open_s == pq.POST_HIT_OPEN_MAX_BIND_S
     assert (first_press + LEAD - hit_f) / FPS >= pq.POST_HIT_OPEN_MAX_BIND_S - 0.5 / FPS
+
+
+@pytest.mark.parametrize("event", (False, True))
+@pytest.mark.parametrize("k", (2, 4))
+def test_vision_hud_drop_without_knockback_presses_at_once(k, event):
+    """Frost / DamageTag damage (DoSpecialDamage's take-health path: no recoil, no freeze, no shut gate, no i-frames)
+    taking the HUD to 1 HP: Q1 is "no hit" and the first press goes on Q1's own tick, not 0.285 s later with the hero
+    vulnerable (fixer review 2026-10-03). With or without a HIT_TAKEN for it (the oracle backend emits one for
+    special_damage), and a skipped frame (the drop seen 2 frames late) changes nothing."""
+    sc = SupervisedControl(SupervisorConfig(worst_known_damage=2), support=lambda s: SupportSet(
+        (SupportEvent("Bone Beast", 2),), True), vision=True)
+    drop_f, first_pending, first_press = 100, None, None
+    for f in range(drop_f - 10, drop_f + 30):
+        fo = f - k
+        if fo == drop_f + 1:
+            continue                                         # the live loop skipped a tick
+        ws = _ws(3 if fo < drop_f else 1, event and fo == drop_f, fo, hurt=False)
+        r = sc.step(state(f, 0, 1.0), obs=state(fo, 0, 1.0), ws=ws)
+        if r.decision.pause_pending and first_pending is None:
+            first_pending = f
+            assert r.decision.q1_cause == sv.Q1_NO_HIT
+        if r.mask and r.mask & PAUSE and first_press is None:
+            first_press = f
+    assert sc.t_hit_seen is None and first_pending == drop_f + k and first_press == first_pending
+
+
+def test_vision_hit_seen_late_still_shows_the_knockback():
+    """A hit on a frame the live loop skipped reaches the view as the lower HUD with the hero still in the knockback
+    (the hurt mode lasts through the freeze and the recoil): timed as a hit from that capture."""
+    sc = SupervisedControl(SupervisorConfig(worst_known_damage=2), support=lambda s: SupportSet(
+        (SupportEvent("Bone Beast", 2),), True), vision=True)
+    hit_f, k = 100, 3
+    for f in range(hit_f - 10, hit_f + 10):
+        fo = f - k
+        if fo == hit_f:
+            continue                                         # skipped: its HIT_TAKEN is never seen
+        r = sc.step(state(f, 0, 1.0), obs=state(fo, 0, 1.0),
+                    ws=_ws(5 if fo < hit_f else 1, False, fo, hurt=hit_f <= fo < hit_f + RECOIL_F))
+        if r.decision.pause_pending:
+            assert r.decision.q1_cause == Q1_HIT
+    assert sc.t_hit_seen == pytest.approx((hit_f + 1) / FPS, abs=1e-6)

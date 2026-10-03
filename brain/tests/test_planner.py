@@ -212,6 +212,21 @@ def test_q1a_heal_first_branches(model, tpls, params, arena):
     d2 = _decision(2)
     assert d2.pause_pending and not d2.allows("BIND")
     assert tac.decide(world(85.0, hp=2, silk=9), f_none, d2, d2.h).mode != HEAL
+    # the decision of the tick before (h 2, heal first) with this tick's h 1 (a hit to 1 HP on this tick): no Bind
+    # (PlannerPolicy hands the tactics SupervisedControl.h_now; fixer review 2026-10-03)
+    d3 = _decision(3)
+    assert d3.h == 2 and d3.restrictions.heal_first
+    prefs = tac.decide(world(85.0, hp=1, silk=9), f_none, d3, 1)
+    assert prefs.mode != HEAL and not prefs.want_bind
+    # gathering silk (DESIGN §3.7.4 Q6, 2026-10-03): h 2 below max HP with silk < 9 raises the hit weight by the
+    # playbook's gather_hit_x; not at full HP, not with the Bind's silk, not at h 1
+    pb0 = load_playbook()
+    assert pb0.bind_gather_hit_x > 1.0
+    base = pb0.weights["hit"]
+    assert tac.decide(world(85.0, hp=3, silk=5), f_none, d3, 2).weights["hit"] == base * pb0.bind_gather_hit_x
+    assert tac.decide(world(85.0, hp=5, silk=5), f_none, _decision(5), 3).weights["hit"] == base
+    assert tac.decide(world(85.0, hp=1, silk=5), f_none, d3, 1).weights["hit"] == base
+    assert tac.decide(world(85.0, hp=3, silk=5), f_none, None, 2).weights["hit"] == base     # no supervisor: tools
     # in place impossible (a charge 8 u away): no spot in the Bell Beast playbook -> fight on (EVADE here)
     an = model.anchor("BB_CHARGE", "Set L")
     charge = [Root("Charge", -0.1, -0.1, Ctx("BB_CHARGE", "Set L", an, "P1", False), current=True)]
