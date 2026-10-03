@@ -561,3 +561,5 @@ Code: f9dcbba (supervisor / tactics), 4eb57db (tools), 5026372 (combat_run --sta
    `git worktree remove --force`: `C:\ssbot\live_pq_72baaf3`, `C:\ssbot\live_pq_3bc9da8` (at 3afa1e1),
    `C:\ssbot\live_pq_4eb57db` (the fixer round's injected checks).
 7. Merge note: main's 1c0a082 marks DESIGN §3.7.4 Q6's revision "待实现"; it is implemented here (q6_max_h 1).
+   The Bell Beast gate on main (e3ceda4: degraded_dust 4a90331, 94.4 % CLEAR) ran with Q6 at h 2; after merging, the
+   gate's QUIT / STUCK mix changes (h 2 fights on), so re-run it on the merged code before quoting it.
