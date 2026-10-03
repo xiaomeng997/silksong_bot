@@ -140,6 +140,13 @@ height per jump hold length, logged (min, median, max) against the model over th
 height spread for the hazard margin (0.05-0.35 u, the 50 Hz steps falling differently among the frames; the model
 range holds every logged apex of live i0_000 within 4 mm).
 
+Forum loadout (M2 W8, docs/facts/1.0.30000/movement_kinematics.md): HeroParams.abilities switches on wall slide,
+Ascendant's Grip cling, wall jump, wall slash, Wall Scramble, Drifter's Cloak glide, Swift Step dash and the sprint FSM
+after it, the Reaper down slash and hard landing (modes M_GLIDE .. M_SCRAMBLE, rows WSIDE .. SP_X), from the
+decompiled HeroController and the hero's PlayMaker templates. Those rules exist only in kin_jit (scalar, compiled);
+with abilities 0 none of them runs and the Hunter rollout is bit for bit the same. classify_modes(forum=True),
+ForumRows and StateTracker estimate the new rows from cstate, hero.wall and the animation clips.
+
 Implementation: the model state is one float64 array [K, N] (rows below) and the parameters one float64 vector. The
 NumPy functions here (_fixed_step, _apply_events, _update, _simulate) are the readable reference, array code over
 lanes; kin_jit is the same rules per lane as numba-compiled scalar code, which rollout() uses (backend "auto"), and
