@@ -416,3 +416,88 @@ launcher --restore.
   prune's hit-count assumption (M3), the persistent-bias size (M3), bursts / rage pattern / Dig In pogos.
 - To stop a running job: `..\scripts\uv.cmd run python -m ssbot.tools.combat_run stop <run dir>` from
   C:\ssbot\live_vv\brain (or this worktree's brain).
+
+## Chain Q - low-HP heal-or-quit rule, Q1 / Q1a (branch worktree-wf_9edc2274-509-2)
+
+Worktree `C:\modeling\silksong_bot\.claude\worktrees\wf_9edc2274-509-2`, branch `worktree-wf_9edc2274-509-2`, from main
+5a83283. Instance 4 (port 47021), seeds 105000-109999, savestate prefix pq_ (none made). Facts:
+docs/facts/1.0.30000/pause_quit.md sections 7 (this rule) and 8 (EXCLUSIVE deploy checklist). This answers the
+integration section's Next item 4.
+
+### Done
+
+- Supervisor (`safety/supervisor.py`): h is hits_to_death against the support, and against the encounter's worst known
+  event when the support is certified empty (`SupervisorDecision.h_basis`); every rule reads it (tier, Q1, Q1a, Q3, Q5,
+  Q6, the Bind commit test's worth clause). Replaces 10bfb66's Q1-only floor: at 3 HP with the boss underground the tier
+  is YELLOW with h 2 (was GREEN with h UNBOUNDED, and the commit test refused the Bind as "not worth it"). Q1 (h <= 1)
+  quits, never Binds, and records its cause (`q1_cause`: a hit within 1.1 s = the post-hit window, else the first
+  pausable frame). Q1a: `Restrictions.heal_first` = h >= 2 and HP < max, in any tier.
+- Tactics (`combat/tactics/modes.py`): HEAL with heal_first at any HP < max (4 / 5 too), never at h <= 1; HEAL_SPOT
+  walks to a verified floor spot of the playbook (`bind.safe_spots`, `playbook.SafeSpot.usable`, forecast agreeing)
+  when only the place fails; else fight on. Bell Beast lists none (playbook comment: the coverage map's only gaps are
+  wall-cling points at the gates).
+- Post-hit pause timing (`safety/pause_quit.py`, `train/supervision.py`): `PauseCues.gate_open_at` = the predicted
+  first pausable frame; no press before it, and from it the press goes even with the gate still seen shut. Measured:
+  G (first STATE with pause.blk 0) 0.213-0.267 s after 2138 hits; **the first frame a press pauses is G + 1**
+  (the time scale comes back after InputHandler's Update; a press on G is dropped and costs a 6-frame cadence).
+  Oracle: the freeze ramp's last shut frame (ts >= 0.999) -> pause on G + 1 (about 60 % of hits), else the observed
+  gate's G + 2 as before. Vision (delayed view only): the hit's capture time + 0.285 s (0.57 s through a Bind).
+- Harness: `SSBOT_INJECT_LEAVE_HP` / `SSBOT_INJECT_MIN_SILK` (injector "anytime" hits leaving h 1 or 2), `combat_run
+  --start-silk LO HI --silk-reserve`; tools `lowhp_check` (live check summary) and `lowhp_replay` (recorded decisions).
+- Commits: 5126afd (rule, h, gate_open_at, tactics, tests), 72baaf3 (harness), 3bc9da8 (hit through a Bind),
+  8beb806 (G + 1 fix), b957be6 / a2d0ec9 (lowhp_replay), 05382a7 (lowhp_check), d0c2327 / 3afa1e1 (Q1 cause), docs.
+- Tests: tests/test_post_hit_window.py (stand-in game with the four measured gate shapes and G + 1; oracle, vision
+  k 2-4 x G 13-16, no hit, SupervisedControl wiring, hit through a Bind), Q1 / Q1a / h-basis tests in
+  test_supervisor.py, tactics branches in test_planner.py (test_q1a_heal_first_branches), injector option in
+  test_pause_stress.py.
+
+### Measured
+
+- Live oracle 20261003_112406 (8beb806, 30 trials, CPU ~75 %): h 1 16 / 16 pause on G + 1 (+16 frames, 0.264-0.268 s
+  after the hit, 0.925 s of i-frames left), 0 Binds; h 2 (3 HP) 11 / 14 Binds, 11 / 11 completed, 0 hit, all 11 CLEAR,
+  3 Q6 quits. The first version (72baaf3, run 20261003_111244, stopped after 12) timed the press for G: dropped,
+  pauses at +20 / +21 (chain H's observed gate: +17).
+- Live degraded_dust 20261003_114708 (8beb806, 30 trials): h 1 22 / 22 pending 2-4 frames after the hit (the view's
+  delay), paused at +17 (21) / +18 (1) = G + 2 / G + 3, all inside the i-frames (0.89-0.91 s left), 0 Binds; h 2 8:
+  5 Binds, 5 / 5 completed, 0 hit, 4 CLEAR, 4 Q6 (3 before any Bind). One h-1 Q1 was labelled "no hit" (its HIT_TAKEN on
+  a skipped frame; timing still right): fixed in d0c2327 (a HUD drop counts as a hit) and 3afa1e1 (the cause latched
+  while the pause is pending or held).
+- Both views together (72 trials): h 1 46 / 46 paused inside the window, 0 Binds; h 2 20 Binds, 20 completed, 0 hit.
+- Full suite (code of 8beb806 + tools): 903 passed, 1 failed (the known support-query timing test under load: p99
+  2.76 / 4.39 ms vs 3 ms), 1 skipped, 1 xfailed; after d0c2327 / 3afa1e1 (supervisor only) the related tests 86 passed.
+- Replay (61 runs, 324 episodes: 311 Q6 quits, 13 heals; 0 Q1 quits and 0 Binds at h <= 1 in the recordings):
+  Binds that become quits 0; quits that become Binds 1 (20261002_232157 i1 ep49, degraded_dust: Bind at +152 underground
+  with h 2 by the worst known event, where main's rule waited to +214 and the live run quit at +221); 14 new Binds
+  checked: support T_min >= 1.7 s, recorded colliders >= 1.07 u away, 0 would be hit (2 censored by the live pause).
+  Only 14 of 198 replayable episodes ever had 9 silk after the hit: the Silkspear at full HP spends it, so Q1a binds
+  rarely unless `bind.reserve_at_full_hp` is on (A/B needed).
+
+### Running
+
+- 10^4 pause stress campaign, restarted on the final code: worktree `C:\ssbot\live_pq_3bc9da8` (the name is stale: it
+  is checked out at 3afa1e1, numba prewarmed), instance 4, seeds 105330-109999 (4670 trials, about 39 h at ~30 s),
+  run dir `C:\ssbot\data\runs\m2\20261003_122030_BellBeast_eval_planner_oracle_inject`, launcher log
+  `C:\ssbot\sandbox\pq_campaign_q2.log`, started detached (Win32_Process Create) with
+  `C:\ssbot\sandbox\pq_campaign_start.cmd C:\ssbot\live_pq_3bc9da8 105330 4670 C:\ssbot\sandbox\pq_campaign_q2.log`.
+  Stop (graceful, after the current trial): from `C:\ssbot\live_pq_3bc9da8\brain`:
+  `..\scripts\uv.cmd run python -m ssbot.tools.combat_run stop C:\ssbot\data\runs\m2\20261003_122030_BellBeast_eval_planner_oracle_inject`
+  (or C:\ssbot\sandbox\STOP_AGENTS). It holds SsOracle.dll: stop it before the EXCLUSIVE deploy. Summarise with
+  `pause_stress <run dir> --quiet --json <run dir>\pause_stress.json` (below-normal priority).
+- Chain H's campaign 20261003_010522 was not running (it died at 07:13 after 722 trials, see Next 2); a 23-trial start
+  on d0c2327 (20261003_120827, seeds 105300-105322) was stopped to pick up 3afa1e1.
+
+### Needs deploy
+
+- Nothing new from this chain. The EXCLUSIVE oracle flag already in main: checklist in pause_quit.md section 8 (stop
+  this chain's campaign on instance 4 first; it holds SsOracle.dll).
+
+### Next
+
+1. A/B of `bind.reserve_at_full_hp` (keep 9 silk at full HP) now that Q1a binds whenever it may: Binds and CLEARs vs
+   Silkspear damage and time to kill.
+2. Chain H's campaign died at 07:13 (722 episodes, 20261003_010522): `load_slot` after a real quit timed out waiting
+   for gameplay (TimeoutError in the worker); the worker has no retry there. Watch the restarted campaign for the same.
+3. Safe spots for later encounters (Forum left wall top, Lace 2 arena): need a cling / double-jump primitive in the
+   planner before `SafeSpot.kind == "wall"` can be used; verify each with coverage_map first.
+4. Live workdirs: `C:\ssbot\live_pq_72baaf3` (first live check; can be removed with `git worktree remove`) and
+   `C:\ssbot\live_pq_3bc9da8` (despite its name checked out at the final code commit, numba warm; runs the campaign).
