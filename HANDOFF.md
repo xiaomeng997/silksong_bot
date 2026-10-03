@@ -3,6 +3,79 @@
 One section per merged chain; each keeps its chain's own text (headings demoted one level) including its Next steps.
 Paths to worktrees / run dirs in a section are that chain's, not this integration worktree's.
 
+## Integration (branch m2-integration-6, worktree `C:\modeling\silksong_bot\.claude\worktrees\wf_510ef709-004-1`)
+
+Main (3744eeb, docs only since 03482a4) plus five chains, one `git merge --no-ff` each, in this order: R route research
+(worktree-wf_c0d56d51-4cb-5), W kinematics (worktree-wf_946a7803-63c-3), F Forum (worktree-wf_946a7803-63c-2), H pause /
+quit (worktree-wf_c0d56d51-4cb-4), V vision view (worktree-wf_946a7803-63c-1). Offline only: no game instance touched,
+nothing running, nothing deployed.
+
+### Conflicts and how they were resolved
+
+- `train/encounters.py` (W x F): both kept - W's `BELL_BEAST_REAPER` and F's `FORUM` + arms; `ENCOUNTERS` lists all
+  seven; `forum_variant` uses the module-level `replace` import.
+- `train/episode.py` (F x H, post-kill zeros): F's `act_after` (policy flag or a gauntlet encounter) decides; the kept-
+  acting tick goes through H's `_act` (ACTION flags from the policy).
+- `safety/supervisor.py` imports (H x V): union of both sides' names.
+- `train/supervision.py` (H x V): `SupervisedControl.step(s, obs=None, ws=None, inflight=(), **planner)`. In the vision
+  views the supervisor and the pause machine read only the delayed view (V's rule: `vision_cues_from_state(obs)`,
+  `input_from_world(ws)`); H's key guard then sets `cues.keys_clear` from the current STATE's `act.hf` and the in-flight
+  masks in every view. Decision: the key path is the bot's own output (the final inputd sink holds the same filter
+  state), not an observation of the game, so reading it undelayed does not break the vision rule. Test:
+  `test_vision_mode_keeps_the_menu_key_guard`.
+- `train/planner_policy.py` (H x V): every `sc.step` call passes V's `obs` / `ws` and H's `inflight`; V's unpredicted-hit
+  backlog kept in the pause tick; H's `action_flags` kept.
+- `tests/test_supervision.py`: both chains' new tests kept. `HANDOFF.md`: this file (one section per chain).
+
+### Fixes after the merges
+
+- `tests/test_episode_post_clear.py` (F's fake link had no `flags` argument, so H's `_act` raised and 5 tests ended
+  HARNESS_FAIL): test fake only.
+- `combat_run.new_run_dir`: `<timestamp>_<encounter>_<tag>`, `_2`, `_3`, ... when that name is taken (mkdir is the claim;
+  the 2026-10-03 07:45 FileExistsError). Names without a collision are unchanged.
+- Oracle EXCLUSIVE (H's 10d3948, still NOT deployed): `HoldFilter.QueueExclusive` spares the keys an earlier EXCLUSIVE
+  ACTION of the same stretch asked for (the pause loop's own taps keep the 2-frame minimum press); a plain ACTION ends
+  the stretch; the brain-lost Pause tap still cuts every key. InputLogicCheck `ExclusiveSparesTheLoopsOwnKeys`, all ok;
+  `dotnet build oracle/SsOracle.csproj -p:Deploy=false` ok. The merged `oracle/` = branch oracle-deploy-20261003
+  (2783573) + H's input / IPC files + this fix, nothing else.
+- `docs/facts/1.0.30000/crests.json` (P17) committed; `.gitignore`: `/knowledge/1.0.30000/enemies/forum/*.npz`.
+
+### Checks (offline, below-normal priority, NUMBA_NUM_THREADS 4; scratch outputs in this session's scratchpad)
+
+- Full suite (`python -m pytest -q tests`): 878 passed, 1 skipped, 1 xfailed, 1 failed:
+  `test_hitbox_tables::test_support_query_budget_on_the_committed_bell_beast_templates` (p99 3.85 ms vs the 3 ms
+  budget: the known failure under the machine's load; budget not loosened). Before the test fix above: 6 failed (that one
+  + the 5 merge failures).
+- InputLogicCheck (oracle input logic): ALL OK, incl. the new own-key check.
+- (a) Held-out support recall (`support_recall 20261001_122249_BellBeast_data --recordings=i2_002,i3_002 --table
+  C:/ssbot/data/m2_heldout/tables --lags=2,3,4 --margin 0`, 35 fights): ve_dust noise seed 7 23,896 / 23,896 and oracle
+  23,896 / 23,896 at lags 2, 3 and 4 (V: 23,896 / 23,896).
+- (b) kin_check Hunter (default params and lanes) on 20261002_171806 i0_000, integration vs main's code (exported tree of
+  3744eeb): the two JSON reports are identical except the params path (all five settings, all categories, the 40
+  worst windows). Forum held-out (`--params hero_reaper_forum.json --lanes bounds_lo_mix --bounds-events none`) T1
+  s98600 99.448 % (32,953), T2 s98700 98.895 % (16,747), together 99.26 % of 49,700; every category as in
+  movement_kinematics.md 5.3 (dash 97.34, glide 98.125, contact 89.78, slope 98.36, wall 100, scramble 99.48 %).
+- (c) planner_bench, 20261003_053033 i0_000 (degraded_dust live run), 8000 frames, threads 4, warm numba, alternating
+  order, integration vs V's branch: decisions identical (forced share 0.2138 ve / 0.0405 oracle, same mode counts);
+  tick p99 ve 14.74 / 15.70 vs 15.10 / 14.58 ms, oracle 16.30 / 15.56 vs 16.30 / 15.72 ms (noise: 5 game instances
+  running); rollout phase p50 2.43-2.49 vs 2.10-2.20 ms, p99 4.09-4.35 vs 3.83-3.95 ms (W's model).
+- (d) Forum gauntlet tables rebuilt from the 13 complete gauntlets (223640, 230325, 231917; `behaviour_build --encounter
+  Forum --allow-failed-validation --out <scratch>`, 986 s): coverage.json identical to the committed one except code sha
+  / paths; every table JSON identical except build time / sha; all nine _hitboxes.npz byte-identical to F's. 28,029
+  contacts, unattributed 0, held-out beyond R_FAIL as forum.md section 11 (Clawmaiden 66 / 1258, Reed 92 / 3104, ...).
+- (e) tests/test_key_guard.py passes; pause_stress on 20261002_232051 (100 trials: special 52.5 % / 43.4 % without menu,
+  99 / 99 paused + main menu, latency p50 2 / max 3, 0 game keys on the pause frame or in menus, 0 unintended unpauses,
+  0 wrong submits) and 20261003_001326 (93 trials: 49.5 % / 38.7 %, 93 / 93, max 3, all zeros) - output identical to
+  H's own runs of the tool.
+
+### Next (integration)
+
+1. Deploy (lead): the oracle in this branch = deployed 2783573 + EXCLUSIVE (with the own-key fix). Stop instance 4's
+   pause campaign before (it holds SsOracle.dll). After deploying, the key guard could model EXCLUSIVE (H's note).
+2. Planner rollout cost: rollout phase p50 +0.3 ms on Hunter after W's model (K = 82 state rows, ability checks); tick
+   p99 within noise in planner_bench, but watch late ticks in the next live vision run.
+3. The chains' own next steps follow below.
+
 ## Chain R - Forum route research (branch worktree-wf_c0d56d51-4cb-5)
 
 Original title: HANDOFF - Task R (Forum route research, offline)
