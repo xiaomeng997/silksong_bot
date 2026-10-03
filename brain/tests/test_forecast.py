@@ -310,3 +310,17 @@ def test_tracker_recovers_a_missed_attack_start(model):
     tr2 = BossTracker(model, ORACLE)
     tr2._enter("Dig In", 5.0)                     # in two families: left unknown (the walk roots in both)
     assert tr2.ctx.family is None and tr2.t_start is None
+
+
+def test_rage_rule_and_the_vision_views_hp_slack(model, templates):
+    """Rage? -> Rage Pos is the FSM's HP rule (support keeps it while possible); the vision view, whose HP misses hits
+    it did not see, scores the rage as likely just above the threshold."""
+    for view, hp, want in ((ORACLE, 75.0, {"Rage Pos": 1.0}), (ORACLE, 80.0, 0.0), (VISION_EQUIVALENT, 75.0,
+                                                                                  {"Rage Pos": 1.0}),
+                           (VISION_EQUIVALENT, 80.0, 0.5), (VISION_EQUIVALENT, 90.0, 0.0)):
+        fc = _fc(model, templates, view)
+        succ = dict(fc._successors("Rage?", Ctx(phase="P1", raged=False, hp=hp)))
+        if isinstance(want, dict):
+            assert succ == want
+        else:
+            assert succ["Rage Pos"] == pytest.approx(want) and len(succ) > 1

@@ -63,6 +63,8 @@ class TargetPath:
     ok: np.ndarray            # [T] path determined, collider on
     cert: np.ndarray          # [T] usable for the pogo gate (ok and within CERT_MAX_S)
     r: float
+    cert_margin: float = CERT_MARGIN_U   # the certain circle: r minus this
+    redirect: bool = True     # a side slash's redirect may be planned on it (its registry entry permitting)
 
 
 def load_registry(path: Path | str | None = None) -> list[TargetSpec]:

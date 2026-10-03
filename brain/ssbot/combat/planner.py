@@ -776,14 +776,14 @@ class Planner:
         paths = f.target_paths(tk) if hasattr(f, "target_paths") else []
         for pth in paths:
             P0, S0, B0 = pt.octagon(pth.r)
-            m = pt.CERT_MARGIN_U
+            m = getattr(pth, "cert_margin", pt.CERT_MARGIN_U)
             P1, S1, B1 = pt.octagon(pth.r - m)
             cbox = np.ascontiguousarray(pth.box + np.array([m, m, -m, -m]))
             spec = f.fc.targets.spec_of(pth.type_key) if hasattr(f.fc, "targets") else None
             out.append(_Target(np.ascontiguousarray(pth.box), np.ascontiguousarray(pth.ok), P0, S0, B0, cbox,
                                np.ascontiguousarray(pth.cert), P1, S1, B1, spec.recoil if spec else True,
                                pth.type_key, spec.cooldown_s if spec else 0.0,
-                               bool(spec and "side" in spec.redirect)))
+                               bool(spec and "side" in spec.redirect and getattr(pth, "redirect", True))))
         if not okb.any() and len(out) == 1:
             return []
         return out

@@ -71,7 +71,7 @@ import numpy as np
 from ssbot.combat.bell_track import ATK_BELL, AtkBellTracks, DropBellTracks, SKIN_Z
 from ssbot.combat.boss_model import TAIL, Anchor, BossModel
 from ssbot.combat.fastquery import circle_hits, query_par
-from ssbot.combat.pogo_targets import TargetTracker, simulate
+from ssbot.combat.pogo_targets import CERT_MARGIN_U, CERT_MAX_S, TargetPath, TargetTracker, simulate
 from ssbot.core.bosses import BELL_BEAST_PHASES as VE_PHASE_OF
 from ssbot.core.worldstate import ORACLE, VISION_EQUIVALENT, Entity, Ev, WorldState
 from ssbot.knowledge import hitbox_tables as hb
@@ -103,6 +103,21 @@ DET_ATK = os.environ.get("SSBOT_DET_ATK", "1") != "0"
 ATK_LAUNCH_STATE = "Burst Out"     # the boss's state on the attack bells' Launch frame (100 of 100, 20261002_171806 i0)
 ATK_ANCHOR_TOL_U = 0.5             # a pair's middle this close to a burst's anchor is that burst's pair
 ATK_LAG_SLACK_S = 0.05
+# the vision view's hit targets (a down spike bounces off a bell, a slash recoils from it) from the bells on exact paths
+# (Forecast.det): the certain circle shrinks by this much more than the oracle's (the track's centre error, p99 0.29 u
+# at tk 0 and max 0.51 u: the 50 Hz step phase, bell_track_audit --kind atk on 20261002_171806), and a drop bell counts
+# only while it falls (a down spike on a rising one clamps its vy: TINK DOWN), never for a side slash's redirect (the
+# track does not follow a tinked bell: bell_track withdraws it). Off by default (SSBOT_VE_TARGETS=1 turns it on): on
+# a recorded fight replayed in degraded_dust (view_compare 20261002_171806 i0 ep2) it generated bell pogos (0.34 per
+# Ptn R tick, 6.1 per Burst Recovery tick) but accepted none and left FORCED_RISK unchanged; not yet run live
+VE_TARGETS = os.environ.get("SSBOT_VE_TARGETS", "0") == "1"
+VE_CERT_EXTRA_U = 0.35
+# the vision view's HP is the hits it saw: a hit it missed leaves the count high, so just above the rage HP the rage is
+# still likely (scoring only: the support always keeps Rage Pos while it is possible). Live degraded_dust run
+# 20261002_224934 i1 ep8: the view counted 80 HP at the decision (the boss had 75), p_rage 0, and FORCED_RISK ranked
+# the rage's eruption point (86.21, the hidden stance next to it) as the least likely contact; the rage burst hit
+VE_RAGE_HP_SLACK = 10.0
+VE_RAGE_P = 0.5
 # the vision view's certain boss form only until its observable phase can end (SSBOT_CERT_PHASE_CUT=0: diagnostics)
 CERT_PHASE_CUT = os.environ.get("SSBOT_CERT_PHASE_CUT", "1") != "0"
 # the vision view's boss box changes its shape along the horizon (the hurtbox table's bin at the time in the phase +
@@ -588,9 +603,33 @@ class Forecast:
         return out
 
     def target_paths(self, tk: np.ndarray) -> list:
-        """Registry targets (pogo_targets: bells) on their predicted paths, tk seconds from the observation."""
+        """Registry targets (pogo_targets: bells) on their predicted paths, tk seconds from the observation: the
+        oracle view's from the logged state, the vision view's from the bells on exact paths (Forecast.det)."""
         ws = self.fc._ws
-        return self.fc.targets.paths(ws, tk) if ws is not None else []
+        if ws is None:
+            return []
+        if self.fc.view == ORACLE:
+            return self.fc.targets.paths(ws, tk)
+        return self._det_targets(np.asarray(tk, np.float64)) if VE_TARGETS else []
+
+    def _det_targets(self, tk: np.ndarray) -> list:
+        """VE: one TargetPath per bell on an exact path with one branch (a drop bell before its bounce: until the
+        bounce), nominal centre (no time slack), determined where simulate says so, collider on until its life;
+        a drop bell only while falling."""
+        out = []
+        for j, d in enumerate(self.det):
+            sides = d.branch_sides()
+            sd = sides[0] if len(sides) == 1 else 0
+            cx, cy, ok = self._bell_path(j, sd, 0.0, tk)
+            ok = np.asarray(ok, bool).copy()
+            if d.type_key.startswith(DROP_BELL):
+                dy = np.diff(cy, append=cy[-1] - 1e-6) if len(cy) else cy
+                ok &= dy < 0.0
+            r = d.sp.r
+            box = np.stack([cx - r, cy - r, cx + r, cy + r], axis=1)
+            out.append(TargetPath(d.type_key, -1 - j, np.ascontiguousarray(box), ok, ok & (tk <= CERT_MAX_S), r,
+                                  CERT_MARGIN_U + VE_CERT_EXTRA_U + d.skin, False))
+        return out
 
     def boss_box(self, tk: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         """Nominal boss hurtbox [T, 4] (x0, y0, x1, y1) and hittable [T] along the most likely path (scoring only):
@@ -1558,6 +1597,8 @@ class Forecaster:
             p_rage = 0.0
             if rage_possible and ctx.phase == "P1" and ctx.hp is not None and m.rage_hp is not None:
                 p_rage = 1.0 if ctx.hp <= m.rage_hp else 0.0
+                if self.view != ORACLE and m.rage_hp < ctx.hp <= m.rage_hp + VE_RAGE_HP_SLACK:
+                    p_rage = VE_RAGE_P
             elif rage_possible:
                 p_rage = 0.03
             if p_rage == 1.0 and any(s == "Rage Pos" for s, _ in succ):
