@@ -56,6 +56,7 @@ COMFORT = (0.25, 0.25)                # preferred extra clearance (planner: S = 
 NOISE_K = 3.0                         # stage C: + k * sigma of the hero / boss position noise
 HORIZON_S = 2.0                       # forecast horizon: the risk map's and the Bind's
 UNPRED_LAG = 3
+CATCH_UP_MAX = 64      # STATEs kept for _catch_up (a tick later than this many frames loses the oldest)
 LOG_BEFORE, LOG_AFTER = 90, 10
 LOG_ALL = os.environ.get("SSBOT_LOG_ALL") == "1"     # debugging: every tick to the decision log
 # Underground cues for the vision view (ObservabilityFilter tells; hypotheses until M3 measures tell_lead_vision in
@@ -198,6 +199,8 @@ class PlannerPolicy:
             self.tac.hidden_x = self.pb.hidden_x_vision      # no cues: the stance with the least unreactable risk
         self.planner: Planner | None = None
         self.terrain_tap: TerrainTap | None = None
+        self._inbox: deque | None = None        # every STATE of the link (attach), for _catch_up
+        self._last_f: int | None = None
         self.terrain: Terrain2D | None = None
         self.log_path = (Path(log_dir) / f"decisions_i{instance}.jsonl") if log_dir else None
         self._log_buf: list[dict] = []
@@ -212,6 +215,38 @@ class PlannerPolicy:
     def attach(self, link) -> None:
         self.terrain_tap = TerrainTap(link)
         self.link = link
+        import threading
+        self._inbox_lock = threading.Lock()
+        self._inbox: deque = deque(maxlen=CATCH_UP_MAX)
+        link.subscribe_state(self._on_state)
+
+    def _on_state(self, s: dict) -> None:
+        with self._inbox_lock:          # the reader thread: every STATE, in order
+            self._inbox.append(s)
+
+    def _catch_up(self, f: int, tap) -> None:
+        """The STATEs between the last one acted on and f (the episode loop hands the policy only the newest one, so a
+        late tick skips frames: 2.5 a fight in degraded_dust run 20261002_224934) go through the perception path too:
+        the backend (filter, noise, delay line: one push per frame), the hero's state tracker and the forecaster's
+        trackers, without planning. Their events were lost before: a hit dealt on a skipped frame was never counted
+        (that run's i1 ep8: the view's boss HP stayed 80 after an up-slash took it to 75, and the rage rule did not
+        fire); a vision pipeline processes every captured frame whatever the planner's latency."""
+        last, self._last_f = self._last_f, f
+        if self._inbox is None or last is None or f <= last + 1:
+            return
+        with self._inbox_lock:
+            pending = [x for x in self._inbox if last < x.get("f", -1) < f]
+        for sk in sorted(pending, key=lambda x: x["f"]):
+            self.raw[sk["f"]] = sk
+            ws = self.backend.feed(sk)
+            if ws is None:
+                continue
+            raw = self.raw.get(ws.stamp.frame, sk)
+            raw["_t"] = ws.stamp.t_game_s
+            self.trk.push(raw)
+            self._wake(ws, sk, tap)
+            self.fc.update(ws)
+            self.counts["caught_up"] += 1
 
     def warmup(self) -> float:
         """Compile every numba path before the first episode (a first call mid-fight compiles for seconds, and the
@@ -309,6 +344,7 @@ class PlannerPolicy:
         self.counts: Counter = Counter()
         self.tick_ms: list[float] = []
         self.plan_ms: list[float] = []
+        self._last_f: int | None = None          # the last STATE acted on (_catch_up)
         self.unpredicted: list[int] = []
         self.hits_taken: list[int] = []
         self.forced_frames: list[int] = []
@@ -418,6 +454,7 @@ class PlannerPolicy:
         f = s["f"]
         if self.real_quit_active:
             return self._real_quit_step(s, f)
+        self._catch_up(f, tap)
         self.raw[f] = s
         for old in [k for k in self.raw if k < f - 12]:
             del self.raw[old]
