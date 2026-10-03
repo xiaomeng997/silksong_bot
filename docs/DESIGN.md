@@ -776,7 +776,7 @@ every frame:
 | **Fourth Chorus**（S08，默认开打，A 类） | 手的攻击为 2 格。研究结论是不依赖 Fourth Chorus Skip [spe 隐含]。只有当跳过方法是 NMG 允许的非帧精确移动、且配方 ≥ 99.5% 零伤害暴露时才改为跳过。 |
 | **Last Judge**（S17） | 前置：Magma Bell + Fractured Mask + Weighted Belt，满血，丝 ≥ 9。第一招固定是香炉投掷，开局闪避预先规划。P1：Slam 在悬停时离开 reach，落地后惩罚；Throw 靠近或远离，跳过回程的球；Spin 待在半径外。P2：穿过 Blazing Rings，避开 Exploding Throw，跳过 Searing Slam 冲击波和 Pillar Charge；香雾是一级火焰前摇。216 HP 时 Judgement：约 5 s 光环后力竭，Bind 和惩罚窗口预先登记。死亡后退到爆炸半径外，2 s 内无伤害威胁才算结束。 |
 | **Cogwork Dancers**（S19） | 两个本体、两套管道；接触 2；Configuration/Clash 为 1+1。有 Ascendant's Grip 时贴角挂墙 [待验证]，否则用口袋 + 远程工具。 |
-| **G&Z 切磋**（S21，**B 类且有危险物**） | 下方尖刺 = 危险物；I2 适用；Q 触发全部保持生效；远离边缘作战。 |
+| **G&Z 切磋**（S21，**B 类且有危险物**，风险低） | 下方尖刺 = 危险物；I2 适用；Q 触发全部保持生效；远离边缘作战。你的经验（2026-10-02）：Garmond 前摇很长、范围很小，与早期小怪相当；切磋输了不算死，只有尖刺扣掉最后一格面具才致命，而击退包络保证被打中也推不进尖刺。所以 G&Z 的代价主要是路线时间，不是风险。 |
 | **Forum 连战**（S25） | 前置：G&Z 助战（Ledger 标志须是对话观测确认的 COMMITTED）、Cogfly 已合成、7 面具。先杀 Clawmaiden；最后 2 只 Choir Clapper（230 HP，全部 2 格，交替出手）按 boss 对待，用口袋 + Cogfly 输出。**后备 playbook**（只用 Cogfly、无助战）在 G1 中单独测量；标志缺失时自动切换。 |
 | **Lace 2**（S26） | 800 HP。针挥为 1+1（D1 = 2）。防御中不近战，只做远程；只在收招时惩罚。Fractured Mask 在连招最后一击时碎。 |
 | **GMS**（S27） | 攻击 2；尖刺平台 1（危险物）。Silk Web 1+1+1 抓取是否被面具覆盖未知，所以只要它在支撑中，就要求**不算面具**的 HP ≥ 4。击败后进入 ENDING 状态（§3.6.1）。 |
