@@ -206,7 +206,7 @@
    "source": "slash.dump; clip SlashEffect events [2, 5] at 24 fps; live frames (5, 12) (66 samples)"
   },
   "down": {
-   "src": "DownSlash",
+   "src": "DownSlash New",
    "polys": [
     [
      [
@@ -257,7 +257,7 @@
     -2.451129999999999,
     1.7421100000000003
    ],
-   "source": "slash.dump; clip DownSlashEffect (4 frames at 24 fps): timing unmeasured"
+   "source": "slash.dump; clip DownSlashEffect (4 frames at 24 fps): timing unmeasured; hit src DownSlash New (the FSM's object; polygon still the group object's until a slash.dump paths sample)"
   },
   "dash_stab": {
    "src": "Dash Stab",

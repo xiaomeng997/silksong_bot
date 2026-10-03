@@ -92,12 +92,21 @@ def from_dump(dump: dict, crest: str) -> AttackTable:
                                    source=f"slash.dump; {how}")
     config = {k: cfg.get(k) for k in ("duration", "cooldown", "recovery", "down", "down_recovery", "dash_stab")}
     config["down_slash_event"] = sl.get("down_slash_event")
+    src = CUSTOM_DOWN_SRC.get(sl.get("down_slash_event") or "")
+    if src and "down" in shapes:
+        d = shapes["down"]
+        shapes["down"] = AttackShape(d.slot, src, d.polys, d.t_on, d.t_off, d.frames, d.damage_mult, d.clash_box,
+                                     d.source + f"; hit src {src} (the FSM's object; polygon still the group object's "
+                                     "until a slash.dump paths sample)")
     return AttackTable(crest, dump.get("game", "1.0.30000"), config, shapes, dict(RECOIL), notes)
 
 
 # slash.dump "paths" samples (slot "path:<hero-relative path>") that stand for a table slot: the object the FSM
 # really swings, whose polygons replace the dump's (the dump's custom down slot is the config group's DownSlash object)
 PATH_SLOTS = {"path:Attacks/Scythe/DownSlash New": "down"}
+# the hit src of a Custom down slash: the object the Crest Attacks FSM swings (FindChild in its Init state; live
+# Bell Beast Reaper run 20261002_225836: 18 hits with src "DownSlash New", none with the group object's "DownSlash")
+CUSTOM_DOWN_SRC = {"RPR DOWNSLASH": "DownSlash New"}
 
 
 def _on(d: dict) -> bool:
