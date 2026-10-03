@@ -355,6 +355,7 @@ class Planner:
         S = occ.any(axis=1)
         th0 = time.perf_counter()
         roll_j = self._hit_effects(f, start, latched, roll, tk, S, enemy_only)
+        self._no_cast_out_of_spike(latched, roll, roll_j, S)
         th1 = time.perf_counter()
         self._lock_check(f, roll, hold_end, S, P + T, enemy_only)
         t_hit = np.where(S, occ.argmax(axis=1), T1)        # first contact frame (FORCED_RISK: later is better)
@@ -665,6 +666,33 @@ class Planner:
                         self._pogo_ok[c] = True
                         self.pogo_log["bell"] += int(pogo_tgt[c] > 0)
         return cur
+
+    def _no_cast_out_of_spike(self, latched: np.ndarray, roll, roll_j, S: np.ndarray) -> None:
+        """A Silkspear pressed during a down spike (its antic or the spike) or within CAST_AFTER_POGO frames of a
+        predicted pogo is not modelled against the game: there the queued cast starts at the hit and cancels the bounce,
+        and the hero hangs in the cast's antic at the boss's height (live run 20261002_162847: all 17 hits in Charge End
+        came 5-10 frames after a pogo hit, the hero in NeedleThrow AnticA over the boss; quickcast pressed 2 frames
+        before the hit, the bounce never came). Such plans count as unsafe (S)."""
+        qc = (latched & B_QUICKCAST) != 0
+        if not qc.any():
+            return
+        ds = (roll.mode[:, :-1] == M_DS_ANTIC) | (roll.mode[:, :-1] == M_DS_SPIKE)
+        if roll_j is not roll:
+            ds |= (roll_j.mode[:, :-1] == M_DS_ANTIC) | (roll_j.mode[:, :-1] == M_DS_SPIKE)
+        bad = (qc & ds).any(axis=1)
+        ev = self._fx_ev
+        if ev is not None and ev.shape == latched.shape:
+            pg = (ev & kin.EV_POGO) != 0
+            if pg.any():
+                near = np.zeros_like(pg)
+                for k in range(-2, CAST_AFTER_POGO + 1):
+                    if k >= 0:
+                        near[:, k:] |= pg[:, :pg.shape[1] - k]
+                    else:
+                        near[:, :k] |= pg[:, -k:]
+                bad |= (qc & near).any(axis=1)
+        S |= bad
+        self.last_cast_vetoed = int(bad.sum())
 
     def _redirect_value(self, f: Forecast, roll_j, tk: np.ndarray, J: np.ndarray, S: np.ndarray, S2: np.ndarray,
                         ctx: FilterContext, prefs: TacticPrefs, enemy_only: bool, tc: int) -> None:
@@ -1163,6 +1191,7 @@ def _attacks_of(box, flags, mode, lat, face0, boss, okb, polys, starts, base, wi
 
 
 MACRO_MARGIN = 5.0             # J (half a hit) another plan needs over a started macro to replace it
+CAST_AFTER_POGO = 12           # frames after a predicted pogo in which a Silkspear press counts as unsafe
 REDIRECT_K = 12                # side-slash-on-a-drop-bell rows scored on the redirected path per tick (earliest hits)
 
 
