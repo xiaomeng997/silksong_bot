@@ -316,3 +316,23 @@ def test_vision_view_bell_targets_are_the_tracked_attack_bells(atk_spec, monkeyp
     assert all(p.ok.any() for p in paths)
     monkeypatch.setattr(fmod, "VE_TARGETS", False)
     assert f.target_paths(tk) == []
+
+
+def test_stacked_paths_on_the_frame_grid_match_direct_evaluation(spec):
+    """Forecast._det_groups (task V review speedup): paths taken as columns of the per-forecast frame grid equal the
+    paths evaluated at the query times directly (a touched bell's branches, every time-slack copy)."""
+    from ssbot.combat.boss_model import BossModel
+    from ssbot.combat.forecast import Forecaster
+    from ssbot.core.worldstate import VISION_EQUIVALENT
+    fc = Forecaster(BossModel.load(), VISION_EQUIVALENT, margin=(0.5, 0.6), templates={})
+    fc.tracker.roots = lambda origin: ([], True)
+    for t, x, y in _drop(spec, 86.6, 1, 20.0, 21, 0.05, seed=5):
+        fc.update(_ws(t, [_bell(7, x, y, 0.05)], hero=(85.0, 3.05),
+                      mode="attack" if 0.25 <= t - 20.0 <= 0.32 else "ground"))
+    f = fc.forecast(2.0)
+    assert f.det and len(f.det[0].paths()) > 1
+    tk = np.arange(3, 52, 2) / 60.0                    # on the frame grid, not from 0 (a risk map's times)
+    g = f._det_groups(tk, len(tk), None, None)
+    d = f._stack(tk, len(tk), None, None)
+    assert len(g) == len(d) and all(r1 == r2 and np.allclose(a1, a2) and np.allclose(b1, b2) and (c1 == c2).all()
+                                    for (r1, a1, b1, c1), (r2, a2, b2, c2) in zip(g, d))
