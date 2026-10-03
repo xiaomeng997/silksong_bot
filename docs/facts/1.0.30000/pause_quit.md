@@ -154,8 +154,11 @@
 | 运行 | 视图 | 场 | h = 1 | h = 2 |
 |---|---|---|---|---|
 | 20261003_132436 | oracle | 30 | 10 / 10 暂停在 +16 = G + 1（0.265–0.268 s），全在无敌窗口内（剩 0.925 s），0 次 Bind | 20 场：受击时丝 0–8，20 / 20 攒到 9 丝（受击后 35–2004 帧），**20 次 Bind、20 次完成、0 次 Bind 中受击，20 / 20 CLEAR，0 次退出**；没有第二下 |
+| 20261003_135244 | degraded_dust | 30 | 5 / 5 暂停在 +17 = G + 2（0.282–0.284 s；视图延迟 2–4 帧后进入 PAUSE_PENDING），全在无敌窗口内（剩 0.908 s），0 次 Bind；受击要有击退才算（f9dcbba）之后视觉时机不变 | 25 场：受击时丝 0–5，25 / 25 攒到 9 丝（392–2852 帧），**25 次 Bind、25 次完成、0 次 Bind 中受击，23 CLEAR、2 STUCK（240 s 时限），0 次退出**；没有第二下到 1 HP |
 
-（第一轮同类检查开局 9 丝、留 Bind 丝、有 Q6：h = 2 的 14 场里 11 次 Bind、3 次 Q6 退出。）
+（第一轮同类检查开局 9 丝、留 Bind 丝、有 Q6：h = 2 的 oracle 14 场里 11 次 Bind、3 次 Q6 退出；dust 8 场里 5 次 Bind、4 次 Q6。）两个视图合计 h = 2 的 45 场：45 次 Bind 全部完成、0 次被打中、0 次退出、43 CLEAR。CPU：dust 臂期间约 49 %（采样 10 s；oracle 臂时回放在同时跑，未采样）。
+
+**2 次 STUCK 的原因（新问题，未改）**：两场都是 Bind 回满后又挨一下回到 3 HP（h = 2），Boss 只剩 15 / 20 HP（视图的计数）；决策日志最后 1500 tick（25 s）全是 YELLOW、h 2、3 HP、丝 0 / 4 不变、没有一个计划含攻击。推断（日志没记允许集）：YELLOW 下"下一下可能打死 Boss"时禁止一切伤害动作（I3：Boss 死亡慢动作 1.35 s 不能暂停，只能在满血且 h ≥ 3 时进入）；视觉视图按计数的 Boss HP − 3σ ≤ 主角最大一击（`VISION_HERO_HIT` = 15，丝矛）判断，于是 Boss 20 HP 以下就不打了，而不打就攒不到丝、回不了血：一直躲到时限。旧规则下这种局面多半先因 Q6 退出。可选的改法（需主管 / 你决定，涉及安全规则）：(a) 低于满血时用"现在允许的最大一击"（丝技能被禁，只剩针击 5）判断下一下会不会打死，缩小禁区；但针的暴击等未知倍率是取"见过的最大一击"的原因，要先核实；(b) h = 2、丝 < 9 且伤害动作被 I3 禁止时直接退出（没有回血的路）。最终运行里 STUCK 会被进度看门狗（Q8）暂停退出，不会死。
 
 ## 8. EXCLUSIVE 部署清单（任务 Q，2026-10-03；main 里已有、未部署）
 
@@ -174,7 +177,7 @@
 **实例 4 上的实战检查（部署后第一件事）**
 7. 掉线看门狗（`ssbot.probes.m1_harness --lost --instance 4`）：检查"held keys released"和"game paused with 1 tap"都 PASS；另加一条看录像：看门狗那次 Pause 落地帧 STATE `act.hf.latched` 只有 Pause 位（CutAll：掉线前刚按下的键当帧就被切掉，旧 `ReleaseAllNow` 会保留最短按下）。
 8. 短暂停块：`SSBOT_INJECT_KINDS=keys,menu`，`combat_run run --instances 4 --mode eval --policy planner --view oracle --real-quit 1.0 --inject-hits 1.0 --episodes 40 --seed <本链种子>`，然后 `pause_stress <运行目录>`：菜单可见帧游戏键 0、暂停帧游戏键 0、意外取消暂停 0、错误确认 0、延迟最大 ≤ 6 帧（之前 3）；暂停循环自己的点按每次锁存 ≥ 2 帧（录像里 `act.hf.latched` 的 Pause 位连续 ≥ 2 帧：确认 QueueExclusive 没有切掉循环自己的键）；块结束后 `input.stats.released_early` > 0（"在途按键"试验里规划器的键被切）。
-9. 低血量检查（第 7 节的命令，oracle 视图 10 场）：结果与部署前同（h = 1 暂停帧 = G + 1 或 G + 2；h = 2 的 Bind 完成），证明 EXCLUSIVE 不影响暂停时机。
+9. 低血量检查（7.7 的命令：`SSBOT_INJECT_LEAVE_HP=1,3,3`、`--inject-hits 1.0`，oracle 视图 10 场，`lowhp_check` 汇总）：结果与部署前同（h = 1 暂停帧 = G + 1（ramp999）或 G + 2，全在无敌窗口内；h = 2 攒丝后 Bind 完成、没有 Q6 退出），证明 EXCLUSIVE 不影响暂停时机，也不切掉 Bind 的按键（Bind 不在暂停循环里，ACTION flags 0）。
 10. 通过后在新 DLL 上重启 10⁴ 暂停压力测试（HANDOFF 链 Q 一节的命令），它就是 KeyboardInjector 一侧的长期实战检查。
 
 **之后可选（主管决定）**：Python 键保护（`safety.key_guard`）按 EXCLUSIVE 建模，`keys_clear` 恒真，省掉 0–2 帧的等待；先跑一块关掉保护的对照（需要加一个开关），确认只靠 EXCLUSIVE 时菜单帧游戏键仍为 0 再改。
