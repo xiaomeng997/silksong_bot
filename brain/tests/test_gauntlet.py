@@ -4,7 +4,7 @@ kill replay, the battle-end freeze or room.battles, and the gauntlet data policy
 import random
 
 from ssbot.ipc.framing import mask
-from ssbot.train.data_policy import GauntletDataPolicy
+from ssbot.train.data_policy import POCKET_CLING_SHARE, GauntletDataPolicy
 from ssbot.train.encounters import FORUM, FORUM_WAVES
 from ssbot.train.gauntlet import CHECK_AFTER_F, GauntletTap, WaveSim, type_key
 
@@ -198,6 +198,14 @@ def test_gauntlet_policy_takes_the_pocket_when_only_clappers_are_left():
         picks.append((pol.mode, pol.wall))
     cling = [w for m, w in picks if m == "CLING"]
     assert 0.4 < len(cling) / len(picks) < 0.6 and cling.count(-1) > 0.9 * len(cling)
+    # by frames CLING takes POCKET_CLING_SHARE (0.85), not the 0.5 of the picks
+    pol.reset(random.Random(6), FORUM)
+    pol.mode_left = 0
+    for _ in range(60_000):
+        pol.act(_state(clappers), None)
+    fr = pol.stats()["mode_frames"]
+    assert abs(fr["CLING"] / sum(fr.values()) - POCKET_CLING_SHARE) < 0.04
+    pol.reset(random.Random(5), FORUM)
     # clinging at the top of the left wall: hold toward it, no wall jump
     pol.mode, pol.mode_left, pol.wall = "CLING", 10_000, -1
     pol._cstate = lambda s: {"wallClinging": True, "onGround": False}

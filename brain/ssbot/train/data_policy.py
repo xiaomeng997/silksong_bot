@@ -125,10 +125,27 @@ class DataPolicy:
 
 
 G_MODES = (("PRESS", 0.48), ("KEEP", 0.22), ("EVADE", 0.10), ("IDLE", 0.05), ("CLING", 0.15))
-# with only Choir Clappers left (wave 7, the finale): half the time in the person's pocket at the top of the left wall,
-# so the Clappers' choices against a hero up there get logged (docs/facts/1.0.30000/forum.md §10: only Far Range
-# decisions; 4 data episodes before this had 384 frames in the pocket)
-POCKET_MODES = (("PRESS", 0.25), ("KEEP", 0.10), ("EVADE", 0.10), ("IDLE", 0.05), ("CLING", 0.50))
+SEG_F = (20, 90)                 # frames of a PRESS / KEEP / EVADE / IDLE segment
+CLING_F = (30, 150)              # of a CLING segment
+POCKET_CLING_F = (120, 480)      # of a CLING segment with only Choir Clappers left
+# With only Choir Clappers left (wave 7, the finale) CLING takes POCKET_CLING_SHARE of the time (by frames, not by
+# picks: a pocket CLING segment lasts 300 frames on average, the others 55), on the left wall, climbing to the
+# person's pocket at its top, so the Clappers' choices against a hero up there get logged (docs/facts/1.0.30000/
+# forum.md §10: only Far Range decisions). Their ground attacks are already logged plenty (CC_SLAM 227, CC_CAST 232,
+# CC_EVADE 509 instances in 8 gauntlets; jumps 130 and jump casts 122), the pocket was the scarce case (10 fights: 1712
+# frames), so most of the time goes to it. Run 20261002_231917 (e589c0b) used a 0.5 pick weight, which is this share.
+POCKET_CLING_SHARE = 0.85
+_POCKET_OTHERS = (("PRESS", 0.50), ("KEEP", 0.20), ("EVADE", 0.20), ("IDLE", 0.10))
+
+
+def _pocket_modes(share: float = POCKET_CLING_SHARE) -> tuple[tuple[str, float], ...]:
+    """Pick weights giving CLING `share` of the frames: w * m_cling / (w * m_cling + (1 - w) * m_seg) = share."""
+    m_cling, m_seg = sum(POCKET_CLING_F) / 2.0, sum(SEG_F) / 2.0
+    w = share * m_seg / (share * m_seg + (1.0 - share) * m_cling)
+    return tuple((m, (1.0 - w) * q) for m, q in _POCKET_OTHERS) + (("CLING", w),)
+
+
+POCKET_MODES = _pocket_modes()
 POCKET_TYPES = frozenset(("Song Heavy Sentry",))
 POCKET_Y = 13.3          # hero transform at the top of the left-wall cling (highest still cling 13.45-13.60)
 WALL_NEAR = 1.2          # hero centre to the arena's inner wall face when touching it, about (hero box half width 0.5)
@@ -181,9 +198,9 @@ class GauntletDataPolicy(DataPolicy):
             modes = POCKET_MODES if pocket else G_MODES
             self.mode = r.choices([m for m, _ in modes], [w for _, w in modes])[0]
             if self.mode == "CLING":
-                self.mode_left = r.randint(120, 480) if pocket else r.randint(30, 150)
+                self.mode_left = r.randint(*POCKET_CLING_F) if pocket else r.randint(*CLING_F)
             else:
-                self.mode_left = r.randint(20, 90)
+                self.mode_left = r.randint(*SEG_F)
             self.keep_d = r.uniform(3.0, 10.0)
             self.wall = -1 if r.random() < (0.95 if pocket else 0.8) else 1
             if live:
