@@ -1,0 +1,420 @@
+{
+ "crest": "Reaper",
+ "build": "1.0.30000",
+ "config": {
+  "duration": 0.35,
+  "cooldown": 0.5,
+  "recovery": 0.3,
+  "down": "Custom",
+  "down_recovery": 0.25,
+  "dash_stab": 0.2,
+  "down_slash_event": "RPR DOWNSLASH"
+ },
+ "recoil": {
+  "velocity": 3.75,
+  "steps": 8,
+  "source": "HeroController.Recoil: RECOIL_HOR_VELOCITY x RECOIL_HOR_STEPS (hero_constants.json); the long recoil (16) only for RecoilLeftLong / RightLong callers"
+ },
+ "notes": [
+  "P17 slash.dump frame 3016 (crests.json captured 2026-09-30T19:22:48), hero [238.78, 7.56769] facing -1, config Reaper",
+  "live samples: C:\\ssbot\\data\\runs\\m2\\kn_excite_forum\\2026-10-02\\TRAIN\\kn_excite_forum_s98010\\attack_frames.jsonl, C:\\ssbot\\data\\runs\\m2\\kn_excite_forum\\2026-10-02\\TRAIN\\kn_excite_forum_s98400\\attack_frames.jsonl, C:\\ssbot\\data\\runs\\m2\\kn_excite_forum\\2026-10-02\\TRAIN\\kn_excite_forum_s98410\\attack_frames.jsonl (charge frames counted from the release)"
+ ],
+ "shapes": {
+  "normal": {
+   "src": "Slash",
+   "polys": [
+    [
+     [
+      -0.2542,
+      2.6863
+     ],
+     [
+      1.0821,
+      2.4752
+     ],
+     [
+      2.5324,
+      1.8172
+     ],
+     [
+      3.5255,
+      0.5872
+     ],
+     [
+      3.5958,
+      -0.4186
+     ],
+     [
+      -0.0337,
+      -0.2345
+     ]
+    ]
+   ],
+   "t_on": 0.08333333333333333,
+   "t_off": 0.20833333333333334,
+   "frames": [
+    5,
+    12
+   ],
+   "damage_mult": 1.0,
+   "clash_box": [
+    -0.535899999999998,
+    3.638869999999997,
+    -0.8336499999999996,
+    2.4814100000000003
+   ],
+   "source": "slash.dump; clip SlashEffect events [2, 5] at 24 fps; live frames (5, 12) (508 samples)"
+  },
+  "alt": {
+   "src": "AltSlash",
+   "polys": [
+    [
+     [
+      0.4023,
+      0.8904
+     ],
+     [
+      1.3144,
+      1.0244
+     ],
+     [
+      3.6695,
+      0.981
+     ],
+     [
+      3.5702,
+      0.324
+     ],
+     [
+      2.6323,
+      -0.5409
+     ],
+     [
+      1.2851,
+      -0.9804
+     ],
+     [
+      0.1059,
+      -0.9954
+     ]
+    ]
+   ],
+   "t_on": 0.08333333333333333,
+   "t_off": 0.20833333333333334,
+   "frames": [
+    5,
+    12
+   ],
+   "damage_mult": 1.0,
+   "clash_box": [
+    -0.10112000000000876,
+    3.9888500000000136,
+    -0.7007199999999996,
+    1.8625800000000012
+   ],
+   "source": "slash.dump; clip SlashEffectAlt events [2, 5] at 24 fps; live frames (5, 12) (22 samples)"
+  },
+  "up": {
+   "src": "UpSlash",
+   "polys": [
+    [
+     [
+      -2.1197,
+      -0.6303
+     ],
+     [
+      -1.9126,
+      1.2667
+     ],
+     [
+      -1.2979,
+      2.4404
+     ],
+     [
+      -0.2341,
+      3.4423
+     ],
+     [
+      0.8108,
+      3.7675
+     ],
+     [
+      0.4911,
+      2.6837
+     ],
+     [
+      0.2634,
+      1.0097
+     ]
+    ]
+   ],
+   "t_on": 0.08333333333333333,
+   "t_off": 0.25,
+   "frames": [
+    5,
+    15
+   ],
+   "damage_mult": 1.0,
+   "clash_box": [
+    -1.853039999999993,
+    1.3429700000000082,
+    -0.5587299999999988,
+    3.9503600000000016
+   ],
+   "source": "slash.dump; clip UpSlashEffect events [2, 6] at 24 fps; live frames (5, 15) (103 samples)"
+  },
+  "wall": {
+   "src": "WallSlash",
+   "polys": [
+    [
+     [
+      -0.1536,
+      2.7318
+     ],
+     [
+      -1.9468,
+      2.2148
+     ],
+     [
+      -3.2697,
+      1.2088
+     ],
+     [
+      -3.9313,
+      0.0389
+     ],
+     [
+      -3.9428,
+      -0.3174
+     ],
+     [
+      -0.7761,
+      0.1019
+     ]
+    ]
+   ],
+   "t_on": 0.08333333333333333,
+   "t_off": 0.20833333333333334,
+   "frames": [
+    5,
+    12
+   ],
+   "damage_mult": 1.0,
+   "clash_box": [
+    -4.884219999999999,
+    -0.8301199999999938,
+    -0.8029499999999992,
+    2.1914300000000004
+   ],
+   "source": "slash.dump; clip SlashEffect events [2, 5] at 24 fps; live frames (5, 12) (66 samples)"
+  },
+  "down": {
+   "src": "DownSlash New",
+   "polys": [
+    [
+     [
+      1.2254,
+      1.8068
+     ],
+     [
+      0.2637,
+      0.4091
+     ],
+     [
+      -1.8004,
+      0.454
+     ],
+     [
+      -0.7119,
+      -1.3961
+     ],
+     [
+      0.6809,
+      -2.5355
+     ],
+     [
+      1.6862,
+      -2.6071
+     ],
+     [
+      2.193,
+      -2.0284
+     ],
+     [
+      2.2596,
+      -0.6386
+     ],
+     [
+      1.8373,
+      1.0245
+     ]
+    ]
+   ],
+   "t_on": 0.0,
+   "t_off": 0.16666666666666666,
+   "frames": [],
+   "damage_mult": 1.0,
+   "clash_box": [
+    -1.674350000000004,
+    2.101409999999987,
+    -2.451129999999999,
+    1.7421100000000003
+   ],
+   "source": "slash.dump; clip DownSlashEffect (4 frames at 24 fps): timing unmeasured; hit src DownSlash New (the FSM's object; polygon still the group object's until a slash.dump paths sample)"
+  },
+  "dash_stab": {
+   "src": "Dash Stab",
+   "polys": [
+    [
+     [
+      1.3875,
+      1.1161
+     ],
+     [
+      3.2075,
+      0.9945
+     ],
+     [
+      4.1635,
+      0.4591
+     ],
+     [
+      3.7373,
+      -0.2871
+     ],
+     [
+      2.4936,
+      -0.8165
+     ],
+     [
+      -0.0758,
+      -1.0302
+     ],
+     [
+      -0.0412,
+      0.9928
+     ]
+    ]
+   ],
+   "t_on": 0.0,
+   "t_off": 0.2,
+   "frames": [],
+   "damage_mult": 1.0,
+   "clash_box": [],
+   "source": "slash.dump; no clip: timing unmeasured"
+  },
+  "charge": {
+   "src": "slash 01|slash 02|slash behind",
+   "polys": [
+    [
+     [
+      -0.1946,
+      3.9138
+     ],
+     [
+      -1.1003,
+      3.5093
+     ],
+     [
+      -1.4373,
+      -0.5231
+     ],
+     [
+      1.1702,
+      0.531
+     ],
+     [
+      2.1373,
+      3.3947
+     ]
+    ],
+    [
+     [
+      -1.2987,
+      3.8431
+     ],
+     [
+      -1.4373,
+      -0.5231
+     ],
+     [
+      3.5656,
+      -2.0073
+     ],
+     [
+      4.4578,
+      0.2693
+     ],
+     [
+      3.818,
+      2.8267
+     ],
+     [
+      0.9442,
+      4.2405
+     ]
+    ],
+    [
+     [
+      -1.7115,
+      0.1971
+     ],
+     [
+      -1.6932,
+      3.4924
+     ],
+     [
+      -2.5053,
+      3.1346
+     ],
+     [
+      -3.5661,
+      0.9973
+     ],
+     [
+      -3.3809,
+      -1.3895
+     ]
+    ]
+   ],
+   "t_on": 0.0,
+   "t_off": 0.2,
+   "frames": [
+    16,
+    29
+   ],
+   "damage_mult": 2.5,
+   "clash_box": [],
+   "source": "slash.dump; no clip: timing unmeasured; live frames (16, 29) (208 samples)"
+  },
+  "taunt": {
+   "src": "Taunt Slash",
+   "polys": [
+    [
+     [
+      -0.6788,
+      2.15
+     ],
+     [
+      1.6629,
+      1.1364
+     ],
+     [
+      2.5332,
+      -1.0792
+     ],
+     [
+      -0.6272,
+      -0.4284
+     ]
+    ]
+   ],
+   "t_on": 0.0,
+   "t_off": 0.2,
+   "frames": [],
+   "damage_mult": 0.5,
+   "clash_box": [],
+   "source": "slash.dump; no clip: timing unmeasured"
+  }
+ }
+}

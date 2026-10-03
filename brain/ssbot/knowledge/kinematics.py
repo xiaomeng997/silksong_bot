@@ -140,6 +140,13 @@ height per jump hold length, logged (min, median, max) against the model over th
 height spread for the hazard margin (0.05-0.35 u, the 50 Hz steps falling differently among the frames; the model
 range holds every logged apex of live i0_000 within 4 mm).
 
+Forum loadout (M2 W8, docs/facts/1.0.30000/movement_kinematics.md): HeroParams.abilities switches on wall slide,
+Ascendant's Grip cling, wall jump, wall slash, Wall Scramble, Drifter's Cloak glide, Swift Step dash and the sprint FSM
+after it, the Reaper down slash and hard landing (modes M_GLIDE .. M_SCRAMBLE, rows WSIDE .. SP_X), from the
+decompiled HeroController and the hero's PlayMaker templates. Those rules exist only in kin_jit (scalar, compiled);
+with abilities 0 none of them runs and the Hunter rollout is bit for bit the same. classify_modes(forum=True),
+ForumRows and StateTracker estimate the new rows from cstate, hero.wall and the animation clips.
+
 Implementation: the model state is one float64 array [K, N] (rows below) and the parameters one float64 vector. The
 NumPy functions here (_fixed_step, _apply_events, _update, _simulate) are the readable reference, array code over
 lanes; kin_jit is the same rules per lane as numba-compiled scalar code, which rollout() uses (backend "auto"), and
@@ -199,15 +206,54 @@ DEFAULT_PARAMS = REPO / "knowledge" / "1.0.30000" / "kinematics" / "hero_hunter.
                   # 1 wait, 2 ramp up (+10: started in this frame, the coroutine's first step done), timer (unscaled)
  WF_S,            # its time-scale factor (the effective scale is TS * WF_S: TimeManager multiplies the controls)
  WF_DOWN, WF_WAIT, WF_UP, WF_TGT,   # its preset (FREEZE_PRESETS)
- K) = range(52)
+ # Forum loadout rows (HeroParams.abilities; ssbot.knowledge.kin_jit "Forum loadout"): unused while abilities is 0
+ WSIDE,           # wall slide side: -1 wall on the left (wallSlidingL), +1 right, 0 not sliding
+ WTOUCH,          # touchingWallL / touchingWallR from the last physics step's contacts (-1 / +1 / 0)
+ CLING,           # cState.wallClinging (Ascendant's Grip)
+ CLING_CD,        # wallClingCooldownTimer (s)
+ WSTICK,          # wallStickTimer (s)
+ UNSTICK,         # wallUnstickSteps
+ WLOCK,           # wallLockSteps while wallLocked after a wall jump, -1 not locked
+ WJ_DIR,          # +1 wallJumpedR, -1 wallJumpedL
+ WJ_V,            # currentWalljumpSpeed
+ WJ_CHAIN,        # wallJumpChainStepsLeft
+ WJQ,             # queuedWallJumpInterrupt
+ WSLASH,          # wallSlashing
+ PREV_GS,         # prevGravityScale (AffectedByGravity)
+ GL_CD,           # Umbrella Float FSM cooldown left (s; FLOAT is ignored while it runs)
+ DASH_T,          # dash_timer (s)
+ DASH_CD,         # dashCooldownTimer (s)
+ AIRDASHED,
+ DQ,              # dash queue steps (-1: not queuing)
+ FALL_T,          # fallTimer (s, hard landing)
+ HARD,            # cState.willHardLand
+ SP_X,            # sprint FSM: x speed target (Sprint Speed Crt, signed)
+ WCON,            # contacts of the last physics step: 1 floor, 2 wall (OnCollisionStay vs Enter)
+ SHOVE,           # pending rb2d.MovePosition x offset (an up slash off a wall: done in the next physics step)
+ RX0, RY0,        # where the body was drawn last frame (the transform a FixedUpdate's Transform.Translate moves)
+ JBUF,            # InputHandler's jump press queue timer (unscaled s, 0.1 at a press; RegainControl jumps on it)
+ ATK_KIND,        # the swing in progress (AB_THUNK): 1 normal, 2 alt, 3 up, 4 wall slash, 0 none; negative once its
+                  # terrain thunker has recoiled the hero (one thunk per swing)
+ ALT,             # cState.altAttack (the next side / up slash is the alternate one)
+ ALT_T,           # scaled seconds since altAttackTime (the last slash); past recovery + ALT_ATTACK_RESET altAttack clears
+ ATK_PDIR,        # prevAttackDir: 0 normal, 1 up, 2 down, -1 none (a new direction clears altAttack)
+ K) = range(82)
 ROW_NAMES = ("px py qx qy sx sy vx vy alpha gs face ground mode mode_t mode_n jumping jsteps jdsteps jq aq airhang "
              "attacking atk_t atk_cd rdir rsteps ds_hs ds_rec bounce hvx hvy move jheld prev silk inv_t ledge touch "
-             "phase ts qq alo ahi landq wf_ph wf_t wf_s wf_down wf_wait wf_up wf_tgt").split()
+             "phase ts qq alo ahi landq wf_ph wf_t wf_s wf_down wf_wait wf_up wf_tgt wside wtouch cling cling_cd "
+             "wstick unstick wlock wj_dir wj_v wj_chain wjq wslash prev_gs gl_cd dash_t dash_cd airdashed dq fall_t "
+             "hard sp_x wcon shove rx0 ry0 jbuf atk_kind alt alt_t atk_pdir").split()
 assert len(ROW_NAMES) == K
 
 M_NORMAL, M_DS_ANTIC, M_DS_SPIKE, M_HURT_FREEZE, M_HURT_RECOIL, M_CAST, M_BIND, M_LOCKED = range(8)
-MODE_NAMES = ("NORMAL", "DS_ANTIC", "DS_SPIKE", "HURT_FREEZE", "HURT_RECOIL", "CAST", "BIND", "LOCKED")
-RELINQUISHED = (M_DS_ANTIC, M_DS_SPIKE, M_CAST, M_BIND, M_LOCKED)    # controlReqlinquished
+# Forum loadout modes (kin_jit): Drifter's Cloak glide (Umbrella Float FSM, PHASE 0 antic / 1 inflate / 2 float /
+# 3 deflate / 5 bump), Swift Step dash (HeroController.Dash), the sprint FSM after it (PHASE 0 air sprint / 1 air loop /
+# 2 ground sprint / 3 skid), the Reaper down slash (Crest Attacks FSM, PHASE 0 antic / 1 slash / 2 fall / 3 fall 2),
+# hard landing
+M_GLIDE, M_DASH, M_SPRINT, M_RPR_DS, M_HARD_LAND, M_SCRAMBLE = range(8, 14)
+MODE_NAMES = ("NORMAL", "DS_ANTIC", "DS_SPIKE", "HURT_FREEZE", "HURT_RECOIL", "CAST", "BIND", "LOCKED", "GLIDE",
+              "DASH", "SPRINT", "RPR_DS", "HARD_LAND", "SCRAMBLE")
+RELINQUISHED = (M_DS_ANTIC, M_DS_SPIKE, M_CAST, M_BIND, M_LOCKED, M_GLIDE, M_SPRINT, M_RPR_DS, M_SCRAMBLE)  # controlReqlinquished
 NO_INPUT = (M_HURT_FREEZE, M_HURT_RECOIL)                             # hero_state no_input
 
 # contact events (bit flags per frame; applied after the frame's physics steps, before its Update)
@@ -233,7 +279,21 @@ EVENT_NAMES = {EV_RECOIL_L: "recoil_l", EV_RECOIL_R: "recoil_r", EV_POGO: "pogo"
 F_GROUND, F_JUMPING, F_ATTACKING, F_RECOIL, F_RELINQ, F_INVULN, F_NO_INPUT = (1 << i for i in range(7))
 
 # ACTION button bits (ssbot.ipc.framing.BUTTONS order)
-B_JUMP, B_ATTACK, B_BIND, B_QUICKCAST = 1 << 0, 1 << 1, 1 << 3, 1 << 6
+B_JUMP, B_ATTACK, B_DASH, B_BIND, B_QUICKCAST = 1 << 0, 1 << 1, 1 << 2, 1 << 3, 1 << 6
+# HeroParams.abilities bits: Cling Grip (wall slide / wall jump), Ascendant's Grip (Gameplay.WallClingTool: wall
+# cling), Swift Step (dash + sprint FSM), Drifter's Cloak (glide), the Reaper crest's down slash (Custom, Crest
+# Attacks FSM "RPR DOWNSLASH") and wall slash slowdown (HeroControllerConfig.WallSlashSlowdown), hard landing
+# landing; and two rules that are not loadout but were added with it (so the Hunter rollout stays bit for bit the
+# same): the side / up slashes' terrain thunk (NailSlashTerrainThunk: recoil off a wall, RecoilDown off a ceiling)
+# and collision with sloped terrain edges (Terrain2D.slopes)
+AB_WALL, AB_CLING, AB_DASH, AB_BROLLY, AB_RPR_DOWN, AB_WALLSLASH_SLOW, AB_HARD_LAND, AB_THUNK, AB_SLOPES = \
+    (1 << i for i in range(9))
+ABILITY_NAMES = {AB_WALL: "walljump", AB_CLING: "wallcling", AB_DASH: "dash", AB_BROLLY: "brolly",
+                 AB_RPR_DOWN: "reaper_down", AB_WALLSLASH_SLOW: "wallslash_slowdown", AB_HARD_LAND: "hard_landing",
+                 AB_THUNK: "slash_thunk", AB_SLOPES: "slopes"}
+THUNK_SLOTS = ("normal", "alt", "up")   # ATK_KIND 1, 2, 3: their damage polygons (the thunker copies the collider)
+THUNK_MAXV = 12                         # vertices per polygon in the parameter vector's tail
+ALT_ATTACK_RESET = 0.5                  # HeroController.ALT_ATTACK_RESET (hero_constants.json)
 B_UP, B_DOWN, B_LEFT, B_RIGHT = 1 << 18, 1 << 19, 1 << 20, 1 << 21
 
 EPS = 1e-4       # open-interval margin for overlap tests
@@ -344,6 +404,106 @@ class HeroParams:
     cast_throw_variants: list = field(default_factory=lambda: [[0.42, 0.5], [0.44, 0.5]])
     cast_catch_variants: list = field(default_factory=lambda: [[0.14, 0.5], [0.16, 0.5]])
     bind_time_variants: list = field(default_factory=list)     # Bind lengths one frame apart, as the cast phases
+    # Forum loadout (M2 W8; docs/facts/1.0.30000/movement_kinematics.md): AB_* bits, 0 for the Hunter fit (every
+    # rule below is then skipped). HeroController 1.0.30000 constants (hero_constants.json) unless noted; FSM values
+    # from the hero's PlayMaker templates (fsmtemplates_assets_shared: hornet_umbrella_float, hornet_sprint,
+    # crest_attacks); clip lengths ("*_t" of FSM states that wait for an animation) are measured (kin_fit)
+    abilities: int = 0
+    wall_ray: float = 0.6              # WALLJUMP_RAY_LENGTH: IsFacingNearSlideableWall
+    wall_ray_brolly: float = 1.0       # WALLJUMP_BROLLY_RAY_LENGTH: TryQueueWallJumpInterrupt
+    wall_touch_ray: float = 0.1        # WallTouchCache ray length (CheckStillTouchingWall)
+    wall_contact: float = 0.01         # gap beyond the skin within which a wall contact persists (OnCollisionStay2D)
+    wall_stick_time: float = 0.15      # WALLSLIDE_STICK_TIME
+    wall_slide_accel: float = -24.0    # WALLSLIDE_ACCEL (LateUpdate, per rendered frame)
+    wall_cling_decel: float = 80.0     # WALLCLING_DECEL
+    wall_cling_vmin: float = -10.0     # LateUpdate clamp while clinging
+    wall_cling_cooldown: float = 0.3   # WALLCLING_COOLDOWN
+    wall_sticky_steps: int = 3         # WALL_STICKY_STEPS
+    wj_speed: float = 25.0             # WJ_KICKOFF_SPEED
+    wj_lock_short: int = 5             # WJLOCK_STEPS_SHORT
+    wj_lock_long: int = 15             # WJLOCK_STEPS_LONG
+    wj_chain_steps: int = 10           # WJLOCK_CHAIN_STEPS
+    wj_jumped_steps: int = 5           # DoWallJump: jumped_steps = 5
+    wall_up_shove: float = 0.8         # Attack(upward) while wall sliding: MovePosition 0.8 off the wall
+    wall_slash_vy_min: float = -5.0    # WallSlashSlowdown: vy / 2, at least this
+    dash_speed: float = 28.0           # DASH_SPEED
+    dash_time: float = 0.1             # DASH_TIME (ground)
+    air_dash_time: float = 0.02        # AIR_DASH_TIME
+    dash_cooldown: float = 0.425       # DASH_COOLDOWN
+    dash_queue_steps: int = 10         # DASH_QUEUE_STEPS
+    sprint_speed: float = 17.5         # Sprint FSM "Sprint Speed Regular" (Hero_Hornet instance value)
+    air_sprint_speed: float = 12.0     # "Air Sprint Speed"
+    sprint_accel: float = 1.1          # AccelerateToX per physics step
+    air_sprint_time: float = 0.235     # Air Sprint L/R Wait
+    air_fall_clamp0: float = -10.0     # Air Sprint EaseFloat Fall Clamp from
+    air_fall_clamp1: float = -30.0     # ... to
+    air_fall_clamp_time: float = 1.0   # ... over
+    air_fall_clamp_lag: float = 0.016667   # ... a frame behind the state's own time (live: -15.20 where the state
+    #                                    time gives -15.53, on every air sprint of C / D)
+    # side / up slash terrain thunk (AB_THUNK): the slash collider (and its Terrain Thunker copy) is on from the clip's
+    # first animation event to its second (NailSlash.OnAnimationEventTriggered); the clip time counts the attack
+    # frame's own dt, so in ATK_T (zero in the attack frame) the collider is on at a physics step once ATK_T reaches
+    # event / 24 - one frame: normal / alt 2/24 .. 5/24, up 2/24 .. 6/24 (Reaper clips, crests.json); a contact
+    # starts in the first step after (live: recoil 5 to 7 frames after the swing, kn_excite_forum s98000 / A)
+    # sloped edges (AB_SLOPES): a box closer than this to one makes a contact (it then rests at the skin)
+    slope_contact: float = 0.005
+    thunk_on: float = 0.0666667
+    thunk_off: float = 0.1916667
+    thunk_off_up: float = 0.2333333
+    # damage polygons of ATK_KIND 1..3 in the facing frame, relative to the box centre (knowledge attacks/<crest>.json)
+    thunk_polys: dict = field(default_factory=dict)
+    skid_decel: float = 0.85           # Skid End 1 / 2 (a ground sprint released after Sprint Grace): DecelerateXY
+    skid_decel_move: float = 0.95      # ... per step, 0.95 while moving the facing way
+    skid_time: float = 0.25            # ... the two clips (0.2 + 0.05 s)
+    skid_min_speed: float = 4.0        # Skid SFX?: slower than this, no skid
+    sprint_grace: float = 0.3          # Sprint Grace: released earlier, control back at once (Regain Control To Idle)
+    sprint_shift: float = 0.05         # Ground Sprint R / L OnEnter: Translate 0.05 u forward (from the drawn position)
+    glide_antic_t: float = 0.0833      # Umbrella Inflate Antic clip (fit)
+    glide_inflate_t: float = 0.25      # Umbrella Inflate clip (fit)
+    glide_deflate_t: float = 0.1667    # Umbrella Deflate clip (fit)
+    glide_antic_accel: float = 8.5     # UmbrellaMotionX in Antic: accel / decel / max
+    glide_accel: float = 1.0           # ... in Inflate and Float Idle
+    glide_decel: float = 0.25
+    glide_vmax: float = 8.5
+    glide_vy: float = -6.0             # Float Idle AccelerateToY target ...
+    glide_vy_accel: float = 0.13       # ... and step
+    glide_start_vy: float = 0.5        # Inflate: vy < 0.05 -> 0.5 every step; Start: vy = 0.5
+    glide_cooldown: float = 0.1        # Cooldown Wait after control is back
+    glide_ground_ray: float = 1.1      # IsApproachingSolidGround: JUMP_ABILITY_GROUND_RAY_LENGTH + 0.1
+    glide_bump_ray: float = 0.7        # "Wall Bump Distance"
+    glide_bump_vx: float = 6.0         # Bump L / R
+    rpr_antic_t: float = 0.1583        # v3 Down Slash Antic clip (fit: 10 frames)
+    rpr_slash_t: float = 0.175         # v3 Down Slash to its trigger frame (fit: the x0.7 decay lasts 11 frames)
+    rpr_fall_t: float = 0.1583         # rest of v3 Down Slash (fit: control back 11 frames after the trigger)
+    rpr_fall2_t: float = 0.0           # Fall 2 (its watch sees the clip complete: ends the next frame)
+    rpr_antic_decel: float = 0.85      # Rpr Downslash Antic DecelerateV2 (OnEnter and every step)
+    rpr_antic_decel_y: float = 0.8     # unused: the antic's DecelerateXY is disabled in the template
+    rpr_accel: float = 3.0             # unused: the antic's UmbrellaMotionX is disabled in the template
+    rpr_decel: float = 1.0
+    rpr_vmax: float = 12.0
+    rpr_speed: float = 30.0            # Rpr Downslash SetVelocityByScale (forward, -down)
+    rpr_slash_decel: float = 0.7       # ... DecelerateV2
+    rpr_thunk_decel: float = 0.715     # Rpr Downslash Thunk (THUNKED DOWN: the slash met a floor): DecelerateV2 (its
+    #                                    SetVelocity2d y 28 is disabled in the template)
+    rpr_thunk_reach0: float = 2.18     # thunk reach below the box centre while the slash's MODE_T < rpr_thunk_reach_t
+    rpr_thunk_reach1: float = 2.35     # ... after (kin_fit_forum thunk_reach on the fit runs s98000 / A / C)
+    rpr_thunk_reach_t: float = 0.058
+    rpr_thunk_lobe0: float = 0.5       # x span (along the facing, from the body centre) of the floor the thunk meets
+    rpr_thunk_lobe1: float = 2.2
+    hard_fall_time: float = 0.5        # BIG_FALL_TIME
+    hard_land_time: float = 0.67       # HARD_LANDING_TIME
+    # Wall Scramble FSM (hornet_wall_scramble: a dash while sliding and holding towards the wall climbs it)
+    scr_antic_t: float = 0.0583        # Wall Scramble Antic clip (fit: 4 frames)
+    scr_speed: float = 22.0            # Start Scramble: vy (30 with Quickening)
+    scr_force: float = 72.0            # Scramble Up: AddForce2d down per step (mass 1), ...
+    scr_force_held: float = 48.0       # ... while the dash is still held
+    scr_end_vy: float = 0.5            # ... until vy < 0.5
+    scr_end_decel: float = 0.8         # Scramble End: DecelerateXY y
+    scr_end_t: float = 0.075           # Wall Scramble End clip (fit: 5 frames)
+    scr_roof_ray: float = 0.03         # Scramble Up / End: HeroCheckForBumpVertical up, 0.03 + |vy| fdt above the box
+    scr_roof_t: float = 0.0917         # Hit Roof Soft: the End clip from a FixedUpdate entry (fit: control back 5
+    #                                    frames after the roof step)
+    scr_detach: float = 0.2            # Detach: Translate x by scale.x * 0.2 (away from the wall)
     jump_heights: list = field(default_factory=list)   # per jump hold length: logged and model apex spread
     scenes: dict = field(default_factory=dict)       # scene -> {"enable": [go names], "disable": [go names]}
     source: dict = field(default_factory=dict)       # key -> provenance note
@@ -360,10 +520,43 @@ class HeroParams:
               "cast_catch_decay", "cast_silk", "bind_time", "bind_decay", "bind_vy_cap",
               "bind_vy_cap_down", "bind_end_vy", "bind_silk",
               "silk_max", "lock_decay", "ledge_steps", "land_slop_lo", "land_slop_hi", "rdown_halve",
-              "bind_break_before", "wf_bias_wait", "wf_bias_up", "pogo_invul")
+              "bind_break_before", "wf_bias_wait", "wf_bias_up", "pogo_invul",
+              "abilities", "wall_ray", "wall_ray_brolly", "wall_touch_ray", "wall_contact", "wall_stick_time",
+              "wall_slide_accel", "wall_cling_decel", "wall_cling_vmin", "wall_cling_cooldown", "wall_sticky_steps",
+              "wj_speed", "wj_lock_short", "wj_lock_long", "wj_chain_steps", "wj_jumped_steps", "wall_up_shove",
+              "wall_slash_vy_min", "dash_speed", "dash_time", "air_dash_time", "dash_cooldown", "dash_queue_steps",
+              "sprint_speed", "air_sprint_speed", "sprint_accel", "air_sprint_time", "air_fall_clamp0",
+              "air_fall_clamp1", "air_fall_clamp_time", "skid_decel", "skid_time", "glide_antic_t",
+              "glide_inflate_t", "glide_deflate_t", "glide_antic_accel", "glide_accel", "glide_decel", "glide_vmax",
+              "glide_vy", "glide_vy_accel", "glide_start_vy", "glide_cooldown", "glide_ground_ray",
+              "glide_bump_ray", "glide_bump_vx", "rpr_antic_t", "rpr_slash_t", "rpr_fall_t", "rpr_fall2_t",
+              "rpr_antic_decel", "rpr_antic_decel_y", "rpr_accel", "rpr_decel", "rpr_vmax", "rpr_speed",
+              "rpr_slash_decel", "hard_fall_time", "hard_land_time", "scr_antic_t", "scr_speed", "scr_force",
+              "scr_force_held", "scr_end_vy", "scr_end_decel", "scr_end_t", "scr_roof_ray", "scr_roof_t",
+              "scr_detach", "rpr_thunk_decel", "rpr_thunk_reach0", "rpr_thunk_reach1", "rpr_thunk_reach_t",
+              "rpr_thunk_lobe0", "rpr_thunk_lobe1", "sprint_shift", "sprint_grace", "skid_decel_move",
+              "skid_min_speed", "air_fall_clamp_lag", "thunk_on", "thunk_off", "thunk_off_up", "slope_contact")
 
     def vector(self) -> np.ndarray:
-        return np.array([float(getattr(self, k)) for k in self.VECTOR], dtype=np.float64)
+        """The scalar parameters (P_* order); with AB_THUNK a tail from P_THK: per THUNK_SLOTS slot the vertex count
+        and THUNK_MAXV (x, y) pairs."""
+        v = [float(getattr(self, k)) for k in self.VECTOR]
+        if int(self.abilities) & AB_THUNK:
+            for slot in THUNK_SLOTS:
+                pts = [tuple(map(float, q)) for q in (self.thunk_polys.get(slot) or ())][:THUNK_MAXV]
+                v.append(float(len(pts)))
+                for k in range(THUNK_MAXV):
+                    v.extend(pts[k] if k < len(pts) else (0.0, 0.0))
+        return np.array(v, dtype=np.float64)
+
+    def with_slash_polys(self, crest: str | None = None) -> "HeroParams":
+        """A copy whose thunk_polys come from the crest's attack table (knowledge/<build>/attacks/<crest>.json)."""
+        from ssbot.knowledge.attack_shapes import AttackTable
+        tab = AttackTable.load(crest or self.crest)
+        d = self.to_json()
+        d["thunk_polys"] = {k: [[round(float(a), 4), round(float(b), 4)] for a, b in tab[k].polys[0]]
+                            for k in THUNK_SLOTS if k in tab}
+        return HeroParams.from_json(d)
 
     def scene(self, name: str) -> dict:
         return self.scenes.get(name, {})
@@ -425,8 +618,21 @@ class HeroParams:
  P_HURT_T, P_HURT_WAIT, P_HURT_RAMP, P_HURT_SKIP, P_INV_T, P_CAST_ANTIC, P_CAST_THROW, P_CAST_CATCH, P_CAST_DECAY,
  P_CAST_DECAY_G, P_CAST_VYCAP, P_CAST_CSPEED, P_CAST_CDECAY, P_CAST_SILK, P_BIND_T, P_BIND_DECAY, P_BIND_VYCAP,
  P_BIND_VYDOWN, P_BIND_ENDVY, P_BIND_SILK, P_SILK_MAX, P_LOCK_DECAY, P_LEDGE, P_SLOP_LO, P_SLOP_HI, P_RDOWN_HALF,
- P_BIND_BREAK, P_WF_BW, P_WF_BU, P_POGO_INV, NP) = range(68)
+ P_BIND_BREAK, P_WF_BW, P_WF_BU, P_POGO_INV,
+ P_ABIL, P_W_RAY, P_W_RAY_B, P_W_TRAY, P_W_CONTACT, P_W_STICK, P_W_ACCEL, P_W_CDECEL, P_W_CVMIN, P_W_CCD, P_W_STICKY,
+ P_WJ_SPEED, P_WJ_SHORT, P_WJ_LONG, P_WJ_CHAIN, P_WJ_JUMPED, P_W_SHOVE, P_W_SLASH_VMIN, P_DASH_SPEED, P_DASH_T,
+ P_ADASH_T, P_DASH_CD, P_DQ, P_SPR_SPEED, P_ASPR_SPEED, P_SPR_ACC, P_ASPR_T, P_AFC0, P_AFC1, P_AFC_T, P_SKID_DEC,
+ P_SKID_T, P_GL_ANTIC, P_GL_INFLATE, P_GL_DEFLATE, P_GL_AACC, P_GL_ACC, P_GL_DEC, P_GL_VMAX, P_GL_VY, P_GL_VYACC,
+ P_GL_START_VY, P_GL_CD, P_GL_GRAY, P_GL_BRAY, P_GL_BVX, P_RPR_ANTIC, P_RPR_SLASH, P_RPR_FALL, P_RPR_FALL2,
+ P_RPR_ADEC, P_RPR_ADEC_Y, P_RPR_ACC, P_RPR_DEC, P_RPR_VMAX, P_RPR_SPEED, P_RPR_SDEC, P_HARD_FALL, P_HARD_LAND,
+ P_SCR_ANTIC, P_SCR_SPEED, P_SCR_FORCE, P_SCR_FORCE_H, P_SCR_END_VY, P_SCR_END_DEC, P_SCR_END_T, P_SCR_ROOF_RAY,
+ P_SCR_ROOF_T, P_SCR_DETACH, P_RPR_TDEC, P_RPR_TREACH0, P_RPR_TREACH1, P_RPR_TREACH_T, P_RPR_TLOBE0, P_RPR_TLOBE1,
+ P_SPR_SHIFT, P_SPR_GRACE, P_SKID_DEC_MV, P_SKID_VMIN, P_AFC_LAG, P_THK_ON, P_THK_OFF, P_THK_OFF_UP,
+ P_SLOPE_CONTACT,
+ NP) = range(152)
 assert NP == len(HeroParams.VECTOR)
+P_THK = NP           # AB_THUNK: the slash polygons' tail (HeroParams.vector)
+THK_STRIDE = 1 + 2 * THUNK_MAXV
 
 
 # ---- terrain --------------------------------------------------------------------------------------------------
@@ -696,6 +902,21 @@ def _on_ground(px, py, P, hseg):
     xov = ((px + hw)[:, None] > x0 + EPS) & ((px - hw)[:, None] < x1 - EPS)
     gap = (py - P[P_FOOT])[:, None] - (s + P[P_SKIN])
     return (xov & (gap >= -GTOL) & (gap <= GTOL)).any(axis=1)
+
+
+def _wall_contact(px, py, P, vseg):
+    """kin_jit.forum_contacts' wall contact: a wall face within skin + wall_contact of a box side whose y span holds
+    the box's centre or bottom height."""
+    if vseg.shape[0] == 0:
+        return np.zeros(px.shape, dtype=np.bool_)
+    hw, reach = P[P_HW], P[P_SKIN] + P[P_W_CONTACT]
+    s, y0, y1 = vseg[:, 0][None, :], vseg[:, 1][None, :], vseg[:, 2][None, :]
+    ymid = (py + 0.5 * (P[P_HEAD] - P[P_FOOT]))[:, None]
+    ybot = (py - P[P_FOOT])[:, None]
+    span = ((y0 - EPS <= ymid) & (ymid <= y1 + EPS)) | ((y0 - EPS <= ybot) & (ybot <= y1 + EPS))
+    gl = (px - hw)[:, None] - s
+    gr = s - (px + hw)[:, None]
+    return (span & (((gl >= -TOL) & (gl <= reach)) | ((gr >= -TOL) & (gr <= reach)))).any(axis=1)
 
 
 # ---- the model: one physics step, one Update ------------------------------------------------------------------
@@ -1267,6 +1488,7 @@ class Variant:
     frame_time: str = "mean"
     cast: str = "nominal"
     timers: tuple = (0, 0, 0)
+    second: int = 0       # nonzero: the second timed phase of the Forum FSM moves (_SECOND_TIMERS) takes this sign
 
 
 def _lane(t: tuple) -> Variant:
@@ -1282,9 +1504,27 @@ FAST = (Variant("nominal"), _lane((-1, -1, -1)), _lane((1, 1, 1)))
 BOUNDS = (Variant("nominal"),) + tuple(_lane(t) for t in _SIGNS)
 FULL = (Variant("nominal"),) + tuple(Variant(f"{a}/{_lane(t).name}", a, "mean", _lane(t).cast, t)
                                      for a in ("lo", "hi") for t in _SIGNS)
-VARIANT_SETS = {"nominal": NOMINAL, "fast": FAST, "bounds": BOUNDS, "full": FULL}
+# bounds_ft: bounds plus two lanes at the jitter model's shortest / longest frame time (each with the phase at the
+# matching end): a game instance that renders every frame at the limiter's 0.01665 s (kn_excite_forum on a lone
+# instance) drifts the physics phase 0.024 in 30 frames against the mean 0.016666 s, past alpha_margin
+BOUNDS_FT = BOUNDS + (Variant("ft_lo", "lo", "lo"), Variant("ft_hi", "hi", "hi"))
+BOUNDS_LO = BOUNDS + (Variant("ft_lo", "lo", "lo"),)
+# bounds_lo_mix: two more lanes whose Forum moves' second timed phase (the Reaper down slash's slash, the glide's
+# inflate) ends on the other side of the threshold from the first and third (the antic, the fall / deflate): each
+# phase's end is its own coin flip of the frame-time sums (s98010 f719895: antic a frame early, slash on time)
+BOUNDS_LO_MIX = BOUNDS_LO + (Variant("mix-+", "hi", "mean", "nominal", (0, 0, -1), 1),
+                             Variant("mix+-", "lo", "mean", "nominal", (0, 0, 1), -1))
+BOUNDS_LO2 = BOUNDS + (Variant("ft_lo", "lo", "lo"), Variant("ft_lo_h", "hi", "lo"))
+VARIANT_SETS = {"nominal": NOMINAL, "fast": FAST, "bounds": BOUNDS, "full": FULL, "bounds_ft": BOUNDS_FT,
+                "bounds_lo": BOUNDS_LO, "bounds_lo2": BOUNDS_LO2, "bounds_lo_mix": BOUNDS_LO_MIX}
+_SECOND_TIMERS = ("P_RPR_SLASH", "P_GL_INFLATE")
 _SCALED_TIMERS = ("P_ATK_DUR", "P_ATK_CD", "P_DS_ANTIC", "P_DS_REC", "P_DS_LREC", "P_HURT_T", "P_CAST_ANTIC",
-                  "P_BIND_T")
+                  "P_BIND_T",
+                  # Forum loadout: the animation-timed FSM states, the sprint wait, the cling cooldown and hard landing
+                  # (scaled time against a threshold, as the above; unused while abilities is 0)
+                  "P_GL_ANTIC", "P_GL_INFLATE", "P_GL_DEFLATE", "P_RPR_ANTIC", "P_RPR_SLASH", "P_RPR_FALL",
+                  "P_RPR_FALL2", "P_SCR_ANTIC", "P_SCR_END_T", "P_SCR_ROOF_T", "P_ASPR_T", "P_SKID_T", "P_W_CCD",
+                  "P_W_STICK", "P_HARD_LAND", "P_SPR_GRACE", "P_THK_ON", "P_THK_OFF", "P_THK_OFF_UP")
 
 
 def _variant_rows(params: HeroParams, variants: tuple[Variant, ...]
@@ -1305,6 +1545,9 @@ def _variant_rows(params: HeroParams, variants: tuple[Variant, ...]
         Pv[v, P_WF_BW] += tw * params.timer_bias          # a world freeze's wait / ramp up: the same unscaled links
         Pv[v, P_WF_BU] += tr * params.timer_bias
         Pv[v, scaled] += ts * params.timer_bias
+        if var.second:
+            second = [globals()[k] for k in _SECOND_TIMERS]
+            Pv[v, second] += (var.second - ts) * params.timer_bias
     return Pv, np.asarray(ft, dtype=np.float32).astype(np.float64), sel
 
 
@@ -1380,6 +1623,8 @@ def rollout(start: np.ndarray, masks: np.ndarray, params: HeroParams, terrain: T
         dts = fss = np.zeros((0, 0))
     terrain = terrain or Terrain2D.empty()
     use_jit = HAVE_NUMBA if backend == "auto" else backend == "numba"
+    if params.abilities and not use_jit:
+        raise ValueError("the Forum loadout rules (HeroParams.abilities) exist in kin_jit only: use backend numba")
     if variants and use_jit and not lanes:
         from ssbot.knowledge import kin_jit
         if threads > 1:
@@ -1589,6 +1834,8 @@ def initial_state(params: HeroParams, x: float, y: float, *, vx: float = 0.0, vy
     S[TS] = 1.0
     S[WF_PH] = -1.0
     S[WF_S] = 1.0
+    S[WLOCK] = S[DQ] = -1.0
+    S[PREV_GS] = 1.0
     return S
 
 
@@ -1598,7 +1845,20 @@ CSTATE_NAMES_PATH = REPO / "docs" / "facts" / "1.0.30000" / "cstate_schema.json"
 _CS_USED = ("facingRight", "onGround", "jumping", "attacking", "upAttacking", "downSpikeAntic", "downSpiking",
             "downSpikeBouncing", "downSpikeRecovery", "recoilingRight", "recoilingLeft", "recoilFrozen", "recoiling",
             "invulnerable", "casting", "isBinding", "isToolThrowing", "nailCharging", "hazardRespawning", "dead",
-            "transitioning", "wallSliding", "dashing", "parrying")
+            "transitioning", "wallSliding", "dashing", "parrying",
+            # Forum loadout (appended: traces saved before have fewer columns, Trace.flag reads them as False)
+            "wallClinging", "touchingWall", "isSprinting", "airDashing", "willHardLand", "isInCancelableFSMMove",
+            "altAttack")
+# animation clips that say which phase of an FSM-driven move a logged frame is in (Hero_Hornet's tk2d clips named
+# in the Umbrella Float, Sprint and Crest Attacks FSMs)
+GLIDE_CLIPS = {"Umbrella Inflate Antic": 0, "Umbrella Inflate": 1, "Umbrella Float": 2, "Umbrella Turn": 2,
+               "Umbrella Deflate": 3}
+SPRINT_CLIPS = {"Sprint Air": 0, "Sprint Air Short": 0, "Sprint Air Loop": 1, "Sprint": 2, "Land to Sprint": 2,
+                "Skid End 1": 3, "Skid End 2": 3}
+RPR_CLIPS = {"v3 Down Slash Antic": 0, "v3 Down Slash": 1}
+SCRAMBLE_CLIPS = {"Wall Scramble Antic": 0, "Wall Scramble": 1, "Wall Scramble Quickened": 1,
+                  "Wall Scramble End": 2}
+HS_HARD_LANDING = 5   # GlobalEnums.ActorStates.hard_landing
 
 
 MK_HARNESS, MK_HAZARD, MK_SCENE, MK_FREEZE, MK_DEATH, MK_SLIDE = 1, 2, 4, 8, 16, 32
@@ -1655,12 +1915,14 @@ class Trace:
     tm: np.ndarray | None = None          # [n, len(TM_KEYS)] hero.tm when exported (NaN where missing)
     alpha_log: np.ndarray | None = None   # [n] hero.alpha when exported (NaN where missing)
     freeze: np.ndarray | None = None      # [n] FZ_* bits of the FreezeMoments started in that frame
+    wall: np.ndarray | None = None        # [n] hero.wall: -1 touchingWallL, +1 touchingWallR, 0 (None: not exported)
 
     def __len__(self) -> int:
         return len(self.f)
 
     def flag(self, name: str) -> np.ndarray:
-        return self.cs[:, _CS_USED.index(name)]
+        i = _CS_USED.index(name)
+        return self.cs[:, i] if i < self.cs.shape[1] else np.zeros(len(self.cs), dtype=bool)
 
     def save(self, path: str | Path) -> None:
         d = {f.name: getattr(self, f.name) for f in fields(self) if getattr(self, f.name) is not None}
@@ -1684,7 +1946,8 @@ class Trace:
                 "valid": bool(self.valid[i]),
                 "tm": self.tm[i] if self.tm is not None else np.full(len(TM_KEYS), np.nan),
                 "alpha": float(self.alpha_log[i]) if self.alpha_log is not None else np.nan,
-                "load": bool(self.marks[i] & MK_SLIDE)}
+                "load": bool(self.marks[i] & MK_SLIDE),
+                "wall": int(self.wall[i]) if self.wall is not None else None}
 
     def slice(self, i0: int, i1: int) -> "Trace":
         d = {}
@@ -1707,7 +1970,8 @@ class Trace:
         scenes: dict = {}
         cols: dict[str, list] = {k: [] for k in ("f", "fs", "dt", "udt", "ts", "pos", "phys", "vel", "facing",
                                                  "hero_state", "relinq", "cs", "act", "inp", "silk", "hp", "clip",
-                                                 "spell", "dmg", "marks", "box", "valid", "scene", "freeze")}
+                                                 "spell", "dmg", "marks", "box", "valid", "scene", "freeze", "wall")}
+        wall_seen = False
         nan2 = [np.nan, np.nan]
         nan_tm = [np.nan] * len(TM_KEYS)
         tm_rows: list = []
@@ -1754,7 +2018,7 @@ class Trace:
             if not h or not h.get("box") or not h.get("cstate"):
                 for k, v in (("pos", nan2), ("phys", nan2), ("vel", nan2), ("box", nan2 * 2), ("facing", 0),
                              ("hero_state", -1), ("relinq", False), ("cs", [False] * len(bit)), ("silk", 0), ("hp", 0),
-                             ("valid", False)):
+                             ("valid", False), ("wall", 0)):
                     cols[k].append(v)
                 cols["clip"].append(clips.setdefault(None, len(clips)))
                 cols["spell"].append(spells.setdefault(None, len(spells)))
@@ -1775,6 +2039,9 @@ class Trace:
             cols["spell"].append(spells.setdefault((h.get("spell") or [None])[0], len(spells)))
             pause = s.get("pause") or {}
             cols["valid"].append(g.get("gs", 4) == 4 and not g.get("paused") and not pause.get("inv", False))
+            w = h.get("wall")
+            wall_seen |= w is not None
+            cols["wall"].append(-1 if w and w[0] else 1 if w and len(w) > 1 and w[1] else 0)
         act = np.asarray(cols.pop("act"), dtype=np.int64)
         inp = np.asarray(cols.pop("inp"), dtype=np.int64)
         if mask_source == "auto":
@@ -1804,7 +2071,8 @@ class Trace:
                  valid=arr["valid"].astype(bool),
                  scene=arr["scene"].astype(np.int32), clips=list(clips), spells=list(spells), scenes=list(scenes),
                  mask_source=mask_source, tm=tm_arr if np.isfinite(tm_arr).any() else None,
-                 alpha_log=al if np.isfinite(al).any() else None, freeze=arr["freeze"].astype(np.int16))
+                 alpha_log=al if np.isfinite(al).any() else None, freeze=arr["freeze"].astype(np.int16),
+                 wall=arr["wall"].astype(np.int8) if wall_seen else None)
         mark_load_slides(tr, loads, params)
         return tr
 
@@ -1946,8 +2214,31 @@ def _bind_time(tr: Trace, modes: np.ndarray) -> np.ndarray:
     return _since32(m_on, tr.dt, include_onset=False)
 
 
-def classify_modes(tr: Trace) -> np.ndarray:
-    """Model mode per logged frame (M_*), from cstate, hero_state and the animation."""
+def forum_mode(md: int, prev_md: int | None, flag, clip, relinq: bool, hero_state: int) -> int:
+    """Mode of a logged frame for the Forum loadout's moves, given the Hunter rules' mode so far (M_LOCKED or
+    M_NORMAL; cast, bind, down spike and damage are decided after and keep priority): the glide, sprint and Reaper
+    down slash FSMs take control (control relinquished / no_input) and show their own clips; the Reaper down slash's
+    fall shows the hero's clips, so it continues while control stays taken; the dash and hard landing are
+    HeroController states. Used by classify_modes (forum=True) and StateTracker alike."""
+    taken = relinq or hero_state == HS_NO_INPUT
+    if taken and clip in GLIDE_CLIPS:
+        return M_GLIDE
+    if taken and clip in SCRAMBLE_CLIPS:
+        return M_SCRAMBLE
+    if taken and (flag("isSprinting") or clip in ("Skid End 1", "Skid End 2")):
+        return M_SPRINT                   # (the skid clips play after isSprinting cleared: s98200 f774201)
+    if taken and (clip in RPR_CLIPS or (prev_md == M_RPR_DS and md == M_LOCKED)):
+        return M_RPR_DS
+    if flag("dashing"):
+        return M_DASH
+    if hero_state == HS_HARD_LANDING:
+        return M_HARD_LAND
+    return md
+
+
+def classify_modes(tr: Trace, forum: bool = False) -> np.ndarray:
+    """Model mode per logged frame (M_*), from cstate, hero_state and the animation. forum: also the Forum
+    loadout's modes (forum_mode; HeroParams.abilities != 0), which the Hunter model leaves as M_NORMAL / M_LOCKED."""
     n = len(tr)
     mode = np.full(n, M_NORMAL, dtype=np.int8)
     clip = np.array(tr.clips, dtype=object)[tr.clip]
@@ -1955,6 +2246,13 @@ def classify_modes(tr: Trace) -> np.ndarray:
     cast = np.isin(clip, CAST_CLIPS)
     bind = tr.flag("isBinding") | np.isin(spell, BIND_SPELLS)
     mode[tr.relinq] = M_LOCKED
+    if forum:
+        fl = {k: tr.flag(k) for k in ("isSprinting", "dashing")}
+        prev = None
+        for i in range(n):
+            mode[i] = forum_mode(int(mode[i]), prev, lambda name: bool(fl[name][i]), clip[i], bool(tr.relinq[i]),
+                                 int(tr.hero_state[i]))
+            prev = int(mode[i])
     mode[cast & (tr.relinq | (tr.hero_state == HS_NO_INPUT))] = M_CAST
     mode[bind & (tr.relinq | (tr.hero_state == HS_NO_INPUT))] = M_BIND
     mode[tr.flag("downSpikeAntic")] = M_DS_ANTIC
@@ -1962,6 +2260,271 @@ def classify_modes(tr: Trace) -> np.ndarray:
     mode[tr.flag("recoiling") & (tr.hero_state == HS_NO_INPUT)] = M_HURT_RECOIL
     mode[tr.flag("recoilFrozen")] = M_HURT_FREEZE
     return mode
+
+
+def _umbrella_x(vx: float, mask: int, acc: float, dec: float, vmax: float) -> float:
+    """UmbrellaMotionX.DoAccelerate (kin_jit.umbrella_x)."""
+    if mask & B_RIGHT:
+        vx = vx + acc if vx < vmax else vx
+    elif mask & B_LEFT:
+        vx = vx - acc if vx > -vmax else vx
+    elif vx > 0:
+        vx = max(vx - dec, 0.0)
+    elif vx < 0:
+        vx = min(vx + dec, 0.0)
+    return min(max(vx, -vmax), vmax)
+
+
+class ForumRows:
+    """The Forum loadout's state rows of logged frames, one frame at a time (state_table runs one over the trace,
+    StateTracker keeps one): the wall rows from cstate wallSliding / wallClinging and hero.wall, the wall stick and
+    cling cooldown timers, a wall jump's lock (from a jump that starts off a wall), the FSM-driven moves' phase and
+    phase time (from their clips: GLIDE_CLIPS, SPRINT_CLIPS, RPR_CLIPS, as the Silkspear phases), the dash timer
+    from the dash's start, the dash cooldown from hero.tm. Rows the log cannot show start neutral: WLOCK and DQ -1,
+    PREV_GS 1."""
+
+    def __init__(self, params: HeroParams):
+        self.p = params
+        self.prev: dict | None = None
+        self.wstick = np.float32(0.0)
+        self.cling_cd = np.float32(0.0)
+        self.gl_cd = np.float32(0.0)
+        self.wlock = -1.0
+        self.wj_dir = 0.0
+        self.ph_t = np.float32(0.0)
+        self.dash_t = np.float32(0.0)
+        self.airdashed = False
+        self.wslash = False
+        self.shove = 0.0
+        self.scr_pending = 0.0
+        self.gl_vx: float | None = None
+        self.jbuf = np.float32(0.0)
+        self.atk_kind = 0.0
+        self.alt_t = np.float32(9.0)
+        self.atk_pdir = -1.0
+        self.wj_chain = 0.0
+        self.unstick = 0.0
+
+    def push(self, S: np.ndarray, r: dict, md: int, flag) -> None:
+        """Fill S (one [K] state, the frame's other rows already set) for row r (Trace.row form) in mode md."""
+        p, pr = self.p, self.prev
+        dt = np.float32(r["dt"])
+        fs = int(r["fs"])
+        face = 1.0 if r["facing"] >= 0 else -1.0
+        sliding, cling = flag("wallSliding"), flag("wallClinging")
+        wall = r.get("wall")
+        side = float(wall) if (wall is not None and wall != 0) else face
+        S[WSIDE] = side if sliding else 0.0
+        S[WTOUCH] = float(wall) if wall is not None else (side if sliding else 0.0)
+        S[CLING] = 1.0 if cling else 0.0
+        if sliding and not cling:
+            if not (pr and pr["sliding"] and not pr["cling"]):
+                self.wstick = np.float32(0.0)
+            if self.wstick < np.float32(p.wall_stick_time):
+                self.wstick = np.float32(self.wstick + dt)
+        else:
+            self.wstick = np.float32(0.0)
+        S[WSTICK] = float(self.wstick)
+        if pr and pr["cling"] and not cling and sliding:
+            self.cling_cd = np.float32(p.wall_cling_cooldown)
+        if self.cling_cd > 0:
+            self.cling_cd = np.float32(self.cling_cd - dt)
+        S[CLING_CD] = float(self.cling_cd)
+        # wall jump: a jump that starts off a wall (sliding or touching one in the air) locks x for up to
+        # wj_lock_long steps while the jump lasts
+        jumping, ground = flag("jumping"), flag("onGround")
+        if self.wj_chain > 0:
+            self.wj_chain = max(self.wj_chain - fs, 0.0)
+        if jumping and pr and not pr["jumping"] and (pr["sliding"] or pr["wall"]) and not pr["ground"]:
+            self.wlock, self.wj_dir = 0.0, face
+        elif self.wlock >= 0:
+            self.wlock += fs
+            mask = int(r.get("mask", 0))
+            back = (self.wj_dir < 0 and mask & B_RIGHT) or (self.wj_dir > 0 and mask & B_LEFT)
+            if self.wlock > p.wj_lock_long:
+                self.wlock = -1.0             # the lock ran out: the chain window opens (WJLOCK_CHAIN_STEPS)
+                self.wj_chain = float(p.wj_chain_steps)
+            elif not jumping or (self.wlock >= p.wj_lock_short and back):
+                self.wlock = -1.0             # (LookForInput 8407: back towards the wall after the short lock)
+        S[WLOCK] = self.wlock
+        S[WJ_DIR] = self.wj_dir
+        S[WJ_CHAIN] = self.wj_chain
+        # wallUnstickSteps: FixedUpdate counts its steps with the input of the last Update held away from the wall
+        # (the previous frame's buttons); three end the slide
+        pm = int(pr["mask"]) if pr else 0
+        if sliding and pr and pr["sliding"]:
+            away = (pm & B_RIGHT and not pm & B_LEFT) if side < 0 else (pm & B_LEFT and not pm & B_RIGHT)
+            self.unstick = self.unstick + fs if away else 0.0
+        else:
+            self.unstick = 0.0
+        S[UNSTICK] = self.unstick
+        # wallSlashing: a side attack started during the slide, until the attack ends (ResetAttacks) or the slide
+        attacking = flag("attacking")
+        if not (attacking and sliding):
+            self.wslash = False
+        elif not (pr and pr["attacking"]):
+            self.wslash = not flag("upAttacking")
+        S[WSLASH] = 1.0 if self.wslash else 0.0
+        # the swing for its terrain thunker (AB_THUNK): kind at the onset (the alternate slash shows as altAttack
+        # cleared right after it, a normal one as set), negative once a nail recoil started during it; the time
+        # since the last slash and its direction (altAttack's reset rule)
+        up_now = flag("upAttacking")
+        att_any = attacking or up_now
+        if att_any and not (pr and pr["att_any"]):
+            if md == M_RPR_DS:
+                self.atk_pdir, self.atk_kind = 2.0, 0.0
+            else:
+                self.atk_pdir = 1.0 if up_now else 0.0
+                self.atk_kind = 3.0 if up_now else (4.0 if (sliding or (pr and pr["sliding"])) else
+                                                     (1.0 if flag("altAttack") else 2.0))
+                self.alt_t = np.float32(0.0)
+        else:
+            self.alt_t = np.float32(self.alt_t + dt)
+            if not att_any:
+                self.atk_kind = 0.0
+            elif self.atk_kind in (1.0, 2.0) and pr and not pr["recoiling"] and \
+                    (flag("recoilingLeft") or flag("recoilingRight")):
+                self.atk_kind = -self.atk_kind
+        S[ATK_KIND] = self.atk_kind
+        S[ALT] = 1.0 if flag("altAttack") else 0.0
+        S[ALT_T] = float(self.alt_t)
+        S[ATK_PDIR] = self.atk_pdir
+        # an up slash off the wall: MovePosition 0.8 u away from it, pending until the next physics step
+        up = flag("upAttacking")
+        if up and pr and not pr["up"] and pr["sliding"]:
+            self.shove = -pr["side"] * p.wall_up_shove
+        elif fs > 0:
+            self.shove = 0.0
+        S[SHOVE] = self.shove
+        # InputHandler's jump queue timer (0.1 s from a press, unscaled)
+        m_now = int(r.get("mask", 0))
+        if m_now & B_JUMP and not (pr and pr["mask"] & B_JUMP):
+            self.jbuf = np.float32(0.1)
+        elif self.jbuf > 0:
+            self.jbuf = np.float32(self.jbuf - np.float32(r.get("udt", r["dt"])))
+        S[JBUF] = float(max(self.jbuf, 0.0))
+        S[WJ_V] = p.wj_speed - max(self.wlock, 0.0) * (p.wj_speed - p.run_speed) / p.wj_lock_long
+        S[PREV_GS] = 1.0
+        S[DQ] = -1.0
+        # FSM-driven moves: phase and time in it (from the frame after the phase's first)
+        pmd = pr["md"] if pr else None
+        clip = r.get("clip")
+        ph = 0.0
+        if md == M_GLIDE:
+            ph = float(GLIDE_CLIPS.get(clip, pr["ph"] if pr and pmd == M_GLIDE else 0))
+        elif md == M_SPRINT:
+            ph = float(SPRINT_CLIPS.get(clip, pr["ph"] if pr and pmd == M_SPRINT else 0))
+        elif md == M_RPR_DS:
+            # the slash, its fall and Fall 2 all show (or follow) "v3 Down Slash": past the clip's onset the phase
+            # advances on the fitted thresholds, as the model's
+            cph = RPR_CLIPS.get(clip)
+            ph = 0.0 if cph == 0 else (pr["ph"] if pr and pmd == M_RPR_DS and pr["ph"] >= 1 else
+                                       (1.0 if cph == 1 else 2.0))
+            # a thunk (the slash met a floor: Rpr Downslash Thunk) shows as one step decaying |vx| by 0.7 x 0.715
+            # (with two steps in the frame the plain decay is 0.49: the test scales with the steps)
+            if ph == 1 and pr and pmd == M_RPR_DS and pr["ph"] == 1 and fs > 0 and r.get("vel") is not None:
+                lim = 0.85 * p.rpr_slash_decel ** fs
+                if abs(pr["vx"]) > 0.05 and abs(float(r["vel"][0])) < lim * abs(pr["vx"]):
+                    ph = 4.0
+        elif md == M_SCRAMBLE:
+            ph = float(SCRAMBLE_CLIPS.get(clip, pr["ph"] if pr and pmd == M_SCRAMBLE else 0))
+            if ph == 2 and pr and pmd == M_SCRAMBLE:
+                if pr["ph"] in (2.0, 3.0):
+                    ph = pr["ph"]
+                elif pr["ph"] == 0:
+                    ph = 3.0              # Start Scramble and Hit Roof in one Update (the roof ray's OnEnter)
+                elif pr["ph"] == 1 and fs > 0:
+                    # Scramble End (vy < 0.5 after a step, DecelerateXY OnEnter) or Hit Roof Soft (the roof ray
+                    # in the step: gravity back in it): whichever velocity rule the logged vy fits
+                    # (End needs vy < 0.5 after the step's force; a roof can also stop the body dead)
+                    v0 = float(pr["vy"]) - (p.scr_force_held if pr["mask"] & B_DASH else p.scr_force) * p.fdt
+                    vy_log = float(r["vel"][1]) if r.get("vel") is not None else v0 * p.scr_end_decel
+                    roof = v0 - p.gravity * p.fdt
+                    ph = 3.0 if (v0 >= p.scr_end_vy or
+                                 abs(vy_log - roof) < abs(vy_log - v0 * p.scr_end_decel)) else 2.0
+        if md in (M_GLIDE, M_SPRINT, M_RPR_DS, M_SCRAMBLE):
+            if pr and pmd == md and (pr["ph"] == ph or (md == M_RPR_DS and pr["ph"] == 1 and ph == 4)
+                                     or (md == M_SPRINT and pr["ph"] <= 1 and ph == 2)):
+                self.ph_t = np.float32(self.ph_t + dt)
+            elif (md == M_SCRAMBLE and ph == 3) or (md == M_SPRINT and not (pr and pmd == M_SPRINT)):
+                self.ph_t = dt                # entered in a FixedUpdate (roof ray; FinishedDashing): the entry
+                #                               frame's Update counts
+            else:
+                self.ph_t = np.float32(0.0)
+            if md == M_RPR_DS and pr and pmd == md and pr["ph"] in (ph, 1.0):
+                for k, lim, nxt in ((1.0, p.rpr_slash_t, 2.0), (4.0, p.rpr_slash_t, 2.0), (2.0, p.rpr_fall_t, 3.0)):
+                    if ph == k and self.ph_t >= np.float32(lim):
+                        ph, self.ph_t = nxt, np.float32(0.0)
+                        break
+            S[PHASE] = ph
+            S[MODE_T] = float(self.ph_t)
+            if md == M_GLIDE:
+                S[GS] = 0.0 if ph in (1.0, 2.0) else 1.0
+                # the UmbrellaMotionX OnEnter of the antic / inflate / float idle changes the hero's own x speed
+                # (UmbrellaWindObject) at once; the body shows it from the next physics step
+                if not (pr and pmd == md and pr["ph"] == ph) and ph <= 2 and r.get("vel") is not None:
+                    base = 0.0 if ph == 1 else float(r["vel"][0])
+                    acc = p.glide_antic_accel if ph == 0 else p.glide_accel
+                    self.gl_vx = _umbrella_x(base, int(r.get("mask", 0)), acc, p.glide_decel, p.glide_vmax)
+                elif fs > 0 or ph > 2:
+                    self.gl_vx = None
+                if self.gl_vx is not None:
+                    S[VX] = self.gl_vx
+            elif md == M_RPR_DS:
+                S[GS] = 0.0 if ph in (0.0, 1.0, 4.0) else 1.0
+            elif md == M_SCRAMBLE:
+                S[GS] = 1.0 if ph == 3 else 0.0
+                start = ph == 1 or (ph == 3 and pr and pmd == md and pr["ph"] == 0)
+                if start and not (pr and pmd == md and pr["ph"] == ph) and "mask" in r:
+                    # Start Scramble's frame: Scramble Up's AddForce2d OnEnter is pending until the next step (also
+                    # when the OnEnter roof ray left Scramble Up in the same Update)
+                    self.scr_pending = (p.scr_force_held if r["mask"] & B_DASH else p.scr_force) * p.fdt
+                elif not start or fs > 0:
+                    self.scr_pending = 0.0
+                S[VY] -= self.scr_pending
+            else:
+                S[GS] = 1.0
+        S[SP_X] = face * (p.air_sprint_speed if ph <= 1 else p.sprint_speed) if md == M_SPRINT else \
+            (face if md == M_SCRAMBLE else 0.0)
+        if pr and pmd == M_GLIDE and md != M_GLIDE:
+            self.gl_cd = np.float32(p.glide_cooldown)
+        elif self.gl_cd > 0:
+            self.gl_cd = np.float32(self.gl_cd - dt)
+        S[GL_CD] = float(max(self.gl_cd, 0.0))
+        # dash: dash_timer from the start (dash_time on the ground, air_dash_time in the air), minus fdt per step
+        if md == M_DASH:
+            if not (pr and pmd == M_DASH):
+                on_ground = pr["ground"] if pr else ground
+                self.dash_t = np.float32(p.dash_time if on_ground else p.air_dash_time)
+                self.airdashed |= not on_ground
+            else:
+                for _ in range(fs):
+                    self.dash_t = np.float32(self.dash_t - np.float32(p.fdt))
+            S[DASH_T] = float(self.dash_t)
+        if ground or sliding:
+            self.airdashed = False
+        S[AIRDASHED] = 1.0 if self.airdashed else 0.0
+        tm = r.get("tm")
+        dcd = float(tm[TM_KEYS.index("dash_cd")]) if tm is not None else np.nan
+        S[DASH_CD] = max(dcd, 0.0) if np.isfinite(dcd) else 0.0
+        S[HARD] = 1.0 if flag("willHardLand") else 0.0
+        S[WCON] = (1.0 if ground else 0.0) + (2.0 if (wall is not None and wall != 0) or sliding else 0.0)
+        S[FALL_T] = p.hard_fall_time + 0.01 if S[HARD] > 0 else 0.0
+        self.prev = {"sliding": sliding, "cling": cling, "jumping": jumping, "ground": ground, "attacking": attacking,
+                     "up": up, "side": side, "att_any": att_any,
+                     "recoiling": bool(flag("recoilingLeft") or flag("recoilingRight")),
+                     "wall": bool(wall) if wall is not None else sliding, "md": md, "ph": ph,
+                     "vy": float(r["vel"][1]) if r.get("vel") is not None else 0.0, "mask": int(r.get("mask", 0)),
+                     "vx": float(r["vel"][0]) if r.get("vel") is not None else 0.0}
+
+
+def _neutral_forum_rows(S: np.ndarray) -> None:
+    """The Forum rows of a state the Hunter model estimated (it never reads them)."""
+    S[WLOCK] = -1.0
+    S[DQ] = -1.0
+    S[PREV_GS] = 1.0
+    S[ATK_PDIR] = -1.0
+    S[ALT_T] = 9.0
 
 
 def derive_events(tr: Trace, modes: np.ndarray | None = None) -> np.ndarray:
@@ -2018,8 +2581,11 @@ def estimate_state(tr: Trace, idx: Iterable[int] | np.ndarray, params: HeroParam
     table = state_table(tr, params, modes, alpha, causal) if table is None else table
     S = table[:, idx].copy()
     if terrain is not None:     # falling body parked on a floor without contact yet (see _move_y)
-        near = _on_ground(S[PX], S[PY], params.vector(), terrain.hseg)
+        P = params.vector()
+        near = _on_ground(S[PX], S[PY], P, terrain.hseg)
         S[TOUCH] = (near & (S[GROUND] <= 0) & (S[VY] < 0)).astype(np.float64)
+        if params.abilities:    # a wall reached in the last step: OnCollisionEnter2D, the touch flags come a step later
+            S[WCON] = np.where(_wall_contact(S[PX], S[PY], P, terrain.vseg), S[WCON] % 2 + 2.0, S[WCON])
     return S
 
 
@@ -2029,7 +2595,7 @@ def state_table(tr: Trace, params: HeroParams, modes: np.ndarray | None = None,
     row depends on that row and the ones before it only (with causal=False the phase uses the whole trace)."""
     n = len(tr)
     idx = np.arange(n)
-    modes = classify_modes(tr) if modes is None else modes
+    modes = classify_modes(tr, forum=bool(params.abilities)) if modes is None else modes
     if alpha is None:
         alpha, a_lo, a_hi = phase_interval(tr, params.fdt, causal=causal)
     else:
@@ -2074,7 +2640,9 @@ def state_table(tr: Trace, params: HeroParams, modes: np.ndarray | None = None,
     prev_mask = np.r_[0, tr.mask[:-1]]
     ar = np.arange(n)
     c_on = _onset(np.isin(modes, (M_CAST, M_BIND)))
-    for row, bit, started in ((JQ, B_JUMP, j_on), (AQ, B_ATTACK, a_on | ds_on), (QQ, B_QUICKCAST, c_on)):
+    # (a jump press that starts the glide is spent there: StartFloat, no jump queue)
+    jq_on = j_on | _onset(modes == M_GLIDE) if params.abilities else j_on
+    for row, bit, started in ((JQ, B_JUMP, jq_on), (AQ, B_ATTACK, a_on | ds_on), (QQ, B_QUICKCAST, c_on)):
         held = (tr.mask & bit) != 0
         q_on = held & ((prev_mask & bit) == 0) & ~started
         last_q = np.maximum.accumulate(np.where(q_on, ar, -1))
@@ -2143,6 +2711,17 @@ def state_table(tr: Trace, params: HeroParams, modes: np.ndarray | None = None,
     S[WF_PH:WF_TGT + 1] = wf.T
     act = wf[:, 0] >= 0
     S[TS] = np.where(act, np.where(frz, fz[:, 3], 1.0), S[TS])
+    _neutral_forum_rows(S)
+    if params.abilities:
+        fr = ForumRows(params)
+        fls = {k: tr.flag(k) for k in ("wallSliding", "wallClinging", "jumping", "onGround", "willHardLand",
+                                       "attacking", "upAttacking", "altAttack", "recoilingLeft", "recoilingRight")}
+        for i in range(n):
+            r = {"dt": float(tr.dt[i]), "fs": int(tr.fs[i]), "facing": int(tr.facing[i]),
+                 "wall": int(tr.wall[i]) if tr.wall is not None else None, "clip": tr.clips[tr.clip[i]],
+                 "tm": tr.tm[i] if tr.tm is not None else None, "mask": int(tr.mask[i]), "vel": tr.vel[i],
+                 "udt": float(tr.udt[i])}
+            fr.push(S[:, i], r, int(modes[i]), lambda name: bool(fls[name][i]))
     _apply_exported(tr, S, md, params)
     return S
 
@@ -2201,6 +2780,7 @@ def _replay_gravity(tr: Trace, modes: np.ndarray, params: HeroParams) -> tuple[n
     relinq_modes = np.isin(modes, RELINQUISHED)
     noinp = np.isin(modes, NO_INPUT)
     catch = np.array(tr.clips, dtype=object)[tr.clip] == "NeedleThrow Catch"
+    forum = bool(params.abilities)
     for i in range(n):
         m = modes[i]
         if m == M_CAST and catch[i]:
@@ -2209,8 +2789,11 @@ def _replay_gravity(tr: Trace, modes: np.ndarray, params: HeroParams) -> tuple[n
             g = 0.0
         elif i > 0 and modes[i - 1] in (M_DS_ANTIC, M_DS_SPIKE, M_HURT_FREEZE, M_HURT_RECOIL, M_CAST, M_BIND):
             g = 1.0
-        for _ in range(int(tr.fs[i])):
-            vy = tr.vel[i, 1]
+        for k in range(int(tr.fs[i])):
+            # FixedUpdate reads the velocity the step starts from: with the Forum loadout the previous frame's
+            # (the wall slide changes vy in LateUpdate, after the step: the hang comes a step after the slide's
+            # first vy < 0); the Hunter fit keeps the frame's own
+            vy = tr.vel[i - 1, 1] if (forum and k == 0 and i > 0) else tr.vel[i, 1]
             if h <= 0 and not ground[i] and vy < 0:
                 if not relinq_modes[i] and not noinp[i]:
                     g = params.air_hang_gravity
@@ -2323,6 +2906,7 @@ class StateTracker:
         self._last_q = {JQ: -1, AQ: -1, QQ: -1}
         self._last_kill = {JQ: -1, AQ: -1, QQ: -1}
         self._g, self._h = 1.0, 0.0
+        self._pvy = 0.0
         self._ds_face = 0.0
         self._ds_seen = False
         self._dmg_side = 0.0
@@ -2331,6 +2915,8 @@ class StateTracker:
         self._slide_left = 0
         self._other_in_hitstop = False
         self._wf = WF_IDLE.copy()
+        self._forum = ForumRows(params) if params.abilities else None
+        self._fmd: int | None = None
 
     # -- one row ---------------------------------------------------------------------------------------------------
     def push(self, s: dict) -> None:
@@ -2380,6 +2966,9 @@ class StateTracker:
                        silk=int(h.get("silk") or 0), clip=(h.get("anim") or {}).get("clip"),
                        spell=(h.get("spell") or [None])[0],
                        valid=g.get("gs", 4) == 4 and not g.get("paused") and not pause.get("inv", False))
+            w = h.get("wall")
+            if w is not None:
+                row["wall"] = -1 if w[0] else 1 if len(w) > 1 and w[1] else 0
         self.push_row(row)
 
     def push_row(self, r: dict) -> None:
@@ -2401,6 +2990,9 @@ class StateTracker:
         md = M_NORMAL
         if r["relinq"]:
             md = M_LOCKED
+        if self._forum is not None:
+            md = forum_mode(md, self._fmd, fl, r["clip"], bool(r["relinq"]), int(r["hero_state"]))
+            self._fmd = md
         if r["clip"] in CAST_CLIPS and (r["relinq"] or hs7):
             md = M_CAST
         if (fl("isBinding") or r["spell"] in BIND_SPELLS) and (r["relinq"] or hs7):
@@ -2461,7 +3053,8 @@ class StateTracker:
         # input queues
         castbind = md in (M_CAST, M_BIND)
         c_on = castbind and not (pmd in (M_CAST, M_BIND))
-        for row, bit, started, key in ((JQ, B_JUMP, j_on, "q_j"), (AQ, B_ATTACK, a_on or ds_on, "q_a"),
+        jq_on = j_on or (bool(p.abilities) and md == M_GLIDE and pmd != M_GLIDE)
+        for row, bit, started, key in ((JQ, B_JUMP, jq_on, "q_j"), (AQ, B_ATTACK, a_on or ds_on, "q_a"),
                                        (QQ, B_QUICKCAST, c_on, "q_t")):
             held = (mask & bit) != 0
             q_on = held and not (pmask & bit) and not started
@@ -2483,8 +3076,8 @@ class StateTracker:
         elif not first and pmd in (M_DS_ANTIC, M_DS_SPIKE, M_HURT_FREEZE, M_HURT_RECOIL, M_CAST, M_BIND):
             g = 1.0
         jheld_prev = ((pmask if not first else mask) & B_JUMP) != 0
-        for _ in range(int(r["fs"])):
-            vy = r["vel"][1]
+        for k in range(int(r["fs"])):
+            vy = self._pvy if (p.abilities and k == 0 and not first) else r["vel"][1]
             if hh <= 0 and not ground and vy < 0:
                 if not relq and not noinp:
                     g = p.air_hang_gravity
@@ -2498,6 +3091,7 @@ class StateTracker:
                 g = 1.0
             g = min(g, 1.0)
         self._g, self._h = g, hh
+        self._pvy = float(r["vel"][1])
         S[GS], S[AIRHANG] = g, hh
         # attacks
         S[ATTACKING] = float(att)
@@ -2591,6 +3185,9 @@ class StateTracker:
         S[WF_PH:WF_TGT + 1] = self._wf
         if self._wf[0] >= 0:
             S[TS] = out[3] if md == M_HURT_FREEZE else 1.0
+        _neutral_forum_rows(S)
+        if self._forum is not None:
+            self._forum.push(S, r, md, fl)
         # exported timers and phase (_apply_exported)
         if np.isfinite(r["alpha"]):
             S[ALPHA] = S[ALO] = S[AHI] = r["alpha"]
@@ -2665,6 +3262,8 @@ class StateTracker:
         if self.terrain is not None:
             near = _on_ground(S[PX:PX + 1], S[PY:PY + 1], P, self.terrain.hseg)[0]
             S[TOUCH] = float(near and S[GROUND] <= 0 and S[VY] < 0)
+            if p.abilities and _wall_contact(S[PX:PX + 1], S[PY:PY + 1], P, self.terrain.vseg)[0]:
+                S[WCON] = S[WCON] % 2 + 2.0
         self.S = S
         self.events = ev
         self.f, self.box, self.mask, self.udt = r["f"], r["box"], mask, r["udt"]
