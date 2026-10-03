@@ -54,13 +54,17 @@ def zone(f, type_key: str, hx: float, hy: float, t_lo: float, t_hi: float, det=N
     X = np.ascontiguousarray(np.repeat(px[:, None], len(tk), axis=1))
     Y = np.ascontiguousarray(np.repeat(py[:, None], len(tk), axis=1))
     occ = np.zeros(X.shape, bool)
-    saved = f.det
+    # the forecast's path caches are keyed by the index in f.det: a swapped list gets its own (fresh) caches
+    names = ("det", "_paths", "_groups", "_grid")
+    saved = {k: getattr(f, k, None) for k in names}
     try:
-        f.det = list(saved if det is None else det)
+        f.det = list(saved["det"] if det is None else det)
+        f._paths, f._groups, f._grid = {}, {}, {}
         if f.det:
             occ |= f._det_occ(X, Y, tk, only=type_key)
     finally:
-        f.det = saved
+        for k, v in saved.items():
+            setattr(f, k, v)
     pl = [p for p in (f.placements if placements is None else placements) if p.sources == frozenset({type_key})]
     if pl:
         occ |= f._occ(pl, X, Y, tk)

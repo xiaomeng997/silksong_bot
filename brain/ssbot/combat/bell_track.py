@@ -38,7 +38,7 @@ same WorldState, so no correction for the delay is needed.
 """
 import math
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import numpy as np
 
@@ -132,6 +132,7 @@ class DropBellTracks:
         self.touched: set[int] = set()
         # touched bell -> [(game s, hero facing, the side tink's dir: the facing)]
         self.touch_log: dict[int, list[tuple[float, float, int]]] = {}
+        self._memo: dict[int, tuple] = {}         # touched bell -> ((detections, touches), _branch_set result)
         self.t = 0.0
         if not hasattr(self, "_rel"):
             self._rel: dict = {}
@@ -176,6 +177,7 @@ class DropBellTracks:
                 lst.clear()
                 self.touched.discard(e.id)
                 self.touch_log.pop(e.id, None)
+                self._memo.pop(e.id, None)
             x, y = e.pos.v
             s = e.pos.sigma if math.isfinite(e.pos.sigma) else 1.0
             lst.append((t, float(x), float(y), max(float(s), MIN_SIGMA_U)))
@@ -194,6 +196,7 @@ class DropBellTracks:
             self.type_of.pop(iid, None)
             self.touched.discard(iid)
             self.touch_log.pop(iid, None)
+            self._memo.pop(iid, None)
 
     def _tau(self, y: np.ndarray) -> np.ndarray:
         """Time since the drop at height y on the fall: the 50 Hz semi-implicit steps as a parabola,
@@ -258,6 +261,26 @@ class DropBellTracks:
         log = self.touch_log.get(iid) or []
         if not log:
             return self._estimate(iid)
+        # the branches change only with a new detection or touch (the forecaster asks every tick, sometimes twice)
+        key = (len(self.obs.get(iid) or ()), len(log))
+        memo = self._memo.get(iid)
+        if memo is None or memo[0] != key:
+            memo = self._memo[iid] = (key, self._branch_set(iid, log))
+        if memo[1] is None:
+            return None
+        est, branches = replace(memo[1][0]), memo[1][1]
+        if self.t - log[-1][0] >= CONFIRM_S and all(not tk for _, tk in branches):
+            self.touched.discard(iid)              # untouched after all: later attacks start a new check
+            self.touch_log.pop(iid, None)
+            self._memo.pop(iid, None)
+            sides = {sd for sd, _ in branches}
+            est.side = next(iter(sides)) if len(sides) == 1 else 0
+            return est
+        est.branches = tuple(sorted(branches))
+        return est
+
+    def _branch_set(self, iid: int, log: list) -> tuple | None:
+        """(the drop from the detections before the first touch, the branches the later detections allow) or None."""
         est = self._estimate(iid, before=log[0][0])
         if est is None:
             return None
@@ -302,14 +325,7 @@ class DropBellTracks:
             branches = {b for b in new if self._fits(est, b, post[sel], lim[sel])}
             if not branches:
                 return None
-        if self.t - log[-1][0] >= CONFIRM_S and all(not tk for _, tk in branches):
-            self.touched.discard(iid)              # untouched after all: later attacks start a new check
-            self.touch_log.pop(iid, None)
-            sides = {sd for sd, _ in branches}
-            est.side = next(iter(sides)) if len(sides) == 1 else 0
-            return est
-        est.branches = tuple(sorted(branches))
-        return est
+        return est, branches
 
     def _fits(self, est: DropEstimate, branch: tuple, rows: np.ndarray, lim: np.ndarray) -> bool:
         """At most one detection in rows beyond lim of the branch's path (at the closest of DEV_DT_S, the step's
@@ -453,6 +469,8 @@ class AtkBellTracks:
         self.est: dict[int, LaunchEstimate] = {}       # current launch per id (kept past the detections)
         self.old: list[LaunchEstimate] = []            # earlier launches of re-used ids, until their end
         self.t = 0.0
+        if not hasattr(self, "_rel"):
+            self._rel: dict = {}
 
     def update(self, ws: WorldState, t: float, anchor_x: float | None = None) -> None:
         """Add this frame's attack-bell detections; anchor_x: the current burst's anchor (its transform x), if known."""
@@ -592,6 +610,23 @@ class AtkBellTracks:
         if (dmin > dev_lim + SKIN_Z * sx).all():
             return None
         return LaunchEstimate(iid, xm, taum, tl, side, n, sx, t_end, prev.pair if prev is not None else False)
+
+    def path_at(self, x0: float, side: int, tinks: tuple, tau: np.ndarray
+                ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Centre (x, y) and determined at tau s after the launch from x0 on that side (no tinks: an attack bell has
+        no Tink state), from the launch path relative to x0, cached per side on the physics-step grid (as
+        DropBellTracks.path_at; the forecaster applies the collider's life)."""
+        r = self._rel.get(side)
+        if r is None:
+            ts = np.arange(int(PATH_T_S / STEP_S) + 1) * STEP_S
+            r = self._rel[side] = simulate(self.spec, 0.0, self.y0, side * self.vx_mag, self.vy0, 0, None, ts)
+        rx, ry, rok = r
+        ts = np.arange(len(rx)) * STEP_S
+        tau = np.asarray(tau, np.float64)
+        ok = np.interp(tau, ts, rok.astype(np.float64)) >= 1.0
+        return x0 + np.interp(tau, ts, rx), np.interp(tau, ts, ry), ok & (tau <= ts[-1])
+
+    t_fall = math.inf        # (no random bounce to redirect: the forecaster's redirect rule never applies)
 
     def x0(self, e: LaunchEstimate, side: int) -> float:
         """The launch x on that side."""

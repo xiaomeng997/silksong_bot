@@ -287,6 +287,8 @@ class Forecast:
         self.self_tpl: dict = {}      # drop bell type key -> its self-template placements, placed or not (audits)
         self.truncated = 0            # walk branches inside the horizon cut by MAX_NODES / depth
         self._paths: dict = {}        # drop-bell path cache (_bell_path)
+        self._groups: dict = {}       # stacked exact paths per query times (_det_groups)
+        self._grid: dict = {}         # ... on the frame grid, per (exclude, only)
         kids = {}
         for n in nodes:
             kids.setdefault(n.parent, []).append(n.id)
@@ -338,28 +340,77 @@ class Forecast:
         hx, hy = self.fc.half
         if comfort and self.fc.comfort is not None:
             hx, hy = hx + self.fc.comfort[0], hy + self.fc.comfort[1]
-        by_r: dict = {}
-        for j, d in enumerate(self.det):
-            tk_ = d.type_key
-            if exclude is not None and tk_.endswith(exclude) or only is not None and tk_ != only:
-                continue
-            for br in d.paths():
-                for dt in (d.slack or DET_SLACK_S):
-                    by_r.setdefault(d.sp.r + DET_SKIN_U + d.skin, []).append(self._bell_path(j, br, dt, tk))
-        if not by_r:
-            return out
         shp = out.shape
         T = shp[-1] if len(shp) else 1
+        groups = self._det_groups(tk, T, exclude, only)
+        if not groups:
+            return out
         # writable copies: a read-only view (broadcast_to) is another numba specialization, compiled mid-fight
         x2 = np.require(np.broadcast_to(np.asarray(x, np.float64), shp).reshape(-1, T), np.float64, ["C", "W"])
         y2 = np.require(np.broadcast_to(np.asarray(y, np.float64), shp).reshape(-1, T), np.float64, ["C", "W"])
         flat = out.reshape(-1, T)
-        for rr, paths in by_r.items():
-            cx = np.ascontiguousarray([np.broadcast_to(np.asarray(p[0], np.float64), (T,)) for p in paths])
-            cy = np.ascontiguousarray([np.broadcast_to(np.asarray(p[1], np.float64), (T,)) for p in paths])
-            ok = np.ascontiguousarray([np.broadcast_to(np.asarray(p[2], np.bool_), (T,)) for p in paths])
+        for rr, cx, cy, ok in groups:
             flat |= circle_hits(x2, y2, cx, cy, ok, float(hx), float(hy), float(rr))
         return flat.reshape(shp)
+
+    def _det_groups(self, tk: np.ndarray, T: int, exclude: str | None, only: str | None) -> list:
+        """The exact paths' centres stacked per contact radius [(r, cx [P, T], cy, ok)], cached per forecast and
+        query times: the planner asks the same times for every candidate block of a tick, and with a touched drop
+        bell's branches and both attack bells the per-call stacking cost more than the contact test (task V review:
+        stage C ticks were 3-4 ms slower in bursts, 60-180 late ticks a fight)."""
+        key = (len(tk), float(tk[0]) if len(tk) else 0.0, float(tk[-1]) if len(tk) else 0.0, T, exclude, only)
+        g = self._groups.get(key)
+        if g is not None:
+            return g
+        tk = np.asarray(tk, np.float64)
+        kf = np.rint(tk / BIN)
+        if T == len(tk) and len(tk) and (kf >= 0).all() and np.abs(tk - kf * BIN).max() < 1e-9:
+            # times on the frame grid (the planner's rollout frames, the tactics' risk maps): columns of the paths
+            # computed once per forecast on frames 0 .. n (each path's simulate / interpolation once, not per query)
+            n = int(kf.max()) + 1
+            base = self._grid.get((exclude, only))
+            if base is None or base[0] < n:
+                n2 = max(n, int(math.ceil(self.horizon / BIN)) + 64)
+                base = self._grid[(exclude, only)] = (n2, self._stack(np.arange(n2) * BIN, n2, exclude, only))
+            idx = kf.astype(np.int64)
+            g = [(rr, np.ascontiguousarray(cx[:, idx]), np.ascontiguousarray(cy[:, idx]),
+                  np.ascontiguousarray(ok[:, idx])) for rr, cx, cy, ok in base[1]]
+        else:
+            g = self._stack(tk, T, exclude, only)
+        if len(self._groups) > 64:
+            self._groups.clear()
+        self._groups[key] = g
+        return g
+
+    def _stack(self, tk: np.ndarray, T: int, exclude: str | None, only: str | None) -> list:
+        by_r: dict = {}
+        tk = np.asarray(tk, np.float64)
+        for j, d in enumerate(self.det):
+            tk_ = d.type_key
+            if exclude is not None and tk_.endswith(exclude) or only is not None and tk_ != only:
+                continue
+            rr = d.sp.r + DET_SKIN_U + d.skin
+            dts = np.asarray(d.slack or DET_SLACK_S, np.float64)
+            for br in d.paths():
+                if d.rel is not None:
+                    # a tracked bell: every time-slack copy of a branch from one interpolation of its cached path
+                    t = np.maximum(tk[None, :] + dts[:, None] + d.t0, 0.0)
+                    cx, cy, ok = d.rel.path_at(d.x, br[0], br[1], t.ravel())
+                    if d.life is not None:
+                        ok = ok & (t.ravel() <= d.life)
+                    by_r.setdefault(rr, []).append((cx.reshape(len(dts), -1), cy.reshape(len(dts), -1),
+                                                    ok.reshape(len(dts), -1)))
+                    continue
+                for dt in dts:
+                    p = self._bell_path(j, br, float(dt), tk)
+                    by_r.setdefault(rr, []).append(tuple(np.broadcast_to(np.asarray(v), (1, T)) for v in p))
+        g = []
+        for rr, paths in by_r.items():
+            cx = np.ascontiguousarray(np.concatenate([p[0] for p in paths]), np.float64)
+            cy = np.ascontiguousarray(np.concatenate([p[1] for p in paths]), np.float64)
+            ok = np.ascontiguousarray(np.concatenate([p[2] for p in paths]), np.bool_)
+            g.append((rr, cx, cy, ok))
+        return g
 
     def _bell_path(self, j: int, sd, dt: float, tk: np.ndarray, redirect: tuple | None = None):
         """Bell j's centre (x, y, ok) at tk + dt on branch sd (a bounce side; a VE drop bell's (side, tinks)), or
@@ -381,7 +432,8 @@ class Forecast:
                     if not tinks or k > tinks[-1][0]:
                         side = int(redirect[1]) if redirect[1] and k * STEP_S <= rel.t_fall else side
                         tinks = tinks + ((k, int(redirect[1])),)
-                r = rel.path_at(bx, side, tinks, t)
+                cx, cy, ok = rel.path_at(bx, side, tinks, t)
+                r = (cx, cy, ok & (t <= life) if life is not None else ok)
             elif redirect is not None:
                 r = simulate(sp, bx, by, vx, vy, nb, life, t, side=sd, redirect=(redirect[0] + t0, redirect[1]))
             else:
@@ -487,7 +539,7 @@ class Forecast:
         # armed bells on exact paths are decided too (their self templates are not placed: without them the tactics'
         # underground risk map did not see a falling drop bell at all)
         out.det = self.det
-        out._paths = self._paths
+        out._paths, out._groups, out._grid = self._paths, self._groups, self._grid
         return out
 
     def active_sources(self, t0: float = 0.0, t1: float = SUP_HORIZON_S) -> frozenset[str]:
@@ -1620,8 +1672,11 @@ class Forecaster:
             tk_ = at.type_of.get(e.iid, ATK_BELL)
             for sd in ((e.side,) if e.side else (1, -1)):
                 x0, y0, vx0, vy0 = at.path_args(e, sd)
+                # the launch path relative to its x, cached per side (AtkBellTracks.path_at): simulate per tick and
+                # query times was the stage C tick's largest new cost in bursts
                 det.append(DetBell(at.spec, x0, y0, vx0, vy0, 0, None, tk_, t0=origin - e.t_launch, sides=(0,),
-                                   skin=SKIN_Z * e.sx, life=e.t_end - e.t_launch, slack=VE_SLACK))
+                                   skin=SKIN_Z * e.sx, life=e.t_end - e.t_launch, slack=VE_SLACK,
+                                   branches=((sd, ()),), rel=at))
         cover = []
         paired = [e for e in ests if e.pair and e.side]
         for i, a in enumerate(paired):
