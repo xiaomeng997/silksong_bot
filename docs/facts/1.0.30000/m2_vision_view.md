@@ -46,4 +46,5 @@ oracle 录像 `20261002_171806` i0 ep2（3269 tick）按录像里的实际按键
 
 ## 实战
 
-（待补）
+- 7c18e6c，degraded_dust，实例 0 / 1，每实例 4 线程，种子 90000（`20261002_205247`）：20:54 起 STOP_AGENTS（主代理：5 小时额度 86 %），各打完 1 场即停。i1 ep0 CLEAR（120 s，0 受击，k 4）；i0 ep0 QUIT（81 s，被落铃 M2 打中 1 次后 h 2 时 Q6，k 3）。tick p99 12.4 / 12.8 ms（6ab67e1 的 degraded_dust 中位数 12.0），plan p99 10.4 / 10.8 ms。CPU：游戏 4 实例都在跑，只有本任务 2 个 worker，负载约 40 %。样本太少，不作结论。
+- 待做：这场 M2 受击的回放（`tools/postmortem` / `view_compare`，看当时铃是在精确路径上还是退回了 self 模板，以及 FORCED_RISK 的来源）；≥ 150 场的 degraded_dust 主跑；oracle 视图回归（CLEAR 不得下降：本次改了 oracle 也用的狂暴规则、committed() 带落铃、rollout 可写事件）。
