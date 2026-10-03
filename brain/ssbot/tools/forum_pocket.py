@@ -3,11 +3,13 @@ the left wall where they cannot reach): the closest approach of every Clapper da
 the pocket, from recordings (docs/facts/1.0.30000/forum.md §10).
 
     ..\\scripts\\uv.cmd run python -m ssbot.tools.forum_pocket C:/ssbot/data/runs/m2/<run> [more runs] [--include-open]
-        [--pocket 14.02,11.69,14.52,13.92] [--json out.json]
+        [--pocket 14.042,12.534,14.918,13.965] [--json out.json]
 
-The pocket is the hero hurtbox at the top of the left-wall cling (forum.md §8.1: wall face x 14.01, cling x 14.27,
-highest still cling y 13.45-13.60 under the Roof Collider_Basic (2) dome; the Wall Cling pose's box is pos + (-0.25,
--1.76) .. (+0.25, +0.32)): x 14.02-14.52, y 11.69-13.92. For every frame of every fight (AttemptRecord f_wake..f_end) and
+The pocket is the hero's damage receiver at the top of the left-wall cling (forum.md §8.1: wall face x 14.01, cling
+x 14.27, highest still cling y 13.45-13.60 under the Roof Collider_Basic (2) dome). Clinging to the left wall calls
+FaceLeft (transform scale x +1) and HeroBox.HeroBoxWallSlide (HeroBox.cs: 0.8757 x 1.2805 at (+0.2101, -0.2755) from
+the hero transform), so the receiver spans x 14.04-14.92, y 12.53-13.97 (STATE hero.box is the physics collider's
+bounds, 0.5 x 2.08, not the receiver). For every frame of every fight (AttemptRecord f_wake..f_end) and
 every enabled damage collider of a "Song Heavy Sentry" (body box, Slam Collider 1 / 2) and of the hazards it spawns
 ("damager" circles told apart by radius: Bomb Cast bombs, the Jump Cast rune; ssbot.knowledge.gauntlet_tables
 .HAZARD_ALIASES), the exact distance from the collider (polygon or circle) to the pocket box, kept per Clapper attack
@@ -27,7 +29,8 @@ from ssbot.knowledge.behaviour_tables import fight_states, run_fights, support_t
 from ssbot.knowledge.gauntlet_tables import FORUM_SPECS, hazard_type
 
 CLAPPER = "Song Heavy Sentry"
-POCKET = (14.02, 11.69, 14.52, 13.92)
+POCKET = (14.042, 12.534, 14.918, 13.965)   # HeroBoxWallSlide at (14.27, 13.45-13.60), facing left
+CLING_X, CLING_Y_MIN = 14.27, 13.2          # hero transform in the pocket (the contacts there are listed)
 
 
 def _seg_box_dist(p: np.ndarray, q: np.ndarray, box: tuple) -> float:
@@ -95,15 +98,16 @@ def scan(runs: list[Path], include_open: bool = False, pocket: tuple = POCKET) -
                 f = s["f"]
                 hero = s.get("hero") or {}
                 hb = hero.get("box")
-                in_pocket = bool(hb) and hb[0] < pocket[2] + 0.05 and hb[2] > pocket[0] - 0.05 and \
-                    hb[3] > pocket[1] + 1.5
+                hp = hero.get("pos")
+                in_pocket = bool(hp) and hp[0] < CLING_X + 0.3 and hp[1] >= CLING_Y_MIN   # clinging up there
                 pocket_frames += in_pocket
                 if in_pocket:
                     for ev in s.get("ev") or ():
                         if ev.get("k") in ("damage", "damage_blocked"):
                             d = ev.get("d") or {}
                             pocket_contacts.append({"fight": fight.id, "f": f, "kind": ev["k"],
-                                                    "source": d.get("source"), "hero_box": [round(v, 3) for v in hb]})
+                                                    "source": d.get("source"), "hero_pos": [round(v, 3) for v in hp[:2]],
+                                                    "hero_bounds": [round(v, 3) for v in hb or ()]})
                 clappers = []
                 for e in s.get("ents") or ():
                     tk = e.get("type_key")
@@ -116,7 +120,7 @@ def scan(runs: list[Path], include_open: bool = False, pocket: tuple = POCKET) -
                             fam[iid] = spec.attack_starts[st]
                         elif st in spec.decision_states or st in spec.dormant:
                             fam[iid] = spec.idle_family
-                        _jump(e, st, st_prev.get(iid), air, jumps, fight.id, f, pocket)
+                        _jump(e, st, st_prev.get(iid), air, jumps, fight.id, f, pocket, hp[0] if hp else None)
                         st_prev[iid] = st
                         for c in e.get("colliders") or ():
                             if support_threat(c):
@@ -147,13 +151,16 @@ def _keep(best: dict, fam_best: dict, key: tuple, c: dict, pocket: tuple, f: int
         fam_best[fk] = {**row, "state": key[1], "collider": key[2]}
 
 
-def _jump(e: dict, st: str | None, prev: str | None, air: dict, jumps: list, fid: str, f: int, pocket: tuple) -> None:
+def _jump(e: dict, st: str | None, prev: str | None, air: dict, jumps: list, fid: str, f: int, pocket: tuple,
+          hero_x: float | None = None) -> None:
     """Track a jump from its Jump state until it leaves Air: takeoff x, facing, and the lowest left edge of the body
     box while the body's top is above the pocket's bottom."""
     iid = e["iid"]
-    body = next((c for c in e.get("colliders") or () if c.get("name") == CLAPPER and c.get("kind") == "box"), None)
+    body = next((c for c in e.get("colliders") or ()
+                 if str(c.get("name")).startswith(CLAPPER) and c.get("kind") == "box"), None)
     if st == "Jump" and prev != "Jump":
         air[iid] = {"fight": fid, "f": f, "x0": round(e["pos"][0], 3), "flipX": e.get("flipX"),
+                    "hero_x": None if hero_x is None else round(hero_x, 2),
                     "min_left_high": None, "max_top": None}
     j = air.get(iid)
     if j is None:
@@ -172,7 +179,7 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("runs", nargs="+", type=Path)
     ap.add_argument("--include-open", action="store_true")
-    ap.add_argument("--pocket", default=",".join(str(v) for v in POCKET), help="x0,y0,x1,y1 of the hero box")
+    ap.add_argument("--pocket", default=",".join(str(v) for v in POCKET), help="x0,y0,x1,y1 of the hero's damage receiver")
     ap.add_argument("--json", type=Path, default=None)
     a = ap.parse_args(argv)
     pocket = tuple(float(v) for v in a.pocket.split(","))

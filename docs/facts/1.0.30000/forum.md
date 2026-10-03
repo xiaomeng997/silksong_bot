@@ -37,8 +37,8 @@
 - 共 28 个敌人。出生点是场景包里的初始位置；Handmaiden 在 (1.67, 46.23)（场地左上远处，飞进来），Heavy Sentry 从 y 23–26 落下（`Rest` → `Drop Antic` → `Drop In` → `Enter Land`）。
 - `activateEnemiesOnStart = 0` 的是索引 1、6、12（敌人一直在场景里，FSM 等 `BATTLE START`），其余开波时才激活。
 - 研究资料说 "13 波"（research.json，wiki 原文），游戏数据是 14 个 BattleWave；差别大概来自索引 2（2 个敌人、remainingEnemyToEnd 2：开波 1 s 后的子物体检查就会放下一波，所以和索引 3 连成一波）【推测，用 room.battles 实测核对】。
-- 伤害（DamageHero.damageDealt，全部 hazardType 1 = ENEMY）：Song Heavy Sentry 本体与 `Slam Collider 1/2` = **2**；Song Handmaiden `Spear` = **2**，其余 1；Song Reed / Song Pilgrim 01 / Song Pilgrim 03 / Pilgrim 03 Song / Song Administrator / Song Pilgrim Maestro 全部 1（Song Pilgrim 03 的 `Whip Hit 1–6` 和 Song Reed 的 `ParrySlash Hit`、Administrator 的 `Slash Collider` 为 0）。research.json 的 "Choir Clapper：锤、接触、丝砸全为 2，丝内爆 1"：锤、接触 = 2 与场景包一致；丝砸、丝内爆是 `Bomb Cast` 生成的投射物，场景包里看不到，待实测。
-- 内部名与社区名【未核实，按 HP 和招式推断】：Song Heavy Sentry = Choir Clapper（230 HP、末波 2 只，研究资料一致）；Song Handmaiden = Clawmaiden（有 `Silk Suck` FSM，偷丝）；Song Administrator = Minister；Song Pilgrim Maestro = Maestro；Song Reed = Reed；Song Pilgrim 01 / Song Pilgrim 03 / Pilgrim 03 Song 对应 Choristor / Envoy / Choir Bellbearer 中的哪一个待查（Pilgrim 03 Song 会飞、35 HP）。
+- 伤害（DamageHero.damageDealt，全部 hazardType 1 = ENEMY）：Song Heavy Sentry 本体与 `Slam Collider 1/2` = **2**；Song Handmaiden `Spear` = **2**，其余 1；Song Reed / Song Pilgrim 01 / Song Pilgrim 03 / Pilgrim 03 Song / Song Administrator / Song Pilgrim Maestro 全部 1（Song Pilgrim 03 的 `Whip Hit 1–6` 和 Song Reed 的 `ParrySlash Hit`、Administrator 的 `Slash Collider` 为 0）。research.json 的 "Choir Clapper：锤、接触、丝砸全为 2，丝内爆 1"：锤、接触 = 2 与场景包一致；丝砸、丝内爆是生成的投射物，场景包里看不到；实测（§9.2、§10）：Bomb Cast 的 `rune bomb small` 伤 1（= 丝内爆），Jump Cast 落地后的 `rune slam` 伤 2（= 丝砸）。
+- 内部名与游戏名：已由游戏图鉴核实，见 §9.1（Song Pilgrim 03 = Choristor，Song Pilgrim 01 = Envoy，Pilgrim 03 Song = Choir Bellbearer）。上面"为 0"的 `Whip Hit 1–6`、`ParrySlash Hit`、`Slash Collider` 是多段攻击，实际每下扣 1 血（§9.2）。
 - 各类型 FSM：Song Heavy Sentry `Control`（`Slam Antic`、`Jump Antic → Jump Aim → Jump → Air → Charged? → Slam`、`Spell Antic → Cast 1/2`（`Bomb Cast` FSM 放丝弹）、`Cast Slam Antic`、`Evade Scuttle`、`Avoid Type`（`AVOID BUDDY`：两只互相让））；其余类型的状态表在 `fo/fsm_enemy_*.txt`（场景包导出），行为表从采集录像生成。
 
 ## 3. 怎么结束
@@ -93,7 +93,7 @@
 - **左墙**：`Battle Gate` x 10.54–14.01、y 2.96–9.07，上面 `Wall Collider` x 10.57–14.01、y 8.98–15.08（进场时左门已关、右门 `Battle Gate (1)` 和它的 `Wall Collider` 关闭；开战 `BG CLOSE` 后两边都关）；tilemap 墙面 x = 14（y 9–15）。**墙面 x = 14.01**。右墙对称：门 x ≥ 48.99，tilemap 墙 x = 49（y 9–15）。
 - **天花板是一个穹顶**，真正的下沿是两块启用的 `Roof Collider_Basic (2)`、`(1)` 多边形（flags 1 = NON_SLIDER：实体、不能贴墙/滑墙），比 tilemap 台阶和 `terrain collider (n)` 盒子都低：左半下沿 (10.72, 14.41) (13.93, 14.19) (15.44, 14.99) (16.74, 16.14) (17.58, 16.24) (19.68, 17.32) (20.38, 17.75) (21.53, 17.87) (22.46, 19.00) (23.89, 20.36) (25.82, 21.77) (27.87, 22.66) (29.52, 23.02) (31.19, 23.15) (31.89, 23.31)；右半 (31.16, 23.23) (33.53, 22.95) (36.41, 21.81) (38.73, 20.23) (39.96, 18.69) (40.60, 17.85) (42.42, 17.10) (43.41, 16.95) (44.31, 16.51) (46.43, 15.86) (46.91, 15.05) (49.67, 14.28)。即**墙边 y ≈ 14.2，往中间升高，中央 x ≈ 31.5 处 y ≈ 23.3**。其上的 tilemap 台阶（左：x 14–15 y 15、15–17 y 16、17–20 y 17、20–22 y 18、22–23 y 22、23–24 y 23、24–32 y 24；右对称，中心 x ≈ 31.5）和 `terrain collider`/`(1)`–`(7)` 盒子（底 y 15.15–18.15）都在穹顶之上，碰不到。`Roof Collider_Basic (3)`/`(4)`（另一套略低的穹顶）和 `Black Thread Battle Gate`（Act 3 的 `Battle Scene Act3`）都是关闭的。
 - 左门外走廊的天花板 `Roof Collider_Basic` x −3.78–13.52、y 9.09–15.05（门外，场地内用不到）。
-- **左墙顶的贴墙点**：墙面 14.01 + 主角半宽 0.25 → 贴墙 x = 14.27（实测 14.268–14.272）。最高点被穹顶限制：贴墙时（`Wall Cling` 动画）主角受击框相对位置 y −1.76…+0.32（实测：`20261002_221727` i2 ep0 最高贴墙帧 pos (14.273, 13.452)，受击框 x 14.023–14.523、y 11.693–13.772）；`forum_setup` 贴墙测试最高静止贴墙 y 13.60（受击框顶约 13.92），框顶顶到穹顶下沿（x 14.0–14.5 处 y 14.23–14.46，算上主角物理碰撞体比受击框高）。所以**口袋 = 受击框 x 14.02–14.52、y ≈ 11.7–13.9**。
+- **左墙顶的贴墙点**：墙面 14.01 + 主角物理碰撞体半宽 0.25 → 贴墙 x = 14.27（实测 14.268–14.272）。最高点被穹顶限制：`20261002_221727` i2 ep0 最高 `Wall Cling` 帧 pos (14.273, 13.452)、STATE hero.box x 14.023–14.523、y 11.693–13.772；`forum_setup` 贴墙测试最高静止贴墙 y 13.60。**注意 STATE hero.box 是 `HeroController.Bounds`（物理碰撞体外框 0.5 × 2.08），不是受伤判定**：受伤判定是 `HeroBox` 子物体的盒子（反编译 `HeroBox.cs`，运动学链也用这个）。贴左墙时 `HeroController`（8470 行）调 `FaceLeft()`（`localScale.x = +1`）并 `heroBox.HeroBoxWallSlide()`：盒子 0.8757 × 1.2805、中心在主角 transform 的 (+0.2101, −0.2755)。所以**口袋（贴墙最高点的受伤判定）= x 14.04–14.92、y 12.53–13.97**（pos y 13.45–13.60），比物理外框向右多出 0.4 u、下沿高 0.8 u。贴墙时 STATE facing = −1（1029 帧里 960 帧，与 FaceLeft 一致）。
 - 相机：`CameraLockArea (5)`（启用）x_min 14.6、x_max 56.4、y 9.1–16.8；STATE cam 模式 FROZEN（场景 71 × 26）。
 - `zone battles`：`Battle Scene`（启用，14 波，`set_pd_bool` hang04Battle，门 id 即上面 4 个门碰撞体）和 `Battle Scene Act3`（关闭，1 波，`no_end_slomo`）。
 
@@ -104,6 +104,77 @@
 - 场地中间上方开阔到 y ≈ 33（相机锁 (1) 多边形）；`Normal World` 下还有 `Roof Collider_Basic (1)/(2)` 两个大多边形（y 14.2 起，左上 x 10.25–37.74、右上 x 30.11–54.21）。
 - `Teleplane`（触发盒 x 17.42–45.94、y 7.35–13.26）：会瞬移的敌人（Handmaiden 的 `Tele`）的落点范围【推测】。
 
-## 9. oracle 导出核对
+## 9. oracle 导出核对（实例 2，fo_A，数据策略；运行 `20261002_221727`（2 场，见下"假 CLEAR"）、`20261002_223640`（2 场，完整打到 hang04 结束）；工具 `ssbot.tools.behaviour_build --encounter Forum`、`forum_counts`、`forum_pocket`）
 
-（实测后补）
+### 9.1 游戏名对照（游戏自己的图鉴：场景包里每个敌人的 `EnemyDeathEffects.journalRecord` → `EnemyJournalRecord.displayName` → 解密的 `EN_Journal` / `ZH_Journal`（`resources.assets` TextAsset，`StringEncrypt` AES-ECB，密钥见反编译 `StringEncrypt.cs`））
+
+| 内部类型 | 英文 | 中文 | HP | 控制 FSM | 波次 |
+|---|---|---|---|---|---|
+| Song Pilgrim 03 | Choristor | 圣咏使徒 | 55 | `Attack` | 0, 1(×2), 9 |
+| Song Pilgrim 01 | Envoy | 圣咏特使 | 38 | `Attack` | 0 |
+| Pilgrim 03 Song | Choir Bellbearer | 圣咏钟卫 | 35 | `Control` | 2, 8, 9(×2), 11 |
+| Song Reed | Reed | 簧片战士 | 55 | `Control` | 0, 2, 8(×2), 12 |
+| Song Handmaiden | Clawmaiden | 丝偶侍女 | 48 | `Control`（另有 `Silk Suck`、`Lock Control`） | 3, 5, 10 |
+| Song Administrator | Minister | 圣咏大臣 | 60 | `Control` | 4(×2), 11(×2) |
+| Song Pilgrim Maestro | Maestro | 圣咏指挥 | 65 | `Control` | 6(×2), 12 |
+| Song Heavy Sentry | Choir Clapper | 圣咏槌手 | 230 | `Control`（另有 `Bomb Cast`） | 7, 13(×2) |
+| Song Automaton Tiny | （Maestro 的召唤物，对象池克隆，不在波次表） | — | 28 | `Control` | 每只 Maestro 3 只 |
+
+之前 §2 的推断（Song Pilgrim 01/03 与 Choristor/Envoy 的对应）由此更正：**Choristor = Song Pilgrim 03，Envoy = Song Pilgrim 01**。
+
+### 9.2 每类敌人的导出（"ents"）
+
+全部波次敌人都在 "ents"：HealthManager（src 位 1）+ DamageHero（2）；Reed、Choristor、Minister 还有 multi_wounder（8）。实体 iid 稳定，"fsm" 事件的 `ent` 和 "hit" 事件的 `ent` 就是 ents[].iid（行为表按 iid 分流）。parry 位：4 = 只有 counter；5 = clash + counter（可拼刀）。gravity_scale 实测：Choir Clapper 1.4（Air 中每物理步 dvy −1.68 → g_eff 84）、Choristor 1.1、Envoy 1.0、Throwing Bell 1.0，其余都是飞行敌人（0）。
+
+| 类型 | 伤害碰撞体（名字：形状，伤害，parry） | 敌人自己放出的危险物 |
+|---|---|---|
+| Choir Clapper | 本体 "Song Heavy Sentry"（终局是 "(2)"/"(3)"）盒 2/4；`Slam Collider 1`、`Slam Collider 2` 多边形 2/4（另有不伤主角的 `… Ally`、`Tile Smasher`） | 共用名 "damager" 的圆（type_key 一样，按半径区分，伤害事件来源给出父物体名）：Bomb Cast 的 `rune bomb small` r 2.166、伤 1；Jump Cast 的 `rune slam` r 7.187、伤 2 |
+| Clawmaiden | 本体盒 1（有些帧 0）/4；`Slash Collider 1–4` 多边形 1/5 | `Spear`（多边形 2/4，FSM `Control`：Init→Idle→Get Antic Angle→Fire L→Antic Pause→Antic→Fire→Explode→Deactivate）；矛的爆炸 `handmaiden_spear_silk_explosion` = "damager" 圆 r 3.553、伤 2 |
+| Minister | 根盒 "Song Administrator" 1/4；`Colliders` 子物体下 `Collider Fly`/`AttackAntic`/`ParryAntic`/`ParryStance`/`Evade` 盒 1/4（随状态换）；`Slash Collider` 多边形（多段，导出伤害 0）；`ParrySlash Hit 1–4` 1/5 | — |
+| Maestro | 本体盒 1/4；`Slash Hit 1/2` 多边形 1/5 | 召唤 3 只 Song Automaton Tiny |
+| Song Automaton Tiny | 本体盒 1/4 | — |
+| Reed | 本体盒 1/4；`Stab Hit 1–3` 1/5；`ParrySlash Hit`（多段，导出 0） | `Song Reed Pin Projectile`（盒 1/5：可拼刀；FSM `Javelin Control`：Init→Throw Effect→Fly→Stick（插墙，碰撞体关）或 Dealt Damage→Deactivate→Recycle） |
+| Envoy | 本体盒 1/4；`Charge Damager`、`P1 Damager`（盒）、`P2 Damager`、`JumpSlash Damager 1/2`（多边形）1/5 | — |
+| Choristor | `Body Damager` 盒 1/4；`Slash Hit 1–3`、`Spin Hit`、`Spin Slash Hit` 1/5；`Whip Hit 1–6`（多段，导出 dealt 0、eff 2） | — |
+| Choir Bellbearer | 本体盒 1/4 | `Throwing Bell`（圆 r 0.425，伤 1，有些帧 0；重力 1.0；FSM：Init→Air→Ground/Wall L/Wall R/Roof→Bounce→Air…，被钉子打中 Tink L/R/U→Nail Hit→Air（改向），Break→Deactivate→Recycle；另有子碰撞体 `Enemy Damager` 打敌人） |
+
+- **多段攻击**：Choristor `Whip Hit 1–6`、Reed `ParrySlash Hit`、Minister `Slash Collider` 导出的伤害是 0（Whip Hit eff 2），但连上之后由 `hornet_multi_wounder` FSM 继续扣血，后续命中时碰撞体已不在导出里（例：`20261002_221727` ep0 f690811 `Whip Hit 2` 启用，f690833 Multiwhip 中 "Song Pilgrim 03/Whip Hit 2" 扣 1 血时它已关闭）。行为表把这类"已连上的多段攻击的后续命中"单列（`multi_hit_follow_ups`，碰撞体 90 帧内出现过），不拿去对支撑；规划器应当把第一下接触当作整套命中。
+- **伤害事件的来源路径**（damage / damage_blocked 的 source）：本体是 "Wave N/<GameObject>"（"Wave 8 - Heavy Sentry/Song Heavy Sentry"），子碰撞体是 "<GameObject>/<子物体>"；**Minister 的身体盒只给 "Colliders/Collider ParryStance"**（不含敌人名，只能按"谁在导出这个名字的碰撞体"认）；Tiny 是 "Song Automaton Tiny(Clone)" 或 "EmptyObjectFromNull/Song Automaton Tiny(Clone)"（最多 6 只同名，只能按位置认）；三种 "damager" 由父物体名区分。等待中的同名敌人（波 12 的 "Song Reed" 开场就在 `Fly In Ready`）也在 ents。`damage_blocked` 在一段无敌接触结束时才报，且一段可能跨同名的几只 Tiny：行为表按帧回溯归属。
+- **助战与 Cogfly 不在 ents**（部署 `allies` 导出之前）。击杀来源（hit.src；4 场 149 次击杀）：Garmond = `WildSlash Enemy Damager` 30、`Stomp Damager` 5、`Stomp Splash Damager` 4、`Charge Damager` 3（Generic，5 伤）；Cogfly = `Damager` 8（Generic 3，偶尔 4）；Hornet = `Slash` 29、`UpSlash` 19、`DownSlash New` 10、`AltSlash` 5、`WallSlash` 4（Nail 9，Reaper）、`Needle Damage` 10（Heavy 27 = Silk Spear）；`Enemy Damager` 2（Generic 9）= 被钉子打回的 Throwing Bell 砸到别的敌人。
+- **假 CLEAR（已修 7eb12de）**：Tiny 也报 "hit" dead，旧 GauntletTap 把它们算进 DecrementEnemy 重放，`20261002_221727` ep0 在终局开打前就判 CLEAR（28 次击杀里 6 次是 Tiny，Clapper 只死了 1 只，没有 EnemyBattleEndSlow 冻结）。修后只数波次类型；`20261002_223640` ep0 36 次击杀（28 + 8 Tiny）、终局 761 s 开始、848 s 两只 Clapper 都死。随机策略打完 14 波要 550–850 s，接近 900 s 时间盒，数据跑改用 `--timebox 1500`。
+- **行为表核对**（首版，4 场 + 之后的场次见 §11）：每类敌人的接触（命中 + 无敌帧接触）几乎全部落在支撑内；剩下的：Clapper `Slam Collider 2` 在 Slam Recover 的 2–3 帧（分状态模板），Bellbearer 的钟 2–4 次，Minister `ParryStance` 1–2 次，Envoy `Charge Damager` 在 Charge End 1 次，Tiny 1 次；Clawmaiden 的矛爆炸有 15 帧接触发生在她的攻击实例之外（矛在她被打死或回到飞行很久之后才炸）。导出空洞（有伤害却 colliders == []）：见 §11 表的 export_holes。
+
+## 10. Choir Clapper 的跳跃与左墙顶口袋（你的打法核验；工具 `ssbot.tools.forum_pocket`）
+
+### 10.1 跳跃（反编译 FSM `Control` + 录像）
+
+- 状态链：`Jump Antic`（面向主角、vx 0）→ `Jump Aim`（面向主角；Target X = 主角 x + 5；`SendEventByScale`：scale x > 0 即**面朝左**时直接结束，否则再 −10 → 主角 x − 5）→ `Jump`（Jump X = clamp(Target − 自己 x, −12, 12)；SetVelocity(Jump X, **38**)）→ `Air`（直到底部碰撞 LAND）→ `Charged?`（Jump Cast 时放 rune）→ `Slam Effects?` → `Slam 2`（`Slam Collider 2`）→ `Slam Recover` → `Idle`。
+- 实测瞄准（`20261002_221727` ep0，9 次跳）：落点 = 主角 x + 5.00（±0.14，面朝左）或 − 5.00（面朝右），即**总落在主角前 5 u、自己这一侧**。
+- 重力：gravity_scale **1.4**，g_eff **84 u/s²**（Air 中每个 0.02 s 物理步 dvy −1.68）；vy0 38 → 理论最高 +8.6 u，实测 pos y 7.45 → 15.67（本体框顶 15.86），到顶 0.43–0.48 s，空中约 0.9 s。靠近右墙（x 44.8–46.7）的跳被穹顶截到 14.47–14.78。
+- 本体框相对 pos：站立面朝左 x −2.25…+1.34、y −4.43…−0.53（地面 pos y 7.45 → 框 y 3.02–6.92，Spell Antic 最高 7.78）；Air 中 y −3.59…+0.19；`Jump Antic` 姿势 x −1.92…+1.65。面朝右左右镜像。所以贴紧左墙时 pos = 16.26（面朝左）/ 15.35（面朝右）/ 15.93（Jump Antic 面朝左）。
+- 其他招：`Slam 0`/`Slam 1` 各 SetVelocityByScale −30（向前冲 3.0–4.3 u，0.12–0.32 s），`Slam Collider 1` 前 −1.91…+6.24、y −3.19…+3.13（地面时顶 10.58），`Slam Collider 2` 前 0.67…7.76、y −4.99…+2.65（顶 10.10）；`Evade Scuttle` 0.35 s 内以 15 u/s **向后**（背离主角）退，背后 6 u 内有墙则 `Escape Jump` → Jump Slam / Jump Cast；Bomb Cast：`First Bomb` 后 9 对、每 0.15 s 一对、间距 4.2（最远 ±37.8，穿墙），每颗 `rune bomb small` r 2.17、中心 y 3.67、亮 5–7 帧（偶尔 16–17）；Jump Cast 落地后约 2 s 在落点出现 `rune slam`，再 1.28 s 爆：圆 r 7.19、中心 y ≈ 3.34（顶 ≈ 10.5），亮 7–19 帧。
+
+### 10.2 主角在口袋里时 Clapper 怎么选
+
+- `Slam Range`（AlertRange = 主角碰撞体进入触发盒，反编译 `AlertRange.cs`）是 pos ±8.05 × (pos − 4.46 … pos + 3.37)，站地时世界 y ≤ 10.82。口袋里主角的物理碰撞体下沿 ≥ 11.69、受伤盒下沿 ≥ 12.53，都在盒子上方 → "In Slam Range" 为假：`Walk` 的 CLOSE、`Idle` 的 EVADE 都不会触发，只走 `Far Range`：JUMP SLAM 0.5 / CAST 0.25 / JUMP CAST 0.25（SendRandomEventV4，eventMax 2/1/1，missedMax 1/2/2）；`Walk` 的 DistanceWalk 把自己保持在离主角 7 ± 1.5 u（x ≈ 19.8–22.8）。
+- 这时跳的目标 = 14.27 + 5 = 19.27：从 19.8–22.8 起跳只向左移 0.5–3.5 u，本体左沿始终 ≥ 17.3。
+
+### 10.3 各招离口袋最近的距离（4 场、36,532 帧 Clapper；口袋 = 贴墙最高点的 `HeroBoxWallSlide` x 14.04–14.92、y 12.53–13.97；碰撞体到盒子的精确距离）
+
+| 招 / 碰撞体 | 最近距离 u | 说明 |
+|---|---|---|
+| Jump、Jump Cast 本体（Air） | **0.00** | 62 次跳中 2 次碰到：都从**贴紧左墙**起跳（x 15.95、15.36）。`20261002_221727` ep1 f744330–744405：Clapper 在主角右边时向后 Evade 到墙上（pos 15.36，左沿 14.02），Escape Jump，主角当时在它左边往下劈（x ≈ 14.7）→ 瞄 19.6、vx +3.4，本体贴着墙上升，f744387 本体 [14.36, 8.24, 17.95, 12.02] 打中贴墙下方的主角；之后主角爬到最高贴墙点，f744405 上升中的本体（左沿 14.77、顶 14.46）仍有接触（无敌帧内）。另一次是 `20261002_223640` ep1 f832382 的 Jump Cast。终局两只：0.17 / 0.74 u（主角在它们右边时朝墙方向跳）。其余本体升过 12.53 的跳，左沿都 ≥ 17.83（≥ 2.9 u） |
+| Slam 1 锤（`Slam Collider 1`） | 2.04 | 冲刺可冲到墙边（框 x 到 11.45），但顶 ≤ 10.58 |
+| Slam 2 / 跳砸落地（`Slam Collider 2`） | 2.42 / 2.73 | 顶 ≤ 10.10 |
+| rune slam（Jump Cast，伤 2） | 2.00 | 该次 rune 正落在口袋下方（x 14.38）；顶 ≈ 10.5 |
+| Bomb Cast 炸弹（伤 1） | 6.70 | 只在地面 |
+| 终局 Drop In（x 21.03 / 42.03 从 y 23.7 落下） | 4.15 | |
+| Cast / Evade / Idle / Walk 本体 | ≥ 4.76 | |
+
+（其他波次的飞行敌人会进口袋：Reed 本体、Tiny、Choristor `Spin Hit`、Clawmaiden 矛爆炸 0.34 u。口袋只用于终局。）
+
+### 10.4 结论
+
+- **你的打法基本成立**：主角贴在左墙最高点时，Clapper 的锤、跳砸落地、丝砸（rune slam）、丝内爆（炸弹）、入场、本体都够不着，余量 ≥ 2.0 u（锤 2.04、rune 2.00）；它们也不会选锤和后撤（主角不在 Slam Range 里），只会跳 / 施法，而跳总落在主角前 5 u（x ≈ 19.3）。
+- **唯一的漏洞是贴墙起跳**：Clapper 的本体贴着左墙（左沿在墙面 0.5 u 以内，pos ≤ ≈ 16.8 面朝左）时起跳，跳向 19.27 的路上本体先沿墙升起，约 0.16 s 时顶过 12.53、左沿还在 14.9 以内（模型：top = 7.64 + 38t − 42t²，左沿 = pos − 2.25 + (19.27 − pos)·t → pos ≤ 16.78 就重叠），实测 2 次碰到口袋。Clapper 只有在主角离开口袋时才会到墙边（主角在 Slam Range 里时朝墙冲锤，或主角在它右边时向后 Evade 到墙）。所以**规则：回到口袋之前，确认没有 Clapper 贴在左墙边（本体左沿 ≤ 14.6）；有就等它离开或先别上去**。规划器靠 CC_JUMP / CC_JUMP_CAST 的行为表（按起跳点锚定）自动得到这一点，剧本里再写一条。
+- 还要测的：主角真正待在口袋里时 Clapper 的选择（4 场里主角在口袋只有 384 帧）。需要一个终局"贴墙口袋"数据策略（GauntletDataPolicy 的 CLING 模式只在随机时段用），以及在墙顶出刀打跳到最高点的 Clapper 的命中实测（本体最高时左沿约 17.3–17.8，Reaper 向前 3.6 u：从 14.27 只够到 ≈ 17.9）。
