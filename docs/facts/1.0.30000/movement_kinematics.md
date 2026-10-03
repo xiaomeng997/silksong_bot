@@ -35,6 +35,11 @@ FSM 来源：Hero_Hornet 预制体在 `heroloading_assets_all.bundle`，它的 P
 - `DownSlashType` = Custom：`Attack` 先设 attacking 并 `DidAttack`（冷却 0.5 s），FSM：Rpr Downslash Antic（"v3 Down Slash Antic"）：夺控、重力关、每步 vx、vy ×0.85（DecelerateV2）再 vy ×0.8，UmbrellaMotionX(3, 1, 12)；Rpr Downslash（"v3 Down Slash"）：v = 0 后 `SetVelocityByScale` → vx = 朝向 × 30、vy = −30，每步 ×0.7；动画触发帧后 Fall（重力恢复）→ Fall 2 → End（交还控制，`FinishDownspike`：下劈恢复期）。命中 → Bounce（`SetStartWithDownSpikeBounce`，交还控制后弹起）；Fall 中按冲刺 → 取消。
 - HeroBox 在下劈中是 `HeroBoxReaperDownSlash`（0.4554 × 1.601，偏移 (0.37, 0.632)）。
 
+### 1.4b 爬墙（Wall Scramble FSM，hornet_wall_scramble）与翻越（Mantle）
+
+- 滑墙中**按住朝墙方向再按冲刺**（`HeroDashPressed` → `CanWallScramble`：在滑墙、有 Cling Grip、能控制、按着朝墙方向）不是冲刺而是爬墙：Take Control（夺控，滑墙结束）→ Scramble Antic（片段 "Wall Scramble Antic"，速度清零、重力关、y 每步 ×0.85）→ Start Scramble（vy = 22，Quickening 时 30）→ Scramble Up（每步 AddForce2d 向下 72，冲刺键仍按着时 48；英雄刚体质量 1（预制体 Rigidbody2D m_Mass）；vy < 0.5 → Scramble End；按跳 → 蹬墙跳；不再面对可滑的墙（到顶）→ Mantle 翻越）→ Scramble End（片段 "Wall Scramble End"，y 每步 ×0.8；再按冲刺（松开过、按着朝墙）→ 再爬一次）→ 回到滑墙。一次爬升约 22² / (2 × 72) ≈ 3.4 u（按住冲刺 ≈ 5.0 u）。这是爬上高墙（Forum 左墙顶）的方法。模型已加入（`M_SCRAMBLE`，片段长度 `scr_antic_t` / `scr_end_t` 待测）；Mantle FSM 未建模（到顶时模型只是交还控制）。
+- 空中翻越（Update 2558）：不在滑墙、在空中、vy < 5、按着朝墙方向、碰撞盒中部或底部射线碰墙等条件下发 "AIR MANTLE"，Mantle FSM 把英雄翻上墙沿。贴墙 / 滑墙中不会触发；从墙顶附近跳向墙沿时会。未建模：靠近墙沿的计划要以实测为准。
+
 ### 1.5 硬着陆
 
 `FallCheck`（9730）：下落中、未夺控（或在 sprint）、vy ≤ −`MAX_FALL_VELOCITY`（30）且不在滑墙时累计 fallTimer，超过 `BIG_FALL_TIME` 0.5 s → willHardLand；着地时 `DoHardLanding` → hero_state hard_landing 0.67 s，每步速度清零。Bell Beast 场地落差不够，Hunter 模型没有它；Forum 从墙顶掉下来可能触发，所以 Forum 参数里打开（`AB_HARD_LAND`）。
