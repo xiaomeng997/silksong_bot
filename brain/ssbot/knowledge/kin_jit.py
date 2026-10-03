@@ -1076,10 +1076,24 @@ def forum_after_queue(x, mask, pressed, mode0, dt, P, TT):
             x[PHASE] = 1.0                # Start Scramble: vy up; Scramble Up's AddForce2d OnEnter adds to the next
             x[MODE_T] = 0.0               # step's force (VY carries it from here)
             x[VY] = P[P_SCR_SPEED] - (P[P_SCR_FORCE_H] if (mask & B_DASH) != 0 else P[P_SCR_FORCE]) * P[P_FDT]
+            # HeroCheckForBumpVertical's OnEnter, in this Update, with the start speed in the ray: a roof within
+            # reach is Hit Roof now, its End clip timed from this frame as a FixedUpdate entry's (run A s98010:
+            # f696151 / f716016 detached 5 frames after the start frame, as the FixedUpdate roofs)
+            if roof_ray(x[PX] + side * (P[P_HW] - 0.2), x[PY] + P[P_HEAD],
+                        P[P_SCR_ROOF_RAY] + P[P_SCR_SPEED] * P[P_FDT], TT):
+                x[PHASE] = 3.0
+                x[MODE_T] = f32(dt)
+                grav_on(x)
         elif (ph == 1 or ph == 2) and (pressed & B_JUMP) != 0:
             regain(x, mask)               # Wall Jump: SetStartWithWallJump, control back
             x[WTOUCH] = side
             do_wall_jump(x, P)
+        elif ph == 1 and (pressed & B_DASH) != 0 and ((side < 0 and (mask & B_LEFT) != 0) or
+                                                   (side > 0 and (mask & B_RIGHT) != 0)):
+            x[PHASE] = 0.0                # REPEAT DASH from Scramble Up as from End (s98000 f419074: vy 1.84 -> antic)
+            x[MODE_T] = 0.0
+            x[VX] = 0.0
+            x[VY] = 0.0
         elif ph == 1 and x[VY] < P[P_SCR_END_VY]:
             x[PHASE] = 2.0                # Scramble End (DecelerateXY OnEnter)
             x[MODE_T] = 0.0

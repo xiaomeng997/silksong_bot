@@ -461,7 +461,7 @@ class HeroParams:
     rpr_thunk_decel: float = 0.715     # Rpr Downslash Thunk (THUNKED DOWN: the slash met a floor): DecelerateV2 (its
     #                                    SetVelocity2d y 28 is disabled in the template)
     rpr_thunk_reach0: float = 2.18     # thunk reach below the box centre while the slash's MODE_T < rpr_thunk_reach_t
-    rpr_thunk_reach1: float = 2.33     # ... after (fit: excitation runs A / B / C, see movement_kinematics.md)
+    rpr_thunk_reach1: float = 2.35     # ... after (kin_fit_forum thunk_reach on the fit runs s98000 / A / C)
     rpr_thunk_reach_t: float = 0.058
     rpr_thunk_lobe0: float = 0.5       # x span (along the facing, from the body centre) of the floor the thunk meets
     rpr_thunk_lobe1: float = 2.2
@@ -1461,7 +1461,10 @@ FULL = (Variant("nominal"),) + tuple(Variant(f"{a}/{_lane(t).name}", a, "mean", 
 # matching end): a game instance that renders every frame at the limiter's 0.01665 s (kn_excite_forum on a lone
 # instance) drifts the physics phase 0.024 in 30 frames against the mean 0.016666 s, past alpha_margin
 BOUNDS_FT = BOUNDS + (Variant("ft_lo", "lo", "lo"), Variant("ft_hi", "hi", "hi"))
-VARIANT_SETS = {"nominal": NOMINAL, "fast": FAST, "bounds": BOUNDS, "full": FULL, "bounds_ft": BOUNDS_FT}
+BOUNDS_LO = BOUNDS + (Variant("ft_lo", "lo", "lo"),)
+BOUNDS_LO2 = BOUNDS + (Variant("ft_lo", "lo", "lo"), Variant("ft_lo_h", "hi", "lo"))
+VARIANT_SETS = {"nominal": NOMINAL, "fast": FAST, "bounds": BOUNDS, "full": FULL, "bounds_ft": BOUNDS_FT,
+                "bounds_lo": BOUNDS_LO, "bounds_lo2": BOUNDS_LO2}
 _SCALED_TIMERS = ("P_ATK_DUR", "P_ATK_CD", "P_DS_ANTIC", "P_DS_REC", "P_DS_LREC", "P_HURT_T", "P_CAST_ANTIC",
                   "P_BIND_T",
                   # Forum loadout: the animation-timed FSM states, the sprint wait, the cling cooldown and hard landing
@@ -2317,14 +2320,18 @@ class ForumRows:
             ph = 0.0 if cph == 0 else (pr["ph"] if pr and pmd == M_RPR_DS and pr["ph"] >= 1 else
                                        (1.0 if cph == 1 else 2.0))
             # a thunk (the slash met a floor: Rpr Downslash Thunk) shows as one step decaying |vx| by 0.7 x 0.715
+            # (with two steps in the frame the plain decay is 0.49: the test scales with the steps)
             if ph == 1 and pr and pmd == M_RPR_DS and pr["ph"] == 1 and fs > 0 and r.get("vel") is not None:
-                if abs(pr["vx"]) > 0.05 and abs(float(r["vel"][0])) < 0.6 * abs(pr["vx"]):
+                lim = 0.85 * p.rpr_slash_decel ** fs
+                if abs(pr["vx"]) > 0.05 and abs(float(r["vel"][0])) < lim * abs(pr["vx"]):
                     ph = 4.0
         elif md == M_SCRAMBLE:
             ph = float(SCRAMBLE_CLIPS.get(clip, pr["ph"] if pr and pmd == M_SCRAMBLE else 0))
             if ph == 2 and pr and pmd == M_SCRAMBLE:
                 if pr["ph"] in (2.0, 3.0):
                     ph = pr["ph"]
+                elif pr["ph"] == 0:
+                    ph = 3.0              # Start Scramble and Hit Roof in one Update (the roof ray's OnEnter)
                 elif pr["ph"] == 1 and fs > 0:
                     # Scramble End (vy < 0.5 after a step, DecelerateXY OnEnter) or Hit Roof Soft (the roof ray
                     # in the step: gravity back in it): whichever velocity rule the logged vy fits
@@ -2365,10 +2372,12 @@ class ForumRows:
                 S[GS] = 0.0 if ph in (0.0, 1.0, 4.0) else 1.0
             elif md == M_SCRAMBLE:
                 S[GS] = 1.0 if ph == 3 else 0.0
-                if ph == 1 and not (pr and pmd == md and pr["ph"] == 1) and "mask" in r:
-                    # Start Scramble's frame: Scramble Up's AddForce2d OnEnter is pending until the next step
+                start = ph == 1 or (ph == 3 and pr and pmd == md and pr["ph"] == 0)
+                if start and not (pr and pmd == md and pr["ph"] == ph) and "mask" in r:
+                    # Start Scramble's frame: Scramble Up's AddForce2d OnEnter is pending until the next step (also
+                    # when the OnEnter roof ray left Scramble Up in the same Update)
                     self.scr_pending = (p.scr_force_held if r["mask"] & B_DASH else p.scr_force) * p.fdt
-                elif ph != 1 or fs > 0:
+                elif not start or fs > 0:
                     self.scr_pending = 0.0
                 S[VY] -= self.scr_pending
             else:

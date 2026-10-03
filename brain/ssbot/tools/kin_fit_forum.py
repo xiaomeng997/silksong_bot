@@ -18,10 +18,19 @@ Where a phase ends is read from the log as follows:
     step); the fall
     ends when control comes back with the downspike recovery (FinishDownspike), Fall 2 taking the frame before;
   - the last phase of a move (glide deflate, scramble end): control back (to the wall slide for the scramble end);
-  - Hit Roof Soft (a scramble's roof ray in a FixedUpdate: the End clip with gravity back) counts from the roof step,
-    whose Update already adds to the timer (an offset of one frame).
+  - Hit Roof Soft (a scramble's roof ray in a FixedUpdate, or in Scramble Up's OnEnter: the End clip with gravity
+    back) counts from the frame the End clip shows, whose Update already adds to the timer (threshold offset one
+    frame; until 2026-10-03 the length also added that frame, so the offset counted twice: 0.1002 for an End clip
+    that lasts 5 frames, 4 when the frame-time sum reaches 1/12 s).
+The Reaper down slash's terrain thunk reach (rpr_thunk_reach0 / reach1 / reach_t, thunk_reach()): every physics step
+of the slash phase is a thunk (|vx| decays by 0.7 x 0.715 in it instead of 0.7) or not; its height is the box centre
+above the highest floor under the forward lobe (rpr_thunk_lobe0 .. lobe1 along the facing) and its time the phase
+timer before the step (the model's MODE_T in rpr_thunk). The reach is the midpoint between the highest thunk and the
+lowest step that did not thunk, separately before and after the split time (between the last early and the first
+late thunk); frames with two steps are skipped (which step thunked is unknown).
 Checks (decomp values, not fitted): vy while clinging, the wall slide's per-frame vy change after the stick time, the
 wall jump's first x speeds, the dash's x speed, the glide's settled vy, the scramble's first rise step.
+Every value this tool does not fit but the Forum model reads gets a "source" entry (HAND_SET).
 """
 from __future__ import annotations
 
@@ -106,10 +115,97 @@ def phase_lengths(tr: km.Trace, modes: np.ndarray, params: km.HeroParams) -> dic
                 rep = onset_of(e, i1, ("Wall Scramble Antic",))   # REPEAT DASH: the End cut short
                 c = i1 if rep is None else rep
                 if roof:
-                    out["scr_roof_t"].append((c - e + 1, not cut and rep is None))
+                    out["scr_roof_t"].append((c - e, not cut and rep is None))
                 else:
                     out["scr_end_t"].append((c - e, not cut and rep is None and c < n and bool(slide[c])))
     return out
+
+
+def thunk_steps(tr: km.Trace, modes: np.ndarray, terrain, params: km.HeroParams) -> list[tuple[float, float, bool]]:
+    """(phase timer before the step, box centre height over the floor under the lobe, thunked) for every one-step
+    frame of every Reaper down slash's slash phase, up to its thunk."""
+    clip = np.array(tr.clips, dtype=object)[tr.clip]
+    out = []
+    for i0, i1 in _runs(modes == km.M_RPR_DS):
+        e = next((k for k in range(i0, i1) if clip[k] == "v3 Down Slash"), None)
+        if e is None or terrain is None:
+            continue
+        face = 1.0 if tr.facing[e] >= 0 else -1.0
+        t = 0.0
+        for k in range(e + 1, i1):
+            if tr.fs[k] == 0:
+                t += float(tr.dt[k])
+                continue
+            v0, v1 = abs(tr.vel[k - 1, 0]), abs(tr.vel[k, 0])
+            decay = params.rpr_slash_decel ** int(tr.fs[k])
+            if v0 < 0.05 or v1 > 1.05 * decay * v0:
+                break                          # the slash's decay stopped: its trigger frame passed
+            thunk = v1 < 0.85 * decay * v0
+            if tr.fs[k] == 1:
+                px = 0.5 * (tr.box[k, 0] + tr.box[k, 2])
+                cy = 0.5 * (tr.box[k, 1] + tr.box[k, 3])
+                lo, hi = sorted((px + face * params.rpr_thunk_lobe0, px + face * params.rpr_thunk_lobe1))
+                fl = [y for y, a, b in terrain.hseg if a < hi and b > lo and y <= cy]
+                if fl:
+                    out.append((round(t, 5), float(cy - max(fl)), bool(thunk)))
+            t += float(tr.dt[k])
+            if thunk:
+                break
+    return out
+
+
+def thunk_reach(steps: list[tuple[float, float, bool]]) -> tuple[dict, dict]:
+    """rpr_thunk_reach0 / reach1 / reach_t from thunk_steps over all recordings (see the module docstring)."""
+    th = [(t, h) for t, h, k in steps if k]
+    if not th:
+        return {}, {"n_steps": len(steps), "thunks": 0}
+    ts = sorted({t for t, _ in th})
+    # split: the gap between consecutive thunk times where the early / late reaches separate best
+    best = None
+    for a, b in zip(ts, ts[1:]):
+        split = 0.5 * (a + b)
+        hi0 = max((h for t, h in th if t < split), default=-np.inf)
+        hi1 = max((h for t, h in th if t >= split), default=-np.inf)
+        lo0 = min((h for t, h, k in steps if not k and t < split), default=np.inf)
+        lo1 = min((h for t, h, k in steps if not k and t >= split), default=np.inf)
+        if hi0 < lo0 and hi1 < lo1 and hi1 > hi0 and (best is None or hi1 - hi0 > best[0]):
+            best = (hi1 - hi0, split, hi0, lo0, hi1, lo1)
+    if best is None:
+        hi = max(h for _, h in th)
+        lo = min((h for _, h, k in steps if not k), default=hi + 0.02)
+        r = round(0.5 * (hi + min(lo, hi + 0.04)), 4)
+        return {"rpr_thunk_reach0": r, "rpr_thunk_reach1": r}, {"n_steps": len(steps), "thunks": len(th),
+                                                                "highest_thunk": hi, "lowest_miss": lo}
+    _, split, hi0, lo0, hi1, lo1 = best
+    fitted = {"rpr_thunk_reach0": round(0.5 * (hi0 + lo0), 4), "rpr_thunk_reach1": round(0.5 * (hi1 + lo1), 4),
+              "rpr_thunk_reach_t": round(split, 4)}
+    return fitted, {"n_steps": len(steps), "thunks": len(th), "early": [round(hi0, 3), round(lo0, 3)],
+                    "late": [round(hi1, 3), round(lo1, 3)], "split_s": round(split, 4)}
+
+
+# values the Forum model reads that no fit here sets: where each comes from (written into the params' "source")
+HAND_SET = {
+    "rpr_thunk_decel": "crest_attacks template, Rpr Downslash Thunk: DecelerateV2 0.715 (its SetVelocity2d y 28 is "
+                       "disabled); live: the thunk step's |vx| ratio 0.7 x 0.715 = 0.50 (kin_fit_forum thunk_steps)",
+    "rpr_thunk_lobe0": "hand-set x span of the floor the down slash's thunker meets (0.5 .. 2.2 u ahead of the body "
+                       "centre); not separable in the excitation runs (every logged slash had one floor under the hero "
+                       "and the lobe)",
+    "rpr_thunk_lobe1": "see rpr_thunk_lobe0",
+    "sprint_shift": "hornet_sprint template, Ground Sprint R / L OnEnter: Transform.Translate 0.05 u forward; live: "
+                    "implied shift from the drawn position exactly 0.05 in 24 of 25 released ground dashes "
+                    "(kn_excite_forum_s98200, movement_kinematics.md 1.3)",
+    "sprint_grace": "hornet_sprint template: Sprint Grace 0.3 s (Regain Control To Idle under it)",
+    "skid_decel": "hornet_sprint template, Skid End 1 / 2: DecelerateXY 0.85",
+    "skid_decel_move": "hornet_sprint template, Skid End 1 / 2: 0.95 while moving the facing way",
+    "skid_time": "animation clips Skid End 1 (0.2 s) + Skid End 2 (0.05 s) (herodynamic bundle, UnityPy)",
+    "skid_min_speed": "hornet_sprint template, Skid SFX?: no skid under 4 u/s",
+    "air_fall_clamp_lag": "one frame: the Air Sprint fall clamp (EaseFloat -10 -> -30, 1 s) reads a frame behind the "
+                          "state's own time in every air sprint of kn_excite_forum_s98200 (fit run C; also seen in "
+                          "the dev run D, s98300)",
+    "scr_roof_ray": "CharacterBumpCheck.CheckForBump (top): ray 0.1 + 0.03 + |vy| fdt from 0.1 u under the box top",
+    "scr_detach": "hornet_wall_scramble template, Detach: Translate x scale.x * 0.2",
+    "wall_up_shove": "HeroController.Attack 4164: MovePosition 0.8 off the wall for an up slash while wall sliding",
+}
 
 
 def threshold(lengths: list[int], offset: int, bias: float) -> tuple[float, str]:
@@ -133,9 +229,13 @@ def fit(paths: list[str], params: km.HeroParams) -> tuple[dict, dict]:
     report: dict = {"phases": {}, "checks": {}, "clips_seen": Counter()}
     lengths: dict[str, list[tuple[int, bool]]] = defaultdict(list)
     vy_cling, dvy_slide, wj_vx, dash_vx, glide_vy, scr_first = [], [], [], [], [], []
+    thunks: list[tuple[float, float, bool]] = []
     for path in paths:
         tr, terrains = load_source(path, params)
         modes = km.classify_modes(tr, forum=True)
+        for si, name in enumerate(tr.scenes):
+            if name in terrains and (tr.scene == si).any():
+                thunks += thunk_steps(tr, np.where(tr.scene == si, modes, km.M_NORMAL), terrains[name], params)
         clip = np.array(tr.clips, dtype=object)[tr.clip]
         for c in clip[modes >= km.M_GLIDE]:
             report["clips_seen"][str(c)] += 1
@@ -170,6 +270,9 @@ def fit(paths: list[str], params: km.HeroParams) -> tuple[dict, dict]:
             r["fit"] = {"value": fitted[name], "rule": how, "n": len(nat),
                         "spread_frames": [int(min(nat)), int(max(nat))]}
         report["phases"][name] = r
+    tf, trep = thunk_reach(thunks)
+    fitted.update(tf)
+    report["phases"]["rpr_thunk_reach"] = trep
     q = lambda a: ({"n": len(a), "p5": round(float(np.percentile(a, 5)), 3),  # noqa: E731
                     "p50": round(float(np.percentile(a, 50)), 3), "p95": round(float(np.percentile(a, 95)), 3)}
                    if len(a) else {"n": 0})
@@ -196,7 +299,10 @@ def main(argv: list[str] | None = None) -> int:
         d.update(fitted)
         d["source"] = dict(d.get("source") or {})
         for k in fitted:
-            d["source"][k] = f"kin_fit_forum (median logged phase length) on {', '.join(map(str, a.sources))}"
+            how = "thunk heights (thunk_reach)" if k.startswith("rpr_thunk") else "logged phase lengths (threshold)"
+            d["source"][k] = f"kin_fit_forum, {how}, on {', '.join(map(str, a.sources))}"
+        for k, v in HAND_SET.items():
+            d["source"][k] = v
         d["fit"] = dict(d.get("fit") or {})
         d["fit"]["forum"] = {"sources": [str(s) for s in a.sources], "fitted": fitted,
                              "phases": report["phases"], "checks": report["checks"]}
