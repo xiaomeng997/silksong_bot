@@ -66,13 +66,23 @@ def draw(rng: random.Random, d: int) -> Trial:
     """One primitive; d = +-1 the direction of the wall from the start."""
     md = M_R if d > 0 else M_L
     mo = M_L if d > 0 else M_R
-    kind = rng.choice(("wall_hold", "wall_hold", "wall_jump", "wall_jump", "wall_attack", "glide", "glide", "dash",
-                       "dash", "reaper_attack"))
+    kind = rng.choice(("wall_hold", "wall_hold", "wall_jump", "wall_jump", "wall_attack", "wall_scramble", "glide",
+                       "glide", "dash", "dash", "reaper_attack"))
     p: dict = {"d": d}
     m: list[int] = []
     run = rng.randint(0, 60)
     p["run"] = run
-    if kind in ("wall_hold", "wall_jump", "wall_attack"):
+    if kind == "wall_scramble":
+        # the Wall Scramble FSM (dash while sliding and holding towards the wall: a climb, not in the model yet):
+        # recorded so its velocity profile can be measured; repeats after the dash is released and pressed again
+        k, h, s = rng.randint(4, 24), rng.randint(5, 40), rng.randint(3, 30)
+        rep = rng.randint(0, 2)
+        p.update(k=k, h=h, s=s, rep=rep)
+        m = _seg(md, run) + _seg(M_J | md, k) + _seg(md, h)
+        for _ in range(rep + 1):
+            m += _seg(M_DASH | md, s) + _seg(md, rng.randint(18, 30))
+        m += _seg(0, rng.randint(0, 30))
+    elif kind in ("wall_hold", "wall_jump", "wall_attack"):
         k = rng.randint(4, 24)
         h = rng.randint(5, 120)
         p.update(k=k, h=h)
