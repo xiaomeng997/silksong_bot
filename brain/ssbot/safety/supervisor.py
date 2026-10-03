@@ -24,6 +24,9 @@ known hero, and Q5 fires once the hero has been missing for hero_lost_ms with h 
 Tiers: GREEN h >= 3, the chosen plan has S = 0 and the support is known; YELLOW h = 2, or S = 1 (or no plan yet, or
 the support unknown) with h >= 3; RED any trigger. Triggers (§3.7.4):
   Q1 h <= 1 (a Fractured Mask just broken at 1 HP included)                  -> PAUSE_PENDING, quit
+     With a certified-empty support h is unbounded (nothing can land within the horizon), yet the encounter's worst
+     event comes back after it: Q1 then counts h against that event (worst_known_damage, the worst taken), so a
+     hero one hit from death pauses while nothing can hurt, not when the threat reappears
   Q2 I2 broken and no candidate leaves the exposure within 0.2 s              -> PAUSE_PENDING, quit
   Q3 h = 2 with a mask-bypassing, multi-instance, hazard or CriticalDamage threat, or an unknown support
                                                                               -> PAUSE_PENDING, quit
@@ -83,7 +86,7 @@ import numpy as np
 
 from ssbot.core.primitives import ALL, DAMAGING, EVASIVE, N_PRIM, Prim
 from ssbot.core.primitives import code as prim_code
-from ssbot.safety.hits_to_death import (MASK_UNKNOWN, SupportEvent, ctx_from_support, hits_to_death,
+from ssbot.safety.hits_to_death import (MASK_UNKNOWN, UNBOUNDED, SupportEvent, ctx_from_support, hits_to_death,
                                         mask_intact, mask_state, pending_from_tags)
 from ssbot.safety.invariants import Verdict
 from ssbot.safety.pause_quit import availability_from_state
@@ -380,6 +383,17 @@ class Supervisor:
         out: list[tuple[str, str]] = []
         if h is not None and h <= 1:
             out.append(("Q1", f"hits_to_death {h}"))
+        elif h == UNBOUNDED and hero is not None:
+            # nothing in support now (certified empty: the Bell Beast underground), but the support covers only the
+            # horizon: the encounter's worst event comes back. Q1 on that, so the pause comes while nothing can hurt
+            # instead of when the threat reappears (pause stress chunk 20261002_232051 ep 35: hit to 1 HP with the
+            # boss submerged, h UNBOUNDED, tier GREEN, the planner kept fighting; only a Q4 paused it 15 frames later)
+            # the encounter's own worst event, as the visible boss's would count (an intact Fractured Mask covers it)
+            floor = SupportEvent("worst known event", max(1, cfg.worst_known_damage, self.worst_seen))
+            hf = hits_to_death(hero.hp, hero.blue, mask_intact(hero.mask),
+                               ctx_from_support((floor,), inp.pending_dmg, inp.pending_mask_covers))
+            if hf <= 1:
+                out.append(("Q1", f"hits_to_death {hf} against the worst known event (support empty now)"))
         if inp.i2_violated and (inp.escape_s is None or inp.escape_s > cfg.q2_escape_s):
             out.append(("Q2", "I2 broken, no escape within "
                               f"{cfg.q2_escape_s} s" + ("" if inp.escape_s is None else f" ({inp.escape_s:.2f} s)")))
