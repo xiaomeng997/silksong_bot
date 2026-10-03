@@ -7,8 +7,10 @@ Paths to worktrees / run dirs in a section are that chain's, not this integratio
 
 Main (3744eeb, docs only since 03482a4) plus five chains, one `git merge --no-ff` each, in this order: R route research
 (worktree-wf_c0d56d51-4cb-5), W kinematics (worktree-wf_946a7803-63c-3), F Forum (worktree-wf_946a7803-63c-2), H pause /
-quit (worktree-wf_c0d56d51-4cb-4), V vision view (worktree-wf_946a7803-63c-1). Offline only: no game instance touched,
-nothing running, nothing deployed.
+quit (worktree-wf_c0d56d51-4cb-4), V vision view (worktree-wf_946a7803-63c-1). Main's later doc commits are merged too:
+94bff53 (DESIGN 3.6.4, at the end of the integration, 5f6c5e0) and, in the fixer round, e1edd86 (DESIGN Q1 / Q1a user
+rule) and 3b70280 (formal run keeps Steam achievement notifications), so the branch holds main up to 3b70280. Offline
+only: no game instance touched, nothing running, nothing deployed.
 
 ### Conflicts and how they were resolved
 
@@ -39,6 +41,12 @@ nothing running, nothing deployed.
   `dotnet build oracle/SsOracle.csproj -p:Deploy=false` ok. The merged `oracle/` = branch oracle-deploy-20261003
   (2783573) + H's input / IPC files + this fix, nothing else.
 - `docs/facts/1.0.30000/crests.json` (P17) committed; `.gitignore`: `/knowledge/1.0.30000/enemies/forum/*.npz`.
+- Fixer round (after the verifier): main re-merged (doc only, clean). Oracle: KeyboardInjector's ways into the filter
+  are HoldFilter methods now, so InputLogicCheck runs the same calls: `TryQueueMask` = `QueuePlain` (EndExclusive + the
+  two Pushes), `SetMaskExclusive` (brain-lost Pause tap) = `QueueExclusiveCutAll` (EndExclusive + QueueExclusive; the
+  mask is validated first, so a rejected request no longer ends the stretch). New check `InjectorExclusiveWiring`
+  (same-stretch key spared; a plain ACTION ends the stretch; the brain-lost Pause cuts the loop's own key); ALL OK,
+  `dotnet build -p:Deploy=false` 0 warnings / 0 errors, not deployed.
 
 ### Checks (offline, below-normal priority, NUMBA_NUM_THREADS 4; scratch outputs in this session's scratchpad)
 
@@ -46,7 +54,9 @@ nothing running, nothing deployed.
   `test_hitbox_tables::test_support_query_budget_on_the_committed_bell_beast_templates` (p99 3.85 ms vs the 3 ms
   budget: the known failure under the machine's load; budget not loosened). Before the test fix above: 6 failed (that one
   + the 5 merge failures).
-- InputLogicCheck (oracle input logic): ALL OK, incl. the new own-key check.
+- InputLogicCheck (oracle input logic): ALL OK, incl. the new own-key check and (fixer round) InjectorExclusiveWiring.
+- Fixer round: no Python change since 5f6c5e0 (the main merge is docs only); test_primitives (parses DESIGN.md),
+  test_key_guard, test_supervision, test_supervisor: 54 passed.
 - (a) Held-out support recall (`support_recall 20261001_122249_BellBeast_data --recordings=i2_002,i3_002 --table
   C:/ssbot/data/m2_heldout/tables --lags=2,3,4 --margin 0`, 35 fights): ve_dust noise seed 7 23,896 / 23,896 and oracle
   23,896 / 23,896 at lags 2, 3 and 4 (V: 23,896 / 23,896).
@@ -55,10 +65,21 @@ nothing running, nothing deployed.
   worst windows). Forum held-out (`--params hero_reaper_forum.json --lanes bounds_lo_mix --bounds-events none`) T1
   s98600 99.448 % (32,953), T2 s98700 98.895 % (16,747), together 99.26 % of 49,700; every category as in
   movement_kinematics.md 5.3 (dash 97.34, glide 98.125, contact 89.78, slope 98.36, wall 100, scramble 99.48 %).
-- (c) planner_bench, 20261003_053033 i0_000 (degraded_dust live run), 8000 frames, threads 4, warm numba, alternating
-  order, integration vs V's branch: decisions identical (forced share 0.2138 ve / 0.0405 oracle, same mode counts);
-  tick p99 ve 14.74 / 15.70 vs 15.10 / 14.58 ms, oracle 16.30 / 15.56 vs 16.30 / 15.72 ms (noise: 5 game instances
-  running); rollout phase p50 2.43-2.49 vs 2.10-2.20 ms, p99 4.09-4.35 vs 3.83-3.95 ms (W's model).
+- (c) planner_bench, 20261003_053033 i0_000 (degraded_dust live run), 8000 frames, threads 4, warm numba,
+  integration vs V's branch: decisions identical (forced share 0.2138 ve / 0.0405 oracle, same mode counts). The
+  integration is SLOWER, measurably: the verifier's 4 pairs (both views, both orders) had the integration slower in
+  every pair - tick p99 +1.00 / +0.60 ms (ve: 14.73 vs 13.73, 15.03 vs 14.44) and +1.25 / +0.96 ms (oracle: 15.83 vs
+  14.58, 15.63 vs 14.66), tick p50 +0.43 to +0.73 ms, rollout phase p50 2.39-2.41 vs 1.97-2.07 ms, p99 4.20-4.30 vs
+  3.65-3.86 ms (paired: rollout p50 +0.33-0.42, p99 +0.43-0.55 ms). The integration report's "tick p99 within noise"
+  did not reproduce. Cause: W's Hunter kernel, not the conflict resolution (kinematics.py / kin_jit.py are W's files plus V's two
+  np.require hunks). Fixer profile on the planner's own main rollouts (442 sequences x 49 frames, bounds lanes, 250
+  captured calls, min of 7 replays, alternating trees): compiled kernel 1 thread 4.83-5.15 vs 4.19-4.51 ms (+12-20 %),
+  4 threads 1.40 vs 1.15 ms; Python-side preparation +0.02 ms; the lanes run per sequence (3 of 9) and the inputs
+  (masks, terrain, lane runs) are identical. Compiling the Forum loadout branches out for abilities == 0 (the abilities
+  word a constant 0 in a second copy of the frame loop, inline and as a separate function; Hunter outputs bit-identical)
+  gained nothing measurable (5.09 / 5.11 vs 5.13 / 5.15 ms) and doubled / tripled the first compile (51 s -> 97 / 157
+  s), so it was not kept; W's four extra modes in `relinq` cost ~3 %. The rest is spread over W's larger state (K 51 ->
+  81) and parameter row (67 -> 151 columns); not changed.
 - (d) Forum gauntlet tables rebuilt from the 13 complete gauntlets (223640, 230325, 231917; `behaviour_build --encounter
   Forum --allow-failed-validation --out <scratch>`, 986 s): coverage.json identical to the committed one except code sha
   / paths; every table JSON identical except build time / sha; all nine _hitboxes.npz byte-identical to F's. 28,029
@@ -70,11 +91,25 @@ nothing running, nothing deployed.
 
 ### Next (integration)
 
-1. Deploy (lead): the oracle in this branch = deployed 2783573 + EXCLUSIVE (with the own-key fix). Stop instance 4's
-   pause campaign before (it holds SsOracle.dll). After deploying, the key guard could model EXCLUSIVE (H's note).
-2. Planner rollout cost: rollout phase p50 +0.3 ms on Hunter after W's model (K = 82 state rows, ability checks); tick
-   p99 within noise in planner_bench, but watch late ticks in the next live vision run.
-3. The chains' own next steps follow below.
+1. Landing in main: the main checkout has an untracked `docs/facts/1.0.30000/crests.json` at the path this branch now
+   tracks (4ff6046), so `git merge m2-integration-6` there aborts ("untracked working tree files would be
+   overwritten"). Move that file aside first: it is the committed file with CRLF endings, nothing is lost. Merge main
+   into this branch again first if main has moved past 3b70280.
+2. Deploy (lead): the oracle in this branch = deployed 2783573 + EXCLUSIVE (with the own-key fix and the wiring moved
+   into HoldFilter). Stop instance 4's pause campaign before (it holds SsOracle.dll). After deploying, the key guard
+   could model EXCLUSIVE (H's note); the post-deploy pause campaign is the live check of the KeyboardInjector side.
+3. Planner cost after W's Hunter model: tick p50 +0.4-0.7 ms and tick p99 +0.6-1.25 ms against V's branch in
+   planner_bench (rollout phase p50 +0.33-0.42 ms, p99 +0.43-0.55 ms); decisions unchanged. Compiling the Forum
+   branches out does not recover it (Checks (c)). Watch late ticks in the next live vision run; if they rise, profile
+   the frame loop itself (state size, relinq) - the Forum branches are ruled out.
+4. DESIGN Q1 / Q1a changed after the chains were cut (e1edd86, user rule): h <= 1 -> quit in the post-hit window
+   (pausable from ~0.25 s after the hit, i-frames to ~1.2 s), no Bind attempt; h <= 1 not caused by a hit (frost,
+   pending damage) quits at the first pausable frame; h >= 2 and HP < max -> heal first (Bind in place when the Bind
+   commit conditions hold, else at a verified safe spot, else keep fighting under Q3 / Q6). Check Supervisor against
+   it: `_triggers` Q1 fires at h <= 1 (and H's UNBOUNDED case against the worst known event) without a post-hit-window
+   rule, and `Restrictions.heal_first` is set only in YELLOW / RED (`careful`), not for every h >= 2 below max HP.
+   This replaces the 10-02 revision (heal first even at h <= 1) that M2.md recorded before.
+5. The chains' own next steps follow below.
 
 ## Chain R - Forum route research (branch worktree-wf_c0d56d51-4cb-5)
 
