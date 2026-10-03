@@ -1,43 +1,54 @@
-# HANDOFF - Task F (Forum setup, M2 W8 first half) - stopped by STOP_AGENTS
+# HANDOFF - Task F (Forum, M2 W8) - round 2
 
 Worktree `C:\modeling\silksong_bot\.claude\worktrees\wf_946a7803-63c-2`, branch `worktree-wf_946a7803-63c-2`.
-Stopped 2026-10-02 ~21:06 PDT: `C:\ssbot\sandbox\STOP_AGENTS` ("lead: 5-hour window at 86%... Resume after 22:40 PDT").
-The stop file was written at 20:54:09, two minutes after GATE_DONE; I noticed it only at ~21:05, so the live steps on
-instance 2 between 20:52 and 21:05 (savestates, checks, cling test) ran after it. No live run or job of mine is running
-now (instance 2 is idle in Hang_04; the two idle-priority UnityPy scans finished).
+Instance 2 (port 47019). Seeds 95100-97999 (used: 95100, 95200, 95300, 95400 as --seed bases).
 
-## Done (all committed)
+## Running job (may keep running after the agent returns)
 
-- Facts: `docs/facts/1.0.30000/forum.md` (Chinese): arena structure, the 14 BattleWaves (enemy types, spawn points, HP,
-  damage), how the gauntlet ends (EndBattle, EnemyBattleEndSlow freeze, hang04Battle, lamp opens the gates), helper
-  flags and the Call Ally FSM (Garmond 4 s after wave index 1), LoadedFromMenu clears the aid flags, tool / crest ids
-  (Cogwork Flier, Wallcling, Reaper), Reaper chapel Greymoor_20b/20c, Cogfly craft table Hang_09 (8 s pause-disabled),
-  bundle geometry, savestate composition + in-game checks (section 7). Sections 8 (TERRAIN) and 9 (export check) still
-  need the live numbers below.
-- Oracle (built with -p:Deploy=false, NOT deployed): 788aaa8 STATE `room.battles` (BattleScene wave / started /
-  completed / enemies / to_next); cd215cc STATE `allies` (Cogflies + BattleScene "* Fighter" NPCs). -> needs deploy.
-- Python: `ssbot/train/gauntlet.py` (GauntletTap, WaveSim, live_enemies / WAITING_STATES), FORUM encounter +
-  `Forum_A/B/C/A5` variants and `forum_intro` in `encounters.py`, `make_tap` + `AttemptRecord.gauntlet` in `episode.py`,
-  `GauntletDataPolicy` in `data_policy.py` (incl. CLING mode), `combat_run` uses them, `tools/forum_counts.py`
-  (attack counts per enemy type, hours-to-200 estimate), `probes/forum_setup.py`, tests `brain/tests/test_gauntlet.py`.
-- Savestates (C:\ssbot\sandbox\savestates): `fo_A`, `fo_A5`, `fo_B`, `fo_C` (game-written, verified: loadout, flags,
-  no double jump / Silk Soar), plus intermediates `fo_pre_help7`, `fo_pre_nohelp7`, `fo_p7_s3`, `fo_*_raw`, `fo_*_fix`.
-- Verified live: intro reaches the battle start (x ~33, wave 0 spawn ~4.7 s later); Garmond enters and kills in A and
-  B, stays Dormant in C; wall cling with the Grip on the left wall (highest still cling y 13.60 at x 14.27).
+- Data collection, arm A, instance 2: chain `C:\ssbot\sandbox\fo_chain.ps1 -Tag F` (log `C:\ssbot\sandbox\fo_chain_F.log`)
+  starts `combat_run run --instances 2 --encounter Forum_A --mode data --policy data --hours 12 --episodes 100000
+  --seed 95400 --threads 4 --timebox 1500 --rotate 5` from the frozen worktree `C:\ssbot\live_fo_e589c0b` once run E
+  (`20261002_230325_Forum_A_data`, stop requested after its episode 0) has ended. Run F's dir is printed in the chain log
+  (`C:\ssbot\data\runs\m2\2026100?_??????_Forum_A_data`, the newest Forum_A_data dir).
+- Stop: `cd C:\ssbot\live_fo_e589c0b\brain; ..\scripts\uv.cmd run python -m ssbot.tools.combat_run stop <run dir>`
+  (ends after the current episode, about 10-15 min); before run F has started: create
+  `C:\ssbot\sandbox\fo_chain_F.stop`. STOP_AGENTS also stops it.
+- Recordings rotate every 5 episodes (closed every ~1-1.2 h), so `behaviour_build` (closed recordings only) can be run
+  any time.
 
-## Next (in order)
+## Runs so far (all fo_A, data policy, instance 2)
 
-1. Read `C:\ssbot\sandbox\forum_setup\terrain_A.bin` (TERRAIN of Hang_04 from the check; `ssbot.oracle.messages.Terrain`)
-   and fill forum.md section 8 (floor, walls, ceiling steps, platforms).
-2. Start the arm A data-collection run on instance 2 (detached, so it survives the agent):
-   `cd brain; Start-Process -WindowStyle Hidden ..\scripts\uv.cmd -ArgumentList "run python -m ssbot.tools.combat_run run
-   --instances 2 --encounter Forum_A --mode data --policy data --hours 12 --seed 95000" -RedirectStandardOutput
-   C:\ssbot\sandbox\fo_data_A.log`. After 3-4 episodes run `python -m ssbot.tools.forum_counts <run dir>` for the hours
-   estimate (Clapper attacks are the slow ones: 1 Clapper in wave 7, 2 in the finale). Add instance 4 only if the CPU
-   allows. Stop: `python -m ssbot.tools.combat_run stop <run dir>`.
-3. Add "Song Automaton Tiny" (the Maestro's summons) to `forum_counts.ATTACKS` once its attack states are seen in data;
-   check which "Damager" / "Enemy Damager" kill sources are the Cogfly vs Garmond / Zaza.
-4. forum.md section 9: export check from the first recordings (every wave enemy with colliders and damage bits,
-   Clapper Bomb Cast projectiles, Handmaiden spear); helpers and Cogflies are missing from "ents" by design -> the
-   `allies` export (needs deploy).
-5. Ascendant's Grip pickup location is still unknown (no string reference in the scene bundles).
+| run | code | episodes | note |
+|---|---|---|---|
+| 20261002_221727_Forum_A_data | 3fa0375 | 2 | false CLEAR before the finale (Tiny kills, fixed 7eb12de) |
+| 20261002_223640_Forum_A_data | 7eb12de | 2 | full gauntlets (848 s, 737 s of 900 s timebox) |
+| 20261002_230325_Forum_A_data | c86979f | 1 | --timebox 1500 --rotate 5; stopped for the pocket policy |
+| run F | e589c0b | ... | + pocket mode in the finale (data_policy POCKET_MODES) |
+
+## Done this round (commits 7eb12de .. e589c0b)
+
+- Fix: GauntletTap counted the Maestro's Song Automaton Tiny kills in the DecrementEnemy replay -> false CLEAR.
+- `ssbot/knowledge/gauntlet_tables.py`: one BehaviourBuilder per Forum enemy type (FORUM_SPECS: families per type from the
+  FSM dumps), fed per enemy entity; hazard aliases by circle radius ("damager"); contact attribution by GameObject name,
+  collider child ("Colliders/Collider ParryStance"), nearest live subject, per frame for blocked stretches; scanner
+  extensions in behaviour_tables (idle family, kill = death, late spawns, several armed hazards per type, multi-hit
+  follow-ups). `behaviour_build --encounter Forum` writes `knowledge/1.0.30000/enemies/forum/<Enemy>.json/_hitboxes.npz`
+  + `coverage.json` (counts, rate, hours to 200). Tests: tests/test_gauntlet_tables.py.
+- `ssbot/tools/forum_pocket.py`: closest approach of every Clapper collider / hazard to the cling pocket.
+- `combat_run --timebox`; data policy pocket mode with only Clappers alive.
+- forum.md sections 8 (TERRAIN, the dome ceiling, pocket = HeroBoxWallSlide x 14.04-14.92 y 12.53-13.97), 9 (journal
+  names: Choristor = Song Pilgrim 03, Envoy = Song Pilgrim 01, Choir Bellbearer = Pilgrim 03 Song; export per type;
+  multi-hit colliders; source paths; kill sources: Cogfly = "Damager", Garmond = WildSlash/Stomp/Stomp Splash/Charge),
+  10 (Clapper jump: aim hero x +- 5, vy 38, g_eff 84; only Far Range choices while the hero clings; closest approach per
+  attack; only a jump from flush against the left wall reached the pocket, 2 of 62 jumps), 11 (first tables).
+
+## Next
+
+1. Rebuild the tables when more recordings close:
+   `cd brain; ..\scripts\uv.cmd run python -m ssbot.tools.behaviour_build <runs...> --encounter Forum
+   --allow-failed-validation` (NUMBA_NUM_THREADS=4, below-normal priority; ~45 s per episode scan) and update forum.md §11.
+2. `forum_pocket` on the run F recordings (pocket mode): Clapper choices and jump aims with the hero up there; check the
+   "flush takeoff" rule (forum.md §10.4).
+3. Residual validation failures (small): Clawmaiden spear blast contacts after her death/attack (no owning instance),
+   Bellbearer bells 2-4, Clapper Slam Collider 2 in Slam Recover (per-state set).
+4. Oracle allies export still not deployed (helpers/Cogflies not in STATE); Ascendant's Grip pickup location unknown.
