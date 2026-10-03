@@ -54,6 +54,9 @@ def _cs(names: list[str], s: dict) -> dict[str, bool]:
         return {}
 
 
+FLOOR_HERO_Y = 3.5677        # the hero transform's y standing on the Bone_05 floor
+
+
 def moments(states: list[dict], names: list[str], death_states: tuple[str, ...] = ("Death Broadcast",)) -> dict:
     """Frames of the special moments in a stretch of STATEs: kill, stun, bounce, clash; plus hits dealt."""
     out: dict[str, list[int]] = {"kill": [], "stun": [], "bounce": [], "clash": [], "hit": []}
@@ -105,7 +108,9 @@ def trial(row: dict, states: list[dict], names: list[str]) -> dict | None:
     dmg = [s["f"] for s in states if fh - 1 <= s["f"] <= fh + 3 and any(e.get("k") == "damage"
                                                                          for e in s.get("ev") or ())]
     fh = dmg[0] if dmg else fh
-    s0 = by_f.get(fh) or {}
+    # the hero as the hit arrived: the frame before the damage frame (on the damage frame the hurt has already set
+    # her state; the first summary read hero_state there and counted 0 airborne hits of 112)
+    s0 = by_f.get(fh - 1) or by_f.get(fh) or {}
     h = s0.get("hero") or {}
     near = moments([s for s in states if fh - 12 <= s["f"] <= fh + 12], names)
     off = {k: min((f - fh for f in v), key=abs) for k, v in near.items() if v}
@@ -140,7 +145,7 @@ def trial(row: dict, states: list[dict], names: list[str]) -> dict | None:
         menu_s = round((menu["q"] - q(paused)) / 1e7, 3)
     out.update(
         hit_f=fh, hero_state=h.get("hero_state"), vy=round(((h.get("vel") or [0, 0])[1]), 2),
-        clip=(h.get("anim") or {}).get("clip"), airborne=h.get("hero_state") == 3, moments=off, special=special,
+        clip=(h.get("anim") or {}).get("clip"), airborne=bool(h.get("hero_state") == 3 or (h.get("pos") or [0, 0])[1] > FLOOR_HERO_Y + 0.1), moments=off, special=special,
         first_pausable=None if pausable is None else pausable - fh,
         pending=None if pol.get("first_pending_f") is None else pol["first_pending_f"] - fh,
         paused=None if paused is None else paused - fh,
