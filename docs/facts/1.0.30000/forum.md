@@ -69,15 +69,20 @@
 
 - Reaper 纹章：场景包里 `Greymoor_20c` 有 `Crest Get Shrine`（FSM 引用 `completedMemory_reaper`）和 `chapel_candle_control`，`Greymoor_20b` 有 `Chapel Door Control`（`chapelClosed_reaper`）和满屋的蜡烛开关 → Reaper 的礼拜堂在 Greymoor（`Greymoor_20b` 进门、`Greymoor_20c` 取纹章，取得 = `completedMemory_reaper`，autosplit "Reaper Crest"）。礼拜堂门的开启条件、记忆场景的内容和绕路时间【未核实】。
 - Ascendant's Grip：场景包字符串里找不到拾取点（拾取物引用的是资源，不是名字；只有 Lace 1 / Lace 2 / Lost Lace 的 FSM 提到 "Wallcling"）。社区说法：Dancers 和 Forum 末波都靠它贴墙（research.json）。取得地点【未知，需要查商店清单或拾取物资源】。
-- Cogfly：DESIGN §3.6.4 路线 S25 写在 High Halls（✚ Cogfly，用 1 块工艺金属合成）【未核实合成地点】。
+- Cogfly：`Hang_09`（High Halls）的 `Craft Pickup`（FSM `FSM`，检视文本 `COG_FLIER`）：检视 → `DialogueYesNoItemV3` 消耗 1 个所需物品（场景包里是资源引用，按 DESIGN 是 1 块工艺金属）→ 主角走到桌前、转身做工约 7.5 s（`Hero Face Table` 1.5 s + `Craft` 4.5 s + `Turn Back` 1.5 s）→ 得到物品。这段时间 `disablePause = 1`（`Wait` 置 1，`Get Item` 置 0）：**约 8 s 不能暂停**，路线和 quit map 要登记（房间里没有威胁时无妨）。与 DESIGN §3.6.4 S25 "High Halls → ✚ Cogfly" 一致。
 
 ## 7. savestate 组装与验证
 
 （实测后补，见下次更新）
 
-## 8. 场地几何（TERRAIN 实测）
+## 8. 场地几何
 
-（实测后补）
+场景包（`Hang_04` TileMap 的 EdgeCollider 和 `terrain collider` 盒子，`Hang_04_boss` 的门；TERRAIN 实测后核对）：
+- 地面：y = 3.0（tilemap 边 x 5–71）。社区存档站立时主角 y 4.5677。
+- 左墙：门 x ≤ 14.01（y 2.96–15.08），门上方是 tilemap 墙 x = 14（y 9–15）；再往上是向场地中间升高的台阶状天花板：`terrain collider (7)` x 11.92–14.88、底 y 15.15；`(6)` x 13.92–16.88、底 16.15；`(5)` x 16.92–19.88、底 17.15；`(4)` x 18.92–21.88、底 18.15。所以**左墙顶 ≈ x 14、y 15 以下**（墙面到 y ≈ 15，正上方是 y 15.15 的天花板台阶），贴墙最高点约 (14.5, 13.5–14.5)【待 TERRAIN 与贴墙实测】。
+- 右墙对称：门 x ≥ 48.99，天花板 `terrain collider` x 47.12–49.12 底 15.15、`(1)` 45.12–47.12 底 16.15、`(2)` 42.12–45.08 底 17.15、`(3)` 40.12–43.08 底 18.15。
+- 场地中间上方开阔到 y ≈ 33（相机锁 (1) 多边形）；`Normal World` 下还有 `Roof Collider_Basic (1)/(2)` 两个大多边形（y 14.2 起，左上 x 10.25–37.74、右上 x 30.11–54.21）。
+- `Teleplane`（触发盒 x 17.42–45.94、y 7.35–13.26）：会瞬移的敌人（Handmaiden 的 `Tele`）的落点范围【推测】。
 
 ## 9. oracle 导出核对
 
