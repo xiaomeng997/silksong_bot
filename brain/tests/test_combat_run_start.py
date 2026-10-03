@@ -15,3 +15,6 @@ def test_cutscene_is_a_game_without_control():
     assert not _in_game_without_control({"game": {"scene": "Menu_Title", "gs": 1, "menu": MENU_MAIN}, "hero": None})
     assert not _in_game_without_control({"game": {"scene": "Menu_Title", "gs": 1, "menu": MENU_SAVE_PROFILES},
                                          "hero": hero})
+    # a new game started from the save select: PLAYING in Tut_01 with the menu state still SAVE_PROFILES
+    assert _in_game_without_control({"game": {"scene": "Tut_01", "gs": GS_PLAYING, "menu": MENU_SAVE_PROFILES},
+                                     "hero": hero, "pause": {}})

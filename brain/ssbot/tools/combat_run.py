@@ -81,11 +81,14 @@ def mode_config(mode: str, seed: int):
 
 def _in_game_without_control(s: dict) -> bool:
     """A save is loaded (a scene, the hero exported, not the title or save-select menus) but Hornet takes no input:
-    a cutscene (the post-kill memory scene), a transition or a load. load_slot only knows the menus and gameplay."""
-    from ssbot.probes.common import MENU_MAIN, MENU_SAVE_PROFILES, in_gameplay
+    a cutscene (the post-kill memory scene), a transition or a load. load_slot only knows the menus and gameplay.
+    While PLAYING the menu state is not read: UIManager keeps the save-select menuState after a game starts from it
+    (instance 4's first start, 2026-10-02: an empty slot 1 began a new game in Tut_01 with menu still SAVE_PROFILES,
+    and load_slot pressed Enter there and timed out twice)."""
+    from ssbot.probes.common import GS_PLAYING, MENU_MAIN, MENU_SAVE_PROFILES, in_gameplay
     g = s.get("game") or {}
-    return bool(g.get("scene")) and bool(s.get("hero")) and g.get("menu") not in (MENU_MAIN, MENU_SAVE_PROFILES) \
-        and not in_gameplay(s)
+    on_menu = g.get("gs") != GS_PLAYING and g.get("menu") in (MENU_MAIN, MENU_SAVE_PROFILES)
+    return bool(g.get("scene")) and bool(s.get("hero")) and not on_menu and not in_gameplay(s)
 
 
 def worker(a: argparse.Namespace) -> int:
