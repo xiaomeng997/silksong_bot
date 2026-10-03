@@ -71,7 +71,7 @@ import numpy as np
 from ssbot.combat.bell_track import ATK_BELL, AtkBellTracks, DropBellTracks, SKIN_Z
 from ssbot.combat.boss_model import TAIL, Anchor, BossModel
 from ssbot.combat.fastquery import circle_hits, query_par
-from ssbot.combat.pogo_targets import CERT_MARGIN_U, CERT_MAX_S, TargetPath, TargetTracker, simulate
+from ssbot.combat.pogo_targets import CERT_MARGIN_U, CERT_MAX_S, STEP_S, TargetPath, TargetTracker, simulate
 from ssbot.core.bosses import BELL_BEAST_PHASES as VE_PHASE_OF
 from ssbot.core.worldstate import ORACLE, VISION_EQUIVALENT, Entity, Ev, WorldState
 from ssbot.knowledge import hitbox_tables as hb
@@ -110,15 +110,17 @@ DET_ATK = os.environ.get("SSBOT_DET_ATK", "1") != "0"
 ATK_LAUNCH_STATE = "Burst Out"     # the boss's state on the attack bells' Launch frame (100 of 100, 20261002_171806 i0)
 ATK_ANCHOR_TOL_U = 0.5             # a pair's middle this close to a burst's anchor is that burst's pair
 ATK_LAG_SLACK_S = 0.05
-# the vision view's hit targets (a down spike bounces off a bell, a slash recoils from it) from the bells on exact paths
-# (Forecast.det): the certain circle shrinks by this much more than the oracle's (the track's centre error, p99 0.29 u
-# at tk 0 and max 0.51 u: the 50 Hz step phase, bell_track_audit --kind atk on 20261002_171806), and a drop bell counts
-# only while it falls (a down spike on a rising one clamps its vy: TINK DOWN), never for a side slash's redirect (the
-# track does not follow a tinked bell: bell_track withdraws it). Off by default (SSBOT_VE_TARGETS=1 turns it on): on
-# a recorded fight replayed in degraded_dust (view_compare 20261002_171806 i0 ep2) it generated bell pogos (0.34 per
-# Ptn R tick, 6.1 per Burst Recovery tick) but accepted none and left FORCED_RISK unchanged; not yet run live
-VE_TARGETS = os.environ.get("SSBOT_VE_TARGETS", "0") == "1"
-VE_DROP_TARGETS = os.environ.get("SSBOT_VE_DROP_TARGETS", "0") == "1"
+# the vision view's hit targets (a down spike bounces off a bell, a slash recoils from it, a side slash knocks a drop
+# bell aside) from the bells on exact paths (Forecast.det): the certain circle shrinks by this much more than the
+# oracle's (the track's centre error, p99 0.29 u at tk 0 and max 0.51 u: the 50 Hz step phase, bell_track_audit
+# --kind atk on 20261002_171806); a drop bell's pogo counts only while it falls (a down spike on a rising one clamps
+# its vy, TINK DOWN, which the pogo branch's path does not follow). On by default since the task V review (2026-10-03):
+# the hero's own hits on bells are known effects (recoil, bounce, redirect, pogo_targets.tink), and without them in
+# the model a slash through a bell was scored against the bell's untouched path (SSBOT_VE_TARGETS=0: off, the A/B).
+# A drop bell whose track has tinked branches open (bell_track: the hero attacked it, the detections do not tell yet)
+# is no target: a plan whose attack meets any of its branches is not safe (Forecast.ambiguous_paths, planner).
+VE_TARGETS = os.environ.get("SSBOT_VE_TARGETS", "1") == "1"
+VE_DROP_TARGETS = os.environ.get("SSBOT_VE_DROP_TARGETS", "1") == "1"
 VE_CERT_EXTRA_U = 0.35
 # the vision view's HP is the hits it saw: a hit it missed leaves the count high, so just above the rage HP the rage is
 # still likely (scoring only: the support always keeps Rage Pos while it is possible). Live degraded_dust run
@@ -190,12 +192,23 @@ class DetBell(NamedTuple):
     skin: float = 0.0
     life: float | None = None      # path time its collider goes off (an attack bell's End Timer), None: never
     slack: tuple | None = None     # its time slack (None: DET_SLACK_S)
+    branches: tuple | None = None  # VE drop bell: the paths it may be on, (side, tinks) (bell_track.DropEstimate)
+    rel: object | None = None      # ... and the track that has their cached relative paths (DropBellTracks)
 
     def branch_sides(self) -> tuple:
         if self.sides is not None:
             return self.sides
         b = self.sp.bounces
         return (1, -1) if self.nb < len(b) and b[self.nb].get("vx") == "random" else (0,)
+
+    def paths(self) -> tuple:
+        """The branches _bell_path takes: (side, tinks) pairs for a VE drop bell, else bounce sides."""
+        return self.branches if self.branches is not None else self.branch_sides()
+
+    @property
+    def ambiguous(self) -> bool:
+        """A VE drop bell the hero may have tinked, with more than one path still open."""
+        return self.branches is not None and len(self.branches) > 1 and any(tk for _, tk in self.branches)
 
 
 @dataclass(slots=True)
@@ -258,6 +271,7 @@ class Forecast:
         self.roots = roots
         self.boss = boss
         self.det: list = []           # drop bells on exact paths (Forecaster._det_bell)
+        self.self_tpl: dict = {}      # drop bell type key -> its self-template placements, placed or not (audits)
         self.truncated = 0            # walk branches inside the horizon cut by MAX_NODES / depth
         self._paths: dict = {}        # drop-bell path cache (_bell_path)
         kids = {}
@@ -316,9 +330,9 @@ class Forecast:
             tk_ = d.type_key
             if exclude is not None and tk_.endswith(exclude) or only is not None and tk_ != only:
                 continue
-            for sd in d.branch_sides():
+            for br in d.paths():
                 for dt in (d.slack or DET_SLACK_S):
-                    by_r.setdefault(d.sp.r + DET_SKIN_U + d.skin, []).append(self._bell_path(j, sd, dt, tk))
+                    by_r.setdefault(d.sp.r + DET_SKIN_U + d.skin, []).append(self._bell_path(j, br, dt, tk))
         if not by_r:
             return out
         shp = out.shape
@@ -334,17 +348,28 @@ class Forecast:
             flat |= circle_hits(x2, y2, cx, cy, ok, float(hx), float(hy), float(rr))
         return flat.reshape(shp)
 
-    def _bell_path(self, j: int, sd: int, dt: float, tk: np.ndarray, redirect: tuple | None = None):
-        """Drop bell j's centre (x, y, ok) at tk + dt on bounce side sd (or knocked aside: redirect = (t_hit, d)),
-        cached per forecast: the planner asks the same times for every candidate block of a tick (pogo_targets.simulate
-        was 135,499 calls, 5.5 s of an 8,000-tick bench before the cache)."""
+    def _bell_path(self, j: int, sd, dt: float, tk: np.ndarray, redirect: tuple | None = None):
+        """Bell j's centre (x, y, ok) at tk + dt on branch sd (a bounce side; a VE drop bell's (side, tinks)), or
+        knocked aside: redirect = (t_hit, d), cached per forecast: the planner asks the same times for every candidate
+        block of a tick (pogo_targets.simulate was 135,499 calls, 5.5 s of an 8,000-tick bench before the cache).
+        A VE drop bell's path comes from its track's cached relative path (bell_track.DropBellTracks.rel_path), the
+        planner's hit one more tink at the first physics step from t_hit on."""
         key = (j, sd, dt, len(tk), float(tk[0]), float(tk[-1]), redirect)
         r = self._paths.get(key)
         if r is None:
             sp, bx, by, vx, vy, nb, rest, _, t0 = self.det[j][:9]
             life = self.det[j].life
             t = np.maximum(tk + dt + t0, 0.0)
-            if redirect is not None:
+            rel = self.det[j].rel
+            if rel is not None:
+                side, tinks = sd
+                if redirect is not None:
+                    k = int(math.ceil((redirect[0] + t0) / STEP_S - 1e-6))
+                    if not tinks or k > tinks[-1][0]:
+                        side = int(redirect[1]) if redirect[1] and k * STEP_S <= rel.t_fall else side
+                        tinks = tinks + ((k, int(redirect[1])),)
+                r = rel.path_at(bx, side, tinks, t)
+            elif redirect is not None:
                 r = simulate(sp, bx, by, vx, vy, nb, life, t, side=sd, redirect=(redirect[0] + t0, redirect[1]))
             else:
                 if rest is not None:
@@ -361,7 +386,7 @@ class Forecast:
         if j is None:
             return None
         sp, rest = self.det[j].sp, self.det[j].rest
-        if rest is not None or "side" not in sp.redirect:
+        if rest is not None or "side" not in sp.redirect or self.det[j].ambiguous:
             return None
         tk = np.asarray(tk, np.float64)
         x = np.asarray(x, np.float64)
@@ -371,11 +396,14 @@ class Forecast:
             hx, hy = hx + self.fc.comfort[0], hy + self.fc.comfort[1]
         rr = sp.r + DET_SKIN_U + self.det[j].skin
         out = np.zeros(x.shape, bool)
-        for dt in (self.det[j].slack or DET_SLACK_S):
-            cx, cy, ok = self._bell_path(j, d, dt, tk, (t_hit, d))
-            dx = np.maximum(np.abs(x - cx) - hx, 0.0)
-            dy = np.maximum(np.abs(y - cy) - hy, 0.0)
-            out |= ((dx * dx + dy * dy) <= rr * rr) & ok
+        # the oracle's bell takes the hit's side; a VE drop bell each of its branches (one before its bounce)
+        brs = self.det[j].paths() if self.det[j].rel is not None else (d,)
+        for br in brs:
+            for dt in (self.det[j].slack or DET_SLACK_S):
+                cx, cy, ok = self._bell_path(j, br, dt, tk, (t_hit, d))
+                dx = np.maximum(np.abs(x - cx) - hx, 0.0)
+                dy = np.maximum(np.abs(y - cy) - hy, 0.0)
+                out |= ((dx * dx + dy * dy) <= rr * rr) & ok
         return out
 
     def occupied_redirect(self, x, y, tk, type_key: str, t_hit: float, d: int, comfort: bool = False
@@ -622,26 +650,48 @@ class Forecast:
         return self._det_targets(np.asarray(tk, np.float64)) if VE_TARGETS else []
 
     def _det_targets(self, tk: np.ndarray) -> list:
-        """VE: one TargetPath per bell on an exact path with one branch (a drop bell before its bounce: until the
-        bounce), nominal centre (no time slack), determined where simulate says so, collider on until its life;
-        a drop bell only while falling, and only with VE_DROP_TARGETS (any attack near a drop bell withdraws its
-        track, bell_track touched: the next tick sees the bell's whole self template, not the path the pogo was
-        planned on)."""
+        """VE: one TargetPath per bell on an exact path with one branch until its next random bounce (two open
+        bounce sides: until the bounce), nominal centre (no time slack), determined where its path says so, collider
+        on until its life. A drop bell (VE_DROP_TARGETS): a side slash knocks it aside on the redirect rule
+        (Forecast.redirect_occ on its branch), and a pogo counts only while it falls (pogo_ok); a drop bell with
+        tinked branches open is no target (ambiguous_paths)."""
         out = []
         for j, d in enumerate(self.det):
-            if d.type_key.startswith(DROP_BELL) and not VE_DROP_TARGETS:
+            drop = d.type_key.startswith(DROP_BELL)
+            if drop and (not VE_DROP_TARGETS or d.ambiguous):
                 continue
-            sides = d.branch_sides()
-            sd = sides[0] if len(sides) == 1 else 0
-            cx, cy, ok = self._bell_path(j, sd, 0.0, tk)
+            if d.branches is not None:
+                sides = {sd for sd, _ in d.branches}
+                br = (next(iter(sides)) if len(sides) == 1 else 0, d.branches[0][1])
+            else:
+                sides = d.branch_sides()
+                br = sides[0] if len(sides) == 1 else 0
+            cx, cy, ok = self._bell_path(j, br, 0.0, tk)
             ok = np.asarray(ok, bool).copy()
-            if d.type_key.startswith(DROP_BELL):
+            pogo_ok = None
+            if drop:
                 dy = np.diff(cy, append=cy[-1] - 1e-6) if len(cy) else cy
-                ok &= dy < 0.0
+                pogo_ok = ok & (dy < 0.0)
             r = d.sp.r
             box = np.stack([cx - r, cy - r, cx + r, cy + r], axis=1)
             out.append(TargetPath(d.type_key, -1 - j, np.ascontiguousarray(box), ok, ok & (tk <= CERT_MAX_S), r,
-                                  CERT_MARGIN_U + VE_CERT_EXTRA_U + d.skin, False))
+                                  CERT_MARGIN_U + VE_CERT_EXTRA_U + d.skin, drop, pogo_ok))
+        return out
+
+    def ambiguous_paths(self, tk: np.ndarray) -> list:
+        """VE drop bells with tinked branches open: per bell, (type_key, [(box [T, 4], ok [T]) per branch, nominal
+        centre]) for the planner's check that no plan's attack meets one (its outcome is not modelled)."""
+        out = []
+        for j, d in enumerate(self.det):
+            if not d.ambiguous:
+                continue
+            paths = []
+            r = d.sp.r
+            for br in d.branches:
+                cx, cy, ok = self._bell_path(j, br, 0.0, tk)
+                paths.append((np.ascontiguousarray(np.stack([cx - r, cy - r, cx + r, cy + r], axis=1)),
+                              np.ascontiguousarray(np.asarray(ok, bool))))
+            out.append((d.type_key, paths))
         return out
 
     def boss_box(self, tk: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
@@ -1385,6 +1435,7 @@ class Forecaster:
             for iid in self.drop_tracks.obs:
                 if iid not in tr.bells:
                     self._det_bell(iid, det)
+        self_tpl: dict[str, list] = {}
         if tr.bells:
             nid = len(nodes)
             nodes.append(Node(nid, "bells", 0.0, 0.0, None, 1.0, -1, None))
@@ -1394,19 +1445,22 @@ class Forecaster:
                 key = f"{hb.SUPPORT}ent/{tk}/self"
                 if key not in self.meta:
                     continue
-                if self._det_bell(iid, det):
-                    continue                  # falling or bounced: its exact path (two branches) replaces the template
                 t0, t1 = self.meta[key]
                 # VE: a cue seen in few frames: its x +- 3 sigma as well, beyond what the view's margin covers
                 sx = tr.bell_sx.get(iid, 0.0)
                 dxs = (0.0,) if sx <= CUE_SIGMA_COVERED else (-SKIN_Z * sx, 0.0, SKIN_Z * sx)
+                own = []
                 for j in range(-k, k + 1):
                     e = t_arm + j * BIN - origin
                     if e + t1 < -BIN or e + t0 > H + BIN:
                         continue
                     for dx in dxs:
-                        placements.append(Placement(key, -e, (pos[0] + dx, pos[1]), 1, nid, e + t0, e + t1,
-                                                    frozenset({tk})))
+                        own.append(Placement(key, -e, (pos[0] + dx, pos[1]), 1, nid, e + t0, e + t1,
+                                             frozenset({tk})))
+                self_tpl[tk] = own            # (audits: the template a bell on an exact path would have had)
+                if self._det_bell(iid, det):
+                    continue                  # falling or bounced: its exact path (two branches) replaces the template
+                placements.extend(own)
         for fam, anchor, lo, hi, phase, death in self.tracker.ends:
             nid = len(nodes)
             nodes.append(Node(nid, TAIL, lo - origin, hi - origin, fam, 1.0, -1, anchor))
@@ -1416,6 +1470,7 @@ class Forecaster:
             known = True
         out = Forecast(self, origin, H, nodes, placements, known, roots, self.boss)
         out.det = det
+        out.self_tpl = self_tpl
         out.truncated = self.truncated
         return out
 
@@ -1437,7 +1492,8 @@ class Forecaster:
             dt_ = self.drop_tracks
             tk_ = dt_.type_of.get(iid, DROP_BELL)
             det.append(DetBell(dt_.spec, est.x, dt_.y0, dt_.vx0, dt_.vy0, 0, None, tk_, t0=self.t - est.t_drop,
-                               sides=(est.side,) if est.side else (1, -1), skin=SKIN_Z * est.sx, slack=VE_SLACK))
+                               sides=(est.side,) if est.side else (1, -1), skin=SKIN_Z * est.sx, slack=VE_SLACK,
+                               branches=est.paths(), rel=dt_))
             return True
         if not DET_REPLACE or self._ws is None:
             return False

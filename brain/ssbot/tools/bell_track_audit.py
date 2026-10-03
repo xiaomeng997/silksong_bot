@@ -10,10 +10,13 @@ Per recorded fight: OracleBackend -> ObservabilityFilter (dust cues) -> SimpleNo
 Forecaster (its DropBellTracks), every frame. At every frame with an estimate for a bell: the predicted centre at tk
 ahead (0 .. 0.8 s every 0.05 s) on each branch the estimate keeps open, against the bell's recorded transform at the
 first frame whose game time reaches t + tk (while the recorded bell is still in a state the registry lists, i.e.
-not put away). Reported: the centre error of the nearest branch (min over the forecaster's time slack DET_SLACK_S,
-as the support uses it) by tk, the share of frames beyond the contact radius margin (skin), the time from the first
-floor contact to the side decision, and decisions for the wrong side (must be 0: a wrong side drops the real branch
-from the support).
+not put away). Reported: the centre error of the nearest branch (min over the time slack the vision view's support
+uses for tracked bells, VE_DET_SLACK_S; --slack det: the oracle's DET_SLACK_S) by tk, the share of frames beyond the
+contact radius margin (skin), the time from the first floor contact to the side decision, and decisions for the wrong
+side (must be 0: a wrong side drops the real branch from the support).
+Drop bells the hero attacked (bell_track tink branches, task V review): the same errors split by whether the recorded
+bell had been tinked by then (an FSM Tink event) and whether the estimate had tinked branches open, the branch counts,
+and how often a touched bell was withdrawn (no estimate: its self template stands).
 """
 import argparse
 import json
@@ -27,13 +30,16 @@ import numpy as np
 TKS = np.round(np.arange(0, 0.81, 0.05), 3)
 
 
-def audit(states: list[dict], seed: int, out: dict) -> None:
+TINK_TO = {"Tink Right", "Tink Left", "Tink D", "Tink Right 2", "Tink Left 2", "Tink D 2"}
+
+
+def audit(states: list[dict], seed: int, out: dict, slack: tuple) -> None:
     from ssbot.backends.noise_simple import SimpleNoise
     from ssbot.backends.observability import ObservabilityFilter
     from ssbot.backends.oracle_backend import OracleBackend
     from ssbot.combat.bell_track import DROP_BELL, SKIN_Z
-    from ssbot.combat.forecast import DET_SLACK_S, DET_SKIN_U
-    from ssbot.combat.pogo_targets import load_registry, simulate
+    from ssbot.combat.forecast import DET_SKIN_U
+    from ssbot.combat.pogo_targets import load_registry
     from ssbot.combat.bell_track import DropBellTracks
     from ssbot.core.bosses import BELL_BEAST
     from ssbot.train.planner_policy import DUST_TELL
@@ -44,9 +50,19 @@ def audit(states: list[dict], seed: int, out: dict) -> None:
     tracks = DropBellTracks(spec)
     tg = np.zeros(len(states))
     truth: list[dict] = []             # per frame: iid -> (x, y, state)
+    tinked_at: dict[int, float] = {}   # iid -> game s of its last recorded tink (FSM event)
+    tinked: list[dict] = []            # per frame: the iids tinked so far (this drop)
     for i, s in enumerate(states):
         ws = noise.apply(filt.apply(be.feed(s)))
         tg[i] = ws.stamp.t_game_s
+        for ev in s.get("ev") or ():
+            d = ev.get("d") or {}
+            if ev.get("k") == "fsm" and str(d.get("obj", "")).startswith(DROP_BELL):
+                if d.get("to") in TINK_TO:
+                    tinked_at[int(d.get("iid"))] = tg[i]
+                elif d.get("to") in ("Dormant", "Antic"):
+                    tinked_at.pop(int(d.get("iid")), None)
+        tinked.append(dict(tinked_at))
         tr = {}
         for e in s.get("ents") or ():
             if str(e.get("type_key", "")).startswith(DROP_BELL) and e.get("fsms"):
@@ -56,22 +72,28 @@ def audit(states: list[dict], seed: int, out: dict) -> None:
         truth.append(tr)
         tracks.update(ws, tg[i])
         for iid in list(tracks.obs):
+            was_touched = iid in tracks.touched
             est = tracks.estimate(iid)
             if est is None:
                 if iid in tr:
                     out["no_estimate"].append(1)
+                    if was_touched:
+                        out["touched_withdrawn"].append(1)
                 continue
             if iid in tr:
                 out["no_estimate"].append(0)
+                if was_touched:
+                    out["touched_withdrawn"].append(0)
+                    out["branches"].append(len(est.paths()))
             if est.side and tr.get(iid) is not None:
                 key = (iid, round(est.t_drop, 1))
                 if key not in out["_sided"]:
                     out["_sided"][key] = True
                     out["side_latency"].append(tg[i] - est.t_contact)
-            sides = (est.side,) if est.side else (1, -1)
-            out["_pending"].append((i, iid, est, sides, tg[i] - est.t_drop))
+            out["_pending"].append((i, iid, est, est.paths(), tg[i] - est.t_drop))
     # resolve predictions against the recorded future
-    for i, iid, est, sides, t0 in out.pop("_pending"):
+    for i, iid, est, paths, t0 in out.pop("_pending"):
+        amb = any(tk_ for _, tk_ in paths)
         for tk in TKS:
             j = int(np.searchsorted(tg, tg[i] + tk - 1e-6))
             if j >= len(states) or iid not in truth[j]:
@@ -80,26 +102,37 @@ def audit(states: list[dict], seed: int, out: dict) -> None:
             if ay < spec.ground_y - spec.r:
                 continue                    # sunk below the floor (Submerge): nothing on the floor can meet it
             best = np.inf
-            for sd in sides:
-                for dt in DET_SLACK_S:
-                    cx, cy, ok = simulate(spec, est.x, tracks.y0, tracks.vx0, tracks.vy0, 0, None,
-                                          np.array([max(t0 + tk + dt, 0.0)]), side=sd)
+            for side, tinks in paths:
+                for dt in slack:
+                    cx, cy, ok = tracks.path_at(est.x, side, tinks, np.array([max(t0 + tk + dt, 0.0)]))
                     best = min(best, float(np.hypot(cx[0] - ax, cy[0] - ay)))
             out[f"err_{tk:.2f}"].append(best)
+            # the recorded bell tinked before the prediction's time (it happened) and after its origin (unknown then:
+            # a later hit of the hero's own, which the planner's rows model, not the forecast) or before it
+            tt = tinked[j].get(iid)
+            cat = "untinked" if tt is None else ("tinked_after_origin" if tt > tg[i] else "tinked")
+            cat += "/branches" if amb else ""
+            miss = best > DET_SKIN_U + SKIN_Z * est.sx
+            out[f"cat_{cat}"].append(miss)
+            if miss and not cat.startswith("tinked_after"):
+                out["miss_cases"].append((cat, round(best, 2), float(tk), iid, st, round(ax, 2), round(ay, 2),
+                                          round(float(tg[i]), 3), round(est.x, 2), round(est.t_drop, 3), est.side,
+                                          est.n, len(paths), [list(b) for b in paths][:4]))
             if best > 1.0:
                 out["worst"].append((round(best, 2), float(tk), iid, round(est.x, 2), round(est.t_drop, 3),
                                      est.side, est.n, st, round(ax, 2), round(ay, 2), round(float(tg[i]), 3)))
             over = best > DET_SKIN_U + SKIN_Z * est.sx
             out[f"over_{tk:.2f}"].append(over)
             if over:
-                out["over_by"].append(f"{st}/{'open' if len(sides) > 1 else 'sided'}/n{min(est.n, 5)}")
-            if est.side and tg[j] > est.t_contact + 0.1 and st in ("Bounce Air", "Submerge"):
+                out["over_by"].append(f"{st}/{'open' if len(paths) > 1 else 'sided'}/n{min(est.n, 5)}")
+            if est.side and not est.branches and tt is None and tg[j] > est.t_contact + 0.1 and \
+                    st in ("Bounce Air", "Submerge"):
                 true_side = 1 if ax > est.x else -1
                 out["wrong_side"].append(int(true_side != est.side))
     out["_pending"] = []
 
 
-def audit_atk(states: list[dict], seed: int, out: dict) -> None:
+def audit_atk(states: list[dict], seed: int, out: dict, slack: tuple) -> None:
     """Attack bells (bell_track.AtkBellTracks): the same centre errors on the launch paths, plus the collider's end
     (a recorded bell still on after the estimate's end must not happen), wrong sides, and how often a burst's two
     bells are both on exact paths (the forecaster then drops the attack-bell unions) with the pair's middle against
@@ -109,7 +142,7 @@ def audit_atk(states: list[dict], seed: int, out: dict) -> None:
     from ssbot.backends.oracle_backend import OracleBackend
     from ssbot.combat.bell_track import ATK_BELL, SKIN_Z, AtkBellTracks
     from ssbot.combat.boss_model import BossModel
-    from ssbot.combat.forecast import DET_SKIN_U, DET_SLACK_S, BossTracker
+    from ssbot.combat.forecast import DET_SKIN_U, BossTracker
     from ssbot.combat.pogo_targets import load_registry, simulate
     from ssbot.core.bosses import BELL_BEAST
     from ssbot.core.worldstate import VISION_EQUIVALENT
@@ -165,7 +198,7 @@ def audit_atk(states: list[dict], seed: int, out: dict) -> None:
                 continue
             best = np.inf
             for x0, y0, vx0, vy0 in branches:
-                for dt in DET_SLACK_S:
+                for dt in slack:
                     cx, cy, ok = simulate(spec, x0, y0, vx0, vy0, 0, None, np.array([max(t0 + tk + dt, 0.0)]))
                     best = min(best, float(np.hypot(cx[0] - ax_, cy[0] - ay)))
             out[f"err_{tk:.2f}"].append(best)
@@ -187,7 +220,11 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--noise-seed", type=int, default=1)
     ap.add_argument("--kind", choices=("drop", "atk"), default="drop")
     ap.add_argument("--json", type=Path, default=None)
+    ap.add_argument("--slack", choices=("ve", "det"), default="ve",
+                    help="time slack of the predicted paths: the vision view's (VE_SLACK, default) or DET_SLACK_S")
     a = ap.parse_args(argv)
+    from ssbot.combat.forecast import DET_SLACK_S, VE_SLACK
+    slack = tuple(VE_SLACK or DET_SLACK_S) if a.slack == "ve" else tuple(DET_SLACK_S)
     from ssbot.record.recorder import RecordingReader
     from ssbot.tools.postmortem import episode_rows, find_recording
     out: dict = defaultdict(list)
@@ -200,10 +237,10 @@ def main(argv: list[str] | None = None) -> int:
                 continue
             r = RecordingReader(find_recording(a.run, row))
             states = list(r.states(row["f_end"] - row["acts"], row["f_end"]))
-            (audit if a.kind == "drop" else audit_atk)(states, a.noise_seed + 1000 * inst + ep, out)
+            (audit if a.kind == "drop" else audit_atk)(states, a.noise_seed + 1000 * inst + ep, out, slack)
             n += 1
             print(f"i{inst} ep{ep}: {len(out['err_0.00'])} estimates", flush=True)
-    rep = {"episodes": n, "noise_seed": a.noise_seed}
+    rep = {"episodes": n, "noise_seed": a.noise_seed, "slack": list(slack)}
     q = lambda v: [round(float(np.percentile(v, p)), 3) for p in (50, 90, 99, 99.9)] + [round(float(np.max(v)), 3),
                                                                                          len(v)]  # noqa: E731
     rep["centre_err_p50_p90_p99_p999_max_n"] = {f"{tk:.2f}": q(out[f"err_{tk:.2f}"]) for tk in TKS
@@ -217,6 +254,12 @@ def main(argv: list[str] | None = None) -> int:
     rep["wrong_side"] = [int(np.sum(out["wrong_side"])), len(out["wrong_side"])]
     rep["no_estimate_share_while_falling"] = round(float(np.mean(out["no_estimate"])), 4) if out["no_estimate"] \
         else None
+    if a.kind == "drop":
+        rep["over_skin_by_tink"] = {k[4:]: [int(np.sum(v)), len(v)] for k, v in out.items() if k.startswith("cat_")}
+        rep["miss_cases"] = out["miss_cases"][:40]
+        rep["touched_withdrawn"] = [int(np.sum(out["touched_withdrawn"])), len(out["touched_withdrawn"])]
+        rep["branches_p50_p90_max"] = [int(np.percentile(out["branches"], 50)), int(np.percentile(out["branches"], 90)),
+                                       int(np.max(out["branches"]))] if out["branches"] else None
     if a.kind == "atk":
         rep["paired_share"] = round(float(np.mean(out["paired"])), 4) if out["paired"] else None
         rep["sided_share"] = round(float(np.mean(out["sided"])), 4) if out["sided"] else None

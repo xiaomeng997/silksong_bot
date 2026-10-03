@@ -65,6 +65,7 @@ class TargetPath:
     r: float
     cert_margin: float = CERT_MARGIN_U   # the certain circle: r minus this
     redirect: bool = True     # a side slash's redirect may be planned on it (its registry entry permitting)
+    pogo_ok: np.ndarray | None = None    # [T] where a down spike's hit counts (None: wherever ok)
 
 
 def load_registry(path: Path | str | None = None) -> list[TargetSpec]:
@@ -80,26 +81,49 @@ def load_registry(path: Path | str | None = None) -> list[TargetSpec]:
     return out
 
 
+def tink(spec: TargetSpec, vx: float, vy: float, d: int) -> tuple[float, float]:
+    """A drop bell's velocity right after a hero hit moving d (+1 right, -1 left, 0 down), as its Control FSM sets it
+    (the states Tink Right / Tink R Min, Tink Left / Tink L Min, Tink D, and the same with " 2" from Bounce Air;
+    UnityPy dump C:/ssbot/sandbox/m2_agent_notes/fsm_dropbell_m.txt): right: vx = clamp(|vx|, 5, 10); left: vx = -|vx|
+    clamped by FloatClamp(min -5, max -10), i.e. Mathf.Clamp's first test wins: -5 when |vx| > 5, else -10; down:
+    vy = min(vy, 0). Live oracle run 20261002_171806 (74 fights, 95 tinks, tools: vv_scratch/fx/tink_facts.py): 90 of
+    92 side tinks match (the other 2 landed within the 2 frames looked at: their bounce took Bounce X = 4 d), every
+    left tink of a falling or bouncing bell (|vx| 0 or 4) went to -10, every direction was the hero's facing (92 of
+    92, SlashAlt); 3 Tink D 2 kept vx and vy (falling already)."""
+    if d == 0:
+        return vx, min(vy, 0.0)
+    r = spec.redirect.get("side") or {}
+    lo, hi = float(r.get("vx_min", 5.0)), float(r.get("vx_max", 10.0))
+    if d > 0:
+        return min(max(abs(vx), lo), hi), vy
+    return (-lo if abs(vx) > lo else -hi), vy
+
+
 def simulate(spec: TargetSpec, x: float, y: float, vx: float, vy: float, nb: int, life_s: float | None,
-             tk: np.ndarray, side: int = 0, redirect: tuple[float, float] | None = None
+             tk: np.ndarray, side: int = 0, redirect: tuple | None = None
              ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Centre path sampled at tk (s, game time) and whether it is determined there. side +-1: the branch of a random
     bounce (a drop bell's) taken to that side, so the path stays determined (one of two branches, p 0.5 each).
     Recordings 20261001_122249 i0_002 / i3_002, time from the game's physics steps: centre error 0.000 u over 0.8 s for
     attack bells (Launch, Launched Up through the first bounce) and drop bells (Air, Bounce Air), n 7,532 starts.
-    redirect (t, dir): a side slash meets it at t (a drop bell's TINK RIGHT / LEFT, FSM Tink Right / Tink R Min): vx
-    becomes dir x clamp(|vx|, 5, 10) and its next bounce goes that way (Bounce X = dir x 4)."""
+    redirect (t, dir), or a tuple of them in time order: a hero hit meets it at t (a drop bell's TINK, tink()): a side
+    one (dir +-1) sets vx and sends its next bounce that way (Bounce X = dir x 4); a down one (dir 0) clamps vy."""
     t_end = float(tk[-1]) if len(tk) else 0.0
     n = int(math.ceil(t_end / STEP_S)) + 2
     ts = np.arange(n) * STEP_S
     xs, ys, det = np.empty(n), np.empty(n), np.ones(n, bool)
     known = True
     gone = False
+    reds = list(redirect) if redirect is not None and len(redirect) and isinstance(redirect[0], tuple) else \
+        ([redirect] if redirect is not None else [])
     for i in range(n):
-        if redirect is not None and ts[i] >= redirect[0]:
-            d = 1.0 if redirect[1] > 0 else -1.0
-            vx = d * min(max(abs(vx), 5.0), 10.0)
-            side, known, redirect = int(d), True, None
+        while reds and ts[i] >= reds[0][0]:
+            d = int(np.sign(reds.pop(0)[1]))
+            if gone or nb >= len(spec.bounces):
+                continue                    # sinking (Submerge) or gone: no Tink state to go to
+            vx, vy = tink(spec, vx, vy, d)
+            if d:
+                side, known = d, True
         if life_s is not None and ts[i] > life_s:
             gone = True
         xs[i], ys[i], det[i] = x, y, known and not gone

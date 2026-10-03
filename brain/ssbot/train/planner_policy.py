@@ -22,6 +22,8 @@ Per STATE (this is the only place where backends meet the combat stack, which re
   5. unpredicted hits: a hero hit whose box (frame c or c - 1) is outside the support forecast L = 3 frames earlier
      (the stage-A recall pairing; 4, else 2 when a late tick left a gap; none of these: unknown, counted the same)
      counts for the supervisor's Q4.
+  6. the known-effect invariant (train/bell_hit_monitor.py): every drop bell the hero tinks must leave the bell's
+     danger zone around her no larger than the untouched bell's (violations counted in stats()["bell_hits"]).
 The decision log (decisions_i<N>.jsonl in the run directory) keeps the 90 ticks before every hero hit, lethal hit,
 FORCED_RISK and supervisor pause, and 10 after, for ssbot.tools.postmortem.
 """
@@ -51,6 +53,7 @@ from ssbot.knowledge import kinematics as kin
 from ssbot.knowledge.kinematics import HeroParams, HoldState, StateTracker, Terrain2D
 from ssbot.safety.pause_quit import TERMINAL
 from ssbot.safety.supervisor import SupervisorConfig
+from ssbot.train.bell_hit_monitor import BellHitMonitor
 from ssbot.train.supervision import SupervisedControl
 
 MARGIN_ORACLE = (0.15, 0.25)          # DESIGN §3.5.3 m = 0.15 u; y + 0.10 u so a jump's lane spread fits one point
@@ -254,6 +257,7 @@ class PlannerPolicy:
             self.fc.update(ws)
             self.counts["caught_up"] += 1
             self._unpred_backlog += self._unpredicted(raw, ws.stamp.frame)
+            self._mon_raws.append(sk)
 
     def warmup(self) -> float:
         """Compile every numba path before the first episode (a first call mid-fight compiles for seconds, and the
@@ -353,6 +357,8 @@ class PlannerPolicy:
         self.plan_ms: list[float] = []
         self._last_f: int | None = None          # the last STATE acted on (_catch_up)
         self._unpred_backlog = 0                 # unpredicted hits found on caught-up frames, for the next tick
+        self.bell_mon = BellHitMonitor()
+        self._mon_raws: list[dict] = []
         self.unpredicted: list[int] = []
         self.unpredicted_unknown: list[int] = []     # hits with no forecast at the validated lags (counted for Q4)
         self.hits_taken: list[int] = []
@@ -490,6 +496,10 @@ class PlannerPolicy:
         fcast = self.fc.forecast(HORIZON_S)
         self.forecasts.append((fo, fcast, ws.stamp.t_game_s))
         self._support = fcast.support_set(ws)
+        self._mon_raws.append(s)
+        if self.sc.pq is None:
+            self.bell_mon.on_tick(fcast, fo, ws.stamp.t_game_s, self._mon_raws)
+        self._mon_raws = []
         if self.sc.pq is not None:
             return self._pause_tick(s, f, fo, ws, raw, t0)
         d = self.decision
@@ -718,4 +728,5 @@ class PlannerPolicy:
                 "first_pending_f": self.first_pending_f, "first_pending_reasons": self.first_pending_reasons,
                 "outcome_reason": self.outcome_reason,
                 "alerts": list(self.sc.alerts), "anchor_log": tr.anchor_log[-40:],
+                "bell_hits": self.bell_mon.stats(),
                 "real_quit": self.real_quit_stats()}

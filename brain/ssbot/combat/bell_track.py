@@ -16,12 +16,21 @@ inverted on the known fall curve, robust median), and the bounce side (the sign 
 open until it is significant). The path itself is then the registry physics from the drop (pogo_targets.simulate in
 the game's 50 Hz steps, which start at the drop), sampled at (tk + time since the drop), with the forecaster's time
 slack (DET_SLACK_S) and a contact skin grown by the column's x uncertainty (3 sigma of the mean of the detections,
-sigma from the view's position noise). A detection that leaves the model by more than DEV_U (a side slash's tink, a
-bell the model does not describe) withdraws the estimate: the bell's self template (the logged union) stands again;
-so does the hero attacking within reach of it (a tink changes vx to 5-10 u/s, which the drift shows only slowly:
-live 20261002_171806 i0 ep0, a DropBell M tinked to vx 5 in Bounce Air stayed within 0.42 u of the untouched model
-for 8 frames), until the track rules a tink out (CONFIRM_S below; a touched drop was 10 % of the drop-bell frames of
-degraded_dust run 20261002_224934, about 1.8 drops a fight, each in its union for the rest of its life before).
+sigma from the view's position noise). A detection that leaves the model by more than DEV_U (a bell the model does
+not describe) withdraws the estimate: the bell's self template (the logged union) stands again.
+
+The hero's own hits (task V review, 2026-10-03; M2 plan: "a known-effect action must not enlarge the danger zone").
+The view has no tink event (drop bells have no HealthManager), but the tink's effect is the FSM's rule
+(pogo_targets.tink: a side slash sends the bell away from the hitter at 5-10 u/s and its bounce that way, a down
+spike clamps vy; 95 of 95 tinks of live run 20261002_171806 went the hero's facing). So when the hero attacks within
+reach of a bell (TOUCH_BOX), the bell keeps exact paths: the untouched ones and one tinked branch per possible tink
+step (every TINK_EVERY physics steps of the attack's frames in reach, the forecaster's time slack covering the steps
+between), the side from the hero's facing (a down spike: vy clamped). Each detection after the touch prunes the
+branches it leaves (beyond CONFIRM_U or 3 sigma); the bell is withdrawn only when none is left or there are more than
+MAX_BRANCHES (a second attack multiplies them). Before, any touch withdrew the path until the track ruled a tink out:
+the bell's whole self template stood instead (10 % of the drop-bell frames of degraded_dust run 20261002_224934,
+about 1.8 drops a fight), so hitting a bell enlarged the danger zone, and the planner, which did not model its own hit
+on a bell in this view, never chose to (0.4 redirects a phase-2 fight against the oracle view's 2.49).
 
 Only detections count (visible_frac > 0: the noise model's coasting tracks and the filter's memory tracks do not), in
 game time, each at the WorldState it came in (k frames late on the simulated final path): the forecast's origin is that
@@ -63,6 +72,18 @@ CONFIRM_S = 0.25
 CONFIRM_U = 0.35
 CONFIRM_N = 6
 TOUCH_CONFIRM = os.environ.get("SSBOT_TOUCH_CONFIRM", "1") != "0"
+# tink branches instead of withdrawing a touched bell (SSBOT_TINK_BRANCHES=0: the withdrawal, the A/B before)
+TINK_BRANCHES = os.environ.get("SSBOT_TINK_BRANCHES", "1") != "0"
+TINK_EVERY = 2               # a tink hypothesis every this many physics steps (0.04 s; VE_DET_SLACK_S +-0.02 between)
+TOUCH_GAP_S = 0.1            # touch frames this far apart are separate attacks
+MAX_BRANCHES = 48
+# ... or once the mean x offset of the detections after its first tink step is this many sigma of that mean off it
+# (and MEAN_MIN_U): a tink late in the fall moves the bell 0.8 u off the untouched side and keeps it there, under
+# the two-detections test; the column x comes from the same detector, so a bias shared by its detections cancels
+MEAN_Z = 6.0
+MEAN_MIN_U = 0.25
+MEAN_MIN_N = 6
+PATH_T_S = 4.0               # cached relative paths reach this far after the drop (a drop lives about 2 s)
 
 
 @dataclass(slots=True)
@@ -73,6 +94,14 @@ class DropEstimate:
     n: int                 # fall detections used
     sx: float              # 1 sigma of x
     t_contact: float       # predicted first floor contact (game s)
+    branches: tuple = ()   # touched: the paths still possible, (side, ((physics step of a tink, dir), ...)); ()
+    #                        untouched: the bounce sides (side, or both)
+
+    def paths(self) -> tuple:
+        """(side, tinks) of every path the bell may be on."""
+        if self.branches:
+            return self.branches
+        return ((self.side, ()),) if self.side else ((1, ()), (-1, ()))
 
 
 class DropBellTracks:
@@ -101,8 +130,36 @@ class DropBellTracks:
         self.obs: dict[int, list[tuple[float, float, float, float]]] = {}
         self.type_of: dict[int, str] = {}
         self.touched: set[int] = set()
-        self.touch_log: dict[int, list[tuple[float, float]]] = {}   # touched bell -> [(game s, hero facing)]
+        # touched bell -> [(game s, hero facing, the side tink's dir: the facing)]
+        self.touch_log: dict[int, list[tuple[float, float, int]]] = {}
         self.t = 0.0
+        if not hasattr(self, "_rel"):
+            self._rel: dict = {}
+
+    def rel_path(self, side: int, tinks: tuple) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """The path from the drop (x relative to the column, y, determined) on the physics-step grid up to PATH_T_S,
+        bounce side `side` (0: open), tinks ((step, dir), ...): pogo_targets.simulate, cached per branch (it does not
+        depend on the column x)."""
+        key = (side, tinks)
+        r = self._rel.get(key)
+        if r is None:
+            if len(self._rel) > 20000:
+                self._rel.clear()
+            ts = np.arange(int(PATH_T_S / STEP_S) + 1) * STEP_S
+            reds = tuple((k * STEP_S - 1e-9, d) for k, d in tinks) or None
+            r = self._rel[key] = simulate(self.spec, 0.0, self.y0, self.vx0, self.vy0, 0, None, ts, side=side,
+                                          redirect=reds)
+        return r
+
+    def path_at(self, x: float, side: int, tinks: tuple, tau: np.ndarray
+                ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Centre (x, y) and determined at tau s after the drop on one branch (rel_path, interpolated as simulate
+        samples its own steps)."""
+        rx, ry, rok = self.rel_path(side, tinks)
+        ts = np.arange(len(rx)) * STEP_S
+        tau = np.asarray(tau, np.float64)
+        ok = np.interp(tau, ts, rok.astype(np.float64)) >= 1.0
+        return x + np.interp(tau, ts, rx), np.interp(tau, ts, ry), ok & (tau <= ts[-1])
 
     def update(self, ws: WorldState, t: float) -> None:
         self.t = t
@@ -125,13 +182,13 @@ class DropBellTracks:
             self.type_of[e.id] = tk
             if attacking:
                 # the hero's own attack may have met it (a tink: a side slash sends it away, a down attack clamps
-                # its fall), which no estimate here models: the union of the hero's slash, up-slash and down-spike
-                # boxes (planner SIDE / UP / DOWN, facing frame) grown by the bell's radius
+                # its fall): the union of the hero's slash, up-slash and down-spike boxes (planner SIDE / UP / DOWN,
+                # facing frame) grown by the bell's radius
                 dx, dy = face * (float(x) - hx), float(y) - hy
                 g = self.spec.r + TOUCH_MARGIN_U
                 if TOUCH_BOX[0] - g <= dx <= TOUCH_BOX[1] + g and TOUCH_BOX[2] - g <= dy <= TOUCH_BOX[3] + g:
                     self.touched.add(e.id)
-                    self.touch_log.setdefault(e.id, []).append((t, face))
+                    self.touch_log.setdefault(e.id, []).append((t, face, int(face)))
         for iid in [i for i, v in self.obs.items() if not v or t - v[-1][0] > GAP_S]:
             del self.obs[iid]
             self.type_of.pop(iid, None)
@@ -147,12 +204,15 @@ class DropBellTracks:
         return np.maximum((-b + np.sqrt(d)) / g, 0.0)
 
     def estimate(self, iid: int) -> DropEstimate | None:
-        """The drop bell iid's drop, or None: no detection of its fall, the track left the model, or the hero's attack
-        may have tinked it and the track does not rule that out yet (CONFIRM_S ...)."""
+        """The drop bell iid's drop, or None: no detection of its fall, or the track left the model. A bell the hero's
+        attack may have tinked carries the branches still possible (_branches; TINK_BRANCHES off: None until the track
+        rules a tink out, CONFIRM_S ...)."""
         if not self.ok:
             return None
         if iid not in self.touched:
             return self._estimate(iid)
+        if TINK_BRANCHES:
+            return self._touched(iid)
         if not TOUCH_CONFIRM:
             return None
         log = self.touch_log.get(iid) or []
@@ -180,22 +240,111 @@ class DropBellTracks:
             return None
         # a side slash facing the way the model has the bell moving: TINK RIGHT on a bell going right at 4 u/s
         # (5 u/s) cannot be told apart yet, so the path is not given back
-        th = np.array([u for u, _ in log]) - est.t_drop
+        th = np.array([u for u, *_ in log]) - est.t_drop
         for sd in sides:
             cx, _, _ = simulate(self.spec, est.x, self.y0, self.vx0, self.vy0, 0, None,
                                 np.concatenate([np.maximum(th, 0.0), np.maximum(th, 0.0) + STEP_S]), side=sd)
             vx = (cx[len(th):] - cx[:len(th)]) / STEP_S
-            if any(face > 0 and v > 0.5 for (_, face), v in zip(log, vx)):
+            if any(face > 0 and v > 0.5 for (_, face, _d), v in zip(log, vx)):
                 return None
         self.touched.discard(iid)          # untouched after all: later attacks start a new check
         self.touch_log.pop(iid, None)
         return est
 
-    def _estimate(self, iid: int) -> DropEstimate | None:
+    def _touched(self, iid: int) -> DropEstimate | None:
+        """A bell the hero's attack may have tinked: the drop from the detections before the first touch, and the
+        branches (untouched, tinked at each possible step) the detections since then still allow. Once no tinked
+        branch is left and the last touch is CONFIRM_S old, the bell counts as untouched again."""
+        log = self.touch_log.get(iid) or []
+        if not log:
+            return self._estimate(iid)
+        est = self._estimate(iid, before=log[0][0])
+        if est is None:
+            return None
+        a = np.asarray(self.obs.get(iid) or (), np.float64)
+        post = a[a[:, 0] >= log[0][0]] if len(a) else a
+        # a branch goes once two detections leave it by DEV_U / DEV_Z sigma (the withdrawal's test): a true branch is
+        # never pruned by noise (5 sigma, twice), a wrong tink leaves within 0.1-0.2 s (5-10 u/s off)
+        lim = (np.maximum(DEV_U, DEV_Z * post[:, 3]) + SKIN_Z * est.sx) if len(post) else post
+        tau_c = est.t_contact - est.t_drop
+        b0 = self.spec.bounces[0] if self.spec.bounces else {}
+        tau_apex = tau_c + float(b0.get("vy", 0.0)) / self.spec.g if self.spec.g > 0 else tau_c
+        branches = {(sd, ()) for sd in ((est.side,) if est.side else (1, -1))}
+        # touch frames grouped into attacks; each attack may tink once at any of its steps (a second one multiplies)
+        groups: list[list[tuple]] = []
+        for row in log:
+            if groups and row[0] - groups[-1][-1][0] <= TOUCH_GAP_S and row[2] == groups[-1][-1][2]:
+                groups[-1].append(row)
+            else:
+                groups.append([row])
+        for gi, grp in enumerate(groups):
+            k0 = int(math.floor((grp[0][0] - est.t_drop) / STEP_S)) - 1
+            k1 = int(math.ceil((grp[-1][0] - est.t_drop) / STEP_S)) + 1
+            steps = list(range(max(k0, 0), k1 + 1, TINK_EVERY))
+            if steps and steps[-1] < k1:
+                steps.append(k1)
+            new = set(branches)
+            # the view does not tell a side slash from an up-slash (no tink) or a down spike (TINK DOWN): all three
+            for d in (grp[0][2], 0):
+                for sd, tk in branches:
+                    for k in steps:
+                        if tk and k <= tk[-1][0]:
+                            continue
+                        if d == 0 and not tau_c < k * STEP_S < tau_apex:
+                            continue                        # TINK DOWN changes only a rising bell (vy <= 0)
+                        s2 = d if d and k * STEP_S <= tau_c else sd     # tinked before the bounce: its side is d
+                        new.add((s2, tk + ((k, d),)))
+            if len(new) > MAX_BRANCHES:
+                return None
+            # the detections up to the next attack prune them
+            t_next = groups[gi + 1][0][0] if gi + 1 < len(groups) else math.inf
+            sel = post[:, 0] < t_next if len(post) else np.zeros(0, bool)
+            branches = {b for b in new if self._fits(est, b, post[sel], lim[sel])}
+            if not branches:
+                return None
+        if self.t - log[-1][0] >= CONFIRM_S and all(not tk for _, tk in branches):
+            self.touched.discard(iid)              # untouched after all: later attacks start a new check
+            self.touch_log.pop(iid, None)
+            sides = {sd for sd, _ in branches}
+            est.side = next(iter(sides)) if len(sides) == 1 else 0
+            return est
+        est.branches = tuple(sorted(branches))
+        return est
+
+    def _fits(self, est: DropEstimate, branch: tuple, rows: np.ndarray, lim: np.ndarray) -> bool:
+        """At most one detection in rows beyond lim of the branch's path (at the closest of DEV_DT_S, the step's
+        phase), and the detections since its first tink step (the untouched: since the touch) not off it on average
+        (MEAN_Z)."""
+        if not len(rows):
+            return True
+        tau = rows[:, 0] - est.t_drop
+        dmin = np.full(len(rows), np.inf)
+        k0 = branch[1][0][0] * STEP_S if branch[1] else -math.inf
+        aft = tau >= k0
+        n = int(aft.sum())
+        m_min = math.inf
+        for dt in DEV_DT_S:
+            cx, cy, _ = self.path_at(est.x, branch[0], branch[1], np.maximum(tau + dt, 0.0))
+            dmin = np.minimum(dmin, np.hypot(cx - rows[:, 1], cy - rows[:, 2]))
+            if n >= MEAN_MIN_N:
+                m_min = min(m_min, abs(float(np.mean(cx[aft] - rows[aft, 1]))))
+        if int((dmin > lim).sum()) >= 2:
+            return False
+        if n >= MEAN_MIN_N:
+            sm = math.sqrt(float(np.mean(rows[aft, 3] ** 2)) / n + est.sx ** 2)
+            if m_min > max(MEAN_MIN_U, MEAN_Z * sm):
+                return False
+        return True
+
+    def _estimate(self, iid: int, before: float | None = None) -> DropEstimate | None:
         o = self.obs.get(iid)
         if not o:
             return None
         a = np.asarray(o, np.float64)
+        if before is not None:
+            a = a[a[:, 0] < before]
+            if not len(a):
+                return None
         t, x, y, s = a[:, 0], a[:, 1], a[:, 2], a[:, 3]
         if y[0] <= self.spec.ground_y + 0.5:
             return None              # first seen near the floor: not a fall we can time

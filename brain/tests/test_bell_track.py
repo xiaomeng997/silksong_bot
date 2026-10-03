@@ -67,22 +67,91 @@ def test_drop_time_column_and_side_from_noisy_detections(spec, side):
     assert sided is not None and sided - (20.0 + tr.t_fall) < 0.3
 
 
-def test_an_attack_in_reach_or_a_path_off_the_model_withdraws_the_estimate(spec):
-    tr = DropBellTracks(spec)
+def test_a_path_off_the_model_withdraws_the_estimate(spec):
+    tr2 = DropBellTracks(spec)
     frames = _drop(spec, 84.3, 1, 20.0, 12, 0.05, seed=1)
     for t, x, y in frames:
-        tr.update(_ws(t, [_bell(5, x, y, 0.05)]), t)
-    assert tr.estimate(5) is not None
-    t = frames[-1][0] + 1 / 60
-    tr.update(_ws(t, [_bell(5, frames[-1][1], frames[-1][2] - 0.6, 0.05)], hero=(83.0, 9.0), mode="attack"), t)
-    assert tr.estimate(5) is None                 # touched: a tink is possible
-    tr2 = DropBellTracks(spec)
-    for t, x, y in frames:
         tr2.update(_ws(t, [_bell(6, x, y, 0.05)]), t)
+    assert tr2.estimate(6) is not None
     for k in (1, 2):                              # two detections 2 u off the column (pushed aside)
         t = frames[-1][0] + k / 60
         tr2.update(_ws(t, [_bell(6, 86.3, frames[-1][2] - k * 0.6, 0.05)]), t)
     assert tr2.estimate(6) is None
+
+
+def _tinked(spec, x0: float, t_drop: float, frames: int, sigma: float, seed: int, tink_step: int, d: int):
+    """Like _drop, with a hero hit at physics step tink_step after the drop (pogo_targets.tink)."""
+    rng = np.random.default_rng(seed)
+    out = []
+    for k in range(frames):
+        t = t_drop + k / 60
+        n_steps = int(np.floor((t - t_drop) / 0.02 + 1e-9))
+        cx, cy, _ = simulate(spec, x0, 13.74, 0.0, -17.0, 0, None, np.array([n_steps * 0.02]), side=1,
+                             redirect=(tink_step * 0.02 - 1e-9, d))
+        out.append((t, cx[0] + rng.normal(0, sigma), cy[0] + rng.normal(0, sigma)))
+    return out
+
+
+@pytest.mark.parametrize("d", [1, -1])
+def test_a_touched_bell_keeps_its_tink_branches_and_the_detections_pick_one(spec, d):
+    """Task V review: the hero attacking within reach of a falling bell no longer withdraws its path; the estimate
+    keeps the untouched branches and one tinked branch per possible tink step (TINK_EVERY, side = the facing), and the
+    detections prune them: a tinked bell (vx 5 right, -10 left, pogo_targets.tink) ends on tinked branches only, the
+    true one among them, within 0.25 s; the branches never grow past MAX_BRANCHES."""
+    from ssbot.combat.bell_track import MAX_BRANCHES
+    tr = DropBellTracks(spec)
+    k_tink = 10                                   # 0.2 s after the drop, before the floor (0.36 s)
+    frames = _tinked(spec, 84.3, 20.0, 40, 0.15, seed=3, tink_step=k_tink, d=d)
+    hero = (84.3 - d * 2.5, 9.0)
+    seen_amb = False
+    for t, x, y in frames:
+        att = 0.17 <= t - 20.0 <= 0.23
+        ws = _ws(t, [_bell(7, x, y, 0.15)], hero=hero, mode="attack" if att else "air")
+        ws.hero.facing = E(d)
+        tr.update(ws, t)
+        est = tr.estimate(7)
+        assert est is not None
+        assert len(est.paths()) <= MAX_BRANCHES
+        if att:
+            assert any(tk for _, tk in est.paths()) and any(not tk for _, tk in est.paths())
+            seen_amb = True
+    assert seen_amb
+    est = tr.estimate(7)
+    assert all(tk for _, tk in est.paths())                     # the untouched paths are gone
+    assert all(tk[0][1] == d for _, tk in est.paths())
+    assert any(abs(tk[0][0] - k_tink) <= 2 for _, tk in est.paths())
+
+
+def test_an_untinked_touched_bell_is_given_back(spec):
+    """An attack in reach that did not tink the bell: once the tinked branches leave the detections and the last touch
+    is CONFIRM_S old, the bell is untouched again (one or both untouched sides)."""
+    tr = DropBellTracks(spec)
+    frames = _drop(spec, 84.3, 1, 20.0, 50, 0.15, seed=8)
+    for t, x, y in frames:
+        att = 0.12 <= t - 20.0 <= 0.18
+        ws = _ws(t, [_bell(8, x, y, 0.15)], hero=(81.8, 9.0), mode="attack" if att else "air")
+        tr.update(ws, t)
+        est = tr.estimate(8)
+        assert est is not None
+    assert 8 not in tr.touched and not est.branches
+
+
+def test_simulate_tink_rules(spec):
+    """pogo_targets.tink as the DropBell FSM sets it (live 20261002_171806: 90 of 92 side tinks): a falling bell
+    tinked right goes 5 u/s, tinked left -10 (FloatClamp min -5 max -10); one moving right at 4 tinked left -10,
+    at 10 tinked left -5; a down tink clamps a rising bell's vy to 0 and leaves a falling one alone."""
+    from ssbot.combat.pogo_targets import tink
+    assert tink(spec, 0.0, -20.0, 1) == (5.0, -20.0)
+    assert tink(spec, 0.0, -20.0, -1) == (-10.0, -20.0)
+    assert tink(spec, 4.0, 10.0, -1) == (-10.0, 10.0)
+    assert tink(spec, 10.0, 10.0, -1) == (-5.0, 10.0)
+    assert tink(spec, -4.0, 10.0, 1) == (5.0, 10.0)
+    assert tink(spec, 4.0, 10.0, 0) == (4.0, 0.0) and tink(spec, 4.0, -3.0, 0) == (4.0, -3.0)
+    ts = np.array([0.2, 0.3])
+    cx, _, ok = simulate(spec, 80.0, 13.74, 0.0, -17.0, 0, None, ts, redirect=(0.1, -1))
+    assert ok.all() and cx[1] - cx[0] == pytest.approx(-1.0, abs=0.01)      # -10 u/s
+    cx2, _, _ = simulate(spec, 80.0, 13.74, 0.0, -17.0, 0, None, ts, redirect=((0.1, 1), (0.2, -1)))
+    assert cx2[1] - cx2[0] == pytest.approx(-1.0, abs=0.01)     # 5, then left: |5| is not > 5, so -10
 
 
 def test_forecaster_uses_the_track_in_the_vision_view(spec):

@@ -355,6 +355,7 @@ class Planner:
         S = occ.any(axis=1)
         th0 = time.perf_counter()
         roll_j = self._hit_effects(f, start, latched, roll, tk, S, enemy_only)
+        self._ambiguous_bells(f, latched, roll_j, start, tk, S)
         self._no_cast_out_of_spike(latched, roll, roll_j, S)
         th1 = time.perf_counter()
         self._lock_check(f, roll, hold_end, S, P + T, enemy_only)
@@ -558,6 +559,9 @@ class Planner:
                             after, hf, kd, win)
                 if not g.recoil:
                     hf[kd != 3] = -1
+                if g.pogo_ok is not None:
+                    # a pogo where it does not count (a rising drop bell, VE): no hit, the miss branch stands
+                    hf[(kd == 3) & (hf >= 0) & ~g.pogo_ok[np.clip(hf, 0, len(g.pogo_ok) - 1)]] = -1
                 better = (hf >= 0) & ((hit_f < 0) | (hf < hit_f))
                 hit_f[better], kind[better], tsel[better] = hf[better], kd[better], ti
             if self.cfg.attack_model == "v1":
@@ -689,6 +693,33 @@ class Planner:
                         self.pogo_log["bell"] += int(pogo_tgt[c] > 0)
         return cur
 
+    def _ambiguous_bells(self, f: Forecast, latched: np.ndarray, roll, start, tk: np.ndarray, S: np.ndarray) -> None:
+        """VE: a drop bell whose track has tinked branches open (bell_track: the hero attacked it and the detections
+        do not tell yet) is no hit target, so what a new attack would do to it is not modelled: a plan whose attack
+        (slash, up-slash or down spike, in its windows) meets the bell on any of its branches is not safe (S)."""
+        amb = f.ambiguous_paths(tk) if hasattr(f, "ambiguous_paths") else []
+        self.last_ambiguous = 0
+        if not amb:
+            return
+        flags = roll.flags
+        if not (((flags & F_ATTACKING) != 0).any() or (roll.mode == M_DS_SPIKE).any()):
+            return
+        face0 = 1 if start.reshape(kin.K, -1)[kin.FACE, 0] >= 0 else -1
+        win = WINDOWS[self.cfg.attack_model]
+        N = len(latched)
+        cb, cf, cm = (np.ascontiguousarray(roll.box), np.ascontiguousarray(flags), np.ascontiguousarray(roll.mode))
+        lat = np.ascontiguousarray(latched)
+        for _name, paths in amb:
+            for box, ok in paths:
+                r = 0.5 * float(box[0, 2] - box[0, 0])
+                P0, S0, B0 = pt.octagon(r)
+                hf = np.full(N, -1, np.int64)
+                kd = np.zeros(N, np.int64)
+                _first_hits(cb, cf, cm, lat, face0, box, ok, P0, S0, B0, np.full(N, -1, np.int64), hf, kd, win)
+                hit = hf >= 0
+                self.last_ambiguous += int(hit.sum())
+                S |= hit
+
     def _no_cast_out_of_spike(self, latched: np.ndarray, roll, roll_j, S: np.ndarray) -> None:
         """A Silkspear pressed during a down spike (its antic or the spike) or within CAST_AFTER_POGO frames of a
         predicted pogo is not modelled against the game: there the queued cast starts at the hit and cancels the bounce,
@@ -780,10 +811,13 @@ class Planner:
             P1, S1, B1 = pt.octagon(pth.r - m)
             cbox = np.ascontiguousarray(pth.box + np.array([m, m, -m, -m]))
             spec = f.fc.targets.spec_of(pth.type_key) if hasattr(f.fc, "targets") else None
-            out.append(_Target(np.ascontiguousarray(pth.box), np.ascontiguousarray(pth.ok), P0, S0, B0, cbox,
-                               np.ascontiguousarray(pth.cert), P1, S1, B1, spec.recoil if spec else True,
-                               pth.type_key, spec.cooldown_s if spec else 0.0,
-                               bool(spec and "side" in spec.redirect and getattr(pth, "redirect", True))))
+            t_ = _Target(np.ascontiguousarray(pth.box), np.ascontiguousarray(pth.ok), P0, S0, B0, cbox,
+                         np.ascontiguousarray(pth.cert), P1, S1, B1, spec.recoil if spec else True,
+                         pth.type_key, spec.cooldown_s if spec else 0.0,
+                         bool(spec and "side" in spec.redirect and getattr(pth, "redirect", True)))
+            po = getattr(pth, "pogo_ok", None)
+            t_.pogo_ok = None if po is None else np.asarray(po, bool)
+            out.append(t_)
         if not okb.any() and len(out) == 1:
             return []
         return out
@@ -1260,6 +1294,7 @@ class _Target:
         self.cstarts = starts if cstarts is None else cstarts
         self.cbase = base if cbase is None else cbase
         self.recoil, self.name, self.cooldown_s, self.redirect = recoil, name, cooldown_s, redirect
+        self.pogo_ok: np.ndarray | None = None    # [T] where a down spike's hit counts (None: wherever ok)
 
 
 class _View:
