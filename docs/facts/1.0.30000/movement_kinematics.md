@@ -61,6 +61,10 @@ FSM 来源：Hero_Hornet 预制体在 `heroloading_assets_all.bundle`，它的 P
 
 Reaper 配置（crests.json table.configs）：攻击持续 0.35 s、冷却 0.5 s、硬直 0.3 s（Hunter 0.35 / 0.41 / 0.15）。命中后坐：`RECOIL_HOR_VELOCITY` 3.75 × 8 步（与 Hunter 同一路径，长后坐只在 RecoilLeftLong 等调用时）。逐帧实测（slash.dump 每帧采样）与命中核对见第 5 节。
 
+### 3.1 英雄受伤判定框（HeroBox）与碰撞盒不是一回事
+
+Hero_Hornet 预制体（heroloading_assets_all.bundle，UnityPy 读取）：碰撞盒 BoxCollider2D 偏移 (0, −0.5132)、尺寸 0.5 × 2.0789（即 hero.box：transform 下方 1.5527、上方 0.5262）；子物体 HeroBox 在 transform 原点（局部 (0, 0)），触发器 BoxCollider2D，尺寸随状态由 `HeroBox.cs` 改写：正常（`HeroBoxNormal`，进入 idle / running / airborne / grounded 时设置）偏移 (0, −0.3799)、0.4554 × 2.2498，即 transform 下方 1.505、上方 0.745——**比碰撞盒高出 0.22 u（头顶），两侧各窄 0.045 u**；滑墙 / 贴墙（`HeroBoxWallSlide`）偏移 (0.2101, −0.2755)、0.8757 × 1.2805（局部 +x 是朝左时的前方：贴左墙时向右偏，背离墙一侧伸出 0.65 u）；下劈 0.4554 × 1.218；Reaper 下劈 偏移 (0.37, 0.632)、0.4554 × 1.601；sprint、空中冲刺、招架姿态等各有一套（HeroBox.cs 166-273 行）。规划器和预测器至今用碰撞盒加余量判接触；头顶 0.22 u 的差靠余量吸收（余量小于 0.22 u 的检查会漏掉擦头顶的命中）。覆盖图工具用 HeroBox。
+
 ## 4. 覆盖图 / 安全口袋工具
 
 `tools/coverage_map.py`：录像中每帧敌人的伤害碰撞体（`ents.is_threat`）按（type_key, Control 状态）栅格化（默认 0.05 u）求并集；候选英雄姿态 = 每段地面上的站立点 + 每面能贴的墙（`facing_near_wall` 通过）从底到"碰撞盒中心到墙顶"的贴墙点，各配自己的 HeroBox（HeroBox.cs：普通 0.4554 × 2.2498 偏移 (0, −0.38)；滑墙 0.876 × 1.280 偏移 (0.21, −0.276)，x 随朝向镜像，背离墙一侧更宽）；输出每点与每个招式并集的间隙（负数 = 重叠）、最近的招式、安全点（间隙 ≥ --margin）、每面墙最高贴墙点的间隙，可选 PNG。
