@@ -97,8 +97,10 @@ def phase_lengths(tr: km.Trace, modes: np.ndarray, params: km.HeroParams) -> dic
                 if e is None or e == i0:
                     continue
                 if fs[e] > 0:
-                    v0 = vy[e - 1] - (params.scr_force_held if tr.mask[e - 1] & km.B_DASH else params.scr_force) * params.fdt
-                    roof = v0 >= params.scr_end_vy or                         abs(vy[e] - (v0 - params.gravity * params.fdt)) < abs(vy[e] - v0 * params.scr_end_decel)
+                    f = params.scr_force_held if tr.mask[e - 1] & km.B_DASH else params.scr_force
+                    v0 = vy[e - 1] - f * params.fdt
+                    roof = v0 >= params.scr_end_vy or \
+                        abs(vy[e] - (v0 - params.gravity * params.fdt)) < abs(vy[e] - v0 * params.scr_end_decel)
                 else:
                     roof = False
                 rep = onset_of(e, i1, ("Wall Scramble Antic",))   # REPEAT DASH: the End cut short

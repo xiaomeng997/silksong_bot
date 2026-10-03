@@ -25,7 +25,8 @@ only (estimate_state, causal phase interval): what the planner knows at decision
 Every window lands in exactly one category (first match of the last applicable rule): uncovered:<why> (invalid:
 hero absent, paused or not in gameplay; gap: missing frames; slide: a savestate load still moving the hero back;
 harness teleports, hazard respawns, scene changes, deaths, control taken by another FSM, no terrain for the scene,
-nail-charge arts), world_freeze (the time scale is below 1 outside the hero's own hit-stop: boss stun, boss death
+nail-charge arts, slope: the box within 0.05 u of a sloped terrain edge, which the rollout does not collide),
+world_freeze (the time scale is below 1 outside the hero's own hit-stop: boss stun, boss death
 slow-motion, BindBreak after a hit during Bind: the model runs them from the logged freeze starts, EV_FZ_*, and
 BindBreak from the hit during the Bind charge), hitch (a
 frame longer than the jitter model's frame_time_max: rate 3.1e-5 per frame, left to the residual monitor), hurt (a
@@ -155,6 +156,35 @@ def world_slow(tr: Trace, modes: np.ndarray) -> np.ndarray:
     return out
 
 
+def near_slopes(tr: Trace, terrains: dict, reach: float = 0.05, step: float = 0.05) -> np.ndarray:
+    """Per frame: the logged box comes within `reach` of a sloped terrain edge (Terrain2D.slopes, which the rollout
+    does not collide: Hang_12's ceiling is one jagged run of them, y 9.88 - 11.1)."""
+    out = np.zeros(len(tr), dtype=bool)
+    b = tr.box
+    for si, name in enumerate(tr.scenes):
+        t = terrains.get(name)
+        sl = getattr(t, "slopes", None) if t is not None else None
+        if sl is None or len(sl) == 0:
+            continue
+        rows = np.flatnonzero((tr.scene == si) & np.isfinite(b[:, 0]))
+        if not len(rows):
+            continue
+        bx = b[rows]
+        for x0, y0, x1, y1 in np.asarray(sl, dtype=np.float64):
+            lo_x, hi_x, lo_y, hi_y = min(x0, x1) - reach, max(x0, x1) + reach, min(y0, y1) - reach, max(y0, y1) + reach
+            cand = (bx[:, 2] >= lo_x) & (bx[:, 0] <= hi_x) & (bx[:, 3] >= lo_y) & (bx[:, 1] <= hi_y)
+            if not cand.any():
+                continue
+            n = max(int(np.hypot(x1 - x0, y1 - y0) / step) + 1, 2)
+            px, py = np.linspace(x0, x1, n), np.linspace(y0, y1, n)
+            c = bx[cand]
+            dx = np.maximum(np.maximum(c[:, None, 0] - px[None], px[None] - c[:, None, 2]), 0.0)
+            dy = np.maximum(np.maximum(c[:, None, 1] - py[None], py[None] - c[:, None, 3]), 0.0)
+            hit = (np.hypot(dx, dy) <= reach).any(axis=1)
+            out[rows[np.flatnonzero(cand)[hit]]] = True
+    return out
+
+
 def categorize(tr: Trace, horizon: int, modes: np.ndarray, events: np.ndarray, terrains: dict,
                frame_time_max: float = 0.018) -> tuple[np.ndarray, np.ndarray]:
     """(starts, label per window) for every row i with i + horizon inside the trace (see the module docstring)."""
@@ -197,6 +227,7 @@ def categorize(tr: Trace, horizon: int, modes: np.ndarray, events: np.ndarray, t
         ("hurt", (ew & HURT).any(axis=1)),
         ("world_freeze", world_slow(tr, modes)[I].any(axis=1)),
         ("hitch", (tr.udt[I[:, 1:]] > frame_time_max).any(axis=1)),
+        ("uncovered:slope", near_slopes(tr, terrains)[I].any(axis=1)),
         ("uncovered:nail_charge", tr.flag("nailCharging")[I].any(axis=1)),
         ("uncovered:locked", (mw == km.M_LOCKED).any(axis=1)),
         ("uncovered:scene", (mk & km.MK_SCENE).any(axis=1)),
@@ -257,7 +288,8 @@ def check_trace(tr: Trace, terrains: dict[str, Terrain2D], params: HeroParams, h
     run = np.flatnonzero([not lab.startswith("uncovered:") or lab in ("uncovered:locked", "uncovered:harness",
                                                                       "uncovered:hazard", "uncovered:scene",
                                                                       "uncovered:nail_charge", "uncovered:death",
-                                                                      "uncovered:slide", "uncovered:no_terrain")
+                                                                      "uncovered:slide", "uncovered:no_terrain",
+                                                                      "uncovered:slope")
                           for lab in labels])
     # windows that cannot be run at all (an invalid frame or a gap inside) stay NaN; the other uncovered ones are run
     # and reported, so their figures show what the model does there

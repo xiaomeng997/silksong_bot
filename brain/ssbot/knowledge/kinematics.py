@@ -231,12 +231,13 @@ DEFAULT_PARAMS = REPO / "knowledge" / "1.0.30000" / "kinematics" / "hero_hunter.
  WCON,            # contacts of the last physics step: 1 floor, 2 wall (OnCollisionStay vs Enter)
  SHOVE,           # pending rb2d.MovePosition x offset (an up slash off a wall: done in the next physics step)
  RX0, RY0,        # where the body was drawn last frame (the transform a FixedUpdate's Transform.Translate moves)
- K) = range(77)
+ JBUF,            # InputHandler's jump press queue timer (unscaled s, 0.1 at a press; RegainControl jumps on it)
+ K) = range(78)
 ROW_NAMES = ("px py qx qy sx sy vx vy alpha gs face ground mode mode_t mode_n jumping jsteps jdsteps jq aq airhang "
              "attacking atk_t atk_cd rdir rsteps ds_hs ds_rec bounce hvx hvy move jheld prev silk inv_t ledge touch "
              "phase ts qq alo ahi landq wf_ph wf_t wf_s wf_down wf_wait wf_up wf_tgt wside wtouch cling cling_cd "
              "wstick unstick wlock wj_dir wj_v wj_chain wjq wslash prev_gs gl_cd dash_t dash_cd airdashed dq fall_t "
-             "hard sp_x wcon shove rx0 ry0").split()
+             "hard sp_x wcon shove rx0 ry0 jbuf").split()
 assert len(ROW_NAMES) == K
 
 M_NORMAL, M_DS_ANTIC, M_DS_SPIKE, M_HURT_FREEZE, M_HURT_RECOIL, M_CAST, M_BIND, M_LOCKED = range(8)
@@ -2235,6 +2236,7 @@ class ForumRows:
         self.shove = 0.0
         self.scr_pending = 0.0
         self.gl_vx: float | None = None
+        self.jbuf = np.float32(0.0)
 
     def push(self, S: np.ndarray, r: dict, md: int, flag) -> None:
         """Fill S (one [K] state, the frame's other rows already set) for row r (Trace.row form) in mode md."""
@@ -2288,6 +2290,13 @@ class ForumRows:
         elif fs > 0:
             self.shove = 0.0
         S[SHOVE] = self.shove
+        # InputHandler's jump queue timer (0.1 s from a press, unscaled)
+        m_now = int(r.get("mask", 0))
+        if m_now & B_JUMP and not (pr and pr["mask"] & B_JUMP):
+            self.jbuf = np.float32(0.1)
+        elif self.jbuf > 0:
+            self.jbuf = np.float32(self.jbuf - np.float32(r.get("udt", r["dt"])))
+        S[JBUF] = float(max(self.jbuf, 0.0))
         S[WJ_V] = p.wj_speed - max(self.wlock, 0.0) * (p.wj_speed - p.run_speed) / p.wj_lock_long
         S[PREV_GS] = 1.0
         S[DQ] = -1.0
@@ -2591,7 +2600,8 @@ def state_table(tr: Trace, params: HeroParams, modes: np.ndarray | None = None,
         for i in range(n):
             r = {"dt": float(tr.dt[i]), "fs": int(tr.fs[i]), "facing": int(tr.facing[i]),
                  "wall": int(tr.wall[i]) if tr.wall is not None else None, "clip": tr.clips[tr.clip[i]],
-                 "tm": tr.tm[i] if tr.tm is not None else None, "mask": int(tr.mask[i]), "vel": tr.vel[i]}
+                 "tm": tr.tm[i] if tr.tm is not None else None, "mask": int(tr.mask[i]), "vel": tr.vel[i],
+                 "udt": float(tr.udt[i])}
             fr.push(S[:, i], r, int(modes[i]), lambda name: bool(fls[name][i]))
     _apply_exported(tr, S, md, params)
     return S

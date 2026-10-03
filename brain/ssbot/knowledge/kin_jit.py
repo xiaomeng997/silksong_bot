@@ -42,9 +42,10 @@ from ssbot.knowledge.kinematics import (  # Forum loadout (abilities)
     P_SKID_T, P_SPR_ACC, P_SPR_SPEED, P_W_CCD, P_W_CDECEL, P_W_CONTACT, P_W_CVMIN, P_W_RAY, P_W_RAY_B, P_W_SHOVE,
     P_W_SLASH_VMIN, P_W_STICK, P_W_STICKY, P_W_ACCEL, P_W_TRAY, P_WJ_CHAIN, P_WJ_JUMPED, P_WJ_LONG, P_WJ_SHORT,
     P_WJ_SPEED, PREV_GS, SP_X, UNSTICK, WJ_CHAIN, WJ_DIR, WJ_V, WJQ, WLOCK, WSIDE, WSLASH, WSTICK, WTOUCH, WCON, SHOVE,
-    RX0, RY0,
+    RX0, RY0, JBUF,
     M_SCRAMBLE, P_SCR_ANTIC, P_SCR_SPEED, P_SCR_FORCE, P_SCR_FORCE_H, P_SCR_END_VY, P_SCR_END_DEC, P_SCR_END_T,
-    P_SCR_ROOF_RAY, P_SCR_ROOF_T, P_SCR_DETACH, P_SPR_SHIFT, P_SPR_GRACE, P_SKID_DEC_MV, P_SKID_VMIN, P_RPR_TDEC, P_RPR_TREACH0, P_RPR_TREACH1, P_RPR_TREACH_T, P_RPR_TLOBE0,
+    P_SCR_ROOF_RAY, P_SCR_ROOF_T, P_SCR_DETACH, P_SPR_SHIFT, P_SPR_GRACE, P_SKID_DEC_MV, P_SKID_VMIN, P_RPR_TDEC,
+    P_RPR_TREACH0, P_RPR_TREACH1, P_RPR_TREACH_T, P_RPR_TLOBE0,
     P_RPR_TLOBE1)
 
 # world freeze presets in start order (kinematics.WF_ORDER): event bit, rampDown, wait, rampUp, target
@@ -584,6 +585,17 @@ def regain(x, mask):
 
 
 @njit(cache=True, error_model="numpy")
+def regain_jump(x, mask, P):
+    """RegainControl's plain path: control back, and a jump press still in InputHandler's 0.1 s queue
+    (GetWasButtonPressedQueued) jumps if the hero can (live: a glide pressed just above the floor lands and jumps
+    with the button still held)."""
+    regain(x, mask)
+    if x[JBUF] > 0 and x[JUMPING] <= 0 and x[BOUNCE] < 0 and x[DS_REC] < 0 and (x[GROUND] > 0 or x[LEDGE] > 0):
+        x[JBUF] = 0.0
+        hero_jump(x, P)
+
+
+@njit(cache=True, error_model="numpy")
 def start_glide(x, mask, P):
     """StartFloat -> Umbrella Float FSM Take Control -> Antic (UmbrellaMotionX OnEnter). Ignored while the FSM's
     cooldown runs (the press is spent all the same)."""
@@ -959,7 +971,7 @@ def forum_after_queue(x, mask, pressed, mode0, dt, P, TT):
     if mode == M_GLIDE:
         ph = x[PHASE]
         if x[GROUND] > 0:                 # LAND -> Land -> Relinquish Control
-            regain(x, mask)
+            regain_jump(x, mask, P)
             x[GL_CD] = P[P_GL_CD]
         elif ph == 0 and ge32(x[MODE_T], P[P_GL_ANTIC]):
             x[PHASE] = 1.0                # Damager? -> Inflate: gravity off, v = (0, 0.5) OnEnter, then UmbrellaMotionX
@@ -977,7 +989,7 @@ def forum_after_queue(x, mask, pressed, mode0, dt, P, TT):
             x[MODE_T] = 0.0
             grav_on(x)
         elif ph == 3 and ge32(x[MODE_T], P[P_GL_DEFLATE]):
-            regain(x, mask)
+            regain_jump(x, mask, P)
             x[GL_CD] = P[P_GL_CD]
         if x[MODE] == M_GLIDE and (x[PHASE] == 2 or (x[PHASE] == 1 and x[MODE_T] >= 0.075) or x[PHASE] == 3):
             if (pressed & B_ATTACK) != 0 or ((pressed & B_DASH) != 0 and (ab & AB_DASH) != 0):
@@ -1013,15 +1025,15 @@ def forum_after_queue(x, mask, pressed, mode0, dt, P, TT):
                     sprint_translate(x, rend_x(x), rend_y(x), P)
                     x[VX] = accel_to(x[VX], P[P_SPR_ACC], x[SP_X])
                 else:
-                    regain(x, mask)
+                    regain_jump(x, mask, P)
             elif wall or (ph == 1 and (mask & B_DASH) == 0):
-                regain(x, mask)           # END
+                regain_jump(x, mask, P)   # END
             elif (pressed & (B_ATTACK | B_JUMP)) != 0:
                 regain(x, mask)           # Attack Cancel / Queue Sprint Jump: control back, the press acts
         elif ph == 2:
             if (mask & B_DASH) == 0:      # released: SKID END
                 if not ge32(x[MODE_T], P[P_SPR_GRACE]) or abs(x[VX]) < P[P_SKID_VMIN]:
-                    regain(x, mask)       # Sprint Timer under Sprint Grace (or slower than 4): no skid, Regain
+                    regain_jump(x, mask, P)   # Sprint Timer under Sprint Grace (or slower than 4): no skid, Regain
                 else:                     # Control To Idle
                     x[PHASE] = 3.0        # Skid End 1 (DecelerateXY OnEnter)
                     x[MODE_T] = 0.0
@@ -1032,7 +1044,7 @@ def forum_after_queue(x, mask, pressed, mode0, dt, P, TT):
             elif (pressed & (B_ATTACK | B_JUMP)) != 0 or wall:
                 regain(x, mask)
         elif ph == 3 and ge32(x[MODE_T], P[P_SKID_T]):
-            regain(x, mask)
+            regain_jump(x, mask, P)
     elif mode == M_RPR_DS:
         ph = x[PHASE]
         if ph == 0 and ge32(x[MODE_T], P[P_RPR_ANTIC]):
@@ -1052,7 +1064,8 @@ def forum_after_queue(x, mask, pressed, mode0, dt, P, TT):
             x[DS_REC] = 0.0               # vy = -10)
             x[GS] = 1.0
             x[VY] = P[P_DS_ENDVY]
-        if x[MODE] == M_RPR_DS and (x[PHASE] == 2 or x[PHASE] == 3) and (pressed & B_DASH) != 0 and                 (ab & AB_DASH) != 0:
+        if x[MODE] == M_RPR_DS and (x[PHASE] == 2 or x[PHASE] == 3) and (pressed & B_DASH) != 0 and \
+                (ab & AB_DASH) != 0:
             regain(x, mask)               # Rpr DashCancel
     elif mode == M_SCRAMBLE:
         ph = x[PHASE]
@@ -1094,7 +1107,7 @@ def forum_after_queue(x, mask, pressed, mode0, dt, P, TT):
             x[PY] = ny
             x[QY] = ny
             x[SY] = ny
-            regain(x, mask)
+            regain_jump(x, mask, P)
     elif mode == M_HARD_LAND:
         if gt32(x[MODE_T], P[P_HARD_LAND]):
             x[MODE] = M_NORMAL
@@ -1524,6 +1537,10 @@ def update(x, mask, ev, dt, udt, P, TT):
     ab = np.int64(P[P_ABIL])
     falling = False
     if ab != 0:
+        if (pressed & B_JUMP) != 0:       # InputHandler.UpdateButtonQueueing (before the hero's Update)
+            x[JBUF] = 0.1
+        elif x[JBUF] > 0:
+            x[JBUF] = f32(x[JBUF] - udt)
         falling = x[VY] <= EPS_F and x[GROUND] <= 0
         if (ab & AB_HARD_LAND) != 0:
             forum_fall_check(x, dt, P)
