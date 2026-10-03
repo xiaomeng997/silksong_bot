@@ -229,12 +229,13 @@ DEFAULT_PARAMS = REPO / "knowledge" / "1.0.30000" / "kinematics" / "hero_hunter.
  HARD,            # cState.willHardLand
  SP_X,            # sprint FSM: x speed target (Sprint Speed Crt, signed)
  WCON,            # contacts of the last physics step: 1 floor, 2 wall (OnCollisionStay vs Enter)
- K) = range(74)
+ SHOVE,           # pending rb2d.MovePosition x offset (an up slash off a wall: done in the next physics step)
+ K) = range(75)
 ROW_NAMES = ("px py qx qy sx sy vx vy alpha gs face ground mode mode_t mode_n jumping jsteps jdsteps jq aq airhang "
              "attacking atk_t atk_cd rdir rsteps ds_hs ds_rec bounce hvx hvy move jheld prev silk inv_t ledge touch "
              "phase ts qq alo ahi landq wf_ph wf_t wf_s wf_down wf_wait wf_up wf_tgt wside wtouch cling cling_cd "
              "wstick unstick wlock wj_dir wj_v wj_chain wjq wslash prev_gs gl_cd dash_t dash_cd airdashed dq fall_t "
-             "hard sp_x wcon").split()
+             "hard sp_x wcon shove").split()
 assert len(ROW_NAMES) == K
 
 M_NORMAL, M_DS_ANTIC, M_DS_SPIKE, M_HURT_FREEZE, M_HURT_RECOIL, M_CAST, M_BIND, M_LOCKED = range(8)
@@ -449,6 +450,13 @@ class HeroParams:
     rpr_vmax: float = 12.0
     rpr_speed: float = 30.0            # Rpr Downslash SetVelocityByScale (forward, -down)
     rpr_slash_decel: float = 0.7       # ... DecelerateV2
+    rpr_thunk_decel: float = 0.715     # Rpr Downslash Thunk (THUNKED DOWN: the slash met a floor): DecelerateV2 (its
+    #                                    SetVelocity2d y 28 is disabled in the template)
+    rpr_thunk_reach0: float = 2.18     # thunk reach below the box centre while the slash's MODE_T < rpr_thunk_reach_t
+    rpr_thunk_reach1: float = 2.33     # ... after (fit: excitation runs A / B / C, see movement_kinematics.md)
+    rpr_thunk_reach_t: float = 0.058
+    rpr_thunk_lobe0: float = 0.5       # x span (along the facing, from the body centre) of the floor the thunk meets
+    rpr_thunk_lobe1: float = 2.2
     hard_fall_time: float = 0.5        # BIG_FALL_TIME
     hard_land_time: float = 0.67       # HARD_LANDING_TIME
     # Wall Scramble FSM (hornet_wall_scramble: a dash while sliding and holding towards the wall climbs it)
@@ -492,7 +500,8 @@ class HeroParams:
               "rpr_antic_decel", "rpr_antic_decel_y", "rpr_accel", "rpr_decel", "rpr_vmax", "rpr_speed",
               "rpr_slash_decel", "hard_fall_time", "hard_land_time", "scr_antic_t", "scr_speed", "scr_force",
               "scr_force_held", "scr_end_vy", "scr_end_decel", "scr_end_t", "scr_roof_ray", "scr_roof_t",
-              "scr_detach")
+              "scr_detach", "rpr_thunk_decel", "rpr_thunk_reach0", "rpr_thunk_reach1", "rpr_thunk_reach_t",
+              "rpr_thunk_lobe0", "rpr_thunk_lobe1")
 
     def vector(self) -> np.ndarray:
         return np.array([float(getattr(self, k)) for k in self.VECTOR], dtype=np.float64)
@@ -565,8 +574,8 @@ class HeroParams:
  P_GL_START_VY, P_GL_CD, P_GL_GRAY, P_GL_BRAY, P_GL_BVX, P_RPR_ANTIC, P_RPR_SLASH, P_RPR_FALL, P_RPR_FALL2,
  P_RPR_ADEC, P_RPR_ADEC_Y, P_RPR_ACC, P_RPR_DEC, P_RPR_VMAX, P_RPR_SPEED, P_RPR_SDEC, P_HARD_FALL, P_HARD_LAND,
  P_SCR_ANTIC, P_SCR_SPEED, P_SCR_FORCE, P_SCR_FORCE_H, P_SCR_END_VY, P_SCR_END_DEC, P_SCR_END_T, P_SCR_ROOF_RAY,
- P_SCR_ROOF_T, P_SCR_DETACH,
- NP) = range(137)
+ P_SCR_ROOF_T, P_SCR_DETACH, P_RPR_TDEC, P_RPR_TREACH0, P_RPR_TREACH1, P_RPR_TREACH_T, P_RPR_TLOBE0, P_RPR_TLOBE1,
+ NP) = range(143)
 assert NP == len(HeroParams.VECTOR)
 
 
@@ -837,6 +846,21 @@ def _on_ground(px, py, P, hseg):
     xov = ((px + hw)[:, None] > x0 + EPS) & ((px - hw)[:, None] < x1 - EPS)
     gap = (py - P[P_FOOT])[:, None] - (s + P[P_SKIN])
     return (xov & (gap >= -GTOL) & (gap <= GTOL)).any(axis=1)
+
+
+def _wall_contact(px, py, P, vseg):
+    """kin_jit.forum_contacts' wall contact: a wall face within skin + wall_contact of a box side whose y span holds
+    the box's centre or bottom height."""
+    if vseg.shape[0] == 0:
+        return np.zeros(px.shape, dtype=np.bool_)
+    hw, reach = P[P_HW], P[P_SKIN] + P[P_W_CONTACT]
+    s, y0, y1 = vseg[:, 0][None, :], vseg[:, 1][None, :], vseg[:, 2][None, :]
+    ymid = (py + 0.5 * (P[P_HEAD] - P[P_FOOT]))[:, None]
+    ybot = (py - P[P_FOOT])[:, None]
+    span = ((y0 - EPS <= ymid) & (ymid <= y1 + EPS)) | ((y0 - EPS <= ybot) & (ybot <= y1 + EPS))
+    gl = (px - hw)[:, None] - s
+    gr = s - (px + hw)[:, None]
+    return (span & (((gl >= -TOL) & (gl <= reach)) | ((gr >= -TOL) & (gr <= reach)))).any(axis=1)
 
 
 # ---- the model: one physics step, one Update ------------------------------------------------------------------
@@ -2187,6 +2211,9 @@ class ForumRows:
         self.ph_t = np.float32(0.0)
         self.dash_t = np.float32(0.0)
         self.airdashed = False
+        self.wslash = False
+        self.shove = 0.0
+        self.scr_pending = 0.0
 
     def push(self, S: np.ndarray, r: dict, md: int, flag) -> None:
         """Fill S (one [K] state, the frame's other rows already set) for row r (Trace.row form) in mode md."""
@@ -2220,10 +2247,26 @@ class ForumRows:
             self.wlock, self.wj_dir = 0.0, face
         elif self.wlock >= 0:
             self.wlock += fs
-            if self.wlock > p.wj_lock_long or not jumping:
-                self.wlock = -1.0
+            mask = int(r.get("mask", 0))
+            back = (self.wj_dir < 0 and mask & B_RIGHT) or (self.wj_dir > 0 and mask & B_LEFT)
+            if self.wlock > p.wj_lock_long or not jumping or (self.wlock >= p.wj_lock_short and back):
+                self.wlock = -1.0             # (LookForInput 8407: back towards the wall after the short lock)
         S[WLOCK] = self.wlock
         S[WJ_DIR] = self.wj_dir
+        # wallSlashing: a side attack started during the slide, until the attack ends (ResetAttacks) or the slide
+        attacking = flag("attacking")
+        if not (attacking and sliding):
+            self.wslash = False
+        elif not (pr and pr["attacking"]):
+            self.wslash = not flag("upAttacking")
+        S[WSLASH] = 1.0 if self.wslash else 0.0
+        # an up slash off the wall: MovePosition 0.8 u away from it, pending until the next physics step
+        up = flag("upAttacking")
+        if up and pr and not pr["up"] and pr["sliding"]:
+            self.shove = -pr["side"] * p.wall_up_shove
+        elif fs > 0:
+            self.shove = 0.0
+        S[SHOVE] = self.shove
         S[WJ_V] = p.wj_speed - max(self.wlock, 0.0) * (p.wj_speed - p.run_speed) / p.wj_lock_long
         S[PREV_GS] = 1.0
         S[DQ] = -1.0
@@ -2241,6 +2284,10 @@ class ForumRows:
             cph = RPR_CLIPS.get(clip)
             ph = 0.0 if cph == 0 else (pr["ph"] if pr and pmd == M_RPR_DS and pr["ph"] >= 1 else
                                        (1.0 if cph == 1 else 2.0))
+            # a thunk (the slash met a floor: Rpr Downslash Thunk) shows as one step decaying |vx| by 0.7 x 0.715
+            if ph == 1 and pr and pmd == M_RPR_DS and pr["ph"] == 1 and fs > 0 and r.get("vel") is not None:
+                if abs(pr["vx"]) > 0.05 and abs(float(r["vel"][0])) < 0.6 * abs(pr["vx"]):
+                    ph = 4.0
         elif md == M_SCRAMBLE:
             ph = float(SCRAMBLE_CLIPS.get(clip, pr["ph"] if pr and pmd == M_SCRAMBLE else 0))
             if ph == 2 and pr and pmd == M_SCRAMBLE:
@@ -2249,33 +2296,38 @@ class ForumRows:
                 elif pr["ph"] == 1 and fs > 0:
                     # Scramble End (vy < 0.5 after a step, DecelerateXY OnEnter) or Hit Roof Soft (the roof ray
                     # in the step: gravity back in it): whichever velocity rule the logged vy fits
+                    # (End needs vy < 0.5 after the step's force; a roof can also stop the body dead)
                     v0 = float(pr["vy"]) - (p.scr_force_held if pr["mask"] & B_DASH else p.scr_force) * p.fdt
                     vy_log = float(r["vel"][1]) if r.get("vel") is not None else v0 * p.scr_end_decel
                     roof = v0 - p.gravity * p.fdt
-                    ph = 3.0 if abs(vy_log - roof) < abs(vy_log - v0 * p.scr_end_decel) else 2.0
+                    ph = 3.0 if (v0 >= p.scr_end_vy or
+                                 abs(vy_log - roof) < abs(vy_log - v0 * p.scr_end_decel)) else 2.0
         if md in (M_GLIDE, M_SPRINT, M_RPR_DS, M_SCRAMBLE):
-            if pr and pmd == md and pr["ph"] == ph:
+            if pr and pmd == md and (pr["ph"] == ph or (md == M_RPR_DS and pr["ph"] == 1 and ph == 4)):
                 self.ph_t = np.float32(self.ph_t + dt)
             elif md == M_SCRAMBLE and ph == 3:
                 self.ph_t = dt                # entered in a FixedUpdate: the entry frame's Update counts
             else:
                 self.ph_t = np.float32(0.0)
-            if md == M_RPR_DS and pr and pmd == md and pr["ph"] == ph:
-                for k, lim in ((1.0, p.rpr_slash_t), (2.0, p.rpr_fall_t)):
+            if md == M_RPR_DS and pr and pmd == md and pr["ph"] in (ph, 1.0):
+                for k, lim, nxt in ((1.0, p.rpr_slash_t, 2.0), (4.0, p.rpr_slash_t, 2.0), (2.0, p.rpr_fall_t, 3.0)):
                     if ph == k and self.ph_t >= np.float32(lim):
-                        ph, self.ph_t = k + 1.0, np.float32(0.0)
+                        ph, self.ph_t = nxt, np.float32(0.0)
                         break
             S[PHASE] = ph
             S[MODE_T] = float(self.ph_t)
             if md == M_GLIDE:
                 S[GS] = 0.0 if ph in (1.0, 2.0) else 1.0
             elif md == M_RPR_DS:
-                S[GS] = 0.0 if ph < 2 else 1.0
+                S[GS] = 0.0 if ph in (0.0, 1.0, 4.0) else 1.0
             elif md == M_SCRAMBLE:
                 S[GS] = 1.0 if ph == 3 else 0.0
                 if ph == 1 and not (pr and pmd == md and pr["ph"] == 1) and "mask" in r:
-                    # Start Scramble's frame: Scramble Up's AddForce2d OnEnter is pending for the next step
-                    S[VY] -= (p.scr_force_held if r["mask"] & B_DASH else p.scr_force) * p.fdt
+                    # Start Scramble's frame: Scramble Up's AddForce2d OnEnter is pending until the next step
+                    self.scr_pending = (p.scr_force_held if r["mask"] & B_DASH else p.scr_force) * p.fdt
+                elif ph != 1 or fs > 0:
+                    self.scr_pending = 0.0
+                S[VY] -= self.scr_pending
             else:
                 S[GS] = 1.0
         S[SP_X] = face * (p.air_sprint_speed if ph <= 1 else p.sprint_speed) if md == M_SPRINT else \
@@ -2304,9 +2356,11 @@ class ForumRows:
         S[HARD] = 1.0 if flag("willHardLand") else 0.0
         S[WCON] = (1.0 if ground else 0.0) + (2.0 if (wall is not None and wall != 0) or sliding else 0.0)
         S[FALL_T] = p.hard_fall_time + 0.01 if S[HARD] > 0 else 0.0
-        self.prev = {"sliding": sliding, "cling": cling, "jumping": jumping, "ground": ground,
+        self.prev = {"sliding": sliding, "cling": cling, "jumping": jumping, "ground": ground, "attacking": attacking,
+                     "up": up, "side": side,
                      "wall": bool(wall) if wall is not None else sliding, "md": md, "ph": ph,
-                     "vy": float(r["vel"][1]) if r.get("vel") is not None else 0.0, "mask": int(r.get("mask", 0))}
+                     "vy": float(r["vel"][1]) if r.get("vel") is not None else 0.0, "mask": int(r.get("mask", 0)),
+                     "vx": float(r["vel"][0]) if r.get("vel") is not None else 0.0}
 
 
 def _neutral_forum_rows(S: np.ndarray) -> None:
@@ -2370,8 +2424,11 @@ def estimate_state(tr: Trace, idx: Iterable[int] | np.ndarray, params: HeroParam
     table = state_table(tr, params, modes, alpha, causal) if table is None else table
     S = table[:, idx].copy()
     if terrain is not None:     # falling body parked on a floor without contact yet (see _move_y)
-        near = _on_ground(S[PX], S[PY], params.vector(), terrain.hseg)
+        P = params.vector()
+        near = _on_ground(S[PX], S[PY], P, terrain.hseg)
         S[TOUCH] = (near & (S[GROUND] <= 0) & (S[VY] < 0)).astype(np.float64)
+        if params.abilities:    # a wall reached in the last step: OnCollisionEnter2D, the touch flags come a step later
+            S[WCON] = np.where(_wall_contact(S[PX], S[PY], P, terrain.vseg), S[WCON] % 2 + 2.0, S[WCON])
     return S
 
 
@@ -2498,7 +2555,8 @@ def state_table(tr: Trace, params: HeroParams, modes: np.ndarray | None = None,
     _neutral_forum_rows(S)
     if params.abilities:
         fr = ForumRows(params)
-        fls = {k: tr.flag(k) for k in ("wallSliding", "wallClinging", "jumping", "onGround", "willHardLand")}
+        fls = {k: tr.flag(k) for k in ("wallSliding", "wallClinging", "jumping", "onGround", "willHardLand",
+                                       "attacking", "upAttacking")}
         for i in range(n):
             r = {"dt": float(tr.dt[i]), "fs": int(tr.fs[i]), "facing": int(tr.facing[i]),
                  "wall": int(tr.wall[i]) if tr.wall is not None else None, "clip": tr.clips[tr.clip[i]],
@@ -2562,6 +2620,7 @@ def _replay_gravity(tr: Trace, modes: np.ndarray, params: HeroParams) -> tuple[n
     relinq_modes = np.isin(modes, RELINQUISHED)
     noinp = np.isin(modes, NO_INPUT)
     catch = np.array(tr.clips, dtype=object)[tr.clip] == "NeedleThrow Catch"
+    forum = bool(params.abilities)
     for i in range(n):
         m = modes[i]
         if m == M_CAST and catch[i]:
@@ -2570,8 +2629,11 @@ def _replay_gravity(tr: Trace, modes: np.ndarray, params: HeroParams) -> tuple[n
             g = 0.0
         elif i > 0 and modes[i - 1] in (M_DS_ANTIC, M_DS_SPIKE, M_HURT_FREEZE, M_HURT_RECOIL, M_CAST, M_BIND):
             g = 1.0
-        for _ in range(int(tr.fs[i])):
-            vy = tr.vel[i, 1]
+        for k in range(int(tr.fs[i])):
+            # FixedUpdate reads the velocity the step starts from: with the Forum loadout the previous frame's
+            # (the wall slide changes vy in LateUpdate, after the step: the hang comes a step after the slide's
+            # first vy < 0); the Hunter fit keeps the frame's own
+            vy = tr.vel[i - 1, 1] if (forum and k == 0 and i > 0) else tr.vel[i, 1]
             if h <= 0 and not ground[i] and vy < 0:
                 if not relinq_modes[i] and not noinp[i]:
                     g = params.air_hang_gravity
@@ -2684,6 +2746,7 @@ class StateTracker:
         self._last_q = {JQ: -1, AQ: -1, QQ: -1}
         self._last_kill = {JQ: -1, AQ: -1, QQ: -1}
         self._g, self._h = 1.0, 0.0
+        self._pvy = 0.0
         self._ds_face = 0.0
         self._ds_seen = False
         self._dmg_side = 0.0
@@ -2852,8 +2915,8 @@ class StateTracker:
         elif not first and pmd in (M_DS_ANTIC, M_DS_SPIKE, M_HURT_FREEZE, M_HURT_RECOIL, M_CAST, M_BIND):
             g = 1.0
         jheld_prev = ((pmask if not first else mask) & B_JUMP) != 0
-        for _ in range(int(r["fs"])):
-            vy = r["vel"][1]
+        for k in range(int(r["fs"])):
+            vy = self._pvy if (p.abilities and k == 0 and not first) else r["vel"][1]
             if hh <= 0 and not ground and vy < 0:
                 if not relq and not noinp:
                     g = p.air_hang_gravity
@@ -2867,6 +2930,7 @@ class StateTracker:
                 g = 1.0
             g = min(g, 1.0)
         self._g, self._h = g, hh
+        self._pvy = float(r["vel"][1])
         S[GS], S[AIRHANG] = g, hh
         # attacks
         S[ATTACKING] = float(att)
@@ -3037,6 +3101,8 @@ class StateTracker:
         if self.terrain is not None:
             near = _on_ground(S[PX:PX + 1], S[PY:PY + 1], P, self.terrain.hseg)[0]
             S[TOUCH] = float(near and S[GROUND] <= 0 and S[VY] < 0)
+            if p.abilities and _wall_contact(S[PX:PX + 1], S[PY:PY + 1], P, self.terrain.vseg)[0]:
+                S[WCON] = S[WCON] % 2 + 2.0
         self.S = S
         self.events = ev
         self.f, self.box, self.mask, self.udt = r["f"], r["box"], mask, r["udt"]

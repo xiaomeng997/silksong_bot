@@ -41,9 +41,10 @@ from ssbot.knowledge.kinematics import (  # Forum loadout (abilities)
     P_RPR_ANTIC, P_RPR_FALL, P_RPR_FALL2, P_RPR_SDEC, P_RPR_SLASH, P_RPR_SPEED, P_SKID_DEC,
     P_SKID_T, P_SPR_ACC, P_SPR_SPEED, P_W_CCD, P_W_CDECEL, P_W_CONTACT, P_W_CVMIN, P_W_RAY, P_W_RAY_B, P_W_SHOVE,
     P_W_SLASH_VMIN, P_W_STICK, P_W_STICKY, P_W_ACCEL, P_W_TRAY, P_WJ_CHAIN, P_WJ_JUMPED, P_WJ_LONG, P_WJ_SHORT,
-    P_WJ_SPEED, PREV_GS, SP_X, UNSTICK, WJ_CHAIN, WJ_DIR, WJ_V, WJQ, WLOCK, WSIDE, WSLASH, WSTICK, WTOUCH, WCON,
+    P_WJ_SPEED, PREV_GS, SP_X, UNSTICK, WJ_CHAIN, WJ_DIR, WJ_V, WJQ, WLOCK, WSIDE, WSLASH, WSTICK, WTOUCH, WCON, SHOVE,
     M_SCRAMBLE, P_SCR_ANTIC, P_SCR_SPEED, P_SCR_FORCE, P_SCR_FORCE_H, P_SCR_END_VY, P_SCR_END_DEC, P_SCR_END_T,
-    P_SCR_ROOF_RAY, P_SCR_ROOF_T, P_SCR_DETACH)
+    P_SCR_ROOF_RAY, P_SCR_ROOF_T, P_SCR_DETACH, P_RPR_TDEC, P_RPR_TREACH0, P_RPR_TREACH1, P_RPR_TREACH_T, P_RPR_TLOBE0,
+    P_RPR_TLOBE1)
 
 # world freeze presets in start order (kinematics.WF_ORDER): event bit, rampDown, wait, rampUp, target
 _WF = np.array([[float(b), *FREEZE_PRESETS[b]] for b in WF_ORDER])
@@ -324,6 +325,30 @@ def roof_ray(x0, top, length, TT):
             j = TT_H + 3 * np.int64(TT[ids + q])
             d = TT[j] - top
             if -0.1 <= d <= length and TT[j + 1] <= x0 <= TT[j + 2]:
+                return True
+    return False
+
+
+@njit(cache=True, error_model="numpy")
+def rpr_thunk(x, P, TT):
+    """The Reaper down slash's terrain thunker (NailSlashTerrainThunk on the DownSlash collider) meets a floor below
+    the hero: a floor segment under the slash's forward lobe within the reach below the box centre, which grows as
+    the slash's effect plays (fit on the excitation runs: 2.18 u over the first four frames, 2.33 u after). Walls
+    beside the hero do not thunk it (no wall-clinging slash high above the floor did)."""
+    if TT[0] == 0:
+        return False
+    cy = x[PY] + 0.5 * (P[P_HEAD] - P[P_FOOT])
+    reach = P[P_RPR_TREACH0] if x[MODE_T] < P[P_RPR_TREACH_T] else P[P_RPR_TREACH1]
+    a = x[PX] + x[FACE] * P[P_RPR_TLOBE0]
+    b = x[PX] + x[FACE] * P[P_RPR_TLOBE1]
+    lo, hi = min(a, b), max(a, b)
+    b0, b1 = _buckets(lo - 0.01, hi + 0.01, TT)
+    st, ids = np.int64(TT[5]), np.int64(TT[6])
+    for k in range(b0, b1 + 1):
+        for q in range(np.int64(TT[st + k]), np.int64(TT[st + k + 1])):
+            j = TT_H + 3 * np.int64(TT[ids + q])
+            d = cy - TT[j]
+            if 0.0 <= d <= reach and TT[j + 1] < hi and TT[j + 2] > lo:
                 return True
     return False
 
@@ -728,9 +753,10 @@ def forum_fixed(x, vx, vy, normal, P, TT):
         if ph == 0:                       # DecelerateV2 only: the state's DecelerateXY and UmbrellaMotionX are
             vx = decel(vx, P[P_RPR_ADEC])   # disabled in the template (actionEnabled false)
             vy = decel(vy, P[P_RPR_ADEC])
-        elif ph == 1:
-            vx = decel(vx, P[P_RPR_SDEC])
-            vy = decel(vy, P[P_RPR_SDEC])
+        elif ph == 1 or ph == 4:          # Rpr Downslash / Rpr Downslash Thunk: DecelerateV2
+            f = P[P_RPR_SDEC] if ph == 1 else P[P_RPR_TDEC]
+            vx = decel(vx, f)
+            vy = decel(vy, f)
     elif mode == M_HARD_LAND:
         vx = 0.0
         vy = 0.0
@@ -982,8 +1008,8 @@ def forum_after_queue(x, mask, pressed, mode0, dt, P, TT):
             x[MODE_T] = 0.0
             x[VX] = x[FACE] * P[P_RPR_SPEED]
             x[VY] = -P[P_RPR_SPEED]
-        elif ph == 1 and ge32(x[MODE_T], P[P_RPR_SLASH]):
-            x[PHASE] = 2.0                # Fall: gravity back
+        elif (ph == 1 or ph == 4) and ge32(x[MODE_T], P[P_RPR_SLASH]):
+            x[PHASE] = 2.0                # Fall (the same clip trigger ends the Thunk): gravity back
             x[MODE_T] = 0.0
             grav_on(x)
         elif ph == 2 and ge32(x[MODE_T], P[P_RPR_FALL]):
@@ -994,7 +1020,7 @@ def forum_after_queue(x, mask, pressed, mode0, dt, P, TT):
             x[DS_REC] = 0.0               # vy = -10)
             x[GS] = 1.0
             x[VY] = P[P_DS_ENDVY]
-        if x[MODE] == M_RPR_DS and x[PHASE] >= 2 and (pressed & B_DASH) != 0 and (ab & AB_DASH) != 0:
+        if x[MODE] == M_RPR_DS and (x[PHASE] == 2 or x[PHASE] == 3) and (pressed & B_DASH) != 0 and                 (ab & AB_DASH) != 0:
             regain(x, mask)               # Rpr DashCancel
     elif mode == M_SCRAMBLE:
         ph = x[PHASE]
@@ -1077,8 +1103,8 @@ def forum_attack(x, mask, P):
                     x[VY] = P[P_W_SLASH_VMIN]
             x[WSLASH] = 1.0
         else:
-            if up:
-                x[PX] = x[PX] - x[FACE] * P[P_W_SHOVE]
+            if up:                        # MovePosition 0.8 u off the wall: done by the next physics step
+                x[SHOVE] = -x[FACE] * P[P_W_SHOVE]
             x[FACE] = -x[FACE]
             cancel_wallslide(x)
     if down and (ab & AB_RPR_DOWN) != 0:
@@ -1218,6 +1244,17 @@ def fixed_step(x, P, TT):
     x[GS] = min(gs, 1.0)
     x[LEDGE] = max(x[LEDGE] - 1, 0.0)
 
+    shove = 0.0
+    sv_x = 0.0
+    sv_y = 0.0
+    if ab != 0 and x[SHOVE] != 0:
+        # rb2d.MovePosition: this step moves the body by the offset (plus gravity's share in y) instead of its
+        # velocity, which the step then leaves as it was (live: x -0.8 exactly, y -g fdt^2, vy still 0)
+        shove = x[SHOVE]
+        x[SHOVE] = 0.0
+        sv_x, sv_y = vx, vy
+        vx = shove / fdt
+        vy = 0.0
     vy = vy - P[P_G] * x[GS] * fdt
     pend = x[TOUCH] > 0
     # (the reference always computes it; it only matters in these cases)
@@ -1232,6 +1269,8 @@ def fixed_step(x, P, TT):
                                          TT)
     if landed or bumped:
         vy = 0.0
+    if shove != 0:
+        vx, vy = sv_x, sv_y
     x[PX] = nx
     x[PY] = ny
     x[SX] = nx
@@ -1260,6 +1299,10 @@ def fixed_step(x, P, TT):
     if ab != 0:
         if (ab & AB_WALL) != 0 or (lands and x[HARD] > 0):
             forum_contacts(x, lands, P, TT)
+        if x[MODE] == M_RPR_DS and x[PHASE] == 1 and rpr_thunk(x, P, TT):
+            x[PHASE] = 4.0                # THUNKED DOWN in the step's collision: Rpr Downslash Thunk, DecelerateV2
+            x[VX] = decel(x[VX], P[P_RPR_TDEC])   # OnEnter (the step's own x0.7 already done)
+            x[VY] = decel(x[VY], P[P_RPR_TDEC])
 
 
 @njit(cache=True, inline="always", error_model="numpy")
