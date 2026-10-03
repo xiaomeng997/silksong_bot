@@ -156,7 +156,7 @@
 
 ### 10.2 主角在口袋里时 Clapper 怎么选
 
-- `Slam Range`（AlertRange = 主角碰撞体进入触发盒，反编译 `AlertRange.cs`）是 pos ±8.05 × (pos − 4.46 … pos + 3.37)，站地时世界 y ≤ 10.82。口袋里主角的物理碰撞体下沿 ≥ 11.69、受伤盒下沿 ≥ 12.53，都在盒子上方 → "In Slam Range" 为假：`Walk` 的 CLOSE、`Idle` 的 EVADE 都不会触发，只走 `Far Range`：JUMP SLAM 0.5 / CAST 0.25 / JUMP CAST 0.25（SendRandomEventV4，eventMax 2/1/1，missedMax 1/2/2）；`Walk` 的 DistanceWalk 把自己保持在离主角 7 ± 1.5 u（x ≈ 19.8–22.8）。
+- `Slam Range`（AlertRange = 主角碰撞体进入触发盒，反编译 `AlertRange.cs`）是 pos ±8.05 × (pos − 4.46 … pos + 3.37)，站地时世界 y ≤ 10.82。口袋里主角的物理碰撞体下沿 ≥ 11.69、受伤盒下沿 ≥ 12.53，都在盒子上方 → "In Slam Range" 为假：`Walk` 的 CLOSE、`Idle` 的 EVADE 都不会触发，只走 `Far Range`：JUMP SLAM 0.5 / CAST 0.25 / JUMP CAST 0.25（SendRandomEventV4，eventMax 2/1/1，missedMax 1/2/2）；`Walk` 的 DistanceWalk 把自己保持在离主角 7 ± 1.5 u（x ≈ 19.8–22.8）。贴墙高度的门槛：Slam Range 顶 10.82，主角贴墙时物理碰撞体下沿 = pos − 1.76、`HeroBoxWallSlide` 下沿 = pos − 0.92，所以 pos y 高于约 12.6（按物理碰撞体）/ 11.7（按 HeroBox）就出了 Slam Range；低于这个高度贴墙，Clapper 照样会冲锤（锤顶 10.58）和后撤。`TrackTriggerObjects` 认的是与触发盒层相碰的任何碰撞体（层矩阵未查），代码里对进入者取 `GetComponent<HeroController>()`，说明预期的是主角根物体（物理碰撞体）；按保守的 12.6 算。
 - 这时跳的目标 = 14.27 + 5 = 19.27：从 19.8–22.8 起跳只向左移 0.5–3.5 u，本体左沿始终 ≥ 17.3。
 - 实测（运行 `20261002_231917`，数据策略加了"只剩 Clapper 时一半时间去口袋"，e589c0b；ep0 的 40 次跳）：起跳时主角在左墙（x 14.27–14.6）的 17 次，起跳点 x 22.1–28.8（中位 ≈ 25），本体顶过 12.53 时左沿最小 17.87–19.37，即离口袋右沿 ≥ 2.95 u；主角在口袋里时 Clapper 的 x：p5 18.6、中位 23.7。两次危险的起跳（x 15.36、15.59，面朝右）都发生在主角在它右边（x 16.5、18.6）时：本体贴墙升到 14.31–14.36（被穹顶挡住），覆盖口袋的高度。
 
