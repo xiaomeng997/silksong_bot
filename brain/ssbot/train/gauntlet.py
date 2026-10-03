@@ -11,9 +11,8 @@ Sources, best first (GauntletTap):
   room.battles   oracle STATE (SceneDump.BattleWatch, commit 788aaa8; absent before that oracle is deployed): the
                  BattleScene's own wave index, started / completed and enemy count. Exact.
   kills          "hit" events with dead true (every source: the hero, helpers, Cogflies), replayed through the
-                 BattleScene's DecrementEnemy rule on the known wave list (WaveSim). Exact for the DecrementEnemy
-                 path; BattleScene also ends a wave when the wave transforms' child count drops to remainingEnemyToEnd
-                 (DoCheckEnemies, 1 s after each start), which the sim does not see.
+                 BattleScene's wave rules on the known wave list (WaveSim: DecrementEnemy on each death of a wave
+                 member, and the enemy-count check 1 s after each wave's activation).
   spawns         the FSM start ("fsm" event with from None) of a wave-0 enemy GameObject whose name no later wave
                  reuses (they are inactive until StartWave(0)) marks the battle start when room.battles is absent.
   end            freeze "EnemyBattleEndSlow" after the start, or the sim finishing the last wave: CLEAR.
@@ -60,40 +59,90 @@ class Wave:
         return tuple(type_key(n) for n in self.enemies)
 
 
+CHECK_AFTER_F = 60     # BattleScene.StartWave: DoCheckEnemies 1 s after a wave's enemies are activated
+
+
 class WaveSim:
-    """BattleScene's DecrementEnemy rule replayed from kills: start(f) at the battle's first wave, kill(f) per death."""
+    """BattleScene's wave rules replayed from kills: start(f) at the battle's first wave, kill(f) per death of a wave
+    member, advance(f) as time passes (every STATE).
+
+    StartWave(i) (BattleScene.cs:311) activates wave i after its startDelay (currentWave = i, enemiesToNext =
+    remainingEnemyToEnd) and checks the enemy count 1 s later (DoCheckEnemies: the wave transforms' child count, which
+    is the number of wave members still alive); DecrementEnemy on a death checks at once. Either check ends the wave
+    when the count is <= enemiesToNext: StartWave(i + 1), or EndBattle after the last. A wave whose own size is within
+    its remainingEnemyToEnd (Forum index 2: 2 enemies, 2) therefore ends 1 s after its activation, not with it (run
+    20261002_231917 ep0: the Clawmaiden of index 3 activated at 59.77 s, index 2 at 58.03 s, + 1.0 s check + 0.5 s
+    startDelay). A wave end while the next StartWave is still in its startDelay (a second kill of an overlapping wave)
+    makes the game run StartWave(i + 1) a second time; its members are counted once by the child count, so the sim
+    ignores it."""
 
     def __init__(self, waves: tuple[Wave, ...]):
         self.waves = waves
-        self.wave = -1
+        self.wave = -1                               # BattleScene.currentWave (set at a wave's activation)
         self.alive = 0
         self.to_next = 0
         self.done = False
-        self.starts: list[tuple[int, int]] = []      # (wave index, frame its enemies were activated)
+        self.starts: list[tuple[int, int]] = []      # (wave index, frame its enemies were activated), in time order
         self.end_frame: int | None = None
+        self._queued: tuple[int, int] | None = None  # (wave index, activation frame) of a StartWave in its delay
+        self._checks: list[tuple[int, int]] = []     # (frame, wave) of pending DoCheckEnemies
 
     def start(self, f: int) -> None:
-        if self.wave < 0:
-            self._start_wave(0, f)
+        if self.wave < 0 and self._queued is None and not self.done:
+            self._queue(0, f)
+            self.advance(f)
 
-    def _start_wave(self, i: int, f: int) -> None:
-        w = self.waves[i]
-        f_on = f + round(w.start_delay_s * 60)
-        self.wave = i
-        self.alive += len(w.enemies)
-        self.to_next = w.remaining_to_end
-        self.starts.append((i, f_on))
+    def _queue(self, i: int, f: int) -> None:
+        if self._queued is None:
+            self._queued = (i, f + round(self.waves[i].start_delay_s * 60))
+
+    def _wave_end(self, f: int) -> None:
+        if self.wave >= len(self.waves) - 1:
+            self.done = True
+            self.end_frame = f
+        else:
+            self._queue(self.wave + 1, f)
+
+    def advance(self, f: int) -> None:
+        """Run the activations and 1 s checks due by frame f, in time order."""
+        while not self.done:
+            nxt = []
+            if self._queued is not None and self._queued[1] <= f:
+                nxt.append((self._queued[1], 0))
+            due = [c for c in self._checks if c[0] <= f]
+            if due:
+                nxt.append((min(due)[0], 1))
+            if not nxt:
+                return
+            fe, kind = min(nxt)
+            if kind == 0:
+                i, fa = self._queued
+                self._queued = None
+                w = self.waves[i]
+                self.wave = i
+                self.alive += len(w.enemies)
+                self.to_next = w.remaining_to_end
+                self.starts.append((i, fa))
+                self._checks.append((fa + CHECK_AFTER_F, i))
+            else:
+                c = min(due)
+                self._checks.remove(c)
+                if self.alive <= self.to_next:
+                    self._wave_end(fe)
 
     def kill(self, f: int) -> None:
-        if self.wave < 0 or self.done:
+        if self.done or (self.wave < 0 and self._queued is None):
+            return
+        self.advance(f)
+        if self.done:
             return
         self.alive -= 1
-        while self.alive <= self.to_next and not self.done:
-            if self.wave >= len(self.waves) - 1:
-                self.done = True
-                self.end_frame = f
-            else:
-                self._start_wave(self.wave + 1, f)
+        if self.wave >= 0 and self.alive <= self.to_next:
+            self._wave_end(f)
+            self.advance(f)
+
+
+DEAD_REPEAT_F = 60     # a second dead "hit" of one entity within this many frames is the same death
 
 
 class GauntletTap:
@@ -127,7 +176,7 @@ class GauntletTap:
             self.hp: list[tuple[int, dict]] = []
             self.other: list[tuple[int, str, dict]] = []
             self.kills: list[tuple[int, str, str | None]] = []     # (frame, type_key, src)
-            self._dead: set[int] = set()
+            self._dead: dict[int, int] = {}                       # ent -> frame of its last counted death
             self.state_entries: dict[str, int] = {}               # "<type>/<fsm>/<state>" -> entries
             self.sim = WaveSim(self.enc.waves)
             self.waves_exact: list[tuple[int, int]] = []          # (wave index, frame) from room.battles
@@ -162,6 +211,11 @@ class GauntletTap:
         battles = room.get("battles")
         allies = s.get("allies")
         evs = s.get("ev")
+        if self.wake_frame is not None and not self.battle_seen and not self.sim.done:
+            with self._lock:
+                self.sim.advance(f)        # wave activations and 1 s checks due by now, in time order
+                if self.sim.done:
+                    self._end(self.sim.end_frame, "kills")
         if not evs and battles is None and not allies:
             return
         with self._lock:
@@ -194,8 +248,7 @@ class GauntletTap:
                         key = f"{type_key(obj)}/{d.get('fsm')}/{d['to']}"
                         self.state_entries[key] = self.state_entries.get(key, 0) + 1
                 elif k == "hit":
-                    if d.get("dead") and d.get("ent") not in self._dead:
-                        self._dead.add(d.get("ent"))
+                    if self._new_death(f, d):
                         self.kills.append((f, d.get("type_key"), d.get("src")))
                         if self.wake_frame is not None and d.get("type_key") in self._wave_types:
                             if self.sim.wave < 0:
@@ -217,6 +270,23 @@ class GauntletTap:
                 elif k in ("special_damage", "hazard_respawn", "hazard_death", "die", "hero_dead", "player_dead",
                            "gs", "scene_leave"):
                     self.other.append((f, k, d))
+
+    def _new_death(self, f: int, d: dict) -> bool:
+        """A "hit" with dead that is a new death: the hit took the enemy from hp > 0 (every dead hit of the four
+        Forum runs of 2026-10-02 did), and not a repeat report of the same entity within DEAD_REPEAT_F. The Maestro's
+        pooled "Song Automaton Tiny" come back under the same iid (run 20261002_231917 ep0: -693612 died 4 times,
+        907+ frames apart), so an iid may die again."""
+        if not d.get("dead"):
+            return False
+        hp0 = d.get("hp_before")
+        if hp0 is not None and hp0 <= 0:
+            return False
+        ent = d.get("ent")
+        last = self._dead.get(ent)
+        if last is not None and f - last < DEAD_REPEAT_F:
+            return False
+        self._dead[ent] = f
+        return True
 
     def lethal_frames(self) -> list[int]:
         return sorted({f for f, _, _ in self.lethal})

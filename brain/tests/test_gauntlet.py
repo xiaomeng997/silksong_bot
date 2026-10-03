@@ -6,7 +6,7 @@ import random
 from ssbot.ipc.framing import mask
 from ssbot.train.data_policy import GauntletDataPolicy
 from ssbot.train.encounters import FORUM, FORUM_WAVES
-from ssbot.train.gauntlet import GauntletTap, WaveSim, type_key
+from ssbot.train.gauntlet import CHECK_AFTER_F, GauntletTap, WaveSim, type_key
 
 
 class _Link:
@@ -34,15 +34,29 @@ def test_type_key_matches_the_oracle():
     assert type_key("(3)") == "(3)"
 
 
-def _kill_all(sim: WaveSim, f0: int = 100) -> list[int]:
-    """Kill every enemy as soon as it is alive; returns the frames of the kills."""
+def _kill_all(sim: WaveSim, f0: int = 100, step: int = 10) -> list[int]:
+    """Kill an enemy every `step` frames whenever one is alive (as in a fight: no kill before a wave's activation);
+    returns the frames of the kills."""
     f = f0
     kills = []
     while not sim.done:
-        f += 10
-        sim.kill(f)
-        kills.append(f)
+        f += step
+        sim.advance(f)
+        if sim.alive > 0:
+            sim.kill(f)
+            kills.append(f)
     return kills
+
+
+def _run_to_wave(sim: WaveSim, i: int) -> int:
+    """Kill the alive enemies every 200 frames until wave i activates; returns its activation frame."""
+    f = 100
+    while sim.wave < i:
+        f += 1
+        sim.advance(f)
+        if sim.wave < i and sim.alive > 0 and f % 200 == 0:
+            sim.kill(f)
+    return dict(sim.starts)[i]
 
 
 def test_wave_sim_runs_the_forum_waves_in_order():
@@ -50,14 +64,30 @@ def test_wave_sim_runs_the_forum_waves_in_order():
     assert total == 28 and len(FORUM_WAVES) == 14
     sim = WaveSim(FORUM_WAVES)
     sim.start(100)
-    kills = _kill_all(sim)
+    kills = _kill_all(sim, step=200)
     assert sim.done and sim.end_frame == kills[-1]
     assert [i for i, _ in sim.starts] == list(range(14))
+    assert [f for _, f in sim.starts] == sorted(f for _, f in sim.starts)
     assert len(kills) == total
-    # wave index 2 (2 enemies, remainingEnemyToEnd 2) ends at once: wave 3 starts with it, on the same kill
-    f2 = dict(sim.starts)[2] - round(FORUM_WAVES[2].start_delay_s * 60)
-    f3 = dict(sim.starts)[3] - round(FORUM_WAVES[3].start_delay_s * 60)
-    assert f2 == f3
+    # wave index 2 (2 enemies, remainingEnemyToEnd 2) ends at its 1 s enemy check, not with its own start: index 3
+    # (startDelay 0.5 s) activates 1.5 s after it when nobody dies in between (BattleScene.StartWave)
+    st = dict(sim.starts)
+    assert st[3] - st[2] == CHECK_AFTER_F + round(FORUM_WAVES[3].start_delay_s * 60)
+    # a kill of an index-2 enemy before that check ends the wave at once (DecrementEnemy: 1 <= 2)
+    sim2 = WaveSim(FORUM_WAVES)
+    sim2.start(100)
+    f2 = _run_to_wave(sim2, 2)
+    sim2.kill(f2 + 10)
+    sim2.advance(f2 + 200)
+    assert dict(sim2.starts)[3] == f2 + 10 + round(FORUM_WAVES[3].start_delay_s * 60)
+    # a second kill while index 3 is still in its startDelay does not start it twice
+    sim3 = WaveSim(FORUM_WAVES)
+    sim3.start(100)
+    f2 = _run_to_wave(sim3, 2)
+    sim3.kill(f2 + 10)
+    sim3.kill(f2 + 12)
+    sim3.advance(f2 + 300)
+    assert [i for i, _ in sim3.starts].count(3) == 1 and sim3.alive == 1
 
 
 def test_tap_start_waves_and_end_from_kills():
@@ -71,18 +101,27 @@ def test_tap_start_waves_and_end_from_kills():
     link.feed({"f": f, "ev": [_ev("fsm", obj="Song Pilgrim 01", fsm="Attack", to="Init", **{"from": None})]})
     assert tap.wake_frame == f and tap.wave == 0
     n = 0
-    while tap.death_frame is None and n < 40:
+    while tap.death_frame is None and f < 1000 + 200 * 60:
         f += 30
+        if tap.sim.alive <= 0:
+            link.feed({"f": f})            # waiting for the next wave's activation (startDelay, 1 s check)
+            continue
         n += 1
-        # the Maestro's summons die too (run 20261002_221727 i2 ep0): not wave members, no DecrementEnemy
-        link.feed({"f": f, "ev": [_ev("hit", ent=1000 + n, type_key="Song Automaton Tiny", dead=True, src="Slash"),
-                                  _ev("hit", ent=n, type_key="Song Reed", dead=True, src="WildSlash Enemy Damager")]})
+        # the Maestro's summons die too (run 20261002_221727 i2 ep0): not wave members, no DecrementEnemy; a pooled
+        # summon dies again under the same iid (run 20261002_231917 ep0)
+        link.feed({"f": f, "ev": [_ev("hit", ent=-1 - n % 3, type_key="Song Automaton Tiny", dead=True, src="Slash",
+                                      hp_before=4),
+                                  _ev("hit", ent=n, type_key="Song Reed", dead=True, src="WildSlash Enemy Damager",
+                                      hp_before=9)]})
     assert n == 28 and tap.death_frame == f and tap.end_source == "kills"
     summ = tap.summary()
     assert summ["wave_reached"] == 13 and summ["kills"]["n"] == 56
     assert summ["kills"]["by_src"] == {"WildSlash Enemy Damager": 28, "Slash": 28}
-    # the same enemy reported dead twice counts once
-    link.feed({"f": f + 1, "ev": [_ev("hit", ent=n, type_key="Song Reed", dead=True, src="Slash")]})
+    waves = [w["f"] for w in summ["waves"]]
+    assert [w["wave"] for w in summ["waves"]] == list(range(14)) and waves == sorted(waves)
+    # the same death reported twice counts once; a hit on an enemy already at hp <= 0 is no new death
+    link.feed({"f": f + 1, "ev": [_ev("hit", ent=n, type_key="Song Reed", dead=True, src="Slash", hp_before=3)]})
+    link.feed({"f": f + 200, "ev": [_ev("hit", ent=n, type_key="Song Reed", dead=True, src="Slash", hp_before=-2)]})
     assert tap.summary()["kills"]["n"] == 56
 
 
