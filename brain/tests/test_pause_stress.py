@@ -200,12 +200,21 @@ def test_trigger_fault_fires_at_the_bounce_onset_plus_its_offset_without_a_hit()
 def test_kill_trigger_goes_before_a_committed_needle_kill():
     """A Silkspear thrown with the boss at <= 15 HP hits 18-20 frames after the press (run 20261002_190611): the
     trigger goes at press + 19 + offset; a hit fault waits for the kill itself."""
+    from types import SimpleNamespace
     inner = InnerSc()
     inj, link = _injector("kill", fault="trigger", offset=-2, inner=inner)
     for f in range(0, 100):
         inj.act(_fs(f, boss_hp=10))
     for f in range(100, 130):
         inj.act(_fs(f, boss_hp=10, lat=1 << 6 if f < 104 else 0))         # quickcast latched from 100
+    assert not inner.sc.faults                                            # the planner did not score it
+    inner = InnerSc()
+    inner.planner_last = SimpleNamespace(attack=(4, 2, [0.0] * 4))         # its first scored hit: a Silkspear
+    inj, link = _injector("kill", fault="trigger", offset=-2, inner=inner)
+    for f in range(0, 100):
+        inj.act(_fs(f, boss_hp=10))
+    for f in range(100, 130):
+        inj.act(_fs(f, boss_hp=10, lat=1 << 6 if f < 104 else 0))
     assert inj.stats()["inject"]["trigger_f"] == 100 + 19 - 2 and len(inner.sc.faults) == 1
     inj, link = _injector("kill", fault="hit", offset=0, inner=InnerSc())
     for f in range(0, 140):

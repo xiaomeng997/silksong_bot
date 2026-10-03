@@ -27,7 +27,8 @@ where the moment is committed and its frame known, a few frames before it:
           its damage: a Silkspear hits 18-20 frames after the quickcast press (run 20261002_190611, 6 episodes:
           26 of 26 needle hits, 18 / 19 / 20 frames 12 / 13 / 1; it flies on whatever the keys do), so the
           trigger goes at press + 19 + offset; a nail press hits 1-4 frames later (Slash / AltSlash 38 of 56 at +1),
-          so its offset is at least -1 (the press is seen on the frame it is latched)
+          so its offset is at least -1 (the press is seen on the frame it is latched); either only when the planner
+          scored that attack as a hit
   bounce  downSpikeBouncing onset. hit: onset + 1 (past the 2-physics-step down-spike i-frames,
           HeroController.DOWNSPIKE_INVULNERABILITY_STEPS; a hit the game refuses re-arms for the next bounce);
           trigger: onset + 0..2
@@ -103,6 +104,7 @@ class HitInjector:
         self.retries, self.done = 0, True        # nothing to inject before the first reset
         self._prev: dict = {}
         self._hit_frames: list[int] = []
+        self._attacks: list = []             # (tick frame, the planner's PlanResult.attack then)
 
     def __getattr__(self, name):          # pause_owned, episode_outcome, real_quit_active, planner_last, ...
         return getattr(self.inner, name)
@@ -147,6 +149,7 @@ class HitInjector:
         self.done = False
         self._prev = {}
         self._hit_frames: list[int] = []
+        self._attacks: list = []
         self.log = {"kind": kind, "fault": fault, "offset": offset, "sent": [], "replies": [], "fallback": False,
                     "moments": []}
 
@@ -234,10 +237,10 @@ class HitInjector:
                 hp = self._boss_hp(s)
                 if hp is None or hp <= 0:
                     return None
-                if x["needle"] and hp <= NEEDLE_HIT:
+                if x["needle"] and hp <= NEEDLE_HIT and self._scored(f, needle=True):
                     self.log["moments"].append(["needle_press", f])
                     return f + NEEDLE_DELAY + o
-                if x["nail"] and hp <= HERO_HIT:
+                if x["nail"] and hp <= HERO_HIT and self._scored(f, needle=False):
                     self.log["moments"].append(["nail_press", f])
                     return f + max(NAIL_DELAY + o, 0)
             return None
@@ -249,6 +252,16 @@ class HitInjector:
                "attack": any(clip.startswith(c) for c in ATTACK_CLIPS), "pogo": clip.startswith("DownSpike"),
                "keys": x["lat"] != 0, "menu": x["lat"] != 0}.get(k, False)
         return f if now else None
+
+    def _scored(self, f: int, needle: bool) -> bool:
+        """The planner scored the attack pressed now as a hit: a tick of the last 4 frames whose chosen plan's first
+        scored hit (PlanResult.attack: kind 1-3 nail, 4 Silkspear; start frame from that tick's origin) starts
+        within 3 frames of it. A press it did not score is not a predicted kill (chunk 20261002_225013 ep 6: a
+        SlashAlt press with the boss at 5 HP whiffed, the trigger fired, no kill)."""
+        for t, a in self._attacks:
+            if t >= f - 4 and a and (int(a[0]) == 4) == needle and int(a[1]) <= 3:
+                return True
+        return False
 
     # ---- injection ----------------------------------------------------------------------------------------------
 
@@ -286,6 +299,8 @@ class HitInjector:
         if self.f0 is None:
             self.f0 = f
         x = self._features(s)
+        att = getattr(getattr(self.inner, "planner_last", None), "attack", None)
+        self._attacks = [(t, a) for t, a in self._attacks if t >= f - 6] + [(f - 1, att)]
         if self.done or self.fut is not None or self.link is None or f - self.f0 < self.min_s * 60:
             return
         if not self._ready(s):
