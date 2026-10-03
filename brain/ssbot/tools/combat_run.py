@@ -68,14 +68,16 @@ def make_policy(name: str, view: str = "oracle", run_dir: Path | None = None, in
     raise SystemExit(f"unknown policy {name}")
 
 
-def mode_config(mode: str, seed: int):
+def mode_config(mode: str, seed: int, timebox_s: float | None = None):
+    """timebox_s overrides the encounter's (data runs of the Forum: the random policy needs 550-850 s for the 14
+    waves, run 20261002_223640, and the finale comes last)."""
     from ssbot.train.episode import EpisodeConfig
     if mode == "data":
         return EpisodeConfig(mode="data", seed=seed, hp=(1, 5), silk=(0, 9), dx=(-6.0, 2.0), facing="random",
-                             wait_frames=(0, 30))
+                             wait_frames=(0, 30), timebox_s=timebox_s)
     if mode == "eval":
         return EpisodeConfig(mode="eval", seed=seed, hp=None, silk=None, dx=(-3.0, 1.0), facing="random",
-                             wait_frames=(0, 30))
+                             wait_frames=(0, 30), timebox_s=timebox_s)
     raise SystemExit(f"unknown mode {mode}")
 
 
@@ -151,7 +153,7 @@ def worker(a: argparse.Namespace) -> int:
             rec = AttemptRecord(unit=enc.name, stage="TRAIN", profile="TRAIN" if a.view == "oracle" else "SIM_FINAL",
                                 build="1.0.30000", code_rev=rev,
                                 config_fp=fp, start_kind="savestate", mode=a.mode, seed=seed)
-            run_episode(link, enc, tap, policy, mode_config(a.mode, seed), rec)
+            run_episode(link, enc, tap, policy, mode_config(a.mode, seed, a.timebox or None), rec)
             d = asdict(rec)
             d["instance"] = a.instance
             d["episode"] = k
@@ -205,7 +207,7 @@ def run(a: argparse.Namespace) -> int:
                str(run_dir), "--encounter", a.encounter, "--mode", a.mode, "--policy", a.policy, "--episodes",
                str(a.episodes), "--hours", str(a.hours or 0), "--rotate", str(a.rotate), "--seed", str(a.seed),
                "--view", a.view, "--threads", str(a.threads), "--real-quit", str(a.real_quit),
-               "--inject-hits", str(a.inject_hits)]
+               "--inject-hits", str(a.inject_hits), "--timebox", str(a.timebox or 0)]
         if a.no_record:
             cmd.append("--no-record")
         log = (run_dir / f"worker_i{i}.log").open("w", encoding="utf-8")
@@ -322,6 +324,8 @@ def main(argv: list[str] | None = None) -> int:
         p.add_argument("--no-record", action="store_true")
         p.add_argument("--view", choices=("oracle", "degraded", "degraded_dust", "degraded_tell"), default="oracle")
         p.add_argument("--threads", type=int, default=8)
+        p.add_argument("--timebox", type=float, default=0.0,
+                       help="seconds from the wake before STUCK (0: the encounter's timebox_s)")
         p.add_argument("--real-quit", type=float, default=0.0,
                        help="probability that a confirmed supervisor pause quits for real (menu, Yes, main menu), "
                             "then the worker reloads sandbox slot 1 and the savestate")

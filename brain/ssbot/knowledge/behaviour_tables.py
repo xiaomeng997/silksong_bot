@@ -157,6 +157,7 @@ R_FAIL_U = 0.5                # a contact farther than this from its family's oc
 R_SEARCH_U = 1.0
 LAG_F = 2                     # a contact's source must show an exported damage collider within f-2..f
 RING_F = 1800                 # frames of per-frame contact context kept (blocked stretches are reported late)
+MW_FOLLOW_F = 90              # a multi-hit's follow-up hits land up to this long after its collider was exported
 ALPHA_TEST = 0.01             # family-wise level of the decision covariate tests (Holm)
 RUN_CAP, SINCE_CAP = 4, 5     # history covariate levels: run 1..4+, attacks since 0..5+ / never
 HELD_LL_GAIN = 1e-3           # a conditioner is kept only if it lowers the held-out log loss by this (nats)
@@ -175,6 +176,37 @@ def support_threat(c: dict) -> bool:
     """A collider that belongs in the support templates: enabled, with damage, eff != 0 (can_cause_damage ignored)."""
     d = c.get("damage")
     return bool(c.get("enabled") and d and d.get("eff") != 0)
+
+
+def multi_wounder_threat(c: dict) -> bool:
+    """An enabled DamageHero collider exported with damage 0 on an entity with the multi_wounder src bit: a multi-hit
+    collider whose hits the hornet_multi_wounder FSM deals (Forum run 20261002_221727 i2 ep0: Choristor "Whip Hit 2",
+    Reed "ParrySlash Hit", Minister "Slash Collider" damage events, 1 mask each, while exported with dealt 0)."""
+    d = c.get("damage")
+    return bool(c.get("enabled") and d is not None and not d.get("dealt"))
+
+
+def _cols_box(cols: list) -> tuple | None:
+    """Bounding box (x0, y0, x1, y1) of colliders' world vertices."""
+    xs, ys = [], []
+    for c in cols:
+        v = c.get("verts_world") or ()
+        xs += v[0::2]
+        ys += v[1::2]
+    return (min(xs), min(ys), max(xs), max(ys)) if xs else None
+
+
+def _nearest(entries: list, box: tuple | None):
+    """Of (owner, arm, box) entries, the one whose box is nearest to the hero box (the first without a hero box)."""
+    if len(entries) == 1 or box is None:
+        return entries[0]
+
+    def gap(en):
+        b = en[2]
+        if b is None:
+            return math.inf
+        return math.hypot(max(b[0] - box[2], box[0] - b[2], 0.0), max(b[1] - box[3], box[1] - b[3], 0.0))
+    return min(entries, key=gap)
 
 
 @dataclass(frozen=True, slots=True)
@@ -201,6 +233,20 @@ class BehaviourSpec:
     arena_x: tuple[float, float] = (0.0, 0.0)
     floor_y: float = 0.0
     tail_max_s: float = 6.0
+    # multi-enemy fights (ssbot.knowledge.gauntlet_tables): the time between attacks as one more family (enemies whose
+    # body deals contact damage while they walk or fly about), a kill ("hit" event with dead) as the death when the
+    # Control FSM has no death state, and the type_key prefixes of the hazard entities this enemy spawns
+    idle_family: str | None = None
+    death_on_kill: bool = False
+    projectiles: tuple[str, ...] = ()
+    # hazards that arm after the attack that made them is over (the Choir Clapper's Bomb Cast bombs explode while it
+    # walks again; the rune of a Jump Cast 1.3 s after the landing): (type_key prefix, owner families); such a hazard
+    # arming within spawn_window_s after an instance of those families ended belongs to that instance
+    spawns: tuple[tuple[str, tuple[str, ...]], ...] = ()
+    spawn_window_s: float = 4.0
+    # enemies with the oracle's multi_wounder src bit: their multi-hit colliders (Choristor Whip Hit 1-6, Reed
+    # ParrySlash Hit, Minister Slash Collider) are exported with damage dealt 0 but hurt (hornet_multi_wounder FSM)
+    multi_wounder: bool = False
 
 
 BELL_BEAST = BehaviourSpec(
@@ -647,6 +693,7 @@ class EntitySeg:
     arm_T: float = 0.0           # game time since the scan start when it armed
     arm_pos: tuple = (0.0, 0.0)  # its transform position then (the origin of its "self" template)
     uid: int = 0                 # unique over the build (BehaviourBuilder.arming)
+    box: tuple | None = None     # its damage colliders' bounding box on the last armed frame (x0, y0, x1, y1)
 
 
 @dataclass(slots=True)
@@ -714,6 +761,8 @@ class Contact:
     named_gap: bool = False  # the oracle exported the source's other colliders by name, but not the one it named
     fold: int = 0            # held-out fold of the recording
     res: dict = field(default_factory=dict)   # template set -> residual (u; inf = none within R_SEARCH_U)
+    follow: bool = False     # a follow-up hit of a connected multi-hit (BehaviourSpec.multi_wounder): its collider
+                             # was exported within MW_FOLLOW_F, not now; left out of the validation
 
 
 @dataclass(slots=True)
@@ -721,8 +770,8 @@ class _Frame:
     T: float
     box: tuple | None
     cur: Instance | None
-    owners: dict             # type_key -> owning instance of an armed entity
-    armed: dict              # type_key -> (arm_T, arm_pos) of its armed stretch
+    owners: dict             # type_key -> [(owning instance or None, (arm_T, arm_pos), box)] of its armed entities
+    armed: dict              # type_key -> [(arm_T, arm_pos)] of their armed stretches
     threat: set              # type_keys with a support_threat collider
     names: dict              # type_key -> names (without "(Clone)" / " (n)") of its support_threat colliders, when
     holes: set               #   exported; holes: type_keys exported without colliders while not hidden
@@ -763,6 +812,7 @@ class FightScanner:
         self.pending: list[tuple] = []
         self.ended_now: Instance | None = None
         self.ambient_now: set[str] = set()      # type_keys of ambient hazards armed on the last frame
+        self.mw_seen: dict[tuple, int] = {}     # (type_key, collider name) -> last frame enabled as a multi-hit
 
     # ---- feed ----
 
@@ -813,6 +863,8 @@ class FightScanner:
                 self.pending.append(("blocked", d["first_f"], d["last_f"], str(d.get("source"))))
             elif k == "hit" and d.get("type_key") == self.spec.boss_type and d.get("hp_after") is not None:
                 self.boss_hp = d.get("hp_after")
+                if d.get("dead") and self.spec.death_on_kill:
+                    self._kill(f)
         threat, names, holes, ambient = set(), {}, set(), set()
         self._boss(f, boss, threat, names, holes)
         if self.cur is not None and self.boss_hidden is not None and self.cur.anchor_hidden is None \
@@ -863,34 +915,56 @@ class FightScanner:
             self.b.dwells.append(Dwell(frm, self.T - self.ctl_t, d.get("t_in_prev"), to, f - self.ctl_f, self.phase))
         self.ctl, self.ctl_t, self.ctl_f = to, self.T, f
         cur = self.cur
+        idle = spec.idle_family
         if to in spec.death_states:
             if cur is not None:
                 self._end(cur, f, "death")
             self.dead = True
+        elif to in spec.attack_starts and cur is not None and cur.family == spec.attack_starts[to] \
+                and to != cur.states[0][0]:
+            # another entry state of the attack already running (Reed: Stab Pos -> Stab Antic; Stab Antic is also
+            # entered straight from Evade End)
+            cur.states.append((to, f, self.T - cur.t_start))
         elif to in spec.attack_starts:
             if cur is not None:
                 self._end(cur, f, "chain")
-            fam = spec.attack_starts[to]
-            mirror = spec.dir_states.get(self.dir) if fam in spec.directed else 1
-            self.cur = Instance(family=fam, phase=self.phase, fight=self.fight, f_start=f, t_start=self.T,
-                                dir=self.dir if fam in spec.directed else None, mirror=mirror,
-                                states=[(to, f, 0.0)], ctx=tr, hero_start=self.hero, boss_hp=self.boss_hp,
-                                fold=self.fold)
-            if fam in spec.directed and mirror is not None:
-                self.last_mirror = mirror
-            self.hist.append(fam)
-            self.dir = None
+            self.dead = False      # a pooled enemy (the Maestro's Song Automaton Tiny) comes back after a kill
+            self._start(spec.attack_starts[to], to, f, tr)
+            self.hist.append(spec.attack_starts[to])
         elif to in spec.decision_states:
-            if cur is not None:
+            if cur is not None and cur.family != idle:
                 self._end(cur, f, "rest")
             if to in spec.dir_states:
                 self.dir = to
+            if idle is not None and not self.dead:
+                if self.cur is None:
+                    self._start(idle, to, f, tr)
+                else:
+                    self.cur.states.append((to, f, self.T - self.cur.t_start))
         elif cur is not None:
             cur.states.append((to, f, self.T - cur.t_start))
         elif to not in spec.dormant:
             self.b.counters[f"control state outside attacks: {to}"] += 1
         if to in spec.phase_marks:
             self.phase = spec.phase_marks[to]
+
+    def _start(self, fam: str, to: str, f: int, tr: Transition) -> None:
+        spec = self.spec
+        mirror = spec.dir_states.get(self.dir) if fam in spec.directed else 1
+        self.cur = Instance(family=fam, phase=self.phase, fight=self.fight, f_start=f, t_start=self.T,
+                            dir=self.dir if fam in spec.directed else None, mirror=mirror,
+                            states=[(to, f, 0.0)], ctx=tr, hero_start=self.hero, boss_hp=self.boss_hp,
+                            fold=self.fold)
+        if fam in spec.directed and mirror is not None:
+            self.last_mirror = mirror
+        if fam != spec.idle_family:
+            self.dir = None
+
+    def _kill(self, f: int) -> None:
+        """A kill without a death state in the Control FSM (BehaviourSpec.death_on_kill)."""
+        if self.cur is not None:
+            self._end(self.cur, f, "death")
+        self.dead = True
 
     def _end(self, inst: Instance, f: int, reason: str) -> None:
         inst.f_end, inst.t_end, inst.end = f, self.T - inst.t_start, reason
@@ -902,9 +976,14 @@ class FightScanner:
     # ---- hits ----
 
     def _owner_now(self, tk: str | None, f: int) -> Instance | None:
-        """The instance owning an armed entity of type tk (a bell still bouncing), else the current one, else one
-        that ended this frame (the kill's own hit lands after the transition)."""
+        """The instance owning an armed entity of type tk (a bell still bouncing; with several armed, the owner of
+        the one nearest to the hero box), else the current one, else one that ended this frame (the kill's own hit
+        lands after the transition)."""
         if tk is not None and tk != self.spec.boss_type:
+            fr = self.ring.get(f) or self.ring.get(f - 1)   # events are read before this frame's entities
+            entries = fr.owners.get(tk) if fr is not None else None
+            if entries:
+                return _nearest(entries, self.hero_box)[0]
             for inst in ([self.cur] if self.cur else []) + self.done[::-1]:
                 if any(seg.end is None and seg.type_key == tk for seg in inst.ents):
                     return inst
@@ -939,12 +1018,17 @@ class FightScanner:
                 boss = tk == self.spec.boss_type
                 ambient = tk is not None and not boss and any(tk in r.ambient for r in near) \
                     and not any(tk in r.armed for r in near)
+                # several armed entities of one type (bells of different throws): the one nearest the hero box
+                entry = None
+                if tk is not None and not boss and not ambient:
+                    entry = next((_nearest(self.ring[g].owners[tk], fr.box) for g in range(ff, ff - LAG_F - 1, -1)
+                                  if g in self.ring and self.ring[g].owners.get(tk)), None)
                 if tk is None or ambient:
                     owner = None
                 elif boss:
                     owner = fr.cur
                 else:
-                    owner = fr.owners.get(tk) or fr.cur
+                    owner = (entry[0] if entry is not None else None) or fr.cur
                 if owner is None and not ambient:  # a kill frame: the ended attack's geometry was exported until then
                     owner = next((self.ring[g].ended for g in range(ff, ff - LAG_F - 1, -1)
                                   if g in self.ring and self.ring[g].ended is not None), None)
@@ -960,13 +1044,12 @@ class FightScanner:
                 if owner is not None:
                     t = fr.T - owner.t_start
                     st, ts = owner.state_at(t)
-                arm = None
-                if tk is not None and not boss and not ambient:
-                    arm = next((self.ring[g].armed[tk] for g in range(ff, ff - LAG_F - 1, -1)
-                                if g in self.ring and tk in self.ring[g].armed), None)
+                arm = entry[1] if entry is not None else None
                 self.b.contacts.append(Contact(kind, ff, self.fight, src, tk, owner, t, st, ts, [b for b, _ in pairs],
                                                exported, hole, fr.T, arm, [d for _, d in pairs], ambient,
-                                               bool(named) and not exported, self.fold))
+                                               bool(named) and not exported, self.fold,
+                                               follow=not exported and ff - self.mw_seen.get((tk, go), -10**9)
+                                               <= MW_FOLLOW_F))
         self.pending = []
 
     # ---- colliders ----
@@ -984,9 +1067,13 @@ class FightScanner:
         inst.samples.append(Sample(t, st, ts, collider_key(type_key, c), world, v, self._dmg(c), c.get("name")))
         inst.t_last = max(inst.t_last, t)
 
-    @staticmethod
-    def _threats(e: dict, tk: str, threat: set, names: dict) -> list:
-        out = [c for c in e.get("colliders") or () if support_threat(c)]
+    def _threats(self, e: dict, tk: str, threat: set, names: dict) -> list:
+        mw = self.spec.multi_wounder and bool(int(e.get("src") or 0) & SRC_BITS["multi_wounder"])
+        out = [c for c in e.get("colliders") or () if support_threat(c) or (mw and multi_wounder_threat(c))]
+        if mw and self.last_f is not None:
+            for c in out:
+                if c.get("name") and not support_threat(c):
+                    self.mw_seen[(tk, _strip_clone(c["name"]))] = self.last_f
         if out:
             threat.add(tk)
             named = {_strip_clone(c["name"]) for c in out if c.get("name")}
@@ -1062,7 +1149,7 @@ class FightScanner:
                 continue
             seg = self.segs.get(iid)
             if armed and seg is None:
-                owner = self.cur
+                owner = self._spawner(tk)
                 world = tk.startswith(spec.world_fixed)
                 t_on = self.T - owner.t_start if owner else self.T
                 seg = self.segs[iid] = EntitySeg(iid, tk, world, t_on, self.ctl, owner, last_f=f, last_t=t_on,
@@ -1079,6 +1166,7 @@ class FightScanner:
                 self._close(seg, "disarmed")
                 continue
             seg.last_t = self.T - seg.owner.t_start if seg.owner else self.T
+            seg.box = _cols_box(threats) or (float(e["pos"][0]), float(e["pos"][1])) * 2
             for c in threats:
                 self.b.self_sample(seg, self.T - seg.arm_T, c, self.fold)
             if seg.owner is not None:
@@ -1087,7 +1175,9 @@ class FightScanner:
                     seg.owner.hole_t.append(seg.last_t)
                 for c in threats:
                     self._sample(seg.owner, tk, c, seg.world)
-        owners, armed = {}, {}
+        # per type_key every armed entity: (owning instance or None, (arm_T, arm_pos), its colliders' box now)
+        owners: dict[str, list] = defaultdict(list)
+        armed: dict[str, list] = defaultdict(list)
         for iid, seg in list(self.segs.items()):
             if iid not in seen and f - seg.last_f > ABSENT_CLOSE_F:
                 self._close(seg, "left view")
@@ -1096,10 +1186,24 @@ class FightScanner:
                     self.T - seg.owner.t_start - seg.owner.t_end > spec.tail_max_s:
                 self._close(seg, "tail cap")
                 continue
-            if seg.owner is not None:
-                owners[seg.type_key] = seg.owner
-            armed[seg.type_key] = (seg.arm_T, seg.arm_pos)
-        return owners, armed
+            owners[seg.type_key].append((seg.owner, (seg.arm_T, seg.arm_pos), seg.box))
+            armed[seg.type_key].append((seg.arm_T, seg.arm_pos))
+        return dict(owners), dict(armed)
+
+    def _spawn_families(self, tk: str) -> tuple[str, ...]:
+        return next((fams for p, fams in self.spec.spawns if tk == p or tk.startswith(p)), ())
+
+    def _spawner(self, tk: str) -> "Instance | None":
+        """The instance a hazard arming now belongs to: the current one, unless BehaviourSpec.spawns names the
+        families that make it and the current one is not of them: then the latest of them that ended within
+        spawn_window_s (else the current one)."""
+        fams = self._spawn_families(tk)
+        cur = self.cur
+        if not fams or (cur is not None and cur.family in fams):
+            return cur
+        late = next((i for i in reversed(self.done) if i.family in fams and i.t_end is not None
+                     and self.T - i.t_start - i.t_end <= self.spec.spawn_window_s), None)
+        return late or cur
 
     def _close(self, seg: EntitySeg, why: str) -> None:
         seg.end = why
@@ -1108,8 +1212,11 @@ class FightScanner:
 
     def _retire(self, f: int) -> None:
         keep = []
+        spawners = {fam for _, fams in self.spec.spawns for fam in fams}
         for inst in self.done:
-            if any(seg.end is None for seg in inst.ents):
+            if any(seg.end is None for seg in inst.ents) or (
+                    inst.family in spawners and inst.t_end is not None
+                    and self.T - inst.t_start - inst.t_end <= self.spec.spawn_window_s):
                 keep.append(inst)
             else:
                 self.b.add_instance(inst)
@@ -1485,6 +1592,8 @@ class BehaviourBuilder:
         fails, outside, unexplained = [], [], []             #                  member keys)
         own = lambda k: [raw[k]] if k in raw else []  # noqa: E731
         for c in self.contacts:
+            if c.follow:
+                continue
             if c.inst is None and not c.ambient:
                 outside.append(c)
                 continue
@@ -2049,6 +2158,7 @@ class BehaviourBuilder:
         fails = val["fails"]
         hole_c = [c for c in cs if not c.exported and c.hole]
         gaps = [c for c in cs if c.named_gap]
+        follow = [c for c in cs if c.follow]
         amb = [c for c in cs if c.ambient]
         ok = not fails and not unexpl and not val["outside"]
         ho: dict[str, list] = defaultdict(list)
@@ -2061,6 +2171,10 @@ class BehaviourBuilder:
                                 f"state / state_world_all pool the per-state sets",
                         **{k: _held_row(v, val["radius"]) for k, v in sorted(ho.items())}},
             "ok": ok, "r_fail_u": R_FAIL_U, "lag_frames": LAG_F,
+            "multi_hit_follow_ups": {"desc": f"hits of a connected multi-hit (multi_wounder) whose collider was "
+                                             f"exported within {MW_FOLLOW_F} frames before, not then: not checked "
+                                             f"against the support", "n": len(follow),
+                                     "by_source": dict(Counter(c.src for c in follow))},
             "contacts": len(cs), "damage": len(dmg), "blocked_frames": len(cs) - len(dmg),
             "no_hero_box": sum(1 for c in cs if not c.boxes),
             "no_exported_collider_explained_by_export_hole": {"n": len(hole_c), "damage": sum(

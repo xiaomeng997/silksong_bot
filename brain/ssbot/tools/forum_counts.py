@@ -13,16 +13,26 @@ from collections import Counter
 from datetime import datetime
 from pathlib import Path
 
-ATTACKS: dict[str, tuple[str, ...]] = {
-    "Song Heavy Sentry/Control": ("Slam Antic", "Jump Antic", "Spell Antic", "Cast Slam Antic", "Cast Jump Antic"),
-    "Song Pilgrim 01/Attack": ("Slash Antic", "JumpSlash Antic", "Charge Antic", "HopSlash Antic", "Ambush Antic"),
-    "Song Pilgrim 03/Attack": ("Slash Antic", "Whip Antic", "Jump Antic", "ComboSlash Antic1", "Slash Antic Jump"),
-    "Pilgrim 03 Song/Control": ("Throw Antic", "Throw Antic Quick"),
-    "Song Reed/Control": ("Stab Antic", "Throw Antic", "Parry Slash"),
-    "Song Handmaiden/Control": ("Slash Antic", "Spin Antic", "Spear Cast Antic"),
-    "Song Administrator/Control": ("Attack Antic", "Parry Stance Antic", "Parry Slash 1"),
-    "Song Pilgrim Maestro/Control": ("Fire Antic", "Slash 1"),
-}
+
+def _attacks() -> dict[str, tuple[str, ...]]:
+    """The first attack-start state of every family (ssbot.knowledge.gauntlet_tables.FORUM_SPECS; entries are a quick
+    estimate: an attack entered by its second start state, e.g. Reed's Stab Antic straight from Evade End, is not
+    counted; ssbot.tools.behaviour_build --encounter Forum counts instances), plus the follow-ups that only some
+    instances reach (Clawmaiden spear, Reed / Minister parry counters)."""
+    from ssbot.knowledge.gauntlet_tables import FORUM_SPECS
+    out = {}
+    extra = {"Song Handmaiden": ("Spear Cast Antic",), "Song Reed": ("Parry Slash",),
+             "Song Administrator": ("Parry Slash 1",), "Pilgrim 03 Song": ("Throw Antic Quick",)}
+    for tk, s in FORUM_SPECS.items():
+        firsts = {}
+        for st, fam in s.attack_starts.items():
+            if not fam.endswith("_ENTRY"):
+                firsts.setdefault(fam, st)
+        out[f"{tk}/{s.control_fsm}"] = tuple(firsts.values()) + extra.get(tk, ())
+    return out
+
+
+ATTACKS: dict[str, tuple[str, ...]] = _attacks()
 TARGET = 200
 
 
@@ -58,11 +68,13 @@ def report(rows: list[dict]) -> dict:
     span_h = (ts[-1] - ts[0]).total_seconds() / 3600.0 if len(ts) > 1 else None
     need = {k: v for k, v in per.items() if v < TARGET}
     eta = None
-    if wall_h > 0 and need:
-        # hours of episode wall time per instance until the slowest attack reaches the target, at the current rate
-        worst = min((v / wall_h, k) for k, v in per.items())
+    seen = {k: v for k, v in per.items() if v > 0}
+    if wall_h > 0 and need and seen:
+        # hours of episode wall time per instance until the slowest attack seen reaches the target, at this rate
+        worst = min((v / wall_h, k) for k, v in seen.items())
         eta = {"slowest": worst[1], "per_hour": round(worst[0], 1),
-               "hours_episode_time": round(TARGET / worst[0], 1) if worst[0] > 0 else None}
+               "hours_episode_time": round((TARGET - per[worst[1]]) / worst[0], 1),
+               "never_seen": sorted(k for k, v in per.items() if v == 0)}
     return {"episodes": len(rows), "outcomes": dict(Counter(r["outcome"] for r in rows)),
             "wave_reached": dict(sorted(waves.items(), key=lambda kv: (kv[0] is None, kv[0]))),
             "kills_by_src": dict(by_src.most_common(12)), "episode_hours": round(wall_h, 2), "span_hours": span_h,

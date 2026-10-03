@@ -14,6 +14,10 @@ ssbot.knowledge.hitbox_tables) unless --report-only, then prints the coverage re
 (and phase) against the target, FSM edges and states with fewer than 30 logged exits, the contact validation (every
 logged hit and blocked contact against the support templates), export holes and the decision covariates kept.
 
+A multi-enemy arena (--encounter Forum: ssbot.knowledge.gauntlet_tables) gets one table per enemy type, written to
+<out>/forum/<enemy>.json and _hitboxes.npz, plus <out>/forum/coverage.json with the attack instances per family, their
+rate per hour of fight time and the hours still needed for the target.
+
 Exit codes: 0 ok; 1 nothing to scan; 3 validation failed (a contact farther than R_FAIL_U from its family's logged
 occupancy, a contact whose source had no exported damage collider and no export hole near it, or a contact outside
 every attack): nothing is written unless --allow-failed-validation (then coverage.validation.ok is false in the file).
@@ -38,6 +42,7 @@ from ssbot.knowledge.behaviour_tables import (
     human_fight,
     run_fights,
 )
+from ssbot.knowledge.gauntlet_tables import GAUNTLET_SPECS
 
 
 def default_out() -> Path:
@@ -111,11 +116,66 @@ def report(tables: dict) -> str:
     return "\n".join(lines)
 
 
+def gauntlet_main(a: argparse.Namespace, fights: list, skipped: list, code: dict) -> int:
+    """One table per enemy type of a multi-enemy arena (ssbot.knowledge.gauntlet_tables), written to
+    <out>/<encounter lower>/, then the attack counts against the target with the rate per hour of fight time."""
+    from ssbot.knowledge.gauntlet_tables import GauntletBuilder
+    g = GauntletBuilder(GAUNTLET_SPECS[a.encounter], keep_paths=a.paths)
+    t_all = time.perf_counter()
+    for i, fight in enumerate(fights):
+        t0 = time.perf_counter()
+        info = g.scan(fight)
+        print(f"[{i + 1}/{len(fights)}] {fight.id}: {info['frames']} frames, subjects {info['subjects']}, "
+              f"instances {sum(info['instances'].values())}, {fight.outcome or '-'} ({time.perf_counter() - t0:.1f} s)",
+              flush=True)
+    if skipped:
+        print(f"skipped {len(skipped)}:", *skipped[:20], sep="\n  ")
+    hours = sum(f.f1 - f.f0 for f in fights) / 60.0 / 3600.0
+    out = (a.out or default_out()) / a.encounter.lower()
+    rc = 0
+    written = {}
+    for tk, b in g.builders.items():
+        if not b.instances:
+            print(f"== {tk}: no instances")
+            continue
+        tables = b.tables()
+        if not tables["coverage"]["validation"]["ok"]:
+            rc = 3
+        if not a.report_only:
+            try:
+                js, npz, tables = b.write(out, allow_failed=a.allow_failed_validation, code=code)
+                written[tk] = str(js)
+                print(f"wrote {js} ({js.stat().st_size / 1e3:.0f} KB), {npz} ({npz.stat().st_size / 1e3:.0f} KB)")
+            except ValidationFailed as e:
+                print(f"{tk}: validation failed, nothing written: {e}", file=sys.stderr)
+        print(f"== {tk}")
+        print(report(tables))
+    rows = g.report_rows(hours=hours, target=TARGET_INSTANCES)
+    print(f"\nattack instances per family over {len(fights)} fights, {hours:.2f} h of fight time "
+          f"(target {TARGET_INSTANCES}; hours of fight time per instance at this rate):")
+    for r in rows:
+        if r["idle"] and not r["n"]:
+            continue
+        print(f"  {r['enemy']:16s} {r['family']:14s} {r['n']:5d}  {r['per_hour'] or 0:7.1f}/h  "
+              f"{'idle' if r['idle'] else ('ok' if r['hours_to_target'] == 0 else r['hours_to_target'])}")
+    print("counters:", dict(g.counters.most_common(20)))
+    if not a.report_only:
+        out.mkdir(parents=True, exist_ok=True)
+        (out / "coverage.json").write_text(json.dumps(
+            {"encounter": a.encounter, "fights": g.fights, "fight_hours": round(hours, 3), "rows": rows,
+             "counters": dict(g.counters.most_common()), "tables": written, "code": code}, indent=1) + "\n",
+            encoding="utf-8")
+    print(f"scan + build {time.perf_counter() - t_all:.1f} s")
+    return rc
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("runs", nargs="*", type=Path, help="combat run directories")
     ap.add_argument("--human", action="append", default=[], help="SESSION:F0:F1 (repeatable)")
-    ap.add_argument("--encounter", default="BellBeast", choices=sorted(SPECS))
+    ap.add_argument("--encounter", default="BellBeast", choices=sorted(SPECS) + sorted(GAUNTLET_SPECS),
+                    help="a boss (one Control FSM) or a multi-enemy arena (one table per enemy type: "
+                         "ssbot.knowledge.gauntlet_tables)")
     ap.add_argument("--out", type=Path, default=None)
     ap.add_argument("--max-fights", type=int, default=0, help="stop after this many fights (0 = all)")
     ap.add_argument("--report-only", action="store_true", help="do not write the knowledge files")
@@ -144,6 +204,8 @@ def main(argv: list[str] | None = None) -> int:
     graph = json.loads(a.fsm_graph.read_text("utf-8")) if a.fsm_graph else None
     from ssbot.record.recorder import find_repo_root, git_info
     code = git_info(find_repo_root())  # the revision that runs the scan (files edited meanwhile do not count)
+    if a.encounter in GAUNTLET_SPECS:
+        return gauntlet_main(a, fights, skipped, code)
     b = BehaviourBuilder(SPECS[a.encounter], keep_paths=a.paths, fsm_graph=graph)
     t_all = time.perf_counter()
     for i, fight in enumerate(fights):
