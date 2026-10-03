@@ -53,7 +53,7 @@
     "Song Pilgrim 03": 72,
     "Pilgrim 03 Song": 171
    },
-   "fold": 0
+   "fold": 1
   },
   {
    "id": "20261002_230325_Forum_A_data/i2/ep0",
@@ -80,7 +80,7 @@
     "Song Pilgrim 03": 68,
     "Pilgrim 03 Song": 233
    },
-   "fold": 1
+   "fold": 0
   },
   {
    "id": "20261002_231917_Forum_A_data/i2/ep0",
@@ -107,7 +107,7 @@
     "Song Pilgrim 03": 62,
     "Pilgrim 03 Song": 282
    },
-   "fold": 0
+   "fold": 1
   },
   {
    "id": "20261002_231917_Forum_A_data/i2/ep1",
@@ -161,7 +161,7 @@
     "Song Pilgrim 03": 65,
     "Pilgrim 03 Song": 140
    },
-   "fold": 0
+   "fold": 1
   },
   {
    "id": "20261002_231917_Forum_A_data/i2/ep3",
@@ -215,189 +215,324 @@
     "Song Pilgrim 03": 90,
     "Pilgrim 03 Song": 273
    },
+   "fold": 1
+  },
+  {
+   "id": "20261002_231917_Forum_A_data/i2/ep5",
+   "frames": 47677,
+   "subjects": {
+    "Song Pilgrim 03": 4,
+    "Song Pilgrim Maestro": 3,
+    "Song Reed": 5,
+    "Song Automaton Tiny": 9,
+    "Song Pilgrim 01": 1,
+    "Pilgrim 03 Song": 5,
+    "Song Handmaiden": 3,
+    "Song Administrator": 4,
+    "Song Heavy Sentry": 3
+   },
+   "instances": {
+    "Song Heavy Sentry": 369,
+    "Song Handmaiden": 120,
+    "Song Administrator": 105,
+    "Song Pilgrim Maestro": 200,
+    "Song Automaton Tiny": 305,
+    "Song Reed": 156,
+    "Song Pilgrim 01": 25,
+    "Song Pilgrim 03": 78,
+    "Pilgrim 03 Song": 179
+   },
+   "fold": 0
+  },
+  {
+   "id": "20261002_231917_Forum_A_data/i2/ep6",
+   "frames": 54696,
+   "subjects": {
+    "Song Pilgrim 03": 4,
+    "Song Pilgrim Maestro": 3,
+    "Song Reed": 5,
+    "Song Automaton Tiny": 9,
+    "Song Pilgrim 01": 1,
+    "Pilgrim 03 Song": 5,
+    "Song Handmaiden": 3,
+    "Song Administrator": 4,
+    "Song Heavy Sentry": 3
+   },
+   "instances": {
+    "Song Heavy Sentry": 283,
+    "Song Handmaiden": 103,
+    "Song Administrator": 145,
+    "Song Pilgrim Maestro": 316,
+    "Song Automaton Tiny": 458,
+    "Song Reed": 147,
+    "Song Pilgrim 01": 17,
+    "Song Pilgrim 03": 91,
+    "Pilgrim 03 Song": 223
+   },
+   "fold": 1
+  },
+  {
+   "id": "20261002_231917_Forum_A_data/i2/ep7",
+   "frames": 47748,
+   "subjects": {
+    "Song Pilgrim 03": 4,
+    "Song Pilgrim Maestro": 3,
+    "Song Reed": 5,
+    "Song Automaton Tiny": 9,
+    "Song Pilgrim 01": 1,
+    "Pilgrim 03 Song": 5,
+    "Song Handmaiden": 3,
+    "Song Administrator": 4,
+    "Song Heavy Sentry": 3
+   },
+   "instances": {
+    "Song Heavy Sentry": 327,
+    "Song Handmaiden": 120,
+    "Song Administrator": 144,
+    "Song Pilgrim Maestro": 192,
+    "Song Automaton Tiny": 284,
+    "Song Reed": 182,
+    "Song Pilgrim 01": 22,
+    "Song Pilgrim 03": 92,
+    "Pilgrim 03 Song": 258
+   },
+   "fold": 0
+  },
+  {
+   "id": "20261002_231917_Forum_A_data/i2/ep8",
+   "frames": 52280,
+   "subjects": {
+    "Song Pilgrim 03": 4,
+    "Song Pilgrim Maestro": 3,
+    "Song Reed": 5,
+    "Song Automaton Tiny": 9,
+    "Song Pilgrim 01": 1,
+    "Pilgrim 03 Song": 5,
+    "Song Handmaiden": 3,
+    "Song Administrator": 4,
+    "Song Heavy Sentry": 3
+   },
+   "instances": {
+    "Song Heavy Sentry": 342,
+    "Song Handmaiden": 86,
+    "Song Administrator": 147,
+    "Song Pilgrim Maestro": 226,
+    "Song Automaton Tiny": 329,
+    "Song Reed": 188,
+    "Song Pilgrim 01": 32,
+    "Song Pilgrim 03": 65,
+    "Pilgrim 03 Song": 163
+   },
+   "fold": 1
+  },
+  {
+   "id": "20261002_231917_Forum_A_data/i2/ep9",
+   "frames": 49230,
+   "subjects": {
+    "Song Pilgrim 03": 4,
+    "Song Pilgrim Maestro": 3,
+    "Song Reed": 5,
+    "Song Automaton Tiny": 9,
+    "Song Pilgrim 01": 1,
+    "Pilgrim 03 Song": 5,
+    "Song Handmaiden": 3,
+    "Song Administrator": 4,
+    "Song Heavy Sentry": 3
+   },
+   "instances": {
+    "Song Heavy Sentry": 351,
+    "Song Handmaiden": 135,
+    "Song Administrator": 150,
+    "Song Pilgrim Maestro": 188,
+    "Song Automaton Tiny": 280,
+    "Song Reed": 133,
+    "Song Pilgrim 01": 31,
+    "Song Pilgrim 03": 67,
+    "Pilgrim 03 Song": 201
+   },
    "fold": 0
   }
  ],
- "fight_hours": 1.905,
+ "fight_hours": 3.07,
  "rows": [
   {
    "type": "Song Heavy Sentry",
    "enemy": "ChoirClapper",
    "family": "CC_SLAM",
-   "n": 227,
+   "n": 393,
    "idle": false,
-   "per_hour": 119.2,
+   "per_hour": 128.0,
    "hours_to_target": 0.0
   },
   {
    "type": "Song Heavy Sentry",
    "enemy": "ChoirClapper",
    "family": "CC_JUMP",
-   "n": 130,
+   "n": 220,
    "idle": false,
-   "per_hour": 68.2,
-   "hours_to_target": 1.0
+   "per_hour": 71.7,
+   "hours_to_target": 0.0
   },
   {
    "type": "Song Heavy Sentry",
    "enemy": "ChoirClapper",
    "family": "CC_CAST",
-   "n": 232,
+   "n": 390,
    "idle": false,
-   "per_hour": 121.8,
+   "per_hour": 127.0,
    "hours_to_target": 0.0
   },
   {
    "type": "Song Heavy Sentry",
    "enemy": "ChoirClapper",
    "family": "CC_JUMP_CAST",
-   "n": 122,
+   "n": 202,
    "idle": false,
-   "per_hour": 64.0,
-   "hours_to_target": 1.2
+   "per_hour": 65.8,
+   "hours_to_target": 0.0
   },
   {
    "type": "Song Heavy Sentry",
    "enemy": "ChoirClapper",
    "family": "CC_EVADE",
-   "n": 509,
+   "n": 843,
    "idle": false,
-   "per_hour": 267.2,
+   "per_hour": 274.6,
    "hours_to_target": 0.0
   },
   {
    "type": "Song Heavy Sentry",
    "enemy": "ChoirClapper",
    "family": "CC_ENTRY",
-   "n": 24,
+   "n": 39,
    "idle": false,
-   "per_hour": 12.6,
-   "hours_to_target": 14.0
+   "per_hour": 12.7,
+   "hours_to_target": 12.7
   },
   {
    "type": "Song Heavy Sentry",
    "enemy": "ChoirClapper",
    "family": "CC_IDLE",
-   "n": 1223,
+   "n": 2052,
    "idle": true,
-   "per_hour": 642.0,
+   "per_hour": 668.4,
    "hours_to_target": 0.0
   },
   {
    "type": "Song Handmaiden",
    "enemy": "Clawmaiden",
    "family": "CM_SLASH",
-   "n": 181,
+   "n": 296,
    "idle": false,
-   "per_hour": 95.0,
-   "hours_to_target": 0.2
+   "per_hour": 96.4,
+   "hours_to_target": 0.0
   },
   {
    "type": "Song Handmaiden",
    "enemy": "Clawmaiden",
    "family": "CM_SPIN",
-   "n": 195,
+   "n": 356,
    "idle": false,
-   "per_hour": 102.4,
+   "per_hour": 116.0,
    "hours_to_target": 0.0
   },
   {
    "type": "Song Handmaiden",
    "enemy": "Clawmaiden",
    "family": "CM_TELE",
-   "n": 45,
+   "n": 78,
    "idle": false,
-   "per_hour": 23.6,
-   "hours_to_target": 6.6
+   "per_hour": 25.4,
+   "hours_to_target": 4.8
   },
   {
    "type": "Song Handmaiden",
    "enemy": "Clawmaiden",
    "family": "CM_ENTRY",
-   "n": 24,
+   "n": 39,
    "idle": false,
-   "per_hour": 12.6,
-   "hours_to_target": 14.0
+   "per_hour": 12.7,
+   "hours_to_target": 12.7
   },
   {
    "type": "Song Handmaiden",
    "enemy": "Clawmaiden",
    "family": "CM_IDLE",
-   "n": 342,
+   "n": 582,
    "idle": true,
-   "per_hour": 179.5,
+   "per_hour": 189.6,
    "hours_to_target": 0.0
   },
   {
    "type": "Song Administrator",
    "enemy": "Minister",
    "family": "MI_CHARGE",
-   "n": 200,
+   "n": 334,
    "idle": false,
-   "per_hour": 105.0,
+   "per_hour": 108.8,
    "hours_to_target": 0.0
   },
   {
    "type": "Song Administrator",
    "enemy": "Minister",
    "family": "MI_PARRY",
-   "n": 202,
+   "n": 334,
    "idle": false,
-   "per_hour": 106.0,
+   "per_hour": 108.8,
    "hours_to_target": 0.0
   },
   {
    "type": "Song Administrator",
    "enemy": "Minister",
    "family": "MI_EVADE",
-   "n": 133,
+   "n": 219,
    "idle": false,
-   "per_hour": 69.8,
-   "hours_to_target": 1.0
+   "per_hour": 71.3,
+   "hours_to_target": 0.0
   },
   {
    "type": "Song Administrator",
    "enemy": "Minister",
    "family": "MI_ENTRY",
-   "n": 32,
+   "n": 52,
    "idle": false,
-   "per_hour": 16.8,
-   "hours_to_target": 10.0
+   "per_hour": 16.9,
+   "hours_to_target": 8.7
   },
   {
    "type": "Song Administrator",
    "enemy": "Minister",
    "family": "MI_IDLE",
-   "n": 478,
+   "n": 797,
    "idle": true,
-   "per_hour": 250.9,
+   "per_hour": 259.6,
    "hours_to_target": 0.0
   },
   {
    "type": "Song Pilgrim Maestro",
    "enemy": "Maestro",
    "family": "MA_SLASH",
-   "n": 644,
+   "n": 989,
    "idle": false,
-   "per_hour": 338.0,
+   "per_hour": 322.1,
    "hours_to_target": 0.0
   },
   {
    "type": "Song Pilgrim Maestro",
    "enemy": "Maestro",
    "family": "MA_SUMMON",
-   "n": 114,
+   "n": 177,
    "idle": false,
-   "per_hour": 59.8,
-   "hours_to_target": 1.4
+   "per_hour": 57.7,
+   "hours_to_target": 0.4
   },
   {
    "type": "Song Pilgrim Maestro",
    "enemy": "Maestro",
    "family": "MA_DEFEND",
-   "n": 264,
+   "n": 417,
    "idle": false,
-   "per_hour": 138.6,
+   "per_hour": 135.8,
    "hours_to_target": 0.0
   },
   {
@@ -413,145 +548,145 @@
    "type": "Song Pilgrim Maestro",
    "enemy": "Maestro",
    "family": "MA_ENTRY",
-   "n": 24,
+   "n": 39,
    "idle": false,
-   "per_hour": 12.6,
-   "hours_to_target": 14.0
+   "per_hour": 12.7,
+   "hours_to_target": 12.7
   },
   {
    "type": "Song Pilgrim Maestro",
    "enemy": "Maestro",
    "family": "MA_IDLE",
-   "n": 998,
+   "n": 1544,
    "idle": true,
-   "per_hour": 523.9,
+   "per_hour": 502.9,
    "hours_to_target": 0.0
   },
   {
    "type": "Song Automaton Tiny",
    "enemy": "MaestroAutomaton",
    "family": "AT_FIRE",
-   "n": 643,
+   "n": 988,
    "idle": false,
-   "per_hour": 337.5,
+   "per_hour": 321.8,
    "hours_to_target": 0.0
   },
   {
    "type": "Song Automaton Tiny",
    "enemy": "MaestroAutomaton",
    "family": "AT_DEFEND",
-   "n": 742,
+   "n": 1178,
    "idle": false,
-   "per_hour": 389.5,
+   "per_hour": 383.7,
    "hours_to_target": 0.0
   },
   {
    "type": "Song Automaton Tiny",
    "enemy": "MaestroAutomaton",
    "family": "AT_ENTRY",
-   "n": 177,
+   "n": 282,
    "idle": false,
-   "per_hour": 92.9,
-   "hours_to_target": 0.2
+   "per_hour": 91.9,
+   "hours_to_target": 0.0
   },
   {
    "type": "Song Automaton Tiny",
    "enemy": "MaestroAutomaton",
    "family": "AT_LEAVE",
-   "n": 66,
+   "n": 107,
    "idle": false,
-   "per_hour": 34.6,
-   "hours_to_target": 3.9
+   "per_hour": 34.9,
+   "hours_to_target": 2.7
   },
   {
    "type": "Song Automaton Tiny",
    "enemy": "MaestroAutomaton",
    "family": "AT_IDLE",
-   "n": 1299,
+   "n": 2028,
    "idle": true,
-   "per_hour": 681.9,
+   "per_hour": 660.6,
    "hours_to_target": 0.0
   },
   {
    "type": "Song Reed",
    "enemy": "Reed",
    "family": "RE_STAB",
-   "n": 168,
+   "n": 281,
    "idle": false,
-   "per_hour": 88.2,
-   "hours_to_target": 0.4
+   "per_hour": 91.5,
+   "hours_to_target": 0.0
   },
   {
    "type": "Song Reed",
    "enemy": "Reed",
    "family": "RE_THROW",
-   "n": 150,
+   "n": 268,
    "idle": false,
-   "per_hour": 78.7,
-   "hours_to_target": 0.6
+   "per_hour": 87.3,
+   "hours_to_target": 0.0
   },
   {
    "type": "Song Reed",
    "enemy": "Reed",
    "family": "RE_DEFEND",
-   "n": 125,
+   "n": 230,
    "idle": false,
-   "per_hour": 65.6,
-   "hours_to_target": 1.1
+   "per_hour": 74.9,
+   "hours_to_target": 0.0
   },
   {
    "type": "Song Reed",
    "enemy": "Reed",
    "family": "RE_EVADE",
-   "n": 128,
+   "n": 202,
    "idle": false,
-   "per_hour": 67.2,
-   "hours_to_target": 1.1
+   "per_hour": 65.8,
+   "hours_to_target": 0.0
   },
   {
    "type": "Song Reed",
    "enemy": "Reed",
    "family": "RE_ENTRY",
-   "n": 40,
+   "n": 65,
    "idle": false,
-   "per_hour": 21.0,
-   "hours_to_target": 7.6
+   "per_hour": 21.2,
+   "hours_to_target": 6.4
   },
   {
    "type": "Song Reed",
    "enemy": "Reed",
    "family": "RE_IDLE",
-   "n": 512,
+   "n": 883,
    "idle": true,
-   "per_hour": 268.8,
+   "per_hour": 287.6,
    "hours_to_target": 0.0
   },
   {
    "type": "Song Pilgrim 01",
    "enemy": "Envoy",
    "family": "EN_SLASH",
-   "n": 59,
+   "n": 95,
    "idle": false,
-   "per_hour": 31.0,
-   "hours_to_target": 4.6
+   "per_hour": 30.9,
+   "hours_to_target": 3.4
   },
   {
    "type": "Song Pilgrim 01",
    "enemy": "Envoy",
    "family": "EN_JUMPSLASH",
-   "n": 22,
+   "n": 34,
    "idle": false,
-   "per_hour": 11.5,
-   "hours_to_target": 15.4
+   "per_hour": 11.1,
+   "hours_to_target": 15.0
   },
   {
    "type": "Song Pilgrim 01",
    "enemy": "Envoy",
    "family": "EN_CHARGE",
-   "n": 25,
+   "n": 44,
    "idle": false,
-   "per_hour": 13.1,
-   "hours_to_target": 13.3
+   "per_hour": 14.3,
+   "hours_to_target": 10.9
   },
   {
    "type": "Song Pilgrim 01",
@@ -566,10 +701,10 @@
    "type": "Song Pilgrim 01",
    "enemy": "Envoy",
    "family": "EN_AMBUSH",
-   "n": 8,
+   "n": 13,
    "idle": false,
    "per_hour": 4.2,
-   "hours_to_target": 45.7
+   "hours_to_target": 44.2
   },
   {
    "type": "Song Pilgrim 01",
@@ -584,100 +719,305 @@
    "type": "Song Pilgrim 01",
    "enemy": "Envoy",
    "family": "EN_IDLE",
-   "n": 84,
+   "n": 139,
    "idle": true,
-   "per_hour": 44.1,
-   "hours_to_target": 2.6
+   "per_hour": 45.3,
+   "hours_to_target": 1.3
   },
   {
    "type": "Song Pilgrim 03",
    "enemy": "Choristor",
    "family": "CH_SLASH",
-   "n": 112,
+   "n": 177,
    "idle": false,
-   "per_hour": 58.8,
-   "hours_to_target": 1.5
+   "per_hour": 57.7,
+   "hours_to_target": 0.4
   },
   {
    "type": "Song Pilgrim 03",
    "enemy": "Choristor",
    "family": "CH_WHIP",
-   "n": 99,
+   "n": 170,
    "idle": false,
-   "per_hour": 52.0,
-   "hours_to_target": 1.9
+   "per_hour": 55.4,
+   "hours_to_target": 0.5
   },
   {
    "type": "Song Pilgrim 03",
    "enemy": "Choristor",
    "family": "CH_JUMP",
-   "n": 66,
+   "n": 112,
    "idle": false,
-   "per_hour": 34.6,
-   "hours_to_target": 3.9
+   "per_hour": 36.5,
+   "hours_to_target": 2.4
   },
   {
    "type": "Song Pilgrim 03",
    "enemy": "Choristor",
    "family": "CH_ENTRY",
-   "n": 32,
+   "n": 52,
    "idle": false,
-   "per_hour": 16.8,
-   "hours_to_target": 10.0
+   "per_hour": 16.9,
+   "hours_to_target": 8.7
   },
   {
    "type": "Song Pilgrim 03",
    "enemy": "Choristor",
    "family": "CH_IDLE",
-   "n": 282,
+   "n": 473,
    "idle": true,
-   "per_hour": 148.0,
+   "per_hour": 154.1,
    "hours_to_target": 0.0
   },
   {
    "type": "Pilgrim 03 Song",
    "enemy": "ChoirBellbearer",
    "family": "CB_THROW",
-   "n": 671,
+   "n": 1057,
    "idle": false,
-   "per_hour": 352.2,
+   "per_hour": 344.3,
    "hours_to_target": 0.0
   },
   {
    "type": "Pilgrim 03 Song",
    "enemy": "ChoirBellbearer",
    "family": "CB_EVADE",
-   "n": 253,
+   "n": 395,
    "idle": false,
-   "per_hour": 132.8,
+   "per_hour": 128.7,
    "hours_to_target": 0.0
   },
   {
    "type": "Pilgrim 03 Song",
    "enemy": "ChoirBellbearer",
    "family": "CB_ENTRY",
-   "n": 40,
+   "n": 65,
    "idle": false,
-   "per_hour": 21.0,
-   "hours_to_target": 7.6
+   "per_hour": 21.2,
+   "hours_to_target": 6.4
   },
   {
    "type": "Pilgrim 03 Song",
    "enemy": "ChoirBellbearer",
    "family": "CB_IDLE",
-   "n": 812,
+   "n": 1283,
    "idle": true,
-   "per_hour": 426.2,
+   "per_hour": 417.9,
    "hours_to_target": 0.0
   }
  ],
+ "validation": {
+  "ok": false,
+  "folds": "per fight (alternating)",
+  "unattributed": {
+   "desc": "hero contacts no enemy could take (validation failures)",
+   "n": 0,
+   "first": []
+  },
+  "types": {
+   "Song Heavy Sentry": {
+    "ok": false,
+    "support_conservative": false,
+    "support_note": "NOT shown to cover unseen instances: in-sample validation failed; held out anchor: 41 of 10828 contacts beyond 0.5 u - inflate it or keep it out of the planner until more data closes this",
+    "contacts": 10832,
+    "uncovered_contacts": 1,
+    "uncovered_pairs": 2,
+    "unexplained": 2,
+    "outside_attacks": 1,
+    "heldout_anchor": {
+     "n": 10828,
+     "within_radius": 10781,
+     "beyond_r_fail": 41,
+     "share_beyond": 0.0038,
+     "beyond_r_fail_t4": 20
+    },
+    "heldout_self": {
+     "n": 1626,
+     "within_radius": 1626,
+     "beyond_r_fail": 0,
+     "share_beyond": 0.0,
+     "beyond_r_fail_t4": 0
+    }
+   },
+   "Song Handmaiden": {
+    "ok": false,
+    "support_conservative": false,
+    "support_note": "NOT shown to cover unseen instances: in-sample validation failed; held out anchor: 66 of 1258 contacts beyond 0.5 u; held out self: 4 of 193 contacts beyond 0.5 u - inflate it or keep it out of the planner until more data closes this",
+    "contacts": 1338,
+    "uncovered_contacts": 0,
+    "uncovered_pairs": 0,
+    "unexplained": 0,
+    "outside_attacks": 2,
+    "heldout_anchor": {
+     "n": 1258,
+     "within_radius": 1180,
+     "beyond_r_fail": 66,
+     "share_beyond": 0.0525,
+     "beyond_r_fail_t4": 48
+    },
+    "heldout_self": {
+     "n": 193,
+     "within_radius": 186,
+     "beyond_r_fail": 4,
+     "share_beyond": 0.0207,
+     "beyond_r_fail_t4": 4
+    }
+   },
+   "Song Administrator": {
+    "ok": false,
+    "support_conservative": false,
+    "support_note": "NOT shown to cover unseen instances: in-sample validation failed; held out anchor: 26 of 2636 contacts beyond 0.5 u - inflate it or keep it out of the planner until more data closes this",
+    "contacts": 2742,
+    "uncovered_contacts": 6,
+    "uncovered_pairs": 10,
+    "unexplained": 0,
+    "outside_attacks": 0,
+    "heldout_anchor": {
+     "n": 2636,
+     "within_radius": 2579,
+     "beyond_r_fail": 26,
+     "share_beyond": 0.0099,
+     "beyond_r_fail_t4": 13
+    },
+    "heldout_self": {
+     "n": 0
+    }
+   },
+   "Song Pilgrim Maestro": {
+    "ok": false,
+    "support_conservative": false,
+    "support_note": "NOT shown to cover unseen instances: in-sample validation failed; held out anchor: 3 of 498 contacts beyond 0.5 u - inflate it or keep it out of the planner until more data closes this",
+    "contacts": 499,
+    "uncovered_contacts": 0,
+    "uncovered_pairs": 0,
+    "unexplained": 0,
+    "outside_attacks": 1,
+    "heldout_anchor": {
+     "n": 498,
+     "within_radius": 493,
+     "beyond_r_fail": 3,
+     "share_beyond": 0.006,
+     "beyond_r_fail_t4": 3
+    },
+    "heldout_self": {
+     "n": 0
+    }
+   },
+   "Song Automaton Tiny": {
+    "ok": true,
+    "support_conservative": false,
+    "support_note": "NOT shown to cover unseen instances: held out anchor: 80 of 5076 contacts beyond 0.5 u - inflate it or keep it out of the planner until more data closes this",
+    "contacts": 5076,
+    "uncovered_contacts": 0,
+    "uncovered_pairs": 0,
+    "unexplained": 0,
+    "outside_attacks": 0,
+    "heldout_anchor": {
+     "n": 5076,
+     "within_radius": 4941,
+     "beyond_r_fail": 80,
+     "share_beyond": 0.0158,
+     "beyond_r_fail_t4": 56
+    },
+    "heldout_self": {
+     "n": 0
+    }
+   },
+   "Song Reed": {
+    "ok": false,
+    "support_conservative": false,
+    "support_note": "NOT shown to cover unseen instances: in-sample validation failed; held out anchor: 92 of 3104 contacts beyond 0.5 u - inflate it or keep it out of the planner until more data closes this",
+    "contacts": 3137,
+    "uncovered_contacts": 3,
+    "uncovered_pairs": 6,
+    "unexplained": 1,
+    "outside_attacks": 1,
+    "heldout_anchor": {
+     "n": 3104,
+     "within_radius": 2947,
+     "beyond_r_fail": 92,
+     "share_beyond": 0.0296,
+     "beyond_r_fail_t4": 60
+    },
+    "heldout_self": {
+     "n": 97,
+     "within_radius": 97,
+     "beyond_r_fail": 0,
+     "share_beyond": 0.0,
+     "beyond_r_fail_t4": 0
+    }
+   },
+   "Song Pilgrim 01": {
+    "ok": true,
+    "support_conservative": false,
+    "support_note": "NOT shown to cover unseen instances: held out anchor: 6 of 994 contacts beyond 0.5 u - inflate it or keep it out of the planner until more data closes this",
+    "contacts": 994,
+    "uncovered_contacts": 0,
+    "uncovered_pairs": 0,
+    "unexplained": 0,
+    "outside_attacks": 0,
+    "heldout_anchor": {
+     "n": 994,
+     "within_radius": 988,
+     "beyond_r_fail": 6,
+     "share_beyond": 0.006,
+     "beyond_r_fail_t4": 6
+    },
+    "heldout_self": {
+     "n": 0
+    }
+   },
+   "Song Pilgrim 03": {
+    "ok": true,
+    "support_conservative": false,
+    "support_note": "NOT shown to cover unseen instances: held out anchor: 8 of 2417 contacts beyond 0.5 u - inflate it or keep it out of the planner until more data closes this",
+    "contacts": 2467,
+    "uncovered_contacts": 0,
+    "uncovered_pairs": 0,
+    "unexplained": 0,
+    "outside_attacks": 0,
+    "heldout_anchor": {
+     "n": 2417,
+     "within_radius": 2393,
+     "beyond_r_fail": 8,
+     "share_beyond": 0.0033,
+     "beyond_r_fail_t4": 1
+    },
+    "heldout_self": {
+     "n": 0
+    }
+   },
+   "Pilgrim 03 Song": {
+    "ok": false,
+    "support_conservative": false,
+    "support_note": "NOT shown to cover unseen instances: in-sample validation failed; held out anchor: 8 of 944 contacts beyond 0.5 u; held out self: 9 of 573 contacts beyond 0.5 u - inflate it or keep it out of the planner until more data closes this",
+    "contacts": 944,
+    "uncovered_contacts": 2,
+    "uncovered_pairs": 6,
+    "unexplained": 0,
+    "outside_attacks": 0,
+    "heldout_anchor": {
+     "n": 944,
+     "within_radius": 934,
+     "beyond_r_fail": 8,
+     "share_beyond": 0.0085,
+     "beyond_r_fail_t4": 6
+    },
+    "heldout_self": {
+     "n": 573,
+     "within_radius": 557,
+     "beyond_r_fail": 9,
+     "share_beyond": 0.0157,
+     "beyond_r_fail_t4": 8
+    }
+   }
+  }
+ },
  "counters": {
-  "contacts with a shared source name (nearest subject)": 5950,
-  "contacts named by a collider child only (subject exporting it)": 1065,
-  "hazard contacts after the hazard left the export (its last owner)": 15,
-  "hero contacts without an enemy: Colliders/Collider Fly": 5,
-  "hero contacts without an enemy: Colliders/Collider ParryStance": 5,
-  "hero contacts without an enemy: Colliders/Collider ParryAntic": 3
+  "contacts with a shared source name (nearest subject)": 9104,
+  "contacts named by a collider child only (subject exporting it)": 1754,
+  "hazard contacts after the hazard left the export (its last owner)": 23,
+  "contacts named by a collider child only (exported up to LAG_F before)": 21
  },
  "tables": {
   "Song Heavy Sentry": "C:\\modeling\\silksong_bot\\.claude\\worktrees\\wf_946a7803-63c-2\\knowledge\\1.0.30000\\enemies\\forum\\ChoirClapper.json",
@@ -691,7 +1031,7 @@
   "Pilgrim 03 Song": "C:\\modeling\\silksong_bot\\.claude\\worktrees\\wf_946a7803-63c-2\\knowledge\\1.0.30000\\enemies\\forum\\ChoirBellbearer.json"
  },
  "code": {
-  "sha": "104501017303d0683b5d5afbdbd40ae4b6035b68",
+  "sha": "9a145743175038f949f7fc9d0165bedb5e7009b3",
   "branch": "worktree-wf_946a7803-63c-2",
   "dirty": false
  }
