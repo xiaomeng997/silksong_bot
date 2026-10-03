@@ -44,7 +44,7 @@ from ssbot.knowledge.kinematics import (  # Forum loadout (abilities)
     P_WJ_SPEED, PREV_GS, SP_X, UNSTICK, WJ_CHAIN, WJ_DIR, WJ_V, WJQ, WLOCK, WSIDE, WSLASH, WSTICK, WTOUCH, WCON, SHOVE,
     RX0, RY0, JBUF,
     M_SCRAMBLE, P_SCR_ANTIC, P_SCR_SPEED, P_SCR_FORCE, P_SCR_FORCE_H, P_SCR_END_VY, P_SCR_END_DEC, P_SCR_END_T,
-    P_SCR_ROOF_RAY, P_SCR_ROOF_T, P_SCR_DETACH, P_SPR_SHIFT, P_SPR_GRACE, P_SKID_DEC_MV, P_SKID_VMIN, P_RPR_TDEC,
+    P_SCR_ROOF_RAY, P_SCR_ROOF_T, P_SCR_DETACH, P_SPR_SHIFT, P_SPR_GRACE, P_SKID_DEC_MV, P_SKID_VMIN, P_AFC_LAG, P_RPR_TDEC,
     P_RPR_TREACH0, P_RPR_TREACH1, P_RPR_TREACH_T, P_RPR_TLOBE0,
     P_RPR_TLOBE1)
 
@@ -766,7 +766,7 @@ def forum_fixed(x, vx, vy, normal, rx0, ry0, P, TT):
         vx = accel_to(vx, P[P_SPR_ACC], x[SP_X])
         if ph == 0:
             # Air Sprint: Fall Clamp eased linearly (easeType 21) from air_fall_clamp0 to air_fall_clamp1
-            u = min(x[MODE_T] / P[P_AFC_T], 1.0)
+            u = min(max(x[MODE_T] - P[P_AFC_LAG], 0.0) / P[P_AFC_T], 1.0)
             vy = max(vy, P[P_AFC0] + (P[P_AFC1] - P[P_AFC0]) * u)
         elif ph == 1:
             vy = max(vy, -P[P_MAXFALL])
@@ -1022,7 +1022,9 @@ def forum_after_queue(x, mask, pressed, mode0, dt, P, TT):
                     x[PHASE] = 2.0
                     x[MODE_T] = 0.0
                     x[SP_X] = x[FACE] * P[P_SPR_SPEED]
-                    sprint_translate(x, rend_x(x), rend_y(x), P)
+                    # LAND comes from the landing step's collision callback, where the transform sits at the body
+                    # (live: the landing frame moved the step's 17.0 u/s x 0.02 + 0.05)
+                    sprint_translate(x, x[PX], x[PY], P)
                     x[VX] = accel_to(x[VX], P[P_SPR_ACC], x[SP_X])
                 else:
                     regain_jump(x, mask, P)

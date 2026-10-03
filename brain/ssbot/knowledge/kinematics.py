@@ -425,6 +425,8 @@ class HeroParams:
     air_fall_clamp0: float = -10.0     # Air Sprint EaseFloat Fall Clamp from
     air_fall_clamp1: float = -30.0     # ... to
     air_fall_clamp_time: float = 1.0   # ... over
+    air_fall_clamp_lag: float = 0.016667   # ... a frame behind the state's own time (live: -15.20 where the state
+    #                                    time gives -15.53, on every air sprint of C / D)
     skid_decel: float = 0.85           # Skid End 1 / 2 (a ground sprint released after Sprint Grace): DecelerateXY
     skid_decel_move: float = 0.95      # ... per step, 0.95 while moving the facing way
     skid_time: float = 0.25            # ... the two clips (0.2 + 0.05 s)
@@ -508,7 +510,7 @@ class HeroParams:
               "scr_force_held", "scr_end_vy", "scr_end_decel", "scr_end_t", "scr_roof_ray", "scr_roof_t",
               "scr_detach", "rpr_thunk_decel", "rpr_thunk_reach0", "rpr_thunk_reach1", "rpr_thunk_reach_t",
               "rpr_thunk_lobe0", "rpr_thunk_lobe1", "sprint_shift", "sprint_grace", "skid_decel_move",
-              "skid_min_speed")
+              "skid_min_speed", "air_fall_clamp_lag")
 
     def vector(self) -> np.ndarray:
         return np.array([float(getattr(self, k)) for k in self.VECTOR], dtype=np.float64)
@@ -582,8 +584,8 @@ class HeroParams:
  P_RPR_ADEC, P_RPR_ADEC_Y, P_RPR_ACC, P_RPR_DEC, P_RPR_VMAX, P_RPR_SPEED, P_RPR_SDEC, P_HARD_FALL, P_HARD_LAND,
  P_SCR_ANTIC, P_SCR_SPEED, P_SCR_FORCE, P_SCR_FORCE_H, P_SCR_END_VY, P_SCR_END_DEC, P_SCR_END_T, P_SCR_ROOF_RAY,
  P_SCR_ROOF_T, P_SCR_DETACH, P_RPR_TDEC, P_RPR_TREACH0, P_RPR_TREACH1, P_RPR_TREACH_T, P_RPR_TLOBE0, P_RPR_TLOBE1,
- P_SPR_SHIFT, P_SPR_GRACE, P_SKID_DEC_MV, P_SKID_VMIN,
- NP) = range(147)
+ P_SPR_SHIFT, P_SPR_GRACE, P_SKID_DEC_MV, P_SKID_VMIN, P_AFC_LAG,
+ NP) = range(148)
 assert NP == len(HeroParams.VECTOR)
 
 
