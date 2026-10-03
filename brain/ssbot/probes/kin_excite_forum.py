@@ -48,6 +48,9 @@ M_L, M_R = mask("left"), mask("right")
 M_J, M_A, M_D, M_U, M_DASH = mask("jump"), mask("attack"), mask("down"), mask("up"), mask("dash")
 FORUM_ABILITIES = "walljump,wallcling,dash,brolly,reaper_down,wallslash_slowdown,hard_landing"
 REAPER_PARAMS = {"attack_cooldown": 0.5, "attack_recovery": 0.3, "attack_duration": 0.35}
+# objects an FSM swings that no slash.dump slot names (the oracle's "paths" argument; older plugins ignore it): the
+# Reaper down slash, which the Crest Attacks FSM finds as Attacks/Scythe/DownSlash New
+ATTACK_PATHS = ("Attacks/Scythe/DownSlash New",)
 
 
 def forum_params():
@@ -224,7 +227,7 @@ def sample_attack(link: OracleLink, t: Trial, out, frames: int = 26) -> None:
             link.act(last + 2, masks[k], hold_frames=0)
             i = k + 1
         if t0 + press <= last <= t0 + press + frames:
-            pending.append(link.rpc_async("slash.dump"))
+            pending.append(link.rpc_async("slash.dump", paths=list(ATTACK_PATHS)))
     link.act(link.frame + 2, 0, hold_frames=0)
     t.f1 = link.frame
     f_press = t0 + press
@@ -234,7 +237,10 @@ def sample_attack(link: OracleLink, t: Trial, out, frames: int = 26) -> None:
         except Exception:  # noqa: BLE001
             continue
         for a in r.get("attacks") or ():
-            dms = [{"path": dm["path"], "enabled": any(c.get("enabled") for c in dm["colliders"]) and dm["enabled"],
+            # live: a collider can be enabled under an inactive object (the group's down / charge / taunt objects
+            # read enabled on every frame), so the object's and the damager's activeInHierarchy count too
+            dms = [{"path": dm["path"], "enabled": bool(any(c.get("enabled") for c in dm["colliders"]) and dm["enabled"]
+                                                        and dm.get("active", True) and a.get("active", True)),
                     "polys": [shp["v"] for c in dm["colliders"] for shp in (c.get("shapes_swing") or c["shapes"])]}
                    for dm in a.get("damagers") or ()]
             if any(d["enabled"] for d in dms):

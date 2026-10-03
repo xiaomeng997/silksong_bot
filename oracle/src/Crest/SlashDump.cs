@@ -8,7 +8,7 @@ using UnityEngine;
 namespace SsOracle.Crest
 {
     /// <summary>
-    /// RPC "slash.dump" {all_groups=false} (read-only; crests.md §5 b). Every attack object the hero can use with the
+    /// RPC "slash.dump" {all_groups=false, paths=[]} (read-only; crests.md §5 b). Every attack object the hero can use with the
     /// equipped crest, found the way the game finds them in 1.0.30000:
     /// <list type="bullet">
     /// <item>Nail swings: HeroController.Attack/DownAttack use the private normalSlash, alternateSlash, upSlash,
@@ -101,6 +101,14 @@ namespace SsOracle.Crest
                 AddCustomDown(attacks, hero, cfg.DownSlashEvent);
             var group = hero.CurrentConfigGroup;
             if (group != null) AddFsmObjects(attacks, group, root);
+            // Extra hero-relative paths (slot "path:<path>"): objects an FSM swings that no slot names, e.g. the Reaper
+            // down slash the Crest Attacks FSM finds as "Attacks/Scythe/DownSlash New".
+            if (args != null && args.TryGetValue("paths", out var po) && po is IList<object> paths)
+                foreach (var p in paths)
+                {
+                    var t = p is string ps ? root.Find(ps) : null;
+                    if (t != null) AddObject(attacks, "path:" + (string)p, t.gameObject, root);
+                }
 
             var pos = root.position;
             var d = new Dictionary<string, object>

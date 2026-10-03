@@ -95,24 +95,42 @@ def from_dump(dump: dict, crest: str) -> AttackTable:
     return AttackTable(crest, dump.get("game", "1.0.30000"), config, shapes, dict(RECOIL), notes)
 
 
+# slash.dump "paths" samples (slot "path:<hero-relative path>") that stand for a table slot: the object the FSM
+# really swings, whose polygons replace the dump's (the dump's custom down slot is the config group's DownSlash object)
+PATH_SLOTS = {"path:Attacks/Scythe/DownSlash New": "down"}
+
+
+def _on(d: dict) -> bool:
+    return bool(d.get("enabled")) and d.get("active", True) is not False
+
+
 def apply_live(tab: AttackTable, lines: list[dict]) -> list[str]:
     """Fold live per-frame samples into the table: frames each slot's damager was enabled, polygons while enabled."""
     by_slot: dict[str, list[dict]] = defaultdict(list)
     for r in lines:
-        by_slot[r["slot"]].append(r)
+        by_slot[PATH_SLOTS.get(r["slot"], r["slot"])].append(r)
     out = []
     for slot, rows in by_slot.items():
         if slot not in tab:
             continue
         sh = tab[slot]
-        on = sorted({r["k"] for r in rows if any(d.get("enabled") for d in r.get("damagers") or ())})
+        replace = any(r["slot"] in PATH_SLOTS for r in rows)
+        if replace:
+            rows = [r for r in rows if r["slot"] in PATH_SLOTS]
+        on = sorted({r["k"] for r in rows if any(_on(d) for d in r.get("damagers") or ())})
+        no_active = not any("active" in d for r in rows for d in r.get("damagers") or ())
+        if no_active and len(on) >= 20 and len(on) == len({r["k"] for r in rows}):
+            # samples from before the probe recorded activeInHierarchy: an object enabled on every sampled frame of
+            # every trial is an inactive group object (down / charge / taunt), not a swing
+            out.append(f"{slot}: skipped (enabled on every sampled frame, no active flag: an inactive object)")
+            continue
         polys = defaultdict(list)
         for r in rows:
             b = r["hero"]["box"]
             cx, cy = 0.5 * (b[0] + b[2]), 0.5 * (b[1] + b[3])
             f = 1 if r["hero"]["facing"] >= 0 else -1
             for d in r.get("damagers") or ():
-                if d.get("enabled") and "Knockback" not in d["path"]:
+                if _on(d) and "Knockback" not in d["path"]:
                     for i, p in enumerate(d["polys"]):
                         polys[(d["path"], i)].append(_rel(np.asarray(p, float).reshape(-1, 2), cx, cy, f))
         new = tuple(np.median(np.stack(v), axis=0) for v in polys.values() if len({len(x) for x in v}) == 1)
@@ -120,11 +138,15 @@ def apply_live(tab: AttackTable, lines: list[dict]) -> list[str]:
         if new and len(new) == len(sh.polys) and all(a.shape == b.shape for a, b in zip(new, sh.polys)):
             moved = max(float(np.abs(a - b).max()) for a, b in zip(new, sh.polys))
         frames = (on[0], on[-1]) if on else ()
+        if replace and new:
+            moved = float("inf")              # another object: its polygons, whatever the dump's were
         tab.shapes[slot] = AttackShape(slot, sh.src, new if (new and moved > 0.02) else sh.polys,
                                        sh.t_on, sh.t_off, frames, sh.damage_mult, sh.clash_box,
                                        sh.source + f"; live frames {frames} ({len(rows)} samples"
-                                       + (f", polygon moved {moved:.3f} u" if moved > 0.02 else "") + ")")
-        out.append(f"{slot}: frames {frames}, polygon shift {moved:.3f} u, {len(rows)} samples")
+                                       + (", polygons of the FSM's own object" if replace and new else
+                                          f", polygon moved {moved:.3f} u" if moved > 0.02 else "") + ")")
+        out.append(f"{slot}: frames {frames}, " + ("polygons replaced" if replace and new else
+                                                   f"polygon shift {moved:.3f} u") + f", {len(rows)} samples")
     return out
 
 
