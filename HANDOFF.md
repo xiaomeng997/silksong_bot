@@ -1,63 +1,40 @@
-# HANDOFF: task V (Bell Beast in the vision-equivalent view) - stopped by STOP_AGENTS
+# HANDOFF: task V (Bell Beast in the vision-equivalent view)
 
-Stopped 2026-10-02 21:04 PDT: C:\ssbot\sandbox\STOP_AGENTS ("lead: 5-hour window at 86 % ... Resume after 22:40 PDT").
 Worktree C:\modeling\silksong_bot\.claude\worktrees\wf_946a7803-63c-1, branch worktree-wf_946a7803-63c-1.
-No live run of mine is running (the two combat_run workers ended after their episode on the stop file).
-Instances 0 and 1 are left running (not touched otherwise). Findings: docs/facts/1.0.30000/m2_vision_view.md.
+Findings: docs/facts/1.0.30000/m2_vision_view.md (round 2 section at the end).
+Live runs go from a separate detached worktree C:\ssbot\live_vv (git worktree of this branch, checked out at the
+commit under test, numba prewarmed with planner_bench). Instances 0 and 1 (ports 47017 / 47018) were restarted by
+this task at 22:2x (launcher -n 1 --first 0/1 --detach); the lead runs launcher --restore.
 
-## Done (commits da9a232, a479c09, 2068293, 7c18e6c + this one)
+## Done (round 2)
 
-Diagnosis with the new tool `ssbot.tools.view_compare` (oracle vs degraded_dust on the same recorded fight,
-recorded masks as the prefix): the vision view never generated a pogo because the hurtbox table was built relative to
-the root transform but placed at Entity.pos (charge box 2.35 u low, under the floor); falling drop bells had only
-their self-template union (exact paths were oracle-only: FSM + logged velocity); the rage underground kept every
-attack in support (FORCED_RISK through Rage Pos / Rage Antic); the attack start came from the dust cue +-0.1 s and a
-fit over standing frames.
+- bb568e5: no logged velocities in the vision view (vision/track.VelocityTracks: slope of the detections), cues get
+  detection noise and misses; drop-bell x = mean of its cue detections, burst anchor = mean of the burst cue.
+- 71f2478: attack bells on exact paths from their tracks (bell_track.AtkBellTracks; registry AtkBell start); a burst
+  whose two bells are tracked drops its attack-bell unions (Burst Recovery, tail).
+- 06aa2f4: filter: undrawn types with a renderer have no image extent (the "Antic Bell Shaker" made the underground
+  boss visible), a ghost's due cue in the image shows (boss lost at the edge); boss box shape along the horizon
+  (SHAPE_T); pogo-gate margins per 0.1 s of time in the phase (phases_tau in BellBeast_vision_box_margin.json).
+- 387ff86: VE rage scoring p 0.5 within 10 HP above the rage HP; VE bell targets implemented, off (SSBOT_VE_TARGETS=1).
+- Held-out recall (ve_dust + noise seed 7, margin 0, lags 2-4) 23,896 / 23,896 after every step.
+- Live: bb568e5 7 eps (4 CLEAR); 71f2478 28 eps, 21 CLEAR (75 %), 0 WOULD_DIE.
 
-Fixes (all vision-legal; see the facts file for the numbers):
-- combat/bell_track.py: drop-bell path from its detections (column x, drop time from the known fall curve, bounce side
-  once the drift is significant), two branches until then; withdrawn on a hero attack in reach or a track off the
-  model. Forecaster VE uses it (Forecast DetBell with t0 / sides / skin); Forecast.committed keeps exact bells.
-- hurtbox table rebuilt relative to Entity.pos, "recover" split by family (BossTracker.shape_key).
-- VE attack start re-anchored at every drawn phase entry; AttackFit off by default (planner_policy.FUSION).
-- BossTracker.fused_pos: box position averaged over the attack's detections moved along the mean path.
-- Pogo gate in VE (Forecast.certain_boss + planner buckets): the boss shape eroded by measured residuals
-  (boss_path_audit --view degraded_dust --margins -> knowledge/1.0.30000/enemies/BellBeast_vision_box_margin.json),
-  valid until the phase can end.
-- Rage? -> Rage Pos only when P1, not raged, HP <= 75 (311/311 logged; 0/1990 above).
-- kinematics.rollout: writable events/dt/fs (read-only broadcast view = second numba specialization = the mid-fight
-  compile of fresh worktrees); warmup on a TERRAIN-message arena + clip_fractions (sigs check: no new specialization
-  in 3000 replayed frames, both views).
-- Tools: view_compare, bell_track_audit, boss_path_audit --view/--margins, support_recall --noise-seed.
+## Running / pending
 
-## Measured
-
-- Held-out recall (support_recall i2_002/i3_002, held-out tables, lags 2-4, margin 0): oracle 23,896/23,896;
-  ve_dust + SimpleNoise seed 7: 23,896/23,896 (1,652 drop-bell contact frames).
-- Replay ep2 of 20261002_171806 i0 (view_compare): VE FORCED in Rage Antic 100 % -> 1.4 %, Rage Pos 57 -> 0 %,
-  Burst Antic+bell 100 -> 0 %, Submerged+bell 36 -> 9 %; VE pogos accepted in Charge 0 -> 0.55 per tick with the
-  certain-box gate (2.28 with the nominal box, oracle 3.0); Dig In / Charge End pogos still blocked (recover margins
-  2-5 u: Dig In sinking).
-- Live 7c18e6c degraded_dust (20261002_205247, instances 0/1, seed 90000): 2 episodes before the stop: 1 CLEAR,
-  1 QUIT (DropBell M2 hit). tick p99 12.4 / 12.8 ms.
+- Final degraded_dust run on 387ff86 (started 23:14 PDT, instances 0,1, seed 90400, --episodes 85 --hours 3.2):
+  run dir C:\ssbot\data\runs\m2\2026100?_*_BellBeast_eval_planner_degraded_dust (the newest; log
+  C:\ssbot\sandbox\vv_scratch\live_387ff86_final.log). Then the oracle regression (>= 60 eps, --view oracle).
+- Stop gracefully: cd C:\ssbot\live_vv\brain; ..\scripts\uv.cmd run python -m ssbot.tools.combat_run stop <run dir>
+- Summaries: combat_run summary <run>; C:\ssbot\sandbox\vv_scratch\rec_stats.py <run> (hits by Control state from the
+  recordings, pogo hits per charge); hits_summary.py <run> (decision rows before each hit).
 
 ## Next
 
-1. Replay the M2 hit of 20261002_205247 i0 ep0 (postmortem / dbg scripts in C:\ssbot\sandbox\vv_scratch:
-   dbg_support.py lists which placements / exact bells cover the floor at a frame) - was the bell on its exact path
-   or back on the self template (touched / deviation), and what made the plan FORCED.
-2. Live degraded_dust on instances 0,1 (>= 150 valid episodes; seeds 90000-94999; e.g. --seed 90100 --hours 1.5 per
-   chunk), summarize with combat_run summary + fight_stats; oracle regression chunk (--view oracle, ~40 eps).
-3. If bursts / attack bells cause hits: an attack-bell track model like bell_track (launch from the burst, vx +-1,
-   vy 38, first bounce vx +-12 vy 14).
-4. Dig In / Charge End pogos in VE: the recover margins are dominated by Dig In's sinking (table bins); a per-state
-   shape timing would shrink them.
-
-## How to resume
-
-    cd C:\modeling\silksong_bot\.claude\worktrees\wf_946a7803-63c-1\brain
-    ..\scripts\uv.cmd run python -m ssbot.tools.combat_run run --instances 0,1 --encounter BellBeast --mode eval
-        --policy planner --view degraded_dust --threads 4 --seed 90100 --hours 1.5 --episodes 400 --real-quit 0.2
-    ..\scripts\uv.cmd run python -m ssbot.tools.combat_run summary C:/ssbot/data/runs/m2/<run>
-    ..\scripts\uv.cmd run python -m ssbot.tools.combat_run stop C:/ssbot/data/runs/m2/<run>      # graceful stop
-Long offline jobs: C:\ssbot\sandbox\vv_scratch\bg.ps1 (below-normal priority, NUMBA_NUM_THREADS=4).
+1. Bursts in VE (3 of 7 QUITs on 71f2478): the PREPARE stance 4.5 u beside the burst puts the hero where the attack
+   bell lands (x' 3.15) and rolls out at 12 u/s; with the VE margin the jump-over / step-in windows close. Try a VE
+   stance and det-bell margins without the boss-noise part (the bells carry their own skin).
+2. Rage drop-bell pattern (Ptn L/R, 3 QUITs): self templates before the fall (cue +-0.1 s time slack, both sides);
+   VE bell targets for pogo escapes exist (off) - evaluate live, or a tighter pre-fall model from the cue.
+3. Dig In / Charge End pogos: still 0 accepted in VE (L/R margins 2.5 u at Charge End from the charge's deceleration
+   timing; Dig In top 1.5 u).
+4. The VE HP count misses hits (80 vs 75): find which hits the filter drops.
