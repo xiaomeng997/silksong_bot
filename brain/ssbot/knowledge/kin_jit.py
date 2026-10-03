@@ -41,7 +41,7 @@ from ssbot.knowledge.kinematics import (  # Forum loadout (abilities)
     P_RPR_ANTIC, P_RPR_DEC, P_RPR_FALL, P_RPR_FALL2, P_RPR_SDEC, P_RPR_SLASH, P_RPR_SPEED, P_RPR_VMAX, P_SKID_DEC,
     P_SKID_T, P_SPR_ACC, P_SPR_SPEED, P_W_CCD, P_W_CDECEL, P_W_CONTACT, P_W_CVMIN, P_W_RAY, P_W_RAY_B, P_W_SHOVE,
     P_W_SLASH_VMIN, P_W_STICK, P_W_STICKY, P_W_ACCEL, P_W_TRAY, P_WJ_CHAIN, P_WJ_JUMPED, P_WJ_LONG, P_WJ_SHORT,
-    P_WJ_SPEED, PREV_GS, SP_X, UNSTICK, WJ_CHAIN, WJ_DIR, WJ_V, WJQ, WLOCK, WSIDE, WSLASH, WSTICK, WTOUCH,
+    P_WJ_SPEED, PREV_GS, SP_X, UNSTICK, WJ_CHAIN, WJ_DIR, WJ_V, WJQ, WLOCK, WSIDE, WSLASH, WSTICK, WTOUCH, WCON,
     M_SCRAMBLE, P_SCR_ANTIC, P_SCR_SPEED, P_SCR_FORCE, P_SCR_FORCE_H, P_SCR_END_VY, P_SCR_END_DEC, P_SCR_END_T)
 
 # world freeze presets in start order (kinematics.WF_ORDER): event bit, rampDown, wait, rampUp, target
@@ -741,15 +741,22 @@ def forum_contacts(x, landed, P, TT):
     if mode == M_NORMAL or mode == M_DASH or mode == M_HARD_LAND:
         reach = P[P_SKIN] + P[P_W_CONTACT]
         gl, gr = wall_gaps(x[PX], x[PY], max(reach, P[P_W_TRAY]), P, TT)
-        if x[GROUND] > 0 or gl <= reach or gr <= reach:
+        # OnCollisionStay2D refreshes the flags only for a contact that already existed in the step before (its
+        # first step is OnCollisionEnter2D, which does not): a jump into a wall touches it a step after contact
+        gnow = x[GROUND] > 0
+        wnow = gl <= reach or gr <= reach
+        prev = np.int64(x[WCON])
+        x[WCON] = (1.0 if gnow else 0.0) + (2.0 if wnow else 0.0)
+        stay = (gnow and (prev & 1) != 0) or (wnow and (prev & 2) != 0)
+        if not (gnow or wnow):
+            x[WTOUCH] = 0.0               # OnCollisionExit2D
+        elif stay:
             if gl <= P[P_W_TRAY]:
                 x[WTOUCH] = -1.0
             elif gr <= P[P_W_TRAY]:
                 x[WTOUCH] = 1.0
             else:
                 x[WTOUCH] = 0.0
-        else:
-            x[WTOUCH] = 0.0
     if landed and x[HARD] > 0 and (mode == M_NORMAL or mode == M_DASH or mode == M_SPRINT):
         x[MODE] = M_HARD_LAND
         x[MODE_T] = 0.0

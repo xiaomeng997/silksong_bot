@@ -228,12 +228,13 @@ DEFAULT_PARAMS = REPO / "knowledge" / "1.0.30000" / "kinematics" / "hero_hunter.
  FALL_T,          # fallTimer (s, hard landing)
  HARD,            # cState.willHardLand
  SP_X,            # sprint FSM: x speed target (Sprint Speed Crt, signed)
- K) = range(73)
+ WCON,            # contacts of the last physics step: 1 floor, 2 wall (OnCollisionStay vs Enter)
+ K) = range(74)
 ROW_NAMES = ("px py qx qy sx sy vx vy alpha gs face ground mode mode_t mode_n jumping jsteps jdsteps jq aq airhang "
              "attacking atk_t atk_cd rdir rsteps ds_hs ds_rec bounce hvx hvy move jheld prev silk inv_t ledge touch "
              "phase ts qq alo ahi landq wf_ph wf_t wf_s wf_down wf_wait wf_up wf_tgt wside wtouch cling cling_cd "
              "wstick unstick wlock wj_dir wj_v wj_chain wjq wslash prev_gs gl_cd dash_t dash_cd airdashed dq fall_t "
-             "hard sp_x").split()
+             "hard sp_x wcon").split()
 assert len(ROW_NAMES) == K
 
 M_NORMAL, M_DS_ANTIC, M_DS_SPIKE, M_HURT_FREEZE, M_HURT_RECOIL, M_CAST, M_BIND, M_LOCKED = range(8)
@@ -2267,6 +2268,7 @@ class ForumRows:
         dcd = float(tm[TM_KEYS.index("dash_cd")]) if tm is not None else np.nan
         S[DASH_CD] = max(dcd, 0.0) if np.isfinite(dcd) else 0.0
         S[HARD] = 1.0 if flag("willHardLand") else 0.0
+        S[WCON] = (1.0 if ground else 0.0) + (2.0 if (wall is not None and wall != 0) or sliding else 0.0)
         S[FALL_T] = p.hard_fall_time + 0.01 if S[HARD] > 0 else 0.0
         self.prev = {"sliding": sliding, "cling": cling, "jumping": jumping, "ground": ground,
                      "wall": bool(wall) if wall is not None else sliding, "md": md, "ph": ph}
