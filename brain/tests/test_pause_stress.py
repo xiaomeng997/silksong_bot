@@ -231,14 +231,17 @@ def test_menu_fault_triggers_and_hits_on_one_tick_and_hit_faults_rearm_on_the_ne
     assert not link.calls and not inner.sc.faults                     # no planner key latched yet
     inj.act(_fs(80, lat=1 << 20))
     assert len(link.calls) == 1 and len(inner.sc.faults) == 1 and inj.log["trigger_f"] == 80
-    inj, link = _injector("bounce", fault="hit", offset=2, take=False)
-    for f in range(0, 300):
-        inj.act(_fs(f, cs={"downSpikeBouncing": True} if f % 50 < 5 else {}))   # a bounce onset every 50 frames
-    assert [r["f"] for r in inj.log["sent"]] == [102, 152]             # refused (i-frames): re-armed once
     inj, link = _injector("cast", fault="hit", offset=0, take=False)
     for f in range(0, 300):
-        inj.act(_fs(f, clip="NeedleThrow AnticG" if f % 50 < 5 else "Idle"))
-    assert [r["f"] for r in inj.log["sent"]] == [100, 150, 200, 250]   # other kinds: max_retries
+        inj.act(_fs(f, clip="NeedleThrow AnticG" if f % 50 < 5 else "Idle"))   # a cast every 50 frames
+    assert [r["f"] for r in inj.log["sent"]] == [100, 150, 200, 250]   # refused (i-frames): re-armed each cast
+    kinds = set()
+    for seed in range(400):                                            # bounce faults are triggers only
+        inj = HitInjector(InnerSc(), p_event=1.0)
+        inj.reset(random.Random(seed), None)
+        kinds.add((inj.kind, inj.fault))
+    assert ("bounce", "hit") not in kinds and ("bounce", "trigger") in kinds
+    assert not any(k == "clash" for k, _ in kinds) and ("cast", "hit") in kinds and ("kill", "trigger") in kinds
 
 
 def test_trial_of_a_trigger_fault_counts_game_keys_on_menu_frames():

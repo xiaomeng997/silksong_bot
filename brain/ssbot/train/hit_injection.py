@@ -29,16 +29,17 @@ where the moment is committed and its frame known, a few frames before it:
           trigger goes at press + 19 + offset; a nail press hits 1-4 frames later (Slash / AltSlash 38 of 56 at +1),
           so its offset is at least -1 (the press is seen on the frame it is latched); either only when the planner
           scored that attack as a hit
-  bounce  downSpikeBouncing onset. hit: sent at onset + 2, so it lands at + 3, past the down-spike i-frames
-          (HeroController.DOWNSPIKE_INVULNERABILITY_STEPS = 2 physics steps, counted down in FixedUpdate: 2-3 frames
-          at 50 Hz physics; chunk 20261002_225739 ep 0: two hits sent at + 1, run at + 2, both refused) and re-armed
-          once at most (every refused hit is a "damage" event the planner counts as unpredicted: two of them are a
-          Q4 quit with no fault); trigger: onset + 0..2
+  bounce  downSpikeBouncing onset: trigger only, onset + 0..2. The game takes no enemy hit there: hits sent at
+          onset + 1 and + 2 (run at + 2 and + 3) were all refused (take_health_calls 0; chunks 20261002_225739 ep 0,
+          230409: 4 of 4): past the 2-physics-step down-spike i-frames (HeroController.DOWNSPIKE_INVULNERABILITY_STEPS)
+          the bounce's recoil still holds CanTakeDamage false (!cState.recoiling). Every refused hit is a "damage"
+          event the planner counts as unpredicted, so two of them end the attempt as a Q4 quit with no fault in it
   cast    the first frame of a NeedleThrow clip (a Silkspear: AnticG / AnticA); hit / trigger + 0..2
   clash   parrying onset, or a nail recoil onset with no hit dealt on that frame or the 2 before (a tink off a bell);
-          hit / trigger + 0..2 (rare against the Bell Beast: a short fallback)
-p_event is the share of these (weights bounce 3 : cast 3 : menu 2 : kill 1 : clash 1; hit or trigger 50 / 50
-except menu); the rest are coverage kinds: hit faults on airborne frames (rising vy > 2, apex |vy| < 1.5, falling
+          hit / trigger + 0..2. Weight 0 against the Bell Beast: none came within clash_fallback_s in 5 of 5 trials
+          (chunks 20261002_225013, 230409) and the 6 calibration fights had no parry
+p_event is the share of these (weights bounce 3 : cast 3 : menu 2 : kill 1 : clash 0; hit or trigger 50 / 50 for
+cast and kill); the rest are coverage kinds: hit faults on airborne frames (rising vy > 2, apex |vy| < 1.5, falling
 vy < -2), attack, pogo (as the first chunk), and trigger faults on any frame with a planner key latched ("keys": the
 key guard under load). An episode whose moment never comes falls back after fallback_s (kill: kill_fallback_s, as the
 boss is one hit from death only near the end of a 55-80 s fight; clash: clash_fallback_s): a hit on the next
@@ -58,7 +59,7 @@ from ssbot.knowledge.kinematics import CSTATE_NAMES_PATH
 AIR_KINDS = ("rising", "apex", "falling", "attack", "pogo")
 COVERAGE_KINDS = AIR_KINDS + ("keys",)
 EVENT_KINDS = ("bounce", "cast", "menu", "kill", "clash")
-EVENT_WEIGHTS = (3, 3, 2, 1, 1)
+EVENT_WEIGHTS = (3, 3, 2, 1, 0)
 FAULT_HIT, FAULT_TRIGGER, FAULT_MENU = "hit", "trigger", "menu"
 HS_AIRBORNE = 3                      # GlobalEnums.ActorStates.airborne
 HERO_HIT = 5                         # Bell Beast: every nail hit 5 HP (supervision.HERO_HIT_FLOOR)
@@ -129,7 +130,7 @@ class HitInjector:
         r = random.Random(rng.random())      # after the inner policy's own draws: its seeds are those of a plain run
         if r.random() < self.p_event:
             kind = r.choices(EVENT_KINDS, EVENT_WEIGHTS)[0]
-            fault = FAULT_MENU if kind == "menu" else r.choice((FAULT_HIT, FAULT_TRIGGER))
+            fault = {"menu": FAULT_MENU, "bounce": FAULT_TRIGGER}.get(kind) or r.choice((FAULT_HIT, FAULT_TRIGGER))
         else:
             kind = r.choice(COVERAGE_KINDS)
             fault = FAULT_TRIGGER if kind == "keys" else FAULT_HIT
@@ -137,8 +138,6 @@ class HitInjector:
             fault = FAULT_HIT                # no supervisor to trigger: the plain hit
         if kind == "kill" and fault == FAULT_TRIGGER:
             offset = r.randint(-3, 2)
-        elif kind == "bounce" and fault == FAULT_HIT:
-            offset = 2
         elif fault == FAULT_HIT:
             offset = r.randint(0, 1)
         else:
@@ -281,7 +280,7 @@ class HitInjector:
             "hp_before", 0)
         if took or self.fault == FAULT_MENU:       # menu: the trigger has fired; one hit, taken or not
             self.done = True
-        elif self.retries < (1 if self.kind == "bounce" else self.max_retries):
+        elif self.retries < self.max_retries:
             self.retries += 1
             self.sched = None
         else:
