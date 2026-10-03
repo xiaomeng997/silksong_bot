@@ -10,6 +10,14 @@ Leap / Bell Burst cycles; one Rage pattern at about 65 HP; the kill goes Control
 the arena is shut by "Thick Silk Vines" at x ~88; the route cuts them with Silkspear (quickcast, 4 silk), which the
 savestate cannot keep (the vines grow back on every load). From a person's session (2026-09-30): the trigger fired at
 hero x ~87.5 just after the cut; the boss emerges about 2 s after waking.
+
+FORUM (route S25, M2 W8): Hang_04 with the additive Hang_04_boss, whose "Battle Scene" (BattleScene) runs 14 waves
+(FORUM_WAVES, from the scene bundle; docs/facts/1.0.30000/forum.md) and is tracked by ssbot.train.gauntlet.GauntletTap
+instead of a boss Control FSM. The hero enters from Hang_06 on the right (community savestate p7_s3: x 53.24); the
+"Start Range" trigger (x 12.04-32.75) runs a short roar-and-pull cutscene and calls BattleScene.StartBattle, which
+closes the gates (x 10.5-14.0 and 49.0-53.2) and starts wave 0 0.75 s later. Helpers: 4 s after wave index 1 starts
+its "Call Ally" FSM sends ENTER FORUM to "Garmond Fighter" if PlayerData garmondAidForumBattle, else to "Shakra
+Fighter" if shakraAidForumBattle (both reset by GameManager.LoadedFromMenu).
 """
 import time
 from dataclasses import dataclass, field, replace
@@ -17,6 +25,7 @@ from typing import Callable
 
 from ssbot.ipc.framing import mask
 from ssbot.ipc.oracle_link import OracleLink
+from ssbot.train.gauntlet import Wave
 
 R = mask("right")
 L = mask("left")
@@ -27,7 +36,7 @@ class Encounter:
     name: str
     scene: str
     savestate: str
-    boss_type: str                     # entity type_key of the boss
+    boss_type: str                     # entity type_key of the boss ("" for a gauntlet)
     control_fsm: str                   # its FSM whose transitions mark the fight
     dormant: tuple[str, ...]           # Control states before the trigger
     death_states: tuple[str, ...]      # Control states that mean the boss is dying (CLEAR)
@@ -35,6 +44,10 @@ class Encounter:
     timebox_s: float                   # STUCK after this long from the wake
     arena_x: tuple[float, float]       # walkable arena floor, for policies (x min, x max)
     floor_y: float
+    waves: tuple[Wave, ...] = ()       # a gauntlet's BattleScene waves (ssbot.train.gauntlet); () for a boss
+    battle_name: str = ""              # its BattleScene GameObject (STATE room.battles[].name)
+    post_clear_s: float = 1.0          # the episode goes on this long after the kill (late hazards; a lethal hit
+                                       # there is still a death: ssbot.train.episode)
 
 
 @dataclass
@@ -125,4 +138,75 @@ BELL_BEAST = Encounter(
 # slot (the intro cuts the vines with it), saved by the game (probes/kin_excite_forum --setup-bb).
 BELL_BEAST_REAPER = replace(BELL_BEAST, name="BellBeastReaper", savestate="kn_bb_reaper")
 
-ENCOUNTERS = {e.name: e for e in (BELL_BEAST, BELL_BEAST_REAPER)}
+
+# Hang_04_boss "Battle Scene".waves in order (UnityPy dump of the 1.0.30000 scene bundle, BattleWave fields and the
+# HealthManager children; hp: Song Reed 55, Song Pilgrim 01 38, Song Pilgrim 03 55, Pilgrim 03 Song 35, Song Handmaiden
+# 48, Song Administrator 60, Song Pilgrim Maestro 65, Song Heavy Sentry 230). remaining_to_end 2 / 1 lets the next wave
+# start while enemies of this one still live (waves 2, 4, 9).
+FORUM_WAVES = (
+    Wave(0, "Wave 1", 0.0, 0, ("Song Reed", "Song Pilgrim 01", "Song Pilgrim 03")),
+    Wave(1, "Wave 2 - Call Ally", 1.0, 0, ("Song Pilgrim 03 (2)", "Song Pilgrim 03 (3)")),
+    Wave(2, "Wave 3", 1.0, 2, ("Pilgrim 03 Song", "Song Reed (1)")),
+    Wave(3, "Wave 4", 0.5, 0, ("Song Handmaiden",)),
+    Wave(4, "Wave 5 - Song Admins", 1.0, 1, ("Song Administrator", "Song Administrator (1)")),
+    Wave(5, "Wave 6", 0.0, 0, ("Song Handmaiden",)),
+    Wave(6, "Wave 7 - Maestro x 2", 1.0, 0, ("Song Pilgrim Maestro", "Song Pilgrim Maestro (1)")),
+    Wave(7, "Wave 8 - Heavy Sentry", 1.5, 0, ("Song Heavy Sentry",)),
+    Wave(8, "Wave 9", 3.0, 0, ("Song Reed (2)", "Song Reed (3)", "Pilgrim 03 Song")),
+    Wave(9, "Wave 10", 1.0, 2, ("Song Pilgrim 03 (2)", "Pilgrim 03 Song", "Pilgrim 03 Song (1)")),
+    Wave(10, "Wave 11", 0.5, 0, ("Song Handmaiden",)),
+    Wave(11, "Wave 12", 1.0, 0, ("Pilgrim 03 Song (1)", "Song Administrator", "Song Administrator (1)")),
+    Wave(12, "Wave 13 - Maestro", 2.0, 0, ("Song Pilgrim Maestro", "Song Reed")),
+    Wave(13, "Wave 14 - Finale", 2.0, 0, ("Song Heavy Sentry (2)", "Song Heavy Sentry (3)")),
+)
+
+FORUM_START_X = 32.75          # right edge of the "Start Range" trigger box (x 12.04-32.75, y 0.95-25.04)
+
+
+def forum_intro(ctx: Ctx) -> int:
+    """Walk left from the Hang_06 side into the "Start Range" trigger, then wait out the roar-and-pull cutscene until
+    the battle has started (GauntletTap.wake_frame: room.battles started, or wave 0's enemies spawning). Returns the
+    battle-start frame."""
+    tap = ctx.tap
+
+    def inside(s: dict) -> bool:
+        # in the trigger, or the roar cutscene has taken control (it can stop her right at its edge)
+        x = s["hero"]["pos"][0]
+        return (tap.wake_frame is not None or x <= FORUM_START_X - 1.0
+                or (x <= FORUM_START_X + 1.0 and not s["hero"]["hero_accepting_input"]))
+
+    s = _walk_until(ctx, L, inside, timeout_s=10.0)
+    ctx.log.append({"walked_to_x": round(s["hero"]["pos"][0], 2), "f": s["f"]})
+    link = ctx.link
+    deadline = time.monotonic() + 15.0
+    last = link.frame
+    while tap.wake_frame is None and time.monotonic() < deadline:
+        s = link.wait_state(newer_than=last, timeout_s=1.0)
+        last = s["f"]
+        link.act(last + 2, 0, hold_frames=0)
+    if tap.wake_frame is None:
+        raise RuntimeError("intro: the Forum battle did not start")
+    ctx.log.append({"battle_start_f": tap.wake_frame, "how": tap.control})
+    return tap.wake_frame
+
+
+# After the last kill BattleScene.EndBattle runs FreezeMoment EnemyBattleEndSlow (GameManager.cs:5132: ramp to 0.25x
+# in 0.1 s, hold 1 s unscaled, back to 1x in 0.75 s: about 1.85 s of real time for 0.78 s of game time), then waits
+# 1 s + battleEndPause 2 s of game time before it sets hang04Battle and sends FORUM BATTLE END (BattleScene.cs:444):
+# about 4.1 s (245 frames) after the kill. The dying Clappers' bodies, rune slams and bombs still hurt meanwhile
+# (runs 20261002_223640 ep0 f808877 and 230325 f910457: body contacts 13 and 2 frames after the freeze), so the
+# episode runs 4.5 s past the kill. Complete gauntlets with the random data policy took 714-990 s (10 of 2026-10-02).
+FORUM = Encounter(
+    name="Forum", scene="Hang_04", savestate="fo_A", boss_type="", control_fsm="Control", dormant=(),
+    death_states=(), intro=forum_intro, timebox_s=1500.0, arena_x=(14.0, 49.0), floor_y=4.5677,
+    waves=FORUM_WAVES, battle_name="Battle Scene",   # gates' inner faces x 14.01 / 48.99; floor y: savestate p7_s3
+    post_clear_s=4.5)
+
+
+def forum_variant(arm: str) -> Encounter:
+    """FORUM on another savestate arm (fo_A, fo_B, fo_C, fo_A5; docs/facts/1.0.30000/forum.md)."""
+    return replace(FORUM, name=f"Forum_{arm}", savestate=f"fo_{arm}")
+
+
+ENCOUNTERS = {e.name: e for e in (BELL_BEAST, BELL_BEAST_REAPER, FORUM,
+                                  *(forum_variant(a) for a in ("A", "B", "C", "A5")))}

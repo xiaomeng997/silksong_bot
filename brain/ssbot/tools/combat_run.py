@@ -53,10 +53,10 @@ def git_rev() -> str | None:
 
 
 def make_policy(name: str, view: str = "oracle", run_dir: Path | None = None, instance: int = 0,
-                threads: int = 8, real_quit: float = 0.0, inject_hits: float = 0.0):
+                threads: int = 8, real_quit: float = 0.0, inject_hits: float = 0.0, gauntlet: bool = False):
     if name == "data":
-        from ssbot.train.data_policy import DataPolicy
-        return DataPolicy()
+        from ssbot.train.data_policy import DataPolicy, GauntletDataPolicy
+        return GauntletDataPolicy() if gauntlet else DataPolicy()
     if name == "planner":
         from ssbot.train.planner_policy import PlannerPolicy
         pol = PlannerPolicy(view=view, threads=threads, log_dir=run_dir, instance=instance, real_quit_p=real_quit)
@@ -68,14 +68,16 @@ def make_policy(name: str, view: str = "oracle", run_dir: Path | None = None, in
     raise SystemExit(f"unknown policy {name}")
 
 
-def mode_config(mode: str, seed: int):
+def mode_config(mode: str, seed: int, timebox_s: float | None = None):
+    """timebox_s overrides the encounter's (the Forum's default is 1500 s: complete gauntlets with the random data
+    policy took 714-990 s, 10 episodes of the runs of 2026-10-02, and the finale comes last)."""
     from ssbot.train.episode import EpisodeConfig
     if mode == "data":
         return EpisodeConfig(mode="data", seed=seed, hp=(1, 5), silk=(0, 9), dx=(-6.0, 2.0), facing="random",
-                             wait_frames=(0, 30))
+                             wait_frames=(0, 30), timebox_s=timebox_s)
     if mode == "eval":
         return EpisodeConfig(mode="eval", seed=seed, hp=None, silk=None, dx=(-3.0, 1.0), facing="random",
-                             wait_frames=(0, 30))
+                             wait_frames=(0, 30), timebox_s=timebox_s)
     raise SystemExit(f"unknown mode {mode}")
 
 
@@ -93,14 +95,15 @@ def worker(a: argparse.Namespace) -> int:
     from ssbot.probes.common import load_slot, stand_up
     from ssbot.record.recorder import Recorder
     from ssbot.train.encounters import ENCOUNTERS
-    from ssbot.train.episode import AttemptRecord, FightTap, run_episode
+    from ssbot.train.episode import AttemptRecord, make_tap, run_episode
 
     enc = ENCOUNTERS[a.encounter]
     run_dir = Path(a.run_dir)
     out = (run_dir / f"attempts_i{a.instance}.jsonl").open("a", encoding="utf-8", newline="\n")
     link = OracleLink(instance=a.instance, connect_timeout_s=120)
-    tap = FightTap(link, enc)
-    policy = make_policy(a.policy, a.view, run_dir, a.instance, a.threads, a.real_quit, a.inject_hits)
+    tap = make_tap(link, enc)
+    policy = make_policy(a.policy, a.view, run_dir, a.instance, a.threads, a.real_quit, a.inject_hits,
+                         gauntlet=bool(enc.waves))
     if hasattr(policy, "attach"):
         policy.attach(link)
     if hasattr(policy, "warmup"):
@@ -150,7 +153,7 @@ def worker(a: argparse.Namespace) -> int:
             rec = AttemptRecord(unit=enc.name, stage="TRAIN", profile="TRAIN" if a.view == "oracle" else "SIM_FINAL",
                                 build="1.0.30000", code_rev=rev,
                                 config_fp=fp, start_kind="savestate", mode=a.mode, seed=seed)
-            run_episode(link, enc, tap, policy, mode_config(a.mode, seed), rec)
+            run_episode(link, enc, tap, policy, mode_config(a.mode, seed, a.timebox or None), rec)
             d = asdict(rec)
             d["instance"] = a.instance
             d["episode"] = k
@@ -159,7 +162,13 @@ def worker(a: argparse.Namespace) -> int:
             out.write(json.dumps(d) + "\n")
             out.flush()
             counts[rec.outcome] += 1
-            atk = {s: n for s, n in rec.attacks.items() if s in ("Charge Antic", "Leap Out", "Burst Antic", "Rage Antic")}
+            if rec.gauntlet is not None:
+                g = rec.gauntlet
+                atk = {"wave": g.get("wave_reached"), "kills": (g.get("kills") or {}).get("n"),
+                       "allies": sorted(g.get("allies") or {})}
+            else:
+                atk = {s: n for s, n in rec.attacks.items()
+                       if s in ("Charge Antic", "Leap Out", "Burst Antic", "Rage Antic")}
             print(f"[i{a.instance} ep{k}] {rec.outcome:12s} {rec.ingame_s or 0:6.1f}s hits {rec.hits} wd {rec.would_die} "
                   f"boss_hp {rec.boss_hp_end} {atk} {rec.reason or ''}", flush=True)
             k += 1
@@ -198,7 +207,7 @@ def run(a: argparse.Namespace) -> int:
                str(run_dir), "--encounter", a.encounter, "--mode", a.mode, "--policy", a.policy, "--episodes",
                str(a.episodes), "--hours", str(a.hours or 0), "--rotate", str(a.rotate), "--seed", str(a.seed),
                "--view", a.view, "--threads", str(a.threads), "--real-quit", str(a.real_quit),
-               "--inject-hits", str(a.inject_hits)]
+               "--inject-hits", str(a.inject_hits), "--timebox", str(a.timebox or 0)]
         if a.no_record:
             cmd.append("--no-record")
         log = (run_dir / f"worker_i{i}.log").open("w", encoding="utf-8")
@@ -315,6 +324,8 @@ def main(argv: list[str] | None = None) -> int:
         p.add_argument("--no-record", action="store_true")
         p.add_argument("--view", choices=("oracle", "degraded", "degraded_dust", "degraded_tell"), default="oracle")
         p.add_argument("--threads", type=int, default=8)
+        p.add_argument("--timebox", type=float, default=0.0,
+                       help="seconds from the wake before STUCK (0: the encounter's timebox_s)")
         p.add_argument("--real-quit", type=float, default=0.0,
                        help="probability that a confirmed supervisor pause quits for real (menu, Yes, main menu), "
                             "then the worker reloads sandbox slot 1 and the savestate")

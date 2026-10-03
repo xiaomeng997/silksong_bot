@@ -70,6 +70,19 @@ class Family:
     path: np.ndarray | None = None                  # boss_path rows (t, n, x_min, x_max, y_min, y_max, x_mean, y_mean)
 
 
+def _support_status(d: dict) -> dict:
+    """validation.ok / support_conservative of a behaviour table (tables built before support_conservative existed
+    carry only ok); warns when the support is not shown to cover unseen fights."""
+    v = (d.get("coverage") or {}).get("validation") or {}
+    ok = bool(v.get("support_conservative", v.get("ok", True)))
+    note = v.get("support_note")
+    if not ok:
+        import warnings
+        warnings.warn(f"behaviour table {d.get('enemy')}: support not conservative ({note or 'validation failed'})",
+                      stacklevel=3)
+    return {"support_ok": ok, "support_note": note}
+
+
 @dataclass(slots=True)
 class BossModel:
     enemy: str
@@ -88,6 +101,9 @@ class BossModel:
     keys: frozenset[str]
     p_burst: dict[str, float] = field(default_factory=dict)   # Bell Burst? -> Burst Pos by phase (probability only)
     rage_hp: float | None = None                    # Rage? -> Rage Pos at the first P1 decision with hp <= this
+    support_ok: bool = True                         # the table's validation.support_conservative (a table built
+    support_note: str | None = None                 # with --allow-failed-validation or not covering held-out fights
+                                                    # warns at load: inflate it or keep it out of the planner)
 
     @classmethod
     def load(cls, enemy: str = "BellBeast", table: Path | str | None = None, npz: Path | str | None = None
@@ -130,7 +146,8 @@ class BossModel:
                    spec=boss, states=states, families=families, attack_starts=dict(spec_d["attack_starts"]),
                    decision_states=tuple(spec_d["decision_states"]), dir_states=dict(spec_d["dir_states"]),
                    death_states=tuple(deaths), phase_marks=dict(spec_d.get("phase_marks") or {}),
-                   initial_phase="P1", keys=frozenset(keys), p_burst=_burst_by_phase(d), rage_hp=_rage_hp(d))
+                   initial_phase="P1", keys=frozenset(keys), p_burst=_burst_by_phase(d), rage_hp=_rage_hp(d),
+                   **_support_status(d))
 
     # ---- lookups ------------------------------------------------------------------------------------------------
 

@@ -17,7 +17,10 @@ namespace SsOracle.Entities
             EntityRegistry.Install(harmony);
             FsmTap.Install(harmony);
             Export.FrameExporter.Register(new EntityExporter());
+            AllyWatch.Install(harmony);
+            Export.FrameExporter.Register(new AllyExporter());
 
+            SceneManager.sceneUnloaded += _ => AllyWatch.SceneChanged();
             SceneManager.sceneUnloaded += _ => EntityRegistry.MarkSceneChanged();
             SceneManager.activeSceneChanged += (_, __) => EntityRegistry.MarkSceneChanged();
 
