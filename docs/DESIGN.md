@@ -808,7 +808,8 @@ every frame:
   - Q1–Q6 和死人开关解除，只保留 PERMADEATH 和崩溃检测。
   - HUD 切换到结局皮肤模式。
   - 唯一允许的动作是交互目录里脚本化的 BIND（绕过战斗 Bind 测试；永不按 Needolin）。
-  - 之后 `neutral()`，零输入，直到看到 MAIN_MENU。零输入覆盖所有来源：跳过监听 legacy `Input.anyKeyDown`（含鼠标）和手柄，OS 级按键同样会跳过当前子序列 [m0 §2.1]。
+  - 之后 `neutral()`，零输入，直到片尾链需要按键的画面。零输入覆盖所有来源：跳过监听 legacy `Input.anyKeyDown`（含鼠标）和手柄，OS 级按键同样会跳过当前子序列 [m0 §2.1]。
+  - **修订（2026-10-03，四成就调研 research/four_achievements.md §3.5，待实测）：片尾链必须按键才会走完。** 感谢画面（结局 A、D、E）和完成度画面都设了 `waitForSkip`，不按就永远停住：完成度画面不出现，`CheckCompletionAchievements`（完成度画面出现 5.75 s 后运行）永远不会被调用，成就不会推送。规则：感谢画面出现"继续"提示后按一次；完成度画面上等 Player.log 出现各成就的 `upload complete`（或超时）后按一次；用一个在主菜单上无害的键；MAIN_MENU 出现后不再按。早按没有风险（7.0 s / 9.0 s 前的按键被忽略）。结局预演必须覆盖这一段。
   - 然后停机：Player.log 中 STEEL_SOUL 和 SPEEDRUN_1 都要有 "Steam achievement X (a/b) upload complete"（只有 "Pushing achievement" 不算）[m0:N27]，再请你在 Steam 个人资料页确认两个成就，确认前不动存档。不以槽位时间判断成败：片尾后的保存会把检查之后的时间也 flush 进去 [m0:C18]。
 - **结局预演：** GMS → Bind → 片尾 → 主菜单，在训练副本上用最终 sink 和纯屏幕 MenuDriver 预演 ≥ 5 次（G3 的一部分）。
 
