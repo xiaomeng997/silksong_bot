@@ -37,12 +37,13 @@ from ssbot.knowledge.kinematics import (  # Forum loadout (abilities)
     CLING_CD, DASH_CD, DASH_T, DQ, FALL_T, GL_CD, HARD, M_DASH, M_GLIDE, M_HARD_LAND, M_RPR_DS, M_SPRINT, P_ABIL,
     P_ADASH_T, P_AFC0, P_AFC1, P_AFC_T, P_ASPR_SPEED, P_ASPR_T, P_DASH_CD, P_DASH_SPEED, P_DASH_T, P_DQ, P_GL_AACC,
     P_GL_ACC, P_GL_ANTIC, P_GL_BRAY, P_GL_BVX, P_GL_CD, P_GL_DEC, P_GL_DEFLATE, P_GL_GRAY, P_GL_INFLATE,
-    P_GL_START_VY, P_GL_VMAX, P_GL_VY, P_GL_VYACC, P_HARD_FALL, P_HARD_LAND, P_RPR_ACC, P_RPR_ADEC, P_RPR_ADEC_Y,
-    P_RPR_ANTIC, P_RPR_DEC, P_RPR_FALL, P_RPR_FALL2, P_RPR_SDEC, P_RPR_SLASH, P_RPR_SPEED, P_RPR_VMAX, P_SKID_DEC,
+    P_GL_START_VY, P_GL_VMAX, P_GL_VY, P_GL_VYACC, P_HARD_FALL, P_HARD_LAND, P_RPR_ADEC,
+    P_RPR_ANTIC, P_RPR_FALL, P_RPR_FALL2, P_RPR_SDEC, P_RPR_SLASH, P_RPR_SPEED, P_SKID_DEC,
     P_SKID_T, P_SPR_ACC, P_SPR_SPEED, P_W_CCD, P_W_CDECEL, P_W_CONTACT, P_W_CVMIN, P_W_RAY, P_W_RAY_B, P_W_SHOVE,
     P_W_SLASH_VMIN, P_W_STICK, P_W_STICKY, P_W_ACCEL, P_W_TRAY, P_WJ_CHAIN, P_WJ_JUMPED, P_WJ_LONG, P_WJ_SHORT,
     P_WJ_SPEED, PREV_GS, SP_X, UNSTICK, WJ_CHAIN, WJ_DIR, WJ_V, WJQ, WLOCK, WSIDE, WSLASH, WSTICK, WTOUCH, WCON,
-    M_SCRAMBLE, P_SCR_ANTIC, P_SCR_SPEED, P_SCR_FORCE, P_SCR_FORCE_H, P_SCR_END_VY, P_SCR_END_DEC, P_SCR_END_T)
+    M_SCRAMBLE, P_SCR_ANTIC, P_SCR_SPEED, P_SCR_FORCE, P_SCR_FORCE_H, P_SCR_END_VY, P_SCR_END_DEC, P_SCR_END_T,
+    P_SCR_ROOF_RAY, P_SCR_ROOF_T, P_SCR_DETACH)
 
 # world freeze presets in start order (kinematics.WF_ORDER): event bit, rampDown, wait, rampUp, target
 _WF = np.array([[float(b), *FREEZE_PRESETS[b]] for b in WF_ORDER])
@@ -306,6 +307,23 @@ def vray(x0, y0, length, TT):
             j = TT_H + 3 * np.int64(TT[ids + q])
             d = y0 - TT[j]
             if -EPS <= d <= length and TT[j + 1] <= x0 <= TT[j + 2]:
+                return True
+    return False
+
+
+@njit(cache=True, error_model="numpy")
+def roof_ray(x0, top, length, TT):
+    """CharacterBumpCheck.CheckForBump(top)'s wall ray: from (x0, top - 0.1) up 0.1 + `length` meets a horizontal
+    segment."""
+    if TT[0] == 0:
+        return False
+    b0, b1 = _buckets(x0 - 0.01, x0 + 0.01, TT)
+    st, ids = np.int64(TT[5]), np.int64(TT[6])
+    for b in range(b0, b1 + 1):
+        for q in range(np.int64(TT[st + b]), np.int64(TT[st + b + 1])):
+            j = TT_H + 3 * np.int64(TT[ids + q])
+            d = TT[j] - top
+            if -0.1 <= d <= length and TT[j + 1] <= x0 <= TT[j + 2]:
                 return True
     return False
 
@@ -707,11 +725,9 @@ def forum_fixed(x, vx, vy, normal, P, TT):
             vx = umbrella_x(vx, pm, P[P_GL_ACC], P[P_GL_DEC], P[P_GL_VMAX])
     elif mode == M_RPR_DS:
         ph = x[PHASE]
-        if ph == 0:
-            vx = decel(vx, P[P_RPR_ADEC])
+        if ph == 0:                       # DecelerateV2 only: the state's DecelerateXY and UmbrellaMotionX are
+            vx = decel(vx, P[P_RPR_ADEC])   # disabled in the template (actionEnabled false)
             vy = decel(vy, P[P_RPR_ADEC])
-            vy = decel(vy, P[P_RPR_ADEC_Y])
-            vx = umbrella_x(vx, pm, P[P_RPR_ACC], P[P_RPR_DEC], P[P_RPR_VMAX])
         elif ph == 1:
             vx = decel(vx, P[P_RPR_SDEC])
             vy = decel(vy, P[P_RPR_SDEC])
@@ -721,12 +737,19 @@ def forum_fixed(x, vx, vy, normal, P, TT):
     elif mode == M_SCRAMBLE:
         ph = x[PHASE]
         vx = 0.0
-        if ph == 0:
-            vy = decel(vy, 0.85)
-        elif ph == 1:                     # AddForce2d down (mass 1), weaker while the dash is held
+        if ph == 1:                       # AddForce2d down (mass 1), weaker while the dash is held
             vy = vy - (P[P_SCR_FORCE_H] if (pm & B_DASH) != 0 else P[P_SCR_FORCE]) * P[P_FDT]
-        else:
+        elif ph == 2:
             vy = decel(vy, P[P_SCR_END_DEC])
+        if ph == 1 or ph == 2:
+            # HeroCheckForBumpVertical (after the force / decel in the action list): the top wall ray, as long as
+            # the velocity at the step's start covers, sends ROOF: Hit Roof (gravity back this step), Hit Roof Soft
+            side = x[SP_X]
+            reach = P[P_SCR_ROOF_RAY] + abs(x[VY]) * P[P_FDT]
+            if roof_ray(x[PX] + side * (P[P_HW] - 0.2), x[PY] + P[P_HEAD], reach, TT):
+                x[PHASE] = 3.0
+                x[MODE_T] = 0.0
+                grav_on(x)
     if x[DQ] >= 0:
         x[DQ] += 1.0
     return vx, vy
@@ -967,28 +990,32 @@ def forum_after_queue(x, mask, pressed, mode0, dt, P, TT):
             x[PHASE] = 3.0
             x[MODE_T] = 0.0
         elif ph == 3 and ge32(x[MODE_T], P[P_RPR_FALL2]):
-            regain(x, mask)               # End (FinishDownspike: the downspike recovery starts)
-            x[DS_REC] = 0.0
+            regain(x, mask)               # End (FinishDownspike: the downspike recovery starts, ResetGravity,
+            x[DS_REC] = 0.0               # vy = -10)
+            x[GS] = 1.0
+            x[VY] = P[P_DS_ENDVY]
         if x[MODE] == M_RPR_DS and x[PHASE] >= 2 and (pressed & B_DASH) != 0 and (ab & AB_DASH) != 0:
             regain(x, mask)               # Rpr DashCancel
     elif mode == M_SCRAMBLE:
         ph = x[PHASE]
         side = x[SP_X]
         if ph == 0 and ge32(x[MODE_T], P[P_SCR_ANTIC]):
-            x[PHASE] = 1.0                # Start Scramble: vy up
-            x[MODE_T] = 0.0
-            x[VY] = P[P_SCR_SPEED]
-        elif ph >= 1 and (pressed & B_JUMP) != 0:
+            x[PHASE] = 1.0                # Start Scramble: vy up; Scramble Up's AddForce2d OnEnter adds to the next
+            x[MODE_T] = 0.0               # step's force (VY carries it from here)
+            x[VY] = P[P_SCR_SPEED] - (P[P_SCR_FORCE_H] if (mask & B_DASH) != 0 else P[P_SCR_FORCE]) * P[P_FDT]
+        elif (ph == 1 or ph == 2) and (pressed & B_JUMP) != 0:
             regain(x, mask)               # Wall Jump: SetStartWithWallJump, control back
             x[WTOUCH] = side
             do_wall_jump(x, P)
         elif ph == 1 and x[VY] < P[P_SCR_END_VY]:
-            x[PHASE] = 2.0                # Scramble End
+            x[PHASE] = 2.0                # Scramble End (DecelerateXY OnEnter)
             x[MODE_T] = 0.0
+            x[VY] = decel(x[VY], P[P_SCR_END_DEC])
         elif ph == 1 and not facing_near_wall(rend_x(x), rend_y(x), side, P[P_W_RAY], TT):
             regain(x, mask)               # MANTLE over the top (the Mantle FSM is not modelled)
         elif ph == 2 and ge32(x[MODE_T], P[P_SCR_END_T]):
-            regain(x, mask)               # To Wall Slide: control back, sliding from the touch
+            regain(x, mask)               # To Wall Slide: control back, sliding from the touch; brakeOnExit: vy 0
+            x[VY] = 0.0
             x[WTOUCH] = side
             begin_wallslide(x, False, 0)
         elif ph == 2 and (pressed & B_DASH) != 0 and ((side < 0 and (mask & B_LEFT) != 0) or
@@ -997,6 +1024,19 @@ def forum_after_queue(x, mask, pressed, mode0, dt, P, TT):
             x[MODE_T] = 0.0
             x[VX] = 0.0
             x[VY] = 0.0
+        elif ph == 3 and ge32(x[MODE_T], P[P_SCR_ROOF_T]):
+            # Detach: Translate x by scale.x * 0.2 (scale.x = -facing) moves the transform from where it is
+            # drawn, and the body follows it (the logged box jumps to the interpolated height), then Return Control
+            # (gravity stays on, no wall slide)
+            nx = rend_x(x) - side * P[P_SCR_DETACH]
+            ny = rend_y(x)
+            x[PX] = nx
+            x[QX] = nx
+            x[SX] = nx
+            x[PY] = ny
+            x[QY] = ny
+            x[SY] = ny
+            regain(x, mask)
     elif mode == M_HARD_LAND:
         if gt32(x[MODE_T], P[P_HARD_LAND]):
             x[MODE] = M_NORMAL
@@ -1047,7 +1087,8 @@ def forum_attack(x, mask, P):
         x[MODE] = M_RPR_DS
         x[PHASE] = 0.0
         x[MODE_T] = 0.0
-        x[VX] = umbrella_x(x[VX], mask, P[P_RPR_ACC], P[P_RPR_DEC], P[P_RPR_VMAX])
+        x[VX] = decel(x[VX], P[P_RPR_ADEC])   # Rpr Downslash Antic OnEnter: DecelerateV2 once
+        x[VY] = decel(x[VY], P[P_RPR_ADEC])
         return True
     return False
 

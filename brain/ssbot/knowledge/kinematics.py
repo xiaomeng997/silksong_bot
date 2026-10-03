@@ -438,13 +438,13 @@ class HeroParams:
     glide_ground_ray: float = 1.1      # IsApproachingSolidGround: JUMP_ABILITY_GROUND_RAY_LENGTH + 0.1
     glide_bump_ray: float = 0.7        # "Wall Bump Distance"
     glide_bump_vx: float = 6.0         # Bump L / R
-    rpr_antic_t: float = 0.1           # v3 Down Slash Antic clip (fit)
-    rpr_slash_t: float = 0.0833        # v3 Down Slash to its trigger frame (fit)
-    rpr_fall_t: float = 0.1667         # rest of v3 Down Slash (fit)
-    rpr_fall2_t: float = 0.1           # Fall 2 (fit)
-    rpr_antic_decel: float = 0.85      # Rpr Downslash Antic DecelerateV2
-    rpr_antic_decel_y: float = 0.8     # ... DecelerateXY y
-    rpr_accel: float = 3.0             # ... UmbrellaMotionX accel / decel / max
+    rpr_antic_t: float = 0.1583        # v3 Down Slash Antic clip (fit: 10 frames)
+    rpr_slash_t: float = 0.175         # v3 Down Slash to its trigger frame (fit: the x0.7 decay lasts 11 frames)
+    rpr_fall_t: float = 0.1583         # rest of v3 Down Slash (fit: control back 11 frames after the trigger)
+    rpr_fall2_t: float = 0.0           # Fall 2 (its watch sees the clip complete: ends the next frame)
+    rpr_antic_decel: float = 0.85      # Rpr Downslash Antic DecelerateV2 (OnEnter and every step)
+    rpr_antic_decel_y: float = 0.8     # unused: the antic's DecelerateXY is disabled in the template
+    rpr_accel: float = 3.0             # unused: the antic's UmbrellaMotionX is disabled in the template
     rpr_decel: float = 1.0
     rpr_vmax: float = 12.0
     rpr_speed: float = 30.0            # Rpr Downslash SetVelocityByScale (forward, -down)
@@ -452,13 +452,17 @@ class HeroParams:
     hard_fall_time: float = 0.5        # BIG_FALL_TIME
     hard_land_time: float = 0.67       # HARD_LANDING_TIME
     # Wall Scramble FSM (hornet_wall_scramble: a dash while sliding and holding towards the wall climbs it)
-    scr_antic_t: float = 0.1           # Wall Scramble Antic clip (fit)
+    scr_antic_t: float = 0.0583        # Wall Scramble Antic clip (fit: 4 frames)
     scr_speed: float = 22.0            # Start Scramble: vy (30 with Quickening)
     scr_force: float = 72.0            # Scramble Up: AddForce2d down per step (mass 1), ...
     scr_force_held: float = 48.0       # ... while the dash is still held
     scr_end_vy: float = 0.5            # ... until vy < 0.5
     scr_end_decel: float = 0.8         # Scramble End: DecelerateXY y
-    scr_end_t: float = 0.1             # Wall Scramble End clip (fit)
+    scr_end_t: float = 0.075           # Wall Scramble End clip (fit: 5 frames)
+    scr_roof_ray: float = 0.03         # Scramble Up / End: HeroCheckForBumpVertical up, 0.03 + |vy| fdt above the box
+    scr_roof_t: float = 0.0917         # Hit Roof Soft: the End clip from a FixedUpdate entry (fit: control back 5
+    #                                    frames after the roof step)
+    scr_detach: float = 0.2            # Detach: Translate x by scale.x * 0.2 (away from the wall)
     jump_heights: list = field(default_factory=list)   # per jump hold length: logged and model apex spread
     scenes: dict = field(default_factory=dict)       # scene -> {"enable": [go names], "disable": [go names]}
     source: dict = field(default_factory=dict)       # key -> provenance note
@@ -487,7 +491,8 @@ class HeroParams:
               "glide_bump_ray", "glide_bump_vx", "rpr_antic_t", "rpr_slash_t", "rpr_fall_t", "rpr_fall2_t",
               "rpr_antic_decel", "rpr_antic_decel_y", "rpr_accel", "rpr_decel", "rpr_vmax", "rpr_speed",
               "rpr_slash_decel", "hard_fall_time", "hard_land_time", "scr_antic_t", "scr_speed", "scr_force",
-              "scr_force_held", "scr_end_vy", "scr_end_decel", "scr_end_t")
+              "scr_force_held", "scr_end_vy", "scr_end_decel", "scr_end_t", "scr_roof_ray", "scr_roof_t",
+              "scr_detach")
 
     def vector(self) -> np.ndarray:
         return np.array([float(getattr(self, k)) for k in self.VECTOR], dtype=np.float64)
@@ -559,8 +564,9 @@ class HeroParams:
  P_SKID_T, P_GL_ANTIC, P_GL_INFLATE, P_GL_DEFLATE, P_GL_AACC, P_GL_ACC, P_GL_DEC, P_GL_VMAX, P_GL_VY, P_GL_VYACC,
  P_GL_START_VY, P_GL_CD, P_GL_GRAY, P_GL_BRAY, P_GL_BVX, P_RPR_ANTIC, P_RPR_SLASH, P_RPR_FALL, P_RPR_FALL2,
  P_RPR_ADEC, P_RPR_ADEC_Y, P_RPR_ACC, P_RPR_DEC, P_RPR_VMAX, P_RPR_SPEED, P_RPR_SDEC, P_HARD_FALL, P_HARD_LAND,
- P_SCR_ANTIC, P_SCR_SPEED, P_SCR_FORCE, P_SCR_FORCE_H, P_SCR_END_VY, P_SCR_END_DEC, P_SCR_END_T,
- NP) = range(134)
+ P_SCR_ANTIC, P_SCR_SPEED, P_SCR_FORCE, P_SCR_FORCE_H, P_SCR_END_VY, P_SCR_END_DEC, P_SCR_END_T, P_SCR_ROOF_RAY,
+ P_SCR_ROOF_T, P_SCR_DETACH,
+ NP) = range(137)
 assert NP == len(HeroParams.VECTOR)
 
 
@@ -1427,8 +1433,8 @@ _SCALED_TIMERS = ("P_ATK_DUR", "P_ATK_CD", "P_DS_ANTIC", "P_DS_REC", "P_DS_LREC"
                   # Forum loadout: the animation-timed FSM states, the sprint wait, the cling cooldown and hard landing
                   # (scaled time against a threshold, as the above; unused while abilities is 0)
                   "P_GL_ANTIC", "P_GL_INFLATE", "P_GL_DEFLATE", "P_RPR_ANTIC", "P_RPR_SLASH", "P_RPR_FALL",
-                  "P_RPR_FALL2", "P_SCR_ANTIC", "P_SCR_END_T", "P_ASPR_T", "P_SKID_T", "P_W_CCD", "P_W_STICK",
-                  "P_HARD_LAND")
+                  "P_RPR_FALL2", "P_SCR_ANTIC", "P_SCR_END_T", "P_SCR_ROOF_T", "P_ASPR_T", "P_SKID_T", "P_W_CCD",
+                  "P_W_STICK", "P_HARD_LAND")
 
 
 def _variant_rows(params: HeroParams, variants: tuple[Variant, ...]
@@ -2230,14 +2236,35 @@ class ForumRows:
         elif md == M_SPRINT:
             ph = float(SPRINT_CLIPS.get(clip, pr["ph"] if pr and pmd == M_SPRINT else 0))
         elif md == M_RPR_DS:
-            ph = float(RPR_CLIPS.get(clip, max(pr["ph"], 2.0) if pr and pmd == M_RPR_DS else 0))
+            # the slash, its fall and Fall 2 all show (or follow) "v3 Down Slash": past the clip's onset the phase
+            # advances on the fitted thresholds, as the model's
+            cph = RPR_CLIPS.get(clip)
+            ph = 0.0 if cph == 0 else (pr["ph"] if pr and pmd == M_RPR_DS and pr["ph"] >= 1 else
+                                       (1.0 if cph == 1 else 2.0))
         elif md == M_SCRAMBLE:
             ph = float(SCRAMBLE_CLIPS.get(clip, pr["ph"] if pr and pmd == M_SCRAMBLE else 0))
+            if ph == 2 and pr and pmd == M_SCRAMBLE:
+                if pr["ph"] in (2.0, 3.0):
+                    ph = pr["ph"]
+                elif pr["ph"] == 1 and fs > 0:
+                    # Scramble End (vy < 0.5 after a step, DecelerateXY OnEnter) or Hit Roof Soft (the roof ray
+                    # in the step: gravity back in it): whichever velocity rule the logged vy fits
+                    v0 = float(pr["vy"]) - (p.scr_force_held if pr["mask"] & B_DASH else p.scr_force) * p.fdt
+                    vy_log = float(r["vel"][1]) if r.get("vel") is not None else v0 * p.scr_end_decel
+                    roof = v0 - p.gravity * p.fdt
+                    ph = 3.0 if abs(vy_log - roof) < abs(vy_log - v0 * p.scr_end_decel) else 2.0
         if md in (M_GLIDE, M_SPRINT, M_RPR_DS, M_SCRAMBLE):
             if pr and pmd == md and pr["ph"] == ph:
                 self.ph_t = np.float32(self.ph_t + dt)
+            elif md == M_SCRAMBLE and ph == 3:
+                self.ph_t = dt                # entered in a FixedUpdate: the entry frame's Update counts
             else:
                 self.ph_t = np.float32(0.0)
+            if md == M_RPR_DS and pr and pmd == md and pr["ph"] == ph:
+                for k, lim in ((1.0, p.rpr_slash_t), (2.0, p.rpr_fall_t)):
+                    if ph == k and self.ph_t >= np.float32(lim):
+                        ph, self.ph_t = k + 1.0, np.float32(0.0)
+                        break
             S[PHASE] = ph
             S[MODE_T] = float(self.ph_t)
             if md == M_GLIDE:
@@ -2245,7 +2272,10 @@ class ForumRows:
             elif md == M_RPR_DS:
                 S[GS] = 0.0 if ph < 2 else 1.0
             elif md == M_SCRAMBLE:
-                S[GS] = 0.0
+                S[GS] = 1.0 if ph == 3 else 0.0
+                if ph == 1 and not (pr and pmd == md and pr["ph"] == 1) and "mask" in r:
+                    # Start Scramble's frame: Scramble Up's AddForce2d OnEnter is pending for the next step
+                    S[VY] -= (p.scr_force_held if r["mask"] & B_DASH else p.scr_force) * p.fdt
             else:
                 S[GS] = 1.0
         S[SP_X] = face * (p.air_sprint_speed if ph <= 1 else p.sprint_speed) if md == M_SPRINT else \
@@ -2275,7 +2305,8 @@ class ForumRows:
         S[WCON] = (1.0 if ground else 0.0) + (2.0 if (wall is not None and wall != 0) or sliding else 0.0)
         S[FALL_T] = p.hard_fall_time + 0.01 if S[HARD] > 0 else 0.0
         self.prev = {"sliding": sliding, "cling": cling, "jumping": jumping, "ground": ground,
-                     "wall": bool(wall) if wall is not None else sliding, "md": md, "ph": ph}
+                     "wall": bool(wall) if wall is not None else sliding, "md": md, "ph": ph,
+                     "vy": float(r["vel"][1]) if r.get("vel") is not None else 0.0, "mask": int(r.get("mask", 0))}
 
 
 def _neutral_forum_rows(S: np.ndarray) -> None:
@@ -2471,7 +2502,7 @@ def state_table(tr: Trace, params: HeroParams, modes: np.ndarray | None = None,
         for i in range(n):
             r = {"dt": float(tr.dt[i]), "fs": int(tr.fs[i]), "facing": int(tr.facing[i]),
                  "wall": int(tr.wall[i]) if tr.wall is not None else None, "clip": tr.clips[tr.clip[i]],
-                 "tm": tr.tm[i] if tr.tm is not None else None}
+                 "tm": tr.tm[i] if tr.tm is not None else None, "mask": int(tr.mask[i]), "vel": tr.vel[i]}
             fr.push(S[:, i], r, int(modes[i]), lambda name: bool(fls[name][i]))
     _apply_exported(tr, S, md, params)
     return S
