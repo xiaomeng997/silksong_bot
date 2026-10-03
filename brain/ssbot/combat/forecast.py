@@ -89,6 +89,13 @@ DROP_BELL = "BoneBeast DropBell"
 # the exact path's time slack: a hit lands in the physics step after the recorded position (fixture hit 62131: the bell
 # 0.11 u short of the hurtbox in the hit frame's STATE), and hit-stop frames still step (game time vs steps, 0.37 u)
 DET_SLACK_S = (-0.04, -0.02, 0.0, 0.02, 0.04)
+# the vision view's bells on tracks: their time error is the estimate's (the launch / drop time from many detections and
+# the 50 Hz step's phase), not the oracle's step-after-the-record: a finer and narrower slack is both tighter and more
+# exact. Attack bells (6 recorded fights of 20261002_171806, noise seed 1, 6,118 samples 0-0.8 s ahead): nearest-sample
+# centre error max 0.40 u and 3.2 % beyond the contact skin with DET_SLACK_S, max 0.24 u and 0 % with these; drop bells
+# (4,407 samples): 10.5 % -> 3.0 % beyond the skin (the rest: tinked or sinking bells far from the floor's reach)
+VE_DET_SLACK_S = (-0.02, -0.01, 0.0, 0.01, 0.02)
+VE_SLACK = VE_DET_SLACK_S if os.environ.get("SSBOT_VE_SLACK", "1") != "0" else None   # 0: DET_SLACK_S (the A/B)
 # contact skin: held-out hit i3_002 f 603438 registered with the bell circle 0.004 u short of the recorded hurtbox
 # (Box2D contact offset and polygon skin); the logged unions carry such slack implicitly
 DET_SKIN_U = 0.1
@@ -181,6 +188,7 @@ class DetBell(NamedTuple):
     sides: tuple | None = None
     skin: float = 0.0
     life: float | None = None      # path time its collider goes off (an attack bell's End Timer), None: never
+    slack: tuple | None = None     # its time slack (None: DET_SLACK_S)
 
     def branch_sides(self) -> tuple:
         if self.sides is not None:
@@ -308,7 +316,7 @@ class Forecast:
             if exclude is not None and tk_.endswith(exclude) or only is not None and tk_ != only:
                 continue
             for sd in d.branch_sides():
-                for dt in DET_SLACK_S:
+                for dt in (d.slack or DET_SLACK_S):
                     by_r.setdefault(d.sp.r + DET_SKIN_U + d.skin, []).append(self._bell_path(j, sd, dt, tk))
         if not by_r:
             return out
@@ -362,7 +370,7 @@ class Forecast:
             hx, hy = hx + self.fc.comfort[0], hy + self.fc.comfort[1]
         rr = sp.r + DET_SKIN_U + self.det[j].skin
         out = np.zeros(x.shape, bool)
-        for dt in DET_SLACK_S:
+        for dt in (self.det[j].slack or DET_SLACK_S):
             cx, cy, ok = self._bell_path(j, d, dt, tk, (t_hit, d))
             dx = np.maximum(np.abs(x - cx) - hx, 0.0)
             dy = np.maximum(np.abs(y - cy) - hy, 0.0)
@@ -1418,7 +1426,7 @@ class Forecaster:
             dt_ = self.drop_tracks
             tk_ = dt_.type_of.get(iid, DROP_BELL)
             det.append(DetBell(dt_.spec, est.x, dt_.y0, dt_.vx0, dt_.vy0, 0, None, tk_, t0=self.t - est.t_drop,
-                               sides=(est.side,) if est.side else (1, -1), skin=SKIN_Z * est.sx))
+                               sides=(est.side,) if est.side else (1, -1), skin=SKIN_Z * est.sx, slack=VE_SLACK))
             return True
         if not DET_REPLACE or self._ws is None:
             return False
@@ -1461,7 +1469,7 @@ class Forecaster:
             for sd in ((e.side,) if e.side else (1, -1)):
                 x0, y0, vx0, vy0 = at.path_args(e, sd)
                 det.append(DetBell(at.spec, x0, y0, vx0, vy0, 0, None, tk_, t0=origin - e.t_launch, sides=(0,),
-                                   skin=SKIN_Z * e.sx, life=e.t_end - e.t_launch))
+                                   skin=SKIN_Z * e.sx, life=e.t_end - e.t_launch, slack=VE_SLACK))
         cover = []
         paired = [e for e in ests if e.pair and e.side]
         for i, a in enumerate(paired):
