@@ -121,9 +121,13 @@ def _ready(s: dict) -> bool:
     return bool(cues_from_state(s).menu_ready)
 
 
-def trial(row: dict, states: list[dict], names: list[str]) -> dict | None:
+def trial(row: dict, states: list[dict], names: list[str], natural: bool = False) -> dict | None:
+    """One trial; natural: also an attempt without an injection whose supervisor paused (its first PAUSE_PENDING is
+    the fault frame, kind "natural"), e.g. the QUITs of a gate run, as a baseline."""
     pol = row.get("policy") or {}
     inj = pol.get("inject")
+    if not inj and natural and pol.get("first_pending_f") is not None:
+        inj = {"kind": "natural", "fault": "trigger", "offset": 0, "sent": [], "replies": []}
     if not inj:
         return None
     fault = inj.get("fault") or "hit"
@@ -266,6 +270,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("runs", type=Path, nargs="+")
     ap.add_argument("--json", type=Path, default=None)
     ap.add_argument("--quiet", action="store_true", help="only the summary")
+    ap.add_argument("--natural", action="store_true",
+                    help="also attempts without an injection whose supervisor paused (gate / live QUITs: a baseline)")
     a = ap.parse_args(argv)
     from ssbot.knowledge.kinematics import cstate_names
     from ssbot.record.recorder import RecordingReader
@@ -274,11 +280,12 @@ def main(argv: list[str] | None = None) -> int:
     out = []
     for run in a.runs:
         for row in load_attempts(run):
-            if not (row.get("policy") or {}).get("inject") or not row.get("recording"):
+            pol = row.get("policy") or {}
+            if not row.get("recording") or not (pol.get("inject") or (a.natural and pol.get("first_pending_f"))):
                 continue
             start = row["f_end"] - row["acts"] - (row.get("late_states") or 0)
             states = list(RecordingReader(find_recording(run, row)).states(start, row["f_end"] + 60, keys=STATE_KEYS))
-            t = trial(row, states, names)
+            t = trial(row, states, names, natural=a.natural)
             if t is None:
                 continue
             t.update(run=run.name, instance=row.get("instance"), episode=row.get("episode"))

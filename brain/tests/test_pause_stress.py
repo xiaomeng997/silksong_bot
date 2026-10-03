@@ -264,6 +264,11 @@ def test_trial_of_a_trigger_fault_counts_game_keys_on_menu_frames():
     assert t["foreign_keys"] == {"right": 1, "up": 1}
     s = ps.summarize([t])
     assert s["special_share"] == 1.0 and s["pause_frame_with_game_keys"] == 1 and s["faults"] == {"trigger": 1}
+    # the same pause without an injection (a gate QUIT): only with natural, from its first PAUSE_PENDING
+    plain = {"outcome": "QUIT", "reason": "QUIT: Q6", "policy": {"first_pending_f": 200, "real_quit": None}}
+    assert ps.trial(plain, states, _names()) is None
+    tn = ps.trial(plain, states, _names(), natural=True)
+    assert tn["kind"] == "natural" and tn["fault_f"] == 200 and tn["pause_frame_keys"] == R
 
 
 def test_trial_of_a_menu_fault_counts_the_hit_next_to_the_first_press():
