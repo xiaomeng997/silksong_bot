@@ -170,6 +170,7 @@ class SupervisedControl:
         self._resume_reason = RESUME_SELF_CHECK
         self._resume_scene: str | None = None
         self._sup_alerted = False
+        self._last_ws: WorldState | None = None
 
     @property
     def held(self) -> bool:
@@ -203,6 +204,10 @@ class SupervisedControl:
             self.t0 = t_q
         if self.vision:
             obs = s if obs is None else obs
+            # a real quit's menus feed no WorldState: the last one stands (the world is paused), not a lost hero
+            # (live 20261003_043306 i0 ep0 ended "Q5: hero lost 4500 ms" after 4.5 s of menus)
+            ws = self._last_ws if ws is None else ws
+            self._last_ws = ws
             self.hero_hit = max(self.hero_hit, VISION_HERO_HIT)
             events, known, empty_ok = _support_of(None if self.support is None else self.support(obs))
             if ws is not None:
