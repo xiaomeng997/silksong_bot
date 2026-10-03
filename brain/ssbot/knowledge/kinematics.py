@@ -199,15 +199,45 @@ DEFAULT_PARAMS = REPO / "knowledge" / "1.0.30000" / "kinematics" / "hero_hunter.
                   # 1 wait, 2 ramp up (+10: started in this frame, the coroutine's first step done), timer (unscaled)
  WF_S,            # its time-scale factor (the effective scale is TS * WF_S: TimeManager multiplies the controls)
  WF_DOWN, WF_WAIT, WF_UP, WF_TGT,   # its preset (FREEZE_PRESETS)
- K) = range(52)
+ # Forum loadout rows (HeroParams.abilities; ssbot.knowledge.kin_jit "Forum loadout"): unused while abilities is 0
+ WSIDE,           # wall slide side: -1 wall on the left (wallSlidingL), +1 right, 0 not sliding
+ WTOUCH,          # touchingWallL / touchingWallR from the last physics step's contacts (-1 / +1 / 0)
+ CLING,           # cState.wallClinging (Ascendant's Grip)
+ CLING_CD,        # wallClingCooldownTimer (s)
+ WSTICK,          # wallStickTimer (s)
+ UNSTICK,         # wallUnstickSteps
+ WLOCK,           # wallLockSteps while wallLocked after a wall jump, -1 not locked
+ WJ_DIR,          # +1 wallJumpedR, -1 wallJumpedL
+ WJ_V,            # currentWalljumpSpeed
+ WJ_CHAIN,        # wallJumpChainStepsLeft
+ WJQ,             # queuedWallJumpInterrupt
+ WSLASH,          # wallSlashing
+ PREV_GS,         # prevGravityScale (AffectedByGravity)
+ GL_CD,           # Umbrella Float FSM cooldown left (s; FLOAT is ignored while it runs)
+ DASH_T,          # dash_timer (s)
+ DASH_CD,         # dashCooldownTimer (s)
+ AIRDASHED,
+ DQ,              # dash queue steps (-1: not queuing)
+ FALL_T,          # fallTimer (s, hard landing)
+ HARD,            # cState.willHardLand
+ SP_X,            # sprint FSM: x speed target (Sprint Speed Crt, signed)
+ K) = range(73)
 ROW_NAMES = ("px py qx qy sx sy vx vy alpha gs face ground mode mode_t mode_n jumping jsteps jdsteps jq aq airhang "
              "attacking atk_t atk_cd rdir rsteps ds_hs ds_rec bounce hvx hvy move jheld prev silk inv_t ledge touch "
-             "phase ts qq alo ahi landq wf_ph wf_t wf_s wf_down wf_wait wf_up wf_tgt").split()
+             "phase ts qq alo ahi landq wf_ph wf_t wf_s wf_down wf_wait wf_up wf_tgt wside wtouch cling cling_cd "
+             "wstick unstick wlock wj_dir wj_v wj_chain wjq wslash prev_gs gl_cd dash_t dash_cd airdashed dq fall_t "
+             "hard sp_x").split()
 assert len(ROW_NAMES) == K
 
 M_NORMAL, M_DS_ANTIC, M_DS_SPIKE, M_HURT_FREEZE, M_HURT_RECOIL, M_CAST, M_BIND, M_LOCKED = range(8)
-MODE_NAMES = ("NORMAL", "DS_ANTIC", "DS_SPIKE", "HURT_FREEZE", "HURT_RECOIL", "CAST", "BIND", "LOCKED")
-RELINQUISHED = (M_DS_ANTIC, M_DS_SPIKE, M_CAST, M_BIND, M_LOCKED)    # controlReqlinquished
+# Forum loadout modes (kin_jit): Drifter's Cloak glide (Umbrella Float FSM, PHASE 0 antic / 1 inflate / 2 float /
+# 3 deflate), Swift Step dash (HeroController.Dash), the sprint FSM after it (PHASE 0 air sprint / 1 air loop /
+# 2 ground sprint / 3 skid), the Reaper down slash (Crest Attacks FSM, PHASE 0 antic / 1 slash / 2 fall / 3 fall 2),
+# hard landing
+M_GLIDE, M_DASH, M_SPRINT, M_RPR_DS, M_HARD_LAND = range(8, 13)
+MODE_NAMES = ("NORMAL", "DS_ANTIC", "DS_SPIKE", "HURT_FREEZE", "HURT_RECOIL", "CAST", "BIND", "LOCKED", "GLIDE",
+              "DASH", "SPRINT", "RPR_DS", "HARD_LAND")
+RELINQUISHED = (M_DS_ANTIC, M_DS_SPIKE, M_CAST, M_BIND, M_LOCKED, M_GLIDE, M_SPRINT, M_RPR_DS)  # controlReqlinquished
 NO_INPUT = (M_HURT_FREEZE, M_HURT_RECOIL)                             # hero_state no_input
 
 # contact events (bit flags per frame; applied after the frame's physics steps, before its Update)
@@ -233,7 +263,13 @@ EVENT_NAMES = {EV_RECOIL_L: "recoil_l", EV_RECOIL_R: "recoil_r", EV_POGO: "pogo"
 F_GROUND, F_JUMPING, F_ATTACKING, F_RECOIL, F_RELINQ, F_INVULN, F_NO_INPUT = (1 << i for i in range(7))
 
 # ACTION button bits (ssbot.ipc.framing.BUTTONS order)
-B_JUMP, B_ATTACK, B_BIND, B_QUICKCAST = 1 << 0, 1 << 1, 1 << 3, 1 << 6
+B_JUMP, B_ATTACK, B_DASH, B_BIND, B_QUICKCAST = 1 << 0, 1 << 1, 1 << 2, 1 << 3, 1 << 6
+# HeroParams.abilities bits: Cling Grip (wall slide / wall jump), Ascendant's Grip (Gameplay.WallClingTool: wall
+# cling), Swift Step (dash + sprint FSM), Drifter's Cloak (glide), the Reaper crest's down slash (Custom, Crest
+# Attacks FSM "RPR DOWNSLASH") and wall slash slowdown (HeroControllerConfig.WallSlashSlowdown), hard landing
+AB_WALL, AB_CLING, AB_DASH, AB_BROLLY, AB_RPR_DOWN, AB_WALLSLASH_SLOW, AB_HARD_LAND = (1 << i for i in range(7))
+ABILITY_NAMES = {AB_WALL: "walljump", AB_CLING: "wallcling", AB_DASH: "dash", AB_BROLLY: "brolly",
+                 AB_RPR_DOWN: "reaper_down", AB_WALLSLASH_SLOW: "wallslash_slowdown", AB_HARD_LAND: "hard_landing"}
 B_UP, B_DOWN, B_LEFT, B_RIGHT = 1 << 18, 1 << 19, 1 << 20, 1 << 21
 
 EPS = 1e-4       # open-interval margin for overlap tests
@@ -344,6 +380,69 @@ class HeroParams:
     cast_throw_variants: list = field(default_factory=lambda: [[0.42, 0.5], [0.44, 0.5]])
     cast_catch_variants: list = field(default_factory=lambda: [[0.14, 0.5], [0.16, 0.5]])
     bind_time_variants: list = field(default_factory=list)     # Bind lengths one frame apart, as the cast phases
+    # Forum loadout (M2 W8; docs/facts/1.0.30000/movement_kinematics.md): AB_* bits, 0 for the Hunter fit (every
+    # rule below is then skipped). HeroController 1.0.30000 constants (hero_constants.json) unless noted; FSM values
+    # from the hero's PlayMaker templates (fsmtemplates_assets_shared: hornet_umbrella_float, hornet_sprint,
+    # crest_attacks); clip lengths ("*_t" of FSM states that wait for an animation) are measured (kin_fit)
+    abilities: int = 0
+    wall_ray: float = 0.6              # WALLJUMP_RAY_LENGTH: IsFacingNearSlideableWall
+    wall_ray_brolly: float = 1.0       # WALLJUMP_BROLLY_RAY_LENGTH: TryQueueWallJumpInterrupt
+    wall_touch_ray: float = 0.1        # WallTouchCache ray length (CheckStillTouchingWall)
+    wall_contact: float = 0.01         # gap beyond the skin within which a wall contact persists (OnCollisionStay2D)
+    wall_stick_time: float = 0.15      # WALLSLIDE_STICK_TIME
+    wall_slide_accel: float = -24.0    # WALLSLIDE_ACCEL (LateUpdate, per rendered frame)
+    wall_cling_decel: float = 80.0     # WALLCLING_DECEL
+    wall_cling_vmin: float = -10.0     # LateUpdate clamp while clinging
+    wall_cling_cooldown: float = 0.3   # WALLCLING_COOLDOWN
+    wall_sticky_steps: int = 3         # WALL_STICKY_STEPS
+    wj_speed: float = 25.0             # WJ_KICKOFF_SPEED
+    wj_lock_short: int = 5             # WJLOCK_STEPS_SHORT
+    wj_lock_long: int = 15             # WJLOCK_STEPS_LONG
+    wj_chain_steps: int = 10           # WJLOCK_CHAIN_STEPS
+    wj_jumped_steps: int = 5           # DoWallJump: jumped_steps = 5
+    wall_up_shove: float = 0.8         # Attack(upward) while wall sliding: MovePosition 0.8 off the wall
+    wall_slash_vy_min: float = -5.0    # WallSlashSlowdown: vy / 2, at least this
+    dash_speed: float = 28.0           # DASH_SPEED
+    dash_time: float = 0.1             # DASH_TIME (ground)
+    air_dash_time: float = 0.02        # AIR_DASH_TIME
+    dash_cooldown: float = 0.425       # DASH_COOLDOWN
+    dash_queue_steps: int = 10         # DASH_QUEUE_STEPS
+    sprint_speed: float = 17.5         # Sprint FSM "Sprint Speed Regular" (Hero_Hornet instance value)
+    air_sprint_speed: float = 12.0     # "Air Sprint Speed"
+    sprint_accel: float = 1.1          # AccelerateToX per physics step
+    air_sprint_time: float = 0.235     # Air Sprint L/R Wait
+    air_fall_clamp0: float = -10.0     # Air Sprint EaseFloat Fall Clamp from
+    air_fall_clamp1: float = -30.0     # ... to
+    air_fall_clamp_time: float = 1.0   # ... over
+    skid_decel: float = 0.85           # ground sprint release: x velocity factor per step (fit)
+    skid_time: float = 0.1             # ... and how long (fit)
+    glide_antic_t: float = 0.0833      # Umbrella Inflate Antic clip (fit)
+    glide_inflate_t: float = 0.25      # Umbrella Inflate clip (fit)
+    glide_deflate_t: float = 0.1667    # Umbrella Deflate clip (fit)
+    glide_antic_accel: float = 8.5     # UmbrellaMotionX in Antic: accel / decel / max
+    glide_accel: float = 1.0           # ... in Inflate and Float Idle
+    glide_decel: float = 0.25
+    glide_vmax: float = 8.5
+    glide_vy: float = -6.0             # Float Idle AccelerateToY target ...
+    glide_vy_accel: float = 0.13       # ... and step
+    glide_start_vy: float = 0.5        # Inflate: vy < 0.05 -> 0.5 every step; Start: vy = 0.5
+    glide_cooldown: float = 0.1        # Cooldown Wait after control is back
+    glide_ground_ray: float = 1.1      # IsApproachingSolidGround: JUMP_ABILITY_GROUND_RAY_LENGTH + 0.1
+    glide_bump_ray: float = 0.7        # "Wall Bump Distance"
+    glide_bump_vx: float = 6.0         # Bump L / R
+    rpr_antic_t: float = 0.1           # v3 Down Slash Antic clip (fit)
+    rpr_slash_t: float = 0.0833        # v3 Down Slash to its trigger frame (fit)
+    rpr_fall_t: float = 0.1667         # rest of v3 Down Slash (fit)
+    rpr_fall2_t: float = 0.1           # Fall 2 (fit)
+    rpr_antic_decel: float = 0.85      # Rpr Downslash Antic DecelerateV2
+    rpr_antic_decel_y: float = 0.8     # ... DecelerateXY y
+    rpr_accel: float = 3.0             # ... UmbrellaMotionX accel / decel / max
+    rpr_decel: float = 1.0
+    rpr_vmax: float = 12.0
+    rpr_speed: float = 30.0            # Rpr Downslash SetVelocityByScale (forward, -down)
+    rpr_slash_decel: float = 0.7       # ... DecelerateV2
+    hard_fall_time: float = 0.5        # BIG_FALL_TIME
+    hard_land_time: float = 0.67       # HARD_LANDING_TIME
     jump_heights: list = field(default_factory=list)   # per jump hold length: logged and model apex spread
     scenes: dict = field(default_factory=dict)       # scene -> {"enable": [go names], "disable": [go names]}
     source: dict = field(default_factory=dict)       # key -> provenance note
@@ -360,7 +459,18 @@ class HeroParams:
               "cast_catch_decay", "cast_silk", "bind_time", "bind_decay", "bind_vy_cap",
               "bind_vy_cap_down", "bind_end_vy", "bind_silk",
               "silk_max", "lock_decay", "ledge_steps", "land_slop_lo", "land_slop_hi", "rdown_halve",
-              "bind_break_before", "wf_bias_wait", "wf_bias_up", "pogo_invul")
+              "bind_break_before", "wf_bias_wait", "wf_bias_up", "pogo_invul",
+              "abilities", "wall_ray", "wall_ray_brolly", "wall_touch_ray", "wall_contact", "wall_stick_time",
+              "wall_slide_accel", "wall_cling_decel", "wall_cling_vmin", "wall_cling_cooldown", "wall_sticky_steps",
+              "wj_speed", "wj_lock_short", "wj_lock_long", "wj_chain_steps", "wj_jumped_steps", "wall_up_shove",
+              "wall_slash_vy_min", "dash_speed", "dash_time", "air_dash_time", "dash_cooldown", "dash_queue_steps",
+              "sprint_speed", "air_sprint_speed", "sprint_accel", "air_sprint_time", "air_fall_clamp0",
+              "air_fall_clamp1", "air_fall_clamp_time", "skid_decel", "skid_time", "glide_antic_t",
+              "glide_inflate_t", "glide_deflate_t", "glide_antic_accel", "glide_accel", "glide_decel", "glide_vmax",
+              "glide_vy", "glide_vy_accel", "glide_start_vy", "glide_cooldown", "glide_ground_ray",
+              "glide_bump_ray", "glide_bump_vx", "rpr_antic_t", "rpr_slash_t", "rpr_fall_t", "rpr_fall2_t",
+              "rpr_antic_decel", "rpr_antic_decel_y", "rpr_accel", "rpr_decel", "rpr_vmax", "rpr_speed",
+              "rpr_slash_decel", "hard_fall_time", "hard_land_time")
 
     def vector(self) -> np.ndarray:
         return np.array([float(getattr(self, k)) for k in self.VECTOR], dtype=np.float64)
@@ -425,7 +535,14 @@ class HeroParams:
  P_HURT_T, P_HURT_WAIT, P_HURT_RAMP, P_HURT_SKIP, P_INV_T, P_CAST_ANTIC, P_CAST_THROW, P_CAST_CATCH, P_CAST_DECAY,
  P_CAST_DECAY_G, P_CAST_VYCAP, P_CAST_CSPEED, P_CAST_CDECAY, P_CAST_SILK, P_BIND_T, P_BIND_DECAY, P_BIND_VYCAP,
  P_BIND_VYDOWN, P_BIND_ENDVY, P_BIND_SILK, P_SILK_MAX, P_LOCK_DECAY, P_LEDGE, P_SLOP_LO, P_SLOP_HI, P_RDOWN_HALF,
- P_BIND_BREAK, P_WF_BW, P_WF_BU, P_POGO_INV, NP) = range(68)
+ P_BIND_BREAK, P_WF_BW, P_WF_BU, P_POGO_INV,
+ P_ABIL, P_W_RAY, P_W_RAY_B, P_W_TRAY, P_W_CONTACT, P_W_STICK, P_W_ACCEL, P_W_CDECEL, P_W_CVMIN, P_W_CCD, P_W_STICKY,
+ P_WJ_SPEED, P_WJ_SHORT, P_WJ_LONG, P_WJ_CHAIN, P_WJ_JUMPED, P_W_SHOVE, P_W_SLASH_VMIN, P_DASH_SPEED, P_DASH_T,
+ P_ADASH_T, P_DASH_CD, P_DQ, P_SPR_SPEED, P_ASPR_SPEED, P_SPR_ACC, P_ASPR_T, P_AFC0, P_AFC1, P_AFC_T, P_SKID_DEC,
+ P_SKID_T, P_GL_ANTIC, P_GL_INFLATE, P_GL_DEFLATE, P_GL_AACC, P_GL_ACC, P_GL_DEC, P_GL_VMAX, P_GL_VY, P_GL_VYACC,
+ P_GL_START_VY, P_GL_CD, P_GL_GRAY, P_GL_BRAY, P_GL_BVX, P_RPR_ANTIC, P_RPR_SLASH, P_RPR_FALL, P_RPR_FALL2,
+ P_RPR_ADEC, P_RPR_ADEC_Y, P_RPR_ACC, P_RPR_DEC, P_RPR_VMAX, P_RPR_SPEED, P_RPR_SDEC, P_HARD_FALL, P_HARD_LAND,
+ NP) = range(127)
 assert NP == len(HeroParams.VECTOR)
 
 
@@ -1380,6 +1497,8 @@ def rollout(start: np.ndarray, masks: np.ndarray, params: HeroParams, terrain: T
         dts = fss = np.zeros((0, 0))
     terrain = terrain or Terrain2D.empty()
     use_jit = HAVE_NUMBA if backend == "auto" else backend == "numba"
+    if params.abilities and not use_jit:
+        raise ValueError("the Forum loadout rules (HeroParams.abilities) exist in kin_jit only: use backend numba")
     if variants and use_jit and not lanes:
         from ssbot.knowledge import kin_jit
         if threads > 1:
@@ -1589,6 +1708,8 @@ def initial_state(params: HeroParams, x: float, y: float, *, vx: float = 0.0, vy
     S[TS] = 1.0
     S[WF_PH] = -1.0
     S[WF_S] = 1.0
+    S[WLOCK] = S[DQ] = -1.0
+    S[PREV_GS] = 1.0
     return S
 
 

@@ -32,6 +32,16 @@ from ssbot.knowledge.kinematics import (
     P_SLOP_LO, PHASE, PREV, PX, PY, QQ, QX, QY, RDIR, RSTEPS, SILK, SX, SY, TOL, TOUCH, TS, TT_HEAD, VX, VY, ALO, AHI,
     LANDQ, WF_PH, WF_T, WF_S, WF_DOWN, WF_WAIT, WF_UP, WF_TGT, P_BIND_BREAK, P_WF_BW, P_WF_BU, EV_FZ_BIND_BREAK,
     FREEZE_PRESETS, WF_ORDER)
+from ssbot.knowledge.kinematics import (  # Forum loadout (abilities)
+    AB_BROLLY, AB_CLING, AB_DASH, AB_HARD_LAND, AB_RPR_DOWN, AB_WALL, AB_WALLSLASH_SLOW, AIRDASHED, B_DASH, CLING,
+    CLING_CD, DASH_CD, DASH_T, DQ, FALL_T, GL_CD, HARD, M_DASH, M_GLIDE, M_HARD_LAND, M_RPR_DS, M_SPRINT, P_ABIL,
+    P_ADASH_T, P_AFC0, P_AFC1, P_AFC_T, P_ASPR_SPEED, P_ASPR_T, P_DASH_CD, P_DASH_SPEED, P_DASH_T, P_DQ, P_GL_AACC,
+    P_GL_ACC, P_GL_ANTIC, P_GL_BRAY, P_GL_BVX, P_GL_CD, P_GL_DEC, P_GL_DEFLATE, P_GL_GRAY, P_GL_INFLATE,
+    P_GL_START_VY, P_GL_VMAX, P_GL_VY, P_GL_VYACC, P_HARD_FALL, P_HARD_LAND, P_RPR_ACC, P_RPR_ADEC, P_RPR_ADEC_Y,
+    P_RPR_ANTIC, P_RPR_DEC, P_RPR_FALL, P_RPR_FALL2, P_RPR_SDEC, P_RPR_SLASH, P_RPR_SPEED, P_RPR_VMAX, P_SKID_DEC,
+    P_SKID_T, P_SPR_ACC, P_SPR_SPEED, P_W_CCD, P_W_CDECEL, P_W_CONTACT, P_W_CVMIN, P_W_RAY, P_W_RAY_B, P_W_SHOVE,
+    P_W_SLASH_VMIN, P_W_STICK, P_W_STICKY, P_W_ACCEL, P_W_TRAY, P_WJ_CHAIN, P_WJ_JUMPED, P_WJ_LONG, P_WJ_SHORT,
+    P_WJ_SPEED, PREV_GS, SP_X, UNSTICK, WJ_CHAIN, WJ_DIR, WJ_V, WJQ, WLOCK, WSIDE, WSLASH, WSTICK, WTOUCH)
 
 # world freeze presets in start order (kinematics.WF_ORDER): event bit, rampDown, wait, rampUp, target
 _WF = np.array([[float(b), *FREEZE_PRESETS[b]] for b in WF_ORDER])
@@ -55,7 +65,8 @@ def gt32(a, c):
 
 @njit(cache=True, inline="always", error_model="numpy")
 def relinq(m):
-    return m == M_DS_ANTIC or m == M_DS_SPIKE or m == M_CAST or m == M_BIND or m == M_LOCKED
+    return (m == M_DS_ANTIC or m == M_DS_SPIKE or m == M_CAST or m == M_BIND or m == M_LOCKED or m == M_GLIDE
+            or m == M_SPRINT or m == M_RPR_DS)
 
 
 @njit(cache=True, inline="always", error_model="numpy")
@@ -177,6 +188,755 @@ def on_ground(px, py, hw, skin, foot, TT):
     return False
 
 
+# ---- Forum loadout (HeroParams.abilities != 0) -------------------------------------------------------------------
+# One implementation only: these rules exist as scalar code here (the NumPy reference in kinematics.py covers the
+# Hunter rules, which take none of these branches while abilities is 0, so the Hunter rollout is unchanged bit for
+# bit). Sources, HeroController 1.0.30000 unless noted: wall slide LookForInput 8397-8406, BeginWallSlide 8461-8528,
+# Update 2198-2289, FixedUpdate 3118-3181, LateUpdate 3869-3907, CancelWallsliding 9930; wall touch
+# OnCollisionStay2D 11469-11507 + WallTouchCache (0.1 u rays at the box side's mid / bottom); wall jump DoWallJump
+# 8855-8925, CanWallJump 11260, CanChainWallJumps 11285, TryQueueWallJumpInterrupt 11024, JumpReleased 10298;
+# wall slash Attack 4125-4137 (Reaper WallSlashSlowdown), up slash off a wall 4164-4169; dash HeroDash 9058,
+# Dash 4334, CanDash 10902, FinishedDashing 10325; then the Sprint FSM (template hornet_sprint: Try, Start Sprint,
+# Air Dir, Air Sprint L/R, Air Sprint Loop, Ground Dir, Ground Sprint L/R); glide CanFloat 11069 and the Umbrella
+# Float FSM (hornet_umbrella_float: Take Control, Antic, Inflate, Start, Float Idle, Bump L/R, Deflate, Relinquish
+# Control, Cooldown); Reaper down slash: the Crest Attacks FSM (crest_attacks: Rpr Downslash Antic / Downslash /
+# Fall / Fall 2 / End); hard landing FallCheck 9730, DoHardLanding 8999. FSM actions read the input the frame's
+# FixedUpdates see, i.e. the previous frame's (x[PREV]); PlayMaker velocity actions (UmbrellaMotionX, AccelerateToX,
+# AccelerateToY, DecelerateV2 / XY, SetVelocity2dConditional) run per physics step, their OnEnter once in the
+# Update that enters the state. Animation-timed FSM states end after HeroParams *_t of scaled time counted from the
+# frame after their entry (as the Silkspear phases). Wall side: -1 = the wall is on the hero's left.
+
+EPS_F = 1.401298464e-45       # Mathf.Epsilon
+
+
+@njit(cache=True, inline="always", error_model="numpy")
+def grav_off(x):
+    """AffectedByGravity(false)."""
+    if x[GS] > EPS_F:
+        x[PREV_GS] = x[GS]
+        x[GS] = 0.0
+
+
+@njit(cache=True, inline="always", error_model="numpy")
+def grav_on(x):
+    """AffectedByGravity(true)."""
+    if x[GS] <= EPS_F:
+        x[GS] = x[PREV_GS]
+        x[PREV_GS] = 0.0
+
+
+@njit(cache=True, error_model="numpy")
+def wall_near(px, py, side, reach, P, TT):
+    """A wall face on `side` within `reach` of the box side whose y span holds the box's centre or bottom height
+    (WallTouchCache's mid and bottom rays)."""
+    if TT[1] == 0:
+        return False
+    edge = px + side * P[P_HW]
+    ymid = py + 0.5 * (P[P_HEAD] - P[P_FOOT])
+    ybot = py - P[P_FOOT]
+    b0, b1 = _buckets(edge - reach - TOL, edge + reach + TOL, TT)
+    st, ids, ov = np.int64(TT[7]), np.int64(TT[8]), np.int64(TT[9])
+    for b in range(b0, b1 + 1):
+        for q in range(np.int64(TT[st + b]), np.int64(TT[st + b + 1])):
+            j = ov + 3 * np.int64(TT[ids + q])
+            gap = (edge - TT[j]) if side < 0 else (TT[j] - edge)
+            if gap < -TOL or gap > reach:
+                continue
+            if (TT[j + 1] - EPS <= ymid <= TT[j + 2] + EPS) or (TT[j + 1] - EPS <= ybot <= TT[j + 2] + EPS):
+                return True
+    return False
+
+
+@njit(cache=True, error_model="numpy")
+def hray(x0, y0, side, length, TT):
+    """A horizontal ray from (x0, y0) of `length` towards `side` meets a wall segment."""
+    if TT[1] == 0:
+        return False
+    lo = x0 - length if side < 0 else x0
+    hi = x0 if side < 0 else x0 + length
+    b0, b1 = _buckets(lo - 0.02, hi + 0.02, TT)
+    st, ids, ov = np.int64(TT[7]), np.int64(TT[8]), np.int64(TT[9])
+    for b in range(b0, b1 + 1):
+        for q in range(np.int64(TT[st + b]), np.int64(TT[st + b + 1])):
+            j = ov + 3 * np.int64(TT[ids + q])
+            d = side * (TT[j] - x0)
+            if 0.0 <= d <= length and TT[j + 1] <= y0 <= TT[j + 2]:
+                return True
+    return False
+
+
+@njit(cache=True, error_model="numpy")
+def vray(x0, y0, length, TT):
+    """A downward ray from (x0, y0) of `length` meets a floor segment."""
+    if TT[0] == 0:
+        return False
+    b0, b1 = _buckets(x0 - 0.01, x0 + 0.01, TT)
+    st, ids = np.int64(TT[5]), np.int64(TT[6])
+    for b in range(b0, b1 + 1):
+        for q in range(np.int64(TT[st + b]), np.int64(TT[st + b + 1])):
+            j = TT_H + 3 * np.int64(TT[ids + q])
+            d = y0 - TT[j]
+            if -EPS <= d <= length and TT[j + 1] <= x0 <= TT[j + 2]:
+                return True
+    return False
+
+
+@njit(cache=True, error_model="numpy")
+def facing_near_wall(x0, y0, face, length, TT):
+    """IsFacingNearWall: the ray of `length` from hero.pos along the facing meets a wall, and so do the rays 0.1 u
+    apart above and below it over at least 1.5 u in all (each side counted to its first miss, at most 1.4 u;
+    float32 sums as the game's loop)."""
+    if not hray(x0, y0, face, length, TT):
+        return False
+    num = np.float32(0.0)
+    k = np.float32(0.1)
+    while k < np.float32(1.5) and hray(x0, y0 + np.float64(k), face, length, TT):
+        num = np.float32(num + np.float32(0.1))
+        k = np.float32(k + np.float32(0.1))
+    k = np.float32(0.1)
+    while k < np.float32(1.5) and hray(x0, y0 - np.float64(k), face, length, TT):
+        num = np.float32(num + np.float32(0.1))
+        k = np.float32(k + np.float32(0.1))
+    return not (num < np.float32(1.5))
+
+
+@njit(cache=True, inline="always", error_model="numpy")
+def rend_x(x):
+    return x[QX] + x[ALPHA] * (x[SX] - x[QX])
+
+
+@njit(cache=True, inline="always", error_model="numpy")
+def rend_y(x):
+    return x[QY] + x[ALPHA] * (x[SY] - x[QY])
+
+
+@njit(cache=True, inline="always", error_model="numpy")
+def move_of(mask):
+    return (1.0 if (mask & B_RIGHT) != 0 else 0.0) - (1.0 if (mask & B_LEFT) != 0 else 0.0)
+
+
+@njit(cache=True, inline="always", error_model="numpy")
+def umbrella_x(vx, mask, acc, dec, vmax):
+    """UmbrellaMotionX.DoAccelerate."""
+    num = vx
+    if (mask & B_RIGHT) != 0:
+        if num < vmax:
+            num += acc
+    elif (mask & B_LEFT) != 0:
+        if num > -vmax:
+            num -= acc
+    elif num > 0.0:
+        num -= dec
+        if num < 0.0:
+            num = 0.0
+    elif num < 0.0:
+        num += dec
+        if num > 0.0:
+            num = 0.0
+    return min(max(num, -vmax), vmax)
+
+
+@njit(cache=True, inline="always", error_model="numpy")
+def accel_to(v, acc, target):
+    """AccelerateToX / AccelerateToY on one axis."""
+    if v > target:
+        v -= acc
+        if v < target:
+            v = target
+    if v < target:
+        v += acc
+        if v > target:
+            v = target
+    return v
+
+
+@njit(cache=True, inline="always", error_model="numpy")
+def decel(v, f):
+    """DecelerateV2 / DecelerateXY on one axis (the sign never flips)."""
+    if v < 0.0:
+        v *= f
+        if v > 0.0:
+            v = 0.0
+    elif v > 0.0:
+        v *= f
+        if v < 0.0:
+            v = 0.0
+    return v
+
+
+@njit(cache=True, inline="always", error_model="numpy")
+def chain_ok(x):
+    """CanChainWallJumps (dashing down is not modelled)."""
+    return x[WLOCK] >= 0 or x[WJ_CHAIN] > 0 or x[MOVE] != 0
+
+
+@njit(cache=True, error_model="numpy")
+def cancel_wallslide(x):
+    """CancelWallsliding (gravity back even when not sliding, touch flags cleared)."""
+    if x[WSIDE] != 0:
+        x[WSIDE] = 0.0
+        x[CLING] = 0.0
+    grav_on(x)
+    x[WTOUCH] = 0.0
+
+
+@njit(cache=True, error_model="numpy")
+def can_start_wallslide(x, falling, P, TT):
+    """CanStartWithWallSlide: in the air, falling (or already sliding), not attacking unless wall slashing, facing a
+    wall 0.6 u away with enough height (non-slider walls are not in the terrain dump: never)."""
+    if x[GROUND] > 0:
+        return False
+    if not (falling or x[WSIDE] != 0):
+        return False
+    if x[ATTACKING] > 0 and x[WSLASH] <= 0:
+        return False
+    return facing_near_wall(rend_x(x), rend_y(x), x[FACE], P[P_W_RAY], TT)
+
+
+@njit(cache=True, error_model="numpy")
+def begin_wallslide(x, require_input, mask):
+    """BeginWallSlide; returns whether a slide started."""
+    if x[WSIDE] != 0:
+        return False
+    side = 0.0
+    if x[WTOUCH] < 0 and (not require_input or (mask & B_LEFT) != 0):
+        side = -1.0
+    if x[WTOUCH] > 0 and (not require_input or (mask & B_RIGHT) != 0):
+        side = 1.0
+    if side == 0:
+        return False
+    x[FACE] = side
+    x[JUMPING] = 0.0                      # CancelJump
+    x[JSTEPS] = 0.0
+    x[WLOCK] = -1.0
+    if x[MODE] == M_DASH:                 # CancelDash
+        x[MODE] = M_NORMAL
+        x[DASH_T] = 0.0
+        grav_on(x)
+    x[AIRDASHED] = 0.0
+    x[WSIDE] = side
+    grav_off(x)
+    x[DASH_CD] = 0.0
+    return True
+
+
+@njit(cache=True, error_model="numpy")
+def do_wall_jump(x, P):
+    """DoWallJump: face away from the wall, x speed locked to WJ_KICKOFF_SPEED decaying to the run speed over
+    WJLOCK_STEPS_LONG steps, a full jump (jumped_steps 5, so a release halves vy at once and unlocks)."""
+    t = x[WTOUCH] if x[WTOUCH] != 0 else x[WSIDE]
+    x[WJQ] = 0.0
+    if t < 0:
+        x[FACE] = 1.0
+        x[WJ_DIR] = 1.0
+    elif t > 0:
+        x[FACE] = -1.0
+        x[WJ_DIR] = -1.0
+    cancel_wallslide(x)
+    x[AIRDASHED] = 0.0
+    x[WJ_V] = P[P_WJ_SPEED]
+    x[JUMPING] = 1.0
+    x[WLOCK] = 0.0
+    x[JQ] = -1.0
+    x[JDSTEPS] = P[P_WJ_JUMPED]
+
+
+@njit(cache=True, error_model="numpy")
+def queue_wj_interrupt(x, P, TT):
+    """TryQueueWallJumpInterrupt: a jump press near a facing wall (1 u) that cannot act yet becomes a wall jump in
+    the next frame's queue check."""
+    if x[WJQ] > 0:
+        return True
+    ab = np.int64(P[P_ABIL])
+    if (ab & AB_WALL) != 0 and facing_near_wall(rend_x(x), rend_y(x), x[FACE], P[P_W_RAY_B], TT):
+        if not chain_ok(x):
+            return False
+        x[WJQ] = 1.0
+        return True
+    return False
+
+
+@njit(cache=True, error_model="numpy")
+def relinquish_nv(x):
+    """RelinquishControlNotVelocity (ResetMotionNotVelocity, ResetAttacks, no_input): what every FSM move here
+    starts with."""
+    x[JUMPING] = 0.0
+    x[JSTEPS] = 0.0
+    x[WLOCK] = -1.0
+    x[BOUNCE] = -1.0
+    x[RDIR] = 0.0
+    cancel_wallslide(x)
+    x[GS] = 1.0                           # ResetGravity
+    x[ATTACKING] = 0.0
+    x[WSLASH] = 0.0
+    x[WTOUCH] = 0.0
+    x[DASH_T] = 0.0
+
+
+@njit(cache=True, error_model="numpy")
+def regain(x, mask):
+    """RegainControl at the end of an FSM move: control and the move input back."""
+    x[MODE] = M_NORMAL
+    x[MODE_T] = 0.0
+    x[PHASE] = 0.0
+    x[HARD] = 0.0
+    x[MOVE] = move_of(mask)
+    x[JHELD] = 1.0 if (mask & B_JUMP) != 0 else 0.0
+
+
+@njit(cache=True, error_model="numpy")
+def start_glide(x, mask, P):
+    """StartFloat -> Umbrella Float FSM Take Control -> Antic (UmbrellaMotionX OnEnter). Ignored while the FSM's
+    cooldown runs (the press is spent all the same)."""
+    if x[GL_CD] > 0:
+        return
+    relinquish_nv(x)
+    x[MODE] = M_GLIDE
+    x[PHASE] = 0.0
+    x[MODE_T] = 0.0
+    x[VX] = umbrella_x(x[VX], mask, P[P_GL_AACC], P[P_GL_DEC], P[P_GL_VMAX])
+
+
+@njit(cache=True, error_model="numpy")
+def can_float(x, P, TT):
+    """CanFloat (Drifter's Cloak), its TryQueueWallJumpInterrupt side effect included."""
+    if (np.int64(P[P_ABIL]) & AB_BROLLY) == 0 or x[GROUND] > 0 or x[LEDGE] > 0 or x[WSIDE] != 0:
+        return False
+    if x[ATTACKING] > 0 and x[ATK_T] < P[P_ATK_REC]:
+        return False
+    if queue_wj_interrupt(x, P, TT):
+        return False
+    if x[VY] <= 0:                        # IsApproachingSolidGround: both bottom corners over a floor 1.1 u below
+        bot = x[PY] - P[P_FOOT]
+        if vray(x[PX] - P[P_HW], bot, P[P_GL_GRAY], TT) and vray(x[PX] + P[P_HW], bot, P[P_GL_GRAY], TT):
+            return False
+    return True
+
+
+@njit(cache=True, error_model="numpy")
+def can_dash(x, P):
+    if (np.int64(P[P_ABIL]) & AB_DASH) == 0 or x[MODE] != M_NORMAL or x[DASH_CD] > 0:
+        return False
+    if x[ATTACKING] > 0 and x[ATK_T] < P[P_ATK_REC]:
+        return False
+    return x[GROUND] > 0 or x[AIRDASHED] <= 0 or x[WSIDE] != 0
+
+
+@njit(cache=True, error_model="numpy")
+def hero_dash(x, mask, P):
+    """HeroDashPressed -> HeroDash. Not modelled (the press does nothing here): the wall scramble (dash while
+    sliding and holding towards the wall), the down dash and the scuttle."""
+    left = (mask & B_LEFT) != 0
+    right = (mask & B_RIGHT) != 0
+    if x[WSIDE] != 0 and ((x[WSIDE] < 0 and left) or (x[WSIDE] > 0 and right)):
+        return
+    if (mask & B_DOWN) != 0 and x[GROUND] <= 0 and not left and not right:
+        return
+    x[ATTACKING] = 0.0
+    x[WSLASH] = 0.0
+    x[BOUNCE] = -1.0
+    x[JUMPING] = 0.0
+    x[JSTEPS] = 0.0
+    if x[GROUND] > 0:
+        x[DASH_T] = P[P_DASH_T]
+    else:
+        x[DASH_T] = P[P_ADASH_T]
+        x[AIRDASHED] = 1.0
+    if x[WSIDE] != 0:
+        x[FACE] = -x[FACE]
+    elif right and not left:
+        x[FACE] = 1.0
+    elif left and not right:
+        x[FACE] = -1.0
+    x[MODE] = M_DASH
+    x[MODE_T] = 0.0
+    x[DQ] = -1.0
+    x[WLOCK] = -1.0
+    x[DASH_CD] = P[P_DASH_CD]
+
+
+@njit(cache=True, error_model="numpy")
+def finished_dashing(x, P):
+    """FinishedDashing -> Sprint FSM TRY SPRINT -> Start Sprint (gravity 1, control taken) -> the air sprint or,
+    on the ground, the sprint at the dash speed."""
+    x[DASH_T] = 0.0
+    grav_on(x)
+    relinquish_nv(x)
+    x[MODE] = M_SPRINT
+    x[MODE_T] = 0.0
+    if x[GROUND] > 0:
+        x[PHASE] = 2.0
+        x[SP_X] = x[FACE] * P[P_SPR_SPEED]
+        x[VX] = x[FACE] * P[P_DASH_SPEED]
+    else:
+        x[PHASE] = 0.0
+        x[SP_X] = x[FACE] * P[P_ASPR_SPEED]
+
+
+@njit(cache=True, error_model="numpy")
+def forum_fixed(x, vx, vy, normal, P, TT):
+    """The Forum loadout's part of FixedUpdate before the terminal-velocity clamp and air hang (after the Hunter
+    rules' own velocity of this step). Returns (vx, vy)."""
+    mode = x[MODE]
+    pm = np.int64(x[PREV])                # what FSM actions read in FixedUpdate: the previous frame's input
+    if normal:
+        if x[WJ_CHAIN] > 0:
+            x[WJ_CHAIN] -= 1.0
+        if x[WLOCK] >= 0:
+            vx = x[WJ_DIR] * x[WJ_V]
+            x[WLOCK] += 1.0
+            if x[WLOCK] > P[P_WJ_LONG]:
+                x[WLOCK] = -1.0
+                x[WJ_CHAIN] = P[P_WJ_CHAIN]
+            x[WJ_V] = x[WJ_V] - (P[P_WJ_SPEED] - P[P_RUN]) / P[P_WJ_LONG]
+        if x[WSIDE] != 0:
+            away = ((pm & B_RIGHT) != 0 and (pm & B_LEFT) == 0) if x[WSIDE] < 0 else \
+                ((pm & B_LEFT) != 0 and (pm & B_RIGHT) == 0)
+            x[UNSTICK] = x[UNSTICK] + 1.0 if away else 0.0
+            if x[UNSTICK] >= P[P_W_STICKY]:
+                x[FACE] = -x[FACE]
+                cancel_wallslide(x)
+            if x[WSIDE] != 0 and not wall_near(x[PX], x[PY], x[WSIDE], P[P_W_TRAY], P, TT):
+                x[FACE] = -x[FACE]
+                cancel_wallslide(x)
+    elif mode == M_DASH:
+        falling = x[VY] <= EPS_F and x[GROUND] <= 0
+        if x[WTOUCH] != 0 and can_start_wallslide(x, falling, P, TT) and begin_wallslide(x, False, 0):
+            return x[VX], x[VY]
+        grav_off(x)
+        if x[DASH_T] <= 0:
+            finished_dashing(x, P)
+            return x[VX], x[VY]
+        vx = x[FACE] * P[P_DASH_SPEED]
+        vy = 0.0
+        x[DASH_T] = f32(x[DASH_T] - P[P_FDT])
+    elif mode == M_SPRINT:
+        ph = x[PHASE]
+        vx = accel_to(vx, P[P_SPR_ACC], x[SP_X])
+        if ph == 0:
+            # Air Sprint: Fall Clamp eased linearly (easeType 21) from air_fall_clamp0 to air_fall_clamp1
+            u = min(x[MODE_T] / P[P_AFC_T], 1.0)
+            vy = max(vy, P[P_AFC0] + (P[P_AFC1] - P[P_AFC0]) * u)
+        elif ph == 1:
+            vy = max(vy, -P[P_MAXFALL])
+        elif ph == 2:
+            vx = min(max(vx, -40.0), 40.0)
+        elif ph == 3:
+            vx = decel(x[VX], P[P_SKID_DEC])
+    elif mode == M_GLIDE:
+        ph = x[PHASE]
+        if ph == 0:
+            vx = umbrella_x(vx, pm, P[P_GL_AACC], P[P_GL_DEC], P[P_GL_VMAX])
+        elif ph == 1:
+            if vy < 0.05:
+                vy = P[P_GL_START_VY]
+            vx = umbrella_x(vx, pm, P[P_GL_ACC], P[P_GL_DEC], P[P_GL_VMAX])
+        elif ph == 2:
+            vy = accel_to(vy, P[P_GL_VYACC], P[P_GL_VY])
+            vx = umbrella_x(vx, pm, P[P_GL_ACC], P[P_GL_DEC], P[P_GL_VMAX])
+    elif mode == M_RPR_DS:
+        ph = x[PHASE]
+        if ph == 0:
+            vx = decel(vx, P[P_RPR_ADEC])
+            vy = decel(vy, P[P_RPR_ADEC])
+            vy = decel(vy, P[P_RPR_ADEC_Y])
+            vx = umbrella_x(vx, pm, P[P_RPR_ACC], P[P_RPR_DEC], P[P_RPR_VMAX])
+        elif ph == 1:
+            vx = decel(vx, P[P_RPR_SDEC])
+            vy = decel(vy, P[P_RPR_SDEC])
+    elif mode == M_HARD_LAND:
+        vx = 0.0
+        vy = 0.0
+    if x[DQ] >= 0:
+        x[DQ] += 1.0
+    return vx, vy
+
+
+@njit(cache=True, error_model="numpy")
+def forum_contacts(x, landed, P, TT):
+    """After the step's move: OnCollisionStay2D's wall flags (only outside no_input: a contact with a wall within
+    the skin, or the floor, refreshes them from the 0.1 u rays; no contact at all clears them, as OnCollisionExit),
+    and a landing that was a hard one (DoHardLanding)."""
+    mode = x[MODE]
+    if mode == M_NORMAL or mode == M_DASH or mode == M_HARD_LAND:
+        reach = P[P_SKIN] + P[P_W_CONTACT]
+        if x[GROUND] > 0 or wall_near(x[PX], x[PY], -1.0, reach, P, TT) or wall_near(x[PX], x[PY], 1.0, reach, P, TT):
+            if wall_near(x[PX], x[PY], -1.0, P[P_W_TRAY], P, TT):
+                x[WTOUCH] = -1.0
+            elif wall_near(x[PX], x[PY], 1.0, P[P_W_TRAY], P, TT):
+                x[WTOUCH] = 1.0
+            else:
+                x[WTOUCH] = 0.0
+        else:
+            x[WTOUCH] = 0.0
+    if landed and x[HARD] > 0 and (mode == M_NORMAL or mode == M_DASH or mode == M_SPRINT):
+        x[MODE] = M_HARD_LAND
+        x[MODE_T] = 0.0
+        x[HARD] = 0.0
+        x[VX] = 0.0
+        x[VY] = 0.0
+        x[ATTACKING] = 0.0
+        x[DASH_T] = 0.0
+
+
+@njit(cache=True, error_model="numpy")
+def forum_fall_check(x, dt, P):
+    """FallCheck at the start of Update: whether the hero is falling, and the hard-landing fall timer."""
+    falling = x[VY] <= EPS_F and x[GROUND] <= 0
+    if (np.int64(P[P_ABIL]) & AB_HARD_LAND) != 0:
+        m = x[MODE]
+        ctl = not relinq(m) or m == M_SPRINT
+        if falling and ctl and x[VY] <= -P[P_MAXFALL] and x[WSIDE] == 0:
+            x[FALL_T] = f32(x[FALL_T] + dt)
+        else:
+            x[FALL_T] = 0.0
+        if x[FALL_T] > P[P_HARD_FALL]:
+            x[HARD] = 1.0
+    return falling
+
+
+@njit(cache=True, error_model="numpy")
+def forum_look_for_input(x, mask, pressed, falling, P, TT):
+    """LookForInput's wall part (after the move input is read): start a slide when pressing into a touched wall,
+    a down press drops off, pressing back after WJLOCK_STEPS_SHORT ends a wall jump's lock."""
+    if x[MODE] != M_NORMAL:
+        return
+    ab = np.int64(P[P_ABIL])
+    if (ab & AB_WALL) != 0 and x[WTOUCH] != 0 and x[ATTACKING] <= 0 and can_start_wallslide(x, falling, P, TT):
+        begin_wallslide(x, True, mask)
+    left = (mask & B_LEFT) != 0
+    right = (mask & B_RIGHT) != 0
+    if x[WSIDE] != 0 and (pressed & B_DOWN) != 0 and not (x[WTOUCH] < 0 and left) and not (x[WTOUCH] > 0 and right):
+        cancel_wallslide(x)
+        x[FACE] = -x[FACE]
+    if x[WLOCK] >= P[P_WJ_SHORT] and ((x[WJ_DIR] < 0 and right) or (x[WJ_DIR] > 0 and left)):
+        x[WLOCK] = -1.0
+
+
+@njit(cache=True, error_model="numpy")
+def forum_jump_press(x, mask, pressed, P, TT):
+    """LookForQueueInput's jump part that the Hunter rules do not have: a queued wall-jump interrupt, a wall jump,
+    the glide, and the interrupt queue. Returns True when the press (or the queue) was used here."""
+    if x[MODE] != M_NORMAL:
+        return False
+    ab = np.int64(P[P_ABIL])
+    if x[WJQ] > 0:
+        x[WJQ] = 0.0
+        if (ab & AB_WALL) != 0:             # TryDoWallJumpFromMove: CanWallJump(false), ForceTouchingWall
+            x[WTOUCH] = x[FACE]
+            do_wall_jump(x, P)
+        return True
+    if (pressed & B_JUMP) == 0:
+        return False
+    if (ab & AB_WALL) != 0 and (x[WSIDE] != 0 or (x[WTOUCH] != 0 and x[GROUND] <= 0 and chain_ok(x))):
+        do_wall_jump(x, P)
+        return True
+    can_jump = x[JUMPING] <= 0 and x[BOUNCE] < 0 and x[DS_REC] < 0 and (x[GROUND] > 0 or x[LEDGE] > 0)
+    if can_jump:
+        return False
+    if x[WLOCK] < 0 and can_float(x, P, TT):
+        start_glide(x, mask, P)
+        return True
+    return queue_wj_interrupt(x, P, TT)
+
+
+@njit(cache=True, error_model="numpy")
+def forum_dash_input(x, mask, pressed, P):
+    """LookForQueueInput's dash part: a press, or a queued one (DASH_QUEUE_STEPS) still held."""
+    if (np.int64(P[P_ABIL]) & AB_DASH) == 0:
+        return
+    if (mask & B_DASH) == 0:
+        x[DQ] = -1.0                      # LookForInput: released -> not queuing
+        return
+    if (pressed & B_DASH) != 0:
+        if can_dash(x, P):
+            hero_dash(x, mask, P)
+        else:
+            x[DQ] = 0.0
+    elif 0 <= x[DQ] <= P[P_DQ] and can_dash(x, P):
+        hero_dash(x, mask, P)
+
+
+@njit(cache=True, error_model="numpy")
+def forum_after_queue(x, mask, pressed, mode0, dt, P, TT):
+    """After LookForQueueInput: the wall slide checks and the cling, the FSM-driven moves' Update side (phase
+    timers and transitions), cooldowns, and LateUpdate's wall velocity."""
+    ab = np.int64(P[P_ABIL])
+    if x[WSIDE] != 0:
+        x[AIRDASHED] = 0.0
+        if x[GROUND] > 0 or x[WTOUCH] == 0:
+            x[FACE] = -x[FACE]
+            cancel_wallslide(x)
+        elif x[MODE] != M_NORMAL or not can_start_wallslide(x, True, P, TT):
+            cancel_wallslide(x)
+        if x[WSIDE] != 0:
+            was = x[CLING] > 0
+            mv = move_of(mask)
+            cl = (x[CLING_CD] <= 0 and (ab & AB_CLING) != 0
+                  and ((x[WSIDE] < 0 and mv < 0) or (x[WSIDE] > 0 and mv > 0)))
+            x[CLING] = 1.0 if cl else 0.0
+            if cl:
+                grav_off(x)
+            elif was:
+                x[CLING_CD] = P[P_W_CCD]
+    else:
+        x[WSTICK] = 0.0
+        if x[WSLASH] > 0:                 # CancelAttack
+            x[WSLASH] = 0.0
+            x[ATTACKING] = 0.0
+    # cooldowns (Update)
+    if x[CLING_CD] > 0:
+        x[CLING_CD] = f32(x[CLING_CD] - dt)
+    if x[DASH_CD] > 0:
+        x[DASH_CD] = f32(x[DASH_CD] - dt)
+    if x[GL_CD] > 0:
+        x[GL_CD] = f32(x[GL_CD] - dt)
+    mode = x[MODE]
+    if mode0 == mode and (mode == M_GLIDE or mode == M_SPRINT or mode == M_RPR_DS or mode == M_HARD_LAND):
+        x[MODE_T] = f32(x[MODE_T] + dt)
+    if mode == M_GLIDE:
+        ph = x[PHASE]
+        if x[GROUND] > 0:                 # LAND -> Land -> Relinquish Control
+            regain(x, mask)
+            x[GL_CD] = P[P_GL_CD]
+        elif ph == 0 and ge32(x[MODE_T], P[P_GL_ANTIC]):
+            x[PHASE] = 1.0                # Damager? -> Inflate: gravity off, UmbrellaMotionX OnEnter
+            x[MODE_T] = 0.0
+            grav_off(x)
+            x[VX] = umbrella_x(x[VX], mask, P[P_GL_ACC], P[P_GL_DEC], P[P_GL_VMAX])
+        elif ph == 1 and ge32(x[MODE_T], P[P_GL_INFLATE]):
+            x[PHASE] = 2.0                # Start (vy 0.5) -> Float Idle (AccelerateToY, UmbrellaMotionX OnEnter)
+            x[MODE_T] = 0.0
+            x[VY] = accel_to(P[P_GL_START_VY], P[P_GL_VYACC], P[P_GL_VY])
+            x[VX] = umbrella_x(x[VX], mask, P[P_GL_ACC], P[P_GL_DEC], P[P_GL_VMAX])
+        elif ph == 2 and (mask & B_JUMP) == 0:
+            x[PHASE] = 3.0                # END -> Deflate: gravity back
+            x[MODE_T] = 0.0
+            grav_on(x)
+        elif ph == 3 and ge32(x[MODE_T], P[P_GL_DEFLATE]):
+            regain(x, mask)
+            x[GL_CD] = P[P_GL_CD]
+        if x[MODE] == M_GLIDE and (x[PHASE] == 2 or (x[PHASE] == 1 and x[MODE_T] >= 0.075) or x[PHASE] == 3):
+            if (pressed & B_ATTACK) != 0 or ((pressed & B_DASH) != 0 and (ab & AB_DASH) != 0):
+                regain(x, mask)           # Attack Cancel / Dash Cancel: control back, the press acts this frame
+                x[GL_CD] = P[P_GL_CD]
+        if x[MODE] == M_GLIDE and (x[PHASE] == 1 or x[PHASE] == 2):
+            rx, ry = rend_x(x), rend_y(x)
+            bl = hray(rx, ry, -1.0, P[P_GL_BRAY], TT)
+            br = hray(rx, ry, 1.0, P[P_GL_BRAY], TT)
+            if bl != br:                  # Bump L / R: into a wall slide, or pushed off the wall
+                side = -1.0 if bl else 1.0
+                toward = (mask & (B_LEFT if bl else B_RIGHT)) != 0
+                if (ab & AB_WALL) != 0 and toward:
+                    regain(x, mask)       # SetStartWithWallslide: the slide starts from the touch
+                    x[FACE] = side
+                    x[GL_CD] = P[P_GL_CD]
+                else:
+                    x[VX] = -side * P[P_GL_BVX]
+                    if bl:
+                        x[VY] = min(x[VY], -0.5)
+    elif mode == M_SPRINT:
+        ph = x[PHASE]
+        if ph == 0 and ge32(x[MODE_T], P[P_ASPR_T]):
+            x[PHASE] = 1.0
+        ph = x[PHASE]
+        wall = wall_near(x[PX], x[PY], x[FACE], P[P_SKIN] + P[P_W_CONTACT], P, TT)
+        if ph <= 1:
+            if x[GROUND] > 0:             # LAND -> Land: sprint on if the dash is held
+                if (mask & B_DASH) != 0:
+                    x[PHASE] = 2.0
+                    x[SP_X] = x[FACE] * P[P_SPR_SPEED]
+                else:
+                    regain(x, mask)
+            elif wall or (ph == 1 and (mask & B_DASH) == 0):
+                regain(x, mask)           # END
+            elif (pressed & (B_ATTACK | B_JUMP)) != 0:
+                regain(x, mask)           # Attack Cancel / Queue Sprint Jump: control back, the press acts
+        elif ph == 2:
+            if (mask & B_DASH) == 0:
+                x[PHASE] = 3.0            # released: skid
+                x[MODE_T] = 0.0
+            elif x[GROUND] <= 0:
+                x[PHASE] = 0.0            # Allow Air Jump -> Air Sprint (the ground target speed kept)
+                x[MODE_T] = 0.0
+            elif (pressed & (B_ATTACK | B_JUMP)) != 0 or wall:
+                regain(x, mask)
+        elif ph == 3 and ge32(x[MODE_T], P[P_SKID_T]):
+            regain(x, mask)
+    elif mode == M_RPR_DS:
+        ph = x[PHASE]
+        if ph == 0 and ge32(x[MODE_T], P[P_RPR_ANTIC]):
+            x[PHASE] = 1.0                # Rpr Downslash: v = 0, then SetVelocityByScale (forward, down)
+            x[MODE_T] = 0.0
+            x[VX] = x[FACE] * P[P_RPR_SPEED]
+            x[VY] = -P[P_RPR_SPEED]
+        elif ph == 1 and ge32(x[MODE_T], P[P_RPR_SLASH]):
+            x[PHASE] = 2.0                # Fall: gravity back
+            x[MODE_T] = 0.0
+            grav_on(x)
+        elif ph == 2 and ge32(x[MODE_T], P[P_RPR_FALL]):
+            x[PHASE] = 3.0
+            x[MODE_T] = 0.0
+        elif ph == 3 and ge32(x[MODE_T], P[P_RPR_FALL2]):
+            regain(x, mask)               # End (FinishDownspike: the downspike recovery starts)
+            x[DS_REC] = 0.0
+        if x[MODE] == M_RPR_DS and x[PHASE] >= 2 and (pressed & B_DASH) != 0 and (ab & AB_DASH) != 0:
+            regain(x, mask)               # Rpr DashCancel
+    elif mode == M_HARD_LAND:
+        if gt32(x[MODE_T], P[P_HARD_LAND]):
+            x[MODE] = M_NORMAL
+            x[MODE_T] = 0.0
+    # LateUpdate: the wall slide's own vertical velocity (per rendered frame)
+    if x[WSIDE] != 0:
+        vy = x[VY]
+        if x[CLING] > 0:
+            if vy < P[P_W_CVMIN]:
+                vy = P[P_W_CVMIN]
+            if vy < 0:
+                vy = f32(vy + P[P_W_CDECEL] * dt)
+            elif vy > 0:
+                vy = 0.0
+            x[WSTICK] = 0.0
+        elif x[WSTICK] < P[P_W_STICK]:
+            vy = 0.0
+            x[WSTICK] = f32(x[WSTICK] + dt)
+        else:
+            vy = f32(vy + P[P_W_ACCEL] * dt)
+        x[VY] = vy
+
+
+@njit(cache=True, error_model="numpy")
+def forum_attack(x, mask, P):
+    """Attack's wall and Reaper parts, after DoAttack decided the direction: a side slash while wall sliding is the
+    wall slash (Reaper: vy halved, at least -5; the slide goes on), an up slash shoves 0.8 u off the wall and ends
+    the slide, a down attack ends it; the Reaper down attack is the Crest Attacks FSM's Rpr Downslash. Returns True
+    when it started the Reaper down slash."""
+    ab = np.int64(P[P_ABIL])
+    up = (mask & B_UP) != 0
+    down = not up and (mask & B_DOWN) != 0 and x[GROUND] <= 0
+    if x[WSIDE] != 0:
+        if not up and not down:
+            if (ab & AB_WALLSLASH_SLOW) != 0:
+                x[VY] = x[VY] / 2.0
+                if x[VY] < P[P_W_SLASH_VMIN]:
+                    x[VY] = P[P_W_SLASH_VMIN]
+            x[WSLASH] = 1.0
+        else:
+            if up:
+                x[PX] = x[PX] - x[FACE] * P[P_W_SHOVE]
+            x[FACE] = -x[FACE]
+            cancel_wallslide(x)
+    if down and (ab & AB_RPR_DOWN) != 0:
+        relinquish_nv(x)
+        grav_off(x)
+        x[MODE] = M_RPR_DS
+        x[PHASE] = 0.0
+        x[MODE_T] = 0.0
+        x[VX] = umbrella_x(x[VX], mask, P[P_RPR_ACC], P[P_RPR_DEC], P[P_RPR_VMAX])
+        return True
+    return False
+
+
 # ---- one physics step, contact events, one Update ---------------------------------------------------------------
 
 @njit(cache=True, inline="always", error_model="numpy")
@@ -199,9 +959,14 @@ def fixed_step(x, P, TT):
         else:
             x[RSTEPS] = x[RSTEPS] - 1
 
+    ab = np.int64(P[P_ABIL])
     mv = 0.0 if (x[DS_REC] >= 0 and x[GROUND] > 0) else x[MOVE]
     vx = mv * P[P_RUN] if normal else x[VX]
     can_turn = normal and not (x[ATTACKING] > 0 and x[ATK_T] < P[P_ATK_REC])
+    if ab != 0 and normal and (x[WSIDE] != 0 or x[WLOCK] >= 0):
+        can_turn = False                  # DoMovement: no turning while wall sliding or wall locked
+        if x[WSIDE] != 0:
+            vx = x[VX]                    # Move: no input velocity while wall sliding
     sg = 1.0 if mv > 0 else (-1.0 if mv < 0 else 0.0)
     if can_turn and mv != 0 and sg != x[FACE]:
         x[FACE] = sg
@@ -236,6 +1001,10 @@ def fixed_step(x, P, TT):
             x[MODE_T] = f32(x[MODE_T] + np.float32(fdt))
     mode = x[MODE]
     rlq = relinq(mode)
+    if ab != 0:
+        vx, vy = forum_fixed(x, vx, vy, mode == M_NORMAL, P, TT)
+        mode = x[MODE]
+        rlq = relinq(mode)
 
     if mode == M_DS_ANTIC and not ge32(x[MODE_T], P[P_DS_ANTIC]):
         vx = vx * P[P_DS_DECEL]
@@ -280,6 +1049,8 @@ def fixed_step(x, P, TT):
     elif ground:
         x[AIRHANG] = 0.0
     ctl = not rlq and not noinp
+    if ab != 0 and x[WSIDE] != 0:
+        ctl = False                       # gravity scale is left alone while wall sliding
     gs = x[GS]
     if ctl and gs < 1.0:
         gs = gs + P[P_AH_ACC] * fdt
@@ -327,6 +1098,8 @@ def fixed_step(x, P, TT):
         x[VY] = P[P_DS_ENDVY]
     if (lands or land_sp) and not was:
         x[LANDQ] = 1.0
+    if ab != 0:
+        forum_contacts(x, lands, P, TT)
 
 
 @njit(cache=True, inline="always", error_model="numpy")
@@ -431,6 +1204,10 @@ def apply_events(x, ev, P):
         bit = EV_HURT_L if b == 0 else EV_HURT_R
         side = -1.0 if b == 0 else 1.0
         if (ev & bit) != 0:
+            if P[P_ABIL] != 0:            # the damage ends a wall slide, a glide, a dash or an FSM move
+                cancel_wallslide(x)
+                x[WLOCK] = -1.0
+                x[DASH_T] = 0.0
             x[MODE] = M_HURT_FREEZE
             x[MODE_T] = 0.0
             x[MODE_N] = 0.0
@@ -478,6 +1255,11 @@ def do_attack(x, mask, P):
     want = 1.0 if (mask & B_RIGHT) != 0 else (-1.0 if (mask & B_LEFT) != 0 else 0.0)
     if want != 0:
         x[FACE] = want
+    if P[P_ABIL] != 0 and forum_attack(x, mask, P):
+        x[ATK_T] = 0.0                    # Reaper down slash: DidAttack's cooldown, the FSM has control
+        x[ATK_CD] = P[P_ATK_CD]
+        x[AQ] = -1.0
+        return
     down = (mask & B_UP) == 0 and (mask & B_DOWN) != 0 and x[GROUND] <= 0
     if not down:
         x[ATTACKING] = 1.0
@@ -495,24 +1277,34 @@ def do_attack(x, mask, P):
 
 
 @njit(cache=True, inline="always", error_model="numpy")
-def update(x, mask, ev, dt, udt, P):
+def update(x, mask, ev, dt, udt, P, TT):
     mode = x[MODE]
     mode0 = mode
     prev = np.int64(x[PREV])
     pressed = mask & ~prev
     normal = mode == M_NORMAL
     accept = normal or noinput(mode)
+    ab = np.int64(P[P_ABIL])
+    falling = False
+    if ab != 0:
+        falling = forum_fall_check(x, dt, P)
+        if mode == M_DASH or mode == M_HARD_LAND:
+            accept = True                 # hero_state is not no_input: LookForInput reads the move input
 
     move = (1.0 if (mask & B_RIGHT) != 0 else 0.0) - (1.0 if (mask & B_LEFT) != 0 else 0.0)
     jheld = (mask & B_JUMP) != 0
     if accept:
         x[MOVE] = move
         x[JHELD] = 1.0 if jheld else 0.0
+        if ab != 0:
+            forum_look_for_input(x, mask, pressed, falling, P, TT)
         if not jheld:
             if x[VY] > 0 and x[JDSTEPS] >= P[P_JSTEPS_MIN]:
                 x[VY] = x[VY] * P[P_REL]
                 x[JUMPING] = 0.0
                 x[JSTEPS] = 0.0
+                if ab != 0:
+                    x[WLOCK] = -1.0       # CancelJump ends a wall jump's lock
             x[JQ] = -1.0
         if (mask & B_ATTACK) == 0:
             x[AQ] = -1.0
@@ -534,15 +1326,23 @@ def update(x, mask, ev, dt, udt, P):
         x[ATK_T] = f32(x[ATK_T] + dt)
         if ge32(x[ATK_T], P[P_ATK_DUR]):
             x[ATTACKING] = 0.0
+            if ab != 0:
+                x[WSLASH] = 0.0           # ResetAttacks
 
+    used = False
+    if ab != 0:
+        used = forum_jump_press(x, mask, pressed, P, TT)
     normal = x[MODE] == M_NORMAL
     ground = x[GROUND] > 0
     can_jump = normal and x[JUMPING] <= 0 and x[BOUNCE] < 0 and x[DS_REC] < 0 and (ground or x[LEDGE] > 0)
-    jp = (pressed & B_JUMP) != 0
+    jp = (pressed & B_JUMP) != 0 and not used
     if jp and not can_jump:
         x[JQ] = 0.0
     if jp and can_jump:
         hero_jump(x, P)
+    if ab != 0:
+        forum_dash_input(x, mask, pressed, P)
+        normal = x[MODE] == M_NORMAL
     downish = (mask & B_DOWN) != 0 and (mask & B_UP) == 0
     can_down = x[BOUNCE] < 0 and x[DS_REC] < 0
     bind_first = normal and (pressed & B_BIND) != 0 and x[SILK] >= P[P_BIND_SILK]
@@ -571,6 +1371,9 @@ def update(x, mask, ev, dt, udt, P):
         want = 1.0 if (mask & B_RIGHT) != 0 else (-1.0 if (mask & B_LEFT) != 0 else 0.0)
         if want != 0:
             x[FACE] = want
+        if ab != 0:
+            cancel_wallslide(x)
+            x[WLOCK] = -1.0
         x[MODE] = M_CAST
         x[MODE_T] = 0.0
         x[PHASE] = 0.0
@@ -590,6 +1393,9 @@ def update(x, mask, ev, dt, udt, P):
         do_attack(x, mask, P)
     normal = x[MODE] == M_NORMAL
     if normal and (pressed & B_BIND) != 0 and x[SILK] >= P[P_BIND_SILK]:
+        if ab != 0:
+            cancel_wallslide(x)
+            x[WLOCK] = -1.0
         x[MODE] = M_BIND
         x[MODE_T] = 0.0
         x[SILK] = x[SILK] - P[P_BIND_SILK]
@@ -602,6 +1408,8 @@ def update(x, mask, ev, dt, udt, P):
         else:
             x[VX] = 0.0
             x[VY] = 0.0
+    if ab != 0:
+        forum_after_queue(x, mask, pressed, mode0, dt, P, TT)
 
     # timers
     if x[ATK_CD] > 0:
@@ -743,7 +1551,7 @@ def run_lane(r, v, o, S0, masks, events, dts, fss, udts, ft_v, alpha_sel, alpha_
             for _ in range(steps):
                 fixed_step(x, p, TT)
             apply_events(x, ev, p)
-            update(x, m, ev, dt, udt, p)
+            update(x, m, ev, dt, udt, p, TT)
         fl = flags_of(x)
         if o >= 0:
             phys[o, t, 0] = x[PX]
