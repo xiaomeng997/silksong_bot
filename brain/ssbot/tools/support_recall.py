@@ -88,8 +88,10 @@ def run_fight(fight: dict, fc, view: str, lags: list[int], stats: dict, misses: 
     filt = None
     noise = None
     if view in ("ve", "ve_dust"):
-        from ssbot.train.planner_policy import DUST_TELL
-        filt = ObservabilityFilter(bosses=bosses, tells=DUST_TELL if view == "ve_dust" else None)
+        from ssbot.train.planner_policy import DUST_TELL, TELL_ONSET
+        filt = ObservabilityFilter(bosses=bosses, tells=DUST_TELL if view == "ve_dust" else None,
+                                   tell_onset=TELL_ONSET)
+        filt.reset(noise_seed if noise_seed is not None else 0)       # the cue onsets' draws
         if noise_seed is not None:
             from ssbot.backends.noise_simple import SimpleNoise
             noise = SimpleNoise(seed=noise_seed)

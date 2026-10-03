@@ -764,13 +764,39 @@ def test_a_bell_cue_shows_an_undrawn_drop_bell(wake):
         pytest.skip("no drop bell in the fixture window")
     f = ObservabilityFilter(bosses=[BELL_BEAST], tells={"BoneBeast DropBell M2": {"Antic": [(0.3, "bell_dust")]}})
     out = []
-    for k, tau in enumerate((0.1, 0.35)):
+    for k, (tau, dx) in enumerate(((0.1, 0.0), (0.35, 0.0), (0.4, 40.0))):
         w = copy.deepcopy(wake[i + k])
         bell = next(e for e in w.entities if e.type_key.v.startswith("BoneBeast DropBell"))
         bell.type_key = E("BoneBeast DropBell M2")
         bell.fsm = [("Control", "Antic", tau)]
+        bell.pos = E((w.hero.pos.v[0] + dx, bell.pos.v[1]), conf=1.0)    # its column inside the image, then not
         bell.render_box, bell.dmg_boxes, bell.body_polys = None, [], []
         out.append(next((e for e in f.apply(w).entities if e.id == bell.id), None))
     assert out[0] is None
     assert out[1] is not None and out[1].phase.top == "bell_dust" and out[1].hidden and out[1].pos.conf == 1.0
     assert out[1].fsm is None and out[1].dmg_boxes == []
+    assert out[2] is None                         # task V review: a cue outside the image is not shown
+
+
+def test_tell_onsets_are_drawn_in_their_bracket():
+    """tell_onset (task V review): each cue's onset is drawn once, uniform in the bracket the screenshots give its
+    nominal delay ((0.1, 0.3] for the dust, (0.3, 0.6] for the low / tall), reproducible from the reset seed."""
+    from ssbot.train.planner_policy import TELL_ONSET
+    spec = [(0.3, "dust"), (0.6, "dust_low")]
+    f = ObservabilityFilter(bosses=[BELL_BEAST], tells={}, tell_onset=TELL_ONSET)
+    f.reset(5)
+    first, second = [], []
+    for iid in range(300):
+        for tau in np.arange(0.0, 0.7, 1 / 60):
+            due = f._due(iid, "Emerge Antic C", spec, float(tau), 100.0 + float(tau))
+            if due and not first[iid:]:
+                first.append(float(tau))
+            if len(due) == 2 and not second[iid:]:
+                second.append(float(tau))
+    assert len(first) == len(second) == 300
+    assert 0.1 < min(first) and max(first) <= 0.3 + 1 / 60 and np.std(first) > 0.04
+    assert 0.3 < min(second) and max(second) <= 0.6 + 1 / 60
+    g = ObservabilityFilter(bosses=[BELL_BEAST], tells={}, tell_onset=TELL_ONSET)
+    g.reset(5)
+    assert [g._due(i, "Emerge Antic C", spec, 0.2, 100.2) for i in range(20)] == \
+        [ObservabilityFilter._due(f, i, "Emerge Antic C", spec, 0.2, 100.2) for i in range(20)]

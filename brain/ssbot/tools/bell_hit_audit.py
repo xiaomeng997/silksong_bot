@@ -36,7 +36,7 @@ def run_fight(row: dict, run: Path, view: str, noise_seed: int, model, tpls, mon
     from ssbot.record.recorder import RecordingReader
     from ssbot.tools.postmortem import find_recording
     from ssbot.train.bell_hit_monitor import BellHitMonitor
-    from ssbot.train.planner_policy import COMFORT, HORIZON_S, MARGIN_ORACLE, NOISE_K, TELLS
+    from ssbot.train.planner_policy import COMFORT, HORIZON_S, MARGIN_ORACLE, NOISE_K, TELL_ONSET, TELLS
 
     r = RecordingReader(find_recording(run, row))
     f1 = row["f_end"]
@@ -53,7 +53,8 @@ def run_fight(row: dict, run: Path, view: str, noise_seed: int, model, tpls, mon
         sg = NOISE_K * math.hypot(SIGMA_HERO_U, SIGMA_POS_U[Kind.BOSS])
         margin, fview = (MARGIN_ORACLE[0] + sg, MARGIN_ORACLE[1] + sg), VISION_EQUIVALENT
         backend = DegradedOracleBackend(OracleBackend(bosses=[BELL_BEAST]),
-                                        ObservabilityFilter(bosses=[BELL_BEAST], tells=TELLS[view]))
+                                        ObservabilityFilter(bosses=[BELL_BEAST], tells=TELLS[view],
+                                                            tell_onset=TELL_ONSET))
         backend.reset(noise_seed)
     fc = Forecaster(model, fview, margin=margin, templates=tpls(margin), comfort=COMFORT)
     fc.bell_tells = view == "degraded_dust"

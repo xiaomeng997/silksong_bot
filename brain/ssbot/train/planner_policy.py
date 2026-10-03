@@ -79,6 +79,8 @@ DUST_TELL = {"Bone Beast": {"Emerge Antic C": [(0.3, "dust"), (0.6, "dust_low")]
                             "Burst Antic": [(0.3, "dust_burst")]}} | {
     f"BoneBeast DropBell {b}": {"Antic": [(0.3, "bell_dust")]} for b in ("L", "L2", "M", "M2", "R", "R2")}
 BURST_TELL = {"Bone Beast": {"Burst Antic": "burst_tell"}}
+# each cue's onset drawn in the bracket the screenshots give its nominal delay (forecast.TELL_DELAY; task V review)
+TELL_ONSET = {0.3: (0.1, 0.3), 0.6: (0.3, 0.6)}
 TELLS = {"degraded": None, "degraded_dust": DUST_TELL, "degraded_tell": BURST_TELL}
 # Vision view: the attack fit (combat.attack_fit) re-times the boss's predicted path; off by default since the tracker
 # anchors the attack's start at every drawn phase's entry (task V, boss_path_audit --view degraded_dust on live run
@@ -319,7 +321,8 @@ class PlannerPolicy:
             self.k = 0
         else:
             self.backend = DegradedOracleBackend(OracleBackend(bosses=[self.spec]),
-                                                 ObservabilityFilter(bosses=[self.spec], tells=TELLS[self.view]))
+                                                 ObservabilityFilter(bosses=[self.spec], tells=TELLS[self.view],
+                                                                     tell_onset=TELL_ONSET))
             self.k = self.backend.reset(seed)
         if self.terrain_tap is not None:
             msg = self.terrain_tap.wait(enc.scene, timeout_s=5.0)

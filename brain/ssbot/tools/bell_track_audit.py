@@ -42,10 +42,11 @@ def audit(states: list[dict], seed: int, out: dict, slack: tuple) -> None:
     from ssbot.combat.pogo_targets import load_registry
     from ssbot.combat.bell_track import DropBellTracks
     from ssbot.core.bosses import BELL_BEAST
-    from ssbot.train.planner_policy import DUST_TELL
+    from ssbot.train.planner_policy import DUST_TELL, TELL_ONSET
     spec = next(s for s in load_registry() if s.prefix == DROP_BELL)
     be = OracleBackend(bosses=[BELL_BEAST])
-    filt = ObservabilityFilter(bosses=[BELL_BEAST], tells=DUST_TELL)
+    filt = ObservabilityFilter(bosses=[BELL_BEAST], tells=DUST_TELL, tell_onset=TELL_ONSET)
+    filt.reset(seed)
     noise = SimpleNoise(seed=seed)
     tracks = DropBellTracks(spec)
     tg = np.zeros(len(states))
@@ -146,10 +147,11 @@ def audit_atk(states: list[dict], seed: int, out: dict, slack: tuple) -> None:
     from ssbot.combat.pogo_targets import load_registry, simulate
     from ssbot.core.bosses import BELL_BEAST
     from ssbot.core.worldstate import VISION_EQUIVALENT
-    from ssbot.train.planner_policy import DUST_TELL
+    from ssbot.train.planner_policy import DUST_TELL, TELL_ONSET
     spec = next(s for s in load_registry() if s.prefix == ATK_BELL)
     be = OracleBackend(bosses=[BELL_BEAST])
-    filt = ObservabilityFilter(bosses=[BELL_BEAST], tells=DUST_TELL)
+    filt = ObservabilityFilter(bosses=[BELL_BEAST], tells=DUST_TELL, tell_onset=TELL_ONSET)
+    filt.reset(seed)
     noise = SimpleNoise(seed=seed)
     tracks = AtkBellTracks(spec)
     bt = BossTracker(BossModel.load(), VISION_EQUIVALENT)

@@ -154,13 +154,18 @@ PHASE_FAMILY = {"emerge": "BB_CHARGE", "charge_antic": "BB_CHARGE", "charge": "B
 # +0.3 s after Emerge Antic C / L and Burst Antic; low for a charge, a tall column with debris for a leap, told apart
 # for certain at +0.6 s. "dust": at an anchor, charge or leap not yet told; "dust_low" / "dust_tall": a charge / a
 # leap; "dust_burst": inside the burst range (bursts erupt at x 81.2-91.2, charges and leaps at the anchors 75.03 /
-# 95.72). The antic began TELL_DELAY before the cue, give or take TELL_SLACK_S (when vision would first see it).
+# 95.72). The antic began TELL_DELAY before the cue, give or take TELL_SLACK_S: the screenshots bracket a cue's onset
+# to (0.1, 0.3] s after the antic began (the low / tall told apart: (0.3, 0.6] s), and the simulated view draws each
+# cue's onset in that bracket (ObservabilityFilter tell_onset, planner_policy.TELL_ONSET; task V review: it showed the
+# cue at the FSM timer's exact 0.3 s, which the forecaster inverted to +-0.1 s): the bracket's middle, half its width
+# plus a frame. A low / tall dust after a plain one is timed by the plain one (the narrower bracket).
 # "burst_tell": the burst position from the antic's first frame, the first experiment (run 20261002_061942).
 TELL_PHASES = frozenset(("burst_tell", "dust", "dust_low", "dust_tall", "dust_burst"))
 EMERGE_TELLS = frozenset(("dust", "dust_low", "dust_tall"))
-TELL_DELAY = {"burst_tell": 0.0, "dust": 0.3, "dust_low": 0.6, "dust_tall": 0.6, "dust_burst": 0.3, "bell_dust": 0.3}
-TELL_SLACK_S = {"burst_tell": BIN, "dust": 0.1, "dust_low": 0.1, "dust_tall": 0.1, "dust_burst": 0.1,
-                "bell_dust": 0.1}
+TELL_DELAY = {"burst_tell": 0.0, "dust": 0.2, "dust_low": 0.45, "dust_tall": 0.45, "dust_burst": 0.2,
+              "bell_dust": 0.2}
+TELL_SLACK_S = {"burst_tell": BIN, "dust": 0.1 + BIN, "dust_low": 0.15 + BIN, "dust_tall": 0.15 + BIN,
+                "dust_burst": 0.1 + BIN, "bell_dust": 0.1 + BIN}
 # A drop bell's cue: a narrow dust column from the ceiling at its x, from +0.3 s after it arms (Antic; none at +0.1 s;
 # it falls about 1.25 s after arming), screenshots C:/ssbot/sandbox/m2_tells DropBell_*. The vision view places its
 # self template from the cue (arming TELL_DELAY earlier, +-TELL_SLACK_S) like the oracle view does from the FSM.
@@ -168,6 +173,14 @@ TELL_SLACK_S = {"burst_tell": BIN, "dust": 0.1, "dust_low": 0.1, "dust_tall": 0.
 # (planner_policy: NOISE_K x hypot(hero sigma, boss sigma 0.10)) covers a placement x this uncertain (1 sigma); a cue
 # seen in fewer frames is placed at its x +- SKIN_Z sigma as well.
 CUE_SIGMA_COVERED = 0.10
+# A cue shows only inside the image (ObservabilityFilter): one that comes into the image as the camera moves may be
+# older than its delay says. Its onset is then bounded by the last frame its x was inside the image (it was not out
+# yet then), at most VIS_HIST_S back, and a drop bell's arming by its Antic (it has not fallen: BELL_ANTIC_S, the FSM's
+# 1.25 s) - task V review, 2026-10-03.
+VIS_HIST_S = 2.5
+VIS_FLOOR_Y, VIS_CEIL_Y = 3.0, 13.74
+BELL_ANTIC_S = 1.25
+_VIS_XS = np.arange(55.0, 115.01, 0.25)
 DUST_ROOTS = (("BB_CHARGE", "Emerge Antic C"), ("BB_LEAP", "Emerge Antic L"))
 RECOVER_ROOT = {"BB_CHARGE": "Charge End", "BB_LEAP": "Leap Land"}
 # the state a hidden phase starts in, by the last drawn family (None: before the first emergence)
@@ -745,6 +758,22 @@ class Forecast:
         return box, ok
 
 
+def visible_x(cam, y: float) -> tuple[float, float] | None:
+    """The world x interval at height y that lies inside the image (the camera's projection; None: no camera)."""
+    if cam is None or cam.V is None or cam.P is None or cam.screen is None:
+        return None
+    from ssbot.tools.projector import mat4, project
+    pts = np.stack([_VIS_XS, np.full(len(_VIS_XS), y)], axis=1)
+    xy, ok = project(pts, mat4(cam.V), mat4(cam.P), cam.viewport, cam.screen)
+    rx, _ry, rw, _rh = cam.viewport
+    sw = cam.screen[0]
+    inside = ok & (xy[:, 0] >= rx * sw) & (xy[:, 0] <= (rx + rw) * sw)
+    if not inside.any():
+        return (math.inf, -math.inf)
+    v = _VIS_XS[inside]
+    return float(v.min()), float(v.max())
+
+
 @functools.lru_cache(maxsize=256)
 def _eroded_cached(key: bytes, n: int, starts: tuple, l: float, r: float, b: float, t: float):
     from shapely.affinity import translate
@@ -848,6 +877,10 @@ class BossTracker:
         self.bells: dict[int, tuple[str, float, tuple[float, float]]] = {}   # ORACLE: armed drop bells: (type,
         #                                                                    arm time, arm position)
         self.bells_unknown = False             # an armed drop bell whose arming was not seen
+        self.vis: list[tuple[float, tuple | None, tuple | None]] = []   # VE: (t, floor x range, ceiling x range)
+        self.tell_early: float | None = None   # VE: a boss cue that came into the image late: its earliest onset
+        self.tell_first: tuple[str, float] | None = None   # VE: the attack's first cue (phase, first seen)
+        self.bell_early: dict[int, float] = {}  # VE: ... a drop bell's cue: its earliest arming
         self._cued: set[int] = set()           # VE: drop bells with their cue in the last frame
         self._cue_obs: dict[int, list[tuple[float, float, float]]] = {}   # VE: the cue's detections (x, y, sigma)
         self.bell_sx: dict[int, float] = {}    # VE: 1 sigma of an armed bell's x (the mean of its cue detections)
@@ -932,8 +965,24 @@ class BossTracker:
         if self.view == ORACLE:
             self._update_oracle(ws, boss, t)
         else:
+            self.vis = [v for v in self.vis if v[0] >= t - VIS_HIST_S]
             self._update_ve(ws, boss, t)
+            self.vis.append((t, visible_x(ws.cam, VIS_FLOOR_Y), visible_x(ws.cam, VIS_CEIL_Y)))
         return boss
+
+    def last_seen_t(self, x: float, ceiling: bool, before: float) -> float | None:
+        """VE: the last frame before `before` whose image held x (at the floor or the ceiling); -inf: none in the
+        history; None: no camera, or no history yet (the fight's first frame: nothing to bound)."""
+        if not self.vis:
+            return None
+        last = -math.inf
+        for t, fl, ce in self.vis:
+            r = ce if ceiling else fl
+            if r is None:
+                return None
+            if t < before and r[0] <= x <= r[1]:
+                last = t
+        return last
 
     def _update_oracle(self, ws: WorldState, boss: Entity | None, t: float) -> None:
         m = self.model
@@ -1025,8 +1074,18 @@ class BossTracker:
             cued.add(e.id)
             if e.id not in self._cued:             # a new cue: this bell (re-)armed
                 t_arm = t - e.phase.t_in_phase - TELL_DELAY["bell_dust"]
+                if e.id in self.bells and t - self.bells[e.id][1] < BELL_ANTIC_S + 0.5:
+                    t_arm = min(t_arm, self.bells[e.id][1])    # its cue came back into the image: the same arming
                 self.bells[e.id] = (e.type_key.v, t_arm, (float(e.pos.v[0]), float(e.pos.v[1])))
                 self._cue_obs[e.id] = []
+                # a cue that came into the image late (its column was outside it on the frame before): armed after
+                # the last frame its column was in the image less the cue's delay, and less than the Antic ago
+                t_first = t - e.phase.t_in_phase
+                tv = self.last_seen_t(float(e.pos.v[0]), True, t_first - 1e-6)
+                if tv is not None and tv < t_first - 1.5 * BIN:
+                    self.bell_early[e.id] = max(tv - TELL_DELAY["bell_dust"], t - BELL_ANTIC_S)
+                else:
+                    self.bell_early.pop(e.id, None)
             obs = self._cue_obs.setdefault(e.id, [])
             if e.pos.age_ms <= 0.0:                # detected in this frame (a coasted cue's age grows)
                 s = e.pos.sigma if math.isfinite(e.pos.sigma) else 1.0
@@ -1044,6 +1103,7 @@ class BossTracker:
             if t - self.bells[iid][1] > BELL_TTL_S:
                 del self.bells[iid]
                 self.bell_sx.pop(iid, None)
+                self.bell_early.pop(iid, None)
 
     def _update_ve(self, ws: WorldState, boss: Entity | None, t: float) -> None:
         m = self.model
@@ -1057,6 +1117,18 @@ class BossTracker:
         if ph != self.state:
             prev = self.state
             self.state, self.t_entry = ph, t - tau
+            if ph in TELL_PHASES and prev not in TELL_PHASES:
+                self.tell_first = (ph, self.t_entry)
+            elif ph not in TELL_PHASES:
+                self.tell_first = None
+            if ph in TELL_PHASES and prev not in TELL_PHASES and boss.pos.conf > 0:
+                # a cue that came into the image late: its onset after the last frame its x was in the image
+                # (less the cue's delay), and after the boss went under
+                tv = self.last_seen_t(float(boss.pos.v[0]), False, self.t_entry - 1e-6)
+                late = tv is not None and tv < self.t_entry - 1.5 * BIN
+                self.tell_early = max(tv, self.t_hide if self.t_hide is not None else -math.inf) if late else None
+            elif ph not in TELL_PHASES:
+                self.tell_early = None
             if ph == HIDDEN:
                 self._obs = []
             if ph == HIDDEN:
@@ -1219,6 +1291,17 @@ class BossTracker:
         if self.state in TELL_PHASES:
             d, sl = TELL_DELAY[self.state], TELL_SLACK_S[self.state]
             lo, hi = e - d - sl, e - d + sl
+            tf = self.tell_first
+            if self.state in ("dust_low", "dust_tall") and tf is not None and tf[0] == "dust" \
+                    and self.tell_early is None:
+                # timed by the plain dust before it (its bracket is narrower), within this one's own
+                e0, d0, s0 = tf[1] - origin_t, TELL_DELAY["dust"], TELL_SLACK_S["dust"]
+                lo2, hi2 = max(lo, e0 - d0 - s0), min(hi, e0 - d0 + s0)
+                if lo2 <= hi2:
+                    lo, hi = lo2, hi2
+            if self.tell_early is not None:
+                # it came into the image late: it was not out yet at tell_early (or the boss was not under)
+                lo = min(lo, max(self.tell_early - origin_t - d, lo - VIS_HIST_S) - sl)
             if self.state in EMERGE_TELLS:
                 direction = self.tell_dir
             if self.state == "dust":
@@ -1442,6 +1525,8 @@ class Forecaster:
             # oracle: the arming frame; vision: from the cue, +-its slack in 1/60 s steps
             k = 0 if self.view == ORACLE else int(round(TELL_SLACK_S["bell_dust"] / BIN))
             for iid, (tk, t_arm, pos) in tr.bells.items():
+                # a cue that came into the image late: arming times back to its earliest (VE)
+                k_lo = k + (int(math.ceil((t_arm - tr.bell_early[iid]) / BIN)) if iid in tr.bell_early else 0)
                 key = f"{hb.SUPPORT}ent/{tk}/self"
                 if key not in self.meta:
                     continue
@@ -1450,7 +1535,7 @@ class Forecaster:
                 sx = tr.bell_sx.get(iid, 0.0)
                 dxs = (0.0,) if sx <= CUE_SIGMA_COVERED else (-SKIN_Z * sx, 0.0, SKIN_Z * sx)
                 own = []
-                for j in range(-k, k + 1):
+                for j in range(-k_lo, k + 1):
                     e = t_arm + j * BIN - origin
                     if e + t1 < -BIN or e + t0 > H + BIN:
                         continue

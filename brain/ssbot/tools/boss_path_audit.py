@@ -97,9 +97,10 @@ def audit_episode(states: list[dict], fc, want: set[str], every: int, out: dict,
         import random
         from ssbot.backends.degraded import DegradedOracleBackend
         from ssbot.backends.observability import ObservabilityFilter
-        from ssbot.train.planner_policy import TELLS
+        from ssbot.train.planner_policy import TELL_ONSET, TELLS
         be = DegradedOracleBackend(OracleBackend(bosses=[spec]), ObservabilityFilter(bosses=[spec],
-                                                                                    tells=TELLS[view]))
+                                                                                    tells=TELLS[view],
+                                                                                    tell_onset=TELL_ONSET))
         be.reset(random.Random(seed).randrange(1 << 30))     # PlannerPolicy.reset's draw: the live run's noise
     idx = {s["f"]: i for i, s in enumerate(states)}
     preds = []
