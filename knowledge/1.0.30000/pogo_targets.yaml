@@ -25,6 +25,10 @@ BoneBeast AtkBell:
       - {vx: 12.0, vy: 14.0}          # First Bounce: X Speed (+-1, L / R) x 12
       - {vx: keep, vy: 14.0, repeat: true}
     life_after_first_bounce_s: 2.0    # In Air: End Timer > 2 -> Dormant
+    # the launch (FSM Launch): drawn from that frame at y 0.954, x = the burst's transform -2 (L) / +2 (R), velocity
+    # (-1, 38) / (+1, 38): 100 of 100 launches of live run 20261002_171806 i0_000; vx is the magnitude here, its sign
+    # the side (the vision view's launch paths: ssbot.combat.bell_track.AtkBellTracks)
+    start: {y: 0.954, vx: 1.0, vy: 38.0}
 BoneBeast DropBell:
   shape: {circle: 1.274}
   states: [Drop, Air, Bounce Up, Bounce Air, Tink Right, Tink R Min, Tink Left, Tink L Min, Tink D, Tink Right 2,

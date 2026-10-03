@@ -68,7 +68,7 @@ from typing import NamedTuple
 
 import numpy as np
 
-from ssbot.combat.bell_track import DropBellTracks, SKIN_Z
+from ssbot.combat.bell_track import ATK_BELL, AtkBellTracks, DropBellTracks, SKIN_Z
 from ssbot.combat.boss_model import TAIL, Anchor, BossModel
 from ssbot.combat.fastquery import circle_hits, query_par
 from ssbot.combat.pogo_targets import TargetTracker, simulate
@@ -97,6 +97,12 @@ DET_SKIN_U = 0.1
 DET_REPLACE = os.environ.get("SSBOT_DET_BELLS", "1") != "0"   # SSBOT_DET_BELLS=0: the logged unions (A/B)
 # the vision view's drop-bell paths from their tracks (bell_track; SSBOT_DET_VE=0: the self templates, the A/B before)
 DET_VE = os.environ.get("SSBOT_DET_VE", "1") != "0"
+# the vision view's attack-bell paths from their tracks (bell_track.AtkBellTracks): a burst whose two bells are both on
+# exact paths drops the attack-bell unions of its Burst Recovery and tail (SSBOT_DET_ATK=0: the unions, the A/B before)
+DET_ATK = os.environ.get("SSBOT_DET_ATK", "1") != "0"
+ATK_LAUNCH_STATE = "Burst Out"     # the boss's state on the attack bells' Launch frame (100 of 100, 20261002_171806 i0)
+ATK_ANCHOR_TOL_U = 0.5             # a pair's middle this close to a burst's anchor is that burst's pair
+ATK_LAG_SLACK_S = 0.05
 # the vision view's certain boss form only until its observable phase can end (SSBOT_CERT_PHASE_CUT=0: diagnostics)
 CERT_PHASE_CUT = os.environ.get("SSBOT_CERT_PHASE_CUT", "1") != "0"
 DET_STATES = frozenset({"Drop", "Air", "Bounce Up", "Bounce Air", "Submerge", "Tink Right", "Tink R Min", "Tink Left",
@@ -138,7 +144,7 @@ HIDE_ROOT = {"BB_CHARGE": "Submerged", "BB_LEAP": "Submerged", "BB_BURST": "Burs
 
 
 class DetBell(NamedTuple):
-    """A drop bell on an exact path: its state (x, y, vx, vy, the index of its next bounce, the Submerge time left)
+    """A bell on an exact path: its state (x, y, vx, vy, the index of its next bounce, the Submerge time left)
     at path time t0 (the forecast origin is path time t0: 0 for the oracle view's logged state, the time since the
     drop for the vision view's track estimate), the bounce sides still open (None: both when the next bounce is
     random) and an extra contact skin (the vision view's x uncertainty)."""
@@ -153,6 +159,7 @@ class DetBell(NamedTuple):
     t0: float = 0.0
     sides: tuple | None = None
     skin: float = 0.0
+    life: float | None = None      # path time its collider goes off (an attack bell's End Timer), None: never
 
     def branch_sides(self) -> tuple:
         if self.sides is not None:
@@ -305,13 +312,14 @@ class Forecast:
         r = self._paths.get(key)
         if r is None:
             sp, bx, by, vx, vy, nb, rest, _, t0 = self.det[j][:9]
+            life = self.det[j].life
             t = np.maximum(tk + dt + t0, 0.0)
             if redirect is not None:
-                r = simulate(sp, bx, by, vx, vy, nb, None, t, side=sd, redirect=(redirect[0] + t0, redirect[1]))
+                r = simulate(sp, bx, by, vx, vy, nb, life, t, side=sd, redirect=(redirect[0] + t0, redirect[1]))
             else:
                 if rest is not None:
                     nb = len(sp.bounces)          # in Submerge: sinking, no more floor contacts
-                r = simulate(sp, bx, by, vx, vy, nb, rest, t, side=sd)
+                r = simulate(sp, bx, by, vx, vy, nb, rest if rest is not None else life, t, side=sd)
             self._paths[key] = r
         return r
 
@@ -1208,6 +1216,11 @@ class Forecaster:
         # oracle view reads from the FSM and the logged velocity
         sp = self.targets.spec_of(DROP_BELL)
         self.drop_tracks = DropBellTracks(sp) if sp is not None and view != ORACLE else None
+        asp = self.targets.spec_of(ATK_BELL)
+        self.atk_tracks = AtkBellTracks(asp) if asp is not None and view != ORACLE else None
+        self.det_atk = DET_ATK
+        self._atk_cover: list[tuple[float, float]] = []    # VE: (pair middle x, launch time from the origin)
+        self._atk_lag = self._launch_lags()
         if self.drop_tracks is not None and self.drop_tracks.ok:
             self.tracker.bell_y = self.drop_tracks.y0
         self.det_ve = DET_VE
@@ -1236,6 +1249,8 @@ class Forecaster:
         self.targets.reset()
         if self.drop_tracks is not None:
             self.drop_tracks.reset()
+        if self.atk_tracks is not None:
+            self.atk_tracks.reset()
         self._ws = None
         self.boss = None
 
@@ -1250,6 +1265,10 @@ class Forecaster:
         self.targets.update(ws, self.t)
         if self.drop_tracks is not None:
             self.drop_tracks.update(ws, self.t)
+        if self.atk_tracks is not None:
+            tr = self.tracker
+            ax = tr.last_anchor.x if tr.last_family == "BB_BURST" and tr.last_anchor is not None else None
+            self.atk_tracks.update(ws, self.t, ax)
         self._ws = ws
 
     # ---- the walk -----------------------------------------------------------------------------------------------
@@ -1261,10 +1280,11 @@ class Forecaster:
         roots, known = self.tracker.roots(origin)
         nodes: list[Node] = []
         placements: list[Placement] = []
+        det: list = []
+        self._atk_cover = self._atk_bells(origin, det) if self.atk_tracks is not None and self.det_atk else []
         for r in roots:
             self._walk(r.state, r.e_lo, r.e_hi, replace(r.ctx), r.p, -1, H, nodes, placements, r.current, 0)
         tr = self.tracker
-        det: list = []
         if self.drop_tracks is not None and self.det_ve:
             # VE: a drop bell seen falling without its cue (the cue missed) is support on its path too
             for iid in self.drop_tracks.obs:
@@ -1340,6 +1360,52 @@ class Forecaster:
                            int(sp.next_bounce.get(st, len(sp.bounces))), rest, e.type_key.v))
         return True
 
+    def _launch_lags(self) -> dict[str, tuple[float, float]]:
+        """State (and _tail) -> (min, max) game s from the attack bells' launch to its entry (the attack's end for
+        _tail): the burst's logged entry offsets and dwells."""
+        f = self.model.families.get("BB_BURST")
+        if f is None or ATK_LAUNCH_STATE not in f.entry:
+            return {}
+        lo0, hi0 = f.entry[ATK_LAUNCH_STATE]
+        out = {st: (lo - hi0, hi - lo0) for st, (lo, hi) in f.entry.items()}
+        last = f.states[-1]
+        if last in f.entry and last in self.model.states:
+            d = self.model.states[last].dwell
+            out[TAIL] = (f.entry[last][0] + d[0] - hi0, f.entry[last][1] + d[1] - lo0)
+        return out
+
+    def _atk_bells(self, origin: float, det: list) -> list[tuple[float, float]]:
+        """VE: attack bells on exact paths (bell_track.AtkBellTracks: launch time and x, side; one branch per side
+        still open, gone at its End Timer) into det; returns the bursts whose two bells are both on exact paths:
+        (their middle x = the burst's anchor, launch time from the origin)."""
+        at = self.atk_tracks
+        ests = at.estimates()
+        for e in ests:
+            tk_ = at.type_of.get(e.iid, ATK_BELL)
+            for sd in ((e.side,) if e.side else (1, -1)):
+                x0, y0, vx0, vy0 = at.path_args(e, sd)
+                det.append(DetBell(at.spec, x0, y0, vx0, vy0, 0, None, tk_, t0=origin - e.t_launch, sides=(0,),
+                                   skin=SKIN_Z * e.sx, life=e.t_end - e.t_launch))
+        cover = []
+        paired = [e for e in ests if e.pair and e.side]
+        for i, a in enumerate(paired):
+            for b in paired[i + 1:]:
+                if a.side == -b.side and abs(a.t_launch - b.t_launch) <= 0.05:
+                    xm = 0.5 * (at.x0(a, a.side) + at.x0(b, b.side))
+                    cover.append((xm, 0.5 * (a.t_launch + b.t_launch) - origin))
+        return cover
+
+    def _atk_covered(self, state: str, e_lo: float, e_hi: float, anchor: Anchor | None) -> bool:
+        """A burst state's (or tail's) attack-bell union whose bells are both on exact paths (VE)."""
+        lag = self._atk_lag.get(state)
+        if anchor is None or lag is None:
+            return False
+        for xm, tl in self._atk_cover:
+            if abs(xm - anchor.x) <= ATK_ANCHOR_TOL_U and \
+                    e_lo - lag[1] - ATK_LAG_SLACK_S <= tl <= e_hi - lag[0] + ATK_LAG_SLACK_S:
+                return True
+        return False
+
     def _place(self, fam: str, state: str, e_lo: float, e_hi: float, ctx: Ctx, node: int, H: float,
                out: list[Placement], death_tail: bool = False) -> None:
         m = self.model
@@ -1381,6 +1447,9 @@ class Forecaster:
             allsrc = f.sources.get(state, frozenset())
             fsrc = ws if fr == "world" else (allsrc - ws if fr == "anchor" else allsrc)
             t_from = -math.inf
+            if fr == "anchor" and fsrc and self._atk_cover and all(x.startswith(ATK_BELL) for x in fsrc) \
+                    and self._atk_covered(state, e_lo, e_hi, ctx.anchor):
+                continue           # VE: both of this burst's attack bells are on exact paths (Forecast.det)
             if fsrc and all(x.startswith(DROP_BELL) for x in fsrc) and not self.tracker.bells_unknown:
                 if self.view == ORACLE:
                     t_from = self.bell_lead
