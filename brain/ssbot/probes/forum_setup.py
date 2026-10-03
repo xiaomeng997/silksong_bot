@@ -14,7 +14,8 @@ Steps:
   arm X          in game: load the pre savestate, crest.equip (unlock), abilities.grant {set: movement, tools} (the
                  only grant without the combat set's Needle Strike and six silk skills; it also sets the movement flags
                  the base lacks), savestate.save fo_X_raw, then offline every flag the grant changed goes back to the
-                 base value (hasDoubleJump and hasSuperJump stay false: the route has neither at the Forum), load that,
+                 base value (hasDoubleJump and hasSuperJump stay false: the route has neither at the Forum), Silkspear
+                 goes into the new crest's empty Skill slot (a first-time crest has no saved equips), load that,
                  check (abilities.list, crest.dump, PROGRESS PlayerData mirror) and savestate.save fo_X, a state the
                  game wrote itself. A5 is made from fo_A with masks 5.
   check X        in game: load fo_X, print the loadout, run the Forum intro and GauntletDataPolicy for --seconds with
@@ -137,6 +138,18 @@ def loadout(link: OracleLink, prog: Progress) -> dict:
             "equipped": pf["equipped"], "crest_section": pf["crest"]}
 
 
+def compact(lo: dict) -> dict:
+    """The parts of a loadout() result worth reading: crest, slot contents, quickcast bindings, PlayerData flags."""
+    ab = lo.get("abilities") or {}
+    return {"crest": lo.get("crest"), "pd": lo.get("pd"),
+            "slots": [(s.get("index"), s.get("type"), s.get("binding"), s.get("tool"), s.get("locked"))
+                      for s in ab.get("slots") or ()],
+            "bindings": ab.get("bindings"), "bindings_cached": ab.get("bindings_cached"),
+            "tools": [(t.get("name"), t.get("amount"), t.get("equipped")) for t in ab.get("tools") or ()],
+            "skills_equipped": [s.get("tool") for s in ab.get("skills") or () if s.get("equipped")],
+            "config": ab.get("config")}
+
+
 def make_arm(link: OracleLink, prog: Progress, arm: str) -> dict:
     out: dict = {"arm": arm}
     if arm == "A5":
@@ -164,6 +177,15 @@ def make_arm(link: OracleLink, prog: Progress, arm: str) -> dict:
                 restored[k] = [d["savedPd"].get(k), pre.get(k)]
                 d["savedPd"][k] = pre.get(k)
         out["flags_restored"] = restored
+        # A crest equipped for the first time has no saved equips: Silkspear stays in Hunter's Skill slot. The route
+        # carries it into every crest, so it goes into the new crest's first empty Skill slot (same slot index in
+        # PlayerData.ToolEquips[crest].Slots as in abilities.list "slots").
+        skill = next((sl["index"] for sl in g.get("slots") or () if sl.get("type") == "Skill" and not sl.get("tool")),
+                     None)
+        if skill is not None:
+            entry = next(e for e in d["savedPd"]["ToolEquips"]["savedData"] if e["Name"] == spec["crest"])
+            entry["Data"]["Slots"][skill]["EquippedTool"] = "Silk Spear"
+            out["silkspear_slot"] = skill
         _write(f"fo_{arm}_fix", d)
         _load(link, f"fo_{arm}_fix")
     out["after"] = loadout(link, prog)
@@ -324,7 +346,14 @@ def main(argv: list[str] | None = None) -> int:
         link.close()
     p = OUT / f"{a.step}_{a.arm}_{time.strftime('%H%M%S')}.json"
     p.write_text(json.dumps(res, indent=1, default=str), encoding="utf-8")
-    print(json.dumps(res, indent=1, default=str)[:12000])
+    for k in ("reloaded", "loadout") if a.step != "loadout" else ():
+        if isinstance(res.get(k), dict):
+            print(k, json.dumps(compact(res[k]), default=str))
+    if a.step == "loadout":
+        print(json.dumps(compact(res), default=str))
+    rest = {k: v for k, v in res.items() if k not in ("before", "after", "reloaded", "loadout", "equip", "grant",
+                                                      "grant_first")}
+    print(json.dumps(rest, indent=1, default=str)[:12000])
     print("written", p)
     return 0
 
