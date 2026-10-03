@@ -777,7 +777,7 @@ every frame:
 | **Last Judge**（S17） | 前置：Magma Bell + Fractured Mask + Weighted Belt，满血，丝 ≥ 9。第一招固定是香炉投掷，开局闪避预先规划。P1：Slam 在悬停时离开 reach，落地后惩罚；Throw 靠近或远离，跳过回程的球；Spin 待在半径外。P2：穿过 Blazing Rings，避开 Exploding Throw，跳过 Searing Slam 冲击波和 Pillar Charge；香雾是一级火焰前摇。216 HP 时 Judgement：约 5 s 光环后力竭，Bind 和惩罚窗口预先登记。死亡后退到爆炸半径外，2 s 内无伤害威胁才算结束。 |
 | **Cogwork Dancers**（S19） | 两个本体、两套管道；接触 2；Configuration/Clash 为 1+1。有 Ascendant's Grip 时贴角挂墙 [待验证]，否则用口袋 + 远程工具。 |
 | **G&Z 切磋**（S21，**B 类且有危险物**，风险低） | 下方尖刺 = 危险物；I2 适用；Q 触发全部保持生效；远离边缘作战。你的经验（2026-10-02）：Garmond 前摇很长、范围很小，与早期小怪相当；切磋输了不算死，只有尖刺扣掉最后一格面具才致命，而击退包络保证被打中也推不进尖刺。所以 G&Z 的代价主要是路线时间，不是风险。 |
-| **Forum 连战**（S25） | 前置：G&Z 助战（Ledger 标志须是对话观测确认的 COMMITTED）、Cogfly 已合成、7 面具。先杀 Clawmaiden；最后 2 只 Choir Clapper（230 HP，全部 2 格，交替出手）按 boss 对待，用口袋 + Cogfly 输出。**后备 playbook**（只用 Cogfly、无助战）在 G1 中单独测量；标志缺失时自动切换。 |
+| **Forum 连战**（S25） | 前置：G&Z 助战（Ledger 标志须是对话观测确认的 COMMITTED）、Cogfly 已合成、7 面具。先杀 Clawmaiden；最后 2 只 Choir Clapper（230 HP，全部 2 格，交替出手）按 boss 对待，用口袋 + Cogfly 输出。你的打法（2026-10-02）：换 Reaper + 爬墙爪（Ascendant's Grip），吸在左墙最高点打不到，等 Clapper 跳到最高点时砍；地面安全时再下去打。口袋要用覆盖图核验（M2 W8）。**后备 playbook**（只用 Cogfly、无助战）在 G1 中单独测量；标志缺失时自动切换。 |
 | **Lace 2**（S26） | 800 HP。针挥为 1+1（D1 = 2）。防御中不近战，只做远程；只在收招时惩罚。Fractured Mask 在连招最后一击时碎。 |
 | **GMS**（S27） | 攻击 2；尖刺平台 1（危险物）。Silk Web 1+1+1 抓取是否被面具覆盖未知，所以只要它在支撑中，就要求**不算面具**的 HP ≥ 4。击败后进入 ENDING 状态（§3.6.1）。 |
 | Bell Beast、Lace 1、Widow、Trobbio | 标准模式，从日志填表和 playbook。 |
@@ -883,7 +883,8 @@ A 类 = 以 2 格攻击为主的 boss 或连战；B 类 = 竞技场、小 boss�
 - **绕路排序：** 价值 = （下游风险降低 − 自身风险）/ Δt，在 G1 中用 A 类 savestate 做 A/B 测量。
   - **必留：** Fractured Mask、Weighted Belt、Warding Bell、Magma Bell、Memory Locket #1/#2、Needle 1、Cogfly、G&Z（Garmond 对话 + 屋顶捷径 + 切磋）。
   - **调速器压力大时才舍：** 7 面具碎片、Needle 2、Straight Pin。
-  - **最先舍：** 丝轴碎片、Sting Shard、Ascendant's Grip、Memory Locket #3。
+  - **最先舍：** 丝轴碎片、Sting Shard、Memory Locket #3。
+  - **Ascendant's Grip（爬墙爪）暂列必留**（2026-10-02 起）：Forum 末波的左墙顶口袋和 Dancers 的贴角都靠它；K1 实测后再定。
   - **仅 A/B，默认不做：** Faydown（除非 Wardenfly 迫使）、Injector Band、Pollip Pouch。
 - **Fourth Chorus、Moorwing、Sister Splinter 的打/跳决定**在 M1 前由你的游玩和社区路线定下；凡是要打的 boss 都算 A 类，配 playbook 和门槛。
 - **永不交战：** Savage Beastfly、Skull Tyrant、Great Conchflies、Forebrothers、Groal、First Sinner、Summoned Saviour、Lumble 的骰子、所有 Act 3 内容。
