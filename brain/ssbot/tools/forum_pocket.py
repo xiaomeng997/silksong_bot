@@ -20,6 +20,7 @@ import argparse
 import json
 import math
 import sys
+from collections import Counter
 from pathlib import Path
 
 import numpy as np
@@ -85,6 +86,8 @@ def scan(runs: list[Path], include_open: bool = False, pocket: tuple = POCKET) -
     jumps: list[dict] = []
     pocket_contacts: list[dict] = []
     pocket_frames = 0
+    pocket_entries: Counter = Counter()     # Clapper Control states entered while the hero is in the pocket
+    pocket_x: list[float] = []              # Clapper x on those frames
     clapper_frames = 0
     fights = 0
     for run in runs:
@@ -121,6 +124,10 @@ def scan(runs: list[Path], include_open: bool = False, pocket: tuple = POCKET) -
                         elif st in spec.decision_states or st in spec.dormant:
                             fam[iid] = spec.idle_family
                         _jump(e, st, st_prev.get(iid), air, jumps, fight.id, f, pocket, hp[0] if hp else None)
+                        if in_pocket:
+                            pocket_x.append(round(e["pos"][0], 2))
+                            if st != st_prev.get(iid):
+                                pocket_entries[st] += 1
                         st_prev[iid] = st
                         for c in e.get("colliders") or ():
                             if support_threat(c):
@@ -134,7 +141,10 @@ def scan(runs: list[Path], include_open: bool = False, pocket: tuple = POCKET) -
     rows = sorted(({"family": k[0], "state": k[1], "collider": k[2], **v} for k, v in best.items()),
                   key=lambda r: r["dist_u"])
     return {"pocket": list(pocket), "fights": fights, "clapper_frames": clapper_frames,
-            "pocket_frames": pocket_frames, "by_family": dict(sorted(fam_best.items(), key=lambda kv: kv[1]["dist_u"])),
+            "pocket_frames": pocket_frames,
+            "pocket_clapper_states": dict(pocket_entries.most_common()),
+            "pocket_clapper_x": [float(v) for v in np.quantile(pocket_x, [0, 0.05, 0.5, 0.95, 1])] if pocket_x else None,
+            "by_family": dict(sorted(fam_best.items(), key=lambda kv: kv[1]["dist_u"])),
             "by_state": rows, "jumps": jumps, "pocket_contacts": pocket_contacts}
 
 
@@ -186,6 +196,8 @@ def main(argv: list[str] | None = None) -> int:
     out = scan(a.runs, a.include_open, pocket)
     print(f"pocket {pocket}: {out['fights']} fights, {out['clapper_frames']} Clapper frames, hero in the pocket "
           f"{out['pocket_frames']} frames, contacts there {len(out['pocket_contacts'])}")
+    print("Clapper states entered while the hero is in the pocket:", out["pocket_clapper_states"])
+    print("Clapper x then (min, p5, p50, p95, max):", out["pocket_clapper_x"])
     print("closest approach per family (u):")
     for k, v in out["by_family"].items():
         print(f"  {k:16s} {v['dist_u']:6.2f}  ({v['state']} / {v['collider']}, f{v['f']} pos {v['pos']})")
