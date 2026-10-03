@@ -29,6 +29,9 @@ frame (the box predicted for k frames after it is compared with the colliders of
 the recorded Control state at the origin, and per box side the errors carry min / p1 / p99 / max too: the box
 uncertainty the vision view's pogo gate shrinks the box by is sized from them (--margins: written to
 knowledge/1.0.30000/enemies/BellBeast_vision_box_margin.json, read by Forecast.certain_boss).
+--check-margins <json> (task V review): the share of the same-phase residuals beyond the committed margins, looked up
+the way Forecast.certain_boss does (the origin's 0.1 s bin of time in the phase, else the phase; the smallest bucket
+at or past k), per side and phase: run it on recordings the margins were not fitted on.
 """
 import argparse
 import json
@@ -181,6 +184,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--margins", type=Path, default=None,
                     help="vision views: write the pogo gate's box margins per phase and horizon (vision_margins)")
     ap.add_argument("--pad", type=float, default=0.1)
+    ap.add_argument("--check-margins", type=Path, default=None,
+                    help="vision views: residuals beyond these committed margins (held-out check)")
     ap.add_argument("--json", type=Path, default=None)
     a = ap.parse_args(argv)
     from ssbot.combat.boss_model import BossModel
@@ -223,6 +228,12 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(x))
     if a.json:
         a.json.write_text(json.dumps(rep, indent=1), "utf-8")
+    if a.check_margins and a.view != "oracle":
+        chk = check_margins(out, json.loads(a.check_margins.read_text("utf-8")))
+        rep["margin_check"] = chk
+        print(json.dumps({k: v for k, v in chk.items() if k != "worst"}, indent=1))
+        if a.json:
+            a.json.write_text(json.dumps(rep, indent=1), "utf-8")
     if a.margins and a.view != "oracle":
         doc = vision_margins(out, a.pad)
         doc["source"] = {"run": str(a.run), "instances": a.instances, "episodes_per_instance": a.episodes,
@@ -235,6 +246,45 @@ def main(argv: list[str] | None = None) -> int:
 MARGIN_BUCKETS = (6, 12, 24, 48)
 TAU_BIN_S = 0.1              # forecast.MARGIN_BIN_S
 TAU_MIN_N = 40               # a time bin needs this many residuals per bucket, else the phase's margins stand
+
+
+def check_margins(out: dict, doc: dict) -> dict:
+    """Residuals (frame base, the boss still in the origin's phase) beyond the margins of doc, per side: left / bottom
+    count when the real box reaches further out than the predicted one shrunk by the margin (residual < -margin),
+    right / top likewise (> margin). Only residuals whose horizon a bucket covers and whose phase has margins."""
+    phases, tau_tab = doc.get("phases") or {}, doc.get("phases_tau") or {}
+    buckets = sorted(int(b) for b in doc.get("buckets") or MARGIN_BUCKETS)
+    sides = ("left", "right", "bottom", "top")
+    n = 0
+    over = dict.fromkeys(sides, 0)
+    by_phase: dict = {}
+    worst: list = []
+    for (key, base, k), o in out.items():
+        if base != "frame" or not o.get("same_left"):
+            continue
+        phase = key.split("#")[1].split("|")[0]
+        kb = next((b for b in buckets if b >= k), None)
+        if kb is None or phase not in phases:
+            continue
+        res = np.array([o["same_left"], o["same_right"], o["same_bottom"], o["same_top"]], np.float64)
+        tau = np.nan_to_num(np.asarray(o["same_tau"], np.float64), nan=-1.0)
+        for j in range(res.shape[1]):
+            b = str(int(max(0.0, tau[j]) / TAU_BIN_S))
+            m = (tau_tab.get(phase, {}).get(b) or {}).get(str(kb)) or phases[phase].get(str(kb))
+            if m is None:
+                continue
+            n += 1
+            d = by_phase.setdefault(phase, {"n": 0, **dict.fromkeys(sides, 0)})
+            d["n"] += 1
+            ex = (-res[0, j] - m[0], res[1, j] - m[1], -res[2, j] - m[2], res[3, j] - m[3])
+            for side, e in zip(sides, ex):
+                if e > 0:
+                    over[side] += 1
+                    d[side] += 1
+                    worst.append((round(float(e), 3), side, key, k, b))
+    worst.sort(reverse=True)
+    return {"n": n, "over": over, "over_share": {sd: round(v / max(n, 1), 5) for sd, v in over.items()},
+            "by_phase": by_phase, "worst": worst[:20]}
 
 
 def vision_margins(out: dict, pad: float) -> dict:

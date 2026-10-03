@@ -800,3 +800,27 @@ def test_tell_onsets_are_drawn_in_their_bracket():
     g.reset(5)
     assert [g._due(i, "Emerge Antic C", spec, 0.2, 100.2) for i in range(20)] == \
         [ObservabilityFilter._due(f, i, "Emerge Antic C", spec, 0.2, 100.2) for i in range(20)]
+
+
+def test_noise_bias_persists_per_track_and_a_ghost_keeps_its_last_offset():
+    """SimpleNoise (task V review): a per-track offset (bias_sigma, placeholder 0) that every detection of that track
+    carries, and a memory track (ghost) at its last detection's offset, not the filter's exact position."""
+    from ssbot.core.worldstate import E, Entity, Kind, WorldState
+    cfg = NoiseConfig(sigma_pos={Kind.BOSS: 0.0}, p_drop={Kind.BOSS: 0.0}, bias_sigma={Kind.BOSS: 0.3})
+    nz = SimpleNoise(cfg, seed=4)
+    offs = []
+    for i in range(5):
+        ws = WorldState()
+        ws.stamp.t_game_s = i / 60
+        ws.entities = [Entity(id=3, kind=Kind.BOSS, pos=E((80.0, 5.0), conf=1.0), visible_frac=1.0)]
+        offs.append(nz.apply(ws).entities[0].pos.v[0] - 80.0)
+    assert abs(offs[0]) > 1e-6 and np.allclose(offs, offs[0])
+    ws = WorldState()
+    ws.stamp.t_game_s = 0.1
+    ws.entities = [Entity(id=3, kind=Kind.BOSS, pos=E((80.0, 5.0), conf=0.5, age_ms=16.0), visible_frac=0.0)]
+    assert nz.apply(ws).entities[0].pos.v[0] - 80.0 == pytest.approx(offs[0])
+    plain = SimpleNoise(NoiseConfig(), seed=4)
+    ws = WorldState()
+    ws.entities = [Entity(id=3, kind=Kind.BOSS, pos=E((80.0, 5.0), conf=1.0), visible_frac=1.0)]
+    plain.apply(ws)
+    assert plain._bias[3] == (0.0, 0.0)

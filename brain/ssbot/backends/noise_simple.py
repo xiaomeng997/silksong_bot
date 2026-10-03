@@ -21,10 +21,18 @@ Velocities: never the logged ones. A detection's velocity is the slope of its ow
 The hero's position gets sigma_hero (its velocity is the hero's self-state: own inputs and kinematics, M3's
 self-estimator). HUD and phase confusion are not modelled yet.
 
+Errors that persist (task V review, 2026-10-03): each frame's noise is independent, and the consumers average many
+detections (fused boss position, cue means, bell columns), so the view's estimates were about 5 x more precise than
+one detection. A real detector also errs the same way frame after frame (the same sprite frame, the same dust shape):
+bias_sigma[kind] draws one offset per track (entity id) that every detection of it carries (PLACEHOLDER 0 until M3
+measures it; SSBOT_NOISE_BIAS=<u> sets every kind's for audits), and a memory track (the filter's ghost of an entity
+lost over the image edge) keeps the offset of its last detection instead of the filter's exact last position.
+
 Every default is a PLACEHOLDER until M3 measures the vision stack (§3.9.5): position sigma per class from the detector
 against projected oracle boxes, miss rate from the detector's recall. Seeded with numpy's PCG64: the same seed and the
 same WorldState stream give the same noise.
 """
+import os
 from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 
@@ -40,6 +48,7 @@ P_DROP = {Kind.BOSS: 0.01, Kind.ENEMY: 0.02, Kind.PROJECTILE: 0.05, Kind.ENEMY_A
 SIGMA_POS_OTHER_U = 0.10
 P_DROP_OTHER = 0.02
 SIGMA_HERO_U = 0.05
+BIAS_ALL_U = float(os.environ.get("SSBOT_NOISE_BIAS", "0") or 0.0)
 
 
 @dataclass(slots=True)
@@ -49,6 +58,8 @@ class NoiseConfig:
     sigma_pos_other: float = SIGMA_POS_OTHER_U
     p_drop_other: float = P_DROP_OTHER
     sigma_hero: float = SIGMA_HERO_U
+    bias_sigma: Mapping[Kind, float] = field(default_factory=dict)   # per-track persistent offset (placeholder: none)
+    bias_other: float = BIAS_ALL_U
 
 
 def _shift(poly: list[tuple[float, float]], dx: float, dy: float) -> list[tuple[float, float]]:
@@ -74,6 +85,8 @@ class SimpleNoise:
     def reset(self, seed: int) -> None:
         self.rng = np.random.default_rng(seed)
         self._last: dict[int, tuple[Entity, float]] = {}    # id -> (last output with a detection or coast, t_game)
+        self._bias: dict[int, tuple[float, float]] = {}      # id -> its persistent offset
+        self._off: dict[int, tuple[float, float]] = {}       # id -> its last detection's offset (for its ghost)
         self.vel = VelocityTracks()
 
     def apply(self, ws: WorldState) -> WorldState:
@@ -102,6 +115,13 @@ class SimpleNoise:
                         last[e.id] = (c, t)
                     continue
                 dx, dy = float(dpos[i, 0]), float(dpos[i, 1])
+                bias = self._bias.get(e.id)
+                if bias is None:
+                    bs = cfg.bias_sigma.get(e.kind, cfg.bias_other)
+                    bias = self._bias[e.id] = ((float(self.rng.normal(0.0, bs)), float(self.rng.normal(0.0, bs)))
+                                               if bs > 0 else (0.0, 0.0))
+                dx, dy = dx + bias[0], dy + bias[1]
+                self._off[e.id] = (dx, dy)
                 x, y = e.pos.v[0] + dx, e.pos.v[1] + dy
                 e.pos = E((x, y), sigma=float(sig[i]), conf=e.pos.conf, src=e.pos.src, age_ms=e.pos.age_ms)
                 if e.visible_frac > 0.0:
@@ -115,6 +135,17 @@ class SimpleNoise:
                 out.append(e)
                 last[e.id] = (e, t)
             ws.entities = out + others
+        # a memory track (ghost: lost over the image edge, position from the filter's memory) keeps its last
+        # detection's offset, not the filter's exact last position
+        for e in others:
+            off = self._off.get(e.id)
+            if off is not None and not e.hidden and e.visible_frac <= 0.0 and e.pos.conf > 0.0 and e.pos.age_ms > 0.0:
+                x, y = e.pos.v
+                e.pos = E((x + off[0], y + off[1]), sigma=e.pos.sigma, conf=e.pos.conf, src=e.pos.src,
+                          age_ms=e.pos.age_ms)
+                e.body_polys = [_shift(poly, off[0], off[1]) for poly in e.body_polys]
+                for b in e.dmg_boxes:
+                    b.poly = _shift(b.poly, off[0], off[1])
         self._last = last
         self.vel.prune(t)
         h = ws.hero
