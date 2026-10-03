@@ -986,6 +986,8 @@ def fixed_step(x, P, TT):
     elif jmp:
         x[JSTEPS] = 0.0
         x[JUMPING] = 0.0
+        if ab != 0:
+            x[WLOCK] = -1.0               # Jump() past JUMP_STEPS: CancelJump ends a wall jump's lock too
     if x[BOUNCE] >= 0:
         x[BOUNCE] = x[BOUNCE] + 1 if x[BOUNCE] <= P[P_BOUNCE] else -1.0
 

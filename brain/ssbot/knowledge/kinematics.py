@@ -1719,7 +1719,17 @@ CSTATE_NAMES_PATH = REPO / "docs" / "facts" / "1.0.30000" / "cstate_schema.json"
 _CS_USED = ("facingRight", "onGround", "jumping", "attacking", "upAttacking", "downSpikeAntic", "downSpiking",
             "downSpikeBouncing", "downSpikeRecovery", "recoilingRight", "recoilingLeft", "recoilFrozen", "recoiling",
             "invulnerable", "casting", "isBinding", "isToolThrowing", "nailCharging", "hazardRespawning", "dead",
-            "transitioning", "wallSliding", "dashing", "parrying")
+            "transitioning", "wallSliding", "dashing", "parrying",
+            # Forum loadout (appended: traces saved before have fewer columns, Trace.flag reads them as False)
+            "wallClinging", "touchingWall", "isSprinting", "airDashing", "willHardLand", "isInCancelableFSMMove")
+# animation clips that say which phase of an FSM-driven move a logged frame is in (Hero_Hornet's tk2d clips named
+# in the Umbrella Float, Sprint and Crest Attacks FSMs)
+GLIDE_CLIPS = {"Umbrella Inflate Antic": 0, "Umbrella Inflate": 1, "Umbrella Float": 2, "Umbrella Turn": 2,
+               "Umbrella Deflate": 3}
+SPRINT_CLIPS = {"Sprint Air": 0, "Sprint Air Short": 0, "Sprint Air Loop": 1, "Sprint": 2, "Land to Sprint": 2,
+                "Skid End 1": 3, "Skid End 2": 3}
+RPR_CLIPS = {"v3 Down Slash Antic": 0, "v3 Down Slash": 1}
+HS_HARD_LANDING = 5   # GlobalEnums.ActorStates.hard_landing
 
 
 MK_HARNESS, MK_HAZARD, MK_SCENE, MK_FREEZE, MK_DEATH, MK_SLIDE = 1, 2, 4, 8, 16, 32
@@ -1776,12 +1786,14 @@ class Trace:
     tm: np.ndarray | None = None          # [n, len(TM_KEYS)] hero.tm when exported (NaN where missing)
     alpha_log: np.ndarray | None = None   # [n] hero.alpha when exported (NaN where missing)
     freeze: np.ndarray | None = None      # [n] FZ_* bits of the FreezeMoments started in that frame
+    wall: np.ndarray | None = None        # [n] hero.wall: -1 touchingWallL, +1 touchingWallR, 0 (None: not exported)
 
     def __len__(self) -> int:
         return len(self.f)
 
     def flag(self, name: str) -> np.ndarray:
-        return self.cs[:, _CS_USED.index(name)]
+        i = _CS_USED.index(name)
+        return self.cs[:, i] if i < self.cs.shape[1] else np.zeros(len(self.cs), dtype=bool)
 
     def save(self, path: str | Path) -> None:
         d = {f.name: getattr(self, f.name) for f in fields(self) if getattr(self, f.name) is not None}
@@ -1805,7 +1817,8 @@ class Trace:
                 "valid": bool(self.valid[i]),
                 "tm": self.tm[i] if self.tm is not None else np.full(len(TM_KEYS), np.nan),
                 "alpha": float(self.alpha_log[i]) if self.alpha_log is not None else np.nan,
-                "load": bool(self.marks[i] & MK_SLIDE)}
+                "load": bool(self.marks[i] & MK_SLIDE),
+                "wall": int(self.wall[i]) if self.wall is not None else None}
 
     def slice(self, i0: int, i1: int) -> "Trace":
         d = {}
@@ -1828,7 +1841,8 @@ class Trace:
         scenes: dict = {}
         cols: dict[str, list] = {k: [] for k in ("f", "fs", "dt", "udt", "ts", "pos", "phys", "vel", "facing",
                                                  "hero_state", "relinq", "cs", "act", "inp", "silk", "hp", "clip",
-                                                 "spell", "dmg", "marks", "box", "valid", "scene", "freeze")}
+                                                 "spell", "dmg", "marks", "box", "valid", "scene", "freeze", "wall")}
+        wall_seen = False
         nan2 = [np.nan, np.nan]
         nan_tm = [np.nan] * len(TM_KEYS)
         tm_rows: list = []
@@ -1875,7 +1889,7 @@ class Trace:
             if not h or not h.get("box") or not h.get("cstate"):
                 for k, v in (("pos", nan2), ("phys", nan2), ("vel", nan2), ("box", nan2 * 2), ("facing", 0),
                              ("hero_state", -1), ("relinq", False), ("cs", [False] * len(bit)), ("silk", 0), ("hp", 0),
-                             ("valid", False)):
+                             ("valid", False), ("wall", 0)):
                     cols[k].append(v)
                 cols["clip"].append(clips.setdefault(None, len(clips)))
                 cols["spell"].append(spells.setdefault(None, len(spells)))
@@ -1896,6 +1910,9 @@ class Trace:
             cols["spell"].append(spells.setdefault((h.get("spell") or [None])[0], len(spells)))
             pause = s.get("pause") or {}
             cols["valid"].append(g.get("gs", 4) == 4 and not g.get("paused") and not pause.get("inv", False))
+            w = h.get("wall")
+            wall_seen |= w is not None
+            cols["wall"].append(-1 if w and w[0] else 1 if w and len(w) > 1 and w[1] else 0)
         act = np.asarray(cols.pop("act"), dtype=np.int64)
         inp = np.asarray(cols.pop("inp"), dtype=np.int64)
         if mask_source == "auto":
@@ -1925,7 +1942,8 @@ class Trace:
                  valid=arr["valid"].astype(bool),
                  scene=arr["scene"].astype(np.int32), clips=list(clips), spells=list(spells), scenes=list(scenes),
                  mask_source=mask_source, tm=tm_arr if np.isfinite(tm_arr).any() else None,
-                 alpha_log=al if np.isfinite(al).any() else None, freeze=arr["freeze"].astype(np.int16))
+                 alpha_log=al if np.isfinite(al).any() else None, freeze=arr["freeze"].astype(np.int16),
+                 wall=arr["wall"].astype(np.int8) if wall_seen else None)
         mark_load_slides(tr, loads, params)
         return tr
 
@@ -2067,8 +2085,29 @@ def _bind_time(tr: Trace, modes: np.ndarray) -> np.ndarray:
     return _since32(m_on, tr.dt, include_onset=False)
 
 
-def classify_modes(tr: Trace) -> np.ndarray:
-    """Model mode per logged frame (M_*), from cstate, hero_state and the animation."""
+def forum_mode(md: int, prev_md: int | None, flag, clip, relinq: bool, hero_state: int) -> int:
+    """Mode of a logged frame for the Forum loadout's moves, given the Hunter rules' mode so far (M_LOCKED or
+    M_NORMAL; cast, bind, down spike and damage are decided after and keep priority): the glide, sprint and Reaper
+    down slash FSMs take control (control relinquished / no_input) and show their own clips; the Reaper down slash's
+    fall shows the hero's clips, so it continues while control stays taken; the dash and hard landing are
+    HeroController states. Used by classify_modes (forum=True) and StateTracker alike."""
+    taken = relinq or hero_state == HS_NO_INPUT
+    if taken and clip in GLIDE_CLIPS:
+        return M_GLIDE
+    if taken and flag("isSprinting"):
+        return M_SPRINT
+    if taken and (clip in RPR_CLIPS or (prev_md == M_RPR_DS and md == M_LOCKED)):
+        return M_RPR_DS
+    if flag("dashing"):
+        return M_DASH
+    if hero_state == HS_HARD_LANDING:
+        return M_HARD_LAND
+    return md
+
+
+def classify_modes(tr: Trace, forum: bool = False) -> np.ndarray:
+    """Model mode per logged frame (M_*), from cstate, hero_state and the animation. forum: also the Forum
+    loadout's modes (forum_mode; HeroParams.abilities != 0), which the Hunter model leaves as M_NORMAL / M_LOCKED."""
     n = len(tr)
     mode = np.full(n, M_NORMAL, dtype=np.int8)
     clip = np.array(tr.clips, dtype=object)[tr.clip]
@@ -2076,6 +2115,13 @@ def classify_modes(tr: Trace) -> np.ndarray:
     cast = np.isin(clip, CAST_CLIPS)
     bind = tr.flag("isBinding") | np.isin(spell, BIND_SPELLS)
     mode[tr.relinq] = M_LOCKED
+    if forum:
+        fl = {k: tr.flag(k) for k in ("isSprinting", "dashing")}
+        prev = None
+        for i in range(n):
+            mode[i] = forum_mode(int(mode[i]), prev, lambda name: bool(fl[name][i]), clip[i], bool(tr.relinq[i]),
+                                 int(tr.hero_state[i]))
+            prev = int(mode[i])
     mode[cast & (tr.relinq | (tr.hero_state == HS_NO_INPUT))] = M_CAST
     mode[bind & (tr.relinq | (tr.hero_state == HS_NO_INPUT))] = M_BIND
     mode[tr.flag("downSpikeAntic")] = M_DS_ANTIC
@@ -2083,6 +2129,123 @@ def classify_modes(tr: Trace) -> np.ndarray:
     mode[tr.flag("recoiling") & (tr.hero_state == HS_NO_INPUT)] = M_HURT_RECOIL
     mode[tr.flag("recoilFrozen")] = M_HURT_FREEZE
     return mode
+
+
+class ForumRows:
+    """The Forum loadout's state rows of logged frames, one frame at a time (state_table runs one over the trace,
+    StateTracker keeps one): the wall rows from cstate wallSliding / wallClinging and hero.wall, the wall stick and
+    cling cooldown timers, a wall jump's lock (from a jump that starts off a wall), the FSM-driven moves' phase and
+    phase time (from their clips: GLIDE_CLIPS, SPRINT_CLIPS, RPR_CLIPS, as the Silkspear phases), the dash timer
+    from the dash's start, the dash cooldown from hero.tm. Rows the log cannot show start neutral: WLOCK and DQ -1,
+    PREV_GS 1."""
+
+    def __init__(self, params: HeroParams):
+        self.p = params
+        self.prev: dict | None = None
+        self.wstick = np.float32(0.0)
+        self.cling_cd = np.float32(0.0)
+        self.gl_cd = np.float32(0.0)
+        self.wlock = -1.0
+        self.wj_dir = 0.0
+        self.ph_t = np.float32(0.0)
+        self.dash_t = np.float32(0.0)
+        self.airdashed = False
+
+    def push(self, S: np.ndarray, r: dict, md: int, flag) -> None:
+        """Fill S (one [K] state, the frame's other rows already set) for row r (Trace.row form) in mode md."""
+        p, pr = self.p, self.prev
+        dt = np.float32(r["dt"])
+        fs = int(r["fs"])
+        face = 1.0 if r["facing"] >= 0 else -1.0
+        sliding, cling = flag("wallSliding"), flag("wallClinging")
+        wall = r.get("wall")
+        side = float(wall) if (wall is not None and wall != 0) else face
+        S[WSIDE] = side if sliding else 0.0
+        S[WTOUCH] = float(wall) if wall is not None else (side if sliding else 0.0)
+        S[CLING] = 1.0 if cling else 0.0
+        if sliding and not cling:
+            if not (pr and pr["sliding"] and not pr["cling"]):
+                self.wstick = np.float32(0.0)
+            if self.wstick < np.float32(p.wall_stick_time):
+                self.wstick = np.float32(self.wstick + dt)
+        else:
+            self.wstick = np.float32(0.0)
+        S[WSTICK] = float(self.wstick)
+        if pr and pr["cling"] and not cling and sliding:
+            self.cling_cd = np.float32(p.wall_cling_cooldown)
+        if self.cling_cd > 0:
+            self.cling_cd = np.float32(self.cling_cd - dt)
+        S[CLING_CD] = float(self.cling_cd)
+        # wall jump: a jump that starts off a wall (sliding or touching one in the air) locks x for up to
+        # wj_lock_long steps while the jump lasts
+        jumping, ground = flag("jumping"), flag("onGround")
+        if jumping and pr and not pr["jumping"] and (pr["sliding"] or pr["wall"]) and not pr["ground"]:
+            self.wlock, self.wj_dir = 0.0, face
+        elif self.wlock >= 0:
+            self.wlock += fs
+            if self.wlock > p.wj_lock_long or not jumping:
+                self.wlock = -1.0
+        S[WLOCK] = self.wlock
+        S[WJ_DIR] = self.wj_dir
+        S[WJ_V] = p.wj_speed - max(self.wlock, 0.0) * (p.wj_speed - p.run_speed) / p.wj_lock_long
+        S[PREV_GS] = 1.0
+        S[DQ] = -1.0
+        # FSM-driven moves: phase and time in it (from the frame after the phase's first)
+        pmd = pr["md"] if pr else None
+        clip = r.get("clip")
+        ph = 0.0
+        if md == M_GLIDE:
+            ph = float(GLIDE_CLIPS.get(clip, pr["ph"] if pr and pmd == M_GLIDE else 0))
+        elif md == M_SPRINT:
+            ph = float(SPRINT_CLIPS.get(clip, pr["ph"] if pr and pmd == M_SPRINT else 0))
+        elif md == M_RPR_DS:
+            ph = float(RPR_CLIPS.get(clip, max(pr["ph"], 2.0) if pr and pmd == M_RPR_DS else 0))
+        if md in (M_GLIDE, M_SPRINT, M_RPR_DS):
+            if pr and pmd == md and pr["ph"] == ph:
+                self.ph_t = np.float32(self.ph_t + dt)
+            else:
+                self.ph_t = np.float32(0.0)
+            S[PHASE] = ph
+            S[MODE_T] = float(self.ph_t)
+            if md == M_GLIDE:
+                S[GS] = 0.0 if ph in (1.0, 2.0) else 1.0
+            elif md == M_RPR_DS:
+                S[GS] = 0.0 if ph < 2 else 1.0
+            else:
+                S[GS] = 1.0
+        S[SP_X] = face * (p.air_sprint_speed if ph <= 1 else p.sprint_speed) if md == M_SPRINT else 0.0
+        if pr and pmd == M_GLIDE and md != M_GLIDE:
+            self.gl_cd = np.float32(p.glide_cooldown)
+        elif self.gl_cd > 0:
+            self.gl_cd = np.float32(self.gl_cd - dt)
+        S[GL_CD] = float(max(self.gl_cd, 0.0))
+        # dash: dash_timer from the start (dash_time on the ground, air_dash_time in the air), minus fdt per step
+        if md == M_DASH:
+            if not (pr and pmd == M_DASH):
+                on_ground = pr["ground"] if pr else ground
+                self.dash_t = np.float32(p.dash_time if on_ground else p.air_dash_time)
+                self.airdashed |= not on_ground
+            else:
+                for _ in range(fs):
+                    self.dash_t = np.float32(self.dash_t - np.float32(p.fdt))
+            S[DASH_T] = float(self.dash_t)
+        if ground or sliding:
+            self.airdashed = False
+        S[AIRDASHED] = 1.0 if self.airdashed else 0.0
+        tm = r.get("tm")
+        dcd = float(tm[TM_KEYS.index("dash_cd")]) if tm is not None else np.nan
+        S[DASH_CD] = max(dcd, 0.0) if np.isfinite(dcd) else 0.0
+        S[HARD] = 1.0 if flag("willHardLand") else 0.0
+        S[FALL_T] = p.hard_fall_time + 0.01 if S[HARD] > 0 else 0.0
+        self.prev = {"sliding": sliding, "cling": cling, "jumping": jumping, "ground": ground,
+                     "wall": bool(wall) if wall is not None else sliding, "md": md, "ph": ph}
+
+
+def _neutral_forum_rows(S: np.ndarray) -> None:
+    """The Forum rows of a state the Hunter model estimated (it never reads them)."""
+    S[WLOCK] = -1.0
+    S[DQ] = -1.0
+    S[PREV_GS] = 1.0
 
 
 def derive_events(tr: Trace, modes: np.ndarray | None = None) -> np.ndarray:
@@ -2150,7 +2313,7 @@ def state_table(tr: Trace, params: HeroParams, modes: np.ndarray | None = None,
     row depends on that row and the ones before it only (with causal=False the phase uses the whole trace)."""
     n = len(tr)
     idx = np.arange(n)
-    modes = classify_modes(tr) if modes is None else modes
+    modes = classify_modes(tr, forum=bool(params.abilities)) if modes is None else modes
     if alpha is None:
         alpha, a_lo, a_hi = phase_interval(tr, params.fdt, causal=causal)
     else:
@@ -2264,6 +2427,15 @@ def state_table(tr: Trace, params: HeroParams, modes: np.ndarray | None = None,
     S[WF_PH:WF_TGT + 1] = wf.T
     act = wf[:, 0] >= 0
     S[TS] = np.where(act, np.where(frz, fz[:, 3], 1.0), S[TS])
+    _neutral_forum_rows(S)
+    if params.abilities:
+        fr = ForumRows(params)
+        fls = {k: tr.flag(k) for k in ("wallSliding", "wallClinging", "jumping", "onGround", "willHardLand")}
+        for i in range(n):
+            r = {"dt": float(tr.dt[i]), "fs": int(tr.fs[i]), "facing": int(tr.facing[i]),
+                 "wall": int(tr.wall[i]) if tr.wall is not None else None, "clip": tr.clips[tr.clip[i]],
+                 "tm": tr.tm[i] if tr.tm is not None else None}
+            fr.push(S[:, i], r, int(modes[i]), lambda name: bool(fls[name][i]))
     _apply_exported(tr, S, md, params)
     return S
 
@@ -2452,6 +2624,8 @@ class StateTracker:
         self._slide_left = 0
         self._other_in_hitstop = False
         self._wf = WF_IDLE.copy()
+        self._forum = ForumRows(params) if params.abilities else None
+        self._fmd: int | None = None
 
     # -- one row ---------------------------------------------------------------------------------------------------
     def push(self, s: dict) -> None:
@@ -2522,6 +2696,9 @@ class StateTracker:
         md = M_NORMAL
         if r["relinq"]:
             md = M_LOCKED
+        if self._forum is not None:
+            md = forum_mode(md, self._fmd, fl, r["clip"], bool(r["relinq"]), int(r["hero_state"]))
+            self._fmd = md
         if r["clip"] in CAST_CLIPS and (r["relinq"] or hs7):
             md = M_CAST
         if (fl("isBinding") or r["spell"] in BIND_SPELLS) and (r["relinq"] or hs7):
@@ -2712,6 +2889,9 @@ class StateTracker:
         S[WF_PH:WF_TGT + 1] = self._wf
         if self._wf[0] >= 0:
             S[TS] = out[3] if md == M_HURT_FREEZE else 1.0
+        _neutral_forum_rows(S)
+        if self._forum is not None:
+            self._forum.push(S, r, md, fl)
         # exported timers and phase (_apply_exported)
         if np.isfinite(r["alpha"]):
             S[ALPHA] = S[ALO] = S[AHI] = r["alpha"]
