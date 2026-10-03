@@ -268,6 +268,8 @@ namespace SsOracle.Core
             // room.battles (SceneDump.BattleWatch)
             F("BattleScene", "waves"), F("BattleScene", "currentWave"), F("BattleScene", "currentEnemies"),
             F("BattleScene", "enemiesToNext"), F("BattleScene", "started"), F("BattleScene", "completed"),
+            // STATE "allies" (Entities.AllyWatch)
+            T("ClockworkHatchling"), F("ClockworkHatchling", "hpCurrent"), P("ClockworkHatchling", "CurrentState"),
 
             // --- DebugMod 1.1.2 (soft: TRAIN only; savestates and cheat switches) ---
             T("DebugMod.DebugMod", soft: true), F("DebugMod.DebugMod", "infiniteHP", soft: true), F("DebugMod.DebugMod", "infiniteSilk", soft: true),

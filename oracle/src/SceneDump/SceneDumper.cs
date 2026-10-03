@@ -776,6 +776,7 @@ namespace SsOracle.SceneDump
             }
             Zone("battles").Add(d);
             BattleWatch.Battle(bs);
+            Entities.AllyWatch.BattleScene(bs);
             return verts;
         }
 
