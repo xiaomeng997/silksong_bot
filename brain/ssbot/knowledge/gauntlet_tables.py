@@ -66,6 +66,8 @@ HAZARD_ALIASES: dict[str, tuple[tuple[float, str], ...]] = {
 }
 ALIAS_TOL_U = 0.05
 SNAP_F = 600          # frames of per-frame subject snapshots kept for blocked stretches reported late
+TOUCH_U = 0.3         # an enabled damage collider this close to the hero box names the source among same-named ones
+NEAR_POS_U = 1.0      # else a same-named enemy's transform this close to the hero box (its collider off this frame)
 
 
 def hazard_type(e: dict) -> str:
@@ -413,8 +415,9 @@ class GauntletBuilder:
             elif tk is not None:
                 near = [(e, owner[e["iid"]]) for e in hazards if e["iid"] in owner and
                         (e["type_key"] == tk or e["type_key"].startswith(tk))]
-                if near:
-                    return min(near, key=lambda en: _box_dist(en[0], box))[1]
+                if near:   # touching first, else the nearest transform (a bell's collider is off once it hit)
+                    return min(near, key=lambda en: (_box_dist(en[0], box)[0] > TOUCH_U,
+                                                     _box_dist(en[0], box)[1]))[1]
                 last = self._last_owner.get(tk)   # the hazard left the export before its damage event
                 if last is not None and self._f - last[0] <= 120 and last[1] in subjects:
                     self.counters["hazard contacts after the hazard left the export (its last owner)"] += 1
@@ -427,14 +430,23 @@ class GauntletBuilder:
                 if not cands:
                     return None
                 self.counters["contacts named by a collider child only (subject exporting it)"] += 1
-        if len(cands) > 1:
-            # the scanner's dead flag: a kill, until the next attack start (the pooled summons come back)
-            live = [s for s in cands if ent(s) is not None and not s.scanner.dead and in_play(ent(s))]
-            cands = live or cands
-        if len(cands) > 1:
-            cands.sort(key=lambda s: _box_dist(ent(s), box, leaf))
-            self.counters["contacts with a shared source name (nearest subject)"] += 1
-        return cands[0].iid
+        if len(cands) == 1:
+            return cands[0].iid
+        self.counters["contacts with a shared source name (nearest subject)"] += 1
+        # several of one name (the Maestro's summons, a waiting wave-12 Reed): one whose enabled damage collider
+        # touches the hero box, whatever its state; else one whose body is right there although its collider is
+        # off this frame (a summon hit as it dies: run 20261002_223640 ep1 f823377); else the live ones in play,
+        # nearest first (the scanner's dead flag is not enough: a pooled summon can come back without an attack
+        # start, ep1 f844798)
+        dist = {s.iid: _box_dist(ent(s), box, leaf) for s in cands}
+        touching = [s for s in cands if dist[s.iid][0] <= TOUCH_U]
+        if touching:
+            return min(touching, key=lambda s: dist[s.iid]).iid
+        near = [s for s in cands if dist[s.iid][1] <= NEAR_POS_U]
+        if near:
+            return min(near, key=lambda s: dist[s.iid][1]).iid
+        live = [s for s in cands if ent(s) is not None and not s.scanner.dead and in_play(ent(s))] or cands
+        return min(live, key=lambda s: dist[s.iid]).iid
 
     def report_rows(self, hours: float | None = None, target: int = 200) -> list[dict]:
         """Attack instances per (type, family) with the rate per hour of episode time and the hours to the target."""
