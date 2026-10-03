@@ -53,11 +53,8 @@ def _targets(s: dict) -> tuple[np.ndarray, np.ndarray] | None:
         for c in e.get("colliders") or ():
             if not c.get("enabled"):
                 continue
+            # a circle's verts_world is already its circumscribed octagon (oracle ColliderGeometry.AppendCircle)
             v = np.asarray(c["verts_world"], float).reshape(-1, 2)
-            if c.get("kind") == "circle" and len(v):
-                r = float(c.get("r") or 0.0) / math.cos(math.pi / 8)
-                ang = np.pi / 8 + np.arange(8) * np.pi / 4
-                v = v[0][None, :] + r * np.stack([np.cos(ang), np.sin(ang)], axis=1)
             if len(v) >= 3:
                 vs.append(v)
             elif len(v) == 2:

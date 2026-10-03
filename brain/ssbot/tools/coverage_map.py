@@ -8,9 +8,14 @@ out of reach of the last wave's Choir Clappers").
         [--json out.json] [--png out.png]
 
 From recordings: every recorded frame's enemy damage colliders (STATE ents, ssbot.ipc.ents.is_threat: enabled, can
-cause damage, nonzero damage), rasterized at --res into one occupancy grid per (enemy type_key, attack), the attack
-being the entity's Control FSM state (or its first FSM's). The union over all frames is the support of that attack as
-logged: where its hitbox has ever been. Queried for candidate hero positions, each with the hero hurtbox of that pose:
+cause damage, nonzero damage; hidden entities included), rasterized at --res into one occupancy grid per (enemy
+type_key, attack), the attack being the entity's Control FSM state (or its first FSM's). The union over all frames is
+the support of that attack as logged: where its hitbox has ever been. The raster is conservative: a cell is marked
+when the shape meets it at all (cell-centre fill plus every cell the outline passes through, so slivers thinner than a
+cell, 2-point and edge colliders are kept), circles use the oracle's circumscribed octagon, capsules their arcs pushed
+out to circumscribe, and each collider also marks the area it swept since the previous frame (vertices moving
+linearly; the physics step between two logged frames is not logged), so a box that overlaps a logged shape or its
+sweep never reads a positive clearance. Queried for candidate hero positions, each with the hero hurtbox of that pose:
   stand  the hero standing on every floor segment of the scene's terrain (TERRAIN, the room-entry dump), x every
          --step, HeroBox normal;
   wall   the wall slide / cling poses against every wall face that can hold one (kin_jit.facing_near_wall: 1.5 u of
@@ -48,59 +53,155 @@ HERO_SKIN = 0.015
 # HeroBox.cs (local to the hero transform; x mirrored by the facing): (offset x, offset y, width, height)
 HB_NORMAL = (0.0, -0.3799, 0.4554, 2.2498)
 HB_WALL = (0.2101475, -0.2755051, 0.875695, 1.280464)
+# a threat outline moving further than this between two consecutive frames was placed, not moved (respawn, warp):
+# no sweep (the Bell Beast's colliders move at most 1.23 u per frame)
+SWEEP_MAX = 3.0
 
 
 # ---- rasterizing ------------------------------------------------------------------------------------------------
 
 @njit(cache=True)
-def _fill_poly(grid, x0, y0, res, P):
-    """Even-odd scanline fill of polygon P [n, 2] into grid[iy, ix] (cell centres)."""
+def _mark_segment(grid, x0, y0, res, ax, ay, bx, by):
+    """Every cell the segment passes through (supercover): samples res / 4 apart move at most one cell per axis
+    between them; a step that changes both indices marks both cells beside the corner it cut."""
     ny, nx = grid.shape
-    n = P.shape[0]
-    ymin, ymax = P[:, 1].min(), P[:, 1].max()
-    j0 = max(int(math.floor((ymin - y0) / res - 0.5)), 0)
-    j1 = min(int(math.ceil((ymax - y0) / res - 0.5)), ny - 1)
-    xs = np.empty(n)
-    for j in range(j0, j1 + 1):
-        yc = y0 + (j + 0.5) * res
-        m = 0
-        for i in range(n):
-            ax, ay = P[i, 0], P[i, 1]
-            bx, by = P[(i + 1) % n, 0], P[(i + 1) % n, 1]
-            if (ay > yc) != (by > yc):
-                xs[m] = ax + (yc - ay) * (bx - ax) / (by - ay)
-                m += 1
-        xs[:m].sort()
-        for k in range(0, m - 1, 2):
-            i0 = max(int(math.ceil((xs[k] - x0) / res - 0.5)), 0)
-            i1 = min(int(math.floor((xs[k + 1] - x0) / res - 0.5)), nx - 1)
-            for i in range(i0, i1 + 1):
-                grid[j, i] = True
-    # thin shapes narrower than a cell still mark the cells of their vertices
-    for i in range(n):
-        ix = int(math.floor((P[i, 0] - x0) / res))
-        iy = int(math.floor((P[i, 1] - y0) / res))
-        if 0 <= ix < nx and 0 <= iy < ny:
-            grid[iy, ix] = True
+    n = int(math.ceil(math.hypot(bx - ax, by - ay) / (0.25 * res))) + 1
+    pi = -(1 << 40)
+    pj = -(1 << 40)
+    for k in range(n + 1):
+        t = k / n
+        i = int(math.floor((ax + t * (bx - ax) - x0) / res))
+        j = int(math.floor((ay + t * (by - ay) - y0) / res))
+        if k > 0 and i != pi and j != pj:
+            if 0 <= pi < nx and 0 <= j < ny:
+                grid[j, pi] = True
+            if 0 <= i < nx and 0 <= pj < ny:
+                grid[pj, i] = True
+        if 0 <= i < nx and 0 <= j < ny:
+            grid[j, i] = True
+        pi = i
+        pj = j
 
 
 @njit(cache=True)
-def _fill_circle(grid, x0, y0, res, cx, cy, r):
+def _fill_poly(grid, x0, y0, res, P, closed):
+    """Every cell the polygon P [n, 2] meets: even-odd scanline fill of the cells whose centre is inside, plus every
+    cell its outline passes through, so a cell that meets the polygon is never left free (a cell that meets it
+    either holds a piece of the outline or lies wholly inside). closed False: an open chain (EdgeCollider2D), its
+    segments only."""
     ny, nx = grid.shape
-    j0 = max(int(math.floor((cy - r - y0) / res)), 0)
-    j1 = min(int(math.ceil((cy + r - y0) / res)), ny - 1)
-    i0 = max(int(math.floor((cx - r - x0) / res)), 0)
-    i1 = min(int(math.ceil((cx + r - x0) / res)), nx - 1)
-    for j in range(j0, j1 + 1):
-        for i in range(i0, i1 + 1):
-            dx = x0 + (i + 0.5) * res - cx
-            dy = y0 + (j + 0.5) * res - cy
-            if dx * dx + dy * dy <= r * r:
-                grid[j, i] = True
-    ix = int(math.floor((cx - x0) / res))
-    iy = int(math.floor((cy - y0) / res))
-    if 0 <= ix < nx and 0 <= iy < ny:
-        grid[iy, ix] = True
+    n = P.shape[0]
+    if closed and n >= 3:
+        ymin, ymax = P[:, 1].min(), P[:, 1].max()
+        j0 = max(int(math.floor((ymin - y0) / res - 0.5)), 0)
+        j1 = min(int(math.ceil((ymax - y0) / res - 0.5)), ny - 1)
+        xs = np.empty(n)
+        for j in range(j0, j1 + 1):
+            yc = y0 + (j + 0.5) * res
+            m = 0
+            for i in range(n):
+                ax, ay = P[i, 0], P[i, 1]
+                bx, by = P[(i + 1) % n, 0], P[(i + 1) % n, 1]
+                if (ay > yc) != (by > yc):
+                    xs[m] = ax + (yc - ay) * (bx - ax) / (by - ay)
+                    m += 1
+            xs[:m].sort()
+            for k in range(0, m - 1, 2):
+                i0 = max(int(math.ceil((xs[k] - x0) / res - 0.5)), 0)
+                i1 = min(int(math.floor((xs[k + 1] - x0) / res - 0.5)), nx - 1)
+                for i in range(i0, i1 + 1):
+                    grid[j, i] = True
+    last = n if (closed and n >= 3) else n - 1
+    for i in range(last):
+        _mark_segment(grid, x0, y0, res, P[i, 0], P[i, 1], P[(i + 1) % n, 0], P[(i + 1) % n, 1])
+    if n == 1:
+        _mark_segment(grid, x0, y0, res, P[0, 0], P[0, 1], P[0, 0], P[0, 1])
+
+
+def outline(c: dict) -> tuple[np.ndarray, bool] | None:
+    """A threat collider's world outline (points [n, 2], closed) that covers its shape: the oracle's circle octagon
+    already circumscribes the circle (ColliderGeometry.AppendCircle); a capsule's two 5-point arcs lie on its circles,
+    so they are pushed out from their centres to circumscribe them (the chords would cut up to 0.076 r off); an edge
+    collider is an open chain."""
+    v = np.asarray(c.get("verts_world") or (), dtype=np.float64).reshape(-1, 2)
+    if not len(v):
+        return None
+    kind = c.get("kind")
+    if kind == "edge":
+        return v, False
+    if kind == "capsule" and len(v) == 10:
+        v = v.copy()
+        for a in (0, 5):
+            cen = 0.5 * (v[a] + v[a + 4])
+            v[a:a + 5] = cen + (v[a:a + 5] - cen) / math.cos(math.pi / 8)
+    return v, len(v) >= 3
+
+
+def convex_hull(pts: np.ndarray) -> np.ndarray:
+    """Andrew's monotone chain, counter-clockwise, no repeated end point."""
+    q = np.unique(np.round(pts, 9), axis=0)
+    if len(q) < 3:
+        return q
+
+    def cross(o, a, b):
+        return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
+
+    lo: list = []
+    for p in q:
+        while len(lo) >= 2 and cross(lo[-2], lo[-1], p) <= 0:
+            lo.pop()
+        lo.append(p)
+    hi: list = []
+    for p in q[::-1]:
+        while len(hi) >= 2 and cross(hi[-2], hi[-1], p) <= 0:
+            hi.pop()
+        hi.append(p)
+    return np.array(lo[:-1] + hi[:-1])
+
+
+@njit(cache=True)
+def _hull4(Q):
+    """Convex hull (gift wrapping) of a handful of points Q [m, 2], counter-clockwise."""
+    m = Q.shape[0]
+    out = np.empty((m, 2))
+    start = 0
+    for i in range(1, m):
+        if Q[i, 0] < Q[start, 0] or (Q[i, 0] == Q[start, 0] and Q[i, 1] < Q[start, 1]):
+            start = i
+    h = 0
+    cur = start
+    while True:
+        out[h] = Q[cur]
+        h += 1
+        nxt = (cur + 1) % m
+        for i in range(m):
+            cr = (Q[nxt, 0] - Q[cur, 0]) * (Q[i, 1] - Q[cur, 1]) - (Q[nxt, 1] - Q[cur, 1]) * (Q[i, 0] - Q[cur, 0])
+            if cr < 0 or (cr == 0 and (Q[i, 0] - Q[cur, 0]) ** 2 + (Q[i, 1] - Q[cur, 1]) ** 2 >
+                          (Q[nxt, 0] - Q[cur, 0]) ** 2 + (Q[nxt, 1] - Q[cur, 1]) ** 2):
+                nxt = i
+        cur = nxt
+        if cur == start or h >= m:
+            break
+    return out[:h]
+
+
+@njit(cache=True)
+def _fill_swept(grid, x0, y0, res, A, B, closed):
+    """The area a collider outline swept between two frames, its vertices moving linearly from A to B (same order):
+    the outline at B (A was marked with its own frame) and, per edge, the convex hull of the edge's four end points,
+    which holds every intermediate position of that edge (the region the outline swept is bounded by them)."""
+    n = A.shape[0]
+    _fill_poly(grid, x0, y0, res, B, closed)
+    last = n if (closed and n >= 3) else n - 1
+    Q = np.empty((4, 2))
+    for i in range(max(last, 1 if n == 1 else 0)):
+        k = (i + 1) % n
+        Q[0] = A[i]
+        Q[1] = A[k]
+        Q[2] = B[k]
+        Q[3] = B[i]
+        H = _hull4(Q)
+        _fill_poly(grid, x0, y0, res, H, H.shape[0] >= 3)
 
 
 @njit(cache=True)
@@ -164,6 +265,10 @@ class CoverageMap:
     groups: dict = field(default_factory=dict)      # (type_key, attack) -> Group
     frames: int = 0
     sources: list = field(default_factory=list)
+    swept: int = 0                    # outlines rasterized with their sweep from the previous frame
+    teleports: int = 0                # outlines that jumped more than SWEEP_MAX in a frame (no sweep)
+    _prev: dict = field(default_factory=dict, repr=False)
+    _prev_f: int | None = None
 
     def shape(self) -> tuple[int, int]:
         return int(math.ceil((self.y1 - self.y0) / self.res)), int(math.ceil((self.x1 - self.x0) / self.res))
@@ -175,37 +280,48 @@ class CoverageMap:
         return g
 
     def add_state(self, s: dict, fsm_name: str = "Control", types: set | None = None) -> int:
-        """Rasterize one STATE's threat colliders; returns how many were added."""
-        from ssbot.ipc.ents import is_hidden, is_threat
+        """Rasterize one STATE's threat colliders, and the area each swept since the previous frame (a collider
+        seen in frame f - 1 under the same entity, index, kind and vertex count, moved by at most SWEEP_MAX: a
+        frame holds up to two 50 Hz physics steps, and the step between two logged frames is where the outline
+        passed, not where it was logged); returns how many were added. Hidden entities count too (an enabled
+        damage collider hurts whether or not the renderer is on)."""
+        from ssbot.ipc.ents import is_threat
         n = 0
         seen = set()
-        for e in s.get("ents") or ():
-            if is_hidden(e):
-                continue
+        f = s.get("f")
+        cur: dict = {}
+        for ei, e in enumerate(s.get("ents") or ()):
             tk = e.get("type_key") or "?"
             if types and tk not in types:
                 continue
-            cols = [c for c in e.get("colliders") or () if is_threat(c)]
+            cols = [(ci, c) for ci, c in enumerate(e.get("colliders") or ()) if is_threat(c)]
             if not cols:
                 continue
             fs = e.get("fsms") or []
-            f = next((x for x in fs if x.get("name") == fsm_name), fs[0] if fs else None)
-            g = self.group(tk, str(f.get("state")) if f else "-")
+            fm = next((x for x in fs if x.get("name") == fsm_name), fs[0] if fs else None)
+            g = self.group(tk, str(fm.get("state")) if fm else "-")
             if (tk, g.attack) not in seen:
                 g.frames += 1
                 seen.add((tk, g.attack))
-            for c in cols:
-                v = np.asarray(c["verts_world"], dtype=np.float64).reshape(-1, 2)
-                if not len(v):
+            for ci, c in cols:
+                o = outline(c)
+                if o is None:
                     continue
-                if c.get("kind") == "circle":
-                    _fill_circle(g.grid, self.x0, self.y0, self.res, v[0, 0], v[0, 1], float(c.get("r") or 0.0))
-                elif len(v) >= 3:
-                    _fill_poly(g.grid, self.x0, self.y0, self.res, np.ascontiguousarray(v))
-                else:                         # edges / degenerate: their vertices
-                    _fill_poly(g.grid, self.x0, self.y0, self.res, np.ascontiguousarray(np.vstack([v, v[::-1]])))
+                v, closed = o
+                v = np.ascontiguousarray(v)
+                key = (e.get("iid", ei), ci, c.get("kind"), len(v))
+                cur[key] = (v, closed)
+                prev = self._prev.get(key) if (f is not None and self._prev_f is not None and
+                                               f == self._prev_f + 1) else None
+                if prev is not None and float(np.abs(prev[0] - v).max()) <= SWEEP_MAX:
+                    _fill_swept(g.grid, self.x0, self.y0, self.res, prev[0], v, closed)
+                    self.swept += 1
+                else:
+                    _fill_poly(g.grid, self.x0, self.y0, self.res, v, closed)
+                    self.teleports += int(prev is not None)
                 g.colliders += 1
                 n += 1
+        self._prev, self._prev_f = cur, f
         self.frames += 1
         return n
 
@@ -441,7 +557,8 @@ def main(argv: list[str] | None = None) -> int:
     pts = candidate_points(terrain, q[0], q[2], q[1], q[3], a.step, a.air) if terrain else []
     evaluate(cm, pts, a.margin)
     groups = sorted(cm.groups.values(), key=lambda g: (g.type_key, g.attack))
-    print(f"{len(srcs)} recording spans, {cm.frames} frames, scene {scene}, {len(groups)} groups")
+    print(f"{len(srcs)} recording spans, {cm.frames} frames, scene {scene}, {len(groups)} groups, "
+          f"{cm.swept} outlines swept from the previous frame, {cm.teleports} jumps > {SWEEP_MAX} u not swept")
     for g in groups:
         print(f"  {g.type_key:28s} {g.attack:22s} frames {g.frames:6d} colliders {g.colliders:7d} "
               f"area {g.grid.sum() * cm.res ** 2:7.1f} u2")
@@ -463,7 +580,7 @@ def main(argv: list[str] | None = None) -> int:
               f"y {hq['pos'][1]:.2f} clearance {hq['clearance']:.2f} closest {hq['closest'][:1]}")
     if a.json:
         out = {"scene": scene, "bounds": bounds, "res": cm.res, "frames": cm.frames, "sources": cm.sources,
-               "margin": a.margin,
+               "margin": a.margin, "swept": cm.swept, "teleports": cm.teleports,
                "groups": [{"type_key": g.type_key, "attack": g.attack, "frames": g.frames, "colliders": g.colliders,
                            "area": float(g.grid.sum() * cm.res ** 2)} for g in groups],
                "points": [{k: v for k, v in q.items() if k != "box"} | {"box": [round(c, 4) for c in q["box"]]}

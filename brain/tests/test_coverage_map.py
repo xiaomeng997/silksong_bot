@@ -27,7 +27,7 @@ def test_union_and_clearance():
     assert set(cm.groups) == {("Clapper", "Attack"), ("Clapper", "Slam")}
     g = cm.groups[("Clapper", "Attack")]
     assert g.frames == 2 and g.colliders == 2                 # the disabled collider is not a threat
-    assert abs(g.grid.sum() * 0.05 ** 2 - 4.0) < 0.15
+    assert 4.0 - 1e-9 <= g.grid.sum() * 0.05 ** 2 < 4.0 + 0.25   # conservative: outline cells on top
     c = cm.clearance((8.0, 1.0, 9.0, 3.0))                    # 1 u right of the Attack union, 3 u left of Slam
     assert abs(c[("Clapper", "Attack")] - 1.0) < 0.06
     assert abs(c[("Clapper", "Slam")] - 3.0) < 0.06
@@ -57,3 +57,64 @@ def test_wall_cling_candidates_in_a_box_room():
     floor = [q for q in stands if q["pos"][1] < 5]
     assert floor and all(abs(q["pos"][1] - (0.015 + 1.5527)) < 1e-6 for q in floor)
     assert all(abs(q["pos"][1] - (15.015 + 1.5527)) < 1e-6 for q in stands if q["pos"][1] >= 5)   # on the wall top
+
+
+def _ent(colliders, iid=1, tk="Clapper", state="Attack", hidden=False):
+    dmg = {"dealt": 2, "eff": 2, "hazard_type": 1, "flags": 0, "parry": 0, "parryable": False,
+           "can_cause_damage": True}
+    return {"iid": iid, "type_key": tk, "hidden": hidden, "fsms": [{"name": "Control", "state": state}],
+            "colliders": [dict(c, enabled=True, layer=11, damage=dmg) for c in colliders]}
+
+
+def _clear(cm, box):
+    cm.finish()
+    return cm.clearance(box)[("Clapper", "Attack")]
+
+
+@pytest.mark.parametrize("x0", [0.0, 0.013, 0.031])
+def test_thin_and_edge_colliders_are_never_reported_clear(x0):
+    # a 3 x 0.02 u damage sliver, an EdgeCollider2D segment and a 2-point collider through a HeroBox-sized box
+    box = (1.0 + x0, 0.9, 1.4554 + x0, 3.1498)
+    for col in ({"kind": "poly", "verts_world": [0.0, 2.0, 3.0, 2.0, 3.0, 2.02, 0.0, 2.02]},
+                {"kind": "edge", "verts_world": [0.0, 2.003, 3.0, 2.011]},
+                {"kind": "box", "verts_world": [0.0, 1.5, 3.0, 1.5]}):
+        cm = cmap.CoverageMap(-1.0, -1.0, 5.0, 5.0, 0.05)
+        cm.add_state({"f": 1, "ents": [_ent([col])]})
+        assert _clear(cm, box) < 0, col
+
+
+def test_polygon_edge_between_cell_centres_overlaps():
+    # the polygon ends at x 2.024, inside the cell 2.00 - 2.05 but short of its centre: a box from x 2.0 overlaps it
+    cm = cmap.CoverageMap(0.0, 0.0, 5.0, 5.0, 0.05)
+    cm.add_state({"f": 1, "ents": [_ent([{"kind": "poly", "verts_world": [0.5, 1.0, 2.024, 1.0, 2.024, 2.0,
+                                                                            0.5, 2.0]}])]})
+    assert _clear(cm, (2.0, 1.2, 2.5, 1.8)) < 0
+    assert 0.4 <= _clear(cm, (2.5, 1.2, 3.0, 1.8)) <= 0.476 + 1e-9    # never more than the true gap
+
+
+def test_moving_collider_marks_its_sweep():
+    # a 0.5 u box moving 1.2 u right per frame: the 0.7 u between two logged outlines was passed through
+    cm = cmap.CoverageMap(0.0, 0.0, 10.0, 5.0, 0.05)
+    for f, x in ((1, 1.0), (2, 2.2)):
+        v = [x, 1.0, x + 0.5, 1.0, x + 0.5, 1.5, x, 1.5]
+        cm.add_state({"f": f, "ents": [_ent([{"kind": "box", "verts_world": v}])]})
+    assert cm.swept == 1
+    assert _clear(cm, (1.7, 1.1, 1.9, 1.4)) < 0
+    # a gap in the frames (or a jump past SWEEP_MAX) is no sweep
+    cm = cmap.CoverageMap(0.0, 0.0, 10.0, 5.0, 0.05)
+    for f, x in ((1, 1.0), (3, 2.2)):
+        v = [x, 1.0, x + 0.5, 1.0, x + 0.5, 1.5, x, 1.5]
+        cm.add_state({"f": f, "ents": [_ent([{"kind": "box", "verts_world": v}])]})
+    assert cm.swept == 0 and _clear(cm, (1.7, 1.1, 1.9, 1.4)) > 0
+
+
+def test_circle_octagon_and_hidden_entities():
+    # the oracle exports a circle as its circumscribed octagon; the old code took the first vertex as the centre
+    r, cx, cy = 1.0, 3.0, 2.0
+    ang = np.deg2rad(22.5 + 45 * np.arange(8))
+    v = np.stack([cx + r / np.cos(np.pi / 8) * np.cos(ang), cy + r / np.cos(np.pi / 8) * np.sin(ang)], 1)
+    cm = cmap.CoverageMap(0.0, 0.0, 6.0, 5.0, 0.05)
+    cm.add_state({"f": 1, "ents": [_ent([{"kind": "circle", "verts_world": v.ravel().tolist(), "r": r}],
+                                        hidden=True)]})
+    assert _clear(cm, (cx - 0.1, cy - 0.1, cx + 0.1, cy + 0.1)) < 0     # the centre is covered (hidden counts)
+    assert 0.0 <= _clear(cm, (cx + 1.0 + 0.3, cy - 0.1, cx + 1.6, cy + 0.1)) <= 0.3
