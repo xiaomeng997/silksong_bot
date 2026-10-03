@@ -31,6 +31,7 @@ from ssbot.train.encounters import Ctx, Encounter
 
 CLEAR, WOULD_DIE, QUIT, STUCK, HARNESS_FAIL = "CLEAR", "WOULD_DIE", "QUIT", "STUCK", "HARNESS_FAIL"
 POST_CLEAR_FRAMES = 60   # keep recording a second after the kill (death animations, late hazards)
+PAUSE_AFTER_KILL_FRAMES = 1200   # a supervisor pause under way at the kill keeps the keys this long at most
 
 
 class FightTap:
@@ -264,6 +265,22 @@ def _run(link: OracleLink, enc: Encounter, tap: FightTap, policy, cfg: EpisodeCo
             rec.late_states += 1
         last = s["f"]
         game = s.get("game") or {}
+        if (tap.death_frame is not None and getattr(policy, "pause_owned", False)
+                and getattr(policy, "episode_outcome", None) is None
+                and last - tap.death_frame < PAUSE_AFTER_KILL_FRAMES):
+            # a supervisor pause raised around the kill (the boss-death slow motion keeps the pause gate shut for
+            # 1.35 s, m0:N13): its pause machine keeps the keys until its quit is done, as in a real run, instead of
+            # being cut off by the post-kill zeros (the pause stress test injects hits within 3 frames of kills)
+            if tap.lethal and cfg.mode == "eval":
+                rec.outcome, rec.reason = WOULD_DIE, "lethal hit after the kill"
+                break
+            rec.outcome = rec.outcome or CLEAR
+            link.act(last + 2, policy.act(s, tap), hold_frames=0)
+            rec.acts += 1
+            if getattr(policy, "episode_outcome", None) == QUIT:
+                rec.reason = f"quit after the kill: {getattr(policy, 'outcome_reason', None)}"
+                end_after = last
+            continue
         if end_after is not None:
             if last >= end_after:
                 break

@@ -53,13 +53,18 @@ def git_rev() -> str | None:
 
 
 def make_policy(name: str, view: str = "oracle", run_dir: Path | None = None, instance: int = 0,
-                threads: int = 8, real_quit: float = 0.0):
+                threads: int = 8, real_quit: float = 0.0, inject_hits: float = 0.0):
     if name == "data":
         from ssbot.train.data_policy import DataPolicy
         return DataPolicy()
     if name == "planner":
         from ssbot.train.planner_policy import PlannerPolicy
-        return PlannerPolicy(view=view, threads=threads, log_dir=run_dir, instance=instance, real_quit_p=real_quit)
+        pol = PlannerPolicy(view=view, threads=threads, log_dir=run_dir, instance=instance, real_quit_p=real_quit)
+        if inject_hits > 0:
+            # the pause stress test (ssbot.train.hit_injection, ssbot.tools.pause_stress): one hit per episode
+            from ssbot.train.hit_injection import HitInjector
+            pol = HitInjector(pol, p_event=inject_hits)
+        return pol
     raise SystemExit(f"unknown policy {name}")
 
 
@@ -95,7 +100,7 @@ def worker(a: argparse.Namespace) -> int:
     out = (run_dir / f"attempts_i{a.instance}.jsonl").open("a", encoding="utf-8", newline="\n")
     link = OracleLink(instance=a.instance, connect_timeout_s=120)
     tap = FightTap(link, enc)
-    policy = make_policy(a.policy, a.view, run_dir, a.instance, a.threads, a.real_quit)
+    policy = make_policy(a.policy, a.view, run_dir, a.instance, a.threads, a.real_quit, a.inject_hits)
     if hasattr(policy, "attach"):
         policy.attach(link)
     if hasattr(policy, "warmup"):
@@ -182,6 +187,8 @@ def worker(a: argparse.Namespace) -> int:
 
 def run(a: argparse.Namespace) -> int:
     tag = a.mode if a.policy == "data" else f"{a.mode}_{a.policy}_{a.view}"
+    if a.inject_hits > 0:
+        tag += "_inject"
     run_dir = RUNS / f"{datetime.now():%Y%m%d_%H%M%S}_{a.encounter}_{tag}"
     run_dir.mkdir(parents=True)
     (run_dir / "config.json").write_text(json.dumps(vars(a), indent=1), encoding="utf-8")
@@ -190,7 +197,8 @@ def run(a: argparse.Namespace) -> int:
         cmd = [sys.executable, "-m", "ssbot.tools.combat_run", "_worker", "--instance", str(i), "--run-dir",
                str(run_dir), "--encounter", a.encounter, "--mode", a.mode, "--policy", a.policy, "--episodes",
                str(a.episodes), "--hours", str(a.hours or 0), "--rotate", str(a.rotate), "--seed", str(a.seed),
-               "--view", a.view, "--threads", str(a.threads), "--real-quit", str(a.real_quit)]
+               "--view", a.view, "--threads", str(a.threads), "--real-quit", str(a.real_quit),
+               "--inject-hits", str(a.inject_hits)]
         if a.no_record:
             cmd.append("--no-record")
         log = (run_dir / f"worker_i{i}.log").open("w", encoding="utf-8")
@@ -310,6 +318,11 @@ def main(argv: list[str] | None = None) -> int:
         p.add_argument("--real-quit", type=float, default=0.0,
                        help="probability that a confirmed supervisor pause quits for real (menu, Yes, main menu), "
                             "then the worker reloads sandbox slot 1 and the savestate")
+        p.add_argument("--inject-hits", type=float, default=0.0, metavar="SHARE",
+                       help="pause stress test: inject one hit per episode (hurt.special, HP down to 1, so the "
+                            "supervisor must quit), SHARE of them timed on kills / hits / bounces / the roar, the "
+                            "rest on airborne / attack / cast / pogo moments (0: off); summarise with "
+                            "ssbot.tools.pause_stress")
         if name == "run":
             p.add_argument("--instances", default="0")
         else:
