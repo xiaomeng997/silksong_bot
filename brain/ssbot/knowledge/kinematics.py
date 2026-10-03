@@ -2675,6 +2675,9 @@ class StateTracker:
                        silk=int(h.get("silk") or 0), clip=(h.get("anim") or {}).get("clip"),
                        spell=(h.get("spell") or [None])[0],
                        valid=g.get("gs", 4) == 4 and not g.get("paused") and not pause.get("inv", False))
+            w = h.get("wall")
+            if w is not None:
+                row["wall"] = -1 if w[0] else 1 if len(w) > 1 and w[1] else 0
         self.push_row(row)
 
     def push_row(self, r: dict) -> None:

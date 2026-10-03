@@ -87,6 +87,48 @@ def test_ground_dash_speed_and_air_sprint(params, room):
     assert (r2.mode[0] == km.M_SPRINT).any()
 
 
+def test_tracker_matches_the_batch_estimator_with_the_forum_rows(params):
+    """StateTracker (the planner's per-tick state) and state_table give the same rows, the Forum ones included, on a
+    synthetic log: a jump into a wall, slide, cling, wall jump, a glide's phases, a dash, a Reaper down slash."""
+    from tests.test_kinematics import REST, _state
+    seq = []
+    for i in range(70):
+        fl, clip, hs, rel, wall = {"onGround": i < 5}, "Idle", 1, False, [False, False]
+        if 5 <= i < 10:
+            fl["jumping"] = True
+        if 10 <= i < 25:
+            fl.update(wallSliding=True, wallClinging=12 <= i < 18)
+            wall = [True, False]
+        if 25 <= i < 30:
+            fl["jumping"] = True                       # off the wall: a wall jump
+        if 32 <= i < 45:
+            clip = ("Umbrella Inflate Antic" if i < 35 else "Umbrella Inflate" if i < 38 else "Umbrella Float"
+                    if i < 43 else "Umbrella Deflate")
+            hs, rel = 7, True
+        if 47 <= i < 50:
+            fl["dashing"] = True
+        if 55 <= i < 64:
+            clip = "v3 Down Slash Antic" if i < 58 else "v3 Down Slash" if i < 61 else "Fall"
+            hs, rel = 7, True
+        s = _state(i, 10.0 + 0.05 * i, REST + (1.0 if i >= 5 else 0.0), **fl)
+        s["hero"] = dict(s["hero"], anim={"clip": clip}, hero_state=hs, control_relinquished=rel, wall=wall,
+                         vel=[0.0, -1.0 if 10 <= i < 25 else 0.0])
+        s["fs"] = int(i % 6 != 0)
+        seq.append(s)
+    tr = km.Trace.from_states(seq, params)
+    modes = km.classify_modes(tr, forum=True)
+    assert set(modes[32:45]) == {km.M_GLIDE} and set(modes[47:50]) == {km.M_DASH} and \
+        set(modes[55:64]) == {km.M_RPR_DS}
+    ref = km.estimate_state(tr, np.arange(len(tr)), params)
+    assert ref[km.WSIDE, 15] == -1 and ref[km.CLING, 15] == 1 and ref[km.WLOCK, 26] >= 0
+    assert ref[km.PHASE, 40] == 2 and ref[km.PHASE, 44] == 3
+    trk = km.StateTracker(params)
+    for i, s in enumerate(seq):
+        trk.push(s)
+        same = (trk.S == ref[:, i]) | (np.isnan(trk.S) & np.isnan(ref[:, i]))
+        assert same.all(), (i, [km.ROW_NAMES[j] for j in np.flatnonzero(~same)])
+
+
 def test_reaper_down_slash_lunges_forward_down(params, room):
     S = km.initial_state(params, 10.0, 15.0, facing=1, ground=False)
     r = _roll(params, room, S, [A | D] * 3 + [0] * 40)
