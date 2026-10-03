@@ -150,3 +150,61 @@ def test_reaper_down_slash_lunges_forward_down(params, room):
     assert r.vel[0, k, 0].max() > 10                           # Rpr Downslash: 30 forward, decaying x0.7
     assert (r.vel[0, k, 1] <= 1e-9).all()
     assert md[-1] == km.M_NORMAL                               # control back after Fall 2
+
+
+@pytest.fixture(scope="module")
+def thunk_params(params):
+    d = params.to_json() | {"abilities": ALL | km.AB_THUNK | km.AB_SLOPES, "crest": "Reaper"}
+    return km.HeroParams.from_json(d).with_slash_polys()
+
+
+def test_side_slash_into_a_wall_recoils_once(thunk_params, room):
+    # standing 2.5 u from the wall face (x 0), facing it: the Reaper slash (reach 3.6 u past the box centre) meets it
+    p = thunk_params
+    S = km.initial_state(p, 2.5, p.skin + p.foot, facing=-1)
+    r = _roll(p, room, S, [L | A] + [0] * 20)
+    x = r.box[0, :, 0]
+    assert x[-1] > x[0] + 0.4                                  # pushed away from the wall (8 recoil steps x 3.75)
+    k_on = int(np.flatnonzero(r.vel[0, :, 0] > 1.0)[0])
+    assert 5 <= k_on <= 7                                      # the collider's first active step (live 5 / 6 / 7)
+    # out of reach: no recoil
+    S = km.initial_state(p, 4.5, p.skin + p.foot, facing=-1)
+    r = _roll(p, room, S, [A] + [0] * 20)
+    assert np.ptp(r.box[0, :, 0]) < 1e-6
+    # the Hunter rules (no AB_THUNK) never recoil off terrain
+    S = km.initial_state(p, 2.5, p.skin + p.foot, facing=-1)
+    q = km.HeroParams.from_json(p.to_json() | {"abilities": ALL})
+    r = _roll(q, room, S, [A] + [0] * 20)
+    assert np.ptp(r.box[0, :, 0]) < 1e-6
+
+
+def test_alt_attack_alternates_and_resets(thunk_params, room):
+    p = thunk_params
+    S = km.initial_state(p, 20.0, p.skin + p.foot, facing=1)
+    m = [A] + [0] * 39 + [A] + [0] * 39 + [U | A] + [0] * 60 + [A] + [0] * 5
+    r = km.rollout(S, np.asarray(m, dtype=np.int64)[None], p, room, lanes=True)
+    kinds = r.final[km.ATK_KIND, 0]
+    # normal (sets altAttack) -> alt (clears it) -> up (a new direction clears, then sets it) -> after > 0.8 s a
+    # normal again (the reset)
+    assert kinds == 1.0
+
+
+def test_jump_under_a_sloped_ceiling_slides_along_it(thunk_params):
+    # a 45 deg ceiling edge from (0, 4) up to (6, 10), the solid above-left of it: a jump under it slides up and right
+    # along it (the velocity's part into the edge projected away) instead of passing through (the Hunter rules do not
+    # collide slopes)
+    p = thunk_params
+    outline = np.array([[-5.0, 4.0], [0.0, 4.0], [6.0, 10.0], [-5.0, 10.0]])
+    floor = np.array([[-5.0, -5.0], [30.0, -5.0], [30.0, 0.0], [-5.0, 0.0]])
+    terr = km.Terrain2D.from_outlines([outline, floor], closed=[True, True])
+    assert len(terr.slopes) == 1
+    S = km.initial_state(p, 2.0, p.skin + p.foot, facing=1)
+    r = _roll(p, terr, S, [J] * 20)
+    top = r.box[0, :, 3]
+    xc = 0.5 * (r.box[0, :, 0] + r.box[0, :, 2])
+    edge_y = 4.0 + (r.box[0, :, 0] - 0.0)                      # the edge's height over the box's left side
+    assert (top <= edge_y + 1e-3).all()                        # never through the edge
+    assert xc[-1] > 2.0 + 0.1                                  # along the edge, away from the solid
+    q = km.HeroParams.from_json(p.to_json() | {"abilities": ALL})
+    r2 = _roll(q, terr, S, [J] * 20)
+    assert r2.box[0, :, 3].max() > top.max() + 0.5            # without AB_SLOPES the jump goes through

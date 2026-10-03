@@ -2225,8 +2225,8 @@ def forum_mode(md: int, prev_md: int | None, flag, clip, relinq: bool, hero_stat
         return M_GLIDE
     if taken and clip in SCRAMBLE_CLIPS:
         return M_SCRAMBLE
-    if taken and flag("isSprinting"):
-        return M_SPRINT
+    if taken and (flag("isSprinting") or clip in ("Skid End 1", "Skid End 2")):
+        return M_SPRINT                   # (the skid clips play after isSprinting cleared: s98200 f774201)
     if taken and (clip in RPR_CLIPS or (prev_md == M_RPR_DS and md == M_LOCKED)):
         return M_RPR_DS
     if flag("dashing"):
@@ -2443,7 +2443,8 @@ class ForumRows:
                     ph = 3.0 if (v0 >= p.scr_end_vy or
                                  abs(vy_log - roof) < abs(vy_log - v0 * p.scr_end_decel)) else 2.0
         if md in (M_GLIDE, M_SPRINT, M_RPR_DS, M_SCRAMBLE):
-            if pr and pmd == md and (pr["ph"] == ph or (md == M_RPR_DS and pr["ph"] == 1 and ph == 4)):
+            if pr and pmd == md and (pr["ph"] == ph or (md == M_RPR_DS and pr["ph"] == 1 and ph == 4)
+                                     or (md == M_SPRINT and pr["ph"] <= 1 and ph == 2)):
                 self.ph_t = np.float32(self.ph_t + dt)
             elif (md == M_SCRAMBLE and ph == 3) or (md == M_SPRINT and not (pr and pmd == M_SPRINT)):
                 self.ph_t = dt                # entered in a FixedUpdate (roof ray; FinishedDashing): the entry

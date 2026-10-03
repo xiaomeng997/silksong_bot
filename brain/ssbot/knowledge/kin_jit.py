@@ -1336,9 +1336,8 @@ def forum_after_queue(x, mask, pressed, mode0, dt, P, TT):
         if ph <= 1:
             if x[GROUND] > 0:             # LAND -> Land: sprint on if the dash is held
                 if (mask & B_DASH) != 0:
-                    x[PHASE] = 2.0
-                    x[MODE_T] = 0.0
-                    x[SP_X] = x[FACE] * P[P_SPR_SPEED]
+                    x[PHASE] = 2.0                # (the Sprint Grace timer runs on from Start Sprint: s98200
+                    x[SP_X] = x[FACE] * P[P_SPR_SPEED]   # f774201, 0.28 s on the ground after 0.20 s in the air, skidded)
                     # LAND comes from the landing step's collision callback, where the transform sits at the body
                     # (live: the landing frame moved the step's 17.0 u/s x 0.02 + 0.05)
                     sprint_translate(x, x[PX], x[PY], P)

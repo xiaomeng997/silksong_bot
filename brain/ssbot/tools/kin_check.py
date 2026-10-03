@@ -25,7 +25,8 @@ only (estimate_state, causal phase interval): what the planner knows at decision
 Every window lands in exactly one category (first match of the last applicable rule): uncovered:<why> (invalid:
 hero absent, paused or not in gameplay; gap: missing frames; slide: a savestate load still moving the hero back;
 harness teleports, hazard respawns, scene changes, deaths, control taken by another FSM, no terrain for the scene,
-nail-charge arts), world_freeze (the time scale is below 1 outside the hero's own hit-stop: boss stun, boss death
+nail-charge arts; with the Forum parameters control taken by another FSM is the covered category "locked"
+instead: a mantle is not in that model, and the log's mantle is not information the planner has), world_freeze (the time scale is below 1 outside the hero's own hit-stop: boss stun, boss death
 slow-motion, BindBreak after a hit during Bind: the model runs them from the logged freeze starts, EV_FZ_*, and
 BindBreak from the hit during the Bind charge), hitch (a
 frame longer than the jitter model's frame_time_max: rate 3.1e-5 per frame, left to the residual monitor), hurt (a
@@ -191,8 +192,10 @@ def near_slopes(tr: Trace, terrains: dict, reach: float = 0.05, step: float = 0.
 
 
 def categorize(tr: Trace, horizon: int, modes: np.ndarray, events: np.ndarray, terrains: dict,
-               frame_time_max: float = 0.018) -> tuple[np.ndarray, np.ndarray]:
-    """(starts, label per window) for every row i with i + horizon inside the trace (see the module docstring)."""
+               frame_time_max: float = 0.018, forum: bool = False) -> tuple[np.ndarray, np.ndarray]:
+    """(starts, label per window) for every row i with i + horizon inside the trace (see the module docstring).
+    forum: control taken by another FSM is a covered category ("locked": the Forum model does not have the Mantle
+    FSM, and a mantle in the log is not information the planner has), not uncovered:locked."""
     n = len(tr)
     starts = np.arange(max(n - horizon, 0))
     I = starts[:, None] + np.arange(0, horizon + 1)[None, :]
@@ -234,7 +237,7 @@ def categorize(tr: Trace, horizon: int, modes: np.ndarray, events: np.ndarray, t
         ("slope", near_slopes(tr, terrains)[I].any(axis=1)),
         ("hitch", (tr.udt[I[:, 1:]] > frame_time_max).any(axis=1)),
         ("uncovered:nail_charge", tr.flag("nailCharging")[I].any(axis=1)),
-        ("uncovered:locked", (mw == km.M_LOCKED).any(axis=1)),
+        ("locked" if forum else "uncovered:locked", (mw == km.M_LOCKED).any(axis=1)),
         ("uncovered:scene", (mk & km.MK_SCENE).any(axis=1)),
         ("uncovered:death", (mk & km.MK_DEATH).any(axis=1)),
         ("uncovered:hazard", (mk & km.MK_HAZARD).any(axis=1)),
@@ -289,7 +292,8 @@ def check_trace(tr: Trace, terrains: dict[str, Terrain2D], params: HeroParams, h
     """Run every covered window of one trace in each setting; returns the per-window errors (NaN: not run)."""
     modes = km.classify_modes(tr, forum=bool(params.abilities))
     events = km.derive_events(tr, modes)
-    starts, labels = categorize(tr, horizon, modes, events, terrains, params.frame_time_max)
+    starts, labels = categorize(tr, horizon, modes, events, terrains, params.frame_time_max,
+                                forum=bool(params.abilities))
     run = np.flatnonzero([not lab.startswith("uncovered:") or lab in ("uncovered:locked", "uncovered:harness",
                                                                       "uncovered:hazard", "uncovered:scene",
                                                                       "uncovered:nail_charge", "uncovered:death",
