@@ -62,8 +62,9 @@ def forum_params():
     return km.HeroParams.from_json(d)
 
 
-def draw(rng: random.Random, d: int) -> Trial:
-    """One primitive; d = +-1 the direction of the wall from the start."""
+def draw(rng: random.Random, d: int, dist: float = 4.0) -> Trial:
+    """One primitive; d = +-1 the direction of the wall from the start, dist its distance (the wall primitives
+    run most of the way first: at 8.25 u/s, stopping 0.5-3 u short)."""
     md = M_R if d > 0 else M_L
     mo = M_L if d > 0 else M_R
     kind = rng.choice(("wall_hold", "wall_hold", "wall_jump", "wall_jump", "wall_attack", "wall_scramble", "glide",
@@ -71,6 +72,8 @@ def draw(rng: random.Random, d: int) -> Trial:
     p: dict = {"d": d}
     m: list[int] = []
     run = rng.randint(0, 60)
+    if kind in ("wall_hold", "wall_jump", "wall_attack", "wall_scramble"):
+        run = max(0, int((dist - rng.uniform(0.5, 3.0)) / 8.25 * 60))
     p["run"] = run
     if kind == "wall_scramble":
         # the Wall Scramble FSM (dash while sliding and holding towards the wall: a climb, not in the model yet):
@@ -146,13 +149,13 @@ def safe(S: np.ndarray, t: Trial, params, terrain, x_safe) -> bool:
     return bool(xs.min() >= x_safe[0] and xs.max() <= x_safe[1])
 
 
-def plan(rng: random.Random, state: dict, model, d: int, x_safe, tries: int = 20) -> Trial:
+def plan(rng: random.Random, state: dict, model, d: int, x_safe, dist: float = 4.0, tries: int = 20) -> Trial:
     from ssbot.knowledge import kinematics as km
     params, terrain = model
     tr = km.Trace.from_states([state], params, mask_source="act")
     S = km.estimate_state(tr, [0], params, terrain=terrain)
     for i in range(tries):
-        t = draw(rng, d)
+        t = draw(rng, d, dist)
         t.redraws = i
         if safe(S, t, params, terrain, x_safe):
             return t
@@ -290,13 +293,14 @@ def main(argv: list[str] | None = None) -> int:
                 terrain = Terrain2D.from_message(t_msg) if t_msg else Terrain2D.empty()
             x0 = float(s["hero"]["pos"][0])
             d = 1 if (a.wall_x if a.wall_x is not None else x0 + 1) > x0 else -1
+            dist = abs(a.wall_x - x0) - 0.265 if a.wall_x is not None else 4.0
             x_safe = tuple(a.x_safe) if a.x_safe else (x0 - 30, x0 + 30)
             if n >= a.trials:                # attack-frame trials: Reaper swings only
-                t = draw(rng, d)
+                t = draw(rng, d, dist)
                 while t.kind not in ("reaper_attack", "wall_attack"):
-                    t = draw(rng, d)
+                    t = draw(rng, d, dist)
             else:
-                t = plan(rng, s, (params, terrain), d, x_safe)
+                t = plan(rng, s, (params, terrain), d, x_safe, dist)
             t.seed = a.seed
             t.start = {"pos": s["hero"]["pos"][:2], "silk": s["hero"]["silk"], "facing": s["hero"]["facing"]}
             if n >= a.trials:
