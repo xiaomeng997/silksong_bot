@@ -123,6 +123,11 @@ shape_from: {Charge Emerge: Charge Antic}
 bind:
   states: [Submerged, Dig In, Leap Land, Charge End, Rage Submerge, Rage Rumble]
   hp_missing_min: 2       # bind at 3/5 (h = 2) and below; the supervisor's own test asks HP <= max - 3 or h <= 2
+  # Keep the Bind's 9 silk at full HP too (no Silkspear then: the spool holds 9). Off: the Silkspear at full HP left
+  # silk 0-6 at the hit in all 37 gate / live QUITs (20261002_123347 ... 152649), 26 of which had a Bind window
+  # within 2 s of the hit (ssbot.tools.quit_timeline --replay). On: every first hit finds a Bind; the cost is the
+  # Silkspear's damage (3-5 casts, 45-75 of the boss's 150 HP a fight in run 152649). Decide by a live A/B.
+  reserve_at_full_hp: false
 
 weights:
   hit: 10.0               # per predicted nail hit on the boss (Silkspear: x 3)

@@ -211,6 +211,25 @@ def test_q6_forced_risk_only_at_low_h():
     assert "Q6" in Supervisor(BB).step(_inp(hp=4, forced_risk=True)).triggers
 
 
+def test_q6_counts_forced_risk_within_the_design_horizon_only():
+    # the best plan meets the support within H = 0.8 s (48 frames at 60 fps, inclusive), or how long it stays clear is
+    # unknown: Q6 as before; clear beyond H (the adaptive horizon's open-loop contact near a charge's end, 2 s out):
+    # no Q6, the attempt goes on in YELLOW and the planner re-plans every frame
+    for clear in (None, 0.0, 0.4, 48 / 60, 48 * 0.016666):
+        d = Supervisor(BB).step(_inp(hp=4, forced_risk=True, forced_clear_s=clear))
+        assert "Q6" in d.triggers and d.pause_pending and d.quit_requested, clear
+    for clear in (49 / 60, 1.2, 2.0):
+        d = Supervisor(BB).step(_inp(hp=4, forced_risk=True, forced_clear_s=clear))
+        assert not d.triggers and not d.pause_pending and d.tier == "YELLOW" and d.h == 2, clear
+    # h >= 3: never Q6, whatever the clearance; h = 1 is Q1 anyway
+    assert not Supervisor(BB).step(_inp(forced_risk=True, forced_clear_s=0.1)).triggers
+    assert "Q1" in Supervisor(BB).step(_inp(hp=2, forced_risk=True, forced_clear_s=1.5)).triggers
+    # the horizon is configuration (DESIGN §3.5.4 H), and a clearance without FORCED_RISK means nothing
+    s = Supervisor(SupervisorConfig(worst_known_damage=2, q6_horizon_s=1.5))
+    assert "Q6" in s.step(_inp(hp=4, forced_risk=True, forced_clear_s=1.2)).triggers
+    assert not Supervisor(BB).step(_inp(hp=4, forced_risk=False, forced_clear_s=0.1)).triggers
+
+
 def test_q7_focus_q8_watchdog_q9_stop():
     d = Supervisor(BB).step(_inp(focus_lost=True))
     assert d.release_all and d.regain_focus and d.pause_pending and d.on_paused == sv.SELF_CHECK
@@ -403,3 +422,13 @@ def test_safety_package_never_imports_ipc_or_an_oracle_backend():
                 continue
             for m in mods:
                 assert not m.startswith("ssbot.ipc") and "oracle_backend" not in m, (p.name, m)
+
+
+def test_bind_reserve_at_full_hp_is_opt_in():
+    # off (the default): at full HP any silk above the cost may go into a silk skill
+    assert sv.silk_spend_allowed(9, 4, 5, 5).ok and sv.silk_spend_allowed(4, 4, 5, 5).ok
+    # on (playbook bind.reserve_at_full_hp): never under the Bind's 9 at full HP either; below full HP as before
+    v = sv.silk_spend_allowed(9, 4, 5, 5, reserve_at_full_hp=True)
+    assert not v.ok and "Bind reserve" in v.reason
+    assert sv.silk_spend_allowed(13, 4, 5, 5, reserve_at_full_hp=True).ok
+    assert not sv.silk_spend_allowed(13, 4, 4, 5, reserve_at_full_hp=True).ok     # a skill below full HP: never

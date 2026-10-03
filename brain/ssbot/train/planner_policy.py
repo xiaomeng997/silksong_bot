@@ -14,7 +14,9 @@ Per STATE (this is the only place where backends meet the combat stack, which re
      safety filter context (combat.safety_filter); planner tick (combat.planner) with the commanded masks already
      sent for the frames between the WorldState and the decision frame as its prefix.
   4. SupervisedControl (train/supervision.py): risk tier, triggers, PAUSE_PENDING and the emulated pause / quit;
-     its keys replace the planner's while it pauses. A pause machine outcome ends the episode as QUIT
+     its keys replace the planner's while it pauses, and from the tick after the trigger the tactics and the planner
+     are not ticked at all (_pause_tick). A FORCED_RISK reaches Q6 with how long the best plan stays clear
+     (_forced_clear_f: Q6 only within the design horizon). A pause machine outcome ends the episode as QUIT
      (episode_outcome); the harness lets the policy own the pause (pause_owned).
   5. unpredicted hits: a hero hit whose box (frame c or c - 1) is outside the support forecast L = 3 frames earlier
      (the stage-A recall pairing) counts for the supervisor's Q4.
@@ -189,6 +191,7 @@ class PlannerPolicy:
         self.terrain_tap: TerrainTap | None = None
         self.terrain: Terrain2D | None = None
         self.log_path = (Path(log_dir) / f"decisions_i{instance}.jsonl") if log_dir else None
+        self._log_buf: list[dict] = []
         self.episode = -1
         self.sc = SupervisedControl(cfg=SupervisorConfig(worst_known_damage=2), support=lambda s: self._support)
         self.real_quit_p = real_quit_p
@@ -240,6 +243,7 @@ class PlannerPolicy:
     # ---- per episode -----------------------------------------------------------------------------------------
 
     def reset(self, rng: random.Random, enc) -> None:
+        self.flush_log()
         self.episode += 1
         seed = rng.randrange(1 << 30)
         if self.view == "oracle":
@@ -288,6 +292,7 @@ class PlannerPolicy:
         self.forced_frames: list[int] = []
         self.first_pending_f: int | None = None
         self.planner_last = None
+        self.last_clear_f: int | None = None
         self.enc = enc
 
     # ---- per STATE ---------------------------------------------------------------------------------------------
@@ -348,6 +353,44 @@ class PlannerPolicy:
                 self.unpredicted.append(fo)
         return n
 
+    def _forced_clear_f(self, res, fcast, S0: np.ndarray, P: int) -> int | None:
+        """At a FORCED_RISK tick: frames after the decision frame that a plan stays out of the support, i-frames
+        counted (the supervisor's forced_clear_s: Q6 only within DESIGN §3.5.4's H = 0.8 s). The planner's exact
+        value when it exports one (PlanResult.t_clear: the latest first contact over the allowed, non-Hz candidates);
+        else a lower bound from the chosen plan's hull, checked the planner's own way (Planner._contacts):
+        - i-frames skipped only while every source is i-frame blocked, and only for frames certainly inside them
+          (the start state's INV_T run down at the longest frame time; the planner skips per lane, so this skips less);
+        - the hull is exact only up to the plan's first attack, cast or Bind press (the planner re-rolls hit effects
+          and locks from there), so the bound stops at that press;
+        - no hull (no allowed plan): None, i.e. unknown, which the supervisor takes as 0.
+        Why: through a committed charge the planner rolls out to the charge's end plus 0.3 s (playbook long_horizon,
+        up to 2 s), and FORCED_RISK there was an open-loop contact near that end. Replayed (ssbot.tools.quit_timeline
+        --replay), the Charge Emerge triggers of the gate / live QUITs (20261002_123347 ... 152649) had the best plan
+        clear for 120 of 120 frames, its first contact on the last one (Charge End's support where the jump lands); at
+        h >= 3, 2266 FORCED_RISK streaks began in Charge Emerge and 13 (0.6 %) were followed by a hit within 3 s."""
+        t = getattr(res, "t_clear", None)
+        if t is not None:
+            return max(0, int(t))
+        if res.hull is None or not len(res.cmd):
+            return None
+        hull = np.asarray(res.hull, np.float64)[None]
+        T1 = hull.shape[1]
+        p = self.params
+        tk = np.arange(T1, dtype=np.float64) * p.frame_time
+        skip = np.zeros((1, T1), bool)
+        if not any(fm.hazard for fm in fcast.fc.model.families.values()):
+            inv = float(np.asarray(S0).reshape(kin.K, -1)[kin.INV_T, 0])
+            skip[0] = np.arange(T1) * p.frame_time_max < inv
+        occ = self.planner._contacts(fcast, hull, tk, skip)
+        if occ is None:
+            return None
+        hit = np.flatnonzero(occ[0])
+        k = int(hit[0]) if len(hit) else T1 - 1
+        press = np.flatnonzero((np.asarray(res.cmd) & (kin.B_ATTACK | kin.B_QUICKCAST | kin.B_BIND)) != 0)
+        if len(press):
+            k = min(k, P + int(press[0]))
+        return max(0, k - P)
+
     def act(self, s: dict, tap=None) -> int:
         t0 = time.perf_counter()
         f = s["f"]
@@ -369,6 +412,8 @@ class PlannerPolicy:
         fcast = self.fc.forecast(HORIZON_S)
         self.forecasts.append((fo, fcast, ws.stamp.t_game_s))
         self._support = fcast.support_set(ws)
+        if self.sc.pq is not None:
+            return self._pause_tick(s, f, fo, ws, raw, t0)
         d = self.decision
         h = d.h if d is not None else None
         prefs = self.tac.decide(ws, fcast, d, h)
@@ -380,15 +425,20 @@ class PlannerPolicy:
             if conf < self.atk_mon.tighten:
                 prefs.max_hits = 1 if prefs.max_hits is None else min(prefs.max_hits, 1)
         ctx = FilterContext.from_world(ws, d, h, want_bind=prefs.want_bind)
+        ctx.silk_reserve_full_hp = self.pb.bind_reserve_at_full_hp
         hold = HoldState.from_act(raw.get("act"))
         prefix = np.array([self.sent.get(fr, 0) for fr in range(fo + 1, f + 2)], np.int64)
         t1 = time.perf_counter()
-        res = self.planner.tick(ws, self._start_state(ws, raw), hold, prefix, fcast, prefs, ctx)
+        S0 = self._start_state(ws, raw)
+        res = self.planner.tick(ws, S0, hold, prefix, fcast, prefs, ctx)
         self.planner_last = res
         self.atk_mon.predict(fo, res.attacks, res.attack)
         t2 = time.perf_counter()
         unpred = self._unpredicted(raw, fo)
-        r = self.sc.step(s, plan_s=res.S, forced_risk=res.forced_risk, unpredicted_hits=unpred, p_death=res.P)
+        clear = self._forced_clear_f(res, fcast, S0, len(prefix)) if res.forced_risk else None
+        self.last_clear_f = clear
+        r = self.sc.step(s, plan_s=res.S, forced_risk=res.forced_risk, unpredicted_hits=unpred, p_death=res.P,
+                         forced_clear_s=None if clear is None else clear * self.params.frame_time)
         self.decision = r.decision
         self.pause_owned = self.sc.pq is not None
         if r.decision.pause_pending and self.first_pending_f is None:
@@ -412,7 +462,71 @@ class PlannerPolicy:
         self._log(s, f, fo, ws, fcast, prefs, res, r, unpred)
         return int(mask)
 
+    def _pause_tick(self, s: dict, f: int, fo: int, ws, raw: dict, t0: float) -> int:
+        """The pause machine owns the keys (PAUSE_PENDING onwards; DESIGN §3.7.5): its keys replace the planner's
+        whole mask, so the tactics and the planner are not ticked (3-30 ms a tick in the live runs, all of it
+        discarded), and the trackers, the forecast and the supervisor still run (the support and h stay current for a
+        resume). Every tick's keys go out as soon as the supervisor has them, so the loop's 34 ms presses keep their
+        frames and its first press after the pause gate opens is not held up by planning. A resumed attempt (UNPAUSED)
+        restarts the planner without the plan carried from before the pause (the keys sent meanwhile were the
+        machine's)."""
+        unpred = self._unpredicted(raw, fo)
+        r = self.sc.step(s, plan_s=None, forced_risk=False, unpredicted_hits=unpred)
+        self.decision = r.decision
+        self.pause_owned = self.sc.pq is not None
+        mask = 0 if r.mask is None else int(r.mask)     # never the planner's: its last plan is from before the pause
+        if r.outcome is not None and r.outcome in TERMINAL and self.episode_outcome is None:
+            self.episode_outcome = "QUIT"
+            self.outcome_reason = f"{r.outcome}: {'; '.join(r.decision.reasons) or 'supervisor'}"
+        if self.sc.pq is None:
+            self.planner.reset()
+        self.sent[f + 2] = mask
+        for old in [k for k in self.sent if k < f - 12]:
+            del self.sent[old]
+        self.tick_ms.append((time.perf_counter() - t0) * 1e3)
+        self.counts["PAUSE"] += 1
+        self.counts[f"tier_{r.decision.tier}"] += 1
+        pq = self.sc.pq
+        rec = {"ep": self.episode, "f": f, "fo": fo, "t": round(ws.stamp.t_game_s, 4),
+               "hero": [round(v, 3) for v in ws.hero.pos.v], "hp": ws.res.hp.v, "silk": ws.res.silk.v,
+               "boss_state": self.fc.tracker.state, "mode": "PAUSE", "plan": "PAUSE", "S": None, "forced": False,
+               "clear": None, "mask": mask, "sup_mask": True, "tier": r.decision.tier, "h": r.decision.h,
+               "pending": r.decision.pause_pending, "triggers": list(r.decision.triggers), "unpred": unpred,
+               "pq": None if pq is None else pq.state, "outcome": r.outcome}
+        hit = any(ev.get("k") in ("damage", "catastrophe", "would_die") for ev in s.get("ev") or ())
+        self._emit(rec, hit)
+        return mask
+
     # ---- decision log ------------------------------------------------------------------------------------------
+
+    def _emit(self, rec: dict, event: bool) -> None:
+        """Keep the 90 ticks before an event and LOG_AFTER after it. While the pause loop presses, rows are only
+        buffered: the trigger tick's 90-row write (about 150 KB of JSON) used to run before that tick's keys went out;
+        they are written once the loop has stopped (the game paused) or the episode ends (stats)."""
+        self.ring.append(rec)
+        if self.log_path is None:
+            return
+        if LOG_ALL:
+            self._log_buf.extend(self.ring)
+            self.ring.clear()
+        elif event:
+            self._log_buf.extend(self.ring)
+            self.ring.clear()
+            self.log_after = LOG_AFTER
+        elif self.log_after > 0:
+            self.log_after -= 1
+            self._log_buf.append(rec)
+            self.ring.clear()
+        pq = self.sc.pq
+        if self._log_buf and not (pq is not None and pq.pressing):
+            self.flush_log()
+
+    def flush_log(self) -> None:
+        if self._log_buf and self.log_path is not None:
+            with self.log_path.open("a", encoding="utf-8") as fh:
+                for x in self._log_buf:
+                    fh.write(json.dumps(x) + "\n")
+        self._log_buf.clear()
 
     def _log(self, s, f, fo, ws, fcast, prefs, res, r, unpred) -> None:
         tr = self.fc.tracker
@@ -423,6 +537,7 @@ class PlannerPolicy:
                "roots": [(x.state, round(x.e_lo, 3), round(x.e_hi, 3), x.ctx.family) for x in fcast.roots],
                "n_place": len(fcast.placements), "known": fcast.known, "mode": prefs.mode,
                "stance": round(prefs.stance_x, 2), "plan": res.name, "S": res.S, "forced": res.forced_risk,
+               "clear": self.last_clear_f,
                "P": round(res.P, 3), "J": round(res.J, 2), "V": res.V, "n_safe": res.n_safe, "n_ok": res.n_allowed,
                "alts": res.alternatives, "mask": int(res.mask if r.mask is None else r.mask),
                "sup_mask": r.mask is not None, "tier": r.decision.tier, "h": r.decision.h,
@@ -431,29 +546,11 @@ class PlannerPolicy:
                "attacks": res.attacks, "atk_conf": self.atk_mon.confidence(), "fam_p": self._fam_p(fcast),
                "best_up": res.best_up, "hits": res.hits, "pogo": dict(self.planner.pogo_log),
                "path": None if res.path is None else np.round(res.path[::4, :], 3).tolist()}
-        self.ring.append(rec)
         hit = any(ev.get("k") in ("damage", "catastrophe", "would_die") for ev in s.get("ev") or ())
         event = hit or res.forced_risk or (r.decision.pause_pending and self.counts["_pend_logged"] == 0)
         if r.decision.pause_pending:
             self.counts["_pend_logged"] = 1
-        if self.log_path is None:
-            return
-        if LOG_ALL:
-            with self.log_path.open("a", encoding="utf-8") as fh:
-                fh.write(json.dumps(rec) + "\n")
-            self.ring.clear()
-            return
-        if event:
-            with self.log_path.open("a", encoding="utf-8") as fh:
-                for x in self.ring:
-                    fh.write(json.dumps(x) + "\n")
-            self.ring.clear()
-            self.log_after = LOG_AFTER
-        elif self.log_after > 0:
-            self.log_after -= 1
-            with self.log_path.open("a", encoding="utf-8") as fh:
-                fh.write(json.dumps(rec) + "\n")
-            self.ring.clear()
+        self._emit(rec, event)
 
     UNDECIDED = frozenset(("Submerged", "Submerged Init", "Burst Recovery", "Rage Submerge", "hidden"))
 
@@ -519,6 +616,7 @@ class PlannerPolicy:
         return out
 
     def stats(self) -> dict:
+        self.flush_log()                        # the episode is over: rows held back while the loop pressed
         q = (lambda v, p: round(float(np.percentile(v, p)), 3) if v else None)
         tr = self.fc.tracker
         modes = {k: v for k, v in self.counts.items() if not k.startswith("_")}

@@ -705,3 +705,50 @@ def test_oracle_mode_end_to_end_with_masks():
         if m.done:
             break
     assert m.outcome == pq.QUIT_EMULATED and m.quit_state_seen == pq.QUIT_AVAILABLE
+
+
+def _oracle_hit_quit(gate_cue: bool, open_at: int = 15, lead: int = 2, frames: int = 120,
+                     wrong_until: int | None = None) -> tuple[int | None, list[int]]:
+    """An oracle stand-in for a quit raised on an enemy hit's frame 0: STATE f is answered by keys the game applies at
+    f + lead (the harness's 2-frame lead), the gate is closed until open_at (probe P7: 15 frames after an enemy hit),
+    and a Pause edge (pressed now, not on the frame before) on an open frame pauses. gate_cue False: the STATE has no
+    pause.blk (the cue unknown, the blind cadence). wrong_until: the STATE says closed until then although the gate is
+    open from open_at (a wrong cue). Returns the pause frame and the frames whose applied mask held Pause."""
+    m = _machine(emulate_quit=True)
+    applied: dict[int, int] = {}
+    paused_f, prev, held = None, 0, []
+    P = 1 << BIT["pause"]
+    for f in range(frames):
+        mask = applied.get(f, 0)
+        if mask & P:
+            held.append(f)
+        if paused_f is None and f >= open_at and mask & P and not prev & P:
+            paused_f = f
+        prev = mask
+        if paused_f is not None:
+            break
+        closed = f < (open_at if wrong_until is None else wrong_until)
+        s = _state(f, blk=gc.BLK_DISABLE_PAUSE | gc.BLK_TIME_SLOWED if closed else 0)
+        if not gate_cue:
+            del s["pause"]["blk"]
+        k = to_mask(m.step(cues_from_state(s)), BIT)
+        assert k & ~P == 0
+        applied[f + lead] = k
+    return paused_f, held
+
+
+def test_oracle_gate_cue_puts_the_first_press_on_the_first_open_frame():
+    """(a) of the quit-timeline round: a quit raised inside an enemy hit's 250 ms unpausable window. Blind (no gate
+    cue), the 34 ms cadence (3 frames down, 3 up at 60 fps) makes edges at +2, +8, +14; the gate opens at +15 with
+    the key still held, so the pause lands at +20. With the oracle's pause.blk the loop holds its press until the
+    gate is seen open and the pause lands at the opening plus the lead, whatever the opening frame."""
+    assert _oracle_hit_quit(False)[0] == 20
+    for open_at in range(3, 30):
+        blind, _ = _oracle_hit_quit(False, open_at)
+        aware, held = _oracle_hit_quit(True, open_at)
+        assert aware == open_at + 2, (open_at, aware)
+        assert blind - open_at <= 5 and aware <= blind + 2, (open_at, blind, aware)
+        assert all(f >= open_at + 2 for f in held)         # no press wasted into the closed gate
+    # a cue that wrongly says closed: after gate_trust_s (1 s) the blind cadence resumes and the pause still lands
+    paused, held = _oracle_hit_quit(True, open_at=15, wrong_until=600, frames=200)
+    assert paused is not None and 60 <= paused <= 60 + 2 + 6 and min(held) >= 60

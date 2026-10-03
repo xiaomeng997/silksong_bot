@@ -39,7 +39,16 @@ the support unknown) with h >= 3; RED any trigger. Triggers (§3.7.4):
   Q5 frame age > 50 ms, HUD unreadable > 100 ms (not in ENDING), hero lost > 300 ms with h <= 2, unknown scene,
      OVERLAY_INTRUSION, consecutive tearing                                   -> pause, self-check (resume only with
                                                                                  h >= 3 and the frozen check passing)
-  Q6 FORCED_RISK with h <= 2                                                  -> PAUSE_PENDING, quit
+  Q6 FORCED_RISK with h <= 2, its best plan meeting the support within H      -> PAUSE_PENDING, quit
+     H = q6_horizon_s = 0.8 s, DESIGN §3.5.4's horizon, on which FORCED_RISK is defined. The planner's adaptive
+     horizon (a committed charge rolled out to its end plus 0.3 s, up to 2 s) made FORCED_RISK an open-loop statement
+     about the whole charge: every gate / live QUIT of 20261002_123347 ... 152649 (37, all Q6 at h = 2) came 93-1214
+     frames after the hit, and in the 19 whose trigger tick replays (ssbot.tools.quit_timeline), all in Charge
+     Emerge / Emerge Antic C, the best plan stayed clear for 120 of 120 frames (its first contact on the last one,
+     where the jump lands beside Charge End); at h >= 3, 13 of 2266 FORCED_RISK streaks starting in Charge Emerge
+     (0.6 %) were followed by a hit within 3 s. forced_clear_s is how long the best plan stays out of the support
+     (unknown, None, counts as 0), so FORCED_RISK within H is Q6 as before, whatever the planner's horizon (the 9
+     Burst / rage-pattern triggers: 0-48 frames, the 2 in a committed lock: 4 and 7)
   Q7 FOCUS_LOST                                                               -> release all, regain focus, pause,
                                                                                  self-check
   Q8 progress watchdog (hook)                                                 -> pause, diagnose, alert
@@ -109,6 +118,8 @@ class SupervisorConfig:
     frame_age_ms: float = 50.0
     hud_unreadable_ms: float = 100.0
     hero_lost_ms: float = 300.0
+    q6_horizon_s: float = 0.8                  # DESIGN §3.5.4 H: Q6 counts FORCED_RISK whose best plan meets the support
+    #                                            within this (SupervisorInput.forced_clear_s; the module docstring)
     tear_frames: int = 3
     unknown_mask_covers: bool = False          # may the Fractured Mask be trusted against an unknown threat (grabs ...)
     evade_exit_timeout_s: float = 20.0
@@ -130,6 +141,9 @@ class SupervisorInput:
     pending_mask_covers: bool = False
     plan_s: int | None = None                  # S of the chosen plan (0/1); None: no plan yet (treated as S = 1)
     forced_risk: bool = False                  # no candidate with S = 0 this frame
+    forced_clear_s: float | None = None        # FORCED_RISK only: how long the best allowed plan stays out of the
+    #                                            support after the decision frame, i-frames counted (None: unknown,
+    #                                            taken as 0); the planner's horizon can be longer than H
     i2_violated: bool = False
     escape_s: float | None = None              # least time any candidate needs to leave the I2 exposure (None: none)
     unpredicted_hits: int = 0                  # hero hits this frame that no in-support tube covered
@@ -388,7 +402,9 @@ class Supervisor:
         if q5:
             out.append(("Q5", ", ".join(q5)))
         if inp.forced_risk and h is not None and h <= 2:
-            out.append(("Q6", f"FORCED_RISK at h {h}"))
+            clear = inp.forced_clear_s
+            if clear is None or clear <= cfg.q6_horizon_s:
+                out.append(("Q6", f"FORCED_RISK at h {h}" + ("" if clear is None else f", clear {clear:.2f} s")))
         if inp.focus_lost:
             out.append(("Q7", "FOCUS_LOST"))
         if inp.watchdog:
@@ -571,8 +587,14 @@ def down_slash_allowed(over_spikes: bool, over_hazard: bool, tier: str, pause_pe
     return Verdict(not why, "DOWN_SLASH", "; ".join(why))
 
 
-def silk_spend_allowed(silk: int, cost: int, hp: int, max_hp: int, skill: bool = True) -> Verdict:
-    """Keep the Bind silk (§3.5.6): below full HP silk never drops under 9; silk skills only at full HP."""
+def silk_spend_allowed(silk: int, cost: int, hp: int, max_hp: int, skill: bool = True,
+                       reserve_at_full_hp: bool = False) -> Verdict:
+    """Keep the Bind silk (§3.5.6): below full HP silk never drops under 9; silk skills only at full HP.
+    reserve_at_full_hp (playbook bind.reserve_at_full_hp, off by default): never under 9 at full HP either, so the
+    first hit always finds a Bind's silk. Why it is there: with a 9-silk spool the Silkspear at full HP left silk 0-6
+    at the hit in all 37 gate / live QUITs (20261002_123347 ... 152649; 3-5 casts, 12-20 silk a fight in run 152649
+    i0 / i1), while 26 of them had a Bind-sized window (commit test and the planner's Bind rollout, hero in control)
+    within 2 s of the hit. The price is the Silkspear's damage (15 per cast at full HP), to be weighed in a live A/B."""
     why = []
     if silk < cost:
         why.append(f"silk {silk} < cost {cost}")
@@ -580,4 +602,6 @@ def silk_spend_allowed(silk: int, cost: int, hp: int, max_hp: int, skill: bool =
         why.append("silk skill below full HP")
     if hp < max_hp and silk - cost < BIND_SILK:
         why.append(f"would leave {silk - cost} < {BIND_SILK} silk below full HP")
+    elif reserve_at_full_hp and silk - cost < BIND_SILK:
+        why.append(f"would leave {silk - cost} < {BIND_SILK} silk (Bind reserve at full HP)")
     return Verdict(not why, "SILK", "; ".join(why))

@@ -12,8 +12,14 @@ to hold, plus the pause / quit availability model and an oracle-mode cue adapter
 
 Flow (§3.7.5): LOOP presses Pause for >= 2 frames and >= 34 ms, releases as long, unconditionally, until the earliest
 pause cue or a death; then it stops at once and CONFIRMs the pause; a cue that the evidence contradicts was false and
-the loop resumes. Once confirmed it reads the Quit item: available -> highlight "Quit to menu" -> Submit -> the "save
-and quit?" prompt (default "No") -> Up to "Yes" -> Submit; greyed -> stays paused, refreshes the menu once through
+the loop resumes. One exception to "unconditionally": where the pause gate itself is observed (oracle STATE pause.blk,
+PauseCues.gate_open), no new press starts while it is closed, for at most gate_trust_s, so that the first press lands
+on the first open frame plus the input path's lead instead of wherever the blind cadence happens to be (at 60 fps the
+34 ms floor makes it 3 frames down, 3 up, and a press held into the opening makes no edge: 0-5 frames late. A Q1
+raised on an enemy hit's frame with the 2-frame training lead: press edges at +2, +8, +14 and the gate opening at +15
+(32 of the 38 hits of the gate / live QUITs, 20261002_123347 ... 152649; +14 in 5) put the pause at +20; now +17).
+Once confirmed it reads the Quit item: available -> highlight "Quit to menu" -> Submit -> the "save and quit?" prompt
+(default "No") -> Up to "Yes" -> Submit; greyed -> stays paused, refreshes the menu once through
 Options -> Back when the cause may be disableSaveQuit, then waits for resolve_greyed(); after "Yes", still on the prompt
 with no fade-out refusal_s after the Submit took effect = the Patch 4 refusal: stays paused, never unpauses blindly.
 Unpausing is Continue + Submit after the 0.3 s lockout, never Esc. The machine only ever holds pause (in LOOP) or
@@ -147,6 +153,8 @@ class PauseCues:
     menu_alpha: float | None = None  # current menu canvas alpha
     disable_pause: bool | None = None   # PauseGate DISABLE_PAUSE (Patch 4 refuses Yes while set); None: unknown
     unpause_blocked: bool | None = None  # UIManager.ignoreUnpause (Continue does nothing while set)
+    gate_open: bool | None = None    # a Pause press this frame would pause (oracle: STATE pause.blk == 0, the
+    #                                  PauseGate blockers); None: unknown (vision)
 
 
 @dataclass(slots=True)
@@ -170,6 +178,9 @@ class PauseQuitConfig:
     confirm_max_s: float = 2.0       # a cue neither confirmed nor contradicted this long: confirmed if a second
     #                                  detector (menu, stopped world) agreed at least once, else rejected
     budget_s: float = 0.23           # pressing must stop within this of the real pause
+    gate_trust_s: float = 1.0        # a gate seen closed (PauseCues.gate_open False) holds new presses back this long
+    #                                  at most (an enemy hit closes it 250 ms, probe P7), then the blind cadence
+    #                                  resumes in case the cue is wrong
     loop_alert_s: float = 5.0        # still looping this long: alert (and keep looping)
     false_cue_alert: int = 3         # this many false cues: alert (and keep looping)
     input_latency_max_s: float = 0.10   # p99.9 key emission -> capture time of the first frame that can show its
@@ -286,6 +297,7 @@ class PauseQuit:
         self._second = False                  # a detector other than the cue's agreed since the cue
         self._settle: tuple[float, str] | None = None   # (until, reading) after a flip
         self._settle_armed = False
+        self._gate_closed_t: float | None = None   # capture time since when the pause gate has been seen closed
 
     # ---- control ------------------------------------------------------------------------------------------------
 
@@ -308,6 +320,7 @@ class PauseQuit:
         self._suppressed = set()
         self._cue_base = None
         self._settle, self._settle_armed = None, False
+        self._gate_closed_t = None
         self._note(t, "start", goal)
 
     def upgrade_to_quit(self, t: float) -> bool:
@@ -559,10 +572,19 @@ class PauseQuit:
             self._note(self.now, "cue", f"{'+'.join(sorted(src))} paused={c.paused} dim={c.dim} menu={c.menu}")
             return NO_KEYS
         now = self.now
+        if fresh:
+            self._gate_closed_t = (self._gate_closed_t if self._gate_closed_t is not None else c.t) \
+                if c.gate_open is False else None
         if self._tap is not None and not self._tap.done:
             keys = self._tap_keys(now)
             if not self._tap.done:
                 return keys
+        if self._gate_closed_t is not None and c.t - self._gate_closed_t < self.cfg.gate_trust_s:
+            # the gate is closed (oracle pause.blk: the hit's 250 ms, probe P7): a press now is dropped (m0:N12), and
+            # one still held when the gate opens makes no new edge, so with the blind cadence (3 frames down, 3 up at
+            # 60 fps) the pause came 0-5 frames after the gate opened. Released until the first open frame, it comes
+            # at the input path's lead (2 frames in training)
+            return NO_KEYS
         self._tap = _Tap(PAUSE, now)     # the frame a release completes starts the next press
         self.presses += 1
         self.last_press_t = now
@@ -1027,4 +1049,4 @@ def cues_from_state(s: dict, qpc_freq: float = 1e7) -> PauseCues:
         menu=menu, menu_ready=ready, highlight=highlight, quit_state=quit_state, quit_cause=quit_cause,
         quitting=quitting, dead=dead, menu_alpha=extra.get("alpha"),
         disable_pause=bool(blk & gc.BLK_DISABLE_PAUSE) if "blk" in p else None,
-        unpause_blocked=None if ign is None else bool(ign))
+        unpause_blocked=None if ign is None else bool(ign), gate_open=(blk == 0) if "blk" in p else None)

@@ -10,7 +10,8 @@ Rules:
   ALLOW     the supervisor's allowlist (PAUSE_PENDING / EVADE_EXIT: evasive only; YELLOW / RED: no damaging primitive
             when the next landed hit may kill; ATTACK(down) over spikes never, over any hazard outside GREEN).
   SILK      Silkspear (4 silk) only through supervisor.silk_spend_allowed: silk skills at full HP only, never leaving
-            fewer than 9 silk below full HP (the Bind reserve, §3.5.6).
+            fewer than 9 silk below full HP (the Bind reserve, §3.5.6), nor at full HP when the playbook asks for the
+            reserve there too (bind.reserve_at_full_hp, FilterContext.silk_reserve_full_hp).
   BIND      the Bind macro only when the tactics' commit test passed (supervisor.bind_allowed: silk 9, HP <= max - 3
             or h <= 2, T_min >= 1.37 + 0.15 s, not PAUSE_PENDING); the planner's own S check then covers its rollout.
   DOWN      ATTACK(down) never with a hazard under the hero (§3.5.6), and not over any hazard outside GREEN.
@@ -48,6 +49,7 @@ class FilterContext:
     tier: str = "YELLOW"
     pause_pending: bool = False
     want_bind: bool = False
+    silk_reserve_full_hp: bool = False   # playbook bind.reserve_at_full_hp: keep 9 silk at full HP too
     hazards: list[tuple[float, float, float, float]] = field(default_factory=list)
     soft: list[tuple[float, float, float, float]] = field(default_factory=list)
     hero_x: float = 0.0
@@ -79,7 +81,8 @@ def veto(cands: CandidateSet, ctx: FilterContext) -> tuple[np.ndarray, np.ndarra
     ok = cands.allowed(ctx.allowed_mask)
     why[~ok] = R_ALLOW
     spear = (cands.prim_bits & _BIT[Prim.SILKSKILL]) != 0
-    if spear.any() and not silk_spend_allowed(ctx.silk, SILKSPEAR_COST, ctx.hp, ctx.max_hp, skill=True).ok:
+    if spear.any() and not silk_spend_allowed(ctx.silk, SILKSPEAR_COST, ctx.hp, ctx.max_hp, skill=True,
+                                              reserve_at_full_hp=ctx.silk_reserve_full_hp).ok:
         why[ok & spear] = R_SILK
         ok &= ~spear
     bind = (cands.prim_bits & _BIT[Prim.BIND]) != 0

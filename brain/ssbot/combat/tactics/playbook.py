@@ -33,6 +33,7 @@ class Playbook:
     prepare: dict[str, tuple[float, str]] = field(default_factory=dict)   # state -> (x' from the anchor, side)
     long_horizon: dict = field(default_factory=dict)   # states, until, extra_s, map (observable phase -> state)
     weights: dict[str, float] = field(default_factory=lambda: dict(DEFAULT_WEIGHTS))
+    bind_reserve_at_full_hp: bool = False     # bind.reserve_at_full_hp: no silk spent below 9 even at full HP
 
     @classmethod
     def from_dict(cls, d: dict) -> "Playbook":
@@ -55,7 +56,8 @@ class Playbook:
                    prepare={x["state"]: (float(x["x_prime"]), str(x.get("side", "attack")))
                             for x in d.get("prepare") or ()},
                    long_horizon=_long(d.get("long_horizon")),
-                   weights=DEFAULT_WEIGHTS | {k: float(v) for k, v in (d.get("weights") or {}).items()})
+                   weights=DEFAULT_WEIGHTS | {k: float(v) for k, v in (d.get("weights") or {}).items()},
+                   bind_reserve_at_full_hp=bool(bind.get("reserve_at_full_hp", False)))
 
 
 def _long(d: dict | None) -> dict:
