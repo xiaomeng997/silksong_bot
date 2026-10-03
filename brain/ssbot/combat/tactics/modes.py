@@ -4,8 +4,15 @@
     prefs = tac.decide(ws, forecast, decision, h)       # every tick, before the planner
 
 Modes:
-  HEAL    HP is missing, silk >= 9, the supervisor allows BIND and the §3.5.6 commit test passes at the hero's position
-          (T_min >= 1.37 + 0.15 s from the forecast's support, no PAUSE_PENDING): the planner gets the Bind macro.
+  HEAL    Q1a (DESIGN §3.7.4, the person's rule of 2026-10-03: h >= 2 below max HP, heal first; the supervisor's
+          Restrictions.heal_first): silk >= 9, the supervisor allows BIND and the §3.5.6 commit test passes at the
+          hero's position (T_min >= 1.37 + 0.15 s from the forecast's support, HP <= max - 3 or h <= 2, no
+          PAUSE_PENDING): the planner gets the Bind macro (its own rollout checks the support and the knockback
+          envelope's hazards). Never at h <= 1 (Q1 quits in the post-hit window instead).
+  HEAL_SPOT Q1a when the commit test fails only on the place: the nearest verified safe spot of the playbook
+          (bind.safe_spots, Playbook.SafeSpot.usable, and the forecast agreeing it is out of reach for a Bind) is the
+          stance; the planner walks there under its support check and HEAL takes over once the test passes there.
+          No spot (Bell Beast has none: playbook) -> the other modes, i.e. fight on under the supervisor's triggers.
   ENGAGE  the boss is drawn in a punish window of the playbook: the stance is just outside its body on the hero's side,
           where the support's future coverage is lowest, and hits score fully.
   PREPARE the boss is committed to an attack whose punish window is ahead (a leap in its antic or flight, a burst
@@ -31,9 +38,10 @@ from ssbot.combat.forecast import BIN, HIDDEN, Forecast
 from ssbot.combat.tactics.playbook import Playbook
 from ssbot.core.primitives import Prim
 from ssbot.core.worldstate import ORACLE, WorldState
-from ssbot.safety.supervisor import BIND_SILK, SupervisorDecision, bind_allowed
+from ssbot.safety.supervisor import BIND_SILK, DELTA_B_S, T_BIND_S, SupervisorDecision, bind_allowed
 
 ENGAGE, EVADE, HEAL, HOLD, PREPARE = "ENGAGE", "EVADE", "HEAL", "HOLD", "PREPARE"
+HEAL_SPOT = "HEAL_SPOT"
 GRID_U = 0.5
 EVADE_S = 0.6
 HOLD_PULL = 0.15               # risk units per u away from the playbook's stance (HOLD)
@@ -80,6 +88,16 @@ class Tactics:
         w = 1.0 / (1.0 + tk)
         return (occ * w).sum(axis=1) / w.sum()
 
+    def safe_spot(self, f: Forecast, x: float):
+        """The nearest usable safe spot of the playbook (Playbook.SafeSpot.usable) where the forecast agrees with the
+        coverage map: no support tube reaches a hurtbox standing there within T_bind + delta_b (§3.5.6), else None.
+        A spot the forecast covers is not taken on the map's word (the map is a union over recorded fights)."""
+        need = T_BIND_S + DELTA_B_S
+        for sp in sorted((s for s in self.pb.safe_spots if s.usable), key=lambda s: abs(s.x - x)):
+            if f.t_min(sp.x, sp.y, t_max=2.0) >= need:
+                return sp
+        return None
+
     def long_horizon(self, f: Forecast, state: str | None) -> int:
         """Frames to roll out through the committed long attack this state is part of (playbook long_horizon: until
         the last listed state ends, at its longest logged dwell, plus extra_s), 0 when none."""
@@ -112,17 +130,38 @@ class Tactics:
         drawn = bool(ok[0])
         if drawn:
             prefs.boss_x = 0.5 * (box[0, 0] + box[0, 2])
-        # HEAL: the Bind commit test at the hero's position (the Bind roots her there)
+        # HEAL (Q1a, DESIGN §3.7.4, the person's rule of 2026-10-03): with h >= 2 below max HP, heal first: the Bind
+        # commit test at the hero's position (the Bind roots her there), else a verified safe spot, else fight on.
+        # Never at h <= 1: that is Q1's quit in the post-hit window (a model error there is death), and an unknown h
+        # (no hero read) is no reason to Bind. h is this tick's (PlannerPolicy: SupervisedControl.h_now), and heal
+        # first is Q1a's rule on it (the decision's own flag is a tick old). The playbook's hp_missing_min still gates
+        # a Bind without the supervisor (d None: tests, tools)
         bind_ok = d is None or d.allows(Prim.BIND)
-        if (hp is not None and max_hp and silk is not None and silk >= BIND_SILK
-                and hp <= max_hp - pb.bind_hp_missing_min and bind_ok):
+        heal_first = d is not None and h is not None and h >= 2 and hp is not None and max_hp is not None \
+            and hp < max_hp
+        if heal_first and silk is not None and silk < BIND_SILK:
+            # gathering silk for the heal (DESIGN §3.7.4 Q6, the person's rule of 2026-10-03: at h 2 fight on with
+            # nail hits until the Bind's silk is there): nail hits count more (playbook bind.gather_hit_x; silk skills
+            # are already off below full HP, supervisor.silk_spend_allowed)
+            wts["hit"] *= pb.bind_gather_hit_x
+        if (hp is not None and max_hp and silk is not None and silk >= BIND_SILK and hp < max_hp and bind_ok
+                and h is not None and h >= 2 and (heal_first or hp <= max_hp - pb.bind_hp_missing_min)):
+            pending = bool(d is not None and d.pause_pending)
             prefs.t_min = f.t_min(hero[0], hero[1], t_max=2.0)
-            v = bind_allowed(int(silk), int(hp), int(max_hp), int(h if h is not None else 1), prefs.t_min,
-                             pause_pending=bool(d is not None and d.pause_pending))
+            v = bind_allowed(int(silk), int(hp), int(max_hp), int(h), prefs.t_min, pause_pending=pending)
             prefs.bind_why = v.reason
             if v.ok:
                 prefs.mode, prefs.want_bind = HEAL, True
                 prefs.stance_x = hero[0]
+                return prefs
+            spot = self.safe_spot(f, hero[0]) if heal_first and \
+                bind_allowed(int(silk), int(hp), int(max_hp), int(h), math.inf, pause_pending=pending).ok else None
+            if spot is not None:
+                # everything but the place passes: walk to the spot (each step under the planner's support check) and
+                # Bind there once the commit test passes at the hero's position
+                prefs.mode, prefs.stance_x = HEAL_SPOT, spot.x
+                prefs.bind_why = f"{v.reason}; to safe spot {spot.name}"
+                wts["hit"] *= 0.3
                 return prefs
         state = f.fc.tracker.state
         prefs.horizon_frames = self.long_horizon(f, state)

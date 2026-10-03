@@ -122,12 +122,27 @@ shape_from: {Charge Emerge: Charge Antic}
 # away from the boss. The live test decides every time.
 bind:
   states: [Submerged, Dig In, Leap Land, Charge End, Rage Submerge, Rage Rumble]
-  hp_missing_min: 2       # bind at 3/5 (h = 2) and below; the supervisor's own test asks HP <= max - 3 or h <= 2
+  # Without the supervisor's heal-first flag only: bind at 3/5 and below. With it (Q1a, DESIGN §3.7.4, the person's rule
+  # of 2026-10-03: h >= 2 below max HP, i.e. 3 or 4 of 5 against 2-mask hits) the Bind is tried at 4/5 too, and the
+  # supervisor's commit test decides (HP <= max - 3 or h <= 2); never at h <= 1 (1-2 HP: Q1 quits in the post-hit window)
+  hp_missing_min: 2
+  # Verified safe spots for a Bind away from the boss (Q1a's second branch; Playbook.SafeSpot): none. The coverage map
+  # (tools/coverage_map, 20261002_171806, 16 fights; movement_kinematics.md section 4) leaves no floor spot out of
+  # reach (the charge crosses the whole floor, the leap lands 16-27.75 u out, the bells roll to the walls); its only
+  # gaps are wall-cling points at the gates' inner faces (left x 69.21, y 13.29, 1.44 u; right x 102.0, 1.59 u), which
+  # need a cling the route does not have at S03 and the planner has no primitive for.
+  safe_spots: []
   # Keep the Bind's 9 silk at full HP too (no Silkspear then: the spool holds 9). Off: the Silkspear at full HP left
   # silk 0-6 at the hit in all 37 gate / live QUITs (20261002_123347 ... 152649), 26 of which had a Bind window
   # within 2 s of the hit (ssbot.tools.quit_timeline --replay). On: every first hit finds a Bind; the cost is the
   # Silkspear's damage (3-5 casts, 45-75 of the boss's 150 HP a fight in run 152649). Decide by a live A/B.
   reserve_at_full_hp: false
+  # Gathering silk after the first hit (DESIGN §3.7.4 Q6, the person's rule of 2026-10-03: at h 2 no quit on
+  # FORCED_RISK; fight on with nail hits, no silk skills, until silk 9 and the Bind's commit test, or a second hit,
+  # which is Q1's quit in the post-hit window): the hit weight's factor while h >= 2, below max HP and silk < 9.
+  # A first value, not tuned: YELLOW still caps a punish at 1 hit, so it mostly decides whether a marginal window is
+  # taken (pause_quit.md 7.7 measures silk gathered after the hit and the Binds it buys).
+  gather_hit_x: 1.5
 
 weights:
   hit: 10.0               # per predicted nail hit on the boss (Silkspear: x 3)

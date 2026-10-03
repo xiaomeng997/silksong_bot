@@ -76,3 +76,115 @@
 4. 注入器：弹起受击被无敌拒绝并累积成 Q4；拼刀等不到；只按"任意锁存键"的触发从不触发保护（f4de530、a92f547、30d542b、e34da27）。
 5. oracle 掉线看门狗的 Pause 点按可能与刚按下的键同帧（EXCLUSIVE，待部署）。
 - 双重 Esc 关菜单、卡在暂停、错误确认：本轮所有试验 0 次。
+
+## 7. 低血量：先回血，h ≤ 1 在受击后的窗口里退出（任务 Q，DESIGN §3.7.4 Q1 / Q1a，你 2026-10-03 的规则）
+
+工作区 `wf_9edc2274-509-2`，实例 4，种子 105000–109999，代码 5126afd … （第 7.5 节列提交）。
+
+### 7.1 实现
+
+- **h 的定义**（`safety/supervisor.py`）：对支撑算 hits_to_death；支撑被确认为空（0.8 s 内什么都打不到，例如 Bell Beast 在地下）时改为对本遭遇最坏已知事件算（`worst_known_damage`、本次受过的最大伤害，完好的碎面具照常抵挡），`h_basis = "worst known"`。风险档、Q1、Q1a、Q3、Q5、Q6、Bind 提交条件里的"值得回血"一项都读这个 h。10bfb66 只在 Q1 里这样算；以前 3 HP + Boss 在地下时 h = UNBOUNDED、风险档 GREEN，Bind 提交条件因"HP 3 > max − 3 且 h > 2"判为不值得——恰好在最安全的空档里不回血。
+- **Q1（h ≤ 1）**：PAUSE_PENDING + 退出，不尝试 Bind（PAUSE_PENDING 只允许躲避；战术层在 h ≤ 1 时也永不要求 Bind）。原因写明是否受击后（1.1 s 内有受击 = 受击后窗口；否则 = 霜冻、挂起伤害等，按第一个能暂停的帧）。修复轮（f9dcbba）：掉血只有同时看到受击击退才算"受击"（`SupervisorInput.hurt`：cState recoilFrozen / recoiling，视觉 = 主角 hurt 姿态）。TakeDamage 的 StartRecoil 在受击当帧就置 recoilFrozen（抽查 112406 / 114708 / 014409 / 053033 的 28 个受击帧，28 / 28 当帧 hurt 且掉血）；霜冻、DamageTag 走 DoSpecialDamage 的只扣血路径（HeroController.cs 5184–5231），没有击退、冻结、关门和无敌，所以算"无受击"，立即按。
+- **战术层读本 tick 的 h**（修复轮 f9dcbba）：战术层和安全过滤在本 tick 监督器 step 之前运行（step 要用规划结果），以前读的是上一 tick 的决定；受击把 h 从 2 打到 1 的那一 tick，上一 tick 的决定还写着 h = 2、先回血，战术层可能要 Bind，只是因为同一 tick Q1 让暂停机的按键整个替换了规划器的按键才没发出去。现在 PlannerPolicy 给战术层 `SupervisedControl.h_now`（`Supervisor.peek_h`：同样的输入、不改状态），先回血也按这个 h 现算。
+- **Q1a（h ≥ 2 且 HP < max）**：`Restrictions.heal_first`，任何风险档都设（以前只是 YELLOW / RED 的标志，没人读）。战术层（`combat/tactics/modes.py`）：满足 §3.5.6 提交条件（丝 ≥ 9、T_min ≥ 1.37 + 0.15 s、HP ≤ max − 3 或 h ≤ 2、不在 PAUSE_PENDING；击退包络内的危险物由规划器的 Bind 推演检查）就原地 Bind，4 / 5 HP 也算（以前剧本的 hp_missing_min = 2 挡掉了 4 / 5）；否则若只差"位置"，去剧本里已核验的安全点（`bind.safe_spots`，`SafeSpot.usable`：有覆盖图核验、在地面、不需要额外能力，且预测也同意那里 T_bind + δ_b 内打不到），走过去（每一步过规划器的支撑检查）再 Bind（模式 HEAL_SPOT）；都不行就继续打，照 Q3 / Q6 处理（修复轮起 h = 2 不再有 Q6，见 7.7）。Bell Beast 没有可用安全点：覆盖图（movement_kinematics.md 第 4 节）里地面全被覆盖，只有两扇门内侧墙上的贴墙点（左 1.44 u、右 1.59 u），需要贴墙能力，路线在 S03 没有，规划器也没有贴墙原语。
+
+### 7.2 受击后的暂停窗口：哪一帧能暂停
+
+- 受击冻结：pause.blk = 3（DISABLE_PAUSE | TIME_SLOWED），时间缩放 0 持续 8–9 帧，然后 0.1 s 线性回升（ts 0.17、0.33、0.5、0.67、0.83，约 60 % 的受击还有一帧 0.999 仍关门）。记 G = STATE 第一次显示门开（blk 0）的帧。2143 次关门的受击（数据运行 20261001_122249 i0_000 / i2_000、实战 152649 / 171806 / 053033 各两路）：2138 次 G 在受击后 0.213–0.267 s（p50 0.232；13 / 14 / 15 / 16 帧 = 327 / 1286 / 524 / 1 次）；另 5 次是 Bind 中受击（BindBreak 冻结，G 在 0.532–0.550 s）。从回升的某一帧（ts）到 G：(1 − ts) × 0.1 s − 0.003 … + 0.022 s（2895 帧）。
+- **第一个能暂停的帧是 G + 1，不是 G**：时间缩放和 TIME_SLOWED 在冻结协程里恢复，晚于 InputHandler 的 Update。实测（72baaf3 的第一版按回升斜率把按键对准 G，20261003_111244）：落在 G（+15，那一帧 STATE 已显示 blk 0）的按键全部被丢弃，8 / 8 次 h = 1 试验都在下一次按键（+20 / +21）才暂停；修正后（8beb806）16 / 16 次落在 G + 1（+16）就暂停（见 7.4）。链 H 只看观测到的门时按键落在 G + 2（+17）。
+- 实现（`safety/pause_quit.py`）：`PauseCues.gate_open_at` = 预测的第一个能暂停的帧；在它之前不发新按键（按早了会被丢弃、按住跨过开门又没有新边沿，要多等一整个 6 帧周期），到点后即使看到的门还关着也照按。oracle：只在回升的最后一个仍关门帧（blk = 3、ts ≥ 0.999、主角无敌中）预测"G + 1 = 两帧后"，于是 60 % 的受击暂停落在 G + 1，其余（0.83 直接开门）照旧由观测到的门落在 G + 2；更早的回升帧分不清这两种，不预测。视觉视图（`train/supervision.py`，只读延迟视图）：从它看到的受击（HIT_TAKEN 或 HUD 血量下降，且主角在受击击退中；修复轮起没有击退的掉血 = 霜冻 / DamageTag，不等，立即按）的采集时间起加 `POST_HIT_OPEN_MAX_S` = 0.285 s（G 最大 0.2668 s + 1 帧）；Bind 中受击（视图看到主角在 Bind）加 0.57 s。于是不论视图延迟 k = 2–4，第一次按键都落在 G + 1 之后 0–3 帧（盲按节奏是 0–5 帧）。
+- 无敌：受击后 i-frame 1.10–2.08 s（pause_window），注入的受击 1.2 s（72 帧）；h = 1 的暂停落在受击后 0.264–0.268 s，暂停时还剩 0.925 s 无敌。
+
+### 7.3 回放：录像里的低血量决定（Bell Beast 实战，2026-10-02 起，oracle 与 degraded_dust）
+
+`tools/lowhp_replay`（a2d0ec9）：61 个 eval 运行（20261002_* / 20261003_* 的 oracle 与 degraded_dust，不含还在跑的 074533）里每一场 Q1 / Q6 退出和每一场战斗中回过血的，用本代码的 PlannerPolicy 开环回放（实况按键作前缀；受击前 60 帧起完整 tick，之前只走感知路径），从"打到 h ≤ 2 的那次受击"到实况的暂停（或实况的 Bind）为止，比较三者：实况（各运行自己的代码，23 个版本）、新规则、旧规则（main 5a83283）的反事实（新规则选了 Bind 的那一 tick，旧规则只有在 HP ≤ max − 2 且 h 按支撑算时才会选；退出两者相同，10bfb66 已经让 Q1 用最坏已知事件）。新 Bind 再用录像核对：支撑的 T_min，以及 Bind 全程（决定帧 + 2 起 92 帧）录像里所有威胁碰撞体到主角框的最小距离（站着：+2 帧的框不动；空中：Bind 推演的框）；实况暂停后世界冻结，之后的帧算删失。耗时 29 min（11:25–11:54，低于正常优先级，NUMBA 4 线程；同时实例 4 在跑实战检查，CPU 约 75 %）。
+
+结果（`C:\ssbot\sandbox\pq_lowhp_replay.json`，324 场，35 个运行）：
+- 选出 311 场 Q6 退出（**这 35 个普通 eval 运行里** 0 次 Q1：那里所有低血量退出都在 3 HP、h = 2，第二次受击前就退出了；旧 Q3 读法和 Q5 不在本题范围）和 13 场战斗中回过血的。**没有一次 h ≤ 1 的 Bind**（13 次回血全部是 3 → 5 HP），所以"Bind 变成退出"为 **0**。**更正（修复轮）**：任务点名的范围还包括链 H 的暂停压力运行（`*_oracle_inject`：20261002_180411 … 20261003_074533），那里有约 580 次 Q1 退出（注入的受击一次打到 1 HP），第一轮没有回放；修复轮补上（7.7）。
+- 126 场（全部 degraded_dust，任务 V 之前的视觉运行）实况在受击那一帧就暂停（监督器读当前 oracle STATE / 受击帧 FORCED_RISK 未计无敌），录像在那里结束，没有可回放的部分。
+- 其余 198 场：
+  - 实况 Bind → 新 Bind：13 场（oracle），新代码在同一 tick 或更早 Bind（实况 +196…+754 帧，新 +194…+602）；旧规则反事实在同一 tick Bind，差别来自那些运行之后的其他改动，不是 Q1 / Q1a。
+  - 实况退出 → 新 Bind：**1 场**，20261002_232157 i1 ep49（degraded_dust）：实况 Q6 在受击后 +221 帧；新规则在 +152 帧 Bind（h 按最坏已知事件 = 2，Boss 在地下、支撑确认为空，丝 9，T_min 1.78 s，站在地面），旧规则要到 +214 帧（Boss 冒出、h 按支撑）才会 Bind。这是唯一一处 Q1 / Q1a 本身带来的不同：地下空档里提前 62 帧回血。
+  - 实况退出 → 新退出：71 场（全部 Q6），57 场同一 tick（±3 帧），14 场更早；新退出原因 72 / 72 为 Q6，0 次 Q1。
+  - 实况退出 → 到实况暂停为止新代码没退出：113 场（之后录像不再跟随新代码，无法判断），都是 Q6。**更正（修复轮）**：第一轮说"差别来自 Q6 只看 0.8 s 视野（d73fe65）等之后的改动"，没有逐场归因；按实况代码版本数，只有 44 场来自 d73fe65 之前的代码，69 场的实况代码已含 d73fe65（开环回放的漂移：规划器每次的计划不同，FORCED_RISK 随之不同；未逐场查明）。
+- **新 Bind 的安全核对**：14 次新 Bind（13 + 1），支撑 T_min 全部 ≥ 1.7 s（9 次 2 s 内支撑根本到不了）。12 次全程有录像，最近的威胁碰撞体 1.07–2.71 u，**没有被打中**（开环：录像里的 Boss 是对实况主角的反应）；2 次删失，**不能算核对过**（修复轮更正；工具现在把删失的 Bind 判为 "unverified"）：152649 i2 ep3 只有 5 / 92 帧，而实况在同一个 Bind 开始 3 帧后就因 Q6 FORCED_RISK 退出、威胁碰撞体距主角 0.93 u，未核对；232157 i1 ep49（唯一一处 Q1 / Q1a 本身带来的不同）有 69 / 92 帧，期间没有威胁碰撞体，删失段处在 Emerge Antic C（Boss 在 x 95.7）：其他录像里 196 次在 x 95.7 的 Emerge Antic C 开始后 150 帧内没有威胁碰撞体到达 Bind 框，Charge Emerge 要到 +60 帧才跟上，所以在 +246 前结束的 Bind 很可能安全（核验者的补充核对，非本工具结果）。
+- 为什么新规则几乎不改变决定：198 场里只有 14 场受击后丝曾 ≥ 9（13 oracle、1 dust）；其余都是满血时丝矛把丝花掉（链 H 的结论：37 次门槛 QUIT 受击时丝 0–6）。h 按最坏已知事件算的 tick 有 9495 个（95 场，地下阶段），这些 tick 的风险档从 GREEN 变 YELLOW，但没有丝就没有 Bind。要让 Q1a 真正起作用，剧本的 `bind.reserve_at_full_hp`（满血也留 9 丝）要做 A/B：实战检查里开着它，h = 2 的 Bind 在 oracle 视图 11 / 14 场完成。
+
+### 7.4 实战检查（实例 4，注入受击留 1 / 2 / 3 HP，`--start-silk 9 9 --silk-reserve`：开局 9 丝且满血时不花，以便 h = 2 时能回血）
+
+| 运行 | 代码 | 视图 | 场 | 说明 |
+|---|---|---|---|---|
+| 20261003_111244 | 72baaf3 | oracle | 12（中途停） | 第一版时机：按键落在 G，h = 1 暂停在 +20 / +21；h = 2 Bind 4 / 4 完成 |
+| **20261003_112406** | **8beb806** | **oracle** | **30** | 修正后 |
+| **20261003_114708** | **8beb806** | **degraded_dust** | **30** | 修正后；监督器和暂停机只读延迟视图 |
+
+**20261003_112406（oracle，30 场，CPU 约 75 %：5 个游戏实例 + 回放批处理）**：
+- h = 1（留 1 HP 8 场、2 HP 8 场）：16 / 16 在受击帧进入 PAUSE_PENDING（2 次原因是"支撑为空、按最坏已知事件"），16 / 16 暂停在受击后 +16 帧 = G + 1（0.264–0.268 s），全部在无敌窗口内（暂停时剩 0.925 s），0 次 Bind。
+- h = 2（留 3 HP，14 场）：11 次 Bind，11 / 11 完成（3 → 5 HP），0 次 Bind 中受击，这 11 场全部 CLEAR；Bind 在受击后 31–260 帧开始（0.5–4.3 s）。另 3 场 Q6（h = 2 时 FORCED_RISK，清空时间 0.02 / 0.02 / 0.22 s）在受击后 59–105 帧退出。
+- 第一版运行的 h = 2 四场同样 4 / 4 完成、全部 CLEAR。
+
+**20261003_114708（degraded_dust，30 场）**：
+- h = 1（留 1 HP 9 场、2 HP 13 场）：22 / 22 在受击后 2–4 帧（视图延迟 k）进入 PAUSE_PENDING，21 次暂停在 +17 帧（G + 2，0.282–0.284 s），1 次 +18（0.300 s），全部在无敌窗口内（剩 0.89–0.91 s），0 次 Bind。视觉视图看不到门和时间缩放，按"受击采集时间 + 0.285 s"落在 G + 1 之后 1–2 帧，与预期（0–3）一致。1 次原因被记成"no hit"（ep 0：那次 HIT_TAKEN 落在被跳过的帧上；暂停时机按 HUD 掉血仍按受击处理，+18）：已改为 HUD 掉血也算受击（d0c2327），并把 Q1 的原因在暂停期间锁定（3afa1e1）。
+- h = 2（留 3 HP，8 场）：5 次 Bind，5 / 5 完成，0 次 Bind 中受击，其中 4 场 CLEAR；另 1 场 Bind 之后 72 s 又一次 h = 2 时 Q6；3 场在 Bind 之前 Q6（受击后 64–99 帧）。视觉视图的支撑更宽，Bind 机会比 oracle 少（5 / 8 对 11 / 14）。
+- 两个视图合计（修正后 60 场 + 第一版 12 场）：h = 1 的 46 次全部暂停、全部在无敌窗口内，0 次 Bind；h = 2 的 Bind 20 次全部完成、0 次被打中。
+- **只覆盖了一种冻结形状（修复轮补充）**：这些检查里每一次注入的受击都是 G = +15、G 前一帧是 ts 0.999 的最后关门帧（`lowhp_check --q1` 的 ramp999）——正是 oracle 能提前一帧按、落在 G + 1 的最好情况。自然受击约 40 % 没有这一帧，oracle 落在 G + 2；视觉视图在 G = 13 / 14 / 16 和 Bind 中受击时的 0.285 / 0.57 s 也没有实战过。所以"16 / 16 落在 G + 1"只说明注入受击；自然受击见 7.7。
+
+### 7.5 提交
+
+5126afd（Q1 / Q1a、h 的定义、gate_open_at、战术层 HEAL / HEAL_SPOT、测试）、72baaf3（注入器留血量、combat_run --start-silk / --silk-reserve、tools/lowhp_check）、3bc9da8（视觉视图 Bind 中受击的等待）、8beb806（G + 1 修正）、b957be6 / a2d0ec9（tools/lowhp_replay）、05382a7（lowhp_check 的"窗口内"判定）、d0c2327（HUD 掉血也算受击）、3afa1e1（Q1 原因在暂停期间锁定）。全套测试（8beb806 之后、d0c2327 之前的代码）：903 通过、1 失败（已知：机器负载下 support query 计时 p99 2.76 / 4.39 ms 超 3 ms 预算，未放宽）、1 跳过、1 xfail；之后两处只改 supervisor，相关测试（supervisor、supervision、post_hit_window、planner_policy、pause_stress）86 通过。
+
+### 7.6 10⁴ 暂停压力测试（重启）
+
+链 H 的运行 20261003_010522 在 07:13 第 722 次后中断（真实退出后 `load_slot` 等进入游戏超时 120 s，worker 没有重试），不是本链停的。本链在最终代码上重启：工作区 `C:\ssbot\live_pq_3bc9da8`（名字是旧的，检出 3afa1e1，numba 已预热），`pq_campaign_start.cmd C:\ssbot\live_pq_3bc9da8 105330 4670 C:\ssbot\sandbox\pq_campaign_q2.log`（种子 105330–109999，约 39 h）。中途在 d0c2327 上试跑了 23 次（20261003_120827，105300–105322），为锁定 Q1 原因停掉。另：链 H 在 07:45 重启过一次（20261003_074533 `_inject`，`pq_campaign2.log`），4 次 Q1 真实退出后 ep 4 / ep 5 都是 HARNESS_FAIL（"state condition not met within 2.0s"），随后 worker 在 `guards.set` RPC 超时退出（实例 4 无响应），3 分钟内就停了。
+
+修复轮：20261003_122030（3afa1e1）在 13:22 优雅停止（123 次，105330–105452；它和 120827 合计 Q1 85 次（`lowhp_check --q1`，`C:\ssbot\sandbox\pq_q1scan_campaign.json`）：82 次注入受击 ramp999 → 82 / 82 落在 G + 1，3 次 Boss 死亡慢动作里的注入受击 G = +82 / +83、暂停在 G + 3…5，都在无敌窗口内；0 次自然受击的 Q1）。实战检查后在最终代码上重启：工作区 `C:\ssbot\live_pq_final`（5026372，numba 已预热），`pq_campaign_start.cmd C:\ssbot\live_pq_final 105453 4347 C:\ssbot\sandbox\pq_campaign_q3.log`，运行目录 20261003_153044_BellBeast_eval_planner_oracle_inject（种子 105453–109799；109800–109919 是修复轮检查用的）。
+
+### 7.7 修复轮（核验后，2026-10-03 下午；代码 f9dcbba / 4eb57db / 5026372）
+
+**改动**
+- **Q6（你的规则，main 1c0a082）**：h = 2 时 FORCED_RISK 不再退出（`SupervisorConfig.q6_max_h` = 1；2 = 以前的规则，供 A/B），照常选风险最低的方案、丝技能照旧只在满血时用；Q3（绕过面具、多实例、危险物、Critical、未知支撑）在 h = 2 照旧退出；第二下把 h 打到 1 就是 Q1，在受击后窗口里退出。攒丝：h ≥ 2、HP < max、丝 < 9 时命中权重 × 剧本的 `bind.gather_hit_x`（Bell Beast 1.5，第一个值，未调；YELLOW 仍限每个惩罚窗口 1 下）。
+- 战术层读本 tick 的 h、掉血要有击退才算受击（7.1）；视觉视图没有击退的掉血不等 0.285 s（7.2）。
+- 工具：`lowhp_replay` 删失的新 Bind 判 "unverified"、实况在受击帧的 Q1 也回放、`--q6-max-h`；`lowhp_check` 每次受击的冻结形状（ramp999）、受击后攒丝、第二下（自然受击）的窗口、`--q1`（任意运行的 Q1 按受击来源和形状汇总）；`combat_run --start-hp`。
+
+**回放（最终代码 4eb57db，`C:\ssbot\sandbox\pq_lowhp_replay2.json` 与 `pq_lowhp_replay2_010522.json`，13:24–13:54，低于正常优先级、NUMBA 4 线程，同时实例 4 在跑实战检查）**：78 个运行目录（2026-10-02 起所有 Bell Beast eval 运行，本链自己的检查和还在跑的除外），其中有低血量决定的：38 个普通 eval 运行（第一轮的 35 个，加 20261003_074533 degraded_dust 10 场、第一轮没列入的 20261002_061942 degraded_tell 3 场和 061751 degraded 1 场）和链 H 的 9 个 `_inject` 运行（20261003_010522 按顺序取前 80 场），共 649 场。
+- **链 H 的暂停压力运行（第一轮漏掉的）**：304 场，303 场实况 Q1（298 次 Q1、5 次 Q1 + Q4）全部"退出 → 退出"，新代码都在**受击那一 tick**（+0）进入 PAUSE_PENDING、原因只有 Q1，**0 次 Bind**；另 1 场实况 Q6 → 新代码到实况暂停为止没退出。所以"Q1 退出变 Bind"在录像里的 303 次 Q1 上为 0。
+- 普通 eval 运行 345 场：实况 Q6 → 新代码到实况暂停为止没退出 201 场（第一轮的 71 场"退出 → 退出"全部在这里：h = 2 不再有 Q6，按设计；之后录像不再跟随新代码，结果看实战检查）；受击帧暂停（不回放）130 场；Bind → Bind 13 场、退出 → Bind 1 场（232157 i1 ep49），与第一轮相同；新代码在这些片段里一次也没退出（新退出全部来自 Q1）。
+- **新 Bind 的安全核对**：14 次，与第一轮相同；工具判定 12 次 "clear"（全程有录像，最近威胁碰撞体 1.07–2.71 u；开环），**2 次 "unverified"**（152649 i2 ep3：5 / 93 帧；232157 i1 ep49：69 / 92 帧，见 7.3）。去掉 h = 2 的 Q6 没有在这些片段里带来新的 Bind（片段在实况暂停处结束，那之前丝都不到 9）。
+
+**实战检查 1：注入受击留 1 或 3 HP（`SSBOT_INJECT_LEAVE_HP=1,3,3`，不设开局丝、不留 Bind 丝：受击后要自己攒丝），实例 4**
+
+| 运行 | 视图 | 场 | h = 1 | h = 2 |
+|---|---|---|---|---|
+| 20261003_132436 | oracle | 30 | 10 / 10 暂停在 +16 = G + 1（0.265–0.268 s），全在无敌窗口内（剩 0.925 s），0 次 Bind | 20 场：受击时丝 0–8，20 / 20 攒到 9 丝（受击后 35–2004 帧），**20 次 Bind、20 次完成、0 次 Bind 中受击，20 / 20 CLEAR，0 次退出**；没有第二下 |
+| 20261003_135244 | degraded_dust | 30 | 5 / 5 暂停在 +17 = G + 2（0.282–0.284 s；视图延迟 2–4 帧后进入 PAUSE_PENDING），全在无敌窗口内（剩 0.908 s），0 次 Bind；受击要有击退才算（f9dcbba）之后视觉时机不变 | 25 场：受击时丝 0–5，25 / 25 攒到 9 丝（392–2852 帧），**25 次 Bind、25 次完成、0 次 Bind 中受击，23 CLEAR、2 STUCK（240 s 时限），0 次退出**；没有第二下到 1 HP |
+
+（第一轮同类检查开局 9 丝、留 Bind 丝、有 Q6：h = 2 的 oracle 14 场里 11 次 Bind、3 次 Q6 退出；dust 8 场里 5 次 Bind、4 次 Q6。）两个视图合计 h = 2 的 45 场：45 次 Bind 全部完成、0 次被打中、0 次退出、43 CLEAR。CPU：dust 臂期间约 49 %（采样 10 s；oracle 臂时回放在同时跑，未采样）。
+
+**2 次 STUCK 的原因（新问题，未改）**：两场都是 Bind 回满后又挨一下回到 3 HP（h = 2），Boss 只剩 15 / 20 HP（视图的计数）；决策日志最后 1500 tick（25 s）全是 YELLOW、h 2、3 HP、丝 0 / 4 不变、没有一个计划含攻击。推断（日志没记允许集）：YELLOW 下"下一下可能打死 Boss"时禁止一切伤害动作（I3：Boss 死亡慢动作 1.35 s 不能暂停，只能在满血且 h ≥ 3 时进入）；视觉视图按计数的 Boss HP − 3σ ≤ 主角最大一击（`VISION_HERO_HIT` = 15，丝矛）判断，于是 Boss 20 HP 以下就不打了，而不打就攒不到丝、回不了血：一直躲到时限。旧规则下这种局面多半先因 Q6 退出。可选的改法（需主管 / 你决定，涉及安全规则）：(a) 低于满血时用"现在允许的最大一击"（丝技能被禁，只剩针击 5）判断下一下会不会打死，缩小禁区；但针的暴击等未知倍率是取"见过的最大一击"的原因，要先核实；(b) h = 2、丝 < 9 且伤害动作被 I3 禁止时直接退出（没有回血的路）。最终运行里 STUCK 会被进度看门狗（Q8）暂停退出，不会死。
+
+**实战检查 2：自然受击（`combat_run --start-hp 3 3 --start-silk 0 0`，不注入；代码 5026372）**：开局 3 HP（h = 2）、0 丝，Boss 的第一下就该是 Q1 的自然受击。结果 Boss 几乎打不到人：
+- oracle 20261003_144536（18 场后停）：18 / 18 先攒丝回血（第一次 Bind 在苏醒后 18–29 s），18 / 18 CLEAR；有 FORCED_RISK 的 18 场共 2591 tick（旧规则下 h = 2、H 内的 FORCED_RISK 就是 Q6 退出），0 次退出；4 场各挨 1 下（都在回满之后）。
+- degraded_dust 20261003_150835（12 场后停）：12 / 12 回血（20–54 s），12 / 12 CLEAR（击杀 83–128 s），FORCED_RISK 12 场 2955 tick，0 次退出，1 场挨 1 下。
+- 所以**自然受击的 Q1 暂停时机在实战里仍没有样本**（两臂 0 次 Q1）。今天实例 4 上能分形状的受击 62 次（60 次注入、2 次自然、都在 dust 臂）全部是 G = +15、有 0.999 帧；7.2 的 2143 次分布（G 13–16）来自 2026-10-01 的数据运行。oracle 对四种形状的按键时机由 `test_post_hit_window.py` 的替身游戏覆盖；实战的自然受击样本留给重启的 10⁴ 暂停压力测试（h = 2 不再退出，第二下自然受击就是 Q1），用 `lowhp_check --q1 <运行目录>` 按来源和形状汇总。
+
+## 8. EXCLUSIVE 部署清单（任务 Q，2026-10-03；main 里已有、未部署）
+
+部署内容：main 的 `oracle/` = 已部署的 oracle-deploy-20261003（2783573：Forum room.battles + allies、slash.dump paths）+ 链 H 的输入 / IPC 文件 + EXCLUSIVE（10d3948）+ 集成轮的修正（`HoldFilter.QueueExclusive` 保留本段暂停循环自己的键）+ 修复轮的接线（`QueuePlain` / `QueueExclusiveCutAll`，ef3ea8f）。
+
+**部署前**
+1. 停掉实例 4 上的暂停压力测试（它锁着 SsOracle.dll）：在其工作区 `brain` 里 `..\scripts\uv.cmd run python -m ssbot.tools.combat_run stop <运行目录>`（运行目录见 HANDOFF 链 Q 一节），等当前这一次结束；其他实例上的作业按主管的窗口停。
+2. 在要部署的提交上：`dotnet run --project oracle/tests/InputLogicCheck` 全部 OK（含 `ExclusiveSparesTheLoopsOwnKeys`、`InjectorExclusiveWiring`）；`dotnet build oracle/SsOracle.csproj` 0 警告 0 错误。
+
+**部署后，每个实例**
+3. HELLO：`OracleLink(instance=k).hello["action_flags"] == ["exclusive"]`（旧 DLL 没有这个键）。
+4. `input.stats` 有 `released_early`（新计数，启动时 0）；`lost_pause_taps` 等旧键照旧。
+5. 旧导出没丢：`python -m ssbot.probes.m2_exports --instance k --skip-fight`（act.hf、hero.tm、menu 一节）全 PASS；Forum 实例上 room.battles / allies 照常（Forum 采集日志里 allies 非空）。
+6. 普通 ACTION 不受影响：任何非暂停的对局里 `released_early` 不增长（规划器、数据策略、Forum 采集都只发 flags 0）。对照：部署后第一段运行开始和结束各读一次 `input.stats`，增长只能来自暂停循环。
+
+**实例 4 上的实战检查（部署后第一件事）**
+7. 掉线看门狗（`ssbot.probes.m1_harness --lost --instance 4`）：检查"held keys released"和"game paused with 1 tap"都 PASS；另加一条看录像：看门狗那次 Pause 落地帧 STATE `act.hf.latched` 只有 Pause 位（CutAll：掉线前刚按下的键当帧就被切掉，旧 `ReleaseAllNow` 会保留最短按下）。
+8. 短暂停块：`SSBOT_INJECT_KINDS=keys,menu`，`combat_run run --instances 4 --mode eval --policy planner --view oracle --real-quit 1.0 --inject-hits 1.0 --episodes 40 --seed <本链种子>`，然后 `pause_stress <运行目录>`：菜单可见帧游戏键 0、暂停帧游戏键 0、意外取消暂停 0、错误确认 0、延迟最大 ≤ 6 帧（之前 3）；暂停循环自己的点按每次锁存 ≥ 2 帧（录像里 `act.hf.latched` 的 Pause 位连续 ≥ 2 帧：确认 QueueExclusive 没有切掉循环自己的键）；块结束后 `input.stats.released_early` > 0（"在途按键"试验里规划器的键被切）。
+9. 低血量检查（7.7 的命令：`SSBOT_INJECT_LEAVE_HP=1,3,3`、`--inject-hits 1.0`，oracle 视图 10 场，`lowhp_check` 汇总）：结果与部署前同（h = 1 暂停帧 = G + 1（ramp999）或 G + 2，全在无敌窗口内；h = 2 攒丝后 Bind 完成、没有 Q6 退出），证明 EXCLUSIVE 不影响暂停时机，也不切掉 Bind 的按键（Bind 不在暂停循环里，ACTION flags 0）。
+10. 通过后在新 DLL 上重启 10⁴ 暂停压力测试（HANDOFF 链 Q 一节的命令），它就是 KeyboardInjector 一侧的长期实战检查。
+
+**之后可选（主管决定）**：Python 键保护（`safety.key_guard`）按 EXCLUSIVE 建模，`keys_clear` 恒真，省掉 0–2 帧的等待；先跑一块关掉保护的对照（需要加一个开关），确认只靠 EXCLUSIVE 时菜单帧游戏键仍为 0 再改。

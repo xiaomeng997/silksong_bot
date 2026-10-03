@@ -60,25 +60,114 @@ def test_q1_low_h_is_a_sticky_pause_pending_quit():
     assert not d.allowed_mask.any()
 
 
-def test_q1_with_a_certified_empty_support_counts_the_worst_known_event():
+def test_h_with_a_certified_empty_support_counts_the_worst_known_event():
     """Pause stress chunk 20261002_232051 ep 35: a hit took the hero to 1 HP with the boss submerged (support
-    certified empty, h UNBOUNDED): no Q1, tier GREEN, the planner kept fighting. Now Q1 counts h against the
-    encounter's worst event (Bell Beast 2 masks), so 1-2 HP pause at once; 3 HP does not."""
+    certified empty, h UNBOUNDED): no Q1, tier GREEN, the planner kept fighting. 10bfb66 made Q1 alone count the
+    encounter's worst event there; now h itself does (h_basis "worst known"), so the tier, Q1 and Q1a agree: 1-2 HP
+    quit (h 1), 3 HP is h 2 (YELLOW, heal first) instead of GREEN with an unbounded h that refused the Bind."""
     empty = dict(support=(), support_known=True, support_empty_ok=True)
     for hp in (1, 2):
         d = Supervisor(BB).step(_inp(hp=hp, **empty))
-        assert d.h == UNBOUNDED and "Q1" in d.triggers and d.pause_pending and d.quit_requested, hp
-        assert d.allowed == EVASIVE
+        assert d.h == 1 and d.h_basis == sv.H_WORST and "Q1" in d.triggers and d.pause_pending and d.quit_requested
+        assert d.allowed == EVASIVE and not d.restrictions.heal_first
+        assert any("against the worst known event" in r for r in d.reasons)
     d = Supervisor(BB).step(_inp(hp=3, **empty))
-    assert d.h == UNBOUNDED and not d.triggers and not d.pause_pending and d.tier == "GREEN"
+    assert (d.h, d.h_basis, d.triggers, d.pause_pending, d.tier) == (2, sv.H_WORST, (), False, "YELLOW")
+    assert d.restrictions.heal_first and d.allows("BIND")
+    assert sv.bind_allowed(9, 3, 5, d.h, 2.0).ok             # was "not worth a Bind" with h UNBOUNDED at 3 HP
+    d = Supervisor(BB).step(_inp(hp=5, **empty))
+    assert (d.h, d.tier, d.restrictions.heal_first) == (3, "GREEN", False)
+    d = Supervisor(BB).step(_inp(hp=3))                     # the visible boss: the support's own h
+    assert d.h == 2 and d.h_basis == sv.H_SUPPORT
     d = Supervisor(W1).step(_inp(hp=2, **empty))                  # a 1-mask encounter: 2 HP is two hits away
-    assert not d.pause_pending
+    assert not d.pause_pending and d.h == 2
     d = Supervisor(BB).step(_inp(hp=1, mask=MASK_INTACT, **empty))  # an intact Fractured Mask covers the event, as
-    assert not d.pause_pending                                      # it would for the visible boss (h = 2 there)
+    assert not d.pause_pending and d.h == 2                         # it would for the visible boss (h = 2 there)
     assert Supervisor(BB).step(_inp(hp=1, mask=MASK_INTACT)).h == 2
     s = Supervisor(W1)
     s.step(_inp(hp=5, damage_taken=3))                             # a 3-mask hit seen this attempt raises the floor
     assert "Q1" in s.step(_inp(hp=3, **empty)).triggers
+    assert UNBOUNDED not in {Supervisor(BB).step(_inp(hp=hp, **empty)).h for hp in range(1, 6)}
+
+
+def test_q1_after_a_hit_quits_in_the_post_hit_window_never_binds():
+    """Q1 (the person's rule, 2026-10-03): h <= 1 never Binds; after a hit the quit is the post-hit window's
+    (q1_cause "hit": the pause machine times its press for the gate's opening), without one (frost, pending damage,
+    a low start) it is the first pausable frame's (q1_cause "no_hit")."""
+    s = Supervisor(BB)
+    d = s.step(_inp(t=10.0, hp=5))
+    assert d.q1_cause is None and d.t_hit is None
+    d = s.step(_inp(t=10.5, hp=3, damage_taken=2))               # a 2-mask hit: h 2, heal first, no quit
+    assert d.h == 2 and not d.pause_pending and d.restrictions.heal_first and d.t_hit == 10.5 and d.q1_cause is None
+    d = s.step(_inp(t=12.0, hp=1, damage_taken=2))               # the next one: h 1
+    assert "Q1" in d.triggers and d.q1_cause == sv.Q1_HIT and d.t_hit == 12.0 and d.pause_pending
+    assert not d.allows("BIND") and not d.restrictions.heal_first
+    assert any("post-hit window" in r for r in d.reasons)
+    d = s.step(_inp(t=12.6, hp=1))                               # still pending, sticky
+    assert d.pause_pending and not d.allows("BIND")
+    d = s.step(_inp(t=20.0, hp=1))                               # a real quit's menus end seconds later: the cause
+    assert d.q1_cause == sv.Q1_HIT and any("post-hit window" in r for r in d.reasons)   # Q1 fired with is kept
+    s = Supervisor(BB)
+    s.step(_inp(t=1.0, hp=3, damage_taken=2))
+    d = s.step(_inp(t=3.0, hp=3, pending_dmg=2))                # no hit for 2 s (> POST_HIT_WINDOW_S): pending damage
+    assert "Q1" in d.triggers and d.q1_cause == sv.Q1_NO_HIT and any("first pausable" in r for r in d.reasons)
+    d = Supervisor(BB).step(_inp(t=0.0, hp=4, pending_dmg=3))   # frost: 4 - 3 pending leaves 1, no hit at all
+    assert "Q1" in d.triggers and d.q1_cause == sv.Q1_NO_HIT
+    s = Supervisor(BB)                                           # vision: the HUD lost 2 masks, no HIT_TAKEN seen
+    s.step(_inp(t=5.0, hp=3))
+    d = s.step(_inp(t=5.05, hp=1))
+    assert d.q1_cause == sv.Q1_HIT and d.t_hit == 5.05
+
+
+def test_a_drop_without_knockback_is_no_hit():
+    """SupervisorInput.hurt (fixer review 2026-10-03): frost / DamageTag damage (DoSpecialDamage's take-health path)
+    lowers the HUD with no recoil, no freeze and no i-frames, so a Q1 it causes is "no hit" (press at once); a drop
+    with the knockback showing is a hit, as is a drop with the knockback not read (None: the rule before)."""
+    s = Supervisor(BB)
+    s.step(_inp(t=5.0, hp=3, hurt=False))
+    d = s.step(_inp(t=5.05, hp=1, hurt=False))                   # frost ticks 3 -> 1: Q1 at the first pausable frame
+    assert "Q1" in d.triggers and d.q1_cause == sv.Q1_NO_HIT and d.t_hit is None
+    s = Supervisor(BB)
+    s.step(_inp(t=5.0, hp=3, hurt=False))
+    d = s.step(_inp(t=5.05, hp=1, damage_taken=2, hurt=False))   # a "damage" event the game refused (no recoil)
+    assert d.q1_cause == sv.Q1_NO_HIT
+    s = Supervisor(BB)
+    s.step(_inp(t=5.0, hp=3, hurt=False))
+    d = s.step(_inp(t=5.05, hp=1, hurt=True))                    # the HUD drop with the hit's recoil
+    assert d.q1_cause == sv.Q1_HIT and d.t_hit == 5.05
+
+
+def test_peek_h_is_the_next_steps_h_without_stepping():
+    """Supervisor.peek_h: the tactics read this tick's h before the step (fixer review 2026-10-03: the decision of the
+    tick before still said h 2 on the tick a hit took the hero to 1 HP); no state changes (worst seen, hero, latches)."""
+    s = Supervisor(BB)
+    d = s.step(_inp(hp=3))
+    assert d.h == 2 and d.restrictions.heal_first
+    assert s.peek_h(_inp(hp=1, damage_taken=2)) == (1, sv.H_SUPPORT)
+    assert s.worst_seen == 0 and s.hero.hp == 3 and not s.pending
+    empty = dict(support=(), support_known=True, support_empty_ok=True)
+    assert s.peek_h(_inp(hp=3, **empty)) == (2, sv.H_WORST)       # certified empty: the worst known event
+    assert s.peek_h(_inp(hp=None, max_hp=None)) == (2, sv.H_SUPPORT)   # no hero read: the last one
+    assert Supervisor(BB).peek_h(_inp(hp=None, max_hp=None)) == (None, None)
+    for hp in range(1, 6):
+        for kw in ({}, empty, dict(support_known=False)):
+            s = Supervisor(BB)
+            assert s.peek_h(_inp(hp=hp, **kw)) == (s.step(_inp(hp=hp, **kw)).h, s.step(_inp(hp=hp, **kw)).h_basis)
+
+
+def test_q1a_heal_first_for_h2_and_up_below_max_hp():
+    """Q1a: h >= 2 and HP < max -> heal first in any tier (Restrictions.heal_first); at full HP or h <= 1 not."""
+    for hp, h, heal in ((5, 3, False), (4, 2, True), (3, 2, True), (2, 1, False), (1, 1, False)):
+        d = Supervisor(BB).step(_inp(hp=hp))
+        assert (d.h, d.restrictions.heal_first) == (h, heal), hp
+    big = SupervisorConfig(worst_known_damage=2)
+    d = Supervisor(big).step(_inp(hp=5, max_hp=7))              # 7 masks (Forum): h 3, GREEN, still heal first
+    assert d.tier == "GREEN" and d.restrictions.heal_first and not d.restrictions.no_parry
+    assert not sv.bind_allowed(9, 5, 7, d.h, 2.0).ok             # ... but the commit test's worth clause decides
+    assert sv.bind_allowed(9, 4, 7, 3, 2.0).ok                   # HP <= max - 3
+    d = Supervisor(BB).step(_inp(hp=4, plan_s=1))               # YELLOW at h 2 keeps the other restrictions
+    r = d.restrictions
+    assert d.tier == "YELLOW" and r.heal_first and r.max_punish_hits == 1 and r.no_parry and r.no_new_fights
 
 
 def test_allowed_mask_matches_the_allowlist():
@@ -161,12 +250,12 @@ def test_unknown_support_is_never_safe():
         d = Supervisor(BB).step(_inp(hp=1, support=empty, support_known=True))
         assert d.h == 1 and "Q1" in d.triggers and not d.support_known and d.tier == "RED", empty
         assert not d.allows("ATTACK(side)") and not d.long_planning_ok
-    # only an explicitly certified empty support is "nothing can hurt" now (h unbounded); at 1 HP Q1 still fires on
-    # the encounter's worst known event, which comes back after the horizon (test_q1_with_a_certified_empty_...)
+    # only an explicitly certified empty support is "nothing can hurt" now; h then counts the encounter's worst known
+    # event, which comes back after the horizon (test_h_with_a_certified_empty_support_counts_the_worst_known_event)
     d = Supervisor(BB).step(_inp(hp=1, support=(), support_known=True, support_empty_ok=True))
-    assert d.h == UNBOUNDED and d.support_known and "Q1" in d.triggers and d.tier == "RED"
+    assert d.h == 1 and d.h_basis == sv.H_WORST and d.support_known and "Q1" in d.triggers and d.tier == "RED"
     d = Supervisor(BB).step(_inp(hp=5, support=(), support_known=True, support_empty_ok=True))
-    assert d.h == UNBOUNDED and d.tier == "GREEN" and d.support_known
+    assert d.h == 3 and d.h_basis == sv.H_WORST and d.tier == "GREEN" and d.support_known
     assert not Supervisor(BB).step(_inp(hp=1, support=(), support_known=False, support_empty_ok=True)).support_known
 
 
@@ -230,28 +319,48 @@ def test_q5_perception_self_check():
     assert s.step(_inp(hp=2)).on_paused == sv.QUIT
 
 
+BB_Q6_H2 = SupervisorConfig(worst_known_damage=2, q6_max_h=2)    # the rule before 2026-10-03 (Q6 at h <= 2)
+
+
 def test_q6_forced_risk_only_at_low_h():
-    assert not Supervisor(BB).step(_inp(forced_risk=True)).triggers
-    assert "Q6" in Supervisor(BB).step(_inp(hp=4, forced_risk=True)).triggers
+    assert not Supervisor(BB_Q6_H2).step(_inp(forced_risk=True)).triggers
+    assert "Q6" in Supervisor(BB_Q6_H2).step(_inp(hp=4, forced_risk=True)).triggers
+
+
+def test_q6_at_h2_fights_on_by_the_persons_rule():
+    """DESIGN §3.7.4 Q6, the person's rule of 2026-10-03: at h = 2 FORCED_RISK within H no longer quits (the least
+    risky plan, heal first, silk gathering); the second hit is Q1's quit in the post-hit window; a Q3-class threat at
+    h = 2 still quits; at h <= 1 Q6 only adds its reason to Q1's."""
+    for clear in (None, 0.0, 0.4):
+        d = Supervisor(BB).step(_inp(hp=3, forced_risk=True, forced_clear_s=clear, plan_s=1))
+        assert not d.triggers and not d.pause_pending and d.tier == "YELLOW" and d.h == 2, clear
+        assert d.restrictions.heal_first and d.allows(Prim.BIND) and not d.allows(Prim.SILKSKILL)
+    s = Supervisor(BB)
+    assert not s.step(_inp(hp=3, forced_risk=True, plan_s=1)).pause_pending
+    d = s.step(_inp(t=10.5, hp=1, forced_risk=True, plan_s=1, damage_taken=2, hurt=True))
+    assert d.pause_pending and "Q1" in d.triggers and "Q6" in d.triggers and d.q1_cause == sv.Q1_HIT
+    hazard = SupportEvent("spikes", 1, hazard=True)
+    d = Supervisor(BB).step(_inp(hp=3, forced_risk=True, support=(BODY, hazard), plan_s=1))
+    assert d.pause_pending and "Q3" in d.triggers and "Q6" not in d.triggers
 
 
 def test_q6_counts_forced_risk_within_the_design_horizon_only():
-    # the best plan meets the support within H = 0.8 s (48 frames at 60 fps, inclusive), or how long it stays clear is
-    # unknown: Q6 as before; clear beyond H (the adaptive horizon's open-loop contact near a charge's end, 2 s out):
-    # no Q6, the attempt goes on in YELLOW and the planner re-plans every frame
+    # (the rule before 2026-10-03, q6_max_h 2) the best plan meets the support within H = 0.8 s (48 frames at 60 fps,
+    # inclusive), or how long it stays clear is unknown: Q6 as before; clear beyond H (the adaptive horizon's open-loop
+    # contact near a charge's end, 2 s out): no Q6, the attempt goes on in YELLOW and the planner re-plans every frame
     for clear in (None, 0.0, 0.4, 48 / 60, 48 * 0.016666):
-        d = Supervisor(BB).step(_inp(hp=4, forced_risk=True, forced_clear_s=clear))
+        d = Supervisor(BB_Q6_H2).step(_inp(hp=4, forced_risk=True, forced_clear_s=clear))
         assert "Q6" in d.triggers and d.pause_pending and d.quit_requested, clear
     for clear in (49 / 60, 1.2, 2.0):
-        d = Supervisor(BB).step(_inp(hp=4, forced_risk=True, forced_clear_s=clear))
+        d = Supervisor(BB_Q6_H2).step(_inp(hp=4, forced_risk=True, forced_clear_s=clear))
         assert not d.triggers and not d.pause_pending and d.tier == "YELLOW" and d.h == 2, clear
     # h >= 3: never Q6, whatever the clearance; h = 1 is Q1 anyway
-    assert not Supervisor(BB).step(_inp(forced_risk=True, forced_clear_s=0.1)).triggers
-    assert "Q1" in Supervisor(BB).step(_inp(hp=2, forced_risk=True, forced_clear_s=1.5)).triggers
+    assert not Supervisor(BB_Q6_H2).step(_inp(forced_risk=True, forced_clear_s=0.1)).triggers
+    assert "Q1" in Supervisor(BB_Q6_H2).step(_inp(hp=2, forced_risk=True, forced_clear_s=1.5)).triggers
     # the horizon is configuration (DESIGN §3.5.4 H), and a clearance without FORCED_RISK means nothing
-    s = Supervisor(SupervisorConfig(worst_known_damage=2, q6_horizon_s=1.5))
+    s = Supervisor(SupervisorConfig(worst_known_damage=2, q6_horizon_s=1.5, q6_max_h=2))
     assert "Q6" in s.step(_inp(hp=4, forced_risk=True, forced_clear_s=1.2)).triggers
-    assert not Supervisor(BB).step(_inp(hp=4, forced_risk=False, forced_clear_s=0.1)).triggers
+    assert not Supervisor(BB_Q6_H2).step(_inp(hp=4, forced_risk=False, forced_clear_s=0.1)).triggers
 
 
 def test_q7_focus_q8_watchdog_q9_stop():

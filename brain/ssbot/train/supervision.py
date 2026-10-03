@@ -51,22 +51,30 @@ Why each piece:
   the current oracle STATE: the degraded_dust runs' 0 WOULD_DIE and their pause latency were measured with oracle pause
   timing (the gate cue put the first press on the first open frame) and the oracle's paused flag.
   The PauseWindowMonitor stays on the raw STATE: it is instrumentation, not a decision.
+- the post-hit window (Q1 after a hit, DESIGN §3.7.4, the person's rule of 2026-10-03): a hit's freeze shuts the pause
+  gate (its STATE opens 0.213-0.267 s after the hit, the first pausable frame is one later), and a press that reaches
+  the game before that is dropped (one held into it makes no edge). The pause machine gets the predicted first
+  pausable frame (PauseCues.gate_open_at): the oracle cues from the freeze ramp's last shut frame
+  (pause_quit.hit_ramp_open_at), the vision view from the capture time of the hit it showed plus POST_HIT_OPEN_MAX_S
+  (post_hit_open_at), so the pause lands on or just after the first pausable frame of the window, well inside the
+  i-frames (1.10-2.08 s).
 """
 import math
 from collections.abc import Callable, Mapping, Sequence
 from typing import NamedTuple
 
 from ssbot.backends.observability import DEFAULT_ATTACK_DAMAGE
-from ssbot.core.worldstate import Kind, WorldState
+from ssbot.core.worldstate import Ev, Kind, WorldState
 from ssbot.ipc.ents import HAZARD_TYPES
 from ssbot.ipc.framing import BIT
 from ssbot.safety.hits_to_death import SupportEvent, SupportSet
 from ssbot.safety.key_guard import keys_clear
-from ssbot.safety.pause_quit import (GOAL_PAUSE, GOAL_QUIT, HELD_STATES, UNPAUSED, PauseQuit, PauseQuitConfig,
-                                     cues_from_state, to_mask, vision_cues_from_state)
+from ssbot.safety.pause_quit import (GOAL_PAUSE, GOAL_QUIT, HELD_STATES, POST_HIT_OPEN_MAX_BIND_S, POST_HIT_OPEN_MAX_S,
+                                     UNPAUSED, PauseQuit, PauseQuitConfig, cues_from_state, to_mask,
+                                     vision_cues_from_state)
 from ssbot.safety.pause_window import PauseWindowMonitor
 from ssbot.safety.supervisor import (RESUME_SELF_CHECK, Supervisor, SupervisorConfig, SupervisorDecision,
-                                     SupervisorInput, input_from_state, input_from_world)
+                                     SupervisorInput, hero_hurt, input_from_state, input_from_world)
 
 SupportFn = Callable[[dict], object]
 
@@ -137,6 +145,10 @@ def next_hit_may_kill_world(ws: WorldState, hero_hit: float, z: float = VISION_H
     return False
 
 
+def _known_v(e) -> object | None:
+    return e.v if e is not None and e.conf > 0 else None
+
+
 def _support_of(r: object) -> tuple[tuple[SupportEvent, ...] | None, bool, bool]:
     """(events, known, certified empty) of a support callable's result; only explicit certifications count."""
     if isinstance(r, SupportSet):
@@ -178,6 +190,48 @@ class SupervisedControl:
         self._resume_scene: str | None = None
         self._sup_alerted = False
         self._last_ws: WorldState | None = None
+        self.t_hit_seen: float | None = None    # vision: capture time (QPC s) of the last hit the view showed
+        self._hp_seen: int | None = None
+        self._last_seen_ws: WorldState | None = None
+        self._binding_seen = False              # the view showed the hero binding on its previous frame
+        self.hit_open_s = POST_HIT_OPEN_MAX_S
+
+    def _see_hit(self, ws: WorldState, t_cap: float) -> None:
+        """Vision: note the capture time of a hit the delayed view shows: a HIT_TAKEN event, or the HUD's health + blue
+        lower than at the last read (a hit on a frame the live loop skipped reaches the supervisor only as the lower
+        HUD, and is then timed a frame or two late, which only delays the press), with the hero in the hit's knockback
+        (supervisor.hero_hurt). A drop without it is frost or DamageTag damage (DoSpecialDamage's take-health path:
+        no freeze, no shut gate, no i-frames), and holding the first press for 0.285 s there would only leave the hero
+        vulnerable that long: Q1 then presses at once (fixer review 2026-10-03). The knockback shows on the hit's own
+        frame (cState.recoilFrozen in the STATE of 28 of 28 sampled hit frames) and lasts through the freeze and the
+        recoil, so a hit seen late still shows it."""
+        hp = ws.res.hp
+        tot = None if hp is None or hp.conf <= 0 or hp.v is None else int(hp.v) + int(_known_v(ws.res.blue) or 0)
+        drop = any(ev.kind == Ev.HIT_TAKEN for ev in ws.events) or \
+            (tot is not None and self._hp_seen is not None and tot < self._hp_seen)
+        hit = drop and hero_hurt(ws) is True
+        if tot is not None:
+            self._hp_seen = tot
+        if hit:
+            self.t_hit_seen = t_cap
+            # a hit through a Bind (Q1a's own risk) adds the BindBreak freeze: the gate opened 0.53-0.55 s after it
+            self.hit_open_s = POST_HIT_OPEN_MAX_BIND_S if self._binding_seen else POST_HIT_OPEN_MAX_S
+        b = ws.hero.binding
+        self._binding_seen = b is not None and b.conf > 0 and b.v == "IN_PROGRESS"
+
+    def post_hit_open_at(self, now: float) -> float | None:
+        """Vision: when a press may first reach the game after the last hit the view showed: its capture time plus
+        the latest first pausable frame measured after a hit, pause_quit.POST_HIT_OPEN_MAX_S (0.285 s: 2138 hits had
+        the STATE's gate open 0.213-0.267 s after it, pausable one frame later). The press then lands 0-3 frames after
+        the first pausable frame whatever the view's delay k; the blind cadence from the trigger (hit + k + the lead,
+        every 6 frames) landed 0-5 after it. The vision view sees
+        no gate and no time scale; the hero does not move during the freeze's ramp (recoil starts after it), so a
+        motion cue for the ramp is left to M3's measurements. None once the opening is more than gate_trust_s past."""
+        t = self.t_hit_seen
+        if t is None:
+            return None
+        at = t + self.hit_open_s
+        return at if now - at <= self.pq_cfg.gate_trust_s else None
 
     @property
     def held(self) -> bool:
@@ -204,6 +258,25 @@ class SupervisedControl:
         """The pause stress test: a quit trigger on the next step, with no damage (Supervisor.inject)."""
         self.sup.inject(tid, why)
 
+    def h_now(self, s: dict, obs: dict | None = None, ws: WorldState | None = None) -> tuple[int | None, str | None]:
+        """(h, basis) the supervisor's step will decide for this STATE (same inputs: the current STATE in oracle mode,
+        the delayed view in vision mode), without stepping it (Supervisor.peek_h). The policy's tactics and safety
+        filter run before the step and read this, not the decision of the tick before, which on the tick a hit takes
+        h to 1 still said h 2 (fixer review 2026-10-03)."""
+        if self.vision:
+            obs = s if obs is None else obs
+            ws = self._last_ws if ws is None else ws
+            events, known, empty_ok = _support_of(None if self.support is None else self.support(obs))
+            if ws is None:
+                inp = SupervisorInput(t=0.0, support=tuple(events or ()), support_known=events is not None and known,
+                                      support_empty_ok=events is not None and empty_ok)
+            else:
+                inp = input_from_world(ws, 0.0, support=events, support_known=known, support_empty_ok=empty_ok)
+        else:
+            events, known, empty_ok = _support_of(None if self.support is None else self.support(s))
+            inp = input_from_state(s, 0.0, support=events, support_known=known, support_empty_ok=empty_ok)
+        return self.sup.peek_h(inp)
+
     def step(self, s: dict, obs: dict | None = None, ws: WorldState | None = None, inflight: Sequence[int] = (),
              **planner) -> Supervised:
         """s: the current STATE (its QPC is the clock the keys go out on). Vision mode: obs is the STATE of the frame
@@ -227,6 +300,9 @@ class SupervisedControl:
             self._last_ws = ws
             self.hero_hit = max(self.hero_hit, VISION_HERO_HIT)
             events, known, empty_ok = _support_of(None if self.support is None else self.support(obs))
+            if ws is not None and ws is not self._last_seen_ws:
+                self._last_seen_ws = ws
+                self._see_hit(ws, (obs.get("q") or 0) / self.qpc_freq)
             if ws is not None:
                 planner.setdefault("next_hit_may_kill", next_hit_may_kill_world(ws, self.hero_hit))
                 inp = input_from_world(ws, t_q - self.t0, support=events, support_known=known,
@@ -243,6 +319,8 @@ class SupervisedControl:
                         self.hero_hit = max(self.hero_hit, int(d))
             events, known, empty_ok = _support_of(None if self.support is None else self.support(s))
             planner.setdefault("next_hit_may_kill", next_hit_may_kill(s, self.hero_hit))
+            if ws is not None:
+                planner.setdefault("hurt", hero_hurt(ws))      # the oracle backend's ws is this STATE's frame
             inp = input_from_state(s, t_q - self.t0, support=events, support_known=known, support_empty_ok=empty_ok,
                                    foreground_sink=self.foreground_sink, **planner)
         d = self.sup.step(inp)
@@ -265,6 +343,8 @@ class SupervisedControl:
         if pq is None:
             return Supervised(None, d, None, tuple(self.alerts))
         cues = vision_cues_from_state(obs, self.qpc_freq) if self.vision else cues_from_state(s, self.qpc_freq)
+        if self.vision:
+            cues.gate_open_at = self.post_hit_open_at(t_q)
         if pq.pressing:
             cues.keys_clear = keys_clear((s.get("act") or {}).get("hf"), inflight, self._pause_bit)
         keys = pq.step(cues, t_q)

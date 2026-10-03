@@ -508,7 +508,10 @@ class PlannerPolicy:
         if self.sc.pq is not None:
             return self._pause_tick(s, f, fo, ws, raw, t0)
         d = self.decision
-        h = d.h if d is not None else None
+        # this tick's h (SupervisedControl.h_now: the step below decides on the same inputs after the planner), not the
+        # decision of the tick before: on the tick a hit or frost takes h from 2 to 1 that one still said h 2 and heal
+        # first, and the tactics could want a Bind at h 1 (fixer review 2026-10-03)
+        h, _ = self.sc.h_now(s, obs=raw, ws=ws)
         prefs = self.tac.decide(ws, fcast, d, h)
         self.atk_mon.observe(fo, [ev.frame for ev in ws.events if ev.kind == Ev.HIT_DEALT])
         conf = self.atk_mon.confidence()

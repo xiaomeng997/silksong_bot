@@ -12,6 +12,34 @@ DEFAULT_WEIGHTS = {"hit": 10.0, "stance": 0.6, "risk": 3.0, "waste": 0.6, "face"
                    "jump": 0.15}
 
 
+@dataclass(frozen=True)
+class SafeSpot:
+    """A place to Bind away from the boss (DESIGN §3.7.4 Q1a, §3.5.7: the coverage map's complement): a hurtbox there
+    is outside the union of every attack's reach with `clearance_u` to spare, measured by ssbot.tools.coverage_map on
+    the recordings named in `verified`. The way there is never taken on trust: the planner's support check covers every
+    step, and the Bind itself still has to pass the §3.5.6 commit test at the spot. A spot is usable by the tactics
+    only when verified, on the floor (the planner walks there; a wall cling needs a cling primitive the planner does not
+    have) and with no ability in `needs` (wall_cling, double_jump: the person's spot in Lace 2's arena, up the right
+    wall and a double jump higher, needs the Faydown the route does not have)."""
+    name: str
+    x: float
+    y: float
+    kind: str = "floor"                  # "floor" | "wall"
+    clearance_u: float = 0.0
+    verified: str = ""                   # the coverage-map run and code that measured the clearance ("": not verified)
+    needs: tuple[str, ...] = ()
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "SafeSpot":
+        return cls(name=str(d["name"]), x=float(d["x"]), y=float(d["y"]), kind=str(d.get("kind", "floor")),
+                   clearance_u=float(d.get("clearance_u", 0.0)), verified=str(d.get("verified") or ""),
+                   needs=tuple(str(x) for x in d.get("needs") or ()))
+
+    @property
+    def usable(self) -> bool:
+        return bool(self.verified) and self.kind == "floor" and not self.needs and self.clearance_u > 0
+
+
 @dataclass
 class Playbook:
     enemy: str
@@ -34,6 +62,9 @@ class Playbook:
     long_horizon: dict = field(default_factory=dict)   # states, until, extra_s, map (observable phase -> state)
     weights: dict[str, float] = field(default_factory=lambda: dict(DEFAULT_WEIGHTS))
     bind_reserve_at_full_hp: bool = False     # bind.reserve_at_full_hp: no silk spent below 9 even at full HP
+    safe_spots: tuple["SafeSpot", ...] = ()   # bind.safe_spots: where Q1a's Bind may go when it cannot be in place
+    bind_gather_hit_x: float = 1.0            # bind.gather_hit_x: the hit weight's factor while Q1a gathers silk
+    #                                           (h >= 2, below max HP, silk < 9; DESIGN §3.7.4 Q6, 2026-10-03)
 
     @classmethod
     def from_dict(cls, d: dict) -> "Playbook":
@@ -57,7 +88,9 @@ class Playbook:
                             for x in d.get("prepare") or ()},
                    long_horizon=_long(d.get("long_horizon")),
                    weights=DEFAULT_WEIGHTS | {k: float(v) for k, v in (d.get("weights") or {}).items()},
-                   bind_reserve_at_full_hp=bool(bind.get("reserve_at_full_hp", False)))
+                   bind_reserve_at_full_hp=bool(bind.get("reserve_at_full_hp", False)),
+                   safe_spots=tuple(SafeSpot.from_dict(x) for x in bind.get("safe_spots") or ()),
+                   bind_gather_hit_x=float(bind.get("gather_hit_x", 1.0)))
 
 
 def _long(d: dict | None) -> dict:

@@ -167,13 +167,108 @@ def test_planner_ticks(model, tpls, params, arena):
 
 def test_heal_mode_and_the_bind_macro(model, tpls, params, arena):
     planner = Planner(params, arena, PlannerConfig(threads=4))
-    r, prefs = tick(planner, model, tpls, params, [], 85.0, hp=2, silk=9, h=1)
+    r, prefs = tick(planner, model, tpls, params, [], 85.0, hp=3, silk=9, h=2)
     assert prefs.mode == HEAL and prefs.want_bind and r.name == "BIND" and r.mask & kin.B_BIND
     an = model.anchor("BB_CHARGE", "Set L")
     charge = [Root("Charge", -0.1, -0.1, Ctx("BB_CHARGE", "Set L", an, "P1", False), current=True)]
     planner.reset()
-    r, prefs = tick(planner, model, tpls, params, charge, an.x + 8.0, hp=2, silk=9, h=1)
+    r, prefs = tick(planner, model, tpls, params, charge, an.x + 8.0, hp=3, silk=9, h=2)
     assert prefs.mode != HEAL and r.name != "BIND"                           # T_min < 1.37 + 0.15 s
+    # Q1 (the person's rule, 2026-10-03): never a Bind at h <= 1, whatever the room
+    planner.reset()
+    r, prefs = tick(planner, model, tpls, params, [], 85.0, hp=2, silk=9, h=1)
+    assert prefs.mode != HEAL and not prefs.want_bind and r.name != "BIND"
+
+
+def _decision(hp: int, max_hp: int = 5):
+    """The supervisor's decision for a hero at hp of max_hp against the Bell Beast's 2-mask body (S = 0 plan)."""
+    from ssbot.safety.hits_to_death import SupportEvent
+    from ssbot.safety.supervisor import Supervisor, SupervisorConfig, SupervisorInput
+    return Supervisor(SupervisorConfig(worst_known_damage=2)).step(SupervisorInput(
+        t=1.0, hp=hp, max_hp=max_hp, support=(SupportEvent("Bone Beast", 2),), support_known=True, plan_s=0))
+
+
+def test_q1a_heal_first_branches(model, tpls, params, arena):
+    """Q1a (DESIGN §3.7.4): h >= 2 below max HP -> Bind in place when the commit test passes; else walk to a verified
+    safe spot the forecast agrees with and Bind there; else fight on (the other modes)."""
+    from dataclasses import replace
+
+    from ssbot.combat.tactics import HEAL_SPOT, SafeSpot
+    planner = Planner(params, arena, PlannerConfig(threads=4))
+    tac = Tactics(load_playbook())
+    f_none = fc_with(model, tpls, []).forecast(2.0, 0.0)
+    # 4 / 5 (h 2): the playbook's hp_missing_min alone keeps the Bind off; the supervisor's heal-first flag does not
+    d4 = _decision(4)
+    assert d4.h == 2 and d4.restrictions.heal_first
+    assert tac.decide(world(85.0, hp=4, silk=9), f_none, None, 2).mode != HEAL
+    prefs = tac.decide(world(85.0, hp=4, silk=9), f_none, d4, d4.h)
+    assert prefs.mode == HEAL and prefs.want_bind
+    r = planner.tick(world(85.0, hp=4, silk=9), kin.initial_state(params, 85.0, 2.015 + params.foot),
+                     kin.HoldState.idle(1), np.zeros(1, np.int64), f_none, prefs,
+                     FilterContext.from_world(world(85.0, hp=4, silk=9), d4, d4.h, want_bind=prefs.want_bind))
+    assert r.name == "BIND"
+    # full HP: nothing to heal; 2 / 5 (h 1): Q1's quit, never a Bind
+    assert not _decision(5).restrictions.heal_first
+    d2 = _decision(2)
+    assert d2.pause_pending and not d2.allows("BIND")
+    assert tac.decide(world(85.0, hp=2, silk=9), f_none, d2, d2.h).mode != HEAL
+    # the decision of the tick before (h 2, heal first) with this tick's h 1 (a hit to 1 HP on this tick): no Bind
+    # (PlannerPolicy hands the tactics SupervisedControl.h_now; fixer review 2026-10-03)
+    d3 = _decision(3)
+    assert d3.h == 2 and d3.restrictions.heal_first
+    prefs = tac.decide(world(85.0, hp=1, silk=9), f_none, d3, 1)
+    assert prefs.mode != HEAL and not prefs.want_bind
+    # gathering silk (DESIGN §3.7.4 Q6, 2026-10-03): h 2 below max HP with silk < 9 raises the hit weight by the
+    # playbook's gather_hit_x; not at full HP, not with the Bind's silk, not at h 1
+    pb0 = load_playbook()
+    assert pb0.bind_gather_hit_x > 1.0
+    base = pb0.weights["hit"]
+    assert tac.decide(world(85.0, hp=3, silk=5), f_none, d3, 2).weights["hit"] == base * pb0.bind_gather_hit_x
+    assert tac.decide(world(85.0, hp=5, silk=5), f_none, _decision(5), 3).weights["hit"] == base
+    assert tac.decide(world(85.0, hp=1, silk=5), f_none, d3, 1).weights["hit"] == base
+    assert tac.decide(world(85.0, hp=3, silk=5), f_none, None, 2).weights["hit"] == base     # no supervisor: tools
+    # in place impossible (a charge 8 u away): no spot in the Bell Beast playbook -> fight on (EVADE here)
+    an = model.anchor("BB_CHARGE", "Set L")
+    charge = [Root("Charge", -0.1, -0.1, Ctx("BB_CHARGE", "Set L", an, "P1", False), current=True)]
+    f_ch = fc_with(model, tpls, charge).forecast(2.0, 0.0)
+    d3 = _decision(3)
+    x = an.x + 8.0
+    prefs = tac.decide(world(x, hp=3, silk=9), f_ch, d3, d3.h)
+    assert prefs.mode not in (HEAL, HEAL_SPOT) and not prefs.want_bind and "T_min" in prefs.bind_why
+    # a leap landed right of the arena's middle: its body (and the next attack, past the 2 s horizon) leaves the left
+    # floor out of reach for a Bind; the hero beside the body cannot Bind there
+    pb = load_playbook()
+    lan = model.anchor("BB_LEAP", "Set L")
+    land = [Root("Leap Land", -0.1, -0.1, Ctx("BB_LEAP", "Set L", lan, "P1", False), current=True)]
+    f_ld = fc_with(model, tpls, land).forecast(2.0, 0.0)
+    xs = np.arange(pb.arena_x[0], pb.arena_x[1], 0.5)
+    tm = np.array([f_ld.t_min(float(v), pb.hero_y, t_max=2.0) for v in xs])
+    near_x = float(xs[np.flatnonzero(tm < 1.52)[0]])               # the first covered spot (nearest the free side)
+    free = xs[tm >= 1.52]
+    assert len(free) and np.isfinite(near_x)
+    spot = SafeSpot("test spot", float(free[0]), pb.hero_y, "floor", 1.0, "synthetic")
+    assert Tactics(pb).decide(world(near_x, hp=3, silk=9), f_ld, d3, d3.h).mode not in (HEAL, HEAL_SPOT)
+    tac2 = Tactics(replace(pb, safe_spots=(spot,)))
+    prefs = tac2.decide(world(near_x, hp=3, silk=9), f_ld, d3, d3.h)
+    assert prefs.mode == HEAL_SPOT and prefs.stance_x == spot.x and not prefs.want_bind
+    assert "safe spot" in prefs.bind_why
+    # once there, the commit test passes in place: HEAL, and the planner's own Bind rollout agrees
+    prefs = tac2.decide(world(spot.x, hp=3, silk=9), f_ld, d3, d3.h)
+    assert prefs.mode == HEAL and prefs.want_bind
+    planner.reset()
+    r = planner.tick(world(spot.x, hp=3, silk=9), kin.initial_state(params, spot.x, 2.015 + params.foot),
+                     kin.HoldState.idle(1), np.zeros(1, np.int64), f_ld, prefs,
+                     FilterContext.from_world(world(spot.x, hp=3, silk=9), d3, d3.h, want_bind=True))
+    assert r.name == "BIND"
+    # a spot the forecast covers, an unverified one, a wall one or one that needs an ability is never used
+    covered = SafeSpot("covered", near_x, pb.hero_y, "floor", 1.0, "synthetic")
+    for sp in (covered, replace(spot, verified=""), replace(spot, kind="wall"), replace(spot, needs=("double_jump",))):
+        prefs = Tactics(replace(pb, safe_spots=(sp,))).decide(world(near_x, hp=3, silk=9), f_ld, d3, d3.h)
+        assert prefs.mode not in (HEAL, HEAL_SPOT), sp
+    # silk short of a Bind: no spot either (only the place may fail); h 1: never
+    assert tac2.decide(world(near_x, hp=3, silk=8), f_ld, d3, d3.h).mode not in (HEAL, HEAL_SPOT)
+    assert tac2.decide(world(near_x, hp=2, silk=9), f_ld, d2, d2.h).mode not in (HEAL, HEAL_SPOT)
+    assert load_playbook().safe_spots == ()                      # Bell Beast: none verified (playbook comment)
 
 
 def test_soft_gates_at_h2(model, tpls, params, arena):
