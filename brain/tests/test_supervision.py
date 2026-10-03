@@ -277,3 +277,26 @@ def test_pause_window_accounts_for_every_hit():
     mon = PauseWindowMonitor()
     mon.update(st(0, 3, 1.2, hit))
     assert mon.finish().censored and not mon.alerts and mon.open is None
+
+
+def test_injected_fault_pauses_and_the_first_press_waits_for_the_planner_keys():
+    """The pause stress test's trigger fault (inject_fault -> QF): PAUSE_PENDING with a quit goal on the next step,
+    at full health. The menu key guard: with a planner key pressed in flight (the ACTION for f + 1) the first step
+    sends no Pause; once the key path shows it released in time, the press goes out (safety.key_guard)."""
+    right = 1 << BIT["right"]
+    sc = _control()
+    states = wf.window(0)[:12]
+    for s in states:
+        s["act"] = {"target": s["f"], "hf": {"latched": right, "desired": right, "pending": [0] * 22,
+                                              "age": [9] * 22}}
+    r = sc.step(states[0])
+    assert r.mask is None and not r.decision.pause_pending
+    sc.inject_fault("QF", "test")
+    r = sc.step(states[1], inflight=[right | (1 << BIT["jump"])])  # jump pressed on f + 1: held to f + 3
+    assert r.decision.pause_pending and r.decision.quit_requested and "QF" in r.decision.triggers
+    assert r.mask == 0 and sc.pq.key_waits == 1
+    s = states[2]
+    s["act"]["hf"].update(latched=right | (1 << BIT["jump"]), desired=right | (1 << BIT["jump"]),
+                          age=[9] * 22)                            # by now held long enough to release with the press
+    r = sc.step(s, inflight=[0])
+    assert r.mask == PAUSE and sc.pq.presses == 1

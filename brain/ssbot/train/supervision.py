@@ -33,17 +33,23 @@ Why each piece:
   so the next PAUSE_PENDING starts a new loop.
 - the clock is the STATE's end-of-frame QPC (s["q"]); keys are held from that frame (the harness applies them at
   frame + 2, so PauseQuitConfig's input_latency_max_s must cover 2-3 frames plus the oracle DelayLine).
+- menu key guard (safety.key_guard): the caller passes the masks it already sent for the frames before the returned
+  one lands (step(s, inflight=...)); while the loop presses, PauseCues.keys_clear says whether a Pause press sent now
+  lands with no game key latched or queued on the key path (STATE act.hf replayed through them), and the loop's next
+  press waits until it does (a held or replayed planner key would otherwise reach the pause menu: Z submits, X / A
+  cancel, m0:N16).
 - STATE "focus" counts only with a foreground sink (Q7): TRAIN instances run unfocused under OracleInjectSink.
 - PauseWindowMonitor measures every hit's Q1 pause window [disablePause cleared, i-frames end] and alerts when one is
   shorter than detection + loop latency (DESIGN §3.7.5); its alerts, the supervisor's and the pause machine's are
   returned in Supervised.alerts.
 """
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from typing import NamedTuple
 
 from ssbot.ipc.ents import HAZARD_TYPES
 from ssbot.ipc.framing import BIT
 from ssbot.safety.hits_to_death import SupportEvent, SupportSet
+from ssbot.safety.key_guard import keys_clear
 from ssbot.safety.pause_quit import (GOAL_PAUSE, GOAL_QUIT, HELD_STATES, UNPAUSED, PauseQuit, PauseQuitConfig,
                                      cues_from_state, to_mask)
 from ssbot.safety.pause_window import PauseWindowMonitor
@@ -124,6 +130,7 @@ class SupervisedControl:
         self.always_quit = always_quit
         self.qpc_freq = qpc_freq
         self.hero_hit_floor = hero_hit_floor
+        self._pause_bit = 1 << bit["pause"]
         self.reset()
 
     def reset(self) -> None:
@@ -161,7 +168,14 @@ class SupervisedControl:
         if msg not in self.alerts:
             self.alerts.append(msg)
 
-    def step(self, s: dict, **planner) -> Supervised:
+    def inject_fault(self, tid: str = "QF", why: str = "injected fault") -> None:
+        """The pause stress test: a quit trigger on the next step, with no damage (Supervisor.inject)."""
+        self.sup.inject(tid, why)
+
+    def step(self, s: dict, inflight: Sequence[int] = (), **planner) -> Supervised:
+        """inflight: the ACTION masks already sent for the frames after s's frame and before the one the returned
+        mask is sent for (training: [mask for f + 1]); the pause loop's first press waits until the key path
+        (STATE act.hf) shows no game key can be latched or replayed when it lands (safety.key_guard)."""
         t_q = (s.get("q") or 0) / self.qpc_freq
         self.t_last = t_q
         if self.t0 is None:
@@ -194,7 +208,10 @@ class SupervisedControl:
             return Supervised(0, d, None if pq is None else pq.outcome, tuple(self.alerts))
         if pq is None:
             return Supervised(None, d, None, tuple(self.alerts))
-        keys = pq.step(cues_from_state(s, self.qpc_freq), t_q)
+        cues = cues_from_state(s, self.qpc_freq)
+        if pq.pressing:
+            cues.keys_clear = keys_clear((s.get("act") or {}).get("hf"), inflight, self._pause_bit)
+        keys = pq.step(cues, t_q)
         if pq.confirmed and not self.sup.paused:
             self.sup.notify_paused()
         if pq.alert:

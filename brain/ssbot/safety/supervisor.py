@@ -54,6 +54,7 @@ the support unknown) with h >= 3; RED any trigger. Triggers (§3.7.4):
   Q8 progress watchdog (hook)                                                 -> pause, diagnose, alert
   Q9 capture lost or PERMADEATH (hook)                                        -> stop all input, alert
   P1 planning that needs > 3 ms only in GREEN outside A/B encounters, or in GREEN inside a registered safe window.
+  QF a fault injected by the pause stress test (Supervisor.inject)              -> PAUSE_PENDING, quit
 Q7 is the active input sink's focus guard (inputd under SendInput / Pico); under OracleInjectSink (TRAIN, 4-6
 instances, at most one focused) Application.isFocused says nothing, so input_from_state ignores STATE "focus" unless
 foreground_sink is set.
@@ -92,7 +93,7 @@ QUIT, DIAGNOSE, SELF_CHECK = "QUIT", "DIAGNOSE", "SELF_CHECK"     # what to do o
 _ON_PAUSED_RANK = {None: 0, SELF_CHECK: 1, DIAGNOSE: 2, QUIT: 3}
 RESUME_SELF_CHECK, RESUME_EVADE_EXIT = "self_check", "evade_exit"   # notify_resumed reasons
 
-QUIT_TRIGGERS = ("Q1", "Q2", "Q3", "Q6")
+QUIT_TRIGGERS = ("Q1", "Q2", "Q3", "Q6", "QF")   # QF: a fault injected by the pause stress test (inject)
 UNKNOWN_SOURCE = "unknown support"
 NOTHING: frozenset[Prim] = frozenset()
 
@@ -322,6 +323,12 @@ class Supervisor:
         self.hero: _Hero | None = None
         self.never_seen_s = 0.0
         self.reasons_latched: list[str] = []
+        self.injected: list[tuple[str, str]] = []
+
+    def inject(self, tid: str = "QF", why: str = "injected fault") -> None:
+        """Fire trigger `tid` on the next step (the pause stress test, DESIGN §3.7.5 G1 fault injection: a quit
+        trigger at a chosen frame, with no damage, so the pause loop runs from any moment of the fight)."""
+        self.injected.append((tid, why))
 
     def notify_paused(self) -> None:
         """The pause loop confirmed the pause (PAUSE_MENU seen)."""
@@ -416,6 +423,8 @@ class Supervisor:
         for hook in cfg.hooks:
             for tid in hook(inp) or ():
                 out.append((tid, f"hook {getattr(hook, '__name__', 'hook')}"))
+        out.extend(self.injected)
+        self.injected = []
         return out
 
     def _arm(self, on_paused: str) -> None:

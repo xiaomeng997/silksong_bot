@@ -437,7 +437,8 @@ class PlannerPolicy:
         unpred = self._unpredicted(raw, fo)
         clear = self._forced_clear_f(res, fcast, S0, len(prefix)) if res.forced_risk else None
         self.last_clear_f = clear
-        r = self.sc.step(s, plan_s=res.S, forced_risk=res.forced_risk, unpredicted_hits=unpred, p_death=res.P,
+        r = self.sc.step(s, inflight=self._inflight(s, f), plan_s=res.S, forced_risk=res.forced_risk,
+                         unpredicted_hits=unpred, p_death=res.P,
                          forced_clear_s=None if clear is None else clear * self.params.frame_time)
         self.decision = r.decision
         self.pause_owned = self.sc.pq is not None
@@ -462,6 +463,14 @@ class PlannerPolicy:
         self._log(s, f, fo, ws, fcast, prefs, res, r, unpred)
         return int(mask)
 
+    def _inflight(self, s: dict, f: int) -> list[int]:
+        """The masks sent but not applied yet before f + 2, the frame this tick's mask is for: from the frame after
+        the last ACTION the oracle applied (STATE act.target; an ACTION that missed its frame is still pending) to
+        f + 1 (the menu key guard replays the key path through them)."""
+        tgt = (s.get("act") or {}).get("target")
+        f0 = f + 1 if not isinstance(tgt, int) or tgt < f - 4 else min(tgt + 1, f + 1)
+        return [self.sent.get(fr, 0) for fr in range(f0, f + 2) if fr in self.sent]
+
     def _pause_tick(self, s: dict, f: int, fo: int, ws, raw: dict, t0: float) -> int:
         """The pause machine owns the keys (PAUSE_PENDING onwards; DESIGN §3.7.5): its keys replace the planner's
         whole mask, so the tactics and the planner are not ticked (3-30 ms a tick in the live runs, all of it
@@ -471,7 +480,7 @@ class PlannerPolicy:
         restarts the planner without the plan carried from before the pause (the keys sent meanwhile were the
         machine's)."""
         unpred = self._unpredicted(raw, fo)
-        r = self.sc.step(s, plan_s=None, forced_risk=False, unpredicted_hits=unpred)
+        r = self.sc.step(s, inflight=self._inflight(s, f), plan_s=None, forced_risk=False, unpredicted_hits=unpred)
         self.decision = r.decision
         self.pause_owned = self.sc.pq is not None
         mask = 0 if r.mask is None else int(r.mask)     # never the planner's: its last plan is from before the pause
@@ -574,7 +583,7 @@ class PlannerPolicy:
     def _real_quit_step(self, s: dict, f: int) -> int:
         """A confirmed pause in a real-quit episode: only the pause machine acts (menus, the exit prompt, the
         quit to the main menu); the oracle's own menu export records what each Submit landed on."""
-        r = self.sc.step(s)
+        r = self.sc.step(s, inflight=self._inflight(s, f))
         mask = int(r.mask or 0)
         menu = s.get("menu") or {}
         g = s.get("game") or {}
@@ -605,7 +614,8 @@ class PlannerPolicy:
         out = dict(self.rq)
         if pq is not None:
             out.update(outcome=pq.outcome, presses=pq.presses, false_cues=pq.false_cues, nav_flips=pq.nav_flips,
-                       unexpected_unpauses=pq.unexpected_unpauses,
+                       unexpected_unpauses=pq.unexpected_unpauses, key_waits=pq.key_waits,
+                       key_waits_expired=pq.key_waits_expired,
                        pause_latency_s=None if pq.t_confirm is None or pq.t_start is None
                        else round(pq.t_confirm - pq.t_start, 3),
                        steps=[[round(t - (pq.t_start or 0.0), 3), k, d] for t, k, d in pq.log
