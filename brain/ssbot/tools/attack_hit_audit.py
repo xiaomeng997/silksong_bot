@@ -15,6 +15,12 @@ ceil(t_on * 60) .. ceil(t_off * 60), widened by --slack frames each way. Contact
 enabled collider of a living, visible entity with a health manager (not the hero's own). Hit: a "hit" event whose
 src is one of the slot's damagers, from the swing's first frame to its last active frame + --slack + 2. Confusion
 per slot (TP contact and hit, FP contact only, FN hit only, TN neither) and contact frame minus hit frame.
+
+A hit on the hero ends the swing: HeroController.TakeDamage cancels the attack (CancelAttack), so a "damage" event (or
+a blocked-lethal "catastrophe" of cause damage) at swing frame k_d leaves only the frames before k_d to make contact,
+and a swing hit before its first active frame never swings (Bell Beast Reaper data 20261002_225836, slack 0: all 22
+normal false positives of the first audit had the hero hit at k = 1..5, no true positive before k = 6). Such swings
+are counted per slot as "cancelled" (and "cancelled_before_active" when no active frame was left).
 """
 from __future__ import annotations
 
@@ -91,10 +97,34 @@ def swings(S: list[dict], names: list[str]) -> list[tuple[int, str]]:
     return out
 
 
+def hero_hit(s: dict) -> bool:
+    """The hero took damage in this frame (TakeDamage ran: a "damage" event, or a lethal one LethalBlock stopped)."""
+    for e in s.get("ev") or ():
+        k = e.get("k")
+        if k == "damage" or (k == "catastrophe" and (e.get("d") or {}).get("cause") == "damage"):
+            return True
+    return False
+
+
+def _contact(s: dict, tab, slot: str) -> bool:
+    """The slot's polygon at the recorded hero box meets an enemy collider in this frame."""
+    h = s.get("hero") or {}
+    if not h.get("box"):
+        return False
+    tg = _targets(s)
+    if tg is None:
+        return False
+    bx = h["box"]
+    face = 1 if (h.get("facing") or 1) >= 0 else -1
+    return bool(tab.meets(slot, 0.5 * (bx[0] + bx[2]), 0.5 * (bx[1] + bx[3]), face, tg[0], tg[1]))
+
+
 def audit(states: list[dict], tab, names: list[str], slack: int) -> dict:
     conf: dict[str, Counter] = defaultdict(Counter)
     lead: dict[str, list] = defaultdict(list)
     hit_k: dict[str, list] = defaultdict(list)
+    cancelled: dict[str, Counter] = defaultdict(Counter)
+    hurt = np.array([hero_hit(s) for s in states], dtype=bool)
     for i0, slot in swings(states, names):
         if slot not in tab:
             continue
@@ -107,24 +137,19 @@ def audit(states: list[dict], tab, names: list[str], slack: int) -> dict:
         srcs = set(sh.src.split("|"))
         hk = next((k for k in range(0, k1 + 3) if i0 + k < len(states) for e in states[i0 + k].get("ev") or ()
                    if e.get("k") == "hit" and (e.get("d") or {}).get("src") in srcs), None)
-        first = None
-        for k in range(k0, k1 + 1):
-            if i0 + k >= len(states):
-                break
-            s = states[i0 + k]
-            h = s.get("hero") or {}
-            if not h.get("box"):
-                continue
-            tg = _targets(s)
-            if tg is None:
-                continue
-            bx = h["box"]
-            cx, cy = 0.5 * (bx[0] + bx[2]), 0.5 * (bx[1] + bx[3])
-            face = 1 if (h.get("facing") or 1) >= 0 else -1
-            if tab.meets(slot, cx, cy, face, tg[0], tg[1]):
-                first = k
-                break
+        kd = next((k for k in range(0, k1 + 1) if i0 + k < len(states) and hurt[i0 + k]), None)
+        if kd is not None:
+            cancelled[slot]["cancelled"] += 1
+            cancelled[slot]["cancelled_before_active"] += int(kd <= k0)
+            k1 = kd - 1
+        first = next((k for k in range(k0, k1 + 1) if i0 + k < len(states)
+                      and _contact(states[i0 + k], tab, slot)), None)
         pred, act = first is not None, hk is not None
+        if (kd is not None and first is None and kd >= k0 and i0 + kd < len(states)
+                and _contact(states[i0 + kd], tab, slot)):
+            # first contact in the very frame the hero is hit: which of the two the step handles first decides
+            cancelled[slot]["contact_on_damage_frame"] += 1
+            cancelled[slot]["contact_on_damage_frame_hit"] += int(act)
         conf[slot]["TP" if pred and act else "FP" if pred else "FN" if act else "TN"] += 1
         if pred and act:
             lead[slot].append(first - hk)
@@ -132,7 +157,8 @@ def audit(states: list[dict], tab, names: list[str], slack: int) -> dict:
             hit_k[slot].append(hk)
     return {"confusion": {k: dict(v) for k, v in conf.items()},
             "contact_minus_hit": {k: dict(Counter(v)) for k, v in lead.items()},
-            "hit_frame_k": {k: dict(Counter(v)) for k, v in hit_k.items()}}
+            "hit_frame_k": {k: dict(Counter(v)) for k, v in hit_k.items()},
+            "cancelled": {k: dict(v) for k, v in cancelled.items()}}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -151,7 +177,7 @@ def main(argv: list[str] | None = None) -> int:
     tab = AttackTable.load(a.crest)
     names = cstate_names()
     total: dict = {"confusion": defaultdict(Counter), "contact_minus_hit": defaultdict(Counter),
-                   "hit_frame_k": defaultdict(Counter)}
+                   "hit_frame_k": defaultdict(Counter), "cancelled": defaultdict(Counter)}
     n = 0
     for path, f0, f1 in recordings(a.paths, [int(x) for x in a.instances.split(",")], a.episodes):
         S = list(RecordingReader(path).states(f0, f1, keys=("hero", "ents", "ev")))
