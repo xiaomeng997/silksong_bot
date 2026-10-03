@@ -37,6 +37,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--threads", type=int, default=4)
     ap.add_argument("--n", type=int, default=512)
     ap.add_argument("--T", type=int, default=48)
+    ap.add_argument("--lanes", default="nominal,bounds", help="comma-separated lane sets (kinematics.VARIANT_SETS)")
     a = ap.parse_args(argv)
     from ssbot.knowledge import kinematics as km
     from ssbot.probes.kin_excite_forum import forum_params
@@ -47,7 +48,7 @@ def main(argv: list[str] | None = None) -> int:
     rng = np.random.default_rng(98000)
     out = {}
     for name, p in (("forum", fp), ("hunter", hp)):
-        for lanes in ("nominal", "bounds"):
+        for lanes in [x.strip() for x in a.lanes.split(",") if x.strip()]:
             ts = []
             for r in range(a.reps + 5):
                 x = 2.265 + rng.uniform(0, 8)
@@ -58,7 +59,7 @@ def main(argv: list[str] | None = None) -> int:
                     S[km.PX] = S[km.QX] = S[km.SX] = 2.265
                 m = masks(rng, a.n, a.T, -1)
                 t0 = time.perf_counter()
-                km.rollout(S, m, p, terr, variants=None if lanes == "nominal" else "bounds", threads=a.threads)
+                km.rollout(S, m, p, terr, variants=None if lanes == "nominal" else lanes, threads=a.threads)
                 dt = (time.perf_counter() - t0) * 1e3
                 if r >= 5:
                     ts.append(dt)
