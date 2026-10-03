@@ -247,6 +247,34 @@ def wall_near(px, py, side, reach, P, TT):
     return False
 
 
+@njit(cache=True, inline="always", error_model="numpy")
+def wall_gaps(px, py, reach, P, TT):
+    """(gap to the nearest wall face on the left, on the right) within `reach` of the box sides whose y span holds
+    the box's centre or bottom height (np.inf: none); one pass over the walls for both sides."""
+    gl = np.inf
+    gr = np.inf
+    if TT[1] == 0:
+        return gl, gr
+    hw = P[P_HW]
+    ymid = py + 0.5 * (P[P_HEAD] - P[P_FOOT])
+    ybot = py - P[P_FOOT]
+    b0, b1 = _buckets(px - hw - reach - TOL, px + hw + reach + TOL, TT)
+    st, ids, ov = np.int64(TT[7]), np.int64(TT[8]), np.int64(TT[9])
+    for b in range(b0, b1 + 1):
+        for q in range(np.int64(TT[st + b]), np.int64(TT[st + b + 1])):
+            j = ov + 3 * np.int64(TT[ids + q])
+            if not ((TT[j + 1] - EPS <= ymid <= TT[j + 2] + EPS) or (TT[j + 1] - EPS <= ybot <= TT[j + 2] + EPS)):
+                continue
+            s = TT[j]
+            g = (px - hw) - s
+            if -TOL <= g <= reach and g < gl:
+                gl = g
+            g = s - (px + hw)
+            if -TOL <= g <= reach and g < gr:
+                gr = g
+    return gl, gr
+
+
 @njit(cache=True, error_model="numpy")
 def hray(x0, y0, side, length, TT):
     """A horizontal ray from (x0, y0) of `length` towards `side` meets a wall segment."""
@@ -286,18 +314,44 @@ def facing_near_wall(x0, y0, face, length, TT):
     """IsFacingNearWall: the ray of `length` from hero.pos along the facing meets a wall, and so do the rays 0.1 u
     apart above and below it over at least 1.5 u in all (each side counted to its first miss, at most 1.4 u;
     float32 sums as the game's loop)."""
-    if not hray(x0, y0, face, length, TT):
+    if TT[1] == 0:
+        return False
+    # the wall segments within reach along the facing, collected once (the 29 rays then test only these)
+    lo = x0 - length if face < 0 else x0
+    hi = x0 if face < 0 else x0 + length
+    b0, b1 = _buckets(lo - 0.02, hi + 0.02, TT)
+    st, ids, ov = np.int64(TT[7]), np.int64(TT[8]), np.int64(TT[9])
+    ya = np.empty(32)
+    yb = np.empty(32)
+    m = 0
+    for b in range(b0, b1 + 1):
+        for q in range(np.int64(TT[st + b]), np.int64(TT[st + b + 1])):
+            j = ov + 3 * np.int64(TT[ids + q])
+            d = face * (TT[j] - x0)
+            if 0.0 <= d <= length and TT[j + 2] >= y0 - 1.5 and TT[j + 1] <= y0 + 1.5 and m < 32:
+                ya[m] = TT[j + 1]
+                yb[m] = TT[j + 2]
+                m += 1
+    if not _covered(ya, yb, m, y0):
         return False
     num = np.float32(0.0)
     k = np.float32(0.1)
-    while k < np.float32(1.5) and hray(x0, y0 + np.float64(k), face, length, TT):
+    while k < np.float32(1.5) and _covered(ya, yb, m, y0 + np.float64(k)):
         num = np.float32(num + np.float32(0.1))
         k = np.float32(k + np.float32(0.1))
     k = np.float32(0.1)
-    while k < np.float32(1.5) and hray(x0, y0 - np.float64(k), face, length, TT):
+    while k < np.float32(1.5) and _covered(ya, yb, m, y0 - np.float64(k)):
         num = np.float32(num + np.float32(0.1))
         k = np.float32(k + np.float32(0.1))
     return not (num < np.float32(1.5))
+
+
+@njit(cache=True, inline="always", error_model="numpy")
+def _covered(ya, yb, m, y):
+    for i in range(m):
+        if ya[i] <= y <= yb[i]:
+            return True
+    return False
 
 
 @njit(cache=True, inline="always", error_model="numpy")
@@ -573,7 +627,7 @@ def finished_dashing(x, P):
         x[SP_X] = x[FACE] * P[P_ASPR_SPEED]
 
 
-@njit(cache=True, error_model="numpy")
+@njit(cache=True, inline="always", error_model="numpy")
 def forum_fixed(x, vx, vy, normal, P, TT):
     """The Forum loadout's part of FixedUpdate before the terminal-velocity clamp and air hang (after the Hunter
     rules' own velocity of this step). Returns (vx, vy)."""
@@ -652,7 +706,7 @@ def forum_fixed(x, vx, vy, normal, P, TT):
     return vx, vy
 
 
-@njit(cache=True, error_model="numpy")
+@njit(cache=True, inline="always", error_model="numpy")
 def forum_contacts(x, landed, P, TT):
     """After the step's move: OnCollisionStay2D's wall flags (only outside no_input: a contact with a wall within
     the skin, or the floor, refreshes them from the 0.1 u rays; no contact at all clears them, as OnCollisionExit),
@@ -660,10 +714,11 @@ def forum_contacts(x, landed, P, TT):
     mode = x[MODE]
     if mode == M_NORMAL or mode == M_DASH or mode == M_HARD_LAND:
         reach = P[P_SKIN] + P[P_W_CONTACT]
-        if x[GROUND] > 0 or wall_near(x[PX], x[PY], -1.0, reach, P, TT) or wall_near(x[PX], x[PY], 1.0, reach, P, TT):
-            if wall_near(x[PX], x[PY], -1.0, P[P_W_TRAY], P, TT):
+        gl, gr = wall_gaps(x[PX], x[PY], max(reach, P[P_W_TRAY]), P, TT)
+        if x[GROUND] > 0 or gl <= reach or gr <= reach:
+            if gl <= P[P_W_TRAY]:
                 x[WTOUCH] = -1.0
-            elif wall_near(x[PX], x[PY], 1.0, P[P_W_TRAY], P, TT):
+            elif gr <= P[P_W_TRAY]:
                 x[WTOUCH] = 1.0
             else:
                 x[WTOUCH] = 0.0
@@ -1004,7 +1059,8 @@ def fixed_step(x, P, TT):
     mode = x[MODE]
     rlq = relinq(mode)
     if ab != 0:
-        vx, vy = forum_fixed(x, vx, vy, mode == M_NORMAL, P, TT)
+        if mode != M_NORMAL or x[WSIDE] != 0 or x[WLOCK] >= 0 or x[WJ_CHAIN] > 0 or x[DQ] >= 0:
+            vx, vy = forum_fixed(x, vx, vy, mode == M_NORMAL, P, TT)
         mode = x[MODE]
         rlq = relinq(mode)
 
@@ -1101,7 +1157,8 @@ def fixed_step(x, P, TT):
     if (lands or land_sp) and not was:
         x[LANDQ] = 1.0
     if ab != 0:
-        forum_contacts(x, lands, P, TT)
+        if (ab & AB_WALL) != 0 or (lands and x[HARD] > 0):
+            forum_contacts(x, lands, P, TT)
 
 
 @njit(cache=True, inline="always", error_model="numpy")
@@ -1289,7 +1346,9 @@ def update(x, mask, ev, dt, udt, P, TT):
     ab = np.int64(P[P_ABIL])
     falling = False
     if ab != 0:
-        falling = forum_fall_check(x, dt, P)
+        falling = x[VY] <= EPS_F and x[GROUND] <= 0
+        if (ab & AB_HARD_LAND) != 0:
+            forum_fall_check(x, dt, P)
         if mode == M_DASH or mode == M_HARD_LAND:
             accept = True                 # hero_state is not no_input: LookForInput reads the move input
 
@@ -1299,7 +1358,8 @@ def update(x, mask, ev, dt, udt, P, TT):
         x[MOVE] = move
         x[JHELD] = 1.0 if jheld else 0.0
         if ab != 0:
-            forum_look_for_input(x, mask, pressed, falling, P, TT)
+            if x[WTOUCH] != 0 or x[WSIDE] != 0 or x[WLOCK] >= 0:
+                forum_look_for_input(x, mask, pressed, falling, P, TT)
         if not jheld:
             if x[VY] > 0 and x[JDSTEPS] >= P[P_JSTEPS_MIN]:
                 x[VY] = x[VY] * P[P_REL]
@@ -1333,7 +1393,8 @@ def update(x, mask, ev, dt, udt, P, TT):
 
     used = False
     if ab != 0:
-        used = forum_jump_press(x, mask, pressed, P, TT)
+        if (pressed & B_JUMP) != 0 or x[WJQ] > 0:
+            used = forum_jump_press(x, mask, pressed, P, TT)
     normal = x[MODE] == M_NORMAL
     ground = x[GROUND] > 0
     can_jump = normal and x[JUMPING] <= 0 and x[BOUNCE] < 0 and x[DS_REC] < 0 and (ground or x[LEDGE] > 0)
@@ -1343,7 +1404,8 @@ def update(x, mask, ev, dt, udt, P, TT):
     if jp and can_jump:
         hero_jump(x, P)
     if ab != 0:
-        forum_dash_input(x, mask, pressed, P)
+        if (ab & AB_DASH) != 0 and ((mask & B_DASH) != 0 or x[DQ] >= 0):
+            forum_dash_input(x, mask, pressed, P)
         normal = x[MODE] == M_NORMAL
     downish = (mask & B_DOWN) != 0 and (mask & B_UP) == 0
     can_down = x[BOUNCE] < 0 and x[DS_REC] < 0
@@ -1411,7 +1473,9 @@ def update(x, mask, ev, dt, udt, P, TT):
             x[VX] = 0.0
             x[VY] = 0.0
     if ab != 0:
-        forum_after_queue(x, mask, pressed, mode0, dt, P, TT)
+        if (x[WSIDE] != 0 or x[WSLASH] > 0 or x[WSTICK] > 0 or x[CLING_CD] > 0 or x[DASH_CD] > 0 or x[GL_CD] > 0
+                or x[MODE] >= M_GLIDE):
+            forum_after_queue(x, mask, pressed, mode0, dt, P, TT)
 
     # timers
     if x[ATK_CD] > 0:
