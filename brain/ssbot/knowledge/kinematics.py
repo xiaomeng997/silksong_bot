@@ -445,6 +445,8 @@ class HeroParams:
     # frame's own dt, so in ATK_T (zero in the attack frame) the collider is on at a physics step once ATK_T reaches
     # event / 24 - one frame: normal / alt 2/24 .. 5/24, up 2/24 .. 6/24 (Reaper clips, crests.json); a contact
     # starts in the first step after (live: recoil 5 to 7 frames after the swing, kn_excite_forum s98000 / A)
+    # sloped edges (AB_SLOPES): a box closer than this to one makes a contact (it then rests at the skin)
+    slope_contact: float = 0.005
     thunk_on: float = 0.0666667
     thunk_off: float = 0.1916667
     thunk_off_up: float = 0.2333333
@@ -533,7 +535,7 @@ class HeroParams:
               "scr_force_held", "scr_end_vy", "scr_end_decel", "scr_end_t", "scr_roof_ray", "scr_roof_t",
               "scr_detach", "rpr_thunk_decel", "rpr_thunk_reach0", "rpr_thunk_reach1", "rpr_thunk_reach_t",
               "rpr_thunk_lobe0", "rpr_thunk_lobe1", "sprint_shift", "sprint_grace", "skid_decel_move",
-              "skid_min_speed", "air_fall_clamp_lag", "thunk_on", "thunk_off", "thunk_off_up")
+              "skid_min_speed", "air_fall_clamp_lag", "thunk_on", "thunk_off", "thunk_off_up", "slope_contact")
 
     def vector(self) -> np.ndarray:
         """The scalar parameters (P_* order); with AB_THUNK a tail from P_THK: per THUNK_SLOTS slot the vertex count
@@ -626,7 +628,8 @@ class HeroParams:
  P_SCR_ANTIC, P_SCR_SPEED, P_SCR_FORCE, P_SCR_FORCE_H, P_SCR_END_VY, P_SCR_END_DEC, P_SCR_END_T, P_SCR_ROOF_RAY,
  P_SCR_ROOF_T, P_SCR_DETACH, P_RPR_TDEC, P_RPR_TREACH0, P_RPR_TREACH1, P_RPR_TREACH_T, P_RPR_TLOBE0, P_RPR_TLOBE1,
  P_SPR_SHIFT, P_SPR_GRACE, P_SKID_DEC_MV, P_SKID_VMIN, P_AFC_LAG, P_THK_ON, P_THK_OFF, P_THK_OFF_UP,
- NP) = range(151)
+ P_SLOPE_CONTACT,
+ NP) = range(152)
 assert NP == len(HeroParams.VECTOR)
 P_THK = NP           # AB_THUNK: the slash polygons' tail (HeroParams.vector)
 THK_STRIDE = 1 + 2 * THUNK_MAXV

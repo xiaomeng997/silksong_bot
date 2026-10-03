@@ -208,6 +208,9 @@ HAND_SET = {
     "thunk_on": "Reaper slash clips' first animation event 2/24 s (crests.json), minus the attack frame's own dt (the clip "
                 "time counts it): the collider is on from the first physics step with ATK_T >= 4/60; live: recoil "
                 "onsets 5 / 6 / 7 frames after the swing in s98000 + A, as the frame's steps fall (thunk check)",
+    "slope_contact": "Box2D's linear slop 0.005: a box this close to a sloped edge makes a contact; on the fit runs "
+                     "(s98000 + A + C, bounds_lo) slope windows 91.6 / 92.1 / 92.1 % at 0.003 / 0.005 / 0.007, 0.015 "
+                     "(the floor skin) one step early (s98200 f761657: 0.0095 u from the slope, no contact yet)",
     "thunk_off": "second animation event 5/24 s (normal / alt / wall) minus one frame",
     "thunk_off_up": "second animation event 6/24 s (up) minus one frame",
     "thunk_polys": "knowledge/1.0.30000/attacks/reaper.json normal / alt / up polygons (HeroParams.with_slash_polys; the "

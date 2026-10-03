@@ -47,7 +47,7 @@ from ssbot.knowledge.kinematics import (  # Forum loadout (abilities)
     P_SCR_ROOF_RAY, P_SCR_ROOF_T, P_SCR_DETACH, P_SPR_SHIFT, P_SPR_GRACE, P_SKID_DEC_MV, P_SKID_VMIN, P_AFC_LAG, P_RPR_TDEC,
     P_RPR_TREACH0, P_RPR_TREACH1, P_RPR_TREACH_T, P_RPR_TLOBE0,
     P_RPR_TLOBE1, AB_THUNK, AB_SLOPES, ATK_KIND, ALT, ALT_T, ATK_PDIR, P_THK_ON, P_THK_OFF, P_THK_OFF_UP, P_THK,
-    THK_STRIDE, ALT_ATTACK_RESET)
+    THK_STRIDE, ALT_ATTACK_RESET, P_SLOPE_CONTACT)
 
 # world freeze presets in start order (kinematics.WF_ORDER): event bit, rampDown, wait, rampUp, target
 _WF = np.array([[float(b), *FREEZE_PRESETS[b]] for b in WF_ORDER])
@@ -452,84 +452,123 @@ def slash_thunk(px, py, face, kind, P, TT):
 
 
 @njit(cache=True, error_model="numpy")
+def _slope_axis(cx, cy, c0x, c0y, ax, ay, bx, by, hw, hh, skin):
+    """Box (centre c, half sizes hw, hh) against one sloped edge, as Box2D's polygon-edge manifold picks its reference
+    face: the separating axis with the least penetration (into the box inflated by the skin) among the edge normal
+    (oriented to the side c0 is on) and the box's x / y axes (an edge end poking into a box face), the edge normal
+    preferred within 1 mm. Returns (penetration, axis x, axis y): the direction to push the box; penetration <= 0
+    when they are apart."""
+    ex = bx - ax
+    ey = by - ay
+    ln = math.sqrt(ex * ex + ey * ey)
+    if ln < 1e-9:
+        return 0.0, 0.0, 0.0
+    enx = -ey / ln
+    eny = ex / ln
+    if (c0x - ax) * enx + (c0y - ay) * eny < 0:
+        enx = -enx
+        eny = -eny
+    pen_n = skin - ((cx - ax) * enx + (cy - ay) * eny - (abs(enx) * hw + abs(eny) * hh))
+    if pen_n <= 0:
+        return 0.0, 0.0, 0.0
+    if c0x >= 0.5 * (ax + bx):
+        pen_x = max(ax, bx) - (cx - hw) + skin
+        sx = 1.0
+    else:
+        pen_x = (cx + hw) - min(ax, bx) + skin
+        sx = -1.0
+    if c0y >= 0.5 * (ay + by):
+        pen_y = max(ay, by) - (cy - hh) + skin
+        sy = 1.0
+    else:
+        pen_y = (cy + hh) - min(ay, by) + skin
+        sy = -1.0
+    if pen_x <= 0 or pen_y <= 0:
+        return 0.0, 0.0, 0.0
+    if pen_n <= pen_x + 1e-3 and pen_n <= pen_y + 1e-3:
+        return pen_n, enx, eny
+    if pen_y <= pen_x:
+        return pen_y, 0.0, sy
+    return pen_x, sx, 0.0
+
+
+@njit(cache=True, error_model="numpy")
+def slope_project(px, py, vx, vy, P, TT):
+    """The start of a physics step: a contact with a sloped edge the box already rests against (within the skin and
+    Box2D's 5 mm slop) takes the velocity's component into the surface away before the move, so the step slides
+    along it (the axis-aligned moves would otherwise meet a wall end the slide passes under: s98200 f770141, sliding
+    down Hang_12's 45 deg ceiling under a tile corner 7 mm below it). Returns (vx, vy)."""
+    if TT[10] == 0:
+        return vx, vy
+    hw = P[P_HW]
+    hh = 0.5 * (P[P_HEAD] + P[P_FOOT])
+    cx = px
+    cy = py + 0.5 * (P[P_HEAD] - P[P_FOOT])
+    reach = P[P_SKIN] + P[P_SLOPE_CONTACT]
+    st, ids, ov = np.int64(TT[12]), np.int64(TT[13]), np.int64(TT[11])
+    b0, b1 = _buckets(cx - hw - 0.05, cx + hw + 0.05, TT)
+    for b in range(b0, b1 + 1):
+        for q in range(np.int64(TT[st + b]), np.int64(TT[st + b + 1])):
+            j = ov + 4 * np.int64(TT[ids + q])
+            ax, ay, bx, by = TT[j], TT[j + 1], TT[j + 2], TT[j + 3]
+            if max(ax, bx) < cx - hw - reach or min(ax, bx) > cx + hw + reach or \
+                    max(ay, by) < cy - hh - reach or min(ay, by) > cy + hh + reach:
+                continue
+            pen, ux, uy = _slope_axis(cx, cy, cx, cy, ax, ay, bx, by, hw, hh, reach)
+            if pen <= 0:
+                continue
+            vn = vx * ux + vy * uy
+            if vn < 0:
+                vx -= vn * ux
+                vy -= vn * uy
+    return vx, vy
+
+
+@njit(cache=True, error_model="numpy")
 def slope_push(x0, y0, nx, ny, vx, vy, P, TT):
-    """Collide the box (moved from body position (x0, y0) to (nx, ny) by the axis-aligned rules) with the sloped
-    terrain edges (Terrain2D.slopes), as Box2D's polygon-edge contact does: per edge the separating axis with the
-    least penetration among the edge normal (oriented to the side the step started on) and the box's x / y axes
-    (an edge end poking into a box face), preferring the edge normal within 1 mm; the box is pushed out to the skin
-    and the velocity loses its component into the surface (no friction). Two passes over the edges in reach.
-    Returns (nx, ny, vx, vy, contact: 1 roof (a normal pointing down at least 60 deg), 2 floor, 0 none or a side)."""
+    """After the step's axis-aligned move from body position (x0, y0) to (nx, ny): a box that went into a sloped
+    terrain edge (closer than P_SLOPE_CONTACT) stops at it, out to the skin, and loses the velocity component into the
+    surface in the same step (Box2D's time-of-impact sub-step solves the contact: live s98200 f755635, a jump into
+    Hang_12's ceiling vertex stopped 0.014 u under it with vy 0; f761658, a jump into its ceiling slope went from
+    (8.25, 0.60) after gravity to (7.11, -2.56), the projection on the normal (-0.339, -0.941), no friction; the
+    step before, 0.0095 u from the slope, it had not touched). Two passes over the edges in reach. Returns
+    (nx, ny, vx, vy, contact: 1 a roof, its normal pointing down 60 deg or more (OnCollisionEnter2D's side "top"),
+    2 a floor, 0 none or a side)."""
     if TT[10] == 0:
         return nx, ny, vx, vy, 0
     hw = P[P_HW]
     hh = 0.5 * (P[P_HEAD] + P[P_FOOT])
     off = 0.5 * (P[P_HEAD] - P[P_FOOT])
     skin = P[P_SKIN]
+    need = skin - P[P_SLOPE_CONTACT]      # penetration into the skin-inflated box that makes a contact
     c0x = x0
     c0y = y0 + off
     contact = 0
     st, ids, ov = np.int64(TT[12]), np.int64(TT[13]), np.int64(TT[11])
     for _ in range(2):
-        cx = nx
-        cy = ny + off
-        b0, b1 = _buckets(cx - hw - 0.05, cx + hw + 0.05, TT)
+        b0, b1 = _buckets(nx - hw - 0.05, nx + hw + 0.05, TT)
         for b in range(b0, b1 + 1):
             for q in range(np.int64(TT[st + b]), np.int64(TT[st + b + 1])):
                 j = ov + 4 * np.int64(TT[ids + q])
                 ax, ay, bx, by = TT[j], TT[j + 1], TT[j + 2], TT[j + 3]
                 cx = nx
                 cy = ny + off
-                if max(ax, bx) < cx - hw - skin or min(ax, bx) > cx + hw + skin or                         max(ay, by) < cy - hh - skin or min(ay, by) > cy + hh + skin:
+                if max(ax, bx) < cx - hw - skin or min(ax, bx) > cx + hw + skin or \
+                        max(ay, by) < cy - hh - skin or min(ay, by) > cy + hh + skin:
                     continue
-                ex = bx - ax
-                ey = by - ay
-                ln = math.sqrt(ex * ex + ey * ey)
-                if ln < 1e-9:
+                pen, ux, uy = _slope_axis(cx, cy, c0x, c0y, ax, ay, bx, by, hw, hh, skin)
+                if pen <= need or pen <= 0:
                     continue
-                enx = -ey / ln
-                eny = ex / ln
-                if (c0x - ax) * enx + (c0y - ay) * eny < 0:
-                    enx = -enx
-                    eny = -eny
-                pen_n = skin - ((cx - ax) * enx + (cy - ay) * eny - (abs(enx) * hw + abs(eny) * hh))
-                if pen_n <= 0:
-                    continue
-                # the box axes: penetration of the edge's extent into the box (inflated by the skin) on the side the
-                # box sits
-                if c0x >= 0.5 * (ax + bx):
-                    pen_x = max(ax, bx) - (cx - hw) + skin
-                    sx = 1.0
-                else:
-                    pen_x = (cx + hw) - min(ax, bx) + skin
-                    sx = -1.0
-                if c0y >= 0.5 * (ay + by):
-                    pen_y = max(ay, by) - (cy - hh) + skin
-                    sy = 1.0
-                else:
-                    pen_y = (cy + hh) - min(ay, by) + skin
-                    sy = -1.0
-                if pen_x <= 0 or pen_y <= 0:
-                    continue
-                if pen_n <= pen_x + 1e-3 and pen_n <= pen_y + 1e-3:
-                    nx += enx * pen_n
-                    ny += eny * pen_n
-                    vn = vx * enx + vy * eny
-                    if vn < 0:
-                        vx -= vn * enx
-                        vy -= vn * eny
-                    if eny <= -0.5:
-                        contact = 1
-                    elif eny >= 0.5:
-                        contact = 2
-                elif pen_y <= pen_x:
-                    ny += sy * pen_y
-                    if vy * sy < 0:
-                        vy = 0.0
-                    contact = 1 if sy < 0 else 2
-                else:
-                    nx += sx * pen_x
-                    if vx * sx < 0:
-                        vx = 0.0
+                nx += ux * pen
+                ny += uy * pen
+                vn = vx * ux + vy * uy
+                if vn < 0:
+                    vx -= vn * ux
+                    vy -= vn * uy
+                if uy <= -0.5:
+                    contact = 1
+                elif uy >= 0.5:
+                    contact = 2
     return nx, ny, vx, vy, contact
 
 
@@ -1556,6 +1595,8 @@ def fixed_step(x, P, TT):
         vx = shove / fdt
         vy = 0.0
     vy = vy - P[P_G] * x[GS] * fdt
+    if (ab & AB_SLOPES) != 0:
+        vx, vy = slope_project(x[PX], x[PY], vx, vy, P, TT)
     pend = x[TOUCH] > 0
     # (the reference always computes it; it only matters in these cases)
     under = (pend or x[GROUND] > 0 or x[MODE] == M_DS_SPIKE) and on_ground(x[PX], x[PY], hw, skin, foot, TT)
