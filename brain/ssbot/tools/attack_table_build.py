@@ -14,9 +14,16 @@ Downspike component swung by the Crest Attacks FSM; dash stab; charge; taunt) ge
 and are marked "timing": "unmeasured" until live samples exist.
 
 From live samples (one JSON line per sampled frame of a swing: {slot, k (rendered frames since the press reached the
-game), enabled: {damager path: bool}, hero: {box, facing}, damagers: [{path, enabled, polys (world)}]}): the frames
-each damager was enabled (frames), and the polygons as seen while enabled (the median over samples of each vertex,
-relative to the sampled hero box centre), which replace the dump's where they disagree by more than 0.02 u.
+game), enabled: {damager path: bool}, hero: {pos, box, facing}, damagers: [{path, enabled, polys (world)}]}): the
+frames each damager was enabled (frames), and the polygons as seen while enabled (the median over samples of each
+vertex), which replace the dump's where they disagree by more than 0.02 u. Frames: the exported polygon vertices come
+from the damager's transform (localToWorldMatrix), which follows the hero's interpolated (rendered) transform, while
+hero.box is the physics collider (HeroController.Bounds, the body's own position); during motion the two differ by
+the interpolation lag (s98010 / s98400 / s98410: a sample's offset from the dump polygon was -0.6 x the box's
+per-frame displacement, corr -0.92, up to 0.41 u; the shapes themselves rigid). So a sample is placed relative to
+the rendered hero.pos plus the collider's own offset from it (HeroParams: head 0.5262 above, foot 1.5527 below the
+transform, centre 0.5133 below): the table's frame, the hero collider centre of a body at rest, where the planner puts
+it. ents outlines (enemy colliders) are exported the same way, from rendered transforms.
 """
 from __future__ import annotations
 
@@ -130,6 +137,17 @@ def _on(d: dict) -> bool:
     return bool(d.get("enabled")) and d.get("active", True) is not False
 
 
+def sample_centre(hero: dict) -> tuple[float, float]:
+    """The hero collider centre in the frame of the exported polygons: the rendered transform (hero.pos) plus the
+    collider's offset from it; the physics box (hero.box) when the sample has no pos."""
+    from ssbot.knowledge.kinematics import HeroParams
+    if hero.get("pos"):
+        p = HeroParams()
+        return float(hero["pos"][0]), float(hero["pos"][1]) + 0.5 * (p.head - p.foot)
+    b = hero["box"]
+    return 0.5 * (b[0] + b[2]), 0.5 * (b[1] + b[3])
+
+
 def apply_live(tab: AttackTable, lines: list[dict]) -> list[str]:
     """Fold live per-frame samples into the table: frames each slot's damager was enabled, polygons while enabled."""
     by_slot: dict[str, list[dict]] = defaultdict(list)
@@ -154,8 +172,7 @@ def apply_live(tab: AttackTable, lines: list[dict]) -> list[str]:
         on = sorted({r["k"] for r in rows if any(_on(d) for d in r.get("damagers") or ())})
         polys = defaultdict(list)
         for r in rows:
-            b = r["hero"]["box"]
-            cx, cy = 0.5 * (b[0] + b[2]), 0.5 * (b[1] + b[3])
+            cx, cy = sample_centre(r["hero"])
             f = 1 if r["hero"]["facing"] >= 0 else -1
             for d in r.get("damagers") or ():
                 if _on(d) and "Knockback" not in d["path"]:

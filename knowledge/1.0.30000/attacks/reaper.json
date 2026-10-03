@@ -120,31 +120,31 @@
     [
      [
       -2.1197,
-      -0.6062
+      -0.6303
      ],
      [
-      -1.9127,
-      1.2909
+      -1.9126,
+      1.2667
      ],
      [
       -1.2979,
-      2.4646
+      2.4404
      ],
      [
       -0.2341,
-      3.4665
+      3.4423
      ],
      [
       0.8108,
-      3.7916
+      3.7675
      ],
      [
       0.4911,
-      2.7078
+      2.6837
      ],
      [
       0.2634,
-      1.0338
+      1.0097
      ]
     ]
    ],
@@ -161,7 +161,7 @@
     -0.5587299999999988,
     3.9503600000000016
    ],
-   "source": "slash.dump; clip UpSlashEffect events [2, 6] at 24 fps; live frames (5, 15) (103 samples, polygon moved 0.024 u)"
+   "source": "slash.dump; clip UpSlashEffect events [2, 6] at 24 fps; live frames (5, 15) (103 samples)"
   },
   "wall": {
    "src": "WallSlash",
