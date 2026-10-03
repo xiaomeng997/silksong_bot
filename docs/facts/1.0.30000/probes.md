@@ -279,3 +279,9 @@
 - **通过**：代码固定在 11b4ca0（工作区 C:\ssbot\live_11b4ca0，numba 已预热），4 实例，每实例 4 线程，随机起点（种子 70000 段、72000 段），`--real-quit 0.2`，oracle 视图。第一段期间另有 3 个开发代理在跑（低优先级），未出现 HARNESS_FAIL。
 - 有效 510 场：**CLEAR 503（98.6 %）**，QUIT 7（全部是挨一下后剩 2 格时 Q6 按规则退出），**WOULD_DIE 0**，STUCK 0。挨打：491 场 0 次、18 场 1 次、1 场 2 次。击杀用时中位数 59 s（45–76 s）。规划 tick 每场 p99 的中位数 12.7 ms。
 - 运行目录：C:\ssbot\data\runs\m2\20261002_190611_BellBeast_eval_planner_oracle（386 场）、20261002_210643_BellBeast_eval_planner_oracle（124 场）。20261002_210607 为空跑（STOP_AGENTS 仍在，combat_run 也认这个停止文件），不计。
+
+## M2：Bell Beast 门槛（模拟最终路径 degraded_dust，代码 4a90331，2026-10-03）
+
+- **通过**：代码固定在 4a90331（工作区 C:\ssbot\live_vv，numba 已预热），实例 0、1，每实例 4 线程，随机起点，`--real-quit 0.2`，视图 degraded_dust（ObservabilityFilter VISION_EQUIVALENT + 噪声 + 2–4 帧延迟 + 可见烟尘前兆；见 m2_vision_view.md）。同期另有 Forum 采集、暂停压力测试和开发代理在跑。
+- 有效 516 场（另 3 场 HARNESS_FAIL 不计）：**CLEAR 487（94.4 %）**，QUIT 29，**WOULD_DIE 0**，未预测命中 0。挨打：490 场 0 次、29 场 1 次。29 次 QUIT 全部是挨一下后 h = 2 时的 Q6（FORCED_RISK）——正是 2026-10-03 你改的规则要改掉的情形（h = 2 不再因 FORCED_RISK 退出，攒丝回血，DESIGN §3.7.4 Q6）。真实退出 6 次全部到主菜单，暂停延迟 p50 0.083 s、最大 0.165 s，0 次选错。击杀用时中位数 93 s（oracle 视图 59 s）；规划 tick 每场 p99 的中位数 14.6 ms。
+- 运行目录：C:\ssbot\data\runs\m2\20261003_053033_BellBeast_eval_planner_degraded_dust（150）、20261003_074533_…（249 有效）、20261003_111705_…（117 有效）。
