@@ -163,6 +163,8 @@ ALPHA_TEST = 0.01             # family-wise level of the decision covariate test
 RUN_CAP, SINCE_CAP = 4, 5     # history covariate levels: run 1..4+, attacks since 0..5+ / never
 HELD_LL_GAIN = 1e-3           # a conditioner is kept only if it lowers the held-out log loss by this (nats)
 N_FOLDS = 2                   # held-out folds of recordings for the residual on unseen instances
+HELDOUT_MISS_MAX = 0.001      # held-out contacts beyond R_FAIL_U above this share: the support is not shown to cover
+                              # unseen instances (validation.support_conservative false)
 HELD_T_BINS = 4               # held-out residual also measured with +-4 bins (67 ms): spatial gap vs timing spread
 N_PERM = 2000
 N_PERM_MAX = 50000
@@ -2167,12 +2169,27 @@ class BehaviourBuilder:
         ho: dict[str, list] = defaultdict(list)
         for (fam, name), items in val["heldout"].items():
             ho[name.split(":")[0]].extend(items)
+        held_rows = {k: _held_row(v, val["radius"]) for k, v in sorted(ho.items())}
+        held_bad = {k: r for k, r in held_rows.items() if k in ("anchor", "self")
+                    and (not r["n"] or r["beyond_r_fail"] > HELDOUT_MISS_MAX * r["n"])}
+        conservative = ok and "anchor" in held_rows and not held_bad
         return {
-            "heldout": {"desc": f"{N_FOLDS} folds by recording: contacts against the other fold's logged occupancy; "
+            "support_conservative": conservative,
+            "support_note": ("in sample every contact is covered and held out (other fold) at most "
+                             f"{HELDOUT_MISS_MAX:.1%} of the anchor / self contacts lie beyond {R_FAIL_U} u"
+                             if conservative else
+                             "NOT shown to cover unseen instances: " + "; ".join(
+                                 ([] if ok else ["in-sample validation failed"]) +
+                                 ([] if "anchor" in held_rows else ["no held-out anchor contacts"]) +
+                                 [f"held out {k}: {r['beyond_r_fail']} of {r['n']} contacts beyond {R_FAIL_U} u"
+                                  for k, r in held_bad.items()]) +
+                             " - inflate it or keep it out of the planner until more data closes this"),
+            "heldout": {"desc": f"{N_FOLDS} folds (by recording; by fight for a gauntlet): contacts against the "
+                                f"other fold's logged occupancy; "
                                 f"within_radius = inside the support radius of the full build; "
                                 f"within_radius_t{HELD_T_BINS} = also with +-{HELD_T_BINS} bins of timing slack; "
                                 f"state / state_world_all pool the per-state sets",
-                        **{k: _held_row(v, val["radius"]) for k, v in sorted(ho.items())}},
+                        **held_rows},
             "ok": ok, "r_fail_u": R_FAIL_U, "lag_frames": LAG_F,
             "multi_hit_follow_ups": {"desc": f"hits of a connected multi-hit (multi_wounder) whose collider was "
                                              f"exported within {MW_FOLLOW_F} frames before, not then: not checked "
@@ -2194,8 +2211,9 @@ class BehaviourBuilder:
                                 f"static {AMBIENT} support only", "n": len(amb),
                         "by_source": dict(Counter(c.src for c in amb)),
                         "radius_u": _r(val["radius"][AMBIENT][0]) if AMBIENT in val["radius"] else None},
-            "uncovered": {"n": len(fails), "first": [{**self._contact_row(c, d), "set": name}
-                                                    for c, name, d in fails[:20]]},
+            "uncovered": {"n": len(fails), "contacts": len({id(c) for c, _, _ in fails}),
+                          "desc": "n counts (contact, template set) pairs; contacts the distinct contacts",
+                          "first": [{**self._contact_row(c, d), "set": name} for c, name, d in fails[:20]]},
             "outside_attacks": {"n": len(val["outside"]), "first": [self._contact_row(c) for c in val["outside"][:20]]},
             "uncovered_by_set": dict(Counter(name.split(":")[0] for _, name, _ in fails)),
         }

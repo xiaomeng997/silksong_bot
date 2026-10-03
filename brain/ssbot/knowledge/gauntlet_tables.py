@@ -23,6 +23,14 @@ FightScanner, all of one type into that type's BehaviourBuilder:
            Song Pilgrim 01", "Song Pilgrim 03 (3)/Body Damager") or a hazard type; a name several live subjects share
            (the Maestro's "Song Automaton Tiny(Clone)" summons, the waiting wave-12 "Song Reed") goes to the one in play
            nearest to the hero's box.
+A contact that names only a collider child is given to the subject exporting an enabled damage collider of that name
+on the contact frame or up to LAG_F frames before (the Minister swaps its "Colliders/..." body boxes every few frames:
+run 20261002_230325 f864772 "Collider Fly" was enabled at f864770-771); failing that, to the nearest live subject of a
+type that has exported that name, whose scanner then counts the contact as unexplained (no exported collider). A
+contact no subject can take is listed in GauntletBuilder.unattributed and fails the build's validation like an
+uncovered one (behaviour_build --encounter: coverage.json "validation").
+Held-out folds alternate per fight (episode), not per recording as for one boss: a combat-run recording holds several
+gauntlets (5 with --rotate 5), and folds by recording put 7 of the first 8 gauntlets in one fold.
 Enemies whose body hurts on contact while they walk or fly between attacks get an idle family
 (BehaviourSpec.idle_family, "<P>_IDLE": from a decision state until the next attack), so the support covers them all
 the time; a kill ends the instance ("hit" with dead, BehaviourSpec.death_on_kill: most of these Control FSMs have no
@@ -39,6 +47,7 @@ from dataclasses import dataclass
 
 from ssbot.ipc.ents import DAMAGE_SRC
 from ssbot.knowledge.behaviour_tables import (
+    LAG_F,
     N_FOLDS,
     BehaviourBuilder,
     BehaviourSpec,
@@ -243,6 +252,8 @@ class GauntletBuilder:
         self.counters: Counter = Counter()
         self.recordings: dict[str, int] = {}
         self.fights: list[dict] = []
+        self.unattributed: list[dict] = []          # hero contacts no subject could take (validation failures)
+        self.collider_types: dict[str, set[str]] = defaultdict(set)   # damage collider name -> types exporting it
         self._last_owner: dict[str, tuple[int, int]] = {}
         self._f = 0
 
@@ -253,7 +264,8 @@ class GauntletBuilder:
         """Scan one fight (its STATEs from fight_states unless given); returns a summary (subjects per type,
         instances added per type)."""
         rec = str(fight.path)
-        fold = self.recordings.setdefault(rec, len(self.recordings)) % N_FOLDS
+        fold = len(self.fights) % N_FOLDS     # per fight: a recording holds several gauntlets (module docstring)
+        self.recordings.setdefault(rec, fold)
         for b in self.builders.values():
             b._built = None
             b.recordings.setdefault(rec, fold)
@@ -295,6 +307,10 @@ class GauntletBuilder:
                         sub.name = next((c["name"] for c in e.get("colliders") or ()
                                          if c.get("name") and (c["name"] == tk or c["name"].startswith(tk + " (")
                                                                or c["name"].startswith(tk + "("))), None)
+                    for c in e.get("colliders") or ():
+                        n = c.get("name")
+                        if n and tk not in self.collider_types[n] and (support_threat(c) or multi_wounder_threat(c)):
+                            self.collider_types[n].add(tk)
                     per[e["iid"]].append(e)
                 elif tk and int(e.get("src") or 0) & DAMAGE_SRC:
                     ht = hazard_type(e)
@@ -345,10 +361,12 @@ class GauntletBuilder:
                     else:
                         parts = [(f, None, d)]
                     for ff, snap, dd in parts:
+                        back = [snaps[g][0] for g in range(ff - 1, ff - LAG_F - 1, -1) if g in snaps]
                         sid = self._attribute(src, subjects, owner, *(snap[1:] if snap else (hazards, box)),
-                                              ents=snap[0] if snap else None)
+                                              ents=snap[0] if snap else None, back=back)
                         if sid is None:
                             self.counters[f"hero contacts without an enemy: {src}"] += 1
+                            self.unattributed.append({"fight": fight.id, "f": ff, "kind": k, "source": src})
                             continue
                         sub = subjects[sid]
                         known = {sub.type_key} | {e["type_key"] for e in per.get(sid, ())}
@@ -399,7 +417,8 @@ class GauntletBuilder:
         return min(cands, key=key).iid
 
     def _attribute(self, src: str, subjects: dict[int, _Subject], owner: dict[int, int], hazards: list,
-                   box: tuple | None, ents: dict[int, dict] | None = None) -> int | None:
+                   box: tuple | None, ents: dict[int, dict] | None = None,
+                   back: list[dict[int, dict]] | None = None) -> int | None:
         """The subject a hero contact's source belongs to (see the module docstring). The source names the enemy's
         GameObject, or a hazard type, or only a collider child ("Colliders/Collider ParryStance": the Minister's body
         colliders sit under a "Colliders" child): then the subject exporting an enabled damage collider of that
@@ -439,9 +458,26 @@ class GauntletBuilder:
                 leaf = parts[-1] if parts else None
                 cands = [s for s in subjects.values() if ent(s) is not None and leaf and
                          _box_dist(ent(s), box, leaf)[0] < math.inf]
+                if cands:
+                    self.counters["contacts named by a collider child only (subject exporting it)"] += 1
+                for snap in back or ():       # the collider was swapped out within the export lag
+                    if cands or not leaf:
+                        break
+                    cands = [s for s in subjects.values() if snap.get(s.iid) is not None and
+                             _box_dist(snap.get(s.iid), box, leaf)[0] < math.inf]
+                    if cands:
+                        self.counters["contacts named by a collider child only (exported up to LAG_F before)"] += 1
+                if not cands and leaf:
+                    # nobody exported it lately: the nearest live subject of a type that has that collider (its
+                    # scanner counts the contact as unexplained)
+                    types = self.collider_types.get(leaf, ())
+                    live = [s for s in subjects.values() if s.type_key in types and ent(s) is not None
+                            and not s.scanner.dead]
+                    if live:
+                        self.counters["contacts named by a collider child only (nearest of its type, unexported)"] += 1
+                        return min(live, key=lambda s: _box_dist(ent(s), box)[1]).iid
                 if not cands:
                     return None
-                self.counters["contacts named by a collider child only (subject exporting it)"] += 1
         if len(cands) == 1:
             return cands[0].iid
         self.counters["contacts with a shared source name (nearest subject)"] += 1

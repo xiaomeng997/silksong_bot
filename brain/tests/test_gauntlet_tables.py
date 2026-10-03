@@ -106,3 +106,45 @@ def test_damager_radius_aliases_and_forum_specs():
     for s in FORUM_SPECS.values():   # no state is both an attack start and a decision state
         assert not set(s.attack_starts) & set(s.decision_states), s.enemy
         assert not set(s.attack_starts) & set(s.dormant), s.enemy
+
+
+def _late_states():
+    """_states plus Foe (1) exporting a "Claw" child at frames 100-101 only, contacts naming it at 103 (within the
+    export lag) and 118 (long gone), and one naming a collider nobody ever exported."""
+    out = _states()
+    for s in out:
+        f = s["f"]
+        if f in (100, 101):
+            foe1 = next(e for e in s["ents"] if e["iid"] == 2)
+            foe1["colliders"].append(_box("Claw", 21.0, 5.0))
+        if f == 103:
+            s["ev"].append({"k": "damage", "d": {"source": "Colliders/Claw", "amount": 1}})
+        if f == 110:
+            s["ev"].append({"k": "damage", "d": {"source": "Colliders/Tail", "amount": 1}})
+        if f == 118:
+            s["ev"].append({"k": "damage", "d": {"source": "Colliders/Claw", "amount": 1}})
+    return out
+
+
+def test_collider_child_contacts_look_back_and_unattributed_ones_are_failures():
+    g = GauntletBuilder({"Foe": SPEC})
+    g.scan(Fight("states", Path("."), 1, 120, "synthetic"), _late_states())
+    b = g.builders["Foe"]
+    contacts = {(c.f, c.fight.split("#")[-1]): c for c in b.contacts}
+    # swapped out 2 frames before the contact (the Minister's "Colliders/Collider Fly", run 20261002_230325 f864772)
+    c = contacts[(103, "2")]
+    assert c.src == "Foe (1)/Colliders/Claw" and c.exported
+    # not exported for 17 frames: the nearest live Foe takes it and it is unexplained (a validation failure)
+    c = contacts[(118, "2")]
+    assert not c.exported and not c.hole
+    v = b.tables()["coverage"]["validation"]
+    assert not v["ok"] and v["unexplained"]["n"] >= 1 and not v["support_conservative"]
+    # nobody ever exported a "Tail": listed, not dropped
+    assert [(u["f"], u["source"]) for u in g.unattributed] == [(110, "Colliders/Tail")]
+
+
+def test_folds_alternate_per_fight():
+    g = GauntletBuilder({"Foe": SPEC})
+    for _ in range(4):     # four gauntlets of one recording (combat_run --rotate)
+        g.scan(Fight("states", Path("rec_i2_000"), 1, 120, "synthetic"), _states())
+    assert [f["fold"] for f in g.fights] == [0, 1, 0, 1]

@@ -16,7 +16,9 @@ logged hit and blocked contact against the support templates), export holes and 
 
 A multi-enemy arena (--encounter Forum: ssbot.knowledge.gauntlet_tables) gets one table per enemy type, written to
 <out>/forum/<enemy>.json and _hitboxes.npz, plus <out>/forum/coverage.json with the attack instances per family, their
-rate per hour of fight time and the hours still needed for the target.
+rate per hour of fight time and the hours still needed for the target, and "validation": per type the in-sample
+result (distinct uncovered / unexplained / outside contacts), the held-out (other fold) coverage and whether the
+support is shown to be conservative (validation.support_conservative), plus the hero contacts no enemy could take.
 
 Exit codes: 0 ok; 1 nothing to scan; 3 validation failed (a contact farther than R_FAIL_U from its family's logged
 occupancy, a contact whose source had no exported damage collider and no export hole near it, or a contact outside
@@ -116,6 +118,23 @@ def report(tables: dict) -> str:
     return "\n".join(lines)
 
 
+def type_validation(v: dict) -> dict:
+    """One enemy type's validation for coverage.json: distinct failing contacts in sample, the held-out coverage
+    (anchor and self sets) and the support status."""
+    def held(r: dict | None) -> dict:
+        if not isinstance(r, dict) or not r.get("n"):
+            return {"n": 0}
+        return {"n": r["n"], "within_radius": r["within_radius"], "beyond_r_fail": r["beyond_r_fail"],
+                "share_beyond": round(r["beyond_r_fail"] / r["n"], 4), "beyond_r_fail_t4": r.get("beyond_r_fail_t4")}
+    ho = v.get("heldout") or {}
+    return {"ok": v["ok"], "support_conservative": v.get("support_conservative", v["ok"]),
+            "support_note": v.get("support_note"), "contacts": v["contacts"],
+            "uncovered_contacts": v["uncovered"].get("contacts", v["uncovered"]["n"]),
+            "uncovered_pairs": v["uncovered"]["n"], "unexplained": v["unexplained"]["n"],
+            "outside_attacks": v["outside_attacks"]["n"], "heldout_anchor": held(ho.get("anchor")),
+            "heldout_self": held(ho.get("self"))}
+
+
 def gauntlet_main(a: argparse.Namespace, fights: list, skipped: list, code: dict) -> int:
     """One table per enemy type of a multi-enemy arena (ssbot.knowledge.gauntlet_tables), written to
     <out>/<encounter lower>/, then the attack counts against the target with the rate per hour of fight time."""
@@ -132,13 +151,15 @@ def gauntlet_main(a: argparse.Namespace, fights: list, skipped: list, code: dict
         print(f"skipped {len(skipped)}:", *skipped[:20], sep="\n  ")
     hours = sum(f.f1 - f.f0 for f in fights) / 60.0 / 3600.0
     out = (a.out or default_out()) / a.encounter.lower()
-    rc = 0
+    rc = 3 if g.unattributed else 0
     written = {}
+    vals = {}
     for tk, b in g.builders.items():
         if not b.instances:
             print(f"== {tk}: no instances")
             continue
         tables = b.tables()
+        vals[tk] = type_validation(tables["coverage"]["validation"])
         if not tables["coverage"]["validation"]["ok"]:
             rc = 3
         if not a.report_only:
@@ -159,12 +180,23 @@ def gauntlet_main(a: argparse.Namespace, fights: list, skipped: list, code: dict
         print(f"  {r['enemy']:16s} {r['family']:14s} {r['n']:5d}  {r['per_hour'] or 0:7.1f}/h  "
               f"{'idle' if r['idle'] else ('ok' if r['hours_to_target'] == 0 else r['hours_to_target'])}")
     print("counters:", dict(g.counters.most_common(20)))
+    validation = {
+        "ok": rc == 0, "folds": "per fight (alternating)",
+        "unattributed": {"desc": "hero contacts no enemy could take (validation failures)", "n": len(g.unattributed),
+                         "first": g.unattributed[:20]},
+        "types": vals}
+    print(f"\nvalidation {'ok' if rc == 0 else 'FAILED'}; unattributed contacts {len(g.unattributed)}")
+    for tk, v in vals.items():
+        h = v["heldout_anchor"]
+        print(f"  {tk:22s} in sample: {v['uncovered_contacts']} uncovered, {v['unexplained']} unexplained, "
+              f"{v['outside_attacks']} outside of {v['contacts']}; held out: {h.get('beyond_r_fail')} of {h.get('n')} "
+              f"beyond R_FAIL ({h.get('share_beyond')}); conservative {v['support_conservative']}")
     if not a.report_only:
         out.mkdir(parents=True, exist_ok=True)
         (out / "coverage.json").write_text(json.dumps(
             {"encounter": a.encounter, "fights": g.fights, "fight_hours": round(hours, 3), "rows": rows,
-             "counters": dict(g.counters.most_common()), "tables": written, "code": code}, indent=1) + "\n",
-            encoding="utf-8")
+             "validation": validation, "counters": dict(g.counters.most_common()), "tables": written, "code": code},
+            indent=1) + "\n", encoding="utf-8")
     print(f"scan + build {time.perf_counter() - t_all:.1f} s")
     return rc
 
