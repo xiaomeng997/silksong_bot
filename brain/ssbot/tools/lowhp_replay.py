@@ -13,12 +13,16 @@ compared:
   old    main before this change (5a83283), at the same ticks, as a counterfactual: it Binds where the new code does
          only when the playbook's hp_missing_min held (HP <= max - 2) and its h was the support's (the new h_basis
          "support"); with a certified-empty support its h was UNBOUNDED and the commit test refused the Bind (HP 3 >
-         max - 3, h > 2). Its quits were the new ones: 10bfb66 already counted the worst known event for Q1.
+         max - 3, h > 2). Its quits were the new ones with Q6 at h 2 (--q6-max-h 2): 10bfb66 already counted the
+         worst known event for Q1.
 For a Bind the new code would start: the support's T_min at the tick (>= 1.52 s by the commit test) and the ground
 truth over the recorded frames of the Bind (decision frame + 2 .. + 2 + 83 + 9: the macro's latch lead, its 81-83
 frames and delta_b): the least distance from any threat collider of the recording (ssbot.ipc.ents.is_threat) to the
 hero's box held where the Bind starts (standing: the recorded box 2 frames on; airborne: the Bind rollout's boxes),
-"censored" when the recording ends first (an emulated quit stops it at the pause).
+"censored" when the recording ends first (an emulated quit stops it at the pause); its verdict is then "unverified",
+never "clear" (new_bind_check.verdict: clear / hit / unverified). A live Q1 on the hit's own frame (h <= 1 at once:
+the pause stress chunks' injected hits) is replayed for that tick: does this code quit there too, or ask for a Bind.
+--q6-max-h 2 replays with Q6 at h 2 (the rule before the person's of 2026-10-03), to tell its effect from Q1 / Q1a's.
 
 The replay is the live loop up to drift: before the stretch the STATEs go through the perception path only (the
 backend, the hero's state tracker, the forecaster's trackers, as PlannerPolicy._catch_up does for late ticks), and
@@ -249,10 +253,15 @@ def replay(run: Path, row: dict, ids: list[str], heals: list, pol, threads: int 
                 if f + LEAD_F <= fo + k <= f + LEAD_F + BIND_F:
                     boxes[fo + k] = tuple(b)
         dist, n, cens = _min_dist(by_f, boxes)
+        hit = dist is not None and dist <= 0.0
+        # a Bind the recording does not cover to its end is unverified, not clear: the world after the live pause is
+        # not recorded (fixer review 2026-10-03: 20261002_152649 i2 ep3 had 5 of 92 frames, and the live run quit 3
+        # frames into the same Bind with a threat 0.93 u away)
         out["new_bind_check"] = {"t_min": nb["t_min"], "hp": nb["hp"], "silk": nb["silk"], "basis": nb["basis"],
-                                 "on_ground": on_ground, "frames": n, "censored": cens,
+                                 "on_ground": on_ground, "frames": n, "frames_needed": len(boxes), "censored": cens,
                                  "min_dist": None if dist is None else round(dist, 3),
-                                 "would_be_hit": dist is not None and dist <= 0.0}
+                                 "would_be_hit": hit,
+                                 "verdict": "hit" if hit else "unverified" if cens or not n else "clear"}
     return out
 
 
@@ -293,7 +302,11 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--threads", type=int, default=4)
     ap.add_argument("--json", type=Path, default=None)
     ap.add_argument("--limit", type=int, default=0)
+    ap.add_argument("--q6-max-h", type=int, default=None,
+                    help="SupervisorConfig.q6_max_h for the replayed code (2: Q6 at h 2 as before 2026-10-03)")
     a = ap.parse_args(argv)
+    from dataclasses import replace as dc_replace
+
     from ssbot.train.planner_policy import PlannerPolicy
     pols: dict[str, PlannerPolicy] = {}
     items = []
@@ -301,14 +314,18 @@ def main(argv: list[str] | None = None) -> int:
         view = (row.get("policy") or {}).get("view", "oracle")
         pend = (row.get("policy") or {}).get("first_pending_f")
         low = _events(run, row)[1]
-        if pend is not None and low and pend - low[0] <= 1 and not heals:
-            # the live supervisor paused on the hit's own frame (stage C before task V read the oracle STATE; Q6 on
-            # FORCED_RISK at the hit frame before the i-frames were counted, 20261002_102538): the recording stops
-            # there, nothing after the hit to replay
+        if pend is not None and low and pend - low[0] <= 1 and not heals and "Q1" not in ids:
+            # the live supervisor quit on the hit's own frame for a reason this code no longer has (stage C before
+            # task V read the oracle STATE; Q6 on FORCED_RISK at the hit frame before the i-frames were counted,
+            # 20261002_102538): nothing between the hit and the live decision to replay. A Q1 on the hit frame (h <= 1
+            # at once: the pause stress chunks' injected hits, a second Bell Beast hit) is replayed: its hit tick says
+            # whether this code quits there too or would ask for a Bind
             rp = {"skipped": "live pause on the hit frame", "live_pending": pend - low[0], "live_ids": ids}
         else:
             if view not in pols:
                 pols[view] = PlannerPolicy(view=view, threads=a.threads)
+                if a.q6_max_h is not None:
+                    pols[view].sc.cfg = dc_replace(pols[view].sc.cfg, q6_max_h=a.q6_max_h)
             try:
                 rp = replay(run, row, ids, heals, pols[view], a.threads)
             except Exception as e:  # noqa: BLE001 - one broken recording must not end the batch
@@ -331,7 +348,13 @@ def main(argv: list[str] | None = None) -> int:
                                      for x in items),
             "new_bind_would_be_hit": sum(bool((x["replay"].get("new_bind_check") or {}).get("would_be_hit"))
                                          for x in items),
-            "new_bind_censored": sum(bool((x["replay"].get("new_bind_check") or {}).get("censored")) for x in items)}
+            "new_bind_censored": sum(bool((x["replay"].get("new_bind_check") or {}).get("censored")) for x in items),
+            "new_bind_verdicts": dict(Counter((x["replay"].get("new_bind_check") or {}).get("verdict")
+                                              for x in items if x["replay"].get("new_bind_check"))),
+            "new_pending_ids": dict(Counter(",".join(sorted({r.split(":", 1)[0] for r in
+                                                             x["replay"].get("new_pending_reasons") or ()}))
+                                            for x in items if x["replay"].get("new_pending") is not None)),
+            "live_ids": dict(Counter(",".join(x["replay"].get("live_ids") or ()) for x in items))}
     print(json.dumps(summ, indent=1))
     if a.json:
         a.json.write_text(json.dumps({"summary": summ, "items": items}, indent=1, default=str), "utf-8")
