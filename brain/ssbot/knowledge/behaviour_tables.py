@@ -153,6 +153,7 @@ STATE_KEYS = ("dt", "hero", "ents", "ev")
 TAIL = "_tail"
 SELF = "ent"                  # self templates: ent/<type_key>/self
 AMBIENT = "_ambient/world"    # hazards armed when a scan started: one time-invariant (static) world template
+ORPHAN = "_orphan"            # contacts of an armed hazard owned by no instance (checked against its self template)
 R_FAIL_U = 0.5                # a contact farther than this from its family's occupancy is a support hole
 R_SEARCH_U = 1.0
 LAG_F = 2                     # a contact's source must show an exported damage collider within f-2..f
@@ -1551,6 +1552,8 @@ class BehaviourBuilder:
         (anchor None, key in anchor frame: marked by mirror 0). An ambient source has its own time-invariant set."""
         if c.ambient:
             return {"ambient": [(AMBIENT, None, 1, 0.0)]}
+        if c.inst is None:   # an armed hazard whose attack is unknown (it outlived the owner): its own template only
+            return {f"self:{c.tk}": [(f"{SELF}/{c.tk}/self", c.arm[1], 1, c.T - c.arm[0])]}
         fam = c.inst.family
         a, m = c.inst.anchor, c.inst.mirror or 1
         anc = (a, m) if a is not None else (None, 0)
@@ -1594,7 +1597,7 @@ class BehaviourBuilder:
         for c in self.contacts:
             if c.follow:
                 continue
-            if c.inst is None and not c.ambient:
+            if c.inst is None and not c.ambient and c.arm is None:
                 outside.append(c)
                 continue
             if not c.exported and not c.hole:
@@ -1602,7 +1605,7 @@ class BehaviourBuilder:
             if not c.boxes:
                 continue
             fold = c.inst.fold if c.inst is not None else c.fold
-            fam = c.inst.family if c.inst is not None else AMBIENT.split("/")[0]
+            fam = c.inst.family if c.inst is not None else (AMBIENT.split("/")[0] if c.ambient else ORPHAN)
             others = lambda k: [t for fd, t in self._folds.get(k, {}).items() if fd != fold]  # noqa: E731
             for name, members in self.contact_sets(c).items():
                 d, usable = self._residual(c, members, own)
