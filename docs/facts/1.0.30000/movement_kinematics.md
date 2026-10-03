@@ -156,14 +156,14 @@ uns\m2\kn_excite_forum6-10-02\TRAIN\…） | 存档 | 种子 / 次数 | 用途
 - 下劈的真实伤害对象是 `Attacks/Scythe/DownSlash New`（Crest Attacks FSM），冲刺攻击是 `Attacks/Scythe/DashUpper Slash`（Sprint FSM 的 Reaper Antic / Upper / End：Upper 里 SetVelocityByScale 50 u/s 向前、每步 ×0.85、CurveFloat 改 vy 0.3 s，End 设 vy 7——这个位移原语没建模）。两者都不在 slash.dump 的槽里：oracle `slash.dump` 加了可选 `paths` 参数（已编译、未部署），探针默认带上这两个路径，构建工具把它们映射到 down / dash_stab 槽；部署后各采 20–40 次即可得到多边形和帧窗口（s98400 的 dash_attack 试验因为旧插件不认 paths 没采到）。
 - 命中核对（`attack_hit_audit`，Bell Beast + Reaper 数据跑 20261002_225836，实例 3，9 场：7 CLEAR、2 STUCK；CPU ~60 %）：
 
-| 槽 | TP | FP | FN | 接触比命中早（帧） |
-|---|---|---|---|---|
-| normal | 103 | 27 | 0 | 主要 1–3（58 次 2 帧） |
-| alt | 17 | 2 | 0 | 1–3 |
-| up | 34 | 5 | 0 | 0–3 |
-| down（src DownSlash New，多边形暂用组对象的） | 17 | 2 | 1 | 1–2 |
+| 槽 | TP | FP | FN | 接触比命中早（帧） | --slack 1 时 |
+|---|---|---|---|---|---|
+| normal | 103 | 22 | 0 | 1（66）、2（16）、0（20） | FP 27 |
+| alt | 17 | 1 | 0 | 0–2 | FP 2 |
+| up | 34 | 2 | 0 | 0–2 | FP 5 |
+| down（src DownSlash New，多边形暂用组对象的） | 17 | 2 | 1 | 1–2 | 同 |
 
-无漏判（normal / alt / up 0 FN），下劈 1 FN；接触普遍比命中事件早 1–3 帧（伤害在下一物理步结算、事件再晚一帧）。normal 的 27 个 FP 待查（候选：Boss 处于不可伤状态、铃铛挡刀、窗口 5–12 帧偏长）。
+（`--slack 0`：只用实测的开启帧；默认 slack 1 多出来的 FP 全是"提前一帧（k = 4）的接触"。）无漏判（normal / alt / up 0 FN），下劈 1 FN；接触通常比命中事件早 1 帧。normal 剩下的 22 个 FP 全落在 Boss 的五个状态：Attack Burst 8、Charge Emerge 6、Rage Roar 3、Charge Loop 3、Attack Leap End 2——碰撞盒（层 11，唯一一个）在、inv 为 False、却没有命中事件，所以是 Boss 这些状态不吃刀（或只在特定帧吃），属于 Boss 行为表 / 命中预测要加的"不可伤状态"，不是刀的形状问题；待用 Hunter 数据交叉确认。
 
 ### 5.5 bounds_ft 时序分支要不要（M2 任务第 4 项）
 
