@@ -68,10 +68,15 @@ def episodes(runs: list[Path]):
 
 
 def _heals(run: Path, row: dict) -> list[tuple[int, int]]:
+    return _events(run, row)[0]
+
+
+def _events(run: Path, row: dict) -> tuple[list[tuple[int, int]], list[int]]:
+    """(heals as (frame, HP before), frames of the hits that left HP <= max - 2) from the recording's events.jsonl."""
     rec = find_recording(run, row)
     p = rec / "events.jsonl"
     f0, f1 = row["f_end"] - row["acts"] - (row.get("late_states") or 0), row["f_end"]
-    out = []
+    heals, low = [], []
     if p.is_file():
         for line in p.open(encoding="utf-8"):
             try:
@@ -79,9 +84,14 @@ def _heals(run: Path, row: dict) -> list[tuple[int, int]]:
             except json.JSONDecodeError:
                 continue
             d = e.get("data") or {}
-            if e.get("kind") == "hp" and f0 <= (e.get("frame") or 0) <= f1 and (d.get("delta") or 0) > 0:
-                out.append((e["frame"], int(d.get("h") or 0) - int(d.get("delta") or 0)))
-    return out
+            if not f0 <= (e.get("frame") or 0) <= f1:
+                continue
+            if e.get("kind") == "hp" and (d.get("delta") or 0) > 0:
+                heals.append((e["frame"], int(d.get("h") or 0) - int(d.get("delta") or 0)))
+            elif e.get("kind") == "damage" and d.get("h") is not None and d.get("amount") is not None \
+                    and int(d["h"]) - int(d["amount"]) <= MAX_HP - 2:
+                low.append(e["frame"])
+    return heals, low
 
 
 def _min_dist(states_by_f: dict, boxes: dict[int, tuple]) -> tuple[float | None, int, bool]:
@@ -268,7 +278,7 @@ def classify(x: dict) -> str:
     up to the live pause or Bind, after which the recording no longer follows what it would have done)."""
     r = x.get("replay") or {}
     if r.get("skipped"):
-        return "skipped"
+        return "quit@hit" if r["skipped"].startswith("live pause on the hit") else "skipped"
     nb, npd, lp = r.get("new_bind"), r.get("new_pending"), r.get("live_pending")
     live_bound = bool(r.get("live_binds"))
     new_first = "bind" if nb is not None and (npd is None or nb < npd) else "quit" if npd is not None else "fight"
@@ -289,12 +299,20 @@ def main(argv: list[str] | None = None) -> int:
     items = []
     for run, row, ids, heals in episodes(a.runs):
         view = (row.get("policy") or {}).get("view", "oracle")
-        if view not in pols:
-            pols[view] = PlannerPolicy(view=view, threads=a.threads)
-        try:
-            rp = replay(run, row, ids, heals, pols[view], a.threads)
-        except Exception as e:  # noqa: BLE001 - one broken recording must not end the batch
-            rp = {"skipped": f"error {e!r}"[:200]}
+        pend = (row.get("policy") or {}).get("first_pending_f")
+        low = _events(run, row)[1]
+        if pend is not None and low and pend - low[0] <= 1 and not heals:
+            # the live supervisor paused on the hit's own frame (stage C before task V read the oracle STATE; Q6 on
+            # FORCED_RISK at the hit frame before the i-frames were counted, 20261002_102538): the recording stops
+            # there, nothing after the hit to replay
+            rp = {"skipped": "live pause on the hit frame", "live_pending": pend - low[0], "live_ids": ids}
+        else:
+            if view not in pols:
+                pols[view] = PlannerPolicy(view=view, threads=a.threads)
+            try:
+                rp = replay(run, row, ids, heals, pols[view], a.threads)
+            except Exception as e:  # noqa: BLE001 - one broken recording must not end the batch
+                rp = {"skipped": f"error {e!r}"[:200]}
         x = {"run": run.name, "instance": row.get("instance"), "episode": row.get("episode"), "view": view,
              "code": row.get("code_rev"), "outcome": row.get("outcome"), "replay": rp}
         x["change"] = classify(x)
