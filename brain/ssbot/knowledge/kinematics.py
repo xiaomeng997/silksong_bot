@@ -1488,6 +1488,7 @@ class Variant:
     frame_time: str = "mean"
     cast: str = "nominal"
     timers: tuple = (0, 0, 0)
+    second: int = 0       # nonzero: the second timed phase of the Forum FSM moves (_SECOND_TIMERS) takes this sign
 
 
 def _lane(t: tuple) -> Variant:
@@ -1508,9 +1509,15 @@ FULL = (Variant("nominal"),) + tuple(Variant(f"{a}/{_lane(t).name}", a, "mean", 
 # instance) drifts the physics phase 0.024 in 30 frames against the mean 0.016666 s, past alpha_margin
 BOUNDS_FT = BOUNDS + (Variant("ft_lo", "lo", "lo"), Variant("ft_hi", "hi", "hi"))
 BOUNDS_LO = BOUNDS + (Variant("ft_lo", "lo", "lo"),)
+# bounds_lo_mix: two more lanes whose Forum moves' second timed phase (the Reaper down slash's slash, the glide's
+# inflate) ends on the other side of the threshold from the first and third (the antic, the fall / deflate): each
+# phase's end is its own coin flip of the frame-time sums (s98010 f719895: antic a frame early, slash on time)
+BOUNDS_LO_MIX = BOUNDS_LO + (Variant("mix-+", "hi", "mean", "nominal", (0, 0, -1), 1),
+                             Variant("mix+-", "lo", "mean", "nominal", (0, 0, 1), -1))
 BOUNDS_LO2 = BOUNDS + (Variant("ft_lo", "lo", "lo"), Variant("ft_lo_h", "hi", "lo"))
 VARIANT_SETS = {"nominal": NOMINAL, "fast": FAST, "bounds": BOUNDS, "full": FULL, "bounds_ft": BOUNDS_FT,
-                "bounds_lo": BOUNDS_LO, "bounds_lo2": BOUNDS_LO2}
+                "bounds_lo": BOUNDS_LO, "bounds_lo2": BOUNDS_LO2, "bounds_lo_mix": BOUNDS_LO_MIX}
+_SECOND_TIMERS = ("P_RPR_SLASH", "P_GL_INFLATE")
 _SCALED_TIMERS = ("P_ATK_DUR", "P_ATK_CD", "P_DS_ANTIC", "P_DS_REC", "P_DS_LREC", "P_HURT_T", "P_CAST_ANTIC",
                   "P_BIND_T",
                   # Forum loadout: the animation-timed FSM states, the sprint wait, the cling cooldown and hard landing
@@ -1538,6 +1545,9 @@ def _variant_rows(params: HeroParams, variants: tuple[Variant, ...]
         Pv[v, P_WF_BW] += tw * params.timer_bias          # a world freeze's wait / ramp up: the same unscaled links
         Pv[v, P_WF_BU] += tr * params.timer_bias
         Pv[v, scaled] += ts * params.timer_bias
+        if var.second:
+            second = [globals()[k] for k in _SECOND_TIMERS]
+            Pv[v, second] += (var.second - ts) * params.timer_bias
     return Pv, np.asarray(ft, dtype=np.float32).astype(np.float64), sel
 
 
@@ -2292,6 +2302,8 @@ class ForumRows:
         self.atk_kind = 0.0
         self.alt_t = np.float32(9.0)
         self.atk_pdir = -1.0
+        self.wj_chain = 0.0
+        self.unstick = 0.0
 
     def push(self, S: np.ndarray, r: dict, md: int, flag) -> None:
         """Fill S (one [K] state, the frame's other rows already set) for row r (Trace.row form) in mode md."""
@@ -2321,16 +2333,31 @@ class ForumRows:
         # wall jump: a jump that starts off a wall (sliding or touching one in the air) locks x for up to
         # wj_lock_long steps while the jump lasts
         jumping, ground = flag("jumping"), flag("onGround")
+        if self.wj_chain > 0:
+            self.wj_chain = max(self.wj_chain - fs, 0.0)
         if jumping and pr and not pr["jumping"] and (pr["sliding"] or pr["wall"]) and not pr["ground"]:
             self.wlock, self.wj_dir = 0.0, face
         elif self.wlock >= 0:
             self.wlock += fs
             mask = int(r.get("mask", 0))
             back = (self.wj_dir < 0 and mask & B_RIGHT) or (self.wj_dir > 0 and mask & B_LEFT)
-            if self.wlock > p.wj_lock_long or not jumping or (self.wlock >= p.wj_lock_short and back):
+            if self.wlock > p.wj_lock_long:
+                self.wlock = -1.0             # the lock ran out: the chain window opens (WJLOCK_CHAIN_STEPS)
+                self.wj_chain = float(p.wj_chain_steps)
+            elif not jumping or (self.wlock >= p.wj_lock_short and back):
                 self.wlock = -1.0             # (LookForInput 8407: back towards the wall after the short lock)
         S[WLOCK] = self.wlock
         S[WJ_DIR] = self.wj_dir
+        S[WJ_CHAIN] = self.wj_chain
+        # wallUnstickSteps: FixedUpdate counts its steps with the input of the last Update held away from the wall
+        # (the previous frame's buttons); three end the slide
+        pm = int(pr["mask"]) if pr else 0
+        if sliding and pr and pr["sliding"]:
+            away = (pm & B_RIGHT and not pm & B_LEFT) if side < 0 else (pm & B_LEFT and not pm & B_RIGHT)
+            self.unstick = self.unstick + fs if away else 0.0
+        else:
+            self.unstick = 0.0
+        S[UNSTICK] = self.unstick
         # wallSlashing: a side attack started during the slide, until the attack ends (ResetAttacks) or the slide
         attacking = flag("attacking")
         if not (attacking and sliding):

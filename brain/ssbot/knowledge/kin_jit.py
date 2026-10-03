@@ -1118,6 +1118,16 @@ def forum_contacts(x, landed, P, TT):
                 x[WTOUCH] = 1.0
             else:
                 x[WTOUCH] = 0.0
+            # the same callback lands a falling hero whose CheckTouchingGround rays (box left / centre / right, 0.16
+            # below the box) see a floor, while the body is still above it (s98010 f695370: sliding down the wall,
+            # "Land To Run" 0.11 u above the floor, the run starting in the next step)
+            if mode == M_NORMAL and not gnow and wnow and x[VY] <= EPS_F:
+                bot = x[PY] - P[P_FOOT]
+                if vray(x[PX] - P[P_HW], bot, 0.16, TT) or vray(x[PX], bot, 0.16, TT) or                         vray(x[PX] + P[P_HW], bot, 0.16, TT):
+                    x[GROUND] = 1.0       # BackOnGround
+                    x[JUMPING] = 0.0
+                    x[JSTEPS] = 0.0
+                    x[LANDQ] = 1.0
     if landed and x[HARD] > 0 and (mode == M_NORMAL or mode == M_DASH or mode == M_SPRINT):
         x[MODE] = M_HARD_LAND
         x[MODE_T] = 0.0
