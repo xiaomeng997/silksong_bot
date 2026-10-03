@@ -12,7 +12,7 @@ savestate cannot keep (the vines grow back on every load). From a person's sessi
 hero x ~87.5 just after the cut; the boss emerges about 2 s after waking.
 """
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Callable
 
 from ssbot.ipc.framing import mask
@@ -120,4 +120,9 @@ BELL_BEAST = Encounter(
     dormant=("Init", "Dormant"), death_states=("Death Broadcast",), intro=bell_beast_intro, timebox_s=240.0,
     arena_x=(73.5, 97.5), floor_y=3.5677)   # the person's fight: hero x 78.3-97.4, boss x 73.5-97.4
 
-ENCOUNTERS = {e.name: e for e in (BELL_BEAST,)}
+# The same fight with the Reaper crest equipped (M2 W8: the Reaper's attack polygons against the game's hit events,
+# tools/attack_hit_audit). Savestate kn_bb_reaper: bellbeast_arena + crest.equip Reaper + Silk Spear in a Reaper skill
+# slot (the intro cuts the vines with it), saved by the game (probes/kin_excite_forum --setup-bb).
+BELL_BEAST_REAPER = replace(BELL_BEAST, name="BellBeastReaper", savestate="kn_bb_reaper")
+
+ENCOUNTERS = {e.name: e for e in (BELL_BEAST, BELL_BEAST_REAPER)}

@@ -170,6 +170,23 @@ def setup(link: OracleLink, room: str, save_as: str) -> dict:
             "saved": saved}
 
 
+def setup_bb(link: OracleLink, save_as: str = "kn_bb_reaper") -> dict:
+    """bellbeast_arena with the Reaper crest and Silk Spear in a Reaper skill slot (the encounter's intro cuts the
+    vines with it): train.encounters.BELL_BEAST_REAPER."""
+    link.rpc("savestate.load", timeout_s=60, name="bellbeast_arena", timeout=50)
+    link.wait_state(lambda s: s.get("hero") and s["hero"].get("hero_accepting_input"), timeout_s=30)
+    time.sleep(1.0)
+    crest = link.rpc("crest.equip", timeout_s=20, name="Reaper", unlock=True)
+    grant = link.rpc("abilities.grant", timeout_s=20, set="combat", tools=[], skill="Silk Spear", unlock_slots=True)
+    time.sleep(0.5)
+    lst = link.rpc("abilities.list", timeout_s=20)
+    spear = [s for s in lst["skills"] if s["tool"] == "Silk Spear"]
+    if lst["crest"] != "Reaper" or not spear or not spear[0]["equipped"]:
+        raise SystemExit(f"setup failed: crest {lst['crest']}, Silk Spear {spear}, grant {grant}")
+    saved = link.rpc("savestate.save", timeout_s=60, name=save_as)
+    return {"crest": crest, "grant_changed": grant.get("changed"), "bindings": lst.get("bindings"), "saved": saved}
+
+
 def sample_attack(link: OracleLink, t: Trial, out, frames: int = 26) -> None:
     """Play an attack trial while sampling slash.dump every frame from the press: one line per (frame, slot) with an
     enabled damager."""
@@ -215,6 +232,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--instance", type=int, default=3)
     ap.add_argument("--setup", default=None, help="room savestate to build --save from (Reaper + Wallcling)")
     ap.add_argument("--save", default=None)
+    ap.add_argument("--setup-bb", action="store_true", help="build kn_bb_reaper (Bell Beast arena, Reaper crest)")
     ap.add_argument("--savestate", default=None)
     ap.add_argument("--wall-x", type=float, default=None)
     ap.add_argument("--x-safe", type=float, nargs=2, default=None)
@@ -233,6 +251,9 @@ def main(argv: list[str] | None = None) -> int:
     try:
         load_slot(link, 1)
         link.rpc("guards.set", save_suppression=True)
+        if a.setup_bb:
+            print(json.dumps(setup_bb(link), default=str)[:3000])
+            return 0
         if a.setup:
             print(json.dumps(setup(link, a.setup, a.save), default=str)[:3000])
             return 0
