@@ -249,6 +249,24 @@ namespace SsOracle.Input
         /// <summary>A plain (non-EXCLUSIVE) set: the next EXCLUSIVE spares nothing it did not ask for itself.</summary>
         public void EndExclusive() => exclusiveOwn = 0;
 
+        /// <summary>A plain ACTION (KeyboardInjector.TryQueueMask): EndExclusive, then the edges of
+        /// <paramref name="previous"/> (a set another caller made since the last latch keeps its edges too) and of
+        /// <paramref name="want"/>. Here rather than in KeyboardInjector so that InputLogicCheck runs the same calls.</summary>
+        public void QueuePlain(uint previous, uint want)
+        {
+            EndExclusive();
+            Push(previous);
+            Push(want);
+        }
+
+        /// <summary>The brain-lost Pause tap (KeyboardInjector.SetMaskExclusive): EndExclusive, then QueueExclusive, so
+        /// every key outside <paramref name="want"/> is cut, the pause loop's own included.</summary>
+        public void QueueExclusiveCutAll(uint want)
+        {
+            EndExclusive();
+            QueueExclusive(want);
+        }
+
         /// <summary>Un-latch a press made this frame that collides with the opposite direction. If the caller no longer
         /// wants the key, what is left queued is a stale tap (an even number of edges): drop it rather than fire it
         /// later.</summary>

@@ -35,6 +35,7 @@ internal static class Program
         ReleaseAllDropsQueuedEdges();
         ExclusiveClearsOtherKeysAtOnce();
         ExclusiveSparesTheLoopsOwnKeys();
+        InjectorExclusiveWiring();
         BoundedBacklog();
         ExportedStateIsSufficient();
         LatencyModelDraws();
@@ -66,8 +67,7 @@ internal static class Program
             }
             while (Line.TryTakeDue(frame, out var act))
             {
-                Filter.Push(requested);
-                Filter.Push(act.Buttons);
+                Filter.QueuePlain(requested, act.Buttons);     // KeyboardInjector.TryQueueMask
                 requested = act.Buttons;
             }
             return Filter.Step(requested);
@@ -303,6 +303,41 @@ internal static class Program
         var last = f.Step(Pause);
         Check(last == Pause && f.ReleasedEarly == 2,
             $"EndExclusive: the next EXCLUSIVE cuts the keys of the stretch before (0x{last:x}, early {f.ReleasedEarly})");
+    }
+
+    /// <summary>
+    /// KeyboardInjector's ways into the filter, through the HoldFilter calls it makes: TryQueueMask = QueuePlain (ends
+    /// the EXCLUSIVE stretch), TryQueueMaskExclusive = QueueExclusive, SetMaskExclusive (the brain-lost Pause tap) =
+    /// QueueExclusiveCutAll (cuts the pause loop's own keys too).
+    /// </summary>
+    private static void InjectorExclusiveWiring()
+    {
+        const uint Pause = 1u << 14, Enter = 1u << 15, Down = 1u << 19;
+        // within one stretch the loop's own key, latched one frame, is spared by its next EXCLUSIVE ACTION ...
+        var g = new HoldFilter(Left, Right);
+        g.QueueExclusive(Down);
+        g.Step(Down);
+        g.QueueExclusive(Pause);
+        var spared = g.Step(Pause);
+        Check(spared == (Pause | Down) && g.ReleasedEarly == 0,
+            $"QueueExclusive: a key of the same stretch keeps its minimum press (0x{spared:x}, early {g.ReleasedEarly})");
+        // ... while a plain ACTION in between (the planner is back) ends the stretch: the next EXCLUSIVE cuts it
+        var f = new HoldFilter(Left, Right);
+        f.QueueExclusive(Down);
+        f.Step(Down);
+        f.QueuePlain(Down, Down);
+        f.QueueExclusive(Pause);
+        var cut = f.Step(Pause);
+        Check(cut == Pause && f.ReleasedEarly == 1,
+            $"QueuePlain (TryQueueMask) ends the EXCLUSIVE stretch (0x{cut:x}, early {f.ReleasedEarly})");
+        // the brain-lost Pause tap cuts the loop's own key in the middle of its stretch
+        var h = new HoldFilter(Left, Right);
+        h.QueueExclusive(Enter);
+        h.Step(Enter);
+        h.QueueExclusiveCutAll(Pause);
+        var lost = h.Step(Pause);
+        Check(lost == Pause && h.ReleasedEarly == 1 && h.PendingToggles == 0,
+            $"QueueExclusiveCutAll (SetMaskExclusive): the loop's own key is cut too (0x{lost:x}, early {h.ReleasedEarly})");
     }
 
     private static void BoundedBacklog()

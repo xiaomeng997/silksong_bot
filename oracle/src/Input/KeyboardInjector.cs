@@ -70,9 +70,9 @@ namespace SsOracle.Input
         public static bool TryQueueMask(uint mask, out string error)
         {
             if (!Validate(mask, out error)) return false;
-            Filter.EndExclusive();    // a plain ACTION: the next EXCLUSIVE one cuts every key it does not ask for
-            Filter.Push(requested);   // a set another caller made since the last latch keeps its edges too
-            Filter.Push(mask);
+            // a plain ACTION: the next EXCLUSIVE one cuts every key it does not ask for; a set another caller made
+            // since the last latch keeps its edges too
+            Filter.QueuePlain(requested, mask);
             requested = mask;
             return true;
         }
@@ -95,8 +95,10 @@ namespace SsOracle.Input
         /// loop's included).</summary>
         public static bool SetMaskExclusive(uint mask, out string error)
         {
-            Filter.EndExclusive();
-            return TryQueueMaskExclusive(mask, out error);
+            if (!Validate(mask, out error)) return false;
+            Filter.QueueExclusiveCutAll(mask);
+            requested = mask;
+            return true;
         }
 
         private static bool Validate(uint mask, out string error)
