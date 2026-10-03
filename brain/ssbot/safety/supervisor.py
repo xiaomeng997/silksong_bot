@@ -392,7 +392,8 @@ class Supervisor:
         self.never_seen_s = 0.0
         self.reasons_latched: list[str] = []
         self.injected: list[tuple[str, str]] = []
-        self.t_hit: float | None = None         # the last frame with damage taken (SupervisorInput.damage_taken > 0)
+        self.t_hit: float | None = None         # the last frame with a hit (damage taken, or health + blue down)
+        self._hp_tot: int | None = None
 
     def inject(self, tid: str = "QF", why: str = "injected fault") -> None:
         """Fire trigger `tid` on the next step (the pause stress test, DESIGN §3.7.5 G1 fault injection: a quit
@@ -541,8 +542,14 @@ class Supervisor:
     def step(self, inp: SupervisorInput) -> SupervisorDecision:
         cfg = self.cfg
         self.worst_seen = max(self.worst_seen, inp.damage_taken)
-        if inp.damage_taken > 0:
+        # a hit: damage reported, or the hero's health + blue lower than at the last read (the vision view's HIT_TAKEN
+        # can fall on a frame the live loop skipped; degraded_dust check 20261003_114708 ep 0 labelled such a Q1
+        # "no hit" while the pause machine, which also reads the HUD drop, timed it as one)
+        tot = None if inp.hp is None else inp.hp + inp.blue
+        if inp.damage_taken > 0 or (tot is not None and self._hp_tot is not None and tot < self._hp_tot):
             self.t_hit = inp.t
+        if tot is not None:
+            self._hp_tot = tot
         hero = self._hero(inp)
         known = self.support_certified(inp)
         support = self._support(inp, known)

@@ -106,11 +106,15 @@ def test_q1_after_a_hit_quits_in_the_post_hit_window_never_binds():
     d = s.step(_inp(t=12.6, hp=1))                               # still pending, sticky; the cause is only per frame
     assert d.pause_pending and not d.allows("BIND")
     s = Supervisor(BB)
-    s.step(_inp(t=1.0, hp=5, damage_taken=2))
-    d = s.step(_inp(t=3.0, hp=1, pending_dmg=0))                # no hit for 2 s (> POST_HIT_WINDOW_S): pending damage
+    s.step(_inp(t=1.0, hp=3, damage_taken=2))
+    d = s.step(_inp(t=3.0, hp=3, pending_dmg=2))                # no hit for 2 s (> POST_HIT_WINDOW_S): pending damage
     assert "Q1" in d.triggers and d.q1_cause == sv.Q1_NO_HIT and any("first pausable" in r for r in d.reasons)
     d = Supervisor(BB).step(_inp(t=0.0, hp=4, pending_dmg=3))   # frost: 4 - 3 pending leaves 1, no hit at all
     assert "Q1" in d.triggers and d.q1_cause == sv.Q1_NO_HIT
+    s = Supervisor(BB)                                           # vision: the HUD lost 2 masks, no HIT_TAKEN seen
+    s.step(_inp(t=5.0, hp=3))
+    d = s.step(_inp(t=5.05, hp=1))
+    assert d.q1_cause == sv.Q1_HIT and d.t_hit == 5.05
 
 
 def test_q1a_heal_first_for_h2_and_up_below_max_hp():
