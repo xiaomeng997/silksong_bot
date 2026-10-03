@@ -19,14 +19,16 @@ this task at about 22:25 PDT (they had exited); the lead runs launcher --restore
 - Main degraded_dust run on 52d0e1e (20261002_232157): 154 valid, 126 CLEAR (81.8 %), 0 WOULD_DIE, 2 HARNESS_FAIL.
   QUITs: rage drop-bell pattern 15, bursts 8, charges 3, 2 hits on skipped frames.
 
-## Running / pending
+## Results (no job running)
 
-- Oracle regression on ec62558: run dir C:\ssbot\data\runs\m2\20261003_0144??_BellBeast_eval_planner_oracle (the
-  newest *_oracle), started 01:44 PDT, --episodes 33 x 2, seed 90800. A partial run on d4a85c5 (same oracle path
-  except the unpredicted accounting) was 20 / 20 CLEAR (20261003_013226).
-- Stop gracefully: cd C:\ssbot\live_vv\brain; ..\scripts\uv.cmd run python -m ssbot.tools.combat_run stop <run dir>
-- Summaries: combat_run summary <run>; C:\ssbot\sandbox\vv_scratch\rec_stats.py <run> (hits by Control state from
-  the recordings); hits_summary.py <run>; unpred_dbg.py <run> <inst> <ep> <hit f> (forecast at the hit).
+- Oracle regression on ec62558 (20261003_014409): 66 eps, 65 CLEAR (98.5 %), 0 WOULD_DIE, 0 unpredicted; plus
+  20 / 20 CLEAR on d4a85c5 (20261003_013226, stopped to move to the final commit).
+- degraded_dust on ec62558 (20261003_022259): 61 eps, 47 CLEAR (77.0 %), 0 WOULD_DIE, 0 unpredicted.
+- Nothing of this task is running. Instances 0 and 1 are left running idle (lead: launcher --restore). The live
+  worktree C:\ssbot\live_vv (detached at ec62558) can be removed with `git worktree remove C:\ssbot\live_vv`.
+- Tools: combat_run summary <run>; C:\ssbot\sandboxv_scratchec_stats.py <run> (hits by Control state from
+  the recordings); hits_summary.py <run>; unpred_dbg.py <run> <inst> <ep> <hit f>; dbg_support2.py (support per x
+  and height around a frame); touch_count.py; slack_need.py.
 
 ## Next
 
@@ -37,4 +39,3 @@ this task at about 22:25 PDT (they had exited); the lead runs launcher --restore
 2. Bursts (8): PREPARE 4.5 u beside the burst is where the attack bell lands and rolls out; the VE slack change
    (0f4435d) halves the bells' smear - measure live (needs a chunk on ec62558).
 3. Dig In / Charge End pogos (0.2 pogo hits per charge vs 0.97 oracle): Charge End left/right margins 2.5 u.
-4. Live chunks on ec62558 (VE) have not been run: the main run is on 52d0e1e.
