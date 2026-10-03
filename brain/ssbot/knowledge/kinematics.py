@@ -2337,8 +2337,9 @@ class ForumRows:
         if md in (M_GLIDE, M_SPRINT, M_RPR_DS, M_SCRAMBLE):
             if pr and pmd == md and (pr["ph"] == ph or (md == M_RPR_DS and pr["ph"] == 1 and ph == 4)):
                 self.ph_t = np.float32(self.ph_t + dt)
-            elif md == M_SCRAMBLE and ph == 3:
-                self.ph_t = dt                # entered in a FixedUpdate: the entry frame's Update counts
+            elif (md == M_SCRAMBLE and ph == 3) or (md == M_SPRINT and not (pr and pmd == M_SPRINT)):
+                self.ph_t = dt                # entered in a FixedUpdate (roof ray; FinishedDashing): the entry
+                #                               frame's Update counts
             else:
                 self.ph_t = np.float32(0.0)
             if md == M_RPR_DS and pr and pmd == md and pr["ph"] in (ph, 1.0):
@@ -2525,7 +2526,9 @@ def state_table(tr: Trace, params: HeroParams, modes: np.ndarray | None = None,
     prev_mask = np.r_[0, tr.mask[:-1]]
     ar = np.arange(n)
     c_on = _onset(np.isin(modes, (M_CAST, M_BIND)))
-    for row, bit, started in ((JQ, B_JUMP, j_on), (AQ, B_ATTACK, a_on | ds_on), (QQ, B_QUICKCAST, c_on)):
+    # (a jump press that starts the glide is spent there: StartFloat, no jump queue)
+    jq_on = j_on | _onset(modes == M_GLIDE) if params.abilities else j_on
+    for row, bit, started in ((JQ, B_JUMP, jq_on), (AQ, B_ATTACK, a_on | ds_on), (QQ, B_QUICKCAST, c_on)):
         held = (tr.mask & bit) != 0
         q_on = held & ((prev_mask & bit) == 0) & ~started
         last_q = np.maximum.accumulate(np.where(q_on, ar, -1))
@@ -2936,7 +2939,8 @@ class StateTracker:
         # input queues
         castbind = md in (M_CAST, M_BIND)
         c_on = castbind and not (pmd in (M_CAST, M_BIND))
-        for row, bit, started, key in ((JQ, B_JUMP, j_on, "q_j"), (AQ, B_ATTACK, a_on or ds_on, "q_a"),
+        jq_on = j_on or (bool(p.abilities) and md == M_GLIDE and pmd != M_GLIDE)
+        for row, bit, started, key in ((JQ, B_JUMP, jq_on, "q_j"), (AQ, B_ATTACK, a_on or ds_on, "q_a"),
                                        (QQ, B_QUICKCAST, c_on, "q_t")):
             held = (mask & bit) != 0
             q_on = held and not (pmask & bit) and not started
