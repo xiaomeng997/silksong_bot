@@ -13,3 +13,6 @@ __pycache__/
 .idea/
 oracle/bin/
 oracle/obj/
+# Forum behaviour-table templates (<enemy>_hitboxes.npz, 0.3-12 MB each): generated, rebuilt by
+# ssbot.tools.behaviour_build --encounter Forum (docs/facts/1.0.30000/forum.md section 11); the .json tables are tracked
+/knowledge/1.0.30000/enemies/forum/*.npz
