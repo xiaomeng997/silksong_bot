@@ -34,7 +34,22 @@ launcher --restore.
   gives 9 / 9 violations.
 - Pogo-gate margins on held-out fights (20261003_014409, 12 fights): 8 / 31,505 residuals beyond (max 0.09 u);
   with a 0.05 u persistent bias 67 / 31,543 (max 0.066 u).
-- Live: see the facts file section 8b (degraded_dust on 4a90331) and 8c (oracle regression).
+- Live degraded_dust on 4a90331 (20261003_053033, instances 0 / 1, seeds 91200+): 150 valid, 141 CLEAR (94.0 %,
+  95 % CI 88.9-97.2), 9 QUIT (attack bells 7, charge body 2, rage pattern 0), 0 WOULD_DIE, 0 HARNESS_FAIL,
+  0 unpredicted; bell-hit monitor 235 tinks, 0 violations; late ticks p50 7 / p90 17 a fight, tick p99 median
+  19.1 ms. Stopped at 150 by the lead's STOP_AGENTS (oracle deploy window, 07:33).
+- Stopped runs (not evidence for the final code): 20261003_043306 (65fab69, 10 eps) and 20261003_050343
+  (3dd640f, 6 eps), both with the tick-cost regression fixed in 4a90331.
+
+## Stopped here (STOP_AGENTS, 2026-10-03 07:33): not done yet
+
+- Oracle-view regression on the final code (both views share the left-tink fix, the exact-path caches and the
+  unpredicted accounting): about 60 episodes, e.g. from C:\ssbot\live_vv\brain (already at 4a90331, numba warm):
+  `..\scripts\uv.cmd run python -m ssbot.tools.combat_run run --instances 0,1 --encounter BellBeast --mode eval
+  --policy planner --view oracle --threads 4 --real-quit 0.2 --seed 92000 --episodes 32`.
+- Offline property test on the final code (tools/bell_hit_audit, both views; last run at 8809999) and rec_stats
+  (pogo hits per charge) on 20261003_053033.
+- Nothing of this task is running.
 
 ## Next
 
