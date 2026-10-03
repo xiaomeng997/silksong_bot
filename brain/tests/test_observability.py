@@ -602,22 +602,75 @@ def test_noise_drop_rate_and_sigma():
     assert out.entities[-1].id == -1 and out.entities[-1].pos.v == (5.0, 5.0)   # memory tracks untouched
 
 
-def test_a_missed_detection_coasts(wake_v):
+def test_a_missed_detection_coasts_on_the_estimated_velocity(wake_v):
     base = _visible_boss_frame(wake_v)
-    cfg = NoiseConfig(sigma_pos={}, p_drop={}, sigma_pos_other=0.0, p_drop_other=0.0, sigma_vel=0.0)
+    cfg = NoiseConfig(sigma_pos={}, p_drop={}, sigma_pos_other=0.0, p_drop_other=0.0)
     n = SimpleNoise(cfg, seed=0)
-    first = n.apply(copy.deepcopy(base))
-    b0 = boss(first)
-    n.cfg = NoiseConfig(sigma_pos={}, p_drop={Kind.BOSS: 1.0}, sigma_pos_other=0.0, p_drop_other=0.0, sigma_vel=0.0)
+    n.apply(copy.deepcopy(base))
+    w = copy.deepcopy(base)                         # 0.5 u right 0.05 s later: 10 u/s, whatever the export says
+    w.stamp.t_game_s += 0.05
+    for e in w.entities:
+        if e.id == fx.BOSS_IID:
+            e.pos = E((e.pos.v[0] + 0.5, e.pos.v[1]))
+            e.dmg_boxes = [obs.replace(b, poly=[(x + 0.5, y) for x, y in b.poly]) for b in e.dmg_boxes]
+    b0 = boss(n.apply(w))
+    assert b0.vel.v[0] == pytest.approx(10.0) and b0.vel.v[1] == pytest.approx(0.0, abs=1e-9)
+    n.cfg = NoiseConfig(sigma_pos={}, p_drop={Kind.BOSS: 1.0}, sigma_pos_other=0.0, p_drop_other=0.0)
     nxt = copy.deepcopy(base)
-    nxt.stamp.t_game_s += 0.1
+    nxt.stamp.t_game_s += 0.15
     out = n.apply(nxt)
     c = boss(out)
     assert c is not None and c.visible_frac == 0.0 and c.pos.src == Src.PREDICTED and c.pos.conf == b0.pos.conf / 2
-    dx = b0.vel.v[0] * 0.1
-    assert c.pos.v[0] == pytest.approx(b0.pos.v[0] + dx)
-    assert c.dmg_boxes and np.allclose(np.array(c.dmg_boxes[0].poly)[:, 0] - np.array(b0.dmg_boxes[0].poly)[:, 0], dx)
+    assert c.pos.v[0] == pytest.approx(b0.pos.v[0] + 1.0)
+    assert c.dmg_boxes and np.allclose(np.array(c.dmg_boxes[0].poly)[:, 0] - np.array(b0.dmg_boxes[0].poly)[:, 0], 1.0)
     assert out.game.unobservable & Unobs.DETECTION_MISSED
+
+
+def test_no_logged_velocity_reaches_the_view(wake):
+    """Entity.vel in the vision view is the slope of the detections, never the exported Rigidbody2D velocity."""
+    f = ObservabilityFilter(bosses=[BELL_BEAST])
+    n = SimpleNoise(NoiseConfig(p_drop={}, p_drop_other=0.0), seed=3)
+    seen = 0
+    for w in wake[:400]:
+        w = copy.deepcopy(w)
+        for e in w.entities:
+            e.vel = E((123.0, -321.0))              # an export no tracker could know
+        for out in (f.apply(w), ):
+            for e in out.entities:
+                assert e.vel.v != (123.0, -321.0)
+            for e in n.apply(out).entities:
+                assert abs(e.vel.v[0]) < 100 and abs(e.vel.v[1]) < 100
+                seen += e.vel.conf > 0
+    assert seen > 100
+
+
+def test_a_cue_gets_the_detection_noise_and_no_velocity():
+    from ssbot.core.worldstate import PhasePost
+    cue = [Entity(id=i, kind=Kind.ENEMY_ATTACK, pos=E((80.0, 13.74), conf=1.0, src=Src.PREDICTED), hidden=True,
+                  visible_frac=0.0, phase=PhasePost(topk=[("bell_dust", 1.0)])) for i in range(3000)]
+    dug_in = Entity(id=-2, kind=Kind.BOSS, pos=E((1.0, 1.0), conf=0.0), hidden=True, visible_frac=0.0,
+                    phase=PhasePost(topk=[("hidden", 1.0)]))
+    ghost = Entity(id=-1, kind=Kind.ENEMY, pos=E((5.0, 5.0)), visible_frac=0.0)
+    cfg = NoiseConfig(sigma_pos={Kind.ENEMY_ATTACK: 0.15}, p_drop={Kind.ENEMY_ATTACK: 0.0})
+    out = SimpleNoise(cfg, seed=2).apply(WorldState(entities=cue + [dug_in, ghost]))
+    xy = np.array([e.pos.v for e in out.entities if e.id >= 0])
+    assert len(xy) == 3000 and np.allclose(xy.std(axis=0), 0.15, atol=0.01)
+    assert all(e.hidden and e.visible_frac == 0.0 and e.vel.conf == 0 and e.pos.sigma == 0.15
+               for e in out.entities if e.id >= 0)
+    assert [e.pos.v for e in out.entities if e.id < 0] == [(1.0, 1.0), (5.0, 5.0)]   # no cue: untouched
+
+
+def test_velocity_tracks():
+    from ssbot.vision.track import VelocityTracks
+    vt = VelocityTracks()
+    assert vt.observe(1, 0.0, 0.0, 0.0).conf == 0                       # one detection: unknown
+    assert vt.observe(1, 0.0, 0.0, 0.0).conf == 0                       # hit-stop: no time span
+    for k in range(1, 10):
+        v = vt.observe(1, k / 60, 2.0 * k / 60, 5.0 - 3.0 * k / 60, sigma=0.1)
+    assert v.v == pytest.approx((2.0, -3.0)) and 0 < v.sigma < 2.0 and v.conf > 0
+    assert vt.observe(1, 2.0, 50.0, 0.0).conf == 0                      # a gap: a new history
+    vt.prune(10.0)
+    assert vt.hist == {}
 
 
 # ---- delay line and the action-side client -------------------------------------------------------------------

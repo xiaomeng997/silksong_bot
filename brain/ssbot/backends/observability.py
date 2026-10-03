@@ -60,6 +60,9 @@ Rule: no value in the output may depend on something pixels cannot show. Per fra
     20261002_060151: 16 of 16 episodes ended at the first burst); planner_policy.BURST_TELL only measures what a cue
     would be worth.
   - Exact timers (HeroState fields tagged timer=True) -> None until the vision-side timer models exist.
+  - Velocities: an entity's exported Rigidbody2D velocity (and the acceleration and facing derived from it) is O; a
+    visible entity carries the slope of its detections' history instead (vision.track.VelocityTracks, 0.1 s window),
+    a tell none. SimpleNoise re-estimates it from the noisy positions (task V, 2026-10-02).
   - playTime -> wall clock: calibrated once from the first frame (standing in for the save-slot read, sigma
     calib_sigma_s; the slot shows h:mm), then advanced by the QPC wall clock while the game would count it
     (GameManager.IncreaseGameTimer, GameManager.cs:4223: PLAYING / ENTERING_LEVEL / EXITING_LEVEL with the inventory
@@ -111,6 +114,7 @@ from ssbot.core.worldstate import (BIND_SILK, ORACLE, VISION_BLOCKS, VISION_EQUI
                                    Hazard, HeroState, HitDealt, Kind, PauseBlock, PhasePost, Screen, Src, Unobs,
                                    WorldState, timer_fields, unknown)
 from ssbot.tools.projector import mat4, project
+from ssbot.vision.track import VelocityTracks
 
 try:
     import numba
@@ -473,6 +477,7 @@ class ObservabilityFilter:
         self._rates: deque[tuple[float, float]] = deque(maxlen=SLOW_WINDOW)   # (game dt, real dt) per frame
         self._gameplay_prev: bool | None = None
         self._audit: tuple[str, list[str]] | None = None       # crest and equipment at the last inventory audit
+        self._vel = VelocityTracks()          # velocities from the detections' history (never the logged ones)
 
     # ---- per frame ---------------------------------------------------------------------------------------------
 
@@ -490,6 +495,7 @@ class ObservabilityFilter:
             self._killed.clear()
             self._phase.clear()
             self._freeze_q.clear()
+            self._vel.reset()
         unobs = Unobs.TIMERS_DROPPED | Unobs.PLAYTIME_WALL | Unobs.PAUSE_INFERRED
 
         for e in ws.entities:                      # types without an offline table: learn from every exported one
@@ -533,6 +539,7 @@ class ObservabilityFilter:
 
         for e in visible:
             unobs |= self._estimate(e, t)
+            self._track_vel(e, t)
             if self.boxes.t.get(e.type_key.v):
                 e.dmg_boxes = self.boxes.place(e.type_key.v, e.pos.v, e.flip_x)
                 unobs |= Unobs.BOXES_FROM_TABLE
@@ -594,6 +601,7 @@ class ObservabilityFilter:
                                        visible_frac=0.0, hidden=True, flip_x=e.flip_x))
             self._told = told
         out.entities = ents
+        self._vel.prune(t)
 
         for name in _TIMERS:
             setattr(out.hero, name, None)
@@ -653,6 +661,18 @@ class ObservabilityFilter:
             e.phase = PhasePost(topk=[(name, 1.0)], t_in_phase=self._phase_time(e.id, name, t))
             flags |= Unobs.PHASE_FROM_TABLE
         return flags
+
+    def _track_vel(self, e: Entity, t: float) -> None:
+        """A visible entity's velocity, acceleration and facing as a tracker has them: the slope of its detections
+        (vision.track; the exported Rigidbody2D velocity is O), no acceleration, facing from that slope when it is
+        clear, else from the sprite's flip."""
+        e.vel = self._vel.observe(e.id, t, e.pos.v[0], e.pos.v[1], e.pos.sigma)
+        e.acc = (0.0, 0.0)
+        vx = e.vel.v[0]
+        if e.vel.conf > 0 and abs(vx) > max(0.1, 3.0 * e.vel.sigma):
+            e.facing = E(1 if vx > 0 else -1, conf=0.6, src=Src.PREDICTED)
+        else:
+            e.facing = E(-1 if e.flip_x else 1, conf=0.3, src=Src.PREDICTED)
 
     def _hit_value(self, d: HitDealt) -> tuple[float, float]:
         """(damage, variance) of one hit dealt: attack_damage[src], else [attack], else the longest key prefixing the

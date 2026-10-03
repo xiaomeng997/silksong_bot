@@ -127,6 +127,10 @@ TELL_SLACK_S = {"burst_tell": BIN, "dust": 0.1, "dust_low": 0.1, "dust_tall": 0.
 # A drop bell's cue: a narrow dust column from the ceiling at its x, from +0.3 s after it arms (Antic; none at +0.1 s;
 # it falls about 1.25 s after arming), screenshots C:/ssbot/sandbox/m2_tells DropBell_*. The vision view places its
 # self template from the cue (arming TELL_DELAY earlier, +-TELL_SLACK_S) like the oracle view does from the FSM.
+# A cue's x is the mean of its detections (SimpleNoise: as noisy as any detection). The vision view's planner margin
+# (planner_policy: NOISE_K x hypot(hero sigma, boss sigma 0.10)) covers a placement x this uncertain (1 sigma); a cue
+# seen in fewer frames is placed at its x +- SKIN_Z sigma as well.
+CUE_SIGMA_COVERED = 0.10
 DUST_ROOTS = (("BB_CHARGE", "Emerge Antic C"), ("BB_LEAP", "Emerge Antic L"))
 RECOVER_ROOT = {"BB_CHARGE": "Charge End", "BB_LEAP": "Leap Land"}
 # the state a hidden phase starts in, by the last drawn family (None: before the first emergence)
@@ -698,7 +702,10 @@ class BossTracker:
         #                                                                    arm time, arm position)
         self.bells_unknown = False             # an armed drop bell whose arming was not seen
         self._cued: set[int] = set()           # VE: drop bells with their cue in the last frame
+        self._cue_obs: dict[int, list[tuple[float, float, float]]] = {}   # VE: the cue's detections (x, y, sigma)
+        self.bell_sx: dict[int, float] = {}    # VE: 1 sigma of an armed bell's x (the mean of its cue detections)
         self.anchor_log: list[tuple[str, float, float]] = []   # ORACLE: (family, hidden x, drawn transform x)
+        self.bell_y: float | None = getattr(self, "bell_y", None)   # VE: drop bells' hang height (registry `start`)
         # ORACLE: body shapes seen per (state, flipX), polygons relative to the transform (kept across episodes: the
         # same boss), for the states the playbook predicts others with (Forecaster.shape_from)
         self.shapes: dict = getattr(self, "shapes", {})
@@ -860,7 +867,10 @@ class BossTracker:
     # ---- VISION_EQUIVALENT ----------------------------------------------------------------------------------------
 
     def _bells_ve(self, ws: WorldState, t: float) -> None:
-        """VE with the bell cue (ObservabilityFilter tells, phase "bell_dust"): arming time from the cue."""
+        """VE with the bell cue (ObservabilityFilter tells, phase "bell_dust"): arming time from the cue, the bell's x
+        from the mean of the cue's detections (each as noisy as any other detection; a missed one coasts and does
+        not count), its y the hang height every drop bell has (registry `start`: 13.74, the transform in Antic in
+        13,479 of 13,479 frames of live run 20261002_171806 i0_000), else the cue's mean y."""
         cued = set()
         for e in ws.entities:
             if not e.type_key.v.startswith(DROP_BELL) or e.phase is None or e.phase.top != "bell_dust":
@@ -869,10 +879,24 @@ class BossTracker:
             if e.id not in self._cued:             # a new cue: this bell (re-)armed
                 t_arm = t - e.phase.t_in_phase - TELL_DELAY["bell_dust"]
                 self.bells[e.id] = (e.type_key.v, t_arm, (float(e.pos.v[0]), float(e.pos.v[1])))
+                self._cue_obs[e.id] = []
+            obs = self._cue_obs.setdefault(e.id, [])
+            if e.pos.age_ms <= 0.0:                # detected in this frame (a coasted cue's age grows)
+                s = e.pos.sigma if math.isfinite(e.pos.sigma) else 1.0
+                obs.append((float(e.pos.v[0]), float(e.pos.v[1]), float(s)))
+            if obs:
+                a = np.asarray(obs, np.float64)
+                y = self.bell_y if self.bell_y is not None else float(a[:, 1].mean())
+                tk, t_arm, _ = self.bells[e.id]
+                self.bells[e.id] = (tk, t_arm, (float(a[:, 0].mean()), y))
+                self.bell_sx[e.id] = float(np.sqrt(np.mean(a[:, 2] ** 2)) / math.sqrt(len(a)))
         self._cued = cued
+        for iid in [i for i in self._cue_obs if i not in cued]:
+            del self._cue_obs[iid]
         for iid in [i for i in self.bells if i not in cued]:
             if t - self.bells[iid][1] > BELL_TTL_S:
                 del self.bells[iid]
+                self.bell_sx.pop(iid, None)
 
     def _update_ve(self, ws: WorldState, boss: Entity | None, t: float) -> None:
         m = self.model
@@ -940,18 +964,20 @@ class BossTracker:
             self._t_start0 = self.t_start
             self._phase_t0 = (ph, self.t_entry)
         if fam == "BB_BURST":
-            # set once per burst and kept to its end (an earlier version fell through to the family's named anchor,
+            # set per burst and kept to its end (an earlier version fell through to the family's named anchor,
             # which a burst has none of, from the second drawn frame on: the whole burst range for the rest of the
-            # burst, FORCED_RISK in every stage C burst, run 20261002_060151)
-            if boss.pos.conf > 0 and not self._anchor_sum:
+            # burst, FORCED_RISK in every stage C burst, run 20261002_060151). The cue's dust stands at the anchor:
+            # the mean of all its detections (each as noisy as a boss detection); without a cue the first drawn frame
+            if boss.pos.conf > 0 and boss.pos.age_ms <= 0.0:       # detected in this frame (not coasted)
                 if ph in TELL_PHASES:
                     self._anchor_sum.append(boss.pos.v[0])
-                else:
+                elif not self._anchor_sum:
                     # the box follows the sprite frame (live i2_002 f605393-605452: box centre x 89.93 -> 91.57 while
                     # the transform stays at 90.47), so only the first drawn frame has the behaviour table's offset
                     self._anchor_sum.append(boss.pos.v[0] - f.box_offset.get(bool(boss.flip_x), (0.0, 0.0))[0])
+            if self._anchor_sum:
                 y = f.anchor_y if f.anchor_y is not None else boss.pos.v[1] + 2.68
-                self.last_anchor = Anchor(float(self._anchor_sum[0]), y, 1)
+                self.last_anchor = Anchor(float(np.mean(self._anchor_sum)), y, 1)
         elif f.directed:
             told = ph in TELL_PHASES and self.tell_dir is not None
             base = m.anchor(fam, self.tell_dir if told else ("Set R" if boss.flip_x else "Set L"))
@@ -1182,6 +1208,8 @@ class Forecaster:
         # oracle view reads from the FSM and the logged velocity
         sp = self.targets.spec_of(DROP_BELL)
         self.drop_tracks = DropBellTracks(sp) if sp is not None and view != ORACLE else None
+        if self.drop_tracks is not None and self.drop_tracks.ok:
+            self.tracker.bell_y = self.drop_tracks.y0
         self.det_ve = DET_VE
         self._ws: WorldState | None = None
         self.boss: Entity | None = None
@@ -1254,11 +1282,16 @@ class Forecaster:
                 if self._det_bell(iid, det):
                     continue                  # falling or bounced: its exact path (two branches) replaces the template
                 t0, t1 = self.meta[key]
+                # VE: a cue seen in few frames: its x +- 3 sigma as well, beyond what the view's margin covers
+                sx = tr.bell_sx.get(iid, 0.0)
+                dxs = (0.0,) if sx <= CUE_SIGMA_COVERED else (-SKIN_Z * sx, 0.0, SKIN_Z * sx)
                 for j in range(-k, k + 1):
                     e = t_arm + j * BIN - origin
                     if e + t1 < -BIN or e + t0 > H + BIN:
                         continue
-                    placements.append(Placement(key, -e, pos, 1, nid, e + t0, e + t1, frozenset({tk})))
+                    for dx in dxs:
+                        placements.append(Placement(key, -e, (pos[0] + dx, pos[1]), 1, nid, e + t0, e + t1,
+                                                    frozenset({tk})))
         for fam, anchor, lo, hi, phase, death in self.tracker.ends:
             nid = len(nodes)
             nodes.append(Node(nid, TAIL, lo - origin, hi - origin, fam, 1.0, -1, anchor))
