@@ -136,7 +136,9 @@ def trial(row: dict, states: list[dict], names: list[str], natural: bool = False
     took = [r for r in inj.get("replies") or () if isinstance(r, dict) and r.get("take_health_calls")
             and r.get("hp_after", 9) < r.get("hp_before", 0)]
     out = {"kind": inj.get("kind"), "fault": fault, "offset": inj.get("offset"), "fallback": inj.get("fallback"),
-           "sent": len(inj.get("sent") or ()), "took": bool(took), "outcome": row.get("outcome"),
+           "sent": len(inj.get("sent") or ()), "took": bool(took),
+           "refused": sum(1 for r in inj.get("replies") or () if isinstance(r, dict) and r not in took),
+           "outcome": row.get("outcome"),
            "reason": row.get("reason")}
     pend = pol.get("first_pending_f")
     by_f = {s["f"]: s for s in states}
@@ -250,6 +252,7 @@ def summarize(trials: list[dict]) -> dict:
         for v in (t.get("special") or {}).values():
             offs[v] += 1
     return {"trials": len(trials), "injected": len(inj), "hits_taken": sum(bool(t.get("took")) for t in trials),
+            "hits_refused": sum(t.get("refused") or 0 for t in trials),
             "kinds": dict(Counter(t["kind"] for t in trials)),
             "faults": dict(Counter(t.get("fault", "hit") for t in trials)),
             "special_share": share(inj),

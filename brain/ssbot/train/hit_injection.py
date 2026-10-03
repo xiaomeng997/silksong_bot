@@ -29,9 +29,11 @@ where the moment is committed and its frame known, a few frames before it:
           trigger goes at press + 19 + offset; a nail press hits 1-4 frames later (Slash / AltSlash 38 of 56 at +1),
           so its offset is at least -1 (the press is seen on the frame it is latched); either only when the planner
           scored that attack as a hit
-  bounce  downSpikeBouncing onset. hit: onset + 1 (past the 2-physics-step down-spike i-frames,
-          HeroController.DOWNSPIKE_INVULNERABILITY_STEPS; a hit the game refuses re-arms for the next bounce);
-          trigger: onset + 0..2
+  bounce  downSpikeBouncing onset. hit: sent at onset + 2, so it lands at + 3, past the down-spike i-frames
+          (HeroController.DOWNSPIKE_INVULNERABILITY_STEPS = 2 physics steps, counted down in FixedUpdate: 2-3 frames
+          at 50 Hz physics; chunk 20261002_225739 ep 0: two hits sent at + 1, run at + 2, both refused) and re-armed
+          once at most (every refused hit is a "damage" event the planner counts as unpredicted: two of them are a
+          Q4 quit with no fault); trigger: onset + 0..2
   cast    the first frame of a NeedleThrow clip (a Silkspear: AnticG / AnticA); hit / trigger + 0..2
   clash   parrying onset, or a nail recoil onset with no hit dealt on that frame or the 2 before (a tink off a bell);
           hit / trigger + 0..2 (rare against the Bell Beast: a short fallback)
@@ -136,7 +138,7 @@ class HitInjector:
         if kind == "kill" and fault == FAULT_TRIGGER:
             offset = r.randint(-3, 2)
         elif kind == "bounce" and fault == FAULT_HIT:
-            offset = 1
+            offset = 2
         elif fault == FAULT_HIT:
             offset = r.randint(0, 1)
         else:
@@ -279,7 +281,7 @@ class HitInjector:
             "hp_before", 0)
         if took or self.fault == FAULT_MENU:       # menu: the trigger has fired; one hit, taken or not
             self.done = True
-        elif self.retries < self.max_retries:
+        elif self.retries < (1 if self.kind == "bounce" else self.max_retries):
             self.retries += 1
             self.sched = None
         else:
