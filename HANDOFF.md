@@ -1,41 +1,44 @@
-# HANDOFF: task V (Bell Beast in the vision-equivalent view)
+# HANDOFF: task V (Bell Beast in the vision-equivalent view), fixer round
 
 Worktree C:\modeling\silksong_bot\.claude\worktrees\wf_946a7803-63c-1, branch worktree-wf_946a7803-63c-1.
-Findings: docs/facts/1.0.30000/m2_vision_view.md (round 2: sections 1-11 at the end).
-Live runs go from a separate detached worktree C:\ssbot\live_vv (git worktree of this branch, checked out at the
-commit under test, numba prewarmed with planner_bench). Instances 0 and 1 (ports 47017 / 47018) were restarted by
-this task at about 22:25 PDT (they had exited); the lead runs launcher --restore.
+Findings: docs/facts/1.0.30000/m2_vision_view.md, "第三轮" (round 3 = this fixer round) at the end; it also marks
+round 2's live numbers (sections 10-12) as measured with an oracle supervisor / pause machine.
+Live runs go from the detached worktree C:\ssbot\live_vv (checked out at the commit under test, numba prewarmed
+with planner_bench on a recording). Instances 0 and 1 (ports 47017 / 47018) are left running idle; the lead runs
+launcher --restore.
 
-## Done (round 2, commits bb568e5 .. ec62558)
+## Done (fixer round, commits d9faaff .. 4a90331; later commits are docs)
 
-- bb568e5 no logged velocities (vision/track.VelocityTracks), cues as noisy detections; 71f2478 attack bells on
-  exact paths (bell_track.AtkBellTracks) and the burst's attack-bell unions dropped; 06aa2f4 filter: undrawn bosses
-  invisible, ghost cues shown; boss box shape along the horizon; pogo margins per time in phase; 387ff86 VE rage
-  scoring; VE bell targets (off); 52d0e1e late-tick catch-up (skipped STATEs through the perception path);
-  0f4435d finer/narrower time slack for tracked bells; 5cdf73f VE targets only attack bells; e77c6ec touched drop
-  bells get their path back once the track rules a tink out; ec62558 a cue always starts a new attack (the run's one
-  real unpredicted hit), unpredicted accounting with forecast gaps.
-- Held-out recall (ve_dust + noise seed 7, margin 0, lags 2-4) 23,896 / 23,896 after every step.
-- Main degraded_dust run on 52d0e1e (20261002_232157): 154 valid, 126 CLEAR (81.8 %), 0 WOULD_DIE, 2 HARNESS_FAIL.
-  QUITs: rage drop-bell pattern 15, bursts 8, charges 3, 2 hits on skipped frames.
+- d9faaff: stage C supervisor and pause machine read only the delayed view (supervisor.input_from_world,
+  pause_quit.vision_cues_from_state: dimmer, stopped world, menu reader; no paused flag, no pause gate); no hero hits
+  newer than the WorldState in the planner's start state; unpredicted hits judged only at lags 3 / 4 / 2, else
+  unpredicted_unknown (also counted for Q4).
+- 8809999: the hero's hits on drop bells are modelled in the vision view: pogo_targets.tink (the FSM's rule; TINK LEFT
+  is -10 for |vx| <= 5, simulate had -5 in both views), bell_track keeps tink branches instead of withdrawing a
+  touched bell, VE bell targets on (drop bells redirect on their branch, pogo only while falling), a bell with open
+  branches makes attacking plans unsafe; train/bell_hit_monitor (live, stats()["bell_hits"]) and
+  tools/bell_hit_audit (offline property test, both views).
+- 3f6de98: cues only inside the image; a cue that comes into the image late is bounded by the camera history; cue
+  onsets drawn in their evidence bracket ((0.1, 0.3] s, low/tall (0.3, 0.6] s), TELL_DELAY / TELL_SLACK_S re-centred.
+- 65fab69: SimpleNoise per-track persistent bias (placeholder 0, SSBOT_NOISE_BIAS for audits), ghosts keep their last
+  detection's offset; boss_path_audit --check-margins (held-out exceedance of the pogo-gate margins).
+- 3dd640f: real-quit menus keep the last WorldState (outcome reason only).
+- 4a90331: tick cost back to the ec62558 level (the new exact paths had made bursts 3-4 ms slower: 60-180 late ticks
+  a fight and attack-bell hits in 12 of 16 live episodes of 20261003_043306 / 050343, both stopped).
 
-## Results (no job running)
+## Measured (details in the facts file)
 
-- Oracle regression on ec62558 (20261003_014409): 66 eps, 65 CLEAR (98.5 %), 0 WOULD_DIE, 0 unpredicted; plus
-  20 / 20 CLEAR on d4a85c5 (20261003_013226, stopped to move to the final commit).
-- degraded_dust on ec62558 (20261003_022259): 61 eps, 47 CLEAR (77.0 %), 0 WOULD_DIE, 0 unpredicted.
-- Nothing of this task is running. Instances 0 and 1 are left running idle (lead: launcher --restore). The live
-  worktree C:\ssbot\live_vv (detached at ec62558) can be removed with `git worktree remove C:\ssbot\live_vv`.
-- Tools: combat_run summary <run>; C:/ssbot/sandbox/vv_scratch/rec_stats.py <run> (hits by Control state from
-  the recordings); hits_summary.py <run>; unpred_dbg.py <run> <inst> <ep> <hit f>; dbg_support2.py (support per x
-  and height around a frame); touch_count.py; slack_need.py.
+- Held-out recall (i2_002 / i3_002, held-out tables, lags 2-4): 23,896 / 23,896 for ve_dust noise seeds 7, 11, 23
+  (margin 0), seed 23 at the live margin 0.335 u, and oracle; again after 4a90331 (seed 7, oracle).
+- Property test (bell_hit_audit, 171806, 24 fights, at 8809999): 0 violations in 32 + 32 tinks; the old withdrawal
+  gives 9 / 9 violations.
+- Pogo-gate margins on held-out fights (20261003_014409, 12 fights): 8 / 31,505 residuals beyond (max 0.09 u);
+  with a 0.05 u persistent bias 67 / 31,543 (max 0.066 u).
+- Live: see the facts file section 8b (degraded_dust on 4a90331) and 8c (oracle regression).
 
 ## Next
 
-1. Rage drop-bell pattern (15 of 28 QUITs): the cue's +-0.1 s time slack (13 self-template placements per pending
-   bell), the VE margin on bells (the boss-noise part does not apply to tracked bells, but the planner's hull
-   sampling assumes one dilation), no pogo / redirect escapes in VE (drop-bell targets need a tink model: keep the
-   untouched and tinked branches instead of withdrawing; simulate must be vectorised first).
-2. Bursts (8): PREPARE 4.5 u beside the burst is where the attack bell lands and rolls out; the VE slack change
-   (0f4435d) halves the bells' smear; the ec62558 chunk had 6 burst QUITs of 61 (the main run 8 of 154).
-3. Dig In / Charge End pogos (0.2 pogo hits per charge vs 0.97 oracle): Charge End left/right margins 2.5 u.
+- See the facts file, round 3 section 9 (remaining issues): off-screen bell columns and the union shortcut, the rage
+  prune's hit-count assumption (M3), the persistent-bias size (M3), bursts / rage pattern / Dig In pogos.
+- To stop a running job: `..\scripts\uv.cmd run python -m ssbot.tools.combat_run stop <run dir>` from
+  C:\ssbot\live_vv\brain (or this worktree's brain).
