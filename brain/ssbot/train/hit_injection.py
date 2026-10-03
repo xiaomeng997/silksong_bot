@@ -42,8 +42,8 @@ where the moment is committed and its frame known, a few frames before it:
           (chunks 20261002_225013, 230409) and the 6 calibration fights had no parry
 p_event is the share of these (weights bounce 3 : cast 3 : menu 2 : kill 1 : clash 0; hit or trigger 50 / 50 for
 cast and kill); the rest are coverage kinds: hit faults on airborne frames (rising vy > 2, apex |vy| < 1.5, falling
-vy < -2), attack, pogo (as the first chunk), and trigger faults on any frame with a planner key latched ("keys": the
-key guard under load). An episode whose moment never comes falls back after fallback_s (kill: kill_fallback_s, as the
+vy < -2), attack, pogo (as the first chunk), and trigger faults on a frame whose in-flight ACTION (the planner's mask
+already sent for the next frame) presses a key ("keys": the menu key guard under load, safety.key_guard). An episode whose moment never comes falls back after fallback_s (kill: kill_fallback_s, as the
 boss is one hit from death only near the end of a 55-80 s fight; clash: clash_fallback_s): a hit on the next
 airborne frame, a trigger at once. A hit the game does not take (i-frames, take_health_calls 0) re-arms. Faults wait
 min_s after the policy's first tick so the fight is under way. Trigger faults are injected before the wrapped
@@ -251,9 +251,17 @@ class HitInjector:
         vy = (h.get("vel") or [0.0, 0.0])[1]
         air = h.get("hero_state") == HS_AIRBORNE
         clip = _clip(s)
+        if k == "keys":
+            # a key pressed in flight: the ACTION already sent for f + 1 presses a key not latched now, which the
+            # key path cannot release before f + 3 (the leak's case; a long-held key is released on the press's own
+            # frame). Before, this kind fired on any latched key: 0 of the first 14 trigger faults (5 of this kind,
+            # chunks 20261002_225013 ... 230409) needed the guard
+            sent = getattr(self.inner, "sent", None)
+            inflight = int(sent.get(f + 1, 0)) if isinstance(sent, dict) else 0
+            return f if inflight & ~x["lat"] else None
         now = {"rising": air and vy > 2.0, "apex": air and abs(vy) < 1.5, "falling": air and vy < -2.0,
                "attack": any(clip.startswith(c) for c in ATTACK_CLIPS), "pogo": clip.startswith("DownSpike"),
-               "keys": x["lat"] != 0, "menu": x["lat"] != 0}.get(k, False)
+               "menu": x["lat"] != 0}.get(k, False)
         return f if now else None
 
     def _scored(self, f: int, needle: bool) -> bool:

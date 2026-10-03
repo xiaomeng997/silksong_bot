@@ -231,6 +231,16 @@ def test_menu_fault_triggers_and_hits_on_one_tick_and_hit_faults_rearm_on_the_ne
     assert not link.calls and not inner.sc.faults                     # no planner key latched yet
     inj.act(_fs(80, lat=1 << 20))
     assert len(link.calls) == 1 and len(inner.sc.faults) == 1 and inj.log["trigger_f"] == 80
+    inner = InnerSc()                                                 # "keys": a press in flight, not a held key
+    inner.sent = {}
+    inj, link = _injector("keys", fault="trigger", inner=inner)
+    for f in range(0, 90):
+        inner.sent[f + 1] = 1 << 20                                   # right held all along
+        inj.act(_fs(f, lat=1 << 20 if f > 0 else 0))
+    assert inj.log.get("trigger_f") is None
+    inner.sent[91] = (1 << 20) | 1                                    # jump pressed on f + 1
+    inj.act(_fs(90, lat=1 << 20))
+    assert inj.log["trigger_f"] == 90 and len(inner.sc.faults) == 1 and not link.calls
     inj, link = _injector("cast", fault="hit", offset=0, take=False)
     for f in range(0, 300):
         inj.act(_fs(f, clip="NeedleThrow AnticG" if f % 50 < 5 else "Idle"))   # a cast every 50 frames
