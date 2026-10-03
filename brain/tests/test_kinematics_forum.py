@@ -65,6 +65,18 @@ def test_wall_jump_kicks_off_and_locks(params, room):
     assert r.final[km.WSIDE, 0] == 0
 
 
+def test_wall_scramble_climbs(params, room):
+    S, m = _in_air_at_wall(params, room, 40)
+    r0 = _roll(params, room, S, m)
+    m = m + [DASH | L] * 6 + [L] * 60
+    r = _roll(params, room, S, m)
+    assert (r.mode[0] == km.M_SCRAMBLE).any()
+    y0 = r0.box[0, -1, 1]
+    rise = r.box[0, :, 1].max() - y0
+    assert 2.5 < rise < 6.0                                    # 22 u/s up against 48-72 u/s^2: about 3.4-5 u
+    assert r.final[km.WSIDE, 0] == -1                          # back to the wall slide (To Wall Slide)
+
+
 def test_glide_approaches_float_speed(params, room):
     S = km.initial_state(params, 10.0, params.skin + params.foot)
     m = [J] * 12 + [0] * 4 + [J] * 120

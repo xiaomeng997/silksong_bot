@@ -191,6 +191,7 @@ def categorize(tr: Trace, horizon: int, modes: np.ndarray, events: np.ndarray, t
         ("dash", np.isin(mw, (km.M_DASH, km.M_SPRINT)).any(axis=1)),
         ("reaper_down", (mw == km.M_RPR_DS).any(axis=1)),
         ("hard_landing", (mw == km.M_HARD_LAND).any(axis=1)),
+        ("scramble", (mw == km.M_SCRAMBLE).any(axis=1)),
         ("recovering", np.isin(mw[:, 0], (km.M_HURT_FREEZE, km.M_HURT_RECOIL))),
         ("contact", (ew & CONTACT).any(axis=1)),
         ("hurt", (ew & HURT).any(axis=1)),

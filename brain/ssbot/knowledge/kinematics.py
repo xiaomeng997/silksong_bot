@@ -234,10 +234,10 @@ M_NORMAL, M_DS_ANTIC, M_DS_SPIKE, M_HURT_FREEZE, M_HURT_RECOIL, M_CAST, M_BIND, 
 # 3 deflate), Swift Step dash (HeroController.Dash), the sprint FSM after it (PHASE 0 air sprint / 1 air loop /
 # 2 ground sprint / 3 skid), the Reaper down slash (Crest Attacks FSM, PHASE 0 antic / 1 slash / 2 fall / 3 fall 2),
 # hard landing
-M_GLIDE, M_DASH, M_SPRINT, M_RPR_DS, M_HARD_LAND = range(8, 13)
+M_GLIDE, M_DASH, M_SPRINT, M_RPR_DS, M_HARD_LAND, M_SCRAMBLE = range(8, 14)
 MODE_NAMES = ("NORMAL", "DS_ANTIC", "DS_SPIKE", "HURT_FREEZE", "HURT_RECOIL", "CAST", "BIND", "LOCKED", "GLIDE",
-              "DASH", "SPRINT", "RPR_DS", "HARD_LAND")
-RELINQUISHED = (M_DS_ANTIC, M_DS_SPIKE, M_CAST, M_BIND, M_LOCKED, M_GLIDE, M_SPRINT, M_RPR_DS)  # controlReqlinquished
+              "DASH", "SPRINT", "RPR_DS", "HARD_LAND", "SCRAMBLE")
+RELINQUISHED = (M_DS_ANTIC, M_DS_SPIKE, M_CAST, M_BIND, M_LOCKED, M_GLIDE, M_SPRINT, M_RPR_DS, M_SCRAMBLE)  # controlReqlinquished
 NO_INPUT = (M_HURT_FREEZE, M_HURT_RECOIL)                             # hero_state no_input
 
 # contact events (bit flags per frame; applied after the frame's physics steps, before its Update)
@@ -443,6 +443,14 @@ class HeroParams:
     rpr_slash_decel: float = 0.7       # ... DecelerateV2
     hard_fall_time: float = 0.5        # BIG_FALL_TIME
     hard_land_time: float = 0.67       # HARD_LANDING_TIME
+    # Wall Scramble FSM (hornet_wall_scramble: a dash while sliding and holding towards the wall climbs it)
+    scr_antic_t: float = 0.1           # Wall Scramble Antic clip (fit)
+    scr_speed: float = 22.0            # Start Scramble: vy (30 with Quickening)
+    scr_force: float = 72.0            # Scramble Up: AddForce2d down per step (mass 1), ...
+    scr_force_held: float = 48.0       # ... while the dash is still held
+    scr_end_vy: float = 0.5            # ... until vy < 0.5
+    scr_end_decel: float = 0.8         # Scramble End: DecelerateXY y
+    scr_end_t: float = 0.1             # Wall Scramble End clip (fit)
     jump_heights: list = field(default_factory=list)   # per jump hold length: logged and model apex spread
     scenes: dict = field(default_factory=dict)       # scene -> {"enable": [go names], "disable": [go names]}
     source: dict = field(default_factory=dict)       # key -> provenance note
@@ -470,7 +478,8 @@ class HeroParams:
               "glide_vy", "glide_vy_accel", "glide_start_vy", "glide_cooldown", "glide_ground_ray",
               "glide_bump_ray", "glide_bump_vx", "rpr_antic_t", "rpr_slash_t", "rpr_fall_t", "rpr_fall2_t",
               "rpr_antic_decel", "rpr_antic_decel_y", "rpr_accel", "rpr_decel", "rpr_vmax", "rpr_speed",
-              "rpr_slash_decel", "hard_fall_time", "hard_land_time")
+              "rpr_slash_decel", "hard_fall_time", "hard_land_time", "scr_antic_t", "scr_speed", "scr_force",
+              "scr_force_held", "scr_end_vy", "scr_end_decel", "scr_end_t")
 
     def vector(self) -> np.ndarray:
         return np.array([float(getattr(self, k)) for k in self.VECTOR], dtype=np.float64)
@@ -542,7 +551,8 @@ class HeroParams:
  P_SKID_T, P_GL_ANTIC, P_GL_INFLATE, P_GL_DEFLATE, P_GL_AACC, P_GL_ACC, P_GL_DEC, P_GL_VMAX, P_GL_VY, P_GL_VYACC,
  P_GL_START_VY, P_GL_CD, P_GL_GRAY, P_GL_BRAY, P_GL_BVX, P_RPR_ANTIC, P_RPR_SLASH, P_RPR_FALL, P_RPR_FALL2,
  P_RPR_ADEC, P_RPR_ADEC_Y, P_RPR_ACC, P_RPR_DEC, P_RPR_VMAX, P_RPR_SPEED, P_RPR_SDEC, P_HARD_FALL, P_HARD_LAND,
- NP) = range(127)
+ P_SCR_ANTIC, P_SCR_SPEED, P_SCR_FORCE, P_SCR_FORCE_H, P_SCR_END_VY, P_SCR_END_DEC, P_SCR_END_T,
+ NP) = range(134)
 assert NP == len(HeroParams.VECTOR)
 
 
@@ -1729,6 +1739,8 @@ GLIDE_CLIPS = {"Umbrella Inflate Antic": 0, "Umbrella Inflate": 1, "Umbrella Flo
 SPRINT_CLIPS = {"Sprint Air": 0, "Sprint Air Short": 0, "Sprint Air Loop": 1, "Sprint": 2, "Land to Sprint": 2,
                 "Skid End 1": 3, "Skid End 2": 3}
 RPR_CLIPS = {"v3 Down Slash Antic": 0, "v3 Down Slash": 1}
+SCRAMBLE_CLIPS = {"Wall Scramble Antic": 0, "Wall Scramble": 1, "Wall Scramble Quickened": 1,
+                  "Wall Scramble End": 2}
 HS_HARD_LANDING = 5   # GlobalEnums.ActorStates.hard_landing
 
 
@@ -2094,6 +2106,8 @@ def forum_mode(md: int, prev_md: int | None, flag, clip, relinq: bool, hero_stat
     taken = relinq or hero_state == HS_NO_INPUT
     if taken and clip in GLIDE_CLIPS:
         return M_GLIDE
+    if taken and clip in SCRAMBLE_CLIPS:
+        return M_SCRAMBLE
     if taken and flag("isSprinting"):
         return M_SPRINT
     if taken and (clip in RPR_CLIPS or (prev_md == M_RPR_DS and md == M_LOCKED)):
@@ -2200,7 +2214,9 @@ class ForumRows:
             ph = float(SPRINT_CLIPS.get(clip, pr["ph"] if pr and pmd == M_SPRINT else 0))
         elif md == M_RPR_DS:
             ph = float(RPR_CLIPS.get(clip, max(pr["ph"], 2.0) if pr and pmd == M_RPR_DS else 0))
-        if md in (M_GLIDE, M_SPRINT, M_RPR_DS):
+        elif md == M_SCRAMBLE:
+            ph = float(SCRAMBLE_CLIPS.get(clip, pr["ph"] if pr and pmd == M_SCRAMBLE else 0))
+        if md in (M_GLIDE, M_SPRINT, M_RPR_DS, M_SCRAMBLE):
             if pr and pmd == md and pr["ph"] == ph:
                 self.ph_t = np.float32(self.ph_t + dt)
             else:
@@ -2211,9 +2227,12 @@ class ForumRows:
                 S[GS] = 0.0 if ph in (1.0, 2.0) else 1.0
             elif md == M_RPR_DS:
                 S[GS] = 0.0 if ph < 2 else 1.0
+            elif md == M_SCRAMBLE:
+                S[GS] = 0.0
             else:
                 S[GS] = 1.0
-        S[SP_X] = face * (p.air_sprint_speed if ph <= 1 else p.sprint_speed) if md == M_SPRINT else 0.0
+        S[SP_X] = face * (p.air_sprint_speed if ph <= 1 else p.sprint_speed) if md == M_SPRINT else \
+            (face if md == M_SCRAMBLE else 0.0)
         if pr and pmd == M_GLIDE and md != M_GLIDE:
             self.gl_cd = np.float32(p.glide_cooldown)
         elif self.gl_cd > 0:

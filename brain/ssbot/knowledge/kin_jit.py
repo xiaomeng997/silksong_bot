@@ -41,7 +41,8 @@ from ssbot.knowledge.kinematics import (  # Forum loadout (abilities)
     P_RPR_ANTIC, P_RPR_DEC, P_RPR_FALL, P_RPR_FALL2, P_RPR_SDEC, P_RPR_SLASH, P_RPR_SPEED, P_RPR_VMAX, P_SKID_DEC,
     P_SKID_T, P_SPR_ACC, P_SPR_SPEED, P_W_CCD, P_W_CDECEL, P_W_CONTACT, P_W_CVMIN, P_W_RAY, P_W_RAY_B, P_W_SHOVE,
     P_W_SLASH_VMIN, P_W_STICK, P_W_STICKY, P_W_ACCEL, P_W_TRAY, P_WJ_CHAIN, P_WJ_JUMPED, P_WJ_LONG, P_WJ_SHORT,
-    P_WJ_SPEED, PREV_GS, SP_X, UNSTICK, WJ_CHAIN, WJ_DIR, WJ_V, WJQ, WLOCK, WSIDE, WSLASH, WSTICK, WTOUCH)
+    P_WJ_SPEED, PREV_GS, SP_X, UNSTICK, WJ_CHAIN, WJ_DIR, WJ_V, WJQ, WLOCK, WSIDE, WSLASH, WSTICK, WTOUCH,
+    M_SCRAMBLE, P_SCR_ANTIC, P_SCR_SPEED, P_SCR_FORCE, P_SCR_FORCE_H, P_SCR_END_VY, P_SCR_END_DEC, P_SCR_END_T)
 
 # world freeze presets in start order (kinematics.WF_ORDER): event bit, rampDown, wait, rampUp, target
 _WF = np.array([[float(b), *FREEZE_PRESETS[b]] for b in WF_ORDER])
@@ -66,7 +67,7 @@ def gt32(a, c):
 @njit(cache=True, inline="always", error_model="numpy")
 def relinq(m):
     return (m == M_DS_ANTIC or m == M_DS_SPIKE or m == M_CAST or m == M_BIND or m == M_LOCKED or m == M_GLIDE
-            or m == M_SPRINT or m == M_RPR_DS)
+            or m == M_SPRINT or m == M_RPR_DS or m == M_SCRAMBLE)
 
 
 @njit(cache=True, inline="always", error_model="numpy")
@@ -578,11 +579,12 @@ def can_dash(x, P):
 
 @njit(cache=True, error_model="numpy")
 def hero_dash(x, mask, P):
-    """HeroDashPressed -> HeroDash. Not modelled (the press does nothing here): the wall scramble (dash while
-    sliding and holding towards the wall), the down dash and the scuttle."""
+    """HeroDashPressed -> the wall scramble (sliding and holding towards the wall) or HeroDash. Not modelled (the
+    press does nothing here): the down dash and the scuttle."""
     left = (mask & B_LEFT) != 0
     right = (mask & B_RIGHT) != 0
     if x[WSIDE] != 0 and ((x[WSIDE] < 0 and left) or (x[WSIDE] > 0 and right)):
+        start_scramble(x, P)              # CanWallScramble: the Wall Scramble FSM
         return
     if (mask & B_DOWN) != 0 and x[GROUND] <= 0 and not left and not right:
         return
@@ -607,6 +609,21 @@ def hero_dash(x, mask, P):
     x[DQ] = -1.0
     x[WLOCK] = -1.0
     x[DASH_CD] = P[P_DASH_CD]
+
+
+@njit(cache=True, error_model="numpy")
+def start_scramble(x, P):
+    """Wall Scramble FSM: Take Control (control taken, the slide ends), Scramble Antic (v = 0, gravity off)."""
+    side = x[WSIDE]
+    relinquish_nv(x)
+    x[MODE] = M_SCRAMBLE
+    x[PHASE] = 0.0
+    x[MODE_T] = 0.0
+    x[SP_X] = side
+    x[FACE] = side
+    x[VX] = 0.0
+    x[VY] = 0.0
+    grav_off(x)
 
 
 @njit(cache=True, error_model="numpy")
@@ -701,6 +718,15 @@ def forum_fixed(x, vx, vy, normal, P, TT):
     elif mode == M_HARD_LAND:
         vx = 0.0
         vy = 0.0
+    elif mode == M_SCRAMBLE:
+        ph = x[PHASE]
+        vx = 0.0
+        if ph == 0:
+            vy = decel(vy, 0.85)
+        elif ph == 1:                     # AddForce2d down (mass 1), weaker while the dash is held
+            vy = vy - (P[P_SCR_FORCE_H] if (pm & B_DASH) != 0 else P[P_SCR_FORCE]) * P[P_FDT]
+        else:
+            vy = decel(vy, P[P_SCR_END_DEC])
     if x[DQ] >= 0:
         x[DQ] += 1.0
     return vx, vy
@@ -847,7 +873,8 @@ def forum_after_queue(x, mask, pressed, mode0, dt, P, TT):
     if x[GL_CD] > 0:
         x[GL_CD] = f32(x[GL_CD] - dt)
     mode = x[MODE]
-    if mode0 == mode and (mode == M_GLIDE or mode == M_SPRINT or mode == M_RPR_DS or mode == M_HARD_LAND):
+    if mode0 == mode and (mode == M_GLIDE or mode == M_SPRINT or mode == M_RPR_DS or mode == M_HARD_LAND
+                          or mode == M_SCRAMBLE):
         x[MODE_T] = f32(x[MODE_T] + dt)
     if mode == M_GLIDE:
         ph = x[PHASE]
@@ -937,6 +964,32 @@ def forum_after_queue(x, mask, pressed, mode0, dt, P, TT):
             x[DS_REC] = 0.0
         if x[MODE] == M_RPR_DS and x[PHASE] >= 2 and (pressed & B_DASH) != 0 and (ab & AB_DASH) != 0:
             regain(x, mask)               # Rpr DashCancel
+    elif mode == M_SCRAMBLE:
+        ph = x[PHASE]
+        side = x[SP_X]
+        if ph == 0 and ge32(x[MODE_T], P[P_SCR_ANTIC]):
+            x[PHASE] = 1.0                # Start Scramble: vy up
+            x[MODE_T] = 0.0
+            x[VY] = P[P_SCR_SPEED]
+        elif ph >= 1 and (pressed & B_JUMP) != 0:
+            regain(x, mask)               # Wall Jump: SetStartWithWallJump, control back
+            x[WTOUCH] = side
+            do_wall_jump(x, P)
+        elif ph == 1 and x[VY] < P[P_SCR_END_VY]:
+            x[PHASE] = 2.0                # Scramble End
+            x[MODE_T] = 0.0
+        elif ph == 1 and not facing_near_wall(rend_x(x), rend_y(x), side, P[P_W_RAY], TT):
+            regain(x, mask)               # MANTLE over the top (the Mantle FSM is not modelled)
+        elif ph == 2 and ge32(x[MODE_T], P[P_SCR_END_T]):
+            regain(x, mask)               # To Wall Slide: control back, sliding from the touch
+            x[WTOUCH] = side
+            begin_wallslide(x, False, 0)
+        elif ph == 2 and (pressed & B_DASH) != 0 and ((side < 0 and (mask & B_LEFT) != 0) or
+                                                   (side > 0 and (mask & B_RIGHT) != 0)):
+            x[PHASE] = 0.0                # REPEAT DASH: Scramble Antic again
+            x[MODE_T] = 0.0
+            x[VX] = 0.0
+            x[VY] = 0.0
     elif mode == M_HARD_LAND:
         if gt32(x[MODE_T], P[P_HARD_LAND]):
             x[MODE] = M_NORMAL

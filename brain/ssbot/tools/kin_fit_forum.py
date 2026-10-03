@@ -29,6 +29,7 @@ PHASE_PARAMS = {
     km.M_GLIDE: {0: "glide_antic_t", 1: "glide_inflate_t", 3: "glide_deflate_t"},
     km.M_RPR_DS: {0: "rpr_antic_t", 1: "rpr_slash_t"},
     km.M_SPRINT: {0: "air_sprint_time"},
+    km.M_SCRAMBLE: {0: "scr_antic_t", 2: "scr_end_t"},
 }
 
 
@@ -45,7 +46,8 @@ def phase_runs(tr: km.Trace, modes: np.ndarray) -> dict:
         j = i
         while j < n and modes[j] == m:
             j += 1
-        tab = {km.M_GLIDE: km.GLIDE_CLIPS, km.M_RPR_DS: km.RPR_CLIPS, km.M_SPRINT: km.SPRINT_CLIPS}[m]
+        tab = {km.M_GLIDE: km.GLIDE_CLIPS, km.M_RPR_DS: km.RPR_CLIPS, km.M_SPRINT: km.SPRINT_CLIPS,
+               km.M_SCRAMBLE: km.SCRAMBLE_CLIPS}[m]
         ph = [tab.get(c, -1) for c in clip[i:j]]
         k = 0
         while k < len(ph):
