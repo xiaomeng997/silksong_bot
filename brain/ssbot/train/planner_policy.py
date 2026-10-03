@@ -223,8 +223,21 @@ class PlannerPolicy:
         from ssbot.combat.tactics import TacticPrefs
         from ssbot.core.worldstate import E, Gate, WorldState
         t0 = time.perf_counter()
-        terrain = Terrain2D.from_boxes([(60.0, 0.0, 110.0, 2.0), (67.2, 0.0, 69.2, 14.0), (102.0, 0.0, 104.0, 14.0)])
+        # the arena as a TERRAIN message (floor, walls, an arena gate the scene overrides enable), built the way a
+        # live room's is (Terrain2D.from_message: the planner's real arrays), not from boxes
+        box = lambda x0, y0, x1, y1: {"k": "box", "v": [[x0, y0], [x1, y0], [x1, y1], [x0, y1]], "r": 0.0}  # noqa
+        msg = {"solids": [{"go": "Floor", "on": True, "shapes": [box(60.0, 0.0, 110.0, 2.0)]},
+                          {"go": "Wall L", "on": True, "shapes": [box(64.0, 0.0, 66.0, 20.0)]},
+                          {"go": "Wall R", "on": True, "shapes": [box(105.0, 0.0, 107.0, 20.0)]},
+                          {"go": "Gate", "on": False, "shapes": [box(67.2, 0.0, 69.2, 14.0)]},
+                          {"go": "Gate 2", "on": False, "shapes": [box(102.0, 0.0, 104.0, 14.0)]}]}
+        terrain = Terrain2D.from_message(msg, {"enable": ["Gate", "Gate 2"]})
         planner = Planner(self.params, terrain, PlannerConfig(threads=self.threads))
+        if self.view != "oracle":
+            # the vision view's filter kernel runs from the first STATE of a fight
+            from ssbot.backends.observability import clip_fractions
+            clip_fractions(np.zeros((5, 2)), np.array([1, 5], np.int64), np.zeros(1, np.int64), 1,
+                           np.array([0.0, 0.0, 1.0, 1.0]))
         fc = self.fc
         roots = fc.tracker.roots
         an = self.model.anchor("BB_CHARGE", "Set L")
