@@ -44,7 +44,7 @@ from ssbot.combat.safety_filter import FilterContext
 from ssbot.combat.tactics import Tactics, load_playbook
 from ssbot.core.bosses import BOSSES
 from ssbot.core.worldstate import ORACLE, VISION_EQUIVALENT, Ev
-from ssbot.ipc.framing import BIT
+from ssbot.ipc.framing import ACTION_EXCLUSIVE, BIT
 from ssbot.knowledge import kinematics as kin
 from ssbot.knowledge.kinematics import HeroParams, HoldState, StateTracker, Terrain2D
 from ssbot.safety.pause_quit import TERMINAL
@@ -280,6 +280,8 @@ class PlannerPolicy:
         self.episode_outcome: str | None = None
         self.outcome_reason: str | None = None
         self.pause_owned = False
+        self.action_flags = 0                  # ACTION flags for this tick's mask (episode._act): EXCLUSIVE while the
+        #                                        pause machine owns the keys (no planner key reaches the pause menu)
         self.wake_sent = False
         self.first_pending_reasons: list[str] = []
         self.ring: deque = deque(maxlen=LOG_BEFORE)
@@ -442,6 +444,7 @@ class PlannerPolicy:
                          forced_clear_s=None if clear is None else clear * self.params.frame_time)
         self.decision = r.decision
         self.pause_owned = self.sc.pq is not None
+        self.action_flags = ACTION_EXCLUSIVE if self.pause_owned else 0
         if r.decision.pause_pending and self.first_pending_f is None:
             self.first_pending_f = f
             self.first_pending_reasons = list(r.decision.reasons)     # what started the pause (the end's reasons
@@ -483,6 +486,7 @@ class PlannerPolicy:
         r = self.sc.step(s, inflight=self._inflight(s, f), plan_s=None, forced_risk=False, unpredicted_hits=unpred)
         self.decision = r.decision
         self.pause_owned = self.sc.pq is not None
+        self.action_flags = ACTION_EXCLUSIVE if self.pause_owned else 0
         mask = 0 if r.mask is None else int(r.mask)     # never the planner's: its last plan is from before the pause
         if r.outcome is not None and r.outcome in TERMINAL and self.episode_outcome is None:
             self.episode_outcome = "QUIT"
@@ -585,6 +589,7 @@ class PlannerPolicy:
         quit to the main menu); the oracle's own menu export records what each Submit landed on."""
         r = self.sc.step(s, inflight=self._inflight(s, f))
         mask = int(r.mask or 0)
+        self.action_flags = ACTION_EXCLUSIVE
         menu = s.get("menu") or {}
         g = s.get("game") or {}
         key = (g.get("menu"), menu.get("sel"))

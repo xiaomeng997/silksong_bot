@@ -32,6 +32,13 @@ namespace SsOracle.Input
         private const int PauseVerifyFrames = 20;
         private const int MaxPauseTaps = 3;
 
+        /// <summary>ACTION flags (optional 5th element). EXCLUSIVE: from this ACTION's frame no key outside its mask is
+        /// down: every other key is released at once, below its minimum press if need be, and every edge still queued
+        /// for it is dropped (HoldFilter.Exclusive). The brain's pause loop and quit sequence send it, so no planner key
+        /// is latched on the pause frame or replayed into the pause menu (DESIGN §3.8.2: Z submits, X / A cancel).</summary>
+        public const uint FlagExclusive = 1;
+        public static readonly string[] FlagNames = { "exclusive" };
+
         private static readonly ConcurrentQueue<DelayLine.Item> Incoming = new ConcurrentQueue<DelayLine.Item>();
         private static readonly DelayLine Pending = new DelayLine();
         private static readonly LatencyModel Latency = new LatencyModel();
@@ -62,13 +69,16 @@ namespace SsOracle.Input
         public static long Coalesced { get; private set; }
         public static long Suppressed { get; private set; }
         public static long Rejected { get; private set; }
+        /// <summary>ACTIONs applied with the EXCLUSIVE flag.</summary>
+        public static long Exclusives { get; private set; }
         public static long LostEvents { get; private set; }
         public static long LostPauseTaps { get; private set; }
         public static long LostPausesConfirmed { get; private set; }
 
         public static bool HarnessBusy => harnessDepth > 0;
 
-        /// <summary>IPC reader thread: payload is a msgpack array [target_frame, buttons, hold_frames, ack_seq].</summary>
+        /// <summary>IPC reader thread: payload is a msgpack array [target_frame, buttons, hold_frames, ack_seq, flags?]
+        /// (flags optional: brains that send four elements are unchanged).</summary>
         public static void Enqueue(byte[] body, int offset, int count)
         {
             if (!Core.Profile.Rules.Injection) return;  // REHEARSAL profiles: ACTIONs go through the final sink instead
@@ -79,6 +89,7 @@ namespace SsOracle.Input
                 Buttons = (uint)Convert.ToUInt64(a[1]),
                 HoldFrames = Convert.ToInt32(a[2]),
                 AckSeq = (uint)Convert.ToUInt64(a[3]),
+                Flags = a.Count > 4 && a[4] != null ? (uint)Convert.ToUInt64(a[4]) : 0u,
             });
             Interlocked.Exchange(ref lastEnqueueTimestamp, Stopwatch.GetTimestamp());
             Interlocked.Increment(ref received);
@@ -96,7 +107,10 @@ namespace SsOracle.Input
             {
                 if (applied) Coalesced++;
                 applied = true;
-                if (!KeyboardInjector.TryQueueMask(act.Buttons, out var error))
+                var exclusive = (act.Flags & FlagExclusive) != 0;
+                if (exclusive) Exclusives++;
+                if (!(exclusive ? KeyboardInjector.TryQueueMaskExclusive(act.Buttons, out var error)
+                        : KeyboardInjector.TryQueueMask(act.Buttons, out error)))
                 {
                     Rejected++;
                     Core.Plugin.Log.LogWarning("ACTION rejected: " + error);
@@ -214,7 +228,9 @@ namespace SsOracle.Input
             if (!KeyboardInjector.OwnsKeyboard) return;
             var pd = gm.playerData;
             if (pd == null || pd.isInventoryOpen || PauseGate.Blockers(gm, pd) != 0) return;
-            if (!KeyboardInjector.TrySetMask(KeyboardInjector.PauseBit, out _)) return;
+            // Exclusive: a key the brain pressed just before it was lost is not still latched (minimum press) on the
+            // frame the Pause tap pauses the game, so the pause menu never opens over a game key.
+            if (!KeyboardInjector.SetMaskExclusive(KeyboardInjector.PauseBit, out _)) return;
             pauseTapReleaseAt = frame + PauseTapFrames;
             pauseTaps++;
             LostPauseTaps++;
@@ -284,6 +300,7 @@ namespace SsOracle.Input
                 ["stale"] = StaleDropped,
                 ["suppressed"] = Suppressed,
                 ["rejected"] = Rejected,
+                ["exclusive"] = Exclusives,
                 ["pending"] = Pending.Count,
                 ["last_ack"] = LastAck,
                 ["last_applied"] = LastAppliedFrame,

@@ -142,3 +142,40 @@ def test_no_game_key_reaches_the_pause_menu_with_the_guard():
     lat = sorted(d for _, d, _ in with_guard)
     base = sorted(d for _, d, _ in without)
     assert lat[0] == base[0] == 2 and lat[-1] <= base[-1] + 3   # at most the 2-frame press (+ a late ACTION)
+
+
+def test_exclusive_mirrors_the_oracle_flag():
+    """HoldFilter.Exclusive as InputLogicCheck checks it: the Pause press's latch carries nothing else, even a key
+    pressed on the frame before, and a queued game-key press never fires."""
+    f = kg.Filter()
+    f.step(RIGHT)
+    f.step(RIGHT | JUMP)
+    f.push(RIGHT)
+    f.push(RIGHT | ATTACK)
+    f.exclusive(PAUSE)
+    seen = [f.step(PAUSE)] + [f.step(PAUSE if i < 2 else 0) for i in range(10)]
+    assert seen[0] == PAUSE and all(m & ~PAUSE == 0 for m in seen) and not f.queued(~PAUSE & ((1 << 22) - 1))
+
+
+def test_action_flags_go_out_as_a_fifth_element_and_follow_the_policy():
+    import msgpack
+
+    from ssbot.ipc.framing import ACTION_EXCLUSIVE
+    from ssbot.ipc.oracle_link import OracleLink
+    from ssbot.train.episode import _act
+
+    sent = []
+    link = object.__new__(OracleLink)
+    link._send = lambda t, body: sent.append(msgpack.unpackb(body))
+    link.act(10, PAUSE)
+    link.act(11, PAUSE, flags=ACTION_EXCLUSIVE)
+    assert sent == [[10, PAUSE, 0, 0], [11, PAUSE, 0, 0, ACTION_EXCLUSIVE]]   # an old oracle reads the first four
+
+    class Pol:
+        action_flags = 0
+
+        def act(self, s, tap=None):
+            self.action_flags = ACTION_EXCLUSIVE        # set during the tick: the flags of this tick's mask
+            return PAUSE
+    _act(link, 20, Pol(), {"f": 20}, None)
+    assert sent[-1] == [22, PAUSE, 0, 0, ACTION_EXCLUSIVE]

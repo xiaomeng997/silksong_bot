@@ -199,6 +199,13 @@ def boss_entity(s: dict, boss_type: str) -> dict | None:
     return ents.boss_entity(s.get("ents"), boss_type, include_hidden=True)
 
 
+def _act(link: OracleLink, last: int, policy, s: dict, tap) -> None:
+    """The policy's mask for STATE `last`, applied at last + 2, with the ACTION flags the policy asks for after its
+    tick (policy.action_flags: the pause machine's keys go out EXCLUSIVE, framing.ACTION_EXCLUSIVE)."""
+    m = policy.act(s, tap)
+    link.act(last + 2, m, hold_frames=0, flags=int(getattr(policy, "action_flags", 0) or 0))
+
+
 def run_episode(link: OracleLink, enc: Encounter, tap: FightTap, policy, cfg: EpisodeConfig,
                 rec: AttemptRecord) -> AttemptRecord:
     t_start = time.perf_counter()
@@ -275,7 +282,7 @@ def _run(link: OracleLink, enc: Encounter, tap: FightTap, policy, cfg: EpisodeCo
                 rec.outcome, rec.reason = WOULD_DIE, "lethal hit after the kill"
                 break
             rec.outcome = rec.outcome or CLEAR
-            link.act(last + 2, policy.act(s, tap), hold_frames=0)
+            _act(link, last, policy, s, tap)
             rec.acts += 1
             if getattr(policy, "episode_outcome", None) == QUIT:
                 rec.reason = f"quit after the kill: {getattr(policy, 'outcome_reason', None)}"
@@ -287,7 +294,10 @@ def _run(link: OracleLink, enc: Encounter, tap: FightTap, policy, cfg: EpisodeCo
             # zeros after a kill, unless the policy asks to keep acting (the pause stress test's hit injected just
             # after the killing blow must reach the supervisor, which then owns the keys through the block above)
             after = getattr(policy, "act_after_clear", False) and rec.outcome == CLEAR and not rec.reason
-            link.act(last + 2, policy.act(s, tap) if after else 0, hold_frames=0)
+            if after:
+                _act(link, last, policy, s, tap)
+            else:
+                link.act(last + 2, 0, hold_frames=0)
             continue
         if tap.death_frame is not None:
             rec.outcome = CLEAR
@@ -306,7 +316,7 @@ def _run(link: OracleLink, enc: Encounter, tap: FightTap, policy, cfg: EpisodeCo
         if (last - (tap.wake_frame or rec.f_reset)) / 60.0 > timebox:
             rec.outcome, rec.reason = STUCK, f"timebox {timebox:.0f} s"
             break
-        link.act(last + 2, policy.act(s, tap), hold_frames=0)
+        _act(link, last, policy, s, tap)
         rec.acts += 1
         if getattr(policy, "episode_outcome", None) == QUIT:
             rec.outcome, rec.reason = QUIT, getattr(policy, "outcome_reason", None)

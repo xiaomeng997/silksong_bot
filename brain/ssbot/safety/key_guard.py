@@ -27,7 +27,12 @@ all with the press). Cost: 0 frames when no game key is down, at most the minimu
     inflight = [sent[g] for g in range(s["act"]["target"] + 1, f + 2)]
     clear = keys_clear(s["act"]["hf"], inflight, press=1 << BIT["pause"])   # None: no act.hf
 
-Filter is a scalar mirror of HoldFilter.cs (Push / Step / ReleaseAll, left-right exclusion, the pending-toggle cap);
+A second layer sits in the oracle (built 2026-10-02, not yet deployed): the ACTION EXCLUSIVE flag
+(framing.ACTION_EXCLUSIVE, HoldFilter.Exclusive), which the pause machine's ACTIONs carry, releases every other key on
+its frame below the minimum press and drops their queued edges, so the press could go out without waiting; the guard
+still models the plain filter (an oracle without the flag, or a sink that does not implement it, stays safe).
+
+Filter is a scalar mirror of HoldFilter.cs (Push / Step / Exclusive, left-right exclusion, the pending-toggle cap);
 tests/test_key_guard.py checks it frame for frame against ssbot.knowledge.kinematics.hold_filter on random streams.
 Pure Python, no numpy: the final-run inputd can use it as is.
 """
@@ -107,6 +112,19 @@ class Filter:
             self.age[i] = 1 if toggled >> i & 1 else min(self.age[i] + 1, AGE_LONG)
         self.latched = nxt
         return nxt
+
+    def exclusive(self, keep: int) -> None:
+        """HoldFilter.Exclusive (the ACTION EXCLUSIVE flag): every key outside `keep` released on the next latch,
+        below its minimum press if need be, and its queued edges dropped; then push the kept set as usual."""
+        for i in range(N_BITS):
+            b = 1 << i
+            if keep & b:
+                continue
+            self.pending[i] = 0
+            if self.latched & b:
+                self.latched &= ~b
+                self.age[i] = 0          # step() ages it to 1: released on this latch
+        self.desired &= keep
 
     def queued(self, mask: int) -> bool:
         """Some key in `mask` has an edge requested but not latched yet."""
