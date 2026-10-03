@@ -1072,7 +1072,7 @@ class FightScanner:
         out = [c for c in e.get("colliders") or () if support_threat(c) or (mw and multi_wounder_threat(c))]
         if mw and self.last_f is not None:
             for c in out:
-                if c.get("name") and not support_threat(c):
+                if c.get("name") and multi_wounder_threat(c):   # dealt 0 (Whip Hit: eff 2, dealt 0)
                     self.mw_seen[(tk, _strip_clone(c["name"]))] = self.last_f
         if out:
             threat.add(tk)

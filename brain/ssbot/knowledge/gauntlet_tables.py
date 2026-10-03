@@ -199,7 +199,6 @@ class _Subject:
     seen_f: int = -1
     first_f: int = -1
     n0: int = 0                      # its builder's instance count when it was created
-    dead: bool = False
 
 
 def _armed(e: dict, rest: tuple[str, ...]) -> bool:
@@ -248,8 +247,9 @@ class GauntletBuilder:
     def _proj_owner_types(self, tk: str) -> list[str]:
         return [o for p, os in self.proj_types.items() if tk == p or tk.startswith(p) for o in os]
 
-    def scan(self, fight: Fight) -> dict:
-        """Scan one fight; returns a summary (subjects per type, instances added per type)."""
+    def scan(self, fight: Fight, states=None) -> dict:
+        """Scan one fight (its STATEs from fight_states unless given); returns a summary (subjects per type,
+        instances added per type)."""
         rec = str(fight.path)
         fold = self.recordings.setdefault(rec, len(self.recordings)) % N_FOLDS
         for b in self.builders.values():
@@ -272,7 +272,7 @@ class GauntletBuilder:
                 sub = subjects[iid] = _Subject(iid, tk, sc, first_f=f, n0=len(b.instances))
             return sub
 
-        for s in fight_states(fight):
+        for s in fight_states(fight) if states is None else states:
             f = s.get("f")
             if not isinstance(f, int) or (last_f is not None and f <= last_f):
                 continue
@@ -333,7 +333,6 @@ class GauntletBuilder:
                     sub = subjects.get(d.get("ent"))
                     if sub is not None:
                         evs[sub.iid].append(ev)
-                        sub.dead = bool(d.get("dead"))
                 elif k in ("damage", "damage_blocked"):
                     src = str(d.get("source"))
                     # a blocked stretch is reported when it ends and may span several enemies of one name (the
@@ -394,7 +393,7 @@ class GauntletBuilder:
                 for i in sc.done)
             attacking = cur is not None and cur.family != spec.idle_family
             p = s.ent["pos"]
-            return (not spawning, not attacking, s.dead, math.hypot(p[0] - x, p[1] - y))
+            return (not spawning, not attacking, s.scanner.dead, math.hypot(p[0] - x, p[1] - y))
         return min(cands, key=key).iid
 
     def _attribute(self, src: str, subjects: dict[int, _Subject], owner: dict[int, int], hazards: list,
@@ -429,7 +428,8 @@ class GauntletBuilder:
                     return None
                 self.counters["contacts named by a collider child only (subject exporting it)"] += 1
         if len(cands) > 1:
-            live = [s for s in cands if ent(s) is not None and not s.dead and in_play(ent(s))]
+            # the scanner's dead flag: a kill, until the next attack start (the pooled summons come back)
+            live = [s for s in cands if ent(s) is not None and not s.scanner.dead and in_play(ent(s))]
             cands = live or cands
         if len(cands) > 1:
             cands.sort(key=lambda s: _box_dist(ent(s), box, leaf))
