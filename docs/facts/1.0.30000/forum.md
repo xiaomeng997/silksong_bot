@@ -71,9 +71,19 @@
 - Ascendant's Grip：场景包字符串里找不到拾取点（拾取物引用的是资源，不是名字；只有 Lace 1 / Lace 2 / Lost Lace 的 FSM 提到 "Wallcling"）。社区说法：Dancers 和 Forum 末波都靠它贴墙（research.json）。取得地点【未知，需要查商店清单或拾取物资源】。
 - Cogfly：`Hang_09`（High Halls）的 `Craft Pickup`（FSM `FSM`，检视文本 `COG_FLIER`）：检视 → `DialogueYesNoItemV3` 消耗 1 个所需物品（场景包里是资源引用，按 DESIGN 是 1 块工艺金属）→ 主角走到桌前、转身做工约 7.5 s（`Hero Face Table` 1.5 s + `Craft` 4.5 s + `Turn Back` 1.5 s）→ 得到物品。这段时间 `disablePause = 1`（`Wait` 置 1，`Get Item` 置 0）：**约 8 s 不能暂停**，路线和 quit map 要登记（房间里没有威胁时无妨）。与 DESIGN §3.6.4 S25 "High Halls → ✚ Cogfly" 一致。
 
-## 7. savestate 组装与验证
+## 7. savestate 组装与验证（实例 2，2026-10-02 20:52–21:05，`ssbot.probes.forum_setup`，结果 JSON 在 `C:\ssbot\sandbox\forum_setup\`）
 
-（实测后补，见下次更新）
+- 组装：`fo_pre_help7` / `fo_pre_nohelp7` = p7_s3 + 7 面具（health / maxHealth / maxHealthBase 7）+ 助战标志（help：`garmondAidForumBattle`、`garmondWillAidInForumBattle`、`garmondLibraryDefeatedHornet`、`metGarmond` 为真；nohelp：与 p7_s3 相同，全假）。游戏内 `crest.equip`（unlock）+ `abilities.grant {set: movement, tools}`（不带 combat 组，免得给 Needle Strike 和全部丝技）→ 存 `fo_X_raw` → 离线把 grant 多给的 `hasDoubleJump`、`hasSuperJump` 改回假（**路线在 Forum 时没有二段跳和 Silk Soar**），并把 Silkspear 放进新纹章空的 Skill 槽（第一次装备的纹章没有存档的装备，Silkspear 留在 Hunter）→ 读回 → 游戏再存成 `fo_X`。
+- 读回核对（abilities.list + crest.dump + PROGRESS PlayerData）：
+  - **fo_A**：Reaper；槽 0 Skill/Neutral = Silk Spear，槽 1 Red/Up = Cogwork Flier（4 次），槽 6 Yellow = Wallcling；7 面具、丝 1；冲刺 / Cling Grip / 披风 / Clawline 有，二段跳 / Silk Soar / Needle Strike 无；`garmondAidForumBattle` 真。纹章配置 `can_double_jump` 为真，但 PlayerData 没有 Faydown，所以没有二段跳。
+  - **fo_A5**：同 fo_A，5 面具。
+  - **fo_B**：Hunter_v2（Silkspear 原样在槽 3 Skill/Neutral，Hunter_v2 继承了 Hunter 的装备），槽 0 Red/Up = Cogwork Flier；7 面具；助战真。
+  - **fo_C**：同 fo_B，助战标志全假。
+- **DebugMod 读 savestate 不清助战标志**（读回后 `garmondAidForumBattle` 仍为真；只有从主菜单读档的 `LoadedFromMenu` 会清）。
+- 进场（`forum_intro`）：从 x 53.24 向左走，到 x ≈ 33.0（触发盒右沿）吼叫过场接管控制，约 4.7 s 后第 0 波敌人出现（三次 33.0 / 33.07 / 33.03）。开战前右门开、左门关（room.gates：`Battle Gate` enabled、`Battle Gate (1)` disabled）。
+- 助战实测（`check`，GauntletDataPolicy 130–150 s，fsmtap all）：A 与 B 里 `Garmond Fighter` 在按击杀重放的第 1 波开始后 4.3 / 4.4 s 进场（`Jump In → Enter Fall → Enter Land → Roar → Chase/Wildslash/Stomp`），击杀来源里有 `Stomp Damager`、`WildSlash Enemy Damager`；C 里 Garmond 一直 `Dormant`。Shakra 三组都只到 `Away`。130–150 s 内打到第 3–4 波（随机策略，受击 26–52 次，LethalBlock 保命）。
+- 开战前就在 "ents" 里、但还没参战的敌人：后面波次的 Song Pilgrim Maestro 和 Song Reed（`Fly In Ready`），Maestro 的 3 个 "Song Automaton Tiny"（hp 28，`Die`，在 Maestro 位置待命：**Maestro 会放小机械，波次表外的第 9 种敌人**），第 1 波的 Song Pilgrim 03（`Attack` FSM 被禁用，状态 None）。数据策略已排除这些等待状态（`gauntlet.WAITING_STATES`）。
+- **贴墙（Ascendant's Grip，fo_A，左墙）**：40 s 里 1046 帧 `wallClinging`，其中 741 帧竖直速度为 0；贴墙 x = 14.27（墙面 14.01）；**静止贴墙最高点 y = 13.60**（主角中心；墙顶上方 y 15.15 是天花板台阶），蹬墙跳最高到 y 14.95。按住朝墙方向就一直不滑（静止段最长 42 帧，被探针自己随机蹬墙打断）。
 
 ## 8. 场地几何
 
