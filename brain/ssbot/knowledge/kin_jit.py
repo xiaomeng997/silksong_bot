@@ -493,6 +493,28 @@ def _slope_axis(cx, cy, c0x, c0y, ax, ay, bx, by, hw, hh, skin):
 
 
 @njit(cache=True, error_model="numpy")
+def roof_touch(px, py, P, TT):
+    """The box top rests against a horizontal ceiling (within the skin and Box2D's 5 mm slop) over the box's x span:
+    the contact a step that ended just short of the ceiling makes at the start of the next one."""
+    if TT[0] == 0:
+        return False
+    hw = P[P_HW]
+    top = py + P[P_HEAD]
+    reach = P[P_SKIN] + P[P_SLOPE_CONTACT]
+    b0, b1 = _buckets(px - hw - 0.01, px + hw + 0.01, TT)
+    st, ids = np.int64(TT[5]), np.int64(TT[6])
+    for b in range(b0, b1 + 1):
+        for q in range(np.int64(TT[st + b]), np.int64(TT[st + b + 1])):
+            j = TT_H + 3 * np.int64(TT[ids + q])
+            if not ((px + hw) > TT[j + 1] + EPS and (px - hw) < TT[j + 2] - EPS):
+                continue
+            d = TT[j] - top
+            if -TOL <= d <= reach:
+                return True
+    return False
+
+
+@njit(cache=True, error_model="numpy")
 def slope_project(px, py, vx, vy, P, TT):
     """The start of a physics step: a contact with a sloped edge the box already rests against (within the skin and
     Box2D's 5 mm slop) takes the velocity's component into the surface away before the move, so the step slides
@@ -1270,14 +1292,18 @@ def forum_after_queue(x, mask, pressed, mode0, dt, P, TT):
             x[MODE_T] = 0.0
             x[VY] = accel_to(P[P_GL_START_VY], P[P_GL_VYACC], P[P_GL_VY])
             x[VX] = umbrella_x(x[VX], mask, P[P_GL_ACC], P[P_GL_DEC], P[P_GL_VMAX])
-        elif ph == 2 and (mask & B_JUMP) == 0:
+        elif (ph == 2 or ph == 5) and (mask & B_JUMP) == 0:
             x[PHASE] = 3.0                # END -> Deflate: gravity back
             x[MODE_T] = 0.0
             grav_on(x)
+        elif ph == 5:
+            x[PHASE] = 2.0                # Bump L / R -> Float Idle (AccelerateToY, UmbrellaMotionX from the next step)
+            x[MODE_T] = 0.0
         elif ph == 3 and ge32(x[MODE_T], P[P_GL_DEFLATE]):
             regain_jump(x, mask, P)
             x[GL_CD] = P[P_GL_CD]
-        if x[MODE] == M_GLIDE and (x[PHASE] == 2 or (x[PHASE] == 1 and x[MODE_T] >= 0.075) or x[PHASE] == 3):
+        if x[MODE] == M_GLIDE and (x[PHASE] == 2 or (x[PHASE] == 1 and x[MODE_T] >= 0.075) or x[PHASE] == 3
+                                   or x[PHASE] == 5):
             if (pressed & B_ATTACK) != 0 or ((pressed & B_DASH) != 0 and (ab & AB_DASH) != 0):
                 regain(x, mask)           # Attack Cancel / Dash Cancel: control back, the press acts this frame
                 x[GL_CD] = P[P_GL_CD]
@@ -1296,6 +1322,11 @@ def forum_after_queue(x, mask, pressed, mode0, dt, P, TT):
                     x[VX] = -side * P[P_GL_BVX]
                     if bl:
                         x[VY] = min(x[VY], -0.5)
+                    # the Bump state: no velocity action of its own; a release goes on to Deflate from it (s98000
+                    # f405707: pushed off the right wall in the inflate, released a frame later: vy kept 0.5, then
+                    # gravity)
+                    x[PHASE] = 5.0
+                    x[MODE_T] = 0.0
     elif mode == M_SPRINT:
         ph = x[PHASE]
         if ph == 0 and ge32(x[MODE_T], P[P_ASPR_T]):
@@ -1605,8 +1636,12 @@ def fixed_step(x, P, TT):
         vx = shove / fdt
         vy = 0.0
     vy = vy - P[P_G] * x[GS] * fdt
+    roof0 = False
     if (ab & AB_SLOPES) != 0:
         vx, vy = slope_project(x[PX], x[PY], vx, vy, P, TT)
+        if vy > 0 and roof_touch(x[PX], x[PY], P, TT):
+            vy = 0.0                      # the contact the last step parked at (below)
+            roof0 = True
     pend = x[TOUCH] > 0
     # (the reference always computes it; it only matters in these cases)
     under = (pend or x[GROUND] > 0 or x[MODE] == M_DS_SPIKE) and on_ground(x[PX], x[PY], hw, skin, foot, TT)
@@ -1618,11 +1653,17 @@ def fixed_step(x, P, TT):
         vx = 0.0
     ny, landed, touched, bumped = move_y(nx, x[PY], vy * fdt, hw, skin, foot, head, P[P_SLOP_LO], P[P_SLOP_HI],
                                          TT)
+    if bumped and (ab & AB_SLOPES) != 0 and x[PY] + vy * fdt <= ny + skin - P[P_SLOPE_CONTACT]:
+        # a rise that ends just short of a ceiling (closer than the skin, not within Box2D's slop) parks there with
+        # its velocity: the contact is made in the next step (as the late floor contacts, land_slop; live s98010
+        # f708617: a scramble's top 0.0099 u under the ceiling, vy 16.96 kept, 0 a step later)
+        ny = x[PY] + vy * fdt
+        bumped = False
     if landed or bumped:
         vy = 0.0
     if (ab & AB_SLOPES) != 0:
         nx, ny, vx, vy, sc = slope_push(x[PX], x[PY], nx, ny, vx, vy, P, TT)
-        bumped = bumped or sc == 1
+        bumped = bumped or sc == 1 or roof0
         if bumped and not noinp:
             # OnCollisionEnter2D, side top (normal y <= -0.5): CancelJump (the rise does not press on into the roof)
             x[JUMPING] = 0.0

@@ -247,7 +247,7 @@ assert len(ROW_NAMES) == K
 
 M_NORMAL, M_DS_ANTIC, M_DS_SPIKE, M_HURT_FREEZE, M_HURT_RECOIL, M_CAST, M_BIND, M_LOCKED = range(8)
 # Forum loadout modes (kin_jit): Drifter's Cloak glide (Umbrella Float FSM, PHASE 0 antic / 1 inflate / 2 float /
-# 3 deflate), Swift Step dash (HeroController.Dash), the sprint FSM after it (PHASE 0 air sprint / 1 air loop /
+# 3 deflate / 5 bump), Swift Step dash (HeroController.Dash), the sprint FSM after it (PHASE 0 air sprint / 1 air loop /
 # 2 ground sprint / 3 skid), the Reaper down slash (Crest Attacks FSM, PHASE 0 antic / 1 slash / 2 fall / 3 fall 2),
 # hard landing
 M_GLIDE, M_DASH, M_SPRINT, M_RPR_DS, M_HARD_LAND, M_SCRAMBLE = range(8, 14)
