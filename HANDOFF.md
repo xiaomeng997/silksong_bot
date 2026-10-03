@@ -37,5 +37,5 @@ this task at about 22:25 PDT (they had exited); the lead runs launcher --restore
    sampling assumes one dilation), no pogo / redirect escapes in VE (drop-bell targets need a tink model: keep the
    untouched and tinked branches instead of withdrawing; simulate must be vectorised first).
 2. Bursts (8): PREPARE 4.5 u beside the burst is where the attack bell lands and rolls out; the VE slack change
-   (0f4435d) halves the bells' smear - measure live (needs a chunk on ec62558).
+   (0f4435d) halves the bells' smear; the ec62558 chunk had 6 burst QUITs of 61 (the main run 8 of 154).
 3. Dig In / Charge End pogos (0.2 pogo hits per charge vs 0.97 oracle): Charge End left/right margins 2.5 u.
