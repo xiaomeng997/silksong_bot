@@ -248,6 +248,7 @@ def _groups(tr: Trace, starts: np.ndarray, horizon: int, terrains: dict) -> list
 
 def check_trace(tr: Trace, terrains: dict[str, Terrain2D], params: HeroParams, horizon: int = 30,
                 tol: float = 0.1, settings: tuple[str, ...] = SETTINGS, bounds: bool = True,
+                lanes: str = "bounds",
                 batch: int = 16384) -> dict:
     """Run every covered window of one trace in each setting; returns the per-window errors (NaN: not run)."""
     modes = km.classify_modes(tr, forum=bool(params.abilities))
@@ -282,7 +283,7 @@ def check_trace(tr: Trace, terrains: dict[str, Terrain2D], params: HeroParams, h
                     r = km.rollout(S, tr.mask[I], params, terrain, events=ev, dt=tr.dt[I], fs=tr.fs[I],
                                    udt=tr.udt[I])
                 elif s == BOUNDS:
-                    r = km.rollout(S, tr.mask[I], params, terrain, events=ev, variants="bounds")
+                    r = km.rollout(S, tr.mask[I], params, terrain, events=ev, variants=lanes)
                 else:
                     r = km.rollout(S, tr.mask[I], params, terrain, events=ev)
                 if s == BOUNDS:
@@ -515,13 +516,15 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--worst", type=int, default=10, help="list the worst covered windows (planner_events)")
     ap.add_argument("--no-windows", action="store_true", help="knockback section only")
     ap.add_argument("--monitor", action="store_true", help="also replay the runtime residual monitor")
+    ap.add_argument("--lanes", default="bounds", choices=sorted(km.VARIANT_SETS),
+                    help="timing lanes of planner_bounds (bounds_ft adds the frame-time ends)")
     a = ap.parse_args(argv)
     params = HeroParams.load(a.params)
     results = []
     for src in a.sources:
         t0 = time.time()
         tr, terrains = load_source(src, params, a.scene)
-        res = check_trace(tr, terrains, params, a.horizon, a.tol) if not a.no_windows else \
+        res = check_trace(tr, terrains, params, a.horizon, a.tol, lanes=a.lanes) if not a.no_windows else \
             {"labels": np.array([], dtype=object)}
         res["knockback"] = check_knockback(tr, terrains, params)
         if a.monitor:

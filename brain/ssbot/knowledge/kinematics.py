@@ -1417,7 +1417,11 @@ FAST = (Variant("nominal"), _lane((-1, -1, -1)), _lane((1, 1, 1)))
 BOUNDS = (Variant("nominal"),) + tuple(_lane(t) for t in _SIGNS)
 FULL = (Variant("nominal"),) + tuple(Variant(f"{a}/{_lane(t).name}", a, "mean", _lane(t).cast, t)
                                      for a in ("lo", "hi") for t in _SIGNS)
-VARIANT_SETS = {"nominal": NOMINAL, "fast": FAST, "bounds": BOUNDS, "full": FULL}
+# bounds_ft: bounds plus two lanes at the jitter model's shortest / longest frame time (each with the phase at the
+# matching end): a game instance that renders every frame at the limiter's 0.01665 s (kn_excite_forum on a lone
+# instance) drifts the physics phase 0.024 in 30 frames against the mean 0.016666 s, past alpha_margin
+BOUNDS_FT = BOUNDS + (Variant("ft_lo", "lo", "lo"), Variant("ft_hi", "hi", "hi"))
+VARIANT_SETS = {"nominal": NOMINAL, "fast": FAST, "bounds": BOUNDS, "full": FULL, "bounds_ft": BOUNDS_FT}
 _SCALED_TIMERS = ("P_ATK_DUR", "P_ATK_CD", "P_DS_ANTIC", "P_DS_REC", "P_DS_LREC", "P_HURT_T", "P_CAST_ANTIC",
                   "P_BIND_T",
                   # Forum loadout: the animation-timed FSM states, the sprint wait, the cling cooldown and hard landing
