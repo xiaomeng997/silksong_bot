@@ -160,23 +160,81 @@
 - 这时跳的目标 = 14.27 + 5 = 19.27：从 19.8–22.8 起跳只向左移 0.5–3.5 u，本体左沿始终 ≥ 17.3。
 - 实测（运行 `20261002_231917`，数据策略加了"只剩 Clapper 时一半时间去口袋"，e589c0b；ep0 的 40 次跳）：起跳时主角在左墙（x 14.27–14.6）的 17 次，起跳点 x 22.1–28.8（中位 ≈ 25），本体顶过 12.53 时左沿最小 17.87–19.37，即离口袋右沿 ≥ 2.95 u；主角在口袋里时 Clapper 的 x：p5 18.6、中位 23.7。两次危险的起跳（x 15.36、15.59，面朝右）都发生在主角在它右边（x 16.5、18.6）时：本体贴墙升到 14.31–14.36（被穹顶挡住），覆盖口袋的高度。
 
-### 10.3 各招离口袋最近的距离（4 场、36,532 帧 Clapper；口袋 = 贴墙最高点的 `HeroBoxWallSlide` x 14.04–14.92、y 12.53–13.97；碰撞体到盒子的精确距离）
+### 10.3 各招离口袋最近的距离（4 个运行 10 场、149,676 帧 Clapper、264 次跳；口袋 = 贴墙最高点的 `HeroBoxWallSlide` x 14.04–14.92、y 12.53–13.97；碰撞体到盒子的精确距离）
 
 | 招 / 碰撞体 | 最近距离 u | 说明 |
 |---|---|---|
-| Jump、Jump Cast 本体（Air） | **0.00** | 62 次跳中 2 次碰到：都从**贴紧左墙**起跳（x 15.95、15.36）。`20261002_221727` ep1 f744330–744405：Clapper 在主角右边时向后 Evade 到墙上（pos 15.36，左沿 14.02），Escape Jump，主角当时在它左边往下劈（x ≈ 14.7）→ 瞄 19.6、vx +3.4，本体贴着墙上升，f744387 本体 [14.36, 8.24, 17.95, 12.02] 打中贴墙下方的主角；之后主角爬到最高贴墙点，f744405 上升中的本体（左沿 14.77、顶 14.46）仍有接触（无敌帧内）。另一次是 `20261002_223640` ep1 f832382 的 Jump Cast。终局两只：0.17 / 0.74 u（主角在它们右边时朝墙方向跳）。其余本体升过 12.53 的跳，左沿都 ≥ 17.83（≥ 2.9 u） |
+| Jump、Jump Cast 本体（Air） | **0.00** | 264 次跳中 7 次本体在 y ≥ 12.53 时左沿进了 14.92：全部从**贴紧左墙**起跳（x 15.36–15.95，共 10 次这样的起跳），其中 6 次主角在 Clapper 右边、1 次主角正贴墙往下劈（x 14.34）；这些跳沿墙升到穹顶（顶 14.25–14.88）。Clapper 在口袋里打到主角 2 次（都来自这种跳）：`20261002_221727` ep1 f744330–744405（Clapper 在主角右边时向后 Evade 到墙上，pos 15.36、左沿 14.02，Escape Jump，主角在它左边往下劈 → 瞄 19.6、vx +3.4，本体贴墙上升，f744387 本体 [14.36, 8.24, 17.95, 12.02] 先打中贴墙下方的主角，f744405 主角爬到最高点时仍有接触）和 `20261002_231917` ep3 f1106796。**起跳时主角就在左墙（x ≤ 14.7）的 62 次**：起跳点中位 26.9，本体升过 12.53 时左沿中位 19.25，除上面那次贴墙起跳外最小 16.74（离口袋 1.82 u） |
 | Slam 1 锤（`Slam Collider 1`） | 2.04 | 冲刺可冲到墙边（框 x 到 11.45），但顶 ≤ 10.58 |
 | Slam 2 / 跳砸落地（`Slam Collider 2`） | 2.42 / 2.73 | 顶 ≤ 10.10 |
 | rune slam（Jump Cast，伤 2） | 2.00 | 该次 rune 正落在口袋下方（x 14.38）；顶 ≈ 10.5 |
-| Bomb Cast 炸弹（伤 1） | 6.70 | 只在地面 |
+| Bomb Cast 炸弹（伤 1） | 6.67 | 只在地面 |
 | 终局 Drop In（x 21.03 / 42.03 从 y 23.7 落下） | 4.15 | |
-| Cast / Evade / Idle / Walk 本体 | ≥ 4.76 | |
+| Cast / Evade / Idle / Walk 本体 | ≥ 4.73 | |
 
-（其他波次的飞行敌人会进口袋：Reed 本体、Tiny、Choristor `Spin Hit`、Clawmaiden 矛爆炸 0.34 u。口袋只用于终局。）
+（其他波次的敌人会进口袋：Reed 本体、Tiny、Minister `Slash Collider`、Choristor `Spin Hit`、Clawmaiden 矛爆炸 0.00 u。口袋只用于终局。）
+
+主角在口袋里（transform x < 14.57、y ≥ 13.2，10 场共 1712 帧）时 Clapper 进入的状态：Idle 9、Walk 8、Slam 2 7（跳砸落地）、Cast Slam Antic(2) 7、Jump 4、Air 4、Slam Recover 3、Cast 1/2 3、Spell Antic 1、Jump Antic 1、Evade Scuttle 1；**没有 Slam Antic（地面锤）**，与 10.2 一致（那次 Evade 未查原因：可能是两只互相让的 Avoid Type）。Clapper 当时的 x：最小 15.63、p5 18.5、中位 22.9。
 
 ### 10.4 结论
 
-- **你的打法基本成立**：主角贴在左墙最高点时，Clapper 的锤、跳砸落地、丝砸（rune slam）、丝内爆（炸弹）、入场、本体都够不着，余量 ≥ 2.0 u（锤 2.04、rune 2.00）；它们也不会选锤和后撤（主角不在 Slam Range 里），只会跳 / 施法，而跳总落在主角前 5 u（x ≈ 19.3）。
-- **唯一的漏洞是贴墙起跳**：Clapper 的本体贴着左墙（左沿在墙面 0.5 u 以内，pos ≤ ≈ 16.8 面朝左）时起跳，跳向 19.27 的路上本体先沿墙升起，约 0.16 s 时顶过 12.53、左沿还在 14.9 以内（模型：top = 7.64 + 38t − 42t²，左沿 = pos − 2.25 + (19.27 − pos)·t → pos ≤ 16.78 就重叠），实测 2 次碰到口袋。Clapper 只有在主角离开口袋时才会到墙边（主角在 Slam Range 里时朝墙冲锤，或主角在它右边时向后 Evade 到墙）。所以**规则：回到口袋之前，确认没有 Clapper 贴在左墙边（本体左沿 ≤ 14.6）；有就等它离开或先别上去**。规划器靠 CC_JUMP / CC_JUMP_CAST 的行为表（按起跳点锚定）自动得到这一点，剧本里再写一条。
+- **你的打法基本成立**：主角贴在左墙最高点时，Clapper 的锤、跳砸落地、丝砸（rune slam）、丝内爆（炸弹）、入场、本体都够不着，余量 ≥ 2.0 u（锤 2.04、rune 2.00）；它们也不会选锤和后撤（主角不在 Slam Range 里），只会跳 / 施法，而跳总落在主角前 5 u（x ≈ 19.3）；起跳时主角在墙上的 62 次跳，除一次贴墙起跳外本体都离口袋 ≥ 1.82 u（中位 4.3 u）。
+- **唯一的漏洞是贴墙起跳**：Clapper 的本体贴着左墙（左沿在墙面 0.5 u 以内，pos ≤ ≈ 16.8 面朝左）时起跳，跳向 19.27 的路上本体先沿墙升起，约 0.16 s 时顶过 12.53、左沿还在 14.9 以内（模型：top = 7.64 + 38t − 42t²，左沿 = pos − 2.25 + (19.27 − pos)·t → pos ≤ 16.78 就重叠）；10 场里贴墙起跳 10 次，7 次本体进了口袋的范围，Clapper 在口袋里打到主角 2 次。Clapper 只有在主角离开口袋时才会到墙边（主角在 Slam Range 里时朝墙冲锤，或主角在它右边时向后 Evade 到墙）。所以**规则：回到口袋之前，确认没有 Clapper 贴在左墙边（本体左沿 ≤ 14.6）；有就等它离开或先别上去**。规划器靠 CC_JUMP / CC_JUMP_CAST 的行为表（按起跳点锚定）自动得到这一点，剧本里再写一条。
 - **墙上出刀够得着跳到高处的 Clapper 吗**：录像里从左墙（x 14.27）出的 Reaper `WallSlash` 打中 Clapper 7 次（3 个运行）：站地的 Clapper 本体左沿到 16.3–18.6，空中的一次（`20261002_231917` f969433，主角贴墙 y 9.88，Clapper `Air` pos (20.53, 12.43)，本体左沿 18.28）。所以贴墙横斩够到 x ≈ 18.3–18.6（离主角中心约 4.0–4.3 u）。口袋模式那一场里主角在墙上时的跳，本体升过 12.53 时左沿 17.87–19.37，大约一半在 18.6 以内：**"在最高点砍一下"对较近的一半跳可行**，较远的够不着（规划器按行为表和攻击多边形逐次判断）。Clapper 的伤害绝大部分来自 Garmond（3 个运行里 Clapper 受到的命中：`WildSlash Enemy Damager` 185、`Charge Damager` 48、`Stomp*` 37，Hornet 的钉子 / 丝矛 106）。
-- 还要测的：主角真正待在口袋里时 Clapper 的选择（4 场里主角在口袋只有 384 帧）。需要一个终局"贴墙口袋"数据策略（GauntletDataPolicy 的 CLING 模式只在随机时段用），以及在墙顶出刀打跳到最高点的 Clapper 的命中实测（本体最高时左沿约 17.3–17.8，Reaper 向前 3.6 u：从 14.27 只够到 ≈ 17.9）。
+- 还要测的：主角长时间待在口袋里时 Clapper 的选择。e589c0b 起数据策略在只剩 Clapper 时一半时间去左墙爬到口袋，但爬上去的少（`20261002_231917` ep0：贴墙 5621 帧里只有 145 帧在 y ≥ 13.3；10 场合计口袋 1712 帧），需要按运动学链的蹬墙跳模型写一个可靠的爬墙动作；以及在墙顶出刀打跳到最高点的 Clapper 的命中实测。
+
+## 11. 行为表首版（`ssbot.tools.behaviour_build --encounter Forum`，代码 1045010，输出 `knowledge/1.0.30000/enemies/forum/<敌人>.json`（+ `_hitboxes.npz`，未提交，用命令可重建）和 `coverage.json`）
+
+- 做法（`ssbot/knowledge/gauntlet_tables.py`）：Forum 同时有最多 6 个、4 类敌人，同类常有 2–9 只（Tiny），单 Boss 的 BehaviourBuilder 把别的伤害实体都当成 Boss 的危险物。现在每个敌人实体（HealthManager 根的 iid）一条流：它自己的实体和它放出的危险物（按 spawns 表：Clapper 的 rune bomb small / rune slam、Clawmaiden 的 Spear / 矛爆炸、Reed 的 Pin、Bellbearer 的 Throwing Bell；危险物在"放它的那招结束后 4 s 内"武装也归那招），它的 fsm / hit 事件，以及归到它名下的主角接触（按来源路径里最深的敌人名；只给子碰撞体名的按"谁在导出这个名字的碰撞体"；同名的按"哪只的伤害碰撞体碰到主角框"，再按 transform 距离；`damage_blocked` 逐帧归属）。每类一个 BehaviourBuilder；家族 = 该类的攻击开始状态（表见代码 FORUM_SPECS，从场景包 FSM 和录像整理），另加 `<P>_IDLE`（两招之间走 / 飞时本体也伤人）和 `<P>_ENTRY`（入场）；被打死（hit dead）即死亡；多段攻击的后续命中单列。
+- 输入：8 场完整的连战（`20261002_223640` 2 场、`20261002_230325` 1 场、`20261002_231917` 5 场；fo_A，数据策略，实例 2），1.91 h 战斗时间（墙钟约 2.0 h），每类敌人的实例数：Clapper 24、Clawmaiden 24、Minister 32、Maestro 24、Tiny 72（对象池，按 iid 计）、Reed 40、Envoy 8、Choristor 32、Bellbearer 40。
+- 核对：18,084 次接触（1,679 次命中 + 16,405 帧无敌接触）里 19 次不在支撑内或无法解释：Clapper 2 + 2（Slam Collider 2 在 Slam Recover 的分状态模板）、Minister 5、Reed 2 + 1、Bellbearer 3、Clawmaiden 1 + 2、Maestro 1；Tiny、Envoy、Choristor 全部通过。导出空洞（有伤害却 colliders == []）0。多段后续命中：Minister 64、Choristor 30、Reed 20。
+- 决策条件（似然比 + 留出对数损失，只影响概率）：与 Bell Beast 不同，**这里很多选择依赖距离**（dist_visible）：Clapper 的 Walk / Idle / Dmg Attack / After Scuttle / Evade Scuttle（Slam Range），Choristor 的 Attack Choice / Hop / Slash Check，Minister 的 Chase / Attack，Reed 的 Alert，Bellbearer 的 In Range，Tiny 的 Fire / Brake / Pull Up；Clapper 的 Far Range、Maestro 的 Attack Choice、Clawmaiden 的 Spin Antic 跟随 SendRandomEventV4 的计数器（last_choice / miss_*）。
+
+每招的实例数、每小时战斗时间的速率、到 200 还要几小时（同一实例上继续跑同样的数据策略）：
+
+| 敌人 | 家族 | 实例 | 每小时 | 到 200 还要 h |
+|---|---|---|---|---|
+| Choir Clapper | CC_SLAM | 227 | 119.2 | 已够 |
+| Choir Clapper | CC_JUMP | 130 | 68.2 | 1.0 |
+| Choir Clapper | CC_CAST | 232 | 121.8 | 已够 |
+| Choir Clapper | CC_JUMP_CAST | 122 | 64.0 | 1.2 |
+| Choir Clapper | CC_EVADE | 509 | 267.2 | 已够 |
+| Choir Clapper | CC_ENTRY | 24 | 12.6 | 14.0 |
+| Clawmaiden | CM_SLASH | 181 | 95.0 | 0.2 |
+| Clawmaiden | CM_SPIN | 195 | 102.4 | 已够 |
+| Clawmaiden | CM_TELE | 45 | 23.6 | 6.6 |
+| Clawmaiden | CM_ENTRY | 24 | 12.6 | 14.0 |
+| Minister | MI_CHARGE | 200 | 105.0 | 已够 |
+| Minister | MI_PARRY | 202 | 106.0 | 已够 |
+| Minister | MI_EVADE | 133 | 69.8 | 1.0 |
+| Minister | MI_ENTRY | 32 | 16.8 | 10.0 |
+| Maestro | MA_SLASH | 644 | 338.0 | 已够 |
+| Maestro | MA_SUMMON | 114 | 59.8 | 1.4 |
+| Maestro | MA_DEFEND | 264 | 138.6 | 已够 |
+| Maestro | MA_POINT | 0 | 0.0 | 没出现过 |
+| Maestro | MA_ENTRY | 24 | 12.6 | 14.0 |
+| Song Automaton Tiny | AT_FIRE | 643 | 337.5 | 已够 |
+| Song Automaton Tiny | AT_DEFEND | 742 | 389.5 | 已够 |
+| Song Automaton Tiny | AT_ENTRY | 177 | 92.9 | 0.2 |
+| Song Automaton Tiny | AT_LEAVE | 66 | 34.6 | 3.9 |
+| Reed | RE_STAB | 168 | 88.2 | 0.4 |
+| Reed | RE_THROW | 150 | 78.7 | 0.6 |
+| Reed | RE_DEFEND | 125 | 65.6 | 1.1 |
+| Reed | RE_EVADE | 128 | 67.2 | 1.1 |
+| Reed | RE_ENTRY | 40 | 21.0 | 7.6 |
+| Envoy | EN_SLASH | 59 | 31.0 | 4.6 |
+| Envoy | EN_JUMPSLASH | 22 | 11.5 | 15.4 |
+| Envoy | EN_CHARGE | 25 | 13.1 | 13.3 |
+| Envoy | EN_HOPSLASH | 0 | 0.0 | 没出现过 |
+| Envoy | EN_AMBUSH | 8 | 4.2 | 45.7 |
+| Envoy | EN_ENTRY | 0 | 0.0 | 没出现过 |
+| Choristor | CH_SLASH | 112 | 58.8 | 1.5 |
+| Choristor | CH_WHIP | 99 | 52.0 | 1.9 |
+| Choristor | CH_JUMP | 66 | 34.6 | 3.9 |
+| Choristor | CH_ENTRY | 32 | 16.8 | 10.0 |
+| Choir Bellbearer | CB_THROW | 671 | 352.2 | 已够 |
+| Choir Bellbearer | CB_EVADE | 253 | 132.8 | 已够 |
+| Choir Bellbearer | CB_ENTRY | 40 | 21.0 | 7.6 |
+
+- **结论**：再跑约 2 h，除 Envoy 和各类入场外几乎全部 ≥ 200；较慢的是 Clawmaiden 的瞬移（6.6 h）、Tiny 的离场（3.9 h）、Choristor 跳斩（3.9 h）。**Envoy 只在第 0 波出现一只**（38 HP，几秒就死）：跳斩 15 h、冲锋 13 h、普通斩 4.6 h，伏击每场一次（46 h），HopSlash 从没出现（`Hop Up?` 要主角在它上方）；各类入场每场 1–5 次（7.6–14 h）。这些要么另做定点采集（只打 Envoy 的 savestate、让它多活），要么按"每场一次的固定开场"处理、不要求 200。MA_POINT（`Point Start` 的下一个状态是空）在 Forum 不出现。
+- 每场 13–17 min（`--timebox 1500`；第 7 波两只 Maestro 是最慢的一段），一个实例一小时约 4 场。

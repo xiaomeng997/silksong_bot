@@ -1,0 +1,698 @@
+{
+ "encounter": "Forum",
+ "fights": [
+  {
+   "id": "20261002_223640_Forum_A_data/i2/ep0",
+   "frames": 50880,
+   "subjects": {
+    "Song Pilgrim 03": 4,
+    "Song Pilgrim Maestro": 3,
+    "Song Reed": 5,
+    "Song Automaton Tiny": 9,
+    "Song Pilgrim 01": 1,
+    "Pilgrim 03 Song": 5,
+    "Song Handmaiden": 3,
+    "Song Administrator": 4,
+    "Song Heavy Sentry": 3
+   },
+   "instances": {
+    "Song Heavy Sentry": 246,
+    "Song Handmaiden": 107,
+    "Song Administrator": 189,
+    "Song Pilgrim Maestro": 240,
+    "Song Automaton Tiny": 349,
+    "Song Reed": 156,
+    "Song Pilgrim 01": 19,
+    "Song Pilgrim 03": 61,
+    "Pilgrim 03 Song": 237
+   },
+   "fold": 0
+  },
+  {
+   "id": "20261002_223640_Forum_A_data/i2/ep1",
+   "frames": 44188,
+   "subjects": {
+    "Song Pilgrim 03": 4,
+    "Song Pilgrim Maestro": 3,
+    "Song Reed": 5,
+    "Song Automaton Tiny": 9,
+    "Song Pilgrim 01": 1,
+    "Pilgrim 03 Song": 5,
+    "Song Handmaiden": 3,
+    "Song Administrator": 4,
+    "Song Heavy Sentry": 3
+   },
+   "instances": {
+    "Song Heavy Sentry": 267,
+    "Song Handmaiden": 73,
+    "Song Administrator": 158,
+    "Song Pilgrim Maestro": 236,
+    "Song Automaton Tiny": 356,
+    "Song Reed": 137,
+    "Song Pilgrim 01": 28,
+    "Song Pilgrim 03": 72,
+    "Pilgrim 03 Song": 171
+   },
+   "fold": 0
+  },
+  {
+   "id": "20261002_230325_Forum_A_data/i2/ep0",
+   "frames": 56148,
+   "subjects": {
+    "Song Pilgrim 03": 4,
+    "Song Pilgrim Maestro": 3,
+    "Song Reed": 5,
+    "Song Automaton Tiny": 9,
+    "Song Pilgrim 01": 1,
+    "Pilgrim 03 Song": 5,
+    "Song Handmaiden": 3,
+    "Song Administrator": 4,
+    "Song Heavy Sentry": 3
+   },
+   "instances": {
+    "Song Heavy Sentry": 247,
+    "Song Handmaiden": 85,
+    "Song Administrator": 104,
+    "Song Pilgrim Maestro": 328,
+    "Song Automaton Tiny": 472,
+    "Song Reed": 165,
+    "Song Pilgrim 01": 29,
+    "Song Pilgrim 03": 68,
+    "Pilgrim 03 Song": 233
+   },
+   "fold": 1
+  },
+  {
+   "id": "20261002_231917_Forum_A_data/i2/ep0",
+   "frames": 58932,
+   "subjects": {
+    "Song Pilgrim 03": 4,
+    "Song Pilgrim Maestro": 3,
+    "Song Reed": 5,
+    "Song Automaton Tiny": 9,
+    "Song Pilgrim 01": 1,
+    "Pilgrim 03 Song": 5,
+    "Song Handmaiden": 3,
+    "Song Administrator": 4,
+    "Song Heavy Sentry": 3
+   },
+   "instances": {
+    "Song Heavy Sentry": 366,
+    "Song Handmaiden": 112,
+    "Song Administrator": 144,
+    "Song Pilgrim Maestro": 326,
+    "Song Automaton Tiny": 465,
+    "Song Reed": 135,
+    "Song Pilgrim 01": 30,
+    "Song Pilgrim 03": 62,
+    "Pilgrim 03 Song": 282
+   },
+   "fold": 0
+  },
+  {
+   "id": "20261002_231917_Forum_A_data/i2/ep1",
+   "frames": 48215,
+   "subjects": {
+    "Song Pilgrim 03": 4,
+    "Song Pilgrim Maestro": 3,
+    "Song Reed": 5,
+    "Song Automaton Tiny": 9,
+    "Song Pilgrim 01": 1,
+    "Pilgrim 03 Song": 5,
+    "Song Handmaiden": 3,
+    "Song Administrator": 4,
+    "Song Heavy Sentry": 3
+   },
+   "instances": {
+    "Song Heavy Sentry": 244,
+    "Song Handmaiden": 132,
+    "Song Administrator": 98,
+    "Song Pilgrim Maestro": 238,
+    "Song Automaton Tiny": 328,
+    "Song Reed": 159,
+    "Song Pilgrim 01": 39,
+    "Song Pilgrim 03": 79,
+    "Pilgrim 03 Song": 202
+   },
+   "fold": 0
+  },
+  {
+   "id": "20261002_231917_Forum_A_data/i2/ep2",
+   "frames": 50859,
+   "subjects": {
+    "Song Pilgrim 03": 4,
+    "Song Pilgrim Maestro": 3,
+    "Song Reed": 5,
+    "Song Automaton Tiny": 9,
+    "Song Pilgrim 01": 1,
+    "Pilgrim 03 Song": 5,
+    "Song Handmaiden": 3,
+    "Song Administrator": 4,
+    "Song Heavy Sentry": 3
+   },
+   "instances": {
+    "Song Heavy Sentry": 361,
+    "Song Handmaiden": 80,
+    "Song Administrator": 108,
+    "Song Pilgrim Maestro": 264,
+    "Song Automaton Tiny": 362,
+    "Song Reed": 102,
+    "Song Pilgrim 01": 13,
+    "Song Pilgrim 03": 65,
+    "Pilgrim 03 Song": 140
+   },
+   "fold": 0
+  },
+  {
+   "id": "20261002_231917_Forum_A_data/i2/ep3",
+   "frames": 42873,
+   "subjects": {
+    "Song Pilgrim 03": 4,
+    "Song Pilgrim Maestro": 3,
+    "Song Reed": 5,
+    "Song Automaton Tiny": 9,
+    "Song Pilgrim 01": 1,
+    "Pilgrim 03 Song": 5,
+    "Song Handmaiden": 3,
+    "Song Administrator": 4,
+    "Song Heavy Sentry": 3
+   },
+   "instances": {
+    "Song Heavy Sentry": 307,
+    "Song Handmaiden": 81,
+    "Song Administrator": 126,
+    "Song Pilgrim Maestro": 142,
+    "Song Automaton Tiny": 196,
+    "Song Reed": 141,
+    "Song Pilgrim 01": 17,
+    "Song Pilgrim 03": 94,
+    "Pilgrim 03 Song": 238
+   },
+   "fold": 0
+  },
+  {
+   "id": "20261002_231917_Forum_A_data/i2/ep4",
+   "frames": 59416,
+   "subjects": {
+    "Song Pilgrim 03": 4,
+    "Song Pilgrim Maestro": 3,
+    "Song Reed": 5,
+    "Song Automaton Tiny": 9,
+    "Song Pilgrim 01": 1,
+    "Pilgrim 03 Song": 5,
+    "Song Handmaiden": 3,
+    "Song Administrator": 4,
+    "Song Heavy Sentry": 3
+   },
+   "instances": {
+    "Song Heavy Sentry": 429,
+    "Song Handmaiden": 117,
+    "Song Administrator": 118,
+    "Song Pilgrim Maestro": 270,
+    "Song Automaton Tiny": 399,
+    "Song Reed": 128,
+    "Song Pilgrim 01": 23,
+    "Song Pilgrim 03": 90,
+    "Pilgrim 03 Song": 273
+   },
+   "fold": 0
+  }
+ ],
+ "fight_hours": 1.905,
+ "rows": [
+  {
+   "type": "Song Heavy Sentry",
+   "enemy": "ChoirClapper",
+   "family": "CC_SLAM",
+   "n": 227,
+   "idle": false,
+   "per_hour": 119.2,
+   "hours_to_target": 0.0
+  },
+  {
+   "type": "Song Heavy Sentry",
+   "enemy": "ChoirClapper",
+   "family": "CC_JUMP",
+   "n": 130,
+   "idle": false,
+   "per_hour": 68.2,
+   "hours_to_target": 1.0
+  },
+  {
+   "type": "Song Heavy Sentry",
+   "enemy": "ChoirClapper",
+   "family": "CC_CAST",
+   "n": 232,
+   "idle": false,
+   "per_hour": 121.8,
+   "hours_to_target": 0.0
+  },
+  {
+   "type": "Song Heavy Sentry",
+   "enemy": "ChoirClapper",
+   "family": "CC_JUMP_CAST",
+   "n": 122,
+   "idle": false,
+   "per_hour": 64.0,
+   "hours_to_target": 1.2
+  },
+  {
+   "type": "Song Heavy Sentry",
+   "enemy": "ChoirClapper",
+   "family": "CC_EVADE",
+   "n": 509,
+   "idle": false,
+   "per_hour": 267.2,
+   "hours_to_target": 0.0
+  },
+  {
+   "type": "Song Heavy Sentry",
+   "enemy": "ChoirClapper",
+   "family": "CC_ENTRY",
+   "n": 24,
+   "idle": false,
+   "per_hour": 12.6,
+   "hours_to_target": 14.0
+  },
+  {
+   "type": "Song Heavy Sentry",
+   "enemy": "ChoirClapper",
+   "family": "CC_IDLE",
+   "n": 1223,
+   "idle": true,
+   "per_hour": 642.0,
+   "hours_to_target": 0.0
+  },
+  {
+   "type": "Song Handmaiden",
+   "enemy": "Clawmaiden",
+   "family": "CM_SLASH",
+   "n": 181,
+   "idle": false,
+   "per_hour": 95.0,
+   "hours_to_target": 0.2
+  },
+  {
+   "type": "Song Handmaiden",
+   "enemy": "Clawmaiden",
+   "family": "CM_SPIN",
+   "n": 195,
+   "idle": false,
+   "per_hour": 102.4,
+   "hours_to_target": 0.0
+  },
+  {
+   "type": "Song Handmaiden",
+   "enemy": "Clawmaiden",
+   "family": "CM_TELE",
+   "n": 45,
+   "idle": false,
+   "per_hour": 23.6,
+   "hours_to_target": 6.6
+  },
+  {
+   "type": "Song Handmaiden",
+   "enemy": "Clawmaiden",
+   "family": "CM_ENTRY",
+   "n": 24,
+   "idle": false,
+   "per_hour": 12.6,
+   "hours_to_target": 14.0
+  },
+  {
+   "type": "Song Handmaiden",
+   "enemy": "Clawmaiden",
+   "family": "CM_IDLE",
+   "n": 342,
+   "idle": true,
+   "per_hour": 179.5,
+   "hours_to_target": 0.0
+  },
+  {
+   "type": "Song Administrator",
+   "enemy": "Minister",
+   "family": "MI_CHARGE",
+   "n": 200,
+   "idle": false,
+   "per_hour": 105.0,
+   "hours_to_target": 0.0
+  },
+  {
+   "type": "Song Administrator",
+   "enemy": "Minister",
+   "family": "MI_PARRY",
+   "n": 202,
+   "idle": false,
+   "per_hour": 106.0,
+   "hours_to_target": 0.0
+  },
+  {
+   "type": "Song Administrator",
+   "enemy": "Minister",
+   "family": "MI_EVADE",
+   "n": 133,
+   "idle": false,
+   "per_hour": 69.8,
+   "hours_to_target": 1.0
+  },
+  {
+   "type": "Song Administrator",
+   "enemy": "Minister",
+   "family": "MI_ENTRY",
+   "n": 32,
+   "idle": false,
+   "per_hour": 16.8,
+   "hours_to_target": 10.0
+  },
+  {
+   "type": "Song Administrator",
+   "enemy": "Minister",
+   "family": "MI_IDLE",
+   "n": 478,
+   "idle": true,
+   "per_hour": 250.9,
+   "hours_to_target": 0.0
+  },
+  {
+   "type": "Song Pilgrim Maestro",
+   "enemy": "Maestro",
+   "family": "MA_SLASH",
+   "n": 644,
+   "idle": false,
+   "per_hour": 338.0,
+   "hours_to_target": 0.0
+  },
+  {
+   "type": "Song Pilgrim Maestro",
+   "enemy": "Maestro",
+   "family": "MA_SUMMON",
+   "n": 114,
+   "idle": false,
+   "per_hour": 59.8,
+   "hours_to_target": 1.4
+  },
+  {
+   "type": "Song Pilgrim Maestro",
+   "enemy": "Maestro",
+   "family": "MA_DEFEND",
+   "n": 264,
+   "idle": false,
+   "per_hour": 138.6,
+   "hours_to_target": 0.0
+  },
+  {
+   "type": "Song Pilgrim Maestro",
+   "enemy": "Maestro",
+   "family": "MA_POINT",
+   "n": 0,
+   "idle": false,
+   "per_hour": 0.0,
+   "hours_to_target": null
+  },
+  {
+   "type": "Song Pilgrim Maestro",
+   "enemy": "Maestro",
+   "family": "MA_ENTRY",
+   "n": 24,
+   "idle": false,
+   "per_hour": 12.6,
+   "hours_to_target": 14.0
+  },
+  {
+   "type": "Song Pilgrim Maestro",
+   "enemy": "Maestro",
+   "family": "MA_IDLE",
+   "n": 998,
+   "idle": true,
+   "per_hour": 523.9,
+   "hours_to_target": 0.0
+  },
+  {
+   "type": "Song Automaton Tiny",
+   "enemy": "MaestroAutomaton",
+   "family": "AT_FIRE",
+   "n": 643,
+   "idle": false,
+   "per_hour": 337.5,
+   "hours_to_target": 0.0
+  },
+  {
+   "type": "Song Automaton Tiny",
+   "enemy": "MaestroAutomaton",
+   "family": "AT_DEFEND",
+   "n": 742,
+   "idle": false,
+   "per_hour": 389.5,
+   "hours_to_target": 0.0
+  },
+  {
+   "type": "Song Automaton Tiny",
+   "enemy": "MaestroAutomaton",
+   "family": "AT_ENTRY",
+   "n": 177,
+   "idle": false,
+   "per_hour": 92.9,
+   "hours_to_target": 0.2
+  },
+  {
+   "type": "Song Automaton Tiny",
+   "enemy": "MaestroAutomaton",
+   "family": "AT_LEAVE",
+   "n": 66,
+   "idle": false,
+   "per_hour": 34.6,
+   "hours_to_target": 3.9
+  },
+  {
+   "type": "Song Automaton Tiny",
+   "enemy": "MaestroAutomaton",
+   "family": "AT_IDLE",
+   "n": 1299,
+   "idle": true,
+   "per_hour": 681.9,
+   "hours_to_target": 0.0
+  },
+  {
+   "type": "Song Reed",
+   "enemy": "Reed",
+   "family": "RE_STAB",
+   "n": 168,
+   "idle": false,
+   "per_hour": 88.2,
+   "hours_to_target": 0.4
+  },
+  {
+   "type": "Song Reed",
+   "enemy": "Reed",
+   "family": "RE_THROW",
+   "n": 150,
+   "idle": false,
+   "per_hour": 78.7,
+   "hours_to_target": 0.6
+  },
+  {
+   "type": "Song Reed",
+   "enemy": "Reed",
+   "family": "RE_DEFEND",
+   "n": 125,
+   "idle": false,
+   "per_hour": 65.6,
+   "hours_to_target": 1.1
+  },
+  {
+   "type": "Song Reed",
+   "enemy": "Reed",
+   "family": "RE_EVADE",
+   "n": 128,
+   "idle": false,
+   "per_hour": 67.2,
+   "hours_to_target": 1.1
+  },
+  {
+   "type": "Song Reed",
+   "enemy": "Reed",
+   "family": "RE_ENTRY",
+   "n": 40,
+   "idle": false,
+   "per_hour": 21.0,
+   "hours_to_target": 7.6
+  },
+  {
+   "type": "Song Reed",
+   "enemy": "Reed",
+   "family": "RE_IDLE",
+   "n": 512,
+   "idle": true,
+   "per_hour": 268.8,
+   "hours_to_target": 0.0
+  },
+  {
+   "type": "Song Pilgrim 01",
+   "enemy": "Envoy",
+   "family": "EN_SLASH",
+   "n": 59,
+   "idle": false,
+   "per_hour": 31.0,
+   "hours_to_target": 4.6
+  },
+  {
+   "type": "Song Pilgrim 01",
+   "enemy": "Envoy",
+   "family": "EN_JUMPSLASH",
+   "n": 22,
+   "idle": false,
+   "per_hour": 11.5,
+   "hours_to_target": 15.4
+  },
+  {
+   "type": "Song Pilgrim 01",
+   "enemy": "Envoy",
+   "family": "EN_CHARGE",
+   "n": 25,
+   "idle": false,
+   "per_hour": 13.1,
+   "hours_to_target": 13.3
+  },
+  {
+   "type": "Song Pilgrim 01",
+   "enemy": "Envoy",
+   "family": "EN_HOPSLASH",
+   "n": 0,
+   "idle": false,
+   "per_hour": 0.0,
+   "hours_to_target": null
+  },
+  {
+   "type": "Song Pilgrim 01",
+   "enemy": "Envoy",
+   "family": "EN_AMBUSH",
+   "n": 8,
+   "idle": false,
+   "per_hour": 4.2,
+   "hours_to_target": 45.7
+  },
+  {
+   "type": "Song Pilgrim 01",
+   "enemy": "Envoy",
+   "family": "EN_ENTRY",
+   "n": 0,
+   "idle": false,
+   "per_hour": 0.0,
+   "hours_to_target": null
+  },
+  {
+   "type": "Song Pilgrim 01",
+   "enemy": "Envoy",
+   "family": "EN_IDLE",
+   "n": 84,
+   "idle": true,
+   "per_hour": 44.1,
+   "hours_to_target": 2.6
+  },
+  {
+   "type": "Song Pilgrim 03",
+   "enemy": "Choristor",
+   "family": "CH_SLASH",
+   "n": 112,
+   "idle": false,
+   "per_hour": 58.8,
+   "hours_to_target": 1.5
+  },
+  {
+   "type": "Song Pilgrim 03",
+   "enemy": "Choristor",
+   "family": "CH_WHIP",
+   "n": 99,
+   "idle": false,
+   "per_hour": 52.0,
+   "hours_to_target": 1.9
+  },
+  {
+   "type": "Song Pilgrim 03",
+   "enemy": "Choristor",
+   "family": "CH_JUMP",
+   "n": 66,
+   "idle": false,
+   "per_hour": 34.6,
+   "hours_to_target": 3.9
+  },
+  {
+   "type": "Song Pilgrim 03",
+   "enemy": "Choristor",
+   "family": "CH_ENTRY",
+   "n": 32,
+   "idle": false,
+   "per_hour": 16.8,
+   "hours_to_target": 10.0
+  },
+  {
+   "type": "Song Pilgrim 03",
+   "enemy": "Choristor",
+   "family": "CH_IDLE",
+   "n": 282,
+   "idle": true,
+   "per_hour": 148.0,
+   "hours_to_target": 0.0
+  },
+  {
+   "type": "Pilgrim 03 Song",
+   "enemy": "ChoirBellbearer",
+   "family": "CB_THROW",
+   "n": 671,
+   "idle": false,
+   "per_hour": 352.2,
+   "hours_to_target": 0.0
+  },
+  {
+   "type": "Pilgrim 03 Song",
+   "enemy": "ChoirBellbearer",
+   "family": "CB_EVADE",
+   "n": 253,
+   "idle": false,
+   "per_hour": 132.8,
+   "hours_to_target": 0.0
+  },
+  {
+   "type": "Pilgrim 03 Song",
+   "enemy": "ChoirBellbearer",
+   "family": "CB_ENTRY",
+   "n": 40,
+   "idle": false,
+   "per_hour": 21.0,
+   "hours_to_target": 7.6
+  },
+  {
+   "type": "Pilgrim 03 Song",
+   "enemy": "ChoirBellbearer",
+   "family": "CB_IDLE",
+   "n": 812,
+   "idle": true,
+   "per_hour": 426.2,
+   "hours_to_target": 0.0
+  }
+ ],
+ "counters": {
+  "contacts with a shared source name (nearest subject)": 5950,
+  "contacts named by a collider child only (subject exporting it)": 1065,
+  "hazard contacts after the hazard left the export (its last owner)": 15,
+  "hero contacts without an enemy: Colliders/Collider Fly": 5,
+  "hero contacts without an enemy: Colliders/Collider ParryStance": 5,
+  "hero contacts without an enemy: Colliders/Collider ParryAntic": 3
+ },
+ "tables": {
+  "Song Heavy Sentry": "C:\\modeling\\silksong_bot\\.claude\\worktrees\\wf_946a7803-63c-2\\knowledge\\1.0.30000\\enemies\\forum\\ChoirClapper.json",
+  "Song Handmaiden": "C:\\modeling\\silksong_bot\\.claude\\worktrees\\wf_946a7803-63c-2\\knowledge\\1.0.30000\\enemies\\forum\\Clawmaiden.json",
+  "Song Administrator": "C:\\modeling\\silksong_bot\\.claude\\worktrees\\wf_946a7803-63c-2\\knowledge\\1.0.30000\\enemies\\forum\\Minister.json",
+  "Song Pilgrim Maestro": "C:\\modeling\\silksong_bot\\.claude\\worktrees\\wf_946a7803-63c-2\\knowledge\\1.0.30000\\enemies\\forum\\Maestro.json",
+  "Song Automaton Tiny": "C:\\modeling\\silksong_bot\\.claude\\worktrees\\wf_946a7803-63c-2\\knowledge\\1.0.30000\\enemies\\forum\\MaestroAutomaton.json",
+  "Song Reed": "C:\\modeling\\silksong_bot\\.claude\\worktrees\\wf_946a7803-63c-2\\knowledge\\1.0.30000\\enemies\\forum\\Reed.json",
+  "Song Pilgrim 01": "C:\\modeling\\silksong_bot\\.claude\\worktrees\\wf_946a7803-63c-2\\knowledge\\1.0.30000\\enemies\\forum\\Envoy.json",
+  "Song Pilgrim 03": "C:\\modeling\\silksong_bot\\.claude\\worktrees\\wf_946a7803-63c-2\\knowledge\\1.0.30000\\enemies\\forum\\Choristor.json",
+  "Pilgrim 03 Song": "C:\\modeling\\silksong_bot\\.claude\\worktrees\\wf_946a7803-63c-2\\knowledge\\1.0.30000\\enemies\\forum\\ChoirBellbearer.json"
+ },
+ "code": {
+  "sha": "104501017303d0683b5d5afbdbd40ae4b6035b68",
+  "branch": "worktree-wf_946a7803-63c-2",
+  "dirty": false
+ }
+}
