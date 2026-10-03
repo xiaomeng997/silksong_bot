@@ -54,4 +54,6 @@ def test_wall_cling_candidates_in_a_box_room():
     top = max(q["pos"][1] for q in walls)
     assert 14.0 < top <= 15.0 + 0.52                          # the highest cling has the box centre at the top
     stands = [q for q in pts if q["kind"] == "stand"]
-    assert stands and all(abs(q["pos"][1] - (0.015 + 1.5527)) < 1e-6 for q in stands)
+    floor = [q for q in stands if q["pos"][1] < 5]
+    assert floor and all(abs(q["pos"][1] - (0.015 + 1.5527)) < 1e-6 for q in floor)
+    assert all(abs(q["pos"][1] - (15.015 + 1.5527)) < 1e-6 for q in stands if q["pos"][1] >= 5)   # on the wall top
