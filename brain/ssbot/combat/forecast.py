@@ -249,8 +249,9 @@ class Forecast:
             return out
         shp = out.shape
         T = shp[-1] if len(shp) else 1
-        x2 = np.ascontiguousarray(np.broadcast_to(np.asarray(x, np.float64), shp).reshape(-1, T))
-        y2 = np.ascontiguousarray(np.broadcast_to(np.asarray(y, np.float64), shp).reshape(-1, T))
+        # writable copies: a read-only view (broadcast_to) is another numba specialization, compiled mid-fight
+        x2 = np.require(np.broadcast_to(np.asarray(x, np.float64), shp).reshape(-1, T), np.float64, ["C", "W"])
+        y2 = np.require(np.broadcast_to(np.asarray(y, np.float64), shp).reshape(-1, T), np.float64, ["C", "W"])
         flat = out.reshape(-1, T)
         for rr, paths in by_r.items():
             cx = np.ascontiguousarray([np.broadcast_to(np.asarray(p[0], np.float64), (T,)) for p in paths])

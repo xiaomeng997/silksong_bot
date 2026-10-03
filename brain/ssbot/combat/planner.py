@@ -603,9 +603,12 @@ class Planner:
                 r = np.flatnonzero(pogo_tgt[sub] == ti)
                 occ_x = self._contacts(f, cur.bound[sub[r]], tk, skip[r], exclude=g.name)
                 b0 = np.argmax((ev[sub[r]] & kin.EV_POGO) != 0, axis=1)
-                win = ((np.arange(tk.shape[0])[None, :] >= b0[:, None]) &
-                       (tk[None, :] <= tk[b0][:, None] + g.cooldown_s))
-                occ[r] = np.where(win, occ_x, occ[r])
+                # (named cool, not win: win is the attack windows the pogo lane gate below reads; reusing the name
+                # handed _lanes_connect this bool mask as its windows after a bell pogo, out-of-bounds reads in a
+                # compiled kernel; found by a cold-cache replay: _lanes_connect compiled for win bool[:, :])
+                cool = ((np.arange(tk.shape[0])[None, :] >= b0[:, None]) &
+                        (tk[None, :] <= tk[b0][:, None] + g.cooldown_s))
+                occ[r] = np.where(cool, occ_x, occ[r])
             # a side slash on a drop bell knocks it away from the hitter (TINK): its support is its one redirected
             # path instead of both bounce sides (Forecast.occupied_redirect); the slash's own safety as usual
             self.last_redirect = 0
