@@ -25,12 +25,19 @@ only (estimate_state, causal phase interval): what the planner knows at decision
 Every window lands in exactly one category (first match of the last applicable rule): uncovered:<why> (invalid:
 hero absent, paused or not in gameplay; gap: missing frames; slide: a savestate load still moving the hero back;
 harness teleports, hazard respawns, scene changes, deaths, control taken by another FSM, no terrain for the scene,
-nail-charge arts), world_freeze (the time scale is below 1 outside the hero's own hit-stop: boss stun, boss death
+nail-charge arts; with the Forum parameters control taken by another FSM is the covered category "locked"
+instead: a mantle is not in that model, and the log's mantle is not information the planner has), world_freeze (the time scale is below 1 outside the hero's own hit-stop: boss stun, boss death
 slow-motion, BindBreak after a hit during Bind: the model runs them from the logged freeze starts, EV_FZ_*, and
 BindBreak from the hit during the Bind charge), hitch (a
 frame longer than the jitter model's frame_time_max: rate 3.1e-5 per frame, left to the residual monitor), hurt (a
-damage knockback inside), contact (nail recoil, recoil down, pogo or an early Silkspear catch inside), recovering
-(starts in the damage freeze / recoil), bind, cast, downspike, plain:<primitive> (jump, attack, air, run, idle).
+damage knockback inside), contact (nail recoil, recoil down, pogo or an early Silkspear catch inside), slope (the box
+within 0.05 u of a sloped terrain edge: the Forum model collides them, HeroParams.abilities; the Hunter rollout does
+not, so its slope windows are counted as they come out), recovering (starts in the damage freeze / recoil), bind,
+cast, downspike, plain:<primitive> (jump, attack, air, run, idle).
+--bounds-events none runs planner_bounds without the logged events: the setting for recordings with no enemy, where
+the threat layer has nothing to announce and every contact (a slash into a wall, a down slash into the floor) is the
+model's own (the Forum loadout's terrain thunks); the Forum acceptance figure (docs/facts/1.0.30000/
+movement_kinematics.md section 5).
 Nothing is dropped: uncovered windows are counted by reason and the "all" figures count them as misses; "covered"
 leaves out only the uncovered ones. Arena gates (scene overrides "enable") are world state: a window runs
 with them closed unless a logged box of that window overlaps one.
@@ -155,9 +162,40 @@ def world_slow(tr: Trace, modes: np.ndarray) -> np.ndarray:
     return out
 
 
+def near_slopes(tr: Trace, terrains: dict, reach: float = 0.05, step: float = 0.05) -> np.ndarray:
+    """Per frame: the logged box comes within `reach` of a sloped terrain edge (Terrain2D.slopes, which the rollout
+    does not collide: Hang_12's ceiling is one jagged run of them, y 9.88 - 11.1)."""
+    out = np.zeros(len(tr), dtype=bool)
+    b = tr.box
+    for si, name in enumerate(tr.scenes):
+        t = terrains.get(name)
+        sl = getattr(t, "slopes", None) if t is not None else None
+        if sl is None or len(sl) == 0:
+            continue
+        rows = np.flatnonzero((tr.scene == si) & np.isfinite(b[:, 0]))
+        if not len(rows):
+            continue
+        bx = b[rows]
+        for x0, y0, x1, y1 in np.asarray(sl, dtype=np.float64):
+            lo_x, hi_x, lo_y, hi_y = min(x0, x1) - reach, max(x0, x1) + reach, min(y0, y1) - reach, max(y0, y1) + reach
+            cand = (bx[:, 2] >= lo_x) & (bx[:, 0] <= hi_x) & (bx[:, 3] >= lo_y) & (bx[:, 1] <= hi_y)
+            if not cand.any():
+                continue
+            n = max(int(np.hypot(x1 - x0, y1 - y0) / step) + 1, 2)
+            px, py = np.linspace(x0, x1, n), np.linspace(y0, y1, n)
+            c = bx[cand]
+            dx = np.maximum(np.maximum(c[:, None, 0] - px[None], px[None] - c[:, None, 2]), 0.0)
+            dy = np.maximum(np.maximum(c[:, None, 1] - py[None], py[None] - c[:, None, 3]), 0.0)
+            hit = (np.hypot(dx, dy) <= reach).any(axis=1)
+            out[rows[np.flatnonzero(cand)[hit]]] = True
+    return out
+
+
 def categorize(tr: Trace, horizon: int, modes: np.ndarray, events: np.ndarray, terrains: dict,
-               frame_time_max: float = 0.018) -> tuple[np.ndarray, np.ndarray]:
-    """(starts, label per window) for every row i with i + horizon inside the trace (see the module docstring)."""
+               frame_time_max: float = 0.018, forum: bool = False) -> tuple[np.ndarray, np.ndarray]:
+    """(starts, label per window) for every row i with i + horizon inside the trace (see the module docstring).
+    forum: control taken by another FSM is a covered category ("locked": the Forum model does not have the Mantle
+    FSM, and a mantle in the log is not information the planner has), not uncovered:locked."""
     n = len(tr)
     starts = np.arange(max(n - horizon, 0))
     I = starts[:, None] + np.arange(0, horizon + 1)[None, :]
@@ -185,13 +223,21 @@ def categorize(tr: Trace, horizon: int, modes: np.ndarray, events: np.ndarray, t
         ("downspike", np.isin(mw, (km.M_DS_ANTIC, km.M_DS_SPIKE)).any(axis=1)),
         ("cast", (mw == km.M_CAST).any(axis=1)),
         ("bind", (mw == km.M_BIND).any(axis=1)),
+        # Forum loadout primitives (modes only classified with HeroParams.abilities: classify_modes(forum=True))
+        ("wall", (tr.flag("wallSliding") | tr.flag("wallClinging"))[I].any(axis=1)),
+        ("glide", (mw == km.M_GLIDE).any(axis=1)),
+        ("dash", np.isin(mw, (km.M_DASH, km.M_SPRINT)).any(axis=1)),
+        ("reaper_down", (mw == km.M_RPR_DS).any(axis=1)),
+        ("hard_landing", (mw == km.M_HARD_LAND).any(axis=1)),
+        ("scramble", (mw == km.M_SCRAMBLE).any(axis=1)),
         ("recovering", np.isin(mw[:, 0], (km.M_HURT_FREEZE, km.M_HURT_RECOIL))),
         ("contact", (ew & CONTACT).any(axis=1)),
         ("hurt", (ew & HURT).any(axis=1)),
         ("world_freeze", world_slow(tr, modes)[I].any(axis=1)),
+        ("slope", near_slopes(tr, terrains)[I].any(axis=1)),
         ("hitch", (tr.udt[I[:, 1:]] > frame_time_max).any(axis=1)),
         ("uncovered:nail_charge", tr.flag("nailCharging")[I].any(axis=1)),
-        ("uncovered:locked", (mw == km.M_LOCKED).any(axis=1)),
+        ("locked" if forum else "uncovered:locked", (mw == km.M_LOCKED).any(axis=1)),
         ("uncovered:scene", (mk & km.MK_SCENE).any(axis=1)),
         ("uncovered:death", (mk & km.MK_DEATH).any(axis=1)),
         ("uncovered:hazard", (mk & km.MK_HAZARD).any(axis=1)),
@@ -241,11 +287,13 @@ def _groups(tr: Trace, starts: np.ndarray, horizon: int, terrains: dict) -> list
 
 def check_trace(tr: Trace, terrains: dict[str, Terrain2D], params: HeroParams, horizon: int = 30,
                 tol: float = 0.1, settings: tuple[str, ...] = SETTINGS, bounds: bool = True,
+                lanes: str = "bounds", bounds_events: bool = True,
                 batch: int = 16384) -> dict:
     """Run every covered window of one trace in each setting; returns the per-window errors (NaN: not run)."""
-    modes = km.classify_modes(tr)
+    modes = km.classify_modes(tr, forum=bool(params.abilities))
     events = km.derive_events(tr, modes)
-    starts, labels = categorize(tr, horizon, modes, events, terrains, params.frame_time_max)
+    starts, labels = categorize(tr, horizon, modes, events, terrains, params.frame_time_max,
+                                forum=bool(params.abilities))
     run = np.flatnonzero([not lab.startswith("uncovered:") or lab in ("uncovered:locked", "uncovered:harness",
                                                                       "uncovered:hazard", "uncovered:scene",
                                                                       "uncovered:nail_charge", "uncovered:death",
@@ -270,12 +318,12 @@ def check_trace(tr: Trace, terrains: dict[str, Terrain2D], params: HeroParams, h
             I = st[:, None] + np.arange(1, horizon + 1)[None, :]
             end = st + horizon
             for s in names:
-                ev = None if s.endswith("inputs") else events[I]
+                ev = None if (s.endswith("inputs") or (s == BOUNDS and not bounds_events)) else events[I]
                 if s.startswith("replay"):
                     r = km.rollout(S, tr.mask[I], params, terrain, events=ev, dt=tr.dt[I], fs=tr.fs[I],
                                    udt=tr.udt[I])
                 elif s == BOUNDS:
-                    r = km.rollout(S, tr.mask[I], params, terrain, events=ev, variants="bounds")
+                    r = km.rollout(S, tr.mask[I], params, terrain, events=ev, variants=lanes)
                 else:
                     r = km.rollout(S, tr.mask[I], params, terrain, events=ev)
                 if s == BOUNDS:
@@ -508,13 +556,18 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--worst", type=int, default=10, help="list the worst covered windows (planner_events)")
     ap.add_argument("--no-windows", action="store_true", help="knockback section only")
     ap.add_argument("--monitor", action="store_true", help="also replay the runtime residual monitor")
+    ap.add_argument("--lanes", default="bounds", choices=sorted(km.VARIANT_SETS),
+                    help="timing lanes of planner_bounds (bounds_ft adds the frame-time ends)")
+    ap.add_argument("--bounds-events", default="logged", choices=("logged", "none"),
+                    help="planner_bounds with the logged contact events or none (no enemy in the recording)")
     a = ap.parse_args(argv)
     params = HeroParams.load(a.params)
     results = []
     for src in a.sources:
         t0 = time.time()
         tr, terrains = load_source(src, params, a.scene)
-        res = check_trace(tr, terrains, params, a.horizon, a.tol) if not a.no_windows else \
+        res = check_trace(tr, terrains, params, a.horizon, a.tol, lanes=a.lanes,
+                          bounds_events=a.bounds_events == "logged") if not a.no_windows else \
             {"labels": np.array([], dtype=object)}
         res["knockback"] = check_knockback(tr, terrains, params)
         if a.monitor:

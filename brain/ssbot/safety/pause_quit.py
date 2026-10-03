@@ -18,7 +18,10 @@ on the first open frame plus the input path's lead instead of wherever the blind
 34 ms floor makes it 3 frames down, 3 up, and a press held into the opening makes no edge: 0-5 frames late. A Q1
 raised on an enemy hit's frame with the 2-frame training lead: press edges at +2, +8, +14 and the gate opening at +15
 (32 of the 38 hits of the gate / live QUITs, 20261002_123347 ... 152649; +14 in 5) put the pause at +20; now +17).
-Once confirmed it reads the Quit item: available -> highlight "Quit to menu" -> Submit -> the "save and quit?" prompt
+A second hold-back: no new press starts while PauseCues.keys_clear is False (safety.key_guard: a game key the
+planner pressed could still be latched, or replayed by the key path's minimum press / release, on the frame the press
+lands, and the menu would open over it), for at most keys_wait_s; the machine's empty mask releases such keys within
+the 2-frame minimum press. Once confirmed it reads the Quit item: available -> highlight "Quit to menu" -> Submit -> the "save and quit?" prompt
 (default "No") -> Up to "Yes" -> Submit; greyed -> stays paused, refreshes the menu once through
 Options -> Back when the cause may be disableSaveQuit, then waits for resolve_greyed(); after "Yes", still on the prompt
 with no fade-out refusal_s after the Submit took effect = the Patch 4 refusal: stays paused, never unpauses blindly.
@@ -155,6 +158,9 @@ class PauseCues:
     unpause_blocked: bool | None = None  # UIManager.ignoreUnpause (Continue does nothing while set)
     gate_open: bool | None = None    # a Pause press this frame would pause (oracle: STATE pause.blk == 0, the
     #                                  PauseGate blockers); None: unknown (vision)
+    keys_clear: bool | None = None   # a Pause press emitted now would land with no other key latched or queued on the
+    #                                  key path (safety.key_guard.keys_clear; the caller knows the in-flight ACTIONs);
+    #                                  None: unknown
 
 
 @dataclass(slots=True)
@@ -181,6 +187,9 @@ class PauseQuitConfig:
     gate_trust_s: float = 1.0        # a gate seen closed (PauseCues.gate_open False) holds new presses back this long
     #                                  at most (an enemy hit closes it 250 ms, probe P7), then the blind cadence
     #                                  resumes in case the cue is wrong
+    keys_wait_s: float = 0.25        # keys seen not clear (PauseCues.keys_clear False) hold the next press back this
+    #                                  long at most (they drain within the 2-frame minimum press once the machine's
+    #                                  empty mask goes out), then it goes anyway and the wait is logged
     loop_alert_s: float = 5.0        # still looping this long: alert (and keep looping)
     false_cue_alert: int = 3         # this many false cues: alert (and keep looping)
     input_latency_max_s: float = 0.10   # p99.9 key emission -> capture time of the first frame that can show its
@@ -298,6 +307,9 @@ class PauseQuit:
         self._settle: tuple[float, str] | None = None   # (until, reading) after a flip
         self._settle_armed = False
         self._gate_closed_t: float | None = None   # capture time since when the pause gate has been seen closed
+        self._keys_wait_t: float | None = None     # emission time since when a press has waited for clear keys
+        self.key_waits = 0                         # presses held back for the keys (frames)
+        self.key_waits_expired = 0                 # presses that went after keys_wait_s with the keys still not clear
 
     # ---- control ------------------------------------------------------------------------------------------------
 
@@ -321,6 +333,7 @@ class PauseQuit:
         self._cue_base = None
         self._settle, self._settle_armed = None, False
         self._gate_closed_t = None
+        self._keys_wait_t = None
         self._note(t, "start", goal)
 
     def upgrade_to_quit(self, t: float) -> bool:
@@ -585,6 +598,17 @@ class PauseQuit:
             # 60 fps) the pause came 0-5 frames after the gate opened. Released until the first open frame, it comes
             # at the input path's lead (2 frames in training)
             return NO_KEYS
+        if c.keys_clear is False:
+            # a game key could still be latched (or replayed) on the frame this press lands: the pause menu would
+            # open over it (Z submits, X / A cancel; m0:N16). The empty mask releases it within the minimum press.
+            if self._keys_wait_t is None:
+                self._keys_wait_t = now
+            if now - self._keys_wait_t < self.cfg.keys_wait_s:
+                self.key_waits += 1
+                return NO_KEYS
+            self.key_waits_expired += 1
+            self._note(now, "keys_not_clear", f"{now - self._keys_wait_t:.3f} s")
+        self._keys_wait_t = None
         self._tap = _Tap(PAUSE, now)     # the frame a release completes starts the next press
         self.presses += 1
         self.last_press_t = now
@@ -1050,3 +1074,44 @@ def cues_from_state(s: dict, qpc_freq: float = 1e7) -> PauseCues:
         quitting=quitting, dead=dead, menu_alpha=extra.get("alpha"),
         disable_pause=bool(blk & gc.BLK_DISABLE_PAUSE) if "blk" in p else None,
         unpause_blocked=None if ign is None else bool(ign), gate_open=(blk == 0) if "blk" in p else None)
+
+
+# The vision form of the oracle cues (training on the simulated final path). A menu reader sees the pause menu once its
+# canvas is this opaque (the canvas fades in from the pause frame: alpha 0.083 per 60 fps frame in the exported menu
+# section, so 3 frames in, as tests/pause_sim.py's reader), and reads the highlight and the Quit item once it has faded
+# in (alpha >= READY_ALPHA, and the game accepts input: the menu's own fade-in, which vision sees end).
+VISION_READER_ALPHA = 0.25
+VISION_READY_ALPHA = 0.95
+
+
+def vision_cues_from_state(s: dict, qpc_freq: float = 1e7) -> PauseCues:
+    """The cues a vision pipeline has of one frame, from the oracle STATE (training on the simulated final path, DESIGN
+    §3.9.2): no pause flag, no pause gate (gate_open None: the blind press cadence), no ignoreUnpause, no greyed cause;
+    the modal dimmer's alpha (the exported menu.dim while paused, 0 outside the pause: what a dimmer detector measures
+    above the scene's baseline), the world stopped (timeScale 0: a motion detector sees a pause and a hit-stop alike),
+    the pause menu only once its canvas is VISION_READER_ALPHA opaque, its highlight and Quit item only once it has faded
+    in (VISION_READY_ALPHA). The caller passes the STATE of the frame the vision view shows (k frames old on the
+    simulated final path), so the cues are as late as the view. disable_pause stays: the machine reads it only for the
+    training label REFUSED_EMULATED (what a real quit would have met), never for a decision."""
+    c = cues_from_state(s, qpc_freq)
+    c.paused = None
+    c.gate_open = None
+    c.unpause_blocked = None
+    c.quit_cause = None
+    g = s.get("game")
+    if g is None:
+        return c
+    extra = s.get("menu") if isinstance(s.get("menu"), dict) else {}
+    paused_ui = g.get("ui") == gc.UI_PAUSED
+    dim = extra.get("dim") if paused_ui else 0.0
+    c.dim = None if dim is None else float(dim)
+    alpha = extra.get("alpha")
+    if c.menu in PAUSE_MENUS and c.menu != M_SAVE_FAILED:
+        if alpha is not None and alpha < VISION_READER_ALPHA:
+            c.menu = M_NONE
+        if alpha is not None and alpha < VISION_READY_ALPHA:
+            c.menu_ready = False
+    if not c.menu_ready:
+        c.highlight = None
+        c.quit_state = None
+    return c

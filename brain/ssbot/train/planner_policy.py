@@ -17,9 +17,13 @@ Per STATE (this is the only place where backends meet the combat stack, which re
      its keys replace the planner's while it pauses, and from the tick after the trigger the tactics and the planner
      are not ticked at all (_pause_tick). A FORCED_RISK reaches Q6 with how long the best plan stays clear
      (_forced_clear_f: Q6 only within the design horizon). A pause machine outcome ends the episode as QUIT
-     (episode_outcome); the harness lets the policy own the pause (pause_owned).
+     (episode_outcome); the harness lets the policy own the pause (pause_owned). In stage C the supervisor and the
+     pause machine read only the delayed view (the WorldState and the vision form of its STATE's pause cues).
   5. unpredicted hits: a hero hit whose box (frame c or c - 1) is outside the support forecast L = 3 frames earlier
-     (the stage-A recall pairing) counts for the supervisor's Q4.
+     (the stage-A recall pairing; 4, else 2 when a late tick left a gap; none of these: unknown, counted the same)
+     counts for the supervisor's Q4.
+  6. the known-effect invariant (train/bell_hit_monitor.py): every drop bell the hero tinks must leave the bell's
+     danger zone around her no larger than the untouched bell's (violations counted in stats()["bell_hits"]).
 The decision log (decisions_i<N>.jsonl in the run directory) keeps the 90 ticks before every hero hit, lethal hit,
 FORCED_RISK and supervisor pause, and 10 after, for ssbot.tools.postmortem.
 """
@@ -38,17 +42,18 @@ from ssbot.backends.degraded import DegradedOracleBackend
 from ssbot.backends.observability import ObservabilityFilter
 from ssbot.backends.oracle_backend import OracleBackend
 from ssbot.combat.boss_model import BossModel
-from ssbot.combat.forecast import Forecaster, load_hurtbox, load_planner_templates
+from ssbot.combat.forecast import Forecaster, load_box_margin, load_hurtbox, load_planner_templates
 from ssbot.combat.planner import Planner, PlannerConfig
 from ssbot.combat.safety_filter import FilterContext
 from ssbot.combat.tactics import Tactics, load_playbook
 from ssbot.core.bosses import BOSSES
 from ssbot.core.worldstate import ORACLE, VISION_EQUIVALENT, Ev
-from ssbot.ipc.framing import BIT
+from ssbot.ipc.framing import ACTION_EXCLUSIVE, BIT
 from ssbot.knowledge import kinematics as kin
 from ssbot.knowledge.kinematics import HeroParams, HoldState, StateTracker, Terrain2D
 from ssbot.safety.pause_quit import TERMINAL
 from ssbot.safety.supervisor import SupervisorConfig
+from ssbot.train.bell_hit_monitor import BellHitMonitor
 from ssbot.train.supervision import SupervisedControl
 
 MARGIN_ORACLE = (0.15, 0.25)          # DESIGN §3.5.3 m = 0.15 u; y + 0.10 u so a jump's lane spread fits one point
@@ -56,6 +61,9 @@ COMFORT = (0.25, 0.25)                # preferred extra clearance (planner: S = 
 NOISE_K = 3.0                         # stage C: + k * sigma of the hero / boss position noise
 HORIZON_S = 2.0                       # forecast horizon: the risk map's and the Bind's
 UNPRED_LAG = 3
+UNPRED_LAGS = (3, 4, 2)   # the forecast a hit is judged against: lag 3, else 4, else 2 (the lags support_recall
+#                           validates, the DelayLine's range); none of them kept (a late tick's gap): unknown
+CATCH_UP_MAX = 64      # STATEs kept for _catch_up (a tick later than this many frames loses the oldest)
 LOG_BEFORE, LOG_AFTER = 90, 10
 LOG_ALL = os.environ.get("SSBOT_LOG_ALL") == "1"     # debugging: every tick to the decision log
 # Underground cues for the vision view (ObservabilityFilter tells; hypotheses until M3 measures tell_lead_vision in
@@ -71,7 +79,14 @@ DUST_TELL = {"Bone Beast": {"Emerge Antic C": [(0.3, "dust"), (0.6, "dust_low")]
                             "Burst Antic": [(0.3, "dust_burst")]}} | {
     f"BoneBeast DropBell {b}": {"Antic": [(0.3, "bell_dust")]} for b in ("L", "L2", "M", "M2", "R", "R2")}
 BURST_TELL = {"Bone Beast": {"Burst Antic": "burst_tell"}}
+# each cue's onset drawn in the bracket the screenshots give its nominal delay (forecast.TELL_DELAY; task V review)
+TELL_ONSET = {0.3: (0.1, 0.3), 0.6: (0.3, 0.6)}
 TELLS = {"degraded": None, "degraded_dust": DUST_TELL, "degraded_tell": BURST_TELL}
+# Vision view: the attack fit (combat.attack_fit) re-times the boss's predicted path; off by default since the tracker
+# anchors the attack's start at every drawn phase's entry (task V, boss_path_audit --view degraded_dust on live run
+# 20261002_171806, 8 fights: the fit changed the charge's box errors by < 0.1 u and put the leap's top 4.4 u off at
+# p99, +12 frames, against 0.8 u without it). SSBOT_FUSION=1 turns it back on.
+FUSION = os.environ.get("SSBOT_FUSION", "0") == "1"
 VIEWS = ("oracle", "degraded", "degraded_dust", "degraded_tell")
 
 
@@ -178,22 +193,30 @@ class PlannerPolicy:
         self.fc.no_hurtbox = self.pb.no_hurtbox
         self.fc.shape_from = self.pb.shape_from          # the emerge predicted with the charge's shape
         self.fc.bell_tells = view == "degraded_dust"
-        if fview != ORACLE and os.environ.get("SSBOT_FUSION", "1") == "1":
+        if fview != ORACLE and FUSION:
             from ssbot.combat.attack_fit import AttackFit
             self.fc.tracker.fit = AttackFit(self.model)   # multi-frame fusion of committed attacks
         if fview != ORACLE and os.environ.get("SSBOT_ATTACK_MODEL", "v2") != "v1":
             self.fc.hurtbox = load_hurtbox()     # vision: the hittable box per phase, not the sprite's (v1: the
             #                                      first attack model, for the audit's before)
+        if fview != ORACLE:
+            # the pogo gate's certain box: the predicted one eroded by the residuals measured in this view
+            # (boss_path_audit --margins); missing: {} (no pogo is ever certain), never the nominal box
+            self.fc.box_margin = load_box_margin() or {}
         self.tac = Tactics(self.pb)
         if view == "degraded" and self.pb.hidden_x_vision is not None:
             self.tac.hidden_x = self.pb.hidden_x_vision      # no cues: the stance with the least unreactable risk
         self.planner: Planner | None = None
         self.terrain_tap: TerrainTap | None = None
+        self._inbox: deque | None = None        # every STATE of the link (attach), for _catch_up
+        self._last_f: int | None = None
         self.terrain: Terrain2D | None = None
         self.log_path = (Path(log_dir) / f"decisions_i{instance}.jsonl") if log_dir else None
         self._log_buf: list[dict] = []
         self.episode = -1
-        self.sc = SupervisedControl(cfg=SupervisorConfig(worst_known_damage=2), support=lambda s: self._support)
+        # stage C: the supervisor and the pause machine read the delayed view too (SupervisedControl vision=True)
+        self.sc = SupervisedControl(cfg=SupervisorConfig(worst_known_damage=2), support=lambda s: self._support,
+                                    vision=view != "oracle")
         self.real_quit_p = real_quit_p
         self.atk_mon = AttackMonitor()
         self._pq_emulated = self.sc.pq_cfg
@@ -203,6 +226,40 @@ class PlannerPolicy:
     def attach(self, link) -> None:
         self.terrain_tap = TerrainTap(link)
         self.link = link
+        import threading
+        self._inbox_lock = threading.Lock()
+        self._inbox: deque = deque(maxlen=CATCH_UP_MAX)
+        link.subscribe_state(self._on_state)
+
+    def _on_state(self, s: dict) -> None:
+        with self._inbox_lock:          # the reader thread: every STATE, in order
+            self._inbox.append(s)
+
+    def _catch_up(self, f: int, tap) -> None:
+        """The STATEs between the last one acted on and f (the episode loop hands the policy only the newest one, so a
+        late tick skips frames: 2.5 a fight in degraded_dust run 20261002_224934) go through the perception path too:
+        the backend (filter, noise, delay line: one push per frame), the hero's state tracker and the forecaster's
+        trackers, without planning. Their events were lost before: a hit dealt on a skipped frame was never counted
+        (that run's i1 ep8: the view's boss HP stayed 80 after an up-slash took it to 75, and the rage rule did not
+        fire); a vision pipeline processes every captured frame whatever the planner's latency."""
+        last, self._last_f = self._last_f, f
+        if self._inbox is None or last is None or f <= last + 1:
+            return
+        with self._inbox_lock:
+            pending = [x for x in self._inbox if last < x.get("f", -1) < f]
+        for sk in sorted(pending, key=lambda x: x["f"]):
+            self.raw[sk["f"]] = sk
+            ws = self.backend.feed(sk)
+            if ws is None:
+                continue
+            raw = self.raw.get(ws.stamp.frame, sk)
+            raw["_t"] = ws.stamp.t_game_s
+            self.trk.push(raw)
+            self._wake(ws, sk, tap)
+            self.fc.update(ws)
+            self.counts["caught_up"] += 1
+            self._unpred_backlog += self._unpredicted(raw, ws.stamp.frame)
+            self._mon_raws.append(sk)
 
     def warmup(self) -> float:
         """Compile every numba path before the first episode (a first call mid-fight compiles for seconds, and the
@@ -214,8 +271,21 @@ class PlannerPolicy:
         from ssbot.combat.tactics import TacticPrefs
         from ssbot.core.worldstate import E, Gate, WorldState
         t0 = time.perf_counter()
-        terrain = Terrain2D.from_boxes([(60.0, 0.0, 110.0, 2.0), (67.2, 0.0, 69.2, 14.0), (102.0, 0.0, 104.0, 14.0)])
+        # the arena as a TERRAIN message (floor, walls, an arena gate the scene overrides enable), built the way a
+        # live room's is (Terrain2D.from_message: the planner's real arrays), not from boxes
+        box = lambda x0, y0, x1, y1: {"k": "box", "v": [[x0, y0], [x1, y0], [x1, y1], [x0, y1]], "r": 0.0}  # noqa
+        msg = {"solids": [{"go": "Floor", "on": True, "shapes": [box(60.0, 0.0, 110.0, 2.0)]},
+                          {"go": "Wall L", "on": True, "shapes": [box(64.0, 0.0, 66.0, 20.0)]},
+                          {"go": "Wall R", "on": True, "shapes": [box(105.0, 0.0, 107.0, 20.0)]},
+                          {"go": "Gate", "on": False, "shapes": [box(67.2, 0.0, 69.2, 14.0)]},
+                          {"go": "Gate 2", "on": False, "shapes": [box(102.0, 0.0, 104.0, 14.0)]}]}
+        terrain = Terrain2D.from_message(msg, {"enable": ["Gate", "Gate 2"]})
         planner = Planner(self.params, terrain, PlannerConfig(threads=self.threads))
+        if self.view != "oracle":
+            # the vision view's filter kernel runs from the first STATE of a fight
+            from ssbot.backends.observability import clip_fractions
+            clip_fractions(np.zeros((5, 2)), np.array([1, 5], np.int64), np.zeros(1, np.int64), 1,
+                           np.array([0.0, 0.0, 1.0, 1.0]))
         fc = self.fc
         roots = fc.tracker.roots
         an = self.model.anchor("BB_CHARGE", "Set L")
@@ -251,7 +321,8 @@ class PlannerPolicy:
             self.k = 0
         else:
             self.backend = DegradedOracleBackend(OracleBackend(bosses=[self.spec]),
-                                                 ObservabilityFilter(bosses=[self.spec], tells=TELLS[self.view]))
+                                                 ObservabilityFilter(bosses=[self.spec], tells=TELLS[self.view],
+                                                                     tell_onset=TELL_ONSET))
             self.k = self.backend.reset(seed)
         if self.terrain_tap is not None:
             msg = self.terrain_tap.wait(enc.scene, timeout_s=5.0)
@@ -280,6 +351,8 @@ class PlannerPolicy:
         self.episode_outcome: str | None = None
         self.outcome_reason: str | None = None
         self.pause_owned = False
+        self.action_flags = 0                  # ACTION flags for this tick's mask (episode._act): EXCLUSIVE while the
+        #                                        pause machine owns the keys (no planner key reaches the pause menu)
         self.wake_sent = False
         self.first_pending_reasons: list[str] = []
         self.ring: deque = deque(maxlen=LOG_BEFORE)
@@ -287,7 +360,12 @@ class PlannerPolicy:
         self.counts: Counter = Counter()
         self.tick_ms: list[float] = []
         self.plan_ms: list[float] = []
+        self._last_f: int | None = None          # the last STATE acted on (_catch_up)
+        self._unpred_backlog = 0                 # unpredicted hits found on caught-up frames, for the next tick
+        self.bell_mon = BellHitMonitor()
+        self._mon_raws: list[dict] = []
         self.unpredicted: list[int] = []
+        self.unpredicted_unknown: list[int] = []     # hits with no forecast at the validated lags (counted for Q4)
         self.hits_taken: list[int] = []
         self.forced_frames: list[int] = []
         self.first_pending_f: int | None = None
@@ -306,12 +384,14 @@ class PlannerPolicy:
 
     def _start_state(self, ws, raw: dict) -> np.ndarray:
         S = self.trk.state().copy()
-        # a hit the hero took after the WorldState's frame (stage C sees the world 2-4 frames late; the hero knows
-        # it was hit at once) starts her i-frames, which block enemy damage: without them every plan of the first
-        # ticks after a hit met the support, and Q6 ended the attempt (stage C run 20261002_102538: the 4 Q6 quits
-        # checked were FORCED_RISK on the hit frame itself with the start state's INV_T 0, the hero invulnerable)
+        # oracle view: a hit the hero took after the WorldState's frame starts her i-frames, which block enemy damage:
+        # without them every plan of the first ticks after a hit met the support, and Q6 ended the attempt (stage C
+        # run 20261002_102538: the 4 Q6 quits checked were FORCED_RISK on the hit frame itself with the start state's
+        # INV_T 0, the hero invulnerable). Stage C: the hero's hit is seen as late as the rest of the view (the hit
+        # frame's screen and HUD, k frames on), so no hit newer than the WorldState counts (task V review, 2026-10-03)
         fo = int(raw.get("f", 0)) if raw else 0
-        hit_f = [f for f in sorted(self.raw) if f > fo for ev in (self.raw[f].get("ev") or ()) if ev.get("k") == "damage"]
+        hit_f = [] if self.view != "oracle" else \
+            [f for f in sorted(self.raw) if f > fo for ev in (self.raw[f].get("ev") or ()) if ev.get("k") == "damage"]
         if hit_f:
             Sv = S.reshape(kin.K, -1)
             Sv[kin.INV_T] = np.maximum(Sv[kin.INV_T], self.params.invul_time + (hit_f[-1] - fo) * self.params.frame_time)
@@ -328,26 +408,34 @@ class PlannerPolicy:
 
     def _unpredicted(self, raw: dict, fo: int) -> int:
         """Hero hits in the WorldState's frame (the delayed one in stage C) outside the support forecast UNPRED_LAG
-        frames earlier (box of fo or fo - 1, the recall pairing)."""
+        frames earlier (box of fo or fo - 1, the recall pairing). A late tick leaves gaps in the forecasts kept: then
+        the one 4, else 2 frames earlier (UNPRED_LAGS, the lags the held-out recall validates). With none of those the
+        hit is unpredicted_unknown, which the supervisor counts like an unpredicted one (Q4); both are reported
+        (task V review, 2026-10-03: a fallback to forecasts up to 9 frames old, outside the validated lags, had counted
+        degraded_dust 20261003_022259 i0 ep9 as predicted)."""
         n = 0
+        by_f = {x[0]: x for x in self.forecasts}
         for ev in raw.get("ev") or ():
             if ev.get("k") != "damage":
                 continue
             self.hits_taken.append(fo)
             cover = False
-            old = next((x for x in self.forecasts if x[0] == fo - UNPRED_LAG), None)
-            if old is not None:
-                _, fcast, t_o = old
-                for fr in (fo, fo - 1):
-                    st = self.raw.get(fr)
-                    b = ((st or {}).get("hero") or {}).get("box")
-                    t = (st or {}).get("_t")
-                    if not b or t is None:
-                        continue
-                    x, y = 0.5 * (b[0] + b[2]), 0.5 * (b[1] + b[3])
-                    if fcast.occupied(np.array([[x]]), np.array([[y]]), np.array([t - t_o]))[0, 0]:
-                        cover = True
-                        break
+            old = next((by_f[fo - lag] for lag in UNPRED_LAGS if fo - lag in by_f), None)
+            if old is None:
+                n += 1
+                self.unpredicted_unknown.append(fo)
+                continue
+            _, fcast, t_o = old
+            for fr in (fo, fo - 1):
+                st = self.raw.get(fr)
+                b = ((st or {}).get("hero") or {}).get("box")
+                t = (st or {}).get("_t")
+                if not b or t is None:
+                    continue
+                x, y = 0.5 * (b[0] + b[2]), 0.5 * (b[1] + b[3])
+                if fcast.occupied(np.array([[x]]), np.array([[y]]), np.array([t - t_o]))[0, 0]:
+                    cover = True
+                    break
             if not cover:
                 n += 1
                 self.unpredicted.append(fo)
@@ -396,6 +484,7 @@ class PlannerPolicy:
         f = s["f"]
         if self.real_quit_active:
             return self._real_quit_step(s, f)
+        self._catch_up(f, tap)
         self.raw[f] = s
         for old in [k for k in self.raw if k < f - 12]:
             del self.raw[old]
@@ -412,6 +501,10 @@ class PlannerPolicy:
         fcast = self.fc.forecast(HORIZON_S)
         self.forecasts.append((fo, fcast, ws.stamp.t_game_s))
         self._support = fcast.support_set(ws)
+        self._mon_raws.append(s)
+        if self.sc.pq is None:
+            self.bell_mon.on_tick(fcast, fo, ws.stamp.t_game_s, self._mon_raws)
+        self._mon_raws = []
         if self.sc.pq is not None:
             return self._pause_tick(s, f, fo, ws, raw, t0)
         d = self.decision
@@ -434,13 +527,16 @@ class PlannerPolicy:
         self.planner_last = res
         self.atk_mon.predict(fo, res.attacks, res.attack)
         t2 = time.perf_counter()
-        unpred = self._unpredicted(raw, fo)
+        unpred = self._unpredicted(raw, fo) + self._unpred_backlog
+        self._unpred_backlog = 0
         clear = self._forced_clear_f(res, fcast, S0, len(prefix)) if res.forced_risk else None
         self.last_clear_f = clear
-        r = self.sc.step(s, plan_s=res.S, forced_risk=res.forced_risk, unpredicted_hits=unpred, p_death=res.P,
+        r = self.sc.step(s, obs=raw, ws=ws, inflight=self._inflight(s, f), plan_s=res.S, forced_risk=res.forced_risk,
+                         unpredicted_hits=unpred, p_death=res.P,
                          forced_clear_s=None if clear is None else clear * self.params.frame_time)
         self.decision = r.decision
         self.pause_owned = self.sc.pq is not None
+        self.action_flags = ACTION_EXCLUSIVE if self.pause_owned else 0
         if r.decision.pause_pending and self.first_pending_f is None:
             self.first_pending_f = f
             self.first_pending_reasons = list(r.decision.reasons)     # what started the pause (the end's reasons
@@ -462,6 +558,14 @@ class PlannerPolicy:
         self._log(s, f, fo, ws, fcast, prefs, res, r, unpred)
         return int(mask)
 
+    def _inflight(self, s: dict, f: int) -> list[int]:
+        """The masks sent but not applied yet before f + 2, the frame this tick's mask is for: from the frame after
+        the last ACTION the oracle applied (STATE act.target; an ACTION that missed its frame is still pending) to
+        f + 1 (the menu key guard replays the key path through them)."""
+        tgt = (s.get("act") or {}).get("target")
+        f0 = f + 1 if not isinstance(tgt, int) or tgt < f - 4 else min(tgt + 1, f + 1)
+        return [self.sent.get(fr, 0) for fr in range(f0, f + 2) if fr in self.sent]
+
     def _pause_tick(self, s: dict, f: int, fo: int, ws, raw: dict, t0: float) -> int:
         """The pause machine owns the keys (PAUSE_PENDING onwards; DESIGN §3.7.5): its keys replace the planner's
         whole mask, so the tactics and the planner are not ticked (3-30 ms a tick in the live runs, all of it
@@ -470,10 +574,13 @@ class PlannerPolicy:
         frames and its first press after the pause gate opens is not held up by planning. A resumed attempt (UNPAUSED)
         restarts the planner without the plan carried from before the pause (the keys sent meanwhile were the
         machine's)."""
-        unpred = self._unpredicted(raw, fo)
-        r = self.sc.step(s, plan_s=None, forced_risk=False, unpredicted_hits=unpred)
+        unpred = self._unpredicted(raw, fo) + self._unpred_backlog
+        self._unpred_backlog = 0
+        r = self.sc.step(s, obs=raw, ws=ws, inflight=self._inflight(s, f), plan_s=None, forced_risk=False,
+                         unpredicted_hits=unpred)
         self.decision = r.decision
         self.pause_owned = self.sc.pq is not None
+        self.action_flags = ACTION_EXCLUSIVE if self.pause_owned else 0
         mask = 0 if r.mask is None else int(r.mask)     # never the planner's: its last plan is from before the pause
         if r.outcome is not None and r.outcome in TERMINAL and self.episode_outcome is None:
             self.episode_outcome = "QUIT"
@@ -574,8 +681,17 @@ class PlannerPolicy:
     def _real_quit_step(self, s: dict, f: int) -> int:
         """A confirmed pause in a real-quit episode: only the pause machine acts (menus, the exit prompt, the
         quit to the main menu); the oracle's own menu export records what each Submit landed on."""
-        r = self.sc.step(s)
+        obs = None
+        if self.view != "oracle":
+            # the backend is not fed through the menus: the cues come from the STATE k frames back, as the view's
+            self.raw[f] = s
+            for old in [k for k in self.raw if k < f - 12]:
+                del self.raw[old]
+            old = [fr for fr in self.raw if fr <= f - self.k]
+            obs = self.raw[max(old)] if old else s
+        r = self.sc.step(s, obs=obs, inflight=self._inflight(s, f))
         mask = int(r.mask or 0)
+        self.action_flags = ACTION_EXCLUSIVE
         menu = s.get("menu") or {}
         g = s.get("game") or {}
         key = (g.get("menu"), menu.get("sel"))
@@ -605,7 +721,8 @@ class PlannerPolicy:
         out = dict(self.rq)
         if pq is not None:
             out.update(outcome=pq.outcome, presses=pq.presses, false_cues=pq.false_cues, nav_flips=pq.nav_flips,
-                       unexpected_unpauses=pq.unexpected_unpauses,
+                       unexpected_unpauses=pq.unexpected_unpauses, key_waits=pq.key_waits,
+                       key_waits_expired=pq.key_waits_expired,
                        pause_latency_s=None if pq.t_confirm is None or pq.t_start is None
                        else round(pq.t_confirm - pq.t_start, 3),
                        steps=[[round(t - (pq.t_start or 0.0), 3), k, d] for t, k, d in pq.log
@@ -623,9 +740,11 @@ class PlannerPolicy:
         return {"view": self.view, "k": self.k, "modes": modes,
                 "tick_ms_p50": q(self.tick_ms, 50), "tick_ms_p99": q(self.tick_ms, 99),
                 "plan_ms_p50": q(self.plan_ms, 50), "plan_ms_p99": q(self.plan_ms, 99),
-                "unpredicted": self.unpredicted, "hits_taken": self.hits_taken,
+                "unpredicted": self.unpredicted, "unpredicted_unknown": self.unpredicted_unknown,
+                "hits_taken": self.hits_taken,
                 "forced_risk_ticks": len(self.forced_frames), "forced_first": self.forced_frames[:20],
                 "first_pending_f": self.first_pending_f, "first_pending_reasons": self.first_pending_reasons,
                 "outcome_reason": self.outcome_reason,
                 "alerts": list(self.sc.alerts), "anchor_log": tr.anchor_log[-40:],
+                "bell_hits": self.bell_mon.stats(),
                 "real_quit": self.real_quit_stats()}

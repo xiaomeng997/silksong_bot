@@ -281,6 +281,7 @@ FrameSource ─► ScreenMode(+menu read, tear flag) ─┬─► HUDReader ─�
 | 粒子 | **Low** | 画面更干净 |
 | HUD 缩放、亮度、着色器质量 | 固定，记录在 `versions.lock` | HUD 区域和颜色统计稳定 |
 | 原生成就弹窗、Steam/Discord/NVIDIA 叠加层、Game Bar、Windows 通知 | 全部关闭；Steam 状态设为隐身 | 屏幕上不出现入侵 |
+| **正式运行的例外（2026-10-03，你的要求："录着视频、带 Steam 跳成就"）** | 正式运行开 **Steam 叠加层的成就通知**（其余叠加、Discord、NVIDIA、Game Bar、Windows 通知仍关；Shift+Tab 仍屏蔽）。四个完成类成就都在片尾统一发放（CheckCompletionAchievements [ach1]），弹出时 bot 不在战斗；路上的进度成就要么在正式运行前已解锁（D8 的原版预演），要么视觉在通知所在的角落做遮罩并把它当作已知入侵（不触发 Q5），开叠加层前在训练副本上实测通知的位置、大小、时长。全程录屏（含叠加层），另存 Player.log 的 `upload complete` 行和 Steam 成就页的解锁时间作旁证。 | 视频里看得到成就弹出；战斗中不出现未预期的入侵 |
 | 输入 | 默认键盘键位（P4 核对与注册表一致 [probe:P4]）；键盘固定走 Input System，注册表快照冻结 NativeInput [m0:C15]；中文界面（2026-09-29 定，沿用你自己的设置；菜单 OCR 模板按中文字体做）；英文键盘布局（无输入法）；**PC 上不接任何手柄**（含 Switch Pro 和 RP2040 手柄模式）：活动手柄断开会自动暂停，任何手柄输入都会切换菜单的键盘别名 [m0:N19][m0:N16] | 扫描码映射有效；菜单别名和意外暂停可预测 |
 | Windows | 专注助手开；暂停更新；关闭睡眠；GPU 驱动锁版本；`SPI_SETFOREGROUNDLOCKTIMEOUT` 设为最大；关闭粘滞键/筛选键/切换键的快捷键；**章节期间拔掉鼠标**（悬停会改变菜单选中项）；调试 UI 放在第二显示器，窗口带 `WS_EX_NOACTIVATE` | 保护焦点和捕获 |
 | 硬件 | BIOS 更新到带 Intel 微码 0x12B 或更新版本 | 13 代 Vmin 不稳定问题；部分挂起比整机挂起更危险 |

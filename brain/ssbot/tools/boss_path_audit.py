@@ -21,6 +21,17 @@ Errors along the boss's motion (dir = the recorded box centre's displacement sig
 (predicted front edge - recorded front edge), > 0: the prediction is ahead (the boss arrives later than planned);
 top = predicted top - recorded top, > 0: predicted taller (a spike planned to meet it is pressed too high). Also the
 hittable flag (predicted ok vs recorded colliders enabled) and the share of hit-stop frames (ts 0) in the window.
+
+--view degraded / degraded_dust (task V): the simulated final path instead (PlannerPolicy's DegradedOracleBackend:
+ObservabilityFilter, SimpleNoise, DelayLine 2-4 frames, seeded from the episode's seed as the live run did; the
+vision-equivalent forecaster with the attack fit and the hurtbox table). The origin is then the delayed WorldState's
+frame (the box predicted for k frames after it is compared with the colliders of that frame + k), rows are keyed by
+the recorded Control state at the origin, and per box side the errors carry min / p1 / p99 / max too: the box
+uncertainty the vision view's pogo gate shrinks the box by is sized from them (--margins: written to
+knowledge/1.0.30000/enemies/BellBeast_vision_box_margin.json, read by Forecast.certain_boss).
+--check-margins <json> (task V review): the share of the same-phase residuals beyond the committed margins, looked up
+the way Forecast.certain_boss does (the origin's 0.1 s bin of time in the phase, else the phase; the smallest bucket
+at or past k), per side and phase: run it on recordings the margins were not fitted on.
 """
 import argparse
 import json
@@ -29,6 +40,8 @@ from collections import defaultdict
 from pathlib import Path
 
 import numpy as np
+
+from ssbot.core.bosses import BELL_BEAST_PHASES as PHASE_OF
 
 KS = (3, 6, 9, 12, 18, 24, 30, 36, 42, 48)
 CHARGE = ("Charge Emerge", "Charge Antic", "Charge", "Charge End")
@@ -54,31 +67,65 @@ def _q(v):
     return [round(float(np.percentile(a, p)), 2) for p in (10, 50, 90)] + [len(a)]
 
 
-def audit_episode(states: list[dict], fc, want: set[str], every: int, out: dict) -> None:
+def _q_wide(v):
+    if not v:
+        return None
+    a = np.asarray(v)
+    return [round(float(a.min()), 2)] + [round(float(np.percentile(a, p)), 2) for p in (1, 10, 50, 90, 99)] + \
+        [round(float(a.max()), 2), len(a)]
+
+
+def _control(s: dict) -> str | None:
+    return ((_boss(s) or {}).get("fsms") or [{}])[0].get("state")
+
+
+def audit_episode(states: list[dict], fc, want: set[str], every: int, out: dict, view: str = "oracle",
+                  seed: int | None = None, wake_frame: int | None = None) -> None:
     from ssbot.backends.oracle_backend import OracleBackend
     from ssbot.combat.forecast import Forecast
     from ssbot.core.bosses import BOSSES
     fc.reset()
-    be = OracleBackend(bosses=[BOSSES[fc.model.boss_type]])
+    spec = BOSSES[fc.model.boss_type]
     tg = np.zeros(len(states))
     boxes: list = [None] * len(states)
     frz = np.zeros(len(states), bool)
+    clock = OracleBackend(bosses=[spec])
     for i, s in enumerate(states):
         boxes[i] = _box(_boss(s))
         frz[i] = float(s.get("ts", 1.0) or 0.0) == 0.0
+        tg[i] = clock.feed(s).stamp.t_game_s
+    if view == "oracle":
+        be = OracleBackend(bosses=[spec])
+    else:
+        import random
+        from ssbot.backends.degraded import DegradedOracleBackend
+        from ssbot.backends.observability import ObservabilityFilter
+        from ssbot.train.planner_policy import TELL_ONSET, TELLS
+        be = DegradedOracleBackend(OracleBackend(bosses=[spec]), ObservabilityFilter(bosses=[spec],
+                                                                                    tells=TELLS[view],
+                                                                                    tell_onset=TELL_ONSET))
+        be.reset(random.Random(seed).randrange(1 << 30))     # PlannerPolicy.reset's draw: the live run's noise
+    idx = {s["f"]: i for i, s in enumerate(states)}
     preds = []
-    for i, s in enumerate(states):
+    woke = False
+    for s in states:
         ws = be.feed(s)
-        tg[i] = ws.stamp.t_game_s
+        if ws is None or ws.stamp.frame not in idx:
+            continue
+        i = idx[ws.stamp.frame]
+        if view != "oracle" and not woke and wake_frame is not None and ws.stamp.frame >= wake_frame:
+            fc.notify_wake(ws.stamp.t_game_s)
+            woke = True
         fc.update(ws)
-        st = fc.tracker.state
+        st = fc.tracker.state if view == "oracle" else _control(states[i])
         if st not in want or i % every or i + KS[-1] >= len(states):
             continue
         f = Forecast(fc, ws.stamp.t_game_s, 0.8, [], [], True, [], fc.boss)
         tk = np.arange(KS[-1] + 1) / 60.0
         bb, ok = f.boss_box(tk)
-        hx = float(s["hero"]["pos"][0])
-        ph = f"{fc.tracker.ctx.phase}{'first' if fc.tracker.n_attacks <= 1 else ''}"
+        hx = float(states[i]["hero"]["pos"][0])
+        ph = f"{fc.tracker.ctx.phase}{'first' if fc.tracker.n_attacks <= 1 else ''}" if view == "oracle" else \
+            f"{fc.tracker.shape_key(fc.hurtbox)}|flip{int(bool(fc.boss is not None and fc.boss.flip_x))}"
         preds.append((i, st, ph, round(ws.stamp.t_game_s - fc.tracker.t_entry, 3) if fc.tracker.t_entry is not None
                       else None, bb, ok, hx))
     for i, st, ph, tau, bb, ok, hx in preds:
@@ -92,7 +139,7 @@ def audit_episode(states: list[dict], fc, want: set[str], every: int, out: dict)
                     if j >= len(states):
                         continue
                 bj = boxes[j]
-                key = (st + "/" + str(ph), base, k)
+                key = (st + "#" + str(ph), base, k)
                 o = out.setdefault(key, defaultdict(list))
                 o["n"].append(1)
                 if not ok[k] or bj is None:
@@ -110,11 +157,20 @@ def audit_episode(states: list[dict], fc, want: set[str], every: int, out: dict)
                     rel = "head_on" if d * (hx - c_now) > 0 else "behind"
                     o[f"front_{rel}"].append(d * (pf - af))
                 o["cx"].append(0.5 * (p[0] + p[2]) - c_then)
+                o["left"].append(p[0] - bj[0])
+                o["right"].append(p[2] - bj[2])
                 o["top"].append(p[3] - bj[3])
                 o["bottom"].append(p[1] - bj[1])
                 o["width"].append((p[2] - p[0]) - (bj[2] - bj[0]))
                 o["frozen"].append(float(frz[i + 1:i + k + 1].mean()) if base == "frame" else 0.0)
                 o["tau"].append(tau if tau is not None else np.nan)
+                if PHASE_OF.get(_control(states[j]) or "") == PHASE_OF.get(_control(states[i]) or ""):
+                    # still in the observable phase of the origin (the vision view's certain box is used only until
+                    # the phase can end: Forecast.certain_boss)
+                    for side, v in (("left", p[0] - bj[0]), ("right", p[2] - bj[2]), ("bottom", p[1] - bj[1]),
+                                    ("top", p[3] - bj[3])):
+                        o[f"same_{side}"].append(v)
+                    o["same_tau"].append(tau if tau is not None else np.nan)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -124,18 +180,31 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--episodes", type=int, default=4)
     ap.add_argument("--states", default=",".join(CHARGE))
     ap.add_argument("--every", type=int, default=2)
+    ap.add_argument("--view", default="oracle", choices=("oracle", "degraded", "degraded_dust"))
+    ap.add_argument("--margins", type=Path, default=None,
+                    help="vision views: write the pogo gate's box margins per phase and horizon (vision_margins)")
+    ap.add_argument("--pad", type=float, default=0.1)
+    ap.add_argument("--check-margins", type=Path, default=None,
+                    help="vision views: residuals beyond these committed margins (held-out check)")
     ap.add_argument("--json", type=Path, default=None)
     a = ap.parse_args(argv)
     from ssbot.combat.boss_model import BossModel
-    from ssbot.combat.forecast import Forecaster
+    from ssbot.combat.forecast import Forecaster, load_hurtbox
     from ssbot.combat.tactics import load_playbook
     from ssbot.record.recorder import RecordingReader
     from ssbot.tools.postmortem import episode_rows, find_recording
     model = BossModel.load("BellBeast")
-    from ssbot.core.worldstate import ORACLE
-    fc = Forecaster(model, ORACLE, templates={})
+    from ssbot.core.worldstate import ORACLE, VISION_EQUIVALENT
+    fc = Forecaster(model, ORACLE if a.view == "oracle" else VISION_EQUIVALENT, templates={})
     pb = load_playbook("BellBeast")
     fc.no_hurtbox, fc.shape_from = pb.no_hurtbox, pb.shape_from
+    if a.view != "oracle":                   # as PlannerPolicy builds the vision view's forecaster
+        from ssbot.combat.attack_fit import AttackFit
+        from ssbot.train.planner_policy import FUSION
+        if FUSION:
+            fc.tracker.fit = AttackFit(model)
+        fc.hurtbox = load_hurtbox()
+        fc.bell_tells = a.view == "degraded_dust"
     want = set(a.states.split(","))
     out: dict = {}
     n_ep = 0
@@ -145,19 +214,124 @@ def main(argv: list[str] | None = None) -> int:
                 continue
             r = RecordingReader(find_recording(a.run, row))
             states = [s for s in r.states(row["f_end"] - row["acts"], row["f_end"])]
-            audit_episode(states, fc, want, a.every, out)
+            audit_episode(states, fc, want, a.every, out, a.view, row.get("seed"), row.get("f_wake"))
             n_ep += 1
     rep = {"episodes": n_ep, "quantiles": "p10 / p50 / p90 / n", "rows": []}
     for (st, base, k), o in sorted(out.items(), key=lambda kv: (kv[0][0], kv[0][1], kv[0][2])):
         rep["rows"].append({"state": st, "base": base, "k": k, "n": len(o["n"]),
                             "ok_mismatch": round(float(np.mean(o["ok_mismatch"])), 3) if o["ok_mismatch"] else None,
                             **{m: _q(o[m]) for m in ("front", "front_head_on", "front_behind", "top", "bottom",
-                                                     "width", "frozen")}})
+                                                     "width", "frozen")},
+                            **({f"{m}_wide": _q_wide(o[m]) for m in ("left", "right", "top", "bottom")}
+                               if a.view != "oracle" else {})})
     for x in rep["rows"]:
         print(json.dumps(x))
     if a.json:
         a.json.write_text(json.dumps(rep, indent=1), "utf-8")
+    if a.check_margins and a.view != "oracle":
+        chk = check_margins(out, json.loads(a.check_margins.read_text("utf-8")))
+        rep["margin_check"] = chk
+        print(json.dumps({k: v for k, v in chk.items() if k != "worst"}, indent=1))
+        if a.json:
+            a.json.write_text(json.dumps(rep, indent=1), "utf-8")
+    if a.margins and a.view != "oracle":
+        doc = vision_margins(out, a.pad)
+        doc["source"] = {"run": str(a.run), "instances": a.instances, "episodes_per_instance": a.episodes,
+                         "view": a.view, "episodes": n_ep}
+        a.margins.write_text(json.dumps(doc, indent=1), "utf-8")
+        print(f"margins -> {a.margins}: {json.dumps(doc['phases'])}")
     return 0
+
+
+MARGIN_BUCKETS = (6, 12, 24, 48)
+TAU_BIN_S = 0.1              # forecast.MARGIN_BIN_S
+TAU_MIN_N = 40               # a time bin needs this many residuals per bucket, else the phase's margins stand
+
+
+def check_margins(out: dict, doc: dict) -> dict:
+    """Residuals (frame base, the boss still in the origin's phase) beyond the margins of doc, per side: left / bottom
+    count when the real box reaches further out than the predicted one shrunk by the margin (residual < -margin),
+    right / top likewise (> margin). Only residuals whose horizon a bucket covers and whose phase has margins."""
+    phases, tau_tab = doc.get("phases") or {}, doc.get("phases_tau") or {}
+    buckets = sorted(int(b) for b in doc.get("buckets") or MARGIN_BUCKETS)
+    sides = ("left", "right", "bottom", "top")
+    n = 0
+    over = dict.fromkeys(sides, 0)
+    by_phase: dict = {}
+    worst: list = []
+    for (key, base, k), o in out.items():
+        if base != "frame" or not o.get("same_left"):
+            continue
+        phase = key.split("#")[1].split("|")[0]
+        kb = next((b for b in buckets if b >= k), None)
+        if kb is None or phase not in phases:
+            continue
+        res = np.array([o["same_left"], o["same_right"], o["same_bottom"], o["same_top"]], np.float64)
+        tau = np.nan_to_num(np.asarray(o["same_tau"], np.float64), nan=-1.0)
+        for j in range(res.shape[1]):
+            b = str(int(max(0.0, tau[j]) / TAU_BIN_S))
+            m = (tau_tab.get(phase, {}).get(b) or {}).get(str(kb)) or phases[phase].get(str(kb))
+            if m is None:
+                continue
+            n += 1
+            d = by_phase.setdefault(phase, {"n": 0, **dict.fromkeys(sides, 0)})
+            d["n"] += 1
+            ex = (-res[0, j] - m[0], res[1, j] - m[1], -res[2, j] - m[2], res[3, j] - m[3])
+            for side, e in zip(sides, ex):
+                if e > 0:
+                    over[side] += 1
+                    d[side] += 1
+                    worst.append((round(float(e), 3), side, key, k, b))
+    worst.sort(reverse=True)
+    return {"n": n, "over": over, "over_share": {sd: round(v / max(n, 1), 5) for sd, v in over.items()},
+            "by_phase": by_phase, "worst": worst[:20]}
+
+
+def vision_margins(out: dict, pad: float) -> dict:
+    """Per observable phase and horizon bucket (frames ahead <= k), how far the actual box can lie inside the
+    predicted one on each side (left, right, bottom, top shrinks, u): the largest residual seen in that direction
+    over every origin state and flip while the boss was still in the origin's observable phase (recorded), + pad.
+    Frame base (the planner's frame k). "phases_tau": the same per 0.1 s bin of the origin's time in the phase (a
+    charge's end and the Dig In after it are one phase with different errors), only bins with TAU_MIN_N residuals in
+    every bucket they list (Forecast.certain_boss falls back to the phase's margins)."""
+    agg: dict = {}
+    agg_t: dict = {}
+    cnt_t: dict = {}
+    for (key, base, k), o in out.items():
+        if base != "frame" or not o.get("same_left"):
+            continue
+        phase = key.split("#")[1].split("|")[0]
+        res = np.array([o["same_left"], o["same_right"], o["same_bottom"], o["same_top"]], np.float64)
+        tau = np.asarray(o["same_tau"], np.float64)
+        for kb in MARGIN_BUCKETS:
+            if k > kb:
+                continue
+            m = agg.setdefault(phase, {}).setdefault(str(kb), [0.0, 0.0, 0.0, 0.0])
+            m[0] = max(m[0], -float(np.min(res[0])))
+            m[1] = max(m[1], float(np.max(res[1])))
+            m[2] = max(m[2], -float(np.min(res[2])))
+            m[3] = max(m[3], float(np.max(res[3])))
+            tb = np.floor(np.nan_to_num(tau, nan=-1.0) / TAU_BIN_S).astype(int)
+            for b in np.unique(tb[tb >= 0]):
+                sel = tb == b
+                mt = agg_t.setdefault(phase, {}).setdefault(str(int(b)), {}).setdefault(str(kb), [0.0] * 4)
+                mt[0] = max(mt[0], -float(np.min(res[0, sel])))
+                mt[1] = max(mt[1], float(np.max(res[1, sel])))
+                mt[2] = max(mt[2], -float(np.min(res[2, sel])))
+                mt[3] = max(mt[3], float(np.max(res[3, sel])))
+                c = cnt_t.setdefault((phase, str(int(b)), str(kb)), [0])
+                c[0] += int(sel.sum())
+    phases = {ph: {kb: [round(max(0.0, v) + pad, 3) for v in m] for kb, m in d.items()} for ph, d in agg.items()}
+    phases_tau: dict = {}
+    for ph, bins in agg_t.items():
+        for b, d in bins.items():
+            kbs = {kb: [round(max(0.0, v) + pad, 3) for v in m] for kb, m in d.items()
+                   if cnt_t[(ph, b, kb)][0] >= TAU_MIN_N}
+            if kbs and all(cnt_t[(ph, b, kb)][0] >= TAU_MIN_N for kb in d):
+                phases_tau.setdefault(ph, {})[b] = kbs
+    counts = {f"{ph}/{b}/{kb}": c[0] for (ph, b, kb), c in sorted(cnt_t.items())}
+    return {"buckets": list(MARGIN_BUCKETS), "pad": pad, "sides": ["left", "right", "bottom", "top"],
+            "phases": phases, "tau_bin_s": TAU_BIN_S, "phases_tau": phases_tau, "tau_counts": counts}
 
 
 if __name__ == "__main__":

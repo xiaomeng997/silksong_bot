@@ -53,39 +53,44 @@ def git_rev() -> str | None:
 
 
 def make_policy(name: str, view: str = "oracle", run_dir: Path | None = None, instance: int = 0,
-                threads: int = 8, real_quit: float = 0.0, inject_hits: float = 0.0):
+                threads: int = 8, real_quit: float = 0.0, inject_hits: float = 0.0, gauntlet: bool = False):
     if name == "data":
-        from ssbot.train.data_policy import DataPolicy
-        return DataPolicy()
+        from ssbot.train.data_policy import DataPolicy, GauntletDataPolicy
+        return GauntletDataPolicy() if gauntlet else DataPolicy()
     if name == "planner":
         from ssbot.train.planner_policy import PlannerPolicy
         pol = PlannerPolicy(view=view, threads=threads, log_dir=run_dir, instance=instance, real_quit_p=real_quit)
         if inject_hits > 0:
-            # the pause stress test (ssbot.train.hit_injection, ssbot.tools.pause_stress): one hit per episode
+            # the pause stress test (ssbot.train.hit_injection, ssbot.tools.pause_stress): one fault per episode
             from ssbot.train.hit_injection import HitInjector
             pol = HitInjector(pol, p_event=inject_hits)
         return pol
     raise SystemExit(f"unknown policy {name}")
 
 
-def mode_config(mode: str, seed: int):
+def mode_config(mode: str, seed: int, timebox_s: float | None = None):
+    """timebox_s overrides the encounter's (the Forum's default is 1500 s: complete gauntlets with the random data
+    policy took 714-990 s, 10 episodes of the runs of 2026-10-02, and the finale comes last)."""
     from ssbot.train.episode import EpisodeConfig
     if mode == "data":
         return EpisodeConfig(mode="data", seed=seed, hp=(1, 5), silk=(0, 9), dx=(-6.0, 2.0), facing="random",
-                             wait_frames=(0, 30))
+                             wait_frames=(0, 30), timebox_s=timebox_s)
     if mode == "eval":
         return EpisodeConfig(mode="eval", seed=seed, hp=None, silk=None, dx=(-3.0, 1.0), facing="random",
-                             wait_frames=(0, 30))
+                             wait_frames=(0, 30), timebox_s=timebox_s)
     raise SystemExit(f"unknown mode {mode}")
 
 
 def _in_game_without_control(s: dict) -> bool:
     """A save is loaded (a scene, the hero exported, not the title or save-select menus) but Hornet takes no input:
-    a cutscene (the post-kill memory scene), a transition or a load. load_slot only knows the menus and gameplay."""
-    from ssbot.probes.common import MENU_MAIN, MENU_SAVE_PROFILES, in_gameplay
+    a cutscene (the post-kill memory scene), a transition or a load. load_slot only knows the menus and gameplay.
+    While PLAYING the menu state is not read: UIManager keeps the save-select menuState after a game starts from it
+    (instance 4's first start, 2026-10-02: an empty slot 1 began a new game in Tut_01 with menu still SAVE_PROFILES,
+    and load_slot pressed Enter there and timed out twice)."""
+    from ssbot.probes.common import GS_PLAYING, MENU_MAIN, MENU_SAVE_PROFILES, in_gameplay
     g = s.get("game") or {}
-    return bool(g.get("scene")) and bool(s.get("hero")) and g.get("menu") not in (MENU_MAIN, MENU_SAVE_PROFILES) \
-        and not in_gameplay(s)
+    on_menu = g.get("gs") != GS_PLAYING and g.get("menu") in (MENU_MAIN, MENU_SAVE_PROFILES)
+    return bool(g.get("scene")) and bool(s.get("hero")) and not on_menu and not in_gameplay(s)
 
 
 def worker(a: argparse.Namespace) -> int:
@@ -93,14 +98,15 @@ def worker(a: argparse.Namespace) -> int:
     from ssbot.probes.common import load_slot, stand_up
     from ssbot.record.recorder import Recorder
     from ssbot.train.encounters import ENCOUNTERS
-    from ssbot.train.episode import AttemptRecord, FightTap, run_episode
+    from ssbot.train.episode import AttemptRecord, make_tap, run_episode
 
     enc = ENCOUNTERS[a.encounter]
     run_dir = Path(a.run_dir)
     out = (run_dir / f"attempts_i{a.instance}.jsonl").open("a", encoding="utf-8", newline="\n")
     link = OracleLink(instance=a.instance, connect_timeout_s=120)
-    tap = FightTap(link, enc)
-    policy = make_policy(a.policy, a.view, run_dir, a.instance, a.threads, a.real_quit, a.inject_hits)
+    tap = make_tap(link, enc)
+    policy = make_policy(a.policy, a.view, run_dir, a.instance, a.threads, a.real_quit, a.inject_hits,
+                         gauntlet=bool(enc.waves))
     if hasattr(policy, "attach"):
         policy.attach(link)
     if hasattr(policy, "warmup"):
@@ -150,7 +156,7 @@ def worker(a: argparse.Namespace) -> int:
             rec = AttemptRecord(unit=enc.name, stage="TRAIN", profile="TRAIN" if a.view == "oracle" else "SIM_FINAL",
                                 build="1.0.30000", code_rev=rev,
                                 config_fp=fp, start_kind="savestate", mode=a.mode, seed=seed)
-            run_episode(link, enc, tap, policy, mode_config(a.mode, seed), rec)
+            run_episode(link, enc, tap, policy, mode_config(a.mode, seed, a.timebox or None), rec)
             d = asdict(rec)
             d["instance"] = a.instance
             d["episode"] = k
@@ -159,7 +165,13 @@ def worker(a: argparse.Namespace) -> int:
             out.write(json.dumps(d) + "\n")
             out.flush()
             counts[rec.outcome] += 1
-            atk = {s: n for s, n in rec.attacks.items() if s in ("Charge Antic", "Leap Out", "Burst Antic", "Rage Antic")}
+            if rec.gauntlet is not None:
+                g = rec.gauntlet
+                atk = {"wave": g.get("wave_reached"), "kills": (g.get("kills") or {}).get("n"),
+                       "allies": sorted(g.get("allies") or {})}
+            else:
+                atk = {s: n for s, n in rec.attacks.items()
+                       if s in ("Charge Antic", "Leap Out", "Burst Antic", "Rage Antic")}
             print(f"[i{a.instance} ep{k}] {rec.outcome:12s} {rec.ingame_s or 0:6.1f}s hits {rec.hits} wd {rec.would_die} "
                   f"boss_hp {rec.boss_hp_end} {atk} {rec.reason or ''}", flush=True)
             k += 1
@@ -185,12 +197,28 @@ def worker(a: argparse.Namespace) -> int:
     return 0
 
 
+def new_run_dir(encounter: str, tag: str, root: Path | None = None, now: datetime | None = None) -> Path:
+    """Create and return <root>/<timestamp>_<encounter>_<tag>; when another run took that name in the same second,
+    <name>_2, _3, ... (two launchers started in the same second collided with FileExistsError, 2026-10-03 07:45).
+    The mkdir itself is the claim, so two processes racing for one name cannot both get it."""
+    root = RUNS if root is None else root
+    base = f"{(now or datetime.now()):%Y%m%d_%H%M%S}_{encounter}_{tag}"
+    root.mkdir(parents=True, exist_ok=True)
+    for k in range(1, 1000):
+        d = root / (base if k == 1 else f"{base}_{k}")
+        try:
+            d.mkdir()
+            return d
+        except FileExistsError:
+            continue
+    raise FileExistsError(f"no free run dir name for {root / base}")
+
+
 def run(a: argparse.Namespace) -> int:
     tag = a.mode if a.policy == "data" else f"{a.mode}_{a.policy}_{a.view}"
     if a.inject_hits > 0:
         tag += "_inject"
-    run_dir = RUNS / f"{datetime.now():%Y%m%d_%H%M%S}_{a.encounter}_{tag}"
-    run_dir.mkdir(parents=True)
+    run_dir = new_run_dir(a.encounter, tag)
     (run_dir / "config.json").write_text(json.dumps(vars(a), indent=1), encoding="utf-8")
     procs = []
     for i in [int(x) for x in a.instances.split(",")]:
@@ -198,7 +226,7 @@ def run(a: argparse.Namespace) -> int:
                str(run_dir), "--encounter", a.encounter, "--mode", a.mode, "--policy", a.policy, "--episodes",
                str(a.episodes), "--hours", str(a.hours or 0), "--rotate", str(a.rotate), "--seed", str(a.seed),
                "--view", a.view, "--threads", str(a.threads), "--real-quit", str(a.real_quit),
-               "--inject-hits", str(a.inject_hits)]
+               "--inject-hits", str(a.inject_hits), "--timebox", str(a.timebox or 0)]
         if a.no_record:
             cmd.append("--no-record")
         log = (run_dir / f"worker_i{i}.log").open("w", encoding="utf-8")
@@ -272,6 +300,10 @@ def summary(run_dir: Path, more: list[Path] | None = None, write: bool = True) -
         pol = [r.get("policy") or {} for r in rows]
         if any(p.get("view") for p in pol):
             out["unpredicted_hits"] = sum(len(p.get("unpredicted") or ()) for p in pol)
+            out["unpredicted_unknown"] = sum(len(p.get("unpredicted_unknown") or ()) for p in pol)
+            bh = [p.get("bell_hits") or {} for p in pol]
+            out["bell_hit_monitor"] = {k: sum(int(b.get(k) or 0) for b in bh)
+                                       for k in ("tinks", "skipped", "evaluated", "violations", "over_template")}
             out["episodes_with_forced_risk"] = sum(1 for p in pol if p.get("forced_risk_ticks"))
             out["forced_risk_ticks"] = sum(p.get("forced_risk_ticks") or 0 for p in pol)
             rq = [p["real_quit"] for p in pol if p.get("real_quit")]
@@ -315,13 +347,16 @@ def main(argv: list[str] | None = None) -> int:
         p.add_argument("--no-record", action="store_true")
         p.add_argument("--view", choices=("oracle", "degraded", "degraded_dust", "degraded_tell"), default="oracle")
         p.add_argument("--threads", type=int, default=8)
+        p.add_argument("--timebox", type=float, default=0.0,
+                       help="seconds from the wake before STUCK (0: the encounter's timebox_s)")
         p.add_argument("--real-quit", type=float, default=0.0,
                        help="probability that a confirmed supervisor pause quits for real (menu, Yes, main menu), "
                             "then the worker reloads sandbox slot 1 and the savestate")
         p.add_argument("--inject-hits", type=float, default=0.0, metavar="SHARE",
-                       help="pause stress test: inject one hit per episode (hurt.special, HP down to 1, so the "
-                            "supervisor must quit), SHARE of them timed on kills / hits / bounces / the roar, the "
-                            "rest on airborne / attack / cast / pogo moments (0: off); summarise with "
+                       help="pause stress test: inject one fault per episode (a hit down to 1 HP through "
+                            "hurt.special, a supervisor quit trigger QF, or both on one tick), SHARE of them on the "
+                            "hard moments (kill, bounce, Silkspear cast, clash, the pause press), the rest on "
+                            "airborne / attack / pogo frames or with planner keys down (0: off); summarise with "
                             "ssbot.tools.pause_stress")
         if name == "run":
             p.add_argument("--instances", default="0")

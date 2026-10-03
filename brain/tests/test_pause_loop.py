@@ -752,3 +752,55 @@ def test_oracle_gate_cue_puts_the_first_press_on_the_first_open_frame():
     # a cue that wrongly says closed: after gate_trust_s (1 s) the blind cadence resumes and the pause still lands
     paused, held = _oracle_hit_quit(True, open_at=15, wrong_until=600, frames=200)
     assert paused is not None and 60 <= paused <= 60 + 2 + 6 and min(held) >= 60
+
+
+def test_vision_cues_hide_the_oracle_flags_and_follow_the_menu_canvas():
+    """vision_cues_from_state (training on the simulated final path): no paused flag, no gate, no ignoreUnpause, no
+    greyed cause; the dimmer from the exported menu dim (0 outside the pause); the pause menu only once its canvas is
+    0.25 opaque, the highlight and Quit item only once it has faded in (live run 20261003_022259 i0 ep9: dim and alpha
+    rise 0.083 a frame from the pause frame, the menu ready 11 frames in)."""
+    vc = pq.vision_cues_from_state
+    c = vc(_state(5, blk=gc.BLK_DISABLE_PAUSE))
+    assert c.paused is None and c.gate_open is None and c.dim == 0.0 and c.frozen is False
+    assert c.disable_pause is True          # kept for the emulation label only
+    menu = {"sel": "continue", "quit_ok": True, "dim": 0.083, "alpha": 0.083, "ignore_unpause": True}
+    c = vc(_state(6, gc.GS_PAUSED, 5, 17, True, 100, extra=menu))
+    assert c.paused is None and c.frozen and c.dim == 0.083 and c.menu == pq.M_NONE and not c.menu_ready
+    assert c.unpause_blocked is None and c.highlight is None and c.quit_state is None
+    c = vc(_state(9, gc.GS_PAUSED, 5, 17, True, 100, extra=dict(menu, dim=0.333, alpha=0.333)))
+    assert c.menu == pq.M_PAUSE and not c.menu_ready and c.highlight is None and c.quit_state is None
+    c = vc(_state(15, gc.GS_PAUSED, 5, 17, False, 64, dsq=True,
+                  extra=dict(menu, dim=0.8, alpha=1.0, quit_ok=False, ignore_unpause=False)))
+    assert c.menu == pq.M_PAUSE and c.menu_ready and c.highlight == "continue" and c.quit_state == pq.QUIT_GREYED
+    assert c.quit_cause is None
+    assert vc({"f": 156265, "q": 1, "game": None, "pause": None}).menu == pq.M_LOADING
+
+
+def test_vision_cues_end_to_end_pause_without_the_gate():
+    """The oracle stand-in of test_oracle_mode_end_to_end_with_masks seen through vision cues, 3 frames late: the gate
+    closed for 30 frames is not seen, so the blind cadence presses on; the pause is taken from the dimmer's rise on a
+    stopped world, confirmed by the menu reader, and the attempt ends as an emulated quit."""
+    m = _machine(emulate_quit=True)
+    paused_f = None
+    prev_mask = 0
+    seen: list[dict] = []
+    for f in range(240):
+        if paused_f is None:
+            s = _state(f, blk=gc.BLK_DISABLE_PAUSE if f < 30 else 0)
+        else:
+            age = f - paused_f
+            a = min(1.0, 0.0833 * (age + 1))
+            s = _state(f, gc.GS_PAUSED, 5, 17 if age >= 8 else 6, age < 11, 100 if age < 11 else 68 if age < 19 else 64,
+                       extra={"sel": "continue", "quit_ok": True, "dim": min(0.8, a), "alpha": a})
+        seen.append(s)
+        obs = seen[max(0, len(seen) - 1 - 3)]
+        mask = to_mask(m.step(pq.vision_cues_from_state(obs), s["q"] / 1e7), BIT)
+        assert mask & ~(1 << BIT["pause"]) == 0
+        if paused_f is None and f >= 30 and mask & (1 << BIT["pause"]) and not prev_mask & (1 << BIT["pause"]):
+            paused_f = f + 1
+        if paused_f is not None and f > paused_f + 14:
+            assert not mask & (1 << BIT["pause"])      # stopped pressing within the lockout's budget
+        prev_mask = mask
+        if m.done:
+            break
+    assert paused_f is not None and m.outcome == pq.QUIT_EMULATED and m.quit_state_seen == pq.QUIT_AVAILABLE

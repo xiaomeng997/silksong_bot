@@ -136,6 +136,7 @@ namespace SsOracle.SceneDump
                 if (scene == active || !IsSubScene(scene.name, gm.sceneName ?? active.name)) return;
                 Core.Plugin.Log.LogInfo($"TERRAIN: {scene.name} {what} after {gm.sceneName} was entered: dumping the room again");
                 GateWatch.Invalidate();
+                BattleWatch.Invalidate();
                 Request("subscene", null, restart: true);
             }
             catch (Exception e)
@@ -162,6 +163,7 @@ namespace SsOracle.SceneDump
                 running = false;
                 ReleaseObjects();
                 GateWatch.Discard();
+                BattleWatch.Discard();
             }
             var gm = GameManager._instance;
             if (gm == null || !gm.IsGameplayScene() || !FlowTap.RoomIsEntered)
@@ -183,6 +185,7 @@ namespace SsOracle.SceneDump
             running = false;
             ReleaseObjects();
             GateWatch.Discard();
+            BattleWatch.Discard();
             FailWaiters(why);
         }
 
@@ -282,6 +285,7 @@ namespace SsOracle.SceneDump
             scenesToScan.Clear();
             rare.Clear();
             GateWatch.Begin();
+            BattleWatch.Begin();
             var verts = 0;
             var seen = 0;
             var visited = 0;
@@ -395,6 +399,7 @@ namespace SsOracle.SceneDump
             LastSeq = seq;
             LastTransition = transition;
             GateWatch.Commit(transition);
+            BattleWatch.Commit(transition);
             var workMs = dumpWorkTicks * 1000.0 / Stopwatch.Frequency;
             var result = new Dictionary<string, object>
             {
@@ -417,6 +422,7 @@ namespace SsOracle.SceneDump
             routine = null;
             ReleaseObjects();
             GateWatch.Discard();
+            BattleWatch.Discard();
             FailWaiters(why);
         }
 
@@ -769,6 +775,8 @@ namespace SsOracle.SceneDump
                 d["gate_ids"] = ids;
             }
             Zone("battles").Add(d);
+            BattleWatch.Battle(bs);
+            Entities.AllyWatch.BattleScene(bs);
             return verts;
         }
 
@@ -975,7 +983,7 @@ namespace SsOracle.SceneDump
 
             public void Write(Ipc.MsgPackWriter w, Export.FrameContext ctx)
             {
-                w.MapHeader(7);
+                w.MapHeader(8);
                 w.Key("seq"); w.Int(LastSeq);
                 w.Key("transition"); w.Int(LastTransition);
                 w.Key("current"); w.Int(FlowTap.TransitionSeq);
@@ -983,6 +991,7 @@ namespace SsOracle.SceneDump
                 w.Key("work_us"); w.Int(WorkUs(ctx.Frame));
                 w.Key("gates"); GateWatch.Write(w, FlowTap.TransitionSeq);
                 w.Key("gates_trunc"); GateWatch.WriteTruncated(w, FlowTap.TransitionSeq);
+                w.Key("battles"); BattleWatch.Write(w, FlowTap.TransitionSeq);
             }
         }
     }

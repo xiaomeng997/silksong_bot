@@ -64,12 +64,15 @@ import os
 from pathlib import Path
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, replace
+from typing import NamedTuple
 
 import numpy as np
 
+from ssbot.combat.bell_track import ATK_BELL, AtkBellTracks, DropBellTracks, SKIN_Z
 from ssbot.combat.boss_model import TAIL, Anchor, BossModel
 from ssbot.combat.fastquery import circle_hits, query_par
-from ssbot.combat.pogo_targets import TargetTracker, simulate
+from ssbot.combat.pogo_targets import CERT_MARGIN_U, CERT_MAX_S, STEP_S, TargetPath, TargetTracker, simulate
+from ssbot.core.bosses import BELL_BEAST_PHASES as VE_PHASE_OF
 from ssbot.core.worldstate import ORACLE, VISION_EQUIVALENT, Entity, Ev, WorldState
 from ssbot.knowledge import hitbox_tables as hb
 from ssbot.safety.hits_to_death import SupportEvent, SupportSet
@@ -78,18 +81,61 @@ BIN = hb.BIN_S
 MIN_HORIZON_S = 0.8
 SUP_HORIZON_S = 0.8          # what the supervisor's support covers (hits_to_death's worst event "now")
 VE_ENTRY_SLACK = 1           # bins of slack on an observable phase's entry (a transition frame shows a clip early)
+FUSE_N = 10                  # VE: detections the boss's box x is averaged over (BossTracker.fused_pos) ...
+FUSE_N_Y = 30                # ... and its y (the mean path's height is flat along a charge, its x grows less exact)
 MAX_NODES = 400
 HIDDEN, UNKNOWN = "hidden", "unknown"
 DROP_BELL = "BoneBeast DropBell"
 # the exact path's time slack: a hit lands in the physics step after the recorded position (fixture hit 62131: the bell
 # 0.11 u short of the hurtbox in the hit frame's STATE), and hit-stop frames still step (game time vs steps, 0.37 u)
 DET_SLACK_S = (-0.04, -0.02, 0.0, 0.02, 0.04)
+# the vision view's bells on tracks: their time error is the estimate's (the launch / drop time from many detections and
+# the 50 Hz step's phase), not the oracle's step-after-the-record: a finer and narrower slack is both tighter and more
+# exact. Attack bells (6 recorded fights of 20261002_171806, noise seed 1, 6,118 samples 0-0.8 s ahead): nearest-sample
+# centre error max 0.40 u and 3.2 % beyond the contact skin with DET_SLACK_S, max 0.24 u and 0 % with these; drop bells
+# (4,407 samples): 10.5 % -> 3.0 % beyond the skin (the rest: tinked or sinking bells far from the floor's reach)
+VE_DET_SLACK_S = (-0.02, -0.01, 0.0, 0.01, 0.02)
+VE_SLACK = VE_DET_SLACK_S if os.environ.get("SSBOT_VE_SLACK", "1") != "0" else None   # 0: DET_SLACK_S (the A/B)
 # contact skin: held-out hit i3_002 f 603438 registered with the bell circle 0.004 u short of the recorded hurtbox
 # (Box2D contact offset and polygon skin); the logged unions carry such slack implicitly
 DET_SKIN_U = 0.1
 # held-out recall (support_recall i2_002 / i3_002, held-out tables, lags 2-4, oracle): 100 % with the Submerge sink and
 # the skin (28 misses before: a resting Submerge, contact skin)
 DET_REPLACE = os.environ.get("SSBOT_DET_BELLS", "1") != "0"   # SSBOT_DET_BELLS=0: the logged unions (A/B)
+# the vision view's drop-bell paths from their tracks (bell_track; SSBOT_DET_VE=0: the self templates, the A/B before)
+DET_VE = os.environ.get("SSBOT_DET_VE", "1") != "0"
+# the vision view's attack-bell paths from their tracks (bell_track.AtkBellTracks): a burst whose two bells are both on
+# exact paths drops the attack-bell unions of its Burst Recovery and tail (SSBOT_DET_ATK=0: the unions, the A/B before)
+DET_ATK = os.environ.get("SSBOT_DET_ATK", "1") != "0"
+ATK_LAUNCH_STATE = "Burst Out"     # the boss's state on the attack bells' Launch frame (100 of 100, 20261002_171806 i0)
+ATK_ANCHOR_TOL_U = 0.5             # a pair's middle this close to a burst's anchor is that burst's pair
+ATK_LAG_SLACK_S = 0.05
+# the vision view's hit targets (a down spike bounces off a bell, a slash recoils from it, a side slash knocks a drop
+# bell aside) from the bells on exact paths (Forecast.det): the certain circle shrinks by this much more than the
+# oracle's (the track's centre error, p99 0.29 u at tk 0 and max 0.51 u: the 50 Hz step phase, bell_track_audit
+# --kind atk on 20261002_171806); a drop bell's pogo counts only while it falls (a down spike on a rising one clamps
+# its vy, TINK DOWN, which the pogo branch's path does not follow). On by default since the task V review (2026-10-03):
+# the hero's own hits on bells are known effects (recoil, bounce, redirect, pogo_targets.tink), and without them in
+# the model a slash through a bell was scored against the bell's untouched path (SSBOT_VE_TARGETS=0: off, the A/B).
+# A drop bell whose track has tinked branches open (bell_track: the hero attacked it, the detections do not tell yet)
+# is no target: a plan whose attack meets any of its branches is not safe (Forecast.ambiguous_paths, planner).
+VE_TARGETS = os.environ.get("SSBOT_VE_TARGETS", "1") == "1"
+VE_DROP_TARGETS = os.environ.get("SSBOT_VE_DROP_TARGETS", "1") == "1"
+VE_CERT_EXTRA_U = 0.35
+# the vision view's HP is the hits it saw: a hit it missed leaves the count high, so just above the rage HP the rage is
+# still likely (scoring only: the support always keeps Rage Pos while it is possible). Live degraded_dust run
+# 20261002_224934 i1 ep8: the view counted 80 HP at the decision (the boss had 75), p_rage 0, and FORCED_RISK ranked
+# the rage's eruption point (86.21, the hidden stance next to it) as the least likely contact; the rage burst hit
+VE_RAGE_HP_SLACK = 10.0
+VE_RAGE_P = 0.5
+# the vision view's certain boss form only until its observable phase can end (SSBOT_CERT_PHASE_CUT=0: diagnostics)
+CERT_PHASE_CUT = os.environ.get("SSBOT_CERT_PHASE_CUT", "1") != "0"
+# the vision view's boss box changes its shape along the horizon (the hurtbox table's bin at the time in the phase +
+# tk, not the origin's): a charge's end shrinks and sinks into Dig In within 0.6 s (SSBOT_SHAPE_T=0: the origin's shape
+# for the whole horizon, the A/B before)
+SHAPE_T = os.environ.get("SSBOT_SHAPE_T", "1") != "0"
+HURT_BIN_S = 0.1             # the hurtbox table's time bins (ssbot.tools.hurtbox_table BIN_S)
+MARGIN_BIN_S = 0.1           # the pogo gate's margins per time bin in the phase (boss_path_audit --margins "_tau")
 DET_STATES = frozenset({"Drop", "Air", "Bounce Up", "Bounce Air", "Submerge", "Tink Right", "Tink R Min", "Tink Left",
                         "Tink L Min", "Tink D", "Tink Right 2", "Tink R Min 2", "Tink Left 2", "Tink L Min 2", "Tink D 2"})   # world-fixed hazards with self templates (entities.<tk>.self_template)
 REST_STATES = ("Init", "Dormant")
@@ -108,20 +154,74 @@ PHASE_FAMILY = {"emerge": "BB_CHARGE", "charge_antic": "BB_CHARGE", "charge": "B
 # +0.3 s after Emerge Antic C / L and Burst Antic; low for a charge, a tall column with debris for a leap, told apart
 # for certain at +0.6 s. "dust": at an anchor, charge or leap not yet told; "dust_low" / "dust_tall": a charge / a
 # leap; "dust_burst": inside the burst range (bursts erupt at x 81.2-91.2, charges and leaps at the anchors 75.03 /
-# 95.72). The antic began TELL_DELAY before the cue, give or take TELL_SLACK_S (when vision would first see it).
+# 95.72). The antic began TELL_DELAY before the cue, give or take TELL_SLACK_S: the screenshots bracket a cue's onset
+# to (0.1, 0.3] s after the antic began (the low / tall told apart: (0.3, 0.6] s), and the simulated view draws each
+# cue's onset in that bracket (ObservabilityFilter tell_onset, planner_policy.TELL_ONSET; task V review: it showed the
+# cue at the FSM timer's exact 0.3 s, which the forecaster inverted to +-0.1 s): the bracket's middle, half its width
+# plus a frame. A low / tall dust after a plain one is timed by the plain one (the narrower bracket).
 # "burst_tell": the burst position from the antic's first frame, the first experiment (run 20261002_061942).
 TELL_PHASES = frozenset(("burst_tell", "dust", "dust_low", "dust_tall", "dust_burst"))
 EMERGE_TELLS = frozenset(("dust", "dust_low", "dust_tall"))
-TELL_DELAY = {"burst_tell": 0.0, "dust": 0.3, "dust_low": 0.6, "dust_tall": 0.6, "dust_burst": 0.3, "bell_dust": 0.3}
-TELL_SLACK_S = {"burst_tell": BIN, "dust": 0.1, "dust_low": 0.1, "dust_tall": 0.1, "dust_burst": 0.1,
-                "bell_dust": 0.1}
+TELL_DELAY = {"burst_tell": 0.0, "dust": 0.2, "dust_low": 0.45, "dust_tall": 0.45, "dust_burst": 0.2,
+              "bell_dust": 0.2}
+TELL_SLACK_S = {"burst_tell": BIN, "dust": 0.1 + BIN, "dust_low": 0.15 + BIN, "dust_tall": 0.15 + BIN,
+                "dust_burst": 0.1 + BIN, "bell_dust": 0.1 + BIN}
 # A drop bell's cue: a narrow dust column from the ceiling at its x, from +0.3 s after it arms (Antic; none at +0.1 s;
 # it falls about 1.25 s after arming), screenshots C:/ssbot/sandbox/m2_tells DropBell_*. The vision view places its
 # self template from the cue (arming TELL_DELAY earlier, +-TELL_SLACK_S) like the oracle view does from the FSM.
+# A cue's x is the mean of its detections (SimpleNoise: as noisy as any detection). The vision view's planner margin
+# (planner_policy: NOISE_K x hypot(hero sigma, boss sigma 0.10)) covers a placement x this uncertain (1 sigma); a cue
+# seen in fewer frames is placed at its x +- SKIN_Z sigma as well.
+CUE_SIGMA_COVERED = 0.10
+# A cue shows only inside the image (ObservabilityFilter): one that comes into the image as the camera moves may be
+# older than its delay says. Its onset is then bounded by the last frame its x was inside the image (it was not out
+# yet then), at most VIS_HIST_S back, and a drop bell's arming by its Antic (it has not fallen: BELL_ANTIC_S, the FSM's
+# 1.25 s) - task V review, 2026-10-03.
+VIS_HIST_S = 2.5
+VIS_FLOOR_Y, VIS_CEIL_Y = 3.0, 13.74
+BELL_ANTIC_S = 1.25
+_VIS_XS = np.arange(55.0, 115.01, 0.25)
 DUST_ROOTS = (("BB_CHARGE", "Emerge Antic C"), ("BB_LEAP", "Emerge Antic L"))
 RECOVER_ROOT = {"BB_CHARGE": "Charge End", "BB_LEAP": "Leap Land"}
 # the state a hidden phase starts in, by the last drawn family (None: before the first emergence)
 HIDE_ROOT = {"BB_CHARGE": "Submerged", "BB_LEAP": "Submerged", "BB_BURST": "Burst Recovery", "BB_RAGE": "Rage Submerge"}
+
+
+class DetBell(NamedTuple):
+    """A bell on an exact path: its state (x, y, vx, vy, the index of its next bounce, the Submerge time left)
+    at path time t0 (the forecast origin is path time t0: 0 for the oracle view's logged state, the time since the
+    drop for the vision view's track estimate), the bounce sides still open (None: both when the next bounce is
+    random) and an extra contact skin (the vision view's x uncertainty)."""
+    sp: object
+    x: float
+    y: float
+    vx: float
+    vy: float
+    nb: int
+    rest: float | None
+    type_key: str
+    t0: float = 0.0
+    sides: tuple | None = None
+    skin: float = 0.0
+    life: float | None = None      # path time its collider goes off (an attack bell's End Timer), None: never
+    slack: tuple | None = None     # its time slack (None: DET_SLACK_S)
+    branches: tuple | None = None  # VE drop bell: the paths it may be on, (side, tinks) (bell_track.DropEstimate)
+    rel: object | None = None      # ... and the track that has their cached relative paths (DropBellTracks)
+
+    def branch_sides(self) -> tuple:
+        if self.sides is not None:
+            return self.sides
+        b = self.sp.bounces
+        return (1, -1) if self.nb < len(b) and b[self.nb].get("vx") == "random" else (0,)
+
+    def paths(self) -> tuple:
+        """The branches _bell_path takes: (side, tinks) pairs for a VE drop bell, else bounce sides."""
+        return self.branches if self.branches is not None else self.branch_sides()
+
+    @property
+    def ambiguous(self) -> bool:
+        """A VE drop bell the hero may have tinked, with more than one path still open."""
+        return self.branches is not None and len(self.branches) > 1 and any(tk for _, tk in self.branches)
 
 
 @dataclass(slots=True)
@@ -184,8 +284,11 @@ class Forecast:
         self.roots = roots
         self.boss = boss
         self.det: list = []           # drop bells on exact paths (Forecaster._det_bell)
+        self.self_tpl: dict = {}      # drop bell type key -> its self-template placements, placed or not (audits)
         self.truncated = 0            # walk branches inside the horizon cut by MAX_NODES / depth
         self._paths: dict = {}        # drop-bell path cache (_bell_path)
+        self._groups: dict = {}       # stacked exact paths per query times (_det_groups)
+        self._grid: dict = {}         # ... on the frame grid, per (exclude, only)
         kids = {}
         for n in nodes:
             kids.setdefault(n.parent, []).append(n.id)
@@ -237,44 +340,106 @@ class Forecast:
         hx, hy = self.fc.half
         if comfort and self.fc.comfort is not None:
             hx, hy = hx + self.fc.comfort[0], hy + self.fc.comfort[1]
-        by_r: dict = {}
-        for j, (sp, bx, by, vx, vy, nb, rest, tk_) in enumerate(self.det):
-            if exclude is not None and tk_.endswith(exclude) or only is not None and tk_ != only:
-                continue
-            sides = (1, -1) if nb < len(sp.bounces) and sp.bounces[nb].get("vx") == "random" else (0,)
-            for sd in sides:
-                for dt in DET_SLACK_S:
-                    by_r.setdefault(sp.r + DET_SKIN_U, []).append(self._bell_path(j, sd, dt, tk))
-        if not by_r:
-            return out
         shp = out.shape
         T = shp[-1] if len(shp) else 1
+        groups = self._det_groups(tk, T, exclude, only)
+        if not groups:
+            return out
         # writable copies: a read-only view (broadcast_to) is another numba specialization, compiled mid-fight
         x2 = np.require(np.broadcast_to(np.asarray(x, np.float64), shp).reshape(-1, T), np.float64, ["C", "W"])
         y2 = np.require(np.broadcast_to(np.asarray(y, np.float64), shp).reshape(-1, T), np.float64, ["C", "W"])
         flat = out.reshape(-1, T)
-        for rr, paths in by_r.items():
-            cx = np.ascontiguousarray([np.broadcast_to(np.asarray(p[0], np.float64), (T,)) for p in paths])
-            cy = np.ascontiguousarray([np.broadcast_to(np.asarray(p[1], np.float64), (T,)) for p in paths])
-            ok = np.ascontiguousarray([np.broadcast_to(np.asarray(p[2], np.bool_), (T,)) for p in paths])
+        for rr, cx, cy, ok in groups:
             flat |= circle_hits(x2, y2, cx, cy, ok, float(hx), float(hy), float(rr))
         return flat.reshape(shp)
 
-    def _bell_path(self, j: int, sd: int, dt: float, tk: np.ndarray, redirect: tuple | None = None):
-        """Drop bell j's centre (x, y, ok) at tk + dt on bounce side sd (or knocked aside: redirect = (t_hit, d)),
-        cached per forecast: the planner asks the same times for every candidate block of a tick (pogo_targets.simulate
-        was 135,499 calls, 5.5 s of an 8,000-tick bench before the cache)."""
+    def _det_groups(self, tk: np.ndarray, T: int, exclude: str | None, only: str | None) -> list:
+        """The exact paths' centres stacked per contact radius [(r, cx [P, T], cy, ok)], cached per forecast and
+        query times: the planner asks the same times for every candidate block of a tick, and with a touched drop
+        bell's branches and both attack bells the per-call stacking cost more than the contact test (task V review:
+        stage C ticks were 3-4 ms slower in bursts, 60-180 late ticks a fight)."""
+        key = (len(tk), float(tk[0]) if len(tk) else 0.0, float(tk[-1]) if len(tk) else 0.0, T, exclude, only)
+        g = self._groups.get(key)
+        if g is not None:
+            return g
+        tk = np.asarray(tk, np.float64)
+        kf = np.rint(tk / BIN)
+        if T == len(tk) and len(tk) and (kf >= 0).all() and np.abs(tk - kf * BIN).max() < 1e-9:
+            # times on the frame grid (the planner's rollout frames, the tactics' risk maps): columns of the paths
+            # computed once per forecast on frames 0 .. n (each path's simulate / interpolation once, not per query)
+            n = int(kf.max()) + 1
+            base = self._grid.get((exclude, only))
+            if base is None or base[0] < n:
+                n2 = max(n, int(math.ceil(self.horizon / BIN)) + 64)
+                base = self._grid[(exclude, only)] = (n2, self._stack(np.arange(n2) * BIN, n2, exclude, only))
+            idx = kf.astype(np.int64)
+            g = [(rr, np.ascontiguousarray(cx[:, idx]), np.ascontiguousarray(cy[:, idx]),
+                  np.ascontiguousarray(ok[:, idx])) for rr, cx, cy, ok in base[1]]
+        else:
+            g = self._stack(tk, T, exclude, only)
+        if len(self._groups) > 64:
+            self._groups.clear()
+        self._groups[key] = g
+        return g
+
+    def _stack(self, tk: np.ndarray, T: int, exclude: str | None, only: str | None) -> list:
+        by_r: dict = {}
+        tk = np.asarray(tk, np.float64)
+        for j, d in enumerate(self.det):
+            tk_ = d.type_key
+            if exclude is not None and tk_.endswith(exclude) or only is not None and tk_ != only:
+                continue
+            rr = d.sp.r + DET_SKIN_U + d.skin
+            dts = np.asarray(d.slack or DET_SLACK_S, np.float64)
+            for br in d.paths():
+                if d.rel is not None:
+                    # a tracked bell: every time-slack copy of a branch from one interpolation of its cached path
+                    t = np.maximum(tk[None, :] + dts[:, None] + d.t0, 0.0)
+                    cx, cy, ok = d.rel.path_at(d.x, br[0], br[1], t.ravel())
+                    if d.life is not None:
+                        ok = ok & (t.ravel() <= d.life)
+                    by_r.setdefault(rr, []).append((cx.reshape(len(dts), -1), cy.reshape(len(dts), -1),
+                                                    ok.reshape(len(dts), -1)))
+                    continue
+                for dt in dts:
+                    p = self._bell_path(j, br, float(dt), tk)
+                    by_r.setdefault(rr, []).append(tuple(np.broadcast_to(np.asarray(v), (1, T)) for v in p))
+        g = []
+        for rr, paths in by_r.items():
+            cx = np.ascontiguousarray(np.concatenate([p[0] for p in paths]), np.float64)
+            cy = np.ascontiguousarray(np.concatenate([p[1] for p in paths]), np.float64)
+            ok = np.ascontiguousarray(np.concatenate([p[2] for p in paths]), np.bool_)
+            g.append((rr, cx, cy, ok))
+        return g
+
+    def _bell_path(self, j: int, sd, dt: float, tk: np.ndarray, redirect: tuple | None = None):
+        """Bell j's centre (x, y, ok) at tk + dt on branch sd (a bounce side; a VE drop bell's (side, tinks)), or
+        knocked aside: redirect = (t_hit, d), cached per forecast: the planner asks the same times for every candidate
+        block of a tick (pogo_targets.simulate was 135,499 calls, 5.5 s of an 8,000-tick bench before the cache).
+        A VE drop bell's path comes from its track's cached relative path (bell_track.DropBellTracks.rel_path), the
+        planner's hit one more tink at the first physics step from t_hit on."""
         key = (j, sd, dt, len(tk), float(tk[0]), float(tk[-1]), redirect)
         r = self._paths.get(key)
         if r is None:
-            sp, bx, by, vx, vy, nb, rest, _ = self.det[j]
-            t = np.maximum(tk + dt, 0.0)
-            if redirect is not None:
-                r = simulate(sp, bx, by, vx, vy, nb, None, t, side=sd, redirect=redirect)
+            sp, bx, by, vx, vy, nb, rest, _, t0 = self.det[j][:9]
+            life = self.det[j].life
+            t = np.maximum(tk + dt + t0, 0.0)
+            rel = self.det[j].rel
+            if rel is not None:
+                side, tinks = sd
+                if redirect is not None:
+                    k = int(math.ceil((redirect[0] + t0) / STEP_S - 1e-6))
+                    if not tinks or k > tinks[-1][0]:
+                        side = int(redirect[1]) if redirect[1] and k * STEP_S <= rel.t_fall else side
+                        tinks = tinks + ((k, int(redirect[1])),)
+                cx, cy, ok = rel.path_at(bx, side, tinks, t)
+                r = (cx, cy, ok & (t <= life) if life is not None else ok)
+            elif redirect is not None:
+                r = simulate(sp, bx, by, vx, vy, nb, life, t, side=sd, redirect=(redirect[0] + t0, redirect[1]))
             else:
                 if rest is not None:
                     nb = len(sp.bounces)          # in Submerge: sinking, no more floor contacts
-                r = simulate(sp, bx, by, vx, vy, nb, rest, t, side=sd)
+                r = simulate(sp, bx, by, vx, vy, nb, rest if rest is not None else life, t, side=sd)
             self._paths[key] = r
         return r
 
@@ -282,11 +447,11 @@ class Forecast:
                      ) -> np.ndarray | None:
         """Contact with the drop bell `type_key` on its one path after a side slash moving d (+1 right) at t_hit;
         None when not applicable (not on an exact path, resting, or no side redirect in its registry entry)."""
-        j = next((i for i, e in enumerate(self.det) if e[7] == type_key), None)
+        j = next((i for i, e in enumerate(self.det) if e.type_key == type_key), None)
         if j is None:
             return None
-        sp, rest = self.det[j][0], self.det[j][6]
-        if rest is not None or "side" not in sp.redirect:
+        sp, rest = self.det[j].sp, self.det[j].rest
+        if rest is not None or "side" not in sp.redirect or self.det[j].ambiguous:
             return None
         tk = np.asarray(tk, np.float64)
         x = np.asarray(x, np.float64)
@@ -294,13 +459,16 @@ class Forecast:
         hx, hy = self.fc.half
         if comfort and self.fc.comfort is not None:
             hx, hy = hx + self.fc.comfort[0], hy + self.fc.comfort[1]
-        rr = sp.r + DET_SKIN_U
+        rr = sp.r + DET_SKIN_U + self.det[j].skin
         out = np.zeros(x.shape, bool)
-        for dt in DET_SLACK_S:
-            cx, cy, ok = self._bell_path(j, d, dt, tk, (t_hit, d))
-            dx = np.maximum(np.abs(x - cx) - hx, 0.0)
-            dy = np.maximum(np.abs(y - cy) - hy, 0.0)
-            out |= ((dx * dx + dy * dy) <= rr * rr) & ok
+        # the oracle's bell takes the hit's side; a VE drop bell each of its branches (one before its bounce)
+        brs = self.det[j].paths() if self.det[j].rel is not None else (d,)
+        for br in brs:
+            for dt in (self.det[j].slack or DET_SLACK_S):
+                cx, cy, ok = self._bell_path(j, br, dt, tk, (t_hit, d))
+                dx = np.maximum(np.abs(x - cx) - hx, 0.0)
+                dy = np.maximum(np.abs(y - cy) - hy, 0.0)
+                out |= ((dx * dx + dy * dy) <= rr * rr) & ok
         return out
 
     def occupied_redirect(self, x, y, tk, type_key: str, t_hit: float, d: int, comfort: bool = False
@@ -367,7 +535,12 @@ class Forecast:
         for n in self.nodes:                    # the walk appends a parent before its children
             pre[n.id] = (n.parent < 0 or pre.get(n.parent, False)) and n.state not in dec
         kept = [p for p in self.placements if pre.get(p.node, False)]
-        return Forecast(self.fc, self.origin_t, self.horizon, self.nodes, kept, self.known, self.roots, self.boss)
+        out = Forecast(self.fc, self.origin_t, self.horizon, self.nodes, kept, self.known, self.roots, self.boss)
+        # armed bells on exact paths are decided too (their self templates are not placed: without them the tactics'
+        # underground risk map did not see a falling drop bell at all)
+        out.det = self.det
+        out._paths, out._groups, out._grid = self._paths, self._groups, self._grid
+        return out
 
     def active_sources(self, t0: float = 0.0, t1: float = SUP_HORIZON_S) -> frozenset[str]:
         out: set[str] = set()
@@ -426,7 +599,7 @@ class Forecast:
         if b is None:
             return None
         tab = self.fc.hurtbox
-        st = self.fc.tracker.state
+        st = self.fc.tracker.shape_key(tab)
         if self.fc.view != ORACLE and tab and st in tab and self.fc.tracker.t_entry is not None:
             bins = tab[st]
             k = str(min(int(max(0.0, self.origin_t - self.fc.tracker.t_entry) / 0.1), max(int(x) for x in bins)))
@@ -434,7 +607,7 @@ class Forecast:
             x0, y0, x1, y1 = m
             if b.flip_x:
                 x0, x1 = -x1, -x0
-            px, py = b.pos.v
+            px, py = self.fc.tracker.fused_pos(self.origin_t, b)
             return px + x0, py + y0, px + x1, py + y1
         ov = self._shape_override()
         if ov:
@@ -442,8 +615,28 @@ class Forecast:
             return float(p[:, 0].min()), float(p[:, 1].min()), float(p[:, 0].max()), float(p[:, 1].max())
         return _body_box(b)
 
+    def _table_rel(self, tk: np.ndarray) -> np.ndarray | None:
+        """VE: the hurtbox table's median box relative to the boss's position (mirrored with the sprite) at each tk,
+        from the time bin of (time in the phase + tk), the phase's last bin past its end: [T, 4]; None without a
+        table entry for the phase."""
+        tab = self.fc.hurtbox
+        tr = self.fc.tracker
+        st = tr.shape_key(tab)
+        if self.fc.view == ORACLE or not tab or st not in tab or tr.t_entry is None or self.boss is None:
+            return None
+        bins = tab[st]
+        keys = np.array(sorted(int(k) for k in bins))
+        tau = self.origin_t - tr.t_entry + np.asarray(tk, np.float64)
+        want = np.clip((np.maximum(tau, 0.0) / HURT_BIN_S).astype(np.int64), keys[0], keys[-1])
+        near = keys[np.abs(keys[None, :] - want[:, None]).argmin(axis=1)]
+        rel = np.array([bins[str(int(k))]["median"] for k in near], np.float64)
+        if self.boss.flip_x:
+            rel = np.stack([-rel[:, 2], rel[:, 1], -rel[:, 0], rel[:, 3]], axis=1)
+        return rel
+
     def _table_entry(self) -> dict | None:
-        tab, st = self.fc.hurtbox, self.fc.tracker.state
+        tab = self.fc.hurtbox
+        st = self.fc.tracker.shape_key(tab)
         if self.fc.view == ORACLE or not tab or st not in tab or self.fc.tracker.t_entry is None:
             return None
         bins = tab[st]
@@ -458,7 +651,7 @@ class Forecast:
             q = np.asarray(ent["poly"], np.float64)
             if self.boss.flip_x:
                 q = q * (-1.0, 1.0)
-            q = q + self.boss.pos.v
+            q = q + self.fc.tracker.fused_pos(self.origin_t, self.boss)
             return q, np.array([0, len(q)], np.int64)
         ov = self._shape_override()
         if ov:
@@ -472,10 +665,99 @@ class Forecast:
                 return np.array([[x0, y0], [x1, y0], [x1, y1], [x0, y1]], np.float64), np.array([0, 4], np.int64)
         return body_shape(self.boss)
 
+    def certain_boss(self, box: np.ndarray, okb: np.ndarray, polys: np.ndarray, starts: np.ndarray,
+                     tk: np.ndarray) -> list | None:
+        """The pogo gate's certain form of the boss (DESIGN 3.5.6: a pogo stands only if its spike meets the boss in
+        every timing lane; a miss lands the hero on it) in the vision view: per horizon bucket k_max (frames from the
+        origin), the shape eroded by how far the real box was seen inside the predicted one at that horizon while the
+        boss stayed in this observable phase (Forecaster.box_margin, ssbot.tools.boss_path_audit --margins), moved
+        along the nominal box, and only until the phase can end at the earliest (its states' shortest logged
+        dwells: the shape changes there, a charge's into its end, which the margins do not cover):
+        [(k_max, cbox [T, 4], ok [T], polys, starts, base)]. None in the oracle view (its box is the colliders'
+        own); [] when the phase has no measured margin (no pogo is certain then)."""
+        fc = self.fc
+        if fc.view == ORACLE or fc.box_margin is None:
+            return None
+        key = fc.tracker.shape_key(fc.box_margin) or ""
+        tab = fc.box_margin.get(key)
+        tau_tab = (fc.box_margin.get("_tau") or {}).get(key)
+        if tau_tab and fc.tracker.t_entry is not None:
+            # the margins measured from origins in this time bin of the phase (a charge's end and its Dig In differ)
+            b = str(int(max(0.0, self.origin_t - fc.tracker.t_entry) / MARGIN_BIN_S))
+            tab = tau_tab.get(b, tab)
+        if not tab or not len(polys):
+            return []
+        t_cut = fc.tracker.phase_left_min(self.origin_t) if CERT_PHASE_CUT else math.inf
+        okc = np.ascontiguousarray(okb & (np.asarray(tk) <= t_cut))
+        if not okc.any():
+            return []
+        b0 = np.array([polys[:, 0].min(), polys[:, 1].min(), polys[:, 0].max(), polys[:, 1].max()])
+        out = []
+        for kb in sorted(tab, key=int):
+            l, r, b, t = tab[kb]
+            cp = _eroded(polys, starts, float(l), float(r), float(b), float(t))
+            if cp is None:
+                continue
+            q, qs = cp
+            c0 = np.array([q[:, 0].min(), q[:, 1].min(), q[:, 0].max(), q[:, 1].max()])
+            out.append((int(kb), np.ascontiguousarray(box + (c0 - b0)[None, :]), okc, q, qs,
+                        np.ascontiguousarray(c0[:2])))
+        return out
+
     def target_paths(self, tk: np.ndarray) -> list:
-        """Registry targets (pogo_targets: bells) on their predicted paths, tk seconds from the observation."""
+        """Registry targets (pogo_targets: bells) on their predicted paths, tk seconds from the observation: the
+        oracle view's from the logged state, the vision view's from the bells on exact paths (Forecast.det)."""
         ws = self.fc._ws
-        return self.fc.targets.paths(ws, tk) if ws is not None else []
+        if ws is None:
+            return []
+        if self.fc.view == ORACLE:
+            return self.fc.targets.paths(ws, tk)
+        return self._det_targets(np.asarray(tk, np.float64)) if VE_TARGETS else []
+
+    def _det_targets(self, tk: np.ndarray) -> list:
+        """VE: one TargetPath per bell on an exact path with one branch until its next random bounce (two open
+        bounce sides: until the bounce), nominal centre (no time slack), determined where its path says so, collider
+        on until its life. A drop bell (VE_DROP_TARGETS): a side slash knocks it aside on the redirect rule
+        (Forecast.redirect_occ on its branch), and a pogo counts only while it falls (pogo_ok); a drop bell with
+        tinked branches open is no target (ambiguous_paths)."""
+        out = []
+        for j, d in enumerate(self.det):
+            drop = d.type_key.startswith(DROP_BELL)
+            if drop and (not VE_DROP_TARGETS or d.ambiguous):
+                continue
+            if d.branches is not None:
+                sides = {sd for sd, _ in d.branches}
+                br = (next(iter(sides)) if len(sides) == 1 else 0, d.branches[0][1])
+            else:
+                sides = d.branch_sides()
+                br = sides[0] if len(sides) == 1 else 0
+            cx, cy, ok = self._bell_path(j, br, 0.0, tk)
+            ok = np.asarray(ok, bool).copy()
+            pogo_ok = None
+            if drop:
+                dy = np.diff(cy, append=cy[-1] - 1e-6) if len(cy) else cy
+                pogo_ok = ok & (dy < 0.0)
+            r = d.sp.r
+            box = np.stack([cx - r, cy - r, cx + r, cy + r], axis=1)
+            out.append(TargetPath(d.type_key, -1 - j, np.ascontiguousarray(box), ok, ok & (tk <= CERT_MAX_S), r,
+                                  CERT_MARGIN_U + VE_CERT_EXTRA_U + d.skin, drop, pogo_ok))
+        return out
+
+    def ambiguous_paths(self, tk: np.ndarray) -> list:
+        """VE drop bells with tinked branches open: per bell, (type_key, [(box [T, 4], ok [T]) per branch, nominal
+        centre]) for the planner's check that no plan's attack meets one (its outcome is not modelled)."""
+        out = []
+        for j, d in enumerate(self.det):
+            if not d.ambiguous:
+                continue
+            paths = []
+            r = d.sp.r
+            for br in d.branches:
+                cx, cy, ok = self._bell_path(j, br, 0.0, tk)
+                paths.append((np.ascontiguousarray(np.stack([cx - r, cy - r, cx + r, cy + r], axis=1)),
+                              np.ascontiguousarray(np.asarray(ok, bool))))
+            out.append((d.type_key, paths))
+        return out
 
     def boss_box(self, tk: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         """Nominal boss hurtbox [T, 4] (x0, y0, x1, y1) and hittable [T] along the most likely path (scoring only):
@@ -491,6 +773,12 @@ class Forecast:
         if bb is None or self._shape_override() == []:
             return box, ok
         box[:] = bb
+        if SHAPE_T:
+            # the shape along the horizon (vision view): the table's bin at each frame's time in the phase, moved
+            # with the origin's box (the same reference: the box at tk 0 is the origin's)
+            rel = self._table_rel(tk)
+            if rel is not None:
+                box += rel - self._table_rel(np.zeros(1))[0]
         t_left = tr.drawn_left(self.origin_t)
         ok[:] = tk <= t_left
         if tr.state in self.fc.no_hurtbox:
@@ -520,6 +808,59 @@ class Forecast:
             box[:, [0, 2]] += (m * (xs - x0))[:, None]
             box[:, [1, 3]] += (ys - y0)[:, None]
         return box, ok
+
+
+def visible_x(cam, y: float) -> tuple[float, float] | None:
+    """The world x interval at height y that lies inside the image (the camera's projection; None: no camera)."""
+    if cam is None or cam.V is None or cam.P is None or cam.screen is None:
+        return None
+    from ssbot.tools.projector import mat4, project
+    pts = np.stack([_VIS_XS, np.full(len(_VIS_XS), y)], axis=1)
+    xy, ok = project(pts, mat4(cam.V), mat4(cam.P), cam.viewport, cam.screen)
+    rx, _ry, rw, _rh = cam.viewport
+    sw = cam.screen[0]
+    inside = ok & (xy[:, 0] >= rx * sw) & (xy[:, 0] <= (rx + rw) * sw)
+    if not inside.any():
+        return (math.inf, -math.inf)
+    v = _VIS_XS[inside]
+    return float(v.min()), float(v.max())
+
+
+@functools.lru_cache(maxsize=256)
+def _eroded_cached(key: bytes, n: int, starts: tuple, l: float, r: float, b: float, t: float):
+    from shapely.affinity import translate
+    from shapely.geometry import Polygon
+    pts = np.frombuffer(key, np.float64).reshape(n, 2)
+    outs = []
+    for a, z in zip(starts[:-1], starts[1:]):
+        p = Polygon(pts[a:z])
+        if not p.is_valid:
+            p = p.buffer(0)
+        # the real shape is this one moved by (dx, dy), dx in [-r, l], dy in [-t, b]: what all of them cover
+        q = p
+        for dx in (-r, l):
+            for dy in (-t, b):
+                q = q.intersection(translate(p, dx, dy))
+        if q.is_empty:
+            continue
+        geoms = getattr(q, "geoms", [q])
+        best = max((g for g in geoms if g.geom_type == "Polygon"), key=lambda g: g.area, default=None)
+        if best is None or best.area <= 1e-6:
+            continue
+        outs.append(np.asarray(best.exterior.coords, np.float64)[:-1])
+    if not outs:
+        return None
+    st = np.zeros(len(outs) + 1, np.int64)
+    st[1:] = np.cumsum([len(o) for o in outs])
+    return np.ascontiguousarray(np.concatenate(outs)), st
+
+
+def _eroded(polys: np.ndarray, starts: np.ndarray, l: float, r: float, b: float, t: float):
+    """Polygons (flat vertices, starts) eroded by a translation box: the part every shift (dx in [-r, l], dy in
+    [-t, b]) of them still covers (Minkowski erosion, exact for convex parts), or None when nothing is left."""
+    p = np.ascontiguousarray(polys, np.float64)
+    return _eroded_cached(p.tobytes(), len(p), tuple(int(x) for x in starts), round(l, 4), round(r, 4), round(b, 4),
+                          round(t, 4))
 
 
 def body_shape(e: Entity | None) -> tuple[np.ndarray, np.ndarray]:
@@ -575,6 +916,8 @@ class BossTracker:
         self.fit_anchor: Anchor | None = None
         self.fit_anomalies = 0
         self._t_start0: float | None = None
+        self._phase_t0: tuple | None = None    # VE: the drawn phase (and its entry) t_start was last anchored at
+        self._obs: list[tuple[float, float, float]] = []   # VE: detections (t, x, y) of the boss in this phase
         self.coasting = False                  # VE: no phase this frame (a ghost)
         self._anchor_sum: list[float] = []
         self.t = 0.0
@@ -586,8 +929,15 @@ class BossTracker:
         self.bells: dict[int, tuple[str, float, tuple[float, float]]] = {}   # ORACLE: armed drop bells: (type,
         #                                                                    arm time, arm position)
         self.bells_unknown = False             # an armed drop bell whose arming was not seen
+        self.vis: list[tuple[float, tuple | None, tuple | None]] = []   # VE: (t, floor x range, ceiling x range)
+        self.tell_early: float | None = None   # VE: a boss cue that came into the image late: its earliest onset
+        self.tell_first: tuple[str, float] | None = None   # VE: the attack's first cue (phase, first seen)
+        self.bell_early: dict[int, float] = {}  # VE: ... a drop bell's cue: its earliest arming
         self._cued: set[int] = set()           # VE: drop bells with their cue in the last frame
+        self._cue_obs: dict[int, list[tuple[float, float, float]]] = {}   # VE: the cue's detections (x, y, sigma)
+        self.bell_sx: dict[int, float] = {}    # VE: 1 sigma of an armed bell's x (the mean of its cue detections)
         self.anchor_log: list[tuple[str, float, float]] = []   # ORACLE: (family, hidden x, drawn transform x)
+        self.bell_y: float | None = getattr(self, "bell_y", None)   # VE: drop bells' hang height (registry `start`)
         # ORACLE: body shapes seen per (state, flipX), polygons relative to the transform (kept across episodes: the
         # same boss), for the states the playbook predicts others with (Forecaster.shape_from)
         self.shapes: dict = getattr(self, "shapes", {})
@@ -667,8 +1017,24 @@ class BossTracker:
         if self.view == ORACLE:
             self._update_oracle(ws, boss, t)
         else:
+            self.vis = [v for v in self.vis if v[0] >= t - VIS_HIST_S]
             self._update_ve(ws, boss, t)
+            self.vis.append((t, visible_x(ws.cam, VIS_FLOOR_Y), visible_x(ws.cam, VIS_CEIL_Y)))
         return boss
+
+    def last_seen_t(self, x: float, ceiling: bool, before: float) -> float | None:
+        """VE: the last frame before `before` whose image held x (at the floor or the ceiling); -inf: none in the
+        history; None: no camera, or no history yet (the fight's first frame: nothing to bound)."""
+        if not self.vis:
+            return None
+        last = -math.inf
+        for t, fl, ce in self.vis:
+            r = ce if ceiling else fl
+            if r is None:
+                return None
+            if t < before and r[0] <= x <= r[1]:
+                last = t
+        return last
 
     def _update_oracle(self, ws: WorldState, boss: Entity | None, t: float) -> None:
         m = self.model
@@ -749,7 +1115,10 @@ class BossTracker:
     # ---- VISION_EQUIVALENT ----------------------------------------------------------------------------------------
 
     def _bells_ve(self, ws: WorldState, t: float) -> None:
-        """VE with the bell cue (ObservabilityFilter tells, phase "bell_dust"): arming time from the cue."""
+        """VE with the bell cue (ObservabilityFilter tells, phase "bell_dust"): arming time from the cue, the bell's x
+        from the mean of the cue's detections (each as noisy as any other detection; a missed one coasts and does
+        not count), its y the hang height every drop bell has (registry `start`: 13.74, the transform in Antic in
+        13,479 of 13,479 frames of live run 20261002_171806 i0_000), else the cue's mean y."""
         cued = set()
         for e in ws.entities:
             if not e.type_key.v.startswith(DROP_BELL) or e.phase is None or e.phase.top != "bell_dust":
@@ -757,11 +1126,36 @@ class BossTracker:
             cued.add(e.id)
             if e.id not in self._cued:             # a new cue: this bell (re-)armed
                 t_arm = t - e.phase.t_in_phase - TELL_DELAY["bell_dust"]
+                if e.id in self.bells and t - self.bells[e.id][1] < BELL_ANTIC_S + 0.5:
+                    t_arm = min(t_arm, self.bells[e.id][1])    # its cue came back into the image: the same arming
                 self.bells[e.id] = (e.type_key.v, t_arm, (float(e.pos.v[0]), float(e.pos.v[1])))
+                self._cue_obs[e.id] = []
+                # a cue that came into the image late (its column was outside it on the frame before): armed after
+                # the last frame its column was in the image less the cue's delay, and less than the Antic ago
+                t_first = t - e.phase.t_in_phase
+                tv = self.last_seen_t(float(e.pos.v[0]), True, t_first - 1e-6)
+                if tv is not None and tv < t_first - 1.5 * BIN:
+                    self.bell_early[e.id] = max(tv - TELL_DELAY["bell_dust"], t - BELL_ANTIC_S)
+                else:
+                    self.bell_early.pop(e.id, None)
+            obs = self._cue_obs.setdefault(e.id, [])
+            if e.pos.age_ms <= 0.0:                # detected in this frame (a coasted cue's age grows)
+                s = e.pos.sigma if math.isfinite(e.pos.sigma) else 1.0
+                obs.append((float(e.pos.v[0]), float(e.pos.v[1]), float(s)))
+            if obs:
+                a = np.asarray(obs, np.float64)
+                y = self.bell_y if self.bell_y is not None else float(a[:, 1].mean())
+                tk, t_arm, _ = self.bells[e.id]
+                self.bells[e.id] = (tk, t_arm, (float(a[:, 0].mean()), y))
+                self.bell_sx[e.id] = float(np.sqrt(np.mean(a[:, 2] ** 2)) / math.sqrt(len(a)))
         self._cued = cued
+        for iid in [i for i in self._cue_obs if i not in cued]:
+            del self._cue_obs[iid]
         for iid in [i for i in self.bells if i not in cued]:
             if t - self.bells[iid][1] > BELL_TTL_S:
                 del self.bells[iid]
+                self.bell_sx.pop(iid, None)
+                self.bell_early.pop(iid, None)
 
     def _update_ve(self, ws: WorldState, boss: Entity | None, t: float) -> None:
         m = self.model
@@ -775,6 +1169,20 @@ class BossTracker:
         if ph != self.state:
             prev = self.state
             self.state, self.t_entry = ph, t - tau
+            if ph in TELL_PHASES and prev not in TELL_PHASES:
+                self.tell_first = (ph, self.t_entry)
+            elif ph not in TELL_PHASES:
+                self.tell_first = None
+            if ph in TELL_PHASES and prev not in TELL_PHASES and boss.pos.conf > 0:
+                # a cue that came into the image late: its onset after the last frame its x was in the image
+                # (less the cue's delay), and after the boss went under
+                tv = self.last_seen_t(float(boss.pos.v[0]), False, self.t_entry - 1e-6)
+                late = tv is not None and tv < self.t_entry - 1.5 * BIN
+                self.tell_early = max(tv, self.t_hide if self.t_hide is not None else -math.inf) if late else None
+            elif ph not in TELL_PHASES:
+                self.tell_early = None
+            if ph == HIDDEN:
+                self._obs = []
             if ph == HIDDEN:
                 self.t_hide = t - tau
                 if prev == "roar":
@@ -786,13 +1194,20 @@ class BossTracker:
                 fam = PHASE_FAMILY.get(ph)
                 if ph == "recover":
                     fam = self.last_family if self.last_family in RECOVER_ROOT else None
+                # a new attack: another family, a first drawn phase after the boss was under / at the end of one, or
+                # any cue after a phase that was not one (a cue shows only underground before an attack: after a
+                # boss lost over the image edge the tracker never saw it go under, and the next burst's cue followed
+                # the last burst's phase: its anchor averaged both bursts' cues, 2.6 u off, and the attack bell came
+                # up outside the support; degraded_dust run 20261002_232157 i0 ep27)
                 if fam is not None and fam != self.last_family or ph in ("emerge", "leap", "burst", "roar",
                                                                          *TELL_PHASES) \
-                        and prev in (HIDDEN, None, "recover", "roar_end"):
+                        and prev in (HIDDEN, None, "recover", "roar_end") \
+                        or ph in TELL_PHASES and prev not in TELL_PHASES:
                     self._anchor_sum = []
                     self.last_anchor = None
                     self.t_start = None
                     self._t_start0, self.fit_ok, self.fit_anchor = None, False, None
+                    self._obs = []         # a new attack: its own path (the fused position spans its phases)
                 self.last_family = fam if fam is not None else (None if ph == "dust" else self.last_family)
                 if ph == "roar":
                     self.ctx.raged = True
@@ -801,6 +1216,8 @@ class BossTracker:
         if ph == HIDDEN:
             return
         self.seen = True
+        if ph not in TELL_PHASES and boss.visible_frac > 0.0 and boss.pos.conf > 0.0 and not boss.hidden:
+            self._obs = (self._obs + [(t, float(boss.pos.v[0]), float(boss.pos.v[1]))])[-FUSE_N_Y:]
         if ph in EMERGE_TELLS and boss.pos.conf > 0:
             xl, xr = m.anchor("BB_CHARGE", "Set L").x, m.anchor("BB_CHARGE", "Set R").x
             self.tell_dir = "Set L" if boss.pos.v[0] < 0.5 * (xl + xr) else "Set R"
@@ -811,25 +1228,33 @@ class BossTracker:
         if fam is None:
             return
         f = m.families[fam]
-        root = PHASE_ROOT.get(ph)
-        if self.t_start is None and root in f.entry:
-            # the attack began this long before the phase's first state (the family's logged entry offsets): the
-            # boss box then moves along the family's mean path for scoring (Forecast.boss_box)
-            self.t_start = t - tau - TELL_DELAY.get(ph, 0.0) - f.entry[root][0]
+        root = RECOVER_ROOT.get(fam) if ph == "recover" else PHASE_ROOT.get(ph)
+        if root in f.entry and (self.t_start is None or (self._phase_t0 != (ph, self.t_entry)
+                                                         and ph not in TELL_PHASES)):
+            # the attack began this long before the phase's first state (the family's logged entry offsets, their
+            # middle): the boss box then moves along the family's mean path (Forecast.boss_box). Re-anchored at
+            # every drawn phase's entry (seen +-1 frame): a start guessed from the dust cue (+-0.1 s) and fitted over
+            # frames of a boss standing at its anchor (no timing in them) put the charge's box up to 2 u off at
+            # +0.1 s (task V, boss_path_audit --view degraded_dust on live run 20261002_171806)
+            lo, hi = f.entry[root]
+            self.t_start = t - tau - TELL_DELAY.get(ph, 0.0) - 0.5 * (lo + hi)
             self._t_start0 = self.t_start
+            self._phase_t0 = (ph, self.t_entry)
         if fam == "BB_BURST":
-            # set once per burst and kept to its end (an earlier version fell through to the family's named anchor,
+            # set per burst and kept to its end (an earlier version fell through to the family's named anchor,
             # which a burst has none of, from the second drawn frame on: the whole burst range for the rest of the
-            # burst, FORCED_RISK in every stage C burst, run 20261002_060151)
-            if boss.pos.conf > 0 and not self._anchor_sum:
+            # burst, FORCED_RISK in every stage C burst, run 20261002_060151). The cue's dust stands at the anchor:
+            # the mean of all its detections (each as noisy as a boss detection); without a cue the first drawn frame
+            if boss.pos.conf > 0 and boss.pos.age_ms <= 0.0:       # detected in this frame (not coasted)
                 if ph in TELL_PHASES:
                     self._anchor_sum.append(boss.pos.v[0])
-                else:
+                elif not self._anchor_sum:
                     # the box follows the sprite frame (live i2_002 f605393-605452: box centre x 89.93 -> 91.57 while
                     # the transform stays at 90.47), so only the first drawn frame has the behaviour table's offset
                     self._anchor_sum.append(boss.pos.v[0] - f.box_offset.get(bool(boss.flip_x), (0.0, 0.0))[0])
+            if self._anchor_sum:
                 y = f.anchor_y if f.anchor_y is not None else boss.pos.v[1] + 2.68
-                self.last_anchor = Anchor(float(self._anchor_sum[0]), y, 1)
+                self.last_anchor = Anchor(float(np.mean(self._anchor_sum)), y, 1)
         elif f.directed:
             told = ph in TELL_PHASES and self.tell_dir is not None
             base = m.anchor(fam, self.tell_dir if told else ("Set R" if boss.flip_x else "Set L"))
@@ -918,6 +1343,17 @@ class BossTracker:
         if self.state in TELL_PHASES:
             d, sl = TELL_DELAY[self.state], TELL_SLACK_S[self.state]
             lo, hi = e - d - sl, e - d + sl
+            tf = self.tell_first
+            if self.state in ("dust_low", "dust_tall") and tf is not None and tf[0] == "dust" \
+                    and self.tell_early is None:
+                # timed by the plain dust before it (its bracket is narrower), within this one's own
+                e0, d0, s0 = tf[1] - origin_t, TELL_DELAY["dust"], TELL_SLACK_S["dust"]
+                lo2, hi2 = max(lo, e0 - d0 - s0), min(hi, e0 - d0 + s0)
+                if lo2 <= hi2:
+                    lo, hi = lo2, hi2
+            if self.tell_early is not None:
+                # it came into the image late: it was not out yet at tell_early (or the boss was not under)
+                lo = min(lo, max(self.tell_early - origin_t - d, lo - VIS_HIST_S) - sl)
             if self.state in EMERGE_TELLS:
                 direction = self.tell_dir
             if self.state == "dust":
@@ -929,6 +1365,74 @@ class BossTracker:
         fam_r = PHASE_FAMILY[self.state]
         ctx = replace(base, family=fam_r, anchor=self.last_anchor, direction=direction)
         return [Root(st, lo, hi, ctx)], True
+
+    def shape_key(self, table: dict | None = None) -> str | None:
+        """VE: the key of the boss's shape tables (hurtbox per phase, pogo-gate margins): the observable phase,
+        "recover/<family>" for the end of a charge or of a leap (one phase, two shapes: Charge End's box vs Leap
+        Land's) when the table has it."""
+        st = self.state
+        if st == "recover" and self.last_family in RECOVER_ROOT:
+            k = f"recover/{self.last_family}"
+            if table is None or k in table:
+                return k
+        return st
+
+    def _path_xy(self, t: float) -> tuple[float, float] | None:
+        """The current attack's mean path (anchor frame: x mirrored) at game time t, or None."""
+        fam = self.last_family
+        f = self.model.families.get(fam) if fam else None
+        anchor = self.fit_anchor or self.last_anchor
+        if f is None or f.path is None or self.t_start is None or anchor is None:
+            return None
+        ta = t - self.t_start
+        return (anchor.mirror * float(np.interp(ta, f.path[:, 0], f.path[:, 6])),
+                float(np.interp(ta, f.path[:, 0], f.path[:, 7])))
+
+    def fused_pos(self, origin_t: float, boss: Entity) -> tuple[float, float]:
+        """VE: the boss's position at the origin from its last FUSE_N detections in this attack (its phases share
+        the family's mean path and the reference point, the root box's centre), each moved to the origin along
+        that path (Forecast.boss_box moves the box the same way): the noise of one detection averages down (task V:
+        the pogo gate's box margins are sized from the residual of this position; reset per phase, the first
+        frames of a charge left 0.2 u of top error). A boss without a path (a burst, a roar) takes the plain mean."""
+        obs = self._obs[-FUSE_N_Y:]
+        if len(obs) < 2:
+            return boss.pos.v
+        p0 = self._path_xy(origin_t)
+        xs, ys = [], []
+        for t, x, y in obs:
+            pi = self._path_xy(t) if p0 is not None else None
+            if pi is None:
+                xs.append(x)
+                ys.append(y)
+            else:
+                xs.append(x + p0[0] - pi[0])
+                ys.append(y + p0[1] - pi[1])
+        return float(np.mean(xs[-FUSE_N:])), float(np.mean(ys))
+
+    def phase_left_min(self, origin_t: float) -> float:
+        """VE: game s from the origin until the observable phase can end at the earliest: the shortest logged dwells
+        of its Control states from its first one (PHASE_ROOT / RECOVER_ROOT) along the likeliest successor while that
+        is still in the same phase. 0 when unknown."""
+        m = self.model
+        ph = self.state
+        if self.t_entry is None or ph is None:
+            return 0.0
+        st = RECOVER_ROOT.get(self.last_family or "") if ph == "recover" else PHASE_ROOT.get(ph)
+        if st is None or st not in m.states:
+            return 0.0
+        t = self.t_entry - origin_t
+        for _ in range(8):
+            info = m.states.get(st)
+            if info is None:
+                break
+            t += info.dwell[0]
+            if not info.succ:
+                break
+            nxt = max(info.succ, key=lambda x: x[1])[0]
+            if VE_PHASE_OF.get(nxt) != ph:
+                break
+            st = nxt
+        return max(0.0, t)
 
     def drawn_left(self, origin_t: float) -> float:
         """Game s the boss stays drawn from the origin along the shortest logged dwells (scoring only)."""
@@ -988,6 +1492,18 @@ class Forecaster:
         self.tracker = BossTracker(model, view)
         # registry hit targets (bells): their predicted paths for the planner's hit effects (pogo off a bell)
         self.targets = TargetTracker()
+        # VE: drop bells' falls from their tracks (bell_track: column, drop time, bounce side), the exact paths the
+        # oracle view reads from the FSM and the logged velocity
+        sp = self.targets.spec_of(DROP_BELL)
+        self.drop_tracks = DropBellTracks(sp) if sp is not None and view != ORACLE else None
+        asp = self.targets.spec_of(ATK_BELL)
+        self.atk_tracks = AtkBellTracks(asp) if asp is not None and view != ORACLE else None
+        self.det_atk = DET_ATK
+        self._atk_cover: list[tuple[float, float]] = []    # VE: (pair middle x, launch time from the origin)
+        self._atk_lag = self._launch_lags()
+        if self.drop_tracks is not None and self.drop_tracks.ok:
+            self.tracker.bell_y = self.drop_tracks.y0
+        self.det_ve = DET_VE
         self._ws: WorldState | None = None
         self.boss: Entity | None = None
         self.no_hurtbox: frozenset[str] = frozenset()     # states / phases with the body box disabled (playbook)
@@ -995,6 +1511,7 @@ class Forecaster:
         self.bell_tells = False        # VE: the drop bells' cue is in the view (ObservabilityFilter tells)
         self.truncated = 0
         self.hurtbox: dict | None = None   # VE: the boss's hittable box per phase (load_hurtbox; scoring only)
+        self.box_margin: dict | None = None   # VE: the pogo gate's margins per phase (load_box_margin)
         self.t = 0.0
 
     @property
@@ -1010,6 +1527,10 @@ class Forecaster:
     def reset(self) -> None:
         self.tracker.reset()
         self.targets.reset()
+        if self.drop_tracks is not None:
+            self.drop_tracks.reset()
+        if self.atk_tracks is not None:
+            self.atk_tracks.reset()
         self._ws = None
         self.boss = None
 
@@ -1022,6 +1543,12 @@ class Forecaster:
         self.t = ws.stamp.t_game_s
         self.boss = self.tracker.update(ws)
         self.targets.update(ws, self.t)
+        if self.drop_tracks is not None:
+            self.drop_tracks.update(ws, self.t)
+        if self.atk_tracks is not None:
+            tr = self.tracker
+            ax = tr.last_anchor.x if tr.last_family == "BB_BURST" and tr.last_anchor is not None else None
+            self.atk_tracks.update(ws, self.t, ax)
         self._ws = ws
 
     # ---- the walk -----------------------------------------------------------------------------------------------
@@ -1033,27 +1560,44 @@ class Forecaster:
         roots, known = self.tracker.roots(origin)
         nodes: list[Node] = []
         placements: list[Placement] = []
+        det: list = []
+        self._atk_cover = self._atk_bells(origin, det) if self.atk_tracks is not None and self.det_atk else []
         for r in roots:
             self._walk(r.state, r.e_lo, r.e_hi, replace(r.ctx), r.p, -1, H, nodes, placements, r.current, 0)
         tr = self.tracker
-        det: list = []
+        if self.drop_tracks is not None and self.det_ve:
+            # VE: a drop bell seen falling without its cue (the cue missed) is support on its path too
+            for iid in self.drop_tracks.obs:
+                if iid not in tr.bells:
+                    self._det_bell(iid, det)
+        self_tpl: dict[str, list] = {}
         if tr.bells:
             nid = len(nodes)
             nodes.append(Node(nid, "bells", 0.0, 0.0, None, 1.0, -1, None))
             # oracle: the arming frame; vision: from the cue, +-its slack in 1/60 s steps
             k = 0 if self.view == ORACLE else int(round(TELL_SLACK_S["bell_dust"] / BIN))
             for iid, (tk, t_arm, pos) in tr.bells.items():
+                # a cue that came into the image late: arming times back to its earliest (VE)
+                k_lo = k + (int(math.ceil((t_arm - tr.bell_early[iid]) / BIN)) if iid in tr.bell_early else 0)
                 key = f"{hb.SUPPORT}ent/{tk}/self"
                 if key not in self.meta:
                     continue
-                if self._det_bell(iid, det):
-                    continue                  # falling or bounced: its exact path (two branches) replaces the template
                 t0, t1 = self.meta[key]
-                for j in range(-k, k + 1):
+                # VE: a cue seen in few frames: its x +- 3 sigma as well, beyond what the view's margin covers
+                sx = tr.bell_sx.get(iid, 0.0)
+                dxs = (0.0,) if sx <= CUE_SIGMA_COVERED else (-SKIN_Z * sx, 0.0, SKIN_Z * sx)
+                own = []
+                for j in range(-k_lo, k + 1):
                     e = t_arm + j * BIN - origin
                     if e + t1 < -BIN or e + t0 > H + BIN:
                         continue
-                    placements.append(Placement(key, -e, pos, 1, nid, e + t0, e + t1, frozenset({tk})))
+                    for dx in dxs:
+                        own.append(Placement(key, -e, (pos[0] + dx, pos[1]), 1, nid, e + t0, e + t1,
+                                             frozenset({tk})))
+                self_tpl[tk] = own            # (audits: the template a bell on an exact path would have had)
+                if self._det_bell(iid, det):
+                    continue                  # falling or bounced: its exact path (two branches) replaces the template
+                placements.extend(own)
         for fam, anchor, lo, hi, phase, death in self.tracker.ends:
             nid = len(nodes)
             nodes.append(Node(nid, TAIL, lo - origin, hi - origin, fam, 1.0, -1, anchor))
@@ -1063,6 +1607,7 @@ class Forecaster:
             known = True
         out = Forecast(self, origin, H, nodes, placements, known, roots, self.boss)
         out.det = det
+        out.self_tpl = self_tpl
         out.truncated = self.truncated
         return out
 
@@ -1070,8 +1615,24 @@ class Forecaster:
         """ORACLE: an armed drop bell already falling (Drop, Air) or bounced (Bounce Air, Submerge) has an exact path
         (pogo_targets.simulate, centre error 0.000 u over 0.8 s in game time on 2 recordings): it is support as two
         branches, one per bounce side (p 0.5 each; the bounce speed is fixed, 4 u/s), or one once it bounced, instead
-        of the logged union of its self template."""
-        if not DET_REPLACE or self.view != ORACLE or self._ws is None:
+        of the logged union of its self template.
+        VISION_EQUIVALENT (det_ve): the same path from the bell's track instead (bell_track.DropBellTracks: column x,
+        drop time, bounce side once seen), started at the drop and sampled at the time since it, its contact skin grown
+        by SKIN_Z sigma of the column's x; while the bell is not seen falling, or its track leaves the model, its self
+        template stays."""
+        if self.view != ORACLE:
+            if not (DET_REPLACE and self.det_ve) or self.drop_tracks is None or self._ws is None:
+                return False
+            est = self.drop_tracks.estimate(iid)
+            if est is None:
+                return False
+            dt_ = self.drop_tracks
+            tk_ = dt_.type_of.get(iid, DROP_BELL)
+            det.append(DetBell(dt_.spec, est.x, dt_.y0, dt_.vx0, dt_.vy0, 0, None, tk_, t0=self.t - est.t_drop,
+                               sides=(est.side,) if est.side else (1, -1), skin=SKIN_Z * est.sx, slack=VE_SLACK,
+                               branches=est.paths(), rel=dt_))
+            return True
+        if not DET_REPLACE or self._ws is None:
             return False
         e = next((x for x in self._ws.entities if x.id == iid), None)
         if e is None or not e.fsm or e.vel.conf <= 0:
@@ -1083,9 +1644,58 @@ class Forecaster:
         rest = None
         if st == "Submerge":
             rest = max(0.0, 0.75 - e.fsm[0][2])
-        det.append((sp, float(e.pos.v[0]), float(e.pos.v[1]), float(e.vel.v[0]), float(e.vel.v[1]),
-                    int(sp.next_bounce.get(st, len(sp.bounces))), rest, e.type_key.v))
+        det.append(DetBell(sp, float(e.pos.v[0]), float(e.pos.v[1]), float(e.vel.v[0]), float(e.vel.v[1]),
+                           int(sp.next_bounce.get(st, len(sp.bounces))), rest, e.type_key.v))
         return True
+
+    def _launch_lags(self) -> dict[str, tuple[float, float]]:
+        """State (and _tail) -> (min, max) game s from the attack bells' launch to its entry (the attack's end for
+        _tail): the burst's logged entry offsets and dwells."""
+        f = self.model.families.get("BB_BURST")
+        if f is None or ATK_LAUNCH_STATE not in f.entry:
+            return {}
+        lo0, hi0 = f.entry[ATK_LAUNCH_STATE]
+        out = {st: (lo - hi0, hi - lo0) for st, (lo, hi) in f.entry.items()}
+        last = f.states[-1]
+        if last in f.entry and last in self.model.states:
+            d = self.model.states[last].dwell
+            out[TAIL] = (f.entry[last][0] + d[0] - hi0, f.entry[last][1] + d[1] - lo0)
+        return out
+
+    def _atk_bells(self, origin: float, det: list) -> list[tuple[float, float]]:
+        """VE: attack bells on exact paths (bell_track.AtkBellTracks: launch time and x, side; one branch per side
+        still open, gone at its End Timer) into det; returns the bursts whose two bells are both on exact paths:
+        (their middle x = the burst's anchor, launch time from the origin)."""
+        at = self.atk_tracks
+        ests = at.estimates()
+        for e in ests:
+            tk_ = at.type_of.get(e.iid, ATK_BELL)
+            for sd in ((e.side,) if e.side else (1, -1)):
+                x0, y0, vx0, vy0 = at.path_args(e, sd)
+                # the launch path relative to its x, cached per side (AtkBellTracks.path_at): simulate per tick and
+                # query times was the stage C tick's largest new cost in bursts
+                det.append(DetBell(at.spec, x0, y0, vx0, vy0, 0, None, tk_, t0=origin - e.t_launch, sides=(0,),
+                                   skin=SKIN_Z * e.sx, life=e.t_end - e.t_launch, slack=VE_SLACK,
+                                   branches=((sd, ()),), rel=at))
+        cover = []
+        paired = [e for e in ests if e.pair and e.side]
+        for i, a in enumerate(paired):
+            for b in paired[i + 1:]:
+                if a.side == -b.side and abs(a.t_launch - b.t_launch) <= 0.05:
+                    xm = 0.5 * (at.x0(a, a.side) + at.x0(b, b.side))
+                    cover.append((xm, 0.5 * (a.t_launch + b.t_launch) - origin))
+        return cover
+
+    def _atk_covered(self, state: str, e_lo: float, e_hi: float, anchor: Anchor | None) -> bool:
+        """A burst state's (or tail's) attack-bell union whose bells are both on exact paths (VE)."""
+        lag = self._atk_lag.get(state)
+        if anchor is None or lag is None:
+            return False
+        for xm, tl in self._atk_cover:
+            if abs(xm - anchor.x) <= ATK_ANCHOR_TOL_U and \
+                    e_lo - lag[1] - ATK_LAG_SLACK_S <= tl <= e_hi - lag[0] + ATK_LAG_SLACK_S:
+                return True
+        return False
 
     def _place(self, fam: str, state: str, e_lo: float, e_hi: float, ctx: Ctx, node: int, H: float,
                out: list[Placement], death_tail: bool = False) -> None:
@@ -1128,6 +1738,9 @@ class Forecaster:
             allsrc = f.sources.get(state, frozenset())
             fsrc = ws if fr == "world" else (allsrc - ws if fr == "anchor" else allsrc)
             t_from = -math.inf
+            if fr == "anchor" and fsrc and self._atk_cover and all(x.startswith(ATK_BELL) for x in fsrc) \
+                    and self._atk_covered(state, e_lo, e_hi, ctx.anchor):
+                continue           # VE: both of this burst's attack bells are on exact paths (Forecast.det)
             if fsrc and all(x.startswith(DROP_BELL) for x in fsrc) and not self.tracker.bells_unknown:
                 if self.view == ORACLE:
                     t_from = self.bell_lead
@@ -1199,8 +1812,18 @@ class Forecaster:
             p_rage = 0.0
             if rage_possible and ctx.phase == "P1" and ctx.hp is not None and m.rage_hp is not None:
                 p_rage = 1.0 if ctx.hp <= m.rage_hp else 0.0
+                if self.view != ORACLE and m.rage_hp < ctx.hp <= m.rage_hp + VE_RAGE_HP_SLACK:
+                    p_rage = VE_RAGE_P
             elif rage_possible:
                 p_rage = 0.03
+            if p_rage == 1.0 and any(s == "Rage Pos" for s, _ in succ):
+                # the rage is the FSM's rule, not a draw: every logged P1 decision with the boss at <= 75 HP went to
+                # Rage Pos (311 of 311) and none above it did (1,990), live / gate runs 20261002_123347 ... 173956
+                # (HP = 150 - the logged hits). The view's HP only counts hits it saw: a missed hit makes it higher,
+                # never lower, so a count at or below the threshold is certain. Without this the vision view, which
+                # cannot see Rage Pos underground, kept every other attack in support too and was FORCED_RISK through
+                # all of Rage Pos / Rage Antic (view_compare, run 20261002_171806 i0 ep2)
+                return [("Rage Pos", 1.0)]
             out = []
             for s, _ in succ:
                 if s == "Rage Pos":
@@ -1220,6 +1843,18 @@ def load_hurtbox(path: str | Path | None = None) -> dict:
     p = Path(path) if path else Path(__file__).resolve().parents[3] / "knowledge" / "1.0.30000" / "enemies" / \
         "BellBeast_hurtbox.json"
     return json.loads(p.read_text("utf-8"))["phases"] if p.exists() else {}
+
+
+def load_box_margin(path: str | Path | None = None) -> dict | None:
+    """The vision view's box margins (ssbot.tools.boss_path_audit --margins): {phase: {k_max: [left, right, bottom,
+    top]}, "_tau": {phase: {time bin: {k_max: [...]}}}}; None when the file is missing (the pogo gate then has no
+    certain form in the vision view)."""
+    p = Path(path) if path else Path(__file__).resolve().parents[3] / "knowledge" / "1.0.30000" / "enemies" / \
+        "BellBeast_vision_box_margin.json"
+    if not p.exists():
+        return None
+    d = json.loads(p.read_text("utf-8"))
+    return d["phases"] | ({"_tau": d["phases_tau"]} if d.get("phases_tau") else {})
 
 
 def margin_xy(margin: float | tuple[float, float]) -> tuple[float, float]:

@@ -20,6 +20,7 @@ namespace SsOracle.Input
             public uint Buttons;
             public int HoldFrames;
             public uint AckSeq;
+            public uint Flags;            // ActionScheduler.FlagExclusive, ...
         }
 
         public const int MaxLateFrames = 3;

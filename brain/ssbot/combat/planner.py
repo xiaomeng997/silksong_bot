@@ -355,6 +355,7 @@ class Planner:
         S = occ.any(axis=1)
         th0 = time.perf_counter()
         roll_j = self._hit_effects(f, start, latched, roll, tk, S, enemy_only)
+        self._ambiguous_bells(f, latched, roll_j, start, tk, S)
         self._no_cast_out_of_spike(latched, roll, roll_j, S)
         th1 = time.perf_counter()
         self._lock_check(f, roll, hold_end, S, P + T, enemy_only)
@@ -558,6 +559,9 @@ class Planner:
                             after, hf, kd, win)
                 if not g.recoil:
                     hf[kd != 3] = -1
+                if g.pogo_ok is not None:
+                    # a pogo where it does not count (a rising drop bell, VE): no hit, the miss branch stands
+                    hf[(kd == 3) & (hf >= 0) & ~g.pogo_ok[np.clip(hf, 0, len(g.pogo_ok) - 1)]] = -1
                 better = (hf >= 0) & ((hit_f < 0) | (hf < hit_f))
                 hit_f[better], kind[better], tsel[better] = hf[better], kd[better], ti
             if self.cfg.attack_model == "v1":
@@ -653,9 +657,28 @@ class Planner:
                 g = tgts[max(int(ti), 0)]
                 idx = np.flatnonzero(pogo_tgt[pg] == ti)
                 cn = np.zeros(len(idx), np.bool_)
-                _lanes_connect(np.ascontiguousarray(rl.var_box[idx]), np.ascontiguousarray(rl.var_flags[idx]),
-                               np.ascontiguousarray(rl.var_mode[idx]), np.ascontiguousarray(latched[pg[idx]]), face0,
-                               g.cbox, g.cok, g.cpolys, g.cstarts, g.cbase, win, cn)
+                buckets = getattr(g, "buckets", None)
+                if buckets is None:
+                    _lanes_connect(np.ascontiguousarray(rl.var_box[idx]), np.ascontiguousarray(rl.var_flags[idx]),
+                                   np.ascontiguousarray(rl.var_mode[idx]), np.ascontiguousarray(latched[pg[idx]]),
+                                   face0, g.cbox, g.cok, g.cpolys, g.cstarts, g.cbase, win, cn)
+                else:
+                    # the certain form of the bucket that covers the row's bounce (+ BUCKET_SLACK frames for the
+                    # lanes' spread); rows bouncing beyond the last bucket, or with no form at all, are rejected
+                    kb0 = np.argmax((ev[pg[idx]] & kin.EV_POGO) != 0, axis=1) + BUCKET_SLACK
+                    done = np.zeros(len(idx), bool)
+                    for kb, cbox, cok, cp, cst, cbs in buckets:
+                        sel = np.flatnonzero(~done & (kb0 <= kb))
+                        if not len(sel):
+                            continue
+                        done[sel] = True
+                        cs_ = np.zeros(len(sel), np.bool_)
+                        _lanes_connect(np.ascontiguousarray(rl.var_box[idx[sel]]),
+                                       np.ascontiguousarray(rl.var_flags[idx[sel]]),
+                                       np.ascontiguousarray(rl.var_mode[idx[sel]]),
+                                       np.ascontiguousarray(latched[pg[idx[sel]]]), face0, cbox, cok, cp, cst, cbs,
+                                       win, cs_)
+                        cn[sel] = cs_
                 conn[idx] = cn
             for n, c in enumerate(pg):
                 ok_all = bool(conn[n])
@@ -669,6 +692,33 @@ class Planner:
                         self._pogo_ok[c] = True
                         self.pogo_log["bell"] += int(pogo_tgt[c] > 0)
         return cur
+
+    def _ambiguous_bells(self, f: Forecast, latched: np.ndarray, roll, start, tk: np.ndarray, S: np.ndarray) -> None:
+        """VE: a drop bell whose track has tinked branches open (bell_track: the hero attacked it and the detections
+        do not tell yet) is no hit target, so what a new attack would do to it is not modelled: a plan whose attack
+        (slash, up-slash or down spike, in its windows) meets the bell on any of its branches is not safe (S)."""
+        amb = f.ambiguous_paths(tk) if hasattr(f, "ambiguous_paths") else []
+        self.last_ambiguous = 0
+        if not amb:
+            return
+        flags = roll.flags
+        if not (((flags & F_ATTACKING) != 0).any() or (roll.mode == M_DS_SPIKE).any()):
+            return
+        face0 = 1 if start.reshape(kin.K, -1)[kin.FACE, 0] >= 0 else -1
+        win = WINDOWS[self.cfg.attack_model]
+        N = len(latched)
+        cb, cf, cm = (np.ascontiguousarray(roll.box), np.ascontiguousarray(flags), np.ascontiguousarray(roll.mode))
+        lat = np.ascontiguousarray(latched)
+        for _name, paths in amb:
+            for box, ok in paths:
+                r = 0.5 * float(box[0, 2] - box[0, 0])
+                P0, S0, B0 = pt.octagon(r)
+                hf = np.full(N, -1, np.int64)
+                kd = np.zeros(N, np.int64)
+                _first_hits(cb, cf, cm, lat, face0, box, ok, P0, S0, B0, np.full(N, -1, np.int64), hf, kd, win)
+                hit = hf >= 0
+                self.last_ambiguous += int(hit.sum())
+                S |= hit
 
     def _no_cast_out_of_spike(self, latched: np.ndarray, roll, roll_j, S: np.ndarray) -> None:
         """A Silkspear pressed during a down spike (its antic or the spike) or within CAST_AFTER_POGO frames of a
@@ -751,18 +801,23 @@ class Planner:
         base = np.array([b0[0], b0[1]])
         bt = _Target(np.ascontiguousarray(boss, np.float64), np.ascontiguousarray(okb),
                      np.ascontiguousarray(polys, np.float64), np.ascontiguousarray(starts, np.int64), base)
+        # vision view: the pogo gate checks the boss eroded by the measured box residuals, per horizon bucket
+        bt.buckets = f.certain_boss(bt.box, bt.ok, bt.polys, bt.starts, tk) if hasattr(f, "certain_boss") else None
         out.append(bt)
         paths = f.target_paths(tk) if hasattr(f, "target_paths") else []
         for pth in paths:
             P0, S0, B0 = pt.octagon(pth.r)
-            m = pt.CERT_MARGIN_U
+            m = getattr(pth, "cert_margin", pt.CERT_MARGIN_U)
             P1, S1, B1 = pt.octagon(pth.r - m)
             cbox = np.ascontiguousarray(pth.box + np.array([m, m, -m, -m]))
             spec = f.fc.targets.spec_of(pth.type_key) if hasattr(f.fc, "targets") else None
-            out.append(_Target(np.ascontiguousarray(pth.box), np.ascontiguousarray(pth.ok), P0, S0, B0, cbox,
-                               np.ascontiguousarray(pth.cert), P1, S1, B1, spec.recoil if spec else True,
-                               pth.type_key, spec.cooldown_s if spec else 0.0,
-                               bool(spec and "side" in spec.redirect)))
+            t_ = _Target(np.ascontiguousarray(pth.box), np.ascontiguousarray(pth.ok), P0, S0, B0, cbox,
+                         np.ascontiguousarray(pth.cert), P1, S1, B1, spec.recoil if spec else True,
+                         pth.type_key, spec.cooldown_s if spec else 0.0,
+                         bool(spec and "side" in spec.redirect and getattr(pth, "redirect", True)))
+            po = getattr(pth, "pogo_ok", None)
+            t_.pogo_ok = None if po is None else np.asarray(po, bool)
+            out.append(t_)
         if not okb.any() and len(out) == 1:
             return []
         return out
@@ -1196,6 +1251,7 @@ def _attacks_of(box, flags, mode, lat, face0, boss, okb, polys, starts, base, wi
 MACRO_MARGIN = 5.0             # J (half a hit) another plan needs over a started macro to replace it
 CAST_AFTER_POGO = 12           # frames after a predicted pogo in which a Silkspear press counts as unsafe
 REDIRECT_K = 12                # side-slash-on-a-drop-bell rows scored on the redirected path per tick (earliest hits)
+BUCKET_SLACK = 3               # vision view's pogo gate: frames added to a row's nominal bounce to pick its margin
 
 
 def _is_macro(name: str) -> bool:
@@ -1238,6 +1294,7 @@ class _Target:
         self.cstarts = starts if cstarts is None else cstarts
         self.cbase = base if cbase is None else cbase
         self.recoil, self.name, self.cooldown_s, self.redirect = recoil, name, cooldown_s, redirect
+        self.pogo_ok: np.ndarray | None = None    # [T] where a down spike's hit counts (None: wherever ok)
 
 
 class _View:

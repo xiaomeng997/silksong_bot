@@ -60,6 +60,27 @@ def test_q1_low_h_is_a_sticky_pause_pending_quit():
     assert not d.allowed_mask.any()
 
 
+def test_q1_with_a_certified_empty_support_counts_the_worst_known_event():
+    """Pause stress chunk 20261002_232051 ep 35: a hit took the hero to 1 HP with the boss submerged (support
+    certified empty, h UNBOUNDED): no Q1, tier GREEN, the planner kept fighting. Now Q1 counts h against the
+    encounter's worst event (Bell Beast 2 masks), so 1-2 HP pause at once; 3 HP does not."""
+    empty = dict(support=(), support_known=True, support_empty_ok=True)
+    for hp in (1, 2):
+        d = Supervisor(BB).step(_inp(hp=hp, **empty))
+        assert d.h == UNBOUNDED and "Q1" in d.triggers and d.pause_pending and d.quit_requested, hp
+        assert d.allowed == EVASIVE
+    d = Supervisor(BB).step(_inp(hp=3, **empty))
+    assert d.h == UNBOUNDED and not d.triggers and not d.pause_pending and d.tier == "GREEN"
+    d = Supervisor(W1).step(_inp(hp=2, **empty))                  # a 1-mask encounter: 2 HP is two hits away
+    assert not d.pause_pending
+    d = Supervisor(BB).step(_inp(hp=1, mask=MASK_INTACT, **empty))  # an intact Fractured Mask covers the event, as
+    assert not d.pause_pending                                      # it would for the visible boss (h = 2 there)
+    assert Supervisor(BB).step(_inp(hp=1, mask=MASK_INTACT)).h == 2
+    s = Supervisor(W1)
+    s.step(_inp(hp=5, damage_taken=3))                             # a 3-mask hit seen this attempt raises the floor
+    assert "Q1" in s.step(_inp(hp=3, **empty)).triggers
+
+
 def test_allowed_mask_matches_the_allowlist():
     d = Supervisor(BB).step(_inp(hp=4, next_hit_may_kill=True))
     m = d.allowed_mask
@@ -140,8 +161,11 @@ def test_unknown_support_is_never_safe():
         d = Supervisor(BB).step(_inp(hp=1, support=empty, support_known=True))
         assert d.h == 1 and "Q1" in d.triggers and not d.support_known and d.tier == "RED", empty
         assert not d.allows("ATTACK(side)") and not d.long_planning_ok
-    # only an explicitly certified empty support is "nothing can hurt"
+    # only an explicitly certified empty support is "nothing can hurt" now (h unbounded); at 1 HP Q1 still fires on
+    # the encounter's worst known event, which comes back after the horizon (test_q1_with_a_certified_empty_...)
     d = Supervisor(BB).step(_inp(hp=1, support=(), support_known=True, support_empty_ok=True))
+    assert d.h == UNBOUNDED and d.support_known and "Q1" in d.triggers and d.tier == "RED"
+    d = Supervisor(BB).step(_inp(hp=5, support=(), support_known=True, support_empty_ok=True))
     assert d.h == UNBOUNDED and d.tier == "GREEN" and d.support_known
     assert not Supervisor(BB).step(_inp(hp=1, support=(), support_known=False, support_empty_ok=True)).support_known
 

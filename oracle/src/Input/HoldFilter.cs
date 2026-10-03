@@ -61,6 +61,7 @@ namespace SsOracle.Input
         {
             desired = desiredMask;
             latched = latchedMask;
+            exclusiveOwn = 0;
             for (var i = 0; i < Bits; i++)
             {
                 pending[i] = pendingEdges != null && i < pendingEdges.Length ? pendingEdges[i] : 0;
@@ -180,6 +181,7 @@ namespace SsOracle.Input
         public void ReleaseAll()
         {
             desired = 0;
+            exclusiveOwn = 0;
             for (var i = 0; i < Bits; i++)
             {
                 var down = (latched & (1u << i)) != 0;
@@ -194,6 +196,75 @@ namespace SsOracle.Input
                     exclusiveWaiting[i] = false;
                 }
             }
+        }
+
+        /// <summary>Keys Exclusive released below their minimum press.</summary>
+        public long ReleasedEarly { get; private set; }
+
+        /// <summary>
+        /// The ACTION EXCLUSIVE flag (DESIGN §3.7.5, §3.8.2 "no game key may reach a visible menu"): from this latch
+        /// on, no key outside <paramref name="keep"/> is down. Every other key is released now, below its minimum
+        /// press if need be (a key being abandoned for the pause menu needs no guarantee that the game sampled it), and
+        /// every edge still queued for it is dropped, so no deferred press replays into the menu. The kept keys follow
+        /// the usual limits (call Push / Step with them after this). Before it, a planner key pressed on the frame
+        /// before the pause stayed latched on the pause frame (2-frame minimum press) and a press deferred by the
+        /// minimum release fired inside the menu (pause_stress: 9 of 37 gate / live QUITs, 20261002_123347 ...).
+        /// </summary>
+        public void Exclusive(uint keep)
+        {
+            for (var i = 0; i < Bits; i++)
+            {
+                var bit = 1u << i;
+                if ((keep & bit) != 0) continue;
+                if (pending[i] > 0 && (latched & bit) == 0) TapsCollapsed += (pending[i] + 1) / 2;
+                pending[i] = 0;
+                deferred[i] = false;
+                exclusiveWaiting[i] = false;
+                if ((latched & bit) != 0)
+                {
+                    if (age[i] < MinPressFrames) ReleasedEarly++;
+                    latched &= ~bit;
+                    age[i] = 0;          // Step ages it to 1: released on this latch, like any release
+                }
+            }
+            desired &= keep;
+        }
+
+        private uint exclusiveOwn;   // keys EXCLUSIVE sets asked for since the last plain set (QueueExclusive)
+
+        /// <summary>
+        /// The ACTION EXCLUSIVE path (KeyboardInjector.TryQueueMaskExclusive): Exclusive, sparing the keys that earlier
+        /// EXCLUSIVE sets of the same stretch asked for, then Push. The pause loop sends all its ACTIONs EXCLUSIVE; its
+        /// own taps keep the usual limits, so a tap latched for one frame (its first ACTION late, or two applied in
+        /// one update) is not cut below the minimum press by the loop's next ACTION (review of 10d3948). Only the
+        /// keys of other sets (the planner's) are cut. EndExclusive (a plain set: the planner is back) forgets them.
+        /// </summary>
+        public void QueueExclusive(uint want)
+        {
+            Exclusive(want | exclusiveOwn);
+            exclusiveOwn |= want;
+            Push(want);
+        }
+
+        /// <summary>A plain (non-EXCLUSIVE) set: the next EXCLUSIVE spares nothing it did not ask for itself.</summary>
+        public void EndExclusive() => exclusiveOwn = 0;
+
+        /// <summary>A plain ACTION (KeyboardInjector.TryQueueMask): EndExclusive, then the edges of
+        /// <paramref name="previous"/> (a set another caller made since the last latch keeps its edges too) and of
+        /// <paramref name="want"/>. Here rather than in KeyboardInjector so that InputLogicCheck runs the same calls.</summary>
+        public void QueuePlain(uint previous, uint want)
+        {
+            EndExclusive();
+            Push(previous);
+            Push(want);
+        }
+
+        /// <summary>The brain-lost Pause tap (KeyboardInjector.SetMaskExclusive): EndExclusive, then QueueExclusive, so
+        /// every key outside <paramref name="want"/> is cut, the pause loop's own included.</summary>
+        public void QueueExclusiveCutAll(uint want)
+        {
+            EndExclusive();
+            QueueExclusive(want);
         }
 
         /// <summary>Un-latch a press made this frame that collides with the opposite direction. If the caller no longer
