@@ -20,13 +20,15 @@ sigma from the view's position noise). A detection that leaves the model by more
 bell the model does not describe) withdraws the estimate: the bell's self template (the logged union) stands again;
 so does the hero attacking within reach of it (a tink changes vx to 5-10 u/s, which the drift shows only slowly:
 live 20261002_171806 i0 ep0, a DropBell M tinked to vx 5 in Bounce Air stayed within 0.42 u of the untouched model
-for 8 frames).
+for 8 frames), until the track rules a tink out (CONFIRM_S below; a touched drop was 10 % of the drop-bell frames of
+degraded_dust run 20261002_224934, about 1.8 drops a fight, each in its union for the rest of its life before).
 
 Only detections count (visible_frac > 0: the noise model's coasting tracks and the filter's memory tracks do not), in
 game time, each at the WorldState it came in (k frames late on the simulated final path): the forecast's origin is that
 same WorldState, so no correction for the delay is needed.
 """
 import math
+import os
 from dataclasses import dataclass
 
 import numpy as np
@@ -51,6 +53,16 @@ MIN_SIGMA_U = 0.02     # floor for a detection's sigma (an exact view reports 0)
 ATTACK_MODES = frozenset(("attack", "pogo"))
 TOUCH_BOX = (-1.23, 2.81, -1.96, 3.33)
 TOUCH_MARGIN_U = 0.5
+# A touched bell gets its path back once the track shows no tink: CONFIRM_S after the last touch, every detection since
+# the first touch within CONFIRM_U (or 3 sigma) of the untouched model, and no tink the track could not tell apart: a
+# side slash facing the way the bell already moves (TINK RIGHT on a bell moving right at 4 u/s sets 5 u/s: 1 u/s, under
+# the noise for a long time). A tink leaves the model fast otherwise: a falling bell (vx 0) goes to 5 or 10 u/s, a
+# rising one stops (TINK DOWN), a bell moving left tinked left goes to -10, against the hitter to the other side.
+# SSBOT_TOUCH_CONFIRM=0: a touched bell stays withdrawn (the A/B before).
+CONFIRM_S = 0.25
+CONFIRM_U = 0.35
+CONFIRM_N = 6
+TOUCH_CONFIRM = os.environ.get("SSBOT_TOUCH_CONFIRM", "1") != "0"
 
 
 @dataclass(slots=True)
@@ -89,6 +101,7 @@ class DropBellTracks:
         self.obs: dict[int, list[tuple[float, float, float, float]]] = {}
         self.type_of: dict[int, str] = {}
         self.touched: set[int] = set()
+        self.touch_log: dict[int, list[tuple[float, float]]] = {}   # touched bell -> [(game s, hero facing)]
         self.t = 0.0
 
     def update(self, ws: WorldState, t: float) -> None:
@@ -105,6 +118,7 @@ class DropBellTracks:
             if lst and t - lst[-1][0] > GAP_S:
                 lst.clear()
                 self.touched.discard(e.id)
+                self.touch_log.pop(e.id, None)
             x, y = e.pos.v
             s = e.pos.sigma if math.isfinite(e.pos.sigma) else 1.0
             lst.append((t, float(x), float(y), max(float(s), MIN_SIGMA_U)))
@@ -117,10 +131,12 @@ class DropBellTracks:
                 g = self.spec.r + TOUCH_MARGIN_U
                 if TOUCH_BOX[0] - g <= dx <= TOUCH_BOX[1] + g and TOUCH_BOX[2] - g <= dy <= TOUCH_BOX[3] + g:
                     self.touched.add(e.id)
+                    self.touch_log.setdefault(e.id, []).append((t, face))
         for iid in [i for i, v in self.obs.items() if not v or t - v[-1][0] > GAP_S]:
             del self.obs[iid]
             self.type_of.pop(iid, None)
             self.touched.discard(iid)
+            self.touch_log.pop(iid, None)
 
     def _tau(self, y: np.ndarray) -> np.ndarray:
         """Time since the drop at height y on the fall: the 50 Hz semi-implicit steps as a parabola,
@@ -131,9 +147,51 @@ class DropBellTracks:
         return np.maximum((-b + np.sqrt(d)) / g, 0.0)
 
     def estimate(self, iid: int) -> DropEstimate | None:
-        """The drop bell iid's drop, or None: no detection of its fall, or the track left the model."""
-        if not self.ok or iid in self.touched:
+        """The drop bell iid's drop, or None: no detection of its fall, the track left the model, or the hero's attack
+        may have tinked it and the track does not rule that out yet (CONFIRM_S ...)."""
+        if not self.ok:
             return None
+        if iid not in self.touched:
+            return self._estimate(iid)
+        if not TOUCH_CONFIRM:
+            return None
+        log = self.touch_log.get(iid) or []
+        if not log or self.t - log[-1][0] < CONFIRM_S:
+            return None
+        est = self._estimate(iid)
+        if est is None:
+            return None
+        a = np.asarray(self.obs.get(iid) or (), np.float64)
+        if not len(a):
+            return None
+        post = a[a[:, 0] >= log[0][0]]
+        if int((post[:, 0] > log[-1][0]).sum()) < CONFIRM_N:
+            return None
+        sides = (est.side,) if est.side else (1, -1)
+        lim = np.maximum(CONFIRM_U, 3.0 * post[:, 3]) + SKIN_Z * est.sx
+        ts = np.maximum(post[:, 0] - est.t_drop, 0.0)
+        dmin = np.full(len(post), np.inf)
+        for sd in sides:
+            for dt in DEV_DT_S:
+                cx, cy, _ = simulate(self.spec, est.x, self.y0, self.vx0, self.vy0, 0, None,
+                                     np.concatenate([[0.0], np.maximum(ts + dt, 0.0)]), side=sd)
+                dmin = np.minimum(dmin, np.hypot(cx[1:] - post[:, 1], cy[1:] - post[:, 2]))
+        if (dmin > lim).any():
+            return None
+        # a side slash facing the way the model has the bell moving: TINK RIGHT on a bell going right at 4 u/s
+        # (5 u/s) cannot be told apart yet, so the path is not given back
+        th = np.array([u for u, _ in log]) - est.t_drop
+        for sd in sides:
+            cx, _, _ = simulate(self.spec, est.x, self.y0, self.vx0, self.vy0, 0, None,
+                                np.concatenate([np.maximum(th, 0.0), np.maximum(th, 0.0) + STEP_S]), side=sd)
+            vx = (cx[len(th):] - cx[:len(th)]) / STEP_S
+            if any(face > 0 and v > 0.5 for (_, face), v in zip(log, vx)):
+                return None
+        self.touched.discard(iid)          # untouched after all: later attacks start a new check
+        self.touch_log.pop(iid, None)
+        return est
+
+    def _estimate(self, iid: int) -> DropEstimate | None:
         o = self.obs.get(iid)
         if not o:
             return None
