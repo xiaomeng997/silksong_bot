@@ -1411,7 +1411,12 @@ FULL = (Variant("nominal"),) + tuple(Variant(f"{a}/{_lane(t).name}", a, "mean", 
                                      for a in ("lo", "hi") for t in _SIGNS)
 VARIANT_SETS = {"nominal": NOMINAL, "fast": FAST, "bounds": BOUNDS, "full": FULL}
 _SCALED_TIMERS = ("P_ATK_DUR", "P_ATK_CD", "P_DS_ANTIC", "P_DS_REC", "P_DS_LREC", "P_HURT_T", "P_CAST_ANTIC",
-                  "P_BIND_T")
+                  "P_BIND_T",
+                  # Forum loadout: the animation-timed FSM states, the sprint wait, the cling cooldown and hard landing
+                  # (scaled time against a threshold, as the above; unused while abilities is 0)
+                  "P_GL_ANTIC", "P_GL_INFLATE", "P_GL_DEFLATE", "P_RPR_ANTIC", "P_RPR_SLASH", "P_RPR_FALL",
+                  "P_RPR_FALL2", "P_SCR_ANTIC", "P_SCR_END_T", "P_ASPR_T", "P_SKID_T", "P_W_CCD", "P_W_STICK",
+                  "P_HARD_LAND")
 
 
 def _variant_rows(params: HeroParams, variants: tuple[Variant, ...]
