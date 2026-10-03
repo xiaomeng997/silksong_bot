@@ -4,7 +4,14 @@
 
 **标签：** 【包】离线 UnityPy 读训练副本 1.0.30000 的场景包（`scenes_scenes_scenes/*.bundle`）和 `dataassets`；【码】反编译 1.0.30000 C#（`C:\ssbot\decomp\1.0.30000\Assembly-CSharp`，文件:行）；【录】我们自己的录像和由录像生成的 `knowledge/1.0.30000/quit_map.json`；【攻】社区资料（社区路线逻辑图 `room_graph_data.json`、wiki、指南），没有用游戏数据核对；【估】下文 §3 的门距模型估计；【推】推断；【未核实】待实测。
 
-**脚本与原始输出：** `C:\ssbot\sandbox\bench_scripts\`（全部离线，idle 优先级，没有连接任何游戏实例）。`bench_scan.py` → `bench_scan.jsonl`（全部 590 个场景包里带 `RestBench` 组件或 `Bench Control` FSM 的对象，含祖先链上的条件组件和 FSM 变量）；`bench_extra.py` → `bench_extra.txt`（钟椅 `BellBench` 字段、收费机 FSM 的 `Cost Reference`）；`costs.py` → `costs.txt`（`dataassets/costs.bundle` 全部价格资产）；`fsm_dump3.py`（能解出 byteData 参数的 FSM 导出器）及其输出 `fsm3_*.txt`、`fsm_*.txt`；`find_tpl.py`（FSM 模板）；`gates_all.py` → `gates_all.json`（所有场景的门坐标和 BattleScene）；`walk.py` / `nearest.py` → `nearest.txt`（§3 的回撤估计）；`gen_table.py` → `bench_table.md`（附录 A）；`refscan.py`、`scan_str.py`、`goname.py`、`fields.py`（查引用、字符串、对象名、组件字段）。方法沿用 Forum 路线调研（`research/forum_route.md`，分支 `worktree-wf_c0d56d51-4cb-5`）。
+**脚本与原始输出：** `C:\ssbot\sandbox\bench_scripts\`（全部离线，idle 优先级，没有连接任何游戏实例）。`bench_scan.py` → `bench_scan.jsonl`（全部 590 个场景包里带 `RestBench` 组件或 `Bench Control` FSM 的对象，含祖先链上的条件组件和 FSM 变量）；`bench_extra.py` → `bench_extra.txt`（钟椅 `BellBench` 字段、收费机 FSM 的 `Cost Reference`）；`costs.py` → `costs.txt`（`dataassets/costs.bundle` 全部价格资产）；`fsm_dump3.py`（能解出 byteData 参数的 FSM 导出器）及其输出 `fsm3_*.txt`、`fsm_*.txt`；`find_tpl.py`（FSM 模板）；`gates_all.py` → `gates_all.json`（所有场景的门坐标和 BattleScene）；`walk.py` / `nearest.py` → `nearest.txt`（§3 的回撤估计）；`gen_table.py` → `bench_table.md`（附录 A）；`refscan.py`、`scan_str.py`、`goname.py`、`fields.py`（查引用、字符串、对象名、组件字段）。核查后的修订另加：`fix_near.py`（按区域 / 名字列对象的世界坐标、激活链、组件、FSM 名）→ `fix_near_coral32_top.txt`、`fix_near_coral38.txt`、`fix_near_coral11.txt`、`fix_near_forge_battle.txt`；`fix_lift.py` → `fix_lift_coral38.txt`（升降梯各停靠点和呼叫板）；`fsm_dump3.py` 的新输出 `fix_fsm_cogdancers_sequence.txt`、`fix_fsm_coral32_crustwall.txt`、`fix_fsm_room_pinstress.txt`；`walk.py` 重算 → `fix_walks.txt`。方法沿用 Forum 路线调研（`research/forum_route.md`，分支 `worktree-wf_c0d56d51-4cb-5`）。
+
+**修订（2026-10-03，事实核查之后）：**
+1. **Lace 2 退出后不用重新演奏旋律**：第一次演奏结束时游戏置 `UnlockedMelodyLift` 并存档，之后从 `Cog_Dancers` 坐升降梯进 `Song_Tower_01`（§3.1、§3.2）。一次性解锁过场里有不能暂停、不能存档退出的窗口（§1.3）。
+2. **`Bellway_08` 不再列为"买"**：基线改为路线上免费坐的 `Bonetown`，交战门的影响单独建模；默认不买，按 K1/M2/M5 的实测用 §4.2 的判据决定（§0.7、§4、§7）。
+3. **Last Judge 的两张候选椅子已查**：`Bellshrine_Coral` 在 S17 从下方到不了（`Coral_38` 的升降梯只有上方呼叫板能解锁）；`Room_Pinstress` 要经过 Great Conchflies 的 boss 闸门（§3.2 补充）。
+4. Fourth Chorus 和 Hunter's March 竞技场改用 boss / 闸门的实际坐标，回撤变长（§3.2）；`Room_Forge` 的 5 波竞技场写进 Lace 1 行（§3.2、§5）；每次退出的回撤只给一个区间（§0.8、§6）。
+5. 核查提到的 decomp 行号偏差：用 `sed -n` 对 `C:\ssbot\decomp\1.0.30000\Assembly-CSharp\GameManager.cs`（CRLF，5,528 行）复核，本文原引的 1626（`skullKingDefeated` 入侵条件）、1734–1749（`BelltownHouseState`）、2167（`StartAct3` 改写重生点，2167–2169）都对得上，未改。
 
 ## 0. 结论摘要
 
@@ -16,9 +23,9 @@
 3. **坐下就设置存档退出后的重生点**【包】【码】：`Bench Control` FSM 的 `Set Spawn Location` 在 `Set Respawn` 为真、`z_FakeBench` 为假时写 `respawnScene`、`respawnMarkerName`、`respawnType = 1`，随后 `Save Game` 状态调用 `TimePasses` 并存档。Continue 时 `GameManager.GetRespawnInfo` 只看 `respawnScene`/`respawnMarkerName`（`tempRespawn*` 不存档）。所有真工作台的 `Set Respawn` 都是 1；**5 张假椅不设重生点**。付费钟椅、收费椅、收费门后的工作台坐下后都和普通工作台一样设置重生点；收费椅在你从它上面醒来时直接处于坐下状态，不用再付【推：其 FSM 在 `Init`/`Inert` 收到 `BENCHREST START` 直接进 `Start Sitting`，事件来源未逐条核实】。
 4. **购买时不能暂停**【码】【包】【录】：收费机是 NPC 交互，交互期间 `InteractManager.BlockingInteractable` 非空，`GameManager.PauseGameToggle` 直接拒绝（`GameManager.cs:4992`，只有 `atBench` 时例外）。从按"是"到付款动画结束约 5 s 不能暂停（我们录像里 `Bone_01c` 有一段 4.87 s 的 BLOCKING_INTERACT，暂停概率 0）。确认框期间受击会取消购买（模板 `toll_dish_sub`：`HERO DAMAGED` → `Cancel`）。之后钟椅升起约 5 s，可以暂停。**坐在工作台上可以暂停**（`atBench` 为真时不受 BlockingInteractable 限制），开地图时 `disablePause` = 1。
 5. **路线相关的有条件工作台**【包】【码】：Hunter's March 唯一的工作台 `Ant_17` 是**陷阱椅**：拉杆 `ant_lever_persistent` 置 `antBenchTrapDefused` 之前坐下会触发镰刀陷阱（伤害 2），之后才是真工作台；五个钟塔（Marrow、Deep Docks、Greymoor、Shellwood、Songclave）的工作台**敲钟后才出现**；Songclave 的工作台要 `enclaveLevel` ≥ 1；跳蚤商队的工作台跟着 `CaravanTroupeLocation` 走（Greymoor_08 只在 = Greymoor 时有）；Last Judge 竞技场的商队工作台要打完 Last Judge 且商队到了那里；Bellhome 要完成两个 Bellhart 许愿；Bone Bottom 的工作台只有在 Skull Tyrant 入侵时会坏，入侵要先打败 Skull Tyrant，本路线不会发生。
-6. **最大的收益是免费的**【估】：几乎每个 A 类战斗附近一两个房间内都有免费工作台，路线本来就经过，只要**战前坐下**：Moss Mother（`Tut_03`，同房间）、Bell Beast（`Bone_04`，隔 1 道门）、Lace 1（`Room_Forge`，隔 1 道门）、Fourth Chorus（`Bone_East_Umbrella`，隔 2 道门，门的可用性未实测）、Widow（`Belltown`，2 道门）、Trobbio（`Bellway_City`，2 道门）、Forum（`Hang_06b`）、Lace 2（`Cog_Bench` → `Cog_Dancers` 的 Threefold Melody 过场）、GMS（`Tube_Hub`，1 道门）。按门距模型，这些回撤是 **5–60 s**（另加 boss 进场过场，未测），远低于 DESIGN §3.6.6 每次退出 380 s 的先验。
-7. **值得买的只有一张：Blasted Steps 的 `Bellway_08` 钟椅（40 念珠），给 Last Judge 用**【估】。它在 `Coral_03`（Blasted Steps 大竖井）顶端旁边，比竖井下方最近的免费工作台（`Bonetown`）少走约 535 u、2 道门、约 70–130 s，并跳过整段竖井攀爬。盈亏平衡点约 0.4–0.7 次回到工作台；只算 0.34 次紧急退出时略负，算上交战门回撤后为正（§4），所以列为"买，K1/M2 后复核"。其余付费工作台都不如附近的免费工作台，或附近没有我们要打的 A 类战斗，**不买**；Far Fields `Bellway_03`（30）只在 Pinstress 小屋的工作台实测不可用时作为 Fourth Chorus 的后备。
-8. **对时间预算**【估】：如果路线在每个 A 类战斗前坐最近的工作台，按模型每次紧急退出的回撤约 10–90 s（Last Judge 买椅后约 45–85 s，Dancers 约 40–85 s 是最差的两项），加 Continue 读档（P7 待测）和进场过场。DESIGN 的 380 s × 4.5 = 1,700 s 这一行可能偏保守很多；交战门的工作台回撤 700 s 也一样。建议在 P7 / M5 用 oracle 实测替换（§6）。
+6. **最大的收益是免费的**【估】：几乎每个 A 类战斗附近一两个房间内都有免费工作台，路线本来就经过，只要**战前坐下**：Moss Mother（`Tut_03`，同房间）、Bell Beast（`Bone_04`，隔 1 道门）、Lace 1（`Room_Forge`，隔 1 道门；房间里有 5 波竞技场，见 §3.2）、Fourth Chorus（`Bone_East_Umbrella`，隔 2 道门，门的可用性未实测）、Widow（`Belltown`，2 道门）、Trobbio（`Bellway_City`，2 道门）、Forum（`Hang_06b`）、Lace 2（`Cog_Bench` → `Cog_Dancers` 的升降梯，第一次演奏 Threefold Melody 解锁后可重复乘坐）、GMS（`Tube_Hub`，1 道门）。按门距模型，除 Last Judge 外这些回撤是 **约 10–85 s**（另加 boss 进场过场，未测），远低于 DESIGN §3.6.6 每次退出 380 s 的先验。
+7. **默认不买任何工作台；唯一接近盈亏平衡的是 Blasted Steps 的 `Bellway_08` 钟椅（40 念珠），给 Last Judge 用**【估】【推】。它在 `Coral_03`（Blasted Steps 大竖井）顶端旁边；路线上免费可坐的是竖井下方的 `Bonetown`（S17 路过），`Bellway_08` 比它每次回撤少约 67–134 s（中值约 100 s）并跳过整段竖井。成本约 12 s 绕路 + 14 s 购买 + 40 念珠。只算紧急退出（Last Judge q = 0.34 次 / 局，先验）时约 **−32 s / 局**；它的另一项价值是交战门：从 `Bonetown` 出发、爬完竖井到 Last Judge 门口时不满血的概率 p 越大越值。按 §4.2 的判据，**p ≥ 约 0.07、或 Last Judge 的 q ≥ 0.66、或 S17 时念珠有余（成本降到约 26 s，q ≥ 0.26 即可）时买**，否则不买；这三个量等 K1/M2（q）、M5 oracle（p、念珠收入）实测后定。附近的免费替代 `Bellshrine_Coral` 在 S17 到不了，`Room_Pinstress` 在 Great Conchflies 的闸门后面（§3.2）。其余付费工作台都不如附近的免费工作台，或附近没有我们要打的 A 类战斗，**不买**；Far Fields `Bellway_03`（30）只在 Pinstress 小屋的工作台实测不可用时作为 Fourth Chorus 的后备（同样按 §4.2 判据）。
+8. **对时间预算**【估】【推】：如果路线在每个 A 类战斗前坐最近的工作台，按门距模型每次紧急退出的单程回撤约 **10–85 s**；Last Judge 是例外，从 `Bonetown` 约 110–220 s（买 `Bellway_08` 后约 45–85 s）。另加 Continue 读档（P7 待测）、boss 进场过场和重新清场（DESIGN §3.7.5 第 6 步），模型还低估竖井和平台。DESIGN 的 380 s × 4.5 = 1,700 s 这一行可能偏高，但这只是**待 M5 oracle 实测检验的假设**，不据此改预算（§6）。
 
 ## 1. 机制（所有工作台通用）
 
@@ -45,6 +52,7 @@
 - **钟椅升起**：付完后 `Retract Animation` 结束对话（交还控制），再由 `BellBench.Behaviour` 协程升起：`moveUpPause` 0.3 s + 架子从锁定位置升约 10 u（`moveUpSpeed` 4 → 约 2.5 s）+ `benchRaiseDelay` 1.3 s + 假椅出现动画 + 真椅淡入 0.5 s，约 5–6 s【包 `Bone_01c` 的 BellBench 字段】【码 `BellBench.cs`】。这段可以暂停，但工作台还不能坐。
 - **整次购买的耗时**【推】：确认 + 付款约 5 s（不能暂停）+ 升起约 5–6 s + 坐下约 2–3 s ≈ **13–15 s**。
 - 监督器：购买的 5 s 要像 Cogfly 合成一样登记成确定性禁暂停窗口，只在无威胁、GREEN、满血时确认（与 forum_route §4 的做法一致）。
+- **另一个与工作台回撤有关的窗口：`Cog_Dancers` 的一次性解锁（S26 第一次演奏 Threefold Melody）**【包 `cog_dancers` 的 `Boss Scene` FSM `Sequence`，`fix_fsm_cogdancers_sequence.txt`】：`Needolin Prompted Full` 置 `disablePause` = 1，直到雕像唱完、对话结束后的 `Return Control` 才恢复 0；接着 `Break Lock Pt1` 置 `disableSaveQuit` = 1，`Break Lock Pt2` 置 `UnlockedMelodyLift` = 1、`QueueSaveGameV2`（存档）并把 `disableSaveQuit` 恢复 0。所以这段过场里先不能暂停、再不能存档退出。Dancers 已打完、房间里没有敌人，风险低，但 quit map 和 §3.7.5 要登记这两个窗口（时长未测）。
 
 ### 1.4 价格表（`dataassets/costs.bundle`，`costs.txt`）【包】
 
@@ -115,9 +123,9 @@
 
 - 图：`gates_all.json` 里每个场景的 `TransitionPoint` 世界坐标和 `targetScene` / `entryPoint`【包】。房间内用门到门的直线距离，过门代价 0.5 s。用 Dijkstra 从遭遇点反向求所有工作台的最短距离（`nearest.py`）。
 - 节奏：与 forum_route §6 相同，用你的录像校准：有敌人或平台的房间约 4 u/s、通畅走廊约 8 u/s【录】。下表的"回撤"是 `距离/8 + 0.5 × 门数` 到 `距离/4 + 0.5 × 门数` 的区间，**只是单程走回去的时间**，不含 Continue 读档醒来（P7）、boss 进场过场、重新打竞技场。
-- 局限：不看能力要求、单向门和房间内的真实路线（攀爬按直线算），所以竖井多的路线被低估；工作台本身能不能在那个阶段到达，下表单独标注。遭遇位置：boss 用场景包里 boss 对象的坐标，竞技场用 BattleScene 所在房间的入口门。
+- 局限：不看能力要求、单向门和房间内的真实路线（攀爬按直线算），所以竖井多的路线被低估；工作台本身能不能在那个阶段到达，下表单独标注。遭遇位置：boss 用场景包里 boss 对象的坐标，竞技场用 BattleScene 所在房间的入口门。修订：Fourth Chorus 改用附加场景 `bone_east_08_boss_golem` 里 `Boss Scene/song_golem` 的坐标 (80.8, 7.5)（初稿只算到房间门口）；Hunter's March 竞技场 `Ant_04_mid` 改用普通世界 Battle Scene 两道闸门 `Battle Gate Ant` (185.3, 14.6) / (213.2, 14.6) 的中点 (199, 15)（BattleScene 根对象的坐标 (5.3, 1.7) 不是竞技场位置）【包，`fix_walks.txt`】。
 - 遭遇与路线段的对应：boss 场景由场景包对象确认（`Tut_03` 的 BattleScene 与茧堆、`Bone_05_boss`、`Bone_East_12` 的 `Lace Boss1`、`Bone_East_08` 的 boss 附加场景、`Belltown_Shrine` 的 `Spinner Boss`、`Coral_Judge_Arena` 的 `Last Judge`、`Cog_Dancers`、`Library_13` 的 Trobbio、`Hang_04_boss`（14 波）、`Song_Tower_01`、`Cradle_03` 的 `Silk Boss`）【包】；B 类竞技场对应到哪个路线段是【推】（用社区房间名）。
-- Lace 2 的入口：`Cog_Dancers` 的 `Boss Scene` FSM `Sequence` 直接切到 `Song_Tower_01` 的 `door_cutsceneEndLaceTower`【包】，也就是 DESIGN 写的"Dancers 雕像处演奏 Threefold Melody"。`Song_Tower_01` 只有通往 `Tube_Hub` 的 right1，所以 Lace 2 退出后要从 Dancers 竞技场重新演奏旋律进场。
+- Lace 2 的入口【包 `fix_fsm_cogdancers_sequence.txt`】：`Cog_Dancers` 的 `Boss Scene` FSM `Sequence` 在第一次演奏（DESIGN 写的"Dancers 雕像处演奏 Threefold Melody"）结束时，经 `Break Lock Pt2` 置 `UnlockedMelodyLift` = 1 并存档，进入 `Idle Unlocked`（升降梯交互 `Lift Unlocked Inspect` 激活）。**以后再进这个房间**：`Check`（`defeatedCogworkDancers`）→ `Defeated` → 测 `UnlockedMelodyLift` → `UNLOCKED` → `Gates Opened` → `Wait for hero pos` → `Door Entry` → `Idle Unlocked`，与升降梯交互（`LIFT INSPECTED`）→ `Get In Lift Start`（同时预加载 `Song_Tower_01`）→ `In Lift` → `Lift Start`（升降梯动画 `Move Up`，到动画事件结束）→ `Lift Moving` → `Fade Down`（淡出等待，核查者解出约 2.5 s，我的导出器没解出这个浮点数）→ `Travel Instant`：切到 `Song_Tower_01` 的 `door_cutsceneEndLaceTower` (49.3, 100.0)，Lace 2 的位置 `door_cinematicEnd` (54.3, 99.0) 离它约 5 u。所以 **Lace 2 退出后不用重新演奏旋律，坐升降梯即可**；升降梯在房间底部 (40, 4) 附近（`door_arriveFromTower` (40.0, 3.9)），离 bot1 约 9 u。乘坐全程时长未测（几秒，主要是动画）【推】。`Song_Tower_01` 另一个出口 right1 通 `Tube_Hub`，那边是 Lace 2 之后才到的区域，不能用来回撤。
 
 ### 3.2 结果表
 
@@ -127,26 +135,32 @@
 |---|---|---|---|---|---|---|---|---|
 | Moss Mother（S01，`Tut_03`） | B | `Tut_03` 同房间（入口 right1 → 工作台 x 90 → 战斗 x 57） | 38 u，0 门，5–10 s | — | — | DESIGN S01 列了"工作台"，先后不明 | — | 0–？（确保战前坐） |
 | Bell Beast（S03，`Bone_05`） | A | `Bone_04`（Marrow Map Shop），无条件 | 88 u，1 门，11–22 s | `Bone_01c` 30 | 260 u，3 门，34–67 s（更远） | S02 的 `Bonetown` 或 Mosshome `Mosstown_02c` | 238 u / 5 门，32–62 s；171 u / 4 门，23–45 s | **约 12–40 s** |
-| Lace 1（S07，`Bone_East_12`） | A | `Room_Forge`（Deep Docks Forge，无条件；S06 的 Magma Bell 是 Forge 商店的 "Forge Lava Charm Tool"，110 + 1 Tool Metal【包 shopitems】，商店在这个房间【推】）；上去要过气闸（社区逻辑 "Open Airlock Up"【攻】） | 97 u，1 门，13–25 s | `Dock_01` 30 | 204 u，2 门，26–52 s（更远） | `Bone_12`（Marrow Jail，S04） | 465 u，6 门，61–119 s | **约 48–94 s** |
-| Fourth Chorus（S08，`Bone_East_08`） | A | `Bone_East_Umbrella`（Pinstress 小屋，`Bone_East_09` door1，门在包里常开、社区逻辑无要求【攻】，实际可用【未核实】） | 56 u，2 门，8–15 s | `Bellway_03` 30（路线 S08 本来就在这里开 Bellway 站） | 101 u，2 门，14–26 s | `Bellshrine_05`（S07 敲完 Deep Docks 钟） | 386 u，4 门，50–98 s | **约 42–83 s**（小屋）/ 36–72 s（买 `Bellway_03`） |
-| Hunter's March 竞技场（S10，`Ant_04_mid`，5 波） | B | `Ant_17`（先打拉杆） | 228 u，3 门，30–58 s | `Bone_East_15` 30 | 301 u，5 门，40–78 s（更远） | — | 380 s（预算） | 拉杆 + 坐下是唯一选择 |
+| Lace 1（S07，`Bone_East_12`） | A | `Room_Forge`（Deep Docks Forge，无条件；S06 的 Magma Bell 是 Forge 商店的 "Forge Lava Charm Tool"，110 + 1 Tool Metal【包 shopitems】，商店在这个房间【推】）。**同房间有 5 波竞技场**（`Battle Scene` (74.7, 12.3)，闸门 x = 58.5 / 89.5，`PersistentBoolItem`，清过一次就不再触发）【包 `fix_near_forge_battle.txt`】；社区逻辑把它放在左入口和工作台 / 商店（"forge daughter"）之间，第一次从左入口进来要先清它才能到工作台和 Magma Bell，工作台旁的 `Song_lever_side` (51.4, 32.0) 应是回左入口的闸门开关【攻】【推】，所以它多半就是 DESIGN S06 的"竞技场"。上去的气闸是 top1 处的 `dock_pipe_trapdoor (4)`（Trapdoor + `PersistentBoolItem`，上下各一个拉杆，`Lever Bottom` (39.0, 58.2)）【包】，从下方打拉杆应能打开并永久保持【推：拉杆事件接线未逐条核实】 | 97 u，1 门，13–25 s | `Dock_01` 30 | 204 u，2 门，26–52 s（更远） | `Bone_12`（Marrow Jail，S04） | 465 u，6 门，61–119 s | **约 48–94 s** |
+| Fourth Chorus（S08，`Bone_East_08`，boss 在 (80.8, 7.5)） | A | `Bone_East_Umbrella`（Pinstress 小屋，`Bone_East_09` door1，门在包里常开、社区逻辑无要求【攻】，实际可用【未核实】） | 127 u，2 门，17–33 s | `Bellway_03` 30（路线 S08 本来就在这里开 Bellway 站） | 190 u，2 门，25–48 s | `Bellshrine_05`（S07 敲完 Deep Docks 钟） | 474 u，4 门，61–121 s | **约 44–88 s**（小屋）/ 36–73 s（买 `Bellway_03`） |
+| Hunter's March 竞技场（S10，`Ant_04_mid`，5 波，闸门间中点 (199, 15)） | B | `Ant_17`（先打拉杆） | 264 u，3 门，35–68 s | `Bone_East_15` 30 | 338 u，5 门，45–87 s（更远） | — | 380 s（预算） | 拉杆 + 坐下是唯一选择 |
 | Greymoor 钟 / 伏击（S11，`Bellshrine_02`） | B | `Greymoor_02`（East Bellshrine Room） | 48 u，1 门，7–13 s | — | — | — | — | — |
 | Greymoor_04 塔（S11?，2 波） | B | `Halfway_01` | 78 u，2 门，11–20 s | — | — | — | — | — |
 | Reaper 礼拜堂（S11 可选） | B | `Greymoor_08` 商队（要商队在 Greymoor） | 152 u，3 门，21–40 s | — | — | — | — | — |
 | Shellwood 竞技场（S12，`Shellwood_01b`，3 波） | B | `Mosstown_03`（Greyroots） / `Belltown`（到过 Bellhart 后） | 355 u，4 门，46–91 s / 238 u，3 门，31–61 s | `Shellwood_01b` 40（同房间） | 37 u，0 门，5–9 s | — | — | 约 26–82 s |
 | Widow（S13，`Belltown_Shrine`） | A | `Belltown` | 143 u，2 门，19–37 s | Bellhome（要两个许愿） | 170 u，3 门，23–44 s（更远） | `Belltown`（S13 到 Bellhart 一般会坐） | 同左 | 0（确保战前坐） |
-| Last Judge（S17，`Coral_Judge_Arena`） | A | `Bonetown`（S15 → S17 路过） | 872 u，5 门，111–220 s | **`Bellway_08` 40** | 337 u，3 门，44–86 s | `Weave_07`（S15 最后一张） | 1,203 u，10 门，155–306 s | **买椅：约 67–134 s（对 Bonetown）、111–220 s（对 Weave_07）** |
+| Last Judge（S17，`Coral_Judge_Arena`） | A | `Bonetown`（S15 → S17 路过；从 `Tut_01` 进来的 bot2 绕到工作台再去上方出口，比直走多约 50 u，6–13 s）；`Bellshrine_Coral` 免费但 S17 到不了（见下） | 872 u，5 门，111–220 s | `Bellway_08` 40（**条件买**，§4.2） | 337 u，3 门，44–86 s | `Weave_07`（S15 最后一张） | 1,203 u，10 门，155–306 s | 坐 `Bonetown`：约 44–86 s（对 `Weave_07`）；再买 `Bellway_08`：再省约 67–134 s |
 | Dancers（S19，`Cog_Dancers`） | A | `Song_Enclave` L1（`enclaveLevel` ≥ 1）/ `Bellshrine_Enclave`（敲钟后） | 285 u，2 门，37–72 s / 335 u，3 门，43–85 s | — | — | Songclave（S18） | 同左 | 0（确保 S18 敲钟并坐） |
 | Trobbio（S22，`Library_13`） | A | `Bellway_City`（Grand Bellway） | 119 u，2 门，16–31 s | — | — | `Library_08`（S21） | 248 u，3 门，33–64 s | **约 17–33 s** |
 | Clawline 竞技场（S23，`Under_18`，7 波） | B | `Under_17` | 98 u，1 门，13–25 s | 收费椅 15/次 | 364 u，6 门（更远） | — | — | — |
 | Underworks 西侧连战（S23?，`Under_07`） | B | `Under_07b` | 110 u，2 门，15–29 s | `Under_08` 收费椅 | 106 u，2 门，14–28 s | — | — | ≈ 0 |
 | Forum（S25，`Hang_04`） | A | `Hang_06b`（Ventrica） | 139 u，2 门，18–36 s | — | — | `Hang_06b`（forum_route 方案） | 同左 | 0 |
-| Lace 2（S26，`Song_Tower_01`） | A | `Cog_Bench` → `Cog_Dancers` 演奏 Threefold Melody 过场 | 51 u，2 门，7–14 s + 旋律过场【未核实】 | — | — | S24 的 `Cog_Bench` | 同左 | 0（确保 S26 前在 `Cog_Bench` 坐） |
+| Lace 2（S26，`Song_Tower_01`） | A | `Cog_Bench` → `Cog_Dancers` 的升降梯（第一次演奏解锁后，§3.1）→ `Song_Tower_01` | 到升降梯 60 u，2 门，8–16 s；+ 乘梯（未测，几秒）+ 下梯到 Lace 约 5 u | — | — | S24 的 `Cog_Bench` | 同左 | 0（确保 S26 前在 `Cog_Bench` 坐） |
 | GMS（S27，`Cradle_03`） | A | `Tube_Hub`（Terminus Ventrica，Lace 2 之后才到得了） | 128 u，1 门，16–32 s | — | — | `Tube_Hub`（S26 的 "Cradle 工作台"） | 同左 | 0 |
 | 其他竞技场：`Bone_01`（4 波）/ `Dock_08`（7 波）/ `Cog_05`（6 波）/ `Song_07` 伏击 / `Library_02`（5–6 波）/ G&Z 切磋 `Library_09` / `Song_04`（5 波） | B | `Bonetown` 1 门 10–20 s / `Bone_12` 3 门 24–46 s / `Cog_Bench` 2 门 11–21 s / `Song_18` 2 门 17–32 s / `Song_Enclave` L1 1 门 10–19 s / `Library_08` 2 门 22–43 s / `Song_10` 1 门 5–9 s | | `Bone_01c` 30：5–10 s / `Dock_01` 30：8–16 s | | | | 付费只省 5–30 s |
 
 补充：
-- **Last Judge 的竖井**：`Bonetown` → `Coral_03` 底部 421 u、3 门，然后在 `Coral_03` 里爬约 200 u（直线模型按直线算，实际更久，Blasted Steps 还有 DESIGN 说的 Steel Soul 变体房间）。`Bellway_08` 在 `Coral_03` 顶端 left1 旁（工作台离门 30 u），从它出发**完全跳过竖井**【包：门坐标】。`Sands of Karak` 钟塔的 `Bellshrine_Coral` 工作台离 Last Judge 只有 3 门（29–56 s），但要经 `Coral_38`（社区房间名 "Elevator to Blasted Steps"）上去，S17 时能否到达【未核实】，不作计划依据。
+- **Last Judge 的竖井**：`Bonetown` → `Coral_03` 底部约 430 u、3 门，然后在 `Coral_03` 里爬约 200 u（直线模型按直线算，实际更久，Blasted Steps 还有 DESIGN 说的 Steel Soul 变体房间）。`Bellway_08` 在 `Coral_03` 顶端 left1 旁（工作台离门 30 u），从它出发**完全跳过竖井**【包：门坐标】。
+- **`Bellshrine_Coral`（Sands of Karak 钟塔，免费，离 Last Judge 3 门、217 u、29–56 s）在 S17 从下方到不了**：
+  - 路径是 `Coral_32` top1 (143, 115.5) → `Coral_38` bot1 (63, −0.5) → `Coral_38` right1 (128.5, 77) → `Bellshrine_Coral`【包 `gates_all.json`】。
+  - `Coral_38` 底部到 right1 要坐升降梯 `Hornet_cage_rect_lift`（x ≈ 24）。它的 `LiftControl` 有两个停靠点：停靠点 0 在上方 (y 75.2，默认停在这里)，**只有它的呼叫板 `Hornet_pressure_plate_small` (27.0, 73.0) 能解锁升降梯**（`CallPlateUnlocks` = 1）；停靠点 1 在下方 (y 7.2)，呼叫板 (27.0, 5.0) 不解锁（`CallPlateUnlocks` = 0）。解锁状态存在 `persistentUnlocked`（PersistentBoolItem）里【包 `fix_lift_coral38.txt`】【码 `LiftControl.cs:220-256`：有停靠点带 `CallPlateUnlocks` 时升降梯开局不解锁；`304-312`：只有这种停靠点的呼叫板接 `Unlock`；`500-505`：未解锁时 `MoveToStop` 直接返回】。所以必须先从上方（`Coral_26` 经 left1，或从 `Bellshrine_Coral` 经 right1）来过一次。社区逻辑也写 bottom ↔ right 只能靠 "Activate Elevator switch Karak"，从底部能爬到的只有一个死胡同小平台【攻】。
+  - `Coral_32` 的 top1 前有一面 `Coral Crust Wall Tall` (138.7, 110.1)：`Control` FSM 挨 3 次攻击（`Hits` = 3，`ReceivedDamage` → 计数；没有 `Damageable Range` 子对象时任何方向的攻击都算）后永久碎掉（`PersistentBoolItem`）；`Direction Control` FSM 在从 top1 进场时关掉它的碰撞体【包 `fix_fsm_coral32_crustwall.txt`】【码 `DamageEnemies.cs:1215`：打到带 `IsCoralCrustWall` 的 Recoiler 会通知 FSM】。社区逻辑注明 top1 "Have to come from Coral_38 side"【攻】。墙本身可能从下方打得掉【推】，但上一条的升降梯已经堵死了这条路。
+  - 路线在 S17 之前不去 Sands of Karak 上层（DESIGN §3.6.4），所以 `Bellshrine_Coral` 不是 S17 的选项。要用它就得在路线里加一段 Sands of Karak（经 `Coral_34` top1 要过 Great Conchflies，见下一条），不在本文范围。
+- **`Room_Pinstress`（Blasted Steps 竖井中段旁的有条件工作台）在 Great Conchflies 的闸门后面**：从 `Coral_03` left2 (y 105) 出去是 `Coral_11` → `Coral_11b` → `Coral_34` door1 → `Room_Pinstress`。`Coral_11` 里有 Great Conchflies 的 `Boss Scene`，`Battle Gate Conch` 在 (40.0, 19.5)、(39.3, 19.1) 和 (69.9, 19.5)，挡住通往 left1 (40.5, 15) 的路【包 `fix_near_coral11.txt`】；社区逻辑写 left1 要 "defeat Boss: Great Conchflies"【攻】。DESIGN 把 Great Conchflies 列为永不交战，所以这张椅子也不是选项。它本身的条件：`Pinstress States` FSM 测 `hasChargeSlash`、`pinstressQuestReady`、`pinstressStoppedResting`、`pinstressInsideSitting` 选 NPC 的状态【包 `fix_fsm_room_pinstress.txt`】，哪个状态激活 `Room Regular Parent`（工作台所在）我的导出器没解清楚。`Coral_34` 的另一个出口 top1 通 Sands of Karak。
 - **Dancers 没有付费选项**：`Cog_Bench` 在 Dancers 守着的 Cogwork Core 一侧，打完才到得了【推】；`Arborium_04`（Memorium）3 门 17–33 s，但 S19 时能否到达【未核实】。
 - **Fourth Chorus 的两张椅子**：小屋免费且更近，但门能不能进没有实测；`Bellway_03` 钟椅 30 在路线本来要停的 Bellway 站房间里，绕路≈ 0，是可靠的后备。
 
@@ -154,20 +168,21 @@
 
 ### 4.1 公式与假设
 
-价值（每局，秒）= Σ_附近遭遇 w_e × Δt_e − （绕路秒 + 购买 13–15 s + 念珠 ÷ r）
+价值（每局，秒）= Σ_附近遭遇 [ q_e × Δt_e + G_e ] − （绕路秒 + 购买 13–15 s + 念珠 ÷ r）
 
-- Δt_e：该工作台比"没有它时路线会用的工作台"每次少走的回撤（§3.2，取区间中值）。
-- w_e：每局回到该工作台的预期次数 = 紧急退出 q_e + 交战门回撤 g_e。
-  - q_e【推】：DESIGN 的约 4.5 次 / 局按权重分摊：A 类 10 个（Bell Beast、Lace 1、Fourth Chorus、Widow、Last Judge、Dancers、Trobbio、Forum、Lace 2、GMS）权重 3，B 类约 10 个权重 1 → A 类每个 q ≈ 0.34，B 类每个 q ≈ 0.11。等 K1 / M2 的险情率出来后替换。
-  - g_e【推】：DESIGN §3.6.6 的"交战门的工作台回撤 700 s"也是回到工作台，按 A 类每个约 0.5 次计。只算退出时取 g = 0。
-- r：念珠换成秒的汇率。DESIGN 没有刷念珠速率；按保守的 1 念珠/s（P10 收入不够时要去刷）计，同时给出盈亏平衡点 w* = 成本 ÷ Δt，路线有余钱时念珠成本近似 0。
+- Δt_e：该工作台比"没有它时路线会用的工作台"（**基线，必须是路线上免费可坐、且本方案也会坐的那张**）每次少走的单程回撤（§3.2，取区间中值）。
+- q_e【推】：每局在该遭遇紧急退出的预期次数。DESIGN 的约 4.5 次 / 局按权重分摊：A 类 10 个（Bell Beast、Lace 1、Fourth Chorus、Widow、Last Judge、Dancers、Trobbio、Forum、Lace 2、GMS）权重 3，B 类约 10 个权重 1 → A 类每个 q ≈ 0.34，B 类每个 q ≈ 0.11。等 K1 / M2 的险情率出来后替换。
+- G_e：交战门项，单独建模（初稿把它当成"每个 A 类再回工作台 0.5 次"，既与 DESIGN 的 700 s 对不上——那是 700 / 380 ≈ 1.8 次 / 局，不是 10 × 0.5 = 5 次——也忽略了坐在战前的工作台本来就满足交战门）。DESIGN §3.7.6 的交战门要求"在 playbook 指定的工作台休息过、满血"，所以从工作台走到战斗门口时只要挨了打，就要走回工作台再来。设 p_X = 从工作台 X 走到门口时不满足交战门的概率，T_X = 单程时间，每次"成功到达门口"的期望耗时是 T_X × (1 + p_X) / (1 − p_X)，其中多出的 2 T_X × p_X / (1 − p_X) 就是交战门回撤。每局要走 1 + q_e 次（第一次 + 每次退出后），所以
+  G_e = (1 + q_e) × 2 × [ T_基线 × p_基线 / (1 − p_基线) − T_X × p_X / (1 − p_X) ]。
+  p 没有任何实测【推】；DESIGN 的 700 s 先验折合每局约 1.8 次、约 20 个 A/B 单元，平均每个单元 p ≈ 0.09。
+- r：念珠换成秒的汇率。DESIGN 没有刷念珠速率；按保守的 1 念珠/s（P10 收入不够时要去刷）计，同时给出路线有余钱（念珠成本近似 0）时的结果。
 
 ### 4.2 排序
 
 | # | 工作台 | 价格 | 覆盖的遭遇 | Δt（中值） | 成本（r = 1） | 盈亏平衡 w* | 每局价值（只算退出 / 加交战门） | 结论 |
 |---|---|---|---|---|---|---|---|---|
-| 1 | **`Bellway_08`（Blasted Steps）** | 40 | Last Judge（A）+ 竖井上方的 Blasted Steps 路段 | ≈ 100 s（对 `Bonetown`）/ ≈ 165 s（对 `Weave_07`） | 绕路约 12 s + 购买 14 s + 40 = 66 s | 0.66 / 0.40 次 | −32 ~ −10 s / +18 ~ +73 s | **买**（唯一可能为正的一张）：S17 爬完 `Coral_03` 后进 `Bellway_08` 付 40、坐下，再去 Last Judge。只算退出时略负，算上交战门回撤、或 Last Judge 的 q ≥ 0.4–0.66、或 r ≥ 2 念珠/s 时为正；另外它是竖井上方唯一的存档点，Grand Gate 的 Needolin 交互和 S17 末尾的章节边界也受益。K1/M2 给出 Last Judge 的险情率后复核 |
-| 2 | `Bellway_03`（Far Fields） | 30 | Fourth Chorus（A） | 小屋可用时为负；小屋不可用时 ≈ 54 s（对 `Bellshrine_05`） | 绕路 0 + 14 + 30 = 44 s | 0.8 次 | −25 / +1 s（小屋不可用时） | **后备**：只在 Pinstress 小屋实测不可用时买 |
+| 1 | `Bellway_08`（Blasted Steps） | 40 | Last Judge（A）+ 竖井上方的 Blasted Steps 路段 | ≈ 100 s（67–134 s，对路线免费坐的 `Bonetown`；直线模型低估竖井攀爬，实际可能更大） | 绕路约 12 s + 购买 14 s + 40 = 66 s（念珠有余时约 26 s） | 只算退出：q* = 0.66（念珠有余时 0.26） | 只算退出（q = 0.34）：**−32 s**（念珠有余时 +8 s）；加交战门项见下表 | **默认不买，按判据定**：买 ⇔ V = q_LJ × Δt + G − 成本 > 0（q_LJ 用实测值替换先验 0.34）；按下表，相当于 p ≥ 约 0.07，或 q_LJ ≥ 0.66，或 S17 念珠有余且 q_LJ ≥ 0.26。要买就在 S17 爬完 `Coral_03` 后进 `Bellway_08` 付 40、坐下，再去 Last Judge。它是 S17 时竖井上方唯一能到的存档点（`Bellshrine_Coral` 到不了，`Room_Pinstress` 在 Great Conchflies 后，§3.2） |
+| 2 | `Bellway_03`（Far Fields） | 30 | Fourth Chorus（A） | 小屋可用时为负（比小屋远约 12 s）；小屋不可用时 ≈ 55 s（对 `Bellshrine_05`，36–73 s） | 绕路 0 + 14 + 30 = 44 s | q* = 0.81 | 小屋不可用时只算退出 −25 s；交战门项按同一公式，p（`Bellshrine_05` → Fourth Chorus，474 u）≥ 约 0.10 时转正 | **后备**：只在 Pinstress 小屋实测不可用时按判据决定 |
 | 3 | `Shellwood_01b` | 40 | Shellwood 3 波竞技场（B）；Sister Splinter（默认跳过） | ≈ 39 s（对 Belltown）/ ≈ 61 s（对 Mosstown_03） | 绕路约 5 s + 14 + 40 = 59 s | 1.0–1.5 次 | 约 −53 s | 不买；如果 Sister Splinter 被迫开打（A 类）再评估 |
 | 4 | `Dock_01` | 30 | `Dock_08` 7 波竞技场（B）；Lace 1 不如 `Room_Forge` | ≈ 23 s | 44 s | 1.9 次 | −41 s | 不买 |
 | 5 | `Bone_01c` | 30 | `Bone_01` 4 波竞技场（B）；Bell Beast 不如 `Bone_04` | ≈ 7 s | 44 s | 6 次 | −43 s | 不买 |
@@ -177,39 +192,51 @@
 | — | **有条件但免费**：`Ant_17` 拉杆 | 0 | Hunter's March 竞技场、整个 S10 | 唯一的工作台 | 拉杆往返约 36 u，5–9 s | — | 正 | **做**：先打拉杆再坐，避免 2 伤害的镰刀 |
 | — | **有条件但免费**：钟塔工作台 | 0 | 敲钟后的下一段 | — | 0（就在钟旁） | — | 正 | 敲完钟顺手坐（Songclave 钟是 Dancers 的最佳选项之一） |
 
-念珠合计：只买 `Bellway_08` 时 +40（DESIGN §3.6.5 的约 1,200–1,600，forum_route 再加 350，合计约 1,590–1,990）。
+**`Bellway_08` 的交战门项**【推】：p = 从 `Bonetown` 出发、爬完竖井到 Last Judge 门口时不满足交战门的概率；保守地取 p_Bellway_08 = 0（两条路共用竖井顶端到竞技场那一段，那一段的挨打对从 `Bonetown` 出发更贵，计入只会让买更划算）。T_Bonetown = 165 s，q = 0.34，G = 1.34 × 330 × p / (1 − p)。
+
+| p | G | 每局价值（r = 1） | 每局价值（念珠有余） |
+|---|---|---|---|
+| 0 | 0 | −32 s | +8 s |
+| 0.05 | +23 s | −9 s | +31 s |
+| 0.067 | +32 s | 0 | +40 s |
+| 0.09（DESIGN 700 s 折合的平均值） | +44 s | +12 s | +52 s |
+| 0.20 | +111 s | +79 s | +119 s |
+
+所以三个量决定结论：Last Judge 的 q（K1/M2）、p（M5 oracle 在 S17 记录"从 `Bonetown` 醒来走到 Last Judge 门口时是否满血"）、S17 时念珠是否有余（M5 的 P10 收入）。在这些实测出来之前，路线表**不写**这次购买（DESIGN 的保守默认：不花念珠、不多一个约 5 s 不能暂停的窗口）；如果 Bind 可以替代走回工作台（交战门允许在门口 Bind 回满），p 的影响还会变小。
+
+念珠合计：默认不变；如果按判据买 `Bellway_08`，+40（DESIGN §3.6.5 的约 1,200–1,600，forum_route 再加 350，合计约 1,590–1,990）。
 
 ## 5. 免费的节省：路线经过、难战前应坐下的工作台
 
-都在路线自然路径上或旁边一两个房间【估】，不花念珠，绕路几秒到十几秒，坐下同时存档并补满血、丝和工具（交战门的门槛也就满足了）。
+都在路线自然路径上或旁边一两个房间【估】，不花念珠，绕路几秒到十几秒，坐下同时存档并补满血、丝和工具（交战门的门槛也就满足了，只要走到战斗门口前没挨打；挨打的概率按 §4.1 的 p 算）。
 
 | 段 | 在哪坐 | 为了 | 备注 |
 |---|---|---|---|
 | S01 | `Tut_03` 工作台（Moss Mother 竞技场之前，同房间） | Moss Mother | 工作台在入口和战斗之间 |
 | S03 | `Bone_04`（Marrow Map Shop） | Bell Beast | 上门 top1 就是 `Bone_05` |
 | S04 | 敲 Marrow 钟后 `Bellshrine` | S04 扫荡 | 钟塔工作台敲钟后出现 |
-| S06 → S07 | `Room_Forge`（买完 Magma Bell） | Lace 1 | 上方气闸通 `Bone_East_12` |
+| S06 → S07 | `Room_Forge`（先清同房间的 5 波竞技场，再买 Magma Bell、坐） | Lace 1 | 竞技场清过一次永久不再触发；上方 top1 的气闸（`dock_pipe_trapdoor (4)`，下侧有拉杆）通 `Bone_East_12`（§3.2） |
 | S07 → S08 | `Bellshrine_05`（敲完 Deep Docks 钟） | Far Fields 路段 | — |
-| S08 | `Bone_East_Umbrella`（`Bone_East_09` 的小屋） | Fourth Chorus | 小屋不可用时买 `Bellway_03`（30） |
+| S08 | `Bone_East_Umbrella`（`Bone_East_09` 的小屋） | Fourth Chorus | 小屋不可用时按 §4.2 判据决定是否买 `Bellway_03`（30） |
 | S10 | `Ant_17`：先打左侧拉杆再坐 | Hunter's March 竞技场 | 不打拉杆坐下会挨 2 伤害且不设重生点 |
 | S11 | `Greymoor_02`（钟塔隔壁）；`Halfway_01` | Greymoor 钟伏击、Greymoor_04、Garmond（`Greymoor_05` 28–55 s） | — |
 | S13 | `Belltown` | Widow | — |
-| S17 | 路过 `Bonetown` 坐一次；**买 `Bellway_08` 并坐** | Last Judge | §4 第 1 名 |
+| S17 | 路过 `Bonetown` 坐一次（绕路约 6–13 s） | Last Judge | `Bellway_08`（40）默认不买，按 §4.2 判据在 K1/M2/M5 后决定 |
 | S18 → S19 | 敲 Songclave 钟后 `Bellshrine_Enclave`，或 `enclaveLevel` ≥ 1 后的 Level 1 工作台 | Dancers | 与 forum_route 的 S18 提案一致 |
 | S21 | `Library_08` 或 Songclave | G&Z 切磋、`Library_02` 连战 | forum_route §3.2 |
 | S22 | `Bellway_City`（Grand Bellway） | Trobbio | — |
 | S23 | `Under_17`；`Under_07b` | Clawline 竞技场；西侧连战 | 收费椅不用 |
 | S25 | `Hang_06b` | Forum | forum_route |
-| S26 | `Cog_Bench` | Lace 2（从 Dancers 竞技场演奏旋律） | 演奏前坐 |
+| S26 | `Cog_Bench` | Lace 2（第一次在 `Cog_Dancers` 演奏旋律解锁升降梯；退出后坐升降梯回来） | 演奏前坐；演奏过场里有不能暂停、不能存档退出的窗口（§1.3） |
 | S27 | `Tube_Hub` | GMS | DESIGN 已有 |
 
 另外：章节边界（DESIGN §3.6.1，每章以"坐工作台 + 退出"结束）应尽量放在这些工作台上。
 
 ## 6. 对时间预算的影响【估】【推】
 
-- 按门距模型，上面的安排下 A 类战斗的单程回撤：Bell Beast 11–22 s、Lace 1 13–25 s、Fourth Chorus 8–15 s、Widow 19–37 s、Last Judge 44–86 s、Dancers 37–85 s、Trobbio 16–31 s、Forum 18–36 s、Lace 2 7–14 s + 旋律过场、GMS 16–32 s。
-- 再加：Continue 后工作台场景加载 + 醒来（P7 待测，DESIGN §3.6.6 已注明）、boss 进场过场（各 boss 不同，未测）、模型低估的攀爬（竖井、平台）。即使把模型时间乘 2、再加 30 s 过场，每次退出也约 50–200 s，低于 380 s。
-- 所以 DESIGN §3.6.6 的"紧急退出恢复 1,700 s（暂定）"可能高估了约 800–1,500 s（每次少 180–330 s × 4.5 次），"交战门的工作台回撤 700 s"也可能高估。**这不是定论**：模型不看能力和单向门，boss 过场没测。建议 M5 的 oracle 路线实测里给每个 A 类遭遇记录"从路线工作台醒来到进入战斗"的计时时间，替换 380 s。
+- 按门距模型（修订后的坐标），上面的安排下 A 类战斗的单程回撤：Bell Beast 11–22 s、Lace 1 13–25 s、Fourth Chorus 17–33 s、Widow 19–37 s、Dancers 37–85 s、Trobbio 16–31 s、Forum 18–36 s、Lace 2 8–16 s + 乘梯几秒、GMS 16–32 s；**合起来约 10–85 s**。Last Judge 单列：从 `Bonetown` 111–220 s（按 §4.2 判据买了 `Bellway_08` 时 44–86 s）。本文其他地方引用每次退出的回撤时都用这一组数。
+- 没算进去的：Continue 后工作台场景加载 + 醒来（P7 待测，DESIGN §3.6.6 已注明）、boss 进场过场（各 boss 不同，未测）、重新清场（DESIGN §3.7.5 第 6 步）、模型低估的攀爬（竖井、平台）和能力 / 单向门造成的绕行。
+- 所以 DESIGN §3.6.6 的"紧急退出恢复 1,700 s（暂定）"和"交战门的工作台回撤 700 s"**可能**偏高，但这只是**假设**：上面的数字来自不看能力、单向门和过场的直线模型，不能用来改预算。建议 M5 的 oracle 路线实测里给每个 A 类遭遇记录两项计时时间：①"从路线工作台醒来到进入战斗"（替换 380 s）；②"从工作台走到门口时是否满足交战门"（给出 §4.1 的 p，替换 700 s 的先验）。
 
 ## 7. DESIGN §3.6.4 提议文本（DESIGN 未改，由你和 lead 决定）
 
@@ -217,8 +244,8 @@
 
 > - **工作台（2026-10-03 调研，[`research/benches.md`](research/benches.md)）：** 全游戏 80 个场景有可用工作台；付费的是钟椅（一次 30 / 40 / 60 念珠）、Underworks 收费椅（每次 15）和 Pilgrim's Rest 的收费门（30）。坐下即设置存档退出后的重生点（假椅除外）。购买期间约 5 s 不能暂停（BlockingInteractable），只在无威胁、GREEN、满血时确认。
 >   - **免费规则（必做）：** 每个 A 类遭遇（及 Moss Mother）前在最近的工作台坐下：Moss Mother `Tut_03`、Bell Beast `Bone_04`、Lace 1 `Room_Forge`、Fourth Chorus `Bone_East_Umbrella`、Widow `Belltown`、Dancers `Bellshrine_Enclave` 或 Songclave Level 1、Trobbio `Bellway_City`、Forum `Hang_06b`、Lace 2 `Cog_Bench`、GMS `Tube_Hub`；B 类：Hunter's March `Ant_17`（**先打拉杆**再坐）、Greymoor `Greymoor_02`、Underworks `Under_17`。敲钟后顺手坐钟塔工作台。route_check 断言每个 A 类遭遇之前最后一次坐的工作台就是表里那张。
->   - **购买（暂列必留，K1/M2 给出 Last Judge 险情率后复核）：** S17 爬完 `Coral_03` 后在 `Bellway_08` 买钟椅（40）并坐下，再去 Last Judge（每次回撤省约 70–130 s，并跳过竖井；盈亏平衡约 0.4–0.7 次回到工作台）。
->   - **后备：** `Bone_East_Umbrella` 实测不可用时，S08 在 `Bellway_03` 买钟椅（30）。
+>   - **购买（默认不买，按判据定）：** `Bellway_08` 钟椅（40，Blasted Steps 竖井顶端）比路线上免费坐的 `Bonetown` 每次回撤少约 100 s。买 ⇔ q_LJ × 100 + G − 成本 > 0，成本约 66 s（念珠要刷时）或 26 s（念珠有余时），G = (1 + q_LJ) × 330 × p / (1 − p)，p = 从 `Bonetown` 走到 Last Judge 门口时不满足交战门的概率（benches.md §4）。q_LJ 来自 K1/M2，p 和 S17 念珠余量来自 M5 oracle；实测前路线表不写这次购买。要买就在 S17 爬完 `Coral_03` 后买、坐下，再去 Last Judge。附近的 `Bellshrine_Coral` 在 S17 到不了，`Room_Pinstress` 在 Great Conchflies 后面。
+>   - **后备：** `Bone_East_Umbrella` 实测不可用时，S08 在 `Bellway_03`（30）按同一判据决定是否买钟椅。
 >   - **不买：** 其余钟椅和收费椅（附近有同样近的免费工作台，或附近没有要打的 A 类遭遇）；Bellhome。
 >   - **不买地图**：导航用离线提取的世界图（§3.4）。
 
@@ -226,30 +253,30 @@
 
 - S01 内容加："Moss Mother 前坐 `Tut_03` 工作台"。
 - S03 加："Bell Beast 前坐 `Bone_04` 工作台"。
-- S06/S07 加："买完 Magma Bell 坐 `Room_Forge` 工作台，经上方气闸去 Lace 1"。
-- S08 加："Fourth Chorus 前坐 `Bone_East_09` 小屋工作台（`Bone_East_Umbrella`）；不可用时在 Bellway 站买钟椅 30"。
+- S06/S07 加："`Room_Forge` 的 5 波竞技场清完后买 Magma Bell、坐 `Room_Forge` 工作台，经上方气闸（下侧拉杆）去 Lace 1"；route_check 要确认这个竞技场是不是 S06 的"竞技场"。
+- S08 加："Fourth Chorus 前坐 `Bone_East_09` 小屋工作台（`Bone_East_Umbrella`）；不可用时按判据决定是否在 Bellway 站买钟椅 30"。
 - S10 加："`Ant_17` 是陷阱椅：先打拉杆（置 `antBenchTrapDefused`），再坐"。
 - S13 加："Widow 前坐 `Belltown`"。
-- S17 加："途经 `Bonetown` 坐一次；爬完 `Coral_03` 后进 `Bellway_08` 买钟椅（40）坐下；然后 Grand Gate → Last Judge"。P50/P90 约 +30 / +45 s。
+- S17 加："途经 `Bonetown` 坐一次（约 +10 s）；然后 Grand Gate → Last Judge"。按判据要买 `Bellway_08` 时再加"爬完 `Coral_03` 后进 `Bellway_08` 买钟椅（40）坐下"，P50/P90 约 +30 / +45 s。
 - S18 加（与 forum_route 一致）："敲 Songclave 钟，Dancers 前坐 `Bellshrine_Enclave`"。
 - S22 加："Trobbio 前坐 `Bellway_City`"。
 - S23 加："Clawline 竞技场前坐 `Under_17`"。
-- S26 加："演奏 Threefold Melody 前坐 `Cog_Bench`"。
+- S26 加："演奏 Threefold Melody 前坐 `Cog_Bench`；Lace 2 退出后从 `Cog_Dancers` 坐升降梯回 `Song_Tower_01`，不用重新演奏"。
 
-§3.6.5 经济：念珠加"`Bellway_08` 钟椅 40（`Bellway_03` 30 为后备）"。§3.6.6：在紧急退出那一行注明"每次退出的回撤按 benches.md §6 的实测替换，预计远低于 380 s"。§3.7.5 / quit map：加"收费机交互约 5 s 不能暂停"。
+§3.6.5 经济：念珠注明"`Bellway_08` 钟椅 40、`Bellway_03` 30 是按判据的可选项，默认不计"。§3.6.6：在紧急退出那一行注明"每次退出的回撤待 M5 oracle 实测（benches.md §6 的直线模型给出约 10–85 s、Last Judge 110–220 s，只作假设）"，交战门那一行注明"按每个单元的 p 实测"。§3.7.5 / quit map：加"收费机交互约 5 s 不能暂停"和"`Cog_Dancers` 一次性解锁过场：`Needolin Prompted Full` 到 `Return Control` 不能暂停，`Break Lock Pt1` 到 `Pt2` 不能存档退出"。
 
 ## 8. 待实测 / 未核实
 
 1. `Bone_East_09` 的小屋门（`Bone_East_Umbrella`）在 S08 时能否进入、工作台能否坐。
 2. 收费流程实测：按"是"到可以暂停的时长；受击取消；钟椅升起时长；之后存档退出 → Continue 是否在钟椅上醒来。
 3. `Ant_17`：拉杆位置和打法；不打拉杆坐下的伤害（2）是否会被 Fractured Mask 抵挡；DESIGN S10 "在该工作台休息前买 [待验证原因]" 是否与这个陷阱有关【推】。
-4. `Room_Forge` 上方气闸（社区逻辑 "Open Airlock Up"）在 S06/S07 时是否已开、从哪一侧开。
-5. Lace 2 退出后，从 `Cog_Dancers` 重新演奏 Threefold Melody 能否再次进入 `Song_Tower_01`，过场时长。
-6. 各 boss 的进场过场时长；每个 A 类遭遇"从路线工作台醒来到开打"的实测计时（替换 §3 的模型）。
+4. `Room_Forge` 上方气闸（社区逻辑 "Open Airlock Up"）：包里是 top1 处的 `dock_pipe_trapdoor (4)`，下侧有 `Lever Bottom`【包】；待实测从下方打拉杆能否打开。另外核对 `Room_Forge` 的 5 波竞技场是否就是 DESIGN S06 的"竞技场"、`Song_lever_side` 是否是回左入口的闸门开关。
+5. Lace 2 退出后的回程：已由包确认是 `Cog_Dancers` 的升降梯（`UnlockedMelodyLift`，§3.1），待测乘梯全程时长，以及一次性解锁过场里不能暂停、不能存档退出的两个窗口各多长（§1.3）。
+6. 各 boss 的进场过场时长；每个 A 类遭遇"从路线工作台醒来到开打"的实测计时（替换 §3 的模型），以及"走到门口时是否满足交战门"（§4.1 的 p，尤其是 `Bonetown` → Last Judge）。
 7. `Greymoor_08` 商队何时到 Greymoor（`Bone_10` 商队的 `QUEST END TRAVEL` 由哪个 quest 触发）。
-8. `Bellshrine_Coral` 在 S17 能否经 `Coral_38` 到达（能的话是 Last Judge 的免费替代，3 门 29–56 s）。
+8. ~~`Bellshrine_Coral` 在 S17 能否经 `Coral_38` 到达~~：已由包确认不能（升降梯只有上方呼叫板能解锁，§3.2）。只有路线加一段 Sands of Karak 上层时才需要再看。
 9. `Shellwood_01b` 3 波 BattleScene 在房间里的实际位置（包里的坐标是预制体默认值），以及它是不是 DESIGN S12 说的 Shellwood 竞技场。
-10. §4 的 q、g、r 全是先验，等 K1/M2 的险情率和路线念珠实测替换。
+10. §4 的 q、p、r 全是先验，等 K1/M2 的险情率、M5 的交战门记录和路线念珠实测替换；`Bellway_08` / `Bellway_03` 买不买由它们代入 §4.2 判据决定。
 
 ## 附录 A：全部工作台对象（100 个）
 
@@ -272,7 +299,7 @@
 | Bellway_08 | blasted-steps / Blasted Steps Bellway | `Bell Bench Scene/bell_bench/RestBench` | (120.6, 14.0) | 111 | 付费 | 40（Bell Bench Toll Midlands） | 钟椅收费机，付一次永久升起（`bell_toll_machine` 的 PersistentBoolItem）；付后另置 `activatedStepsUpperBellbench` |
 | Coral_02 | blasted-steps / Blasted Steps Toll Bench Bottom | `bell_bench/RestBench` | (195.9, 5.1) | 11 | 付费 | 60（Bellway Toll Midlands） | 钟椅收费机，付一次永久升起（`bell_toll_machine` 的 PersistentBoolItem）（引用的价格资产是 Bellway Toll Midlands） |
 | Coral_Judge_Arena | blasted-steps / Last Judge Arena | `…van_Set/Caravan/Caravan Scenery/Bench/RestBench` | (23.2, 23.7) | 11101 | 有条件 |  | `CaravanTroupeLocation` = CoralJudge(2) 且 `defeatedLastJudge` |
-| Room_Pinstress | blasted-steps / Windy Pinstress Room | `Pinstress States/Room Regular Parent/RestBench` | (22.3, 6.6) | 101 | 有条件 |  | `Pinstress States` FSM 决定 `Room Regular Parent` 是否激活（未展开） |
+| Room_Pinstress | blasted-steps / Windy Pinstress Room | `Pinstress States/Room Regular Parent/RestBench` | (22.3, 6.6) | 101 | 有条件 |  | `Pinstress States` FSM 测 `hasChargeSlash`、`pinstressQuestReady`、`pinstressStoppedResting`、`pinstressInsideSitting` 选状态，哪个状态激活 `Room Regular Parent` 未解清；从路线进来要过 `Coral_11` 的 Great Conchflies 闸门（§3.2） |
 | Bonetown | bone-bottom / Bone Bottom Town | `…States/Normal World/RestBench Control/RestBench` | (238.8, 6.9) | 1101 | 免费 |  | `skullKingInvaded` 时被 `Break Bench` 打坏、`skullKingBenchMended`/`skullKingKilled` 后修好；入侵要先 `skullKingDefeated`（GameManager.cs:1626），本路线不打 Skull Tyrant，所以一直可用 |
 | Bonetown（`bonetown_boss`） | bone-bottom / Bone Bottom Town | `Skull King Encounter - deprecated?/Fake Bench` | (238.6, 6.9) | 00 | 不可用 |  | 废弃的 Skull King 遭遇对象（未激活） |
 | Mosstown_02c | bone-bottom / Mosshome Druid | `RestBench` | (13.0, 2.7) | 1 | 免费 |  |  |
@@ -318,7 +345,7 @@
 | Aqueduct_05（`aqueduct_05_pre`） | putrified-ducts / Fleatopia | `Caravan_States/Pre_Fleatopia/RestBench` | (106.6, 8.3) | 111 | 有条件 |  | 跳蚤商队到 Aqueduct 后（Pre_Fleatopia），第三幕内容 |
 | Bellway_Aqueduct | putrified-ducts / Putrified Ducts Bellway | `Shadow_09b/bell_bench/RestBench` | (83.6, 23.0) | 111 | 付费 | 60（Bell Bench Toll Upperlands） | 钟椅收费机，付一次永久升起（`bell_toll_machine` 的 PersistentBoolItem） |
 | Room_Huntress | putrified-ducts / Huntress | `RestBench` | (13.4, 5.8) | 1 | 免费 |  |  |
-| Bellshrine_Coral | sands-of-karak / Sands of Karak Bellshrine | `RestBench` | (26.9, 15.5) | 1 | 免费 |  |  |
+| Bellshrine_Coral | sands-of-karak / Sands of Karak Bellshrine | `RestBench` | (26.9, 15.5) | 1 | 免费 |  | 从下方（`Coral_32` top1 → `Coral_38`）要先在上方解锁 `Coral_38` 的升降梯（§3.2） |
 | Coral_Tower_01 | sands-of-karak / Coral Tower | `RestBench` | (126.5, 8.5) | 1 | 免费 |  |  |
 | Bellshrine_03 | shellwood / Shellwood Bellshrine | `Whole Scene/Bell Bench/RestBench` | (20.5, 5.2) | 111 | 有条件 |  | 敲钟后升起（同 Bellshrine 预制体，推） |
 | Mosstown_03 | shellwood / Greyroots Basement Tall room | `RestBench` | (13.7, 56.1) | 1 | 免费 |  |  |
