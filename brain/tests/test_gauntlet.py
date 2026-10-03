@@ -146,3 +146,28 @@ def test_gauntlet_policy_presses_toward_a_live_enemy_and_clings_left():
     pol.mode, pol.mode_left, pol.wall = "CLING", 1000, -1
     moves = [pol.act(_state([]), None) & mask("left", "right") for _ in range(10)]
     assert all(m == mask("left") for m in moves)
+
+
+def test_gauntlet_policy_takes_the_pocket_when_only_clappers_are_left():
+    pol = GauntletDataPolicy()
+    pol.reset(random.Random(5), FORUM)
+    clappers = [("Song Heavy Sentry", 21.0, 7.45), ("Song Heavy Sentry", 42.0, 7.45)]
+    picks = []
+    for _ in range(400):
+        pol.mode_left = 0
+        pol.act(_state(clappers), None)
+        picks.append((pol.mode, pol.wall))
+    cling = [w for m, w in picks if m == "CLING"]
+    assert 0.4 < len(cling) / len(picks) < 0.6 and cling.count(-1) > 0.9 * len(cling)
+    # clinging at the top of the left wall: hold toward it, no wall jump
+    pol.mode, pol.mode_left, pol.wall = "CLING", 10_000, -1
+    pol._cstate = lambda s: {"wallClinging": True, "onGround": False}
+    s = _state(clappers, hx=14.27)
+    s["hero"]["pos"][1] = 13.5
+    acts = [pol.act(s, None) for _ in range(300)]
+    assert all(a & mask("left") for a in acts) and not any(a & mask("jump") for a in acts)
+    assert pol.stats()["pocket_frames"] == 300
+    # lower on the wall: it climbs with wall jumps
+    s["hero"]["pos"][1] = 10.0
+    acts = [pol.act(s, None) for _ in range(300)]
+    assert any(a & mask("jump") for a in acts)

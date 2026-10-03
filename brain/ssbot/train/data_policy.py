@@ -125,6 +125,12 @@ class DataPolicy:
 
 
 G_MODES = (("PRESS", 0.48), ("KEEP", 0.22), ("EVADE", 0.10), ("IDLE", 0.05), ("CLING", 0.15))
+# with only Choir Clappers left (wave 7, the finale): half the time in the person's pocket at the top of the left wall,
+# so the Clappers' choices against a hero up there get logged (docs/facts/1.0.30000/forum.md §10: only Far Range
+# decisions; 4 data episodes before this had 384 frames in the pocket)
+POCKET_MODES = (("PRESS", 0.25), ("KEEP", 0.10), ("EVADE", 0.10), ("IDLE", 0.05), ("CLING", 0.50))
+POCKET_TYPES = frozenset(("Song Heavy Sentry",))
+POCKET_Y = 13.3          # hero transform at the top of the left-wall cling (highest still cling 13.45-13.60)
 WALL_NEAR = 1.2          # hero centre to the arena's inner wall face when touching it, about (hero box half width 0.5)
 
 
@@ -143,10 +149,12 @@ class GauntletDataPolicy(DataPolicy):
         self.wall = 0
         self.targets: dict[str, int] = {}
         self.cling_frames = 0
+        self.pocket_frames = 0
         self.names: list[str] | None = None
 
     def stats(self) -> dict:
-        return {**super().stats(), "targets": dict(self.targets), "cling_frames": self.cling_frames}
+        return {**super().stats(), "targets": dict(self.targets), "cling_frames": self.cling_frames,
+                "pocket_frames": self.pocket_frames}
 
     def _cstate(self, s: dict) -> dict:
         if self.names is None:
@@ -168,11 +176,16 @@ class GauntletDataPolicy(DataPolicy):
         hx, hy = hero["pos"][0], hero["pos"][1]
         lo, hi = enc.arena_x
         live = [e for e in live_enemies(s) if lo - 3.0 <= e["pos"][0] <= hi + 3.0 and e["pos"][1] < enc.floor_y + 25.0]
+        pocket = bool(live) and all(e.get("type_key") in POCKET_TYPES for e in live)
         if self.mode_left <= 0:
-            self.mode = r.choices([m for m, _ in G_MODES], [w for _, w in G_MODES])[0]
-            self.mode_left = r.randint(30, 150) if self.mode == "CLING" else r.randint(20, 90)
+            modes = POCKET_MODES if pocket else G_MODES
+            self.mode = r.choices([m for m, _ in modes], [w for _, w in modes])[0]
+            if self.mode == "CLING":
+                self.mode_left = r.randint(120, 480) if pocket else r.randint(30, 150)
+            else:
+                self.mode_left = r.randint(20, 90)
             self.keep_d = r.uniform(3.0, 10.0)
-            self.wall = -1 if r.random() < 0.8 else 1
+            self.wall = -1 if r.random() < (0.95 if pocket else 0.8) else 1
             if live:
                 tgt = (min(live, key=lambda e: abs(e["pos"][0] - hx) + abs(e["pos"][1] - hy)) if r.random() < 0.6
                        else r.choice(live))
@@ -204,9 +217,12 @@ class GauntletDataPolicy(DataPolicy):
                     self._press("jump", r.randint(18, 26))
                 elif on_wall:
                     self.cling_frames += 1
-                    if r.random() < 0.015:
-                        self._press("jump", r.randint(8, 16))   # wall jump: climbs, then re-grabs
-                    if r.random() < 0.04:
+                    high = self.wall < 0 and hy >= POCKET_Y
+                    self.pocket_frames += high
+                    # wall jumps climb, then re-grab; in the finale, climb to the pocket and stay there
+                    if r.random() < (0.0 if high and pocket else 0.08 if pocket else 0.015):
+                        self._press("jump", r.randint(8, 16))
+                    if r.random() < (0.03 if pocket else 0.04):
                         self._press("attack", 3)
         elif tgt is not None:
             bx, by = tgt["pos"][0], tgt["pos"][1]
