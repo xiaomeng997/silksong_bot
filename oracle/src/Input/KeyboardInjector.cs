@@ -70,6 +70,7 @@ namespace SsOracle.Input
         public static bool TryQueueMask(uint mask, out string error)
         {
             if (!Validate(mask, out error)) return false;
+            Filter.EndExclusive();    // a plain ACTION: the next EXCLUSIVE one cuts every key it does not ask for
             Filter.Push(requested);   // a set another caller made since the last latch keeps its edges too
             Filter.Push(mask);
             requested = mask;
@@ -78,19 +79,25 @@ namespace SsOracle.Input
 
         /// <summary>Main thread only (ActionScheduler, before the latch): the EXCLUSIVE ACTION flag. Every key outside
         /// <paramref name="mask"/> is released on this latch (below its minimum press if need be) and loses its queued
-        /// edges (HoldFilter.Exclusive); the mask's own edges are queued as TryQueueMask does.</summary>
+        /// edges (HoldFilter.Exclusive); the mask's own edges are queued as TryQueueMask does. Keys an earlier
+        /// EXCLUSIVE ACTION of the same stretch asked for (the pause loop's own taps) are not cut: they keep the
+        /// minimum press (HoldFilter.QueueExclusive).</summary>
         public static bool TryQueueMaskExclusive(uint mask, out string error)
         {
             if (!Validate(mask, out error)) return false;
-            Filter.Exclusive(mask);
-            Filter.Push(mask);
+            Filter.QueueExclusive(mask);
             requested = mask;
             return true;
         }
 
         /// <summary>Main thread only: hold exactly <paramref name="mask"/> from the next latch, every other key released
-        /// at once and its queued edges dropped (the brain-lost Pause tap).</summary>
-        public static bool SetMaskExclusive(uint mask, out string error) => TryQueueMaskExclusive(mask, out error);
+        /// at once and its queued edges dropped (the brain-lost Pause tap: the lost brain's keys are all cut, the pause
+        /// loop's included).</summary>
+        public static bool SetMaskExclusive(uint mask, out string error)
+        {
+            Filter.EndExclusive();
+            return TryQueueMaskExclusive(mask, out error);
+        }
 
         private static bool Validate(uint mask, out string error)
         {

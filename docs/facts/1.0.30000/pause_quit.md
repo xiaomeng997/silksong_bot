@@ -33,6 +33,7 @@
   - 模拟按键路径（`tests/test_key_guard.py`，2000 次，规划器随机键流、10 % 的 ACTION 晚一帧）：不加保护 706 次泄漏；在途列表只取 f+1 时 56 次；完整保护 0 次。
   - 实战（第 4 节，30d542b）：13 / 99 次暂停的第一次按下等了 1 帧（"在途按键"触发 11 / 11，弹起触发 2 次），0 次超时，这 13 次的延迟都是 3 帧（其余 2 帧）；暂停帧和菜单可见帧上 0 个游戏键。
 - oracle 侧（提交 10d3948，**只编译未部署**）：ACTION 第 5 个元素 flags，EXCLUSIVE = 1：从该 ACTION 的帧起，掩码外的键立即松开（必要时短于最短按下）并丢弃排队边沿（`HoldFilter.Exclusive`，`input.stats` 新计数 `released_early`）。暂停机发出的所有 ACTION 都带它；掉线看门狗的 Pause 点按也改用它（原来 `ReleaseAllNow` 保留最短按下，刚按下的键会和 Pause 同帧）。HELLO 新增 `action_flags: ["exclusive"]`；旧 oracle 只读前 4 个元素，所以现在发 5 个元素也安全。`oracle/tests/InputLogicCheck` 全部通过。Python 保护保留（按普通过滤器建模），两层独立；部署后 Python 的等待（0–2 帧）可以改为按 EXCLUSIVE 建模而取消。
+  - 集成分支 m2-integration-6 的修正（审查 10d3948 时指出：暂停机自己的按键也带 EXCLUSIVE，若其点按只锁存了一帧——第一个 ACTION 晚到、与下一个同帧生效——下一个 EXCLUSIVE ACTION 会把它切到短于最短按下）：`HoldFilter.QueueExclusive` 只切断本段 EXCLUSIVE 之外的键（规划器的键），本段 EXCLUSIVE ACTION 自己要过的键照常受最短按下 / 松开约束；普通 ACTION（规划器恢复）清空这一集合（`EndExclusive`）；掉线看门狗的 Pause 点按先清空，仍切断所有键。`InputLogicCheck` 新增 `ExclusiveSparesTheLoopsOwnKeys`（全部通过），`dotnet build -p:Deploy=false` 通过，**仍未部署**。
 
 ## 4. 实战（实例 4，oracle，`--real-quit 1.0 --inject-hits 0.5 --threads 4`）
 

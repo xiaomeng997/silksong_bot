@@ -34,6 +34,7 @@ internal static class Program
         LeftRightNeverTogether();
         ReleaseAllDropsQueuedEdges();
         ExclusiveClearsOtherKeysAtOnce();
+        ExclusiveSparesTheLoopsOwnKeys();
         BoundedBacklog();
         ExportedStateIsSufficient();
         LatencyModelDraws();
@@ -261,6 +262,47 @@ internal static class Program
         f.Push(Jump);
         var again = Enumerable.Range(0, 4).Select(_ => f.Step(Jump)).ToList();
         Check(again.All(m => (m & Jump) != 0), "Exclusive: a later press of an abandoned key latches normally");
+    }
+
+    /// <summary>
+    /// QueueExclusive (the ACTION EXCLUSIVE path, KeyboardInjector.TryQueueMaskExclusive): the pause loop sends all its
+    /// ACTIONs EXCLUSIVE; a tap of its own that was latched for one frame only (its first ACTION late, applied with the
+    /// next one) keeps the 2-frame minimum press when the loop's next ACTION no longer asks for it, while the planner's
+    /// keys are cut at the takeover. After a plain set (EndExclusive) the next EXCLUSIVE cuts every other key again.
+    /// </summary>
+    private static void ExclusiveSparesTheLoopsOwnKeys()
+    {
+        const uint Pause = 1u << 14, Down = 1u << 19;
+        var f = new HoldFilter(Left, Right);
+        f.Step(Right);
+        f.Step(Right | Jump);                           // planner keys, jump pressed on the frame before the takeover
+        f.QueueExclusive(0);                            // the loop's first ACTION: no key yet, the planner's cut
+        var seen = new List<uint> { f.Step(0) };
+        f.QueueExclusive(Pause);                        // the loop's Pause tap, latched on one frame only ...
+        seen.Add(f.Step(Pause));
+        f.QueueExclusive(0);                            // ... before the loop's release ACTION
+        seen.Add(f.Step(0));
+        f.QueueExclusive(0);
+        seen.Add(f.Step(0));
+        Check(seen[0] == 0, $"QueueExclusive: the planner's keys are cut at the takeover (0x{seen[0]:x})");
+        Check(seen[1] == Pause && seen[2] == Pause && seen[3] == 0 && f.ReleasedEarly == 1,
+            "QueueExclusive: the loop's own tap keeps its minimum press " +
+            $"({string.Join(",", seen.Select(m => m.ToString("x")))}, released early {f.ReleasedEarly})");
+        // a menu tap pressed and released by two EXCLUSIVE ACTIONs applied in one update: still latched twice
+        f.QueueExclusive(Down);
+        f.QueueExclusive(0);
+        var d = new List<uint> { f.Step(0), f.Step(0), f.Step(0), f.Step(0) };
+        Check(d[0] == Down && d[1] == Down && d[2] == 0 && f.ReleasedEarly == 1,
+            $"QueueExclusive: a tap pressed and released in one update is latched for the minimum press " +
+            $"({string.Join(",", d.Select(m => m.ToString("x")))})");
+        // a plain set ends the stretch: a key an earlier EXCLUSIVE set pressed is cut like any other
+        f.QueueExclusive(Down);
+        f.Step(Down);
+        f.EndExclusive();
+        f.QueueExclusive(Pause);
+        var last = f.Step(Pause);
+        Check(last == Pause && f.ReleasedEarly == 2,
+            $"EndExclusive: the next EXCLUSIVE cuts the keys of the stretch before (0x{last:x}, early {f.ReleasedEarly})");
     }
 
     private static void BoundedBacklog()

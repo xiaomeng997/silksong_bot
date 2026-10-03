@@ -20,7 +20,9 @@ BIT = {name: i for i, name in enumerate(BUTTONS)}
 
 # ACTION flags (the optional 5th element; ActionScheduler.FlagExclusive). EXCLUSIVE: from the ACTION's frame no key
 # outside its mask is down (others released at once, below their minimum press if need be, queued edges dropped):
-# the pause loop and quit sequence send it so no planner key reaches the pause menu. HELLO "action_flags" lists the
+# the pause loop and quit sequence send it so no planner key reaches the pause menu. Keys an earlier EXCLUSIVE ACTION
+# of the same stretch asked for (the loop's own taps) are spared and keep the minimum press (HoldFilter.QueueExclusive);
+# a plain ACTION ends the stretch. HELLO "action_flags" lists the
 # flags an oracle knows; an older oracle reads four elements and ignores the fifth.
 ACTION_EXCLUSIVE = 1
 

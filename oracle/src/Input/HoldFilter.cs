@@ -61,6 +61,7 @@ namespace SsOracle.Input
         {
             desired = desiredMask;
             latched = latchedMask;
+            exclusiveOwn = 0;
             for (var i = 0; i < Bits; i++)
             {
                 pending[i] = pendingEdges != null && i < pendingEdges.Length ? pendingEdges[i] : 0;
@@ -180,6 +181,7 @@ namespace SsOracle.Input
         public void ReleaseAll()
         {
             desired = 0;
+            exclusiveOwn = 0;
             for (var i = 0; i < Bits; i++)
             {
                 var down = (latched & (1u << i)) != 0;
@@ -227,6 +229,25 @@ namespace SsOracle.Input
             }
             desired &= keep;
         }
+
+        private uint exclusiveOwn;   // keys EXCLUSIVE sets asked for since the last plain set (QueueExclusive)
+
+        /// <summary>
+        /// The ACTION EXCLUSIVE path (KeyboardInjector.TryQueueMaskExclusive): Exclusive, sparing the keys that earlier
+        /// EXCLUSIVE sets of the same stretch asked for, then Push. The pause loop sends all its ACTIONs EXCLUSIVE; its
+        /// own taps keep the usual limits, so a tap latched for one frame (its first ACTION late, or two applied in
+        /// one update) is not cut below the minimum press by the loop's next ACTION (review of 10d3948). Only the
+        /// keys of other sets (the planner's) are cut. EndExclusive (a plain set: the planner is back) forgets them.
+        /// </summary>
+        public void QueueExclusive(uint want)
+        {
+            Exclusive(want | exclusiveOwn);
+            exclusiveOwn |= want;
+            Push(want);
+        }
+
+        /// <summary>A plain (non-EXCLUSIVE) set: the next EXCLUSIVE spares nothing it did not ask for itself.</summary>
+        public void EndExclusive() => exclusiveOwn = 0;
 
         /// <summary>Un-latch a press made this frame that collides with the opposite direction. If the caller no longer
         /// wants the key, what is left queued is a stale tap (an even number of edges): drop it rather than fire it

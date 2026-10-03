@@ -35,7 +35,9 @@ namespace SsOracle.Input
         /// <summary>ACTION flags (optional 5th element). EXCLUSIVE: from this ACTION's frame no key outside its mask is
         /// down: every other key is released at once, below its minimum press if need be, and every edge still queued
         /// for it is dropped (HoldFilter.Exclusive). The brain's pause loop and quit sequence send it, so no planner key
-        /// is latched on the pause frame or replayed into the pause menu (DESIGN §3.8.2: Z submits, X / A cancel).</summary>
+        /// is latched on the pause frame or replayed into the pause menu (DESIGN §3.8.2: Z submits, X / A cancel).
+        /// Keys an earlier EXCLUSIVE ACTION of the same stretch asked for (the loop's own taps) are spared and keep the
+        /// minimum press; a plain ACTION ends the stretch (HoldFilter.QueueExclusive).</summary>
         public const uint FlagExclusive = 1;
         public static readonly string[] FlagNames = { "exclusive" };
 
