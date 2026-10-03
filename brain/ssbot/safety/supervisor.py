@@ -394,6 +394,7 @@ class Supervisor:
         self.injected: list[tuple[str, str]] = []
         self.t_hit: float | None = None         # the last frame with a hit (damage taken, or health + blue down)
         self._hp_tot: int | None = None
+        self._q1_cause: str | None = None
 
     def inject(self, tid: str = "QF", why: str = "injected fault") -> None:
         """Fire trigger `tid` on the next step (the pause stress test, DESIGN §3.7.5 G1 fault injection: a quit
@@ -458,8 +459,14 @@ class Supervisor:
 
     def q1_cause(self, t: float) -> str:
         """Q1_HIT when a hit came within POST_HIT_WINDOW_S of t (the quit belongs in its post-hit window), else
-        Q1_NO_HIT (frost, pending damage, a start at low HP: the first pausable frame)."""
-        return Q1_HIT if self.t_hit is not None and 0.0 <= t - self.t_hit <= POST_HIT_WINDOW_S else Q1_NO_HIT
+        Q1_NO_HIT (frost, pending damage, a start at low HP: the first pausable frame). Latched while the pause it
+        started is pending or held, so the attempt's reasons keep the cause Q1 fired with (the campaign's real quits
+        end seconds later, when the hit is long past: they read "no hit" before)."""
+        if self._q1_cause is not None and (self.pending or self.paused):
+            return self._q1_cause
+        self._q1_cause = Q1_HIT if self.t_hit is not None and 0.0 <= t - self.t_hit <= POST_HIT_WINDOW_S \
+            else Q1_NO_HIT
+        return self._q1_cause
 
     def _triggers(self, inp: SupervisorInput, h: int | None, hero: _Hero | None, support: Sequence[SupportEvent],
                   known: bool, basis: str | None = None) -> list[tuple[str, str]]:

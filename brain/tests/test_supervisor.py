@@ -103,8 +103,10 @@ def test_q1_after_a_hit_quits_in_the_post_hit_window_never_binds():
     assert "Q1" in d.triggers and d.q1_cause == sv.Q1_HIT and d.t_hit == 12.0 and d.pause_pending
     assert not d.allows("BIND") and not d.restrictions.heal_first
     assert any("post-hit window" in r for r in d.reasons)
-    d = s.step(_inp(t=12.6, hp=1))                               # still pending, sticky; the cause is only per frame
+    d = s.step(_inp(t=12.6, hp=1))                               # still pending, sticky
     assert d.pause_pending and not d.allows("BIND")
+    d = s.step(_inp(t=20.0, hp=1))                               # a real quit's menus end seconds later: the cause
+    assert d.q1_cause == sv.Q1_HIT and any("post-hit window" in r for r in d.reasons)   # Q1 fired with is kept
     s = Supervisor(BB)
     s.step(_inp(t=1.0, hp=3, damage_taken=2))
     d = s.step(_inp(t=3.0, hp=3, pending_dmg=2))                # no hit for 2 s (> POST_HIT_WINDOW_S): pending damage
