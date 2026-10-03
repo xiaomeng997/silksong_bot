@@ -405,8 +405,20 @@ class GauntletBuilder:
         colliders sit under a "Colliders" child): then the subject exporting an enabled damage collider of that
         name. Several candidates: those in play and alive, then the nearest damage collider to the hero box."""
         parts = [p for p in src.split("/") if p]
-        ent = (lambda sb: ents.get(sb.iid, sb.ent)) if ents is not None else (lambda sb: sb.ent)
-        cands = [s for s in subjects.values() if s.name and s.name in parts]
+        # exported on that frame only (a killed enemy's last export would otherwise still "touch" the hero)
+        if ents is not None:
+            def ent(sb):
+                return ents.get(sb.iid)
+        else:
+            def ent(sb):
+                return sb.ent if sb.seen_f >= self._f - 2 else None
+        # the deepest path component that names a subject: "Song Pilgrim 03/Song Pilgrim Maestro/Slash Hit 2" is
+        # the Maestro's (run 20261002_231917 ep0 f984847: a Maestro parented under a Choristor)
+        cands = []
+        for part in reversed(parts):
+            cands = [s for s in subjects.values() if s.name == part]
+            if cands:
+                break
         leaf = None
         if not cands:
             tk, _ = match_source(src, set(self.proj_types) | set(self.specs) | {e["type_key"] for e in hazards})
