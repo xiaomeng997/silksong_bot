@@ -150,9 +150,11 @@ class OracleLink:
             self._seq += 1
             self.sock.sendall(encode(msg_type, self._seq, payload))
 
-    def act(self, target_frame: int, buttons: int, hold_frames: int = 0, ack_seq: int = 0) -> None:
-        """Hold exactly `buttons` from target_frame on (for hold_frames frames if > 0)."""
-        self._send(MsgType.ACTION, msgpack.packb([target_frame, buttons, hold_frames, ack_seq]))
+    def act(self, target_frame: int, buttons: int, hold_frames: int = 0, ack_seq: int = 0, flags: int = 0) -> None:
+        """Hold exactly `buttons` from target_frame on (for hold_frames frames if > 0). flags: framing.ACTION_*
+        (sent as a fifth element only when set)."""
+        body = [target_frame, buttons, hold_frames, ack_seq] + ([flags] if flags else [])
+        self._send(MsgType.ACTION, msgpack.packb(body))
 
     def rpc_async(self, name: str, /, **args) -> Future:
         fut: Future = Future()

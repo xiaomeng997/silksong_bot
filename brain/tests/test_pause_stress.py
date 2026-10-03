@@ -47,12 +47,15 @@ def _s(f: int, hp: int = 5, hs: int = 1, vy: float = 0.0, clip: str = "Idle", pa
                                                           "facing": 1, "anim": {"clip": clip}}}
 
 
-def _injector(kind: str, take: bool = True) -> tuple[HitInjector, FakeLink]:
-    inj = HitInjector(Inner(), p_event=0.0, min_s=1.0)
+def _injector(kind: str, take: bool = True, fault: str = "hit", offset: int = 0,
+              inner=None) -> tuple[HitInjector, FakeLink]:
+    inj = HitInjector(inner or Inner(), p_event=0.0, min_s=1.0, boss_type="Bone Beast")
     link = FakeLink(take)
     inj.attach(link)
     inj.reset(random.Random(1), None)
     inj.kind = inj.log["kind"] = kind
+    inj.fault = inj.log["fault"] = fault
+    inj.offset = inj.log["offset"] = offset
     return inj, link
 
 
@@ -93,11 +96,16 @@ def test_bit_table_matches_the_framing_buttons():
     assert ps.KEYS == BUTTONS
 
 
-def _rec(f, *, blk=0, paused=False, gs=4, latched=0, ev=(), q=None) -> dict:
+def _rec(f, *, blk=0, paused=False, gs=4, latched=0, ev=(), q=None, ready=None, clip="Airborne") -> dict:
+    """ready: the pause menu accepts input (ui PAUSED, not fading, accepting input); default: paused and blk has no
+    NOT_ACCEPTING_INPUT bit."""
+    ready = paused and not blk & 32 if ready is None else ready
     return {"f": f, "q": q if q is not None else f * 166_667, "ev": list(ev),
-            "hero": {"hero_state": 3, "vel": [0.0, -3.0], "anim": {"clip": "Airborne"}, "cstate": None},
-            "act": {"hf": {"latched": latched}}, "game": {"paused": paused, "gs": gs, "scene": "Bone_05"},
-            "pause": {"blk": blk}, "ts": 1.0}
+            "hero": {"hero_state": 3, "vel": [0.0, -3.0], "anim": {"clip": clip}, "cstate": None},
+            "act": {"hf": {"latched": latched}},
+            "game": {"paused": paused, "gs": gs, "scene": "Bone_05", "ui": 5 if paused else 0,
+                     "fading": not ready, "menu": 7},
+            "pause": {"blk": blk if ready or not paused else blk | 32}, "ts": 1.0}
 
 
 def test_trial_measures_latency_keys_unpauses_and_the_menu():
@@ -138,3 +146,204 @@ def test_trial_measures_latency_keys_unpauses_and_the_menu():
     s = ps.summarize([t, t2])
     assert s["hits_taken"] == 2 and s["unintended_unpauses"] == 1 and s["foreign_keys_while_paused"] == 2
     assert s["latency_frames"]["max"] == 2 and s["main_menu"] == 2
+
+
+# ---- fault kinds (trigger / menu) and hard moments -------------------------------------------------------------
+
+class FakeSc:
+    def __init__(self):
+        self.faults: list[tuple[str, str]] = []
+
+    def inject_fault(self, tid="QF", why=""):
+        self.faults.append((tid, why))
+
+
+class InnerSc(Inner):
+    def __init__(self):
+        super().__init__()
+        self.sc = FakeSc()
+
+
+def _names() -> list[str]:
+    from ssbot.knowledge.kinematics import cstate_names
+    return cstate_names()
+
+
+def _cs_words(**flags) -> list[int]:
+    from ssbot.tools.cstate import encode
+    return encode(flags, _names())
+
+
+def _fs(f: int, *, cs=None, lat: int = 0, clip: str = "Idle", boss_hp=None, ev=(), hp: int = 5) -> dict:
+    s = _s(f, hp=hp, clip=clip)
+    s["hero"]["cstate"] = _cs_words(**(cs or {}))
+    s["act"] = {"hf": {"latched": lat}}
+    s["ev"] = list(ev)
+    if boss_hp is not None:
+        s["ents"] = [{"type_key": "Bone Beast", "hp": boss_hp}]
+    return s
+
+
+def test_trigger_fault_fires_at_the_bounce_onset_plus_its_offset_without_a_hit():
+    inner = InnerSc()
+    inj, link = _injector("bounce", fault="trigger", offset=2, inner=inner)
+    for f in range(0, 100):
+        inj.act(_fs(f))
+    assert not inner.sc.faults
+    for f in range(100, 110):
+        inj.act(_fs(f, cs={"downSpikeBouncing": True}))
+    assert len(inner.sc.faults) == 1 and inner.sc.faults[0][0] == "QF" and not link.calls
+    st = inj.stats()["inject"]
+    assert st["trigger_f"] == 102 and st["moments"] == [["bounce", 100]] and st["fault"] == "trigger"
+
+
+def test_kill_trigger_goes_before_a_committed_needle_kill():
+    """A Silkspear thrown with the boss at <= 15 HP hits 18-20 frames after the press (run 20261002_190611): the
+    trigger goes at press + 19 + offset; a hit fault waits for the kill itself."""
+    from types import SimpleNamespace
+    inner = InnerSc()
+    inj, link = _injector("kill", fault="trigger", offset=-2, inner=inner)
+    for f in range(0, 100):
+        inj.act(_fs(f, boss_hp=10))
+    for f in range(100, 130):
+        inj.act(_fs(f, boss_hp=10, lat=1 << 6 if f < 104 else 0))         # quickcast latched from 100
+    assert not inner.sc.faults                                            # the planner did not score it
+    inner = InnerSc()
+    inner.planner_last = SimpleNamespace(attack=(4, 2, [0.0] * 4))         # its first scored hit: a Silkspear
+    inj, link = _injector("kill", fault="trigger", offset=-2, inner=inner)
+    for f in range(0, 100):
+        inj.act(_fs(f, boss_hp=10))
+    for f in range(100, 130):
+        inj.act(_fs(f, boss_hp=10, lat=1 << 6 if f < 104 else 0))
+    assert inj.stats()["inject"]["trigger_f"] == 100 + 19 - 2 and len(inner.sc.faults) == 1
+    inj, link = _injector("kill", fault="hit", offset=0, inner=InnerSc())
+    for f in range(0, 140):
+        kill = [{"k": "hit", "d": {"type_key": "Bone Beast", "hp_after": 0, "dead": True}}] if f == 130 else ()
+        inj.act(_fs(f, boss_hp=10, lat=1 << 6 if f == 100 else 0, ev=kill))
+    assert len(link.calls) == 1 and inj.log["sent"][0]["f"] == 130
+
+
+def test_menu_fault_triggers_and_hits_on_one_tick_and_hit_faults_rearm_on_the_next_bounce():
+    inner = InnerSc()
+    inj, link = _injector("menu", fault="menu", inner=inner)
+    for f in range(0, 80):
+        inj.act(_fs(f))
+    assert not link.calls and not inner.sc.faults                     # no planner key latched yet
+    inj.act(_fs(80, lat=1 << 20))
+    assert len(link.calls) == 1 and len(inner.sc.faults) == 1 and inj.log["trigger_f"] == 80
+    inner = InnerSc()                                                 # offset 1: the hit a tick after the trigger
+    inj, link = _injector("menu", fault="menu", offset=1, inner=inner)
+    for f in range(0, 80):
+        inj.act(_fs(f))
+    inj.act(_fs(80, lat=1 << 20))
+    assert len(inner.sc.faults) == 1 and not link.calls
+    inj.act(_fs(81))
+    inj.stats()                                                       # collects the reply: one hit, done
+    assert len(link.calls) == 1 and inj.log["hit_f_sent"] == 81 and inj.done
+    inner = InnerSc()                                                 # "keys": a press in flight, not a held key
+    inner.sent = {}
+    inj, link = _injector("keys", fault="trigger", inner=inner)
+    for f in range(0, 90):
+        inner.sent[f + 1] = 1 << 20                                   # right held all along
+        inj.act(_fs(f, lat=1 << 20 if f > 0 else 0))
+    assert inj.log.get("trigger_f") is None
+    inner.sent[91] = (1 << 20) | 1                                    # jump pressed on f + 1
+    inj.act(_fs(90, lat=1 << 20))
+    assert inj.log["trigger_f"] == 90 and len(inner.sc.faults) == 1 and not link.calls
+    inj, link = _injector("cast", fault="hit", offset=0, take=False)
+    for f in range(0, 300):
+        inj.act(_fs(f, clip="NeedleThrow AnticG" if f % 50 < 5 else "Idle"))   # a cast every 50 frames
+    assert [r["f"] for r in inj.log["sent"]] == [100, 150, 200, 250]   # refused (i-frames): re-armed each cast
+    kinds = set()
+    for seed in range(400):                                            # bounce faults are triggers only
+        inj = HitInjector(InnerSc(), p_event=1.0)
+        inj.reset(random.Random(seed), None)
+        kinds.add((inj.kind, inj.fault))
+    assert ("bounce", "hit") not in kinds and ("bounce", "trigger") in kinds
+    assert not any(k == "clash" for k, _ in kinds) and ("cast", "hit") in kinds and ("kill", "trigger") in kinds
+
+
+def test_hit_faults_wait_out_the_heros_invulnerability():
+    """A refused hit is a damage event the planner counts as unpredicted (two make a Q4 quit): no hit is sent while
+    down-spike invulnerability steps (cstate_int[1]), invulnerable or parry i-frames would refuse it."""
+    inj, link = _injector("falling")
+    for f in range(0, 75):
+        s = _s(f, hs=3, vy=-4.0)
+        if f < 70:
+            s["hero"]["cstate_int"] = [15, 5, 0, 0]
+        if f < 72:
+            s["hero"]["invulnerable"] = f >= 70
+        inj.act(s)
+    assert [r["f"] for r in inj.log["sent"]] == [72]
+
+
+def test_inject_kinds_env_restricts_the_draw(monkeypatch):
+    monkeypatch.setenv("SSBOT_INJECT_KINDS", "menu,keys")
+    seen = set()
+    for seed in range(100):
+        inj = HitInjector(InnerSc(), p_event=0.0)
+        inj.reset(random.Random(seed), None)
+        seen.add((inj.kind, inj.fault, inj.offset if inj.kind == "menu" else None))
+    assert seen == {("menu", "menu", 0), ("menu", "menu", 1), ("keys", "trigger", None)}
+
+
+def test_trial_of_a_trigger_fault_counts_game_keys_on_menu_frames():
+    """Trigger at 200 on the bounce onset's frame (+0): special. The pause lands at 202 with the planner's right still
+    latched on it (counted, also as the pause frame's keys), and an Up before the menu accepts input counts; Up /
+    Enter after it does not."""
+    P, R, UPK, ENTER = ps.BIT["pause"], ps.BIT["right"], ps.BIT["up"], ps.BIT["enter"]
+    states = []
+    for f in range(180, 400):
+        if f < 202:
+            s = _rec(f, latched=R)
+        elif f < 300:
+            lat = (P | R) if f == 202 else P if f < 205 else UPK if f in (206, 230) else ENTER if f == 240 else 0
+            s = _rec(f, paused=True, blk=64, latched=lat, ready=f >= 210)
+        else:
+            s = _rec(f, paused=True, gs=1)
+        s["hero"]["cstate"] = _cs_words(downSpikeBouncing=f >= 200)
+        states.append(s)
+    row = {"outcome": "QUIT", "reason": "QUIT: QF", "policy": {
+        "first_pending_f": 200, "inject": {"kind": "bounce", "fault": "trigger", "offset": 0, "trigger_f": 200,
+                                           "sent": [{"f": 200}], "replies": []},
+        "real_quit": {"armed": True, "wrong_submits": 0, "unexpected_unpauses": 0, "key_waits": 0}}}
+    t = ps.trial(row, states, _names())
+    assert t["injected"] and t["fault_f"] == 200 and t["special"] == {"bounce": 0}
+    assert t["press"] == 2 and t["paused"] == 2 and t["first_pausable"] == 0 and t["latency"] == 2
+    assert t["pause_frame_keys"] == R and t["foreign_key_frames_paused"] == 2      # 202 (right), 206 (up, not ready)
+    assert t["foreign_keys"] == {"right": 1, "up": 1}
+    s = ps.summarize([t])
+    assert s["special_share"] == 1.0 and s["pause_frame_with_game_keys"] == 1 and s["faults"] == {"trigger": 1}
+    # the same pause without an injection (a gate QUIT): only with natural, from its first PAUSE_PENDING
+    plain = {"outcome": "QUIT", "reason": "QUIT: Q6", "policy": {"first_pending_f": 200, "real_quit": None}}
+    assert ps.trial(plain, states, _names()) is None
+    tn = ps.trial(plain, states, _names(), natural=True)
+    assert tn["kind"] == "natural" and tn["fault_f"] == 200 and tn["pause_frame_keys"] == R
+
+
+def test_trial_of_a_menu_fault_counts_the_hit_next_to_the_first_press():
+    P = ps.BIT["pause"]
+    states = []
+    for f in range(180, 400):
+        dmg = [{"k": "damage", "d": {"amount": 4}}] if f == 201 else ()
+        if f < 201:
+            states.append(_rec(f))
+        elif f < 202:
+            states.append(_rec(f, ev=dmg, blk=1))                                         # the hit's disablePause
+        elif f < 217:
+            states.append(_rec(f, blk=1, latched=P if f in (202, 203, 204) else 0))      # the press dropped
+        elif f < 300:
+            states.append(_rec(f, paused=f >= 219, blk=64 if f >= 219 else 0, latched=P if f in (219, 220) else 0))
+        else:
+            states.append(_rec(f, paused=True, gs=1))
+    row = {"outcome": "QUIT", "reason": "QUIT: QF", "policy": {
+        "first_pending_f": 200, "inject": {"kind": "menu", "fault": "menu", "offset": 0, "trigger_f": 200,
+                                           "sent": [{"f": 200}],
+                                           "replies": [{"frame": 201, "hp_before": 5, "hp_after": 1,
+                                                        "take_health_calls": 1}]},
+        "real_quit": {"armed": True, "wrong_submits": 0, "unexpected_unpauses": 0}}}
+    t = ps.trial(row, states, [])
+    assert t["fault_f"] == 201 and t["special"] == {"menu": -1} and t["press"] == 1
+    assert t["first_pausable"] == 16 and t["paused"] == 18 and t["latency"] == 2
+    s = ps.summarize([t])
+    assert s["special_share"] == 1.0 and s["special_share_without_menu"] == 0.0

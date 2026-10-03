@@ -24,6 +24,9 @@ known hero, and Q5 fires once the hero has been missing for hero_lost_ms with h 
 Tiers: GREEN h >= 3, the chosen plan has S = 0 and the support is known; YELLOW h = 2, or S = 1 (or no plan yet, or
 the support unknown) with h >= 3; RED any trigger. Triggers (§3.7.4):
   Q1 h <= 1 (a Fractured Mask just broken at 1 HP included)                  -> PAUSE_PENDING, quit
+     With a certified-empty support h is unbounded (nothing can land within the horizon), yet the encounter's worst
+     event comes back after it: Q1 then counts h against that event (worst_known_damage, the worst taken), so a
+     hero one hit from death pauses while nothing can hurt, not when the threat reappears
   Q2 I2 broken and no candidate leaves the exposure within 0.2 s              -> PAUSE_PENDING, quit
   Q3 h = 2 with a mask-bypassing, multi-instance, hazard or CriticalDamage threat, or an unknown support
                                                                               -> PAUSE_PENDING, quit
@@ -54,6 +57,7 @@ the support unknown) with h >= 3; RED any trigger. Triggers (§3.7.4):
   Q8 progress watchdog (hook)                                                 -> pause, diagnose, alert
   Q9 capture lost or PERMADEATH (hook)                                        -> stop all input, alert
   P1 planning that needs > 3 ms only in GREEN outside A/B encounters, or in GREEN inside a registered safe window.
+  QF a fault injected by the pause stress test (Supervisor.inject)              -> PAUSE_PENDING, quit
 Q7 is the active input sink's focus guard (inputd under SendInput / Pico); under OracleInjectSink (TRAIN, 4-6
 instances, at most one focused) Application.isFocused says nothing, so input_from_state ignores STATE "focus" unless
 foreground_sink is set.
@@ -82,7 +86,7 @@ import numpy as np
 
 from ssbot.core.primitives import ALL, DAMAGING, EVASIVE, N_PRIM, Prim
 from ssbot.core.primitives import code as prim_code
-from ssbot.safety.hits_to_death import (MASK_UNKNOWN, SupportEvent, ctx_from_support, hits_to_death,
+from ssbot.safety.hits_to_death import (MASK_UNKNOWN, UNBOUNDED, SupportEvent, ctx_from_support, hits_to_death,
                                         mask_intact, mask_state, pending_from_tags)
 from ssbot.safety.invariants import Verdict
 from ssbot.safety.pause_quit import availability_from_state
@@ -92,7 +96,7 @@ QUIT, DIAGNOSE, SELF_CHECK = "QUIT", "DIAGNOSE", "SELF_CHECK"     # what to do o
 _ON_PAUSED_RANK = {None: 0, SELF_CHECK: 1, DIAGNOSE: 2, QUIT: 3}
 RESUME_SELF_CHECK, RESUME_EVADE_EXIT = "self_check", "evade_exit"   # notify_resumed reasons
 
-QUIT_TRIGGERS = ("Q1", "Q2", "Q3", "Q6")
+QUIT_TRIGGERS = ("Q1", "Q2", "Q3", "Q6", "QF")   # QF: a fault injected by the pause stress test (inject)
 UNKNOWN_SOURCE = "unknown support"
 NOTHING: frozenset[Prim] = frozenset()
 
@@ -322,6 +326,12 @@ class Supervisor:
         self.hero: _Hero | None = None
         self.never_seen_s = 0.0
         self.reasons_latched: list[str] = []
+        self.injected: list[tuple[str, str]] = []
+
+    def inject(self, tid: str = "QF", why: str = "injected fault") -> None:
+        """Fire trigger `tid` on the next step (the pause stress test, DESIGN §3.7.5 G1 fault injection: a quit
+        trigger at a chosen frame, with no damage, so the pause loop runs from any moment of the fight)."""
+        self.injected.append((tid, why))
 
     def notify_paused(self) -> None:
         """The pause loop confirmed the pause (PAUSE_MENU seen)."""
@@ -373,6 +383,17 @@ class Supervisor:
         out: list[tuple[str, str]] = []
         if h is not None and h <= 1:
             out.append(("Q1", f"hits_to_death {h}"))
+        elif h == UNBOUNDED and hero is not None:
+            # nothing in support now (certified empty: the Bell Beast underground), but the support covers only the
+            # horizon: the encounter's worst event comes back. Q1 on that, so the pause comes while nothing can hurt
+            # instead of when the threat reappears (pause stress chunk 20261002_232051 ep 35: hit to 1 HP with the
+            # boss submerged, h UNBOUNDED, tier GREEN, the planner kept fighting; only a Q4 paused it 15 frames later)
+            # the encounter's own worst event, as the visible boss's would count (an intact Fractured Mask covers it)
+            floor = SupportEvent("worst known event", max(1, cfg.worst_known_damage, self.worst_seen))
+            hf = hits_to_death(hero.hp, hero.blue, mask_intact(hero.mask),
+                               ctx_from_support((floor,), inp.pending_dmg, inp.pending_mask_covers))
+            if hf <= 1:
+                out.append(("Q1", f"hits_to_death {hf} against the worst known event (support empty now)"))
         if inp.i2_violated and (inp.escape_s is None or inp.escape_s > cfg.q2_escape_s):
             out.append(("Q2", "I2 broken, no escape within "
                               f"{cfg.q2_escape_s} s" + ("" if inp.escape_s is None else f" ({inp.escape_s:.2f} s)")))
@@ -416,6 +437,8 @@ class Supervisor:
         for hook in cfg.hooks:
             for tid in hook(inp) or ():
                 out.append((tid, f"hook {getattr(hook, '__name__', 'hook')}"))
+        out.extend(self.injected)
+        self.injected = []
         return out
 
     def _arm(self, on_paused: str) -> None:

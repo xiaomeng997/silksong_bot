@@ -171,7 +171,7 @@ namespace SsOracle.Ipc
         private void SendHello()
         {
             var w = new MsgPackWriter(1024);
-            w.MapHeader(8);
+            w.MapHeader(9);
             w.Key("role"); w.Str("oracle");
             w.Key("schema"); w.UInt(Protocol.SchemaVersion);
             w.Key("plugin"); w.Str(Core.Plugin.Version);
@@ -180,6 +180,7 @@ namespace SsOracle.Ipc
             w.Key("qpc_freq"); w.Int(Core.Qpc.Frequency);
             w.Key("rpcs"); var names = new List<string>(Rpc.Names); w.ArrayHeader(names.Count); foreach (var n in names) w.Str(n);
             w.Key("buttons"); w.ArrayHeader(Input.KeyboardInjector.ButtonNames.Length); foreach (var b in Input.KeyboardInjector.ButtonNames) w.Str(b);
+            w.Key("action_flags"); w.ArrayHeader(Input.ActionScheduler.FlagNames.Length); foreach (var n in Input.ActionScheduler.FlagNames) w.Str(n);
             Send(Protocol.MsgType.Hello, w);
         }
 

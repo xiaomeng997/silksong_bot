@@ -33,6 +33,7 @@ internal static class Program
         RePressKeepsBothEdges();
         LeftRightNeverTogether();
         ReleaseAllDropsQueuedEdges();
+        ExclusiveClearsOtherKeysAtOnce();
         BoundedBacklog();
         ExportedStateIsSufficient();
         LatencyModelDraws();
@@ -232,6 +233,34 @@ internal static class Program
         g.ReleaseAll();
         var any = Enumerable.Range(0, 6).Select(_ => g.Step(0)).Any(m => m != 0);
         Check(!any && g.TapsCollapsed == 1, "ReleaseAll: a press queued but not yet latched is dropped");
+    }
+
+    /// <summary>
+    /// The ACTION EXCLUSIVE flag (HoldFilter.Exclusive, the pause loop's ACTIONs): on the Pause press's own latch no
+    /// other key is down, even one pressed on the frame before (released below its 2-frame minimum press), and a
+    /// press queued for a game key never fires later (the pause_stress key leak: a planner key latched on the pause
+    /// frame, or a deferred re-press replayed into the menu).
+    /// </summary>
+    private static void ExclusiveClearsOtherKeysAtOnce()
+    {
+        const uint Pause = 1u << 14;
+        var f = new HoldFilter(Left, Right);
+        f.Step(Right);
+        f.Step(Right | Jump);                           // jump pressed on the frame before the pause (age 1)
+        f.Push(Right);                                  // the planner releases right ...
+        f.Push(Right | Attack);                         // ... and queues right + attack again
+        f.Exclusive(Pause);
+        f.Push(Pause);
+        var seen = new List<uint> { f.Step(Pause) };
+        for (var i = 0; i < 10; i++) seen.Add(f.Step(i < 2 ? Pause : 0));
+        Check(seen[0] == Pause, $"Exclusive: the Pause press's latch carries nothing else (0x{seen[0]:x})");
+        Check(seen.All(m => (m & ~Pause) == 0) && f.PendingToggles == 0,
+            $"Exclusive: no game key latched afterwards, nothing queued ({string.Join(",", seen.Select(m => m.ToString("x")))})");
+        Check(f.ReleasedEarly == 1, $"Exclusive counts the key released below its minimum press ({f.ReleasedEarly})");
+        // the abandoned keys obey the minimum release afterwards like any released key
+        f.Push(Jump);
+        var again = Enumerable.Range(0, 4).Select(_ => f.Step(Jump)).ToList();
+        Check(again.All(m => (m & Jump) != 0), "Exclusive: a later press of an abandoned key latches normally");
     }
 
     private static void BoundedBacklog()

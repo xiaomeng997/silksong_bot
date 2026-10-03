@@ -196,6 +196,38 @@ namespace SsOracle.Input
             }
         }
 
+        /// <summary>Keys Exclusive released below their minimum press.</summary>
+        public long ReleasedEarly { get; private set; }
+
+        /// <summary>
+        /// The ACTION EXCLUSIVE flag (DESIGN §3.7.5, §3.8.2 "no game key may reach a visible menu"): from this latch
+        /// on, no key outside <paramref name="keep"/> is down. Every other key is released now, below its minimum
+        /// press if need be (a key being abandoned for the pause menu needs no guarantee that the game sampled it), and
+        /// every edge still queued for it is dropped, so no deferred press replays into the menu. The kept keys follow
+        /// the usual limits (call Push / Step with them after this). Before it, a planner key pressed on the frame
+        /// before the pause stayed latched on the pause frame (2-frame minimum press) and a press deferred by the
+        /// minimum release fired inside the menu (pause_stress: 9 of 37 gate / live QUITs, 20261002_123347 ...).
+        /// </summary>
+        public void Exclusive(uint keep)
+        {
+            for (var i = 0; i < Bits; i++)
+            {
+                var bit = 1u << i;
+                if ((keep & bit) != 0) continue;
+                if (pending[i] > 0 && (latched & bit) == 0) TapsCollapsed += (pending[i] + 1) / 2;
+                pending[i] = 0;
+                deferred[i] = false;
+                exclusiveWaiting[i] = false;
+                if ((latched & bit) != 0)
+                {
+                    if (age[i] < MinPressFrames) ReleasedEarly++;
+                    latched &= ~bit;
+                    age[i] = 0;          // Step ages it to 1: released on this latch, like any release
+                }
+            }
+            desired &= keep;
+        }
+
         /// <summary>Un-latch a press made this frame that collides with the opposite direction. If the caller no longer
         /// wants the key, what is left queued is a stale tap (an even number of edges): drop it rather than fire it
         /// later.</summary>

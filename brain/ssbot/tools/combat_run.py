@@ -61,7 +61,7 @@ def make_policy(name: str, view: str = "oracle", run_dir: Path | None = None, in
         from ssbot.train.planner_policy import PlannerPolicy
         pol = PlannerPolicy(view=view, threads=threads, log_dir=run_dir, instance=instance, real_quit_p=real_quit)
         if inject_hits > 0:
-            # the pause stress test (ssbot.train.hit_injection, ssbot.tools.pause_stress): one hit per episode
+            # the pause stress test (ssbot.train.hit_injection, ssbot.tools.pause_stress): one fault per episode
             from ssbot.train.hit_injection import HitInjector
             pol = HitInjector(pol, p_event=inject_hits)
         return pol
@@ -83,11 +83,14 @@ def mode_config(mode: str, seed: int, timebox_s: float | None = None):
 
 def _in_game_without_control(s: dict) -> bool:
     """A save is loaded (a scene, the hero exported, not the title or save-select menus) but Hornet takes no input:
-    a cutscene (the post-kill memory scene), a transition or a load. load_slot only knows the menus and gameplay."""
-    from ssbot.probes.common import MENU_MAIN, MENU_SAVE_PROFILES, in_gameplay
+    a cutscene (the post-kill memory scene), a transition or a load. load_slot only knows the menus and gameplay.
+    While PLAYING the menu state is not read: UIManager keeps the save-select menuState after a game starts from it
+    (instance 4's first start, 2026-10-02: an empty slot 1 began a new game in Tut_01 with menu still SAVE_PROFILES,
+    and load_slot pressed Enter there and timed out twice)."""
+    from ssbot.probes.common import GS_PLAYING, MENU_MAIN, MENU_SAVE_PROFILES, in_gameplay
     g = s.get("game") or {}
-    return bool(g.get("scene")) and bool(s.get("hero")) and g.get("menu") not in (MENU_MAIN, MENU_SAVE_PROFILES) \
-        and not in_gameplay(s)
+    on_menu = g.get("gs") != GS_PLAYING and g.get("menu") in (MENU_MAIN, MENU_SAVE_PROFILES)
+    return bool(g.get("scene")) and bool(s.get("hero")) and not on_menu and not in_gameplay(s)
 
 
 def worker(a: argparse.Namespace) -> int:
@@ -330,9 +333,10 @@ def main(argv: list[str] | None = None) -> int:
                        help="probability that a confirmed supervisor pause quits for real (menu, Yes, main menu), "
                             "then the worker reloads sandbox slot 1 and the savestate")
         p.add_argument("--inject-hits", type=float, default=0.0, metavar="SHARE",
-                       help="pause stress test: inject one hit per episode (hurt.special, HP down to 1, so the "
-                            "supervisor must quit), SHARE of them timed on kills / hits / bounces / the roar, the "
-                            "rest on airborne / attack / cast / pogo moments (0: off); summarise with "
+                       help="pause stress test: inject one fault per episode (a hit down to 1 HP through "
+                            "hurt.special, a supervisor quit trigger QF, or both on one tick), SHARE of them on the "
+                            "hard moments (kill, bounce, Silkspear cast, clash, the pause press), the rest on "
+                            "airborne / attack / pogo frames or with planner keys down (0: off); summarise with "
                             "ssbot.tools.pause_stress")
         if name == "run":
             p.add_argument("--instances", default="0")

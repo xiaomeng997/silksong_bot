@@ -18,6 +18,12 @@ BUTTONS = (
 )
 BIT = {name: i for i, name in enumerate(BUTTONS)}
 
+# ACTION flags (the optional 5th element; ActionScheduler.FlagExclusive). EXCLUSIVE: from the ACTION's frame no key
+# outside its mask is down (others released at once, below their minimum press if need be, queued edges dropped):
+# the pause loop and quit sequence send it so no planner key reaches the pause menu. HELLO "action_flags" lists the
+# flags an oracle knows; an older oracle reads four elements and ignores the fifth.
+ACTION_EXCLUSIVE = 1
+
 
 class MsgType(IntEnum):
     HELLO = 1
