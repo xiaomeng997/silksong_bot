@@ -185,6 +185,12 @@ def categorize(tr: Trace, horizon: int, modes: np.ndarray, events: np.ndarray, t
         ("downspike", np.isin(mw, (km.M_DS_ANTIC, km.M_DS_SPIKE)).any(axis=1)),
         ("cast", (mw == km.M_CAST).any(axis=1)),
         ("bind", (mw == km.M_BIND).any(axis=1)),
+        # Forum loadout primitives (modes only classified with HeroParams.abilities: classify_modes(forum=True))
+        ("wall", (tr.flag("wallSliding") | tr.flag("wallClinging"))[I].any(axis=1)),
+        ("glide", (mw == km.M_GLIDE).any(axis=1)),
+        ("dash", np.isin(mw, (km.M_DASH, km.M_SPRINT)).any(axis=1)),
+        ("reaper_down", (mw == km.M_RPR_DS).any(axis=1)),
+        ("hard_landing", (mw == km.M_HARD_LAND).any(axis=1)),
         ("recovering", np.isin(mw[:, 0], (km.M_HURT_FREEZE, km.M_HURT_RECOIL))),
         ("contact", (ew & CONTACT).any(axis=1)),
         ("hurt", (ew & HURT).any(axis=1)),
@@ -243,7 +249,7 @@ def check_trace(tr: Trace, terrains: dict[str, Terrain2D], params: HeroParams, h
                 tol: float = 0.1, settings: tuple[str, ...] = SETTINGS, bounds: bool = True,
                 batch: int = 16384) -> dict:
     """Run every covered window of one trace in each setting; returns the per-window errors (NaN: not run)."""
-    modes = km.classify_modes(tr)
+    modes = km.classify_modes(tr, forum=bool(params.abilities))
     events = km.derive_events(tr, modes)
     starts, labels = categorize(tr, horizon, modes, events, terrains, params.frame_time_max)
     run = np.flatnonzero([not lab.startswith("uncovered:") or lab in ("uncovered:locked", "uncovered:harness",
