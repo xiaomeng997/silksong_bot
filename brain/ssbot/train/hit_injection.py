@@ -52,6 +52,12 @@ min_s after the policy's first tick so the fight is under way. Trigger faults ar
 policy's tick, so its supervisor raises PAUSE_PENDING on that very STATE; the hit RPC is sent at the STATE of the
 chosen frame and lands at the oracle's next RPC pump (1-2 frames later): the recording's damage event is the hit frame
 that counts.
+Low-HP check (Q1 / Q1a, DESIGN §3.7.4, the person's rule of 2026-10-03): SSBOT_INJECT_LEAVE_HP=1,2,3 makes every
+fault a hit that leaves that many masks (drawn per episode; 1-2 HP is h 1 against the Bell Beast's 2-mask hits: Q1's
+quit in the post-hit window; 3 HP is h 2: Q1a's heal first), of kind "anytime" unless SSBOT_INJECT_KINDS says
+otherwise: at a random moment 0-ANYTIME_SPREAD_S after min_s, on the first frame the hero can take it;
+SSBOT_INJECT_MIN_SILK=9 holds it until the hero has the Bind's silk (with combat_run --start-silk 9 9 and the
+playbook's Bind reserve the hero keeps it from the start).
 Everything else is the wrapped policy's (attribute access falls through), so the harness sees the same pause
 ownership, outcome and stats, plus stats()["inject"].
 """
@@ -66,6 +72,7 @@ COVERAGE_KINDS = AIR_KINDS + ("keys",)
 EVENT_KINDS = ("bounce", "cast", "menu", "kill", "clash")
 EVENT_WEIGHTS = (3, 3, 2, 1, 0)
 FAULT_HIT, FAULT_TRIGGER, FAULT_MENU = "hit", "trigger", "menu"
+ANYTIME_SPREAD_S = 20.0              # "anytime" hits: uniform over this long after min_s
 HS_AIRBORNE = 3                      # GlobalEnums.ActorStates.airborne
 HERO_HIT = 5                         # Bell Beast: every nail hit 5 HP (supervision.HERO_HIT_FLOOR)
 NEEDLE_HIT = 15                      # Silkspear ("Needle Damage", run 20261002_190611: 26 of 26 hits 15 HP)
@@ -126,6 +133,10 @@ class HitInjector:
         self._menu_hit_at: int | None = None
         # SSBOT_INJECT_KINDS=menu,kill: draw only these kinds (targeted chunks); unset: p_event and the weights
         self.only = tuple(k for k in os.environ.get("SSBOT_INJECT_KINDS", "").split(",") if k)
+        # SSBOT_INJECT_LEAVE_HP=1,2,3: hits that leave this many masks (the low-HP check); SSBOT_INJECT_MIN_SILK
+        self.leave_hp = tuple(int(k) for k in os.environ.get("SSBOT_INJECT_LEAVE_HP", "").split(",") if k)
+        self.min_silk = int(os.environ.get("SSBOT_INJECT_MIN_SILK", "0") or 0)
+        self.target_hp = 1
 
     def __getattr__(self, name):          # pause_owned, episode_outcome, real_quit_active, planner_last, ...
         return getattr(self.inner, name)
@@ -146,7 +157,12 @@ class HitInjector:
             self.boss_type = getattr(enc, "boss_type", self.boss_type)
             self.death_states = tuple(getattr(enc, "death_states", self.death_states))
         r = random.Random(rng.random())      # after the inner policy's own draws: its seeds are those of a plain run
-        if self.only:
+        self.target_hp = 1
+        if self.leave_hp:
+            self.target_hp = r.choice(self.leave_hp)
+            kind = r.choice(self.only) if self.only else "anytime"
+            fault = FAULT_HIT
+        elif self.only:
             kind = r.choice(self.only)
             fault = {"menu": FAULT_MENU, "bounce": FAULT_TRIGGER, "keys": FAULT_TRIGGER}.get(kind) or (
                 r.choice((FAULT_HIT, FAULT_TRIGGER)) if kind in EVENT_KINDS else FAULT_HIT)
@@ -158,7 +174,9 @@ class HitInjector:
             fault = FAULT_TRIGGER if kind == "keys" else FAULT_HIT
         if fault in (FAULT_TRIGGER, FAULT_MENU) and getattr(self.inner, "sc", None) is None:
             fault = FAULT_HIT                # no supervisor to trigger: the plain hit
-        if kind == "kill" and fault == FAULT_TRIGGER:
+        if kind == "anytime":
+            offset = r.randint(0, int(ANYTIME_SPREAD_S * 60))
+        elif kind == "kill" and fault == FAULT_TRIGGER:
             offset = r.randint(-3, 2)
         elif fault == FAULT_MENU:
             offset = r.randint(0, 1)         # ticks from the trigger to the hit: lands 1 frame before / on the press
@@ -177,7 +195,7 @@ class HitInjector:
         self._attacks = []
         self._menu_hit_at = None
         self.log = {"kind": kind, "fault": fault, "offset": offset, "sent": [], "replies": [], "fallback": False,
-                    "moments": []}
+                    "moments": [], "target_hp": self.target_hp}
 
     def stats(self) -> dict:
         st = self.inner.stats() if hasattr(self.inner, "stats") else {}
@@ -250,6 +268,8 @@ class HitInjector:
         """The frame to fire at, once this episode's moment is seen (or, for a committed kill, predicted)."""
         f = s["f"]
         k, o = self.kind, self.offset
+        if k == "anytime":
+            return f + o if not self.retries else f      # a refused hit goes again at once
         if k in ("bounce", "cast", "clash"):
             if x[k]:
                 self.log["moments"].append([k, f])
@@ -324,8 +344,10 @@ class HitInjector:
         g = s.get("game") or {}
         h = s.get("hero") or {}
         hp = h.get("health")
-        need = 1 if self.fault == FAULT_TRIGGER else 2
+        need = 1 if self.fault == FAULT_TRIGGER else self.target_hp + 1
         if g.get("paused") or not isinstance(hp, int) or hp < need or getattr(self.inner, "pause_owned", False):
+            return False
+        if self.min_silk and self.fault != FAULT_TRIGGER and int(h.get("silk") or 0) < self.min_silk:
             return False
         return self.fault == FAULT_TRIGGER or _takes_hits(h)
 
@@ -382,5 +404,5 @@ class HitInjector:
     def _hit(self, s: dict) -> None:
         h = s.get("hero") or {}
         side = "left" if h.get("facing", 1) > 0 else "right"
-        self.fut = self.link.rpc_async("hurt.special", kind="damage", amount=int(h["health"]) - 1,
+        self.fut = self.link.rpc_async("hurt.special", kind="damage", amount=int(h["health"]) - self.target_hp,
                                        hazard="ENEMY", side=side)

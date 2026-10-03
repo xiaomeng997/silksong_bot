@@ -347,3 +347,36 @@ def test_trial_of_a_menu_fault_counts_the_hit_next_to_the_first_press():
     assert t["first_pausable"] == 16 and t["paused"] == 18 and t["latency"] == 2
     s = ps.summarize([t])
     assert s["special_share"] == 1.0 and s["special_share_without_menu"] == 0.0
+
+
+def test_leave_hp_env_hits_down_to_the_drawn_target_with_the_silk_for_a_heal(monkeypatch):
+    """The Q1 / Q1a low-HP check (SSBOT_INJECT_LEAVE_HP, SSBOT_INJECT_MIN_SILK): every fault is an "anytime" hit that
+    leaves the drawn HP, held until the hero has the silk and more HP than the target."""
+    monkeypatch.setenv("SSBOT_INJECT_LEAVE_HP", "1,3")
+    monkeypatch.setenv("SSBOT_INJECT_MIN_SILK", "9")
+    targets = set()
+    for seed in range(40):
+        inj = HitInjector(Inner(), p_event=0.0, min_s=1.0)
+        inj.reset(random.Random(seed), None)
+        assert inj.kind == "anytime" and inj.fault == "hit" and 0 <= inj.offset <= 1200
+        targets.add(inj.target_hp)
+    assert targets == {1, 3}
+    inj = HitInjector(Inner(), p_event=0.0, min_s=1.0)
+    link = FakeLink()
+    inj.attach(link)
+    inj.reset(random.Random(3), None)
+    inj.target_hp, inj.offset = 3, 10
+
+    def hero(f: int, hp: int = 5, silk: int = 9) -> dict:
+        return {"f": f, "game": {"paused": False}, "hero": {"health": hp, "silk": silk, "hero_state": 1,
+                                                             "vel": [0.0, 0.0], "facing": 1, "anim": {"clip": "Idle"}}}
+    for f in range(0, 80):
+        inj.act(hero(f, silk=8))                                      # the heal's silk not there yet
+    assert not link.calls
+    for f in range(80, 100):
+        inj.act(hero(f, hp=3))                                        # HP 3: nothing above the target to take
+    assert not link.calls
+    for f in range(100, 130):
+        inj.act(hero(f))
+    assert len(link.calls) == 1 and link.calls[0]["amount"] == 2      # 5 -> 3
+    assert inj.stats()["inject"]["target_hp"] == 3

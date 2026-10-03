@@ -68,15 +68,16 @@ def make_policy(name: str, view: str = "oracle", run_dir: Path | None = None, in
     raise SystemExit(f"unknown policy {name}")
 
 
-def mode_config(mode: str, seed: int, timebox_s: float | None = None):
+def mode_config(mode: str, seed: int, timebox_s: float | None = None, silk: tuple[int, int] | None = None):
     """timebox_s overrides the encounter's (the Forum's default is 1500 s: complete gauntlets with the random data
-    policy took 714-990 s, 10 episodes of the runs of 2026-10-02, and the finale comes last)."""
+    policy took 714-990 s, 10 episodes of the runs of 2026-10-02, and the finale comes last). silk: eval mode's
+    randomize_start silk range (--start-silk; None: as loaded)."""
     from ssbot.train.episode import EpisodeConfig
     if mode == "data":
         return EpisodeConfig(mode="data", seed=seed, hp=(1, 5), silk=(0, 9), dx=(-6.0, 2.0), facing="random",
                              wait_frames=(0, 30), timebox_s=timebox_s)
     if mode == "eval":
-        return EpisodeConfig(mode="eval", seed=seed, hp=None, silk=None, dx=(-3.0, 1.0), facing="random",
+        return EpisodeConfig(mode="eval", seed=seed, hp=None, silk=silk, dx=(-3.0, 1.0), facing="random",
                              wait_frames=(0, 30), timebox_s=timebox_s)
     raise SystemExit(f"unknown mode {mode}")
 
@@ -107,6 +108,10 @@ def worker(a: argparse.Namespace) -> int:
     tap = make_tap(link, enc)
     policy = make_policy(a.policy, a.view, run_dir, a.instance, a.threads, a.real_quit, a.inject_hits,
                          gauntlet=bool(enc.waves))
+    if a.silk_reserve:
+        pb = getattr(getattr(policy, "inner", policy), "pb", None)
+        if pb is not None:
+            pb.bind_reserve_at_full_hp = True
     if hasattr(policy, "attach"):
         policy.attach(link)
     if hasattr(policy, "warmup"):
@@ -156,7 +161,8 @@ def worker(a: argparse.Namespace) -> int:
             rec = AttemptRecord(unit=enc.name, stage="TRAIN", profile="TRAIN" if a.view == "oracle" else "SIM_FINAL",
                                 build="1.0.30000", code_rev=rev,
                                 config_fp=fp, start_kind="savestate", mode=a.mode, seed=seed)
-            run_episode(link, enc, tap, policy, mode_config(a.mode, seed, a.timebox or None), rec)
+            run_episode(link, enc, tap, policy, mode_config(a.mode, seed, a.timebox or None,
+                                                            tuple(a.start_silk) if a.start_silk else None), rec)
             d = asdict(rec)
             d["instance"] = a.instance
             d["episode"] = k
@@ -227,6 +233,10 @@ def run(a: argparse.Namespace) -> int:
                str(a.episodes), "--hours", str(a.hours or 0), "--rotate", str(a.rotate), "--seed", str(a.seed),
                "--view", a.view, "--threads", str(a.threads), "--real-quit", str(a.real_quit),
                "--inject-hits", str(a.inject_hits), "--timebox", str(a.timebox or 0)]
+        if a.start_silk:
+            cmd += ["--start-silk", str(a.start_silk[0]), str(a.start_silk[1])]
+        if a.silk_reserve:
+            cmd.append("--silk-reserve")
         if a.no_record:
             cmd.append("--no-record")
         log = (run_dir / f"worker_i{i}.log").open("w", encoding="utf-8")
@@ -358,6 +368,11 @@ def main(argv: list[str] | None = None) -> int:
                             "hard moments (kill, bounce, Silkspear cast, clash, the pause press), the rest on "
                             "airborne / attack / pogo frames or with planner keys down (0: off); summarise with "
                             "ssbot.tools.pause_stress")
+        p.add_argument("--start-silk", type=int, nargs=2, default=None, metavar=("LO", "HI"),
+                       help="eval mode: randomize_start's silk range at the wake (default: as loaded)")
+        p.add_argument("--silk-reserve", action="store_true",
+                       help="planner policy: keep the Bind's 9 silk at full HP too (playbook "
+                            "reserve_at_full_hp; the Q1a low-HP check starts with 9 silk and keeps it)")
         if name == "run":
             p.add_argument("--instances", default="0")
         else:
