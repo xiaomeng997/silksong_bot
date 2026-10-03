@@ -14,8 +14,8 @@ Sources, best first (GauntletTap):
                  BattleScene's DecrementEnemy rule on the known wave list (WaveSim). Exact for the DecrementEnemy
                  path; BattleScene also ends a wave when the wave transforms' child count drops to remainingEnemyToEnd
                  (DoCheckEnemies, 1 s after each start), which the sim does not see.
-  spawns         the first "fsm" event of a wave-0 enemy GameObject (they are inactive until StartWave(0)) marks the
-                 battle start when room.battles is absent.
+  spawns         the FSM start ("fsm" event with from None) of a wave-0 enemy GameObject whose name no later wave
+                 reuses (they are inactive until StartWave(0)) marks the battle start when room.battles is absent.
   end            freeze "EnemyBattleEndSlow" after the start, or the sim finishing the last wave: CLEAR.
 
 Allies (STATE "allies", Entities.AllyWatch, commit cd215cc) are recorded when present; their kills are counted from
@@ -104,7 +104,10 @@ class GauntletTap:
     def __init__(self, link, enc):
         self.enc = enc
         self._lock = threading.Lock()
-        self._wave0 = set(enc.waves[0].enemies) if enc.waves else set()
+        # wave 0's enemy GameObjects whose name no later wave reuses (Forum: "Song Reed" is also wave 12's, which is
+        # active from the load and runs its FSM before the battle); their FSM start (from None) is the activation
+        later = {n for w in enc.waves[1:] for n in w.enemies}
+        self._wave0 = set(enc.waves[0].enemies) - later if enc.waves else set()
         self.reset()
         link.subscribe_state(self._on)
 
@@ -180,7 +183,8 @@ class GauntletTap:
                 d = ev.get("d") or {}
                 if k == "fsm":
                     obj = d.get("obj")
-                    if self.wake_frame is None and obj in self._wave0 and not self.battle_seen:
+                    if (self.wake_frame is None and obj in self._wave0 and d.get("from") is None
+                            and not self.battle_seen):
                         self._start(f, "wave0 spawn")
                         self.sim.start(f)
                     if self.wake_frame is not None and d.get("to"):

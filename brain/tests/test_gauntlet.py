@@ -64,7 +64,11 @@ def test_tap_start_waves_and_end_from_kills():
     link = _Link()
     tap = GauntletTap(link, FORUM)
     f = 1000
-    link.feed({"f": f, "ev": [_ev("fsm", obj="Song Reed", fsm="Control", to="Idle")]})
+    link.feed({"f": f - 5, "ev": [_ev("fsm", obj="Song Reed", fsm="Control", to="Init", **{"from": None})]})
+    assert tap.wake_frame is None     # a name a later wave reuses (wave 12's Song Reed runs from the load)
+    link.feed({"f": f - 3, "ev": [_ev("fsm", obj="Song Pilgrim 01", fsm="Attack", to="Idle", **{"from": "Init"})]})
+    assert tap.wake_frame is None     # not a start
+    link.feed({"f": f, "ev": [_ev("fsm", obj="Song Pilgrim 01", fsm="Attack", to="Init", **{"from": None})]})
     assert tap.wake_frame == f and tap.wave == 0
     n = 0
     while tap.death_frame is None and n < 40:
@@ -104,7 +108,7 @@ def test_tap_prefers_room_battles_and_the_end_freeze():
 def test_tap_counts_state_entries_and_allies():
     link = _Link()
     tap = GauntletTap(link, FORUM)
-    link.feed({"f": 1, "ev": [_ev("fsm", obj="Song Reed", fsm="Control", to="Idle")]})
+    link.feed({"f": 1, "ev": [_ev("fsm", obj="Song Pilgrim 03", fsm="Attack", to="Init")]})
     link.feed({"f": 2, "ev": [_ev("fsm", obj="Song Reed (1)", fsm="Control", to="Stab Antic")],
                "allies": [{"name": "Garmond Fighter", "active": True, "state": "Jump In"},
                           {"name": "Shakra Fighter", "active": True, "state": "Dormant"}]})
