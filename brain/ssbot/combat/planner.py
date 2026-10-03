@@ -653,9 +653,28 @@ class Planner:
                 g = tgts[max(int(ti), 0)]
                 idx = np.flatnonzero(pogo_tgt[pg] == ti)
                 cn = np.zeros(len(idx), np.bool_)
-                _lanes_connect(np.ascontiguousarray(rl.var_box[idx]), np.ascontiguousarray(rl.var_flags[idx]),
-                               np.ascontiguousarray(rl.var_mode[idx]), np.ascontiguousarray(latched[pg[idx]]), face0,
-                               g.cbox, g.cok, g.cpolys, g.cstarts, g.cbase, win, cn)
+                buckets = getattr(g, "buckets", None)
+                if buckets is None:
+                    _lanes_connect(np.ascontiguousarray(rl.var_box[idx]), np.ascontiguousarray(rl.var_flags[idx]),
+                                   np.ascontiguousarray(rl.var_mode[idx]), np.ascontiguousarray(latched[pg[idx]]),
+                                   face0, g.cbox, g.cok, g.cpolys, g.cstarts, g.cbase, win, cn)
+                else:
+                    # the certain form of the bucket that covers the row's bounce (+ BUCKET_SLACK frames for the
+                    # lanes' spread); rows bouncing beyond the last bucket, or with no form at all, are rejected
+                    kb0 = np.argmax((ev[pg[idx]] & kin.EV_POGO) != 0, axis=1) + BUCKET_SLACK
+                    done = np.zeros(len(idx), bool)
+                    for kb, cbox, cok, cp, cst, cbs in buckets:
+                        sel = np.flatnonzero(~done & (kb0 <= kb))
+                        if not len(sel):
+                            continue
+                        done[sel] = True
+                        cs_ = np.zeros(len(sel), np.bool_)
+                        _lanes_connect(np.ascontiguousarray(rl.var_box[idx[sel]]),
+                                       np.ascontiguousarray(rl.var_flags[idx[sel]]),
+                                       np.ascontiguousarray(rl.var_mode[idx[sel]]),
+                                       np.ascontiguousarray(latched[pg[idx[sel]]]), face0, cbox, cok, cp, cst, cbs,
+                                       win, cs_)
+                        cn[sel] = cs_
                 conn[idx] = cn
             for n, c in enumerate(pg):
                 ok_all = bool(conn[n])
@@ -751,6 +770,8 @@ class Planner:
         base = np.array([b0[0], b0[1]])
         bt = _Target(np.ascontiguousarray(boss, np.float64), np.ascontiguousarray(okb),
                      np.ascontiguousarray(polys, np.float64), np.ascontiguousarray(starts, np.int64), base)
+        # vision view: the pogo gate checks the boss eroded by the measured box residuals, per horizon bucket
+        bt.buckets = f.certain_boss(bt.box, bt.ok, bt.polys, bt.starts, tk) if hasattr(f, "certain_boss") else None
         out.append(bt)
         paths = f.target_paths(tk) if hasattr(f, "target_paths") else []
         for pth in paths:
@@ -1196,6 +1217,7 @@ def _attacks_of(box, flags, mode, lat, face0, boss, okb, polys, starts, base, wi
 MACRO_MARGIN = 5.0             # J (half a hit) another plan needs over a started macro to replace it
 CAST_AFTER_POGO = 12           # frames after a predicted pogo in which a Silkspear press counts as unsafe
 REDIRECT_K = 12                # side-slash-on-a-drop-bell rows scored on the redirected path per tick (earliest hits)
+BUCKET_SLACK = 3               # vision view's pogo gate: frames added to a row's nominal bounce to pick its margin
 
 
 def _is_macro(name: str) -> bool:

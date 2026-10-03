@@ -38,7 +38,7 @@ from ssbot.backends.degraded import DegradedOracleBackend
 from ssbot.backends.observability import ObservabilityFilter
 from ssbot.backends.oracle_backend import OracleBackend
 from ssbot.combat.boss_model import BossModel
-from ssbot.combat.forecast import Forecaster, load_hurtbox, load_planner_templates
+from ssbot.combat.forecast import Forecaster, load_box_margin, load_hurtbox, load_planner_templates
 from ssbot.combat.planner import Planner, PlannerConfig
 from ssbot.combat.safety_filter import FilterContext
 from ssbot.combat.tactics import Tactics, load_playbook
@@ -72,6 +72,11 @@ DUST_TELL = {"Bone Beast": {"Emerge Antic C": [(0.3, "dust"), (0.6, "dust_low")]
     f"BoneBeast DropBell {b}": {"Antic": [(0.3, "bell_dust")]} for b in ("L", "L2", "M", "M2", "R", "R2")}
 BURST_TELL = {"Bone Beast": {"Burst Antic": "burst_tell"}}
 TELLS = {"degraded": None, "degraded_dust": DUST_TELL, "degraded_tell": BURST_TELL}
+# Vision view: the attack fit (combat.attack_fit) re-times the boss's predicted path; off by default since the tracker
+# anchors the attack's start at every drawn phase's entry (task V, boss_path_audit --view degraded_dust on live run
+# 20261002_171806, 8 fights: the fit changed the charge's box errors by < 0.1 u and put the leap's top 4.4 u off at
+# p99, +12 frames, against 0.8 u without it). SSBOT_FUSION=1 turns it back on.
+FUSION = os.environ.get("SSBOT_FUSION", "0") == "1"
 VIEWS = ("oracle", "degraded", "degraded_dust", "degraded_tell")
 
 
@@ -178,12 +183,16 @@ class PlannerPolicy:
         self.fc.no_hurtbox = self.pb.no_hurtbox
         self.fc.shape_from = self.pb.shape_from          # the emerge predicted with the charge's shape
         self.fc.bell_tells = view == "degraded_dust"
-        if fview != ORACLE and os.environ.get("SSBOT_FUSION", "1") == "1":
+        if fview != ORACLE and FUSION:
             from ssbot.combat.attack_fit import AttackFit
             self.fc.tracker.fit = AttackFit(self.model)   # multi-frame fusion of committed attacks
         if fview != ORACLE and os.environ.get("SSBOT_ATTACK_MODEL", "v2") != "v1":
             self.fc.hurtbox = load_hurtbox()     # vision: the hittable box per phase, not the sprite's (v1: the
             #                                      first attack model, for the audit's before)
+        if fview != ORACLE:
+            # the pogo gate's certain box: the predicted one eroded by the residuals measured in this view
+            # (boss_path_audit --margins); missing: {} (no pogo is ever certain), never the nominal box
+            self.fc.box_margin = load_box_margin() or {}
         self.tac = Tactics(self.pb)
         if view == "degraded" and self.pb.hidden_x_vision is not None:
             self.tac.hidden_x = self.pb.hidden_x_vision      # no cues: the stance with the least unreactable risk

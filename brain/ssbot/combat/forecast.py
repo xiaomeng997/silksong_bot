@@ -72,6 +72,7 @@ from ssbot.combat.bell_track import DropBellTracks, SKIN_Z
 from ssbot.combat.boss_model import TAIL, Anchor, BossModel
 from ssbot.combat.fastquery import circle_hits, query_par
 from ssbot.combat.pogo_targets import TargetTracker, simulate
+from ssbot.core.bosses import BELL_BEAST_PHASES as VE_PHASE_OF
 from ssbot.core.worldstate import ORACLE, VISION_EQUIVALENT, Entity, Ev, WorldState
 from ssbot.knowledge import hitbox_tables as hb
 from ssbot.safety.hits_to_death import SupportEvent, SupportSet
@@ -80,6 +81,8 @@ BIN = hb.BIN_S
 MIN_HORIZON_S = 0.8
 SUP_HORIZON_S = 0.8          # what the supervisor's support covers (hits_to_death's worst event "now")
 VE_ENTRY_SLACK = 1           # bins of slack on an observable phase's entry (a transition frame shows a clip early)
+FUSE_N = 10                  # VE: detections the boss's box x is averaged over (BossTracker.fused_pos) ...
+FUSE_N_Y = 30                # ... and its y (the mean path's height is flat along a charge, its x grows less exact)
 MAX_NODES = 400
 HIDDEN, UNKNOWN = "hidden", "unknown"
 DROP_BELL = "BoneBeast DropBell"
@@ -94,6 +97,8 @@ DET_SKIN_U = 0.1
 DET_REPLACE = os.environ.get("SSBOT_DET_BELLS", "1") != "0"   # SSBOT_DET_BELLS=0: the logged unions (A/B)
 # the vision view's drop-bell paths from their tracks (bell_track; SSBOT_DET_VE=0: the self templates, the A/B before)
 DET_VE = os.environ.get("SSBOT_DET_VE", "1") != "0"
+# the vision view's certain boss form only until its observable phase can end (SSBOT_CERT_PHASE_CUT=0: diagnostics)
+CERT_PHASE_CUT = os.environ.get("SSBOT_CERT_PHASE_CUT", "1") != "0"
 DET_STATES = frozenset({"Drop", "Air", "Bounce Up", "Bounce Air", "Submerge", "Tink Right", "Tink R Min", "Tink Left",
                         "Tink L Min", "Tink D", "Tink Right 2", "Tink R Min 2", "Tink Left 2", "Tink L Min 2", "Tink D 2"})   # world-fixed hazards with self templates (entities.<tk>.self_template)
 REST_STATES = ("Init", "Dormant")
@@ -459,7 +464,7 @@ class Forecast:
         if b is None:
             return None
         tab = self.fc.hurtbox
-        st = self.fc.tracker.state
+        st = self.fc.tracker.shape_key(tab)
         if self.fc.view != ORACLE and tab and st in tab and self.fc.tracker.t_entry is not None:
             bins = tab[st]
             k = str(min(int(max(0.0, self.origin_t - self.fc.tracker.t_entry) / 0.1), max(int(x) for x in bins)))
@@ -467,7 +472,7 @@ class Forecast:
             x0, y0, x1, y1 = m
             if b.flip_x:
                 x0, x1 = -x1, -x0
-            px, py = b.pos.v
+            px, py = self.fc.tracker.fused_pos(self.origin_t, b)
             return px + x0, py + y0, px + x1, py + y1
         ov = self._shape_override()
         if ov:
@@ -476,7 +481,8 @@ class Forecast:
         return _body_box(b)
 
     def _table_entry(self) -> dict | None:
-        tab, st = self.fc.hurtbox, self.fc.tracker.state
+        tab = self.fc.hurtbox
+        st = self.fc.tracker.shape_key(tab)
         if self.fc.view == ORACLE or not tab or st not in tab or self.fc.tracker.t_entry is None:
             return None
         bins = tab[st]
@@ -491,7 +497,7 @@ class Forecast:
             q = np.asarray(ent["poly"], np.float64)
             if self.boss.flip_x:
                 q = q * (-1.0, 1.0)
-            q = q + self.boss.pos.v
+            q = q + self.fc.tracker.fused_pos(self.origin_t, self.boss)
             return q, np.array([0, len(q)], np.int64)
         ov = self._shape_override()
         if ov:
@@ -504,6 +510,39 @@ class Forecast:
                 x0, y0, x1, y1 = bb
                 return np.array([[x0, y0], [x1, y0], [x1, y1], [x0, y1]], np.float64), np.array([0, 4], np.int64)
         return body_shape(self.boss)
+
+    def certain_boss(self, box: np.ndarray, okb: np.ndarray, polys: np.ndarray, starts: np.ndarray,
+                     tk: np.ndarray) -> list | None:
+        """The pogo gate's certain form of the boss (DESIGN 3.5.6: a pogo stands only if its spike meets the boss in
+        every timing lane; a miss lands the hero on it) in the vision view: per horizon bucket k_max (frames from the
+        origin), the shape eroded by how far the real box was seen inside the predicted one at that horizon while the
+        boss stayed in this observable phase (Forecaster.box_margin, ssbot.tools.boss_path_audit --margins), moved
+        along the nominal box, and only until the phase can end at the earliest (its states' shortest logged
+        dwells: the shape changes there, a charge's into its end, which the margins do not cover):
+        [(k_max, cbox [T, 4], ok [T], polys, starts, base)]. None in the oracle view (its box is the colliders'
+        own); [] when the phase has no measured margin (no pogo is certain then)."""
+        fc = self.fc
+        if fc.view == ORACLE or fc.box_margin is None:
+            return None
+        tab = fc.box_margin.get(fc.tracker.shape_key(fc.box_margin) or "")
+        if not tab or not len(polys):
+            return []
+        t_cut = fc.tracker.phase_left_min(self.origin_t) if CERT_PHASE_CUT else math.inf
+        okc = np.ascontiguousarray(okb & (np.asarray(tk) <= t_cut))
+        if not okc.any():
+            return []
+        b0 = np.array([polys[:, 0].min(), polys[:, 1].min(), polys[:, 0].max(), polys[:, 1].max()])
+        out = []
+        for kb in sorted(tab, key=int):
+            l, r, b, t = tab[kb]
+            cp = _eroded(polys, starts, float(l), float(r), float(b), float(t))
+            if cp is None:
+                continue
+            q, qs = cp
+            c0 = np.array([q[:, 0].min(), q[:, 1].min(), q[:, 0].max(), q[:, 1].max()])
+            out.append((int(kb), np.ascontiguousarray(box + (c0 - b0)[None, :]), okc, q, qs,
+                        np.ascontiguousarray(c0[:2])))
+        return out
 
     def target_paths(self, tk: np.ndarray) -> list:
         """Registry targets (pogo_targets: bells) on their predicted paths, tk seconds from the observation."""
@@ -553,6 +592,43 @@ class Forecast:
             box[:, [0, 2]] += (m * (xs - x0))[:, None]
             box[:, [1, 3]] += (ys - y0)[:, None]
         return box, ok
+
+
+@functools.lru_cache(maxsize=256)
+def _eroded_cached(key: bytes, n: int, starts: tuple, l: float, r: float, b: float, t: float):
+    from shapely.affinity import translate
+    from shapely.geometry import Polygon
+    pts = np.frombuffer(key, np.float64).reshape(n, 2)
+    outs = []
+    for a, z in zip(starts[:-1], starts[1:]):
+        p = Polygon(pts[a:z])
+        if not p.is_valid:
+            p = p.buffer(0)
+        # the real shape is this one moved by (dx, dy), dx in [-r, l], dy in [-t, b]: what all of them cover
+        q = p
+        for dx in (-r, l):
+            for dy in (-t, b):
+                q = q.intersection(translate(p, dx, dy))
+        if q.is_empty:
+            continue
+        geoms = getattr(q, "geoms", [q])
+        best = max((g for g in geoms if g.geom_type == "Polygon"), key=lambda g: g.area, default=None)
+        if best is None or best.area <= 1e-6:
+            continue
+        outs.append(np.asarray(best.exterior.coords, np.float64)[:-1])
+    if not outs:
+        return None
+    st = np.zeros(len(outs) + 1, np.int64)
+    st[1:] = np.cumsum([len(o) for o in outs])
+    return np.ascontiguousarray(np.concatenate(outs)), st
+
+
+def _eroded(polys: np.ndarray, starts: np.ndarray, l: float, r: float, b: float, t: float):
+    """Polygons (flat vertices, starts) eroded by a translation box: the part every shift (dx in [-r, l], dy in
+    [-t, b]) of them still covers (Minkowski erosion, exact for convex parts), or None when nothing is left."""
+    p = np.ascontiguousarray(polys, np.float64)
+    return _eroded_cached(p.tobytes(), len(p), tuple(int(x) for x in starts), round(l, 4), round(r, 4), round(b, 4),
+                          round(t, 4))
 
 
 def body_shape(e: Entity | None) -> tuple[np.ndarray, np.ndarray]:
@@ -609,6 +685,7 @@ class BossTracker:
         self.fit_anomalies = 0
         self._t_start0: float | None = None
         self._phase_t0: tuple | None = None    # VE: the drawn phase (and its entry) t_start was last anchored at
+        self._obs: list[tuple[float, float, float]] = []   # VE: detections (t, x, y) of the boss in this phase
         self.coasting = False                  # VE: no phase this frame (a ghost)
         self._anchor_sum: list[float] = []
         self.t = 0.0
@@ -810,6 +887,8 @@ class BossTracker:
             prev = self.state
             self.state, self.t_entry = ph, t - tau
             if ph == HIDDEN:
+                self._obs = []
+            if ph == HIDDEN:
                 self.t_hide = t - tau
                 if prev == "roar":
                     self.last_family = "BB_RAGE"
@@ -827,6 +906,7 @@ class BossTracker:
                     self.last_anchor = None
                     self.t_start = None
                     self._t_start0, self.fit_ok, self.fit_anchor = None, False, None
+                    self._obs = []         # a new attack: its own path (the fused position spans its phases)
                 self.last_family = fam if fam is not None else (None if ph == "dust" else self.last_family)
                 if ph == "roar":
                     self.ctx.raged = True
@@ -835,6 +915,8 @@ class BossTracker:
         if ph == HIDDEN:
             return
         self.seen = True
+        if ph not in TELL_PHASES and boss.visible_frac > 0.0 and boss.pos.conf > 0.0 and not boss.hidden:
+            self._obs = (self._obs + [(t, float(boss.pos.v[0]), float(boss.pos.v[1]))])[-FUSE_N_Y:]
         if ph in EMERGE_TELLS and boss.pos.conf > 0:
             xl, xr = m.anchor("BB_CHARGE", "Set L").x, m.anchor("BB_CHARGE", "Set R").x
             self.tell_dir = "Set L" if boss.pos.v[0] < 0.5 * (xl + xr) else "Set R"
@@ -970,6 +1052,74 @@ class BossTracker:
         ctx = replace(base, family=fam_r, anchor=self.last_anchor, direction=direction)
         return [Root(st, lo, hi, ctx)], True
 
+    def shape_key(self, table: dict | None = None) -> str | None:
+        """VE: the key of the boss's shape tables (hurtbox per phase, pogo-gate margins): the observable phase,
+        "recover/<family>" for the end of a charge or of a leap (one phase, two shapes: Charge End's box vs Leap
+        Land's) when the table has it."""
+        st = self.state
+        if st == "recover" and self.last_family in RECOVER_ROOT:
+            k = f"recover/{self.last_family}"
+            if table is None or k in table:
+                return k
+        return st
+
+    def _path_xy(self, t: float) -> tuple[float, float] | None:
+        """The current attack's mean path (anchor frame: x mirrored) at game time t, or None."""
+        fam = self.last_family
+        f = self.model.families.get(fam) if fam else None
+        anchor = self.fit_anchor or self.last_anchor
+        if f is None or f.path is None or self.t_start is None or anchor is None:
+            return None
+        ta = t - self.t_start
+        return (anchor.mirror * float(np.interp(ta, f.path[:, 0], f.path[:, 6])),
+                float(np.interp(ta, f.path[:, 0], f.path[:, 7])))
+
+    def fused_pos(self, origin_t: float, boss: Entity) -> tuple[float, float]:
+        """VE: the boss's position at the origin from its last FUSE_N detections in this attack (its phases share
+        the family's mean path and the reference point, the root box's centre), each moved to the origin along
+        that path (Forecast.boss_box moves the box the same way): the noise of one detection averages down (task V:
+        the pogo gate's box margins are sized from the residual of this position; reset per phase, the first
+        frames of a charge left 0.2 u of top error). A boss without a path (a burst, a roar) takes the plain mean."""
+        obs = self._obs[-FUSE_N_Y:]
+        if len(obs) < 2:
+            return boss.pos.v
+        p0 = self._path_xy(origin_t)
+        xs, ys = [], []
+        for t, x, y in obs:
+            pi = self._path_xy(t) if p0 is not None else None
+            if pi is None:
+                xs.append(x)
+                ys.append(y)
+            else:
+                xs.append(x + p0[0] - pi[0])
+                ys.append(y + p0[1] - pi[1])
+        return float(np.mean(xs[-FUSE_N:])), float(np.mean(ys))
+
+    def phase_left_min(self, origin_t: float) -> float:
+        """VE: game s from the origin until the observable phase can end at the earliest: the shortest logged dwells
+        of its Control states from its first one (PHASE_ROOT / RECOVER_ROOT) along the likeliest successor while that
+        is still in the same phase. 0 when unknown."""
+        m = self.model
+        ph = self.state
+        if self.t_entry is None or ph is None:
+            return 0.0
+        st = RECOVER_ROOT.get(self.last_family or "") if ph == "recover" else PHASE_ROOT.get(ph)
+        if st is None or st not in m.states:
+            return 0.0
+        t = self.t_entry - origin_t
+        for _ in range(8):
+            info = m.states.get(st)
+            if info is None:
+                break
+            t += info.dwell[0]
+            if not info.succ:
+                break
+            nxt = max(info.succ, key=lambda x: x[1])[0]
+            if VE_PHASE_OF.get(nxt) != ph:
+                break
+            st = nxt
+        return max(0.0, t)
+
     def drawn_left(self, origin_t: float) -> float:
         """Game s the boss stays drawn from the origin along the shortest logged dwells (scoring only)."""
         m = self.model
@@ -1040,6 +1190,7 @@ class Forecaster:
         self.bell_tells = False        # VE: the drop bells' cue is in the view (ObservabilityFilter tells)
         self.truncated = 0
         self.hurtbox: dict | None = None   # VE: the boss's hittable box per phase (load_hurtbox; scoring only)
+        self.box_margin: dict | None = None   # VE: the pogo gate's margins per phase (load_box_margin)
         self.t = 0.0
 
     @property
@@ -1270,6 +1421,14 @@ class Forecaster:
                 p_rage = 1.0 if ctx.hp <= m.rage_hp else 0.0
             elif rage_possible:
                 p_rage = 0.03
+            if p_rage == 1.0 and any(s == "Rage Pos" for s, _ in succ):
+                # the rage is the FSM's rule, not a draw: every logged P1 decision with the boss at <= 75 HP went to
+                # Rage Pos (311 of 311) and none above it did (1,990), live / gate runs 20261002_123347 ... 173956
+                # (HP = 150 - the logged hits). The view's HP only counts hits it saw: a missed hit makes it higher,
+                # never lower, so a count at or below the threshold is certain. Without this the vision view, which
+                # cannot see Rage Pos underground, kept every other attack in support too and was FORCED_RISK through
+                # all of Rage Pos / Rage Antic (view_compare, run 20261002_171806 i0 ep2)
+                return [("Rage Pos", 1.0)]
             out = []
             for s, _ in succ:
                 if s == "Rage Pos":
@@ -1289,6 +1448,14 @@ def load_hurtbox(path: str | Path | None = None) -> dict:
     p = Path(path) if path else Path(__file__).resolve().parents[3] / "knowledge" / "1.0.30000" / "enemies" / \
         "BellBeast_hurtbox.json"
     return json.loads(p.read_text("utf-8"))["phases"] if p.exists() else {}
+
+
+def load_box_margin(path: str | Path | None = None) -> dict | None:
+    """The vision view's box margins (ssbot.tools.boss_path_audit --margins): {phase: {k_max: [left, right, bottom,
+    top]}}; None when the file is missing (the pogo gate then has no certain form in the vision view)."""
+    p = Path(path) if path else Path(__file__).resolve().parents[3] / "knowledge" / "1.0.30000" / "enemies" / \
+        "BellBeast_vision_box_margin.json"
+    return json.loads(p.read_text("utf-8"))["phases"] if p.exists() else None
 
 
 def margin_xy(margin: float | tuple[float, float]) -> tuple[float, float]:

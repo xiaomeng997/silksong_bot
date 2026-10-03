@@ -27,7 +27,8 @@ ObservabilityFilter, SimpleNoise, DelayLine 2-4 frames, seeded from the episode'
 vision-equivalent forecaster with the attack fit and the hurtbox table). The origin is then the delayed WorldState's
 frame (the box predicted for k frames after it is compared with the colliders of that frame + k), rows are keyed by
 the recorded Control state at the origin, and per box side the errors carry min / p1 / p99 / max too: the box
-uncertainty the vision view's pogo gate shrinks the box by is sized from them.
+uncertainty the vision view's pogo gate shrinks the box by is sized from them (--margins: written to
+knowledge/1.0.30000/enemies/BellBeast_vision_box_margin.json, read by Forecast.certain_boss).
 """
 import argparse
 import json
@@ -36,6 +37,8 @@ from collections import defaultdict
 from pathlib import Path
 
 import numpy as np
+
+from ssbot.core.bosses import BELL_BEAST_PHASES as PHASE_OF
 
 KS = (3, 6, 9, 12, 18, 24, 30, 36, 42, 48)
 CHARGE = ("Charge Emerge", "Charge Antic", "Charge", "Charge End")
@@ -118,7 +121,7 @@ def audit_episode(states: list[dict], fc, want: set[str], every: int, out: dict,
         bb, ok = f.boss_box(tk)
         hx = float(states[i]["hero"]["pos"][0])
         ph = f"{fc.tracker.ctx.phase}{'first' if fc.tracker.n_attacks <= 1 else ''}" if view == "oracle" else \
-            f"{fc.tracker.state}/flip{int(bool(fc.boss is not None and fc.boss.flip_x))}"
+            f"{fc.tracker.shape_key(fc.hurtbox)}|flip{int(bool(fc.boss is not None and fc.boss.flip_x))}"
         preds.append((i, st, ph, round(ws.stamp.t_game_s - fc.tracker.t_entry, 3) if fc.tracker.t_entry is not None
                       else None, bb, ok, hx))
     for i, st, ph, tau, bb, ok, hx in preds:
@@ -132,7 +135,7 @@ def audit_episode(states: list[dict], fc, want: set[str], every: int, out: dict,
                     if j >= len(states):
                         continue
                 bj = boxes[j]
-                key = (st + "/" + str(ph), base, k)
+                key = (st + "#" + str(ph), base, k)
                 o = out.setdefault(key, defaultdict(list))
                 o["n"].append(1)
                 if not ok[k] or bj is None:
@@ -157,6 +160,12 @@ def audit_episode(states: list[dict], fc, want: set[str], every: int, out: dict,
                 o["width"].append((p[2] - p[0]) - (bj[2] - bj[0]))
                 o["frozen"].append(float(frz[i + 1:i + k + 1].mean()) if base == "frame" else 0.0)
                 o["tau"].append(tau if tau is not None else np.nan)
+                if PHASE_OF.get(_control(states[j]) or "") == PHASE_OF.get(_control(states[i]) or ""):
+                    # still in the observable phase of the origin (the vision view's certain box is used only until
+                    # the phase can end: Forecast.certain_boss)
+                    for side, v in (("left", p[0] - bj[0]), ("right", p[2] - bj[2]), ("bottom", p[1] - bj[1]),
+                                    ("top", p[3] - bj[3])):
+                        o[f"same_{side}"].append(v)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -167,6 +176,9 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--states", default=",".join(CHARGE))
     ap.add_argument("--every", type=int, default=2)
     ap.add_argument("--view", default="oracle", choices=("oracle", "degraded", "degraded_dust"))
+    ap.add_argument("--margins", type=Path, default=None,
+                    help="vision views: write the pogo gate's box margins per phase and horizon (vision_margins)")
+    ap.add_argument("--pad", type=float, default=0.1)
     ap.add_argument("--json", type=Path, default=None)
     a = ap.parse_args(argv)
     from ssbot.combat.boss_model import BossModel
@@ -180,9 +192,9 @@ def main(argv: list[str] | None = None) -> int:
     pb = load_playbook("BellBeast")
     fc.no_hurtbox, fc.shape_from = pb.no_hurtbox, pb.shape_from
     if a.view != "oracle":                   # as PlannerPolicy builds the vision view's forecaster
-        import os
         from ssbot.combat.attack_fit import AttackFit
-        if os.environ.get("SSBOT_FUSION", "1") == "1":
+        from ssbot.train.planner_policy import FUSION
+        if FUSION:
             fc.tracker.fit = AttackFit(model)
         fc.hurtbox = load_hurtbox()
         fc.bell_tells = a.view == "degraded_dust"
@@ -209,7 +221,39 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(x))
     if a.json:
         a.json.write_text(json.dumps(rep, indent=1), "utf-8")
+    if a.margins and a.view != "oracle":
+        doc = vision_margins(out, a.pad)
+        doc["source"] = {"run": str(a.run), "instances": a.instances, "episodes_per_instance": a.episodes,
+                         "view": a.view, "episodes": n_ep}
+        a.margins.write_text(json.dumps(doc, indent=1), "utf-8")
+        print(f"margins -> {a.margins}: {json.dumps(doc['phases'])}")
     return 0
+
+
+MARGIN_BUCKETS = (6, 12, 24, 48)
+
+
+def vision_margins(out: dict, pad: float) -> dict:
+    """Per observable phase and horizon bucket (frames ahead <= k), how far the actual box can lie inside the
+    predicted one on each side (left, right, bottom, top shrinks, u): the largest residual seen in that direction
+    over every origin state and flip while the boss was still in the origin's observable phase (recorded), + pad.
+    Frame base (the planner's frame k)."""
+    agg: dict = {}
+    for (key, base, k), o in out.items():
+        if base != "frame" or not o.get("same_left"):
+            continue
+        phase = key.split("#")[1].split("|")[0]
+        for kb in MARGIN_BUCKETS:
+            if k > kb:
+                continue
+            m = agg.setdefault(phase, {}).setdefault(str(kb), [0.0, 0.0, 0.0, 0.0])
+            m[0] = max(m[0], -float(np.min(o["same_left"])))
+            m[1] = max(m[1], float(np.max(o["same_right"])))
+            m[2] = max(m[2], -float(np.min(o["same_bottom"])))
+            m[3] = max(m[3], float(np.max(o["same_top"])))
+    phases = {ph: {kb: [round(max(0.0, v) + pad, 3) for v in m] for kb, m in d.items()} for ph, d in agg.items()}
+    return {"buckets": list(MARGIN_BUCKETS), "pad": pad, "sides": ["left", "right", "bottom", "top"],
+            "phases": phases}
 
 
 if __name__ == "__main__":

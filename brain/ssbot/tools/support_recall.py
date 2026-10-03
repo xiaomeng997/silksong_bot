@@ -184,7 +184,8 @@ def main(argv: list[str] | None = None) -> int:
     for v in views:
         fc = Forecaster(model, ORACLE if v == "oracle" else VISION_EQUIVALENT, margin=a.margin, templates=tpls)
         fc.bell_tells = v == "ve_dust"
-        if v != "oracle" and os.environ.get("SSBOT_FUSION", "1") == "1":
+        from ssbot.train.planner_policy import FUSION
+        if v != "oracle" and FUSION:
             from ssbot.combat.attack_fit import AttackFit
             fc.tracker.fit = AttackFit(model)      # multi-frame fusion of committed attacks (vision views)
         for i, fight in enumerate(fights):

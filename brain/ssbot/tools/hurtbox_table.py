@@ -30,6 +30,11 @@ import numpy as np
 
 OUT = Path(__file__).resolve().parents[3] / "knowledge" / "1.0.30000" / "enemies" / "BellBeast_hurtbox.json"
 BIN_S = 0.1
+# the attack a drawn Control state belongs to: "recover" is the end of a charge (Charge End's box) or of a leap (Leap
+# Land's), one observable phase with two shapes, so it is also tabled per family ("recover/BB_CHARGE" ...); the
+# vision view knows the family from the phase before (BossTracker.shape_key)
+FAMILY_START = {"Charge Emerge": "BB_CHARGE", "Charge Antic": "BB_CHARGE", "Charge": "BB_CHARGE",
+                "Leap Out": "BB_LEAP", "Descending": "BB_LEAP", "Burst Out": "BB_BURST", "Rage Burst": "BB_RAGE"}
 
 
 def build(runs: list[Path], max_frames: int) -> dict:
@@ -41,6 +46,7 @@ def build(runs: list[Path], max_frames: int) -> dict:
     polys = defaultdict(list)
     n = 0
     prev_state, t_in = None, 0
+    fam = None
     for run in runs:
         for rec in sorted(run.glob("rec/*/*/i*_*")):
             r = RecordingReader(rec)
@@ -51,6 +57,8 @@ def build(runs: list[Path], max_frames: int) -> dict:
                     continue
                 st = (b.get("fsms") or [{}])[0].get("state")
                 ph = phases.get(st)
+                if st in FAMILY_START:
+                    fam = FAMILY_START[st]
                 # time in the OBSERVABLE phase (what the vision view counts), not in the FSM state: a leap phase spans
                 # Emerge Antic L, Leap Out and Descending, and binning by state time put Descending's high polygon at
                 # Leap Out's early times and back (stage C run 20261002_102538: side slashes under a leap, 153
@@ -68,13 +76,16 @@ def build(runs: list[Path], max_frames: int) -> dict:
                 x0, x1 = v[:, 0].min() - px, v[:, 0].max() - px
                 if b.get("flipX"):
                     x0, x1 = -x1, -x0
-                key = (ph, min(int(t_in / 60 / BIN_S), 30))
-                acc[key].append((x0, v[:, 1].min() - py, x1, v[:, 1].max() - py))
-                if len(vs) == 1:      # the polygon itself, relative and unflipped: its box alone over-credits
-                    q = vs[0] - (px, py)
-                    if b.get("flipX"):
-                        q = q * (-1.0, 1.0)
-                    polys[key].append(q)
+                keys = [(ph, min(int(t_in / 60 / BIN_S), 30))]
+                if ph == "recover" and fam is not None:
+                    keys.append((f"recover/{fam}", keys[0][1]))    # the end of a charge or of a leap
+                for key in keys:
+                    acc[key].append((x0, v[:, 1].min() - py, x1, v[:, 1].max() - py))
+                    if len(vs) == 1:      # the polygon itself, relative and unflipped: its box alone over-credits
+                        q = vs[0] - (px, py)
+                        if b.get("flipX"):
+                            q = q * (-1.0, 1.0)
+                        polys[key].append(q)
                 n += 1
                 if n >= max_frames:
                     break
