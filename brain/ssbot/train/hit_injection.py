@@ -17,8 +17,10 @@ Kinds (one per episode, drawn at reset):
                             frame, so offsets before the event exist too; the measured offset comes from the recording
   roar                      0-3 frames into Rage Roar (Bell Beast has no stun; the roar is its only long committed
                             state with a screen effect)
-p_event is the share of event kinds (hit / kill / bounce / roar); the rest are air / attack kinds. An episode whose
-moment never comes falls back to the first airborne frame after fallback_s; a hit the game does not take (i-frames,
+p_event is the share of event kinds, drawn kill 3 : bounce 3 : hit 1 : roar 1 (G1 counts kills, clashes, bounces and
+stuns: p_event 0.5 times 6 / 8 is 37.5 % kills and bounces); the rest are air / attack kinds. An episode whose
+moment never comes falls back to the first airborne frame after fallback_s (kill: kill_fallback_s, as the boss is one
+hit from death only near the end of a 55-80 s fight); a hit the game does not take (i-frames,
 take_health_calls 0) re-arms. Injection waits min_s after the policy's first tick so the fight is under way.
 The RPC is sent at the STATE of the chosen frame and lands at the oracle's next RPC pump (1-2 frames later): the
 recording's damage event is the hit frame that counts.
@@ -29,6 +31,7 @@ import random
 
 AIR_KINDS = ("rising", "apex", "falling", "attack", "cast", "pogo")
 EVENT_KINDS = ("hit", "kill", "bounce", "roar")
+EVENT_WEIGHTS = (1, 3, 3, 1)
 HS_AIRBORNE = 3                      # GlobalEnums.ActorStates.airborne
 HERO_HIT = 5                         # Bell Beast: every nail hit 5 HP (supervision.HERO_HIT_FLOOR)
 ATTACK_CLIPS = ("Slash", "SlashAlt", "UpSlash", "DownSlash", "Slash Land", "Up Slash", "Attack")
@@ -41,12 +44,15 @@ def _clip(s: dict) -> str:
 
 
 class HitInjector:
+    act_after_clear = True               # train/episode: keep acting through the post-kill frames (a kill-timed hit)
+
     def __init__(self, inner, p_event: float = 0.4, min_s: float = 4.0, fallback_s: float = 45.0,
-                 max_retries: int = 3):
+                 kill_fallback_s: float = 150.0, max_retries: int = 3):
         self.inner = inner
         self.p_event = p_event
         self.min_s = min_s
         self.fallback_s = fallback_s
+        self.kill_fallback_s = kill_fallback_s
         self.max_retries = max_retries
         self.link = None
         self.log: dict = {}
@@ -69,7 +75,7 @@ class HitInjector:
     def reset(self, rng: random.Random, enc) -> None:
         self.inner.reset(rng, enc)
         r = random.Random(rng.random())      # after the inner policy's own draws: its seeds are those of a plain run
-        kind = r.choice(EVENT_KINDS) if r.random() < self.p_event else r.choice(AIR_KINDS)
+        kind = r.choices(EVENT_KINDS, EVENT_WEIGHTS)[0] if r.random() < self.p_event else r.choice(AIR_KINDS)
         self.kind = kind
         self.offset = r.randint(-3, 3) if kind in ("hit", "kill", "bounce") else r.randint(0, 3)
         self.f0: int | None = None
@@ -183,7 +189,8 @@ class HitInjector:
         if hp is None:
             return
         go = self._moment(s)
-        if not go and f - self.f0 > self.fallback_s * 60 and (s.get("hero") or {}).get("hero_state") == HS_AIRBORNE:
+        late = (self.kill_fallback_s if self.kind == "kill" else self.fallback_s) * 60
+        if not go and f - self.f0 > late and (s.get("hero") or {}).get("hero_state") == HS_AIRBORNE:
             go = True
             self.log["fallback"] = True
         if not go:

@@ -284,7 +284,10 @@ def _run(link: OracleLink, enc: Encounter, tap: FightTap, policy, cfg: EpisodeCo
         if end_after is not None:
             if last >= end_after:
                 break
-            link.act(last + 2, 0, hold_frames=0)
+            # zeros after a kill, unless the policy asks to keep acting (the pause stress test's hit injected just
+            # after the killing blow must reach the supervisor, which then owns the keys through the block above)
+            after = getattr(policy, "act_after_clear", False) and rec.outcome == CLEAR and not rec.reason
+            link.act(last + 2, policy.act(s, tap) if after else 0, hold_frames=0)
             continue
         if tap.death_frame is not None:
             rec.outcome = CLEAR
