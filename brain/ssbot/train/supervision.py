@@ -42,24 +42,40 @@ Why each piece:
 - PauseWindowMonitor measures every hit's Q1 pause window [disablePause cleared, i-frames end] and alerts when one is
   shorter than detection + loop latency (DESIGN §3.7.5); its alerts, the supervisor's and the pause machine's are
   returned in Supervised.alerts.
+- vision=True (training on the simulated final path, DESIGN §3.9.2; task V review, 2026-10-03): the decisions read
+  only what the vision view has. The SupervisorInput comes from the delayed WorldState the planner sees
+  (supervisor.input_from_world: HUD health, the vision-side pause / quit availability, HIT_TAKEN), next_hit_may_kill
+  from the view's counted boss HP (hp_est minus 3 sigma against the largest priced hit, not ents[].hp), and the pause
+  machine from the vision form of the cues of the delayed STATE (pause_quit.vision_cues_from_state: the dimmer, a
+  stopped world, the menu reader; no pause flag, no pause gate). Before, every view's supervisor and pause machine read
+  the current oracle STATE: the degraded_dust runs' 0 WOULD_DIE and their pause latency were measured with oracle pause
+  timing (the gate cue put the first press on the first open frame) and the oracle's paused flag.
+  The PauseWindowMonitor stays on the raw STATE: it is instrumentation, not a decision.
 """
+import math
 from collections.abc import Callable, Mapping, Sequence
 from typing import NamedTuple
 
+from ssbot.backends.observability import DEFAULT_ATTACK_DAMAGE
+from ssbot.core.worldstate import Kind, WorldState
 from ssbot.ipc.ents import HAZARD_TYPES
 from ssbot.ipc.framing import BIT
 from ssbot.safety.hits_to_death import SupportEvent, SupportSet
 from ssbot.safety.key_guard import keys_clear
 from ssbot.safety.pause_quit import (GOAL_PAUSE, GOAL_QUIT, HELD_STATES, UNPAUSED, PauseQuit, PauseQuitConfig,
-                                     cues_from_state, to_mask)
+                                     cues_from_state, to_mask, vision_cues_from_state)
 from ssbot.safety.pause_window import PauseWindowMonitor
 from ssbot.safety.supervisor import (RESUME_SELF_CHECK, Supervisor, SupervisorConfig, SupervisorDecision,
-                                     input_from_state)
+                                     SupervisorInput, input_from_state, input_from_world)
 
 SupportFn = Callable[[dict], object]
 
 _I_FRAME_BLOCKED = frozenset(i for i, n in enumerate(HAZARD_TYPES) if n in ("NON_HAZARD", "ENEMY", "EXPLOSION"))
 HERO_HIT_FLOOR = 5
+# vision: the hero's largest hit is the largest the view prices (ObservabilityFilter attack_damage: the Silk Spear 15,
+# the needle 5), and the view's HP is a count with an uncertainty: may kill below hero hit + this many sigma
+VISION_HERO_HIT = int(max([HERO_HIT_FLOOR, *DEFAULT_ATTACK_DAMAGE.values()]))
+VISION_HP_Z = 3.0
 
 
 class Supervised(NamedTuple):
@@ -107,6 +123,20 @@ def next_hit_may_kill(s: dict, hero_hit: int) -> bool:
     return False
 
 
+def next_hit_may_kill_world(ws: WorldState, hero_hit: float, z: float = VISION_HP_Z) -> bool:
+    """Vision: an enemy or boss the view tracks whose counted HP (Entity.hp_est, hits it saw) the hero's next hit could
+    take to zero: 0 < hp_est and hp_est - z sigma <= hero_hit. A missed hit leaves the count high, so the bound looks
+    below it; a hidden root counts too (it can come back)."""
+    for e in ws.entities:
+        h = e.hp_est
+        if h is None or e.kind not in (Kind.BOSS, Kind.ENEMY) or h.conf <= 0:
+            continue
+        sig = h.sigma if math.isfinite(h.sigma) else 0.0
+        if 0 < h.v and h.v - z * sig <= hero_hit:
+            return True
+    return False
+
+
 def _support_of(r: object) -> tuple[tuple[SupportEvent, ...] | None, bool, bool]:
     """(events, known, certified empty) of a support callable's result; only explicit certifications count."""
     if isinstance(r, SupportSet):
@@ -121,7 +151,7 @@ def _support_of(r: object) -> tuple[tuple[SupportEvent, ...] | None, bool, bool]
 class SupervisedControl:
     def __init__(self, cfg: SupervisorConfig, support: SupportFn | None = None, pq_cfg: PauseQuitConfig | None = None,
                  bit: Mapping[str, int] = BIT, foreground_sink: bool = False, always_quit: bool = True,
-                 qpc_freq: float = 1e7, hero_hit_floor: int = HERO_HIT_FLOOR):
+                 qpc_freq: float = 1e7, hero_hit_floor: int = HERO_HIT_FLOOR, vision: bool = False):
         self.support = support
         self.cfg = cfg
         self.pq_cfg = pq_cfg or PauseQuitConfig(emulate_quit=True)
@@ -131,6 +161,7 @@ class SupervisedControl:
         self.qpc_freq = qpc_freq
         self.hero_hit_floor = hero_hit_floor
         self._pause_bit = 1 << bit["pause"]
+        self.vision = vision
         self.reset()
 
     def reset(self) -> None:
@@ -146,6 +177,7 @@ class SupervisedControl:
         self._resume_reason = RESUME_SELF_CHECK
         self._resume_scene: str | None = None
         self._sup_alerted = False
+        self._last_ws: WorldState | None = None
 
     @property
     def held(self) -> bool:
@@ -172,23 +204,47 @@ class SupervisedControl:
         """The pause stress test: a quit trigger on the next step, with no damage (Supervisor.inject)."""
         self.sup.inject(tid, why)
 
-    def step(self, s: dict, inflight: Sequence[int] = (), **planner) -> Supervised:
-        """inflight: the ACTION masks already sent for the frames after s's frame and before the one the returned
+    def step(self, s: dict, obs: dict | None = None, ws: WorldState | None = None, inflight: Sequence[int] = (),
+             **planner) -> Supervised:
+        """s: the current STATE (its QPC is the clock the keys go out on). Vision mode: obs is the STATE of the frame
+        the view shows and ws its WorldState (the delayed ones); the decisions and the pause machine read only those
+        (module docstring). Without ws (a real quit's menus, where the backend is not fed) the supervisor keeps the
+        last hero it read.
+        inflight: the ACTION masks already sent for the frames after s's frame and before the one the returned
         mask is sent for (training: [mask for f + 1]); the pause loop's first press waits until the key path
-        (STATE act.hf) shows no game key can be latched or replayed when it lands (safety.key_guard)."""
+        (STATE act.hf) shows no game key can be latched or replayed when it lands (safety.key_guard). The key path is
+        the bot's own output (the final inputd sink holds the same filter state), not an observation of the game, so
+        the key guard reads the current STATE in every view, the vision views included."""
         t_q = (s.get("q") or 0) / self.qpc_freq
         self.t_last = t_q
         if self.t0 is None:
             self.t0 = t_q
-        for ev in s.get("ev") or ():
-            if ev.get("k") == "hit":
-                d = (ev.get("d") or {}).get("dmg")
-                if isinstance(d, (int, float)) and not isinstance(d, bool):
-                    self.hero_hit = max(self.hero_hit, int(d))
-        events, known, empty_ok = _support_of(None if self.support is None else self.support(s))
-        planner.setdefault("next_hit_may_kill", next_hit_may_kill(s, self.hero_hit))
-        inp = input_from_state(s, t_q - self.t0, support=events, support_known=known, support_empty_ok=empty_ok,
-                               foreground_sink=self.foreground_sink, **planner)
+        if self.vision:
+            obs = s if obs is None else obs
+            # a real quit's menus feed no WorldState: the last one stands (the world is paused), not a lost hero
+            # (live 20261003_043306 i0 ep0 ended "Q5: hero lost 4500 ms" after 4.5 s of menus)
+            ws = self._last_ws if ws is None else ws
+            self._last_ws = ws
+            self.hero_hit = max(self.hero_hit, VISION_HERO_HIT)
+            events, known, empty_ok = _support_of(None if self.support is None else self.support(obs))
+            if ws is not None:
+                planner.setdefault("next_hit_may_kill", next_hit_may_kill_world(ws, self.hero_hit))
+                inp = input_from_world(ws, t_q - self.t0, support=events, support_known=known,
+                                       support_empty_ok=empty_ok, foreground_sink=self.foreground_sink, **planner)
+            else:
+                inp = SupervisorInput(t=t_q - self.t0, support=tuple(events or ()),
+                                      support_known=events is not None and known,
+                                      support_empty_ok=events is not None and empty_ok, **planner)
+        else:
+            for ev in s.get("ev") or ():
+                if ev.get("k") == "hit":
+                    d = (ev.get("d") or {}).get("dmg")
+                    if isinstance(d, (int, float)) and not isinstance(d, bool):
+                        self.hero_hit = max(self.hero_hit, int(d))
+            events, known, empty_ok = _support_of(None if self.support is None else self.support(s))
+            planner.setdefault("next_hit_may_kill", next_hit_may_kill(s, self.hero_hit))
+            inp = input_from_state(s, t_q - self.t0, support=events, support_known=known, support_empty_ok=empty_ok,
+                                   foreground_sink=self.foreground_sink, **planner)
         d = self.sup.step(inp)
         self.windows.update(s)
         for a in self.windows.alerts:
@@ -208,7 +264,7 @@ class SupervisedControl:
             return Supervised(0, d, None if pq is None else pq.outcome, tuple(self.alerts))
         if pq is None:
             return Supervised(None, d, None, tuple(self.alerts))
-        cues = cues_from_state(s, self.qpc_freq)
+        cues = vision_cues_from_state(obs, self.qpc_freq) if self.vision else cues_from_state(s, self.qpc_freq)
         if pq.pressing:
             cues.keys_clear = keys_clear((s.get("act") or {}).get("hf"), inflight, self._pause_bit)
         keys = pq.step(cues, t_q)

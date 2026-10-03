@@ -107,3 +107,63 @@ def test_a_side_slash_redirects_a_falling_drop_bell(setup):
     planner.tick(ws, kin.initial_state(params, 85.0, 2.015 + params.foot), kin.HoldState.idle(1),
                  np.zeros(1, np.int64), f, prefs, FilterContext.from_world(ws, None, 3))
     assert planner.last_redirect > 0
+
+
+def _ve_tracked(setup, att=None, n=12, x0=86.6):
+    """The vision view's Forecaster after n frames of a drop bell falling at x0 (detections only: noisy positions,
+    no FSM state, no velocity), the hero standing at 85 facing right; att (t0, t1): frames she attacks in."""
+    from ssbot.core.worldstate import VISION_EQUIVALENT
+    from tests.test_bell_track import _drop
+    m, tpls, params, arena = setup
+    spec = next(s for s in pt.load_registry() if s.prefix == "BoneBeast DropBell")
+    fc = Forecaster(m, VISION_EQUIVALENT, margin=MARGIN, templates=tpls)
+    fc.tracker.roots = lambda origin: ([], True)
+    ws = None
+    for t, x, y in _drop(spec, x0, 1, 20.0, n, 0.05, seed=5):
+        ws = WorldState()
+        ws.stamp.t_game_s = t
+        ws.hero.pos = E((85.0, 3.0544))
+        ws.hero.facing = E(1)
+        ws.hero.mode = E("attack" if att and att[0] <= t - 20.0 <= att[1] else "ground")
+        ws.res.hp, ws.res.hp_max, ws.res.silk = E(5), E(5), E(3)
+        ws.entities = [Entity(id=7, kind=Kind.ENEMY_ATTACK, type_key=E("BoneBeast DropBell M2"),
+                              pos=E((x, y), sigma=0.05, conf=1.0), visible_frac=1.0)]
+        fc.update(ws)
+    return fc, ws, fc.forecast(2.0)
+
+
+def test_vision_view_side_slash_redirects_a_tracked_drop_bell(setup):
+    """Task V review: in the vision view a drop bell on its track is a hit target (VE_TARGETS on), so a side slash
+    that meets it is scored against its redirected path (one side, pogo_targets.tink), and its pogo counts only while
+    it falls (pogo_ok)."""
+    m, tpls, params, arena = setup
+    fc, ws, f = _ve_tracked(setup)
+    assert len(f.det) == 1 and not f.det[0].ambiguous
+    tk = np.arange(121) / 60.0
+    paths = f.target_paths(tk)
+    assert len(paths) == 1 and paths[0].redirect and paths[0].pogo_ok is not None
+    assert paths[0].ok[:5].all() and not paths[0].ok[-1]          # until its random bounce
+    xs, ys, t3 = np.array([[84.6], [88.6]]), np.array([[8.0], [8.0]]), np.array([0.45])
+    assert f.occupied(xs, ys, t3)[:, 0].all()                      # both bounce sides
+    o = f.occupied_redirect(xs, ys, t3, "BoneBeast DropBell M2", 0.02, 1)
+    assert not o[0, 0] and o[1, 0]
+    prefs = Tactics(load_playbook()).decide(ws, f, None, 3)
+    planner = Planner(params, arena, PlannerConfig(threads=1))
+    planner.tick(ws, kin.initial_state(params, 85.0, 2.015 + params.foot), kin.HoldState.idle(1),
+                 np.zeros(1, np.int64), f, prefs, FilterContext.from_world(ws, None, 3))
+    assert planner.last_redirect > 0
+
+
+def test_vision_view_attacks_into_a_bell_with_open_tink_branches_are_not_safe(setup):
+    """A drop bell the hero just attacked within reach keeps its untouched and tinked branches (bell_track); it is no
+    target while they are open, and every plan whose attack meets one of them is not safe (planner
+    _ambiguous_bells)."""
+    m, tpls, params, arena = setup
+    fc, ws, f = _ve_tracked(setup, att=(0.25, 0.32), n=21)
+    assert len(f.det) == 1 and f.det[0].ambiguous
+    assert not f.target_paths(np.arange(121) / 60.0)
+    prefs = Tactics(load_playbook()).decide(ws, f, None, 3)
+    planner = Planner(params, arena, PlannerConfig(threads=1))
+    planner.tick(ws, kin.initial_state(params, 85.0, 2.015 + params.foot), kin.HoldState.idle(1),
+                 np.zeros(1, np.int64), f, prefs, FilterContext.from_world(ws, None, 3))
+    assert planner.last_ambiguous > 0

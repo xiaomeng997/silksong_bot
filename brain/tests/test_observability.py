@@ -602,22 +602,75 @@ def test_noise_drop_rate_and_sigma():
     assert out.entities[-1].id == -1 and out.entities[-1].pos.v == (5.0, 5.0)   # memory tracks untouched
 
 
-def test_a_missed_detection_coasts(wake_v):
+def test_a_missed_detection_coasts_on_the_estimated_velocity(wake_v):
     base = _visible_boss_frame(wake_v)
-    cfg = NoiseConfig(sigma_pos={}, p_drop={}, sigma_pos_other=0.0, p_drop_other=0.0, sigma_vel=0.0)
+    cfg = NoiseConfig(sigma_pos={}, p_drop={}, sigma_pos_other=0.0, p_drop_other=0.0)
     n = SimpleNoise(cfg, seed=0)
-    first = n.apply(copy.deepcopy(base))
-    b0 = boss(first)
-    n.cfg = NoiseConfig(sigma_pos={}, p_drop={Kind.BOSS: 1.0}, sigma_pos_other=0.0, p_drop_other=0.0, sigma_vel=0.0)
+    n.apply(copy.deepcopy(base))
+    w = copy.deepcopy(base)                         # 0.5 u right 0.05 s later: 10 u/s, whatever the export says
+    w.stamp.t_game_s += 0.05
+    for e in w.entities:
+        if e.id == fx.BOSS_IID:
+            e.pos = E((e.pos.v[0] + 0.5, e.pos.v[1]))
+            e.dmg_boxes = [obs.replace(b, poly=[(x + 0.5, y) for x, y in b.poly]) for b in e.dmg_boxes]
+    b0 = boss(n.apply(w))
+    assert b0.vel.v[0] == pytest.approx(10.0) and b0.vel.v[1] == pytest.approx(0.0, abs=1e-9)
+    n.cfg = NoiseConfig(sigma_pos={}, p_drop={Kind.BOSS: 1.0}, sigma_pos_other=0.0, p_drop_other=0.0)
     nxt = copy.deepcopy(base)
-    nxt.stamp.t_game_s += 0.1
+    nxt.stamp.t_game_s += 0.15
     out = n.apply(nxt)
     c = boss(out)
     assert c is not None and c.visible_frac == 0.0 and c.pos.src == Src.PREDICTED and c.pos.conf == b0.pos.conf / 2
-    dx = b0.vel.v[0] * 0.1
-    assert c.pos.v[0] == pytest.approx(b0.pos.v[0] + dx)
-    assert c.dmg_boxes and np.allclose(np.array(c.dmg_boxes[0].poly)[:, 0] - np.array(b0.dmg_boxes[0].poly)[:, 0], dx)
+    assert c.pos.v[0] == pytest.approx(b0.pos.v[0] + 1.0)
+    assert c.dmg_boxes and np.allclose(np.array(c.dmg_boxes[0].poly)[:, 0] - np.array(b0.dmg_boxes[0].poly)[:, 0], 1.0)
     assert out.game.unobservable & Unobs.DETECTION_MISSED
+
+
+def test_no_logged_velocity_reaches_the_view(wake):
+    """Entity.vel in the vision view is the slope of the detections, never the exported Rigidbody2D velocity."""
+    f = ObservabilityFilter(bosses=[BELL_BEAST])
+    n = SimpleNoise(NoiseConfig(p_drop={}, p_drop_other=0.0), seed=3)
+    seen = 0
+    for w in wake[:400]:
+        w = copy.deepcopy(w)
+        for e in w.entities:
+            e.vel = E((123.0, -321.0))              # an export no tracker could know
+        for out in (f.apply(w), ):
+            for e in out.entities:
+                assert e.vel.v != (123.0, -321.0)
+            for e in n.apply(out).entities:
+                assert abs(e.vel.v[0]) < 100 and abs(e.vel.v[1]) < 100
+                seen += e.vel.conf > 0
+    assert seen > 100
+
+
+def test_a_cue_gets_the_detection_noise_and_no_velocity():
+    from ssbot.core.worldstate import PhasePost
+    cue = [Entity(id=i, kind=Kind.ENEMY_ATTACK, pos=E((80.0, 13.74), conf=1.0, src=Src.PREDICTED), hidden=True,
+                  visible_frac=0.0, phase=PhasePost(topk=[("bell_dust", 1.0)])) for i in range(3000)]
+    dug_in = Entity(id=-2, kind=Kind.BOSS, pos=E((1.0, 1.0), conf=0.0), hidden=True, visible_frac=0.0,
+                    phase=PhasePost(topk=[("hidden", 1.0)]))
+    ghost = Entity(id=-1, kind=Kind.ENEMY, pos=E((5.0, 5.0)), visible_frac=0.0)
+    cfg = NoiseConfig(sigma_pos={Kind.ENEMY_ATTACK: 0.15}, p_drop={Kind.ENEMY_ATTACK: 0.0})
+    out = SimpleNoise(cfg, seed=2).apply(WorldState(entities=cue + [dug_in, ghost]))
+    xy = np.array([e.pos.v for e in out.entities if e.id >= 0])
+    assert len(xy) == 3000 and np.allclose(xy.std(axis=0), 0.15, atol=0.01)
+    assert all(e.hidden and e.visible_frac == 0.0 and e.vel.conf == 0 and e.pos.sigma == 0.15
+               for e in out.entities if e.id >= 0)
+    assert [e.pos.v for e in out.entities if e.id < 0] == [(1.0, 1.0), (5.0, 5.0)]   # no cue: untouched
+
+
+def test_velocity_tracks():
+    from ssbot.vision.track import VelocityTracks
+    vt = VelocityTracks()
+    assert vt.observe(1, 0.0, 0.0, 0.0).conf == 0                       # one detection: unknown
+    assert vt.observe(1, 0.0, 0.0, 0.0).conf == 0                       # hit-stop: no time span
+    for k in range(1, 10):
+        v = vt.observe(1, k / 60, 2.0 * k / 60, 5.0 - 3.0 * k / 60, sigma=0.1)
+    assert v.v == pytest.approx((2.0, -3.0)) and 0 < v.sigma < 2.0 and v.conf > 0
+    assert vt.observe(1, 2.0, 50.0, 0.0).conf == 0                      # a gap: a new history
+    vt.prune(10.0)
+    assert vt.hist == {}
 
 
 # ---- delay line and the action-side client -------------------------------------------------------------------
@@ -711,13 +764,63 @@ def test_a_bell_cue_shows_an_undrawn_drop_bell(wake):
         pytest.skip("no drop bell in the fixture window")
     f = ObservabilityFilter(bosses=[BELL_BEAST], tells={"BoneBeast DropBell M2": {"Antic": [(0.3, "bell_dust")]}})
     out = []
-    for k, tau in enumerate((0.1, 0.35)):
+    for k, (tau, dx) in enumerate(((0.1, 0.0), (0.35, 0.0), (0.4, 40.0))):
         w = copy.deepcopy(wake[i + k])
         bell = next(e for e in w.entities if e.type_key.v.startswith("BoneBeast DropBell"))
         bell.type_key = E("BoneBeast DropBell M2")
         bell.fsm = [("Control", "Antic", tau)]
+        bell.pos = E((w.hero.pos.v[0] + dx, bell.pos.v[1]), conf=1.0)    # its column inside the image, then not
         bell.render_box, bell.dmg_boxes, bell.body_polys = None, [], []
         out.append(next((e for e in f.apply(w).entities if e.id == bell.id), None))
     assert out[0] is None
     assert out[1] is not None and out[1].phase.top == "bell_dust" and out[1].hidden and out[1].pos.conf == 1.0
     assert out[1].fsm is None and out[1].dmg_boxes == []
+    assert out[2] is None                         # task V review: a cue outside the image is not shown
+
+
+def test_tell_onsets_are_drawn_in_their_bracket():
+    """tell_onset (task V review): each cue's onset is drawn once, uniform in the bracket the screenshots give its
+    nominal delay ((0.1, 0.3] for the dust, (0.3, 0.6] for the low / tall), reproducible from the reset seed."""
+    from ssbot.train.planner_policy import TELL_ONSET
+    spec = [(0.3, "dust"), (0.6, "dust_low")]
+    f = ObservabilityFilter(bosses=[BELL_BEAST], tells={}, tell_onset=TELL_ONSET)
+    f.reset(5)
+    first, second = [], []
+    for iid in range(300):
+        for tau in np.arange(0.0, 0.7, 1 / 60):
+            due = f._due(iid, "Emerge Antic C", spec, float(tau), 100.0 + float(tau))
+            if due and not first[iid:]:
+                first.append(float(tau))
+            if len(due) == 2 and not second[iid:]:
+                second.append(float(tau))
+    assert len(first) == len(second) == 300
+    assert 0.1 < min(first) and max(first) <= 0.3 + 1 / 60 and np.std(first) > 0.04
+    assert 0.3 < min(second) and max(second) <= 0.6 + 1 / 60
+    g = ObservabilityFilter(bosses=[BELL_BEAST], tells={}, tell_onset=TELL_ONSET)
+    g.reset(5)
+    assert [g._due(i, "Emerge Antic C", spec, 0.2, 100.2) for i in range(20)] == \
+        [ObservabilityFilter._due(f, i, "Emerge Antic C", spec, 0.2, 100.2) for i in range(20)]
+
+
+def test_noise_bias_persists_per_track_and_a_ghost_keeps_its_last_offset():
+    """SimpleNoise (task V review): a per-track offset (bias_sigma, placeholder 0) that every detection of that track
+    carries, and a memory track (ghost) at its last detection's offset, not the filter's exact position."""
+    from ssbot.core.worldstate import E, Entity, Kind, WorldState
+    cfg = NoiseConfig(sigma_pos={Kind.BOSS: 0.0}, p_drop={Kind.BOSS: 0.0}, bias_sigma={Kind.BOSS: 0.3})
+    nz = SimpleNoise(cfg, seed=4)
+    offs = []
+    for i in range(5):
+        ws = WorldState()
+        ws.stamp.t_game_s = i / 60
+        ws.entities = [Entity(id=3, kind=Kind.BOSS, pos=E((80.0, 5.0), conf=1.0), visible_frac=1.0)]
+        offs.append(nz.apply(ws).entities[0].pos.v[0] - 80.0)
+    assert abs(offs[0]) > 1e-6 and np.allclose(offs, offs[0])
+    ws = WorldState()
+    ws.stamp.t_game_s = 0.1
+    ws.entities = [Entity(id=3, kind=Kind.BOSS, pos=E((80.0, 5.0), conf=0.5, age_ms=16.0), visible_frac=0.0)]
+    assert nz.apply(ws).entities[0].pos.v[0] - 80.0 == pytest.approx(offs[0])
+    plain = SimpleNoise(NoiseConfig(), seed=4)
+    ws = WorldState()
+    ws.entities = [Entity(id=3, kind=Kind.BOSS, pos=E((80.0, 5.0), conf=1.0), visible_frac=1.0)]
+    plain.apply(ws)
+    assert plain._bias[3] == (0.0, 0.0)

@@ -240,12 +240,15 @@ def test_ve_dust_cues_start_the_walk_in_the_antic(model, templates):
         ("Emerge Antic C", "BB_CHARGE", "Set R"), ("Emerge Antic L", "BB_LEAP", "Set R")}
     for r in roots:
         assert r.ctx.anchor.x == pytest.approx(95.72) and r.p == 0.5
-        assert r.e_lo == pytest.approx(-0.3 - 0.1) and r.e_hi == pytest.approx(-0.3 + 0.1)
+        assert r.e_lo == pytest.approx(-TELL_DELAY["dust"] - TELL_SLACK_S["dust"])
+        assert r.e_hi == pytest.approx(-TELL_DELAY["dust"] + TELL_SLACK_S["dust"])
     fc.update(frame(11.6, "dust_tall", 95.72, 0.0))
     roots, _ = trk.roots(11.6)
     assert [(r.state, r.ctx.family, r.ctx.direction, r.ctx.anchor.x) for r in roots] == [
         ("Emerge Antic L", "BB_LEAP", "Set R", pytest.approx(95.72))]
-    assert roots[0].e_lo == pytest.approx(-TELL_DELAY["dust_tall"] - TELL_SLACK_S["dust_tall"])
+    # timed by the plain dust 0.3 s before (its bracket is narrower), inside the tall dust's own
+    assert roots[0].e_lo == pytest.approx(-0.3 - TELL_DELAY["dust"] - TELL_SLACK_S["dust"])
+    assert roots[0].e_hi == pytest.approx(-0.3 - TELL_DELAY["dust"] + TELL_SLACK_S["dust"])
     fc = _fc(model, templates, VISION_EQUIVALENT)
     fc.tracker.seen = True
     fc.update(frame(20.0, "hidden", 0.0, 0.0))
@@ -258,7 +261,7 @@ def test_ve_dust_cues_start_the_walk_in_the_antic(model, templates):
 def test_ve_bell_cue_places_the_bells_self_template(model, templates):
     """Drop bell cue (phase "bell_dust", PlannerPolicy DUST_TELL): the bell's self template from its arming time,
     TELL_DELAY before the cue, +-TELL_SLACK_S; unannounced bells' unions count only from the cue's lead on."""
-    from ssbot.combat.forecast import TELL_DELAY
+    from ssbot.combat.forecast import TELL_DELAY, TELL_SLACK_S
     from ssbot.core.worldstate import E, Entity, Kind, PhasePost, WorldState
     fc = _fc(model, templates, VISION_EQUIVALENT)
     fc.bell_tells = True
@@ -271,7 +274,8 @@ def test_ve_bell_cue_places_the_bells_self_template(model, templates):
     assert tk == "BoneBeast DropBell M2" and t_arm == pytest.approx(30.0 - 0.05 - TELL_DELAY["bell_dust"])
     f = fc.forecast(2.0)
     own = [p for p in f.placements if p.key.endswith("DropBell M2/self")]
-    assert len(own) == 13 and {p.anchor for p in own} == {(84.5, 13.74)}
+    k = int(round(TELL_SLACK_S["bell_dust"] * 60))
+    assert len(own) == 2 * k + 1 and {p.anchor for p in own} == {(84.5, 13.74)}
 
 
 def test_attack_fit_recovers_the_start_and_rejects_another_path(model):
@@ -310,3 +314,45 @@ def test_tracker_recovers_a_missed_attack_start(model):
     tr2 = BossTracker(model, ORACLE)
     tr2._enter("Dig In", 5.0)                     # in two families: left unknown (the walk roots in both)
     assert tr2.ctx.family is None and tr2.t_start is None
+
+
+def test_rage_rule_and_the_vision_views_hp_slack(model, templates):
+    """Rage? -> Rage Pos is the FSM's HP rule (support keeps it while possible); the vision view, whose HP misses hits
+    it did not see, scores the rage as likely just above the threshold."""
+    for view, hp, want in ((ORACLE, 75.0, {"Rage Pos": 1.0}), (ORACLE, 80.0, 0.0), (VISION_EQUIVALENT, 75.0,
+                                                                                  {"Rage Pos": 1.0}),
+                           (VISION_EQUIVALENT, 80.0, 0.5), (VISION_EQUIVALENT, 90.0, 0.0)):
+        fc = _fc(model, templates, view)
+        succ = dict(fc._successors("Rage?", Ctx(phase="P1", raged=False, hp=hp)))
+        if isinstance(want, dict):
+            assert succ == want
+        else:
+            assert succ["Rage Pos"] == pytest.approx(want) and len(succ) > 1
+
+
+def test_ve_bell_cue_that_comes_into_the_image_late_widens_its_arming(model, templates):
+    """Task V review: a cue shows only inside the image, so one whose column was outside the image on the frame before
+    (the camera moved) may be older than its delay says: its arming goes back to the last frame its column was in the
+    image less the delay, at most the Antic (1.25 s) - more self-template placements, earlier ones."""
+    from ssbot.combat.forecast import BELL_ANTIC_S, BIN, TELL_DELAY, TELL_SLACK_S
+    from ssbot.core.worldstate import E, Entity, Kind, PhasePost, WorldState
+    fc = _fc(model, templates, VISION_EQUIVALENT)
+    fc.bell_tells = True
+    fc.tracker.vis = [(29.4, (60.0, 120.0), (60.0, 80.0)), (29.98, (60.0, 120.0), (60.0, 80.0))]   # column outside
+    ws = WorldState()
+    ws.stamp.t_game_s = 30.0
+    ws.entities = [Entity(id=11, kind=Kind.HAZARD_DYN, type_key=E("BoneBeast DropBell M2"), pos=E((84.5, 13.74), conf=1.0),
+                          phase=PhasePost(topk=[("bell_dust", 1.0)], t_in_phase=0.0), hidden=True, visible_frac=0.0)]
+    fc.update(ws)
+    assert fc.tracker.bell_early[11] == pytest.approx(30.0 - BELL_ANTIC_S)
+    f = fc.forecast(2.0)
+    own = [p for p in f.placements if p.key.endswith("DropBell M2/self")]
+    t_arm = 30.0 - TELL_DELAY["bell_dust"]
+    k = int(round(TELL_SLACK_S["bell_dust"] / BIN))
+    assert len(own) == 2 * k + 1 + int(np.ceil((t_arm - (30.0 - BELL_ANTIC_S)) / BIN))
+    # in the image on the frame before: the normal +-slack
+    fc2 = _fc(model, templates, VISION_EQUIVALENT)
+    fc2.bell_tells = True
+    fc2.tracker.vis = [(29.98, (60.0, 120.0), (60.0, 120.0))]
+    fc2.update(ws)
+    assert 11 not in fc2.tracker.bell_early

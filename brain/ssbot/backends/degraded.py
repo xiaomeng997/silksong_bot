@@ -30,10 +30,12 @@ class DegradedOracleBackend:
         self.source = source
 
     def reset(self, seed: int) -> int:
-        """New episode: forget all memory, reseed noise and delay (independent streams). Returns the episode's k."""
-        noise_seed, delay_seed = (int(c.generate_state(1)[0]) for c in np.random.SeedSequence(seed).spawn(2))
+        """New episode: forget all memory, reseed noise, delay and the filter's cue onsets (independent streams; the
+        first two as before the third was added). Returns the episode's k."""
+        noise_seed, delay_seed, filt_seed = (int(c.generate_state(1)[0])
+                                             for c in np.random.SeedSequence(seed).spawn(3))
         self.oracle.reset()
-        self.filt.reset()
+        self.filt.reset(filt_seed)
         self.noise.reset(noise_seed)
         return self.delay.reset(delay_seed)
 

@@ -260,3 +260,37 @@ def test_bind_reserve_reaches_the_safety_filter():
                             silk_reserve_full_hp=reserve)
         ok, why = veto(cs, ctx)
         assert ok[spear].any() == allowed and (why[spear] == R_SILK).all() == (not allowed)
+
+
+def test_skipped_states_reach_the_perception_path():
+    """A late tick skips STATEs (the episode loop hands the policy only the newest): the skipped ones still go
+    through the backend (filter, noise, delay line) in order, so their events (a hit dealt) are not lost."""
+    class Link:
+        def __init__(self):
+            self.subs = []
+
+        def subscribe_raw(self, fn):
+            pass
+
+        def subscribe_state(self, fn):
+            self.subs.append(fn)
+
+    pol = PlannerPolicy(view="degraded", threads=4)
+    link = Link()
+    pol.attach(link)
+    pol.terrain_tap = None                       # no TERRAIN messages here
+    pol.terrain = Terrain2D.from_boxes(ARENA)
+    pol.reset(random.Random(1), BELL_BEAST)
+    fed = []
+    orig = pol.backend.feed
+    pol.backend.feed = lambda s: (fed.append(s["f"]), orig(s))[1]
+    frames = [s for s in fx.window(0) if s["f"] >= 56540][:121]
+    acted = []
+    for i, s in enumerate(frames):
+        for fn in link.subs:
+            fn(s)
+        if i % 3 == 0:
+            pol.act(s, Tap)
+            acted.append(s["f"])
+    assert fed == [s["f"] for s in frames if s["f"] <= acted[-1]]
+    assert pol.counts["caught_up"] > 0

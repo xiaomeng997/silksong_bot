@@ -1600,8 +1600,12 @@ def rollout(start: np.ndarray, masks: np.ndarray, params: HeroParams, terrain: T
     if S0.shape[0] != K or S0.shape[1] not in (1, n):
         raise ValueError(f"start state {S0.shape}, expected ({K}, {n}) or ({K}, 1)")
     S0 = np.ascontiguousarray(S0)
-    ev = np.zeros((0, 0), dtype=np.int64) if events is None else np.ascontiguousarray(
-        np.broadcast_to(np.asarray(events, dtype=np.int64), (n, T)))
+    # writable: broadcast_to returns a read-only view, which ascontiguousarray passes through when no copy is needed
+    # (events already [n, T]), and a read-only array is another numba specialization: the planner's hit-effect
+    # rollouts compiled simulate_bound_par for it mid-fight in fresh worktrees (task V, numba signatures after
+    # PlannerPolicy.warmup against a replayed fight: only this one was new)
+    ev = np.zeros((0, 0), dtype=np.int64) if events is None else np.require(
+        np.broadcast_to(np.asarray(events, dtype=np.int64), (n, T)), np.int64, ["C", "W"])
     if isinstance(variants, str):
         variants = VARIANT_SETS[variants]
     variants = tuple(variants) if variants else ()
@@ -1617,8 +1621,8 @@ def rollout(start: np.ndarray, masks: np.ndarray, params: HeroParams, terrain: T
     if udts.shape[0] not in (1, n) or udts.shape[1] not in (1, T):
         raise ValueError(f"udt {udts.shape} does not broadcast to ({n}, {T})")
     if dt is not None:
-        dts = np.ascontiguousarray(np.broadcast_to(np.asarray(dt, dtype=np.float64), (n, T)))
-        fss = np.ascontiguousarray(np.broadcast_to(np.asarray(fs, dtype=np.float64), (n, T)))
+        dts = np.require(np.broadcast_to(np.asarray(dt, dtype=np.float64), (n, T)), np.float64, ["C", "W"])
+        fss = np.require(np.broadcast_to(np.asarray(fs, dtype=np.float64), (n, T)), np.float64, ["C", "W"])
     else:
         dts = fss = np.zeros((0, 0))
     terrain = terrain or Terrain2D.empty()
