@@ -105,6 +105,12 @@ ATK_ANCHOR_TOL_U = 0.5             # a pair's middle this close to a burst's anc
 ATK_LAG_SLACK_S = 0.05
 # the vision view's certain boss form only until its observable phase can end (SSBOT_CERT_PHASE_CUT=0: diagnostics)
 CERT_PHASE_CUT = os.environ.get("SSBOT_CERT_PHASE_CUT", "1") != "0"
+# the vision view's boss box changes its shape along the horizon (the hurtbox table's bin at the time in the phase +
+# tk, not the origin's): a charge's end shrinks and sinks into Dig In within 0.6 s (SSBOT_SHAPE_T=0: the origin's shape
+# for the whole horizon, the A/B before)
+SHAPE_T = os.environ.get("SSBOT_SHAPE_T", "1") != "0"
+HURT_BIN_S = 0.1             # the hurtbox table's time bins (ssbot.tools.hurtbox_table BIN_S)
+MARGIN_BIN_S = 0.1           # the pogo gate's margins per time bin in the phase (boss_path_audit --margins "_tau")
 DET_STATES = frozenset({"Drop", "Air", "Bounce Up", "Bounce Air", "Submerge", "Tink Right", "Tink R Min", "Tink Left",
                         "Tink L Min", "Tink D", "Tink Right 2", "Tink R Min 2", "Tink Left 2", "Tink L Min 2", "Tink D 2"})   # world-fixed hazards with self templates (entities.<tk>.self_template)
 REST_STATES = ("Init", "Dormant")
@@ -492,6 +498,25 @@ class Forecast:
             return float(p[:, 0].min()), float(p[:, 1].min()), float(p[:, 0].max()), float(p[:, 1].max())
         return _body_box(b)
 
+    def _table_rel(self, tk: np.ndarray) -> np.ndarray | None:
+        """VE: the hurtbox table's median box relative to the boss's position (mirrored with the sprite) at each tk,
+        from the time bin of (time in the phase + tk), the phase's last bin past its end: [T, 4]; None without a
+        table entry for the phase."""
+        tab = self.fc.hurtbox
+        tr = self.fc.tracker
+        st = tr.shape_key(tab)
+        if self.fc.view == ORACLE or not tab or st not in tab or tr.t_entry is None or self.boss is None:
+            return None
+        bins = tab[st]
+        keys = np.array(sorted(int(k) for k in bins))
+        tau = self.origin_t - tr.t_entry + np.asarray(tk, np.float64)
+        want = np.clip((np.maximum(tau, 0.0) / HURT_BIN_S).astype(np.int64), keys[0], keys[-1])
+        near = keys[np.abs(keys[None, :] - want[:, None]).argmin(axis=1)]
+        rel = np.array([bins[str(int(k))]["median"] for k in near], np.float64)
+        if self.boss.flip_x:
+            rel = np.stack([-rel[:, 2], rel[:, 1], -rel[:, 0], rel[:, 3]], axis=1)
+        return rel
+
     def _table_entry(self) -> dict | None:
         tab = self.fc.hurtbox
         st = self.fc.tracker.shape_key(tab)
@@ -536,7 +561,13 @@ class Forecast:
         fc = self.fc
         if fc.view == ORACLE or fc.box_margin is None:
             return None
-        tab = fc.box_margin.get(fc.tracker.shape_key(fc.box_margin) or "")
+        key = fc.tracker.shape_key(fc.box_margin) or ""
+        tab = fc.box_margin.get(key)
+        tau_tab = (fc.box_margin.get("_tau") or {}).get(key)
+        if tau_tab and fc.tracker.t_entry is not None:
+            # the margins measured from origins in this time bin of the phase (a charge's end and its Dig In differ)
+            b = str(int(max(0.0, self.origin_t - fc.tracker.t_entry) / MARGIN_BIN_S))
+            tab = tau_tab.get(b, tab)
         if not tab or not len(polys):
             return []
         t_cut = fc.tracker.phase_left_min(self.origin_t) if CERT_PHASE_CUT else math.inf
@@ -575,6 +606,12 @@ class Forecast:
         if bb is None or self._shape_override() == []:
             return box, ok
         box[:] = bb
+        if SHAPE_T:
+            # the shape along the horizon (vision view): the table's bin at each frame's time in the phase, moved
+            # with the origin's box (the same reference: the box at tk 0 is the origin's)
+            rel = self._table_rel(tk)
+            if rel is not None:
+                box += rel - self._table_rel(np.zeros(1))[0]
         t_left = tr.drawn_left(self.origin_t)
         ok[:] = tk <= t_left
         if tr.state in self.fc.no_hurtbox:
@@ -1554,10 +1591,14 @@ def load_hurtbox(path: str | Path | None = None) -> dict:
 
 def load_box_margin(path: str | Path | None = None) -> dict | None:
     """The vision view's box margins (ssbot.tools.boss_path_audit --margins): {phase: {k_max: [left, right, bottom,
-    top]}}; None when the file is missing (the pogo gate then has no certain form in the vision view)."""
+    top]}, "_tau": {phase: {time bin: {k_max: [...]}}}}; None when the file is missing (the pogo gate then has no
+    certain form in the vision view)."""
     p = Path(path) if path else Path(__file__).resolve().parents[3] / "knowledge" / "1.0.30000" / "enemies" / \
         "BellBeast_vision_box_margin.json"
-    return json.loads(p.read_text("utf-8"))["phases"] if p.exists() else None
+    if not p.exists():
+        return None
+    d = json.loads(p.read_text("utf-8"))
+    return d["phases"] | ({"_tau": d["phases_tau"]} if d.get("phases_tau") else {})
 
 
 def margin_xy(margin: float | tuple[float, float]) -> tuple[float, float]:

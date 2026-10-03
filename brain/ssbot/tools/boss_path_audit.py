@@ -166,6 +166,7 @@ def audit_episode(states: list[dict], fc, want: set[str], every: int, out: dict,
                     for side, v in (("left", p[0] - bj[0]), ("right", p[2] - bj[2]), ("bottom", p[1] - bj[1]),
                                     ("top", p[3] - bj[3])):
                         o[f"same_{side}"].append(v)
+                    o["same_tau"].append(tau if tau is not None else np.nan)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -231,29 +232,55 @@ def main(argv: list[str] | None = None) -> int:
 
 
 MARGIN_BUCKETS = (6, 12, 24, 48)
+TAU_BIN_S = 0.1              # forecast.MARGIN_BIN_S
+TAU_MIN_N = 40               # a time bin needs this many residuals per bucket, else the phase's margins stand
 
 
 def vision_margins(out: dict, pad: float) -> dict:
     """Per observable phase and horizon bucket (frames ahead <= k), how far the actual box can lie inside the
     predicted one on each side (left, right, bottom, top shrinks, u): the largest residual seen in that direction
     over every origin state and flip while the boss was still in the origin's observable phase (recorded), + pad.
-    Frame base (the planner's frame k)."""
+    Frame base (the planner's frame k). "phases_tau": the same per 0.1 s bin of the origin's time in the phase (a
+    charge's end and the Dig In after it are one phase with different errors), only bins with TAU_MIN_N residuals in
+    every bucket they list (Forecast.certain_boss falls back to the phase's margins)."""
     agg: dict = {}
+    agg_t: dict = {}
+    cnt_t: dict = {}
     for (key, base, k), o in out.items():
         if base != "frame" or not o.get("same_left"):
             continue
         phase = key.split("#")[1].split("|")[0]
+        res = np.array([o["same_left"], o["same_right"], o["same_bottom"], o["same_top"]], np.float64)
+        tau = np.asarray(o["same_tau"], np.float64)
         for kb in MARGIN_BUCKETS:
             if k > kb:
                 continue
             m = agg.setdefault(phase, {}).setdefault(str(kb), [0.0, 0.0, 0.0, 0.0])
-            m[0] = max(m[0], -float(np.min(o["same_left"])))
-            m[1] = max(m[1], float(np.max(o["same_right"])))
-            m[2] = max(m[2], -float(np.min(o["same_bottom"])))
-            m[3] = max(m[3], float(np.max(o["same_top"])))
+            m[0] = max(m[0], -float(np.min(res[0])))
+            m[1] = max(m[1], float(np.max(res[1])))
+            m[2] = max(m[2], -float(np.min(res[2])))
+            m[3] = max(m[3], float(np.max(res[3])))
+            tb = np.floor(np.nan_to_num(tau, nan=-1.0) / TAU_BIN_S).astype(int)
+            for b in np.unique(tb[tb >= 0]):
+                sel = tb == b
+                mt = agg_t.setdefault(phase, {}).setdefault(str(int(b)), {}).setdefault(str(kb), [0.0] * 4)
+                mt[0] = max(mt[0], -float(np.min(res[0, sel])))
+                mt[1] = max(mt[1], float(np.max(res[1, sel])))
+                mt[2] = max(mt[2], -float(np.min(res[2, sel])))
+                mt[3] = max(mt[3], float(np.max(res[3, sel])))
+                c = cnt_t.setdefault((phase, str(int(b)), str(kb)), [0])
+                c[0] += int(sel.sum())
     phases = {ph: {kb: [round(max(0.0, v) + pad, 3) for v in m] for kb, m in d.items()} for ph, d in agg.items()}
+    phases_tau: dict = {}
+    for ph, bins in agg_t.items():
+        for b, d in bins.items():
+            kbs = {kb: [round(max(0.0, v) + pad, 3) for v in m] for kb, m in d.items()
+                   if cnt_t[(ph, b, kb)][0] >= TAU_MIN_N}
+            if kbs and all(cnt_t[(ph, b, kb)][0] >= TAU_MIN_N for kb in d):
+                phases_tau.setdefault(ph, {})[b] = kbs
+    counts = {f"{ph}/{b}/{kb}": c[0] for (ph, b, kb), c in sorted(cnt_t.items())}
     return {"buckets": list(MARGIN_BUCKETS), "pad": pad, "sides": ["left", "right", "bottom", "top"],
-            "phases": phases}
+            "phases": phases, "tau_bin_s": TAU_BIN_S, "phases_tau": phases_tau, "tau_counts": counts}
 
 
 if __name__ == "__main__":

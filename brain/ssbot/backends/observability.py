@@ -299,14 +299,20 @@ def _rect_poly(r: tuple[float, float, float, float]) -> list[tuple[float, float]
     return [(r[0], r[1]), (r[2], r[1]), (r[2], r[3]), (r[0], r[3])]
 
 
-def image_extent(e: Entity) -> list[list[tuple[float, float]]]:
+def image_extent(e: Entity, rendered: bool = False) -> list[list[tuple[float, float]]]:
     """What a detector would see of e: its sprite bounds (the root renderer only, EntityRegistry.cs:691) plus its
     active damage boxes (a beam or slash effect is drawn; live i1_001 f352306: render box 72.26-73.84 x 1.76-2.24,
-    damage box 72.44-75.44 x 1.96-4.07), else its enabled colliders; [] = not drawn."""
+    damage box 72.44-75.44 x 1.96-4.07), else its enabled colliders; [] = not drawn. rendered: e's type is known to
+    have a renderer (it was exported with sprite bounds before), so without them it is not drawn whatever colliders
+    are on (the Bell Beast underground in Burst Antic: renderer off, hidden false, only its "Antic Bell Shaker"
+    trigger enabled, which made it a visible boss of phase "unknown" for the whole antic: degraded_dust run
+    20261002_224536 i0 ep0 f 32099-32171, the burst cue never shown, the tracker stuck in the leap's end)."""
     if e.hidden:
         return []
     if e.render_box is not None:
         return [_rect_poly(e.render_box)] + [b.poly for b in e.dmg_boxes if b.active and len(b.poly) >= 2]
+    if rendered:
+        return []
     return [p for p in e.body_polys if len(p) >= 2]
 
 
@@ -453,6 +459,7 @@ class ObservabilityFilter:
         self.min_p = min_p
         self.boxes = box_table if box_table is not None else BoxTable.load()   # knowledge: survives reset()
         self.tells = {k: dict(v) for k, v in (tells or {}).items()}
+        self._rendered: set[str] = set()     # types exported with sprite bounds at least once (knowledge: kept)
         self.reset()
 
     def reset(self) -> None:
@@ -502,13 +509,16 @@ class ObservabilityFilter:
             if not e.hidden and e.dmg_boxes:
                 self.boxes.learn(e.type_key.v, e.pos.v, e.flip_x, e.dmg_boxes)
 
+        for e in out.entities:
+            if e.render_box is not None:
+                self._rendered.add(e.type_key.v)
         frac, inside = self._visibility(out)
         visible: list[Entity] = []
         gone_inside: dict[int, bool] = {}          # id -> the oracle exports it hidden
         exported: dict[int, Entity] = {}           # the oracle's copy of an entity gone inside (hypothetical tells)
         outside: set[int] = set()
         for e, fv, pin in zip(out.entities, frac, inside):
-            if e.hidden or (fv <= 0.0 and not image_extent(e) and pin):
+            if e.hidden or (fv <= 0.0 and not image_extent(e, e.type_key.v in self._rendered) and pin):
                 gone_inside[e.id] = e.hidden
                 exported[e.id] = e
             elif fv <= 0.0:
@@ -550,6 +560,7 @@ class ObservabilityFilter:
             self._seen[e.id] = _Seen(e, t, float(e.visible_frac), "visible", t)
 
         ents = list(visible)
+        orig = {e.id: e for e in ws.entities}      # the input's copies (phase: the oracle's state; the transform)
         for iid in list(self._seen):
             if iid in vis_ids:
                 continue
@@ -561,6 +572,11 @@ class ObservabilityFilter:
             if seen.state == "visible":            # just lost: it vanished in view, or vision lost it over the edge
                 vanished = iid not in outside and seen.frac >= VANISH_FRAC    # hidden, not drawn, left the export
                 seen.state, seen.t_state = ("hidden" if vanished else "ghost"), t
+            if seen.state == "ghost" and self.tells and self._cue_in_view(seen, orig.get(iid), ws):
+                # its cue shows inside the image (dust where it digs out): vision sees it is underground there, however
+                # it was lost (a boss that dug in at the image edge stayed a ghost through the next attack's antic:
+                # degraded_dust run 20261002_173956, 71 of 13,104 cue frames)
+                seen.state, seen.t_state = "hidden", t
             # (a ghost stays a ghost and a hidden one hidden until seen again: vision cannot see either change)
             age = t - seen.t
             if seen.state == "hidden" and seen.ent.kind not in KEEP_HIDDEN:
@@ -570,7 +586,7 @@ class ObservabilityFilter:
                 del self._seen[iid]               # (seen digging in and still exported hidden: no TTL)
                 continue
             if seen.state == "hidden":
-                ents.append(self._hidden(seen, t, age, exported.get(iid)))
+                ents.append(self._hidden(seen, t, age, exported.get(iid) or orig.get(iid)))
                 unobs |= Unobs.VANISHED_IN_VIEW
             else:
                 ents.append(self._ghost(seen, age))
@@ -634,7 +650,7 @@ class ObservabilityFilter:
         start = [n]
         owner = []
         for i, e in enumerate(ents):
-            for poly in image_extent(e):
+            for poly in image_extent(e, e.type_key.v in self._rendered):
                 pts.extend(poly)
                 start.append(len(pts))
                 owner.append(i)
@@ -716,21 +732,40 @@ class ObservabilityFilter:
                       facing=g.facing, hp_est=self._hp(g.id, self.hp_max.get(g.type_key.v)) if g.hp_est else None,
                       visible_frac=0.0, last_seen_ms=age_ms, flip_x=g.flip_x)
 
+    def _tell_of(self, type_key: str, cur: Entity | None) -> str | None:
+        """The tell phase an entity in the oracle copy cur shows now (self.tells), or None."""
+        if cur is None or cur.phase is None or not cur.phase.top:
+            return None
+        spec = self.tells.get(type_key, {}).get(cur.phase.top)
+        if isinstance(spec, str):
+            return spec
+        if spec:
+            due = [ph for d, ph in spec if cur.phase.t_in_phase >= d - 1e-6]
+            return due[-1] if due else None
+        return None
+
+    def _cue_in_view(self, seen: _Seen, cur: Entity | None, ws: WorldState) -> bool:
+        """A ghost's cue is due and its x (the transform's) lies inside the image at the height it was last seen."""
+        if self._tell_of(seen.ent.type_key.v, cur) is None:
+            return False
+        cam = ws.cam
+        if cam.V is None or cam.P is None or cam.screen is None:
+            return True
+        x = cur.pos_transform[0] if cur.pos_transform is not None else cur.pos.v[0]
+        xy, ok = project(np.array([[float(x), float(seen.ent.pos.v[1])]]), mat4(cam.V), mat4(cam.P), cam.viewport,
+                         cam.screen)
+        rect = viewport_rect(cam, self.margin_px)
+        return bool(ok[0] and rect[0] <= xy[0, 0] <= rect[2])
+
     def _hidden(self, seen: _Seen, t: float, age: float, cur: Entity | None = None) -> Entity:
         """Gone inside the image (dug in, put away): it exists, its position is unknown (conf 0), unless a
         hypothetical tell (self.tells) shows its state and x."""
         g = seen.ent
-        tell = None
-        if cur is not None and cur.phase is not None and cur.phase.top:
-            spec = self.tells.get(g.type_key.v, {}).get(cur.phase.top)
-            if isinstance(spec, str):
-                tell = spec
-            elif spec:
-                due = [ph for d, ph in spec if cur.phase.t_in_phase >= d - 1e-6]
-                tell = due[-1] if due else None
+        tell = self._tell_of(g.type_key.v, cur)
         if tell is not None:
+            x = cur.pos_transform[0] if cur.pos_transform is not None else cur.pos.v[0]
             return Entity(id=g.id, kind=g.kind, type_key=g.type_key,
-                          pos=E((float(cur.pos.v[0]), float(g.pos.v[1])), sigma=g.pos.sigma, conf=1.0,
+                          pos=E((float(x), float(g.pos.v[1])), sigma=g.pos.sigma, conf=1.0,
                                 src=Src.PREDICTED, age_ms=0.0),
                           vel=unknown((0.0, 0.0)), facing=g.facing,
                           phase=PhasePost(topk=[(tell, 1.0)], t_in_phase=self._phase_time(g.id, tell, t)),
