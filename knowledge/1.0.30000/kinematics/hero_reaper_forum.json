@@ -117,7 +117,7 @@
    0.167
   ]
  ],
- "abilities": 127,
+ "abilities": 511,
  "wall_ray": 0.6,
  "wall_ray_brolly": 1.0,
  "wall_touch_ray": 0.1,
@@ -148,6 +148,97 @@
  "air_fall_clamp1": -30.0,
  "air_fall_clamp_time": 1.0,
  "air_fall_clamp_lag": 0.016667,
+ "thunk_on": 0.0666667,
+ "thunk_off": 0.1916667,
+ "thunk_off_up": 0.2333333,
+ "thunk_polys": {
+  "normal": [
+   [
+    -0.2542,
+    2.6863
+   ],
+   [
+    1.0821,
+    2.4752
+   ],
+   [
+    2.5324,
+    1.8172
+   ],
+   [
+    3.5255,
+    0.5872
+   ],
+   [
+    3.5958,
+    -0.4186
+   ],
+   [
+    -0.0337,
+    -0.2345
+   ]
+  ],
+  "alt": [
+   [
+    0.4023,
+    0.8904
+   ],
+   [
+    1.3144,
+    1.0244
+   ],
+   [
+    3.6695,
+    0.981
+   ],
+   [
+    3.5702,
+    0.324
+   ],
+   [
+    2.6323,
+    -0.5409
+   ],
+   [
+    1.2851,
+    -0.9804
+   ],
+   [
+    0.1059,
+    -0.9954
+   ]
+  ],
+  "up": [
+   [
+    -2.1197,
+    -0.6303
+   ],
+   [
+    -1.9126,
+    1.2667
+   ],
+   [
+    -1.2979,
+    2.4404
+   ],
+   [
+    -0.2341,
+    3.4423
+   ],
+   [
+    0.8108,
+    3.7675
+   ],
+   [
+    0.4911,
+    2.6837
+   ],
+   [
+    0.2634,
+    1.0097
+   ]
+  ]
+ },
  "skid_decel": 0.85,
  "skid_decel_move": 0.95,
  "skid_time": 0.25,
@@ -642,7 +733,11 @@
   "air_fall_clamp_lag": "one frame: the Air Sprint fall clamp (EaseFloat -10 -> -30, 1 s) reads a frame behind the state's own time in every air sprint of kn_excite_forum_s98200 (fit run C; also seen in the dev run D, s98300)",
   "scr_roof_ray": "CharacterBumpCheck.CheckForBump (top): ray 0.1 + 0.03 + |vy| fdt from 0.1 u under the box top",
   "scr_detach": "hornet_wall_scramble template, Detach: Translate x scale.x * 0.2",
-  "wall_up_shove": "HeroController.Attack 4164: MovePosition 0.8 off the wall for an up slash while wall sliding"
+  "wall_up_shove": "HeroController.Attack 4164: MovePosition 0.8 off the wall for an up slash while wall sliding",
+  "thunk_on": "Reaper slash clips' first animation event 2/24 s (crests.json), minus the attack frame's own dt (the clip time counts it): the collider is on from the first physics step with ATK_T >= 4/60; live: recoil onsets 5 / 6 / 7 frames after the swing in s98000 + A, as the frame's steps fall (thunk check)",
+  "thunk_off": "second animation event 5/24 s (normal / alt / wall) minus one frame",
+  "thunk_off_up": "second animation event 6/24 s (up) minus one frame",
+  "thunk_polys": "knowledge/1.0.30000/attacks/reaper.json normal / alt / up polygons (HeroParams.with_slash_polys; the Terrain Thunker child copies the slash collider: NailSlashTerrainThunk.generateChild)"
  },
  "fit": {
   "frame_time": {

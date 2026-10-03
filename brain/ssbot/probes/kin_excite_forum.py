@@ -48,7 +48,7 @@ from ssbot.probes.kin_excite import TerrainTap, Trial, _seg, run_trial
 SETTLE_FRAMES = 40
 M_L, M_R = mask("left"), mask("right")
 M_J, M_A, M_D, M_U, M_DASH = mask("jump"), mask("attack"), mask("down"), mask("up"), mask("dash")
-FORUM_ABILITIES = "walljump,wallcling,dash,brolly,reaper_down,wallslash_slowdown,hard_landing"
+FORUM_ABILITIES = "walljump,wallcling,dash,brolly,reaper_down,wallslash_slowdown,hard_landing,slash_thunk,slopes"
 REAPER_PARAMS = {"attack_cooldown": 0.5, "attack_recovery": 0.3, "attack_duration": 0.35}
 # objects an FSM swings that no slash.dump slot names (the oracle's "paths" argument; older plugins ignore it): the
 # Reaper down slash (the Crest Attacks FSM's Attacks/Scythe/DownSlash New) and dash attack (the Sprint FSM's
@@ -65,7 +65,7 @@ def forum_params():
     for name in FORUM_ABILITIES.split(","):
         ab |= next(b for b, n in km.ABILITY_NAMES.items() if n == name)
     d = p.to_json() | {"abilities": ab, "crest": "Reaper"} | REAPER_PARAMS
-    return km.HeroParams.from_json(d)
+    return km.HeroParams.from_json(d).with_slash_polys()
 
 
 KINDS = ("wall_hold", "wall_hold", "wall_jump", "wall_jump", "wall_attack", "wall_scramble", "glide", "glide",

@@ -46,7 +46,8 @@ from ssbot.knowledge.kinematics import (  # Forum loadout (abilities)
     M_SCRAMBLE, P_SCR_ANTIC, P_SCR_SPEED, P_SCR_FORCE, P_SCR_FORCE_H, P_SCR_END_VY, P_SCR_END_DEC, P_SCR_END_T,
     P_SCR_ROOF_RAY, P_SCR_ROOF_T, P_SCR_DETACH, P_SPR_SHIFT, P_SPR_GRACE, P_SKID_DEC_MV, P_SKID_VMIN, P_AFC_LAG, P_RPR_TDEC,
     P_RPR_TREACH0, P_RPR_TREACH1, P_RPR_TREACH_T, P_RPR_TLOBE0,
-    P_RPR_TLOBE1)
+    P_RPR_TLOBE1, AB_THUNK, AB_SLOPES, ATK_KIND, ALT, ALT_T, ATK_PDIR, P_THK_ON, P_THK_OFF, P_THK_OFF_UP, P_THK,
+    THK_STRIDE, ALT_ATTACK_RESET)
 
 # world freeze presets in start order (kinematics.WF_ORDER): event bit, rampDown, wait, rampUp, target
 _WF = np.array([[float(b), *FREEZE_PRESETS[b]] for b in WF_ORDER])
@@ -315,19 +316,29 @@ def vray(x0, y0, length, TT):
 
 
 @njit(cache=True, error_model="numpy")
-def roof_ray(x0, top, length, TT):
+def roof_ray(x0, top, length, TT, slopes=False):
     """CharacterBumpCheck.CheckForBump(top)'s wall ray: from (x0, top - 0.1) up 0.1 + `length` meets a horizontal
-    segment."""
-    if TT[0] == 0:
-        return False
-    b0, b1 = _buckets(x0 - 0.01, x0 + 0.01, TT)
-    st, ids = np.int64(TT[5]), np.int64(TT[6])
-    for b in range(b0, b1 + 1):
-        for q in range(np.int64(TT[st + b]), np.int64(TT[st + b + 1])):
-            j = TT_H + 3 * np.int64(TT[ids + q])
-            d = TT[j] - top
-            if -0.1 <= d <= length and TT[j + 1] <= x0 <= TT[j + 2]:
-                return True
+    segment (or, with `slopes`, a sloped edge: the Forum's roof over the left wall top is one)."""
+    if TT[0] > 0:
+        b0, b1 = _buckets(x0 - 0.01, x0 + 0.01, TT)
+        st, ids = np.int64(TT[5]), np.int64(TT[6])
+        for b in range(b0, b1 + 1):
+            for q in range(np.int64(TT[st + b]), np.int64(TT[st + b + 1])):
+                j = TT_H + 3 * np.int64(TT[ids + q])
+                d = TT[j] - top
+                if -0.1 <= d <= length and TT[j + 1] <= x0 <= TT[j + 2]:
+                    return True
+    if slopes and TT[10] > 0:
+        b0, b1 = _buckets(x0 - 0.01, x0 + 0.01, TT)
+        st, ids, ov = np.int64(TT[12]), np.int64(TT[13]), np.int64(TT[11])
+        for b in range(b0, b1 + 1):
+            for q in range(np.int64(TT[st + b]), np.int64(TT[st + b + 1])):
+                j = ov + 4 * np.int64(TT[ids + q])
+                ax, ay, bx, by = TT[j], TT[j + 1], TT[j + 2], TT[j + 3]
+                if min(ax, bx) <= x0 <= max(ax, bx) and abs(bx - ax) > 1e-6:
+                    d = ay + (x0 - ax) * (by - ay) / (bx - ax) - top
+                    if -0.1 <= d <= length:
+                        return True
     return False
 
 
@@ -353,6 +364,231 @@ def rpr_thunk(x, P, TT):
             if 0.0 <= d <= reach and TT[j + 1] < hi and TT[j + 2] > lo:
                 return True
     return False
+
+
+@njit(cache=True, inline="always", error_model="numpy")
+def _cross(ax, ay, bx, by, cx, cy):
+    return (bx - ax) * (cy - ay) - (by - ay) * (cx - ax)
+
+
+@njit(cache=True, error_model="numpy")
+def _seg_meets_poly(ax, ay, bx, by, wx, wy, n):
+    """The segment (a, b) meets the polygon (wx, wy)[:n] (as an area: crosses an edge or lies inside)."""
+    inside = False
+    for i in range(n):
+        k = (i + 1) % n
+        if (wy[i] > ay) != (wy[k] > ay) and ax < wx[i] + (ay - wy[i]) * (wx[k] - wx[i]) / (wy[k] - wy[i]):
+            inside = not inside
+    if inside:
+        return True
+    for i in range(n):
+        k = (i + 1) % n
+        d1 = _cross(ax, ay, bx, by, wx[i], wy[i])
+        d2 = _cross(ax, ay, bx, by, wx[k], wy[k])
+        d3 = _cross(wx[i], wy[i], wx[k], wy[k], ax, ay)
+        d4 = _cross(wx[i], wy[i], wx[k], wy[k], bx, by)
+        if ((d1 > 0) != (d2 > 0)) and ((d3 > 0) != (d4 > 0)):
+            return True
+    return False
+
+
+@njit(cache=True, error_model="numpy")
+def slash_thunk(px, py, face, kind, P, TT):
+    """The swing's Terrain Thunker (a copy of its damage polygon, P_THK tail) meets terrain the way
+    NailSlashTerrainThunk recoils from (TerrainThunkUtils.GenerateTerrainThunk): a side slash (kind 1 / 2) a wall face
+    in front of the hero (contact x past hero.pos along the facing, a horizontal surface normal: RecoilLeft / Right),
+    an up slash (kind 3) a ceiling or a shallow slope above hero.pos (vertical normal: RecoilDown). Placed at the body
+    position the step started from (the thunker's kinematic body is synced to the transform before the step)."""
+    base = P_THK + (np.int64(kind) - 1) * THK_STRIDE
+    n = np.int64(P[base])
+    if n < 3:
+        return False
+    cx = px
+    cy = py + 0.5 * (P[P_HEAD] - P[P_FOOT])
+    wx = np.empty(n)
+    wy = np.empty(n)
+    for i in range(n):
+        wx[i] = cx + face * P[base + 1 + 2 * i]
+        wy[i] = cy + P[base + 2 + 2 * i]
+    x0, x1 = wx.min(), wx.max()
+    y0, y1 = wy.min(), wy.max()
+    b0, b1 = _buckets(x0 - 0.02, x1 + 0.02, TT)
+    if kind <= 2:
+        if TT[1] == 0:
+            return False
+        st, ids, ov = np.int64(TT[7]), np.int64(TT[8]), np.int64(TT[9])
+        for b in range(b0, b1 + 1):
+            for q in range(np.int64(TT[st + b]), np.int64(TT[st + b + 1])):
+                j = ov + 3 * np.int64(TT[ids + q])
+                xs = TT[j]
+                if face * (xs - px) <= 0.0 or xs < x0 or xs > x1 or TT[j + 2] < y0 or TT[j + 1] > y1:
+                    continue
+                if _seg_meets_poly(xs, TT[j + 1], xs, TT[j + 2], wx, wy, n):
+                    return True
+        return False
+    if TT[0] > 0:
+        st, ids = np.int64(TT[5]), np.int64(TT[6])
+        for b in range(b0, b1 + 1):
+            for q in range(np.int64(TT[st + b]), np.int64(TT[st + b + 1])):
+                j = TT_H + 3 * np.int64(TT[ids + q])
+                ys = TT[j]
+                if ys <= py or ys < y0 or ys > y1 or TT[j + 2] < x0 or TT[j + 1] > x1:
+                    continue
+                if _seg_meets_poly(TT[j + 1], ys, TT[j + 2], ys, wx, wy, n):
+                    return True
+    if TT[10] > 0:
+        st, ids, ov = np.int64(TT[12]), np.int64(TT[13]), np.int64(TT[11])
+        for b in range(b0, b1 + 1):
+            for q in range(np.int64(TT[st + b]), np.int64(TT[st + b + 1])):
+                j = ov + 4 * np.int64(TT[ids + q])
+                ax, ay, bx, by = TT[j], TT[j + 1], TT[j + 2], TT[j + 3]
+                if abs(by - ay) > abs(bx - ax) or max(ay, by) <= py:
+                    continue                  # a steep edge (its normal is horizontal) or below hero.pos
+                if max(ax, bx) < x0 or min(ax, bx) > x1 or max(ay, by) < y0 or min(ay, by) > y1:
+                    continue
+                if _seg_meets_poly(ax, ay, bx, by, wx, wy, n):
+                    return True
+    return False
+
+
+@njit(cache=True, error_model="numpy")
+def slope_push(x0, y0, nx, ny, vx, vy, P, TT):
+    """Collide the box (moved from body position (x0, y0) to (nx, ny) by the axis-aligned rules) with the sloped
+    terrain edges (Terrain2D.slopes), as Box2D's polygon-edge contact does: per edge the separating axis with the
+    least penetration among the edge normal (oriented to the side the step started on) and the box's x / y axes
+    (an edge end poking into a box face), preferring the edge normal within 1 mm; the box is pushed out to the skin
+    and the velocity loses its component into the surface (no friction). Two passes over the edges in reach.
+    Returns (nx, ny, vx, vy, contact: 1 roof (a normal pointing down at least 60 deg), 2 floor, 0 none or a side)."""
+    if TT[10] == 0:
+        return nx, ny, vx, vy, 0
+    hw = P[P_HW]
+    hh = 0.5 * (P[P_HEAD] + P[P_FOOT])
+    off = 0.5 * (P[P_HEAD] - P[P_FOOT])
+    skin = P[P_SKIN]
+    c0x = x0
+    c0y = y0 + off
+    contact = 0
+    st, ids, ov = np.int64(TT[12]), np.int64(TT[13]), np.int64(TT[11])
+    for _ in range(2):
+        cx = nx
+        cy = ny + off
+        b0, b1 = _buckets(cx - hw - 0.05, cx + hw + 0.05, TT)
+        for b in range(b0, b1 + 1):
+            for q in range(np.int64(TT[st + b]), np.int64(TT[st + b + 1])):
+                j = ov + 4 * np.int64(TT[ids + q])
+                ax, ay, bx, by = TT[j], TT[j + 1], TT[j + 2], TT[j + 3]
+                cx = nx
+                cy = ny + off
+                if max(ax, bx) < cx - hw - skin or min(ax, bx) > cx + hw + skin or                         max(ay, by) < cy - hh - skin or min(ay, by) > cy + hh + skin:
+                    continue
+                ex = bx - ax
+                ey = by - ay
+                ln = math.sqrt(ex * ex + ey * ey)
+                if ln < 1e-9:
+                    continue
+                enx = -ey / ln
+                eny = ex / ln
+                if (c0x - ax) * enx + (c0y - ay) * eny < 0:
+                    enx = -enx
+                    eny = -eny
+                pen_n = skin - ((cx - ax) * enx + (cy - ay) * eny - (abs(enx) * hw + abs(eny) * hh))
+                if pen_n <= 0:
+                    continue
+                # the box axes: penetration of the edge's extent into the box (inflated by the skin) on the side the
+                # box sits
+                if c0x >= 0.5 * (ax + bx):
+                    pen_x = max(ax, bx) - (cx - hw) + skin
+                    sx = 1.0
+                else:
+                    pen_x = (cx + hw) - min(ax, bx) + skin
+                    sx = -1.0
+                if c0y >= 0.5 * (ay + by):
+                    pen_y = max(ay, by) - (cy - hh) + skin
+                    sy = 1.0
+                else:
+                    pen_y = (cy + hh) - min(ay, by) + skin
+                    sy = -1.0
+                if pen_x <= 0 or pen_y <= 0:
+                    continue
+                if pen_n <= pen_x + 1e-3 and pen_n <= pen_y + 1e-3:
+                    nx += enx * pen_n
+                    ny += eny * pen_n
+                    vn = vx * enx + vy * eny
+                    if vn < 0:
+                        vx -= vn * enx
+                        vy -= vn * eny
+                    if eny <= -0.5:
+                        contact = 1
+                    elif eny >= 0.5:
+                        contact = 2
+                elif pen_y <= pen_x:
+                    ny += sy * pen_y
+                    if vy * sy < 0:
+                        vy = 0.0
+                    contact = 1 if sy < 0 else 2
+                else:
+                    nx += sx * pen_x
+                    if vx * sx < 0:
+                        vx = 0.0
+    return nx, ny, vx, vy, contact
+
+
+@njit(cache=True, error_model="numpy")
+def forum_swing(x, mask, P):
+    """Attack()'s slash bookkeeping (AB_THUNK): the direction, altAttack (cleared past AttackRecoveryTime +
+    ALT_ATTACK_RESET since the last slash or on a new direction; a normal / up slash takes the alternate one when it
+    is set and toggles it), the swing kind for its terrain thunker, altAttackTime and prevAttackDir."""
+    up = (mask & B_UP) != 0
+    down = not up and (mask & B_DOWN) != 0 and x[GROUND] <= 0
+    dirn = 1.0 if up else (2.0 if down else 0.0)
+    if x[ALT_T] > P[P_ATK_REC] + ALT_ATTACK_RESET or dirn != x[ATK_PDIR]:
+        x[ALT] = 0.0
+    kind = 0.0
+    if dirn == 0 and x[WSIDE] != 0:
+        kind = 4.0                        # wall slash: the polygon lies behind the facing, never thunks
+    elif dirn == 0 or dirn == 1:
+        if dirn == 0:
+            kind = 2.0 if x[ALT] > 0 else 1.0
+        else:
+            kind = 3.0
+        x[ALT] = 0.0 if x[ALT] > 0 else 1.0
+    if dirn != 2:
+        x[ALT_T] = 0.0                    # altAttackTime (a Custom down slash is not "slashing")
+    x[ATK_PDIR] = dirn
+    x[ATK_KIND] = kind
+
+
+@njit(cache=True, error_model="numpy")
+def thunk_step(x, P, TT):
+    """After a physics step: the swing's thunker met terrain in it (OnCollisionEnter2D, handled at once): Recoil away
+    from the wall (allowed while relinquished, not while already recoiling; it also cancels a dash and the wall
+    jump's push) or RecoilDown off a ceiling (CancelJump, the rise stops). One thunk per swing."""
+    k = x[ATK_KIND]
+    if k <= 0 or k > 3 or x[ATTACKING] <= 0:
+        return
+    if not ge32(x[ATK_T], P[P_THK_ON]) or ge32(x[ATK_T], P[P_THK_OFF_UP] if k == 3 else P[P_THK_OFF]):
+        return
+    if not slash_thunk(x[QX], x[QY], x[FACE], k, P, TT):
+        return
+    x[ATK_KIND] = -k
+    if k == 3:
+        x[JUMPING] = 0.0
+        x[JSTEPS] = 0.0
+        x[WLOCK] = -1.0
+        if x[VY] > 0 and not relinq(x[MODE]):
+            x[VY] = x[VY] * 0.5 if P[P_RDOWN_HALF] > 0 else 0.0
+        return
+    if x[RDIR] != 0 or noinput(x[MODE]):
+        return
+    side = -x[FACE]
+    if x[MODE] == M_DASH:
+        x[MODE] = M_NORMAL
+        x[DASH_T] = 0.0
+        grav_on(x)
+    x[RDIR] = side
+    x[RSTEPS] = P[P_RSTEPS]
+    x[VX] = side * P[P_RV]
+    x[WJ_DIR] = 0.0
 
 
 @njit(cache=True, error_model="numpy")
@@ -808,7 +1044,8 @@ def forum_fixed(x, vx, vy, normal, rx0, ry0, P, TT):
             # the velocity at the step's start covers, sends ROOF: Hit Roof (gravity back this step), Hit Roof Soft
             side = x[SP_X]
             reach = P[P_SCR_ROOF_RAY] + abs(x[VY]) * P[P_FDT]
-            if roof_ray(x[PX] + side * (P[P_HW] - 0.2), x[PY] + P[P_HEAD], reach, TT):
+            if roof_ray(x[PX] + side * (P[P_HW] - 0.2), x[PY] + P[P_HEAD], reach, TT,
+                        (np.int64(P[P_ABIL]) & AB_SLOPES) != 0):
                 x[PHASE] = 3.0
                 x[MODE_T] = 0.0
                 grav_on(x)
@@ -1080,7 +1317,7 @@ def forum_after_queue(x, mask, pressed, mode0, dt, P, TT):
             # reach is Hit Roof now, its End clip timed from this frame as a FixedUpdate entry's (run A s98010:
             # f696151 / f716016 detached 5 frames after the start frame, as the FixedUpdate roofs)
             if roof_ray(x[PX] + side * (P[P_HW] - 0.2), x[PY] + P[P_HEAD],
-                        P[P_SCR_ROOF_RAY] + P[P_SCR_SPEED] * P[P_FDT], TT):
+                        P[P_SCR_ROOF_RAY] + P[P_SCR_SPEED] * P[P_FDT], TT, (ab & AB_SLOPES) != 0):
                 x[PHASE] = 3.0
                 x[MODE_T] = f32(dt)
                 grav_on(x)
@@ -1332,6 +1569,14 @@ def fixed_step(x, P, TT):
                                          TT)
     if landed or bumped:
         vy = 0.0
+    if (ab & AB_SLOPES) != 0:
+        nx, ny, vx, vy, sc = slope_push(x[PX], x[PY], nx, ny, vx, vy, P, TT)
+        bumped = bumped or sc == 1
+        if bumped and not noinp:
+            # OnCollisionEnter2D, side top (normal y <= -0.5): CancelJump (the rise does not press on into the roof)
+            x[JUMPING] = 0.0
+            x[JSTEPS] = 0.0
+            x[WLOCK] = -1.0
     if shove != 0:
         vx, vy = sv_x, sv_y
     x[PX] = nx
@@ -1366,6 +1611,8 @@ def fixed_step(x, P, TT):
             x[PHASE] = 4.0                # THUNKED DOWN in the step's collision: Rpr Downslash Thunk, DecelerateV2
             x[VX] = decel(x[VX], P[P_RPR_TDEC])   # OnEnter (the step's own x0.7 already done)
             x[VY] = decel(x[VY], P[P_RPR_TDEC])
+        if (ab & AB_THUNK) != 0 and x[ATK_KIND] > 0:
+            thunk_step(x, P, TT)
 
 
 @njit(cache=True, inline="always", error_model="numpy")
@@ -1521,6 +1768,8 @@ def do_attack(x, mask, P):
     want = 1.0 if (mask & B_RIGHT) != 0 else (-1.0 if (mask & B_LEFT) != 0 else 0.0)
     if want != 0:
         x[FACE] = want
+    if (np.int64(P[P_ABIL]) & AB_THUNK) != 0:
+        forum_swing(x, mask, P)
     if P[P_ABIL] != 0 and forum_attack(x, mask, P):
         x[ATK_T] = 0.0                    # Reaper down slash: DidAttack's cooldown, the FSM has control
         x[ATK_CD] = P[P_ATK_CD]
@@ -1553,6 +1802,8 @@ def update(x, mask, ev, dt, udt, P, TT):
     ab = np.int64(P[P_ABIL])
     falling = False
     if ab != 0:
+        if (ab & AB_THUNK) != 0:
+            x[ALT_T] = f32(x[ALT_T] + dt)  # Time.timeSinceLevelLoad - altAttackTime
         if (pressed & B_JUMP) != 0:       # InputHandler.UpdateButtonQueueing (before the hero's Update)
             x[JBUF] = 0.1
         elif x[JBUF] > 0:

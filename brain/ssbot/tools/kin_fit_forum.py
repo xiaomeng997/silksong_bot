@@ -205,6 +205,13 @@ HAND_SET = {
     "scr_roof_ray": "CharacterBumpCheck.CheckForBump (top): ray 0.1 + 0.03 + |vy| fdt from 0.1 u under the box top",
     "scr_detach": "hornet_wall_scramble template, Detach: Translate x scale.x * 0.2",
     "wall_up_shove": "HeroController.Attack 4164: MovePosition 0.8 off the wall for an up slash while wall sliding",
+    "thunk_on": "Reaper slash clips' first animation event 2/24 s (crests.json), minus the attack frame's own dt (the clip "
+                "time counts it): the collider is on from the first physics step with ATK_T >= 4/60; live: recoil "
+                "onsets 5 / 6 / 7 frames after the swing in s98000 + A, as the frame's steps fall (thunk check)",
+    "thunk_off": "second animation event 5/24 s (normal / alt / wall) minus one frame",
+    "thunk_off_up": "second animation event 6/24 s (up) minus one frame",
+    "thunk_polys": "knowledge/1.0.30000/attacks/reaper.json normal / alt / up polygons (HeroParams.with_slash_polys; the "
+                   "Terrain Thunker child copies the slash collider: NailSlashTerrainThunk.generateChild)",
 }
 
 
