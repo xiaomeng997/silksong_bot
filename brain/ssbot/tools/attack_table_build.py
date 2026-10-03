@@ -103,7 +103,7 @@ def from_dump(dump: dict, crest: str) -> AttackTable:
 
 # slash.dump "paths" samples (slot "path:<hero-relative path>") that stand for a table slot: the object the FSM
 # really swings, whose polygons replace the dump's (the dump's custom down slot is the config group's DownSlash object)
-PATH_SLOTS = {"path:Attacks/Scythe/DownSlash New": "down"}
+PATH_SLOTS = {"path:Attacks/Scythe/DownSlash New": "down", "path:Attacks/Scythe/DashUpper Slash": "dash_stab"}
 # the hit src of a Custom down slash: the object the Crest Attacks FSM swings (FindChild in its Init state; live
 # Bell Beast Reaper run 20261002_225836: 18 hits with src "DownSlash New", none with the group object's "DownSlash")
 CUSTOM_DOWN_SRC = {"RPR DOWNSLASH": "DownSlash New"}

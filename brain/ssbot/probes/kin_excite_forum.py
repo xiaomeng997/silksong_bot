@@ -24,8 +24,9 @@ release, press again and hold, steering), dash (on the ground or in the air, tap
 direction), reaper_attack (side / alt / up / down on the ground and in the air), dash_attack (a ground dash held
 into the sprint, then attack: the crest's dash attack), charge (hold attack, release: the charge slash). A plan is
 rolled out from the logged start with the Forum parameters and redrawn when the hero would leave --x-safe (the model
-is what this probe measures, so this only keeps her in the room). Output: one recording plus <recording>/kin_trials.jsonl, and with
---attack-frames <recording>/attack_frames.jsonl (one line per sampled frame and enabled damager).
+is what this probe measures, so this only keeps her in the room). Output: one recording plus
+<recording>/kin_trials.jsonl, and with --attack-frames <recording>/attack_frames.jsonl (one line per sampled frame and
+enabled damager).
 
 Safety: a free training instance only (it loads savestates and drives input); save suppression on all the time.
 """
@@ -50,8 +51,9 @@ M_J, M_A, M_D, M_U, M_DASH = mask("jump"), mask("attack"), mask("down"), mask("u
 FORUM_ABILITIES = "walljump,wallcling,dash,brolly,reaper_down,wallslash_slowdown,hard_landing"
 REAPER_PARAMS = {"attack_cooldown": 0.5, "attack_recovery": 0.3, "attack_duration": 0.35}
 # objects an FSM swings that no slash.dump slot names (the oracle's "paths" argument; older plugins ignore it): the
-# Reaper down slash, which the Crest Attacks FSM finds as Attacks/Scythe/DownSlash New
-ATTACK_PATHS = ("Attacks/Scythe/DownSlash New",)
+# Reaper down slash (the Crest Attacks FSM's Attacks/Scythe/DownSlash New) and dash attack (the Sprint FSM's
+# Attacks/Scythe/DashUpper Slash: Reaper Antic / Upper / End)
+ATTACK_PATHS = ("Attacks/Scythe/DownSlash New", "Attacks/Scythe/DashUpper Slash")
 
 
 def forum_params():
@@ -136,7 +138,7 @@ def draw(rng: random.Random, d: int, dist: float = 4.0, kinds: tuple = KINDS) ->
         m = _seg(M_DASH | mv, h) + _seg(M_DASH | mv, w) + _seg(M_A | M_DASH | mv, 3) + _seg(mv, rng.randint(25, 45))
     elif kind == "charge":
         # hold attack (Needle Strike when playerData.hasChargeSlash) and release: the crest's charge slash
-        h = rng.randint(30, 75)
+        h = rng.randint(110, 140)         # the press swings first (0.35 s), then NAIL_CHARGE_TIME 1.35 s
         air = rng.random() < 0.3
         k = rng.randint(4, 14) if air else 0
         p.update(h=h, air=air, k=k)
