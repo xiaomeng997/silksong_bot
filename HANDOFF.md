@@ -26,7 +26,8 @@ this task at about 22:25 PDT (they had exited); the lead runs launcher --restore
 - degraded_dust on ec62558 (20261003_022259): 61 eps, 47 CLEAR (77.0 %), 0 WOULD_DIE, 0 unpredicted.
 - Nothing of this task is running. Instances 0 and 1 are left running idle (lead: launcher --restore). The live
   worktree C:\ssbot\live_vv (detached at ec62558) can be removed with `git worktree remove C:\ssbot\live_vv`.
-- Tools: combat_run summary <run>; C:\ssbot\sandboxv_scratchec_stats.py <run> (hits by Control state from
+- Tools: combat_run summary <run>; C:/ssbot/sandbox/vv_scratch/rec_stats.py <run> (hits by Control state from
+ec_stats.py <run> (hits by Control state from
   the recordings); hits_summary.py <run>; unpred_dbg.py <run> <inst> <ep> <hit f>; dbg_support2.py (support per x
   and height around a frame); touch_count.py; slack_need.py.
 
