@@ -1020,9 +1020,15 @@ class BossTracker:
                 fam = PHASE_FAMILY.get(ph)
                 if ph == "recover":
                     fam = self.last_family if self.last_family in RECOVER_ROOT else None
+                # a new attack: another family, a first drawn phase after the boss was under / at the end of one, or
+                # any cue after a phase that was not one (a cue shows only underground before an attack: after a
+                # boss lost over the image edge the tracker never saw it go under, and the next burst's cue followed
+                # the last burst's phase: its anchor averaged both bursts' cues, 2.6 u off, and the attack bell came
+                # up outside the support; degraded_dust run 20261002_232157 i0 ep27)
                 if fam is not None and fam != self.last_family or ph in ("emerge", "leap", "burst", "roar",
                                                                          *TELL_PHASES) \
-                        and prev in (HIDDEN, None, "recover", "roar_end"):
+                        and prev in (HIDDEN, None, "recover", "roar_end") \
+                        or ph in TELL_PHASES and prev not in TELL_PHASES:
                     self._anchor_sum = []
                     self.last_anchor = None
                     self.t_start = None

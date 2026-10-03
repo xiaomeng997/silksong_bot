@@ -56,6 +56,7 @@ COMFORT = (0.25, 0.25)                # preferred extra clearance (planner: S = 
 NOISE_K = 3.0                         # stage C: + k * sigma of the hero / boss position noise
 HORIZON_S = 2.0                       # forecast horizon: the risk map's and the Bind's
 UNPRED_LAG = 3
+UNPRED_BACK = 6
 CATCH_UP_MAX = 64      # STATEs kept for _catch_up (a tick later than this many frames loses the oldest)
 LOG_BEFORE, LOG_AFTER = 90, 10
 LOG_ALL = os.environ.get("SSBOT_LOG_ALL") == "1"     # debugging: every tick to the decision log
@@ -247,6 +248,7 @@ class PlannerPolicy:
             self._wake(ws, sk, tap)
             self.fc.update(ws)
             self.counts["caught_up"] += 1
+            self._unpred_backlog += self._unpredicted(raw, ws.stamp.frame)
 
     def warmup(self) -> float:
         """Compile every numba path before the first episode (a first call mid-fight compiles for seconds, and the
@@ -345,6 +347,7 @@ class PlannerPolicy:
         self.tick_ms: list[float] = []
         self.plan_ms: list[float] = []
         self._last_f: int | None = None          # the last STATE acted on (_catch_up)
+        self._unpred_backlog = 0                 # unpredicted hits found on caught-up frames, for the next tick
         self.unpredicted: list[int] = []
         self.hits_taken: list[int] = []
         self.forced_frames: list[int] = []
@@ -386,14 +389,17 @@ class PlannerPolicy:
 
     def _unpredicted(self, raw: dict, fo: int) -> int:
         """Hero hits in the WorldState's frame (the delayed one in stage C) outside the support forecast UNPRED_LAG
-        frames earlier (box of fo or fo - 1, the recall pairing)."""
+        frames earlier (box of fo or fo - 1, the recall pairing); a late tick leaves gaps in the forecasts kept, so
+        the latest one at most UNPRED_BACK frames before that counts (exactly that frame missing used to count the hit
+        as unpredicted: degraded_dust run 20261002_232157 i1 ep71, covered in an open-loop replay)."""
         n = 0
         for ev in raw.get("ev") or ():
             if ev.get("k") != "damage":
                 continue
             self.hits_taken.append(fo)
             cover = False
-            old = next((x for x in self.forecasts if x[0] == fo - UNPRED_LAG), None)
+            old = max((x for x in self.forecasts if fo - UNPRED_LAG - UNPRED_BACK <= x[0] <= fo - UNPRED_LAG),
+                      key=lambda x: x[0], default=None)
             if old is not None:
                 _, fcast, t_o = old
                 for fr in (fo, fo - 1):
@@ -493,7 +499,8 @@ class PlannerPolicy:
         self.planner_last = res
         self.atk_mon.predict(fo, res.attacks, res.attack)
         t2 = time.perf_counter()
-        unpred = self._unpredicted(raw, fo)
+        unpred = self._unpredicted(raw, fo) + self._unpred_backlog
+        self._unpred_backlog = 0
         clear = self._forced_clear_f(res, fcast, S0, len(prefix)) if res.forced_risk else None
         self.last_clear_f = clear
         r = self.sc.step(s, plan_s=res.S, forced_risk=res.forced_risk, unpredicted_hits=unpred, p_death=res.P,
@@ -529,7 +536,8 @@ class PlannerPolicy:
         frames and its first press after the pause gate opens is not held up by planning. A resumed attempt (UNPAUSED)
         restarts the planner without the plan carried from before the pause (the keys sent meanwhile were the
         machine's)."""
-        unpred = self._unpredicted(raw, fo)
+        unpred = self._unpredicted(raw, fo) + self._unpred_backlog
+        self._unpred_backlog = 0
         r = self.sc.step(s, plan_s=None, forced_risk=False, unpredicted_hits=unpred)
         self.decision = r.decision
         self.pause_owned = self.sc.pq is not None
