@@ -18,6 +18,9 @@ recording: the events alone give the contact frames, then
 the backend, filter and tracker run over every frame and forecast only at the frames some contact needs.
 --table points the forecaster at another behaviour build (a held-out build: C:/ssbot/data/m2_heldout/tables holds
 one without i2_002 / i3_002 and the trial run).
+--noise-seed N (vision views, task V): SimpleNoise after the filter (position noise, missed detections that coast),
+as on the simulated final path: what the vision view's drop-bell paths are estimated from (combat.bell_track). The
+hero's box stays the recorded one (the planner's margin covers the hero's own position noise).
 """
 import argparse
 import json
@@ -65,7 +68,8 @@ def contacts_of(reader, f0: int, f1: int) -> dict[int, str]:
     return out
 
 
-def run_fight(fight: dict, fc, view: str, lags: list[int], stats: dict, misses: list, bosses) -> None:
+def run_fight(fight: dict, fc, view: str, lags: list[int], stats: dict, misses: list, bosses,
+              noise_seed: int | None = None) -> None:
     from ssbot.backends.observability import ObservabilityFilter
     from ssbot.backends.oracle_backend import OracleBackend
     from ssbot.core.worldstate import VISION_EQUIVALENT
@@ -82,9 +86,13 @@ def run_fight(fight: dict, fc, view: str, lags: list[int], stats: dict, misses: 
             need[c - L].append(c)
     backend = OracleBackend(bosses=bosses)
     filt = None
+    noise = None
     if view in ("ve", "ve_dust"):
         from ssbot.train.planner_policy import DUST_TELL
         filt = ObservabilityFilter(bosses=bosses, tells=DUST_TELL if view == "ve_dust" else None)
+        if noise_seed is not None:
+            from ssbot.backends.noise_simple import SimpleNoise
+            noise = SimpleNoise(seed=noise_seed)
     fc.reset()
     t_of: dict[int, float] = {}
     box_of: dict[int, tuple] = {}
@@ -96,6 +104,8 @@ def run_fight(fight: dict, fc, view: str, lags: list[int], stats: dict, misses: 
         ws = backend.feed(s)
         if filt is not None:
             ws = filt.apply(ws)
+        if noise is not None:
+            ws = noise.apply(ws)
         if f == f0 and view != "oracle":
             fc.notify_wake(ws.stamp.t_game_s)
         fc.update(ws)
@@ -145,6 +155,9 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--view", default="oracle,ve")
     ap.add_argument("--table", type=Path, default=None)
     ap.add_argument("--margin", type=float, default=0.0)
+    ap.add_argument("--noise-seed", type=int, default=None,
+                    help="vision views: SimpleNoise after the filter, seeded with this + the fight's index (the "
+                         "simulated final path's position noise and missed detections; the lag stands for the delay)")
     ap.add_argument("--max-fights", type=int, default=0)
     ap.add_argument("--json", type=Path, default=None)
     a = ap.parse_args(argv)
@@ -176,7 +189,8 @@ def main(argv: list[str] | None = None) -> int:
             fc.tracker.fit = AttackFit(model)      # multi-frame fusion of committed attacks (vision views)
         for i, fight in enumerate(fights):
             t1 = time.perf_counter()
-            run_fight(fight, fc, v, lags, stats, misses, [BELL_BEAST])
+            run_fight(fight, fc, v, lags, stats, misses, [BELL_BEAST],
+                      None if a.noise_seed is None else a.noise_seed + i)
             line = " ".join(f"L{L} {stats[(v, L)]['covered']}/{stats[(v, L)]['n']}" for L in lags)
             print(f"[{v}] {i + 1}/{len(fights)} {fight['id']} {time.perf_counter() - t1:.1f} s  {line}", flush=True)
     out = {"fights": len(fights), "lags": lags, "margin": a.margin, "table": str(a.table) if a.table else None,

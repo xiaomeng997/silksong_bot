@@ -52,6 +52,7 @@ class TargetSpec:
     bounces: list = field(default_factory=list)
     life_after_first_s: float | None = None
     redirect: dict = field(default_factory=dict)     # what a side slash does to its path (drop bells: TINK)
+    start: dict = field(default_factory=dict)        # the fall's start state (drop bells: y, vx, vy)
 
 
 @dataclass
@@ -73,7 +74,7 @@ def load_registry(path: Path | str | None = None) -> list[TargetSpec]:
                               bool(v.get("recoil", True)), float(v.get("damage_cooldown_s", 0.0)),
                               float(ph.get("g", 0.0)), ph.get("ground_y"), dict(ph.get("next_bounce") or {}),
                               list(ph.get("bounces") or []), ph.get("life_after_first_bounce_s"),
-                              dict(v.get("redirect") or {})))
+                              dict(v.get("redirect") or {}), dict(ph.get("start") or {})))
     return out
 
 

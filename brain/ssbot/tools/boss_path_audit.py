@@ -21,6 +21,13 @@ Errors along the boss's motion (dir = the recorded box centre's displacement sig
 (predicted front edge - recorded front edge), > 0: the prediction is ahead (the boss arrives later than planned);
 top = predicted top - recorded top, > 0: predicted taller (a spike planned to meet it is pressed too high). Also the
 hittable flag (predicted ok vs recorded colliders enabled) and the share of hit-stop frames (ts 0) in the window.
+
+--view degraded / degraded_dust (task V): the simulated final path instead (PlannerPolicy's DegradedOracleBackend:
+ObservabilityFilter, SimpleNoise, DelayLine 2-4 frames, seeded from the episode's seed as the live run did; the
+vision-equivalent forecaster with the attack fit and the hurtbox table). The origin is then the delayed WorldState's
+frame (the box predicted for k frames after it is compared with the colliders of that frame + k), rows are keyed by
+the recorded Control state at the origin, and per box side the errors carry min / p1 / p99 / max too: the box
+uncertainty the vision view's pogo gate shrinks the box by is sized from them.
 """
 import argparse
 import json
@@ -54,31 +61,64 @@ def _q(v):
     return [round(float(np.percentile(a, p)), 2) for p in (10, 50, 90)] + [len(a)]
 
 
-def audit_episode(states: list[dict], fc, want: set[str], every: int, out: dict) -> None:
+def _q_wide(v):
+    if not v:
+        return None
+    a = np.asarray(v)
+    return [round(float(a.min()), 2)] + [round(float(np.percentile(a, p)), 2) for p in (1, 10, 50, 90, 99)] + \
+        [round(float(a.max()), 2), len(a)]
+
+
+def _control(s: dict) -> str | None:
+    return ((_boss(s) or {}).get("fsms") or [{}])[0].get("state")
+
+
+def audit_episode(states: list[dict], fc, want: set[str], every: int, out: dict, view: str = "oracle",
+                  seed: int | None = None, wake_frame: int | None = None) -> None:
     from ssbot.backends.oracle_backend import OracleBackend
     from ssbot.combat.forecast import Forecast
     from ssbot.core.bosses import BOSSES
     fc.reset()
-    be = OracleBackend(bosses=[BOSSES[fc.model.boss_type]])
+    spec = BOSSES[fc.model.boss_type]
     tg = np.zeros(len(states))
     boxes: list = [None] * len(states)
     frz = np.zeros(len(states), bool)
+    clock = OracleBackend(bosses=[spec])
     for i, s in enumerate(states):
         boxes[i] = _box(_boss(s))
         frz[i] = float(s.get("ts", 1.0) or 0.0) == 0.0
+        tg[i] = clock.feed(s).stamp.t_game_s
+    if view == "oracle":
+        be = OracleBackend(bosses=[spec])
+    else:
+        import random
+        from ssbot.backends.degraded import DegradedOracleBackend
+        from ssbot.backends.observability import ObservabilityFilter
+        from ssbot.train.planner_policy import TELLS
+        be = DegradedOracleBackend(OracleBackend(bosses=[spec]), ObservabilityFilter(bosses=[spec],
+                                                                                    tells=TELLS[view]))
+        be.reset(random.Random(seed).randrange(1 << 30))     # PlannerPolicy.reset's draw: the live run's noise
+    idx = {s["f"]: i for i, s in enumerate(states)}
     preds = []
-    for i, s in enumerate(states):
+    woke = False
+    for s in states:
         ws = be.feed(s)
-        tg[i] = ws.stamp.t_game_s
+        if ws is None or ws.stamp.frame not in idx:
+            continue
+        i = idx[ws.stamp.frame]
+        if view != "oracle" and not woke and wake_frame is not None and ws.stamp.frame >= wake_frame:
+            fc.notify_wake(ws.stamp.t_game_s)
+            woke = True
         fc.update(ws)
-        st = fc.tracker.state
+        st = fc.tracker.state if view == "oracle" else _control(states[i])
         if st not in want or i % every or i + KS[-1] >= len(states):
             continue
         f = Forecast(fc, ws.stamp.t_game_s, 0.8, [], [], True, [], fc.boss)
         tk = np.arange(KS[-1] + 1) / 60.0
         bb, ok = f.boss_box(tk)
-        hx = float(s["hero"]["pos"][0])
-        ph = f"{fc.tracker.ctx.phase}{'first' if fc.tracker.n_attacks <= 1 else ''}"
+        hx = float(states[i]["hero"]["pos"][0])
+        ph = f"{fc.tracker.ctx.phase}{'first' if fc.tracker.n_attacks <= 1 else ''}" if view == "oracle" else \
+            f"{fc.tracker.state}/flip{int(bool(fc.boss is not None and fc.boss.flip_x))}"
         preds.append((i, st, ph, round(ws.stamp.t_game_s - fc.tracker.t_entry, 3) if fc.tracker.t_entry is not None
                       else None, bb, ok, hx))
     for i, st, ph, tau, bb, ok, hx in preds:
@@ -110,6 +150,8 @@ def audit_episode(states: list[dict], fc, want: set[str], every: int, out: dict)
                     rel = "head_on" if d * (hx - c_now) > 0 else "behind"
                     o[f"front_{rel}"].append(d * (pf - af))
                 o["cx"].append(0.5 * (p[0] + p[2]) - c_then)
+                o["left"].append(p[0] - bj[0])
+                o["right"].append(p[2] - bj[2])
                 o["top"].append(p[3] - bj[3])
                 o["bottom"].append(p[1] - bj[1])
                 o["width"].append((p[2] - p[0]) - (bj[2] - bj[0]))
@@ -124,18 +166,26 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--episodes", type=int, default=4)
     ap.add_argument("--states", default=",".join(CHARGE))
     ap.add_argument("--every", type=int, default=2)
+    ap.add_argument("--view", default="oracle", choices=("oracle", "degraded", "degraded_dust"))
     ap.add_argument("--json", type=Path, default=None)
     a = ap.parse_args(argv)
     from ssbot.combat.boss_model import BossModel
-    from ssbot.combat.forecast import Forecaster
+    from ssbot.combat.forecast import Forecaster, load_hurtbox
     from ssbot.combat.tactics import load_playbook
     from ssbot.record.recorder import RecordingReader
     from ssbot.tools.postmortem import episode_rows, find_recording
     model = BossModel.load("BellBeast")
-    from ssbot.core.worldstate import ORACLE
-    fc = Forecaster(model, ORACLE, templates={})
+    from ssbot.core.worldstate import ORACLE, VISION_EQUIVALENT
+    fc = Forecaster(model, ORACLE if a.view == "oracle" else VISION_EQUIVALENT, templates={})
     pb = load_playbook("BellBeast")
     fc.no_hurtbox, fc.shape_from = pb.no_hurtbox, pb.shape_from
+    if a.view != "oracle":                   # as PlannerPolicy builds the vision view's forecaster
+        import os
+        from ssbot.combat.attack_fit import AttackFit
+        if os.environ.get("SSBOT_FUSION", "1") == "1":
+            fc.tracker.fit = AttackFit(model)
+        fc.hurtbox = load_hurtbox()
+        fc.bell_tells = a.view == "degraded_dust"
     want = set(a.states.split(","))
     out: dict = {}
     n_ep = 0
@@ -145,14 +195,16 @@ def main(argv: list[str] | None = None) -> int:
                 continue
             r = RecordingReader(find_recording(a.run, row))
             states = [s for s in r.states(row["f_end"] - row["acts"], row["f_end"])]
-            audit_episode(states, fc, want, a.every, out)
+            audit_episode(states, fc, want, a.every, out, a.view, row.get("seed"), row.get("f_wake"))
             n_ep += 1
     rep = {"episodes": n_ep, "quantiles": "p10 / p50 / p90 / n", "rows": []}
     for (st, base, k), o in sorted(out.items(), key=lambda kv: (kv[0][0], kv[0][1], kv[0][2])):
         rep["rows"].append({"state": st, "base": base, "k": k, "n": len(o["n"]),
                             "ok_mismatch": round(float(np.mean(o["ok_mismatch"])), 3) if o["ok_mismatch"] else None,
                             **{m: _q(o[m]) for m in ("front", "front_head_on", "front_behind", "top", "bottom",
-                                                     "width", "frozen")}})
+                                                     "width", "frozen")},
+                            **({f"{m}_wide": _q_wide(o[m]) for m in ("left", "right", "top", "bottom")}
+                               if a.view != "oracle" else {})})
     for x in rep["rows"]:
         print(json.dumps(x))
     if a.json:

@@ -12,6 +12,13 @@ With a single enabled collider (attacks: PolyCollider, LeapCollider) the median 
 in a leap the collider's box covers corners the 9-vertex shape does not, and side slashes under a leap scored as
 hits that never landed (stage C run 20261002_093052: 332 predicted, 0 hit). The vision view places the polygon, else
 the median box, at the observed position (Forecast.body_polys).
+
+Reference point: Entity.pos (oracle_backend.entity_pos, DESIGN §4.1: the main body collider's centre, else the sprite
+bounds' centre), the position the view reports and the forecaster places the box at. The first build (2026-10-02)
+took the root transform instead; Bone Beast's root box centre sits 2.35 u below it and about 3 u along the facing
+(task V, run 20261002_171806 i0 ep2 replayed in degraded_dust: Charge at f 187634 predicted box y -0.50..2.55 against
+the colliders' 1.84..4.90, x 3 u off), so in the vision view the box was under the floor through every charge and
+no pogo plan was ever generated there (view_compare: 3.9 per Charge tick against 104 in the oracle view).
 """
 import argparse
 import json
@@ -26,6 +33,7 @@ BIN_S = 0.1
 
 
 def build(runs: list[Path], max_frames: int) -> dict:
+    from ssbot.backends.oracle_backend import entity_pos
     from ssbot.core.bosses import BELL_BEAST
     from ssbot.record.recorder import RecordingReader
     phases = dict(BELL_BEAST.phases)
@@ -56,7 +64,7 @@ def build(runs: list[Path], max_frames: int) -> dict:
                 if ph is None or not vs or b.get("render_aabb") is None:
                     continue
                 v = np.concatenate(vs)
-                px, py = b["pos"][0], b["pos"][1]
+                px, py = entity_pos(b)
                 x0, x1 = v[:, 0].min() - px, v[:, 0].max() - px
                 if b.get("flipX"):
                     x0, x1 = -x1, -x0

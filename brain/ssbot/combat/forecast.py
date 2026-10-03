@@ -64,9 +64,11 @@ import os
 from pathlib import Path
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, replace
+from typing import NamedTuple
 
 import numpy as np
 
+from ssbot.combat.bell_track import DropBellTracks, SKIN_Z
 from ssbot.combat.boss_model import TAIL, Anchor, BossModel
 from ssbot.combat.fastquery import circle_hits, query_par
 from ssbot.combat.pogo_targets import TargetTracker, simulate
@@ -90,6 +92,8 @@ DET_SKIN_U = 0.1
 # held-out recall (support_recall i2_002 / i3_002, held-out tables, lags 2-4, oracle): 100 % with the Submerge sink and
 # the skin (28 misses before: a resting Submerge, contact skin)
 DET_REPLACE = os.environ.get("SSBOT_DET_BELLS", "1") != "0"   # SSBOT_DET_BELLS=0: the logged unions (A/B)
+# the vision view's drop-bell paths from their tracks (bell_track; SSBOT_DET_VE=0: the self templates, the A/B before)
+DET_VE = os.environ.get("SSBOT_DET_VE", "1") != "0"
 DET_STATES = frozenset({"Drop", "Air", "Bounce Up", "Bounce Air", "Submerge", "Tink Right", "Tink R Min", "Tink Left",
                         "Tink L Min", "Tink D", "Tink Right 2", "Tink R Min 2", "Tink Left 2", "Tink L Min 2", "Tink D 2"})   # world-fixed hazards with self templates (entities.<tk>.self_template)
 REST_STATES = ("Init", "Dormant")
@@ -122,6 +126,30 @@ DUST_ROOTS = (("BB_CHARGE", "Emerge Antic C"), ("BB_LEAP", "Emerge Antic L"))
 RECOVER_ROOT = {"BB_CHARGE": "Charge End", "BB_LEAP": "Leap Land"}
 # the state a hidden phase starts in, by the last drawn family (None: before the first emergence)
 HIDE_ROOT = {"BB_CHARGE": "Submerged", "BB_LEAP": "Submerged", "BB_BURST": "Burst Recovery", "BB_RAGE": "Rage Submerge"}
+
+
+class DetBell(NamedTuple):
+    """A drop bell on an exact path: its state (x, y, vx, vy, the index of its next bounce, the Submerge time left)
+    at path time t0 (the forecast origin is path time t0: 0 for the oracle view's logged state, the time since the
+    drop for the vision view's track estimate), the bounce sides still open (None: both when the next bounce is
+    random) and an extra contact skin (the vision view's x uncertainty)."""
+    sp: object
+    x: float
+    y: float
+    vx: float
+    vy: float
+    nb: int
+    rest: float | None
+    type_key: str
+    t0: float = 0.0
+    sides: tuple | None = None
+    skin: float = 0.0
+
+    def branch_sides(self) -> tuple:
+        if self.sides is not None:
+            return self.sides
+        b = self.sp.bounces
+        return (1, -1) if self.nb < len(b) and b[self.nb].get("vx") == "random" else (0,)
 
 
 @dataclass(slots=True)
@@ -238,13 +266,13 @@ class Forecast:
         if comfort and self.fc.comfort is not None:
             hx, hy = hx + self.fc.comfort[0], hy + self.fc.comfort[1]
         by_r: dict = {}
-        for j, (sp, bx, by, vx, vy, nb, rest, tk_) in enumerate(self.det):
+        for j, d in enumerate(self.det):
+            tk_ = d.type_key
             if exclude is not None and tk_.endswith(exclude) or only is not None and tk_ != only:
                 continue
-            sides = (1, -1) if nb < len(sp.bounces) and sp.bounces[nb].get("vx") == "random" else (0,)
-            for sd in sides:
+            for sd in d.branch_sides():
                 for dt in DET_SLACK_S:
-                    by_r.setdefault(sp.r + DET_SKIN_U, []).append(self._bell_path(j, sd, dt, tk))
+                    by_r.setdefault(d.sp.r + DET_SKIN_U + d.skin, []).append(self._bell_path(j, sd, dt, tk))
         if not by_r:
             return out
         shp = out.shape
@@ -267,10 +295,10 @@ class Forecast:
         key = (j, sd, dt, len(tk), float(tk[0]), float(tk[-1]), redirect)
         r = self._paths.get(key)
         if r is None:
-            sp, bx, by, vx, vy, nb, rest, _ = self.det[j]
-            t = np.maximum(tk + dt, 0.0)
+            sp, bx, by, vx, vy, nb, rest, _, t0 = self.det[j][:9]
+            t = np.maximum(tk + dt + t0, 0.0)
             if redirect is not None:
-                r = simulate(sp, bx, by, vx, vy, nb, None, t, side=sd, redirect=redirect)
+                r = simulate(sp, bx, by, vx, vy, nb, None, t, side=sd, redirect=(redirect[0] + t0, redirect[1]))
             else:
                 if rest is not None:
                     nb = len(sp.bounces)          # in Submerge: sinking, no more floor contacts
@@ -282,10 +310,10 @@ class Forecast:
                      ) -> np.ndarray | None:
         """Contact with the drop bell `type_key` on its one path after a side slash moving d (+1 right) at t_hit;
         None when not applicable (not on an exact path, resting, or no side redirect in its registry entry)."""
-        j = next((i for i, e in enumerate(self.det) if e[7] == type_key), None)
+        j = next((i for i, e in enumerate(self.det) if e.type_key == type_key), None)
         if j is None:
             return None
-        sp, rest = self.det[j][0], self.det[j][6]
+        sp, rest = self.det[j].sp, self.det[j].rest
         if rest is not None or "side" not in sp.redirect:
             return None
         tk = np.asarray(tk, np.float64)
@@ -294,7 +322,7 @@ class Forecast:
         hx, hy = self.fc.half
         if comfort and self.fc.comfort is not None:
             hx, hy = hx + self.fc.comfort[0], hy + self.fc.comfort[1]
-        rr = sp.r + DET_SKIN_U
+        rr = sp.r + DET_SKIN_U + self.det[j].skin
         out = np.zeros(x.shape, bool)
         for dt in DET_SLACK_S:
             cx, cy, ok = self._bell_path(j, d, dt, tk, (t_hit, d))
@@ -367,7 +395,12 @@ class Forecast:
         for n in self.nodes:                    # the walk appends a parent before its children
             pre[n.id] = (n.parent < 0 or pre.get(n.parent, False)) and n.state not in dec
         kept = [p for p in self.placements if pre.get(p.node, False)]
-        return Forecast(self.fc, self.origin_t, self.horizon, self.nodes, kept, self.known, self.roots, self.boss)
+        out = Forecast(self.fc, self.origin_t, self.horizon, self.nodes, kept, self.known, self.roots, self.boss)
+        # armed bells on exact paths are decided too (their self templates are not placed: without them the tactics'
+        # underground risk map did not see a falling drop bell at all)
+        out.det = self.det
+        out._paths = self._paths
+        return out
 
     def active_sources(self, t0: float = 0.0, t1: float = SUP_HORIZON_S) -> frozenset[str]:
         out: set[str] = set()
@@ -575,6 +608,7 @@ class BossTracker:
         self.fit_anchor: Anchor | None = None
         self.fit_anomalies = 0
         self._t_start0: float | None = None
+        self._phase_t0: tuple | None = None    # VE: the drawn phase (and its entry) t_start was last anchored at
         self.coasting = False                  # VE: no phase this frame (a ghost)
         self._anchor_sum: list[float] = []
         self.t = 0.0
@@ -811,12 +845,18 @@ class BossTracker:
         if fam is None:
             return
         f = m.families[fam]
-        root = PHASE_ROOT.get(ph)
-        if self.t_start is None and root in f.entry:
-            # the attack began this long before the phase's first state (the family's logged entry offsets): the
-            # boss box then moves along the family's mean path for scoring (Forecast.boss_box)
-            self.t_start = t - tau - TELL_DELAY.get(ph, 0.0) - f.entry[root][0]
+        root = RECOVER_ROOT.get(fam) if ph == "recover" else PHASE_ROOT.get(ph)
+        if root in f.entry and (self.t_start is None or (self._phase_t0 != (ph, self.t_entry)
+                                                         and ph not in TELL_PHASES)):
+            # the attack began this long before the phase's first state (the family's logged entry offsets, their
+            # middle): the boss box then moves along the family's mean path (Forecast.boss_box). Re-anchored at
+            # every drawn phase's entry (seen +-1 frame): a start guessed from the dust cue (+-0.1 s) and fitted over
+            # frames of a boss standing at its anchor (no timing in them) put the charge's box up to 2 u off at
+            # +0.1 s (task V, boss_path_audit --view degraded_dust on live run 20261002_171806)
+            lo, hi = f.entry[root]
+            self.t_start = t - tau - TELL_DELAY.get(ph, 0.0) - 0.5 * (lo + hi)
             self._t_start0 = self.t_start
+            self._phase_t0 = (ph, self.t_entry)
         if fam == "BB_BURST":
             # set once per burst and kept to its end (an earlier version fell through to the family's named anchor,
             # which a burst has none of, from the second drawn frame on: the whole burst range for the rest of the
@@ -988,6 +1028,11 @@ class Forecaster:
         self.tracker = BossTracker(model, view)
         # registry hit targets (bells): their predicted paths for the planner's hit effects (pogo off a bell)
         self.targets = TargetTracker()
+        # VE: drop bells' falls from their tracks (bell_track: column, drop time, bounce side), the exact paths the
+        # oracle view reads from the FSM and the logged velocity
+        sp = self.targets.spec_of(DROP_BELL)
+        self.drop_tracks = DropBellTracks(sp) if sp is not None and view != ORACLE else None
+        self.det_ve = DET_VE
         self._ws: WorldState | None = None
         self.boss: Entity | None = None
         self.no_hurtbox: frozenset[str] = frozenset()     # states / phases with the body box disabled (playbook)
@@ -1010,6 +1055,8 @@ class Forecaster:
     def reset(self) -> None:
         self.tracker.reset()
         self.targets.reset()
+        if self.drop_tracks is not None:
+            self.drop_tracks.reset()
         self._ws = None
         self.boss = None
 
@@ -1022,6 +1069,8 @@ class Forecaster:
         self.t = ws.stamp.t_game_s
         self.boss = self.tracker.update(ws)
         self.targets.update(ws, self.t)
+        if self.drop_tracks is not None:
+            self.drop_tracks.update(ws, self.t)
         self._ws = ws
 
     # ---- the walk -----------------------------------------------------------------------------------------------
@@ -1037,6 +1086,11 @@ class Forecaster:
             self._walk(r.state, r.e_lo, r.e_hi, replace(r.ctx), r.p, -1, H, nodes, placements, r.current, 0)
         tr = self.tracker
         det: list = []
+        if self.drop_tracks is not None and self.det_ve:
+            # VE: a drop bell seen falling without its cue (the cue missed) is support on its path too
+            for iid in self.drop_tracks.obs:
+                if iid not in tr.bells:
+                    self._det_bell(iid, det)
         if tr.bells:
             nid = len(nodes)
             nodes.append(Node(nid, "bells", 0.0, 0.0, None, 1.0, -1, None))
@@ -1070,8 +1124,23 @@ class Forecaster:
         """ORACLE: an armed drop bell already falling (Drop, Air) or bounced (Bounce Air, Submerge) has an exact path
         (pogo_targets.simulate, centre error 0.000 u over 0.8 s in game time on 2 recordings): it is support as two
         branches, one per bounce side (p 0.5 each; the bounce speed is fixed, 4 u/s), or one once it bounced, instead
-        of the logged union of its self template."""
-        if not DET_REPLACE or self.view != ORACLE or self._ws is None:
+        of the logged union of its self template.
+        VISION_EQUIVALENT (det_ve): the same path from the bell's track instead (bell_track.DropBellTracks: column x,
+        drop time, bounce side once seen), started at the drop and sampled at the time since it, its contact skin grown
+        by SKIN_Z sigma of the column's x; while the bell is not seen falling, or its track leaves the model, its self
+        template stays."""
+        if self.view != ORACLE:
+            if not (DET_REPLACE and self.det_ve) or self.drop_tracks is None or self._ws is None:
+                return False
+            est = self.drop_tracks.estimate(iid)
+            if est is None:
+                return False
+            dt_ = self.drop_tracks
+            tk_ = dt_.type_of.get(iid, DROP_BELL)
+            det.append(DetBell(dt_.spec, est.x, dt_.y0, dt_.vx0, dt_.vy0, 0, None, tk_, t0=self.t - est.t_drop,
+                               sides=(est.side,) if est.side else (1, -1), skin=SKIN_Z * est.sx))
+            return True
+        if not DET_REPLACE or self._ws is None:
             return False
         e = next((x for x in self._ws.entities if x.id == iid), None)
         if e is None or not e.fsm or e.vel.conf <= 0:
@@ -1083,8 +1152,8 @@ class Forecaster:
         rest = None
         if st == "Submerge":
             rest = max(0.0, 0.75 - e.fsm[0][2])
-        det.append((sp, float(e.pos.v[0]), float(e.pos.v[1]), float(e.vel.v[0]), float(e.vel.v[1]),
-                    int(sp.next_bounce.get(st, len(sp.bounces))), rest, e.type_key.v))
+        det.append(DetBell(sp, float(e.pos.v[0]), float(e.pos.v[1]), float(e.vel.v[0]), float(e.vel.v[1]),
+                           int(sp.next_bounce.get(st, len(sp.bounces))), rest, e.type_key.v))
         return True
 
     def _place(self, fam: str, state: str, e_lo: float, e_hi: float, ctx: Ctx, node: int, H: float,

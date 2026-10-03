@@ -34,6 +34,10 @@ BoneBeast DropBell:
   physics:
     g: 66.0
     ground_y: 3.18
+    # the fall's start (FSM Antic -> Air: SetVelocity 0, -17 at the hang height): the first frame the bell is drawn
+    # (render_aabb) is that frame, y 13.74, velocity (0, -17), in 178 of 178 drops of live run 20261002_171806 i0_000
+    # (the vision view's drop paths start here: ssbot.combat.bell_track)
+    start: {y: 13.74, vx: 0.0, vy: -17.0}
     next_bounce: {Drop: 0, Air: 0, Tink Right: 0, Tink R Min: 0, Tink Left: 0, Tink L Min: 0, Tink D: 0,
                   Bounce Up: 1, Bounce Air: 1, Tink Right 2: 1, Tink R Min 2: 1, Tink Left 2: 1, Tink L Min 2: 1,
                   Tink D 2: 1}
