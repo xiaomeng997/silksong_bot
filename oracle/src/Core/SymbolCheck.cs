@@ -265,6 +265,9 @@ namespace SsOracle.Core
             T("UnityEngine.CanvasGroup"), P("UnityEngine.CanvasGroup", "alpha"),
             // room.gates (SceneDump.GateWatch)
             F("BattleScene", "gates"),
+            // room.battles (SceneDump.BattleWatch)
+            F("BattleScene", "waves"), F("BattleScene", "currentWave"), F("BattleScene", "currentEnemies"),
+            F("BattleScene", "enemiesToNext"), F("BattleScene", "started"), F("BattleScene", "completed"),
 
             // --- DebugMod 1.1.2 (soft: TRAIN only; savestates and cheat switches) ---
             T("DebugMod.DebugMod", soft: true), F("DebugMod.DebugMod", "infiniteHP", soft: true), F("DebugMod.DebugMod", "infiniteSilk", soft: true),
