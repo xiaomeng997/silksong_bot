@@ -21,9 +21,10 @@ releases everything for a settle period. Primitives (d = towards the wall): wall
 hold towards it for a while: slide then cling, release: slide, then drop / re-hold / down), wall_jump (the same,
 then a jump with no direction, away or back), wall_attack (side = wall slash, up, down off the wall), glide (jump,
 release, press again and hold, steering), dash (on the ground or in the air, tap or hold, with or without a
-direction), reaper_attack (side / alt / up / down on the ground and in the air). A plan is rolled out from the
-logged start with the Forum parameters and redrawn when the hero would leave --x-safe (the model is what this probe
-measures, so this only keeps her in the room). Output: one recording plus <recording>/kin_trials.jsonl, and with
+direction), reaper_attack (side / alt / up / down on the ground and in the air), dash_attack (a ground dash held
+into the sprint, then attack: the crest's dash attack), charge (hold attack, release: the charge slash). A plan is
+rolled out from the logged start with the Forum parameters and redrawn when the hero would leave --x-safe (the model
+is what this probe measures, so this only keeps her in the room). Output: one recording plus <recording>/kin_trials.jsonl, and with
 --attack-frames <recording>/attack_frames.jsonl (one line per sampled frame and enabled damager).
 
 Safety: a free training instance only (it loads savestates and drives input); save suppression on all the time.
@@ -125,6 +126,21 @@ def draw(rng: random.Random, d: int, dist: float = 4.0, kinds: tuple = KINDS) ->
             s = {"none": 0, "d": md, "o": mo, "switch": md if (i // 15) % 2 == 0 else mo}[steer]
             m.append(M_J | s)
         m += _seg(0, rng.randint(0, 30))
+    elif kind == "dash_attack":
+        # a ground dash held into the sprint, then an attack: the sprint FSM's Dash Stab Dir -> Start Attack ->
+        # the crest's dash attack (Reaper: Reaper Antic / Upper / End)
+        h, w = rng.randint(4, 14), rng.randint(0, 8)
+        dirn = rng.choice((0, d))
+        mv = 0 if dirn == 0 else md
+        p.update(h=h, w=w, dir=dirn)
+        m = _seg(M_DASH | mv, h) + _seg(M_DASH | mv, w) + _seg(M_A | M_DASH | mv, 3) + _seg(mv, rng.randint(25, 45))
+    elif kind == "charge":
+        # hold attack (Needle Strike when playerData.hasChargeSlash) and release: the crest's charge slash
+        h = rng.randint(30, 75)
+        air = rng.random() < 0.3
+        k = rng.randint(4, 14) if air else 0
+        p.update(h=h, air=air, k=k)
+        m = _seg(M_J, k) + _seg(M_A, h) + _seg(0, rng.randint(30, 50))
     elif kind == "dash":
         air = rng.random() < 0.5
         k = rng.randint(4, 16) if air else 0
@@ -208,10 +224,11 @@ def setup_bb(link: OracleLink, save_as: str = "kn_bb_reaper") -> dict:
 
 
 def sample_attack(link: OracleLink, t: Trial, out, frames: int = 26) -> None:
-    """Play an attack trial while sampling slash.dump every frame from the press: one line per (frame, slot) with an
-    enabled damager."""
+    """Play an attack trial while sampling slash.dump every frame from the press (to the end of the trial when that
+    is later: a charge slash swings at the release): one line per (frame, slot) with an enabled damager."""
     masks = t.masks + _seg(0, SETTLE_FRAMES)
     press = next(i for i, m in enumerate(masks) if m & M_A)
+    frames = max(frames, len(t.masks) - press + 10)
     last = link.frame
     t0 = None
     i = 0
@@ -263,6 +280,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--trials", type=int, default=200)
     ap.add_argument("--attack-frames", type=int, default=0, help="extra attack trials sampled with slash.dump")
     ap.add_argument("--kinds", default="", help="comma-separated primitives (default: all, weighted)")
+    ap.add_argument("--attack-kinds", default="reaper_attack,wall_attack",
+                    help="primitives of the attack-frame trials (also dash_attack, charge)")
     ap.add_argument("--random-dir", action="store_true", help="each trial's direction at random (no wall)")
     ap.add_argument("--out", default=r"C:\ssbot\data\runs\m2\kn_excite_forum")
     a = ap.parse_args(argv)
@@ -294,6 +313,7 @@ def main(argv: list[str] | None = None) -> int:
         terrain = None
         n_total = a.trials + a.attack_frames
         kinds = tuple(k.strip() for k in a.kinds.split(",") if k.strip()) or KINDS
+        attack_kinds = tuple(k.strip() for k in a.attack_kinds.split(",") if k.strip())
         for n in range(n_total):
             link.rpc("savestate.load", timeout_s=60, name=a.savestate, timeout=50)
             s = link.wait_state(lambda s: s.get("hero") and s["hero"].get("hero_accepting_input"), timeout_s=30)
@@ -311,9 +331,7 @@ def main(argv: list[str] | None = None) -> int:
             dist = abs(a.wall_x - x0) - 0.265 if a.wall_x is not None else 4.0
             x_safe = tuple(a.x_safe) if a.x_safe else (x0 - 30, x0 + 30)
             if n >= a.trials:                # attack-frame trials: Reaper swings only
-                t = draw(rng, d, dist)
-                while t.kind not in ("reaper_attack", "wall_attack"):
-                    t = draw(rng, d, dist)
+                t = draw(rng, d, dist, attack_kinds)
             else:
                 t = plan(rng, s, (params, terrain), d, x_safe, dist, kinds)
             t.seed = a.seed

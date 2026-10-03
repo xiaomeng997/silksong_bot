@@ -1,0 +1,1776 @@
+{
+ "build": "1.0.30000",
+ "crest": "Reaper",
+ "fdt": 0.0199999921,
+ "frame_time": 0.016666,
+ "gravity": 60.0,
+ "run_speed": 8.25,
+ "jump_speed": 18.6,
+ "jump_steps": 8,
+ "jump_steps_min": 2,
+ "jump_queue_steps": 2,
+ "attack_queue_steps": 8,
+ "tool_queue_steps": 5,
+ "jump_release_mult": 0.5,
+ "air_hang_gravity": 0.1,
+ "air_hang_accel": 5.0,
+ "max_fall": 30.0,
+ "airborne_lift": 0.02,
+ "half_width": 0.25,
+ "foot": 1.5527,
+ "head": 0.5262,
+ "skin": 0.015,
+ "attack_duration": 0.35,
+ "attack_cooldown": 0.5,
+ "attack_recovery": 0.3,
+ "recoil_velocity": 3.75,
+ "recoil_steps": 8,
+ "ds_antic": 0.1,
+ "ds_time": 0.1,
+ "ds_speed": 26.0,
+ "ds_recovery": 0.25,
+ "ds_land_recovery": 0.166666672,
+ "ds_antic_decel": 0.8,
+ "ds_antic_vy_min": -12.0,
+ "ds_antic_vy_max": 12.0,
+ "ds_end_vy": -10.0,
+ "pogo_jump_steps": 4,
+ "pogo_jumped_steps": -20,
+ "bounce_steps": 6,
+ "pogo_invul": 0.16,
+ "hurt_velocity": 15.0,
+ "hurt_vy_ratio": 0.5,
+ "hurt_recoil_time": 0.2,
+ "hurt_wait": 0.1,
+ "hurt_ramp": 0.1,
+ "hurt_wait_skip": 1,
+ "invul_time": 1.0,
+ "cast_antic": 0.26,
+ "cast_throw": 0.44,
+ "cast_catch": 0.16,
+ "cast_decay": 0.9,
+ "cast_decay_ground": 0.85,
+ "cast_vy_cap": 12.0,
+ "cast_catch_speed": 21.0,
+ "cast_catch_decay": 0.7,
+ "cast_silk": 4,
+ "bind_time": 1.36,
+ "bind_decay": 0.85,
+ "bind_vy_cap": 7.5,
+ "bind_vy_cap_down": 12.0,
+ "bind_end_vy": -0.25,
+ "bind_silk": 9,
+ "bind_break_before": 1.2,
+ "wf_bias_wait": 0.0,
+ "wf_bias_up": 0.0,
+ "silk_max": 9,
+ "lock_decay": 0.86,
+ "ledge_steps": 4,
+ "land_slop_lo": 0.0082,
+ "land_slop_hi": 0.0053,
+ "input_jump_lag": 1,
+ "rdown_halve": 0,
+ "weighted": false,
+ "weighted_knockback_mult": 0.5,
+ "weighted_invuln_mult": 1.3,
+ "weighted_recoil_steps": 4,
+ "max_fall_weighted": 38.0,
+ "frame_time_lo": 0.016649993136525154,
+ "frame_time_hi": 0.01698,
+ "frame_time_max": 0.018,
+ "hitch_max": 0.04,
+ "hitch_rate": 3.07e-05,
+ "hitches_per_window": 2,
+ "timer_bias": 0.0005,
+ "alpha_margin": 0.01,
+ "cast_throw_variants": [
+  [
+   0.42,
+   0.462
+  ],
+  [
+   0.44,
+   0.538
+  ]
+ ],
+ "cast_catch_variants": [
+  [
+   0.14,
+   0.406
+  ],
+  [
+   0.16,
+   0.594
+  ]
+ ],
+ "bind_time_variants": [
+  [
+   1.34,
+   0.278
+  ],
+  [
+   1.36,
+   0.556
+  ],
+  [
+   1.37,
+   0.167
+  ]
+ ],
+ "abilities": 127,
+ "wall_ray": 0.6,
+ "wall_ray_brolly": 1.0,
+ "wall_touch_ray": 0.1,
+ "wall_contact": 0.01,
+ "wall_stick_time": 0.15,
+ "wall_slide_accel": -24.0,
+ "wall_cling_decel": 80.0,
+ "wall_cling_vmin": -10.0,
+ "wall_cling_cooldown": 0.3,
+ "wall_sticky_steps": 3,
+ "wj_speed": 25.0,
+ "wj_lock_short": 5,
+ "wj_lock_long": 15,
+ "wj_chain_steps": 10,
+ "wj_jumped_steps": 5,
+ "wall_up_shove": 0.8,
+ "wall_slash_vy_min": -5.0,
+ "dash_speed": 28.0,
+ "dash_time": 0.1,
+ "air_dash_time": 0.02,
+ "dash_cooldown": 0.425,
+ "dash_queue_steps": 10,
+ "sprint_speed": 17.5,
+ "air_sprint_speed": 12.0,
+ "sprint_accel": 1.1,
+ "air_sprint_time": 0.235,
+ "air_fall_clamp0": -10.0,
+ "air_fall_clamp1": -30.0,
+ "air_fall_clamp_time": 1.0,
+ "air_fall_clamp_lag": 0.016667,
+ "skid_decel": 0.85,
+ "skid_decel_move": 0.95,
+ "skid_time": 0.25,
+ "skid_min_speed": 4.0,
+ "sprint_grace": 0.3,
+ "sprint_shift": 0.05,
+ "glide_antic_t": 0.083533,
+ "glide_inflate_t": 0.191667,
+ "glide_deflate_t": 0.083533,
+ "glide_antic_accel": 8.5,
+ "glide_accel": 1.0,
+ "glide_decel": 0.25,
+ "glide_vmax": 8.5,
+ "glide_vy": -6.0,
+ "glide_vy_accel": 0.13,
+ "glide_start_vy": 0.5,
+ "glide_cooldown": 0.1,
+ "glide_ground_ray": 1.1,
+ "glide_bump_ray": 0.7,
+ "glide_bump_vx": 6.0,
+ "rpr_antic_t": 0.1502,
+ "rpr_slash_t": 0.166867,
+ "rpr_fall_t": 0.1502,
+ "rpr_fall2_t": 0.0,
+ "rpr_antic_decel": 0.85,
+ "rpr_antic_decel_y": 0.8,
+ "rpr_accel": 3.0,
+ "rpr_decel": 1.0,
+ "rpr_vmax": 12.0,
+ "rpr_speed": 30.0,
+ "rpr_slash_decel": 0.7,
+ "rpr_thunk_decel": 0.715,
+ "rpr_thunk_reach0": 2.18,
+ "rpr_thunk_reach1": 2.33,
+ "rpr_thunk_reach_t": 0.058,
+ "rpr_thunk_lobe0": 0.5,
+ "rpr_thunk_lobe1": 2.2,
+ "hard_fall_time": 0.5,
+ "hard_land_time": 0.67,
+ "scr_antic_t": 0.058333,
+ "scr_speed": 22.0,
+ "scr_force": 72.0,
+ "scr_force_held": 48.0,
+ "scr_end_vy": 0.5,
+ "scr_end_decel": 0.8,
+ "scr_end_t": 0.066867,
+ "scr_roof_ray": 0.03,
+ "scr_roof_t": 0.1002,
+ "scr_detach": 0.2,
+ "jump_heights": [
+  {
+   "hold": 3,
+   "n": 70,
+   "logged": [
+    0.9145,
+    0.9185,
+    1.265
+   ],
+   "model": [
+    0.917,
+    1.2665
+   ],
+   "spread": 0.3505,
+   "outside_model": 0.0025
+  },
+  {
+   "hold": 4,
+   "n": 81,
+   "logged": [
+    1.265,
+    1.2665,
+    1.5755
+   ],
+   "model": [
+    1.2275,
+    1.613
+   ],
+   "spread": 0.3105,
+   "outside_model": 0.0
+  },
+  {
+   "hold": 5,
+   "n": 92,
+   "logged": [
+    1.5755,
+    1.6145,
+    1.8305
+   ],
+   "model": [
+    1.4825,
+    1.9235
+   ],
+   "spread": 0.255,
+   "outside_model": 0.0
+  },
+  {
+   "hold": 6,
+   "n": 85,
+   "logged": [
+    1.8305,
+    1.961,
+    2.1785
+   ],
+   "model": [
+    1.6145,
+    2.1785
+   ],
+   "spread": 0.348,
+   "outside_model": 0.0
+  },
+  {
+   "hold": 7,
+   "n": 108,
+   "logged": [
+    1.9585,
+    2.309,
+    2.3105
+   ],
+   "model": [
+    1.9625,
+    2.3105
+   ],
+   "spread": 0.352,
+   "outside_model": 0.004
+  },
+  {
+   "hold": 8,
+   "n": 72,
+   "logged": [
+    2.3105,
+    2.5265,
+    2.6585
+   ],
+   "model": [
+    2.3105,
+    2.6585
+   ],
+   "spread": 0.348,
+   "outside_model": 0.0
+  },
+  {
+   "hold": 9,
+   "n": 72,
+   "logged": [
+    2.6585,
+    2.6585,
+    3.005
+   ],
+   "model": [
+    2.657,
+    3.0065
+   ],
+   "spread": 0.3465,
+   "outside_model": 0.0
+  },
+  {
+   "hold": 10,
+   "n": 82,
+   "logged": [
+    2.9675,
+    3.0065,
+    3.3155
+   ],
+   "model": [
+    2.9675,
+    3.3545
+   ],
+   "spread": 0.348,
+   "outside_model": 0.0
+  },
+  {
+   "hold": 11,
+   "n": 76,
+   "logged": [
+    3.2225,
+    3.3545,
+    3.5375
+   ],
+   "model": [
+    3.2225,
+    3.659
+   ],
+   "spread": 0.315,
+   "outside_model": 0.0
+  },
+  {
+   "hold": 12,
+   "n": 96,
+   "logged": [
+    3.5375,
+    3.659,
+    3.6605
+   ],
+   "model": [
+    3.3545,
+    3.9095
+   ],
+   "spread": 0.123,
+   "outside_model": 0.0
+  },
+  {
+   "hold": 13,
+   "n": 81,
+   "logged": [
+    3.659,
+    3.941,
+    3.941
+   ],
+   "model": [
+    3.659,
+    4.097
+   ],
+   "spread": 0.282,
+   "outside_model": 0.0
+  },
+  {
+   "hold": 14,
+   "n": 87,
+   "logged": [
+    3.941,
+    4.097,
+    4.199
+   ],
+   "model": [
+    3.941,
+    4.199
+   ],
+   "spread": 0.258,
+   "outside_model": 0.0
+  },
+  {
+   "hold": 15,
+   "n": 87,
+   "logged": [
+    4.199,
+    4.199,
+    4.433
+   ],
+   "model": [
+    4.199,
+    4.433
+   ],
+   "spread": 0.234,
+   "outside_model": 0.0
+  },
+  {
+   "hold": 16,
+   "n": 86,
+   "logged": [
+    4.433,
+    4.433,
+    4.622
+   ],
+   "model": [
+    4.4075,
+    4.643
+   ],
+   "spread": 0.189,
+   "outside_model": 0.0
+  },
+  {
+   "hold": 17,
+   "n": 92,
+   "logged": [
+    4.565,
+    4.643,
+    4.763
+   ],
+   "model": [
+    4.565,
+    4.829
+   ],
+   "spread": 0.198,
+   "outside_model": 0.0
+  },
+  {
+   "hold": 18,
+   "n": 101,
+   "logged": [
+    4.763,
+    4.829,
+    4.829
+   ],
+   "model": [
+    4.643,
+    4.982
+   ],
+   "spread": 0.066,
+   "outside_model": 0.0
+  },
+  {
+   "hold": 19,
+   "n": 113,
+   "logged": [
+    4.829,
+    4.991,
+    4.991
+   ],
+   "model": [
+    4.829,
+    5.087
+   ],
+   "spread": 0.162,
+   "outside_model": 0.0
+  },
+  {
+   "hold": 20,
+   "n": 108,
+   "logged": [
+    4.991,
+    5.1066,
+    5.129
+   ],
+   "model": [
+    4.991,
+    5.129
+   ],
+   "spread": 0.138,
+   "outside_model": 0.0
+  },
+  {
+   "hold": 21,
+   "n": 101,
+   "logged": [
+    5.129,
+    5.129,
+    5.246
+   ],
+   "model": [
+    5.129,
+    5.246
+   ],
+   "spread": 0.117,
+   "outside_model": 0.0
+  },
+  {
+   "hold": 22,
+   "n": 98,
+   "logged": [
+    5.246,
+    5.246,
+    5.342
+   ],
+   "model": [
+    5.246,
+    5.342
+   ],
+   "spread": 0.096,
+   "outside_model": 0.0
+  },
+  {
+   "hold": 23,
+   "n": 78,
+   "logged": [
+    5.342,
+    5.342,
+    5.396
+   ],
+   "model": [
+    5.315,
+    5.414
+   ],
+   "spread": 0.054,
+   "outside_model": 0.0
+  },
+  {
+   "hold": 24,
+   "n": 87,
+   "logged": [
+    5.396,
+    5.414,
+    5.456
+   ],
+   "model": [
+    5.342,
+    5.462
+   ],
+   "spread": 0.06,
+   "outside_model": 0.0
+  }
+ ],
+ "scenes": {
+  "Bone_05": {
+   "enable": [
+    "Threaded Bell Gate",
+    "Threaded Bell Gate (1)"
+   ],
+   "disable": [
+    "Wall"
+   ]
+  }
+ },
+ "source": {
+  "frame_time": "kin_fit: mean unscaled gameplay frame time (n=2833028)",
+  "frame_time_lo": "kin_fit: shortest frame (frame limiter) (n=2833028)",
+  "frame_time_hi": "kin_fit: p99.99 frame time (n=2833028)",
+  "frame_time_max": "kin_fit: at most 2 frames of any 65 are longer (per bound: {0.017: 4, 0.0175: 3, 0.018: 2, 0.019: 2, 0.02: 2, 0.025: 1}) (n=2833028)",
+  "hitch_max": "kin_fit: longest frame 0.0369 s, rounded up to the next 5 ms (n=2833028)",
+  "hitch_rate": "kin_fit: frames longer than 0.018 s, per frame (n=2833028)",
+  "hitches_per_window": "kin_fit: frames above frame_time_max in any 65 (see frame_time_max) (n=2833028)",
+  "scenes.Bone_05": "kin_fit: hero boxes against the room-entry TERRAIN dump",
+  "foot": "kin_fit: pos.y - box bottom at rest (n=65378)",
+  "head": "kin_fit: box top - pos.y at rest (n=65378)",
+  "half_width": "kin_fit: half box width at rest (n=65378)",
+  "skin": "kin_fit: box bottom - floor segment at rest (n=503)",
+  "gravity": "kin_fit: falling steps, dvy / fdt (n=38676)",
+  "run_speed": "kin_fit: grounded |vx| with one direction held (n=33862)",
+  "jump_speed": "kin_fit: vy + g fdt on rising jump steps (n=16194)",
+  "jump_steps": "kin_fit: full-hold jumps: rise steps - 1 (JUMP_STEPS: Jump() runs while jump_steps <= JUMP_STEPS); counts {1: 50, 2: 106, 3: 114, 4: 116, 5: 134, 6: 115, 7: 110, 8: 112, 9: 1517} (n=2374)",
+  "pogo_jump_steps": "kin_fit: pogo rise steps {1: 1, 4: 1, 5: 40} -> start jump_steps (n=42)",
+  "jump_release_mult": "kin_fit: vy ratio on step-less frames with jump released (n=1510)",
+  "air_hang_gravity": "kin_fit: smallest post-apex scale minus one ramp step (StartAirHang, then += accel * fdt before the step) (n=2533)",
+  "recoil_velocity": "kin_fit: |vx| in nail recoil without input push (n=3086)",
+  "recoil_steps": "kin_fit: steps after the hit frame {0: 18, 1: 14, 2: 4, 3: 6, 4: 2, 5: 5, 6: 2, 7: 6, 8: 314} (n=371)",
+  "ds_antic_decel": "kin_fit: vx ratio per antic step (n=197)",
+  "ds_antic_vy_min": "kin_fit: lowest vy at a down-attack press (n=102)",
+  "ds_speed": "kin_fit: |v| components while spiking (n=678)",
+  "hurt_velocity": "kin_fit: |dx| / (steps fdt) over the damage recoil (n=987)",
+  "hurt_vy_ratio": "kin_fit: (dy / dx) over the recoil (n=987)",
+  "cast_antic": "kin_fit: antic: threshold in (0.2501, 0.2664], runs [0.2664, 0.2667, 0.2667, 0.2666, 0.2664, 0.2667, 0.2666, 0.2667, 0.2664, 0.2667, 0.2667, 0.2666, 0.2664, 0.2667, 0.2667, 0.2667, 0.2667, 0.2664, 0.2667, 0.2667, 0.2667, 0.2667, 0.2667, 0.2666, 0.2664, 0.2667, 0.2667, 0.2667, 0.2667, 0.2664, 0.2666, 0.2667, 0.2667, 0.2667, 0.2664, 0.2666, 0.2667, 0.2668, 0.2666, 0.2664, 0.2667, 0.2666, 0.2667, 0.2667, 0.2664, 0.2667, 0.2666, 0.2666, 0.2667, 0.2664, 0.2667, 0.2666, 0.2664, 0.2666, 0.2667, 0.2664, 0.2667, 0.2666, 0.2667, 0.2664, 0.2667, 0.2666, 0.2664, 0.2667, 0.2667, 0.2666, 0.2667, 0.2664, 0.2667, 0.2666, 0.2666, 0.2667, 0.2667, 0.2667, 0.2664, 0.2666, 0.2667, 0.2666, 0.2664, 0.2666, 0.2667, 0.2666, 0.2668, 0.2667, 0.2664, 0.2667, 0.2666, 0.2667, 0.2667, 0.2664, 0.2664, 0.2666, 0.2668, 0.2668, 0.2667, 0.2664, 0.2667, 0.2666, 0.2667, 0.2667, 0.2664, 0.2667, 0.2667, 0.2666, 0.2666, 0.2664, 0.2667, 0.2666, 0.2666, 0.2667] (n=110)",
+  "cast_throw_variants": "kin_fit: throw runs per frame count (n=78)",
+  "cast_throw": "kin_fit: throw: threshold in (0.4333, 0.4333], runs [0.4333, 0.4499, 0.45, 0.4334, 0.4334, 0.4334, 0.45, 0.45, 0.4334, 0.4499, 0.45, 0.4334, 0.45, 0.4334, 0.45, 0.4499, 0.4333, 0.4334, 0.4333, 0.45, 0.45, 0.45, 0.4334, 0.4334, 0.45, 0.4334, 0.4499, 0.4499, 0.45, 0.45, 0.4333, 0.45, 0.45, 0.4334, 0.4333, 0.45, 0.4499, 0.45, 0.4334, 0.4333, 0.4334, 0.45, 0.4334, 0.4334, 0.45, 0.4499, 0.4334, 0.4333, 0.4499, 0.4333, 0.4334, 0.4333, 0.4334, 0.4334, 0.4333, 0.45, 0.4501, 0.4334, 0.4499, 0.4334, 0.45, 0.4333, 0.4495, 0.45, 0.4499, 0.4499, 0.45, 0.45, 0.4333, 0.45, 0.4334, 0.45, 0.45, 0.45, 0.45, 0.4333, 0.4333, 0.4499] (n=78)",
+  "cast_catch_variants": "kin_fit: catch runs per frame count (n=106)",
+  "cast_catch": "kin_fit: catch: threshold in (0.1500, 0.1499], runs [0.1665, 0.1666, 0.15, 0.1501, 0.1665, 0.15, 0.15, 0.15, 0.1665, 0.1667, 0.1666, 0.1666, 0.1665, 0.15, 0.1501, 0.1666, 0.1666, 0.1665, 0.1667, 0.15, 0.1501, 0.1666, 0.1667, 0.1666, 0.1665, 0.15, 0.15, 0.15, 0.15, 0.1665, 0.15, 0.1666, 0.15, 0.1665, 0.1666, 0.15, 0.1667, 0.1666, 0.1665, 0.1667, 0.15, 0.1666, 0.15, 0.1665, 0.1667, 0.15, 0.15, 0.1665, 0.1666, 0.1666, 0.1665, 0.15, 0.15, 0.1665, 0.15, 0.15, 0.15, 0.1665, 0.1667, 0.1667, 0.1665, 0.1667, 0.15, 0.1666, 0.1666, 0.1665, 0.1667, 0.15, 0.1667, 0.1667, 0.15, 0.15, 0.1665, 0.15, 0.1499, 0.15, 0.1665, 0.1666, 0.1499, 0.15, 0.15, 0.1665, 0.1667, 0.1499, 0.1666, 0.15, 0.1665, 0.1665, 0.15, 0.15, 0.1666, 0.1667, 0.1665, 0.1667, 0.1501, 0.1666, 0.1665, 0.1666, 0.15, 0.15, 0.15, 0.1665, 0.1666, 0.1667, 0.1667, 0.1667] (n=106)",
+  "cast_decay": "kin_fit: vx ratio per step in an air antic (n=565)",
+  "cast_decay_ground": "kin_fit: vx ratio per step in a ground antic (n=251)",
+  "cast_vy_cap": "kin_fit: |vy| at clipped air cast presses / decay (both directions: [1.28, 12.0, 12.0, 12.0, 12.0, 12.0]...) (n=32)",
+  "cast_catch_speed": "kin_fit: |vx| when the catch starts (n=106)",
+  "cast_catch_decay": "kin_fit: vx ratio per catch step (n=776)",
+  "bind_decay": "kin_fit: vx ratio per step in an air bind (n=16)",
+  "bind_vy_cap_down": "kin_fit: |vy| at clipped air bind presses / decay (falling) (n=2)",
+  "bind_time": "kin_fit thresholds: the most frequent Bind length (82 frames) of 18 binds in live i0_000 and i0-3_002 (the held-out recordings are not used)",
+  "bind_time_variants": "Bind runs per frame count, 18 binds of live i0_000 + i0-3_002: 81 / 82 / 83 frames end at float32 dt sums in (1.3333, 1.3499] / (1.3500, 1.3666] / (1.3666, 1.3820]; the 37 binds of the 8 held-out recordings fall in the same three intervals (shares 0.24 / 0.51 / 0.24)",
+  "bind_end_vy": "kin_fit: vy in the first frame after a bind (n=3)",
+  "lock_decay": "kin_fit: vx ratio per step while another FSM holds control (n=437)",
+  "land_slop_lo": "kin_fit: late contacts end in [-0.0077, 0.0048] (n=122)",
+  "land_slop_hi": "kin_fit: upper edge of the late-contact band (n=122)",
+  "jump_heights": "kin_fit: clean ground jumps of the bot traces against the model over the phase",
+  "input_jump_lag": "kin_fit: residual jump-bit lag after the shift {-3: 4, -2: 2, -1: 7, 0: 652, 2: 7} (n=672)",
+  "fdt": "decompiled HeroController / crest config (docs/facts/1.0.30000 hero_constants.json, crests.json) or a code constant; not refitted",
+  "jump_steps_min": "decompiled HeroController / crest config (docs/facts/1.0.30000 hero_constants.json, crests.json) or a code constant; not refitted",
+  "jump_queue_steps": "decompiled HeroController / crest config (docs/facts/1.0.30000 hero_constants.json, crests.json) or a code constant; not refitted",
+  "attack_queue_steps": "decompiled HeroController / crest config (docs/facts/1.0.30000 hero_constants.json, crests.json) or a code constant; not refitted",
+  "tool_queue_steps": "decompiled HeroController / crest config (docs/facts/1.0.30000 hero_constants.json, crests.json) or a code constant; not refitted",
+  "air_hang_accel": "decompiled HeroController / crest config (docs/facts/1.0.30000 hero_constants.json, crests.json) or a code constant; not refitted",
+  "max_fall": "decompiled HeroController / crest config (docs/facts/1.0.30000 hero_constants.json, crests.json) or a code constant; not refitted",
+  "airborne_lift": "decompiled HeroController / crest config (docs/facts/1.0.30000 hero_constants.json, crests.json) or a code constant; not refitted",
+  "attack_duration": "decompiled HeroController / crest config (docs/facts/1.0.30000 hero_constants.json, crests.json) or a code constant; not refitted",
+  "attack_cooldown": "decompiled HeroController / crest config (docs/facts/1.0.30000 hero_constants.json, crests.json) or a code constant; not refitted",
+  "attack_recovery": "decompiled HeroController / crest config (docs/facts/1.0.30000 hero_constants.json, crests.json) or a code constant; not refitted",
+  "ds_antic": "decompiled HeroController / crest config (docs/facts/1.0.30000 hero_constants.json, crests.json) or a code constant; not refitted",
+  "ds_time": "decompiled HeroController / crest config (docs/facts/1.0.30000 hero_constants.json, crests.json) or a code constant; not refitted",
+  "ds_recovery": "decompiled HeroController / crest config (docs/facts/1.0.30000 hero_constants.json, crests.json) or a code constant; not refitted",
+  "ds_land_recovery": "decompiled HeroController / crest config (docs/facts/1.0.30000 hero_constants.json, crests.json) or a code constant; not refitted",
+  "ds_antic_vy_max": "decompiled HeroController / crest config (docs/facts/1.0.30000 hero_constants.json, crests.json) or a code constant; not refitted",
+  "ds_end_vy": "decompiled HeroController / crest config (docs/facts/1.0.30000 hero_constants.json, crests.json) or a code constant; not refitted",
+  "pogo_jumped_steps": "decompiled HeroController / crest config (docs/facts/1.0.30000 hero_constants.json, crests.json) or a code constant; not refitted",
+  "bounce_steps": "decompiled HeroController / crest config (docs/facts/1.0.30000 hero_constants.json, crests.json) or a code constant; not refitted",
+  "hurt_recoil_time": "decompiled HeroController / crest config (docs/facts/1.0.30000 hero_constants.json, crests.json) or a code constant; not refitted",
+  "hurt_wait": "decompiled HeroController / crest config (docs/facts/1.0.30000 hero_constants.json, crests.json) or a code constant; not refitted",
+  "hurt_ramp": "decompiled HeroController / crest config (docs/facts/1.0.30000 hero_constants.json, crests.json) or a code constant; not refitted",
+  "hurt_wait_skip": "decompiled HeroController / crest config (docs/facts/1.0.30000 hero_constants.json, crests.json) or a code constant; not refitted",
+  "invul_time": "decompiled HeroController / crest config (docs/facts/1.0.30000 hero_constants.json, crests.json) or a code constant; not refitted",
+  "cast_silk": "decompiled HeroController / crest config (docs/facts/1.0.30000 hero_constants.json, crests.json) or a code constant; not refitted",
+  "bind_vy_cap": "decompiled HeroController / crest config (docs/facts/1.0.30000 hero_constants.json, crests.json) or a code constant; not refitted",
+  "bind_silk": "decompiled HeroController / crest config (docs/facts/1.0.30000 hero_constants.json, crests.json) or a code constant; not refitted",
+  "silk_max": "decompiled HeroController / crest config (docs/facts/1.0.30000 hero_constants.json, crests.json) or a code constant; not refitted",
+  "ledge_steps": "decompiled HeroController / crest config (docs/facts/1.0.30000 hero_constants.json, crests.json) or a code constant; not refitted",
+  "rdown_halve": "decompiled HeroController / crest config (docs/facts/1.0.30000 hero_constants.json, crests.json) or a code constant; not refitted",
+  "bind_break_before": "Bind charge: the first BindBurst frame comes 1.2 / 1.217 s after the Bind starts (42 binds); 22 of 22 logged hits in the charge started BindBreak, 0 of 1 in the burst (all 14 sources)",
+  "glide_antic_t": "kin_fit_forum (median logged phase length) on C:/ssbot/data/runs/m2/kn_excite_forum/2026-10-02/TRAIN/kn_excite_forum_s98000, C:/ssbot/data/runs/m2/kn_excite_forum/2026-10-02/TRAIN/kn_excite_forum_s98010, C:/ssbot/data/runs/m2/kn_excite_forum/2026-10-02/TRAIN/kn_excite_forum_s98200",
+  "glide_deflate_t": "kin_fit_forum (median logged phase length) on C:/ssbot/data/runs/m2/kn_excite_forum/2026-10-02/TRAIN/kn_excite_forum_s98000, C:/ssbot/data/runs/m2/kn_excite_forum/2026-10-02/TRAIN/kn_excite_forum_s98010, C:/ssbot/data/runs/m2/kn_excite_forum/2026-10-02/TRAIN/kn_excite_forum_s98200",
+  "glide_inflate_t": "kin_fit_forum (median logged phase length) on C:/ssbot/data/runs/m2/kn_excite_forum/2026-10-02/TRAIN/kn_excite_forum_s98000, C:/ssbot/data/runs/m2/kn_excite_forum/2026-10-02/TRAIN/kn_excite_forum_s98010, C:/ssbot/data/runs/m2/kn_excite_forum/2026-10-02/TRAIN/kn_excite_forum_s98200",
+  "rpr_antic_t": "kin_fit_forum (median logged phase length) on C:/ssbot/data/runs/m2/kn_excite_forum/2026-10-02/TRAIN/kn_excite_forum_s98000, C:/ssbot/data/runs/m2/kn_excite_forum/2026-10-02/TRAIN/kn_excite_forum_s98010, C:/ssbot/data/runs/m2/kn_excite_forum/2026-10-02/TRAIN/kn_excite_forum_s98200",
+  "rpr_fall_t": "kin_fit_forum (median logged phase length) on C:/ssbot/data/runs/m2/kn_excite_forum/2026-10-02/TRAIN/kn_excite_forum_s98000, C:/ssbot/data/runs/m2/kn_excite_forum/2026-10-02/TRAIN/kn_excite_forum_s98010, C:/ssbot/data/runs/m2/kn_excite_forum/2026-10-02/TRAIN/kn_excite_forum_s98200",
+  "rpr_slash_t": "kin_fit_forum (median logged phase length) on C:/ssbot/data/runs/m2/kn_excite_forum/2026-10-02/TRAIN/kn_excite_forum_s98000, C:/ssbot/data/runs/m2/kn_excite_forum/2026-10-02/TRAIN/kn_excite_forum_s98010, C:/ssbot/data/runs/m2/kn_excite_forum/2026-10-02/TRAIN/kn_excite_forum_s98200",
+  "scr_antic_t": "kin_fit_forum (median logged phase length) on C:/ssbot/data/runs/m2/kn_excite_forum/2026-10-02/TRAIN/kn_excite_forum_s98000, C:/ssbot/data/runs/m2/kn_excite_forum/2026-10-02/TRAIN/kn_excite_forum_s98010, C:/ssbot/data/runs/m2/kn_excite_forum/2026-10-02/TRAIN/kn_excite_forum_s98200",
+  "scr_end_t": "kin_fit_forum (median logged phase length) on C:/ssbot/data/runs/m2/kn_excite_forum/2026-10-02/TRAIN/kn_excite_forum_s98000, C:/ssbot/data/runs/m2/kn_excite_forum/2026-10-02/TRAIN/kn_excite_forum_s98010, C:/ssbot/data/runs/m2/kn_excite_forum/2026-10-02/TRAIN/kn_excite_forum_s98200",
+  "scr_roof_t": "kin_fit_forum (median logged phase length) on C:/ssbot/data/runs/m2/kn_excite_forum/2026-10-02/TRAIN/kn_excite_forum_s98000, C:/ssbot/data/runs/m2/kn_excite_forum/2026-10-02/TRAIN/kn_excite_forum_s98010, C:/ssbot/data/runs/m2/kn_excite_forum/2026-10-02/TRAIN/kn_excite_forum_s98200"
+ },
+ "fit": {
+  "frame_time": {
+   "value": 0.016666,
+   "n": 2833028,
+   "spread": null,
+   "note": "mean unscaled gameplay frame time"
+  },
+  "frame_time_lo": {
+   "value": 0.016649993136525154,
+   "n": 2833028,
+   "spread": null,
+   "note": "shortest frame (frame limiter)"
+  },
+  "frame_time_hi": {
+   "value": 0.01698,
+   "n": 2833028,
+   "spread": null,
+   "note": "p99.99 frame time"
+  },
+  "frame_time_max": {
+   "value": 0.018,
+   "n": 2833028,
+   "spread": null,
+   "note": "at most 2 frames of any 65 are longer (per bound: {0.017: 4, 0.0175: 3, 0.018: 2, 0.019: 2, 0.02: 2, 0.025: 1})"
+  },
+  "hitch_max": {
+   "value": 0.04,
+   "n": 2833028,
+   "spread": null,
+   "note": "longest frame 0.0369 s, rounded up to the next 5 ms"
+  },
+  "hitch_rate": {
+   "value": 3.07e-05,
+   "n": 2833028,
+   "spread": null,
+   "note": "frames longer than 0.018 s, per frame"
+  },
+  "hitches_per_window": {
+   "value": 2,
+   "n": 2833028,
+   "spread": null,
+   "note": "frames above frame_time_max in any 65 (see frame_time_max)"
+  },
+  "frame_times": {
+   "value": {
+    "p1": 0.01665,
+    "p50": 0.01665,
+    "p99": 0.016744,
+    "max": 0.0369,
+    "over_18ms": 87
+   },
+   "n": 2833028,
+   "note": "gameplay frames of the timing sources"
+  },
+  "timing_data": {
+   "value": [
+    "C:/ssbot/data/runs/m2/20261001_121446_BellBeast_data/rec/2026-10-01/TRAIN/i0_000",
+    "C:/ssbot/data/runs/m2/20261001_122249_BellBeast_data/rec/2026-10-01/TRAIN/i0_000",
+    "C:/ssbot/data/runs/m2/20261001_122249_BellBeast_data/rec/2026-10-01/TRAIN/i0_001",
+    "C:/ssbot/data/runs/m2/20261001_122249_BellBeast_data/rec/2026-10-01/TRAIN/i0_002",
+    "C:/ssbot/data/runs/m2/20261001_122249_BellBeast_data/rec/2026-10-01/TRAIN/i1_000",
+    "C:/ssbot/data/runs/m2/20261001_122249_BellBeast_data/rec/2026-10-01/TRAIN/i1_001",
+    "C:/ssbot/data/runs/m2/20261001_122249_BellBeast_data/rec/2026-10-01/TRAIN/i1_002",
+    "C:/ssbot/data/runs/m2/20261001_122249_BellBeast_data/rec/2026-10-01/TRAIN/i2_000",
+    "C:/ssbot/data/runs/m2/20261001_122249_BellBeast_data/rec/2026-10-01/TRAIN/i2_001",
+    "C:/ssbot/data/runs/m2/20261001_122249_BellBeast_data/rec/2026-10-01/TRAIN/i2_002",
+    "C:/ssbot/data/runs/m2/20261001_122249_BellBeast_data/rec/2026-10-01/TRAIN/i3_000",
+    "C:/ssbot/data/runs/m2/20261001_122249_BellBeast_data/rec/2026-10-01/TRAIN/i3_001",
+    "C:/ssbot/data/runs/m2/20261001_122249_BellBeast_data/rec/2026-10-01/TRAIN/i3_002"
+   ],
+   "n": 2965593,
+   "note": "traces of the jitter model"
+  },
+  "data": {
+   "value": [
+    {
+     "source": "C:/ssbot/data/runs/m2/20261001_122249_BellBeast_data/rec/2026-10-01/TRAIN/i0_000",
+     "frames": 259302,
+     "mask": "act"
+    },
+    {
+     "source": "C:/ssbot/data/human/20260930_210337",
+     "frames": 159471,
+     "mask": "input"
+    }
+   ],
+   "n": 418773,
+   "note": "traces used"
+  },
+  "scene:Bone_05": {
+   "value": {
+    "enable": [
+     "Threaded Bell Gate",
+     "Threaded Bell Gate (1)"
+    ],
+    "disable": [
+     "Wall"
+    ]
+   },
+   "n": 259068,
+   "note": "solids inferred from logged boxes"
+  },
+  "foot": {
+   "value": 1.5527,
+   "n": 65378,
+   "spread": null,
+   "note": "pos.y - box bottom at rest"
+  },
+  "head": {
+   "value": 0.5262,
+   "n": 65378,
+   "spread": null,
+   "note": "box top - pos.y at rest"
+  },
+  "half_width": {
+   "value": 0.25,
+   "n": 65378,
+   "spread": null,
+   "note": "half box width at rest"
+  },
+  "skin": {
+   "value": 0.015,
+   "n": 503,
+   "spread": 0.0,
+   "note": "box bottom - floor segment at rest"
+  },
+  "gravity": {
+   "value": 60.0,
+   "n": 38676,
+   "spread": 0.0,
+   "note": "falling steps, dvy / fdt"
+  },
+  "run_speed": {
+   "value": 8.25,
+   "n": 33862,
+   "spread": 0.0,
+   "note": "grounded |vx| with one direction held"
+  },
+  "jump_speed": {
+   "value": 18.6,
+   "n": 16194,
+   "spread": 0.0,
+   "note": "vy + g fdt on rising jump steps"
+  },
+  "jump_steps": {
+   "value": 8,
+   "n": 2374,
+   "spread": null,
+   "note": "full-hold jumps: rise steps - 1 (JUMP_STEPS: Jump() runs while jump_steps <= JUMP_STEPS); counts {1: 50, 2: 106, 3: 114, 4: 116, 5: 134, 6: 115, 7: 110, 8: 112, 9: 1517}"
+  },
+  "pogo_jump_steps": {
+   "value": 4,
+   "n": 42,
+   "spread": null,
+   "note": "pogo rise steps {1: 1, 4: 1, 5: 40} -> start jump_steps"
+  },
+  "jump_release_mult": {
+   "value": 0.5,
+   "n": 1510,
+   "spread": 0.0,
+   "note": "vy ratio on step-less frames with jump released"
+  },
+  "max_fall_observed": {
+   "value": 31.2,
+   "n": 102864,
+   "note": "fastest NORMAL fall; MAX_FALL_VELOCITY 30 binds only if reached"
+  },
+  "air_hang_scales": {
+   "value": [
+    [
+     0.2,
+     272
+    ],
+    [
+     0.3,
+     246
+    ],
+    [
+     0.4,
+     230
+    ],
+    [
+     0.5,
+     213
+    ],
+    [
+     0.6,
+     188
+    ],
+    [
+     0.7,
+     165
+    ],
+    [
+     0.8,
+     147
+    ],
+    [
+     1.0,
+     947
+    ]
+   ],
+   "n": 2533,
+   "note": "gravity scales seen right after the apex, jump held"
+  },
+  "air_hang_gravity": {
+   "value": 0.1,
+   "n": 2533,
+   "spread": null,
+   "note": "smallest post-apex scale minus one ramp step (StartAirHang, then += accel * fdt before the step)"
+  },
+  "recoil_velocity": {
+   "value": 3.75,
+   "n": 3086,
+   "spread": null,
+   "note": "|vx| in nail recoil without input push"
+  },
+  "recoil_steps": {
+   "value": 8,
+   "n": 371,
+   "spread": null,
+   "note": "steps after the hit frame {0: 18, 1: 14, 2: 4, 3: 6, 4: 2, 5: 5, 6: 2, 7: 6, 8: 314}"
+  },
+  "ds_antic_runs": {
+   "value": [
+    [
+     0.117,
+     54
+    ],
+    [
+     0.1,
+     37
+    ],
+    [
+     0.083,
+     3
+    ],
+    [
+     0.033,
+     3
+    ]
+   ],
+   "n": 102,
+   "note": "scaled seconds in the antic (prefab 0.1 kept)"
+  },
+  "ds_antic_decel": {
+   "value": 0.8,
+   "n": 197,
+   "spread": null,
+   "note": "vx ratio per antic step"
+  },
+  "ds_antic_vy_at_press": {
+   "value": [
+    -12.0,
+    -11.55,
+    -11.47,
+    -11.25,
+    -11.02,
+    -10.72,
+    -10.42,
+    -10.27,
+    -9.97,
+    -9.82,
+    -9.75,
+    -9.67
+   ],
+   "n": 102,
+   "note": "vy right after the press (clamp)"
+  },
+  "ds_antic_vy_min": {
+   "value": -12.0,
+   "n": 102,
+   "spread": null,
+   "note": "lowest vy at a down-attack press"
+  },
+  "ds_speed": {
+   "value": 26.0,
+   "n": 678,
+   "spread": null,
+   "note": "|v| components while spiking"
+  },
+  "ds_spike_steps": {
+   "value": {
+    "0": 30,
+    "1": 7,
+    "2": 5,
+    "3": 5,
+    "5": 5,
+    "6": 38
+   },
+   "n": 90,
+   "note": "steps in a spike (incl. cut)"
+  },
+  "ds_end_vy_seen": {
+   "value": [
+    [
+     -10.0,
+     36
+    ],
+    [
+     -8.8,
+     45
+    ]
+   ],
+   "n": 81,
+   "note": "vy + g fdt in the frame after a spike (code: -10)"
+  },
+  "damage_events": {
+   "value": {
+    "damage": 1013,
+    "knockbacks": 987
+   },
+   "n": 987,
+   "note": "oracle damage events vs StartRecoil (recoilFrozen onsets)"
+  },
+  "hurt_freeze_frames": {
+   "value": {
+    "13": 155,
+    "14": 609,
+    "15": 223
+   },
+   "n": 987,
+   "note": "damage frame -> recoil start; FreezeMoment replay right in 987/987"
+  },
+  "hurt_velocity": {
+   "value": 15.0,
+   "n": 987,
+   "spread": null,
+   "note": "|dx| / (steps fdt) over the damage recoil"
+  },
+  "hurt_vy_ratio": {
+   "value": 0.5,
+   "n": 987,
+   "spread": null,
+   "note": "(dy / dx) over the recoil"
+  },
+  "hurt_recoil_frames": {
+   "value": {
+    "13": 408,
+    "14": 574,
+    "28": 3,
+    "29": 1,
+    "47": 1
+   },
+   "n": 987,
+   "note": "frames with the recoiling flag (RECOIL_DURATION 0.2 s, float32 dt sum)"
+  },
+  "cast_antic": {
+   "value": 0.26,
+   "n": 110,
+   "spread": null,
+   "note": "antic: threshold in (0.2501, 0.2664], runs [0.2664, 0.2667, 0.2667, 0.2666, 0.2664, 0.2667, 0.2666, 0.2667, 0.2664, 0.2667, 0.2667, 0.2666, 0.2664, 0.2667, 0.2667, 0.2667, 0.2667, 0.2664, 0.2667, 0.2667, 0.2667, 0.2667, 0.2667, 0.2666, 0.2664, 0.2667, 0.2667, 0.2667, 0.2667, 0.2664, 0.2666, 0.2667, 0.2667, 0.2667, 0.2664, 0.2666, 0.2667, 0.2668, 0.2666, 0.2664, 0.2667, 0.2666, 0.2667, 0.2667, 0.2664, 0.2667, 0.2666, 0.2666, 0.2667, 0.2664, 0.2667, 0.2666, 0.2664, 0.2666, 0.2667, 0.2664, 0.2667, 0.2666, 0.2667, 0.2664, 0.2667, 0.2666, 0.2664, 0.2667, 0.2667, 0.2666, 0.2667, 0.2664, 0.2667, 0.2666, 0.2666, 0.2667, 0.2667, 0.2667, 0.2664, 0.2666, 0.2667, 0.2666, 0.2664, 0.2666, 0.2667, 0.2666, 0.2668, 0.2667, 0.2664, 0.2667, 0.2666, 0.2667, 0.2667, 0.2664, 0.2664, 0.2666, 0.2668, 0.2668, 0.2667, 0.2664, 0.2667, 0.2666, 0.2667, 0.2667, 0.2664, 0.2667, 0.2667, 0.2666, 0.2666, 0.2664, 0.2667, 0.2666, 0.2666, 0.2667]"
+  },
+  "cast_throw_variants": {
+   "value": [
+    [
+     0.42,
+     0.462,
+     26,
+     36
+    ],
+    [
+     0.44,
+     0.538,
+     27,
+     42
+    ]
+   ],
+   "n": 78,
+   "note": "throw: [threshold, share, frames, n] per frame-count cluster"
+  },
+  "cast_throw": {
+   "value": 0.44,
+   "n": 78,
+   "spread": null,
+   "note": "throw: threshold in (0.4333, 0.4333], runs [0.4333, 0.4499, 0.45, 0.4334, 0.4334, 0.4334, 0.45, 0.45, 0.4334, 0.4499, 0.45, 0.4334, 0.45, 0.4334, 0.45, 0.4499, 0.4333, 0.4334, 0.4333, 0.45, 0.45, 0.45, 0.4334, 0.4334, 0.45, 0.4334, 0.4499, 0.4499, 0.45, 0.45, 0.4333, 0.45, 0.45, 0.4334, 0.4333, 0.45, 0.4499, 0.45, 0.4334, 0.4333, 0.4334, 0.45, 0.4334, 0.4334, 0.45, 0.4499, 0.4334, 0.4333, 0.4499, 0.4333, 0.4334, 0.4333, 0.4334, 0.4334, 0.4333, 0.45, 0.4501, 0.4334, 0.4499, 0.4334, 0.45, 0.4333, 0.4495, 0.45, 0.4499, 0.4499, 0.45, 0.45, 0.4333, 0.45, 0.4334, 0.45, 0.45, 0.45, 0.45, 0.4333, 0.4333, 0.4499]"
+  },
+  "cast_catch_variants": {
+   "value": [
+    [
+     0.14,
+     0.406,
+     9,
+     43
+    ],
+    [
+     0.16,
+     0.594,
+     10,
+     63
+    ]
+   ],
+   "n": 106,
+   "note": "catch: [threshold, share, frames, n] per frame-count cluster"
+  },
+  "cast_catch": {
+   "value": 0.16,
+   "n": 106,
+   "spread": null,
+   "note": "catch: threshold in (0.1500, 0.1499], runs [0.1665, 0.1666, 0.15, 0.1501, 0.1665, 0.15, 0.15, 0.15, 0.1665, 0.1667, 0.1666, 0.1666, 0.1665, 0.15, 0.1501, 0.1666, 0.1666, 0.1665, 0.1667, 0.15, 0.1501, 0.1666, 0.1667, 0.1666, 0.1665, 0.15, 0.15, 0.15, 0.15, 0.1665, 0.15, 0.1666, 0.15, 0.1665, 0.1666, 0.15, 0.1667, 0.1666, 0.1665, 0.1667, 0.15, 0.1666, 0.15, 0.1665, 0.1667, 0.15, 0.15, 0.1665, 0.1666, 0.1666, 0.1665, 0.15, 0.15, 0.1665, 0.15, 0.15, 0.15, 0.1665, 0.1667, 0.1667, 0.1665, 0.1667, 0.15, 0.1666, 0.1666, 0.1665, 0.1667, 0.15, 0.1667, 0.1667, 0.15, 0.15, 0.1665, 0.15, 0.1499, 0.15, 0.1665, 0.1666, 0.1499, 0.15, 0.15, 0.1665, 0.1667, 0.1499, 0.1666, 0.15, 0.1665, 0.1665, 0.15, 0.15, 0.1666, 0.1667, 0.1665, 0.1667, 0.1501, 0.1666, 0.1665, 0.1666, 0.15, 0.15, 0.15, 0.1665, 0.1666, 0.1667, 0.1667, 0.1667]"
+  },
+  "cast_decay": {
+   "value": 0.9,
+   "n": 565,
+   "spread": null,
+   "note": "vx ratio per step in an air antic"
+  },
+  "cast_decay_ground": {
+   "value": 0.85,
+   "n": 251,
+   "spread": null,
+   "note": "vx ratio per step in a ground antic"
+  },
+  "cast_vy_cap": {
+   "value": 12.0,
+   "n": 32,
+   "spread": null,
+   "note": "|vy| at clipped air cast presses / decay (both directions: [1.28, 12.0, 12.0, 12.0, 12.0, 12.0]...)"
+  },
+  "cast_catch_speed": {
+   "value": 21.0,
+   "n": 106,
+   "spread": null,
+   "note": "|vx| when the catch starts"
+  },
+  "cast_catch_decay": {
+   "value": 0.7,
+   "n": 776,
+   "spread": null,
+   "note": "vx ratio per catch step"
+  },
+  "bind_decay": {
+   "value": 0.85,
+   "n": 16,
+   "spread": null,
+   "note": "vx ratio per step in an air bind"
+  },
+  "bind_vy_cap_down": {
+   "value": 12.0,
+   "n": 2,
+   "spread": null,
+   "note": "|vy| at clipped air bind presses / decay (falling)"
+  },
+  "bind_time": {
+   "value": 1.3666,
+   "n": 3,
+   "spread": null,
+   "note": "Bind: scaled time relinquished"
+  },
+  "bind_runs": {
+   "value": [],
+   "n": 18,
+   "note": "re-measured 2026-10-01 (kinematics fix round 3) on live i0_000 + i0-3_002: frames per bind {81: 5, 82: 10, 83: 3}; median dt sum 1.36664 s"
+  },
+  "bind_end_vy": {
+   "value": -0.25,
+   "n": 3,
+   "spread": null,
+   "note": "vy in the first frame after a bind"
+  },
+  "lock_decay": {
+   "value": 0.86,
+   "n": 437,
+   "spread": null,
+   "note": "vx ratio per step while another FSM holds control"
+  },
+  "land_slop_lo": {
+   "value": 0.0082,
+   "n": 122,
+   "spread": null,
+   "note": "late contacts end in [-0.0077, 0.0048]"
+  },
+  "land_slop_hi": {
+   "value": 0.0053,
+   "n": 122,
+   "spread": null,
+   "note": "upper edge of the late-contact band"
+  },
+  "landings": {
+   "value": {
+    "same_step": 2743,
+    "next_step": 122
+   },
+   "n": 2865,
+   "note": "contact resolved in the landing step vs the next one"
+  },
+  "jump_heights": {
+   "value": [
+    {
+     "hold": 3,
+     "n": 70,
+     "logged": [
+      0.9145,
+      0.9185,
+      1.265
+     ],
+     "model": [
+      0.917,
+      1.2665
+     ],
+     "spread": 0.3505,
+     "outside_model": 0.0025
+    },
+    {
+     "hold": 4,
+     "n": 81,
+     "logged": [
+      1.265,
+      1.2665,
+      1.5755
+     ],
+     "model": [
+      1.2275,
+      1.613
+     ],
+     "spread": 0.3105,
+     "outside_model": 0.0
+    },
+    {
+     "hold": 5,
+     "n": 92,
+     "logged": [
+      1.5755,
+      1.6145,
+      1.8305
+     ],
+     "model": [
+      1.4825,
+      1.9235
+     ],
+     "spread": 0.255,
+     "outside_model": 0.0
+    },
+    {
+     "hold": 6,
+     "n": 85,
+     "logged": [
+      1.8305,
+      1.961,
+      2.1785
+     ],
+     "model": [
+      1.6145,
+      2.1785
+     ],
+     "spread": 0.348,
+     "outside_model": 0.0
+    },
+    {
+     "hold": 7,
+     "n": 108,
+     "logged": [
+      1.9585,
+      2.309,
+      2.3105
+     ],
+     "model": [
+      1.9625,
+      2.3105
+     ],
+     "spread": 0.352,
+     "outside_model": 0.004
+    },
+    {
+     "hold": 8,
+     "n": 72,
+     "logged": [
+      2.3105,
+      2.5265,
+      2.6585
+     ],
+     "model": [
+      2.3105,
+      2.6585
+     ],
+     "spread": 0.348,
+     "outside_model": 0.0
+    },
+    {
+     "hold": 9,
+     "n": 72,
+     "logged": [
+      2.6585,
+      2.6585,
+      3.005
+     ],
+     "model": [
+      2.657,
+      3.0065
+     ],
+     "spread": 0.3465,
+     "outside_model": 0.0
+    },
+    {
+     "hold": 10,
+     "n": 82,
+     "logged": [
+      2.9675,
+      3.0065,
+      3.3155
+     ],
+     "model": [
+      2.9675,
+      3.3545
+     ],
+     "spread": 0.348,
+     "outside_model": 0.0
+    },
+    {
+     "hold": 11,
+     "n": 76,
+     "logged": [
+      3.2225,
+      3.3545,
+      3.5375
+     ],
+     "model": [
+      3.2225,
+      3.659
+     ],
+     "spread": 0.315,
+     "outside_model": 0.0
+    },
+    {
+     "hold": 12,
+     "n": 96,
+     "logged": [
+      3.5375,
+      3.659,
+      3.6605
+     ],
+     "model": [
+      3.3545,
+      3.9095
+     ],
+     "spread": 0.123,
+     "outside_model": 0.0
+    },
+    {
+     "hold": 13,
+     "n": 81,
+     "logged": [
+      3.659,
+      3.941,
+      3.941
+     ],
+     "model": [
+      3.659,
+      4.097
+     ],
+     "spread": 0.282,
+     "outside_model": 0.0
+    },
+    {
+     "hold": 14,
+     "n": 87,
+     "logged": [
+      3.941,
+      4.097,
+      4.199
+     ],
+     "model": [
+      3.941,
+      4.199
+     ],
+     "spread": 0.258,
+     "outside_model": 0.0
+    },
+    {
+     "hold": 15,
+     "n": 87,
+     "logged": [
+      4.199,
+      4.199,
+      4.433
+     ],
+     "model": [
+      4.199,
+      4.433
+     ],
+     "spread": 0.234,
+     "outside_model": 0.0
+    },
+    {
+     "hold": 16,
+     "n": 86,
+     "logged": [
+      4.433,
+      4.433,
+      4.622
+     ],
+     "model": [
+      4.4075,
+      4.643
+     ],
+     "spread": 0.189,
+     "outside_model": 0.0
+    },
+    {
+     "hold": 17,
+     "n": 92,
+     "logged": [
+      4.565,
+      4.643,
+      4.763
+     ],
+     "model": [
+      4.565,
+      4.829
+     ],
+     "spread": 0.198,
+     "outside_model": 0.0
+    },
+    {
+     "hold": 18,
+     "n": 101,
+     "logged": [
+      4.763,
+      4.829,
+      4.829
+     ],
+     "model": [
+      4.643,
+      4.982
+     ],
+     "spread": 0.066,
+     "outside_model": 0.0
+    },
+    {
+     "hold": 19,
+     "n": 113,
+     "logged": [
+      4.829,
+      4.991,
+      4.991
+     ],
+     "model": [
+      4.829,
+      5.087
+     ],
+     "spread": 0.162,
+     "outside_model": 0.0
+    },
+    {
+     "hold": 20,
+     "n": 108,
+     "logged": [
+      4.991,
+      5.1066,
+      5.129
+     ],
+     "model": [
+      4.991,
+      5.129
+     ],
+     "spread": 0.138,
+     "outside_model": 0.0
+    },
+    {
+     "hold": 21,
+     "n": 101,
+     "logged": [
+      5.129,
+      5.129,
+      5.246
+     ],
+     "model": [
+      5.129,
+      5.246
+     ],
+     "spread": 0.117,
+     "outside_model": 0.0
+    },
+    {
+     "hold": 22,
+     "n": 98,
+     "logged": [
+      5.246,
+      5.246,
+      5.342
+     ],
+     "model": [
+      5.246,
+      5.342
+     ],
+     "spread": 0.096,
+     "outside_model": 0.0
+    },
+    {
+     "hold": 23,
+     "n": 78,
+     "logged": [
+      5.342,
+      5.342,
+      5.396
+     ],
+     "model": [
+      5.315,
+      5.414
+     ],
+     "spread": 0.054,
+     "outside_model": 0.0
+    },
+    {
+     "hold": 24,
+     "n": 87,
+     "logged": [
+      5.396,
+      5.414,
+      5.456
+     ],
+     "model": [
+      5.342,
+      5.462
+     ],
+     "spread": 0.06,
+     "outside_model": 0.0
+    }
+   ],
+   "n": 1953,
+   "note": "apex above takeoff per jump hold (frames, 32 = 32 or more)"
+  },
+  "input_jump_lag": {
+   "value": 1,
+   "n": 672,
+   "spread": null,
+   "note": "residual jump-bit lag after the shift {-3: 4, -2: 2, -1: 7, 0: 652, 2: 7}"
+  },
+  "forum": {
+   "sources": [
+    "C:/ssbot/data/runs/m2/kn_excite_forum/2026-10-02/TRAIN/kn_excite_forum_s98000",
+    "C:/ssbot/data/runs/m2/kn_excite_forum/2026-10-02/TRAIN/kn_excite_forum_s98010",
+    "C:/ssbot/data/runs/m2/kn_excite_forum/2026-10-02/TRAIN/kn_excite_forum_s98200"
+   ],
+   "fitted": {
+    "glide_antic_t": 0.083533,
+    "glide_deflate_t": 0.083533,
+    "glide_inflate_t": 0.191667,
+    "rpr_antic_t": 0.1502,
+    "rpr_fall_t": 0.1502,
+    "rpr_slash_t": 0.166867,
+    "scr_antic_t": 0.058333,
+    "scr_end_t": 0.066867,
+    "scr_roof_t": 0.1002
+   },
+   "phases": {
+    "glide_antic_t": {
+     "lengths_natural": {
+      "5": 5,
+      "6": 23
+     },
+     "lengths_cut": {},
+     "fit": {
+      "value": 0.083533,
+      "rule": "boundary L=5/6",
+      "n": 28,
+      "spread_frames": [
+       5,
+       6
+      ]
+     }
+    },
+    "glide_deflate_t": {
+     "lengths_natural": {
+      "5": 3,
+      "6": 9
+     },
+     "lengths_cut": {
+      "2": 1,
+      "4": 1,
+      "5": 2,
+      "6": 3
+     },
+     "fit": {
+      "value": 0.083533,
+      "rule": "boundary L=5/6",
+      "n": 12,
+      "spread_frames": [
+       5,
+       6
+      ]
+     }
+    },
+    "glide_inflate_t": {
+     "lengths_natural": {
+      "12": 28
+     },
+     "lengths_cut": {},
+     "fit": {
+      "value": 0.191667,
+      "rule": "middle of L=12",
+      "n": 28,
+      "spread_frames": [
+       12,
+       12
+      ]
+     }
+    },
+    "rpr_antic_t": {
+     "lengths_natural": {
+      "9": 11,
+      "10": 38
+     },
+     "lengths_cut": {},
+     "fit": {
+      "value": 0.1502,
+      "rule": "boundary L=9/10",
+      "n": 49,
+      "spread_frames": [
+       9,
+       10
+      ]
+     }
+    },
+    "rpr_fall_t": {
+     "lengths_natural": {
+      "9": 3,
+      "10": 33
+     },
+     "lengths_cut": {},
+     "fit": {
+      "value": 0.1502,
+      "rule": "boundary L=9/10",
+      "n": 36,
+      "spread_frames": [
+       9,
+       10
+      ]
+     }
+    },
+    "rpr_slash_t": {
+     "lengths_natural": {
+      "10": 3,
+      "11": 33
+     },
+     "lengths_cut": {},
+     "fit": {
+      "value": 0.166867,
+      "rule": "boundary L=10/11",
+      "n": 36,
+      "spread_frames": [
+       10,
+       11
+      ]
+     }
+    },
+    "scr_antic_t": {
+     "lengths_natural": {
+      "4": 83
+     },
+     "lengths_cut": {},
+     "fit": {
+      "value": 0.058333,
+      "rule": "middle of L=4",
+      "n": 83,
+      "spread_frames": [
+       4,
+       4
+      ]
+     }
+    },
+    "scr_end_t": {
+     "lengths_natural": {
+      "4": 9,
+      "5": 47
+     },
+     "lengths_cut": {
+      "1": 1,
+      "2": 1,
+      "3": 1,
+      "5": 2
+     },
+     "fit": {
+      "value": 0.066867,
+      "rule": "boundary L=4/5",
+      "n": 56,
+      "spread_frames": [
+       4,
+       5
+      ]
+     }
+    },
+    "scr_roof_t": {
+     "lengths_natural": {
+      "5": 4,
+      "6": 16
+     },
+     "lengths_cut": {},
+     "fit": {
+      "value": 0.1002,
+      "rule": "boundary L=5/6",
+      "n": 20,
+      "spread_frames": [
+       5,
+       6
+      ]
+     }
+    }
+   },
+   "checks": {
+    "vy_while_clinging": {
+     "n": 15645,
+     "p5": 0.0,
+     "p50": 0.0,
+     "p95": 0.0
+    },
+    "slide_dvy_per_s_after_stick": {
+     "n": 4865,
+     "p5": -31.207,
+     "p50": -24.0,
+     "p95": -24.0
+    },
+    "wall_jump_abs_vx_first_frames": [
+     [
+      0.0,
+      25.0,
+      23.88,
+      22.77,
+      22.77,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0,
+      25.0,
+      23.88,
+      22.77,
+      21.65,
+      21.65,
+      8.25,
+      8.25,
+      8.25,
+      8.25,
+      8.25,
+      8.25
+     ],
+     [
+      0.0,
+      25.0,
+      25.0,
+      23.88,
+      22.77,
+      21.65,
+      20.53,
+      19.42,
+      19.42,
+      18.3,
+      17.18,
+      16.07
+     ],
+     [
+      0.0,
+      0.0,
+      25.0,
+      23.88,
+      22.77,
+      21.65,
+      20.53,
+      20.53,
+      19.42,
+      18.3,
+      17.18,
+      16.07
+     ],
+     [
+      0.0,
+      25.0,
+      23.88,
+      23.88,
+      22.77,
+      21.65,
+      20.53,
+      8.25,
+      8.25,
+      8.25,
+      8.25,
+      8.25
+     ],
+     [
+      0.0,
+      25.0,
+      23.88,
+      22.77,
+      21.65,
+      20.53,
+      20.53,
+      8.25,
+      8.25,
+      8.25,
+      8.25,
+      8.25
+     ],
+     [
+      0.0,
+      25.0,
+      23.88,
+      22.77,
+      22.77,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0,
+      25.0,
+      23.88,
+      22.77,
+      22.77,
+      21.65,
+      20.53,
+      19.42,
+      18.3,
+      17.18,
+      17.18,
+      16.07
+     ]
+    ],
+    "dash_abs_vx": {
+     "n": 390,
+     "p5": 0.0,
+     "p50": 28.0,
+     "p95": 28.0
+    },
+    "glide_float_vy": {
+     "n": 575,
+     "p5": -4.479,
+     "p50": -1.19,
+     "p95": 0.24
+    },
+    "scramble_first_step_dvy": {
+     "-1.92": 74,
+     "-2.88": 9
+    }
+   }
+  }
+ }
+}
