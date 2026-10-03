@@ -10,11 +10,13 @@ hit, measured from the recordings:
 
 Per trial (the injected hit: the first "damage" event at or after the injector's send frame):
   hit         frame, HP after it, h after it against the Bell Beast's 2-mask hits (1-2 HP: h 1; 3-4: h 2)
-  window      the gate's opening (first frame with pause.blk 0 after the hit) and the i-frames' end (hero.tm.inv 0,
-              else hero.invulnerable false), frames after the hit
+  window      G, the gate's opening (first frame with pause.blk 0 after the hit; a press pauses from G + 1,
+              pause_quit constants) and the i-frames' end (hero.tm.inv 0, else hero.invulnerable false), frames after
+              the hit
   quit        the supervisor's first PAUSE_PENDING frame (policy.first_pending_f) and its reasons, the first paused
-              frame (game.paused); latency from the hit (frames, real s from STATE q) and from the opening; "inside":
-              the opening <= the pause < the i-frames' end (the window both invulnerable and pausable)
+              frame (game.paused); latency from the hit (frames, real s from STATE q) and from G ("after_opening": 1 is
+              the first pausable frame); "inside": G < the pause, the hero still invulnerable on it (tm.inv > 0,
+              inv_left_at_pause s; the paused game freezes the i-frames' clock, so their end is not recorded)
   bind        the first Bind after the hit (cstate isBinding onset), whether it completed (health up while binding or
               on its last frame) and whether a hit landed while binding (a damage event; the would-be-hit check)
   outcome     the attempt's outcome and reason
@@ -98,7 +100,10 @@ def trial(row: dict, states: list[dict], names: list[str]) -> dict | None:
                paused_s=None if paused is None else round(((paused.get("q") or 0) - q0) / QPC, 4),
                after_opening=None if paused is None or opening is None else paused["f"] - opening["f"],
                inside=None if paused is None or opening is None else
-               opening["f"] <= paused["f"] and (inv_end is None or paused["f"] < inv_end["f"]),
+               opening["f"] < paused["f"] and (inv_end is None or paused["f"] < inv_end["f"])
+               and (tm(paused).get("inv") is None or tm(paused)["inv"] > 0),
+               inv_left_at_pause=None if paused is None or tm(paused).get("inv") is None
+               else round(float(tm(paused)["inv"]), 3),
                bind=bind, later_hits=[s["f"] - fh for s in after if any(e.get("k") == "damage"
                                                                          for e in s.get("ev") or ())][:5])
     return out
@@ -130,6 +135,8 @@ def summarize(trials: list[dict]) -> dict:
                                    "max": _pct([t["paused_s"] for t in pz], 100)},
             "paused_after_opening": dict(Counter(t["after_opening"] for t in pz)),
             "inside_window": sum(bool(t["inside"]) for t in pz),
+            "inv_left_at_pause_s": {"min": _pct([t.get("inv_left_at_pause") for t in pz], 0),
+                                    "max": _pct([t.get("inv_left_at_pause") for t in pz], 100)},
             "opening_frames": dict(Counter(t["opening"] for t in ts)),
             "inv_end_frames": {"min": _pct([t["inv_end"] for t in ts], 0), "max": _pct([t["inv_end"] for t in ts], 100)},
             "binds_started": len(binds), "binds_completed": sum(b["completed"] for b in binds),
