@@ -62,13 +62,16 @@ def forum_params():
     return km.HeroParams.from_json(d)
 
 
-def draw(rng: random.Random, d: int, dist: float = 4.0) -> Trial:
+KINDS = ("wall_hold", "wall_hold", "wall_jump", "wall_jump", "wall_attack", "wall_scramble", "glide", "glide",
+         "dash", "dash", "reaper_attack")
+
+
+def draw(rng: random.Random, d: int, dist: float = 4.0, kinds: tuple = KINDS) -> Trial:
     """One primitive; d = +-1 the direction of the wall from the start, dist its distance (the wall primitives
     run most of the way first: at 8.25 u/s, stopping 0.5-3 u short)."""
     md = M_R if d > 0 else M_L
     mo = M_L if d > 0 else M_R
-    kind = rng.choice(("wall_hold", "wall_hold", "wall_jump", "wall_jump", "wall_attack", "wall_scramble", "glide",
-                       "glide", "dash", "dash", "reaper_attack"))
+    kind = rng.choice(kinds)
     p: dict = {"d": d}
     m: list[int] = []
     run = rng.randint(0, 60)
@@ -149,13 +152,14 @@ def safe(S: np.ndarray, t: Trial, params, terrain, x_safe) -> bool:
     return bool(xs.min() >= x_safe[0] and xs.max() <= x_safe[1])
 
 
-def plan(rng: random.Random, state: dict, model, d: int, x_safe, dist: float = 4.0, tries: int = 20) -> Trial:
+def plan(rng: random.Random, state: dict, model, d: int, x_safe, dist: float = 4.0, kinds: tuple = KINDS,
+         tries: int = 20) -> Trial:
     from ssbot.knowledge import kinematics as km
     params, terrain = model
     tr = km.Trace.from_states([state], params, mask_source="act")
     S = km.estimate_state(tr, [0], params, terrain=terrain)
     for i in range(tries):
-        t = draw(rng, d, dist)
+        t = draw(rng, d, dist, kinds)
         t.redraws = i
         if safe(S, t, params, terrain, x_safe):
             return t
@@ -252,6 +256,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--seed", type=int, default=98000)
     ap.add_argument("--trials", type=int, default=200)
     ap.add_argument("--attack-frames", type=int, default=0, help="extra attack trials sampled with slash.dump")
+    ap.add_argument("--kinds", default="", help="comma-separated primitives (default: all, weighted)")
+    ap.add_argument("--random-dir", action="store_true", help="each trial's direction at random (no wall)")
     ap.add_argument("--out", default=r"C:\ssbot\data\runs\m2\kn_excite_forum")
     a = ap.parse_args(argv)
 
@@ -281,6 +287,7 @@ def main(argv: list[str] | None = None) -> int:
         af = (rec.path / "attack_frames.jsonl").open("w", encoding="utf-8") if a.attack_frames else None
         terrain = None
         n_total = a.trials + a.attack_frames
+        kinds = tuple(k.strip() for k in a.kinds.split(",") if k.strip()) or KINDS
         for n in range(n_total):
             link.rpc("savestate.load", timeout_s=60, name=a.savestate, timeout=50)
             s = link.wait_state(lambda s: s.get("hero") and s["hero"].get("hero_accepting_input"), timeout_s=30)
@@ -293,6 +300,8 @@ def main(argv: list[str] | None = None) -> int:
                 terrain = Terrain2D.from_message(t_msg) if t_msg else Terrain2D.empty()
             x0 = float(s["hero"]["pos"][0])
             d = 1 if (a.wall_x if a.wall_x is not None else x0 + 1) > x0 else -1
+            if a.random_dir:
+                d = rng.choice((-1, 1))
             dist = abs(a.wall_x - x0) - 0.265 if a.wall_x is not None else 4.0
             x_safe = tuple(a.x_safe) if a.x_safe else (x0 - 30, x0 + 30)
             if n >= a.trials:                # attack-frame trials: Reaper swings only
@@ -300,7 +309,7 @@ def main(argv: list[str] | None = None) -> int:
                 while t.kind not in ("reaper_attack", "wall_attack"):
                     t = draw(rng, d, dist)
             else:
-                t = plan(rng, s, (params, terrain), d, x_safe, dist)
+                t = plan(rng, s, (params, terrain), d, x_safe, dist, kinds)
             t.seed = a.seed
             t.start = {"pos": s["hero"]["pos"][:2], "silk": s["hero"]["silk"], "facing": s["hero"]["facing"]}
             if n >= a.trials:
