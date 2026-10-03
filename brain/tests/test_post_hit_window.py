@@ -164,3 +164,20 @@ def test_supervised_control_vision_times_the_q1_press_from_the_hit(k):
     land = first_press + LEAD
     assert (land - hit_f) / FPS >= pq.POST_HIT_OPEN_MAX_S - 0.5 / FPS        # never into the shut gate
     assert land - hit_f <= math.ceil(pq.POST_HIT_OPEN_MAX_S * FPS)            # and on the first sure frame
+
+
+def test_vision_hit_through_a_bind_waits_for_the_bindbreak_freeze():
+    """Q1a's own risk: a hit through a Bind (to 1 HP) adds the BindBreak freeze; the gate opened 0.53-0.55 s after
+    such hits (5 measured), so the vision view's first press waits for POST_HIT_OPEN_MAX_BIND_S instead."""
+    sc = SupervisedControl(SupervisorConfig(worst_known_damage=2), support=lambda s: SupportSet(
+        (SupportEvent("Bone Beast", 2),), True), vision=True)
+    hit_f, k, first_press = 100, 3, None
+    for f in range(hit_f - 10, hit_f + 50):
+        fo = f - k
+        ws = _ws(3 if fo < hit_f else 1, fo == hit_f, fo)
+        ws.hero.binding = E("IN_PROGRESS" if fo < hit_f else "INTERRUPTED")
+        r = sc.step(state(f, 0, 1.0), obs=state(fo, 0, 1.0), ws=ws)
+        if r.mask and r.mask & PAUSE and first_press is None:
+            first_press = f
+    assert sc.hit_open_s == pq.POST_HIT_OPEN_MAX_BIND_S
+    assert (first_press + LEAD - hit_f) / FPS >= pq.POST_HIT_OPEN_MAX_BIND_S - 0.5 / FPS

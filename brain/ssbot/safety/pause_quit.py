@@ -182,7 +182,8 @@ class PauseCues:
 # later (2895 ramp frames of 579 hits, i0_000), 5-6 frames after the first ramp frame. The other 5 were hits during a
 # Bind (the BindBreak freeze: 0.53-0.55 s). The i-frames last 1.10-2.08 s (safety.pause_window).
 HIT_RAMP_S = 0.1                 # FreezeMoment(0, 0.1, 0.1, 0): the time scale's ramp back to 1
-POST_HIT_OPEN_MAX_S = 0.27       # the latest opening after a hit without a Bind (max 0.2668 s of 2143)
+POST_HIT_OPEN_MAX_S = 0.27       # the latest opening after a hit without a Bind (max 0.2668 s of 2138)
+POST_HIT_OPEN_MAX_BIND_S = 0.56  # ... after a hit through a Bind (BindBreak freeze: 0.532-0.550 s, 5 hits)
 HIT_BLOCKERS = gc.BLK_DISABLE_PAUSE | gc.BLK_TIME_SLOWED
 
 

@@ -68,8 +68,9 @@ from ssbot.ipc.ents import HAZARD_TYPES
 from ssbot.ipc.framing import BIT
 from ssbot.safety.hits_to_death import SupportEvent, SupportSet
 from ssbot.safety.key_guard import keys_clear
-from ssbot.safety.pause_quit import (GOAL_PAUSE, GOAL_QUIT, HELD_STATES, POST_HIT_OPEN_MAX_S, UNPAUSED, PauseQuit,
-                                     PauseQuitConfig, cues_from_state, to_mask, vision_cues_from_state)
+from ssbot.safety.pause_quit import (GOAL_PAUSE, GOAL_QUIT, HELD_STATES, POST_HIT_OPEN_MAX_BIND_S, POST_HIT_OPEN_MAX_S,
+                                     UNPAUSED, PauseQuit, PauseQuitConfig, cues_from_state, to_mask,
+                                     vision_cues_from_state)
 from ssbot.safety.pause_window import PauseWindowMonitor
 from ssbot.safety.supervisor import (RESUME_SELF_CHECK, Supervisor, SupervisorConfig, SupervisorDecision,
                                      SupervisorInput, input_from_state, input_from_world)
@@ -191,6 +192,8 @@ class SupervisedControl:
         self.t_hit_seen: float | None = None    # vision: capture time (QPC s) of the last hit the view showed
         self._hp_seen: int | None = None
         self._last_seen_ws: WorldState | None = None
+        self._binding_seen = False              # the view showed the hero binding on its previous frame
+        self.hit_open_s = POST_HIT_OPEN_MAX_S
 
     def _see_hit(self, ws: WorldState, t_cap: float) -> None:
         """Vision: note the capture time of a hit the delayed view shows (a HIT_TAKEN event, or the HUD's health +
@@ -204,6 +207,10 @@ class SupervisedControl:
             self._hp_seen = tot
         if hit:
             self.t_hit_seen = t_cap
+            # a hit through a Bind (Q1a's own risk) adds the BindBreak freeze: the gate opened 0.53-0.55 s after it
+            self.hit_open_s = POST_HIT_OPEN_MAX_BIND_S if self._binding_seen else POST_HIT_OPEN_MAX_S
+        b = ws.hero.binding
+        self._binding_seen = b is not None and b.conf > 0 and b.v == "IN_PROGRESS"
 
     def post_hit_open_at(self, now: float) -> float | None:
         """Vision: when a press may first reach the game after the last hit the view showed: its capture time plus
@@ -215,7 +222,7 @@ class SupervisedControl:
         t = self.t_hit_seen
         if t is None:
             return None
-        at = t + POST_HIT_OPEN_MAX_S
+        at = t + self.hit_open_s
         return at if now - at <= self.pq_cfg.gate_trust_s else None
 
     @property
