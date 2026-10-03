@@ -277,3 +277,62 @@ def test_pause_window_accounts_for_every_hit():
     mon = PauseWindowMonitor()
     mon.update(st(0, 3, 1.2, hit))
     assert mon.finish().censored and not mon.alerts and mon.open is None
+
+
+def _paused_vision(s: dict, age: int) -> dict:
+    """_paused with the menu section the oracle exports while paused (dim and canvas alpha rising 0.083 a frame from
+    the pause frame: live run 20261003_022259 i0 ep9)."""
+    p = _paused(s, age)
+    a = min(1.0, 0.0833 * (age + 1))
+    p["menu"] = {"sel": "continue", "quit_ok": True, "dim": min(0.8, a), "alpha": a, "ignore_unpause": age < 9,
+                 "quitting": False}
+    return p
+
+
+def test_vision_mode_decides_on_the_delayed_view_and_pauses_on_vision_cues():
+    """vision=True (stage C, task V review): the supervisor reads the delayed WorldState (HUD health), not the current
+    STATE, so the Q1 at the 2-HP frame 56533 fires k frames later; the pause machine gets the vision cues of the
+    delayed STATE (no paused flag, no gate) and against the stand-in game the attempt still ends as an emulated quit."""
+    from ssbot.backends.degraded import DegradedOracleBackend
+    from ssbot.backends.observability import ObservabilityFilter
+    from ssbot.backends.oracle_backend import OracleBackend
+    from ssbot.core.bosses import BELL_BEAST
+    deg = DegradedOracleBackend(OracleBackend(bosses=[BELL_BEAST], clock=None),
+                                ObservabilityFilter(bosses=[BELL_BEAST]))
+    k = deg.reset(5)
+    sc = _control(vision=True)
+    states = wf.window(0)
+    raw: dict[int, dict] = {}
+    sent: dict[int, int] = {}
+    paused_at, res, pending_f = None, None, None
+    for i, s in enumerate(states):
+        f = s["f"]
+        if paused_at is None and sent.get(f, 0) & PAUSE and not sent.get(f - 1, 0) & PAUSE and s["pause"]["blk"] == 0:
+            paused_at = i
+        st = s if paused_at is None else _paused_vision(states[paused_at], i - paused_at) | {"f": f, "q": s["q"]}
+        raw[f] = st
+        ws = deg.feed(st)
+        if ws is None:
+            continue
+        res = sc.step(st, obs=raw[ws.stamp.frame], ws=ws)
+        if res.decision.pause_pending and pending_f is None:
+            pending_f = f
+        sent[f + 2] = res.mask or 0
+        if res.outcome in pq.TERMINAL:
+            break
+    assert pending_f == 56533 + k and sc.first_pending_f == 56533 + k
+    assert paused_at is not None and res.outcome == pq.QUIT_EMULATED and sc.pq.quit_state_seen == pq.QUIT_AVAILABLE
+    assert not any(x[1] == "cue" and "paused=True" in x[2] for x in sc.pq.log)     # never the oracle's flag
+
+
+def test_vision_next_hit_may_kill_from_the_counted_hp():
+    """Vision: the view's counted HP (hp_est) less 3 sigma against the largest priced hit (15), not ents[].hp."""
+    from ssbot.core.worldstate import E, Entity, Kind, WorldState
+    from ssbot.train.supervision import VISION_HERO_HIT, next_hit_may_kill_world
+    ws = WorldState()
+    ws.entities = [Entity(id=1, kind=Kind.BOSS, hp_est=E(17.0, sigma=1.0, conf=0.8))]
+    assert VISION_HERO_HIT == 15 and next_hit_may_kill_world(ws, 15) and not next_hit_may_kill_world(ws, 15, z=0.0)
+    ws.entities = [Entity(id=1, kind=Kind.BOSS, hp_est=E(40.0, sigma=1.0, conf=0.8))]
+    assert not next_hit_may_kill_world(ws, 15)
+    ws.entities = [Entity(id=1, kind=Kind.BOSS, hp_est=E(0.0, conf=0.9))]          # counted dead
+    assert not next_hit_may_kill_world(ws, 15)

@@ -17,9 +17,11 @@ Per STATE (this is the only place where backends meet the combat stack, which re
      its keys replace the planner's while it pauses, and from the tick after the trigger the tactics and the planner
      are not ticked at all (_pause_tick). A FORCED_RISK reaches Q6 with how long the best plan stays clear
      (_forced_clear_f: Q6 only within the design horizon). A pause machine outcome ends the episode as QUIT
-     (episode_outcome); the harness lets the policy own the pause (pause_owned).
+     (episode_outcome); the harness lets the policy own the pause (pause_owned). In stage C the supervisor and the
+     pause machine read only the delayed view (the WorldState and the vision form of its STATE's pause cues).
   5. unpredicted hits: a hero hit whose box (frame c or c - 1) is outside the support forecast L = 3 frames earlier
-     (the stage-A recall pairing) counts for the supervisor's Q4.
+     (the stage-A recall pairing; 4, else 2 when a late tick left a gap; none of these: unknown, counted the same)
+     counts for the supervisor's Q4.
 The decision log (decisions_i<N>.jsonl in the run directory) keeps the 90 ticks before every hero hit, lethal hit,
 FORCED_RISK and supervisor pause, and 10 after, for ssbot.tools.postmortem.
 """
@@ -56,7 +58,8 @@ COMFORT = (0.25, 0.25)                # preferred extra clearance (planner: S = 
 NOISE_K = 3.0                         # stage C: + k * sigma of the hero / boss position noise
 HORIZON_S = 2.0                       # forecast horizon: the risk map's and the Bind's
 UNPRED_LAG = 3
-UNPRED_BACK = 6
+UNPRED_LAGS = (3, 4, 2)   # the forecast a hit is judged against: lag 3, else 4, else 2 (the lags support_recall
+#                           validates, the DelayLine's range); none of them kept (a late tick's gap): unknown
 CATCH_UP_MAX = 64      # STATEs kept for _catch_up (a tick later than this many frames loses the oldest)
 LOG_BEFORE, LOG_AFTER = 90, 10
 LOG_ALL = os.environ.get("SSBOT_LOG_ALL") == "1"     # debugging: every tick to the decision log
@@ -206,7 +209,9 @@ class PlannerPolicy:
         self.log_path = (Path(log_dir) / f"decisions_i{instance}.jsonl") if log_dir else None
         self._log_buf: list[dict] = []
         self.episode = -1
-        self.sc = SupervisedControl(cfg=SupervisorConfig(worst_known_damage=2), support=lambda s: self._support)
+        # stage C: the supervisor and the pause machine read the delayed view too (SupervisedControl vision=True)
+        self.sc = SupervisedControl(cfg=SupervisorConfig(worst_known_damage=2), support=lambda s: self._support,
+                                    vision=view != "oracle")
         self.real_quit_p = real_quit_p
         self.atk_mon = AttackMonitor()
         self._pq_emulated = self.sc.pq_cfg
@@ -349,6 +354,7 @@ class PlannerPolicy:
         self._last_f: int | None = None          # the last STATE acted on (_catch_up)
         self._unpred_backlog = 0                 # unpredicted hits found on caught-up frames, for the next tick
         self.unpredicted: list[int] = []
+        self.unpredicted_unknown: list[int] = []     # hits with no forecast at the validated lags (counted for Q4)
         self.hits_taken: list[int] = []
         self.forced_frames: list[int] = []
         self.first_pending_f: int | None = None
@@ -367,12 +373,14 @@ class PlannerPolicy:
 
     def _start_state(self, ws, raw: dict) -> np.ndarray:
         S = self.trk.state().copy()
-        # a hit the hero took after the WorldState's frame (stage C sees the world 2-4 frames late; the hero knows
-        # it was hit at once) starts her i-frames, which block enemy damage: without them every plan of the first
-        # ticks after a hit met the support, and Q6 ended the attempt (stage C run 20261002_102538: the 4 Q6 quits
-        # checked were FORCED_RISK on the hit frame itself with the start state's INV_T 0, the hero invulnerable)
+        # oracle view: a hit the hero took after the WorldState's frame starts her i-frames, which block enemy damage:
+        # without them every plan of the first ticks after a hit met the support, and Q6 ended the attempt (stage C
+        # run 20261002_102538: the 4 Q6 quits checked were FORCED_RISK on the hit frame itself with the start state's
+        # INV_T 0, the hero invulnerable). Stage C: the hero's hit is seen as late as the rest of the view (the hit
+        # frame's screen and HUD, k frames on), so no hit newer than the WorldState counts (task V review, 2026-10-03)
         fo = int(raw.get("f", 0)) if raw else 0
-        hit_f = [f for f in sorted(self.raw) if f > fo for ev in (self.raw[f].get("ev") or ()) if ev.get("k") == "damage"]
+        hit_f = [] if self.view != "oracle" else \
+            [f for f in sorted(self.raw) if f > fo for ev in (self.raw[f].get("ev") or ()) if ev.get("k") == "damage"]
         if hit_f:
             Sv = S.reshape(kin.K, -1)
             Sv[kin.INV_T] = np.maximum(Sv[kin.INV_T], self.params.invul_time + (hit_f[-1] - fo) * self.params.frame_time)
@@ -389,29 +397,34 @@ class PlannerPolicy:
 
     def _unpredicted(self, raw: dict, fo: int) -> int:
         """Hero hits in the WorldState's frame (the delayed one in stage C) outside the support forecast UNPRED_LAG
-        frames earlier (box of fo or fo - 1, the recall pairing); a late tick leaves gaps in the forecasts kept, so
-        the latest one at most UNPRED_BACK frames before that counts (exactly that frame missing used to count the hit
-        as unpredicted: degraded_dust run 20261002_232157 i1 ep71, covered in an open-loop replay)."""
+        frames earlier (box of fo or fo - 1, the recall pairing). A late tick leaves gaps in the forecasts kept: then
+        the one 4, else 2 frames earlier (UNPRED_LAGS, the lags the held-out recall validates). With none of those the
+        hit is unpredicted_unknown, which the supervisor counts like an unpredicted one (Q4); both are reported
+        (task V review, 2026-10-03: a fallback to forecasts up to 9 frames old, outside the validated lags, had counted
+        degraded_dust 20261003_022259 i0 ep9 as predicted)."""
         n = 0
+        by_f = {x[0]: x for x in self.forecasts}
         for ev in raw.get("ev") or ():
             if ev.get("k") != "damage":
                 continue
             self.hits_taken.append(fo)
             cover = False
-            old = max((x for x in self.forecasts if fo - UNPRED_LAG - UNPRED_BACK <= x[0] <= fo - UNPRED_LAG),
-                      key=lambda x: x[0], default=None)
-            if old is not None:
-                _, fcast, t_o = old
-                for fr in (fo, fo - 1):
-                    st = self.raw.get(fr)
-                    b = ((st or {}).get("hero") or {}).get("box")
-                    t = (st or {}).get("_t")
-                    if not b or t is None:
-                        continue
-                    x, y = 0.5 * (b[0] + b[2]), 0.5 * (b[1] + b[3])
-                    if fcast.occupied(np.array([[x]]), np.array([[y]]), np.array([t - t_o]))[0, 0]:
-                        cover = True
-                        break
+            old = next((by_f[fo - lag] for lag in UNPRED_LAGS if fo - lag in by_f), None)
+            if old is None:
+                n += 1
+                self.unpredicted_unknown.append(fo)
+                continue
+            _, fcast, t_o = old
+            for fr in (fo, fo - 1):
+                st = self.raw.get(fr)
+                b = ((st or {}).get("hero") or {}).get("box")
+                t = (st or {}).get("_t")
+                if not b or t is None:
+                    continue
+                x, y = 0.5 * (b[0] + b[2]), 0.5 * (b[1] + b[3])
+                if fcast.occupied(np.array([[x]]), np.array([[y]]), np.array([t - t_o]))[0, 0]:
+                    cover = True
+                    break
             if not cover:
                 n += 1
                 self.unpredicted.append(fo)
@@ -503,7 +516,8 @@ class PlannerPolicy:
         self._unpred_backlog = 0
         clear = self._forced_clear_f(res, fcast, S0, len(prefix)) if res.forced_risk else None
         self.last_clear_f = clear
-        r = self.sc.step(s, plan_s=res.S, forced_risk=res.forced_risk, unpredicted_hits=unpred, p_death=res.P,
+        r = self.sc.step(s, obs=raw, ws=ws, plan_s=res.S, forced_risk=res.forced_risk, unpredicted_hits=unpred,
+                         p_death=res.P,
                          forced_clear_s=None if clear is None else clear * self.params.frame_time)
         self.decision = r.decision
         self.pause_owned = self.sc.pq is not None
@@ -538,7 +552,7 @@ class PlannerPolicy:
         machine's)."""
         unpred = self._unpredicted(raw, fo) + self._unpred_backlog
         self._unpred_backlog = 0
-        r = self.sc.step(s, plan_s=None, forced_risk=False, unpredicted_hits=unpred)
+        r = self.sc.step(s, obs=raw, ws=ws, plan_s=None, forced_risk=False, unpredicted_hits=unpred)
         self.decision = r.decision
         self.pause_owned = self.sc.pq is not None
         mask = 0 if r.mask is None else int(r.mask)     # never the planner's: its last plan is from before the pause
@@ -641,7 +655,15 @@ class PlannerPolicy:
     def _real_quit_step(self, s: dict, f: int) -> int:
         """A confirmed pause in a real-quit episode: only the pause machine acts (menus, the exit prompt, the
         quit to the main menu); the oracle's own menu export records what each Submit landed on."""
-        r = self.sc.step(s)
+        obs = None
+        if self.view != "oracle":
+            # the backend is not fed through the menus: the cues come from the STATE k frames back, as the view's
+            self.raw[f] = s
+            for old in [k for k in self.raw if k < f - 12]:
+                del self.raw[old]
+            old = [fr for fr in self.raw if fr <= f - self.k]
+            obs = self.raw[max(old)] if old else s
+        r = self.sc.step(s, obs=obs)
         mask = int(r.mask or 0)
         menu = s.get("menu") or {}
         g = s.get("game") or {}
@@ -690,7 +712,8 @@ class PlannerPolicy:
         return {"view": self.view, "k": self.k, "modes": modes,
                 "tick_ms_p50": q(self.tick_ms, 50), "tick_ms_p99": q(self.tick_ms, 99),
                 "plan_ms_p50": q(self.plan_ms, 50), "plan_ms_p99": q(self.plan_ms, 99),
-                "unpredicted": self.unpredicted, "hits_taken": self.hits_taken,
+                "unpredicted": self.unpredicted, "unpredicted_unknown": self.unpredicted_unknown,
+                "hits_taken": self.hits_taken,
                 "forced_risk_ticks": len(self.forced_frames), "forced_first": self.forced_frames[:20],
                 "first_pending_f": self.first_pending_f, "first_pending_reasons": self.first_pending_reasons,
                 "outcome_reason": self.outcome_reason,

@@ -82,7 +82,9 @@ import numpy as np
 
 from ssbot.core.primitives import ALL, DAMAGING, EVASIVE, N_PRIM, Prim
 from ssbot.core.primitives import code as prim_code
-from ssbot.safety.hits_to_death import (MASK_UNKNOWN, SupportEvent, ctx_from_support, hits_to_death,
+from ssbot.core.worldstate import FM, Ev, WorldState
+from ssbot.safety.hits_to_death import (MASK_BROKEN, MASK_INTACT, MASK_NONE, MASK_UNKNOWN, SupportEvent,
+                                        ctx_from_support, hits_to_death,
                                         mask_intact, mask_state, pending_from_tags)
 from ssbot.safety.invariants import Verdict
 from ssbot.safety.pause_quit import availability_from_state
@@ -246,6 +248,43 @@ def input_from_state(s: dict, t: float, support: Sequence[SupportEvent] | None =
                 damage_taken=dmg, pausable=None if avail is None else avail.pause,
                 quittable=None if avail is None else avail.quit, scene=(s.get("game") or {}).get("scene"),
                 focus_lost=foreground_sink and s.get("focus") is False)
+    base.update(kw)
+    return SupervisorInput(**base)
+
+
+_FM_MASK = {FM.NOT_EQUIPPED: MASK_NONE, FM.INTACT: MASK_INTACT, FM.BROKEN: MASK_BROKEN, FM.UNKNOWN: MASK_UNKNOWN}
+
+
+def _known(e) -> object | None:
+    """An estimate's value, None when it is unknown (conf 0)."""
+    return e.v if e is not None and e.conf > 0 else None
+
+
+def input_from_world(ws: WorldState, t: float, support: Sequence[SupportEvent] | None = None, *,
+                     support_known: bool, support_empty_ok: bool = False, foreground_sink: bool = False,
+                     **kw) -> SupervisorInput:
+    """Vision mode (the final path, and training on its simulation, DESIGN §3.9.2): the SupervisorInput from the
+    WorldState the planner sees, not from the oracle STATE: the HUD's health, blue masks and max health (unread: hp
+    None), the Fractured Mask as the inventory audit has it, pending damage from the visible statuses
+    (Resources.pending_dmg; conf 0, an unbounded status, reads as lethal: health + blue), the masks the HUD lost in this
+    frame (HIT_TAKEN), pause / quit availability from the vision-side model (Game.pause_available / quit_available,
+    ObservabilityFilter._pause; conf 0, e.g. quit without a quit map, is unknown: None), the scene. On the simulated
+    final path the WorldState is the delayed one (2-4 frames), so every trigger fires as late as vision would see it."""
+    r, g = ws.res, ws.game
+    hp = _known(r.hp)
+    max_hp = _known(r.hp_max)
+    blue = int(_known(r.blue) or 0)
+    hp = None if hp is None else int(hp)
+    pending = int(r.pending_dmg.v) if r.pending_dmg.conf > 0 else (hp or 0) + blue
+    dmg = sum(int(getattr(ev.data, "amount", 0) or 0) for ev in ws.events if ev.kind == Ev.HIT_TAKEN)
+    pause, quit_ = _known(g.pause_available), _known(g.quit_available)
+    base = dict(t=t, dt=1 / 60, hp=hp, max_hp=None if max_hp is None else int(max_hp), blue=blue,
+                mask=_FM_MASK.get(r.fractured_mask.v, MASK_UNKNOWN) if r.fractured_mask.conf > 0 else MASK_UNKNOWN,
+                support=tuple(support or ()), support_known=support is not None and bool(support_known),
+                support_empty_ok=support is not None and bool(support_empty_ok), pending_dmg=pending,
+                damage_taken=dmg, pausable=None if pause is None else bool(pause),
+                quittable=None if quit_ is None else bool(quit_), scene=_known(g.scene) or None,
+                focus_lost=foreground_sink and not g.focus_ok)
     base.update(kw)
     return SupervisorInput(**base)
 

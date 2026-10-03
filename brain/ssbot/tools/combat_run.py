@@ -272,6 +272,7 @@ def summary(run_dir: Path, more: list[Path] | None = None, write: bool = True) -
         pol = [r.get("policy") or {} for r in rows]
         if any(p.get("view") for p in pol):
             out["unpredicted_hits"] = sum(len(p.get("unpredicted") or ()) for p in pol)
+            out["unpredicted_unknown"] = sum(len(p.get("unpredicted_unknown") or ()) for p in pol)
             out["episodes_with_forced_risk"] = sum(1 for p in pol if p.get("forced_risk_ticks"))
             out["forced_risk_ticks"] = sum(p.get("forced_risk_ticks") or 0 for p in pol)
             rq = [p["real_quit"] for p in pol if p.get("real_quit")]

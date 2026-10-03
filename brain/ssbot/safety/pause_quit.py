@@ -1050,3 +1050,44 @@ def cues_from_state(s: dict, qpc_freq: float = 1e7) -> PauseCues:
         quitting=quitting, dead=dead, menu_alpha=extra.get("alpha"),
         disable_pause=bool(blk & gc.BLK_DISABLE_PAUSE) if "blk" in p else None,
         unpause_blocked=None if ign is None else bool(ign), gate_open=(blk == 0) if "blk" in p else None)
+
+
+# The vision form of the oracle cues (training on the simulated final path). A menu reader sees the pause menu once its
+# canvas is this opaque (the canvas fades in from the pause frame: alpha 0.083 per 60 fps frame in the exported menu
+# section, so 3 frames in, as tests/pause_sim.py's reader), and reads the highlight and the Quit item once it has faded
+# in (alpha >= READY_ALPHA, and the game accepts input: the menu's own fade-in, which vision sees end).
+VISION_READER_ALPHA = 0.25
+VISION_READY_ALPHA = 0.95
+
+
+def vision_cues_from_state(s: dict, qpc_freq: float = 1e7) -> PauseCues:
+    """The cues a vision pipeline has of one frame, from the oracle STATE (training on the simulated final path, DESIGN
+    §3.9.2): no pause flag, no pause gate (gate_open None: the blind press cadence), no ignoreUnpause, no greyed cause;
+    the modal dimmer's alpha (the exported menu.dim while paused, 0 outside the pause: what a dimmer detector measures
+    above the scene's baseline), the world stopped (timeScale 0: a motion detector sees a pause and a hit-stop alike),
+    the pause menu only once its canvas is VISION_READER_ALPHA opaque, its highlight and Quit item only once it has faded
+    in (VISION_READY_ALPHA). The caller passes the STATE of the frame the vision view shows (k frames old on the
+    simulated final path), so the cues are as late as the view. disable_pause stays: the machine reads it only for the
+    training label REFUSED_EMULATED (what a real quit would have met), never for a decision."""
+    c = cues_from_state(s, qpc_freq)
+    c.paused = None
+    c.gate_open = None
+    c.unpause_blocked = None
+    c.quit_cause = None
+    g = s.get("game")
+    if g is None:
+        return c
+    extra = s.get("menu") if isinstance(s.get("menu"), dict) else {}
+    paused_ui = g.get("ui") == gc.UI_PAUSED
+    dim = extra.get("dim") if paused_ui else 0.0
+    c.dim = None if dim is None else float(dim)
+    alpha = extra.get("alpha")
+    if c.menu in PAUSE_MENUS and c.menu != M_SAVE_FAILED:
+        if alpha is not None and alpha < VISION_READER_ALPHA:
+            c.menu = M_NONE
+        if alpha is not None and alpha < VISION_READY_ALPHA:
+            c.menu_ready = False
+    if not c.menu_ready:
+        c.highlight = None
+        c.quit_state = None
+    return c
