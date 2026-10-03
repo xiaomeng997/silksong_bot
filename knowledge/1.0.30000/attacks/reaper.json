@@ -17,7 +17,7 @@
  },
  "notes": [
   "P17 slash.dump frame 3016 (crests.json captured 2026-09-30T19:22:48), hero [238.78, 7.56769] facing -1, config Reaper",
-  "live samples: C:\\ssbot\\data\\runs\\m2\\kn_excite_forum\\2026-10-02\\TRAIN\\kn_excite_forum_s98010\\attack_frames.jsonl"
+  "live samples: C:\\ssbot\\data\\runs\\m2\\kn_excite_forum\\2026-10-02\\TRAIN\\kn_excite_forum_s98010\\attack_frames.jsonl, C:\\ssbot\\data\\runs\\m2\\kn_excite_forum\\2026-10-02\\TRAIN\\kn_excite_forum_s98400\\attack_frames.jsonl, C:\\ssbot\\data\\runs\\m2\\kn_excite_forum\\2026-10-02\\TRAIN\\kn_excite_forum_s98410\\attack_frames.jsonl (charge frames counted from the release)"
  ],
  "shapes": {
   "normal": {
@@ -63,7 +63,7 @@
     -0.8336499999999996,
     2.4814100000000003
    ],
-   "source": "slash.dump; clip SlashEffect events [2, 5] at 24 fps; live frames (5, 12) (134 samples)"
+   "source": "slash.dump; clip SlashEffect events [2, 5] at 24 fps; live frames (5, 12) (508 samples)"
   },
   "alt": {
    "src": "AltSlash",
@@ -101,7 +101,10 @@
    ],
    "t_on": 0.08333333333333333,
    "t_off": 0.20833333333333334,
-   "frames": [],
+   "frames": [
+    5,
+    12
+   ],
    "damage_mult": 1.0,
    "clash_box": [
     -0.10112000000000876,
@@ -109,7 +112,7 @@
     -0.7007199999999996,
     1.8625800000000012
    ],
-   "source": "slash.dump; clip SlashEffectAlt events [2, 5] at 24 fps"
+   "source": "slash.dump; clip SlashEffectAlt events [2, 5] at 24 fps; live frames (5, 12) (22 samples)"
   },
   "up": {
    "src": "UpSlash",
@@ -376,10 +379,13 @@
    ],
    "t_on": 0.0,
    "t_off": 0.2,
-   "frames": [],
+   "frames": [
+    16,
+    29
+   ],
    "damage_mult": 2.5,
    "clash_box": [],
-   "source": "slash.dump; no clip: timing unmeasured"
+   "source": "slash.dump; no clip: timing unmeasured; live frames (16, 29) (208 samples)"
   },
   "taunt": {
    "src": "Taunt Slash",

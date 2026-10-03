@@ -3,7 +3,7 @@ when given, live per-frame samples of the swings (probes/attack_frames.py).
 
     cd brain
     ../scripts/uv.cmd run python -m ssbot.tools.attack_table_build --crest Reaper [--dump <crests.json>]
-        [--live <run>/attack_frames.jsonl] [--dry-run]
+        [--live <run>/attack_frames.jsonl ...] [--dry-run]
 
 From the dump (docs/facts/1.0.30000/crests.json, P17 "crests" -> <crest> -> "slash": every attack object of the
 crest, damagers with their colliders in world space at the dumped hero pose): each slot's damage polygons relative to
@@ -107,6 +107,23 @@ PATH_SLOTS = {"path:Attacks/Scythe/DownSlash New": "down", "path:Attacks/Scythe/
 # the hit src of a Custom down slash: the object the Crest Attacks FSM swings (FindChild in its Init state; live
 # Bell Beast Reaper run 20261002_225836: 18 hits with src "DownSlash New", none with the group object's "DownSlash")
 CUSTOM_DOWN_SRC = {"RPR DOWNSLASH": "DownSlash New"}
+ALT_PRESS = 31        # kin_excite_forum reaper_attack: presses 3 + 28 frames apart (the alt slash is the second)
+
+
+def drop_always_on(lines: list[dict]) -> tuple[list[dict], list[str]]:
+    """One file's samples without the FSM-swung group slots that read enabled from the press on: samples from before
+    the probe required the object active took the config group's inactive down / charge / taunt / dash stab objects
+    for swings (enabled on every sampled frame from k = 1; no FSM swing starts within two frames of the press)."""
+    by = defaultdict(list)
+    for r in lines:
+        by[r["slot"]].append(r)
+    keep, msgs = [], []
+    for slot, rows in by.items():
+        if slot in ("down", "charge", "taunt", "dash_stab") and min(r["k"] for r in rows) <= 2:
+            msgs.append(f"{slot}: {len(rows)} samples dropped (enabled from the press on: an inactive object)")
+            continue
+        keep += rows
+    return keep, msgs
 
 
 def _on(d: dict) -> bool:
@@ -126,13 +143,15 @@ def apply_live(tab: AttackTable, lines: list[dict]) -> list[str]:
         replace = any(r["slot"] in PATH_SLOTS for r in rows)
         if replace:
             rows = [r for r in rows if r["slot"] in PATH_SLOTS]
+        for r in rows:                        # frames from the press that swung it
+            prm = r.get("params") if isinstance(r.get("params"), dict) else {}
+            if "k0" in r:
+                continue
+            if slot == "charge" and "h" in prm:
+                r["k0"], r["k"] = r["k"], r["k"] - int(prm["h"])          # a charge slash swings at the release
+            elif slot == "alt" and r.get("trial") == "reaper_attack" and prm.get("n") == 2:
+                r["k0"], r["k"] = r["k"], r["k"] - ALT_PRESS          # the probe's second press
         on = sorted({r["k"] for r in rows if any(_on(d) for d in r.get("damagers") or ())})
-        no_active = not any("active" in d for r in rows for d in r.get("damagers") or ())
-        if no_active and len(on) >= 20 and len(on) == len({r["k"] for r in rows}):
-            # samples from before the probe recorded activeInHierarchy: an object enabled on every sampled frame of
-            # every trial is an inactive group object (down / charge / taunt), not a swing
-            out.append(f"{slot}: skipped (enabled on every sampled frame, no active flag: an inactive object)")
-            continue
         polys = defaultdict(list)
         for r in rows:
             b = r["hero"]["box"]
@@ -163,17 +182,23 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--crest", default="Reaper")
     ap.add_argument("--dump", type=Path, default=None)
-    ap.add_argument("--live", type=Path, default=None)
+    ap.add_argument("--live", type=Path, nargs="*", default=None)
     ap.add_argument("--out", type=Path, default=ROOT)
     ap.add_argument("--dry-run", action="store_true")
     a = ap.parse_args(argv)
     path = a.dump or (DUMP if DUMP.exists() else DUMP_MAIN)
     tab = from_dump(json.loads(path.read_text(encoding="utf-8")), a.crest)
     if a.live:
-        lines = [json.loads(x) for x in a.live.read_text(encoding="utf-8").splitlines() if x.strip()]
+        lines = []
+        for f in a.live:
+            kept, msgs = drop_always_on([json.loads(x) for x in f.read_text(encoding="utf-8").splitlines()
+                                         if x.strip()])
+            lines += kept
+            for m in msgs:
+                print(f"{f.parent.name}: {m}")
         for msg in apply_live(tab, lines):
             print(msg)
-        tab.notes.append(f"live samples: {a.live}")
+        tab.notes.append(f"live samples: {', '.join(map(str, a.live))} (charge frames counted from the release)")
     for k, s in tab.shapes.items():
         b = s.box
         print(f"{k:10s} src {s.src:22s} on {s.t_on:.3f}-{s.t_off:.3f} s frames {s.frames} box x {b[0]:+.2f}..{b[1]:+.2f}"

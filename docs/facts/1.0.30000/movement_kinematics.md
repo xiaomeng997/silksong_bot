@@ -151,7 +151,9 @@ uns\m2\kn_excite_forum6-10-02\TRAIN\…） | 存档 | 种子 / 次数 | 用途
 ### 5.4 Reaper 攻击：逐帧采样与命中核对
 
 - 逐帧采样（A 的 40 次攻击试验，343 帧有效）：横砍 / 墙砍伤害体在按键到达游戏后第 5–12 帧开启，上砍 5–15 帧，多边形与 slash.dump 相差 ≤ 0.024 u（`attack_table_build --live`，已写入 reaper.json）。旧采样把配置组里未激活对象（down / charge / taunt）的碰撞体当成"开启"（每帧都开）——探针现在同时要求对象 activeInHierarchy，构建工具跳过这种旧样本。
-- 下劈的真实伤害对象是 `Attacks/Scythe/DownSlash New`：oracle `slash.dump` 加了可选 `paths` 参数（已编译、未部署），探针默认带上它；部署后再采样即可得到它的多边形和帧窗口。冲刺攻击（dash_attack）与蓄力斩（charge）探针原语已加，采样见 HANDOFF。
+- 第二刀（alt，s98400：22 帧）与第一刀同为第 5–12 帧（从它自己的按键算；探针的两次按键相隔 31 帧）。
+- 蓄力斩（charge，s98410：16 次按住 110–140 帧再松开，208 帧样本；High Halls 社区存档有 hasChargeSlash）：`Attacks/Charge Slash Scythe` 的 slash 01 在松开后第 16–19 帧开启、slash behind 16–21、slash 02 19–29（按键后先挥一刀普通横砍 0.35 s，蓄力计时在攻击结束后才走，NAIL_CHARGE_TIME 1.35 s）；多边形与转储一致。
+- 下劈的真实伤害对象是 `Attacks/Scythe/DownSlash New`（Crest Attacks FSM），冲刺攻击是 `Attacks/Scythe/DashUpper Slash`（Sprint FSM 的 Reaper Antic / Upper / End：Upper 里 SetVelocityByScale 50 u/s 向前、每步 ×0.85、CurveFloat 改 vy 0.3 s，End 设 vy 7——这个位移原语没建模）。两者都不在 slash.dump 的槽里：oracle `slash.dump` 加了可选 `paths` 参数（已编译、未部署），探针默认带上这两个路径，构建工具把它们映射到 down / dash_stab 槽；部署后各采 20–40 次即可得到多边形和帧窗口（s98400 的 dash_attack 试验因为旧插件不认 paths 没采到）。
 - 命中核对（`attack_hit_audit`，Bell Beast + Reaper 数据跑 20261002_225836，实例 3，9 场：7 CLEAR、2 STUCK；CPU ~60 %）：
 
 | 槽 | TP | FP | FN | 接触比命中早（帧） |
