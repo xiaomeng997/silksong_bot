@@ -230,12 +230,13 @@ DEFAULT_PARAMS = REPO / "knowledge" / "1.0.30000" / "kinematics" / "hero_hunter.
  SP_X,            # sprint FSM: x speed target (Sprint Speed Crt, signed)
  WCON,            # contacts of the last physics step: 1 floor, 2 wall (OnCollisionStay vs Enter)
  SHOVE,           # pending rb2d.MovePosition x offset (an up slash off a wall: done in the next physics step)
- K) = range(75)
+ RX0, RY0,        # where the body was drawn last frame (the transform a FixedUpdate's Transform.Translate moves)
+ K) = range(77)
 ROW_NAMES = ("px py qx qy sx sy vx vy alpha gs face ground mode mode_t mode_n jumping jsteps jdsteps jq aq airhang "
              "attacking atk_t atk_cd rdir rsteps ds_hs ds_rec bounce hvx hvy move jheld prev silk inv_t ledge touch "
              "phase ts qq alo ahi landq wf_ph wf_t wf_s wf_down wf_wait wf_up wf_tgt wside wtouch cling cling_cd "
              "wstick unstick wlock wj_dir wj_v wj_chain wjq wslash prev_gs gl_cd dash_t dash_cd airdashed dq fall_t "
-             "hard sp_x wcon shove").split()
+             "hard sp_x wcon shove rx0 ry0").split()
 assert len(ROW_NAMES) == K
 
 M_NORMAL, M_DS_ANTIC, M_DS_SPIKE, M_HURT_FREEZE, M_HURT_RECOIL, M_CAST, M_BIND, M_LOCKED = range(8)
@@ -423,8 +424,12 @@ class HeroParams:
     air_fall_clamp0: float = -10.0     # Air Sprint EaseFloat Fall Clamp from
     air_fall_clamp1: float = -30.0     # ... to
     air_fall_clamp_time: float = 1.0   # ... over
-    skid_decel: float = 0.85           # ground sprint release: x velocity factor per step (fit)
-    skid_time: float = 0.1             # ... and how long (fit)
+    skid_decel: float = 0.85           # Skid End 1 / 2 (a ground sprint released after Sprint Grace): DecelerateXY
+    skid_decel_move: float = 0.95      # ... per step, 0.95 while moving the facing way
+    skid_time: float = 0.25            # ... the two clips (0.2 + 0.05 s)
+    skid_min_speed: float = 4.0        # Skid SFX?: slower than this, no skid
+    sprint_grace: float = 0.3          # Sprint Grace: released earlier, control back at once (Regain Control To Idle)
+    sprint_shift: float = 0.05         # Ground Sprint R / L OnEnter: Translate 0.05 u forward (from the drawn position)
     glide_antic_t: float = 0.0833      # Umbrella Inflate Antic clip (fit)
     glide_inflate_t: float = 0.25      # Umbrella Inflate clip (fit)
     glide_deflate_t: float = 0.1667    # Umbrella Deflate clip (fit)
@@ -501,7 +506,8 @@ class HeroParams:
               "rpr_slash_decel", "hard_fall_time", "hard_land_time", "scr_antic_t", "scr_speed", "scr_force",
               "scr_force_held", "scr_end_vy", "scr_end_decel", "scr_end_t", "scr_roof_ray", "scr_roof_t",
               "scr_detach", "rpr_thunk_decel", "rpr_thunk_reach0", "rpr_thunk_reach1", "rpr_thunk_reach_t",
-              "rpr_thunk_lobe0", "rpr_thunk_lobe1")
+              "rpr_thunk_lobe0", "rpr_thunk_lobe1", "sprint_shift", "sprint_grace", "skid_decel_move",
+              "skid_min_speed")
 
     def vector(self) -> np.ndarray:
         return np.array([float(getattr(self, k)) for k in self.VECTOR], dtype=np.float64)
@@ -575,7 +581,8 @@ class HeroParams:
  P_RPR_ADEC, P_RPR_ADEC_Y, P_RPR_ACC, P_RPR_DEC, P_RPR_VMAX, P_RPR_SPEED, P_RPR_SDEC, P_HARD_FALL, P_HARD_LAND,
  P_SCR_ANTIC, P_SCR_SPEED, P_SCR_FORCE, P_SCR_FORCE_H, P_SCR_END_VY, P_SCR_END_DEC, P_SCR_END_T, P_SCR_ROOF_RAY,
  P_SCR_ROOF_T, P_SCR_DETACH, P_RPR_TDEC, P_RPR_TREACH0, P_RPR_TREACH1, P_RPR_TREACH_T, P_RPR_TLOBE0, P_RPR_TLOBE1,
- NP) = range(143)
+ P_SPR_SHIFT, P_SPR_GRACE, P_SKID_DEC_MV, P_SKID_VMIN,
+ NP) = range(147)
 assert NP == len(HeroParams.VECTOR)
 
 
@@ -1458,7 +1465,7 @@ _SCALED_TIMERS = ("P_ATK_DUR", "P_ATK_CD", "P_DS_ANTIC", "P_DS_REC", "P_DS_LREC"
                   # (scaled time against a threshold, as the above; unused while abilities is 0)
                   "P_GL_ANTIC", "P_GL_INFLATE", "P_GL_DEFLATE", "P_RPR_ANTIC", "P_RPR_SLASH", "P_RPR_FALL",
                   "P_RPR_FALL2", "P_SCR_ANTIC", "P_SCR_END_T", "P_SCR_ROOF_T", "P_ASPR_T", "P_SKID_T", "P_W_CCD",
-                  "P_W_STICK", "P_HARD_LAND")
+                  "P_W_STICK", "P_HARD_LAND", "P_SPR_GRACE")
 
 
 def _variant_rows(params: HeroParams, variants: tuple[Variant, ...]
@@ -2192,6 +2199,19 @@ def classify_modes(tr: Trace, forum: bool = False) -> np.ndarray:
     return mode
 
 
+def _umbrella_x(vx: float, mask: int, acc: float, dec: float, vmax: float) -> float:
+    """UmbrellaMotionX.DoAccelerate (kin_jit.umbrella_x)."""
+    if mask & B_RIGHT:
+        vx = vx + acc if vx < vmax else vx
+    elif mask & B_LEFT:
+        vx = vx - acc if vx > -vmax else vx
+    elif vx > 0:
+        vx = max(vx - dec, 0.0)
+    elif vx < 0:
+        vx = min(vx + dec, 0.0)
+    return min(max(vx, -vmax), vmax)
+
+
 class ForumRows:
     """The Forum loadout's state rows of logged frames, one frame at a time (state_table runs one over the trace,
     StateTracker keeps one): the wall rows from cstate wallSliding / wallClinging and hero.wall, the wall stick and
@@ -2214,6 +2234,7 @@ class ForumRows:
         self.wslash = False
         self.shove = 0.0
         self.scr_pending = 0.0
+        self.gl_vx: float | None = None
 
     def push(self, S: np.ndarray, r: dict, md: int, flag) -> None:
         """Fill S (one [K] state, the frame's other rows already set) for row r (Trace.row form) in mode md."""
@@ -2318,6 +2339,16 @@ class ForumRows:
             S[MODE_T] = float(self.ph_t)
             if md == M_GLIDE:
                 S[GS] = 0.0 if ph in (1.0, 2.0) else 1.0
+                # the UmbrellaMotionX OnEnter of the antic / inflate / float idle changes the hero's own x speed
+                # (UmbrellaWindObject) at once; the body shows it from the next physics step
+                if not (pr and pmd == md and pr["ph"] == ph) and ph <= 2 and r.get("vel") is not None:
+                    base = 0.0 if ph == 1 else float(r["vel"][0])
+                    acc = p.glide_antic_accel if ph == 0 else p.glide_accel
+                    self.gl_vx = _umbrella_x(base, int(r.get("mask", 0)), acc, p.glide_decel, p.glide_vmax)
+                elif fs > 0 or ph > 2:
+                    self.gl_vx = None
+                if self.gl_vx is not None:
+                    S[VX] = self.gl_vx
             elif md == M_RPR_DS:
                 S[GS] = 0.0 if ph in (0.0, 1.0, 4.0) else 1.0
             elif md == M_SCRAMBLE:

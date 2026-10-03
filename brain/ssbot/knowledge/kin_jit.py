@@ -42,8 +42,9 @@ from ssbot.knowledge.kinematics import (  # Forum loadout (abilities)
     P_SKID_T, P_SPR_ACC, P_SPR_SPEED, P_W_CCD, P_W_CDECEL, P_W_CONTACT, P_W_CVMIN, P_W_RAY, P_W_RAY_B, P_W_SHOVE,
     P_W_SLASH_VMIN, P_W_STICK, P_W_STICKY, P_W_ACCEL, P_W_TRAY, P_WJ_CHAIN, P_WJ_JUMPED, P_WJ_LONG, P_WJ_SHORT,
     P_WJ_SPEED, PREV_GS, SP_X, UNSTICK, WJ_CHAIN, WJ_DIR, WJ_V, WJQ, WLOCK, WSIDE, WSLASH, WSTICK, WTOUCH, WCON, SHOVE,
+    RX0, RY0,
     M_SCRAMBLE, P_SCR_ANTIC, P_SCR_SPEED, P_SCR_FORCE, P_SCR_FORCE_H, P_SCR_END_VY, P_SCR_END_DEC, P_SCR_END_T,
-    P_SCR_ROOF_RAY, P_SCR_ROOF_T, P_SCR_DETACH, P_RPR_TDEC, P_RPR_TREACH0, P_RPR_TREACH1, P_RPR_TREACH_T, P_RPR_TLOBE0,
+    P_SCR_ROOF_RAY, P_SCR_ROOF_T, P_SCR_DETACH, P_SPR_SHIFT, P_SPR_GRACE, P_SKID_DEC_MV, P_SKID_VMIN, P_RPR_TDEC, P_RPR_TREACH0, P_RPR_TREACH1, P_RPR_TREACH_T, P_RPR_TLOBE0,
     P_RPR_TLOBE1)
 
 # world freeze presets in start order (kinematics.WF_ORDER): event bit, rampDown, wait, rampUp, target
@@ -688,9 +689,29 @@ def finished_dashing(x, P):
 
 
 @njit(cache=True, inline="always", error_model="numpy")
-def forum_fixed(x, vx, vy, normal, P, TT):
+def sprint_translate(x, rx, ry, P):
+    """Ground Sprint R / L OnEnter: Transform.Translate 0.05 u forward; the body follows the transform from where it
+    was drawn (as the scramble's Detach): live, a released ground dash's last step moved 0.179 u at 26.9 u/s."""
+    nx = rx + x[FACE] * P[P_SPR_SHIFT]
+    x[PX] = nx
+    x[QX] = nx
+    x[SX] = nx
+    x[PY] = ry
+    x[QY] = ry
+    x[SY] = ry
+
+
+@njit(cache=True, inline="always", error_model="numpy")
+def skid_factor(x, mask, P):
+    mv = move_of(mask)
+    return P[P_SKID_DEC_MV] if mv != 0 and mv == x[FACE] else P[P_SKID_DEC]
+
+
+@njit(cache=True, inline="always", error_model="numpy")
+def forum_fixed(x, vx, vy, normal, rx0, ry0, P, TT):
     """The Forum loadout's part of FixedUpdate before the terminal-velocity clamp and air hang (after the Hunter
-    rules' own velocity of this step). Returns (vx, vy)."""
+    rules' own velocity of this step; rx0, ry0: where the body was drawn last frame, which a Transform.Translate in
+    an FSM moves it from). Returns (vx, vy)."""
     mode = x[MODE]
     pm = np.int64(x[PREV])                # what FSM actions read in FixedUpdate: the previous frame's input
     if normal:
@@ -719,7 +740,11 @@ def forum_fixed(x, vx, vy, normal, P, TT):
             return x[VX], x[VY]
         grav_off(x)
         if x[DASH_T] <= 0:
-            finished_dashing(x, P)
+            finished_dashing(x, P)        # (Dash() leaves the velocity as it was)
+            if x[MODE] == M_SPRINT:
+                if x[PHASE] == 2:
+                    sprint_translate(x, rx0, ry0, P)
+                x[VX] = accel_to(x[VX], P[P_SPR_ACC], x[SP_X])   # Air / Ground Sprint: AccelerateToX OnEnter
             return x[VX], x[VY]
         vx = x[FACE] * P[P_DASH_SPEED]
         vy = 0.0
@@ -735,16 +760,15 @@ def forum_fixed(x, vx, vy, normal, P, TT):
             vy = max(vy, -P[P_MAXFALL])
         elif ph == 2:
             vx = min(max(vx, -40.0), 40.0)
-        elif ph == 3:
-            vx = decel(x[VX], P[P_SKID_DEC])
+        elif ph == 3:                     # Skid End 1 / 2: DecelerateXY 0.95 while moving the facing way, else 0.85
+            vx = decel(x[VX], skid_factor(x, pm, P))
     elif mode == M_GLIDE:
         ph = x[PHASE]
         if ph == 0:
             vx = umbrella_x(vx, pm, P[P_GL_AACC], P[P_GL_DEC], P[P_GL_VMAX])
-        elif ph == 1:
-            if vy < 0.05:
-                vy = P[P_GL_START_VY]
-            vx = umbrella_x(vx, pm, P[P_GL_ACC], P[P_GL_DEC], P[P_GL_VMAX])
+        elif ph == 1:                     # Inflate: SetVelocity2dConditional from the vector (0, 0) sets vy 0.5 every
+            vy = P[P_GL_START_VY]         # step (its y test sees 0 < 0.05); the hero's UmbrellaWindObject keeps the
+            vx = umbrella_x(vx, pm, P[P_GL_ACC], P[P_GL_DEC], P[P_GL_VMAX])   # own x speed UmbrellaMotionX drives
         elif ph == 2:
             vy = accel_to(vy, P[P_GL_VYACC], P[P_GL_VY])
             vx = umbrella_x(vx, pm, P[P_GL_ACC], P[P_GL_DEC], P[P_GL_VMAX])
@@ -938,10 +962,11 @@ def forum_after_queue(x, mask, pressed, mode0, dt, P, TT):
             regain(x, mask)
             x[GL_CD] = P[P_GL_CD]
         elif ph == 0 and ge32(x[MODE_T], P[P_GL_ANTIC]):
-            x[PHASE] = 1.0                # Damager? -> Inflate: gravity off, UmbrellaMotionX OnEnter
-            x[MODE_T] = 0.0
+            x[PHASE] = 1.0                # Damager? -> Inflate: gravity off, v = (0, 0.5) OnEnter, then UmbrellaMotionX
+            x[MODE_T] = 0.0               # OnEnter takes its own x speed from that 0 (live: 0, then -2, -3 ... -8.5)
             grav_off(x)
-            x[VX] = umbrella_x(x[VX], mask, P[P_GL_ACC], P[P_GL_DEC], P[P_GL_VMAX])
+            x[VY] = P[P_GL_START_VY]
+            x[VX] = umbrella_x(0.0, mask, P[P_GL_ACC], P[P_GL_DEC], P[P_GL_VMAX])
         elif ph == 1 and ge32(x[MODE_T], P[P_GL_INFLATE]):
             x[PHASE] = 2.0                # Start (vy 0.5) -> Float Idle (AccelerateToY, UmbrellaMotionX OnEnter)
             x[MODE_T] = 0.0
@@ -983,7 +1008,10 @@ def forum_after_queue(x, mask, pressed, mode0, dt, P, TT):
             if x[GROUND] > 0:             # LAND -> Land: sprint on if the dash is held
                 if (mask & B_DASH) != 0:
                     x[PHASE] = 2.0
+                    x[MODE_T] = 0.0
                     x[SP_X] = x[FACE] * P[P_SPR_SPEED]
+                    sprint_translate(x, rend_x(x), rend_y(x), P)
+                    x[VX] = accel_to(x[VX], P[P_SPR_ACC], x[SP_X])
                 else:
                     regain(x, mask)
             elif wall or (ph == 1 and (mask & B_DASH) == 0):
@@ -991,9 +1019,13 @@ def forum_after_queue(x, mask, pressed, mode0, dt, P, TT):
             elif (pressed & (B_ATTACK | B_JUMP)) != 0:
                 regain(x, mask)           # Attack Cancel / Queue Sprint Jump: control back, the press acts
         elif ph == 2:
-            if (mask & B_DASH) == 0:
-                x[PHASE] = 3.0            # released: skid
-                x[MODE_T] = 0.0
+            if (mask & B_DASH) == 0:      # released: SKID END
+                if not ge32(x[MODE_T], P[P_SPR_GRACE]) or abs(x[VX]) < P[P_SKID_VMIN]:
+                    regain(x, mask)       # Sprint Timer under Sprint Grace (or slower than 4): no skid, Regain
+                else:                     # Control To Idle
+                    x[PHASE] = 3.0        # Skid End 1 (DecelerateXY OnEnter)
+                    x[MODE_T] = 0.0
+                    x[VX] = decel(x[VX], skid_factor(x, mask, P))
             elif x[GROUND] <= 0:
                 x[PHASE] = 0.0            # Allow Air Jump -> Air Sprint (the ground target speed kept)
                 x[MODE_T] = 0.0
@@ -1128,6 +1160,8 @@ def fixed_step(x, P, TT):
     skin = P[P_SKIN]
     foot = P[P_FOOT]
     head = P[P_HEAD]
+    rx0 = x[RX0]
+    ry0 = x[RY0]
     x[QX] = x[PX]
     x[QY] = x[PY]
     mode = x[MODE]
@@ -1187,7 +1221,7 @@ def fixed_step(x, P, TT):
     rlq = relinq(mode)
     if ab != 0:
         if mode != M_NORMAL or x[WSIDE] != 0 or x[WLOCK] >= 0 or x[WJ_CHAIN] > 0 or x[DQ] >= 0:
-            vx, vy = forum_fixed(x, vx, vy, mode == M_NORMAL, P, TT)
+            vx, vy = forum_fixed(x, vx, vy, mode == M_NORMAL, rx0, ry0, P, TT)
         mode = x[MODE]
         rlq = relinq(mode)
 
@@ -1748,6 +1782,9 @@ def run_lane(r, v, o, S0, masks, events, dts, fss, udts, ft_v, alpha_sel, alpha_
             m = masks[r, t - 1]
             ev = events[r, t - 1] if has_ev else np.int64(0)
             udt = ft_v[v] if ft_v[v] > 0 else udts[ur, t - 1 if uc else 0]
+            if p[P_ABIL] != 0:            # the drawn position this frame's FixedUpdates start from
+                x[RX0] = x[QX] + x[ALPHA] * (x[SX] - x[QX])
+                x[RY0] = x[QY] + x[ALPHA] * (x[SY] - x[QY])
             if logged:
                 dt = dts[r, t - 1]
                 steps = np.int64(fss[r, t - 1])
