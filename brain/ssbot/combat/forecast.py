@@ -68,7 +68,7 @@ from dataclasses import dataclass, replace
 import numpy as np
 
 from ssbot.combat.boss_model import TAIL, Anchor, BossModel
-from ssbot.combat.fastquery import query_par
+from ssbot.combat.fastquery import circle_hits, query_par
 from ssbot.combat.pogo_targets import TargetTracker, simulate
 from ssbot.core.worldstate import ORACLE, VISION_EQUIVALENT, Entity, Ev, WorldState
 from ssbot.knowledge import hitbox_tables as hb
@@ -185,6 +185,7 @@ class Forecast:
         self.boss = boss
         self.det: list = []           # drop bells on exact paths (Forecaster._det_bell)
         self.truncated = 0            # walk branches inside the horizon cut by MAX_NODES / depth
+        self._paths: dict = {}        # drop-bell path cache (_bell_path)
         kids = {}
         for n in nodes:
             kids.setdefault(n.parent, []).append(n.id)
@@ -228,27 +229,77 @@ class Forecast:
             out |= self._det_occ(np.asarray(x, np.float64), np.asarray(y, np.float64), tk, comfort)
         return out
 
-    def _det_occ(self, x, y, tk: np.ndarray, comfort: bool = False, exclude: str | None = None) -> np.ndarray:
+    def _det_occ(self, x, y, tk: np.ndarray, comfort: bool = False, exclude: str | None = None,
+                 only: str | None = None) -> np.ndarray:
         """Contact with the drop bells on exact paths (Forecaster._det_bell): the hurtbox grown like the templates'
         dilation (comfort: and the comfort margin) meets the bell's circle on either bounce branch."""
         out = np.zeros(np.shape(x), bool)
         hx, hy = self.fc.half
         if comfort and self.fc.comfort is not None:
             hx, hy = hx + self.fc.comfort[0], hy + self.fc.comfort[1]
-        for sp, bx, by, vx, vy, nb, rest, tk_ in self.det:
-            if exclude is not None and tk_.endswith(exclude):
+        by_r: dict = {}
+        for j, (sp, bx, by, vx, vy, nb, rest, tk_) in enumerate(self.det):
+            if exclude is not None and tk_.endswith(exclude) or only is not None and tk_ != only:
                 continue
             sides = (1, -1) if nb < len(sp.bounces) and sp.bounces[nb].get("vx") == "random" else (0,)
-            if rest is not None:
-                nb = len(sp.bounces)          # in Submerge: sinking, no more floor contacts
             for sd in sides:
                 for dt in DET_SLACK_S:
-                    t = np.maximum(tk + dt, 0.0)
-                    cx, cy, ok = simulate(sp, bx, by, vx, vy, nb, rest, t, side=sd)
-                    dx = np.maximum(np.abs(x - cx) - hx, 0.0)
-                    dy = np.maximum(np.abs(y - cy) - hy, 0.0)
-                    rr = sp.r + DET_SKIN_U
-                    out |= ((dx * dx + dy * dy) <= rr * rr) & ok
+                    by_r.setdefault(sp.r + DET_SKIN_U, []).append(self._bell_path(j, sd, dt, tk))
+        if not by_r:
+            return out
+        shp = out.shape
+        T = shp[-1] if len(shp) else 1
+        x2 = np.ascontiguousarray(np.broadcast_to(np.asarray(x, np.float64), shp).reshape(-1, T))
+        y2 = np.ascontiguousarray(np.broadcast_to(np.asarray(y, np.float64), shp).reshape(-1, T))
+        flat = out.reshape(-1, T)
+        for rr, paths in by_r.items():
+            cx = np.ascontiguousarray([np.broadcast_to(np.asarray(p[0], np.float64), (T,)) for p in paths])
+            cy = np.ascontiguousarray([np.broadcast_to(np.asarray(p[1], np.float64), (T,)) for p in paths])
+            ok = np.ascontiguousarray([np.broadcast_to(np.asarray(p[2], np.bool_), (T,)) for p in paths])
+            flat |= circle_hits(x2, y2, cx, cy, ok, float(hx), float(hy), float(rr))
+        return flat.reshape(shp)
+
+    def _bell_path(self, j: int, sd: int, dt: float, tk: np.ndarray, redirect: tuple | None = None):
+        """Drop bell j's centre (x, y, ok) at tk + dt on bounce side sd (or knocked aside: redirect = (t_hit, d)),
+        cached per forecast: the planner asks the same times for every candidate block of a tick (pogo_targets.simulate
+        was 135,499 calls, 5.5 s of an 8,000-tick bench before the cache)."""
+        key = (j, sd, dt, len(tk), float(tk[0]), float(tk[-1]), redirect)
+        r = self._paths.get(key)
+        if r is None:
+            sp, bx, by, vx, vy, nb, rest, _ = self.det[j]
+            t = np.maximum(tk + dt, 0.0)
+            if redirect is not None:
+                r = simulate(sp, bx, by, vx, vy, nb, None, t, side=sd, redirect=redirect)
+            else:
+                if rest is not None:
+                    nb = len(sp.bounces)          # in Submerge: sinking, no more floor contacts
+                r = simulate(sp, bx, by, vx, vy, nb, rest, t, side=sd)
+            self._paths[key] = r
+        return r
+
+    def redirect_occ(self, x, y, tk, type_key: str, t_hit: float, d: int, comfort: bool = False
+                     ) -> np.ndarray | None:
+        """Contact with the drop bell `type_key` on its one path after a side slash moving d (+1 right) at t_hit;
+        None when not applicable (not on an exact path, resting, or no side redirect in its registry entry)."""
+        j = next((i for i, e in enumerate(self.det) if e[7] == type_key), None)
+        if j is None:
+            return None
+        sp, rest = self.det[j][0], self.det[j][6]
+        if rest is not None or "side" not in sp.redirect:
+            return None
+        tk = np.asarray(tk, np.float64)
+        x = np.asarray(x, np.float64)
+        y = np.asarray(y, np.float64)
+        hx, hy = self.fc.half
+        if comfort and self.fc.comfort is not None:
+            hx, hy = hx + self.fc.comfort[0], hy + self.fc.comfort[1]
+        rr = sp.r + DET_SKIN_U
+        out = np.zeros(x.shape, bool)
+        for dt in DET_SLACK_S:
+            cx, cy, ok = self._bell_path(j, d, dt, tk, (t_hit, d))
+            dx = np.maximum(np.abs(x - cx) - hx, 0.0)
+            dy = np.maximum(np.abs(y - cy) - hy, 0.0)
+            out |= ((dx * dx + dy * dy) <= rr * rr) & ok
         return out
 
     def occupied_redirect(self, x, y, tk, type_key: str, t_hit: float, d: int, comfort: bool = False
@@ -256,25 +307,10 @@ class Forecast:
         """occupied() with the drop bell `type_key` knocked aside at t_hit by a side slash moving d (+1 right): its
         own placements replaced by its one redirected path (pogo_targets.simulate redirect). None: not applicable (the
         bell is not on an exact path, or its random bounce comes before the hit). comfort: as occupied()."""
-        ent = next((e for e in self.det if e[7] == type_key), None)
-        if ent is None:
+        one = self.redirect_occ(x, y, tk, type_key, t_hit, d, comfort)
+        if one is None:
             return None
-        sp, bx, by, vx, vy, nb, rest, _ = ent
-        if rest is not None or "side" not in sp.redirect:
-            return None
-        tk = np.asarray(tk, np.float64)
-        out = self.occupied_without(x, y, tk, type_key, comfort)
-        hx, hy = self.fc.half
-        if comfort and self.fc.comfort is not None:
-            hx, hy = hx + self.fc.comfort[0], hy + self.fc.comfort[1]
-        rr = sp.r + DET_SKIN_U
-        for dt in DET_SLACK_S:
-            t = np.maximum(tk + dt, 0.0)
-            cx, cy, ok = simulate(sp, bx, by, vx, vy, nb, None, t, side=d, redirect=(t_hit, d))
-            dx = np.maximum(np.abs(np.asarray(x) - cx) - hx, 0.0)
-            dy = np.maximum(np.abs(np.asarray(y) - cy) - hy, 0.0)
-            out |= ((dx * dx + dy * dy) <= rr * rr) & ok
-        return out
+        return self.occupied_without(x, y, tk, type_key, comfort) | one
 
     def occupied_without(self, x, y, tk, exclude: str, comfort: bool = False) -> np.ndarray:
         """occupied() without the placements whose only source is the entity type `exclude` (a bell disarmed by a

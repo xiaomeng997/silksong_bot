@@ -269,6 +269,42 @@ class Planner:
         occ[:, 0] = False
         return occ
 
+    def _contacts_redirect(self, f: Forecast, bound: np.ndarray, tk: np.ndarray, skip: np.ndarray, params: list,
+                           comfort: bool = False) -> tuple[np.ndarray, np.ndarray]:
+        """_contacts for rows that each knock a drop bell aside, params[i] = (bell type key, hit time, direction):
+        the support without that bell (one query per bell for all its rows) plus its one redirected path (one per
+        distinct hit). Returns contact [n, T1] and applicable [n] (False: the bell is not on an exact path; those rows
+        keep their both-sides contact). One call per row cost 0.6 ms (occupied_redirect: 11,771 calls in an
+        8,000-tick bench of live run 20261002_162847, tick p99 33 ms with up to ~30 such rows a tick)."""
+        hx, hy = f.fc.half
+        X, Y, rows, too_wide = _hull_points(np.ascontiguousarray(bound), hx, hy, self.cfg.max_points)
+        n = bound.shape[0]
+        R = len(rows)
+        L = (X.shape[0] - n) // R if R else 0
+        own = np.concatenate([np.arange(n), np.tile(rows, L)]) if R else np.arange(n)
+        hit = np.zeros(X.shape, bool)
+        appl = np.ones(n, bool)
+        keys = [p[0] for p in params]
+        for name in set(keys):
+            mine = np.array([k == name for k in keys])
+            pts = np.flatnonzero(mine[own])
+            hit[pts] = f.occupied_without(X[pts], Y[pts], tk, name, comfort)
+            for th, d in {(p[1], p[2]) for p in params if p[0] == name}:
+                rsel = np.array([p[0] == name and p[1] == th and p[2] == d for p in params])
+                p2 = np.flatnonzero(rsel[own])
+                o = f.redirect_occ(X[p2], Y[p2], tk, name, th, d, comfort)
+                if o is None:
+                    appl[rsel] = False
+                else:
+                    hit[p2] |= o
+        occ = hit[:n].copy()
+        if R:
+            occ[rows] |= hit[n:].reshape(-1, R, hit.shape[1]).any(axis=0)
+        occ |= too_wide
+        occ &= ~skip
+        occ[:, 0] = False
+        return occ, appl
+
     # ---- the tick ------------------------------------------------------------------------------------------------
 
     def tick(self, ws: WorldState, start: np.ndarray, hold: HoldState, prefix: np.ndarray, f: Forecast,
@@ -317,7 +353,9 @@ class Planner:
         skip = ((roll.flags_all & F_INVULN) != 0) if enemy_only else np.zeros((N, T1), bool)
         occ = self._contacts(f, roll.bound, tk, skip)
         S = occ.any(axis=1)
+        th0 = time.perf_counter()
         roll_j = self._hit_effects(f, start, latched, roll, tk, S, enemy_only)
+        th1 = time.perf_counter()
         self._lock_check(f, roll, hold_end, S, P + T, enemy_only)
         t_hit = np.where(S, occ.argmax(axis=1), T1)        # first contact frame (FORCED_RISK: later is better)
         S2 = S.copy()
@@ -336,8 +374,10 @@ class Planner:
         J, hits, may_kill = self._score(ws, roll_j, latched, start, f, prefs, P, tk)
         if cont:
             J[-1] += prefs.weights.get("cont", 0.0)
+        tr0 = time.perf_counter()
         if self._redirect:
             self._redirect_value(f, roll_j, tk, J, S, S2, ctx, prefs, enemy_only, min(T1, COMFORT_FRAMES + P + 1))
+        tr1 = time.perf_counter()
         U = unpausable(may_kill, ctx) if ctx.hp else np.zeros(N, bool)
         t4 = time.perf_counter()
         # a jump's hold is committed when it is pressed (DESIGN §3.5.4): a plan that releases it early, or casts
@@ -451,7 +491,7 @@ class Planner:
         t6 = time.perf_counter()
         res.t_ms = {"filter": (t1 - t0) * 1e3, "rollout": (t2 - t1) * 1e3, "support": (t3 - t2) * 1e3,
                     "score": (t4 - t3) * 1e3, "prob_bind": (t5 - t4) * 1e3, "select": (t6 - t5) * 1e3,
-                    "total": (t6 - t0) * 1e3}
+                    "total": (t6 - t0) * 1e3, "hit_fx": (th1 - th0) * 1e3, "redirect": (tr1 - tr0) * 1e3}
         return res
 
     def _prev_allowed(self, ctx: FilterContext) -> bool:
@@ -569,18 +609,22 @@ class Planner:
             # path instead of both bounce sides (Forecast.occupied_redirect); the slash's own safety as usual
             self.last_redirect = 0
             self.redirect_rows = []
-            for n_ in np.flatnonzero(side_tgt[sub] > 0):
-                g = tgts[int(side_tgt[sub[n_]])]
-                if not g.redirect:
-                    continue
-                c = sub[n_]
-                o = self._contacts(f, cur.bound[c:c + 1], tk, skip[n_:n_ + 1],
-                                   redirect=(g.name, float(tk[min(side_f[c], len(tk) - 1)]), int(side_d[c])))
-                if o is not None:
-                    occ[n_] = o[0]
-                    self.last_redirect += 1
-                    self.redirect_rows.append(int(c))
-                    self._redirect[int(c)] = (g.name, float(tk[min(side_f[c], len(tk) - 1)]), int(side_d[c]))
+            red = [n_ for n_ in np.flatnonzero(side_tgt[sub] > 0) if tgts[int(side_tgt[sub[n_]])].redirect]
+            if len(red) > REDIRECT_K:
+                # the earliest hits first (the rest keep both bounce sides: their S is the conservative one)
+                red = sorted(red, key=lambda n_: int(side_f[sub[n_]]))[:REDIRECT_K]
+            if red:
+                red = np.asarray(red, np.int64)
+                cs_ = sub[red]
+                prm = [(tgts[int(side_tgt[c])].name, float(tk[min(side_f[c], len(tk) - 1)]), int(side_d[c]))
+                       for c in cs_]
+                o, appl = self._contacts_redirect(f, cur.bound[cs_], tk, skip[red], prm)
+                for i_, (n_, c) in enumerate(zip(red, cs_)):
+                    if appl[i_]:
+                        occ[n_] = o[i_]
+                        self.last_redirect += 1
+                        self.redirect_rows.append(int(c))
+                        self._redirect[int(c)] = prm[i_]
             s_hit[sub] = occ.any(axis=1)
             S[sub] |= s_hit[sub]
         # a pogo plan stands only if the down spike connects in every timing lane (DESIGN 3.5.6: a miss lands the hero
@@ -635,30 +679,34 @@ class Planner:
         FORCED_RISK turned into a safe plan needs no bonus: S = 0 ranks first. J and S2 are updated in place."""
         w = prefs.weights.get("bell_free", 8.0) * (1.0 if ctx.tier == "GREEN" else 2.0)
         cache: dict = {}
-        for c, (name, t_hit, d) in self._redirect.items():
-            if c >= len(S) or S[c]:
-                continue
-            sk = (((roll_j.flags_all[c:c + 1, :tc] & F_INVULN) != 0) if enemy_only
-                  else np.zeros((1, tc), bool))
-            o = self._contacts(f, roll_j.bound[c:c + 1, :tc], tk[:tc], sk, comfort=True, redirect=(name, t_hit, d))
-            if o is not None:
-                S2[c] = bool(o[0].any())
+        safe_rows = [c for c in self._redirect if c < len(S) and not S[c]]
+        if safe_rows:
+            cs_ = np.asarray(safe_rows, np.int64)
+            sk = (((roll_j.flags_all[cs_, :tc] & F_INVULN) != 0) if enemy_only else np.zeros((len(cs_), tc), bool))
+            o, appl = self._contacts_redirect(f, roll_j.bound[cs_, :tc], tk[:tc], sk,
+                                              [self._redirect[c] for c in safe_rows], comfort=True)
+            S2[cs_[appl]] = o[appl].any(axis=1)
+        if not safe_rows:
+            return
+        # the probe grid is the same for every row (frame 0 is the start state): the rest of the support and the
+        # bell's both-sides occupancy once per bell, its redirected path once per hit
+        b0 = roll_j.box[safe_rows[0], 0]
+        cx, cy = 0.5 * (b0[0] + b0[2]), 0.5 * (b0[1] + b0[3])
+        xs = np.concatenate([cx + np.arange(-4.5, 4.6, 1.5), [prefs.stance_x]])
+        tq = tk[::3]
+        X = np.repeat(np.concatenate([xs, xs])[:, None], len(tq), axis=1)
+        Y = np.repeat(np.concatenate([np.full(len(xs), cy), np.full(len(xs), cy + 3.0)])[:, None], len(tq), axis=1)
+        per_bell: dict = {}
+        for c in safe_rows:
+            name, t_hit, d = self._redirect[c]
             key = (name, int(round(t_hit * 60)), d)
             if key not in cache:
-                b0 = roll_j.box[c, 0]
-                cx, cy = 0.5 * (b0[0] + b0[2]), 0.5 * (b0[1] + b0[3])
-                xs = np.concatenate([cx + np.arange(-4.5, 4.6, 1.5), [prefs.stance_x]])
-                X = np.concatenate([xs, xs])[:, None]
-                Y = np.concatenate([np.full(len(xs), cy), np.full(len(xs), cy + 3.0)])[:, None]
-                tq = tk[(tk >= t_hit)][::3]
-                if not len(tq):
-                    cache[key] = 0.0
-                    continue
-                X = np.repeat(X, len(tq), axis=1)
-                Y = np.repeat(Y, len(tq), axis=1)
-                both = f.occupied(X, Y, tq)
-                one = f.occupied_redirect(X, Y, tq, name, t_hit, d)
-                cache[key] = 0.0 if one is None else float((both & ~one).mean())
+                if name not in per_bell:
+                    rest = f.occupied_without(X, Y, tq, name)
+                    per_bell[name] = f._det_occ(X, Y, tq, only=name) & ~rest
+                one = f.redirect_occ(X, Y, tq, name, t_hit, d)
+                after = tq >= t_hit
+                cache[key] = 0.0 if one is None or not after.any() else                     float((per_bell[name] & ~one)[:, after].mean())
             J[c] += w * cache[key]
 
     def _targets(self, f: Forecast, tk: np.ndarray) -> list["_Target"]:
@@ -712,6 +760,9 @@ class Planner:
         # the pogo lane gate and the hit kernels with a bell's octagon too: a fresh checkout has no numba cache, and
         # these compiled mid-fight past the watchdog (live run 20261002_162847 from a new worktree: 2-3 episodes per
         # worker "paused unasked", in the first charge and in a burst)
+        from ssbot.combat.fastquery import circle_hits      # drop bells on exact paths (forecast._det_occ)
+        z = np.zeros((1, 2))
+        circle_hits(z, z, z, z, np.ones((1, 2), np.bool_), 0.5, 1.0, 1.0)
         P0, S0, B0 = pt.octagon(1.274)
         for pp, ss, bb in ((polys, starts, np.zeros(2)), (P0, S0, B0)):
             pp, ss, bb = (np.ascontiguousarray(pp, np.float64), np.ascontiguousarray(ss, np.int64),
@@ -1112,6 +1163,7 @@ def _attacks_of(box, flags, mode, lat, face0, boss, okb, polys, starts, base, wi
 
 
 MACRO_MARGIN = 5.0             # J (half a hit) another plan needs over a started macro to replace it
+REDIRECT_K = 12                # side-slash-on-a-drop-bell rows scored on the redirected path per tick (earliest hits)
 
 
 def _is_macro(name: str) -> bool:

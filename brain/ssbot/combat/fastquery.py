@@ -73,3 +73,30 @@ def query_par(q: SupportQuery, x, y, tk, chunks: int = CHUNKS) -> np.ndarray:
         cbox[np.isnan(cbox)] = 0.0       # a step with no point at all: nothing to test there anyway
         _query_par(q.bits, boff, im, fm, q.full, tk, xt, yt, out, min(chunks, max(1, xt.shape[1] // 8)), pbox, cbox)
     return np.ascontiguousarray(out.T)
+
+
+@numba.njit(cache=True, parallel=True)
+def circle_hits(x, y, cx, cy, ok, hx, hy, rr):
+    """[N, T] bool: the box of half-extents (hx, hy) centred at (x, y) [N, T] meets one of the K circles of radius rr
+    centred at (cx, cy) [K, T] where ok [K, T] (drop bells on exact paths, forecast._det_occ: every bounce side and
+    time slack at once; the numpy form cost 0.74 ms a call, 2.6 s of an 8,000-tick bench). NaN points never meet."""
+    N, T = x.shape
+    K = cx.shape[0]
+    out = np.zeros((N, T), np.bool_)
+    r2 = rr * rr
+    for n in numba.prange(N):
+        for t in range(T):
+            px, py = x[n, t], y[n, t]
+            if px != px or py != py:
+                continue
+            for k in range(K):
+                if not ok[k, t]:
+                    continue
+                dx = abs(px - cx[k, t]) - hx
+                dy = abs(py - cy[k, t]) - hy
+                dx = dx if dx > 0.0 else 0.0
+                dy = dy if dy > 0.0 else 0.0
+                if dx * dx + dy * dy <= r2:
+                    out[n, t] = True
+                    break
+    return out
