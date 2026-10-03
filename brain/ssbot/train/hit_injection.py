@@ -31,9 +31,11 @@ where the moment is committed and its frame known, a few frames before it:
           scored that attack as a hit
   bounce  downSpikeBouncing onset: trigger only, onset + 0..2. The game takes no enemy hit there: hits sent at
           onset + 1 and + 2 (run at + 2 and + 3) were all refused (take_health_calls 0; chunks 20261002_225739 ep 0,
-          230409: 4 of 4): past the 2-physics-step down-spike i-frames (HeroController.DOWNSPIKE_INVULNERABILITY_STEPS)
-          the bounce's recoil still holds CanTakeDamage false (!cState.recoiling). Every refused hit is a "damage"
-          event the planner counts as unpredicted, so two of them end the attempt as a Q4 quit with no fault in it
+          230409: 4 of 4): a bounce off the boss sets the long down-spike invulnerability
+          (DOWNSPIKE_INVULNERABILITY_STEPS_LONG = 10 physics steps; STATE hero.cstate_int[1] downspikeInvulnerabilitySteps
+          read 8 on the onset frame and counted down to 0 about 10 frames later, 230409 ep 14), which TakeDamage refuses
+          for ENEMY hits. Every refused hit is a "damage" event the planner counts as unpredicted, so two of them end
+          the attempt as a Q4 quit with no fault in it
   cast    the first frame of a NeedleThrow clip (a Silkspear: AnticG / AnticA); hit / trigger + 0..2
   clash   parrying onset, or a nail recoil onset with no hit dealt on that frame or the 2 before (a tink off a bell);
           hit / trigger + 0..2. Weight 0 against the Bell Beast: none came within clash_fallback_s in 5 of 5 trials
