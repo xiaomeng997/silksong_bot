@@ -281,7 +281,10 @@ def _run(link: OracleLink, enc: Encounter, tap: FightTap, policy, cfg: EpisodeCo
             if tap.lethal and cfg.mode == "eval":
                 rec.outcome, rec.reason = WOULD_DIE, "lethal hit after the kill"
                 break
-            rec.outcome = rec.outcome or CLEAR
+            # the boss is dead: CLEAR (any other outcome ends the loop). Was `rec.outcome or CLEAR`, which kept the
+            # record's default HARNESS_FAIL when the pause began before the kill (a pause triggered 1-3 frames before
+            # a committed blow: pause stress chunk 20261002_232051 ep 26 and 39, "quit after the kill")
+            rec.outcome = CLEAR
             _act(link, last, policy, s, tap)
             rec.acts += 1
             if getattr(policy, "episode_outcome", None) == QUIT:
