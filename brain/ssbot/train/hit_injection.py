@@ -12,9 +12,11 @@ Faults (one per episode):
   trigger   a supervisor quit trigger with no damage (Supervisor.inject, trigger QF): the pause loop starts from
             whatever the game and the key path are doing, usually with the gate open and planner keys down (the menu
             key guard's case, safety.key_guard); needs the wrapped policy's SupervisedControl (inner.sc)
-  menu      both on one tick, on a frame with a planner key latched: the hit lands 1-2 frames after the trigger, i.e.
-            0-2 frames before the loop's first Pause press reaches the game, the frame the pause menu would open
-            (the press is dropped when the hit's disablePause wins the frame; the loop must retry at the gate)
+  menu      the trigger on a frame with a planner key latched and the hit on that tick or the next (offset 0 / 1):
+            the RPC runs a frame after it is sent, so the hit lands 1 frame before the loop's first Pause press
+            reaches the game, or on that very frame, the frame the pause menu would open. Before it, the hit's
+            disablePause drops the press and the loop must retry at the gate; on it, the frame's Update order decides
+            (the oracle runs RPCs in FramedServer.Update, the game reads Pause in InputHandler.Update)
 
 Moments. The first stress chunk (11b4ca0, 20261002_180411) aimed its kill / bounce / hit kinds at the planner's
 predicted attack frame and landed 4 of 112 within +-3 frames of a measured kill / bounce / clash / stun (3.6 %): a hit
@@ -54,6 +56,7 @@ Everything else is the wrapped policy's (attribute access falls through), so the
 ownership, outcome and stats, plus stats()["inject"].
 """
 import json
+import os
 import random
 
 from ssbot.knowledge.kinematics import CSTATE_NAMES_PATH
@@ -110,6 +113,9 @@ class HitInjector:
         self._prev: dict = {}
         self._hit_frames: list[int] = []
         self._attacks: list = []             # (tick frame, the planner's PlanResult.attack then)
+        self._menu_hit_at: int | None = None
+        # SSBOT_INJECT_KINDS=menu,kill: draw only these kinds (targeted chunks); unset: p_event and the weights
+        self.only = tuple(k for k in os.environ.get("SSBOT_INJECT_KINDS", "").split(",") if k)
 
     def __getattr__(self, name):          # pause_owned, episode_outcome, real_quit_active, planner_last, ...
         return getattr(self.inner, name)
@@ -130,16 +136,22 @@ class HitInjector:
             self.boss_type = getattr(enc, "boss_type", self.boss_type)
             self.death_states = tuple(getattr(enc, "death_states", self.death_states))
         r = random.Random(rng.random())      # after the inner policy's own draws: its seeds are those of a plain run
-        if r.random() < self.p_event:
+        if self.only:
+            kind = r.choice(self.only)
+            fault = {"menu": FAULT_MENU, "bounce": FAULT_TRIGGER, "keys": FAULT_TRIGGER}.get(kind) or (
+                r.choice((FAULT_HIT, FAULT_TRIGGER)) if kind in EVENT_KINDS else FAULT_HIT)
+        elif r.random() < self.p_event:
             kind = r.choices(EVENT_KINDS, EVENT_WEIGHTS)[0]
             fault = {"menu": FAULT_MENU, "bounce": FAULT_TRIGGER}.get(kind) or r.choice((FAULT_HIT, FAULT_TRIGGER))
         else:
             kind = r.choice(COVERAGE_KINDS)
             fault = FAULT_TRIGGER if kind == "keys" else FAULT_HIT
-        if fault == FAULT_TRIGGER and getattr(self.inner, "sc", None) is None:
+        if fault in (FAULT_TRIGGER, FAULT_MENU) and getattr(self.inner, "sc", None) is None:
             fault = FAULT_HIT                # no supervisor to trigger: the plain hit
         if kind == "kill" and fault == FAULT_TRIGGER:
             offset = r.randint(-3, 2)
+        elif fault == FAULT_MENU:
+            offset = r.randint(0, 1)         # ticks from the trigger to the hit: lands 1 frame before / on the press
         elif fault == FAULT_HIT:
             offset = r.randint(0, 1)
         else:
@@ -151,8 +163,9 @@ class HitInjector:
         self.retries = 0
         self.done = False
         self._prev = {}
-        self._hit_frames: list[int] = []
-        self._attacks: list = []
+        self._hit_frames = []
+        self._attacks = []
+        self._menu_hit_at = None
         self.log = {"kind": kind, "fault": fault, "offset": offset, "sent": [], "replies": [], "fallback": False,
                     "moments": []}
 
@@ -312,6 +325,17 @@ class HitInjector:
         x = self._features(s)
         att = getattr(getattr(self.inner, "planner_last", None), "attack", None)
         self._attacks = [(t, a) for t, a in self._attacks if t >= f - 6] + [(f - 1, att)]
+        if self._menu_hit_at is not None and f >= self._menu_hit_at and self.fut is None and self.link is not None:
+            # the menu fault's delayed hit: the pause machine owns the keys by now, so no _ready check (a hit while
+            # the game is paused cannot happen in the game; the first press lands on f + 2 at the earliest)
+            self._menu_hit_at = None
+            hp = (s.get("hero") or {}).get("health")
+            if not (s.get("game") or {}).get("paused") and isinstance(hp, int) and hp >= 2:
+                self._hit(s)
+                self.log["hit_f_sent"] = f
+            else:
+                self.done = True
+            return
         if self.done or self.fut is not None or self.link is None or f - self.f0 < self.min_s * 60:
             return
         if not self._ready(s):
@@ -335,8 +359,16 @@ class HitInjector:
             self.log["trigger_f"] = f
             if self.fault == FAULT_TRIGGER:
                 self.done = True
+            elif self.offset > 0:            # menu: the hit a tick later, landing on the first press's own frame
+                self._menu_hit_at = f + self.offset
+                self.log["sent"].append(row)
+                return
         if self.fault in (FAULT_HIT, FAULT_MENU):
-            side = "left" if h.get("facing", 1) > 0 else "right"
-            self.fut = self.link.rpc_async("hurt.special", kind="damage", amount=int(h["health"]) - 1,
-                                           hazard="ENEMY", side=side)
+            self._hit(s)
         self.log["sent"].append(row)
+
+    def _hit(self, s: dict) -> None:
+        h = s.get("hero") or {}
+        side = "left" if h.get("facing", 1) > 0 else "right"
+        self.fut = self.link.rpc_async("hurt.special", kind="damage", amount=int(h["health"]) - 1,
+                                       hazard="ENEMY", side=side)

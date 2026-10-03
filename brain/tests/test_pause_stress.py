@@ -231,6 +231,15 @@ def test_menu_fault_triggers_and_hits_on_one_tick_and_hit_faults_rearm_on_the_ne
     assert not link.calls and not inner.sc.faults                     # no planner key latched yet
     inj.act(_fs(80, lat=1 << 20))
     assert len(link.calls) == 1 and len(inner.sc.faults) == 1 and inj.log["trigger_f"] == 80
+    inner = InnerSc()                                                 # offset 1: the hit a tick after the trigger
+    inj, link = _injector("menu", fault="menu", offset=1, inner=inner)
+    for f in range(0, 80):
+        inj.act(_fs(f))
+    inj.act(_fs(80, lat=1 << 20))
+    assert len(inner.sc.faults) == 1 and not link.calls
+    inj.act(_fs(81))
+    inj.stats()                                                       # collects the reply: one hit, done
+    assert len(link.calls) == 1 and inj.log["hit_f_sent"] == 81 and inj.done
     inner = InnerSc()                                                 # "keys": a press in flight, not a held key
     inner.sent = {}
     inj, link = _injector("keys", fault="trigger", inner=inner)
@@ -252,6 +261,16 @@ def test_menu_fault_triggers_and_hits_on_one_tick_and_hit_faults_rearm_on_the_ne
         kinds.add((inj.kind, inj.fault))
     assert ("bounce", "hit") not in kinds and ("bounce", "trigger") in kinds
     assert not any(k == "clash" for k, _ in kinds) and ("cast", "hit") in kinds and ("kill", "trigger") in kinds
+
+
+def test_inject_kinds_env_restricts_the_draw(monkeypatch):
+    monkeypatch.setenv("SSBOT_INJECT_KINDS", "menu,keys")
+    seen = set()
+    for seed in range(100):
+        inj = HitInjector(InnerSc(), p_event=0.0)
+        inj.reset(random.Random(seed), None)
+        seen.add((inj.kind, inj.fault, inj.offset if inj.kind == "menu" else None))
+    assert seen == {("menu", "menu", 0), ("menu", "menu", 1), ("keys", "trigger", None)}
 
 
 def test_trial_of_a_trigger_fault_counts_game_keys_on_menu_frames():
