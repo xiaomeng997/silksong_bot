@@ -511,20 +511,33 @@ Code: f9dcbba (supervisor / tactics), 4eb57db (tools), 5026372 (combat_run --sta
   (VISION_HERO_HIT, the Silkspear) stopped every attack, so no silk, no Bind: a deadlock that Q6 at h 2 used to cut
   short with a quit. Options for the lead / the person (pause_quit.md 7.7): the next hit's bound from the hits allowed
   now (below full HP no silk skill: nail 5; check crits first), or quit at h 2 when silk < 9 and I3 forbids damage.
+- Live natural hits (5026372, `--start-hp 3 3 --start-silk 0 0`, no injection; stopped early): oracle 20261003_144536
+  18 / 18 healed first (Bind 18-29 s after the wake) and CLEAR, FORCED_RISK in 18 episodes (2591 ticks, each a Q6
+  quit under the old rule), 0 quits; degraded_dust 20261003_150835 12 / 12 healed (20-54 s) and CLEAR, 0 quits. The
+  boss barely hit the hero, so **natural-hit Q1 timing still has no live sample**; every one of the 62 hits measured
+  today on instance 4 (60 injected, 2 natural) had G = +15 after a 0.999 ramp frame. The restarted campaign (h 2 no
+  longer quits, so a second natural hit is a Q1) collects them: summarise with `lowhp_check --q1 <run dir>`.
+- Campaign 20261003_122030 (3afa1e1) stopped gracefully at 13:22 after 123 trials (seeds 105330-105452). With 120827 it
+  had 85 Q1 pauses (pq_q1scan_campaign.json): 82 injected hits with the ramp frame, all at G + 1; 3 injected hits in the
+  boss-death slow motion (G +82 / +83), paused G + 3..5, inside the i-frames; no natural-hit Q1.
+- Chain H's restart 20261003_074533 (`_inject`, pq_campaign2.log; omitted in the first report): 4 Q1 real quits, then
+  ep 4 / ep 5 HARNESS_FAIL ("state condition not met within 2.0s") and the worker died on a `guards.set` RPC timeout
+  (instance 4 unresponsive), 3 minutes after the start.
 
 ### Running
 
-- 10^4 pause stress campaign, restarted on the final code: worktree `C:\ssbot\live_pq_3bc9da8` (the name is stale: it
-  is checked out at 3afa1e1, numba prewarmed), instance 4, seeds 105330-109999 (4670 trials, about 39 h at ~30 s),
-  run dir `C:\ssbot\data\runs\m2\20261003_122030_BellBeast_eval_planner_oracle_inject`, launcher log
-  `C:\ssbot\sandbox\pq_campaign_q2.log`, started detached (Win32_Process Create) with
-  `C:\ssbot\sandbox\pq_campaign_start.cmd C:\ssbot\live_pq_3bc9da8 105330 4670 C:\ssbot\sandbox\pq_campaign_q2.log`.
-  Stop (graceful, after the current trial): from `C:\ssbot\live_pq_3bc9da8\brain`:
-  `..\scripts\uv.cmd run python -m ssbot.tools.combat_run stop C:\ssbot\data\runs\m2\20261003_122030_BellBeast_eval_planner_oracle_inject`
+- 10^4 pause stress campaign on the final code: worktree `C:\ssbot\live_pq_final` (5026372, numba prewarmed),
+  instance 4, seeds 105453-109799 (4347 trials, about 36 h; 109800-109919 were the fixer round's checks), run dir
+  `C:\ssbot\data\runs\m2\20261003_153044_BellBeast_eval_planner_oracle_inject`, launcher log
+  `C:\ssbot\sandbox\pq_campaign_q3.log`, started detached (Win32_Process Create) with
+  `C:\ssbot\sandbox\pq_campaign_start.cmd C:\ssbot\live_pq_final 105453 4347 C:\ssbot\sandbox\pq_campaign_q3.log`.
+  Stop (graceful, after the current trial): from `C:\ssbot\live_pq_final\brain`:
+  `..\scripts\uv.cmd run python -m ssbot.tools.combat_run stop C:\ssbot\data\runs\m2\20261003_153044_BellBeast_eval_planner_oracle_inject`
   (or C:\ssbot\sandbox\STOP_AGENTS). It holds SsOracle.dll: stop it before the EXCLUSIVE deploy. Summarise with
-  `pause_stress <run dir> --quiet --json <run dir>\pause_stress.json` (below-normal priority).
-- Chain H's campaign 20261003_010522 was not running (it died at 07:13 after 722 trials, see Next 2); a 23-trial start
-  on d0c2327 (20261003_120827, seeds 105300-105322) was stopped to pick up 3afa1e1.
+  `pause_stress <run dir> --quiet --json <run dir>\pause_stress.json` and `lowhp_check --q1 <run dir>` (natural-hit
+  Q1s by freeze shape), below-normal priority. Behaviour differs from the earlier chunks: h 2 no longer quits (Q6).
+- Stopped: 20261003_122030 (3afa1e1, see above); chain H's 20261003_010522 died at 07:13 after 722 trials (Next 2);
+  a 23-trial start on d0c2327 (20261003_120827, seeds 105300-105322) was stopped to pick up 3afa1e1.
 
 ### Needs deploy
 
@@ -533,11 +546,18 @@ Code: f9dcbba (supervisor / tactics), 4eb57db (tools), 5026372 (combat_run --sta
 
 ### Next
 
-1. A/B of `bind.reserve_at_full_hp` (keep 9 silk at full HP) now that Q1a binds whenever it may: Binds and CLEARs vs
-   Silkspear damage and time to kill.
-2. Chain H's campaign died at 07:13 (722 episodes, 20261003_010522): `load_slot` after a real quit timed out waiting
-   for gameplay (TimeoutError in the worker); the worker has no retry there. Watch the restarted campaign for the same.
-3. Safe spots for later encounters (Forum left wall top, Lace 2 arena): need a cling / double-jump primitive in the
+1. The h 2 STUCK deadlock (Fixer round, dust 2 / 25): decide between a finer "next hit may kill" bound below full HP
+   and a quit when silk < 9 and I3 forbids damage; then a dust A/B of the h 2 arm (`SSBOT_INJECT_LEAVE_HP=3`).
+2. Tune `bind.gather_hit_x` (1.5, untuned) and A/B `bind.reserve_at_full_hp` now that h 2 fights on: time to 9 silk
+   after the hit (oracle 0.6-33 s, dust 6.5-47 s today), Binds, time to kill, STUCKs.
+3. Chain H's campaign died at 07:13 (722 episodes, 20261003_010522): `load_slot` after a real quit timed out waiting
+   for gameplay (TimeoutError in the worker); its 07:45 restart (074533) died on a `guards.set` timeout after 2
+   HARNESS_FAILs. The worker has no retry there. Watch the restarted campaign for both (its log and worker_i4.log).
+4. Natural-hit Q1 timing: none live yet (above); read it from the campaign with `lowhp_check --q1`. Expect G + 1 after a
+   0.999 ramp frame, G + 2 without; a G + 3 or later outside the boss-death slow motion is a finding.
+5. Safe spots for later encounters (Forum left wall top, Lace 2 arena): need a cling / double-jump primitive in the
    planner before `SafeSpot.kind == "wall"` can be used; verify each with coverage_map first.
-4. Live workdirs: `C:\ssbot\live_pq_72baaf3` (first live check; can be removed with `git worktree remove`) and
-   `C:\ssbot\live_pq_3bc9da8` (despite its name checked out at the final code commit, numba warm; runs the campaign).
+6. Live workdirs: `C:\ssbot\live_pq_final` (5026372, runs the campaign). No longer used, removable with
+   `git worktree remove --force`: `C:\ssbot\live_pq_72baaf3`, `C:\ssbot\live_pq_3bc9da8` (at 3afa1e1),
+   `C:\ssbot\live_pq_4eb57db` (the fixer round's injected checks).
+7. Merge note: main's 1c0a082 marks DESIGN §3.7.4 Q6's revision "待实现"; it is implemented here (q6_max_h 1).
