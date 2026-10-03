@@ -52,11 +52,12 @@ Why each piece:
   timing (the gate cue put the first press on the first open frame) and the oracle's paused flag.
   The PauseWindowMonitor stays on the raw STATE: it is instrumentation, not a decision.
 - the post-hit window (Q1 after a hit, DESIGN §3.7.4, the person's rule of 2026-10-03): a hit's freeze shuts the pause
-  gate for 0.213-0.267 s, and a press that reaches the game before the opening is dropped (one held into it makes no
-  edge). The pause machine gets the predicted opening (PauseCues.gate_open_at): the oracle cues read it from the
-  freeze's time-scale ramp (pause_quit.hit_ramp_open_at), the vision view from the capture time of the hit it showed
-  plus POST_HIT_OPEN_MAX_S (post_hit_open_at), so the pause lands on the first pausable frame of the window, well
-  inside the i-frames (1.10-2.08 s), never on the planner's next decision.
+  gate (its STATE opens 0.213-0.267 s after the hit, the first pausable frame is one later), and a press that reaches
+  the game before that is dropped (one held into it makes no edge). The pause machine gets the predicted first
+  pausable frame (PauseCues.gate_open_at): the oracle cues from the freeze ramp's last shut frame
+  (pause_quit.hit_ramp_open_at), the vision view from the capture time of the hit it showed plus POST_HIT_OPEN_MAX_S
+  (post_hit_open_at), so the pause lands on or just after the first pausable frame of the window, well inside the
+  i-frames (1.10-2.08 s).
 """
 import math
 from collections.abc import Callable, Mapping, Sequence
@@ -214,9 +215,10 @@ class SupervisedControl:
 
     def post_hit_open_at(self, now: float) -> float | None:
         """Vision: when a press may first reach the game after the last hit the view showed: its capture time plus
-        the latest gate opening measured after a hit, pause_quit.POST_HIT_OPEN_MAX_S (0.27 s; 2138 hits opened
-        0.213-0.267 s after it). The press then lands 0-3 frames after the opening whatever the view's delay k; the
-        blind cadence from the trigger (hit + k + the lead, every 6 frames) landed 0-5 after it. The vision view sees
+        the latest first pausable frame measured after a hit, pause_quit.POST_HIT_OPEN_MAX_S (0.285 s: 2138 hits had
+        the STATE's gate open 0.213-0.267 s after it, pausable one frame later). The press then lands 0-3 frames after
+        the first pausable frame whatever the view's delay k; the blind cadence from the trigger (hit + k + the lead,
+        every 6 frames) landed 0-5 after it. The vision view sees
         no gate and no time scale; the hero does not move during the freeze's ramp (recoil starts after it), so a
         motion cue for the ramp is left to M3's measurements. None once the opening is more than gate_trust_s past."""
         t = self.t_hit_seen

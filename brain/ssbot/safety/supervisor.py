@@ -35,9 +35,9 @@ the support unknown) with h >= 3; RED any trigger. Triggers (§3.7.4, Q1 / Q1a t
      (the PAUSE_PENDING allowlist is evasive only, and the tactics never ask for a Bind at h <= 1: a model error at
      h <= 1 is death, so the bot bets on its model only where an error is survivable). After a hit (q1_cause "hit":
      a hit within POST_HIT_WINDOW_S) the pause lands in the post-hit window, the one stretch that is both
-     invulnerable and pausable: the gate is shut by the hit's freeze for 0.213-0.267 s (2143 Bell Beast hits) and
-     the i-frames last 1.10-2.08 s; the pause machine times its first press for the gate's opening
-     (pause_quit.PauseCues.gate_open_at). Without a hit (frost, pending damage: q1_cause "no_hit") it presses at once,
+     invulnerable and pausable: the hit's freeze shuts the gate (the STATE shows it open 0.213-0.267 s after the hit
+     on 2138 Bell Beast hits, a press pauses from the frame after) and the i-frames last 1.10-2.08 s; the pause
+     machine times its first press for the first pausable frame (pause_quit.PauseCues.gate_open_at). Without a hit (frost, pending damage: q1_cause "no_hit") it presses at once,
      i.e. the pause lands on the first pausable frame. The 10bfb66 rule (Q1 at a certified-empty support against the
      worst known event) is now simply h's definition above.
   Q1a h >= 2 and HP < max: heal first (Restrictions.heal_first; no pause). The tactics Bind in place when the §3.5.6

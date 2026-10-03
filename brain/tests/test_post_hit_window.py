@@ -1,8 +1,10 @@
 """Q1's post-hit window (DESIGN §3.7.4 / §3.7.5, the person's rule of 2026-10-03): after a hit that leaves h <= 1 the
 pause must land on the first pausable frame of the window that is both invulnerable and pausable. Stand-in game: the
-hit's freeze shuts the gate (pause.blk 3) through the time scale's hold (ts 0) and its 0.1 s ramp (ts 0.17 ... 0.83),
-opening on the ramp's end frame or the next (the four sequences of the 2143 measured hits, pause_quit constants); an
-ACTION answers the STATE two frames earlier; a Pause press is an edge, and it pauses only on an open frame."""
+hit's freeze shuts the gate (pause.blk 3) through the time scale's hold (ts 0) and its 0.1 s ramp (ts 0.17 ... 0.83,
+sometimes a last 1.0 frame still shut), the four shapes of the 2143 measured hits; G is the first frame whose STATE
+shows the gate open, and a press pauses from G + 1 on (the time scale comes back after InputHandler's Update: live
+check 20261003_111244, a press latched on G did not pause); an ACTION answers the STATE two frames earlier; a Pause
+press is an edge."""
 import math
 
 import pytest
@@ -47,8 +49,8 @@ def run_loop(seq, start: int, cues_of, lead: int = LEAD) -> int | None:
     sent: dict[int, int] = {}
     for f in range(len(seq)):
         pressed = bool(sent.get(f, 0) & PAUSE)
-        if pressed and not sent.get(f - 1, 0) & PAUSE and seq[f][0] == 0:
-            return f
+        if pressed and not sent.get(f - 1, 0) & PAUSE and f > 0 and seq[f - 1][0] == 0:
+            return f                     # pausable: the gate was open in the previous frame's STATE (G + 1 on)
         if f < start:
             continue
         if f == start:
@@ -70,29 +72,29 @@ def no_prediction(f: int, seq) -> pq.PauseCues:
 
 
 @pytest.mark.parametrize("first_ramp,extra_shut", SEQUENCES)
-def test_oracle_ramp_lands_the_pause_on_the_opening_frame(first_ramp, extra_shut):
-    """Oracle view: Q1 on the hit frame; the time-scale ramp predicts the opening, so the first press lands on the
-    opening frame or the next (before: on the observed gate alone, 2 frames after it, the training lead)."""
+def test_oracle_lands_the_pause_on_the_first_pausable_frame(first_ramp, extra_shut):
+    """Oracle view: Q1 on the hit frame. With a last shut 1.0 frame the press goes there and pauses on G + 1, the
+    first pausable frame; without one the observed gate puts it on G + 2, as before. Never earlier: a press on G is
+    dropped and the next edge comes 6 frames later (the first version timed the press for G: +20 / +21 live)."""
     seq = gate_sequence(first_ramp, extra_shut)
-    opening = next(i for i, (b, _) in enumerate(seq) if b == 0)
+    g = next(i for i, (b, _) in enumerate(seq) if b == 0)
     landed = run_loop(seq, 0, oracle_cues)
-    assert landed is not None and 0 <= landed - opening <= 1
-    assert run_loop(seq, 0, no_prediction) == opening + LEAD
+    assert landed == (g + 1 if extra_shut else g + 2)
+    assert run_loop(seq, 0, no_prediction) == g + LEAD
     # the trigger seen late (a skipped tick) changes nothing as long as it comes before the ramp's end
     assert run_loop(seq, 6, oracle_cues) == landed
 
 
-def test_hit_ramp_open_at_only_in_a_hit_freeze():
+def test_hit_ramp_open_at_only_on_the_ramps_last_shut_frame():
     t = 1.0
-    s = state(10, 3, 0.83)
-    assert hit_at(s, t) == pytest.approx(t + 0.017 + 1 / 60)
-    assert hit_at(state(10, 3, 1.0), t) == pytest.approx(t + 1 / 60)          # ramp done, gate one frame behind
+    assert hit_at(state(10, 3, 1.0), t) == pytest.approx(t + 2 / 60)          # G next frame, pausable after it
+    assert hit_at(state(10, 3, 0.83), t) is None                               # 0.83 -> 1.0 or 0.83 -> open: unknown
     assert hit_at(state(10, 3, 0.0), t) is None                                # the hold: its length unknown
     assert hit_at(state(10, 0, 1.0), t) is None                                # open
-    assert hit_at(state(10, 3 | gc.BLK_GAME_STATE, 0.5), t) is None           # another blocker
-    assert hit_at(state(10, 3, 0.5, inv=0.0), t) is None                       # no i-frames: not a hit's freeze
+    assert hit_at(state(10, 3 | gc.BLK_GAME_STATE, 1.0), t) is None           # another blocker
+    assert hit_at(state(10, 3, 1.0, inv=0.0), t) is None                       # no i-frames: not a hit's freeze
     # the vision cues never carry it (no time scale, no gate in the view)
-    assert pq.vision_cues_from_state(state(10, 3, 0.83), QPC).gate_open_at is None
+    assert pq.vision_cues_from_state(state(10, 3, 1.0), QPC).gate_open_at is None
 
 
 def hit_at(s: dict, t: float) -> float | None:
@@ -103,8 +105,8 @@ def hit_at(s: dict, t: float) -> float | None:
 @pytest.mark.parametrize("opening", (13, 14, 15, 16))
 def test_vision_prediction_never_presses_into_the_shut_gate(k, opening):
     """Vision view: Q1 seen k frames after the hit (the delayed view); the press waits for the hit's capture time plus
-    POST_HIT_OPEN_MAX_S and lands 0-3 frames after the opening (13-16 frames measured), whatever k. The blind cadence
-    from the trigger landed 0-5 after it."""
+    POST_HIT_OPEN_MAX_S and lands 0-3 frames after the first pausable frame (G 13-16 frames measured, pausable from
+    G + 1), whatever k. The blind cadence from the trigger landed 0-5 after it."""
     seq = [(3, 0.0)] * opening + [(0, 1.0)] * 40
     t_hit = 0.0
 
@@ -116,14 +118,14 @@ def test_vision_prediction_never_presses_into_the_shut_gate(k, opening):
     def blind(f, s):
         return pq.vision_cues_from_state(state(max(0, f - k), *s[max(0, f - k)]), QPC)
     landed = run_loop(seq, k, vision)
-    assert landed is not None and 0 <= landed - opening <= 3 and landed <= 16
+    assert landed is not None and 0 <= landed - (opening + 1) <= 3 and landed <= 17
     b = run_loop(seq, k, blind)
-    assert b is not None and 0 <= b - opening <= 5
+    assert b is not None and 0 <= b - (opening + 1) <= 5
 
 
 def test_no_hit_presses_at_once():
     """Q1 without a hit (frost, pending damage): no prediction, the first press goes on the trigger's frame and lands
-    on the first open frame (lead 2)."""
+    on the first pausable frame (lead 2)."""
     seq = [(0, 1.0)] * 30
     assert run_loop(seq, 5, oracle_cues) == 5 + LEAD
     assert run_loop(seq, 5, lambda f, s: pq.vision_cues_from_state(state(f, *s[f]), QPC)) == 5 + LEAD
