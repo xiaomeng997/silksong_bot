@@ -123,6 +123,15 @@ def _state(enemies, hx=30.0):
             "ents": ents}
 
 
+def test_waiting_enemies_are_not_in_play():
+    from ssbot.train.gauntlet import live_enemies
+    s = _state([("Song Pilgrim Maestro", 42.5, 10.9), ("Song Pilgrim 03", 40.0, 4.5), ("Song Reed", 35.0, 4.6)])
+    s["ents"][0]["fsms"] = [{"name": "Control", "state": "Fly In Ready"}]
+    s["ents"][1]["fsms"] = [{"name": "Attack", "state": None}]
+    s["ents"][2]["fsms"] = [{"name": "Control", "state": "Stab Antic"}]
+    assert [e["type_key"] for e in live_enemies(s)] == ["Song Reed"]
+
+
 def test_gauntlet_policy_presses_toward_a_live_enemy_and_clings_left():
     pol = GauntletDataPolicy()
     pol.reset(random.Random(3), FORUM)

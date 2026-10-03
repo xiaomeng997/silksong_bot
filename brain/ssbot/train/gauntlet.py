@@ -237,13 +237,28 @@ class GauntletTap:
                     "sim_alive": self.sim.alive}
 
 
+# FSM states of enemies that are in the scene but not in the fight (Forum, fo_A before the battle, instance 2,
+# 2026-10-02: later waves' Song Pilgrim Maestro and Song Reed wait in "Fly In Ready"; the Maestro's three pooled
+# "Song Automaton Tiny" (hp 28) sit in "Die" at its position; wave 1's Song Pilgrim 03 pair has its "Attack" FSM
+# disabled (state None) until BattleSceneEnemy enables it; Song Heavy Sentry rests in "Rest" until BATTLE START).
+WAITING_STATES = frozenset(("Fly In Ready", "Die", "Dormant", "Rest", "On-plane Rest", "Start Idle"))
+
+
+def in_play(e: dict) -> bool:
+    """An enemy that takes part now: its FSMs run (some state set) and none is a waiting state."""
+    states = [f.get("state") for f in e.get("fsms") or ()]
+    if not states:
+        return True
+    return any(st is not None for st in states) and not any(st in WAITING_STATES for st in states)
+
+
 def live_enemies(s: dict) -> list[dict]:
-    """The HealthManager entities of a STATE that are in play: not hidden, not dead, hp > 0."""
+    """The HealthManager entities of a STATE that are in play: not hidden, not dead, hp > 0, not waiting."""
     out = []
     for e in s.get("ents") or ():
         if not (e.get("src", 0) & SRC_BITS["health_manager"]) or e.get("hidden") or e.get("is_dead"):
             continue
-        if (e.get("hp") or 0) <= 0:
+        if (e.get("hp") or 0) <= 0 or not in_play(e):
             continue
         out.append(e)
     return out
