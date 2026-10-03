@@ -302,6 +302,28 @@ def test_injected_fault_pauses_and_the_first_press_waits_for_the_planner_keys():
     assert r.mask == PAUSE and sc.pq.presses == 1
 
 
+def test_vision_mode_keeps_the_menu_key_guard():
+    """vision=True (the pause machine reads the delayed STATE's vision cues) together with the menu key guard: the key
+    path is the bot's own output, so the guard reads the current STATE's act.hf and the in-flight masks in every view,
+    and the first Pause waits for a planner key pressed in flight exactly as in the oracle view (integration of the
+    vision and pause / quit chains)."""
+    right = 1 << BIT["right"]
+    sc = _control(vision=True)
+    states = wf.window(0)[:12]
+    for s in states:
+        s["act"] = {"target": s["f"], "hf": {"latched": right, "desired": right, "pending": [0] * 22,
+                                              "age": [9] * 22}}
+    sc.step(states[0], obs=states[0])
+    sc.inject_fault("QF", "test")
+    r = sc.step(states[1], obs=states[0], inflight=[right | (1 << BIT["jump"])])
+    assert r.decision.pause_pending and "QF" in r.decision.triggers
+    assert r.mask == 0 and sc.pq.key_waits == 1
+    s = states[2]
+    s["act"]["hf"].update(latched=right | (1 << BIT["jump"]), desired=right | (1 << BIT["jump"]), age=[9] * 22)
+    r = sc.step(s, obs=states[1], inflight=[0])
+    assert r.mask == PAUSE and sc.pq.presses == 1
+
+
 def _paused_vision(s: dict, age: int) -> dict:
     """_paused with the menu section the oracle exports while paused (dim and canvas alpha rising 0.083 a frame from
     the pause frame: live run 20261003_022259 i0 ep9)."""

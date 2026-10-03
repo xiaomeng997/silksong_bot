@@ -39,7 +39,7 @@ class _Link:
     def rpc(self, method: str, **kw):
         return {"seed": kw.get("seed")} if method == "randomize_start" else {}
 
-    def act(self, f: int, m: int, hold_frames: int = 0) -> None:
+    def act(self, f: int, m: int, hold_frames: int = 0, flags: int = 0) -> None:   # OracleLink.act (ACTION flags)
         self.acts.append((f, m))
 
 
