@@ -263,6 +263,20 @@ def test_menu_fault_triggers_and_hits_on_one_tick_and_hit_faults_rearm_on_the_ne
     assert not any(k == "clash" for k, _ in kinds) and ("cast", "hit") in kinds and ("kill", "trigger") in kinds
 
 
+def test_hit_faults_wait_out_the_heros_invulnerability():
+    """A refused hit is a damage event the planner counts as unpredicted (two make a Q4 quit): no hit is sent while
+    down-spike invulnerability steps (cstate_int[1]), invulnerable or parry i-frames would refuse it."""
+    inj, link = _injector("falling")
+    for f in range(0, 75):
+        s = _s(f, hs=3, vy=-4.0)
+        if f < 70:
+            s["hero"]["cstate_int"] = [15, 5, 0, 0]
+        if f < 72:
+            s["hero"]["invulnerable"] = f >= 70
+        inj.act(s)
+    assert [r["f"] for r in inj.log["sent"]] == [72]
+
+
 def test_inject_kinds_env_restricts_the_draw(monkeypatch):
     monkeypatch.setenv("SSBOT_INJECT_KINDS", "menu,keys")
     seen = set()

@@ -80,6 +80,16 @@ def _clip(s: dict) -> str:
     return str(((s.get("hero") or {}).get("anim") or {}).get("clip") or "")
 
 
+def _takes_hits(h: dict) -> bool:
+    """The hero would take an ENEMY hit now: not invulnerable, no down-spike invulnerability steps (STATE
+    cstate_int[1]), no parry i-frames, CanTakeDamage. A refused injected hit is still a "damage" event that the
+    planner counts as unpredicted, and two of them end the attempt as a Q4 quit with no fault in it (chunk
+    20261002_232051 ep 35: a falling-kind hit sent in a pogo's Recoil Twirl was refused)."""
+    ci = h.get("cstate_int") or ()
+    return (h.get("can_take_damage", True) is not False and not h.get("invulnerable")
+            and not (len(ci) > 1 and ci[1]) and not (h.get("parry_invuln_timer") or 0) > 0)
+
+
 def _latched(s: dict) -> int:
     act = s.get("act") or {}
     hf = act.get("hf") or {}
@@ -312,10 +322,12 @@ class HitInjector:
     def _ready(self, s: dict) -> bool:
         """A fault may go now: a fight frame, not paused, no pause under way, and HP >= 2 when it includes a hit."""
         g = s.get("game") or {}
-        hp = (s.get("hero") or {}).get("health")
+        h = s.get("hero") or {}
+        hp = h.get("health")
         need = 1 if self.fault == FAULT_TRIGGER else 2
-        return not (g.get("paused") or not isinstance(hp, int) or hp < need
-                    or getattr(self.inner, "pause_owned", False))
+        if g.get("paused") or not isinstance(hp, int) or hp < need or getattr(self.inner, "pause_owned", False):
+            return False
+        return self.fault == FAULT_TRIGGER or _takes_hits(h)
 
     def _step(self, s: dict) -> None:
         self._collect()
