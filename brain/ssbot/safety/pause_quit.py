@@ -18,6 +18,11 @@ on the first open frame plus the input path's lead instead of wherever the blind
 34 ms floor makes it 3 frames down, 3 up, and a press held into the opening makes no edge: 0-5 frames late. A Q1
 raised on an enemy hit's frame with the 2-frame training lead: press edges at +2, +8, +14 and the gate opening at +15
 (32 of the 38 hits of the gate / live QUITs, 20261002_123347 ... 152649; +14 in 5) put the pause at +20; now +17).
+A hit's freeze is predictable (PauseCues.gate_open_at; Q1's post-hit window, DESIGN §3.7.4 / §3.7.5): while it shuts
+the gate no press starts before one would reach the game at the predicted opening, and from then on the press goes even
+with the gate still seen shut: the oracle reads the freeze's time-scale ramp (hit_ramp_open_at; the pause lands on the
+opening frame or the next), the vision view the hit's time plus the latest opening measured, POST_HIT_OPEN_MAX_S
+(train.supervision; lands 0-3 frames after the opening whatever the view's delay, instead of the blind cadence's 0-5).
 A second hold-back: no new press starts while PauseCues.keys_clear is False (safety.key_guard: a game key the
 planner pressed could still be latched, or replayed by the key path's minimum press / release, on the frame the press
 lands, and the menu would open over it), for at most keys_wait_s; the machine's empty mask releases such keys within
@@ -161,6 +166,24 @@ class PauseCues:
     keys_clear: bool | None = None   # a Pause press emitted now would land with no other key latched or queued on the
     #                                  key path (safety.key_guard.keys_clear; the caller knows the in-flight ACTIONs);
     #                                  None: unknown
+    gate_open_at: float | None = None   # predicted: a Pause press reaching the game at or after this time (cue
+    #                                  clock) finds the gate open; set only while a hit's freeze shuts it (oracle: the
+    #                                  time-scale ramp, cues_from_state; vision: the hit's time + POST_HIT_OPEN_MAX_S,
+    #                                  train.supervision). None: no prediction
+
+
+# The post-hit pause window (DESIGN §3.7.5, Q1 of §3.7.4). An enemy hit shuts the pause gate with DISABLE_PAUSE and
+# TIME_SLOWED (STATE pause.blk 3) for its FreezeMoment: time scale 0 for 8-9 frames, then a linear ramp of 0.1 s back
+# to 1 (ts 0.17, 0.33, 0.5, 0.67, 0.83 per 60 fps frame); the gate opens on the frame the ramp reaches 1 or the next.
+# Measured on the Bell Beast hits that shut the gate (data run 20261001_122249 i0_000 / i2_000, eval runs 20261002_152649
+# / 171806 i0-i1 and 20261003_053033 i0-i1; 2143 hits, plus 44 lethal-blocked ones that shut nothing): 2138 opened
+# 0.213-0.267 s after the hit (p50 0.232; 13 / 14 / 15 / 16 frames: 327 / 1286 / 524 / 1), on the ramp's end frame or
+# the next (950 / 1193); from a ramp frame with time scale ts the opening comes (1 - ts) x 0.1 s - 0.003 .. + 0.022 s
+# later (2895 ramp frames of 579 hits, i0_000), 5-6 frames after the first ramp frame. The other 5 were hits during a
+# Bind (the BindBreak freeze: 0.53-0.55 s). The i-frames last 1.10-2.08 s (safety.pause_window).
+HIT_RAMP_S = 0.1                 # FreezeMoment(0, 0.1, 0.1, 0): the time scale's ramp back to 1
+POST_HIT_OPEN_MAX_S = 0.27       # the latest opening after a hit without a Bind (max 0.2668 s of 2143)
+HIT_BLOCKERS = gc.BLK_DISABLE_PAUSE | gc.BLK_TIME_SLOWED
 
 
 @dataclass(slots=True)
@@ -190,6 +213,8 @@ class PauseQuitConfig:
     keys_wait_s: float = 0.25        # keys seen not clear (PauseCues.keys_clear False) hold the next press back this
     #                                  long at most (they drain within the 2-frame minimum press once the machine's
     #                                  empty mask goes out), then it goes anyway and the wait is logged
+    input_lead_s: float = 2 / 60     # emission -> the game frame that samples the key: training sends the ACTION for
+    #                                  frame f + 2 at STATE f (PauseCues.gate_open_at is compared with now + this)
     loop_alert_s: float = 5.0        # still looping this long: alert (and keep looping)
     false_cue_alert: int = 3         # this many false cues: alert (and keep looping)
     input_latency_max_s: float = 0.10   # p99.9 key emission -> capture time of the first frame that can show its
@@ -310,6 +335,8 @@ class PauseQuit:
         self._keys_wait_t: float | None = None     # emission time since when a press has waited for clear keys
         self.key_waits = 0                         # presses held back for the keys (frames)
         self.key_waits_expired = 0                 # presses that went after keys_wait_s with the keys still not clear
+        self.post_hit_waits = 0                    # loops whose first press waited for a hit's predicted opening
+        self._post_hit_noted = False
 
     # ---- control ------------------------------------------------------------------------------------------------
 
@@ -334,6 +361,7 @@ class PauseQuit:
         self._settle, self._settle_armed = None, False
         self._gate_closed_t = None
         self._keys_wait_t = None
+        self._post_hit_noted = False
         self._note(t, "start", goal)
 
     def upgrade_to_quit(self, t: float) -> bool:
@@ -592,7 +620,21 @@ class PauseQuit:
             keys = self._tap_keys(now)
             if not self._tap.done:
                 return keys
-        if self._gate_closed_t is not None and c.t - self._gate_closed_t < self.cfg.gate_trust_s:
+        cfg = self.cfg
+        pred = c.gate_open_at
+        if pred is not None and pred - now <= cfg.gate_trust_s:
+            # a hit's freeze shuts the gate until about `pred` (the post-hit window, Q1): no press may reach the game
+            # before it (dropped, and one held into the opening makes no edge: 0-5 frames late with the blind
+            # cadence); from the first frame a press lands at or after it, the press goes even with the gate still
+            # seen shut (the oracle's gate is this frame's, the press lands input_lead_s later). Half a frame of
+            # tolerance: both sides are nominal frame counts on a jittered clock
+            if now + cfg.input_lead_s < pred - 0.5 * cfg.frame_s:
+                if not self._post_hit_noted:
+                    self._post_hit_noted = True
+                    self.post_hit_waits += 1
+                    self._note(now, "post_hit_wait", f"{pred - now:.3f} s")
+                return NO_KEYS
+        elif self._gate_closed_t is not None and c.t - self._gate_closed_t < cfg.gate_trust_s:
             # the gate is closed (oracle pause.blk: the hit's 250 ms, probe P7): a press now is dropped (m0:N12), and
             # one still held when the gate opens makes no new edge, so with the blind cadence (3 frames down, 3 up at
             # 60 fps) the pause came 0-5 frames after the gate opened. Released until the first open frame, it comes
@@ -1073,7 +1115,27 @@ def cues_from_state(s: dict, qpc_freq: float = 1e7) -> PauseCues:
         menu=menu, menu_ready=ready, highlight=highlight, quit_state=quit_state, quit_cause=quit_cause,
         quitting=quitting, dead=dead, menu_alpha=extra.get("alpha"),
         disable_pause=bool(blk & gc.BLK_DISABLE_PAUSE) if "blk" in p else None,
-        unpause_blocked=None if ign is None else bool(ign), gate_open=(blk == 0) if "blk" in p else None)
+        unpause_blocked=None if ign is None else bool(ign), gate_open=(blk == 0) if "blk" in p else None,
+        gate_open_at=hit_ramp_open_at(s, t))
+
+
+def hit_ramp_open_at(s: dict, t: float, frame_s: float = 1 / 60) -> float | None:
+    """Oracle: when a hit's freeze will let the pause gate open, from one STATE in the freeze's ramp (the hero
+    invulnerable, pause.blk exactly DISABLE_PAUSE | TIME_SLOWED, 0 < ts <= 1): the ramp's end, (1 - ts) x 0.1 s on,
+    plus one frame (the gate opens on the ramp's end frame or the next: 950 / 1193 hits; measured error of the ramp's
+    end -0.003 .. +0.022 s, module constants). None in the freeze's hold (ts 0: its remaining length is not in the
+    STATE) and outside a hit's freeze: a boss-death slow motion (TIME_SLOWED with the hero not invulnerable) keeps the
+    observed gate's hold-back. With the training lead (the ACTION for f + 2), the first press goes at the ramp frame
+    with ts 0.83 and lands on the opening frame or one after it; on the observed gate alone it landed 2 after."""
+    p = s.get("pause") or {}
+    blk, ts = p.get("blk"), s.get("ts")
+    if blk != HIT_BLOCKERS or not isinstance(ts, (int, float)) or not 0 < ts <= 1:
+        return None
+    tm = (s.get("hero") or {}).get("tm") or {}
+    inv = tm.get("inv") if isinstance(tm, dict) else None
+    if not (isinstance(inv, (int, float)) and inv > 0) and not (s.get("hero") or {}).get("invulnerable"):
+        return None
+    return t + (1.0 - float(ts)) * HIT_RAMP_S + frame_s
 
 
 # The vision form of the oracle cues (training on the simulated final path). A menu reader sees the pause menu once its
@@ -1096,6 +1158,8 @@ def vision_cues_from_state(s: dict, qpc_freq: float = 1e7) -> PauseCues:
     c = cues_from_state(s, qpc_freq)
     c.paused = None
     c.gate_open = None
+    c.gate_open_at = None     # the time-scale ramp is the oracle's; the vision view times a hit by its HUD / hit cue
+    #                           (train.supervision: the hit's time + POST_HIT_OPEN_MAX_S)
     c.unpause_blocked = None
     c.quit_cause = None
     g = s.get("game")

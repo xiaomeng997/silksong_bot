@@ -21,12 +21,29 @@ worst_known_damage has no default: every caller states the encounter's worst sin
 A frame without a hero (STATE "hero" missing: loads, the main menu) is unknown, not 0 HP: h is taken from the last
 known hero, and Q5 fires once the hero has been missing for hero_lost_ms with h <= 2 or never seen.
 
+h (SupervisorDecision.h) is hits_to_death against the support; with a certified-empty support (nothing can land within
+its 0.8 s, e.g. the Bell Beast underground) the support says UNBOUNDED, yet the encounter's worst event comes back
+after the horizon, so h is then counted against that event (worst_known_damage, the worst taken this attempt; an
+intact Fractured Mask covers it as it would the visible boss's): h_basis "worst known". Every rule below (tier, Q1,
+Q1a, Q3, Q5, Q6, the Bind commit test's worth clause) reads this h. Before 2026-10-03 only Q1 used the floor (10bfb66),
+so at 3 HP with the boss underground the tier was GREEN and the Bind commit test refused the Bind as "not worth it"
+(HP 3 > max - 3 and h UNBOUNDED > 2) in the one window where it is safest.
+
 Tiers: GREEN h >= 3, the chosen plan has S = 0 and the support is known; YELLOW h = 2, or S = 1 (or no plan yet, or
-the support unknown) with h >= 3; RED any trigger. Triggers (§3.7.4):
-  Q1 h <= 1 (a Fractured Mask just broken at 1 HP included)                  -> PAUSE_PENDING, quit
-     With a certified-empty support h is unbounded (nothing can land within the horizon), yet the encounter's worst
-     event comes back after it: Q1 then counts h against that event (worst_known_damage, the worst taken), so a
-     hero one hit from death pauses while nothing can hurt, not when the threat reappears
+the support unknown) with h >= 3; RED any trigger. Triggers (§3.7.4, Q1 / Q1a the person's rule of 2026-10-03):
+  Q1 h <= 1 (a Fractured Mask just broken at 1 HP included)                  -> PAUSE_PENDING, quit; no Bind attempt
+     (the PAUSE_PENDING allowlist is evasive only, and the tactics never ask for a Bind at h <= 1: a model error at
+     h <= 1 is death, so the bot bets on its model only where an error is survivable). After a hit (q1_cause "hit":
+     a hit within POST_HIT_WINDOW_S) the pause lands in the post-hit window, the one stretch that is both
+     invulnerable and pausable: the gate is shut by the hit's freeze for 0.213-0.267 s (2143 Bell Beast hits) and
+     the i-frames last 1.10-2.08 s; the pause machine times its first press for the gate's opening
+     (pause_quit.PauseCues.gate_open_at). Without a hit (frost, pending damage: q1_cause "no_hit") it presses at once,
+     i.e. the pause lands on the first pausable frame. The 10bfb66 rule (Q1 at a certified-empty support against the
+     worst known event) is now simply h's definition above.
+  Q1a h >= 2 and HP < max: heal first (Restrictions.heal_first; no pause). The tactics Bind in place when the §3.5.6
+     commit test passes, else walk to a verified safe spot of the playbook and Bind there, else fight on under the
+     other triggers (combat.tactics.modes). Before, heal_first was only a YELLOW / RED flag nothing read, and the
+     playbook's hp_missing_min (2) kept the Bind off 4 / 5 HP although h is 2 there
   Q2 I2 broken and no candidate leaves the exposure within 0.2 s              -> PAUSE_PENDING, quit
   Q3 h = 2 with a mask-bypassing, multi-instance, hazard or CriticalDamage threat, or an unknown support
                                                                               -> PAUSE_PENDING, quit
@@ -71,8 +88,8 @@ vocabulary does not know is never allowed:
                                      and interactions set BlockingInteractable or disablePause (m0:N15)
   YELLOW / RED otherwise             everything except: DAMAGING (attacks, tools, silk skills, Clawline, HIT_TARGET)
                                      when the next landed hit may kill (the kill freeze swallows a pause); ATTACK(down)
-                                     over any hazard; plus the GREEN rules. Restrictions: heal first, punish <= 1 hit,
-                                     no parry, no new fights
+                                     over any hazard; plus the GREEN rules. Restrictions: punish <= 1 hit, no parry,
+                                     no new fights (heal first is Q1a's: h >= 2 below max HP, in any tier)
   GREEN                              everything except SILKSKILL below full HP and ATTACK(down) over spikes (§3.5.6)
 PAUSE_PENDING is sticky until the pause is confirmed (notify_paused) or the attempt ends: a pause does not end the
 threat. After a greyed-Quit "unpause, EVADE out of the room, pause and quit" (§3.7.5 step 4), notify_resumed(EVADE_EXIT)
@@ -100,6 +117,12 @@ RESUME_SELF_CHECK, RESUME_EVADE_EXIT = "self_check", "evade_exit"   # notify_res
 
 QUIT_TRIGGERS = ("Q1", "Q2", "Q3", "Q6", "QF")   # QF: a fault injected by the pause stress test (inject)
 UNKNOWN_SOURCE = "unknown support"
+WORST_SOURCE = "worst known event"
+H_SUPPORT, H_WORST = "support", "worst known"       # SupervisorDecision.h_basis
+Q1_HIT, Q1_NO_HIT = "hit", "no_hit"                  # SupervisorDecision.q1_cause
+# A Q1 this soon after a hit is the post-hit window's quit: the hit's i-frames last at least this long (pause_window:
+# the i-frames end 1.10-2.08 s after the hit on the 2268 hits of 20261001_121446 / 122249; probe P7 "to about 1.2 s")
+POST_HIT_WINDOW_S = 1.1
 NOTHING: frozenset[Prim] = frozenset()
 
 # §3.5.6 constants
@@ -210,6 +233,9 @@ class SupervisorDecision:
     support_known: bool = False
     hero_known: bool = True
     evade_exit: bool = False                   # the EVADE_EXIT latch is on: leave the room, evasive primitives only
+    h_basis: str | None = None                 # H_SUPPORT, or H_WORST (certified-empty support: the encounter's worst)
+    q1_cause: str | None = None                # Q1 this frame: Q1_HIT (post-hit window) or Q1_NO_HIT (first pausable)
+    t_hit: float | None = None                 # SupervisorInput.t of the last hit seen this attempt
 
     def allows(self, primitive: "Prim | int | str") -> bool:
         """A primitive (code, int or text name such as "ATTACK(down)") is allowed; unknown names never are."""
@@ -366,6 +392,7 @@ class Supervisor:
         self.never_seen_s = 0.0
         self.reasons_latched: list[str] = []
         self.injected: list[tuple[str, str]] = []
+        self.t_hit: float | None = None         # the last frame with damage taken (SupervisorInput.damage_taken > 0)
 
     def inject(self, tid: str = "QF", why: str = "injected fault") -> None:
         """Fire trigger `tid` on the next step (the pause stress test, DESIGN §3.7.5 G1 fault injection: a quit
@@ -416,23 +443,32 @@ class Supervisor:
         floor = max(1, self.cfg.worst_known_damage, self.worst_seen, max((e.damage for e in ev), default=0))
         return ev + (SupportEvent(UNKNOWN_SOURCE, floor, mask_covers=self.cfg.unknown_mask_covers),)
 
+    def _h(self, inp: SupervisorInput, hero: _Hero, support: Sequence[SupportEvent]) -> tuple[int, str]:
+        """(h, basis): hits_to_death against the support; against the encounter's worst known event when the support
+        is certified empty (module docstring). Pause stress chunk 20261002_232051 ep 35: a hit to 1 HP with the boss
+        submerged left h UNBOUNDED, the tier GREEN and the planner fighting for 15 frames, until a Q4 paused it."""
+        h = hits_to_death(hero.hp, hero.blue, mask_intact(hero.mask),
+                          ctx_from_support(support, inp.pending_dmg, inp.pending_mask_covers))
+        if h != UNBOUNDED:
+            return h, H_SUPPORT
+        floor = SupportEvent(WORST_SOURCE, max(1, self.cfg.worst_known_damage, self.worst_seen))
+        return hits_to_death(hero.hp, hero.blue, mask_intact(hero.mask),
+                             ctx_from_support((floor,), inp.pending_dmg, inp.pending_mask_covers)), H_WORST
+
+    def q1_cause(self, t: float) -> str:
+        """Q1_HIT when a hit came within POST_HIT_WINDOW_S of t (the quit belongs in its post-hit window), else
+        Q1_NO_HIT (frost, pending damage, a start at low HP: the first pausable frame)."""
+        return Q1_HIT if self.t_hit is not None and 0.0 <= t - self.t_hit <= POST_HIT_WINDOW_S else Q1_NO_HIT
+
     def _triggers(self, inp: SupervisorInput, h: int | None, hero: _Hero | None, support: Sequence[SupportEvent],
-                  known: bool) -> list[tuple[str, str]]:
+                  known: bool, basis: str | None = None) -> list[tuple[str, str]]:
         cfg = self.cfg
         out: list[tuple[str, str]] = []
         if h is not None and h <= 1:
-            out.append(("Q1", f"hits_to_death {h}"))
-        elif h == UNBOUNDED and hero is not None:
-            # nothing in support now (certified empty: the Bell Beast underground), but the support covers only the
-            # horizon: the encounter's worst event comes back. Q1 on that, so the pause comes while nothing can hurt
-            # instead of when the threat reappears (pause stress chunk 20261002_232051 ep 35: hit to 1 HP with the
-            # boss submerged, h UNBOUNDED, tier GREEN, the planner kept fighting; only a Q4 paused it 15 frames later)
-            # the encounter's own worst event, as the visible boss's would count (an intact Fractured Mask covers it)
-            floor = SupportEvent("worst known event", max(1, cfg.worst_known_damage, self.worst_seen))
-            hf = hits_to_death(hero.hp, hero.blue, mask_intact(hero.mask),
-                               ctx_from_support((floor,), inp.pending_dmg, inp.pending_mask_covers))
-            if hf <= 1:
-                out.append(("Q1", f"hits_to_death {hf} against the worst known event (support empty now)"))
+            why = f"hits_to_death {h}" + (" against the worst known event (support empty now)" if basis == H_WORST
+                                          else "")
+            out.append(("Q1", why + ("; after a hit: pause in the post-hit window"
+                                     if self.q1_cause(inp.t) == Q1_HIT else "; no hit: first pausable frame")))
         if inp.i2_violated and (inp.escape_s is None or inp.escape_s > cfg.q2_escape_s):
             out.append(("Q2", "I2 broken, no escape within "
                               f"{cfg.q2_escape_s} s" + ("" if inp.escape_s is None else f" ({inp.escape_s:.2f} s)")))
@@ -505,17 +541,18 @@ class Supervisor:
     def step(self, inp: SupervisorInput) -> SupervisorDecision:
         cfg = self.cfg
         self.worst_seen = max(self.worst_seen, inp.damage_taken)
+        if inp.damage_taken > 0:
+            self.t_hit = inp.t
         hero = self._hero(inp)
         known = self.support_certified(inp)
         support = self._support(inp, known)
-        h = None
+        h = basis = None
         if hero is not None:
-            ctx = ctx_from_support(support, inp.pending_dmg, inp.pending_mask_covers)
-            h = hits_to_death(hero.hp, hero.blue, mask_intact(hero.mask), ctx)
+            h, basis = self._h(inp, hero, support)
         self.risk_integral += max(0.0, inp.p_death)
         self.unpredicted += max(0, inp.unpredicted_hits)
 
-        fired = self._triggers(inp, h, hero, support, known)
+        fired = self._triggers(inp, h, hero, support, known, basis)
         evade_end = self._evade_latch(inp)
         if evade_end is not None:
             fired.append(("EVADE_EXIT", f"ended: {evade_end}"))
@@ -570,7 +607,9 @@ class Supervisor:
             if careful and inp.next_hit_may_kill:
                 allowed -= DAMAGING
             allowed = frozenset(allowed)
-        restr = Restrictions(heal_first=careful, max_punish_hits=1 if careful else None, no_parry=careful,
+        # Q1a (the person's rule, 2026-10-03): h >= 2 below max HP -> heal first, in any tier (combat.tactics.modes)
+        heal_first = hero is not None and h is not None and h >= 2 and hero.hp < hero.max_hp
+        restr = Restrictions(heal_first=heal_first, max_punish_hits=1 if careful else None, no_parry=careful,
                              no_killing_blow=careful, no_down_slash_over_hazard=True, no_new_fights=careful)
         return SupervisorDecision(
             tier=tier, h=h, pause_pending=self.pending, quit_requested=self.on_paused == QUIT,
@@ -581,7 +620,8 @@ class Supervisor:
             conservative_variant=self.q4 is not None,
             long_planning_ok=tier == GREEN and not self.pending and (not inp.in_encounter or inp.in_safe_window),
             risk_integral=self.risk_integral, unpredicted_hits=self.unpredicted, support_known=known,
-            hero_known=inp.hp is not None, evade_exit=self.evade is not None)
+            hero_known=inp.hp is not None, evade_exit=self.evade is not None, h_basis=basis,
+            q1_cause=self.q1_cause(inp.t) if "Q1" in ids else None, t_hit=self.t_hit)
 
 
 # ---- §3.5.6 gates ------------------------------------------------------------------------------------------------
