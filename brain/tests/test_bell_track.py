@@ -224,3 +224,26 @@ def test_forecaster_drops_a_bursts_bell_unions_once_both_bells_are_tracked(atk_s
             occ = f.occupied(np.array([[cx[0]], [100.0]]), np.full((2, 1), 3.05), np.array([tc]))[:, 0]
             assert occ[0] and not occ[1]
             assert e_br > 0
+
+
+def test_vision_view_bell_targets_are_the_tracked_attack_bells(atk_spec, monkeypatch):
+    """SSBOT_VE_TARGETS: the tracked attack bells as pogo targets (their certain circle smaller than the oracle's, no
+    redirect); drop bells only with SSBOT_VE_DROP_TARGETS (an attack near one withdraws its track)."""
+    from ssbot.combat import forecast as fmod
+    from ssbot.combat.boss_model import BossModel
+    from ssbot.combat.pogo_targets import CERT_MARGIN_U
+    from ssbot.core.worldstate import VISION_EQUIVALENT
+    monkeypatch.setattr(fmod, "VE_TARGETS", True)
+    fc = fmod.Forecaster(BossModel.load("BellBeast"), VISION_EQUIVALENT, templates={})
+    fc.reset()
+    a = _launch(atk_spec, 84.0, -1, 30.0, 40, 0.15, seed=5)
+    b = _launch(atk_spec, 88.0, 1, 30.0, 40, 0.15, seed=6)
+    for (t, xa, ya), (_, xb, yb) in zip(a, b):
+        fc.update(_ws(t, [_atk(1, xa, ya, 0.15), _atk(2, xb, yb, 0.15)]))
+    f = fc.forecast(1.0)
+    tk = np.arange(30) / 60
+    paths = f.target_paths(tk)
+    assert len(paths) == 2 and all(p.cert_margin > CERT_MARGIN_U and not p.redirect for p in paths)
+    assert all(p.ok.any() for p in paths)
+    monkeypatch.setattr(fmod, "VE_TARGETS", False)
+    assert f.target_paths(tk) == []

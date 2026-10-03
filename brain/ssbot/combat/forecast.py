@@ -118,6 +118,7 @@ ATK_LAG_SLACK_S = 0.05
 # a recorded fight replayed in degraded_dust (view_compare 20261002_171806 i0 ep2) it generated bell pogos (0.34 per
 # Ptn R tick, 6.1 per Burst Recovery tick) but accepted none and left FORCED_RISK unchanged; not yet run live
 VE_TARGETS = os.environ.get("SSBOT_VE_TARGETS", "0") == "1"
+VE_DROP_TARGETS = os.environ.get("SSBOT_VE_DROP_TARGETS", "0") == "1"
 VE_CERT_EXTRA_U = 0.35
 # the vision view's HP is the hits it saw: a hit it missed leaves the count high, so just above the rage HP the rage is
 # still likely (scoring only: the support always keeps Rage Pos while it is possible). Live degraded_dust run
@@ -623,9 +624,13 @@ class Forecast:
     def _det_targets(self, tk: np.ndarray) -> list:
         """VE: one TargetPath per bell on an exact path with one branch (a drop bell before its bounce: until the
         bounce), nominal centre (no time slack), determined where simulate says so, collider on until its life;
-        a drop bell only while falling."""
+        a drop bell only while falling, and only with VE_DROP_TARGETS (any attack near a drop bell withdraws its
+        track, bell_track touched: the next tick sees the bell's whole self template, not the path the pogo was
+        planned on)."""
         out = []
         for j, d in enumerate(self.det):
+            if d.type_key.startswith(DROP_BELL) and not VE_DROP_TARGETS:
+                continue
             sides = d.branch_sides()
             sd = sides[0] if len(sides) == 1 else 0
             cx, cy, ok = self._bell_path(j, sd, 0.0, tk)
