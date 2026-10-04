@@ -792,3 +792,58 @@ and 10 (fixer round). Lead decision 2026-10-04: the certified killing blow at h 
    --write-knowledge`; add the scene to ENCOUNTER_SCENES / NEEDLE_BY_SCENE).
 3. Remove the live checkouts `C:\ssbot\live_stuck_f140a49` (at c67e4c1; the name is stale) and
    `C:\ssbot\live_stuck_9b42247` when no longer needed (`git worktree remove --force`).
+
+## Task "post-kill forecast" - keep dodging after the boss dies (branch worktree-wf_8f2a901f-a0c-1)
+
+Worktree `C:\modeling\silksong_bot\.claude\worktrees\wf_8f2a901f-a0c-1`, from main d1f3c46. Code 5a97e0f + fd18ae6 (tool fix,
+test); docs after. Instances 0 and 1 (oracle, Bell Beast), base seeds 122000 (smoke), 122100 (kill check), 122500 (200
+plain), 123500 (gate). Facts: `docs/facts/1.0.30000/post_kill.md` (Chinese); DESIGN §3.9.4 (CLEAR with the post-kill
+tail) and §3.7.2 I3 (the window's support holds what outlives the boss); M2.md status line; pause_quit.md 10.7 marked
+fixed.
+
+### Done
+
+- `combat/forecast.py`: after Death Broadcast (oracle view) every attack bell in the export is a DetBell on its exact
+  path (registry physics from its position and velocity; life = first bounce + 2 s End Timer + 0.05 s), and the BB_BURST
+  death tail's attack-bell union is no longer placed once both bells are exact (`SSBOT_DEAD_ATK=0`: the old way);
+  drop bells in "Cancel" (the death cancels a bell in its Antic) count as at rest. The fight (boss alive) is unchanged.
+- `train/planner_policy.py`: `act_after_clear = True` (the planner plays through the tail); a death without a kill
+  commitment keeps the last plan by game time through the slow motion (`_post_kill_commit`), then the planner ticks;
+  `stats()["post_kill"]` (ticks, planner ticks, FORCED_RISK after the death).
+- `train/episode.py` + `train/encounters.py`: `Encounter.tail_quiet_s` (Bell Beast 2.0): CLEAR only once no damage
+  source (`live_threats`: an enabled damage collider, or a drop bell in Antic) has been live for 2 s of game time after
+  the kill (FightTap counts every STATE); leaving the room ends it too; > 15 s: STUCK; a supervisor quit before the
+  tail's end: QUIT ("quit after the kill"); a lethal hit: WOULD_DIE. New record fields kill_s, f_kill, tail_s,
+  tail_threat_s, tail_threats, tail_hits, tail_hp_lost, tail_end; `combat_run summary` uses kill_s for the time to kill
+  and adds `post_kill_tail`. `SSBOT_POST_CLEAR_S` still gives the old fixed window (and turns the tail off).
+- `tools/post_kill.py`: scan (what is live after each kill, exact-path error, Cancel), clears (past CLEARs: live source
+  at the window's end, the standing hero's exposure), cover (post-kill contacts vs the certification's forecast and the
+  post-death one).
+
+### Measured
+
+- Recordings (4,603 kills): Burst Out kills (1,140) always leave both attack bells in flight; 114 of 545 Dig In kills a
+  falling drop bell; body contacts <= 0.0202 s of game time after the kill; 1,222 Antic -> Cancel, all on kill frames;
+  exact paths after the kill within 0.032 u (2,280 bells).
+- Support recall on the 2.5 s post-kill recordings (041626 / 042718 / 043850, L 3): post-kill attack-bell contacts
+  uncovered 104 -> 0; the forecast the kill was certified with (boss alive, frame before the kill) covers all 105
+  post-kill contacts (0.017-1.116 s ahead).
+- Kill check at h 2 (20261004_064120, 24 episodes, injected to 3 HP): 24 CLEAR, 24 / 24 certified, 8 with bells after
+  the kill, 0 hits in the tail (before: 4 of 23 Q1 quits), 0 FORCED_RISK in 3,234 post-kill planner ticks.
+- Past CLEARs (`post_kill clears`): oracle eval 2,878: none changes outcome (all full-HP kills), 772 would have had a
+  longer tail, 714 would have been hit standing still; injection runs: the 106 "quit after the kill" CLEARs become
+  QUIT (6 of them the post-kill bells), 7 more would have been hit standing still at HP <= 3.
+- 200-episode plain run and the gate: see Running.
+
+### Running
+
+- (filled in at the end of the task)
+
+### Next
+
+1. Turn the tail on for the Forum (`tail_quiet_s`, the runes / bombs / dying Clappers as live sources) after checking
+   its recordings the same way (`post_kill scan` is Bell Beast only now: BOSS / SCENE constants).
+2. Vision view: a cancelled drop bell stays armed in the vision tracker up to BELL_TTL_S (8 s) after the death (the cue
+   just stops); harmless (more support), but the vision view's post-death support is not checked live.
+3. Remove the live checkouts `C:\ssbot\live_postkill_5a97e0f` (smoke and kill check) and `C:\ssbot\live_postkill_fd18ae6`
+   (200 + gate) when no longer needed.
