@@ -33,7 +33,10 @@ Rules:
             kind's window (FilterContext.kill_window_s) + KILL_MARGIN_S still inside the rollout: no support event can
             land in the window, so h >= 2 holds after its worst event; and no rise with the jump released from the
             earliest killing hit on (released_rise: the game's per-Update jump release stops a rise at once in the
-            slow motion, which the per-frame rollout does not model; live 20261004_041626). The window is game time from the killing hit to
+            slow motion, which the per-frame rollout does not model; live 20261004_041626); and the planner checks
+            the killing hit's own branches (Planner._kill_branches: the recoil, stopped rise or bounce a landed
+            killing hit gives the hero, on its earliest and latest hit frame) the same way, since a kill means the
+            hit landed whatever the boss model predicted (live 20261004_042718: a 1.9 u recoil off the no-hit path). The window is game time from the killing hit to
             the first pausable frame, measured per freeze type a hero's killing hit started (tools/kill_window,
             knowledge kill_windows.json): BossDeathSlow 0.150-0.167 s (330 kills; 1.65-1.73 s real), EnemyBattleEndSlow
             and BigEnemyDeathSlow up to 0.794 s (138 / 400); an encounter takes the longest of the kinds its recordings
