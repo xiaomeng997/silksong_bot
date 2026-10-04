@@ -112,9 +112,9 @@
   ],
   "cache": "C:\\ssbot\\data\\m2_forum_r0\\cache",
   "code": {
-   "sha": null,
-   "branch": null,
-   "dirty": null
+   "sha": "da1cd41d49652ba0deda8309bc84ea6b66c3f00d",
+   "branch": "worktree-wf_198518ec-9ba-1",
+   "dirty": true
   },
   "tool": "python -m ssbot.tools.forum_products --cache C:\\ssbot\\data\\m2_forum_r0\\cache"
  },
@@ -150,19 +150,19 @@
     "p95": -0.634,
     "max": 6.922
    },
-   "reach_facing_frame_u": {
-    "x_min": NaN,
-    "x_max": NaN,
-    "y_min": NaN,
-    "y_max": NaN,
-    "x_max_p99": NaN
+   "reach_facing_frame_u": null,
+   "body_only_commit_to_hero_box_s": {
+    "n": 0,
+    "never_reached": 3404,
+    "touching_at_commit": 14,
+    "note": "instances without attack colliders: commit to the body's first overlap with the hero's box as it was at the commit (instances already touching it then left out)"
    }
   },
   "Pilgrim 03 Song/CB_THROW": {
-   "instances_with_attack_colliders": 8648,
-   "instances_without": 218,
+   "instances_with_attack_colliders": 8613,
+   "instances_without": 253,
    "commit_to_first_attack_collider_s": {
-    "n": 8648,
+    "n": 8613,
     "min": 0.0,
     "p5": 0.658,
     "p50": 0.666,
@@ -185,12 +185,12 @@
     "p95": 0.42,
     "max": 8.868
    },
-   "reach_facing_frame_u": {
-    "x_min": NaN,
-    "x_max": NaN,
-    "y_min": NaN,
-    "y_max": NaN,
-    "x_max_p99": NaN
+   "reach_facing_frame_u": null,
+   "body_only_commit_to_hero_box_s": {
+    "n": 0,
+    "never_reached": 253,
+    "touching_at_commit": 0,
+    "note": "instances without attack colliders: commit to the body's first overlap with the hero's box as it was at the commit (instances already touching it then left out)"
    }
   },
   "Song Administrator/MI_CHARGE": {
@@ -226,6 +226,17 @@
     "y_min": -8.55,
     "y_max": 12.58,
     "x_max_p99": 9.3
+   },
+   "body_only_commit_to_hero_box_s": {
+    "n": 1,
+    "min": 0.033,
+    "p5": 0.033,
+    "p50": 0.033,
+    "p95": 0.033,
+    "max": 0.033,
+    "never_reached": 34,
+    "touching_at_commit": 3,
+    "note": "instances without attack colliders: commit to the body's first overlap with the hero's box as it was at the commit (instances already touching it then left out)"
    }
   },
   "Song Administrator/MI_EVADE": {
@@ -250,12 +261,17 @@
     "p95": 1.924,
     "max": 4.997
    },
-   "reach_facing_frame_u": {
-    "x_min": NaN,
-    "x_max": NaN,
-    "y_min": NaN,
-    "y_max": NaN,
-    "x_max_p99": NaN
+   "reach_facing_frame_u": null,
+   "body_only_commit_to_hero_box_s": {
+    "n": 313,
+    "min": 0.017,
+    "p5": 0.083,
+    "p50": 0.1,
+    "p95": 0.1,
+    "max": 0.175,
+    "never_reached": 1382,
+    "touching_at_commit": 114,
+    "note": "instances without attack colliders: commit to the body's first overlap with the hero's box as it was at the commit (instances already touching it then left out)"
    }
   },
   "Song Administrator/MI_PARRY": {
@@ -291,6 +307,17 @@
     "y_min": -8.72,
     "y_max": 9.42,
     "x_max_p99": 12.15
+   },
+   "body_only_commit_to_hero_box_s": {
+    "n": 286,
+    "min": 0.033,
+    "p5": 0.391,
+    "p50": 0.982,
+    "p95": 1.213,
+    "max": 1.267,
+    "never_reached": 1685,
+    "touching_at_commit": 50,
+    "note": "instances without attack colliders: commit to the body's first overlap with the hero's box as it was at the commit (instances already touching it then left out)"
    }
   },
   "Song Automaton Tiny/AT_DEFEND": {
@@ -315,12 +342,17 @@
     "p95": 0.6,
     "max": 11.064
    },
-   "reach_facing_frame_u": {
-    "x_min": NaN,
-    "x_max": NaN,
-    "y_min": NaN,
-    "y_max": NaN,
-    "x_max_p99": NaN
+   "reach_facing_frame_u": null,
+   "body_only_commit_to_hero_box_s": {
+    "n": 856,
+    "min": 0.033,
+    "p5": 0.373,
+    "p50": 1.232,
+    "p95": 1.928,
+    "max": 2.031,
+    "never_reached": 8540,
+    "touching_at_commit": 68,
+    "note": "instances without attack colliders: commit to the body's first overlap with the hero's box as it was at the commit (instances already touching it then left out)"
    }
   },
   "Song Automaton Tiny/AT_FIRE": {
@@ -345,12 +377,17 @@
     "p95": -2.516,
     "max": 7.512
    },
-   "reach_facing_frame_u": {
-    "x_min": NaN,
-    "x_max": NaN,
-    "y_min": NaN,
-    "y_max": NaN,
-    "x_max_p99": NaN
+   "reach_facing_frame_u": null,
+   "body_only_commit_to_hero_box_s": {
+    "n": 4063,
+    "min": 0.017,
+    "p5": 0.899,
+    "p50": 1.308,
+    "p95": 2.098,
+    "max": 3.796,
+    "never_reached": 3896,
+    "touching_at_commit": 4,
+    "note": "instances without attack colliders: commit to the body's first overlap with the hero's box as it was at the commit (instances already touching it then left out)"
    }
   },
   "Song Automaton Tiny/AT_LEAVE": {
@@ -375,12 +412,17 @@
     "p95": 6.101,
     "max": 6.394
    },
-   "reach_facing_frame_u": {
-    "x_min": NaN,
-    "x_max": NaN,
-    "y_min": NaN,
-    "y_max": NaN,
-    "x_max_p99": NaN
+   "reach_facing_frame_u": null,
+   "body_only_commit_to_hero_box_s": {
+    "n": 1,
+    "min": 0.133,
+    "p5": 0.133,
+    "p50": 0.133,
+    "p95": 0.133,
+    "max": 0.133,
+    "never_reached": 16,
+    "touching_at_commit": 1,
+    "note": "instances without attack colliders: commit to the body's first overlap with the hero's box as it was at the commit (instances already touching it then left out)"
    }
   },
   "Song Handmaiden/CM_SLASH": {
@@ -416,6 +458,17 @@
     "y_min": -7.94,
     "y_max": 7.62,
     "x_max_p99": 10.56
+   },
+   "body_only_commit_to_hero_box_s": {
+    "n": 7,
+    "min": 0.4,
+    "p5": 0.5,
+    "p50": 0.816,
+    "p95": 1.016,
+    "max": 1.016,
+    "never_reached": 567,
+    "touching_at_commit": 4,
+    "note": "instances without attack colliders: commit to the body's first overlap with the hero's box as it was at the commit (instances already touching it then left out)"
    }
   },
   "Song Handmaiden/CM_SPIN": {
@@ -445,12 +498,17 @@
     "p95": 1.115,
     "max": 6.301
    },
-   "reach_facing_frame_u": {
-    "x_min": NaN,
-    "x_max": NaN,
-    "y_min": NaN,
-    "y_max": NaN,
-    "x_max_p99": NaN
+   "reach_facing_frame_u": null,
+   "body_only_commit_to_hero_box_s": {
+    "n": 33,
+    "min": 0.5,
+    "p5": 0.774,
+    "p50": 1.833,
+    "p95": 3.779,
+    "max": 4.212,
+    "never_reached": 255,
+    "touching_at_commit": 0,
+    "note": "instances without attack colliders: commit to the body's first overlap with the hero's box as it was at the commit (instances already touching it then left out)"
    }
   },
   "Song Handmaiden/CM_TELE": {
@@ -475,24 +533,29 @@
     "p95": -0.028,
     "max": 3.223
    },
-   "reach_facing_frame_u": {
-    "x_min": NaN,
-    "x_max": NaN,
-    "y_min": NaN,
-    "y_max": NaN,
-    "x_max_p99": NaN
+   "reach_facing_frame_u": null,
+   "body_only_commit_to_hero_box_s": {
+    "n": 2,
+    "min": 0.058,
+    "p5": 0.06,
+    "p50": 0.079,
+    "p95": 0.098,
+    "max": 0.1,
+    "never_reached": 658,
+    "touching_at_commit": 0,
+    "note": "instances without attack colliders: commit to the body's first overlap with the hero's box as it was at the commit (instances already touching it then left out)"
    }
   },
   "Song Heavy Sentry/CC_CAST": {
-   "instances_with_attack_colliders": 3499,
-   "instances_without": 31,
+   "instances_with_attack_colliders": 3501,
+   "instances_without": 29,
    "commit_to_first_attack_collider_s": {
-    "n": 3499,
-    "min": 0.0,
-    "p5": 0.067,
+    "n": 3501,
+    "min": 0.117,
+    "p5": 0.4,
     "p50": 1.182,
-    "p95": 1.182,
-    "max": 2.448
+    "p95": 1.183,
+    "max": 1.35
    },
    "hero_dx_at_commit_u": {
     "n": 3530,
@@ -510,12 +573,17 @@
     "p95": 6.686,
     "max": 8.479
    },
-   "reach_facing_frame_u": {
-    "x_min": NaN,
-    "x_max": NaN,
-    "y_min": NaN,
-    "y_max": NaN,
-    "x_max_p99": NaN
+   "reach_facing_frame_u": null,
+   "body_only_commit_to_hero_box_s": {
+    "n": 1,
+    "min": 0.05,
+    "p5": 0.05,
+    "p50": 0.05,
+    "p95": 0.05,
+    "max": 0.05,
+    "never_reached": 27,
+    "touching_at_commit": 1,
+    "note": "instances without attack colliders: commit to the body's first overlap with the hero's box as it was at the commit (instances already touching it then left out)"
    }
   },
   "Song Heavy Sentry/CC_EVADE": {
@@ -540,12 +608,17 @@
     "p95": 6.133,
     "max": 8.614
    },
-   "reach_facing_frame_u": {
-    "x_min": NaN,
-    "x_max": NaN,
-    "y_min": NaN,
-    "y_max": NaN,
-    "x_max_p99": NaN
+   "reach_facing_frame_u": null,
+   "body_only_commit_to_hero_box_s": {
+    "n": 21,
+    "min": 0.05,
+    "p5": 0.05,
+    "p50": 0.05,
+    "p95": 0.05,
+    "max": 0.067,
+    "never_reached": 7230,
+    "touching_at_commit": 356,
+    "note": "instances without attack colliders: commit to the body's first overlap with the hero's box as it was at the commit (instances already touching it then left out)"
    }
   },
   "Song Heavy Sentry/CC_JUMP": {
@@ -581,18 +654,29 @@
     "y_min": -5.86,
     "y_max": 2.52,
     "x_max_p99": 18.8
+   },
+   "body_only_commit_to_hero_box_s": {
+    "n": 2,
+    "min": 0.508,
+    "p5": 0.512,
+    "p50": 0.549,
+    "p95": 0.587,
+    "max": 0.591,
+    "never_reached": 23,
+    "touching_at_commit": 1,
+    "note": "instances without attack colliders: commit to the body's first overlap with the hero's box as it was at the commit (instances already touching it then left out)"
    }
   },
   "Song Heavy Sentry/CC_JUMP_CAST": {
-   "instances_with_attack_colliders": 1930,
-   "instances_without": 44,
+   "instances_with_attack_colliders": 1929,
+   "instances_without": 45,
    "commit_to_first_attack_collider_s": {
-    "n": 1930,
-    "min": 0.017,
-    "p5": 0.816,
+    "n": 1929,
+    "min": 1.182,
+    "p5": 1.798,
     "p50": 1.848,
     "p95": 1.865,
-    "max": 1.89
+    "max": 2.939
    },
    "hero_dx_at_commit_u": {
     "n": 1974,
@@ -616,6 +700,17 @@
     "y_min": -5.88,
     "y_max": 2.52,
     "x_max_p99": 18.8
+   },
+   "body_only_commit_to_hero_box_s": {
+    "n": 1,
+    "min": 1.533,
+    "p5": 1.533,
+    "p50": 1.533,
+    "p95": 1.533,
+    "max": 1.533,
+    "never_reached": 44,
+    "touching_at_commit": 0,
+    "note": "instances without attack colliders: commit to the body's first overlap with the hero's box as it was at the commit (instances already touching it then left out)"
    }
   },
   "Song Heavy Sentry/CC_SLAM": {
@@ -651,6 +746,12 @@
     "y_min": -5.19,
     "y_max": 3.17,
     "x_max_p99": 12.08
+   },
+   "body_only_commit_to_hero_box_s": {
+    "n": 0,
+    "never_reached": 38,
+    "touching_at_commit": 2,
+    "note": "instances without attack colliders: commit to the body's first overlap with the hero's box as it was at the commit (instances already touching it then left out)"
    }
   },
   "Song Pilgrim 01/EN_AMBUSH": {
@@ -675,12 +776,12 @@
     "p95": -0.562,
     "max": -0.562
    },
-   "reach_facing_frame_u": {
-    "x_min": NaN,
-    "x_max": NaN,
-    "y_min": NaN,
-    "y_max": NaN,
-    "x_max_p99": NaN
+   "reach_facing_frame_u": null,
+   "body_only_commit_to_hero_box_s": {
+    "n": 0,
+    "never_reached": 107,
+    "touching_at_commit": 0,
+    "note": "instances without attack colliders: commit to the body's first overlap with the hero's box as it was at the commit (instances already touching it then left out)"
    }
   },
   "Song Pilgrim 01/EN_CHARGE": {
@@ -716,6 +817,12 @@
     "y_min": -1.87,
     "y_max": 0.56,
     "x_max_p99": 29.2
+   },
+   "body_only_commit_to_hero_box_s": {
+    "n": 0,
+    "never_reached": 4,
+    "touching_at_commit": 0,
+    "note": "instances without attack colliders: commit to the body's first overlap with the hero's box as it was at the commit (instances already touching it then left out)"
    }
   },
   "Song Pilgrim 01/EN_JUMPSLASH": {
@@ -751,6 +858,12 @@
     "y_min": -2.71,
     "y_max": 3.49,
     "x_max_p99": 6.56
+   },
+   "body_only_commit_to_hero_box_s": {
+    "n": 0,
+    "never_reached": 7,
+    "touching_at_commit": 0,
+    "note": "instances without attack colliders: commit to the body's first overlap with the hero's box as it was at the commit (instances already touching it then left out)"
    }
   },
   "Song Pilgrim 01/EN_SLASH": {
@@ -786,6 +899,12 @@
     "y_min": -3.99,
     "y_max": 4.27,
     "x_max_p99": 4.6
+   },
+   "body_only_commit_to_hero_box_s": {
+    "n": 0,
+    "never_reached": 24,
+    "touching_at_commit": 2,
+    "note": "instances without attack colliders: commit to the body's first overlap with the hero's box as it was at the commit (instances already touching it then left out)"
    }
   },
   "Song Pilgrim 03/CH_JUMP": {
@@ -821,6 +940,12 @@
     "y_min": -2.11,
     "y_max": 11.23,
     "x_max_p99": 14.85
+   },
+   "body_only_commit_to_hero_box_s": {
+    "n": 0,
+    "never_reached": 25,
+    "touching_at_commit": 0,
+    "note": "instances without attack colliders: commit to the body's first overlap with the hero's box as it was at the commit (instances already touching it then left out)"
    }
   },
   "Song Pilgrim 03/CH_SLASH": {
@@ -856,6 +981,12 @@
     "y_min": -2.83,
     "y_max": 3.32,
     "x_max_p99": 9.46
+   },
+   "body_only_commit_to_hero_box_s": {
+    "n": 0,
+    "never_reached": 76,
+    "touching_at_commit": 11,
+    "note": "instances without attack colliders: commit to the body's first overlap with the hero's box as it was at the commit (instances already touching it then left out)"
    }
   },
   "Song Pilgrim 03/CH_WHIP": {
@@ -891,6 +1022,12 @@
     "y_min": -1.79,
     "y_max": 4.87,
     "x_max_p99": 10.02
+   },
+   "body_only_commit_to_hero_box_s": {
+    "n": 0,
+    "never_reached": 41,
+    "touching_at_commit": 0,
+    "note": "instances without attack colliders: commit to the body's first overlap with the hero's box as it was at the commit (instances already touching it then left out)"
    }
   },
   "Song Pilgrim Maestro/MA_DEFEND": {
@@ -915,12 +1052,17 @@
     "p95": -0.415,
     "max": 6.168
    },
-   "reach_facing_frame_u": {
-    "x_min": NaN,
-    "x_max": NaN,
-    "y_min": NaN,
-    "y_max": NaN,
-    "x_max_p99": NaN
+   "reach_facing_frame_u": null,
+   "body_only_commit_to_hero_box_s": {
+    "n": 13,
+    "min": 0.05,
+    "p5": 0.43,
+    "p50": 1.64,
+    "p95": 2.249,
+    "max": 2.398,
+    "never_reached": 3335,
+    "touching_at_commit": 11,
+    "note": "instances without attack colliders: commit to the body's first overlap with the hero's box as it was at the commit (instances already touching it then left out)"
    }
   },
   "Song Pilgrim Maestro/MA_SLASH": {
@@ -956,6 +1098,12 @@
     "y_min": -4.6,
     "y_max": 6.59,
     "x_max_p99": 3.65
+   },
+   "body_only_commit_to_hero_box_s": {
+    "n": 0,
+    "never_reached": 50,
+    "touching_at_commit": 0,
+    "note": "instances without attack colliders: commit to the body's first overlap with the hero's box as it was at the commit (instances already touching it then left out)"
    }
   },
   "Song Pilgrim Maestro/MA_SUMMON": {
@@ -980,12 +1128,12 @@
     "p95": -0.533,
     "max": 4.132
    },
-   "reach_facing_frame_u": {
-    "x_min": NaN,
-    "x_max": NaN,
-    "y_min": NaN,
-    "y_max": NaN,
-    "x_max_p99": NaN
+   "reach_facing_frame_u": null,
+   "body_only_commit_to_hero_box_s": {
+    "n": 0,
+    "never_reached": 1362,
+    "touching_at_commit": 4,
+    "note": "instances without attack colliders: commit to the body's first overlap with the hero's box as it was at the commit (instances already touching it then left out)"
    }
   },
   "Song Reed/RE_DEFEND": {
@@ -1021,6 +1169,17 @@
     "y_min": -8.06,
     "y_max": 6.86,
     "x_max_p99": 10.48
+   },
+   "body_only_commit_to_hero_box_s": {
+    "n": 50,
+    "min": 0.117,
+    "p5": 0.379,
+    "p50": 1.071,
+    "p95": 1.252,
+    "max": 1.324,
+    "never_reached": 1274,
+    "touching_at_commit": 10,
+    "note": "instances without attack colliders: commit to the body's first overlap with the hero's box as it was at the commit (instances already touching it then left out)"
    }
   },
   "Song Reed/RE_EVADE": {
@@ -1045,12 +1204,17 @@
     "p95": 3.893,
     "max": 6.898
    },
-   "reach_facing_frame_u": {
-    "x_min": NaN,
-    "x_max": NaN,
-    "y_min": NaN,
-    "y_max": NaN,
-    "x_max_p99": NaN
+   "reach_facing_frame_u": null,
+   "body_only_commit_to_hero_box_s": {
+    "n": 25,
+    "min": 0.033,
+    "p5": 0.033,
+    "p50": 0.167,
+    "p95": 0.28,
+    "max": 0.316,
+    "never_reached": 1570,
+    "touching_at_commit": 121,
+    "note": "instances without attack colliders: commit to the body's first overlap with the hero's box as it was at the commit (instances already touching it then left out)"
    }
   },
   "Song Reed/RE_STAB": {
@@ -1086,13 +1250,24 @@
     "y_min": -12.59,
     "y_max": 8.42,
     "x_max_p99": 18.89
+   },
+   "body_only_commit_to_hero_box_s": {
+    "n": 28,
+    "min": 0.033,
+    "p5": 0.834,
+    "p50": 1.174,
+    "p95": 1.437,
+    "max": 1.482,
+    "never_reached": 124,
+    "touching_at_commit": 0,
+    "note": "instances without attack colliders: commit to the body's first overlap with the hero's box as it was at the commit (instances already touching it then left out)"
    }
   },
   "Song Reed/RE_THROW": {
-   "instances_with_attack_colliders": 2139,
-   "instances_without": 62,
+   "instances_with_attack_colliders": 2130,
+   "instances_without": 71,
    "commit_to_first_attack_collider_s": {
-    "n": 2139,
+    "n": 2130,
     "min": 0.1,
     "p5": 0.667,
     "p50": 0.683,
@@ -1115,47 +1290,128 @@
     "p95": 2.486,
     "max": 8.273
    },
-   "reach_facing_frame_u": {
-    "x_min": NaN,
-    "x_max": NaN,
-    "y_min": NaN,
-    "y_max": NaN,
-    "x_max_p99": NaN
+   "reach_facing_frame_u": null,
+   "body_only_commit_to_hero_box_s": {
+    "n": 0,
+    "never_reached": 70,
+    "touching_at_commit": 1,
+    "note": "instances without attack colliders: commit to the body's first overlap with the hero's box as it was at the commit (instances already touching it then left out)"
    }
   }
  },
  "fastest_by_type": {
   "Pilgrim 03 Song": {
    "family": "CB_THROW",
-   "min_s": 0.0
+   "kind": "attack collider or hazard",
+   "p5_s": 0.658,
+   "min_s": 0.0,
+   "n": 8613
   },
   "Song Administrator": {
    "family": "MI_CHARGE",
-   "min_s": 0.483
+   "kind": "attack collider or hazard",
+   "p5_s": 0.5,
+   "min_s": 0.483,
+   "n": 2587
+  },
+  "Song Automaton Tiny": {
+   "family": "AT_FIRE",
+   "kind": "body",
+   "p5_s": 0.899,
+   "min_s": 0.017,
+   "n": 4063
   },
   "Song Handmaiden": {
    "family": "CM_SLASH",
-   "min_s": 0.5
+   "kind": "attack collider or hazard",
+   "p5_s": 0.508,
+   "min_s": 0.5,
+   "n": 1657
   },
   "Song Heavy Sentry": {
    "family": "CC_CAST",
-   "min_s": 0.0
+   "kind": "attack collider or hazard",
+   "p5_s": 0.4,
+   "min_s": 0.117,
+   "n": 3501
   },
   "Song Pilgrim 01": {
    "family": "EN_JUMPSLASH",
-   "min_s": 0.4
+   "kind": "attack collider or hazard",
+   "p5_s": 0.408,
+   "min_s": 0.4,
+   "n": 234
   },
   "Song Pilgrim 03": {
    "family": "CH_SLASH",
-   "min_s": 0.627
+   "kind": "attack collider or hazard",
+   "p5_s": 0.633,
+   "min_s": 0.627,
+   "n": 1290
   },
   "Song Pilgrim Maestro": {
    "family": "MA_SLASH",
-   "min_s": 0.683
+   "kind": "attack collider or hazard",
+   "p5_s": 0.699,
+   "min_s": 0.683,
+   "n": 7922
   },
   "Song Reed": {
-   "family": "RE_THROW",
-   "min_s": 0.1
+   "family": "RE_STAB",
+   "kind": "attack collider or hazard",
+   "p5_s": 0.649,
+   "min_s": 0.633,
+   "n": 1926
+  }
+ },
+ "hazard_spawn_lead_in_frames": {
+  "Song Reed Pin Projectile": {
+   "n": 2153,
+   "min": 0.0,
+   "p5": 0.0,
+   "p50": 0.0,
+   "p95": 0.0,
+   "max": 244.0
+  },
+  "Spear": {
+   "n": 492,
+   "min": 0.0,
+   "p5": 79.0,
+   "p50": 80.0,
+   "p95": 92.0,
+   "max": 130.0
+  },
+  "Throwing Bell": {
+   "n": 8758,
+   "min": 0.0,
+   "p5": 0.0,
+   "p50": 0.0,
+   "p95": 0.0,
+   "max": 100.0
+  },
+  "handmaiden_spear_silk_explosion": {
+   "n": 492,
+   "min": 0.0,
+   "p5": 0.0,
+   "p50": 0.0,
+   "p95": 0.0,
+   "max": 0.0
+  },
+  "rune bomb small": {
+   "n": 33595,
+   "min": 0.0,
+   "p5": 21.0,
+   "p50": 21.0,
+   "p95": 32.0,
+   "max": 97.0
+  },
+  "rune slam": {
+   "n": 1929,
+   "min": 61.0,
+   "p5": 65.0,
+   "p50": 65.0,
+   "p95": 77.0,
+   "max": 185.0
   }
  },
  "punish": {

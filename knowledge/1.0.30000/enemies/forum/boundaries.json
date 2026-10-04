@@ -112,9 +112,9 @@
   ],
   "cache": "C:\\ssbot\\data\\m2_forum_r0\\cache",
   "code": {
-   "sha": null,
-   "branch": null,
-   "dirty": null
+   "sha": "da1cd41d49652ba0deda8309bc84ea6b66c3f00d",
+   "branch": "worktree-wf_198518ec-9ba-1",
+   "dirty": true
   },
   "tool": "python -m ssbot.tools.forum_products --cache C:\\ssbot\\data\\m2_forum_r0\\cache"
  },

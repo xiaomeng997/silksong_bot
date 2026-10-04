@@ -112,9 +112,9 @@
   ],
   "cache": "C:\\ssbot\\data\\m2_forum_r0\\cache",
   "code": {
-   "sha": null,
-   "branch": null,
-   "dirty": null
+   "sha": "da1cd41d49652ba0deda8309bc84ea6b66c3f00d",
+   "branch": "worktree-wf_198518ec-9ba-1",
+   "dirty": true
   },
   "tool": "python -m ssbot.tools.forum_products --cache C:\\ssbot\\data\\m2_forum_r0\\cache"
  },
@@ -130,8 +130,8 @@
   "Pilgrim 03 Song/CB_THROW": {
    "instances": 8853,
    "own: dx +0": 0.001,
-   "with thrown hazards: dx +0": 0.017,
-   "with thrown hazards: dx +3": 0.102,
+   "with thrown hazards: dx +0": 0.018,
+   "with thrown hazards: dx +3": 0.103,
    "with thrown hazards: dx +6": 0.35,
    "with thrown hazards: dx -3": 0.008,
    "with thrown hazards: dx -6": 0.005
@@ -290,9 +290,10 @@
    "own: dx +6": 0.025,
    "own: dx -3": 0.001,
    "with thrown hazards: dx +0": 0.064,
-   "with thrown hazards: dx +3": 0.148,
-   "with thrown hazards: dx +6": 0.224,
-   "with thrown hazards: dx -3": 0.008
+   "with thrown hazards: dx +3": 0.147,
+   "with thrown hazards: dx +6": 0.223,
+   "with thrown hazards: dx -3": 0.008,
+   "with thrown hazards: dx -6": 0.0
   }
  }
 }

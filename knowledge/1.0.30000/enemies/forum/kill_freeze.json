@@ -112,12 +112,13 @@
   ],
   "cache": "C:\\ssbot\\data\\m2_forum_r0\\cache",
   "code": {
-   "sha": null,
-   "branch": null,
-   "dirty": null
+   "sha": "da1cd41d49652ba0deda8309bc84ea6b66c3f00d",
+   "branch": "worktree-wf_198518ec-9ba-1",
+   "dirty": true
   },
   "tool": "python -m ssbot.tools.forum_products --cache C:\\ssbot\\data\\m2_forum_r0\\cache"
  },
+ "note": "length = the oracle's end event (frames, ms: unscaled real time the freeze lasted); ends past the cached fight read from the recording (late); censored = no end found",
  "by_type": {
   "Pilgrim 03 Song": {
    "direct:HeroController.StartRecoil down 0.0 wait 0.1 up 0.10000000149011612 speed 0.0": 3,
@@ -168,166 +169,406 @@
   "Song Pilgrim Maestro": 318,
   "Song Reed": 503
  },
- "frames_to_end": {
+ "length": {
   "Pilgrim 03 Song|NailClashEffect": {
-   "n": 2,
-   "min": 24.0,
-   "p5": 24.0,
-   "p50": 24.0,
-   "p95": 24.0,
-   "max": 24.0
+   "frames": {
+    "n": 2,
+    "min": 24.0,
+    "p5": 24.0,
+    "p50": 24.0,
+    "p95": 24.0,
+    "max": 24.0
+   },
+   "ms": {
+    "n": 2,
+    "min": 400.0,
+    "p5": 400.1,
+    "p50": 400.3,
+    "p95": 400.6,
+    "max": 400.6
+   },
+   "late": 0,
+   "censored": 0
   },
   "Pilgrim 03 Song|direct:HeroController.StartRecoil": {
-   "n": 3,
-   "min": 15.0,
-   "p5": 15.0,
-   "p50": 15.0,
-   "p95": 15.0,
-   "max": 15.0
+   "frames": {
+    "n": 3,
+    "min": 15.0,
+    "p5": 15.0,
+    "p50": 15.0,
+    "p95": 15.0,
+    "max": 15.0
+   },
+   "ms": {
+    "n": 3,
+    "min": 247.7,
+    "p5": 247.7,
+    "p50": 248.0,
+    "p95": 248.4,
+    "max": 248.4
+   },
+   "late": 0,
+   "censored": 0
   },
   "Song Administrator|NailClashEffect": {
-   "n": 36,
-   "min": 23.0,
-   "p5": 24.0,
-   "p50": 24.0,
-   "p95": 24.0,
-   "max": 24.0
+   "frames": {
+    "n": 36,
+    "min": 23.0,
+    "p5": 24.0,
+    "p50": 24.0,
+    "p95": 24.0,
+    "max": 24.0
+   },
+   "ms": {
+    "n": 36,
+    "min": 384.0,
+    "p5": 400.0,
+    "p50": 400.4,
+    "p95": 400.7,
+    "max": 400.8
+   },
+   "late": 0,
+   "censored": 0
   },
   "Song Administrator|direct:HeroController.StartRecoil": {
-   "n": 7,
-   "min": 15.0,
-   "p5": 15.0,
-   "p50": 15.0,
-   "p95": 15.0,
-   "max": 15.0
+   "frames": {
+    "n": 7,
+    "min": 15.0,
+    "p5": 15.0,
+    "p50": 15.0,
+    "p95": 15.0,
+    "max": 15.0
+   },
+   "ms": {
+    "n": 7,
+    "min": 247.0,
+    "p5": 247.2,
+    "p50": 248.1,
+    "p95": 248.3,
+    "max": 248.4
+   },
+   "late": 0,
+   "censored": 0
   },
   "Song Automaton Tiny|NailClashEffect": {
-   "n": 3,
-   "min": 24.0,
-   "p5": 24.0,
-   "p50": 24.0,
-   "p95": 24.0,
-   "max": 24.0
+   "frames": {
+    "n": 3,
+    "min": 24.0,
+    "p5": 24.0,
+    "p50": 24.0,
+    "p95": 24.0,
+    "max": 24.0
+   },
+   "ms": {
+    "n": 3,
+    "min": 400.2,
+    "p5": 400.2,
+    "p50": 400.4,
+    "p95": 400.6,
+    "max": 400.6
+   },
+   "late": 0,
+   "censored": 0
   },
   "Song Automaton Tiny|direct:HeroController.StartRecoil": {
-   "n": 35,
-   "min": 14.0,
-   "p5": 14.0,
-   "p50": 15.0,
-   "p95": 15.0,
-   "max": 15.0
+   "frames": {
+    "n": 35,
+    "min": 14.0,
+    "p5": 14.0,
+    "p50": 15.0,
+    "p95": 15.0,
+    "max": 15.0
+   },
+   "ms": {
+    "n": 35,
+    "min": 231.8,
+    "p5": 232.1,
+    "p50": 248.2,
+    "p95": 248.8,
+    "max": 249.6
+   },
+   "late": 0,
+   "censored": 0
   },
   "Song Handmaiden|NailClashEffect": {
-   "n": 9,
-   "min": 24.0,
-   "p5": 24.0,
-   "p50": 24.0,
-   "p95": 24.0,
-   "max": 24.0
+   "frames": {
+    "n": 9,
+    "min": 24.0,
+    "p5": 24.0,
+    "p50": 24.0,
+    "p95": 24.0,
+    "max": 24.0
+   },
+   "ms": {
+    "n": 9,
+    "min": 400.0,
+    "p5": 400.1,
+    "p50": 400.4,
+    "p95": 400.9,
+    "max": 400.9
+   },
+   "late": 0,
+   "censored": 0
   },
   "Song Handmaiden|direct:HeroController.StartRecoil": {
-   "n": 4,
-   "min": 14.0,
-   "p5": 14.2,
-   "p50": 15.0,
-   "p95": 15.8,
-   "max": 16.0
+   "frames": {
+    "n": 4,
+    "min": 14.0,
+    "p5": 14.2,
+    "p50": 15.0,
+    "p95": 15.0,
+    "max": 15.0
+   },
+   "ms": {
+    "n": 4,
+    "min": 232.4,
+    "p5": 234.7,
+    "p50": 247.7,
+    "p95": 248.5,
+    "max": 248.7
+   },
+   "late": 0,
+   "censored": 0
   },
   "Song Heavy Sentry|BigEnemyDeathSlow": {
-   "n": 323,
-   "min": 9.0,
-   "p5": 10.0,
-   "p50": 10.0,
-   "p95": 10.0,
-   "max": 10.0
+   "frames": {
+    "n": 323,
+    "min": 9.0,
+    "p5": 10.0,
+    "p50": 10.0,
+    "p95": 10.0,
+    "max": 10.0
+   },
+   "ms": {
+    "n": 323,
+    "min": 148.5,
+    "p5": 164.4,
+    "p50": 165.3,
+    "p95": 166.1,
+    "max": 167.4
+   },
+   "late": 0,
+   "censored": 0
   },
   "Song Heavy Sentry|EnemyBattleEndSlow": {
-   "n": 95,
-   "min": 112.0,
-   "p5": 113.0,
-   "p50": 114.0,
-   "p95": 114.0,
-   "max": 114.0
+   "frames": {
+    "n": 104,
+    "min": 112.0,
+    "p5": 113.2,
+    "p50": 114.0,
+    "p95": 134.8,
+    "max": 138.0
+   },
+   "ms": {
+    "n": 104,
+    "min": 1865.8,
+    "p5": 1885.4,
+    "p50": 1898.5,
+    "p95": 2412.8,
+    "max": 2467.0
+   },
+   "late": 9,
+   "censored": 4
   },
   "Song Heavy Sentry|EnemyDeath": {
-   "n": 6,
-   "min": 8.0,
-   "p5": 8.0,
-   "p50": 8.0,
-   "p95": 8.0,
-   "max": 8.0
+   "frames": {
+    "n": 6,
+    "min": 8.0,
+    "p5": 8.0,
+    "p50": 8.0,
+    "p95": 8.0,
+    "max": 8.0
+   },
+   "ms": {
+    "n": 6,
+    "min": 130.0,
+    "p5": 130.0,
+    "p50": 130.6,
+    "p95": 130.9,
+    "max": 130.9
+   },
+   "late": 0,
+   "censored": 0
   },
   "Song Heavy Sentry|direct:HeroController.StartRecoil": {
-   "n": 7,
-   "min": 15.0,
-   "p5": 15.0,
-   "p50": 15.0,
-   "p95": 15.0,
-   "max": 15.0
+   "frames": {
+    "n": 7,
+    "min": 15.0,
+    "p5": 15.0,
+    "p50": 15.0,
+    "p95": 15.0,
+    "max": 15.0
+   },
+   "ms": {
+    "n": 7,
+    "min": 247.9,
+    "p5": 247.9,
+    "p50": 248.1,
+    "p95": 248.7,
+    "max": 248.8
+   },
+   "late": 0,
+   "censored": 0
   },
   "Song Pilgrim 01|NailClashEffect": {
-   "n": 14,
-   "min": 23.0,
-   "p5": 23.0,
-   "p50": 24.0,
-   "p95": 24.0,
-   "max": 24.0
+   "frames": {
+    "n": 14,
+    "min": 23.0,
+    "p5": 23.0,
+    "p50": 24.0,
+    "p95": 24.0,
+    "max": 24.0
+   },
+   "ms": {
+    "n": 14,
+    "min": 383.5,
+    "p5": 384.2,
+    "p50": 400.6,
+    "p95": 401.4,
+    "max": 401.7
+   },
+   "late": 0,
+   "censored": 0
   },
   "Song Pilgrim 03|BindBreak": {
-   "n": 1,
-   "min": 34.0,
-   "p5": 34.0,
-   "p50": 34.0,
-   "p95": 34.0,
-   "max": 34.0
+   "frames": {
+    "n": 1,
+    "min": 33.0,
+    "p5": 33.0,
+    "p50": 33.0,
+    "p95": 33.0,
+    "max": 33.0
+   },
+   "ms": {
+    "n": 1,
+    "min": 549.8,
+    "p5": 549.8,
+    "p50": 549.8,
+    "p95": 549.8,
+    "max": 549.8
+   },
+   "late": 0,
+   "censored": 0
   },
   "Song Pilgrim 03|NailClashEffect": {
-   "n": 10,
-   "min": 23.0,
-   "p5": 23.0,
-   "p50": 24.0,
-   "p95": 24.0,
-   "max": 24.0
+   "frames": {
+    "n": 10,
+    "min": 23.0,
+    "p5": 23.0,
+    "p50": 24.0,
+    "p95": 24.0,
+    "max": 24.0
+   },
+   "ms": {
+    "n": 10,
+    "min": 381.1,
+    "p5": 382.8,
+    "p50": 400.1,
+    "p95": 400.8,
+    "max": 401.0
+   },
+   "late": 0,
+   "censored": 0
   },
   "Song Pilgrim 03|direct:HeroController.StartRecoil": {
-   "n": 9,
-   "min": 15.0,
-   "p5": 15.0,
-   "p50": 15.0,
-   "p95": 15.6,
-   "max": 16.0
+   "frames": {
+    "n": 9,
+    "min": 15.0,
+    "p5": 15.0,
+    "p50": 15.0,
+    "p95": 15.0,
+    "max": 15.0
+   },
+   "ms": {
+    "n": 9,
+    "min": 247.0,
+    "p5": 247.0,
+    "p50": 247.4,
+    "p95": 248.8,
+    "max": 249.2
+   },
+   "late": 0,
+   "censored": 0
   },
   "Song Pilgrim Maestro|direct:HeroController.StartRecoil": {
-   "n": 3,
-   "min": 15.0,
-   "p5": 15.0,
-   "p50": 15.0,
-   "p95": 15.0,
-   "max": 15.0
+   "frames": {
+    "n": 3,
+    "min": 15.0,
+    "p5": 15.0,
+    "p50": 15.0,
+    "p95": 15.0,
+    "max": 15.0
+   },
+   "ms": {
+    "n": 3,
+    "min": 247.7,
+    "p5": 247.8,
+    "p50": 247.9,
+    "p95": 248.0,
+    "max": 248.0
+   },
+   "late": 0,
+   "censored": 0
   },
   "Song Reed|NailClashEffect": {
-   "n": 23,
-   "min": 24.0,
-   "p5": 24.0,
-   "p50": 24.0,
-   "p95": 24.0,
-   "max": 24.0
+   "frames": {
+    "n": 23,
+    "min": 24.0,
+    "p5": 24.0,
+    "p50": 24.0,
+    "p95": 24.0,
+    "max": 24.0
+   },
+   "ms": {
+    "n": 23,
+    "min": 397.6,
+    "p5": 398.7,
+    "p50": 400.2,
+    "p95": 400.6,
+    "max": 400.7
+   },
+   "late": 0,
+   "censored": 0
   },
   "Song Reed|QuickFreeze": {
-   "n": 1,
-   "min": 4.0,
-   "p5": 4.0,
-   "p50": 4.0,
-   "p95": 4.0,
-   "max": 4.0
+   "frames": {
+    "n": 1,
+    "min": 4.0,
+    "p5": 4.0,
+    "p50": 4.0,
+    "p95": 4.0,
+    "max": 4.0
+   },
+   "ms": {
+    "n": 1,
+    "min": 64.3,
+    "p5": 64.3,
+    "p50": 64.3,
+    "p95": 64.3,
+    "max": 64.3
+   },
+   "late": 0,
+   "censored": 0
   },
   "Song Reed|direct:HeroController.StartRecoil": {
-   "n": 8,
-   "min": 15.0,
-   "p5": 15.0,
-   "p50": 15.0,
-   "p95": 15.0,
-   "max": 15.0
+   "frames": {
+    "n": 8,
+    "min": 15.0,
+    "p5": 15.0,
+    "p50": 15.0,
+    "p95": 15.0,
+    "max": 15.0
+   },
+   "ms": {
+    "n": 8,
+    "min": 247.3,
+    "p5": 247.5,
+    "p50": 248.2,
+    "p95": 248.7,
+    "max": 248.9
+   },
+   "late": 0,
+   "censored": 0
   }
  }
 }
