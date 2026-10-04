@@ -5,7 +5,7 @@
         [--out ../knowledge/1.0.30000/enemies/forum] [--only chains,quiet] [--max-fights N] [--print]
 
 Writes one <out>/<product>.json per product (chains, death_tails, kill_freeze, strikes, quiet, garmond, stances,
-below, clawmaiden, bells, boundaries) with the fights it read and the code revision.
+below, clawmaiden_distance, bells, boundaries) with the fights it read and the code revision.
 """
 import argparse
 import json

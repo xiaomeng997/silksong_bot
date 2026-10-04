@@ -28,7 +28,7 @@ the gauntlet builder does (forum_support.SubjectTracker on the Control FSM event
                  counter's states, delay, length, reach and parry bits (clash bit 1: clashable)
   below          flying enemies: share of their attack instances whose own colliders touch a hero standing on the floor
                  directly below the commit point, against one standing diagonally (BELOW_DX)
-  clawmaiden     the Clawmaiden's distance to the hero while it flies between attacks, against a dash stab's reach
+  clawmaiden_distance  the Clawmaiden's distance to the hero while it flies between attacks, against a dash stab's reach
   bells          Throwing Bell: parry bits, nail hits (Tink states), pogo off a bell (hero bounce after a down slash)
   boundaries     per attack family the hero distance when it was chosen, its trigger boundary (max) and how many
                  decisions were sampled within BOUNDARY_U of it (chosen / not chosen)
@@ -831,7 +831,8 @@ class Boundaries:
 
 
 PRODUCTS = {"chains": Chains, "death_tails": DeathTails, "kill_freeze": KillFreeze, "strikes": Strikes,
-            "quiet": Quiet, "garmond": Garmond, "stances": Stances, "below": Below, "clawmaiden": Clawmaiden,
+            # (file names must not collide with the per-enemy tables on a case-insensitive file system)
+            "quiet": Quiet, "garmond": Garmond, "stances": Stances, "below": Below, "clawmaiden_distance": Clawmaiden,
             "bells": Bells, "boundaries": Boundaries}
 
 

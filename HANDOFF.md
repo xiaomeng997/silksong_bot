@@ -249,7 +249,7 @@ fight caches 728 MB, `recall_*.json`, `products\`, `simul_h12.json`, logs, `pipe
   residuals, structural additions (thrown hazards by self templates, same-name candidates, current-collider tube for
   enemies outside every attack, optional family-wide union), `--write-margins`, `--area`.
 - `ssbot.knowledge.forum_products` + `tools/forum_products`: chains, death_tails, kill_freeze, strikes (+ punish),
-  quiet, garmond, stances, below, clawmaiden, bells, boundaries -> `knowledge/1.0.30000/enemies/forum/*.json`.
+  quiet, garmond, stances, below, clawmaiden_distance, bells, boundaries -> `knowledge/1.0.30000/enemies/forum/*.json`.
 - `tools/forum_simul` (open-loop replay through the trackers; reproduces design H table 1.2 on the same 12 fights;
   optional forecast statistics) and `planner_bench --encounter Forum` (support-phase timing scaffold).
 - Tests: `tests/test_forum_r0.py` (12, synthetic fixture of test_gauntlet_tables); gauntlet / behaviour tests pass.
