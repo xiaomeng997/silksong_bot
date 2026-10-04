@@ -321,3 +321,21 @@ def test_audit_poisson_and_bins():
     assert abs(poisson_cdf(0, 4.08) - _m.exp(-4.08)) < 1e-12 and poisson_cdf(3, 0.0) == 1.0
     assert abs(poisson_cdf(2, 1.5) - _m.exp(-1.5) * (1 + 1.5 + 1.125)) < 1e-12
     assert dx_bin(0.5) == "0-3" and dx_bin(7.0) == "6-10" and dx_bin(120.0) == ">99"
+
+
+def test_builder_last_resort_attribution_skips_parked_tinies():
+    """A contact named only "Song Automaton Tiny" (pooled, all same-named), no Tiny touching or near the hero box: the
+    builder's last resort is the nearest one in play, not a nearer parked one in "Dead" (WAITING_STATES, R1
+    close-out); with only parked ones it still answers (the old fallback: every candidate)."""
+    from types import SimpleNamespace
+
+    from ssbot.knowledge.gauntlet_tables import FORUM_SPECS, GauntletBuilder, _Subject
+    g = GauntletBuilder(FORUM_SPECS)
+    tk = "Song Automaton Tiny"
+    parked = _ent(1, tk, 26.0, 10.9, state="Dead", hp=28)
+    active = _ent(2, tk, 40.0, 8.0, state="Fire Ready", hp=28)
+    subs = {e["iid"]: _Subject(e["iid"], tk, SimpleNamespace(dead=False), name=tk, ent=e) for e in (parked, active)}
+    box = (30.0, 4.57, 31.0, 6.0)
+    ents = {1: parked, 2: active}
+    assert g._attribute(tk, subs, {}, [], box, ents=ents) == 2
+    assert g._attribute(tk, {1: subs[1]}, {}, [], box, ents={1: parked}) == 1

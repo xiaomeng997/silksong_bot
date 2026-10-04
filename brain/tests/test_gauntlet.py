@@ -173,6 +173,34 @@ def test_waiting_enemies_are_not_in_play():
     assert [e["type_key"] for e in live_enemies(s)] == ["Song Reed"]
 
 
+def test_parked_tinies_are_not_in_play():
+    """The Maestros' pooled Tinies wait in "Dead" (R1 close-out): not in play; summoned (Fire Ready) they are."""
+    from ssbot.train.gauntlet import WAITING_STATES, in_play, live_enemies
+    assert "Dead" in WAITING_STATES and "Die" in WAITING_STATES
+    s = _state([("Song Automaton Tiny", 20.5, 10.9), ("Song Automaton Tiny", 24.4, 10.9),
+                ("Song Automaton Tiny", 30.0, 8.0), ("Song Heavy Sentry", 35.0, FORUM.floor_y)])
+    s["ents"][0]["fsms"] = [{"name": "Control", "state": "Dead"}]
+    s["ents"][1]["fsms"] = [{"name": "Control", "state": "Die"}]
+    s["ents"][2]["fsms"] = [{"name": "Control", "state": "Fire Ready"}]
+    s["ents"][3]["fsms"] = [{"name": "Control", "state": "Idle"}]
+    assert [e["iid"] for e in live_enemies(s)] == [2, 3]
+    assert not in_play(s["ents"][0]) and in_play(s["ents"][2])
+
+
+def test_gauntlet_policy_ignores_parked_tinies():
+    """v1 targets only enemies in play: a parked Tiny (nearer to the hero) is neither a target nor a non-Clapper that
+    keeps the pocket test ("only Clappers left") off."""
+    for seed in range(20):
+        pol = GauntletDataPolicy()
+        pol.reset(random.Random(seed), FORUM)
+        s = _state([("Song Heavy Sentry", 45.0, FORUM.floor_y), ("Song Automaton Tiny", 24.4, 10.9)], hx=25.0)
+        s["ents"][0]["fsms"] = [{"name": "Control", "state": "Idle"}]
+        s["ents"][1]["fsms"] = [{"name": "Control", "state": "Dead"}]
+        pol.mode_left = 0
+        pol.act(s, None)
+        assert pol.targets == {"Song Heavy Sentry": 1}
+
+
 def test_gauntlet_policy_presses_toward_a_live_enemy_and_clings_left():
     pol = GauntletDataPolicy()
     pol.reset(random.Random(3), FORUM)
