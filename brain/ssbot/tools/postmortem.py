@@ -104,7 +104,9 @@ def main(argv: list[str] | None = None) -> int:
 
     rows = episode_rows(a.run, a.instance)
     view = (rows[0].get("policy") or {}).get("view", "oracle") if rows else "oracle"
-    pol = PlannerPolicy(view=view, threads=8)
+    cfg = a.run / "config.json"
+    kc = json.loads(cfg.read_text("utf-8")).get("key_cost") if cfg.exists() else None
+    pol = PlannerPolicy(view=view, threads=8, key_cost=tuple(kc) if kc else None)   # the run's key economy weights
     report = []
     if a.png:
         a.png.mkdir(parents=True, exist_ok=True)
@@ -169,6 +171,7 @@ def main(argv: list[str] | None = None) -> int:
                     "V": None if res is None else res.V, "P": None if res is None else round(res.P, 3),
                     "J": None if res is None else round(res.J, 2), "n_safe": None if res is None else res.n_safe,
                     "alternatives": None if res is None else res.alternatives,
+                    "keys": rec.get("keys"),               # key economy: the off choice, swapped, J / risk given up
                     "actual_in_hull_frames": f"{sum(inside)}/{len(inside)}",
                     "first_out_of_hull": next((k for k, v in enumerate(inside) if not v), None),
                     "placements": [(p.key.split('/', 1)[1], round(p.t_ref, 3), None if p.anchor is None else
