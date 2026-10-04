@@ -170,6 +170,8 @@ class Subject:
     flip: int = 0
     hidden: bool = False
     seen_T: float = -math.inf
+    name: str | None = None                        # its GameObject name (the Control events' obj)
+    box: tuple | None = None                       # its enabled damage colliders' box on the last frame seen
 
 
 class SubjectTracker:
@@ -207,9 +209,11 @@ class SubjectTracker:
         if not s.hidden and not math.isnan(s.pos[0]) and s.seen_T == T:
             s.cur.anchor, s.cur.mirror = s.pos, FACES_LEFT[s.flip]
 
-    def transition(self, iid: int, tk: str, to: str, T: float) -> None:
+    def transition(self, iid: int, tk: str, to: str, T: float, name: str | None = None) -> None:
         sp = self.specs[tk]
         s = self.subject(iid, tk)
+        if name:
+            s.name = name
         s.state, s.t_entry = to, T
         cur, idle = s.cur, sp.idle_family
         if to in sp.death_states:
@@ -237,7 +241,7 @@ class SubjectTracker:
         h = self.hazards.get(iid)
         if h is None:
             h = self.hazards[iid] = [tk, False, T, (float(x), float(y)), T]
-        if armed and not h[1]:
+        if armed and (not h[1] or T - h[4] > 2.5 * FRAME_S):    # (re-)armed, or back in the export (pooled)
             h[0], h[2], h[3] = tk, T, (float(x), float(y))
         h[1], h[4] = armed, T
 
@@ -249,9 +253,10 @@ class SubjectTracker:
             s.dead = True
 
     def entity(self, iid: int, tk: str, T: float, x: float, y: float, vx: float, vy: float, flip: int,
-               hidden: bool, state: str | None = None, tin: float | None = None) -> None:
+               hidden: bool, state: str | None = None, tin: float | None = None, box=None) -> None:
         s = self.subject(iid, tk)
         s.hidden = hidden
+        s.box = None if box is None or math.isnan(float(box[0])) else tuple(float(v) for v in box)
         if not hidden:
             s.pos, s.vel, s.flip, s.seen_T = (float(x), float(y)), (float(vx), float(vy)), int(flip), T
             if s.cur is not None and s.cur.anchor is None:
@@ -263,9 +268,13 @@ class SubjectTracker:
 class SubjectRecall:
     """Run the trackers over a fight's cache and test the contacts (see the module docstring)."""
 
-    def __init__(self, tables: FoldTables, lags=(2, 3, 4)):
+    def __init__(self, tables: FoldTables, lags=(2, 3, 4), tube_speed: dict[str, float] | None = None,
+                 tube_skin: float = 0.1):
         self.t = tables
         self.lags = tuple(lags)
+        self.tube = tube_speed is not None
+        self.tube_speed = dict(tube_speed or {})
+        self.tube_skin = tube_skin
         self.stats: dict = defaultdict(Counter)
         self.misses: list[dict] = []
         self.placements = Counter()
@@ -397,6 +406,18 @@ class SubjectRecall:
                 self._place(out, self.t.key(c[0], TAIL), lo, hi, c[2], H)
             else:
                 self._place(out, self.t.key(c[0], st), lo, hi, c[2], H)
+    def in_tube(self, s: Subject, pts: list[tuple[float, float, float]]) -> bool:
+        """The enemy's damage colliders enabled now (its box on the origin frame) moved at most its type's top speed
+        (tube_speed: measured on the training fold) by the query time: the current-collider tube. Only for the
+        recall's lags (a few frames): dying and waiting bodies, a parked summon, a body thrown back by a clash."""
+        if s.box is None:
+            return False
+        v = self.tube_speed.get(s.tk, 0.0)
+        hx, hy = hb.HERO_HALF_U[0] + self.tube_skin, hb.HERO_HALF_U[1] + self.tube_skin
+        b = s.box
+        return any(b[0] - hx - v * tau <= x <= b[2] + hx + v * tau and b[1] - hy - v * tau <= y <= b[3] + hy + v * tau
+                   for x, y, tau in pts)
+
     def covered(self, placements: list, pts: list[tuple[float, float, float]]) -> bool:
         q = self.t.query
         if q is None or not placements:
@@ -443,20 +464,55 @@ class SubjectRecall:
             if box is None or fr not in fi_of:
                 continue
             pts.append((0.5 * (box[0] + box[2]), 0.5 * (box[1] + box[3]), float(T_arr[fi_of[fr]]) - T_o))
-        ok = False
+        how = None
         if s is not None and pts:
-            pl = self.placements_of(s, T_o, H, hazards=thrown(tr, self.t.specs[s.tk]))
-            self.placements["placements"] += len(pl)
-            self.placements["forecasts"] += 1
-            ok = self.covered(pl, pts)
-        if ok:
+            # the gauntlet builder attributes a contact by the GameObject name (a waiting wave-12 "Song Reed" and the
+            # wave-0 one share it): every subject of that name is a candidate, the attributed one first
+            names = [s] + [o for o in tr.subjects.values() if o is not s and o.tk == s.tk and s.name
+                           and o.name == s.name]
+            for k, o in enumerate(names):
+                pl = self.placements_of(o, T_o, H, hazards=thrown(tr, self.t.specs[o.tk]))
+                self.placements["placements"] += len(pl)
+                self.placements["forecasts"] += 1
+                if self.covered(pl, pts):
+                    how = "forecast" if k == 0 else "namesake forecast"
+                    break
+                if self.tube and self.in_tube(o, pts):
+                    how = "current-collider tube" if k == 0 else "namesake tube"
+                    break
+        if how is not None:
             st["covered"] += 1
+            if how != "forecast":
+                st[f"covered by {how}"] += 1
             return
         self.misses.append({"fight": c["fight"], "f": cf, "lag": L, "type": c["type"], "family": c.get("family"),
                             "state": c.get("state"), "ts": c.get("ts"), "src": c.get("src"), "kind": c.get("kind"),
                             "subject_state": None if s is None else s.state,
                             "subject_family": None if s is None or s.cur is None else s.cur.family,
                             "ho": c.get("ho"), "label": label})
+
+
+def top_speeds(caches, specs=FORUM_SPECS, jump_u: float = 2.0) -> dict[str, float]:
+    """Per enemy type the largest speed (u per game s) of its transform between consecutive exported frames over the
+    given fight caches (moves longer than jump_u in one frame are teleports or respawns and are left out): the
+    current-collider tube's growth rate."""
+    out: dict[str, float] = {}
+    for c in caches:
+        types = c["types"]
+        order = np.lexsort((c["e_fi"], c["e_iid"]))
+        iid, fi = c["e_iid"][order], c["e_fi"][order]
+        x, y, tk = c["e_x"][order].astype(np.float64), c["e_y"][order].astype(np.float64), c["e_tk"][order]
+        same = (iid[1:] == iid[:-1]) & (fi[1:] == fi[:-1] + 1)
+        dt = np.diff(c["T"])[fi[:-1].clip(0, len(c["T"]) - 2)]
+        d = np.hypot(np.diff(x), np.diff(y))
+        ok = same & (dt > 1e-4) & (d <= jump_u)
+        sp = np.zeros_like(d)
+        sp[ok] = d[ok] / dt[ok]
+        for k in np.unique(tk[:-1][ok]):
+            t = types[int(k)]
+            if t in specs:
+                out[t] = max(out.get(t, 0.0), float(sp[ok & (tk[:-1] == k)].max()))
+    return out
 
 
 def thrown(tr: SubjectTracker, sp) -> list[tuple]:
@@ -490,7 +546,7 @@ def replay(cache: dict, tr: SubjectTracker, specs=FORUM_SPECS):
             if k == "fsm":
                 tk = _type_of(d.get("obj"), specs)
                 if tk is not None and d.get("fsm") == specs[tk].control_fsm and isinstance(d.get("to"), str)                         and isinstance(d.get("ent"), int):
-                    tr.transition(int(d["ent"]), tk, d["to"], T)
+                    tr.transition(int(d["ent"]), tk, d["to"], T, d.get("obj"))
             elif k == "hit" and d.get("dead") and isinstance(d.get("ent"), int) and d.get("ent") in tr.subjects:
                 tr.kill(int(d["ent"]), T)
         for r in range(starts[i], starts[i + 1]):
@@ -514,7 +570,7 @@ def replay(cache: dict, tr: SubjectTracker, specs=FORUM_SPECS):
             st = int(cache["e_st"][r])
             tr.entity(int(cache["e_iid"][r]), types[tki], T, cache["e_x"][r], cache["e_y"][r], cache["e_vx"][r],
                       cache["e_vy"][r], int(cache["e_flip"][r]), bool(cache["e_hidden"][r]),
-                      states[st] if st >= 0 else None, float(cache["e_tin"][r]))
+                      states[st] if st >= 0 else None, float(cache["e_tin"][r]), cache["e_box"][r])
         yield i, f, T
 
 

@@ -195,7 +195,8 @@ def forum_main(a: argparse.Namespace) -> int:
     """--encounter Forum: held-out recall of the gauntlet tables (ssbot.knowledge.forum_support), fold k's fights
     against the tables of the other fold, each enemy's contacts against its own forecast."""
     from ssbot.knowledge.forum_cache import cache_name, load_cache
-    from ssbot.knowledge.forum_support import FoldTables, SubjectRecall, margins_from_contacts, read_contacts
+    from ssbot.knowledge.forum_support import FoldTables, SubjectRecall, margins_from_contacts, read_contacts, \
+        top_speeds
     from ssbot.knowledge.gauntlet_tables import FORUM_SPECS
 
     extra = a.extra
@@ -225,7 +226,16 @@ def forum_main(a: argparse.Namespace) -> int:
         tables = FoldTables(extra, train, margins=m, base=a.margin, specs=FORUM_SPECS)
         print(f"fold {k}: tables of fold {train}, {len(tables.templates)} templates ({time.perf_counter() - t0:.0f} s)",
               flush=True)
-        rec = SubjectRecall(tables, lags)
+        speeds = None
+        if a.tube:
+            t0 = time.perf_counter()
+            train_ids = [fid for fid, fd in folds.items() if fd == train]
+            speeds = top_speeds(load_cache(a.cache / cache_name(fid)) for fid in train_ids
+                                if (a.cache / cache_name(fid)).exists())
+            print(f"  top speeds of fold {train} ({time.perf_counter() - t0:.0f} s): "
+                  + ", ".join(f"{tk} {v:.1f}" for tk, v in sorted(speeds.items())), flush=True)
+            out.setdefault("tube_speed_by_fold", {})[str(k)] = {tk: round(v, 2) for tk, v in speeds.items()}
+        rec = SubjectRecall(tables, lags, tube_speed=speeds)
         ids = [fid for fid, fd in folds.items() if fd == k]
         if a.max_fights:
             ids = ids[:a.max_fights]
@@ -250,11 +260,18 @@ def forum_main(a: argparse.Namespace) -> int:
             by[f"{tk}"] = dict(v)
             continue
         by[f"{tk}/L{L}"] = {"n": v["n"], "covered": v["covered"], "outside_attacks": v["outside_attacks"],
-                            "recall": round(v["covered"] / v["n"], 6) if v["n"] else None}
+                            "recall": round(v["covered"] / v["n"], 6) if v["n"] else None,
+                            **{x: v[x] for x in sorted(v) if x.startswith("covered by")}}
     tot = {L: [sum(v["n"] for (tk, l2), v in stats.items() if l2 == L),
                sum(v["covered"] for (tk, l2), v in stats.items() if l2 == L)] for L in lags}
     out["recall"] = {f"L{L}": {"n": n, "covered": c, "recall": round(c / n, 6) if n else None}
                      for L, (n, c) in tot.items()}
+    how: Counter = Counter()
+    for (tk, L), v in stats.items():
+        for x in v:
+            if x.startswith("covered by"):
+                how[f"L{L} {x}"] += v[x]
+    out["covered_other_than_by_the_forecast"] = dict(sorted(how.items()))
     out["by_type"] = by
     out["fights"] = fights_done
     out["margins_by_fold"] = {str(k): {f"{tk}/{fam}": round(v, 4) for (tk, fam), v in m.items()}
@@ -302,6 +319,8 @@ def main(argv: list[str] | None = None) -> int:
                     help="Forum: per-family margins from the training fold's held-out residuals, or none")
     ap.add_argument("--margin-q", type=float, default=1.0, help="Forum: the residual quantile a margin takes")
     ap.add_argument("--area", action="store_true", help="Forum: report the margins' support area cost")
+    ap.add_argument("--no-tube", dest="tube", action="store_false",
+                    help="Forum: leave out the current-collider tube (forum_support.SubjectRecall.in_tube)")
     ap.add_argument("--write-margins", type=Path, default=None,
                     help="Forum: write the planner's per-family margins and this recall to this JSON")
     ap.add_argument("--in-sample", action="store_true",

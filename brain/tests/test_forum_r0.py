@@ -191,3 +191,21 @@ def test_contacts_file_is_gzip_jsonl(tmp_path):
         first = json.loads(fh.readline())
     assert {"type", "fight", "f", "family", "state", "fold", "boxes", "res", "ho"} <= set(first)
     assert (extra / "Foe_support_fold0.npz").exists() and (extra / "Foe_support_fold1.npz").exists()
+
+
+def test_top_speed_and_current_collider_tube(tmp_path):
+    from ssbot.knowledge.forum_support import Subject, top_speeds
+    states = _states()
+    for s in states:                     # Foe (iid 1) walks 0.1 u per frame; a 5 u jump is a teleport
+        for e in s["ents"]:
+            if e["iid"] == 1:
+                e["pos"] = [10.0 + 0.1 * s["f"] + (5.0 if s["f"] >= 60 else 0.0), 5.0, 0.0]
+    c = _cache(tmp_path, states)
+    v = top_speeds([c], SPECS)
+    assert math.isclose(v["Foe"], 6.0, rel_tol=1e-3)
+    rec = SubjectRecall.__new__(SubjectRecall)
+    rec.tube_speed, rec.tube_skin = {"Foe": 6.0}, 0.1
+    s = Subject(1, "Foe", box=(9.5, 4.5, 10.5, 5.5))
+    # within the hero half-width + skin + 6 u/s x 4 frames of the box edge, and beyond it
+    assert rec.in_tube(s, [(10.5 + 0.25 + 0.1 + 0.39, 5.0, 4 / 60)])
+    assert not rec.in_tube(s, [(10.5 + 0.25 + 0.1 + 0.41, 5.0, 4 / 60)])
