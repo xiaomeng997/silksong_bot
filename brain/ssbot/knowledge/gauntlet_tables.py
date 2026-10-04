@@ -41,9 +41,11 @@ session) and the first recording of run 20261002_221727 (instance 2, fo_A): atta
 states between attacks and the waiting states. Names: the game's journal (EnemyDeathEffects.journalRecord ->
 EnemyJournalRecord.displayName -> EN_Journal), forum.md §9.
 """
+import json
 import math
 from collections import Counter, defaultdict
 from dataclasses import dataclass
+from pathlib import Path
 
 from ssbot.ipc.ents import DAMAGE_SRC
 from ssbot.knowledge.behaviour_tables import (
@@ -93,6 +95,26 @@ def hazard_type(e: dict) -> str:
     return tk
 
 
+# hero height above the floor: grounded (< 1 u), in the air, high (>= 5 u: platforms' tops, the left-wall top pocket)
+HEIGHT_BINS_U = (-99.0, 1.0, 5.0, 99.0)
+# R1 provenance (Forum plan R1, forum.md 13.8): the Control states whose exits include one the hero causes by a hit
+# (an FSM transition on TOOK DAMAGE / DAMAGED / HIT, read from fsm.graph dumps: knowledge/1.0.30000/enemies/forum/
+# hero_caused.json). In a fight whose policy never hit a type below its protect_hp (data2_envoy: the Envoy), that
+# type's decisions and dwells out of these states are dropped: the protection takes the hit-caused exit away.
+HERO_CAUSED_PATH = Path(__file__).resolve().parents[3] / "knowledge" / "1.0.30000" / "enemies" / "forum" / \
+    "hero_caused.json"
+PROTECT_HP_DEFAULT = 20      # forum_policy.PROTECT_HP before the records carried it
+
+
+def hero_caused_states(path: Path | None = None) -> dict[str, set[str]]:
+    """{type_key: {state with a hero-caused exit}} from hero_caused.json ({} when it is missing)."""
+    try:
+        d = json.loads((path or HERO_CAUSED_PATH).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return {tk: set(v.get("states") or ()) for tk, v in (d.get("types") or {}).items()}
+
+
 def _spec(enemy: str, boss_type: str, fsm: str, hp: int, prefix: str, attacks: dict[str, str],
           decisions: tuple[str, ...], dormant: tuple[str, ...], death: tuple[str, ...] = (),
           spawns: tuple[tuple[str, tuple[str, ...]], ...] = (),
@@ -105,7 +127,7 @@ def _spec(enemy: str, boss_type: str, fsm: str, hp: int, prefix: str, attacks: d
         directed=fams + (idle,), phase_marks={}, phases={"P1": "the whole fight (no phases)"}, initial_phase="P1",
         world_fixed=(), rest_states=rest, flip_mirror=FACES_LEFT, arena_x=FORUM.arena_x, floor_y=FORUM.floor_y,
         idle_family=idle, death_on_kill=True, projectiles=tuple(p for p, _ in spawns), spawns=spawns,
-        multi_wounder=True)
+        multi_wounder=True, height_bins_u=HEIGHT_BINS_U)
 
 
 FORUM_SPECS: dict[str, BehaviourSpec] = {s.boss_type: s for s in (
@@ -256,6 +278,7 @@ class GauntletBuilder:
         self.collider_types: dict[str, set[str]] = defaultdict(set)   # damage collider name -> types exporting it
         self._last_owner: dict[str, tuple[int, int]] = {}
         self._f = 0
+        self.hero_caused = hero_caused_states()
 
     def _proj_owner_types(self, tk: str) -> list[str]:
         return [o for p, os in self.proj_types.items() if tk == p or tk.startswith(p) for o in os]
@@ -273,6 +296,7 @@ class GauntletBuilder:
         owner: dict[int, int] = {}          # hazard iid -> owning subject iid
         armed_last: dict[int, bool] = {}
         n_inst0 = {tk: len(b.instances) for tk, b in self.builders.items()}
+        n_tr0 = {tk: (len(b.transitions), len(b.dwells)) for tk, b in self.builders.items()}
         frames = 0
         last_f = None
         snaps: dict[int, tuple] = {}         # frame -> (subject iid -> ent, hazards, hero box)
@@ -378,9 +402,11 @@ class GauntletBuilder:
             for sid, sub in subjects.items():
                 sub.scanner.feed({"f": f, "dt": s.get("dt"), "hero": hero, "ents": per.get(sid, ()),
                                   "ev": evs.get(sid, ())})
-        by_type: Counter = Counter()
         for sub in subjects.values():
             sub.scanner.close()
+        self._drop_protected(fight, n_tr0)
+        by_type: Counter = Counter()
+        for sub in subjects.values():
             b = self.builders[sub.type_key]
             sc = sub.scanner
             by_type[sub.type_key] += 1
@@ -393,6 +419,27 @@ class GauntletBuilder:
                               if len(b.instances) > n_inst0[tk]}, "fold": fold}
         self.fights.append(info)
         return info
+
+    def _drop_protected(self, fight: Fight, n_tr0: dict[str, tuple[int, int]]) -> None:
+        """R1 provenance (HERO_CAUSED_PATH): drop a protected type's transitions out of its hero-caused states taken at
+        or below protect_hp, and its dwells in those states, from what this fight added."""
+        info = fight.info or {}
+        hp_cap = info.get("protect_hp") or PROTECT_HP_DEFAULT
+        for tk in info.get("protect") or ():
+            b = self.builders.get(tk)
+            states = self.hero_caused.get(tk)
+            if b is None or not states:
+                if b is not None:
+                    self.counters[f"protected {tk}: no hero-caused states known (nothing dropped)"] += 1
+                continue
+            t0, d0 = n_tr0[tk]
+            keep = [t for t in b.transitions[t0:]
+                    if not (t.frm in states and (t.boss_hp is None or t.boss_hp <= hp_cap))]
+            self.counters[f"protected {tk}: decisions dropped"] += len(b.transitions) - t0 - len(keep)
+            b.transitions[t0:] = keep
+            keep_d = [d for d in b.dwells[d0:] if d.state not in states]
+            self.counters[f"protected {tk}: dwells dropped"] += len(b.dwells) - d0 - len(keep_d)
+            b.dwells[d0:] = keep_d
 
     def _pick_owner(self, e: dict, types: list[str], subjects: dict[int, _Subject], f: int) -> int | None:
         """A hazard's owner when it is first seen or arms again: among the live subjects of the types that spawn it,

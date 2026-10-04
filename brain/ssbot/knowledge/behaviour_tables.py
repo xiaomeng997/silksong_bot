@@ -236,6 +236,10 @@ class BehaviourSpec:
     rest_states: tuple[str, ...] = ("Init", "Dormant")   # FSM states of a hazard entity that mean "not armed"
     flip_mirror: tuple[int, int] = (1, -1)               # mirror for flipX False / True when no direction state
     dist_bins_u: tuple[float, ...] = (0.0, 3.0, 6.0, 10.0, 99.0)   # distance covariate bins (tested, not assumed)
+    # hero height above floor_y bins (covariate "hero_height", tested like the others; None: not a candidate). The
+    # Forum sets it: the left-wall top pocket changes the Choir Clapper's choices within the same distance cells
+    # (forum.md 13.8: Idle at |dx| 3-10 u, pocket 0 / 214 Evade Scuttle or Dmg Attack, ground 35 / 122)
+    height_bins_u: tuple[float, ...] | None = None
     arena_x: tuple[float, float] = (0.0, 0.0)
     floor_y: float = 0.0
     tail_max_s: float = 6.0
@@ -537,9 +541,14 @@ def run_fights(run_dir: Path, closed_only: bool = True) -> tuple[list[Fight], li
             if closed_only and status != "closed":
                 skipped.append(f"{fid}: recording {rec.name} is {status or 'missing'}")
                 continue
+            pol = a.get("policy") or {}
             fights.append(Fight("rec", rec, int(a["f_wake"]), int(a["f_end"]), fid, a.get("outcome"),
                                 {"seed": a.get("seed"), "mode": a.get("mode"), "hits": a.get("hits"),
-                                 "would_die": a.get("would_die")}))
+                                 "would_die": a.get("would_die"), "unit": a.get("unit"),
+                                 # R1 provenance (ssbot.train.forum_policy): types the policy never hit below
+                                 # protect_hp, and its tactic segments [frame, tactic, target, pocket, protect]
+                                 "protect": list(pol.get("protect") or ()), "protect_hp": pol.get("protect_hp"),
+                                 "segments": pol.get("segments")}))
     return fights, skipped
 
 
@@ -1754,6 +1763,9 @@ class BehaviourBuilder:
             else:
                 cov["dist_hidden"].append(None)
             cov["hero_x"].append(third(t.hero_x, hx_e))
+            if spec.height_bins_u:
+                cov["hero_height"].append(None if t.hero_y is None else
+                                          dist_bin(t.hero_y - spec.floor_y, spec.height_bins_u))
             cov["phase"].append(t.phase)
             cov["boss_hp"].append(None if t.boss_hp is None else
                                   f"q{min(4, max(1, math.ceil(4 * t.boss_hp / spec.hp)))}")
@@ -1799,6 +1811,9 @@ class BehaviourBuilder:
                 "choice_run": f"times in a row this state chose that outcome (top level {caps['choice_run']}+)",
                 **{f"miss_{o}": f"decisions of this state since it last chose {o} (0 = the previous one; top level "
                                 f"{caps[f'miss_{o}']}+)" for o in outs}}
+        if spec.height_bins_u:
+            defs["hero_height"] = (f"hero transform height above the floor (y {spec.floor_y}) bin of "
+                                   f"{list(spec.height_bins_u)} u (V)")
         defs["observability"] = ("V: seen on screen at decision time; O: oracle only; D: derived from what was seen "
                                  "before. The history covariates (prev, run, since_*, prev_dir, last_seen_x, "
                                  "last_choice, choice_run, miss_*) are D: every outcome of these decisions shows as "
