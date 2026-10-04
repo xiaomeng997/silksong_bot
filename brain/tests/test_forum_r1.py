@@ -323,6 +323,26 @@ def test_audit_poisson_and_bins():
     assert dx_bin(0.5) == "0-3" and dx_bin(7.0) == "6-10" and dx_bin(120.0) == ">99"
 
 
+def test_set_time_scale_waits_out_a_momentary_zero():
+    """time.scale 2 read back as Time.timeScale 0 for a moment (a freeze, the load between episodes) is not a failure;
+    a scale that never takes is (the run must not collect at the wrong speed)."""
+    import pytest
+
+    from ssbot.tools.combat_run import set_time_scale
+
+    class _L:
+        def __init__(self, seq):
+            self.seq = list(seq)
+
+        def rpc(self, name, timeout_s=10, **kw):
+            v = self.seq.pop(0) if len(self.seq) > 1 else self.seq[0]
+            return {"scale": 2.0, "time_scale": v, "via": "debugmod", "debugmod_scale": 2.0}
+
+    set_time_scale(_L([0.0, 0.0, 2.0]), 2.0, 2, wait_s=2.0)
+    with pytest.raises(SystemExit):
+        set_time_scale(_L([1.0]), 2.0, 2, wait_s=0.3)
+
+
 def test_builder_last_resort_attribution_skips_parked_tinies():
     """A contact named only "Song Automaton Tiny" (pooled, all same-named), no Tiny touching or near the hero box: the
     builder's last resort is the nearest one in play, not a nearer parked one in "Dead" (WAITING_STATES, R1

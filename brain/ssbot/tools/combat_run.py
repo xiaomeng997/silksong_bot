@@ -221,12 +221,18 @@ def back_into_slot(link, enc, instance: int, tries: int = SLOT_TRIES, slot_timeo
                 log(f"recovery step failed: {type(e2).__name__}: {e2}; {_describe(link.state)}")
 
 
-def set_time_scale(link, scale: float, instance: int) -> None:
+def set_time_scale(link, scale: float, instance: int, wait_s: float = 5.0) -> None:
     """Oracle time.scale (training copy only). Above 1 it needs the oracle of 06a7c2b (through DebugMod's TimeScale):
-    the deployed one before it clamps to 1, so the run stops rather than collect at the wrong speed."""
+    the deployed one before it clamps to 1, so the run stops rather than collect at the wrong speed. Time.timeScale
+    itself can read 0 for a moment after the scale is set (a freeze or the savestate load between episodes: run
+    20261004_145235 i2 stopped at ep4 on time_scale 0.0 with debugmod_scale 2.0), so it is read again for wait_s."""
     if scale == 1.0:
         return
     r = link.rpc("time.scale", timeout_s=10, scale=scale)
+    deadline = time.monotonic() + wait_s
+    while abs(float((r or {}).get("time_scale") or 0.0) - scale) > 1e-3 and time.monotonic() < deadline:
+        time.sleep(0.25)
+        r = link.rpc("time.scale", timeout_s=10)
     got = float((r or {}).get("time_scale") or 0.0)
     if abs(got - scale) > 1e-3:
         raise SystemExit(f"[i{instance}] time.scale {scale}: the game runs at {got} ({r}); not collecting")
