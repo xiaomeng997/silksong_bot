@@ -26,7 +26,7 @@ Per STATE (this is the only place where backends meet the combat stack, which re
      danger zone around her no larger than the untouched bell's (violations counted in stats()["bell_hits"]).
 The decision log (decisions_i<N>.jsonl in the run directory) keeps the 90 ticks before every hero hit, lethal hit,
 FORCED_RISK and supervisor pause, and 10 after, for ssbot.tools.postmortem. The key plan log (keys_i<N>.jsonl, one
-line per episode, combat.keyplan) keeps every key press decided at every tick (first decision, changes,
+line per episode, train.keyplan) keeps every key press decided at every tick (first decision, changes,
 cancellation) and the presses the game latched (STATE act.mask, every frame): the key economy metrics
 (ssbot.tools.key_economy) and the video's key track (ssbot.tools.key_track).
 """
@@ -46,7 +46,7 @@ from ssbot.backends.observability import ObservabilityFilter
 from ssbot.backends.oracle_backend import OracleBackend
 from ssbot.combat.boss_model import BossModel
 from ssbot.combat.forecast import Forecaster, load_box_margin, load_hurtbox, load_planner_templates
-from ssbot.combat.keyplan import KeyPlanLog, summarize
+from ssbot.train.keyplan import KeyPlanLog, summarize
 from ssbot.combat.planner import Planner, PlannerConfig
 from ssbot.combat.safety_filter import FilterContext
 from ssbot.combat.tactics import Tactics, load_playbook
@@ -168,7 +168,7 @@ class AttackMonitor:
 
 class PlannerPolicy:
     def __init__(self, view: str = "oracle", threads: int = 8, enemy: str = "BellBeast", log_dir: Path | None = None,
-                 instance: int = 0, real_quit_p: float = 0.0, key_cost: tuple[float, float] | None = None):
+                 instance: int = 0, real_quit_p: float = 0.0, key_cost: tuple[float, ...] | None = None):
         import cv2
         import numba
         numba.set_num_threads(threads)
@@ -195,8 +195,12 @@ class PlannerPolicy:
                              comfort=COMFORT)
         self.pb = load_playbook(enemy)
         if key_cost is not None:
-            # the key economy weights (planner: key_press, key_change) for an A/B (combat_run --key-cost)
+            # the key economy weights (planner: key_press, key_change[, key_tie]) for an A/B (combat_run --key-cost)
+            if len(key_cost) not in (2, 3):
+                raise ValueError(f"key_cost: PRESS CHANGE [TIE], got {key_cost}")
             self.pb.weights.update(key_press=float(key_cost[0]), key_change=float(key_cost[1]))
+            if len(key_cost) > 2:
+                self.pb.weights["key_tie"] = float(key_cost[2])
         self.fc.no_hurtbox = self.pb.no_hurtbox
         self.fc.shape_from = self.pb.shape_from          # the emerge predicted with the charge's shape
         self.fc.bell_tells = view == "degraded_dust"
@@ -691,6 +695,12 @@ class PlannerPolicy:
                "attacks": res.attacks, "atk_conf": self.atk_mon.confidence(), "fam_p": self._fam_p(fcast),
                "best_up": res.best_up, "hits": res.hits, "pogo": dict(self.planner.pogo_log),
                "path": None if res.path is None else np.round(res.path[::4, :], 3).tolist()}
+        if res.key_on:
+            # the key economy terms: the choice without them, whether they swapped it, the chosen plan's presses and
+            # plan changes, and what the swap gave up in J and the end's risk map value (ssbot.tools.postmortem)
+            rec["keys"] = {"swap": res.name_off != res.name, "off": res.name_off, "J_off": round(res.J_off, 3),
+                           "kp": res.key_press, "kc": res.key_change, "risk": round(res.risk, 4),
+                           "risk_off": round(res.risk_off, 4)}
         hit = any(ev.get("k") in ("damage", "catastrophe", "would_die") for ev in s.get("ev") or ())
         event = hit or res.forced_risk or (r.decision.pause_pending and self.counts["_pend_logged"] == 0)
         if r.decision.pause_pending:

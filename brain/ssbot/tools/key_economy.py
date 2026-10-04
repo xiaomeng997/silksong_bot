@@ -10,7 +10,7 @@ Per group (runs pooled), fights = attempts without HARNESS_FAIL, each from its w
 f_end):
 - outcomes, CLEAR %, WOULD_DIE episodes, hits taken (mean, per episode), time to kill (CLEAR: p50, mean, sd);
 - latched presses (rising edges of STATE act.mask, what the game applied) per second, per key and in total: from the
-  key plan logs (keys_i<N>.jsonl, combat.keyplan) where the run has them, else from the recordings' act.mask;
+  key plan logs (keys_i<N>.jsonl, train.keyplan) where the run has them, else from the recordings' act.mask;
 - from the key plan logs only (runs from 2026-10-03 night on): decided presses (the planner's notes with the press in
   the fight; the supervisor's are counted apart), the share changed before the press was sent or cancelled (plan
   change rate, also per key), the decision lead (first decision to the press sent, frames; and to the latched press),
@@ -18,7 +18,20 @@ f_end):
   changed, one-tick flip-flops) per second of the logged ticks.
 The person's fight (raw human session, frames 64275-68397 = the Bell Beast fight from the wake to the kill, the same
 window as opportunity_audit / pogo_repro): presses per second per key from STATE input.mask (the game's action layer:
-what the person's keys did), counted the same way.
+what the person's keys did), counted the same way. The bot's rates come from act.mask (what the oracle latched); in
+bot recordings input.mask shows 1-2 % more presses than act.mask (extra jump edges), so the person's rate may read
+that much high against the bot's.
+
+Safety leading indicators (the gate for any key economy weight: it must never cost safety, and hits are too rare to
+show a modest cost; first A/B 2026-10-03: 3 hit fights in 110 per arm): per fight second, the planner's FORCED_RISK
+ticks (no collision-free plan; attempts' policy.forced_risk_ticks) and the supervisor's non-green tier ticks (YELLOW
+and worse; policy.modes tier_*), pooled and per episode, and the fights with a hit. compare() tests each arm against
+the first: the ratio of the per-fight mean rates (each fight weighs the same; the pooled rates are reported too),
+Mann-Whitney one-sided p (higher in b), the seed-paired sign-flip p where both arms played the same seeds (the A/B
+runs every seed on both arms; the seed includes the instance), Fisher's one-sided p on hit fights, and the gate:
+every indicator's ratio at most
+GATE_RATIO and its one-sided p at least GATE_P, hit fights' p at least GATE_P, WOULD_DIE not more, and time to kill's
+95 % interval below +GATE_TTK_S (with about 110 fights an arm the interval is +-1.5 s wide).
 """
 import argparse
 import json
@@ -29,9 +42,12 @@ from pathlib import Path
 
 import numpy as np
 
-from ssbot.combat.keyplan import final_press, match_actual, summarize
+from ssbot.train.keyplan import final_press, match_actual, summarize
 
 FPS = 60.0
+GATE_RATIO = 1.02          # a safety indicator may rise at most 2 % (point estimate) ...
+GATE_P = 0.2               # ... and not significantly (one-sided p >= 0.2: no hint of a rise either)
+GATE_TTK_S = 2.0           # time to kill: the 95 % interval of the difference stays below +2 s (3 % of a fight)
 HUMAN = Path(r"C:\ssbot\data\human\20260930_210337")
 HUMAN_FRAMES = (64275, 68397)
 LEAD_BINS = (2, 3, 6, 12, 24, 48, 10 ** 9)       # [2], [3, 5], [6, 11], [12, 23], [24, 47], [48, ...)
@@ -181,6 +197,9 @@ def group(runs: list[Path]) -> dict:
     flips = np.zeros(3, np.int64)
     flip_s = 0.0
     sources = Counter()
+    safety: list[list] = []                      # [seed, forced_risk /s, non-green /s, yellow /s, hits, seconds]
+    tier_ticks = Counter()
+    fr_ticks = 0
     for run in runs:
         recs = _key_records(run)
         for a in _attempts(run):
@@ -189,6 +208,15 @@ def group(runs: list[Path]) -> dict:
             rows.append(a)
             fw, fe = a["f_wake"], a["f_end"]
             dur = (fe - fw + 1) / FPS
+            pol = a.get("policy") or {}
+            modes = pol.get("modes") or {}
+            tiers = {k[5:]: v for k, v in modes.items() if k.startswith("tier_")}
+            tier_ticks.update(tiers)
+            fr = int(pol.get("forced_risk_ticks") or 0)
+            fr_ticks += fr
+            ng = sum(v for k, v in tiers.items() if k != "GREEN")
+            safety.append([int(a.get("seed") or 0), fr / dur, ng / dur, tiers.get("YELLOW", 0) / dur,
+                           int(a.get("hits") or 0), dur])
             rec = _record_for(recs.get(a.get("instance"), []), a)
             if rec is not None:
                 hl = {k: [(r if r >= 0 else fe + 1) - p for p, r in iv if fw <= p <= fe]
@@ -251,6 +279,17 @@ def group(runs: list[Path]) -> dict:
            "presses_per_s_total": round(sum(per_key_lat.values()) / secs, 3) if secs else None,
            "presses_per_s_gameplay": round(gameplay_total(per_key_lat) / secs, 3) if secs else None,
            "presses_per_s_episode": _q(ep_rate), "holds_frames": hold_stats(holds)}
+    fs = sum(x[5] for x in safety)
+    out["safety"] = {
+        "fight_s": round(fs, 1),
+        "forced_risk_per_s": round(fr_ticks / fs, 4) if fs else None,
+        "non_green_per_s": round(sum(v for k, v in tier_ticks.items() if k != "GREEN") / fs, 4) if fs else None,
+        "yellow_per_s": round(tier_ticks.get("YELLOW", 0) / fs, 4) if fs else None,
+        "tier_ticks": dict(tier_ticks.most_common()),
+        "forced_risk_per_s_episode": _q([x[1] for x in safety]),
+        "non_green_per_s_episode": _q([x[2] for x in safety]),
+        "hit_fights": sum(1 for x in safety if x[4] > 0)}
+    out["_episodes"] = safety
     if dec:
         bins = np.histogram(leads, bins=LEAD_BINS)[0] if leads else []
         out["plan"] = {
@@ -273,8 +312,91 @@ def group(runs: list[Path]) -> dict:
     return out
 
 
+def mann_whitney_greater(x, y) -> float:
+    """One-sided p that y tends to be larger than x (normal approximation with the tie correction)."""
+    x, y = np.asarray(x, float), np.asarray(y, float)
+    n1, n2 = len(x), len(y)
+    if not n1 or not n2:
+        return float("nan")
+    allv = np.concatenate([x, y])
+    order = allv.argsort(kind="mergesort")
+    ranks = np.empty(len(allv))
+    sv = allv[order]
+    i = 0
+    tie_term = 0.0
+    while i < len(sv):
+        j = i
+        while j + 1 < len(sv) and sv[j + 1] == sv[i]:
+            j += 1
+        ranks[order[i:j + 1]] = 0.5 * (i + j) + 1.0
+        t = j - i + 1
+        tie_term += t ** 3 - t
+        i = j + 1
+    u2 = ranks[n1:].sum() - n2 * (n2 + 1) / 2.0
+    mu = n1 * n2 / 2.0
+    n = n1 + n2
+    var = n1 * n2 / 12.0 * ((n + 1) - tie_term / (n * (n - 1)))
+    if var <= 0:
+        return 0.5
+    z = (u2 - mu - 0.5) / math.sqrt(var)
+    return 0.5 * math.erfc(z / math.sqrt(2.0))
+
+
+def sign_flip_greater(d, n_perm: int = 20000, seed: int = 0) -> float:
+    """One-sided p that the paired differences d (b - a) have a positive mean (random sign flips)."""
+    d = np.asarray(d, float)
+    if not len(d):
+        return float("nan")
+    rng = np.random.default_rng(seed)
+    obs = d.mean()
+    signs = rng.choice((-1.0, 1.0), size=(n_perm, len(d)))
+    return float(((signs * np.abs(d)).mean(axis=1) >= obs - 1e-12).mean())
+
+
+def fisher_greater(k1: int, n1: int, k2: int, n2: int) -> float:
+    """Fisher's exact one-sided p that the second proportion (k2 / n2) is higher than the first."""
+    K, N = k1 + k2, n1 + n2
+    tot = math.comb(N, K)
+    return float(sum(math.comb(n2, k) * math.comb(n1, K - k) for k in range(k2, min(K, n2) + 1)) / tot)
+
+
+def safety_compare(a: dict, b: dict) -> dict:
+    """The safety leading indicators of b against a, and the gate (module docstring)."""
+    ea, eb = a.get("_episodes") or [], b.get("_episodes") or []
+    sa, sb = a.get("safety") or {}, b.get("safety") or {}
+    out: dict = {}
+    pa = {x[0]: x for x in ea}
+    pb = {x[0]: x for x in eb}
+    common = sorted(set(pa) & set(pb))
+    ok = True
+    for name, col in (("forced_risk_per_s", 1), ("non_green_per_s", 2)):
+        ra, rb = sa.get(name), sb.get(name)
+        ma = float(np.mean([x[col] for x in ea])) if ea else None
+        mb = float(np.mean([x[col] for x in eb])) if eb else None
+        ratio = round(mb / ma, 4) if ma else None
+        p_mw = mann_whitney_greater([x[col] for x in ea], [x[col] for x in eb])
+        d = [pb[k][col] - pa[k][col] for k in common]
+        p_pair = sign_flip_greater(d) if len(d) >= 10 else None
+        p_use = p_pair if p_pair is not None else p_mw
+        passed = ratio is not None and ratio <= GATE_RATIO and p_use >= GATE_P
+        ok &= bool(passed)
+        out[name] = {"pooled_a": ra, "pooled_b": rb, "mean_a": None if ma is None else round(ma, 4),
+                     "mean_b": None if mb is None else round(mb, 4), "ratio": ratio, "p_mann_whitney": round(p_mw, 4),
+                     "p_paired": None if p_pair is None else round(p_pair, 4), "paired_seeds": len(common),
+                     "higher_in_b": sum(1 for x in d if x > 0), "pass": bool(passed)}
+    ha, hb = sa.get("hit_fights", 0), sb.get("hit_fights", 0)
+    p_hit = fisher_greater(ha, len(ea), hb, len(eb)) if ea and eb else float("nan")
+    hp = bool(p_hit >= GATE_P)
+    out["hit_fights"] = {"a": f"{ha}/{len(ea)}", "b": f"{hb}/{len(eb)}", "p_fisher": round(p_hit, 4), "pass": hp}
+    wd = b.get("would_die_episodes", 0) <= a.get("would_die_episodes", 0)
+    out["would_die_not_more"] = bool(wd)
+    out["gate_pass"] = bool(ok and hp and wd)
+    return out
+
+
 def compare(a: dict, b: dict) -> dict:
-    """b against a: time to kill (Welch's t, 95 % interval of the difference of means), CLEAR and hits."""
+    """b against a: time to kill (Welch's t, 95 % interval of the difference of means), CLEAR and hits, the safety
+    leading indicators and the gate (safety_compare; the time to kill's interval is part of it)."""
     out = {}
     ta, tb = a.get("time_to_kill_s"), b.get("time_to_kill_s")
     if ta and tb and ta.get("sd") and tb.get("sd"):
@@ -291,6 +413,11 @@ def compare(a: dict, b: dict) -> dict:
     pa, pb = a.get("plan"), b.get("plan")
     if pa and pb:
         out["plan_change_rate_diff"] = round(pb["plan_change_rate"] - pa["plan_change_rate"], 4)
+    out["safety"] = safety_compare(a, b)
+    ttk = out.get("time_to_kill_mean_diff_s")
+    ttk_ok = ttk is not None and ttk["ci95"][1] < GATE_TTK_S
+    out["gate"] = {"safety": out["safety"]["gate_pass"], "time": bool(ttk_ok),
+                   "adopt": bool(out["safety"]["gate_pass"] and ttk_ok)}
     return out
 
 
@@ -313,9 +440,11 @@ def main(argv: list[str] | None = None) -> int:
         out["vs_" + arms[0][0]] = {name: compare(base, out["arms"][name]) for name, _ in arms[1:]}
     if not a.no_human and a.human.exists():
         out["human"] = human(a.human, *a.frames)
-    print(json.dumps(out, indent=1))
     if a.json:
         a.json.write_text(json.dumps(out, indent=1), "utf-8")
+    for g in out["arms"].values():
+        g.pop("_episodes", None)                  # per-episode rows: in --json only
+    print(json.dumps(out, indent=1))
     return 0
 
 

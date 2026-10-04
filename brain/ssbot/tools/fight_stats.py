@@ -130,6 +130,8 @@ def main(argv: list[str] | None = None) -> int:
             v = json.loads(cfg.read_text("utf-8")).get("view", "?") if cfg.exists() else "?"
             views.setdefault(v, []).append(r)
         out["keys"] = {v: group(rs) for v, rs in views.items()}
+        for g in out["keys"].values():
+            g.pop("_episodes", None)              # per-episode safety rows (key_economy --json keeps them)
     print(json.dumps(out, indent=1))
     if a.json:
         a.json.write_text(json.dumps(out, indent=1), "utf-8")

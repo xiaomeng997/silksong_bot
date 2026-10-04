@@ -21,7 +21,7 @@ from pathlib import Path
 
 import numpy as np
 
-from ssbot.combat.keyplan import final_press, match_actual
+from ssbot.train.keyplan import final_press, match_actual
 
 FFMPEG = Path(r"C:\ssbot\tools\ffmpeg\bin\ffmpeg.exe")
 LANES = ("left", "right", "up", "down", "jump", "attack", "quickcast", "dash", "bind")

@@ -1,14 +1,15 @@
-"""Key economy (M2 plan, 2026-10-03): the key plan log (combat.keyplan) on synthetic plan streams, the planner's key
+"""Key economy (M2 plan, 2026-10-03): the key plan log (train.keyplan) on synthetic plan streams, the planner's key
 cost kernel, and the property that the key economy terms never change the chosen plan's safety class (Hz, U, S, V,
-P, the commitments, comfort, first contact, the tail result): synthetic Bell Beast scenes, and a replayed recording
-when the run is on this machine."""
+P, the commitments, comfort, first contact, the tail result) and, bounded (key_tie), give up at most key_tie of J,
+no end risk and no jump commitment: synthetic Bell Beast scenes, and a replayed recording when the run is on this
+machine."""
 from pathlib import Path
 
 import numpy as np
 import pytest
 
-from ssbot.combat.keyplan import KeyPlanLog, match_actual, summarize
-from ssbot.combat.planner import Planner, PlannerConfig, _key_costs
+from ssbot.train.keyplan import KeyPlanLog, match_actual, summarize
+from ssbot.combat.planner import Planner, PlannerConfig, _key_costs, _lead_run
 from ssbot.ipc.framing import BIT
 from ssbot.knowledge import kinematics as kin
 
@@ -103,23 +104,56 @@ def test_flip_flops_at_one_frame():
 
 
 def test_key_cost_kernel():
+    """Changes are counted as the key plan log counts them: a press moved, dropped or added is one change each (the
+    first version charged a move 3 and a drop 1.5, so the planner preferred cancelling a press to nudging it)."""
     T = 10
     old = np.zeros(T, np.int64)
     old[3:5] = A                                            # the previous plan: an attack tap at 3-4
-    cmd = np.zeros((4, T), np.int64)
+    cmd = np.zeros((7, T), np.int64)
     cmd[0, 3:5] = A                                         # the same plan: 1 press, 0 changes
-    cmd[1, 4:6] = A                                         # moved by a frame: 2 rises differ, 2 falls differ
-    cmd[2] = 0                                              # dropped: 1 rise, 1 fall
+    cmd[1, 4:6] = A                                         # moved by a frame: 1 change
+    cmd[2] = 0                                              # dropped: 1 change
     cmd[3, 3:5] = A
-    cmd[3, 7:9] = J                                         # an extra jump: 1 more press, 1 rise + 1 fall
-    kp, kc = np.zeros(4), np.zeros(4)
+    cmd[3, 7:9] = J                                         # an extra jump: 1 more press, 1 change
+    cmd[4, 3:6] = A                                         # the release moved: half a change
+    cmd[5, 3:5] = A
+    cmd[5, 6:8] = A                                         # a second attack added: 1 change
+    old2 = np.zeros(T, np.int64)
+    old2[0:2] = A
+    cmd[6, 9:10] = A                                        # (against old2) moved 9 frames: dropped + added
+    kp, kc = np.zeros(7), np.zeros(7)
     _key_costs(cmd, 0, old, 0, kp, kc)
-    assert kp.tolist() == [1, 1, 0, 2]
-    assert kc.tolist() == [0.0, 3.0, 1.5, 1.5]
-    # a key held before the plan starts is no press
+    assert kp.tolist() == [1, 1, 0, 2, 1, 2, 1]
+    assert kc[:6].tolist() == [0.0, 1.0, 1.0, 1.0, 0.5, 1.0]
+    _key_costs(cmd[6:], 0, old2, 0, kp[:1], kc[:1])
+    assert kc[0] == 2.0
+    # a key held before the plan starts is no press; released at another frame than planned: half a change
     cmd2 = np.full((1, T), L, np.int64)
     _key_costs(cmd2, L, np.zeros(0, np.int64), 0, kp[:1], kc[:1])
     assert kp[0] == 0 and kc[0] == 0
+    oldh = np.zeros(T, np.int64)
+    oldh[:4] = L
+    cmd3 = np.zeros((2, T), np.int64)
+    cmd3[0, :4] = L
+    cmd3[1, :2] = L
+    kp, kc = np.zeros(2), np.zeros(2)
+    _key_costs(cmd3, L, oldh, L, kp, kc)
+    assert kp.tolist() == [0, 0] and kc.tolist() == [0.0, 0.5]
+    # releases past the frames both plans cover are open: no change
+    cmd4 = np.zeros((1, 2 * T), np.int64)
+    cmd4[0, 3:15] = A
+    old4 = np.zeros(T, np.int64)
+    old4[3:] = A
+    _key_costs(cmd4, 0, old4, 0, kp[:1], kc[:1])
+    assert kc[0] == 0.0
+
+
+def test_lead_run():
+    cmd = np.zeros((3, 6), np.int64)
+    cmd[0, :4] = J
+    cmd[1, 1:3] = J
+    cmd[2, :] = J | A
+    assert _lead_run(cmd, J).tolist() == [4, 0, 6]
 
 
 def test_presses_counted_from_mask_streams():
@@ -129,6 +163,30 @@ def test_presses_counted_from_mask_streams():
     c = presses_from_masks(fs, masks, 10, 19)
     assert c == {"left": 1, "attack": 1, "jump": 1, "enter": 1}      # the first frame's held left is no press
     assert gameplay_total(c) == 3
+
+
+def test_safety_gate_statistics():
+    """The key economy gate's statistics (key_economy.safety_compare): Fisher's one-sided p on the first A/B's hit
+    fights (3 of 110 off, 8 of 85 at 0.15 / 0.3: 0.045), Mann-Whitney and the paired sign flip on a clear rise and on
+    no change, and the gate failing on a 5 % rise of FORCED_RISK time."""
+    from ssbot.tools.key_economy import fisher_greater, mann_whitney_greater, safety_compare, sign_flip_greater
+    assert abs(fisher_greater(3, 110, 8, 85) - 0.0454) < 1e-3
+    assert fisher_greater(3, 110, 3, 110) > 0.5
+    rng = np.random.default_rng(1)
+    x = rng.normal(1.5, 0.3, 110)
+    assert mann_whitney_greater(x, x + 0.5) < 0.001 and mann_whitney_greater(x, x) > 0.4
+    assert sign_flip_greater(np.full(30, 0.1)) < 0.001 and sign_flip_greater(rng.normal(0, 1, 200) * 0) > 0.9
+
+    def arm(rate, hits):
+        eps = [[2112000 + k, rate[k], rate[k], rate[k], int(k < hits), 60.0] for k in range(110)]
+        return {"_episodes": eps, "safety": {"forced_risk_per_s": float(np.mean(rate)),
+                                             "non_green_per_s": float(np.mean(rate)), "hit_fights": hits},
+                "would_die_episodes": 0}
+    base = rng.normal(1.5, 0.3, 110).clip(0.1)
+    same = safety_compare(arm(base, 3), arm(base.copy(), 3))
+    assert same["gate_pass"] and same["forced_risk_per_s"]["ratio"] == 1.0
+    up = safety_compare(arm(base, 3), arm(base * 1.05 + rng.normal(0, 0.02, 110), 3))
+    assert not up["gate_pass"] and up["forced_risk_per_s"]["p_paired"] < 0.05
 
 
 def test_key_track_draws_a_logged_episode(tmp_path):
@@ -155,11 +213,14 @@ def _sync(dst, src):
     sync(dst, src)
 
 
-def test_key_terms_never_change_the_safety_class():
+@pytest.mark.parametrize("tie", [0.5, -1.0])
+def test_key_terms_never_change_the_safety_class(tie):
     """Synthetic scenes (a charge from either side at several phases and distances, a burst on the hero, idle):
     each tick is planned from the same state with the terms off and on (strong weights, so they do pick other plans);
     the chosen plans' classes and tail results are identical, and the "off" choice the on planner reports is the off
-    planner's."""
+    planner's. Bounded (tie 0.5: wider than KEY_TIE, so that these few ticks have swaps), the swap also gives up at
+    most the tie in J, ends no deeper in the risk map and starts no longer jump hold; unbounded (tie -1, the first
+    A/B's rule) only the class holds."""
     from ssbot.combat.boss_model import Anchor, BossModel
     from ssbot.combat.forecast import Ctx, Forecaster, Root, load_planner_templates
     from ssbot.combat.safety_filter import FilterContext
@@ -204,10 +265,17 @@ def test_key_terms_never_change_the_safety_class():
             prefs.weights = dict(w0, key_press=0.0, key_change=0.0)
             ro = off.tick(ws, S0, kin.HoldState.idle(1), prefix, f, prefs, ctx)
             prefs.weights = dict(w0, key_press=0.5, key_change=1.0)
+            prefs.weights["key_tie"] = tie
+            committed = on.jump_until > on.ticks
             rn = on.tick(ws, S0, kin.HoldState.idle(1), prefix, f, prefs, ctx)
             assert rn.cls == ro.cls and rn.tail_ok == ro.tail_ok, (roots, x, k, rn.name, ro.name)
             assert (rn.S, rn.V, rn.P, rn.Hz, rn.U, rn.forced_risk) == (ro.S, ro.V, ro.P, ro.Hz, ro.U, ro.forced_risk)
             assert rn.idx_off == ro.idx and rn.cls_off == rn.cls
+            assert rn.key_on and rn.name_off == ro.name and abs(rn.J_off - ro.J) < 1e-9
+            if tie >= 0:
+                assert rn.J >= ro.J - tie - 1e-9 and rn.risk <= rn.risk_off + 1e-9, (rn.name, ro.name)
+                if not committed:
+                    assert _lead_run(rn.cmd[None], J)[0] <= _lead_run(ro.cmd[None], J)[0]
             differs += rn.idx != ro.idx
             n += 1
     assert differs > 0, "the terms never chose another plan: the property was not exercised"
@@ -222,4 +290,5 @@ def test_key_terms_never_change_the_safety_class_on_a_recording():
     out = replay(REC, 900, None, 0.05, 0.1, 4)
     assert out["ticks"] > 500
     assert out["class_mismatch"] == 0 and out["tail_mismatch"] == 0 and out["off_mismatch"] == 0
+    assert out["bound_violations"] == {"j_loss_over_tie": 0, "risk_worse": 0, "jump_commit_longer": 0}
     assert out["choice_differs"] > 0

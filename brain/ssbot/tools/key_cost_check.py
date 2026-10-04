@@ -4,12 +4,20 @@ the same planner state, with the terms on and off (open loop, as ssbot.tools.pla
 safety classes (PlanResult.cls: Hz, Hz_soft, U, S, the jump and macro commitments, comfort, V, P, first contact) and
 tail results must be identical. The planner state carried on is the "on" one.
 
+What this does NOT show: that the terms cost no safety in closed loop. J itself holds safety terms (the end
+position's support coverage, the stance) and the jump commitment a press makes outlives the tick; with the class
+bound alone (--tie -1, the first A/B's rule) every tick passed this check while FORCED_RISK time rose 5 % at 0.05 /
+0.1 and 2.4x at 0.15 / 0.3 in the live A/B. Hence the bound (planner.KEY_TIE, default): the check also counts the
+ticks whose swap gave up more than the tie in J, ended deeper in the risk map, or started a longer jump hold
+(bound_violations, all 0 when bounded), and reports what the swaps gave up (j_loss, risk_diff). Closed-loop safety
+needs the live A/B gate (ssbot.tools.key_economy: FORCED_RISK and yellow-tier time per second, hits).
+
     cd brain
     ../scripts/uv.cmd run python -m ssbot.tools.key_cost_check C:/ssbot/data/runs/m2/<run>/rec/<date>/TRAIN/i2_000
-        [--frames 6000] [--start F] [--press 0.05] [--change 0.1] [--threads 4] [--json out.json]
+        [--frames 6000] [--start F] [--press 0.05] [--change 0.1] [--tie T] [--threads 4] [--json out.json]
 
-Reports the ticks, the class mismatches (must be 0), how often the choice differed, the chosen plans' presses and
-plan changes with the terms on and off, and the tick time of both.
+Reports the ticks, the class mismatches (must be 0), the bound violations, how often the choice differed, the chosen
+plans' presses and plan changes with the terms on and off, and the tick time of both.
 """
 import argparse
 import json
@@ -29,13 +37,13 @@ def sync(dst, src) -> None:
 
 
 def replay(recording: Path, frames: int, start: int | None, press: float, change: float, threads: int,
-           scene: str = "Bone_05") -> dict:
+           scene: str = "Bone_05", tie: float | None = None) -> dict:
     import numba
 
     from ssbot.backends.oracle_backend import OracleBackend
     from ssbot.combat.boss_model import BossModel
     from ssbot.combat.forecast import Forecaster, load_planner_templates
-    from ssbot.combat.planner import Planner, PlannerConfig
+    from ssbot.combat.planner import KEY_TIE, Planner, PlannerConfig, _lead_run
     from ssbot.combat.safety_filter import FilterContext
     from ssbot.combat.tactics import Tactics, load_playbook
     from ssbot.core.bosses import BELL_BEAST
@@ -64,9 +72,13 @@ def replay(recording: Path, frames: int, start: int | None, press: float, change
     backend = OracleBackend(bosses=[BELL_BEAST])
     trk = StateTracker(params, terrain)
     f0 = start if start is not None else r.index("state")[0].get("f0", 0)
+    from ssbot.knowledge.kinematics import B_JUMP
     out = {"ticks": 0, "class_mismatch": 0, "tail_mismatch": 0, "off_mismatch": 0, "choice_differs": 0,
            "forced": 0, "examples": []}
+    bv = {"j_loss_over_tie": 0, "risk_worse": 0, "jump_commit_longer": 0}
+    tie_eff = KEY_TIE if tie is None else tie
     kp_on, kc_on, kp_off, kc_off, t_on, t_off = [], [], [], [], [], []
+    j_loss, r_diff = [], []
     prev = None
     last_scene_ok = False
     for s in r.states(f0, f0 + frames + 1):
@@ -96,6 +108,9 @@ def replay(recording: Path, frames: int, start: int | None, press: float, change
         ro = off.tick(ws, S0.copy(), hold, prefix, f, prefs, ctx)
         tb = time.perf_counter()
         prefs.weights = dict(w0, key_press=press, key_change=change)
+        if tie is not None:
+            prefs.weights["key_tie"] = tie
+        committed = on.jump_until > on.ticks
         rn = on.tick(ws, S0.copy(), hold, prefix, f, prefs, ctx)
         tc = time.perf_counter()
         out["ticks"] += 1
@@ -109,6 +124,14 @@ def replay(recording: Path, frames: int, start: int | None, press: float, change
         out["tail_mismatch"] += bool(rn.tail_ok != ro.tail_ok)
         out["off_mismatch"] += bool(rn.idx_off != ro.idx)
         out["choice_differs"] += bool(rn.idx != ro.idx)
+        if rn.idx != ro.idx and rn.key_on:
+            j_loss.append(ro.J - rn.J)
+            r_diff.append(rn.risk - rn.risk_off)
+            bv["j_loss_over_tie"] += bool(tie_eff >= 0 and ro.J - rn.J > tie_eff + 1e-9)
+            bv["risk_worse"] += bool(rn.risk > rn.risk_off + 1e-9)
+            if not committed and len(rn.cmd) and len(ro.cmd):
+                bv["jump_commit_longer"] += bool(_lead_run(rn.cmd[None], B_JUMP)[0] > _lead_run(ro.cmd[None],
+                                                                                                B_JUMP)[0])
         if (bad or rn.tail_ok != ro.tail_ok) and len(out["examples"]) < 10:
             out["examples"].append({"f": prev["f"], "on": [rn.name, rn.cls, rn.tail_ok],
                                     "off": [ro.name, ro.cls, ro.tail_ok]})
@@ -119,7 +142,14 @@ def replay(recording: Path, frames: int, start: int | None, press: float, change
         prev = s
     q = (lambda v: {"p50": round(float(np.percentile(v, 50)), 3), "p99": round(float(np.percentile(v, 99)), 3)}
          if v else {})
-    out.update({"key_press_on_mean": round(float(np.mean(kp_on)), 3) if kp_on else None,
+    qd = (lambda v: {"n": len(v), "p50": round(float(np.percentile(v, 50)), 4),
+                     "p90": round(float(np.percentile(v, 90)), 4), "max": round(float(np.max(v)), 4),
+                     "mean": round(float(np.mean(v)), 4)} if v else {"n": 0})
+    out.update({"tie": tie_eff, "bound_violations": bv if tie_eff >= 0 else None,
+                "bound_would_fail": bv if tie_eff < 0 else None,
+                "j_loss": qd(j_loss), "risk_diff": qd(r_diff),
+                "risk_worse_share": round(bv["risk_worse"] / len(r_diff), 4) if r_diff else None,
+                "key_press_on_mean": round(float(np.mean(kp_on)), 3) if kp_on else None,
                 "key_change_on_mean": round(float(np.mean(kc_on)), 3) if kc_on else None,
                 "tick_ms_off": q(t_off), "tick_ms_on": q(t_on), "press": press, "change": change})
     return out
@@ -132,14 +162,16 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--start", type=int, default=None)
     ap.add_argument("--press", type=float, default=0.05)
     ap.add_argument("--change", type=float, default=0.1)
+    ap.add_argument("--tie", type=float, default=None, help="key_tie (default planner.KEY_TIE; < 0: class bound only)")
     ap.add_argument("--threads", type=int, default=4)
     ap.add_argument("--json", type=Path, default=None)
     a = ap.parse_args(argv)
-    out = replay(a.recording, a.frames, a.start, a.press, a.change, a.threads)
+    out = replay(a.recording, a.frames, a.start, a.press, a.change, a.threads, tie=a.tie)
     print(json.dumps(out, indent=1))
     if a.json:
         a.json.write_text(json.dumps(out, indent=1), "utf-8")
-    return 1 if out["class_mismatch"] else 0
+    bad = out["class_mismatch"] or (out["bound_violations"] and any(out["bound_violations"].values()))
+    return 1 if bad else 0
 
 
 if __name__ == "__main__":
