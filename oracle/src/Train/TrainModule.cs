@@ -17,6 +17,7 @@ namespace SsOracle.Train
             SavestateBridge.Register();
             StartRandomizer.Register();
             AbilityGrant.Register();
+            TimeScaleRpc.Register();
             ProjectionSample.Install(host);
         }
     }

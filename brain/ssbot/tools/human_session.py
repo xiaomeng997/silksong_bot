@@ -53,7 +53,9 @@ GAME = Path(r"C:\ssbot\game\train\Hollow Knight Silksong.exe")
 RENDER = (1920, 1080)       # -screen-width / -screen-height
 # Commands from the lead while a person plays (the oracle takes one IPC client at a time, so they go through this
 # session's own link): one per line, "load <savestate>" loads that savestate with save suppression on, e.g. to start
-# or retry the Forum demo (2026-10-03). The file is consumed when read; every command lands in meta.json "commands".
+# or retry the Forum demo (2026-10-03); "speed <x>" scales the game's time (oracle time.scale, e.g. 0.5 for the
+# person's half-speed practice, 1 to restore). The file is consumed when read; every command lands in meta.json
+# "commands".
 CMD_FILE = Path(r"C:\ssbot\sandbox\human_cmd.txt")
 
 
@@ -78,6 +80,12 @@ def run_commands(link: OracleLink, log: list) -> None:
                     entry["result"] = "loaded"
                 except (OracleError, TimeoutError) as e:
                     entry["result"] = f"failed: {e}"
+        elif len(parts) == 2 and parts[0] == "speed":
+            try:
+                r = link.rpc("time.scale", scale=float(parts[1]))
+                entry["result"] = f"speed {r.get('scale')}"
+            except (OracleError, TimeoutError, ValueError) as e:
+                entry["result"] = f"failed: {e}"
         elif parts:
             entry["result"] = "unknown command"
         if parts:
@@ -184,9 +192,11 @@ def main() -> None:
     ap.add_argument("--savestate", default=None,
                     help="load this savestate once the person is in gameplay (save suppression on); later loads "
                          f"through {CMD_FILE}")
+    ap.add_argument("--speed", type=float, default=None, help="game speed once in gameplay (time.scale), e.g. 0.5")
     args = ap.parse_args()
-    if args.savestate:
-        CMD_FILE.write_text(f"load {args.savestate}\n", encoding="utf-8")
+    if args.savestate or args.speed:
+        CMD_FILE.write_text((f"load {args.savestate}\n" if args.savestate else "")
+                            + (f"speed {args.speed}\n" if args.speed else ""), encoding="utf-8")
     commands: list = []
 
     session = Path(args.out) / datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -250,7 +260,7 @@ def main() -> None:
         try:
             while game.poll() is None:
                 time.sleep(1)
-                if CMD_FILE.exists() and (not args.savestate or in_gameplay(link.state or {}) or commands):
+                if CMD_FILE.exists() and (not (args.savestate or args.speed) or in_gameplay(link.state or {}) or commands):
                     run_commands(link, commands)
                 p = placement(game.pid)
                 if p is not None and all((p["client"], p["desktop"]) != (q["client"], q["desktop"])

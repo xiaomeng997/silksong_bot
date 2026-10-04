@@ -40,3 +40,18 @@ def test_load_outside_gameplay_is_refused_and_unknown_commands_are_logged(tmp_pa
     assert link.calls == []
     assert log[0]["result"].startswith("refused") and log[1]["result"] == "unknown command"
     assert not hs.CMD_FILE.exists()
+
+
+def test_speed_command_calls_time_scale(tmp_path, monkeypatch):
+    monkeypatch.setattr(hs, "CMD_FILE", tmp_path / "cmd.txt")
+    hs.CMD_FILE.write_text("speed 0.5\n", encoding="utf-8")
+
+    class _L(_Link):
+        def rpc(self, method, **kw):
+            self.calls.append((method, kw))
+            return {"scale": kw.get("scale")}
+
+    link, log = _L({"f": 7}), []
+    hs.run_commands(link, log)
+    assert link.calls == [("time.scale", {"scale": 0.5})]
+    assert log[0]["result"] == "speed 0.5"
