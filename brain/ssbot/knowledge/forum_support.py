@@ -11,7 +11,9 @@ The forecast per enemy (subject) follows the planner's (ssbot.combat.forecast.Fo
 gauntlet builder's segmentation (ssbot.knowledge.behaviour_tables.FightScanner: attack instances from the Control
 FSM's transitions, the idle family between attacks, a kill ends the instance): the current state's per-state support
 template at the instance's anchor (its transform at the instance's first exported frame, mirror by flipX), the
-successors the training fold logged with entry intervals from its logged dwell range, the tail of an attack once it
+successors the training fold logged with entry intervals from its logged dwell range (one bin of slack on each side;
+a current state already older than its longest logged dwell can end from the next frame on to the horizon; the walk
+keeps one entry hull per state and instance, so zero-dwell decision loops end), the tail of an attack once it
 can end (hazards outliving it), the tails of ended attacks for tail_max_s. Forum anchors vary (no Set L / Set R): an
 instance that starts after the origin is anchored at the enemy's position moved along its exported velocity, one
 anchor per frame of the horizon, both mirrors (the enemy may turn as it starts). The query is the planner's
@@ -38,7 +40,7 @@ from ssbot.knowledge.gauntlet_tables import FACES_LEFT, FORUM_SPECS
 BIN = hb.BIN_S
 FRAME_S = 1.0 / 60.0
 TAIL = "_tail"
-MAX_DEPTH = 12
+DWELL_SLACK_S = BIN          # logged dwell ranges are frame-quantised: one bin of slack on each side
 
 
 def margins_from_contacts(rows: list[dict], fold: int | None = None, q: float = 1.0) -> dict[tuple[str, str], float]:
@@ -320,9 +322,12 @@ class SubjectRecall:
             dw = w.dwell.get(st)
             if dw is None:
                 continue
-            x_lo, x_hi = lo + dw[0], hi + dw[1]
+            # the training fold's dwell range, one bin of frame-time slack on each side; a current state already
+            # older than its longest logged dwell (a held-out instance) can end at any time from the next frame on
+            x_lo, x_hi = lo + dw[0] - DWELL_SLACK_S, hi + dw[1] + DWELL_SLACK_S
             if current:
-                x_lo, x_hi = max(x_lo, BIN), max(x_hi, BIN)
+                x_lo = max(x_lo, BIN)
+                x_hi = cap if x_hi < BIN else x_hi
             if x_lo > cap:
                 continue
             for nxt in w.succ.get(st, ()):
