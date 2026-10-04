@@ -301,25 +301,74 @@ def probe_dt(runs: list[Path], frames: int = 600) -> float:
     return 1.0 / 60.0
 
 
+def _match(pat: str, v: str) -> bool:
+    return pat in ("*", "") or pat == v
+
+
+def parse_inject(spec: str):
+    """A known change applied to each fight of arm B after its scan (the check's power: it must catch a difference of
+    the size that matters for the tables). Specs:
+      dwell:TYPE:STATE:+S      add S game seconds to every dwell of the matching (type, state) keys (* = any)
+      dwellx:TYPE:STATE:F      multiply those dwells by F
+      choice:TYPE:FROM:TO:P    move a share P of TYPE's FROM family starts to TO (every distance bin)
+      speed:TYPE:F             multiply TYPE's window speeds by F
+    Returns fn(arm) that changes one fight's Arm in place."""
+    p = spec.split(":")
+    kind = p[0]
+    if kind in ("dwell", "dwellx"):
+        tk, st, v = p[1], p[2], float(p[3])
+
+        def fn(arm: Arm) -> None:
+            for (k_tk, k_st), vals in arm.dwell.items():
+                if _match(tk, k_tk) and _match(st, k_st):
+                    arm.dwell[(k_tk, k_st)] = [t + v if kind == "dwell" else t * v for t in vals]
+        return fn
+    if kind == "choice":
+        tk, frm, to, share = p[1], p[2], p[3], float(p[4])
+
+        def fn(arm: Arm) -> None:
+            for key, fams in arm.choice.items():
+                if key[0] != tk or not fams.get(frm):
+                    continue
+                n = fams[frm]
+                moved = int(math.floor(n * share)) + (1 if (n * share) % 1.0 >= 0.5 else 0)
+                fams[frm] -= moved
+                fams[to] = fams.get(to, 0) + moved
+        return fn
+    if kind == "speed":
+        tk, f = p[1], float(p[2])
+
+        def fn(arm: Arm) -> None:
+            for (k_tk, k_st), vals in arm.speed.items():
+                if _match(tk, k_tk):
+                    arm.speed[(k_tk, k_st)] = [v * f for v in vals]
+        return fn
+    raise SystemExit(f"unknown --inject {spec!r}")
+
+
 def load(runs: list[Path], max_fights: int | None, with_ents: bool, stride: int = 1,
-         sim_k: int = 1) -> tuple[Arm, Arm, Arm]:
-    """The whole arm and its two halves (alternating fights)."""
+         sim_k: int = 1, fight_slice: str | None = None, inject=()) -> tuple[Arm, Arm, Arm]:
+    """The whole arm and its two halves (alternating fights). fight_slice "start:stop:step" picks fights of the runs'
+    list (e.g. an arm's even fights against its odd ones); inject: parse_inject functions applied to each fight."""
     whole, h1, h2 = Arm(), Arm(), Arm()
     n = 0
+    pool = []
     for run in runs:
-        fights, _ = run_fights(Path(run))
-        for fight in fights:
-            if max_fights is not None and n >= max_fights:
-                break
-            half = h1 if n % 2 == 0 else h2
-            one = Arm()
-            scan(fight, one, with_ents, stride, sim_k)
-            for arm in (whole, half):
-                arm.merge(one)
-            one.box, one.tbins, one.apex = {}, {}, []
-            whole.per_fight.append(one)
-            half.per_fight.append(one)
-            n += 1
+        pool += run_fights(Path(run))[0]
+    if fight_slice:
+        pool = pool[slice(*[int(x) if x else None for x in fight_slice.split(":")])]
+    for fight in pool[:max_fights] if max_fights is not None else pool:
+        half = h1 if n % 2 == 0 else h2
+        one = Arm()
+        scan(fight, one, with_ents, stride, sim_k)
+        for fn in inject:
+            fn(one)
+        for arm in (whole, half):
+            arm.merge(one)
+        one.box, one.tbins, one.apex = {}, {}, []
+        whole.per_fight.append(one)
+        half.per_fight.append(one)
+        n += 1
     return whole, h1, h2
 
 
@@ -488,17 +537,23 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--no-grid", action="store_true", help="dwell without the common frame grid (for comparison)")
     ap.add_argument("--simulate-b", type=int, default=1, metavar="K",
                     help="arm B as if recorded at K x speed (calibration)")
+    ap.add_argument("--a-slice", default=None, help="start:stop:step of arm A's fights (e.g. ::2)")
+    ap.add_argument("--b-slice", default=None, help="start:stop:step of arm B's fights (e.g. 1::2)")
+    ap.add_argument("--inject", action="append", default=[], metavar="SPEC",
+                    help="a known change in arm B (parse_inject: dwell / dwellx / choice / speed); repeatable")
     ap.add_argument("--json", type=Path)
     a = ap.parse_args(argv)
     # entities of both arms read on the coarsest arm's frames (module docstring: speed)
     dt_a, dt_b = probe_dt(a.a), probe_dt(a.b) * a.simulate_b
     frame = max(dt_a, dt_b)
-    A, A1, A2 = load(a.a, a.max_fights, not a.events_only, stride=max(1, round(frame / dt_a)))
+    A, A1, A2 = load(a.a, a.max_fights, not a.events_only, stride=max(1, round(frame / dt_a)), fight_slice=a.a_slice)
     B, B1, B2 = load(a.b, a.max_fights, not a.events_only, stride=a.simulate_b * max(1, round(frame / dt_b)),
-                     sim_k=a.simulate_b)
+                     sim_k=a.simulate_b, fight_slice=a.b_slice, inject=[parse_inject(s) for s in a.inject])
     grid = None if a.no_grid else max(A.dt, B.dt)
-    res = {"a": {"fights": A.fights, "game_s": round(A.game_s, 1), "dt": A.dt, "read_stride": round(frame / dt_a)},
-           "b": {"fights": B.fights, "game_s": round(B.game_s, 1), "dt": B.dt, "simulated_k": a.simulate_b},
+    res = {"a": {"fights": A.fights, "game_s": round(A.game_s, 1), "dt": A.dt, "read_stride": round(frame / dt_a),
+                 "slice": a.a_slice},
+           "b": {"fights": B.fights, "game_s": round(B.game_s, 1), "dt": B.dt, "simulated_k": a.simulate_b,
+                 "slice": a.b_slice, "inject": a.inject},
            "grid_s": grid,
            "perm": perm_tests(A, B, a.min, a.perm, n_perm_max=a.perm_max, grid=grid),
            # the same tests between each arm's halves: their false positives (informational)

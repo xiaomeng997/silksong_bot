@@ -291,6 +291,28 @@ def test_speed_check_grid_and_holm():
     assert not res["underpowered"]
 
 
+def test_speed_check_injections():
+    """--inject: the known changes the power check puts into arm B (dwell shift / scale, a choice share moved, a speed
+    factor), applied per fight and only to the matching keys."""
+    from ssbot.tools.forum_speed_check import Arm, parse_inject
+    one = Arm()
+    one.dwell[("A", "S1")] = [0.5, 1.0]
+    one.dwell[("B", "S1")] = [0.5]
+    one.choice[("A", "0-3")]["F1"] = 10
+    one.choice[("A", "3-6")]["F1"] = 3
+    one.choice[("B", "0-3")]["F1"] = 10
+    one.speed[("A", "S1")] = [2.0]
+    one.speed[("B", "S1")] = [2.0]
+    parse_inject("dwell:A:*:+0.0333")(one)
+    parse_inject("dwellx:*:S1:2")(one)
+    parse_inject("choice:A:F1:F2:0.1")(one)
+    parse_inject("speed:B:1.1")(one)
+    assert [round(v, 4) for v in one.dwell[("A", "S1")]] == [1.0666, 2.0666] and one.dwell[("B", "S1")] == [1.0]
+    assert dict(one.choice[("A", "0-3")]) == {"F1": 9, "F2": 1} and dict(one.choice[("A", "3-6")]) == {"F1": 3, "F2": 0}
+    assert dict(one.choice[("B", "0-3")]) == {"F1": 10}
+    assert one.speed[("A", "S1")] == [2.0] and abs(one.speed[("B", "S1")][0] - 2.2) < 1e-12
+
+
 def test_hero_height_covariate_and_protected_decisions():
     from ssbot.knowledge.behaviour_tables import BELL_BEAST, Dwell, Fight, Transition
     from ssbot.knowledge.gauntlet_tables import FORUM_SPECS, GauntletBuilder, hero_caused_states
