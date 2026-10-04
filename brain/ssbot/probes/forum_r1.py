@@ -12,6 +12,8 @@ section). Training copy, oracle view, savestates prefixed fo_r1_.
             Scramble, ssbot.train.climb), --repeat attempts (back down and walk away between them); success rate.
   fsmgraph  load --savestate (default fo_r1_w13), wait for its wave's members, fsm.graph of every Forum type's
             control FSM found: the states with an exit on a hero-hit event (knowledge/.../forum/hero_caused.json).
+  hello     post-deploy check: the HELLO (plugin, the RPCs R1 needs) and time.scale 2 -> Time.timeScale 2 (STATE dt
+            1/30 s) -> back to 1 (dt 1/60 s).
 
     cd brain
     ..\\scripts\\uv.cmd run python -m ssbot.probes.forum_r1 skip --instance 2 --wave 3
@@ -209,6 +211,47 @@ def fsmgraph(link: OracleLink, a) -> dict:
     return out
 
 
+def _dt_sample(link: OracleLink, n: int = 90) -> dict:
+    """The STATE dt over the next n STATEs (keys up): median and spread, game seconds per rendered frame."""
+    dts = []
+    last = link.frame
+    for _ in range(n):
+        s = link.wait_state(newer_than=last, timeout_s=3.0)
+        last = s["f"]
+        link.act(last + 2, 0, hold_frames=0)
+        if s.get("dt") is not None:
+            dts.append(float(s["dt"]))
+    dts.sort()
+    return {"n": len(dts), "median": dts[len(dts) // 2] if dts else None, "min": dts[0] if dts else None,
+            "max": dts[-1] if dts else None}
+
+
+def hello(link: OracleLink, a) -> dict:
+    """The post-deploy check of an instance: the HELLO (plugin version, the RPCs R1 needs) and time.scale: 2 must give
+    Time.timeScale 2 (STATE dt about 1/30 s per rendered frame), then back to 1 (dt about 1/60 s)."""
+    h = link.hello or {}
+    rpcs = set(h.get("rpcs") or ())
+    out: dict = {"hello": {k: h.get(k) for k in ("plugin", "game", "instance", "schema")},
+                 "rpcs_needed": {n: n in rpcs for n in ("battle.prune", "battle.wave", "time.scale", "fsm.graph")},
+                 "before": link.rpc("time.scale", timeout_s=10)}
+    try:
+        out["set_2"] = link.rpc("time.scale", timeout_s=10, scale=2.0)
+        time.sleep(0.5)
+        out["dt_at_2"] = _dt_sample(link)
+        out["read_2"] = link.rpc("time.scale", timeout_s=10)
+    finally:
+        out["set_1"] = link.rpc("time.scale", timeout_s=10, scale=1.0)
+    time.sleep(0.5)
+    out["dt_at_1"] = _dt_sample(link)
+    out["ok"] = (all(out["rpcs_needed"].values())
+                 and abs(float(out["set_2"].get("time_scale") or 0) - 2.0) < 1e-3
+                 and abs(float(out["set_1"].get("time_scale") or 0) - 1.0) < 1e-3
+                 and abs((out["dt_at_2"]["median"] or 0) - 1 / 30) < 2e-3
+                 and abs((out["dt_at_1"]["median"] or 0) - 1 / 60) < 1e-3)
+    print(json.dumps(out, default=str)[:3000], flush=True)
+    return out
+
+
 def climb(link: OracleLink, a) -> dict:
     from ssbot.train.climb import ClimbProbe
     from ssbot.train.encounters import ENCOUNTERS
@@ -234,7 +277,7 @@ def climb(link: OracleLink, a) -> dict:
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("step", choices=("midsave", "skip", "states", "check", "climb", "fsmgraph"))
+    ap.add_argument("step", choices=("midsave", "skip", "states", "check", "climb", "fsmgraph", "hello"))
     ap.add_argument("--instance", type=int, default=2)
     ap.add_argument("--wave", type=int, default=0)
     ap.add_argument("--seconds", type=float, default=8.0)
@@ -251,7 +294,7 @@ def main(argv: list[str] | None = None) -> int:
     link = connect(a.instance)
     try:
         res = {"midsave": midsave, "skip": skip, "states": states, "check": check, "climb": climb,
-               "fsmgraph": fsmgraph}[a.step](link, a)
+               "fsmgraph": fsmgraph, "hello": hello}[a.step](link, a)
     except (OracleError, TimeoutError, RuntimeError) as e:
         print(f"FAIL {type(e).__name__}: {e}")
         return 1

@@ -306,7 +306,10 @@ def worker(a: argparse.Namespace) -> int:
             rec = AttemptRecord(unit=enc.name, stage="TRAIN", profile="TRAIN" if a.view == "oracle" else "SIM_FINAL",
                                 build="1.0.30000", code_rev=rev,
                                 config_fp=fp, start_kind="savestate", mode=a.mode, seed=seed)
-            run_episode(link, enc, tap, policy, mode_config(a.mode, seed, a.timebox or None,
+            # the episode's timebox counts rendered frames / 60 (real seconds): at time scale s that is s times as
+            # much game time, so it is divided by s (a 2x wave start covers the same 180 s of game time as at 1x)
+            timebox = (a.timebox or enc.timebox_s) / a.time_scale
+            run_episode(link, enc, tap, policy, mode_config(a.mode, seed, timebox,
                                                             tuple(a.start_silk) if a.start_silk else None,
                                                             tuple(a.start_hp) if a.start_hp else None), rec)
             d = asdict(rec)
