@@ -125,7 +125,7 @@
 
 ### 9.2 每类敌人的导出（"ents"）
 
-全部波次敌人都在 "ents"：HealthManager（src 位 1）+ DamageHero（2）；Reed、Choristor、Minister 还有 multi_wounder（8）。实体 iid 稳定，"fsm" 事件的 `ent` 和 "hit" 事件的 `ent` 就是 ents[].iid（行为表按 iid 分流）。parry 位：4 = 只有 counter；5 = clash + counter（可拼刀）。**核对（2026-10-04，你问 Clapper 能否拼刀、Skarrgard 能拼）**：parry 的 clash 位就是 `DamageHero.canClashTink`（拼刀只走 `DamageHero.TryClashTinkCollider`，反编译里没有别的 NailClash 路径）；场景包直接读（`C:\ssbot\sandboxorum_tools_scripts\clash_bits.py <scene>`）：Forum 两只 Clapper 的本体和 `Slam Collider 1/2`（都是 2 伤）canClashTink = 0，Clawmaiden 的 `Spear`（2 伤）也是 0；Hunter's March 守门竞技场（`ant_02`）的 Skarrgard（斯卡尔守卫，`Bone Hunter Throw`）本体 2 伤 = 0、斩击 `JSlash1/2`、`Slash1`、`Slash2`（含 3 个副本）2 伤 = 1。所以能否拼刀是逐个碰撞体设的，和伤害无关：Skarrgard 的斩能拼，Clapper 的砸不能。gravity_scale 实测：Choir Clapper 1.4（Air 中每物理步 dvy −1.68 → g_eff 84）、Choristor 1.1、Envoy 1.0、Throwing Bell 1.0，其余都是飞行敌人（0）。
+全部波次敌人都在 "ents"：HealthManager（src 位 1）+ DamageHero（2）；Reed、Choristor、Minister 还有 multi_wounder（8）。实体 iid 稳定，"fsm" 事件的 `ent` 和 "hit" 事件的 `ent` 就是 ents[].iid（行为表按 iid 分流）。parry 位：4 = 只有 counter；5 = clash + counter（可拼刀）。**核对（2026-10-04，你问 Clapper 能否拼刀、Skarrgard 能拼）**：parry 的 clash 位就是 `DamageHero.canClashTink`（拼刀只走 `DamageHero.TryClashTinkCollider`，反编译里没有别的 NailClash 路径）；场景包直接读（`C:\ssbot\sandbox\forum_tools_scripts\clash_bits.py <scene>`）：Forum 两只 Clapper 的本体和 `Slam Collider 1/2`（都是 2 伤）canClashTink = 0，Clawmaiden 的 `Spear`（2 伤）也是 0；Hunter's March 守门竞技场（`ant_02`）的 Skarrgard（斯卡尔守卫，`Bone Hunter Throw`）本体 2 伤 = 0、斩击 `JSlash1/2`、`Slash1`、`Slash2`（含 3 个副本）2 伤 = 1。所以能否拼刀是逐个碰撞体设的，和伤害无关：Skarrgard 的斩能拼，Clapper 的砸不能。gravity_scale 实测：Choir Clapper 1.4（Air 中每物理步 dvy −1.68 → g_eff 84）、Choristor 1.1、Envoy 1.0、Throwing Bell 1.0，其余都是飞行敌人（0）。
 
 | 类型 | 伤害碰撞体（名字：形状，伤害，parry） | 敌人自己放出的危险物 |
 |---|---|---|
