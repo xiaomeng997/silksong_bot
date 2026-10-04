@@ -85,6 +85,14 @@ the support unknown) with h >= 3; RED any trigger. Triggers (§3.7.4, Q1 / Q1a t
   Q9 capture lost or PERMADEATH (hook)                                        -> stop all input, alert
   P1 planning that needs > 3 ms only in GREEN outside A/B encounters, or in GREEN inside a registered safe window.
   QF a fault injected by the pause stress test (Supervisor.inject)              -> PAUSE_PENDING, quit
+  QS stalemate: the killing-blow rule has held the nail attacks back (kill_rule, every melee hit may kill) for
+     stalemate_s (20 s) with no hit dealt (SupervisorInput.hit_dealt) and no heal
+                                                                -> latched; PAUSE_PENDING, quit at the first safe frame
+                                                                   (pausable, the chosen plan S = 0, no FORCED_RISK)
+     Why (task "STUCK at 15 HP", 2026-10-04): with h = 2 and the boss at or below one hit's bound, a kill that can
+     never be certified safe (safety_filter.kill_certified) leaves no hit, so no silk and no Bind: the fight would run
+     into the time box (the 240 s STUCK of runs 20261003_175813 / 231255 / 231257). Quitting at a safe moment and
+     retrying is the §3.7.6 path; the backstop of the fix below, not the fix.
 Q7 is the active input sink's focus guard (inputd under SendInput / Pico); under OracleInjectSink (TRAIN, 4-6
 instances, at most one focused) Application.isFocused says nothing, so input_from_state ignores STATE "focus" unless
 foreground_sink is set.
@@ -96,11 +104,19 @@ vocabulary does not know is never allowed:
                                      attack (a Wanderer crit is a 0.2 s HeroDamageShort freeze, m0 §2.4), parry / nail
                                      clash, down-slash, tool, silk skill, Bind and Clawline can start a FreezeMoment,
                                      and interactions set BlockingInteractable or disablePause (m0:N15)
-  YELLOW / RED otherwise             everything except: DAMAGING (attacks, tools, silk skills, Clawline, HIT_TARGET)
-                                     when the next landed hit may kill (the kill freeze swallows a pause); ATTACK(down)
-                                     over any hazard; plus the GREEN rules. Restrictions: punish <= 1 hit, no parry,
-                                     no new fights (heal first is Q1a's: h >= 2 below max HP, in any tier)
-  GREEN                              everything except SILKSKILL below full HP and ATTACK(down) over spikes (§3.5.6)
+  YELLOW / RED otherwise             everything except: the damaging primitives (attacks, tools, silk skills,
+                                     Clawline, HIT_TARGET) whose next landed hit may kill (kill_prims: per primitive,
+                                     from the crest's / tools' damage bounds, combat.hero_damage; the kill freeze
+                                     swallows a pause) when no kill can be certified (the support not certified, or
+                                     h < 2); with a certified support and h >= 2 they stay and kill_rule asks the L0
+                                     filter to pass only plans certified safe through the slow motion
+                                     (safety_filter.kill_certified; before 2026-10-04 every damaging primitive went
+                                     whenever the largest hit seen this attempt, a 15 HP Silkspear, could kill: the
+                                     STUCK deadlock); ATTACK(down) over any hazard; plus the GREEN rules. Restrictions:
+                                     punish <= 1 hit, no parry, no new fights (heal first is Q1a's: h >= 2 below max
+                                     HP, in any tier)
+  GREEN                              everything except SILKSKILL below full HP and ATTACK(down) over spikes (§3.5.6);
+                                     a killing blow below full HP or h < 3 is the L0 filter's (I3, kill_certified)
 PAUSE_PENDING is sticky until the pause is confirmed (notify_paused) or the attempt ends: a pause does not end the
 threat. After a greyed-Quit "unpause, EVADE out of the room, pause and quit" (§3.7.5 step 4), notify_resumed(EVADE_EXIT)
 latches EVADE_EXIT: evasive primitives only and no re-arming of the quit triggers until the scene changes or quit
@@ -111,7 +127,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from ssbot.core.primitives import ALL, DAMAGING, EVASIVE, N_PRIM, Prim
+from ssbot.core.primitives import ALL, ATTACKS, DAMAGING, EVASIVE, N_PRIM, Prim
 from ssbot.core.primitives import code as prim_code
 from ssbot.core.worldstate import FM, Ev, WorldState
 from ssbot.safety.hits_to_death import (MASK_BROKEN, MASK_INTACT, MASK_NONE, MASK_UNKNOWN, UNBOUNDED, SupportEvent,
@@ -125,7 +141,7 @@ QUIT, DIAGNOSE, SELF_CHECK = "QUIT", "DIAGNOSE", "SELF_CHECK"     # what to do o
 _ON_PAUSED_RANK = {None: 0, SELF_CHECK: 1, DIAGNOSE: 2, QUIT: 3}
 RESUME_SELF_CHECK, RESUME_EVADE_EXIT = "self_check", "evade_exit"   # notify_resumed reasons
 
-QUIT_TRIGGERS = ("Q1", "Q2", "Q3", "Q6", "QF")   # QF: a fault injected by the pause stress test (inject)
+QUIT_TRIGGERS = ("Q1", "Q2", "Q3", "Q6", "QF", "QS")   # QF: an injected fault (inject); QS: stalemate
 UNKNOWN_SOURCE = "unknown support"
 WORST_SOURCE = "worst known event"
 H_SUPPORT, H_WORST = "support", "worst known"       # SupervisorDecision.h_basis
@@ -165,6 +181,7 @@ class SupervisorConfig:
     tear_frames: int = 3
     unknown_mask_covers: bool = False          # may the Fractured Mask be trusted against an unknown threat (grabs ...)
     evade_exit_timeout_s: float = 20.0
+    stalemate_s: float = 20.0                  # QS: the killing-blow rule holding back this long, no hit, no heal
     hooks: tuple[Callable[["SupervisorInput"], Iterable[str]], ...] = ()
 
 
@@ -209,6 +226,9 @@ class SupervisorInput:
     capture_lost: bool = False                 # Q9
     permadeath: bool = False                   # Q9
     next_hit_may_kill: bool = False            # an enemy in reach could die from the next landed hit
+    kill_prims: frozenset[Prim] | None = None  # the damaging primitives whose next landed hit may kill (per-attack
+    #                                            bounds, combat.hero_damage); None: DAMAGING when next_hit_may_kill
+    hit_dealt: bool = False                    # the hero landed a hit on an enemy this frame (QS's progress)
     over_spikes: bool = False                  # a down-slash here passes over spikes (never, §3.5.6)
     over_hazard: bool = False                  # ... over any other hazard (only in GREEN, §3.7.3)
     in_encounter: bool = False                 # inside an A/B encounter (P1)
@@ -252,6 +272,10 @@ class SupervisorDecision:
     h_basis: str | None = None                 # H_SUPPORT, or H_WORST (certified-empty support: the encounter's worst)
     q1_cause: str | None = None                # Q1 this frame: Q1_HIT (post-hit window) or Q1_NO_HIT (first pausable)
     t_hit: float | None = None                 # SupervisorInput.t of the last hit seen this attempt
+    kill_rule: bool = False                    # the killing-blow rule holds damaging primitives back (removed when
+    #                                            no kill can be certified, else left to the L0 filter's certification)
+    kill_prims: frozenset[Prim] = frozenset()  # ... those primitives (allowed or not)
+    stall_s: float = 0.0                       # how long the rule has held back with no hit and no heal (QS)
 
     def allows(self, primitive: "Prim | int | str") -> bool:
         """A primitive (code, int or text name such as "ATTACK(down)") is allowed; unknown names never are."""
@@ -420,6 +444,8 @@ class Supervisor:
         self.t_hit: float | None = None         # the last frame with a hit (damage taken, or health + blue down)
         self._hp_tot: int | None = None
         self._q1_cause: str | None = None
+        self._stall_t0: float | None = None     # QS: since when the killing-blow rule holds back with no progress
+        self.qs: str | None = None              # latched QS reason (armed at the first safe frame)
 
     def inject(self, tid: str = "QF", why: str = "injected fault") -> None:
         """Fire trigger `tid` on the next step (the pause stress test, DESIGN §3.7.5 G1 fault injection: a quit
@@ -557,6 +583,8 @@ class Supervisor:
             out.append(("Q9", "capture lost"))
         if inp.permadeath:
             out.append(("Q9", "PERMADEATH"))
+        if self.qs is not None and inp.pausable is True and inp.plan_s == 0 and not inp.forced_risk:
+            out.append(("QS", self.qs))          # a latched stalemate quits at the first safe frame
         for hook in cfg.hooks:
             for tid in hook(inp) or ():
                 out.append((tid, f"hook {getattr(hook, '__name__', 'hook')}"))
@@ -599,6 +627,7 @@ class Supervisor:
         # drop alone counts as before
         tot = None if inp.hp is None else inp.hp + inp.blue
         drop = inp.damage_taken > 0 or (tot is not None and self._hp_tot is not None and tot < self._hp_tot)
+        healed = tot is not None and self._hp_tot is not None and tot > self._hp_tot
         if drop and inp.hurt is not False:
             self.t_hit = inp.t
         if tot is not None:
@@ -654,6 +683,9 @@ class Supervisor:
             self.reasons_latched.extend(r for r in reasons if r not in self.reasons_latched)
 
         careful = tier in (YELLOW, RED)
+        kill_prims = frozenset(inp.kill_prims) if inp.kill_prims is not None else \
+            (DAMAGING if inp.next_hit_may_kill else NOTHING)
+        kill_rule, kill = False, NOTHING
         if self.paused:
             allowed = NOTHING
         elif self.pending or self.evade is not None:
@@ -664,9 +696,29 @@ class Supervisor:
                 allowed.discard(Prim.SILKSKILL)
             if down_slash_ok(inp.over_spikes, inp.over_hazard, tier) is not None:
                 allowed.discard(Prim.ATTACK_DOWN)
-            if careful and inp.next_hit_may_kill:
-                allowed -= DAMAGING
+            # the killing blow (§3.7.3, I3): uncertified only in GREEN at full HP with h >= 3; otherwise the L0 filter
+            # passes a plan that may kill only when it is certified safe through the slow motion, which needs a
+            # certified support and h >= 2: without those no kill can be certified, and the primitives go here
+            kill = kill_prims & allowed
+            i3_ok = tier == GREEN and hero is not None and hero.hp >= hero.max_hp and h is not None and h >= 3
+            kill_rule = bool(kill) and not i3_ok
+            if careful and kill and not (known and h is not None and h >= 2):
+                allowed -= kill
             allowed = frozenset(allowed)
+        # QS: the rule holding back the nail (every melee hit may kill: below full HP the bot's only damage) with no
+        # hit dealt and no heal for stalemate_s latches a quit at a safe frame. Tools and the Clawline count as
+        # unbounded (combat.hero_damage) and would keep the rule on whenever an enemy lives; the planner has neither
+        if kill_rule and kill & ATTACKS and not inp.hit_dealt and not healed and not self.pending and not self.paused:
+            if self._stall_t0 is None:
+                self._stall_t0 = inp.t
+            elif self.qs is None and inp.t - self._stall_t0 >= cfg.stalemate_s:
+                self.qs = (f"stalemate: the killing-blow rule held back {inp.t - self._stall_t0:.1f} s with no hit "
+                           "dealt and no heal")
+        else:
+            self._stall_t0 = None
+            if not self.pending and not self.paused:
+                self.qs = None
+        stall = 0.0 if self._stall_t0 is None else inp.t - self._stall_t0
         # Q1a (the person's rule, 2026-10-03): h >= 2 below max HP -> heal first, in any tier (combat.tactics.modes)
         heal_first = hero is not None and h is not None and h >= 2 and hero.hp < hero.max_hp
         restr = Restrictions(heal_first=heal_first, max_punish_hits=1 if careful else None, no_parry=careful,
@@ -681,7 +733,8 @@ class Supervisor:
             long_planning_ok=tier == GREEN and not self.pending and (not inp.in_encounter or inp.in_safe_window),
             risk_integral=self.risk_integral, unpredicted_hits=self.unpredicted, support_known=known,
             hero_known=inp.hp is not None, evade_exit=self.evade is not None, h_basis=basis,
-            q1_cause=self.q1_cause(inp.t) if "Q1" in ids else None, t_hit=self.t_hit)
+            q1_cause=self.q1_cause(inp.t) if "Q1" in ids else None, t_hit=self.t_hit, kill_rule=kill_rule,
+            kill_prims=kill_prims, stall_s=stall)
 
 
 # ---- §3.5.6 gates ------------------------------------------------------------------------------------------------

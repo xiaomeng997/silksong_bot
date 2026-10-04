@@ -19,6 +19,9 @@ arena:
   x: [70.0, 101.2]        # hero collider centre range (gate faces 69.208 / 102.002, hero half width 0.25)
   hero_y: 3.0544          # hero collider centre standing on the floor (box bottom 2.015 + 1.0394)
 hit_damage: {nail: 5, silkspear: 15}
+# the M2 loadout's needle (nailUpgrades 0: 5 per nail hit); the crest and tools come from the audit (STATE hero.crest /
+# tools): combat.hero_damage bounds each attack's hit from these (the killing-blow rule, DESIGN §3.7.3)
+loadout: {needle_level: 0}
 
 stance:
   # Underground with the next attack unknown: in the oracle view the decision is seen 1.0-1.2 s before any damage,

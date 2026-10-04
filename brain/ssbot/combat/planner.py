@@ -43,7 +43,9 @@ the Bind macro when the tactics want it, over a longer horizon):
             F_INVULN: hit i-frames, the recoil) are skipped while every source in support is i-frame blocked (ENEMY:
             all of the Bell Beast's).
   Hz        safety_filter.hazard_flags on knockback.knockback_hull (computed only when hazards or soft gates exist).
-  U         safety_filter.unpausable: a possible killing blow outside I3.
+  U         safety_filter.unpausable: a possible killing blow (safety_filter.kill_frames: every damaging press at its
+            attack's bound, combat.hero_damage) outside I3 and not certified safe through the boss-death slow motion
+            (safety_filter.kill_certified); vetoed (R_KILL), not only ranked, since 2026-10-04.
   V         at least 2 candidates with the same first primitive have S = 0 and no Hz (the committed part keeps two
             ways on); the carried plan counts its own S.
   P         only when no candidate has S = 0 (with S = 0, P is 0: the probability tubes lie inside the support):
@@ -71,7 +73,8 @@ from ssbot.combat import candidates as cmod
 from ssbot.combat import pogo_targets as pt
 from ssbot.combat.forecast import body_shape, Forecast
 from ssbot.combat.holdfilter import hold_filter_jit
-from ssbot.combat.safety_filter import REASONS, FilterContext, hazard_flags, unpausable, veto
+from ssbot.combat.safety_filter import (R_KILL, REASONS, FilterContext, hazard_flags, kill_certified, kill_frames,
+                                        unpausable, veto)
 from ssbot.combat.tactics.modes import TacticPrefs
 from ssbot.core.primitives import Prim
 from ssbot.core.worldstate import WorldState
@@ -233,6 +236,7 @@ class Planner:
         self.prev_name = ""
         self.ticks = 0
         self._audit = (np.zeros(0, np.int64), np.zeros(0, np.int64), np.zeros((0, 4)))
+        self.last_kill = (0, 0, 0)      # this tick's plans that may kill, of them certified, vetoed (R_KILL)
         self.last_pogo = 0            # candidates with a predicted bounce in the last tick
         self.last_recoil = 0          # ... with a predicted nail recoil
         self.last_bell_pogo = 0       # ... bouncing off a registry target (a bell)
@@ -373,14 +377,22 @@ class Planner:
         if ctx.hazards or ctx.soft:
             hull, kfl = knockback_hull(roll.box, params, self.terrain, threads=cfg.threads)
             hz, hz_soft = hazard_flags(hull, kfl, ctx)
-        J, hits, may_kill = self._score(ws, roll_j, latched, start, f, prefs, P, tk)
+        J, hits, _near = self._score(ws, roll_j, latched, start, f, prefs, P, tk)
         if cont:
             J[-1] += prefs.weights.get("cont", 0.0)
         tr0 = time.perf_counter()
         if self._redirect:
             self._redirect_value(f, roll_j, tk, J, S, S2, ctx, prefs, enemy_only, min(T1, COMFORT_FRAMES + P + 1))
         tr1 = time.perf_counter()
-        U = unpausable(may_kill, ctx) if ctx.hp else np.zeros(N, bool)
+        # the killing blow (safety_filter U / KILL, a hard veto): every press may land at its attack's bound, and a
+        # plan that may kill passes only under I3 (GREEN, full HP, h >= 3) or certified safe through the slow motion
+        may_kill, _k_lo, k_hi = kill_frames(latched, roll.flags, roll.mode, P, ctx)
+        cert = kill_certified(S, k_hi, T1, ctx, params.frame_time)
+        U = unpausable(may_kill, ctx, cert)
+        if U.any():
+            why[ok & U] = R_KILL
+            ok = ok & ~U
+        self.last_kill = (int(may_kill.sum()), int((may_kill & cert).sum()), int(U.sum()))
         t4 = time.perf_counter()
         # a jump's hold is committed when it is pressed (DESIGN §3.5.4): a plan that releases it early, or casts
         # (a cast stops the rise), ranks below every plan that keeps it, unless none of those is safe (ABORT)
@@ -1050,12 +1062,10 @@ class Planner:
                       np.ascontiguousarray(base, np.float64), J, hits, near, first_hit, first_kind,
                       WINDOWS[self.cfg.attack_model])
         self._audit = (first_hit, first_kind, boss)
-        boss_hp = f.fc.tracker.ctx.hp
-        may_kill = near if (boss_hp is not None and boss_hp <= SPEAR_DAMAGE) else np.zeros(N, bool)
-        return J, hits, may_kill
-
-
-SPEAR_DAMAGE = 15.0
+        # near: an attack starts with the boss within 1 u of its box (audits only). The killing-blow rule no longer
+        # reads it: it counted SPEAR_DAMAGE = 15 for every attack (a nail hit is 5 with the Hunter crest) and missed
+        # up-slashes above the side box; safety_filter.kill_frames bounds every press instead (2026-10-04)
+        return J, hits, near
 
 
 def _box_of(polys: np.ndarray) -> tuple[float, float, float, float]:

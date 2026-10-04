@@ -65,6 +65,7 @@ class Playbook:
     safe_spots: tuple["SafeSpot", ...] = ()   # bind.safe_spots: where Q1a's Bind may go when it cannot be in place
     bind_gather_hit_x: float = 1.0            # bind.gather_hit_x: the hit weight's factor while Q1a gathers silk
     #                                           (h >= 2, below max HP, silk < 9; DESIGN §3.7.4 Q6, 2026-10-03)
+    needle_level: int = 0                     # loadout.needle_level (nailUpgrades): combat.hero_damage's needle
 
     @classmethod
     def from_dict(cls, d: dict) -> "Playbook":
@@ -90,7 +91,8 @@ class Playbook:
                    weights=DEFAULT_WEIGHTS | {k: float(v) for k, v in (d.get("weights") or {}).items()},
                    bind_reserve_at_full_hp=bool(bind.get("reserve_at_full_hp", False)),
                    safe_spots=tuple(SafeSpot.from_dict(x) for x in bind.get("safe_spots") or ()),
-                   bind_gather_hit_x=float(bind.get("gather_hit_x", 1.0)))
+                   bind_gather_hit_x=float(bind.get("gather_hit_x", 1.0)),
+                   needle_level=int((d.get("loadout") or {}).get("needle_level", 0)))
 
 
 def _long(d: dict | None) -> dict:

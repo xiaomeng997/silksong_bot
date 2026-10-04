@@ -43,6 +43,7 @@ from ssbot.backends.observability import ObservabilityFilter
 from ssbot.backends.oracle_backend import OracleBackend
 from ssbot.combat.boss_model import BossModel
 from ssbot.combat.forecast import Forecaster, load_box_margin, load_hurtbox, load_planner_templates
+from ssbot.combat.hero_damage import HeroDamage
 from ssbot.combat.planner import Planner, PlannerConfig
 from ssbot.combat.safety_filter import FilterContext
 from ssbot.combat.tactics import Tactics, load_playbook
@@ -215,8 +216,10 @@ class PlannerPolicy:
         self._log_buf: list[dict] = []
         self.episode = -1
         # stage C: the supervisor and the pause machine read the delayed view too (SupervisedControl vision=True)
+        # the hero's per-attack damage bounds (combat.hero_damage) come from the audited crest and tools of the first
+        # frame and the playbook's needle level (loadout.needle_level: not in the per-frame export)
         self.sc = SupervisedControl(cfg=SupervisorConfig(worst_known_damage=2), support=lambda s: self._support,
-                                    vision=view != "oracle")
+                                    vision=view != "oracle", needle_level=self.pb.needle_level)
         self.real_quit_p = real_quit_p
         self.atk_mon = AttackMonitor()
         self._pq_emulated = self.sc.pq_cfg
@@ -520,7 +523,11 @@ class PlannerPolicy:
             prefs.weights = dict(prefs.weights, hit=prefs.weights.get("hit", 10.0) * max(0.3, conf))
             if conf < self.atk_mon.tighten:
                 prefs.max_hits = 1 if prefs.max_hits is None else min(prefs.max_hits, 1)
-        ctx = FilterContext.from_world(ws, d, h, want_bind=prefs.want_bind)
+        if self.sc.damage is None:
+            # the loadout before the supervisor's first step reads it: the planner's killing-blow rule needs it now
+            self.sc.damage = HeroDamage.from_loadout(ws.res.crest.v if ws.res.crest.conf > 0 else None,
+                                                     self.pb.needle_level, ws.res.equipped)
+        ctx = FilterContext.from_world(ws, d, h, want_bind=prefs.want_bind, damage=self.sc.damage)
         ctx.silk_reserve_full_hp = self.pb.bind_reserve_at_full_hp
         hold = HoldState.from_act(raw.get("act"))
         prefix = np.array([self.sent.get(fr, 0) for fr in range(fo + 1, f + 2)], np.int64)
@@ -655,6 +662,8 @@ class PlannerPolicy:
                "ms": round(res.t_ms.get("total", 0.0), 3), "tail": res.tail_ok, "attack": res.attack,
                "attacks": res.attacks, "atk_conf": self.atk_mon.confidence(), "fam_p": self._fam_p(fcast),
                "best_up": res.best_up, "hits": res.hits, "pogo": dict(self.planner.pogo_log),
+               "kill": list(self.planner.last_kill), "kill_rule": r.decision.kill_rule,
+               "kill_prims": sorted(p.name for p in r.decision.kill_prims), "stall": round(r.decision.stall_s, 2),
                "path": None if res.path is None else np.round(res.path[::4, :], 3).tolist()}
         hit = any(ev.get("k") in ("damage", "catastrophe", "would_die") for ev in s.get("ev") or ())
         event = hit or res.forced_risk or (r.decision.pause_pending and self.counts["_pend_logged"] == 0)

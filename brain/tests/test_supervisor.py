@@ -35,8 +35,13 @@ def test_tiers_from_h_and_plan():
     r = d.restrictions
     assert r.heal_first and r.max_punish_hits == 1 and r.no_parry and r.no_killing_blow and r.no_new_fights
     assert d.allows("ATTACK(side)") and not d.allows("SILKSKILL(0)")   # below full HP: no silk skills
+    # a possibly killing blow in YELLOW: with a certified support and h 2 the L0 filter certifies it per plan
+    # (kill_rule), so the primitives stay; with the support not certified no kill can be, and they go here
     d = s.step(_inp(hp=4, next_hit_may_kill=True, over_hazard=True))
-    assert not d.allowed & DAMAGING and not d.allows("ATTACK(down)") and d.allows("DASH")
+    assert d.kill_rule and d.allowed & DAMAGING and not d.allows("ATTACK(down)") and d.allows("DASH")
+    d = s.step(_inp(next_hit_may_kill=True, over_hazard=True, support_known=False))      # YELLOW at h 3
+    assert d.tier == "YELLOW" and d.h == 3 and not d.triggers
+    assert d.kill_rule and not d.allowed & DAMAGING and not d.allows("ATTACK(down)") and d.allows("DASH")
 
 
 def test_q1_low_h_is_a_sticky_pause_pending_quit():
