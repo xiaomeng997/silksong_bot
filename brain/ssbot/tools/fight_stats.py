@@ -3,6 +3,10 @@ each boss attack, pogos per charge, hits dealt per burst, and the hits taken by 
 
     cd brain
     ../scripts/uv.cmd run python -m ssbot.tools.fight_stats C:/ssbot/data/runs/m2/<run> [<run> ...] [--json out.json]
+        [--keys]
+
+--keys adds the key economy section (ssbot.tools.key_economy.group: presses per second, plan change rate, decision
+lead, flips), one entry per view (the runs' config.json "view"); the person's fight is in key_economy's own output.
 
 Sources: the recordings' "hit" events (the hero's hits on the boss, data.src: Slash / AltSlash / UpSlash / DownSpike
 / Needle Damage ...), the attempts' hits_taken frames, and the decision logs (SSBOT_LOG_ALL=1: every tick) for the
@@ -115,8 +119,17 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("runs", nargs="+", type=Path)
     ap.add_argument("--json", type=Path, default=None)
+    ap.add_argument("--keys", action="store_true", help="add the key economy section, per view")
     a = ap.parse_args(argv)
     out = collect(a.runs)
+    if a.keys:
+        from ssbot.tools.key_economy import group
+        views: dict[str, list[Path]] = {}
+        for r in a.runs:
+            cfg = r / "config.json"
+            v = json.loads(cfg.read_text("utf-8")).get("view", "?") if cfg.exists() else "?"
+            views.setdefault(v, []).append(r)
+        out["keys"] = {v: group(rs) for v, rs in views.items()}
     print(json.dumps(out, indent=1))
     if a.json:
         a.json.write_text(json.dumps(out, indent=1), "utf-8")
