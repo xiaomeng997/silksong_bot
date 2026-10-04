@@ -25,6 +25,13 @@ margin plus the family's margin; the pairing is the planner's (box of frame c at
 the origin c - L). Multi-hit follow-ups (the builder's `follow`) are left out: the first contact of a chain stands for
 it (the supervisor counts the chain's measured damage).
 
+An enemy in its idle family (between attacks) is forecast by the idle body tube instead of the idle family's per-state
+templates (those are anchored where the idle began: an idle Minister chases the hero for seconds and its Chase
+template covers most of the arena, so it "covers" any contact): its damage box as last seen, moved along its exported
+velocity, grown by g[game time since the sighting] calibrated on training fights (IdleTubeCalibration: the largest
+dead-reckoning residual of idle bodies per type and time bin). Its successors are walked as before (an attack it may
+start within the horizon is placed at velocity-extrapolated anchors), only the current idle instance is not placed.
+
 This is an offline evaluator on the recordings' raw exports (ssbot.knowledge.forum_cache); the planner's run-time
 multi-enemy forecast (MultiForecast, round R2) reads WorldState and must keep this recall.
 """
@@ -422,7 +429,7 @@ class SubjectRecall:
                 return False
             b = (s.pos[0] + rel[0], s.pos[1] + rel[1], s.pos[0] + rel[2], s.pos[1] + rel[3])
         age = T_o - s.seen_T
-        vx, vy = s.vel
+        vx, vy = (0.0 if math.isnan(v) else v for v in s.vel)
         hx, hy = hb.HERO_HALF_U[0] + 1e-3, hb.HERO_HALF_U[1] + 1e-3
         for x, y, tau, *_ in pts:
             dt = age + tau
@@ -719,7 +726,8 @@ def idle_tube_samples(cache: dict, hulls: dict[str, tuple], specs=FORUM_SPECS, n
         if h is None:
             continue
         box[m] = np.stack([x[m] + h[0], y[m] + h[1], x[m] + h[2], y[m] + h[3]], axis=1)
-    vx, vy = cache["e_vx"][rows].astype(np.float64), cache["e_vy"][rows].astype(np.float64)
+    vx = np.nan_to_num(cache["e_vx"][rows].astype(np.float64))      # no velocity exported: standing
+    vy = np.nan_to_num(cache["e_vy"][rows].astype(np.float64))
     T = cache["T"]
     fi_r, inst_r = fi[rows], inst[rows]
     ebox = cache["e_box"][rows]

@@ -70694,9 +70694,10 @@
  },
  "build_info": {
   "code": {
-   "sha": null,
-   "branch": null,
-   "dirty": null
+   "sha": "7d097987941bd6581bb44feb2369725c2f8cca1b",
+   "branch": "worktree-wf_198518ec-9ba-1",
+   "dirty": null,
+   "note": "patched 2026-10-04: git_info returned null in the detached build (started 2026-10-03 17:19 from the working tree that commit 7d09798 recorded at 17:20; the builder code - behaviour_tables, gauntlet_tables, hitbox_tables - is unchanged from 7d09798 to the fixer's commits except contact_rows(residuals), which does not touch the tables)"
   },
   "built_at": "2026-10-03T22:09:14",
   "versions": {

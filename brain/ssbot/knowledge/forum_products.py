@@ -49,6 +49,7 @@ from ssbot.train.gauntlet import type_key as go_type
 
 REPO = Path(__file__).resolve().parents[3]
 MW_TICK_F = 30                  # the hero's Multihit ticks and its Final Hit come about 20 frames apart (Chains)
+BODY_STRIKES = frozenset(("AT_FIRE",))   # body-only attacks whose body is the strike (the Tiny's Fire is a ram)
 # the multi-hit colliders (hornet_multi_wounder), the trailing number stripped (Choristor Whip Hit 1-6, Reed /
 # Minister ParrySlash Hit, Minister Slash Collider): their single hits are grouped under the stripped name
 MULTI_HIT = frozenset(("Whip Hit", "ParrySlash Hit", "Slash Collider"))
@@ -500,20 +501,22 @@ class Strikes:
         self.none: Counter = Counter()
         self.body: dict[str, list] = defaultdict(list)  # body-only attacks: commit to the body reaching the hero
         self.body_missed: Counter = Counter()
+        self.body_touching: Counter = Counter()
         self.lead_in: dict[str, list] = defaultdict(list)
 
     @staticmethod
     def body_strike(v: FightView, inst, fi0: int, fi1: int) -> float | None:
         """A body-only attack's strike time: from its commit to the first frame its damage box (the body) overlaps
-        the hero's physics box as it was at the commit (the hero standing still), None if it never does."""
+        the hero's physics box as it was at the commit (the hero standing still); None if it never does, -1.0 if it
+        already overlapped it at the commit (no strike to time)."""
         c = v.c
         hb = c["hbox"][fi0]
         if np.isnan(hb[0]):
             return None
-        for r in v.rows_between(inst.iid, fi0, fi1):
+        for k, r in enumerate(v.rows_between(inst.iid, fi0, fi1)):
             b = c["e_box"][r]
             if not np.isnan(b[0]) and b[0] <= hb[2] and hb[0] <= b[2] and b[1] <= hb[3] and hb[1] <= b[3]:
-                return float(v.T[int(c["e_fi"][r])]) - inst.t_start
+                return -1.0 if k == 0 else float(v.T[int(c["e_fi"][r])]) - inst.t_start
         return None
 
     def add(self, v: FightView) -> None:
@@ -543,6 +546,8 @@ class Strikes:
                 bt = self.body_strike(v, inst, fi0, fi1)
                 if bt is None:
                     self.body_missed[key] += 1
+                elif bt < 0:
+                    self.body_touching[key] += 1
                 else:
                     self.body[key].append(bt)
                 continue
@@ -569,20 +574,21 @@ class Strikes:
                 "instances_with_attack_colliders": len(ttd), "instances_without": self.none.get(key, 0),
                 "commit_to_first_attack_collider_s": _q(ttd),
                 "hero_dx_at_commit_u": _q(d[:, 0]), "hero_dy_at_commit_u": _q(d[:, 1]),
-                "reach_facing_frame_u": {"x_min": round(float(np.nanmin(rb[:, 0])), 2),
-                                         "x_max": round(float(np.nanmax(rb[:, 2])), 2),
-                                         "y_min": round(float(np.nanmin(rb[:, 1])), 2),
-                                         "y_max": round(float(np.nanmax(rb[:, 3])), 2),
-                                         "x_max_p99": round(float(np.nanquantile(rb[:, 2], 0.99)), 2)}}
+                "reach_facing_frame_u": None if np.isnan(rb).all() else {
+                    "x_min": round(float(np.nanmin(rb[:, 0])), 2), "x_max": round(float(np.nanmax(rb[:, 2])), 2),
+                    "y_min": round(float(np.nanmin(rb[:, 1])), 2), "y_max": round(float(np.nanmax(rb[:, 3])), 2),
+                    "x_max_p99": round(float(np.nanquantile(rb[:, 2], 0.99)), 2)}}
             if self.none.get(key):
                 body = self.body.get(key, [])
                 strikes[key]["body_only_commit_to_hero_box_s"] = {
                     **_q(body), "never_reached": self.body_missed.get(key, 0),
+                    "touching_at_commit": self.body_touching.get(key, 0),
                     "note": "instances without attack colliders: commit to the body's first overlap with the hero's "
-                            "box as it was at the commit"}
-            # the fastest family per type by p5 (the minima carry a few mis-credited hazards); body-only attacks
-            # (no attack collider, e.g. the Tiny's ram) by their body strike when the type has nothing else
-            for kind, vals in (("attack collider or hazard", ttd), ("body", self.body.get(key, []))):
+                            "box as it was at the commit (instances already touching it then left out)"}
+            # the fastest family per type by p5 (the minima carry a few mis-credited hazards); a body attack (the
+            # Tiny's ram, BODY_STRIKES) by its body strike when the type has nothing else
+            for kind, vals in (("attack collider or hazard", ttd),
+                               ("body", self.body.get(key, []) if key.split("/")[1] in BODY_STRIKES else [])):
                 if len(vals) < 20:
                     continue
                 p5 = float(np.quantile(vals, 0.05))

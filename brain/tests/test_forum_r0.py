@@ -88,16 +88,23 @@ def test_held_out_recall_end_to_end(tmp_path):
 
 
 def test_margins_are_calibrated_on_the_other_fold():
-    own = {"type": "Foe", "tk": "Foe", "family": "F_HIT", "state": "Antic"}
+    own = {"type": "Foe", "tk": "Foe", "family": "F_HIT", "state": "Antic", "fight": "run/i0/ep0/Foe#1"}
     rows = [{**own, "fold": 0, "ho": {"state:Antic": 0.2}},
-            {**own, "fold": 0, "ho": {"state:Antic": 0.7}},
+            {**own, "fold": 0, "ho": {"state:Antic": 0.7}, "fight": "run/i0/ep2/Foe#1"},
             {**own, "fold": 1, "ho": {"state:Antic": None}},
             {**own, "fold": 1, "follow": True, "ho": {"state:Antic": 2.0}},
             # a thrown hazard's contact: its self template's residual, not the family's
-            {**own, "tk": "Ball", "fold": 0, "state": "_tail", "ho": {"state:_tail": 2.5, "self:Ball": 0.1}}]
-    assert margins_from_contacts(rows, fold=0) == {("Foe", "F_HIT"): 0.7, ("ent", "Ball"): 0.1}
+            {**own, "tk": "Ball", "fold": 0, "state": "_tail", "ho": {"state:_tail": 2.5, "self:Ball": 0.1}},
+            # an idle contact: no margin under the idle body tube (skip_families)
+            {**own, "fold": 0, "family": "F_IDLE", "state": "Idle", "ho": {"state:Idle": 1.5}}]
+    assert margins_from_contacts(rows, fold=0) == {("Foe", "F_HIT"): 0.7, ("ent", "Ball"): 0.1,
+                                                   ("Foe", "F_IDLE"): 1.5}
+    assert margins_from_contacts(rows, fold=0, skip_families={"F_IDLE"}) == {("Foe", "F_HIT"): 0.7,
+                                                                             ("ent", "Ball"): 0.1}
     assert margins_from_contacts(rows, fold=1) == {("Foe", "F_HIT"): 3.0}     # beyond the search: its radius
     assert math.isclose(margins_from_contacts(rows, fold=0, q=0.0)[("Foe", "F_HIT")], 0.2)
+    # the 3-way split: only the calibration fights' contacts
+    assert margins_from_contacts(rows, fold=0, fights={"run/i0/ep2"}) == {("Foe", "F_HIT"): 0.7}
 
 
 def test_tracker_records_hazard_armings(tmp_path):
@@ -123,25 +130,34 @@ def test_margin_dilates_the_fold_templates(tmp_path):
     assert t1.templates[k].pad_x >= t0.templates[k].pad_x + 0.5 - 1e-9
 
 
-def test_chains_count_multi_hit_follow_ups_and_skip_blocked_first_hits():
+def test_chains_follow_the_heros_multihit_mechanism():
+    tick = {"fsm": "Hero_Hornet(Clone)/Roar and Wound States/Multihit:CallMethodProper", "amount": 1}
+    final = "Hero_Hornet(Clone)/Roar and Wound States/Final Hit:DamageHeroDirectly"
+
     class V:
-        events = [(100, "damage", {"source": "Song Pilgrim 03/Whip Hit 2", "amount": 1}),
-                  (112, "special_damage", {"fsm": "Hero_Hornet(Clone)/Roar and Wound States/Multihit:X", "amount": 1}),
-                  (130, "catastrophe", {"src": "Whip Hit 2", "blocked": True, "amount": 1}),
-                  (400, "damage", {"source": "Song Pilgrim 03 (2)/Whip Hit 1", "amount": 1}),
-                  (400, "catastrophe", {"src": "Whip Hit 1", "blocked": True, "amount": 1}),
+        events = [  # two ticks 20 frames apart, then the final hit naming the whip: one chain of 3
+                  (100, "special_damage", tick), (100, "catastrophe", {"cause": "quick", "blocked": True}),
+                  (120, "special_damage", tick),
+                  (140, "damage", {"source": "Song Pilgrim 03/Whip Hit 2", "amount": 1, "fsm": final}),
+                  # a body hit 60 frames later is a single hit, not a follow-up (timing alone attaches nothing)
+                  (200, "damage", {"source": "Song Pilgrim 03/Body Damager", "amount": 1}),
+                  # a tick long before a final hit is not its own (more than MW_TICK_F before it)
+                  (300, "special_damage", tick),
+                  (400, "special_damage", tick),
+                  (421, "damage", {"source": "Song Administrator (1)/Slash Collider", "amount": 1, "fsm": final}),
                   (700, "damage", {"source": "Wave 8 - Heavy Sentry/Song Heavy Sentry", "amount": 2}),
-                  # follow-ups as damage events of the same whip, another Choristor's hit in between ends nothing
-                  (1000, "damage", {"source": "Song Pilgrim 03 (3)/Whip Hit 1", "amount": 1}),
-                  (1012, "damage", {"source": "Song Pilgrim 03 (3)/Whip Hit 3", "amount": 1}),
-                  (1030, "damage", {"source": "Song Pilgrim 03 (3)/Whip Hit 4", "amount": 1})]
+                  (900, "special_damage", tick)]       # no final hit follows
     ch = Chains()
     ch.add(V())
-    r = ch.result()["by_source"]
+    res = ch.result()
+    r = res["by_source"]
     w = r["Song Pilgrim 03/Whip Hit"]          # the whip's colliders 1-6 are one attack
-    assert w["n"] == 3 and w["first_hit_blocked"] == 1 and w["multi_hit_chains"] == 2
-    assert w["hits_max"] == 3 and w["damage_max"] == 3 and w["hits"] == {3: 2, 1: 1}
+    assert w["n"] == 1 and w["multi_hit_chains"] == 1 and w["hits_max"] == 3 and w["damage_max"] == 3
+    assert r["Song Pilgrim 03/Body Damager"]["hits_max"] == 1
+    s = r["Song Administrator/Slash Collider"]
+    assert s["hits"] == {2: 1} and s["span_frames_max"] == 21
     assert r["Song Heavy Sentry/body"]["damage_max"] == 2
+    assert res["multihit_ticks"] == 5 and res["ticks_without_a_final_hit"] == 2
 
 
 def test_source_types_and_body_colliders():
@@ -157,16 +173,22 @@ def test_products_on_the_synthetic_fight(tmp_path):
     c = _cache(tmp_path)
     c["events"].append((90, "freeze", {"phase": "start", "id": 7, "type": "BigEnemyDeathSlow", "down": 0.04,
                                        "wait": 0.06, "up": 0.04, "speed": 0.0}))
-    c["events"].append((100, "freeze", {"phase": "end", "id": 7}))
+    c["events"].append((100, "freeze", {"phase": "end", "id": 7, "frames": 10, "ms": 166.0}))
+    # a second kill whose freeze ends past the cached fight (no recording to read: censored, not measured)
+    c["events"].append((110, "hit", {"ent": 2, "type_key": "Foe", "dead": True}))
+    c["events"].append((110, "freeze", {"phase": "start", "id": 8, "type": "EnemyBattleEndSlow", "down": 0.1,
+                                        "wait": 1.5, "up": 0.25, "speed": 0.0}))
     v = FightView(c, specs=SPECS)
-    assert [i.family for i in v.instances if i.iid == 2] == ["F_IDLE", "F_HIT", "F_IDLE"]
-    # the ball armed after Foe (1)'s attack ended belongs to that attack
+    assert [i.family for i in v.instances if i.iid == 2][:3] == ["F_IDLE", "F_HIT", "F_IDLE"]
+    # the ball armed after Foe (1)'s attack ended belongs to that attack (attributed where it appeared, frame 30)
     hit = next(i for i in v.instances if i.family == "F_HIT")
     assert v.hazards[id(hit)] and v.hazards[id(hit)][0][1] == "Ball(Clone)"
     kf = KillFreeze()
     kf.add(v)
     r = kf.result()
-    assert r["by_type"]["Foe"] and r["frames_to_end"]["Foe|BigEnemyDeathSlow"]["max"] == 10
+    assert r["by_type"]["Foe"]
+    assert r["length"]["Foe|BigEnemyDeathSlow"]["frames"]["max"] == 10 and r["length"]["Foe|BigEnemyDeathSlow"]["ms"]
+    assert r["length"]["Foe|EnemyBattleEndSlow"]["censored"] == 1
     q = Quiet()
     q.add(v)
     assert q.result()["gaps"] == 0      # a foe is in play every frame
@@ -217,6 +239,145 @@ def test_top_speed_and_current_collider_tube(tmp_path):
     # a box last seen 2 frames before the origin (a killed enemy left the export) grows from then on
     assert rec.in_tube(s, [(10.5 + 0.25 + 0.1 + 0.59, 5.0, 4 / 60)], 1.0 + 2 / 60)
     assert not rec.in_tube(s, [(10.5, 5.0, 0.0)], 1.6)          # too old: no tube
+
+
+def _walking_foe_states():
+    from tests.test_gauntlet_tables import _box
+    states = _states()
+    for s in states:                     # Foe (iid 1) walks 0.1 u per frame while idle; no velocity exported
+        for e in s["ents"]:
+            if e["iid"] == 1:
+                x = 10.0 + 0.1 * s["f"]
+                e["pos"] = [x, 5.0, 0.0]
+                e["colliders"] = [_box("Foe", x, 5.0)]
+    return states
+
+
+def test_idle_body_tube_calibration_and_query(tmp_path):
+    from ssbot.knowledge.forum_support import IdleTubeCalibration, Subject, body_hulls, tube_bin
+    c = _cache(tmp_path, _walking_foe_states())
+    cal = IdleTubeCalibration(body_hulls([c], SPECS), specs=SPECS, n_max=8)
+    cal.add(c)
+    g = cal.growth()["Foe"]
+    assert len(g) == 9 and math.isclose(g[4], 0.4, abs_tol=1e-3) and math.isclose(g[1], 0.1, abs_tol=1e-3)
+    assert all(b >= a for a, b in zip(g, g[1:])) and g[0] == 0.0
+    assert cal.samples()["Foe"][4] > 0
+    # game-time bins, not frames: 4 frames of a 0.12 s hitch fall in bin 8
+    assert int(tube_bin(4 / 60)) == 4 and int(tube_bin(4.02 / 60)) == 4 and int(tube_bin(0.12)) == 8
+    rec = SubjectRecall.__new__(SubjectRecall)
+    rec.idle_growth, rec.body_rel = {"Foe": g}, {}
+    s = Subject(1, "Foe", seen_T=1.0, seen_f=60, seen_box=(9.5, 4.5, 10.5, 5.5), vel=(6.0, 0.0))
+    # moved 6 u/s x 4 frames = 0.4 u, grown by g[4] = 0.4 u, plus the hero half-width 0.25
+    edge = 10.5 + 0.4 + 0.4 + 0.25
+    assert rec.in_idle_tube(s, [(edge - 0.01, 5.0, 4 / 60, 64)], 1.0)
+    assert not rec.in_idle_tube(s, [(edge + 0.02, 5.0, 4 / 60, 64)], 1.0)
+    assert not rec.in_idle_tube(s, [(10.0, 5.0, 9 / 60, 69)], 1.0)          # past the calibration: not covered
+
+
+def test_idle_instance_is_not_placed_under_the_tube(tmp_path):
+    from ssbot.knowledge.forum_support import IdleTubeCalibration, body_hulls
+    extra = _build_extra(tmp_path)
+    c = _cache(tmp_path, _walking_foe_states(), name="walk")
+    cal = IdleTubeCalibration(body_hulls([c], SPECS), specs=SPECS)
+    cal.add(c)
+    tables = FoldTables(extra, 0, specs=SPECS)
+    plain = SubjectRecall(tables, lags=(2, 3, 4))
+    tube = SubjectRecall(tables, lags=(2, 3, 4), idle_growth=cal.growth())
+    tr = SubjectTracker(SPECS)
+    H = 5 / 60
+    for i, f, T in replay(c, tr, SPECS):
+        if f == 50:
+            s = tr.subjects[1]
+            assert s.cur.family == "F_IDLE" and tube.idle_tube_ok(s, T) and not plain.idle_tube_ok(s, T)
+            assert any("/F_IDLE/" in k for k, *_ in plain.placements_of(s, T, H))
+            assert not any("/F_IDLE/" in k for k, *_ in tube.placements_of(s, T, H))
+            assert tube.in_idle_tube(s, [(s.pos[0] + 0.4, 5.0, 4 / 60, 54)], T)
+    rows = read_contacts(extra / "contacts.jsonl.gz")
+    for fold in (0, 1):
+        rec = SubjectRecall(FoldTables(extra, 1 - fold, specs=SPECS), lags=(2, 3, 4), idle_growth=cal.growth())
+        rec.run(_cache(tmp_path), [r for r in rows if r["fold"] == fold])
+        assert not rec.misses, rec.misses[:3]
+
+
+def test_unnamed_sources_and_raw_sources(tmp_path):
+    from ssbot.knowledge.forum_support import names_enemy, raw_sources
+    assert names_enemy("Song Administrator (1)/Colliders/Collider Fly", "Song Administrator")
+    assert not names_enemy("Colliders/Collider Fly", "Song Administrator")
+    assert names_enemy("Wave 12/Song Reed", "Song Reed") and names_enemy("Song Automaton Tiny(Clone)",
+                                                                          "Song Automaton Tiny")
+    raw = raw_sources(_cache(tmp_path))
+    assert raw[40] == ["Wave 1/Foe (1)"] and raw[63] == ["Colliders/Hand"] and 61 not in raw
+
+
+def test_contacts_only_and_git_head_from_files(tmp_path):
+    from ssbot.record.recorder import git_head_from_files
+    from ssbot.tools.behaviour_build import write_contacts_only
+    g = GauntletBuilder(SPECS)
+    g.scan(Fight("states", Path("."), 1, 120, "fresh/i0/ep0"), _states())
+    write_contacts_only(tmp_path / "fresh", g, {"sha": "x"})
+    rows = read_contacts(tmp_path / "fresh" / "contacts.jsonl.gz")
+    assert rows and all(r["ho"] == {} and r["fight"].startswith("fresh/i0/ep0/") for r in rows)
+    b = json.loads((tmp_path / "fresh" / "build.json").read_text("utf-8"))
+    assert b["contacts_only"] and b["fights"][0]["id"] == "fresh/i0/ep0"
+    # a repository and a worktree (".git" a file naming its git dir, the branch in the common dir's packed-refs)
+    repo = tmp_path / "repo"
+    (repo / ".git" / "refs" / "heads").mkdir(parents=True)
+    (repo / ".git" / "HEAD").write_text("ref: refs/heads/main\n")
+    (repo / ".git" / "refs" / "heads" / "main").write_text("abc123\n")
+    assert git_head_from_files(repo) == {"sha": "abc123", "branch": "main", "how": "git files"}
+    wt_git = repo / ".git" / "worktrees" / "w1"
+    wt_git.mkdir(parents=True)
+    (wt_git / "HEAD").write_text("ref: refs/heads/feature\n")
+    (wt_git / "commondir").write_text("../..\n")
+    (repo / ".git" / "packed-refs").write_text("# pack-refs\ndef456 refs/heads/feature\n")
+    wt = tmp_path / "wt"
+    wt.mkdir()
+    (wt / ".git").write_text(f"gitdir: {wt_git}\n")
+    assert git_head_from_files(wt)["sha"] == "def456"
+
+
+def test_hazard_attributed_at_its_spawn_and_body_strikes(tmp_path):
+    from ssbot.knowledge.forum_products import Strikes
+    from tests.test_gauntlet_tables import _ball, _fsm
+    states = _states()
+    for s in states:     # a second attack of Foe (1) at 28..40; the ball appears unarmed at 22, arms at 30
+        f = s["f"]
+        if f == 28:
+            s["ev"].append(_fsm(2, "Foe (1)", "Idle", "Antic"))
+        if f == 40:
+            s["ev"].append(_fsm(2, "Foe (1)", "Antic", "Idle"))
+        if 28 <= f < 40:
+            for e in s["ents"]:
+                if e["iid"] == 2:
+                    e["fsms"] = [{"name": "Control", "state": "Antic"}]
+        s["ents"] = [e for e in s["ents"] if e["iid"] != 99]
+        if 22 <= f <= 70:
+            s["ents"].append(_ball(21.0, armed=f >= 30))
+    c = _cache(tmp_path, states, name="spawn")
+    v = FightView(c, specs=SPECS)
+    first, second = [i for i in v.instances if i.family == "F_HIT"]
+    assert v.hazards[id(first)] and not v.hazards.get(id(second))
+    assert v.lead_in["Ball"] == [8]
+    st = Strikes()
+    st.add(v)
+    r = st.result()
+    body = r["strikes"]["Foe/F_HIT"]
+    assert r["hazard_spawn_lead_in_frames"]["Ball"]["max"] == 8
+    # the second attack has no collider of its own and no hazard: a body-only instance; the hero stands on it
+    assert body["instances_without"] == 1 and body["body_only_commit_to_hero_box_s"]["touching_at_commit"] == 1
+
+
+def test_support_area_reports_band_cover(tmp_path):
+    from ssbot.tools.support_recall import support_area
+    extra = _build_extra(tmp_path)
+    a0 = support_area(extra, {}, SPECS)
+    a1 = support_area(extra, {("Foe", "F_HIT"): 1.0}, SPECS)
+    row0, row1 = a0["Foe/F_HIT"], a1["Foe/F_HIT"]
+    assert 0.0 < row0["band_cover"]["max"] <= 1.0 and row0["ratio"] == 1.0
+    assert row1["band_cover_with_margin"]["max"] > row1["band_cover"]["max"] and row1["ratio"] > 1.0
+    assert "ent/Ball" in a0          # the thrown hazards' self templates are in the report
+    idle = support_area(extra, {}, SPECS, idle={"Foe": {"growth_l4": 0.4, "hull": (-0.5, -0.5, 0.5, 0.5)}})
+    assert idle["Foe/F_IDLE"]["idle_body_tube"]["box_u"][0] == round(1.0 + 2 * (0.25 + 0.4), 2)
 
 
 def test_body_hull_and_hazard_tube(tmp_path):
