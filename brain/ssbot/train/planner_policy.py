@@ -678,8 +678,7 @@ class PlannerPolicy:
                           "planned_box": None if c["path"] is None or not 0 <= k < len(c["path"])
                           else [round(float(v), 3) for v in c["path"][k]],
                           "box": None if not hero_box else [round(float(v), 3) for v in hero_box]}}
-        hit = any(ev.get("k") in ("damage", "catastrophe", "would_die") for ev in s.get("ev") or ())
-        self._emit(rec, True if c.get("ticks", 0) <= 1 else hit)
+        self._emit(rec, True)            # every commitment tick is kept (the path through the slow motion)
         return mask
 
     def _inflight(self, s: dict, f: int) -> list[int]:
