@@ -43,6 +43,7 @@ from ssbot.knowledge.gauntlet_tables import FACES_LEFT, FORUM_SPECS, HAZARD_ALIA
 BIN = hb.BIN_S
 FRAME_S = 1.0 / 60.0
 TAIL = "_tail"
+HAZARD_DV_U_S = 40.0         # a thrown hazard's velocity change bound per s for its tube (a bounce reverses ~34 u/s)
 TUBE_MAX_AGE_S = 0.5         # the current-collider tube starts from a box seen at most this long ago
 HAZARD_GONE_S = 0.5          # an armed hazard missing from the export this long has left (behaviour_tables
 #                              ABSENT_CLOSE_F: 30 frames)
@@ -124,6 +125,11 @@ class FoldTables:
                     continue
                 if len(parts) == 3 and not (parts[2] == "anchor" and self.family_wide):
                     continue
+                if len(parts) == 4 and parts[3] == "world_all" and parts[1].endswith("_ENTRY"):
+                    # an entry comes from the wave's fixed spawn point: its world-frame union per state
+                    m = base + self.margins.get((tk, parts[1]), 0.0)
+                    tpls[k] = t.dilated(rx=hb.HERO_HALF_U[0] + m, ry=hb.HERO_HALF_U[1] + m, key=k)
+                    continue
                 if len(parts) == 3 and parts[2] == "anchor" and self.family_wide:    # t from the attack start
                     m = base + self.margins.get((tk, parts[1]), 0.0)
                     tpls[k] = t.dilated(rx=hb.HERO_HALF_U[0] + m, ry=hb.HERO_HALF_U[1] + m, key=k)
@@ -141,6 +147,10 @@ class FoldTables:
 
     def key(self, fam: str, state: str) -> str | None:
         k = f"{hb.SUPPORT}{fam}/{state}/anchor"
+        return k if k in self.meta else None
+
+    def world_key(self, fam: str, state: str) -> str | None:
+        k = f"{hb.SUPPORT}{fam}/{state}/world_all"
         return k if k in self.meta else None
 
     def family_key(self, fam: str) -> str | None:
@@ -247,15 +257,21 @@ class SubjectTracker:
         if self.log is not None and s.cur is not None:
             s.cur.states.append((to, T))
 
-    def hazard(self, iid: int, tk: str, T: float, x: float, y: float, armed: bool) -> None:
+    def hazard(self, iid: int, tk: str, T: float, x: float, y: float, armed: bool, box=None,
+               vel=(0.0, 0.0)) -> None:
         """A thrown hazard's frame: an arming (armed now, not on its last frame) records where and when (its self
         template's origin, the gauntlet builder's EntitySeg.arm_T / arm_pos)."""
         h = self.hazards.get(iid)
         if h is None:
-            h = self.hazards[iid] = [tk, False, T, (float(x), float(y)), T]
+            h = self.hazards[iid] = [tk, False, T, (float(x), float(y)), T, (float(x), float(y)), None, (0.0, 0.0)]
         if armed and (not h[1] or T - h[4] > 2.5 * FRAME_S):    # (re-)armed, or back in the export (pooled)
             h[0], h[2], h[3] = tk, T, (float(x), float(y))
-        h[1], h[4] = armed, T
+        if tk is not None:
+            h[0] = tk
+        h[1], h[4], h[5] = armed, T, (float(x), float(y))
+        if box is not None and not math.isnan(float(box[0])):    # its damage box relative to it (kept while off)
+            h[6] = (float(box[0]) - x, float(box[1]) - y, float(box[2]) - x, float(box[3]) - y)
+        h[7] = (float(vel[0]), float(vel[1]))
 
     def kill(self, iid: int, T: float) -> None:
         s = self.subjects.get(iid)
@@ -286,6 +302,7 @@ class SubjectRecall:
         self.lags = tuple(lags)
         self.tube = tube_speed is not None
         self.tube_speed = dict(tube_speed or {})
+        self.body_rel: dict[str, tuple] = {}     # type -> body collider hull relative to its position (body_hulls)
         self.tube_skin = tube_skin
         self.stats: dict = defaultdict(Counter)
         self.misses: list[dict] = []
@@ -313,6 +330,14 @@ class SubjectRecall:
             for ax, ay, m in anchors:
                 out.append((key, -e, (ax, ay), m))
 
+    def _place_world(self, out: list, key: str | None, e_lo: float, e_hi: float, H: float) -> None:
+        """A world-frame template (no anchor): the same entries as _place."""
+        if key is None:
+            return
+        tmp: list = []
+        self._place(tmp, key, e_lo, e_hi, [(0.0, 0.0, 1)], H)
+        out += [(k, t, None, 1) for k, t, _, _ in tmp]
+
     def placements_of(self, s: Subject, T_o: float, H: float, anchor_step: int = 1,
                       hazards: list | None = None) -> list[tuple]:
         """SupportQuery placements (key, t_ref, anchor, mirror) of one subject at origin T_o (no duplicates).
@@ -326,8 +351,11 @@ class SubjectRecall:
             e = t_end - T_o
             self._place(out, self.t.key(fam, TAIL), e, e, [(anc[0], anc[1], mir)], H)
         for htk, arm_T, pos in hazards or ():
-            e = arm_T - T_o
-            self._place(out, self.t.self_key(htk), e, e, [(pos[0], pos[1], 1)], H)
+            if arm_T is None:       # not armed: it may arm from the next frame on, where it is now
+                self._place(out, self.t.self_key(htk), BIN, H, [(pos[0], pos[1], 1)], H)
+            else:
+                e = arm_T - T_o
+                self._place(out, self.t.self_key(htk), e, e, [(pos[0], pos[1], 1)], H)
         if w is not None and s.state is not None and s.t_entry is not None:
             k_max = int(math.ceil(H / FRAME_S))
             x, y = s.pos
@@ -417,10 +445,9 @@ class SubjectRecall:
         for (st, c, d, current), (lo, hi) in nodes.items():
             if c is None:
                 continue
-            if st == TAIL:
-                self._place(out, self.t.key(c[0], TAIL), lo, hi, c[2], H)
-            else:
-                self._place(out, self.t.key(c[0], st), lo, hi, c[2], H)
+            self._place(out, self.t.key(c[0], st), lo, hi, c[2], H)
+            if c[0].endswith("_ENTRY"):
+                self._place_world(out, self.t.world_key(c[0], st), lo, hi, H)
     def in_tube(self, s: Subject, pts: list[tuple[float, float, float]], T_o: float) -> bool:
         """The enemy's damage colliders as last exported (its box on the last frame it was seen, at most
         TUBE_MAX_AGE_S before the origin) moved at most its type's top speed (tube_speed: measured on the training
@@ -428,18 +455,41 @@ class SubjectRecall:
         no behaviour template applies (a dying body - the export drops an enemy on its kill frame while its body still
         hurts for some frames, forum_products death_tails - a waiting body, a parked summon); in an attack it catches
         the enemy's own body beyond its family's margin. Only for the recall's lags; counted apart."""
-        if s.box is None:
-            return False
         age = T_o - s.seen_T
         if age > TUBE_MAX_AGE_S:
             return False
+        b = s.box
+        if b is None:       # no damage collider exported (an entering leap): the type's body hull at its position
+            rel = self.body_rel.get(s.tk)
+            if rel is None or math.isnan(s.pos[0]):
+                return False
+            b = (s.pos[0] + rel[0], s.pos[1] + rel[1], s.pos[0] + rel[2], s.pos[1] + rel[3])
         v = self.tube_speed.get(s.tk, 0.0)
         hx, hy = hb.HERO_HALF_U[0] + self.tube_skin, hb.HERO_HALF_U[1] + self.tube_skin
-        b = s.box
         for x, y, tau in pts:
             g = v * (age + tau)
             if b[0] - hx - g <= x <= b[2] + hx + g and b[1] - hy - g <= y <= b[3] + hy + g:
                 return True
+        return False
+
+    def in_hazard_tube(self, tr: SubjectTracker, sp, pts: list[tuple[float, float, float]], T_o: float) -> bool:
+        """A thrown hazard's damage box (its last enabled one, relative to it, at its last exported position: a
+        nail hit turns its collider off for a few frames) moved along its exported velocity, grown by
+        HAZARD_DV_U_S x the elapsed time (a bounce or a nail hit turns it; Throwing Bell speeds stay <= 34 u/s): for
+        the recall's lags only (the run-time model is its path, round R2)."""
+        hx, hy = hb.HERO_HALF_U[0] + self.tube_skin, hb.HERO_HALF_U[1] + self.tube_skin
+        for h in tr.hazards.values():
+            if h[6] is None or T_o - h[4] > HAZARD_GONE_S or not any(n.startswith(sp.projectiles)
+                                                                      for n in _names(h[0])):
+                continue
+            rel, (vx, vy), (px, py) = h[6], h[7], h[5]
+            b = (px + rel[0], py + rel[1], px + rel[2], py + rel[3])
+            for x, y, tau in pts:
+                t = tau + (T_o - h[4])
+                g = HAZARD_DV_U_S * t
+                if b[0] + vx * t - hx - g <= x <= b[2] + vx * t + hx + g and \
+                        b[1] + vy * t - hy - g <= y <= b[3] + vy * t + hy + g:
+                    return True
         return False
 
     def covered(self, placements: list, pts: list[tuple[float, float, float]]) -> bool:
@@ -508,6 +558,9 @@ class SubjectRecall:
                         how = ("current-collider tube" if k == 0 else "namesake tube") + \
                             (" (outside attacks)" if o.cur is None else " (in an attack)")
                         break
+            if how is None and self.tube and self.t.specs[s.tk].projectiles and \
+                    self.in_hazard_tube(tr, self.t.specs[s.tk], pts, T_o):
+                how = "hazard tube"
         if how is not None:
             st["covered"] += 1
             if how != "forecast":
@@ -545,12 +598,54 @@ def top_speeds(caches, specs=FORUM_SPECS, jump_u: float = 1.2, min_dt: float = 0
     return {t: float(np.quantile(np.concatenate(v), q)) for t, v in vals.items()}
 
 
+def _names(tk: str) -> tuple[str, ...]:
+    """The hazard types an exported name may be (a shared name whose radius is not known yet: each alias)."""
+    return tuple(n for _, n in HAZARD_ALIASES[tk]) if tk in HAZARD_ALIASES else (tk,)
+
+
+def body_hulls(caches, specs=FORUM_SPECS) -> dict[str, tuple]:
+    """Per enemy type the hull of its body colliders (forum_products.body_collider: the root collider, the
+    Choristor's Body Damager, the Minister's "Collider ..." boxes) relative to its transform, over the given caches."""
+    from ssbot.knowledge.forum_products import body_collider
+    out: dict[str, list] = {}
+    for c in caches:
+        names, types = c["names"], c["types"]
+        ei = c["c_ei"]
+        for j in range(len(ei)):
+            r = int(ei[j])
+            tk = types[int(c["e_tk"][r])]
+            if tk not in specs:
+                continue
+            n = int(c["c_name"][j])
+            if not body_collider(tk, names[n] if n >= 0 else None):
+                continue
+            b = c["c_box"][j]
+            x, y = float(c["e_x"][r]), float(c["e_y"][r])
+            rel = (float(b[0]) - x, float(b[1]) - y, float(b[2]) - x, float(b[3]) - y)
+            h = out.get(tk)
+            out[tk] = list(rel) if h is None else [min(h[0], rel[0]), min(h[1], rel[1]), max(h[2], rel[2]),
+                                                   max(h[3], rel[3])]
+    return {k: tuple(v) for k, v in out.items()}
+
+
 def thrown(tr: SubjectTracker, sp) -> list[tuple]:
-    """(type, arm time, arm position) of the armed hazards of the types this enemy type throws."""
+    """(type, arm time or None, position) of the hazards of the types this enemy type throws that are in the export:
+    armed ones from where and when they armed; the others (a rune waiting to burst, a bell between a nail hit and its
+    collider coming back) may arm within the horizon where they are now (arm time None)."""
     if not sp.projectiles:
         return []
-    return [(h[0], h[2], h[3]) for h in tr.hazards.values()
-            if h[1] and tr.T - h[4] <= HAZARD_GONE_S and h[0].startswith(sp.projectiles)]
+    out = []
+    for h in tr.hazards.values():
+        if tr.T - h[4] > HAZARD_GONE_S:
+            continue
+        for n in _names(h[0]):
+            if not n.startswith(sp.projectiles):
+                continue
+            if h[1] and n == h[0]:
+                out.append((n, h[2], h[3]))
+            elif tr.T - h[4] <= 2.5 * FRAME_S:
+                out.append((n, None, h[5]))
+    return out
 
 
 def replay(cache: dict, tr: SubjectTracker, specs=FORUM_SPECS):
@@ -587,13 +682,13 @@ def replay(cache: dict, tr: SubjectTracker, specs=FORUM_SPECS):
                 st = int(cache["e_st"][r])
                 armed = not math.isnan(float(box[0])) or (st >= 0 and states[st] not in rest)
                 tk = types[tki]
-                if tk in HAZARD_ALIASES:      # a shared name: the circle's radius from the box width
+                if tk in HAZARD_ALIASES:      # a shared name: the circle's radius from the box width (None: unknown)
                     if not math.isnan(float(box[0])):
                         w = 0.5 * float(box[2] - box[0])
                         alias[iid] = min(HAZARD_ALIASES[tk], key=lambda a: abs(a[0] - w))[1]
-                    tk = alias.get(iid)
-                if tk is not None:
-                    tr.hazard(iid, tk, T, cache["e_x"][r], cache["e_y"][r], armed)
+                    tk = alias.get(iid, tk)
+                tr.hazard(iid, tk, T, cache["e_x"][r], cache["e_y"][r], armed, box,
+                          (cache["e_vx"][r], cache["e_vy"][r]))
                 continue
             if not tk_ok[tki]:
                 continue

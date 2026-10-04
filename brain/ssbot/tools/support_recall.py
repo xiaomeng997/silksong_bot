@@ -195,8 +195,8 @@ def forum_main(a: argparse.Namespace) -> int:
     """--encounter Forum: held-out recall of the gauntlet tables (ssbot.knowledge.forum_support), fold k's fights
     against the tables of the other fold, each enemy's contacts against its own forecast."""
     from ssbot.knowledge.forum_cache import cache_name, load_cache
-    from ssbot.knowledge.forum_support import FoldTables, SubjectRecall, margins_from_contacts, read_contacts, \
-        top_speeds
+    from ssbot.knowledge.forum_support import FoldTables, SubjectRecall, body_hulls, margins_from_contacts, \
+        read_contacts, top_speeds
     from ssbot.knowledge.gauntlet_tables import FORUM_SPECS
 
     extra = a.extra
@@ -231,12 +231,18 @@ def forum_main(a: argparse.Namespace) -> int:
         if a.tube:
             t0 = time.perf_counter()
             train_ids = [fid for fid, fd in folds.items() if fd == train]
-            speeds = top_speeds(load_cache(a.cache / cache_name(fid)) for fid in train_ids
-                                if (a.cache / cache_name(fid)).exists())
+            train_caches = [load_cache(a.cache / cache_name(fid)) for fid in train_ids[::4]
+                            if (a.cache / cache_name(fid)).exists()]
+            speeds = top_speeds(train_caches)
+            hulls = body_hulls(train_caches)
+            del train_caches
             print(f"  top speeds of fold {train} ({time.perf_counter() - t0:.0f} s): "
                   + ", ".join(f"{tk} {v:.1f}" for tk, v in sorted(speeds.items())), flush=True)
             out.setdefault("tube_speed_by_fold", {})[str(k)] = {tk: round(v, 2) for tk, v in speeds.items()}
         rec = SubjectRecall(tables, lags, tube_speed=speeds)
+        if a.tube:
+            rec.body_rel = hulls
+            out.setdefault("body_hull_by_fold", {})[str(k)] = {tk: [round(v, 2) for v in h] for tk, h in hulls.items()}
         ids = [fid for fid, fd in folds.items() if fd == k]
         if a.max_fights:
             ids = ids[:a.max_fights]

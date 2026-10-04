@@ -217,3 +217,22 @@ def test_top_speed_and_current_collider_tube(tmp_path):
     # a box last seen 2 frames before the origin (a killed enemy left the export) grows from then on
     assert rec.in_tube(s, [(10.5 + 0.25 + 0.1 + 0.59, 5.0, 4 / 60)], 1.0 + 2 / 60)
     assert not rec.in_tube(s, [(10.5, 5.0, 0.0)], 1.6)          # too old: no tube
+
+
+def test_body_hull_and_hazard_tube(tmp_path):
+    from ssbot.knowledge.forum_support import Subject, body_hulls
+    c = _cache(tmp_path)
+    hull = body_hulls([c], SPECS)["Foe"]          # the root collider "Foe" (1 x 1 at its position), not "Hand"
+    assert np.allclose(hull, (-0.5, -0.5, 0.5, 0.5))
+    rec = SubjectRecall.__new__(SubjectRecall)
+    rec.tube_speed, rec.tube_skin, rec.body_rel = {"Foe": 0.0}, 0.1, {"Foe": hull}
+    s = Subject(1, "Foe", pos=(10.0, 5.0), seen_T=1.0)          # no damage box exported: the hull at its position
+    assert rec.in_tube(s, [(10.0 + 0.5 + 0.25 + 0.09, 5.0, 0.0)], 1.0)
+    tr = SubjectTracker(SPECS)
+    tr.T = 1.0
+    # a ball last seen 1 frame ago moving at 6 u/s, its collider off (a nail hit): 0.5 x 0.5 box around it
+    tr.hazard(99, "Ball", 1.0 - 1 / 60, 21.0, 4.0, True, (20.75, 3.75, 21.25, 4.25), (6.0, 0.0))
+    tr.hazard(99, "Ball", 1.0 - 1 / 60, 21.0, 4.0, False, None, (6.0, 0.0))
+    reach = 21.25 + 0.25 + 0.1 + 6.0 * (3 / 60)
+    assert rec.in_hazard_tube(tr, SPEC, [(reach - 0.01, 4.0, 2 / 60)], 1.0)
+    assert not rec.in_hazard_tube(tr, SPEC, [(reach + 40.0 * 3 / 60 + 0.05, 4.0, 2 / 60)], 1.0)
