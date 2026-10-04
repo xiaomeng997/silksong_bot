@@ -312,18 +312,17 @@ class Chains:
     def result(self) -> dict:
         out = {}
         for (tk, src), rows in sorted(self.rows.items(), key=lambda kv: (str(kv[0][0]), kv[0][1])):
-            v = [x for x in rows if not x[4]]
-            row = {"n": len(rows), "first_hit_blocked": len(rows) - len(v)}
-            if v:
-                a = np.array([x[:3] for x in v], np.float64)
-                row.update({"chains_counted": len(v), "multi_hit_chains": sum(1 for x in v if x[3]),
-                            "hits_max": int(a[:, 0].max()), "damage_max": int(a[:, 1].max()),
-                            "hits": dict(Counter(int(x) for x in a[:, 0])),
-                            "damage": dict(Counter(int(x) for x in a[:, 1])), "span_frames_max": int(a[:, 2].max())})
-            out[f"{tk}/{src}"] = row
-        return {"note": "a chain: the first damage event of a source and the Multihit follow-ups / blocked hits within "
-                        f"{MW_CHAIN_F} frames of the last; chains whose first hit LethalBlock blocked (the hero at 1 "
-                        "mask in data mode) never chain and are counted apart", "by_source": out}
+            a = np.array([x[:3] for x in rows], np.float64)
+            out[f"{tk}/{src}"] = {
+                "n": len(rows), "first_hit_blocked": sum(1 for x in rows if x[4]),
+                "multi_hit_chains": sum(1 for x in rows if x[3] or x[0] > 1), "hits_max": int(a[:, 0].max()),
+                "damage_max": int(a[:, 1].max()), "hits": dict(Counter(int(x) for x in a[:, 0])),
+                "damage": dict(Counter(int(x) for x in a[:, 1])), "span_frames_max": int(a[:, 2].max())}
+        return {"note": "a chain: a source's damage event, then within " f"{MW_CHAIN_F}" " frames of the last hit the same "
+                        "attack's further damage events, the Multihit follow-ups (special_damage) and the hits "
+                        "LethalBlock blocked (catastrophe: data mode keeps the hero at 1 mask; the hit happened, its "
+                        "damage is counted). A chain whose first hit was blocked tends not to continue (first_hit_"
+                        "blocked), so the maxima are lower bounds of what an unblocked chain deals", "by_source": out}
 
 
 class DeathTails:

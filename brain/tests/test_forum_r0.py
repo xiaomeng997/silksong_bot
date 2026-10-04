@@ -139,8 +139,8 @@ def test_chains_count_multi_hit_follow_ups_and_skip_blocked_first_hits():
     ch.add(V())
     r = ch.result()["by_source"]
     w = r["Song Pilgrim 03/Whip Hit"]          # the whip's colliders 1-6 are one attack
-    assert w["n"] == 3 and w["first_hit_blocked"] == 1 and w["chains_counted"] == 2
-    assert w["hits_max"] == 3 and w["damage_max"] == 3 and w["hits"] == {3: 2}
+    assert w["n"] == 3 and w["first_hit_blocked"] == 1 and w["multi_hit_chains"] == 2
+    assert w["hits_max"] == 3 and w["damage_max"] == 3 and w["hits"] == {3: 2, 1: 1}
     assert r["Song Heavy Sentry/body"]["damage_max"] == 2
 
 
