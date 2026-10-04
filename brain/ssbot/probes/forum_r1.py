@@ -61,23 +61,35 @@ def battles(s: dict) -> list:
             for b in (s.get("room") or {}).get("battles") or ()]
 
 
-def watch(link: OracleLink, seconds: float, every_s: float = 1.0) -> list:
+def watch(link: OracleLink, seconds: float, every_s: float = 1.0, changes: list | None = None) -> list:
+    """Rows every `every_s`; `changes`, when given, gets every STATE where the Battle Scene's wave or enemy count
+    changes ({f, wave, enemies, to_next}: the wave clock at frame resolution)."""
     from ssbot.train.gauntlet import live_enemies
+    from ssbot.train.wave_start import battle_of
     rows = []
     t_end = time.monotonic() + seconds
     nxt = 0.0
     last = link.frame
+    prev = None
     while time.monotonic() < t_end:
         s = link.wait_state(newer_than=last, timeout_s=3.0)
         last = s["f"]
         link.act(last + 2, 0, hold_frames=0)
+        if changes is not None:
+            b = battle_of(s) or {}
+            cur = (b.get("wave"), b.get("enemies"), b.get("to_next"))
+            if cur != prev:
+                changes.append({"f": s["f"], "wave": cur[0], "enemies": cur[1], "to_next": cur[2]})
+                prev = cur
         if time.monotonic() >= nxt:
             nxt = time.monotonic() + every_s
             h = s.get("hero") or {}
             rows.append({"f": s["f"], "scene": (s.get("game") or {}).get("scene"), "battles": battles(s),
                          "in_play": sorted(f"{e.get('type_key')}@{e['pos'][0]:.1f},{e['pos'][1]:.1f}"
                                            for e in live_enemies(s)),
-                         "hero": [round(v, 2) for v in (h.get("pos") or ())[:2]], "input": h.get("hero_accepting_input")})
+                         "hero": [round(v, 2) for v in (h.get("pos") or ())[:2]], "input": h.get("hero_accepting_input"),
+                         "allies": [f"{x.get('name')}:{x.get('state')}" for x in s.get("allies") or ()
+                                    if str(x.get("name", "")).endswith("Fighter")]})
     return rows
 
 
@@ -161,12 +173,18 @@ def check(link: OracleLink, a) -> dict:
             act = wait_wave_active(link, enc, i, after=s["f"])
             r["activation_s"] = round((act["f"] - s["f"]) / 60.0, 3)
             r["at_active"] = verify_wave_start(act, enc, i)
-            rows = watch(link, a.seconds, every_s=2.0)
+            r["active_f"] = act["f"]
+            r["changes"] = []
+            rows = watch(link, a.seconds, every_s=2.0, changes=r["changes"])
             r["watch"] = rows
+            # StartWave(i + 1) (room.battles' wave index moves on; its members come startDelay later), game seconds
+            # after this wave's activation: the w2 check (1 s count check once pruned, then wave 3's 0.5 s delay)
+            nxt = next((c for c in r["changes"] if (c["wave"] if c["wave"] is not None else -1) > i), None)
+            r["next_wave_after_s"] = round((nxt["f"] - act["f"]) / 60.0, 3) if nxt else None
             r["at_end"] = verify_wave_start(link.state or {}, enc, i)
         except (RuntimeError, TimeoutError, OracleError) as e:
             r["error"] = f"{type(e).__name__}: {e}"
-        out[i] = r
+        out[f"{i}" if f"{i}" not in out else f"{i}_{len(out)}"] = r      # --waves 2,2,2 repeats a wave
         print(f"w{i}: start {r.get('start_real_s')} s, active +{r.get('activation_s')} s "
               f"{json.dumps(r.get('at_active'))[:300]} | end "
               f"{json.dumps(r.get('at_end'))[:400]} {r.get('error') or ''}", flush=True)
