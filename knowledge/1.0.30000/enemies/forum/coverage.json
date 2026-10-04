@@ -351,188 +351,2726 @@
     "Pilgrim 03 Song": 201
    },
    "fold": 0
+  },
+  {
+   "id": "20261003_014254_Forum_A_data/i2/ep0",
+   "frames": 56026,
+   "subjects": {
+    "Song Pilgrim 03": 4,
+    "Song Pilgrim Maestro": 3,
+    "Song Reed": 5,
+    "Song Automaton Tiny": 9,
+    "Song Pilgrim 01": 1,
+    "Pilgrim 03 Song": 5,
+    "Song Handmaiden": 3,
+    "Song Administrator": 4,
+    "Song Heavy Sentry": 3
+   },
+   "instances": {
+    "Song Heavy Sentry": 337,
+    "Song Handmaiden": 106,
+    "Song Administrator": 119,
+    "Song Pilgrim Maestro": 264,
+    "Song Automaton Tiny": 380,
+    "Song Reed": 130,
+    "Song Pilgrim 01": 11,
+    "Song Pilgrim 03": 68,
+    "Pilgrim 03 Song": 292
+   },
+   "fold": 1
+  },
+  {
+   "id": "20261003_014254_Forum_A_data/i2/ep1",
+   "frames": 51334,
+   "subjects": {
+    "Song Pilgrim 03": 4,
+    "Song Pilgrim Maestro": 3,
+    "Song Reed": 5,
+    "Song Automaton Tiny": 9,
+    "Song Pilgrim 01": 1,
+    "Pilgrim 03 Song": 5,
+    "Song Handmaiden": 3,
+    "Song Administrator": 4,
+    "Song Heavy Sentry": 3
+   },
+   "instances": {
+    "Song Heavy Sentry": 411,
+    "Song Handmaiden": 103,
+    "Song Administrator": 134,
+    "Song Pilgrim Maestro": 240,
+    "Song Automaton Tiny": 335,
+    "Song Reed": 119,
+    "Song Pilgrim 01": 14,
+    "Song Pilgrim 03": 90,
+    "Pilgrim 03 Song": 207
+   },
+   "fold": 0
+  },
+  {
+   "id": "20261003_014254_Forum_A_data/i2/ep2",
+   "frames": 51313,
+   "subjects": {
+    "Song Pilgrim 03": 4,
+    "Song Pilgrim Maestro": 3,
+    "Song Reed": 5,
+    "Song Automaton Tiny": 9,
+    "Song Pilgrim 01": 1,
+    "Pilgrim 03 Song": 5,
+    "Song Handmaiden": 3,
+    "Song Administrator": 4,
+    "Song Heavy Sentry": 3
+   },
+   "instances": {
+    "Song Heavy Sentry": 385,
+    "Song Handmaiden": 88,
+    "Song Administrator": 79,
+    "Song Pilgrim Maestro": 266,
+    "Song Automaton Tiny": 393,
+    "Song Reed": 118,
+    "Song Pilgrim 01": 15,
+    "Song Pilgrim 03": 66,
+    "Pilgrim 03 Song": 268
+   },
+   "fold": 1
+  },
+  {
+   "id": "20261003_014254_Forum_A_data/i2/ep3",
+   "frames": 46579,
+   "subjects": {
+    "Song Pilgrim 03": 4,
+    "Song Pilgrim Maestro": 3,
+    "Song Reed": 5,
+    "Song Automaton Tiny": 9,
+    "Song Pilgrim 01": 1,
+    "Pilgrim 03 Song": 5,
+    "Song Handmaiden": 3,
+    "Song Administrator": 4,
+    "Song Heavy Sentry": 3
+   },
+   "instances": {
+    "Song Heavy Sentry": 447,
+    "Song Handmaiden": 78,
+    "Song Administrator": 142,
+    "Song Pilgrim Maestro": 154,
+    "Song Automaton Tiny": 229,
+    "Song Reed": 98,
+    "Song Pilgrim 01": 12,
+    "Song Pilgrim 03": 58,
+    "Pilgrim 03 Song": 179
+   },
+   "fold": 0
+  },
+  {
+   "id": "20261003_014254_Forum_A_data/i2/ep4",
+   "frames": 53584,
+   "subjects": {
+    "Song Pilgrim 03": 4,
+    "Song Pilgrim Maestro": 3,
+    "Song Reed": 5,
+    "Song Automaton Tiny": 9,
+    "Song Pilgrim 01": 1,
+    "Pilgrim 03 Song": 5,
+    "Song Handmaiden": 3,
+    "Song Administrator": 4,
+    "Song Heavy Sentry": 3
+   },
+   "instances": {
+    "Song Heavy Sentry": 367,
+    "Song Handmaiden": 66,
+    "Song Administrator": 105,
+    "Song Pilgrim Maestro": 296,
+    "Song Automaton Tiny": 422,
+    "Song Reed": 108,
+    "Song Pilgrim 01": 25,
+    "Song Pilgrim 03": 57,
+    "Pilgrim 03 Song": 217
+   },
+   "fold": 1
+  },
+  {
+   "id": "20261003_014254_Forum_A_data/i2/ep5",
+   "frames": 56554,
+   "subjects": {
+    "Song Pilgrim 03": 4,
+    "Song Pilgrim Maestro": 3,
+    "Song Reed": 5,
+    "Song Automaton Tiny": 9,
+    "Song Pilgrim 01": 1,
+    "Pilgrim 03 Song": 5,
+    "Song Handmaiden": 3,
+    "Song Administrator": 4,
+    "Song Heavy Sentry": 3
+   },
+   "instances": {
+    "Song Heavy Sentry": 373,
+    "Song Handmaiden": 102,
+    "Song Administrator": 108,
+    "Song Pilgrim Maestro": 282,
+    "Song Automaton Tiny": 414,
+    "Song Reed": 140,
+    "Song Pilgrim 01": 24,
+    "Song Pilgrim 03": 95,
+    "Pilgrim 03 Song": 310
+   },
+   "fold": 0
+  },
+  {
+   "id": "20261003_014254_Forum_A_data/i2/ep6",
+   "frames": 49652,
+   "subjects": {
+    "Song Pilgrim 03": 4,
+    "Song Pilgrim Maestro": 3,
+    "Song Reed": 5,
+    "Song Automaton Tiny": 9,
+    "Song Pilgrim 01": 1,
+    "Pilgrim 03 Song": 5,
+    "Song Handmaiden": 3,
+    "Song Administrator": 4,
+    "Song Heavy Sentry": 3
+   },
+   "instances": {
+    "Song Heavy Sentry": 387,
+    "Song Handmaiden": 210,
+    "Song Administrator": 143,
+    "Song Pilgrim Maestro": 202,
+    "Song Automaton Tiny": 296,
+    "Song Reed": 93,
+    "Song Pilgrim 01": 21,
+    "Song Pilgrim 03": 50,
+    "Pilgrim 03 Song": 229
+   },
+   "fold": 1
+  },
+  {
+   "id": "20261003_014254_Forum_A_data/i2/ep7",
+   "frames": 54019,
+   "subjects": {
+    "Song Pilgrim 03": 4,
+    "Song Pilgrim Maestro": 3,
+    "Song Reed": 5,
+    "Song Automaton Tiny": 9,
+    "Song Pilgrim 01": 1,
+    "Pilgrim 03 Song": 5,
+    "Song Handmaiden": 3,
+    "Song Administrator": 4,
+    "Song Heavy Sentry": 3
+   },
+   "instances": {
+    "Song Heavy Sentry": 285,
+    "Song Handmaiden": 88,
+    "Song Administrator": 153,
+    "Song Pilgrim Maestro": 252,
+    "Song Automaton Tiny": 365,
+    "Song Reed": 193,
+    "Song Pilgrim 01": 43,
+    "Song Pilgrim 03": 67,
+    "Pilgrim 03 Song": 235
+   },
+   "fold": 0
+  },
+  {
+   "id": "20261003_014254_Forum_A_data/i2/ep8",
+   "frames": 50379,
+   "subjects": {
+    "Song Pilgrim 03": 4,
+    "Song Pilgrim Maestro": 3,
+    "Song Reed": 5,
+    "Song Automaton Tiny": 9,
+    "Song Pilgrim 01": 1,
+    "Pilgrim 03 Song": 5,
+    "Song Handmaiden": 3,
+    "Song Administrator": 4,
+    "Song Heavy Sentry": 3
+   },
+   "instances": {
+    "Song Heavy Sentry": 365,
+    "Song Handmaiden": 117,
+    "Song Administrator": 72,
+    "Song Pilgrim Maestro": 212,
+    "Song Automaton Tiny": 302,
+    "Song Reed": 160,
+    "Song Pilgrim 01": 23,
+    "Song Pilgrim 03": 72,
+    "Pilgrim 03 Song": 195
+   },
+   "fold": 1
+  },
+  {
+   "id": "20261003_014254_Forum_A_data/i2/ep9",
+   "frames": 47378,
+   "subjects": {
+    "Song Pilgrim 03": 4,
+    "Song Pilgrim Maestro": 3,
+    "Song Reed": 5,
+    "Song Automaton Tiny": 9,
+    "Song Pilgrim 01": 1,
+    "Pilgrim 03 Song": 5,
+    "Song Handmaiden": 3,
+    "Song Administrator": 4,
+    "Song Heavy Sentry": 3
+   },
+   "instances": {
+    "Song Heavy Sentry": 315,
+    "Song Handmaiden": 104,
+    "Song Administrator": 155,
+    "Song Pilgrim Maestro": 180,
+    "Song Automaton Tiny": 261,
+    "Song Reed": 149,
+    "Song Pilgrim 01": 17,
+    "Song Pilgrim 03": 61,
+    "Pilgrim 03 Song": 205
+   },
+   "fold": 0
+  },
+  {
+   "id": "20261003_014254_Forum_A_data/i2/ep10",
+   "frames": 51851,
+   "subjects": {
+    "Song Pilgrim 03": 4,
+    "Song Pilgrim Maestro": 3,
+    "Song Reed": 5,
+    "Song Automaton Tiny": 9,
+    "Song Pilgrim 01": 1,
+    "Pilgrim 03 Song": 5,
+    "Song Handmaiden": 3,
+    "Song Administrator": 4,
+    "Song Heavy Sentry": 3
+   },
+   "instances": {
+    "Song Heavy Sentry": 367,
+    "Song Handmaiden": 120,
+    "Song Administrator": 161,
+    "Song Pilgrim Maestro": 194,
+    "Song Automaton Tiny": 279,
+    "Song Reed": 151,
+    "Song Pilgrim 01": 18,
+    "Song Pilgrim 03": 51,
+    "Pilgrim 03 Song": 240
+   },
+   "fold": 1
+  },
+  {
+   "id": "20261003_014254_Forum_A_data/i2/ep11",
+   "frames": 53140,
+   "subjects": {
+    "Song Pilgrim 03": 4,
+    "Song Pilgrim Maestro": 3,
+    "Song Reed": 5,
+    "Song Automaton Tiny": 9,
+    "Song Pilgrim 01": 1,
+    "Pilgrim 03 Song": 5,
+    "Song Handmaiden": 3,
+    "Song Administrator": 4,
+    "Song Heavy Sentry": 3
+   },
+   "instances": {
+    "Song Heavy Sentry": 349,
+    "Song Handmaiden": 126,
+    "Song Administrator": 191,
+    "Song Pilgrim Maestro": 260,
+    "Song Automaton Tiny": 387,
+    "Song Reed": 149,
+    "Song Pilgrim 01": 25,
+    "Song Pilgrim 03": 67,
+    "Pilgrim 03 Song": 233
+   },
+   "fold": 0
+  },
+  {
+   "id": "20261003_014254_Forum_A_data/i2/ep12",
+   "frames": 49711,
+   "subjects": {
+    "Song Pilgrim 03": 4,
+    "Song Pilgrim Maestro": 3,
+    "Song Reed": 5,
+    "Song Automaton Tiny": 9,
+    "Song Pilgrim 01": 1,
+    "Pilgrim 03 Song": 5,
+    "Song Handmaiden": 3,
+    "Song Administrator": 4,
+    "Song Heavy Sentry": 3
+   },
+   "instances": {
+    "Song Heavy Sentry": 404,
+    "Song Handmaiden": 80,
+    "Song Administrator": 70,
+    "Song Pilgrim Maestro": 240,
+    "Song Automaton Tiny": 347,
+    "Song Reed": 167,
+    "Song Pilgrim 01": 9,
+    "Song Pilgrim 03": 70,
+    "Pilgrim 03 Song": 242
+   },
+   "fold": 1
+  },
+  {
+   "id": "20261003_014254_Forum_A_data/i2/ep13",
+   "frames": 48984,
+   "subjects": {
+    "Song Pilgrim 03": 4,
+    "Song Pilgrim Maestro": 3,
+    "Song Reed": 5,
+    "Song Automaton Tiny": 9,
+    "Song Pilgrim 01": 1,
+    "Pilgrim 03 Song": 5,
+    "Song Handmaiden": 3,
+    "Song Administrator": 4,
+    "Song Heavy Sentry": 3
+   },
+   "instances": {
+    "Song Heavy Sentry": 401,
+    "Song Handmaiden": 97,
+    "Song Administrator": 124,
+    "Song Pilgrim Maestro": 172,
+    "Song Automaton Tiny": 249,
+    "Song Reed": 162,
+    "Song Pilgrim 01": 34,
+    "Song Pilgrim 03": 91,
+    "Pilgrim 03 Song": 201
+   },
+   "fold": 0
+  },
+  {
+   "id": "20261003_014254_Forum_A_data/i2/ep14",
+   "frames": 53366,
+   "subjects": {
+    "Song Pilgrim 03": 4,
+    "Song Pilgrim Maestro": 3,
+    "Song Reed": 5,
+    "Song Automaton Tiny": 9,
+    "Song Pilgrim 01": 1,
+    "Pilgrim 03 Song": 5,
+    "Song Handmaiden": 3,
+    "Song Administrator": 4,
+    "Song Heavy Sentry": 3
+   },
+   "instances": {
+    "Song Heavy Sentry": 284,
+    "Song Handmaiden": 119,
+    "Song Administrator": 122,
+    "Song Pilgrim Maestro": 286,
+    "Song Automaton Tiny": 420,
+    "Song Reed": 142,
+    "Song Pilgrim 01": 38,
+    "Song Pilgrim 03": 64,
+    "Pilgrim 03 Song": 242
+   },
+   "fold": 1
+  },
+  {
+   "id": "20261003_014254_Forum_A_data/i2/ep15",
+   "frames": 45001,
+   "subjects": {
+    "Song Pilgrim 03": 4,
+    "Song Pilgrim Maestro": 3,
+    "Song Reed": 5,
+    "Song Automaton Tiny": 9,
+    "Song Pilgrim 01": 1,
+    "Pilgrim 03 Song": 5,
+    "Song Handmaiden": 3,
+    "Song Administrator": 4,
+    "Song Heavy Sentry": 3
+   },
+   "instances": {
+    "Song Heavy Sentry": 266,
+    "Song Handmaiden": 108,
+    "Song Administrator": 220,
+    "Song Pilgrim Maestro": 180,
+    "Song Automaton Tiny": 258,
+    "Song Reed": 112,
+    "Song Pilgrim 01": 26,
+    "Song Pilgrim 03": 104,
+    "Pilgrim 03 Song": 220
+   },
+   "fold": 0
+  },
+  {
+   "id": "20261003_014254_Forum_A_data/i2/ep16",
+   "frames": 48012,
+   "subjects": {
+    "Song Pilgrim 03": 4,
+    "Song Pilgrim Maestro": 3,
+    "Song Reed": 5,
+    "Song Automaton Tiny": 9,
+    "Song Pilgrim 01": 1,
+    "Pilgrim 03 Song": 5,
+    "Song Handmaiden": 3,
+    "Song Administrator": 4,
+    "Song Heavy Sentry": 3
+   },
+   "instances": {
+    "Song Heavy Sentry": 424,
+    "Song Handmaiden": 77,
+    "Song Administrator": 157,
+    "Song Pilgrim Maestro": 170,
+    "Song Automaton Tiny": 249,
+    "Song Reed": 163,
+    "Song Pilgrim 01": 17,
+    "Song Pilgrim 03": 59,
+    "Pilgrim 03 Song": 243
+   },
+   "fold": 1
+  },
+  {
+   "id": "20261003_014254_Forum_A_data/i2/ep17",
+   "frames": 48991,
+   "subjects": {
+    "Song Pilgrim 03": 4,
+    "Song Pilgrim Maestro": 3,
+    "Song Reed": 5,
+    "Song Automaton Tiny": 9,
+    "Song Pilgrim 01": 1,
+    "Pilgrim 03 Song": 5,
+    "Song Handmaiden": 3,
+    "Song Administrator": 4,
+    "Song Heavy Sentry": 3
+   },
+   "instances": {
+    "Song Heavy Sentry": 348,
+    "Song Handmaiden": 95,
+    "Song Administrator": 152,
+    "Song Pilgrim Maestro": 174,
+    "Song Automaton Tiny": 247,
+    "Song Reed": 135,
+    "Song Pilgrim 01": 18,
+    "Song Pilgrim 03": 68,
+    "Pilgrim 03 Song": 285
+   },
+   "fold": 0
+  },
+  {
+   "id": "20261003_014254_Forum_A_data/i2/ep18",
+   "frames": 53600,
+   "subjects": {
+    "Song Pilgrim 03": 4,
+    "Song Pilgrim Maestro": 3,
+    "Song Reed": 5,
+    "Song Automaton Tiny": 9,
+    "Song Pilgrim 01": 1,
+    "Pilgrim 03 Song": 5,
+    "Song Handmaiden": 3,
+    "Song Administrator": 4,
+    "Song Heavy Sentry": 3
+   },
+   "instances": {
+    "Song Heavy Sentry": 447,
+    "Song Handmaiden": 63,
+    "Song Administrator": 152,
+    "Song Pilgrim Maestro": 246,
+    "Song Automaton Tiny": 357,
+    "Song Reed": 116,
+    "Song Pilgrim 01": 14,
+    "Song Pilgrim 03": 65,
+    "Pilgrim 03 Song": 253
+   },
+   "fold": 1
+  },
+  {
+   "id": "20261003_014254_Forum_A_data/i2/ep19",
+   "frames": 49235,
+   "subjects": {
+    "Song Pilgrim 03": 4,
+    "Song Pilgrim Maestro": 3,
+    "Song Reed": 5,
+    "Song Automaton Tiny": 9,
+    "Song Pilgrim 01": 1,
+    "Pilgrim 03 Song": 5,
+    "Song Handmaiden": 3,
+    "Song Administrator": 4,
+    "Song Heavy Sentry": 3
+   },
+   "instances": {
+    "Song Heavy Sentry": 402,
+    "Song Handmaiden": 113,
+    "Song Administrator": 193,
+    "Song Pilgrim Maestro": 198,
+    "Song Automaton Tiny": 297,
+    "Song Reed": 156,
+    "Song Pilgrim 01": 22,
+    "Song Pilgrim 03": 61,
+    "Pilgrim 03 Song": 146
+   },
+   "fold": 0
+  },
+  {
+   "id": "20261003_014254_Forum_A_data/i2/ep20",
+   "frames": 53506,
+   "subjects": {
+    "Song Pilgrim 03": 4,
+    "Song Pilgrim Maestro": 3,
+    "Song Reed": 5,
+    "Song Automaton Tiny": 9,
+    "Song Pilgrim 01": 1,
+    "Pilgrim 03 Song": 5,
+    "Song Handmaiden": 3,
+    "Song Administrator": 4,
+    "Song Heavy Sentry": 3
+   },
+   "instances": {
+    "Song Heavy Sentry": 411,
+    "Song Handmaiden": 74,
+    "Song Administrator": 107,
+    "Song Pilgrim Maestro": 280,
+    "Song Automaton Tiny": 411,
+    "Song Reed": 190,
+    "Song Pilgrim 01": 16,
+    "Song Pilgrim 03": 70,
+    "Pilgrim 03 Song": 247
+   },
+   "fold": 1
+  },
+  {
+   "id": "20261003_014254_Forum_A_data/i2/ep21",
+   "frames": 45652,
+   "subjects": {
+    "Song Pilgrim 03": 4,
+    "Song Pilgrim Maestro": 3,
+    "Song Reed": 5,
+    "Song Automaton Tiny": 9,
+    "Song Pilgrim 01": 1,
+    "Pilgrim 03 Song": 5,
+    "Song Handmaiden": 3,
+    "Song Administrator": 4,
+    "Song Heavy Sentry": 3
+   },
+   "instances": {
+    "Song Heavy Sentry": 337,
+    "Song Handmaiden": 129,
+    "Song Administrator": 125,
+    "Song Pilgrim Maestro": 246,
+    "Song Automaton Tiny": 359,
+    "Song Reed": 143,
+    "Song Pilgrim 01": 12,
+    "Song Pilgrim 03": 61,
+    "Pilgrim 03 Song": 150
+   },
+   "fold": 0
+  },
+  {
+   "id": "20261003_014254_Forum_A_data/i2/ep22",
+   "frames": 51857,
+   "subjects": {
+    "Song Pilgrim 03": 4,
+    "Song Pilgrim Maestro": 3,
+    "Song Reed": 5,
+    "Song Automaton Tiny": 9,
+    "Song Pilgrim 01": 1,
+    "Pilgrim 03 Song": 5,
+    "Song Handmaiden": 3,
+    "Song Administrator": 4,
+    "Song Heavy Sentry": 3
+   },
+   "instances": {
+    "Song Heavy Sentry": 359,
+    "Song Handmaiden": 112,
+    "Song Administrator": 153,
+    "Song Pilgrim Maestro": 258,
+    "Song Automaton Tiny": 364,
+    "Song Reed": 107,
+    "Song Pilgrim 01": 25,
+    "Song Pilgrim 03": 68,
+    "Pilgrim 03 Song": 153
+   },
+   "fold": 1
+  },
+  {
+   "id": "20261003_014254_Forum_A_data/i2/ep23",
+   "frames": 55973,
+   "subjects": {
+    "Song Pilgrim 03": 4,
+    "Song Pilgrim Maestro": 3,
+    "Song Reed": 5,
+    "Song Automaton Tiny": 9,
+    "Song Pilgrim 01": 1,
+    "Pilgrim 03 Song": 5,
+    "Song Handmaiden": 3,
+    "Song Administrator": 4,
+    "Song Heavy Sentry": 3
+   },
+   "instances": {
+    "Song Heavy Sentry": 348,
+    "Song Handmaiden": 86,
+    "Song Administrator": 140,
+    "Song Pilgrim Maestro": 322,
+    "Song Automaton Tiny": 464,
+    "Song Reed": 172,
+    "Song Pilgrim 01": 21,
+    "Song Pilgrim 03": 83,
+    "Pilgrim 03 Song": 201
+   },
+   "fold": 0
+  },
+  {
+   "id": "20261003_014254_Forum_A_data/i2/ep24",
+   "frames": 54169,
+   "subjects": {
+    "Song Pilgrim 03": 4,
+    "Song Pilgrim Maestro": 3,
+    "Song Reed": 5,
+    "Song Automaton Tiny": 9,
+    "Song Pilgrim 01": 1,
+    "Pilgrim 03 Song": 5,
+    "Song Handmaiden": 3,
+    "Song Administrator": 4,
+    "Song Heavy Sentry": 3
+   },
+   "instances": {
+    "Song Heavy Sentry": 315,
+    "Song Handmaiden": 101,
+    "Song Administrator": 148,
+    "Song Pilgrim Maestro": 266,
+    "Song Automaton Tiny": 399,
+    "Song Reed": 134,
+    "Song Pilgrim 01": 37,
+    "Song Pilgrim 03": 92,
+    "Pilgrim 03 Song": 214
+   },
+   "fold": 1
+  },
+  {
+   "id": "20261003_030413_Forum_A_data/i3/ep0",
+   "frames": 53164,
+   "subjects": {
+    "Song Pilgrim 03": 4,
+    "Song Pilgrim Maestro": 3,
+    "Song Reed": 5,
+    "Song Automaton Tiny": 9,
+    "Song Pilgrim 01": 1,
+    "Pilgrim 03 Song": 5,
+    "Song Handmaiden": 3,
+    "Song Administrator": 4,
+    "Song Heavy Sentry": 3
+   },
+   "instances": {
+    "Song Heavy Sentry": 322,
+    "Song Handmaiden": 83,
+    "Song Administrator": 148,
+    "Song Pilgrim Maestro": 274,
+    "Song Automaton Tiny": 390,
+    "Song Reed": 197,
+    "Song Pilgrim 01": 23,
+    "Song Pilgrim 03": 91,
+    "Pilgrim 03 Song": 261
+   },
+   "fold": 0
+  },
+  {
+   "id": "20261003_030413_Forum_A_data/i3/ep1",
+   "frames": 55977,
+   "subjects": {
+    "Song Pilgrim 03": 4,
+    "Song Pilgrim Maestro": 3,
+    "Song Reed": 5,
+    "Song Automaton Tiny": 9,
+    "Song Pilgrim 01": 1,
+    "Pilgrim 03 Song": 5,
+    "Song Handmaiden": 3,
+    "Song Administrator": 4,
+    "Song Heavy Sentry": 3
+   },
+   "instances": {
+    "Song Heavy Sentry": 413,
+    "Song Handmaiden": 68,
+    "Song Administrator": 118,
+    "Song Pilgrim Maestro": 280,
+    "Song Automaton Tiny": 409,
+    "Song Reed": 148,
+    "Song Pilgrim 01": 16,
+    "Song Pilgrim 03": 73,
+    "Pilgrim 03 Song": 167
+   },
+   "fold": 1
+  },
+  {
+   "id": "20261003_030413_Forum_A_data/i3/ep2",
+   "frames": 54340,
+   "subjects": {
+    "Song Pilgrim 03": 4,
+    "Song Pilgrim Maestro": 3,
+    "Song Reed": 5,
+    "Song Automaton Tiny": 9,
+    "Song Pilgrim 01": 1,
+    "Pilgrim 03 Song": 5,
+    "Song Handmaiden": 3,
+    "Song Administrator": 4,
+    "Song Heavy Sentry": 3
+   },
+   "instances": {
+    "Song Heavy Sentry": 354,
+    "Song Handmaiden": 107,
+    "Song Administrator": 139,
+    "Song Pilgrim Maestro": 280,
+    "Song Automaton Tiny": 412,
+    "Song Reed": 125,
+    "Song Pilgrim 01": 18,
+    "Song Pilgrim 03": 61,
+    "Pilgrim 03 Song": 188
+   },
+   "fold": 0
+  },
+  {
+   "id": "20261003_030413_Forum_A_data/i3/ep3",
+   "frames": 44378,
+   "subjects": {
+    "Song Pilgrim 03": 4,
+    "Song Pilgrim Maestro": 3,
+    "Song Reed": 5,
+    "Song Automaton Tiny": 9,
+    "Song Pilgrim 01": 1,
+    "Pilgrim 03 Song": 5,
+    "Song Handmaiden": 3,
+    "Song Administrator": 4,
+    "Song Heavy Sentry": 3
+   },
+   "instances": {
+    "Song Heavy Sentry": 383,
+    "Song Handmaiden": 100,
+    "Song Administrator": 114,
+    "Song Pilgrim Maestro": 164,
+    "Song Automaton Tiny": 247,
+    "Song Reed": 135,
+    "Song Pilgrim 01": 27,
+    "Song Pilgrim 03": 71,
+    "Pilgrim 03 Song": 249
+   },
+   "fold": 1
+  },
+  {
+   "id": "20261003_030413_Forum_A_data/i3/ep4",
+   "frames": 46594,
+   "subjects": {
+    "Song Pilgrim 03": 4,
+    "Song Pilgrim Maestro": 3,
+    "Song Reed": 5,
+    "Song Automaton Tiny": 9,
+    "Song Pilgrim 01": 1,
+    "Pilgrim 03 Song": 5,
+    "Song Handmaiden": 3,
+    "Song Administrator": 4,
+    "Song Heavy Sentry": 3
+   },
+   "instances": {
+    "Song Heavy Sentry": 407,
+    "Song Handmaiden": 110,
+    "Song Administrator": 129,
+    "Song Pilgrim Maestro": 172,
+    "Song Automaton Tiny": 243,
+    "Song Reed": 173,
+    "Song Pilgrim 01": 15,
+    "Song Pilgrim 03": 90,
+    "Pilgrim 03 Song": 165
+   },
+   "fold": 0
+  },
+  {
+   "id": "20261003_030413_Forum_A_data/i3/ep5",
+   "frames": 52419,
+   "subjects": {
+    "Song Pilgrim 03": 4,
+    "Song Pilgrim Maestro": 3,
+    "Song Reed": 5,
+    "Song Automaton Tiny": 9,
+    "Song Pilgrim 01": 1,
+    "Pilgrim 03 Song": 5,
+    "Song Handmaiden": 3,
+    "Song Administrator": 4,
+    "Song Heavy Sentry": 3
+   },
+   "instances": {
+    "Song Heavy Sentry": 323,
+    "Song Handmaiden": 112,
+    "Song Administrator": 138,
+    "Song Pilgrim Maestro": 284,
+    "Song Automaton Tiny": 420,
+    "Song Reed": 172,
+    "Song Pilgrim 01": 29,
+    "Song Pilgrim 03": 73,
+    "Pilgrim 03 Song": 212
+   },
+   "fold": 1
+  },
+  {
+   "id": "20261003_030413_Forum_A_data/i3/ep6",
+   "frames": 48855,
+   "subjects": {
+    "Song Pilgrim 03": 4,
+    "Song Pilgrim Maestro": 3,
+    "Song Reed": 5,
+    "Song Automaton Tiny": 9,
+    "Song Pilgrim 01": 1,
+    "Pilgrim 03 Song": 5,
+    "Song Handmaiden": 3,
+    "Song Administrator": 4,
+    "Song Heavy Sentry": 3
+   },
+   "instances": {
+    "Song Heavy Sentry": 416,
+    "Song Handmaiden": 56,
+    "Song Administrator": 132,
+    "Song Pilgrim Maestro": 208,
+    "Song Automaton Tiny": 303,
+    "Song Reed": 146,
+    "Song Pilgrim 01": 20,
+    "Song Pilgrim 03": 45,
+    "Pilgrim 03 Song": 215
+   },
+   "fold": 0
+  },
+  {
+   "id": "20261003_030413_Forum_A_data/i3/ep7",
+   "frames": 52773,
+   "subjects": {
+    "Song Pilgrim 03": 4,
+    "Song Pilgrim Maestro": 3,
+    "Song Reed": 5,
+    "Song Automaton Tiny": 9,
+    "Song Pilgrim 01": 1,
+    "Pilgrim 03 Song": 5,
+    "Song Handmaiden": 3,
+    "Song Administrator": 4,
+    "Song Heavy Sentry": 3
+   },
+   "instances": {
+    "Song Heavy Sentry": 315,
+    "Song Handmaiden": 96,
+    "Song Administrator": 143,
+    "Song Pilgrim Maestro": 264,
+    "Song Automaton Tiny": 358,
+    "Song Reed": 187,
+    "Song Pilgrim 01": 13,
+    "Song Pilgrim 03": 88,
+    "Pilgrim 03 Song": 272
+   },
+   "fold": 1
+  },
+  {
+   "id": "20261003_030413_Forum_A_data/i3/ep8",
+   "frames": 55045,
+   "subjects": {
+    "Song Pilgrim 03": 4,
+    "Song Pilgrim Maestro": 3,
+    "Song Reed": 5,
+    "Song Automaton Tiny": 9,
+    "Song Pilgrim 01": 1,
+    "Pilgrim 03 Song": 5,
+    "Song Handmaiden": 3,
+    "Song Administrator": 4,
+    "Song Heavy Sentry": 3
+   },
+   "instances": {
+    "Song Heavy Sentry": 302,
+    "Song Handmaiden": 69,
+    "Song Administrator": 163,
+    "Song Pilgrim Maestro": 270,
+    "Song Automaton Tiny": 399,
+    "Song Reed": 192,
+    "Song Pilgrim 01": 43,
+    "Song Pilgrim 03": 70,
+    "Pilgrim 03 Song": 283
+   },
+   "fold": 0
+  },
+  {
+   "id": "20261003_030413_Forum_A_data/i3/ep9",
+   "frames": 50034,
+   "subjects": {
+    "Song Pilgrim 03": 4,
+    "Song Pilgrim Maestro": 3,
+    "Song Reed": 5,
+    "Song Automaton Tiny": 9,
+    "Song Pilgrim 01": 1,
+    "Pilgrim 03 Song": 5,
+    "Song Handmaiden": 3,
+    "Song Administrator": 4,
+    "Song Heavy Sentry": 3
+   },
+   "instances": {
+    "Song Heavy Sentry": 481,
+    "Song Handmaiden": 131,
+    "Song Administrator": 97,
+    "Song Pilgrim Maestro": 210,
+    "Song Automaton Tiny": 303,
+    "Song Reed": 181,
+    "Song Pilgrim 01": 24,
+    "Song Pilgrim 03": 80,
+    "Pilgrim 03 Song": 223
+   },
+   "fold": 1
+  },
+  {
+   "id": "20261003_030413_Forum_A_data/i3/ep10",
+   "frames": 51263,
+   "subjects": {
+    "Song Pilgrim 03": 4,
+    "Song Pilgrim Maestro": 3,
+    "Song Reed": 5,
+    "Song Automaton Tiny": 9,
+    "Song Pilgrim 01": 1,
+    "Pilgrim 03 Song": 5,
+    "Song Handmaiden": 3,
+    "Song Administrator": 4,
+    "Song Heavy Sentry": 3
+   },
+   "instances": {
+    "Song Heavy Sentry": 347,
+    "Song Handmaiden": 83,
+    "Song Administrator": 100,
+    "Song Pilgrim Maestro": 276,
+    "Song Automaton Tiny": 395,
+    "Song Reed": 150,
+    "Song Pilgrim 01": 26,
+    "Song Pilgrim 03": 68,
+    "Pilgrim 03 Song": 218
+   },
+   "fold": 0
+  },
+  {
+   "id": "20261003_030413_Forum_A_data/i3/ep11",
+   "frames": 53787,
+   "subjects": {
+    "Song Pilgrim 03": 4,
+    "Song Pilgrim Maestro": 3,
+    "Song Reed": 5,
+    "Song Automaton Tiny": 9,
+    "Song Pilgrim 01": 1,
+    "Pilgrim 03 Song": 5,
+    "Song Handmaiden": 3,
+    "Song Administrator": 4,
+    "Song Heavy Sentry": 3
+   },
+   "instances": {
+    "Song Heavy Sentry": 385,
+    "Song Handmaiden": 72,
+    "Song Administrator": 181,
+    "Song Pilgrim Maestro": 262,
+    "Song Automaton Tiny": 390,
+    "Song Reed": 116,
+    "Song Pilgrim 01": 19,
+    "Song Pilgrim 03": 82,
+    "Pilgrim 03 Song": 201
+   },
+   "fold": 1
+  },
+  {
+   "id": "20261003_030413_Forum_A_data/i3/ep12",
+   "frames": 48807,
+   "subjects": {
+    "Song Pilgrim 03": 4,
+    "Song Pilgrim Maestro": 3,
+    "Song Reed": 5,
+    "Song Automaton Tiny": 9,
+    "Song Pilgrim 01": 1,
+    "Pilgrim 03 Song": 5,
+    "Song Handmaiden": 3,
+    "Song Administrator": 4,
+    "Song Heavy Sentry": 3
+   },
+   "instances": {
+    "Song Heavy Sentry": 315,
+    "Song Handmaiden": 128,
+    "Song Administrator": 117,
+    "Song Pilgrim Maestro": 222,
+    "Song Automaton Tiny": 327,
+    "Song Reed": 143,
+    "Song Pilgrim 01": 26,
+    "Song Pilgrim 03": 73,
+    "Pilgrim 03 Song": 225
+   },
+   "fold": 0
+  },
+  {
+   "id": "20261003_030413_Forum_A_data/i3/ep13",
+   "frames": 54955,
+   "subjects": {
+    "Song Pilgrim 03": 4,
+    "Song Pilgrim Maestro": 3,
+    "Song Reed": 5,
+    "Song Automaton Tiny": 9,
+    "Song Pilgrim 01": 1,
+    "Pilgrim 03 Song": 5,
+    "Song Handmaiden": 3,
+    "Song Administrator": 4,
+    "Song Heavy Sentry": 3
+   },
+   "instances": {
+    "Song Heavy Sentry": 341,
+    "Song Handmaiden": 101,
+    "Song Administrator": 123,
+    "Song Pilgrim Maestro": 352,
+    "Song Automaton Tiny": 497,
+    "Song Reed": 117,
+    "Song Pilgrim 01": 13,
+    "Song Pilgrim 03": 46,
+    "Pilgrim 03 Song": 286
+   },
+   "fold": 1
+  },
+  {
+   "id": "20261003_030413_Forum_A_data/i3/ep14",
+   "frames": 48074,
+   "subjects": {
+    "Song Pilgrim 03": 4,
+    "Song Pilgrim Maestro": 3,
+    "Song Reed": 5,
+    "Song Automaton Tiny": 9,
+    "Song Pilgrim 01": 1,
+    "Pilgrim 03 Song": 5,
+    "Song Handmaiden": 3,
+    "Song Administrator": 4,
+    "Song Heavy Sentry": 3
+   },
+   "instances": {
+    "Song Heavy Sentry": 399,
+    "Song Handmaiden": 107,
+    "Song Administrator": 130,
+    "Song Pilgrim Maestro": 180,
+    "Song Automaton Tiny": 280,
+    "Song Reed": 175,
+    "Song Pilgrim 01": 18,
+    "Song Pilgrim 03": 58,
+    "Pilgrim 03 Song": 184
+   },
+   "fold": 0
+  },
+  {
+   "id": "20261003_030413_Forum_A_data/i3/ep15",
+   "frames": 51052,
+   "subjects": {
+    "Song Pilgrim 03": 4,
+    "Song Pilgrim Maestro": 3,
+    "Song Reed": 5,
+    "Song Automaton Tiny": 9,
+    "Song Pilgrim 01": 1,
+    "Pilgrim 03 Song": 5,
+    "Song Handmaiden": 3,
+    "Song Administrator": 4,
+    "Song Heavy Sentry": 3
+   },
+   "instances": {
+    "Song Heavy Sentry": 387,
+    "Song Handmaiden": 112,
+    "Song Administrator": 141,
+    "Song Pilgrim Maestro": 260,
+    "Song Automaton Tiny": 363,
+    "Song Reed": 105,
+    "Song Pilgrim 01": 28,
+    "Song Pilgrim 03": 52,
+    "Pilgrim 03 Song": 261
+   },
+   "fold": 1
+  },
+  {
+   "id": "20261003_030413_Forum_A_data/i3/ep16",
+   "frames": 51755,
+   "subjects": {
+    "Song Pilgrim 03": 4,
+    "Song Pilgrim Maestro": 3,
+    "Song Reed": 5,
+    "Song Automaton Tiny": 9,
+    "Song Pilgrim 01": 1,
+    "Pilgrim 03 Song": 5,
+    "Song Handmaiden": 3,
+    "Song Administrator": 4,
+    "Song Heavy Sentry": 3
+   },
+   "instances": {
+    "Song Heavy Sentry": 382,
+    "Song Handmaiden": 108,
+    "Song Administrator": 140,
+    "Song Pilgrim Maestro": 256,
+    "Song Automaton Tiny": 374,
+    "Song Reed": 130,
+    "Song Pilgrim 01": 20,
+    "Song Pilgrim 03": 74,
+    "Pilgrim 03 Song": 239
+   },
+   "fold": 0
+  },
+  {
+   "id": "20261003_030413_Forum_A_data/i3/ep17",
+   "frames": 58826,
+   "subjects": {
+    "Song Pilgrim 03": 4,
+    "Song Pilgrim Maestro": 3,
+    "Song Reed": 5,
+    "Song Automaton Tiny": 9,
+    "Song Pilgrim 01": 1,
+    "Pilgrim 03 Song": 5,
+    "Song Handmaiden": 3,
+    "Song Administrator": 4,
+    "Song Heavy Sentry": 3
+   },
+   "instances": {
+    "Song Heavy Sentry": 387,
+    "Song Handmaiden": 83,
+    "Song Administrator": 119,
+    "Song Pilgrim Maestro": 334,
+    "Song Automaton Tiny": 470,
+    "Song Reed": 133,
+    "Song Pilgrim 01": 21,
+    "Song Pilgrim 03": 67,
+    "Pilgrim 03 Song": 165
+   },
+   "fold": 1
+  },
+  {
+   "id": "20261003_030413_Forum_A_data/i3/ep18",
+   "frames": 52125,
+   "subjects": {
+    "Song Pilgrim 03": 4,
+    "Song Pilgrim Maestro": 3,
+    "Song Reed": 5,
+    "Song Automaton Tiny": 9,
+    "Song Pilgrim 01": 1,
+    "Pilgrim 03 Song": 5,
+    "Song Handmaiden": 3,
+    "Song Administrator": 4,
+    "Song Heavy Sentry": 3
+   },
+   "instances": {
+    "Song Heavy Sentry": 283,
+    "Song Handmaiden": 67,
+    "Song Administrator": 165,
+    "Song Pilgrim Maestro": 258,
+    "Song Automaton Tiny": 376,
+    "Song Reed": 180,
+    "Song Pilgrim 01": 19,
+    "Song Pilgrim 03": 70,
+    "Pilgrim 03 Song": 244
+   },
+   "fold": 0
+  },
+  {
+   "id": "20261003_074533_Forum_A_data/i2/ep0",
+   "frames": 54859,
+   "subjects": {
+    "Song Pilgrim 03": 4,
+    "Song Pilgrim Maestro": 3,
+    "Song Reed": 5,
+    "Song Automaton Tiny": 9,
+    "Song Pilgrim 01": 1,
+    "Pilgrim 03 Song": 5,
+    "Song Handmaiden": 3,
+    "Song Administrator": 4,
+    "Song Heavy Sentry": 3
+   },
+   "instances": {
+    "Song Heavy Sentry": 344,
+    "Song Handmaiden": 120,
+    "Song Administrator": 147,
+    "Song Pilgrim Maestro": 214,
+    "Song Automaton Tiny": 305,
+    "Song Reed": 159,
+    "Song Pilgrim 01": 31,
+    "Song Pilgrim 03": 60,
+    "Pilgrim 03 Song": 253
+   },
+   "fold": 1
+  },
+  {
+   "id": "20261003_074533_Forum_A_data/i2/ep1",
+   "frames": 53121,
+   "subjects": {
+    "Song Pilgrim 03": 4,
+    "Song Pilgrim Maestro": 3,
+    "Song Reed": 5,
+    "Song Automaton Tiny": 9,
+    "Song Pilgrim 01": 1,
+    "Pilgrim 03 Song": 5,
+    "Song Handmaiden": 3,
+    "Song Administrator": 4,
+    "Song Heavy Sentry": 3
+   },
+   "instances": {
+    "Song Heavy Sentry": 347,
+    "Song Handmaiden": 120,
+    "Song Administrator": 163,
+    "Song Pilgrim Maestro": 234,
+    "Song Automaton Tiny": 340,
+    "Song Reed": 153,
+    "Song Pilgrim 01": 36,
+    "Song Pilgrim 03": 68,
+    "Pilgrim 03 Song": 253
+   },
+   "fold": 0
+  },
+  {
+   "id": "20261003_074533_Forum_A_data/i2/ep2",
+   "frames": 43801,
+   "subjects": {
+    "Song Pilgrim 03": 4,
+    "Song Pilgrim Maestro": 3,
+    "Song Reed": 5,
+    "Song Automaton Tiny": 9,
+    "Song Pilgrim 01": 1,
+    "Pilgrim 03 Song": 5,
+    "Song Handmaiden": 3,
+    "Song Administrator": 4,
+    "Song Heavy Sentry": 3
+   },
+   "instances": {
+    "Song Heavy Sentry": 327,
+    "Song Handmaiden": 95,
+    "Song Administrator": 101,
+    "Song Pilgrim Maestro": 156,
+    "Song Automaton Tiny": 227,
+    "Song Reed": 142,
+    "Song Pilgrim 01": 35,
+    "Song Pilgrim 03": 72,
+    "Pilgrim 03 Song": 271
+   },
+   "fold": 1
+  },
+  {
+   "id": "20261003_074533_Forum_A_data/i2/ep3",
+   "frames": 48846,
+   "subjects": {
+    "Song Pilgrim 03": 4,
+    "Song Pilgrim Maestro": 3,
+    "Song Reed": 5,
+    "Song Automaton Tiny": 9,
+    "Song Pilgrim 01": 1,
+    "Pilgrim 03 Song": 5,
+    "Song Handmaiden": 3,
+    "Song Administrator": 4,
+    "Song Heavy Sentry": 3
+   },
+   "instances": {
+    "Song Heavy Sentry": 328,
+    "Song Handmaiden": 126,
+    "Song Administrator": 123,
+    "Song Pilgrim Maestro": 276,
+    "Song Automaton Tiny": 384,
+    "Song Reed": 134,
+    "Song Pilgrim 01": 22,
+    "Song Pilgrim 03": 46,
+    "Pilgrim 03 Song": 246
+   },
+   "fold": 0
+  },
+  {
+   "id": "20261003_074533_Forum_A_data/i2/ep4",
+   "frames": 48550,
+   "subjects": {
+    "Song Pilgrim 03": 4,
+    "Song Pilgrim Maestro": 3,
+    "Song Reed": 5,
+    "Song Automaton Tiny": 9,
+    "Song Pilgrim 01": 1,
+    "Pilgrim 03 Song": 5,
+    "Song Handmaiden": 3,
+    "Song Administrator": 4,
+    "Song Heavy Sentry": 3
+   },
+   "instances": {
+    "Song Heavy Sentry": 471,
+    "Song Handmaiden": 149,
+    "Song Administrator": 156,
+    "Song Pilgrim Maestro": 202,
+    "Song Automaton Tiny": 299,
+    "Song Reed": 137,
+    "Song Pilgrim 01": 10,
+    "Song Pilgrim 03": 74,
+    "Pilgrim 03 Song": 168
+   },
+   "fold": 1
+  },
+  {
+   "id": "20261003_074533_Forum_A_data/i2/ep5",
+   "frames": 57323,
+   "subjects": {
+    "Song Pilgrim 03": 4,
+    "Song Pilgrim Maestro": 3,
+    "Song Reed": 5,
+    "Song Automaton Tiny": 9,
+    "Song Pilgrim 01": 1,
+    "Pilgrim 03 Song": 5,
+    "Song Handmaiden": 3,
+    "Song Administrator": 4,
+    "Song Heavy Sentry": 3
+   },
+   "instances": {
+    "Song Heavy Sentry": 389,
+    "Song Handmaiden": 136,
+    "Song Administrator": 138,
+    "Song Pilgrim Maestro": 316,
+    "Song Automaton Tiny": 447,
+    "Song Reed": 149,
+    "Song Pilgrim 01": 39,
+    "Song Pilgrim 03": 86,
+    "Pilgrim 03 Song": 219
+   },
+   "fold": 0
+  },
+  {
+   "id": "20261003_074533_Forum_A_data/i2/ep6",
+   "frames": 55878,
+   "subjects": {
+    "Song Pilgrim 03": 4,
+    "Song Pilgrim Maestro": 3,
+    "Song Reed": 5,
+    "Song Automaton Tiny": 9,
+    "Song Pilgrim 01": 1,
+    "Pilgrim 03 Song": 5,
+    "Song Handmaiden": 3,
+    "Song Administrator": 4,
+    "Song Heavy Sentry": 3
+   },
+   "instances": {
+    "Song Heavy Sentry": 385,
+    "Song Handmaiden": 62,
+    "Song Administrator": 88,
+    "Song Pilgrim Maestro": 282,
+    "Song Automaton Tiny": 421,
+    "Song Reed": 152,
+    "Song Pilgrim 01": 23,
+    "Song Pilgrim 03": 80,
+    "Pilgrim 03 Song": 257
+   },
+   "fold": 1
+  },
+  {
+   "id": "20261003_074533_Forum_A_data/i2/ep7",
+   "frames": 48840,
+   "subjects": {
+    "Song Pilgrim 03": 4,
+    "Song Pilgrim Maestro": 3,
+    "Song Reed": 5,
+    "Song Automaton Tiny": 9,
+    "Song Pilgrim 01": 1,
+    "Pilgrim 03 Song": 5,
+    "Song Handmaiden": 3,
+    "Song Administrator": 4,
+    "Song Heavy Sentry": 3
+   },
+   "instances": {
+    "Song Heavy Sentry": 348,
+    "Song Handmaiden": 70,
+    "Song Administrator": 118,
+    "Song Pilgrim Maestro": 270,
+    "Song Automaton Tiny": 397,
+    "Song Reed": 125,
+    "Song Pilgrim 01": 33,
+    "Song Pilgrim 03": 67,
+    "Pilgrim 03 Song": 260
+   },
+   "fold": 0
+  },
+  {
+   "id": "20261003_074533_Forum_A_data/i2/ep8",
+   "frames": 65642,
+   "subjects": {
+    "Song Pilgrim 03": 4,
+    "Song Pilgrim Maestro": 3,
+    "Song Reed": 5,
+    "Song Automaton Tiny": 9,
+    "Song Pilgrim 01": 1,
+    "Pilgrim 03 Song": 5,
+    "Song Handmaiden": 3,
+    "Song Administrator": 4,
+    "Song Heavy Sentry": 3
+   },
+   "instances": {
+    "Song Heavy Sentry": 429,
+    "Song Handmaiden": 94,
+    "Song Administrator": 131,
+    "Song Pilgrim Maestro": 344,
+    "Song Automaton Tiny": 499,
+    "Song Reed": 125,
+    "Song Pilgrim 01": 19,
+    "Song Pilgrim 03": 92,
+    "Pilgrim 03 Song": 267
+   },
+   "fold": 1
+  },
+  {
+   "id": "20261003_074533_Forum_A_data/i2/ep9",
+   "frames": 47119,
+   "subjects": {
+    "Song Pilgrim 03": 4,
+    "Song Pilgrim Maestro": 3,
+    "Song Reed": 5,
+    "Song Automaton Tiny": 9,
+    "Song Pilgrim 01": 1,
+    "Pilgrim 03 Song": 5,
+    "Song Handmaiden": 3,
+    "Song Administrator": 4,
+    "Song Heavy Sentry": 3
+   },
+   "instances": {
+    "Song Heavy Sentry": 392,
+    "Song Handmaiden": 113,
+    "Song Administrator": 101,
+    "Song Pilgrim Maestro": 258,
+    "Song Automaton Tiny": 374,
+    "Song Reed": 103,
+    "Song Pilgrim 01": 16,
+    "Song Pilgrim 03": 59,
+    "Pilgrim 03 Song": 147
+   },
+   "fold": 0
+  },
+  {
+   "id": "20261003_074533_Forum_A_data/i2/ep10",
+   "frames": 51478,
+   "subjects": {
+    "Song Pilgrim 03": 4,
+    "Song Pilgrim Maestro": 3,
+    "Song Reed": 5,
+    "Song Automaton Tiny": 9,
+    "Song Pilgrim 01": 1,
+    "Pilgrim 03 Song": 5,
+    "Song Handmaiden": 3,
+    "Song Administrator": 4,
+    "Song Heavy Sentry": 3
+   },
+   "instances": {
+    "Song Heavy Sentry": 309,
+    "Song Handmaiden": 79,
+    "Song Administrator": 97,
+    "Song Pilgrim Maestro": 206,
+    "Song Automaton Tiny": 300,
+    "Song Reed": 170,
+    "Song Pilgrim 01": 29,
+    "Song Pilgrim 03": 78,
+    "Pilgrim 03 Song": 262
+   },
+   "fold": 1
+  },
+  {
+   "id": "20261003_074533_Forum_A_data/i2/ep11",
+   "frames": 56082,
+   "subjects": {
+    "Song Pilgrim 03": 4,
+    "Song Pilgrim Maestro": 3,
+    "Song Reed": 5,
+    "Song Automaton Tiny": 9,
+    "Song Pilgrim 01": 1,
+    "Pilgrim 03 Song": 5,
+    "Song Handmaiden": 3,
+    "Song Administrator": 4,
+    "Song Heavy Sentry": 3
+   },
+   "instances": {
+    "Song Heavy Sentry": 447,
+    "Song Handmaiden": 67,
+    "Song Administrator": 136,
+    "Song Pilgrim Maestro": 244,
+    "Song Automaton Tiny": 349,
+    "Song Reed": 178,
+    "Song Pilgrim 01": 18,
+    "Song Pilgrim 03": 87,
+    "Pilgrim 03 Song": 227
+   },
+   "fold": 0
+  },
+  {
+   "id": "20261003_074533_Forum_A_data/i2/ep12",
+   "frames": 54038,
+   "subjects": {
+    "Song Pilgrim 03": 4,
+    "Song Pilgrim Maestro": 3,
+    "Song Reed": 5,
+    "Song Automaton Tiny": 9,
+    "Song Pilgrim 01": 1,
+    "Pilgrim 03 Song": 5,
+    "Song Handmaiden": 3,
+    "Song Administrator": 4,
+    "Song Heavy Sentry": 3
+   },
+   "instances": {
+    "Song Heavy Sentry": 396,
+    "Song Handmaiden": 85,
+    "Song Administrator": 119,
+    "Song Pilgrim Maestro": 292,
+    "Song Automaton Tiny": 421,
+    "Song Reed": 144,
+    "Song Pilgrim 01": 18,
+    "Song Pilgrim 03": 35,
+    "Pilgrim 03 Song": 275
+   },
+   "fold": 1
+  },
+  {
+   "id": "20261003_074533_Forum_A_data/i2/ep13",
+   "frames": 46759,
+   "subjects": {
+    "Song Pilgrim 03": 4,
+    "Song Pilgrim Maestro": 3,
+    "Song Reed": 5,
+    "Song Automaton Tiny": 9,
+    "Song Pilgrim 01": 1,
+    "Pilgrim 03 Song": 5,
+    "Song Handmaiden": 3,
+    "Song Administrator": 4,
+    "Song Heavy Sentry": 3
+   },
+   "instances": {
+    "Song Heavy Sentry": 249,
+    "Song Handmaiden": 109,
+    "Song Administrator": 86,
+    "Song Pilgrim Maestro": 206,
+    "Song Automaton Tiny": 316,
+    "Song Reed": 165,
+    "Song Pilgrim 01": 24,
+    "Song Pilgrim 03": 76,
+    "Pilgrim 03 Song": 270
+   },
+   "fold": 0
+  },
+  {
+   "id": "20261003_074533_Forum_A_data/i2/ep14",
+   "frames": 50189,
+   "subjects": {
+    "Song Pilgrim 03": 4,
+    "Song Pilgrim Maestro": 3,
+    "Song Reed": 5,
+    "Song Automaton Tiny": 9,
+    "Song Pilgrim 01": 1,
+    "Pilgrim 03 Song": 5,
+    "Song Handmaiden": 3,
+    "Song Administrator": 4,
+    "Song Heavy Sentry": 3
+   },
+   "instances": {
+    "Song Heavy Sentry": 283,
+    "Song Handmaiden": 66,
+    "Song Administrator": 114,
+    "Song Pilgrim Maestro": 342,
+    "Song Automaton Tiny": 495,
+    "Song Reed": 157,
+    "Song Pilgrim 01": 33,
+    "Song Pilgrim 03": 79,
+    "Pilgrim 03 Song": 167
+   },
+   "fold": 1
+  },
+  {
+   "id": "20261003_074533_Forum_A_data/i2/ep15",
+   "frames": 59706,
+   "subjects": {
+    "Song Pilgrim 03": 4,
+    "Song Pilgrim Maestro": 3,
+    "Song Reed": 5,
+    "Song Automaton Tiny": 9,
+    "Song Pilgrim 01": 1,
+    "Pilgrim 03 Song": 5,
+    "Song Handmaiden": 3,
+    "Song Administrator": 4,
+    "Song Heavy Sentry": 3
+   },
+   "instances": {
+    "Song Heavy Sentry": 379,
+    "Song Handmaiden": 73,
+    "Song Administrator": 135,
+    "Song Pilgrim Maestro": 314,
+    "Song Automaton Tiny": 453,
+    "Song Reed": 162,
+    "Song Pilgrim 01": 27,
+    "Song Pilgrim 03": 64,
+    "Pilgrim 03 Song": 216
+   },
+   "fold": 0
+  },
+  {
+   "id": "20261003_074533_Forum_A_data/i2/ep16",
+   "frames": 49621,
+   "subjects": {
+    "Song Pilgrim 03": 4,
+    "Song Pilgrim Maestro": 3,
+    "Song Reed": 5,
+    "Song Automaton Tiny": 9,
+    "Song Pilgrim 01": 1,
+    "Pilgrim 03 Song": 5,
+    "Song Handmaiden": 3,
+    "Song Administrator": 4,
+    "Song Heavy Sentry": 3
+   },
+   "instances": {
+    "Song Heavy Sentry": 329,
+    "Song Handmaiden": 161,
+    "Song Administrator": 161,
+    "Song Pilgrim Maestro": 180,
+    "Song Automaton Tiny": 256,
+    "Song Reed": 177,
+    "Song Pilgrim 01": 18,
+    "Song Pilgrim 03": 85,
+    "Pilgrim 03 Song": 214
+   },
+   "fold": 1
+  },
+  {
+   "id": "20261003_074533_Forum_A_data/i2/ep17",
+   "frames": 45301,
+   "subjects": {
+    "Song Pilgrim 03": 4,
+    "Song Pilgrim Maestro": 3,
+    "Song Reed": 5,
+    "Song Automaton Tiny": 9,
+    "Song Pilgrim 01": 1,
+    "Pilgrim 03 Song": 5,
+    "Song Handmaiden": 3,
+    "Song Administrator": 4,
+    "Song Heavy Sentry": 3
+   },
+   "instances": {
+    "Song Heavy Sentry": 283,
+    "Song Handmaiden": 81,
+    "Song Administrator": 147,
+    "Song Pilgrim Maestro": 202,
+    "Song Automaton Tiny": 283,
+    "Song Reed": 136,
+    "Song Pilgrim 01": 25,
+    "Song Pilgrim 03": 41,
+    "Pilgrim 03 Song": 221
+   },
+   "fold": 0
+  },
+  {
+   "id": "20261003_074533_Forum_A_data/i2/ep18",
+   "frames": 50825,
+   "subjects": {
+    "Song Pilgrim 03": 4,
+    "Song Pilgrim Maestro": 3,
+    "Song Reed": 5,
+    "Song Automaton Tiny": 9,
+    "Song Pilgrim 01": 1,
+    "Pilgrim 03 Song": 5,
+    "Song Handmaiden": 3,
+    "Song Administrator": 4,
+    "Song Heavy Sentry": 3
+   },
+   "instances": {
+    "Song Heavy Sentry": 420,
+    "Song Handmaiden": 103,
+    "Song Administrator": 109,
+    "Song Pilgrim Maestro": 236,
+    "Song Automaton Tiny": 333,
+    "Song Reed": 130,
+    "Song Pilgrim 01": 28,
+    "Song Pilgrim 03": 90,
+    "Pilgrim 03 Song": 238
+   },
+   "fold": 1
+  },
+  {
+   "id": "20261003_074533_Forum_A_data/i2/ep19",
+   "frames": 55140,
+   "subjects": {
+    "Song Pilgrim 03": 4,
+    "Song Pilgrim Maestro": 3,
+    "Song Reed": 5,
+    "Song Automaton Tiny": 9,
+    "Song Pilgrim 01": 1,
+    "Pilgrim 03 Song": 5,
+    "Song Handmaiden": 3,
+    "Song Administrator": 4,
+    "Song Heavy Sentry": 3
+   },
+   "instances": {
+    "Song Heavy Sentry": 342,
+    "Song Handmaiden": 165,
+    "Song Administrator": 138,
+    "Song Pilgrim Maestro": 240,
+    "Song Automaton Tiny": 326,
+    "Song Reed": 140,
+    "Song Pilgrim 01": 16,
+    "Song Pilgrim 03": 72,
+    "Pilgrim 03 Song": 246
+   },
+   "fold": 0
+  },
+  {
+   "id": "20261003_074533_Forum_A_data/i2/ep20",
+   "frames": 52639,
+   "subjects": {
+    "Song Pilgrim 03": 4,
+    "Song Pilgrim Maestro": 3,
+    "Song Reed": 5,
+    "Song Automaton Tiny": 9,
+    "Song Pilgrim 01": 1,
+    "Pilgrim 03 Song": 5,
+    "Song Handmaiden": 3,
+    "Song Administrator": 4,
+    "Song Heavy Sentry": 3
+   },
+   "instances": {
+    "Song Heavy Sentry": 346,
+    "Song Handmaiden": 97,
+    "Song Administrator": 105,
+    "Song Pilgrim Maestro": 270,
+    "Song Automaton Tiny": 399,
+    "Song Reed": 186,
+    "Song Pilgrim 01": 26,
+    "Song Pilgrim 03": 50,
+    "Pilgrim 03 Song": 203
+   },
+   "fold": 1
+  },
+  {
+   "id": "20261003_074533_Forum_A_data/i2/ep21",
+   "frames": 51619,
+   "subjects": {
+    "Song Pilgrim 03": 4,
+    "Song Pilgrim Maestro": 3,
+    "Song Reed": 5,
+    "Song Automaton Tiny": 9,
+    "Song Pilgrim 01": 1,
+    "Pilgrim 03 Song": 5,
+    "Song Handmaiden": 3,
+    "Song Administrator": 4,
+    "Song Heavy Sentry": 3
+   },
+   "instances": {
+    "Song Heavy Sentry": 369,
+    "Song Handmaiden": 90,
+    "Song Administrator": 135,
+    "Song Pilgrim Maestro": 232,
+    "Song Automaton Tiny": 352,
+    "Song Reed": 146,
+    "Song Pilgrim 01": 23,
+    "Song Pilgrim 03": 59,
+    "Pilgrim 03 Song": 138
+   },
+   "fold": 0
+  },
+  {
+   "id": "20261003_074533_Forum_A_data/i2/ep22",
+   "frames": 58356,
+   "subjects": {
+    "Song Pilgrim 03": 4,
+    "Song Pilgrim Maestro": 3,
+    "Song Reed": 5,
+    "Song Automaton Tiny": 9,
+    "Song Pilgrim 01": 1,
+    "Pilgrim 03 Song": 5,
+    "Song Handmaiden": 3,
+    "Song Administrator": 4,
+    "Song Heavy Sentry": 3
+   },
+   "instances": {
+    "Song Heavy Sentry": 379,
+    "Song Handmaiden": 138,
+    "Song Administrator": 98,
+    "Song Pilgrim Maestro": 268,
+    "Song Automaton Tiny": 393,
+    "Song Reed": 147,
+    "Song Pilgrim 01": 19,
+    "Song Pilgrim 03": 88,
+    "Pilgrim 03 Song": 262
+   },
+   "fold": 1
+  },
+  {
+   "id": "20261003_074533_Forum_A_data/i2/ep23",
+   "frames": 51691,
+   "subjects": {
+    "Song Pilgrim 03": 4,
+    "Song Pilgrim Maestro": 3,
+    "Song Reed": 5,
+    "Song Automaton Tiny": 9,
+    "Song Pilgrim 01": 1,
+    "Pilgrim 03 Song": 5,
+    "Song Handmaiden": 3,
+    "Song Administrator": 4,
+    "Song Heavy Sentry": 3
+   },
+   "instances": {
+    "Song Heavy Sentry": 446,
+    "Song Handmaiden": 79,
+    "Song Administrator": 155,
+    "Song Pilgrim Maestro": 192,
+    "Song Automaton Tiny": 284,
+    "Song Reed": 129,
+    "Song Pilgrim 01": 28,
+    "Song Pilgrim 03": 85,
+    "Pilgrim 03 Song": 230
+   },
+   "fold": 0
+  },
+  {
+   "id": "20261003_074533_Forum_A_data/i2/ep24",
+   "frames": 51455,
+   "subjects": {
+    "Song Pilgrim 03": 4,
+    "Song Pilgrim Maestro": 3,
+    "Song Reed": 5,
+    "Song Automaton Tiny": 9,
+    "Song Pilgrim 01": 1,
+    "Pilgrim 03 Song": 5,
+    "Song Handmaiden": 3,
+    "Song Administrator": 4,
+    "Song Heavy Sentry": 3
+   },
+   "instances": {
+    "Song Heavy Sentry": 317,
+    "Song Handmaiden": 77,
+    "Song Administrator": 148,
+    "Song Pilgrim Maestro": 252,
+    "Song Automaton Tiny": 366,
+    "Song Reed": 184,
+    "Song Pilgrim 01": 21,
+    "Song Pilgrim 03": 78,
+    "Pilgrim 03 Song": 249
+   },
+   "fold": 1
+  },
+  {
+   "id": "20261003_074719_Forum_A_data/i3/ep0",
+   "frames": 51823,
+   "subjects": {
+    "Song Pilgrim 03": 4,
+    "Song Pilgrim Maestro": 3,
+    "Song Reed": 5,
+    "Song Automaton Tiny": 9,
+    "Song Pilgrim 01": 1,
+    "Pilgrim 03 Song": 5,
+    "Song Handmaiden": 3,
+    "Song Administrator": 4,
+    "Song Heavy Sentry": 3
+   },
+   "instances": {
+    "Song Heavy Sentry": 348,
+    "Song Handmaiden": 110,
+    "Song Administrator": 191,
+    "Song Pilgrim Maestro": 196,
+    "Song Automaton Tiny": 278,
+    "Song Reed": 185,
+    "Song Pilgrim 01": 32,
+    "Song Pilgrim 03": 101,
+    "Pilgrim 03 Song": 191
+   },
+   "fold": 0
+  },
+  {
+   "id": "20261003_074719_Forum_A_data/i3/ep1",
+   "frames": 50315,
+   "subjects": {
+    "Song Pilgrim 03": 4,
+    "Song Pilgrim Maestro": 3,
+    "Song Reed": 5,
+    "Song Automaton Tiny": 9,
+    "Song Pilgrim 01": 1,
+    "Pilgrim 03 Song": 5,
+    "Song Handmaiden": 3,
+    "Song Administrator": 4,
+    "Song Heavy Sentry": 3
+   },
+   "instances": {
+    "Song Heavy Sentry": 325,
+    "Song Handmaiden": 118,
+    "Song Administrator": 111,
+    "Song Pilgrim Maestro": 242,
+    "Song Automaton Tiny": 354,
+    "Song Reed": 104,
+    "Song Pilgrim 01": 13,
+    "Song Pilgrim 03": 76,
+    "Pilgrim 03 Song": 228
+   },
+   "fold": 1
+  },
+  {
+   "id": "20261003_074719_Forum_A_data/i3/ep2",
+   "frames": 50195,
+   "subjects": {
+    "Song Pilgrim 03": 4,
+    "Song Pilgrim Maestro": 3,
+    "Song Reed": 5,
+    "Song Automaton Tiny": 9,
+    "Song Pilgrim 01": 1,
+    "Pilgrim 03 Song": 5,
+    "Song Handmaiden": 3,
+    "Song Administrator": 4,
+    "Song Heavy Sentry": 3
+   },
+   "instances": {
+    "Song Heavy Sentry": 338,
+    "Song Handmaiden": 97,
+    "Song Administrator": 117,
+    "Song Pilgrim Maestro": 194,
+    "Song Automaton Tiny": 288,
+    "Song Reed": 163,
+    "Song Pilgrim 01": 26,
+    "Song Pilgrim 03": 76,
+    "Pilgrim 03 Song": 291
+   },
+   "fold": 0
+  },
+  {
+   "id": "20261003_074719_Forum_A_data/i3/ep3",
+   "frames": 54001,
+   "subjects": {
+    "Song Pilgrim 03": 4,
+    "Song Pilgrim Maestro": 3,
+    "Song Reed": 5,
+    "Song Automaton Tiny": 9,
+    "Song Pilgrim 01": 1,
+    "Pilgrim 03 Song": 5,
+    "Song Handmaiden": 3,
+    "Song Administrator": 4,
+    "Song Heavy Sentry": 3
+   },
+   "instances": {
+    "Song Heavy Sentry": 431,
+    "Song Handmaiden": 78,
+    "Song Administrator": 112,
+    "Song Pilgrim Maestro": 284,
+    "Song Automaton Tiny": 415,
+    "Song Reed": 139,
+    "Song Pilgrim 01": 23,
+    "Song Pilgrim 03": 75,
+    "Pilgrim 03 Song": 180
+   },
+   "fold": 1
+  },
+  {
+   "id": "20261003_074719_Forum_A_data/i3/ep4",
+   "frames": 51618,
+   "subjects": {
+    "Song Pilgrim 03": 4,
+    "Song Pilgrim Maestro": 3,
+    "Song Reed": 5,
+    "Song Automaton Tiny": 9,
+    "Song Pilgrim 01": 1,
+    "Pilgrim 03 Song": 5,
+    "Song Handmaiden": 3,
+    "Song Administrator": 4,
+    "Song Heavy Sentry": 3
+   },
+   "instances": {
+    "Song Heavy Sentry": 362,
+    "Song Handmaiden": 81,
+    "Song Administrator": 117,
+    "Song Pilgrim Maestro": 224,
+    "Song Automaton Tiny": 328,
+    "Song Reed": 174,
+    "Song Pilgrim 01": 17,
+    "Song Pilgrim 03": 85,
+    "Pilgrim 03 Song": 191
+   },
+   "fold": 0
+  },
+  {
+   "id": "20261003_074719_Forum_A_data/i3/ep5",
+   "frames": 46740,
+   "subjects": {
+    "Song Pilgrim 03": 4,
+    "Song Pilgrim Maestro": 3,
+    "Song Reed": 5,
+    "Song Automaton Tiny": 9,
+    "Song Pilgrim 01": 1,
+    "Pilgrim 03 Song": 5,
+    "Song Handmaiden": 3,
+    "Song Administrator": 4,
+    "Song Heavy Sentry": 3
+   },
+   "instances": {
+    "Song Heavy Sentry": 357,
+    "Song Handmaiden": 106,
+    "Song Administrator": 153,
+    "Song Pilgrim Maestro": 172,
+    "Song Automaton Tiny": 269,
+    "Song Reed": 162,
+    "Song Pilgrim 01": 18,
+    "Song Pilgrim 03": 79,
+    "Pilgrim 03 Song": 226
+   },
+   "fold": 1
+  },
+  {
+   "id": "20261003_074719_Forum_A_data/i3/ep6",
+   "frames": 55196,
+   "subjects": {
+    "Song Pilgrim 03": 4,
+    "Song Pilgrim Maestro": 3,
+    "Song Reed": 5,
+    "Song Automaton Tiny": 9,
+    "Song Pilgrim 01": 1,
+    "Pilgrim 03 Song": 5,
+    "Song Handmaiden": 3,
+    "Song Administrator": 4,
+    "Song Heavy Sentry": 3
+   },
+   "instances": {
+    "Song Heavy Sentry": 382,
+    "Song Handmaiden": 81,
+    "Song Administrator": 125,
+    "Song Pilgrim Maestro": 258,
+    "Song Automaton Tiny": 365,
+    "Song Reed": 147,
+    "Song Pilgrim 01": 22,
+    "Song Pilgrim 03": 118,
+    "Pilgrim 03 Song": 186
+   },
+   "fold": 0
+  },
+  {
+   "id": "20261003_074719_Forum_A_data/i3/ep7",
+   "frames": 44628,
+   "subjects": {
+    "Song Pilgrim 03": 4,
+    "Song Pilgrim Maestro": 3,
+    "Song Reed": 5,
+    "Song Automaton Tiny": 9,
+    "Song Pilgrim 01": 1,
+    "Pilgrim 03 Song": 5,
+    "Song Handmaiden": 3,
+    "Song Administrator": 4,
+    "Song Heavy Sentry": 3
+   },
+   "instances": {
+    "Song Heavy Sentry": 366,
+    "Song Handmaiden": 65,
+    "Song Administrator": 97,
+    "Song Pilgrim Maestro": 206,
+    "Song Automaton Tiny": 298,
+    "Song Reed": 122,
+    "Song Pilgrim 01": 17,
+    "Song Pilgrim 03": 57,
+    "Pilgrim 03 Song": 178
+   },
+   "fold": 1
+  },
+  {
+   "id": "20261003_074719_Forum_A_data/i3/ep8",
+   "frames": 54217,
+   "subjects": {
+    "Song Pilgrim 03": 4,
+    "Song Pilgrim Maestro": 3,
+    "Song Reed": 5,
+    "Song Automaton Tiny": 9,
+    "Song Pilgrim 01": 1,
+    "Pilgrim 03 Song": 5,
+    "Song Handmaiden": 3,
+    "Song Administrator": 4,
+    "Song Heavy Sentry": 3
+   },
+   "instances": {
+    "Song Heavy Sentry": 435,
+    "Song Handmaiden": 66,
+    "Song Administrator": 148,
+    "Song Pilgrim Maestro": 230,
+    "Song Automaton Tiny": 340,
+    "Song Reed": 117,
+    "Song Pilgrim 01": 31,
+    "Song Pilgrim 03": 67,
+    "Pilgrim 03 Song": 213
+   },
+   "fold": 0
+  },
+  {
+   "id": "20261003_074719_Forum_A_data/i3/ep9",
+   "frames": 50629,
+   "subjects": {
+    "Song Pilgrim 03": 4,
+    "Song Pilgrim Maestro": 3,
+    "Song Reed": 5,
+    "Song Automaton Tiny": 9,
+    "Song Pilgrim 01": 1,
+    "Pilgrim 03 Song": 5,
+    "Song Handmaiden": 3,
+    "Song Administrator": 4,
+    "Song Heavy Sentry": 3
+   },
+   "instances": {
+    "Song Heavy Sentry": 388,
+    "Song Handmaiden": 133,
+    "Song Administrator": 147,
+    "Song Pilgrim Maestro": 206,
+    "Song Automaton Tiny": 304,
+    "Song Reed": 124,
+    "Song Pilgrim 01": 22,
+    "Song Pilgrim 03": 51,
+    "Pilgrim 03 Song": 205
+   },
+   "fold": 1
+  },
+  {
+   "id": "20261003_074719_Forum_A_data/i3/ep10",
+   "frames": 50353,
+   "subjects": {
+    "Song Pilgrim 03": 4,
+    "Song Pilgrim Maestro": 3,
+    "Song Reed": 5,
+    "Song Automaton Tiny": 9,
+    "Song Pilgrim 01": 1,
+    "Pilgrim 03 Song": 5,
+    "Song Handmaiden": 3,
+    "Song Administrator": 4,
+    "Song Heavy Sentry": 3
+   },
+   "instances": {
+    "Song Heavy Sentry": 281,
+    "Song Handmaiden": 111,
+    "Song Administrator": 126,
+    "Song Pilgrim Maestro": 228,
+    "Song Automaton Tiny": 338,
+    "Song Reed": 166,
+    "Song Pilgrim 01": 30,
+    "Song Pilgrim 03": 78,
+    "Pilgrim 03 Song": 244
+   },
+   "fold": 0
+  },
+  {
+   "id": "20261003_074719_Forum_A_data/i3/ep11",
+   "frames": 49766,
+   "subjects": {
+    "Song Pilgrim 03": 4,
+    "Song Pilgrim Maestro": 3,
+    "Song Reed": 5,
+    "Song Automaton Tiny": 9,
+    "Song Pilgrim 01": 1,
+    "Pilgrim 03 Song": 5,
+    "Song Handmaiden": 3,
+    "Song Administrator": 4,
+    "Song Heavy Sentry": 3
+   },
+   "instances": {
+    "Song Heavy Sentry": 412,
+    "Song Handmaiden": 78,
+    "Song Administrator": 86,
+    "Song Pilgrim Maestro": 224,
+    "Song Automaton Tiny": 328,
+    "Song Reed": 92,
+    "Song Pilgrim 01": 20,
+    "Song Pilgrim 03": 51,
+    "Pilgrim 03 Song": 188
+   },
+   "fold": 1
+  },
+  {
+   "id": "20261003_074719_Forum_A_data/i3/ep12",
+   "frames": 47195,
+   "subjects": {
+    "Song Pilgrim 03": 4,
+    "Song Pilgrim Maestro": 3,
+    "Song Reed": 5,
+    "Song Automaton Tiny": 9,
+    "Song Pilgrim 01": 1,
+    "Pilgrim 03 Song": 5,
+    "Song Handmaiden": 3,
+    "Song Administrator": 4,
+    "Song Heavy Sentry": 3
+   },
+   "instances": {
+    "Song Heavy Sentry": 284,
+    "Song Handmaiden": 115,
+    "Song Administrator": 139,
+    "Song Pilgrim Maestro": 172,
+    "Song Automaton Tiny": 247,
+    "Song Reed": 150,
+    "Song Pilgrim 01": 27,
+    "Song Pilgrim 03": 118,
+    "Pilgrim 03 Song": 254
+   },
+   "fold": 0
+  },
+  {
+   "id": "20261003_074719_Forum_A_data/i3/ep13",
+   "frames": 53594,
+   "subjects": {
+    "Song Pilgrim 03": 4,
+    "Song Pilgrim Maestro": 3,
+    "Song Reed": 5,
+    "Song Automaton Tiny": 9,
+    "Song Pilgrim 01": 1,
+    "Pilgrim 03 Song": 5,
+    "Song Handmaiden": 3,
+    "Song Administrator": 4,
+    "Song Heavy Sentry": 3
+   },
+   "instances": {
+    "Song Heavy Sentry": 404,
+    "Song Handmaiden": 127,
+    "Song Administrator": 107,
+    "Song Pilgrim Maestro": 252,
+    "Song Automaton Tiny": 378,
+    "Song Reed": 130,
+    "Song Pilgrim 01": 33,
+    "Song Pilgrim 03": 93,
+    "Pilgrim 03 Song": 188
+   },
+   "fold": 1
+  },
+  {
+   "id": "20261003_074719_Forum_A_data/i3/ep14",
+   "frames": 57278,
+   "subjects": {
+    "Song Pilgrim 03": 4,
+    "Song Pilgrim Maestro": 3,
+    "Song Reed": 5,
+    "Song Automaton Tiny": 9,
+    "Song Pilgrim 01": 1,
+    "Pilgrim 03 Song": 5,
+    "Song Handmaiden": 3,
+    "Song Administrator": 4,
+    "Song Heavy Sentry": 3
+   },
+   "instances": {
+    "Song Heavy Sentry": 403,
+    "Song Handmaiden": 88,
+    "Song Administrator": 142,
+    "Song Pilgrim Maestro": 272,
+    "Song Automaton Tiny": 388,
+    "Song Reed": 114,
+    "Song Pilgrim 01": 23,
+    "Song Pilgrim 03": 63,
+    "Pilgrim 03 Song": 219
+   },
+   "fold": 0
+  },
+  {
+   "id": "20261003_074719_Forum_A_data/i3/ep15",
+   "frames": 46839,
+   "subjects": {
+    "Song Pilgrim 03": 4,
+    "Song Pilgrim Maestro": 3,
+    "Song Reed": 5,
+    "Song Automaton Tiny": 9,
+    "Song Pilgrim 01": 1,
+    "Pilgrim 03 Song": 5,
+    "Song Handmaiden": 3,
+    "Song Administrator": 4,
+    "Song Heavy Sentry": 3
+   },
+   "instances": {
+    "Song Heavy Sentry": 262,
+    "Song Handmaiden": 91,
+    "Song Administrator": 109,
+    "Song Pilgrim Maestro": 218,
+    "Song Automaton Tiny": 314,
+    "Song Reed": 184,
+    "Song Pilgrim 01": 16,
+    "Song Pilgrim 03": 97,
+    "Pilgrim 03 Song": 268
+   },
+   "fold": 1
+  },
+  {
+   "id": "20261003_074719_Forum_A_data/i3/ep16",
+   "frames": 51291,
+   "subjects": {
+    "Song Pilgrim 03": 4,
+    "Song Pilgrim Maestro": 3,
+    "Song Reed": 5,
+    "Song Automaton Tiny": 9,
+    "Song Pilgrim 01": 1,
+    "Pilgrim 03 Song": 5,
+    "Song Handmaiden": 3,
+    "Song Administrator": 4,
+    "Song Heavy Sentry": 3
+   },
+   "instances": {
+    "Song Heavy Sentry": 440,
+    "Song Handmaiden": 52,
+    "Song Administrator": 90,
+    "Song Pilgrim Maestro": 274,
+    "Song Automaton Tiny": 396,
+    "Song Reed": 150,
+    "Song Pilgrim 01": 30,
+    "Song Pilgrim 03": 58,
+    "Pilgrim 03 Song": 190
+   },
+   "fold": 0
+  },
+  {
+   "id": "20261003_074719_Forum_A_data/i3/ep17",
+   "frames": 47223,
+   "subjects": {
+    "Song Pilgrim 03": 4,
+    "Song Pilgrim Maestro": 3,
+    "Song Reed": 5,
+    "Song Automaton Tiny": 9,
+    "Song Pilgrim 01": 1,
+    "Pilgrim 03 Song": 5,
+    "Song Handmaiden": 3,
+    "Song Administrator": 4,
+    "Song Heavy Sentry": 3
+   },
+   "instances": {
+    "Song Heavy Sentry": 357,
+    "Song Handmaiden": 77,
+    "Song Administrator": 130,
+    "Song Pilgrim Maestro": 220,
+    "Song Automaton Tiny": 322,
+    "Song Reed": 164,
+    "Song Pilgrim 01": 22,
+    "Song Pilgrim 03": 60,
+    "Pilgrim 03 Song": 147
+   },
+   "fold": 1
+  },
+  {
+   "id": "20261003_074719_Forum_A_data/i3/ep18",
+   "frames": 41512,
+   "subjects": {
+    "Song Pilgrim 03": 4,
+    "Song Pilgrim Maestro": 3,
+    "Song Reed": 5,
+    "Song Automaton Tiny": 9,
+    "Song Pilgrim 01": 1,
+    "Pilgrim 03 Song": 5,
+    "Song Handmaiden": 3,
+    "Song Administrator": 4,
+    "Song Heavy Sentry": 3
+   },
+   "instances": {
+    "Song Heavy Sentry": 377,
+    "Song Handmaiden": 43,
+    "Song Administrator": 116,
+    "Song Pilgrim Maestro": 186,
+    "Song Automaton Tiny": 271,
+    "Song Reed": 116,
+    "Song Pilgrim 01": 29,
+    "Song Pilgrim 03": 47,
+    "Pilgrim 03 Song": 151
+   },
+   "fold": 0
+  },
+  {
+   "id": "20261003_074719_Forum_A_data/i3/ep19",
+   "frames": 50756,
+   "subjects": {
+    "Song Pilgrim 03": 4,
+    "Song Pilgrim Maestro": 3,
+    "Song Reed": 5,
+    "Song Automaton Tiny": 9,
+    "Song Pilgrim 01": 1,
+    "Pilgrim 03 Song": 5,
+    "Song Handmaiden": 3,
+    "Song Administrator": 4,
+    "Song Heavy Sentry": 3
+   },
+   "instances": {
+    "Song Heavy Sentry": 343,
+    "Song Handmaiden": 52,
+    "Song Administrator": 116,
+    "Song Pilgrim Maestro": 278,
+    "Song Automaton Tiny": 411,
+    "Song Reed": 117,
+    "Song Pilgrim 01": 13,
+    "Song Pilgrim 03": 104,
+    "Pilgrim 03 Song": 260
+   },
+   "fold": 1
+  },
+  {
+   "id": "20261003_074719_Forum_A_data/i3/ep20",
+   "frames": 42668,
+   "subjects": {
+    "Song Pilgrim 03": 4,
+    "Song Pilgrim Maestro": 3,
+    "Song Reed": 5,
+    "Song Automaton Tiny": 9,
+    "Song Pilgrim 01": 1,
+    "Pilgrim 03 Song": 5,
+    "Song Handmaiden": 3,
+    "Song Administrator": 4,
+    "Song Heavy Sentry": 3
+   },
+   "instances": {
+    "Song Heavy Sentry": 295,
+    "Song Handmaiden": 114,
+    "Song Administrator": 121,
+    "Song Pilgrim Maestro": 156,
+    "Song Automaton Tiny": 229,
+    "Song Reed": 153,
+    "Song Pilgrim 01": 40,
+    "Song Pilgrim 03": 83,
+    "Pilgrim 03 Song": 161
+   },
+   "fold": 0
+  },
+  {
+   "id": "20261003_074719_Forum_A_data/i3/ep21",
+   "frames": 53825,
+   "subjects": {
+    "Song Pilgrim 03": 4,
+    "Song Pilgrim Maestro": 3,
+    "Song Reed": 5,
+    "Song Automaton Tiny": 9,
+    "Song Pilgrim 01": 1,
+    "Pilgrim 03 Song": 5,
+    "Song Handmaiden": 3,
+    "Song Administrator": 4,
+    "Song Heavy Sentry": 3
+   },
+   "instances": {
+    "Song Heavy Sentry": 387,
+    "Song Handmaiden": 85,
+    "Song Administrator": 111,
+    "Song Pilgrim Maestro": 268,
+    "Song Automaton Tiny": 389,
+    "Song Reed": 200,
+    "Song Pilgrim 01": 19,
+    "Song Pilgrim 03": 57,
+    "Pilgrim 03 Song": 177
+   },
+   "fold": 1
+  },
+  {
+   "id": "20261003_074719_Forum_A_data/i3/ep22",
+   "frames": 55080,
+   "subjects": {
+    "Song Pilgrim 03": 4,
+    "Song Pilgrim Maestro": 3,
+    "Song Reed": 5,
+    "Song Automaton Tiny": 9,
+    "Song Pilgrim 01": 1,
+    "Pilgrim 03 Song": 5,
+    "Song Handmaiden": 3,
+    "Song Administrator": 4,
+    "Song Heavy Sentry": 3
+   },
+   "instances": {
+    "Song Heavy Sentry": 463,
+    "Song Handmaiden": 130,
+    "Song Administrator": 109,
+    "Song Pilgrim Maestro": 264,
+    "Song Automaton Tiny": 382,
+    "Song Reed": 129,
+    "Song Pilgrim 01": 36,
+    "Song Pilgrim 03": 93,
+    "Pilgrim 03 Song": 192
+   },
+   "fold": 0
+  },
+  {
+   "id": "20261003_074719_Forum_A_data/i3/ep23",
+   "frames": 46102,
+   "subjects": {
+    "Song Pilgrim 03": 4,
+    "Song Pilgrim Maestro": 3,
+    "Song Reed": 5,
+    "Song Automaton Tiny": 9,
+    "Song Pilgrim 01": 1,
+    "Pilgrim 03 Song": 5,
+    "Song Handmaiden": 3,
+    "Song Administrator": 4,
+    "Song Heavy Sentry": 3
+   },
+   "instances": {
+    "Song Heavy Sentry": 348,
+    "Song Handmaiden": 70,
+    "Song Administrator": 114,
+    "Song Pilgrim Maestro": 190,
+    "Song Automaton Tiny": 282,
+    "Song Reed": 146,
+    "Song Pilgrim 01": 19,
+    "Song Pilgrim 03": 52,
+    "Pilgrim 03 Song": 241
+   },
+   "fold": 1
+  },
+  {
+   "id": "20261003_074719_Forum_A_data/i3/ep24",
+   "frames": 57960,
+   "subjects": {
+    "Song Pilgrim 03": 4,
+    "Song Pilgrim Maestro": 3,
+    "Song Reed": 5,
+    "Song Automaton Tiny": 9,
+    "Song Pilgrim 01": 1,
+    "Pilgrim 03 Song": 5,
+    "Song Handmaiden": 3,
+    "Song Administrator": 4,
+    "Song Heavy Sentry": 3
+   },
+   "instances": {
+    "Song Heavy Sentry": 429,
+    "Song Handmaiden": 81,
+    "Song Administrator": 144,
+    "Song Pilgrim Maestro": 250,
+    "Song Automaton Tiny": 353,
+    "Song Reed": 158,
+    "Song Pilgrim 01": 32,
+    "Song Pilgrim 03": 59,
+    "Pilgrim 03 Song": 268
+   },
+   "fold": 0
   }
  ],
- "fight_hours": 3.07,
+ "fight_hours": 25.448,
  "rows": [
   {
    "type": "Song Heavy Sentry",
    "enemy": "ChoirClapper",
    "family": "CC_SLAM",
-   "n": 393,
+   "n": 3497,
    "idle": false,
-   "per_hour": 128.0,
+   "per_hour": 137.4,
    "hours_to_target": 0.0
   },
   {
    "type": "Song Heavy Sentry",
    "enemy": "ChoirClapper",
    "family": "CC_JUMP",
-   "n": 220,
+   "n": 2116,
    "idle": false,
-   "per_hour": 71.7,
+   "per_hour": 83.1,
    "hours_to_target": 0.0
   },
   {
    "type": "Song Heavy Sentry",
    "enemy": "ChoirClapper",
    "family": "CC_CAST",
-   "n": 390,
+   "n": 3545,
    "idle": false,
-   "per_hour": 127.0,
+   "per_hour": 139.3,
    "hours_to_target": 0.0
   },
   {
    "type": "Song Heavy Sentry",
    "enemy": "ChoirClapper",
    "family": "CC_JUMP_CAST",
-   "n": 202,
+   "n": 1978,
    "idle": false,
-   "per_hour": 65.8,
+   "per_hour": 77.7,
    "hours_to_target": 0.0
   },
   {
    "type": "Song Heavy Sentry",
    "enemy": "ChoirClapper",
    "family": "CC_EVADE",
-   "n": 843,
+   "n": 7923,
    "idle": false,
-   "per_hour": 274.6,
+   "per_hour": 311.3,
    "hours_to_target": 0.0
   },
   {
    "type": "Song Heavy Sentry",
    "enemy": "ChoirClapper",
    "family": "CC_ENTRY",
-   "n": 39,
+   "n": 321,
    "idle": false,
-   "per_hour": 12.7,
-   "hours_to_target": 12.7
+   "per_hour": 12.6,
+   "hours_to_target": 0.0
   },
   {
    "type": "Song Heavy Sentry",
    "enemy": "ChoirClapper",
    "family": "CC_IDLE",
-   "n": 2052,
+   "n": 19106,
    "idle": true,
-   "per_hour": 668.4,
+   "per_hour": 750.8,
    "hours_to_target": 0.0
   },
   {
    "type": "Song Handmaiden",
    "enemy": "Clawmaiden",
    "family": "CM_SLASH",
-   "n": 296,
+   "n": 2235,
    "idle": false,
-   "per_hour": 96.4,
+   "per_hour": 87.8,
    "hours_to_target": 0.0
   },
   {
    "type": "Song Handmaiden",
    "enemy": "Clawmaiden",
    "family": "CM_SPIN",
-   "n": 356,
+   "n": 2766,
    "idle": false,
-   "per_hour": 116.0,
+   "per_hour": 108.7,
    "hours_to_target": 0.0
   },
   {
    "type": "Song Handmaiden",
    "enemy": "Clawmaiden",
    "family": "CM_TELE",
-   "n": 78,
+   "n": 660,
    "idle": false,
-   "per_hour": 25.4,
-   "hours_to_target": 4.8
+   "per_hour": 25.9,
+   "hours_to_target": 0.0
   },
   {
    "type": "Song Handmaiden",
    "enemy": "Clawmaiden",
    "family": "CM_ENTRY",
-   "n": 39,
+   "n": 321,
    "idle": false,
-   "per_hour": 12.7,
-   "hours_to_target": 12.7
+   "per_hour": 12.6,
+   "hours_to_target": 0.0
   },
   {
    "type": "Song Handmaiden",
    "enemy": "Clawmaiden",
    "family": "CM_IDLE",
-   "n": 582,
+   "n": 4528,
    "idle": true,
-   "per_hour": 189.6,
+   "per_hour": 177.9,
    "hours_to_target": 0.0
   },
   {
    "type": "Song Administrator",
    "enemy": "Minister",
    "family": "MI_CHARGE",
-   "n": 334,
+   "n": 2643,
    "idle": false,
-   "per_hour": 108.8,
+   "per_hour": 103.9,
    "hours_to_target": 0.0
   },
   {
    "type": "Song Administrator",
    "enemy": "Minister",
    "family": "MI_PARRY",
-   "n": 334,
+   "n": 2639,
    "idle": false,
-   "per_hour": 108.8,
+   "per_hour": 103.7,
    "hours_to_target": 0.0
   },
   {
    "type": "Song Administrator",
    "enemy": "Minister",
    "family": "MI_EVADE",
-   "n": 219,
+   "n": 1809,
    "idle": false,
-   "per_hour": 71.3,
+   "per_hour": 71.1,
    "hours_to_target": 0.0
   },
   {
    "type": "Song Administrator",
    "enemy": "Minister",
    "family": "MI_ENTRY",
-   "n": 52,
+   "n": 428,
    "idle": false,
-   "per_hour": 16.9,
-   "hours_to_target": 8.7
+   "per_hour": 16.8,
+   "hours_to_target": 0.0
   },
   {
    "type": "Song Administrator",
    "enemy": "Minister",
    "family": "MI_IDLE",
-   "n": 797,
+   "n": 6406,
    "idle": true,
-   "per_hour": 259.6,
+   "per_hour": 251.7,
    "hours_to_target": 0.0
   },
   {
    "type": "Song Pilgrim Maestro",
    "enemy": "Maestro",
    "family": "MA_SLASH",
-   "n": 989,
+   "n": 8073,
    "idle": false,
-   "per_hour": 322.1,
+   "per_hour": 317.2,
    "hours_to_target": 0.0
   },
   {
    "type": "Song Pilgrim Maestro",
    "enemy": "Maestro",
    "family": "MA_SUMMON",
-   "n": 177,
+   "n": 1386,
    "idle": false,
-   "per_hour": 57.7,
-   "hours_to_target": 0.4
+   "per_hour": 54.5,
+   "hours_to_target": 0.0
   },
   {
    "type": "Song Pilgrim Maestro",
    "enemy": "Maestro",
    "family": "MA_DEFEND",
-   "n": 417,
+   "n": 3393,
    "idle": false,
-   "per_hour": 135.8,
+   "per_hour": 133.3,
    "hours_to_target": 0.0
   },
   {
@@ -548,145 +3086,145 @@
    "type": "Song Pilgrim Maestro",
    "enemy": "Maestro",
    "family": "MA_ENTRY",
-   "n": 39,
+   "n": 321,
    "idle": false,
-   "per_hour": 12.7,
-   "hours_to_target": 12.7
+   "per_hour": 12.6,
+   "hours_to_target": 0.0
   },
   {
    "type": "Song Pilgrim Maestro",
    "enemy": "Maestro",
    "family": "MA_IDLE",
-   "n": 1544,
+   "n": 12531,
    "idle": true,
-   "per_hour": 502.9,
+   "per_hour": 492.4,
    "hours_to_target": 0.0
   },
   {
    "type": "Song Automaton Tiny",
    "enemy": "MaestroAutomaton",
    "family": "AT_FIRE",
-   "n": 988,
+   "n": 8066,
    "idle": false,
-   "per_hour": 321.8,
+   "per_hour": 317.0,
    "hours_to_target": 0.0
   },
   {
    "type": "Song Automaton Tiny",
    "enemy": "MaestroAutomaton",
    "family": "AT_DEFEND",
-   "n": 1178,
+   "n": 9563,
    "idle": false,
-   "per_hour": 383.7,
+   "per_hour": 375.8,
    "hours_to_target": 0.0
   },
   {
    "type": "Song Automaton Tiny",
    "enemy": "MaestroAutomaton",
    "family": "AT_ENTRY",
-   "n": 282,
+   "n": 2236,
    "idle": false,
-   "per_hour": 91.9,
+   "per_hour": 87.9,
    "hours_to_target": 0.0
   },
   {
    "type": "Song Automaton Tiny",
    "enemy": "MaestroAutomaton",
    "family": "AT_LEAVE",
-   "n": 107,
+   "n": 828,
    "idle": false,
-   "per_hour": 34.9,
-   "hours_to_target": 2.7
+   "per_hour": 32.5,
+   "hours_to_target": 0.0
   },
   {
    "type": "Song Automaton Tiny",
    "enemy": "MaestroAutomaton",
    "family": "AT_IDLE",
-   "n": 2028,
+   "n": 16616,
    "idle": true,
-   "per_hour": 660.6,
+   "per_hour": 652.9,
    "hours_to_target": 0.0
   },
   {
    "type": "Song Reed",
    "enemy": "Reed",
    "family": "RE_STAB",
-   "n": 281,
+   "n": 2172,
    "idle": false,
-   "per_hour": 91.5,
+   "per_hour": 85.3,
    "hours_to_target": 0.0
   },
   {
    "type": "Song Reed",
    "enemy": "Reed",
    "family": "RE_THROW",
-   "n": 268,
+   "n": 2201,
    "idle": false,
-   "per_hour": 87.3,
+   "per_hour": 86.5,
    "hours_to_target": 0.0
   },
   {
    "type": "Song Reed",
    "enemy": "Reed",
    "family": "RE_DEFEND",
-   "n": 230,
+   "n": 1899,
    "idle": false,
-   "per_hour": 74.9,
+   "per_hour": 74.6,
    "hours_to_target": 0.0
   },
   {
    "type": "Song Reed",
    "enemy": "Reed",
    "family": "RE_EVADE",
-   "n": 202,
+   "n": 1716,
    "idle": false,
-   "per_hour": 65.8,
+   "per_hour": 67.4,
    "hours_to_target": 0.0
   },
   {
    "type": "Song Reed",
    "enemy": "Reed",
    "family": "RE_ENTRY",
-   "n": 65,
+   "n": 535,
    "idle": false,
-   "per_hour": 21.2,
-   "hours_to_target": 6.4
+   "per_hour": 21.0,
+   "hours_to_target": 0.0
   },
   {
    "type": "Song Reed",
    "enemy": "Reed",
    "family": "RE_IDLE",
-   "n": 883,
+   "n": 7154,
    "idle": true,
-   "per_hour": 287.6,
+   "per_hour": 281.1,
    "hours_to_target": 0.0
   },
   {
    "type": "Song Pilgrim 01",
    "enemy": "Envoy",
    "family": "EN_SLASH",
-   "n": 95,
+   "n": 692,
    "idle": false,
-   "per_hour": 30.9,
-   "hours_to_target": 3.4
+   "per_hour": 27.2,
+   "hours_to_target": 0.0
   },
   {
    "type": "Song Pilgrim 01",
    "enemy": "Envoy",
    "family": "EN_JUMPSLASH",
-   "n": 34,
+   "n": 241,
    "idle": false,
-   "per_hour": 11.1,
-   "hours_to_target": 15.0
+   "per_hour": 9.5,
+   "hours_to_target": 0.0
   },
   {
    "type": "Song Pilgrim 01",
    "enemy": "Envoy",
    "family": "EN_CHARGE",
-   "n": 44,
+   "n": 385,
    "idle": false,
-   "per_hour": 14.3,
-   "hours_to_target": 10.9
+   "per_hour": 15.1,
+   "hours_to_target": 0.0
   },
   {
    "type": "Song Pilgrim 01",
@@ -701,10 +3239,10 @@
    "type": "Song Pilgrim 01",
    "enemy": "Envoy",
    "family": "EN_AMBUSH",
-   "n": 13,
+   "n": 107,
    "idle": false,
    "per_hour": 4.2,
-   "hours_to_target": 44.2
+   "hours_to_target": 22.1
   },
   {
    "type": "Song Pilgrim 01",
@@ -719,90 +3257,90 @@
    "type": "Song Pilgrim 01",
    "enemy": "Envoy",
    "family": "EN_IDLE",
-   "n": 139,
+   "n": 1082,
    "idle": true,
-   "per_hour": 45.3,
-   "hours_to_target": 1.3
+   "per_hour": 42.5,
+   "hours_to_target": 0.0
   },
   {
    "type": "Song Pilgrim 03",
    "enemy": "Choristor",
    "family": "CH_SLASH",
-   "n": 177,
+   "n": 1377,
    "idle": false,
-   "per_hour": 57.7,
-   "hours_to_target": 0.4
+   "per_hour": 54.1,
+   "hours_to_target": 0.0
   },
   {
    "type": "Song Pilgrim 03",
    "enemy": "Choristor",
    "family": "CH_WHIP",
-   "n": 170,
+   "n": 1309,
    "idle": false,
-   "per_hour": 55.4,
-   "hours_to_target": 0.5
+   "per_hour": 51.4,
+   "hours_to_target": 0.0
   },
   {
    "type": "Song Pilgrim 03",
    "enemy": "Choristor",
    "family": "CH_JUMP",
-   "n": 112,
+   "n": 914,
    "idle": false,
-   "per_hour": 36.5,
-   "hours_to_target": 2.4
+   "per_hour": 35.9,
+   "hours_to_target": 0.0
   },
   {
    "type": "Song Pilgrim 03",
    "enemy": "Choristor",
    "family": "CH_ENTRY",
-   "n": 52,
+   "n": 428,
    "idle": false,
-   "per_hour": 16.9,
-   "hours_to_target": 8.7
+   "per_hour": 16.8,
+   "hours_to_target": 0.0
   },
   {
    "type": "Song Pilgrim 03",
    "enemy": "Choristor",
    "family": "CH_IDLE",
-   "n": 473,
+   "n": 3715,
    "idle": true,
-   "per_hour": 154.1,
+   "per_hour": 146.0,
    "hours_to_target": 0.0
   },
   {
    "type": "Pilgrim 03 Song",
    "enemy": "ChoirBellbearer",
    "family": "CB_THROW",
-   "n": 1057,
+   "n": 8866,
    "idle": false,
-   "per_hour": 344.3,
+   "per_hour": 348.4,
    "hours_to_target": 0.0
   },
   {
    "type": "Pilgrim 03 Song",
    "enemy": "ChoirBellbearer",
    "family": "CB_EVADE",
-   "n": 395,
+   "n": 3418,
    "idle": false,
-   "per_hour": 128.7,
+   "per_hour": 134.3,
    "hours_to_target": 0.0
   },
   {
    "type": "Pilgrim 03 Song",
    "enemy": "ChoirBellbearer",
    "family": "CB_ENTRY",
-   "n": 65,
+   "n": 535,
    "idle": false,
-   "per_hour": 21.2,
-   "hours_to_target": 6.4
+   "per_hour": 21.0,
+   "hours_to_target": 0.0
   },
   {
    "type": "Pilgrim 03 Song",
    "enemy": "ChoirBellbearer",
    "family": "CB_IDLE",
-   "n": 1283,
+   "n": 10842,
    "idle": true,
-   "per_hour": 417.9,
+   "per_hour": 426.0,
    "hours_to_target": 0.0
   }
  ],
@@ -818,66 +3356,66 @@
    "Song Heavy Sentry": {
     "ok": false,
     "support_conservative": false,
-    "support_note": "NOT shown to cover unseen instances: in-sample validation failed; held out anchor: 41 of 10828 contacts beyond 0.5 u - inflate it or keep it out of the planner until more data closes this",
-    "contacts": 10832,
-    "uncovered_contacts": 1,
-    "uncovered_pairs": 2,
-    "unexplained": 2,
+    "support_note": "NOT shown to cover unseen instances: in-sample validation failed - inflate it or keep it out of the planner until more data closes this",
+    "contacts": 89707,
+    "uncovered_contacts": 12,
+    "uncovered_pairs": 16,
+    "unexplained": 14,
     "outside_attacks": 1,
     "heldout_anchor": {
-     "n": 10828,
-     "within_radius": 10781,
-     "beyond_r_fail": 41,
-     "share_beyond": 0.0038,
-     "beyond_r_fail_t4": 20
+     "n": 89694,
+     "within_radius": 89621,
+     "beyond_r_fail": 70,
+     "share_beyond": 0.0008,
+     "beyond_r_fail_t4": 38
     },
     "heldout_self": {
-     "n": 1626,
-     "within_radius": 1626,
-     "beyond_r_fail": 0,
-     "share_beyond": 0.0,
-     "beyond_r_fail_t4": 0
+     "n": 13963,
+     "within_radius": 13959,
+     "beyond_r_fail": 4,
+     "share_beyond": 0.0003,
+     "beyond_r_fail_t4": 4
     }
    },
    "Song Handmaiden": {
     "ok": false,
     "support_conservative": false,
-    "support_note": "NOT shown to cover unseen instances: in-sample validation failed; held out anchor: 66 of 1258 contacts beyond 0.5 u; held out self: 4 of 193 contacts beyond 0.5 u - inflate it or keep it out of the planner until more data closes this",
-    "contacts": 1338,
+    "support_note": "NOT shown to cover unseen instances: in-sample validation failed; held out anchor: 61 of 9953 contacts beyond 0.5 u; held out self: 6 of 1586 contacts beyond 0.5 u - inflate it or keep it out of the planner until more data closes this",
+    "contacts": 10731,
     "uncovered_contacts": 0,
     "uncovered_pairs": 0,
     "unexplained": 0,
-    "outside_attacks": 2,
+    "outside_attacks": 6,
     "heldout_anchor": {
-     "n": 1258,
-     "within_radius": 1180,
-     "beyond_r_fail": 66,
-     "share_beyond": 0.0525,
-     "beyond_r_fail_t4": 48
+     "n": 9953,
+     "within_radius": 9881,
+     "beyond_r_fail": 61,
+     "share_beyond": 0.0061,
+     "beyond_r_fail_t4": 33
     },
     "heldout_self": {
-     "n": 193,
-     "within_radius": 186,
-     "beyond_r_fail": 4,
-     "share_beyond": 0.0207,
-     "beyond_r_fail_t4": 4
+     "n": 1586,
+     "within_radius": 1580,
+     "beyond_r_fail": 6,
+     "share_beyond": 0.0038,
+     "beyond_r_fail_t4": 3
     }
    },
    "Song Administrator": {
     "ok": false,
     "support_conservative": false,
-    "support_note": "NOT shown to cover unseen instances: in-sample validation failed; held out anchor: 26 of 2636 contacts beyond 0.5 u - inflate it or keep it out of the planner until more data closes this",
-    "contacts": 2742,
-    "uncovered_contacts": 6,
-    "uncovered_pairs": 10,
+    "support_note": "NOT shown to cover unseen instances: in-sample validation failed; held out anchor: 26 of 20996 contacts beyond 0.5 u - inflate it or keep it out of the planner until more data closes this",
+    "contacts": 21840,
+    "uncovered_contacts": 16,
+    "uncovered_pairs": 24,
     "unexplained": 0,
-    "outside_attacks": 0,
+    "outside_attacks": 6,
     "heldout_anchor": {
-     "n": 2636,
-     "within_radius": 2579,
+     "n": 20996,
+     "within_radius": 20951,
      "beyond_r_fail": 26,
-     "share_beyond": 0.0099,
-     "beyond_r_fail_t4": 13
+     "share_beyond": 0.0012,
+     "beyond_r_fail_t4": 16
     },
     "heldout_self": {
      "n": 0
@@ -886,38 +3424,38 @@
    "Song Pilgrim Maestro": {
     "ok": false,
     "support_conservative": false,
-    "support_note": "NOT shown to cover unseen instances: in-sample validation failed; held out anchor: 3 of 498 contacts beyond 0.5 u - inflate it or keep it out of the planner until more data closes this",
-    "contacts": 499,
+    "support_note": "NOT shown to cover unseen instances: in-sample validation failed; held out anchor: 7 of 4098 contacts beyond 0.5 u - inflate it or keep it out of the planner until more data closes this",
+    "contacts": 4109,
     "uncovered_contacts": 0,
     "uncovered_pairs": 0,
     "unexplained": 0,
-    "outside_attacks": 1,
+    "outside_attacks": 8,
     "heldout_anchor": {
-     "n": 498,
-     "within_radius": 493,
-     "beyond_r_fail": 3,
-     "share_beyond": 0.006,
-     "beyond_r_fail_t4": 3
+     "n": 4098,
+     "within_radius": 4085,
+     "beyond_r_fail": 7,
+     "share_beyond": 0.0017,
+     "beyond_r_fail_t4": 4
     },
     "heldout_self": {
      "n": 0
     }
    },
    "Song Automaton Tiny": {
-    "ok": true,
+    "ok": false,
     "support_conservative": false,
-    "support_note": "NOT shown to cover unseen instances: held out anchor: 80 of 5076 contacts beyond 0.5 u - inflate it or keep it out of the planner until more data closes this",
-    "contacts": 5076,
-    "uncovered_contacts": 0,
-    "uncovered_pairs": 0,
-    "unexplained": 0,
-    "outside_attacks": 0,
+    "support_note": "NOT shown to cover unseen instances: in-sample validation failed - inflate it or keep it out of the planner until more data closes this",
+    "contacts": 41921,
+    "uncovered_contacts": 4,
+    "uncovered_pairs": 11,
+    "unexplained": 1,
+    "outside_attacks": 8,
     "heldout_anchor": {
-     "n": 5076,
-     "within_radius": 4941,
-     "beyond_r_fail": 80,
-     "share_beyond": 0.0158,
-     "beyond_r_fail_t4": 56
+     "n": 41912,
+     "within_radius": 41836,
+     "beyond_r_fail": 38,
+     "share_beyond": 0.0009,
+     "beyond_r_fail_t4": 14
     },
     "heldout_self": {
      "n": 0
@@ -926,62 +3464,62 @@
    "Song Reed": {
     "ok": false,
     "support_conservative": false,
-    "support_note": "NOT shown to cover unseen instances: in-sample validation failed; held out anchor: 92 of 3104 contacts beyond 0.5 u - inflate it or keep it out of the planner until more data closes this",
-    "contacts": 3137,
-    "uncovered_contacts": 3,
-    "uncovered_pairs": 6,
-    "unexplained": 1,
-    "outside_attacks": 1,
+    "support_note": "NOT shown to cover unseen instances: in-sample validation failed; held out anchor: 74 of 24002 contacts beyond 0.5 u; held out self: 3 of 867 contacts beyond 0.5 u - inflate it or keep it out of the planner until more data closes this",
+    "contacts": 24247,
+    "uncovered_contacts": 7,
+    "uncovered_pairs": 10,
+    "unexplained": 3,
+    "outside_attacks": 18,
     "heldout_anchor": {
-     "n": 3104,
-     "within_radius": 2947,
-     "beyond_r_fail": 92,
-     "share_beyond": 0.0296,
-     "beyond_r_fail_t4": 60
+     "n": 24002,
+     "within_radius": 23869,
+     "beyond_r_fail": 74,
+     "share_beyond": 0.0031,
+     "beyond_r_fail_t4": 52
     },
     "heldout_self": {
-     "n": 97,
-     "within_radius": 97,
-     "beyond_r_fail": 0,
-     "share_beyond": 0.0,
-     "beyond_r_fail_t4": 0
+     "n": 867,
+     "within_radius": 864,
+     "beyond_r_fail": 3,
+     "share_beyond": 0.0035,
+     "beyond_r_fail_t4": 1
     }
    },
    "Song Pilgrim 01": {
     "ok": true,
-    "support_conservative": false,
-    "support_note": "NOT shown to cover unseen instances: held out anchor: 6 of 994 contacts beyond 0.5 u - inflate it or keep it out of the planner until more data closes this",
-    "contacts": 994,
+    "support_conservative": true,
+    "support_note": "in sample every contact is covered and held out (other fold) at most 0.1% of the anchor / self contacts lie beyond 0.5 u",
+    "contacts": 9145,
     "uncovered_contacts": 0,
     "uncovered_pairs": 0,
     "unexplained": 0,
     "outside_attacks": 0,
     "heldout_anchor": {
-     "n": 994,
-     "within_radius": 988,
-     "beyond_r_fail": 6,
-     "share_beyond": 0.006,
-     "beyond_r_fail_t4": 6
+     "n": 9145,
+     "within_radius": 9143,
+     "beyond_r_fail": 0,
+     "share_beyond": 0.0,
+     "beyond_r_fail_t4": 0
     },
     "heldout_self": {
      "n": 0
     }
    },
    "Song Pilgrim 03": {
-    "ok": true,
+    "ok": false,
     "support_conservative": false,
-    "support_note": "NOT shown to cover unseen instances: held out anchor: 8 of 2417 contacts beyond 0.5 u - inflate it or keep it out of the planner until more data closes this",
-    "contacts": 2467,
-    "uncovered_contacts": 0,
-    "uncovered_pairs": 0,
+    "support_note": "NOT shown to cover unseen instances: in-sample validation failed - inflate it or keep it out of the planner until more data closes this",
+    "contacts": 19967,
+    "uncovered_contacts": 2,
+    "uncovered_pairs": 4,
     "unexplained": 0,
-    "outside_attacks": 0,
+    "outside_attacks": 5,
     "heldout_anchor": {
-     "n": 2417,
-     "within_radius": 2393,
-     "beyond_r_fail": 8,
-     "share_beyond": 0.0033,
-     "beyond_r_fail_t4": 1
+     "n": 19561,
+     "within_radius": 19554,
+     "beyond_r_fail": 1,
+     "share_beyond": 0.0001,
+     "beyond_r_fail_t4": 0
     },
     "heldout_self": {
      "n": 0
@@ -990,49 +3528,50 @@
    "Pilgrim 03 Song": {
     "ok": false,
     "support_conservative": false,
-    "support_note": "NOT shown to cover unseen instances: in-sample validation failed; held out anchor: 8 of 944 contacts beyond 0.5 u; held out self: 9 of 573 contacts beyond 0.5 u - inflate it or keep it out of the planner until more data closes this",
-    "contacts": 944,
-    "uncovered_contacts": 2,
-    "uncovered_pairs": 6,
-    "unexplained": 0,
-    "outside_attacks": 0,
+    "support_note": "NOT shown to cover unseen instances: in-sample validation failed; held out anchor: 15 of 8121 contacts beyond 0.5 u; held out self: 19 of 4750 contacts beyond 0.5 u - inflate it or keep it out of the planner until more data closes this",
+    "contacts": 8125,
+    "uncovered_contacts": 14,
+    "uncovered_pairs": 41,
+    "unexplained": 1,
+    "outside_attacks": 4,
     "heldout_anchor": {
-     "n": 944,
-     "within_radius": 934,
-     "beyond_r_fail": 8,
-     "share_beyond": 0.0085,
-     "beyond_r_fail_t4": 6
+     "n": 8121,
+     "within_radius": 8100,
+     "beyond_r_fail": 15,
+     "share_beyond": 0.0018,
+     "beyond_r_fail_t4": 14
     },
     "heldout_self": {
-     "n": 573,
-     "within_radius": 557,
-     "beyond_r_fail": 9,
-     "share_beyond": 0.0157,
-     "beyond_r_fail_t4": 8
+     "n": 4750,
+     "within_radius": 4730,
+     "beyond_r_fail": 19,
+     "share_beyond": 0.004,
+     "beyond_r_fail_t4": 18
     }
    }
   }
  },
  "counters": {
-  "contacts with a shared source name (nearest subject)": 9104,
-  "contacts named by a collider child only (subject exporting it)": 1754,
-  "hazard contacts after the hazard left the export (its last owner)": 23,
-  "contacts named by a collider child only (exported up to LAG_F before)": 21
+  "contacts with a shared source name (nearest subject)": 74352,
+  "contacts named by a collider child only (subject exporting it)": 13604,
+  "contacts named by a collider child only (exported up to LAG_F before)": 176,
+  "hazard contacts after the hazard left the export (its last owner)": 175,
+  "hazard without an owner: rune slam": 2
  },
  "tables": {
-  "Song Heavy Sentry": "C:\\modeling\\silksong_bot\\.claude\\worktrees\\wf_946a7803-63c-2\\knowledge\\1.0.30000\\enemies\\forum\\ChoirClapper.json",
-  "Song Handmaiden": "C:\\modeling\\silksong_bot\\.claude\\worktrees\\wf_946a7803-63c-2\\knowledge\\1.0.30000\\enemies\\forum\\Clawmaiden.json",
-  "Song Administrator": "C:\\modeling\\silksong_bot\\.claude\\worktrees\\wf_946a7803-63c-2\\knowledge\\1.0.30000\\enemies\\forum\\Minister.json",
-  "Song Pilgrim Maestro": "C:\\modeling\\silksong_bot\\.claude\\worktrees\\wf_946a7803-63c-2\\knowledge\\1.0.30000\\enemies\\forum\\Maestro.json",
-  "Song Automaton Tiny": "C:\\modeling\\silksong_bot\\.claude\\worktrees\\wf_946a7803-63c-2\\knowledge\\1.0.30000\\enemies\\forum\\MaestroAutomaton.json",
-  "Song Reed": "C:\\modeling\\silksong_bot\\.claude\\worktrees\\wf_946a7803-63c-2\\knowledge\\1.0.30000\\enemies\\forum\\Reed.json",
-  "Song Pilgrim 01": "C:\\modeling\\silksong_bot\\.claude\\worktrees\\wf_946a7803-63c-2\\knowledge\\1.0.30000\\enemies\\forum\\Envoy.json",
-  "Song Pilgrim 03": "C:\\modeling\\silksong_bot\\.claude\\worktrees\\wf_946a7803-63c-2\\knowledge\\1.0.30000\\enemies\\forum\\Choristor.json",
-  "Pilgrim 03 Song": "C:\\modeling\\silksong_bot\\.claude\\worktrees\\wf_946a7803-63c-2\\knowledge\\1.0.30000\\enemies\\forum\\ChoirBellbearer.json"
+  "Song Heavy Sentry": "C:\\modeling\\silksong_bot\\.claude\\worktrees\\wf_198518ec-9ba-1\\knowledge\\1.0.30000\\enemies\\forum\\ChoirClapper.json",
+  "Song Handmaiden": "C:\\modeling\\silksong_bot\\.claude\\worktrees\\wf_198518ec-9ba-1\\knowledge\\1.0.30000\\enemies\\forum\\Clawmaiden.json",
+  "Song Administrator": "C:\\modeling\\silksong_bot\\.claude\\worktrees\\wf_198518ec-9ba-1\\knowledge\\1.0.30000\\enemies\\forum\\Minister.json",
+  "Song Pilgrim Maestro": "C:\\modeling\\silksong_bot\\.claude\\worktrees\\wf_198518ec-9ba-1\\knowledge\\1.0.30000\\enemies\\forum\\Maestro.json",
+  "Song Automaton Tiny": "C:\\modeling\\silksong_bot\\.claude\\worktrees\\wf_198518ec-9ba-1\\knowledge\\1.0.30000\\enemies\\forum\\MaestroAutomaton.json",
+  "Song Reed": "C:\\modeling\\silksong_bot\\.claude\\worktrees\\wf_198518ec-9ba-1\\knowledge\\1.0.30000\\enemies\\forum\\Reed.json",
+  "Song Pilgrim 01": "C:\\modeling\\silksong_bot\\.claude\\worktrees\\wf_198518ec-9ba-1\\knowledge\\1.0.30000\\enemies\\forum\\Envoy.json",
+  "Song Pilgrim 03": "C:\\modeling\\silksong_bot\\.claude\\worktrees\\wf_198518ec-9ba-1\\knowledge\\1.0.30000\\enemies\\forum\\Choristor.json",
+  "Pilgrim 03 Song": "C:\\modeling\\silksong_bot\\.claude\\worktrees\\wf_198518ec-9ba-1\\knowledge\\1.0.30000\\enemies\\forum\\ChoirBellbearer.json"
  },
  "code": {
-  "sha": "9a145743175038f949f7fc9d0165bedb5e7009b3",
-  "branch": "worktree-wf_946a7803-63c-2",
-  "dirty": false
+  "sha": null,
+  "branch": null,
+  "dirty": null
  }
 }
