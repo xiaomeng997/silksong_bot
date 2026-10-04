@@ -88,7 +88,7 @@
 | 长爪 Longclaw | 腐殖渠女猎手的"育巢盛宴"许愿【包】 |
 | 念珠炮 Rosary Cannon | 拾取物在 Forum 隔壁的 `Hang_06` 场景包里【包】；wiki 说它在一扇要简易钥匙的门后【攻，门锁没用游戏数据核对】（简易钥匙在 Bone Bottom 卖 500【包】）；子弹是念珠 |
 | 燧石板 Flintslate | Deep Docks 简易钥匙门后【攻】 |
-| 机轮刃 / 迅捷脊锁 / 锯齿环 | 第十二席建筑师 360 / 140 / 230 + 各 1 工艺金属【包】 |
+| 机轮刃 / 迅捷脊锁 / 锯齿环 | 第十二席建筑师 360 / 140 / 230 + 各 1 工艺金属【包】。**锯齿环 Sawtooth Circlet**（内部名 `Brolly Spike`，**蓝**）：货单条件 `hasBrolly`（有 Drifter's Cloak 才上架，路线 S08 就有）【包 shops_all.txt】；开披风（滑翔）时旋转利刃伤周围敌人【loc】，代码里二段跳也会触发（`HeroController.cs:8948`，我们没有二段跳）；滑翔触发走 Brolly FSM，伤害数值和判定范围**还没读**；你 10-04 问能不能拿：能（S23 Underworks 的建筑师店，但 `Under_17` 是否在 S23 路径上没查）；代价是 230 + 第 3 块工艺金属（DESIGN 只预留了 2 块）和一个蓝槽（Hunter_v2 蓝 2 = 裂痕面具 + 护佑钟；Wanderer 路线没有蓝槽） |
 | 丝弹 Silkshot | 要先在 Weavenest Murglin 拿到坏掉的工具，再花念珠 + 工艺金属修【攻】 |
 | 爆燃囊 Pimpillo | Greymoor 西北的隐藏房间合成（`Wisp_06` 合成桌）【包】【攻】，要材料，位置偏 |
 | 丝刃冲刺 Sharpdart | 蠕道 `Crawl_05` 神龛【包】；社区逻辑图下我们的能力到不了【攻】 |
