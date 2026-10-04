@@ -51,6 +51,7 @@ from ssbot.backends.observability import ObservabilityFilter
 from ssbot.backends.oracle_backend import OracleBackend
 from ssbot.combat.boss_model import BossModel
 from ssbot.combat.forecast import Forecaster, load_box_margin, load_hurtbox, load_planner_templates
+from ssbot.combat.hero_damage import HeroDamage
 from ssbot.combat.planner import Planner, PlannerConfig
 from ssbot.combat.safety_filter import FilterContext, KillKnowledge
 from ssbot.combat.tactics import Tactics, load_playbook
@@ -323,7 +324,12 @@ class PlannerPolicy:
             ws.terrain.gates = [Gate("Gate", True, (67.2, 0.0, 69.2, 14.0))]
             prefs = self.tac.decide(ws, f, None, 2)
             prefs.want_bind = True
-            ctx = FilterContext.from_world(ws, None, 2, want_bind=True)
+            # a kill target in reach (5 HP), so the killing-blow kernel (safety_filter._kill_kernel) compiles here,
+            # not on the first tick with a boss in view (live 20261004_041255 ep 0 on both instances: "paused
+            # unasked" 3.4 s in, the 250 ms brain-lost watchdog during that compile)
+            ctx = FilterContext.from_world(ws, None, 2, want_bind=True, kill_hp=5.0, kill_window_s=self.kill_window_s,
+                                           damage=HeroDamage.from_loadout("Hunter", 0, ("Silk Spear",)))
+            ctx.support_known = True
             S = kin.initial_state(self.params, x, 2.015 + self.params.foot, mode=mode)
             planner.tick(ws, S, HoldState.idle(1), np.zeros(1, np.int64), f, prefs, ctx)
             f.prob(np.full((3, 5), x), np.full((3, 5), 3.05), np.arange(5) * 0.0167)
