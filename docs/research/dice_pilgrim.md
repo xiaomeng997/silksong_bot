@@ -1,10 +1,10 @@
 # 磁石骰与蚀阶的赌徒兰布尔（PC 1.0.30000）
 
-**问题（你，2026-10-04）：** "骰子是在蚀阶跟一个 NPC 赌博拿到的；开着 mod，赌骰子不就很容易吗？" 本文核对：骰子到底从哪来（§1）、那个 NPC 在哪、什么时候在（§2）、赌局怎么实现、能不能稳赢（§3）、只读 oracle 比画面多看到什么（§4）、骰子值不值一个黄槽（§5）。
+**问题（你，2026-10-04）：** "骰子是在蚀阶跟一个 NPC 赌博拿到的。" 本文核对：骰子到底从哪来（§1）、那个 NPC 在哪、什么时候在（§2）、赌局怎么实现、能不能稳赢（§3）、只读 oracle 比画面多看到什么（§4）、骰子值不值一个黄槽（§5）。
 
-**标签：** 【码 文件:行】反编译 1.0.30000 C#（`C:\ssbot\decomp\1.0.30000`）；【包】离线 UnityPy 读训练副本 `C:\ssbot\game\train` 的场景包和数据包（只读）；【本地化】解密后的语言表（`C:\ssbot\sandbox\forum_tools_scripts\loc`）；【攻】社区资料（rando 逻辑图 `room_graph_data.json`，不是游戏数据）；【推】由代码或数据推出、未实测；【估】估计；【未核实】待实测。
+**标签：** 【码 文件:行】反编译 1.0.30000 C#（`C:\ssbot\decomp\1.0.30000`）；【包】离线 UnityPy 读训练副本 `C:\ssbot\game\train` 的场景包和数据包（只读）；【本地化】解密后的语言表（`C:\ssbot\sandbox\forum_tools_scripts\loc`）；【攻】社区资料（Archipelago rando 逻辑图 `room_graph_data.json`，2026-09-28 下载，本地副本 `C:\ssbot\sandbox\dice_pilgrim_scripts\room_graph_data.json`，不是游戏数据）；【推】由代码或数据推出、未实测；【估】估计；【未核实】待实测。
 
-**脚本与原始输出：** `C:\ssbot\sandbox\dice_pilgrim_scripts\`（全部离线、低优先级，没有连接任何游戏实例）：`scan_all.py` → `scan_all.txt`（590 个场景包里含 `dicePilgrim` / `Dice` 字符串的组件）；`scan_pptr.py` → `scan_pptr_dice.txt`（全部 2,068 个包里引用磁石骰资产的组件）；`dump_fsm.py`（dataVersion 2 逐参数解码，沿用 `four_ach_fix/rawp.py`）→ `fsm_play_point.txt`（赌桌）、`fsm_dialogue.txt`（兰布尔对话）、`fsm_control.txt`（场景状态）、`fsm_die_octagon.txt`（骰子漂浮）、`fsm_bell_dropper.txt`；`scene_pos.py` → `scene_coral33_dice.txt`、`scene_coral32_dice.txt`（对象、坐标、组件字段）；`tk2d_clips.py` → `tk2d_dice.txt`、`tk2d_dice_hornet.txt`（动画帧率、帧、触发帧、精灵号）；`mapzone.py`、`threats.py`、`geo_magnet.py`、`imbue.py`、`fcall.py`；`gamble_math.py` → `gamble_math.txt`（赌局和护盾的精确概率）。
+**脚本与原始输出：** `C:\ssbot\sandbox\dice_pilgrim_scripts\`（全部离线、低优先级，没有连接任何游戏实例）：`scan_all.py` → `scan_all.txt`（590 个场景包里含 `dicePilgrim` / `Dice` 字符串的组件）；`scan_pptr.py` → `scan_pptr_dice.txt`（全部 2,068 个包里引用磁石骰资产的组件）；`dump_fsm.py`（dataVersion 2 逐参数解码，沿用 `four_ach_fix/rawp.py`）→ `fsm_play_point.txt`（赌桌）、`fsm_dialogue.txt`（兰布尔对话）、`fsm_control.txt`（场景状态）、`fsm_die_octagon.txt`（骰子漂浮）、`fsm_bell_dropper.txt`；`scene_pos.py` → `scene_coral33_dice.txt`、`scene_coral32_dice.txt`（对象、坐标、组件字段）；`tk2d_clips.py` → `tk2d_dice.txt`、`tk2d_dice_hornet.txt`（动画帧率、帧、触发帧、精灵号）；`mapzone.py`、`threats.py`、`geo_magnet.py`、`imbue.py`、`fcall.py`；`gamble_math.py` → `gamble_math.txt`（赌局和护盾的精确概率）；`bell_v4.py` → `bell_v4.txt`（Bellhart 银铃长期比例，逐行移植 `SendRandomEventV4`）；`comm_rooms.py` → `comm_rooms.txt`（从 rando 逻辑图读 `Coral_33/43/35`、`Bellway_08` 的能力要求）。
 
 ---
 
@@ -14,12 +14,12 @@
    - **赌赢他**：让他输光本钱，他付不起最后一注，改送骰子（`Play Point` FSM 的 `Get Reward`：`SetToolUnlocked Magnetite Dice` + `dicePilgrimDefeated`）。
    - **他的尸体**：没赢过他时，只要打过**齿轮舞者**（Cogwork Dancers）或拿到**飞针**（Clawline），之后在蚀阶以外发生一次 TimePasses（坐椅子、死亡、存档退出），他就死在赌桌旁，尸体边有一个骰子拾取物，**免费，不用赌**（Act 1–2）。
    - **Grindle 300 念珠**：只在 Act 3（`blackThreadWorld`），而且只在你还没有骰子时出现，是后备。
-2. **赌局不靠运气。** 每局胜负平时是 50/50 抛硬币，但有"**完美掷骰**"：按住"掷骰"约 4.5 s（或 4.8 s，见 §3.3），霍内特换成特殊的掷骰动作并响一声，**之后 0.3 s 内松手，这一局必赢**【包】。这个信号在画面上（和声音里）就有，所以**视觉在 Switch 上也能做**，不需要 mod。数据里还有一个疑似漏洞：完美一次以后标志不复位，之后几局只要在窗口结束前松手（随手一按）都算完美【推，待实测】。
+2. **赌局不靠运气。** 每局胜负平时是 50/50 抛硬币，但有"**完美掷骰**"：按住确认键，霍内特开始掷骰动作（`Roll Start`）后约 4.5 s（或 4.83 s，见 §3.3）换成特殊的掷骰动作并响一声，**之后 0.3 s 内松手，按 FSM 数据这一局必赢**【包；未实测，§7】。这个信号在画面上（和声音里）就有，所以**视觉在 Switch 上也能做**，不需要 mod。**第 2 局起要注意：**每局结束后"继续游戏"的那一下确认键**本身就是下一局的掷骰**——之后只有 0.5 s 收骰、0.5 s 起手，没有新的"掷骰"提示；必须从按"继续"起一直按住（窗口在按下后约 5.0 / 5.33 s），按一下就松会立刻普通掷出（50/50）【包 `Hornet Choice` → `Hornet Collect 1/2` → `Roll Start` → `Rolling`】。数据里还有一个疑似漏洞：完美一次以后标志不复位，之后几局只要在窗口结束前松手（随手一按）都算完美【推，待实测】。
 3. **赌注和风险：** 每局 4 念珠（"一拍子念珠"），兰布尔本钱 16；要**净赢 5 局**，第 5 局他付不起，改给骰子。所以只要打完，一定净赚 **+16 念珠**，中途输掉的都会赢回来；只有中途放弃才会净亏（亏的部分记在他的本钱里，存档保留）。坐下和每局继续都要求身上至少 4 念珠，**不会输掉身上没有的念珠**【包】。全靠抛硬币时要净赢 5 局，平均要几十到上百局（§3.5），完美掷骰时 5 局就完。
 4. **开 mod 有没有额外好处：基本没有。** 只读 oracle 能直接读到的东西（FSM 是否在完美窗口、完美标志、兰布尔剩余本钱）都能从画面推出来。抛硬币是在两人都掷完之后才用 Unity 全局随机数抽的，**之前没有任何预先决定、可以偷看的值**【包】【码】。所以视觉能做的完美掷骰就是最优策略，不需要也不应该用隐藏状态（§4）。
-5. **骰子的作用（代码）：** 被**敌人**打中时，按"连续没挡住的次数" 0/1/2/3/4/≥5 给 0/2/4/6/8/10 %（实际是 /99）的概率**整下免伤**（2 格的重击也整下免掉，击退和无敌帧照常）；挡住一次后归零。长期平均每 12.8 次敌人命中挡 1 次（7.8 %）。运气 ×1.1 只影响 Wanderer 暴击（2 % → 2.2 %）和火焰附魔的"幸运命中"；**不影响念珠、壳片掉落**（只在同时带念珠磁铁时让念珠早 30 % 开始被吸）【码】【包】。
-6. **建议（Ending 1 路线）：默认不去拿。** 它占一个黄槽，而 Hunter 只有 2 个黄槽，已分给负重环带（确定性的减击退、加无敌帧，规划器在用）和爬墙爪（Forum 口袋）。我们的 bot 每场挨打很少（Bell Beast 门槛 66 场共 3 次），随机护盾几乎碰不到，也不能被安全监督当作保护。绕路 + 赌局约 **3–4.5 min**【估】。如果 K1 的 A/B（训练里用 DebugMod 直接给骰子）证明某场 A 类战斗换掉负重环带更好，再在 S17 加这段（确定性、视觉合法）。**100 % 部分：不用赌**，Ending 1 之后（还在 Act 2，Dancers 已打）到 `Coral_33` 免费捡尸体旁的骰子；错过了就 Act 3 找 Grindle（300）。
-7. **DESIGN §3.6.4 "永不交战"里的"Lumble 的骰子"** 理由要改：它不是战斗，是可以稳赢的小游戏；不做的理由是占槽和时间（§6）。
+5. **骰子的作用（代码）：** 被**敌人**打中时，按"连续没挡住的次数" 0/1/2/3/4/≥5 给 0/2/4/6/8/10 %（实际是 /99）的概率**整下免伤**（2 格的重击也整下免掉，击退和无敌帧照常）；挡住一次后归零。长期平均每 12.8 次敌人命中挡 1 次（7.8 %）。运气 ×1.1 只影响 Wanderer 暴击（2 % → 2.2 %）和火焰附魔的"幸运命中"；**不影响念珠、壳片掉落**（只在同时带念珠磁铁时让念珠早 30 % 开始被吸）；Bellhart 许愿的银铃比例约 31 % → 35 %（路线外）【码】【包】。
+6. **建议（Ending 1 路线）：默认不去拿。** 它占一个黄槽，而 Hunter 只有 2 个黄槽，已分给负重环带（确定性的减击退、加无敌帧，规划器在用）和爬墙爪（Forum 口袋）。我们的 bot 每场挨打很少（Bell Beast 门槛 66 场共 3 次），随机护盾几乎碰不到，也不能被安全监督当作保护。绕路 + 赌局约 **3–4.5 min**【估】。如果 K1 的 A/B（训练里用 DebugMod 直接给骰子）证明某场 A 类战斗换掉负重环带更好：只是 S19（Dancers）之后的战斗要它，就在 Dancers 之后回 `Coral_33` 捡尸体旁的骰子（不用赌，只花路程）；只有 Last Judge 本身要它，才在 S17 加赌局这段（视觉合法）。**100 % 部分：不用赌**，Ending 1 之后（还在 Act 2，Dancers 已打）到 `Coral_33` 免费捡尸体旁的骰子；错过了就 Act 3 找 Grindle（300）。
+7. **DESIGN §3.6.4 "永不交战"里的"Lumble 的骰子"** 理由要改：它不是战斗，是按 FSM 数据可以稳赢的小游戏（未实测）；不做的理由是占槽和时间（§6）。
 
 ---
 
@@ -50,11 +50,11 @@
 
 赢过他（`dicePilgrimDefeated`）以后，同样的条件把状态改成 2（离开），`Coral_33` 里什么都不剩，`Coral_32` 出现他的尸体布景【码 GameManager.cs:1457-1460】【包】。
 
-社区 rando 逻辑图对 `Coral_33`（"Lumble the Lucky"）的写法与此一致："（Bankrupt Lumble 或 Clawline 或 Cogwork Dancers）且 Act 1 或 Act 2"；Grindle 一项注明"IF NOT Acquired from Lumble"【攻】。
+社区 rando 逻辑图对 `Coral_33`（"Lumble the Lucky"）的写法与此一致："（Bankrupt Lumble 或 Clawline 或 Cogwork Dancers）且 Act 1 或 Act 2"；Grindle 一项（`Coral_42`，Act 3）注明"IF NOT Acquired from Lumble"【攻 `comm_rooms.txt`】。
 
 ### 1.3 `four_achievements.md` §4.3 为什么错
 
-修订轮的原始扫描 `four_ach_scripts\scan_items.jsonl` **其实扫到了**这两处（`coral_33` 的 `Play Point` / `Get Reward` 和 `Dice Game Corpse/Collectable Item Pickup`）。但汇总表 `summ2_tools.txt` 对磁石骰列出 117 个引用时，前面 101 个是念珠预制体 `GeoControl` 的"磁铁加速工具"字段（§5.1），14 个是 Bellhart 许愿的铃铛掉落判定，只显示了前几条，后面两条被截断；§4.3 按截断后的汇总下了"唯一来源是 Grindle"的结论。教训：汇总不能截断，100 % 清单要按"来源类组件"（拾取物、`SetToolUnlocked`、商店、许愿奖励）单独列，不能和"检查是否装备"的引用混在一起。本分支已改正 §4.3 和相关结论（见 §6）。
+修订轮的原始扫描 `four_ach_scripts\scan_items.jsonl` **其实扫到了**这两处（`coral_33` 的 `Play Point` / `Get Reward` 和 `Dice Game Corpse/Collectable Item Pickup`）。但汇总表 `summ2_tools.txt` 对磁石骰的 117 个引用（101 个是念珠预制体 `GeoControl` 的"磁铁加速工具"字段（§5.1），14 个是 Bellhart 许愿的铃铛掉落判定，2 个是 `coral_33` 的来源）**只打印了前 14 个**（`summ2.py` 的 `items[:14]`）；两个 `coral_33` 来源是第 63–64 个，藏在被省略的中间部分，不是"末尾被截掉"。§4.3 按截断后的汇总下了"唯一来源是 Grindle"的结论。教训：汇总不能只显示前 N 条，100 % 清单要把"来源类组件"（拾取物、`SetToolUnlocked`、商店、许愿奖励）无条件单独列出，不能和"检查是否装备"的引用混在一起。本分支已改正 §4.3 和相关结论（见 §6）。
 
 ### 1.4 赌注不是"一串念珠"
 
@@ -71,7 +71,7 @@
 - 死胡同房间，只有 right1 (57.5, 66) 通 `Coral_43`。赌桌 `Play Point` (22.6, 60.1)，兰布尔 (18.9, 61.4)，尸体拾取物 (20.2, 60.3)。
 - 房间里 Normal World 没有敌人（14 个 `DamageHero`、4 个 `HealthManager` 都在 Act 3 的 Garmond 场景下）；`Coral_43` 没有敌人和伤害体；`Coral_35` 有 3 个尖刺碰撞体【包 `threats.py`；只查场景内对象，生成器生成的敌人没查】。
 
-### 2.2 从 S17 路线过去【包：门坐标】【攻：能力要求】【估：时间】
+### 2.2 从 S17 路线过去【包：门坐标】【攻 `comm_rooms.txt`：能力要求】【估：时间】
 
 S17 在 `Coral_03` 竖井顶端从 right1 (60.5, 203) 去 `Coral_32` → Last Judge。竖井顶端另一侧 left1 (−0.5, 203) 就是 `Bellway_08`：
 
@@ -84,7 +84,7 @@ S17 在 `Coral_03` 竖井顶端从 right1 (60.5, 203) 去 `Coral_32` → Last Ju
 | `Coral_33` right1 (57.5, 66) → 赌桌 (22.6, 60.1) | | 35.5 u |
 
 - 单程从 `Coral_03` left1 起约 260 u、4 道门；往返约 520 u、8 道门，加竖井顶端横穿最多 2 × 61 u。按 `benches.md` 的方法（4–8 u/s，每门 0.5 s）**往返约 70–165 s**【估】。
-- 能力：`Coral_43` 的沙坑两侧要冲刺、Drifter's Cloak、飞针等任一（路线 S05/S08 已有）；回程在 `Coral_35` 从下半段爬回 right1 要 Cling Grip 等（S12 已有）【攻 `room_graph_data.json`】。
+- 能力：`Coral_43` 沙坑与右侧之间（两个方向）要冲刺（sprint）、Drifter's Cloak、Faydown Cloak、Clawline、Sharpdart 任一（或 Flea Brew 跳跃配合纹章下劈 / 滞空）（路线 S05/S08 已有）；回程在 `Coral_35` 从 bl 门所在的底段下半爬到 right1 所在的底段上半要 Cling Grip、Scuttlebrace（medium）、Faydown Cloak、或 Silk Soar + 抓边 任一（S12 已有 Cling Grip）【攻 `comm_rooms.txt`；社区逻辑，未在游戏里核实】。
 - 拿到后要装上得坐工作台（DESIGN §3.6.5 只在工作台换装）。回程正好经过 `Bellway_08` 的钟椅（40 念珠，`benches.md` 里本来就是 S17 的条件购买），坐下约 +10 s。
 
 ### 2.3 什么时候在【码】【包】
@@ -104,8 +104,8 @@ S17 在 `Coral_03` 竖井顶端从 right1 (60.5, 203) 去 `Coral_32` → Last Ju
 |---|---|---|
 | `Kneel Start` | 本钱 < 0 → 输光后的对话；身上念珠 < 4 → `DICE_PILGRIM_NOTENOUGH`；否则隐藏英雄、跪坐动画 | 0.33 s 触发 |
 | `Give Anim` → `Dice Idle` | 兰布尔递骰子；提示"掷骰"（菜单确认键）。**这里没有取消键**：跪下后第一局必须掷 | 约 0.4 s + 等按键 |
-| `Roll Start` | 按下确认；置 `Hornet Turn`、`Perfect Roll = 0`（**不清 `Perfect Timing`**）；播 `Hornet Roll` | 0.5 s |
-| `Rolling` | 一直按住；松开（`ListenForMenuSubmit` 的 isNotPressed）→ `Throw Antic`。`Wait 4.0 s`（游戏时间）后 → `Wait For Anim Loop` | 按住时长 |
+| `Roll Start` | 第一局从 `Dice Idle` 按下确认进来，第 2 局起从 `Hornet Collect 2` 进来（见表末两行）；置 `Hornet Turn`、`Perfect Roll = 0`（**不清 `Perfect Timing`**）；播 `Hornet Roll`；**没有输入监听** | 0.5 s |
+| `Rolling` | 必须仍按着确认：`ListenForMenuSubmit` 每帧检查（第一帧就查），没按着（isNotPressed）→ 立刻 `Throw Antic`。`Wait 4.0 s`（游戏时间）后 → `Wait For Anim Loop` | 按住时长 |
 | `Wait For Anim Loop` | 等 `Hornet Roll` 的下一个触发帧；松开 → `Throw Antic` | 0–0.33 s |
 | `Perfect Anim` | **完美窗口**：`Perfect Timing = 1`，换播 `Hornet Roll Special`，响一声；松开 → `Throw Antic` | 0.3 s |
 | `Rolling 2` | 窗口过了：`Perfect Timing = 0`，音高回落；松开 → `Throw Antic` | 不限 |
@@ -114,11 +114,12 @@ S17 在 `Coral_03` 竖井顶端从 right1 (60.5, 203) 去 `Coral_32` → Last Ju
 | `Pilgrim Collect 1/2` → `Pilgrim Roll` → `Pilgrim Throw` → … `Combine Pause` | 兰布尔收骰、掷骰，同样是表演 | 0.5 + 1–2 + 1.25–1.5 + 2.5 s |
 | `Who Won?` | 见 §3.2 | 0 |
 | `Lose Rosaries` / `Gain Rosaries` | 输：`TakeGeo(4)`，本钱 +4。赢：本钱 −4；本钱 < 0 → `PILGRIM DEPLETED`（**这时不执行后面的 `AddGeo`**，最后一注不付），否则 `AddGeo(4)` | 0 |
-| `Hornet Turn Pause` → `Hornet Choice` | 身上念珠 < 4 → 兰布尔赢光的对话后结束；确认键 = "继续游戏"，取消键 = "停止" | 0.5 s + 等按键 |
+| `Hornet Turn Pause` → `Hornet Choice` | 身上念珠 < 4 → 兰布尔赢光的对话后结束；确认键 = "继续游戏"（`ListenForMenuActionsV2` 的 SubmitPressed，按下那一帧触发），取消键 = "停止"。**"继续游戏"的这一下就是下一局的掷骰按键**：要从这里一直按住，经过下面两个状态进 `Rolling` | 0.5 s + 等按键 |
+| `Hornet Collect 1` → `Hornet Collect 2` → `Roll Start` | 霍内特收回骰子（`Hornet Pickup`：12 fps、6 帧，`Collect 1` 等第 3 帧触发 0.25 s，`Collect 2` 等播完再 0.25 s）；**没有输入监听、没有新的"掷骰"提示**（`CTRL_ROLL` 提示只在 `Dice Idle` 里） | 0.5 s |
 
 最后一注不付的依据：PlayMaker 在某个动作触发转移后不再执行同一状态后面的动作【码 PlayMaker FsmState.cs:293-324（每个动作的 `OnEnter` 后 `IsSwitchingState` 为真就返回）、Fsm.cs:2671-2688（`DoTransition` 置 `switchToState`）】；对话也说"最后这把的赌注我给不起"【本地化】。
 
-**每局时长**（从按下确认算起，不含按住）：0.5（收骰，第一局是跪坐）+ 0.5 + 0.08 + 1.5–1.75 + 2.5 + 0.5 + 1–2 + 1.25–1.5 + 2.5 + 0.5 ≈ **11.3–12.8 s，均值约 11.6 s**；完美掷骰要多按住约 4.1–4.5 s，**约 15.7–17.3 s 一局**【包：FSM 等待和动画长度；推：没算帧对齐和输入延迟】。
+**每局时长**（从按下确认算起，不含按住）：0.5（收骰，第一局是跪坐）+ 0.5 + 0.08 + 1.5–1.75 + 2.5 + 0.5 + 1–2 + 1.25–1.5 + 2.5 + 0.5 ≈ **10.8–12.3 s，均值约 11.6 s**；完美掷骰要在 `Rolling` 多按住 4.0 s + 等触发帧 0–0.33 s + 反应约 0.05–0.1 s，**约 14.9–16.8 s 一局（均值约 15.8 s）**【包：FSM 等待和动画长度；推：没算帧对齐和输入延迟】。
 
 ### 3.2 胜负怎么抽【包】【码】
 
@@ -133,14 +134,15 @@ S17 在 `Coral_03` 竖井顶端从 right1 (60.5, 203) 去 `Coral_32` → Last Ju
 
 - `Hornet Roll`：12 fps，6 帧，帧 0–1 后循环帧 2–5，触发帧在帧 2（循环起点），所以每 4/12 = 0.333 s 一次触发；精灵号 55, 56, **57–60**。
 - `Hornet Roll Special`：12 fps，6 帧，精灵号 **80, 81**, 57–60 —— **只有前两帧（1/6 s，约 10 个 60 fps 画面帧）和普通掷骰不同**，之后和普通循环一样。
-- 窗口起点 T0：`Roll Start` 进入时开始播 `Hornet Roll`，0.5 s 后进 `Rolling`，再 4.0 s 后等下一个触发帧。触发帧出现在按下后 0.167 + 0.333·n s，`Rolling` 结束在约 4.5 s，正好落在第 13 个触发点上，同一帧里谁先谁后取决于帧对齐和更新顺序，所以 **T0 ≈ 4.5 s 或 ≈ 4.83 s（双峰）**【推，待实测】。两个窗口 [4.5, 4.8) 和 [4.83, 5.13) 不重叠，**盲按固定时长不可靠**，要看画面。
-- **视觉做法（Switch 也能用）**：按住确认 → 等霍内特出现精灵 80/81（或听到提示音）→ 下一帧松开。窗口 0.3 s，前 0.167 s 有专用精灵，按 60 fps 采集、1–3 帧识别、1–2 帧输入延迟，松开会落在 T0 后约 0.05–0.1 s，余量足够【推】。成功的确认信号：松手后镜头震动 + 三颗骰子闪光 + 音效（`Perfect?` 状态）；没有这些就是普通掷，按 50/50 处理。
-- **疑似漏洞（`Perfect Timing` 不复位）**：`Perfect Timing` 只在 `Perfect Anim` 置 1、在 `Rolling 2` 置 0，`Roll Start` 不清它【包：`Roll Start` 里只清 `Perfect Roll`；全场景搜索 `Perfect Timing` 只出现在 `Perfect?`、`Rolling 2`、`Perfect Anim`】。所以完美一次之后，只要下一局在窗口结束前松手（包括按一下就松），`Perfect?` 仍读到真，照样算完美；按住超过窗口进了 `Rolling 2` 才会清掉。离开场景再回来 FSM 重新初始化为 0。【推，待实测】稳妥的脚本不依赖它：每局都看画面掐窗口；想省时间就在确认上一局完美后试一次"按一下"，看到成功信号再继续这样做。
+- 窗口起点 T0（**从进入 `Roll Start` 算起**，即霍内特开始播 `Hornet Roll`、出现精灵 55 的那一帧）：0.5 s 后进 `Rolling`，再 4.0 s 后等下一个触发帧。触发帧出现在 0.167 + 0.333·n s，`Rolling` 结束在约 4.5 s，正好落在第 13 个触发点上，同一帧里谁先谁后取决于帧对齐和更新顺序，所以 **T0 ≈ 4.5 s 或 ≈ 4.83 s（双峰）**【推，待实测】。两个窗口 [4.5, 4.8) 和 [4.83, 5.13) 不重叠，**盲按固定时长不可靠**，要看画面。
+- **换算到按键时刻：** 第一局在 `Dice Idle` 按下确认就进 `Roll Start`，所以 T0 ≈ 按下后 4.5 / 4.83 s。第 2–5 局在 `Hornet Choice` 按"继续游戏"后先走 `Hornet Collect 1/2`（`Hornet Pickup`，0.5 s），所以 T0 ≈ 按下后 **5.0 / 5.33 s**【包】【推】。按固定"按下后 4.6 s"盲松，第 2 局起永远落在窗口前。
+- **视觉做法（Switch 也能用）**：按住确认（第 2 局起就是"继续游戏"那一下，**不要松**：中间 1.0 s 的收骰 + 起手没有输入监听，但进 `Rolling` 的第一帧没按着就会立刻普通掷出；松了再在进 `Rolling` 前重新按住理论上也行【推】，但没必要）→ 等霍内特出现精灵 80/81（或听到提示音）→ 下一帧松开。窗口 0.3 s，前 0.167 s 有专用精灵，按 60 fps 采集、1–3 帧识别、1–2 帧输入延迟，松开会落在 T0 后约 0.05–0.1 s，余量足够【推】。成功的确认信号：松手后镜头震动 + 三颗骰子闪光 + 音效（`Perfect?` 状态）；没有这些就是普通掷，按 50/50 处理。
+- **疑似漏洞（`Perfect Timing` 不复位）**：`Perfect Timing` 只在 `Perfect Anim` 置 1、在 `Rolling 2` 置 0，`Roll Start` 不清它【包：`Roll Start` 里只清 `Perfect Roll`；全场景搜索 `Perfect Timing` 只出现在 `Perfect?`、`Rolling 2`、`Perfect Anim`】。所以完美一次之后，只要下一局在窗口结束前松手（包括在"继续游戏"时按一下就松，这时一进 `Rolling` 就掷出），`Perfect?` 仍读到真，照样算完美；按住超过窗口进了 `Rolling 2` 才会清掉。离开场景再回来 FSM 重新初始化为 0。【推，待实测】稳妥的脚本不依赖它：每局都看画面掐窗口；想省时间就在确认上一局完美后试一次"按一下"，看到成功信号再继续这样做。
 - `Perfect?` 里还留着一个关掉的旧判定（`FloatInRange Roll Time` 3.8–4.2），说明早期版本按"按住时长"判定，现在改成跟动画对齐的窗口【包】。
 
 ### 3.4 玩家能做的选择
 
-只有两个：每局按住多久（松手时机）；每局结束后"继续游戏 / 停止"。赌注固定 4，不能加注，没有重掷、保留骰子这类选择。第一局跪下后不能取消（`Dice Idle` 没有取消事件）。
+只有两个：每局按住多久（松手时机；第 2 局起按住是从"继续游戏"那一下开始算的）；每局结束后"继续游戏 / 停止"。赌注固定 4，不能加注，没有重掷、保留骰子这类选择。第一局跪下后不能取消（`Dice Idle` 没有取消事件）。
 
 ### 3.5 胜率、局数、时间（`gamble_math.txt`）【推：模型】
 
@@ -159,7 +161,7 @@ S17 在 `Coral_03` 竖井顶端从 right1 (60.5, 203) 去 `Coral_32` → Last Ju
 
 - 纯抛硬币是对称随机游走：打完的概率 = a / (a + 5)，a = ⌊R / 4⌋；平均局数（不论打完与否）= 5a，R = 100 时 125 局、约 24 min。**纯靠运气不可行**；有完美掷骰就是 5 局。
 - **念珠：** 打完时净赚恒为 +16（W − L = 5，最后一胜不付：4 × (W − 1) − 4 × L = 16）。需要的只是"身上 ≥ 4"；完美掷骰下最多输几局，身上有 20 念珠就够【推】。
-- **桌边总时间**（完美掷骰，每局都掐窗口）：对话（第一次 `MEET` 5 页 + `MEET2` 3 页）约 10 s + 5 局约 80–85 s + 赢后对话 `DICE_PILGRIM_DEPLETED` 5 页和拿骰子动作约 10 s ≈ **100–110 s**；漏洞成立、后 4 局按一下就松时约 85–90 s。得到工具时是否有需要按键关掉的弹窗【未核实】。
+- **桌边总时间**（完美掷骰，每局都掐窗口）：对话（第一次 `MEET` 5 页 + `MEET2` 3 页）约 10 s + 5 局约 75–84 s + 赢后对话 `DICE_PILGRIM_DEPLETED` 5 页和拿骰子动作约 10 s ≈ **95–105 s**；漏洞成立、后 4 局按一下就松时约 80–85 s。得到工具时是否有需要按键关掉的弹窗【未核实】。
 - **加上往返**（§2.2，70–165 s）：**整段约 3–4.5 min**【估】。
 
 ---
@@ -187,7 +189,7 @@ S17 在 `Coral_03` 竖井顶端从 right1 (60.5, 203) 去 `Coral_32` → Last Ju
 1. **敌人命中护盾**【码 HeroController.cs:5430-5453、5723-5734】：装备时、伤害类型为 `ENEMY`、且这一下已经通过了无敌帧等判定，按计数器 `luckyDiceShieldedHits`（连续没挡住的敌人命中次数）取阈值 0/2/4/6/8/10，`Random.Range(1, 100)`（1–99）≤ 阈值就把这一下伤害置 0。挡住 → 计数归零；没挡住 → +1。非 `ENEMY` 的伤害（尖刺、岩浆、酸、爆炸等）或没装备时挨打 → 计数归零。挡下的一下照样走 `HeroDamaged`、取消攻击、受击音和 `StartRecoil`（以伤害 0 调用；无敌帧时长是否随伤害变化没查），和 Warding Bell 一样；跳过的是 `damageAmount > 0` 那一段：扣血、受击特效、伤害事件、Hunter 纹章蓄力重置、Warrior / Reaper 状态扣减、Thief Charm 掉钱【码 HeroController.cs:5455-5672】。计数器是 HeroController 的字段，不存档，跨场景、跨战斗保留，回主菜单后重建为 0【推】。2 格的重击也整下免掉。Warding Bell 已经把伤害置 0 的那一下仍会推进计数【码：铃的判定在骰子之前】。
 2. **运气 ×1.1**（`GetLuckModifier`，只有两个调用点）【码 DamageEnemies.cs:1029、1286】：Wanderer 暴击率 2 % → 2.2 %（`wandererCritChance` 0.02【包 globalsettings】）；针附魔的"幸运命中"概率 ×1.1，数据里只有 `Fire Nail` 有（0.2 → 0.22，命中 2–5 次挂火 vs 普通 3–4 次）【包 profiles】。路线用 Hunter、不带火焰附魔，**对路线无效**。
 3. **念珠磁铁加速**：念珠预制体 `Geo Small/Med/Large` 的 `magnetBuffTool` 就是磁石骰：同时装着念珠磁铁（`magnetTool`）时，念珠开始被吸的延迟 1.0–1.7 s × 0.7【码 CurrencyObjectBase.cs:596-607】【包 `geo_magnet.py`】。没装念珠磁铁时无效；壳片不受影响。**不增加任何掉落量**。
-4. **Bellhart 铃铛许愿**：`Belltown_04`、`Belltown_Basement_03` 的 `Quest Bell Dropper`，装备时银铃概率 30 %（否则 25 %）【包 `fsm_bell_dropper.txt`】。路线外。
+4. **Bellhart 铃铛许愿**：`Belltown_04`、`Belltown_Basement_03` 的 `Quest Bell Dropper`，`Drop Type` 状态用 `SendRandomEventV4` 抽"普通 / 银铃"：装备时名义权重 30 %（否则 25 %），但这个动作带防连续限制——装备时 `eventMax` [4, 3]、`missedMax` [3, 4]，不装 [4, 2]、[2, 4]（普通最多连 4 个、银铃最多连 3 / 2 个，连续没出到上限就强制出）【包 `fsm_bell_dropper.txt`】【码 SendRandomEventV4.cs】。按代码逐行模拟 2×10⁶ 次，**长期银铃比例约 35.4 %（装备）vs 31.4 %（不装）**，两种情况都最多连 4 个普通铃【推 `bell_v4.txt`】。另外 `NoSilver Range` 范围检查命中时直接出普通铃（不经过随机），会把实际比例再拉低一点。路线外。
 5. 其余引用只是工具主列表、Grindle 商品和赌局本身。没有别的作用。
 
 ### 5.2 护盾能挡多少（`gamble_math.txt`）【推：按代码精确计算】
@@ -206,7 +208,7 @@ S17 在 `Coral_03` 竖井顶端从 right1 (60.5, 203) 去 `Coral_32` → Last Ju
 | 18 | 1.21 | 80 % | 1.40 | 84 % |
 
 - **对我们实测的挨打频率：** Bell Beast 门槛（oracle）66 场共 3 次受击、510 场 98.6 % CLEAR【`docs/facts/1.0.30000/m2_vision_view.md`、`probes.md`】：每场期望挡下 < 0.01，**几乎没用**。你的 Forum 半速练习赢的 4 场受击 7 / 13 / 6 / 18 次【`forum_human_demo.md`】：每场期望挡下约 0.3–1.4 次（即少掉 1–3 格），但 bot 的 Forum 目标是"每分钟 1–2 次受击以下"，期望挡下也会跟着降到 1 场 1 次以下。
-- **安全监督不能把它算作保护**：它是随机的，`hits_to_death` 和交战门都按最坏情况算；`brain/ssbot/combat/hero_damage.py` 把它列为 `KNOWN_NEUTRAL` 是对的。它的价值只是"偶尔白挡一下"，降低真实死亡概率，但不改变任何规划上界。
+- **安全监督不能把它算作保护**：它是随机的，`hits_to_death` 和交战门都按最坏情况算——`brain/ssbot/safety/hits_to_death.py` 里没有任何骰子项（只认蓝血、Fractured Mask、CriticalDamage 等确定性因素），这就是"不算保护"的实际代码依据，应保持不变。（另：`brain/ssbot/combat/hero_damage.py` 的 `KNOWN_NEUTRAL` 是"不改变**我方**针击伤害上界"的工具表，用于击杀规则；骰子列在里面是对的，因为 Wanderer 暴击已按纹章 ×3 计入上界、与暴击概率无关——它和受伤保护无关。）它的价值只是"偶尔白挡一下"，降低真实死亡概率，但不改变任何规划上界。
 
 ### 5.3 占哪个槽、挤掉谁
 
@@ -225,7 +227,9 @@ S17 在 `Coral_03` 竖井顶端从 right1 (60.5, 203) 去 `Coral_32` → Last Ju
 - 价值低：bot 挨打少，护盾期望很小；而且只能挤掉负重环带（S17 只有 1 个黄槽）。
 - 代价：整段约 3–4.5 min（§3.5），落在 CP2（S17）这个本来就紧的检查点前；念珠 +16 可忽略。
 - 风险：绕路几乎无风险（`Coral_43`、`Coral_33` 没有敌人，`Coral_35` 有尖刺）；赌局本身没有战斗风险。
-- **什么时候改主意：** K1 用 DebugMod 在训练副本里直接给骰子（训练允许写，正式运行不允许），按 boss 对比"负重环带 vs 磁石骰"的 WOULD_DIE 上界和险情率；如果某场 A 类（Last Judge、Lace 2、GMS、Forum 等）换上骰子明显更好，再在 S17 加："爬完 `Coral_03` → left1 → `Bellway_08`（买钟椅 40，`benches.md` 本来就有这个条件购买）→ `Coral_35` → `Coral_43` → `Coral_33`：说话两次 → 赌 5 局（每局看画面掐完美窗口）→ 原路回 `Bellway_08` 坐下装上 → `Coral_03` → `Coral_32` → Last Judge"。交互目录要加一条"兰布尔赌局"（INTERACT 原语 + 新的"按住直到看到精灵 80/81 再松开"原语 + 成功信号检查）。
+- **什么时候改主意：** K1 用 DebugMod 在训练副本里直接给骰子（训练允许写，正式运行不允许），按 boss 对比"负重环带 vs 磁石骰"的 WOULD_DIE 上界和险情率；如果某场 A 类换上骰子明显更好，按**哪场要它**分两种：
+  - **只是 S19 之后的战斗**（Forum S25、Lace 2 S26、GMS S27 等）：不用赌。打完 Dancers（S19）后只要在蚀阶以外坐一次椅子（或死亡、存档退出），兰布尔就变成尸体，`Coral_33` 尸体旁的骰子免费捡【码 GameManager.cs:1461-1464】【包 `Control` FSM `Dead`】。代价只有一趟回蚀阶的路程（从城塞经 Grand Gate / Last Judge 房间下到 `Coral_33`，往返时间【未核实】），不需要赌局原语和精灵 80/81 识别。而且这时（S18 之后）才有第 2 个黄槽可以考虑。
+  - **Last Judge 本身要它**（S17 时只有 1 个黄槽，DESIGN §3.6 的 Last Judge 行又把负重环带列为前置，这种情况可能性较小）：才在 S17 加赌局："爬完 `Coral_03` → left1 → `Bellway_08`（买钟椅 40，`benches.md` 本来就有这个条件购买）→ `Coral_35` → `Coral_43` → `Coral_33`：说话两次 → 赌 5 局（每局看画面掐完美窗口）→ 原路回 `Bellway_08` 坐下装上 → `Coral_03` → `Coral_32` → Last Judge"。交互目录要加一条"兰布尔赌局"：INTERACT 原语 + 新的"按住确认直到看到精灵 80/81 再松开"原语（**第 2 局起从按'继续游戏'那一下就开始按住，不松**，§3.3）+ 成功信号检查。
 
 **100 % 部分：** 不赌。Ending 1 之后到 `Coral_33` 捡尸体旁的骰子（路过蚀阶时顺路，免费）；或 Act 3 在 `Coral_42` 找 Grindle 买（300）。
 
@@ -234,15 +238,16 @@ S17 在 `Coral_03` 竖井顶端从 right1 (60.5, 203) 去 `Coral_32` → Last Ju
 ## 6. 对现有文档的修正
 
 - **`research/four_achievements.md`**（本分支已改）：§4.3 表里磁石骰一行改为"Act 1–2 可得"，结论里"只能在 Act 3 拿、有数据直接证明的"从 3 个百分点改为 2 个（Everbloom、Pale Nails）；§5.4 第一条改为"Act 1–2 就能拿，可以不删，但没有空黄槽"；修订记录加一条。
-- **DESIGN §3.6.4 "永不交战"**（建议，未改）：删掉"Lumble 的骰子"，在"仅 A/B，默认不做"里加"磁石骰（S17 绕路 + 兰布尔赌局约 3–4.5 min，完美掷骰稳赢，视觉合法；只能换掉负重环带；见 research/dice_pilgrim.md）"。
+- **DESIGN §3.6.4 "永不交战"**（建议，未改）：删掉"Lumble 的骰子"，在"仅 A/B，默认不做"里加"磁石骰（S19 之后要用：Dancers 后到 `Coral_33` 免费捡尸体旁的骰子；Last Judge 要用：S17 绕路 + 兰布尔赌局约 3–4.5 min，按 FSM 数据完美掷骰必赢、视觉合法，未实测；S17 时只能换掉负重环带；见 research/dice_pilgrim.md）"。
 - **`research/claims.txt` [com11] 与"Consider Magnetite Dice in a spare yellow slot"**：取得方式没问题（Act 1–2 就有），问题是 Hunter 没有空黄槽。
 - **100 % 清单**（`four_achievements.md` §4.3 末尾要求的那张）：磁石骰的来源写三条（§1.2），门槛"Act 1–2：赌赢，或 Dancers/Clawline 后的尸体；Act 3：Grindle 300"。
 
 ## 7. 待实测
 
-1. 完美窗口的起点 T0（4.5 s 还是 4.83 s，是否每次一样），精灵 80/81 的样子和识别延迟，提示音；成功信号（震动 + 闪光）。oracle 可在训练里用 `Play Control` 的当前状态给这些画面打标签。
-2. `Perfect Timing` 不复位的漏洞：完美一次后，下一局按一下就松是否仍算完美。
-3. 每局实际时长、对话翻页时间、拿到工具时的弹窗是否要按键。
-4. 赌局中暂停和存档退出的表现。
-5. S17 绕路的实际往返时间（含 `Coral_43` 沙坑、`Coral_35` 爬升）。
-6. 如果 K1 要比较负重环带和磁石骰：训练里用 DebugMod 给工具，按 boss 跑 A/B。
+1. 完美窗口的起点 T0（从进入 `Roll Start` 算 4.5 s 还是 4.83 s，是否每次一样；第 2 局起从按"继续游戏"算是否约 5.0 / 5.33 s），精灵 80/81 的样子和识别延迟，提示音；成功信号（震动 + 闪光）。oracle 可在训练里用 `Play Control` 的当前状态给这些画面打标签。
+2. 第 2 局起"继续游戏"按下后一直按住是否直接进入掷骰并能掐到完美窗口；按一下就松是否立刻普通掷出。
+3. `Perfect Timing` 不复位的漏洞：完美一次后，下一局按一下就松是否仍算完美。
+4. 每局实际时长、对话翻页时间、拿到工具时的弹窗是否要按键。
+5. 赌局中暂停和存档退出的表现。顺带试一个视觉合法的"暂停缓冲"：`ListenForMenuButton.OnUpdate` 在 `gm.isPaused` 时直接返回，`Perfect Anim` 的 `Wait 0.3` 用游戏时间【码】，所以如果跪坐时能打开暂停菜单，可以在看到精灵 80 时暂停 → 松开确认 → 取消暂停，松手应在窗口内被读到，彻底不吃反应时间【推，待实测】。
+6. S17 绕路的实际往返时间（含 `Coral_43` 沙坑、`Coral_35` 爬升），以及 rando 逻辑图给的能力要求是否属实（§2.2）。
+7. 如果 K1 要比较负重环带和磁石骰：训练里用 DebugMod 给工具，按 boss 跑 A/B。S19 之后从城塞回 `Coral_33` 捡尸体骰子的往返时间。
