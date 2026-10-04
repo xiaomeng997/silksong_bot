@@ -283,6 +283,13 @@ def test_once_the_pause_machine_owns_the_keys_no_planner_key_reaches_the_game(tm
     rows = [json.loads(x) for x in log.read_text("utf-8").splitlines()]
     assert any(r["f"] == trig and r["pending"] for r in rows)        # written once the loop stopped
     assert any(r.get("plan") == "PAUSE" for r in rows)
+    # the key plan log: one record for the episode, the pause machine's press a supervisor note
+    st = pol.stats()
+    krec = [json.loads(x) for x in (tmp_path / "keys_i0.jsonl").read_text("utf-8").splitlines()]
+    assert len(krec) == 1 and krec[0]["ticks"] == len(out) and krec[0]["sup_ticks"] > 0
+    assert any(n[0] == "pause" and n[6] for n in krec[0]["notes"])
+    assert st["keys"] is not None and st["keys"]["supervisor_notes"] >= 1
+    assert pol.stats()["keys"] is None                                # written once per episode
 
 
 def test_bind_reserve_reaches_the_safety_filter():
