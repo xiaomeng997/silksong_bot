@@ -639,3 +639,36 @@ time). Facts: `docs/facts/1.0.30000/key_economy.md` (Chinese, all numbers); M2.m
   playbook is off again, so they still hold).
 - The planner's CONTINUE row shifts the previous plan by 1 frame even after a late tick skipped frames (the key terms
   use the real shift); harmless so far, not changed.
+
+## Task D - Forum human demo analysis (branch worktree-wf_7f5f02aa-b80-2, offline, no game instance)
+
+### Done (committed)
+
+- `brain/ssbot/tools/forum_demo.py`: one streaming pass over a human_session recording (per-frame hero / input /
+  room.battles / compact live enemies, all events, full entities around each hit taken; `--cache` pickles it); attempts
+  = "Battle Scene" instances (death / clear / left); per attempt: waves and game-time durations, every mask lost (source
+  -> type, collider or projectile, attack family via FORUM_SPECS, multi-hit chains, hero position / anim / contact,
+  enemies in play and damage-collider distances to hero.box), heals and Bind starts, kills and killer (hero / Garmond /
+  Cogfly / bell), nail clashes, technique use, pre-wave positions, key presses (key_economy's count). `--random-runs`
+  adds the data policy's Forum runs (wave durations, hits per wave from each recording's events.jsonl). Tests
+  `brain/tests/test_forum_demo.py` (3).
+- `docs/facts/1.0.30000/forum_human_demo.md` (Chinese): summary for the lead at the top, per-attempt table (46),
+  per-wave human vs random policy, hits / deaths by attack family, what the person was doing when hit, heals / deaths,
+  kill order, technique use, pre-wave positions, keys, conclusions, implications for forum_planner_plan.md and K1.
+
+### Key measurements
+
+- 46 attempts (40 Reaper fo_A, 6 Wanderer fo_W), 46 deaths, best wave index 6 of 14; index 0 (Reed + Envoy +
+  Choristor, no Garmond: he always enters 4.0 s after index 1 starts) = 70 % of hits and 22 / 46 deaths, median 4 net
+  masks.
+- 10.5 hits / min (11.7 masks / min), 1.34 heals / min; the random data policy takes 13-20 hits / min in the same waves.
+- Deaths: Choristor 19, Reed 10, Clawmaiden 6, Minister 6, Envoy 3; every complete multi-hit chain cost 2 masks (48 / 48).
+- 45 % of hits while attacking or in attack recovery; another threat within 2 u at only 12 % of hits; 20 / 46 deaths
+  with full silk; Cogfly and Silkspear never used; 164 incidental nail clashes (Envoy charge 50); keys 2.55 / 3.80 per s.
+
+### Next
+
+1. Support certification order: Choristor / Reed / Envoy first (the Envoy point savestate of R1 item 5 earlier).
+2. R4 A0 baseline: report hits / min per wave index 0-4 against the person's 11 / min and the random 13-20 / min.
+3. K1 loadout A/B candidates from the demo: Wanderer, Cogfly in index 0 on the Reed, Silkspear on the Reed.
+4. A new demo: `..\scripts\uv.cmd run python -m ssbot.tools.forum_demo <session> --json out.json` (9 min scan ~8 s).

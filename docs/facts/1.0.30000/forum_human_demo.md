@@ -1,0 +1,246 @@
+# 1.0.30000 Forum 人工演示分析（你的两段录像，2026-10-04 凌晨）
+
+来源：`C:\ssbot\data\human\20261004_002749`（51 min，savestate fo_A：Reaper + Ascendant's Grip + Cogfly ×4 + Silkspear、7 面具、G&Z 助战标志）和 `C:\ssbot\data\human\20261004_012300`（9 min，fo_W：同样配装，纹章换 Wanderer）；每帧 oracle STATE（含 room.battles 波次、allies），oracle 只观察（死就是死，死后从 Hang_06b 椅子跑回来重开）。工具 `ssbot.tools.forum_demo`（本次新增，命令见 §14），随机策略对照用 8 个 Forum 数据运行（`*_Forum_A_data`，144 场完整连战，fo_A，LethalBlock）。波次一律用 BattleScene 索引 0–13（forum.md §2；索引 i = 游戏里的 "Wave i+1"）。
+
+## 摘要（可直接转述）
+
+- **两段一共 46 次尝试，46 次都死了**，最好一次打到索引 6（第 7 波，两只 Maestro），14 波里一半都没到；Reaper 40 次里 21 次死在第一波（索引 0），从没过索引 4；Wanderer 6 次里 4 次到索引 4 以后。终局两只 Choir Clapper 和左墙顶口袋一次都没见到。
+- **真正杀人的是开头几波的小怪，不是 Clapper**：索引 0（Reed + Envoy + Choristor 同时上，Garmond 还没来：他总是在索引 1 开始后正好 4.0 s 进场）占全部受击的 70 %、死亡 22 / 46；打完一次索引 0 中位净掉 4 格（掉的减回的）。按致死的一击：Choristor 19 次（鞭 7、连斩 6、跳旋 5）、Reed 10、Clawmaiden 6、Minister 6、Envoy 3。按受击次数：Choristor 163、Reed 149（单招最多的是 Reed 的飞针 49 次，Reed 打中你时 2 / 3 你在空中）、Envoy 80（冲锋 42）。
+- **受击速度**：每分钟 10.5 次（11.7 格），回血每分钟 1.3 次（+4 格）。随机策略（会被 LethalBlock 保住、不躲）同样几波每分钟 13–20 次：**强玩家只比乱按少挨 25–57 %**。整场约 14 分钟（随机策略 144 场完整连战平均约 850 s），7 格 + 回血要撑下来，掉血速度大约要降到你的 1/3 以下（粗算见 §11）。
+- **多段攻击**：56 条连段（Choristor 鞭、Reed 招架反击、Minister 连斩），完整的每条都正好掉 2 格（48 / 48，另 8 条死在中途）。单下 2 格的只有 Clawmaiden 的矛和矛爆炸（3 次）。
+- **怎么挨打的**：45 % 发生在自己出刀或出刀后摇里（换血），27 % 在空中移动，22 % 地面移动；被两只怪夹住的很少（受击时另一只怪的判定在 2 u 内只有 12 %，中位 4.6 u）；29 % 的受击离上一下不到 2 s。**20 / 46 次死时丝是满的（≥ 9）**，14 次死前一次都没回血（其中 11 次开局就是满丝）：不是没丝，是找不到敢 Bind 的空档。
+- **你的手法**：Reaper 每分钟冲刺 22 次、冲刺斩（Dash Upper）7 次（208 次命中）、下劈 9 次、滑翔 4 次、贴墙 3 次（共 18 s，都不在墙顶）、飞针 1 次；**Cogfly 和 Silkspear 一次都没用**（丝全用来 Bind）。意外拼刀 164 次（每分钟 4 次），最多的是 Envoy 冲锋（50）。按键每秒 2.55（Reaper）/ 3.80（Wanderer，光攻击键就 2.5 /s）。
+- **对计划的含义**：支撑认证和数据先做 Choristor、Reed、Envoy（它们是你 89 % 的受击、32 / 46 的死亡；Reed 的留出核对是九类里第二差的 3.0 %，Envoy 每场只有 1 只、冲锋只有 44 个实例）；R4 的 A0 基线先按索引 0–4 的每分钟受击和你的 11 /min、随机的 13–20 /min 比；口袋和终局暂时没有人的数据可用。
+- **对 K1 的含义**：助战改变不了最难的索引 0（Garmond 那时还没来）；能动的杠杆是纹章（Wanderer 那段索引 0 的击杀快 2–5 倍、回血快 70 %，但有练习顺序的混杂）、远程手段（Cogfly / Silkspear / 灵丝风暴打飞着的 Reed）和更多面具。人打不过不等于 bot 打不过：bot 能精确看到每招的判定，但前提是这几类的支撑先认证；K1 的时钟应从索引 0–4 的实测受击率开始算。
+
+## 1. 数据与方法
+
+| 录像 | 配装 | 时长 | 尝试 | 战斗时间（游戏 s） | 受击 / 掉格 | 回血 | 结果 |
+|---|---|---|---|---|---|---|---|
+| 20261004_002749 | fo_A（Reaper） | 51 min | 40 | 2126 | 370 / 407 | 43 | 全部死亡；到达索引 0 ×21、1 ×6、3 ×10、4 ×3 |
+| 20261004_012300 | fo_W（Wanderer） | 9 min | 6 | 375 | 67 / 81 | 13 | 全部死亡；到达索引 0、3、4 ×3、6 |
+
+- 一次尝试 = 一个 "Battle Scene" 实例（room.battles 的 id；死后房间重载换 id），从 started 的第一帧到 "die" 事件。两段的 meta.json 各只有一条 `load` 命令（开头读档），之后的重开都是死后从 Hang_06b 椅子跑回来（死亡到下一次开战中位 17.2 s；复活时满血、丝 9）。
+- 用时 = 游戏时间（每帧 udt × 时间流速，受击冻结按缩放后的长度算）。索引 2（Bellbearer + Reed (1)）在激活 1 s 后就会放出索引 3（remainingEnemyToEnd 2，forum.md §2），所以"索引 2"总是 1.5 s、0 受击，**索引 3 那一行实际包括索引 2 的 Bellbearer 和 Reed**。
+- 受击 = 一次攻击实例（STATE hp 事件 delta < 0；多段攻击的 "Multihit" 后续伤害和 "Final Hit" 合成一条连段，掉格按实际）。来源路径 → 敌人类型、碰撞体（或投射物）；攻击家族 = 该敌人控制 FSM 在受击前 4 s 内最后一个出招起始状态（FORUM_SPECS，同行为表），之间没有出招就记 `<P>_IDLE`（走 / 飞时的身体接触）。距离 = 敌人启用的伤害碰撞体到 STATE hero.box（物理碰撞盒 0.5 × 2.08，不是受伤盒）的精确距离，只在受击前 1 帧有完整实体时算。拼刀 = freeze 事件 `NailClashEffect`，归到最近的在战敌人（近似）。
+- 按键 = `input.mask` 上升沿，只算游戏操作键（与 key_economy.md 你的 Bell Beast 2.37 /s 同口径）。你用的是手柄（Xbox 布局），平时在 Switch 上玩。
+- 只有 oracle 能看到的东西（FSM 状态、碰撞体）只用于分析；视频（`video.mkv`，标签 `labels.npz`，`ssbot.tools.human_video`）可按 JSON 里的帧号回看每一次受击。
+
+## 2. 每次尝试
+
+列：到达的最高波次索引、战斗用时、受击次数 / 掉格、回血次数、致死的一击（类型 / 碰撞体，波次）、各波 `索引:用时(受击)`、该次每秒按键。
+
+#### 20261004_002749
+
+| # | 到达波（索引） | 战斗用时 s | 受击 / 掉格 | 回血 | 死因（类型 / 碰撞体，波） | 各波用时 s（受击） | 按键 /s |
+|---|---|---|---|---|---|---|---|
+| 0 | 0 | 23 | 7 / 7 | 0 | Choristor / Body Damager，0 | 0:23(7) | 2.84 |
+| 1 | 0 | 21 | 7 / 7 | 0 | Reed / body，0 | 0:21(7) | 2.75 |
+| 2 | 1 | 62 | 9 / 10 | 1 | Choristor / Whip Hit 1，1 | 0:54(7) 1:7(2) | 2.46 |
+| 3 | 0 | 47 | 10 / 10 | 1 | Choristor / Body Damager，0 | 0:47(10) | 2.51 |
+| 4 | 3 | 103 | 15 / 16 | 3 | Clawmaiden / Spear，3 | 0:51(7) 1:26(3) 2:2(0) 3:25(5) | 2.48 |
+| 5 | 1 | 73 | 11 / 13 | 2 | Choristor / Slash Hit 1，1 | 0:69(9) 1:4(2) | 2.35 |
+| 6 | 3 | 72 | 13 / 13 | 2 | Clawmaiden / body，3 | 0:25(6) 1:34(3) 2:2(0) 3:12(4) | 2.58 |
+| 7 | 0 | 19 | 7 / 7 | 0 | Reed / ParrySlash Hit，0 | 0:19(7) | 2.17 |
+| 8 | 0 | 13 | 6 / 7 | 0 | Choristor / Whip Hit 1，0 | 0:13(6) | 2.88 |
+| 9 | 0 | 34 | 8 / 10 | 1 | Choristor / Body Damager，0 | 0:34(8) | 2.64 |
+| 10 | 0 | 59 | 8 / 10 | 1 | Choristor / Body Damager，0 | 0:59(8) | 2.7 |
+| 11 | 3 | 98 | 14 / 16 | 3 | Reed / Stab Hit 2，3 | 0:60(8) 1:23(1) 2:2(0) 3:13(5) | 2.86 |
+| 12 | 0 | 23 | 9 / 10 | 1 | Choristor / Body Damager，0 | 0:23(9) | 2.49 |
+| 13 | 3 | 82 | 6 / 8 | 1 | Reed / body，3 | 0:44(2) 1:22(2) 2:2(0) 3:14(2) | 2.34 |
+| 14 | 0 | 16 | 7 / 7 | 0 | Choristor / Slash Hit 1，0 | 0:16(7) | 2.27 |
+| 15 | 1 | 78 | 13 / 13 | 2 | Choristor / Spin Slash Hit，1 | 0:74(11) 1:4(2) | 2.69 |
+| 16 | 0 | 22 | 7 / 7 | 0 | Envoy / JumpSlash Damager 2，0 | 0:22(7) | 2.6 |
+| 17 | 0 | 26 | 7 / 7 | 0 | Choristor / Whip Hit 2，0 | 0:26(7) | 3.12 |
+| 18 | 0 | 48 | 10 / 10 | 1 | Reed / Song Reed Pin Projectile，0 | 0:48(10) | 2.39 |
+| 19 | 4 | 118 | 16 / 16 | 3 | Minister / Slash Collider，4 | 0:55(8) 1:22(3) 2:2(0) 3:34(3) 4:6(2) | 2.59 |
+| 20 | 0 | 20 | 7 / 7 | 0 | Choristor / Body Damager，0 | 0:20(7) | 2.88 |
+| 21 | 0 | 24 | 6 / 7 | 0 | Choristor / Whip Hit 4，0 | 0:24(6) | 2.4 |
+| 22 | 3 | 89 | 12 / 13 | 2 | Clawmaiden / Slash Collider 2，3 | 0:52(5) 1:21(2) 2:2(0) 3:15(5) | 2.57 |
+| 23 | 4 | 105 | 12 / 13 | 2 | Minister / ParrySlash Hit 3，4 | 0:41(5) 1:24(2) 2:2(0) 3:28(4) 4:11(1) | 2.58 |
+| 24 | 0 | 34 | 10 / 10 | 1 | Reed / body，0 | 0:34(10) | 2.7 |
+| 25 | 0 | 17 | 7 / 7 | 0 | Reed / Stab Hit 2，0 | 0:17(7) | 2.63 |
+| 26 | 0 | 25 | 6 / 7 | 0 | Choristor / Slash Hit 1，0 | 0:25(6) | 2.43 |
+| 27 | 4 | 123 | 13 / 16 | 3 | Minister / Slash Collider，4 | 0:53(7) 1:32(3) 2:2(0) 3:31(1) 4:6(2) | 2.55 |
+| 28 | 0 | 34 | 10 / 10 | 1 | Choristor / Whip Hit 2，0 | 0:34(10) | 2.58 |
+| 29 | 0 | 12 | 6 / 7 | 0 | Envoy / Charge Damager，0 | 0:12(6) | 2.32 |
+| 30 | 0 | 20 | 6 / 7 | 0 | Choristor / Whip Hit 1，0 | 0:20(6) | 2.18 |
+| 31 | 1 | 68 | 9 / 10 | 1 | Choristor / Spin Hit，1 | 0:48(6) 1:20(3) | 2.74 |
+| 32 | 0 | 17 | 6 / 7 | 0 | Envoy / Charge Damager，0 | 0:17(6) | 2.53 |
+| 33 | 3 | 83 | 11 / 13 | 2 | Clawmaiden / Spear，3 | 0:49(5) 1:19(2) 2:2(0) 3:13(4) | 2.46 |
+| 34 | 3 | 76 | 9 / 10 | 1 | Clawmaiden / body，3 | 0:47(6) 1:23(1) 2:2(0) 3:5(2) | 2.45 |
+| 35 | 3 | 76 | 11 / 13 | 2 | Clawmaiden / body，3 | 0:46(6) 1:25(3) 2:2(0) 3:3(2) | 2.57 |
+| 36 | 3 | 96 | 11 / 13 | 2 | Reed / Song Reed Pin Projectile，3 | 0:49(5) 1:36(5) 2:2(0) 3:10(1) | 2.41 |
+| 37 | 1 | 51 | 9 / 10 | 1 | Choristor / Slash Hit 1，1 | 0:39(5) 1:11(4) | 2.43 |
+| 38 | 1 | 38 | 8 / 10 | 1 | Choristor / Body Damager，1 | 0:34(7) 1:5(1) | 2.46 |
+| 39 | 3 | 81 | 11 / 13 | 2 | Reed / Song Reed Pin Projectile，3 | 0:42(6) 1:21(1) 2:2(0) 3:16(4) | 2.62 |
+
+#### 20261004_012300
+
+| # | 到达波（索引） | 战斗用时 s | 受击 / 掉格 | 回血 | 死因（类型 / 碰撞体，波） | 各波用时 s（受击） | 按键 /s |
+|---|---|---|---|---|---|---|---|
+| 0 | 0 | 46 | 10 / 10 | 1 | Reed / ParrySlash Hit，0 | 0:46(10) | 3.29 |
+| 1 | 4 | 74 | 10 / 13 | 2 | Minister / Slash Collider，4 | 0:32(4) 1:16(3) 2:2(0) 3:19(1) 4:6(2) | 3.97 |
+| 2 | 4 | 43 | 11 / 13 | 2 | Minister / Collider ParryStance，4 | 0:15(5) 1:8(2) 2:2(0) 3:15(3) 4:3(1) | 4.12 |
+| 3 | 3 | 42 | 10 / 13 | 2 | Choir Bellbearer / body，3 | 0:23(4) 1:16(5) 2:2(0) 3:2(1) | 3.86 |
+| 4 | 6 | 99 | 16 / 19 | 4 | Tiny / body，6 | 0:18(3) 1:11(3) 2:2(0) 3:22(1) 4:26(3) 5:15(4) 6:5(2) | 3.78 |
+| 5 | 4 | 71 | 10 / 13 | 2 | Minister / Slash Collider，4 | 0:10(4) 1:21(2) 2:2(0) 3:35(3) 4:3(1) | 3.75 |
+
+- Reaper 那段前 20 次和后 20 次：过索引 0 的 8 → 11 次、到索引 3 以上 5 → 8 次、每分钟受击 11.0 → 9.9：有练习效果，但很小。Wanderer 那段在 Reaper 练了 51 分钟之后，6 次里 5 次过索引 0，所以纹章的差别和练习混在一起。
+
+## 3. 按波次（你 vs 随机策略）
+
+随机策略 = 数据采集策略（fo_A，LethalBlock 保命，不会死，所以每波都打完），144 场完整连战；它的受击按每波窗口里的 "damage" 事件数（同一口径：一次攻击实例一条）。
+
+| 索引 | 波 | 你：到达 / 打完 | 你：用时中位 s | 你：暴露 s | 你：受击 /min | 你：死亡 | 你：受击来源 | 随机策略：用时中位 s | 随机策略：受击 /min | 随机策略：受击来源（前 3） |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 0 | Wave 1 | 46 / 24 | 46.46 | 1631.2 | 11.33 | 22 | Reed 125, Choristor 103, Envoy 80 | 39.56 | 19.99 | Envoy 688, Choristor 650, Reed 632 |
+| 1 | Wave 2 - Call Ally | 24 / 18 | 21.84 | 451.6 | 7.97 | 6 | Choristor 60 | 26.11 | 17.2 | Choristor 1131 |
+| 2 | Wave 3 | 18 / 18 | 1.52 | 27.4 | 0.0 | 0 | — | 1.53 | 0.0 |  |
+| 3 | Wave 4 | 18 / 7 | 27.62 | 309.8 | 9.88 | 11 | Reed 24, Clawmaiden 19, Choir Bellbearer 8 | 51.53 | 13.34 | Reed 618, Choir Bellbearer 610, Clawmaiden 496 |
+| 4 | Wave 5 - Song Admins | 7 / 1 | 26.16 | 61.0 | 11.8 | 6 | Minister 12 | 33.25 | 15.65 | Minister 1317, Choir Bellbearer 1 |
+| 5 | Wave 6 | 1 / 1 | 15.28 | 15.3 | 15.71 | 0 | Minister 3, Clawmaiden 1 | 32.16 | 10.59 | Clawmaiden 544, Minister 327 |
+| 6 | Wave 7 - Maestro x 2 | 1 / 0 | — | 4.5 | 26.55 | 1 | Tiny 2 | 176.94 | 12.9 | Tiny 5354, Maestro 319 |
+| 7 | Wave 8 - Heavy Sentry | 0 / 0 | — | 0 | — | 0 | — | 71.03 | 23.68 | Choir Clapper 4015, Tiny 12 |
+| 8 | Wave 9 | 0 / 0 | — | 0 | — | 0 | — | 47.78 | 12.93 | Reed 984, Choir Bellbearer 553, Tiny 21 |
+| 9 | Wave 10 | 0 / 0 | — | 0 | — | 0 | — | 17.06 | 18.46 | Choristor 462, Choir Bellbearer 319, Tiny 9 |
+| 10 | Wave 11 | 0 / 0 | — | 0 | — | 0 | — | 38.43 | 12.52 | Choir Bellbearer 712, Clawmaiden 449, Choir Clapper 59 |
+| 11 | Wave 12 | 0 / 0 | — | 0 | — | 0 | — | 55.56 | 14.03 | Minister 1284, Choir Bellbearer 622, Choristor 9 |
+| 12 | Wave 13 - Maestro | 0 / 0 | — | 0 | — | 0 | — | 81.13 | 12.23 | Tiny 1621, Reed 624, Maestro 133 |
+| 13 | Wave 14 - Finale | 0 / 0 | — | 0 | — | 0 | — | — | 11.87 | Choir Clapper 4424, Minister 13, Clawmaiden 1 |
+
+- 你的每分钟受击在索引 0、1、3 比随机少 43–57 %，索引 4 少 25 %。用时：索引 0 你比随机还慢（中位 46.5 s 对 39.6 s，你要躲、要回血），索引 1、3 快（21.8 对 26.1、27.6 对 51.5；索引 3 只有 7 次打完，偏向打得好的那几次）。
+- 每波打完时的净掉格（掉的格数 − 3 × 回血次数）：索引 0 中位 4（−1…6，24 次）、索引 1 中位 0（18 次）、索引 3 中位 3（7 次）。也就是说 7 格里大约一半花在第一波。各波开始时的血量：索引 1 开始时 1–6（中位约 3–4），索引 4 开始时 7 次里 4 次只剩 1–2 格。所以索引 3、4 的死亡（Clawmaiden、Minister）有一大半是第一波欠下的。
+
+## 4. 谁打中了你
+
+按受击次数（全部 437 次）：Choristor 163（掉 198 格）、Reed 149（158）、Envoy 80（80）、Clawmaiden 20（23）、Minister 15（19）、Bellbearer 8、Tiny 2。各招（≥ 3 次）与其中成为致死一击的次数：
+
+| 类型 | 招（家族） / 碰撞体 | 受击 | 其中致死 |
+|---|---|---|---|
+| Reed | RE_THROW / Song Reed Pin Projectile | 49 | 3 |
+| Envoy | EN_CHARGE / Charge Damager | 42 | 2 |
+| Choristor | CH_JUMP / Spin Hit | 35 | 1 |
+| Choristor | CH_SLASH / Slash Hit 1 | 30 | 4 |
+| Reed | RE_STAB / body | 26 | 0 |
+| Choristor | CH_SLASH / Body Damager | 23 | 2 |
+| Reed | RE_DEFEND / body | 21 | 0 |
+| Reed | RE_EVADE / body | 16 | 2 |
+| Choristor | CH_WHIP / Whip Hit 1 | 16 | 3 |
+| Envoy | EN_SLASH / body | 15 | 0 |
+| Choristor | CH_JUMP / Body Damager | 14 | 3 |
+| Choristor | CH_WHIP / Whip Hit 2 | 12 | 2 |
+| Reed | RE_DEFEND / ParrySlash Hit | 11 | 2 |
+| Envoy | EN_SLASH / P2 Damager | 9 | 0 |
+| Choristor | CH_IDLE / Body Damager | 9 | 1 |
+| Reed | RE_STAB / Stab Hit 2 | 8 | 2 |
+| Clawmaiden | CM_SLASH / body | 8 | 3 |
+| Reed | RE_STAB / Stab Hit 1 | 7 | 0 |
+| Choristor | CH_SLASH / Slash Hit 3 | 7 | 0 |
+| Minister | MI_CHARGE / Slash Collider | 7 | 4 |
+| Reed | RE_IDLE / body | 6 | 1 |
+| Envoy | EN_JUMPSLASH / JumpSlash Damager 2 | 6 | 1 |
+| Reed | RE_STAB / Stab Hit 3 | 5 | 0 |
+| Choir Bellbearer | CB_IDLE / body | 5 | 1 |
+| Choristor | CH_WHIP / Whip Hit 4 | 5 | 1 |
+| Envoy | EN_JUMPSLASH / body | 4 | 0 |
+| Clawmaiden | CM_SPIN / body | 4 | 0 |
+| Choristor | CH_WHIP / Whip Hit 3 | 4 | 0 |
+| Choristor | CH_JUMP / Spin Slash Hit | 4 | 1 |
+| Choir Bellbearer | CB_THROW / Throwing Bell | 3 | 0 |
+| Clawmaiden | CM_SPIN / Spear | 3 | 2 |
+| Choristor | CH_WHIP / Body Damager | 3 | 1 |
+| Clawmaiden | CM_SLASH / Slash Collider 2 | 3 | 1 |
+
+- **Choristor**（圣咏使徒，索引 0、1 ×2）：死亡最多（19），鞭（CH_WHIP，`Whip Hit 1–6`）连上就是 2 格；连斩（CH_SLASH）的身体接触和第一刀；跳旋（CH_JUMP，`Spin Hit`）35 次，26 次受击时你在 y ≥ 9 的高处（跳旋打得很高）。
+- **Reed**（簧片战士，飞行）：飞针（RE_THROW）49 次是单招最多；其余多是身体接触（突刺 RE_STAB、防御 RE_DEFEND、闪避 RE_EVADE），防御中的招架反击（`ParrySlash Hit`）11 次、每次 2 格。**101 / 149 次 Reed 打中你时你在空中**（跳起去够它）。Reed 也是索引 0 里活得最久的（击杀中位 45 s）。
+- **Envoy**（圣咏特使，38 HP）：冲锋（EN_CHARGE）42 次，但它几乎总是第一个死（17.5 s），所以只在开头几秒危险。
+- Clawmaiden：身体（CM_SLASH 冲过来的身体 8 次）和矛（2 格）；Minister：连斩（`Slash Collider`，2 格连段）4 次致死，防御姿态的身体 / 反击 2 次。
+- 进场的一刻几乎不挨打（波开始 1.5 s 内只有 6 次）。
+
+## 5. 挨打时你在做什么
+
+- 位置：空中 234、地面 202、滑墙 1。动画：出刀 151（35 %，Reaper 的冲刺斩、下劈、横斩）、出刀后摇 / 下劈弹起 47（11 %）、空中移动（跳、滑翔）119（27 %）、地面移动 95（22 %）、冲刺 23（5 %）、Bind 1。cState `attacking` 为真的 88 次。
+- 在战敌人数（受击前 1 帧，Tiny 待命的不算）：1 只 50、2 只 148、3 只 237、8 只 2。伤害判定在 2 u 内的敌人数（含打中你的那只）：1 只 342（78 %）、2 只以上 48（11 %）、0（碰撞体当帧已关或是投射物）47。**另一只怪的判定也在 2 u 内的只有 54 / 437（12 %）**，另一只最近的中位 4.6 u。
+- 连挨：128 / 437（29 %）离上一下不到 2 s（受击无敌约 1.2 s）。
+- 结论：你的失败模式主要是**和单只怪换血**（出刀时被打、或跳起去够飞着的 Reed 被打），不是被包围；但索引 0 有约 40 s 同时 2–3 只在场（平均 2.4 只），哪只都要时刻提防。
+
+## 6. 回血、死亡与重开
+
+- 回血 56 次 / Bind 起手 57 次（几乎从没被打断）；44 次在空中、12 次在地面；位置多在两边墙附近（x ≈ 15 左墙、x ≈ 50 右墙），回血时在战 1–3 只。每分钟 1.21 次（Reaper）/ 2.08 次（Wanderer：攻速快、攒丝快）。
+- 死亡 46 次：41 次死前 1 格、5 次死前 2 格（被 2 格连段带走）；死前 10 s 里挨了 2–4 下的占多数。**20 次死时丝 ≥ 9；14 次死前一次没回过血（11 次开局就满丝）**；有回血的那些，死时距上次回血中位 21.5 s。
+- 死亡 → 下一次开战中位 17.2 s（复活、跑回 Hang_04、过场）。
+
+## 7. 击杀顺序、击杀来源、助战
+
+- 击杀来源：你 135、Garmond 22、被打回的铃 1、**Cogfly 0**（4 只一次没放）。Garmond 在索引 1 开始后**正好 4.0 s**进场（23 / 23 次，forum.md §4 的 4 s 等待），所以**索引 0 永远没有助战**。
+- 索引 0：先杀 Envoy 34 / 39 次（顺序 Envoy > Choristor > Reed 12、Envoy > Reed > Choristor 8；Wanderer 那段 4 / 6 先杀 Choristor）；击杀用时中位 Envoy 17.5 s、Choristor 32.6 s、Reed 45.1 s（Reaper 18.8 / 36.4 / 47.2；Wanderer 8.1 / 7.0 / 17.3）。索引 1：两只 Choristor 中位 19.7 s（Garmond 杀了其中 12 只）。索引 3：先死的是 Bellbearer 9 / 13（11.2 s；这一波的 Bellbearer 有 5 / 12 是 Garmond 杀的），Clawmaiden 17.9 s、Reed 23.7 s。你说的"先杀 Clawmaiden"实际做到 4 / 13。
+
+## 8. 手法使用
+
+| | Reaper（35.4 min 战斗） | Wanderer（6.3 min） |
+|---|---|---|
+| 冲刺（cState dashing 上升沿） | 769（21.7 /min） | 50（8.0 /min） |
+| 冲刺斩 | 254 次（Dash Upper，7.2 /min），命中 208 | 14 次，命中 5（DashStab） |
+| 下劈 | 306 次，命中 218（DownSlash New） | 7 次，命中 6 |
+| 横斩 / 上砍命中 | Slash 308、AltSlash 74、UpSlash 12 | Slash 88、AltSlash 72、UpSlash 64（36 /min） |
+| 飞针（Clawline） | 34 次，命中 38（Harpoon Damager / Harpoon Dash Damager） | 0 |
+| 贴墙 | 119 次，共 18.2 s（蹬墙跳 79）；墙顶口袋 0 s | 5 次，1.5 s |
+| 滑翔 | 136 | 1 |
+| Cogfly | 0 | 0 |
+| Silkspear | 0（无 Needle Damage 命中） | 0 |
+| Bind | 44 起手 / 43 回血 | 13 / 13 |
+| 意外拼刀（NailClashEffect） | 131 | 33 |
+
+- 拼刀 164 次按对方的招：Envoy 冲锋 50、Reed 突刺 19、Envoy 横斩 19、Choristor 连斩 15、鞭 13、Reed 防御 11、Choristor 跳旋 11、Choristor 待机 9、Clawmaiden 6、Envoy 跳斩 5、Minister 2；拼刀后 1 s 内仍挨打 34 次（21 %）。你说自己基本不拼刀：这些多半是出刀正好撞上对方的攻击判定（Envoy 的 `Charge Damager` 是可拼刀层，parry 5）。
+- 贴墙在你手里是移动手段（蹬墙跳躲招、下来砍），没有在墙顶停留。
+
+## 9. 波前站位
+
+每波开始前 1 s 你的 x（p10 / 中位 / p90）：索引 0 22.4 / 26.7 / 30.0（过场把你放在 x ≈ 31.5，满血）；索引 1 21.9 / 35.8 / 44.6；索引 2 16.2 / 28.8 / 42.6；索引 3 19.1 / 28.4 / 42.3；索引 4 15.9 / 27.6 / 48.7。多在地面上（索引 3 开始时 18 次里 10 次在空中）。**没有固定的波前站位**：位置由上一波最后一只怪在哪里决定。剧本里的波前站位只能从覆盖图和入场模板推，不能照搬你的录像。
+
+## 10. 按键
+
+游戏操作键每秒：Reaper 2.55、Wanderer 3.80（攻击键单独 2.5 /s）、合计 2.74。对照：你打 Bell Beast 2.37 /s；bot 在 Bell Beast 4.39（基线）/ 3.46（按键代价 0.05）。Wanderer 本来就靠连按，按键目标应当按纹章分开定。
+
+## 11. 结论
+
+**什么杀死了强玩家：**
+1. **索引 0 本身**：三只（Reed 飞、Envoy 冲、Choristor 鞭 / 跳旋）同时上、没有助战、约 40–50 s，中位净掉 4 格；22 / 46 次死在这里，其余死亡多是带着第一波的欠血进入索引 3、4。
+2. **Choristor 的鞭和连斩**（2 格连段、死亡最多）、**Reed**（飞针、防御反击、跳起够它时的身体接触，活得最久）。
+3. **换血**：近一半受击发生在自己出刀或刚出完刀时；挨打之后 2 s 内再挨的占 29 %。
+4. **回血窗口不够**：快一半的死亡丝是满的，就是没敢 Bind。
+
+**不是威胁的（就你的录像而言）：** 被包围（12 %）、入场瞬间（6 次）、Bellbearer 的铃（3 次）、Tiny（2 次）。Clapper、Maestro 波、终局没有数据。
+
+**粗算的受击预算**：整场约 14 min（随机策略 144 场平均约 850 s，有 Garmond）。7 格，按 Q1a 在 h ≤ 1 时退出，能花的约 5 格；回血按你的速度每分钟 +4 格。要 14 min 不死，每分钟净掉格要 ≤ 约 0.4，也就是掉格速度 ≤ 约 4.4 格 /min（你是 11.7）；回血又要靠打中怪攒丝、要找安全的 Bind 窗口，所以 bot 实际要的是每分钟 1–2 次受击以下。随机策略在同样几波是 13–20 次 /min。
+
+## 12. 对 Forum 计划的含义（forum_planner_plan.md）
+
+- **支撑认证（R0 / R2）的顺序**：先 Choristor、Reed（含飞针、防御中的招架反击、空中的身体）、Envoy，它们是你 89 % 的受击和 32 / 46 的死亡；再 Clawmaiden、Minister；Clapper / Maestro / Tiny 在开头几波稳定前不急。forum.md §11 的留出核对里 Reed 3.0 %（九类第二差）、Envoy 0.6 % 但每场只有 1 只（EN_CHARGE 44 个实例、EN_AMBUSH 13 个）：**R1 ⑤ 的 Envoy 定点存档应当提前**；Reed 需要更多场次或结构性余量。
+- **多段攻击（§9 第 2 个决定的证据）**：完整连段每条正好 2 格（48 / 48）：Choristor 鞭、Reed 招架反击、Minister 连斩都一样。按实测整链伤害把这类事件计为 D1 = 2 有数据支持；规则改不改由你定。
+- **站位价值（R5）**：你被打主要是单只怪换血，"被夹"只占 12 %，所以 E / trapped 在你的录像里看不出效果；它们的价值要在 bot 自己的 A0 基线上测（索引 0 平均 2.4 只同时在场）。对"换血"更直接的是锁定检查和出刀后摇的支撑核验（已有），以及 Reed 在头顶时不跳上去硬够。
+- **波次剧本（R4 / R6）**：
+  - 索引 0 是瓶颈且没有助战：先杀 Envoy 自然成立（38 HP、最快死），Reed 留到最后代价最大（它飞、会防御，你中位 45 s 才杀掉）。值得 A/B 的：**Cogfly 放在索引 0 打 Reed**（你从来没用 Cogfly，4 只全留着），以及 Silkspear 打飞着的 Reed（你的丝全用来 Bind）。
+  - Garmond 固定在索引 1 开始后 4.0 s 进场；索引 3 他常常先收掉 Bellbearer。
+  - 回血：你在墙边（x ≈ 15 / 50）空中 Bind，57 次只断 1 次；Q1a 的安全点候选可先核验两边墙附近的空中 Bind 位。
+  - 波前站位没有人的参照（§9），只能由覆盖图 + 入场模板定。
+- **口袋（终局）**：没有到终局，没有新证据；贴墙 124 次都不在墙顶。
+- **拼刀（R8）**：你的出刀每分钟意外拼刀约 4 次，Envoy 冲锋最多（50），其次 Reed 突刺、Envoy 横斩、Choristor 连斩 / 鞭：这是白名单 A/B 的候选顺序；拼刀后 1 s 内仍挨打 21 %，拼刀不等于安全。
+- **新原语（R7）**：Reaper 的冲刺斩（Dash Upper）在你手里是主力（每分钟 7 次、208 次命中，和下劈、横斩并列三大输出）；飞针每分钟约 1 次。支持 R7 先做冲刺斩。
+
+## 13. 对 K1 的含义
+
+- K1 规则（DESIGN §5）：Forum 在 2× 时间盒内 WOULD_DIE 仍 > 2 % → 先改路线、配装或助战。你的录像说明：**按路线配装（7 面具 + G&Z + 爬墙爪 + Cogfly，Reaper 或 Wanderer），强玩家 46 次 0 次通关、最远到 14 波里的第 7 波**；随机策略在同样几波的受击率只是你的 1.3–2.2 倍。所以 Forum 不是"人能稳过、bot 只要模仿"的单元：bot 能不能过取决于规划器能否把开头几波的受击压到你的 1/5–1/10，这又取决于 Choristor / Reed / Envoy 支撑能否认证。
+- 助战这根杠杆对最难的索引 0 无效（Garmond 那时还没来，Shakra 同样是索引 1 叫的）；对后面的波有用（Garmond 击杀 22 / 158）。
+- 配装杠杆里有数据苗头的：**Wanderer**（索引 0 击杀快 2–5 倍、回血每分钟 2.1 对 1.2 次，但受击率差不多 10.7 对 10.4 /min，且在 Reaper 练习之后录的，有混杂）；远程（Cogfly / Silkspear / 灵丝风暴）打 Reed；更多面具（路线上 Forum 前能不能多拿要查）。这些都应进 K1 的纹章 / 配装 A/B，度量用每波受击率和 WOULD_DIE。
+- 建议 K1 的时钟按"索引 0–4 的实测受击率"先看：R4 的 A0 基线若在索引 0 的受击率没有明显低于你的 11 /min，就提前启动配装 A/B（Wanderer、Cogfly 前移、Silkspear），而不是等完整连战的 WOULD_DIE 统计。
+
+## 14. 复现
+
+```
+cd brain
+..\scripts\uv.cmd run python -m ssbot.tools.forum_demo C:/ssbot/data/human/20261004_002749 C:/ssbot/data/human/20261004_012300 --cache <scratch> --json <scratch>/demo.json --random-runs C:/ssbot/data/runs/m2/20261002_221727_Forum_A_data ... C:/ssbot/data/runs/m2/20261003_074719_Forum_A_data
+```
+
+扫描 9 min 的录像约 8 s（51 min 的约 1 min）；`--cache` 存扫描结果，之后的统计几秒。JSON 里每次尝试有完整的受击列表（帧号、来源、家族、攻击者状态、主角位置 / 动画 / 接触、在战敌人和距离）、回血、击杀、拼刀、每波站位和按键；测试 `brain/tests/test_forum_demo.py`。
