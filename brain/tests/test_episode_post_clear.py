@@ -236,3 +236,10 @@ def test_live_threats():
     off = _bell()
     off["colliders"][0]["damage"]["can_cause_damage"] = False
     assert live_threats([off], armed) == []
+    # eff -1: a multi-wounder source whose amount lives in its FSM (EntityExporter) is live like any other
+    multi = _bell(tk="Clapper Rune")
+    multi["colliders"][0]["damage"]["eff"] = -1
+    assert live_threats([multi], armed) == ["Clapper Rune"]
+    zero = _bell()
+    zero["colliders"][0]["damage"]["eff"] = 0
+    assert live_threats([zero], armed) == []

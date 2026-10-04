@@ -4,7 +4,7 @@
     ../scripts/uv.cmd run python -m ssbot.tools.launcher -n 4 --detach
     ../scripts/uv.cmd run python -m ssbot.tools.combat_run run --instances 0,1,2,3 --encounter BellBeast --mode data
         --episodes 50 [--hours 2] [--no-record] [--seed 0]
-    ../scripts/uv.cmd run python -m ssbot.tools.combat_run summary C:/ssbot/data/runs/m2/<run>
+    ../scripts/uv.cmd run python -m ssbot.tools.combat_run summary C:/ssbot/data/runs/m2/<run> [<run> ...] [--mixed]
     ../scripts/uv.cmd run python -m ssbot.tools.combat_run stop C:/ssbot/data/runs/m2/<run>     # graceful stop
     ../scripts/uv.cmd run python -m ssbot.tools.combat_run seal C:/ssbot/data/runs/m2/<run>     # after a hard kill
 
@@ -17,6 +17,11 @@ Writes <run>/attempts_i<N>.jsonl (one AttemptRecord per line) and, unless --no-r
 
 Modes: "data" (behaviour logging: a lethal hit is counted, play goes on, random HP / silk / position at the wake),
 "eval" (a lethal hit ends the episode as WOULD_DIE; HP and silk as the route has them).
+
+Fingerprint: every row carries config_fp, a hash of (encounter, policy, mode, view, git rev) and, when any is set,
+the SSBOT_* environment switches (env_overrides: A/B and audit toggles such as SSBOT_POST_CLEAR_S, which turns the
+post-kill tail off, or SSBOT_DEAD_ATK=0); the switches are also in config.json and in each row ("env"). `summary`
+refuses to pool rows of different fingerprints (a gate pools chunks of one configuration) unless --mixed.
 
 Stopping: a worker ends after its current episode when <run>/STOP or the agents' stop file (STOP_FILES) exists
 (`stop` writes <run>/STOP); on Ctrl+C / Ctrl+Break it drops the episode in progress. Either way it closes its
@@ -50,6 +55,24 @@ def git_rev() -> str | None:
                               cwd=Path(__file__).resolve().parents[2], timeout=10).stdout.strip() or None
     except (OSError, subprocess.SubprocessError):
         return None
+
+
+def env_overrides(environ=None) -> dict[str, str]:
+    """The SSBOT_* switches set for this run: they change what an episode is (SSBOT_POST_CLEAR_S: the fixed window
+    instead of the post-kill tail; SSBOT_DEAD_ATK=0: the old post-death forecast; the A/B toggles) without changing
+    the code."""
+    env = os.environ if environ is None else environ
+    return {k: env[k] for k in sorted(env) if k.upper().startswith("SSBOT_")}
+
+
+def config_fp(encounter: str, policy: str, mode: str, view: str, rev: str | None,
+              env: dict[str, str] | None = None) -> str:
+    """The run configuration's fingerprint (module docstring). Without switches it is the hash of (encounter, policy,
+    mode, view, rev) as before they were added, so rows of one commit made before and after still pool."""
+    key: list = [encounter, policy, mode, view, rev]
+    if env:
+        key.append(dict(env))
+    return hashlib.sha256(json.dumps(key, sort_keys=True).encode()).hexdigest()[:12]
 
 
 def make_policy(name: str, view: str = "oracle", run_dir: Path | None = None, instance: int = 0,
@@ -210,7 +233,10 @@ def worker(a: argparse.Namespace) -> int:
     if hasattr(policy, "warmup"):
         print(f"[i{a.instance}] policy warm-up {policy.warmup():.1f} s", flush=True)
     rev = git_rev()
-    fp = hashlib.sha256(json.dumps([enc.name, a.policy, a.mode, a.view, rev], sort_keys=True).encode()).hexdigest()[:12]
+    env = env_overrides()
+    fp = config_fp(enc.name, a.policy, a.mode, a.view, rev, env)
+    if env:
+        print(f"[i{a.instance}] SSBOT switches (in config_fp): {env}", flush=True)
     from ssbot.train.episode import unpause
     deadline = time.monotonic() + 30     # a previous run may have left it paused (a QUIT, or the oracle's
     while time.monotonic() < deadline:   # brain-lost watchdog, which pauses a moment after the last ACTION)
@@ -257,6 +283,7 @@ def worker(a: argparse.Namespace) -> int:
             d = asdict(rec)
             d["instance"] = a.instance
             d["episode"] = k
+            d["env"] = env
             d["recording"] = str(rec_obj.path) if rec_obj else None
             d["t"] = datetime.now().isoformat(timespec="seconds")
             out.write(json.dumps(d) + "\n")
@@ -313,7 +340,8 @@ def run(a: argparse.Namespace) -> int:
     if a.inject_hits > 0:
         tag += "_inject"
     run_dir = new_run_dir(a.encounter, tag)
-    (run_dir / "config.json").write_text(json.dumps(vars(a), indent=1), encoding="utf-8")
+    (run_dir / "config.json").write_text(json.dumps({**vars(a), "env": env_overrides()}, indent=1, default=str),
+                                         encoding="utf-8")
     procs = []
     for i in [int(x) for x in a.instances.split(",")]:
         cmd = [sys.executable, "-m", "ssbot.tools.combat_run", "_worker", "--instance", str(i), "--run-dir",
@@ -376,11 +404,19 @@ def load_attempts(run_dir: Path) -> list[dict]:
     return rows
 
 
-def summary(run_dir: Path, more: list[Path] | None = None, write: bool = True) -> dict:
+def summary(run_dir: Path, more: list[Path] | None = None, write: bool = True, mixed: bool = False) -> dict:
     """Outcome counts and the planner's numbers of one run (written to <run>/summary.json), or of several pooled
-    (`summary RUN [RUN ...]`, printed only)."""
+    (`summary RUN [RUN ...]`, printed only). Rows of different config_fp are not pooled (the result is {"refused":
+    ...} with the fingerprints' counts) unless `mixed`."""
     rows = load_attempts(run_dir) + [r for d in more or () for r in load_attempts(d)]
-    out: dict = {"episodes": len(rows), "outcomes": dict(Counter(r["outcome"] for r in rows))}
+    fps = Counter(r.get("config_fp") for r in rows)
+    if len(fps) > 1 and not mixed:
+        out = {"episodes": len(rows), "config_fp": dict(fps),
+               "refused": "rows of different config_fp (commit, view, mode, policy or SSBOT_* switches): not pooled; "
+                          "--mixed pools them anyway"}
+        print(json.dumps(out, indent=1))
+        return out
+    out: dict = {"episodes": len(rows), "config_fp": dict(fps), "outcomes": dict(Counter(r["outcome"] for r in rows))}
     if rows:
         attacks: Counter = Counter()
         for r in rows:
@@ -498,6 +534,7 @@ def main(argv: list[str] | None = None) -> int:
     s = sub.add_parser("summary")
     s.add_argument("run_dir", type=Path)
     s.add_argument("more", type=Path, nargs="*", help="more runs pooled with the first")
+    s.add_argument("--mixed", action="store_true", help="pool rows of different config_fp too")
     for name in ("stop", "seal"):
         sub.add_parser(name).add_argument("run_dir", type=Path)
     a = ap.parse_args(argv)
@@ -510,8 +547,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if a.cmd == "seal":
         return seal(a.run_dir)
-    summary(a.run_dir, a.more)
-    return 0
+    return 1 if "refused" in summary(a.run_dir, a.more, mixed=a.mixed) else 0
 
 
 if __name__ == "__main__":

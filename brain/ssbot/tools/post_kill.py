@@ -17,7 +17,11 @@ clears  the eval CLEARs of runs made before the post-kill tail (the episode ende
         old harness sent zeros after the kill): each simulated to its End Timer (first bounce + 2 s; a drop bell to
         its Submerge, both bounce sides) against her last recorded hurtbox, dropped to the floor when she was in the
         air. The hero's i-frames and her motion in the slow motion are left out (an estimate of the exposure, not a
-        replay: what the planner does there is the live run's to show).
+        replay: what the planner does there is the live run's to show). Rows made with the tail (tail_s set) are
+        skipped, so a --glob over all runs counts the past ones only. Each CLEAR also says whether its episode already
+        ended "quit after the kill" (QUIT under the tail rule whatever the bells do) and which real hits (injected
+        ones left out) the recording shows after the kill (already in its hits); the summary splits the standing hits
+        at HP <= 3 by these, so an estimate is not counted on top of what the rows already show.
 cover   every hero contact after a kill (injected hits left out) against the forecast the kill was certified with
         (the last frame before it, the boss alive, 2 s horizon: the kill window and the plan's rollout) and against
         the post-death forecast 3 frames before the contact (support_recall's pairing: box of c or c - 1).
@@ -207,7 +211,7 @@ def clears(runs: list[Path]) -> dict:
     for run in runs:
         for row in load_attempts(run):
             if row.get("unit") != "BellBeast" or row.get("mode") != "eval" or row.get("outcome") != "CLEAR" \
-                    or not row.get("recording"):
+                    or not row.get("recording") or row.get("tail_s") is not None:
                 continue
             rec = find_recording(run, row)
             if not (rec / "events.jsonl").is_file():
@@ -266,18 +270,35 @@ def clears(runs: list[Path]) -> dict:
                 srcs.append(tk)
                 if t is not None:
                     t_hit = t if t_hit is None else min(t_hit, t)
+            reason = row.get("reason") or ""
+            qak = None
+            if reason.startswith("quit after the kill"):
+                parts = [x.strip() for x in reason[len("quit after the kill"):].strip(" :").split(":")]
+                qak = " ".join(parts[:2])                   # "QUIT Q1", "QUIT QF", "QUIT_EMULATED Q1"
+            real_hits = [{"df": f - fk, "source": src, "amount": amt} for f, k, src, amt in ev["dmg"]
+                         if k == "damage" and fk < f <= s["f"] and _kind(src) != "injected"]
             out.append({"run": run.name, "instance": row.get("instance"), "episode": row.get("episode"),
                         "from": frm, "recorded_after_kill_f": s["f"] - fk, "recorded_game_s": round(g_end, 3),
                         "live_at_end": sorted(srcs), "standing_hit_in_s": None if t_hit is None else round(t_hit, 3),
-                        "min_hp": row.get("min_hp"), "hp_end": hero.get("health")})
+                        "min_hp": row.get("min_hp"), "hp_end": hero.get("health"), "hits": row.get("hits"),
+                        "quit_after_kill": qak, "hits_after_kill": real_hits})
     n = len(out)
     live = [r for r in out if r["live_at_end"]]
     hit = [r for r in out if r["standing_hit_in_s"] is not None]
+    low = [r for r in hit if (r.get("hp_end") or 5) <= 3]
     summ = {"clears": n, "live_source_at_window_end": len(live),
             "by_state": dict(Counter(r["from"] for r in live)),
             "standing_hero_hit": len(hit),
-            "standing_hit_at_h2_or_less": sum(1 for r in hit if (r.get("hp_end") or 5) <= 3),
-            "standing_hit_lethal": sum(1 for r in hit if (r.get("hp_end") or 5) <= 2)}
+            "standing_hit_at_h2_or_less": len(low),
+            "standing_hit_lethal": sum(1 for r in hit if (r.get("hp_end") or 5) <= 2),
+            # what the rows already show for those: a quit after the kill (QUIT under the tail rule), or a real hit
+            # after the kill in the recording (its HP at the end is after that hit, and the hit is in its hits)
+            "standing_low_hp_already": {
+                "quit_after_kill": sum(1 for r in low if r["quit_after_kill"]),
+                "hit_after_kill_recorded": sum(1 for r in low if not r["quit_after_kill"] and r["hits_after_kill"]),
+                "neither": sum(1 for r in low if not r["quit_after_kill"] and not r["hits_after_kill"])},
+            "quit_after_kill": dict(Counter(r["quit_after_kill"] for r in out if r["quit_after_kill"])),
+            "hit_after_kill_recorded": sum(1 for r in out if r["hits_after_kill"])}
     return {"summary": summ, "clears": out}
 
 

@@ -48,14 +48,15 @@ PAUSE_AFTER_KILL_FRAMES = 1200   # a supervisor pause under way at the kill keep
 
 def live_threats(state_ents, armed: tuple = ()) -> list[str]:
     """Type keys of the STATE's entities that can hurt the hero now or later: one with an enabled damage collider
-    (eff > 0, can_cause_damage), or a hazard in an armed state of its type (Encounter.tail_armed: a drop bell's Antic,
-    no collider until it falls). Hidden entities have no colliders (ssbot.ipc.ents)."""
+    (eff != 0: -1 is a multi-wounder source whose amount only its FSM knows, as ssbot.ipc.ents.is_threat;
+    can_cause_damage), or a hazard in an armed state of its type (Encounter.tail_armed: a drop bell's Antic, no
+    collider until it falls). Hidden entities have no colliders (ssbot.ipc.ents)."""
     out = []
     for e in state_ents or ():
         if e.get("hidden"):
             continue
         tk = str(e.get("type_key") or "")
-        live = any(c.get("enabled") and c.get("damage") and (c["damage"].get("eff") or 0) > 0
+        live = any(c.get("enabled") and c.get("damage") and (c["damage"].get("eff") or 0) != 0
                    and c["damage"].get("can_cause_damage", True) for c in e.get("colliders") or ())
         if not live and armed:
             st = ((e.get("fsms") or [{}])[0] or {}).get("state")
