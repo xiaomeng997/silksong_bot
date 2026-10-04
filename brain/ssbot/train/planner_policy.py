@@ -602,11 +602,17 @@ class PlannerPolicy:
             self.episode_outcome = "QUIT"
             self.outcome_reason = f"{r.outcome}: {'; '.join(r.decision.reasons) or 'supervisor'}"
         kp = res.kill
-        if r.mask is None and kp is not None and kp.certified and not kp.i3:
-            # the chosen plan's blow is certified only below I3: keep it for the slow motion (module docstring, 7)
+        if r.mask is None and kp is not None and not kp.i3:
+            # the chosen plan may land a killing blow outside I3: keep it for the slow motion (module docstring, 7).
+            # A plan of its own presses is certified (the filter vetoes the rest); a blow in flight may have lost its
+            # certificate since its press (live 20261004_041626: 5 of 14 kills at h = 2, a pogo's down spike whose
+            # bounce the forecast stopped predicting 3-6 frames before it landed): then the best plan there is
+            # (FORCED_RISK, least P) is kept the same way, by game time, rather than replanned per real frame at
+            # 0.05x (or the harness's zeros), and counted (stats kill_commits, certified False)
             self.commit = {"fo": fo, "f": f, "tg": ws.stamp.t_game_s, "P": kp.P, "cmd": np.array(res.cmd, np.int64),
                            "end_k": kp.k_hi + kp.window, "k_hi": kp.k_hi, "window": kp.window, "own": kp.own,
-                           "plan": res.name, "path": res.path, "path_hit": res.path_hit, "killed": None}
+                           "certified": kp.certified, "plan": res.name, "path": res.path, "path_hit": res.path_hit,
+                           "killed": None}
         else:
             self.commit = None
         self.sent[f + 2] = int(mask)
@@ -653,7 +659,7 @@ class PlannerPolicy:
         k = commit_frame(ws.stamp.t_game_s, f, fo, rate, c["tg"], ft)
         if k > c["end_k"]:
             c["ended_f"] = f
-            self.commits.append({x: c[x] for x in ("f", "fo", "plan", "own", "k_hi", "window", "killed",
+            self.commits.append({x: c[x] for x in ("f", "fo", "plan", "own", "certified", "k_hi", "window", "killed",
                                                    "f_kill_tick", "ended_f") if x in c} | {"ticks": c.get("ticks", 0)})
             self.commit = None
             return None
@@ -685,6 +691,7 @@ class PlannerPolicy:
                "mask": mask, "sup_mask": r.mask is not None, "tier": r.decision.tier, "h": r.decision.h,
                "pending": r.decision.pause_pending, "triggers": list(r.decision.triggers), "unpred": unpred,
                "commit": {"k": k, "i": i, "end_k": c["end_k"], "rate": round(rate / ft, 4), "commit_f": c["f"],
+                          "certified": c.get("certified"),
                           "killed": c["killed"],
                           "planned_box": None if c["path"] is None or not 0 <= k < len(c["path"])
                           else [round(float(v), 3) for v in c["path"][k]],
@@ -891,5 +898,6 @@ class PlannerPolicy:
                 "bell_hits": self.bell_mon.stats(),
                 "kill_commits": self.commits + ([] if self.commit is None or self.commit.get("killed") is None
                                                 else [{"plan": self.commit["plan"], "killed": self.commit["killed"],
+                                                       "certified": self.commit.get("certified"),
                                                        "ticks": self.commit.get("ticks", 0), "open": True}]),
                 "real_quit": self.real_quit_stats()}
