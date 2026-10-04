@@ -88,14 +88,28 @@ def test_held_out_recall_end_to_end(tmp_path):
 
 
 def test_margins_are_calibrated_on_the_other_fold():
-    rows = [{"type": "Foe", "family": "F_HIT", "state": "Antic", "fold": 0, "ho": {"state:Antic": 0.2}},
-            {"type": "Foe", "family": "F_HIT", "state": "Antic", "fold": 0, "ho": {"state:Antic": 0.7}},
-            {"type": "Foe", "family": "F_HIT", "state": "Antic", "fold": 1, "ho": {"state:Antic": None}},
-            {"type": "Foe", "family": "F_HIT", "state": "Antic", "fold": 1, "follow": True,
-             "ho": {"state:Antic": 2.0}}]
-    assert margins_from_contacts(rows, fold=0) == {("Foe", "F_HIT"): 0.7}
+    own = {"type": "Foe", "tk": "Foe", "family": "F_HIT", "state": "Antic"}
+    rows = [{**own, "fold": 0, "ho": {"state:Antic": 0.2}},
+            {**own, "fold": 0, "ho": {"state:Antic": 0.7}},
+            {**own, "fold": 1, "ho": {"state:Antic": None}},
+            {**own, "fold": 1, "follow": True, "ho": {"state:Antic": 2.0}},
+            # a thrown hazard's contact: its self template's residual, not the family's
+            {**own, "tk": "Ball", "fold": 0, "state": "_tail", "ho": {"state:_tail": 2.5, "self:Ball": 0.1}}]
+    assert margins_from_contacts(rows, fold=0) == {("Foe", "F_HIT"): 0.7, ("ent", "Ball"): 0.1}
     assert margins_from_contacts(rows, fold=1) == {("Foe", "F_HIT"): 3.0}     # beyond the search: its radius
     assert math.isclose(margins_from_contacts(rows, fold=0, q=0.0)[("Foe", "F_HIT")], 0.2)
+
+
+def test_tracker_records_hazard_armings(tmp_path):
+    from ssbot.knowledge.forum_support import thrown
+    c = _cache(tmp_path)
+    tr = SubjectTracker(SPECS)
+    for i, f, T in replay(c, tr, SPECS):
+        if f == 45:
+            h = thrown(tr, SPEC)
+            assert len(h) == 1 and h[0][0] == "Ball" and h[0][2] == (21.0, 4.0)
+            assert math.isclose(T - h[0][1], 15 / 60, abs_tol=1e-9)
+    assert not thrown(tr, SPEC)        # disarmed after frame 70
 
 
 def test_margin_dilates_the_fold_templates(tmp_path):

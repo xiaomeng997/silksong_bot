@@ -14,7 +14,10 @@ template at the instance's anchor (its transform at the instance's first exporte
 successors the training fold logged with entry intervals from its logged dwell range (one bin of slack on each side;
 a current state already older than its longest logged dwell can end from the next frame on to the horizon; the walk
 keeps one entry hull per state and instance, so zero-dwell decision loops end), the tail of an attack once it
-can end (hazards outliving it), the tails of ended attacks for tail_max_s. Forum anchors vary (no Set L / Set R): an
+can end (hazards outliving it), the tails of ended attacks for tail_max_s, and every armed hazard of a type the
+enemy throws by its self template (relative to where and when it armed: a bouncing bell's path depends on where it
+was thrown, which the thrower's per-state templates hold only as a union; the oracle sees the arming, vision the
+projectile's first detection). Forum anchors vary (no Set L / Set R): an
 instance that starts after the origin is anchored at the enemy's position moved along its exported velocity, one
 anchor per frame of the horizon, both mirrors (the enemy may turn as it starts). The query is the planner's
 SupportQuery over every type's per-state anchor templates dilated by the hero hurtbox half-extents plus the base
@@ -35,33 +38,45 @@ from pathlib import Path
 import numpy as np
 
 from ssbot.knowledge import hitbox_tables as hb
-from ssbot.knowledge.gauntlet_tables import FACES_LEFT, FORUM_SPECS
+from ssbot.knowledge.gauntlet_tables import FACES_LEFT, FORUM_SPECS, HAZARD_ALIASES
 
 BIN = hb.BIN_S
 FRAME_S = 1.0 / 60.0
 TAIL = "_tail"
+HAZARD_GONE_S = 0.5          # an armed hazard missing from the export this long has left (behaviour_tables
+#                              ABSENT_CLOSE_F: 30 frames)
 DWELL_SLACK_S = BIN          # logged dwell ranges are frame-quantised: one bin of slack on each side
 
 
 def margins_from_contacts(rows: list[dict], fold: int | None = None, q: float = 1.0) -> dict[tuple[str, str], float]:
-    """Per (type, family) margin from the held-out residuals of the per-state sets ("state:<state>": the contact
-    against the other fold's per-state occupancy): the q-quantile (1.0 = max). fold: only contacts of that fold
-    (the calibration side; the certified side is the other). A residual beyond the search radius counts as
-    behaviour_tables.R_MARGIN_SEARCH_U."""
+    """Margins from held-out residuals (the q-quantile, 1.0 = max; a residual beyond the search radius counts as
+    behaviour_tables.R_MARGIN_SEARCH_U); fold: only contacts of that fold (the calibration side; the certified side is
+    the other):
+      (type, family)  the enemy's own colliders: the per-state set ("state:<state>", the contact against the other
+                      fold's per-state occupancy at its state and time)
+      ("ent", hazard) a thrown hazard's contacts: its self template ("self:<hazard>", relative to where and when it
+                      armed); the recall places it for every armed hazard (SubjectTracker.hazards), so a hazard
+                      whose path the per-state templates cannot hold (a bell's bounces) does not widen the family"""
     from ssbot.knowledge.behaviour_tables import R_MARGIN_SEARCH_U
     per: dict[tuple, list] = defaultdict(list)
     for r in rows:
-        if r.get("follow") or r.get("family") is None or (fold is not None and r.get("fold") != fold):
-            continue
-        st = r.get("state")
-        if st is None:
+        if r.get("follow") or (fold is not None and r.get("fold") != fold):
             continue
         ho = r.get("ho") or {}
-        k = f"state:{st}"
-        if k not in ho:
-            continue
+        own = r.get("tk") == r.get("type")
+        if own:
+            st = r.get("state")
+            k = f"state:{st}"
+            if r.get("family") is None or st is None or k not in ho:
+                continue
+            key = (r["type"], r["family"])
+        else:
+            k = f"self:{r.get('tk')}"
+            if k not in ho:
+                continue
+            key = ("ent", r["tk"])
         v = ho[k]
-        per[(r["type"], r["family"])].append(R_MARGIN_SEARCH_U if v is None else float(v))
+        per[key].append(R_MARGIN_SEARCH_U if v is None else float(v))
     return {k: float(np.quantile(v, q)) if v else 0.0 for k, v in per.items()}
 
 
@@ -103,9 +118,14 @@ class FoldTables:
             raw, _ = hb.load_templates(npz, prefix=hb.SUPPORT)
             for k, t in raw.items():
                 parts = k.split("/")
-                if len(parts) != 4 or parts[3] != "anchor" or parts[2].startswith("ent"):
+                if len(parts) != 4:
                     continue
-                m = base + self.margins.get((tk, parts[1]), 0.0)
+                if parts[1] == "ent" and parts[3] == "self":       # a hazard's self template
+                    m = base + self.margins.get(("ent", parts[2]), 0.0)
+                elif parts[3] == "anchor":
+                    m = base + self.margins.get((tk, parts[1]), 0.0)
+                else:
+                    continue
                 tpls[k] = t.dilated(rx=hb.HERO_HALF_U[0] + m, ry=hb.HERO_HALF_U[1] + m, key=k)
         self.templates = tpls
         self.meta = {k: (t.t0, t.t1) for k, t in tpls.items()}
@@ -113,6 +133,10 @@ class FoldTables:
 
     def key(self, fam: str, state: str) -> str | None:
         k = f"{hb.SUPPORT}{fam}/{state}/anchor"
+        return k if k in self.meta else None
+
+    def self_key(self, hazard: str) -> str | None:
+        k = f"{hb.SUPPORT}ent/{hazard}/self"
         return k if k in self.meta else None
 
 
@@ -158,6 +182,8 @@ class SubjectTracker:
         self.tail_keep_s = tail_keep_s
         self.log = log            # every instance started, in order (ended ones with t_end / f_end / end)
         self.f = -1               # the frame being fed (log only)
+        self.hazards: dict[int, list] = {}   # thrown hazard iid -> [type, armed, arm time, arm position, last seen]
+        self.T = 0.0              # game time of the frame being fed
 
     def subject(self, iid: int, tk: str) -> Subject:
         s = self.subjects.get(iid)
@@ -204,6 +230,16 @@ class SubjectTracker:
                 self._start(s, idle, to, T)
         if self.log is not None and s.cur is not None:
             s.cur.states.append((to, T))
+
+    def hazard(self, iid: int, tk: str, T: float, x: float, y: float, armed: bool) -> None:
+        """A thrown hazard's frame: an arming (armed now, not on its last frame) records where and when (its self
+        template's origin, the gauntlet builder's EntitySeg.arm_T / arm_pos)."""
+        h = self.hazards.get(iid)
+        if h is None:
+            h = self.hazards[iid] = [tk, False, T, (float(x), float(y)), T]
+        if armed and not h[1]:
+            h[0], h[2], h[3] = tk, T, (float(x), float(y))
+        h[1], h[4] = armed, T
 
     def kill(self, iid: int, T: float) -> None:
         s = self.subjects.get(iid)
@@ -256,16 +292,21 @@ class SubjectRecall:
             for ax, ay, m in anchors:
                 out.append((key, -e, (ax, ay), m))
 
-    def placements_of(self, s: Subject, T_o: float, H: float, anchor_step: int = 1) -> list[tuple]:
+    def placements_of(self, s: Subject, T_o: float, H: float, anchor_step: int = 1,
+                      hazards: list | None = None) -> list[tuple]:
         """SupportQuery placements (key, t_ref, anchor, mirror) of one subject at origin T_o (no duplicates).
         anchor_step: frames between the anchors of instances that start after the origin (1 = every frame: the
-        recall; a coarser step for long horizons is an approximation for statistics, not a support)."""
+        recall; a coarser step for long horizons is an approximation for statistics, not a support). hazards:
+        (type, arm time, arm position) of the armed hazards to place by their self templates."""
         sp = self.t.specs[s.tk]
         w = self.t.walk.get(s.tk)
         out: list = []
         for fam, anc, mir, t_end in s.ends:
             e = t_end - T_o
             self._place(out, self.t.key(fam, TAIL), e, e, [(anc[0], anc[1], mir)], H)
+        for htk, arm_T, pos in hazards or ():
+            e = arm_T - T_o
+            self._place(out, self.t.self_key(htk), e, e, [(pos[0], pos[1], 1)], H)
         if w is not None and s.state is not None and s.t_entry is not None:
             k_max = int(math.ceil(H / FRAME_S))
             x, y = s.pos
@@ -402,7 +443,7 @@ class SubjectRecall:
             pts.append((0.5 * (box[0] + box[2]), 0.5 * (box[1] + box[3]), float(T_arr[fi_of[fr]]) - T_o))
         ok = False
         if s is not None and pts:
-            pl = self.placements_of(s, T_o, H)
+            pl = self.placements_of(s, T_o, H, hazards=thrown(tr, self.t.specs[s.tk]))
             self.placements["placements"] += len(pl)
             self.placements["forecasts"] += 1
             ok = self.covered(pl, pts)
@@ -416,6 +457,14 @@ class SubjectRecall:
                             "ho": c.get("ho"), "label": label})
 
 
+def thrown(tr: SubjectTracker, sp) -> list[tuple]:
+    """(type, arm time, arm position) of the armed hazards of the types this enemy type throws."""
+    if not sp.projectiles:
+        return []
+    return [(h[0], h[2], h[3]) for h in tr.hazards.values()
+            if h[1] and tr.T - h[4] <= HAZARD_GONE_S and h[0].startswith(sp.projectiles)]
+
+
 def replay(cache: dict, tr: SubjectTracker, specs=FORUM_SPECS):
     """Feed a fight's cache to the tracker frame by frame (the Control events and kills first, then the entities, as
     the gauntlet builder does); yields (frame index, frame, game time) after each frame."""
@@ -427,10 +476,14 @@ def replay(cache: dict, tr: SubjectTracker, specs=FORUM_SPECS):
             evs[int(f)].append((k, d))
     starts = np.searchsorted(cache["e_fi"], np.arange(len(f_arr) + 1))
     tk_ok = np.array([t in specs for t in types], bool)
+    prefixes = tuple(p for sp in specs.values() for p in sp.projectiles)
+    haz_ok = np.array([t not in specs and (t in HAZARD_ALIASES or t.startswith(prefixes)) for t in types], bool)         if prefixes else np.zeros(len(types), bool)
+    rest = frozenset(st for sp in specs.values() if sp.projectiles for st in sp.rest_states)
+    alias: dict[int, str] = {}
     for i, f in enumerate(f_arr):
         f = int(f)
         T = float(T_arr[i])
-        tr.f = f
+        tr.f, tr.T = f, T
         for k, d in evs.get(f, ()):
             if k == "fsm":
                 tk = _type_of(d.get("obj"), specs)
@@ -440,6 +493,20 @@ def replay(cache: dict, tr: SubjectTracker, specs=FORUM_SPECS):
                 tr.kill(int(d["ent"]), T)
         for r in range(starts[i], starts[i + 1]):
             tki = int(cache["e_tk"][r])
+            if haz_ok[tki]:
+                iid = int(cache["e_iid"][r])
+                box = cache["e_box"][r]
+                st = int(cache["e_st"][r])
+                armed = not math.isnan(float(box[0])) or (st >= 0 and states[st] not in rest)
+                tk = types[tki]
+                if tk in HAZARD_ALIASES:      # a shared name: the circle's radius from the box width
+                    if not math.isnan(float(box[0])):
+                        w = 0.5 * float(box[2] - box[0])
+                        alias[iid] = min(HAZARD_ALIASES[tk], key=lambda a: abs(a[0] - w))[1]
+                    tk = alias.get(iid)
+                if tk is not None:
+                    tr.hazard(iid, tk, T, cache["e_x"][r], cache["e_y"][r], armed)
+                continue
             if not tk_ok[tki]:
                 continue
             st = int(cache["e_st"][r])
