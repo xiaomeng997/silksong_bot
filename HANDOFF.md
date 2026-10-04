@@ -873,7 +873,11 @@ fixed.
   it are docs only). Start: `C:\ssbot\sandbox\postkill_gate2_start.cmd` (detached and hidden; it does nothing while
   STOP_AGENTS or DEMO_SOON exists). Log `C:\ssbot\sandbox\postkill_gate2.log` (prints the run dir, ends with
   POSTKILL_GATE2_DONE; about 4.7 h). Summary: `combat_run summary <run dir>`; stop: `combat_run stop <run dir>`.
-- Status: not started yet: DEMO_SOON ("lead: half-speed demo", 09:06) was still there when this was written.
+- Status: RUNNING. Started 09:53 once DEMO_SOON was gone (it was there 09:06-09:52):
+  `C:\ssbot\data\runs\m2\20261004_095304_BellBeast_eval_planner_oracle`, code_rev c1e971b, config_fp 14d5015e849a,
+  env {} (no SSBOT_* switches). First 6 episodes: 6 CLEAR, tail_end "quiet", 0 tail hits. Expected end about 14:40.
+  If it is stopped early (STOP / DEMO_SOON), restart the missing episodes from the same checkout with a new base seed
+  outside 124000-124249 (for example 124300) and pool only rows of config_fp 14d5015e849a.
 
 ### Next
 
