@@ -268,3 +268,12 @@ cd brain
 - 5 次尝试（forum_demo）：死 4、中途结束 1；到达的波次 4、7、11、13、13——**两次打到最后一波（index 13，两只 Clapper）**：一次在那里结束录像（未死），一次死于 Clapper 的 Slam Collider 1。其余死因：Minister 两次、Clapper（index 7）一次。
 - 受击 80 次、掉 102 格（每分钟 5.73 次，游戏时间），回血 24 次；按键每秒 2.07。左墙口袋一次没用（cling 0 s）。
 - 解读：半速 + 加满的配装让第 1 波不再是瓶颈，能看到后半程；但这是练习条件，不代表原速难度。Forum 计划仍按原速设计；这段录像可作后半程（Maestro、Minister、双 Clapper）站位和出手的参照。
+
+## 补充：路线配装半速练习（2026-10-04 13:38，C:\ssbot\data\human\20261004_133855）
+
+- 配装（存档 fo_R → fo_R2）：Wanderer、制作匣 1、工具袋 1、丝上限 10、针 2 级、面具 7；灵丝风暴、齿轮蜂、裂痕面具、护佑钟、爬墙爪、负重环带，外加壳囊（这份存档里 Wanderer 的槽全开着：路线上 3 个 Locket 全给 Wanderer 才有，壳囊不在路线里）。游戏速度 0.5。
+- 7 次尝试（forum_demo；赢的 4 次被记为 left，因为赢后直接读档）：**赢 4、死 3**，6 次到最后一波。赢的 4 次分别掉 8 / 17 / 11 / 19 格（受击 7 / 13 / 6 / 18 次，回血 1 / 6 / 3 / 8 次），没有无伤。
+- 全部 91 次受击、掉 118 格（游戏时间每分钟 3.89 次，上一段半速练习 5.73 次）：**两只 Clapper（Song Heavy Sentry）45 格**（Slam Collider 1/2 共 15 次，每次 2 格，加 rune bomb），Tiny 19（身体接触 13、Defend 5），Reed 16，Minister 16，Choristor 10 + 7，Clawmaiden 5。死因：Clapper slam、Clapper 身体、Reed 身体各 1。
+- 空中受击 65 / 地面 26；出刀时 14 次、冲刺时 3 次、Bind 中 0 次。按键每秒 2.0–2.3；齿轮蜂每场 4–5 次（上一段 0 次）；拼刀每场 2–9 次。
+- **左墙口袋几乎没用**（每场 0–0.23 s），而 R1 的口袋数据（forum.md §13）里 464 s 中 Clapper 0 次命中：最大的掉血来源正是口袋能避开的那一类。已建议你最后一波试口袋。
+- 复现：`..\scripts\uv.cmd run python -m ssbot.tools.forum_demo C:/ssbot/data/human/20261004_133855 --json C:/ssbot/sandbox/forum_demo4.json`。
