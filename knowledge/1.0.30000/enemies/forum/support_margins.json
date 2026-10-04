@@ -1,0 +1,483 @@
+{
+ "what": "per-family support margins (u) of the Forum behaviour tables: the largest held-out residual of the per-state support (behaviour_tables R_MARGIN_SEARCH_U caps it); the planner dilates every support template of the family by it on top of the hero hurtbox and its own margin",
+ "quantile": 1.0,
+ "certified": true,
+ "recall": {
+  "L2": {
+   "n": 228333,
+   "covered": 228333,
+   "recall": 1.0
+  },
+  "L3": {
+   "n": 228333,
+   "covered": 228333,
+   "recall": 1.0
+  },
+  "L4": {
+   "n": 228333,
+   "covered": 228333,
+   "recall": 1.0
+  }
+ },
+ "lags": [
+  2,
+  3,
+  4
+ ],
+ "base_margin": 0.0,
+ "fights": 107,
+ "extra": "C:\\ssbot\\data\\m2_forum_r0\\build_all\\extra",
+ "by_family": {
+  "Pilgrim 03 Song/CB_EVADE": 0.0,
+  "Pilgrim 03 Song/CB_IDLE": 0.0,
+  "Pilgrim 03 Song/CB_THROW": 0.0,
+  "Song Administrator/MI_CHARGE": 0.1872,
+  "Song Administrator/MI_EVADE": 0.2336,
+  "Song Administrator/MI_IDLE": 3.0,
+  "Song Administrator/MI_PARRY": 3.0,
+  "Song Automaton Tiny/AT_DEFEND": 0.9812,
+  "Song Automaton Tiny/AT_FIRE": 3.0,
+  "Song Automaton Tiny/AT_IDLE": 3.0,
+  "Song Automaton Tiny/AT_LEAVE": 0.3087,
+  "Song Handmaiden/CM_SLASH": 0.7048,
+  "Song Handmaiden/CM_SPIN": 2.7615,
+  "Song Handmaiden/CM_TELE": 0.0,
+  "Song Heavy Sentry/CC_CAST": 0.0,
+  "Song Heavy Sentry/CC_ENTRY": 0.0,
+  "Song Heavy Sentry/CC_EVADE": 0.1591,
+  "Song Heavy Sentry/CC_IDLE": 0.0,
+  "Song Heavy Sentry/CC_JUMP": 2.1112,
+  "Song Heavy Sentry/CC_JUMP_CAST": 0.0182,
+  "Song Heavy Sentry/CC_SLAM": 0.1803,
+  "Song Pilgrim 01/EN_CHARGE": 2.9585,
+  "Song Pilgrim 01/EN_IDLE": 0.0,
+  "Song Pilgrim 01/EN_JUMPSLASH": 0.0663,
+  "Song Pilgrim 01/EN_SLASH": 0.0,
+  "Song Pilgrim 03/CH_ENTRY": 0.5536,
+  "Song Pilgrim 03/CH_IDLE": 0.0,
+  "Song Pilgrim 03/CH_JUMP": 1.6093,
+  "Song Pilgrim 03/CH_SLASH": 0.2813,
+  "Song Pilgrim 03/CH_WHIP": 0.0,
+  "Song Pilgrim Maestro/MA_DEFEND": 0.7571,
+  "Song Pilgrim Maestro/MA_IDLE": 0.4349,
+  "Song Pilgrim Maestro/MA_SLASH": 0.5435,
+  "Song Pilgrim Maestro/MA_SUMMON": 0.1283,
+  "Song Reed/RE_DEFEND": 2.6237,
+  "Song Reed/RE_ENTRY": 0.0,
+  "Song Reed/RE_EVADE": 0.1449,
+  "Song Reed/RE_IDLE": 1.2946,
+  "Song Reed/RE_STAB": 1.3684,
+  "Song Reed/RE_THROW": 0.0,
+  "ent/Song Reed Pin Projectile": 3.0,
+  "ent/Spear": 3.0,
+  "ent/Throwing Bell": 3.0,
+  "ent/handmaiden_spear_silk_explosion": 0.0,
+  "ent/rune bomb small": 3.0,
+  "ent/rune slam": 0.0
+ },
+ "by_type": {
+  "Pilgrim 03 Song": 0.0,
+  "Song Administrator": 3.0,
+  "Song Automaton Tiny": 3.0,
+  "Song Handmaiden": 2.7615,
+  "Song Heavy Sentry": 2.1112,
+  "Song Pilgrim 01": 2.9585,
+  "Song Pilgrim 03": 1.6093,
+  "Song Pilgrim Maestro": 0.7571,
+  "Song Reed": 2.6237,
+  "ent": 3.0
+ },
+ "by_fold": {
+  "0": {
+   "Song Heavy Sentry/CC_JUMP": 0.0,
+   "Song Heavy Sentry/CC_JUMP_CAST": 0.0015,
+   "ent/rune slam": 0.0,
+   "Song Heavy Sentry/CC_SLAM": 0.0,
+   "Song Heavy Sentry/CC_IDLE": 0.0,
+   "Song Heavy Sentry/CC_CAST": 0.0,
+   "ent/rune bomb small": 3.0,
+   "Song Heavy Sentry/CC_EVADE": 0.1591,
+   "Song Heavy Sentry/CC_ENTRY": 0.0,
+   "Song Handmaiden/CM_SLASH": 0.7048,
+   "Song Handmaiden/CM_SPIN": 2.7615,
+   "ent/Spear": 3.0,
+   "ent/handmaiden_spear_silk_explosion": 0.0,
+   "Song Handmaiden/CM_TELE": 0.0,
+   "Song Administrator/MI_PARRY": 3.0,
+   "Song Administrator/MI_IDLE": 3.0,
+   "Song Administrator/MI_CHARGE": 0.0,
+   "Song Administrator/MI_EVADE": 0.1017,
+   "Song Pilgrim Maestro/MA_SLASH": 0.0,
+   "Song Pilgrim Maestro/MA_IDLE": 0.0399,
+   "Song Pilgrim Maestro/MA_DEFEND": 0.0,
+   "Song Pilgrim Maestro/MA_SUMMON": 0.0,
+   "Song Automaton Tiny/AT_FIRE": 0.9599,
+   "Song Automaton Tiny/AT_IDLE": 3.0,
+   "Song Automaton Tiny/AT_DEFEND": 0.434,
+   "Song Automaton Tiny/AT_LEAVE": 0.0,
+   "Song Reed/RE_DEFEND": 0.5666,
+   "Song Reed/RE_STAB": 1.3684,
+   "ent/Song Reed Pin Projectile": 0.0,
+   "Song Reed/RE_EVADE": 0.1449,
+   "Song Reed/RE_IDLE": 1.2946,
+   "Song Reed/RE_THROW": 0.0,
+   "Song Reed/RE_ENTRY": 0.0,
+   "Song Pilgrim 01/EN_CHARGE": 2.7418,
+   "Song Pilgrim 01/EN_JUMPSLASH": 0.0663,
+   "Song Pilgrim 01/EN_SLASH": 0.0,
+   "Song Pilgrim 01/EN_IDLE": 0.0,
+   "Song Pilgrim 03/CH_SLASH": 0.2813,
+   "Song Pilgrim 03/CH_IDLE": 0.0,
+   "Song Pilgrim 03/CH_ENTRY": 0.1724,
+   "Song Pilgrim 03/CH_JUMP": 0.0,
+   "Song Pilgrim 03/CH_WHIP": 0.0,
+   "ent/Throwing Bell": 3.0,
+   "Pilgrim 03 Song/CB_THROW": 0.0,
+   "Pilgrim 03 Song/CB_IDLE": 0.0,
+   "Pilgrim 03 Song/CB_EVADE": 0.0
+  },
+  "1": {
+   "Song Heavy Sentry/CC_SLAM": 0.1803,
+   "Song Heavy Sentry/CC_IDLE": 0.0,
+   "Song Heavy Sentry/CC_CAST": 0.0,
+   "ent/rune bomb small": 3.0,
+   "Song Heavy Sentry/CC_JUMP_CAST": 0.0182,
+   "ent/rune slam": 0.0,
+   "Song Heavy Sentry/CC_JUMP": 2.1112,
+   "Song Heavy Sentry/CC_EVADE": 0.0,
+   "Song Heavy Sentry/CC_ENTRY": 0.0,
+   "Song Handmaiden/CM_SPIN": 1.1522,
+   "ent/Spear": 3.0,
+   "ent/handmaiden_spear_silk_explosion": 0.0,
+   "Song Handmaiden/CM_SLASH": 0.257,
+   "Song Administrator/MI_PARRY": 2.2356,
+   "Song Administrator/MI_IDLE": 1.6421,
+   "Song Administrator/MI_CHARGE": 0.1872,
+   "Song Administrator/MI_EVADE": 0.2336,
+   "Song Pilgrim Maestro/MA_SLASH": 0.5435,
+   "Song Pilgrim Maestro/MA_IDLE": 0.4349,
+   "Song Pilgrim Maestro/MA_SUMMON": 0.1283,
+   "Song Pilgrim Maestro/MA_DEFEND": 0.7571,
+   "Song Automaton Tiny/AT_DEFEND": 0.9812,
+   "Song Automaton Tiny/AT_IDLE": 0.0189,
+   "Song Automaton Tiny/AT_FIRE": 3.0,
+   "Song Automaton Tiny/AT_LEAVE": 0.3087,
+   "Song Reed/RE_STAB": 1.3221,
+   "Song Reed/RE_DEFEND": 2.6237,
+   "Song Reed/RE_EVADE": 0.0,
+   "ent/Song Reed Pin Projectile": 3.0,
+   "Song Reed/RE_IDLE": 0.9291,
+   "Song Reed/RE_THROW": 0.0,
+   "Song Reed/RE_ENTRY": 0.0,
+   "Song Pilgrim 01/EN_CHARGE": 2.9585,
+   "Song Pilgrim 01/EN_SLASH": 0.0,
+   "Song Pilgrim 01/EN_IDLE": 0.0,
+   "Song Pilgrim 01/EN_JUMPSLASH": 0.0,
+   "Song Pilgrim 03/CH_SLASH": 0.0,
+   "Song Pilgrim 03/CH_IDLE": 0.0,
+   "Song Pilgrim 03/CH_JUMP": 1.6093,
+   "Song Pilgrim 03/CH_ENTRY": 0.5536,
+   "Song Pilgrim 03/CH_WHIP": 0.0,
+   "ent/Throwing Bell": 3.0,
+   "Pilgrim 03 Song/CB_IDLE": 0.0,
+   "Pilgrim 03 Song/CB_THROW": 0.0,
+   "Pilgrim 03 Song/CB_EVADE": 0.0
+  }
+ },
+ "support_area": {
+  "Song Heavy Sentry/CC_CAST": {
+   "margin_u": 0.0,
+   "templates": 10,
+   "area_u2": 199.09,
+   "area_with_margin_u2": 199.09,
+   "ratio": 1.0
+  },
+  "Song Heavy Sentry/CC_ENTRY": {
+   "margin_u": 0.0,
+   "templates": 12,
+   "area_u2": 19.98,
+   "area_with_margin_u2": 19.98,
+   "ratio": 1.0
+  },
+  "Song Heavy Sentry/CC_EVADE": {
+   "margin_u": 0.159,
+   "templates": 6,
+   "area_u2": 27.69,
+   "area_with_margin_u2": 32.18,
+   "ratio": 1.162
+  },
+  "Song Heavy Sentry/CC_IDLE": {
+   "margin_u": 0.0,
+   "templates": 18,
+   "area_u2": 119.44,
+   "area_with_margin_u2": 119.44,
+   "ratio": 1.0
+  },
+  "Song Heavy Sentry/CC_JUMP": {
+   "margin_u": 2.111,
+   "templates": 20,
+   "area_u2": 88.75,
+   "area_with_margin_u2": 204.83,
+   "ratio": 2.308
+  },
+  "Song Heavy Sentry/CC_JUMP_CAST": {
+   "margin_u": 0.018,
+   "templates": 24,
+   "area_u2": 260.28,
+   "area_with_margin_u2": 264.16,
+   "ratio": 1.015
+  },
+  "Song Heavy Sentry/CC_SLAM": {
+   "margin_u": 0.18,
+   "templates": 16,
+   "area_u2": 62.64,
+   "area_with_margin_u2": 70.21,
+   "ratio": 1.121
+  },
+  "Song Handmaiden/CM_IDLE": {
+   "margin_u": 0.0,
+   "templates": 8,
+   "area_u2": 270.75,
+   "area_with_margin_u2": 270.75,
+   "ratio": 1.0
+  },
+  "Song Handmaiden/CM_SLASH": {
+   "margin_u": 0.705,
+   "templates": 18,
+   "area_u2": 166.67,
+   "area_with_margin_u2": 223.85,
+   "ratio": 1.343
+  },
+  "Song Handmaiden/CM_SPIN": {
+   "margin_u": 2.761,
+   "templates": 24,
+   "area_u2": 271.54,
+   "area_with_margin_u2": 707.41,
+   "ratio": 2.605
+  },
+  "Song Handmaiden/CM_TELE": {
+   "margin_u": 0.0,
+   "templates": 12,
+   "area_u2": 17.98,
+   "area_with_margin_u2": 17.98,
+   "ratio": 1.0
+  },
+  "Song Administrator/MI_CHARGE": {
+   "margin_u": 0.187,
+   "templates": 10,
+   "area_u2": 146.21,
+   "area_with_margin_u2": 162.86,
+   "ratio": 1.114
+  },
+  "Song Administrator/MI_EVADE": {
+   "margin_u": 0.234,
+   "templates": 6,
+   "area_u2": 69.52,
+   "area_with_margin_u2": 82.87,
+   "ratio": 1.192
+  },
+  "Song Administrator/MI_IDLE": {
+   "margin_u": 3.0,
+   "templates": 12,
+   "area_u2": 286.77,
+   "area_with_margin_u2": 597.64,
+   "ratio": 2.084
+  },
+  "Song Administrator/MI_PARRY": {
+   "margin_u": 3.0,
+   "templates": 22,
+   "area_u2": 193.83,
+   "area_with_margin_u2": 440.11,
+   "ratio": 2.271
+  },
+  "Song Pilgrim Maestro/MA_DEFEND": {
+   "margin_u": 0.757,
+   "templates": 10,
+   "area_u2": 90.84,
+   "area_with_margin_u2": 133.62,
+   "ratio": 1.471
+  },
+  "Song Pilgrim Maestro/MA_IDLE": {
+   "margin_u": 0.435,
+   "templates": 8,
+   "area_u2": 89.83,
+   "area_with_margin_u2": 110.98,
+   "ratio": 1.235
+  },
+  "Song Pilgrim Maestro/MA_SLASH": {
+   "margin_u": 0.543,
+   "templates": 14,
+   "area_u2": 75.09,
+   "area_with_margin_u2": 102.04,
+   "ratio": 1.359
+  },
+  "Song Pilgrim Maestro/MA_SUMMON": {
+   "margin_u": 0.128,
+   "templates": 10,
+   "area_u2": 31.53,
+   "area_with_margin_u2": 35.67,
+   "ratio": 1.131
+  },
+  "Song Automaton Tiny/AT_DEFEND": {
+   "margin_u": 0.981,
+   "templates": 6,
+   "area_u2": 363.02,
+   "area_with_margin_u2": 482.85,
+   "ratio": 1.33
+  },
+  "Song Automaton Tiny/AT_FIRE": {
+   "margin_u": 3.0,
+   "templates": 14,
+   "area_u2": 311.94,
+   "area_with_margin_u2": 770.7,
+   "ratio": 2.471
+  },
+  "Song Automaton Tiny/AT_IDLE": {
+   "margin_u": 3.0,
+   "templates": 6,
+   "area_u2": 329.98,
+   "area_with_margin_u2": 688.69,
+   "ratio": 2.087
+  },
+  "Song Automaton Tiny/AT_LEAVE": {
+   "margin_u": 0.309,
+   "templates": 6,
+   "area_u2": 32.3,
+   "area_with_margin_u2": 45.39,
+   "ratio": 1.405
+  },
+  "Song Reed/RE_DEFEND": {
+   "margin_u": 2.624,
+   "templates": 22,
+   "area_u2": 96.3,
+   "area_with_margin_u2": 265.61,
+   "ratio": 2.758
+  },
+  "Song Reed/RE_ENTRY": {
+   "margin_u": 0.0,
+   "templates": 6,
+   "area_u2": 27.29,
+   "area_with_margin_u2": 27.29,
+   "ratio": 1.0
+  },
+  "Song Reed/RE_EVADE": {
+   "margin_u": 0.145,
+   "templates": 8,
+   "area_u2": 41.95,
+   "area_with_margin_u2": 48.21,
+   "ratio": 1.149
+  },
+  "Song Reed/RE_IDLE": {
+   "margin_u": 1.295,
+   "templates": 12,
+   "area_u2": 125.59,
+   "area_with_margin_u2": 213.95,
+   "ratio": 1.704
+  },
+  "Song Reed/RE_STAB": {
+   "margin_u": 1.368,
+   "templates": 20,
+   "area_u2": 302.39,
+   "area_with_margin_u2": 496.43,
+   "ratio": 1.642
+  },
+  "Song Reed/RE_THROW": {
+   "margin_u": 0.0,
+   "templates": 24,
+   "area_u2": 164.15,
+   "area_with_margin_u2": 164.15,
+   "ratio": 1.0
+  },
+  "Song Pilgrim 01/EN_AMBUSH": {
+   "margin_u": 0.0,
+   "templates": 6,
+   "area_u2": 7.73,
+   "area_with_margin_u2": 7.73,
+   "ratio": 1.0
+  },
+  "Song Pilgrim 01/EN_CHARGE": {
+   "margin_u": 2.958,
+   "templates": 14,
+   "area_u2": 61.94,
+   "area_with_margin_u2": 265.86,
+   "ratio": 4.292
+  },
+  "Song Pilgrim 01/EN_IDLE": {
+   "margin_u": 0.0,
+   "templates": 10,
+   "area_u2": 10.97,
+   "area_with_margin_u2": 10.97,
+   "ratio": 1.0
+  },
+  "Song Pilgrim 01/EN_JUMPSLASH": {
+   "margin_u": 0.066,
+   "templates": 14,
+   "area_u2": 18.05,
+   "area_with_margin_u2": 20.64,
+   "ratio": 1.144
+  },
+  "Song Pilgrim 01/EN_SLASH": {
+   "margin_u": 0.0,
+   "templates": 14,
+   "area_u2": 25.6,
+   "area_with_margin_u2": 25.6,
+   "ratio": 1.0
+  },
+  "Song Pilgrim 03/CH_ENTRY": {
+   "margin_u": 0.554,
+   "templates": 8,
+   "area_u2": 10.52,
+   "area_with_margin_u2": 23.8,
+   "ratio": 2.262
+  },
+  "Song Pilgrim 03/CH_IDLE": {
+   "margin_u": 0.0,
+   "templates": 26,
+   "area_u2": 55.06,
+   "area_with_margin_u2": 55.06,
+   "ratio": 1.0
+  },
+  "Song Pilgrim 03/CH_JUMP": {
+   "margin_u": 1.609,
+   "templates": 16,
+   "area_u2": 51.61,
+   "area_with_margin_u2": 121.52,
+   "ratio": 2.355
+  },
+  "Song Pilgrim 03/CH_SLASH": {
+   "margin_u": 0.281,
+   "templates": 26,
+   "area_u2": 37.58,
+   "area_with_margin_u2": 50.13,
+   "ratio": 1.334
+  },
+  "Song Pilgrim 03/CH_WHIP": {
+   "margin_u": 0.0,
+   "templates": 20,
+   "area_u2": 37.65,
+   "area_with_margin_u2": 37.65,
+   "ratio": 1.0
+  },
+  "Pilgrim 03 Song/CB_EVADE": {
+   "margin_u": 0.0,
+   "templates": 8,
+   "area_u2": 26.96,
+   "area_with_margin_u2": 26.96,
+   "ratio": 1.0
+  },
+  "Pilgrim 03 Song/CB_IDLE": {
+   "margin_u": 0.0,
+   "templates": 8,
+   "area_u2": 249.59,
+   "area_with_margin_u2": 249.59,
+   "ratio": 1.0
+  },
+  "Pilgrim 03 Song/CB_THROW": {
+   "margin_u": 0.0,
+   "templates": 12,
+   "area_u2": 65.47,
+   "area_with_margin_u2": 65.47,
+   "ratio": 1.0
+  }
+ }
+}

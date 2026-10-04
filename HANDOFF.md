@@ -256,7 +256,29 @@ fight caches 728 MB, `recall_*.json`, `products\`, `simul_h12.json`, logs, `pipe
 
 ### Key measurements
 
-RECALL_PLACEHOLDER
+- **Held-out recall 100 % at L = 2 / 3 / 4** (228,333 contacts each; each fold's fights against the other fold's
+  tables; margins calibrated on the training fold only): per-state templates + per-family margins (max held-out
+  residual) + family-wide union + thrown hazards (self templates, pending arming) + same-name candidates + entry
+  world unions + current-collider / body-hull / hazard tubes. Not by the forecast: same-name 45-47, collider tube 9-10,
+  hazard tube 0-1 per lag. Without margins 99.90 %; margins only 99.96 %; p99.9 margins with the first structural
+  additions 99.998 %. `C:\ssbot\data\m2_forum_r0\recall_cert.json`, `knowledge/.../forum/support_margins.json`.
+- Production margins: 26 of 46 families < 0.5 u; 3.0 u (search cap) for MI_IDLE, MI_PARRY, AT_FIRE, AT_IDLE and the
+  pin / spear / bell / bomb self templates; EN_CHARGE 2.96, CM_SPIN 2.76, RE_DEFEND 2.62, CC_JUMP 2.11. Support area
+  median x1.16, max x4.3 (EN_CHARGE), 12 families above x2.
+- Per-type top speeds (p99.99 per-frame move, normal steps): 25-55 u/s. The export drops a killed enemy on its kill
+  frame; contacts naming it come only on that frame (0 frames after).
+- Products: fastest strike from commit >= 0.40 s for every type (Reaper attack 0.35 s); a full attack fits the
+  recovery of Maestro / Envoy / Reed stab / Choristor jump (>= 95 %) but never the Clapper's, the Clawmaiden slash's
+  or the Minister parry's; quiet stretches >= 1.52 s (Bind) only 37.6 % (before waves 7, 12, 13 and half of 8);
+  Garmond hits the enemy nearest to himself 53 % of choices; Minister / Reed counters are fixed, clashable (parry 5),
+  82 Reed counters clashed already; below-flier claim holds for Bellbearer / Maestro / Tiny / Reed, not for Minister /
+  Clawmaiden; the Clawmaiden keeps median 8.0 u (dash stab est. 7.0 u reaches it 39 % of the time vs 11 % for a side
+  slash); Throwing Bell parry bits 4 (no clash), nail hit sends it at 27.6 u/s, pogo off it 8 of 100.
+- Multi-hit chains (lower bounds, LethalBlock blocks most first hits): Minister slash 3, Choristor whip 2 (3 with two
+  Choristors), Reed counter 2.
+- forum_simul reproduces design H table 1.2 on its 12 fights (609,481 frames; in-play shares identical).
+- planner_bench --encounter Forum (support phase only, naive walk at 0.8 s): 28.5k placements / tick, 154 ms p50 -
+  R2 must place interval-dilated templates and velocity-dilated anchors.
 
 ### Next
 
