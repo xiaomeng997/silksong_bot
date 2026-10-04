@@ -226,6 +226,42 @@ audit correction, lane choice, 6 bench).
 5. Reaper dash attack movement (Sprint FSM Reaper Antic / Upper / End) is not modelled; Clawline not started.
 6. More fresh held-out data for a second freeze (new seeds from 98800; 98600 / 98700 are spent).
 
+## Chain F0 - Forum round R0: tables on all closed fights, held-out recall, data products (branch worktree-wf_198518ec-9ba-1)
+
+Worktree `C:\modeling\silksong_bot\.claude\worktrees\wf_198518ec-9ba-1`, branch `worktree-wf_198518ec-9ba-1` (from main
+07bda48). Offline only (no game instance touched). Facts: `docs/facts/1.0.30000/forum.md` §12 (Chinese). Large outputs
+(not in git): `C:\ssbot\data\m2_forum_r0\` (`build_all\extra` per-fold supports + contacts + walk tables, `cache` per-
+fight caches 728 MB, `recall_*.json`, `products\`, `simul_h12.json`, logs, `pipeline*.ps1` drivers).
+
+### Done
+
+- Tables rebuilt from the 107 closed complete gauntlets (frozen list `build_all\fights.json`; 25.4 h fight time; 6.6 h
+  build). The two runs still recording (`074533`, `074719`) had 13-14 open episodes each that are not in. Held-out share
+  beyond 0.5 u per type now 0.00-0.61 % (13 fights: 0.3-5.2 %). Every family >= 200 instances except Envoy ambush
+  (107), HopSlash / Envoy entry / Maestro Point (never seen).
+- `behaviour_build --extra DIR`: per-fold supports (`BehaviourBuilder.fold_support`), every contact with its subject,
+  in-sample and held-out residuals (`contact_rows`; per-state held-out residuals searched to 3 u), per-fold dwell /
+  successor tables; `--fights-list`; the extra write runs after coverage.json and pickles the builder if it fails.
+- `ssbot.knowledge.forum_cache` + `tools/forum_extract`: compact per-fight caches (frames, hero, entity rows with
+  state / box / parry bits, enabled damage colliders, allies, room.battles wave, events).
+- `ssbot.knowledge.forum_support` + `support_recall --encounter Forum`: per-enemy tracker (the gauntlet builder's
+  segmentation), worklist support walk over entry hulls, per-family margins calibrated on the other fold's held-out
+  residuals, structural additions (thrown hazards by self templates, same-name candidates, current-collider tube for
+  enemies outside every attack, optional family-wide union), `--write-margins`, `--area`.
+- `ssbot.knowledge.forum_products` + `tools/forum_products`: chains, death_tails, kill_freeze, strikes (+ punish),
+  quiet, garmond, stances, below, clawmaiden, bells, boundaries -> `knowledge/1.0.30000/enemies/forum/*.json`.
+- `tools/forum_simul` (open-loop replay through the trackers; reproduces design H table 1.2 on the same 12 fights;
+  optional forecast statistics) and `planner_bench --encounter Forum` (support-phase timing scaffold).
+- Tests: `tests/test_forum_r0.py` (12, synthetic fixture of test_gauntlet_tables); gauntlet / behaviour tests pass.
+
+### Key measurements
+
+RECALL_PLACEHOLDER
+
+### Next
+
+NEXT_PLACEHOLDER
+
 ## Chain F - Forum setup, gauntlet tables, data policy (branch worktree-wf_946a7803-63c-2)
 
 Original title: HANDOFF - Task F (Forum, M2 W8) - round 3, fixer (finished normally, 2026-10-03 ~02:20 PDT)

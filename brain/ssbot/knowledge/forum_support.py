@@ -424,9 +424,10 @@ class SubjectRecall:
     def in_tube(self, s: Subject, pts: list[tuple[float, float, float]], T_o: float) -> bool:
         """The enemy's damage colliders as last exported (its box on the last frame it was seen, at most
         TUBE_MAX_AGE_S before the origin) moved at most its type's top speed (tube_speed: measured on the training
-        fold) since then: the current-collider tube, for an enemy outside every attack instance only (no behaviour
-        template applies: a dying body - the export drops an enemy on its kill frame while its body still hurts for
-        some frames, forum_products death_tails - a waiting body, a parked summon), and only for the recall's lags."""
+        fold) since then: the current-collider tube, tried after every forecast failed. Outside every attack instance
+        no behaviour template applies (a dying body - the export drops an enemy on its kill frame while its body still
+        hurts for some frames, forum_products death_tails - a waiting body, a parked summon); in an attack it catches
+        the enemy's own body beyond its family's margin. Only for the recall's lags; counted apart."""
         if s.box is None:
             return False
         age = T_o - s.seen_T
@@ -491,8 +492,9 @@ class SubjectRecall:
         if s is not None and pts:
             # the gauntlet builder attributes a contact by the GameObject name (a waiting wave-12 "Song Reed" and the
             # wave-0 one share it): every subject of that name is a candidate, the attributed one first
-            names = [s] + [o for o in tr.subjects.values() if o is not s and o.tk == s.tk and s.name
-                           and o.name == s.name]
+            # (a subject seen only in its waiting state never had a Control event to name it: every one of its type)
+            names = [s] + [o for o in tr.subjects.values() if o is not s and o.tk == s.tk
+                           and (s.name is None or o.name is None or o.name == s.name)]
             for k, o in enumerate(names):
                 pl = self.placements_of(o, T_o, H, hazards=thrown(tr, self.t.specs[o.tk]))
                 self.placements["placements"] += len(pl)
@@ -500,9 +502,12 @@ class SubjectRecall:
                 if self.covered(pl, pts):
                     how = "forecast" if k == 0 else "namesake forecast"
                     break
-                if self.tube and o.cur is None and self.in_tube(o, pts, T_o):
-                    how = "current-collider tube" if k == 0 else "namesake tube"
-                    break
+            if how is None and self.tube:
+                for k, o in enumerate(names):
+                    if self.in_tube(o, pts, T_o):
+                        how = ("current-collider tube" if k == 0 else "namesake tube") + \
+                            (" (outside attacks)" if o.cur is None else " (in an attack)")
+                        break
         if how is not None:
             st["covered"] += 1
             if how != "forecast":
