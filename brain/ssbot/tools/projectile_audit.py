@@ -136,7 +136,6 @@ def audit_fight(cache: dict, every: int, horizon: float, err: dict, cov: Counter
                     cov[f"{p.type_key} inside"] += ok
     # a row's later bombs: the predicted x / appearance against the bombs that appeared (first frame of each)
     appear: list = []
-    seen: dict[int, int] = {}
     for iid, fr in track.items():
         last = None
         for j in sorted(fr):

@@ -32,8 +32,6 @@ support sets and planner decisions as the Forecaster itself, frame by frame on a
 import argparse
 import gzip
 import json
-import math
-import os
 import sys
 import time
 from collections import Counter, defaultdict
@@ -77,78 +75,7 @@ def wave_of(fight_id: str) -> int:
     return 0
 
 
-def run_fight(job: dict) -> dict:
-    """One fight's contacts against one MultiForecaster configuration (a worker process; tables cached per config)."""
-    from ssbot.backends.oracle_backend import OracleBackend
-    from ssbot.combat.multi_forecast import MultiForecaster
-    from ssbot.core.worldstate import ORACLE, VISION_EQUIVALENT
-    from ssbot.record.recorder import RecordingReader
-    tables = _tables(job["config"])
-    view = job.get("view", "oracle")
-    mf = MultiForecaster(tables, ORACLE if view == "oracle" else VISION_EQUIVALENT)
-    bosses = placeholder_specs() if view != "oracle" else []
-    backend = OracleBackend(bosses=bosses)
-    filt = None
-    if view != "oracle":
-        from ssbot.backends.observability import ObservabilityFilter
-        filt = ObservabilityFilter(bosses=bosses)
-        filt.reset(0)
-    contacts = job["contacts"]
-    need: dict[int, list] = defaultdict(list)
-    stats: dict = defaultdict(Counter)
-    for c in contacts:
-        if c.get("follow"):
-            stats[(c["type"], 0)]["follow-up (not checked)"] += 1
-            continue
-        for L in LAGS:
-            need[int(c["f"]) - L].append((c, L))
-    f0, f1 = job["f0"], job["f1"]
-    r = RecordingReader(job["path"])
-    t_of: dict[int, float] = {}
-    misses = []
-    n_fc = 0
-    t_fc = 0.0
-    wave = wave_of(job["id"])
-    for s in r.states(f0 - 300, f1 + 2):
-        f = s["f"]
-        ws = backend.feed(s)
-        if filt is not None:
-            ws = filt.apply(ws)
-        if f == f0:
-            mf.notify_wake(ws.stamp.t_game_s, wave)
-        mf.update(ws)
-        t_of[f] = ws.stamp.t_game_s
-        todo = need.get(f)
-        if not todo:
-            continue
-        a = time.perf_counter()
-        fc = mf.forecast(job.get("horizon", 0.1), clamp=False)
-        t_fc += time.perf_counter() - a
-        n_fc += 1
-        T_o = ws.stamp.t_game_s
-        for c, L in todo:
-            _check(c, L, fc, mf, T_o, t_of, stats, misses, job["label"])
-    return {"id": job["id"], "stats": {f"{k[0]}|{k[1]}": dict(v) for k, v in stats.items()}, "misses": misses,
-            "forecasts": n_fc, "forecast_ms": round(1e3 * t_fc / max(1, n_fc), 3)}
-
-
-def _check(c: dict, L: int, fc, mf, T_o: float, t_of: dict, stats: dict, misses: list, label: str) -> None:
-    """The contact against the forecast at its origin (frames c - 1 and c; their times are known by then: the
-    recording is read past c before the check runs, see below)."""
-    key = (c["type"], L)
-    st = stats[key]
-    st["n"] += 1
-    if c.get("family") is None:
-        st["outside_attacks"] += 1
-    c.setdefault("_pending", []).append((L, fc, T_o, key, label))
-
-
-def _resolve(c: dict, t_of: dict, mf_types: dict, stats: dict, misses: list) -> None:
-    pass
-
-
 def main_fresh_dev(a, mode: str) -> int:
-    from ssbot.combat.enemy_tables import parse_margins
     rows_by_fight: dict = {}
     jobs = []
     if mode == "dev":
@@ -299,10 +226,11 @@ def run_fight_safe(job: dict) -> dict:
 
 
 def run_fight2(job: dict) -> dict:
-    """run_fight with the checks done once both contact frames have been read (the planner's pairing needs t_c)."""
+    """One fight's contacts against one MultiForecaster configuration (a worker process; tables cached per
+    config), each check done once both contact frames have been read (the planner's pairing needs t_c)."""
     from ssbot.backends.oracle_backend import OracleBackend
     from ssbot.combat.multi_forecast import MultiForecaster
-    from ssbot.core.forum import FORUM_TYPES, HAZARD_OWNER
+    from ssbot.core.forum import HAZARD_OWNER
     from ssbot.core.worldstate import ORACLE, VISION_EQUIVALENT
     from ssbot.record.recorder import RecordingReader
     tables = _tables(job["config"])
@@ -416,7 +344,6 @@ def _check2(c: dict, L: int, fc, T_o: float, t_of: dict, by_type: dict, stats: d
         own = fc.occupied_only(X, Y, tk, by_type.get(c["type"], set())).any()
         st["own"] += int(bool(own))
         return
-    tr_states = {}
     misses.append({"fight": c["fight"], "f": cf, "lag": L, "type": c["type"], "family": c.get("family"),
                    "state": c.get("state"), "src": c.get("src"), "kind": c.get("kind"), "tk": c.get("tk"),
                    "hero": [round(v, 3) for v in (xs[-1], ys[-1])], "label": label,

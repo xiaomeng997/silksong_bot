@@ -25,7 +25,6 @@ templates. The behaviour builder imports the oracle IPC (the import firewall), s
 and npz files here, and the static type facts from ssbot.core.forum.
 """
 import json
-import math
 from dataclasses import dataclass, field
 from pathlib import Path
 
