@@ -15,7 +15,9 @@ combat_run's recordings and AttemptRecords (policy data2 / data2_envoy, ssbot.tr
                state sends itself), with the Envoy's distance to the wall on the hero's side; Bellbearer "Rethrow?" ->
                next; Maestro "Attack Choice" -> next
   clashes      freeze NailClashEffect: the nearest in-play enemy and its current family; Throwing Bell nail hits
-               ("Nail Hit" / "Tink" states); the policy's clash swings by owner type
+               ("Nail Hit" / "Tink" states), by the policy's tactic then when the record has policy.segments (the
+               redirect rate of CLASH swings: Nail Hit in CLASH segments / CLASH swings at bells); the policy's clash
+               swings by owner type
   clawline     hero damage while a Harpoon clip plays (and 0.25 s after), harpoon hits on enemies; a hit counts as
                from the hooked enemy when the nearest live enemy of the source's type to the hero is the one the
                harpoon hit (same iid) within 0.5 s, not only the same type
@@ -32,6 +34,7 @@ combat_run's recordings and AttemptRecords (policy data2 / data2_envoy, ssbot.tr
     ..\\scripts\\uv.cmd run python -m ssbot.tools.forum_r1_audit C:/ssbot/data/runs/m2/<run> [...] --json out.json
 """
 import argparse
+import bisect
 import json
 import math
 from collections import Counter, defaultdict
@@ -113,6 +116,12 @@ def r0_boundaries(path: Path | None = None) -> dict:
 
 def scan_fight(fight, unit: str, acc: dict, starts: dict, bounds: dict, r0b: dict | None = None) -> None:
     r0b = r0b or {}
+    segs = [x for x in ((fight.info or {}).get("segments") or ()) if isinstance(x, list) and x and isinstance(x[0], int)]
+    seg_f = [x[0] for x in segs]
+
+    def tactic_at(f: int) -> str:
+        i = bisect.bisect_right(seg_f, f) - 1
+        return segs[i][1] if i >= 0 else "?"
     r0_by_type: dict[str, list] = defaultdict(list)
     for key, v in r0b.items():
         tk0, fam0 = key.rsplit("/", 1)
@@ -211,6 +220,8 @@ def scan_fight(fight, unit: str, acc: dict, starts: dict, bounds: dict, r0b: dic
                     pend_next[ent] = (to, info)     # keyed by state name below; WATCH names one type each
                 if tk == "Throwing Bell" and to in BELL_NAIL_STATES:
                     acc["clashes"]["bell_nail"][to] += 1
+                    if segs:     # records with policy.segments (8a03afb on): the tactic of the swing's segment
+                        acc["clashes"]["bell_nail_by_tactic"][f"{tactic_at(f)}/{to}"] += 1
             elif k == "freeze" and d.get("phase") == "start" and d.get("type") == "NailClashEffect":
                 src = prev or s
                 cand = []
@@ -271,7 +282,8 @@ def audit(runs: list[Path], max_fights: int | None = None) -> dict:
            "boundary_r0": defaultdict(lambda: {"decisions_within_1u": 0, "chosen": 0}), "bait_samples": Counter(),
            "clapper_dec": defaultdict(lambda: defaultdict(Counter)),
            "never_seen": defaultdict(Counter), "never_seen_dwell_max": {}, "hop_up": [], "game_s": Counter(),
-           "clashes": {"nail_clash": Counter(), "bell_nail": Counter(), "policy_swings": Counter()},
+           "clashes": {"nail_clash": Counter(), "bell_nail": Counter(), "policy_swings": Counter(),
+                       "bell_nail_by_tactic": Counter()},
            "clawline": {"harpoon_s": 0.0, "hero_hits_in_harpoon": [], "harpoon_hits": 0, "presses": 0},
            "under": {"under_s": 0.0, "near_s": 0.0, "hits_under": 0, "hits_near": 0, "policy_under_s": 0.0},
            "pocket": {"pocket_s": 0.0, "clapper_starts": Counter(), "hits": Counter(), "by_unit_s": Counter(),

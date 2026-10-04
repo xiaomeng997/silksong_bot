@@ -312,3 +312,12 @@ def test_hero_height_covariate_and_protected_decisions():
     trs = [tr("Walker", 38, y) for y in (4.57, 4.6, 7.0, 13.5)]
     cov, defs = b._covariates(trs, ["Slash Antic"])
     assert cov["hero_height"] == [0, 0, 1, 2] and "hero_height" in defs     # ground, ground, air, the wall top
+
+
+def test_audit_poisson_and_bins():
+    import math as _m
+
+    from ssbot.tools.forum_r1_audit import dx_bin, poisson_cdf
+    assert abs(poisson_cdf(0, 4.08) - _m.exp(-4.08)) < 1e-12 and poisson_cdf(3, 0.0) == 1.0
+    assert abs(poisson_cdf(2, 1.5) - _m.exp(-1.5) * (1 + 1.5 + 1.125)) < 1e-12
+    assert dx_bin(0.5) == "0-3" and dx_bin(7.0) == "6-10" and dx_bin(120.0) == ">99"
