@@ -156,7 +156,10 @@ AMBIENT = "_ambient/world"    # hazards armed when a scan started: one time-inva
 ORPHAN = "_orphan"            # contacts of an armed hazard owned by no instance (checked against its self template)
 R_FAIL_U = 0.5                # a contact farther than this from its family's occupancy is a support hole
 R_SEARCH_U = 1.0
-LAG_F = 2                     # a contact's source must show an exported damage collider within f-2..f
+# held-out residuals of the per-state sets are searched this far (the per-family margins of a multi-enemy build come
+# from them: support_recall --encounter; beyond R_SEARCH_U the in-sample validation already fails)
+R_MARGIN_SEARCH_U = 3.0
+LAG_F = 2                    # a contact's source must show an exported damage collider within f-2..f
 RING_F = 1800                 # frames of per-frame contact context kept (blocked stretches are reported late)
 MW_FOLLOW_F = 90              # a multi-hit's follow-up hits land up to this long after its collider was exported
 ALPHA_TEST = 0.01             # family-wise level of the decision covariate tests (Holm)
@@ -665,6 +668,7 @@ class Dwell:
     to: str
     frames: int
     phase: str
+    fold: int = 0            # held-out fold of the fight (support_recall --encounter: per-fold dwell ranges)
 
 
 @dataclass(slots=True)
@@ -764,7 +768,9 @@ class Contact:
     named_gap: bool = False  # the oracle exported the source's other colliders by name, but not the one it named
     fold: int = 0            # held-out fold of the recording
     res: dict = field(default_factory=dict)   # template set -> residual (u; inf = none within R_SEARCH_U)
-    follow: bool = False     # a follow-up hit of a connected multi-hit (BehaviourSpec.multi_wounder): its collider
+    ho: dict = field(default_factory=dict)    # template set -> held-out residual (against the other folds'
+    #                                           occupancy; per-state sets searched to R_MARGIN_SEARCH_U)
+    follow: bool = False    # a follow-up hit of a connected multi-hit (BehaviourSpec.multi_wounder): its collider
                              # was exported within MW_FOLLOW_F, not now; left out of the validation
 
 
@@ -915,7 +921,8 @@ class FightScanner:
         if frm is not None and to not in spec.death_states:
             self.local[frm].append(to)
         if frm is not None and frm == self.ctl and self.ctl_t is not None and to not in spec.death_states:
-            self.b.dwells.append(Dwell(frm, self.T - self.ctl_t, d.get("t_in_prev"), to, f - self.ctl_f, self.phase))
+            self.b.dwells.append(Dwell(frm, self.T - self.ctl_t, d.get("t_in_prev"), to, f - self.ctl_f, self.phase,
+                                       self.fold))
         self.ctl, self.ctl_t, self.ctl_f = to, self.T, f
         cur = self.cur
         idle = spec.idle_family
@@ -1570,11 +1577,11 @@ class BehaviourBuilder:
         return sets
 
     @staticmethod
-    def _residual(c: Contact, members: list, lookup, tol: int = 1) -> tuple[float, bool]:
+    def _residual(c: Contact, members: list, lookup, tol: int = 1, r_max: float = R_SEARCH_U) -> tuple[float, bool]:
         """(distance from the contact's hero boxes to the nearest occupied cell of the members' templates, each box
         at its own frame's template time +- tol bins (the box of f-1 at t_f-1, the box of f at t_f: the pairing the
         planner's query makes, so the support dilated by this residual and +-1 bin flags f-1 or f), whether any
-        member template was usable); lookup(key) -> templates to search."""
+        member template was usable; inf beyond r_max); lookup(key) -> templates to search."""
         d, usable = math.inf, False
         for key, anchor, mirror, t in members:
             if anchor is None and mirror == 0:
@@ -1583,7 +1590,7 @@ class BehaviourBuilder:
                 usable = True
                 for box, dt in zip(c.boxes, c.box_dt):
                     b = hb.box_to_anchor(box, anchor, mirror) if anchor is not None else box
-                    d = min(d, tpl.box_distance(t + dt, b, tol_bins=tol, r_max=R_SEARCH_U))
+                    d = min(d, tpl.box_distance(t + dt, b, tol_bins=tol, r_max=r_max))
                     if d == 0.0:
                         return 0.0, True
         return d, usable
@@ -1624,7 +1631,10 @@ class BehaviourBuilder:
                 else:
                     fails.append((c, name, d))
                 dh, usable = self._residual(c, members, others)
+                if usable and dh == math.inf and name.startswith("state:"):
+                    dh = self._residual(c, members, others, r_max=R_MARGIN_SEARCH_U)[0]
                 if usable:
+                    c.ho[name] = dh
                     dt = self._residual(c, members, others, HELD_T_BINS)[0] if dh > 0.0 else 0.0
                     heldout[(fam, name)].append((dh, dt, tuple(m[0] for m in members if m[0] in raw)))
         fam_r: dict[str, float] = defaultdict(float)
@@ -2292,6 +2302,7 @@ class BehaviourBuilder:
         spec = self.spec
         raw = self.raw_templates()
         val = self.validate(raw)
+        self._val = val
         support = {}
         for k, t in raw.items():
             r = val["radius"].get(k, (0.0, ""))[0]
@@ -2346,6 +2357,58 @@ class BehaviourBuilder:
 
     def tables(self) -> dict:
         return self.build().tables
+
+    def fold_support(self, fold: int) -> dict[str, hb.SpaceTimeTemplate]:
+        """Support templates from one held-out fold's instances only, as build() makes them from all: that fold's
+        logged occupancy dilated by the largest residual of that fold's own contacts against it (family max, then
+        global max for keys without a contact of their own) and +-1 bin. The other fold's contacts are unseen by
+        them (ssbot.tools.support_recall --encounter: held-out recall)."""
+        self.build()
+        folds = self._folds
+        radius: dict[str, float] = {}
+        for c in self.contacts:
+            if c.follow or not c.boxes or (c.inst is None and not c.ambient and c.arm is None):
+                continue
+            if (c.inst.fold if c.inst is not None else c.fold) != fold:
+                continue
+            own = lambda k: [folds[k][fold]] if fold in folds.get(k, {}) else []  # noqa: E731
+            for members in self.contact_sets(c).values():
+                d, usable = self._residual(c, members, own)
+                if usable and d <= R_FAIL_U:
+                    for key, *_ in members:
+                        if fold in folds.get(key, {}):
+                            radius[key] = max(radius.get(key, 0.0), d)
+        fam_r: dict[str, float] = defaultdict(float)
+        for key, r in radius.items():
+            fam_r[key.split("/")[0]] = max(fam_r[key.split("/")[0]], r)
+        glob = max(fam_r.values(), default=0.0)
+        out = {}
+        for key, fs in sorted(folds.items()):
+            t = fs.get(fold)
+            if t is None:
+                continue
+            r = radius.get(key, fam_r.get(key.split("/")[0], glob))
+            out[hb.SUPPORT + key] = t.dilated(r_disk=r, t_bins=1, key=hb.SUPPORT + key)
+        return out
+
+    def contact_rows(self, residuals: bool = True) -> list[dict]:
+        """Every contact with its attribution and residuals (in sample, held out) for the support recall of a
+        multi-enemy build (fight = "<run>/i<n>/ep<k>/<type>#<iid>": the subject the gauntlet builder gave it to).
+        residuals=False: the scan's attribution only (no build; res / ho empty), for fights a recall tests against
+        tables built from other fights (behaviour_build --contacts-only)."""
+        if residuals:
+            self.build()
+        rows = []
+        for c in self.contacts:
+            rows.append({
+                "fight": c.fight, "f": c.f, "kind": c.kind, "src": c.src, "tk": c.tk,
+                "family": c.inst.family if c.inst is not None else None, "state": c.state,
+                "ts": _r(c.ts, 4), "t": _r(c.t, 4), "fold": c.inst.fold if c.inst is not None else c.fold,
+                "f_start": c.inst.f_start if c.inst is not None else None, "follow": c.follow,
+                "exported": c.exported, "hole": c.hole, "ambient": c.ambient, "boxes": [list(map(float, b)) for b in c.boxes],
+                "res": {k: (None if v == math.inf else _r(v, 4)) for k, v in c.res.items()},
+                "ho": {k: (None if v == math.inf else _r(v, 4)) for k, v in c.ho.items()}})
+        return rows
 
     def extra_arrays(self, atk: dict | None = None) -> dict[str, np.ndarray]:
         out = {}

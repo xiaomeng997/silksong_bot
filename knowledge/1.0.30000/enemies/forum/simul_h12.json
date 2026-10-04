@@ -1,0 +1,353 @@
+{
+ "fights": [
+  "20261003_074719_Forum_A_data__i3__ep0",
+  "20261003_074719_Forum_A_data__i3__ep1",
+  "20261003_074719_Forum_A_data__i3__ep2",
+  "20261003_074719_Forum_A_data__i3__ep3",
+  "20261003_074719_Forum_A_data__i3__ep4",
+  "20261003_074719_Forum_A_data__i3__ep5",
+  "20261003_074719_Forum_A_data__i3__ep6",
+  "20261003_074719_Forum_A_data__i3__ep7",
+  "20261003_074719_Forum_A_data__i3__ep8",
+  "20261003_074719_Forum_A_data__i3__ep9",
+  "20261003_074719_Forum_A_data__i3__ep10",
+  "20261003_074719_Forum_A_data__i3__ep11"
+ ],
+ "concurrency": {
+  "frames": 609481,
+  "in_play_share": {
+   "0": 0.0231,
+   "1": 0.2233,
+   "2": 0.3223,
+   "3": 0.1906,
+   "4": 0.1243,
+   "5": 0.0265,
+   "6": 0.0064,
+   "7": 0.0208,
+   "8": 0.0628
+  },
+  "by_wave": {
+   "0": {
+    "s_per_fight": 37.1,
+    "in_play_p50": 3.0,
+    "in_play_p95": 3.0,
+    "in_play_max": 3,
+    "share_ge2": 0.799,
+    "top_combos": {
+     "Choristor + Envoy + Reed": 0.553,
+     "Choristor + Reed": 0.186
+    },
+    "x_span_median_u": 8.7,
+    "both_sides_12u": 0.479,
+    "nearest_two_lt_3u": 0.498,
+    "all_idle_mixed_committed": [
+     0.073,
+     0.491,
+     0.436
+    ],
+    "within_6u_ge1_ge2": [
+     0.695,
+     0.294
+    ]
+   },
+   "1": {
+    "s_per_fight": 25.2,
+    "in_play_p50": 2.0,
+    "in_play_p95": 2.0,
+    "in_play_max": 2,
+    "share_ge2": 0.7,
+    "top_combos": {
+     "Choristor + Choristor": 0.7,
+     "Choristor": 0.261
+    },
+    "x_span_median_u": 5.3,
+    "both_sides_12u": 0.208,
+    "nearest_two_lt_3u": 0.337,
+    "all_idle_mixed_committed": [
+     0.129,
+     0.392,
+     0.479
+    ],
+    "within_6u_ge1_ge2": [
+     0.561,
+     0.124
+    ]
+   },
+   "2": {
+    "s_per_fight": 1.5,
+    "in_play_p50": 2.0,
+    "in_play_p95": 2.0,
+    "in_play_max": 2,
+    "share_ge2": 1.0,
+    "top_combos": {
+     "Bellbearer + Reed": 1.0
+    },
+    "x_span_median_u": 16.8,
+    "both_sides_12u": 0.148,
+    "nearest_two_lt_3u": 0.122,
+    "all_idle_mixed_committed": [
+     0.106,
+     0.368,
+     0.526
+    ],
+    "within_6u_ge1_ge2": [
+     0.25,
+     0.0
+    ]
+   },
+   "3": {
+    "s_per_fight": 58.5,
+    "in_play_p50": 2.0,
+    "in_play_p95": 3.0,
+    "in_play_max": 3,
+    "share_ge2": 0.567,
+    "top_combos": {
+     "Bellbearer + Clawmaiden + Reed": 0.363,
+     "Bellbearer": 0.32
+    },
+    "x_span_median_u": 8.6,
+    "both_sides_12u": 0.414,
+    "nearest_two_lt_3u": 0.572,
+    "all_idle_mixed_committed": [
+     0.08,
+     0.664,
+     0.256
+    ],
+    "within_6u_ge1_ge2": [
+     0.418,
+     0.095
+    ]
+   },
+   "4": {
+    "s_per_fight": 29.8,
+    "in_play_p50": 2.0,
+    "in_play_p95": 2.0,
+    "in_play_max": 2,
+    "share_ge2": 0.995,
+    "top_combos": {
+     "Minister + Minister": 0.995,
+     "Minister": 0.005
+    },
+    "x_span_median_u": 6.6,
+    "both_sides_12u": 0.283,
+    "nearest_two_lt_3u": 0.244,
+    "all_idle_mixed_committed": [
+     0.234,
+     0.471,
+     0.296
+    ],
+    "within_6u_ge1_ge2": [
+     0.569,
+     0.135
+    ]
+   },
+   "5": {
+    "s_per_fight": 32.1,
+    "in_play_p50": 1.0,
+    "in_play_p95": 2.0,
+    "in_play_max": 2,
+    "share_ge2": 0.37,
+    "top_combos": {
+     "Clawmaiden": 0.512,
+     "Clawmaiden + Minister": 0.37
+    },
+    "x_span_median_u": 5.0,
+    "both_sides_12u": 0.288,
+    "nearest_two_lt_3u": 0.337,
+    "all_idle_mixed_committed": [
+     0.191,
+     0.488,
+     0.321
+    ],
+    "within_6u_ge1_ge2": [
+     0.416,
+     0.04
+    ]
+   },
+   "6": {
+    "s_per_fight": 167.2,
+    "in_play_p50": 4.0,
+    "in_play_p95": 8.0,
+    "in_play_max": 8,
+    "share_ge2": 0.996,
+    "top_combos": {
+     "Maestro + Tiny + Tiny + Tiny": 0.386,
+     "Maestro + Maestro + Tiny + Tiny + Tiny + Tiny + Tiny + Tiny": 0.303
+    },
+    "x_span_median_u": 19.5,
+    "both_sides_12u": 0.377,
+    "nearest_two_lt_3u": 0.946,
+    "all_idle_mixed_committed": [
+     0.122,
+     0.721,
+     0.157
+    ],
+    "within_6u_ge1_ge2": [
+     0.459,
+     0.16
+    ]
+   },
+   "7": {
+    "s_per_fight": 65.3,
+    "in_play_p50": 1.0,
+    "in_play_p95": 1.0,
+    "in_play_max": 4,
+    "share_ge2": 0.001,
+    "top_combos": {
+     "Clapper": 0.925,
+     "": 0.072
+    },
+    "x_span_median_u": 7.6,
+    "both_sides_12u": 0.059,
+    "nearest_two_lt_3u": 0.368,
+    "all_idle_mixed_committed": [
+     0.0,
+     0.0,
+     1.0
+    ],
+    "within_6u_ge1_ge2": [
+     0.378,
+     0.0
+    ]
+   },
+   "8": {
+    "s_per_fight": 47.2,
+    "in_play_p50": 2.0,
+    "in_play_p95": 3.0,
+    "in_play_max": 3,
+    "share_ge2": 0.763,
+    "top_combos": {
+     "Bellbearer + Reed + Reed": 0.458,
+     "Bellbearer + Reed": 0.275
+    },
+    "x_span_median_u": 8.6,
+    "both_sides_12u": 0.418,
+    "nearest_two_lt_3u": 0.518,
+    "all_idle_mixed_committed": [
+     0.094,
+     0.612,
+     0.295
+    ],
+    "within_6u_ge1_ge2": [
+     0.504,
+     0.147
+    ]
+   },
+   "9": {
+    "s_per_fight": 16.7,
+    "in_play_p50": 3.0,
+    "in_play_p95": 3.0,
+    "in_play_max": 3,
+    "share_ge2": 1.0,
+    "top_combos": {
+     "Bellbearer + Bellbearer + Choristor": 0.967,
+     "Bellbearer + Bellbearer": 0.03
+    },
+    "x_span_median_u": 8.5,
+    "both_sides_12u": 0.368,
+    "nearest_two_lt_3u": 0.672,
+    "all_idle_mixed_committed": [
+     0.1,
+     0.698,
+     0.202
+    ],
+    "within_6u_ge1_ge2": [
+     0.627,
+     0.172
+    ]
+   },
+   "10": {
+    "s_per_fight": 39.1,
+    "in_play_p50": 2.0,
+    "in_play_p95": 3.0,
+    "in_play_max": 3,
+    "share_ge2": 0.567,
+    "top_combos": {
+     "Bellbearer + Bellbearer + Clawmaiden": 0.253,
+     "Bellbearer + Clawmaiden": 0.246
+    },
+    "x_span_median_u": 5.0,
+    "both_sides_12u": 0.23,
+    "nearest_two_lt_3u": 0.611,
+    "all_idle_mixed_committed": [
+     0.128,
+     0.631,
+     0.241
+    ],
+    "within_6u_ge1_ge2": [
+     0.353,
+     0.066
+    ]
+   },
+   "11": {
+    "s_per_fight": 49.6,
+    "in_play_p50": 3.0,
+    "in_play_p95": 3.0,
+    "in_play_max": 3,
+    "share_ge2": 0.75,
+    "top_combos": {
+     "Bellbearer + Minister + Minister": 0.519,
+     "Bellbearer + Minister": 0.163
+    },
+    "x_span_median_u": 7.4,
+    "both_sides_12u": 0.376,
+    "nearest_two_lt_3u": 0.577,
+    "all_idle_mixed_committed": [
+     0.189,
+     0.608,
+     0.203
+    ],
+    "within_6u_ge1_ge2": [
+     0.471,
+     0.126
+    ]
+   },
+   "12": {
+    "s_per_fight": 72.3,
+    "in_play_p50": 4.0,
+    "in_play_p95": 5.0,
+    "in_play_max": 5,
+    "share_ge2": 0.99,
+    "top_combos": {
+     "Maestro + Tiny + Tiny + Tiny": 0.443,
+     "Maestro + Reed + Tiny + Tiny + Tiny": 0.275
+    },
+    "x_span_median_u": 8.1,
+    "both_sides_12u": 0.452,
+    "nearest_two_lt_3u": 0.928,
+    "all_idle_mixed_committed": [
+     0.153,
+     0.641,
+     0.206
+    ],
+    "within_6u_ge1_ge2": [
+     0.509,
+     0.175
+    ]
+   },
+   "13": {
+    "s_per_fight": 156.2,
+    "in_play_p50": 2.0,
+    "in_play_p95": 2.0,
+    "in_play_max": 2,
+    "share_ge2": 0.847,
+    "top_combos": {
+     "Clapper + Clapper": 0.847,
+     "Clapper": 0.141
+    },
+    "x_span_median_u": 5.6,
+    "both_sides_12u": 0.056,
+    "nearest_two_lt_3u": 0.266,
+    "all_idle_mixed_committed": [
+     0.166,
+     0.662,
+     0.172
+    ],
+    "within_6u_ge1_ge2": [
+     0.218,
+     0.014
+    ]
+   }
+  }
+ }
+}
