@@ -1102,3 +1102,59 @@ them in range), savestates `fo_r1_*`. Facts: `docs/facts/1.0.30000/forum.md` sec
 6. `gauntlet.WAITING_STATES` lacks "Dead" (the Maestros' parked Tinies): live_enemies counts nine parked Tinies in play
    from the load on; v1's GauntletDataPolicy targets them. R1 code filters them (`wave_start.fighting`); fixing
    live_enemies itself changes other tools' numbers (left for a reviewed change).
+
+## Task R1 close-out - post-deploy checks, the 2x check, collection restart, R0 + R1 tables (branch worktree-wf_5031b357-209-2)
+
+Worktree `C:\modeling\silksong_bot\.claude\worktrees\wf_5031b357-209-2` (from main 56845a9; deployed oracle = 56845a9,
+`SsOracle.dll` md5 11E34633...). Instances 0-3 (never 4). Seeds 131500-131515 (speed check), 131900-131902 (probes),
+132000+ / 133000+ / 134000+ / 135000+ (wave starts i2 / i3 / i0 / i1), 136000+ / 137000+ (full gauntlets i0 / i1).
+Facts: `docs/facts/1.0.30000/forum.md` 13.9 onward. Offline outputs (not in git): `C:\ssbot\data\m2_forum_r1c\`.
+
+### Done (committed)
+
+- Post-deploy checks (forum.md 13.9): HELLO and `time.scale` 2 -> dt 1/30 -> 1 on instances 2 and 3 (new probe step
+  `forum_r1 hello`); `battle.prune`: w2 -> wave 3 1.52-1.57 s after the activation (4 loads + the first collection
+  episode, game time), ghosts 5 / 7 / 8 / 17 / 20 for w2 / w3 / w4 / w9 / w10; `battle.wave` skips to 6 (5.1 s) and 13
+  (16.7 s) with Garmond coming in. `forum_r1 check` records the wave clock at frame resolution. Forum_A_w2 is back in
+  the rotation (`C:\ssbot\sandbox\r1c_collect.cmd`).
+- 2x check (forum.md 13.10): NOT passed, 2x not adopted, no 2x data in any table (the Clapper's event-ended states end
+  one 2x frame apart in both policies; controls pass, injected +1/30 s caught). `combat_run`: the timebox is divided by
+  the time scale (414fb1a), `set_time_scale` waits out a momentary Time.timeScale 0 (28a9417); `forum_speed_check
+  --inject / --a-slice / --b-slice` and per-type family totals (f656330, 3aa1019). Drivers
+  `C:\ssbot\data\m2_forum_r1c\speed\run_checks.ps1`, `run_checks2.ps1`.
+- `gauntlet.WAITING_STATES` has "Dead" (59e02a1, forum.md 13.11; every user of live_enemies / in_play checked, tests).
+- Structurally absent moves marked in the tables (abad048, forum.md 13.12; `behaviour_build --stamp-absent DIR` for
+  tables built before).
+- Tests: 1037 passed (the support-query budget test fails under this load: 3.88 ms p99 vs its budget; unrelated).
+
+### Running (all hidden, all stop by themselves on STOP_AGENTS / DEMO_SOON after the current episode)
+
+- Collection at 1x from the frozen checkout `C:\ssbot\live_r1c_28a9417` (`C:\ssbot\sandbox\r1c_collect.cmd`, logs
+  `C:\ssbot\sandbox\r1c_collect_<part>.log`):
+  - instance 0: full gauntlets fo_A, v1 data policy, 4 h from 15:46 (`20261004_154609_Forum_A_data`), then wave starts
+    6 h (i0w); instance 1 the same (`20261004_154612_Forum_A_data`, then i1w). These full gauntlets are the fresh
+    certification fights.
+  - instance 2: wave starts with w2, data2, 9 h from 15:56 (`20261004_155649_Forum_A_w2_mix_data2`); instance 3 the
+    same from 16:24 (`20261004_162411_Forum_A_w2_mix_data2`).
+  - Stop one run: `cd C:\ssbot\live_r1c_28a9417\brain; ..\scripts\uv.cmd run python -m ssbot.tools.combat_run stop
+    <run dir>` (i0fg / i1fg then go on to their wave-start part unless STOP_AGENTS / DEMO_SOON exists).
+- Offline, below normal, frozen checkout `C:\ssbot\live_r1c_off_59e02a1`:
+  - `C:\ssbot\data\m2_forum_r1c\pipeline_build.ps1` (from 15:03): `behaviour_build` R0's 107 fights + 181 R1 fights
+    (exclude list `exclude.json`: R0's 35 fresh fights and the three w2 ghost episodes), tables to `tables\forum`
+    (candidates, NOT the repository), extra `build_all\extra`, then R0 caches hard-linked + R1 extracted to `cache`,
+    then the development cross-fit `recall_dev3.json`; writes `pipeline_build.done`.
+  - `C:\ssbot\data\m2_forum_r1c\pipeline_cert.ps1` (waits): once instances 0 / 1 end their gauntlets, freezes the fresh
+    set (the 1x speed-check arms, the i0 / i1 gauntlets, the i2 / i3 wave starts closed by then), scans contacts only
+    and extracts caches; after the build, certifies (`recall_fresh.json`, margins `support_margins.json`) and runs the
+    ablation on R0's tables over the same fresh fights (`recall_fresh_r0tables.json`); writes `pipeline_cert.done`.
+  - Stop: `Get-CimInstance Win32_Process | Where-Object CommandLine -like '*pipeline_*.ps1*'` and the python children
+    whose command line has `m2_forum_r1c` (started by this task; safe to stop, they only write under m2_forum_r1c).
+
+### Next
+
+1. When `pipeline_cert.done` exists: read `recall_dev3.json` and `recall_fresh.json` (L2 / L3 / L4 recall must be 1.0
+   on the fresh fights with both folds' tables) and the ablation `recall_fresh_r0tables.json`. Only if the
+   certification holds: `behaviour_build --stamp-absent C:\ssbot\data\m2_forum_r1c\tables\forum`, copy the tables
+   (`<enemy>.json`, `coverage.json`; the `_hitboxes.npz` stay out of git as before) and `support_margins.json` into
+   `knowledge/1.0.30000/enemies/forum/`, write forum.md 13.13; otherwise keep R0's and record why.
+2. A 2x retry only with a pre-registered equivalence criterion (forum.md 13.10, last point).
