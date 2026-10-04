@@ -454,3 +454,14 @@ R1 的记录里有策略造出来的条件，R0 的协变量（|dx| 段、左右
   - 出处：`run_fights` 的 Fight.info 带 `unit`、`protect`、`protect_hp`、`segments`（修复轮起每段的战术），以后可以按战术分层或去掉。
   - w2 的 3 局见 13.1 的排除清单。
 - 首轮 Envoy 专场在 R1 里占 Envoy 数据的绝大多数（普通斩 2407 次 / 1.56 h，R0 692 次 / 25.4 h）；重建表时应保留 R1 来源，能做"去掉 R1"的消融。
+
+### 13.9 R1 收尾：部署后的核对（2026-10-04 14:45–15:05，实例 2、3；oracle = main 56845a9，`SsOracle.dll` md5 11E34633…，训练副本 14:37 部署）
+
+代码在分支 `worktree-wf_5031b357-209-2`（收尾轮）。探针结果 JSON 在 `C:\ssbot\sandbox\forum_r1\`（`hello_i2_144523`、`hello_i3_144532`、`check_i2_144745` / `144950`、`skip_i2_145059` / `145135`）。
+
+- **HELLO**（新探针 `forum_r1 hello`）：两个实例都报 plugin 0.1.0、game 1.0.30000、schema 1，RPC 表里有 `battle.prune`、`battle.wave`、`time.scale`、`fsm.graph`。
+- **`time.scale` 2**：回复 `time_scale` 2.0、`via` debugmod；之后 90 个 STATE 的 dt 中位 0.0333 s（2 × 0.01665），回 1 后 dt 中位 0.01668 s。两个实例相同。（换场景读档的那一帧 dt 为 0。）
+- **`battle.prune`**（`forum_r1 check --waves 2,3,4,9,10`）：每个存档读回后剪掉前面各波没跑过的成员：w2 5 个（子物体数 [3, 2, 2] → [0, 0, 2]）、w3 7、w4 8、w9 17、w10 20，`kept` 都是空的。**w2 读档后第 3 波在激活后 1.517–1.533 s 开始**（4 次读档：1.533、1.517、1.517 和 13.9 下面长跑第一局的 1.565 s 游戏时间），和自然连战（1 s 计数检查 + 第 3 波 0.5 s startDelay）一样；修复前要等第 2 波死一个（59.7–75 s）。w4（enemies 2 / to_next 1）、w9（3 / 2）在 10 s 内没人死就一直停在本波，是重叠波"死一只才放下一波"的规则；w3、w10 只有 Clawmaiden，和 13.1 一致。
+- **读档后的头几帧 dt 很大**：长跑第一局（`20261004_155649_Forum_A_w2_mix_data2` ep0）从"开始"到激活 31 帧、游戏时间 1.032 s，激活到第 3 波 47 帧、1.565 s；按"帧数 / 60"记的波次时间（AttemptRecord `gauntlet.waves[].t`、开场的 `activation_s`）在读档后第一两秒偏小，要按 STATE dt 之和算。
+- **`battle.wave`**（`forum_r1 skip --method oracle`，从 fo_A 开战）：**跳到第 6 波（两只 Maestro）5.06 s 实时、跳到第 13 波 16.73 s**（策略跳波：第 6 波 353 s、到第 13 波 716 s）。Garmond：跳到第 6 波时还是 `Dormant`（第 1 波开始后 4 s 才叫他，跳得比这快），之后 1 s 内 `Enter Fall` → `Intro Roar` → `Idle` → `Chase Target`，第 8 s 已在 `Wildslash Antic`；跳到第 13 波时他已在场（`No Target Idle`，(34.0, 5.72)）。所以 oracle 跳波保留第 1 波的叫助战，只是时间压缩了。**注意**：跳过的战斗里 BattleScene 自己的 `currentEnemies` 偏大（第 6 波 2 → 10，第 13 波 26；自然连战第 6 波 4、第 13 波 4），因为 `Die` 杀掉的成员和召唤物的计数方式与自然死亡不同【未核实机制】；波次推进靠子物体数检查，不受影响，但终局能否按时结束没有在跳波后测过。跳波只用于探针和造存档，采集用存档。
+- 之后 `Forum_A_w2` 回到波次起点的轮换（`C:\ssbot\sandbox\r1c_collect.cmd`：w2、w4、w6、w7、w8、w9、w11、w12、w13、w3、w5、w10）。
