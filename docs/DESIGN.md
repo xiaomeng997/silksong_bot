@@ -873,12 +873,12 @@ A 类 = 以 2 格攻击为主的 boss 或连战；B 类 = 竞技场、小 boss�
 | S03 | Marrow → Bell Beast + Marrow Bell | 丝心 1 | **A** | 360 / 540 |
 | S04 | Marrow/Bone Bottom 扫荡 | 工艺金属 1、✚ Straight Pin、跳蚤、✚ 丝轴碎片；**✚ Pebb 碎片（Bone Bottom，300）**：如果 P10 收入投影允许就在此购买，否则 S13 前经 Bellway 回 Bone Bottom 购买（+120 s） | C | 240 / 360 |
 | S05 | → Swift Step | 竞技场 | B | 300 / 420 |
-| S06 | Deep Docks | Bellway 40、竞技场、✚ Magma Bell（110 + 1 工艺金属）、Sting Shard | B | 420 / 600 |
+| S06 | Deep Docks | Bellway 40、竞技场、✚ Magma Bell（110 + 1 工艺金属）、**✚ Crafting Kit（熔炉之女 180，同店；所有工具伤害 +60 %）**、Sting Shard | B | 420 / 600 |
 | S07 | Lace 1 + Deep Docks Bell | 250 HP | **A** | 300 / 480 |
 | S08 | Far Fields | 站点 40、Drifter's Cloak、✚ 碎片、✚ Warding Bell；**Fourth Chorus（默认开打）** | **A** | 900 / 1,260 |
 | S09 | Pilgrim's Rest | ✚ Weighted Belt 160、Tool Pouch、**Memory Locket #1** → 红槽 2 | C | 180 / 300 |
-| S10 | Hunter's March（**必须早于首次进入 Greymoor/Bellhart/Shellwood**） | 竞技场（Shakra 助战）、**Memory Locket #2** → 蓝槽 2、✚ Fractured Mask 260（在该工作台休息前买 [待验证原因]） | B | 600 / 840 |
-| S11 | Greymoor → Greymoor Bell | 伏击竞技场、爪形陷阱区（绕过面具）；**与 Garmond 对话**（Ledger 标志，对话观测验证）；Moorwing 通过跳蚤商队跳过 | B | 540 / 780 |
+| S10 | Hunter's March（**必须早于首次进入 Greymoor/Bellhart/Shellwood**） | 竞技场（Shakra 助战）、**Memory Locket #2** → 蓝槽 2、✚ Fractured Mask 260（在该工作台休息前买 [待验证原因]）、✚ Curveclaw 140（同店；和 Straight Pin 的 K1 A/B） | B | 600 / 840 |
+| S11 | Greymoor → Greymoor Bell | 伏击竞技场、爪形陷阱区（绕过面具）；**与 Garmond 对话**（Ledger 标志，对话观测验证）；Moorwing 通过跳蚤商队跳过；✚ Thread Storm + Threefold Pin（Craw Lake，`Greymoor_15b` / `Greymoor_22`，离 Greymoor 钟 4 道门，估 3–5 min；K1 A/B） | B | 540 / 780 |
 | S12 | Shellwood | 竞技场、✚ 碎片、Sister Splinter（默认跳过，被迫开打则为 A）、Cling Grip | B | 600 / 900 |
 | S13 | Bellhart | **Widow** → Needolin + Bellhart Bell；✚ Needle 1；✚ Memory Locket #3（可选购买） | **A** | 480 / 720 |
 | S14 | Shellwood Bell | — | C | 180 / 300 |
@@ -890,17 +890,18 @@ A 类 = 以 2 格攻击为主的 boss 或连战；B 类 = 竞技场、小 boss�
 | S20 | ✚ Cogwork Core 西侧连战碎片、捷径、Jubilana | — | B | 360 / 540 |
 | S21 | Whispering Vaults | 竞技场、✚ 碎片、✚ Pale Oil、**屋顶捷径**、✚ **G&Z 切磋**（B，有危险物） | B | 780 / 1,020 |
 | S21b | ✚ Bellhart：Plinney → Needle 2（带 Pale Oil 回去） | — | C | 240 / 360 |
-| S22 | **Trobbio** | Magma Bell A/B 测试 | **A** | 360 / 600 |
-| S23 | Underworks | Clawline + 竞技场、Crafting Kit、Sacred Cylinder → Vaultkeeper's Melody；熔岩 | B | 780 / 1,080 |
+| S22 | **Trobbio** | Magma Bell A/B 测试；拾取 Claw Mirror（Trobbio 奖励） | **A** | 360 / 600 |
+| S23 | Underworks | Clawline + 竞技场、~~Crafting Kit~~（改在 S06 买；建筑师 450 的第二个只在 K1 / 经济支持时买）、Sacred Cylinder → Vaultkeeper's Melody；熔岩 | B | 780 / 1,080 |
 | S24 | Cogwork Core 解谜 → Architect's Melody | 交互目录中的解法 | C | 420 / 600 |
-| S25 | High Halls → ✚ Cogfly → **Forum 连战** → Conductor's Melody | — | **A** | 780 / 1,200 |
+| S25 | High Halls → ✚ Cogfly → `Hang_06b` 工作台把 Magma Bell 换成 Warding Bell（Forum 没有火焰伤害）→ **Forum 连战** → Conductor's Melody | — | **A** | 780 / 1,200 |
 | S26 | Threefold Melody（Needolin）→ **Lace 2** → Lace 后竞技场 → Cradle 工作台 | — | **A** | 660 / 1,020 |
 | S27 | **GMS** → **Bind** → 片尾 | ENDING 状态 | **A** | 420 / 600 |
 | | **核心合计** | Act 1 ≈ 6,960，Act 2 ≈ 5,640，**≈ 12,600 s** | | |
 
 - **面具算术：** 对 2 格 boss 且有 Fractured Mask 时，死亡前能挨的击数：5 面具 → 4、6 → 4、**7 → 5**。7 面具需要 **8 个碎片**（Act 1 拿 5–6 个 + Act 2 拿 2–3 个），**在 Trobbio 之前**凑齐。
 - **绕路排序：** 价值 = （下游风险降低 − 自身风险）/ Δt，在 G1 中用 A 类 savestate 做 A/B 测量。
-  - **必留：** Fractured Mask、Weighted Belt、Warding Bell、Magma Bell、Memory Locket #1/#2、Needle 1、Cogfly、G&Z（Garmond 对话 + 屋顶捷径 + 切磋）。
+  - **必留：** Fractured Mask、Weighted Belt、Warding Bell、Magma Bell、Crafting Kit（S06）、Memory Locket #1/#2、Needle 1、Cogfly、G&Z（Garmond 对话 + 屋顶捷径 + 切磋）。
+  - **便宜、K1 定装不装：** Curveclaw（S10，140，零绕路）、Claw Mirror（S22，免费）。**K1 A/B：** Thread Storm（S11 绕路，和 Silkspear 共用唯一的技能槽）。**不做：** Voltvessels（要 Faydown）、Volt Filament（要 Faydown 或 Silk Soar）。依据 [`research/forum_tools.md`](research/forum_tools.md)（2026-10-04）。
   - **调速器压力大时才舍：** 7 面具碎片、Needle 2、Straight Pin。
   - **最先舍：** 丝轴碎片、Sting Shard、Memory Locket #3。
   - **Ascendant's Grip（爬墙爪）暂列必留**（2026-10-02 起）：Forum 末波的左墙顶口袋和 Dancers 的贴角都靠它；K1 实测后再定。
@@ -916,12 +917,12 @@ A 类 = 以 2 格攻击为主的 boss 或连战；B 类 = 竞技场、小 boss�
 - **槽位（Hunter：红/蓝/黄各 1 个已解锁 + 1 个锁定）：**
   - Locket #1（S09）→ 红 2：Straight Pin + playbook 工具。
   - Locket #2（S10）→ 蓝 2：Fractured Mask + Warding 或 Magma Bell。
-  - 黄：Weighted Belt。Locket #3（可选）→ 黄 2。
+  - 黄：Weighted Belt。S18 的 Choral Chambers 拾取（`Bellway_City`，条件待查）→ 黄 2（Ascendant's Grip）；Bellhart 330 只在拿不到时买。`Library_08` / `Under_08` 两个免费拾取（条件待查）留给 K1 选 Reaper 时开 Reaper 的槽。
   - **配装规划器做槽位可行性检查**：playbook 要求的装备在槽数不够时构建失败。
   - **监督器的上下文**（火焰 D1、Warding Bell 规则、击退减半）**只从审计确认的已装备工具推出，不从 playbook 推出。**
   - 只在工作台换装。
 - **经济（三种货币）：**
-  - **念珠：** Magma Bell 110 → 站点 → Weighted Belt 160 + 入场费 → Fractured Mask 260 → Pebb 300 → Bellhart 站 60 → Needle/Locket #3 等。合计约 1,200–1,600。
+  - **念珠：** Magma Bell 110 + Crafting Kit 180 → 站点 → Weighted Belt 160 + 入场费 → Fractured Mask 260（+ Curveclaw 140）→ Pebb 300 → Bellhart 站 60 → Needle/Locket #3、Ascendant's Grip 350 等。合计约 1,700–2,200（2026-10-04 起含制作匣、爬墙爪；原表漏了 S23 建筑师制作匣 450）。
   - **Shell Shards：** 需求 = 每把红色工具的补充费用 × 预期休息次数（含 P90 退出次数）。
   - **工艺金属：** 预留 2 块（Magma Bell、Cogfly）。
   - 每段收入取 oracle 路线实测的 P10。预计短缺时跑预先勘测好、远离 Wardenfly 场景的刷取循环，时间由调速器定价。
