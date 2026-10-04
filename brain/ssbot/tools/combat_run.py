@@ -53,13 +53,15 @@ def git_rev() -> str | None:
 
 
 def make_policy(name: str, view: str = "oracle", run_dir: Path | None = None, instance: int = 0,
-                threads: int = 8, real_quit: float = 0.0, inject_hits: float = 0.0, gauntlet: bool = False):
+                threads: int = 8, real_quit: float = 0.0, inject_hits: float = 0.0, gauntlet: bool = False,
+                key_cost: tuple[float, ...] | None = None):
     if name == "data":
         from ssbot.train.data_policy import DataPolicy, GauntletDataPolicy
         return GauntletDataPolicy() if gauntlet else DataPolicy()
     if name == "planner":
         from ssbot.train.planner_policy import PlannerPolicy
-        pol = PlannerPolicy(view=view, threads=threads, log_dir=run_dir, instance=instance, real_quit_p=real_quit)
+        pol = PlannerPolicy(view=view, threads=threads, log_dir=run_dir, instance=instance, real_quit_p=real_quit,
+                            key_cost=key_cost)
         if inject_hits > 0:
             # the pause stress test (ssbot.train.hit_injection, ssbot.tools.pause_stress): one fault per episode
             from ssbot.train.hit_injection import HitInjector
@@ -110,7 +112,7 @@ def worker(a: argparse.Namespace) -> int:
     link = OracleLink(instance=a.instance, connect_timeout_s=120)
     tap = make_tap(link, enc)
     policy = make_policy(a.policy, a.view, run_dir, a.instance, a.threads, a.real_quit, a.inject_hits,
-                         gauntlet=bool(enc.waves))
+                         gauntlet=bool(enc.waves), key_cost=tuple(a.key_cost) if a.key_cost else None)
     if a.silk_reserve:
         pb = getattr(getattr(policy, "inner", policy), "pb", None)
         if pb is not None:
@@ -241,6 +243,8 @@ def run(a: argparse.Namespace) -> int:
             cmd += ["--start-silk", str(a.start_silk[0]), str(a.start_silk[1])]
         if a.silk_reserve:
             cmd.append("--silk-reserve")
+        if a.key_cost:
+            cmd += ["--key-cost"] + [str(v) for v in a.key_cost]
         if a.start_hp:
             cmd += ["--start-hp", str(a.start_hp[0]), str(a.start_hp[1])]
         if a.no_record:
@@ -379,6 +383,11 @@ def main(argv: list[str] | None = None) -> int:
         p.add_argument("--start-hp", type=int, nargs=2, default=None, metavar=("LO", "HI"),
                        help="eval mode: randomize_start's health range at the wake (default: as loaded; 3 3 = h 2 "
                             "against the Bell Beast, so its first hit is Q1's: natural post-hit windows)")
+        p.add_argument("--key-cost", type=float, nargs="+", default=None, metavar="W",
+                       help="planner policy: the key economy weights PRESS CHANGE [TIE]: key_press / key_change (J "
+                            "per press, per change to the previous plan; 0 0 = off) and key_tie (J a swap may give "
+                            "up; default planner.KEY_TIE; < 0: the class bound alone, the first A/B's rule). "
+                            "Default: the playbook's"),
         p.add_argument("--silk-reserve", action="store_true",
                        help="planner policy: keep the Bind's 9 silk at full HP too (playbook "
                             "reserve_at_full_hp; the Q1a low-HP check starts with 9 silk and keeps it)")

@@ -154,6 +154,17 @@ weights:
   ground: 0.2             # on the floor at the end
   cont: 0.15              # keeping the previous plan (hysteresis)
   jump: 0.15              # per jump press (no needless hopping)
+  # Key economy (the person's standard of 2026-10-03: few presses, few changes to the key plan; third after safety
+  # and time, never at a cost to safety): OFF until an A/B shows no safety cost. Oracle A/B 2026-10-03 with the class
+  # bound alone (110 fights an arm, facts/1.0.30000/key_economy.md): 0.05 / 0.1 took presses 4.39 -> 3.46 /s and plan
+  # changes 5.98 -> 2.90 /s with hits 5 -> 4, but FORCED_RISK ticks per fight second rose 1.47 -> 1.55 (+5 %,
+  # p ~0.03-0.06) and yellow-tier time +21 %; 0.15 / 0.3 took 2.4x the FORCED_RISK time and hits in 8 of 85 fights
+  # against 3 of 110. The terms traded J's own safety terms (the end's support coverage, the jump commitment). The
+  # planner now bounds them (near-ties within key_tie, no deeper end risk, no longer jump commitment, no new macro);
+  # the bounded rule needs its own A/B, gated on FORCED_RISK ticks and yellow-tier time per second as well as hits
+  # (ssbot.tools.key_economy --arm ...), before a weight goes here.
+  key_press: 0.0          # per key press in the plan (a key's rising edge)
+  key_change: 0.0         # per press of the previous plan dropped, moved or added (a release moved: half)
 # Dangerous cell (effect_miner on the data-policy run 20261001_122249, 263 fights): a side slash that meets an attack
 # bell in Launch (still beside the boss, rising at 28-38 u/s) got the hero hit in 44 % (AtkBell L, n 16) and 64 %
 # (AtkBell R, n 11) of contacts within 12 frames, against 6 % in matched no-contact frames. Attack bells take no path

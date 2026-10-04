@@ -22,6 +22,19 @@ latest first contact > max J; FORCED_RISK when no allowed candidate has S = 0.
 - Adaptive horizon (M2 plan): when the tactics ask for more than T frames (a committed charge), the dodge set
   candidates.build_long rolls out to the end of the attack, up to 2 s (live run 20261002_045049: with 0.8 s, jumps
   that cleared a charge's front half came down on its back half, 5 hits).
+- Key economy (M2 plan, the person's standard of 2026-10-03: few presses, few changes to the key plan; third after
+  safety and time): playbook weights key_press (per press: a key's rising edge in the commanded stream, from the mask
+  sent for the frame before) and key_change (over the frames both plans cover, per press of the previous tick's plan
+  that the candidate drops or moves, per press it adds, and half that per release moved; presses matched as the key
+  plan log matches them, train.keyplan) lower J. They only break near-ties: the choice without them is made first
+  (lexicographic order and the tail check as always), then the best plan by the lowered J among those that are equal
+  to it in Hz, Hz_soft, U, S, the jump and macro commitments, comfort, V, P and the first contact, lose at most
+  key_tie of its J (KEY_TIE), end no deeper in the risk map, start no longer a jump hold (the jump commitment a press
+  makes) and start no macro the choice does not, and, when the tail check passed, pass their own
+  (Planner._key_economy). The bound is there because J itself holds safety terms (the end position's support
+  coverage, the stance): the first A/B without it (2026-10-03) traded them for fewer presses, FORCED_RISK ticks +5 %
+  at the weights 0.05 / 0.1 and 2.4x at 0.15 / 0.3 (more hits). PlanResult.cls / cls_off: the chosen plan's class
+  with and without the terms; name_off, J_off, risk / risk_off for the decision log and the checks.
 
     planner = Planner(params, terrain)
     r = planner.tick(ws, start, hold, prefix, forecast, prefs, ctx)    # r.mask: the commanded mask for the next free
@@ -161,6 +174,16 @@ class PlanResult:
     #                                         [x0, y0, x1, y1] at the active frame) for the whiff audit
     vetoes: dict = field(default_factory=dict)
     hits: float = 0.0
+    idx_off: int = -1                       # the choice without the key economy terms (the same as idx when off)
+    cls: tuple | None = None                # the chosen plan's safety class (Planner._class_of)
+    cls_off: tuple | None = None            # ... of the choice without the key economy terms
+    key_press: float = 0.0                  # the chosen plan's presses and plan changes (key economy terms)
+    key_change: float = 0.0
+    key_on: bool = False                    # the key economy terms were on this tick
+    name_off: str = ""                      # the choice without them: name, J, the end's risk map value
+    J_off: float = 0.0
+    risk: float = 0.0                       # the chosen plan's end risk map value (unweighted)
+    risk_off: float = 0.0
 
 
 @numba.njit(cache=True)
@@ -233,6 +256,7 @@ class Planner:
         self.prev_name = ""
         self.ticks = 0
         self._audit = (np.zeros(0, np.int64), np.zeros(0, np.int64), np.zeros((0, 4)))
+        self._risk = np.zeros(0)
         self.last_pogo = 0            # candidates with a predicted bounce in the last tick
         self.last_recoil = 0          # ... with a predicted nail recoil
         self.last_bell_pogo = 0       # ... bouncing off a registry target (a bell)
@@ -243,6 +267,7 @@ class Planner:
         self.jump_until = -1          # tick until which the pressed jump's hold schedule is committed
         self.macro_until = -1         # tick until which a started macro (pogo chain) is kept (MACRO_MARGIN)
         self.prev_tail_ok = False
+        self.prev_d: int | None = None  # the decision frame of prev_cmd's first mask (key economy alignment)
 
     # ---- S -----------------------------------------------------------------------------------------------------------
 
@@ -380,6 +405,8 @@ class Planner:
         if self._redirect:
             self._redirect_value(f, roll_j, tk, J, S, S2, ctx, prefs, enemy_only, min(T1, COMFORT_FRAMES + P + 1))
         tr1 = time.perf_counter()
+        d_frame = int(getattr(getattr(ws, "stamp", None), "frame", 0) or 0) + P + 1
+        Jk, kp, kc = self._key_terms(cmd, prefix, prefs, d_frame, J)
         U = unpausable(may_kill, ctx) if ctx.hp else np.zeros(N, bool)
         t4 = time.perf_counter()
         # a jump's hold is committed when it is pressed (DESIGN §3.5.4): a plan that releases it early, or casts
@@ -449,6 +476,11 @@ class Planner:
                         i, tail_ok = (j, ok_j) if ok_j else (int(free[0]), False)
             elif carried:
                 tail_ok = True                     # the plan kept from last tick passed its check then
+            i_off = i
+            keys = (hz, hz_soft, U, S, keep, mkeep, S2, V, Pc, t_hit)
+            if Jk is not None:
+                i, tail_ok = self._key_economy(i, tail_ok, Jk, J, keys, ok, f, roll, hold_end, P + T,
+                                               cont and self.prev_tail_ok, cmd, cs, cont, prefs)
             self.prev_tail_ok = bool(tail_ok)
             sel_cmd = cmd[i]
             name = "CONTINUE" if cont and i == N - 1 else cs.name(i)
@@ -456,6 +488,15 @@ class Planner:
                              bool(hz[i]), bool(U[i]), N, int(ok.sum()), int(safe.sum()), sel_cmd,
                              roll.box[i].copy(), roll.bound[i].copy(), hits=float(hits[i]))
             res.tail_ok = tail_ok
+            res.idx_off, res.cls, res.cls_off = i_off, _class_of(keys, i), _class_of(keys, i_off)
+            if kp is not None:
+                rk = self._risk
+                res.key_on = True
+                res.key_press, res.key_change = float(kp[i]), float(kc[i])
+                res.name_off = "CONTINUE" if cont and i_off == N - 1 else cs.name(i_off)
+                res.J_off = float(J[i_off])
+                if len(rk) == N:
+                    res.risk, res.risk_off = float(rk[i]), float(rk[i_off])
             # the best plan with an up-slash in it, beside the chosen one (why an up-slash loses, when it does)
             up_rows = np.flatnonzero(self._has_up[:N0]) if len(self._has_up) >= N0 and cs is self.cands else []
             if len(up_rows):
@@ -489,12 +530,81 @@ class Planner:
             self.macro_until = -1
         self.prev_cmd = sel_cmd
         self.prev_name = res.name
+        self.prev_d = d_frame
         self.ticks += 1
         t6 = time.perf_counter()
         res.t_ms = {"filter": (t1 - t0) * 1e3, "rollout": (t2 - t1) * 1e3, "support": (t3 - t2) * 1e3,
                     "score": (t4 - t3) * 1e3, "prob_bind": (t5 - t4) * 1e3, "select": (t6 - t5) * 1e3,
                     "total": (t6 - t0) * 1e3, "hit_fx": (th1 - th0) * 1e3, "redirect": (tr1 - tr0) * 1e3}
         return res
+
+    # ---- key economy -----------------------------------------------------------------------------------------------
+
+    def _key_terms(self, cmd: np.ndarray, prefix: np.ndarray, prefs: TacticPrefs, d: int, J: np.ndarray
+                   ) -> tuple[np.ndarray | None, np.ndarray | None, np.ndarray | None]:
+        """J lowered by the key economy terms (None when both weights are 0), and each candidate's presses and plan
+        changes. The previous plan is aligned by the decision frames (d - prev_d frames on; 1 when unknown)."""
+        wp = float(prefs.weights.get("key_press", 0.0))
+        wc = float(prefs.weights.get("key_change", 0.0))
+        if wp <= 0.0 and wc <= 0.0:
+            return None, None, None
+        before = int(prefix[-1]) if len(prefix) else 0
+        old = np.zeros(0, np.int64)
+        old_before = before
+        if self.prev_cmd is not None and len(self.prev_cmd):
+            sh = d - self.prev_d if self.prev_d is not None and d > self.prev_d else 1
+            if sh < len(self.prev_cmd):
+                old = np.ascontiguousarray(self.prev_cmd[sh:], np.int64)
+                old_before = int(self.prev_cmd[sh - 1])
+        n = len(cmd)
+        kp = np.zeros(n)
+        kc = np.zeros(n)
+        _key_costs(np.ascontiguousarray(cmd, np.int64), before, old, old_before, kp, kc)
+        return J - wp * kp - wc * kc, kp, kc
+
+    def _key_economy(self, i: int, tail_ok, Jk: np.ndarray, J: np.ndarray, keys: tuple, ok: np.ndarray,
+                     f: Forecast, roll, hold_end: HoldState, T0: int, carried_ok: bool, cmd: np.ndarray, cs,
+                     cont: bool, prefs: TacticPrefs) -> tuple[int, object]:
+        """The plan that is best by the lowered J among those i may be swapped for; i itself unless that one beats it.
+        A plan j qualifies when it is in i's safety class (keys equal to row i's) and bounded in the J terms that
+        are themselves about safety: J[j] >= J[i] - key_tie (near-ties only; KEY_TIE), its end no deeper in the risk
+        map (the support coverage term), a jump it presses now held no longer than i's (the jump commitment) and no
+        macro unless i is one (the macro commitment). Then the tail result: no tail check made (FORCED_RISK, the
+        adaptive horizon): taken; i's check passed: taken if its own passes (the carried plan, whose check passed last
+        tick, counts as passed); i's failed: i is kept. Hz, U, S, V, P and the commitments are therefore those of the
+        choice without the terms, whatever the weights. key_tie < 0: the class bound alone (the first A/B's rule;
+        analysis only)."""
+        same = ok.copy()
+        for k in keys:
+            same &= k == k[i]
+        tie = float(prefs.weights.get("key_tie", KEY_TIE))
+        bounded = tie >= 0.0
+        if bounded:
+            same &= J >= J[i] - tie
+            rk = self._risk
+            if len(rk) == len(J):
+                same &= rk <= rk[i] + 1e-9
+            if self.jump_until <= self.ticks:          # a jump pressed now commits its hold (tick: jump_until)
+                jl = _lead_run(np.ascontiguousarray(cmd, np.int64), B_JUMP)
+                same &= jl <= jl[i]
+        rows = np.flatnonzero(same)
+        if not len(rows):
+            return i, tail_ok
+        j = int(rows[np.argmax(Jk[rows])])
+        if j == i or Jk[j] <= Jk[i]:
+            return i, tail_ok
+        if bounded:
+            nm = (lambda r: "CONTINUE" if cont and r == len(J) - 1 else cs.name(r))
+            if _is_macro(nm(j)) and not _is_macro(nm(i)):
+                return i, tail_ok
+        if tail_ok is None:
+            return j, None
+        if tail_ok is False:
+            return i, False
+        if carried_ok and j == len(Jk) - 1:
+            return j, True
+        _, okj = self._tail_pick(f, roll, hold_end, np.array([j]), T0, i)
+        return (j, True) if okj else (i, True)
 
     def _prev_allowed(self, ctx: FilterContext) -> bool:
         """The carried plan uses only keys the allowlist still permits (evasive keys always are)."""
@@ -846,6 +956,8 @@ class Planner:
         # the pogo lane gate and the hit kernels with a bell's octagon too: a fresh checkout has no numba cache, and
         # these compiled mid-fight past the watchdog (live run 20261002_162847 from a new worktree: 2-3 episodes per
         # worker "paused unasked", in the first charge and in a burst)
+        _key_costs(np.zeros((1, 4), np.int64), 0, np.zeros(2, np.int64), 0, np.zeros(1), np.zeros(1))
+        _lead_run(np.zeros((1, 4), np.int64), B_JUMP)
         from ssbot.combat.fastquery import circle_hits      # drop bells on exact paths (forecast._det_occ)
         z = np.zeros((1, 2))
         circle_hits(z, z, z, z, np.ones((1, 2), np.bool_), 0.5, 1.0, 1.0)
@@ -1042,14 +1154,16 @@ class Planner:
         near = np.zeros(N, np.bool_)
         first_hit = np.full(N, -1, np.int64)       # frame of the first attack scored as a hit (audit), its kind
         first_kind = np.zeros(N, np.int64)         # 1 side, 2 up, 3 down spike, 4 Silkspear
+        risk = np.zeros(N)                         # the end position's risk map value (J's support coverage term)
         _score_kernel(np.ascontiguousarray(roll.box), np.ascontiguousarray(roll.flags),
                       np.ascontiguousarray(roll.mode), np.ascontiguousarray(latched), face0,
                       np.ascontiguousarray(boss, np.float64), np.ascontiguousarray(okb), wv, float(prefs.stance_x),
                       np.ascontiguousarray(rx, np.float64), np.ascontiguousarray(rv, np.float64), boss_x, max_hits,
                       np.ascontiguousarray(polys, np.float64), np.ascontiguousarray(starts, np.int64),
-                      np.ascontiguousarray(base, np.float64), J, hits, near, first_hit, first_kind,
+                      np.ascontiguousarray(base, np.float64), J, hits, near, first_hit, first_kind, risk,
                       WINDOWS[self.cfg.attack_model])
         self._audit = (first_hit, first_kind, boss)
+        self._risk = risk
         boss_hp = f.fc.tracker.ctx.hp
         may_kill = near if (boss_hp is not None and boss_hp <= SPEAR_DAMAGE) else np.zeros(N, bool)
         return J, hits, may_kill
@@ -1254,6 +1368,159 @@ REDIRECT_K = 12                # side-slash-on-a-drop-bell rows scored on the re
 BUCKET_SLACK = 3               # vision view's pogo gate: frames added to a row's nominal bounce to pick its margin
 
 
+def _class_of(keys: tuple, i: int) -> tuple:
+    """Row i's safety class: (Hz, Hz_soft, U, S, keeps the jump, keeps the macro, comfort S2, V, P, first contact)."""
+    return tuple(float(k[i]) if k.dtype.kind == "f" else (bool(k[i]) if k.dtype == bool else int(k[i])) for k in keys)
+
+
+@numba.njit(cache=True, inline="always")
+def _popcount(x):
+    c = 0
+    while x:
+        x &= x - 1
+        c += 1
+    return c
+
+
+KEY_TIE = 0.05                 # J a plan may lose to the key economy terms (Planner._key_economy; near-ties only)
+KEY_MATCH_F = 6                # frames two presses of one key may lie apart and still be the same press, moved
+#                                (train.keyplan.MATCH_F: the planner's cost counts changes as the metrics do)
+N_KEY_BITS = 22                # ACTION button bits (kinematics.N_BUTTONS)
+
+
+@numba.njit(cache=True)
+def _lead_run(cmd, bit):
+    """Per row: frames the key is held from the plan's first frame on (0: not down at the first frame)."""
+    N, T = cmd.shape
+    out = np.zeros(N, np.int64)
+    for c in range(N):
+        k = 0
+        while k < T and (cmd[c, k] & bit) != 0:
+            k += 1
+        out[c] = k
+    return out
+
+
+@numba.njit(cache=True)
+def _key_runs(seq, n, before, bit, ps, rs):
+    """Runs of one key bit in seq[:n] into ps / rs: press frame (-1: down since before the window), release frame (n:
+    still down at the window's end). Returns the number of runs."""
+    c = 0
+    down = (before >> bit) & 1
+    p = -1
+    for k in range(n):
+        on = (seq[k] >> bit) & 1
+        if on and not down:
+            p = k
+        elif down and not on:
+            ps[c] = p
+            rs[c] = k
+            c += 1
+            p = -1
+        down = on
+    if down:
+        ps[c] = p
+        rs[c] = n
+        c += 1
+    return c
+
+
+@numba.njit(cache=True)
+def _key_costs(cmd, before, old, old_before, presses, changes):
+    """Per candidate: presses (keys' rising edges over the plan, the first against the mask sent before it) and
+    changes against the previous plan over the frames both cover (L), counted the way the key plan log counts them
+    (train.keyplan): per key, the runs of both plans are matched one to one, nearest press first, when the presses
+    lie within KEY_MATCH_F frames or the runs overlap; a press dropped, added or moved is 1, a matched press whose
+    release moved is 0.5 (so is a hold from before the window released at another frame); releases at L are open."""
+    N, T = cmd.shape
+    L = min(old.shape[0], T)
+    cap = L + 2
+    ops = np.empty((N_KEY_BITS, cap), np.int64)
+    ors = np.empty((N_KEY_BITS, cap), np.int64)
+    on_ = np.zeros(N_KEY_BITS, np.int64)
+    old_used = old_before
+    for k in range(L):
+        old_used |= old[k]
+    for b in range(N_KEY_BITS):
+        if (old_used >> b) & 1:
+            on_[b] = _key_runs(old, L, old_before, b, ops[b], ors[b])
+    nps = np.empty(cap, np.int64)
+    nrs = np.empty(cap, np.int64)
+    mo = np.zeros(cap, np.bool_)
+    mn = np.zeros(cap, np.bool_)
+    for c in range(N):
+        pm = before
+        np_ = 0
+        used = before | old_used
+        for k in range(T):
+            m = cmd[c, k]
+            rise = m & ~pm
+            if rise:
+                np_ += _popcount(rise)
+            if k < L:
+                used |= m
+            pm = m
+        presses[c] = np_
+        nc = 0.0
+        if L > 0:
+            for b in range(N_KEY_BITS):
+                if not (used >> b) & 1:
+                    continue
+                a = on_[b]
+                n2 = _key_runs(cmd[c], L, before, b, nps, nrs)
+                if a == 0 and n2 == 0:
+                    continue
+                for x in range(a):
+                    mo[x] = False
+                for y in range(n2):
+                    mn[y] = False
+                # holds from before the window (press -1): the release only
+                xo = a > 0 and ops[b, 0] < 0
+                yn = n2 > 0 and nps[0] < 0
+                if xo and yn:
+                    mo[0] = True
+                    mn[0] = True
+                    if ors[b, 0] != nrs[0]:
+                        nc += 0.5
+                elif xo:
+                    mo[0] = True
+                    nc += 0.5
+                elif yn:
+                    mn[0] = True
+                    nc += 0.5
+                # the other runs: greedy, nearest press first
+                while True:
+                    best = 1 << 40
+                    bx = -1
+                    by = -1
+                    for x in range(a):
+                        if mo[x]:
+                            continue
+                        for y in range(n2):
+                            if mn[y]:
+                                continue
+                            dp = abs(nps[y] - ops[b, x])
+                            if (dp <= KEY_MATCH_F or (nps[y] < ors[b, x] and ops[b, x] < nrs[y])) and dp < best:
+                                best = dp
+                                bx = x
+                                by = y
+                    if bx < 0:
+                        break
+                    mo[bx] = True
+                    mn[by] = True
+                    if best != 0:
+                        nc += 1.0
+                    elif ors[b, bx] != nrs[by]:
+                        nc += 0.5
+                for x in range(a):
+                    if not mo[x]:
+                        nc += 1.0
+                for y in range(n2):
+                    if not mn[y]:
+                        nc += 1.0
+        changes[c] = nc
+
+
 def _is_macro(name: str) -> bool:
     return "_hop" in name or "_ds" in name or name.startswith("POGO+")
 
@@ -1364,9 +1631,10 @@ def _first_hits(box, flags, mode, latched, face0, boss, okb, polys, starts, base
 
 @numba.njit(cache=True, parallel=True)
 def _score_kernel(box, flags, mode, latched, face0, boss, okb, wv, stance_x, rx, rv, boss_x, max_hits, polys, starts,
-                  base, J, hits, near, first_hit, first_kind, win):
+                  base, J, hits, near, first_hit, first_kind, risk, win):
     """J per candidate (the module docstring's terms) on the nominal lane; hits: predicted boss hits (Silkspear x 3);
-    near: an attack starts with the boss within 1 u of its box (a possible killing blow, U)."""
+    near: an attack starts with the boss within 1 u of its box (a possible killing blow, U); risk: the risk map at the
+    end position (unweighted)."""
     N, T1 = flags.shape
     any_boss = False
     for k in range(T1):
@@ -1484,3 +1752,4 @@ def _score_kernel(box, flags, mode, latched, face0, boss, okb, wv, stance_x, rx,
         J[c] = v
         hits[c] = h
         near[c] = nr
+        risk[c] = r

@@ -25,7 +25,10 @@ Per STATE (this is the only place where backends meet the combat stack, which re
   6. the known-effect invariant (train/bell_hit_monitor.py): every drop bell the hero tinks must leave the bell's
      danger zone around her no larger than the untouched bell's (violations counted in stats()["bell_hits"]).
 The decision log (decisions_i<N>.jsonl in the run directory) keeps the 90 ticks before every hero hit, lethal hit,
-FORCED_RISK and supervisor pause, and 10 after, for ssbot.tools.postmortem.
+FORCED_RISK and supervisor pause, and 10 after, for ssbot.tools.postmortem. The key plan log (keys_i<N>.jsonl, one
+line per episode, train.keyplan) keeps every key press decided at every tick (first decision, changes,
+cancellation) and the presses the game latched (STATE act.mask, every frame): the key economy metrics
+(ssbot.tools.key_economy) and the video's key track (ssbot.tools.key_track).
 """
 import json
 import math
@@ -43,6 +46,7 @@ from ssbot.backends.observability import ObservabilityFilter
 from ssbot.backends.oracle_backend import OracleBackend
 from ssbot.combat.boss_model import BossModel
 from ssbot.combat.forecast import Forecaster, load_box_margin, load_hurtbox, load_planner_templates
+from ssbot.train.keyplan import KeyPlanLog, summarize
 from ssbot.combat.planner import Planner, PlannerConfig
 from ssbot.combat.safety_filter import FilterContext
 from ssbot.combat.tactics import Tactics, load_playbook
@@ -164,7 +168,7 @@ class AttackMonitor:
 
 class PlannerPolicy:
     def __init__(self, view: str = "oracle", threads: int = 8, enemy: str = "BellBeast", log_dir: Path | None = None,
-                 instance: int = 0, real_quit_p: float = 0.0):
+                 instance: int = 0, real_quit_p: float = 0.0, key_cost: tuple[float, ...] | None = None):
         import cv2
         import numba
         numba.set_num_threads(threads)
@@ -190,6 +194,13 @@ class PlannerPolicy:
         self.fc = Forecaster(self.model, fview, margin=margin, templates=load_planner_templates(self.model, margin),
                              comfort=COMFORT)
         self.pb = load_playbook(enemy)
+        if key_cost is not None:
+            # the key economy weights (planner: key_press, key_change[, key_tie]) for an A/B (combat_run --key-cost)
+            if len(key_cost) not in (2, 3):
+                raise ValueError(f"key_cost: PRESS CHANGE [TIE], got {key_cost}")
+            self.pb.weights.update(key_press=float(key_cost[0]), key_change=float(key_cost[1]))
+            if len(key_cost) > 2:
+                self.pb.weights["key_tie"] = float(key_cost[2])
         self.fc.no_hurtbox = self.pb.no_hurtbox
         self.fc.shape_from = self.pb.shape_from          # the emerge predicted with the charge's shape
         self.fc.bell_tells = view == "degraded_dust"
@@ -212,6 +223,9 @@ class PlannerPolicy:
         self._last_f: int | None = None
         self.terrain: Terrain2D | None = None
         self.log_path = (Path(log_dir) / f"decisions_i{instance}.jsonl") if log_dir else None
+        self.keys_path = (Path(log_dir) / f"keys_i{instance}.jsonl") if log_dir else None
+        self.keylog = KeyPlanLog()
+        self._keys_done = True
         self._log_buf: list[dict] = []
         self.episode = -1
         # stage C: the supervisor and the pause machine read the delayed view too (SupervisedControl vision=True)
@@ -248,6 +262,7 @@ class PlannerPolicy:
         with self._inbox_lock:
             pending = [x for x in self._inbox if last < x.get("f", -1) < f]
         for sk in sorted(pending, key=lambda x: x["f"]):
+            self.keylog.observe(sk["f"], (sk.get("act") or {}).get("mask", 0))
             self.raw[sk["f"]] = sk
             ws = self.backend.feed(sk)
             if ws is None:
@@ -314,7 +329,10 @@ class PlannerPolicy:
 
     def reset(self, rng: random.Random, enc) -> None:
         self.flush_log()
+        self.flush_keys()
         self.episode += 1
+        self.keylog.reset(self.episode)
+        self._keys_done = False
         seed = rng.randrange(1 << 30)
         if self.view == "oracle":
             self.backend = OracleBackend(bosses=[self.spec])
@@ -485,12 +503,14 @@ class PlannerPolicy:
         if self.real_quit_active:
             return self._real_quit_step(s, f)
         self._catch_up(f, tap)
+        self.keylog.observe(f, (s.get("act") or {}).get("mask", 0))
         self.raw[f] = s
         for old in [k for k in self.raw if k < f - 12]:
             del self.raw[old]
         ws = self.backend.feed(s)
         if ws is None:                                   # stage C: the delay line is filling
             self.sent[f + 2] = 0
+            self.keylog.tick(f, f + 2, (0,))
             return 0
         fo = ws.stamp.frame
         raw = self.raw.get(fo, s)
@@ -551,6 +571,8 @@ class PlannerPolicy:
         self.sent[f + 2] = int(mask)
         for old in [k for k in self.sent if k < f - 12]:
             del self.sent[old]
+        # the plan as decided: the planner's whole command stream when its mask went out, else the supervisor's key
+        self.keylog.tick(f, f + 2, res.cmd if r.mask is None and len(res.cmd) else (int(mask),), sup=r.mask is not None)
         self.tick_ms.append((time.perf_counter() - t0) * 1e3)
         self.plan_ms.append((t2 - t1) * 1e3)
         self.counts[prefs.mode] += 1
@@ -591,6 +613,7 @@ class PlannerPolicy:
         if self.sc.pq is None:
             self.planner.reset()
         self.sent[f + 2] = mask
+        self.keylog.tick(f, f + 2, (mask,), sup=True)
         for old in [k for k in self.sent if k < f - 12]:
             del self.sent[old]
         self.tick_ms.append((time.perf_counter() - t0) * 1e3)
@@ -631,6 +654,22 @@ class PlannerPolicy:
         if self._log_buf and not (pq is not None and pq.pressing):
             self.flush_log()
 
+    def flush_keys(self) -> dict | None:
+        """The episode's key plan record to keys_i<N>.jsonl (once per episode); returns its summary."""
+        if self._keys_done:
+            return None
+        self._keys_done = True
+        rec = self.keylog.record()
+        rec["view"] = self.view
+        if self.keys_path is not None:
+            with self.keys_path.open("a", encoding="utf-8") as fh:
+                fh.write(json.dumps(rec, separators=(",", ":")) + "\n")
+        sm = summarize(rec)
+        lead = sm.pop("leads")
+        sm.pop("flips")
+        sm["lead_frames_p50"] = float(np.percentile(lead, 50)) if lead else None
+        return sm
+
     def flush_log(self) -> None:
         if self._log_buf and self.log_path is not None:
             with self.log_path.open("a", encoding="utf-8") as fh:
@@ -656,6 +695,12 @@ class PlannerPolicy:
                "attacks": res.attacks, "atk_conf": self.atk_mon.confidence(), "fam_p": self._fam_p(fcast),
                "best_up": res.best_up, "hits": res.hits, "pogo": dict(self.planner.pogo_log),
                "path": None if res.path is None else np.round(res.path[::4, :], 3).tolist()}
+        if res.key_on:
+            # the key economy terms: the choice without them, whether they swapped it, the chosen plan's presses and
+            # plan changes, and what the swap gave up in J and the end's risk map value (ssbot.tools.postmortem)
+            rec["keys"] = {"swap": res.name_off != res.name, "off": res.name_off, "J_off": round(res.J_off, 3),
+                           "kp": res.key_press, "kc": res.key_change, "risk": round(res.risk, 4),
+                           "risk_off": round(res.risk_off, 4)}
         hit = any(ev.get("k") in ("damage", "catastrophe", "would_die") for ev in s.get("ev") or ())
         event = hit or res.forced_risk or (r.decision.pause_pending and self.counts["_pend_logged"] == 0)
         if r.decision.pause_pending:
@@ -694,6 +739,8 @@ class PlannerPolicy:
             obs = self.raw[max(old)] if old else s
         r = self.sc.step(s, obs=obs, inflight=self._inflight(s, f))
         mask = int(r.mask or 0)
+        self.keylog.observe(f, (s.get("act") or {}).get("mask", 0))
+        self.keylog.tick(f, f + 2, (mask,), sup=True)
         self.action_flags = ACTION_EXCLUSIVE
         menu = s.get("menu") or {}
         g = s.get("game") or {}
@@ -737,6 +784,7 @@ class PlannerPolicy:
 
     def stats(self) -> dict:
         self.flush_log()                        # the episode is over: rows held back while the loop pressed
+        keys = self.flush_keys()
         q = (lambda v, p: round(float(np.percentile(v, p)), 3) if v else None)
         tr = self.fc.tracker
         modes = {k: v for k, v in self.counts.items() if not k.startswith("_")}
@@ -750,4 +798,4 @@ class PlannerPolicy:
                 "outcome_reason": self.outcome_reason,
                 "alerts": list(self.sc.alerts), "anchor_log": tr.anchor_log[-40:],
                 "bell_hits": self.bell_mon.stats(),
-                "real_quit": self.real_quit_stats()}
+                "real_quit": self.real_quit_stats(), "keys": keys}

@@ -563,3 +563,79 @@ Code: f9dcbba (supervisor / tactics), 4eb57db (tools), 5026372 (combat_run --sta
 7. Merge note: main's 1c0a082 marks DESIGN §3.7.4 Q6's revision "待实现"; it is implemented here (q6_max_h 1).
    The Bell Beast gate on main (e3ceda4: degraded_dust 4a90331, 94.4 % CLEAR) ran with Q6 at h 2; after merging, the
    gate's QUIT / STUCK mix changes (h 2 fights on), so re-run it on the merged code before quoting it.
+
+
+## Chain K - key economy: few presses, few key plan changes (branch worktree-wf_48b03215-cdd-1)
+
+Worktree `C:\modeling\silksong_bot\.claude\worktrees\wf_48b03215-cdd-1`, from main 97b40f6. The person asked (2026-10-03
+night) whether "few presses, few changes to the key plan" is in training; M2 plan "key economy" (third after safety and
+time). Facts: `docs/facts/1.0.30000/key_economy.md` (Chinese, all numbers); M2.md key economy section has the status.
+
+### Done (committed)
+
+- `train/keyplan.py` KeyPlanLog (moved out of `combat/` on 2026-10-04: it imports `ssbot.ipc.framing`, and `combat` is a
+  final-run package the import firewall keeps away from the oracle; `test_import_firewall` failed on 6d88f74): per key, every note (press) from the tick that first decided it, every change /
+  cancellation (late ticks too), executed, open releases, frame-level flip-flops, and the presses the game latched
+  (STATE act.mask every frame, caught-up STATEs included); `summarize`, `match_actual`, `final_press`.
+- `train/planner_policy.py`: `keys_i<N>.jsonl` in the run dir, one line per episode (13-101 KB; off arm 29-57, p50
+  40; the 101 KB line is a 240 s STUCK), always on; `stats()["keys"]` summary in the attempts. Supervisor keys are
+  notes flagged sup. Decision log rows carry `keys` when the terms are on: the off choice, swap flag, J_off, kp / kc,
+  risk / risk_off.
+- `combat/planner.py`: playbook weights `key_press` / `key_change` lower J (`_key_terms`, numba `_key_costs`, which
+  since 2026-10-04 matches presses run to run like the key log: moved / dropped / added 1, release moved 0.5; the first
+  kernel charged a 1-frame move 3 and a drop 1.5), but only within the safety class of the choice made without them
+  (`_key_economy`: same Hz, Hz_soft, U, S, jump / macro commitments, comfort, V, P, first contact; tail check required
+  when the original passed it) AND within the bound added 2026-10-04: unlowered J within `key_tie` (KEY_TIE 0.05),
+  end risk map value not higher, a new jump hold not longer, no macro unless the choice is one (`key_tie` < 0: the old
+  class-only rule, analysis only). `PlanResult.cls`, `cls_off`, `idx_off`, `name_off`, `J_off`, `risk`, `risk_off`,
+  `key_press`, `key_change`, `key_on`. `combat_run --key-cost PRESS CHANGE [TIE]` overrides the playbook.
+- NOT adopted (reverted 2026-10-04 after review): `BellBeast.yaml` has `key_press: 0`, `key_change: 0`. The first A/B's
+  w1 had hits 4 vs 5 but FORCED_RISK ticks per fight second +5.3 % (MW p 0.031, seed-paired p 0.057) and non-green
+  tier time +21.5 % (MW p 0.030); w2 2.4x / 2.8x. The per-tick class invariance holds by construction and says
+  nothing about closed-loop safety (J holds the risk / stance terms; jump holds commit later ticks).
+- Tools: `tools/key_economy.py` (safety leading indicators per arm: FORCED_RISK and non-green tier ticks per fight
+  second, hit fights; `compare` gives MW / seed-paired sign-flip / Fisher p and a `gate`: ratio <= 1.02 and p >= 0.2
+  for both indicators, hit fights p >= 0.2, WOULD_DIE not more, time to kill CI upper < +2 s; presses / s per key, holds, plan change rate per key, decision lead, changes by frames
+  before the press, flips; `--arm NAME RUN...` groups compared; the person's fight 64275-68397, menu actions excluded:
+  the person's 11 "enter" are the jump key 1 frame early), `fight_stats --keys` (same, per view),
+  `tools/key_cost_check.py` (replay property check; `--tie`; bound violations, J given up, risk diff),
+  `tools/key_track.py` (renderer prototype).
+- Tests: `tests/test_key_economy.py` (log semantics, cost kernel, synthetic and recording property tests, renderer);
+  `test_planner_policy` checks the keys file of the pause test. Full suite 2026-10-04 (below normal,
+  NUMBA_NUM_THREADS 4, playbook back at 0 / 0): 927 passed, 1 failed, 1 skipped, 1 xfailed. The failure is
+  test_hitbox_tables' support-query budget (p99 3.44 ms > 3 ms under below-normal priority and load; fails on main
+  7733c98 too). test_import_firewall passes again (keyplan moved to train/).
+
+### Measured
+
+- Property: 21,001 replayed ticks (4 recordings of 20261003_175813 / 175958, weights up to 0.3 / 0.6): 0 class or tail
+  mismatches; the choice changed on 12-20 % of ticks; tick time unchanged. By construction; not a safety result.
+- Bound (2026-10-04, 4,001-tick replays of off-arm recordings 213031 i2_000 / 223152 i3_000, new kernel): class-only
+  rule at w1 swapped 293 / 282 ticks, giving up J p50 0.058 / 0.045, max 0.36, a deeper end risk on 17 % / 10 % of
+  swaps, 2 longer jump commitments; at w2 531 swaps, J p50 0.12, max 0.97. With key_tie 0.05: 145-147 swaps at w1 and
+  w2 alike, J given up <= 0.05, 0 risk / jump violations. Tick p50 +0.05-0.13 ms.
+- Old baseline (175813 + 175958, 241 fights, recordings): 4.67 presses / s, the person 2.37 / s; left + right 3.4 / s
+  vs 1.05, ~40 % of the bot's direction presses are 2-3 frame taps.
+- A/B (class-only rule; instances 2 / 3, oracle, seed 112000, 110 fights an arm, both arms on both instances): off
+  4.39 presses / s, plan change rate 43.5 %, 5.98 changes / s, lead p50 2 frames, FORCED_RISK 1.47 / s, non-green
+  1.80 / s; w1 (0.05, 0.1): 3.46 / s, 39.4 %, 2.90 / s, FORCED_RISK 1.55 / s, non-green 2.19 / s; hits 5 vs 4,
+  WOULD_DIE 0 / 0, time to kill 60.05 vs 59.91 s; w1's 2 non-CLEARs: a Q1 QUIT after 2 hits and the known STUCK
+  (below). w2 (0.15, 0.3; 85 fights, stopped by DEMO_SOON): 2.83 / s, FORCED_RISK 3.48 / s, non-green 5.04 / s, hits in
+  8 fights (p = 0.045). key_economy's gate fails both w1 and w2.
+- Runs: off 20261003_213031 (i2), 20261003_223152 (i3); w1 20261003_213033 (i3), 20261003_223150 (i2); w2
+  20261003_233543 (i2), 20261003_233308 (i3). All ended; nothing of this chain is running.
+- Key track samples: `C:\ssbot\sandbox\key_track_sample` (off, w1, side by side, README.txt).
+
+### Open
+
+- STUCK at boss HP <= 15 after one hit (h 2): the bot never attacks again (the U rule treats every attack near the
+  boss as a possible killing blow when boss HP <= 15); 3 in 175813, 1 in the w1 arm, 3 in w2. Pre-existing; offered as a
+  separate task.
+- Next for key economy (facts section 6): A/B the bounded rule (off vs `--key-cost 0.05 0.1 0.05`, >= 110 fights an
+  arm, instances crossed, same seeds) and adopt only if `key_economy --arm off ... --arm w1b ...` reports
+  `gate.adopt` true; if it fails, put the risk / stance terms into the class. Then: stance dead zone against 2-3 frame
+  direction taps; candidates that keep the previous plan's first part (most presses are decided the tick they are
+  sent); measure per view (the vision view was never measured; Bell Beast gate numbers predate the terms, and the
+  playbook is off again, so they still hold).
+- The planner's CONTINUE row shifts the previous plan by 1 frame even after a late tick skipped frames (the key terms
+  use the real shift); harmless so far, not changed.
