@@ -261,3 +261,10 @@ cd brain
 ```
 
 扫描 9 min 的录像约 8 s（51 min 的约 1 min）；`--cache` 存扫描结果，之后的统计几秒。JSON 里每次尝试有完整的受击列表（帧号、来源、家族、攻击者状态、主角位置 / 动画 / 接触、在战敌人和距离）、回血、击杀、拼刀、每波站位和按键；测试 `brain/tests/test_forum_demo.py`。
+
+## 补充：半速练习（2026-10-04 09:12，C:\ssbot\data\human\20261004_091214）
+
+- 配装：Wanderer + 灵丝风暴 + Lightning Rod + Zap Imbuement / Multibind / Shell Satchel / 爬墙爪 / 负重环带，工具袋 3、工具伤害 4，丝上限 17–18，面具 7（最后一次 10），甲壳碎片满，游戏速度 0.5（oracle time.scale）。
+- 5 次尝试（forum_demo）：死 4、中途结束 1；到达的波次 4、7、11、13、13——**两次打到最后一波（index 13，两只 Clapper）**：一次在那里结束录像（未死），一次死于 Clapper 的 Slam Collider 1。其余死因：Minister 两次、Clapper（index 7）一次。
+- 受击 80 次、掉 102 格（每分钟 5.73 次，游戏时间），回血 24 次；按键每秒 2.07。左墙口袋一次没用（cling 0 s）。
+- 解读：半速 + 加满的配装让第 1 波不再是瓶颈，能看到后半程；但这是练习条件，不代表原速难度。Forum 计划仍按原速设计；这段录像可作后半程（Maestro、Minister、双 Clapper）站位和出手的参照。
