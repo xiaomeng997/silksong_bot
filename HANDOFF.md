@@ -687,3 +687,45 @@ seeds 118000-121999 (campaign 118000-121899, this chain's checks 121900-121954).
 3. Optional (lead): the Python key guard still waits 0-2 frames (19 / 19 in-flight-key trials waited); with
    EXCLUSIVE live it could model EXCLUSIVE (keys_clear always true) after a control block with the guard off.
 4. Merge 3fdd8af and the docs into main; the campaign's code is main ee64458 plus these tools.
+## Task D - Forum human demo analysis (branch worktree-wf_7f5f02aa-b80-2, offline, no game instance)
+
+### Done (committed)
+
+- `brain/ssbot/tools/forum_demo.py`: one streaming pass over a human_session recording (per-frame hero / input /
+  room.battles / compact live enemies, all events, full entities around each hit taken; `--cache` pickles it); attempts
+  = "Battle Scene" instances (death / clear / left); per attempt: waves and game-time durations, every mask lost (source
+  -> type, collider or projectile, attack family via FORUM_SPECS, multi-hit chains, hero position / anim / contact,
+  enemies in play and damage-collider distances to hero.box), heals and Bind starts, kills and killer (hero / Garmond /
+  Cogfly / bell), nail clashes, technique use, pre-wave positions, key presses (key_economy's count). `--random-runs`
+  adds the data policy's Forum runs (wave durations, hits per wave from each recording's events.jsonl). Tests
+  `brain/tests/test_forum_demo.py` (3).
+- `docs/facts/1.0.30000/forum_human_demo.md` (Chinese): summary for the lead at the top, per-attempt table (46),
+  per-wave human vs random policy, hits / deaths by attack family, what the person was doing when hit, heals / deaths,
+  kill order, technique use, pre-wave positions, keys, conclusions, implications for forum_planner_plan.md and K1.
+
+### Key measurements
+
+- 46 attempts (40 Reaper fo_A, 6 Wanderer fo_W), 46 deaths, best wave index 6 of 14; index 0 (Reed + Envoy +
+  Choristor, no Garmond: he always enters 4.0 s after index 1 starts) is where attempts end: 22 / 46 deaths, median
+  3.5 net masks per cleared index 0, 4 of 7 index-4 starts at 1-2 masks. Its 70 % hit share is mostly exposure (65 %
+  of fight time): hits / min index 0 11.3, index 3 / 4 / 5 9.9 / 11.8 / 15.7. No data for waves 7-13.
+- 10.5 hits / min (11.7 masks / min), 1.34 heals / min; the random data policy takes 13-20 hits / min in the same waves
+  (the person 43-54 % fewer at index 0-1, about 25 % fewer at index 3-4).
+- Hits per enemy-minute in play: Minister 6.6, Envoy 5.75, Clawmaiden 5.05, Reed 4.77, Choristor 4.73 (Choristor /
+  Reed / Envoy = 89 % of hits and 88 % of enemy time). Deaths: Choristor 19, Reed 10, Clawmaiden 6, Minister 6,
+  Envoy 3; every complete multi-hit chain cost 2 masks (48 / 48).
+- 45 % of hits while attacking or in attack recovery; another damage collider within 2 u at only 12 % of hits, but
+  3 enemies in play at 237 / 437; 20 / 46 deaths with full silk; 14 deaths with no heal (11 started at silk 9, 8 kept
+  silk 9 throughout); 39 / 46 attempts start at 7 masks + silk 9, 7 at silk 1 (2 loads, 5 respawns); Cogfly and
+  Silkspear never used; 164 incidental nail clashes (Envoy charge 50); keys 2.55 / 3.80 per s.
+- Review fixes: per-type exposure (enemy-seconds in play per attempt), multi-hit chains closed after 90 frames
+  without a Final Hit (chain_cut), death -> next start gaps only within a session, interpolated percentiles (medians
+  changed slightly: Wanderer index-0 kills 7.8 / 6.6 / 17.3 s), start / lowest silk per attempt. Tests: 4.
+
+### Next
+
+1. Support certification order by wave: index 0 (Choristor / Reed / Envoy; the Envoy point savestate of R1 item 5
+   earlier), then index 3-4 (Clawmaiden / Bellbearer / Minister), then Maestro / Tiny / Clapper.
+2. R4 A0 baseline: report hits / min per wave index 0-4 against the person's 8-12 / min and the random 13-20 / min.
+3. K1 loadout A/B candidates from the demo: Wanderer, Cogfly in index 0 on the Reed, Silkspear on the Reed.
+4. A new demo: `..\scripts\uv.cmd run python -m ssbot.tools.forum_demo <session> --json out.json` (9 min scan ~8 s).
