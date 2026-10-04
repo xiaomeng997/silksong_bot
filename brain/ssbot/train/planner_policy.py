@@ -602,7 +602,12 @@ class PlannerPolicy:
             self.episode_outcome = "QUIT"
             self.outcome_reason = f"{r.outcome}: {'; '.join(r.decision.reasons) or 'supervisor'}"
         kp = res.kill
-        if r.mask is None and kp is not None and not kp.i3:
+        # I3's own HP conditions (full HP, h >= 3): a blow there needs no certificate whatever the tier, and the
+        # post-kill frames stay as before (the harness's zeros; live 20261004_045230: 9 of 104 kills were such a
+        # slash in flight on a YELLOW tick at full HP); below them a kill plan is kept (certified, or the best one
+        # left when a blow in flight lost its certificate)
+        i3_hp = ctx.max_hp > 0 and ctx.hp >= ctx.max_hp and h is not None and h >= 3
+        if r.mask is None and kp is not None and not kp.i3 and (kp.certified or not i3_hp):
             # the chosen plan may land a killing blow outside I3: keep it for the slow motion (module docstring, 7).
             # A plan of its own presses is certified (the filter vetoes the rest); a blow in flight may have lost its
             # certificate since its press (live 20261004_041626: 5 of 14 kills at h = 2, a pogo's down spike whose
