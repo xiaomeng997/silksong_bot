@@ -4,7 +4,7 @@ input; save suppression and LethalBlock on all the time; optional PlayerData isI
 
     cd brain
     ..\\scripts\\uv.cmd run python -m ssbot.probes.combo_probe --instance 3 --savestate fo_r1_w0 --trials 12 \\
-        [--exp saw,bypass,claw,rprlock] [--invincible]
+        [--exp saw,bypass,lockout,claw,rprlock] [--invincible] [--lockout-crest Wanderer]
 
 The four questions the offline reading left open (each trial reloads the savestate, waits until the wave-0 enemies
 are active and Hornet takes input, plays one scripted experiment, releases the keys):
@@ -14,10 +14,15 @@ are active and Hornet takes input, plays one scripted experiment, releases the k
            is y-flipped), the enable window of Damager L / R after the spawn (animator: L 0.05-0.175 s, R
            0.10-0.20 s), "hit" events (13 = 8 x 1.6 with one Crafting Kit, then the 1-damage lag hit 0.1 s later).
   bypass   the glide's attack cancel (Umbrella Float "Attack Cancel" -> SetStartWithAttack -> RegainControl ->
-           DoAttack, which checks neither attack_cooldown nor CanDownAttack): in the air, a side slash at t0, the
-           glide pressed once the crest's recovery is over, attack pressed at Inflate + 0.08 s; does the slash start
-           before t0 + attack cooldown (Reaper 0.5 s)? The control trial presses attack at the same time without the
-           glide (expected: queued until the cooldown ends).
+           DoAttack, which checks neither attack_cooldown nor CanDownAttack): a Reaper down slash pogoes on the
+           nearest ground enemy, the glide is pressed as soon as control returns and down + attack at Inflate +
+           0.08 s, ~0.35 s after the down-slash press (inside the 0.5 s cooldown; hero.tm.atk_cd logged; each cycle
+           flags inside_cooldown). Does the next down slash start at once? Up to 3 cycles: hero y at each pogo hit ->
+           the climb per cycle (kin_jit: ~1.3 u, the loop breaks after ~3 hits). The control trial presses down +
+           attack at the same delay without the glide (expected: nothing until atk_cd <= 0).
+  lockout  the Sawtooth's one-spike-at-a-time check (brolly_spike_cooldown_check): glide next to a ground enemy,
+           dash-cancel (or, with --lockout-crest Wanderer, attack-cancel) at Inflate + 0.075 s and re-glide at once ->
+           a 2nd spike ~0.26-0.30 s after the 1st (< its 0.375 s AutoRecycleSelf). Expected: the 2nd deals nothing.
   claw     Clawline at the nearest enemy level with the hero: per frame the hero pos / clip / Harpoon Dash FSM state
            (fsmtap), the two harpoon hits and their damage, where the dash ends (the needle x snap), the harpoon
            bounce height, and the glide pressed k frames after control returns (earliest glide after a Clawline);
@@ -44,7 +49,9 @@ M_J, M_A, M_DASH, M_CLAW = mask("jump"), mask("attack"), mask("dash"), mask("cla
 SAW_ROOT = "Tool_brolly_spike(Clone)/Brolly_spike_position/brolly_slash_enemy_damager"
 SAW_PATHS = (SAW_ROOT + "/Damager L", SAW_ROOT + "/Damager R")
 DS_PATH = "Attacks/Scythe/DownSlash New"
-EXPS = ("saw", "bypass", "claw", "rprlock")
+DS_SRC = ("DownSlash New", "DownSlash", "DownSlashAlt", "DownSpike", "Downspike")
+DS_CLIPS = ("v3 Down Slash", "DownSlash", "Down Slash", "DownSpike")
+EXPS = ("saw", "bypass", "lockout", "claw", "rprlock")
 GROUND_TYPES = ("Song Pilgrim 03", "Song Pilgrim 01", "Song Heavy Sentry")
 
 
@@ -76,7 +83,7 @@ class Driver:
         self.link.act(s["f"] + 2, buttons, hold_frames=0)
         h = s.get("hero") or {}
         row = {"f": s["f"], "m": buttons, "pos": h.get("pos"), "vel": h.get("vel"), "clip": (h.get("anim") or {}).get("clip"),
-               "cs": h.get("cstate"), "silk": h.get("silk"), "inv": h.get("invulnerable"),
+               "cs": h.get("cstate"), "silk": h.get("silk"), "inv": h.get("invulnerable"), "tm": h.get("tm"),
                "ev": [ev for ev in s.get("ev") or () if ev.get("k") in ("hit", "damage", "damage_blocked", "fsm", "hp")]}
         if dump:
             fut = self.link.rpc_async("slash.dump", paths=list(dump))
@@ -136,23 +143,123 @@ def exp_saw(d: Driver, rng: random.Random) -> dict:
     return {"gap": gap, "side": side, "enemy": e.get("type_key")}
 
 
-def exp_bypass(d: Driver, rng: random.Random, glide: bool, recovery_s: float) -> dict:
-    d.hold(M_J, 14)                                                 # full jump
-    d.hold(0, 4)
-    t0 = d.step(M_A)["f"]                                           # side slash at t0
-    d.hold(0, int(recovery_s * 60) + 1)
-    inflate_k = None
-    if glide:
-        d.hold(M_J, 1)
-        _, inflate_k = d.until(lambda s: clip_is(s, "Umbrella Inflate") and not clip_is(s, "Umbrella Inflate Antic"),
-                               M_J, 20)
-        d.hold(M_J, 5)                                              # Inflate + 0.08 s
-    else:
-        d.hold(0, 10)
-    fa = d.step(M_A | (M_J if glide else 0))["f"]                   # the attack (cancel) press
-    d.hold(M_J if glide else 0, 1)
+def ds_hit(s: dict) -> bool:
+    return any(ev.get("k") == "hit" and (ev.get("d") or {}).get("src") in DS_SRC for ev in s.get("ev") or ())
+
+
+def ds_started(s: dict) -> bool:
+    return any(clip_is(s, p) for p in DS_CLIPS)
+
+
+def is_inflate(s: dict) -> bool:
+    return clip_is(s, "Umbrella Inflate") and not clip_is(s, "Umbrella Inflate Antic")
+
+
+def approach(d: Driver, gap: float, ground: bool = True) -> dict | None:
+    """Walk towards the nearest (ground) enemy until |dx| <= gap; returns the last state or None."""
+    s = d.step(0)
+    e = nearest(s, ground=ground)
+    if e is None:
+        return None
+    toward = M_L if e["pos"][0] < s["hero"]["pos"][0] else M_R
+    s, _ = d.until(lambda s: (n := nearest(s, ground=ground)) is None or abs(s["hero"]["pos"][0] - n["pos"][0]) <= gap,
+                   toward, 150)
+    return s
+
+
+def exp_bypass(d: Driver, rng: random.Random, glide: bool, cooldown_s: float, cycles: int = 3) -> dict:
+    """The glide's attack cancel inside the Reaper's 0.5 s attack cooldown (review fix: the old version pressed after a
+    side slash and only reached the cancel at ~0.53 s, past the cooldown). A Reaper down slash pogoes on the nearest
+    ground enemy; the bounce returns control (the down-slash FSM's RelinquishControlNotVelocity ran ResetAttacks, so the
+    glide is not attack-locked), the glide is pressed at once and down + attack at Inflate + 0.08 s, i.e. ~0.35 s after
+    the down-slash press, well inside attack_cooldown (hero.tm.atk_cd is logged every frame). glide=False is the
+    control: down + attack at the same delay after the pogo without a glide (expected: no down slash until atk_cd <= 0).
+    Repeats for `cycles` pogoes to measure the climb per cycle (kin_jit: ~1.3 u per cycle, the loop breaks after ~3)."""
+    s = approach(d, 0.4)
+    if s is None:
+        return {"skip": "no ground enemy"}
+    d.hold(M_J, 14)                                                 # full jump next to / over it
+    d.hold(0, 6)
+    out = {"glide": glide, "cycles": []}
+    f_ds = d.step(M_D | M_A)["f"]                                   # the first down slash
+    for c in range(cycles):
+        cyc = {"ds_press_f": f_ds}
+        s, k_hit = d.until(ds_hit, M_D, 30)
+        if k_hit < 0:
+            cyc["miss"] = True
+            out["cycles"].append(cyc)
+            break
+        cyc["hit_f"] = s["f"]
+        cyc["hero_y_at_hit"] = (s.get("hero") or {}).get("pos", [None, None])[1]
+        s, k_ctl = d.until(lambda s: bool((s.get("hero") or {}).get("hero_accepting_input")), 0, 30)
+        cyc["control_back_f"] = s["f"]
+        if glide:
+            d.hold(M_J, 1)                                          # a new jump press -> glide (if CanFloat)
+            s, k_inf = d.until(is_inflate, M_J, 20)
+            cyc["inflate_f"] = s["f"] if k_inf >= 0 else None
+            if k_inf < 0:
+                cyc["no_glide"] = True
+                out["cycles"].append(cyc)
+                break
+            d.hold(M_J, 4)                                          # Inflate + 0.075 s (ListenForAttack delay)
+            press = M_J | M_D | M_A
+        else:
+            d.hold(0, 10)                                           # same delay as antic (~5) + Inflate wait (5)
+            press = M_D | M_A
+        s = d.step(press)
+        fa = s["f"]
+        tm = (s.get("hero") or {}).get("tm") or {}
+        cyc.update(press_f=fa, press_after_ds_s=(fa - f_ds) / 60.0, atk_cd_at_press=tm.get("atk_cd"),
+                   inside_cooldown=(fa - f_ds) / 60.0 < cooldown_s - 2 / 60.0)
+        s, k_ds = d.until(ds_started, press & ~M_A if glide else M_D, 40)
+        cyc["ds_start_after_press_frames"] = k_ds                   # 0-2: the cancel fired at once (bypass)
+        out["cycles"].append(cyc)
+        if k_ds < 0:
+            break
+        f_ds = fa
     d.hold(0, 30)
-    return {"glide": glide, "t0_f": t0, "press_f": fa, "press_after_s": (fa - t0) / 60.0, "inflate_k": inflate_k}
+    ys = [c.get("hero_y_at_hit") for c in out["cycles"] if c.get("hero_y_at_hit") is not None]
+    out["climb_per_cycle"] = [round(b - a, 3) for a, b in zip(ys, ys[1:])]
+    return out
+
+
+def exp_lockout(d: Driver, rng: random.Random, via: str) -> dict:
+    """The Sawtooth lockout (bundle: Tool_brolly_spike's PlayMakerFSM brolly_spike_cooldown_check tags the new spike,
+    one frame later untags it, FindGameObject withTag 'Brolly Spike Slash' and, if the previous spike is still alive,
+    i.e. within its AutoRecycleSelf 0.375 s, deactivates the new one). Next to a ground enemy: glide (spike 1), cancel
+    at Inflate + 0.075 s (via='dash': a dash cancel, Reaper; via='attack': an attack cancel, run with
+    --lockout-crest Wanderer: 0.1 s attack lock + the FSM's 0.1 s Cooldown), then press jump every frame until the next
+    glide antic -> spike 2 ~0.26-0.30 s after spike 1. Expected: spike 2 deals nothing (no Damager L/R hit events after
+    its spawn while spike 1's were there); spawn frames from the Inflate-after-Antic clip onsets."""
+    gap = rng.uniform(1.5, 3.0)
+    s = approach(d, gap + 0.6)
+    if s is None:
+        return {"skip": "no ground enemy"}
+    d.hold(M_J, 3)                                                  # hop
+    d.hold(0, 3)
+    spawns = []
+    d.hold(M_J, 1, dump=SAW_PATHS)
+    s, k = d.until(is_inflate, M_J, 20, dump=SAW_PATHS)            # spike 1 spawned (Damager? -> Inflate)
+    if k < 0:
+        return {"skip": "no glide 1"}
+    spawns.append(s["f"])
+    d.hold(M_J, 4, dump=SAW_PATHS)
+    d.step(M_J | (M_DASH if via == "dash" else M_A), dump=SAW_PATHS)
+    d.hold(0, 1, dump=SAW_PATHS)
+    for _ in range(40):                                             # jump pressed on alternate frames (new presses)
+        s = d.step(M_J, dump=SAW_PATHS)
+        if clip_is(s, "Umbrella Inflate Antic"):
+            break
+        s = d.step(0, dump=SAW_PATHS)
+        if clip_is(s, "Umbrella Inflate Antic"):
+            break
+    s, k = d.until(is_inflate, M_J, 20, dump=SAW_PATHS)
+    if k >= 0:
+        spawns.append(s["f"])
+    d.hold(M_J, 20, dump=SAW_PATHS)
+    d.hold(0, 10)
+    return {"via": via, "gap": gap, "spawn_f": spawns,
+            "spawn_gap_s": (spawns[1] - spawns[0]) / 60.0 if len(spawns) == 2 else None}
 
 
 def exp_claw(d: Driver, rng: random.Random, k_glide: int) -> dict:
@@ -188,7 +295,9 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--trials", type=int, default=12, help="per experiment")
     ap.add_argument("--exp", default=",".join(EXPS))
     ap.add_argument("--seed", type=int, default=131000)
-    ap.add_argument("--recovery", type=float, default=0.3, help="the crest's AttackRecoveryTime (Reaper 0.3)")
+    ap.add_argument("--cooldown", type=float, default=0.5, help="the crest's attack cooldown (Reaper 0.5)")
+    ap.add_argument("--lockout-crest", default="", help="crest.equip this crest (e.g. Wanderer) for the lockout "
+                    "experiment and use the attack cancel; default: stay Reaper and use the dash cancel")
     ap.add_argument("--invincible", action="store_true", help="PlayerData isInvincible during the trials")
     ap.add_argument("--out", default=r"C:\ssbot\data\runs\m2\combo_probe")
     a = ap.parse_args(argv)
@@ -213,7 +322,9 @@ def main(argv: list[str] | None = None) -> int:
                 link.wait_state(lambda s: s.get("hero") and s["hero"].get("hero_accepting_input")
                                 and any((b.get("enemies") or 0) > 0 for b in (s.get("room") or {}).get("battles") or ()),
                                 timeout_s=30)
-                if x == "saw":   # the tool into a blue slot (the savestate does not have it)
+                if x == "lockout" and a.lockout_crest:   # before the grant: the crest keeps its own tool equips
+                    link.rpc("crest.equip", timeout_s=20, name=a.lockout_crest, unlock=True)
+                if x in ("saw", "lockout", "bypass"):   # the tool into a blue slot (the savestate does not have it)
                     g = link.rpc("abilities.grant", timeout_s=20, set="movement", tools=["Brolly Spike"],
                                  unlock_slots=True)
                     granted = granted or bool(g)
@@ -225,7 +336,9 @@ def main(argv: list[str] | None = None) -> int:
                 if x == "saw":
                     info = exp_saw(drv, rng)
                 elif x == "bypass":
-                    info = exp_bypass(drv, rng, glide=(n % 2 == 0), recovery_s=a.recovery)
+                    info = exp_bypass(drv, rng, glide=(n % 2 == 0), cooldown_s=a.cooldown)
+                elif x == "lockout":
+                    info = exp_lockout(drv, rng, via="attack" if a.lockout_crest else "dash")
                 elif x == "claw":
                     info = exp_claw(drv, rng, k_glide=n % 6)
                 else:
@@ -239,6 +352,8 @@ def main(argv: list[str] | None = None) -> int:
         try:
             link.rpc("input.release", timeout_s=10)
             link.rpc("fsmtap.set", all=False)
+            if a.lockout_crest:
+                link.rpc("crest.equip", timeout_s=20, restore=True)
         except Exception:  # noqa: BLE001
             pass
         if dbg:
