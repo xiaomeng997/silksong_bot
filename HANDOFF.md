@@ -894,3 +894,68 @@ fixed.
    measured this support).
 5. Remove the live checkout `C:\ssbot\live_postkill_c1e971b` after the gate (`git worktree remove --force`); the
    5a97e0f and fd18ae6 checkouts are already removed.
+
+## Task R1 - Forum plan round R1: wave starts, targeted collection v2, wall climb, speed-up check (branch worktree-wf_6dcc3810-3d5-1)
+
+Worktree `C:\modeling\silksong_bot\.claude\worktrees\wf_6dcc3810-3d5-1`, instances 2 and 3 (ports 47019 / 47020), seeds
+127000-131999 (used: 127000+, 127100, 127200, 128000+, 129000+; `--same-seeds` keeps them in range), savestates
+`fo_r1_*`. Facts: `docs/facts/1.0.30000/forum.md` section 13 (R1). Plan: `docs/plans/forum_planner_plan.md` §5 R1.
+
+### Done (committed)
+
+- Wave starts (`brain/ssbot/train/wave_start.py`): a DebugMod savestate taken during wave i restarts the battle at wave i
+  on load (DebugMod RoomSpecific keeps "BattleScene|Battle Scene|<currentWave>" and patches DoStartBattle to
+  StartWave(currentWave)). `fo_r1_w0` .. `fo_r1_w13` made by one policy skip from fo_A (`make_wave_states`: boost off and
+  keys released at each save, so the saves carry the route's PlayerData); all 14 load and restart at their wave in about
+  1.2 s with the wave's members (probe `forum_r1 check`). Not restored: the helper (Garmond stays Dormant: "Call Ally"
+  fires only on wave 1's WAVE START), survivors of an overlapping earlier wave (2 / 4 / 9: load the wave before instead).
+  Encounters `Forum_A_w<i>` (intro waits for room.battles; timebox 180 s); `combat_run --encounter` takes a comma list
+  (rotates per episode). Policy skip (deployed oracle: isInvincible + nailUpgrades 4 + silk 9 over the debug line
+  server, `WaveSkipPolicy`) works but is slow on the Maestro waves (0-5: 37 s, wave 6: 353 s, to 13: 716 s game).
+- Oracle 06a7c2b (built `-p:Deploy=false`, NOT deployed): `time.scale` above 1 through DebugMod's TimeScale (the game
+  clamps its own controls to 1: CheatManager.IsCheatsEnabled is a constant false; live: scale 2 gave Time.timeScale 1),
+  and RPC `battle.wave {wave}` (kills earlier waves' live members through HealthManager.Die, the BattleScene advances by
+  its own rules, helper call included). `skip_to_wave(method="auto")` uses it once deployed.
+- Wall climb (`brain/ssbot/train/climb.py`, WallClimber: hold toward the wall, dash held per climb, released between):
+  probe 27 / 27 to the top (12 invincible, 15 under wave-0 attack), 2-6 scrambles, 1.6-5.5 s.
+- Targeted data policy v2 (`brain/ssbot/train/forum_policy.py`, combat_run `--policy data2` / `data2_envoy`): tactics
+  PRESS / KEEP / BAIT (choice boundaries from R0's boundaries.json, built-in copy until R0 merges) / DASH_IN / CLAW_IN /
+  UNDER / JUMP_OVER / WALL_BAIT / CLASH / CLIMB (pocket share 0.85 with only Clappers) / EVADE, hold times in game
+  seconds; data2_envoy never hits the Envoy below 20 HP.
+- Never-seen moves explained from the FSMs (PlayMaker SendEvent to self switches state before the later actions run):
+  Envoy HopSlash, Bellbearer Throw Antic Quick, Maestro Point Start are unreachable; the Forum Envoy's entry is its
+  ambush.
+- Tools: `ssbot.tools.forum_r1_audit` (families, near-boundary starts, never-seen transitions, clashes, clawline,
+  under fliers, pocket, climbs), `ssbot.tools.forum_speed_check` (2x vs 1x: fight-level permutation tests on dwell /
+  speed / choices, hitbox extents, sampling density), `ssbot.probes.forum_r1` (midsave / skip / states / check / climb),
+  `combat_run --time-scale / --same-seeds`; combat_run also stops on DEMO_SOON. Tests `brain/tests/test_forum_r1.py`.
+
+### Running
+
+- Chain `C:\ssbot\sandbox\fo_r1_chain.ps1` (frozen code `C:\ssbot\live_fo_r1_1c374f8`), started 11:12, hidden:
+  - instance 2: Envoy campaign `C:\ssbot\data\runs\m2\20261004_111158_Forum_A_w0_data2_envoy` (data2_envoy on
+    Forum_A_w0, 60 s episodes, 4 h), then wave starts (data2, 6 h, seeds 129000+) in a new run dir;
+  - instance 3: wave starts `C:\ssbot\data\runs\m2\20261004_111158_Forum_A_w2_mix_data2` (data2, rotation w2, w4, w6,
+    w7, w8, w9, w11, w12, w13 x2, w3, w5, w10; 180 s episodes; 10 h, seeds 128000+).
+  - Logs `C:\ssbot\sandbox\fo_r1_chain_i2.log` / `_i3.log`. Stop: STOP_AGENTS or DEMO_SOON (both end runs after the
+    episode and the chain starts nothing more), or `combat_run stop <run dir>` (the i2 chain then goes on to its second
+    part). Expected end about 21:15.
+
+### Needs deploy
+
+- Oracle 06a7c2b (`time.scale` > 1, `battle.wave`), built with `-p:Deploy=false`; deploy when no instance runs.
+
+### Next
+
+1. After the deploy: the 2x check. Same seeds on two instances, e.g. `combat_run run --instances 2 --encounter
+   Forum_A_w7,Forum_A_w13,Forum_A_w2,Forum_A_w4,Forum_A_w6 --policy data2 --same-seeds --seed 130000 --hours 1.5
+   --time-scale 2` and the same with `--instances 3` at 1x; then `forum_speed_check --a <1x run> --b <2x run>`
+   (`perm_verdict` per metric; the 1x-vs-1x calibration is in forum.md 13.5). Adopt 2x for collection only if dwell,
+   speed and choices match and the hitbox extents agree; even then the support templates bin at 1/60 s and a 2x
+   recording fills every other bin per instance (forum.md 13.5).
+2. After the deploy: `forum_r1 skip --method oracle --wave 13` (battle.wave) and `check` that Garmond comes in.
+3. Run `forum_r1_audit` on the two runs when they end; rebuild the tables with them (`behaviour_build --encounter Forum`
+   after R0 merges) and add the never-seen moves as structurally absent.
+4. `gauntlet.WAITING_STATES` lacks "Dead" (the Maestros' parked Tinies): live_enemies counts nine parked Tinies in
+   play from the load on; v1's GauntletDataPolicy targets them. R1 code filters them (`wave_start.fighting`); fixing
+   live_enemies itself changes other tools' numbers (left for a reviewed change).

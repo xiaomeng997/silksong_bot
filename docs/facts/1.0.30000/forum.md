@@ -244,3 +244,84 @@
 
 - **结论**：除 Envoy 和各类入场外，还没到 200 的是 Clawmaiden CM_TELE 4.8 h、Song Automaton Tiny AT_LEAVE 2.7 h、Choristor CH_JUMP 2.4 h、Choristor CH_WHIP 0.5 h、Maestro MA_SUMMON 0.4 h、Choristor CH_SLASH 0.4 h（战斗时间，单实例墙钟大致相同）。首版写的"再跑约 2 h 就几乎全够"不对（首版表里就有 CM_TELE 6.6 h、AT_LEAVE 3.9 h、CH_JUMP 3.9 h）：按现在 13 场的速率还要约 4.8 h 才能让除 Envoy 和入场外的全部招到 200（四个实例并行约 1.2 h）。**Envoy 只在第 0 波出现一只**（38 HP，几秒就死）：普通斩 / 跳斩 / 冲锋 / 伏击分别还要 3.4 / 15.0 / 10.9 / 44.2 h，HopSlash 从没出现（`Hop Up?` 要主角在它上方）；各类入场每场 1–5 次（6.4–12.7 h）。这些要么另做定点采集（只打 Envoy 的 savestate、让它多活），要么按"每场一次的固定开场"处理、不要求 200。MA_POINT（`Point Start` 的下一个状态是空）在 Forum 不出现。
 - 完整连战每场 714–990 s 游戏时间（11.9–16.5 min，中位 848 s；`--timebox 1500`；第 7 波两只 Maestro 是最慢的一段），一个实例一小时约 4 场。
+
+## 13. R1：波次起点、定点采集 v2、爬墙、加速检查（2026-10-04，forum_planner_plan.md §5 R1；实例 2、3，fo_A，oracle）
+
+代码在分支 `worktree-wf_6dcc3810-3d5-1`。探针结果 JSON 在 `C:\ssbot\sandbox\forum_r1\`（`ssbot.probes.forum_r1`）。
+
+### 13.1 从第 i 波开始（R1 ①）
+
+- **DebugMod 战斗中存档可以用**（之前计划 §1 第 12 条以为读档会回到开战前）。DebugMod 存档时如果房间里有已开始的 BattleScene，会写 `roomSpecificOptions = "BattleScene|Battle Scene|<currentWave>"`（`REF\Silksong.DebugMod\SaveStates\RoomSpecific.cs`）；读档时把 `currentWave` 设回去再调 `StartBattle`，并用 Harmony 转译把 `DoStartBattle` 里的 `StartWave(0)` 改成 `StartWave(currentWave)`。`Start Range` 的 PersistentBoolItem 已触发，所以读档后没有吼叫过场，`battleStartPause` 0.75 s 后直接开第 i 波。
+- 存档 `fo_r1_w0` … `fo_r1_w13`（`C:\ssbot\sandbox\savestates\`）：w1–w13 由一次从 fo_A 开始的策略跳波顺路存下（`wave_start.make_wave_states`：每到新的一波先把 PlayerData 改回、松开按键再存；14 个存档核对 nailUpgrades 1、isInvincible False、7 面具、丝 1）；w0 是开战 2 s 后存的。**读档核对（`forum_r1 check`）：14 / 14 在读档返回后约 1.2 s 由 room.battles 报告第 i 波开始，这一波的成员全部出现**；每个存档的 `roomSpecificOptions` 与文件名一致。
+- **读档不恢复的**：
+  - **助战**：Garmond 在 13 / 13 次读档后一直 `Dormant`。叫助战的是第 1 波（索引 1）FSM 在 `WAVE START` 时发的 `CALL ALLY`（§4），从第 i ≥ 2 波开始的战斗不会再发。所以 w2–w13 是"无助战"的起点（对 Envoy 无影响：第 0 波本来就没有助战）。
+  - **重叠波次的上一波幸存者**：第 2 / 4 / 9 波 remainingEnemyToEnd > 0，自然连战里下一波开始时上一波还有人活着；从 w3 读档只有 Clawmaiden（自然的第 3 波开始时通常还有 Bellbearer + Reed）。要这种组合就从前一波的存档读（w2 → 1.5 s 后第 3 波自然开始）。
+  - 敌人的 HP、位置都是新生成的；主角位置是存档时的位置（w11–w13 在右墙边 x 48.7），HP / 丝在数据模式下由 randomize_start 重新随机。
+- **策略跳波**（部署的 oracle 就能用）：通过 debug line server 把 `isInvincible` 置真、`nailUpgrades` 4（钉子伤害 21）、丝保持 9（丝矛），`WaveSkipPolicy` 去砍在场的波次成员，BattleScene 按自己的规则推进（助战照常进场）。实测一次跳到第 13 波：第 0–5 波共 37 s 游戏时间，**两只 Maestro 的第 6 波 353 s**，第 7 波 13 s，第 12 波（Maestro + Reed）181 s，总计 716 s，与随机数据策略一整场差不多（飞着的 Maestro 打不到）。所以只在前几波有用；实际采集用存档。
+- **oracle RPC `battle.wave {wave}`**（提交 06a7c2b，`-p:Deploy=false` 构建，**未部署**）：对第 0…currentWave 波的活成员调 `HealthManager.Die`（Generic，和 DebugMod 的 kill all 同一调用），BattleScene 按自己的规则推进（startDelay、1 s 数子物体、第 1 波的 Call Ally 照常，所以助战会在），到 `currentWave == wave` 时回复。部署后要核对（HANDOFF R1 Next 2）。
+- 用法：Encounter `Forum_A_w<i>`（intro 只等 room.battles 报告第 i 波开始；时间盒 180 s），`combat_run --encounter` 接受逗号分隔的列表、按局轮换。**只用于采集和以后的课程；门槛仍是完整连战。**
+
+### 13.2 三招从没出现：结构上不可达（R1 ③）
+
+PlayMaker 的 `SendEvent`（delay < 0.001、目标 Self）在 OnEnter 里直接 `Fsm.Event` → `ProcessEvent`，状态一切换，`FsmState.ActivateActions` 就返回，这个状态后面的动作不再执行（反编译 PlayMaker `FsmState.cs` 293 行、`Fsm.cs` 2425 行，`HutongGames.PlayMaker.Actions/SendEvent.cs`）。场景包里每个动作的启用位（`actionEnabled`，UnityPy 读 `hang_04_boss.bundle`）：
+
+- **Envoy `HopSlash Antic`**：`Hop Up?` 的动作依次是 CheckHeroPerformanceRegion、StopWalker、SetVelocity2d、**SendEvent FINISHED（启用）**、FaceObjectV2、RayCast2dV2（TERRAIN，前方 3 u，命中发 `HOP UP`）。FINISHED 先到 → `Slash Antic`；射线永远不跑。**不可达**。（记录里 `Hop Up?` 的停留时间是 0，见 13.4。）
+- **Bellbearer `Throw Antic Quick`**：`Rethrow?` 的动作是 **SendEvent FINISHED（启用）**、SendRandomEventV4（FINISHED 0.7 / ATTACK 0.3）。永远回 `In Range`。**不可达**。
+- **Maestro `Point Start`**：`Attack Choice` 里的 `SendEvent POINT` 是**禁用**的（actionEnabled false），别的分支只有 FIRE / DEFEND / SING；`Point Start` 自己也没有出边（转移目标是空）。**不可达**。
+- **Envoy 入场（EN_ENTRY：Wake Pause / Wake / Black Thread Wake）**：Forum 的 Envoy 默认动画片段是 `Ambush`，`Init` → `Ambush Ready` →（BATTLE START）`Ambush Antic`：它的入场就是伏击（EN_AMBUSH，每场一次）。Wake 系列属于睡眠变体，Forum 里不出现。
+- 所以这三招和 Envoy 的 Wake 入场不需要采集；行为表应把它们当作结构上不存在（不影响支撑）。
+
+### 13.3 爬墙到左墙顶（Wall Scramble，你的方法）
+
+- 控制器 `ssbot.train.climb.WallClimber`：跑向左墙，离墙面 2.6 u 内跳；一贴上墙（wallSliding / wallClinging）就一直按住左，按住冲刺约 0.25 s 爬一次（按住冲刺爬得更高），松开再按；到 y ≥ 13.3 且贴住就停在那里（口袋），低于 13.15 再爬一次（撞顶后 Detach 有时在 12.9 重新抓墙）。
+- 探针（`forum_r1 climb`，第 0 波实战中）：**27 / 27 到顶**（无敌 12 次、不无敌 15 次，后者每次挨 0–3 下），每次 2–6 次冲刺（中位 3），到顶 1.6–5.5 s 游戏时间（中位约 2.9 s），最后贴墙高度 y 13.20–13.66（口袋 13.45–13.60）。之前的蹬墙跳方法 5621 帧贴墙里只有 145 帧到顶（§10.3）。
+- 数据策略 v2 的 CLIMB 段（实战，见 13.4 的运行）：**101 / 106 次到顶（95 %）**，到顶 p50 1.5 s、p95 5.0 s 游戏时间；另 5 次到 CLIMB 段结束时还没到顶（原因没有逐个看）。
+
+### 13.4 定点采集策略 v2 与长跑（R1 ②⑤）
+
+- 策略 `ssbot.train.forum_policy.ForumDataPolicyV2`（combat_run `--policy data2`；`data2_envoy` 只在 Envoy HP ≤ 20 时不打它）：每段选一个战术，按游戏秒计时（任何时间倍速下行为相同）：PRESS、KEEP（3–10 u）、**BAIT**（目标类型某个与距离有关的家族的选择边界：R0 boundaries.json 的最大选择距离或 p99，±1.2 u，偶尔跨过边界）、**DASH_IN**（3–9 u 外冲刺、冲刺中出刀 = 收割者冲刺斩）、**CLAW_IN**（同高度 3–12 u 放飞针）、**UNDER**（站在飞行怪正下方，偶尔上砍）、**JUMP_OVER**（跳过地面怪，在上方偶尔下劈）、**WALL_BAIT**（背靠墙等地面怪过来：Envoy 的 Hop Up? 射线）、**CLASH**（在出刀距离等着，可拼刀的伤害框（parry clash / force 位）或 Throwing Bell 进入横砍框时出刀；有铃时先打铃）、**CLIMB**（13.3 的爬墙器，到顶后贴住，目标在够距内偶尔贴墙横斩；只剩 Clapper 时按帧 85 % 在墙上）、EVADE。审计工具 `ssbot.tools.forum_r1_audit`。
+- 长跑（代码冻结在 `C:\ssbot\live_fo_r1_1c374f8`，11:12 开始，HANDOFF R1 Running）：实例 2 = Envoy 专场（`Forum_A_w0`，每局 60 s，4 h，之后转波次起点 6 h）；实例 3 = 波次起点轮换（w2、w4、w6、w7、w8、w9、w11、w12、w13 ×2、w3、w5、w10，每局 180 s，10 h）。下面的数是**前两个录像**（Envoy 50 局 = 0.73 h 游戏时间；波次 20 局 = 0.95 h）：
+
+| 家族 | R1 实例数（每小时游戏时间） | 选择边界 ±1 u 内开始的（每小时） | R0 107 场里边界 ±1 u 内被选中的（每小时） |
+|---|---|---|---|
+| Envoy 普通斩 EN_SLASH | 1113（1516） | 198（270） | 146（5.7） |
+| Envoy 跳斩 EN_JUMPSLASH | 441（601） | — | — |
+| Envoy 冲锋 EN_CHARGE | 156（213） | 0 | 6（0.2） |
+| **Envoy 伏击 EN_AMBUSH** | **50（每局一次；墙钟约 55 / h）** | — | — |
+| Choristor 斩 / 鞭 / 跳 | 586 / 334 / 225 | 26 / 18 / 3 | 88 / 87 / 45（3.5 / 3.4 / 1.8） |
+| Reed 刺 / 扔 / 防御 / 闪避 | 717 / 876 / 429 / 374 | — | — |
+| Clawmaiden 斩 / 旋转 / 瞬移 | 234 / 204 / 16 | 97 / 21 / 0 | 427 / 389（16.8 / 15.3） |
+| Minister 冲刺 / 格挡 / 闪避 | 254 / 534 / 196 | 0 / 0 / 14 | 130（闪避 5.1） |
+| Bellbearer 扔钟 / 闪避 | 567 / 201 | — | — |
+| Maestro 斩 / 防御 / 召唤 | 296 / 123 / 19 | — | — |
+| Clapper 锤 / 跳 / 跳施法 / 施法 / 后撤 | 41 / 72 / 71 / 87 / 118 | 2 / — | 1131（44.5） |
+
+  - **Envoy**：每个家族都已 ≥ 200 或很快到（冲锋 156 + R0 385）；**伏击**每局正好一次（50 / 50：读 w0 存档后它照样从 `Ambush Ready` 伏击），R0 的 107 + 这里 4 h 约 220 → 合计约 330。HopSlash 和 Envoy 的 Wake 入场不可达（13.2）。
+  - **边界附近的取样**：Envoy 普通斩边界附近开始的速率是 R0 的约 47 倍，Choristor 斩 / 鞭约 10 / 7 倍，Clawmaiden 斩约 6 倍，Minister 闪避约 3 倍；Clapper 锤反而少（w7 / w13 的时间大多在墙上）。
+- **结构性不可达的实测核对**：Envoy `Hop Up?` 1113 次，下一状态 1113 次都是 `Slash Antic`，停留时间最大 0.0 s，其中 123 次 Envoy 离主角一侧的墙不到 3 u；Bellbearer `Rethrow?` 562 次全部回 `In Range`（停留 0.0 s）；Maestro `Attack Choice` 419 次：Fire 296、Defend 123、Point 0。
+
+### 13.5 加速检查（R1 ④）：**没有跑成，2x 不采用**
+
+- 部署的 `time.scale` 不能加速：`TimeManager.UpdateTimeScale` 在 `CheatManager.IsCheatsEnabled`（发行版里是常量 false，`CheatManager.cs` 215 行）时把所有控制的乘积截到 1。实测：scale 2 → `Time.timeScale` 1（0.5 正常）。DebugMod 的加速之所以能用，是它自己在 UpdateTimeScale 前后 Harmony 补丁了 IsCheatsEnabled，并用 IL 钩子让 `FreezeMoment` / `SetTimeScale` 协程的实时等待按倍速缩短（`REF\Silksong.DebugMod\MonoBehaviours\TimeScale.cs`）。
+- 修正（06a7c2b，未部署）：`time.scale` > 1 走 DebugMod 的 `TimeScale.CustomTimeScale`（反射），两条路径互相复位，不会相乘。部署后按 HANDOFF R1 Next 1 跑：同一组种子（`--same-seeds`）一个实例 2x、另一个 1x。
+- 比较工具 `ssbot.tools.forum_speed_check`（全部按游戏时间）：每个（类型, 状态）的停留时间（事件的 t_in_prev）、每个（类型, 状态）的移动速度、每类的家族比例、按 0.05 s 状态时间格的伤害框外沿、Clapper 跳的高度和滞空。**同一场里的样本不独立**（主角的打法、HP 每场不同）：同一臂的两半按样本做 KS，停留时间就有大量 p < 1e-5；所以检验按场置换（两臂的场混在一起随机重分 200 次）。1x 对 1x 校准（074533 对 074719 两个旧数据运行）：8 + 8 场只看事件：停留时间 270 个键里 p < 0.05 的 0.7 %、家族比例 9 类里 1 类；4 + 4 场含实体：停留 2.4 %、速度 2.2 %、比例 0 %，伤害框外沿 239 个键里 2 个差 > 2 倍噪声且 > 0.1 u；Clapper 跳高中位 8.219 u / 滞空 0.917 s 两边相同。判据：p < 0.05 的键占比 ≤ 10 % 且不超过同臂两半之间的两倍，伤害框外沿超差的键 ≤ 5 %。
+- 预期的差别（未实测）：2x 时每帧 1/30 s 游戏时间，录像里每个实例的伤害框只落在一半的 1/60 s 状态时间格上（支撑模板按 1/60 s 分格；`sampling` 一栏会显示），策略每游戏秒的决策数减半（v2 已按游戏秒折算按住时长）。即使行为检验通过，2x 的数据也应先只用于选择概率和时长，支撑模板要另外核对。
+
+### 13.6 你的几条说法的核对（R1 数据）
+
+- **飞针（Clawline）撞上怪不伤主角：不完全成立**。波次长跑里 157 次飞针，59 次 `Harpoon Dash Damager` 打中怪；其中 **5 次在打中后 0.5 s 内被同一类怪打中**（2 次就在接住的那一帧或下一帧：Clawmaiden 本体、Reed 本体；3 次 Tiny），另有 3 次是 Minister 的身体框（来源名不带类型，没算进去）。飞针冲刺中主角**不是无敌的**（cstate invulnerable 为假）：拉到怪身上时它的身体接触照样算。你的录像里 34 次飞针、437 次受击里 0 次发生在 Harpoon 动画里：人多半在怪不出招、身体可以穿的时候用。规划器要把飞针终点当作"贴在怪身体上"做支撑检查。
+- **飞行怪往斜下打，站正下方安全**：按类型（主角站地、在它正下方 |dx| < 0.75 u 对 1.5–6 u 的附近；只算该类的命中）：**Bellbearer 正下方 37.5 s 0 次 vs 附近 4.75 次 / min**；Minister 26.7 s 0 次 vs 2.1 次 / min；Maestro 两边都是 0；Reed 两个运行合计正下方 68.6 s 4 次（3.5 / min）vs 附近 421 s 22 次（3.1 / min）：**Reed 正下方不更安全**；Tiny 14.5 vs 16.2 次 / min（差不多）；Clawmaiden 样本太少。与 R0 below.json（Bellbearer、Tiny、Reed 正下方更安全；Minister、Clawmaiden 俯冲）部分一致：Bellbearer 成立，Reed / Tiny 的"正下方安全"在实战里没有体现（它们会移动、冲撞）。
+- **小铃铛可以打走**：171 次对着铃出刀，61 次铃进入 `Tink L/R/U` → `Nail Hit`（改向）。
+- **拼刀**（按对方的招，NailClashEffect）：Envoy 专场 146 次：Envoy 普通斩 49、Choristor 跳 26、Choristor 斩 19、Envoy 冲锋 17、Envoy 跳斩 12、Reed 防御反击 10、Choristor 鞭 7、Reed 刺 6；波次起点 69 次：**Minister 冲刺 48**、Clawmaiden 斩 8、Minister 格挡反击 6、Reed 4（刺 2、防御反击 2）、Choristor 斩 2、Maestro 斩 1。
+- **口袋（只剩 Clapper 时贴在左墙顶）**：w7 / w13 两种起点里在口袋 464 s；这期间 Clapper 开始的招：跳 59、跳施法 56、施法 55（全部从 `Far Range`）、后撤 45（全部从 `Avoid Type`：两只互相让），**锤 0**（与 §10.2 一致）；**口袋里来自 Clapper 的受击 0**。口袋里的受击全部在别的波次（Reed 的针 / 刺、Minister 的斩、Tiny），与 §10.3"口袋只用于终局"一致。
+
+### 13.7 复现
+
+```
+cd brain
+..\scripts\uv.cmd run python -m ssbot.probes.forum_r1 states --instance 2            # fo_r1_w1..w13
+..\scripts\uv.cmd run python -m ssbot.probes.forum_r1 check --instance 2              # 读每个存档核对
+..\scripts\uv.cmd run python -m ssbot.probes.forum_r1 climb --instance 3 --repeat 15 --timeout 10
+..\scripts\uv.cmd run python -m ssbot.tools.forum_r1_audit <run dir> --json <out>
+..\scripts\uv.cmd run python -m ssbot.tools.forum_speed_check --a <1x runs> --b <2x runs> --json <out>
+```
