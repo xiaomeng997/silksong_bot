@@ -930,6 +930,21 @@ Worktree `C:\modeling\silksong_bot\.claude\worktrees\wf_6dcc3810-3d5-1`, instanc
   speed / choices, hitbox extents, sampling density), `ssbot.probes.forum_r1` (midsave / skip / states / check / climb),
   `combat_run --time-scale / --same-seeds`; combat_run also stops on DEMO_SOON. Tests `brain/tests/test_forum_r1.py`.
 
+### Measured (first two recordings of each run: Envoy 50 episodes, wave starts 20; forum.md 13.4-13.6)
+
+- Envoy: EN_SLASH 1113, EN_JUMPSLASH 441, EN_CHARGE 156, EN_AMBUSH 50 (one per episode, ~55 / h wall); `Hop Up?`
+  1113 -> `Slash Antic` 1113 (123 with the wall < 3 u), dwell 0.0 s; `Rethrow?` 562 -> `In Range`; Maestro
+  `Attack Choice` 419: Fire 296, Defend 123, Point 0.
+- Near-boundary starts per game hour vs R0: Envoy slash 270 vs 5.7, Choristor slash / whip 34 / 25 vs 3.5 / 3.4,
+  Clawmaiden slash 103 vs 17, Minister evade 15 vs 5.
+- Climb in the policy: 101 / 106 (p50 1.5 s). Pocket (w7 / w13) 464 s: Clappers jump 59, jump cast 56, cast 55 (all
+  from Far Range), evade 45 (all from Avoid Type), slam 0; 0 Clapper hits in the pocket.
+- Clawline: 157 presses, 59 harpoon hits, 5 hero hits by the hooked type within 0.5 s (not invulnerable in the dash).
+  Under fliers: Bellbearer 0 hits in 37.5 s under vs 4.75 / min near; Reed 3.5 vs 3.1 / min (no gain). Bells: 171
+  swings, 61 redirects. Nail clashes: Envoy campaign 146 (Envoy slash 49), wave starts 69 (Minister charge 48).
+- Speed check 1x vs 1x calibration (old runs 074533 / 074719): fight-level permutation p < 0.05 for 0.7-2.4 % of the
+  dwell keys, 2.2 % speed, 0-11 % of the 9 choice keys; per-sample KS is unusable (fights cluster).
+
 ### Running
 
 - Chain `C:\ssbot\sandbox\fo_r1_chain.ps1` (frozen code `C:\ssbot\live_fo_r1_1c374f8`), started 11:12, hidden:

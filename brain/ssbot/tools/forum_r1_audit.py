@@ -29,7 +29,7 @@ from ssbot.knowledge.behaviour_tables import fight_states, run_fights
 from ssbot.knowledge.gauntlet_tables import FORUM_SPECS
 from ssbot.train.forum_policy import load_boundaries
 from ssbot.train.gauntlet import in_play
-from ssbot.train.wave_start import body_box
+from ssbot.train.wave_start import PARKED_STATES, body_box
 
 POCKET_X, POCKET_Y = 14.6, 13.2
 WALLS = (14.01, 48.99)
@@ -72,6 +72,7 @@ def scan_fight(fight, unit: str, acc: dict, starts: dict, bounds: dict) -> None:
     pend_next: dict[int, tuple[str, dict]] = {}       # ent -> (state, info) waiting for the next transition
     prev = None
     harpoon_until = -1.0
+    harpooned: list[tuple[float, str]] = []           # (game s, type) of the enemies the harpoon hit
     g = 0.0
     for s in fight_states(fight, keys=("f", "dt", "hero", "ents", "ev")):
         f = s["f"]
@@ -83,7 +84,8 @@ def scan_fight(fight, unit: str, acc: dict, starts: dict, bounds: dict) -> None:
         hx, hy = h["pos"][0], h["pos"][1]
         ents = s.get("ents") or ()
         by_iid = {e["iid"]: e for e in ents}
-        live = [e for e in ents if e.get("type_key") in FORUM_SPECS and (e.get("hp") or 0) > 0 and in_play(e)]
+        live = [e for e in ents if e.get("type_key") in FORUM_SPECS and (e.get("hp") or 0) > 0 and in_play(e)
+                and not any(fs.get("state") in PARKED_STATES for fs in e.get("fsms") or ())]
         clip = str(((h.get("anim") or {}).get("clip")) or "")
         if clip.startswith("Harpoon"):
             harpoon_until = g + HARPOON_TAIL_S
@@ -95,15 +97,21 @@ def scan_fight(fight, unit: str, acc: dict, starts: dict, bounds: dict) -> None:
             x0, y0, x1, y1 = body_box(e)
             if y0 >= hy + UNDER_DY:
                 fl.append((abs((x0 + x1) / 2.0 - hx), e.get("type_key")))
-        under = grounded and any(d < UNDER_DX for d, _ in fl)
-        near = grounded and not under and any(UNDER_DX * 2 <= d < NEAR_DX for d, _ in fl)
+        under_t = {t for d, t in fl if d < UNDER_DX} if grounded else set()
+        near_t = {t for d, t in fl if UNDER_DX * 2 <= d < NEAR_DX} - under_t if grounded else set()
+        under, near = bool(under_t), bool(near_t)
         if under:
             acc["under"]["under_s"] += dt
         elif near:
             acc["under"]["near_s"] += dt
+        for t in under_t:
+            acc["under_by_type"][t]["under_s"] += dt
+        for t in near_t:
+            acc["under_by_type"][t]["near_s"] += dt
         pocket = hx < POCKET_X and hy >= POCKET_Y
         if pocket:
             acc["pocket"]["pocket_s"] += dt
+            acc["pocket"]["by_unit_s"][unit] += dt
         for ev in s.get("ev") or ():
             k, d = ev.get("k"), ev.get("d") or {}
             if k == "fsm":
@@ -131,6 +139,7 @@ def scan_fight(fight, unit: str, acc: dict, starts: dict, bounds: dict) -> None:
                         acc["near_boundary"][f"{tk}/{fam}"] += 1
                     if pocket and tk == "Song Heavy Sentry":
                         acc["pocket"]["clapper_starts"][fam] += 1
+                        acc["pocket"]["clapper_from"][f"{fam} <- {d.get('from')}"] += 1
                 if (tk, to) in WATCH and e is not None:
                     info = {"fsm": d.get("fsm"), "f": f}
                     if to == "Hop Up?":
@@ -164,13 +173,22 @@ def scan_fight(fight, unit: str, acc: dict, starts: dict, bounds: dict) -> None:
                 src = d.get("source")
                 tk = source_type(src, set())
                 if g <= harpoon_until:
-                    acc["clawline"]["hero_hits_in_harpoon"].append({"f": f, "source": src, "clip": clip})
-                if under and tk in {t for _, t in fl}:
+                    hooked = [t for gg, t in harpooned if g - gg <= 0.5]
+                    acc["clawline"]["hero_hits_in_harpoon"].append({"f": f, "source": src, "clip": clip,
+                                                                    "from_hooked": tk in hooked})
+                if tk in under_t:
                     acc["under"]["hits_under"] += 1
-                elif near and tk in {t for _, t in fl}:
+                    acc["under_by_type"][tk]["hits_under"] += 1
+                elif tk in near_t:
                     acc["under"]["hits_near"] += 1
+                    acc["under_by_type"][tk]["hits_near"] += 1
+                if pocket:
+                    fam = next((last_fam[i][0] for i, e2 in by_iid.items() if e2.get("type_key") == tk
+                                and i in last_fam), "?")
+                    acc["pocket"]["hits"][f"{unit}: {tk}/{fam}/{src}"] += 1
             elif k == "hit" and str(d.get("src") or "").startswith("Harpoon"):
                 acc["clawline"]["harpoon_hits"] += 1
+                harpooned.append((g, d.get("type_key")))
         prev = s
     acc["game_s"][unit] += g
 
@@ -183,7 +201,9 @@ def audit(runs: list[Path], max_fights: int | None = None) -> dict:
            "clashes": {"nail_clash": Counter(), "bell_nail": Counter(), "policy_swings": Counter()},
            "clawline": {"harpoon_s": 0.0, "hero_hits_in_harpoon": [], "harpoon_hits": 0, "presses": 0},
            "under": {"under_s": 0.0, "near_s": 0.0, "hits_under": 0, "hits_near": 0, "policy_under_s": 0.0},
-           "pocket": {"pocket_s": 0.0, "clapper_starts": Counter()},
+           "pocket": {"pocket_s": 0.0, "clapper_starts": Counter(), "hits": Counter(), "by_unit_s": Counter(),
+                      "clapper_from": Counter()},
+           "under_by_type": defaultdict(lambda: {"under_s": 0.0, "near_s": 0.0, "hits_under": 0, "hits_near": 0}),
            "climbs": {"n": 0, "ok": 0, "t_top": []}, "fights": 0, "skipped": []}
     n = 0
     for run in runs:
@@ -224,6 +244,11 @@ def audit(runs: list[Path], max_fights: int | None = None) -> dict:
     hours = sum(acc["game_s"].values()) / 3600.0
     acc["per_hour_all"] = {k: round(v / hours, 1) for k, v in acc["families_all"].most_common()} if hours else {}
     acc["hours"] = round(hours, 3)
+    for t, v in acc["under_by_type"].items():
+        v["per_min_under"] = round(60.0 * v["hits_under"] / v["under_s"], 2) if v["under_s"] > 1 else None
+        v["per_min_near"] = round(60.0 * v["hits_near"] / v["near_s"], 2) if v["near_s"] > 1 else None
+    cl = acc["clawline"]
+    cl["hits_from_hooked"] = sum(1 for h in cl["hero_hits_in_harpoon"] if h.get("from_hooked"))
     u = acc["under"]
     u["hits_per_min_under"] = round(60.0 * u["hits_under"] / u["under_s"], 2) if u["under_s"] else None
     u["hits_per_min_near"] = round(60.0 * u["hits_near"] / u["near_s"], 2) if u["near_s"] else None
@@ -244,6 +269,7 @@ def main(argv: list[str] | None = None) -> int:
                                  "never_seen_dwell_max", "clashes",
                                  "clawline", "under", "pocket", "climbs")}
     brief["hop_up_summary"] = out["hop_up_summary"]
+    brief["under_by_type"] = out["under_by_type"]
     brief["clawline"] = {**brief["clawline"], "hero_hits_in_harpoon": len(out["clawline"]["hero_hits_in_harpoon"])}
     print(json.dumps(brief, indent=1)[:12000])
     return 0
