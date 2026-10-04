@@ -21,6 +21,7 @@ combat_run's recordings and AttemptRecords (policy data2 / data2_envoy, ssbot.tr
 """
 import argparse
 import json
+import math
 from collections import Counter, defaultdict
 from pathlib import Path
 
@@ -35,6 +36,10 @@ WALLS = (14.01, 48.99)
 UNDER_DX, UNDER_DY, NEAR_DX = 0.75, 1.5, 6.0
 HARPOON_TAIL_S = 0.25
 BELL_NAIL_STATES = ("Nail Hit", "Tink L", "Tink R", "Tink U")
+# the decision states in front of the never-seen moves (13.2 of forum.md): Envoy hop slash, Bellbearer quick rethrow,
+# Maestro point
+WATCH = frozenset((("Song Pilgrim 01", "Hop Up?"), ("Pilgrim 03 Song", "Rethrow?"),
+                   ("Song Pilgrim Maestro", "Attack Choice")))
 SOURCE_OWNER = {"Throwing Bell": "Pilgrim 03 Song", "Song Reed Pin Projectile": "Song Reed",
                 "Spear": "Song Handmaiden", "handmaiden_spear_silk_explosion": "Song Handmaiden"}
 
@@ -109,6 +114,9 @@ def scan_fight(fight, unit: str, acc: dict, starts: dict, bounds: dict) -> None:
                 if ent in pend_next and d.get("fsm") == pend_next[ent][1].get("fsm") and to != pend_next[ent][0]:
                     st0, info = pend_next.pop(ent)
                     acc["never_seen"][st0][to or "None"] += 1
+                    if d.get("from") == st0 and d.get("t_in_prev") is not None:
+                        acc["never_seen_dwell_max"][st0] = max(acc["never_seen_dwell_max"].get(st0, 0.0),
+                                                                float(d["t_in_prev"]))
                     if st0 == "Hop Up?":
                         acc["hop_up"].append({**info, "next": to})
                 fam = starts.get((tk, d.get("fsm")), {}).get(to)
@@ -123,13 +131,13 @@ def scan_fight(fight, unit: str, acc: dict, starts: dict, bounds: dict) -> None:
                         acc["near_boundary"][f"{tk}/{fam}"] += 1
                     if pocket and tk == "Song Heavy Sentry":
                         acc["pocket"]["clapper_starts"][fam] += 1
-                if to in ("Hop Up?", "Rethrow?", "Attack Choice") and e is not None:
+                if (tk, to) in WATCH and e is not None:
                     info = {"fsm": d.get("fsm"), "f": f}
                     if to == "Hop Up?":
                         ex = e["pos"][0]
                         wall = WALLS[0] if hx < ex else WALLS[1]
                         info.update(envoy_x=round(ex, 2), hero_x=round(hx, 2), wall_gap=round(abs(ex - wall), 2))
-                    pend_next[ent] = (to, info)
+                    pend_next[ent] = (to, info)     # keyed by state name below; WATCH names one type each
                 if tk == "Throwing Bell" and to in BELL_NAIL_STATES:
                     acc["clashes"]["bell_nail"][to] += 1
             elif k == "freeze" and d.get("phase") == "start" and d.get("type") == "NailClashEffect":
@@ -171,7 +179,7 @@ def audit(runs: list[Path], max_fights: int | None = None) -> dict:
     starts, _ = family_tables()
     bounds = load_boundaries()
     acc = {"families": defaultdict(Counter), "families_all": Counter(), "near_boundary": Counter(),
-           "never_seen": defaultdict(Counter), "hop_up": [], "game_s": Counter(),
+           "never_seen": defaultdict(Counter), "never_seen_dwell_max": {}, "hop_up": [], "game_s": Counter(),
            "clashes": {"nail_clash": Counter(), "bell_nail": Counter(), "policy_swings": Counter()},
            "clawline": {"harpoon_s": 0.0, "hero_hits_in_harpoon": [], "harpoon_hits": 0, "presses": 0},
            "under": {"under_s": 0.0, "near_s": 0.0, "hits_under": 0, "hits_near": 0, "policy_under_s": 0.0},
@@ -207,7 +215,11 @@ def audit(runs: list[Path], max_fights: int | None = None) -> dict:
             n += 1
     t = sorted(x for x in acc["climbs"]["t_top"] if x is not None)
     acc["climbs"]["t_top_p50"] = t[len(t) // 2] if t else None
-    acc["climbs"]["t_top_p95"] = t[int(0.95 * (len(t) - 1))] if t else None
+    acc["climbs"]["t_top_p95"] = t[min(len(t) - 1, max(0, math.ceil(0.95 * len(t)) - 1))] if t else None
+    hu = acc["hop_up"]
+    acc["hop_up_summary"] = {"n": len(hu), "wall_gap_lt_3": sum(1 for h in hu if h.get("wall_gap", 99) < 3.0),
+                              "next": dict(Counter(h.get("next") for h in hu))}
+    acc["hop_up"] = hu[:50]
     del acc["climbs"]["t_top"]
     hours = sum(acc["game_s"].values()) / 3600.0
     acc["per_hour_all"] = {k: round(v / hours, 1) for k, v in acc["families_all"].most_common()} if hours else {}
@@ -228,8 +240,10 @@ def main(argv: list[str] | None = None) -> int:
     txt = json.dumps(out, indent=1)
     if a.json:
         a.json.write_text(txt, encoding="utf-8")
-    brief = {k: out[k] for k in ("fights", "hours", "families_all", "near_boundary", "never_seen", "clashes",
+    brief = {k: out[k] for k in ("fights", "hours", "families_all", "near_boundary", "never_seen",
+                                 "never_seen_dwell_max", "clashes",
                                  "clawline", "under", "pocket", "climbs")}
+    brief["hop_up_summary"] = out["hop_up_summary"]
     brief["clawline"] = {**brief["clawline"], "hero_hits_in_harpoon": len(out["clawline"]["hero_hits_in_harpoon"])}
     print(json.dumps(brief, indent=1)[:12000])
     return 0

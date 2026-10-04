@@ -230,8 +230,10 @@ class GauntletTap:
                     if b["completed"]:
                         self._end(f, "room.battles")
             for a in allies or ():
+                # "Away": Shakra Fighter's state when she was not called (every Forum load with the Garmond flag;
+                # forum.md §4), counted as a helper before 2026-10-04 (R1: the wave-start records)
                 if a.get("active") and a.get("state") not in (None, "Dormant", "Init", "Wait Hero In Position",
-                                                               "Wait An Additional Frame", "Auto Target?"):
+                                                               "Wait An Additional Frame", "Auto Target?", "Away"):
                     n = a.get("name") or "?"
                     self.allies_seen[n] = self.allies_seen.get(n, 0) + 1
                     self.ally_first.setdefault(n, f)

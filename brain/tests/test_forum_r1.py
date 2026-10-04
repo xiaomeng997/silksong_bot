@@ -154,3 +154,31 @@ def test_audit_source_type():
     assert source_type("Song Pilgrim 03 (3)/Whip Hit 2", set()) == "Song Pilgrim 03"
     assert source_type("Throwing Bell(Clone)", set()) == "Pilgrim 03 Song"
     assert source_type(None, set()) is None
+
+
+def test_speed_check_statistics():
+    import numpy as np
+
+    from ssbot.tools.forum_speed_check import Arm, chi2_p, ks, ks_p, perm_tests, tv
+    assert ks([1, 2, 3], [1, 2, 3]) == 0.0 and ks([0, 0], [1, 1]) == 1.0
+    assert ks_p(0.0, 100, 100) == 1.0 and ks_p(0.5, 200, 200) < 1e-6
+    assert chi2_p({"a": 50, "b": 50}, {"a": 50, "b": 50}) > 0.5
+    assert chi2_p({"a": 90, "b": 10}, {"a": 10, "b": 90}) < 1e-6
+    assert tv({"a": 1}, {"b": 1}) == 1.0
+    rng = np.random.default_rng(0)
+
+    def arm(shift):
+        a = Arm()
+        for _ in range(8):                       # 8 fights, each with its own offset (samples cluster by fight)
+            one = Arm()
+            off = rng.normal(0, 0.05)
+            one.dwell[("T", "S")] = list(rng.normal(1.0 + shift + off, 0.1, 40))
+            one.choice["T"]["F1"] = 20
+            one.choice["T"]["F2"] = 20
+            a.merge(one)
+            a.per_fight.append(one)
+        return a
+
+    same = perm_tests(arm(0.0), arm(0.0), 10, n_perm=99)
+    diff = perm_tests(arm(0.0), arm(0.5), 10, n_perm=99)
+    assert diff["dwell"]["p_below_0.05"] == 1 and same["choices"]["keys"] == 1
