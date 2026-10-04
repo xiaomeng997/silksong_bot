@@ -339,6 +339,8 @@ class SubjectRecall:
             if lo > cap:
                 return
             hi = min(hi, cap)
+            if not current:          # a state not entered yet enters from the next frame on (the hull stays bounded)
+                lo, hi = max(lo, BIN), max(hi, BIN)
             k = (st, c, d, current)
             iv = nodes.get(k)
             if iv is None:
