@@ -48,6 +48,13 @@ class Encounter:
     battle_name: str = ""              # its BattleScene GameObject (STATE room.battles[].name)
     post_clear_s: float = 1.0          # the episode goes on this long after the kill (late hazards; a lethal hit
                                        # there is still a death: ssbot.train.episode)
+    # The post-kill tail (DESIGN §3.5.7, the Last Judge row's rule for every encounter that sets it): after the kill
+    # the episode goes on until no damage source has been live for tail_quiet_s of game time (ssbot.train.episode
+    # live_threats: an enabled damage collider, or a hazard in one of tail_armed's states, which hurts later), at most
+    # tail_max_s after the kill (then STUCK); None: the fixed post_clear_s window above.
+    tail_quiet_s: float | None = None
+    tail_max_s: float = 15.0
+    tail_armed: tuple[tuple[str, tuple[str, ...]], ...] = ()   # (type_key prefix, FSM states) armed, no collider yet
 
 
 @dataclass
@@ -131,7 +138,11 @@ def bell_beast_intro(ctx: Ctx) -> int:
 BELL_BEAST = Encounter(
     name="BellBeast", scene="Bone_05", savestate="bellbeast_arena", boss_type="Bone Beast", control_fsm="Control",
     dormant=("Init", "Dormant"), death_states=("Death Broadcast",), intro=bell_beast_intro, timebox_s=240.0,
-    arena_x=(73.5, 97.5), floor_y=3.5677)   # the person's fight: hero x 78.3-97.4, boss x 73.5-97.4
+    arena_x=(73.5, 97.5), floor_y=3.5677,   # the person's fight: hero x 78.3-97.4, boss x 73.5-97.4
+    # what outlives the boss (docs/facts/1.0.30000/post_kill.md): the two attack bells of a kill in Burst Out (in
+    # flight at the kill, rolling until their End Timer), a drop bell already falling; a drop bell in its Antic is
+    # cancelled by the death (Antic -> Cancel on the kill frame), so Antic is armed only while the boss lives
+    tail_quiet_s=2.0, tail_armed=(("BoneBeast DropBell", ("Antic",)),))
 
 # The same fight with the Reaper crest equipped (M2 W8: the Reaper's attack polygons against the game's hit events,
 # tools/attack_hit_audit). Savestate kn_bb_reaper: bellbeast_arena + crest.equip Reaper + Silk Spear in a Reaper skill

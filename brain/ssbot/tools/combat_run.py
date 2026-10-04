@@ -396,8 +396,25 @@ def summary(run_dir: Path, more: list[Path] | None = None, write: bool = True) -
         out["reasons"] = dict(Counter(r["reason"] for r in rows if r.get("reason")).most_common(10))
         n = len(rows)
         out["clear_pct"] = round(100.0 * sum(r["outcome"] == "CLEAR" for r in rows) / n, 1)
-        clear = sorted(r["ingame_s"] for r in rows if r["outcome"] == "CLEAR" and r.get("ingame_s") is not None)
+        # time to kill: wake -> the kill (kill_s; rows before the post-kill tail: ingame_s, which ended 1 s after it)
+        clear = sorted(r.get("kill_s") if r.get("kill_s") is not None else r["ingame_s"] for r in rows
+                       if r["outcome"] == "CLEAR" and (r.get("kill_s") is not None or r.get("ingame_s") is not None))
         out["time_to_kill_s"] = {"p50": clear[len(clear) // 2], "min": clear[0], "max": clear[-1]} if clear else None
+        killed = [r for r in rows if r.get("f_kill") is not None]
+        if any(r.get("tail_s") is not None for r in killed):
+            ts = sorted(r["tail_s"] for r in killed if r.get("tail_s") is not None)
+            th = sorted(r["tail_threat_s"] for r in killed if r.get("tail_threat_s") is not None)
+            srcs: Counter = Counter()
+            for r in killed:
+                srcs.update({k.split(" (")[0]: 1 for k in r.get("tail_threats") or {}})
+            out["post_kill_tail"] = {
+                "kills": len(killed), "tail_s_p50": ts[len(ts) // 2] if ts else None, "tail_s_max": ts[-1] if ts else None,
+                "with_live_source": len(th), "last_source_s_max": th[-1] if th else None,
+                "sources": dict(srcs.most_common()),
+                "hits": sum(r.get("tail_hits") or 0 for r in killed),
+                "episodes_hit": sum(1 for r in killed if r.get("tail_hits")),
+                "outcomes": dict(Counter(r["outcome"] for r in killed)),
+                "ends": dict(Counter(str(r.get("tail_end")) for r in killed))}
         out["hits_per_episode"] = dict(sorted(Counter(r["hits"] for r in rows).items()))
         pol = [r.get("policy") or {} for r in rows]
         if any(p.get("view") for p in pol):

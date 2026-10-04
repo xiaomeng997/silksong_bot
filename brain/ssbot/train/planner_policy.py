@@ -32,6 +32,13 @@ Per STATE (this is the only place where backends meet the combat stack, which re
      current rate to the frame the mask is for) until its window ends: the certified path is the executed one, not
      a replan per real frame at 0.05x speed (verifier finding, fixer round). The harness keeps calling act() through
      the post-kill frames while kill_commit_active.
+  8. after the kill (task "post-kill forecast", 2026-10-04; DESIGN §3.5.7): the harness keeps calling act() through
+     the post-kill tail (act_after_clear; train/episode: until no damage source has been live for 2 s), and the
+     planner keeps dodging what outlives the boss: the post-death forecast keeps the attack bells of a kill in Burst
+     Out on their exact paths and the falling drop bells (combat.forecast DEAD_ATK_EXACT). A death without a kill
+     commitment (a blow under I3's own HP conditions) keeps the last plan sent the same way through the slow motion
+     (_post_kill_commit), then the planner ticks as in the fight; stats()["post_kill"] counts the ticks after the
+     death, the planner's among them and their FORCED_RISK.
 The decision log (decisions_i<N>.jsonl in the run directory) keeps the 90 ticks before every hero hit, lethal hit,
 FORCED_RISK and supervisor pause, and 10 after, for ssbot.tools.postmortem. The key plan log (keys_i<N>.jsonl, one
 line per episode, train.keyplan) keeps every key press decided at every tick (first decision, changes,
@@ -57,7 +64,7 @@ from ssbot.combat.forecast import Forecaster, load_box_margin, load_hurtbox, loa
 from ssbot.train.keyplan import KeyPlanLog, summarize
 from ssbot.combat.hero_damage import HeroDamage
 from ssbot.combat.planner import Planner, PlannerConfig
-from ssbot.combat.safety_filter import FilterContext, KillKnowledge
+from ssbot.combat.safety_filter import FilterContext, KillKnowledge, kill_window_frames
 from ssbot.combat.tactics import Tactics, load_playbook
 from ssbot.core.bosses import BOSSES
 from ssbot.core.worldstate import ORACLE, VISION_EQUIVALENT, Ev
@@ -188,6 +195,10 @@ class AttackMonitor:
 
 
 class PlannerPolicy:
+    # the harness keeps calling act() after the kill (train/episode: the post-kill tail): the planner dodges what
+    # outlives the boss (DESIGN §3.5.7, the person's question of 2026-10-04) instead of standing still
+    act_after_clear = True
+
     def __init__(self, view: str = "oracle", threads: int = 8, enemy: str = "BellBeast", log_dir: Path | None = None,
                  instance: int = 0, real_quit_p: float = 0.0, key_cost: tuple[float, ...] | None = None):
         import cv2
@@ -428,6 +439,9 @@ class PlannerPolicy:
         self.commits: list[dict] = []          # every commitment that ran (stats)
         self._kill_seen_f: int | None = None   # the last frame the view showed a kill
         self._tg: deque = deque(maxlen=3)      # (frame, game time) of the last WorldStates: the game clock's rate
+        self._last_plan: dict | None = None    # the plan the last planner tick sent (the post-kill commitment)
+        self._post_kill_done = False           # the boss's death has had its slow-motion commitment
+        self.post_kill = Counter()             # after the boss's death: ticks, planner ticks, FORCED_RISK, hits
 
     # ---- per STATE ---------------------------------------------------------------------------------------------
 
@@ -561,6 +575,14 @@ class PlannerPolicy:
                 and self._kill_seen_f > self.commit["fo"]:
             self.commit["killed"] = self._kill_seen_f
             self.commit["f_kill_tick"] = f
+            self._post_kill_done = True
+        dead = self.fc.tracker.dead
+        if dead and not self._post_kill_done and self._kill_seen_f is not None and self.sc.pq is None:
+            self._post_kill_done = True
+            if self.commit is None and self._last_plan is not None:
+                self.commit = self._post_kill_commit(ws, f)
+        if dead:
+            self.post_kill["ticks"] += 1
         fcast = self.fc.forecast(HORIZON_S)
         self.forecasts.append((fo, fcast, ws.stamp.t_game_s))
         self._support = fcast.support_set(ws)
@@ -618,6 +640,13 @@ class PlannerPolicy:
             self.first_pending_reasons = list(r.decision.reasons)     # what started the pause (the end's reasons
             #                                                           include what the quit itself caused, e.g. Q5)
         mask = res.mask if r.mask is None else r.mask
+        # the plan this tick sends, for a commitment through the boss's death slow motion (_post_kill_commit)
+        self._last_plan = None if r.mask is not None or not len(res.cmd) else {
+            "fo": fo, "f": f, "tg": ws.stamp.t_game_s, "P": len(prefix), "cmd": np.array(res.cmd, np.int64),
+            "plan": res.name, "path": res.path}
+        if self.fc.tracker.dead:
+            self.post_kill["planner_ticks"] += 1
+            self.post_kill["forced_risk"] += int(bool(res.forced_risk))
         if r.outcome is not None and r.outcome in TERMINAL and self.episode_outcome is None:
             self.episode_outcome = "QUIT"
             self.outcome_reason = f"{r.outcome}: {'; '.join(r.decision.reasons) or 'supervisor'}"
@@ -669,6 +698,22 @@ class PlannerPolicy:
                     and getattr(p, "phase", "start") == "start"):
                 self._kill_seen_f = max(self._kill_seen_f or ev.frame, ev.frame)
 
+    def _post_kill_commit(self, ws, f: int) -> dict:
+        """The boss died without a kill commitment (a blow under I3's own HP conditions, full HP and h >= 3, or one
+        the planner did not see coming): the plan the last planner tick sent is kept the same way through the
+        slow motion, by game time, until the kill kind's window after now (kill_window_frames), and the planner
+        takes over after it (it keeps playing in the post-kill tail). Replanning per real frame in the slow motion
+        is what the commitment avoids (module docstring, 7: a released jump halves the rise about 20 times per game
+        frame there)."""
+        lp = self._last_plan
+        ft = self.params.frame_time
+        k_now = int(round((ws.stamp.t_game_s - lp["tg"]) / ft))
+        W = kill_window_frames(ft, self.kill_window_s)
+        return {"fo": lp["fo"], "f": lp["f"], "tg": lp["tg"], "P": lp["P"], "cmd": lp["cmd"], "end_k": k_now + W,
+                "k_hi": k_now, "window": W, "own": False, "certified": False, "post_kill": True, "plan": lp["plan"],
+                "path": lp["path"], "path_hit": None, "path_kill": None, "killed": self._kill_seen_f,
+                "f_kill_tick": f}
+
     @property
     def kill_commit_active(self) -> bool:
         """A certified killing blow's plan is kept (the harness keeps acting through the post-kill frames)."""
@@ -688,7 +733,8 @@ class PlannerPolicy:
         if k > c["end_k"]:
             c["ended_f"] = f
             self.commits.append({x: c[x] for x in ("f", "fo", "plan", "own", "certified", "k_hi", "window", "killed",
-                                                   "f_kill_tick", "ended_f") if x in c} | {"ticks": c.get("ticks", 0)})
+                                                   "f_kill_tick", "ended_f", "post_kill") if x in c}
+                                | {"ticks": c.get("ticks", 0)})
             self.commit = None
             return None
         i = min(max(k - c["P"] - 1, 0), len(c["cmd"]) - 1)
@@ -955,4 +1001,5 @@ class PlannerPolicy:
                                                 else [{"plan": self.commit["plan"], "killed": self.commit["killed"],
                                                        "certified": self.commit.get("certified"),
                                                        "ticks": self.commit.get("ticks", 0), "open": True}]),
+                "post_kill": dict(self.post_kill),
                 "real_quit": self.real_quit_stats(), "keys": keys}

@@ -356,3 +356,77 @@ def test_ve_bell_cue_that_comes_into_the_image_late_widens_its_arming(model, tem
     fc2.tracker.vis = [(29.98, (60.0, 120.0), (60.0, 120.0))]
     fc2.update(ws)
     assert 11 not in fc2.tracker.bell_early
+
+
+def _atk(iid, side, x, y, vx, vy, state="Launch", tau=0.05):
+    from ssbot.core.worldstate import E, Entity, Kind
+    return Entity(id=iid, kind=Kind.ENEMY_ATTACK, type_key=E(f"BoneBeast AtkBell {side}"), pos=E((x, y)),
+                  vel=E((vx, vy)), fsm=[("Control", state, tau)])
+
+
+def test_after_the_death_the_attack_bells_stay_in_support_on_their_exact_paths(model, templates):
+    """Task "post-kill forecast" (2026-10-04): a kill in Burst Out leaves both attack bells in flight (live
+    20261004_043850: they landed on the hero 130 frames after the kill, unpredicted). After Death Broadcast the oracle
+    view puts them on their exact paths until their End Timer, and the death tail's attack-bell union (timed from a
+    burst's normal end, not from the death) is no longer placed."""
+    from ssbot.combat.pogo_targets import simulate
+    from ssbot.core.worldstate import WorldState
+    import ssbot.combat.forecast as fmod
+    an = Anchor(88.59, model.families["BB_BURST"].anchor_y, 1)
+    fc = _fc(model, templates, ORACLE, [])
+    ws = WorldState()
+    ws.stamp.t_game_s = 10.0
+    # the bells of 20261004_043850 i0 f 692539 (the kill frame): Launch, rising
+    ws.entities = [_atk(1, "L", 86.37, 7.571, -1.0, 23.48), _atk(2, "R", 90.81, 7.571, 1.0, 23.48)]
+    fc.tracker.dead = True
+    fc.tracker.ends = [("BB_BURST", an, 10.0, 10.0, "P1", True)]
+    fc.update(ws)
+    f = fc.forecast(2.0)
+    assert len(f.det) == 2 and all(d.life is None for d in f.det)          # not bounced: no end inside 2 s
+    assert not any(p.key == "support/BB_BURST/_tail/anchor" for p in f.placements)
+    sp = fc.targets.spec_of("BoneBeast AtkBell L")
+    tk = np.arange(0, 120) * BIN
+    cx, cy, _ = simulate(sp, 86.37, 7.571, -1.0, 23.48, 0, None, tk)
+    land = int(np.argmin(cy[10:70])) + 10                                   # its first floor contact
+    assert 0.6 < tk[land] < 1.0
+    assert f.occupied(np.array([[cx[land]]]), np.array([[3.57]]), np.array([tk[land]]))[0, 0]
+    # it rolls left from there (12 u/s): 0.5 s later a hurtbox 3 u right of the landing is clear, one on the bell not
+    later = land + 30
+    occ = f.occupied(np.array([[cx[land] + 3.0], [cx[later]]]), np.array([[3.57], [3.57]]), np.array([tk[later]]))
+    assert not occ[0, 0] and occ[1, 0]
+    # the switch off: no exact paths, the union placed at the death as before
+    old = fmod.DEAD_ATK_EXACT
+    try:
+        fmod.DEAD_ATK_EXACT = False
+        f0 = fc.forecast(2.0)
+        assert not f0.det and any(p.key == "support/BB_BURST/_tail/anchor" for p in f0.placements)
+    finally:
+        fmod.DEAD_ATK_EXACT = old
+    # bounced: the End Timer from its first bounce (TargetTracker.first_bounce) plus the slack
+    ws2 = WorldState()
+    ws2.stamp.t_game_s = 11.5
+    ws2.entities = [_atk(1, "L", 70.0, 3.5, -12.0, 5.0, state="In Air", tau=0.3),
+                    _atk(2, "R", 100.0, 3.5, 12.0, 5.0, state="In Air", tau=0.3)]
+    fc.update(ws2)
+    fc.targets.first_bounce = {1: 11.0, 2: 11.0}
+    f2 = fc.forecast(2.0)
+    assert [round(d.life, 3) for d in f2.det] == [round(11.0 + 2.0 + fmod.ATK_LIFE_SLACK_S - 11.5, 3)] * 2
+    # alive: the walk's unions only (the fight is unchanged)
+    fc.tracker.dead = False
+    assert not fc.forecast(2.0).det
+
+
+def test_a_drop_bell_the_death_cancelled_is_no_longer_armed(model, templates):
+    from ssbot.core.worldstate import E, Entity, Kind, WorldState
+    fc = _fc(model, templates, ORACLE, [])
+    ws = WorldState()
+    ws.stamp.t_game_s = 5.0
+    bell = Entity(id=3, kind=Kind.ENEMY_ATTACK, type_key=E("BoneBeast DropBell M2"), pos=E((85.2, 13.74)),
+                  fsm=[("Control", "Antic", 0.2)], pos_transform=(85.2, 13.74))
+    ws.entities = [bell]
+    fc.update(ws)
+    assert 3 in fc.tracker.bells
+    bell.fsm = [("Control", "Cancel", 0.0)]
+    ws.stamp.t_game_s = 5.1
+    fc.update(ws)
+    assert 3 not in fc.tracker.bells
