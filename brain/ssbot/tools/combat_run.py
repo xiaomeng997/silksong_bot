@@ -87,6 +87,10 @@ def make_policy(name: str, view: str = "oracle", run_dir: Path | None = None, in
         # the Forum's targeted data policy v2 (Forum plan R1); data2_envoy never hits the Envoy (wave 0 goes on)
         from ssbot.train.forum_policy import ENVOY, ForumDataPolicyV2
         return ForumDataPolicyV2(protect=(ENVOY,), focus=(ENVOY,)) if name == "data2_envoy" else ForumDataPolicyV2()
+    if name == "idle":
+        # no input (the 2x speed check: forum_policy.IdlePolicy)
+        from ssbot.train.forum_policy import IdlePolicy
+        return IdlePolicy()
     if name == "planner":
         from ssbot.train.planner_policy import PlannerPolicy
         pol = PlannerPolicy(view=view, threads=threads, log_dir=run_dir, instance=instance, real_quit_p=real_quit,

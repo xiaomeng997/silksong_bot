@@ -182,3 +182,133 @@ def test_speed_check_statistics():
     same = perm_tests(arm(0.0), arm(0.0), 10, n_perm=99)
     diff = perm_tests(arm(0.0), arm(0.5), 10, n_perm=99)
     assert diff["dwell"]["p_below_0.05"] == 1 and same["choices"]["keys"] == 1
+
+
+# ---- R1 fixer (2026-10-04) ------------------------------------------------------------------------------------------
+
+def _envoy(x, hp, y=4.6):
+    return _ent(1, ENVOY, x, y, cols=[_box(x - 0.6, 3.0, x + 0.6, 5.0)], state="Walker", hp=hp)
+
+
+def test_protection_counts_the_heros_dash_and_fall():
+    from ssbot.train.forum_policy import ForumDataPolicyV2
+    pol = ForumDataPolicyV2(protect=(ENVOY,), focus=(ENVOY,))
+    pol.reset(random.Random(1), FORUM)
+    # 5.6 u from the Envoy's body, standing: a swing is safe; dashing at it (28 u/s) it is not (run 111158 ep 36)
+    s = _state(42.3 + 5.6, 4.57, ents=[_envoy(42.3, 15)])
+    assert pol._safe_to_hit(s, 47.9, 4.57, -1)
+    s["hero"]["vel"] = [-28.0, 0.0]
+    assert not pol._safe_to_hit(s, 47.9, 4.57, -1)
+    # 5 u above its body top, falling at 20 u/s: not safe; any depth for a down slash (run 111158 ep 8 / ep 64)
+    s = _state(42.3, 10.5, ents=[_envoy(42.3, 15)])
+    assert pol._safe_to_hit(s, 42.3, 10.5, 1) and not pol._safe_to_hit(s, 42.3, 10.5, 1, down=True)
+    s["hero"]["vel"] = [0.0, -20.0]
+    assert not pol._safe_to_hit(s, 42.3, 10.5, 1)
+    # above protect_hp it may be hit
+    s = _state(43.0, 4.57, ents=[_envoy(42.3, 38)])
+    assert pol._safe_to_hit(s, 43.0, 4.57, -1)
+
+
+def test_policy_draws_are_hazards_per_game_second():
+    from ssbot.train.forum_policy import ForumDataPolicyV2
+    pol = ForumDataPolicyV2()
+    pol.reset(random.Random(2), FORUM)
+    n = 20000
+    for dt, want in ((1 / 60, 0.3), (1 / 30, 1 - 0.7 ** 2)):
+        pol._dt = dt
+        k = sum(pol._chance(0.3) for _ in range(n))
+        assert abs(k / n - want) < 0.02, (dt, k / n)
+
+
+def test_policy_logs_segments_and_climbs_starting_at_the_top():
+    from ssbot.train.forum_policy import ForumDataPolicyV2
+    pol = ForumDataPolicyV2()
+    pol.reset(random.Random(6), FORUM)
+    ents = [_ent(2, "Song Heavy Sentry", 30.0, 4.6, cols=[_box(29, 3.5, 31, 7)], state="Idle")]
+    s = _state(14.27, TOP_Y + 0.2, ents=ents, cstate=_cs(wallSliding=True, wallClinging=True))
+    s["f"] = 777
+    pol._new_segment(s, ents, True, 14.27, TOP_Y + 0.2)
+    seg = pol.segments[-1]
+    assert seg[0] == 777 and seg[3] is True and seg[1] in ("CLIMB", "PRESS", "BAIT", "CLASH", "DASH_IN")
+    pol.tactic = "PRESS"
+    while pol.tactic != "CLIMB":
+        pol._new_segment(s, ents, True, 14.27, TOP_Y + 0.2)
+    assert pol.climbs[-1]["start_top"] is True
+    st = pol.stats()
+    assert st["segments"] and st["protect_hp"] == pol.protect_hp
+
+
+def test_idle_policy_presses_nothing():
+    from ssbot.train.forum_policy import IdlePolicy
+    pol = IdlePolicy()
+    pol.reset(random.Random(0), FORUM)
+    assert pol.act(_state(30, 4.57), None) == 0 and pol.stats()["acts"] == 1
+
+
+class _Link:
+    def subscribe_state(self, fn):
+        self.fn = fn
+
+
+def test_tap_rebase_moves_the_battle_start_to_the_activation():
+    from ssbot.train.gauntlet import GauntletTap
+    tap = GauntletTap(_Link(), FORUM)
+    b = {"name": "Battle Scene", "wave": 8, "started": True, "completed": False, "enemies": 0, "to_next": 0}
+    tap._on({"f": 1000, "room": {"battles": [b]}, "ev": []})
+    assert tap.wake_frame == 1000 and tap.waves == [(8, 1000)]
+    tap.rebase_start(1181, "wave active")
+    assert tap.wake_frame == 1181 and tap.waves == [(8, 1181)]
+    assert tap.summary()["waves"][0]["t"] == 0.0
+
+
+def test_speed_check_grid_and_holm():
+    import math as _m
+
+    import numpy as np
+
+    from ssbot.tools.forum_speed_check import Arm, binom_cap, grid_index, perm_tests
+    # a timer of D s: ceil(D*60) frames at 1x, ceil(D*30) at 2x; on the 1/30 s grid both are the same step
+    for d in (0.05, 0.1, 0.51, 0.75, 1.234, 2.0, 3.333):
+        n1, n2 = _m.ceil(d * 60 - 1e-9), _m.ceil(d * 30 - 1e-9)
+        assert grid_index(n1 / 60, 1 / 60, 2) == grid_index(n2 / 30, 1 / 30, 1) == n2
+    assert binom_cap(9) == 2 and binom_cap(270) == 22
+    rng = np.random.default_rng(1)
+
+    def arm(shift_key):
+        a = Arm()
+        for _ in range(8):
+            one = Arm()
+            for k in range(30):
+                off = rng.normal(0, 0.05)
+                sh = 0.6 if k == shift_key else 0.0
+                one.dwell[("T", f"S{k}")] = list(rng.normal(1.0 + sh + off, 0.1, 30))
+            a.merge(one)
+            a.per_fight.append(one)
+        return a
+
+    res = perm_tests(arm(-1), arm(7), 10, n_perm=100, n_perm_max=2000)["dwell"]
+    assert [k for k, _ in res["holm_significant"]] == ["T/S7"], res["holm_significant"]
+    assert not res["underpowered"]
+
+
+def test_hero_height_covariate_and_protected_decisions():
+    from ssbot.knowledge.behaviour_tables import BELL_BEAST, Dwell, Fight, Transition
+    from ssbot.knowledge.gauntlet_tables import FORUM_SPECS, GauntletBuilder, hero_caused_states
+    assert FORUM_SPECS[ENVOY].height_bins_u and BELL_BEAST.height_bins_u is None
+    hc = hero_caused_states()
+    assert "Walker" in hc[ENVOY] and "Idle" in hc["Song Heavy Sentry"]
+    g = GauntletBuilder(FORUM_SPECS)
+    b = g.builders[ENVOY]
+
+    def tr(frm, hp, hero_y=4.57):
+        return Transition("x", 1, 0.0, frm, "Slash Antic", 0.5, 30.0, hero_y, 33.0, 4.6, None, hp, "P1")
+
+    b.transitions += [tr("Walker", 38), tr("Walker", 11), tr("Attack Wait", 11)]
+    b.dwells += [Dwell("Walker", 0.5, 0.5, "Slash Antic", 30, "P1"), Dwell("Attack Wait", 0.2, 0.2, "x", 12, "P1")]
+    fight = Fight("rec", None, 0, 1, "f", info={"protect": [ENVOY], "protect_hp": 20})
+    g._drop_protected(fight, {tk: (0, 0) for tk in FORUM_SPECS})
+    assert [(t.frm, t.boss_hp) for t in b.transitions] == [("Walker", 38), ("Attack Wait", 11)]
+    assert [d.state for d in b.dwells] == ["Attack Wait"]
+    trs = [tr("Walker", 38, y) for y in (4.57, 4.6, 7.0, 13.5)]
+    cov, defs = b._covariates(trs, ["Slash Antic"])
+    assert cov["hero_height"] == [0, 0, 1, 2] and "hero_height" in defs     # ground, ground, air, the wall top

@@ -1,29 +1,47 @@
 """Does the Forum play the same at another game speed? (Forum plan R1 item 4: collect data at 2x only if the enemies'
 FSM timings, attack choices, physics paths and recorded hitboxes match 1x within the measured noise.)
 
-Compares arm A (e.g. 1x) with arm B (e.g. 2x, combat_run --time-scale 2 --same-seeds on another instance): each arm's
-fights are split in two halves (alternating); the distance is the mean of A-half vs B-half, the noise the mean of
-A-half vs A-half and B-half vs B-half, so both come from the same sample sizes. Everything in game time (STATE dt sums and the
-"fsm" events' t_in_prev, the scaled StateTime), so the frame rate of each arm does not enter except as sampling:
+Compares arm A (e.g. 1x) with arm B (e.g. 2x, combat_run --time-scale 2 --same-seeds on another instance). Everything
+is in game time, and everything a frame rate changes by itself is put on a common footing first, so that a 2x arm
+with the same game logic passes:
 
-  dwell      per (type, FSM state) the game seconds spent in the state (t_in_prev of the event leaving it):
-             Kolmogorov-Smirnov distance between the arms, states with >= --min n in both
-  choices    per type the family shares of attack starts (FORUM_SPECS): total variation distance
-  speed      per (type, state) the enemy transform speed (|d pos| / dt per frame): KS distance (physics paths)
+  dwell      per (type, FSM state) the game seconds spent in the state (t_in_prev of the event leaving it). A state's
+             time is counted in frames, 1/60 s at 1x and 1/30 s at 2x: a 1x value coarsened alone to 1/30 s gives
+             fight-level p < 0.05 for 155 of 270 keys (KS up to 1.0) with identical game logic (R1 fixer, 2026-10-04).
+             So both arms go on the coarsest arm's frame grid, as integer grid steps (float values a ulp apart would
+             still be a KS distance of 1): n = round(t / dt) frames of the arm's nominal frame (1/60 s times its
+             speed; the STATE dt jitters 0.01665-0.01668 s), then ceil(n / k) with k = grid / dt (ceil(ceil(x) / k) =
+             ceil(x / k): a timer of D seconds lands on the coarse arm's step).
+  choices    per (type, hero |dx| bin at the decision) the family shares of attack starts (FORUM_SPECS; the bins
+             only with entities, else per type): the hero's distance drives most choices, and a policy at another
+             speed holds other distances.
+  speed      per (type, state) the enemy transform's speed over windows of SPEED_WIN_S game seconds inside one state
+             (per frame, |d pos| / dt aliases against the 0.02 s physics step differently at 1/60 and 1/30 s frames).
   hitbox     per (type, state, collider name) the damage collider's extent relative to the enemy transform, flipped
-             to face +x, per 0.05 s state-time bin: max over bins of |extent difference| (u), and the share of 1/60 s
-             state-time bins with a sample (a 2x recording samples every other one)
-  apex       Choir Clapper jumps: the body's highest point above the takeoff and the air time (Jump -> Air -> landing)
+             to face +x, per 0.05 s state-time bin: max over bins of |extent difference| (u) against the same
+             statistic between each arm's halves (no fight-level test: 2x samples every other 1/60 s bin, and an
+             extent from fewer samples is smaller, so the support templates need their own check anyway).
+  apex       Choir Clapper jumps: the body's highest point above the takeoff and the air time.
 
-Verdict per metric: B matches A when its distance is within the A-vs-A distance's (noise) value times --slack, for
-the keys both have enough samples of.
+Tests are fight-level permutations (samples within one fight are not independent: the hero's play and HP differ per
+fight): the fights of A and B are pooled and relabelled at random; p = share of relabellings whose statistic (KS,
+total variation) is >= the observed one, extended from --perm to --perm-max relabellings for keys below 0.05. A metric
+matches when no key is significant under Holm at family-wise 0.05 (a real difference confined to a few keys) and the
+number of keys with p < 0.05 is within the 99 % binomial bound for its key count (Binomial(keys, 0.05): calibrated by
+the key count, not a fixed share). Keys below 0.05 after --perm relabellings are extended to
+max(--perm-max, 2 x keys / 0.05), so the smallest Holm threshold can be reached. "underpowered" marks a metric where
+Holm cannot reject anything (the smallest attainable p, 1 / C(fights_a + fights_b, fights_a), above 0.05 / keys):
+8 + 8 fights at least.
+
+--simulate-b K: arm B as if recorded at K x speed with the same logic (every K-th STATE, dwell on the K-frame grid):
+the check's own calibration (it must pass), next to A vs A' (two 1x runs).
 
     ..\\scripts\\uv.cmd run python -m ssbot.tools.forum_speed_check --a <run 1x> [...] --b <run 2x> [...] --json out.json
 """
 import argparse
 import json
 import math
-from collections import defaultdict
+from collections import Counter, defaultdict
 from pathlib import Path
 
 import numpy as np
@@ -32,11 +50,15 @@ from ssbot.knowledge.behaviour_tables import fight_states, run_fights
 from ssbot.knowledge.gauntlet_tables import FORUM_SPECS
 
 BIN_S = 0.05
+SPEED_WIN_S = 0.2
+DIST_BINS = (0.0, 3.0, 6.0, 10.0, 99.0)
+HITBOX_SHARE_MAX = 0.05
+ALPHA = 0.05
 
 
-def ks(a: list[float], b: list[float]) -> float:
+def ks(a, b) -> float:
     """Two-sample Kolmogorov-Smirnov distance."""
-    if not a or not b:
+    if len(a) == 0 or len(b) == 0:
         return float("nan")
     x = np.sort(np.asarray(a, float))
     y = np.sort(np.asarray(b, float))
@@ -75,89 +97,50 @@ def chi2_p(a: dict[str, int], b: dict[str, int]) -> float:
     return 0.5 * math.erfc(z / math.sqrt(2.0))
 
 
-def perm_tests(a: "Arm", b: "Arm", min_n: int, n_perm: int = 200, seed: int = 0) -> dict:
-    """Fight-level permutation tests (samples within a fight are not independent: the hero's play and HP differ per
-    fight, so per-sample KS p-values are far too small, see the halves of one arm): the fights of A and B are pooled
-    and relabelled at random n_perm times; p = share of relabellings whose statistic (KS for dwell and speed, total
-    variation for the family shares) is >= the observed one. Under no difference about 5 % of keys get p < 0.05."""
-    rng = np.random.default_rng(seed)
-    fa, fb = a.per_fight, b.per_fight
-    pool = fa + fb
-    labels = np.array([0] * len(fa) + [1] * len(fb))
-    out = {}
-    for m, attr, stat in (("dwell", "dwell", ks), ("speed", "speed", ks), ("choices", "choice", None)):
-        keys = set(getattr(a, attr)) & set(getattr(b, attr))
-        res = {}
-        for k in keys:
-            if stat is None:
-                if sum(getattr(a, attr)[k].values()) < min_n or sum(getattr(b, attr)[k].values()) < min_n:
-                    continue
-
-                def val(sel):
-                    c0, c1 = defaultdict(int), defaultdict(int)
-                    for f, lab in zip(pool, sel):
-                        for fam, n in (getattr(f, attr).get(k) or {}).items():
-                            (c0 if lab == 0 else c1)[fam] += n
-                    return tv(c0, c1)
-            else:
-                if len(getattr(a, attr)[k]) < min_n or len(getattr(b, attr)[k]) < min_n:
-                    continue
-                per = [getattr(f, attr).get(k) or [] for f in pool]
-
-                def val(sel, per=per):
-                    x = [v for p, lab in zip(per, sel) if lab == 0 for v in p]
-                    y = [v for p, lab in zip(per, sel) if lab == 1 for v in p]
-                    return ks(x, y) if x and y else 0.0
-            obs = val(labels)
-            ge = sum(val(rng.permutation(labels)) >= obs - 1e-12 for _ in range(n_perm))
-            res["/".join(k) if isinstance(k, tuple) else k] = ((ge + 1) / (n_perm + 1), obs)
-        low = sorted(((k, p, d) for k, (p, d) in res.items() if p < 0.05), key=lambda t: (t[1], -t[2]))
-        out[m] = {"keys": len(res), "p_below_0.05": len(low),
-                  "share_below_0.05": round(len(low) / len(res), 3) if res else None,
-                  "lowest": [(k, round(p, 4), round(d, 3)) for k, p, d in low[:15]]}
-    return out
-
-
-HITBOX_SHARE_MAX = 0.05
-PERM_SHARE_MAX = 0.10     # under no difference about 5 % of the keys get p < 0.05 (1x vs 1x: 0.7 %, forum.md R1)
-
-
-def perm_verdict(perm: dict, noise: dict) -> dict:
-    """B matches A on a metric when the share of its keys with a fight-level permutation p < 0.05 is at most
-    PERM_SHARE_MAX and at most twice the share between A's own halves (the measured noise)."""
-    out = {}
-    for m, v in perm.items():
-        sh, nz = v.get("share_below_0.05"), (noise.get(m) or {}).get("share_below_0.05")
-        out[m] = {"share": sh, "noise_share": nz,
-                  "match": None if sh is None else sh <= max(PERM_SHARE_MAX, 2.0 * (nz or 0.0))}
-    return out
-
-
-def tests(a: "Arm", b: "Arm", min_n: int, alpha: float = 0.01) -> dict:
-    """Per key significance (Bonferroni over the keys of each metric): dwell and speed by KS, choices by chi-square."""
-    out = {}
-    for m, da, db, fn in (("dwell", a.dwell, b.dwell, None), ("speed", a.speed, b.speed, None),
-                          ("choices", a.choice, b.choice, "chi2")):
-        res = {}
-        for k in set(da) & set(db):
-            if fn == "chi2":
-                if sum(da[k].values()) >= min_n and sum(db[k].values()) >= min_n:
-                    res[k] = chi2_p(da[k], db[k])
-            elif len(da[k]) >= min_n and len(db[k]) >= min_n:
-                res["/".join(k)] = ks_p(ks(da[k], db[k]), len(da[k]), len(db[k]))
-        cut = alpha / max(1, len(res))
-        sig = sorted(((k, p) for k, p in res.items() if not math.isnan(p) and p < cut), key=lambda t: t[1])
-        out[m] = {"keys": len(res), "significant": [(k, float(f"{p:.2g}")) for k, p in sig[:20]],
-                  "n_significant": len(sig)}
-    return out
-
-
 def tv(a: dict[str, int], b: dict[str, int]) -> float:
     na, nb = sum(a.values()), sum(b.values())
     if not na or not nb:
         return float("nan")
     keys = set(a) | set(b)
     return 0.5 * sum(abs(a.get(k, 0) / na - b.get(k, 0) / nb) for k in keys)
+
+
+def holm(p: list[float]) -> list[float]:
+    """Holm-adjusted p-values (step-down, monotone)."""
+    order = sorted(range(len(p)), key=lambda i: p[i])
+    out = [1.0] * len(p)
+    run = 0.0
+    for r, i in enumerate(order):
+        run = max(run, min(1.0, (len(p) - r) * p[i]))
+        out[i] = run
+    return out
+
+
+def binom_cap(n: int, p: float = ALPHA, q: float = 0.99) -> int:
+    """The largest count c with P(Binomial(n, p) <= c) >= q: more keys than this below p fails the metric."""
+    acc = 0.0
+    for c in range(n + 1):
+        acc += math.comb(n, c) * p ** c * (1 - p) ** (n - c)
+        if acc >= q:
+            return c
+    return n
+
+
+def nominal_dt(dt: float) -> float:
+    """The nominal frame of a STATE dt: a multiple of 1/60 s (1/60 at 1x, 1/30 at 2x); freeze frames count as 1x."""
+    return max(1, round(dt * 60.0)) / 60.0 if dt > 0.005 else 1.0 / 60.0
+
+
+def grid_index(t: float, dt: float, k: int) -> int:
+    """A state time of nominal frame dt as a step of the k-frame grid (module docstring)."""
+    return math.ceil(max(0, round(t / dt)) / k)
+
+
+def snap(t: float, dt: float, k: int) -> float:
+    """A state time of nominal frame dt put on the k-frame grid (a recording at k x speed: --simulate-b)."""
+    if k <= 1:
+        return t
+    return grid_index(t, dt, k) * k * dt
 
 
 class Arm:
@@ -168,9 +151,16 @@ class Arm:
         self.box = defaultdict(lambda: defaultdict(list))      # (type, state, name) -> bin -> [(x0, x1, y0, y1)]
         self.tbins = defaultdict(set)                          # (type, state) -> 1/60 s state-time bins seen
         self.apex = []
+        self.dts: Counter = Counter()                          # STATE dt (rounded to 1e-4) -> frames
         self.game_s = 0.0
         self.fights = 0
         self.per_fight: list["Arm"] = []                       # one Arm per fight (dwell, choice, speed only)
+
+    @property
+    def dt(self) -> float:
+        """The arm's nominal frame in game seconds (of its most common STATE dt)."""
+        common = [d for d, n in self.dts.most_common() if d > 0.005 and n > 0]
+        return nominal_dt(common[0]) if common else 1.0 / 60.0
 
     def merge(self, o: "Arm") -> None:
         for k, v in o.dwell.items():
@@ -186,20 +176,43 @@ class Arm:
         for k, v in o.tbins.items():
             self.tbins[k] |= v
         self.apex += o.apex
+        self.dts.update(o.dts)
         self.game_s += o.game_s
         self.fights += o.fights
 
 
-def scan(fight, arm: Arm, with_ents: bool = True) -> None:
+def dist_bin(d: float) -> str:
+    for lo, hi in zip(DIST_BINS[:-1], DIST_BINS[1:]):
+        if lo <= d < hi:
+            return f"{lo:g}-{hi:g}"
+    return f">{DIST_BINS[-1]:g}"
+
+
+def scan(fight, arm: Arm, with_ents: bool = True, stride: int = 1, sim_k: int = 1) -> None:
+    """One fight into `arm`. stride / sim_k simulate a recording at that many times the speed (module docstring):
+    entities read from every stride-th STATE (dt summed over the skipped ones), dwell put on the sim_k-frame grid."""
     starts = {(tk, s.control_fsm): dict(s.attack_starts) for tk, s in FORUM_SPECS.items()}
     ctl = {tk: s.control_fsm for tk, s in FORUM_SPECS.items()}
-    keys = ("f", "dt", "ents", "ev") if with_ents else ("f", "dt", "ev")
-    last_pos: dict[int, tuple[float, float]] = {}
+    keys = ("f", "dt", "ents", "ev", "hero") if with_ents else ("f", "dt", "ev")
+    win: dict[int, tuple] = {}            # iid -> (state, x0, y0, game s so far)
     jump: dict[int, dict] = {}
+    pos: dict[int, float] = {}            # iid -> x of its last read
+    hero_x = None
+    acc_dt = 0.0
+    n = 0
     for s in fight_states(fight, keys=keys):
         dt = float(s.get("dt") or 0.0)
         arm.game_s += dt
-        tks = {}
+        acc_dt += dt
+        n += 1
+        read = with_ents and (n % stride == 0)
+        if dt > 0:
+            arm.dts[round(dt * sim_k, 4)] += 1 if (n % stride == 0) else 0
+        if read:
+            hero_x = ((s.get("hero") or {}).get("pos") or [None])[0]
+            for e in s.get("ents") or ():
+                if e.get("type_key") in FORUM_SPECS and e.get("pos"):
+                    pos[e["iid"]] = e["pos"][0]
         for ev in s.get("ev") or ():
             if ev.get("k") != "fsm":
                 continue
@@ -210,12 +223,17 @@ def scan(fight, arm: Arm, with_ents: bool = True) -> None:
             if tk not in FORUM_SPECS or d.get("fsm") != ctl[tk]:
                 continue
             if d.get("from") is not None and d.get("t_in_prev") is not None:
-                arm.dwell[(tk, d["from"])].append(float(d["t_in_prev"]))
+                arm.dwell[(tk, d["from"])].append(snap(float(d["t_in_prev"]), nominal_dt(dt), sim_k))
             fam = starts[(tk, d.get("fsm"))].get(d.get("to"))
             if fam:
-                arm.choice[tk][fam] += 1
-        if not with_ents:
+                ex = pos.get(d.get("ent"))
+                key = (tk, dist_bin(abs(hero_x - ex))) if (with_ents and ex is not None and hero_x is not None) \
+                    else (tk, "*")
+                arm.choice[key][fam] += 1
+        if not read:
             continue
+        step = acc_dt
+        acc_dt = 0.0
         for e in s.get("ents") or ():
             tk = e.get("type_key")
             if tk not in FORUM_SPECS or not e.get("pos"):
@@ -226,11 +244,16 @@ def scan(fight, arm: Arm, with_ents: bool = True) -> None:
                 continue
             iid = e["iid"]
             x, y = e["pos"][0], e["pos"][1]
-            if iid in last_pos and dt > 0:
-                px, py = last_pos[iid]
-                arm.speed[(tk, st)].append(math.hypot(x - px, y - py) / dt)
-            last_pos[iid] = (x, y)
-            tks[iid] = tk
+            w = win.get(iid)
+            if w is None or w[0] != st:
+                win[iid] = (st, x, y, 0.0)
+            else:
+                g = w[3] + step
+                if g >= SPEED_WIN_S - 1e-6:
+                    arm.speed[(tk, st)].append(math.hypot(x - w[1], y - w[2]) / g)
+                    win[iid] = (st, x, y, 0.0)
+                else:
+                    win[iid] = (st, w[1], w[2], g)
             if t_in is not None:
                 arm.tbins[(tk, st)].add(int(round(float(t_in) * 60)))
                 b = int(float(t_in) / BIN_S)
@@ -250,14 +273,15 @@ def scan(fight, arm: Arm, with_ents: bool = True) -> None:
                 elif iid in jump:
                     j = jump[iid]
                     j["top"] = max(j["top"], y)
-                    j["t"] += dt
+                    j["t"] += step
                     if st not in ("Jump", "Air"):
                         arm.apex.append((j["top"] - j["y0"], j["t"]))
                         del jump[iid]
     arm.fights += 1
 
 
-def load(runs: list[Path], max_fights: int | None, with_ents: bool) -> tuple[Arm, Arm, Arm]:
+def load(runs: list[Path], max_fights: int | None, with_ents: bool, stride: int = 1,
+         sim_k: int = 1) -> tuple[Arm, Arm, Arm]:
     """The whole arm and its two halves (alternating fights)."""
     whole, h1, h2 = Arm(), Arm(), Arm()
     n = 0
@@ -268,7 +292,7 @@ def load(runs: list[Path], max_fights: int | None, with_ents: bool) -> tuple[Arm
                 break
             half = h1 if n % 2 == 0 else h2
             one = Arm()
-            scan(fight, one, with_ents)
+            scan(fight, one, with_ents, stride, sim_k)
             for arm in (whole, half):
                 arm.merge(one)
             one.box, one.tbins, one.apex = {}, {}, []
@@ -278,20 +302,109 @@ def load(runs: list[Path], max_fights: int | None, with_ents: bool) -> tuple[Arm
     return whole, h1, h2
 
 
-def compare(a: Arm, b: Arm, min_n: int) -> dict:
-    out = {"dwell": {}, "choices": {}, "speed": {}, "hitbox": {}, "sampling": {}}
-    for k in set(a.dwell) & set(b.dwell):
-        if len(a.dwell[k]) >= min_n and len(b.dwell[k]) >= min_n:
-            out["dwell"]["/".join(k)] = ks(a.dwell[k], b.dwell[k])
-    for tk in set(a.choice) & set(b.choice):
-        if sum(a.choice[tk].values()) >= min_n and sum(b.choice[tk].values()) >= min_n:
-            out["choices"][tk] = tv(a.choice[tk], b.choice[tk])
-    for k in set(a.speed) & set(b.speed):
-        if len(a.speed[k]) >= 5 * min_n and len(b.speed[k]) >= 5 * min_n:
-            out["speed"]["/".join(k)] = ks(a.speed[k], b.speed[k])
+def on_grid(arm: Arm, grid: float) -> list[dict]:
+    """Each fight's dwell lists as integer steps of the common grid (k = grid / the arm's nominal frame)."""
+    dt = arm.dt
+    k = max(1, round(grid / dt))
+    return [{key: [float(grid_index(t, dt, k)) for t in v] for key, v in f.dwell.items()} for f in arm.per_fight]
+
+
+def _perm_p(per: list, labels: np.ndarray, stat, rng, n_perm: int, n_max: int) -> tuple[float, float]:
+    """Fight-level permutation p of stat(pooled per-fight data, labels), extended to n_max when below ALPHA."""
+    obs = stat(per, labels)
+    ge, done = 0, 0
+    target = n_perm
+    while done < target:
+        ge += stat(per, rng.permutation(labels)) >= obs - 1e-12
+        done += 1
+        if done == target and target < n_max and (ge + 1) / (done + 1) < ALPHA:
+            target = n_max
+    return (ge + 1) / (done + 1), obs
+
+
+def _ks_stat(per, lab):
+    x = [p for p, l_ in zip(per, lab) if l_ == 0 and len(p)]
+    y = [p for p, l_ in zip(per, lab) if l_ == 1 and len(p)]
+    if not x or not y:
+        return 0.0
+    return ks(np.concatenate(x), np.concatenate(y))
+
+
+def _tv_stat(per, lab):
+    c0, c1 = Counter(), Counter()
+    for p, l_ in zip(per, lab):
+        (c0 if l_ == 0 else c1).update(p)
+    return tv(c0, c1) if c0 and c1 else 0.0
+
+
+def perm_tests(a: Arm, b: Arm, min_n: int, n_perm: int = 200, seed: int = 0, n_perm_max: int = 5000,
+               grid: float | None = None) -> dict:
+    """Fight-level permutation tests per key (module docstring) with Holm and the binomial bound per metric."""
+    rng = np.random.default_rng(seed)
+    fa, fb = a.per_fight, b.per_fight
+    labels = np.array([0] * len(fa) + [1] * len(fb))
+    if grid:
+        dwell_a, dwell_b = on_grid(a, grid), on_grid(b, grid)
+    else:
+        dwell_a, dwell_b = [f.dwell for f in fa], [f.dwell for f in fb]
+    pooled = {"dwell": dwell_a + dwell_b, "speed": [f.speed for f in fa + fb],
+              "choices": [f.choice for f in fa + fb]}
+    tot = {"dwell": (a.dwell, b.dwell), "speed": (a.speed, b.speed), "choices": (a.choice, b.choice)}
+    n_lab = math.comb(len(fa) + len(fb), len(fa)) if fa and fb else 1
+    out = {}
+    for m in ("dwell", "speed", "choices"):
+        ta, tb = tot[m]
+        res = {}
+        for k in sorted(set(ta) & set(tb), key=str):
+            if m == "choices":
+                if sum(ta[k].values()) < min_n or sum(tb[k].values()) < min_n:
+                    continue
+                per = [dict(f.get(k) or {}) for f in pooled[m]]
+                stat = _tv_stat
+            else:
+                if len(ta[k]) < min_n or len(tb[k]) < min_n:
+                    continue
+                per = [np.asarray(f.get(k) or (), float) for f in pooled[m]]
+                stat = _ks_stat
+            res["/".join(k) if isinstance(k, tuple) else k] = (per, stat)
+        n_max = max(n_perm_max, math.ceil(2 * len(res) / ALPHA))
+        res = {k: _perm_p(per, labels, stat, rng, n_perm, n_max) for k, (per, stat) in res.items()}
+        names = list(res)
+        ps = [res[k][0] for k in names]
+        adj = holm(ps) if ps else []
+        low = sorted(((k, p, d) for k, (p, d) in res.items() if p < ALPHA), key=lambda t: (t[1], -t[2]))
+        cap = binom_cap(len(res)) if res else 0
+        min_p = max(1.0 / n_lab, 1.0 / (n_max + 1)) if res else 1.0
+        out[m] = {"keys": len(res), "p_below_0.05": len(low),
+                  "share_below_0.05": round(len(low) / len(res), 3) if res else None,
+                  "binom_cap": cap,
+                  "holm_significant": sorted(((k, round(pa, 5)) for k, pa in zip(names, adj) if pa < ALPHA),
+                                             key=lambda t: t[1]),
+                  "min_attainable_p": round(min_p, 6),
+                  "underpowered": bool(res) and min_p > ALPHA / len(res),
+                  "lowest": [(k, round(p, 5), round(d, 3)) for k, p, d in low[:15]]}
+    return out
+
+
+def perm_verdict(perm: dict) -> dict:
+    """Per metric: match when no Holm-significant key and the keys below 0.05 within the binomial bound; None when
+    nothing was compared. "underpowered": Holm could not have rejected anything (more fights needed)."""
+    out = {}
+    for m, v in perm.items():
+        if not v.get("keys"):
+            out[m] = {"match": None}
+            continue
+        ok = not v["holm_significant"] and v["p_below_0.05"] <= v["binom_cap"]
+        out[m] = {"match": ok, "keys": v["keys"], "below_0.05": v["p_below_0.05"], "cap": v["binom_cap"],
+                  "holm": len(v["holm_significant"]), "underpowered": v["underpowered"]}
+    return out
+
+
+def hitbox_cmp(a: Arm, b: Arm) -> dict:
+    """Per (type, state, collider) the worst |extent difference| over the 0.05 s bins both have >= 3 samples of."""
+    out = {}
     for k in set(a.box) & set(b.box):
-        worst = 0.0
-        n = 0
+        worst, n = 0.0, 0
         for bn in set(a.box[k]) & set(b.box[k]):
             ea, eb = np.asarray(a.box[k][bn]), np.asarray(b.box[k][bn])
             if len(ea) < 3 or len(eb) < 3:
@@ -301,44 +414,45 @@ def compare(a: Arm, b: Arm, min_n: int) -> dict:
             worst = max(worst, float(np.max(np.abs(ext_a - ext_b))))
             n += 1
         if n >= 3:
-            out["hitbox"]["/".join(str(x) for x in k)] = worst
+            out["/".join(str(x) for x in k)] = worst
+    return out
+
+
+def sampling(a: Arm, b: Arm) -> dict:
+    out = {}
     for k in set(a.tbins) | set(b.tbins):
         for name, arm in (("a", a), ("b", b)):
             bins = arm.tbins.get(k)
             if bins and len(bins) > 10:
                 span = max(bins) - min(bins) + 1
-                out["sampling"].setdefault("/".join(k), {})[name] = round(len(bins) / span, 3)
-    if a.apex and b.apex:
-        aa, bb = np.asarray(a.apex), np.asarray(b.apex)
-        out["apex"] = {"height_ks": ks(list(aa[:, 0]), list(bb[:, 0])), "air_ks": ks(list(aa[:, 1]), list(bb[:, 1])),
-                       "a_p50": [float(np.median(aa[:, 0])), float(np.median(aa[:, 1]))],
-                       "b_p50": [float(np.median(bb[:, 0])), float(np.median(bb[:, 1]))], "n": [len(aa), len(bb)]}
+                out.setdefault("/".join(k), {})[name] = round(len(bins) / span, 3)
     return out
 
 
-def mean_cmp(x: dict, y: dict) -> dict:
-    """Key-wise mean of two compare() results (keys both have); sampling taken from the first."""
-    out = {}
-    for m in ("dwell", "choices", "speed", "hitbox"):
-        out[m] = {k: (x[m][k] + y[m][k]) / 2.0 for k in set(x[m]) & set(y[m])}
-    out["sampling"] = x.get("sampling", {})
-    return out
+def apex_cmp(a: Arm, b: Arm) -> dict | None:
+    if not (a.apex and b.apex):
+        return None
+    aa, bb = np.asarray(a.apex), np.asarray(b.apex)
+    return {"height_ks": ks(aa[:, 0], bb[:, 0]), "air_ks": ks(aa[:, 1], bb[:, 1]),
+            "a_p50": [float(np.median(aa[:, 0])), float(np.median(aa[:, 1]))],
+            "b_p50": [float(np.median(bb[:, 0])), float(np.median(bb[:, 1]))], "n": [len(aa), len(bb)]}
 
 
-def verdict(ab: dict, noise: dict, slack: float) -> dict:
-    """Per metric: keys compared, how many exceed slack x noise (noise keys missing count as exceeding)."""
-    out = {}
-    for m in ("dwell", "choices", "speed", "hitbox"):
-        over = []
-        for k, v in ab[m].items():
-            nz = noise[m].get(k)
-            if nz is None or (isinstance(v, float) and math.isnan(v)):
-                continue
-            if v > slack * max(nz, 1e-9) and v - nz > (0.05 if m != "hitbox" else 0.1):
-                over.append((k, round(v, 3), round(nz, 3)))
-        out[m] = {"keys": sum(1 for k in ab[m] if k in noise[m]), "over": sorted(over, key=lambda t: -t[1])[:20],
-                  "match": not over}
-    return out
+def hitbox_verdict(a1: Arm, a2: Arm, b1: Arm, b2: Arm) -> dict:
+    """Hitbox extents have no fight-level test: B matches when at most HITBOX_SHARE_MAX of the keys differ (halves of A
+    against halves of B) by more than twice the noise (each arm's halves against each other) and 0.1 u."""
+    ab = [hitbox_cmp(a1, b1), hitbox_cmp(a2, b2)]
+    nz = [hitbox_cmp(a1, a2), hitbox_cmp(b1, b2)]
+    keys = set(ab[0]) & set(ab[1]) & set(nz[0]) & set(nz[1])
+    over = []
+    for k in keys:
+        d = (ab[0][k] + ab[1][k]) / 2.0
+        n = (nz[0][k] + nz[1][k]) / 2.0
+        if d > max(2.0 * n, n + 0.1):
+            over.append((k, round(d, 3), round(n, 3)))
+    return {"keys": len(keys), "over": sorted(over, key=lambda t: -t[1])[:20],
+            "share": round(len(over) / len(keys), 3) if keys else None,
+            "match": (len(over) / len(keys) <= HITBOX_SHARE_MAX) if keys else None}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -346,39 +460,37 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--a", type=Path, nargs="+", required=True)
     ap.add_argument("--b", type=Path, nargs="+", required=True)
     ap.add_argument("--min", type=int, default=20)
-    ap.add_argument("--slack", type=float, default=1.5)
     ap.add_argument("--max-fights", type=int)
     ap.add_argument("--perm", type=int, default=200, help="fight-level permutations per key")
+    ap.add_argument("--perm-max", type=int, default=5000, help="... extended to this many for keys below 0.05")
     ap.add_argument("--events-only", action="store_true", help="dwell and choices only (no ents decode)")
+    ap.add_argument("--no-grid", action="store_true", help="dwell without the common frame grid (for comparison)")
+    ap.add_argument("--simulate-b", type=int, default=1, metavar="K",
+                    help="arm B as if recorded at K x speed (calibration)")
     ap.add_argument("--json", type=Path)
     a = ap.parse_args(argv)
     A, A1, A2 = load(a.a, a.max_fights, not a.events_only)
-    B, B1, B2 = load(a.b, a.max_fights, not a.events_only)
-    # like against like: the halves of A against the halves of B, and each arm's halves against each other (the noise),
-    # so both distances come from the same sample sizes
-    m = max(5, a.min // 2)
-    ab = mean_cmp(compare(A1, B1, m), compare(A2, B2, m))
-    noise = mean_cmp(compare(A1, A2, m), compare(B1, B2, m))
-    if A.apex and B.apex:
-        ab["apex"] = compare(A, B, a.min).get("apex")
-    res = {"a": {"fights": A.fights, "game_s": round(A.game_s, 1)}, "b": {"fights": B.fights, "game_s": round(B.game_s, 1)},
-           # significance on the whole arms, and the same test between A's halves (its false positives: should be 0)
-           "tests": tests(A, B, a.min), "tests_noise": tests(A1, A2, max(5, a.min // 2)),
-           "perm": perm_tests(A, B, a.min, a.perm), "perm_noise": perm_tests(A1, A2, max(5, a.min // 2), a.perm),
-           "verdict": verdict(ab, noise, a.slack), "ab": ab, "noise": noise}
-    res["perm_verdict"] = perm_verdict(res["perm"], res["perm_noise"])
-    hb = res["verdict"]["hitbox"]
-    # hitbox extents have no fight-level test: B matches when at most HITBOX_SHARE_MAX of the keys differ by more
-    # than twice the noise and 0.1 u (1x vs 1x, 4 + 4 gauntlets: 2 of 239 keys, 0.8 %)
-    n_over = len([o for o in res["ab"]["hitbox"] if o in res["noise"]["hitbox"]
-                  and res["ab"]["hitbox"][o] > max(2.0 * res["noise"]["hitbox"][o], res["noise"]["hitbox"][o] + 0.1)])
-    res["perm_verdict"]["hitbox"] = {"keys": hb["keys"], "share": round(n_over / hb["keys"], 3) if hb["keys"] else None,
-                                       "match": (n_over / hb["keys"] <= HITBOX_SHARE_MAX) if hb["keys"] else None}
+    B, B1, B2 = load(a.b, a.max_fights, not a.events_only, stride=a.simulate_b, sim_k=a.simulate_b)
+    grid = None if a.no_grid else max(A.dt, B.dt)
+    res = {"a": {"fights": A.fights, "game_s": round(A.game_s, 1), "dt": A.dt},
+           "b": {"fights": B.fights, "game_s": round(B.game_s, 1), "dt": B.dt, "simulated_k": a.simulate_b},
+           "grid_s": grid,
+           "perm": perm_tests(A, B, a.min, a.perm, n_perm_max=a.perm_max, grid=grid),
+           # the same tests between each arm's halves: their false positives (informational)
+           "perm_noise_a": perm_tests(A1, A2, max(5, a.min // 2), a.perm, n_perm_max=a.perm_max, grid=grid),
+           "perm_noise_b": perm_tests(B1, B2, max(5, a.min // 2), a.perm, n_perm_max=a.perm_max, grid=grid)}
+    res["perm_verdict"] = perm_verdict(res["perm"])
+    if not a.events_only:
+        res["perm_verdict"]["hitbox"] = hitbox_verdict(A1, A2, B1, B2)
+        res["sampling"] = sampling(A, B)
+        res["apex"] = apex_cmp(A, B)
     if a.json:
         a.json.write_text(json.dumps(res, indent=1), encoding="utf-8")
-    print(json.dumps({k: res[k] for k in ("a", "b", "perm", "perm_noise", "perm_verdict", "verdict")}, indent=1))
-    if "apex" in ab:
-        print("apex", json.dumps(ab["apex"]))
+    print(json.dumps({k: res[k] for k in ("a", "b", "grid_s", "perm_verdict")}, indent=1))
+    for m, v in res["perm"].items():
+        print(m, {k: v[k] for k in ("keys", "p_below_0.05", "binom_cap", "holm_significant", "underpowered")})
+    if res.get("apex"):
+        print("apex", json.dumps(res["apex"]))
     return 0
 
 

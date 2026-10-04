@@ -1,0 +1,265 @@
+{
+ "product": "hero_caused",
+ "what": "per Forum enemy type, the Control FSM states with an exit on an event the hero's nail raises (TOOK DAMAGE, BLOCKED HIT on a parry stance, CANCEL MULTI HIT on a clashed multi-hit); MULTI HIT CONNECT (the enemy's multi-hit reaching the hero) is not one. Used by ssbot.knowledge.gauntlet_tables (R1 provenance: a protected type's decisions and dwells out of these states are dropped from fights whose policy never hit it below protect_hp)",
+ "events": [
+  "TOOK DAMAGE",
+  "BLOCKED HIT",
+  "CANCEL MULTI HIT"
+ ],
+ "sources": {
+  "probe": "python -m ssbot.probes.forum_r1 fsmgraph --instance 2 --savestate fo_r1_w<i> (i = 0, 2, 3, 4, 7; RPC fsm.graph once the wave's members are active)",
+  "files": [
+   "fsmgraph_i2_130209.json",
+   "fsmgraph_i2_130213.json",
+   "fsmgraph_i2_130217.json",
+   "fsmgraph_i2_130221.json",
+   "fsmgraph_i2_130225.json"
+  ],
+  "date": "2026-10-04",
+  "build": "1.0.30000"
+ },
+ "types": {
+  "Pilgrim 03 Song": {
+   "fsm": "Control",
+   "states": [
+    "Follow",
+    "Sleep",
+    "To Patrol",
+    "To Start",
+    "Unalert Patrol",
+    "Wake 2"
+   ],
+   "exits": {
+    "To Patrol": {
+     "TOOK DAMAGE": "Startle"
+    },
+    "To Start": {
+     "TOOK DAMAGE": "Startle"
+    },
+    "Unalert Patrol": {
+     "TOOK DAMAGE": "In Range"
+    },
+    "Sleep": {
+     "TOOK DAMAGE": "Wake Thread"
+    },
+    "Wake 2": {
+     "TOOK DAMAGE": "Wake End 2"
+    },
+    "Follow": {
+     "TOOK DAMAGE": "Startle"
+    }
+   },
+   "global": {}
+  },
+  "Song Administrator": {
+   "fsm": "Control",
+   "states": [
+    "Chase",
+    "Off Wall Idle",
+    "Parry Stance",
+    "Rest Ground",
+    "Rest Wall",
+    "Retreat?",
+    "Unalert Patrol"
+   ],
+   "exits": {
+    "Rest Ground": {
+     "TOOK DAMAGE": "Ground Wake"
+    },
+    "Chase": {
+     "TOOK DAMAGE": "Range Check"
+    },
+    "Rest Wall": {
+     "TOOK DAMAGE": "Wall Wake"
+    },
+    "Retreat?": {
+     "TOOK DAMAGE": "Range Check"
+    },
+    "Unalert Patrol": {
+     "TOOK DAMAGE": "ReAlert"
+    },
+    "Parry Stance": {
+     "BLOCKED HIT": "Parry Block"
+    },
+    "Off Wall Idle": {
+     "TOOK DAMAGE": "ReAlert"
+    }
+   },
+   "global": {}
+  },
+  "Song Automaton Tiny": {
+   "fsm": "Control",
+   "states": [],
+   "exits": {},
+   "global": {}
+  },
+  "Song Handmaiden": {
+   "fsm": "Control",
+   "states": [
+    "Rest",
+    "Silkless"
+   ],
+   "exits": {
+    "Rest": {
+     "TOOK DAMAGE": "Wake"
+    },
+    "Silkless": {
+     "TOOK DAMAGE": "Wake"
+    }
+   },
+   "global": {}
+  },
+  "Song Heavy Sentry": {
+   "fsm": "Control",
+   "states": [
+    "Idle",
+    "On-plane Rest",
+    "Start Idle"
+   ],
+   "exits": {
+    "Idle": {
+     "TOOK DAMAGE": "Dmg Attack"
+    },
+    "Start Idle": {
+     "TOOK DAMAGE": "Idle Roar Antic"
+    },
+    "On-plane Rest": {
+     "TOOK DAMAGE": "Idle Roar Antic"
+    }
+   },
+   "global": {}
+  },
+  "Song Pilgrim 01": {
+   "fsm": "Attack",
+   "states": [
+    "Charge",
+    "Sleep",
+    "Start Praying",
+    "Wake",
+    "Walker"
+   ],
+   "exits": {
+    "Walker": {
+     "TOOK DAMAGE": "Leader?"
+    },
+    "Sleep": {
+     "TOOK DAMAGE": "Wake"
+    },
+    "Wake": {
+     "TOOK DAMAGE": "Wake End"
+    },
+    "Charge": {
+     "TOOK DAMAGE": "Reset"
+    },
+    "Start Praying": {
+     "TOOK DAMAGE": "Create Noise"
+    }
+   },
+   "global": {}
+  },
+  "Song Pilgrim 03": {
+   "fsm": "Attack",
+   "states": [
+    "Sleep",
+    "Start Praying",
+    "Unalert",
+    "Wait",
+    "Wake 2",
+    "Walker"
+   ],
+   "exits": {
+    "Walker": {
+     "TOOK DAMAGE": "Alert"
+    },
+    "Sleep": {
+     "TOOK DAMAGE": "Wake Thread"
+    },
+    "Wake 2": {
+     "TOOK DAMAGE": "Wake End 2"
+    },
+    "Unalert": {
+     "TOOK DAMAGE": "Alert"
+    },
+    "Wait": {
+     "TOOK DAMAGE": "Alert"
+    },
+    "Start Praying": {
+     "TOOK DAMAGE": "Alert"
+    }
+   },
+   "global": {}
+  },
+  "Song Pilgrim Maestro": {
+   "fsm": "Control",
+   "states": [
+    "Fly",
+    "Forum Fly",
+    "Idle",
+    "Start Idle"
+   ],
+   "exits": {
+    "Idle": {
+     "TOOK DAMAGE": "Startle"
+    },
+    "Fly": {
+     "TOOK DAMAGE": "Summon?"
+    },
+    "Start Idle": {
+     "TOOK DAMAGE": "First Startle"
+    },
+    "Forum Fly": {
+     "TOOK DAMAGE": "Summon?"
+    }
+   },
+   "global": {}
+  },
+  "Song Reed": {
+   "fsm": "Control",
+   "states": [
+    "Alert",
+    "Defend",
+    "Idle",
+    "Merchant Look",
+    "Merchant Shout",
+    "Parry Slash",
+    "Sleep",
+    "Stab Pos",
+    "Start Praying",
+    "Wake 2"
+   ],
+   "exits": {
+    "Idle": {
+     "TOOK DAMAGE": "Alert Begin"
+    },
+    "Alert": {
+     "TOOK DAMAGE": "Stab Pos"
+    },
+    "Stab Pos": {
+     "TOOK DAMAGE": "Stab Antic"
+    },
+    "Defend": {
+     "BLOCKED HIT": "Block"
+    },
+    "Parry Slash": {
+     "CANCEL MULTI HIT": "Multihit Clashed"
+    },
+    "Sleep": {
+     "TOOK DAMAGE": "Deparent?"
+    },
+    "Wake 2": {
+     "TOOK DAMAGE": "Wake End 2"
+    },
+    "Merchant Look": {
+     "TOOK DAMAGE": "Startle"
+    },
+    "Merchant Shout": {
+     "TOOK DAMAGE": "Startle"
+    },
+    "Start Praying": {
+     "TOOK DAMAGE": "Startle"
+    }
+   },
+   "global": {}
+  }
+ }
+}

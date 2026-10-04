@@ -22,10 +22,20 @@ where the logs are thin:
              left it takes POCKET_SHARE of the time
   EVADE      move away from the target
 
-Hold times are game seconds turned into frames with the STATE dt (so the policy plays the same at any time scale:
-the 2x check, Forum plan R1 item 4). protect = type keys never to be hit (the Envoy campaign: the Envoy is the only
-wave-0 enemy that dies fast, 38 HP; keeping it alive keeps wave 0 and its attacks going): no swing, spear or clawline
-while a protected body at or below PROTECT_HP is near or in line. Training code: reads the oracle's STATE directly.
+Time: hold and rest times are game seconds turned into frames with the STATE dt, and every per-frame random draw is
+a hazard per game second (_chance: the probability written for a 60 Hz frame, 1-(1-p)^(dt*60) per STATE), so the
+policy's decisions per game second do not change with the time scale (the 2x check, Forum plan R1 item 4). What
+still does: the harness applies an action 2 frames after its STATE (episode._act), 1/30 s of game time at 1x and
+1/15 s at 2x; the speed check therefore also runs with IdlePolicy (no input at all).
+
+protect = type keys never to be hit (the Envoy campaign: the Envoy is the only wave-0 enemy that dies fast, 38 HP;
+keeping it alive keeps wave 0 and its attacks going): no swing, spear or clawline while a protected body at or below
+PROTECT_HP is near, in line, or will be within LEAD_S at the hero's velocity (a dash or a fall carries a swing pressed
+5 u away onto it: 5 of 69 Envoy episodes of the first R1 run, frozen code 1c374f8), and no down slash with one
+anywhere under the hero's path.
+
+Provenance: stats()["segments"] logs every segment as [STATE frame, tactic, target type, pocket, protect active], so a
+table builder can drop or stratify R1 frames by tactic. Training code: reads the oracle's STATE directly.
 """
 import json
 import math
@@ -33,7 +43,7 @@ import random
 from pathlib import Path
 
 from ssbot.ipc.framing import mask
-from ssbot.train.climb import WallClimber
+from ssbot.train.climb import TOP_Y, WallClimber
 from ssbot.train.encounters import Encounter
 from ssbot.train.wave_start import body_box, fighting, hero_flags, overlaps
 
@@ -47,7 +57,8 @@ TACTIC_S = {"KEEP": (1.0, 3.0), "BAIT": (2.5, 6.0), "DASH_IN": (2.0, 5.0), "CLAW
             "JUMP_OVER": (2.0, 4.0), "WALL_BAIT": (2.0, 5.0), "CLASH": (2.0, 5.0), "EVADE": (0.5, 1.5)}
 CLIMB_S = (3.0, 9.0)
 POCKET_CLIMB_S = (6.0, 14.0)
-POCKET_SHARE = 0.85           # frames on the wall with only Choir Clappers left (as v1, data_policy.POCKET_CLING_SHARE)
+POCKET_SHARE = 0.5            # frames on the wall with only Choir Clappers left (v1 and the first R1 run: 0.85, which
+                              # left the Clappers' ground decisions thin: about 66 % of the w7 / w13 time in the pocket)
 POCKET_TYPES = frozenset(("Song Heavy Sentry",))
 FLIER_DY = 2.5                # a target whose body bottom is this far above the hero's feet counts as flying
 ENVOY = "Song Pilgrim 01"
@@ -58,6 +69,10 @@ UP_X, UP_Y = (-1.8, 0.7), (0.3, 3.6)
 PROTECT_X, PROTECT_Y = 5.0, 3.5   # no swing while a protected body is this close (side reach 3.6 + a dash step)
 PROTECT_HP = 20       # ... once its hp is down to this: the Envoy (38) takes two Reaper hits (9 each), so clashes with
                       # its parryable charge and the reactions to a hit (TOOK DAMAGE -> Leader? -> Charge) still come
+LEAD_S = 0.35         # the hero's motion counted ahead for protection: 2 frames of action latency, the swing's startup
+                      # and active frames (a dash covers 28 u/s, a fall up to about 25 u/s)
+DOWN_X = 3.0          # no down slash with a protected body within this x of the hero's path, at any depth below
+SEGMENTS_MAX = 800
 
 # Attack-choice boundaries (hero |dx| when chosen: max "boundary_u" and p99) for the distance-dependent families, from
 # R0's knowledge/1.0.30000/enemies/forum/boundaries.json (107 gauntlets; branch worktree-wf_198518ec-9ba-1, not merged
@@ -149,7 +164,10 @@ class ForumDataPolicyV2:
         self.dash_attacks = 0
         self.jump_overs = 0
         self.bait_samples: dict[str, int] = {}
+        self.segments: list[list] = []
         self.g = 0.0
+        self._dt = 1.0 / 60.0
+        self._rest_n = 2
 
     def stats(self) -> dict:
         return {"presses": dict(self.counts), "tactic_s": {k: round(v, 2) for k, v in self.tactic_s.items()},
@@ -159,13 +177,18 @@ class ForumDataPolicyV2:
                 "clash_swings": dict(self.clash_swings), "claw_presses": self.claw_presses,
                 "dash_ins": self.dash_ins, "dash_attacks": self.dash_attacks,
                 "jump_overs": self.jump_overs, "bait_samples": dict(self.bait_samples),
-                "protect": sorted(self.protect)}
+                "protect": sorted(self.protect), "protect_hp": self.protect_hp,
+                "segments": self.segments[-SEGMENTS_MAX:]}
 
     # ---- keys --------------------------------------------------------------------------------------------------
 
     def _frames(self, s: dict, sec: float) -> int:
         dt = float(s.get("dt") or 1.0 / 60.0) or 1.0 / 60.0
         return max(2, math.ceil(sec / dt))
+
+    def _chance(self, p60: float) -> bool:
+        """A draw with probability p60 per 60 Hz frame, as a hazard per game second (module docstring)."""
+        return self.r.random() < 1.0 - (1.0 - p60) ** (self._dt * 60.0)
 
     def _press(self, k: str, frames: int) -> bool:
         if self.hold[k] == 0 and self.rest[k] == 0:
@@ -181,7 +204,7 @@ class ForumDataPolicyV2:
                 self.hold[k] -= 1
                 m |= B[k]
                 if self.hold[k] == 0:
-                    self.rest[k] = 2
+                    self.rest[k] = self._rest_n
             elif self.rest[k] > 0:
                 self.rest[k] -= 1
         if move:
@@ -193,18 +216,26 @@ class ForumDataPolicyV2:
     # ---- helpers -----------------------------------------------------------------------------------------------
 
     def _safe_to_hit(self, s: dict, hx: float, hy: float, facing: int, reach_x: float = PROTECT_X,
-                     line: bool = False) -> bool:
-        """False when a protected enemy is near (or, for a spear / clawline, anywhere ahead on the hero's line)."""
+                     line: bool = False, down: bool = False) -> bool:
+        """False when a protected enemy is near the hero's path over the next LEAD_S (her velocity), for a spear /
+        clawline anywhere ahead on her line, or for a down slash anywhere under her path (module docstring)."""
         if not self.protect:
             return True
-        for e in fighting(s):
-            if e.get("type_key") not in self.protect or (e.get("hp") or 0) > self.protect_hp:
-                continue
+        prot = [e for e in fighting(s) if e.get("type_key") in self.protect and (e.get("hp") or 0) <= self.protect_hp]
+        if not prot:
+            return True
+        v = (s.get("hero") or {}).get("vel") or (0.0, 0.0)
+        floor = getattr(getattr(self, "enc", None), "floor_y", -1e9)
+        px, py = hx + float(v[0]) * LEAD_S, max(floor, hy + float(v[1]) * LEAD_S)
+        xlo, xhi, ylo, yhi = min(hx, px), max(hx, px), min(hy, py), max(hy, py)
+        for e in prot:
             x0, y0, x1, y1 = body_box(e)
-            gx = max(x0 - hx, hx - x1, 0.0)
-            if gx < reach_x and overlaps(hy - PROTECT_Y, hy + PROTECT_Y, y0, y1):
+            gx = max(x0 - xhi, xlo - x1, 0.0)
+            if gx < reach_x and overlaps(ylo - PROTECT_Y, yhi + PROTECT_Y, y0, y1):
                 return False
-            if line and overlaps(hy - 1.5, hy + 2.5, y0, y1) and ((x0 + x1) / 2.0 - hx) * facing > 0:
+            if down and overlaps(xlo - DOWN_X, xhi + DOWN_X, x0, x1) and y0 < yhi:
+                return False
+            if line and overlaps(ylo - 1.5, yhi + 2.5, y0, y1) and ((x0 + x1) / 2.0 - hx) * facing > 0:
                 return False
         return True
 
@@ -245,9 +276,18 @@ class ForumDataPolicyV2:
         if self.tactic == "CLIMB":
             self.climber.reset()
             self.climb_t = 0.0
-            self.climbs.append({"g0": round(self.g, 2), "ok": False, "t_top": None, "pocket": pocket})
+            # start_top: the segment began with the hero already clinging at the top (a CLIMB segment right after one
+            # that reached it): not a climb (forum_r1_audit counts climbs without these)
+            cs = hero_flags(s)
+            at_top = (hy >= TOP_Y - 0.15 and hx < self.enc.arena_x[0] + 1.0
+                      and bool(cs.get("wallClinging") or cs.get("wallSliding")))
+            self.climbs.append({"g0": round(self.g, 2), "ok": False, "t_top": None, "pocket": pocket,
+                                "start_top": at_top})
         self.dash_phase = 0
         self.tactic_n[self.tactic] = self.tactic_n.get(self.tactic, 0) + 1
+        prot = any(e.get("type_key") in self.protect and (e.get("hp") or 0) <= self.protect_hp for e in live)
+        if len(self.segments) < 4 * SEGMENTS_MAX:
+            self.segments.append([s.get("f"), self.tactic, tgt.get("type_key") if tgt else None, pocket, prot])
 
     # ---- the policy --------------------------------------------------------------------------------------------
 
@@ -258,6 +298,8 @@ class ForumDataPolicyV2:
         hx, hy = hero["pos"][0], hero["pos"][1]
         dt = float(s.get("dt") or 0.0)
         self.g += dt
+        self._dt = dt if dt > 0 else 1.0 / 60.0
+        self._rest_n = max(1, round((2.0 / 60.0) / self._dt))     # 2 frames at 1x, 1 at 2x: the same game time
         lo, hi = enc.arena_x
         live = [e for e in fighting(s) if lo - 3.0 <= e["pos"][0] <= hi + 3.0 and e["pos"][1] < enc.floor_y + 25.0]
         pocket = bool(live) and all(e.get("type_key") in POCKET_TYPES for e in live)
@@ -289,7 +331,7 @@ class ForumDataPolicyV2:
                 # wall slash at a target in reach (WallSlash from the left wall reaches x ~18.3, forum.md §10.4)
                 near = [e for e in live if body_box(e)[0] - hx < 4.0 and overlaps(hy - 1.5, hy + 2.5, body_box(e)[1],
                                                                                     body_box(e)[3])]
-                if near and r.random() < 0.08 and self._safe_to_hit(s, hx, hy, facing):
+                if near and self._chance(0.08) and self._safe_to_hit(s, hx, hy, facing):
                     self._press("attack", self._frames(s, 0.05))
             # the climber holds left; key edges of attack come from _compose
             return self._compose(None, m)
@@ -309,14 +351,14 @@ class ForumDataPolicyV2:
             may_hit = self._safe_to_hit(s, hx, hy, facing)
             if t == "PRESS":
                 move = toward if gx > 0.8 else None
-                if in_side and may_hit and r.random() < 0.3:
+                if in_side and may_hit and self._chance(0.3):
                     move = toward if facing != side else move
                     self._press("attack", self._frames(s, 0.05))
-                elif in_up and may_hit and r.random() < 0.2:
+                elif in_up and may_hit and self._chance(0.2):
                     move = move or toward
                     self._press("up", self._frames(s, 0.15))
                     self._press("attack", self._frames(s, 0.05))
-                elif flier and abs(dx) < 2.0 and grounded and r.random() < 0.1:
+                elif flier and abs(dx) < 2.0 and grounded and self._chance(0.1):
                     self._press("jump", self._frames(s, r.uniform(0.2, 0.45)))
             elif t in ("KEEP", "BAIT"):
                 d = self.keep_d if t == "KEEP" or self.bait is None else self.bait[1]
@@ -324,12 +366,12 @@ class ForumDataPolicyV2:
                     move = toward
                 elif abs(dx) < d - 0.4:
                     move = away
-                elif facing != side and r.random() < 0.2:
+                elif facing != side and self._chance(0.2):
                     move = toward                                   # face it at the distance (a turn, no step)
                 if t == "BAIT" and self.bait is not None:
                     if abs(abs(dx) - self.bait[1]) < 0.6:
                         self.bait_samples[self.bait[0]] = self.bait_samples.get(self.bait[0], 0) + 1
-                    if r.random() < 0.01:                           # step across the boundary
+                    if self._chance(0.01):                          # step across the boundary
                         self.bait = (self.bait[0], self.bait[1] + r.choice((-1.0, 1.0)) * r.uniform(0.6, 1.5))
             elif t == "DASH_IN":
                 if self.dash_phase == 0:
@@ -375,7 +417,7 @@ class ForumDataPolicyV2:
                     move = "right" if dx > 0.35 else "left" if dx < -0.35 else None
                     if abs(dx) < 0.6:
                         self.under_s += dt
-                        if in_up and may_hit and r.random() < 0.05:
+                        if in_up and may_hit and self._chance(0.05):
                             move = toward
                             self._press("up", self._frames(s, 0.15))
                             self._press("attack", self._frames(s, 0.05))
@@ -386,7 +428,8 @@ class ForumDataPolicyV2:
                     move = toward
                     if gx < 2.2 and grounded and self._press("jump", self._frames(s, r.uniform(0.32, 0.45))):
                         self.jump_overs += 1
-                    if not grounded and abs(dx) < 1.0 and hy > y1 and may_hit and r.random() < 0.15:
+                    if (not grounded and abs(dx) < 1.0 and hy > y1 and self._chance(0.15)
+                            and self._safe_to_hit(s, hx, hy, facing, down=True)):
                         self._press("down", self._frames(s, 0.2))
                         self._press("attack", self._frames(s, 0.05))
                 else:
@@ -424,8 +467,26 @@ class ForumDataPolicyV2:
                 move = away
             if hx < lo + 1.0 and move == "left" or hx > hi - 1.0 and move == "right":
                 move = "right" if hx < (lo + hi) / 2 else "left"
-        if r.random() < 0.01 and t not in ("CLASH", "WALL_BAIT", "BAIT"):
+        if t not in ("CLASH", "WALL_BAIT", "BAIT") and self._chance(0.01):
             self._press("jump", self._frames(s, r.uniform(0.05, 0.4)))
-        if hero.get("health", 5) <= 2 and hero.get("silk", 0) >= 9 and r.random() < 0.03:
+        if hero.get("health", 5) <= 2 and hero.get("silk", 0) >= 9 and self._chance(0.03):
             self._press("bind", 3)
         return self._compose(move)
+
+
+class IdlePolicy:
+    """No input at all (the 2x speed check, Forum plan R1 item 4: the enemies' play against a hero that does nothing is
+    the same at any time scale, while every input policy reacts 2 frames after its STATE, a game-time latency that
+    doubles at 2x). reset / act / stats as ForumDataPolicyV2."""
+
+    act_after_clear = True
+
+    def reset(self, rng: random.Random, enc: Encounter) -> None:
+        self.acts = 0
+
+    def stats(self) -> dict:
+        return {"idle": True, "acts": self.acts}
+
+    def act(self, s: dict, tap) -> int:
+        self.acts += 1
+        return 0

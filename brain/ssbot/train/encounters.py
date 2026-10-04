@@ -220,22 +220,33 @@ def forum_variant(arm: str) -> Encounter:
 
 
 def forum_wave_intro(wave: int) -> Callable[[Ctx], int]:
-    """The intro of a wave-start savestate (ssbot.train.wave_start: fo_r1_w<i>, taken at wave i's activation): no walk
-    and no roar; DebugMod's load restarts the battle at wave i by itself. Waits for room.battles to report it."""
+    """The intro of a wave-start savestate (ssbot.train.wave_start: fo_r1_w<i>, taken during wave i): no walk and no
+    roar; DebugMod's load restarts the battle at wave i by itself. Waits for room.battles to report the battle
+    started, removes the earlier waves' never-run members (wave_start.prune_ghosts; needs the oracle's battle.prune),
+    then waits for the wave's members to be activated and moves the tap's battle start there (the episode's
+    wake_frame and waves[0] then mark the wave's real start, as in a full gauntlet)."""
     def intro(ctx: Ctx) -> int:
-        from ssbot.train.wave_start import wait_wave_start
+        from ssbot.train.wave_start import prune_ghosts, wait_wave_active, wait_wave_start
         s = wait_wave_start(ctx.link, FORUM, wave)
-        ctx.log.append({"wave_start": wave, "f": s["f"], "battle_start_f": ctx.tap.wake_frame})
-        if ctx.tap.wake_frame is None:
+        started_f = ctx.tap.wake_frame
+        pr = prune_ghosts(ctx.link) if wave > 0 else {"pruned": []}
+        a = wait_wave_active(ctx.link, FORUM, wave, after=s["f"])
+        if started_f is None:
             raise RuntimeError("intro: room.battles started but the tap saw no start")
+        ctx.tap.rebase_start(a["f"], "wave active")
+        ctx.log.append({"wave_start": wave, "f": s["f"], "battle_start_f": started_f, "active_f": a["f"],
+                        "activation_s": round((a["f"] - started_f) / 60.0, 3),
+                        "ghosts": ("unpruned" if pr.get("pruned") is None else len(pr["pruned"])),
+                        **({"prune_error": pr["error"]} if pr.get("error") else {})})
         return ctx.tap.wake_frame
     return intro
 
 
 # Wave starts for targeted data collection (Forum plan R1): fo_A's route loadout at wave i of a battle reached by the
 # skip policy (wave_start.make_wave_states). What such a start keeps and what it does not (no helper from wave 2 on,
-# an earlier overlapping wave's survivors gone): docs/facts/1.0.30000/forum.md, R1 section. Data only: gates stay on
-# full gauntlets. Timebox 180 s (an episode is a slice of a gauntlet, not a whole one).
+# an earlier overlapping wave's survivors gone, the earlier waves' never-run members until battle.prune is deployed):
+# docs/facts/1.0.30000/forum.md 13.1. Data only: gates stay on full gauntlets. Timebox 180 s (an episode is a slice
+# of a gauntlet, not a whole one).
 FORUM_WAVE_STARTS = tuple(replace(FORUM, name=f"Forum_A_w{i}", savestate=f"fo_r1_w{i}", intro=forum_wave_intro(i),
                                   timebox_s=180.0) for i in range(14))
 

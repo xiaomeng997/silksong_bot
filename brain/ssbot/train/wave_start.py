@@ -1,21 +1,30 @@
 """Start a Forum gauntlet at wave index i for training (Forum plan R1 item 1, docs/plans/forum_planner_plan.md): for
 targeted data collection and, later, a curriculum. Gates stay on full gauntlets (DESIGN §3.9.3).
 
-What does not work: a DebugMod savestate taken mid-battle. Its load reloads the scene (DebugMod SaveState.LoadImpl:
-dummy scene, then BeginSceneTransition into the saved scene with the saved SceneData), and the wave index lives only
-in the BattleScene component's fields (currentWave, started), so a reload starts the battle over (probe result in
-docs/facts/1.0.30000/forum.md, R1 section).
+The way in use: a DebugMod savestate taken during wave i (STATE_PREFIX, make_wave_states). DebugMod's RoomSpecific
+saves "BattleScene|Battle Scene|<currentWave>" and its load sets currentWave before StartBattle, with a transpiler that
+turns DoStartBattle's StartWave(0) into StartWave(currentWave): the battle restarts at wave i by itself (no roar; the
+Start Range trigger is already used). What such a load does not give (docs/facts/1.0.30000/forum.md 13.1):
+  - the helper from wave 2 on: wave 1's "Call Ally" fires on its own WAVE START only (a w1 load does bring Garmond);
+  - an overlapping earlier wave's survivors (the wave starts alone);
+  - a natural wave clock: room.battles reports wave i as soon as the battle starts (battleStartPause 0.75 s after
+    the load), startDelay(i) (0-3 s) before the members are activated (wait_wave_active: the first STATE with the
+    battle's currentEnemies > 0);
+  - a natural child count: the members of waves 0..i-1 that never ran stay children of their wave objects, and
+    BattleScene.DoCheckEnemiesNew counts childCount over waves 0..currentWave, so an overlapping wave (Forum wave 2,
+    remainingEnemyToEnd 2) waits for a kill instead of its 1 s count check, and a doubled StartWave is not corrected.
+    prune_ghosts removes them through the oracle RPC "battle.prune" (oracle commit after 06a7c2b, needs a deploy;
+    without it the episode records ghosts="unpruned").
 
-Two ways that do, best first (skip_to_wave):
-  oracle   RPC "battle.wave" {wave} (oracle commit 06a7c2b, needs a deploy): kills the live members of the waves
-           before `wave` through HealthManager.Die, so the BattleScene advances by its own rules (start delays, the
-           1 s enemy-count checks, wave 1's "Call Ally"); about the waves' start delays plus 1 s per wave.
+Skipping a running battle forward (skip_to_wave, used to make the savestates):
+  oracle   RPC "battle.wave" {wave} (oracle 06a7c2b, needs a deploy): kills the live members of the waves before
+           `wave` through HealthManager.Die, so the BattleScene advances by its own rules (start delays, the 1 s
+           enemy-count checks, wave 1's "Call Ally"); about the waves' start delays plus 1 s per wave.
   policy   with the deployed oracle: the hero kills them herself, made invincible and strong for the skip through
            the oracle's debug line server (PlayerData isInvincible true, nailUpgrades 4: nail damage 21, Silk Spear
            kept charged with silk 9), driven by WaveSkipPolicy; the PlayerData values are put back when the wave
-           starts. Slower (game time, the helper joins in), but the BattleScene again advances by itself.
-Both stop when STATE room.battles reports currentWave == wave (set by BattleScene.StartWave after the wave's
-startDelay, when its enemies are activated), then report what is in play (verify_wave_start).
+           starts. Slow on the Maestro waves (wave 6: 353 s of game time), but the BattleScene advances by itself.
+Both stop when STATE room.battles reports currentWave == wave, then report what is in play (verify_wave_start).
 """
 import math
 import socket
@@ -244,6 +253,33 @@ def wait_wave_start(link: OracleLink, enc, wave: int, timeout_s: float = 30.0) -
             return s
         link.act(last + 2, 0, hold_frames=0)
     raise RuntimeError(f"the wave-start savestate did not start wave {wave} within {timeout_s:.0f} s")
+
+
+def wait_wave_active(link: OracleLink, enc, wave: int, after: int | None = None, timeout_s: float = 10.0) -> dict:
+    """The first STATE (newer than `after`) in which the battle at `wave` has activated its members: room.battles
+    currentEnemies > 0 (BattleWave.WaveStarted counts them in, startDelay after StartWave). After a wave-start load
+    room.battles reports the wave from the battle start on (module docstring), so this is the wave's real start.
+    Keeps the keys up while it waits."""
+    last = link.frame if after is None else after
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        s = link.wait_state(newer_than=last, timeout_s=3.0)
+        last = s["f"]
+        b = battle_of(s, enc.battle_name) or {}
+        if b.get("started") and b.get("wave", -1) >= wave and (b.get("enemies") or 0) > 0:
+            return s
+        link.act(last + 2, 0, hold_frames=0)
+    raise RuntimeError(f"wave {wave} did not activate its members within {timeout_s:.0f} s")
+
+
+def prune_ghosts(link: OracleLink) -> dict:
+    """Remove the never-run members of the earlier waves after a wave-start load (oracle RPC "battle.prune", module
+    docstring). Returns the RPC's reply, or {"pruned": None, "error": ...} when the deployed oracle lacks it."""
+    try:
+        r = link.rpc("battle.prune", timeout_s=10)
+        return r if isinstance(r, dict) else {"pruned": None, "reply": r}
+    except OracleError as e:
+        return {"pruned": None, "error": str(e)}
 
 
 def make_wave_states(link: OracleLink, enc, waves: list[int], instance: int, prefix: str = STATE_PREFIX,

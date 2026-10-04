@@ -199,6 +199,20 @@ class GauntletTap:
             self.control = why
             self.control_log.append((f, None, why))
 
+    def rebase_start(self, f: int, why: str) -> None:
+        """Move the battle start (wake_frame) and the first wave's frame to `f`: a wave-start savestate's battle reports
+        its wave from the battle start, startDelay before the members are activated (ssbot.train.wave_start), so
+        its intro calls this with the activation frame; wave times then mean the same as in a full gauntlet."""
+        with self._lock:
+            if self.wake_frame is None or f < self.wake_frame:
+                return
+            self.control_log.append((f, self.control, f"REBASE {why} from {self.wake_frame}"))
+            self.wake_frame = f
+            if self.waves_exact:
+                w, f0 = self.waves_exact[0]
+                if f0 < f:
+                    self.waves_exact[0] = (w, f)
+
     def _end(self, f: int, why: str) -> None:
         if self.death_frame is None and self.wake_frame is not None:
             self.death_frame = f
