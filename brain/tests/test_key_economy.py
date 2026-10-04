@@ -122,6 +122,32 @@ def test_key_cost_kernel():
     assert kp[0] == 0 and kc[0] == 0
 
 
+def test_presses_counted_from_mask_streams():
+    from ssbot.tools.key_economy import gameplay_total, presses_from_masks
+    fs = list(range(10, 20))
+    masks = [L, L, 0, L, L | A, L, 0, J, J, 1 << BIT["enter"]]
+    c = presses_from_masks(fs, masks, 10, 19)
+    assert c == {"left": 1, "attack": 1, "jump": 1, "enter": 1}      # the first frame's held left is no press
+    assert gameplay_total(c) == 3
+
+
+def test_key_track_draws_a_logged_episode(tmp_path):
+    from ssbot.tools.key_track import note_track, render
+    log = KeyPlanLog()
+    log.reset(0)
+    seq = [[(A, 110, 112), (J, 118, 130)]] * 3 + [[(A, 112, 114)]] * 9
+    run(log, 100, [plan(100 + k + 2, 30, p) for k, p in enumerate(seq)])
+    for f in range(100, 125):
+        log.observe(f, A if 112 <= f < 114 else 0)
+    rec = log.record()
+    notes = note_track(rec, 100, 120)
+    by = {n["key"]: n for n in notes}
+    assert by["attack"]["steps"] == [(100, 110, 112), (103, 112, 114)] and by["attack"]["latched"] == [112, 114]
+    assert by["jump"]["cancel"] == 103
+    res = render(rec, 100, 115, tmp_path, video=False)
+    assert res["lanes"] == ["jump", "attack"] and len(list((tmp_path / "frames").glob("*.png"))) == 16
+
+
 # ---- the planner property -----------------------------------------------------------------------------------------
 
 def _sync(dst, src):
