@@ -224,19 +224,19 @@ if (flag2 && playerData.playTime <= 108000f) AwardAchievement("SPEED_COMPLETION"
 
 ### 4.3 必须进 Act 3 才能拿的部分
 
-按证据强度分类（修订轮按事实核查意见重新分类：初稿写"至少 6 个百分点"，其中 3 个有数据直接证明，2 个是推断，第 4 个工具袋经核查是错的）。
+按证据强度分类（修订轮按事实核查意见重新分类：初稿写"至少 6 个百分点"，其中 3 个有数据直接证明，2 个是推断，第 4 个工具袋经核查是错的；2026-10-04 又推翻了 Magnetite Dice，有数据直接证明的现为 2 个，见下表和 `research/dice_pilgrim.md`）。
 
 | 物品 | 占 % | 证据 | 依据 |
 |---|---|---|---|
 | Everbloom（`White Flower`） | 1 | **数据证明** | 只在 `Memory_Red` 的 `Wake Up` FSM 里给出【包】；主线 `Black Thread Pt6 Flower` 是 Act 3 主线的最后一步，前一步 `Pt5 Heart` 要 Coral / Flower / Ant 三颗心（另有 Clover Heart 作为替代目标）【包】，对应 Act 3 的 Coral King / Flower Queen / Hunter Queen / Green Prince（成就键 `DEFEATED_*`）【包 + 攻】 |
 | Pale Nails（`Silk Boss Needle`） | 1 | **数据证明** | 只在 `Cradle_03_Destroyed` 的 `Silk Needle Spell Get` FSM 里给出（毁坏的 Cradle 只在 Act 3 存在）【包】 |
-| Magnetite Dice | 1 | **数据证明** | 唯一来源是 Grindle 商店的 `Grindle Lucky Dice Tool`（300），条件是 `blackThreadWorld` == 1；场景里引用它的只有掉钱和铃铛掉落的判定（检查是否装备）【包】。**这推翻了 claims 里"可考虑在 Act 1–2 带 Magnetite Dice"的建议** |
+| ~~Magnetite Dice~~ | — | **推翻：Act 1–2 就能拿**（2026-10-04，`research/dice_pilgrim.md`） | Act 1–2 的来源在蚀阶 `Coral_33` 的兰布尔（Lumble）：赌赢他（`Play Point` FSM `Play Control` 的 `Get Reward`：`SetToolUnlocked Magnetite Dice` + `dicePilgrimDefeated`），或者没赢过他时、打过 Cogwork Dancers 或拿到 Clawline 后在蚀阶以外发生一次 TimePasses，他死在原地，尸体旁的 `Dice Game Corpse/Collectable Item Pickup` 免费给骰子【包】【码 GameManager.cs:1457-1464】。Grindle 的 `Grindle Lucky Dice Tool`（300，`blackThreadWorld` == 1）只在还没有骰子时出现，是 Act 3 后备【包】【码 ShopItem.cs:332-351】。初稿的扫描 `scan_items.jsonl` 其实扫到了 `coral_33` 的两处，但汇总 `summ2_tools.txt` 对 117 条引用只打印了前 14 条（`summ2.py` 的 `items[:14]`；117 条里 101 条是念珠预制体的"磁铁加速工具"字段、14 条是铃铛掉落判定），`coral_33` 的两处是第 63–64 条，藏在被省略的部分里，结论只看了截断后的汇总 |
 | 第 5 个面具（第 20 片碎片） | 1 | 推断 | 许愿 `Destroy Thread Cores` 需要先完成 `Black Thread Pt1 Shamans`【包】；20 片碎片一片不能少。前提是 14 个场景碎片里没有第 21 个来源可以替代，场景碎片的取得时机没有逐个核对【推】 |
 | Shaman 纹章（`Spell`） | 1 | 推断 | 在 `Tut_04` 的 Snail Shamans 处取得（`States/Intro Scene/Snail Shamans Set`，`CompletedRedMemory` 之后换成 Outro），与 Act 3 主线 `Black Thread Pt1 Shamans` 相连【包 + 推】；Snail Shamans 的 FSM 条件没有解码 |
 | ~~第 4 个工具袋~~ | — | **推翻：Act 2 就能拿** | 初稿把 `Bone_12` 的 `Black Thread States/Black Thread World/Ladybugs_Act_3/Ladybug Craft Pickup` 当作第 4 个来源。它确实只在 Act 3（父物体 `Black Thread World` 只在 `blackThreadWorld` == true 时打开）【包 `scene_bone12_bts.txt`】【码 TestGameObjectActivator.cs:85-129】，但它自己挂着的 `TestGameObjectActivator` 在 `pinGalleriesCompleted` > 0（`NumType` 3 = MoreThan）时把它关掉【包】【码 PlayerDataTest.cs:18-24】。真正的第 4 个来源是 Act 1–2 的针廊：`Bone_12` 的 Normal World 里 `Lady Bug Large` 的 `Convo` FSM，`Reward 1` 状态把 `pinGalleriesCompleted` 设为 1，并运行 FSM 模板 `upgrade_tool_pouch`（`fsmtemplates_assets_areaaqueductareaboneareacoral.bundle`），模板只有一个 `Give` 状态：`IncrementPlayerDataInt ToolPouchUpgrades` + 工具袋升级提示【包 `out_ladybug.txt`、`out_pinreward2.txt`】。针廊在 `spinnerDefeated` 之后开放【码 GameManager.cs:1199-1201】。初稿的物品扫描只找直接引用 `Tool Pouch Pickup` 的组件，所以漏掉了这个走模板的奖励 |
 | 其余（第 4 次针升级、Sylphsong、未找到的 2 段丝轴、部分场景碎片） | ? | 未核实 | 【未核实】 |
 
-**结论：**有数据直接证明、只能在 Act 3 拿的是 3 个百分点（Everbloom、Pale Nails、Magnetite Dice）；推断的 2 个（第 20 片面具碎片、Shaman 纹章）；第 4 个工具袋被推翻（Act 2 的针廊就给）。工具袋的例子也说明，按"直接引用物品资产"扫出来的来源清单会漏掉走 FSM 模板或 `IncrementPlayerDataInt` 的奖励，丝轴缺的 2 段可能也是这种情况【推】。"100 % 必须进 Act 3"单凭 Everbloom 就成立。"Act 3 里能触发片尾的只有 Ending E，所以 100 % 的两个成就只能在 E 的片尾拿到"是推断（Cradle 在 Act 3 是毁坏版本，GMS 不能再打）【推】。在做任何 100 % 路线之前，需要一张经过验证的 100 项清单：每一项写明来源（场景 / FSM / 商店 / 许愿）和它的幕次门槛（`blackThreadWorld` 或任务前置）。
+**结论：**有数据直接证明、只能在 Act 3 拿的是 2 个百分点（Everbloom、Pale Nails）；推断的 2 个（第 20 片面具碎片、Shaman 纹章）；第 4 个工具袋被推翻（Act 2 的针廊就给）；Magnetite Dice 被推翻（Act 1–2 在蚀阶兰布尔处赌赢或捡尸体旁的骰子，Grindle 只是 Act 3 后备，2026-10-04 修正，`research/dice_pilgrim.md`）。工具袋的例子也说明，按"直接引用物品资产"扫出来的来源清单会漏掉走 FSM 模板或 `IncrementPlayerDataInt` 的奖励，丝轴缺的 2 段可能也是这种情况【推】；磁石骰的例子说明，汇总表不能截断，来源类引用（拾取物、`SetToolUnlocked`、商店、许愿奖励）要和"检查是否装备"的引用分开列。"100 % 必须进 Act 3"单凭 Everbloom 就成立。"Act 3 里能触发片尾的只有 Ending E，所以 100 % 的两个成就只能在 E 的片尾拿到"是推断（Cradle 在 Act 3 是毁坏版本，GMS 不能再打）【推】。在做任何 100 % 路线之前，需要一张经过验证的 100 项清单：每一项写明来源（场景 / FSM / 商店 / 许愿）和它的幕次门槛（`blackThreadWorld` 或任务前置）。
 
 ### 4.4 Steel Soul 下的差异
 
@@ -277,7 +277,7 @@ if (flag2 && playerData.playTime <= 108000f) AwardAchievement("SPEED_COMPLETION"
 6. **弹窗前提**（§3.6）：叠加层的开法已由 DESIGN.md:284 定为全程打开成就通知；另外要求账号上尚未拥有这些成就、录屏能录到叠加层、`GameNativePopups` 保持 0。
 7. **Act 3 开场会重置装备**，bot 要重新装纹章和工具（§2.4）。
 8. **Silk and Soul 前置很重**：10 个必做许愿、17 分可选许愿，加上 Faydown Cloak、Fleatopia 商队和 Belltown 房子对话（§2.2），这些都要纳入 Ending 1 之后的路线规划。
-9. **数据缺口**：2 段丝轴的来源没找到；第 4 次针升级、Sylphsong 和部分场景碎片的取得时机【未核实】；第 20 片面具碎片和 Shaman 纹章"只能在 Act 3"是推断（§4.3）。初稿的来源扫描已经漏过一次（第 4 个工具袋其实是针廊奖励，§4.3），所以 100 % 路线需要一张经过验证的完整清单，否则可能在最后才发现差 1 %。
+9. **数据缺口**：2 段丝轴的来源没找到；第 4 次针升级、Sylphsong 和部分场景碎片的取得时机【未核实】；第 20 片面具碎片和 Shaman 纹章"只能在 Act 3"是推断（§4.3）。初稿的来源扫描已经漏过两次（第 4 个工具袋其实是针廊奖励；磁石骰在 Act 1–2 的兰布尔处就有，§4.3），所以 100 % 路线需要一张经过验证的完整清单，否则可能在最后才发现差 1 %。
 10. **版本**：Sea of Sorrow 资料片可能增加物品，改变 100 % 的分母（claims [ach10]），所以必须锁定在 1.0.30000。
 
 ### 5.3 待实测
@@ -290,7 +290,7 @@ if (flag2 && playerData.playTime <= 108000f) AwardAchievement("SPEED_COMPLETION"
 
 ### 5.4 对 claims.txt 和 DESIGN 的修正建议
 
-- 关于 Magnetite Dice：1.0.30000 里它只在 Act 3 由 Grindle 出售（§4.3），Ending 1 路线拿不到，应从"最低防御配置"里删掉。
+- 关于 Magnetite Dice（2026-10-04 修正）：初稿说"只在 Act 3 由 Grindle 出售、Ending 1 路线拿不到"，**错**。Act 1–2 在蚀阶 `Coral_33` 的兰布尔处就能拿：赌赢他（有一个看画面掐时机的"完美掷骰"，按 FSM 数据窗口内松手必赢，未实测；约 3–4.5 min 含往返），或 Dancers / Clawline 之后捡尸体旁的骰子（§4.3，`research/dice_pilgrim.md`）。claims 里"可考虑放进空黄槽"的问题不在取得，而在 Hunter 只有 2 个黄槽、已分给负重环带和爬墙爪；是否换掉负重环带留给 K1 的 A/B；如果只是 S19 之后的战斗要用，Dancers 之后到 `Coral_33` 捡尸体旁的骰子即可，不用赌。
 - 结局备注里"结局 1、3 之后在最后存档点重生"与代码一致（§1.2）。补充：Snared Silk（C）之后不是回到最后存档点，而是进入 Act 3 开场（`StartAct3`）。
 - DESIGN §3.6.1 ENDING："零输入，直到看到 MAIN_MENU"改为 §3.5 的按键规则（感谢画面的继续提示出现后按一次；完成度画面上等 `upload complete` 或超时后按一次）。不改的话，Ending 1 会停在感谢画面，`STEEL_SOUL` 和 `SPEEDRUN_1` 永远不会推送。
 - DESIGN §2.6 / §3.10 预检：加入 `GameNativePopups` == 0（游戏自带弹窗在 Steam 版上有效，§3.6）。
@@ -309,3 +309,7 @@ if (flag2 && playerData.playTime <= 108000f) AwardAchievement("SPEED_COMPLETION"
   - §4.3：Act 3 专属项按证据分类；第 4 个工具袋被推翻（Act 2 针廊奖励）；§4.1 工具袋来源相应更正。
   - §2.2：Silk and Soul 可选许愿里 0.5 分的送货任务是六个，不是五个（28 项合计 25 分）。
   - 文件头：`dataVersion 2` FSM 的解码规则和修订轮脚本目录。
+- **2026-10-04（骰子调研，`research/dice_pilgrim.md`，起因是你指出"骰子是在蚀阶跟一个 NPC 赌博拿到的"）**：
+  - §4.3：Magnetite Dice 不是 Act 3 专属。Act 1–2 来源是蚀阶 `Coral_33` 的兰布尔（赌赢，或 Dancers / Clawline 后捡尸体旁的骰子），Grindle 300 只是 Act 3 后备；"有数据证明的 Act 3 专属"从 3 个百分点改为 2 个。错误原因：汇总表截断了引用列表。
+  - §5.2 第 9 条、§5.4：相应改写。
+  - 同日复核后：§4.3 引言注明现为 2 个；§4.3 表里截断的说法改准（`summ2.py` 只打印前 14 条，`coral_33` 两处是第 63–64 条，不是末尾两条）；§5.4 的"稳赢"改为"按 FSM 数据必赢、未实测"，并补上"S19 之后要用就捡尸体"。
