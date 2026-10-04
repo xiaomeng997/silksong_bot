@@ -42,7 +42,9 @@ from datetime import datetime
 from pathlib import Path
 
 RUNS = Path(r"C:\ssbot\data\runs\m2")
-STOP_FILES = (Path(r"C:\ssbot\sandbox\STOP_AGENTS"),)
+# the agents' stop file, and DEMO_SOON: the person is about to record or practise (human_session refuses to start
+# while another game instance runs), so live runs end after their current episode
+STOP_FILES = (Path(r"C:\ssbot\sandbox\STOP_AGENTS"), Path(r"C:\ssbot\sandbox\DEMO_SOON"))
 
 
 def stop_requested(run_dir: Path) -> bool:
