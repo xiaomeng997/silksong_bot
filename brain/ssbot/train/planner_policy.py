@@ -612,6 +612,7 @@ class PlannerPolicy:
             self.commit = {"fo": fo, "f": f, "tg": ws.stamp.t_game_s, "P": kp.P, "cmd": np.array(res.cmd, np.int64),
                            "end_k": kp.k_hi + kp.window, "k_hi": kp.k_hi, "window": kp.window, "own": kp.own,
                            "certified": kp.certified, "plan": res.name, "path": res.path, "path_hit": res.path_hit,
+                           "path_kill": res.path_kill,
                            "killed": None}
         else:
             self.commit = None
@@ -698,6 +699,7 @@ class PlannerPolicy:
                           # the plan's box at this WorldState's own game time (the frame "box" is from)
                           "k_now": kn,
                           "planned_now": _box_at(c["path"], kn), "planned_now_hit": _box_at(c.get("path_hit"), kn),
+                          "planned_now_kill": [_box_at(x, kn) for x in c.get("path_kill") or ()],
                           "box": None if not hero_box else [round(float(v), 3) for v in hero_box]}}
         self._emit(rec, True)            # every commitment tick is kept (the path through the slow motion)
         return mask

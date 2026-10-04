@@ -523,3 +523,29 @@ def test_vision_focus_lost_alone_does_not_block_pausable_in_training():
     assert input_from_world(ws, 0.0, support_known=False, foreground_sink=True).pausable is False
     ws.game.pause_blockers = int(PauseBlock.FOCUS_LOST | PauseBlock.TIME_SLOWED)
     assert input_from_world(ws, 0.0, support_known=False).pausable is False
+
+
+def test_kill_hit_events_place_the_killing_hits_effect():
+    """Planner._kill_branches' events: the killing attack (the first onset at or after its press) lands on its
+    earliest and latest hit frame: a side slash recoils away from the facing, an up-slash stops the rise, a down spike
+    bounces; a cast moves nothing; an attack already out at the start lands from frame 1."""
+    from ssbot.combat.planner import WINDOWS, kill_hit_events
+    win = WINDOWS["v2"]
+    T = 30
+    T1 = T + 1
+    lat = np.zeros((4, T), np.int64)
+    flags = np.zeros((4, T1), np.int64)
+    mode = np.zeros((4, T1), np.int64)
+    lat[0, 2:5] = kin.B_ATTACK | kin.B_RIGHT          # side slash facing right, onset frame 4
+    flags[0, 4:12] = kin.F_ATTACKING
+    lat[1, 2:5] = kin.B_ATTACK | kin.B_UP              # up-slash, onset frame 4
+    flags[1, 4:12] = kin.F_ATTACKING
+    mode[2, 6:10] = kin.M_DS_SPIKE                     # down spike frames 6..9
+    flags[3, 0:5] = kin.F_ATTACKING                    # a slash already out, facing left (face0 -1)
+    ev = np.zeros((2, 4, T), np.int64)
+    kill_hit_events(lat, flags, mode, -1, np.array([3, 3, 3, 1], np.int64), win, ev)
+    assert ev[0, 0, 4 + win[0, 0] - 1] == kin.EV_RECOIL_L and ev[1, 0, 4 + win[0, 1] - 2] == kin.EV_RECOIL_L
+    assert ev[0, 1, 4 + win[1, 0] - 1] == kin.EV_RECOIL_DOWN and ev[1, 1, 4 + win[1, 1] - 2] == kin.EV_RECOIL_DOWN
+    assert ev[0, 2, 6 - 1] == kin.EV_POGO and ev[1, 2, 9 - 1] == kin.EV_POGO
+    assert ev[0, 3, 0] == kin.EV_RECOIL_R                # facing left: recoil to the right
+    assert (ev != 0).sum() == 8

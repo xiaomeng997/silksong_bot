@@ -78,7 +78,7 @@ from ssbot.combat import pogo_targets as pt
 from ssbot.combat.forecast import body_shape, Forecast
 from ssbot.combat.holdfilter import hold_filter_jit
 from ssbot.combat.safety_filter import (R_KILL, REASONS, FilterContext, hazard_flags, i3_kill_allowed, kill_certified,
-                                        kill_frames, kill_window_frames, unpausable, veto)
+                                        kill_frames, kill_window_frames, released_rise, unpausable, veto)
 from ssbot.combat.tactics.modes import TacticPrefs
 from ssbot.core.primitives import Prim
 from ssbot.core.worldstate import WorldState
@@ -170,6 +170,7 @@ class PlanResult:
     hits: float = 0.0
     kill: "KillPlan | None" = None          # the chosen plan may land a killing blow (its own or one in flight)
     path_hit: np.ndarray | None = None      # the chosen candidate's box per frame where its predicted hits land
+    path_kill: tuple | None = None          # ... where its killing hit lands, earliest / latest (Planner._kill_branches)
     idle_clear: int | None = None           # frames after the decision frame the no-input path stays out of the
     #                                         support (the pause machine's keys; supervisor QS), None: no such candidate
 
@@ -419,6 +420,10 @@ class Planner:
             # the hit branch too (a killing down spike's bounce, a slash's recoil): no released rise in either
             cert &= kill_certified(S, k_hi, T1, ctx, params.frame_time, k_lo=_k_lo, vel_y=roll_j.vel[:, :, 1],
                                    latched=latched)
+        kill_paths = {}
+        self.last_kill_branches = (0, 0)    # plans whose killing hit's branches were rolled out, of them still certified
+        if cert.any():
+            cert = self._kill_branches(f, start, latched, roll, cert, _k_lo, k_hi, ctx, J, tk, enemy_only, kill_paths)
         U = unpausable(may_kill | in_flight, ctx, cert)
         veto_k = U & may_kill
         if veto_k.any():
@@ -504,6 +509,8 @@ class Planner:
                              roll.box[i].copy(), roll.bound[i].copy(), hits=float(hits[i]))
             if roll_j is not roll:
                 res.path_hit = roll_j.box[i].copy()      # the branch where the predicted hits land
+            if i in kill_paths:
+                res.path_kill = kill_paths[i]            # the killing hit's own branches (earliest, latest)
             if may_kill[i] or in_flight[i]:
                 res.kill = KillPlan(own=bool(may_kill[i]), certified=bool(cert[i]), i3=i3_kill_allowed(ctx),
                                     k_lo=int(_k_lo[i]), k_hi=int(k_hi[i]),
@@ -563,6 +570,59 @@ class Planner:
         return all(ctx.allowed_mask[int(p)] for p in need)
 
     # ---- the pogo ---------------------------------------------------------------------------------------------------
+
+    def _kill_branches(self, f: Forecast, start, latched: np.ndarray, roll, cert: np.ndarray, k_lo: np.ndarray,
+                       k_hi: np.ndarray, ctx: FilterContext, J: np.ndarray, tk: np.ndarray, enemy_only: bool,
+                       paths: dict) -> np.ndarray:
+        """The killing hit's own effect on the hero, for the plans the filter would certify: whatever the boss model
+        predicts, a kill means the killing press landed, and a landed hit moves the hero (a side slash recoils her
+        away from where she faces, 3.75 u/s for 9 physics steps, overriding her keys; an up-slash stops her rise; a
+        down spike bounces her). _hit_effects rolls that out only where the predicted hurtbox meets the attack; the
+        rest kept the no-hit path, which the hero did not follow (live 20261004_042718 i0 ep 0: certified, the
+        killing slash's recoil carried her 1.9 u from the plan through the slow motion). Here every such plan is
+        rolled out twice more, with the killing attack's effect on its earliest and on its latest hit frame
+        (kill_hit_events), and stays certified only if both branches are out of the support (S, the plan's own
+        rollout frames) with no released rise. At most KILL_BRANCH_K plans (the best by J, the carried plan first)
+        are checked; the others lose the certificate (unknown is never safe). paths[i]: the branches' boxes."""
+        rows = np.flatnonzero(cert)
+        N, T = latched.shape
+        if len(rows) > KILL_BRANCH_K:
+            pri = J[rows] + np.where(rows == N - 1, 1e9, 0.0)
+            keep = rows[np.argsort(-pri, kind="stable")[:KILL_BRANCH_K]]
+            cert = cert.copy()
+            cert[np.setdiff1d(rows, keep)] = False
+            rows = np.sort(keep)
+        face0 = 1 if start.reshape(kin.K, -1)[kin.FACE, 0] >= 0 else -1
+        ev = np.zeros((2, len(rows), T), np.int64)
+        kill_hit_events(np.ascontiguousarray(latched[rows]), np.ascontiguousarray(roll.flags[rows]),
+                        np.ascontiguousarray(roll.mode[rows]), face0, np.asarray(k_lo, np.int64)[rows],
+                        WINDOWS[self.cfg.attack_model], ev)
+        ok = np.ones(len(rows), bool)
+        W = kill_window_frames(self.params.frame_time, ctx.kill_window_s)
+        boxes = []
+        for b in range(2):
+            moved = ev[b].any(axis=1)
+            if not moved.any():
+                boxes.append(None)
+                continue
+            sub = np.flatnonzero(moved)
+            rl = kin.rollout(start, latched[rows[sub]], self.params, self.terrain, events=ev[b][sub],
+                             variants=self.cfg.variants, threads=self.cfg.threads)
+            skip = ((rl.flags_all & F_INVULN) != 0) if enemy_only else np.zeros(rl.flags_all.shape, bool)
+            occ = self._contacts(f, rl.bound, tk, skip)
+            bad = occ.any(axis=1)
+            bad |= released_rise(rl.vel[:, :, 1], latched[rows[sub]], np.asarray(k_lo, np.int64)[rows[sub]],
+                                 np.asarray(k_hi, np.int64)[rows[sub]] + W)
+            ok[sub] &= ~bad
+            bx = np.full((len(rows),) + rl.box.shape[1:], np.nan)
+            bx[sub] = rl.box
+            boxes.append(bx)
+        out = cert.copy()
+        out[rows] &= ok
+        for n_, c in enumerate(rows):
+            paths[int(c)] = tuple(None if bx is None or np.isnan(bx[n_]).all() else bx[n_].copy() for bx in boxes)
+        self.last_kill_branches = (int(len(rows)), int(ok.sum()))
+        return out
 
     def _hit_effects(self, f: Forecast, start, latched: np.ndarray, roll, tk: np.ndarray, S: np.ndarray,
                      enemy_only: bool):
@@ -898,6 +958,9 @@ class Planner:
         start = kin.initial_state(self.params, 85.0, 2.015 + self.params.foot)
         rl = kin.rollout(start, lat, self.params, self.terrain, events=np.zeros((1, T1 - 1), np.int64),
                          variants=self.cfg.variants, lanes=True)
+        # the killing hit's branch events (Planner._kill_branches), with the rollout's own dtypes
+        kill_hit_events(np.ascontiguousarray(lat), np.ascontiguousarray(rl.flags), np.ascontiguousarray(rl.mode), 1,
+                        np.ones(1, np.int64), win, np.zeros((2, 1, T1 - 1), np.int64))
         # the pogo lane gate and the hit kernels with a bell's octagon too: a fresh checkout has no numba cache, and
         # these compiled mid-fight past the watchdog (live run 20261002_162847 from a new worktree: 2-3 episodes per
         # worker "paused unasked", in the first charge and in a burst)
@@ -1356,6 +1419,69 @@ class _View:
     def __init__(self, box, flags, mode, bound, flags_all, vel=None):
         self.box, self.flags, self.mode, self.bound, self.flags_all = box, flags, mode, bound, flags_all
         self.vel = vel          # [N, T1, 2] nominal lane (the killing blow's released-rise check reads both branches)
+
+
+@numba.njit(cache=True)
+def kill_hit_events(latched, flags, mode, face0, k_lo, win, ev):
+    """ev[0 / 1, c, :]: the killing attack's hit effect on its earliest / latest hit frame (Planner._kill_branches):
+    the attack whose onset is the first at or after k_lo - 1 (an attack already out at the start: frame 1), side
+    slash EV_RECOIL_L facing right / EV_RECOIL_R facing left on onset + win[0] .. + win[0, 1] - 1, up-slash
+    EV_RECOIL_DOWN on onset + win[1], down spike EV_POGO on its first and last spike frame; a cast (the Silkspear)
+    moves nothing. The facing follows the keys as in _first_hits. Frame k's event goes in column k - 1."""
+    n, T = latched.shape
+    T1 = mode.shape[1]
+    for c in range(n):
+        face = face0
+        fc = np.empty(T1, np.int64)
+        fc[0] = face
+        for k in range(1, T1):
+            m = latched[c, k - 1]
+            d = 1 if m & B_RIGHT else (-1 if m & B_LEFT else 0)
+            if d != 0:
+                starts_cast = mode[c, k] == M_CAST and mode[c, k - 1] != M_CAST
+                free = mode[c, k - 1] == M_NORMAL and (flags[c, k - 1] & F_ATTACKING) == 0
+                if starts_cast or free:
+                    face = d
+            fc[k] = face
+        k0 = max(1, k_lo[c] - 1)
+        on, kind = -1, -1
+        if k_lo[c] <= 1 and ((flags[c, 0] & F_ATTACKING) != 0 or mode[c, 0] == M_DS_SPIKE or mode[c, 0] == M_DS_ANTIC):
+            on = 0
+            kind = 2 if mode[c, 0] == M_DS_SPIKE or mode[c, 0] == M_DS_ANTIC else 0
+        else:
+            for k in range(k0, T1):
+                if mode[c, k] == M_CAST and mode[c, k - 1] != M_CAST:
+                    break                                    # a cast: no movement effect
+                if (flags[c, k] & F_ATTACKING) != 0 and (flags[c, k - 1] & F_ATTACKING) == 0:
+                    on = k
+                    kind = 1 if (latched[c, k - 1] & B_UP) != 0 else 0
+                    break
+                if mode[c, k] == M_DS_SPIKE and mode[c, k - 1] != M_DS_SPIKE:
+                    on = k
+                    kind = 2
+                    break
+        if on < 0:
+            continue
+        if kind == 2:
+            k1 = on
+            while k1 + 1 < T1 and mode[c, k1 + 1] == M_DS_SPIKE:
+                k1 += 1
+            lo, hi, bit = max(on, 1), max(k1, 1), EV_POGO_
+        elif kind == 1:
+            lo, hi, bit = on + win[1, 0], on + win[1, 1] - 1, EV_RECOIL_DOWN_
+        else:
+            lo, hi = on + win[0, 0], on + win[0, 1] - 1
+            bit = EV_RECOIL_L_ if fc[min(max(on, 0), T1 - 1)] > 0 else EV_RECOIL_R_
+        lo, hi = max(lo, 1), max(hi, max(lo, 1))
+        if lo <= T:
+            ev[0, c, lo - 1] |= bit
+        if hi <= T:
+            ev[1, c, hi - 1] |= bit
+
+
+EV_POGO_, EV_RECOIL_DOWN_, EV_RECOIL_L_, EV_RECOIL_R_ = (int(kin.EV_POGO), int(kin.EV_RECOIL_DOWN),
+                                                         int(kin.EV_RECOIL_L), int(kin.EV_RECOIL_R))
+KILL_BRANCH_K = 12            # plans whose killing hit's branches are rolled out (Planner._kill_branches)
 
 
 @numba.njit(cache=True, parallel=True)
