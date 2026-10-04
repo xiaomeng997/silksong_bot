@@ -796,8 +796,8 @@ and 10 (fixer round). Lead decision 2026-10-04: the certified killing blow at h 
 ## Task "post-kill forecast" - keep dodging after the boss dies (branch worktree-wf_8f2a901f-a0c-1)
 
 Worktree `C:\modeling\silksong_bot\.claude\worktrees\wf_8f2a901f-a0c-1`, from main d1f3c46. Code 5a97e0f + fd18ae6 (tool fix,
-test); docs after. Instances 0 and 1 (oracle, Bell Beast), base seeds 122000 (smoke), 122100 (kill check), 122500 (200
-plain), 123500 (gate). Facts: `docs/facts/1.0.30000/post_kill.md` (Chinese); DESIGN §3.9.4 (CLEAR with the post-kill
+test), fixer round c1e971b; docs after each. Instances 0 and 1 (oracle, Bell Beast), base seeds 122000 (smoke), 122100
+(kill check), 122500 (200 plain), 123500 (first gate, stopped), 124000 (gate on c1e971b). Facts: `docs/facts/1.0.30000/post_kill.md` (Chinese); DESIGN §3.9.4 (CLEAR with the post-kill
 tail) and §3.7.2 I3 (the window's support holds what outlives the boss); M2.md status line; pause_quit.md 10.7 marked
 fixed.
 
@@ -830,9 +830,12 @@ fixed.
   post-kill contacts (0.017-1.116 s ahead).
 - Kill check at h 2 (20261004_064120, 24 episodes, injected to 3 HP): 24 CLEAR, 24 / 24 certified, 8 with bells after
   the kill, 0 hits in the tail (before: 4 of 23 Q1 quits), 0 FORCED_RISK in 3,234 post-kill planner ticks.
-- Past CLEARs (`post_kill clears`): oracle eval 2,878: none changes outcome (all full-HP kills), 772 would have had a
-  longer tail, 714 would have been hit standing still; injection runs: the 106 "quit after the kill" CLEARs become
-  QUIT (6 of them the post-kill bells), 7 more would have been hit standing still at HP <= 3.
+- Past CLEARs (`post_kill clears`, counts corrected in the fixer round; they match the attempt rows): oracle eval 2,872:
+  none changes outcome (all full-HP kills), 772 would have had a longer tail, 714 would have been hit standing still;
+  injection runs (237 CLEARs): the 121 "quit after the kill" CLEARs (75 Q1, 6 of them QUIT_EMULATED; 46 injected QF)
+  become QUIT, 6 of them the post-kill bells' Q1 (042718 i1 ep5 / ep7, 043850 i0 ep6 / ep7 / ep9, i1 ep5); the 7
+  standing hits at HP <= 3 are those 6 plus 042718 i0 ep8, whose real post-kill bell hit (HP 5 -> 3) is already in its
+  hits: no further outcome changes. Vision view 1,253 / 361 live / 359 standing, none at low HP.
 - Plain live run with the tail (20261004_065707, fd18ae6, 200 episodes, base seed 122500, --real-quit 0.2): 200 CLEAR,
   0 QUIT / STUCK / WOULD_DIE; 8 hits in the fight (0 unpredicted), **0 in the tail**; 56 kills left live sources (51
   both attack bells, 5 a falling drop bell), the last one live <= 2.94 s after the kill, tail p50 2.015 s / max 4.95 s
@@ -842,18 +845,40 @@ fixed.
   killing hit's own effect (a down spike's bounce off the boss) is not in that plan; certified ones stay within 0.47 /
   0.70 u of their certified branch (kill check).
 
-### Running
+- First gate (`C:\ssbot\data\runs\m2\20261004_085210_BellBeast_eval_planner_oracle`, fd18ae6, base seed 123500): stopped at
+  09:06 by the lead's half-speed demo (STOP in the run dir, DEMO_SOON) after 13 episodes per instance: 26 CLEAR, 2
+  fight hits, 0 tail hits, 7 kills with live sources. With 20261004_065707 that is 226 episodes on fd18ae6, not 500.
 
-- Gate (500 with the 200 above): `C:\ssbot\data\runs\m2\20261004_085210_BellBeast_eval_planner_oracle`, instances 0 and
-  1, 150 episodes each, base seed 123500, same checkout `C:\ssbot\live_postkill_fd18ae6` (commit fd18ae6, the same
-  code fingerprint as 20261004_065707), started 08:52 by `C:\ssbot\sandbox\postkill_gate_start.cmd` (detached, hidden;
-  log `C:\ssbot\sandbox\postkill_gate.log`, ends with POSTKILL_GATE_DONE; about 2.8 h). Pool:
-  `combat_run summary C:\ssbot\data\runs\m2\20261004_085210_BellBeast_eval_planner_oracle
-  C:\ssbot\data\runs\m2\20261004_065707_BellBeast_eval_planner_oracle`. Stop: `combat_run stop <run dir>`.
+### Fixer round (code c1e971b)
+
+- `train/episode.py` `live_threats`: an enabled damage collider counts when eff != 0 (was > 0): the oracle exports eff -1
+  for multi-wounder FSM sources (as `ipc.ents.is_threat`), which would otherwise never keep a tail going (the Forum).
+  No change for the Bell Beast: re-scanning all 256 tail kills (063700, 064120, 065707, 085210) with it gives the
+  same last live source as the live `tail_threat_s` in 256 / 256.
+- `tools/combat_run.py`: `config_fp` also hashes the SSBOT_* switches when any is set (`SSBOT_POST_CLEAR_S` turns the
+  tail off, `SSBOT_DEAD_ATK=0` the old post-death forecast, the A/B toggles); without switches it is the old hash
+  (065707 stays e4a26680c027). The switches go into config.json and every row (`env`). `summary` refuses to pool rows
+  of different fingerprints (exit 1, `refused`) unless `--mixed`.
+- `tools/post_kill.py clears`: skips rows made with the tail (so `--glob` over all runs is fine); each CLEAR says
+  whether it ended "quit after the kill" and which real post-kill hits its recording shows; the summary splits the
+  low-HP standing hits by those (`standing_low_hp_already`).
+- Tests: full suite 1004 passed, 1 skipped, 1 xfailed (test_support_query_budget deselected as before: a timing budget
+  that fails under machine load); new `tests/test_combat_run_fp.py`, eff -1 / 0 cases in `test_live_threats`.
+- Facts: post_kill.md section 5 corrected, section 8 (this round); M2.md status line corrected.
+
+### Gate on c1e971b
+
+- From scratch (the fd18ae6 episodes have another fingerprint): 500 episodes, instances 0 and 1, 250 each, base seed
+  124000, `--real-quit 0.2`, oracle view, checkout `C:\ssbot\live_postkill_c1e971b` (commit c1e971b; the commits after
+  it are docs only). Start: `C:\ssbot\sandbox\postkill_gate2_start.cmd` (detached and hidden; it does nothing while
+  STOP_AGENTS or DEMO_SOON exists). Log `C:\ssbot\sandbox\postkill_gate2.log` (prints the run dir, ends with
+  POSTKILL_GATE2_DONE; about 4.7 h). Summary: `combat_run summary <run dir>`; stop: `combat_run stop <run dir>`.
+- Status: not started yet: DEMO_SOON ("lead: half-speed demo", 09:06) was still there when this was written.
 
 ### Next
 
-0. Read the gate when it ends (pooled with 20261004_065707); post-kill numbers in its summary's `post_kill_tail`.
+0. Read the gate on c1e971b when it ends (its own run dir only; `summary` refuses other fingerprints); post-kill
+   numbers in its summary's `post_kill_tail`.
 1. Turn the tail on for the Forum (`tail_quiet_s`, the runes / bombs / dying Clappers as live sources) after checking
    its recordings the same way (`post_kill scan` is Bell Beast only now: BOSS / SCENE constants).
 2. Vision view: a cancelled drop bell stays armed in the vision tracker up to BELL_TTL_S (8 s) after the death (the cue
@@ -861,7 +886,7 @@ fixed.
 3. Full-HP kills: their slow-motion commitment is the last plan without the killing hit's branches; certify every
    possibly killing blow's branches, or prefer a certifiable plan under I3 too, if the tail's FORCED_RISK matters.
 4. After the death no new drop bell can arm, but the drop-bell unions of the tails (t_from 1.2 s) are still placed:
-   extra support beyond the planner's 0.8 s (the tactics' risk map sees it); left as is so the 200 and the gate run
-   the same code.
-5. Remove the live checkouts `C:\ssbot\live_postkill_5a97e0f` (smoke and kill check) and `C:\ssbot\live_postkill_fd18ae6`
-   (200 + gate) when no longer needed.
+   extra support beyond the planner's 0.8 s (the tactics' risk map sees it); left as is (the kill check and the 200
+   measured this support).
+5. Remove the live checkout `C:\ssbot\live_postkill_c1e971b` after the gate (`git worktree remove --force`); the
+   5a97e0f and fd18ae6 checkouts are already removed.
