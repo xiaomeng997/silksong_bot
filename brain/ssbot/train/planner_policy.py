@@ -683,6 +683,11 @@ class PlannerPolicy:
                           "killed": c["killed"],
                           "planned_box": None if c["path"] is None or not 0 <= k < len(c["path"])
                           else [round(float(v), 3) for v in c["path"][k]],
+                          # the plan's box at this WorldState's own game time (the frame "box" is from)
+                          "k_now": commit_frame(ws.stamp.t_game_s, fo - 2, fo, rate, c["tg"], ft),
+                          "planned_now": None if c["path"] is None or not 0 <= (kn := commit_frame(
+                              ws.stamp.t_game_s, fo - 2, fo, rate, c["tg"], ft)) < len(c["path"])
+                          else [round(float(v), 3) for v in c["path"][kn]],
                           "box": None if not hero_box else [round(float(v), 3) for v in hero_box]}}
         self._emit(rec, True)            # every commitment tick is kept (the path through the slow motion)
         return mask

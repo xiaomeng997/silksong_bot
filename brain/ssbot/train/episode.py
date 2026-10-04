@@ -25,6 +25,7 @@ Outcomes (AttemptRecord.outcome):
   STUCK         no outcome within the encounter's timebox after the wake;
   HARNESS_FAIL  the reset, the intro or the link failed, or the game paused or left the scene unasked.
 """
+import os
 import random
 import threading
 import time
@@ -279,6 +280,10 @@ def _run(link: OracleLink, enc: Encounter, tap: FightTap, policy, cfg: EpisodeCo
     policy.reset(random.Random(cfg.seed), enc)
     timebox = cfg.timebox_s or enc.timebox_s
     post_f = round(getattr(enc, "post_clear_s", POST_CLEAR_FRAMES / 60.0) * 60)
+    if os.environ.get("SSBOT_POST_CLEAR_S"):
+        # a longer post-kill window (the certified-kill check: the whole boss-death slow motion, ~100 real frames,
+        # before the next savestate load, so the kill commitment's path through it is recorded)
+        post_f = max(post_f, round(float(os.environ["SSBOT_POST_CLEAR_S"]) * 60))
     # a gauntlet's hazards outlive the last kill (the Forum's dying Clappers, runes, bombs): the policy keeps playing
     # through the window instead of standing still
     act_after = getattr(policy, "act_after_clear", False) or bool(getattr(enc, "waves", ()))
