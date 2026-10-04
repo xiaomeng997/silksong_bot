@@ -208,7 +208,8 @@ def forum_main(a: argparse.Namespace) -> int:
         by_fight[r["fight"].rsplit("/", 1)[0]].append(r)
     lags = [int(x) for x in a.lags.split(",")]
     out: dict = {"encounter": "Forum", "extra": str(extra), "lags": lags, "base_margin": a.margin,
-                 "margins": a.margins, "margin_q": a.margin_q, "folds": {}}
+                 "margins": a.margins, "margin_q": a.margin_q, "family_wide": a.family_wide, "tube": a.tube,
+                 "folds": {}}
     stats: dict = defaultdict(Counter)
     misses: list = []
     margins_used = {}
@@ -223,7 +224,7 @@ def forum_main(a: argparse.Namespace) -> int:
             m = {}
         margins_used[k] = m
         t0 = time.perf_counter()
-        tables = FoldTables(extra, train, margins=m, base=a.margin, specs=FORUM_SPECS)
+        tables = FoldTables(extra, train, margins=m, base=a.margin, specs=FORUM_SPECS, family_wide=a.family_wide)
         print(f"fold {k}: tables of fold {train}, {len(tables.templates)} templates ({time.perf_counter() - t0:.0f} s)",
               flush=True)
         speeds = None
@@ -319,6 +320,9 @@ def main(argv: list[str] | None = None) -> int:
                     help="Forum: per-family margins from the training fold's held-out residuals, or none")
     ap.add_argument("--margin-q", type=float, default=1.0, help="Forum: the residual quantile a margin takes")
     ap.add_argument("--area", action="store_true", help="Forum: report the margins' support area cost")
+    ap.add_argument("--family-wide", action="store_true",
+                    help="Forum: also the current attack's family template (every state's union, t from the attack "
+                         "start): a structural union for rare branches")
     ap.add_argument("--no-tube", dest="tube", action="store_false",
                     help="Forum: leave out the current-collider tube (forum_support.SubjectRecall.in_tube)")
     ap.add_argument("--write-margins", type=Path, default=None,

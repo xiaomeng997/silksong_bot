@@ -98,8 +98,9 @@ class FoldTables:
     extra dilation (u); base: added for every key (the planner's margin)."""
 
     def __init__(self, extra: Path, fold: int, margins: dict[tuple[str, str], float] | None = None,
-                 base: float = 0.0, specs=FORUM_SPECS):
+                 base: float = 0.0, specs=FORUM_SPECS, family_wide: bool = False):
         self.extra, self.fold, self.specs = Path(extra), fold, specs
+        self.family_wide = family_wide       # also the family templates (t from the attack start): a structural union
         self.margins = dict(margins or {})
         build = json.loads((self.extra / "build.json").read_text("utf-8"))
         self.walk: dict[str, Walk] = {}
@@ -119,7 +120,13 @@ class FoldTables:
             raw, _ = hb.load_templates(npz, prefix=hb.SUPPORT)
             for k, t in raw.items():
                 parts = k.split("/")
-                if len(parts) != 4:
+                if len(parts) not in (3, 4):
+                    continue
+                if len(parts) == 3 and not (parts[2] == "anchor" and self.family_wide):
+                    continue
+                if len(parts) == 3 and parts[2] == "anchor" and self.family_wide:    # t from the attack start
+                    m = base + self.margins.get((tk, parts[1]), 0.0)
+                    tpls[k] = t.dilated(rx=hb.HERO_HALF_U[0] + m, ry=hb.HERO_HALF_U[1] + m, key=k)
                     continue
                 if parts[1] == "ent" and parts[3] == "self":       # a hazard's self template
                     m = base + self.margins.get(("ent", parts[2]), 0.0)
@@ -134,6 +141,10 @@ class FoldTables:
 
     def key(self, fam: str, state: str) -> str | None:
         k = f"{hb.SUPPORT}{fam}/{state}/anchor"
+        return k if k in self.meta else None
+
+    def family_key(self, fam: str) -> str | None:
+        k = f"{hb.SUPPORT}{fam}/anchor"
         return k if k in self.meta else None
 
     def self_key(self, hazard: str) -> str | None:
@@ -332,6 +343,9 @@ class SubjectRecall:
             if cur is not None:
                 anc = ((cur.anchor[0], cur.anchor[1], cur.mirror),) if cur.anchor is not None else new
                 ctx = (cur.family, cur.start, anc)
+                if self.t.family_wide:       # the union over every state at the time since the attack start
+                    e = cur.t_start - T_o
+                    self._place(out, self.t.family_key(cur.family), e, e, list(anc), H)
             e0 = s.t_entry - T_o
             self._walk(sp, w, s.state, e0, ctx, new, s.dead, H, out)
         return list(dict.fromkeys(out))
@@ -410,9 +424,9 @@ class SubjectRecall:
     def in_tube(self, s: Subject, pts: list[tuple[float, float, float]], T_o: float) -> bool:
         """The enemy's damage colliders as last exported (its box on the last frame it was seen, at most
         TUBE_MAX_AGE_S before the origin) moved at most its type's top speed (tube_speed: measured on the training
-        fold) since then: the current-collider tube. Only for the recall's lags (a few frames): dying bodies (the
-        export drops an enemy on its kill frame while its body still hurts for some frames: forum_products
-        death_tails), waiting bodies, a parked summon, a body thrown back by a clash."""
+        fold) since then: the current-collider tube, for an enemy outside every attack instance only (no behaviour
+        template applies: a dying body - the export drops an enemy on its kill frame while its body still hurts for
+        some frames, forum_products death_tails - a waiting body, a parked summon), and only for the recall's lags."""
         if s.box is None:
             return False
         age = T_o - s.seen_T
@@ -486,7 +500,7 @@ class SubjectRecall:
                 if self.covered(pl, pts):
                     how = "forecast" if k == 0 else "namesake forecast"
                     break
-                if self.tube and self.in_tube(o, pts, T_o):
+                if self.tube and o.cur is None and self.in_tube(o, pts, T_o):
                     how = "current-collider tube" if k == 0 else "namesake tube"
                     break
         if how is not None:
@@ -501,11 +515,14 @@ class SubjectRecall:
                             "ho": c.get("ho"), "label": label})
 
 
-def top_speeds(caches, specs=FORUM_SPECS, jump_u: float = 2.0) -> dict[str, float]:
-    """Per enemy type the largest speed (u per game s) of its transform between consecutive exported frames over the
-    given fight caches (moves longer than jump_u in one frame are teleports or respawns and are left out): the
-    current-collider tube's growth rate."""
-    out: dict[str, float] = {}
+def top_speeds(caches, specs=FORUM_SPECS, jump_u: float = 1.2, min_dt: float = 0.012,
+               q: float = 0.9999) -> dict[str, float]:
+    """Per enemy type the q-quantile speed (u per game s) of its transform between consecutive exported frames over
+    the given fight caches: frames with a game step shorter than min_dt (hit-stop, the end-of-battle slow motion: a
+    small step over a real-time move reads as hundreds of u/s) and moves longer than jump_u in one frame (teleports,
+    pooled respawns) are left out. 2026-10-04, 9 fights: p99.99 31-56 u/s per type, the maxima 43-66 u/s
+    (Clapper jump launch, Minister charge). The current-collider tube's growth rate."""
+    vals: dict[str, list] = defaultdict(list)
     for c in caches:
         types = c["types"]
         order = np.lexsort((c["e_fi"], c["e_iid"]))
@@ -514,14 +531,13 @@ def top_speeds(caches, specs=FORUM_SPECS, jump_u: float = 2.0) -> dict[str, floa
         same = (iid[1:] == iid[:-1]) & (fi[1:] == fi[:-1] + 1)
         dt = np.diff(c["T"])[fi[:-1].clip(0, len(c["T"]) - 2)]
         d = np.hypot(np.diff(x), np.diff(y))
-        ok = same & (dt > 1e-4) & (d <= jump_u)
-        sp = np.zeros_like(d)
-        sp[ok] = d[ok] / dt[ok]
+        ok = same & (dt >= min_dt) & (d <= jump_u)
         for k in np.unique(tk[:-1][ok]):
             t = types[int(k)]
             if t in specs:
-                out[t] = max(out.get(t, 0.0), float(sp[ok & (tk[:-1] == k)].max()))
-    return out
+                m = ok & (tk[:-1] == k)
+                vals[t].append(d[m] / dt[m])
+    return {t: float(np.quantile(np.concatenate(v), q)) for t, v in vals.items()}
 
 
 def thrown(tr: SubjectTracker, sp) -> list[tuple]:
