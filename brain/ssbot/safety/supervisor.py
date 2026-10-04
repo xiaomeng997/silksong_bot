@@ -141,7 +141,7 @@ import numpy as np
 
 from ssbot.core.primitives import ALL, ATTACKS, DAMAGING, EVASIVE, N_PRIM, Prim
 from ssbot.core.primitives import code as prim_code
-from ssbot.core.worldstate import FM, Ev, WorldState
+from ssbot.core.worldstate import FM, Ev, PauseBlock, WorldState
 from ssbot.safety.hits_to_death import (MASK_BROKEN, MASK_INTACT, MASK_NONE, MASK_UNKNOWN, UNBOUNDED, SupportEvent,
                                         ctx_from_support, hits_to_death,
                                         mask_intact, mask_state, pending_from_tags)
@@ -373,6 +373,13 @@ def input_from_world(ws: WorldState, t: float, support: Sequence[SupportEvent] |
     pending = int(r.pending_dmg.v) if r.pending_dmg.conf > 0 else (hp or 0) + blue
     dmg = sum(int(getattr(ev.data, "amount", 0) or 0) for ev in ws.events if ev.kind == Ev.HIT_TAKEN)
     pause, quit_ = _known(g.pause_available), _known(g.quit_available)
+    blk = g.pause_blockers
+    if not foreground_sink and pause is False and isinstance(blk, int) and blk and not blk & ~int(PauseBlock.FOCUS_LOST):
+        # FOCUS_LOST alone says nothing under OracleInjectSink (training instances run unfocused), as STATE "focus"
+        # says nothing to input_from_state: the vision view of every training run blocked every pause on it, so QS
+        # and Q4's "pausable" never held there (fixer round 2026-10-04: the degraded_dust STUCK replay latched QS and
+        # never found a safe frame, blockers 256 on every frame)
+        pause = True
     base = dict(t=t, dt=1 / 60, hp=hp, max_hp=None if max_hp is None else int(max_hp), blue=blue,
                 mask=_FM_MASK.get(r.fractured_mask.v, MASK_UNKNOWN) if r.fractured_mask.conf > 0 else MASK_UNKNOWN,
                 support=tuple(support or ()), support_known=support is not None and bool(support_known),

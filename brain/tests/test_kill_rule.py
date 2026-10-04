@@ -507,3 +507,19 @@ def test_released_rise_blocks_certification():
     ctx = FilterContext(allowed_mask=np.ones(N_PRIM, bool), h=2, support_known=True, kill_window_s=0.1668)
     cert = kill_certified(np.zeros(N, bool), np.full(N, 10), T1, ctx, FT, k_lo=k_lo, vel_y=vel, latched=lat)
     assert cert.tolist() == [False, True, True, True]
+
+
+def test_vision_focus_lost_alone_does_not_block_pausable_in_training():
+    """The vision view's pause model counts FOCUS_LOST, which says nothing under OracleInjectSink (training runs are
+    unfocused): the supervisor ignores it unless the sink is the foreground one, as input_from_state ignores STATE
+    "focus" (the degraded_dust STUCK replay latched QS and never had a pausable frame)."""
+    from ssbot.core.worldstate import E, PauseBlock, WorldState
+    from ssbot.safety.supervisor import input_from_world
+    ws = WorldState()
+    ws.res.hp, ws.res.hp_max = E(3), E(5)
+    ws.game.pause_available = E(False)
+    ws.game.pause_blockers = int(PauseBlock.FOCUS_LOST)
+    assert input_from_world(ws, 0.0, support_known=False).pausable is True
+    assert input_from_world(ws, 0.0, support_known=False, foreground_sink=True).pausable is False
+    ws.game.pause_blockers = int(PauseBlock.FOCUS_LOST | PauseBlock.TIME_SLOWED)
+    assert input_from_world(ws, 0.0, support_known=False).pausable is False
