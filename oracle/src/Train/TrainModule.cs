@@ -18,6 +18,7 @@ namespace SsOracle.Train
             StartRandomizer.Register();
             AbilityGrant.Register();
             TimeScaleRpc.Register();
+            BattleWaveRpc.Register();
             ProjectionSample.Install(host);
         }
     }
