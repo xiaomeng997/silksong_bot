@@ -219,5 +219,26 @@ def forum_variant(arm: str) -> Encounter:
     return replace(FORUM, name=f"Forum_{arm}", savestate=f"fo_{arm}")
 
 
+def forum_wave_intro(wave: int) -> Callable[[Ctx], int]:
+    """The intro of a wave-start savestate (ssbot.train.wave_start: fo_r1_w<i>, taken at wave i's activation): no walk
+    and no roar; DebugMod's load restarts the battle at wave i by itself. Waits for room.battles to report it."""
+    def intro(ctx: Ctx) -> int:
+        from ssbot.train.wave_start import wait_wave_start
+        s = wait_wave_start(ctx.link, FORUM, wave)
+        ctx.log.append({"wave_start": wave, "f": s["f"], "battle_start_f": ctx.tap.wake_frame})
+        if ctx.tap.wake_frame is None:
+            raise RuntimeError("intro: room.battles started but the tap saw no start")
+        return ctx.tap.wake_frame
+    return intro
+
+
+# Wave starts for targeted data collection (Forum plan R1): fo_A's route loadout at wave i of a battle reached by the
+# skip policy (wave_start.make_wave_states). What such a start keeps and what it does not (no helper from wave 2 on,
+# an earlier overlapping wave's survivors gone): docs/facts/1.0.30000/forum.md, R1 section. Data only: gates stay on
+# full gauntlets. Timebox 180 s (an episode is a slice of a gauntlet, not a whole one).
+FORUM_WAVE_STARTS = tuple(replace(FORUM, name=f"Forum_A_w{i}", savestate=f"fo_r1_w{i}", intro=forum_wave_intro(i),
+                                  timebox_s=180.0) for i in range(14))
+
+
 ENCOUNTERS = {e.name: e for e in (BELL_BEAST, BELL_BEAST_REAPER, FORUM,
-                                  *(forum_variant(a) for a in ("A", "B", "C", "A5")))}
+                                  *(forum_variant(a) for a in ("A", "B", "C", "A5")), *FORUM_WAVE_STARTS)}

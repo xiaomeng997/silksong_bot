@@ -81,6 +81,10 @@ def make_policy(name: str, view: str = "oracle", run_dir: Path | None = None, in
     if name == "data":
         from ssbot.train.data_policy import DataPolicy, GauntletDataPolicy
         return GauntletDataPolicy() if gauntlet else DataPolicy()
+    if name in ("data2", "data2_envoy"):
+        # the Forum's targeted data policy v2 (Forum plan R1); data2_envoy never hits the Envoy (wave 0 goes on)
+        from ssbot.train.forum_policy import ENVOY, ForumDataPolicyV2
+        return ForumDataPolicyV2(protect=(ENVOY,), focus=(ENVOY,)) if name == "data2_envoy" else ForumDataPolicyV2()
     if name == "planner":
         from ssbot.train.planner_policy import PlannerPolicy
         pol = PlannerPolicy(view=view, threads=threads, log_dir=run_dir, instance=instance, real_quit_p=real_quit,
@@ -211,13 +215,27 @@ def back_into_slot(link, enc, instance: int, tries: int = SLOT_TRIES, slot_timeo
                 log(f"recovery step failed: {type(e2).__name__}: {e2}; {_describe(link.state)}")
 
 
+def set_time_scale(link, scale: float, instance: int) -> None:
+    """Oracle time.scale (training copy only). Above 1 it needs the oracle of 06a7c2b (through DebugMod's TimeScale):
+    the deployed one before it clamps to 1, so the run stops rather than collect at the wrong speed."""
+    if scale == 1.0:
+        return
+    r = link.rpc("time.scale", timeout_s=10, scale=scale)
+    got = float((r or {}).get("time_scale") or 0.0)
+    if abs(got - scale) > 1e-3:
+        raise SystemExit(f"[i{instance}] time.scale {scale}: the game runs at {got} ({r}); not collecting")
+    print(f"[i{instance}] time.scale {scale}: {r}", flush=True)
+
+
 def worker(a: argparse.Namespace) -> int:
     from ssbot.ipc.oracle_link import OracleLink
     from ssbot.record.recorder import Recorder
     from ssbot.train.encounters import ENCOUNTERS
     from ssbot.train.episode import AttemptRecord, make_tap, run_episode
 
-    enc = ENCOUNTERS[a.encounter]
+    # a comma-separated list rotates per episode (the Forum's wave starts: Forum_A_w3,Forum_A_w7,...)
+    encs = [ENCOUNTERS[n] for n in a.encounter.split(",")]
+    enc = encs[0]
     run_dir = Path(a.run_dir)
     out = (run_dir / f"attempts_i{a.instance}.jsonl").open("a", encoding="utf-8", newline="\n")
     link = OracleLink(instance=a.instance, connect_timeout_s=120)
@@ -234,7 +252,8 @@ def worker(a: argparse.Namespace) -> int:
         print(f"[i{a.instance}] policy warm-up {policy.warmup():.1f} s", flush=True)
     rev = git_rev()
     env = env_overrides()
-    fp = config_fp(enc.name, a.policy, a.mode, a.view, rev, env)
+    fp = config_fp(a.encounter, a.policy, a.mode, a.view, rev,
+                   {**env, "time_scale": str(a.time_scale)} if a.time_scale != 1.0 else env)
     if env:
         print(f"[i{a.instance}] SSBOT switches (in config_fp): {env}", flush=True)
     from ssbot.train.episode import unpause
@@ -256,6 +275,7 @@ def worker(a: argparse.Namespace) -> int:
         from ssbot.train.episode import wait_settled
         wait_settled(link, enc.scene, timeout_s=60)
     back_into_slot(link, enc, a.instance)
+    set_time_scale(link, a.time_scale, a.instance)
     rec_obj = None
     deadline = time.monotonic() + a.hours * 3600 if a.hours else None
     counts: Counter = Counter()
@@ -271,9 +291,12 @@ def worker(a: argparse.Namespace) -> int:
                     rec_obj.close()
                 rec_obj = Recorder(link, out_dir=run_dir / "rec", profile="TRAIN",
                                    episode=f"i{a.instance}_{k // a.rotate:03d}",
-                                   config={"encounter": enc.name, "mode": a.mode, "policy": a.policy,
-                                           "view": a.view}).start()
-            seed = a.seed + a.instance * 1_000_000 + k
+                                   config={"encounter": a.encounter, "mode": a.mode, "policy": a.policy,
+                                           "view": a.view, "time_scale": a.time_scale}).start()
+            seed = a.seed + k if a.same_seeds else a.seed + a.instance * 1_000_000 + k
+            enc = encs[k % len(encs)]
+            if a.time_scale != 1.0:
+                set_time_scale(link, a.time_scale, a.instance)
             rec = AttemptRecord(unit=enc.name, stage="TRAIN", profile="TRAIN" if a.view == "oracle" else "SIM_FINAL",
                                 build="1.0.30000", code_rev=rev,
                                 config_fp=fp, start_kind="savestate", mode=a.mode, seed=seed)
@@ -284,6 +307,7 @@ def worker(a: argparse.Namespace) -> int:
             d["instance"] = a.instance
             d["episode"] = k
             d["env"] = env
+            d["time_scale"] = a.time_scale
             d["recording"] = str(rec_obj.path) if rec_obj else None
             d["t"] = datetime.now().isoformat(timespec="seconds")
             out.write(json.dumps(d) + "\n")
@@ -336,10 +360,12 @@ def new_run_dir(encounter: str, tag: str, root: Path | None = None, now: datetim
 
 
 def run(a: argparse.Namespace) -> int:
-    tag = a.mode if a.policy == "data" else f"{a.mode}_{a.policy}_{a.view}"
+    tag = a.mode if a.policy == "data" else a.policy if a.policy.startswith("data") else f"{a.mode}_{a.policy}_{a.view}"
+    if a.time_scale != 1.0:
+        tag += f"_x{a.time_scale:g}"
     if a.inject_hits > 0:
         tag += "_inject"
-    run_dir = new_run_dir(a.encounter, tag)
+    run_dir = new_run_dir(a.encounter if "," not in a.encounter else a.encounter.split(",")[0] + "_mix", tag)
     (run_dir / "config.json").write_text(json.dumps({**vars(a), "env": env_overrides()}, indent=1, default=str),
                                          encoding="utf-8")
     procs = []
@@ -353,6 +379,10 @@ def run(a: argparse.Namespace) -> int:
             cmd += ["--start-silk", str(a.start_silk[0]), str(a.start_silk[1])]
         if a.silk_reserve:
             cmd.append("--silk-reserve")
+        if a.time_scale != 1.0:
+            cmd += ["--time-scale", str(a.time_scale)]
+        if a.same_seeds:
+            cmd.append("--same-seeds")
         if a.key_cost:
             cmd += ["--key-cost"] + [str(v) for v in a.key_cost]
         if a.start_hp:
@@ -523,6 +553,12 @@ def main(argv: list[str] | None = None) -> int:
                             "per press, per change to the previous plan; 0 0 = off) and key_tie (J a swap may give "
                             "up; default planner.KEY_TIE; < 0: the class bound alone, the first A/B's rule). "
                             "Default: the playbook's"),
+        p.add_argument("--time-scale", type=float, default=1.0,
+                       help="oracle time.scale for the whole run (data collection only; > 1 needs the oracle of "
+                            "06a7c2b); in config_fp and in every row")
+        p.add_argument("--same-seeds", action="store_true",
+                       help="episode k uses seed + k on every instance (default: seed + instance * 1e6 + k): the "
+                            "time-scale check runs the same seeds on two instances")
         p.add_argument("--silk-reserve", action="store_true",
                        help="planner policy: keep the Bind's 9 silk at full HP too (playbook "
                             "reserve_at_full_hp; the Q1a low-HP check starts with 9 silk and keeps it)")
