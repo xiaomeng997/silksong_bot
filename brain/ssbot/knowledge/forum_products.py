@@ -35,6 +35,7 @@ the gauntlet builder does (forum_support.SubjectTracker on the Control FSM event
 """
 import json
 import math
+import re
 from collections import Counter, defaultdict
 from pathlib import Path
 
@@ -46,6 +47,9 @@ from ssbot.train.gauntlet import type_key as go_type
 
 REPO = Path(__file__).resolve().parents[3]
 MW_CHAIN_F = 90                 # a multi-hit's follow-ups land within this many frames of the hit before
+# the multi-hit attacks (hornet_multi_wounder): their follow-up hits come as "damage" events of the same attack, the
+# collider's trailing number stripped (Choristor Whip Hit 1-6, Reed ParrySlash Hit, Minister Slash Collider)
+MULTI_HIT = frozenset(("Whip Hit", "ParrySlash Hit", "Slash Collider"))
 TAIL_LOOK_S = 6.0
 BIND_NEED_S = 1.37 + 0.15       # DESIGN §3.5.6: T_bind + delta_b (no Injector Band)
 BELOW_DX = (0.0, 3.0, 6.0)      # hero x offsets from the commit point tested by "below"
@@ -280,13 +284,21 @@ class Chains:
                                                               cur["first_blocked"]))
         for f, k, d in sorted(v.events, key=lambda e: e[0]):
             if k == "damage":
-                close()
                 tk, leaf = source_type(d.get("source"))
                 if tk is not None and go_type(leaf) == tk:
                     leaf = "body"
+                who = str(d.get("source")).rsplit("/", 1)[0]
+                base = re.sub(r"\s*\d+$", "", leaf)
+                if cur is not None and base in MULTI_HIT and cur["base"] == base and cur["who"] == who \
+                        and f - cur["last"] <= MW_CHAIN_F:
+                    cur["frames"][int(f)] = max(cur["frames"].get(int(f), 0), int(d.get("amount") or 1))
+                    cur["last"], cur["mw"] = int(f), True
+                    continue
+                close()
                 # LethalBlock (data mode) blocks a hit at 1 mask: a multi-hit whose first hit is blocked never chains
-                cur = {"type": tk or "?", "src": leaf, "frames": {int(f): int(d.get("amount") or 1)}, "last": int(f),
-                       "mw": False, "first_blocked": any(int(f) + g in blocked for g in (-1, 0, 1))}
+                cur = {"type": tk or "?", "src": base if base in MULTI_HIT else leaf, "base": base, "who": who,
+                       "frames": {int(f): int(d.get("amount") or 1)}, "last": int(f), "mw": False,
+                       "first_blocked": any(int(f) + g in blocked for g in (-1, 0, 1))}
             elif k == "special_damage" and "Multihit" in str(d.get("fsm")) and cur is not None \
                     and f - cur["last"] <= MW_CHAIN_F:
                 cur["frames"][int(f)] = max(cur["frames"].get(int(f), 0), int(d.get("amount") or 1))
@@ -315,40 +327,55 @@ class Chains:
 
 
 class DeathTails:
+    """The export drops a killed enemy on its kill frame (it leaves the HealthManager list), but its body and colliders
+    can still hurt: per kill the hero contacts ("damage", each frame of "damage_blocked") whose source names the
+    killed enemy's GameObject, up to TAIL_LOOK_S after the kill."""
+
     def __init__(self):
-        self.tails: dict[str, list] = defaultdict(list)
-        self.exported: dict[str, list] = defaultdict(list)
+        self.kills: Counter = Counter()
+        self.delays: dict[str, list] = defaultdict(list)       # type -> delay of the last post-kill contact (s)
+        self.frames: dict[str, list] = defaultdict(list)
+        self.n: Counter = Counter()
 
     def add(self, v: FightView) -> None:
-        c = v.c
+        names = {}
+        for f, k, d in v.events:
+            if k == "fsm" and isinstance(d.get("ent"), int) and isinstance(d.get("obj"), str):
+                names.setdefault(int(d["ent"]), d["obj"])
+        contacts = []
+        for f, k, d in v.events:
+            if k == "damage":
+                contacts.append((int(f), str(d.get("source"))))
+            elif k == "damage_blocked" and isinstance(d.get("first_f"), int) and isinstance(d.get("last_f"), int):
+                contacts += [(g, str(d.get("source"))) for g in range(d["first_f"], d["last_f"] + 1)]
+        contacts.sort()
+        cf = np.array([c[0] for c in contacts], np.int64)
         for f, k, d in v.events:
             if k != "hit" or not d.get("dead") or not isinstance(d.get("ent"), int):
                 continue
-            iid, fi = int(d["ent"]), v.fi_of.get(int(f))
-            tk = v.tk_of.get(iid)
-            if fi is None or tk is None:
+            tk, name = d.get("type_key"), names.get(int(d["ent"]))
+            if tk not in v.specs or not name or int(f) not in v.fi_of:
                 continue
-            T0 = float(v.T[fi])
-            fi1 = int(np.searchsorted(v.T, T0 + TAIL_LOOK_S))
-            nxt = [i.f_start for i in v.instances if i.iid == iid and i.f_start > int(f)]
-            if nxt and v.fi_of.get(min(nxt)) is not None:      # a pooled summon back in play
-                fi1 = min(fi1, v.fi_of[min(nxt)] - 1)
-            rs = v.rows_between(iid, fi, min(fi1, len(v.f) - 1))
-            last_arm, last_exp, prev = None, None, fi - 1
-            for r in rs:
-                efi = int(c["e_fi"][r])
-                if efi - prev > 1:        # left the export (a pooled summon comes back much later)
+            self.kills[tk] += 1
+            T0 = float(v.T[v.fi_of[int(f)]])
+            last = None
+            for j in range(int(np.searchsorted(cf, int(f))), len(contacts)):
+                g, src = contacts[j]
+                if g not in v.fi_of or float(v.T[v.fi_of[g]]) - T0 > TAIL_LOOK_S:
                     break
-                prev = efi
-                last_exp = efi
-                if not math.isnan(float(c["e_box"][r, 0])):
-                    last_arm = efi
-            self.tails[tk].append(0.0 if last_arm is None else float(v.T[last_arm]) - T0)
-            self.exported[tk].append(0.0 if last_exp is None else float(v.T[last_exp]) - T0)
+                if name in src.split("/"):
+                    last = g
+                    self.n[tk] += 1
+            if last is not None:
+                self.delays[tk].append(float(v.T[v.fi_of[last]]) - T0)
+                self.frames[tk].append(last - int(f))
 
     def result(self) -> dict:
-        return {tk: {"kills": len(v), "damage_collider_after_kill_s": _q(v),
-                     "exported_after_kill_s": _q(self.exported[tk])} for tk, v in sorted(self.tails.items())}
+        return {"note": "contacts naming the killed enemy after its kill frame (the export no longer has it)",
+                "by_type": {tk: {"kills": n, "kills_with_contacts_after": len(self.delays[tk]),
+                                 "contact_frames_after": self.n[tk], "last_contact_s": _q(self.delays[tk]),
+                                 "last_contact_frames": _q(self.frames[tk], nd=0)}
+                            for tk, n in sorted(self.kills.items())}}
 
 
 class KillFreeze:

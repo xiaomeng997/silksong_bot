@@ -130,12 +130,17 @@ def test_chains_count_multi_hit_follow_ups_and_skip_blocked_first_hits():
                   (130, "catastrophe", {"src": "Whip Hit 2", "blocked": True, "amount": 1}),
                   (400, "damage", {"source": "Song Pilgrim 03 (2)/Whip Hit 1", "amount": 1}),
                   (400, "catastrophe", {"src": "Whip Hit 1", "blocked": True, "amount": 1}),
-                  (700, "damage", {"source": "Wave 8 - Heavy Sentry/Song Heavy Sentry", "amount": 2})]
+                  (700, "damage", {"source": "Wave 8 - Heavy Sentry/Song Heavy Sentry", "amount": 2}),
+                  # follow-ups as damage events of the same whip, another Choristor's hit in between ends nothing
+                  (1000, "damage", {"source": "Song Pilgrim 03 (3)/Whip Hit 1", "amount": 1}),
+                  (1012, "damage", {"source": "Song Pilgrim 03 (3)/Whip Hit 3", "amount": 1}),
+                  (1030, "damage", {"source": "Song Pilgrim 03 (3)/Whip Hit 4", "amount": 1})]
     ch = Chains()
     ch.add(V())
     r = ch.result()["by_source"]
-    assert r["Song Pilgrim 03/Whip Hit 2"]["hits_max"] == 3 and r["Song Pilgrim 03/Whip Hit 2"]["damage_max"] == 3
-    assert r["Song Pilgrim 03/Whip Hit 1"] == {"n": 1, "first_hit_blocked": 1}
+    w = r["Song Pilgrim 03/Whip Hit"]          # the whip's colliders 1-6 are one attack
+    assert w["n"] == 3 and w["first_hit_blocked"] == 1 and w["chains_counted"] == 2
+    assert w["hits_max"] == 3 and w["damage_max"] == 3 and w["hits"] == {3: 2}
     assert r["Song Heavy Sentry/body"]["damage_max"] == 2
 
 
@@ -205,7 +210,10 @@ def test_top_speed_and_current_collider_tube(tmp_path):
     assert math.isclose(v["Foe"], 6.0, rel_tol=1e-3)
     rec = SubjectRecall.__new__(SubjectRecall)
     rec.tube_speed, rec.tube_skin = {"Foe": 6.0}, 0.1
-    s = Subject(1, "Foe", box=(9.5, 4.5, 10.5, 5.5))
+    s = Subject(1, "Foe", box=(9.5, 4.5, 10.5, 5.5), seen_T=1.0)
     # within the hero half-width + skin + 6 u/s x 4 frames of the box edge, and beyond it
-    assert rec.in_tube(s, [(10.5 + 0.25 + 0.1 + 0.39, 5.0, 4 / 60)])
-    assert not rec.in_tube(s, [(10.5 + 0.25 + 0.1 + 0.41, 5.0, 4 / 60)])
+    assert rec.in_tube(s, [(10.5 + 0.25 + 0.1 + 0.39, 5.0, 4 / 60)], 1.0)
+    assert not rec.in_tube(s, [(10.5 + 0.25 + 0.1 + 0.41, 5.0, 4 / 60)], 1.0)
+    # a box last seen 2 frames before the origin (a killed enemy left the export) grows from then on
+    assert rec.in_tube(s, [(10.5 + 0.25 + 0.1 + 0.59, 5.0, 4 / 60)], 1.0 + 2 / 60)
+    assert not rec.in_tube(s, [(10.5, 5.0, 0.0)], 1.6)          # too old: no tube

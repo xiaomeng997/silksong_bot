@@ -43,6 +43,7 @@ from ssbot.knowledge.gauntlet_tables import FACES_LEFT, FORUM_SPECS, HAZARD_ALIA
 BIN = hb.BIN_S
 FRAME_S = 1.0 / 60.0
 TAIL = "_tail"
+TUBE_MAX_AGE_S = 0.5         # the current-collider tube starts from a box seen at most this long ago
 HAZARD_GONE_S = 0.5          # an armed hazard missing from the export this long has left (behaviour_tables
 #                              ABSENT_CLOSE_F: 30 frames)
 DWELL_SLACK_S = BIN          # logged dwell ranges are frame-quantised: one bin of slack on each side
@@ -406,17 +407,25 @@ class SubjectRecall:
                 self._place(out, self.t.key(c[0], TAIL), lo, hi, c[2], H)
             else:
                 self._place(out, self.t.key(c[0], st), lo, hi, c[2], H)
-    def in_tube(self, s: Subject, pts: list[tuple[float, float, float]]) -> bool:
-        """The enemy's damage colliders enabled now (its box on the origin frame) moved at most its type's top speed
-        (tube_speed: measured on the training fold) by the query time: the current-collider tube. Only for the
-        recall's lags (a few frames): dying and waiting bodies, a parked summon, a body thrown back by a clash."""
+    def in_tube(self, s: Subject, pts: list[tuple[float, float, float]], T_o: float) -> bool:
+        """The enemy's damage colliders as last exported (its box on the last frame it was seen, at most
+        TUBE_MAX_AGE_S before the origin) moved at most its type's top speed (tube_speed: measured on the training
+        fold) since then: the current-collider tube. Only for the recall's lags (a few frames): dying bodies (the
+        export drops an enemy on its kill frame while its body still hurts for some frames: forum_products
+        death_tails), waiting bodies, a parked summon, a body thrown back by a clash."""
         if s.box is None:
+            return False
+        age = T_o - s.seen_T
+        if age > TUBE_MAX_AGE_S:
             return False
         v = self.tube_speed.get(s.tk, 0.0)
         hx, hy = hb.HERO_HALF_U[0] + self.tube_skin, hb.HERO_HALF_U[1] + self.tube_skin
         b = s.box
-        return any(b[0] - hx - v * tau <= x <= b[2] + hx + v * tau and b[1] - hy - v * tau <= y <= b[3] + hy + v * tau
-                   for x, y, tau in pts)
+        for x, y, tau in pts:
+            g = v * (age + tau)
+            if b[0] - hx - g <= x <= b[2] + hx + g and b[1] - hy - g <= y <= b[3] + hy + g:
+                return True
+        return False
 
     def covered(self, placements: list, pts: list[tuple[float, float, float]]) -> bool:
         q = self.t.query
@@ -477,7 +486,7 @@ class SubjectRecall:
                 if self.covered(pl, pts):
                     how = "forecast" if k == 0 else "namesake forecast"
                     break
-                if self.tube and self.in_tube(o, pts):
+                if self.tube and self.in_tube(o, pts, T_o):
                     how = "current-collider tube" if k == 0 else "namesake tube"
                     break
         if how is not None:
