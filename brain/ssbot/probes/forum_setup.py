@@ -50,6 +50,7 @@ ARMS = {
     "A": {"pre": "fo_pre_help7", "crest": "Reaper", "tools": [COGFLY, GRIP]},
     "B": {"pre": "fo_pre_help7", "crest": "Hunter_v2", "tools": [COGFLY]},
     "C": {"pre": "fo_pre_nohelp7", "crest": "Hunter_v2", "tools": [COGFLY]},
+    "W": {"pre": "fo_pre_help7", "crest": "Wanderer", "tools": [COGFLY, GRIP]},   # the person's demo, 2026-10-04
 }
 
 
