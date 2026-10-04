@@ -344,3 +344,51 @@ def test_skipped_states_reach_the_perception_path():
             acted.append(s["f"])
     assert fed == [s["f"] for s in frames if s["f"] <= acted[-1]]
     assert pol.counts["caught_up"] > 0
+
+
+def test_kill_commitment_plays_the_certified_plan_by_game_time():
+    """The kill commitment (planner_policy module docstring, 7) on the fixture STATEs (at full HP: the fixture's 2 HP
+    start would hand the keys to Q1's pause machine): a certified plan kept when the view shows a kill is played by
+    game time from the plan's own frame (the fixture runs at full speed: one plan frame per real frame), the planner is
+    not ticked meanwhile, every commitment tick is logged with its plan frame, and the commitment ends at its window
+    (k_hi + window), after which the policy plans again."""
+    import numpy as np
+
+    def full(s):
+        s = dict(s)
+        s["hero"] = dict(s.get("hero") or {}, health=5)
+        s["ev"] = [e for e in s.get("ev") or () if e.get("k") not in ("damage", "hp")]
+        return s
+
+    pol = PlannerPolicy(view="oracle", threads=2)
+    pol.terrain = Terrain2D.from_boxes(ARENA)
+    pol.reset(random.Random(1), BELL_BEAST)
+    states = [full(s) for s in fx.window(0)][:140]
+    for s in states[:80]:
+        pol.act(s, Tap)
+    assert pol.sc.pq is None
+    s0 = states[79]
+    cmd = np.arange(1, 61, dtype=np.int64) << 8          # distinct masks: plan frame k sends cmd[k - P - 1]
+    P, k_hi, window = 1, 8, 20
+    pol.commit = {"fo": s0["f"], "f": s0["f"], "tg": pol._tg[-1][1], "P": P, "cmd": cmd, "end_k": k_hi + window,
+                  "k_hi": k_hi, "window": window, "own": True, "plan": "TEST", "path": None, "path_hit": None,
+                  "killed": None}
+    assert pol.kill_commit_active
+    ticks = pol.planner.ticks
+    pol._kill_seen_f = s0["f"] + 1                         # the view shows the kill on the next frame
+    sent = []
+    for s in states[80:]:
+        n = pol.counts["KILL_COMMIT"]
+        m = pol.act(s, Tap)
+        if pol.counts["KILL_COMMIT"] > n:
+            sent.append((s["f"], m))
+        if pol.commit is None:
+            break
+    assert pol.planner.ticks == ticks + 1                  # not ticked while committed; the tick after the window plans
+    assert pol.commit is None and pol.commits and pol.commits[0]["plan"] == "TEST" and not pol.kill_commit_active
+    ks = [f + 2 - s0["f"] for f, _ in sent]                # full speed: the frame the mask is for, from the plan's
+    assert ks[0] == 3 and ks[-1] == k_hi + window and len(sent) == k_hi + window - 2
+    for (f, m), k in zip(sent, ks):
+        assert m == int(cmd[k - P - 1])
+    pol.act(states[80 + len(sent) + 1], Tap)              # the window over: planning again
+    assert pol.planner.ticks == ticks + 2

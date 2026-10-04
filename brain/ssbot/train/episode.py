@@ -25,6 +25,7 @@ Outcomes (AttemptRecord.outcome):
   STUCK         no outcome within the encounter's timebox after the wake;
   HARNESS_FAIL  the reset, the intro or the link failed, or the game paused or left the scene unasked.
 """
+import os
 import random
 import threading
 import time
@@ -279,6 +280,10 @@ def _run(link: OracleLink, enc: Encounter, tap: FightTap, policy, cfg: EpisodeCo
     policy.reset(random.Random(cfg.seed), enc)
     timebox = cfg.timebox_s or enc.timebox_s
     post_f = round(getattr(enc, "post_clear_s", POST_CLEAR_FRAMES / 60.0) * 60)
+    if os.environ.get("SSBOT_POST_CLEAR_S"):
+        # a longer post-kill window (the certified-kill check: the whole boss-death slow motion, ~100 real frames,
+        # before the next savestate load, so the kill commitment's path through it is recorded)
+        post_f = max(post_f, round(float(os.environ["SSBOT_POST_CLEAR_S"]) * 60))
     # a gauntlet's hazards outlive the last kill (the Forum's dying Clappers, runes, bombs): the policy keeps playing
     # through the window instead of standing still
     act_after = getattr(policy, "act_after_clear", False) or bool(getattr(enc, "waves", ()))
@@ -321,7 +326,9 @@ def _run(link: OracleLink, enc: Encounter, tap: FightTap, policy, cfg: EpisodeCo
             # zeros after a kill, unless the policy asks to keep acting or the encounter is a gauntlet (the pause
             # stress test's hit injected just after the killing blow must reach the supervisor, which then owns the
             # keys through the block above)
-            after = act_after and rec.outcome == CLEAR and not rec.reason
+            # a certified killing blow's plan (PlannerPolicy kill_commit_active) is played through the slow motion:
+            # the plan the safety filter certified is the path executed, not the zeros (DESIGN §3.7.3 exception)
+            after = (act_after or getattr(policy, "kill_commit_active", False)) and rec.outcome == CLEAR                 and not rec.reason
             if after:
                 _act(link, last, policy, s, tap)
             else:
@@ -330,6 +337,9 @@ def _run(link: OracleLink, enc: Encounter, tap: FightTap, policy, cfg: EpisodeCo
         if tap.death_frame is not None:
             rec.outcome = CLEAR
             end_after = last + post_f
+            if getattr(policy, "kill_commit_active", False):
+                _act(link, last, policy, s, tap)          # the kill commitment keeps its keys from the kill frame on
+                rec.acts += 1
             continue
         quitting = getattr(policy, "real_quit_active", False)     # a real quit: menus, then the main menu
         if game.get("paused") and not getattr(policy, "pause_owned", False):

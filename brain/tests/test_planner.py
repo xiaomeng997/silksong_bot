@@ -129,7 +129,66 @@ def test_safety_filter_rules():
     assert list(soft) == [True, False, False] and not hz.any()
     assert unpausable(np.array([True, False]), FilterContext(allowed_mask=allowed, hp=4, max_hp=5, h=2)).tolist() == \
         [True, False]
-    assert not unpausable(np.array([True]), FilterContext(allowed_mask=allowed, hp=5, max_hp=5, h=3)).any()
+    assert not unpausable(np.array([True]), FilterContext(allowed_mask=allowed, hp=5, max_hp=5, h=3,
+                                                          tier="GREEN")).any()
+    # YELLOW forbids the uncertified killing blow at full HP too (§3.7.3); a certified plan passes
+    y = FilterContext(allowed_mask=allowed, hp=5, max_hp=5, h=3, tier="YELLOW")
+    assert unpausable(np.array([True, True]), y, np.array([False, True])).tolist() == [True, False]
+
+
+def test_killing_blow_is_vetoed_unless_certified(model, tpls, params, arena):
+    """The STUCK fix in the planner (safety_filter U / KILL): h 2 in YELLOW with nothing in support. Boss at 15 HP:
+    a plan with one or two nail presses (5 each, Hunter) cannot kill and is not touched; at 5 HP every attacking plan
+    may kill, those whose last hit plus the slow motion's window fits in the rollout are certified and pass, the rest
+    are vetoed (R_KILL); with the support not certified none passes; GREEN at full HP with h 3 needs no certificate."""
+    from ssbot.combat.hero_damage import HeroDamage
+    planner = Planner(params, arena, PlannerConfig(threads=4))
+    f = fc_with(model, tpls, []).forecast(2.0, 0.0)
+    ws = world(85.0, 3, 0)
+    prefs = Tactics(load_playbook()).decide(ws, f, None, 2)
+    start = kin.initial_state(params, 85.0, 2.015 + params.foot)
+    dmg = HeroDamage.from_loadout("Hunter", 0, ("Silk Spear",))
+
+    def run(hp=3, h=2, tier="YELLOW", **kw):
+        ctx = FilterContext.from_world(world(85.0, hp, 0), None, h, damage=dmg)
+        ctx.tier = tier
+        for k, v in kw.items():
+            setattr(ctx, k, v)
+        planner.reset()
+        r = planner.tick(ws, start, kin.HoldState.idle(1), np.zeros(1, np.int64), f, prefs, ctx)
+        return r, planner.last_kill
+
+    r, (may, cert, vet, infl) = run(kill_hp=15.0, support_known=True)
+    def edges(bit):
+        on = (planner.last_cs.cmd & bit) != 0
+        return (on[:, 1:] & ~on[:, :-1]).sum(axis=1) + on[:, 0]
+    presses, casts = edges(kin.B_ATTACK), edges(kin.B_QUICKCAST)
+    assert may <= int((5 * presses + 15 * casts >= 15).sum()) and r.S == 0     # casts: the Silkspear's 15
+    r, (may, cert, vet, infl) = run(kill_hp=5.0, support_known=True)
+    assert may >= int((presses >= 1).sum()) and cert > 0 and vet == may - cert
+    assert 0 < r.vetoes.get("uncertified killing blow", 0) <= vet and r.S == 0   # (the Silkspear's: silk reserve)
+    r, (may, cert, vet, infl) = run(kill_hp=5.0, support_known=False)
+    assert cert == 0 and vet == may > 0 and not (r.cmd[:3] & kin.B_ATTACK).any()
+    r, (may, cert, vet, infl) = run(kill_hp=5.0, support_known=False, h=1)
+    assert cert == 0 and vet == may
+    r, (may, cert, vet, infl) = run(hp=5, h=3, tier="GREEN", kill_hp=5.0, support_known=False)
+    assert may > 0 and vet == 0
+    # the chosen plan's kill: certified plans carry their window (the policy keeps them through the slow motion)
+    r, (may, cert, vet, infl) = run(kill_hp=5.0, support_known=True)
+    if r.kill is not None:
+        assert r.kill.own and r.kill.certified and not r.kill.i3 and r.kill.k_hi + r.kill.window <= r.kill.P + 48
+    assert r.idle_clear is not None and r.idle_clear > 0          # nothing in support: the no-input path is clear
+    # a kill kind whose slow motion does not fit the rollout (the Forum's arena end, 0.79 s of game time): nothing
+    # is certified, every plan whose own presses may kill is vetoed
+    r, (may, cert, vet, infl) = run(kill_hp=5.0, support_known=True, kill_window_s=0.7941)
+    assert cert == 0 and vet == may > 0 and not (r.cmd[:3] & kin.B_ATTACK).any()
+    # a blow already sent (the prefix presses the attack): no candidate is vetoed for it, the certified ones rank first
+    ctx = FilterContext.from_world(world(85.0, 3, 0), None, 2, damage=dmg)
+    ctx.tier, ctx.kill_hp, ctx.support_known = "YELLOW", 5.0, True
+    planner.reset()
+    r = planner.tick(ws, start, kin.HoldState.idle(1), np.full(2, kin.B_ATTACK, np.int64), f, prefs, ctx)
+    may, cert, vet, infl = planner.last_kill
+    assert infl > 0 and r.kill is not None and (r.kill.certified or not r.kill.own)
 
 
 def tick(planner, model, tpls, params, roots, x, hp=5, silk=5, h=3, gates=False, mode=kin.M_NORMAL):

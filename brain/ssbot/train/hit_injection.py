@@ -58,6 +58,10 @@ quit in the post-hit window; 3 HP is h 2: Q1a's heal first), of kind "anytime" u
 otherwise: at a random moment 0-ANYTIME_SPREAD_S after min_s, on the first frame the hero can take it;
 SSBOT_INJECT_MIN_SILK=9 holds it until the hero has the Bind's silk (with combat_run --start-silk 9 9 and the
 playbook's Bind reserve the hero keeps it from the start).
+Certified-kill check (the killing blow at h = 2, DESIGN §3.7.3 exception, fixer round 2026-10-04):
+SSBOT_INJECT_BOSS_HP_MAX=15 holds the low-HP hit until the boss is at or under that HP (alive), and
+SSBOT_INJECT_MAX_SILK=8 until the hero has at most that much silk (no Bind's silk: Q1a cannot heal first), so the bot
+fights the last hits at h = 2 and a kill there goes through the certification and the kill commitment.
 Everything else is the wrapped policy's (attribute access falls through), so the harness sees the same pause
 ownership, outcome and stats, plus stats()["inject"].
 """
@@ -136,6 +140,8 @@ class HitInjector:
         # SSBOT_INJECT_LEAVE_HP=1,2,3: hits that leave this many masks (the low-HP check); SSBOT_INJECT_MIN_SILK
         self.leave_hp = tuple(int(k) for k in os.environ.get("SSBOT_INJECT_LEAVE_HP", "").split(",") if k)
         self.min_silk = int(os.environ.get("SSBOT_INJECT_MIN_SILK", "0") or 0)
+        self.max_silk = int(os.environ.get("SSBOT_INJECT_MAX_SILK", "-1") or -1)
+        self.boss_hp_max = float(os.environ.get("SSBOT_INJECT_BOSS_HP_MAX", "0") or 0)
         self.target_hp = 1
 
     def __getattr__(self, name):          # pause_owned, episode_outcome, real_quit_active, planner_last, ...
@@ -175,7 +181,7 @@ class HitInjector:
         if fault in (FAULT_TRIGGER, FAULT_MENU) and getattr(self.inner, "sc", None) is None:
             fault = FAULT_HIT                # no supervisor to trigger: the plain hit
         if kind == "anytime":
-            offset = r.randint(0, int(ANYTIME_SPREAD_S * 60))
+            offset = 0 if self.boss_hp_max > 0 else r.randint(0, int(ANYTIME_SPREAD_S * 60))
         elif kind == "kill" and fault == FAULT_TRIGGER:
             offset = r.randint(-3, 2)
         elif fault == FAULT_MENU:
@@ -349,6 +355,12 @@ class HitInjector:
             return False
         if self.min_silk and self.fault != FAULT_TRIGGER and int(h.get("silk") or 0) < self.min_silk:
             return False
+        if self.max_silk >= 0 and self.fault != FAULT_TRIGGER and int(h.get("silk") or 0) > self.max_silk:
+            return False
+        if self.boss_hp_max > 0:
+            bhp = self._boss_hp(s)
+            if bhp is None or not 0 < bhp <= self.boss_hp_max:
+                return False
         return self.fault == FAULT_TRIGGER or _takes_hits(h)
 
     def _step(self, s: dict) -> None:
