@@ -259,34 +259,38 @@
 - **样本内验证没有通过**（`coverage.json` 的 `validation.ok = false`，构建用了 `--allow-failed-validation`）：样本内 55 次接触离本类的记录占据 > 0.5 u（Minister 16、Bellbearer 14、Clapper 12、Reed 7、Tiny 4、Choristor 2），19 次的来源在接触前后没有导出伤害碰撞体（Clapper 14、Reed 3、Tiny 1、Bellbearer 1），56 次不在任何攻击实例里；无法归属 0。支撑模板按样本内残差膨胀（≤ 0.5 u 的部分），这些超出的接触由 §12.2 的余量和结构项负责。
 - **代码出处**：这次构建在分离的后台进程里跑，`git_info` 返回了空（`sha: null`）。表和 `coverage.json` 的 `code` 已补上 `7d09798`（构建 17:19 开始、该提交 17:20 记录的工作区；构建器代码 `behaviour_tables` / `gauntlet_tables` / `hitbox_tables` 从 7d09798 到修复轮只改了 `contact_rows(residuals)`，不影响表），并注明是事后补的。之后 `git_info` 在 git 进程失败时直接读 `.git` 文件，`behaviour_build` 对多敌人场地读不到版本就退出（`--allow-no-sha` 才继续）。
 
-### 12.2 留出召回（认证；`support_recall --encounter Forum`，`ssbot.knowledge.forum_support`）
+### 12.2 留出召回与认证（`support_recall --encounter Forum`，`ssbot.knowledge.forum_support`；修复轮 2026-10-04 重做）
 
-做法：每一折的场次用**另一折单独建的表**；每次接触对它被归属的那个敌人做预测（不是对所有敌人的并集），起点 c − L（L = 2 / 3 / 4 帧），配对同 Bell Beast（c 帧的主角框在 t_c，或 c − 1 帧的框在 t_c−1）。预测 = 规划器的做法搬到每个敌人上：当前状态的按状态模板（锚点 = 本次攻击第一个导出帧的 transform，镜像按 flipX）+ 训练折记录过的后继（停留区间各放宽 1 帧；当前状态已超过记录的最长停留时，后继可以从下一帧到视野末任意时刻开始）+ 攻击可能结束时的尾巴 + 已结束攻击的尾巴（6 s）。Forum 的锚点不固定：视野内才开始的攻击，锚点放在敌人当前位置沿导出速度每帧外推一个、两种镜像。查询用规划器的 `SupportQuery`（9 类全部模板一次打包，主角受伤框半宽 + 余量）。多段攻击的后续命中（构建器的 `follow`）不检查。
+做法（不变的部分）：每次接触对它被归属的那个敌人做预测（不是对所有敌人的并集），起点 c − L（L = 2 / 3 / 4 帧），配对同 Bell Beast（c 帧的主角框在 t_c，或 c − 1 帧的框在 t_c−1）。预测 = 规划器的做法搬到每个敌人上：当前状态的按状态模板（锚点 = 本次攻击第一个导出帧的 transform，镜像按 flipX）+ 训练表记录过的后继（停留区间各放宽 1 帧；当前状态已超过记录的最长停留时，后继可以从下一帧到视野末任意时刻开始）+ 攻击可能结束时的尾巴 + 已结束攻击的尾巴（6 s）。Forum 的锚点不固定：视野内才开始的攻击，锚点放在敌人当前位置沿导出速度每帧外推一个、两种镜像。查询用规划器的 `SupportQuery`（9 类全部模板一次打包，主角受伤框半宽 + 余量）。多段攻击的后续命中（构建器的 `follow`）不检查。结构项（每一项的覆盖数单独计）：投射物按自身模板（已武装的从武装点 / 时刻放；在导出里还没武装的可以从下一帧起在原地武装）、家族并集（`--family-wide`：当前攻击再放一份所有状态的并集，给"Multihit Clashed"这类少见分支兜底）、入场家族的世界坐标并集、同名候选、当前伤害框管 / 身体外形管 / 投射物管（只在预测失败后试，单独计）。
 
-结构性补充（每一项的覆盖数在输出里单独计）：
-1. **投射物按自身模板**：每个已武装的投射物（钟、Reed 的针、Clawmaiden 的矛和爆炸、Clapper 的炸弹和 rune）从它武装的位置和时刻放它的 self 模板（构建器早就有，留出 99.6–99.97 %）。钟的弹跳路径依赖投掷时主角的位置，投掷者的按状态模板只能以并集包住它，这正是计划 §4.2 说的"确定路径投射物"的前身；R2 里应换成真正的路径。
-2. **同名候选**：构建器按 GameObject 名归属接触，第 12 波开场就在场上等待（`Fly In Ready`）的 "Song Reed" / "Song Pilgrim Maestro" 与第 0 / 6 波的同名敌人重名，来源路径的 "Wave 1/…" 父物体其实能区分（构建器没用它，R2 修）。召回里同名的敌人都算候选。
-3. **当前伤害框管**：**导出在击杀那一帧就把敌人去掉**（它离开 HealthManager 列表），但垂死的身体还会伤人（§12.3 死亡尾巴）；等待中的敌人、停放的 Tiny 也有启用的身体框。对**不在任何攻击实例里**的敌人，用它最后一次导出的伤害框，按该类的最高速度（训练折每帧位移的 p99.99：31–56 u/s，去掉 hit-stop 小步长和单帧 > 1.2 u 的瞬移）向外长到查询时刻，最多用 0.5 s 前的框。
-4. **家族并集**（可选 `--family-wide`）：当前攻击再放一份家族级模板（所有状态的并集，时间从攻击开始算），给"Multihit Clashed"（Reed 的连刺被拼刀弹开）这类少见分支兜底。
+**第一版的"认证"不成立（复核结论，确认）**：(1) 认证折 k 的余量来自训练折接触的留出残差，而这个残差是对**折 k 自己的占据**算的（`behaviour_tables.validate` 的留出 = "对另一折"），等于用被检验折的模板定余量；结构项也是看着这 107 场的漏网逐个加的（`recall_final` 8 行漏 → 6be2b89 加四项 → `recall_cert` 0 漏）。(2) 待机家族的按状态模板锚在**待机开始处**，Minister 追人几秒、Tiny 到处飞，模板盖住大半个场地，100 % 对它们接近空话（下面"代价"一段的场地覆盖率）。(3) 构建之后才关闭的 35 场上，折 0 的表 + 每折余量漏 1 次（Clawmaiden 斩 `074533` i2/ep30 f1590148）。修复：
 
-余量：每个家族一个，取**训练折**接触的按状态留出残差（对测试折的模板）的分位数（`--margin-q`，1.0 = 最大），投射物的余量取它们 self 模板的留出残差；**校准用的接触永远不是被检验的接触**（两折互换）。生产用的余量（两折全部接触的最大值）写进 `knowledge/1.0.30000/enemies/forum/support_margins.json`。
+1. **三份不相交**（`--split 3way`，默认）：认证折 k 的场次用折 1−k 建的表；折 k 的场按顺序交替分两半，每一半用**另一半**接触的留出残差定余量（这些残差正是对折 1−k、即所用表的占据算的）。表、余量、被检验的接触来自三组互不相交的场次。旧做法留作 `--split 2way`（注明有泄漏）。
+2. **待机身体管**（idle body tube）代替待机家族的按状态模板：敌人在待机家族里时，不放当前待机实例的模板，改用它最后一次被看到时的伤害框（没有伤害框时用该类的身体外形），沿导出速度平移，再按"离看到时的游戏时间"（1/60 s 一格，5 % 容差向上取格）长出 g[格]。g 在训练场上标定（`IdleTubeCalibration`）：同一待机实例里 i 帧和 i+n 帧（n ≤ 40）都可见时，i+n 帧的伤害框超出"i 帧的框按 i 帧速度外推"的最大距离，每类每格取最大值、单调化。按游戏时间而不是帧分格：`074533` i2/ep2 有一次 4 帧跨了 0.48 s 的卡顿，按帧分格会把 Clapper 4 帧的增长算成 7.9 u（按时间分格是 1.5 u）。待机里可能开始的攻击照常在外推锚点上放（敌人下一帧就可能出手，那一帧的身体也在攻击模板里），待机实例只在视野内**新进入**时（攻击结束后，锚点 = 那时的位置，只用模板前几帧）才放模板。待机家族不再有余量。107 场的生产值（4 帧 ≈ L4）：Maestro 1.33 u、Clapper 1.53、Envoy 1.80、Reed 1.89、Tiny 1.92、Clawmaiden 1.92、Bellbearer 2.08、Minister 2.21、Choristor 2.52（Choristor 的 Hop Back 在待机里瞬间后跳；导出速度为 0 的移动全进了 g）。注意 g 随时间长得快（20 格 3.0–8.8 u、40 格 3.6–14.9 u）：它只适合几帧的视野，规划器 0.8 s 的视野要另想办法（R2）。
+3. **来源没写敌人名字的接触**：`damage_blocked` 的来源有时只有碰撞体子物体（`Colliders/Collider Fly`），构建器在同类里挑了一个导出这个碰撞体的敌人（`contacts.jsonl.gz` 的 `src` 写的是它挑的名字），不一定是碰到主角的那只（例：`223640` i2/ep0 f767636 归给了 7 u 外的那只 Minister；第一版里它的 Chase 模板盖住整个场地，所以"覆盖"了）。现在按 oracle 事件自己的来源判断，这类接触同类的每个敌人都是候选（"unnamed-source candidate"，单独计）。
+4. **在新数据上认证一次**：配置冻结在 `da1cd41` 之后，对构建之后才关闭的 35 场（`074533` i2 ep25–41、`074719` i3 ep25–42；`behaviour_build --contacts-only --exclude-fights`，在 8d12c86 扫描，74,613 次接触、74,120 次非后续）只跑了一次：两折的表各测一遍，余量 = 107 场全部接触的最大留出残差（生产余量，待机家族除外），管和身体管的参数也来自 107 场。这才是认证。
 
-结果（每个滞后 228,333 次接触 = 两折全部非后续命中的接触；`C:\ssbot\data\m2_forum_r0\recall_*.json`）：
+结果（`C:\ssbot\data\m2_forum_r0\recall_*.json`）：
 
-| 设置 | L2 | L3 | L4 |
-|---|---|---|---|
-| 只有按状态模板 + 尾巴，没有余量（`--margins none`，早期走法，无结构性补充） | 99.897 % | 99.899 % | 99.902 % |
-| + 每家族留出余量（最大值） | 99.964 % | 99.964 % | 99.965 % |
-| + 投射物自身模板、同名候选、伤害框管（余量 p99.9） | 99.998 % | 99.998 % | 99.998 % |
-| 全部结构性补充但不要家族并集，余量 p99.9 | 99.9996 % | 99.9991 % | 99.9987 % |
-| **+ 家族并集、未武装投射物、入场世界并集、身体外形管、投射物管（余量最大值）** | **100 %** | **100 %** | **100 %** |
+| 设置 | 场次 / 每个滞后的接触 | L2 | L3 | L4 | 不是靠预测本身覆盖的（每个滞后） |
+|---|---|---|---|---|---|
+| 第一版，早期代码（6be2b89 之前），无余量 | 107 / 228,333 | 99.897 % | 99.899 % | 99.902 % | — |
+| 第一版，早期代码，每折余量（泄漏） | 107 / 228,333 | 99.964 % | 99.964 % | 99.965 % | — |
+| 第一版"认证"（每折余量有泄漏、结构项按这 107 场的漏网加） | 107 / 228,333 | 100 % | 100 % | 100 % | 同名 45–47、伤害框管 9–10、投射物管 0–1 |
+| **开发：三份不相交 + 待机身体管**（`recall_dev3.json`，da1cd41） | 107 / 228,333 | **100 %** | **99.9996 %** | **99.9996 %** | 同名 46–47、无名来源候选 15–18、伤害框管（攻击中）21–23、投射物管 0–1 |
+| 开发，同上但不要余量（`recall_dev_nomargin.json`） | 107 / 228,333 | 100 % | 99.9996 % | 99.9991 % | 同名 48–50、无名来源候选 22–23、伤害框管（攻击中）48–49、投射物管 5–6（漏的 3 次：上面那次 Clawmaiden 斩 L3 / L4、Reed 第 5 刺 L4） |
+| **认证：35 场新数据，折 0 的表 + 生产余量**（`recall_fresh.json`） | 35 / 74,120 | **100 %** | **100 %** | **100 %** | 同名 9、无名来源候选 4；管 0 |
+| **认证：35 场新数据，折 1 的表 + 生产余量** | 35 / 74,120 | **100 %** | **100 %** | **100 %** | 同名 9、无名来源候选 4；管 0 |
 
-（p99.9 那一行漏的 3 次：Minister 格挡姿态身体框、Reed 第 5 刺的 `Stab Hit 3`（只在 L4）、Clawmaiden 第 5 斩（L3 / L4）；它的面积代价中位 ×1.0、最大 ×3.9，≥ 0.5 u 的家族只剩 Tiny 冲撞 0.62、Clawmaiden 旋转 2.62、Envoy 冲锋 2.66、Maestro 防御 0.73、Reed 防御 1.84 / 待机 0.97 / 刺 0.68 和三种投射物。）
+（前两行是第一版用早期走法跑的，不是对最终代码的对照消融，只作历史记录。待机身体管算在预测里，单独计数：开发每个滞后 474–495 次、认证 133–147 次；其余待机接触被它下一帧可能开始的攻击（外推锚点上的模板前几格）、刚结束攻击的尾巴或它的投射物盖住。）
 
-- **认证通过（最后一行，`support_margins.json` 的 `certified: true`）**：两折互换、余量只在训练折上校准，每个滞后 0 漏。不是靠按状态模板覆盖的接触单独计数（L2 / L3 / L4）：同名候选 47 / 45 / 46（第 12 波等待中的同名敌人，见上）、伤害框管（在攻击里的敌人身体超出家族余量）9 / 10 / 10、投射物管（被钉子打过、碰撞体短暂关闭的钟）1 / 1 / 0。没有一次接触是靠"攻击外"的管覆盖的（垂死和等待的身体都被别的项覆盖了）。
-- 被这几项补上的漏网都是具体的机制，不是随机误差：钟被打中后改向（自身模板以武装点为原点，包不住改向后的路）、rune 在武装前就出现在落点（武装前用当前位置放它的模板）、Choristor 从场外跳入时身体框在落下那一帧才启用（用身体外形 + 速度）、Reed 的反击被拼开后"Multihit Clashed"把身体弹开（家族并集）、终局 Clapper 死后 rune 还会炸。
-- 每类最高速度（伤害框管的增长速度，训练折每帧位移的 p99.99）：Maestro 25–28 u/s，Envoy 37–40，Clawmaiden 43–48，Choristor 45–48，Bellbearer 47–55，Reed 48–51，Clapper 49–54，Tiny 51，Minister 54–55。
-- **余量和代价**（生产用 = 两折全部接触的最大留出残差；`support_margins.json` 的 `by_family` / `by_type`；面积 = 按状态 anchor 模板每个占用时间格的平均面积，不含主角半宽）：46 个家族里 26 个 < 0.5 u（面积 ×1.0–1.4）；≥ 0.5 u 的：Minister 待机 / 格挡、Tiny 冲撞 / 待机、投射物（针、矛、钟、炸弹）**3.0 u（搜索上限，即少数接触离留出模板 > 3 u）**，Envoy 冲锋 2.96、Clawmaiden 旋转 2.76、Reed 防御 2.62、Clapper 跳 2.11、Choristor 跳 1.61、Reed 刺 1.37、Reed 待机 1.29、Tiny 防御 0.98、Maestro 防御 0.76、Clawmaiden 斩 0.70、Choristor 入场 0.55、Maestro 斩 0.54。支撑面积中位 ×1.16，最大 ×4.3（Envoy 冲锋），×2 以上的 12 个家族（Clapper 跳、Clawmaiden 旋转、Minister 待机 / 格挡、Tiny 冲撞 / 待机、Reed 防御 / 待机 / 刺、Envoy 冲锋、Choristor 入场 / 跳）。这些大余量来自每个家族里个位数的离群接触（p99.9 时多数 ≤ 0.7 u，见上表第三行）：认证是在"最大值余量 + 结构性补充"下做的，规划器真正用哪一组余量要和视野内 FORCED_RISK 一起权衡（R2 / R5），换成更小的余量需要再跑一次召回认证。
+- **开发集漏的 1 次**（L3、L4 各 1）：Clawmaiden 斩 `074719` i3/ep5 f281119，构建器记它在 `Slash 5` 第 0 帧，起点时在 `Slash 3`；对另一折 `Slash 5` 模板的留出残差 0.068 u，而它所在那一半拿到的 CM_SLASH 余量是 0.0（另一半的 CM_SLASH 接触全在表里）。它不是结构漏洞，是"半折余量没见过这个尾巴"：生产余量（0.7048 u，来自 107 场的最大值）盖得住它。没有为它改任何东西（之后的认证配置就是跑开发集的那一份）。
+- **余量本身的作用很小**：同一套结构不要余量（`--margins none`）在开发集上是 100 / 99.9996 / 99.9991 %（3 次），只是伤害框管和投射物管多盖了 48–49 / 5–6 次；召回主要靠结构项（待机身体管、投射物自身模板、家族并集、管、候选），不是靠余量。
+- **认证通过**：冻结的配置在 35 场新数据上两折的表都是 0 漏（`support_margins.json`：`certified: true`、`certification: "fresh"`，开发集的数在 `development` 里）。**通过的是生产余量**（107 场全部接触的最大值），不是每折 / 每半的余量：复核时用每折余量，折 0 的表在这 35 场上漏了上面那次 Clawmaiden 斩（需要 0.4–0.5 u，每折余量 0.257）；生产余量 0.7048 u。新数据上没有一次接触要靠管（第一版每个滞后 9–10 次"攻击中的伤害框管"、开发集 21–23 次，都在 107 场里）。
+- 每类最高速度（伤害框管，训练场每帧位移的 p99.99）：Maestro 25–28 u/s，Envoy 37–40，Clawmaiden 43–48，Choristor 45–48，Bellbearer 47–55，Reed 48–52，Clapper 49–54，Tiny 51，Minister 54–55。
+- **余量**（生产 = 107 场全部接触的最大留出残差，待机家族不再有；`support_margins.json` 的 `by_family` / `by_type`）：38 个（29 个敌人家族 + 投射物 6 个 + 入场 3 个）里 21 个 < 0.5 u；≥ 0.5 u 的：**3.0 u（搜索上限）**：Minister 格挡、Tiny 冲撞、Reed 的针、Clawmaiden 的矛、钟、rune bomb；Envoy 冲锋 2.96、Clawmaiden 旋转 2.76、Reed 防御 2.62、Clapper 跳 2.11、Choristor 跳 1.61、Reed 刺 1.37、Tiny 防御 0.98、Maestro 防御 0.76、Clawmaiden 斩 0.70、Choristor 入场 0.55、Maestro 斩 0.54。
+- **代价**（`support_area`；面积 = 按状态 anchor 模板（投射物：self 模板）每个占用时间格的平均面积，不含主角半宽；**场地覆盖率** = 模板锚在场地带 x 14.01–48.99、y 3–18 的中心、加主角半宽（和余量）后占场地带的比例，每个模板取占用格的中位数，家族取中位数 / 最大格）。面积比：48 个（42 个敌人家族 + 6 个投射物）中位 ×1.13，**最大 ×7.4（Reed 的针），×2 以上 12 个**：投射物 4 个（针 ×7.4、rune bomb ×6.0、矛 ×4.1、钟 ×2.7）+ 敌人家族 8 个（Envoy 冲锋 ×4.3、Reed 防御 ×2.8、Clawmaiden 旋转 ×2.6、Tiny 冲撞 ×2.5、Choristor 跳 ×2.4、Clapper 跳 ×2.3、Minister 格挡 ×2.3、Choristor 入场 ×2.3）；只看敌人家族中位 ×1.12、最大 ×4.3。（第一版报的"最大 ×4.3、12 个家族 ×2 以上"漏了投射物的 self 模板，又把 Reed 待机 ×1.70、刺 ×1.64 算进了 ×2 以上；那时 ×2 以上的敌人家族是 10 个。）
+- **场地覆盖率**（无余量 → 生产余量，中位格）：待机模板（现已不放）Tiny 93 %、Clawmaiden 63 %、Bellbearer 62 %、Minister 55 %（最大格 96 %）、Clapper 36 %；**待机身体管在 4 帧时只占 6–20 %**（Maestro 6 %、Tiny 7 %、Envoy 8 %、Bellbearer 9 %、Clawmaiden 9 %、Choristor 11 %、Reed 12 %、Minister 17 %、Clapper 20 %：身体外形 + 主角半宽 + g）。**但几个会移动的攻击家族的模板本身也很宽**：Clawmaiden 旋转 74 % → 99 %、Tiny 防御 75 → 79 %、Reed 刺 66 → 77 %、Minister 格挡 52 → 76 %、Tiny 冲撞 30 → 64 %（最大格 100 %）、钟 34 → 65 %、Reed 防御 26 → 50 %、Clawmaiden 斩 46 → 54 %、Clapper 跳施法 48 %、施法 44 %。这些家族的召回同样有一部分是"模板大"换来的：锚在攻击开始处的按状态模板对边飞边打的招（旋转、冲撞、防御里的移动）天然就宽，R2 要给它们像待机一样按当前位置重新锚定（或按路径条件化），再认证一次。
 
 ### 12.3 数据产品（`forum_products`，107 场缓存；`knowledge/1.0.30000/enemies/forum/<产品>.json`）
 
@@ -316,7 +320,7 @@
 
 ### 12.6 planner_bench --encounter Forum（脚手架）
 
-规划器还没有多敌人预测（R2），所以这里只测"支撑阶段"在真实 Forum 走法上的代价：每 tick 把所有敌人的支撑放置（召回同一套走法，视野 0.8 s；视野内才开始的攻击每 0.2 s 一个锚点）装进一个 `SupportQuery`，再查 400 条 × 36 步的弹道候选（主角位置出发的扇形，不是规划器的候选）。`074719` i3 ep0 前 3,000 帧（第 0–1 波），4 线程，训练折 0 的表 + 余量：**每 tick 放置 p50 28,506、p99 38,391；放置 20 ms / 422 ms，查询 133 / 199 ms，整 tick 154 / 574 ms（p50 / p99）**；400 条候选在每一 tick 都全部碰到支撑。也就是说把召回的走法原样搬进规划器，比 R3 的 9 ms 预算慢约 20 倍、而且会永远 FORCED_RISK：R2 需要（1）停留区间宽的状态用"时间上预先膨胀"的模板一次放置（不是每 1/60 s 一个），（2）视野内才开始的攻击用按速度膨胀的锚点模板（不是每帧一个锚点 × 两个镜像），（3）两招之间的身体按当前位置重新锚定（IDLE 家族从待机开始算的模板太宽：`forum_simul` 的预测统计在一场上（单场建的表、样本内、无余量），主角站着不动时 +0 s 就有 76 % 的帧在支撑里）。
+规划器还没有多敌人预测（R2），所以这里只测"支撑阶段"在真实 Forum 走法上的代价：每 tick 把所有敌人的支撑放置（召回同一套走法，视野 0.8 s；视野内才开始的攻击每 0.2 s 一个锚点）装进一个 `SupportQuery`，再查 400 条 × 36 步的弹道候选（主角位置出发的扇形，不是规划器的候选）。`074719` i3 ep0 前 3,000 帧（第 0–1 波），4 线程，训练折 0 的表 + 余量：**每 tick 放置 p50 28,506、p99 38,391；放置 20 ms / 422 ms，查询 133 / 199 ms，整 tick 154 / 574 ms（p50 / p99）**；400 条候选在每一 tick 都全部碰到支撑。也就是说把召回的走法原样搬进规划器，比 R3 的 9 ms 预算慢约 20 倍、而且会永远 FORCED_RISK：R2 需要（1）停留区间宽的状态用"时间上预先膨胀"的模板一次放置（不是每 1/60 s 一个），（2）视野内才开始的攻击用按速度膨胀的锚点模板（不是每帧一个锚点 × 两个镜像），（3）两招之间的身体按当前位置重新锚定（IDLE 家族从待机开始算的模板太宽：`forum_simul` 的预测统计在一场上（单场建的表、样本内、无余量），主角站着不动时 +0 s 就有 76 % 的帧在支撑里）。修复轮加了 `--idle-growth`（待机身体管代替待机模板，同一场同一段）：每 tick 放置 p50 28,172、p99 37,827（几乎没变：大头是视野内才开始的攻击在每 0.2 s 外推锚点 × 两镜像上的放置，不是待机模板），整 tick 100 / 323 ms（p50 / p99；机器负载不同，不可直接比），候选仍然每 tick 全部碰到支撑。所以待机身体管解决的是"支撑空泛"，不是代价；（1）（2）仍是 R2 的主要工作。
 
 ### 12.7 复现
 
@@ -324,7 +328,13 @@
 cd brain   # 低优先级、NUMBA_NUM_THREADS=4，一次一个
 ..\scripts\uv.cmd run python -m ssbot.tools.behaviour_build <7 个运行> --encounter Forum --allow-failed-validation --extra C:\ssbot\data\m2_forum_r0\build_all\extra --fights-list C:\ssbot\data\m2_forum_r0\build_all\fights.json
 ..\scripts\uv.cmd run python -m ssbot.tools.forum_extract --fights-list C:\ssbot\data\m2_forum_r0\build_all\fights.json --out C:\ssbot\data\m2_forum_r0\cache
-..\scripts\uv.cmd run python -m ssbot.tools.support_recall --encounter Forum --extra C:\ssbot\data\m2_forum_r0\build_all\extra --cache C:\ssbot\data\m2_forum_r0\cache --margins heldout --margin-q 1.0 --family-wide --area --write-margins <json> --json <json>
+# 开发（三份不相交 + 待机身体管；--margins none 是不要余量的对照）
+..\scripts\uv.cmd run python -m ssbot.tools.support_recall --encounter Forum --extra C:\ssbot\data\m2_forum_r0\build_all\extra --cache C:\ssbot\data\m2_forum_r0\cache --margins heldout --margin-q 1.0 --family-wide --split 3way --json C:\ssbot\data\m2_forum_r0\recall_dev3.json
+# 新数据：构建之后关闭的场（不在 fights.json 里的）→ 只扫接触 → 缓存 → 认证（配置先冻结）
+..\scripts\uv.cmd run python -m ssbot.tools.behaviour_build C:\ssbot\data\runs\m2\20261003_074533_Forum_A_data C:\ssbot\data\runs\m2\20261003_074719_Forum_A_data --encounter Forum --report-only --exclude-fights C:\ssbot\data\m2_forum_r0\build_all\fights.json --fights-list C:\ssbot\data\m2_forum_r0\fresh\fights.json --contacts-only C:\ssbot\data\m2_forum_r0\fresh
+..\scripts\uv.cmd run python -m ssbot.tools.forum_extract --fights-list C:\ssbot\data\m2_forum_r0\fresh\fights.json --out C:\ssbot\data\m2_forum_r0\cache_fresh
+..\scripts\uv.cmd run python -m ssbot.tools.support_recall --encounter Forum --extra C:\ssbot\data\m2_forum_r0\build_all\extra --cache C:\ssbot\data\m2_forum_r0\cache --margins heldout --margin-q 1.0 --family-wide --fresh C:\ssbot\data\m2_forum_r0\fresh --fresh-cache C:\ssbot\data\m2_forum_r0\cache_fresh --area --write-margins ..\knowledge\1.0.30000\enemies\forum\support_margins.json --dev-json C:\ssbot\data\m2_forum_r0\recall_dev3.json --json C:\ssbot\data\m2_forum_r0\recall_fresh.json
 ..\scripts\uv.cmd run python -m ssbot.tools.forum_products --cache C:\ssbot\data\m2_forum_r0\cache
+..\scripts\uv.cmd run python -m ssbot.tools.planner_bench --encounter Forum --cache C:\ssbot\data\m2_forum_r0\cache --extra C:\ssbot\data\m2_forum_r0\build_all\extra --fight 20261003_074719_Forum_A_data/i3/ep0 --frames 3000 --idle-growth ..\knowledge\1.0.30000\enemies\forum\support_margins.json
 ..\scripts\uv.cmd run python -m ssbot.tools.forum_simul --cache C:\ssbot\data\m2_forum_r0\cache --run 20261003_074719_Forum_A_data --first 12
 ```

@@ -231,75 +231,103 @@ audit correction, lane choice, 6 bench).
 Worktree `C:\modeling\silksong_bot\.claude\worktrees\wf_198518ec-9ba-1`, branch `worktree-wf_198518ec-9ba-1` (from main
 07bda48). Offline only (no game instance touched). Facts: `docs/facts/1.0.30000/forum.md` §12 (Chinese). Large outputs
 (not in git): `C:\ssbot\data\m2_forum_r0\` (`build_all\extra` per-fold supports + contacts + walk tables, `cache` per-
-fight caches 728 MB, `recall_*.json`, `products\`, `simul_h12.json`, logs, `pipeline*.ps1` drivers).
+fight caches 728 MB, `fresh\` + `cache_fresh\` the 35 fights closed after the build, `recall_*.json`, logs,
+`pipeline*.ps1` / `fix_*.ps1` drivers).
 
-### Done
+### Done (developer round)
 
 - Tables rebuilt from the 107 closed complete gauntlets (frozen list `build_all\fights.json`; 25.4 h fight time; 6.6 h
-  build). The two runs still recording (`074533`, `074719`) had 13-14 open episodes each that are not in. Held-out share
-  beyond 0.5 u per type now 0.00-0.61 % (13 fights: 0.3-5.2 %). Every family >= 200 instances except Envoy ambush
-  (107), HopSlash / Envoy entry / Maestro Point (never seen).
-- `behaviour_build --extra DIR`: per-fold supports (`BehaviourBuilder.fold_support`), every contact with its subject,
-  in-sample and held-out residuals (`contact_rows`; per-state held-out residuals searched to 3 u), per-fold dwell /
-  successor tables; `--fights-list`; the extra write runs after coverage.json and pickles the builder if it fails.
-- `ssbot.knowledge.forum_cache` + `tools/forum_extract`: compact per-fight caches (frames, hero, entity rows with
-  state / box / parry bits, enabled damage colliders, allies, room.battles wave, events).
-- `ssbot.knowledge.forum_support` + `support_recall --encounter Forum`: per-enemy tracker (the gauntlet builder's
-  segmentation), worklist support walk over entry hulls, per-family margins calibrated on the other fold's held-out
-  residuals, structural additions (thrown hazards by self templates, same-name candidates, current-collider tube for
-  enemies outside every attack, optional family-wide union), `--write-margins`, `--area`.
-- `ssbot.knowledge.forum_products` + `tools/forum_products`: chains, death_tails, kill_freeze, strikes (+ punish),
-  quiet, garmond, stances, below, clawmaiden_distance, bells, boundaries -> `knowledge/1.0.30000/enemies/forum/*.json`.
-- `tools/forum_simul` (open-loop replay through the trackers; reproduces design H table 1.2 on the same 12 fights;
-  optional forecast statistics) and `planner_bench --encounter Forum` (support-phase timing scaffold).
-- Tests: `tests/test_forum_r0.py` (12, synthetic fixture of test_gauntlet_tables); gauntlet / behaviour tests pass.
+  build). In-sample validation did not pass (`coverage.json` `validation.ok = false`, built with
+  `--allow-failed-validation`): 55 uncovered and 19 unexplained contacts in sample, 56 outside attacks; the margins and
+  structural items of the recall carry them.
+- `behaviour_build --extra DIR`, `--fights-list`; `ssbot.knowledge.forum_cache` + `tools/forum_extract`;
+  `ssbot.knowledge.forum_support` + `support_recall --encounter Forum`; `ssbot.knowledge.forum_products` +
+  `tools/forum_products`; `tools/forum_simul` (reproduces design H table 1.2); `planner_bench --encounter Forum`.
+
+### Fixer round (after the review; commits 8d12c86 .. HEAD)
+
+The review refuted the first certification (margins of fold k were residuals against fold k's own occupancy; the
+structural items were added while looking at the 107 fights' misses; the idle families' templates, anchored where the
+idle began, cover most of the arena, so their 100 % was close to vacuous; with per-fold margins the configuration
+missed a Clawmaiden slash on 35 fresh fights). Fixed:
+
+- **3-way split** (`support_recall --split 3way`, the default): fold k's fights against fold 1-k's tables, fold k split
+  in two halves, each half certified with margins from the other half's contacts (their held-out residuals are against
+  fold 1-k, the tables used). Tables, margins and certified contacts are disjoint. `--split 2way` keeps the leaky one.
+- **Idle body tube** (`forum_support.IdleTubeCalibration`, `SubjectRecall.in_idle_tube`): an enemy in its idle family is
+  forecast by its damage box as last seen (no box: the type's body hull), moved along its exported velocity and grown by
+  g[game-time bin] calibrated on training fights (largest dead-reckoning residual of idle bodies per type and 1/60 s
+  bin, monotone; bins by game time because a 0.48 s hitch in 4 frames made the Clapper's per-frame g 7.9 u). The current
+  idle instance's templates are not placed; attacks it may start are placed as before; idle families get no margin.
+  Production g at 4 bins 1.33-2.52 u; it grows to 3.6-14.9 u at 40 bins (fine for lags, not for a 0.8 s horizon).
+- **Unnamed sources**: a `damage_blocked` source naming only a collider child (`Colliders/Collider Fly`) was given by
+  the builder to one Minister exporting it, not always the one touching (223640 i2/ep0 f767636: 7 u away, "covered"
+  only by its arena-wide Chase template). Every subject of the type is now a candidate (from the oracle event's own
+  source, `forum_support.raw_sources`), counted apart.
+- **Fresh certification** (`support_recall --fresh`, `behaviour_build --contacts-only --exclude-fights`): the 35 fights
+  closed after the build (074533 i2 ep25-41, 074719 i3 ep25-42; 74,120 non-follow-up contacts), configuration frozen at
+  da1cd41 before the run, each fold's tables, production margins (largest held-out residual over all 107 fights' contacts)
+  and tubes calibrated on all 107 fights. `support_margins.json` now holds that run (`certification: "fresh"`) with the
+  development cross-fit in `development`.
+- `support_area`: the thrown hazards' self templates are in; absolute **band cover** (the template anchored at the
+  centre of the Forum band x 14.01-48.99, y 3-18, with the hero half-extents and the margin) next to the area ratio; the
+  idle body tube's area and band share at 4 bins.
+- Products: **chains** by the hero's own mechanism (Multihit tick `special_damage` ~20 frames before the Final Hit
+  `DamageHeroDirectly` that names the source; no timing-only attachment); **kill_freeze** lengths from the oracle's end
+  events, ends past the cached fight read from the recording, censored ones counted; **strikes**: hazards attributed at
+  their spawn (the first frame of the unarmed lead-in), body-only strike time for the Tiny's ram (AT_FIRE), fastest per
+  type by p5 with the kind.
+- Provenance: `git_info` reads HEAD from the `.git` files when the git process fails (the detached build wrote sha
+  null); `behaviour_build` exits 4 for a multi-enemy arena without a revision (`--allow-no-sha`); the tables' and
+  coverage.json's `code` patched to 7d09798 with a note. `planner_bench --idle-growth` (the idle body tube in the bench).
+- Tests: `tests/test_forum_r0.py` 20 (idle tube calibration / query / not placing the idle instance, 3-way margins,
+  mechanism chains, uncensored freezes, spawn attribution and body strikes, band cover, contacts-only, git files, the
+  bench's tube).
 
 ### Key measurements
 
-- **Held-out recall 100 % at L = 2 / 3 / 4** (228,333 contacts each; each fold's fights against the other fold's
-  tables; margins calibrated on the training fold only): per-state templates + per-family margins (max held-out
-  residual) + family-wide union + thrown hazards (self templates, pending arming) + same-name candidates + entry
-  world unions + current-collider / body-hull / hazard tubes. Not by the forecast: same-name 45-47, collider tube 9-10,
-  hazard tube 0-1 per lag. Without margins 99.90 %; margins only 99.96 %; p99.9 margins with the first structural
-  additions 99.998 %. `C:\ssbot\data\m2_forum_r0\recall_cert.json`, `knowledge/.../forum/support_margins.json`.
-- Production margins: 26 of 46 families < 0.5 u; 3.0 u (search cap) for MI_IDLE, MI_PARRY, AT_FIRE, AT_IDLE and the
-  pin / spear / bell / bomb self templates; EN_CHARGE 2.96, CM_SPIN 2.76, RE_DEFEND 2.62, CC_JUMP 2.11. Support area
-  median x1.16, max x4.3 (EN_CHARGE), 12 families above x2.
-- Per-type top speeds (p99.99 per-frame move, normal steps): 25-55 u/s. The export drops a killed enemy on its kill
-  frame; contacts naming it come only on that frame (0 frames after).
-- Products: fastest strike from commit >= 0.40 s for every type (Reaper attack 0.35 s); a full attack fits the
-  recovery of Maestro / Envoy / Reed stab / Choristor jump (>= 95 %) but never the Clapper's, the Clawmaiden slash's
-  or the Minister parry's; quiet stretches >= 1.52 s (Bind) only 37.6 % (before waves 7, 12, 13 and half of 8);
-  Garmond hits the enemy nearest to himself 53 % of choices; Minister / Reed counters are fixed, clashable (parry 5),
-  82 Reed counters clashed already; below-flier claim holds for Bellbearer / Maestro / Tiny / Reed, not for Minister /
-  Clawmaiden; the Clawmaiden keeps median 8.0 u (dash stab est. 7.0 u reaches it 39 % of the time vs 11 % for a side
-  slash); Throwing Bell parry bits 4 (no clash), nail hit sends it at 27.6 u/s, pogo off it 8 of 100.
-- Multi-hit chains (lower bounds, LethalBlock blocks most first hits): Minister slash 3, Choristor whip 2 (3 with two
-  Choristors), Reed counter 2.
-- forum_simul reproduces design H table 1.2 on its 12 fights (609,481 frames; in-play shares identical).
-- planner_bench --encounter Forum (support phase only, naive walk at 0.8 s): 28.5k placements / tick, 154 ms p50 -
-  R2 must place interval-dilated templates and velocity-dilated anchors.
+- **Certification (35 fresh fights, frozen config da1cd41, production margins): 74,120 / 74,120 at L2, L3 and L4 with
+  fold-0 tables and again with fold-1 tables.** Not by the forecast itself: same-name 9 and unnamed-source candidates 4
+  per lag; no tube needed. The idle body tube (part of the forecast) covered 133-147 per lag. What passed are the
+  production margins (CM_SLASH 0.7048 u), not per-fold or per-half ones.
+- **Development cross-fit (107 fights, 3-way split, da1cd41): 228,333 / 228,333 at L2, 228,332 at L3 and L4
+  (99.9996 %).** The miss: Clawmaiden "Slash 5" at 074719 i3/ep5 f281119 (residual 0.068 u against the other fold's
+  Slash 5 template; its half's CM_SLASH margin was 0.0). Not by the forecast: same-name 46-47, unnamed-source 15-18,
+  collider tube in an attack 21-23, hazard tube 0-1 per lag. Without margins: 100 / 99.9996 / 99.9991 % (the same slash and a Reed Stab 5 at L4) with the collider tube 48-49 and hazard tube 5-6 per lag doing more: the margins add little, the structure and tubes carry the recall.
+- Production margins (38 = 29 attack families + 6 hazards + 3 entries; idle families none): 21 under 0.5 u; 3.0 u (cap)
+  for MI_PARRY, AT_FIRE and the pin / spear / bell / bomb; EN_CHARGE 2.96, CM_SPIN 2.76, RE_DEFEND 2.62, CC_JUMP 2.11,
+  CH_JUMP 1.61, RE_STAB 1.37. Area ratio over 48 (42 enemy families + 6 hazards): median x1.13, max x7.4 (Reed pin), 12
+  above x2 (4 hazards + 8 enemy families; enemy families alone median x1.12, max x4.3). The first report's "max x4.3,
+  12 families above x2" left the hazards out and counted RE_IDLE / RE_STAB (10 enemy families were above x2 then).
+- Band cover (median bin, no margin -> production margin): idle templates (no longer placed) Tiny 93 %, Clawmaiden 63 %,
+  Bellbearer 62 %, Minister 55 % (max bin 96 %); the idle body tube at 4 bins 6-20 %. **Moving attack families are wide
+  too**: CM_SPIN 74 -> 99 %, AT_DEFEND 75 -> 79 %, RE_STAB 66 -> 77 %, MI_PARRY 52 -> 76 %, AT_FIRE 30 -> 64 % (max bin
+  100 %), bell 34 -> 65 %, RE_DEFEND 26 -> 50 %.
+- Products (107 fights): multi-hit chains are at most 2 hits / 2 masks (Minister slash 806 of 831, whip 381 of 401, Reed
+  counter 203 of 227; 1,470 ticks, 80 without a final hit); EnemyBattleEndSlow 112-138 frames (p50 114, 1.90 s; max
+  2.47 s; 104 measured, 9 of them read past the cache, 4 censored), BigEnemyDeathSlow 9-10 frames, Clapper only; fastest
+  strike p5 >= 0.40 s for every type (CC_CAST now 0.400, was 0.067; Tiny ram by body 0.90 s, 4,063 of 7,963 rams reach
+  the hero's commit box), minima below 0.35 s only in hazard families (bell 0.0, pin 0.1, CC_CAST 0.117); CC_JUMP_CAST
+  p5 1.80 s (was 0.82: the rune slam spawns 65 frames before it arms).
+- Unchanged from the developer round: quiet stretches (1,038, 37.6 % >= 1.52 s), Garmond (nearest to him 53 %),
+  stance counters (Minister 241 / Reed 175, parry 5), below-flier shares, Clawmaiden distance, bells, boundaries.
+- planner_bench with the idle body tube (--idle-growth, same fight / frames): placements per tick p50 28,172 (was 28,506), tick 100 / 323 ms p50 / p99, every candidate still meets the support: the tube fixes the vacuous idle support, not the cost; the placements are the attacks that may start at 0.2 s anchors x 2 mirrors.
 
 ### Next
 
-1. R2 (MultiForecast) must keep what the recall needed beyond per-state templates + per-family margins: thrown
-   hazards by self template (armed: from arming; in the export but not armed: may arm where it is), a nail-hit bell's
-   short-lag tube, the family-wide union for rare branches (Reed "Multihit Clashed"), entry families' world-fixed
-   union, a current-collider tube (last exported box + type top speed) for the first frames and for enemies outside
-   any attack (killed enemies leave the export on the kill frame; waiting wave-12 bodies and parked Tiny are live).
-2. Builder attribution: the source path's "Wave N/..." parent tells same-named enemies apart (waiting wave-12 "Song
-   Reed" / "Song Pilgrim Maestro" vs waves 0 / 6); today 22-49 contacts per lag need the same-name rule.
-3. Margins: the q=1.0 production margins (`support_margins.json`) are 3.0 u (search cap) for MI_IDLE, MI_PARRY,
-   AT_FIRE, AT_IDLE and three hazards, and widen 12 families' support x2-4.3; compare the q=0.999 run (see the facts)
-   before the planner takes them; outliers come from a handful of contacts per family.
-4. R1 data: multi-hit chains with LethalBlock off and high HP (the measured maxima, whip 3 / Reed counter 2 /
-   Minister slash 3-5, are lower bounds); dash-stab reach (the 7.0 u estimate vs the Clawmaiden's median 8.0 u);
-   Envoy ambush (107 instances, 22 h at the data rate), HopSlash never seen.
-5. Rebuild with the two open recordings (074533 i2_001, 074719 i3_001: 13-14 episodes each) once they close: 6.6 h
-   build, then forum_extract (~30 min) and the recall (~45 min per setting).
-6. forum_simul's forecast check (one fight, in-sample, 0.8 s horizon): the hero stood inside the support on 76 % of
-   frames already at +0 s - the idle families' templates anchored at the idle start are wide; R2 should re-anchor
-   idle bodies at the current position (body hull + speed) instead.
+1. R2 (MultiForecast) must keep what the certification used beyond per-state templates + production margins: the idle
+   body tube (calibrated to the planner's horizon: 0.8 s = 48 bins, and better than dead reckoning for hopping /
+   chasing idles), attacks it may start at velocity-extrapolated anchors, thrown hazards by self template (armed: from
+   arming; in the export but not armed: may arm where it is), the family-wide union, entry families' world-fixed union,
+   same-name / unnamed-source candidates (the runtime forecasts every enemy anyway), and the collider / hazard tubes.
+2. Moving attack families (CM_SPIN, AT_FIRE, AT_DEFEND, RE_STAB, MI_PARRY, RE_DEFEND) have templates covering 50-99 % of
+   the band at their median bin: re-anchor them at the current position (or condition them on the path) as the idle
+   ones now are, then certify again on fresh fights.
+3. Builder attribution: the source path's "Wave N/..." parent and the toucher's position tell same-named enemies and
+   collider-only sources apart (today 9-18 contacts per lag need the candidate rule).
+4. R1 data: multi-hit chains with LethalBlock off and high HP (whether the tick count depends on health), dash-stab
+   reach (the 7.0 u estimate vs the Clawmaiden's median 8.0 u), Envoy ambush (107 instances), HopSlash never seen.
+5. Any later change to the forecast structure needs a new fresh set (the next recordings); the 35 fights used here are now seen.
 
 ## Chain F - Forum setup, gauntlet tables, data policy (branch worktree-wf_946a7803-63c-2)
 
