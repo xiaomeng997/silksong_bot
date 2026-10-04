@@ -88,3 +88,22 @@ def test_a_pause_begun_before_the_kill_ends_clear():
     finally:
         ep.wait_settled = orig
     assert rec.outcome == ep.CLEAR and rec.reason.startswith("quit after the kill"), (rec.outcome, rec.reason)
+
+
+def test_with_the_post_kill_tail_a_quit_after_the_kill_is_a_quit():
+    """Encounter.tail_quiet_s (DESIGN §3.9.4): the encounter ends only after the tail's quiet, so the same quit is QUIT."""
+    link = FakeLink()
+    enc = SimpleNamespace(scene="Bone_05", savestate="x", boss_type="Bone Beast", timebox_s=240.0,
+                          intro=lambda ctx: None, tail_quiet_s=2.0, tail_max_s=15.0, tail_armed=())
+    tap = FakeTap(link, death_at=1100)
+    pol = Policy(link, trigger=1098, quit_at=1160)
+    rec = ep.AttemptRecord(unit="BellBeast", stage="TRAIN", profile="TRAIN", build="1.0.30000", code_rev=None,
+                           config_fp="x", start_kind="savestate", mode="eval", seed=1)
+    cfg = ep.EpisodeConfig(mode="eval", seed=1, hp=None, silk=None, dx=None, facing=None, wait_frames=(0, 0))
+    orig = ep.wait_settled
+    ep.wait_settled = lambda link, scene, **kw: link.wait_state()
+    try:
+        ep.run_episode(link, enc, tap, pol, cfg, rec)
+    finally:
+        ep.wait_settled = orig
+    assert rec.outcome == ep.QUIT and rec.reason.startswith("quit after the kill"), (rec.outcome, rec.reason)

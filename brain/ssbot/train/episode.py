@@ -12,7 +12,12 @@ wait) while the boss is still waking (Bell Beast: about 2 s submerged) -> the po
 Outcomes (AttemptRecord.outcome):
   CLEAR         the boss's Control FSM entered a death state (Bell Beast: "Death Broadcast"; a gauntlet: the last wave
                 ended, ssbot.train.gauntlet.GauntletTap), and in mode "eval" no lethal hit came until the encounter's
-                post-clear window (Encounter.post_clear_s after the kill) was over;
+                post-clear window (Encounter.post_clear_s after the kill) was over; with a post-kill tail
+                (Encounter.tail_quiet_s, Bell Beast 2 s: DESIGN §3.5.7, the person's question of 2026-10-04) only once
+                no damage source has been live for that much game time after the kill (live_threats: the attack bells
+                of a kill in Burst Out roll for seconds), the policy playing on meanwhile (act_after_clear); a hit in
+                the tail counts like one in the fight (tail_hits), a lethal one is WOULD_DIE, a supervisor quit before
+                the tail's end is QUIT ("quit after the kill"), and a tail longer than tail_max_s is STUCK;
   WOULD_DIE     a lethal hit (LethalBlock "catastrophe" / "would_die"); in mode "eval" the episode ends there, also
                 when the hit comes with the kill or after it (Steel Soul: a death after the last kill still ends the
                 run; the Forum's dying Clappers and their runes still hurt for seconds); in mode "data" (behaviour
@@ -41,6 +46,26 @@ POST_CLEAR_FRAMES = 60   # default post-clear window (Encounter.post_clear_s): d
 PAUSE_AFTER_KILL_FRAMES = 1200   # a supervisor pause under way at the kill keeps the keys this long at most
 
 
+def live_threats(state_ents, armed: tuple = ()) -> list[str]:
+    """Type keys of the STATE's entities that can hurt the hero now or later: one with an enabled damage collider
+    (eff != 0: -1 is a multi-wounder source whose amount only its FSM knows, as ssbot.ipc.ents.is_threat;
+    can_cause_damage), or a hazard in an armed state of its type (Encounter.tail_armed: a drop bell's Antic, no
+    collider until it falls). Hidden entities have no colliders (ssbot.ipc.ents)."""
+    out = []
+    for e in state_ents or ():
+        if e.get("hidden"):
+            continue
+        tk = str(e.get("type_key") or "")
+        live = any(c.get("enabled") and c.get("damage") and (c["damage"].get("eff") or 0) != 0
+                   and c["damage"].get("can_cause_damage", True) for c in e.get("colliders") or ())
+        if not live and armed:
+            st = ((e.get("fsms") or [{}])[0] or {}).get("state")
+            live = any(tk.startswith(p) and st in states for p, states in armed)
+        if live:
+            out.append(tk)
+    return out
+
+
 def make_tap(link: OracleLink, enc: Encounter):
     """The encounter's event tracker: GauntletTap for a multi-wave arena (enc.waves), else FightTap."""
     return GauntletTap(link, enc) if enc.waves else FightTap(link, enc)
@@ -67,37 +92,67 @@ class FightTap:
             self.freezes: list[dict] = []
             self.hp: list[tuple[int, dict]] = []
             self.other: list[tuple[int, str, dict]] = []
+            self.tail_g = 0.0                         # game s after the kill (STATE dt summed after the death frame)
+            self.tail_threat_g: float | None = None   # ... at the last frame a damage source was live
+            self.tail_threats: dict[str, int] = {}    # live source type -> frames live after the kill
+            self.tail_f: int | None = None            # the last frame the tail clock counted
+
+    def tail_quiet_g(self) -> float:
+        """Game s since the last frame with a live damage source after the kill (since the kill when none was)."""
+        return self.tail_g - (self.tail_threat_g if self.tail_threat_g is not None else 0.0)
+
+    def _tail(self, s: dict) -> None:
+        f = s["f"]
+        if self.tail_f is not None and f <= self.tail_f:
+            return
+        if f > self.death_frame:
+            dt = s.get("dt")
+            self.tail_g += float(dt) if isinstance(dt, (int, float)) else 1.0 / 60.0
+        self.tail_f = f
+        live = live_threats(s.get("ents"), getattr(self.enc, "tail_armed", ()))
+        if live:
+            self.tail_threat_g = self.tail_g
+            for k in live:
+                self.tail_threats[k] = self.tail_threats.get(k, 0) + 1
 
     def _on(self, s: dict) -> None:
         evs = s.get("ev")
         if not evs:
+            if self.death_frame is not None and getattr(self.enc, "tail_quiet_s", None) is not None:
+                with self._lock:
+                    self._tail(s)
             return
         enc = self.enc
         with self._lock:
-            for ev in evs:
-                k = ev.get("k")
-                d = ev.get("d") or {}
-                f = s["f"]
-                if k == "fsm":
-                    if d.get("fsm") == enc.control_fsm and str(d.get("obj", "")).startswith(enc.boss_type):
-                        self.control = d["to"]
-                        self.control_log.append((f, d["from"], d["to"]))
-                        if self.wake_frame is None and d["from"] in enc.dormant and d["to"] not in enc.dormant:
-                            self.wake_frame = f
-                        if self.death_frame is None and d["to"] in enc.death_states:
-                            self.death_frame = f
-                elif k == "damage":
-                    self.damage.append((f, d))
-                elif k in ("catastrophe", "would_die"):
-                    self.lethal.append((f, k, d))
-                elif k == "freeze":
-                    if d.get("phase") == "start":
-                        self.freezes.append({"f": f, **d})
-                elif k == "hp":
-                    self.hp.append((f, d))
-                elif k in ("special_damage", "hazard_respawn", "hazard_death", "die", "hero_dead", "player_dead",
-                           "gs", "scene_leave"):
-                    self.other.append((f, k, d))
+            self._events(s, evs, enc)
+            if self.death_frame is not None and getattr(enc, "tail_quiet_s", None) is not None:
+                self._tail(s)
+
+    def _events(self, s: dict, evs: list, enc: Encounter) -> None:
+        f = s["f"]
+        for ev in evs:
+            k = ev.get("k")
+            d = ev.get("d") or {}
+            if k == "fsm":
+                if d.get("fsm") == enc.control_fsm and str(d.get("obj", "")).startswith(enc.boss_type):
+                    self.control = d["to"]
+                    self.control_log.append((f, d["from"], d["to"]))
+                    if self.wake_frame is None and d["from"] in enc.dormant and d["to"] not in enc.dormant:
+                        self.wake_frame = f
+                    if self.death_frame is None and d["to"] in enc.death_states:
+                        self.death_frame = f
+            elif k == "damage":
+                self.damage.append((f, d))
+            elif k in ("catastrophe", "would_die"):
+                self.lethal.append((f, k, d))
+            elif k == "freeze":
+                if d.get("phase") == "start":
+                    self.freezes.append({"f": f, **d})
+            elif k == "hp":
+                self.hp.append((f, d))
+            elif k in ("special_damage", "hazard_respawn", "hazard_death", "die", "hero_dead", "player_dead",
+                       "gs", "scene_leave"):
+                self.other.append((f, k, d))
 
     def lethal_frames(self) -> list[int]:
         """Frames with a lethal hit (one hit can raise both a catastrophe and a would_die)."""
@@ -152,6 +207,14 @@ class AttemptRecord:
     late_states: int = 0                         # STATEs that arrived after the next one was already due (gaps)
     gauntlet: dict | None = None                 # GauntletTap.summary(): waves [{wave, f, t}], kills, allies
     lethal_after_clear: int = 0                  # lethal-hit frames at or after the kill (in the post-clear window)
+    kill_s: float | None = None                  # wake -> the kill (the death state), frames / 60: time to kill
+    f_kill: int | None = None
+    tail_s: float | None = None                  # the post-kill tail (Encounter.tail_quiet_s): game s kill -> end
+    tail_threat_s: float | None = None           # ... game s from the kill to the last live damage source (None: none)
+    tail_threats: dict = field(default_factory=dict)   # live source type -> frames after the kill
+    tail_hits: int = 0                           # hero hits ("damage") at or after the kill
+    tail_hp_lost: int = 0
+    tail_end: str | None = None                  # how the tail ended: "quiet", "scene <name>" (None: no tail / cut)
 
 
 def _rand(link: OracleLink, **args) -> dict:
@@ -287,6 +350,10 @@ def _run(link: OracleLink, enc: Encounter, tap: FightTap, policy, cfg: EpisodeCo
     # a gauntlet's hazards outlive the last kill (the Forum's dying Clappers, runes, bombs): the policy keeps playing
     # through the window instead of standing still
     act_after = getattr(policy, "act_after_clear", False) or bool(getattr(enc, "waves", ()))
+    # the post-kill tail instead of the fixed window (Encounter.tail_quiet_s; SSBOT_POST_CLEAR_S: the fixed window)
+    tail = getattr(enc, "tail_quiet_s", None) is not None and not isinstance(tap, GauntletTap) \
+        and not os.environ.get("SSBOT_POST_CLEAR_S")
+    in_tail = False
     last = link.frame
     end_after = None
     while True:
@@ -312,6 +379,8 @@ def _run(link: OracleLink, enc: Encounter, tap: FightTap, policy, cfg: EpisodeCo
             rec.acts += 1
             if getattr(policy, "episode_outcome", None) == QUIT:
                 rec.reason = f"quit after the kill: {getattr(policy, 'outcome_reason', None)}"
+                if tail:
+                    rec.outcome = QUIT      # the encounter had not ended: the tail's quiet never came (DESIGN §3.5.7)
                 end_after = last
             continue
         if tap.lethal and cfg.mode == "eval":
@@ -334,10 +403,39 @@ def _run(link: OracleLink, enc: Encounter, tap: FightTap, policy, cfg: EpisodeCo
             else:
                 link.act(last + 2, 0, hold_frames=0)
             continue
+        if in_tail:
+            # the post-kill tail (Encounter.tail_quiet_s): CLEAR once no damage source has been live for that long
+            # (game time, FightTap.tail_quiet_g); the policy keeps playing (the planner dodges the bells), and a hit
+            # here is a hit like any other (a lethal one: WOULD_DIE above, a supervisor quit: QUIT)
+            if game.get("scene") != enc.scene and not getattr(policy, "real_quit_active", False):
+                rec.tail_end = f"scene {game.get('scene')}"      # the room is gone, and what was live in it
+                break
+            if tap.tail_quiet_g() >= enc.tail_quiet_s:
+                rec.tail_end = "quiet"
+                break
+            if game.get("paused") and not getattr(policy, "pause_owned", False):
+                rec.outcome, rec.reason = HARNESS_FAIL, f"paused unasked at frame {last} (post-kill tail)"
+                break
+            if tap.tail_g > enc.tail_max_s or last - tap.death_frame > PAUSE_AFTER_KILL_FRAMES + enc.tail_max_s * 60:
+                rec.outcome, rec.reason = STUCK, f"post-kill tail: damage sources live for {enc.tail_max_s:.0f} s"
+                break
+            if act_after or getattr(policy, "kill_commit_active", False):
+                _act(link, last, policy, s, tap)
+                rec.acts += 1
+            else:
+                link.act(last + 2, 0, hold_frames=0)
+            if getattr(policy, "episode_outcome", None) == QUIT:
+                rec.outcome = QUIT
+                rec.reason = f"quit after the kill: {getattr(policy, 'outcome_reason', None)}"
+                break
+            continue
         if tap.death_frame is not None:
             rec.outcome = CLEAR
-            end_after = last + post_f
-            if getattr(policy, "kill_commit_active", False):
+            if tail:
+                in_tail = True
+            else:
+                end_after = last + post_f
+            if getattr(policy, "kill_commit_active", False) or (tail and act_after):
                 _act(link, last, policy, s, tap)          # the kill commitment keeps its keys from the kill frame on
                 rec.acts += 1
             continue
@@ -380,6 +478,16 @@ def _summarise(tap: FightTap, rec: AttemptRecord, s: dict, enc: Encounter) -> No
     rec.lethal_sources = [d.get("src") or d.get("source") for _, k, d in tap.lethal if k == "catastrophe"][:10]
     if tap.death_frame is not None:
         rec.lethal_after_clear = sum(1 for f in lf if f >= tap.death_frame)
+        rec.f_kill = tap.death_frame
+        if tap.wake_frame is not None:
+            rec.kill_s = round((tap.death_frame - tap.wake_frame) / 60.0, 2)
+        rec.tail_hits = sum(1 for f, _ in tap.damage if f >= tap.death_frame)
+        rec.tail_hp_lost = -sum(d.get("delta", 0) for f, d in tap.hp
+                                if f >= tap.death_frame and (d.get("delta") or 0) < 0)
+        if getattr(tap, "tail_f", None) is not None:
+            rec.tail_s = round(tap.tail_g, 3)
+            rec.tail_threat_s = None if tap.tail_threat_g is None else round(tap.tail_threat_g, 3)
+            rec.tail_threats = dict(tap.tail_threats)
     if tap.wake_frame is not None and rec.f_end is not None:
         rec.ingame_s = round((rec.f_end - tap.wake_frame) / 60.0, 2)
     if isinstance(tap, GauntletTap):

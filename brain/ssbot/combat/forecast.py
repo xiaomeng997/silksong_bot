@@ -108,6 +108,16 @@ DET_VE = os.environ.get("SSBOT_DET_VE", "1") != "0"
 # exact paths drops the attack-bell unions of its Burst Recovery and tail (SSBOT_DET_ATK=0: the unions, the A/B before)
 DET_ATK = os.environ.get("SSBOT_DET_ATK", "1") != "0"
 ATK_LAUNCH_STATE = "Burst Out"     # the boss's state on the attack bells' Launch frame (100 of 100, 20261002_171806 i0)
+# After the boss's death (Death Broadcast) the walk has no roots, and what still hurts outlives it (task "post-kill
+# forecast", 2026-10-04; docs/facts/1.0.30000/post_kill.md): 4,597 Bell Beast kills recorded, every one in Burst Out
+# (1,138) left both attack bells in flight (Launch / Launched Up on the kill frame), 114 of the 543 in Dig In a drop
+# bell falling, and the body's own colliders hurt for at most one physics step (0.0202 s of game time, 83 contacts).
+# The oracle view puts every attack bell of the export on its exact path from then on (pos and velocity, registry
+# physics; End Timer from its first bounce plus ATK_LIFE_SLACK_S), until it leaves; the death tail's attack-bell union
+# (placed at the death, but timed from a burst's normal end: the bells there roll, the killed burst's are still rising)
+# is left out once both bells are on exact paths. Drop bells: the armed-bell tracking goes on through the death.
+DEAD_ATK_EXACT = os.environ.get("SSBOT_DEAD_ATK", "1") != "0"
+ATK_LIFE_SLACK_S = 0.05            # the End Timer's 2 s after the first bounce: colliders off 0.80-2.02 s after it
 ATK_ANCHOR_TOL_U = 0.5             # a pair's middle this close to a burst's anchor is that burst's pair
 ATK_LAG_SLACK_S = 0.05
 # the vision view's hit targets (a down spike bounces off a bell, a slash recoils from it, a side slash knocks a drop
@@ -138,7 +148,9 @@ HURT_BIN_S = 0.1             # the hurtbox table's time bins (ssbot.tools.hurtbo
 MARGIN_BIN_S = 0.1           # the pogo gate's margins per time bin in the phase (boss_path_audit --margins "_tau")
 DET_STATES = frozenset({"Drop", "Air", "Bounce Up", "Bounce Air", "Submerge", "Tink Right", "Tink R Min", "Tink Left",
                         "Tink L Min", "Tink D", "Tink Right 2", "Tink R Min 2", "Tink Left 2", "Tink L Min 2", "Tink D 2"})   # world-fixed hazards with self templates (entities.<tk>.self_template)
-REST_STATES = ("Init", "Dormant")
+# a drop bell at rest; "Cancel": the boss's death cancels a bell still in its Antic (1,225 Antic -> Cancel transitions in
+# the Bell Beast recordings, each on a kill frame, none out of Cancel; post_kill.md): it never falls
+REST_STATES = ("Init", "Dormant", "Cancel")
 BELL_TTL_S = 8.0                   # a disarmed bell (left the export, back to Dormant) is forgotten after this
 
 # observable phase -> the Control state its first frame is (the root of the forecast walk)
@@ -1565,6 +1577,8 @@ class Forecaster:
         for r in roots:
             self._walk(r.state, r.e_lo, r.e_hi, replace(r.ctx), r.p, -1, H, nodes, placements, r.current, 0)
         tr = self.tracker
+        # after the boss's death: the attack bells still flying or rolling on their exact paths (DEAD_ATK_EXACT)
+        n_dead_atk = self._dead_atk_bells(det) if tr.dead and self.view == ORACLE and DEAD_ATK_EXACT else 0
         if self.drop_tracks is not None and self.det_ve:
             # VE: a drop bell seen falling without its cue (the cue missed) is support on its path too
             for iid in self.drop_tracks.obs:
@@ -1602,7 +1616,7 @@ class Forecaster:
             nid = len(nodes)
             nodes.append(Node(nid, TAIL, lo - origin, hi - origin, fam, 1.0, -1, anchor))
             self._place(fam, TAIL, lo - origin, hi - origin, Ctx(family=fam, anchor=anchor, phase=phase), nid, H,
-                        placements, death_tail=death)
+                        placements, death_tail=death, skip_atk=death and n_dead_atk >= 2)
         if not roots and self.tracker.dead:
             known = True
         out = Forecast(self, origin, H, nodes, placements, known, roots, self.boss)
@@ -1647,6 +1661,39 @@ class Forecaster:
         det.append(DetBell(sp, float(e.pos.v[0]), float(e.pos.v[1]), float(e.vel.v[0]), float(e.vel.v[1]),
                            int(sp.next_bounce.get(st, len(sp.bounces))), rest, e.type_key.v))
         return True
+
+    def _dead_atk_bells(self, det: list) -> int:
+        """ORACLE, the boss dead: every attack bell of the export whose collider is still on (registry states) as a
+        DetBell on its exact path from its logged position and velocity (pogo_targets.simulate: centre error <= 0.0004
+        u over a whole life, docs/facts/1.0.30000/m2_vision_view.md), its life the End Timer after its first bounce
+        (TargetTracker.first_bounce) plus ATK_LIFE_SLACK_S; not bounced yet: no end inside the horizon (the timer runs
+        from the bounce); bounced but the bounce unseen: no end either (the longest). A bell exported before its
+        velocity is set (Launch, vy ~ 0) starts from the registry's launch velocity. Returns how many."""
+        ws = self._ws
+        if ws is None:
+            return 0
+        n = 0
+        for e in ws.entities:
+            tk = e.type_key.v
+            if not tk.startswith(ATK_BELL) or not e.fsm or e.hidden or e.pos.conf <= 0:
+                continue
+            sp = self.targets.spec_of(tk)
+            st = e.fsm[0][1]
+            if sp is None or st not in sp.states or st not in sp.next_bounce:
+                continue
+            (x, y), (vx, vy) = e.pos.v, (e.vel.v if e.vel.conf > 0 else (0.0, 0.0))
+            nb = int(sp.next_bounce[st])
+            if st == "Launch" and nb == 0 and abs(vy) < 1e-3 and sp.start:
+                side = -1.0 if tk.rstrip().endswith("L") else 1.0
+                vx, vy = side * float(sp.start.get("vx", 0.0)), float(sp.start.get("vy", 0.0))
+            life = None
+            if nb >= 1 and sp.life_after_first_s is not None:
+                t_fb = self.targets.first_bounce.get(e.id)
+                if t_fb is not None:
+                    life = max(0.0, t_fb + sp.life_after_first_s + ATK_LIFE_SLACK_S - self.t)
+            det.append(DetBell(sp, float(x), float(y), float(vx), float(vy), nb, None, tk, life=life))
+            n += 1
+        return n
 
     def _launch_lags(self) -> dict[str, tuple[float, float]]:
         """State (and _tail) -> (min, max) game s from the attack bells' launch to its entry (the attack's end for
@@ -1698,7 +1745,9 @@ class Forecaster:
         return False
 
     def _place(self, fam: str, state: str, e_lo: float, e_hi: float, ctx: Ctx, node: int, H: float,
-               out: list[Placement], death_tail: bool = False) -> None:
+               out: list[Placement], death_tail: bool = False, skip_atk: bool = False) -> None:
+        """skip_atk: a death tail whose attack bells are all on exact paths (_dead_atk_bells): its frames whose
+        sources are attack bells only are not placed."""
         m = self.model
         f = m.families[fam]
         ws = f.world_sources.get(state, frozenset())
@@ -1741,6 +1790,8 @@ class Forecaster:
             if fr == "anchor" and fsrc and self._atk_cover and all(x.startswith(ATK_BELL) for x in fsrc) \
                     and self._atk_covered(state, e_lo, e_hi, ctx.anchor):
                 continue           # VE: both of this burst's attack bells are on exact paths (Forecast.det)
+            if skip_atk and fsrc and all(x.startswith(ATK_BELL) for x in fsrc):
+                continue           # ORACLE after the death: the bells are on exact paths (Forecaster._dead_atk_bells)
             if fsrc and all(x.startswith(DROP_BELL) for x in fsrc) and not self.tracker.bells_unknown:
                 if self.view == ORACLE:
                     t_from = self.bell_lead
