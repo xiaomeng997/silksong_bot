@@ -50,7 +50,7 @@ def _events(rec: Path) -> dict:
         for line in fh:
             if '"fsm"' in line and DEATH not in line and '"Cancel"' not in line:
                 continue
-            if not any(k in line for k in ('"fsm"', '"harness"', '"damage"', '"damage_blocked"')):
+            if not any(k in line for k in ('"fsm"', '"harness"', '"damage"', '"damage_blocked"', '"scene_leave"')):
                 continue
             try:
                 e = json.loads(line)
@@ -61,7 +61,9 @@ def _events(rec: Path) -> dict:
                 out["kills"].append((f, d.get("from")))
             elif k == "fsm" and d.get("to") == "Cancel":
                 out["cancel"].append((f, d.get("obj"), d.get("from")))
-            elif k == "harness" and d.get("op") == "savestate.load":
+            elif (k == "harness" and d.get("op") == "savestate.load") or k == "scene_leave":
+                # the end of the room's frames: a savestate load reloads Bone_05 itself (scene_leave a dozen frames
+                # before the harness logs the load), so the scene name does not tell
                 out["loads"].append(f)
             elif k in ("damage", "damage_blocked"):
                 out["dmg"].append((f, k, str(d.get("source")), d.get("amount")))
