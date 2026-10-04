@@ -833,17 +833,35 @@ fixed.
 - Past CLEARs (`post_kill clears`): oracle eval 2,878: none changes outcome (all full-HP kills), 772 would have had a
   longer tail, 714 would have been hit standing still; injection runs: the 106 "quit after the kill" CLEARs become
   QUIT (6 of them the post-kill bells), 7 more would have been hit standing still at HP <= 3.
-- 200-episode plain run and the gate: see Running.
+- Plain live run with the tail (20261004_065707, fd18ae6, 200 episodes, base seed 122500, --real-quit 0.2): 200 CLEAR,
+  0 QUIT / STUCK / WOULD_DIE; 8 hits in the fight (0 unpredicted), **0 in the tail**; 56 kills left live sources (51
+  both attack bells, 5 a falling drop bell), the last one live <= 2.94 s after the kill, tail p50 2.015 s / max 4.95 s
+  (game); 39 FORCED_RISK ticks in 7 tails (bells landing just after a full-HP kill's slow-motion commitment), no hit;
+  2 certified kills at h 2; time to kill p50 58.0 s (48.2-76.9); planner p50 4.50 ms, p99 median 11.5 ms, max 15.5 ms.
+- Full-HP kills' commitments (the last plan sent, uncertified) leave the plan by up to 2.4 u (x) / 7.4 u (y): the
+  killing hit's own effect (a down spike's bounce off the boss) is not in that plan; certified ones stay within 0.47 /
+  0.70 u of their certified branch (kill check).
 
 ### Running
 
-- (filled in at the end of the task)
+- Gate (500 with the 200 above): `C:\ssbot\data\runs\m2\20261004_085210_BellBeast_eval_planner_oracle`, instances 0 and
+  1, 150 episodes each, base seed 123500, same checkout `C:\ssbot\live_postkill_fd18ae6` (commit fd18ae6, the same
+  code fingerprint as 20261004_065707), started 08:52 by `C:\ssbot\sandbox\postkill_gate_start.cmd` (detached, hidden;
+  log `C:\ssbot\sandbox\postkill_gate.log`, ends with POSTKILL_GATE_DONE; about 2.8 h). Pool:
+  `combat_run summary C:\ssbot\data\runs\m2\20261004_085210_BellBeast_eval_planner_oracle
+  C:\ssbot\data\runs\m2\20261004_065707_BellBeast_eval_planner_oracle`. Stop: `combat_run stop <run dir>`.
 
 ### Next
 
+0. Read the gate when it ends (pooled with 20261004_065707); post-kill numbers in its summary's `post_kill_tail`.
 1. Turn the tail on for the Forum (`tail_quiet_s`, the runes / bombs / dying Clappers as live sources) after checking
    its recordings the same way (`post_kill scan` is Bell Beast only now: BOSS / SCENE constants).
 2. Vision view: a cancelled drop bell stays armed in the vision tracker up to BELL_TTL_S (8 s) after the death (the cue
    just stops); harmless (more support), but the vision view's post-death support is not checked live.
-3. Remove the live checkouts `C:\ssbot\live_postkill_5a97e0f` (smoke and kill check) and `C:\ssbot\live_postkill_fd18ae6`
+3. Full-HP kills: their slow-motion commitment is the last plan without the killing hit's branches; certify every
+   possibly killing blow's branches, or prefer a certifiable plan under I3 too, if the tail's FORCED_RISK matters.
+4. After the death no new drop bell can arm, but the drop-bell unions of the tails (t_from 1.2 s) are still placed:
+   extra support beyond the planner's 0.8 s (the tactics' risk map sees it); left as is so the 200 and the gate run
+   the same code.
+5. Remove the live checkouts `C:\ssbot\live_postkill_5a97e0f` (smoke and kill check) and `C:\ssbot\live_postkill_fd18ae6`
    (200 + gate) when no longer needed.
