@@ -908,7 +908,7 @@ A 类 = 以 2 格攻击为主的 boss 或连战；B 类 = 竞技场、小 boss�
   - **仅 A/B，默认不做：** Faydown（除非 Wardenfly 迫使）、Injector Band、Pollip Pouch。
   - **付费 / 有条件的工作台（2026-10-03，你的问题"路线包括买椅子吗"）：** 原路线没有单独列。价值 = 附近 A 类遭遇的预期退出次数 × 每次少走的回撤时间（紧急退出估计约 4.5 次 × 380 s）− 购买的念珠和绕路时间；路线调研从游戏数据列出全部付费 / 有条件工作台（位置、价格、条件），按此排序。**不买地图**：导航用离线提取的世界图（§3.4）。
 - **Fourth Chorus、Moorwing、Sister Splinter 的打/跳决定**在 M1 前由你的游玩和社区路线定下；凡是要打的 boss 都算 A 类，配 playbook 和门槛。
-- **永不交战：** Savage Beastfly、Skull Tyrant、Great Conchflies、Forebrothers、Groal、First Sinner、Summoned Saviour、Lumble 的骰子、所有 Act 3 内容。
+- **永不交战：** Savage Beastfly、Skull Tyrant、Great Conchflies、Forebrothers、Groal、First Sinner、Summoned Saviour、Lumble 的骰子（默认不赌：磁石骰在 Act 1–2 可在 S17 的 `Coral_33` 赢来，或打完 Dancers / 拿到 Clawline 后从他的尸体免费拾取；只在 K1 显示它比负重环带 / 爬墙爪更值时才改，见 [`research/dice_pilgrim.md`](research/dice_pilgrim.md)）、所有 Act 3 内容。
 - **永不做：** 装 Barbed Bracelet；去 Mount Fay 取 Memory Crystal（Act 2 路线外，只在受击时触发，爆炸可能引发 Lace 等的弹反反击 [research/crests.md]）；启动 Rite of Rebirth；在 GMS 竞技场按 Needolin；NMG 禁止的 glitch 或帧精确跳过。
 
 #### 3.6.5 配装、槽位可行性与经济
