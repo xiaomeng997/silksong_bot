@@ -1,0 +1,679 @@
+{
+ "product": "chains",
+ "sources": {
+  "fights": [
+   "20261002_223640_Forum_A_data/i2/ep0",
+   "20261002_223640_Forum_A_data/i2/ep1",
+   "20261002_230325_Forum_A_data/i2/ep0",
+   "20261002_231917_Forum_A_data/i2/ep0",
+   "20261002_231917_Forum_A_data/i2/ep1",
+   "20261002_231917_Forum_A_data/i2/ep2",
+   "20261002_231917_Forum_A_data/i2/ep3",
+   "20261002_231917_Forum_A_data/i2/ep4",
+   "20261002_231917_Forum_A_data/i2/ep5",
+   "20261002_231917_Forum_A_data/i2/ep6",
+   "20261002_231917_Forum_A_data/i2/ep7",
+   "20261002_231917_Forum_A_data/i2/ep8",
+   "20261002_231917_Forum_A_data/i2/ep9",
+   "20261003_014254_Forum_A_data/i2/ep0",
+   "20261003_014254_Forum_A_data/i2/ep1",
+   "20261003_014254_Forum_A_data/i2/ep10",
+   "20261003_014254_Forum_A_data/i2/ep11",
+   "20261003_014254_Forum_A_data/i2/ep12",
+   "20261003_014254_Forum_A_data/i2/ep13",
+   "20261003_014254_Forum_A_data/i2/ep14",
+   "20261003_014254_Forum_A_data/i2/ep15",
+   "20261003_014254_Forum_A_data/i2/ep16",
+   "20261003_014254_Forum_A_data/i2/ep17",
+   "20261003_014254_Forum_A_data/i2/ep18",
+   "20261003_014254_Forum_A_data/i2/ep19",
+   "20261003_014254_Forum_A_data/i2/ep2",
+   "20261003_014254_Forum_A_data/i2/ep20",
+   "20261003_014254_Forum_A_data/i2/ep21",
+   "20261003_014254_Forum_A_data/i2/ep22",
+   "20261003_014254_Forum_A_data/i2/ep23",
+   "20261003_014254_Forum_A_data/i2/ep24",
+   "20261003_014254_Forum_A_data/i2/ep3",
+   "20261003_014254_Forum_A_data/i2/ep4",
+   "20261003_014254_Forum_A_data/i2/ep5",
+   "20261003_014254_Forum_A_data/i2/ep6",
+   "20261003_014254_Forum_A_data/i2/ep7",
+   "20261003_014254_Forum_A_data/i2/ep8",
+   "20261003_014254_Forum_A_data/i2/ep9",
+   "20261003_030413_Forum_A_data/i3/ep0",
+   "20261003_030413_Forum_A_data/i3/ep1",
+   "20261003_030413_Forum_A_data/i3/ep10",
+   "20261003_030413_Forum_A_data/i3/ep11",
+   "20261003_030413_Forum_A_data/i3/ep12",
+   "20261003_030413_Forum_A_data/i3/ep13",
+   "20261003_030413_Forum_A_data/i3/ep14",
+   "20261003_030413_Forum_A_data/i3/ep15",
+   "20261003_030413_Forum_A_data/i3/ep16",
+   "20261003_030413_Forum_A_data/i3/ep17",
+   "20261003_030413_Forum_A_data/i3/ep18",
+   "20261003_030413_Forum_A_data/i3/ep2",
+   "20261003_030413_Forum_A_data/i3/ep3",
+   "20261003_030413_Forum_A_data/i3/ep4",
+   "20261003_030413_Forum_A_data/i3/ep5",
+   "20261003_030413_Forum_A_data/i3/ep6",
+   "20261003_030413_Forum_A_data/i3/ep7",
+   "20261003_030413_Forum_A_data/i3/ep8",
+   "20261003_030413_Forum_A_data/i3/ep9",
+   "20261003_074533_Forum_A_data/i2/ep0",
+   "20261003_074533_Forum_A_data/i2/ep1",
+   "20261003_074533_Forum_A_data/i2/ep10",
+   "20261003_074533_Forum_A_data/i2/ep11",
+   "20261003_074533_Forum_A_data/i2/ep12",
+   "20261003_074533_Forum_A_data/i2/ep13",
+   "20261003_074533_Forum_A_data/i2/ep14",
+   "20261003_074533_Forum_A_data/i2/ep15",
+   "20261003_074533_Forum_A_data/i2/ep16",
+   "20261003_074533_Forum_A_data/i2/ep17",
+   "20261003_074533_Forum_A_data/i2/ep18",
+   "20261003_074533_Forum_A_data/i2/ep19",
+   "20261003_074533_Forum_A_data/i2/ep2",
+   "20261003_074533_Forum_A_data/i2/ep20",
+   "20261003_074533_Forum_A_data/i2/ep21",
+   "20261003_074533_Forum_A_data/i2/ep22",
+   "20261003_074533_Forum_A_data/i2/ep23",
+   "20261003_074533_Forum_A_data/i2/ep24",
+   "20261003_074533_Forum_A_data/i2/ep3",
+   "20261003_074533_Forum_A_data/i2/ep4",
+   "20261003_074533_Forum_A_data/i2/ep5",
+   "20261003_074533_Forum_A_data/i2/ep6",
+   "20261003_074533_Forum_A_data/i2/ep7",
+   "20261003_074533_Forum_A_data/i2/ep8",
+   "20261003_074533_Forum_A_data/i2/ep9",
+   "20261003_074719_Forum_A_data/i3/ep0",
+   "20261003_074719_Forum_A_data/i3/ep1",
+   "20261003_074719_Forum_A_data/i3/ep10",
+   "20261003_074719_Forum_A_data/i3/ep11",
+   "20261003_074719_Forum_A_data/i3/ep12",
+   "20261003_074719_Forum_A_data/i3/ep13",
+   "20261003_074719_Forum_A_data/i3/ep14",
+   "20261003_074719_Forum_A_data/i3/ep15",
+   "20261003_074719_Forum_A_data/i3/ep16",
+   "20261003_074719_Forum_A_data/i3/ep17",
+   "20261003_074719_Forum_A_data/i3/ep18",
+   "20261003_074719_Forum_A_data/i3/ep19",
+   "20261003_074719_Forum_A_data/i3/ep2",
+   "20261003_074719_Forum_A_data/i3/ep20",
+   "20261003_074719_Forum_A_data/i3/ep21",
+   "20261003_074719_Forum_A_data/i3/ep22",
+   "20261003_074719_Forum_A_data/i3/ep23",
+   "20261003_074719_Forum_A_data/i3/ep24",
+   "20261003_074719_Forum_A_data/i3/ep3",
+   "20261003_074719_Forum_A_data/i3/ep4",
+   "20261003_074719_Forum_A_data/i3/ep5",
+   "20261003_074719_Forum_A_data/i3/ep6",
+   "20261003_074719_Forum_A_data/i3/ep7",
+   "20261003_074719_Forum_A_data/i3/ep8",
+   "20261003_074719_Forum_A_data/i3/ep9"
+  ],
+  "cache": "C:\\ssbot\\data\\m2_forum_r0\\cache",
+  "code": {
+   "sha": "da1cd41d49652ba0deda8309bc84ea6b66c3f00d",
+   "branch": "worktree-wf_198518ec-9ba-1",
+   "dirty": true
+  },
+  "tool": "python -m ssbot.tools.forum_products --cache C:\\ssbot\\data\\m2_forum_r0\\cache"
+ },
+ "note": "a chain: the hero's Multihit ticks (special_damage, about 20 frames apart, each within 30 frames of the next) and the Final Hit damage event that ends them and names the source; every other damage event is one hit. LethalBlock (data mode) blocks the ticks' and hits' health loss but not the FSM: the counts are what the attacks do; whether the tick count depends on the hero's health is not known (R1: LethalBlock off, full HP)",
+ "multihit_ticks": 1470,
+ "ticks_without_a_final_hit": 80,
+ "by_source": {
+  "Pilgrim 03 Song/Throwing Bell": {
+   "n": 1787,
+   "multi_hit_chains": 0,
+   "hits_max": 1,
+   "damage_max": 1,
+   "hits": {
+    "1": 1787
+   },
+   "damage": {
+    "1": 1787
+   },
+   "span_frames_max": 0
+  },
+  "Pilgrim 03 Song/body": {
+   "n": 329,
+   "multi_hit_chains": 0,
+   "hits_max": 1,
+   "damage_max": 1,
+   "hits": {
+    "1": 329
+   },
+   "damage": {
+    "1": 329
+   },
+   "span_frames_max": 0
+  },
+  "Song Administrator/Collider AttackAntic": {
+   "n": 40,
+   "multi_hit_chains": 0,
+   "hits_max": 1,
+   "damage_max": 1,
+   "hits": {
+    "1": 40
+   },
+   "damage": {
+    "1": 40
+   },
+   "span_frames_max": 0
+  },
+  "Song Administrator/Collider Evade": {
+   "n": 38,
+   "multi_hit_chains": 0,
+   "hits_max": 1,
+   "damage_max": 1,
+   "hits": {
+    "1": 38
+   },
+   "damage": {
+    "1": 38
+   },
+   "span_frames_max": 0
+  },
+  "Song Administrator/Collider Fly": {
+   "n": 256,
+   "multi_hit_chains": 0,
+   "hits_max": 1,
+   "damage_max": 1,
+   "hits": {
+    "1": 256
+   },
+   "damage": {
+    "1": 256
+   },
+   "span_frames_max": 0
+  },
+  "Song Administrator/Collider ParryAntic": {
+   "n": 68,
+   "multi_hit_chains": 0,
+   "hits_max": 1,
+   "damage_max": 1,
+   "hits": {
+    "1": 68
+   },
+   "damage": {
+    "1": 68
+   },
+   "span_frames_max": 0
+  },
+  "Song Administrator/Collider ParryStance": {
+   "n": 678,
+   "multi_hit_chains": 0,
+   "hits_max": 1,
+   "damage_max": 1,
+   "hits": {
+    "1": 678
+   },
+   "damage": {
+    "1": 678
+   },
+   "span_frames_max": 0
+  },
+  "Song Administrator/ParrySlash Hit": {
+   "n": 140,
+   "multi_hit_chains": 0,
+   "hits_max": 1,
+   "damage_max": 1,
+   "hits": {
+    "1": 140
+   },
+   "damage": {
+    "1": 140
+   },
+   "span_frames_max": 0
+  },
+  "Song Administrator/Slash Collider": {
+   "n": 831,
+   "multi_hit_chains": 831,
+   "hits_max": 2,
+   "damage_max": 2,
+   "hits": {
+    "2": 806,
+    "1": 25
+   },
+   "damage": {
+    "2": 806,
+    "1": 25
+   },
+   "span_frames_max": 21
+  },
+  "Song Administrator/body": {
+   "n": 209,
+   "multi_hit_chains": 0,
+   "hits_max": 1,
+   "damage_max": 1,
+   "hits": {
+    "1": 209
+   },
+   "damage": {
+    "1": 209
+   },
+   "span_frames_max": 0
+  },
+  "Song Automaton Tiny/body": {
+   "n": 5224,
+   "multi_hit_chains": 0,
+   "hits_max": 1,
+   "damage_max": 1,
+   "hits": {
+    "1": 5224
+   },
+   "damage": {
+    "1": 5224
+   },
+   "span_frames_max": 0
+  },
+  "Song Handmaiden/Slash Collider": {
+   "n": 377,
+   "multi_hit_chains": 0,
+   "hits_max": 1,
+   "damage_max": 1,
+   "hits": {
+    "1": 377
+   },
+   "damage": {
+    "1": 377
+   },
+   "span_frames_max": 0
+  },
+  "Song Handmaiden/Spear": {
+   "n": 156,
+   "multi_hit_chains": 0,
+   "hits_max": 1,
+   "damage_max": 2,
+   "hits": {
+    "1": 156
+   },
+   "damage": {
+    "2": 156
+   },
+   "span_frames_max": 0
+  },
+  "Song Handmaiden/body": {
+   "n": 536,
+   "multi_hit_chains": 0,
+   "hits_max": 1,
+   "damage_max": 1,
+   "hits": {
+    "1": 536
+   },
+   "damage": {
+    "1": 536
+   },
+   "span_frames_max": 0
+  },
+  "Song Handmaiden/handmaiden_spear_silk_explosion": {
+   "n": 58,
+   "multi_hit_chains": 0,
+   "hits_max": 1,
+   "damage_max": 2,
+   "hits": {
+    "1": 58
+   },
+   "damage": {
+    "2": 58
+   },
+   "span_frames_max": 0
+  },
+  "Song Heavy Sentry/Slam Collider 1": {
+   "n": 678,
+   "multi_hit_chains": 0,
+   "hits_max": 1,
+   "damage_max": 2,
+   "hits": {
+    "1": 678
+   },
+   "damage": {
+    "2": 678
+   },
+   "span_frames_max": 0
+  },
+  "Song Heavy Sentry/Slam Collider 2": {
+   "n": 836,
+   "multi_hit_chains": 0,
+   "hits_max": 1,
+   "damage_max": 2,
+   "hits": {
+    "1": 836
+   },
+   "damage": {
+    "2": 836
+   },
+   "span_frames_max": 0
+  },
+  "Song Heavy Sentry/body": {
+   "n": 3370,
+   "multi_hit_chains": 0,
+   "hits_max": 1,
+   "damage_max": 2,
+   "hits": {
+    "1": 3370
+   },
+   "damage": {
+    "2": 3370
+   },
+   "span_frames_max": 0
+  },
+  "Song Heavy Sentry/rune bomb small": {
+   "n": 665,
+   "multi_hit_chains": 0,
+   "hits_max": 1,
+   "damage_max": 2,
+   "hits": {
+    "1": 665
+   },
+   "damage": {
+    "1": 646,
+    "2": 19
+   },
+   "span_frames_max": 0
+  },
+  "Song Heavy Sentry/rune slam": {
+   "n": 804,
+   "multi_hit_chains": 0,
+   "hits_max": 1,
+   "damage_max": 2,
+   "hits": {
+    "1": 804
+   },
+   "damage": {
+    "2": 804
+   },
+   "span_frames_max": 0
+  },
+  "Song Pilgrim 01/Charge Damager": {
+   "n": 161,
+   "multi_hit_chains": 0,
+   "hits_max": 1,
+   "damage_max": 1,
+   "hits": {
+    "1": 161
+   },
+   "damage": {
+    "1": 161
+   },
+   "span_frames_max": 0
+  },
+  "Song Pilgrim 01/JumpSlash Damager 1": {
+   "n": 1,
+   "multi_hit_chains": 0,
+   "hits_max": 1,
+   "damage_max": 1,
+   "hits": {
+    "1": 1
+   },
+   "damage": {
+    "1": 1
+   },
+   "span_frames_max": 0
+  },
+  "Song Pilgrim 01/JumpSlash Damager 2": {
+   "n": 33,
+   "multi_hit_chains": 0,
+   "hits_max": 1,
+   "damage_max": 1,
+   "hits": {
+    "1": 33
+   },
+   "damage": {
+    "1": 33
+   },
+   "span_frames_max": 0
+  },
+  "Song Pilgrim 01/P1 Damager": {
+   "n": 14,
+   "multi_hit_chains": 0,
+   "hits_max": 1,
+   "damage_max": 1,
+   "hits": {
+    "1": 14
+   },
+   "damage": {
+    "1": 14
+   },
+   "span_frames_max": 0
+  },
+  "Song Pilgrim 01/P2 Damager": {
+   "n": 100,
+   "multi_hit_chains": 0,
+   "hits_max": 1,
+   "damage_max": 1,
+   "hits": {
+    "1": 100
+   },
+   "damage": {
+    "1": 100
+   },
+   "span_frames_max": 0
+  },
+  "Song Pilgrim 01/body": {
+   "n": 214,
+   "multi_hit_chains": 0,
+   "hits_max": 1,
+   "damage_max": 1,
+   "hits": {
+    "1": 214
+   },
+   "damage": {
+    "1": 214
+   },
+   "span_frames_max": 0
+  },
+  "Song Pilgrim 03/Body Damager": {
+   "n": 729,
+   "multi_hit_chains": 0,
+   "hits_max": 1,
+   "damage_max": 1,
+   "hits": {
+    "1": 729
+   },
+   "damage": {
+    "1": 729
+   },
+   "span_frames_max": 0
+  },
+  "Song Pilgrim 03/Slash Hit 1": {
+   "n": 182,
+   "multi_hit_chains": 0,
+   "hits_max": 1,
+   "damage_max": 1,
+   "hits": {
+    "1": 182
+   },
+   "damage": {
+    "1": 182
+   },
+   "span_frames_max": 0
+  },
+  "Song Pilgrim 03/Slash Hit 2": {
+   "n": 16,
+   "multi_hit_chains": 0,
+   "hits_max": 1,
+   "damage_max": 1,
+   "hits": {
+    "1": 16
+   },
+   "damage": {
+    "1": 16
+   },
+   "span_frames_max": 0
+  },
+  "Song Pilgrim 03/Slash Hit 3": {
+   "n": 82,
+   "multi_hit_chains": 0,
+   "hits_max": 1,
+   "damage_max": 1,
+   "hits": {
+    "1": 82
+   },
+   "damage": {
+    "1": 82
+   },
+   "span_frames_max": 0
+  },
+  "Song Pilgrim 03/Spin Hit": {
+   "n": 230,
+   "multi_hit_chains": 0,
+   "hits_max": 1,
+   "damage_max": 1,
+   "hits": {
+    "1": 230
+   },
+   "damage": {
+    "1": 230
+   },
+   "span_frames_max": 0
+  },
+  "Song Pilgrim 03/Spin Slash Hit": {
+   "n": 14,
+   "multi_hit_chains": 0,
+   "hits_max": 1,
+   "damage_max": 1,
+   "hits": {
+    "1": 14
+   },
+   "damage": {
+    "1": 14
+   },
+   "span_frames_max": 0
+  },
+  "Song Pilgrim 03/Whip Hit": {
+   "n": 401,
+   "multi_hit_chains": 401,
+   "hits_max": 2,
+   "damage_max": 2,
+   "hits": {
+    "2": 381,
+    "1": 20
+   },
+   "damage": {
+    "2": 381,
+    "1": 20
+   },
+   "span_frames_max": 21
+  },
+  "Song Pilgrim Maestro/Slash Hit 1": {
+   "n": 10,
+   "multi_hit_chains": 0,
+   "hits_max": 1,
+   "damage_max": 1,
+   "hits": {
+    "1": 10
+   },
+   "damage": {
+    "1": 10
+   },
+   "span_frames_max": 0
+  },
+  "Song Pilgrim Maestro/Slash Hit 2": {
+   "n": 62,
+   "multi_hit_chains": 0,
+   "hits_max": 1,
+   "damage_max": 1,
+   "hits": {
+    "1": 62
+   },
+   "damage": {
+    "1": 62
+   },
+   "span_frames_max": 0
+  },
+  "Song Pilgrim Maestro/body": {
+   "n": 258,
+   "multi_hit_chains": 0,
+   "hits_max": 1,
+   "damage_max": 1,
+   "hits": {
+    "1": 258
+   },
+   "damage": {
+    "1": 258
+   },
+   "span_frames_max": 0
+  },
+  "Song Reed/ParrySlash Hit": {
+   "n": 227,
+   "multi_hit_chains": 227,
+   "hits_max": 2,
+   "damage_max": 2,
+   "hits": {
+    "2": 203,
+    "1": 24
+   },
+   "damage": {
+    "2": 203,
+    "1": 24
+   },
+   "span_frames_max": 21
+  },
+  "Song Reed/Song Reed Pin Projectile": {
+   "n": 415,
+   "multi_hit_chains": 0,
+   "hits_max": 1,
+   "damage_max": 1,
+   "hits": {
+    "1": 415
+   },
+   "damage": {
+    "1": 415
+   },
+   "span_frames_max": 0
+  },
+  "Song Reed/Stab Hit 1": {
+   "n": 169,
+   "multi_hit_chains": 0,
+   "hits_max": 1,
+   "damage_max": 1,
+   "hits": {
+    "1": 169
+   },
+   "damage": {
+    "1": 169
+   },
+   "span_frames_max": 0
+  },
+  "Song Reed/Stab Hit 2": {
+   "n": 83,
+   "multi_hit_chains": 0,
+   "hits_max": 1,
+   "damage_max": 1,
+   "hits": {
+    "1": 83
+   },
+   "damage": {
+    "1": 83
+   },
+   "span_frames_max": 0
+  },
+  "Song Reed/Stab Hit 3": {
+   "n": 84,
+   "multi_hit_chains": 0,
+   "hits_max": 1,
+   "damage_max": 1,
+   "hits": {
+    "1": 84
+   },
+   "damage": {
+    "1": 84
+   },
+   "span_frames_max": 0
+  },
+  "Song Reed/body": {
+   "n": 1161,
+   "multi_hit_chains": 0,
+   "hits_max": 1,
+   "damage_max": 1,
+   "hits": {
+    "1": 1161
+   },
+   "damage": {
+    "1": 1161
+   },
+   "span_frames_max": 0
+  }
+ }
+}

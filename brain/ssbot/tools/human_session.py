@@ -86,6 +86,17 @@ def run_commands(link: OracleLink, log: list) -> None:
                 entry["result"] = f"speed {r.get('scale')}"
             except (OracleError, TimeoutError, ValueError) as e:
                 entry["result"] = f"failed: {e}"
+        elif len(parts) >= 2 and parts[0] == "rpc":
+            # "rpc <name> [json args]": any oracle RPC through this link (abilities.grant, crest.equip, ...)
+            try:
+                kw = json.loads(line.strip().split(None, 2)[2]) if len(parts) > 2 else {}
+                r = link.rpc(parts[1], timeout_s=60, **kw)
+                entry["result"] = "ok"
+                entry["reply"] = r
+                (Path(r"C:\ssbot\sandbox") / "human_rpc_reply.json").write_text(json.dumps(r, ensure_ascii=False,
+                                                                                         default=str), encoding="utf-8")
+            except (OracleError, TimeoutError, ValueError) as e:
+                entry["result"] = f"failed: {e}"
         elif parts:
             entry["result"] = "unknown command"
         if parts:
