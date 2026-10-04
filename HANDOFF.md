@@ -563,3 +563,67 @@ Code: f9dcbba (supervisor / tactics), 4eb57db (tools), 5026372 (combat_run --sta
 7. Merge note: main's 1c0a082 marks DESIGN §3.7.4 Q6's revision "待实现"; it is implemented here (q6_max_h 1).
    The Bell Beast gate on main (e3ceda4: degraded_dust 4a90331, 94.4 % CLEAR) ran with Q6 at h 2; after merging, the
    gate's QUIT / STUCK mix changes (h 2 fights on), so re-run it on the merged code before quoting it.
+
+## Task "STUCK at 15 HP" - the killing-blow deadlock at h 2 (branch worktree-wf_9520bd11-c70-1)
+
+Worktree `C:\modeling\silksong_bot\.claude\worktrees\wf_9520bd11-c70-1`, branch `worktree-wf_9520bd11-c70-1`, from main
+7733c98. First round 54d7e67 / 9b42247 / af8a215 (per-attack damage bounds, certified kill, QS); fixer round after the
+review f140a49 .. c67e4c1 plus docs. Instances 0 and 1 (oracle, Bell Beast), seeds 115000-117999 (used 115000-115110,
+115300-115460 for the kill checks, 115500-115639). Facts: docs/facts/1.0.30000/pause_quit.md sections 9 (first round)
+and 10 (fixer round). Lead decision 2026-10-04: the certified killing blow at h >= 2 below full HP is approved; DESIGN
+3.7.2 I3 (exception and its conditions), 3.7.3 YELLOW, 3.5.4 U and review row 47 updated.
+
+### Done (fixer round)
+
+- `combat/hero_damage.py`: the game's damage formula with every RoundToInt bounded up (DamageStack adds its
+  multipliers), the fixed 5 damagers, the target's damage scaling per enemy type and needle level (audited; unknown:
+  unbounded), the Wanderer crit after scaling; vision without an inventory audit takes every needle level.
+- `tools/kill_window.py` + `knowledge/1.0.30000/kill_windows.json`: game time from the killing hit to the first
+  pausable frame per freeze type (BossDeathSlow 0.1668 s / 330 kills, EnemyBattleEndSlow and BigEnemyDeathSlow 0.794 s),
+  the kinds per encounter, and the hero's needle-damage dealt -> dmg audit per enemy type (Song Heavy Sentry 1.13-1.167
+  at needle 1). Rows: `C:\ssbot\sandbox\kill_window_rows.json`.
+- `combat/safety_filter.py`: KillKnowledge (window per encounter; unknown: the longest), in-flight kills (ranked, not
+  vetoed), released_rise; `combat/planner.py`: the killing hit's own branches (`_kill_branches`: recoil / stop / bounce
+  on the earliest and latest hit frame, best 12 plans), KillPlan on the chosen plan, idle_clear, kernels warmed.
+- `train/planner_policy.py`: the kill commitment (the chosen kill plan played by game time through the slow motion; not
+  for an uncertified blow at full HP with h >= 3); `train/episode.py` acts through it (`SSBOT_POST_CLEAR_S` for
+  checks); `train/supervision.py` kill_inputs is the one source for the allowlist and the L0 filter.
+- `safety/supervisor.py`: QS needs the no-input path clear for 0.4 s and progress clears the latch first; vision input:
+  FOCUS_LOST alone does not block pausable unless the sink is the foreground one.
+- `train/hit_injection.py`: `SSBOT_INJECT_BOSS_HP_MAX` / `SSBOT_INJECT_MAX_SILK` (the certified-kill check).
+
+### Measured
+
+- Certified kill at h 2 live (20261004_043850, d356c8e, injected hit to 3 HP at boss <= 15 HP): 24 CLEAR, 0 WOULD_DIE,
+  23 / 23 kills at h 2 certified; the commitment ran through the whole slow motion; the executed hero box stayed within
+  0.405 u (x) / 0.454 u (y) of the certified branch (before the branch and released-rise fixes: 1.9 / 5.5 u, runs
+  041626 / 042718). 4 of 23 then took an attack bell 130 frames after the kill (14-15 frames after the window) -> Q1.
+- Plain live (20261004_045230, d356c8e): 104 CLEAR, 0 STUCK, 0 QUIT, 0 WOULD_DIE, 1 hit, time to kill p50 59.7 s,
+  planner p50 4.31 ms / p99 median 10.8 ms. Confirmation on c67e4c1 (20261004_055131, 20 episodes): 20 CLEAR, 0 hits, 0 commitments, time to kill p50
+  58.2 s.
+- Offline replays (`C:\ssbot\sandbox\stuck_replay_fix3*.json`): the 8 STUCK episodes attack on every tick; with the
+  boss read as 5 HP 75-88 % of ticks have a certified kill plan and QS quits 8 / 8 at a safe frame at 20 s; the
+  degraded_dust replay now reaches QS (it never had a pausable frame before the FOCUS_LOST fix).
+- Tests: 957 passed, 1 skipped, 1 xfailed, 1 failed (test_support_query_budget timing 3.94 ms under load; untouched).
+
+### Needs the lead
+
+- Post-kill attack bells: a kill during Burst Out leaves two launched attack bells that land about 130 frames later;
+  the forecast after the boss's death does not cover them (unpredicted). Not in the certified window, but it costs a
+  Q1 quit after 17 % of the h 2 kills and a 2-mask hit after full-HP kills in a run that keeps acting. Fix in the
+  forecast (keep launched bells in the support after Death Broadcast) before the run manager acts after kills.
+- Vision has no inventory audit: every needle level counts, so the nail is unbounded in vision for Bell Beast (only
+  needle 0 audited) and every attack in YELLOW needs the certification. A needle-level audit is needed for phase 2.
+- FOCUS_LOST fix changes vision training: Q4's "pausable GREEN frame" can now hold there; re-run the vision gate after
+  merging before quoting its old numbers.
+
+### Next
+
+1. The post-kill attack-bell forecast (above), then re-run the certified-kill check (start script
+   `C:\ssbot\sandbox\stuck_fix2_kill_start.cmd`, `SSBOT_INJECT_LEAVE_HP=3 SSBOT_INJECT_BOSS_HP_MAX=15
+   SSBOT_INJECT_MAX_SILK=8 SSBOT_POST_CLEAR_S=2.5`, `--inject-hits 1.0`) and summarise with the kill commitments' path
+   check (decision log rows of mode KILL_COMMIT: commit.planned_now / planned_now_hit / planned_now_kill vs box).
+2. Audit damage scaling before each new encounter or needle level (`python -m ssbot.tools.kill_window <runs>
+   --write-knowledge`; add the scene to ENCOUNTER_SCENES / NEEDLE_BY_SCENE).
+3. Remove the live checkouts `C:\ssbot\live_stuck_f140a49` (at c67e4c1; the name is stale) and
+   `C:\ssbot\live_stuck_9b42247` when no longer needed (`git worktree remove --force`).
