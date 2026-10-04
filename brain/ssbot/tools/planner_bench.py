@@ -181,6 +181,8 @@ def forum_multi_bench(a: argparse.Namespace) -> int:
     nw = mf.warm()
     t_warm = time.perf_counter() - t0
     rss_tables = proc.memory_info().rss
+    peak_warm = getattr(proc.memory_info(), "peak_wset", 0)
+    peak_series = []
     planner = tac = trk = None
     if a.planner:
         from ssbot.combat.planner import Planner, PlannerConfig
@@ -243,6 +245,7 @@ def forum_multi_bench(a: argparse.Namespace) -> int:
             n_sub.append(sum(1 for x in fc.subjects if x.alive and x.in_play))
         if n % 200 == 0:
             load_samples.append(psutil.cpu_percent(None))
+            peak_series.append((n, round(getattr(proc.memory_info(), "peak_wset", 0) / 1e6)))
         prev = s
     q_ = lambda v: {"p50": round(float(np.percentile(v, 50)), 3), "p99": round(float(np.percentile(v, 99)), 3),  # noqa
                     "max": round(float(np.max(v)), 3)} if v else {}
@@ -263,7 +266,10 @@ def forum_multi_bench(a: argparse.Namespace) -> int:
            "tables_load_s": round(t_load, 1), "warm_s": round(t_warm, 1), "warm_templates": nw,
            "rss_mb": {"before": round(rss0 / 1e6), "tables": round(rss_tables / 1e6),
                       "end": round(proc.memory_info().rss / 1e6), "peak": round(proc.memory_info().peak_wset / 1e6)
-                      if hasattr(proc.memory_info(), "peak_wset") else None},
+                      if hasattr(proc.memory_info(), "peak_wset") else None,
+                      "peak_after_warm": round(peak_warm / 1e6),
+                      "peak_jumps": [x for i, x in enumerate(peak_series)
+                                     if i == 0 or x[1] > peak_series[i - 1][1] + 20]},
            "store_mb": round(tables.store.nbytes() / 1e6),
            "placements_by_kind": {"fine": q_(n_fine), "window": q_(n_win), "bbox": q_(n_bb)},
            "machine_cpu_percent": q_(load_samples), "other_processes": dict(Counter(others)),

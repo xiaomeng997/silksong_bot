@@ -170,7 +170,7 @@ class _Pool:
         return sum(a.nbytes for a in self.arenas)
 
 
-JMAX = 7                          # time pyramids / sparse tables up to 2^JMAX bins in one lookup
+JMAX = 6                          # time pyramids / sparse tables up to 2^JMAX bins in one lookup
 G_BINS = 1200                     # the idle growth table reaches 20 s
 EMPTY = (np.inf, np.inf, -np.inf, -np.inf)
 
@@ -265,8 +265,11 @@ class TemplateStore:
         if r is not None:
             return r
         t = self.base(tid)
+        # the family-wide unions are placed at the attack's start only (one-bin windows): no levels above 0
+        key = self.keys[tid] if tid >= 0 else self._base_key.get(tid, "")
+        jm = 0 if (tid < 0 and key.count("/") == 2 and key.endswith("/anchor")) else JMAX
         levels = [np.ascontiguousarray(t.bits)]
-        for j in range(1, JMAX + 1):
+        for j in range(1, jm + 1):
             s = 1 << (j - 1)
             prev = levels[-1]
             nxt = prev.copy()
@@ -283,9 +286,10 @@ class TemplateStore:
             b = lv.ravel()
             a.bits[a.used:a.used + b.size] = b
             a.used += b.size
+        offs[len(levels):] = offs[len(levels) - 1]
         r = self._pyr[tid] = (len(self._pyr_arenas) - 1, offs,
                               np.array([t.ix0, t.iy0, t.nx, t.ny, t.nt, t.bits.shape[2], int(t.frame == "anchor"),
-                                        int(t.static)], np.int64), (t.t0, t.bin_s, t.cell))
+                                        int(t.static), jm], np.int64), (t.t0, t.bin_s, t.cell))
         return r
 
     # ---- bounding boxes ----
@@ -408,10 +412,11 @@ class TemplateStore:
             loff = np.ascontiguousarray(np.stack([pyr[i][1] for i in sel]))
             fmt = np.array([pyr[i][3] for i in sel], np.float64)
             anchored = (meta[:, 6] != 0) & ~np.isnan(W.ax[sel])
-            im = np.empty((len(sel), 8), np.int64)
+            im = np.empty((len(sel), 9), np.int64)
             im[:, 0:6] = meta[:, 0:6]
             im[:, 6] = np.where(anchored, W.mirror[sel], 1)
             im[:, 7] = anchored
+            im[:, 8] = meta[:, 8]
             fm = np.empty((len(sel), 7), np.float64)
             fm[:, 0:3] = fmt
             fm[:, 3] = np.where(anchored, W.ax[sel], 0.0)
@@ -472,11 +477,10 @@ def _pbox(ix0, iy0, nx, ny, cell, mirror, ax, ay) -> np.ndarray:
 def _query_win_par(bits, loff, imeta, fmeta, tk, xt, yt, out, chunks, pbox, cbox):
     """out[k, n] |= some window placement p occupied at (xt[k, n], yt[k, n]) for an entry in [e0, e1]: the template
     bins of tk[k] - e1 .. tk[k] - e0, tiled by two lookups at pyramid level j (2^j <= the window's bins), more for a
-    window longer than 2^JMAX. imeta[p] = (ix0, iy0, nx, ny, nt, row bytes, mirror, anchored); fmeta[p] = (t0,
+    window longer than 2^jmax. imeta[p] = (ix0, iy0, nx, ny, nt, row bytes, mirror, anchored, jmax); fmeta[p] = (t0,
     bin_s, cell, ax, ay, e0, e1)."""
     n_t, n_c = xt.shape
     n_p = loff.shape[0]
-    jmax = loff.shape[1] - 1
     for ch in numba.prange(chunks):
         c0 = ch * n_c // chunks
         c1 = (ch + 1) * n_c // chunks
@@ -484,7 +488,7 @@ def _query_win_par(bits, loff, imeta, fmeta, tk, xt, yt, out, chunks, pbox, cbox
             continue
         for p in range(n_p):
             ix0, iy0, nx, ny, nt, rb = imeta[p, 0], imeta[p, 1], imeta[p, 2], imeta[p, 3], imeta[p, 4], imeta[p, 5]
-            mirror, anchored = imeta[p, 6], imeta[p, 7]
+            mirror, anchored, jmax = imeta[p, 6], imeta[p, 7], imeta[p, 8]
             t0, bs, inv = fmeta[p, 0], fmeta[p, 1], 1.0 / fmeta[p, 2]
             ax, ay = fmeta[p, 3], fmeta[p, 4]
             if not anchored:
@@ -560,11 +564,14 @@ def coarsen(t: hb.SpaceTimeTemplate, f: int) -> hb.SpaceTimeTemplate:
     cx0, cy0 = t.ix0 // f, t.iy0 // f
     px, py = t.ix0 - cx0 * f, t.iy0 - cy0 * f
     NX, NY = -(-(px + t.nx) // f), -(-(py + t.ny) // f)
-    planes = np.unpackbits(t.bits, axis=2, count=t.nx).astype(bool)
-    buf = np.zeros((t.nt, NY * f, NX * f), bool)
-    buf[:, py:py + t.ny, px:px + t.nx] = planes
-    pooled = buf.reshape(t.nt, NY, f, NX, f).any(axis=(2, 4))
-    bits = np.packbits(pooled, axis=2)
+    bits = np.zeros((t.nt, NY, (NX + 7) // 8), np.uint8)
+    step = max(1, (64 << 20) // max(1, NY * f * NX * f))         # bins per chunk: ~64 MB of booleans at most
+    buf = np.zeros((min(step, t.nt), NY * f, NX * f), bool)
+    for b0 in range(0, t.nt, step):
+        b1 = min(t.nt, b0 + step)
+        buf[:] = False
+        buf[:b1 - b0, py:py + t.ny, px:px + t.nx] = np.unpackbits(t.bits[b0:b1], axis=2, count=t.nx).astype(bool)
+        bits[b0:b1] = np.packbits(buf[:b1 - b0].reshape(b1 - b0, NY, f, NX, f).any(axis=(2, 4)), axis=2)
     return hb.SpaceTimeTemplate(key=t.key, frame=t.frame, ix0=cx0, iy0=cy0, nx=NX, ny=NY, t0=t.t0,
                                 bits=np.ascontiguousarray(bits), cell=t.cell * f, bin_s=t.bin_s,
                                 n_instances=t.n_instances, t_pad=t.t_pad, pad_x=t.pad_x, pad_y=t.pad_y,
@@ -636,18 +643,20 @@ def wanted_key(k: str, spec: ForumType, family_wide: bool = True) -> bool:
 
 
 def load_type_templates(npz: Path, spec: ForumType, margins: dict, base: float = 0.0,
-                        family_wide: bool = True) -> dict[str, hb.SpaceTimeTemplate]:
-    """The wanted support templates of one type's npz, dilated by the hero hurtbox half-extents plus base plus the
-    family's margin (or the hazard's: margins ("ent", hazard))."""
-    raw, _ = hb.load_templates(npz, prefix=SUP)
-    out = {}
-    for k, t in raw.items():
-        if not wanted_key(k, spec, family_wide):
-            continue
-        p = k.split("/")
-        m = base + (margins.get(("ent", p[2]), 0.0) if p[1] == "ent" else margins.get((spec.type_key, p[1]), 0.0))
-        out[k] = t.dilated(rx=hb.HERO_HALF_U[0] + m, ry=hb.HERO_HALF_U[1] + m, key=k)
-    return out
+                        family_wide: bool = True):
+    """The wanted support templates of one type's npz, one at a time (key, template), each dilated by the hero
+    hurtbox half-extents plus base plus the family's margin (or the hazard's: margins ("ent", hazard)); the npz is
+    read lazily, so only one raw and one dilated template are held at a time."""
+    with np.load(Path(npz), allow_pickle=False) as z:
+        keys = sorted(f[:-5] for f in z.files if f.endswith("/bits") and f[:-5] + "/meta" in z.files)
+        for k in keys:
+            if not wanted_key(k, spec, family_wide):
+                continue
+            t = hb.SpaceTimeTemplate.from_arrays(k, z[k + "/bits"], z[k + "/meta"])
+            p = k.split("/")
+            m = base + (margins.get(("ent", p[2]), 0.0) if p[1] == "ent" else
+                        margins.get((spec.type_key, p[1]), 0.0))
+            yield k, t.dilated(rx=hb.HERO_HALF_U[0] + m, ry=hb.HERO_HALF_U[1] + m, key=k)
 
 
 @dataclass(slots=True)
@@ -725,7 +734,7 @@ class EnemyTables:
         """Build the store type by type (the peak holds one type's dilated templates, not all nine)."""
         store = TemplateStore({})
         for tpls in per_type:
-            for k, t in tpls.items():
+            for k, t in (tpls.items() if isinstance(tpls, dict) else tpls):
                 if k.count("/") == 2:
                     store.add_coarse_base(k, coarsen(t, COARSE_F))
                 else:
