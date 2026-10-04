@@ -176,6 +176,23 @@ def write_extra(extra: Path, g, code: dict) -> None:
     print(f"extra: {extra} ({time.perf_counter() - t0:.1f} s)", flush=True)
 
 
+def write_contacts_only(out: Path, g, code: dict) -> None:
+    """--contacts-only: the scan's contacts with their attribution (no tables, no residuals) and the fights, for a
+    recall of these fights against tables built from other fights (support_recall --encounter Forum --fresh)."""
+    import gzip
+    out.mkdir(parents=True, exist_ok=True)
+    n = 0
+    with gzip.open(out / "contacts.jsonl.gz", "wt", encoding="utf-8") as fh:
+        for tk, b in g.builders.items():
+            for r in b.contact_rows(residuals=False):
+                fh.write(json.dumps({"type": tk, **r}) + "\n")
+                n += 1
+    (out / "build.json").write_text(json.dumps(
+        {"fights": g.fights, "code": code, "contacts_only": True,
+         "types": {tk: b.spec.enemy for tk, b in g.builders.items()}}, indent=1) + "\n", encoding="utf-8")
+    print(f"contacts only: {n} contacts of {len(g.fights)} fights -> {out}", flush=True)
+
+
 def gauntlet_main(a: argparse.Namespace, fights: list, skipped: list, code: dict) -> int:
     """One table per enemy type of a multi-enemy arena (ssbot.knowledge.gauntlet_tables), written to
     <out>/<encounter lower>/, then the attack counts against the target with the rate per hour of fight time."""
@@ -190,6 +207,10 @@ def gauntlet_main(a: argparse.Namespace, fights: list, skipped: list, code: dict
               flush=True)
     if skipped:
         print(f"skipped {len(skipped)}:", *skipped[:20], sep="\n  ")
+    if a.contacts_only is not None:
+        write_contacts_only(a.contacts_only, g, code)
+        print(f"scan {time.perf_counter() - t_all:.1f} s")
+        return 0
     hours = sum(f.f1 - f.f0 for f in fights) / 60.0 / 3600.0
     out = (a.out or default_out()) / a.encounter.lower()
     rc = 3 if g.unattributed else 0
@@ -276,6 +297,13 @@ def main(argv: list[str] | None = None) -> int:
                          "--encounter; large, keep it out of the repository)")
     ap.add_argument("--fights-list", type=Path, default=None,
                     help="write the scanned fights (id, recording, frames) to this JSON (the frozen input of a build)")
+    ap.add_argument("--allow-no-sha", action="store_true",
+                    help="multi-enemy arenas: build even when the git revision cannot be read (exit 4 otherwise)")
+    ap.add_argument("--exclude-fights", type=Path, default=None,
+                    help="leave out the fights listed in this JSON (a --fights-list output: the fights a build used)")
+    ap.add_argument("--contacts-only", type=Path, default=None,
+                    help="multi-enemy arenas: scan only and write the contacts with their attribution (no tables, no "
+                         "residuals) and build.json here: fresh fights for support_recall --encounter Forum --fresh")
     a = ap.parse_args(argv)
 
     fights, skipped = [], []
@@ -283,6 +311,10 @@ def main(argv: list[str] | None = None) -> int:
         f, s = run_fights(run, closed_only=not a.include_open)
         fights += f
         skipped += s
+    if a.exclude_fights is not None:
+        used = {x["id"] for x in json.loads(a.exclude_fights.read_text("utf-8"))["fights"]}
+        skipped += [f"{f.id}: in {a.exclude_fights}" for f in fights if f.id in used]
+        fights = [f for f in fights if f.id not in used]
     fights += [parse_human(h) for h in a.human]
     if a.max_fights:
         fights = fights[:a.max_fights]
@@ -297,6 +329,10 @@ def main(argv: list[str] | None = None) -> int:
     graph = json.loads(a.fsm_graph.read_text("utf-8")) if a.fsm_graph else None
     from ssbot.record.recorder import find_repo_root, git_info
     code = git_info(find_repo_root())  # the revision that runs the scan (files edited meanwhile do not count)
+    if a.encounter in GAUNTLET_SPECS and not (code or {}).get("sha") and not a.allow_no_sha:
+        # a multi-hour build without its revision cannot be traced (the Forum R0 build of 2026-10-03 wrote sha null)
+        print("no git revision for the build's provenance (git_info); --allow-no-sha to build anyway", file=sys.stderr)
+        return 4
     if a.encounter in GAUNTLET_SPECS:
         return gauntlet_main(a, fights, skipped, code)
     b = BehaviourBuilder(SPECS[a.encounter], keep_paths=a.paths, fsm_graph=graph)

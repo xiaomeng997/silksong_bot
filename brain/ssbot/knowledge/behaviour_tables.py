@@ -2391,10 +2391,13 @@ class BehaviourBuilder:
             out[hb.SUPPORT + key] = t.dilated(r_disk=r, t_bins=1, key=hb.SUPPORT + key)
         return out
 
-    def contact_rows(self) -> list[dict]:
+    def contact_rows(self, residuals: bool = True) -> list[dict]:
         """Every contact with its attribution and residuals (in sample, held out) for the support recall of a
-        multi-enemy build (fight = "<run>/i<n>/ep<k>/<type>#<iid>": the subject the gauntlet builder gave it to)."""
-        self.build()
+        multi-enemy build (fight = "<run>/i<n>/ep<k>/<type>#<iid>": the subject the gauntlet builder gave it to).
+        residuals=False: the scan's attribution only (no build; res / ho empty), for fights a recall tests against
+        tables built from other fights (behaviour_build --contacts-only)."""
+        if residuals:
+            self.build()
         rows = []
         for c in self.contacts:
             rows.append({

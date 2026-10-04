@@ -86,8 +86,46 @@ def git_info(root: Path | None) -> dict | None:
 
     sha = run("rev-parse", "HEAD")
     status = run("status", "--porcelain", "--untracked-files=no")
-    return {"sha": sha, "branch": run("rev-parse", "--abbrev-ref", "HEAD"),
-            "dirty": None if status is None else bool(status)}
+    out = {"sha": sha, "branch": run("rev-parse", "--abbrev-ref", "HEAD"),
+           "dirty": None if status is None else bool(status)}
+    if sha is None:
+        # git itself failed (a detached job with another environment, a busy machine past the timeout: the Forum R0
+        # build of 2026-10-03 wrote sha null): read HEAD from the repository's files (a worktree's .git is a file
+        # naming its git dir); dirty stays unknown
+        out.update(git_head_from_files(root))
+    return out
+
+
+def git_head_from_files(root: Path) -> dict:
+    """{"sha", "branch", "how"} of root's HEAD read from the git files (no git process)."""
+    try:
+        g = root / ".git"
+        if g.is_file():
+            line = g.read_text("utf-8").strip()
+            g = Path(line.split(":", 1)[1].strip()) if line.startswith("gitdir:") else g
+            if not g.is_absolute():
+                g = (root / g).resolve()
+        head = (g / "HEAD").read_text("utf-8").strip()
+        if not head.startswith("ref:"):
+            return {"sha": head, "branch": "HEAD", "how": "git files"}
+        ref = head.split(":", 1)[1].strip()
+        common = g
+        if (g / "commondir").is_file():
+            common = (g / (g / "commondir").read_text("utf-8").strip()).resolve()
+        for base in (g, common):
+            p = base / ref
+            if p.is_file():
+                return {"sha": p.read_text("utf-8").strip(), "branch": ref.removeprefix("refs/heads/"),
+                        "how": "git files"}
+        packed = common / "packed-refs"
+        if packed.is_file():
+            for line in packed.read_text("utf-8").splitlines():
+                parts = line.split()
+                if len(parts) == 2 and parts[1] == ref:
+                    return {"sha": parts[0], "branch": ref.removeprefix("refs/heads/"), "how": "git files"}
+    except (OSError, IndexError):
+        pass
+    return {}
 
 
 def qpc() -> tuple[int, int]:
