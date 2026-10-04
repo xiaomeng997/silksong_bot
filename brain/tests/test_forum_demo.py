@@ -69,3 +69,40 @@ def test_attempts_chain_death_and_keys():
     assert atts[1]["outcome"] == "left"
     sm = summarise(atts)
     assert sm["hits"] == 2 and sm["masks"] == 3 and sm["details"]["chain_masks"] == {2: 1}
+    assert chain["chain_cut"] is None and a["hits"][0]["chain_cut"] is None
+    assert a["start"] == {"hp": 7, "silk": 3} and a["silk_min"] == 3
+    # the Reed is in play on every battle row: one enemy-second per game second (190 row steps from 100 to 290)
+    assert abs(a["enemy_s"]["Song Reed"] - 190 / 60) < 0.01
+    pt = sm["per_type_exposure"]["Song Reed"]
+    assert pt["hits"] == 2 and pt["deaths"] == 1 and pt["share_of_enemy_time"] == 1.0
+
+
+def test_open_chain_is_closed_and_gaps_stay_in_session():
+    rows, ents, allies = [], [], []
+    for f in range(100, 600):
+        bid = 7 if f < 500 else None
+        rows.append(_row(f, bid, True if bid else None, 0 if bid else None))
+        ents.append([])
+        allies.append([])
+    events = [
+        (150, "hp", {"delta": -1, "src": "TakeHealth", "fsm": MULTI, "source": MULTI, "h": 6}),
+        # no Final Hit: the next hit 2 s later is its own attack, not part of the chain
+        (270, "hp", {"delta": -1, "src": "TakeHealth", "source": "Wave 1/Song Reed", "h": 5}),
+        (400, "hp", {"delta": -1, "src": "TakeHealth", "fsm": MULTI, "source": MULTI, "h": 4}),
+        (430, "hp", {"delta": -1, "src": "TakeHealth", "fsm": FINAL, "source": "Song Reed/ParrySlash Hit", "h": 3}),
+    ]
+    atts = attempts({"rows": rows, "ents": ents, "allies": allies, "events": events, "snaps": {}})
+    hs = atts[0]["hits"]
+    assert [(h["f"], h["masks"], h["chain"], h["chain_cut"]) for h in hs] == [
+        (150, 1, 2, "missing"), (270, 1, 1, None), (400, 2, 2, None)]
+    assert hs[1]["type"] == "Song Reed" and hs[0]["type"] is None
+    # death -> next start is never paired across two sessions
+    a = {"death": {"f": 5000, "t": 1.0}, "f0": 10, "session": "s1", "hits": [], "heals": [], "waves": [],
+         "kills": [], "start": {"hp": 7, "silk": 9}, "silk_min": 9, "silk_last": 9}
+    b = dict(a, f0=20, death={"f": 900, "t": 1.0}, session="s2")
+    c = dict(a, f0=1500, death=None, session="s2")
+    from ssbot.tools.forum_demo import _pct, details
+    d = details([a, b, c])
+    assert d["death_to_next_start_s_p50"] == 10.0          # only s2: (1500 - 900) / 60
+    assert d["deaths_without_heal_full_silk_throughout"] == 2 and d["deaths_full_silk"] == 2
+    assert _pct([1, 2, 3, 4], 0.5) == 2.5 and _pct([5], 0.9) == 5

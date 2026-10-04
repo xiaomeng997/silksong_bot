@@ -18,7 +18,9 @@ projectile, the attacker's attack family from its control FSM (FORUM_SPECS: the 
 otherwise <P>_IDLE = body contact between attacks), the hero's position, animation and contact state one frame
 before, how many enemies were in play and how close their enabled damage colliders were (STATE hero.box, the physics
 collider, not the hurt box)), multi-hit chains (Choristor whip, Reed / Minister parry counter: "Multihit"
-TakeQuickDamage follow-ups then "Final Hit"), heals (Bind AddHealth) and Bind starts, kills and the killer (hero
+TakeQuickDamage follow-ups then "Final Hit"; a chain cut by the death or left without its Final Hit is flagged in
+chain_cut), the enemy-seconds each type was in play (per-type rates are per enemy-minute: raw hit shares mostly
+follow exposure), the hero's start and lowest silk, heals (Bind AddHealth) and Bind starts, kills and the killer (hero
 attack, Garmond, Cogfly, a batted Throwing Bell), technique use (dash, dash attack, Clawline, wall cling, glide,
 down slash, Cogfly throws, Silkspear hits), the hero's position at each wave start, and key presses per second
 (ssbot.tools.key_economy's count: rising edges of input.mask, gameplay keys only).
@@ -74,6 +76,11 @@ CLIP_USES = (("Dash Upper Antic", "dash_attack"), ("Wanderer Dash Attack", "dash
              ("v3 Down Slash Antic", "down_slash"), ("DownSlash", "down_slash"), ("Walljump", "wall_jump"))
 CS_BITS = ("onGround", "dashing", "airDashing", "wallClinging", "wallSliding", "attacking", "recoiling", "casting")
 POCKET_X, POCKET_Y = 14.6, 13.2        # forum.md §10.3: transform x < 14.57 and y >= 13.2 on the left wall
+# a multi-hit chain's Final Hit lands 20-41 frames after its last Multihit follow-up in both demo recordings; a pending
+# chain with no hp loss within this many frames is closed on its own (chain_cut "missing") instead of absorbing the
+# next unrelated hit
+CHAIN_GAP_F = 90
+SILK_FULL = 9
 
 
 # ---------------------------------------------------------------------------------------------------- scan
@@ -356,14 +363,19 @@ def _attempt(n, bid, a, z, outcome, died, rows, ents, allies, snaps, by_f, fi, g
             src = d.get("source") or ""
             fsm = d.get("fsm") or ""
             amount = -(d.get("delta") or 0)
+            if pend and f - pend[-1][0] > CHAIN_GAP_F:     # its Final Hit never came (blocked, i-frame edge)
+                hits.append(_hit(pend[-1][0], "", 0, pend, rows, ents, snaps, fi, idx, waves, t, cut="missing"))
+                pend = []
             if "Multihit" in src or "Multihit" in fsm:
                 pend.append((f, amount))
                 continue
-            hits.append(_hit(f, src, amount, fsm, pend, rows, ents, snaps, fi, idx, waves, t))
+            hits.append(_hit(f, src, amount, pend, rows, ents, snaps, fi, idx, waves, t))
             pend = []
-    if pend:    # a chain cut by the death: the die event names the source
-        src = (died[1].get("source") if died else None) or ""
-        hits.append(_hit(pend[-1][0], src, 0, "Final Hit (death)", pend, rows, ents, snaps, fi, idx, waves, t))
+    if pend:    # a chain cut by the death (the die event names the source) or left open at the end
+        by_death = died is not None and died[0] - pend[-1][0] <= CHAIN_GAP_F
+        src = (died[1].get("source") if by_death else None) or ""
+        hits.append(_hit(pend[-1][0], src, 0, pend, rows, ents, snaps, fi, idx, waves, t,
+                         cut="death" if by_death else "missing"))
 
     # ---- heals, bind starts, kills, deaths
     heals, kills, dead_last = [], [], {}
@@ -413,8 +425,13 @@ def _attempt(n, bid, a, z, outcome, died, rows, ents, allies, snaps, by_f, fi, g
     cling_f = pocket_f = 0
     garmond_first = None
     fs_, masks = [], []
+    enemy_s: Counter = Counter()       # type -> enemy-seconds in play (each instance counts)
     for j in range(a, z + 1):
         r = rows[j]
+        if j > a:
+            dt = gt[j] - gt[j - 1]
+            for e in in_play(ents[j]):
+                enemy_s[e[1]] += dt
         fl = _flags(r["cs"], idx)
         an = r["anim"] or ""
         if an != prev_anim:
@@ -446,6 +463,9 @@ def _attempt(n, bid, a, z, outcome, died, rows, ents, allies, snaps, by_f, fi, g
     presses = Counter({k: len(v) for k, v in holds.items()})
     wall_s = (f1 - f0 + 1) / FPS
     game_s = round(gt[z] - gt[a], 2)
+    # silk over the attempt (the death frame itself excluded: the game resets it there)
+    silk = [rows[j]["silk"] for j in range(a, z if died is not None and z > a else z + 1)
+            if rows[j]["silk"] is not None]
 
     # ---- per wave
     wave_rows = []
@@ -473,6 +493,9 @@ def _attempt(n, bid, a, z, outcome, died, rows, ents, allies, snaps, by_f, fi, g
                 if kk not in MENU_KEYS) / max((end_f - wf + 1) / FPS, 1e-6), 2)})
     return {
         "n": n, "battle_id": bid, "outcome": outcome, "crest": rows[a]["crest"],
+        "start": {"hp": rows[a]["hp"], "silk": rows[a]["silk"]},
+        "silk_min": min(silk) if silk else None, "silk_last": silk[-1] if silk else None,
+        "enemy_s": {k: round(v, 2) for k, v in enemy_s.most_common()},
         "wave_reached": waves[-1][0] if waves else -1, "game_s": game_s, "wall_s": round(wall_s, 2),
         "waves": wave_rows, "hits": hits, "masks_lost": sum(h["masks"] for h in hits), "heals": heals,
         "kills": kills, "death": death, "clashes": clashes,
@@ -483,8 +506,9 @@ def _attempt(n, bid, a, z, outcome, died, rows, ents, allies, snaps, by_f, fi, g
     }
 
 
-def _hit(f, src, amount, fsm, pend, rows, ents, snaps, fi, idx, waves, t) -> dict:
-    """One attack instance that cost masks: a plain hit or a multi-hit chain (pend: its follow-up frames)."""
+def _hit(f, src, amount, pend, rows, ents, snaps, fi, idx, waves, t, cut: str | None = None) -> dict:
+    """One attack instance that cost masks: a plain hit or a multi-hit chain (pend: its follow-up frames; cut: the
+    chain ended by the death or without its Final Hit, see CHAIN_GAP_F)."""
     tk, atk, obj = source_type(src)
     f_first = pend[0][0] if pend else f
     j = fi[f_first]
@@ -519,7 +543,8 @@ def _hit(f, src, amount, fsm, pend, rows, ents, snaps, fi, idx, waves, t) -> dic
     others = sorted(d for d in dists if d[2] != attacker)
     return {
         "f": f_first, "t": t(f_first), "wave": _wave_at(waves, f_first), "source": src, "type": tk, "attack": atk,
-        "family": fam, "attacker_state": st, "masks": amount + sum(m for _, m in pend), "chain": len(pend) + 1,
+        "family": fam, "attacker_state": st, "masks": amount + sum(m for _, m in pend),
+        "chain": len(pend) + 1, "chain_cut": cut,
         "hero": {"x": round(r["x"], 2), "y": round(r["y"], 2), "anim": r["anim"], "contact": _contact(fl),
                  "attacking": fl["attacking"], "dashing": fl["dashing"] or fl["airDashing"],
                  "binding": (r["spell"] or "") in ("Binding", "Bind Air", "Bind Ground", "Bind Burst"),
@@ -555,8 +580,14 @@ def anim_kind(an: str | None) -> str:
 
 
 def _pct(v: list[float], q: float):
+    """Linearly interpolated percentile (q = 0.5 is the median)."""
+    if not v:
+        return None
     v = sorted(v)
-    return round(v[min(len(v) - 1, int(q * len(v)))], 2) if v else None
+    x = q * (len(v) - 1)
+    lo = int(x)
+    hi = min(lo + 1, len(v) - 1)
+    return round(v[lo] + (v[hi] - v[lo]) * (x - lo), 2)
 
 
 def details(atts: list[dict]) -> dict:
@@ -575,7 +606,9 @@ def details(atts: list[dict]) -> dict:
                 t_kill[f'{w["wave"]}/{k["type"]}'].append(k["t"] - w["t"])
             pos[w["wave"]].append(w["hero_1s_before"]["x"])
     deaths = [a for a in atts if a["death"]]
-    gaps = [(b["f0"] - a["death"]["f"]) / FPS for a, b in zip(atts, atts[1:]) if a["death"]]
+    # death -> next battle start, within one session only (main() tags each attempt with its session)
+    gaps = [(b["f0"] - a["death"]["f"]) / FPS for a, b in zip(atts, atts[1:])
+            if a["death"] and a.get("session") == b.get("session") and b["f0"] > a["death"]["f"]]
     since_heal = []
     for a in deaths:
         lh = [h["t"] for h in a["heals"] if h["t"] <= a["death"]["t"]]
@@ -596,6 +629,18 @@ def details(atts: list[dict]) -> dict:
         "hits_last_10s_before_death": dict(sorted(Counter(sum(1 for h in a["hits"] if a["death"]["t"] - 10 <= h["t"])
                                                           for a in deaths).items())),
         "deaths_without_heal": sum(1 for v in since_heal if v is None),
+        "deaths_without_heal_full_silk_at_start": sum(1 for a, v in zip(deaths, since_heal)
+                                                      if v is None and (a["start"]["silk"] or 0) >= SILK_FULL),
+        "deaths_without_heal_full_silk_throughout": sum(1 for a, v in zip(deaths, since_heal)
+                                                        if v is None and (a["silk_min"] or 0) >= SILK_FULL),
+        "deaths_full_silk": sum(1 for a in deaths if (a["silk_last"] or 0) >= SILK_FULL),
+        # the final hit: (hp before, chain, masks); a 2-mask death is a chain or a single 2-mask attack
+        "final_hit_at_death": [[*k, v] for k, v in sorted(Counter(
+            (a["hits"][-1]["hero"]["hp_before"], a["hits"][-1]["chain"], a["hits"][-1]["masks"],
+             a["hits"][-1]["type"], a["hits"][-1]["attack"] if a["hits"][-1]["chain"] == 1 else "chain")
+            for a in deaths if a["hits"]).items(), key=lambda kv: (-kv[1], str(kv[0])))],
+        "start_hp_silk": {f"{k[0]}/{k[1]}": v for k, v in Counter((a["start"]["hp"], a["start"]["silk"])
+                                                                   for a in atts).most_common()},
         "since_last_heal_s_p50": _pct([v for v in since_heal if v is not None], 0.5),
         "death_to_next_start_s_p50": _pct(gaps, 0.5),
         "hits_within_2s_of_previous": sum(1 for a in atts for x, y in zip(a["hits"], a["hits"][1:])
@@ -628,6 +673,19 @@ def summarise(atts: list[dict]) -> dict:
     masks_type = Counter()
     for h in hits:
         masks_type[h["type"]] += h["masks"]
+    # exposure per type: raw hit shares mostly follow how long each type is in play (index 0 is most of the fight
+    # time because every attempt starts there), so rates are per enemy-minute in play
+    enemy_min = Counter()
+    for a in atts:
+        for k, v in a["enemy_s"].items():
+            enemy_min[k] += v / 60
+    death_type = Counter(a["death"]["type"] for a in atts if a["death"])
+    tot_enemy_min = sum(enemy_min.values())
+    per_type = {k: {"enemy_min": round(m, 1), "share_of_enemy_time": round(m / tot_enemy_min, 3),
+                    "hits": by_type.get(k, 0), "masks": masks_type.get(k, 0), "deaths": death_type.get(k, 0),
+                    "hits_per_enemy_min": round(by_type.get(k, 0) / m, 2) if m else None,
+                    "deaths_per_enemy_hour": round(60 * death_type.get(k, 0) / m, 2) if m else None}
+                for k, m in enemy_min.most_common()}
     fam = Counter((h["type"], h["family"], h["attack"]) for h in hits)
     deaths = Counter((a["death"]["type"], a["death"]["attack"]) for a in atts if a["death"])
     dfam = Counter()
@@ -656,6 +714,7 @@ def summarise(atts: list[dict]) -> dict:
         "chains": sum(1 for h in hits if h["chain"] > 1),
         "by_wave": by_wave,
         "hits_by_type": dict(by_type.most_common()), "masks_by_type": dict(masks_type.most_common()),
+        "per_type_exposure": per_type,
         "hits_by_family": [[*k, v] for k, v in fam.most_common()],
         "deaths_by_source": [[*k, v] for k, v in deaths.most_common()],
         "deaths_by_family": [[*k, v] for k, v in dfam.most_common()],
@@ -755,6 +814,8 @@ def main(argv: list[str] | None = None) -> int:
     for sess in a.sessions:
         meta = json.loads((sess / "meta.json").read_text("utf-8")) if (sess / "meta.json").exists() else {}
         atts = attempts(load(sess, a.cache))
+        for x in atts:
+            x["session"] = sess.name
         every += atts
         out["sessions"][sess.name] = {"commands": meta.get("commands"), "summary": summarise(atts),
                                       "attempts": atts}

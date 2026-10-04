@@ -659,16 +659,26 @@ time). Facts: `docs/facts/1.0.30000/key_economy.md` (Chinese, all numbers); M2.m
 ### Key measurements
 
 - 46 attempts (40 Reaper fo_A, 6 Wanderer fo_W), 46 deaths, best wave index 6 of 14; index 0 (Reed + Envoy +
-  Choristor, no Garmond: he always enters 4.0 s after index 1 starts) = 70 % of hits and 22 / 46 deaths, median 4 net
-  masks.
-- 10.5 hits / min (11.7 masks / min), 1.34 heals / min; the random data policy takes 13-20 hits / min in the same waves.
-- Deaths: Choristor 19, Reed 10, Clawmaiden 6, Minister 6, Envoy 3; every complete multi-hit chain cost 2 masks (48 / 48).
-- 45 % of hits while attacking or in attack recovery; another threat within 2 u at only 12 % of hits; 20 / 46 deaths
-  with full silk; Cogfly and Silkspear never used; 164 incidental nail clashes (Envoy charge 50); keys 2.55 / 3.80 per s.
+  Choristor, no Garmond: he always enters 4.0 s after index 1 starts) is where attempts end: 22 / 46 deaths, median
+  3.5 net masks per cleared index 0, 4 of 7 index-4 starts at 1-2 masks. Its 70 % hit share is mostly exposure (65 %
+  of fight time): hits / min index 0 11.3, index 3 / 4 / 5 9.9 / 11.8 / 15.7. No data for waves 7-13.
+- 10.5 hits / min (11.7 masks / min), 1.34 heals / min; the random data policy takes 13-20 hits / min in the same waves
+  (the person 43-54 % fewer at index 0-1, about 25 % fewer at index 3-4).
+- Hits per enemy-minute in play: Minister 6.6, Envoy 5.75, Clawmaiden 5.05, Reed 4.77, Choristor 4.73 (Choristor /
+  Reed / Envoy = 89 % of hits and 88 % of enemy time). Deaths: Choristor 19, Reed 10, Clawmaiden 6, Minister 6,
+  Envoy 3; every complete multi-hit chain cost 2 masks (48 / 48).
+- 45 % of hits while attacking or in attack recovery; another damage collider within 2 u at only 12 % of hits, but
+  3 enemies in play at 237 / 437; 20 / 46 deaths with full silk; 14 deaths with no heal (11 started at silk 9, 8 kept
+  silk 9 throughout); 39 / 46 attempts start at 7 masks + silk 9, 7 at silk 1 (2 loads, 5 respawns); Cogfly and
+  Silkspear never used; 164 incidental nail clashes (Envoy charge 50); keys 2.55 / 3.80 per s.
+- Review fixes: per-type exposure (enemy-seconds in play per attempt), multi-hit chains closed after 90 frames
+  without a Final Hit (chain_cut), death -> next start gaps only within a session, interpolated percentiles (medians
+  changed slightly: Wanderer index-0 kills 7.8 / 6.6 / 17.3 s), start / lowest silk per attempt. Tests: 4.
 
 ### Next
 
-1. Support certification order: Choristor / Reed / Envoy first (the Envoy point savestate of R1 item 5 earlier).
-2. R4 A0 baseline: report hits / min per wave index 0-4 against the person's 11 / min and the random 13-20 / min.
+1. Support certification order by wave: index 0 (Choristor / Reed / Envoy; the Envoy point savestate of R1 item 5
+   earlier), then index 3-4 (Clawmaiden / Bellbearer / Minister), then Maestro / Tiny / Clapper.
+2. R4 A0 baseline: report hits / min per wave index 0-4 against the person's 8-12 / min and the random 13-20 / min.
 3. K1 loadout A/B candidates from the demo: Wanderer, Cogfly in index 0 on the Reed, Silkspear on the Reed.
 4. A new demo: `..\scripts\uv.cmd run python -m ssbot.tools.forum_demo <session> --json out.json` (9 min scan ~8 s).
