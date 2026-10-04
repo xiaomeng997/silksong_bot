@@ -19,6 +19,12 @@
 
 ## 0. 一页摘要
 
+> **目标修订（2026-10-03 晚，你的决定）：** "先用 mod 在 PC 上拿到 4 个成就，再搞真视觉给 Switch 用。"
+> - **第一阶段（PC）**：oracle（SsOracle 读游戏状态）驱动的 bot，在**一个录像的钢魂存档**里拿全四个完成类成就：第一结局（≤ 5 h）时拿 STEEL_SOUL + SPEEDRUN_1，继续同一存档做到 100 %，在之后的结局（≤ 30 h）拿 SPEED_COMPLETION + STEEL_SOUL_FULL（research/four_achievements.md）。录像带 Steam 成就弹窗、秒表和按键轨道（§2 的正式运行一行）。这把原来的 OR1（oracle 全流程 bot）升为第一阶段的正式运行。
+> - **正式运行的配置（待你确认）**：Steam 正版副本 + BepInEx + SsOracle，**mod 只观察**：不开 LethalBlock / 无敌、不用 savestate、不装 DebugMod、存档和成就走真实 Steam 路径；规则照游戏本身（死就是死）。训练副本（沙盒、无 Steam、可开防死保护）保持不变。
+> - **第二阶段（Switch）**：真视觉（采集卡 + 手柄模拟），延迟辨识扫频（§3.9.2）、模拟视觉精调等放到这一阶段。
+> - 下文原有的"正式运行只看像素"的表述，对第一阶段改为上面这条；对第二阶段仍然有效。视觉纪律（规划器只用视觉可得的信息）在不拖慢第一阶段的前提下保留。
+
 - **目标。** 用一个 Steel Soul 存档打出 Weaver Queen（结局 1），存档中的 `playTime` ≤ 18000 s，这样 STEEL_SOUL 和 SPEEDRUN_1 会同时解锁 [ach1][com15][VER]。优先级依次为：活下来、通关、时间。
 - **一局怎么打。**
   - 走 Bell 路线（经 Last Judge），不进 Mist。
