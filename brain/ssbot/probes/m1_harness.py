@@ -8,7 +8,8 @@ seconds).
     cd brain
     uv run python -m ssbot.probes.m1_harness                      # savestate x10, randomize, latency, min hold,
                                                                   #   streamed taps under the 2/3/4 latency prior
-    uv run python -m ssbot.probes.m1_harness --lost               # + brain-lost Pause tap (pauses, then unpauses)
+    uv run python -m ssbot.probes.m1_harness --lost               # + brain-lost Pause tap (pauses, then unpauses;
+                                                                  #   the tap lands alone, also right after a press)
     uv run python -m ssbot.probes.m1_harness --cutscene 120       # + legacy shim: waits up to 120 s for a CUTSCENE
                                                                   #   (ride a Bellway or start a skippable cutscene
                                                                   #   by hand), then taps jump and expects the skip
@@ -101,7 +102,11 @@ def section_hello(link: OracleLink) -> None:
     rpcs = set(link.hello.get("rpcs", ()))
     missing = [r for r in REQUIRED_RPCS if r not in rpcs]
     check(not missing, f"HELLO lists the harness RPCs (missing: {missing or 'none'})")
-    legacy = link.rpc("input.stats")["legacy"]
+    flags = link.hello.get("action_flags")
+    check(flags == ["exclusive"], f"HELLO action_flags {flags} (the EXCLUSIVE oracle; an older DLL has no such key)")
+    stats = link.rpc("input.stats")
+    check("released_early" in stats["hold"], f"input.stats hold.released_early present ({stats['hold'].get('released_early')})")
+    legacy = stats["legacy"]
     check(legacy["sites_patched"] == legacy["sites_expected"],
           f"legacy anyKeyDown shim: {legacy['sites_patched']}/{legacy['sites_expected']} call sites patched")
     for site, info in legacy["sites"].items():
@@ -292,16 +297,39 @@ def section_stream(link: OracleLink, seconds: float = 4.0) -> None:
           f"presses_deferred +{ha['presses_deferred'] - hb['presses_deferred']}")
 
 
-def section_lost(link: OracleLink) -> None:
-    """Brain-lost: stop sending ACTIONs while driving -> keys released, one Pause tap."""
+def pause_landing(rec: MaskRecorder, after: int) -> tuple[int | None, int | None]:
+    """(frame, latched mask) of the first recorded frame after `after` with Pause latched: the frame the tap lands."""
+    bit = mask("pause")
+    for f in sorted(k for k in rec.masks if k > after):
+        if rec.masks[f] & bit:
+            return f, rec.masks[f]
+    return None, None
+
+
+def wait_pausable(link: OracleLink) -> None:
     s = link.wait_state(lambda s: s["game"]["gs"] == PLAYING, timeout_s=5)
     if s["pause"]["blk"] != 0:
         print(f"     pause blockers {s['pause']['blk']} set; waiting for them to clear")
         link.wait_state(lambda s: s["pause"]["blk"] == 0, timeout_s=10)
+
+
+def unpause_continue(link: OracleLink, ack: int) -> dict:
+    """Continue + Submit once the menu has faded in (DESIGN §3.7.5: an Esc may be handled twice). Released right
+    after the ack: idling while driving would re-arm the watchdog and tap Pause again."""
+    time.sleep(1.0)
+    act_and_wait(link, link.frame + 1, mask("enter"), ack, hold=2)
+    return link.wait_state(lambda s: not s["game"]["paused"], timeout_s=3)
+
+
+def section_lost(link: OracleLink) -> None:
+    """Brain-lost: stop sending ACTIONs while driving -> keys released, one Pause tap. With the EXCLUSIVE oracle
+    (HELLO action_flags) the tap is QueueExclusiveCutAll: the frame it lands on latches Pause and nothing else."""
+    wait_pausable(link)
     before = link.rpc("input.stats")
+    rec = MaskRecorder(link)
     # Continuous control with a key down (Down: looks down, moves nothing) arms the watchdog; a bare release would
     # not. Then go quiet while driving: the oracle must let go of Down and tap Pause.
-    act_and_wait(link, link.frame + 1, mask("down"), 9400, release=False)
+    s0 = act_and_wait(link, link.frame + 1, mask("down"), 9400, release=False)
     t0 = time.monotonic()
     s = link.wait_state(lambda s: s["act"]["lost"], timeout_s=3)
     print(f"     act.lost after {(time.monotonic() - t0) * 1000:.0f} ms (frame {s['f']})")
@@ -312,15 +340,56 @@ def section_lost(link: OracleLink) -> None:
     check(released is not None, f"brain lost -> held keys released (latched mask 0 at frame {released})")
     s = link.wait_state(lambda s: s["game"]["paused"], timeout_s=3)
     after = link.rpc("input.stats")
+    rec.stop()
     check(s["game"]["paused"] and after["lost_pause_taps"] == before["lost_pause_taps"] + 1,
           f"brain lost -> game paused with {after['lost_pause_taps'] - before['lost_pause_taps']} tap(s) "
           f"(lost_events {before['lost_events']} -> {after['lost_events']})")
-    # Unpause with Continue + Submit once the menu has faded in (DESIGN §3.7.5: an Esc may be handled twice).
-    time.sleep(1.0)
-    # Released right after the ack: idling while driving would re-arm the watchdog and tap Pause again.
-    act_and_wait(link, link.frame + 1, mask("enter"), 9401, hold=2)
-    s = link.wait_state(lambda s: not s["game"]["paused"], timeout_s=3)
+    f_p, m_p = pause_landing(rec, s0["f"])
+    check(f_p is not None and m_p == mask("pause"),
+          f"brain lost -> the Pause tap lands alone (frame {f_p}, latched 0x{m_p or 0:x}, Pause 0x{mask('pause'):x})")
+    s = unpause_continue(link, 9401)
     check(not s["game"]["paused"] and not s["act"]["lost"], "unpaused by an ACTION (Continue); brain no longer lost")
+
+
+def section_lost_late(link: OracleLink, reps: int = 8) -> None:
+    """Brain-lost right after a fresh press: the last ACTION presses Up a few frames before the watchdog fires (Up:
+    looks up, moves nothing). The old tap (ReleaseAllNow) kept such a key for its minimum press, so it could share
+    the Pause frame; QueueExclusiveCutAll cuts it (input.stats hold.released_early counts it when it had latched
+    for fewer than the minimum press frames). The lead before the watchdog is swept, since the watchdog fires on
+    wall time (250 ms after the last ACTION's arrival) and the frame rate varies."""
+    pause, up = mask("pause"), mask("up")
+    s = link.wait_state(timeout_s=2)
+    f_a, t_a = s["f"], time.monotonic()
+    s = link.wait_state(lambda s: s["f"] >= f_a + 30, timeout_s=3)
+    fps = (s["f"] - f_a) / (time.monotonic() - t_a)
+    base = max(1, round(0.25 * fps) - 3)
+    print(f"     ~{fps:.0f} fps: last ACTION's Up at +{base}..+{base + 3} frames after its arrival")
+    alone, cut_gap1, gaps = 0, 0, []
+    early0 = link.rpc("input.stats")["hold"]["released_early"]
+    for i in range(reps):
+        wait_pausable(link)
+        lead = base + i % 4
+        rec = MaskRecorder(link)
+        s0 = act_and_wait(link, link.frame + 1, mask("down"), 9600 + 2 * i, release=False)
+        link.act(link.frame + lead, up, ack_seq=9601 + 2 * i)       # then quiet
+        link.wait_state(lambda s: s["game"]["paused"], timeout_s=3)
+        time.sleep(0.1)
+        rec.stop()
+        f_p, m_p = pause_landing(rec, s0["f"])
+        ups = sorted(f for f, m in rec.masks.items() if m & up and f > s0["f"])
+        gap = f_p - ups[0] if ups and f_p is not None else None
+        gaps.append(gap)
+        ok = f_p is not None and m_p == pause
+        alone += ok
+        cut_gap1 += ok and gap == 1
+        print(f"     rep {i}: lead +{lead}, Up latched {ups[:4]}{'...' if len(ups) > 4 else ''}, Pause lands f{f_p} "
+              f"latched 0x{m_p or 0:x}, Up -> Pause {gap} frame(s)")
+        s = unpause_continue(link, 9700 + i)
+    early = link.rpc("input.stats")["hold"]["released_early"] - early0
+    check(alone == reps, f"brain lost after a fresh press: the Pause tap lands alone {alone} / {reps} "
+                         f"(Up 1 frame before the tap: {cut_gap1}, gaps {gaps})")
+    check(cut_gap1 == 0 or early >= cut_gap1,
+          f"input.stats hold.released_early +{early} (>= the {cut_gap1} taps with Up latched 1 frame before)")
 
 
 def section_cutscene(link: OracleLink, wait_s: float) -> None:
@@ -360,7 +429,7 @@ def main() -> None:
     ap.add_argument("--lost", action="store_true", help="also test the brain-lost Pause tap")
     ap.add_argument("--cutscene", type=float, default=0, metavar="SECONDS", help="also test the legacy shim on a cutscene")
     ap.add_argument("--only", default="",
-                    help="comma list of sections: hello,savestate,randomize,latency,hold,stream,lost,cutscene")
+                    help="comma list of sections: hello,savestate,randomize,latency,hold,stream,lost,lost_late,cutscene")
     a = ap.parse_args()
     only = set(filter(None, a.only.split(",")))
 
@@ -387,6 +456,8 @@ def main() -> None:
             run_section(link, "minimum hold under the latency prior (streamed taps)", section_stream)
         if want("lost", a.lost):
             run_section(link, "brain lost", section_lost)
+        if want("lost_late", a.lost):
+            run_section(link, "brain lost right after a fresh press (QueueExclusiveCutAll)", section_lost_late)
         if want("cutscene", a.cutscene > 0):
             run_section(link, "legacy shim / cutscene skip", section_cutscene, a.cutscene or 120)
     finally:
