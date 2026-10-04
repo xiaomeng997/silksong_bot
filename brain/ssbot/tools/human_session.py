@@ -42,6 +42,7 @@ from pathlib import Path
 import zstandard
 
 from ssbot.ipc.oracle_link import OracleError, OracleLink
+from ssbot.probes.common import in_gameplay
 from ssbot.record.marker import marker_off, marker_on
 from ssbot.record.video import inside
 from ssbot.tools.human_video import FFMPEG, OUT, ffmpeg_cmd, fills_for, labels, output_box, write_meta
@@ -50,6 +51,38 @@ from ssbot.vision import mask as vmask
 
 GAME = Path(r"C:\ssbot\game\train\Hollow Knight Silksong.exe")
 RENDER = (1920, 1080)       # -screen-width / -screen-height
+# Commands from the lead while a person plays (the oracle takes one IPC client at a time, so they go through this
+# session's own link): one per line, "load <savestate>" loads that savestate with save suppression on, e.g. to start
+# or retry the Forum demo (2026-10-03). The file is consumed when read; every command lands in meta.json "commands".
+CMD_FILE = Path(r"C:\ssbot\sandbox\human_cmd.txt")
+
+
+def run_commands(link: OracleLink, log: list) -> None:
+    """Execute and remove CMD_FILE's commands; a load waits until the person is in gameplay (title screen: refused)."""
+    if not CMD_FILE.exists():
+        return
+    try:
+        text = CMD_FILE.read_text(encoding="utf-8-sig")
+    finally:
+        CMD_FILE.unlink(missing_ok=True)
+    for line in text.splitlines():
+        parts = line.split()
+        entry = {"t_ns": time.perf_counter_ns(), "frame": (link.state or {}).get("f"), "cmd": line.strip()}
+        if len(parts) == 2 and parts[0] == "load":
+            if not in_gameplay(link.state or {}):
+                entry["result"] = "refused: not in gameplay (continue a save slot first)"
+            else:
+                try:
+                    link.rpc("guards.set", save_suppression=True)
+                    link.rpc("savestate.load", timeout_s=60, name=parts[1], timeout=50)
+                    entry["result"] = "loaded"
+                except (OracleError, TimeoutError) as e:
+                    entry["result"] = f"failed: {e}"
+        elif parts:
+            entry["result"] = "unknown command"
+        if parts:
+            print(f"command {entry['cmd']!r}: {entry.get('result')}")
+            log.append(entry)
 PREFS_KEY = r"HKCU\Software\Team Cherry\Hollow Knight Silksong"
 KEEP_PREFIXES = ("NativeInput_h", "XInput_h", "AppleMFi_h")
 
@@ -148,7 +181,13 @@ def main() -> None:
     ap.add_argument("--out", default=r"C:\ssbot\data\human")
     ap.add_argument("--no-video", action="store_true")
     ap.add_argument("--no-marker", action="store_true", help="leave the frame marker off (timestamp labels only)")
+    ap.add_argument("--savestate", default=None,
+                    help="load this savestate once the person is in gameplay (save suppression on); later loads "
+                         f"through {CMD_FILE}")
     args = ap.parse_args()
+    if args.savestate:
+        CMD_FILE.write_text(f"load {args.savestate}\n", encoding="utf-8")
+    commands: list = []
 
     session = Path(args.out) / datetime.now().strftime("%Y%m%d_%H%M%S")
     session.mkdir(parents=True)
@@ -211,6 +250,8 @@ def main() -> None:
         try:
             while game.poll() is None:
                 time.sleep(1)
+                if CMD_FILE.exists() and (not args.savestate or in_gameplay(link.state or {}) or commands):
+                    run_commands(link, commands)
                 p = placement(game.pid)
                 if p is not None and all((p["client"], p["desktop"]) != (q["client"], q["desktop"])
                                          for q in placements):
@@ -254,6 +295,7 @@ def main() -> None:
         "labels": {"source": "none", "why": "--no-video"} if video is None else
         {"source": "timestamp", "why": marker["why"]} if not marker["on"] else {"source": "marker", "pending": True},
         "kept_gamepad_prefs": keep,
+        "commands": commands,
     }
     write_meta(session, meta)
     print(json.dumps({k: meta[k] for k in ("duration_s", "state_frames_written", "state_frames_dropped_by_recorder",
