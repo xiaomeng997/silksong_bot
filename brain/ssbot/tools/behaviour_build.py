@@ -135,6 +135,47 @@ def type_validation(v: dict) -> dict:
             "heldout_self": held(ho.get("self"))}
 
 
+def write_extra(extra: Path, g, code: dict) -> None:
+    """The held-out material of a multi-enemy build (too large for the repository): per type the support templates
+    of each fold alone (<enemy>_support_fold<k>.npz: BehaviourBuilder.fold_support), every contact with its
+    attribution and residuals (contacts.jsonl.gz) and the fights with their folds (build.json). support_recall
+    --encounter reads them."""
+    import gzip
+
+    from ssbot.knowledge import hitbox_tables as hb
+    from ssbot.knowledge.behaviour_tables import N_FOLDS
+    extra.mkdir(parents=True, exist_ok=True)
+    t0 = time.perf_counter()
+    with gzip.open(extra / "contacts.jsonl.gz", "wt", encoding="utf-8") as fh:
+        for tk, b in g.builders.items():
+            if not b.instances:
+                continue
+            for r in b.contact_rows():
+                fh.write(json.dumps({"type": tk, **r}) + "\n")
+            for k in range(N_FOLDS):
+                hb.save_templates(extra / f"{b.spec.enemy}_support_fold{k}.npz", b.fold_support(k))
+    walk = {}
+    for tk, b in g.builders.items():
+        # per fold: logged dwell range per Control state and the successors logged (deaths left out), so the held-out
+        # recall walks the other fold's graph only
+        deaths = set(b.spec.death_states)
+        dw: dict = {k: {} for k in range(N_FOLDS)}
+        for d in b.dwells:
+            lo, hi = dw[d.fold].get(d.state, (d.dwell_s, d.dwell_s))
+            dw[d.fold][d.state] = (min(lo, d.dwell_s), max(hi, d.dwell_s))
+        succ: dict = {k: {} for k in range(N_FOLDS)}
+        for t in b.transitions:
+            if t.frm is not None and t.to not in deaths:
+                succ[t.fold].setdefault(t.frm, set()).add(t.to)
+        walk[tk] = {"dwell": {str(k): {s: [round(v[0], 5), round(v[1], 5)] for s, v in d.items()}
+                              for k, d in dw.items()},
+                    "succ": {str(k): {s: sorted(v) for s, v in d.items()} for k, d in succ.items()}}
+    (extra / "build.json").write_text(json.dumps(
+        {"fights": g.fights, "code": code, "types": {tk: b.spec.enemy for tk, b in g.builders.items()},
+         "walk": walk}, indent=1) + "\n", encoding="utf-8")
+    print(f"extra: {extra} ({time.perf_counter() - t0:.1f} s)", flush=True)
+
+
 def gauntlet_main(a: argparse.Namespace, fights: list, skipped: list, code: dict) -> int:
     """One table per enemy type of a multi-enemy arena (ssbot.knowledge.gauntlet_tables), written to
     <out>/<encounter lower>/, then the attack counts against the target with the rate per hour of fight time."""
@@ -197,6 +238,16 @@ def gauntlet_main(a: argparse.Namespace, fights: list, skipped: list, code: dict
             {"encounter": a.encounter, "fights": g.fights, "fight_hours": round(hours, 3), "rows": rows,
              "validation": validation, "counters": dict(g.counters.most_common()), "tables": written, "code": code},
             indent=1) + "\n", encoding="utf-8")
+    if a.extra is not None:
+        try:
+            write_extra(a.extra, g, code)
+        except Exception:     # the tables are written already; keep the scan for a retry
+            import pickle
+            import traceback
+            traceback.print_exc()
+            with (a.extra / "gauntlet_builder.pkl").open("wb") as fh:
+                pickle.dump(g, fh, protocol=pickle.HIGHEST_PROTOCOL)
+            print(f"extra failed; the builder is pickled in {a.extra}", file=sys.stderr)
     print(f"scan + build {time.perf_counter() - t_all:.1f} s")
     return rc
 
@@ -220,6 +271,11 @@ def main(argv: list[str] | None = None) -> int:
                          "families with a variable anchor)")
     ap.add_argument("--allow-failed-validation", action="store_true",
                     help="write the files even when a logged contact is uncovered or unexplained")
+    ap.add_argument("--extra", type=Path, default=None,
+                    help="multi-enemy arenas: write the per-fold supports and the contacts here (support_recall "
+                         "--encounter; large, keep it out of the repository)")
+    ap.add_argument("--fights-list", type=Path, default=None,
+                    help="write the scanned fights (id, recording, frames) to this JSON (the frozen input of a build)")
     a = ap.parse_args(argv)
 
     fights, skipped = [], []
@@ -233,6 +289,11 @@ def main(argv: list[str] | None = None) -> int:
     if not fights:
         print("no fights to scan", *skipped, sep="\n  ", file=sys.stderr)
         return 1
+    if a.fights_list is not None:
+        a.fights_list.parent.mkdir(parents=True, exist_ok=True)
+        a.fights_list.write_text(json.dumps(
+            {"fights": [{"id": f.id, "path": str(f.path), "f0": f.f0, "f1": f.f1, "outcome": f.outcome}
+                        for f in fights], "skipped": skipped}, indent=1) + "\n", encoding="utf-8")
     graph = json.loads(a.fsm_graph.read_text("utf-8")) if a.fsm_graph else None
     from ssbot.record.recorder import find_repo_root, git_info
     code = git_info(find_repo_root())  # the revision that runs the scan (files edited meanwhile do not count)

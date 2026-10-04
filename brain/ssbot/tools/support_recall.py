@@ -149,9 +149,134 @@ def run_fight(fight: dict, fc, view: str, lags: list[int], stats: dict, misses: 
                                "n_place": len(fcast.placements)})
 
 
+def support_area(extra: Path, margins: dict, specs) -> dict:
+    """Per (type, family) the mean occupied area (u^2 per occupied time bin) of the per-state anchor support templates
+    of the full build's two folds (their union not formed: each fold's mean), without and with the family margin
+    (the margin's cost; the hero hurtbox dilation is left out of both)."""
+    from ssbot.knowledge import hitbox_tables as hb
+    out: dict = {}
+    for tk, sp in specs.items():
+        acc: dict = defaultdict(lambda: [0.0, 0.0, 0])
+        for k in range(2):
+            npz = extra / f"{sp.enemy}_support_fold{k}.npz"
+            if not npz.exists():
+                continue
+            raw, _ = hb.load_templates(npz, prefix=hb.SUPPORT)
+            for key, t in raw.items():
+                parts = key.split("/")
+                if len(parts) != 4 or parts[3] != "anchor":
+                    continue
+                m = margins.get((tk, parts[1]), 0.0)
+                a0 = np.unpackbits(t.bits, axis=2).reshape(t.nt, -1).sum(axis=1)
+                d = t.dilated(rx=m, ry=m) if m > 0 else t
+                a1 = np.unpackbits(d.bits, axis=2).reshape(d.nt, -1).sum(axis=1)
+                occ = a0 > 0
+                if not occ.any():
+                    continue
+                r = acc[parts[1]]
+                r[0] += float(a0[occ].mean()) * t.cell ** 2
+                r[1] += float(a1[a1 > 0].mean()) * t.cell ** 2
+                r[2] += 1
+        for fam, (a0, a1, n) in acc.items():
+            out[f"{tk}/{fam}"] = {"margin_u": round(margins.get((tk, fam), 0.0), 3), "templates": n,
+                                  "area_u2": round(a0 / n, 2), "area_with_margin_u2": round(a1 / n, 2),
+                                  "ratio": round(a1 / a0, 3) if a0 else None}
+    return out
+
+
+def forum_main(a: argparse.Namespace) -> int:
+    """--encounter Forum: held-out recall of the gauntlet tables (ssbot.knowledge.forum_support), fold k's fights
+    against the tables of the other fold, each enemy's contacts against its own forecast."""
+    from ssbot.knowledge.forum_cache import cache_name, load_cache
+    from ssbot.knowledge.forum_support import FoldTables, SubjectRecall, margins_from_contacts, read_contacts
+    from ssbot.knowledge.gauntlet_tables import FORUM_SPECS
+
+    extra = a.extra
+    rows = read_contacts(extra / "contacts.jsonl.gz")
+    build = json.loads((extra / "build.json").read_text("utf-8"))
+    folds = {f["id"]: f["fold"] for f in build["fights"]}
+    by_fight: dict[str, list] = defaultdict(list)
+    for r in rows:
+        by_fight[r["fight"].rsplit("/", 1)[0]].append(r)
+    lags = [int(x) for x in a.lags.split(",")]
+    out: dict = {"encounter": "Forum", "extra": str(extra), "lags": lags, "base_margin": a.margin,
+                 "margins": a.margins, "margin_q": a.margin_q, "folds": {}}
+    stats: dict = defaultdict(Counter)
+    misses: list = []
+    margins_used = {}
+    fights_done = 0
+    for k in (0, 1):
+        train = 1 - k
+        if a.margins == "heldout":
+            # calibrated on the training fold's contacts (their residual against fold k's occupancy), certified on
+            # fold k's: the contacts that set a margin are never the ones it is tested on
+            m = margins_from_contacts(rows, fold=train, q=a.margin_q)
+        else:
+            m = {}
+        margins_used[k] = m
+        t0 = time.perf_counter()
+        tables = FoldTables(extra, train, margins=m, base=a.margin, specs=FORUM_SPECS)
+        print(f"fold {k}: tables of fold {train}, {len(tables.templates)} templates ({time.perf_counter() - t0:.0f} s)",
+              flush=True)
+        rec = SubjectRecall(tables, lags)
+        ids = [fid for fid, fd in folds.items() if fd == k]
+        if a.max_fights:
+            ids = ids[:a.max_fights]
+        for i, fid in enumerate(ids):
+            path = a.cache / cache_name(fid)
+            if not path.exists():
+                print(f"  no cache for {fid}", flush=True)
+                continue
+            t1 = time.perf_counter()
+            rec.run(load_cache(path), by_fight.get(fid, []), label=f"fold{k}")
+            fights_done += 1
+            n = sum(v["n"] for (tk, L), v in rec.stats.items() if L)
+            c = sum(v["covered"] for (tk, L), v in rec.stats.items() if L)
+            print(f"  [{i + 1}/{len(ids)}] {fid} {time.perf_counter() - t1:.1f} s  covered {c}/{n}", flush=True)
+        for key, v in rec.stats.items():
+            stats[key].update(v)
+        misses += rec.misses
+        out["folds"][str(k)] = {"train_fold": train, "fights": len(ids), "placements": dict(rec.placements)}
+    by = {}
+    for (tk, L), v in sorted(stats.items()):
+        if not L:
+            by[f"{tk}"] = dict(v)
+            continue
+        by[f"{tk}/L{L}"] = {"n": v["n"], "covered": v["covered"], "outside_attacks": v["outside_attacks"],
+                            "recall": round(v["covered"] / v["n"], 6) if v["n"] else None}
+    tot = {L: [sum(v["n"] for (tk, l2), v in stats.items() if l2 == L),
+               sum(v["covered"] for (tk, l2), v in stats.items() if l2 == L)] for L in lags}
+    out["recall"] = {f"L{L}": {"n": n, "covered": c, "recall": round(c / n, 6) if n else None}
+                     for L, (n, c) in tot.items()}
+    out["by_type"] = by
+    out["fights"] = fights_done
+    out["margins_by_fold"] = {str(k): {f"{tk}/{fam}": round(v, 4) for (tk, fam), v in m.items()}
+                              for k, m in margins_used.items()}
+    out["n_misses"] = len(misses)
+    out["miss_by"] = dict(Counter(f"{m['type']}/{m['family']}/{m['state']}/L{m['lag']}" for m in misses)
+                          .most_common(60))
+    out["misses"] = misses[:400]
+    if a.area:
+        full = margins_from_contacts(rows, fold=None, q=a.margin_q) if a.margins == "heldout" else {}
+        out["support_area"] = support_area(extra, full, FORUM_SPECS)
+    print(json.dumps({k: out[k] for k in ("recall", "n_misses", "miss_by")}, indent=1))
+    if a.json:
+        a.json.parent.mkdir(parents=True, exist_ok=True)
+        a.json.write_text(json.dumps(out, indent=1), "utf-8")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("runs", nargs="+", type=Path)
+    ap.add_argument("runs", nargs="*", type=Path)
+    ap.add_argument("--encounter", default="BellBeast", choices=("BellBeast", "Forum"))
+    ap.add_argument("--extra", type=Path, default=None,
+                    help="Forum: the build's --extra directory (per-fold supports, contacts, walk tables)")
+    ap.add_argument("--cache", type=Path, default=None, help="Forum: the forum_extract caches")
+    ap.add_argument("--margins", default="heldout", choices=("heldout", "none"),
+                    help="Forum: per-family margins from the training fold's held-out residuals, or none")
+    ap.add_argument("--margin-q", type=float, default=1.0, help="Forum: the residual quantile a margin takes")
+    ap.add_argument("--area", action="store_true", help="Forum: report the margins' support area cost")
     ap.add_argument("--recordings", default="")
     ap.add_argument("--lags", default="2,3,4")
     ap.add_argument("--view", default="oracle,ve")
@@ -163,6 +288,12 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--max-fights", type=int, default=0)
     ap.add_argument("--json", type=Path, default=None)
     a = ap.parse_args(argv)
+    if a.encounter == "Forum":
+        if a.extra is None or a.cache is None:
+            ap.error("--encounter Forum needs --extra and --cache")
+        return forum_main(a)
+    if not a.runs:
+        ap.error("no runs")
 
     from ssbot.combat.boss_model import BossModel
     from ssbot.combat.forecast import Forecaster, load_planner_templates
