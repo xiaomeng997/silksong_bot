@@ -9,14 +9,16 @@
 Every product is an accumulator with add(view) and result(); FightView segments the enemies' attack instances the way
 the gauntlet builder does (forum_support.SubjectTracker on the Control FSM events) and indexes each entity's rows.
 
-  chains         multi-hit chains per damage source: hits and damage of the whole chain (the first "damage" event,
-                 the hornet_multi_wounder follow-ups ("special_damage" from the Multihit FSM) and LethalBlock-blocked
-                 hits ("catastrophe", data mode keeps the hero at 1 mask) on distinct frames within MW_CHAIN_F)
+  chains         multi-hit chains per damage source by the hero's own mechanism: the Multihit ticks ("special_damage"
+                 of its Roar and Wound States FSM) and the Final Hit "damage" event that ends them and names the
+                 source (Chains)
   death_tails    after a kill: how long the enemy still exports an enabled damage collider, hero contacts then
-  kill_freeze    the freeze events a kill starts (type, the FreezeMoment parameters, the real-time length)
+  kill_freeze    the freeze events a kill starts (type, the FreezeMoment parameters, the length the oracle's end event
+                 measured; an end past the cached fight is read from the recording)
   strikes        per attack family: time from the commit (the attack-start state) to its first enabled attack collider
-                 (not the body: STRIKE_BODY) or owned hazard, the hero's distance then, and its reach (the attack
-                 colliders' extent in the facing frame); per type the fastest family ("idle to the fastest strike")
+                 (not the body) or owned hazard (attributed at its spawn), the hero's distance then, and its reach (the
+                 attack colliders' extent in the facing frame); for body-only attacks (the Tiny's ram) the time to the
+                 body's first overlap with the hero's box at the commit; per type the fastest family by p5
   punish         per committed attack: startup (commit to the first attack collider), active span, recovery (last
                  attack collider off to the attack's end), the share of instances where a full hero attack
                  (HERO_ATTACK_S) fits in the startup or the recovery, and the body contact during the attack
@@ -46,9 +48,9 @@ from ssbot.knowledge.gauntlet_tables import FORUM_SPECS, HAZARD_ALIASES
 from ssbot.train.gauntlet import type_key as go_type
 
 REPO = Path(__file__).resolve().parents[3]
-MW_CHAIN_F = 90                 # a multi-hit's follow-ups land within this many frames of the hit before
-# the multi-hit attacks (hornet_multi_wounder): their follow-up hits come as "damage" events of the same attack, the
-# collider's trailing number stripped (Choristor Whip Hit 1-6, Reed ParrySlash Hit, Minister Slash Collider)
+MW_TICK_F = 30                  # the hero's Multihit ticks and its Final Hit come about 20 frames apart (Chains)
+# the multi-hit colliders (hornet_multi_wounder), the trailing number stripped (Choristor Whip Hit 1-6, Reed /
+# Minister ParrySlash Hit, Minister Slash Collider): their single hits are grouped under the stripped name
 MULTI_HIT = frozenset(("Whip Hit", "ParrySlash Hit", "Slash Collider"))
 TAIL_LOOK_S = 6.0
 BIND_NEED_S = 1.37 + 0.15       # DESIGN §3.5.6: T_bind + delta_b (no Injector Band)
@@ -167,12 +169,14 @@ class FightView:
         """id(instance) -> [(frame index, name, box, parry)] of the hazards it threw (Throwing Bell, Reed's pin, the
         Clawmaiden's spear and blast, the Clapper's bombs and rune): each armed stretch of a hazard entity goes to the
         instance of a spawning type in a family that spawns it (or ended one within spawn_window_s), else any of that
-        type in an attack, nearest first (the gauntlet builder's rule, GauntletBuilder._pick_owner, simplified)."""
+        type in an attack, nearest first (the gauntlet builder's rule, GauntletBuilder._pick_owner, simplified), chosen
+        at the hazard's spawn: the first frame of the unarmed lead-in it was exported with right before it armed (a
+        rune bomb appears ~20 frames before it bursts; a bomb of the Clapper's previous cast that bursts after the
+        next cast's commit appeared during the previous one, which threw it), its arming frame without a lead-in.
+        self.lead_in: hazard name -> lead-in lengths (frames)."""
         c = self.c
         out: dict[int, list] = defaultdict(list)
-        by_type: dict[str, list] = defaultdict(list)
-        for inst in self.instances:
-            by_type[inst.tk].append(inst)
+        self.lead_in: dict[str, list] = defaultdict(list)
         owners = {}
         for tk, sp in self.specs.items():
             for p in sp.projectiles:
@@ -185,9 +189,10 @@ class FightView:
             if not aliases and not any(name and name.startswith(p) for p in owners):
                 continue
             armed = ~np.isnan(c["e_box"][rs, 0])
+            fis = c["e_fi"][rs].astype(np.int64)
             prev_fi, owner = -10, None
-            for r, a in zip(rs, armed):
-                fi = int(c["e_fi"][r])
+            for k, (r, a) in enumerate(zip(rs, armed)):
+                fi = int(fis[k])
                 if not a:
                     prev_fi = -10
                     continue
@@ -196,8 +201,14 @@ class FightView:
                     if aliases:               # a shared name ("damager"): the circle's radius from its box width
                         w = 0.5 * float(c["e_box"][r, 2] - c["e_box"][r, 0])
                         nm = min(aliases, key=lambda a_: abs(a_[0] - w))[1]
+                    j = k                     # back over the unarmed rows it was exported with right before
+                    while j > 0 and not armed[j - 1] and fis[j] - fis[j - 1] <= 2:
+                        j -= 1
+                    spawn = int(fis[j])
+                    self.lead_in[nm].append(fi - spawn)
                     ots = [t for p, ts in owners.items() if nm.startswith(p) for t in ts]
-                    owner = self._pick(fi, nm, ots, float(c["e_x"][r]), float(c["e_y"][r])) if ots else None
+                    owner = self._pick(spawn, nm, ots, float(c["e_x"][rs[j]]), float(c["e_y"][rs[j]])) \
+                        if ots else None
                 prev_fi = fi
                 if owner is not None:
                     for nm, box, par, _ in self.colliders(int(r)):
@@ -269,60 +280,64 @@ class FightView:
 # ---- products ---------------------------------------------------------------------------------------------------
 
 class Chains:
+    """Multi-hit chains by the hero's own mechanism (the events show it; 2026-10-04, 12 fights: 175 ticks, 174 final
+    hits): a multi-hit collider (hornet_multi_wounder: Minister Slash Collider, Choristor Whip Hit, Reed / Minister
+    ParrySlash Hit) sends the hero's "Roar and Wound States" FSM through Multihit, whose ticks are TakeQuickDamage
+    ("special_damage", no source) about 20 frames apart, to Final Hit, a DamageHeroDirectly "damage" event that names
+    the source. A chain = the final hit and the Multihit ticks right before it (each within MW_TICK_F of the next, none
+    across another final hit); its hits = ticks + 1, its damage = the ticks' amounts + the final hit's. Every other
+    "damage" event is a single hit of its source. Ticks no final hit follows (the fight ended, a death) are counted
+    apart. The hits LethalBlock blocked in data mode ("catastrophe") are the same hits (same frame), not extra ones."""
+
     def __init__(self):
-        self.rows: dict[tuple, list] = defaultdict(list)     # (type, collider) -> [(hits, damage, frames)]
+        self.rows: dict[tuple, list] = defaultdict(list)     # (type, collider) -> [(hits, damage, span frames)]
+        self.orphan_ticks = 0
+        self.ticks = 0
 
     def add(self, v: FightView) -> None:
-        cur = None
-        blocked = {int(f) for f, k, d in v.events if k == "catastrophe" and d.get("blocked")}
-
-        def close():
-            if cur is not None:
-                hits = len(cur["frames"])
-                self.rows[(cur["type"], cur["src"])].append((hits, sum(cur["frames"].values()),
-                                                              max(cur["frames"]) - min(cur["frames"]), cur["mw"],
-                                                              cur["first_blocked"]))
-        for f, k, d in sorted(v.events, key=lambda e: e[0]):
-            if k == "damage":
-                tk, leaf = source_type(d.get("source"))
-                if tk is not None and go_type(leaf) == tk:
-                    leaf = "body"
-                who = str(d.get("source")).rsplit("/", 1)[0]
-                base = re.sub(r"\s*\d+$", "", leaf)
-                if cur is not None and base in MULTI_HIT and cur["base"] == base and cur["who"] == who \
-                        and f - cur["last"] <= MW_CHAIN_F:
-                    cur["frames"][int(f)] = max(cur["frames"].get(int(f), 0), int(d.get("amount") or 1))
-                    cur["last"], cur["mw"] = int(f), True
-                    continue
-                close()
-                # LethalBlock (data mode) blocks a hit at 1 mask: a multi-hit whose first hit is blocked never chains
-                cur = {"type": tk or "?", "src": base if base in MULTI_HIT else leaf, "base": base, "who": who,
-                       "frames": {int(f): int(d.get("amount") or 1)}, "last": int(f), "mw": False,
-                       "first_blocked": any(int(f) + g in blocked for g in (-1, 0, 1))}
-            elif k == "special_damage" and "Multihit" in str(d.get("fsm")) and cur is not None \
-                    and f - cur["last"] <= MW_CHAIN_F:
-                cur["frames"][int(f)] = max(cur["frames"].get(int(f), 0), int(d.get("amount") or 1))
-                cur["last"], cur["mw"] = int(f), True
-            elif k == "catastrophe" and d.get("blocked") and cur is not None and f - cur["last"] <= MW_CHAIN_F \
-                    and not any(abs(int(f) - g) <= 1 for g in cur["frames"]):
-                cur["frames"][int(f)] = int(d.get("amount") or d.get("dmg") or 1)
-                cur["last"] = int(f)
-        close()
+        ev = sorted(((int(f), k, d) for f, k, d in v.events if k in ("damage", "special_damage")),
+                    key=lambda e: e[0])
+        pending: list[tuple[int, int]] = []          # Multihit ticks since the last final hit: (frame, amount)
+        for f, k, d in ev:
+            if k == "special_damage":
+                if "Roar and Wound States/Multihit" in str(d.get("fsm")):
+                    pending.append((f, int(d.get("amount") or 1)))
+                    self.ticks += 1
+                continue
+            tk, leaf = source_type(d.get("source"))
+            if tk is not None and go_type(leaf) == tk:
+                leaf = "body"
+            base = re.sub(r"\s*\d+$", "", leaf)
+            amount = int(d.get("amount") or 1)
+            if "Roar and Wound States/Final Hit" in str(d.get("fsm")):
+                ticks, last = [], f
+                for g, am in reversed(pending):
+                    if last - g > MW_TICK_F:
+                        break
+                    ticks.append((g, am))
+                    last = g
+                self.orphan_ticks += len(pending) - len(ticks)
+                pending = []
+                self.rows[(tk or "?", base)].append((len(ticks) + 1, amount + sum(am for _, am in ticks),
+                                                     f - (ticks[-1][0] if ticks else f), True))
+            else:
+                self.rows[(tk or "?", base if base in MULTI_HIT else leaf)].append((1, amount, 0, False))
+        self.orphan_ticks += len(pending)
 
     def result(self) -> dict:
         out = {}
         for (tk, src), rows in sorted(self.rows.items(), key=lambda kv: (str(kv[0][0]), kv[0][1])):
             a = np.array([x[:3] for x in rows], np.float64)
             out[f"{tk}/{src}"] = {
-                "n": len(rows), "first_hit_blocked": sum(1 for x in rows if x[4]),
-                "multi_hit_chains": sum(1 for x in rows if x[3] or x[0] > 1), "hits_max": int(a[:, 0].max()),
+                "n": len(rows), "multi_hit_chains": sum(1 for x in rows if x[3]), "hits_max": int(a[:, 0].max()),
                 "damage_max": int(a[:, 1].max()), "hits": dict(Counter(int(x) for x in a[:, 0])),
                 "damage": dict(Counter(int(x) for x in a[:, 1])), "span_frames_max": int(a[:, 2].max())}
-        return {"note": "a chain: a source's damage event, then within " f"{MW_CHAIN_F}" " frames of the last hit the same "
-                        "attack's further damage events, the Multihit follow-ups (special_damage) and the hits "
-                        "LethalBlock blocked (catastrophe: data mode keeps the hero at 1 mask; the hit happened, its "
-                        "damage is counted). A chain whose first hit was blocked tends not to continue (first_hit_"
-                        "blocked), so the maxima are lower bounds of what an unblocked chain deals", "by_source": out}
+        return {"note": "a chain: the hero's Multihit ticks (special_damage, about 20 frames apart, each within "
+                        f"{MW_TICK_F} frames of the next) and the Final Hit damage event that ends them and names the "
+                        "source; every other damage event is one hit. LethalBlock (data mode) blocks the ticks' and "
+                        "hits' health loss but not the FSM: the counts are what the attacks do; whether the tick count "
+                        "depends on the hero's health is not known (R1: LethalBlock off, full HP)",
+                "multihit_ticks": self.ticks, "ticks_without_a_final_hit": self.orphan_ticks, "by_source": out}
 
 
 class DeathTails:
@@ -377,10 +392,33 @@ class DeathTails:
                             for tk, n in sorted(self.kills.items())}}
 
 
+LATE_FREEZE_F = 1200             # an end event past the cached fight is looked for this far in the recording
+
+
+def late_events(path, f_from: int, f_to: int, kind: str) -> list[tuple[int, dict]]:
+    """(frame, data) of the recording's events of this kind in [f_from, f_to] (the caches end at the fight's f1)."""
+    from ssbot.record.recorder import RecordingReader
+    try:
+        r = RecordingReader(Path(path))
+        return [(int(ev.get("f", s["f"])), ev.get("d") or {}) for s in r.states(f_from, f_to, keys=("f", "ev"))
+                for ev in s.get("ev") or () if ev.get("k") == kind]
+    except (OSError, ValueError, KeyError):
+        return []
+
+
 class KillFreeze:
-    def __init__(self):
+    """The freezes a kill starts (on its frame or the next): per type the FreezeMoment parameters, and per (type,
+    freeze) the length the oracle's end event measured ("frames", "ms" of the unscaled frames it lasted). The caches
+    end at the fight's f1 (the last kill's EnemyBattleEndSlow runs past it): such an end is read from the recording
+    (late); one not found within LATE_FREEZE_F is censored (counted, not measured)."""
+
+    def __init__(self, read_late: bool = True):
+        self.read_late = read_late
         self.rows: dict[str, Counter] = defaultdict(Counter)
-        self.real: dict[str, list] = defaultdict(list)
+        self.frames: dict[str, list] = defaultdict(list)
+        self.ms: dict[str, list] = defaultdict(list)
+        self.late: Counter = Counter()
+        self.censored: Counter = Counter()
         self.none: Counter = Counter()
 
     def add(self, v: FightView) -> None:
@@ -391,7 +429,8 @@ class KillFreeze:
                 if d.get("phase") == "start":
                     starts[int(f)].append(d)
                 elif d.get("phase") in ("end", "stop", "done") and d.get("id") is not None:
-                    ends[d["id"]] = int(f)
+                    ends[d["id"]] = d
+        todo = []
         for f, k, d in v.events:
             if k != "hit" or not d.get("dead"):
                 continue
@@ -404,15 +443,31 @@ class KillFreeze:
                 key = f"{x.get('type')} down {x.get('down')} wait {round(float(x.get('wait') or 0), 3)} up " \
                       f"{x.get('up')} speed {x.get('speed')}"
                 self.rows[tk][key] += 1
-                if x.get("id") in ends:
-                    i0, i1 = v.fi_of.get(int(f)), v.fi_of.get(ends[x["id"]])
-                    if i0 is not None and i1 is not None:
-                        self.real[f"{tk}|{x.get('type')}"].append(ends[x["id"]] - int(f))
+                todo.append((f"{tk}|{x.get('type')}", x.get("id")))
+        missing = {i for _, i in todo if i is not None and i not in ends}
+        if missing and self.read_late and (v.c.get("meta") or {}).get("path"):
+            f1 = int(v.f[-1])
+            for _, d in late_events(v.c["meta"]["path"], f1 + 1, f1 + LATE_FREEZE_F, "freeze"):
+                if d.get("phase") in ("end", "stop", "done") and d.get("id") in missing:
+                    ends[d["id"]] = {**d, "_late": True}
+        for key, i in todo:
+            e = ends.get(i)
+            if e is None or e.get("frames") is None:
+                self.censored[key] += 1
+                continue
+            self.late[key] += bool(e.get("_late"))
+            self.frames[key].append(int(e["frames"]))
+            if e.get("ms") is not None:
+                self.ms[key].append(float(e["ms"]))
 
     def result(self) -> dict:
-        return {"by_type": {tk: dict(c.most_common()) for tk, c in sorted(self.rows.items())},
+        keys = sorted(set(self.frames) | set(self.censored))
+        return {"note": "length = the oracle's end event (frames, ms: unscaled real time the freeze lasted); ends past "
+                        "the cached fight read from the recording (late); censored = no end found",
+                "by_type": {tk: dict(c.most_common()) for tk, c in sorted(self.rows.items())},
                 "kills_without_freeze": dict(self.none),
-                "frames_to_end": {k: _q(v, nd=1) for k, v in sorted(self.real.items())}}
+                "length": {k: {"frames": _q(self.frames.get(k, []), nd=1), "ms": _q(self.ms.get(k, []), nd=1),
+                               "late": self.late.get(k, 0), "censored": self.censored.get(k, 0)} for k in keys}}
 
 
 def _attack_cols(v: FightView, inst, fi0: int, fi1: int, hazards: bool = True) -> list[tuple[int, str, tuple, int]]:
@@ -443,9 +498,28 @@ class Strikes:
         self.reach: dict[str, list] = defaultdict(list)
         self.win: dict[str, list] = defaultdict(list)   # (startup, active, recovery, dur, body contact frames)
         self.none: Counter = Counter()
+        self.body: dict[str, list] = defaultdict(list)  # body-only attacks: commit to the body reaching the hero
+        self.body_missed: Counter = Counter()
+        self.lead_in: dict[str, list] = defaultdict(list)
+
+    @staticmethod
+    def body_strike(v: FightView, inst, fi0: int, fi1: int) -> float | None:
+        """A body-only attack's strike time: from its commit to the first frame its damage box (the body) overlaps
+        the hero's physics box as it was at the commit (the hero standing still), None if it never does."""
+        c = v.c
+        hb = c["hbox"][fi0]
+        if np.isnan(hb[0]):
+            return None
+        for r in v.rows_between(inst.iid, fi0, fi1):
+            b = c["e_box"][r]
+            if not np.isnan(b[0]) and b[0] <= hb[2] and hb[0] <= b[2] and b[1] <= hb[3] and hb[1] <= b[3]:
+                return float(v.T[int(c["e_fi"][r])]) - inst.t_start
+        return None
 
     def add(self, v: FightView) -> None:
         c = v.c
+        for nm, ls in getattr(v, "lead_in", {}).items():
+            self.lead_in[nm] += ls
         for inst in v.instances:
             sp = v.specs[inst.tk]
             if inst.family == sp.idle_family or inst.family.endswith("_ENTRY") or inst.t_end is None \
@@ -466,6 +540,11 @@ class Strikes:
             if not cols:
                 self.none[key] += 1
                 self.win[key].append((None, None, None, dur))
+                bt = self.body_strike(v, inst, fi0, fi1)
+                if bt is None:
+                    self.body_missed[key] += 1
+                else:
+                    self.body[key].append(bt)
                 continue
             t_on = [float(v.T[fi]) - inst.t_start for fi, *_ in cols]
             self.ttd[key].append(min(t_on))
@@ -480,7 +559,7 @@ class Strikes:
 
     def result(self) -> dict:
         strikes, punish = {}, {}
-        fastest: dict[str, tuple] = {}
+        fastest: dict[str, dict] = {}
         for key in sorted(set(self.ttd) | set(self.none)):
             tk = key.split("/")[0]
             d = np.array(self.dist.get(key) or [(math.nan, math.nan)])
@@ -495,8 +574,23 @@ class Strikes:
                                          "y_min": round(float(np.nanmin(rb[:, 1])), 2),
                                          "y_max": round(float(np.nanmax(rb[:, 3])), 2),
                                          "x_max_p99": round(float(np.nanquantile(rb[:, 2], 0.99)), 2)}}
-            if ttd and (tk not in fastest or min(ttd) < fastest[tk][1]):
-                fastest[tk] = (key.split("/")[1], round(min(ttd), 3))
+            if self.none.get(key):
+                body = self.body.get(key, [])
+                strikes[key]["body_only_commit_to_hero_box_s"] = {
+                    **_q(body), "never_reached": self.body_missed.get(key, 0),
+                    "note": "instances without attack colliders: commit to the body's first overlap with the hero's "
+                            "box as it was at the commit"}
+            # the fastest family per type by p5 (the minima carry a few mis-credited hazards); body-only attacks
+            # (no attack collider, e.g. the Tiny's ram) by their body strike when the type has nothing else
+            for kind, vals in (("attack collider or hazard", ttd), ("body", self.body.get(key, []))):
+                if len(vals) < 20:
+                    continue
+                p5 = float(np.quantile(vals, 0.05))
+                cur = fastest.get(tk)
+                if cur is None or (cur["kind"] == "body" and kind != "body") or \
+                        (cur["kind"] == kind and p5 < cur["p5_s"]):
+                    fastest[tk] = {"family": key.split("/")[1], "kind": kind, "p5_s": round(p5, 3),
+                                   "min_s": round(float(min(vals)), 3), "n": len(vals)}
             w = [x for x in self.win.get(key, []) if x[0] is not None]
             if w:
                 a = np.array(w, np.float64)
@@ -504,8 +598,8 @@ class Strikes:
                                "recovery_s": _q(a[:, 2]), "duration_s": _q(a[:, 3]),
                                "share_attack_fits_startup": round(float((a[:, 0] >= HERO_ATTACK_S).mean()), 3),
                                "share_attack_fits_recovery": round(float((a[:, 2] >= HERO_ATTACK_S).mean()), 3)}
-        return {"hero": HERO, "strikes": strikes, "fastest_by_type": {k: {"family": f, "min_s": t}
-                                                                      for k, (f, t) in sorted(fastest.items())},
+        return {"hero": HERO, "strikes": strikes, "fastest_by_type": dict(sorted(fastest.items())),
+                "hazard_spawn_lead_in_frames": {k: _q(v, nd=0) for k, v in sorted(self.lead_in.items())},
                 "punish": punish}
 
 

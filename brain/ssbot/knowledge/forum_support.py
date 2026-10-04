@@ -50,10 +50,20 @@ HAZARD_GONE_S = 0.5          # an armed hazard missing from the export this long
 DWELL_SLACK_S = BIN          # logged dwell ranges are frame-quantised: one bin of slack on each side
 
 
-def margins_from_contacts(rows: list[dict], fold: int | None = None, q: float = 1.0) -> dict[tuple[str, str], float]:
+def fight_of(row: dict) -> str:
+    """The fight id of a contact row ("<run>/i<n>/ep<k>" of "<run>/i<n>/ep<k>/<type>#<iid>")."""
+    return row["fight"].rsplit("/", 1)[0]
+
+
+def margins_from_contacts(rows: list[dict], fold: int | None = None, q: float = 1.0, fights: set | None = None,
+                          skip_families: set | frozenset = frozenset()) -> dict[tuple[str, str], float]:
     """Margins from held-out residuals (the q-quantile, 1.0 = max; a residual beyond the search radius counts as
-    behaviour_tables.R_MARGIN_SEARCH_U); fold: only contacts of that fold (the calibration side; the certified side is
-    the other):
+    behaviour_tables.R_MARGIN_SEARCH_U). A contact's held-out residual is against the occupancy of the folds other
+    than its own (two folds: the other one), so contacts of fold k calibrate margins for fold (1 - k)'s tables.
+    fold / fights: only contacts of that fold / those fights (the calibration side; support_recall --encounter Forum
+    certifies other fights of the same fold against the other fold's tables: tables, margins and the certified
+    contacts come from three disjoint sets of fights). skip_families: families left without a margin (the idle
+    families under the idle body tube):
       (type, family)  the enemy's own colliders: the per-state set ("state:<state>", the contact against the other
                       fold's per-state occupancy at its state and time)
       ("ent", hazard) a thrown hazard's contacts: its self template ("self:<hazard>", relative to where and when it
@@ -62,10 +72,13 @@ def margins_from_contacts(rows: list[dict], fold: int | None = None, q: float = 
     from ssbot.knowledge.behaviour_tables import R_MARGIN_SEARCH_U
     per: dict[tuple, list] = defaultdict(list)
     for r in rows:
-        if r.get("follow") or (fold is not None and r.get("fold") != fold):
+        if r.get("follow") or (fold is not None and r.get("fold") != fold) \
+                or (fights is not None and fight_of(r) not in fights):
             continue
         ho = r.get("ho") or {}
         own = r.get("tk") == r.get("type")
+        if own and r.get("family") in skip_families:
+            continue
         if own:
             st = r.get("state")
             k = f"state:{st}"
@@ -193,7 +206,9 @@ class Subject:
     hidden: bool = False
     seen_T: float = -math.inf
     name: str | None = None                        # its GameObject name (the Control events' obj)
-    box: tuple | None = None                       # its enabled damage colliders' box on the last frame seen
+    box: tuple | None = None                       # its enabled damage colliders' box on the last frame exported
+    seen_f: int | None = None                      # the last frame it was seen (not hidden) and its box then
+    seen_box: tuple | None = None
 
 
 class SubjectTracker:
@@ -287,6 +302,7 @@ class SubjectTracker:
         s.box = None if box is None or math.isnan(float(box[0])) else tuple(float(v) for v in box)
         if not hidden:
             s.pos, s.vel, s.flip, s.seen_T = (float(x), float(y)), (float(vx), float(vy)), int(flip), T
+            s.seen_f, s.seen_box = self.f, s.box
             if s.cur is not None and s.cur.anchor is None:
                 s.cur.anchor, s.cur.mirror = s.pos, FACES_LEFT[s.flip]
         if s.state is None and state is not None:      # seen before any Control event: its exported state
@@ -297,16 +313,21 @@ class SubjectRecall:
     """Run the trackers over a fight's cache and test the contacts (see the module docstring)."""
 
     def __init__(self, tables: FoldTables, lags=(2, 3, 4), tube_speed: dict[str, float] | None = None,
-                 tube_skin: float = 0.1):
+                 tube_skin: float = 0.1, idle_growth: dict[str, list[float]] | None = None):
         self.t = tables
         self.lags = tuple(lags)
         self.tube = tube_speed is not None
         self.tube_speed = dict(tube_speed or {})
         self.body_rel: dict[str, tuple] = {}     # type -> body collider hull relative to its position (body_hulls)
         self.tube_skin = tube_skin
+        # the idle body tube (idle_tube_growth): an enemy in its idle family is forecast by its body as last seen,
+        # moved along its exported velocity and grown by g[frames since the sighting], instead of the idle family's
+        # per-state templates (anchored at the idle start they cover most of the arena: an idle Minister chases)
+        self.idle_growth = dict(idle_growth) if idle_growth is not None else None
         self.stats: dict = defaultdict(Counter)
         self.misses: list[dict] = []
         self.placements = Counter()
+        self._raw_src: dict = {}
 
     # ---- the walk ----
 
@@ -367,21 +388,59 @@ class SubjectRecall:
                 pts = {(round(x + vx * k * FRAME_S, 4), round(y + vy * k * FRAME_S, 4)) for k in ks}
                 new = tuple((px, py, m) for px, py in sorted(pts) for m in (-1, 1))
             cur = s.cur
-            ctx = None
+            ctx = skip = None
             if cur is not None:
                 anc = ((cur.anchor[0], cur.anchor[1], cur.mirror),) if cur.anchor is not None else new
                 ctx = (cur.family, cur.start, anc)
-                if self.t.family_wide:       # the union over every state at the time since the attack start
+                if self.idle_tube_ok(s, T_o):
+                    skip = ctx               # the current idle instance: its body tube (in_idle_tube) instead
+                elif self.t.family_wide:     # the union over every state at the time since the attack start
                     e = cur.t_start - T_o
                     self._place(out, self.t.family_key(cur.family), e, e, list(anc), H)
             e0 = s.t_entry - T_o
-            self._walk(sp, w, s.state, e0, ctx, new, s.dead, H, out)
+            self._walk(sp, w, s.state, e0, ctx, new, s.dead, H, out, skip)
         return list(dict.fromkeys(out))
 
-    def _walk(self, sp, w: Walk, state: str, e0: float, ctx, new, dead: bool, H: float, out: list) -> None:
+    def idle_tube_ok(self, s: Subject, T_o: float) -> bool:
+        """Whether the idle body tube stands for the subject's current idle instance at origin T_o (calibrated for
+        its type, seen at most TUBE_MAX_AGE_S before)."""
+        return self.idle_growth is not None and s.cur is not None and not s.dead and s.tk in self.idle_growth \
+            and s.cur.family == self.t.specs[s.tk].idle_family and s.seen_f is not None \
+            and T_o - s.seen_T <= TUBE_MAX_AGE_S
+
+    def in_idle_tube(self, s: Subject, pts: list[tuple], T_o: float) -> bool:
+        """The idle body tube: the subject's damage box as last seen (no damage collider then: its type's body hull at
+        its position), moved along its exported velocity for the game time since, grown by the type's calibrated
+        g[tube_bin(game time since the sighting)] (beyond the calibration: not covered) plus the hero half-extents."""
+        g = self.idle_growth.get(s.tk) if self.idle_growth is not None else None
+        if g is None or s.seen_f is None:
+            return False
+        b = s.seen_box
+        if b is None:
+            rel = self.body_rel.get(s.tk)
+            if rel is None or math.isnan(s.pos[0]):
+                return False
+            b = (s.pos[0] + rel[0], s.pos[1] + rel[1], s.pos[0] + rel[2], s.pos[1] + rel[3])
+        age = T_o - s.seen_T
+        vx, vy = s.vel
+        hx, hy = hb.HERO_HALF_U[0] + 1e-3, hb.HERO_HALF_U[1] + 1e-3
+        for x, y, tau, *_ in pts:
+            dt = age + tau
+            n = int(tube_bin(dt))
+            if n >= len(g):
+                continue
+            gx = g[n]
+            if b[0] + vx * dt - hx - gx <= x <= b[2] + vx * dt + hx + gx and \
+                    b[1] + vy * dt - hy - gx <= y <= b[3] + vy * dt + hy + gx:
+                return True
+        return False
+
+    def _walk(self, sp, w: Walk, state: str, e0: float, ctx, new, dead: bool, H: float, out: list,
+              skip=None) -> None:
         """The support walk as a worklist over (state, instance context, dead): each node keeps the hull of its
         entry intervals (a superset of every path's: conservative), entries past the horizon are dropped, so the
-        decision chains' zero-dwell loops end."""
+        decision chains' zero-dwell loops end. skip: an instance context whose nodes are walked but not placed (the
+        current idle instance under the idle body tube)."""
         idle = sp.idle_family
         cap = H + BIN
         nodes: dict[tuple, list] = {}
@@ -443,11 +502,12 @@ class SubjectRecall:
                         c2 = (idle, nxt, new)
                 push(nxt, x_lo, x_hi, c2, d2)
         for (st, c, d, current), (lo, hi) in nodes.items():
-            if c is None:
+            if c is None or (skip is not None and c is skip):
                 continue
             self._place(out, self.t.key(c[0], st), lo, hi, c[2], H)
             if c[0].endswith("_ENTRY"):
                 self._place_world(out, self.t.world_key(c[0], st), lo, hi, H)
+
     def in_tube(self, s: Subject, pts: list[tuple[float, float, float]], T_o: float) -> bool:
         """The enemy's damage colliders as last exported (its box on the last frame it was seen, at most
         TUBE_MAX_AGE_S before the origin) moved at most its type's top speed (tube_speed: measured on the training
@@ -466,7 +526,7 @@ class SubjectRecall:
             b = (s.pos[0] + rel[0], s.pos[1] + rel[1], s.pos[0] + rel[2], s.pos[1] + rel[3])
         v = self.tube_speed.get(s.tk, 0.0)
         hx, hy = hb.HERO_HALF_U[0] + self.tube_skin, hb.HERO_HALF_U[1] + self.tube_skin
-        for x, y, tau in pts:
+        for x, y, tau, *_ in pts:
             g = v * (age + tau)
             if b[0] - hx - g <= x <= b[2] + hx + g and b[1] - hy - g <= y <= b[3] + hy + g:
                 return True
@@ -484,7 +544,7 @@ class SubjectRecall:
                 continue
             rel, (vx, vy), (px, py) = h[6], h[7], h[5]
             b = (px + rel[0], py + rel[1], px + rel[2], py + rel[3])
-            for x, y, tau in pts:
+            for x, y, tau, *_ in pts:
                 t = tau + (T_o - h[4])
                 g = HAZARD_DV_U_S * t
                 if b[0] + vx * t - hx - g <= x <= b[2] + vx * t + hx + g and \
@@ -499,7 +559,7 @@ class SubjectRecall:
         q.clear()
         for key, t_ref, anchor, mirror in placements:
             q.place(key, t_ref, anchor, mirror)
-        for x, y, tau in pts:
+        for x, y, tau, *_ in pts:
             if q.query(np.array([[x]]), np.array([[y]]), np.array([tau]))[0, 0]:
                 return True
         return False
@@ -517,6 +577,7 @@ class SubjectRecall:
                 continue
             for L in self.lags:
                 need[int(c["f"]) - L].append((c, L))
+        self._raw_src = raw_sources(cache)
         tr = SubjectTracker(specs)
         H = (max(self.lags) + 1) * FRAME_S + 1e-6
         for i, f, T in replay(cache, tr, specs):
@@ -537,25 +598,35 @@ class SubjectRecall:
         for fr, box in zip((cf - 1, cf), c["boxes"][-2:] if len(c["boxes"]) >= 2 else [None] + c["boxes"]):
             if box is None or fr not in fi_of:
                 continue
-            pts.append((0.5 * (box[0] + box[2]), 0.5 * (box[1] + box[3]), float(T_arr[fi_of[fr]]) - T_o))
+            pts.append((0.5 * (box[0] + box[2]), 0.5 * (box[1] + box[3]), float(T_arr[fi_of[fr]]) - T_o, fr))
         how = None
         if s is not None and pts:
             # the gauntlet builder attributes a contact by the GameObject name (a waiting wave-12 "Song Reed" and the
-            # wave-0 one share it): every subject of that name is a candidate, the attributed one first
-            # (a subject seen only in its waiting state never had a Control event to name it: every one of its type)
+            # wave-0 one share it): every subject of that name is a candidate, the attributed one first (a subject
+            # seen only in its waiting state never had a Control event to name it: every one of its type); a source
+            # that names no enemy at all ("Colliders/Collider Fly": the builder took one of the Ministers exporting
+            # that collider, not always the one touching) makes every subject of the type a candidate
+            raw = self._raw_src.get(cf, ())      # the event's own source (the row's src carries the builder's pick)
+            unnamed = c.get("tk") == c.get("type") and bool(raw) and not any(names_enemy(x, s.tk) for x in raw)
             names = [s] + [o for o in tr.subjects.values() if o is not s and o.tk == s.tk
-                           and (s.name is None or o.name is None or o.name == s.name)]
+                           and (unnamed or s.name is None or o.name is None or o.name == s.name)]
+            other = "unnamed-source candidate" if unnamed else "namesake"
             for k, o in enumerate(names):
                 pl = self.placements_of(o, T_o, H, hazards=thrown(tr, self.t.specs[o.tk]))
                 self.placements["placements"] += len(pl)
                 self.placements["forecasts"] += 1
                 if self.covered(pl, pts):
-                    how = "forecast" if k == 0 else "namesake forecast"
+                    how = "forecast" if k == 0 else f"{other} forecast"
                     break
+                if self.idle_tube_ok(o, T_o):
+                    self.placements["idle body tubes"] += 1
+                    if self.in_idle_tube(o, pts, T_o):
+                        how = "idle body tube" if k == 0 else f"{other} idle body tube"
+                        break
             if how is None and self.tube:
                 for k, o in enumerate(names):
                     if self.in_tube(o, pts, T_o):
-                        how = ("current-collider tube" if k == 0 else "namesake tube") + \
+                        how = ("current-collider tube" if k == 0 else f"{other} tube") + \
                             (" (outside attacks)" if o.cur is None else " (in an attack)")
                         break
             if how is None and self.tube and self.t.specs[s.tk].projectiles and \
@@ -563,7 +634,9 @@ class SubjectRecall:
                 how = "hazard tube"
         if how is not None:
             st["covered"] += 1
-            if how != "forecast":
+            if how == "idle body tube":       # part of the forecast (the idle family's model), counted apart
+                st["forecast: idle body tube"] += 1
+            elif how != "forecast":
                 st[f"covered by {how}"] += 1
             return
         self.misses.append({"fight": c["fight"], "f": cf, "lag": L, "type": c["type"], "family": c.get("family"),
@@ -596,6 +669,164 @@ def top_speeds(caches, specs=FORUM_SPECS, jump_u: float = 1.2, min_dt: float = 0
                 m = ok & (tk[:-1] == k)
                 vals[t].append(d[m] / dt[m])
     return {t: float(np.quantile(np.concatenate(v), q)) for t, v in vals.items()}
+
+
+IDLE_TUBE_N = 40             # time bins (1/60 s) from an idle body's last sighting the idle body tube is calibrated
+#                              for (the recall's lags plus TUBE_MAX_AGE_S)
+
+
+def idle_rows(cache: dict, specs=FORUM_SPECS) -> np.ndarray:
+    """Per entity row of the cache: the start frame of the subject's current idle-family instance at that frame
+    (SubjectTracker on the replay: the gauntlet builder's segmentation), -1 outside idle (an attack, waiting, dead)."""
+    out = np.full(len(cache["e_fi"]), -1, np.int64)
+    tr = SubjectTracker(specs)
+    starts = np.searchsorted(cache["e_fi"], np.arange(len(cache["f"]) + 1))
+    types = cache["types"]
+    for i, f, T in replay(cache, tr, specs):
+        for r in range(starts[i], starts[i + 1]):
+            tk = types[int(cache["e_tk"][r])]
+            if tk not in specs:
+                continue
+            s = tr.subjects.get(int(cache["e_iid"][r]))
+            if s is not None and s.cur is not None and s.cur.family == specs[tk].idle_family and not s.dead:
+                out[r] = s.cur.f_start
+    return out
+
+
+def idle_tube_samples(cache: dict, hulls: dict[str, tuple], specs=FORUM_SPECS, n_max: int = IDLE_TUBE_N) \
+        -> dict[str, np.ndarray]:
+    """Dead-reckoning residuals of idle bodies: per type a dict time bin -> values (tube_bin of the game time between
+    the two frames) of how far the enemy's damage box n = 1..n_max frames later lies outside its box at frame i moved
+    along its exported velocity at i for the game time between them (the larger of the four edge excesses, 0
+    inside), over every pair of exported, visible frames of one idle-family instance (no damage collider at i: the
+    type's body hull at its position; none at i + n: no sample, it cannot hurt); bins past n_max are dropped. The idle
+    body tube's growth (IdleTubeCalibration)."""
+    iid, fi = cache["e_iid"], cache["e_fi"].astype(np.int64)
+    inst = idle_rows(cache, specs)
+    vis = cache["e_hidden"] == 0
+    ok = (inst >= 0) & vis
+    rows = np.flatnonzero(ok)
+    if not len(rows):
+        return {}
+    types = cache["types"]
+    tk_r = cache["e_tk"][rows]
+    box = cache["e_box"][rows].astype(np.float64)
+    x, y = cache["e_x"][rows].astype(np.float64), cache["e_y"][rows].astype(np.float64)
+    nan = np.isnan(box[:, 0])
+    for k in np.unique(tk_r[nan]):           # no damage collider at i: the body hull at its position
+        h = hulls.get(types[int(k)])
+        m = nan & (tk_r == k)
+        if h is None:
+            continue
+        box[m] = np.stack([x[m] + h[0], y[m] + h[1], x[m] + h[2], y[m] + h[3]], axis=1)
+    vx, vy = cache["e_vx"][rows].astype(np.float64), cache["e_vy"][rows].astype(np.float64)
+    T = cache["T"]
+    fi_r, inst_r = fi[rows], inst[rows]
+    ebox = cache["e_box"][rows]
+    has_j = ~np.isnan(ebox[:, 0])
+    # pair rows of the same subject and idle instance n frames apart
+    _, rank = np.unique(iid[rows], return_inverse=True)
+    key = rank.astype(np.int64) * (int(fi.max()) + n_max + 2) + fi_r
+    order = np.argsort(key, kind="stable")
+    ks = key[order]
+    out: dict[str, dict[int, list]] = defaultdict(lambda: defaultdict(list))
+    for n in range(1, n_max + 1):
+        pos = np.searchsorted(ks, key + n)
+        hit = pos < len(ks)
+        pos = np.where(hit, pos, 0)
+        j = order[pos]
+        hit &= (ks[pos] == key + n) & (inst_r[j] == inst_r) & has_j[j] & ~np.isnan(box[:, 0])
+        if not hit.any():
+            continue
+        a = np.flatnonzero(hit)
+        b = j[a]
+        dt = T[fi_r[b]] - T[fi_r[a]]
+        sx, sy = vx[a] * dt, vy[a] * dt
+        bj = ebox[b].astype(np.float64)
+        e = np.maximum.reduce([box[a, 0] + sx - bj[:, 0], bj[:, 2] - (box[a, 2] + sx),
+                               box[a, 1] + sy - bj[:, 1], bj[:, 3] - (box[a, 3] + sy), np.zeros(len(a))])
+        kb = tube_bin(dt)                    # by game time, not frames: a hitch spans 0.5 s in 4 frames
+        for k in np.unique(tk_r[a]):
+            m = tk_r[a] == k
+            for t_bin in np.unique(kb[m]):
+                if t_bin <= n_max:
+                    out[types[int(k)]][int(t_bin)].append(e[m & (kb == t_bin)])
+    return {tk: {n: np.concatenate(v) for n, v in d.items()} for tk, d in out.items()}
+
+
+def tube_bin(dt):
+    """The idle body tube's time bin of a game-time span (s): bins of one frame (BIN), rounded up with a 5 % tolerance
+    for frame-time jitter; the calibration and the query use the same."""
+    return np.maximum(0, np.ceil(np.asarray(dt, np.float64) / BIN - 0.05)).astype(np.int64)
+
+
+class IdleTubeCalibration:
+    """The idle body tube's growth from training fights, streamed (idle_tube_samples per cache; per type and n the
+    exact maximum and a HIST_U histogram for the quantiles):
+
+        cal = IdleTubeCalibration(hulls)
+        for cache in training_caches: cal.add(cache)
+        g = cal.growth(q=1.0)          # type -> [g_0, ..., g_n_max] per tube_bin of game time, non-decreasing"""
+
+    HIST_U = 0.01
+    HIST_N = 2000
+
+    def __init__(self, hulls: dict[str, tuple], specs=FORUM_SPECS, n_max: int = IDLE_TUBE_N):
+        self.hulls, self.specs, self.n_max = hulls, specs, n_max
+        self.max: dict[str, np.ndarray] = {}
+        self.hist: dict[str, np.ndarray] = {}
+        self.fights = 0
+
+    def add(self, cache: dict) -> None:
+        self.fights += 1
+        for tk, d in idle_tube_samples(cache, self.hulls, self.specs, self.n_max).items():
+            if tk not in self.max:
+                self.max[tk] = np.zeros(self.n_max + 1)
+                self.hist[tk] = np.zeros((self.n_max + 1, self.HIST_N + 1), np.int64)
+            for n, v in d.items():
+                self.max[tk][n] = max(self.max[tk][n], float(v.max()))
+                self.hist[tk][n] += np.bincount(np.minimum((v / self.HIST_U).astype(np.int64), self.HIST_N),
+                                                minlength=self.HIST_N + 1)
+
+    def growth(self, q: float = 1.0) -> dict[str, list[float]]:
+        """q = 1.0: the maximum; else the upper edge of the histogram bin holding the q-quantile (capped by the
+        maximum)."""
+        out = {}
+        for tk, mx in self.max.items():
+            g = [0.0]
+            for n in range(0, self.n_max + 1):
+                h = self.hist[tk][n]
+                if q >= 1.0 or not h.sum():
+                    v = float(mx[n])
+                else:
+                    k = int(np.searchsorted(np.cumsum(h), q * h.sum()))
+                    v = min(float(mx[n]), (k + 1) * self.HIST_U)
+                g.append(max(g[-1], v))
+            out[tk] = [math.ceil(x * 1e4) / 1e4 for x in g[1:]]  # rounded up: never below the calibration
+        return out
+
+    def samples(self) -> dict[str, list[int]]:
+        return {tk: [int(x) for x in h.sum(axis=1)] for tk, h in self.hist.items()}
+
+
+def raw_sources(cache: dict) -> dict[int, list[str]]:
+    """Contact frame -> the sources the oracle's events name (a "damage" event on its frame, a "damage_blocked"
+    stretch on each of its frames), as reported (the contact rows' src carries the gauntlet builder's pick)."""
+    out: dict[int, list[str]] = defaultdict(list)
+    for f, k, d in cache["events"]:
+        if k == "damage":
+            out[int(f)].append(str(d.get("source")))
+        elif k == "damage_blocked" and isinstance(d.get("first_f"), int) and isinstance(d.get("last_f"), int):
+            for g in range(d["first_f"], d["last_f"] + 1):
+                out[g].append(str(d.get("source")))
+    return out
+
+
+def names_enemy(src, tk: str) -> bool:
+    """Whether a contact's source path names an enemy of type tk by its GameObject ("Song Administrator (1)/Colliders/
+    Collider Fly", "Wave 12/Song Reed"), not only a collider child ("Colliders/Collider Fly")."""
+    from ssbot.train.gauntlet import type_key
+    return any(type_key(p.replace("(Clone)", "").strip()) == tk for p in str(src or "").split("/") if p)
 
 
 def _names(tk: str) -> tuple[str, ...]:
