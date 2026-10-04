@@ -169,6 +169,7 @@ class PlanResult:
     vetoes: dict = field(default_factory=dict)
     hits: float = 0.0
     kill: "KillPlan | None" = None          # the chosen plan may land a killing blow (its own or one in flight)
+    path_hit: np.ndarray | None = None      # the chosen candidate's box per frame where its predicted hits land
     idle_clear: int | None = None           # frames after the decision frame the no-input path stays out of the
     #                                         support (the pause machine's keys; supervisor QS), None: no such candidate
 
@@ -414,6 +415,10 @@ class Planner:
         may_kill, _k_lo, k_hi, in_flight = kill_frames(latched, roll.flags, roll.mode, P, ctx)
         cert = kill_certified(S, k_hi, T1, ctx, params.frame_time, k_lo=_k_lo, vel_y=roll.vel[:, :, 1],
                               latched=latched)
+        if cert.any() and roll_j is not roll and getattr(roll_j, "vel", None) is not None:
+            # the hit branch too (a killing down spike's bounce, a slash's recoil): no released rise in either
+            cert &= kill_certified(S, k_hi, T1, ctx, params.frame_time, k_lo=_k_lo, vel_y=roll_j.vel[:, :, 1],
+                                   latched=latched)
         U = unpausable(may_kill | in_flight, ctx, cert)
         veto_k = U & may_kill
         if veto_k.any():
@@ -497,6 +502,8 @@ class Planner:
             res = PlanResult(int(sel_cmd[0]), i, name, int(S[i]), forced, float(Pc[i]), float(J[i]), bool(V[i]),
                              bool(hz[i]), bool(U[i]), N, int(ok.sum()), int(safe.sum()), sel_cmd,
                              roll.box[i].copy(), roll.bound[i].copy(), hits=float(hits[i]))
+            if roll_j is not roll:
+                res.path_hit = roll_j.box[i].copy()      # the branch where the predicted hits land
             if may_kill[i] or in_flight[i]:
                 res.kill = KillPlan(own=bool(may_kill[i]), certified=bool(cert[i]), i3=i3_kill_allowed(ctx),
                                     k_lo=int(_k_lo[i]), k_hi=int(k_hi[i]),
@@ -586,7 +593,7 @@ class Planner:
         win = WINDOWS[self.cfg.attack_model]
         N, T = latched.shape
         ev = np.zeros((N, T), np.int64)
-        cur = _View(roll.box, roll.flags, roll.mode, roll.bound, roll.flags_all)
+        cur = _View(roll.box, roll.flags, roll.mode, roll.bound, roll.flags_all, roll.vel)
         after = np.full(N, -1, np.int64)
         rows_all = np.zeros(N, bool)
         pogo_tgt = np.full(N, -1, np.int64)      # the target of a row's first predicted bounce (0: the boss)
@@ -634,9 +641,10 @@ class Planner:
             rh = kin.rollout(start, latched[sub], self.params, self.terrain, events=ev[sub],
                              variants=self.cfg.variants, threads=self.cfg.threads)
             box, flags, mode = cur.box.copy(), cur.flags.copy(), cur.mode.copy()
-            bound, fall = cur.bound.copy(), cur.flags_all.copy()
+            bound, fall, vel = cur.bound.copy(), cur.flags_all.copy(), cur.vel.copy()
             box[sub], flags[sub], mode[sub], bound[sub], fall[sub] = rh.box, rh.flags, rh.mode, rh.bound, rh.flags_all
-            cur = _View(box, flags, mode, bound, fall)
+            vel[sub] = rh.vel
+            cur = _View(box, flags, mode, bound, fall, vel)
         self._fx_ev = ev
         self.side_bell_rows = int((side_tgt > 0).sum())
         sub = np.flatnonzero(rows_all)
@@ -1345,8 +1353,9 @@ class _Target:
 class _View:
     """The parts of a Rollout the scoring reads, for a rollout patched with hit branches."""
 
-    def __init__(self, box, flags, mode, bound, flags_all):
+    def __init__(self, box, flags, mode, bound, flags_all, vel=None):
         self.box, self.flags, self.mode, self.bound, self.flags_all = box, flags, mode, bound, flags_all
+        self.vel = vel          # [N, T1, 2] nominal lane (the killing blow's released-rise check reads both branches)
 
 
 @numba.njit(cache=True, parallel=True)

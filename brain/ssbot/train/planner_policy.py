@@ -107,6 +107,10 @@ def commit_frame(tg_view: float, f: int, fo: int, rate: float, tg_plan: float, f
     return int(round((tg_view + (f + 2 - fo) * rate - tg_plan) / frame_time))
 
 
+def _box_at(path, k: int) -> list | None:
+    return None if path is None or not 0 <= k < len(path) else [round(float(v), 3) for v in path[k]]
+
+
 class TerrainTap:
     """The latest TERRAIN message per scene (sent once a room has finished entering)."""
 
@@ -602,7 +606,7 @@ class PlannerPolicy:
             # the chosen plan's blow is certified only below I3: keep it for the slow motion (module docstring, 7)
             self.commit = {"fo": fo, "f": f, "tg": ws.stamp.t_game_s, "P": kp.P, "cmd": np.array(res.cmd, np.int64),
                            "end_k": kp.k_hi + kp.window, "k_hi": kp.k_hi, "window": kp.window, "own": kp.own,
-                           "plan": res.name, "path": res.path, "killed": None}
+                           "plan": res.name, "path": res.path, "path_hit": res.path_hit, "killed": None}
         else:
             self.commit = None
         self.sent[f + 2] = int(mask)
@@ -674,6 +678,7 @@ class PlannerPolicy:
         self.tick_ms.append((time.perf_counter() - t0) * 1e3)
         self.counts["KILL_COMMIT"] += 1
         hero_box = (raw.get("hero") or {}).get("box")
+        kn = commit_frame(ws.stamp.t_game_s, fo - 2, fo, rate, c["tg"], ft)      # the view's own frame
         rec = {"ep": self.episode, "f": f, "fo": fo, "t": round(ws.stamp.t_game_s, 4),
                "hero": [round(v, 3) for v in ws.hero.pos.v], "hp": ws.res.hp.v, "silk": ws.res.silk.v,
                "boss_state": self.fc.tracker.state, "mode": "KILL_COMMIT", "plan": c["plan"], "S": 0, "forced": False,
@@ -684,10 +689,8 @@ class PlannerPolicy:
                           "planned_box": None if c["path"] is None or not 0 <= k < len(c["path"])
                           else [round(float(v), 3) for v in c["path"][k]],
                           # the plan's box at this WorldState's own game time (the frame "box" is from)
-                          "k_now": commit_frame(ws.stamp.t_game_s, fo - 2, fo, rate, c["tg"], ft),
-                          "planned_now": None if c["path"] is None or not 0 <= (kn := commit_frame(
-                              ws.stamp.t_game_s, fo - 2, fo, rate, c["tg"], ft)) < len(c["path"])
-                          else [round(float(v), 3) for v in c["path"][kn]],
+                          "k_now": kn,
+                          "planned_now": _box_at(c["path"], kn), "planned_now_hit": _box_at(c.get("path_hit"), kn),
                           "box": None if not hero_box else [round(float(v), 3) for v in hero_box]}}
         self._emit(rec, True)            # every commitment tick is kept (the path through the slow motion)
         return mask
