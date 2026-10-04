@@ -1,0 +1,333 @@
+{
+ "product": "kill_freeze",
+ "sources": {
+  "fights": [
+   "20261002_223640_Forum_A_data/i2/ep0",
+   "20261002_223640_Forum_A_data/i2/ep1",
+   "20261002_230325_Forum_A_data/i2/ep0",
+   "20261002_231917_Forum_A_data/i2/ep0",
+   "20261002_231917_Forum_A_data/i2/ep1",
+   "20261002_231917_Forum_A_data/i2/ep2",
+   "20261002_231917_Forum_A_data/i2/ep3",
+   "20261002_231917_Forum_A_data/i2/ep4",
+   "20261002_231917_Forum_A_data/i2/ep5",
+   "20261002_231917_Forum_A_data/i2/ep6",
+   "20261002_231917_Forum_A_data/i2/ep7",
+   "20261002_231917_Forum_A_data/i2/ep8",
+   "20261002_231917_Forum_A_data/i2/ep9",
+   "20261003_014254_Forum_A_data/i2/ep0",
+   "20261003_014254_Forum_A_data/i2/ep1",
+   "20261003_014254_Forum_A_data/i2/ep10",
+   "20261003_014254_Forum_A_data/i2/ep11",
+   "20261003_014254_Forum_A_data/i2/ep12",
+   "20261003_014254_Forum_A_data/i2/ep13",
+   "20261003_014254_Forum_A_data/i2/ep14",
+   "20261003_014254_Forum_A_data/i2/ep15",
+   "20261003_014254_Forum_A_data/i2/ep16",
+   "20261003_014254_Forum_A_data/i2/ep17",
+   "20261003_014254_Forum_A_data/i2/ep18",
+   "20261003_014254_Forum_A_data/i2/ep19",
+   "20261003_014254_Forum_A_data/i2/ep2",
+   "20261003_014254_Forum_A_data/i2/ep20",
+   "20261003_014254_Forum_A_data/i2/ep21",
+   "20261003_014254_Forum_A_data/i2/ep22",
+   "20261003_014254_Forum_A_data/i2/ep23",
+   "20261003_014254_Forum_A_data/i2/ep24",
+   "20261003_014254_Forum_A_data/i2/ep3",
+   "20261003_014254_Forum_A_data/i2/ep4",
+   "20261003_014254_Forum_A_data/i2/ep5",
+   "20261003_014254_Forum_A_data/i2/ep6",
+   "20261003_014254_Forum_A_data/i2/ep7",
+   "20261003_014254_Forum_A_data/i2/ep8",
+   "20261003_014254_Forum_A_data/i2/ep9",
+   "20261003_030413_Forum_A_data/i3/ep0",
+   "20261003_030413_Forum_A_data/i3/ep1",
+   "20261003_030413_Forum_A_data/i3/ep10",
+   "20261003_030413_Forum_A_data/i3/ep11",
+   "20261003_030413_Forum_A_data/i3/ep12",
+   "20261003_030413_Forum_A_data/i3/ep13",
+   "20261003_030413_Forum_A_data/i3/ep14",
+   "20261003_030413_Forum_A_data/i3/ep15",
+   "20261003_030413_Forum_A_data/i3/ep16",
+   "20261003_030413_Forum_A_data/i3/ep17",
+   "20261003_030413_Forum_A_data/i3/ep18",
+   "20261003_030413_Forum_A_data/i3/ep2",
+   "20261003_030413_Forum_A_data/i3/ep3",
+   "20261003_030413_Forum_A_data/i3/ep4",
+   "20261003_030413_Forum_A_data/i3/ep5",
+   "20261003_030413_Forum_A_data/i3/ep6",
+   "20261003_030413_Forum_A_data/i3/ep7",
+   "20261003_030413_Forum_A_data/i3/ep8",
+   "20261003_030413_Forum_A_data/i3/ep9",
+   "20261003_074533_Forum_A_data/i2/ep0",
+   "20261003_074533_Forum_A_data/i2/ep1",
+   "20261003_074533_Forum_A_data/i2/ep10",
+   "20261003_074533_Forum_A_data/i2/ep11",
+   "20261003_074533_Forum_A_data/i2/ep12",
+   "20261003_074533_Forum_A_data/i2/ep13",
+   "20261003_074533_Forum_A_data/i2/ep14",
+   "20261003_074533_Forum_A_data/i2/ep15",
+   "20261003_074533_Forum_A_data/i2/ep16",
+   "20261003_074533_Forum_A_data/i2/ep17",
+   "20261003_074533_Forum_A_data/i2/ep18",
+   "20261003_074533_Forum_A_data/i2/ep19",
+   "20261003_074533_Forum_A_data/i2/ep2",
+   "20261003_074533_Forum_A_data/i2/ep20",
+   "20261003_074533_Forum_A_data/i2/ep21",
+   "20261003_074533_Forum_A_data/i2/ep22",
+   "20261003_074533_Forum_A_data/i2/ep23",
+   "20261003_074533_Forum_A_data/i2/ep24",
+   "20261003_074533_Forum_A_data/i2/ep3",
+   "20261003_074533_Forum_A_data/i2/ep4",
+   "20261003_074533_Forum_A_data/i2/ep5",
+   "20261003_074533_Forum_A_data/i2/ep6",
+   "20261003_074533_Forum_A_data/i2/ep7",
+   "20261003_074533_Forum_A_data/i2/ep8",
+   "20261003_074533_Forum_A_data/i2/ep9",
+   "20261003_074719_Forum_A_data/i3/ep0",
+   "20261003_074719_Forum_A_data/i3/ep1",
+   "20261003_074719_Forum_A_data/i3/ep10",
+   "20261003_074719_Forum_A_data/i3/ep11",
+   "20261003_074719_Forum_A_data/i3/ep12",
+   "20261003_074719_Forum_A_data/i3/ep13",
+   "20261003_074719_Forum_A_data/i3/ep14",
+   "20261003_074719_Forum_A_data/i3/ep15",
+   "20261003_074719_Forum_A_data/i3/ep16",
+   "20261003_074719_Forum_A_data/i3/ep17",
+   "20261003_074719_Forum_A_data/i3/ep18",
+   "20261003_074719_Forum_A_data/i3/ep19",
+   "20261003_074719_Forum_A_data/i3/ep2",
+   "20261003_074719_Forum_A_data/i3/ep20",
+   "20261003_074719_Forum_A_data/i3/ep21",
+   "20261003_074719_Forum_A_data/i3/ep22",
+   "20261003_074719_Forum_A_data/i3/ep23",
+   "20261003_074719_Forum_A_data/i3/ep24",
+   "20261003_074719_Forum_A_data/i3/ep3",
+   "20261003_074719_Forum_A_data/i3/ep4",
+   "20261003_074719_Forum_A_data/i3/ep5",
+   "20261003_074719_Forum_A_data/i3/ep6",
+   "20261003_074719_Forum_A_data/i3/ep7",
+   "20261003_074719_Forum_A_data/i3/ep8",
+   "20261003_074719_Forum_A_data/i3/ep9"
+  ],
+  "cache": "C:\\ssbot\\data\\m2_forum_r0\\cache",
+  "code": {
+   "sha": null,
+   "branch": null,
+   "dirty": null
+  },
+  "tool": "python -m ssbot.tools.forum_products --cache C:\\ssbot\\data\\m2_forum_r0\\cache"
+ },
+ "by_type": {
+  "Pilgrim 03 Song": {
+   "direct:HeroController.StartRecoil down 0.0 wait 0.1 up 0.10000000149011612 speed 0.0": 3,
+   "NailClashEffect down 0.009999999776482582 wait 0.25 up 0.10000000149011612 speed 0.0": 2
+  },
+  "Song Administrator": {
+   "NailClashEffect down 0.009999999776482582 wait 0.25 up 0.10000000149011612 speed 0.0": 36,
+   "direct:HeroController.StartRecoil down 0.0 wait 0.1 up 0.10000000149011612 speed 0.0": 7
+  },
+  "Song Automaton Tiny": {
+   "direct:HeroController.StartRecoil down 0.0 wait 0.1 up 0.10000000149011612 speed 0.0": 35,
+   "NailClashEffect down 0.009999999776482582 wait 0.25 up 0.10000000149011612 speed 0.0": 3
+  },
+  "Song Handmaiden": {
+   "NailClashEffect down 0.009999999776482582 wait 0.25 up 0.10000000149011612 speed 0.0": 9,
+   "direct:HeroController.StartRecoil down 0.0 wait 0.1 up 0.10000000149011612 speed 0.0": 4
+  },
+  "Song Heavy Sentry": {
+   "BigEnemyDeathSlow down 0.03999999910593033 wait 0.06 up 0.03999999910593033 speed 0.0": 323,
+   "EnemyBattleEndSlow down 0.10000000149011612 wait 1.0 up 0.75 speed 0.25": 108,
+   "direct:HeroController.StartRecoil down 0.0 wait 0.1 up 0.10000000149011612 speed 0.0": 7,
+   "EnemyDeath down 0.03999999910593033 wait 0.024 up 0.03999999910593033 speed 0.0": 6
+  },
+  "Song Pilgrim 01": {
+   "NailClashEffect down 0.009999999776482582 wait 0.25 up 0.10000000149011612 speed 0.0": 14
+  },
+  "Song Pilgrim 03": {
+   "NailClashEffect down 0.009999999776482582 wait 0.25 up 0.10000000149011612 speed 0.0": 10,
+   "direct:HeroController.StartRecoil down 0.0 wait 0.1 up 0.10000000149011612 speed 0.0": 9,
+   "BindBreak down 0.009999999776482582 wait 0.4 up 0.10000000149011612 speed 0.0": 1
+  },
+  "Song Pilgrim Maestro": {
+   "direct:HeroController.StartRecoil down 0.0 wait 0.1 up 0.10000000149011612 speed 0.0": 3
+  },
+  "Song Reed": {
+   "NailClashEffect down 0.009999999776482582 wait 0.25 up 0.10000000149011612 speed 0.0": 23,
+   "direct:HeroController.StartRecoil down 0.0 wait 0.1 up 0.10000000149011612 speed 0.0": 8,
+   "QuickFreeze down 9.999999747378752e-05 wait 0.02 up 9.999999747378752e-05 speed 9.999999747378752e-05": 1
+  }
+ },
+ "kills_without_freeze": {
+  "Song Pilgrim 03": 409,
+  "Song Pilgrim 01": 93,
+  "Song Handmaiden": 308,
+  "Pilgrim 03 Song": 530,
+  "Song Administrator": 385,
+  "Song Automaton Tiny": 1388,
+  "Song Pilgrim Maestro": 318,
+  "Song Reed": 503
+ },
+ "frames_to_end": {
+  "Pilgrim 03 Song|NailClashEffect": {
+   "n": 2,
+   "min": 24.0,
+   "p5": 24.0,
+   "p50": 24.0,
+   "p95": 24.0,
+   "max": 24.0
+  },
+  "Pilgrim 03 Song|direct:HeroController.StartRecoil": {
+   "n": 3,
+   "min": 15.0,
+   "p5": 15.0,
+   "p50": 15.0,
+   "p95": 15.0,
+   "max": 15.0
+  },
+  "Song Administrator|NailClashEffect": {
+   "n": 36,
+   "min": 23.0,
+   "p5": 24.0,
+   "p50": 24.0,
+   "p95": 24.0,
+   "max": 24.0
+  },
+  "Song Administrator|direct:HeroController.StartRecoil": {
+   "n": 7,
+   "min": 15.0,
+   "p5": 15.0,
+   "p50": 15.0,
+   "p95": 15.0,
+   "max": 15.0
+  },
+  "Song Automaton Tiny|NailClashEffect": {
+   "n": 3,
+   "min": 24.0,
+   "p5": 24.0,
+   "p50": 24.0,
+   "p95": 24.0,
+   "max": 24.0
+  },
+  "Song Automaton Tiny|direct:HeroController.StartRecoil": {
+   "n": 35,
+   "min": 14.0,
+   "p5": 14.0,
+   "p50": 15.0,
+   "p95": 15.0,
+   "max": 15.0
+  },
+  "Song Handmaiden|NailClashEffect": {
+   "n": 9,
+   "min": 24.0,
+   "p5": 24.0,
+   "p50": 24.0,
+   "p95": 24.0,
+   "max": 24.0
+  },
+  "Song Handmaiden|direct:HeroController.StartRecoil": {
+   "n": 4,
+   "min": 14.0,
+   "p5": 14.2,
+   "p50": 15.0,
+   "p95": 15.8,
+   "max": 16.0
+  },
+  "Song Heavy Sentry|BigEnemyDeathSlow": {
+   "n": 323,
+   "min": 9.0,
+   "p5": 10.0,
+   "p50": 10.0,
+   "p95": 10.0,
+   "max": 10.0
+  },
+  "Song Heavy Sentry|EnemyBattleEndSlow": {
+   "n": 95,
+   "min": 112.0,
+   "p5": 113.0,
+   "p50": 114.0,
+   "p95": 114.0,
+   "max": 114.0
+  },
+  "Song Heavy Sentry|EnemyDeath": {
+   "n": 6,
+   "min": 8.0,
+   "p5": 8.0,
+   "p50": 8.0,
+   "p95": 8.0,
+   "max": 8.0
+  },
+  "Song Heavy Sentry|direct:HeroController.StartRecoil": {
+   "n": 7,
+   "min": 15.0,
+   "p5": 15.0,
+   "p50": 15.0,
+   "p95": 15.0,
+   "max": 15.0
+  },
+  "Song Pilgrim 01|NailClashEffect": {
+   "n": 14,
+   "min": 23.0,
+   "p5": 23.0,
+   "p50": 24.0,
+   "p95": 24.0,
+   "max": 24.0
+  },
+  "Song Pilgrim 03|BindBreak": {
+   "n": 1,
+   "min": 34.0,
+   "p5": 34.0,
+   "p50": 34.0,
+   "p95": 34.0,
+   "max": 34.0
+  },
+  "Song Pilgrim 03|NailClashEffect": {
+   "n": 10,
+   "min": 23.0,
+   "p5": 23.0,
+   "p50": 24.0,
+   "p95": 24.0,
+   "max": 24.0
+  },
+  "Song Pilgrim 03|direct:HeroController.StartRecoil": {
+   "n": 9,
+   "min": 15.0,
+   "p5": 15.0,
+   "p50": 15.0,
+   "p95": 15.6,
+   "max": 16.0
+  },
+  "Song Pilgrim Maestro|direct:HeroController.StartRecoil": {
+   "n": 3,
+   "min": 15.0,
+   "p5": 15.0,
+   "p50": 15.0,
+   "p95": 15.0,
+   "max": 15.0
+  },
+  "Song Reed|NailClashEffect": {
+   "n": 23,
+   "min": 24.0,
+   "p5": 24.0,
+   "p50": 24.0,
+   "p95": 24.0,
+   "max": 24.0
+  },
+  "Song Reed|QuickFreeze": {
+   "n": 1,
+   "min": 4.0,
+   "p5": 4.0,
+   "p50": 4.0,
+   "p95": 4.0,
+   "max": 4.0
+  },
+  "Song Reed|direct:HeroController.StartRecoil": {
+   "n": 8,
+   "min": 15.0,
+   "p5": 15.0,
+   "p50": 15.0,
+   "p95": 15.0,
+   "max": 15.0
+  }
+ }
+}

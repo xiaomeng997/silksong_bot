@@ -260,7 +260,24 @@ RECALL_PLACEHOLDER
 
 ### Next
 
-NEXT_PLACEHOLDER
+1. R2 (MultiForecast) must keep what the recall needed beyond per-state templates + per-family margins: thrown
+   hazards by self template (armed: from arming; in the export but not armed: may arm where it is), a nail-hit bell's
+   short-lag tube, the family-wide union for rare branches (Reed "Multihit Clashed"), entry families' world-fixed
+   union, a current-collider tube (last exported box + type top speed) for the first frames and for enemies outside
+   any attack (killed enemies leave the export on the kill frame; waiting wave-12 bodies and parked Tiny are live).
+2. Builder attribution: the source path's "Wave N/..." parent tells same-named enemies apart (waiting wave-12 "Song
+   Reed" / "Song Pilgrim Maestro" vs waves 0 / 6); today 22-49 contacts per lag need the same-name rule.
+3. Margins: the q=1.0 production margins (`support_margins.json`) are 3.0 u (search cap) for MI_IDLE, MI_PARRY,
+   AT_FIRE, AT_IDLE and three hazards, and widen 12 families' support x2-4.3; compare the q=0.999 run (see the facts)
+   before the planner takes them; outliers come from a handful of contacts per family.
+4. R1 data: multi-hit chains with LethalBlock off and high HP (the measured maxima, whip 3 / Reed counter 2 /
+   Minister slash 3-5, are lower bounds); dash-stab reach (the 7.0 u estimate vs the Clawmaiden's median 8.0 u);
+   Envoy ambush (107 instances, 22 h at the data rate), HopSlash never seen.
+5. Rebuild with the two open recordings (074533 i2_001, 074719 i3_001: 13-14 episodes each) once they close: 6.6 h
+   build, then forum_extract (~30 min) and the recall (~45 min per setting).
+6. forum_simul's forecast check (one fight, in-sample, 0.8 s horizon): the hero stood inside the support on 76 % of
+   frames already at +0 s - the idle families' templates anchored at the idle start are wide; R2 should re-anchor
+   idle bodies at the current position (body hull + speed) instead.
 
 ## Chain F - Forum setup, gauntlet tables, data policy (branch worktree-wf_946a7803-63c-2)
 

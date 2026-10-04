@@ -1,0 +1,34 @@
+{
+ "encounter": "Forum",
+ "fight": "20261003_074719_Forum_A_data/i3/ep0",
+ "ticks": 2950,
+ "candidates": 400,
+ "steps": 36,
+ "track_ms": {
+  "p50": 0.101,
+  "p99": 0.349,
+  "max": 1.716
+ },
+ "placements_ms": {
+  "p50": 20.264,
+  "p99": 422.448,
+  "max": 459.299
+ },
+ "query_ms": {
+  "p50": 133.481,
+  "p99": 199.228,
+  "max": 613.515
+ },
+ "tick_ms": {
+  "p50": 154.245,
+  "p99": 573.772,
+  "max": 636.672
+ },
+ "placements": {
+  "p50": 28506.0,
+  "p99": 38391.12,
+  "max": 42621.0
+ },
+ "all_candidates_meet_support_share": 1.0,
+ "threads": 4
+}

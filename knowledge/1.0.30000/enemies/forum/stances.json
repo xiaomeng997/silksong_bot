@@ -1,0 +1,291 @@
+{
+ "product": "stances",
+ "sources": {
+  "fights": [
+   "20261002_223640_Forum_A_data/i2/ep0",
+   "20261002_223640_Forum_A_data/i2/ep1",
+   "20261002_230325_Forum_A_data/i2/ep0",
+   "20261002_231917_Forum_A_data/i2/ep0",
+   "20261002_231917_Forum_A_data/i2/ep1",
+   "20261002_231917_Forum_A_data/i2/ep2",
+   "20261002_231917_Forum_A_data/i2/ep3",
+   "20261002_231917_Forum_A_data/i2/ep4",
+   "20261002_231917_Forum_A_data/i2/ep5",
+   "20261002_231917_Forum_A_data/i2/ep6",
+   "20261002_231917_Forum_A_data/i2/ep7",
+   "20261002_231917_Forum_A_data/i2/ep8",
+   "20261002_231917_Forum_A_data/i2/ep9",
+   "20261003_014254_Forum_A_data/i2/ep0",
+   "20261003_014254_Forum_A_data/i2/ep1",
+   "20261003_014254_Forum_A_data/i2/ep10",
+   "20261003_014254_Forum_A_data/i2/ep11",
+   "20261003_014254_Forum_A_data/i2/ep12",
+   "20261003_014254_Forum_A_data/i2/ep13",
+   "20261003_014254_Forum_A_data/i2/ep14",
+   "20261003_014254_Forum_A_data/i2/ep15",
+   "20261003_014254_Forum_A_data/i2/ep16",
+   "20261003_014254_Forum_A_data/i2/ep17",
+   "20261003_014254_Forum_A_data/i2/ep18",
+   "20261003_014254_Forum_A_data/i2/ep19",
+   "20261003_014254_Forum_A_data/i2/ep2",
+   "20261003_014254_Forum_A_data/i2/ep20",
+   "20261003_014254_Forum_A_data/i2/ep21",
+   "20261003_014254_Forum_A_data/i2/ep22",
+   "20261003_014254_Forum_A_data/i2/ep23",
+   "20261003_014254_Forum_A_data/i2/ep24",
+   "20261003_014254_Forum_A_data/i2/ep3",
+   "20261003_014254_Forum_A_data/i2/ep4",
+   "20261003_014254_Forum_A_data/i2/ep5",
+   "20261003_014254_Forum_A_data/i2/ep6",
+   "20261003_014254_Forum_A_data/i2/ep7",
+   "20261003_014254_Forum_A_data/i2/ep8",
+   "20261003_014254_Forum_A_data/i2/ep9",
+   "20261003_030413_Forum_A_data/i3/ep0",
+   "20261003_030413_Forum_A_data/i3/ep1",
+   "20261003_030413_Forum_A_data/i3/ep10",
+   "20261003_030413_Forum_A_data/i3/ep11",
+   "20261003_030413_Forum_A_data/i3/ep12",
+   "20261003_030413_Forum_A_data/i3/ep13",
+   "20261003_030413_Forum_A_data/i3/ep14",
+   "20261003_030413_Forum_A_data/i3/ep15",
+   "20261003_030413_Forum_A_data/i3/ep16",
+   "20261003_030413_Forum_A_data/i3/ep17",
+   "20261003_030413_Forum_A_data/i3/ep18",
+   "20261003_030413_Forum_A_data/i3/ep2",
+   "20261003_030413_Forum_A_data/i3/ep3",
+   "20261003_030413_Forum_A_data/i3/ep4",
+   "20261003_030413_Forum_A_data/i3/ep5",
+   "20261003_030413_Forum_A_data/i3/ep6",
+   "20261003_030413_Forum_A_data/i3/ep7",
+   "20261003_030413_Forum_A_data/i3/ep8",
+   "20261003_030413_Forum_A_data/i3/ep9",
+   "20261003_074533_Forum_A_data/i2/ep0",
+   "20261003_074533_Forum_A_data/i2/ep1",
+   "20261003_074533_Forum_A_data/i2/ep10",
+   "20261003_074533_Forum_A_data/i2/ep11",
+   "20261003_074533_Forum_A_data/i2/ep12",
+   "20261003_074533_Forum_A_data/i2/ep13",
+   "20261003_074533_Forum_A_data/i2/ep14",
+   "20261003_074533_Forum_A_data/i2/ep15",
+   "20261003_074533_Forum_A_data/i2/ep16",
+   "20261003_074533_Forum_A_data/i2/ep17",
+   "20261003_074533_Forum_A_data/i2/ep18",
+   "20261003_074533_Forum_A_data/i2/ep19",
+   "20261003_074533_Forum_A_data/i2/ep2",
+   "20261003_074533_Forum_A_data/i2/ep20",
+   "20261003_074533_Forum_A_data/i2/ep21",
+   "20261003_074533_Forum_A_data/i2/ep22",
+   "20261003_074533_Forum_A_data/i2/ep23",
+   "20261003_074533_Forum_A_data/i2/ep24",
+   "20261003_074533_Forum_A_data/i2/ep3",
+   "20261003_074533_Forum_A_data/i2/ep4",
+   "20261003_074533_Forum_A_data/i2/ep5",
+   "20261003_074533_Forum_A_data/i2/ep6",
+   "20261003_074533_Forum_A_data/i2/ep7",
+   "20261003_074533_Forum_A_data/i2/ep8",
+   "20261003_074533_Forum_A_data/i2/ep9",
+   "20261003_074719_Forum_A_data/i3/ep0",
+   "20261003_074719_Forum_A_data/i3/ep1",
+   "20261003_074719_Forum_A_data/i3/ep10",
+   "20261003_074719_Forum_A_data/i3/ep11",
+   "20261003_074719_Forum_A_data/i3/ep12",
+   "20261003_074719_Forum_A_data/i3/ep13",
+   "20261003_074719_Forum_A_data/i3/ep14",
+   "20261003_074719_Forum_A_data/i3/ep15",
+   "20261003_074719_Forum_A_data/i3/ep16",
+   "20261003_074719_Forum_A_data/i3/ep17",
+   "20261003_074719_Forum_A_data/i3/ep18",
+   "20261003_074719_Forum_A_data/i3/ep19",
+   "20261003_074719_Forum_A_data/i3/ep2",
+   "20261003_074719_Forum_A_data/i3/ep20",
+   "20261003_074719_Forum_A_data/i3/ep21",
+   "20261003_074719_Forum_A_data/i3/ep22",
+   "20261003_074719_Forum_A_data/i3/ep23",
+   "20261003_074719_Forum_A_data/i3/ep24",
+   "20261003_074719_Forum_A_data/i3/ep3",
+   "20261003_074719_Forum_A_data/i3/ep4",
+   "20261003_074719_Forum_A_data/i3/ep5",
+   "20261003_074719_Forum_A_data/i3/ep6",
+   "20261003_074719_Forum_A_data/i3/ep7",
+   "20261003_074719_Forum_A_data/i3/ep8",
+   "20261003_074719_Forum_A_data/i3/ep9"
+  ],
+  "cache": "C:\\ssbot\\data\\m2_forum_r0\\cache",
+  "code": {
+   "sha": null,
+   "branch": null,
+   "dirty": null
+  },
+  "tool": "python -m ssbot.tools.forum_products --cache C:\\ssbot\\data\\m2_forum_r0\\cache"
+ },
+ "AT_DEFEND": {
+  "type": "Song Automaton Tiny",
+  "instances": 9464,
+  "hit_in_stance": 1666,
+  "counter_after_hit": 0,
+  "unhit_with_attack_colliders": 0,
+  "counter_delay_s": {
+   "n": 0
+  },
+  "counter_active_s": {
+   "n": 0
+  },
+  "counter_colliders": {},
+  "counter_parry_bits": {},
+  "clashable_share": null,
+  "hero_damage_dealt_on_the_stance_hit": {
+   "n": 0
+  },
+  "counter_reach_facing_u": {
+   "x_min": NaN,
+   "x_max": NaN,
+   "y_min": NaN,
+   "y_max": NaN
+  },
+  "state_sequences": {
+   "Defend Ready > Defend Buzz": 9425,
+   "Defend Ready": 39
+  }
+ },
+ "MA_DEFEND": {
+  "type": "Song Pilgrim Maestro",
+  "instances": 3359,
+  "hit_in_stance": 734,
+  "counter_after_hit": 0,
+  "unhit_with_attack_colliders": 0,
+  "counter_delay_s": {
+   "n": 0
+  },
+  "counter_active_s": {
+   "n": 0
+  },
+  "counter_colliders": {},
+  "counter_parry_bits": {},
+  "clashable_share": null,
+  "hero_damage_dealt_on_the_stance_hit": {
+   "n": 0
+  },
+  "counter_reach_facing_u": {
+   "x_min": NaN,
+   "x_max": NaN,
+   "y_min": NaN,
+   "y_max": NaN
+  },
+  "state_sequences": {
+   "Defend Start > Defending > Defend End > Slash Recover F": 3319,
+   "Defend Start > Defending": 36,
+   "Defend Start > Defending > Defend End": 3,
+   "Defend Start": 1
+  }
+ },
+ "MI_PARRY": {
+  "type": "Song Administrator",
+  "instances": 2621,
+  "hit_in_stance": 627,
+  "counter_after_hit": 241,
+  "unhit_with_attack_colliders": 317,
+  "counter_delay_s": {
+   "n": 241,
+   "min": 0.0,
+   "p5": 0.0,
+   "p50": 0.266,
+   "p95": 1.166,
+   "max": 1.532
+  },
+  "counter_active_s": {
+   "n": 241,
+   "min": 0.0,
+   "p5": 0.033,
+   "p50": 0.2,
+   "p95": 0.2,
+   "max": 0.2
+  },
+  "counter_colliders": {
+   "ParrySlash Hit 1": 216,
+   "ParrySlash Hit 2": 222,
+   "ParrySlash Hit 3": 226,
+   "ParrySlash Hit 4": 237
+  },
+  "counter_parry_bits": {
+   "5": 241
+  },
+  "clashable_share": 1.0,
+  "hero_damage_dealt_on_the_stance_hit": {
+   "n": 241,
+   "min": 3.0,
+   "p5": 5.0,
+   "p50": 5.0,
+   "p95": 9.0,
+   "max": 27.0
+  },
+  "counter_reach_facing_u": {
+   "x_min": -12.76,
+   "x_max": 15.91,
+   "y_min": -7.05,
+   "y_max": 9.42
+  },
+  "state_sequences": {
+   "Shove Horizontally? > Parry Stance Antic > Parry Stance > Parry Stance End": 1977,
+   "Shove Horizontally? > Parry Stance Antic > Parry Stance > Parry Block > Parry Slash 1 > Parry Slash 2 > Parry Slash 3 > Parry Slash 4": 591,
+   "Shove Horizontally? > Parry Stance Antic > Parry Stance > Parry Block": 18,
+   "Shove Horizontally? > Parry Stance Antic > Parry Stance": 17,
+   "Shove Horizontally? > Parry Stance Antic": 9,
+   "Shove Horizontally? > Parry Stance Antic > Parry Stance > Parry Block > Parry Slash 1": 7,
+   "Shove Horizontally? > Parry Stance Antic > Parry Stance > Parry Block > Parry Slash 1 > Parry Slash 2 > Parry Slash 3": 2
+  }
+ },
+ "RE_DEFEND": {
+  "type": "Song Reed",
+  "instances": 1899,
+  "hit_in_stance": 511,
+  "counter_after_hit": 175,
+  "unhit_with_attack_colliders": 256,
+  "counter_delay_s": {
+   "n": 175,
+   "min": 0.0,
+   "p5": 0.0,
+   "p50": 0.2,
+   "p95": 1.267,
+   "max": 1.517
+  },
+  "counter_active_s": {
+   "n": 175,
+   "min": 0.0,
+   "p5": 0.0,
+   "p50": 0.283,
+   "p95": 0.749,
+   "max": 0.75
+  },
+  "counter_colliders": {
+   "ParrySlash Hit": 175
+  },
+  "counter_parry_bits": {
+   "5": 175
+  },
+  "clashable_share": 1.0,
+  "hero_damage_dealt_on_the_stance_hit": {
+   "n": 175,
+   "min": 3.0,
+   "p5": 3.0,
+   "p50": 5.0,
+   "p95": 9.0,
+   "max": 27.0
+  },
+  "counter_reach_facing_u": {
+   "x_min": -11.17,
+   "x_max": 11.32,
+   "y_min": -6.82,
+   "y_max": 6.86
+  },
+  "state_sequences": {
+   "Defend Start > Defend > Defend End": 1296,
+   "Defend Start > Defend > Block > Parry Y Aim > Parry Slash > Multihit > Multihit End": 227,
+   "Defend Start > Defend > Block > Parry Y Aim > Parry Slash > Parry Slash End": 225,
+   "Defend Start > Defend > Block > Parry Y Aim > Parry Slash > Multihit Clashed > Parry Slash End": 82,
+   "Defend Start > Defend > Block": 22,
+   "Defend Start > Defend > Block > Parry Y Aim > Parry Slash > Multihit Clashed": 17,
+   "Defend Start": 9,
+   "Defend Start > Defend > Block > Parry Y Aim > Parry Slash": 8
+  }
+ }
+}

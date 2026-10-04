@@ -1,0 +1,569 @@
+{
+ "product": "boundaries",
+ "sources": {
+  "fights": [
+   "20261002_223640_Forum_A_data/i2/ep0",
+   "20261002_223640_Forum_A_data/i2/ep1",
+   "20261002_230325_Forum_A_data/i2/ep0",
+   "20261002_231917_Forum_A_data/i2/ep0",
+   "20261002_231917_Forum_A_data/i2/ep1",
+   "20261002_231917_Forum_A_data/i2/ep2",
+   "20261002_231917_Forum_A_data/i2/ep3",
+   "20261002_231917_Forum_A_data/i2/ep4",
+   "20261002_231917_Forum_A_data/i2/ep5",
+   "20261002_231917_Forum_A_data/i2/ep6",
+   "20261002_231917_Forum_A_data/i2/ep7",
+   "20261002_231917_Forum_A_data/i2/ep8",
+   "20261002_231917_Forum_A_data/i2/ep9",
+   "20261003_014254_Forum_A_data/i2/ep0",
+   "20261003_014254_Forum_A_data/i2/ep1",
+   "20261003_014254_Forum_A_data/i2/ep10",
+   "20261003_014254_Forum_A_data/i2/ep11",
+   "20261003_014254_Forum_A_data/i2/ep12",
+   "20261003_014254_Forum_A_data/i2/ep13",
+   "20261003_014254_Forum_A_data/i2/ep14",
+   "20261003_014254_Forum_A_data/i2/ep15",
+   "20261003_014254_Forum_A_data/i2/ep16",
+   "20261003_014254_Forum_A_data/i2/ep17",
+   "20261003_014254_Forum_A_data/i2/ep18",
+   "20261003_014254_Forum_A_data/i2/ep19",
+   "20261003_014254_Forum_A_data/i2/ep2",
+   "20261003_014254_Forum_A_data/i2/ep20",
+   "20261003_014254_Forum_A_data/i2/ep21",
+   "20261003_014254_Forum_A_data/i2/ep22",
+   "20261003_014254_Forum_A_data/i2/ep23",
+   "20261003_014254_Forum_A_data/i2/ep24",
+   "20261003_014254_Forum_A_data/i2/ep3",
+   "20261003_014254_Forum_A_data/i2/ep4",
+   "20261003_014254_Forum_A_data/i2/ep5",
+   "20261003_014254_Forum_A_data/i2/ep6",
+   "20261003_014254_Forum_A_data/i2/ep7",
+   "20261003_014254_Forum_A_data/i2/ep8",
+   "20261003_014254_Forum_A_data/i2/ep9",
+   "20261003_030413_Forum_A_data/i3/ep0",
+   "20261003_030413_Forum_A_data/i3/ep1",
+   "20261003_030413_Forum_A_data/i3/ep10",
+   "20261003_030413_Forum_A_data/i3/ep11",
+   "20261003_030413_Forum_A_data/i3/ep12",
+   "20261003_030413_Forum_A_data/i3/ep13",
+   "20261003_030413_Forum_A_data/i3/ep14",
+   "20261003_030413_Forum_A_data/i3/ep15",
+   "20261003_030413_Forum_A_data/i3/ep16",
+   "20261003_030413_Forum_A_data/i3/ep17",
+   "20261003_030413_Forum_A_data/i3/ep18",
+   "20261003_030413_Forum_A_data/i3/ep2",
+   "20261003_030413_Forum_A_data/i3/ep3",
+   "20261003_030413_Forum_A_data/i3/ep4",
+   "20261003_030413_Forum_A_data/i3/ep5",
+   "20261003_030413_Forum_A_data/i3/ep6",
+   "20261003_030413_Forum_A_data/i3/ep7",
+   "20261003_030413_Forum_A_data/i3/ep8",
+   "20261003_030413_Forum_A_data/i3/ep9",
+   "20261003_074533_Forum_A_data/i2/ep0",
+   "20261003_074533_Forum_A_data/i2/ep1",
+   "20261003_074533_Forum_A_data/i2/ep10",
+   "20261003_074533_Forum_A_data/i2/ep11",
+   "20261003_074533_Forum_A_data/i2/ep12",
+   "20261003_074533_Forum_A_data/i2/ep13",
+   "20261003_074533_Forum_A_data/i2/ep14",
+   "20261003_074533_Forum_A_data/i2/ep15",
+   "20261003_074533_Forum_A_data/i2/ep16",
+   "20261003_074533_Forum_A_data/i2/ep17",
+   "20261003_074533_Forum_A_data/i2/ep18",
+   "20261003_074533_Forum_A_data/i2/ep19",
+   "20261003_074533_Forum_A_data/i2/ep2",
+   "20261003_074533_Forum_A_data/i2/ep20",
+   "20261003_074533_Forum_A_data/i2/ep21",
+   "20261003_074533_Forum_A_data/i2/ep22",
+   "20261003_074533_Forum_A_data/i2/ep23",
+   "20261003_074533_Forum_A_data/i2/ep24",
+   "20261003_074533_Forum_A_data/i2/ep3",
+   "20261003_074533_Forum_A_data/i2/ep4",
+   "20261003_074533_Forum_A_data/i2/ep5",
+   "20261003_074533_Forum_A_data/i2/ep6",
+   "20261003_074533_Forum_A_data/i2/ep7",
+   "20261003_074533_Forum_A_data/i2/ep8",
+   "20261003_074533_Forum_A_data/i2/ep9",
+   "20261003_074719_Forum_A_data/i3/ep0",
+   "20261003_074719_Forum_A_data/i3/ep1",
+   "20261003_074719_Forum_A_data/i3/ep10",
+   "20261003_074719_Forum_A_data/i3/ep11",
+   "20261003_074719_Forum_A_data/i3/ep12",
+   "20261003_074719_Forum_A_data/i3/ep13",
+   "20261003_074719_Forum_A_data/i3/ep14",
+   "20261003_074719_Forum_A_data/i3/ep15",
+   "20261003_074719_Forum_A_data/i3/ep16",
+   "20261003_074719_Forum_A_data/i3/ep17",
+   "20261003_074719_Forum_A_data/i3/ep18",
+   "20261003_074719_Forum_A_data/i3/ep19",
+   "20261003_074719_Forum_A_data/i3/ep2",
+   "20261003_074719_Forum_A_data/i3/ep20",
+   "20261003_074719_Forum_A_data/i3/ep21",
+   "20261003_074719_Forum_A_data/i3/ep22",
+   "20261003_074719_Forum_A_data/i3/ep23",
+   "20261003_074719_Forum_A_data/i3/ep24",
+   "20261003_074719_Forum_A_data/i3/ep3",
+   "20261003_074719_Forum_A_data/i3/ep4",
+   "20261003_074719_Forum_A_data/i3/ep5",
+   "20261003_074719_Forum_A_data/i3/ep6",
+   "20261003_074719_Forum_A_data/i3/ep7",
+   "20261003_074719_Forum_A_data/i3/ep8",
+   "20261003_074719_Forum_A_data/i3/ep9"
+  ],
+  "cache": "C:\\ssbot\\data\\m2_forum_r0\\cache",
+  "code": {
+   "sha": null,
+   "branch": null,
+   "dirty": null
+  },
+  "tool": "python -m ssbot.tools.forum_products --cache C:\\ssbot\\data\\m2_forum_r0\\cache"
+ },
+ "Pilgrim 03 Song/CB_EVADE": {
+  "chosen": 3418,
+  "hero_dx_u": {
+   "n": 3418,
+   "min": 0.001,
+   "p5": 0.297,
+   "p50": 3.209,
+   "p95": 3.697,
+   "max": 12.698
+  },
+  "boundary_u": 12.7,
+  "p99_u": 5.05,
+  "decisions_within_1u_of_boundary": 5754,
+  "of_them_chosen": 2,
+  "beyond_boundary_within_1u": 1887
+ },
+ "Pilgrim 03 Song/CB_THROW": {
+  "chosen": 7194,
+  "hero_dx_u": {
+   "n": 7194,
+   "min": 0.037,
+   "p5": 2.556,
+   "p50": 7.059,
+   "p95": 12.511,
+   "max": 19.606
+  },
+  "boundary_u": 19.61,
+  "p99_u": 12.85,
+  "decisions_within_1u_of_boundary": 129,
+  "of_them_chosen": 1,
+  "beyond_boundary_within_1u": 53
+ },
+ "Song Administrator/MI_CHARGE": {
+  "chosen": 2625,
+  "hero_dx_u": {
+   "n": 2625,
+   "min": 0.004,
+   "p5": 0.948,
+   "p50": 5.932,
+   "p95": 7.26,
+   "max": 16.825
+  },
+  "boundary_u": 16.82,
+  "p99_u": 7.39,
+  "decisions_within_1u_of_boundary": 194,
+  "of_them_chosen": 1,
+  "beyond_boundary_within_1u": 70
+ },
+ "Song Administrator/MI_EVADE": {
+  "chosen": 978,
+  "hero_dx_u": {
+   "n": 978,
+   "min": 0.003,
+   "p5": 0.261,
+   "p50": 2.427,
+   "p95": 4.819,
+   "max": 5.334
+  },
+  "boundary_u": 5.33,
+  "p99_u": 5.12,
+  "decisions_within_1u_of_boundary": 4720,
+  "of_them_chosen": 130,
+  "beyond_boundary_within_1u": 2486
+ },
+ "Song Administrator/MI_PARRY": {
+  "chosen": 2621,
+  "hero_dx_u": {
+   "n": 2621,
+   "min": 0.019,
+   "p5": 1.021,
+   "p50": 6.11,
+   "p95": 7.275,
+   "max": 11.949
+  },
+  "boundary_u": 11.95,
+  "p99_u": 7.42,
+  "decisions_within_1u_of_boundary": 837,
+  "of_them_chosen": 2,
+  "beyond_boundary_within_1u": 399
+ },
+ "Song Automaton Tiny/AT_DEFEND": {
+  "chosen": 7731,
+  "hero_dx_u": {
+   "n": 7731,
+   "min": 0.0,
+   "p5": 0.85,
+   "p50": 9.359,
+   "p95": 27.043,
+   "max": 33.236
+  },
+  "boundary_u": 33.24,
+  "p99_u": 30.39,
+  "decisions_within_1u_of_boundary": 54,
+  "of_them_chosen": 11,
+  "beyond_boundary_within_1u": 9
+ },
+ "Song Automaton Tiny/AT_FIRE": {
+  "chosen": 8064,
+  "hero_dx_u": {
+   "n": 8064,
+   "min": 0.002,
+   "p5": 0.846,
+   "p50": 8.487,
+   "p95": 25.288,
+   "max": 32.534
+  },
+  "boundary_u": 32.53,
+  "p99_u": 29.41,
+  "decisions_within_1u_of_boundary": 120,
+  "of_them_chosen": 11,
+  "beyond_boundary_within_1u": 29
+ },
+ "Song Automaton Tiny/AT_LEAVE": {
+  "chosen": 453,
+  "hero_dx_u": {
+   "n": 453,
+   "min": 0.024,
+   "p5": 0.354,
+   "p50": 3.447,
+   "p95": 18.406,
+   "max": 29.697
+  },
+  "boundary_u": 29.7,
+  "p99_u": 26.38,
+  "decisions_within_1u_of_boundary": 510,
+  "of_them_chosen": 1,
+  "beyond_boundary_within_1u": 210
+ },
+ "Song Handmaiden/CM_SLASH": {
+  "chosen": 1069,
+  "hero_dx_u": {
+   "n": 1069,
+   "min": 0.011,
+   "p5": 0.406,
+   "p50": 3.036,
+   "p95": 4.224,
+   "max": 4.523
+  },
+  "boundary_u": 4.52,
+  "p99_u": 4.31,
+  "decisions_within_1u_of_boundary": 1133,
+  "of_them_chosen": 427,
+  "beyond_boundary_within_1u": 432
+ },
+ "Song Handmaiden/CM_SPIN": {
+  "chosen": 2766,
+  "hero_dx_u": {
+   "n": 2766,
+   "min": 0.045,
+   "p5": 2.039,
+   "p50": 7.137,
+   "p95": 10.482,
+   "max": 10.923
+  },
+  "boundary_u": 10.92,
+  "p99_u": 10.66,
+  "decisions_within_1u_of_boundary": 822,
+  "of_them_chosen": 389,
+  "beyond_boundary_within_1u": 238
+ },
+ "Song Handmaiden/CM_TELE": {
+  "chosen": 339,
+  "hero_dx_u": {
+   "n": 339,
+   "min": 0.151,
+   "p5": 3.841,
+   "p50": 10.402,
+   "p95": 20.013,
+   "max": 25.345
+  },
+  "boundary_u": 25.35,
+  "p99_u": 23.11,
+  "decisions_within_1u_of_boundary": 2,
+  "of_them_chosen": 1,
+  "beyond_boundary_within_1u": 0
+ },
+ "Song Heavy Sentry/CC_CAST": {
+  "chosen": 3530,
+  "hero_dx_u": {
+   "n": 3530,
+   "min": 0.004,
+   "p5": 2.89,
+   "p50": 8.291,
+   "p95": 14.876,
+   "max": 24.33
+  },
+  "boundary_u": 24.33,
+  "p99_u": 17.5,
+  "decisions_within_1u_of_boundary": 113,
+  "of_them_chosen": 3,
+  "beyond_boundary_within_1u": 38
+ },
+ "Song Heavy Sentry/CC_EVADE": {
+  "chosen": 7914,
+  "hero_dx_u": {
+   "n": 7914,
+   "min": 0.001,
+   "p5": 1.734,
+   "p50": 6.734,
+   "p95": 11.376,
+   "max": 26.853
+  },
+  "boundary_u": 26.85,
+  "p99_u": 13.9,
+  "decisions_within_1u_of_boundary": 102,
+  "of_them_chosen": 1,
+  "beyond_boundary_within_1u": 62
+ },
+ "Song Heavy Sentry/CC_JUMP": {
+  "chosen": 2102,
+  "hero_dx_u": {
+   "n": 2102,
+   "min": 0.066,
+   "p5": 4.451,
+   "p50": 10.982,
+   "p95": 16.317,
+   "max": 29.674
+  },
+  "boundary_u": 29.67,
+  "p99_u": 20.2,
+  "decisions_within_1u_of_boundary": 13,
+  "of_them_chosen": 2,
+  "beyond_boundary_within_1u": 1
+ },
+ "Song Heavy Sentry/CC_JUMP_CAST": {
+  "chosen": 1974,
+  "hero_dx_u": {
+   "n": 1974,
+   "min": 0.006,
+   "p5": 3.833,
+   "p50": 10.879,
+   "p95": 15.885,
+   "max": 27.757
+  },
+  "boundary_u": 27.76,
+  "p99_u": 19.32,
+  "decisions_within_1u_of_boundary": 71,
+  "of_them_chosen": 1,
+  "beyond_boundary_within_1u": 18
+ },
+ "Song Heavy Sentry/CC_SLAM": {
+  "chosen": 3490,
+  "hero_dx_u": {
+   "n": 3490,
+   "min": 0.072,
+   "p5": 2.255,
+   "p50": 6.724,
+   "p95": 8.304,
+   "max": 8.758
+  },
+  "boundary_u": 8.76,
+  "p99_u": 8.46,
+  "decisions_within_1u_of_boundary": 19359,
+  "of_them_chosen": 1131,
+  "beyond_boundary_within_1u": 3528
+ },
+ "Song Pilgrim 01/EN_CHARGE": {
+  "chosen": 380,
+  "hero_dx_u": {
+   "n": 380,
+   "min": 0.722,
+   "p5": 6.747,
+   "p50": 10.584,
+   "p95": 21.598,
+   "max": 25.1
+  },
+  "boundary_u": 25.1,
+  "p99_u": 24.23,
+  "decisions_within_1u_of_boundary": 6,
+  "of_them_chosen": 6,
+  "beyond_boundary_within_1u": 0
+ },
+ "Song Pilgrim 01/EN_SLASH": {
+  "chosen": 692,
+  "hero_dx_u": {
+   "n": 692,
+   "min": 0.02,
+   "p5": 0.359,
+   "p50": 3.176,
+   "p95": 4.83,
+   "max": 5.681
+  },
+  "boundary_u": 5.68,
+  "p99_u": 4.9,
+  "decisions_within_1u_of_boundary": 639,
+  "of_them_chosen": 146,
+  "beyond_boundary_within_1u": 101
+ },
+ "Song Pilgrim 03/CH_JUMP": {
+  "chosen": 914,
+  "hero_dx_u": {
+   "n": 914,
+   "min": 0.095,
+   "p5": 3.982,
+   "p50": 7.838,
+   "p95": 12.035,
+   "max": 13.103
+  },
+  "boundary_u": 13.1,
+  "p99_u": 12.83,
+  "decisions_within_1u_of_boundary": 3998,
+  "of_them_chosen": 45,
+  "beyond_boundary_within_1u": 1652
+ },
+ "Song Pilgrim 03/CH_SLASH": {
+  "chosen": 1377,
+  "hero_dx_u": {
+   "n": 1377,
+   "min": 0.001,
+   "p5": 0.411,
+   "p50": 2.728,
+   "p95": 7.236,
+   "max": 8.051
+  },
+  "boundary_u": 8.05,
+  "p99_u": 7.68,
+  "decisions_within_1u_of_boundary": 11304,
+  "of_them_chosen": 88,
+  "beyond_boundary_within_1u": 5484
+ },
+ "Song Pilgrim 03/CH_WHIP": {
+  "chosen": 1309,
+  "hero_dx_u": {
+   "n": 1309,
+   "min": 0.074,
+   "p5": 4.681,
+   "p50": 8.727,
+   "p95": 12.255,
+   "max": 13.033
+  },
+  "boundary_u": 13.03,
+  "p99_u": 12.84,
+  "decisions_within_1u_of_boundary": 4000,
+  "of_them_chosen": 87,
+  "beyond_boundary_within_1u": 1694
+ },
+ "Song Pilgrim Maestro/MA_DEFEND": {
+  "chosen": 3359,
+  "hero_dx_u": {
+   "n": 3359,
+   "min": 0.008,
+   "p5": 1.174,
+   "p50": 11.198,
+   "p95": 27.558,
+   "max": 29.983
+  },
+  "boundary_u": 29.98,
+  "p99_u": 29.08,
+  "decisions_within_1u_of_boundary": 353,
+  "of_them_chosen": 43,
+  "beyond_boundary_within_1u": 13
+ },
+ "Song Pilgrim Maestro/MA_SLASH": {
+  "chosen": 7979,
+  "hero_dx_u": {
+   "n": 7979,
+   "min": 0.001,
+   "p5": 0.97,
+   "p50": 9.425,
+   "p95": 26.74,
+   "max": 30.012
+  },
+  "boundary_u": 30.01,
+  "p99_u": 28.85,
+  "decisions_within_1u_of_boundary": 326,
+  "of_them_chosen": 60,
+  "beyond_boundary_within_1u": 4
+ },
+ "Song Pilgrim Maestro/MA_SUMMON": {
+  "chosen": 1045,
+  "hero_dx_u": {
+   "n": 1045,
+   "min": 0.017,
+   "p5": 0.808,
+   "p50": 8.793,
+   "p95": 26.29,
+   "max": 29.805
+  },
+  "boundary_u": 29.8,
+  "p99_u": 28.83,
+  "decisions_within_1u_of_boundary": 438,
+  "of_them_chosen": 11,
+  "beyond_boundary_within_1u": 34
+ },
+ "Song Reed/RE_DEFEND": {
+  "chosen": 1899,
+  "hero_dx_u": {
+   "n": 1899,
+   "min": 0.0,
+   "p5": 0.704,
+   "p50": 5.277,
+   "p95": 7.874,
+   "max": 26.2
+  },
+  "boundary_u": 26.2,
+  "p99_u": 8.06,
+  "decisions_within_1u_of_boundary": 93,
+  "of_them_chosen": 1,
+  "beyond_boundary_within_1u": 12
+ },
+ "Song Reed/RE_EVADE": {
+  "chosen": 1716,
+  "hero_dx_u": {
+   "n": 1716,
+   "min": 0.004,
+   "p5": 0.195,
+   "p50": 1.649,
+   "p95": 4.103,
+   "max": 18.3
+  },
+  "boundary_u": 18.3,
+  "p99_u": 4.29,
+  "decisions_within_1u_of_boundary": 173,
+  "of_them_chosen": 1,
+  "beyond_boundary_within_1u": 88
+ },
+ "Song Reed/RE_STAB": {
+  "chosen": 2078,
+  "hero_dx_u": {
+   "n": 2078,
+   "min": 0.006,
+   "p5": 1.229,
+   "p50": 6.399,
+   "p95": 11.942,
+   "max": 23.45
+  },
+  "boundary_u": 23.45,
+  "p99_u": 15.73,
+  "decisions_within_1u_of_boundary": 59,
+  "of_them_chosen": 2,
+  "beyond_boundary_within_1u": 35
+ },
+ "Song Reed/RE_THROW": {
+  "chosen": 1367,
+  "hero_dx_u": {
+   "n": 1367,
+   "min": 0.032,
+   "p5": 1.993,
+   "p50": 7.979,
+   "p95": 16.896,
+   "max": 25.088
+  },
+  "boundary_u": 25.09,
+  "p99_u": 19.88,
+  "decisions_within_1u_of_boundary": 98,
+  "of_them_chosen": 3,
+  "beyond_boundary_within_1u": 72
+ }
+}

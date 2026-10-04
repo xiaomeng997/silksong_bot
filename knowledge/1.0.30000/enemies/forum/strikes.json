@@ -1,0 +1,1718 @@
+{
+ "product": "strikes",
+ "sources": {
+  "fights": [
+   "20261002_223640_Forum_A_data/i2/ep0",
+   "20261002_223640_Forum_A_data/i2/ep1",
+   "20261002_230325_Forum_A_data/i2/ep0",
+   "20261002_231917_Forum_A_data/i2/ep0",
+   "20261002_231917_Forum_A_data/i2/ep1",
+   "20261002_231917_Forum_A_data/i2/ep2",
+   "20261002_231917_Forum_A_data/i2/ep3",
+   "20261002_231917_Forum_A_data/i2/ep4",
+   "20261002_231917_Forum_A_data/i2/ep5",
+   "20261002_231917_Forum_A_data/i2/ep6",
+   "20261002_231917_Forum_A_data/i2/ep7",
+   "20261002_231917_Forum_A_data/i2/ep8",
+   "20261002_231917_Forum_A_data/i2/ep9",
+   "20261003_014254_Forum_A_data/i2/ep0",
+   "20261003_014254_Forum_A_data/i2/ep1",
+   "20261003_014254_Forum_A_data/i2/ep10",
+   "20261003_014254_Forum_A_data/i2/ep11",
+   "20261003_014254_Forum_A_data/i2/ep12",
+   "20261003_014254_Forum_A_data/i2/ep13",
+   "20261003_014254_Forum_A_data/i2/ep14",
+   "20261003_014254_Forum_A_data/i2/ep15",
+   "20261003_014254_Forum_A_data/i2/ep16",
+   "20261003_014254_Forum_A_data/i2/ep17",
+   "20261003_014254_Forum_A_data/i2/ep18",
+   "20261003_014254_Forum_A_data/i2/ep19",
+   "20261003_014254_Forum_A_data/i2/ep2",
+   "20261003_014254_Forum_A_data/i2/ep20",
+   "20261003_014254_Forum_A_data/i2/ep21",
+   "20261003_014254_Forum_A_data/i2/ep22",
+   "20261003_014254_Forum_A_data/i2/ep23",
+   "20261003_014254_Forum_A_data/i2/ep24",
+   "20261003_014254_Forum_A_data/i2/ep3",
+   "20261003_014254_Forum_A_data/i2/ep4",
+   "20261003_014254_Forum_A_data/i2/ep5",
+   "20261003_014254_Forum_A_data/i2/ep6",
+   "20261003_014254_Forum_A_data/i2/ep7",
+   "20261003_014254_Forum_A_data/i2/ep8",
+   "20261003_014254_Forum_A_data/i2/ep9",
+   "20261003_030413_Forum_A_data/i3/ep0",
+   "20261003_030413_Forum_A_data/i3/ep1",
+   "20261003_030413_Forum_A_data/i3/ep10",
+   "20261003_030413_Forum_A_data/i3/ep11",
+   "20261003_030413_Forum_A_data/i3/ep12",
+   "20261003_030413_Forum_A_data/i3/ep13",
+   "20261003_030413_Forum_A_data/i3/ep14",
+   "20261003_030413_Forum_A_data/i3/ep15",
+   "20261003_030413_Forum_A_data/i3/ep16",
+   "20261003_030413_Forum_A_data/i3/ep17",
+   "20261003_030413_Forum_A_data/i3/ep18",
+   "20261003_030413_Forum_A_data/i3/ep2",
+   "20261003_030413_Forum_A_data/i3/ep3",
+   "20261003_030413_Forum_A_data/i3/ep4",
+   "20261003_030413_Forum_A_data/i3/ep5",
+   "20261003_030413_Forum_A_data/i3/ep6",
+   "20261003_030413_Forum_A_data/i3/ep7",
+   "20261003_030413_Forum_A_data/i3/ep8",
+   "20261003_030413_Forum_A_data/i3/ep9",
+   "20261003_074533_Forum_A_data/i2/ep0",
+   "20261003_074533_Forum_A_data/i2/ep1",
+   "20261003_074533_Forum_A_data/i2/ep10",
+   "20261003_074533_Forum_A_data/i2/ep11",
+   "20261003_074533_Forum_A_data/i2/ep12",
+   "20261003_074533_Forum_A_data/i2/ep13",
+   "20261003_074533_Forum_A_data/i2/ep14",
+   "20261003_074533_Forum_A_data/i2/ep15",
+   "20261003_074533_Forum_A_data/i2/ep16",
+   "20261003_074533_Forum_A_data/i2/ep17",
+   "20261003_074533_Forum_A_data/i2/ep18",
+   "20261003_074533_Forum_A_data/i2/ep19",
+   "20261003_074533_Forum_A_data/i2/ep2",
+   "20261003_074533_Forum_A_data/i2/ep20",
+   "20261003_074533_Forum_A_data/i2/ep21",
+   "20261003_074533_Forum_A_data/i2/ep22",
+   "20261003_074533_Forum_A_data/i2/ep23",
+   "20261003_074533_Forum_A_data/i2/ep24",
+   "20261003_074533_Forum_A_data/i2/ep3",
+   "20261003_074533_Forum_A_data/i2/ep4",
+   "20261003_074533_Forum_A_data/i2/ep5",
+   "20261003_074533_Forum_A_data/i2/ep6",
+   "20261003_074533_Forum_A_data/i2/ep7",
+   "20261003_074533_Forum_A_data/i2/ep8",
+   "20261003_074533_Forum_A_data/i2/ep9",
+   "20261003_074719_Forum_A_data/i3/ep0",
+   "20261003_074719_Forum_A_data/i3/ep1",
+   "20261003_074719_Forum_A_data/i3/ep10",
+   "20261003_074719_Forum_A_data/i3/ep11",
+   "20261003_074719_Forum_A_data/i3/ep12",
+   "20261003_074719_Forum_A_data/i3/ep13",
+   "20261003_074719_Forum_A_data/i3/ep14",
+   "20261003_074719_Forum_A_data/i3/ep15",
+   "20261003_074719_Forum_A_data/i3/ep16",
+   "20261003_074719_Forum_A_data/i3/ep17",
+   "20261003_074719_Forum_A_data/i3/ep18",
+   "20261003_074719_Forum_A_data/i3/ep19",
+   "20261003_074719_Forum_A_data/i3/ep2",
+   "20261003_074719_Forum_A_data/i3/ep20",
+   "20261003_074719_Forum_A_data/i3/ep21",
+   "20261003_074719_Forum_A_data/i3/ep22",
+   "20261003_074719_Forum_A_data/i3/ep23",
+   "20261003_074719_Forum_A_data/i3/ep24",
+   "20261003_074719_Forum_A_data/i3/ep3",
+   "20261003_074719_Forum_A_data/i3/ep4",
+   "20261003_074719_Forum_A_data/i3/ep5",
+   "20261003_074719_Forum_A_data/i3/ep6",
+   "20261003_074719_Forum_A_data/i3/ep7",
+   "20261003_074719_Forum_A_data/i3/ep8",
+   "20261003_074719_Forum_A_data/i3/ep9"
+  ],
+  "cache": "C:\\ssbot\\data\\m2_forum_r0\\cache",
+  "code": {
+   "sha": null,
+   "branch": null,
+   "dirty": null
+  },
+  "tool": "python -m ssbot.tools.forum_products --cache C:\\ssbot\\data\\m2_forum_r0\\cache"
+ },
+ "hero": {
+  "attack_s": 0.35,
+  "cooldown_s": 0.5,
+  "recovery_s": 0.3,
+  "side_reach_u": 3.596,
+  "dash_stab_reach_u": 4.163,
+  "dash_u": 2.8,
+  "dash_stab_total_u": 6.963
+ },
+ "strikes": {
+  "Pilgrim 03 Song/CB_EVADE": {
+   "instances_with_attack_colliders": 0,
+   "instances_without": 3418,
+   "commit_to_first_attack_collider_s": {
+    "n": 0
+   },
+   "hero_dx_at_commit_u": {
+    "n": 3418,
+    "min": 0.001,
+    "p5": 0.297,
+    "p50": 3.209,
+    "p95": 3.697,
+    "max": 12.698
+   },
+   "hero_dy_at_commit_u": {
+    "n": 3418,
+    "min": -7.989,
+    "p5": -7.169,
+    "p50": -4.535,
+    "p95": -0.634,
+    "max": 6.922
+   },
+   "reach_facing_frame_u": {
+    "x_min": NaN,
+    "x_max": NaN,
+    "y_min": NaN,
+    "y_max": NaN,
+    "x_max_p99": NaN
+   }
+  },
+  "Pilgrim 03 Song/CB_THROW": {
+   "instances_with_attack_colliders": 8648,
+   "instances_without": 218,
+   "commit_to_first_attack_collider_s": {
+    "n": 8648,
+    "min": 0.0,
+    "p5": 0.658,
+    "p50": 0.666,
+    "p95": 0.683,
+    "max": 0.721
+   },
+   "hero_dx_at_commit_u": {
+    "n": 8866,
+    "min": 0.007,
+    "p5": 2.499,
+    "p50": 6.789,
+    "p95": 12.383,
+    "max": 19.606
+   },
+   "hero_dy_at_commit_u": {
+    "n": 8866,
+    "min": -12.731,
+    "p5": -7.901,
+    "p50": -3.911,
+    "p95": 0.42,
+    "max": 8.868
+   },
+   "reach_facing_frame_u": {
+    "x_min": NaN,
+    "x_max": NaN,
+    "y_min": NaN,
+    "y_max": NaN,
+    "x_max_p99": NaN
+   }
+  },
+  "Song Administrator/MI_CHARGE": {
+   "instances_with_attack_colliders": 2587,
+   "instances_without": 38,
+   "commit_to_first_attack_collider_s": {
+    "n": 2587,
+    "min": 0.483,
+    "p5": 0.5,
+    "p50": 0.516,
+    "p95": 0.517,
+    "max": 0.524
+   },
+   "hero_dx_at_commit_u": {
+    "n": 2625,
+    "min": 0.004,
+    "p5": 0.948,
+    "p50": 5.932,
+    "p95": 7.26,
+    "max": 16.825
+   },
+   "hero_dy_at_commit_u": {
+    "n": 2625,
+    "min": -8.629,
+    "p5": -7.484,
+    "p50": -2.375,
+    "p95": 2.401,
+    "max": 7.347
+   },
+   "reach_facing_frame_u": {
+    "x_min": -7.1,
+    "x_max": 13.11,
+    "y_min": -8.55,
+    "y_max": 12.58,
+    "x_max_p99": 9.3
+   }
+  },
+  "Song Administrator/MI_EVADE": {
+   "instances_with_attack_colliders": 0,
+   "instances_without": 1809,
+   "commit_to_first_attack_collider_s": {
+    "n": 0
+   },
+   "hero_dx_at_commit_u": {
+    "n": 1809,
+    "min": 0.003,
+    "p5": 0.27,
+    "p50": 1.849,
+    "p95": 4.539,
+    "max": 5.334
+   },
+   "hero_dy_at_commit_u": {
+    "n": 1809,
+    "min": -6.44,
+    "p5": -4.938,
+    "p50": -1.683,
+    "p95": 1.924,
+    "max": 4.997
+   },
+   "reach_facing_frame_u": {
+    "x_min": NaN,
+    "x_max": NaN,
+    "y_min": NaN,
+    "y_max": NaN,
+    "x_max_p99": NaN
+   }
+  },
+  "Song Administrator/MI_PARRY": {
+   "instances_with_attack_colliders": 600,
+   "instances_without": 2021,
+   "commit_to_first_attack_collider_s": {
+    "n": 600,
+    "min": 0.708,
+    "p5": 0.749,
+    "p50": 1.099,
+    "p95": 1.515,
+    "max": 1.582
+   },
+   "hero_dx_at_commit_u": {
+    "n": 2621,
+    "min": 0.019,
+    "p5": 1.021,
+    "p50": 6.11,
+    "p95": 7.275,
+    "max": 11.949
+   },
+   "hero_dy_at_commit_u": {
+    "n": 2621,
+    "min": -8.812,
+    "p5": -7.433,
+    "p50": -2.497,
+    "p95": 2.117,
+    "max": 7.492
+   },
+   "reach_facing_frame_u": {
+    "x_min": -12.76,
+    "x_max": 15.91,
+    "y_min": -8.72,
+    "y_max": 9.42,
+    "x_max_p99": 12.15
+   }
+  },
+  "Song Automaton Tiny/AT_DEFEND": {
+   "instances_with_attack_colliders": 0,
+   "instances_without": 9464,
+   "commit_to_first_attack_collider_s": {
+    "n": 0
+   },
+   "hero_dx_at_commit_u": {
+    "n": 9464,
+    "min": 0.0,
+    "p5": 0.704,
+    "p50": 7.81,
+    "p95": 26.417,
+    "max": 33.236
+   },
+   "hero_dy_at_commit_u": {
+    "n": 9464,
+    "min": -14.075,
+    "p5": -11.592,
+    "p50": -7.926,
+    "p95": 0.6,
+    "max": 11.064
+   },
+   "reach_facing_frame_u": {
+    "x_min": NaN,
+    "x_max": NaN,
+    "y_min": NaN,
+    "y_max": NaN,
+    "x_max_p99": NaN
+   }
+  },
+  "Song Automaton Tiny/AT_FIRE": {
+   "instances_with_attack_colliders": 0,
+   "instances_without": 7963,
+   "commit_to_first_attack_collider_s": {
+    "n": 0
+   },
+   "hero_dx_at_commit_u": {
+    "n": 7963,
+    "min": 0.002,
+    "p5": 0.875,
+    "p50": 8.568,
+    "p95": 25.307,
+    "max": 32.534
+   },
+   "hero_dy_at_commit_u": {
+    "n": 7963,
+    "min": -14.39,
+    "p5": -11.752,
+    "p50": -8.445,
+    "p95": -2.516,
+    "max": 7.512
+   },
+   "reach_facing_frame_u": {
+    "x_min": NaN,
+    "x_max": NaN,
+    "y_min": NaN,
+    "y_max": NaN,
+    "x_max_p99": NaN
+   }
+  },
+  "Song Automaton Tiny/AT_LEAVE": {
+   "instances_with_attack_colliders": 0,
+   "instances_without": 18,
+   "commit_to_first_attack_collider_s": {
+    "n": 0
+   },
+   "hero_dx_at_commit_u": {
+    "n": 18,
+    "min": 0.038,
+    "p5": 0.162,
+    "p50": 1.774,
+    "p95": 11.909,
+    "max": 15.532
+   },
+   "hero_dy_at_commit_u": {
+    "n": 18,
+    "min": -4.698,
+    "p5": -4.023,
+    "p50": 0.898,
+    "p95": 6.101,
+    "max": 6.394
+   },
+   "reach_facing_frame_u": {
+    "x_min": NaN,
+    "x_max": NaN,
+    "y_min": NaN,
+    "y_max": NaN,
+    "x_max_p99": NaN
+   }
+  },
+  "Song Handmaiden/CM_SLASH": {
+   "instances_with_attack_colliders": 1657,
+   "instances_without": 578,
+   "commit_to_first_attack_collider_s": {
+    "n": 1657,
+    "min": 0.5,
+    "p5": 0.508,
+    "p50": 0.516,
+    "p95": 1.39,
+    "max": 1.517
+   },
+   "hero_dx_at_commit_u": {
+    "n": 2235,
+    "min": 0.011,
+    "p5": 0.753,
+    "p50": 4.178,
+    "p95": 10.23,
+    "max": 10.923
+   },
+   "hero_dy_at_commit_u": {
+    "n": 2235,
+    "min": -10.29,
+    "p5": -5.879,
+    "p50": -2.325,
+    "p95": 2.111,
+    "max": 6.701
+   },
+   "reach_facing_frame_u": {
+    "x_min": -9.87,
+    "x_max": 13.92,
+    "y_min": -7.94,
+    "y_max": 7.62,
+    "x_max_p99": 10.56
+   }
+  },
+  "Song Handmaiden/CM_SPIN": {
+   "instances_with_attack_colliders": 492,
+   "instances_without": 288,
+   "commit_to_first_attack_collider_s": {
+    "n": 492,
+    "min": 4.817,
+    "p5": 4.867,
+    "p50": 5.195,
+    "p95": 6.467,
+    "max": 9.191
+   },
+   "hero_dx_at_commit_u": {
+    "n": 780,
+    "min": 0.045,
+    "p5": 1.73,
+    "p50": 7.32,
+    "p95": 10.514,
+    "max": 10.745
+   },
+   "hero_dy_at_commit_u": {
+    "n": 780,
+    "min": -9.275,
+    "p5": -6.744,
+    "p50": -3.272,
+    "p95": 1.115,
+    "max": 6.301
+   },
+   "reach_facing_frame_u": {
+    "x_min": NaN,
+    "x_max": NaN,
+    "y_min": NaN,
+    "y_max": NaN,
+    "x_max_p99": NaN
+   }
+  },
+  "Song Handmaiden/CM_TELE": {
+   "instances_with_attack_colliders": 0,
+   "instances_without": 660,
+   "commit_to_first_attack_collider_s": {
+    "n": 0
+   },
+   "hero_dx_at_commit_u": {
+    "n": 660,
+    "min": 0.151,
+    "p5": 4.473,
+    "p50": 10.842,
+    "p95": 19.655,
+    "max": 25.345
+   },
+   "hero_dy_at_commit_u": {
+    "n": 660,
+    "min": -12.114,
+    "p5": -11.099,
+    "p50": -4.851,
+    "p95": -0.028,
+    "max": 3.223
+   },
+   "reach_facing_frame_u": {
+    "x_min": NaN,
+    "x_max": NaN,
+    "y_min": NaN,
+    "y_max": NaN,
+    "x_max_p99": NaN
+   }
+  },
+  "Song Heavy Sentry/CC_CAST": {
+   "instances_with_attack_colliders": 3499,
+   "instances_without": 31,
+   "commit_to_first_attack_collider_s": {
+    "n": 3499,
+    "min": 0.0,
+    "p5": 0.067,
+    "p50": 1.182,
+    "p95": 1.182,
+    "max": 2.448
+   },
+   "hero_dx_at_commit_u": {
+    "n": 3530,
+    "min": 0.004,
+    "p5": 2.89,
+    "p50": 8.291,
+    "p95": 14.876,
+    "max": 24.33
+   },
+   "hero_dy_at_commit_u": {
+    "n": 3530,
+    "min": -2.908,
+    "p5": -2.882,
+    "p50": 3.248,
+    "p95": 6.686,
+    "max": 8.479
+   },
+   "reach_facing_frame_u": {
+    "x_min": NaN,
+    "x_max": NaN,
+    "y_min": NaN,
+    "y_max": NaN,
+    "x_max_p99": NaN
+   }
+  },
+  "Song Heavy Sentry/CC_EVADE": {
+   "instances_with_attack_colliders": 0,
+   "instances_without": 7607,
+   "commit_to_first_attack_collider_s": {
+    "n": 0
+   },
+   "hero_dx_at_commit_u": {
+    "n": 7607,
+    "min": 0.001,
+    "p5": 1.96,
+    "p50": 6.836,
+    "p95": 11.415,
+    "max": 26.853
+   },
+   "hero_dy_at_commit_u": {
+    "n": 7607,
+    "min": -2.908,
+    "p5": -2.882,
+    "p50": 3.499,
+    "p95": 6.133,
+    "max": 8.614
+   },
+   "reach_facing_frame_u": {
+    "x_min": NaN,
+    "x_max": NaN,
+    "y_min": NaN,
+    "y_max": NaN,
+    "x_max_p99": NaN
+   }
+  },
+  "Song Heavy Sentry/CC_JUMP": {
+   "instances_with_attack_colliders": 2076,
+   "instances_without": 26,
+   "commit_to_first_attack_collider_s": {
+    "n": 2076,
+    "min": 1.157,
+    "p5": 1.39,
+    "p50": 1.415,
+    "p95": 1.432,
+    "max": 1.45
+   },
+   "hero_dx_at_commit_u": {
+    "n": 2102,
+    "min": 0.066,
+    "p5": 4.451,
+    "p50": 10.982,
+    "p95": 16.317,
+    "max": 29.674
+   },
+   "hero_dy_at_commit_u": {
+    "n": 2102,
+    "min": -2.908,
+    "p5": -2.882,
+    "p50": 3.686,
+    "p95": 6.946,
+    "max": 8.273
+   },
+   "reach_facing_frame_u": {
+    "x_min": -7.03,
+    "x_max": 19.38,
+    "y_min": -5.86,
+    "y_max": 2.52,
+    "x_max_p99": 18.8
+   }
+  },
+  "Song Heavy Sentry/CC_JUMP_CAST": {
+   "instances_with_attack_colliders": 1930,
+   "instances_without": 44,
+   "commit_to_first_attack_collider_s": {
+    "n": 1930,
+    "min": 0.017,
+    "p5": 0.816,
+    "p50": 1.848,
+    "p95": 1.865,
+    "max": 1.89
+   },
+   "hero_dx_at_commit_u": {
+    "n": 1974,
+    "min": 0.006,
+    "p5": 3.833,
+    "p50": 10.879,
+    "p95": 15.885,
+    "max": 27.757
+   },
+   "hero_dy_at_commit_u": {
+    "n": 1974,
+    "min": -2.931,
+    "p5": -2.882,
+    "p50": 3.821,
+    "p95": 7.011,
+    "max": 8.225
+   },
+   "reach_facing_frame_u": {
+    "x_min": -8.29,
+    "x_max": 19.4,
+    "y_min": -5.88,
+    "y_max": 2.52,
+    "x_max_p99": 18.8
+   }
+  },
+  "Song Heavy Sentry/CC_SLAM": {
+   "instances_with_attack_colliders": 3450,
+   "instances_without": 40,
+   "commit_to_first_attack_collider_s": {
+    "n": 3450,
+    "min": 0.85,
+    "p5": 0.874,
+    "p50": 0.899,
+    "p95": 0.899,
+    "max": 0.908
+   },
+   "hero_dx_at_commit_u": {
+    "n": 3490,
+    "min": 0.072,
+    "p5": 2.255,
+    "p50": 6.724,
+    "p95": 8.304,
+    "max": 8.758
+   },
+   "hero_dy_at_commit_u": {
+    "n": 3490,
+    "min": -2.908,
+    "p5": -2.882,
+    "p50": 1.316,
+    "p95": 4.989,
+    "max": 5.272
+   },
+   "reach_facing_frame_u": {
+    "x_min": -2.66,
+    "x_max": 12.68,
+    "y_min": -5.19,
+    "y_max": 3.17,
+    "x_max_p99": 12.08
+   }
+  },
+  "Song Pilgrim 01/EN_AMBUSH": {
+   "instances_with_attack_colliders": 0,
+   "instances_without": 107,
+   "commit_to_first_attack_collider_s": {
+    "n": 0
+   },
+   "hero_dx_at_commit_u": {
+    "n": 107,
+    "min": 11.492,
+    "p5": 12.349,
+    "p50": 13.417,
+    "p95": 18.475,
+    "max": 19.411
+   },
+   "hero_dy_at_commit_u": {
+    "n": 107,
+    "min": -0.562,
+    "p5": -0.562,
+    "p50": -0.562,
+    "p95": -0.562,
+    "max": -0.562
+   },
+   "reach_facing_frame_u": {
+    "x_min": NaN,
+    "x_max": NaN,
+    "y_min": NaN,
+    "y_max": NaN,
+    "x_max_p99": NaN
+   }
+  },
+  "Song Pilgrim 01/EN_CHARGE": {
+   "instances_with_attack_colliders": 376,
+   "instances_without": 4,
+   "commit_to_first_attack_collider_s": {
+    "n": 376,
+    "min": 0.483,
+    "p5": 0.491,
+    "p50": 0.508,
+    "p95": 0.517,
+    "max": 0.517
+   },
+   "hero_dx_at_commit_u": {
+    "n": 380,
+    "min": 0.722,
+    "p5": 6.747,
+    "p50": 10.584,
+    "p95": 21.598,
+    "max": 25.1
+   },
+   "hero_dy_at_commit_u": {
+    "n": 380,
+    "min": -0.832,
+    "p5": -0.829,
+    "p50": -0.355,
+    "p95": 4.475,
+    "max": 8.298
+   },
+   "reach_facing_frame_u": {
+    "x_min": -3.14,
+    "x_max": 32.54,
+    "y_min": -1.87,
+    "y_max": 0.56,
+    "x_max_p99": 29.2
+   }
+  },
+  "Song Pilgrim 01/EN_JUMPSLASH": {
+   "instances_with_attack_colliders": 234,
+   "instances_without": 7,
+   "commit_to_first_attack_collider_s": {
+    "n": 234,
+    "min": 0.4,
+    "p5": 0.408,
+    "p50": 0.416,
+    "p95": 0.417,
+    "max": 0.425
+   },
+   "hero_dx_at_commit_u": {
+    "n": 241,
+    "min": 0.117,
+    "p5": 1.016,
+    "p50": 4.162,
+    "p95": 10.377,
+    "max": 13.338
+   },
+   "hero_dy_at_commit_u": {
+    "n": 241,
+    "min": -0.832,
+    "p5": -0.829,
+    "p50": 0.912,
+    "p95": 5.441,
+    "max": 7.492
+   },
+   "reach_facing_frame_u": {
+    "x_min": -6.33,
+    "x_max": 6.86,
+    "y_min": -2.71,
+    "y_max": 3.49,
+    "x_max_p99": 6.56
+   }
+  },
+  "Song Pilgrim 01/EN_SLASH": {
+   "instances_with_attack_colliders": 666,
+   "instances_without": 26,
+   "commit_to_first_attack_collider_s": {
+    "n": 666,
+    "min": 0.483,
+    "p5": 0.491,
+    "p50": 0.508,
+    "p95": 0.517,
+    "max": 0.517
+   },
+   "hero_dx_at_commit_u": {
+    "n": 692,
+    "min": 0.02,
+    "p5": 0.359,
+    "p50": 3.176,
+    "p95": 4.83,
+    "max": 5.681
+   },
+   "hero_dy_at_commit_u": {
+    "n": 692,
+    "min": -2.509,
+    "p5": -0.829,
+    "p50": 0.332,
+    "p95": 4.464,
+    "max": 8.871
+   },
+   "reach_facing_frame_u": {
+    "x_min": -6.07,
+    "x_max": 8.2,
+    "y_min": -3.99,
+    "y_max": 4.27,
+    "x_max_p99": 4.6
+   }
+  },
+  "Song Pilgrim 03/CH_JUMP": {
+   "instances_with_attack_colliders": 889,
+   "instances_without": 25,
+   "commit_to_first_attack_collider_s": {
+    "n": 889,
+    "min": 0.758,
+    "p5": 0.767,
+    "p50": 0.783,
+    "p95": 0.783,
+    "max": 1.017
+   },
+   "hero_dx_at_commit_u": {
+    "n": 914,
+    "min": 0.095,
+    "p5": 3.982,
+    "p50": 7.838,
+    "p95": 12.035,
+    "max": 13.103
+   },
+   "hero_dy_at_commit_u": {
+    "n": 914,
+    "min": -0.305,
+    "p5": -0.302,
+    "p50": 0.812,
+    "p95": 4.649,
+    "max": 5.409
+   },
+   "reach_facing_frame_u": {
+    "x_min": -4.92,
+    "x_max": 17.56,
+    "y_min": -2.11,
+    "y_max": 11.23,
+    "x_max_p99": 14.85
+   }
+  },
+  "Song Pilgrim 03/CH_SLASH": {
+   "instances_with_attack_colliders": 1290,
+   "instances_without": 87,
+   "commit_to_first_attack_collider_s": {
+    "n": 1290,
+    "min": 0.627,
+    "p5": 0.633,
+    "p50": 0.641,
+    "p95": 0.658,
+    "max": 0.658
+   },
+   "hero_dx_at_commit_u": {
+    "n": 1377,
+    "min": 0.001,
+    "p5": 0.411,
+    "p50": 2.728,
+    "p95": 7.236,
+    "max": 8.051
+   },
+   "hero_dy_at_commit_u": {
+    "n": 1377,
+    "min": -1.548,
+    "p5": -0.302,
+    "p50": 0.348,
+    "p95": 4.006,
+    "max": 5.464
+   },
+   "reach_facing_frame_u": {
+    "x_min": -4.39,
+    "x_max": 12.92,
+    "y_min": -2.83,
+    "y_max": 3.32,
+    "x_max_p99": 9.46
+   }
+  },
+  "Song Pilgrim 03/CH_WHIP": {
+   "instances_with_attack_colliders": 1268,
+   "instances_without": 41,
+   "commit_to_first_attack_collider_s": {
+    "n": 1268,
+    "min": 0.807,
+    "p5": 0.824,
+    "p50": 0.833,
+    "p95": 0.833,
+    "max": 0.833
+   },
+   "hero_dx_at_commit_u": {
+    "n": 1309,
+    "min": 0.074,
+    "p5": 4.681,
+    "p50": 8.727,
+    "p95": 12.255,
+    "max": 13.033
+   },
+   "hero_dy_at_commit_u": {
+    "n": 1309,
+    "min": -0.31,
+    "p5": -0.302,
+    "p50": 0.524,
+    "p95": 4.805,
+    "max": 5.448
+   },
+   "reach_facing_frame_u": {
+    "x_min": -7.21,
+    "x_max": 13.52,
+    "y_min": -1.79,
+    "y_max": 4.87,
+    "x_max_p99": 10.02
+   }
+  },
+  "Song Pilgrim Maestro/MA_DEFEND": {
+   "instances_with_attack_colliders": 0,
+   "instances_without": 3359,
+   "commit_to_first_attack_collider_s": {
+    "n": 0
+   },
+   "hero_dx_at_commit_u": {
+    "n": 3359,
+    "min": 0.008,
+    "p5": 1.174,
+    "p50": 11.198,
+    "p95": 27.558,
+    "max": 29.983
+   },
+   "hero_dy_at_commit_u": {
+    "n": 3359,
+    "min": -8.212,
+    "p5": -7.509,
+    "p50": -5.373,
+    "p95": -0.415,
+    "max": 6.168
+   },
+   "reach_facing_frame_u": {
+    "x_min": NaN,
+    "x_max": NaN,
+    "y_min": NaN,
+    "y_max": NaN,
+    "x_max_p99": NaN
+   }
+  },
+  "Song Pilgrim Maestro/MA_SLASH": {
+   "instances_with_attack_colliders": 7922,
+   "instances_without": 50,
+   "commit_to_first_attack_collider_s": {
+    "n": 7922,
+    "min": 0.683,
+    "p5": 0.699,
+    "p50": 0.716,
+    "p95": 0.717,
+    "max": 0.733
+   },
+   "hero_dx_at_commit_u": {
+    "n": 7972,
+    "min": 0.001,
+    "p5": 0.971,
+    "p50": 9.424,
+    "p95": 26.741,
+    "max": 30.012
+   },
+   "hero_dy_at_commit_u": {
+    "n": 7972,
+    "min": -8.615,
+    "p5": -7.397,
+    "p50": -5.153,
+    "p95": 0.004,
+    "max": 5.824
+   },
+   "reach_facing_frame_u": {
+    "x_min": -7.76,
+    "x_max": 8.34,
+    "y_min": -4.6,
+    "y_max": 6.59,
+    "x_max_p99": 3.65
+   }
+  },
+  "Song Pilgrim Maestro/MA_SUMMON": {
+   "instances_with_attack_colliders": 0,
+   "instances_without": 1366,
+   "commit_to_first_attack_collider_s": {
+    "n": 0
+   },
+   "hero_dx_at_commit_u": {
+    "n": 1366,
+    "min": 0.017,
+    "p5": 0.665,
+    "p50": 8.414,
+    "p95": 26.29,
+    "max": 29.805
+   },
+   "hero_dy_at_commit_u": {
+    "n": 1366,
+    "min": -7.998,
+    "p5": -7.337,
+    "p50": -5.413,
+    "p95": -0.533,
+    "max": 4.132
+   },
+   "reach_facing_frame_u": {
+    "x_min": NaN,
+    "x_max": NaN,
+    "y_min": NaN,
+    "y_max": NaN,
+    "x_max_p99": NaN
+   }
+  },
+  "Song Reed/RE_DEFEND": {
+   "instances_with_attack_colliders": 565,
+   "instances_without": 1334,
+   "commit_to_first_attack_collider_s": {
+    "n": 565,
+    "min": 0.583,
+    "p5": 0.659,
+    "p50": 1.099,
+    "p95": 1.545,
+    "max": 1.617
+   },
+   "hero_dx_at_commit_u": {
+    "n": 1899,
+    "min": 0.0,
+    "p5": 0.704,
+    "p50": 5.277,
+    "p95": 7.874,
+    "max": 26.2
+   },
+   "hero_dy_at_commit_u": {
+    "n": 1899,
+    "min": -8.443,
+    "p5": -7.251,
+    "p50": -2.66,
+    "p95": 2.729,
+    "max": 9.07
+   },
+   "reach_facing_frame_u": {
+    "x_min": -11.17,
+    "x_max": 11.42,
+    "y_min": -8.06,
+    "y_max": 6.86,
+    "x_max_p99": 10.48
+   }
+  },
+  "Song Reed/RE_EVADE": {
+   "instances_with_attack_colliders": 0,
+   "instances_without": 1716,
+   "commit_to_first_attack_collider_s": {
+    "n": 0
+   },
+   "hero_dx_at_commit_u": {
+    "n": 1716,
+    "min": 0.004,
+    "p5": 0.195,
+    "p50": 1.649,
+    "p95": 4.103,
+    "max": 18.3
+   },
+   "hero_dy_at_commit_u": {
+    "n": 1716,
+    "min": -5.955,
+    "p5": -5.598,
+    "p50": -1.013,
+    "p95": 3.893,
+    "max": 6.898
+   },
+   "reach_facing_frame_u": {
+    "x_min": NaN,
+    "x_max": NaN,
+    "y_min": NaN,
+    "y_max": NaN,
+    "x_max_p99": NaN
+   }
+  },
+  "Song Reed/RE_STAB": {
+   "instances_with_attack_colliders": 1926,
+   "instances_without": 152,
+   "commit_to_first_attack_collider_s": {
+    "n": 1926,
+    "min": 0.633,
+    "p5": 0.649,
+    "p50": 0.882,
+    "p95": 1.723,
+    "max": 2.167
+   },
+   "hero_dx_at_commit_u": {
+    "n": 2078,
+    "min": 0.006,
+    "p5": 1.229,
+    "p50": 6.399,
+    "p95": 11.942,
+    "max": 23.45
+   },
+   "hero_dy_at_commit_u": {
+    "n": 2078,
+    "min": -10.815,
+    "p5": -7.079,
+    "p50": -2.729,
+    "p95": 2.0,
+    "max": 7.279
+   },
+   "reach_facing_frame_u": {
+    "x_min": -14.9,
+    "x_max": 24.1,
+    "y_min": -12.59,
+    "y_max": 8.42,
+    "x_max_p99": 18.89
+   }
+  },
+  "Song Reed/RE_THROW": {
+   "instances_with_attack_colliders": 2139,
+   "instances_without": 62,
+   "commit_to_first_attack_collider_s": {
+    "n": 2139,
+    "min": 0.1,
+    "p5": 0.667,
+    "p50": 0.683,
+    "p95": 1.482,
+    "max": 3.638
+   },
+   "hero_dx_at_commit_u": {
+    "n": 2201,
+    "min": 0.013,
+    "p5": 1.704,
+    "p50": 6.641,
+    "p95": 15.735,
+    "max": 25.088
+   },
+   "hero_dy_at_commit_u": {
+    "n": 2201,
+    "min": -12.728,
+    "p5": -8.175,
+    "p50": -2.722,
+    "p95": 2.486,
+    "max": 8.273
+   },
+   "reach_facing_frame_u": {
+    "x_min": NaN,
+    "x_max": NaN,
+    "y_min": NaN,
+    "y_max": NaN,
+    "x_max_p99": NaN
+   }
+  }
+ },
+ "fastest_by_type": {
+  "Pilgrim 03 Song": {
+   "family": "CB_THROW",
+   "min_s": 0.0
+  },
+  "Song Administrator": {
+   "family": "MI_CHARGE",
+   "min_s": 0.483
+  },
+  "Song Handmaiden": {
+   "family": "CM_SLASH",
+   "min_s": 0.5
+  },
+  "Song Heavy Sentry": {
+   "family": "CC_CAST",
+   "min_s": 0.0
+  },
+  "Song Pilgrim 01": {
+   "family": "EN_JUMPSLASH",
+   "min_s": 0.4
+  },
+  "Song Pilgrim 03": {
+   "family": "CH_SLASH",
+   "min_s": 0.627
+  },
+  "Song Pilgrim Maestro": {
+   "family": "MA_SLASH",
+   "min_s": 0.683
+  },
+  "Song Reed": {
+   "family": "RE_THROW",
+   "min_s": 0.1
+  }
+ },
+ "punish": {
+  "Song Administrator/MI_CHARGE": {
+   "n": 2587,
+   "startup_s": {
+    "n": 2587,
+    "min": 0.483,
+    "p5": 0.5,
+    "p50": 0.516,
+    "p95": 0.517,
+    "max": 0.524
+   },
+   "active_s": {
+    "n": 2587,
+    "min": 0.0,
+    "p5": 0.067,
+    "p50": 0.658,
+    "p95": 0.667,
+    "max": 0.681
+   },
+   "recovery_s": {
+    "n": 2587,
+    "min": 0.008,
+    "p5": 0.267,
+    "p50": 0.283,
+    "p95": 0.425,
+    "max": 0.425
+   },
+   "duration_s": {
+    "n": 2587,
+    "min": 0.524,
+    "p5": 0.974,
+    "p50": 1.457,
+    "p95": 1.467,
+    "max": 1.608
+   },
+   "share_attack_fits_startup": 1.0,
+   "share_attack_fits_recovery": 0.321
+  },
+  "Song Administrator/MI_PARRY": {
+   "n": 600,
+   "startup_s": {
+    "n": 600,
+    "min": 0.708,
+    "p5": 0.749,
+    "p50": 1.099,
+    "p95": 1.515,
+    "max": 1.582
+   },
+   "active_s": {
+    "n": 600,
+    "min": 0.0,
+    "p5": 0.191,
+    "p50": 0.2,
+    "p95": 0.2,
+    "max": 0.2
+   },
+   "recovery_s": {
+    "n": 600,
+    "min": 0.017,
+    "p5": 0.267,
+    "p50": 0.283,
+    "p95": 0.283,
+    "max": 0.283
+   },
+   "duration_s": {
+    "n": 600,
+    "min": 0.891,
+    "p5": 1.224,
+    "p50": 1.565,
+    "p95": 1.99,
+    "max": 2.064
+   },
+   "share_attack_fits_startup": 1.0,
+   "share_attack_fits_recovery": 0.0
+  },
+  "Song Handmaiden/CM_SLASH": {
+   "n": 1657,
+   "startup_s": {
+    "n": 1657,
+    "min": 0.5,
+    "p5": 0.508,
+    "p50": 0.516,
+    "p95": 1.39,
+    "max": 1.517
+   },
+   "active_s": {
+    "n": 1657,
+    "min": 0.0,
+    "p5": 0.3,
+    "p50": 0.316,
+    "p95": 0.317,
+    "max": 0.322
+   },
+   "recovery_s": {
+    "n": 1657,
+    "min": 0.008,
+    "p5": 0.175,
+    "p50": 0.183,
+    "p95": 0.183,
+    "max": 0.2
+   },
+   "duration_s": {
+    "n": 1657,
+    "min": 0.525,
+    "p5": 0.999,
+    "p50": 1.016,
+    "p95": 1.881,
+    "max": 2.015
+   },
+   "share_attack_fits_startup": 1.0,
+   "share_attack_fits_recovery": 0.0
+  },
+  "Song Heavy Sentry/CC_JUMP": {
+   "n": 2076,
+   "startup_s": {
+    "n": 2076,
+    "min": 1.157,
+    "p5": 1.39,
+    "p50": 1.415,
+    "p95": 1.432,
+    "max": 1.45
+   },
+   "active_s": {
+    "n": 2076,
+    "min": 0.0,
+    "p5": 0.05,
+    "p50": 0.067,
+    "p95": 0.067,
+    "max": 0.075
+   },
+   "recovery_s": {
+    "n": 2076,
+    "min": 0.017,
+    "p5": 0.264,
+    "p50": 0.266,
+    "p95": 0.267,
+    "max": 0.283
+   },
+   "duration_s": {
+    "n": 2076,
+    "min": 1.424,
+    "p5": 1.716,
+    "p50": 1.748,
+    "p95": 1.765,
+    "max": 1.784
+   },
+   "share_attack_fits_startup": 1.0,
+   "share_attack_fits_recovery": 0.0
+  },
+  "Song Heavy Sentry/CC_JUMP_CAST": {
+   "n": 1928,
+   "startup_s": {
+    "n": 1928,
+    "min": 1.182,
+    "p5": 1.798,
+    "p50": 1.848,
+    "p95": 1.865,
+    "max": 1.89
+   },
+   "active_s": {
+    "n": 1928,
+    "min": 0.033,
+    "p5": 0.05,
+    "p50": 0.067,
+    "p95": 0.067,
+    "max": 0.075
+   },
+   "recovery_s": {
+    "n": 1928,
+    "min": 0.017,
+    "p5": 0.264,
+    "p50": 0.266,
+    "p95": 0.267,
+    "max": 0.283
+   },
+   "duration_s": {
+    "n": 1928,
+    "min": 1.515,
+    "p5": 2.123,
+    "p50": 2.181,
+    "p95": 2.198,
+    "max": 2.223
+   },
+   "share_attack_fits_startup": 1.0,
+   "share_attack_fits_recovery": 0.0
+  },
+  "Song Heavy Sentry/CC_SLAM": {
+   "n": 3450,
+   "startup_s": {
+    "n": 3450,
+    "min": 0.85,
+    "p5": 0.874,
+    "p50": 0.899,
+    "p95": 0.899,
+    "max": 0.908
+   },
+   "active_s": {
+    "n": 3450,
+    "min": 0.0,
+    "p5": 0.117,
+    "p50": 0.133,
+    "p95": 0.133,
+    "max": 0.142
+   },
+   "recovery_s": {
+    "n": 3450,
+    "min": 0.008,
+    "p5": 0.264,
+    "p50": 0.266,
+    "p95": 0.283,
+    "max": 0.5
+   },
+   "duration_s": {
+    "n": 3450,
+    "min": 0.891,
+    "p5": 1.274,
+    "p50": 1.29,
+    "p95": 1.299,
+    "max": 1.532
+   },
+   "share_attack_fits_startup": 1.0,
+   "share_attack_fits_recovery": 0.0
+  },
+  "Song Pilgrim 01/EN_CHARGE": {
+   "n": 376,
+   "startup_s": {
+    "n": 376,
+    "min": 0.483,
+    "p5": 0.491,
+    "p50": 0.508,
+    "p95": 0.517,
+    "max": 0.517
+   },
+   "active_s": {
+    "n": 376,
+    "min": 0.017,
+    "p5": 0.3,
+    "p50": 1.137,
+    "p95": 2.098,
+    "max": 2.248
+   },
+   "recovery_s": {
+    "n": 376,
+    "min": 0.017,
+    "p5": 0.188,
+    "p50": 0.433,
+    "p95": 0.433,
+    "max": 0.458
+   },
+   "duration_s": {
+    "n": 376,
+    "min": 0.55,
+    "p5": 1.209,
+    "p50": 2.059,
+    "p95": 3.047,
+    "max": 3.197
+   },
+   "share_attack_fits_startup": 1.0,
+   "share_attack_fits_recovery": 0.936
+  },
+  "Song Pilgrim 01/EN_JUMPSLASH": {
+   "n": 234,
+   "startup_s": {
+    "n": 234,
+    "min": 0.4,
+    "p5": 0.408,
+    "p50": 0.416,
+    "p95": 0.417,
+    "max": 0.425
+   },
+   "active_s": {
+    "n": 234,
+    "min": 0.1,
+    "p5": 0.108,
+    "p50": 0.117,
+    "p95": 0.117,
+    "max": 0.119
+   },
+   "recovery_s": {
+    "n": 234,
+    "min": 0.125,
+    "p5": 0.517,
+    "p50": 0.533,
+    "p95": 0.533,
+    "max": 0.533
+   },
+   "duration_s": {
+    "n": 234,
+    "min": 0.658,
+    "p5": 1.042,
+    "p50": 1.057,
+    "p95": 1.066,
+    "max": 1.067
+   },
+   "share_attack_fits_startup": 1.0,
+   "share_attack_fits_recovery": 0.983
+  },
+  "Song Pilgrim 01/EN_SLASH": {
+   "n": 666,
+   "startup_s": {
+    "n": 666,
+    "min": 0.483,
+    "p5": 0.491,
+    "p50": 0.508,
+    "p95": 0.517,
+    "max": 0.517
+   },
+   "active_s": {
+    "n": 666,
+    "min": 0.0,
+    "p5": 0.255,
+    "p50": 0.266,
+    "p95": 0.267,
+    "max": 0.269
+   },
+   "recovery_s": {
+    "n": 666,
+    "min": 0.017,
+    "p5": 0.355,
+    "p50": 0.708,
+    "p95": 0.716,
+    "max": 0.717
+   },
+   "duration_s": {
+    "n": 666,
+    "min": 0.517,
+    "p5": 1.117,
+    "p50": 1.473,
+    "p95": 1.499,
+    "max": 1.5
+   },
+   "share_attack_fits_startup": 1.0,
+   "share_attack_fits_recovery": 0.958
+  },
+  "Song Pilgrim 03/CH_JUMP": {
+   "n": 889,
+   "startup_s": {
+    "n": 889,
+    "min": 0.758,
+    "p5": 0.767,
+    "p50": 0.783,
+    "p95": 0.783,
+    "max": 1.017
+   },
+   "active_s": {
+    "n": 889,
+    "min": 0.017,
+    "p5": 0.566,
+    "p50": 0.583,
+    "p95": 0.666,
+    "max": 0.782
+   },
+   "recovery_s": {
+    "n": 889,
+    "min": 0.017,
+    "p5": 0.467,
+    "p50": 0.483,
+    "p95": 0.483,
+    "max": 0.5
+   },
+   "duration_s": {
+    "n": 889,
+    "min": 0.816,
+    "p5": 1.743,
+    "p50": 1.84,
+    "p95": 1.94,
+    "max": 2.165
+   },
+   "share_attack_fits_startup": 1.0,
+   "share_attack_fits_recovery": 0.964
+  },
+  "Song Pilgrim 03/CH_SLASH": {
+   "n": 1290,
+   "startup_s": {
+    "n": 1290,
+    "min": 0.627,
+    "p5": 0.633,
+    "p50": 0.641,
+    "p95": 0.658,
+    "max": 0.658
+   },
+   "active_s": {
+    "n": 1290,
+    "min": 0.017,
+    "p5": 0.117,
+    "p50": 0.841,
+    "p95": 0.857,
+    "max": 0.861
+   },
+   "recovery_s": {
+    "n": 1290,
+    "min": 0.017,
+    "p5": 0.333,
+    "p50": 0.467,
+    "p95": 0.483,
+    "max": 0.683
+   },
+   "duration_s": {
+    "n": 1290,
+    "min": 0.666,
+    "p5": 1.091,
+    "p50": 1.956,
+    "p95": 1.981,
+    "max": 1.992
+   },
+   "share_attack_fits_startup": 1.0,
+   "share_attack_fits_recovery": 0.66
+  },
+  "Song Pilgrim 03/CH_WHIP": {
+   "n": 1268,
+   "startup_s": {
+    "n": 1268,
+    "min": 0.807,
+    "p5": 0.824,
+    "p50": 0.833,
+    "p95": 0.833,
+    "max": 0.833
+   },
+   "active_s": {
+    "n": 1268,
+    "min": 0.0,
+    "p5": 0.0,
+    "p50": 0.4,
+    "p95": 0.4,
+    "max": 0.4
+   },
+   "recovery_s": {
+    "n": 1268,
+    "min": 0.003,
+    "p5": 0.017,
+    "p50": 0.017,
+    "p95": 0.758,
+    "max": 0.788
+   },
+   "duration_s": {
+    "n": 1268,
+    "min": 0.866,
+    "p5": 1.232,
+    "p50": 1.249,
+    "p95": 1.806,
+    "max": 1.917
+   },
+   "share_attack_fits_startup": 1.0,
+   "share_attack_fits_recovery": 0.316
+  },
+  "Song Pilgrim Maestro/MA_SLASH": {
+   "n": 7922,
+   "startup_s": {
+    "n": 7922,
+    "min": 0.683,
+    "p5": 0.699,
+    "p50": 0.716,
+    "p95": 0.717,
+    "max": 0.733
+   },
+   "active_s": {
+    "n": 7922,
+    "min": 0.0,
+    "p5": 0.141,
+    "p50": 0.15,
+    "p95": 0.15,
+    "max": 0.155
+   },
+   "recovery_s": {
+    "n": 7922,
+    "min": 0.017,
+    "p5": 0.45,
+    "p50": 0.466,
+    "p95": 0.467,
+    "max": 0.5
+   },
+   "duration_s": {
+    "n": 7922,
+    "min": 0.724,
+    "p5": 1.307,
+    "p50": 1.325,
+    "p95": 1.332,
+    "max": 1.35
+   },
+   "share_attack_fits_startup": 1.0,
+   "share_attack_fits_recovery": 0.995
+  },
+  "Song Reed/RE_DEFEND": {
+   "n": 565,
+   "startup_s": {
+    "n": 565,
+    "min": 0.583,
+    "p5": 0.659,
+    "p50": 1.099,
+    "p95": 1.545,
+    "max": 1.617
+   },
+   "active_s": {
+    "n": 565,
+    "min": 0.0,
+    "p5": 0.0,
+    "p50": 0.383,
+    "p95": 0.749,
+    "max": 0.75
+   },
+   "recovery_s": {
+    "n": 565,
+    "min": 0.017,
+    "p5": 0.173,
+    "p50": 0.741,
+    "p95": 0.908,
+    "max": 0.917
+   },
+   "duration_s": {
+    "n": 565,
+    "min": 0.783,
+    "p5": 1.557,
+    "p50": 2.123,
+    "p95": 2.664,
+    "max": 3.163
+   },
+   "share_attack_fits_startup": 1.0,
+   "share_attack_fits_recovery": 0.565
+  },
+  "Song Reed/RE_STAB": {
+   "n": 1926,
+   "startup_s": {
+    "n": 1926,
+    "min": 0.633,
+    "p5": 0.649,
+    "p50": 0.882,
+    "p95": 1.723,
+    "max": 2.167
+   },
+   "active_s": {
+    "n": 1926,
+    "min": 0.0,
+    "p5": 0.55,
+    "p50": 0.566,
+    "p95": 0.567,
+    "max": 0.572
+   },
+   "recovery_s": {
+    "n": 1926,
+    "min": 0.014,
+    "p5": 0.366,
+    "p50": 0.616,
+    "p95": 0.617,
+    "max": 0.633
+   },
+   "duration_s": {
+    "n": 1926,
+    "min": 0.666,
+    "p5": 1.799,
+    "p50": 2.023,
+    "p95": 2.872,
+    "max": 3.35
+   },
+   "share_attack_fits_startup": 1.0,
+   "share_attack_fits_recovery": 0.951
+  }
+ }
+}
