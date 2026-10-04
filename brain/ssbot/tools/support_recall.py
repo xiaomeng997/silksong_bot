@@ -18,6 +18,13 @@ recording: the events alone give the contact frames, then
 the backend, filter and tracker run over every frame and forecast only at the frames some contact needs.
 --table points the forecaster at another behaviour build (a held-out build: C:/ssbot/data/m2_heldout/tables holds
 one without i2_002 / i3_002 and the trial run).
+Forum (round R0, the certification before any Forum evaluation; ssbot.knowledge.forum_support):
+    ../scripts/uv.cmd run python -m ssbot.tools.support_recall --encounter Forum
+        --extra C:/ssbot/data/m2_forum_r0/build_all/extra --cache C:/ssbot/data/m2_forum_r0/cache
+        [--margins heldout|none] [--margin-q 1.0] [--area] [--write-margins margins.json] [--json out.json]
+each fold's fights against the tables built from the other fold alone (behaviour_build --extra), every contact
+against the forecast of the enemy it came from, plus per-family margins calibrated on the training fold's held-out
+residuals (never on the contacts they are tested on).
 --noise-seed N (vision views, task V): SimpleNoise after the filter (position noise, missed detections that coast),
 as on the simulated final path: what the vision view's drop-bell paths are estimated from (combat.bell_track). The
 hero's box stays the recorded one (the planner's margin covers the hero's own position noise).
@@ -260,6 +267,24 @@ def forum_main(a: argparse.Namespace) -> int:
         full = margins_from_contacts(rows, fold=None, q=a.margin_q) if a.margins == "heldout" else {}
         out["support_area"] = support_area(extra, full, FORUM_SPECS)
     print(json.dumps({k: out[k] for k in ("recall", "n_misses", "miss_by")}, indent=1))
+    if a.write_margins:
+        # the planner's margins: per family the largest held-out residual over both folds' contacts (the per-fold
+        # margins above were each certified on the fold they were not calibrated on)
+        full = margins_from_contacts(rows, fold=None, q=a.margin_q)
+        per_type: dict = {}
+        for (tk, fam), v in full.items():
+            per_type[tk] = max(per_type.get(tk, 0.0), v)
+        cert = all(r["covered"] == r["n"] for r in out["recall"].values())
+        doc = {"what": "per-family support margins (u) of the Forum behaviour tables: the largest held-out residual of "
+                       "the per-state support (behaviour_tables R_MARGIN_SEARCH_U caps it); the planner dilates every "
+                       "support template of the family by it on top of the hero hurtbox and its own margin",
+               "quantile": a.margin_q, "certified": cert, "recall": out["recall"], "lags": lags,
+               "base_margin": a.margin, "fights": fights_done, "extra": str(extra),
+               "by_family": {f"{tk}/{fam}": round(v, 4) for (tk, fam), v in sorted(full.items())},
+               "by_type": {tk: round(v, 4) for tk, v in sorted(per_type.items())},
+               "by_fold": out["margins_by_fold"], "support_area": out.get("support_area")}
+        a.write_margins.parent.mkdir(parents=True, exist_ok=True)
+        a.write_margins.write_text(json.dumps(doc, indent=1) + "\n", "utf-8")
     if a.json:
         a.json.parent.mkdir(parents=True, exist_ok=True)
         a.json.write_text(json.dumps(out, indent=1), "utf-8")
@@ -277,6 +302,8 @@ def main(argv: list[str] | None = None) -> int:
                     help="Forum: per-family margins from the training fold's held-out residuals, or none")
     ap.add_argument("--margin-q", type=float, default=1.0, help="Forum: the residual quantile a margin takes")
     ap.add_argument("--area", action="store_true", help="Forum: report the margins' support area cost")
+    ap.add_argument("--write-margins", type=Path, default=None,
+                    help="Forum: write the planner's per-family margins and this recall to this JSON")
     ap.add_argument("--in-sample", action="store_true",
                     help="Forum: each fold's fights against its own tables (a check of the tracker, not a recall)")
     ap.add_argument("--recordings", default="")

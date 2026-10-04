@@ -671,21 +671,25 @@ class Below:
                 continue
             key = f"{inst.tk}/{inst.family}"
             self.n[key]["instances"] += 1
-            boxes = [b for r in v.rows_between(inst.iid, fi0, fi1) for _, b, _, _ in v.colliders(int(r))]
-            for dx in BELOW_DX:
-                for side in ((1,) if dx == 0 else (-1, 1)):
-                    x = ax + side * dx * inst.mirror
-                    hb = (x - HERO_HALF_W, FLOOR_Y[0], x + HERO_HALF_W, FLOOR_Y[1])
-                    if any(b[0] <= hb[2] and hb[0] <= b[2] and b[1] <= hb[3] and hb[1] <= b[3] for b in boxes):
-                        self.n[key][f"touch dx {'+' if side > 0 else '-'}{dx:g}"] += 1
+            own = [b for r in v.rows_between(inst.iid, fi0, fi1) for _, b, _, _ in v.colliders(int(r))]
+            fi2 = int(np.searchsorted(v.T, float(v.T[fi1]) + sp.spawn_window_s))
+            thrown = [x[2] for x in v.hazards.get(id(inst), ()) if fi0 <= x[0] <= fi2]
+            for label, boxes in (("own", own), ("with thrown hazards", own + thrown)):
+                for dx in BELOW_DX:
+                    for side in ((1,) if dx == 0 else (-1, 1)):
+                        x = ax + side * dx * inst.mirror
+                        hb = (x - HERO_HALF_W, FLOOR_Y[0], x + HERO_HALF_W, FLOOR_Y[1])
+                        if any(b[0] <= hb[2] and hb[0] <= b[2] and b[1] <= hb[3] and hb[1] <= b[3] for b in boxes):
+                            self.n[key][f"{label}: dx {'+' if side > 0 else '-'}{dx:g}"] += 1
 
     def result(self) -> dict:
         out = {}
         for key, c in sorted(self.n.items()):
             n = c["instances"]
             out[key] = {"instances": n, **{k: round(c[k] / n, 3) for k in sorted(c) if k != "instances"}}
-        return {"note": "share of attack instances whose own colliders (body included, hazards not) touch a hero box "
-                        "on the floor at the commit point's x + dx (+: the side the enemy faces)", "by_family": out}
+        return {"note": "share of attack instances committed in the air whose own colliders (body included), and with "
+                        "the hazards they threw (up to spawn_window_s after the attack), touch a hero box on the floor "
+                        "at the commit point's x + dx (+: the side the enemy faces)", "by_family": out}
 
 
 class Clawmaiden:
