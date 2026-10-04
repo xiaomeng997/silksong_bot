@@ -563,7 +563,8 @@ class HeroParams:
 
     def with_weighted(self, on: bool = True) -> "HeroParams":
         """A copy with the Weighted Anklet equipped (knockback x0.5, i-frames x1.3, nail recoil 4 steps, max fall
-        38, RecoilDown halves the rise). Not identified on logs yet: the bot runs never equipped it."""
+        38, RecoilDown halves the rise). The bot runs never equipped it; the i-frames (1.30 s) are confirmed on the
+        person's practice recording 20261004_133855 (probes.md), the rest is not identified on logs yet."""
         p = HeroParams.from_json(self.to_json())
         if not on or self.weighted:
             return p

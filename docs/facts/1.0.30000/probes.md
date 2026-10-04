@@ -117,6 +117,7 @@
 |---|---|---|
 | `Time.fixedDeltaTime` | 0.02（50 Hz 物理） | 0.02 ✓ |
 | `INVUL_TIME` | 1.0 s | 约 1.0 s ✓ |
+| 负重环带下的受击无敌（`INVUL_TIME` × `weightedAnkletDmgInvulnMult`，资产值 1.3，代码初值 1.2 被覆盖） | **1.30 s**：你装着负重环带的半速练习 `20261004_133855` 里 88 次受击，扣血那帧到 `invulnerable` 清除的游戏时间（逐帧 udt × timeScale 求和）p10 / p50 / p90 = 1.304 / 1.304 / 1.308 s（实时约 2.8 s）；`HeroParams.with_weighted()` 的 1.3 在录像上第一次核对（脚本 `scratchpad/iframes.py`，2026-10-04） | — |
 | `INVUL_TIME_PARRY` | **0.15 s** | 0.25 s ✗ |
 | `INVUL_TIME_CROSS_STITCH` / `SILKDASH` / `QUAKE` | 0.35 / 0.5 / 0.4 s | — |
 | `DOWNSPIKE_INVULNERABILITY_STEPS` / `_LONG` | **8 / 16 步**（0.16 / 0.32 s） | 2 / 10 步 ✗ |
