@@ -35,6 +35,22 @@ FPS = 60.0
 HUMAN = Path(r"C:\ssbot\data\human\20260930_210337")
 HUMAN_FRAMES = (64275, 68397)
 LEAD_BINS = (2, 3, 6, 12, 24, 48, 10 ** 9)       # [2], [3, 5], [6, 11], [12, 23], [24, 47], [48, ...)
+AHEAD_BINS = (0, 7, 13, 25, 10 ** 9)            # a change's distance to the press it moved / dropped: <= 6, 7-12,
+#                                                 13-24, > 24 frames ("last-minute": <= 12, 0.2 s)
+
+
+def change_aheads(n: list) -> list[int]:
+    """For each change or cancellation of a note made before its press was sent: frames from that tick to the press
+    the plan had until then."""
+    out = []
+    p = n[2]
+    for hf, hp, _hr in n[7]:
+        if n[5] is not None and hf > n[5]:
+            break
+        out.append(p - hf)
+        if hp >= 0:
+            p = hp
+    return out
 # menu actions: the game's action layer sets them from gameplay keys too (the person's fight: 11 "enter" with 11
 # jumps, 1 "paneright"), so the comparison counts gameplay keys only; all keys are reported as well
 MENU_KEYS = frozenset(("inventory", "map", "tools", "journal", "quests", "quickmap", "pause", "enter", "paneleft",
@@ -47,21 +63,40 @@ def gameplay_total(c) -> int:
 
 def presses_from_masks(fs, masks, f0: int, f1: int) -> Counter:
     """Rising edges per key in [f0, f1] of a per-frame mask stream (the first frame's held keys are not presses)."""
+    return Counter({k: len(v) for k, v in holds_from_masks(fs, masks, f0, f1).items()})
+
+
+def holds_from_masks(fs, masks, f0: int, f1: int) -> dict[str, list[int]]:
+    """Per key, the hold (frames down) of each press in [f0, f1] (a press still down at f1: down to f1)."""
     from ssbot.ipc.framing import BUTTONS
-    out: Counter = Counter()
+    out: dict[str, list[int]] = {}
+    down: dict[int, int] = {}
     last = None
+    lf = None
     for f, m in zip(fs, masks):
         if f < f0 or f > f1:
             continue
         m = int(m or 0)
         if last is not None:
-            x = m & ~last
+            x = m ^ last
             while x:
                 b = (x & -x).bit_length() - 1
                 x &= x - 1
-                out[BUTTONS[b]] += 1
-        last = m
+                if m >> b & 1:
+                    down[b] = f
+                elif b in down:
+                    out.setdefault(BUTTONS[b], []).append(f - down.pop(b))
+        last, lf = m, f
+    for b, p in down.items():
+        out.setdefault(BUTTONS[b], []).append(lf + 1 - p)
     return out
+
+
+def hold_stats(holds: dict[str, list[int]]) -> dict:
+    """Per key: presses, hold p10 / p50 / p90 (frames) and the share of taps held at most 3 frames."""
+    return {k: {"n": len(v), "p10": float(np.percentile(v, 10)), "p50": float(np.percentile(v, 50)),
+                "p90": float(np.percentile(v, 90)), "le3": round(sum(1 for x in v if x <= 3) / len(v), 3)}
+            for k, v in sorted(holds.items(), key=lambda kv: -len(kv[1])) if v}
 
 
 def human(session: Path, f0: int, f1: int) -> dict:
@@ -74,12 +109,13 @@ def human(session: Path, f0: int, f1: int) -> dict:
             masks.append((s.get("input") or {}).get("mask", 0))
         elif f > f1:
             break
-    c = presses_from_masks(fs, masks, f0 - 1, f1)
+    hl = holds_from_masks(fs, masks, f0 - 1, f1)
+    c = Counter({k: len(v) for k, v in hl.items()})
     dur = (f1 - f0 + 1) / FPS
     return {"session": str(session), "frames": [f0, f1], "seconds": round(dur, 2), "presses": dict(c.most_common()),
             "total": sum(c.values()), "per_s": {k: round(v / dur, 3) for k, v in c.most_common()},
             "total_per_s": round(sum(c.values()) / dur, 3),
-            "gameplay_per_s": round(gameplay_total(c) / dur, 3)}
+            "gameplay_per_s": round(gameplay_total(c) / dur, 3), "holds_frames": hold_stats(hl)}
 
 
 def _attempts(run: Path) -> list[dict]:
@@ -115,7 +151,8 @@ def _record_for(recs: list[dict], a: dict) -> dict | None:
     return best
 
 
-def _latched_from_recording(a: dict) -> Counter | None:
+def _latched_from_recording(a: dict) -> dict[str, list[int]] | None:
+    """Per key, the holds of the presses the game latched (act.mask) from the wake to the end."""
     from ssbot.record.recorder import RecordingReader
     path = a.get("recording")
     if not path or not Path(path).exists():
@@ -125,7 +162,7 @@ def _latched_from_recording(a: dict) -> Counter | None:
     for s in r.states(a["f_wake"] - 1, a["f_end"], keys=("act",)):
         fs.append(s["f"])
         masks.append((s.get("act") or {}).get("mask", 0))
-    return presses_from_masks(fs, masks, a["f_wake"] - 1, a["f_end"])
+    return holds_from_masks(fs, masks, a["f_wake"] - 1, a["f_end"])
 
 
 def _q(v, qs=(10, 25, 50, 75, 90)) -> dict:
@@ -135,9 +172,11 @@ def _q(v, qs=(10, 25, 50, 75, 90)) -> dict:
 
 def group(runs: list[Path]) -> dict:
     rows, per_key_lat, ep_rate = [], Counter(), []
+    holds: dict[str, list[int]] = {}
     secs = 0.0
     dec = ex = chg = canc = late = sup = hold = 0
     leads, leads_act, lag = [], [], []
+    aheads: list[int] = []
     by_key: dict[str, Counter] = {}
     flips = np.zeros(3, np.int64)
     flip_s = 0.0
@@ -152,15 +191,18 @@ def group(runs: list[Path]) -> dict:
             dur = (fe - fw + 1) / FPS
             rec = _record_for(recs.get(a.get("instance"), []), a)
             if rec is not None:
-                c = Counter({k: sum(1 for p, _r in iv if fw <= p <= fe) for k, iv in rec["actual"].items()})
-                c = +c
+                hl = {k: [(r if r >= 0 else fe + 1) - p for p, r in iv if fw <= p <= fe]
+                      for k, iv in rec["actual"].items()}
                 sources["key_log"] += 1
             else:
-                c = _latched_from_recording(a)
-                if c is None:
+                hl = _latched_from_recording(a)
+                if hl is None:
                     sources["none"] += 1
                     continue
                 sources["recording"] += 1
+            c = +Counter({k: len(v) for k, v in hl.items()})
+            for k, v in hl.items():
+                holds.setdefault(k, []).extend(v)
             per_key_lat.update(c)
             secs += dur
             ep_rate.append(sum(c.values()) / dur)
@@ -190,6 +232,7 @@ def group(runs: list[Path]) -> dict:
                     continue
                 k = by_key.setdefault(n[0], Counter())
                 k["decided"] += 1
+                aheads += change_aheads(n)
                 k["changed_or_cancelled"] += (n[4] in ("c", "l")) or (n[4] == "x" and any(h[0] <= n[5] for h in n[7]))
     outc = Counter(a["outcome"] for a in rows)
     n = len(rows)
@@ -207,7 +250,7 @@ def group(runs: list[Path]) -> dict:
            "presses_per_s": {k: round(v / secs, 3) for k, v in per_key_lat.most_common()} if secs else {},
            "presses_per_s_total": round(sum(per_key_lat.values()) / secs, 3) if secs else None,
            "presses_per_s_gameplay": round(gameplay_total(per_key_lat) / secs, 3) if secs else None,
-           "presses_per_s_episode": _q(ep_rate)}
+           "presses_per_s_episode": _q(ep_rate), "holds_frames": hold_stats(holds)}
     if dec:
         bins = np.histogram(leads, bins=LEAD_BINS)[0] if leads else []
         out["plan"] = {
@@ -220,6 +263,11 @@ def group(runs: list[Path]) -> dict:
             "lead_frames": _q(leads), "lead_frames_hist": {
                 lab: int(c) for lab, c in zip(("2", "3-5", "6-11", "12-23", "24-47", ">=48"), bins)},
             "lead_to_latched_frames": _q(leads_act), "sent_to_latched_frames": dict(sorted(Counter(lag).items())),
+            "changes_before_press": len(aheads),
+            "changes_by_frames_ahead": {lab: int(c) for lab, c in zip(
+                ("<=6", "7-12", "13-24", ">24"), np.histogram(aheads, bins=AHEAD_BINS)[0])} if aheads else {},
+            "last_minute_changes_per_s": round(sum(1 for x in aheads if x <= 12) / secs, 3) if secs else None,
+            "changes_per_s": round(len(aheads) / secs, 3) if secs else None,
             "flips_per_s": {"changes": round(flips[0] / flip_s, 3), "flipflops": round(flips[1] / flip_s, 3),
                             "flipflops_1tick": round(flips[2] / flip_s, 3)} if flip_s else None}
     return out
