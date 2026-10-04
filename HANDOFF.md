@@ -526,6 +526,8 @@ Code: f9dcbba (supervisor / tactics), 4eb57db (tools), 5026372 (combat_run --sta
 
 ### Running
 
+- (2026-10-04) Stopped at the 00:25 deploy window after 1014 trials (seeds 105453-106466); restarted on the EXCLUSIVE
+  DLL by chain X (below). The text that follows is the state before that.
 - 10^4 pause stress campaign on the final code: worktree `C:\ssbot\live_pq_final` (5026372, numba prewarmed),
   instance 4, seeds 105453-109799 (4347 trials, about 36 h; 109800-109919 were the fixer round's checks), run dir
   `C:\ssbot\data\runs\m2\20261003_153044_BellBeast_eval_planner_oracle_inject`, launcher log
@@ -639,3 +641,49 @@ time). Facts: `docs/facts/1.0.30000/key_economy.md` (Chinese, all numbers); M2.m
   playbook is off again, so they still hold).
 - The planner's CONTINUE row shifts the previous plan by 1 frame even after a late tick skipped frames (the key terms
   use the real shift); harmless so far, not changed.
+
+## Chain X - EXCLUSIVE post-deploy checklist and the pause campaign restart (branch worktree-wf_7f5f02aa-b80-1)
+
+Worktree `C:\modeling\silksong_bot\.claude\worktrees\wf_7f5f02aa-b80-1`, from main ee64458. Instance 4 (port 47021) only;
+seeds 118000-121999 (campaign 118000-121899, this chain's checks 121900-121954). Deployed DLL: main's oracle of
+2026-10-04 00:25 (EXCLUSIVE). Facts: docs/facts/1.0.30000/pause_quit.md 8.1 (checklist results) and 8.2 (campaign).
+
+### Done
+
+- Checklist steps 3-9 on instance 4, all passed: HELLO action_flags ["exclusive"]; input.stats hold.released_early
+  (0 at start) and the new `exclusive` counter; `m2_exports --skip-fight` all PASS; plain ACTIONs never grow
+  released_early (4 plain eval fights, 15,058 ACTIONs: exclusive and released_early unchanged); brain-lost tap
+  lands alone (latched 0x4000 only), also when the last ACTION pressed Up 1 frame before the tap (2 of 8 reps:
+  cut by QueueExclusiveCutAll, released_early +2); pause block 20261004_014531 (keys 19, menu 21): 40 / 40 paused
+  and on the main menu, latency max 3 frames, 0 game keys on the pause frame or in menus, 0 unpauses, 0 wrong
+  submits, every loop key run >= 2 frames, released_early +20; low-HP 20261004_020857 (10): h 1 3 / 3 at G + 1 inside
+  the i-frames, 0 Binds; h 2 7 / 7 Binds completed, 0 hit, 7 CLEAR, 0 quits.
+- 3fdd8af: `m1_harness` hello checks action_flags / released_early, `lost` checks the tap lands alone, new
+  `lost_late` section; `pause_stress` `loop_key_runs` / `loop_key_runs_short`; `combat_run.back_into_slot`: the way
+  back into slot 1 (start and after every real quit) is tried 3 times with one recovery step between (new game's
+  opening -> skip, then load the encounter savestate; no control -> savestate; paused -> Continue). Tests:
+  tests/test_combat_run_retry.py (5) and test_combat_run_start / test_pause_stress / test_import_firewall pass.
+- Cause of chain H's 07:13 death (recording 20261003_010522 i4_028): the slot-select Enter started a NEW GAME
+  (Opening_Sequence, no hero; the save select read slot 1 as empty for that one press), and load_slot waited 120 s.
+  Why the slot read empty is unknown. The new-game recovery path is tested only against a stand-in game.
+
+### Running
+
+- 10^4 pause stress campaign on the EXCLUSIVE DLL: worktree `C:\ssbot\live_pq_3fdd8af` (3fdd8af = main ee64458 + this
+  chain's tools and retry; numba prewarmed), instance 4, seeds 118000-121899 (3900 trials, about 33 h), run dir
+  `C:\ssbot\data\runs\m2\20261004_021933_BellBeast_eval_planner_oracle_inject`, launcher log
+  `C:\ssbot\sandbox\pq_campaign_x.log`, started hidden (Start-Process -WindowStyle Hidden) with
+  `C:\ssbot\sandbox\pq_campaign_start.cmd C:\ssbot\live_pq_3fdd8af 118000 3900 C:\ssbot\sandbox\pq_campaign_x.log`.
+  Stop (graceful, after the current trial): from `C:\ssbot\live_pq_3fdd8af\brain`:
+  `..\scripts\uv.cmd run python -m ssbot.tools.combat_run stop C:\ssbot\data\runs\m2\20261004_021933_BellBeast_eval_planner_oracle_inject`
+  (or STOP_AGENTS). It holds SsOracle.dll on instance 4. Summarise with `pause_stress <run dir> --quiet --json
+  <run dir>\pause_stress.json` (loop_key_runs_short must stay 0) and `lowhp_check --q1 <run dir>`, below normal.
+
+### Next
+
+1. Watch the campaign's worker_i4.log for "back into the sandbox slot failed": the first live retry tells whether
+   the new-game recovery works in the real game (DebugMod savestate load from the new game's Tut_01 is untested).
+2. Forum instances: checklist step 5's room.battles / allies check was not run (not this chain's instances).
+3. Optional (lead): the Python key guard still waits 0-2 frames (19 / 19 in-flight-key trials waited); with
+   EXCLUSIVE live it could model EXCLUSIVE (keys_clear always true) after a control block with the guard off.
+4. Merge 3fdd8af and the docs into main; the campaign's code is main ee64458 plus these tools.
