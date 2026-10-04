@@ -1001,79 +1001,103 @@ fixed.
 ## Task R1 - Forum plan round R1: wave starts, targeted collection v2, wall climb, speed-up check (branch worktree-wf_6dcc3810-3d5-1)
 
 Worktree `C:\modeling\silksong_bot\.claude\worktrees\wf_6dcc3810-3d5-1`, instances 2 and 3 (ports 47019 / 47020), seeds
-127000-131999 (used: 127000+, 127100, 127200, 128000+, 129000+; `--same-seeds` keeps them in range), savestates
-`fo_r1_*`. Facts: `docs/facts/1.0.30000/forum.md` section 13 (R1). Plan: `docs/plans/forum_planner_plan.md` §5 R1.
+127000-131999 (used: 127000+, 127100, 127200, 128000+, 129000+, 130000-130200, 130500+, 131000+; `--same-seeds` keeps
+them in range), savestates `fo_r1_*`. Facts: `docs/facts/1.0.30000/forum.md` section 13 (R1). Plan:
+`docs/plans/forum_planner_plan.md` §5 R1. Main (with R0) merged into the branch at e1a54a9.
 
 ### Done (committed)
 
 - Wave starts (`brain/ssbot/train/wave_start.py`): a DebugMod savestate taken during wave i restarts the battle at wave i
   on load (DebugMod RoomSpecific keeps "BattleScene|Battle Scene|<currentWave>" and patches DoStartBattle to
-  StartWave(currentWave)). `fo_r1_w0` .. `fo_r1_w13` made by one policy skip from fo_A (`make_wave_states`: boost off and
-  keys released at each save, so the saves carry the route's PlayerData); all 14 load and restart at their wave in about
-  1.2 s with the wave's members (probe `forum_r1 check`). Not restored: the helper (Garmond stays Dormant: "Call Ally"
-  fires only on wave 1's WAVE START), survivors of an overlapping earlier wave (2 / 4 / 9: load the wave before instead).
-  Encounters `Forum_A_w<i>` (intro waits for room.battles; timebox 180 s); `combat_run --encounter` takes a comma list
-  (rotates per episode). Policy skip (deployed oracle: isInvincible + nailUpgrades 4 + silk 9 over the debug line
-  server, `WaveSkipPolicy`) works but is slow on the Maestro waves (0-5: 37 s, wave 6: 353 s, to 13: 716 s game).
-- Oracle 06a7c2b (built `-p:Deploy=false`, NOT deployed): `time.scale` above 1 through DebugMod's TimeScale (the game
-  clamps its own controls to 1: CheatManager.IsCheatsEnabled is a constant false; live: scale 2 gave Time.timeScale 1),
-  and RPC `battle.wave {wave}` (kills earlier waves' live members through HealthManager.Die, the BattleScene advances by
-  its own rules, helper call included). `skip_to_wave(method="auto")` uses it once deployed.
-- Wall climb (`brain/ssbot/train/climb.py`, WallClimber: hold toward the wall, dash held per climb, released between):
-  probe 27 / 27 to the top (12 invincible, 15 under wave-0 attack), 2-6 scrambles, 1.6-5.5 s.
-- Targeted data policy v2 (`brain/ssbot/train/forum_policy.py`, combat_run `--policy data2` / `data2_envoy`): tactics
-  PRESS / KEEP / BAIT (choice boundaries from R0's boundaries.json, built-in copy until R0 merges) / DASH_IN / CLAW_IN /
-  UNDER / JUMP_OVER / WALL_BAIT / CLASH / CLIMB (pocket share 0.85 with only Clappers) / EVADE, hold times in game
-  seconds; data2_envoy never hits the Envoy below 20 HP.
-- Never-seen moves explained from the FSMs (PlayMaker SendEvent to self switches state before the later actions run):
-  Envoy HopSlash, Bellbearer Throw Antic Quick, Maestro Point Start are unreachable; the Forum Envoy's entry is its
-  ambush.
-- Tools: `ssbot.tools.forum_r1_audit` (families, near-boundary starts, never-seen transitions, clashes, clawline,
-  under fliers, pocket, climbs), `ssbot.tools.forum_speed_check` (2x vs 1x: fight-level permutation tests on dwell /
-  speed / choices, hitbox extents, sampling density), `ssbot.probes.forum_r1` (midsave / skip / states / check / climb),
-  `combat_run --time-scale / --same-seeds`; combat_run also stops on DEMO_SOON. Tests `brain/tests/test_forum_r1.py`.
+  StartWave(currentWave)). `fo_r1_w0` .. `fo_r1_w13` made by one policy skip from fo_A (`make_wave_states`). Encounters
+  `Forum_A_w<i>` (timebox 180 s); `combat_run --encounter` takes a comma list (rotates per episode). What a load does
+  not give (forum.md 13.1): the helper from wave 2 on (a w1 load does bring Garmond); room.battles reports wave i at the
+  battle start, startDelay(i) (1.0-3.0 s measured) before its members are activated; the never-run members of waves
+  0..i-1 stay children of their wave objects, so DoCheckEnemiesNew is inflated (a w2 load starts wave 3 only after a
+  wave-2 kill, 59.7 / 75.05 / 65.95 s in the first run, instead of 1.6 s).
+- Fixer round (8a03afb): the wave-start intro waits for the activation (room.battles currentEnemies > 0) and moves the
+  tap's battle start there (`GauntletTap.rebase_start`; AttemptRecord intro: battle_start_f, active_f, activation_s);
+  it calls the new oracle RPC `battle.prune` first (detach + destroy the HealthManager children of waves 0..i-1; not
+  deployed: records say ghosts "unpruned"). Forum_A_w2 is out of the rotation until the deploy; the first run's three
+  w2 episodes are listed in `C:\ssbot\data\runs\m2\20261004_111158_Forum_A_w2_mix_data2\exclude_w2_ghosts.json`
+  (behaviour_build --exclude-fights).
+- Oracle (both built `-p:Deploy=false`, NOT deployed): 06a7c2b `time.scale` > 1 through DebugMod's TimeScale (the game
+  clamps its own controls to 1) and `battle.wave {wave}`; 8a03afb `battle.prune`.
+- Wall climb (`brain/ssbot/train/climb.py`): probes 27 / 27; in the policy (first run, 36 wave-start episodes) 159 real
+  climbs, 144 to the top (91 %, p50 2.39 s); 61 more CLIMB segments began at the top and are not climbs (now flagged
+  `start_top`).
+- Targeted data policy v2 (`brain/ssbot/train/forum_policy.py`, `--policy data2` / `data2_envoy`, `idle`). Fixer round:
+  the Envoy protection counts the hero's velocity over 0.35 s and blocks down slashes over a protected body (the first
+  run hit the Envoy at <= 20 HP 69 times in 106 episodes, 49 episodes, 5 kills; mostly down slashes and dash slashes);
+  per-frame draws are hazards per game second, rest in game time; pocket share 0.5 (was 0.85: 60 % of the w7 / w13
+  time on the wall); `policy.segments` [frame, tactic, target, pocket, protect] and `protect_hp` in every record;
+  `IdlePolicy` (no input) for the speed check.
+- Never-seen moves are unreachable (FSM structure): Envoy HopSlash (Hop Up? 2407 -> Slash Antic 2407), Bellbearer Throw
+  Antic Quick (Rethrow? 910 -> In Range), Maestro Point (Attack Choice 794: Fire 556, Defend 238, Point 0); the Forum
+  Envoy's entry is its ambush.
+- Tables (R0's builder, fixer round): candidate covariate `hero_height` for the Forum specs (bins < 1 / 1-5 / >= 5 u
+  above the floor; Bell Beast unchanged): on the first run's 9 Clapper fights it is kept for Clapper Idle and Walk (the
+  pocket: Idle at 3-10 u, 0 / 494 Evade or Dmg Attack in the pocket vs 83 / 237 on the ground). Protected types:
+  `knowledge/1.0.30000/enemies/forum/hero_caused.json` (fsm.graph, 9 types: states with a TOOK DAMAGE / BLOCKED HIT /
+  CANCEL MULTI HIT exit); a type in a record's `policy.protect` loses its decisions out of those states at hp <=
+  protect_hp and its dwells in them (GauntletBuilder._drop_protected). `run_fights` carries unit / protect / segments.
+- Tools: `forum_r1_audit` (fixer: `boundary_r0` like-for-like with R0's Boundaries product, `clapper_dec` by hero place,
+  same-enemy clawline hits, Poisson P under fliers, `climbs_real`), `forum_speed_check` v2 (dwell on the coarsest frame
+  grid as integer steps, 0.2 s speed windows with both arms read on the coarse frames, choices by distance bin, Holm
+  with extended permutations plus the 99 % binomial bound, `--simulate-b K`), probes `forum_r1` (midsave / skip /
+  states / check / climb / fsmgraph). Tests `brain/tests/test_forum_r1.py` (20).
 
-### Measured (first two recordings of each run: Envoy 50 episodes, wave starts 20; forum.md 13.4-13.6)
+### Measured (forum.md 13; first run = frozen 1c374f8, runs 20261004_111158_*: Envoy 106 episodes 1.56 h, waves 36 / 1.71 h)
 
-- Envoy: EN_SLASH 1113, EN_JUMPSLASH 441, EN_CHARGE 156, EN_AMBUSH 50 (one per episode, ~55 / h wall); `Hop Up?`
-  1113 -> `Slash Antic` 1113 (123 with the wall < 3 u), dwell 0.0 s; `Rethrow?` 562 -> `In Range`; Maestro
-  `Attack Choice` 419: Fire 296, Defend 123, Point 0.
-- Near-boundary starts per game hour vs R0: Envoy slash 270 vs 5.7, Choristor slash / whip 34 / 25 vs 3.5 / 3.4,
-  Clawmaiden slash 103 vs 17, Minister evade 15 vs 5.
-- Climb in the policy: 101 / 106 (p50 1.5 s). Pocket (w7 / w13) 464 s: Clappers jump 59, jump cast 56, cast 55 (all
-  from Far Range), evade 45 (all from Avoid Type), slam 0; 0 Clapper hits in the pocket.
-- Clawline: 157 presses, 59 harpoon hits, 5 hero hits by the hooked type within 0.5 s (not invulnerable in the dash).
-  Under fliers: Bellbearer 0 hits in 37.5 s under vs 4.75 / min near; Reed 3.5 vs 3.1 / min (no gain). Bells: 171
-  swings, 61 redirects. Nail clashes: Envoy campaign 146 (Envoy slash 49), wave starts 69 (Minister charge 48).
-- Speed check 1x vs 1x calibration (old runs 074533 / 074719): fight-level permutation p < 0.05 for 0.7-2.4 % of the
-  dwell keys, 2.2 % speed, 0-11 % of the 9 choice keys; per-sample KS is unusable (fights cluster).
+- Near-boundary decisions, R0's definition (within 1 u of R0's boundary_u), per game hour R1 vs R0: Envoy slash 1011 vs
+  25 (chosen 233 vs 5.8), Choristor slash 4369 vs 445 (chosen 34.7 vs 3.5), Clawmaiden slash 77 vs 45 (24.6 vs 16.8),
+  Minister evade 408 vs 186 (12.9 vs 5.1), Clapper slam 521 vs 762 (16.4 vs 44.5). The chosen share per decision is
+  R0's in every family (an enemy property); the first round's "3-47x" counted any entry into an attack start.
+- Clawline: 203 presses, 75 harpoon hits, 5 hero hits within 0.5 s, all 5 from the hooked individual (nearest-body
+  match). Under fliers (Poisson at the near rate): Bellbearer 0 in 51.8 s vs 4.08 expected (P 0.017); Minister 0 vs
+  0.85 (P 0.43); Reed 6 vs 6.9 (no gain); Tiny 44 vs 50.8. Bells: 289 CLASH swings at bells; the bell FSM entered Nail
+  Hit 109 / Tink 105 times from any swing (not a per-swing rate). Pocket 1232 s: Clapper jump 127 / jump cast 121 /
+  cast 117 / evade 117, slam 0, Clapper hits 0.
+- Speed check calibration (074533 vs 074719, 8 + 8 fights): 1x vs 1x dwell 7 / 270 (cap 22), speed 6 / 114, choices
+  0 / 37, hitbox 0.4 %; 1x vs simulated 2x dwell 10 / 270, speed 5 / 112, choices 0 / 39, hitbox 0.4 %; no Holm hit
+  anywhere. Without the grid the simulated 2x fails (136 / 270 dwell; the first tool 155).
 
 ### Running
 
-- Chain `C:\ssbot\sandbox\fo_r1_chain.ps1` (frozen code `C:\ssbot\live_fo_r1_1c374f8`), started 11:12, hidden:
-  - instance 2: Envoy campaign `C:\ssbot\data\runs\m2\20261004_111158_Forum_A_w0_data2_envoy` (data2_envoy on
-    Forum_A_w0, 60 s episodes, 4 h), then wave starts (data2, 6 h, seeds 129000+) in a new run dir;
-  - instance 3: wave starts `C:\ssbot\data\runs\m2\20261004_111158_Forum_A_w2_mix_data2` (data2, rotation w2, w4, w6,
-    w7, w8, w9, w11, w12, w13 x2, w3, w5, w10; 180 s episodes; 10 h, seeds 128000+).
-  - Logs `C:\ssbot\sandbox\fo_r1_chain_i2.log` / `_i3.log`. Stop: STOP_AGENTS or DEMO_SOON (both end runs after the
-    episode and the chain starts nothing more), or `combat_run stop <run dir>` (the i2 chain then goes on to its second
-    part). Expected end about 21:15.
+- Started 13:13 from `C:\ssbot\sandbox\fo_r1f_run.cmd` (hidden cmd, no PowerShell host; frozen code
+  `C:\ssbot\live_fo_r1f_8a03afb`, a git worktree of 8a03afb), logs `C:\ssbot\sandbox\fo_r1f_i2.log` / `_i3.log`:
+  - instance 2: `C:\ssbot\data\runs\m2\20261004_131323_Forum_A_w0_data2_envoy` (data2_envoy, 40 episodes of 60 s, seeds
+    129000+: the protection check), then wave starts for 7.5 h (data2, seeds 130500+) in a new run dir (expected end
+    about 21:30);
+  - instance 3: `C:\ssbot\data\runs\m2\20261004_131323_Forum_A_w4_mix_data2` (data2, rotation w4, w6, w7, w8, w9, w11,
+    w12, w13, w3, w5, w10; 180 s episodes; 9 h; seeds 131000+; expected end about 22:15).
+  - Stop: `C:\ssbot\sandbox\STOP_AGENTS` or `DEMO_SOON` (runs end after the episode, nothing more starts), or
+    `combat_run stop <run dir>` (from `C:\ssbot\live_fo_r1f_8a03afb\brain`) for one run.
+- The first round's chain (`fo_r1_chain.ps1`) is gone: its PowerShell hosts had died before 13:00 (no "end" lines) while
+  their workers ran on; the fixer stopped both workers gracefully (STOP files) at 13:00.
 
 ### Needs deploy
 
-- Oracle 06a7c2b (`time.scale` > 1, `battle.wave`), built with `-p:Deploy=false`; deploy when no instance runs.
+- Oracle at 8a03afb (`time.scale` > 1 and `battle.wave` from 06a7c2b, `battle.prune`), built with
+  `-p:Deploy=false`; deploy when no instance runs (the user closes the game windows).
 
 ### Next
 
-1. After the deploy: the 2x check. Same seeds on two instances, e.g. `combat_run run --instances 2 --encounter
-   Forum_A_w7,Forum_A_w13,Forum_A_w2,Forum_A_w4,Forum_A_w6 --policy data2 --same-seeds --seed 130000 --hours 1.5
-   --time-scale 2` and the same with `--instances 3` at 1x; then `forum_speed_check --a <1x run> --b <2x run>`
-   (`perm_verdict` per metric; the 1x-vs-1x calibration is in forum.md 13.5). Adopt 2x for collection only if dwell,
-   speed and choices match and the hitbox extents agree; even then the support templates bin at 1/60 s and a 2x
-   recording fills every other bin per instance (forum.md 13.5).
-2. After the deploy: `forum_r1 skip --method oracle --wave 13` (battle.wave) and `check` that Garmond comes in.
-3. Run `forum_r1_audit` on the two runs when they end; rebuild the tables with them (`behaviour_build --encounter Forum`
-   after R0 merges) and add the never-seen moves as structurally absent.
-4. `gauntlet.WAITING_STATES` lacks "Dead" (the Maestros' parked Tinies): live_enemies counts nine parked Tinies in
-   play from the load on; v1's GauntletDataPolicy targets them. R1 code filters them (`wave_start.fighting`); fixing
+1. After the deploy, `forum_r1 check --waves 2,3,4,9,10` (battle.prune: a w2 load starts wave 3 about 1.5 s after the
+   activation; prune lists the earlier waves' members), then put Forum_A_w2 back into the rotation.
+2. After the deploy, the 2x check: same seeds on two instances, at least 8 + 8 gauntlets, first
+   `combat_run run --instances 2 --encounter Forum_A_w7,Forum_A_w13,Forum_A_w4,Forum_A_w6 --policy idle --same-seeds
+   --seed 131500 --episodes 8 --time-scale 2` and the same with `--instances 3` at 1x (no input: the policy's action
+   latency doubles at 2x), then with data2; `forum_speed_check --a <1x> --b <2x>` (`perm_verdict`: dwell, speed,
+   choices, hitbox all match, none underpowered). Even then a 2x instance fills every other 1/60 s state-time bin, so
+   the support templates need their own check.
+3. After the deploy, `forum_r1 skip --method oracle --wave 13` (battle.wave) and check that Garmond comes in.
+4. Rebuild the Forum tables with R0 + R1 (`behaviour_build --encounter Forum <runs> --exclude-fights <w2 list>`): check
+   the build report for `hero_height` among the conditioners and the `protected Song Pilgrim 01: ... dropped`
+   counters; keep R1 provenance for an ablation (R1 dominates the Envoy: 2407 slashes in 1.56 h vs R0's 692 in 25.4 h);
+   mark HopSlash, Throw Antic Quick, Point and the Envoy Wake entry as structurally absent.
+5. Measure the protection fix on run 20261004_131323_Forum_A_w0_data2_envoy (hits on the Envoy at <= 20 HP; the first
+   run: 39 per game hour) once its 40 episodes are in, if the result below is missing.
+6. `gauntlet.WAITING_STATES` lacks "Dead" (the Maestros' parked Tinies): live_enemies counts nine parked Tinies in play
+   from the load on; v1's GauntletDataPolicy targets them. R1 code filters them (`wave_start.fighting`); fixing
    live_enemies itself changes other tools' numbers (left for a reviewed change).
