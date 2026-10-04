@@ -7,8 +7,8 @@ class _Link:
         self.state = state
         self.calls = []
 
-    def rpc(self, name, **kw):
-        self.calls.append((name, kw))
+    def rpc(self, method, **kw):
+        self.calls.append((method, kw))
         return {}
 
 
