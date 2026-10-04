@@ -99,9 +99,97 @@ def _in_game_without_control(s: dict) -> bool:
     return bool(g.get("scene")) and bool(s.get("hero")) and not on_menu and not in_gameplay(s)
 
 
+GS_CUTSCENE = 7                 # GlobalEnums.GameState
+SLOT_TRIES = 3
+NEW_GAME_WAIT_S = 180.0         # Opening_Sequence ran 80 s unskipped (20261003_010522), then Tut_01 loads
+
+
+def _describe(s: dict | None) -> str:
+    g = (s or {}).get("game") or {}
+    h = (s or {}).get("hero") or {}
+    return (f"frame {(s or {}).get('f')} gs {g.get('gs')} menu {g.get('menu')} scene {g.get('scene')} "
+            f"paused {g.get('paused')} hero {bool(h)} input {h.get('hero_accepting_input')}")
+
+
+def _unstick(link, enc, log) -> None:
+    """One recovery step after a failed way back into the sandbox slot, by what the game shows now.
+
+    - A cutscene without a hero: a new game started (20261003_010522, 07:13: after a real quit the slot-select Enter
+      began a new game, Opening_Sequence, as the save select does for a slot it reads as empty, m0:N30 / probes P5;
+      save suppression keeps it off disk). Tap jump (the legacy anyKeyDown shim; a SKIP_PROMPT needs a second press)
+      until the game has a hero, then fall through to the next case.
+    - A game without control (a hero, no input: the new game's first room, the post-kill memory scene): load the
+      encounter's savestate, as at the worker's start.
+    - Paused in a scene: unpause (Continue).
+    - Anything else (the title or save-select menus, a load): nothing; the next try runs load_slot again."""
+    from ssbot.ipc.framing import mask
+    from ssbot.train.episode import unpause, wait_settled
+    s = link.wait_state(lambda s: s.get("game") is not None, timeout_s=60)
+    g = s.get("game") or {}
+    if g.get("gs") == GS_CUTSCENE and not s.get("hero"):
+        log(f"a cutscene without a hero ({g.get('scene')}): a new game? tapping jump until a hero appears")
+        deadline = time.monotonic() + NEW_GAME_WAIT_S
+        while time.monotonic() < deadline and not link.closed:
+            link.act(link.frame + 2, mask("jump"), hold_frames=3)
+            try:
+                s = link.wait_state(lambda s: bool(s.get("hero")) and (s.get("game") or {}).get("gs") != GS_CUTSCENE,
+                                    timeout_s=1.0)
+                break
+            except TimeoutError:
+                continue
+        link.rpc("input.release", timeout_s=30)
+        log(f"after the taps: {_describe(link.state)}")
+        try:     # the new game's first room: Hornet wakes without input for a while
+            s = link.wait_state(lambda s: bool(s.get("hero")) and (s.get("hero") or {}).get("hero_accepting_input"),
+                                timeout_s=30)
+        except TimeoutError:
+            s = link.state or s
+    if _in_game_without_control(s) or (s.get("hero") and (s.get("game") or {}).get("scene") != enc.scene
+                                       and not (s.get("game") or {}).get("paused")):
+        log(f"loading the savestate {enc.savestate} from {(s.get('game') or {}).get('scene')}")
+        link.rpc("savestate.load", timeout_s=40, name=enc.savestate, timeout=30)
+        wait_settled(link, enc.scene, timeout_s=60)
+    elif (s.get("game") or {}).get("paused") and (s.get("game") or {}).get("scene"):
+        log("paused in a scene: unpausing")
+        unpause(link)
+
+
+def back_into_slot(link, enc, instance: int, tries: int = SLOT_TRIES, slot_timeout_s: float = 120.0) -> None:
+    """Into gameplay in the sandbox slot (load_slot from the menus; a no-op in gameplay), Hornet standing, save
+    suppression on: at the worker's start and after every real quit. Retried up to `tries` times with one _unstick
+    step between tries: chain H's campaign died here twice (20261003_010522 at 07:13, load_slot after a real quit
+    waited 120 s for gameplay while a new game's opening ran; 20261003_074533, guards.set timed out on a freshly
+    started game). A closed link is not retried (the game is gone; restarting it is the operator's call)."""
+    from ssbot.ipc.oracle_link import OracleError
+    from ssbot.probes.common import load_slot, stand_up
+
+    def log(msg: str) -> None:
+        print(f"[i{instance}] {msg}", flush=True)
+
+    for attempt in range(1, tries + 1):
+        try:
+            load_slot(link, 1, timeout_s=slot_timeout_s)
+            stand_up(link)
+            if not link.rpc("guards.set", timeout_s=30, save_suppression=True)["save_suppression"]:
+                raise SystemExit("save suppression could not be turned on")
+            if attempt > 1:
+                log(f"back in the sandbox slot on try {attempt}")
+            return
+        except (TimeoutError, OracleError) as e:
+            if link.closed or attempt == tries:
+                raise
+            log(f"back into the sandbox slot failed (try {attempt} of {tries}): {type(e).__name__}: {e}; "
+                f"{_describe(link.state)}")
+            try:
+                _unstick(link, enc, log)
+            except (TimeoutError, OracleError) as e2:
+                if link.closed:
+                    raise
+                log(f"recovery step failed: {type(e2).__name__}: {e2}; {_describe(link.state)}")
+
+
 def worker(a: argparse.Namespace) -> int:
     from ssbot.ipc.oracle_link import OracleLink
-    from ssbot.probes.common import load_slot, stand_up
     from ssbot.record.recorder import Recorder
     from ssbot.train.encounters import ENCOUNTERS
     from ssbot.train.episode import AttemptRecord, make_tap, run_episode
@@ -141,10 +229,7 @@ def worker(a: argparse.Namespace) -> int:
         link.rpc("savestate.load", timeout_s=40, name=enc.savestate, timeout=30)
         from ssbot.train.episode import wait_settled
         wait_settled(link, enc.scene, timeout_s=60)
-    load_slot(link, 1)                   # a no-op in gameplay
-    stand_up(link)
-    if not link.rpc("guards.set", save_suppression=True)["save_suppression"]:
-        raise SystemExit("save suppression could not be turned on")
+    back_into_slot(link, enc, a.instance)
     rec_obj = None
     deadline = time.monotonic() + a.hours * 3600 if a.hours else None
     counts: Counter = Counter()
@@ -190,10 +275,7 @@ def worker(a: argparse.Namespace) -> int:
             rq = (d.get("policy") or {}).get("real_quit")
             if rq and (rq.get("main_menu") or rq.get("steps")):
                 # a real quit left the game on (or on its way to) the main menu: back into the sandbox slot
-                load_slot(link, 1)
-                stand_up(link)
-                if not link.rpc("guards.set", save_suppression=True)["save_suppression"]:
-                    raise SystemExit("save suppression could not be turned on")
+                back_into_slot(link, enc, a.instance)
             fails_in_row = fails_in_row + 1 if rec.outcome == "HARNESS_FAIL" else 0
             if fails_in_row >= 5:
                 print(f"[i{a.instance}] 5 harness failures in a row, stopping", flush=True)

@@ -32,7 +32,9 @@ Per trial:
              keys newly pressed on a paused frame; per key counts. Before the menu key guard (safety.key_guard), the
              37 gate / live QUITs (20261002_123347 ... 152649) had a movement key latched 1-2 frames into the pause
              in 9 and newly pressed on the pause frame in 4. pause_key_frames_paused: the loop's own in-flight press
-             after the pause (within the 230 ms budget)
+             after the pause (within the 230 ms budget). loop_key_runs: latched-run lengths of the loop's own
+             Pause / Up / Down / Enter presses (its ACTIONs carry EXCLUSIVE, which must not cut its own keys below
+             the 2-frame minimum press; loop_key_runs_short must be 0)
   unpauses   paused -> running transitions before the quit reached the main menu (must be 0; real quits only: an
              emulated quit is resumed by the harness); the machine's own
              count (real_quit.unexpected_unpauses) and its wrong Submits (real_quit.wrong_submits, must be 0)
@@ -116,6 +118,39 @@ def moments(states: list[dict], names: list[str], death_states: tuple[str, ...] 
             out["clash"].append(f)
     out["hit"] = sorted(hits)
     return {k: sorted(set(v)) for k, v in out.items()}
+
+
+LOOP_KEYS = ("pause", "up", "down", "enter")
+MIN_PRESS = 2                # HoldFilter.DefaultMinPressFrames
+
+
+def loop_key_runs(after_pend: list[dict], press: int | None, menu_f: int | None) -> dict[str, list[int]]:
+    """Latched-run lengths (frames) of the pause loop's own presses, from its first Pause latch to the main menu:
+    every Pause run, and Up / Down / Enter runs that start on a paused frame (the menu steps; the planner never
+    presses Pause, and its Up / Down are not pressed while paused). The loop's ACTIONs carry EXCLUSIVE; the oracle's
+    HoldFilter.QueueExclusive must spare the loop's own keys, so every run is >= the 2-frame minimum press. A run
+    with a missing STATE frame inside or at either end is left out (its length is unknown)."""
+    out: dict[str, list[int]] = {k: [] for k in LOOP_KEYS}
+    if press is None:
+        return out
+    seq = [s for s in after_pend if s["f"] >= press and (menu_f is None or s["f"] < menu_f)]
+    for key in LOOP_KEYS:
+        bit = BIT[key]
+        start, prev_f, ok = None, None, False
+        for s in seq:
+            f, on = s["f"], bool(_latched(s) & bit)
+            gap = prev_f is not None and f != prev_f + 1
+            if start is not None and (gap or not on):
+                if ok and not gap:
+                    out[key].append(prev_f - start + 1)
+                start = None
+            if on and start is None:
+                paused = bool((s.get("game") or {}).get("paused"))
+                # a run's start needs the frame before it seen without the key (no gap), except the first press
+                ok = (key == "pause" or paused) and (f == press or (prev_f == f - 1))
+                start = f
+            prev_f = f
+    return out
 
 
 def _ready(s: dict) -> bool:
@@ -211,6 +246,7 @@ def trial(row: dict, states: list[dict], names: list[str], natural: bool = False
         elif was and g.get("gs") is not None and g.get("gs") != GS_MAIN_MENU and g.get("scene"):
             unpauses += 1
         was, prev = p, latched
+    loop_runs = loop_key_runs(after_pend, press, menu["f"] if menu is not None else None)
     rq = pol.get("real_quit") or {}
     q = lambda f: (by_f.get(f) or {}).get("q")  # noqa: E731
     menu_s = None
@@ -227,7 +263,7 @@ def trial(row: dict, states: list[dict], names: list[str], natural: bool = False
         key_waits=rq.get("key_waits"), key_waits_expired=rq.get("key_waits_expired"),
         foreign_key_frames_paused=foreign, foreign_edges_paused=edges, last_foreign_edge=last_edge,
         foreign_keys=dict(per_key), pause_frame_keys=pause_frame_keys,
-        pause_key_frames_paused=pause_after,
+        pause_key_frames_paused=pause_after, loop_key_runs=loop_runs,
         unpauses=unpauses if rq.get("armed") else None,     # an emulated quit is resumed by the harness on purpose
         machine_unpauses=rq.get("unexpected_unpauses"), wrong_submits=rq.get("wrong_submits"),
         main_menu=menu is not None, to_menu_frames=None if menu is None or paused is None else menu["f"] - paused,
@@ -275,6 +311,10 @@ def summarize(trials: list[dict]) -> dict:
                                                       if t.get("last_foreign_edge") is not None), default=None),
             "pause_key_frames_after_pause_max": max((t.get("pause_key_frames_paused") or 0 for t in inj),
                                                     default=0),
+            "loop_key_runs": {k: dict(sorted(Counter(n for t in inj for n in (t.get("loop_key_runs") or {}).get(k, ())
+                                                     ).items())) for k in LOOP_KEYS},
+            "loop_key_runs_short": sum(n < MIN_PRESS for t in inj for v in (t.get("loop_key_runs") or {}).values()
+                                       for n in v),
             "unintended_unpauses": sum(t.get("unpauses") or 0 for t in inj)
             + sum(t.get("machine_unpauses") or 0 for t in inj),
             "wrong_submits": sum(t.get("wrong_submits") or 0 for t in inj),

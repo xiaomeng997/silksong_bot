@@ -187,4 +187,26 @@
 9. 低血量检查（7.7 的命令：`SSBOT_INJECT_LEAVE_HP=1,3,3`、`--inject-hits 1.0`，oracle 视图 10 场，`lowhp_check` 汇总）：结果与部署前同（h = 1 暂停帧 = G + 1（ramp999）或 G + 2，全在无敌窗口内；h = 2 攒丝后 Bind 完成、没有 Q6 退出），证明 EXCLUSIVE 不影响暂停时机，也不切掉 Bind 的按键（Bind 不在暂停循环里，ACTION flags 0）。
 10. 通过后在新 DLL 上重启 10⁴ 暂停压力测试（HANDOFF 链 Q 一节的命令），它就是 KeyboardInjector 一侧的长期实战检查。
 
+### 8.1 部署后结果（链 X，2026-10-04 01:35–02:20，实例 4，种子 121900–121954；DLL = main 的 oracle，2026-10-04 00:25 部署）
+
+工作区 `wf_7f5f02aa-b80-1`，代码 ee64458 + 3fdd8af（只改工具 / 探针 / worker 重试，见下）。实例 4 从标题画面开始；只在实例 4 上做，其他实例（Forum 采集等）的第 3–6 步不在本链。
+
+| 步 | 结果 |
+|---|---|
+| 3 HELLO | `action_flags == ["exclusive"]` 通过（`m1_harness` 的 hello 一节现在也检查它）。 |
+| 4 input.stats | `hold.released_early` 存在，启动后为 0；新计数 `exclusive`（EXCLUSIVE ACTION 数）也在；`lost_pause_taps` / `lost_events` / `lost_pauses_confirmed` 等旧键照旧。 |
+| 5 旧导出 | `m2_exports --instance 4 --skip-fight` 全 PASS（act.hf 923 / 923、hero.tm、menu 一节、room.gates、moves；dash 一项 SKIP：存档没有冲刺）；STATE 构建 p50 186 µs、p99 539 µs，`allies` 一节在（cost_ex p50 1 µs）。Forum 实例上的 room.battles / allies 没查（不是本链的实例）。 |
+| 6 普通 ACTION | m2_exports 之后 `released_early` 0、`exclusive` 0；4 场普通 eval（20261004_020427，无注入、不真实退出，4 CLEAR）前后：applied +15 058、`exclusive` 不变（10 685）、`released_early` 不变（22）、`lost_events` 不变。增长只来自暂停循环和掉线看门狗。 |
+| 7 掉线看门狗 | `m1_harness --instance 4 --only hello,lost,lost_late --lost` ALL PASS：掉线 251 ms 后置 lost，按住的 Down 松开，1 次点按就暂停，**Pause 落地帧只锁存 Pause 位**（0x4000）。新一节 `lost_late`：最后一个 ACTION 在看门狗触发前 +12…+15 帧按 Up，8 / 8 次 Pause 落地帧只有 Pause；其中 2 次 Up 只锁存了 1 帧就到看门狗（旧 `ReleaseAllNow` 会保留最短按下、与 Pause 同帧），被 CutAll 当帧切掉，`released_early` 恰好 +2。 |
+| 8 短暂停块 | 20261004_014531（`SSBOT_INJECT_KINDS=keys,menu`，`--real-quit 1.0 --inject-hits 1.0`，40 场：在途按键 19、菜单 21）：40 / 40 暂停并退到主菜单；延迟 p50 1、p99 3、最大 3 帧（≤ 6）；暂停帧游戏键 0、菜单可见帧游戏键 0、意外取消暂停 0、错误确认 0；菜单 21 / 21 落在难点（−1：12、0：9）。**暂停循环自己的按键每段锁存 ≥ 2 帧**（`pause_stress` 新字段 `loop_key_runs`：Pause 2 帧 52 段、3 帧 9 段；Up 2 帧 3、3 帧 77；Enter 2 帧 3、3 帧 77；`loop_key_runs_short` 0），QueueExclusive 没切掉循环自己的键。块内 `released_early` +20（2 → 22，规划器在途的键被切）、`exclusive` ACTION 10 685、掉线 0 次。Python 键保护仍在等（19 / 19 次在途按键试验等过，0 次超时）。 |
+| 9 低血量 | 20261004_020857（`SSBOT_INJECT_LEAVE_HP=1,3,3`、`--inject-hits 1.0`、oracle、10 场，`lowhp_check`）：h = 1 3 / 3 在受击帧进入 PAUSE_PENDING，暂停在 +16 = G + 1（ramp999，0.266–0.267 s），全在无敌窗口内（剩 0.925 s），0 次 Bind；h = 2 7 / 7 攒到 9 丝（受击后 205–809 帧），7 次 Bind、7 次完成、0 次被打中，7 / 7 CLEAR，0 次退出。与部署前（7.7）相同。 |
+| 10 重启 10⁴ | 见 8.2。 |
+
+### 8.2 10⁴ 暂停压力测试（新 DLL 上重启）与回到存档槽的重试
+
+- 上一段 20261003_153044（5026372）在 00:25 部署窗口优雅停止：1 014 次（种子 105453–106466，QUIT 978、CLEAR 36）；`summary.json` 的真实退出：武装 1 014、暂停 1 012、到主菜单 1 012、错误确认 0、意外取消暂停 0（本链没有逐场分析）。
+- **重试**（3fdd8af，`combat_run.back_into_slot`）：worker 开局和每次真实退出后回到 1 号槽（load_slot、stand_up、guards.set）最多试 3 次，两次之间按当时画面做一步恢复：没有主角的过场（新游戏的 Opening_Sequence）→ 点跳跃跳过直到有主角，等她能操作；有主角但不能操作或不在遭遇场景 → 读遭遇的 savestate；在场景里暂停着 → Continue；在菜单上 → 下一次再 load_slot。连接断开不重试（游戏没了，要人来重启）。`tests/test_combat_run_retry.py` 用替身游戏覆盖：一次成功、新游戏开场后恢复、guards.set 超时重试、三次都失败抛出、断线不重试。
+- **之前两次死因**（录像 20261003_010522 i4_028 的最后 12 000 帧）：07:13 那次真实退出后，存档选择界面上按 Enter（菜单出现后 21 帧，与正常的那次相同）**开了一局新游戏**：场景 Opening_Sequence、gs 7（过场）、没有主角，80 s 后录像结束；load_slot 一直等"能操作"，120 s 超时。正常的那次按 Enter 的同一帧 `pause.bench` 变真（读入了存档），这次没有——游戏把 1 号槽当成了空槽（`SaveSlotButton.OnSubmit` 的 Empty 分支 → `StartNewGame`，m0:N30）。为什么这一次读成空槽没查明（槽文件 9/30 的版本还在，之后上千次读档正常）。开着存档抑制，新游戏不会写盘。07:45 那次是游戏重启后几分钟内 `guards.set` RPC 10 s 超时（刚启动的游戏卡顿），现在超时 30 s 且会重试。新游戏的恢复路径（跳过开场 → Tut_01 → 读 savestate）**只在替身游戏里测过**，实战还没遇到。
+- 已启动（脱离会话、隐藏窗口，Start-Process）：工作区 `C:\ssbot\live_pq_3fdd8af`（3fdd8af = main ee64458 + 本链的工具和重试，numba 已预热），`C:\ssbot\sandbox\pq_campaign_start.cmd C:\ssbot\live_pq_3fdd8af 118000 3900 C:\ssbot\sandbox\pq_campaign_x.log`，种子 118000–121899（121900–121954 是本节检查用的），运行目录 `C:\ssbot\data\runs\m2\20261004_021933_BellBeast_eval_planner_oracle_inject`，约 30 s / 次，约 33 h。停止：在 `C:\ssbot\live_pq_3fdd8af\brain` 里 `..\scripts\uv.cmd run python -m ssbot.tools.combat_run stop <运行目录>`（或 STOP_AGENTS），当前这一次结束后退出。汇总：`pause_stress <运行目录> --quiet --json <运行目录>\pause_stress.json`（看 `loop_key_runs_short`）、`lowhp_check --q1 <运行目录>`（自然受击的 Q1），低于正常优先级。
+
 **之后可选（主管决定）**：Python 键保护（`safety.key_guard`）按 EXCLUSIVE 建模，`keys_clear` 恒真，省掉 0–2 帧的等待；先跑一块关掉保护的对照（需要加一个开关），确认只靠 EXCLUSIVE 时菜单帧游戏键仍为 0 再改。
