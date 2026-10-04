@@ -1064,15 +1064,15 @@ them in range), savestates `fo_r1_*`. Facts: `docs/facts/1.0.30000/forum.md` sec
 
 ### Running
 
-- Started 13:13 from `C:\ssbot\sandbox\fo_r1f_run.cmd` (hidden cmd, no PowerShell host; frozen code
-  `C:\ssbot\live_fo_r1f_8a03afb`, a git worktree of 8a03afb), logs `C:\ssbot\sandbox\fo_r1f_i2.log` / `_i3.log`:
-  - instance 2: `C:\ssbot\data\runs\m2\20261004_131323_Forum_A_w0_data2_envoy` (data2_envoy, 40 episodes of 60 s, seeds
-    129000+: the protection check), then wave starts for 7.5 h (data2, seeds 130500+) in a new run dir (expected end
-    about 21:30);
-  - instance 3: `C:\ssbot\data\runs\m2\20261004_131323_Forum_A_w4_mix_data2` (data2, rotation w4, w6, w7, w8, w9, w11,
-    w12, w13, w3, w5, w10; 180 s episodes; 9 h; seeds 131000+; expected end about 22:15).
-  - Stop: `C:\ssbot\sandbox\STOP_AGENTS` or `DEMO_SOON` (runs end after the episode, nothing more starts), or
-    `combat_run stop <run dir>` (from `C:\ssbot\live_fo_r1f_8a03afb\brain`) for one run.
+- Nothing. The fixer's collection (`C:\ssbot\sandbox\fo_r1f_run.cmd`, hidden cmd, frozen code
+  `C:\ssbot\live_fo_r1f_8a03afb`, a git worktree of 8a03afb) started 13:13 and stopped itself at 13:36-13:38 when
+  `C:\ssbot\sandbox\DEMO_SOON` appeared ("human practice 0.5x Forum"): instance 2
+  `C:\ssbot\data\runs\m2\20261004_131323_Forum_A_w0_data2_envoy` (23 protected Envoy episodes), instance 3
+  `C:\ssbot\data\runs\m2\20261004_131323_Forum_A_w4_mix_data2` (8 wave-start episodes). After the demo (DEMO_SOON
+  gone), restart hidden: `Start-Process cmd.exe -ArgumentList "/c C:\ssbot\sandbox\fo_r1f_run.cmd i2w" -WindowStyle
+  Hidden` (instance 2, wave starts 7.5 h, seeds 130500+) and the same with `i3` (instance 3, 9 h, seeds 131100+); logs
+  `C:\ssbot\sandbox\fo_r1f_<part>.log`; stop with STOP_AGENTS / DEMO_SOON or `combat_run stop <run dir>` (from
+  `C:\ssbot\live_fo_r1f_8a03afb\brain`).
 - The first round's chain (`fo_r1_chain.ps1`) is gone: its PowerShell hosts had died before 13:00 (no "end" lines) while
   their workers ran on; the fixer stopped both workers gracefully (STOP files) at 13:00.
 
@@ -1096,8 +1096,9 @@ them in range), savestates `fo_r1_*`. Facts: `docs/facts/1.0.30000/forum.md` sec
    the build report for `hero_height` among the conditioners and the `protected Song Pilgrim 01: ... dropped`
    counters; keep R1 provenance for an ablation (R1 dominates the Envoy: 2407 slashes in 1.56 h vs R0's 692 in 25.4 h);
    mark HopSlash, Throw Antic Quick, Point and the Envoy Wake entry as structurally absent.
-5. Measure the protection fix on run 20261004_131323_Forum_A_w0_data2_envoy (hits on the Envoy at <= 20 HP; the first
-   run: 39 per game hour) once its 40 episodes are in, if the result below is missing.
+5. Restart the collection after the demo (Running). The protection fix is measured: run
+   20261004_131323_Forum_A_w0_data2_envoy, 23 episodes, the Envoy brought to 20 HP in every one (46 hits), then 0 hits
+   and 0 kills (first run: 69 hits in 49 of 106 episodes, about 15 expected in 0.38 h).
 6. `gauntlet.WAITING_STATES` lacks "Dead" (the Maestros' parked Tinies): live_enemies counts nine parked Tinies in play
    from the load on; v1's GauntletDataPolicy targets them. R1 code filters them (`wave_start.fighting`); fixing
    live_enemies itself changes other tools' numbers (left for a reviewed change).
