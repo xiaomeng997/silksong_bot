@@ -365,6 +365,36 @@ def test_set_time_scale_waits_out_a_momentary_zero():
         set_time_scale(_L([1.0]), 2.0, 2, wait_s=0.3)
 
 
+def test_structurally_absent_moves_marked(tmp_path):
+    """forum.md 13.2's unreachable moves: in the specs, in the coverage rows (not missing), in a tables dict, and
+    stamped into tables written before (behaviour_build --stamp-absent); Bell Beast has none."""
+    import json
+
+    from ssbot.knowledge.behaviour_tables import BELL_BEAST, absent_marks
+    from ssbot.knowledge.gauntlet_tables import FORUM_SPECS, GauntletBuilder, stamp_absent
+    env = dict(FORUM_SPECS[ENVOY].absent)
+    assert {"EN_HOPSLASH", "HopSlash Antic", "EN_ENTRY", "Wake"} <= set(env)
+    assert "MA_POINT" in dict(FORUM_SPECS["Song Pilgrim Maestro"].absent)
+    assert "Throw Antic Quick" in dict(FORUM_SPECS["Pilgrim 03 Song"].absent)
+    assert not BELL_BEAST.absent and absent_marks(BELL_BEAST, {"x": 1}) == {"x": 1}
+    rows = {(r["type"], r["family"]): r for r in GauntletBuilder(FORUM_SPECS).report_rows(hours=1.0)}
+    assert rows[(ENVOY, "EN_HOPSLASH")]["absent"] and rows[(ENVOY, "EN_HOPSLASH")]["hours_to_target"] == 0.0
+    assert "absent" not in rows[(ENVOY, "EN_SLASH")] and rows[(ENVOY, "EN_SLASH")]["hours_to_target"] is None
+    t = absent_marks(FORUM_SPECS[ENVOY], {"coverage": {"families": {"EN_HOPSLASH": {"n": 0, "missing": 200},
+                                                                       "EN_SLASH": {"n": 5, "missing": 195}}}})
+    assert t["coverage"]["families"]["EN_HOPSLASH"] == {"n": 0, "missing": 0, "absent": env["EN_HOPSLASH"]}
+    assert t["coverage"]["families"]["EN_SLASH"]["missing"] == 195 and "Wake" in t["structurally_absent"]
+    (tmp_path / "Envoy.json").write_text(json.dumps({"coverage": {"families": {}}}), encoding="utf-8")
+    (tmp_path / "coverage.json").write_text(json.dumps({"rows": [
+        {"type": ENVOY, "family": "EN_HOPSLASH", "n": 0, "hours_to_target": None},
+        {"type": ENVOY, "family": "EN_SLASH", "n": 9, "hours_to_target": 3.0}]}), encoding="utf-8")
+    assert len(stamp_absent(tmp_path, {"sha": "x"})) == 2
+    env_t = json.loads((tmp_path / "Envoy.json").read_text(encoding="utf-8"))
+    cov = json.loads((tmp_path / "coverage.json").read_text(encoding="utf-8"))
+    assert "HopSlash Antic" in env_t["structurally_absent"] and env_t["absent_stamped_by"] == {"sha": "x"}
+    assert cov["rows"][0]["absent"] and cov["rows"][0]["hours_to_target"] == 0.0 and "absent" not in cov["rows"][1]
+
+
 def test_builder_last_resort_attribution_skips_parked_tinies():
     """A contact named only "Song Automaton Tiny" (pooled, all same-named), no Tiny touching or near the hero box: the
     builder's last resort is the nearest one in play, not a nearer parked one in "Dead" (WAITING_STATES, R1
