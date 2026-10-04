@@ -121,6 +121,13 @@ class Inst:
     t_start: float
     anchor: tuple | None = None
     mirror: int = 1
+    iid: int = 0
+    tk: str = ""
+    f_start: int = -1
+    t_end: float | None = None
+    f_end: int | None = None
+    end: str | None = None              # "rest" | "chain" | "death" (SubjectTracker log only)
+    states: list = field(default_factory=list)   # [(state, T)] entries (SubjectTracker log only)
 
 
 @dataclass(slots=True)
@@ -143,10 +150,12 @@ class SubjectTracker:
     """Per enemy entity of a fight: Control state and entry, the attack instance with its anchor, ended attacks
     (the gauntlet builder's segmentation, FightScanner._control)."""
 
-    def __init__(self, specs=FORUM_SPECS, tail_keep_s: float | None = None):
+    def __init__(self, specs=FORUM_SPECS, tail_keep_s: float | None = None, log: list | None = None):
         self.specs = specs
         self.subjects: dict[int, Subject] = {}
         self.tail_keep_s = tail_keep_s
+        self.log = log            # every instance started, in order (ended ones with t_end / f_end / end)
+        self.f = -1               # the frame being fed (log only)
 
     def subject(self, iid: int, tk: str) -> Subject:
         s = self.subjects.get(iid)
@@ -154,15 +163,19 @@ class SubjectTracker:
             s = self.subjects[iid] = Subject(iid, tk)
         return s
 
-    def _end(self, s: Subject, T: float) -> None:
+    def _end(self, s: Subject, T: float, why: str = "rest") -> None:
         c = s.cur
+        if c is not None:
+            c.t_end, c.f_end, c.end = T, self.f, why
         if c is not None and c.anchor is not None:
             keep = self.tail_keep_s if self.tail_keep_s is not None else self.specs[s.tk].tail_max_s + 1.0
             s.ends = [e for e in s.ends if T - e[3] <= keep] + [(c.family, c.anchor, c.mirror, T)]
         s.cur = None
 
     def _start(self, s: Subject, fam: str, to: str, T: float) -> None:
-        s.cur = Inst(fam, to, T)
+        s.cur = Inst(fam, to, T, iid=s.iid, tk=s.tk, f_start=self.f)
+        if self.log is not None:
+            self.log.append(s.cur)
         if not s.hidden and not math.isnan(s.pos[0]) and s.seen_T == T:
             s.cur.anchor, s.cur.mirror = s.pos, FACES_LEFT[s.flip]
 
@@ -173,13 +186,13 @@ class SubjectTracker:
         cur, idle = s.cur, sp.idle_family
         if to in sp.death_states:
             if cur is not None:
-                self._end(s, T)
+                self._end(s, T, "death")
             s.dead = True
         elif to in sp.attack_starts and cur is not None and cur.family == sp.attack_starts[to] and to != cur.start:
             pass
         elif to in sp.attack_starts:
             if cur is not None:
-                self._end(s, T)
+                self._end(s, T, "chain")
             s.dead = False
             self._start(s, sp.attack_starts[to], to, T)
         elif to in sp.decision_states:
@@ -187,12 +200,14 @@ class SubjectTracker:
                 self._end(s, T)
             if idle is not None and not s.dead and s.cur is None:
                 self._start(s, idle, to, T)
+        if self.log is not None and s.cur is not None:
+            s.cur.states.append((to, T))
 
     def kill(self, iid: int, T: float) -> None:
         s = self.subjects.get(iid)
         if s is not None:
             if s.cur is not None:
-                self._end(s, T)
+                self._end(s, T, "death")
             s.dead = True
 
     def entity(self, iid: int, tk: str, T: float, x: float, y: float, vx: float, vy: float, flip: int,
@@ -223,9 +238,14 @@ class SubjectRecall:
         if key is None:
             return
         t0, t1 = self.t.meta[key]
-        n = int(math.floor((e_hi - e_lo) / BIN + 1e-6)) + 1
-        es = [e_lo + i * BIN for i in range(n)]
-        if es[-1] < e_hi - 1e-3:
+        # entries on the 1/60 s grid from e_lo (and e_hi itself), only those whose active span meets [-BIN, H + BIN]
+        lo, hi = max(e_lo, -BIN - t1), min(e_hi, H + BIN - t0)
+        if hi < lo - 1e-9:
+            return
+        i0 = max(0, int(math.ceil((lo - e_lo) / BIN - 1e-6)))
+        i1 = int(math.floor((hi - e_lo) / BIN + 1e-6))
+        es = [e_lo + i * BIN for i in range(i0, i1 + 1)]
+        if e_hi <= hi + 1e-9 and (not es or es[-1] < e_hi - 1e-3):
             es.append(e_hi)
         for e in es:
             on, off = e + t0, e + t1
@@ -234,70 +254,101 @@ class SubjectRecall:
             for ax, ay, m in anchors:
                 out.append((key, -e, (ax, ay), m))
 
-    def placements_of(self, s: Subject, T_o: float, H: float) -> list[tuple]:
-        """SupportQuery placements (key, t_ref, anchor, mirror) of one subject at origin T_o."""
+    def placements_of(self, s: Subject, T_o: float, H: float, anchor_step: int = 1) -> list[tuple]:
+        """SupportQuery placements (key, t_ref, anchor, mirror) of one subject at origin T_o (no duplicates).
+        anchor_step: frames between the anchors of instances that start after the origin (1 = every frame: the
+        recall; a coarser step for long horizons is an approximation for statistics, not a support)."""
         sp = self.t.specs[s.tk]
         w = self.t.walk.get(s.tk)
         out: list = []
         for fam, anc, mir, t_end in s.ends:
             e = t_end - T_o
             self._place(out, self.t.key(fam, TAIL), e, e, [(anc[0], anc[1], mir)], H)
-        if w is None or s.state is None or s.t_entry is None:
-            return out
-        k_max = int(math.ceil(H / FRAME_S))
-        x, y = s.pos
-        if math.isnan(x):
-            new = []
-        else:
-            vx, vy = s.vel
-            pts = {(round(x + vx * k * FRAME_S, 4), round(y + vy * k * FRAME_S, 4)) for k in range(k_max + 1)}
-            new = [(px, py, m) for px, py in sorted(pts) for m in (-1, 1)]
-        cur = s.cur
-        ctx = None
-        if cur is not None:
-            anc = [(cur.anchor[0], cur.anchor[1], cur.mirror)] if cur.anchor is not None else new
-            ctx = (cur.family, cur.start, anc)
-        e0 = s.t_entry - T_o
-        self._walk(sp, w, s.state, e0, e0, ctx, new, s.dead, True, 0, H, out)
-        return out
+        if w is not None and s.state is not None and s.t_entry is not None:
+            k_max = int(math.ceil(H / FRAME_S))
+            x, y = s.pos
+            if math.isnan(x):
+                new: tuple = ()
+            else:
+                vx, vy = s.vel
+                ks = sorted(set(range(0, k_max + 1, max(1, anchor_step))) | {k_max})
+                pts = {(round(x + vx * k * FRAME_S, 4), round(y + vy * k * FRAME_S, 4)) for k in ks}
+                new = tuple((px, py, m) for px, py in sorted(pts) for m in (-1, 1))
+            cur = s.cur
+            ctx = None
+            if cur is not None:
+                anc = ((cur.anchor[0], cur.anchor[1], cur.mirror),) if cur.anchor is not None else new
+                ctx = (cur.family, cur.start, anc)
+            e0 = s.t_entry - T_o
+            self._walk(sp, w, s.state, e0, ctx, new, s.dead, H, out)
+        return list(dict.fromkeys(out))
 
-    def _walk(self, sp, w: Walk, state: str, e_lo: float, e_hi: float, ctx, new, dead: bool, current: bool,
-              depth: int, H: float, out: list) -> None:
-        if e_lo > H:
-            return
-        if depth > MAX_DEPTH:
-            self.placements["truncated walks"] += 1
-            return
-        fam = ctx[0] if ctx else None
-        if fam is not None:
-            self._place(out, self.t.key(fam, state), e_lo, e_hi, ctx[2], H)
-        dw = w.dwell.get(state)
-        if dw is None:
-            return
-        x_lo, x_hi = e_lo + dw[0], e_hi + dw[1]
-        if current:
-            x_lo, x_hi = max(x_lo, BIN), max(x_hi, BIN)
-        if x_lo > H:
-            return
+    def _walk(self, sp, w: Walk, state: str, e0: float, ctx, new, dead: bool, H: float, out: list) -> None:
+        """The support walk as a worklist over (state, instance context, dead): each node keeps the hull of its
+        entry intervals (a superset of every path's: conservative), entries past the horizon are dropped, so the
+        decision chains' zero-dwell loops end."""
         idle = sp.idle_family
-        for nxt in w.succ.get(state, ()):
-            if nxt in sp.death_states:
-                continue
-            c2, d2 = ctx, dead
-            if nxt in sp.attack_starts:
-                nf = sp.attack_starts[nxt]
-                if not (ctx is not None and ctx[0] == nf and nxt != ctx[1]):
-                    if fam is not None and fam != idle:
-                        self._place(out, self.t.key(fam, TAIL), x_lo, x_hi, ctx[2], H)
-                    c2, d2 = (nf, nxt, new), False
-            elif nxt in sp.decision_states:
-                if fam is not None and fam != idle:
-                    self._place(out, self.t.key(fam, TAIL), x_lo, x_hi, ctx[2], H)
-                    c2 = (idle, nxt, new) if idle and not dead else None
-                elif fam is None and idle and not dead:
-                    c2 = (idle, nxt, new)
-            self._walk(sp, w, nxt, x_lo, x_hi, c2, new, d2, False, depth + 1, H, out)
+        cap = H + BIN
+        nodes: dict[tuple, list] = {}
+        todo: list[tuple] = []
 
+        def push(st, lo, hi, c, d, current=False):
+            if lo > cap:
+                return
+            hi = min(hi, cap)
+            k = (st, c, d, current)
+            iv = nodes.get(k)
+            if iv is None:
+                nodes[k] = [lo, hi]
+            elif lo < iv[0] - 1e-9 or hi > iv[1] + 1e-9:
+                iv[0], iv[1] = min(iv[0], lo), max(iv[1], hi)
+            else:
+                return
+            todo.append(k)
+
+        push(state, e0, e0, ctx, dead, True)
+        steps = 0
+        while todo:
+            k = todo.pop()
+            st, c, d, current = k
+            lo, hi = nodes[k]
+            steps += 1
+            if steps > 20000:
+                self.placements["walks cut at 20000 steps"] += 1
+                break
+            fam = c[0] if c else None
+            dw = w.dwell.get(st)
+            if dw is None:
+                continue
+            x_lo, x_hi = lo + dw[0], hi + dw[1]
+            if current:
+                x_lo, x_hi = max(x_lo, BIN), max(x_hi, BIN)
+            if x_lo > cap:
+                continue
+            for nxt in w.succ.get(st, ()):
+                if nxt in sp.death_states:
+                    continue
+                c2, d2 = c, d
+                if nxt in sp.attack_starts:
+                    nf = sp.attack_starts[nxt]
+                    if not (c is not None and c[0] == nf and nxt != c[1]):
+                        if fam is not None and fam != idle:
+                            push(TAIL, x_lo, x_hi, c, d)
+                        c2, d2 = (nf, nxt, new), False
+                elif nxt in sp.decision_states:
+                    if fam is not None and fam != idle:
+                        push(TAIL, x_lo, x_hi, c, d)
+                        c2 = (idle, nxt, new) if idle and not d else None
+                    elif fam is None and idle and not d:
+                        c2 = (idle, nxt, new)
+                push(nxt, x_lo, x_hi, c2, d2)
+        for (st, c, d, current), (lo, hi) in nodes.items():
+            if c is None:
+                continue
+            if st == TAIL:
+                self._place(out, self.t.key(c[0], TAIL), lo, hi, c[2], H)
+            else:
+                self._place(out, self.t.key(c[0], st), lo, hi, c[2], H)
     def covered(self, placements: list, pts: list[tuple[float, float, float]]) -> bool:
         q = self.t.query
         if q is None or not placements:
@@ -313,7 +364,6 @@ class SubjectRecall:
     # ---- one fight ----
 
     def run(self, cache: dict, contacts: list[dict], label: str = "") -> None:
-        types, states = cache["types"], cache["states"]
         specs = self.t.specs
         f_arr, T_arr = cache["f"], cache["T"]
         fi_of = {int(f): i for i, f in enumerate(f_arr)}
@@ -324,34 +374,9 @@ class SubjectRecall:
                 continue
             for L in self.lags:
                 need[int(c["f"]) - L].append((c, L))
-        evs: dict[int, list] = defaultdict(list)
-        for f, k, d in cache["events"]:
-            if k in ("fsm", "hit"):
-                evs[int(f)].append((k, d))
         tr = SubjectTracker(specs)
-        e_fi = cache["e_fi"]
-        starts = np.searchsorted(e_fi, np.arange(len(f_arr) + 1))
-        tk_ok = np.array([t in specs for t in types], bool)
         H = (max(self.lags) + 1) * FRAME_S + 1e-6
-        for i, f in enumerate(f_arr):
-            f = int(f)
-            T = float(T_arr[i])
-            for k, d in evs.get(f, ()):
-                if k == "fsm":
-                    tk = _type_of(d.get("obj"), specs)
-                    if tk is not None and d.get("fsm") == specs[tk].control_fsm and isinstance(d.get("to"), str) \
-                            and isinstance(d.get("ent"), int):
-                        tr.transition(int(d["ent"]), tk, d["to"], T)
-                elif k == "hit" and d.get("dead") and isinstance(d.get("ent"), int) and d.get("ent") in tr.subjects:
-                    tr.kill(int(d["ent"]), T)
-            for r in range(starts[i], starts[i + 1]):
-                tki = int(cache["e_tk"][r])
-                if not tk_ok[tki]:
-                    continue
-                st = int(cache["e_st"][r])
-                tr.entity(int(cache["e_iid"][r]), types[tki], T, cache["e_x"][r], cache["e_y"][r], cache["e_vx"][r],
-                          cache["e_vy"][r], int(cache["e_flip"][r]), bool(cache["e_hidden"][r]),
-                          states[st] if st >= 0 else None, float(cache["e_tin"][r]))
+        for i, f, T in replay(cache, tr, specs):
             for c, L in need.get(f, ()):
                 self._check(c, L, tr, T, fi_of, T_arr, H, label)
 
@@ -384,6 +409,39 @@ class SubjectRecall:
                             "subject_state": None if s is None else s.state,
                             "subject_family": None if s is None or s.cur is None else s.cur.family,
                             "ho": c.get("ho"), "label": label})
+
+
+def replay(cache: dict, tr: SubjectTracker, specs=FORUM_SPECS):
+    """Feed a fight's cache to the tracker frame by frame (the Control events and kills first, then the entities, as
+    the gauntlet builder does); yields (frame index, frame, game time) after each frame."""
+    types, states = cache["types"], cache["states"]
+    f_arr, T_arr = cache["f"], cache["T"]
+    evs: dict[int, list] = defaultdict(list)
+    for f, k, d in cache["events"]:
+        if k in ("fsm", "hit"):
+            evs[int(f)].append((k, d))
+    starts = np.searchsorted(cache["e_fi"], np.arange(len(f_arr) + 1))
+    tk_ok = np.array([t in specs for t in types], bool)
+    for i, f in enumerate(f_arr):
+        f = int(f)
+        T = float(T_arr[i])
+        tr.f = f
+        for k, d in evs.get(f, ()):
+            if k == "fsm":
+                tk = _type_of(d.get("obj"), specs)
+                if tk is not None and d.get("fsm") == specs[tk].control_fsm and isinstance(d.get("to"), str)                         and isinstance(d.get("ent"), int):
+                    tr.transition(int(d["ent"]), tk, d["to"], T)
+            elif k == "hit" and d.get("dead") and isinstance(d.get("ent"), int) and d.get("ent") in tr.subjects:
+                tr.kill(int(d["ent"]), T)
+        for r in range(starts[i], starts[i + 1]):
+            tki = int(cache["e_tk"][r])
+            if not tk_ok[tki]:
+                continue
+            st = int(cache["e_st"][r])
+            tr.entity(int(cache["e_iid"][r]), types[tki], T, cache["e_x"][r], cache["e_y"][r], cache["e_vx"][r],
+                      cache["e_vy"][r], int(cache["e_flip"][r]), bool(cache["e_hidden"][r]),
+                      states[st] if st >= 0 else None, float(cache["e_tin"][r]))
+        yield i, f, T
 
 
 def _type_of(obj, specs) -> str | None:

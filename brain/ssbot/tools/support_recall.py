@@ -206,7 +206,7 @@ def forum_main(a: argparse.Namespace) -> int:
     margins_used = {}
     fights_done = 0
     for k in (0, 1):
-        train = 1 - k
+        train = k if a.in_sample else 1 - k
         if a.margins == "heldout":
             # calibrated on the training fold's contacts (their residual against fold k's occupancy), certified on
             # fold k's: the contacts that set a margin are never the ones it is tested on
@@ -277,6 +277,8 @@ def main(argv: list[str] | None = None) -> int:
                     help="Forum: per-family margins from the training fold's held-out residuals, or none")
     ap.add_argument("--margin-q", type=float, default=1.0, help="Forum: the residual quantile a margin takes")
     ap.add_argument("--area", action="store_true", help="Forum: report the margins' support area cost")
+    ap.add_argument("--in-sample", action="store_true",
+                    help="Forum: each fold's fights against its own tables (a check of the tracker, not a recall)")
     ap.add_argument("--recordings", default="")
     ap.add_argument("--lags", default="2,3,4")
     ap.add_argument("--view", default="oracle,ve")

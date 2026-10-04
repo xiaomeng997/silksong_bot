@@ -8,9 +8,14 @@ the game, the planner only plans) and time every tick.
 
 Reports p50 / p99 / max of the whole tick (forecast + tactics + planner) and of each planner phase, the share of
 ticks with FORCED_RISK and the modes. The first 50 ticks (numba compilation, caches) are left out.
+
+Forum (round R0 scaffold, forum_bench): ../scripts/uv.cmd run python -m ssbot.tools.planner_bench --encounter Forum
+    --cache C:/ssbot/data/m2_forum_r0/cache --extra C:/ssbot/data/m2_forum_r0/build_all/extra
+    --fight <run>/i<n>/ep<k> [--start F] [--frames 4000] [--n 400] [--T 36] [--threads 4]
 """
 import argparse
 import json
+import math
 import sys
 import time
 from collections import Counter
@@ -19,15 +24,101 @@ from pathlib import Path
 import numpy as np
 
 
+def forum_bench(a: argparse.Namespace) -> int:
+    """--encounter Forum (round R0 scaffold; the planner has no multi-enemy forecast before round R2): replay a
+    fight's cache (ssbot.tools.forum_extract) open loop through the enemies' trackers and, every tick, time what the
+    planner's support phase will cost on real Forum walks: every subject's support placements at horizon 0.8 s
+    (forum_support.SubjectRecall.placements_of, the fold's tables with the other fold's held-out margins; anchors of
+    attacks that start later every 0.2 s), one SupportQuery over all of them and a planner-sized batch of hero
+    centre paths (--n candidates x --T steps: ballistic fans from the hero, ssbot.combat.fastquery.query_par). Reports
+    p50 / p99 / max of each phase, the placements per tick and the share of ticks where every candidate path meets the
+    support (an upper bound of FORCED_RISK for this crude candidate set)."""
+    import numba
+
+    from ssbot.combat.fastquery import query_par
+    from ssbot.knowledge.forum_cache import cache_name, load_cache
+    from ssbot.knowledge.forum_support import FoldTables, SubjectRecall, SubjectTracker, margins_from_contacts, \
+        read_contacts, replay
+
+    numba.set_num_threads(a.threads)
+    rows = read_contacts(a.extra / "contacts.jsonl.gz")
+    rec = SubjectRecall(FoldTables(a.extra, a.fold, margins=margins_from_contacts(rows, fold=1 - a.fold),
+                                   base=a.margin))
+    q = rec.t.query
+    cache = load_cache(a.cache / cache_name(a.fight))
+    side = int(round(math.sqrt(a.n)))
+    vx = np.repeat(np.linspace(-9.0, 9.0, side), side)
+    vy = np.tile(np.linspace(-12.0, 16.0, side), side)
+    tk = np.arange(a.T + 1, dtype=np.float64) / 60.0
+    tr = SubjectTracker()
+    t_track, t_fc, t_q, n_pl, forced = [], [], [], [], 0
+    t_prev = time.perf_counter()
+    n = 0
+    i0 = int(np.searchsorted(cache["f"], a.start)) if a.start is not None else 0
+    for i, f, T in replay(cache, tr):
+        t1 = time.perf_counter()
+        if i < i0:
+            t_prev = time.perf_counter()
+            continue
+        n += 1
+        if n > a.frames:
+            break
+        pl = []
+        for s in tr.subjects.values():
+            if s.state is not None:
+                pl += rec.placements_of(s, T, 0.8 + 1e-6, anchor_step=12)
+        t2 = time.perf_counter()
+        hx = float(0.5 * (cache["hbox"][i, 0] + cache["hbox"][i, 2]))
+        hy = float(0.5 * (cache["hbox"][i, 1] + cache["hbox"][i, 3]))
+        x = hx + vx[:, None] * tk[None, :]
+        y = np.maximum(hy + vy[:, None] * tk[None, :] - 0.5 * 50.0 * tk[None, :] ** 2, 4.05)
+        q.clear()
+        for key, t_ref, anchor, mirror in pl:
+            q.place(key, t_ref, anchor, mirror)
+        hit = query_par(q, x, y, tk) if pl else np.zeros(x.shape, bool)
+        t3 = time.perf_counter()
+        if n > 50:
+            t_track.append((t1 - t_prev) * 1e3)
+            t_fc.append((t2 - t1) * 1e3)
+            t_q.append((t3 - t2) * 1e3)
+            n_pl.append(len(pl))
+            forced += bool(hit.any(axis=1).all())
+        t_prev = time.perf_counter()
+    q_ = lambda v: {"p50": round(float(np.percentile(v, 50)), 3), "p99": round(float(np.percentile(v, 99)), 3),  # noqa
+                    "max": round(float(np.max(v)), 3)} if v else {}
+    out = {"encounter": "Forum", "fight": a.fight, "ticks": len(t_fc), "candidates": side * side, "steps": a.T,
+           "track_ms": q_(t_track), "placements_ms": q_(t_fc), "query_ms": q_(t_q),
+           "tick_ms": q_([x + y + z for x, y, z in zip(t_track, t_fc, t_q)]), "placements": q_(n_pl),
+           "all_candidates_meet_support_share": round(forced / max(1, len(t_fc)), 4), "threads": a.threads}
+    print(json.dumps(out, indent=1))
+    if a.json:
+        a.json.write_text(json.dumps(out, indent=1), "utf-8")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("recording", type=Path)
+    ap.add_argument("recording", type=Path, nargs="?")
+    ap.add_argument("--encounter", default="BellBeast", choices=("BellBeast", "Forum"))
+    ap.add_argument("--cache", type=Path, default=None, help="Forum: the forum_extract caches")
+    ap.add_argument("--extra", type=Path, default=None, help="Forum: the build's --extra directory")
+    ap.add_argument("--fight", default="", help="Forum: the fight id (<run>/i<n>/ep<k>)")
+    ap.add_argument("--fold", type=int, default=0, help="Forum: the tables' fold")
+    ap.add_argument("--margin", type=float, default=0.0, help="Forum: base margin added to every template (u)")
+    ap.add_argument("--n", type=int, default=400, help="Forum: candidate paths")
+    ap.add_argument("--T", type=int, default=36, help="Forum: steps per candidate path")
     ap.add_argument("--frames", type=int, default=20000)
     ap.add_argument("--start", type=int, default=None)
     ap.add_argument("--threads", type=int, default=4)
     ap.add_argument("--view", default="oracle")
     ap.add_argument("--json", type=Path, default=None)
     a = ap.parse_args(argv)
+    if a.encounter == "Forum":
+        if a.cache is None or a.extra is None or not a.fight:
+            ap.error("--encounter Forum needs --cache, --extra and --fight")
+        return forum_bench(a)
+    if a.recording is None:
+        ap.error("a recording is needed")
 
     import numba
 

@@ -1,0 +1,179 @@
+"""Forum round R0 offline tools on synthetic STATEs (the gauntlet tables' fixture, tests/test_gauntlet_tables.py):
+the per-fight cache, the per-enemy tracker, the held-out support recall end to end (gauntlet build -> per-fold
+supports and contacts -> caches -> recall), the per-family margins, the data products and the replay's concurrency."""
+import gzip
+import json
+import math
+from pathlib import Path
+
+import numpy as np
+
+from ssbot.knowledge.behaviour_tables import Fight
+from ssbot.knowledge.forum_cache import extract_states, load_cache, save_cache
+from ssbot.knowledge.forum_products import Chains, FightView, KillFreeze, Quiet, body_collider, source_type
+from ssbot.knowledge.forum_support import FoldTables, SubjectRecall, SubjectTracker, margins_from_contacts, \
+    read_contacts, replay
+from ssbot.knowledge.gauntlet_tables import GauntletBuilder
+from tests.test_gauntlet_tables import SPEC, _states
+
+SPECS = {"Foe": SPEC}
+
+
+def _cache(tmp_path: Path, states=None, name="fight") -> dict:
+    c = extract_states(states or _states(), {"id": name})
+    p = save_cache(c, tmp_path / f"{name}.npz")
+    return load_cache(p)
+
+
+def test_cache_roundtrip_keeps_entities_colliders_and_events(tmp_path):
+    c = _cache(tmp_path)
+    assert len(c["f"]) == 120 and c["types"][int(c["e_tk"][0])] == "Foe"
+    # two foes every frame, the ball from frame 30 to 70
+    assert len(c["e_fi"]) == 2 * 120 + 41
+    r = int(np.flatnonzero(c["e_iid"] == 1)[0])
+    assert np.allclose(c["e_box"][r], [9.5, 4.5, 11.5, 5.5])   # body and "Hand" child, one union box
+    assert {c["names"][int(n)] for n in c["c_name"][c["c_ei"] == r]} == {"Foe", "Hand"}
+    assert math.isclose(c["T"][-1], 119 / 60, rel_tol=1e-9)
+    kinds = {k for _, k, _ in c["events"]}
+    assert {"fsm", "damage", "damage_blocked", "hit"} <= kinds
+
+
+def test_tracker_segments_like_the_gauntlet_builder(tmp_path):
+    c = _cache(tmp_path)
+    log: list = []
+    tr = SubjectTracker(SPECS, log=log)
+    for _ in replay(c, tr, SPECS):
+        pass
+    by = {}
+    for inst in log:
+        by.setdefault(inst.iid, []).append((inst.family, inst.end))
+    assert by[2] == [("F_IDLE", "chain"), ("F_HIT", "rest"), ("F_IDLE", None)]
+    assert by[1] == [("F_IDLE", "death")]
+    hit = next(i for i in log if i.family == "F_HIT")
+    assert hit.anchor == (20.0, 5.0) and hit.mirror == -1 and hit.f_start == 10 and hit.f_end == 20
+    assert tr.subjects[1].dead and tr.subjects[2].ends[-1][0] == "F_HIT"
+
+
+def _build_extra(tmp_path: Path) -> Path:
+    from ssbot.tools.behaviour_build import write_extra
+    g = GauntletBuilder(SPECS)
+    for k in range(2):           # two fights: fold 0 and fold 1
+        g.scan(Fight("states", Path("."), 1, 120, f"run/i0/ep{k}"), _states())
+    for b in g.builders.values():
+        b.tables()
+    extra = tmp_path / "extra"
+    write_extra(extra, g, {})
+    return extra
+
+
+def test_held_out_recall_end_to_end(tmp_path):
+    extra = _build_extra(tmp_path)
+    rows = read_contacts(extra / "contacts.jsonl.gz")
+    assert {r["fold"] for r in rows} == {0, 1} and all(r["fight"].startswith("run/i0/ep") for r in rows)
+    build = json.loads((extra / "build.json").read_text("utf-8"))
+    assert build["walk"]["Foe"]["succ"]["0"]["Idle"] == ["Antic"]
+    c = _cache(tmp_path)
+    for fold in (0, 1):
+        rec = SubjectRecall(FoldTables(extra, 1 - fold, specs=SPECS), lags=(2, 3, 4))
+        mine = [r for r in rows if r["fold"] == fold]
+        rec.run(c, mine)
+        n = sum(v["n"] for (tk, L), v in rec.stats.items() if L)
+        assert n == 3 * len([r for r in mine if not r["follow"]]) and n > 0
+        assert not rec.misses, rec.misses[:3]
+    # a contact the enemy cannot reach is a miss
+    far = dict(mine[0], boxes=[[60.0, 4.0, 60.5, 6.0], [60.0, 4.0, 60.5, 6.0]])
+    rec = SubjectRecall(FoldTables(extra, 0, specs=SPECS), lags=(2,))
+    rec.run(c, [far])
+    assert len(rec.misses) == 1
+
+
+def test_margins_are_calibrated_on_the_other_fold():
+    rows = [{"type": "Foe", "family": "F_HIT", "state": "Antic", "fold": 0, "ho": {"state:Antic": 0.2}},
+            {"type": "Foe", "family": "F_HIT", "state": "Antic", "fold": 0, "ho": {"state:Antic": 0.7}},
+            {"type": "Foe", "family": "F_HIT", "state": "Antic", "fold": 1, "ho": {"state:Antic": None}},
+            {"type": "Foe", "family": "F_HIT", "state": "Antic", "fold": 1, "follow": True,
+             "ho": {"state:Antic": 2.0}}]
+    assert margins_from_contacts(rows, fold=0) == {("Foe", "F_HIT"): 0.7}
+    assert margins_from_contacts(rows, fold=1) == {("Foe", "F_HIT"): 3.0}     # beyond the search: its radius
+    assert math.isclose(margins_from_contacts(rows, fold=0, q=0.0)[("Foe", "F_HIT")], 0.2)
+
+
+def test_margin_dilates_the_fold_templates(tmp_path):
+    extra = _build_extra(tmp_path)
+    t0 = FoldTables(extra, 0, specs=SPECS)
+    t1 = FoldTables(extra, 0, margins={("Foe", "F_HIT"): 0.5}, specs=SPECS)
+    k = next(k for k in t0.templates if "/F_HIT/" in k)
+    a0 = np.unpackbits(t0.templates[k].bits).sum()
+    a1 = np.unpackbits(t1.templates[k].bits).sum()
+    assert a1 > a0
+    assert t1.templates[k].pad_x >= t0.templates[k].pad_x + 0.5 - 1e-9
+
+
+def test_chains_count_multi_hit_follow_ups_and_skip_blocked_first_hits():
+    class V:
+        events = [(100, "damage", {"source": "Song Pilgrim 03/Whip Hit 2", "amount": 1}),
+                  (112, "special_damage", {"fsm": "Hero_Hornet(Clone)/Roar and Wound States/Multihit:X", "amount": 1}),
+                  (130, "catastrophe", {"src": "Whip Hit 2", "blocked": True, "amount": 1}),
+                  (400, "damage", {"source": "Song Pilgrim 03 (2)/Whip Hit 1", "amount": 1}),
+                  (400, "catastrophe", {"src": "Whip Hit 1", "blocked": True, "amount": 1}),
+                  (700, "damage", {"source": "Wave 8 - Heavy Sentry/Song Heavy Sentry", "amount": 2})]
+    ch = Chains()
+    ch.add(V())
+    r = ch.result()["by_source"]
+    assert r["Song Pilgrim 03/Whip Hit 2"]["hits_max"] == 3 and r["Song Pilgrim 03/Whip Hit 2"]["damage_max"] == 3
+    assert r["Song Pilgrim 03/Whip Hit 1"] == {"n": 1, "first_hit_blocked": 1}
+    assert r["Song Heavy Sentry/body"]["damage_max"] == 2
+
+
+def test_source_types_and_body_colliders():
+    assert source_type("Colliders/Collider ParryStance") == ("Song Administrator", "Collider ParryStance")
+    assert source_type("rune bomb small(Clone)/damager")[0] == "Song Heavy Sentry"
+    assert source_type("Song Reed Pin Projectile(Clone)")[0] == "Song Reed"
+    assert source_type("Song Pilgrim 03/Song Pilgrim Maestro/Slash Hit 2") == ("Song Pilgrim Maestro", "Slash Hit 2")
+    assert body_collider("Song Reed", "Song Reed (1)") and body_collider("Song Pilgrim 03", "Body Damager")
+    assert body_collider("Song Administrator", "Collider Fly") and not body_collider("Song Reed", "Stab Hit 1")
+
+
+def test_products_on_the_synthetic_fight(tmp_path):
+    c = _cache(tmp_path)
+    c["events"].append((90, "freeze", {"phase": "start", "id": 7, "type": "BigEnemyDeathSlow", "down": 0.04,
+                                       "wait": 0.06, "up": 0.04, "speed": 0.0}))
+    c["events"].append((100, "freeze", {"phase": "end", "id": 7}))
+    v = FightView(c, specs=SPECS)
+    assert [i.family for i in v.instances if i.iid == 2] == ["F_IDLE", "F_HIT", "F_IDLE"]
+    # the ball armed after Foe (1)'s attack ended belongs to that attack
+    hit = next(i for i in v.instances if i.family == "F_HIT")
+    assert v.hazards[id(hit)] and v.hazards[id(hit)][0][1] == "Ball(Clone)"
+    kf = KillFreeze()
+    kf.add(v)
+    r = kf.result()
+    assert r["by_type"]["Foe"] and r["frames_to_end"]["Foe|BigEnemyDeathSlow"]["max"] == 10
+    q = Quiet()
+    q.add(v)
+    assert q.result()["gaps"] == 0      # a foe is in play every frame
+
+
+def test_concurrency_counts_enemies_in_play(tmp_path):
+    from ssbot.tools.forum_simul import Concurrency, in_play_rows
+    states = _states()
+    for s in states:
+        s["room"] = {"battles": [{"name": "Battle Scene", "wave": 0, "started": True, "completed": False}]}
+    c = _cache(tmp_path, states)
+    starts = np.searchsorted(c["e_fi"], np.arange(len(c["f"]) + 1))
+    conc = Concurrency(SPECS)
+    tr = SubjectTracker(SPECS)
+    for i, f, T in replay(c, tr, SPECS):
+        conc.frame(c, i, in_play_rows(c, i, starts, SPECS), tr, "x")
+    r = conc.result()
+    assert r["in_play_share"]["2"] == 1.0          # Init counts as in play (not a waiting state); hp stays 10
+    w = r["by_wave"]["0"]
+    assert w["in_play_max"] == 2 and w["share_ge2"] == 1.0 and w["x_span_median_u"] == 10.0
+    assert sum(w["all_idle_mixed_committed"]) == 1.0 and w["all_idle_mixed_committed"][1] > 0   # the attack frames
+
+
+def test_contacts_file_is_gzip_jsonl(tmp_path):
+    extra = _build_extra(tmp_path)
+    with gzip.open(extra / "contacts.jsonl.gz", "rt", encoding="utf-8") as fh:
+        first = json.loads(fh.readline())
+    assert {"type", "fight", "f", "family", "state", "fold", "boxes", "res", "ho"} <= set(first)
+    assert (extra / "Foe_support_fold0.npz").exists() and (extra / "Foe_support_fold1.npz").exists()

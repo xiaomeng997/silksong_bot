@@ -7,12 +7,13 @@ decode the recordings again.
     save_cache(cache, path); cache = load_cache(path)
 
 Arrays (F frames, E entity rows, C collider rows, A ally rows; float32 unless noted):
-  f (int64), T (float64: game time since the fight's first frame, the scanner's clock: dt x frame gap), dt
+  f (int64), T (float64: game time since the fight's first frame, the scanner's clock: dt x frame gap), dt,
+  wave (int16: room.battles "Battle Scene" wave index, +100 once completed, -1 before the start or without the export)
   hero: hx hy hvx hvy, hbox [F, 4] (STATE hero.box, the physics box), hface (int8), hclip (int16, `names`)
   e_fi (int32 frame index), e_iid (int64), e_tk (int16, `types`), e_x e_y e_vx e_vy, e_flip (int8), e_st (int16,
      `states`: the first FSM's state), e_tin (its time in state), e_hp (nan: none), e_hidden (int8), e_box [E, 4]
      (bounding box of the enabled damage colliders: support_threat or multi-hit; nan: none), e_parry (int8: OR of
-     their parry bits), e_mw (int8: a multi-hit collider is among them)
+     their parry bits), e_mw (int8: a multi-hit collider is among them), e_src (int16: the oracle's src bits)
   c_ei (int32 entity row), c_name (int16, `names`), c_box [C, 4], c_parry (int8), c_dealt (int8), c_eff (int8):
      every enabled damage collider of those rows
   a_fi, a_iid (int64), a_name (int16, `names`), a_x a_y a_vx, a_st (int16, `states`), a_box [A, 4], a_scale (int8):
@@ -31,7 +32,7 @@ from ssbot.ipc.ents import DAMAGE_SRC, SRC_BITS
 from ssbot.knowledge.behaviour_tables import Fight, fight_states, multi_wounder_threat, support_threat
 
 EVENT_KINDS = ("fsm", "damage", "damage_blocked", "hit", "freeze", "special_damage", "catastrophe", "harness")
-STATE_KEYS = ("dt", "hero", "ents", "ev", "allies")
+STATE_KEYS = ("dt", "hero", "ents", "ev", "allies", "room")
 NAN4 = (math.nan,) * 4
 
 
@@ -62,9 +63,9 @@ def _box(verts) -> tuple:
 def extract_states(states, meta: dict | None = None) -> dict:
     """The cache arrays of a stream of STATE dicts (keys STATE_KEYS)."""
     types, sts, names = _Tab(), _Tab(), _Tab()
-    F, T, DT, HX, HY, HVX, HVY, HB, HF, HC = [], [], [], [], [], [], [], [], [], []
+    F, T, DT, HX, HY, HVX, HVY, HB, HF, HC, WV = [], [], [], [], [], [], [], [], [], [], []
     E = {k: [] for k in ("fi", "iid", "tk", "x", "y", "vx", "vy", "flip", "st", "tin", "hp", "hidden", "box", "parry",
-                         "mw")}
+                         "mw", "src")}
     C = {k: [] for k in ("ei", "name", "box", "parry", "dealt", "eff")}
     A = {k: [] for k in ("fi", "iid", "name", "x", "y", "vx", "st", "box", "scale")}
     events: list = []
@@ -91,6 +92,8 @@ def extract_states(states, meta: dict | None = None) -> dict:
         HB.append(tuple(b[:4]) if b else NAN4)
         HF.append(int(h.get("facing") or 0))
         HC.append(names((h.get("anim") or {}).get("clip")))
+        bs = [b for b in (s.get("room") or {}).get("battles") or () if b.get("name") == "Battle Scene"]
+        WV.append(int(bs[0]["wave"]) + (100 if bs[0].get("completed") else 0) if bs and bs[0].get("started") else -1)
         for e in s.get("ents") or ():
             if not int(e.get("src") or 0) & DAMAGE_SRC:
                 continue
@@ -109,6 +112,7 @@ def extract_states(states, meta: dict | None = None) -> dict:
             E["tin"].append(float(fs[0].get("t") or 0.0) if fs else math.nan)
             E["hp"].append(math.nan if e.get("hp") is None else float(e["hp"]))
             E["hidden"].append(1 if e.get("hidden") else 0)
+            E["src"].append(int(e.get("src") or 0))
             bx, par, mw = None, 0, 0
             for c in e.get("colliders") or ():
                 st_ = support_threat(c)
@@ -151,13 +155,13 @@ def extract_states(states, meta: dict | None = None) -> dict:
     out = {
         "f": np.asarray(F, np.int64), "T": np.asarray(T, np.float64), "dt": f32(DT), "hx": f32(HX), "hy": f32(HY),
         "hvx": f32(HVX), "hvy": f32(HVY), "hbox": f32(HB).reshape(-1, 4), "hface": np.asarray(HF, np.int8),
-        "hclip": np.asarray(HC, np.int16),
+        "hclip": np.asarray(HC, np.int16), "wave": np.asarray(WV, np.int16),
         "e_fi": np.asarray(E["fi"], np.int32), "e_iid": np.asarray(E["iid"], np.int64),
         "e_tk": np.asarray(E["tk"], np.int16), "e_x": f32(E["x"]), "e_y": f32(E["y"]), "e_vx": f32(E["vx"]),
         "e_vy": f32(E["vy"]), "e_flip": np.asarray(E["flip"], np.int8), "e_st": np.asarray(E["st"], np.int16),
         "e_tin": f32(E["tin"]), "e_hp": f32(E["hp"]), "e_hidden": np.asarray(E["hidden"], np.int8),
         "e_box": f32(E["box"]).reshape(-1, 4), "e_parry": np.asarray(E["parry"], np.int8),
-        "e_mw": np.asarray(E["mw"], np.int8),
+        "e_mw": np.asarray(E["mw"], np.int8), "e_src": np.asarray(E["src"], np.int16),
         "c_ei": np.asarray(C["ei"], np.int32), "c_name": np.asarray(C["name"], np.int16),
         "c_box": f32(C["box"]).reshape(-1, 4), "c_parry": np.asarray(C["parry"], np.int8),
         "c_dealt": np.asarray(C["dealt"], np.int8), "c_eff": np.asarray(C["eff"], np.int8),
