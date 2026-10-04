@@ -3,58 +3,65 @@ support and probability over the next H seconds in one object with the single-bo
 planner does not need to know how many enemies there are.
 
     mf = MultiForecaster(EnemyTables.production(), view=ORACLE)   # or MultiForecaster(boss=Forecaster(...))
-    mf.reset(); mf.notify_wake(t_battle)
+    mf.reset(); mf.warm(); mf.notify_wake(t_battle)
     mf.update(ws)                                    # every WorldState, in order
     f = mf.forecast(horizon_s=0.8)                   # origin ws.stamp.t_game_s
     f.occupied(x, y, tk)                             # [N, T] bool, every enemy and hazard at once
     f.occupied_without(x, y, tk, iid)                # without one enemy (a kill's effect) or hazard
     f.prob(x, y, tk)                                 # 1 - prod(1 - p_i), scoring only
     f.support_set(ws)                                # one event per instance; multi-hit chains hits > 1
-    f.targets(tk), f.t_min(x, y), f.committed(), f.known
+    f.targets(tk), f.t_min(x, y), f.committed(), f.known, f.subjects
 
 Support per enemy (EnemyTracker: Control state, the attack instance and its anchor), the structure the R0 held-out
 certification ran on (ssbot.knowledge.forum_support.SubjectRecall; forum.md §12.2), at run time:
   - the walk: from the current state over the logged successors and dwell ranges (one bin of slack each side), a hull
     of entry times per (state, instance context, dead) node, so loops end; a current state older than its longest
-    logged dwell can end at any time from the next frame. Memoised per (type, state, instance context, overdue):
-    re-walked only when the state changes (the walk cache), times relative to the state's entry (or to the origin
-    when overdue). Structurally absent states (ssbot.core.forum.STRUCTURALLY_ABSENT) are not in the tables' walk.
-  - the current attack's states at its anchor (fine templates per entry bin while the entry is known to a few bins,
-    else coarse ones whose time dilation spans the interval: EnemyTables), its family template from the attack start
-    (the family-wide union), its tail once it can end, the tails of ended attacks;
-  - attacks (and idle instances) that may start within the horizon: the per-state templates at an anchor box (the
-    enemy's transform dead-reckoned to the possible start times, grown by the type's idle growth since the
-    sighting) and both mirrors, as coarse templates dilated by the box; entry families also in their world frame;
+    logged dwell can end at any time from the next frame. Memoised per (type, state, instance context, dead,
+    overdue): re-walked only when the state changes (the walk cache), times relative to the state's entry (or to the
+    origin when overdue); a state not entered yet enters from the next frame on (applied at placement time: the
+    unclipped walk's later nodes are a superset of the clipped one's). Structurally absent states
+    (ssbot.core.forum.STRUCTURALLY_ABSENT) are not in the tables' walk.
+  - the current attack's states at its anchor: fine templates, one per entry bin, while the entry is known to
+    FINE_MAX_BINS bins; else one window placement (the coarse base's time pyramid answers every entry in the interval
+    at once: EnemyTables.TemplateStore); its family template from the attack start (the family-wide union, coarse);
+    its tail once it can end; the tails of ended attacks;
+  - instances that may start later (attacks, idle instances): the family walk template of their start (every state
+    the instance can reach and its tail, each time-dilated over its entry interval since the start) as a bounding
+    box per time bin, grown by the anchor box (the enemy's transform dead-reckoned to the possible start times, grown
+    by the type's idle growth since the sighting), both mirrors, per start-time piece; entry families also in their
+    world frame;
   - an enemy in its idle family: the idle body tube (its damage box as last seen, moved along its velocity, grown by
     the idle growth) instead of the idle instance's templates;
-  - for the first few frames only (COLLIDER_TUBE_S, the reaction lag the certification needed them for): the
+  - for the first frames only (COLLIDER_TUBE_S, the reaction lag the certification needed them for): the
     current-collider tube (its box grown at the type's top speed) and the hazard tube;
   - a killed enemy's last damage box for DEATH_TAIL_S (forum_products death_tails: contacts on the kill frame only);
-    a pooled enemy (the Maestro's Tinies) is walked on after its death (it comes back), the others are not;
+    a pooled enemy (the Maestro's Tinies) is walked on after its death (it comes back), the others are not; an enemy
+    in a waiting state only while it may enter soon (its wave queued, a Maestro in play for a parked Tiny);
   - thrown hazards: on deterministic paths (ssbot.combat.projectiles: bells incl. the nail redirect, javelins, bomb
     rows, rune slams), the others by their self template from where they armed (the Clawmaiden's spear and blast;
-    every hazard in the vision view, where the paths come from tracked velocities);
-  - entries: the next wave's members not in the export yet (WaveTracker's activation window; static wave table plus
+    every hazard in the vision view too, where the paths come from tracked velocities);
+  - entries: the next wave's members not in the export yet (WaveTracker's activation window: the static wave table,
     the kills and sightings, never room.battles) by their entry family's world-frame template.
-Tiny group placement: with >= TINY_GROUP Tinies, the attacks they may start are placed once per cluster of nearby
-Tinies in the same state (one anchor box covering the members) instead of once per Tiny.
+Tiny group placement: with >= TINY_GROUP Tinies, the instances they may start are placed once per cluster of nearby
+Tinies starting the same family (one anchor box covering the members) instead of once per Tiny.
 
 The single-boss path is untouched: MultiForecaster(boss=fc) wraps a Forecaster and its forecast delegates every query
-to the boss's Forecast (bit-identical: tests/test_multi_forecast.py and tools/multi_recall --bellbeast).
+to the boss's Forecast (bit-identical: tests/test_multi_forecast.py and tools/multi_recall bellbeast).
 """
+import json
 import math
 from collections import defaultdict
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 import numba
 import numpy as np
 
-from ssbot.combat.enemy_tables import BIN, COARSE_U, TAIL, EnemyTables, PlaceBatch, TypeTable, shifted_union
+from ssbot.combat.enemy_tables import BIN, EMPTY, FORUM_DIR, JMAX, TAIL, EnemyTables, PlaceBatch, TypeTable, \
+    WinBatch
 from ssbot.combat.enemy_tracker import TAIL_KEEP_S, EnemyTracker, body_offsets
 from ssbot.combat.fastquery import circle_hits
 from ssbot.combat.forecast import active_within, entry_grid, exit_interval
-from ssbot.combat.projectiles import (BELL, BOMB, HAZARD_DV_U_S, PIN, RUNE, SKIN_U, HazardPath, HazardTracker,
-                                      hazard_type)
+from ssbot.combat.projectiles import BELL, HAZARD_DV_U_S, RUNE, SKIN_U, HazardPath, HazardTracker, hazard_type
 from ssbot.combat.wave_tracker import WaveTracker
 from ssbot.core.forum import FORUM_TYPES, FORUM_WAVES, HAZARD_ALIASES, HAZARD_OWNER, _type_key
 from ssbot.core.worldstate import ORACLE, Ev, WorldState
@@ -66,32 +73,27 @@ SUP_HORIZON_S = 0.8
 DWELL_SLACK_S = BIN               # logged dwell ranges are frame-quantised
 WALK_CAP_S = 6.0                  # memoised walks reach this far past the state's entry
 WALK_MAX_STEPS = 20000
-FINE_MAX_BINS = 3                 # a node whose entry spans more bins goes coarse
+FINE_MAX_BINS = 3                 # a node whose entry spans more bins is one window placement
 TUBE_MAX_AGE_S = 0.5              # the idle body tube starts from a box seen at most this long ago
 COLLIDER_TUBE_S = 5 * BIN         # the current-collider and hazard tubes cover only the reaction lag
 DEATH_TAIL_S = 3 * BIN            # a killed enemy's last box hurts on its kill frame (forum_products death_tails)
 HAZARD_GONE_S = 0.5
 COARSE_MAX_U = 24.0               # an anchor box wider than this places an arena-wide box instead
-BOXIFY_U = 1.0                    # ... wider than this: the template's per-bin bounding box grown by the anchor box
 ARENA_BOX = (0.0, -5.0, 64.0, 40.0)
 TINY = "Song Automaton Tiny"
+MAESTRO = "Song Pilgrim Maestro"
 TINY_GROUP = 3                    # Tinies at least this many: group placement
-TINY_CLUSTER_U = 4.0              # Tinies whose anchors lie this close share one placement set
+TINY_CLUSTER_U = 4.0              # Tinies whose positions lie this close share one placement set
 ENTRY_LAG_S = 1.0                 # a wave's activation -> its member's entry family start (upper bound)
 ENTRY_OWNER = -(1 << 50)          # placement owner of wave w's entries: ENTRY_OWNER - w
-LADDER = (0, 1, 2, 3, 4, 6, 8, 12, 16, 24, 32, 48, 64, 96)    # coarse dilation steps (cells of COARSE_U)
-KT_NEAR, KT_MID, KT_FAR = 3, 6, 12                            # time dilation (bins) of coarse pieces by distance
+PIECES_S = ((0.4, 6 * BIN), (1.0, 12 * BIN), (math.inf, 24 * BIN))   # start-time piece length by distance
 
 
-def _ladder(cells: float) -> int:
-    for k in LADDER:
-        if k >= cells - 1e-9:
-            return k
-    return LADDER[-1]
-
-
-def _kt_for(t: float) -> int:
-    return KT_NEAR if t < 0.4 else KT_MID if t < 1.0 else KT_FAR
+def _piece_len(t: float) -> float:
+    for lim, w in PIECES_S:
+        if t < lim:
+            return w
+    return PIECES_S[-1][1]
 
 
 @dataclass(slots=True)
@@ -125,10 +127,19 @@ def walk(tt: TypeTable, state: str, ctx: tuple | None, dead: bool, overdue: bool
         k = (st, c, d, current)
         iv = nodes.get(k)
         if iv is None:
-            nodes[k] = [lo, hi, p]
-        elif lo < iv[0] - 1e-9 or hi > iv[1] + 1e-9 or p > iv[2] + 1e-9:
+            nodes[k] = [lo, hi, p, 0]
+        elif lo < iv[0] - 1e-9 or hi > iv[1] + 1e-9:
+            iv[3] += 1
+            if iv[3] >= 2:
+                # widening: an interval that keeps growing (a loop pushing the latest entry later, branches found
+                # in turn pulling the earliest one earlier) takes its bounds at once: a superset, and walks end fast
+                if hi > iv[1] + 1e-9:
+                    hi = cap
+                if lo < iv[0] - 1e-9:
+                    lo = min(lo, 0.0) if not current else lo
             iv[0], iv[1], iv[2] = min(iv[0], lo), max(iv[1], hi), max(iv[2], p)
         else:
+            iv[2] = max(iv[2], p)     # a likelier path alone does not re-walk (scoring only)
             return
         todo.append(k)
 
@@ -138,7 +149,7 @@ def walk(tt: TypeTable, state: str, ctx: tuple | None, dead: bool, overdue: bool
     while todo and steps < WALK_MAX_STEPS:
         k = todo.pop()
         st, c, d, current = k
-        lo, hi, p = nodes[k]
+        lo, hi, p, _ = nodes[k]
         steps += 1
         fam = c[0] if c else None
         dw = tt.dwell.get(st)
@@ -170,7 +181,7 @@ def walk(tt: TypeTable, state: str, ctx: tuple | None, dead: bool, overdue: bool
                 continue
             push(nxt, x_lo, x_hi, c2, d2, pn)
     out = []
-    for (st, c, d, current), (lo, hi, p) in nodes.items():
+    for (st, c, d, current), (lo, hi, p, _) in nodes.items():
         if c is None:
             continue
         out.append(WalkNode(st, c[0], c[1], c[2], d, lo, hi, p, current))
@@ -178,17 +189,21 @@ def walk(tt: TypeTable, state: str, ctx: tuple | None, dead: bool, overdue: bool
 
 
 class _WalkCache:
+    """Memoised walks, split for the placements: the current instance's nodes and the roots of later instances."""
+
     def __init__(self):
         self.d: dict = {}
         self.hits = 0
         self.misses = 0
 
-    def get(self, tt: TypeTable, state: str, ctx, dead: bool, overdue: bool) -> list[WalkNode]:
+    def get(self, tt: TypeTable, state: str, ctx, dead: bool, overdue: bool) -> tuple[list, list]:
         k = (tt.tk, state, ctx, dead, overdue)
         r = self.d.get(k)
         if r is None:
             self.misses += 1
-            r = self.d[k] = walk(tt, state, ctx, dead, overdue)
+            nodes = walk(tt, state, ctx, dead, overdue)
+            r = self.d[k] = ([n for n in nodes if n.kind == "cur"],
+                             [n for n in nodes if n.kind == "new" and n.state == n.start])
         else:
             self.hits += 1
         return r
@@ -208,7 +223,7 @@ class Subject:
     hp_sd: float
     pos: tuple | None
     t_free: float                 # earliest time its current attack can end (s from the origin; 0 when idle)
-    t_strike: float               # earliest time its support reaches anywhere (s from the origin)
+    t_strike: float               # earliest time it may start a new attack (s from the origin; inf: none in H)
 
 
 @dataclass(slots=True)
@@ -222,8 +237,8 @@ class Target:
 
 
 class _Shim:
-    """The bits of the single-boss Forecaster the planner reads off f.fc (half, model.families' hazard flags, the
-    comfort query, the registry's spec_of)."""
+    """The bits of the single-boss Forecaster the planner reads off f.fc (the families' hazard flags: Forum damage
+    is all ENEMY, i-frames block it; no comfort query; no registry targets)."""
 
     class _Fam:
         hazard = False
@@ -261,11 +276,9 @@ class MultiForecaster:
         self.query_c = None
         self.targets = _Shim._Targets()
         self.walks = _WalkCache()
-        self._fwalk_none: set = set()
+        self._fwalk: dict = {}
         self.offsets = {}
         if tables is not None and view != ORACLE:
-            import json
-            from ssbot.combat.enemy_tables import FORUM_DIR
             for tk, spec in FORUM_TYPES.items():
                 p = FORUM_DIR / f"{spec.enemy}.json"
                 if p.exists():
@@ -284,6 +297,8 @@ class MultiForecaster:
         self.t_wake: float | None = None
 
     def notify_wake(self, t_game: float, wave: int = 0) -> None:
+        """The battle started (the gates close: the bot walked into Start Range; a wave-start savestate's battle at
+        its wave)."""
         if self.boss is not None:
             self.boss.notify_wake(t_game)
             return
@@ -337,29 +352,6 @@ class MultiForecaster:
     def _new(self, iid: int, tk: str) -> None:
         self.trackers[iid] = EnemyTracker(self.tables.types[tk], self.view, iid, self.offsets.get(tk))
 
-    def family_walk_id(self, tt: TypeTable, fam: str, start: str, frame: str = "anchor") -> int | None:
-        """The family walk template of an instance of (fam, start): the union over the walk inside the instance
-        (instance_only: every state it reaches and its tail, each per-state template time-dilated over its entry
-        interval since the start, on the coarse grid). Built once (a coarse-only base of the store)."""
-        key = f"fwalk/{tt.tk}/{fam}/{start}/{frame}"
-        store = self.tables.store
-        i = store.coarse_keys.get(key)
-        if i is not None or key in self._fwalk_none:
-            return i
-        parts = []
-        for nd in walk(tt, start, (fam, start), False, False, instance_only=True):
-            tid = self.tables.key_id(fam, TAIL if nd.state == TAIL else nd.state, frame)
-            if tid is None:
-                continue
-            base = store.base(tid)
-            k = int(math.ceil((nd.hi - nd.lo) / (2 * BIN) - 1e-9))
-            parts.append((base.dilated(t_bins=k) if k > 0 else base, 0.5 * (nd.lo + nd.hi)))
-        u = shifted_union(parts, key)
-        if u is None:
-            self._fwalk_none.add(key)
-            return None
-        return store.add_coarse_base(key, u)
-
     def _self_hazards(self, ws: WorldState, T: float) -> None:
         """Thrown hazards placed by their self templates (forum_support.SubjectTracker.hazard): armed when a damage
         box is on (or its state is not a rest state), its arming time and position kept."""
@@ -392,6 +384,75 @@ class MultiForecaster:
         for iid in [i for i, h in self.self_haz.items() if T - h[4] > HAZARD_GONE_S]:
             del self.self_haz[iid]
 
+    # ---- family walk templates ----
+
+    def family_walk_id(self, tt: TypeTable, fam: str, start: str, frame: str = "anchor") -> int | None:
+        """A bbox-only id: per time bin since the instance's start, the bounding box of every state the instance
+        can reach from `start` and its tail (walk instance_only), each per-state template's box table time-dilated
+        over its entry interval (sparse-table window unions). Built once."""
+        key = (tt.tk, fam, start, frame)
+        if key in self._fwalk:
+            return self._fwalk[key]
+        store = self.tables.store
+        parts = []
+        for nd in walk(tt, start, (fam, start), False, False, instance_only=True):
+            tid = self.tables.key_id(fam, TAIL if nd.state == TAIL else nd.state, frame)
+            if tid is None:
+                continue
+            offs, nt, t0 = store.bbox_table(tid)
+            parts.append((offs, nt, t0, nd.lo, nd.hi))
+        if not parts:
+            self._fwalk[key] = None
+            return None
+        rows = store.bb_rows()
+        u0 = min(int(round((t0 + lo) / BIN)) for _, _, t0, lo, _ in parts)
+        u1 = max(int(round((t0 + hi) / BIN)) + nt for _, nt, t0, _, hi in parts)
+        acc = np.tile(np.array(EMPTY), (u1 - u0 + 1, 1))
+        tau = (np.arange(u1 - u0 + 1) + u0) * BIN
+        for offs, nt, t0, lo, hi in parts:
+            b = _window_union(rows, offs, nt, np.rint((tau - hi - t0) / BIN).astype(np.int64),
+                              np.rint((tau - lo - t0) / BIN).astype(np.int64))
+            acc[:, 0] = np.minimum(acc[:, 0], b[:, 0])
+            acc[:, 1] = np.minimum(acc[:, 1], b[:, 1])
+            acc[:, 2] = np.maximum(acc[:, 2], b[:, 2])
+            acc[:, 3] = np.maximum(acc[:, 3], b[:, 3])
+        i = store.add_coarse_base(f"fwalk/{tt.tk}/{fam}/{start}/{frame}", None)
+        store.add_bbox(i, acc, u0 * BIN)
+        self._fwalk[key] = i
+        return i
+
+    def warm(self) -> int:
+        """Build before the fight what the forecasts would build lazily: every logged instance start's family walk
+        boxes, the coarse time pyramids and box tables of the per-state templates. Returns how many."""
+        store = self.tables.store
+        n = 0
+        for tt in self.tables.types.values():
+            starts = {(f.name, s) for f in tt.families.values() for s in f.starts}
+            starts |= {(tt.spec.idle_family, s) for s in tt.decision_states}
+            for fam, s in sorted(starts):
+                for frame in ("anchor",) + (("world_all",) if fam == tt.spec.entry_family else ()):
+                    n += self.family_walk_id(tt, fam, s, frame) is not None
+        for tid in list(range(store.n_fine)) + list(store._pooled):
+            store.pyramid(tid)
+            store.bbox_table(tid)
+            n += 1
+        # the walks from every state with the instance contexts it can be in
+        for tt in self.tables.types.values():
+            idle = tt.spec.idle_family
+            for st in tt.dwell:
+                ctxs = {None}
+                for f in tt.families.values():
+                    if st in f.states:
+                        ctxs |= {(f.name, s) for s in f.starts}
+                if st in tt.decision_states:
+                    ctxs.add((idle, st))
+                for ctx in ctxs:
+                    for overdue in (False, True):
+                        for dead in ((False, True) if tt.spec.pooled else (False,)):
+                            self.walks.get(tt, st, ctx, dead, overdue)
+                            n += 1
+        return n
+
     # ---- the forecast ----
 
     def forecast(self, horizon_s: float = MIN_HORIZON_S, origin_t: float | None = None,
@@ -402,7 +463,6 @@ class MultiForecaster:
             return MultiForecast(self, self.boss.t if origin_t is None else origin_t, H,
                                  boss=self.boss.forecast(horizon_s, origin_t))
         origin = self.t if origin_t is None else origin_t
-        self.tables.store.trim()
         b = _Builder(self, origin, H)
         for tr in self.trackers.values():
             b.subject(tr)
@@ -413,8 +473,34 @@ class MultiForecaster:
         return b.finish()
 
 
+def _window_union(rows: np.ndarray, offs: np.ndarray, nt: int, b_lo: np.ndarray, b_hi: np.ndarray) -> np.ndarray:
+    """Union of a box sparse table's bins [b_lo, b_hi] (vectorised over rows; empty where the window misses)."""
+    out = np.tile(np.array(EMPTY), (len(b_lo), 1))
+    lo = np.clip(b_lo, 0, nt - 1)
+    hi = np.clip(b_hi, 0, nt - 1)
+    ok = (b_hi >= 0) & (b_lo < nt) & (hi >= lo)
+    cur = lo.copy()
+    jm = len(offs) - 1
+    while True:
+        rem = ok & (cur <= hi)
+        if not rem.any():
+            break
+        L = hi - cur + 1
+        j = np.minimum(np.floor(np.log2(np.maximum(L, 1))).astype(np.int64), jm)
+        r1 = rows[offs[j] + cur]
+        r2 = rows[offs[j] + np.maximum(hi - (1 << j) + 1, cur)]
+        for a, r in ((r1, rem), (r2, rem & (L <= (1 << (j + 1))))):
+            out[r, 0] = np.minimum(out[r, 0], a[r, 0])
+            out[r, 1] = np.minimum(out[r, 1], a[r, 1])
+            out[r, 2] = np.maximum(out[r, 2], a[r, 2])
+            out[r, 3] = np.maximum(out[r, 3], a[r, 3])
+        done = L <= (1 << (j + 1))
+        cur = np.where(done, hi + 1, cur + (1 << j))
+    return out
+
+
 class _Builder:
-    """One forecast's placements, tubes and hazard shapes."""
+    """One forecast's placements (fine, window, bounding box), tubes and hazard shapes."""
 
     def __init__(self, fc: MultiForecaster, origin: float, H: float):
         self.fc = fc
@@ -422,67 +508,92 @@ class _Builder:
         self.store = fc.tables.store
         self.origin = origin
         self.H = H
-        self.rows: list[tuple] = []          # (tid, t_ref, ax, ay, mirror)
-        self.meta: list[tuple] = []          # (subject iid, family, committed, p, t_on, t_off)
-        self.boxes: list[tuple] = []         # (owner, kind, x0, y0, x1, y1, vx, vy, grow_type, t_from, t_to, t0)
+        self.fine: list[tuple] = []          # (tid, t_ref, ax, ay, mirror)
+        self.fine_m: list[tuple] = []        # (owner, family, committed, p, t_on, t_off)
+        self.win: list[tuple] = []           # (tid, e0, e1, ax, ay, mirror)
+        self.win_m: list[tuple] = []
+        self.bb_chunks: list[tuple] = []     # bounding-box rows, in chunks of arrays (_bbox_rows)
+        self.root_buf: list[tuple] = []      # later instances' roots: (tracker, fid, lo, hi, p, family), flushed
+        #                                      together (groups())
+        self.fam_code: dict = {}             # family name -> its code in the chunks
+        # the start-time grid of later instances' pieces (s from the origin; finer near it: PIECES_S)
+        ed, e = [-BIN], 0.0
+        while e < H + BIN:
+            e += _piece_len(e)
+            ed.append(e)
+        self.edges = np.array(ed)
+        self.boxes: list[tuple] = []         # (owner, kind, x0, y0, x1, y1, vx, vy, grow, t_from, t_to, t_seen)
         self.paths: list[HazardPath] = []
         self.subjects: list[Subject] = []
         self.known = fc.tables.certified
-        self.n_place_fine = 0
-        self.n_place_coarse = 0
-        self.tiny_new: list[tuple] = []      # deferred "new" nodes of Tinies (group placement)
         self.unknown: list[int] = []
+        self.tiny_new: list[tuple] = []      # deferred later-instance roots of Tinies (group placement)
         self.meta_group: dict = {}           # group owner -> the other Tinies its placements stand for
-        self.bbx: list[tuple] = []           # bounding-box placements (BB_FIELDS)
 
     # ---- placements ----
 
     def _fine(self, tid, e_lo: float, e_hi: float, anchor, mirror: int, owner: int, fam, committed: bool, p: float):
+        """Fine placements, one per entry bin (the template's own +-1 bin covers between them)."""
         if tid < 0:                               # kept only coarse
-            ax, ay = anchor if anchor is not None else (0.0, 0.0)
-            self._coarse(tid, e_lo, e_hi, ax, ay, 0.0, 0.0, (mirror,), owner, fam, committed, p,
-                         world=anchor is None)
+            self._window(tid, e_lo, e_hi, anchor, mirror, owner, fam, committed, p)
             return
-        t0, t1 = self.store.tpls[tid].t0, self.store.tpls[tid].t1
-        es = [e for e in entry_grid(e_lo, e_hi) if active_within(e + t0, e + t1, self.H)]
-        ax, ay = (anchor if anchor is not None else (math.nan, math.nan))
-        for e in es:
-            self.rows.append((tid, -e, ax, ay, mirror))
-            self.meta.append((owner, fam, committed, p, e + t0, e + t1))
-        self.n_place_fine += len(es)
-
-    def _coarse(self, tid, e_lo: float, e_hi: float, cx: float, cy: float, hx: float, hy: float, mirrors,
-                owner: int, fam, committed: bool, p: float, world: bool = False):
-        """Entries over [e_lo, e_hi] at anchors in the box (cx +- hx, cy +- hy): coarse pieces of 2 kt + 1 bins."""
-        tpl = self.tables.template(tid)
+        tpl = self.store.tpls[tid]
         t0, t1 = tpl.t0, tpl.t1
+        ax, ay = (anchor if anchor is not None else (math.nan, math.nan))
+        for e in entry_grid(e_lo, e_hi):
+            if active_within(e + t0, e + t1, self.H):
+                self.fine.append((tid, -e, ax, ay, mirror))
+                self.fine_m.append((owner, fam, committed, p, e + t0, e + t1))
+
+    def _window(self, tid, e_lo: float, e_hi: float, anchor, mirror: int, owner: int, fam, committed: bool,
+                p: float):
+        """One window placement: every entry in [e_lo, e_hi] at once (the coarse base's time pyramid)."""
+        t0, t1 = self.store.span(tid)
         lo, hi = max(e_lo, -BIN - t1), min(e_hi, self.H + BIN - t0)
         if hi < lo - 1e-9:
             return
-        if max(hx, hy) > COARSE_MAX_U:
-            self.boxes.append((owner, "arena", *ARENA_BOX, 0.0, 0.0, None, lo + t0 - BIN, hi + t1 + BIN, 0.0))
+        ax, ay = (anchor if anchor is not None else (math.nan, math.nan))
+        self.win.append((tid, lo, hi, ax, ay, mirror))
+        self.win_m.append((owner, fam, committed, p, lo + t0, hi + t1))
+
+    def _bbox(self, tid, e_lo: float, e_hi: float, cx: float, cy: float, hx: float, hy: float, mir: int,
+              owner: int, fam, committed: bool, p: float):
+        """Entries in [e_lo, e_hi] at anchors in the box (cx +- hx, cy +- hy): the template's per-bin bounding box
+        over the window, grown by the anchor box; mir 0: both mirrors."""
+        self._bbox_rows(tid, np.array([e_lo]), np.array([e_hi]), np.array([[cx, cy, hx, hy]]), mir, owner, fam,
+                        committed, p)
+
+    def _bbox_rows(self, tid, e0: np.ndarray, e1: np.ndarray, boxes: np.ndarray, mir: int, owner: int, fam,
+                   committed: bool, p: float):
+        """_bbox for n entry windows at once (boxes [n, 4]: cx, cy, hx, hy); an anchor box wider than COARSE_MAX_U
+        places an arena-wide box instead."""
+        t0, t1 = self.store.span(tid)
+        lo = np.maximum(e0, -BIN - t1)
+        hi = np.minimum(e1, self.H + BIN - t0)
+        ok = hi >= lo - 1e-9
+        if not ok.any():
             return
-        if not world and max(hx, hy) > BOXIFY_U:
-            # an anchor this uncertain: the template's bounding box per time bin, grown by the anchor box (a superset
-            # of the dilated template, without building one per box size)
-            self.store.bbox_table(tid)
-            self.bbx.append((owner, fam, committed, p, tid, lo, hi, cx, cy, hx, hy, 0 if len(mirrors) > 1 else
-                             int(mirrors[0]), lo + t0 - BIN, hi + t1 + BIN))
+        big = ok & (np.maximum(boxes[:, 2], boxes[:, 3]) > COARSE_MAX_U)
+        for i in np.flatnonzero(big):
+            self.boxes.append((owner, "arena", *ARENA_BOX, 0.0, 0.0, None, lo[i] + t0 - BIN, hi[i] + t1 + BIN, 0.0))
+        sel = ok & ~big
+        n = int(sel.sum())
+        if not n:
             return
-        kx = _ladder(hx / COARSE_U)
-        ky = _ladder(hy / COARSE_U)
-        e = lo
-        while e <= hi + 1e-9:
-            kt = _kt_for(max(e, 0.0))
-            span = (2 * kt) * BIN
-            mid = min(e + kt * BIN, max(hi - kt * BIN, e))
-            cid = self.store.coarse_id(tid, kx, ky, kt)
-            for m in mirrors:
-                self.rows.append((cid, -mid, math.nan if world else cx, math.nan if world else cy, m))
-                self.meta.append((owner, fam, committed, p, mid - kt * BIN + t0, mid + kt * BIN + t1))
-                self.n_place_coarse += 1
-            e += span + BIN
-        return
+        self.store.bbox_table(tid)
+        code = self.fam_code.setdefault(fam, len(self.fam_code))
+        self.bb_chunks.append((np.full(n, owner, np.int64), np.full(n, code, np.int64), np.full(n, committed),
+                               np.full(n, p), np.full(n, tid, np.int64), lo[sel], hi[sel], boxes[sel],
+                               np.full(n, mir, np.int64), lo[sel] + t0 - BIN, hi[sel] + t1 + BIN))
+
+    def _place_anchor(self, tid, lo, hi, anc, owner, fam, committed, p):
+        (ax, ay), m, sd = anc
+        if sd > 1e-9:                             # an anchor known to a box (the vision view's offset spread)
+            self._bbox(tid, lo, hi, ax, ay, sd, sd, m, owner, fam, committed, p)
+        elif tid >= 0 and hi - lo <= FINE_MAX_BINS * BIN + 1e-9:
+            self._fine(tid, lo, hi, (ax, ay), m, owner, fam, committed, p)
+        else:
+            self._window(tid, lo, hi, (ax, ay), m, owner, fam, committed, p)
 
     # ---- one enemy ----
 
@@ -491,7 +602,7 @@ class _Builder:
         while a Maestro is in play (a summon), a wave member when its wave is queued or no wave is known yet."""
         fc = self.fc
         if tr.table.spec.pooled:
-            return any(t.tk == "Song Pilgrim Maestro" and t.in_play and not t.dead for t in fc.trackers.values())
+            return any(t.tk == MAESTRO and t.in_play and not t.dead for t in fc.trackers.values())
         if not fc.use_waves or fc.t_wake is None:
             return True
         nw = fc.waves.next_window()
@@ -511,16 +622,13 @@ class _Builder:
             self.boxes.append((tr.iid, "death", *tr.death_box, 0.0, 0.0, None, -BIN, tr.t_dead + DEATH_TAIL_S - T,
                                0.0))
         self._tails(tr)
-        if tr.dead and not sp.pooled:
-            self.subjects.append(self._subject_row(tr, False))
-            return
-        if tr.state is None or tr.t_entry is None:
-            if tr.seen_T > -math.inf and not tr.hidden:
+        if tr.dead and not sp.pooled or tr.state is None or tr.t_entry is None:
+            if not tr.dead and tr.state is None and tr.seen_T > -math.inf and not tr.hidden:
                 self.unknown.append(tr.iid)
-            self.subjects.append(self._subject_row(tr, False))
+            self.subjects.append(self._subject_row(tr, False, math.inf))
             return
         if not tr.in_play and not self._walk_waiting(tr):
-            self.subjects.append(self._subject_row(tr, False))
+            self.subjects.append(self._subject_row(tr, False, math.inf))
             return
         if tr.state not in tt.dwell and tr.in_play:
             self.unknown.append(tr.iid)
@@ -528,54 +636,51 @@ class _Builder:
         dw = tt.dwell.get(tr.state)
         overdue = dw is not None and age > dw[1] + DWELL_SLACK_S
         ctx = (cur.family, cur.start) if cur is not None else None
-        nodes = self.fc.walks.get(tt, tr.state, ctx, tr.dead, overdue)
+        cur_nodes, roots = self.fc.walks.get(tt, tr.state, ctx, tr.dead, overdue)
         ref = T if overdue else tr.t_entry
         idle_tube = (cur is not None and cur.family == sp.idle_family and not tr.dead and tr.pos is not None
                      and T - tr.seen_T <= TUBE_MAX_AGE_S and tt.tk in tubes.growth)
-        anc = None
-        if cur is not None and cur.anchor is not None:
-            anc = (cur.anchor, cur.mirror, cur.sd)
+        anc = (cur.anchor, cur.mirror, cur.sd) if cur is not None and cur.anchor is not None else None
         committed_now = cur is not None and cur.family != sp.idle_family
-        # the current attack's family template from its start (the family-wide union)
         if committed_now and anc is not None:
+            # the current attack's family template from its start (the family-wide union)
             fid = tables.key_id(cur.family, None, "anchor")
             if fid is not None:
                 self._place_anchor(fid, cur.t_start - T, cur.t_start - T, anc, tr.iid, cur.family, True, 1.0)
-        for nd in nodes:
-            if nd.current:
-                lo = hi = tr.t_entry - T          # the current state: its entry
-            else:
-                # a state not entered yet enters from the next frame on (SubjectRecall._walk's push); the memoised
-                # walk is relative to the entry, unclipped: its later nodes are a superset of the clipped walk's
-                lo, hi = ref + nd.lo - T, ref + nd.hi - T
-                lo, hi = max(lo, BIN), max(hi, BIN)
+        if anc is not None and not (idle_tube and cur.family == sp.idle_family):
+            for nd in cur_nodes:
+                if nd.current:
+                    lo = hi = tr.t_entry - T          # the current state: its entry
+                else:
+                    lo, hi = max(ref + nd.lo - T, BIN), max(ref + nd.hi - T, BIN)
+                if lo > H + BIN:
+                    continue
+                key_state = TAIL if nd.state == TAIL else nd.state
+                tid = tables.key_id(nd.family, key_state, "anchor")
+                if tid is not None:
+                    self._place_anchor(tid, lo, hi, anc, tr.iid, nd.family, nd.family != sp.idle_family, nd.p)
+                if nd.family == sp.entry_family:
+                    wid = tables.key_id(nd.family, key_state, "world_all")
+                    if wid is not None:
+                        self._window(wid, lo, hi, None, 1, tr.iid, nd.family, True, nd.p)
+        elif cur is not None and anc is None and not (idle_tube and cur.family == sp.idle_family):
+            # the current instance's anchor is not known (not exported at its start): its family walk from the
+            # start, anchored where the enemy is now
+            self._place_family(tr, cur.family, cur.start, cur.t_start - T, cur.t_start - T, 1.0, committed_now)
+        t_strike = math.inf
+        for nd in roots:
+            lo, hi = max(ref + nd.lo - T, BIN), max(ref + nd.hi - T, BIN)
             if lo > H + BIN:
                 continue
-            fam = nd.family
-            if nd.kind == "cur":
-                if idle_tube and fam == sp.idle_family:
-                    continue                      # the current idle instance: its body tube
-                if anc is None:
-                    continue                      # placed below from the instance's start
-                key_state = TAIL if nd.state == TAIL else nd.state
-                tid = tables.key_id(fam, key_state, "anchor")
-                if tid is not None:
-                    self._place_anchor(tid, lo, hi, anc, tr.iid, fam, fam != sp.idle_family, nd.p)
-                if fam == sp.entry_family:
-                    wid = tables.key_id(fam, key_state, "world_all")
-                    if wid is not None:
-                        self._coarse(wid, lo, hi, 0.0, 0.0, 0.0, 0.0, (1,), tr.iid, fam, True, nd.p, world=True)
-                continue
-            if nd.state != nd.start:
-                continue                          # inside a later instance: its family walk template
-            if sp.pooled and self.fc.tiny_group:
-                self.tiny_new.append((tr, fam, nd.start, lo, hi, nd.p))
-            else:
-                self._place_family(tr, fam, nd.start, lo, hi, nd.p)
-        if cur is not None and anc is None and not (idle_tube and cur.family == sp.idle_family):
-            # the current instance's anchor is not known (not exported at its start): from its start, anchored
-            # where it is now
-            self._place_family(tr, cur.family, cur.start, cur.t_start - T, cur.t_start - T, 1.0, committed_now)
+            if nd.family != sp.idle_family:
+                t_strike = min(t_strike, lo)
+            fid = self.fc.family_walk_id(tt, nd.family, nd.start, "anchor")
+            if fid is not None:
+                self.root_buf.append((tr, fid, lo, min(hi, H + BIN), nd.p, nd.family))
+            if nd.family == sp.entry_family:
+                wid = self.fc.family_walk_id(tt, nd.family, nd.start, "world_all")
+                if wid is not None:
+                    self._bbox(wid, lo, hi, 0.0, 0.0, 0.0, 0.0, 1, tr.iid, nd.family, False, nd.p)
         if idle_tube:
             self._idle_tube(tr)
         if self.fc.collider_tube and T - tr.seen_T <= TUBE_MAX_AGE_S:
@@ -586,13 +691,13 @@ class _Builder:
             if b is not None:
                 self.boxes.append((tr.iid, "collider", *b, 0.0, 0.0, ("speed", tubes.speed.get(tt.tk, 60.0)),
                                    -BIN, COLLIDER_TUBE_S, tr.seen_T - T))
-        self.subjects.append(self._subject_row(tr, True))
+        self.subjects.append(self._subject_row(tr, True, t_strike))
 
-    def _subject_row(self, tr: EnemyTracker, alive: bool) -> Subject:
+    def _subject_row(self, tr: EnemyTracker, alive: bool, t_strike: float) -> Subject:
         c = tr.cur
         committed = c is not None and c.family != tr.table.spec.idle_family
         return Subject(tr.iid, tr.tk, alive and not tr.dead, tr.in_play, committed, None if c is None else c.family,
-                       tr.state, tr.hp_est, tr.hp_sd, tr.pos, 0.0, math.inf)
+                       tr.state, tr.hp_est, tr.hp_sd, tr.pos, 0.0, t_strike)
 
     def _tails(self, tr: EnemyTracker) -> None:
         T = self.origin
@@ -604,53 +709,51 @@ class _Builder:
                 e = inst.t_end - T
                 self._place_anchor(tid, e, e, (inst.anchor, inst.mirror, inst.sd), tr.iid, inst.family, True, 1.0)
 
-    def _place_anchor(self, tid, lo, hi, anc, owner, fam, committed, p):
-        (ax, ay), m, sd = anc
-        if tid >= 0 and sd <= 1e-9 and hi - lo <= FINE_MAX_BINS * BIN + 1e-9:
-            self._fine(tid, lo, hi, (ax, ay), m, owner, fam, committed, p)
-        else:
-            self._coarse(tid, lo, hi, ax, ay, sd, sd, (m,), owner, fam, committed, p)
-
-    def _start_box(self, tr: EnemyTracker, s_lo: float, s_hi: float):
-        """Where an instance starting within [s_lo, s_hi] (s from the origin) is anchored: the transform dead-reckoned
-        to those times, grown by the type's idle growth since the sighting (and the view's anchor spread):
-        (cx, cy, hx, hy), or None without a position."""
+    def _start_boxes(self, tr: EnemyTracker, s_lo: np.ndarray, s_hi: np.ndarray) -> np.ndarray | None:
+        """Where instances starting within [s_lo, s_hi] (s from the origin, arrays) are anchored: the transform
+        dead-reckoned to those times, grown by the type's idle growth since the sighting (and the view's anchor
+        spread): [n, 4] (cx, cy, hx, hy), or None without a position."""
         if tr.pos is None:
             return None
-        s_lo, s_hi = max(0.0, s_lo), max(0.0, s_hi)
+        s_lo, s_hi = np.maximum(s_lo, 0.0), np.maximum(s_hi, 0.0)
         vx, vy = tr.vel
-        age = self.origin - tr.seen_T
-        x0, x1 = tr.pos[0] + vx * s_lo, tr.pos[0] + vx * s_hi
-        y0, y1 = tr.pos[1] + vy * s_lo, tr.pos[1] + vy * s_hi
-        g = float(self.tables.tubes.g(tr.tk, age + s_hi)) + tr.pos_sd
-        return 0.5 * (x0 + x1), 0.5 * (y0 + y1), 0.5 * abs(x1 - x0) + g, 0.5 * abs(y1 - y0) + g
+        g = self.tables.tubes.g(tr.tk, (self.origin - tr.seen_T) + s_hi) + tr.pos_sd
+        mid = 0.5 * (s_lo + s_hi)
+        half = 0.5 * (s_hi - s_lo)
+        return np.stack([tr.pos[0] + vx * mid, tr.pos[1] + vy * mid, abs(vx) * half + g, abs(vy) * half + g], axis=1)
 
-    def _pieces(self, lo: float, hi: float):
-        """Start-time pieces of [lo, hi] (s from the origin): 2 kt + 1 bins each, kt by distance."""
-        e = max(lo, -BIN) if hi >= -BIN else lo
-        while e <= hi + 1e-9:
-            kt = _kt_for(max(e, 0.0))
-            e1 = min(hi, e + 2 * kt * BIN)
-            yield e, e1
-            e = e1 + BIN
+    def _pieces(self, lo: float, hi: float) -> tuple[np.ndarray, np.ndarray]:
+        """[lo, hi] (s from the origin, within the horizon) cut at the forecast's start-time grid (PIECES_S: finer
+        near the origin): the pieces' (e0, e1)."""
+        hi = min(hi, self.H + BIN)
+        if hi < lo - 1e-9:
+            return np.zeros(0), np.zeros(0)
+        ed = self.edges
+        k0 = max(0, int(np.searchsorted(ed, lo, "right")) - 1)
+        k1 = int(np.searchsorted(ed, hi, "left"))
+        a = np.maximum(ed[k0:k1], lo)
+        b = np.minimum(ed[k0 + 1:k1 + 1], hi)
+        if not len(a):
+            return np.array([lo]), np.array([hi])
+        return a, b
 
     def _place_family(self, tr: EnemyTracker, fam: str, start: str, lo: float, hi: float, p: float,
-                      committed: bool = False, box=None, owner: int | None = None):
-        """An instance of (fam, start) starting within [lo, hi]: its family walk template (every state the walk
-        reaches from the start and its tail, entry intervals from the logged dwells: one coarse template) at the
-        anchor box of each start piece, both mirrors; an entry family also in its world frame."""
+                      committed: bool = False, boxes_of=None, owner: int | None = None):
+        """An instance of (fam, start) starting within [lo, hi]: its family walk boxes at the anchor box of each
+        start piece, both mirrors; an entry family also in its world frame."""
         fid = self.fc.family_walk_id(tr.table, fam, start, "anchor")
         wid = self.fc.family_walk_id(tr.table, fam, start, "world_all") if fam == tr.table.spec.entry_family \
             else None
         owner = tr.iid if owner is None else owner
-        for e, e1 in self._pieces(lo, hi):
-            if fid is not None:
-                b = self._start_box(tr, e, e1) if box is None else box(e, e1)
-                if b is None:
-                    break
-                self._coarse(fid, e, e1, b[0], b[1], b[2], b[3], (-1, 1), owner, fam, committed, p)
-            if wid is not None:
-                self._coarse(wid, e, e1, 0.0, 0.0, 0.0, 0.0, (1,), owner, fam, committed, p, world=True)
+        e0s, e1s = self._pieces(lo, hi)
+        if not len(e0s):
+            return
+        if fid is not None:
+            bs = self._start_boxes(tr, e0s, e1s) if boxes_of is None else boxes_of(e0s, e1s)
+            if bs is not None:
+                self._bbox_rows(fid, e0s, e1s, bs, 0, owner, fam, committed, p)
+        if wid is not None:
+            self._bbox(wid, float(e0s[0]), float(e1s[-1]), 0.0, 0.0, 0.0, 0.0, 1, owner, fam, committed, p)
 
     def _idle_tube(self, tr: EnemyTracker) -> None:
         tubes = self.tables.tubes
@@ -664,54 +767,137 @@ class _Builder:
                            tr.seen_T - self.origin))
 
     def groups(self) -> None:
-        """Tiny group placement: with >= tiny_group Tinies, the instances they may start are placed once per cluster
-        of Tinies (within TINY_CLUSTER_U) starting the same family from the same state in the same window: one anchor
-        box covering the members' boxes."""
-        items = self.tiny_new
-        self.tiny_new = []
-        if not items:
+        """Place every buffered later-instance root at once (vectorised): each root's start window cut at the
+        start-time grid, each piece's anchor box from its enemy's dead-reckoned transform and idle growth; Tiny
+        group placement: with >= tiny_group Tinies, the Tinies within TINY_CLUSTER_U of each other form a cluster
+        whose roots of one family walk share a row per grid piece (the union of their windows and anchor boxes)."""
+        buf = self.root_buf
+        self.root_buf = []
+        if not buf:
             return
-        if len({it[0].iid for it in items}) < self.fc.tiny_group:
-            for tr, fam, start, lo, hi, p in items:
-                self._place_family(tr, fam, start, lo, hi, p)
+        R = len(buf)
+        lo = np.array([b[2] for b in buf])
+        hi = np.array([b[3] for b in buf])
+        fid = np.array([b[1] for b in buf], np.int64)
+        p = np.array([b[4] for b in buf])
+        trs = [b[0] for b in buf]
+        by_iid = {t.iid: t for t in trs}
+        tlist = list(by_iid.values())
+        pos_of = {iid: i for i, iid in enumerate(by_iid)}
+        sidx = np.array([pos_of[t.iid] for t in trs], np.int64)
+        ok_pos = np.array([t.pos is not None for t in tlist])
+        px = np.array([t.pos[0] if t.pos is not None else 0.0 for t in tlist])
+        py = np.array([t.pos[1] if t.pos is not None else 0.0 for t in tlist])
+        vx = np.array([t.vel[0] for t in tlist])
+        vy = np.array([t.vel[1] for t in tlist])
+        age = np.array([self.origin - t.seen_T for t in tlist])
+        sd = np.array([t.pos_sd for t in tlist])
+        keep = ok_pos[sidx] & (hi >= lo - 1e-9)
+        if not keep.any():
             return
-        by: dict[tuple, list] = defaultdict(list)
-        for it in items:
-            tr, fam, start, lo, hi, p = it
-            by[(fam, start, round(lo / (6 * BIN)), round(hi / (6 * BIN)))].append(it)
-        for (fam, start, _, _), lst in by.items():
-            lst = [it for it in lst if it[0].pos is not None]
-            lst.sort(key=lambda it: it[0].pos[0])
-            clusters: list[list] = []
-            for it in lst:
-                last = clusters[-1][-1][0] if clusters else None
-                if last is not None and abs(it[0].pos[0] - last.pos[0]) <= TINY_CLUSTER_U \
-                        and abs(it[0].pos[1] - last.pos[1]) <= TINY_CLUSTER_U:
-                    clusters[-1].append(it)
-                else:
-                    clusters.append([it])
-            for cl in clusters:
-                if len(cl) == 1:
-                    tr, fam_, start_, lo, hi, p = cl[0]
-                    self._place_family(tr, fam_, start_, lo, hi, p)
-                    continue
-                lo = min(it[3] for it in cl)
-                hi = max(it[4] for it in cl)
-                members = [it[0] for it in cl]
+        # pieces on the grid
+        E = self.edges
+        k0 = np.maximum(np.searchsorted(E, lo, "right") - 1, 0)
+        k1 = np.maximum(np.searchsorted(E, hi, "left"), k0 + 1)
+        cnt = np.where(keep, k1 - k0, 0)
+        ri = np.repeat(np.arange(R), cnt)
+        if not len(ri):
+            return
+        off = np.arange(len(ri)) - np.repeat(np.cumsum(cnt) - cnt, cnt)
+        k = np.minimum(k0[ri] + off, len(E) - 2)
+        e0 = np.maximum(E[k], lo[ri])
+        e1 = np.minimum(E[k + 1], hi[ri])
+        good = e1 >= e0 - 1e-9
+        ri, k, e0, e1 = ri[good], k[good], e0[good], e1[good]
+        s = sidx[ri]
+        s_lo, s_hi = np.maximum(e0, 0.0), np.maximum(e1, 0.0)
+        g = np.empty(len(ri))
+        tub = self.tables.tubes
+        for t_i, t in enumerate(tlist):
+            m = s == t_i
+            if m.any():
+                g[m] = tub.g(t.tk, age[t_i] + s_hi[m])
+        g += sd[s]
+        mid, half = 0.5 * (s_lo + s_hi), 0.5 * (s_hi - s_lo)
+        x0 = px[s] + vx[s] * mid - np.abs(vx[s]) * half - g
+        x1 = px[s] + vx[s] * mid + np.abs(vx[s]) * half + g
+        y0 = py[s] + vy[s] * mid - np.abs(vy[s]) * half - g
+        y1 = py[s] + vy[s] * mid + np.abs(vy[s]) * half + g
+        owner = np.array([t.iid for t in tlist], np.int64)[s]
+        fam_c = np.array([self.fam_code.setdefault(b[5], len(self.fam_code)) for b in buf], np.int64)[ri]
+        # Tiny clusters
+        tiny = np.array([t.table.spec.pooled for t in tlist])
+        if self.fc.tiny_group and int(tiny.sum()) >= self.fc.tiny_group:
+            ti = np.flatnonzero(tiny)
+            order = ti[np.argsort(px[ti])]
+            cl = np.full(len(tlist), -1, np.int64)
+            c = -1
+            for j, t_i in enumerate(order):
+                if j == 0 or abs(px[t_i] - px[order[j - 1]]) > TINY_CLUSTER_U or \
+                        abs(py[t_i] - py[order[j - 1]]) > TINY_CLUSTER_U:
+                    c += 1
+                cl[t_i] = c
+            grp = tiny[s] & (cl[s] >= 0)
+            if grp.any():
+                gi = np.flatnonzero(grp)
+                key = np.stack([cl[s[gi]], fid[ri[gi]], k[gi]], axis=1)
+                ukey, inv = np.unique(key, axis=0, return_inverse=True)
+                n = len(ukey)
+                G = {"e0": np.full(n, np.inf), "e1": np.full(n, -np.inf), "x0": np.full(n, np.inf),
+                     "x1": np.full(n, -np.inf), "y0": np.full(n, np.inf), "y1": np.full(n, -np.inf),
+                     "p": np.zeros(n)}
+                np.minimum.at(G["e0"], inv, e0[gi])
+                np.maximum.at(G["e1"], inv, e1[gi])
+                np.minimum.at(G["x0"], inv, x0[gi])
+                np.maximum.at(G["x1"], inv, x1[gi])
+                np.minimum.at(G["y0"], inv, y0[gi])
+                np.maximum.at(G["y1"], inv, y1[gi])
+                np.maximum.at(G["p"], inv, p[ri[gi]])
+                first = np.zeros(n, np.int64)
+                first[inv[::-1]] = gi[::-1]                    # a representative row per group (its owner)
+                g_owner = owner[first]
+                # the members a group owner stands for (occupied_without / support accounting)
+                cl_members: dict = defaultdict(set)
+                for t_i in ti:
+                    cl_members[int(cl[t_i])].add(tlist[t_i].iid)
+                for o, c_ in {(int(a), int(b)) for a, b in zip(g_owner, ukey[:, 0])}:
+                    m = cl_members[c_] - {o}
+                    if m:
+                        self.meta_group.setdefault(o, set()).update(m)
+                rest = ~grp
+                self._emit_bbox(np.concatenate([fid[ri[rest]], ukey[:, 1]]),
+                                np.concatenate([e0[rest], G["e0"]]), np.concatenate([e1[rest], G["e1"]]),
+                                np.concatenate([x0[rest], G["x0"]]), np.concatenate([y0[rest], G["y0"]]),
+                                np.concatenate([x1[rest], G["x1"]]), np.concatenate([y1[rest], G["y1"]]),
+                                np.concatenate([owner[rest], g_owner]), np.concatenate([fam_c[rest], fam_c[first]]),
+                                np.concatenate([p[ri[rest]], G["p"]]))
+                return
+        self._emit_bbox(fid[ri], e0, e1, x0, y0, x1, y1, owner, fam_c, p[ri])
 
-                def box(e, e1, members=members):
-                    bs = [self._start_box(m, e, e1) for m in members]
-                    bs = [b for b in bs if b is not None]
-                    if not bs:
-                        return None
-                    x0 = min(b[0] - b[2] for b in bs)
-                    x1 = max(b[0] + b[2] for b in bs)
-                    y0 = min(b[1] - b[3] for b in bs)
-                    y1 = max(b[1] + b[3] for b in bs)
-                    return 0.5 * (x0 + x1), 0.5 * (y0 + y1), 0.5 * (x1 - x0), 0.5 * (y1 - y0)
-                owner = members[0].iid
-                self._place_family(members[0], fam, start, lo, hi, max(it[5] for it in cl), box=box, owner=owner)
-                self.meta_group.setdefault(owner, set()).update(m.iid for m in members[1:])
+    def _emit_bbox(self, tid, e0, e1, x0, y0, x1, y1, owner, fam_c, p) -> None:
+        """Bounding-box rows of later instances (both mirrors, not committed): anchor boxes from their edges; an
+        anchor box wider than COARSE_MAX_U is an arena-wide box."""
+        cx, cy = 0.5 * (x0 + x1), 0.5 * (y0 + y1)
+        hx, hy = 0.5 * (x1 - x0), 0.5 * (y1 - y0)
+        ut, inv = np.unique(tid, return_inverse=True)
+        spans = np.array([self.store.span(int(t)) for t in ut])
+        t0, t1 = spans[inv, 0], spans[inv, 1]
+        lo = np.maximum(e0, -BIN - t1)
+        hi = np.minimum(e1, self.H + BIN - t0)
+        ok = hi >= lo - 1e-9
+        big = ok & (np.maximum(hx, hy) > COARSE_MAX_U)
+        for i in np.flatnonzero(big):
+            self.boxes.append((int(owner[i]), "arena", *ARENA_BOX, 0.0, 0.0, None, lo[i] + t0[i] - BIN,
+                               hi[i] + t1[i] + BIN, 0.0))
+        sel = ok & ~big
+        n = int(sel.sum())
+        if not n:
+            return
+        for t in ut:
+            self.store.bbox_table(int(t))
+        self.bb_chunks.append((owner[sel], fam_c[sel], np.zeros(n, bool), p[sel], tid[sel], lo[sel], hi[sel],
+                               np.stack([cx[sel], cy[sel], hx[sel], hy[sel]], axis=1), np.zeros(n, np.int64),
+                               lo[sel] + t0[sel] - BIN, hi[sel] + t1[sel] + BIN))
 
     # ---- hazards ----
 
@@ -719,32 +905,25 @@ class _Builder:
         fc = self.fc
         T = self.origin
         det = set()
-        if fc.view == ORACLE and fc.self_templates != "all":
+        if fc.self_templates != "all":
             for p in fc.hazards.paths(T, self.H):
                 self.paths.append(p)
-                if not p.predicted:
+                if not p.predicted and fc.view == ORACLE:
                     det.add(p.iid)
-        elif fc.self_templates != "all":
-            for p in fc.hazards.paths(T, self.H):
-                self.paths.append(p)
         for iid, h in fc.self_haz.items():
             tk, armed, arm_T, arm_pos, last_T, pos, rel, vel = h
             if T - last_T > HAZARD_GONE_S:
                 continue
-            owner = HAZARD_OWNER.get(tk)
-            use_self = fc.self_templates in ("all",) or iid not in det or fc.view != ORACLE
-            if fc.self_templates == "none" and iid in det:
-                use_self = False
+            use_self = iid not in det and fc.self_templates != "none"
             if use_self:
                 sid = self.tables.self_id(tk)
                 if sid is not None:
                     if armed and arm_T is not None:
                         e = arm_T - T
                         self._fine(sid, e, e, arm_pos, 1, iid, f"ent/{tk}", True, 1.0)
-                    elif T - last_T <= 2.5 * BIN:
-                        self._coarse(sid, BIN, self.H, pos[0], pos[1], 0.0, 0.0, (1,), iid, f"ent/{tk}", True,
-                                     1.0)
-            if fc.collider_tube and rel is not None and T - last_T <= HAZARD_GONE_S:
+                    elif T - last_T <= 2.5 * BIN:      # may arm from the next frame on, where it is now
+                        self._window(sid, BIN, self.H, pos, 1, iid, f"ent/{tk}", True, 1.0)
+            if fc.collider_tube and rel is not None:
                 b = (pos[0] + rel[0], pos[1] + rel[1], pos[0] + rel[2], pos[1] + rel[3])
                 self.boxes.append((iid, "hazard", *b, vel[0], vel[1], ("speed", HAZARD_DV_U_S), -BIN,
                                    COLLIDER_TUBE_S, last_T - T))
@@ -760,7 +939,7 @@ class _Builder:
         if lo > self.H + BIN:
             return
         present = {tr.tk for tr in self.fc.trackers.values() if not tr.dead}
-        for tk in set(FORUM_WAVES[w].types):
+        for tk in sorted(set(FORUM_WAVES[w].types)):
             if tk in present and FORUM_WAVES[w].active_from_load:
                 continue                       # in the export already, walked from its waiting state
             tt = self.tables.types.get(tk)
@@ -768,68 +947,62 @@ class _Builder:
                 continue
             wid = self.tables.key_id(tt.spec.entry_family, None, "world_all")
             if wid is not None:
-                self._coarse(wid, lo, hi + ENTRY_LAG_S, 0.0, 0.0, 0.0, 0.0, (1,), ENTRY_OWNER - w,
-                             tt.spec.entry_family, False, 1.0, world=True)
+                self._window(wid, lo, hi + ENTRY_LAG_S, None, 1, ENTRY_OWNER - w, tt.spec.entry_family, False, 1.0)
 
     def finish(self) -> "MultiForecast":
         out = MultiForecast(self.fc, self.origin, self.H)
-        out.P = PlaceBatch.from_rows(self.rows)
-        m = self.meta
-        out.p_owner = np.array([x[0] for x in m], np.int64)
-        out.p_family = [x[1] for x in m]
-        out.p_committed = np.array([x[2] for x in m], bool)
-        out.p_prob = np.array([x[3] for x in m], np.float64)
-        out.p_on = np.array([x[4] for x in m], np.float64)
-        out.p_off = np.array([x[5] for x in m], np.float64)
-        out.bb = _bb_arrays(self.bbx, self.store)
+        out.P = PlaceBatch.from_rows(self.fine)
+        out.pm = _meta_arrays(self.fine_m)
+        out.W = WinBatch.from_rows(self.win)
+        out.wm = _meta_arrays(self.win_m)
+        out.bb = _bb_arrays(self.bb_chunks, self.store, self.fam_code)
         out.boxes = self.boxes
         out.paths = self.paths
         out.subjects = self.subjects
         out.known = bool(self.known and not self.unknown)
         out.unknown = self.unknown
-        out.n_fine, out.n_coarse, out.n_bbox = self.n_place_fine, self.n_place_coarse, len(self.bbx)
         out.groups = self.meta_group
-        out.gen = self.store.gen
         return out
 
 
-BB_FIELDS = ("owner", "family", "committed", "prob", "tid", "e0", "e1", "cx", "cy", "hx", "hy", "mir", "on", "off")
+def _meta_arrays(m: list[tuple]) -> dict:
+    return {"owner": np.array([x[0] for x in m], np.int64), "family": [x[1] for x in m],
+            "committed": np.array([x[2] for x in m], bool), "prob": np.array([x[3] for x in m], np.float64),
+            "on": np.array([x[4] for x in m], np.float64), "off": np.array([x[5] for x in m], np.float64)}
 
 
-def _bb_arrays(rows: list, store) -> dict:
-    """The bounding-box placements as arrays (BB_FIELDS) plus their rows in the store's bbox table."""
-    out = {}
-    if not rows:
-        out = {k: np.zeros(0, np.int64 if k in ("owner", "tid", "mir") else bool if k == "committed"
-                           else np.float64) for k in BB_FIELDS if k != "family"}
-        out["family"] = []
-        out["off_row"] = np.zeros(0, np.int64)
-        out["nt"] = np.zeros(0, np.int64)
-        out["t0"] = np.zeros(0)
-        return out
-    for i, k in enumerate(BB_FIELDS):
-        col = [r[i] for r in rows]
-        if k == "family":
-            out[k] = col
-        elif k in ("owner", "tid", "mir"):
-            out[k] = np.array(col, np.int64)
-        elif k == "committed":
-            out[k] = np.array(col, bool)
-        else:
-            out[k] = np.array(col, np.float64)
-    tabs = [store.bbox_table(int(t)) for t in out["tid"]]
-    out["off_row"] = np.array([t[0] for t in tabs], np.int64)
-    out["nt"] = np.array([t[1] for t in tabs], np.int64)
-    out["t0"] = np.array([t[2] for t in tabs], np.float64)
-    return out
+def _bb_arrays(chunks: list, store, fam_code: dict | None = None) -> dict:
+    """The bounding-box placements as arrays: owner, family (one name per row), committed, prob, tid, e0, e1, cx,
+    cy, hx, hy, mir, on, off, and their sparse tables' level offsets, bins and t0."""
+    if not chunks:
+        z = np.zeros(0)
+        zi = np.zeros(0, np.int64)
+        return {"owner": zi, "family": [], "committed": np.zeros(0, bool), "prob": z, "tid": zi, "e0": z, "e1": z,
+                "cx": z, "cy": z, "hx": z, "hy": z, "mir": zi, "on": z, "off": z,
+                "loff": np.zeros((0, JMAX + 1), np.int64), "nt": zi, "t0": z}
+    cat = [np.concatenate([c[i] for c in chunks]) for i in range(len(chunks[0]))]
+    names = {v: k for k, v in (fam_code or {}).items()}
+    tid = cat[4]
+    uniq, inv = np.unique(tid, return_inverse=True)
+    tabs = [store.bbox_table(int(t)) for t in uniq]
+    loff = np.stack([t[0] for t in tabs])[inv]
+    nt = np.array([t[1] for t in tabs], np.int64)[inv]
+    t0 = np.array([t[2] for t in tabs], np.float64)[inv]
+    box = cat[7]
+    return {"owner": cat[0], "family": [names[int(c)] for c in cat[1]], "committed": cat[2], "prob": cat[3],
+            "tid": tid, "e0": cat[5], "e1": cat[6], "cx": box[:, 0].copy(), "cy": box[:, 1].copy(),
+            "hx": box[:, 2].copy(), "hy": box[:, 3].copy(), "mir": cat[8], "on": cat[9], "off": cat[10],
+            "loff": np.ascontiguousarray(loff), "nt": nt, "t0": t0}
 
 
 @numba.njit(cache=True)
-def _bbox_boxes(tk, rows, off, nt, t0, e0, e1, cx, cy, hx, hy, mir, bin_s):
+def _bbox_boxes(tk, rows, loff, nt, t0, e0, e1, cx, cy, hx, hy, mir, bin_s):
     """World boxes [K, T] of bounding-box placements: the union of the template's per-bin boxes over the template
-    times an entry in [e0, e1] gives at tk (mirrored: both mirrors when mir is 0), grown by the anchor box."""
-    K = off.shape[0]
+    times an entry in [e0, e1] gives at tk (the sparse table's two lookups; mirrored: both mirrors when mir is 0),
+    grown by the anchor box."""
+    K = loff.shape[0]
     T = tk.shape[0]
+    jmax = loff.shape[1] - 1
     bx0 = np.zeros((K, T))
     by0 = np.zeros((K, T))
     bx1 = np.zeros((K, T))
@@ -837,24 +1010,35 @@ def _bbox_boxes(tk, rows, off, nt, t0, e0, e1, cx, cy, hx, hy, mir, bin_s):
     ok = np.zeros((K, T), np.bool_)
     for k in range(K):
         for t in range(T):
-            b0 = int(np.rint((tk[t] - e1[k] - t0[k]) / bin_s))
-            b1 = int(np.rint((tk[t] - e0[k] - t0[k]) / bin_s))
-            if b1 < 0 or b0 >= nt[k]:
+            b_lo = int(np.rint((tk[t] - e1[k] - t0[k]) / bin_s))
+            b_hi = int(np.rint((tk[t] - e0[k] - t0[k]) / bin_s))
+            if b_hi < 0 or b_lo >= nt[k]:
                 continue
-            if b0 < 0:
-                b0 = 0
-            if b1 > nt[k] - 1:
-                b1 = nt[k] - 1
+            if b_lo < 0:
+                b_lo = 0
+            if b_hi > nt[k] - 1:
+                b_hi = nt[k] - 1
             x0, y0, x1, y1 = np.inf, np.inf, -np.inf, -np.inf
-            for b in range(b0, b1 + 1):
-                r = off[k] + b
-                if rows[r, 0] != rows[r, 0]:
-                    continue
+            b = b_lo
+            while b <= b_hi:
+                L = b_hi - b + 1
+                j = 0
+                while j < jmax and (1 << (j + 1)) <= L:
+                    j += 1
+                r = loff[k, j] + b
                 x0 = min(x0, rows[r, 0])
                 y0 = min(y0, rows[r, 1])
                 x1 = max(x1, rows[r, 2])
                 y1 = max(y1, rows[r, 3])
-            if x0 == np.inf:
+                if L <= (1 << (j + 1)):
+                    r = loff[k, j] + b_hi - (1 << j) + 1
+                    x0 = min(x0, rows[r, 0])
+                    y0 = min(y0, rows[r, 1])
+                    x1 = max(x1, rows[r, 2])
+                    y1 = max(y1, rows[r, 3])
+                    break
+                b += 1 << j
+            if x0 > x1:
                 continue
             if mir[k] == 0:
                 X0, X1 = min(x0, -x1), max(x1, -x0)
@@ -889,19 +1073,19 @@ def _box_hits(x, y, bx0, by0, bx1, by1, ok, hx, hy):
     return out
 
 
-def _mask(owner: np.ndarray, family: list, committed: np.ndarray, ids=None, names=None, only=None,
-          committed_only: bool = False) -> np.ndarray:
+def _mask(meta: dict, ids=None, names=None, only=None, committed_only: bool = False) -> np.ndarray:
     """Which placements remain: not owned by ids, not of a family / hazard named in names (a suffix match), owned
     by one of only, committed."""
+    owner = meta["owner"]
     m = np.ones(len(owner), bool)
     if ids:
         m &= ~np.isin(owner, np.fromiter(ids, np.int64))
     if names:
-        m &= ~np.array([any(str(f).endswith(n) for n in names) for f in family], bool)
+        m &= ~np.array([any(str(f).endswith(n) for n in names) for f in meta["family"]], bool)
     if only is not None:
         m &= np.isin(owner, np.fromiter(only, np.int64)) if only else np.zeros(len(owner), bool)
     if committed_only:
-        m &= committed
+        m &= meta["committed"]
     return m
 
 
@@ -913,16 +1097,17 @@ class MultiForecast:
         self.origin_t = origin_t
         self.horizon = horizon
         self.boss_fc = boss
-        self.P = None
-        self.bb: dict = {}
+        self.P = PlaceBatch.from_rows([])
+        self.pm = _meta_arrays([])
+        self.W = WinBatch.from_rows([])
+        self.wm = _meta_arrays([])
+        self.bb = _bb_arrays([], None)
         self.boxes: list = []
         self.paths: list[HazardPath] = []
         self.subjects: list[Subject] = []
         self.known = False if boss is None else boss.known
         self.unknown: list = []
-        self.n_fine = self.n_coarse = self.n_bbox = 0
         self.groups: dict = {}
-        self.gen = None
         self._cache: dict = {}
 
     def __getattr__(self, name):
@@ -937,10 +1122,22 @@ class MultiForecast:
         return self.boss_fc.fc if self.boss_fc is not None else self._fc
 
     @property
+    def n_fine(self) -> int:
+        return len(self.P)
+
+    @property
+    def n_window(self) -> int:
+        return len(self.W)
+
+    @property
+    def n_bbox(self) -> int:
+        return len(self.bb["owner"])
+
+    @property
     def placements(self):
         if self.boss_fc is not None:
             return self.boss_fc.placements
-        return range((len(self.P) if self.P is not None else 0) + self.n_bbox)
+        return range(self.n_fine + self.n_window + self.n_bbox)
 
     @property
     def roots(self):
@@ -958,64 +1155,55 @@ class MultiForecast:
 
     # ---- component queries ----
 
-    def _place_occ(self, x, y, tk, sel: np.ndarray | None = None) -> np.ndarray:
-        x = np.asarray(x, np.float64)
-        out = np.zeros(x.shape, bool)
-        if self.P is None or not len(self.P):
+    @staticmethod
+    def _active(meta: dict, tk: np.ndarray, sel) -> np.ndarray:
+        act = (meta["off"] >= tk.min() - BIN) & (meta["on"] <= tk.max() + BIN)
+        return act if sel is None else act & sel
+
+    def _fine_occ(self, x, y, tk, sel=None) -> np.ndarray:
+        out = np.zeros(np.shape(x), bool)
+        if not len(self.P):
             return out
-        on, off = self.p_on, self.p_off
-        act = (off >= tk.min() - BIN) & (on <= tk.max() + BIN)
-        if sel is not None:
-            act &= sel
+        act = self._active(self.pm, tk, sel)
         if not act.any():
             return out
         P = self.P if act.all() else self.P.take(np.flatnonzero(act))
-        return self._fc.tables.store.query(P, x, np.asarray(y, np.float64), tk, out, gen=self.gen)
+        return self._fc.tables.store.query(P, x, y, tk, out)
 
-    def _bbox_occ(self, x, y, tk, sel: np.ndarray | None = None) -> np.ndarray:
+    def _win_occ(self, x, y, tk, sel=None) -> np.ndarray:
+        out = np.zeros(np.shape(x), bool)
+        if not len(self.W):
+            return out
+        act = self._active(self.wm, tk, sel)
+        if not act.any():
+            return out
+        W = self.W if act.all() else self.W.take(np.flatnonzero(act))
+        return self._fc.tables.store.query_win(W, x, y, tk, out)
+
+    def _bbox_occ(self, x, y, tk, sel=None) -> np.ndarray:
         x = np.asarray(x, np.float64)
         shp = x.shape
         bb = self.bb
-        if not bb or not len(bb["owner"]):
+        if not len(bb["owner"]):
             return np.zeros(shp, bool)
-        act = (bb["off"] >= tk.min() - BIN) & (bb["on"] <= tk.max() + BIN)
-        if sel is not None:
-            act &= sel
-        idx = np.flatnonzero(act)
+        idx = np.flatnonzero(self._active(bb, tk, sel))
         if not len(idx):
             return np.zeros(shp, bool)
         rows = self._fc.tables.store.bb_rows()
         g = lambda k: np.ascontiguousarray(bb[k][idx])  # noqa: E731
-        bx = _bbox_boxes(np.ascontiguousarray(tk, np.float64), rows, g("off_row"), g("nt"), g("t0"), g("e0"),
-                         g("e1"), g("cx"), g("cy"), g("hx"), g("hy"), g("mir"), BIN)
+        bx = _bbox_boxes(np.ascontiguousarray(tk, np.float64), rows, g("loff"), g("nt"), g("t0"), g("e0"), g("e1"),
+                         g("cx"), g("cy"), g("hx"), g("hy"), g("mir"), BIN)
         T = shp[-1]
         x2 = np.ascontiguousarray(x.reshape(-1, T))
         y2 = np.ascontiguousarray(np.asarray(y, np.float64).reshape(-1, T))
         # the templates already hold the hero hurtbox's dilation: a point test of the centre
         return _box_hits(x2, y2, *bx, 0.0, 0.0).reshape(shp)
 
-    def _bb_mask(self, **kw) -> np.ndarray | None:
-        if not self.bb or not len(self.bb["owner"]):
-            return None
-        return _mask(self.bb["owner"], self.bb["family"], self.bb["committed"], **kw)
-
-    def _p_mask(self, **kw) -> np.ndarray | None:
-        if self.P is None or not len(self.P):
-            return None
-        return _mask(self.p_owner, self.p_family, self.p_committed, **kw)
-
     def _box_arrays(self, tk: np.ndarray, kinds=None, exclude=None, only=None):
         key = (len(tk), float(tk[0]) if len(tk) else 0.0, float(tk[-1]) if len(tk) else 0.0, kinds,
-               None if exclude is None else frozenset(exclude), None if only is None else frozenset(only))
+               None if not exclude else frozenset(exclude), None if only is None else frozenset(only))
         if key in self._cache:
             return self._cache[key]
-        r = self._box_arrays_(tk, kinds, exclude, only)
-        if len(self._cache) > 64:
-            self._cache.clear()
-        self._cache[key] = r
-        return r
-
-    def _box_arrays_(self, tk: np.ndarray, kinds=None, exclude=None, only=None):
         tubes = self._fc.tables.tubes
         rows = []
         for (owner, kind, x0, y0, x1, y1, vx, vy, grow, t_from, t_to, t_seen) in self.boxes:
@@ -1034,19 +1222,21 @@ class MultiForecast:
             if kind == "idle":
                 ok &= dt >= 0
             rows.append((x0 + vx * dt - g, y0 + vy * dt - g, x1 + vx * dt + g, y1 + vy * dt + g, ok))
-        if not rows:
-            return None
-        return tuple(np.ascontiguousarray(np.stack([r[i] for r in rows]), np.float64 if i < 4 else np.bool_)
-                     for i in range(5))
+        r = None if not rows else tuple(
+            np.ascontiguousarray(np.stack([q[i] for q in rows]), np.float64 if i < 4 else np.bool_) for i in range(5))
+        if len(self._cache) > 64:
+            self._cache.clear()
+        self._cache[key] = r
+        return r
 
     def _box_occ(self, x, y, tk, kinds=None, exclude=None, only=None) -> np.ndarray:
         x = np.asarray(x, np.float64)
         shp = x.shape
-        T = shp[-1]
         arr = self._box_arrays(tk, kinds, exclude, only)
         if arr is None:
             return np.zeros(shp, bool)
         hx, hy = self._fc.half
+        T = shp[-1]
         x2 = np.ascontiguousarray(x.reshape(-1, T))
         y2 = np.ascontiguousarray(np.asarray(y, np.float64).reshape(-1, T))
         return _box_hits(x2, y2, *arr, float(hx), float(hy)).reshape(shp)
@@ -1055,10 +1245,10 @@ class MultiForecast:
         x = np.asarray(x, np.float64)
         y = np.asarray(y, np.float64)
         shp = x.shape
-        T = shp[-1]
         out = np.zeros(shp, bool)
         if not self.paths:
             return out
+        T = shp[-1]
         hx, hy = self._fc.half
         x2 = np.ascontiguousarray(x.reshape(-1, T))
         y2 = np.ascontiguousarray(y.reshape(-1, T))
@@ -1084,21 +1274,26 @@ class MultiForecast:
         return out
 
     def _occ(self, x, y, tk, ids=None, names=None, only=None, committed_only: bool = False,
-             kinds=None) -> np.ndarray:
+             parts: bool = False):
+        x = np.asarray(x, np.float64)
+        y = np.asarray(y, np.float64)
         tk = np.asarray(tk, np.float64)
+        filt = bool(ids or names or only is not None or committed_only)
         kw = dict(ids=ids, names=names, only=only, committed_only=committed_only)
-        sel = self._p_mask(**kw) if (ids or names or only is not None or committed_only) else None
-        out = self._place_occ(x, y, tk, sel)
-        bsel = self._bb_mask(**kw) if (ids or names or only is not None or committed_only) else None
-        out |= self._bbox_occ(x, y, tk, bsel)
+        f = self._fine_occ(x, y, tk, _mask(self.pm, **kw) if filt and len(self.P) else None)
+        f |= self._win_occ(x, y, tk, _mask(self.wm, **kw) if filt and len(self.W) else None)
+        f |= self._bbox_occ(x, y, tk, _mask(self.bb, **kw) if filt and self.n_bbox else None)
+        types = ({p.type_key for p in self.paths} - set(names)) if names else None
+        f |= self._path_occ(x, y, tk, exclude=ids, only=only, types=types)
+        f |= self._box_occ(x, y, tk, kinds=("death", "arena"), exclude=ids, only=only)
         if committed_only:
-            kinds = ("death",)
-        out |= self._box_occ(x, y, tk, kinds=kinds, exclude=ids, only=only)
-        types = None
-        if names:
-            types = {p.type_key for p in self.paths} - set(names)
-        out |= self._path_occ(x, y, tk, exclude=ids, only=only, types=types)
-        return out
+            return f
+        tubes = {k: self._box_occ(x, y, tk, kinds=(k,), exclude=ids, only=only) for k in ("idle", "collider",
+                                                                                           "hazard")}
+        if parts:
+            return {"forecast": f, "idle body tube": tubes["idle"], "collider tube": tubes["collider"],
+                    "hazard tube": tubes["hazard"]}
+        return f | tubes["idle"] | tubes["collider"] | tubes["hazard"]
 
     # ---- the interface ----
 
@@ -1112,16 +1307,11 @@ class MultiForecast:
     def occupied_parts(self, x, y, tk) -> dict[str, np.ndarray]:
         """occupied() split by what covers (the recall's accounting): "forecast" (placements, hazard paths, death
         tails, the arena-wide boxes), "idle body tube", "collider tube", "hazard tube"."""
-        tk = np.asarray(tk, np.float64)
-        f = self._place_occ(x, y, tk) | self._bbox_occ(x, y, tk) | self._path_occ(x, y, tk) | \
-            self._box_occ(x, y, tk, kinds=("death", "arena"))
-        return {"forecast": f, "idle body tube": self._box_occ(x, y, tk, kinds=("idle",)),
-                "collider tube": self._box_occ(x, y, tk, kinds=("collider",)),
-                "hazard tube": self._box_occ(x, y, tk, kinds=("hazard",))}
+        return self._occ(x, y, tk, parts=True)
 
     def occupied_without(self, x, y, tk, exclude, comfort: bool = False) -> np.ndarray:
-        """occupied() without the support of `exclude`: an enemy iid (a kill: its tails, tubes and the attacks it may
-        start; its thrown hazards stay), a hazard iid, a set of them, or a hazard type / family name."""
+        """occupied() without the support of `exclude`: an enemy iid (a kill: its tails, tubes and the instances it
+        may start; its thrown hazards stay), a hazard iid, a set of them, or a hazard type / family name."""
         if self.boss_fc is not None:
             return self.boss_fc.occupied_without(x, y, tk, exclude, comfort)
         ex = set(exclude) if isinstance(exclude, (set, frozenset, list, tuple)) else {exclude}
@@ -1168,19 +1358,14 @@ class MultiForecast:
         tk = np.asarray(tk, np.float64)
         N = x.shape[0]
         q = np.ones(N)
-        owners = set(self.p_owner.tolist()) if self.P is not None else set()
-        if self.bb:
-            owners |= set(self.bb["owner"].tolist())
+        owners = set(self.pm["owner"].tolist()) | set(self.wm["owner"].tolist()) | set(self.bb["owner"].tolist())
         owners |= {b[0] for b in self.boxes} | {p.iid for p in self.paths}
         for o in owners:
             pi = np.zeros(N)
-            for arr_owner, arr_p, occ in ((self.p_owner if self.P is not None else np.zeros(0, np.int64),
-                                           self.p_prob if self.P is not None else np.zeros(0), self._place_occ),
-                                          (self.bb.get("owner", np.zeros(0, np.int64)),
-                                           self.bb.get("prob", np.zeros(0)), self._bbox_occ)):
-                sel = arr_owner == o
-                for pv in np.unique(arr_p[sel]):
-                    hit = occ(x, y, tk, sel & (arr_p == pv)).any(axis=1)
+            for meta, occ in ((self.pm, self._fine_occ), (self.wm, self._win_occ), (self.bb, self._bbox_occ)):
+                sel = meta["owner"] == o
+                for pv in np.unique(meta["prob"][sel]):
+                    hit = occ(x, y, tk, sel & (meta["prob"] == pv)).any(axis=1)
                     pi = np.maximum(pi, np.where(hit, min(1.0, float(pv)), 0.0))
             hit = (self._box_occ(x, y, tk, only={o}) | self._path_occ(x, y, tk, only={o})).any(axis=1)
             pi = np.maximum(pi, hit.astype(float))
@@ -1199,47 +1384,41 @@ class MultiForecast:
         return float(tk[i[0]]) if len(i) else math.inf
 
     def committed(self) -> "MultiForecast":
-        """What is already decided: the current attacks, tails, death tails and hazards (no attack or idle instance
-        that may start later, no tubes)."""
+        """What is already decided: the current attacks, tails, death tails and hazards (no instance that may start
+        later, no tubes)."""
         if self.boss_fc is not None:
             return MultiForecast(self._fc, self.origin_t, self.horizon, boss=self.boss_fc.committed())
         out = MultiForecast(self._fc, self.origin_t, self.horizon)
-        sel = np.flatnonzero(self.p_committed) if self.P is not None else np.zeros(0, np.int64)
-        out.P = self.P.take(sel) if self.P is not None else None
-        if self.P is not None:
-            out.p_owner, out.p_committed = self.p_owner[sel], self.p_committed[sel]
-            out.p_family = [self.p_family[i] for i in sel]
-            out.p_prob, out.p_on, out.p_off = self.p_prob[sel], self.p_on[sel], self.p_off[sel]
-        if self.bb and len(self.bb["owner"]):
-            s2 = np.flatnonzero(self.bb["committed"])
-            out.bb = {k: ([v[i] for i in s2] if isinstance(v, list) else v[s2]) for k, v in self.bb.items()}
+
+        def keep(meta, rows):
+            s = np.flatnonzero(meta["committed"])
+            return rows.take(s), {k: ([v[i] for i in s] if isinstance(v, list) else v[s]) for k, v in meta.items()}
+        out.P, out.pm = keep(self.pm, self.P)
+        out.W, out.wm = keep(self.wm, self.W)
+        s = np.flatnonzero(self.bb["committed"])
+        out.bb = {k: ([v[i] for i in s] if isinstance(v, list) else v[s]) for k, v in self.bb.items()}
         out.boxes = [b for b in self.boxes if b[1] == "death"]
         out.paths = self.paths
         out.subjects = self.subjects
         out.known = self.known
-        out.gen = self.gen
         return out
 
     def support_set(self, ws: WorldState | None = None, t1: float = SUP_HORIZON_S) -> SupportSet:
         """The supervisor's support: one event per enemy instance with support within t1 (its largest family damage;
-        a family with a multi-hit collider: hits 2 and the chain's measured damage, chains.json), one per hazard;
+        a family with a multi-hit collider: the chain's measured hits and damage, chains.json), one per hazard;
         known when the tables are certified and every enemy in play has a tracked state."""
         if self.boss_fc is not None:
             return self.boss_fc.support_set(ws, t1)
         tables = self._fc.tables
-        events = []
         by_owner: dict = defaultdict(set)
-        if self.P is not None and len(self.P):
-            act = (self.p_off >= 0.0) & (self.p_on <= t1)
+        for meta in (self.pm, self.wm, self.bb):
+            act = (meta["off"] >= 0.0) & (meta["on"] <= t1)
             for i in np.flatnonzero(act):
-                by_owner[int(self.p_owner[i])].add(self.p_family[i])
-        if self.bb and len(self.bb["owner"]):
-            act = (self.bb["off"] >= 0.0) & (self.bb["on"] <= t1)
-            for i in np.flatnonzero(act):
-                by_owner[int(self.bb["owner"][i])].add(self.bb["family"][i])
+                by_owner[int(meta["owner"][i])].add(meta["family"][i])
         for b in self.boxes:
             if b[9] <= t1 and b[10] >= 0.0:
                 by_owner[b[0]].add(None)
+        events = []
         trackers = self._fc.trackers
         for owner, fams in by_owner.items():
             tr = trackers.get(owner)
@@ -1267,18 +1446,20 @@ class MultiForecast:
                     hits, dmg = max(hits, h), max(dmg, d)
             events.append(SupportEvent(tr.tk, dmg, hits=hits, instance=owner))
         for p in self.paths:
-            _, _, on, _ = p.at(np.array([0.0, min(t1, self.horizon)]), slack=False)
-            if p.static and (p.t_hi < 0 or p.t_lo > t1):
-                continue
-            if not p.static and not on.any() and p.tube_from is None:
-                continue
+            if p.static:
+                if p.t_hi < 0 or p.t_lo > t1:
+                    continue
+            else:
+                _, _, on, _ = p.at(np.arange(0.0, t1 + 1e-9, BIN), slack=False)
+                if not on.any() and p.tube_from is None:
+                    continue
             events.append(SupportEvent(p.type_key, p.damage, instance=p.iid))
         known = bool(self.known)
         return SupportSet(tuple(events), known, certified_empty=known and not events)
 
     def targets(self, tk) -> list[Target]:
-        """Each live enemy in play: its body box (the export's colliders when last seen) moved along its velocity
-        (hittable while it stays seen); each bell on a path: its circle's box (a redirect target)."""
+        """Each live enemy in play: its body box (the export's colliders when last seen) moved along its velocity;
+        each bell on a path: its circle's box (a redirect target)."""
         tk = np.asarray(tk, np.float64)
         out = []
         for tr in self._fc.trackers.values():
@@ -1368,7 +1549,7 @@ def _chain(chains: dict, tk: str, family: str) -> tuple[int, int]:
     return h, d
 
 
-# families whose colliders chain (forum.md §9.2 / §12.3: hornet_multi_wounder colliders)
+# families whose colliders chain (forum.md §9.2 / §12.3: the hornet_multi_wounder colliders)
 MULTI_HIT = {("Song Administrator", "MI_CHARGE"): ("Slash Collider",),
              ("Song Administrator", "MI_PARRY"): ("ParrySlash Hit",),
              ("Song Pilgrim 03", "CH_WHIP"): tuple(f"Whip Hit {i}" for i in range(1, 7)) + ("Whip Hit",),

@@ -29,6 +29,7 @@ import math
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import numba
 import numpy as np
 
 from ssbot.combat.fastquery import _query_par
@@ -43,7 +44,6 @@ SUP = hb.SUPPORT
 COARSE_F = 5                     # coarse cell = 5 fine cells (0.25 u)
 COARSE_U = COARSE_F * hb.CELL_U
 ARENA_BYTES = 32 << 20           # a coarse arena's capacity
-COARSE_BUDGET = 384 << 20        # a coarse generation larger than this is dropped (TemplateStore.trim)
 FINE_ARENA_BYTES = 64 << 20      # the fine templates' arenas
 CHUNKS = 16
 
@@ -170,11 +170,23 @@ class _Pool:
         return sum(a.nbytes for a in self.arenas)
 
 
+JMAX = 7                          # time pyramids / sparse tables up to 2^JMAX bins in one lookup
+G_BINS = 1200                     # the idle growth table reaches 20 s
+EMPTY = (np.inf, np.inf, -np.inf, -np.inf)
+
+
 class TemplateStore:
-    """Fine and coarse planner templates in packed arenas, with per-template metadata for vectorised placement
-    arrays; query() runs the planner's parallel kernel (ssbot.combat.fastquery) once per arena. Ids below n_fine are
-    fine templates; the others index the current coarse generation (coarse_id), which is dropped and rebuilt on
-    demand when it outgrows COARSE_BUDGET (a forecast keeps the generation it was built with: gen)."""
+    """The planner templates, three ways (query by placement kind):
+      fine      the tables' templates (0.05 u cells, hero hurtbox and margins dilated in), one placement per entry
+                time (PlaceBatch; the planner's parallel kernel, ssbot.combat.fastquery);
+      window    a template's coarse base (OR-pooled to COARSE_U cells) as a time pyramid (level j holds the OR of
+                2^j consecutive bins): one placement stands for every entry in [e0, e1] (WinBatch, _query_win_par:
+                two lookups per point at the level that tiles the window);
+      bbox      a template's per-bin bounding box as a sparse table (level j: the union of 2^j bins), grown by an
+                anchor box: one placement per anchor box and entry window (multi_forecast's bounding-box rows), for
+                anchors only known to a box (attacks that may start later).
+    Ids >= 0 are the fine templates; < 0 the coarse-only bases (family-wide unions) and bbox-only tables (family walk
+    templates: MultiForecaster.family_walk_bbox)."""
 
     def __init__(self, fine: dict[str, hb.SpaceTimeTemplate], hero_half=hb.HERO_HALF_U,
                  coarse_only: dict[str, hb.SpaceTimeTemplate] | None = None):
@@ -191,29 +203,35 @@ class TemplateStore:
             self.fine.add(t, cap=size)
         self.tpls = self.fine.tpls
         self.n_fine = len(self.keys)
-        self.gen = _Pool()
-        self.generations = 1
         self._pooled: dict[int, hb.SpaceTimeTemplate] = {}
-        # coarse-only templates (the large family-wide unions, the family walk templates): base ids < 0
         self.coarse_keys: dict[str, int] = {}
         self._base_key: dict[int, str] = {}
         for k, t in (coarse_only or {}).items():
             self.add_coarse_base(k, coarsen(t, COARSE_F))
-        self._bb: dict[int, tuple] = {}
+        # time pyramids of coarse bases
+        self._pyr: dict[int, tuple] = {}
+        self._pyr_arenas: list[_Arena] = []
+        self._pyr_meta: dict[int, np.ndarray] = {}
+        # bounding-box sparse tables
+        self._bb: dict[int, tuple] = {}            # id -> (level offsets [JMAX + 1], nt, t0)
         self._bb_list: list[np.ndarray] = []
         self._bb_n = 0
         self._bb_arr = np.zeros((0, 4))
 
-    def add_coarse_base(self, key: str, t: hb.SpaceTimeTemplate) -> int:
-        """Register a template already on the coarse grid (cell COARSE_U) as a coarse-only base."""
+    # ---- ids ----
+
+    def add_coarse_base(self, key: str, t: hb.SpaceTimeTemplate | None) -> int:
+        """Register a template on the coarse grid (cell COARSE_U) as a coarse-only base (None: a bbox-only id whose
+        table is given to add_bbox)."""
         i = -(len(self.coarse_keys) + 1)
         self.coarse_keys[key] = i
         self._base_key[i] = key
-        self._pooled[i] = t
+        if t is not None:
+            self._pooled[i] = t
         return i
 
     def base_id(self, key: str) -> int | None:
-        """A fine id (>= 0) or a coarse-only base id (< 0: only coarse_id takes it)."""
+        """A fine id (>= 0) or a coarse-only base id (< 0)."""
         i = self.ids.get(key)
         return i if i is not None else self.coarse_keys.get(key)
 
@@ -227,47 +245,98 @@ class TemplateStore:
             b = self._pooled[tid] = coarsen(self.tpls[tid], COARSE_F)
         return b
 
-    def coarse_id(self, tid: int, kx: int = 0, ky: int = 0, kt: int = 0) -> int:
-        """The coarse version of template tid (fine id or coarse base) grown by kx, ky coarse cells and kt bins,
-        built once per generation."""
-        ck = (tid, kx, ky, kt)
-        g = self.gen
-        i = g.cache.get(ck)
-        if i is not None:
-            return i
-        base = self.base(tid)
-        name = self.keys[tid] if tid >= 0 else self._base_key[tid]
-        t = base.dilated(rx=kx * COARSE_U, ry=ky * COARSE_U, t_bins=kt, key=f"{name}~{kx},{ky},{kt}") \
-            if (kx or ky or kt) else hb.SpaceTimeTemplate(**{f: getattr(base, f) for f in (
-                "key", "frame", "ix0", "iy0", "nx", "ny", "t0", "bits", "cell", "bin_s", "n_instances", "t_pad",
-                "pad_x", "pad_y", "static")})
-        i = self.n_fine + g.add(t)
-        g.cache[ck] = i
-        return i
+    def template(self, tid: int) -> hb.SpaceTimeTemplate:
+        return self.tpls[tid] if tid >= 0 else self._pooled[tid]
 
-    def bbox_table(self, tid: int) -> tuple[int, int, float]:
-        """(row offset, bins, t0) of template tid's per-bin bounding box in bb_rows() (template frame, from its
-        coarse base: a superset by at most one coarse cell; NaN rows for empty bins), built once."""
+    def span(self, tid: int) -> tuple[float, float]:
+        """(t0, t1) template times of an id (a bbox-only id: its table's)."""
+        if tid >= 0 or tid in self._pooled:
+            t = self.template(tid)
+            return t.t0, t.t1
+        _, nt, t0 = self._bb[tid]
+        return t0, t0 + (nt - 1) * BIN
+
+    # ---- time pyramids ----
+
+    def pyramid(self, tid: int) -> tuple:
+        """(arena, level offsets [JMAX + 1], meta (ix0, iy0, nx, ny, nt, rb, anchored, static), (t0, bin, cell)) of
+        the coarse base's time pyramid, built once."""
+        r = self._pyr.get(tid)
+        if r is not None:
+            return r
+        t = self.base(tid)
+        levels = [np.ascontiguousarray(t.bits)]
+        for j in range(1, JMAX + 1):
+            s = 1 << (j - 1)
+            prev = levels[-1]
+            nxt = prev.copy()
+            if s < t.nt:
+                nxt[:-s] |= prev[s:]
+            levels.append(nxt)
+        need = sum(int(x.nbytes) for x in levels)
+        if not self._pyr_arenas or self._pyr_arenas[-1].used + need > self._pyr_arenas[-1].bits.size:
+            self._pyr_arenas.append(_Arena(max(ARENA_BYTES, need)))
+        a = self._pyr_arenas[-1]
+        offs = np.zeros(JMAX + 1, np.int64)
+        for j, lv in enumerate(levels):
+            offs[j] = a.used
+            b = lv.ravel()
+            a.bits[a.used:a.used + b.size] = b
+            a.used += b.size
+        r = self._pyr[tid] = (len(self._pyr_arenas) - 1, offs,
+                              np.array([t.ix0, t.iy0, t.nx, t.ny, t.nt, t.bits.shape[2], int(t.frame == "anchor"),
+                                        int(t.static)], np.int64), (t.t0, t.bin_s, t.cell))
+        return r
+
+    # ---- bounding boxes ----
+
+    def bbox_level0(self, tid: int) -> tuple[np.ndarray, float]:
+        """Per-bin bounding box of the coarse base (template frame; EMPTY rows for empty bins), and its t0."""
+        t = self.base(tid)
+        planes = np.unpackbits(t.bits, axis=2, count=t.nx).astype(bool)
+        ax_ = planes.any(axis=1)
+        ay_ = planes.any(axis=2)
+        ne = ax_.any(axis=1)
+        boxes = np.tile(np.array(EMPTY), (t.nt, 1))
+        if ne.any():
+            x0 = np.argmax(ax_, axis=1)
+            x1 = t.nx - 1 - np.argmax(ax_[:, ::-1], axis=1)
+            y0 = np.argmax(ay_, axis=1)
+            y1 = t.ny - 1 - np.argmax(ay_[:, ::-1], axis=1)
+            c = t.cell
+            boxes[ne] = np.stack([(t.ix0 + x0) * c, (t.iy0 + y0) * c, (t.ix0 + x1 + 1) * c, (t.iy0 + y1 + 1) * c],
+                                 axis=1)[ne]
+        return boxes, t.t0
+
+    def add_bbox(self, tid: int, boxes: np.ndarray, t0: float) -> tuple:
+        """The sparse table of a level-0 bbox table (rows per bin; EMPTY for empty bins)."""
+        levels = [np.asarray(boxes, np.float64)]
+        nt = len(boxes)
+        for j in range(1, JMAX + 1):
+            s = 1 << (j - 1)
+            prev = levels[-1]
+            nxt = prev.copy()
+            if s < nt:
+                sh = prev[s:]
+                nxt[:-s, 0] = np.minimum(prev[:-s, 0], sh[:, 0])
+                nxt[:-s, 1] = np.minimum(prev[:-s, 1], sh[:, 1])
+                nxt[:-s, 2] = np.maximum(prev[:-s, 2], sh[:, 2])
+                nxt[:-s, 3] = np.maximum(prev[:-s, 3], sh[:, 3])
+            levels.append(nxt)
+        offs = np.zeros(JMAX + 1, np.int64)
+        for j, lv in enumerate(levels):
+            offs[j] = self._bb_n
+            self._bb_list.append(lv)
+            self._bb_n += nt
+        r = self._bb[tid] = (offs, nt, float(t0))
+        return r
+
+    def bbox_table(self, tid: int) -> tuple:
+        """(level offsets [JMAX + 1] into bb_rows(), bins, t0) of an id's bounding-box sparse table (built once)."""
         r = self._bb.get(tid)
         if r is None:
-            t = self.base(tid)
-            planes = np.unpackbits(t.bits, axis=2, count=t.nx).astype(bool)
-            ax_ = planes.any(axis=1)
-            ay_ = planes.any(axis=2)
-            ne = ax_.any(axis=1)
-            boxes = np.full((t.nt, 4), np.nan)
-            if ne.any():
-                x0 = np.argmax(ax_, axis=1)
-                x1 = t.nx - 1 - np.argmax(ax_[:, ::-1], axis=1)
-                y0 = np.argmax(ay_, axis=1)
-                y1 = t.ny - 1 - np.argmax(ay_[:, ::-1], axis=1)
-                c = t.cell
-                boxes[ne] = np.stack([(t.ix0 + x0) * c, (t.iy0 + y0) * c, (t.ix0 + x1 + 1) * c,
-                                      (t.iy0 + y1 + 1) * c], axis=1)[ne]
-            off = self._bb_n
-            self._bb_list.append(boxes)
-            self._bb_n += t.nt
-            r = self._bb[tid] = (off, t.nt, t.t0)
+            boxes, t0 = self.bbox_level0(tid)
+            r = self.add_bbox(tid, boxes, t0)
         return r
 
     def bb_rows(self) -> np.ndarray:
@@ -276,29 +345,15 @@ class TemplateStore:
                 else np.zeros((0, 4))
         return self._bb_arr
 
-    def template(self, tid: int, gen: _Pool | None = None) -> hb.SpaceTimeTemplate:
-        if tid < 0:
-            return self._pooled[tid]
-        if tid < self.n_fine:
-            return self.tpls[tid]
-        return (gen or self.gen).tpls[tid - self.n_fine]
-
-    def trim(self, budget: int = COARSE_BUDGET) -> bool:
-        """Start a new coarse generation when this one holds more than budget bytes (call between forecasts)."""
-        if self.gen.nbytes > budget:
-            self.gen = _Pool()
-            self.generations += 1
-            return True
-        return False
-
     def nbytes(self) -> int:
-        return self.fine.nbytes + self.gen.nbytes + sum(int(t.bits.nbytes) for t in self._pooled.values())
+        return self.fine.nbytes + sum(a.nbytes for a in self._pyr_arenas) + \
+            sum(int(t.bits.nbytes) for t in self._pooled.values()) + self._bb_n * 32
 
-    # ---- query ----
+    # ---- queries ----
 
-    def query(self, P: PlaceBatch, x, y, tk, out: np.ndarray | None = None, gen: _Pool | None = None) -> np.ndarray:
-        """[N, T] bool: hero hurtbox centres x, y [N, T] at tk [T] s from the origin inside some placement (OR into
-        out when given). NaN points are skipped. gen: the coarse generation the placements were made in."""
+    def query(self, P: PlaceBatch, x, y, tk, out: np.ndarray | None = None) -> np.ndarray:
+        """Fine placements: [N, T] bool, hero hurtbox centres x, y [N, T] at tk [T] s from the origin inside one (OR
+        into out when given). NaN points are skipped."""
         x = np.asarray(x, np.float64)
         y = np.asarray(y, np.float64)
         tk = np.ascontiguousarray(tk, np.float64)
@@ -306,52 +361,174 @@ class TemplateStore:
             out = np.zeros(x.shape, bool)
         if not len(P):
             return out
-        gen = gen or self.gen
-        xt = np.ascontiguousarray(x.T)
-        yt = np.ascontiguousarray(y.T)
+        xt, yt, cbox, chunks = _cand(x, y)
         res = np.zeros(xt.shape, np.bool_)
-        cbox = np.ascontiguousarray(np.stack([np.fmin.reduce(xt, axis=1), np.fmin.reduce(yt, axis=1),
-                                              np.fmax.reduce(xt, axis=1), np.fmax.reduce(yt, axis=1)], 1))
-        cbox[np.isnan(cbox)] = 0.0
-        chunks = min(CHUNKS, max(1, xt.shape[1] // 8))
-        coarse = P.tid >= self.n_fine
-        for pool, sel_mask, off in ((self.fine, ~coarse, 0), (gen, coarse, self.n_fine)):
-            if not sel_mask.any():
-                continue
-            im_all, fm_all = pool.meta()
-            idx = np.flatnonzero(sel_mask)
-            tid = P.tid[idx] - off
-            ar = im_all[tid, 0]
-            for a in np.unique(ar):
-                s2 = ar == a
-                sel = idx[s2]
-                imt = im_all[tid[s2]]
-                fmt = fm_all[tid[s2]]
-                anchored = (imt[:, 10] != 0) & ~np.isnan(P.ax[sel])
-                im = np.empty((len(sel), 10), np.int64)
-                im[:, 0:6] = imt[:, 3:9]
-                im[:, 6] = np.where(anchored, P.mirror[sel], 1)
-                im[:, 7] = anchored
-                im[:, 8] = imt[:, 9]
-                im[:, 9] = imt[:, 2]
-                fm = np.empty((len(sel), 6), np.float64)
-                fm[:, 0:3] = fmt
-                fm[:, 3] = np.where(anchored, P.ax[sel], 0.0)
-                fm[:, 4] = np.where(anchored, P.ay[sel], 0.0)
-                fm[:, 5] = P.t_ref[sel]
-                boff = np.ascontiguousarray(imt[:, 1])
-                cell = fmt[:, 2]
-                gx0, gx1 = imt[:, 3] * cell, (imt[:, 3] + imt[:, 5]) * cell
-                gy0, gy1 = imt[:, 4] * cell, (imt[:, 4] + imt[:, 6]) * cell
-                mir = im[:, 6]
-                wx0, wx1 = fm[:, 3] + mir * gx0, fm[:, 3] + mir * gx1
-                pbox = np.ascontiguousarray(np.stack([np.minimum(wx0, wx1), fm[:, 4] + gy0, np.maximum(wx0, wx1),
-                                                      fm[:, 4] + gy1], 1))
-                arena = pool.arenas[int(a)]
-                _query_par(arena.bits[:max(arena.used, 1)], boff, im, fm, arena.full_array(), tk, xt, yt, res,
-                           chunks, pbox, cbox)
+        im_all, fm_all = self.fine.meta()
+        tid = P.tid
+        ar = im_all[tid, 0]
+        for a in np.unique(ar):
+            sel = np.flatnonzero(ar == a)
+            imt = im_all[tid[sel]]
+            fmt = fm_all[tid[sel]]
+            anchored = (imt[:, 10] != 0) & ~np.isnan(P.ax[sel])
+            im = np.empty((len(sel), 10), np.int64)
+            im[:, 0:6] = imt[:, 3:9]
+            im[:, 6] = np.where(anchored, P.mirror[sel], 1)
+            im[:, 7] = anchored
+            im[:, 8] = imt[:, 9]
+            im[:, 9] = imt[:, 2]
+            fm = np.empty((len(sel), 6), np.float64)
+            fm[:, 0:3] = fmt
+            fm[:, 3] = np.where(anchored, P.ax[sel], 0.0)
+            fm[:, 4] = np.where(anchored, P.ay[sel], 0.0)
+            fm[:, 5] = P.t_ref[sel]
+            pbox = _pbox(imt[:, 3], imt[:, 4], imt[:, 5], imt[:, 6], fmt[:, 2], im[:, 6], fm[:, 3], fm[:, 4])
+            arena = self.fine.arenas[int(a)]
+            _query_par(arena.bits[:max(arena.used, 1)], np.ascontiguousarray(imt[:, 1]), im, fm,
+                       arena.full_array(), tk, xt, yt, res, chunks, pbox, cbox)
         out |= res.T
         return out
+
+    def query_win(self, W: "WinBatch", x, y, tk, out: np.ndarray | None = None) -> np.ndarray:
+        """Window placements (coarse time pyramids): [N, T] bool, OR into out when given."""
+        x = np.asarray(x, np.float64)
+        y = np.asarray(y, np.float64)
+        tk = np.ascontiguousarray(tk, np.float64)
+        if out is None:
+            out = np.zeros(x.shape, bool)
+        if not len(W):
+            return out
+        xt, yt, cbox, chunks = _cand(x, y)
+        res = np.zeros(xt.shape, np.bool_)
+        pyr = [self.pyramid(int(t)) for t in W.tid]
+        ar = np.array([p[0] for p in pyr], np.int64)
+        for a in np.unique(ar):
+            sel = np.flatnonzero(ar == a)
+            meta = np.stack([pyr[i][2] for i in sel])
+            loff = np.ascontiguousarray(np.stack([pyr[i][1] for i in sel]))
+            fmt = np.array([pyr[i][3] for i in sel], np.float64)
+            anchored = (meta[:, 6] != 0) & ~np.isnan(W.ax[sel])
+            im = np.empty((len(sel), 8), np.int64)
+            im[:, 0:6] = meta[:, 0:6]
+            im[:, 6] = np.where(anchored, W.mirror[sel], 1)
+            im[:, 7] = anchored
+            fm = np.empty((len(sel), 7), np.float64)
+            fm[:, 0:3] = fmt
+            fm[:, 3] = np.where(anchored, W.ax[sel], 0.0)
+            fm[:, 4] = np.where(anchored, W.ay[sel], 0.0)
+            fm[:, 5] = W.e0[sel]
+            fm[:, 6] = W.e1[sel]
+            pbox = _pbox(meta[:, 0], meta[:, 1], meta[:, 2], meta[:, 3], fmt[:, 2], im[:, 6], fm[:, 3], fm[:, 4])
+            arena = self._pyr_arenas[int(a)]
+            _query_win_par(arena.bits[:max(arena.used, 1)], loff, im, fm, tk, xt, yt, res, chunks, pbox, cbox)
+        out |= res.T
+        return out
+
+
+@dataclass(slots=True)
+class WinBatch:
+    """Window placements as arrays: base id (fine or coarse-only: its coarse base's pyramid), entry window
+    [e0, e1] (s from the origin), anchor (NaN: world frame), mirror."""
+    tid: np.ndarray
+    e0: np.ndarray
+    e1: np.ndarray
+    ax: np.ndarray
+    ay: np.ndarray
+    mirror: np.ndarray
+
+    @classmethod
+    def from_rows(cls, rows: list[tuple]) -> "WinBatch":
+        if not rows:
+            z = np.zeros(0)
+            return cls(np.zeros(0, np.int64), z, z, z, z, np.zeros(0, np.int64))
+        a = np.array(rows, np.float64)
+        return cls(a[:, 0].astype(np.int64), a[:, 1].copy(), a[:, 2].copy(), a[:, 3].copy(), a[:, 4].copy(),
+                   a[:, 5].astype(np.int64))
+
+    def __len__(self) -> int:
+        return len(self.tid)
+
+    def take(self, sel: np.ndarray) -> "WinBatch":
+        return WinBatch(self.tid[sel], self.e0[sel], self.e1[sel], self.ax[sel], self.ay[sel], self.mirror[sel])
+
+
+def _cand(x: np.ndarray, y: np.ndarray):
+    xt = np.ascontiguousarray(x.T)
+    yt = np.ascontiguousarray(y.T)
+    cbox = np.ascontiguousarray(np.stack([np.fmin.reduce(xt, axis=1), np.fmin.reduce(yt, axis=1),
+                                          np.fmax.reduce(xt, axis=1), np.fmax.reduce(yt, axis=1)], 1))
+    cbox[np.isnan(cbox)] = 0.0
+    return xt, yt, cbox, min(CHUNKS, max(1, xt.shape[1] // 8))
+
+
+def _pbox(ix0, iy0, nx, ny, cell, mirror, ax, ay) -> np.ndarray:
+    gx0, gx1 = ix0 * cell, (ix0 + nx) * cell
+    gy0, gy1 = iy0 * cell, (iy0 + ny) * cell
+    wx0, wx1 = ax + mirror * gx0, ax + mirror * gx1
+    return np.ascontiguousarray(np.stack([np.minimum(wx0, wx1), ay + gy0, np.maximum(wx0, wx1), ay + gy1], 1))
+
+
+@numba.njit(cache=True, parallel=True)
+def _query_win_par(bits, loff, imeta, fmeta, tk, xt, yt, out, chunks, pbox, cbox):
+    """out[k, n] |= some window placement p occupied at (xt[k, n], yt[k, n]) for an entry in [e0, e1]: the template
+    bins of tk[k] - e1 .. tk[k] - e0, tiled by two lookups at pyramid level j (2^j <= the window's bins), more for a
+    window longer than 2^JMAX. imeta[p] = (ix0, iy0, nx, ny, nt, row bytes, mirror, anchored); fmeta[p] = (t0,
+    bin_s, cell, ax, ay, e0, e1)."""
+    n_t, n_c = xt.shape
+    n_p = loff.shape[0]
+    jmax = loff.shape[1] - 1
+    for ch in numba.prange(chunks):
+        c0 = ch * n_c // chunks
+        c1 = (ch + 1) * n_c // chunks
+        if c1 <= c0:
+            continue
+        for p in range(n_p):
+            ix0, iy0, nx, ny, nt, rb = imeta[p, 0], imeta[p, 1], imeta[p, 2], imeta[p, 3], imeta[p, 4], imeta[p, 5]
+            mirror, anchored = imeta[p, 6], imeta[p, 7]
+            t0, bs, inv = fmeta[p, 0], fmeta[p, 1], 1.0 / fmeta[p, 2]
+            ax, ay = fmeta[p, 3], fmeta[p, 4]
+            if not anchored:
+                mirror, ax, ay = 1, 0.0, 0.0
+            plane = ny * rb
+            for k in range(n_t):
+                b_lo = int(np.rint((tk[k] - fmeta[p, 6] - t0) / bs))
+                b_hi = int(np.rint((tk[k] - fmeta[p, 5] - t0) / bs))
+                if b_hi < 0 or b_lo >= nt:
+                    continue
+                if b_lo < 0:
+                    b_lo = 0
+                if b_hi > nt - 1:
+                    b_hi = nt - 1
+                if (pbox[p, 0] > cbox[k, 2] or pbox[p, 2] < cbox[k, 0] or pbox[p, 1] > cbox[k, 3]
+                        or pbox[p, 3] < cbox[k, 1]):
+                    continue
+                for n in range(c0, c1):
+                    if out[k, n] or xt[k, n] != xt[k, n]:
+                        continue
+                    fx = mirror * (xt[k, n] - ax) * inv - ix0
+                    fy = (yt[k, n] - ay) * inv - iy0
+                    if fx < 0.0 or fy < 0.0 or fx >= nx or fy >= ny:
+                        continue
+                    ix = int(fx)
+                    cell = int(fy) * rb + (ix >> 3)
+                    sh = 7 - (ix & 7)
+                    b = b_lo
+                    hit = False
+                    while b <= b_hi and not hit:
+                        L = b_hi - b + 1
+                        j = 0
+                        while j < jmax and (1 << (j + 1)) <= L:
+                            j += 1
+                        if (bits[loff[p, j] + b * plane + cell] >> sh) & 1:
+                            hit = True
+                        elif L <= (1 << (j + 1)):
+                            b2 = b_hi - (1 << j) + 1
+                            if (bits[loff[p, j] + b2 * plane + cell] >> sh) & 1:
+                                hit = True
+                            break
+                        b += 1 << j
+                    if hit:
+                        out[k, n] = True
 
 
 def shifted_union(parts: list[tuple[hb.SpaceTimeTemplate, float]], key: str) -> hb.SpaceTimeTemplate | None:
@@ -481,6 +658,7 @@ class Tubes:
     growth: dict[str, list[float]]
     speed: dict[str, float]
     hull: dict[str, tuple[float, float, float, float]]
+    _tab: dict = field(default_factory=dict)
 
     @classmethod
     def from_doc(cls, d: dict) -> "Tubes":
@@ -488,17 +666,24 @@ class Tubes:
                    {k: float(v) for k, v in (d.get("tube_speed") or {}).items()},
                    {k: tuple(map(float, v)) for k, v in (d.get("body_hull") or {}).items()})
 
+
     def g(self, tk: str, dt) -> np.ndarray:
         """Idle growth after dt game s since the sighting (the bins of forum_support.tube_bin; past the calibration
-        at the type's top speed)."""
-        g = self.growth.get(tk)
-        dt = np.maximum(np.asarray(dt, np.float64), 0.0)
-        if not g:
-            return self.speed.get(tk, 60.0) * dt
-        k = np.maximum(0, np.ceil(dt / BIN - 0.05)).astype(np.int64)
-        n = len(g) - 1
-        ga = np.asarray(g, np.float64)
-        return np.where(k <= n, ga[np.minimum(k, n)], ga[-1] + self.speed.get(tk, 60.0) * (k - n) * BIN)
+        at the type's top speed): a table lookup."""
+        tab = self._tab.get(tk)
+        if tab is None:
+            g = self.growth.get(tk)
+            k = np.arange(G_BINS + 1)
+            if not g:
+                tab = self.speed.get(tk, 60.0) * k * BIN
+            else:
+                n = len(g) - 1
+                ga = np.asarray(g, np.float64)
+                tab = np.where(k <= n, ga[np.minimum(k, n)], ga[-1] + self.speed.get(tk, 60.0) * (k - n) * BIN)
+            self._tab[tk] = tab
+        dt = np.asarray(dt, np.float64)
+        k = np.clip(np.ceil(dt / BIN - 0.05), 0, G_BINS).astype(np.int64)
+        return tab[k]
 
 
 class EnemyTables:

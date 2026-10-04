@@ -315,21 +315,29 @@ def test_coarse_and_bounding_box_forms_are_supersets():
     coarse = c.contains(ts, xs, ys, tol_bins=0)
     assert fine.any() and not (fine & ~coarse).any()
     store = TemplateStore({"k": t})
-    off, nt, t0 = store.bbox_table(0)
-    rows = store.bb_rows()[off:off + nt]
+    offs, nt, t0 = store.bbox_table(0)
+    rows = store.bb_rows()[offs[0]:offs[0] + nt]
     b = ((ts - t0) / BIN).round().astype(int)
     ok = (b >= 0) & (b < nt)
     r = rows[np.clip(b, 0, nt - 1)]
     inside = ok & (xs >= r[:, 0]) & (xs <= r[:, 2]) & (ys >= r[:, 1]) & (ys <= r[:, 3])
     assert not (fine & ~inside).any()
+    # a window placement (the coarse time pyramid) covers every entry in its window
+    W = et.WinBatch.from_rows([(0, 0.1, 0.25, 20.0, 5.0, 1)])
+    xq, yq = 20.0 + xs[:300, None], 5.0 + ys[:300, None]
+    for e in np.arange(0.1, 0.25 + 1e-9, BIN):
+        want = t.contains(np.full(300, 0.3) - e, xs[:300], ys[:300], tol_bins=0)
+        got = store.query_win(W, xq, yq, np.array([0.3]))[:, 0]
+        assert not (want & ~got).any()
 
 
-def test_family_walk_template_covers_the_per_state_walk():
+def test_family_walk_boxes_cover_the_per_state_walk():
     tabs = _tables()
     mf = MultiForecaster(tabs, ORACLE, waves=False)
     tt = tabs.types[REED]
     fid = mf.family_walk_id(tt, "RE_STAB", "Stab Pos")
-    fw = tabs.store.template(fid)
+    offs, nt, t0 = tabs.store.bbox_table(fid)
+    rows = tabs.store.bb_rows()[offs[0]:offs[0] + nt]
     rng = np.random.default_rng(2)
     xs, ys = rng.uniform(-3, 5, 6000), rng.uniform(-3, 3, 6000)
     ts = rng.uniform(0.0, 0.8, 6000)
@@ -341,7 +349,9 @@ def test_family_walk_template_covers_the_per_state_walk():
         t = tabs.store.tpls[tid]
         for e in np.arange(n.lo, n.hi + 1e-9, BIN):
             hit |= t.contains(ts - e, xs, ys, tol_bins=0)
-    cov = fw.contains(ts, xs, ys, tol_bins=0)
+    b = np.clip(((ts - t0) / BIN).round().astype(int), 0, nt - 1)
+    r = rows[b]
+    cov = (xs >= r[:, 0]) & (xs <= r[:, 2]) & (ys >= r[:, 1]) & (ys <= r[:, 3])
     assert hit.any() and not (hit & ~cov).any()
 
 

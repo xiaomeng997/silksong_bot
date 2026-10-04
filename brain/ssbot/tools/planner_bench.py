@@ -136,6 +136,144 @@ def forum_bench(a: argparse.Namespace) -> int:
     return 0
 
 
+def forum_multi_bench(a: argparse.Namespace) -> int:
+    """--encounter Forum --multi (round R2): replay a fight's recording through OracleBackend and the run-time
+    MultiForecaster (production tables: knowledge/.../forum/*_hitboxes.npz + support_margins.json) and time every
+    tick's update and forecast(--horizon) (acceptance (d): the wave-6 replay, target p99 <= 3 ms), with --planner
+    today's planner and tactics fed by the MultiForecast (acceptance (g): no Forum planner changes, R3), and the
+    process memory (acceptance (e): <= 1.5 GB). --wave N picks the frames of wave N from the fight's cache (room.battles
+    there: the test truth, used only to choose the segment). The machine's load is sampled while it runs."""
+    import os
+
+    import numba
+    import psutil
+
+    from ssbot.backends.oracle_backend import OracleBackend
+    from ssbot.combat.enemy_tables import EnemyTables
+    from ssbot.combat.multi_forecast import MultiForecaster
+    from ssbot.record.recorder import RecordingReader
+
+    numba.set_num_threads(a.threads)
+    proc = psutil.Process()
+    fl = {f["id"]: f for f in json.loads(a.fights_list.read_text("utf-8"))["fights"]}
+    fight = fl[a.fight]
+    f0, f1 = int(fight["f0"]), int(fight["f1"])
+    start = a.start
+    if a.wave is not None:
+        from ssbot.knowledge.forum_cache import cache_name, load_cache
+        c = load_cache((a.cache or Path("C:/ssbot/data/m2_forum_r0/cache")) / cache_name(a.fight))
+        w = c["wave"] % 100
+        idx = np.flatnonzero((w == a.wave) & (c["wave"] >= 0))
+        if not len(idx):
+            raise SystemExit(f"wave {a.wave} not in {a.fight}")
+        start = int(c["f"][idx[0]])
+        stop = int(c["f"][idx[-1]])
+        n_frames = min(a.frames, stop - start + 1) if a.frames else stop - start + 1
+    else:
+        start = start if start is not None else f0
+        n_frames = a.frames
+    rss0 = proc.memory_info().rss
+    t0 = time.perf_counter()
+    tables = EnemyTables.production()
+    t_load = time.perf_counter() - t0
+    mf = MultiForecaster(tables)
+    t0 = time.perf_counter()
+    nw = mf.warm()
+    t_warm = time.perf_counter() - t0
+    rss_tables = proc.memory_info().rss
+    planner = tac = trk = None
+    if a.planner:
+        from ssbot.combat.planner import Planner, PlannerConfig
+        from ssbot.combat.safety_filter import FilterContext
+        from ssbot.combat.tactics import Tactics, load_playbook
+        from ssbot.knowledge.kinematics import HeroParams, HoldState, StateTracker, Terrain2D
+        params = HeroParams.load()
+        r0 = RecordingReader(fight["path"])
+        terrain = None
+        for _, m in r0.terrain():
+            if (m.get("scene_raw") or m.get("scene")) in ("Hang_04", "Hang_04_boss"):
+                terrain = Terrain2D.from_message(m, params.scene("Hang_04"))
+        terrain = terrain or Terrain2D.empty()
+        planner = Planner(params, terrain, PlannerConfig(threads=a.threads))
+        tac = Tactics(load_playbook())
+        trk = StateTracker(params, terrain)
+    backend = OracleBackend()
+    r = RecordingReader(fight["path"])
+    t_up, t_fc, t_tick, n_pl, n_bb, n_sub, forced = [], [], [], [], [], [], 0
+    n_fine, n_win = [], []
+    phases: dict = {}
+    load_samples = []
+    psutil.cpu_percent(None)
+    n = 0
+    prev = None
+    for s in r.states(f0 - 300, start + n_frames):
+        ws = backend.feed(s)
+        if s["f"] == f0:
+            mf.notify_wake(ws.stamp.t_game_s)
+        a0 = time.perf_counter()
+        mf.update(ws)
+        a1 = time.perf_counter()
+        if trk is not None:
+            trk.push(s)
+        if s["f"] < start or not s.get("hero"):
+            prev = s
+            continue
+        fc = mf.forecast(a.horizon)
+        a2 = time.perf_counter()
+        n += 1
+        if planner is not None and prev is not None:
+            prefs = tac.decide(ws, fc, None, 3)
+            ctx = FilterContext.from_world(ws, None, 3, want_bind=prefs.want_bind)
+            hold = HoldState.from_act(prev.get("act"))
+            prefix = np.array([int((s.get("act") or {}).get("mask") or 0)])
+            res = planner.tick(ws, trk.state(), hold, prefix, fc, prefs, ctx)
+            a3 = time.perf_counter()
+            if n > 50:
+                t_tick.append((a3 - a0) * 1e3)
+                for k, v in res.t_ms.items():
+                    phases.setdefault(k, []).append(v)
+                forced += res.forced_risk
+        if n > 50:
+            t_up.append((a1 - a0) * 1e3)
+            t_fc.append((a2 - a1) * 1e3)
+            n_pl.append(len(fc.placements))
+            n_fine.append(fc.n_fine)
+            n_win.append(fc.n_window)
+            n_bb.append(fc.n_bbox)
+            n_sub.append(sum(1 for x in fc.subjects if x.alive and x.in_play))
+        if n % 200 == 0:
+            load_samples.append(psutil.cpu_percent(None))
+        prev = s
+    q_ = lambda v: {"p50": round(float(np.percentile(v, 50)), 3), "p99": round(float(np.percentile(v, 99)), 3),  # noqa
+                    "max": round(float(np.max(v)), 3)} if v else {}
+    others = []
+    for p in psutil.process_iter(["pid", "name", "cpu_percent", "memory_info", "cmdline"]):
+        try:
+            if p.info["name"] and p.info["name"].lower().startswith(("python", "hollow", "silksong")) \
+                    and p.pid != os.getpid():
+                others.append(p.info["name"])
+        except Exception:
+            pass
+    out = {"encounter": "Forum", "mode": "multi", "fight": a.fight, "wave": a.wave, "start": start,
+           "ticks": len(t_fc), "horizon_s": a.horizon, "threads": a.threads,
+           "update_ms": q_(t_up), "forecast_ms": q_(t_fc), "tick_ms": q_(t_tick),
+           "planner_phases_ms": {k: q_(v) for k, v in phases.items()},
+           "forced_risk_share": round(forced / max(1, len(t_tick)), 4) if t_tick else None,
+           "placements": q_(n_pl), "bbox_placements": q_(n_bb), "enemies_in_play": q_(n_sub),
+           "tables_load_s": round(t_load, 1), "warm_s": round(t_warm, 1), "warm_templates": nw,
+           "rss_mb": {"before": round(rss0 / 1e6), "tables": round(rss_tables / 1e6),
+                      "end": round(proc.memory_info().rss / 1e6), "peak": round(proc.memory_info().peak_wset / 1e6)
+                      if hasattr(proc.memory_info(), "peak_wset") else None},
+           "store_mb": round(tables.store.nbytes() / 1e6),
+           "placements_by_kind": {"fine": q_(n_fine), "window": q_(n_win), "bbox": q_(n_bb)},
+           "machine_cpu_percent": q_(load_samples), "other_processes": dict(Counter(others)),
+           "cpu_count": psutil.cpu_count()}
+    print(json.dumps(out, indent=1))
+    if a.json:
+        a.json.write_text(json.dumps(out, indent=1), "utf-8")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("recording", type=Path, nargs="?")
@@ -153,8 +291,17 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--view", default="oracle")
     ap.add_argument("--idle-growth", type=Path, default=None,
                     help="Forum: a support_margins.json with production_tubes: idle enemies by the idle body tube")
+    ap.add_argument("--multi", action="store_true", help="Forum: the run-time MultiForecaster on the recording (R2)")
+    ap.add_argument("--fights-list", type=Path, default=Path("C:/ssbot/data/m2_forum_r0/build_all/fights.json"))
+    ap.add_argument("--wave", type=int, default=None, help="Forum --multi: the frames of this wave")
+    ap.add_argument("--horizon", type=float, default=2.0, help="Forum --multi: the forecast's horizon (s)")
+    ap.add_argument("--planner", action="store_true", help="Forum --multi: today's planner and tactics too")
     ap.add_argument("--json", type=Path, default=None)
     a = ap.parse_args(argv)
+    if a.encounter == "Forum" and a.multi:
+        if not a.fight:
+            ap.error("--multi needs --fight")
+        return forum_multi_bench(a)
     if a.encounter == "Forum":
         if a.cache is None or a.extra is None or not a.fight:
             ap.error("--encounter Forum needs --cache, --extra and --fight")
