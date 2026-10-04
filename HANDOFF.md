@@ -563,3 +563,57 @@ Code: f9dcbba (supervisor / tactics), 4eb57db (tools), 5026372 (combat_run --sta
 7. Merge note: main's 1c0a082 marks DESIGN §3.7.4 Q6's revision "待实现"; it is implemented here (q6_max_h 1).
    The Bell Beast gate on main (e3ceda4: degraded_dust 4a90331, 94.4 % CLEAR) ran with Q6 at h 2; after merging, the
    gate's QUIT / STUCK mix changes (h 2 fights on), so re-run it on the merged code before quoting it.
+
+
+## Chain K - key economy: few presses, few key plan changes (branch worktree-wf_48b03215-cdd-1)
+
+Worktree `C:\modeling\silksong_bot\.claude\worktrees\wf_48b03215-cdd-1`, from main 97b40f6. The person asked (2026-10-03
+night) whether "few presses, few changes to the key plan" is in training; M2 plan "key economy" (third after safety and
+time). Facts: `docs/facts/1.0.30000/key_economy.md` (Chinese, all numbers); M2.md key economy section has the status.
+
+### Done (committed)
+
+- `combat/keyplan.py` KeyPlanLog: per key, every note (press) from the tick that first decided it, every change /
+  cancellation (late ticks too), executed, open releases, frame-level flip-flops, and the presses the game latched
+  (STATE act.mask every frame, caught-up STATEs included); `summarize`, `match_actual`, `final_press`.
+- `train/planner_policy.py`: `keys_i<N>.jsonl` in the run dir, one line per episode (25-45 KB), always on;
+  `stats()["keys"]` summary in the attempts. Supervisor keys are notes flagged sup.
+- `combat/planner.py`: playbook weights `key_press` / `key_change` lower J (`_key_terms`, numba `_key_costs`), but only
+  within the safety class of the choice made without them (`_key_economy`: same Hz, Hz_soft, U, S, jump / macro
+  commitments, comfort, V, P, first contact; tail check required when the original passed it). `PlanResult.cls`,
+  `cls_off`, `idx_off`, `key_press`, `key_change`. `combat_run --key-cost PRESS CHANGE` overrides the playbook.
+- Adopted: `knowledge/1.0.30000/playbooks/BellBeast.yaml` weights `key_press: 0.05`, `key_change: 0.1`. DEFAULT_WEIGHTS
+  unchanged (off for other encounters).
+- Tools: `tools/key_economy.py` (presses / s per key, holds, plan change rate per key, decision lead, changes by frames
+  before the press, flips; `--arm NAME RUN...` groups compared; the person's fight 64275-68397, menu actions excluded:
+  the person's 11 "enter" are the jump key 1 frame early), `fight_stats --keys` (same, per view),
+  `tools/key_cost_check.py` (replay property check), `tools/key_track.py` (renderer prototype).
+- Tests: `tests/test_key_economy.py` (log semantics, cost kernel, synthetic and recording property tests, renderer);
+  `test_planner_policy` checks the keys file of the pause test. Targeted suites pass (key_economy, planner,
+  planner_policy, episode_*, combat_run_start: 40 passed with the adopted weights). The full suite was not re-run
+  (DEMO_SOON: quiet machine).
+
+### Measured
+
+- Property: 21,001 replayed ticks (4 recordings of 20261003_175813 / 175958, weights up to 0.3 / 0.6): 0 class or tail
+  mismatches; the choice changed on 12-20 % of ticks; tick time unchanged.
+- Old baseline (175813 + 175958, 241 fights, recordings): 4.67 presses / s, the person 2.37 / s; left + right 3.4 / s
+  vs 1.05, ~40 % of the bot's direction presses are 2-3 frame taps.
+- A/B (instances 2 / 3, oracle, seed 112000, 110 fights an arm, both arms on both instances): off 4.39 presses / s,
+  plan change rate 43.5 %, 5.98 changes / s, lead p50 2 frames; w1 (0.05, 0.1): 3.46 / s, 39.4 %, 2.90 / s; hits 5 vs 4,
+  WOULD_DIE 0 / 0, time to kill 60.05 vs 59.91 s; w1's 2 non-CLEARs: a Q1 QUIT after 2 hits and the known STUCK
+  (below). w2 (0.15, 0.3; 85 fights, stopped by DEMO_SOON): 2.83 / s but hits in 8 fights (p = 0.045): not adopted.
+- Runs: off 20261003_213031 (i2), 20261003_223152 (i3); w1 20261003_213033 (i3), 20261003_223150 (i2); w2
+  20261003_233543 (i2), 20261003_233308 (i3). All ended; nothing of this chain is running.
+- Key track samples: `C:\ssbot\sandbox\key_track_sample` (off, w1, side by side, README.txt).
+
+### Open
+
+- STUCK at boss HP <= 15 after one hit (h 2): the bot never attacks again (the U rule treats every attack near the
+  boss as a possible killing blow when boss HP <= 15); 3 in 175813, 1 in the w1 arm, 3 in w2. Pre-existing; offered as a
+  separate task.
+- Next for key economy (facts section 6): make the terms a near-tie breaker (only plans within delta of the best J in
+  the class), then a stronger weight can be A/B'd; stance dead zone against 2-3 frame direction taps; candidates that
+  keep the previous plan's first part (most presses are decided the tick they are sent); re-measure in the vision view.
+- The planner's CONTINUE row shifts the previous plan by 1 frame even after a late tick skipped frames (the key terms
+  use the real shift); harmless so far, not changed.

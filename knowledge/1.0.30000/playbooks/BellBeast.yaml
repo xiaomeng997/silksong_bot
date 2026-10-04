@@ -154,6 +154,13 @@ weights:
   ground: 0.2             # on the floor at the end
   cont: 0.15              # keeping the previous plan (hysteresis)
   jump: 0.15              # per jump press (no needless hopping)
+  # Key economy (the person's standard of 2026-10-03: few presses, few changes to the key plan; third after safety
+  # and time). Only reorders plans of one safety class (planner._key_economy). Oracle A/B 2026-10-03, 110 fights an
+  # arm (facts/1.0.30000/key_economy.md): presses 4.39 -> 3.46 /s, plan changes 5.98 -> 2.90 /s, hits 5 -> 4, time to
+  # kill 60.05 -> 59.91 s. Three times as much (0.15, 0.3; 85 fights) cut presses to 2.83 /s but took 9 hits in 8
+  # fights (the terms trade against J's own risk term): not adopted.
+  key_press: 0.05         # per key press in the plan (a key's rising edge)
+  key_change: 0.1         # per press of the previous plan dropped, moved or added (a release moved: half)
 # Dangerous cell (effect_miner on the data-policy run 20261001_122249, 263 fights): a side slash that meets an attack
 # bell in Launch (still beside the boss, rising at 28-38 u/s) got the hero hit in 44 % (AtkBell L, n 16) and 64 %
 # (AtkBell R, n 11) of contacts within 12 frames, against 6 % in matched no-contact frames. Attack bells take no path
