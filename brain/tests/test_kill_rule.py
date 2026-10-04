@@ -486,3 +486,24 @@ def test_glue_one_source_and_unknown_targets():
     assert SupervisedControl(BB, vision=True).needle_level is None
     assert SupervisedControl(BB, vision=True, needle_audited=True).needle_level == 0
     assert SupervisedControl(BB).needle_level == 0
+
+
+def test_released_rise_blocks_certification():
+    """Live 20261004_041626 i1 ep 0: the certified plan rose with the jump released at the kill; in BossDeathSlow the
+    game's per-Update release stopped the rise at once and the hero fell 0.2-0.8 u below the plan. A plan that rises
+    with the jump released between its earliest killing hit and its window's end is not certified; rising with the
+    jump held, falling, or a released rise before the kill can land are fine."""
+    from ssbot.combat.safety_filter import released_rise
+    N, T1 = 4, 40
+    vel = np.zeros((N, T1))
+    lat = np.zeros((N, T1 - 1), np.int64)
+    vel[0, 10:20] = 5.0                                  # rising frames 10..19, jump released: bad
+    vel[1, 10:20] = 5.0
+    lat[1, 9:21] = kin.B_JUMP                            # ... with the jump held: fine
+    vel[2, 10:20] = -5.0                                 # falling: fine
+    vel[3, 2:6] = 5.0                                    # rising released, but before the kill window: fine
+    k_lo, k_end = np.full(N, 8), np.full(N, 30)
+    assert released_rise(vel, lat, k_lo, k_end).tolist() == [True, False, False, False]
+    ctx = FilterContext(allowed_mask=np.ones(N_PRIM, bool), h=2, support_known=True, kill_window_s=0.1668)
+    cert = kill_certified(np.zeros(N, bool), np.full(N, 10), T1, ctx, FT, k_lo=k_lo, vel_y=vel, latched=lat)
+    assert cert.tolist() == [False, True, True, True]

@@ -412,7 +412,8 @@ class Planner:
         # hard veto); a blow already sent (the prefix, a running attack) is not the candidate's doing: U ranks those
         # candidates, the certified ones first, so the plan kept through the slow motion is a certified one
         may_kill, _k_lo, k_hi, in_flight = kill_frames(latched, roll.flags, roll.mode, P, ctx)
-        cert = kill_certified(S, k_hi, T1, ctx, params.frame_time)
+        cert = kill_certified(S, k_hi, T1, ctx, params.frame_time, k_lo=_k_lo, vel_y=roll.vel[:, :, 1],
+                              latched=latched)
         U = unpausable(may_kill | in_flight, ctx, cert)
         veto_k = U & may_kill
         if veto_k.any():

@@ -31,7 +31,9 @@ Rules:
             the slow motion: h >= 2, the support certified, and the candidate's whole rollout (hit effects, both
             branches) out of every support tube (S = 0) with the latest frame its killing hit can land plus the kill
             kind's window (FilterContext.kill_window_s) + KILL_MARGIN_S still inside the rollout: no support event can
-            land in the window, so h >= 2 holds after its worst event. The window is game time from the killing hit to
+            land in the window, so h >= 2 holds after its worst event; and no rise with the jump released from the
+            earliest killing hit on (released_rise: the game's per-Update jump release stops a rise at once in the
+            slow motion, which the per-frame rollout does not model; live 20261004_041626). The window is game time from the killing hit to
             the first pausable frame, measured per freeze type a hero's killing hit started (tools/kill_window,
             knowledge kill_windows.json): BossDeathSlow 0.150-0.167 s (330 kills; 1.65-1.73 s real), EnemyBattleEndSlow
             and BigEnemyDeathSlow up to 0.794 s (138 / 400); an encounter takes the longest of the kinds its recordings
@@ -64,8 +66,8 @@ from ssbot.combat.candidates import CandidateSet
 from ssbot.combat.hero_damage import HeroDamage
 from ssbot.core.primitives import N_PRIM, Prim
 from ssbot.core.worldstate import IFRAME_BLOCKED, Kind, WorldState
-from ssbot.knowledge.kinematics import (B_ATTACK, B_DOWN, B_QUICKCAST, B_UP, F_ATTACKING, M_CAST, M_DS_ANTIC,
-                                        M_DS_SPIKE)
+from ssbot.knowledge.kinematics import (B_ATTACK, B_DOWN, B_JUMP, B_QUICKCAST, B_UP, F_ATTACKING, M_CAST,
+                                        M_DS_ANTIC, M_DS_SPIKE)
 from ssbot.knowledge.knockback import KF_UNKNOWN
 from ssbot.safety.supervisor import GREEN, SupervisorDecision, silk_spend_allowed
 
@@ -193,14 +195,44 @@ def kill_window_frames(frame_time: float, window_s: float = KILL_WINDOW_S) -> in
     return int(math.ceil((window_s + KILL_MARGIN_S) / frame_time - 1e-9))
 
 
-def kill_certified(S: np.ndarray, k_hi: np.ndarray, T1: int, ctx: FilterContext, frame_time: float) -> np.ndarray:
+def kill_certified(S: np.ndarray, k_hi: np.ndarray, T1: int, ctx: FilterContext, frame_time: float,
+                   k_lo: np.ndarray | None = None, vel_y: np.ndarray | None = None,
+                   latched: np.ndarray | None = None) -> np.ndarray:
     """[N]: certified safe through the kill's slow motion (module docstring): h >= 2, the support certified, S = 0
-    over the whole rollout, and the latest killing hit plus the window inside the rollout's T1 frames."""
+    over the whole rollout, the latest killing hit plus the window inside the rollout's T1 frames, and (with k_lo,
+    vel_y, latched) no released rise from the earliest killing hit to the window's end (released_rise)."""
     S = np.asarray(S, bool)
     if ctx.h is None or ctx.h < 2 or not ctx.support_known or not math.isfinite(ctx.kill_window_s):
         return np.zeros(len(S), bool)
     k_hi = np.asarray(k_hi, np.int64)
-    return ~S & (k_hi >= 0) & (k_hi + kill_window_frames(frame_time, ctx.kill_window_s) <= T1 - 1)
+    W = kill_window_frames(frame_time, ctx.kill_window_s)
+    ok = ~S & (k_hi >= 0) & (k_hi + W <= T1 - 1)
+    if k_lo is not None and vel_y is not None and latched is not None and ok.any():
+        ok &= ~released_rise(vel_y, latched, np.asarray(k_lo, np.int64), k_hi + W)
+    return ok
+
+
+RISE_EPS = 0.05             # u/s: rising
+
+
+def released_rise(vel_y: np.ndarray, latched: np.ndarray, k_from: np.ndarray, k_to: np.ndarray) -> np.ndarray:
+    """[N]: the nominal rollout rises with the jump key released on some frame in [k_from, k_to]. The game halves a
+    rising hero's vy on every Update while the jump is released (HeroController's jump release); in a kill's slow
+    motion there are about 20 Updates per game frame, so the rise stops at once and the hero falls on an earlier and
+    lower path than the rollout (the planner's model, and the commitment's replay by game time, have one Update per
+    game frame). Live 20261004_041626 i1 ep 0 (the first certified kill at h = 2 played through BossDeathSlow): x
+    followed the plan to the mm, y fell 0.2-0.8 u below it until both landed. Every other motion rule is per physics
+    step or on scaled timers, so a plan without a released rise in the slow motion is executed as rolled out.
+    vel_y [N, T1]: velocity after frame k; frame k applies latched[:, k - 1]."""
+    N, T1 = vel_y.shape
+    if N == 0 or T1 < 2:
+        return np.zeros(N, bool)
+    rising = vel_y[:, :-1] > RISE_EPS                          # entering frame k = 1 .. T1 - 1
+    held = (np.asarray(latched)[:, :T1 - 1] & B_JUMP) != 0     # held in frame k
+    bad = rising & ~held
+    k = np.arange(1, T1)[None, :]
+    win = (k >= np.asarray(k_from)[:, None]) & (k <= np.asarray(k_to)[:, None])
+    return (bad & win).any(axis=1)
 
 
 class KillKnowledge:
