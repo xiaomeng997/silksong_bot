@@ -24,6 +24,28 @@ from pathlib import Path
 import numpy as np
 
 
+def idle_tube_hits(s, T: float, tk: np.ndarray, x: np.ndarray, y: np.ndarray, g: list[float], v_top: float,
+                   hulls: dict) -> np.ndarray:
+    """[n, steps] candidate centres inside an idle subject's body tube (forum_support.SubjectRecall.in_idle_tube,
+    vectorised over the steps; past the calibrated bins the growth goes on at the type's top speed)."""
+    from ssbot.knowledge import hitbox_tables as hb
+    from ssbot.knowledge.forum_support import tube_bin
+    b = s.seen_box
+    if b is None:
+        rel = hulls.get(s.tk)
+        if rel is None:
+            return np.zeros(x.shape, bool)
+        b = (s.pos[0] + rel[0], s.pos[1] + rel[1], s.pos[0] + rel[2], s.pos[1] + rel[3])
+    dt = (T - s.seen_T) + tk
+    k = tube_bin(dt)
+    n = len(g) - 1
+    gr = np.where(k <= n, np.asarray(g)[np.minimum(k, n)], g[-1] + v_top * (k - n) * hb.BIN_S)
+    vx, vy = (0.0 if math.isnan(v) else v for v in s.vel)
+    hx, hy = hb.HERO_HALF_U[0] + gr, hb.HERO_HALF_U[1] + gr
+    return (x >= b[0] + vx * dt - hx) & (x <= b[2] + vx * dt + hx) & (y >= b[1] + vy * dt - hy) & \
+        (y <= b[3] + vy * dt + hy)
+
+
 def forum_bench(a: argparse.Namespace) -> int:
     """--encounter Forum (round R0 scaffold; the planner has no multi-enemy forecast before round R2): replay a
     fight's cache (ssbot.tools.forum_extract) open loop through the enemies' trackers and, every tick, time what the
@@ -42,8 +64,19 @@ def forum_bench(a: argparse.Namespace) -> int:
 
     numba.set_num_threads(a.threads)
     rows = read_contacts(a.extra / "contacts.jsonl.gz")
-    rec = SubjectRecall(FoldTables(a.extra, a.fold, margins=margins_from_contacts(rows, fold=1 - a.fold),
-                                   base=a.margin))
+    growth, speeds, hulls = None, {}, {}
+    skip: set = set()
+    if a.idle_growth is not None:
+        # the idle body tube (support_recall --write-margins: production_tubes): idle enemies by their body as last
+        # seen instead of their idle templates; past the calibrated bins the growth goes on at the type's top speed
+        from ssbot.knowledge.gauntlet_tables import FORUM_SPECS
+        doc = json.loads(a.idle_growth.read_text("utf-8"))["production_tubes"]
+        growth, speeds, hulls = doc["idle_growth"], doc["tube_speed"], doc["body_hull"]
+        skip = {sp.idle_family for sp in FORUM_SPECS.values()}
+    rec = SubjectRecall(FoldTables(a.extra, a.fold, margins=margins_from_contacts(rows, fold=1 - a.fold,
+                                                                                  skip_families=skip),
+                                   base=a.margin), idle_growth=growth)
+    rec.body_rel = {k: tuple(v) for k, v in hulls.items()}
     q = rec.t.query
     cache = load_cache(a.cache / cache_name(a.fight))
     side = int(round(math.sqrt(a.n)))
@@ -51,7 +84,7 @@ def forum_bench(a: argparse.Namespace) -> int:
     vy = np.tile(np.linspace(-12.0, 16.0, side), side)
     tk = np.arange(a.T + 1, dtype=np.float64) / 60.0
     tr = SubjectTracker()
-    t_track, t_fc, t_q, n_pl, forced = [], [], [], [], 0
+    t_track, t_fc, t_q, n_pl, forced, n_tubes = [], [], [], [], 0, []
     t_prev = time.perf_counter()
     n = 0
     i0 = int(np.searchsorted(cache["f"], a.start)) if a.start is not None else 0
@@ -64,9 +97,12 @@ def forum_bench(a: argparse.Namespace) -> int:
         if n > a.frames:
             break
         pl = []
+        tubes = []
         for s in tr.subjects.values():
             if s.state is not None:
                 pl += rec.placements_of(s, T, 0.8 + 1e-6, anchor_step=12)
+                if growth is not None and rec.idle_tube_ok(s, T):
+                    tubes.append(s)
         t2 = time.perf_counter()
         hx = float(0.5 * (cache["hbox"][i, 0] + cache["hbox"][i, 2]))
         hy = float(0.5 * (cache["hbox"][i, 1] + cache["hbox"][i, 3]))
@@ -76,6 +112,9 @@ def forum_bench(a: argparse.Namespace) -> int:
         for key, t_ref, anchor, mirror in pl:
             q.place(key, t_ref, anchor, mirror)
         hit = query_par(q, x, y, tk) if pl else np.zeros(x.shape, bool)
+        for s in tubes:          # the idle body tubes (box tests per step)
+            hit |= idle_tube_hits(s, T, tk, x, y, growth[s.tk], speeds.get(s.tk, 0.0), rec.body_rel)
+        n_tubes.append(len(tubes))
         t3 = time.perf_counter()
         if n > 50:
             t_track.append((t1 - t_prev) * 1e3)
@@ -89,6 +128,7 @@ def forum_bench(a: argparse.Namespace) -> int:
     out = {"encounter": "Forum", "fight": a.fight, "ticks": len(t_fc), "candidates": side * side, "steps": a.T,
            "track_ms": q_(t_track), "placements_ms": q_(t_fc), "query_ms": q_(t_q),
            "tick_ms": q_([x + y + z for x, y, z in zip(t_track, t_fc, t_q)]), "placements": q_(n_pl),
+           "idle_body_tubes": q_(n_tubes[-len(n_pl):] if n_pl else []), "idle_growth": str(a.idle_growth),
            "all_candidates_meet_support_share": round(forced / max(1, len(t_fc)), 4), "threads": a.threads}
     print(json.dumps(out, indent=1))
     if a.json:
@@ -111,6 +151,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--start", type=int, default=None)
     ap.add_argument("--threads", type=int, default=4)
     ap.add_argument("--view", default="oracle")
+    ap.add_argument("--idle-growth", type=Path, default=None,
+                    help="Forum: a support_margins.json with production_tubes: idle enemies by the idle body tube")
     ap.add_argument("--json", type=Path, default=None)
     a = ap.parse_args(argv)
     if a.encounter == "Forum":

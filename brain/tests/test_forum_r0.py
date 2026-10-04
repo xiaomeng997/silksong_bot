@@ -274,6 +274,20 @@ def test_idle_body_tube_calibration_and_query(tmp_path):
     assert not rec.in_idle_tube(s, [(10.0, 5.0, 9 / 60, 69)], 1.0)          # past the calibration: not covered
 
 
+def test_bench_idle_tube_matches_the_recall_tube():
+    from ssbot.knowledge.forum_support import Subject
+    from ssbot.tools.planner_bench import idle_tube_hits
+    g = [0.1 * k for k in range(9)]
+    s = Subject(1, "Foe", seen_T=1.0, seen_f=60, seen_box=(9.5, 4.5, 10.5, 5.5), vel=(6.0, 0.0))
+    tk = np.array([4 / 60, 12 / 60])
+    edge4 = 10.5 + 0.4 + 0.4 + 0.25                       # as in the recall's in_idle_tube
+    edge12 = 10.5 + 1.2 + 0.8 + 30.0 * 4 / 60 + 0.25      # past the calibration: on at the top speed (30 u/s)
+    x = np.array([[edge4 - 0.01, edge12 - 0.01], [edge4 + 0.01, edge12 + 0.01]])
+    y = np.full(x.shape, 5.0)
+    h = idle_tube_hits(s, 1.0, tk, x, y, g, 30.0, {})
+    assert h.tolist() == [[True, True], [False, False]]
+
+
 def test_idle_instance_is_not_placed_under_the_tube(tmp_path):
     from ssbot.knowledge.forum_support import IdleTubeCalibration, body_hulls
     extra = _build_extra(tmp_path)
