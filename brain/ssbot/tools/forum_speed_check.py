@@ -560,6 +560,15 @@ def main(argv: list[str] | None = None) -> int:
            "perm_noise_a": perm_tests(A1, A2, max(5, a.min // 2), a.perm, n_perm_max=a.perm_max, grid=grid),
            "perm_noise_b": perm_tests(B1, B2, max(5, a.min // 2), a.perm, n_perm_max=a.perm_max, grid=grid)}
     res["perm_verdict"] = perm_verdict(res["perm"])
+
+    def fam_totals(arm: Arm) -> dict:
+        out: dict = {}
+        for (tk, _), fams in arm.choice.items():
+            for fam, n in fams.items():
+                out.setdefault(tk, Counter())[fam] += n
+        return {tk: dict(c.most_common()) for tk, c in out.items()}
+    # per type, the family counts of each arm (B after --inject): the size of an injected choice change in points
+    res["choice_totals"] = {"a": fam_totals(A), "b": fam_totals(B)}
     if not a.events_only:
         res["perm_verdict"]["hitbox"] = hitbox_verdict(A1, A2, B1, B2)
         res["sampling"] = sampling(A, B)
