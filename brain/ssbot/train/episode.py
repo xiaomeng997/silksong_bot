@@ -321,7 +321,9 @@ def _run(link: OracleLink, enc: Encounter, tap: FightTap, policy, cfg: EpisodeCo
             # zeros after a kill, unless the policy asks to keep acting or the encounter is a gauntlet (the pause
             # stress test's hit injected just after the killing blow must reach the supervisor, which then owns the
             # keys through the block above)
-            after = act_after and rec.outcome == CLEAR and not rec.reason
+            # a certified killing blow's plan (PlannerPolicy kill_commit_active) is played through the slow motion:
+            # the plan the safety filter certified is the path executed, not the zeros (DESIGN §3.7.3 exception)
+            after = (act_after or getattr(policy, "kill_commit_active", False)) and rec.outcome == CLEAR                 and not rec.reason
             if after:
                 _act(link, last, policy, s, tap)
             else:
@@ -330,6 +332,9 @@ def _run(link: OracleLink, enc: Encounter, tap: FightTap, policy, cfg: EpisodeCo
         if tap.death_frame is not None:
             rec.outcome = CLEAR
             end_after = last + post_f
+            if getattr(policy, "kill_commit_active", False):
+                _act(link, last, policy, s, tap)          # the kill commitment keeps its keys from the kill frame on
+                rec.acts += 1
             continue
         quitting = getattr(policy, "real_quit_active", False)     # a real quit: menus, then the main menu
         if game.get("paused") and not getattr(policy, "pause_owned", False):

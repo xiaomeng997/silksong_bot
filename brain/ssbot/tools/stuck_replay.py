@@ -131,6 +131,10 @@ def replay(run: Path, row: dict, facts: dict, pol, seconds: float) -> dict:
             "r_kill_vetoes": sum(t["kill"][2] for t in after),
             "chosen_presses_attack": sum(t["presses"] for t in after),
             "kill_certified_ticks": sum(t["kill"][1] > 0 for t in after),
+            "in_flight_ticks": sum(len(t["kill"]) > 3 and t["kill"][3] > 0 for t in after),
+            "chosen_certified_kill": sum(t["chosen_cert"] for t in after),
+            "idle_clear_p50": (sorted(t["idle_clear"] for t in after if t["idle_clear"] is not None) or [None])[
+                len([t for t in after if t["idle_clear"] is not None]) // 2],
             "chosen_scores_hit": sum(t["scores_hit"] for t in after),
             "first_attack_after_final_f": first_atk, "first_scored_hit_after_final_f": first_hit,
             "pending": next(({"f": t["f"] - ff, "triggers": t["triggers"]} for t in ticks if t["pending"]), None),
@@ -151,7 +155,8 @@ def _step(pol, s, tap, fh, ff, ticks, B_ATTACK, ATTACKS, Prim):
                   "atk_allowed": d.allows(Prim.ATTACK_SIDE), "nail_kills": bool(d.kill_prims & ATTACKS),
                   "kill": list(pol.planner.last_kill), "presses": bool((res.cmd[:3] & B_ATTACK).any()),
                   "scores_hit": res.attack is not None, "pending": d.pause_pending, "triggers": list(d.triggers),
-                  "stall": round(d.stall_s, 2)})
+                  "stall": round(d.stall_s, 2), "idle_clear": res.idle_clear,
+                  "chosen_cert": bool(res.kill is not None and res.kill.certified and not res.kill.i3)})
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -168,6 +173,7 @@ def main(argv: list[str] | None = None) -> int:
         import ssbot.combat.safety_filter as sf
         import ssbot.train.supervision as sup
         sf.kill_hp_world = lambda ws, z=sf.VISION_HP_Z: a.kill_hp
+        sup.kill_hp_world = sf.kill_hp_world
         sup.threat_min_hp = lambda s: a.kill_hp
     from ssbot.train.planner_policy import PlannerPolicy
     pols: dict[str, PlannerPolicy] = {}

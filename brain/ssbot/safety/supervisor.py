@@ -88,7 +88,12 @@ the support unknown) with h >= 3; RED any trigger. Triggers (§3.7.4, Q1 / Q1a t
   QS stalemate: the killing-blow rule has held the nail attacks back (kill_rule, every melee hit may kill) for
      stalemate_s (20 s) with no hit dealt (SupervisorInput.hit_dealt) and no heal
                                                                 -> latched; PAUSE_PENDING, quit at the first safe frame
-                                                                   (pausable, the chosen plan S = 0, no FORCED_RISK)
+                                                                   (pausable, the chosen plan S = 0, no FORCED_RISK,
+                                                                   and the no-input path clear for qs_idle_clear_s:
+                                                                   the pause machine's keys replace the plan's until
+                                                                   the pause lands)
+     A hit dealt or a heal on the step clears the clock and the latch before the triggers are read (fixer round:
+     the latch from the step before could fire on the step that made progress).
      Why (task "STUCK at 15 HP", 2026-10-04): with h = 2 and the boss at or below one hit's bound, a kill that can
      never be certified safe (safety_filter.kill_certified) leaves no hit, so no silk and no Bind: the fight would run
      into the time box (the 240 s STUCK of runs 20261003_175813 / 231255 / 231257). Quitting at a safe moment and
@@ -112,7 +117,14 @@ vocabulary does not know is never allowed:
                                      filter to pass only plans certified safe through the slow motion
                                      (safety_filter.kill_certified; before 2026-10-04 every damaging primitive went
                                      whenever the largest hit seen this attempt, a 15 HP Silkspear, could kill: the
-                                     STUCK deadlock); ATTACK(down) over any hazard; plus the GREEN rules. Restrictions:
+                                     STUCK deadlock). The certified kill is DESIGN I3's exception (lead decision
+                                     2026-10-04, the person's rule of 2026-10-03: at h = 2 a model error costs one
+                                     hit). At h >= 3 (full HP, YELLOW for a plan S = 1) the rule changed the same way:
+                                     the primitives stay for the L0 filter's certification where they used to go; a
+                                     certified kill there is safer than the approved h = 2 one (I3 itself holds at full
+                                     HP), and an S = 1 tick has no certifiable plan anyway (certification needs S = 0),
+                                     so only the next tick's S = 0 plans can use it; ATTACK(down) over any hazard;
+                                     plus the GREEN rules. Restrictions:
                                      punish <= 1 hit, no parry, no new fights (heal first is Q1a's: h >= 2 below max
                                      HP, in any tier)
   GREEN                              everything except SILKSKILL below full HP and ATTACK(down) over spikes (§3.5.6);
@@ -182,6 +194,8 @@ class SupervisorConfig:
     unknown_mask_covers: bool = False          # may the Fractured Mask be trusted against an unknown threat (grabs ...)
     evade_exit_timeout_s: float = 20.0
     stalemate_s: float = 20.0                  # QS: the killing-blow rule holding back this long, no hit, no heal
+    qs_idle_clear_s: float = 0.4               # QS fires only while the no-input path stays clear this long: the
+    #                                            pause lands 2-4 frames after the gate, the key guard waits <= 0.25 s
     hooks: tuple[Callable[["SupervisorInput"], Iterable[str]], ...] = ()
 
 
@@ -229,6 +243,8 @@ class SupervisorInput:
     kill_prims: frozenset[Prim] | None = None  # the damaging primitives whose next landed hit may kill (per-attack
     #                                            bounds, combat.hero_damage); None: DAMAGING when next_hit_may_kill
     hit_dealt: bool = False                    # the hero landed a hit on an enemy this frame (QS's progress)
+    idle_clear_s: float | None = None          # how long the no-input path stays out of the support (planner
+    #                                            PlanResult.idle_clear; None: unknown, never clear) - QS's safe frame
     over_spikes: bool = False                  # a down-slash here passes over spikes (never, §3.5.6)
     over_hazard: bool = False                  # ... over any other hazard (only in GREEN, §3.7.3)
     in_encounter: bool = False                 # inside an A/B encounter (P1)
@@ -583,7 +599,8 @@ class Supervisor:
             out.append(("Q9", "capture lost"))
         if inp.permadeath:
             out.append(("Q9", "PERMADEATH"))
-        if self.qs is not None and inp.pausable is True and inp.plan_s == 0 and not inp.forced_risk:
+        if self.qs is not None and inp.pausable is True and inp.plan_s == 0 and not inp.forced_risk \
+                and inp.idle_clear_s is not None and inp.idle_clear_s >= cfg.qs_idle_clear_s:
             out.append(("QS", self.qs))          # a latched stalemate quits at the first safe frame
         for hook in cfg.hooks:
             for tid in hook(inp) or ():
@@ -640,6 +657,8 @@ class Supervisor:
             h, basis = self._h(inp, hero, support)
         self.risk_integral += max(0.0, inp.p_death)
         self.unpredicted += max(0, inp.unpredicted_hits)
+        if (inp.hit_dealt or healed) and not self.pending and not self.paused:
+            self._stall_t0, self.qs = None, None        # progress this step: no stalemate quit on it
 
         fired = self._triggers(inp, h, hero, support, known, basis)
         evade_end = self._evade_latch(inp)

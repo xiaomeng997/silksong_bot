@@ -24,6 +24,14 @@ Per STATE (this is the only place where backends meet the combat stack, which re
      counts for the supervisor's Q4.
   6. the known-effect invariant (train/bell_hit_monitor.py): every drop bell the hero tinks must leave the bell's
      danger zone around her no larger than the untouched bell's (violations counted in stats()["bell_hits"]).
+  7. the kill commitment (DESIGN §3.7.3 / I3 exception, lead decision 2026-10-04): a chosen plan whose killing blow
+     the L0 filter certified (combat.planner.KillPlan: S = 0 through the latest killing hit plus the kill kind's
+     measured slow motion and a margin, in game frames) is kept; once the view shows the kill (ENEMY_KILLED, a
+     killing HIT_DEALT, a death-type FREEZE) the planner is no longer ticked and that plan's keys go out by game time
+     (rollout frame = game time since the plan's frame / frame time, the view's game clock extrapolated at its
+     current rate to the frame the mask is for) until its window ends: the certified path is the executed one, not
+     a replan per real frame at 0.05x speed (verifier finding, fixer round). The harness keeps calling act() through
+     the post-kill frames while kill_commit_active.
 The decision log (decisions_i<N>.jsonl in the run directory) keeps the 90 ticks before every hero hit, lethal hit,
 FORCED_RISK and supervisor pause, and 10 after, for ssbot.tools.postmortem.
 """
@@ -43,9 +51,8 @@ from ssbot.backends.observability import ObservabilityFilter
 from ssbot.backends.oracle_backend import OracleBackend
 from ssbot.combat.boss_model import BossModel
 from ssbot.combat.forecast import Forecaster, load_box_margin, load_hurtbox, load_planner_templates
-from ssbot.combat.hero_damage import HeroDamage
 from ssbot.combat.planner import Planner, PlannerConfig
-from ssbot.combat.safety_filter import FilterContext
+from ssbot.combat.safety_filter import FilterContext, KillKnowledge
 from ssbot.combat.tactics import Tactics, load_playbook
 from ssbot.core.bosses import BOSSES
 from ssbot.core.worldstate import ORACLE, VISION_EQUIVALENT, Ev
@@ -89,6 +96,14 @@ TELLS = {"degraded": None, "degraded_dust": DUST_TELL, "degraded_tell": BURST_TE
 # p99, +12 frames, against 0.8 u without it). SSBOT_FUSION=1 turns it back on.
 FUSION = os.environ.get("SSBOT_FUSION", "0") == "1"
 VIEWS = ("oracle", "degraded", "degraded_dust", "degraded_tell")
+
+
+def commit_frame(tg_view: float, f: int, fo: int, rate: float, tg_plan: float, frame_time: float) -> int:
+    """The kill commitment's rollout frame for the mask this tick sends (for frame f + 2): the game time there, the
+    view's (frame fo, game time tg_view) extrapolated at `rate` game s per real frame, since the committed plan's own
+    frame (game time tg_plan), in frame times. Before the kill rate = frame_time (one rollout frame per real frame);
+    in the slow motion about 0.05 of it, so each rollout frame's keys are held for about 20 real frames."""
+    return int(round((tg_view + (f + 2 - fo) * rate - tg_plan) / frame_time))
 
 
 class TerrainTap:
@@ -218,8 +233,12 @@ class PlannerPolicy:
         # stage C: the supervisor and the pause machine read the delayed view too (SupervisedControl vision=True)
         # the hero's per-attack damage bounds (combat.hero_damage) come from the audited crest and tools of the first
         # frame and the playbook's needle level (loadout.needle_level: not in the per-frame export)
+        # (vision: no inventory audit yet, so every needle level counts: SupervisedControl needle_audited)
+        self.kill_know = KillKnowledge.load()
+        self.kill_window_s = self.kill_know.window_s(enemy)
         self.sc = SupervisedControl(cfg=SupervisorConfig(worst_known_damage=2), support=lambda s: self._support,
-                                    vision=view != "oracle", needle_level=self.pb.needle_level)
+                                    vision=view != "oracle", needle_level=self.pb.needle_level,
+                                    kill_know=self.kill_know)
         self.real_quit_p = real_quit_p
         self.atk_mon = AttackMonitor()
         self._pq_emulated = self.sc.pq_cfg
@@ -262,6 +281,7 @@ class PlannerPolicy:
             self.fc.update(ws)
             self.counts["caught_up"] += 1
             self._unpred_backlog += self._unpredicted(raw, ws.stamp.frame)
+            self._note_kill(ws)
             self._mon_raws.append(sk)
 
     def warmup(self) -> float:
@@ -375,6 +395,11 @@ class PlannerPolicy:
         self.planner_last = None
         self.last_clear_f: int | None = None
         self.enc = enc
+        self.kill_window_s = self.kill_know.window_s(getattr(enc, "name", None))
+        self.commit: dict | None = None        # the kill commitment (module docstring, 7)
+        self.commits: list[dict] = []          # every commitment that ran (stats)
+        self._kill_seen_f: int | None = None   # the last frame the view showed a kill
+        self._tg: deque = deque(maxlen=3)      # (frame, game time) of the last WorldStates: the game clock's rate
 
     # ---- per STATE ---------------------------------------------------------------------------------------------
 
@@ -501,6 +526,11 @@ class PlannerPolicy:
         self.trk.push(raw)
         self._wake(ws, s, tap)
         self.fc.update(ws)
+        self._note_kill(ws)
+        if self.commit is not None and self.commit.get("killed") is None and self._kill_seen_f is not None \
+                and self._kill_seen_f > self.commit["fo"]:
+            self.commit["killed"] = self._kill_seen_f
+            self.commit["f_kill_tick"] = f
         fcast = self.fc.forecast(HORIZON_S)
         self.forecasts.append((fo, fcast, ws.stamp.t_game_s))
         self._support = fcast.support_set(ws)
@@ -508,6 +538,10 @@ class PlannerPolicy:
         if self.sc.pq is None:
             self.bell_mon.on_tick(fcast, fo, ws.stamp.t_game_s, self._mon_raws)
         self._mon_raws = []
+        if self.commit is not None and self.commit.get("killed") is not None and self.sc.pq is None:
+            mask = self._commit_tick(s, f, fo, ws, raw, t0)
+            if mask is not None:
+                return mask
         if self.sc.pq is not None:
             return self._pause_tick(s, f, fo, ws, raw, t0)
         d = self.decision
@@ -523,11 +557,12 @@ class PlannerPolicy:
             prefs.weights = dict(prefs.weights, hit=prefs.weights.get("hit", 10.0) * max(0.3, conf))
             if conf < self.atk_mon.tighten:
                 prefs.max_hits = 1 if prefs.max_hits is None else min(prefs.max_hits, 1)
-        if self.sc.damage is None:
-            # the loadout before the supervisor's first step reads it: the planner's killing-blow rule needs it now
-            self.sc.damage = HeroDamage.from_loadout(ws.res.crest.v if ws.res.crest.conf > 0 else None,
-                                                     self.pb.needle_level, ws.res.equipped)
-        ctx = FilterContext.from_world(ws, d, h, want_bind=prefs.want_bind, damage=self.sc.damage)
+        # the hero's damage bounds against this frame's kill targets and their least HP: the same values the
+        # supervisor's allowlist reads in its step below (SupervisedControl.kill_inputs, one source)
+        dmg, kill_hp = self.sc.kill_inputs(s, obs=raw, ws=ws)
+        self._kill_hp_last = kill_hp
+        ctx = FilterContext.from_world(ws, d, h, want_bind=prefs.want_bind, damage=dmg, kill_hp=kill_hp,
+                                       kill_window_s=self.kill_window_s)
         ctx.silk_reserve_full_hp = self.pb.bind_reserve_at_full_hp
         hold = HoldState.from_act(raw.get("act"))
         prefix = np.array([self.sent.get(fr, 0) for fr in range(fo + 1, f + 2)], np.int64)
@@ -543,7 +578,8 @@ class PlannerPolicy:
         self.last_clear_f = clear
         r = self.sc.step(s, obs=raw, ws=ws, inflight=self._inflight(s, f), plan_s=res.S, forced_risk=res.forced_risk,
                          unpredicted_hits=unpred, p_death=res.P,
-                         forced_clear_s=None if clear is None else clear * self.params.frame_time)
+                         forced_clear_s=None if clear is None else clear * self.params.frame_time,
+                         idle_clear_s=None if res.idle_clear is None else res.idle_clear * self.params.frame_time)
         self.decision = r.decision
         self.pause_owned = self.sc.pq is not None
         self.action_flags = ACTION_EXCLUSIVE if self.pause_owned else 0
@@ -555,6 +591,14 @@ class PlannerPolicy:
         if r.outcome is not None and r.outcome in TERMINAL and self.episode_outcome is None:
             self.episode_outcome = "QUIT"
             self.outcome_reason = f"{r.outcome}: {'; '.join(r.decision.reasons) or 'supervisor'}"
+        kp = res.kill
+        if r.mask is None and kp is not None and kp.certified and not kp.i3:
+            # the chosen plan's blow is certified only below I3: keep it for the slow motion (module docstring, 7)
+            self.commit = {"fo": fo, "f": f, "tg": ws.stamp.t_game_s, "P": kp.P, "cmd": np.array(res.cmd, np.int64),
+                           "end_k": kp.k_hi + kp.window, "k_hi": kp.k_hi, "window": kp.window, "own": kp.own,
+                           "plan": res.name, "path": res.path, "killed": None}
+        else:
+            self.commit = None
         self.sent[f + 2] = int(mask)
         for old in [k for k in self.sent if k < f - 12]:
             del self.sent[old]
@@ -567,6 +611,76 @@ class PlannerPolicy:
         self.counts[f"tier_{r.decision.tier}"] += 1
         self._log(s, f, fo, ws, fcast, prefs, res, r, unpred)
         return int(mask)
+
+    KILL_FREEZES = ("BossDeathSlow", "EnemyBattleEndSlow", "BigEnemyDeathSlow")
+
+    def _note_kill(self, ws) -> None:
+        """The view shows a kill: an ENEMY_KILLED, a killing HIT_DEALT, or a death slow motion starting."""
+        if ws is not None:
+            self._tg.append((ws.stamp.frame, ws.stamp.t_game_s))
+        for ev in ws.events if ws is not None else ():
+            p = ev.data
+            if ev.kind == Ev.ENEMY_KILLED or (ev.kind == Ev.HIT_DEALT and getattr(p, "killing", False)) or (
+                    ev.kind == Ev.FREEZE and getattr(p, "profile", None) in self.KILL_FREEZES
+                    and getattr(p, "phase", "start") == "start"):
+                self._kill_seen_f = max(self._kill_seen_f or ev.frame, ev.frame)
+
+    @property
+    def kill_commit_active(self) -> bool:
+        """A certified killing blow's plan is kept (the harness keeps acting through the post-kill frames)."""
+        return self.commit is not None
+
+    def _commit_tick(self, s: dict, f: int, fo: int, ws, raw: dict, t0: float) -> int | None:
+        """The kill commitment's tick (module docstring, 7): the committed plan's key for the frame this mask is for,
+        indexed by game time; the supervisor still steps (a trigger's pause machine replaces the keys as ever). None:
+        the window has ended (the commitment is dropped and the caller plans as usual)."""
+        c = self.commit
+        ft = self.params.frame_time
+        rate = ft
+        if len(self._tg) >= 2 and self._tg[-1][0] > self._tg[-2][0]:
+            (f0, t0g), (f1, t1g) = self._tg[-2], self._tg[-1]
+            rate = max(0.0, (t1g - t0g) / (f1 - f0))
+        k = commit_frame(ws.stamp.t_game_s, f, fo, rate, c["tg"], ft)
+        if k > c["end_k"]:
+            c["ended_f"] = f
+            self.commits.append({x: c[x] for x in ("f", "fo", "plan", "own", "k_hi", "window", "killed",
+                                                   "f_kill_tick", "ended_f") if x in c} | {"ticks": c.get("ticks", 0)})
+            self.commit = None
+            return None
+        i = min(max(k - c["P"] - 1, 0), len(c["cmd"]) - 1)
+        mask = int(c["cmd"][i])
+        c["ticks"] = c.get("ticks", 0) + 1
+        unpred = self._unpredicted(raw, fo) + self._unpred_backlog
+        self._unpred_backlog = 0
+        r = self.sc.step(s, obs=raw, ws=ws, inflight=self._inflight(s, f), plan_s=0, forced_risk=False,
+                         unpredicted_hits=unpred)
+        self.decision = r.decision
+        self.pause_owned = self.sc.pq is not None
+        self.action_flags = ACTION_EXCLUSIVE if self.pause_owned else 0
+        if r.mask is not None:
+            mask = int(r.mask)
+        if r.outcome is not None and r.outcome in TERMINAL and self.episode_outcome is None:
+            self.episode_outcome = "QUIT"
+            self.outcome_reason = f"{r.outcome}: {'; '.join(r.decision.reasons) or 'supervisor'}"
+        self.sent[f + 2] = mask
+        for old in [x for x in self.sent if x < f - 12]:
+            del self.sent[old]
+        self.tick_ms.append((time.perf_counter() - t0) * 1e3)
+        self.counts["KILL_COMMIT"] += 1
+        hero_box = (raw.get("hero") or {}).get("box")
+        rec = {"ep": self.episode, "f": f, "fo": fo, "t": round(ws.stamp.t_game_s, 4),
+               "hero": [round(v, 3) for v in ws.hero.pos.v], "hp": ws.res.hp.v, "silk": ws.res.silk.v,
+               "boss_state": self.fc.tracker.state, "mode": "KILL_COMMIT", "plan": c["plan"], "S": 0, "forced": False,
+               "mask": mask, "sup_mask": r.mask is not None, "tier": r.decision.tier, "h": r.decision.h,
+               "pending": r.decision.pause_pending, "triggers": list(r.decision.triggers), "unpred": unpred,
+               "commit": {"k": k, "i": i, "end_k": c["end_k"], "rate": round(rate / ft, 4), "commit_f": c["f"],
+                          "killed": c["killed"],
+                          "planned_box": None if c["path"] is None or not 0 <= k < len(c["path"])
+                          else [round(float(v), 3) for v in c["path"][k]],
+                          "box": None if not hero_box else [round(float(v), 3) for v in hero_box]}}
+        hit = any(ev.get("k") in ("damage", "catastrophe", "would_die") for ev in s.get("ev") or ())
+        self._emit(rec, True if c.get("ticks", 0) <= 1 else hit)
+        return mask
 
     def _inflight(self, s: dict, f: int) -> list[int]:
         """The masks sent but not applied yet before f + 2, the frame this tick's mask is for: from the frame after
@@ -663,6 +777,9 @@ class PlannerPolicy:
                "attacks": res.attacks, "atk_conf": self.atk_mon.confidence(), "fam_p": self._fam_p(fcast),
                "best_up": res.best_up, "hits": res.hits, "pogo": dict(self.planner.pogo_log),
                "kill": list(self.planner.last_kill), "kill_rule": r.decision.kill_rule,
+               "kill_plan": None if res.kill is None else [res.kill.own, res.kill.certified, res.kill.i3,
+                                                           res.kill.k_lo, res.kill.k_hi, res.kill.window],
+               "idle_clear": res.idle_clear, "kill_hp": getattr(self, "_kill_hp_last", None),
                "kill_prims": sorted(p.name for p in r.decision.kill_prims), "stall": round(r.decision.stall_s, 2),
                "path": None if res.path is None else np.round(res.path[::4, :], 3).tolist()}
         hit = any(ev.get("k") in ("damage", "catastrophe", "would_die") for ev in s.get("ev") or ())
@@ -759,4 +876,7 @@ class PlannerPolicy:
                 "outcome_reason": self.outcome_reason,
                 "alerts": list(self.sc.alerts), "anchor_log": tr.anchor_log[-40:],
                 "bell_hits": self.bell_mon.stats(),
+                "kill_commits": self.commits + ([] if self.commit is None or self.commit.get("killed") is None
+                                                else [{"plan": self.commit["plan"], "killed": self.commit["killed"],
+                                                       "ticks": self.commit.get("ticks", 0), "open": True}]),
                 "real_quit": self.real_quit_stats()}

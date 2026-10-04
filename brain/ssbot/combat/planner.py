@@ -44,8 +44,12 @@ the Bind macro when the tactics want it, over a longer horizon):
             all of the Bell Beast's).
   Hz        safety_filter.hazard_flags on knockback.knockback_hull (computed only when hazards or soft gates exist).
   U         safety_filter.unpausable: a possible killing blow (safety_filter.kill_frames: every damaging press at its
-            attack's bound, combat.hero_damage) outside I3 and not certified safe through the boss-death slow motion
-            (safety_filter.kill_certified); vetoed (R_KILL), not only ranked, since 2026-10-04.
+            attack's bound, combat.hero_damage) outside I3 and not certified safe through the kill kind's slow motion
+            (safety_filter.kill_certified); vetoed (R_KILL) when the candidate's own presses may kill, ranked when only
+            a blow already sent may (in flight: the certified plans first); the chosen plan's kill goes out as
+            PlanResult.kill (KillPlan), which the policy keeps through the slow motion by game time.
+  idle      PlanResult.idle_clear: frames after the decision frame the no-input candidate stays out of the support
+            (the pause machine's keys replace the plan's while a pause is on its way; supervisor QS's safe frame).
   V         at least 2 candidates with the same first primitive have S = 0 and no Hz (the committed part keeps two
             ways on); the carried plan counts its own S.
   P         only when no candidate has S = 0 (with S = 0, P is 0: the probability tubes lie inside the support):
@@ -73,8 +77,8 @@ from ssbot.combat import candidates as cmod
 from ssbot.combat import pogo_targets as pt
 from ssbot.combat.forecast import body_shape, Forecast
 from ssbot.combat.holdfilter import hold_filter_jit
-from ssbot.combat.safety_filter import (R_KILL, REASONS, FilterContext, hazard_flags, kill_certified, kill_frames,
-                                        unpausable, veto)
+from ssbot.combat.safety_filter import (R_KILL, REASONS, FilterContext, hazard_flags, i3_kill_allowed, kill_certified,
+                                        kill_frames, kill_window_frames, unpausable, veto)
 from ssbot.combat.tactics.modes import TacticPrefs
 from ssbot.core.primitives import Prim
 from ssbot.core.worldstate import WorldState
@@ -164,6 +168,24 @@ class PlanResult:
     #                                         [x0, y0, x1, y1] at the active frame) for the whiff audit
     vetoes: dict = field(default_factory=dict)
     hits: float = 0.0
+    kill: "KillPlan | None" = None          # the chosen plan may land a killing blow (its own or one in flight)
+    idle_clear: int | None = None           # frames after the decision frame the no-input path stays out of the
+    #                                         support (the pause machine's keys; supervisor QS), None: no such candidate
+
+
+@dataclass(frozen=True)
+class KillPlan:
+    """The chosen plan's killing blow: own (its presses, else one already sent), certified safe through the slow motion
+    (safety_filter.kill_certified), i3 (entered uncertified under I3), the rollout frames [k_lo, k_hi] the blow can
+    land in (frame k applies latched[:, k - 1]; P prefix frames) and the window frames the plan stays S = 0 after k_hi.
+    The policy keeps a certified plan through the slow motion by game time (train.planner_policy)."""
+    own: bool
+    certified: bool
+    i3: bool
+    k_lo: int
+    k_hi: int
+    window: int
+    P: int
 
 
 @numba.njit(cache=True)
@@ -236,7 +258,8 @@ class Planner:
         self.prev_name = ""
         self.ticks = 0
         self._audit = (np.zeros(0, np.int64), np.zeros(0, np.int64), np.zeros((0, 4)))
-        self.last_kill = (0, 0, 0)      # this tick's plans that may kill, of them certified, vetoed (R_KILL)
+        self.last_kill = (0, 0, 0, 0)   # this tick's plans that may kill, of them certified, vetoed (R_KILL), and
+        #                                 the plans with a blow in flight only (ranked by U, not vetoed)
         self.last_pogo = 0            # candidates with a predicted bounce in the last tick
         self.last_recoil = 0          # ... with a predicted nail recoil
         self.last_bell_pogo = 0       # ... bouncing off a registry target (a bell)
@@ -384,15 +407,21 @@ class Planner:
         if self._redirect:
             self._redirect_value(f, roll_j, tk, J, S, S2, ctx, prefs, enemy_only, min(T1, COMFORT_FRAMES + P + 1))
         tr1 = time.perf_counter()
-        # the killing blow (safety_filter U / KILL, a hard veto): every press may land at its attack's bound, and a
-        # plan that may kill passes only under I3 (GREEN, full HP, h >= 3) or certified safe through the slow motion
-        may_kill, _k_lo, k_hi = kill_frames(latched, roll.flags, roll.mode, P, ctx)
+        # the killing blow (safety_filter U / KILL): every press may land at its attack's bound, and a plan whose own
+        # presses may kill passes only under I3 (GREEN, full HP, h >= 3) or certified safe through the slow motion (a
+        # hard veto); a blow already sent (the prefix, a running attack) is not the candidate's doing: U ranks those
+        # candidates, the certified ones first, so the plan kept through the slow motion is a certified one
+        may_kill, _k_lo, k_hi, in_flight = kill_frames(latched, roll.flags, roll.mode, P, ctx)
         cert = kill_certified(S, k_hi, T1, ctx, params.frame_time)
-        U = unpausable(may_kill, ctx, cert)
-        if U.any():
-            why[ok & U] = R_KILL
-            ok = ok & ~U
-        self.last_kill = (int(may_kill.sum()), int((may_kill & cert).sum()), int(U.sum()))
+        U = unpausable(may_kill | in_flight, ctx, cert)
+        veto_k = U & may_kill
+        if veto_k.any():
+            why[ok & veto_k] = R_KILL
+            ok = ok & ~veto_k
+        self.last_kill = (int(may_kill.sum()), int((may_kill & cert).sum()), int(veto_k.sum()), int(in_flight.sum()))
+        # the no-input path (the pause machine's keys while a pause is on its way): first contact after the prefix
+        zero = ~cmd.any(axis=1)
+        idle_clear = int(min(t_hit[zero].min(), T1) - P) if zero.any() else None
         t4 = time.perf_counter()
         # a jump's hold is committed when it is pressed (DESIGN §3.5.4): a plan that releases it early, or casts
         # (a cast stops the rise), ranks below every plan that keeps it, unless none of those is safe (ABORT)
@@ -467,6 +496,10 @@ class Planner:
             res = PlanResult(int(sel_cmd[0]), i, name, int(S[i]), forced, float(Pc[i]), float(J[i]), bool(V[i]),
                              bool(hz[i]), bool(U[i]), N, int(ok.sum()), int(safe.sum()), sel_cmd,
                              roll.box[i].copy(), roll.bound[i].copy(), hits=float(hits[i]))
+            if may_kill[i] or in_flight[i]:
+                res.kill = KillPlan(own=bool(may_kill[i]), certified=bool(cert[i]), i3=i3_kill_allowed(ctx),
+                                    k_lo=int(_k_lo[i]), k_hi=int(k_hi[i]),
+                                    window=kill_window_frames(params.frame_time, ctx.kill_window_s), P=P)
             res.tail_ok = tail_ok
             # the best plan with an up-slash in it, beside the chosen one (why an up-slash loses, when it does)
             up_rows = np.flatnonzero(self._has_up[:N0]) if len(self._has_up) >= N0 and cs is self.cands else []
@@ -487,6 +520,7 @@ class Planner:
             sel_cmd = np.zeros(T, np.int64)
             res = PlanResult(0, -1, "NONE", 1, True, n=N)
         res.vetoes = {REASONS[k]: int(v) for k, v in zip(*np.unique(why, return_counts=True)) if k}
+        res.idle_clear = idle_clear
         if len(sel_cmd) and sel_cmd[0] & B_JUMP:
             if self.jump_until <= self.ticks:                        # a new press: commit its hold
                 held = sel_cmd & B_JUMP

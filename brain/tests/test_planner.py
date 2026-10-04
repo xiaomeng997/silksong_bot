@@ -158,21 +158,37 @@ def test_killing_blow_is_vetoed_unless_certified(model, tpls, params, arena):
         r = planner.tick(ws, start, kin.HoldState.idle(1), np.zeros(1, np.int64), f, prefs, ctx)
         return r, planner.last_kill
 
-    r, (may, cert, vet) = run(kill_hp=15.0, support_known=True)
+    r, (may, cert, vet, infl) = run(kill_hp=15.0, support_known=True)
     def edges(bit):
         on = (planner.last_cs.cmd & bit) != 0
         return (on[:, 1:] & ~on[:, :-1]).sum(axis=1) + on[:, 0]
     presses, casts = edges(kin.B_ATTACK), edges(kin.B_QUICKCAST)
     assert may <= int((5 * presses + 15 * casts >= 15).sum()) and r.S == 0     # casts: the Silkspear's 15
-    r, (may, cert, vet) = run(kill_hp=5.0, support_known=True)
+    r, (may, cert, vet, infl) = run(kill_hp=5.0, support_known=True)
     assert may >= int((presses >= 1).sum()) and cert > 0 and vet == may - cert
     assert 0 < r.vetoes.get("uncertified killing blow", 0) <= vet and r.S == 0   # (the Silkspear's: silk reserve)
-    r, (may, cert, vet) = run(kill_hp=5.0, support_known=False)
+    r, (may, cert, vet, infl) = run(kill_hp=5.0, support_known=False)
     assert cert == 0 and vet == may > 0 and not (r.cmd[:3] & kin.B_ATTACK).any()
-    r, (may, cert, vet) = run(kill_hp=5.0, support_known=False, h=1)
+    r, (may, cert, vet, infl) = run(kill_hp=5.0, support_known=False, h=1)
     assert cert == 0 and vet == may
-    r, (may, cert, vet) = run(hp=5, h=3, tier="GREEN", kill_hp=5.0, support_known=False)
+    r, (may, cert, vet, infl) = run(hp=5, h=3, tier="GREEN", kill_hp=5.0, support_known=False)
     assert may > 0 and vet == 0
+    # the chosen plan's kill: certified plans carry their window (the policy keeps them through the slow motion)
+    r, (may, cert, vet, infl) = run(kill_hp=5.0, support_known=True)
+    if r.kill is not None:
+        assert r.kill.own and r.kill.certified and not r.kill.i3 and r.kill.k_hi + r.kill.window <= r.kill.P + 48
+    assert r.idle_clear is not None and r.idle_clear > 0          # nothing in support: the no-input path is clear
+    # a kill kind whose slow motion does not fit the rollout (the Forum's arena end, 0.79 s of game time): nothing
+    # is certified, every plan whose own presses may kill is vetoed
+    r, (may, cert, vet, infl) = run(kill_hp=5.0, support_known=True, kill_window_s=0.7941)
+    assert cert == 0 and vet == may > 0 and not (r.cmd[:3] & kin.B_ATTACK).any()
+    # a blow already sent (the prefix presses the attack): no candidate is vetoed for it, the certified ones rank first
+    ctx = FilterContext.from_world(world(85.0, 3, 0), None, 2, damage=dmg)
+    ctx.tier, ctx.kill_hp, ctx.support_known = "YELLOW", 5.0, True
+    planner.reset()
+    r = planner.tick(ws, start, kin.HoldState.idle(1), np.full(2, kin.B_ATTACK, np.int64), f, prefs, ctx)
+    may, cert, vet, infl = planner.last_kill
+    assert infl > 0 and r.kill is not None and (r.kill.certified or not r.kill.own)
 
 
 def tick(planner, model, tpls, params, roots, x, hp=5, silk=5, h=3, gates=False, mode=kin.M_NORMAL):

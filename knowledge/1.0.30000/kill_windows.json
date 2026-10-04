@@ -1,0 +1,193 @@
+{
+ "about": "game time from the killing hit to the first pausable frame (G + 1), per freeze type a hero's killing hit started; built by ssbot.tools.kill_window (combat.safety_filter.KillKnowledge reads it)",
+ "kinds": {
+  "BigEnemyDeathSlow": {
+   "n": 400,
+   "game_s_max": 0.7941,
+   "game_s_p99": 0.7701,
+   "game_s_p50": 0.0666,
+   "real_s_max": 2.4948,
+   "frames_max": 138,
+   "scenes": [
+    "Hang_04"
+   ]
+  },
+  "BossDeathSlow": {
+   "n": 330,
+   "game_s_max": 0.1668,
+   "game_s_p99": 0.1668,
+   "game_s_p50": 0.1666,
+   "real_s_max": 1.7333,
+   "frames_max": 102,
+   "scenes": [
+    "Bone_05"
+   ]
+  },
+  "EnemyBattleEndSlow": {
+   "n": 138,
+   "game_s_max": 0.7941,
+   "game_s_p99": 0.7883,
+   "game_s_p50": 0.7689,
+   "real_s_max": 2.4948,
+   "frames_max": 139,
+   "scenes": [
+    "Hang_04"
+   ]
+  }
+ },
+ "encounters": {
+  "BellBeast": [
+   "BossDeathSlow"
+  ],
+  "Forum": [
+   "BigEnemyDeathSlow",
+   "EnemyBattleEndSlow"
+  ]
+ },
+ "sources": [
+  "C:\\ssbot\\data\\runs\\m2\\20261003_175813_BellBeast_eval_planner_oracle\\rec\\2026-10-03\\TRAIN\\i2_000",
+  "C:\\ssbot\\data\\runs\\m2\\20261003_175813_BellBeast_eval_planner_oracle\\rec\\2026-10-03\\TRAIN\\i2_001",
+  "C:\\ssbot\\data\\runs\\m2\\20261003_175813_BellBeast_eval_planner_oracle\\rec\\2026-10-03\\TRAIN\\i2_002",
+  "C:\\ssbot\\data\\runs\\m2\\20261003_175813_BellBeast_eval_planner_oracle\\rec\\2026-10-03\\TRAIN\\i2_003",
+  "C:\\ssbot\\data\\runs\\m2\\20261003_175813_BellBeast_eval_planner_oracle\\rec\\2026-10-03\\TRAIN\\i2_004",
+  "C:\\ssbot\\data\\runs\\m2\\20261003_175813_BellBeast_eval_planner_oracle\\rec\\2026-10-03\\TRAIN\\i2_005",
+  "C:\\ssbot\\data\\runs\\m2\\20261004_013433_BellBeast_eval_planner_oracle\\rec\\2026-10-04\\TRAIN\\i0_000",
+  "C:\\ssbot\\data\\runs\\m2\\20261004_013433_BellBeast_eval_planner_oracle\\rec\\2026-10-04\\TRAIN\\i0_001",
+  "C:\\ssbot\\data\\runs\\m2\\20261004_013433_BellBeast_eval_planner_oracle\\rec\\2026-10-04\\TRAIN\\i0_002",
+  "C:\\ssbot\\data\\runs\\m2\\20261004_013433_BellBeast_eval_planner_oracle\\rec\\2026-10-04\\TRAIN\\i1_000",
+  "C:\\ssbot\\data\\runs\\m2\\20261004_013433_BellBeast_eval_planner_oracle\\rec\\2026-10-04\\TRAIN\\i1_001",
+  "C:\\ssbot\\data\\runs\\m2\\20261004_013433_BellBeast_eval_planner_oracle\\rec\\2026-10-04\\TRAIN\\i1_002",
+  "C:\\ssbot\\data\\runs\\m2\\20261003_231255_BellBeast_eval_planner_oracle\\rec\\2026-10-03\\TRAIN\\i0_000",
+  "C:\\ssbot\\data\\runs\\m2\\20261003_231255_BellBeast_eval_planner_oracle\\rec\\2026-10-03\\TRAIN\\i0_001",
+  "C:\\ssbot\\data\\runs\\m2\\20261003_231255_BellBeast_eval_planner_oracle\\rec\\2026-10-04\\TRAIN\\i0_002",
+  "C:\\ssbot\\data\\runs\\m2\\20261003_231257_BellBeast_eval_planner_oracle\\rec\\2026-10-03\\TRAIN\\i1_000",
+  "C:\\ssbot\\data\\runs\\m2\\20261003_231257_BellBeast_eval_planner_oracle\\rec\\2026-10-03\\TRAIN\\i1_001",
+  "C:\\ssbot\\data\\runs\\m2\\20261003_231257_BellBeast_eval_planner_oracle\\rec\\2026-10-04\\TRAIN\\i1_002",
+  "C:\\ssbot\\data\\runs\\m2\\20261003_074533_Forum_A_data\\rec\\2026-10-03\\TRAIN\\i2_000",
+  "C:\\ssbot\\data\\runs\\m2\\20261003_074533_Forum_A_data\\rec\\2026-10-03\\TRAIN\\i2_001",
+  "C:\\ssbot\\data\\runs\\m2\\20261003_074719_Forum_A_data\\rec\\2026-10-03\\TRAIN\\i3_000",
+  "C:\\ssbot\\data\\runs\\m2\\20261003_074719_Forum_A_data\\rec\\2026-10-03\\TRAIN\\i3_001",
+  "C:\\ssbot\\data\\runs\\m2\\20261003_030413_Forum_A_data\\rec\\2026-10-03\\TRAIN\\i3_000",
+  "C:\\ssbot\\data\\runs\\m2\\20261003_014254_Forum_A_data\\rec\\2026-10-03\\TRAIN\\i2_000",
+  "C:\\ssbot\\data\\runs\\m2\\20261003_014254_Forum_A_data\\rec\\2026-10-03\\TRAIN\\i2_001",
+  "C:\\ssbot\\data\\runs\\m2\\20261003_014254_Forum_A_data\\rec\\2026-10-03\\TRAIN\\i2_002",
+  "C:\\ssbot\\data\\runs\\m2\\20261003_014254_Forum_A_data\\rec\\2026-10-03\\TRAIN\\i2_003",
+  "C:\\ssbot\\data\\runs\\m2\\20261003_014254_Forum_A_data\\rec\\2026-10-03\\TRAIN\\i2_004",
+  "C:\\ssbot\\data\\runs\\m2\\20261002_231917_Forum_A_data\\rec\\2026-10-02\\TRAIN\\i2_000",
+  "C:\\ssbot\\data\\runs\\m2\\20261002_231917_Forum_A_data\\rec\\2026-10-03\\TRAIN\\i2_001",
+  "C:\\ssbot\\data\\runs\\m2\\20261002_223640_Forum_A_data\\rec\\2026-10-02\\TRAIN\\i2_000"
+ ],
+ "scaling_about": "HealthManager.ApplyDamageScaling multiplier per enemy type_key and needle level (nailUpgrades): m_sup = min over the recorded non-critical hits of (dmg + 0.5) / dealt",
+ "scaling": {
+  "Bone Beast": {
+   "0": {
+    "m_sup": 1.03333,
+    "m_inf": 0.96667,
+    "n": 7710,
+    "pairs": {
+     "5->5": 6146,
+     "15->15": 1564
+    }
+   }
+  },
+  "Pilgrim 03 Song": {
+   "1": {
+    "m_sup": 1.01852,
+    "m_inf": 0.98148,
+    "n": 1516,
+    "pairs": {
+     "9->9": 1434,
+     "27->27": 82
+    }
+   }
+  },
+  "Song Administrator": {
+   "1": {
+    "m_sup": 1.01852,
+    "m_inf": 0.98148,
+    "n": 1971,
+    "pairs": {
+     "9->9": 1764,
+     "27->27": 207
+    }
+   }
+  },
+  "Song Automaton Tiny": {
+   "1": {
+    "m_sup": 1.01852,
+    "m_inf": 0.98148,
+    "n": 4728,
+    "pairs": {
+     "9->9": 4600,
+     "27->27": 128
+    }
+   }
+  },
+  "Song Handmaiden": {
+   "1": {
+    "m_sup": 1.01852,
+    "m_inf": 0.98148,
+    "n": 1287,
+    "pairs": {
+     "9->9": 1249,
+     "27->27": 38
+    }
+   }
+  },
+  "Song Heavy Sentry": {
+   "1": {
+    "m_sup": 1.16667,
+    "m_inf": 1.12963,
+    "n": 2502,
+    "pairs": {
+     "9->10": 2165,
+     "27->31": 337
+    }
+   }
+  },
+  "Song Pilgrim 01": {
+   "1": {
+    "m_sup": 1.01852,
+    "m_inf": 0.98148,
+    "n": 506,
+    "pairs": {
+     "9->9": 474,
+     "27->27": 32
+    }
+   }
+  },
+  "Song Pilgrim 03": {
+   "1": {
+    "m_sup": 1.01852,
+    "m_inf": 0.98148,
+    "n": 1930,
+    "pairs": {
+     "9->9": 1709,
+     "27->27": 221
+    }
+   }
+  },
+  "Song Pilgrim Maestro": {
+   "1": {
+    "m_sup": 1.01852,
+    "m_inf": 0.98148,
+    "n": 2000,
+    "pairs": {
+     "9->9": 1953,
+     "27->27": 47
+    }
+   }
+  },
+  "Song Reed": {
+   "1": {
+    "m_sup": 1.01852,
+    "m_inf": 0.98148,
+    "n": 2799,
+    "pairs": {
+     "9->9": 2587,
+     "27->27": 212
+    }
+   }
+  }
+ }
+}

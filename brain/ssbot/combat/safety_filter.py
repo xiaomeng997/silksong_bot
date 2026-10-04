@@ -1,11 +1,14 @@
 """L0 safety filter (DESIGN §3.5.1 "veto plans that break an invariant; hazards are walls", §3.5.6, §3.7.2-3.7.4):
 hand-written rules over the planner's candidates, never learned.
 
-    ctx = FilterContext.from_world(ws, decision, h, want_bind=prefs.want_bind, damage=hero_damage)
+    dmg, kill_hp = supervised_control.kill_inputs(s, obs, ws)     # one source with the supervisor's allowlist
+    ctx = FilterContext.from_world(ws, decision, h, want_bind=prefs.want_bind, damage=dmg, kill_hp=kill_hp,
+                                   kill_window_s=KillKnowledge.load().window_s(encounter))
     ok, why = veto(cands, ctx)                       # [N] allowed, [N] first rule that vetoed (0 = none)
     hz, hz_soft = hazard_flags(kb_hull, kb_flags, ctx)   # Hz(c): knockback envelope into a hazard / a soft gate
-    may_kill, k_lo, k_hi = kill_frames(latched, roll.flags, roll.mode, P, ctx)
-    u = unpausable(may_kill, ctx, kill_certified(S, k_hi, T1, ctx, frame_time))   # U(c): vetoed (R_KILL)
+    may_kill, k_lo, k_hi, in_flight = kill_frames(latched, roll.flags, roll.mode, P, ctx)
+    cert = kill_certified(S, k_hi, T1, ctx, frame_time)
+    u = unpausable(may_kill | in_flight, ctx, cert)  # U(c): vetoed (R_KILL) where may_kill, ranked where in flight
 
 Rules:
   ALLOW     the supervisor's allowlist (PAUSE_PENDING / EVADE_EXIT: evasive only; YELLOW / RED: the damaging
@@ -20,29 +23,39 @@ Rules:
   Hz        the candidate's knockback envelope (knockback.knockback_hull over all its frames) touches a hazard (a wall,
             §3.5.6); when h <= 2 the arena gates count as soft hazards (I2). KF_UNKNOWN (frame-time model broken)
             makes every candidate Hz when hazards exist: unknown is never safe.
-  U / KILL  I3 for the killing blow, a hard veto (R_KILL): a window where pause / quit is out of reach for more than
-            0.5 s may be entered uncertified only in GREEN at full HP with h >= 3 (one worst event later h >= 2;
-            §3.7.3: YELLOW forbids a possibly killing blow). Bell Beast's only such window the bot can start itself is
-            the boss-death slow motion (1.35-1.38 s real, quit map BossDeathSlow), started by a killing blow.
-            Certified kill (task "STUCK at 15 HP", 2026-10-04): otherwise the blow is allowed only when the hero is
-            certified safe through the slow motion: h >= 2, the support certified, and the candidate's whole rollout
-            (hit effects, both branches) out of every support tube (S = 0) with the latest frame its killing hit can
-            land plus KILL_WINDOW_S + KILL_MARGIN_S still inside the rollout. Why that window: from the killing hit to
-            the first pausable frame the game advances 0.150-0.167 s of game time (95-101 real frames, 1.65-1.72 s;
-            120 kills of run 20261003_175813, BossDeathSlow 0.1 / 1.15 / 0.1 at 0.05 speed), and the support's tubes
-            (the boss's attacks, the bells in flight) are in game time. Without it, h = 2 with the boss at or below a
-            hit's bound was a deadlock: no attack, no silk, no Bind, YELLOW until the 240 s time box.
-            "May kill" (kill_frames) needs no geometry: every damaging press of the candidate (attack and quick-cast
-            edges of its hold-filtered stream; the prefix's and an attack running at the start count towards the sum)
-            is assumed to land, at the crest's / tools' bound for that attack (combat.hero_damage); the candidate may
-            kill once the sum reaches the least HP of an enemy (kill_hp_world: minus 3 sigma of a counted HP; a boss
-            whose HP is unknown counts as 0). Its killing hit lands no earlier than the press that reaches the sum and
-            no later than the last press's attack onset in the nominal lane (else the press plus the attack queue)
-            plus the attack's hit window (planner.WINDOWS v2: side 6, up 8, down spike 16, Silkspear 20 frames) plus
-            LANE_SLACK_F for the other timing lanes.
+  U / KILL  I3 for the killing blow (DESIGN §3.7.2, and its exception, lead decision 2026-10-04): a window where pause /
+            quit is out of reach for more than 0.5 s may be entered uncertified only in GREEN at full HP with h >= 3
+            (one worst event later h >= 2). The windows the bot starts itself are the kill slow motions (Bell Beast:
+            BossDeathSlow, 1.35-1.38 s real; the Forum: EnemyBattleEndSlow / BigEnemyDeathSlow, 1.9-2.5 s real).
+            Certified kill (the exception): otherwise the blow is allowed only when the hero is certified safe through
+            the slow motion: h >= 2, the support certified, and the candidate's whole rollout (hit effects, both
+            branches) out of every support tube (S = 0) with the latest frame its killing hit can land plus the kill
+            kind's window (FilterContext.kill_window_s) + KILL_MARGIN_S still inside the rollout: no support event can
+            land in the window, so h >= 2 holds after its worst event. The window is game time from the killing hit to
+            the first pausable frame, measured per freeze type a hero's killing hit started (tools/kill_window,
+            knowledge kill_windows.json): BossDeathSlow 0.150-0.167 s (330 kills; 1.65-1.73 s real), EnemyBattleEndSlow
+            and BigEnemyDeathSlow up to 0.794 s (138 / 400); an encounter takes the longest of the kinds its recordings
+            show, one with none the longest measured, and the support's tubes are in game time. The policy then plays
+            the certified plan through the slow motion by game time (train.planner_policy, the kill commitment), so
+            the certified path is the executed one. The Forum's 0.79 + 0.15 s (57 frames) never fits a 48-frame
+            rollout: there nothing is certified and the I3 rule stands. Without the certification, h = 2 with the
+            boss at or below a hit's bound was a deadlock: no attack, no silk, no Bind, YELLOW until the 240 s time box.
+            "May kill" (kill_frames) needs no geometry: every damaging press (attack and quick-cast edges of the
+            hold-filtered stream; the prefix's and an attack running at the start count towards the sum) is assumed
+            to land, at the bound for that attack against the targets' damage scaling (combat.hero_damage); the sum
+            reaching the least HP of an enemy (kill_hp_world: minus 3 sigma of a counted HP; a boss whose HP is
+            unknown counts as 0) makes the candidate may_kill when it has a press of its own (the hard veto, R_KILL),
+            in_flight when only presses already sent reach it: that blow may land whatever the candidate does, so it
+            is ranked (U, before S = 0), not vetoed, and the plan kept through the slow motion is a certified one when
+            one exists. The killing hit lands no earlier than the press that reaches the sum and no later than the last
+            press's attack onset in the nominal lane (else the press plus the attack queue) plus the attack's hit window
+            (planner.WINDOWS v2: side 6, up 8, down spike 16, Silkspear 20 frames) plus LANE_SLACK_F for the other
+            timing lanes.
 """
+import json
 import math
 from dataclasses import dataclass, field
+from pathlib import Path
 
 import numba
 import numpy as np
@@ -66,6 +79,7 @@ LANE_SLACK_F = 4            # attack onsets of the other timing lanes around the
 QUEUE_F = 10                # a press that cannot act waits in the attack queue (attack_queue_steps 8 at 50 Hz) + 1
 HIT_END_F = (6, 8, 16, 20)  # a hit lands at most this many frames after the onset: side, up, down spike, Silkspear
 VISION_HP_Z = 3.0           # a counted HP (vision) may be this many sigma lower
+KILL_HP_FROM_WS = object()  # FilterContext.from_world(kill_hp=KILL_HP_FROM_WS): kill_hp_world(ws)
 _BIT = {p: 1 << int(p) for p in Prim}
 
 
@@ -85,11 +99,17 @@ class FilterContext:
     hero_x: float = 0.0
     support_known: bool = False             # the supervisor's support certification (SupervisorDecision.support_known)
     kill_hp: float | None = None            # least HP an enemy may have now (kill_hp_world); None: none can die
-    damage: HeroDamage | None = None        # per-attack bounds; None: unknown, every press may kill
+    damage: HeroDamage | None = None        # per-attack bounds at the targets' damage scaling; None: unknown, every
+    #                                         press may kill
+    kill_window_s: float = KILL_WINDOW_S    # game s from a killing hit to the first pausable frame, for the kinds of
+    #                                         kill this encounter has (KillKnowledge.window_s)
 
     @classmethod
     def from_world(cls, ws: WorldState, d: SupervisorDecision | None, h: int | None, want_bind: bool = False,
-                   damage: HeroDamage | None = None) -> "FilterContext":
+                   damage: HeroDamage | None = None, kill_hp: "float | None | object" = KILL_HP_FROM_WS,
+                   kill_window_s: float | None = None) -> "FilterContext":
+        """kill_hp: the caller's value (train.supervision.SupervisedControl.kill_inputs: the one the supervisor's
+        allowlist used this frame, so both read the same threats' HP); KILL_HP_FROM_WS: kill_hp_world(ws)."""
         allowed = d.allowed_mask if d is not None else np.ones(N_PRIM, bool)
         hazards = []
         for e in ws.entities:
@@ -106,7 +126,8 @@ class FilterContext:
                    silk=int(ws.res.silk.v or 0), h=h, tier=d.tier if d is not None else "YELLOW",
                    pause_pending=bool(d is not None and d.pause_pending), want_bind=want_bind, hazards=hazards,
                    soft=soft, hero_x=float(ws.hero.pos.v[0]), support_known=bool(d is not None and d.support_known),
-                   kill_hp=kill_hp_world(ws), damage=damage)
+                   kill_hp=kill_hp_world(ws) if kill_hp is KILL_HP_FROM_WS else kill_hp, damage=damage,
+                   kill_window_s=KILL_WINDOW_S if kill_window_s is None else float(kill_window_s))
 
 
 def veto(cands: CandidateSet, ctx: FilterContext) -> tuple[np.ndarray, np.ndarray]:
@@ -165,19 +186,97 @@ def unpausable(may_kill: np.ndarray, ctx: FilterContext, certified: np.ndarray |
     return u
 
 
-def kill_window_frames(frame_time: float) -> int:
-    """Rollout frames the support must stay off the hero after the latest killing hit: the slow motion plus margin."""
-    return int(math.ceil((KILL_WINDOW_S + KILL_MARGIN_S) / frame_time - 1e-9))
+def kill_window_frames(frame_time: float, window_s: float = KILL_WINDOW_S) -> int:
+    """Rollout frames the support must stay off the hero after the latest killing hit: the slow motion of the kill's
+    kind (game time, KillKnowledge.window_s) plus KILL_MARGIN_S. The policy plays the certified plan through the slow
+    motion by game time (train.planner_policy kill commitment), so rollout frames are game frames."""
+    return int(math.ceil((window_s + KILL_MARGIN_S) / frame_time - 1e-9))
 
 
 def kill_certified(S: np.ndarray, k_hi: np.ndarray, T1: int, ctx: FilterContext, frame_time: float) -> np.ndarray:
     """[N]: certified safe through the kill's slow motion (module docstring): h >= 2, the support certified, S = 0
     over the whole rollout, and the latest killing hit plus the window inside the rollout's T1 frames."""
     S = np.asarray(S, bool)
-    if ctx.h is None or ctx.h < 2 or not ctx.support_known:
+    if ctx.h is None or ctx.h < 2 or not ctx.support_known or not math.isfinite(ctx.kill_window_s):
         return np.zeros(len(S), bool)
     k_hi = np.asarray(k_hi, np.int64)
-    return ~S & (k_hi >= 0) & (k_hi + kill_window_frames(frame_time) <= T1 - 1)
+    return ~S & (k_hi >= 0) & (k_hi + kill_window_frames(frame_time, ctx.kill_window_s) <= T1 - 1)
+
+
+class KillKnowledge:
+    """knowledge/1.0.30000/kill_windows.json (built by tools/kill_window from recordings):
+      window_s(encounter)   game s from the killing hit to the first pausable frame: the longest over the freeze
+                            types a death started in that encounter's recordings (Bell Beast: BossDeathSlow; Forum:
+                            EnemyDeath, BigEnemyDeathSlow, EnemyBattleEndSlow); an encounter with no measurement: the
+                            longest measured of any kind (unknown kinds bounded by the longest measured)
+      scaling(type_keys)    {needle level: bound} of the targets' damage-scaling multiplier (HealthManager.
+                            ApplyDamageScaling): per level the largest over the types; a level any type lacks is left
+                            out (unknown: hero_damage.UNKNOWN_SCALING)"""
+
+    PATH = Path(__file__).resolve().parents[3] / "knowledge" / "1.0.30000" / "kill_windows.json"
+    _cache: "KillKnowledge | None" = None
+
+    def __init__(self, data: dict | None = None):
+        d = data or {}
+        self.kinds = {k: float(v["game_s_max"]) for k, v in (d.get("kinds") or {}).items()}
+        self.encounters = {k: tuple(v) for k, v in (d.get("encounters") or {}).items()}
+        self.scal = {tk: {int(lv): float(x["m_sup"]) for lv, x in v.items()}
+                     for tk, v in (d.get("scaling") or {}).items()}
+
+    @classmethod
+    def load(cls, path: Path | None = None) -> "KillKnowledge":
+        if path is None and cls._cache is not None:
+            return cls._cache
+        p = path or cls.PATH
+        k = cls(json.loads(p.read_text("utf-8")) if p.is_file() else None)
+        if path is None:
+            cls._cache = k
+        return k
+
+    def window_s(self, encounter: str | None) -> float:
+        kinds = self.encounters.get(encounter or "", ())
+        known = [self.kinds[k] for k in kinds if k in self.kinds]
+        if known:
+            return max(known)
+        return max(self.kinds.values()) if self.kinds else math.inf
+
+    def scaling(self, type_keys) -> dict[int, float]:
+        out: dict[int, float] | None = None
+        for tk in set(type_keys):
+            v = self.scal.get(tk)
+            if v is None:
+                return {}
+            out = dict(v) if out is None else {lv: max(x, v[lv]) for lv, x in out.items() if lv in v}
+        return out if out is not None else {lv: 1.0 for lv in range(5)}
+
+
+def kill_targets(ws: WorldState) -> list:
+    """The bosses and enemies the killing-blow rule watches (kill_hp_world's): alive or of unknown HP."""
+    out = []
+    for e in ws.entities:
+        if e.kind not in (Kind.BOSS, Kind.ENEMY):
+            continue
+        h = e.hp_est
+        if h is not None and h.conf > 0 and h.v is not None and h.v <= 0:
+            continue
+        if h is None or h.conf <= 0 or h.v is None:
+            if e.kind != Kind.BOSS:
+                continue
+        out.append(e)
+    return out
+
+
+def kill_scaling(ws: WorldState, know: "KillKnowledge | None" = None) -> dict[int, float]:
+    """The damage-scaling bound per needle level over the kill targets of ws (KillKnowledge.scaling; a target whose
+    type the view does not know counts as unknown)."""
+    know = know or KillKnowledge.load()
+    tks = []
+    for e in kill_targets(ws):
+        tk = e.type_key.v if e.type_key is not None and e.type_key.conf > 0 else None
+        if tk is None:
+            return {}
+        tks.append(str(tk))
+    return know.scaling(tks)
 
 
 def kill_hp_world(ws: WorldState, z: float = VISION_HP_Z) -> float | None:
@@ -201,27 +300,32 @@ def kill_hp_world(ws: WorldState, z: float = VISION_HP_Z) -> float | None:
 
 
 def kill_frames(latched: np.ndarray, flags: np.ndarray, mode: np.ndarray, P: int, ctx: FilterContext
-                ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """(may_kill [N], k_lo [N], k_hi [N]): the candidate's own presses may land the killing blow; the earliest and the
-    latest rollout frame that blow can land (module docstring). latched [N, P + T] is the hold-filtered stream (frame k
-    applies latched[:, k - 1], P of them the prefix), flags / mode [N, T1] the nominal lane's."""
+                ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """(may_kill [N], k_lo [N], k_hi [N], in_flight [N]): may_kill, the candidate's own presses may land the killing
+    blow (the hard veto's subject); in_flight, the sum reaches the HP but only with presses already sent (the prefix)
+    or an attack running at the start: the blow may land whatever the candidate does, so it is not vetoed but ranked
+    (U, uncertified below certified: the plan carried through the slow motion should be a certified one); k_lo / k_hi
+    the earliest and the latest rollout frame that blow can land (module docstring), -1 when neither. latched [N, P + T]
+    is the hold-filtered stream (frame k applies latched[:, k - 1], P of them the prefix), flags / mode [N, T1] the
+    nominal lane's."""
     N = latched.shape[0]
     may = np.zeros(N, np.bool_)
+    inf = np.zeros(N, np.bool_)
     lo = np.full(N, -1, np.int64)
     hi = np.full(N, -1, np.int64)
     if ctx.kill_hp is None or N == 0:
-        return may, lo, hi
+        return may, lo, hi, inf
     dmg = ctx.damage
     nail = math.inf if dmg is None else float(dmg.nail)
     spear = math.inf if dmg is None else float(dmg.spear)
     _kill_kernel(np.ascontiguousarray(latched, np.int64), np.ascontiguousarray(flags, np.int64),
                  np.ascontiguousarray(mode, np.int64), int(P), nail, spear, float(ctx.kill_hp), QUEUE_F, LANE_SLACK_F,
-                 np.array(HIT_END_F, np.int64), may, lo, hi)
-    return may, lo, hi
+                 np.array(HIT_END_F, np.int64), may, lo, hi, inf)
+    return may, lo, hi, inf
 
 
 @numba.njit(cache=True)
-def _kill_kernel(latched, flags, mode, P, nail, spear, hp, queue_f, slack, ends, may, lo, hi):
+def _kill_kernel(latched, flags, mode, P, nail, spear, hp, queue_f, slack, ends, may, lo, hi, inflight):
     N, L = latched.shape
     T1 = flags.shape[1]
     for c in range(N):
@@ -275,7 +379,8 @@ def _kill_kernel(latched, flags, mode, P, nail, spear, hp, queue_f, slack, ends,
                 k_lo = fr
             if k_lo >= 0:
                 k_hi = max(k_hi, e)
-        if own and k_lo >= 0:
-            may[c] = True
+        if k_lo >= 0:
+            may[c] = own
+            inflight[c] = not own
             lo[c] = k_lo
             hi[c] = k_hi

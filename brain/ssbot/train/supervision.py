@@ -70,7 +70,8 @@ from typing import NamedTuple
 
 from ssbot.backends.observability import DEFAULT_ATTACK_DAMAGE
 from ssbot.combat.hero_damage import HeroDamage
-from ssbot.combat.safety_filter import kill_hp_world
+from ssbot.combat.safety_filter import KillKnowledge, kill_hp_world, kill_scaling
+from ssbot.core.primitives import DAMAGING
 from ssbot.core.worldstate import Ev, Kind, WorldState
 from ssbot.ipc.ents import HAZARD_TYPES
 from ssbot.ipc.framing import BIT
@@ -183,9 +184,15 @@ class SupervisedControl:
     def __init__(self, cfg: SupervisorConfig, support: SupportFn | None = None, pq_cfg: PauseQuitConfig | None = None,
                  bit: Mapping[str, int] = BIT, foreground_sink: bool = False, always_quit: bool = True,
                  qpc_freq: float = 1e7, hero_hit_floor: int = HERO_HIT_FLOOR, vision: bool = False,
-                 damage: HeroDamage | None = None, needle_level: int = 0):
+                 damage: HeroDamage | None = None, needle_level: int | None = 0, needle_audited: bool | None = None,
+                 kill_know: KillKnowledge | None = None):
         self.damage0 = damage            # None: from the audited loadout of the first frame (crest, tools)
-        self.needle_level = needle_level
+        # the needle level (nailUpgrades) is not in the per-frame export. The oracle view checks the playbook's at run
+        # time (a "hit" event above its bound raises it, observe); the vision view cannot see a hit's damage, so it
+        # takes every level unless an inventory audit confirmed the level (needle_audited; default: oracle only)
+        audited = (not vision) if needle_audited is None else needle_audited
+        self.needle_level = needle_level if audited else None
+        self.kill_know = kill_know if kill_know is not None else KillKnowledge.load()
         self.support = support
         self.cfg = cfg
         self.pq_cfg = pq_cfg or PauseQuitConfig(emulate_quit=True)
@@ -207,7 +214,8 @@ class SupervisedControl:
         self.t_last = 0.0
         self.first_pending_f: int | None = None
         self.hero_hit = self.hero_hit_floor
-        self.damage: HeroDamage | None = self.damage0
+        self.damage: HeroDamage | None = self.damage0   # the loadout's bounds at scaling 1 (observe raises them)
+        self._kill_in: tuple | None = None               # kill_inputs' frame and result (one value per frame)
         self.alerts: list[str] = []
         self._resume_reason = RESUME_SELF_CHECK
         self._resume_scene: str | None = None
@@ -281,6 +289,50 @@ class SupervisedControl:
         """The pause stress test: a quit trigger on the next step, with no damage (Supervisor.inject)."""
         self.sup.inject(tid, why)
 
+    def kill_inputs(self, s: dict, obs: dict | None = None, ws: WorldState | None = None
+                    ) -> tuple[HeroDamage | None, float | None]:
+        """(the hero's per-attack damage bounds against this frame's kill targets, the least HP of a kill target): the
+        one source both the supervisor's allowlist (kill_prims, QS) and the planner's L0 filter (FilterContext) read
+        (fixer round 2026-10-04: the supervisor used to read STATE threat roots and the planner every WorldState boss /
+        enemy, and where they disagreed QS was off while the planner vetoed). From the WorldState the decisions read
+        (the oracle backend's of this STATE; vision: the delayed view): safety_filter.kill_hp_world (an unknown boss HP
+        counts as 0) and the targets' damage scaling (KillKnowledge, unknown types unbounded); without a WorldState,
+        the STATE's live entities. The oracle's "hit" events of this STATE raise the bounds first (observe)."""
+        key = (id(s), s.get("f"), id(ws), id(s.get("ev")))
+        if self._kill_in is not None and self._kill_in[0] == key:
+            return self._kill_in[1]
+        if self.vision:
+            ws = self._last_ws if ws is None else ws
+            if self.damage is None and ws is not None:
+                self.damage = HeroDamage.from_loadout(_known_v(ws.res.crest), self.needle_level, ws.res.equipped)
+        else:
+            hero = s.get("hero") or {}
+            if self.damage is None and hero.get("crest") is not None:
+                self.damage = HeroDamage.from_loadout(hero.get("crest"), self.needle_level, hero.get("tools") or ())
+            for ev in s.get("ev") or ():
+                if ev.get("k") != "hit":
+                    continue
+                d = ev.get("d") or {}
+                dmg = d.get("dmg")
+                if isinstance(dmg, (int, float)) and not isinstance(dmg, bool):
+                    self.hero_hit = max(self.hero_hit, int(dmg))
+                    if self.damage is not None:
+                        new = self.damage.observe(d.get("src"), d.get("attack"), dmg)
+                        if new is not self.damage:
+                            self._note(f"hero damage: a {new.kind_of(d.get('src'), d.get('attack'))} hit "
+                                       f"({d.get('src')}) dealt {dmg}, above the loadout's bound")
+                        self.damage = new
+        if ws is not None:
+            hp, scal = kill_hp_world(ws), kill_scaling(ws, self.kill_know)
+        else:
+            hp = threat_min_hp(s)
+            scal = self.kill_know.scaling(str(e.get("type_key")) for e in s.get("ents") or ()
+                                          if isinstance(e.get("hp"), (int, float)) and e["hp"] > 0
+                                          and not e.get("is_dead"))
+        out = (None if self.damage is None else self.damage.at(scal), hp)
+        self._kill_in = (key, out)
+        return out
+
     def h_now(self, s: dict, obs: dict | None = None, ws: WorldState | None = None) -> tuple[int | None, str | None]:
         """(h, basis) the supervisor's step will decide for this STATE (same inputs: the current STATE in oracle mode,
         the delayed view in vision mode), without stepping it (Supervisor.peek_h). The policy's tactics and safety
@@ -326,9 +378,8 @@ class SupervisedControl:
                 self._last_seen_ws = ws
                 self._see_hit(ws, (obs.get("q") or 0) / self.qpc_freq)
             if ws is not None:
-                if self.damage is None:
-                    self.damage = HeroDamage.from_loadout(_known_v(ws.res.crest), self.needle_level, ws.res.equipped)
-                kp = self.damage.kill_prims(kill_hp_world(ws))
+                dmg, kill_hp = self.kill_inputs(s, obs, ws)
+                kp = dmg.kill_prims(kill_hp) if dmg is not None else DAMAGING
                 planner.setdefault("kill_prims", kp)
                 planner.setdefault("next_hit_may_kill", bool(kp))
                 planner.setdefault("hit_dealt", any(ev.kind == Ev.HIT_DEALT for ev in ws.events))
@@ -339,26 +390,11 @@ class SupervisedControl:
                                       support_known=events is not None and known,
                                       support_empty_ok=events is not None and empty_ok, **planner)
         else:
-            hero = s.get("hero") or {}
-            if self.damage is None and hero.get("crest") is not None:
-                self.damage = HeroDamage.from_loadout(hero.get("crest"), self.needle_level, hero.get("tools") or ())
-            dealt = False
-            for ev in s.get("ev") or ():
-                if ev.get("k") == "hit":
-                    dealt = True
-                    d = ev.get("d") or {}
-                    dmg = d.get("dmg")
-                    if isinstance(dmg, (int, float)) and not isinstance(dmg, bool):
-                        self.hero_hit = max(self.hero_hit, int(dmg))
-                        if self.damage is not None:
-                            new = self.damage.observe(d.get("src"), d.get("attack"), dmg)
-                            if new is not self.damage:
-                                self._note(f"hero damage: a {new.kind_of(d.get('src'), d.get('attack'))} hit "
-                                           f"({d.get('src')}) dealt {dmg}, above the loadout's bound")
-                            self.damage = new
+            dealt = any(ev.get("k") == "hit" for ev in s.get("ev") or ())
+            dmg, kill_hp = self.kill_inputs(s, None, ws)
             events, known, empty_ok = _support_of(None if self.support is None else self.support(s))
-            if self.damage is not None:
-                kp = self.damage.kill_prims(threat_min_hp(s))
+            if dmg is not None:
+                kp = dmg.kill_prims(kill_hp)
                 planner.setdefault("kill_prims", kp)
                 planner.setdefault("next_hit_may_kill", bool(kp))
             else:                          # no loadout read (no hero): every damaging primitive, the largest hit
