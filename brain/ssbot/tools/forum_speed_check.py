@@ -17,6 +17,10 @@ with the same game logic passes:
              speed holds other distances.
   speed      per (type, state) the enemy transform's speed over windows of SPEED_WIN_S game seconds inside one state
              (per frame, |d pos| / dt aliases against the 0.02 s physics step differently at 1/60 and 1/30 s frames).
+             Entities are read on the coarsest arm's frames in both arms (the finer arm every k-th STATE): a window
+             starts at the first frame seen in the state, up to one frame after its entry, and with 1/60 s frames in
+             one arm and 1/30 s in the other the windows of a short, uneven motion (an evade) would cover different
+             parts of it (calibration: every Evade key at p 0.0002 with both arms read at their own rate).
   hitbox     per (type, state, collider name) the damage collider's extent relative to the enemy transform, flipped
              to face +x, per 0.05 s state-time bin: max over bins of |extent difference| (u) against the same
              statistic between each arm's halves (no fight-level test: 2x samples every other 1/60 s bin, and an
@@ -280,6 +284,23 @@ def scan(fight, arm: Arm, with_ents: bool = True, stride: int = 1, sim_k: int = 
     arm.fights += 1
 
 
+def probe_dt(runs: list[Path], frames: int = 600) -> float:
+    """The nominal frame of an arm (its first fight's most common STATE dt)."""
+    for run in runs:
+        fights, _ = run_fights(Path(run))
+        for fight in fights[:1]:
+            c: Counter = Counter()
+            for i, s in enumerate(fight_states(fight, keys=("f", "dt"))):
+                dt = float(s.get("dt") or 0.0)
+                if dt > 0.005:
+                    c[round(dt, 4)] += 1
+                if i >= frames:
+                    break
+            if c:
+                return nominal_dt(c.most_common(1)[0][0])
+    return 1.0 / 60.0
+
+
 def load(runs: list[Path], max_fights: int | None, with_ents: bool, stride: int = 1,
          sim_k: int = 1) -> tuple[Arm, Arm, Arm]:
     """The whole arm and its two halves (alternating fights)."""
@@ -469,10 +490,14 @@ def main(argv: list[str] | None = None) -> int:
                     help="arm B as if recorded at K x speed (calibration)")
     ap.add_argument("--json", type=Path)
     a = ap.parse_args(argv)
-    A, A1, A2 = load(a.a, a.max_fights, not a.events_only)
-    B, B1, B2 = load(a.b, a.max_fights, not a.events_only, stride=a.simulate_b, sim_k=a.simulate_b)
+    # entities of both arms read on the coarsest arm's frames (module docstring: speed)
+    dt_a, dt_b = probe_dt(a.a), probe_dt(a.b) * a.simulate_b
+    frame = max(dt_a, dt_b)
+    A, A1, A2 = load(a.a, a.max_fights, not a.events_only, stride=max(1, round(frame / dt_a)))
+    B, B1, B2 = load(a.b, a.max_fights, not a.events_only, stride=a.simulate_b * max(1, round(frame / dt_b)),
+                     sim_k=a.simulate_b)
     grid = None if a.no_grid else max(A.dt, B.dt)
-    res = {"a": {"fights": A.fights, "game_s": round(A.game_s, 1), "dt": A.dt},
+    res = {"a": {"fights": A.fights, "game_s": round(A.game_s, 1), "dt": A.dt, "read_stride": round(frame / dt_a)},
            "b": {"fights": B.fights, "game_s": round(B.game_s, 1), "dt": B.dt, "simulated_k": a.simulate_b},
            "grid_s": grid,
            "perm": perm_tests(A, B, a.min, a.perm, n_perm_max=a.perm_max, grid=grid),
