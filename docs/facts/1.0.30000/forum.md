@@ -580,7 +580,7 @@ cd brain   # 低优先级、NUMBA_NUM_THREADS ≤ 4
 6. **(d) 不稳**：见 14.5。
 7. **行走截在 6 s**：见 14.1（老状态从原点走）。
 8. **comfort 被悄悄忽略**：见 14.1（计数、写明）。
-9. **一个 Bell Beast 计时测试在忙机器上必挂**（main 上同样挂：p99 4.0–4.3 ms 对 3 ms）：`test_hitbox_tables.py` 的预算超了且整机 CPU > 30 % 时跳过并写出数字，安静机器上仍然断言。
+9. **一个 Bell Beast 计时测试在忙机器上必挂**（main 上同样挂：p99 4.0–4.3 ms 对 3 ms）：`test_hitbox_tables.py` 的预算超了且机器忙（有游戏实例在跑或整机 CPU > 20 %）时跳过并写出数字，安静机器上仍然断言。
 10. 对用户问题"bot 反应会比我 0.5 倍速快吗"的回答原来把"召回在 2–4 帧前就盖住接触"当成反应速度，不对（见 HANDOFF Task R2 的更正）。
 
 全部测试（`pytest -q`，tests + ssbot/tests，e516f22 时的工作区，整机忙）：1071 passed、2 skipped（其一是上面这条计时测试，按负载跳过）、1 xfailed；`tests/test_multi_forecast.py` 25 个。
