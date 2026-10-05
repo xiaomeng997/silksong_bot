@@ -1428,6 +1428,36 @@ identity baseline), `live_r3cert_5d0243b` (superseded).
   99.262 -> 99.404 %, fit + dev unchanged (dash 100 %, all 99.064 %); no other category moved.
 - Tests: full suite 1098 passed, 2 skipped, 1 xfailed.
 
+### Fixer round (after the review; commits 9a8b05d .. HEAD; forum.md 15.11)
+
+- Refuted (c) p99: the p99 ticks were all ticks with a safe row where the envelope ran to the 11 ms deadline. Now
+  deadline 8 ms with a predictive stop (no chunk that would end past it, taken to cost what the last one did; the
+  core rows still always enveloped), the hit branch's reaction contacts one query per reaction (was one per row,
+  ~0.37 ms each), and MultiForecast's support query builds and tests all five box kinds at once (was one array build
+  and kernel call per kind, ~0.45 ms per query; bit-identical union, test). Re-measured interleaved
+  (`C:\ssbot\data\m2_forum_r3fix\bench_fix.cmd live_r3fix_1e45c67 fix2`, CPU p50 29-31 %): wave 6 tick p50 / p99
+  6.04 / 13.49 and 5.84 / 13.51 ms, wave 11 4.30 / 11.25, wave 13 4.96 / 10.88; Bell Beast 15.12 / 15.37 / 13.88 (p99,
+  before / between / after). Margin 0.4 ms to the lowest Bell Beast run; not re-measured at high load.
+- FORCED_RISK ranking: the hit branch's contact joins the row (t_hit, contact frames; a capped row in contact from
+  its hit frame); the p_k candidates are compared on one lane and one frame set (nominal, stage 1's frames; stage 1's
+  first contact is a lower bound now).
+- Hit reactions: from every state the walk allows at the hit (`reaction_states`, `_WalkCache.states`), one forecast
+  for all, anchored at the hit time (dead reckoning + idle growth + view spread, both mirrors; the re-anchor path of a
+  same-family reaction is placed too, it was not before). The real forecast is bit-identical (certification stands).
+- Caps never decide FORCED_RISK: without a safe row the capped rows get their hit branch uncapped first (audit
+  `uncapped_ticks` / `uncapped_rows`; property test with hitfx_k 1, react_k 0). The first hit is looked for on every
+  enemy within 14 u (the 4 nearest scored). `ForumConfig.deadline_ms = inf` = deterministic decisions
+  (`planner_bench --deadline-ms`); `planner_bench --ticks-json` writes per-tick records.
+- Template files: sha256 in `support_margins.json` `runtime_certification.table_files`; canonical copy
+  `C:\ssbot\tables\forum_r3_2a10a0d` (copy into `knowledge/1.0.30000/enemies/forum/` of a new checkout).
+- kin_check: T1 + T2 relabelled a development set (forum.md 15.6). Untouched excitation recordings have 1 dash window;
+  on an untouched Forum combat recording (195019 i0_000, 131,328 windows) planner_bounds dash is 78.45 % (4,259), the
+  same as before R3's kinematics (2a10a0d): the plan's "dash >= 99 %" is far from met on live Forum data, cause not
+  investigated.
+- Tests: full suite 1107 passed, 2 skipped, 1 xfailed (tests + ssbot/tests); `tests/test_forum_planner.py` 22 items.
+- Frozen checkouts added: `C:\ssbot\live_r3fix_9a8b05d` (base bench), `live_r3fix_762d90f` (fix1),
+  `live_r3fix_1e45c67` (fix2, kin_check); outputs `C:\ssbot\data\m2_forum_r3fix\`.
+
 ### Running
 
 - Instance 3: the 1x Forum wave-start collection restarted after the batch, `C:\ssbot\sandbox\r3_collect_i3.cmd`
