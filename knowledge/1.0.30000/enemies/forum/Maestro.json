@@ -19192,7 +19192,8 @@
     "n": 0,
     "by_phase": {},
     "target": 200,
-    "missing": 200
+    "missing": 0,
+    "absent": "Attack Choice's SendEvent POINT is disabled (actionEnabled false) and Point Start has no exit (forum.md 13.2; Fire 556, Defend 238, Point 0 in R1)"
    },
    "MA_ENTRY": {
     "n": 321,
@@ -19725,5 +19726,14 @@
    }
   },
   "npz_sha256": "b8e336f4f0532f466fbfed3ff0c8b6b1a5d9b8f387091a21aa3669f23a21396e"
+ },
+ "structurally_absent": {
+  "MA_POINT": "Attack Choice's SendEvent POINT is disabled (actionEnabled false) and Point Start has no exit (forum.md 13.2; Fire 556, Defend 238, Point 0 in R1)",
+  "Point Start": "Attack Choice's SendEvent POINT is disabled (actionEnabled false) and Point Start has no exit (forum.md 13.2; Fire 556, Defend 238, Point 0 in R1)"
+ },
+ "absent_stamped_by": {
+  "sha": "5bf75770cf46d167098d50ab7bfd9817ad2eb662",
+  "branch": "worktree-wf_5031b357-209-2",
+  "dirty": false
  }
 }

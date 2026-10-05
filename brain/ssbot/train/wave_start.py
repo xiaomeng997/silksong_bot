@@ -201,14 +201,15 @@ class WaveSkipPolicy:
         return m
 
 
-# Control states of entities that are in the room but not fighting, beyond gauntlet.WAITING_STATES: the Maestros'
-# pooled "Song Automaton Tiny" sit at their Maestro's spawn point in "Dead" until summoned (fo_r1_w3, 2026-10-04: nine
-# of them, colliders off), and live_enemies counts them in play.
+# Control states of entities that are in the room but not fighting: the Maestros' pooled "Song Automaton Tiny" sit at
+# their Maestro's spawn point in "Dead" until summoned (fo_r1_w3, 2026-10-04: nine of them, colliders off). Since the
+# R1 close-out gauntlet.WAITING_STATES has "Dead" too, so live_enemies already leaves them out; kept for the records'
+# tools that filter with it (forum_r1_audit) and as the explicit name of the parked summons.
 PARKED_STATES = frozenset(("Dead",))
 
 
 def fighting(s: dict) -> list[dict]:
-    """live_enemies without the parked summons (PARKED_STATES)."""
+    """live_enemies without the parked summons (PARKED_STATES; a no-op filter since WAITING_STATES has them)."""
     return [e for e in live_enemies(s)
             if not any(f.get("state") in PARKED_STATES for f in e.get("fsms") or ())]
 

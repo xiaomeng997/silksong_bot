@@ -3080,7 +3080,8 @@
    "n": 0,
    "idle": false,
    "per_hour": 0.0,
-   "hours_to_target": null
+   "hours_to_target": 0.0,
+   "absent": "Attack Choice's SendEvent POINT is disabled (actionEnabled false) and Point Start has no exit (forum.md 13.2; Fire 556, Defend 238, Point 0 in R1)"
   },
   {
    "type": "Song Pilgrim Maestro",
@@ -3233,7 +3234,8 @@
    "n": 0,
    "idle": false,
    "per_hour": 0.0,
-   "hours_to_target": null
+   "hours_to_target": 0.0,
+   "absent": "Hop Up? sends FINISHED (enabled) before its RayCast2dV2 could send HOP UP: always Slash Antic (forum.md 13.2; 2407 / 2407 in R1)"
   },
   {
    "type": "Song Pilgrim 01",
@@ -3251,7 +3253,8 @@
    "n": 0,
    "idle": false,
    "per_hour": 0.0,
-   "hours_to_target": null
+   "hours_to_target": 0.0,
+   "absent": "the Forum Envoy's default clip is Ambush: Init -> Ambush Ready -> Ambush Antic; the Wake states belong to the sleeping variant (forum.md 13.2): its entry is EN_AMBUSH"
   },
   {
    "type": "Song Pilgrim 01",
@@ -3574,5 +3577,10 @@
   "branch": "worktree-wf_198518ec-9ba-1",
   "dirty": null,
   "note": "patched 2026-10-04: git_info returned null in the detached build (started 2026-10-03 17:19 from the working tree that commit 7d09798 recorded at 17:20; the builder code - behaviour_tables, gauntlet_tables, hitbox_tables - is unchanged from 7d09798 to the fixer's commits except contact_rows(residuals), which does not touch the tables)"
+ },
+ "absent_stamped_by": {
+  "sha": "5bf75770cf46d167098d50ab7bfd9817ad2eb662",
+  "branch": "worktree-wf_5031b357-209-2",
+  "dirty": false
  }
 }

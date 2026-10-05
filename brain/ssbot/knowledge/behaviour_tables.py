@@ -257,6 +257,25 @@ class BehaviourSpec:
     # enemies with the oracle's multi_wounder src bit: their multi-hit colliders (Choristor Whip Hit 1-6, Reed
     # ParrySlash Hit, Minister Slash Collider) are exported with damage dealt 0 but hurt (hornet_multi_wounder FSM)
     multi_wounder: bool = False
+    # attack families or Control states the FSM cannot reach (structure, not missing data): (name, reason) pairs.
+    # The tables list them under "structurally_absent" and the coverage does not count such a family as missing
+    absent: tuple[tuple[str, str], ...] = ()
+
+
+def absent_marks(spec: BehaviourSpec, tables: dict) -> dict:
+    """Mark the spec's structurally absent families and states in a tables dict (BehaviourBuilder.tables, or a table
+    JSON written before the spec carried them): "structurally_absent" {name: reason}, and per absent family in
+    coverage.families "absent" (its reason) with "missing" 0. Returns the dict."""
+    if not spec.absent:
+        return tables
+    marks = dict(spec.absent)
+    tables["structurally_absent"] = marks
+    fams = (tables.get("coverage") or {}).get("families") or {}
+    for fam, reason in marks.items():
+        if fam in fams:
+            fams[fam]["absent"] = reason
+            fams[fam]["missing"] = 0
+    return tables
 
 
 BELL_BEAST = BehaviourSpec(
@@ -2337,7 +2356,8 @@ class BehaviourBuilder:
             "hp": spec.hp, "fsms": sorted({spec.control_fsm}), "phases": self.phases(),
             "sources": self.fights, "graph": g, "dwell_s": self.dwell(), "decisions": self.decisions(g["branching"]),
             "observable_phases": obs, "attacks": atk, "support_transitions": support_tr, "entities": self.entities(val),
-            "coverage": self.coverage(atk, g, val),
+            "coverage": absent_marks(spec, {"coverage": self.coverage(atk, g, val)})["coverage"],
+            **({"structurally_absent": dict(spec.absent)} if spec.absent else {}),
             "templates": {
                 "cell_u": self.cell, "bin_s": self.bin_s, "file": f"{spec.enemy}_hitboxes.npz",
                 "keys": "<family>/<frame> (t from the attack start), <family>/<state>/<frame> (t from the state's "

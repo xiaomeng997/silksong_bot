@@ -106,6 +106,37 @@ HERO_CAUSED_PATH = Path(__file__).resolve().parents[3] / "knowledge" / "1.0.3000
 PROTECT_HP_DEFAULT = 20      # forum_policy.PROTECT_HP before the records carried it
 
 
+def stamp_absent(forum_dir: Path, code: dict | None = None) -> list[str]:
+    """Mark the structurally absent moves (FORUM_SPECS absent, behaviour_tables.absent_marks) in tables written before
+    the specs carried them: each <enemy>.json and the coverage.json rows of forum_dir; `code` (git_info) is recorded
+    as "absent_stamped_by". Templates and decisions are untouched. Returns the files changed."""
+    from ssbot.knowledge.behaviour_tables import absent_marks
+    changed = []
+    by_enemy = {s.enemy: s for s in FORUM_SPECS.values()}
+    for spec in by_enemy.values():
+        p = Path(forum_dir) / f"{spec.enemy}.json"
+        if not spec.absent or not p.is_file():
+            continue
+        t = json.loads(p.read_text(encoding="utf-8"))
+        absent_marks(spec, t)
+        t["absent_stamped_by"] = code
+        p.write_text(json.dumps(t, indent=1) + "\n", encoding="utf-8")
+        changed.append(str(p))
+    cp = Path(forum_dir) / "coverage.json"
+    if cp.is_file():
+        cov = json.loads(cp.read_text(encoding="utf-8"))
+        for r in cov.get("rows") or ():
+            spec = FORUM_SPECS.get(r.get("type"))
+            reason = dict(spec.absent).get(r.get("family")) if spec else None
+            if reason:
+                r["absent"] = reason
+                r["hours_to_target"] = 0.0
+        cov["absent_stamped_by"] = code
+        cp.write_text(json.dumps(cov, indent=1) + "\n", encoding="utf-8")
+        changed.append(str(cp))
+    return changed
+
+
 def hero_caused_states(path: Path | None = None) -> dict[str, set[str]]:
     """{type_key: {state with a hero-caused exit}} from hero_caused.json ({} when it is missing)."""
     try:
@@ -118,7 +149,7 @@ def hero_caused_states(path: Path | None = None) -> dict[str, set[str]]:
 def _spec(enemy: str, boss_type: str, fsm: str, hp: int, prefix: str, attacks: dict[str, str],
           decisions: tuple[str, ...], dormant: tuple[str, ...], death: tuple[str, ...] = (),
           spawns: tuple[tuple[str, tuple[str, ...]], ...] = (),
-          rest: tuple[str, ...] = ("Init", "Dormant")) -> BehaviourSpec:
+          rest: tuple[str, ...] = ("Init", "Dormant"), absent: tuple[tuple[str, str], ...] = ()) -> BehaviourSpec:
     fams = tuple(dict.fromkeys(attacks.values()))
     idle = f"{prefix}_IDLE"
     return BehaviourSpec(
@@ -127,7 +158,20 @@ def _spec(enemy: str, boss_type: str, fsm: str, hp: int, prefix: str, attacks: d
         directed=fams + (idle,), phase_marks={}, phases={"P1": "the whole fight (no phases)"}, initial_phase="P1",
         world_fixed=(), rest_states=rest, flip_mirror=FACES_LEFT, arena_x=FORUM.arena_x, floor_y=FORUM.floor_y,
         idle_family=idle, death_on_kill=True, projectiles=tuple(p for p, _ in spawns), spawns=spawns,
-        multi_wounder=True, height_bins_u=HEIGHT_BINS_U)
+        multi_wounder=True, height_bins_u=HEIGHT_BINS_U, absent=absent)
+
+
+# Moves the Forum's FSMs cannot reach (forum.md 13.2: PlayMaker's SendEvent with delay 0 to Self switches the state
+# inside OnEnter, so the actions after it never run; the scene bundle's actionEnabled bits; 2407 Hop Up? -> Slash
+# Antic, 910 Rethrow? -> In Range, 794 Attack Choice with Point 0 in the R1 runs). Structure, not missing data.
+_HOP = ("Hop Up? sends FINISHED (enabled) before its RayCast2dV2 could send HOP UP: always Slash Antic "
+        "(forum.md 13.2; 2407 / 2407 in R1)")
+_WAKE = ("the Forum Envoy's default clip is Ambush: Init -> Ambush Ready -> Ambush Antic; the Wake states belong to the "
+         "sleeping variant (forum.md 13.2): its entry is EN_AMBUSH")
+_POINT = ("Attack Choice's SendEvent POINT is disabled (actionEnabled false) and Point Start has no exit "
+          "(forum.md 13.2; Fire 556, Defend 238, Point 0 in R1)")
+_QUICK = ("Rethrow? sends FINISHED (enabled) before its SendRandomEventV4: always In Range (forum.md 13.2; "
+          "910 / 910 in R1)")
 
 
 FORUM_SPECS: dict[str, BehaviourSpec] = {s.boss_type: s for s in (
@@ -167,7 +211,7 @@ FORUM_SPECS: dict[str, BehaviourSpec] = {s.boss_type: s for s in (
           ("Fly", "Forum Fly", "Chase", "Summon?", "Attack Choice", "Ready Formation", "Startle", "First Startle",
            "Sing", "Sing End", "Notify Sing End", "Idle"),
           ("Init", "Pause", "Fly In Pause", "Fly In Ready", "Start Idle", "Corpse Spawn", "Init Old"),
-          death=("Death",)),
+          death=("Death",), absent=(("MA_POINT", _POINT), ("Point Start", _POINT))),
     # the Maestro's summon (pooled, 28 HP, body 1): not a wave member, comes back after a kill
     _spec("MaestroAutomaton", "Song Automaton Tiny", "Control", 28, "AT",
           {"Fire Ready": "AT_FIRE", "Defend Ready": "AT_DEFEND", "Swoop In Pause": "AT_ENTRY",
@@ -197,7 +241,9 @@ FORUM_SPECS: dict[str, BehaviourSpec] = {s.boss_type: s for s in (
            "Wake End"),
           ("Init", "Ambush Ready", "Sleep", "Off Plane?", "FG", "BG", "Custom Target?", "Target Hero",
            "Custom Target", "Start Praying", "Create Noise"),
-          death=("Zero HP",)),
+          death=("Zero HP",),
+          absent=(("EN_HOPSLASH", _HOP), ("HopSlash Antic", _HOP), ("EN_ENTRY", _WAKE), ("Wake Pause", _WAKE),
+                  ("Wake", _WAKE), ("Black Thread Wake", _WAKE))),
     # Choristor: 55 HP, slash (combo), whip (Whip Hit 1-6 deal 0), jump spin slash
     _spec("Choristor", "Song Pilgrim 03", "Attack", 55, "CH",
           {"Slash Antic": "CH_SLASH", "Whip Antic": "CH_WHIP", "Jump Antic": "CH_JUMP", "Enter Idle": "CH_ENTRY",
@@ -216,7 +262,8 @@ FORUM_SPECS: dict[str, BehaviourSpec] = {s.boss_type: s for s in (
            "Go Down", "Unalert Patrol", "To Patrol", "To Start", "Follow", "Active"),
           ("Init", "Fly In Ready", "Sleep", "Off Plane?", "FG", "BG", "Preacher Pray", "Start Patrol Voice",
            "Fly In Instant"),
-          spawns=(("Throwing Bell", ("CB_THROW",)),), rest=("Init", "Dormant", "Deactivate", "Recycle", "Break")),
+          spawns=(("Throwing Bell", ("CB_THROW",)),), rest=("Init", "Dormant", "Deactivate", "Recycle", "Break"),
+          absent=(("Throw Antic Quick", _QUICK),)),
 )}
 
 GAUNTLET_SPECS: dict[str, dict[str, BehaviourSpec]] = {"Forum": FORUM_SPECS}
@@ -243,6 +290,26 @@ def _armed(e: dict, rest: tuple[str, ...]) -> bool:
 
 def _gap(b: tuple, box: tuple) -> float:
     return math.hypot(max(b[0] - box[2], box[0] - b[2], 0.0), max(b[1] - box[3], box[1] - b[3], 0.0))
+
+
+SPEED_CHECK_F = 600     # frames read ahead for a fight's game speed
+
+
+def fight_speed(fight: Fight, frames: int = SPEED_CHECK_F) -> float | None:
+    """The game speed a fight was played at: the median STATE dt of its first frames (dt > 5 ms; a freeze or a load
+    reads 0) in 1/60 s, rounded to a half: 1 at 1x, 2 at Time.timeScale 2 (run 20261004_155649 i2 recorded
+    time_scale 1.0 at dt 2/60, forum.md 13.10). None when nothing could be read."""
+    dts = []
+    for i, s in enumerate(fight_states(fight, keys=("f", "dt"))):
+        dt = float(s.get("dt") or 0.0)
+        if dt > 0.005:
+            dts.append(dt)
+        if i >= frames:
+            break
+    if not dts:
+        return None
+    dts.sort()
+    return round(dts[len(dts) // 2] * 60.0 * 2.0) / 2.0
 
 
 def _box_dist(e: dict | None, box: tuple | None, name: str | None = None) -> tuple[float, float]:
@@ -275,6 +342,7 @@ class GauntletBuilder:
         self.recordings: dict[str, int] = {}
         self.fights: list[dict] = []
         self.unattributed: list[dict] = []          # hero contacts no subject could take (validation failures)
+        self.skipped_speed: list[dict] = []         # fights not played at 1x (scan, fight_speed)
         self.collider_types: dict[str, set[str]] = defaultdict(set)   # damage collider name -> types exporting it
         self._last_owner: dict[str, tuple[int, int]] = {}
         self._f = 0
@@ -285,7 +353,14 @@ class GauntletBuilder:
 
     def scan(self, fight: Fight, states=None) -> dict:
         """Scan one fight (its STATEs from fight_states unless given); returns a summary (subjects per type,
-        instances added per type)."""
+        instances added per type). A fight not played at 1x (fight_speed) is left out with a counter: the tables are
+        1x tables (forum.md 13.10), and a record's time_scale is what the run asked for, not what the game ran at."""
+        if states is None:
+            speed = fight_speed(fight)
+            if speed is not None and abs(speed - 1.0) > 0.25:
+                self.counters[f"fights left out: game speed x{speed:g}, not 1x"] += 1
+                self.skipped_speed.append({"fight": fight.id, "speed": speed})
+                return {"id": fight.id, "skipped": f"game speed x{speed:g}"}
         rec = str(fight.path)
         fold = len(self.fights) % N_FOLDS     # per fight: a recording holds several gauntlets (module docstring)
         self.recordings.setdefault(rec, fold)
@@ -505,6 +580,19 @@ class GauntletBuilder:
                 leaf = parts[-1] if parts else None
                 cands = [s for s in subjects.values() if ent(s) is not None and leaf and
                          _box_dist(ent(s), box, leaf)[0] < math.inf]
+                if cands and not any(_box_dist(ent(s), box, leaf)[0] <= TOUCH_U for s in cands):
+                    # none of this frame's exporters touches the hero: one whose collider of that name touched it
+                    # within the export lag turned it off on this frame (run 20261004_111158 i3/ep10 f400125: the
+                    # last frame of a blocked stretch, when the adjacent Minister's "Collider AttackAntic" was off and
+                    # the other Minister's, 8 u away, had just come on; that one got the contact and MI_CHARGE's
+                    # held-out residual went past the 3 u search cap, R1 close-out review)
+                    for snap in back or ():
+                        recent = [s for s in subjects.values() if snap.get(s.iid) is not None and
+                                  _box_dist(snap.get(s.iid), box, leaf)[0] <= TOUCH_U]
+                        if recent:
+                            self.counters["contacts named by a collider child only (touching up to LAG_F before; "
+                                          "this frame's exporters far)"] += 1
+                            return min(recent, key=lambda s: _box_dist(snap.get(s.iid), box, leaf)[0]).iid
                 if cands:
                     self.counters["contacts named by a collider child only (subject exporting it)"] += 1
                 for snap in back or ():       # the collider was swapped out within the export lag
@@ -548,6 +636,7 @@ class GauntletBuilder:
         rows = []
         for tk, b in self.builders.items():
             spec = self.specs[tk]
+            absent = dict(spec.absent)
             n = Counter(i.family for i in b.instances)
             for fam in list(dict.fromkeys(spec.attack_starts.values())) + [spec.idle_family]:
                 c = n.get(fam, 0)
@@ -555,6 +644,7 @@ class GauntletBuilder:
                 rows.append({"type": tk, "enemy": spec.enemy, "family": fam, "n": c,
                              "idle": fam == spec.idle_family,
                              "per_hour": _r(rate, 1) if rate is not None else None,
-                             "hours_to_target": (_r(max(0, target - c) / rate, 1) if rate else None)
-                             if c < target else 0.0})
+                             "hours_to_target": 0.0 if fam in absent else
+                             (_r(max(0, target - c) / rate, 1) if rate else None) if c < target else 0.0,
+                             **({"absent": absent[fam]} if fam in absent else {})})
         return rows

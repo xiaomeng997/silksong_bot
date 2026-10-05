@@ -221,16 +221,34 @@ def back_into_slot(link, enc, instance: int, tries: int = SLOT_TRIES, slot_timeo
                 log(f"recovery step failed: {type(e2).__name__}: {e2}; {_describe(link.state)}")
 
 
-def set_time_scale(link, scale: float, instance: int) -> None:
+def set_time_scale(link, scale: float, instance: int, wait_s: float = 5.0, quiet: bool = False) -> float | None:
     """Oracle time.scale (training copy only). Above 1 it needs the oracle of 06a7c2b (through DebugMod's TimeScale):
-    the deployed one before it clamps to 1, so the run stops rather than collect at the wrong speed."""
-    if scale == 1.0:
-        return
-    r = link.rpc("time.scale", timeout_s=10, scale=scale)
+    the deployed one before it clamps to 1, so the run stops rather than collect at the wrong speed. Time.timeScale
+    itself can read 0 for a moment after the scale is set (a freeze or the savestate load between episodes: run
+    20261004_145235 i2 stopped at ep4 on time_scale 0.0 with debugmod_scale 2.0), so it is read again for wait_s.
+    Set at 1 too: Time.timeScale outlives a run, and a 1x run on an instance a 2x run had used collected every
+    episode at 2x with time_scale 1.0 in its records (20261004_155649 i2, STATE dt 2/60; R1 close-out fixer). An
+    oracle without time.scale (before 06a7c2b) cannot have been set to anything else: 1x is taken as it is. Returns
+    the game's Time.timeScale read back (None without the RPC)."""
+    from ssbot.ipc.oracle_link import OracleError
+    try:
+        r = link.rpc("time.scale", timeout_s=10, scale=scale)
+    except OracleError as e:
+        if scale == 1.0:
+            if not quiet:
+                print(f"[i{instance}] time.scale unavailable ({e}): the game's own 1x", flush=True)
+            return None
+        raise SystemExit(f"[i{instance}] time.scale {scale}: {e}; not collecting")
+    deadline = time.monotonic() + wait_s
+    while abs(float((r or {}).get("time_scale") or 0.0) - scale) > 1e-3 and time.monotonic() < deadline:
+        time.sleep(0.25)
+        r = link.rpc("time.scale", timeout_s=10)
     got = float((r or {}).get("time_scale") or 0.0)
     if abs(got - scale) > 1e-3:
         raise SystemExit(f"[i{instance}] time.scale {scale}: the game runs at {got} ({r}); not collecting")
-    print(f"[i{instance}] time.scale {scale}: {r}", flush=True)
+    if not quiet:
+        print(f"[i{instance}] time.scale {scale}: {r}", flush=True)
+    return got
 
 
 def worker(a: argparse.Namespace) -> int:
@@ -301,12 +319,14 @@ def worker(a: argparse.Namespace) -> int:
                                            "view": a.view, "time_scale": a.time_scale}).start()
             seed = a.seed + k if a.same_seeds else a.seed + a.instance * 1_000_000 + k
             enc = encs[k % len(encs)]
-            if a.time_scale != 1.0:
-                set_time_scale(link, a.time_scale, a.instance)
+            game_scale = set_time_scale(link, a.time_scale, a.instance, quiet=True)
             rec = AttemptRecord(unit=enc.name, stage="TRAIN", profile="TRAIN" if a.view == "oracle" else "SIM_FINAL",
                                 build="1.0.30000", code_rev=rev,
                                 config_fp=fp, start_kind="savestate", mode=a.mode, seed=seed)
-            run_episode(link, enc, tap, policy, mode_config(a.mode, seed, a.timebox or None,
+            # the episode's timebox counts rendered frames / 60 (real seconds): at time scale s that is s times as
+            # much game time, so it is divided by s (a 2x wave start covers the same 180 s of game time as at 1x)
+            timebox = (a.timebox or enc.timebox_s) / a.time_scale
+            run_episode(link, enc, tap, policy, mode_config(a.mode, seed, timebox,
                                                             tuple(a.start_silk) if a.start_silk else None,
                                                             tuple(a.start_hp) if a.start_hp else None), rec)
             d = asdict(rec)
@@ -314,6 +334,7 @@ def worker(a: argparse.Namespace) -> int:
             d["episode"] = k
             d["env"] = env
             d["time_scale"] = a.time_scale
+            d["time_scale_game"] = game_scale       # Time.timeScale read back before the episode (None: no RPC)
             d["recording"] = str(rec_obj.path) if rec_obj else None
             d["t"] = datetime.now().isoformat(timespec="seconds")
             out.write(json.dumps(d) + "\n")
@@ -343,6 +364,11 @@ def worker(a: argparse.Namespace) -> int:
         if rec_obj is not None:
             rec_obj.close()
         out.close()
+        if a.time_scale != 1.0 and not link.closed:
+            try:                         # leave the instance at 1x for whatever runs next (set_time_scale docstring)
+                set_time_scale(link, 1.0, a.instance)
+            except (Exception, SystemExit) as e:
+                print(f"[i{a.instance}] could not set time.scale back to 1: {e}", flush=True)
         link.close()
     print(f"[i{a.instance}] done: {dict(counts)}", flush=True)
     return 0

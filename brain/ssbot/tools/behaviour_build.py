@@ -202,9 +202,17 @@ def gauntlet_main(a: argparse.Namespace, fights: list, skipped: list, code: dict
     for i, fight in enumerate(fights):
         t0 = time.perf_counter()
         info = g.scan(fight)
+        if info.get("skipped"):
+            print(f"[{i + 1}/{len(fights)}] {fight.id}: LEFT OUT ({info['skipped']})", flush=True)
+            continue
         print(f"[{i + 1}/{len(fights)}] {fight.id}: {info['frames']} frames, subjects {info['subjects']}, "
               f"instances {sum(info['instances'].values())}, {fight.outcome or '-'} ({time.perf_counter() - t0:.1f} s)",
               flush=True)
+    if g.skipped_speed:   # not 1x: the build goes on without them, but the run lists should not have had them
+        print(f"WARNING: {len(g.skipped_speed)} fights left out, not played at 1x:",
+              *[f"{x['fight']} x{x['speed']:g}" for x in g.skipped_speed[:20]], sep="\n  ")
+        gone = {x["fight"] for x in g.skipped_speed}
+        fights = [f for f in fights if f.id not in gone]
     if skipped:
         print(f"skipped {len(skipped)}:", *skipped[:20], sep="\n  ")
     if a.contacts_only is not None:
@@ -239,8 +247,9 @@ def gauntlet_main(a: argparse.Namespace, fights: list, skipped: list, code: dict
     for r in rows:
         if r["idle"] and not r["n"]:
             continue
-        print(f"  {r['enemy']:16s} {r['family']:14s} {r['n']:5d}  {r['per_hour'] or 0:7.1f}/h  "
-              f"{'idle' if r['idle'] else ('ok' if r['hours_to_target'] == 0 else r['hours_to_target'])}")
+        state = ("idle" if r["idle"] else "structurally absent" if r.get("absent") else
+                 "ok" if r["hours_to_target"] == 0 else r["hours_to_target"])
+        print(f"  {r['enemy']:16s} {r['family']:14s} {r['n']:5d}  {r['per_hour'] or 0:7.1f}/h  {state}")
     print("counters:", dict(g.counters.most_common(20)))
     validation = {
         "ok": rc == 0, "folds": "per fight (alternating)",
@@ -304,7 +313,16 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--contacts-only", type=Path, default=None,
                     help="multi-enemy arenas: scan only and write the contacts with their attribution (no tables, no "
                          "residuals) and build.json here: fresh fights for support_recall --encounter Forum --fresh")
+    ap.add_argument("--stamp-absent", type=Path, default=None, metavar="DIR",
+                    help="Forum: mark the structurally absent moves (gauntlet_tables FORUM_SPECS absent) in the tables "
+                         "of DIR (<enemy>.json, coverage.json) written before the specs carried them, then exit")
     a = ap.parse_args(argv)
+    if a.stamp_absent is not None:
+        from ssbot.knowledge.gauntlet_tables import stamp_absent
+        from ssbot.record.recorder import find_repo_root, git_info
+        for p in stamp_absent(a.stamp_absent, git_info(find_repo_root())):
+            print("stamped", p)
+        return 0
 
     fights, skipped = [], []
     for run in a.runs:

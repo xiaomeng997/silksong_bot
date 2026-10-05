@@ -330,7 +330,14 @@ class GauntletTap:
 # 2026-10-02: later waves' Song Pilgrim Maestro and Song Reed wait in "Fly In Ready"; the Maestro's three pooled
 # "Song Automaton Tiny" (hp 28) sit in "Die" at its position; wave 1's Song Pilgrim 03 pair has its "Attack" FSM
 # disabled (state None) until BattleSceneEnemy enables it; Song Heavy Sentry rests in "Rest" until BATTLE START).
-WAITING_STATES = frozenset(("Fly In Ready", "Die", "Dormant", "Rest", "On-plane Rest", "Start Idle"))
+# "Dead" (R1 close-out, 2026-10-04): the pooled Tinies spend their parked time in "Dead" (Control: Dead -> Pause /
+# Set Pos when summoned; "Die" is only the step into it): nine of them, hp 28, colliders off, at the three Maestros'
+# spawn points from the load on (fo_r1_w3 and every wave-start check). Without it live_enemies counted them in play
+# (v1's GauntletDataPolicy could target them, and while one was parked its pocket test "only Clappers left" failed;
+# the gauntlet builder's last-resort attribution could pick one). Over 217,145 recorded frames (074719 + two R1
+# runs) "Dead" / "Die" occur only in the Tiny's Control FSM on live entities (974,814 / 909 entity frames), never
+# with a damage collider enabled.
+WAITING_STATES = frozenset(("Fly In Ready", "Die", "Dead", "Dormant", "Rest", "On-plane Rest", "Start Idle"))
 
 
 def in_play(e: dict) -> bool:
