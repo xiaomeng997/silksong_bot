@@ -638,6 +638,17 @@ class _Builder:
             return False
         return tr.tk in FORUM_WAVES[nw[0]].types and nw[1] - self.origin <= self.H + ENTRY_LAG_S
 
+    def _wave_wake(self, tr: EnemyTracker) -> float | None:
+        """The earliest game time a waiting wave member can leave its waiting state: its queued wave's earliest
+        activation (WaveTracker); None when that does not bound it (in play, pooled, no wave known)."""
+        fc = self.fc
+        if tr.in_play or tr.table.spec.pooled or not fc.use_waves or fc.t_wake is None:
+            return None
+        nw = fc.waves.next_window()
+        if nw is None or tr.tk not in FORUM_WAVES[nw[0]].types or not math.isfinite(nw[1]):
+            return None
+        return nw[1]
+
     def subject(self, tr: EnemyTracker) -> None:
         tt = tr.table
         sp = tt.spec
@@ -663,9 +674,15 @@ class _Builder:
         age = T - tr.t_entry
         dw = tt.dwell.get(tr.state)
         overdue = dw is not None and age > dw[1] + DWELL_SLACK_S
+        wake = self._wave_wake(tr)
+        if wake is not None:
+            overdue = True
         ctx = (cur.family, cur.start) if cur is not None else None
         cur_nodes, roots = self.fc.walks.get(tt, tr.state, ctx, tr.dead, overdue)
         ref = T if overdue else tr.t_entry
+        if wake is not None:
+            # a waiting wave member leaves its waiting state once BattleScene activates its wave, not before
+            ref = max(T, wake - BIN)
         idle_tube = (cur is not None and cur.family == sp.idle_family and not tr.dead and tr.pos is not None
                      and T - tr.seen_T <= TUBE_MAX_AGE_S and tt.tk in tubes.growth)
         anc = (cur.anchor, cur.mirror, cur.sd) if cur is not None and cur.anchor is not None else None
@@ -711,7 +728,8 @@ class _Builder:
                     self._bbox(wid, lo, hi, 0.0, 0.0, 0.0, 0.0, 1, tr.iid, nd.family, False, nd.p)
         if idle_tube:
             self._idle_tube(tr)
-        if self.fc.collider_tube and T - tr.seen_T <= TUBE_MAX_AGE_S:
+        # (a waiting wave member's collider cannot move before its wave is activated)
+        if self.fc.collider_tube and T - tr.seen_T <= TUBE_MAX_AGE_S and (wake is None or wake - T <= COLLIDER_TUBE_S):
             b = tr.seen_box
             if b is None and tr.pos is not None and tt.tk in tubes.hull:
                 h = tubes.hull[tt.tk]

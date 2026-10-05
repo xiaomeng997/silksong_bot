@@ -14,8 +14,8 @@ from ssbot.combat import multi_forecast as mfm
 from ssbot.combat.enemy_tables import EnemyTables, TemplateStore, Tubes, coarsen, type_table
 from ssbot.combat.enemy_tracker import EnemyTracker
 from ssbot.combat.multi_forecast import MultiForecaster, walk
-from ssbot.combat.projectiles import (BELL_FLOOR_Y, PhysClock, bell_steps, pin_steps, HazardTracker, BOMB_DX,
-                                      BOMB_DT, BOMB_LEAD_S)
+from ssbot.combat.projectiles import (PhysClock, bell_steps, pin_steps, HazardTracker, BOMB_DX,
+                                      BOMB_LEAD_S)
 from ssbot.combat.wave_tracker import WaveTracker
 from ssbot.core.forum import ABSENT_FAMILIES, FORUM_TYPES, FORUM_WAVES, STRUCTURALLY_ABSENT
 from ssbot.core.worldstate import (ORACLE, VISION_EQUIVALENT, DamageBox, E, EnemyKilled, Entity, Ev, Event,
@@ -364,7 +364,6 @@ def test_idle_enemy_is_its_body_tube_and_the_attacks_it_may_start():
     tube = f.occupied_parts(X, Y, tk)["collider tube"][0]
     assert tube[:6].any() and not tube[6:].any()
     # the defence family carries a 2-hit chain in the support set
-    d = _reed_table()
     assert mfm._chain(tabs.chains, REED, "RE_DEFEND") == (2, 2)
 
 
@@ -446,18 +445,32 @@ def test_pin_stops_at_the_wall_and_the_clock_narrows():
     assert m is not None and not (10.0 % 0.02 < m <= (10.0 + 1 / 60) % 0.02)
 
 
+def _bomb(iid, x):
+    b = DamageBox(poly=[(x - 2.166, 1.5), (x + 2.166, 1.5), (x + 2.166, 5.836), (x - 2.166, 5.836)], active=False)
+    return Entity(id=iid, type_key=E("damager"), pos=E((x, 3.67)), pos_transform=(x, 3.67), dmg_boxes=[b],
+                  vel=E((0.0, 0.0), conf=0.0))
+
+
 def test_bomb_rows_predict_the_later_pairs():
+    """R0 cache 20261002_223640 i2 ep0: a row's bombs appeared at 418.597 (x 24.43), 418.747 (+-1), 418.914 (+-2),
+    419.064 (+-3), 419.23 (+-4), 419.389 (+5): steps of 9 or 10 frames; each arms 0.335-0.36 s after it appears."""
     hz = HazardTracker(ORACLE)
-    b = DamageBox(poly=[(28.9, 1.5), (33.2, 1.5), (33.2, 5.8), (28.9, 5.8)], active=False)
-    e = Entity(id=-5, type_key=E("damager"), pos=E((31.0, 3.67)), pos_transform=(31.0, 3.67), dmg_boxes=[b],
-               vel=E((0.0, 0.0), conf=0.0))
-    hz.update(_ws(0, 10.0, [e]))
-    ps = hz.paths(10.0, 1.0)
-    rows = [p for p in ps if p.predicted]
+    t0, x0 = 418.597, 24.43
+    hz.update(_ws(0, t0, [_bomb(-5, x0)]))
+    rows = [p for p in hz.paths(t0, 1.5) if p.predicted]
     xs = sorted({round(float(p.xs[0]), 2) for p in rows})
-    assert 31.0 + BOMB_DX in xs and 31.0 - BOMB_DX in xs and 31.0 + 2 * BOMB_DX in xs
-    p1 = next(p for p in rows if abs(p.xs[0] - (31.0 + BOMB_DX)) < 1e-6)
-    assert p1.t_lo <= BOMB_DT + BOMB_LEAD_S[0] and p1.t_hi >= BOMB_DT + BOMB_LEAD_S[1]
+    assert round(x0 + BOMB_DX, 2) in xs and round(x0 - BOMB_DX, 2) in xs and round(x0 + 2 * BOMB_DX, 2) in xs
+    for k, t_app in ((1, 418.747), (2, 418.914), (3, 419.064), (4, 419.23), (5, 419.389)):
+        p = next(p for p in rows if abs(p.xs[0] - (x0 + k * BOMB_DX)) < 1e-6)
+        assert p.t_lo <= t_app - t0 + BOMB_LEAD_S[0] and p.t_hi >= t_app - t0 + BOMB_LEAD_S[1]
+    # pair 2 seen: the later ones are timed from it; the pairs seen are not predicted any more
+    hz.update(_ws(1, 418.747, [_bomb(-8, x0 + BOMB_DX), _bomb(-9, x0 - BOMB_DX)]))
+    hz.update(_ws(2, 418.914, [_bomb(-6, x0 + 2 * BOMB_DX), _bomb(-7, x0 - 2 * BOMB_DX)]))
+    rows = [p for p in hz.paths(418.914, 1.5) if p.predicted]
+    assert not any(abs(p.xs[0] - (x0 + 2 * BOMB_DX)) < 1e-6 for p in rows)
+    p3 = next(p for p in rows if abs(p.xs[0] - (x0 + 3 * BOMB_DX)) < 1e-6)
+    assert p3.t_lo <= 419.064 - 418.914 + BOMB_LEAD_S[0] and p3.t_hi >= 419.064 - 418.914 + BOMB_LEAD_S[1]
+    assert p3.t_lo >= 9 / 60 + BOMB_LEAD_S[0] - 0.04 - 1e-9          # one step from pair 2, not three from the first
 
 
 # ---- waves -------------------------------------------------------------------------------------------------------
@@ -472,8 +485,6 @@ def test_wave_tracker_follows_battle_scene_rules():
     sim.start(0)
     kills = [120, 150, 180, 300, 330, 420, 600, 660, 800]
     f = 0
-    members = {w.index: list(w.types) for w in FORUM_WAVES}
-    alive = []
     for f in range(0, 1000):
         t = f / 60.0
         sim.advance(f)

@@ -44,6 +44,13 @@ def cache_worldstates(cache: dict, types: frozenset | None = None, start: int = 
                                              (float(b[2]), float(b[3])), (float(b[0]), float(b[3]))], active=True,
                                        name=cache["names"][int(cache["c_name"][j])]))
             x, y = float(cache["e_x"][r]), float(cache["e_y"][r])
+            if not boxes and tnames[k] == "damager":
+                # the caches keep active boxes only; the export has an unarmed damager's circle too (inactive), by
+                # which the alias resolves: restore it from the height (bomb y 3.67 r 2.166, rune slam y 3.34 r 7.187)
+                rr = 2.166 if abs(y - 3.67) < 0.05 else 7.187 if abs(y - 3.34) < 0.05 else None
+                if rr is not None:
+                    boxes.append(DamageBox(poly=[(x - rr, y - rr), (x + rr, y - rr), (x + rr, y + rr), (x - rr, y + rr)],
+                                           active=False))
             vx, vy = float(cache["e_vx"][r]), float(cache["e_vy"][r])
             st = int(cache["e_st"][r])
             ents.append(Entity(id=int(cache["e_iid"][r]), type_key=E(tnames[k]), pos=E((x, y)),
@@ -134,33 +141,45 @@ def audit_fight(cache: dict, every: int, horizon: float, err: dict, cov: Counter
                                    and abs(0.5 * (bx[1] + bx[3]) - sy[s, 0]) <= 0.5 * (bx[3] - bx[1]) + p.hy + SKIN_U)
                     cov[f"{p.type_key} n"] += 1
                     cov[f"{p.type_key} inside"] += ok
-    # a row's later bombs: the predicted x / appearance against the bombs that appeared (first frame of each)
-    appear: list = []
+    # a row's later bombs: every bomb that appeared (its first frame; the pool reuses iids) against the predictions made
+    # 0.1 - 1.5 s before it appeared at its x: the latest one's window must hold the frames its circle was lit
+    app: list = []
     for iid, fr in track.items():
-        last = None
-        for j in sorted(fr):
-            if last is None or j - last > 30:
-                x, y = fr[j][0], fr[j][1]
-                if abs(y - 3.67) < 0.05:
-                    appear.append((float(T[j]), x))
-            last = j
-    appear.sort()
-    xs = np.array([a[1] for a in appear]) if appear else np.zeros(0)
-    ts = np.array([a[0] for a in appear]) if appear else np.zeros(0)
-    done = set()
-    for i, p in pending_rows:
-        key = (round(float(p.xs[0]), 2), round(float(T[i]) + p.t_lo, 1))
-        if key in done:
+        js = sorted(fr)
+        for n, j in enumerate(js):
+            x, y = fr[j][0], fr[j][1]
+            if abs(y - 3.67) > 0.1:
+                continue
+            if n and js[n - 1] == j - 1 and abs(fr[js[n - 1]][0] - x) < 0.5:
+                continue
+            lit = []
+            for j2 in js[n:]:
+                if j2 - j > 60 or abs(fr[j2][0] - x) > 0.5:
+                    break
+                if fr[j2][3] is not None:
+                    lit.append(float(T[j2]))
+            app.append((float(T[j]), x, lit))
+    preds = sorted((float(T[i]), float(p.xs[0]), float(T[i]) + p.t_lo, float(T[i]) + p.t_hi) for i, p in pending_rows)
+    pt = np.array([q[0] for q in preds]) if preds else np.zeros(0)
+    px = np.array([q[1] for q in preds]) if preds else np.zeros(0)
+    used = np.zeros(len(preds), bool)
+    for t_a, x, lit in app:
+        m = (np.abs(px - x) < 0.5) & (pt <= t_a - 0.1) & (pt >= t_a - 1.5)
+        used |= (np.abs(px - x) < 0.5) & (pt <= t_a + 0.6) & (pt >= t_a - 1.5)
+        if not m.any():
+            rows["not predicted (a row's first bomb, a late side)"].append(1)
             continue
-        done.add(key)
-        t_app = float(T[i]) + p.t_lo + 2 * 0.02 - 0.335
-        m = (np.abs(xs - p.xs[0]) < 1.5) & (np.abs(ts - t_app) < 0.3)
-        if m.any():
-            j = int(np.flatnonzero(m)[np.argmin(np.abs(ts[m] - t_app))])
-            rows["x_err"].append(abs(xs[j] - p.xs[0]))
-            rows["t_err"].append(abs(ts[j] - t_app))
-        else:
-            rows["not_seen"].append(1)
+        k = int(np.flatnonzero(m)[np.argmax(pt[m])])
+        rows["x_err"].append(abs(preds[k][1] - x))
+        if not lit:
+            rows["never lit"].append(1)
+            continue
+        ok = preds[k][2] <= min(lit) + 1e-6 and preds[k][3] >= max(lit) - 1e-6
+        rows["lit inside"].append(int(ok))
+        if not ok:
+            rows["lit outside: early by"].append(max(0.0, preds[k][2] - min(lit)))
+            rows["lit outside: late by"].append(max(0.0, max(lit) - preds[k][3]))
+    rows["predictions never matched (superset: sides the pool did not serve)"] = [int(not u) for u in used]
 
 
 def main(argv=None) -> int:
@@ -192,10 +211,19 @@ def main(argv=None) -> int:
                             "by_horizon": {f"<={h}": q(arr[:, 0] <= h + 1e-9) for h in (0.1, 0.2, 0.4, 0.8)},
                             "support_inside": f"{cov[tk + ' inside']}/{cov[tk + ' n']}"}
     if rows:
-        out["bomb_rows"] = {"predicted_bombs_matched": len(rows["x_err"]), "not_seen": len(rows["not_seen"]),
-                            "x_err_max": round(float(max(rows["x_err"])), 4) if rows["x_err"] else None,
-                            "x_err_p99": round(float(np.percentile(rows["x_err"], 99)), 4) if rows["x_err"] else None,
-                            "t_err_max": round(float(max(rows["t_err"])), 4) if rows["t_err"] else None}
+        li = rows["lit inside"]
+        nm = rows["predictions never matched (superset: sides the pool did not serve)"]
+        out["bomb_rows"] = {
+            "bombs_predicted": len(rows["x_err"]),
+            "not_predicted": len(rows["not predicted (a row's first bomb, a late side)"]),
+            "x_err_p99": round(float(np.percentile(rows["x_err"], 99)), 4) if rows["x_err"] else None,
+            "x_err_max": round(float(max(rows["x_err"])), 4) if rows["x_err"] else None,
+            "lit_inside_window": f"{sum(li)}/{len(li)}", "never_lit": len(rows["never lit"]),
+            "outside_early_max_s": round(float(max(rows["lit outside: early by"])), 4)
+            if rows["lit outside: early by"] else None,
+            "outside_late_max_s": round(float(max(rows["lit outside: late by"])), 4)
+            if rows["lit outside: late by"] else None,
+            "prediction_rows_never_matched": f"{sum(nm)}/{len(nm)}"}
     out["left_out"] = dict(skipped)
     print(json.dumps(out, indent=1))
     if a.json:

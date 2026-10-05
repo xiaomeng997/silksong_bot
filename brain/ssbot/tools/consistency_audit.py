@@ -72,13 +72,18 @@ def _entry_ids() -> set:
     return {ENTRY_OWNER - w for w in range(len(FORUM_WAVES))}
 
 
-def _classify_kill(F, v: int, X, Y, tk, viol: np.ndarray) -> Counter:
-    """What covers the violating cells of the what-if forecast F (victim v): entries / death box / tails / other."""
+def _classify_kill(F, v: int, X, Y, tk, viol: np.ndarray, waiting: set) -> Counter:
+    """What covers the violating cells of the what-if forecast F (victim v): the next wave (its entries, its waiting
+    members' walks: the kill ended a wave), the death box, the victim's tails, other."""
     out = Counter()
     left = viol.copy()
     ent = F.occupied_only(X, Y, tk, _entry_ids()) & left
     out["wave entries"] += int(ent.sum())
     left &= ~ent
+    if waiting:
+        wm = F.occupied_only(X, Y, tk, waiting) & left
+        out["next wave's waiting members"] += int(wm.sum())
+        left &= ~wm
     death = F._box_occ(X, Y, np.asarray(tk, np.float64), kinds=("death",), only={v}) & left
     out["death box"] += int(death.sum())
     left &= ~death
@@ -89,6 +94,10 @@ def _classify_kill(F, v: int, X, Y, tk, viol: np.ndarray) -> Counter:
     return out
 
 
+def _waiting(mf) -> set:
+    return {i for i, t in mf.trackers.items() if not t.in_play and not t.dead}
+
+
 def _redirect_class(F, iid: int, d: int, t_first: float) -> str:
     """What the redirected path met before t_first (s from the origin)."""
     from ssbot.combat.projectiles import BELL_FLOOR_Y, BELL_R, STEP_S
@@ -96,7 +105,7 @@ def _redirect_class(F, iid: int, d: int, t_first: float) -> str:
     p = F._fc.hazards.redirect(iid, 0.0, d, F.origin_t, F.horizon)
     if p is None:
         return "no path"
-    k = int(max(0, math.floor((t_first - p.t0) / STEP_S))) + 1
+    k = int(max(0, math.floor((t_first - p.t_first) / STEP_S))) + 1
     if p.tube_from is not None and p.tube_from <= t_first + 1e-9:
         return "dome contact (undetermined tube)"
     xs, ys = p.xs[:k + 1], p.ys[:k + 1]
@@ -175,7 +184,7 @@ def _audit_fight(job: dict) -> dict:
             X, Y = _grid(hx, hy, rad, step)
             base = F.occupied(X, Y, TK)
             viol = Fk.occupied(X, Y, TK) & ~base
-            cls = _classify_kill(Fk, v, X, Y, TK, viol) if viol.any() else Counter()
+            cls = _classify_kill(Fk, v, X, Y, TK, viol, _waiting(mf)) if viol.any() else Counter()
             if zone == "near" and viol.any():
                 stats[f"{kind}/near violations by type"][tr.tk] += 1
             note(kind, zone, viol, cls, {"f": f, "victim": tr.tk, "state": tr.state, "family": tr.cur.family if tr.cur else
@@ -258,7 +267,7 @@ def _audit_fight(job: dict) -> dict:
                     tr = mf.trackers[v]
                     after = Fk.occupied_only(X, Y, TK, {v} | _entry_ids())
                     viol = after & ~before
-                    cls = _classify_kill(Fk, v, X, Y, TK, viol) if viol.any() else Counter()
+                    cls = _classify_kill(Fk, v, X, Y, TK, viol, _waiting(mf)) if viol.any() else Counter()
                     note("kill (recorded, after vs before)", zone, viol, cls,
                          {"f": f, "victim": tr.tk, "hero": [round(hx, 2), round(hy, 2)]})
         # ---- simulated actions on the sampled frames ----

@@ -1,5 +1,5 @@
-"""Thrown hazards of the Forum on deterministic paths (Forum plan R2, docs/plans/forum_planner_plan.md Â§4.2 "é™ä½Žé£Žé™©çš„åŠ¨ä½œ",
-Â§4.6 projectiles): where a hazard already in the air (or on the floor, waiting to burst) will be, from its observed
+"""Thrown hazards of the Forum on deterministic paths (Forum plan R2, docs/plans/forum_planner_plan.md §4.2, §4.6
+projectiles): where a hazard already in the air (or on the floor, waiting to burst) will be, from its observed
 state and the arena's physics, instead of the union of every logged flight relative to where it armed (the self
 templates of R0, margins up to 3 u).
 
@@ -8,7 +8,7 @@ templates of R0, margins up to 3 u).
     paths = hz.paths(origin_t, horizon_s)      # [HazardPath]: circles / boxes on step-quantised paths
     cx, cy, on, grow = p.at(tk)                # [S, T] centres at the time-slack copies, collider on, tube growth
 
-Models (measured on the R0 caches, ssbot.tools.projectile_audit; docs/facts/1.0.30000/forum.md Â§14):
+Models (measured on the R0 caches, ssbot.tools.projectile_audit; docs/facts/1.0.30000/forum.md §14):
   Throwing Bell (Choir Bellbearer; circle r 0.425, 1 mask): a Rigidbody2D at 50 Hz, g 60 (gravity scale 1), thrown at
       vy 20 with vx in [-15, 15]; semi-implicit Euler (vy -= g dt, then x += vx dt, y += vy dt). The floor (centre y
       3.428) stops it for one step (vy 0), then the FSM's Bounce sets vy 20 again (vx kept: the first bounce step rises
@@ -20,8 +20,10 @@ Models (measured on the R0 caches, ssbot.tools.projectile_audit; docs/facts/1.0.
   Song Reed Pin Projectile (Reed's javelin; box about 2.0 x 0.1): straight on at 31 u/s from its first exported frame
       until its box meets a side wall or the floor (Stick: collider off).
   rune bomb small (Choir Clapper's Bomb Cast; circle r 2.166 at y 3.67, 1 mask): appears unarmed, arms BOMB_LEAD_S
-      later, lit BOMB_LIT_S at most; a cast's row is the first bomb at x0 then pairs at x0 +- 4.2 k every 1/6 s: once a
-      row's first bomb is seen, every later pair is placed before it appears.
+      later, lit BOMB_LIT_S at most; a cast's row is the first bomb at x0 then pairs at x0 +- 4.2 k, a step every 9 or
+      10 frames (the FSM's 0.15 s wait): once a row's first bomb is seen, every later pair is placed before it appears,
+      timed from the row's latest step seen (a side the bomb pool could not serve comes later or never: tracked from
+      its appearance on).
   rune slam (the Jump Cast's; circle r 7.187 at y 3.34, 2 masks): appears RUNE_LEAD_S before it arms, lit RUNE_LIT_S.
 Positions are the step-quantised physics positions the export reports (a frame without a physics step repeats the last
 one): the physics clock's phase is estimated from frames in which a moving hazard did not move (PhysClock), so the
@@ -57,7 +59,7 @@ BOMB_LEAD_S = (0.335, 0.360)                 # appearance -> armed (game time)
 BOMB_LIT_S = 18 * FRAME_S                    # armed 5-17 frames
 BOMB_Y = 3.67
 BOMB_DX = 4.2
-BOMB_DT = 1.0 / 6.0
+BOMB_STEP_F = (9, 10)                        # a row's steps: the FSM's 0.15 s wait, 9 or 10 frames apart at 60 fps
 BOMB_PAIRS = 9
 BOMB_ROW_GAP_S = 0.3                         # a bomb more than this after the row's last one starts a new row
 RUNE_LEAD_S = (1.06, 1.11)
@@ -213,7 +215,8 @@ class HazardTracker:
         self.clock = PhysClock()
         self.h: dict[int, _Haz] = {}
         self.alias: dict[int, str] = {}
-        self.rows: list[dict] = []      # bomb rows: {x0, t0, last_T, seen: {(k, side)}}
+        self.rows: list[dict] = []      # bomb rows: {x0, t0, last_T, seen: {(k, side)}, k_last, T_k, id}
+        self._row_id = 0
         self.t = 0.0
         self.t_prev: float | None = None
 
@@ -260,7 +263,7 @@ class HazardTracker:
         for iid in [i for i, h in self.h.items() if T - h.last_T > GONE_S]:
             del self.h[iid]
             self.alias.pop(iid, None)
-        life = BOMB_DT * (BOMB_PAIRS + 1) + BOMB_LEAD_S[1] + BOMB_LIT_S
+        life = BOMB_STEP_F[1] * FRAME_S * (BOMB_PAIRS + 1) + BOMB_LEAD_S[1] + BOMB_LIT_S
         self.rows = [r for r in self.rows if T - r["t0"] < life]
         self.t_prev, self.t = T, T
 
@@ -272,8 +275,12 @@ class HazardTracker:
                 if abs(abs(x - r["x0"]) - k * BOMB_DX) < 0.3:
                     r["last_T"] = T
                     r["seen"].add((k, int(np.sign(x - r["x0"]))))
+                    if k > r["k_last"]:
+                        r["k_last"], r["T_k"] = k, T
                     return
-        self.rows.append({"x0": x, "t0": T, "last_T": T, "seen": {(0, 0)}})
+        self._row_id += 1
+        self.rows.append({"x0": x, "t0": T, "last_T": T, "seen": {(0, 0)}, "k_last": 0, "T_k": T,
+                          "id": self._row_id})
 
     # ---- paths ----
 
@@ -335,20 +342,24 @@ class HazardTracker:
                           np.ones(1, bool), dmg, t_lo=lo, t_hi=hi, slack=0)
 
     def _row_bombs(self, origin: float) -> list[HazardPath]:
-        """The later bombs of every row whose first bomb was seen: pair k at x0 +- 4.2 k appearing 1/6 s apart."""
+        """The later bombs of every row whose first bomb was seen: pair k (past the latest step seen, k_last at T_k) at
+        x0 +- 4.2 k appearing (k - k_last) steps of 9 to 10 frames after T_k."""
         out = []
         for r in self.rows:
-            for k in range(1, BOMB_PAIRS + 1):
-                t_app = r["t0"] + k * BOMB_DT
+            for k in range(r["k_last"] + 1, BOMB_PAIRS + 1):
+                n = k - r["k_last"]
+                a_lo = r["T_k"] + n * BOMB_STEP_F[0] * FRAME_S
+                a_hi = r["T_k"] + n * BOMB_STEP_F[1] * FRAME_S
                 for s in (-1, 1):
                     if (k, s) in r["seen"]:
                         continue
-                    lo = t_app + BOMB_LEAD_S[0] - 2 * STEP_S - origin
-                    hi = t_app + BOMB_LEAD_S[1] + BOMB_LIT_S + 2 * STEP_S - origin
+                    lo = a_lo + BOMB_LEAD_S[0] - 2 * STEP_S - origin
+                    hi = a_hi + BOMB_LEAD_S[1] + BOMB_LIT_S + 2 * STEP_S - origin
                     x = r["x0"] + s * k * BOMB_DX
                     if hi < 0 or x < WALL_L - BOMB_R - 1.0 or x > WALL_R + BOMB_R + 1.0:
                         continue
-                    out.append(HazardPath(BOMB, -(1 << 40) - k * 2 - (s > 0), "circle", BOMB_R, 0.0, 0.0, 0.0,
+                    out.append(HazardPath(BOMB, -(1 << 40) - r["id"] * 64 - k * 2 - (s > 0), "circle", BOMB_R, 0.0,
+                                          0.0, 0.0,
                                           np.array([x]), np.array([BOMB_Y]), np.ones(1, bool), 1, t_lo=lo, t_hi=hi,
                                           slack=0, predicted=True))
         return out
