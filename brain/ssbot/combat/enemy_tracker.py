@@ -134,12 +134,13 @@ class EnemyTracker:
             self.t_dead = T
             self.death_box = self.box if self.box is not None else self.seen_box
         self.dead = True
-        self.ends = []
 
     def kill(self, T: float) -> None:
-        """Death: the instance ends without a tail and the ended ones' tails go (the export drops a killed enemy on
-        its kill frame and its colliders hurt on that frame only: forum.md death_tails, covered by the death box;
-        forum_planner_plan §4.4 item 6: a kill must not enlarge the danger zone)."""
+        """Death: the instance it cuts short ends without a tail (the export drops a killed enemy on its kill frame and
+        its colliders hurt on that frame only: forum.md death_tails, covered by the death box; forum_planner_plan
+        §4.4 item 6: a kill must not enlarge the danger zone). The tails of the attacks it finished stay: what they
+        threw outlives it (a jump cast's rune slam bursts after the Clapper's death; the vision view has no other
+        support for it)."""
         if self.cur is not None:
             self._end(T, tail=False)
         self._die(T)

@@ -305,9 +305,9 @@ def test_a_kill_never_enlarges_the_danger_zone_and_the_what_if_leaves_the_state(
     tr = mf.trackers[7]
     assert not tr.dead and tr.cur.family == "RE_STAB" and tr.cur.t_end is None
     assert np.array_equal(mf.forecast(1.1).occupied(X, Y, tk), base)
-    # the recorded kill: no tail of the stab either
+    # the recorded kill: no tail of the stab it cut short (the idle instance it finished keeps its tail)
     _run(mf, script[17:26])
-    assert mf.trackers[7].dead and mf.trackers[7].ends == []
+    assert mf.trackers[7].dead and [e.family for e in mf.trackers[7].ends] == ["RE_IDLE"]
 
 
 def test_a_waiting_wave_member_waits_for_its_wave():

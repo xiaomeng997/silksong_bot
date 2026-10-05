@@ -43,8 +43,9 @@ certification ran on (ssbot.knowledge.forum_support.SubjectRecall; forum.md §12
     every hazard in the vision view too, where the paths come from tracked velocities);
   - entries: the next wave's members not in the export yet (WaveTracker's activation window: the static wave table,
     the kills and sightings, never room.battles) by their entry family's world-frame template.
-Tiny group placement: with >= TINY_GROUP Tinies, the instances they may start are placed once per cluster of nearby
-Tinies starting the same family (one anchor box covering the members) instead of once per Tiny.
+Tiny group placement: with >= TINY_GROUP Tinies, the instances they may start are placed once per cluster (the Tinies
+in one TINY_CLUSTER_U grid cell) starting the same family (one anchor box covering the members) instead of once per
+Tiny.
 
 The single-boss path is untouched: MultiForecaster(boss=fc) wraps a Forecaster and its forecast delegates every query
 to the boss's Forecast (bit-identical: tests/test_multi_forecast.py and tools/multi_recall bellbeast).
@@ -85,7 +86,7 @@ ARENA_BOX = (0.0, -5.0, 64.0, 40.0)
 TINY = "Song Automaton Tiny"
 MAESTRO = "Song Pilgrim Maestro"
 TINY_GROUP = 3                    # Tinies at least this many: group placement
-TINY_CLUSTER_U = 4.0              # Tinies whose positions lie this close share one placement set
+TINY_CLUSTER_U = 4.0              # Tinies in one cell of this grid share one placement set
 ENTRY_LAG_S = 1.0                 # a wave's activation -> its member's entry family start (upper bound)
 ENTRY_OWNER = -(1 << 50)          # placement owner of wave w's entries: ENTRY_OWNER - w
 PIECES_S = ((0.4, 6 * BIN), (1.0, 12 * BIN), (math.inf, 24 * BIN))   # start-time piece length by distance
@@ -822,7 +823,7 @@ class _Builder:
     def groups(self) -> None:
         """Place every buffered later-instance root at once (vectorised): each root's start window cut at the
         start-time grid, each piece's anchor box from its enemy's dead-reckoned transform and idle growth; Tiny
-        group placement: with >= tiny_group Tinies, the Tinies within TINY_CLUSTER_U of each other form a cluster
+        group placement: with >= tiny_group Tinies, the Tinies in one cell of a TINY_CLUSTER_U grid form a cluster
         whose roots of one family walk share a row per grid piece (the union of their windows and anchor boxes)."""
         buf = self.root_buf
         self.root_buf = []
@@ -881,15 +882,12 @@ class _Builder:
         # Tiny clusters
         tiny = np.array([t.table.spec.pooled for t in tlist])
         if self.fc.tiny_group and int(tiny.sum()) >= self.fc.tiny_group:
+            # clusters are the cells of a fixed TINY_CLUSTER_U grid: a cluster never spans more than a cell, and a
+            # Tiny gone (killed) never joins two others into one (forum_planner_plan §4.4 item 6)
             ti = np.flatnonzero(tiny)
-            order = ti[np.argsort(px[ti])]
+            cell = np.stack([np.floor(px[ti] / TINY_CLUSTER_U), np.floor(py[ti] / TINY_CLUSTER_U)], axis=1)
             cl = np.full(len(tlist), -1, np.int64)
-            c = -1
-            for j, t_i in enumerate(order):
-                if j == 0 or abs(px[t_i] - px[order[j - 1]]) > TINY_CLUSTER_U or \
-                        abs(py[t_i] - py[order[j - 1]]) > TINY_CLUSTER_U:
-                    c += 1
-                cl[t_i] = c
+            cl[ti] = np.unique(cell, axis=0, return_inverse=True)[1].ravel()
             grp = tiny[s] & (cl[s] >= 0)
             if grp.any():
                 gi = np.flatnonzero(grp)
