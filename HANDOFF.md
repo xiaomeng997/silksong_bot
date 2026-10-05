@@ -1209,3 +1209,157 @@ Facts: `docs/facts/1.0.30000/forum.md` 13.9 onward. Offline outputs (not in git)
 - Open: whether the Tiny's Ready loop counts frames or wall-clock time (if wall clock, its 1x game-time rate depends
   on the machine's load: real / game 1.06 now); the next build must show the speed guard's counter at 0 for its
   run list.
+## Task R2 - Forum multi-enemy forecast (branch worktree-wf_5031b357-209-1)
+
+Worktree `C:\modeling\silksong_bot\.claude\worktrees\wf_5031b357-209-1`, branch `worktree-wf_5031b357-209-1`. Offline
+only (no game instance touched). Plan: `docs/plans/forum_planner_plan.md` §4.1 / 4.3 / 4.4 item 6 and the R2 row of
+§5. Facts: `docs/facts/1.0.30000/forum.md` §14 (Chinese). Outputs (not in git): `C:\ssbot\data\m2_forum_r2\` (`r1\` the
+R1 runs' contacts, `recall_*.json` / `*.log`, `consistency_*.json`, `proj_audit_10c.json`, `bench_*.json`, the `.cmd`
+drivers). The production tables need `knowledge/1.0.30000/enemies/forum/*_hitboxes.npz` (gitignored; rebuilt by
+`behaviour_build --encounter Forum`, copied into each frozen checkout by hand).
+
+### Done (committed)
+
+- `core/forum.py`: the Forum's static facts for run-time code (9 types, waves with spawn points, hazard owners / aliases,
+  structurally absent moves, walls / floor / dome), tested against `knowledge.gauntlet_tables.FORUM_SPECS` and
+  `train.encounters` (the import firewall keeps combat code off those modules).
+- `combat/enemy_tables.py`: one template store for the 9 types (fine templates in arenas, coarse 0.25 u bases with time
+  OR pyramids, per-bin bounding-box sparse tables), lazy npz reading and chunked coarsening (peak working set 1.94 ->
+  1.1 GB), type tables without the structurally absent moves, tubes, chains, fold / production configurations.
+- `combat/enemy_tracker.py`: EnemyTracker per enemy instance (SubjectTracker semantics; oracle: Control FSM events;
+  VE: phase + body offset); HP from seen hits only (oracle amount, else the attack's price); a kill leaves its death box
+  for 3 bins, no tail for the attack it cuts short, and keeps the tails of the attacks it finished (their thrown
+  hazards outlive it: VE own-type recall needs them for the Clapper's rune slams / bombs).
+- `combat/multi_forecast.py`: MultiForecaster / MultiForecast with the §4.3 interface (occupied, occupied_without,
+  prob, t_min, committed, support_set, targets, known) + forecast_if_killed + bell_redirected; walk cache with
+  widening; fine / window / bbox placements; family walk templates for later instances; idle body, collider, hazard
+  tubes; death tails; wave entries; waiting wave members bounded by their wave's earliest activation (no collider
+  tube before it); dead Tinies walked only while a Maestro is in play; Tiny groups by 4 u grid cell;
+  `boss=Forecaster` wraps Bell Beast bit for bit (a proxy since the fix round). `combat/forecast.py`: the
+  boss-independent walk / place helpers
+  (entry_grid, active_within, exit_interval, placement_occupancy) moved out, Bell Beast unchanged.
+- `combat/projectiles.py`: deterministic paths (bell physics incl. the Nail Hit redirect and the dome tube, javelins,
+  bomb rows with 9-10 frame steps from the latest step seen, rune slams) and the physics clock. `combat/wave_tracker.py`
+  (BattleScene rules from what the view sees; room.battles only as test truth).
+- Tools: `multi_recall` (dev / fresh / bellbeast; oracle and ve), `projectile_audit`, `consistency_audit` (new),
+  `planner_bench --encounter Forum --multi [--planner]`.
+- Tests: `tests/test_multi_forecast.py` 20 (incl. the kill what-if, a waiting wave member, Tiny groups, forecasters
+  sharing tables, bomb rows from a recorded row). Full suite (at eb5d221-ish): 1052 passed, 1 skipped, 1 xfailed;
+  `test_hitbox_tables.py::test_support_query_budget_on_the_committed_bell_beast_templates` failed only on time (p99
+  3.54 ms vs 3 ms) with the machine at ~97 % CPU (my recall runs + 5 game instances); rerun it on a quiet machine.
+
+### Measurements (acceptance)
+
+All on 5332426 (frozen checkouts, below-normal priority, NUMBA_NUM_THREADS 2 per worker) unless noted.
+
+- (a) Bell Beast wrapped: `multi_recall bellbeast` on 20261003_144536 i4_000, 4001 frames (eb5d221; later commits do
+  not touch the boss path): 0 differences in placements, occupied, prob, support_set, committed, tactics, planner
+  decision; the fixture-window bit-identity test and the Bell Beast tests pass on 5332426.
+- (b) Recall through MultiForecast (contact at c vs forecast at c - L), union and own-type: dev (R0's 107 fights,
+  3-way) 228,333 / 228,333 at L2, L3, L4; fresh R0 35 fights 74,120 / 74,120 with each fold's tables; R1 187 fights
+  (w2 ghosts excluded) 112,949 / 112,949 with each fold's tables; ve (35 fresh fights, placeholder phase table,
+  fold-0 tables) 74,120 / 74,120. Every one of the 9 types 100 % in every group and lag, own-type too.
+  `C:\ssbot\data\m2_forum_r2\recall_{dev,fresh,ve}_5332426.json`.
+- (c) Projectile path centre error (`projectile_audit`, 10 R0 caches, 0.8 s): bell p99 0.246 u (0.0005 at 0.1 s, 0.20
+  at 0.4 s; max 7.5), javelin p99 0.050 u, bomb rows x p99 0.025 u with 2020 / 2098 predicted bombs lit inside their
+  window (the rest: sides the bomb pool served late). `proj_audit_10c.json`.
+- (d) Wave-6 replay (074719 i3 ep0, 5951 ticks, 6-8 enemies): forecast(2 s) p50 0.91 ms, p99 2.75 ms (max 10.0, once);
+  machine CPU p50 53 % (4 recall workers + 5 game instances). `bench_wave6_fc_5332426.json`. Did not reproduce (the
+  verifier: p99 3.08 / 3.23 / 3.21 ms at the same load): superseded by the fix round below.
+- (e) Memory: peak working set 1,109 MB (with the planner 1,184 MB); tables 696 MB; load 25 s, warm 55 s.
+- (f) Consistency (`consistency_audit`, 35 fresh fights, every 30th frame, +-2 u near / +-6 u wide, 1 s): kills 0
+  violations (172,839 simulated, 1,429 recorded what-if, 1,429 recorded before/after); bell redirects: 0 of 474
+  recorded, 9 of 2,854 simulated in the near zone, all physics (a down hit bounces after Nail Hit 2, an up hit falls
+  back 4, a side hit off a near wall comes back at 10 u/s 2, an up hit reaching the dome becomes a tube 1).
+  `consistency_5332426.json`. Fixed on the way (forum.md 14.4): a kill gave the attack it cut short a tail; a
+  wave-ending kill walked the next wave's parked members at once (with their collider tube); a store bug - a coarse
+  base key registered again took the next new key's id, so the next fight in one process used other family walks'
+  box tables (every multi-fight recall before 5332426 ran with it; they were 100 % anyway).
+- (g) Today's planner fed by the MultiForecast (HOLD prefs, floor risk map): tick p50 21.6 ms, p99 37.9 ms (support
+  6.5 / 16.5, prob_bind 6.4 / 14.7), FORCED_RISK on 92 % of the ticks; machine CPU p50 60 %.
+  `bench_wave6_planner_5332426.json`.
+
+### Fix round after verification (commits 421176d - 568d873, offline)
+
+Two verifiers re-ran (a)-(g) on f274317 and refuted four claims; all fixed and re-measured (forum.md 14.7 has the
+details, 14.2-14.5 the new numbers):
+
+- **The Bell Beast wrap was not a drop-in**: it forwarded reads only (`det` read-only, the multi path's `_occ`
+  shadowed Forecast._occ), so the live policy's `bell_hit_monitor.zone` raised on 4,965 / 4,965 calls. MultiForecast
+  in boss mode is now a proxy (reads and writes of everything it does not answer go to the boss Forecast; the multi
+  union query is `_union_occ`), and `MultiForecaster(boss=fc)` no longer resets `fc`. `multi_recall bellbeast` now
+  also compares the zones: 0 differences in all 8 surfaces on i4_000 (4001 frames, 892 zone checks) and on
+  20261004_095304 i0_001 (4001 frames, 1,333 zone checks); a test wraps a Forecaster mid-window.
+- **Tiny group rows were owned by one Tiny**: `occupied_without(owner)` dropped the other Tinies of the cell
+  (17,870 of 92,276 cells in the verifier's probe), `occupied_only(member)` missed the group rows. Group rows now carry
+  their cluster (`bb["gcl"]`, `MultiForecast.clusters`): kept while one Tiny of the cluster is in, included for each
+  of them, one support event each. `consistency_audit` now also checks `occupied_without(victim)` against the others'
+  support after the kill: 0 violations.
+- **Recall skipped the multi-hit chains' first contact** (the hook is not a contact row): `multi_recall` adds one hook
+  contact per chain (`hook_contacts`) and counts it in n.
+- **WaveTracker never resynced after a missed kill** (vision view): only members new in play activate a wave; a new
+  next-wave member 2 s after the activation resyncs; VE "unknown" / "hidden" phases are not in play.
+- **The bell path was not a superset on held-out data** (1,581 of 1,157,991 boxes outside): side-bounce branches
+  after every floor bounce (384 of 8,813 logged floor bounces get vx +-10 on the next step) and a 1.1 u dome band
+  (air contacts reach 1.01 u below the dome line).
+- Lows: an old state is walked from the origin when age + H passes WALK_CAP_S; comfort requests are counted and
+  documented (no comfort templates in the multi path, so (e) / (g) exclude them); the Bell Beast query budget test
+  skips with its numbers on a busy machine (it failed on main too); forecast build ~15 % faster.
+
+Measurements (frozen `C:\ssbot\live_r2fix_e516f22`, the audit on `live_r2fix_568d873`; below-normal priority;
+outputs in `C:\ssbot\data\m2_forum_r2\`, driver `fix_run.cmd <mode> <rev>`):
+
+- (a) `bellbeast_wrap_i4_000_e516f22.json`, `bellbeast_wrap_095304_i0_001_e516f22.json`: 0 differences (above).
+- (b) Recall with the hooks, union and own type, 100 % at L2 / L3 / L4 for all 9 types in every group: dev 229,711 /
+  229,711 (1,378 hooks); fresh R0 74,585 / 74,585 per table (465 hooks); R1 113,385 / 113,385 per table (436 hooks);
+  ve 74,585 / 74,585 (465 hooks). Every Final Hit row found its hook. `recall_{dev,fresh,ve}_e516f22.json`.
+- (c) Held-out (35 `cache_fresh` caches): bell p99 0.233 u (0.0005 at 0.1 s, 0.185 at 0.4 s), 3,469,352 / 3,469,352
+  boxes inside the support; javelin p99 0.050 u, 108,459 / 108,459; bomb rows x p99 0.148 u, 8,093 / 8,391 lit inside
+  their window. Build 10 caches: bell p99 0.229 u, 1,001,308 / 1,001,308. `proj_audit_fresh35_e516f22.json`.
+- (d) Borderline: three runs p99 2.57 / 2.49 / 2.48 ms (p50 0.77 / 0.69 / 0.64 ms) at machine CPU p50 50 / 44 / 36 %;
+  side by side with 5332426 at the same load 3.14 -> 2.72 and 3.05 -> 2.61 ms. The tail is machine noise (the same
+  tick computed twice: min-of-two p99 2.51 ms under heavy load where the first run's p99 was 4.67 ms; no GC pass inside
+  a forecast). Only ~15 % margin: a saturated machine still goes over 3 ms. `bench_wave6_fc_e516f22_{1,2,3}.json`.
+- (e) Peak working set 1,109-1,112 MB (with the planner 1,187 MB), store 696 MB, load 26-29 s, warm 49-61 s; no comfort
+  templates (R3 adds them: roughly double, forum_planner_plan §1 item 8).
+- (f) `consistency_568d873.json`: kills 0 violations (172,839 simulated, 1,429 recorded what-if and before/after),
+  occupied_without 0 violations (same checks); redirects 0 of 474 recorded, 14 of 2,854 simulated in the near zone:
+  the 9 physics cases as before plus 5 made only by the side-bounce branches (real physics, modelled both ways).
+- (g) Today's planner on the MultiForecast: tick p50 14.2 ms, p99 25.6 ms (CPU p50 42 %; support 4.1 / 12.0,
+  prob_bind 3.7 / 9.8 ms), FORCED_RISK 92.0 % - an open-loop replay (hero positions from the data policy), not a
+  closed-loop rate. `bench_wave6_planner_e516f22.json`.
+- Tests: `pytest -q` (tests + ssbot/tests) 1071 passed, 2 skipped (one the budget test on the busy machine), 1 xfailed;
+  `tests/test_multi_forecast.py` 25.
+
+The person's question (2026-10-04, "bot反应会比我0.5倍速快吗？还是没打出无伤"), corrected answer: the bot's reaction time
+has not been measured end to end; recall at a 2-4 frame lag says how early the forecast covers a contact, not how fast
+the bot reacts. The PC budget (DESIGN §3.8.4) is p99 <= 60 ms from the game's frame to the input taking effect (P8
+measured 45.6 ms Esc -> first dark frame without compute), about half the person's ~200-250 ms visual reaction at
+0.5x (100-125 ms of game time) - if the budget holds. Today it does not for the Forum: the planner tick with the
+MultiForecast is p50 14-22 ms, longer than a 16.7 ms frame (Bell Beast live: p99 tick 19.1 ms median, ~7 late frames
+per fight). No-hit is not a reaction question yet: there is no Forum tactics / planner (R3-R6) and no live Forum run
+with the MultiForecaster; the 92 % FORCED_RISK is an open-loop replay figure.
+
+### Running
+
+Nothing (all fix-round runs finished).
+
+### Next
+
+1. R3: today's planner with the MultiForecast spends p50 ~12-22 ms in its phases (support, prob_bind) and is in
+   FORCED_RISK 92 % of the wave-6 ticks (open loop, no Forum tactics); the Forum vocabulary, K-target scoring and the
+   support query budget are R3's. Before R3 adds per-tick work, regain (d) margin: move `groups()`'s piece / anchor-box
+   math into numba, give a dead Tiny walked for a summon its arena box without the piece machinery.
+2. The physics clock is not narrowed for the first bell of a fight (p99 0.67 u on 0.2 % of the samples): narrow it from
+   any Rigidbody the export has (the hero) or keep the phase across fights of a session.
+3. A bell landing on a resting bell (one case in 142 caches) is not modelled; the side-bounce branches are one level
+   (a branch's own later floor bounces do not branch again).
+4. VE recall used the placeholder phase table (identity) and the tables' body offsets; rerun with the real vision
+   phase tables when they exist; the WaveTracker resync assumes the vision view's iids are stable.
+5. Comfort templates for the multi path (R3), then re-measure (e).
+6. Frozen checkouts to remove (their runs are done): `C:\ssbot\live_r2scan_56845a9`, `live_r2recall_abca5c9`,
+   `live_r2recall_948f32c`, `live_r2final_69e9b36`, `live_r2final_9835ced`, `live_r2final_21d697f`,
+   `live_r2final_5332426`, `live_r2fix_e516f22`, `live_r2fix_568d873` (git worktree remove).
+7. Wiring the MultiForecaster into the live loop is not done (R2 is offline): one forecaster per episode on shared
+   tables is safe (the store fix), `warm()` belongs before the fight; `MultiForecaster(boss=fc)` may wrap a Forecaster
+   that already has state.

@@ -316,23 +316,7 @@ class Forecast:
         return q
 
     def _occ(self, placements: list[Placement], x, y, tk: np.ndarray, comfort: bool = False) -> np.ndarray:
-        x = np.asarray(x, np.float64)
-        y = np.asarray(y, np.float64)
-        out = np.zeros(x.shape, bool)
-        cuts = sorted({p.t_from for p in placements if tk[0] < p.t_from <= tk[-1]})
-        edges = [-math.inf] + cuts + [math.inf]
-        for a, b in zip(edges, edges[1:]):
-            sel = np.flatnonzero((tk >= a) & (tk < b))
-            if not len(sel):
-                continue
-            t_lo, t_hi = tk[sel[0]], tk[sel[-1]]
-            act = [p for p in placements if p.t_from <= t_lo and p.t_off >= t_lo - BIN and p.t_on <= t_hi + BIN]
-            if not act:
-                continue
-            q = self._query(act, comfort)
-            xs, ys, ts = x[:, sel], y[:, sel], tk[sel]
-            out[:, sel] = query_par(q, xs, ys, ts)
-        return out
+        return placement_occupancy(placements, x, y, tk, lambda act: self._query(act, comfort))
 
     def occupied(self, x, y, tk, comfort: bool = False) -> np.ndarray:
         """[N, T] bool: the hurtbox (grown by the forecaster's margin) centred at (x, y) [N, T] at tk [T] game s from
@@ -1771,10 +1755,7 @@ class Forecaster:
         srcs = f.sources.get(state, frozenset())
         if ctx.phase == "P1":
             srcs = srcs - f.p2_only.get(state, frozenset())
-        n = int(math.floor((e_hi - e_lo) / BIN + 1e-6)) + 1
-        es = [e_lo + i * BIN for i in range(n)]
-        if es[-1] < e_hi - 1e-3:            # a 1 ms remainder rounds to the same 1/60 s bin
-            es.append(e_hi)
+        es = entry_grid(e_lo, e_hi)
         for fr in frames:
             key = m.key(fam, state, fr)
             if key is None:
@@ -1799,7 +1780,7 @@ class Forecaster:
                     t_from = self.bell_lead - TELL_DELAY["bell_dust"] - TELL_SLACK_S["bell_dust"]
             for e in es:
                 on, off = e + t0, e + t1
-                if off < -BIN or on > H + BIN:
+                if not active_within(on, off, H):
                     continue
                 if t_from > H + BIN:
                     continue
@@ -1832,9 +1813,7 @@ class Forecaster:
         fam = ctx.family
         if fam is not None and state in m.families[fam].states:
             self._place(fam, state, e_lo, e_hi, ctx, nid, H, out)
-        x_lo, x_hi = e_lo + info.dwell[0], e_hi + info.dwell[1]
-        if current:
-            x_lo, x_hi = max(x_lo, BIN), max(x_hi, BIN)
+        x_lo, x_hi = exit_interval(e_lo, e_hi, info.dwell, current)
         for nxt, pn in self._successors(state, ctx):
             c2 = replace(ctx)
             if fam is not None and state in m.families[fam].states and nxt in m.decision_states:
@@ -1943,4 +1922,55 @@ def offsets(T: int, frame_time: float) -> np.ndarray:
     return np.arange(T + 1, dtype=np.float64) * frame_time
 
 
-__all__: Sequence[str] = ("Forecaster", "Forecast", "BossTracker", "load_planner_templates", "offsets")
+# ---- boss-independent pieces of the walk and the placements (shared with ssbot.combat.multi_forecast) ----------
+
+def entry_grid(e_lo: float, e_hi: float) -> list[float]:
+    """Entry times of a state entered within [e_lo, e_hi]: the 1/60 s grid from e_lo, and e_hi itself unless the
+    last grid point is within 1 ms of it (one placement per bin; each keeps its own +-1 bin of export lag)."""
+    n = int(math.floor((e_hi - e_lo) / BIN + 1e-6)) + 1
+    es = [e_lo + i * BIN for i in range(n)]
+    if es[-1] < e_hi - 1e-3:            # a 1 ms remainder rounds to the same 1/60 s bin
+        es.append(e_hi)
+    return es
+
+
+def active_within(t_on: float, t_off: float, horizon: float) -> bool:
+    """A placement active over [t_on, t_off] (s from the origin) meets the horizon [-1 bin, H + 1 bin]."""
+    return not (t_off < -BIN or t_on > horizon + BIN)
+
+
+def exit_interval(e_lo: float, e_hi: float, dwell: tuple[float, float], current: bool,
+                  slack: float = 0.0) -> tuple[float, float]:
+    """When a state entered within [e_lo, e_hi] is left: its logged dwell range (min, max) widened by slack each
+    side; the current state (known to be in it at the origin) is left no earlier than the next frame."""
+    x_lo, x_hi = e_lo + dwell[0] - slack, e_hi + dwell[1] + slack
+    if current:
+        x_lo, x_hi = max(x_lo, BIN), max(x_hi, BIN)
+    return x_lo, x_hi
+
+
+def placement_occupancy(placements, x, y, tk: np.ndarray, query_of) -> np.ndarray:
+    """[N, T]: the hurtbox centres x, y at tk inside one of the placements (t_on / t_off / t_from: a placement counts
+    only for query times from its t_from on, so the times are cut at every t_from inside them); query_of(active
+    placements) -> a SupportQuery holding them."""
+    x = np.asarray(x, np.float64)
+    y = np.asarray(y, np.float64)
+    out = np.zeros(x.shape, bool)
+    cuts = sorted({p.t_from for p in placements if tk[0] < p.t_from <= tk[-1]})
+    edges = [-math.inf] + cuts + [math.inf]
+    for a, b in zip(edges, edges[1:]):
+        sel = np.flatnonzero((tk >= a) & (tk < b))
+        if not len(sel):
+            continue
+        t_lo, t_hi = tk[sel[0]], tk[sel[-1]]
+        act = [p for p in placements if p.t_from <= t_lo and p.t_off >= t_lo - BIN and p.t_on <= t_hi + BIN]
+        if not act:
+            continue
+        q = query_of(act)
+        xs, ys, ts = x[:, sel], y[:, sel], tk[sel]
+        out[:, sel] = query_par(q, xs, ys, ts)
+    return out
+
+
+__all__: Sequence[str] = ("Forecaster", "Forecast", "BossTracker", "load_planner_templates", "offsets", "entry_grid",
+                          "active_within", "exit_interval", "placement_occupancy")
