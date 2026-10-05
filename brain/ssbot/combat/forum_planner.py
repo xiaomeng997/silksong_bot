@@ -17,21 +17,27 @@ Per tick (the lexicographic order and every rule of Planner.tick unless named he
               core rows that passed stage 1 (always, whatever the deadline: §4.4 item 2), CONTINUE, the K_b best of
               the rest by (Hz, Hz_soft, U, -J) and up to `sibs` rows sharing each of the 8 best rows' first piece (V
               needs two safe ways on with the same first piece), then the rest in that order. After the priority
-              part it stops at the first chunk that leaves a safe row; inside it, once deadline_ms has passed and a
-              safe row exists. Without a safe row it goes on to the end (a slow tick, counted: `overrun`, never
-              FORCED_RISK by itself: §4.4 item 3).
-  hit effects within each chunk, rows with a predicted nail hit (Reaper shapes, every target; the first hit) are
-              rolled out again with its effect (side / wall slash: recoil away, up slash: recoil down, down slash:
-              bounce) and checked again: S = miss branch | hit branch (DESIGN 3.5.6). The hit branch also meets the
-              hit enemy's reaction (hero_caused.json TOOK DAMAGE exits: a Clapper's Idle -> Dmg Attack, a Reed's
-              Alert -> Stab Pos, a Minister's Chase -> Range Check, a Maestro's Fly -> Summon?, an Envoy's Charge,
-              ...): MultiForecaster.forecast_reaction from the hit frame. At most hitfx_k rows a tick get the hit
-              branch and react_k reaction forecasts; a row with a predicted hit beyond those caps is S = 1.
+              part it stops at the first chunk that leaves a safe row; inside it, once a safe row exists and the next
+              chunk would end past deadline_ms (taken to cost what the last one did). Without a safe row it goes on
+              to the end (a slow tick, counted: `overrun`, never FORCED_RISK by itself: §4.4 item 3).
+  hit effects within each chunk, rows with a predicted nail hit (Reaper shapes; the first hit on any enemy in reach,
+              scored or not) are rolled out again with its effect (side / wall slash: recoil away, up slash: recoil
+              down, down slash: bounce) and checked again: S = miss branch | hit branch (DESIGN 3.5.6). The hit branch
+              also meets the hit enemy's reaction (hero_caused.json TOOK DAMAGE exits of every state its walk allows at
+              the hit: a Clapper's Idle -> Dmg Attack, a Reed's Alert -> Stab Pos, a Minister's Chase -> Range Check,
+              a Maestro's Fly -> Summon?, an Envoy's Charge -> Reset, ...): MultiForecaster.forecast_reaction from the
+              hit frame, anchored there. At most hitfx_k rows a tick get the hit branch and react_k reaction
+              forecasts; a row with a predicted hit beyond those caps is S = 1 while a safe row exists; without one,
+              the capped rows get their hit branch uncapped before FORCED_RISK (the caps follow the queue's J order,
+              so the prefs: FORCED_RISK must not depend on them, §4.4 item 2).
   selection   only rows whose S is known: enveloped, or in contact at stage 1. The chosen plan with S = 0 is always an
-              enveloped one (audit: `audit`). FORCED_RISK: no enveloped row is safe after all were checked; of the
-              p_k latest first contacts, the least share of frames in contact first (P's stand-in: MultiForecast.prob
-              costs 3.7 ms p50 on wave 6, one query per enemy, placement kind and probability value; exact_p turns it
-              back on), then the latest contact, then J.
+              enveloped one (audit: `audit`). FORCED_RISK: no enveloped row is safe after all were checked; the p_k
+              latest first contacts (estimates: stage 1's lower bound, the envelope's first frame, the hit branch's)
+              are then put on one lane over every frame (the nominal box against the support, or'ed with the hit
+              branch's contact, from the hit frame on where a cap left it unchecked) and ranked by the share of frames
+              in contact (P's stand-in: MultiForecast.prob costs 3.7 ms p50 on wave 6, one query per enemy, placement
+              kind and probability value; exact_p turns it back on), the latest first contact, the envelope's, J.
+  determinism deadline_ms = inf: decisions do not depend on the machine's speed (audits, identity checks).
   unmodelled  a row that presses attack while dashing / sprinting is vetoed (the Reaper's dash stab is R7's).
   not here    the lock check past the horizon (no Silkspear in the Forum set; the Bind macro checks its own), the key
               economy terms, the killing blow's branches (so no certified final kill: I3 only), the comfort query (no
@@ -78,7 +84,9 @@ class ForumConfig:
     chunk: int = 32
     K_b: int = 96
     sibs: int = 3
-    deadline_ms: float = 11.0
+    deadline_ms: float = 8.0      # the envelope stops before a chunk that would end past it (once the core rows
+    #                               are done and a safe row exists; forum.md 15.11: 11 ms put the tick p99 above the
+    #                               Bell Beast's); inf: deterministic decisions (the only timing-dependent rule)
     hitfx_k: int = 32
     react_k: int = 4
     K_tgt: int = 4
@@ -288,14 +296,17 @@ class ForumPlanner(Planner):
             else (0.0, 0.0)
         tg = [t for t in f.targets(tk) if not t.hazard]
         d = [math.hypot(0.5 * (t.box[0, 0] + t.box[0, 2]) - hx, 0.5 * (t.box[0, 1] + t.box[0, 3]) - hy) for t in tg]
-        keep = [t for _, t in sorted(zip(d, tg), key=lambda z: z[0]) if _ <= TARGET_REACH_U][:self.fcfg.K_tgt]
+        # every enemy in reach: the first hit (the hit branch's) can be on any of them (a 5th-nearest Tiny of a
+        # cluster); only the K_tgt nearest are scored (weight 0 for the rest: J, hits and waste unchanged)
+        keep = [t for _, t in sorted(zip(d, tg), key=lambda z: z[0]) if _ <= TARGET_REACH_U]
         T1 = len(tk)
         if not keep:
             return np.zeros((0, T1, 4)), np.zeros((0, T1), bool), np.zeros(0), []
         hw = getattr(prefs, "hit_w", None) or {}
         return (np.ascontiguousarray(np.stack([t.box for t in keep]), np.float64),
                 np.ascontiguousarray(np.stack([t.ok for t in keep])),
-                np.array([float(hw.get(t.iid, 1.0)) for t in keep]), keep)
+                np.array([float(hw.get(t.iid, 1.0)) if k < self.fcfg.K_tgt else 0.0 for k, t in enumerate(keep)]),
+                keep)
 
     def _score_forum(self, ws, roll, latched, start, f, prefs, tk):
         w = prefs.weights
@@ -324,9 +335,12 @@ class ForumPlanner(Planner):
 
     # ---- hit branches ----
 
-    def _hit_branch(self, f, start, latched, sc, rows, tk, enemy_only, budget) -> np.ndarray:
-        """S of the hit branch for rows (each with a predicted first hit): rolled out with the hit's effect from its
-        frame, against the support and the hit enemy's reaction. budget: dict with hitfx / react counters (caps)."""
+    def _hit_branch(self, f, start, latched, sc, rows, tk, enemy_only, budget, cap: bool = True
+                    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """The hit branch of rows (each with a predicted first hit): rolled out with the hit's effect from its frame,
+        against the support and the hit enemy's reaction (every state its walk allows at the hit: reaction_states).
+        budget: dict with hitfx / react counters (caps; cap False: none). Returns S [n], the branch's contact [n, T1]
+        (the lanes' hull, the reaction included) and the rows the reaction cap left unchecked (S = 1)."""
         T = latched.shape[1]
         ev = np.zeros((len(rows), T), np.int64)
         kinds, faces, fr = sc["first_k"][rows], sc["first_face"][rows], sc["first_f"][rows]
@@ -339,32 +353,53 @@ class ForumPlanner(Planner):
         skip = ((rh.flags_all & F_INVULN) != 0) if enemy_only else np.zeros(rh.flags_all.shape, bool)
         occ = self._contacts(f, rh.bound, tk, skip)
         s = occ.any(axis=1)
+        capped = np.zeros(len(rows), bool)
         # the hit enemy's reaction (hero_caused TOOK DAMAGE exits), one forecast per (enemy, hit frame)
         mf = getattr(f, "_fc", None)
         tg = sc["targets"]
-        if mf is not None and hasattr(mf, "reaction_state"):
+        if mf is not None and hasattr(mf, "reaction_states"):
+            cache = budget["react_cache"]
             for n, r in enumerate(rows):
                 if s[n]:
                     continue
                 t = tg[int(sc["first_t"][r])]
-                to = mf.reaction_state(t.iid)
-                if to is None:
-                    continue
                 key = (t.iid, int(fr[n]))
-                rf = budget["react_cache"].get(key)
-                if rf is None and key not in budget["react_cache"]:
-                    if budget["react"] >= self.fcfg.react_k:
-                        s[n] = True                          # past the cap: the reaction is unchecked
+                rf = cache.get(key, False)               # False: not looked at yet; None: no reaction
+                if rf is False:
+                    t_react = f.origin_t + float(tk[min(fr[n], len(tk) - 1)])
+                    to = mf.reaction_states(t.iid, t_react, f.horizon)
+                    if not to:
+                        rf = None
+                    elif cap and budget["react"] >= self.fcfg.react_k:
+                        s[n] = capped[n] = True          # past the cap: the reaction is unchecked
                         budget["capped"] += 1
                         continue
-                    budget["react"] += 1
-                    rf = mf.forecast_reaction(t.iid, to, f.origin_t + float(tk[min(fr[n], len(tk) - 1)]),
-                                              f.horizon, f.origin_t)
-                    budget["react_cache"][key] = rf
+                    else:
+                        budget["react"] += 1
+                        rf = mf.forecast_reaction(t.iid, to, t_react, f.horizon, f.origin_t)
+                    cache[key] = rf
                 if rf is not None:
-                    o2 = self._contacts(rf, rh.bound[n:n + 1], tk, skip[n:n + 1])
-                    s[n] |= bool(o2.any())
-        return s
+                    occ[n] |= self._contacts(rf, rh.bound[n:n + 1], tk, skip[n:n + 1])[0]
+                    s[n] = bool(occ[n].any())
+        return s, occ, capped
+
+    @staticmethod
+    def _note_hit(rows, sh, oh, cp, sc, t_hit, hit_occ, capped_rows, T1) -> None:
+        """The hit branch's contact into FORCED_RISK's ranking: its first frame lowers t_hit, its frames join the row's
+        (hit_occ); a row the reaction cap left unchecked is in contact from its hit frame on (capped_rows)."""
+        for n, i in enumerate(rows):
+            i = int(i)
+            if cp[n]:
+                capped_rows.append(i)
+                h = np.zeros(T1, bool)
+                h[max(int(sc["first_f"][i]), 1):] = True
+            elif sh[n]:
+                h = oh[n]
+            else:
+                hit_occ.pop(i, None)
+                continue
+            hit_occ[i] = h
+            t_hit[i] = min(int(t_hit[i]), int(np.argmax(h)))
 
     @staticmethod
     def _s1_frames(T1: int) -> np.ndarray:
@@ -419,11 +454,11 @@ class ForumPlanner(Planner):
         o = f.occupied(cx, cy, tk[fr])
         if enemy_only:
             o &= (r1.flags[:, fr] & F_INVULN) == 0
-        occ1 = np.zeros((N, T1), bool)
-        occ1[:, fr] = o
-        S1 = occ1.any(axis=1)
-        share = o.mean(axis=1)                    # FORCED_RISK's ranking without exact_p: time in contact
-        t_hit = np.where(S1, occ1.argmax(axis=1), T1)
+        S1 = o.any(axis=1)
+        # the first contact's estimate for FORCED_RISK's preselection: at stage 1 its lower bound (the frame after the
+        # last clear sampled one), on the envelope its first frame, with the hit branch the earlier of the two
+        k1 = o.argmax(axis=1)
+        t_hit = np.where(S1, np.where(k1 > 0, fr[np.maximum(k1 - 1, 0)] + 1, fr[0]), T1)
         t2 = time.perf_counter()
         sc = self._score_forum(ws, r1, latched, start, f, prefs, tk)
         J = sc["J"]
@@ -478,11 +513,15 @@ class ForumPlanner(Planner):
         queue = prio + [i for i in rest if i not in seen]
         budget = {"hitfx": 0, "react": 0, "capped": 0, "react_cache": {}}
         has_hit = sc["first_f"] >= 0
+        hit_occ: dict = {}                        # row -> its hit branch's contact [T1] (FORCED_RISK's ranking)
+        capped_rows: list = []                    # rows S = 1 by a cap only (checked uncapped before FORCED_RISK)
         safe_any = False
         pos = 0
         overrun = False
         cut = False
+        chunk_ms = 0.0
         while pos < len(queue):
+            tc0 = time.perf_counter()
             ch = np.array(queue[pos:pos + fcfg.chunk], np.int64)
             pos += len(ch)
             r2 = kin.rollout(start, latched[ch], params, self.terrain, variants=fcfg.variants, threads=cfg.threads)
@@ -493,7 +532,6 @@ class ForumPlanner(Planner):
             env[ch] = True
             bound[ch] = r2.bound
             t_hit[ch] = np.where(s2, occ.argmax(axis=1), T1)
-            share[ch] = occ.mean(axis=1)
             hr = ch[~s2 & has_hit[ch]]
             if len(hr):
                 room = fcfg.hitfx_k - budget["hitfx"]
@@ -502,19 +540,41 @@ class ForumPlanner(Planner):
                 if len(over):
                     S[over] = True
                     budget["capped"] += len(over)
+                    capped_rows += [int(i) for i in over]
+                    for i in over:                # unknown from the hit frame on: in contact from there (ranking)
+                        h = np.zeros(T1, bool)
+                        h[max(int(sc["first_f"][i]), 1):] = True
+                        hit_occ[int(i)] = h
+                        t_hit[i] = min(int(t_hit[i]), int(np.argmax(h)))
                 if len(hr):
                     budget["hitfx"] += len(hr)
-                    S[hr] |= self._hit_branch(f, start, latched, sc, hr, tk, enemy_only, budget)
+                    sh, oh, cp = self._hit_branch(f, start, latched, sc, hr, tk, enemy_only, budget)
+                    S[hr] |= sh
+                    self._note_hit(hr, sh, oh, cp, sc, t_hit, hit_occ, capped_rows, T1)
             safe_now = bool((env & ok & ~S & ~hz).any())
             safe_any = safe_any or safe_now
+            now = time.perf_counter()
+            chunk_ms = (now - tc0) * 1e3
             if pos >= n_core and safe_any:
                 if pos >= n_prio:
                     break
-                if (time.perf_counter() - t0) * 1e3 > fcfg.deadline_ms:
+                # the next chunk would end past the deadline (it costs about what this one did): stop before it
+                if (now - t0) * 1e3 + chunk_ms > fcfg.deadline_ms:
                     cut = pos < len(queue)
                     break
             if not safe_any and (time.perf_counter() - t0) * 1e3 > fcfg.deadline_ms and pos < len(queue):
                 overrun = True
+        if not safe_any and capped_rows:
+            # no safe row: the rows a cap set S = 1 get their hit branch uncapped, so FORCED_RISK never depends on the
+            # caps (whose order follows J and so the prefs: §4.4 item 2's "goal FORCED_RISK => default FORCED_RISK")
+            cr = np.array(sorted(set(capped_rows)), np.int64)
+            cr = cr[ok[cr] & ~hz[cr]]
+            if len(cr):
+                sh, oh, cp = self._hit_branch(f, start, latched, sc, cr, tk, enemy_only, budget, cap=False)
+                S[cr] = sh
+                t_hit[cr] = T1
+                self._note_hit(cr, sh, oh, cp, sc, t_hit, hit_occ, [], T1)
+                budget["uncapped"] = len(cr)
         t4 = time.perf_counter()
         known = env | S1
         safe = ok & env & ~S & ~hz
@@ -534,15 +594,28 @@ class ForumPlanner(Planner):
             bind_res = self._bind(ws, start, hold, prefix, f, ctx)
         forced = not safe.any() and not (bind_res is not None and bind_res[0])
         Pc = np.zeros(N)
+        t_c = np.full(N, T1, np.int64)
         sel = ok & known
         if forced and sel.any():
             cand = np.flatnonzero(sel)
             cand = cand[np.lexsort((-J[cand], -t_hit[cand]))][:fcfg.p_k]
+            # the candidates on one lane over every frame: the nominal box's centre against the support (stage 1's
+            # exact test, now on the frames stage 1 skipped too), or'ed with the hit branch's contact (its hull;
+            # from the hit frame on where a cap left it unchecked): the share of frames in contact and the first
+            b = r1.box[cand]
+            on = f.occupied(0.5 * (b[..., 0] + b[..., 2]), 0.5 * (b[..., 1] + b[..., 3]), tk)
+            if enemy_only:
+                on &= (r1.flags[cand] & F_INVULN) == 0
+            on[:, 0] = False
+            for m, i in enumerate(cand):
+                h = hit_occ.get(int(i))
+                if h is not None:
+                    on[m] |= h
+            t_c[cand] = np.where(on.any(axis=1), on.argmax(axis=1), T1)
             if fcfg.exact_p:
-                b = r1.box[cand]
                 Pc[cand] = f.prob(0.5 * (b[..., 0] + b[..., 2]), 0.5 * (b[..., 1] + b[..., 3]), tk)
             else:
-                Pc[cand] = share[cand]
+                Pc[cand] = on[:, 1:].mean(axis=1)
             sel = np.zeros(N, bool)
             sel[cand] = True
         zero = ~cmd.any(axis=1)
@@ -568,7 +641,9 @@ class ForumPlanner(Planner):
             if cont and self.macro_until > self.ticks:
                 mkeep = J >= J[N - 1] + MACRO_MARGIN
                 mkeep[N - 1] = True
-            order = np.lexsort((-J, -t_hit, Pc, ~V, ~mkeep, ~keep, S, U, hz_soft, hz))
+            # FORCED_RISK: the least share in contact, the latest first contact on the nominal lane, then on the
+            # envelope (rows clear on the nominal lane), J (a tick with a safe row: those rows all tie on these)
+            order = np.lexsort((-J, -t_hit, -t_c, Pc, ~V, ~mkeep, ~keep, S, U, hz_soft, hz))
             order = order[sel[order]]
             i = int(order[0])
             tail_ok = None
@@ -623,7 +698,9 @@ class ForumPlanner(Planner):
         self.last_info = {"posture": posture, "N": N, "stage1_pass": int(pass1.sum()), "enveloped": int(env.sum()),
                           "core": int(core.sum()), "core_pass": n_core, "prio": n_prio, "overrun": overrun,
                           "cut": cut, "hitfx": budget["hitfx"], "react": budget["react"], "capped": budget["capped"],
-                          "S": S, "Hz": hz, "U": U, "core_mask": core, "env": env}
+                          "uncapped": budget.get("uncapped", 0),
+                          "S": S, "Hz": hz, "U": U, "core_mask": core, "env": env, "Pc": Pc, "t_c": t_c,
+                          "cand": sel if forced else np.zeros(N, bool), "hit_occ": hit_occ}
         res.t_ms = {"filter": (t1 - t0) * 1e3, "rollout": (t2 - t1) * 1e3, "score": (t3 - t2) * 1e3,
                     "envelope": (t4 - t3) * 1e3, "prob_bind": (t5 - t4) * 1e3, "select": (t6 - t5) * 1e3,
                     "total": (t6 - t0) * 1e3, "s1_rollout": (t1r - t1) * 1e3, "s1_support": (t2 - t1r) * 1e3}

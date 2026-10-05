@@ -225,7 +225,7 @@ def forum_multi_bench(a: argparse.Namespace) -> int:
         terrain = terrain or Terrain2D.empty()
         if a.forum:
             planner = ForumPlanner(params, terrain, PlannerConfig(T=36, threads=a.threads, variants="bounds_lo"),
-                                   ForumConfig(deadline_ms=a.deadline_ms))
+                                   ForumConfig() if a.deadline_ms is None else ForumConfig(deadline_ms=a.deadline_ms))
         else:
             planner = Planner(params, terrain, PlannerConfig(threads=a.threads))
         tac = Tactics(load_playbook())
@@ -360,8 +360,9 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--planner", action="store_true", help="Forum --multi: today's planner and tactics too")
     ap.add_argument("--forum", action="store_true", help="Forum --multi --planner: the Forum fast layer (R3: "
                     "combat.forum_planner.ForumPlanner, the Forum loadout) instead of today's planner")
-    ap.add_argument("--deadline-ms", type=float, default=11.0,
-                    help="--forum: ForumConfig.deadline_ms (inf: deterministic decisions, for audits and "
+    ap.add_argument("--deadline-ms", type=float, default=None,
+                    help="--forum: ForumConfig.deadline_ms (default: ForumConfig's; inf: deterministic decisions, for "
+                    "audits and "
                     "identity checks)")
     ap.add_argument("--ticks-json", type=Path, default=None,
                     help="--forum: per-tick records (tick / planner / phase ms, rows enveloped, cut, "

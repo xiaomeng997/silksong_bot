@@ -1,6 +1,7 @@
 """The Forum fast layer (forum_planner_plan §4.4 items 2 and 3, round R3): combat.forum_planner.ForumPlanner on the
 synthetic Reed tables of test_multi_forecast, the Forum vocabulary, hit reactions, the Forum kill rule and the
 supervisor's Forum settings."""
+import math
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -132,6 +133,71 @@ def test_core_rows_s_hz_u_are_the_same_under_any_goal(params, arena, hero_x, sta
             assert not r.forced_risk or forced_default
 
 
+@pytest.mark.parametrize("hero_x,stab_at", [(27.0, 10), (30.2, 10), (28.5, 8)])
+def test_forced_risk_does_not_depend_on_the_caps_order(params, arena, hero_x, stab_at):
+    """The hit-branch caps are handed out in queue order (J: the prefs); with hitfx_k = 1 and react_k = 0 they bind on
+    every tick, and still a goal's FORCED_RISK implies the default goal's (the capped rows get their hit branch
+    uncapped before FORCED_RISK), and the safe set without a cap is the same under every goal."""
+    mf = _reed_forecaster(stab_at)
+    f = mf.forecast(0.8)
+    start = kin.initial_state(params, hero_x, FLOOR + params.foot)
+    ws = _world(hero_x)
+    rng = np.random.default_rng(int(hero_x * 10) + 1)
+    forced_default = None
+    for k in range(6):
+        pl = ForumPlanner(params, arena, PlannerConfig(T=36, threads=2, variants="bounds_lo"),
+                          ForumConfig(deadline_ms=math.inf, hitfx_k=1, react_k=0, chunk=16))
+        r = pl.tick(ws, start, kin.HoldState.idle(1), np.zeros(1, np.int64), f, _prefs(None if k == 0 else rng,
+                                                                                         hero_x), _ctx(kill_hp=5.0))
+        if k == 0:
+            forced_default = r.forced_risk
+        else:
+            assert not r.forced_risk or forced_default
+
+
+def test_note_hit_puts_the_hit_branch_into_the_forced_ranking():
+    """A row safe on its miss branch whose hit branch meets the support (or whose reaction a cap left unchecked) is
+    not contact-free for FORCED_RISK's ranking: t_hit drops to the branch's first contact (to the hit frame for a
+    capped one) and its contact frames are kept for the share."""
+    T1 = 12
+    rows = np.array([3, 5, 8])
+    sh = np.array([True, False, True])
+    oh = np.zeros((3, T1), bool)
+    oh[0, 6:9] = True
+    cp = np.array([False, False, True])
+    sc = {"first_f": np.array([0, 0, 0, 2, 0, 4, 0, 0, 7, 0])}
+    t_hit = np.full(10, T1, np.int64)
+    hit_occ, capped = {5: np.ones(T1, bool)}, []
+    ForumPlanner._note_hit(rows, sh, oh, cp, sc, t_hit, hit_occ, capped, T1)
+    assert t_hit[3] == 6 and hit_occ[3][6:9].all() and hit_occ[3].sum() == 3
+    assert 5 not in hit_occ and t_hit[5] == T1                     # its hit branch is clear: nothing to add
+    assert t_hit[8] == 7 and hit_occ[8][7:].all() and not hit_occ[8][:7].any() and capped == [8]
+
+
+def test_forced_ranking_never_takes_a_row_in_contact_for_contact_free(params, arena):
+    """FORCED_RISK ranks its candidates on one lane over every frame: a candidate in contact at stage 1, or whose hit
+    branch meets the support, has a share in contact above 0 and a first contact no later than its estimate's."""
+    rng = np.random.default_rng(11)
+    forced = 0
+    for x in (30.6, 31.0, 31.6, 32.0):
+        mf = _reed_forecaster(10, frames=17)
+        pl = ForumPlanner(params, arena, PlannerConfig(T=36, threads=2, variants="bounds_lo"),
+                          ForumConfig(deadline_ms=math.inf, chunk=16))
+        r = pl.tick(_world(x), kin.initial_state(params, x, FLOOR + params.foot), kin.HoldState.idle(1),
+                    np.zeros(1, np.int64), mf.forecast(0.8), _prefs(rng, x), _ctx())
+        li = pl.last_info
+        if not r.forced_risk:
+            continue
+        forced += 1
+        for i in np.flatnonzero(li["cand"]):
+            if not li["env"][i] or int(i) in li["hit_occ"]:
+                assert li["Pc"][i] > 0
+            h = li["hit_occ"].get(int(i))
+            if h is not None:
+                assert li["t_c"][i] <= int(np.argmax(h))
+    assert forced > 0
+
+
 # ---- §4.4 item 3: the chosen plan is always enveloped ----
 
 def test_the_chosen_safe_plan_was_always_enveloped(params, arena):
@@ -183,6 +249,27 @@ def test_a_hit_reed_in_alert_stabs_at_once():
     assert not f.occupied(X, Y, tk)[0][6:13].any()
     assert rf.occupied(X, Y, tk)[0][6:13].any()
     assert mf.trackers[7].state == "Alert"             # the real state is untouched
+
+
+def test_reactions_come_from_every_state_the_walk_allows_at_the_hit():
+    """A Reed in Stab Pos now (its TOOK DAMAGE exit: Stab Antic) is back in Alert (exit: Stab Pos) by a hit 0.8 s on,
+    not by one 2 frames on; the reaction forecast holds all of them, anchored at the hit time."""
+    mf = _reed_forecaster(10, frames=12)
+    T = mf.t
+    assert mf.trackers[7].state == "Stab Pos"
+    ex = hit_reactions()[REED]
+    soon = mf.reaction_states(7, T + 2 * BIN, 0.8)
+    late = mf.reaction_states(7, T + 0.8, 0.8)
+    assert soon == [ex["Stab Pos"]]
+    assert set(late) >= {ex["Stab Pos"], ex["Alert"]}
+    rf = mf.forecast_reaction(7, late, T + 0.8, 1.2, T)
+    assert rf is not None and mf.trackers[7].state == "Stab Pos"
+    # a reaction entering the stab again at 0.8 s: its blade is placed from then (both mirrors) at the anchor box
+    tk = np.arange(0, 80) * BIN
+    X, Y = np.full((1, 80), 30.0 + 2.0), np.full((1, 80), FLOOR + 1.0)
+    Xl = np.full((1, 80), 30.0 - 2.0)
+    late_occ = rf.occupied(X, Y, tk)[0] | rf.occupied(Xl, Y, tk)[0]
+    assert late_occ[49:].any()
 
 
 # ---- the Forum kill rules ----
