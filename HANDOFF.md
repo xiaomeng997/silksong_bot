@@ -1541,8 +1541,10 @@ Worktree `C:\modeling\silksong_bot\.claude\worktrees\wf_89d18409-0b6-1` (from ma
 ### Running
 
 - Instances 2 / 3: the 1x wave-start collections, restarted by the driver at 05:00 from `C:\ssbot\live_r1cfix_ed65873`
-  (seeds 162000 / 163000, 9 h): `C:\ssbot\datauns\m261005_050022_Forum_A_w2_mix_data2` (i2) and
-  `20261005_050022_Forum_A_w2_mix_data2_2` (i3); logs `C:\ssbot\sandbox4_collect_i2.log` / `_i3.log`. Stop:
+  (seeds 162000 / 163000, 9 h): `C:\ssbot\data
+uns\m261005_050022_Forum_A_w2_mix_data2` (i2) and
+  `20261005_050022_Forum_A_w2_mix_data2_2` (i3); logs `C:\ssbot\sandbox
+4_collect_i2.log` / `_i3.log`. Stop:
   `combat_run stop <run dir>` from that checkout's brain.
 - Instances 0 / 1 idle (their collections had ended before this round); instance 4 untouched.
 
