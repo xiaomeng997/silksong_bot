@@ -71,6 +71,20 @@ class TacticPrefs:
         return np.interp(x, self.risk_x, self.risk)
 
 
+@dataclass
+class GoalPrefs(TacticPrefs):
+    """The Forum's L2 goal for the fast layer (forum_planner_plan §4.3; GauntletTactics is R6): the goal's name, the
+    enemy it is about, a 2D stance region, a hit weight per enemy iid (combat.forum_planner scores every target's hits
+    with it; 1 when absent), extra macros and the goal's lifetime. The Bell Beast reads only TacticPrefs' fields. Scores
+    only: no field here changes a candidate's S, Hz or U (§4.4 item 2, tests/test_forum_planner.py)."""
+    goal: str = "LOCAL"
+    target: int | None = None
+    region: tuple | None = None          # (x0, x1, y0, y1, contact)
+    hit_w: dict = field(default_factory=dict)
+    vocab: frozenset = frozenset()
+    ttl_s: float = 0.6
+
+
 class Tactics:
     def __init__(self, pb: Playbook):
         self.pb = pb

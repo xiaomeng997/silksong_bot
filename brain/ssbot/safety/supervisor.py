@@ -54,7 +54,8 @@ the support unknown) with h >= 3; RED any trigger. Triggers (§3.7.4, Q1 / Q1a t
      punish at most 1 hit, no parry, no new fights). This replaces the stricter reading (any two threat instances in
      support), under which every hit against the Bell Beast ended the attempt (M2 runs 20261002_064001 / 072132: all
      QUITs were Q3 "h = 2 and 2-6 threat instances").
-  Q4 two unpredicted hits in one attempt, or the risk integral > 2x the training expectation
+  Q4 two unpredicted hits in one attempt (the Forum: from one enemy instance, or 3 in all; forum_supervisor_config),
+     or the risk integral > 2x the training expectation
                                                                               -> quit at the next pausable GREEN frame,
                                                                                  conservative variant, retrain flag
   Q5 frame age > 50 ms, HUD unreadable > 100 ms (not in ENDING), hero lost > 300 ms with h <= 2, unknown scene,
@@ -161,6 +162,7 @@ Q1_HIT, Q1_NO_HIT = "hit", "no_hit"                  # SupervisorDecision.q1_cau
 # A Q1 this soon after a hit is the post-hit window's quit: the hit's i-frames last at least this long (pause_window:
 # the i-frames end 1.10-2.08 s after the hit on the 2268 hits of 20261001_121446 / 122249; probe P7 "to about 1.2 s")
 POST_HIT_WINDOW_S = 1.1
+WEIGHTED_POST_HIT_WINDOW_S = 1.3   # Weighted Anklet i-frames x1.3 (probes.md: 1.30 s on the person's recording)
 NOTHING: frozenset[Prim] = frozenset()
 
 # §3.5.6 constants
@@ -179,6 +181,13 @@ class SupervisorConfig:
     #                                            floor of an unknown support's D1; required, no default
     q2_escape_s: float = 0.2
     q4_unpredicted_hits: int = 2
+    q4_per_instance: bool = False              # Forum (forum_planner_plan §4.4 item 7): Q4 counts the unpredicted hits
+    #                                            per enemy instance (SupervisorInput.unpredicted_sources), so one wrong
+    #                                            model fires it and two unrelated ones over a 13-wave run do not; the
+    #                                            total still fires at q4_total_hits
+    q4_total_hits: int | None = None           # with q4_per_instance: the attempt-wide cap (None: none)
+    post_hit_window_s: float = POST_HIT_WINDOW_S   # the Weighted Anklet's i-frames 1.30 s (probes.md):
+    #                                            forum_supervisor_config(weighted=True)
     risk_factor: float = 2.0
     expected_risk_per_s: float | None = None   # training expectation of the integral's growth; None: Q4 by hits only
     risk_warmup_s: float = 5.0                 # the expectation is never taken over less than this
@@ -220,6 +229,7 @@ class SupervisorInput:
     i2_violated: bool = False
     escape_s: float | None = None              # least time any candidate needs to leave the I2 exposure (None: none)
     unpredicted_hits: int = 0                  # hero hits this frame that no in-support tube covered
+    unpredicted_sources: tuple = ()            # ... their enemy instances (iid; None unknown), for q4_per_instance
     damage_taken: int = 0                      # damage the hero took this frame (raises the unknown-support floor)
     hurt: bool | None = None                   # the hero shows a hit's knockback (cState recoilFrozen / recoiling;
     #                                            vision: hero mode "hurt"); None: not read. A health drop without it
@@ -452,6 +462,7 @@ class Supervisor:
         """A new attempt."""
         self.risk_integral = 0.0
         self.unpredicted = 0
+        self.unpredicted_by: dict = {}          # q4_per_instance: unpredicted hits per enemy instance
         self.worst_seen = 0
         self.pending = False
         self.on_paused: str | None = None
@@ -553,7 +564,7 @@ class Supervisor:
         end seconds later, when the hit is long past: they read "no hit" before)."""
         if self._q1_cause is not None and (self.pending or self.paused):
             return self._q1_cause
-        self._q1_cause = Q1_HIT if self.t_hit is not None and 0.0 <= t - self.t_hit <= POST_HIT_WINDOW_S \
+        self._q1_cause = Q1_HIT if self.t_hit is not None and 0.0 <= t - self.t_hit <= self.cfg.post_hit_window_s \
             else Q1_NO_HIT
         return self._q1_cause
 
@@ -573,7 +584,13 @@ class Supervisor:
             why = q3_threat(support, known)
             if why:
                 out.append(("Q3", f"h = 2 and {why}"))
-        if self.unpredicted >= cfg.q4_unpredicted_hits:
+        if cfg.q4_per_instance:
+            worst = max(self.unpredicted_by.items(), key=lambda kv: kv[1], default=(None, 0))
+            if worst[1] >= cfg.q4_unpredicted_hits:
+                out.append(("Q4", f"{worst[1]} unpredicted hits from instance {worst[0]}"))
+            elif cfg.q4_total_hits is not None and self.unpredicted >= cfg.q4_total_hits:
+                out.append(("Q4", f"{self.unpredicted} unpredicted hits"))
+        elif self.unpredicted >= cfg.q4_unpredicted_hits:
             out.append(("Q4", f"{self.unpredicted} unpredicted hits"))
         exp = self._expected_risk(inp.t)
         if exp is not None and self.risk_integral > cfg.risk_factor * exp:
@@ -664,6 +681,11 @@ class Supervisor:
             h, basis = self._h(inp, hero, support)
         self.risk_integral += max(0.0, inp.p_death)
         self.unpredicted += max(0, inp.unpredicted_hits)
+        if inp.unpredicted_hits > 0:
+            src = list(inp.unpredicted_sources)[:inp.unpredicted_hits]
+            src += [None] * (inp.unpredicted_hits - len(src))
+            for k in src:
+                self.unpredicted_by[k] = self.unpredicted_by.get(k, 0) + 1
         if (inp.hit_dealt or healed) and not self.pending and not self.paused:
             self._stall_t0, self.qs = None, None        # progress this step: no stalemate quit on it
 
@@ -764,6 +786,17 @@ class Supervisor:
 
 
 # ---- §3.5.6 gates ------------------------------------------------------------------------------------------------
+
+def forum_supervisor_config(weighted: bool = False, **kw) -> SupervisorConfig:
+    """The Forum's supervisor settings (forum_planner_plan §4.4 item 7, round R3): worst_known_damage 2 (rune slams,
+    the Clawmaiden's spear blast and every 2-mask attack; multi-hit chains come as SupportEvent.hits / damage from
+    chains.json through MultiForecast.support_set), Q4 per enemy instance (the attempt-wide total at 3), and with the
+    Weighted Anklet equipped (the route from S09 on) the post-hit window of its 1.30 s i-frames."""
+    d = dict(worst_known_damage=2, q4_per_instance=True, q4_total_hits=3,
+             post_hit_window_s=WEIGHTED_POST_HIT_WINDOW_S if weighted else POST_HIT_WINDOW_S)
+    d.update(kw)
+    return SupervisorConfig(**d)
+
 
 def bind_allowed(silk: int, hp: int, max_hp: int, h: int, t_min_s: float, *, injector_band: bool = False,
                  warding_bell: bool = False, perception_margin_s: float = 0.0, p_exposed: float = 0.0,

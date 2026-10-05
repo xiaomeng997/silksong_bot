@@ -1363,3 +1363,130 @@ Nothing (all fix-round runs finished).
 7. Wiring the MultiForecaster into the live loop is not done (R2 is offline): one forecaster per episode on shared
    tables is safe (the store fix), `warm()` belongs before the fight; `MultiForecaster(boss=fc)` may wrap a Forecaster
    that already has state.
+
+## Task R3 - Forum plan round R3: the fast layer (branch worktree-wf_449c2ee3-df3-1)
+
+Worktree `C:\modeling\silksong_bot\.claude\worktrees\wf_449c2ee3-df3-1` (from main fe50ef9). Offline, plus the Bell
+Beast mini batch on instance 3. Facts: `docs/facts/1.0.30000/forum.md` section 15 (Chinese). Outputs (not in git):
+`C:\ssbot\data\m2_forum_r3\` (drivers `cert.cmd`, `kin.cmd`, `bench.cmd`, `bb_batch.cmd`, `bb_identity.cmd`,
+`scan3.cmd`; results `recall_*`, `kin_*`, `bench_*`, `bbdec_*`). Frozen checkouts (git archive, no .git: behaviour_build
+needs `--allow-no-sha`): `C:\ssbot\live_r3_2a10a0d` (certification), `live_r3kin_d9dd529` (Bell Beast batch, scans),
+`live_r3_0d735f4` (kin_check final, benches load1), `live_r3_2b8f5c7` (final benches), `live_main_fe50ef9` (Bell Beast
+identity baseline), `live_r3cert_5d0243b` (superseded).
+
+### Done (committed)
+
+- Certification fix (forum.md 15.1): the 13.13 miss is covered by the MultiForecast already (window / bbox rows; 2 u
+  of margin), it was SubjectRecall's; the structure behind it (CM_SLASH anchored at Fly To Slash, 3.3 u from where the
+  Clawmaiden struck) is fixed by re-anchoring: an instance entering another start state of its family is also placed
+  as an instance from that state, anchored where the enemy is then (EnemyTracker Instance.re_*, MultiForecast).
+- Forecast tightenings found by the wave-6 diagnosis (forum.md 15.2): the walk's lower bound (a zero-dwell loop drove
+  entries to -333 s; every Tiny's later instances were arena-wide boxes over the whole horizon; recall forecasts 2.4 ->
+  0.7 ms), arena boxes from the templates' boxed bins and merged per window, dead / parked Tinies back no earlier than
+  a Maestro's Summon (105 of 105 revivals on the Summon frame).
+- ForumPlanner (`combat/forum_planner.py`, forum.md 15.3): posture families + the 56-row core evasion set
+  (`candidates.build_forum`), stage 1 nominal + centre support on frames 1-3 and every other one, stage 2 bounds_lo
+  envelope in 32-row chunks with K_b 96, V siblings and the 11 ms deadline (core rows always enveloped; no safe row ->
+  checks on), Reaper shapes over the 4 nearest targets with GoalPrefs.hit_w, hit branches (32 / tick) with the hit
+  enemy's reaction (hero_caused TOOK DAMAGE exits, MultiForecaster.forecast_reaction, 4 / tick), dash-stab rows vetoed,
+  FORCED_RISK ranked by time in contact (exact_p optional), EnvelopeAudit; U = the blow that may end the battle
+  (`forum_kill_hp`, I3 only: no kill branches), YELLOW per-enemy kill freeze (`forum_yellow_kill_hp`,
+  `kill_freeze_s`); `GoalPrefs`; `planner_bench --forum`.
+- Supervisor: `forum_supervisor_config(weighted)`: worst_known_damage 2, Q4 per enemy instance (2) or 3 in all
+  (`SupervisorInput.unpredicted_sources`), post-hit window 1.3 s with the Weighted Anklet; Bell Beast defaults unchanged.
+- Kinematics (Forum loadout only, forum.md 15.6): landing resets a swing whose slash is over (BackOnGround ->
+  ResetAttacks); a ground dash ending at a wall ends the sprint (Dash To Run); Sprint Grace on the ground sprint only,
+  0.2583 s (the estimator restarts the timer on landing too).
+- Tests: `tests/test_forum_planner.py` (14: §4.4 items 2 and 3 as property tests, vocabulary, posture, hit reaction,
+  kill rules, Q4 per instance, the anklet window, Reaper shapes), `tests/test_multi_forecast.py` +2 (re-anchoring, walk
+  floor). Full suite: 1098 passed, 2 skipped, 1 xfailed (at 0d735f4-ish).
+
+### Measured (acceptance; forum.md 15.5-15.8)
+
+- (a) §4.4 items 2 and 3 as property tests (`tests/test_forum_planner.py`): the core rows' S / Hz / U bit-identical
+  under 8 random GoalPrefs in 4 positions (deadline 0 / 50 ms), goal FORCED_RISK => default FORCED_RISK; the chosen
+  S = 0 plan enveloped in every tick at deadline 0 / 2 / 50 ms. Audit on the benches (9,003 ticks): chosen S = 0
+  1,173 = enveloped 1,173, core_not_enveloped 0, overrun 0.
+- (b) Bell Beast: decisions of main fe50ef9 vs R3 (0d735f4) on 20261003_144536 i4_000 and 20261004_095304 i0_001,
+  4,001 ticks each: 0 differences (index, name, S, FORCED_RISK, mask, J, P, plan and path hashes;
+  `bb_identity.cmd`). 50-episode oracle batch on instance 3 (`live_r3kin_d9dd529`, seeds 139100+,
+  `20261005_013127_BellBeast_eval_planner_oracle`): 50 / 50 CLEAR, 0 WOULD_DIE, 0 unpredicted hits, plan p99 median
+  15.3 ms. (A first try, seeds 139000, `20261005_012618`, stopped after 3 episodes: "paused unasked" -> time scale 0;
+  2 CLEAR + 1 HARNESS_FAIL, not counted.)
+- (c) Forum open-loop bench (074719 i3 ep0, 3000 frames each, CPU p50 42-58 %, `bench.cmd live_r3_2b8f5c7 final`):
+  tick p50 / p99 after: wave 6 (Maestro x2) 8.06 / 18.19 ms, wave 11 (mixed) 6.13 / 16.90, wave 13 (finale) 6.31 /
+  14.52; Bell Beast under the same load 5.71 / 18.20 and 5.93 / 18.44 (before / after the Forum runs); before (today's
+  planner, R2 checkout) 19.2 / 31.0, 14.2 / 24.6, 15.3 / 23.9. FORCED_RISK before -> after: 90.8 -> 85.9 %, 88.0 ->
+  84.4 %, 93.7 -> 91.6 % (open loop: the data policy's hero is in support within frames 1-3 on 99.9 % of the forced
+  ticks). Wave 6's p99 equals the Bell Beast's (18.19 vs 18.20 / 18.44): no margin. At CPU 72-86 % (`load1`) wave 6's
+  p50 was 11.6 ms (Bell Beast 7.5).
+- (d) Recertification through MultiForecast on 2a10a0d (R0's tables and margins; L2 / L3 / L4, union and own, hooks
+  counted): dev 107 fights 229,711 / 229,711; fresh 352 fights (R0's 35, R1's 187, 13.13's 130 1x incl. the missed
+  fight) 304,072 / 304,072 per table; new 357 fights nobody had seen (162411 ep60+, 195019, 195800; all 1x) 180,145 /
+  180,145 per table. Every type 100 %. known = True; recorded in `support_margins.json` `runtime_certification`.
+- kin_check (Forum loadout, bounds_lo_mix, `kin.cmd`): held-out dash 97.34 -> 99.67 % (3,048 windows), held-out all
+  99.262 -> 99.404 %, fit + dev unchanged (dash 100 %, all 99.064 %); no other category moved.
+- Tests: full suite 1098 passed, 2 skipped, 1 xfailed.
+
+### Fixer round (after the review; commits 9a8b05d .. HEAD; forum.md 15.11)
+
+- Refuted (c) p99: the p99 ticks were all ticks with a safe row where the envelope ran to the 11 ms deadline. Now
+  deadline 8 ms with a predictive stop (no chunk that would end past it, taken to cost what the last one did; the
+  core rows still always enveloped), the hit branch's reaction contacts one query per reaction (was one per row,
+  ~0.37 ms each), and MultiForecast's support query builds and tests all five box kinds at once (was one array build
+  and kernel call per kind, ~0.45 ms per query; bit-identical union, test). Re-measured interleaved
+  (`C:\ssbot\data\m2_forum_r3fix\bench_fix.cmd live_r3fix_1e45c67 fix2`, CPU p50 29-31 %): wave 6 tick p50 / p99
+  6.04 / 13.49 and 5.84 / 13.51 ms, wave 11 4.30 / 11.25, wave 13 4.96 / 10.88; Bell Beast 15.12 / 15.37 / 13.88 (p99,
+  before / between / after). Margin 0.4 ms to the lowest Bell Beast run; not re-measured at high load.
+- FORCED_RISK ranking: the hit branch's contact joins the row (t_hit, contact frames; a capped row in contact from
+  its hit frame); the p_k candidates are compared on one lane and one frame set (nominal, stage 1's frames; stage 1's
+  first contact is a lower bound now).
+- Hit reactions: from every state the walk allows at the hit (`reaction_states`, `_WalkCache.states`), one forecast
+  for all, anchored at the hit time (dead reckoning + idle growth + view spread, both mirrors; the re-anchor path of a
+  same-family reaction is placed too, it was not before). The real forecast is bit-identical (certification stands).
+- Caps never decide FORCED_RISK: without a safe row the capped rows get their hit branch uncapped first (audit
+  `uncapped_ticks` / `uncapped_rows`; property test with hitfx_k 1, react_k 0). The first hit is looked for on every
+  enemy within 14 u (the 4 nearest scored). `ForumConfig.deadline_ms = inf` = deterministic decisions
+  (`planner_bench --deadline-ms`); `planner_bench --ticks-json` writes per-tick records.
+- Template files: sha256 in `support_margins.json` `runtime_certification.table_files`; canonical copy
+  `C:\ssbot\tables\forum_r3_2a10a0d` (copy into `knowledge/1.0.30000/enemies/forum/` of a new checkout).
+- kin_check: T1 + T2 relabelled a development set (forum.md 15.6). Untouched excitation recordings have 1 dash window;
+  on an untouched Forum combat recording (195019 i0_000, 131,328 windows) planner_bounds dash is 78.45 % (4,259), the
+  same as before R3's kinematics (2a10a0d): the plan's "dash >= 99 %" is far from met on live Forum data, cause not
+  investigated.
+- Tests: full suite 1107 passed, 2 skipped, 1 xfailed (tests + ssbot/tests); `tests/test_forum_planner.py` 22 items.
+- Frozen checkouts added: `C:\ssbot\live_r3fix_9a8b05d` (base bench), `live_r3fix_762d90f` (fix1),
+  `live_r3fix_1e45c67` (fix2, kin_check); outputs `C:\ssbot\data\m2_forum_r3fix\`.
+
+### Running
+
+- Instance 3: the 1x Forum wave-start collection restarted after the batch, `C:\ssbot\sandbox\r3_collect_i3.cmd`
+  (the r1c_collect i3 command from the fixed frozen code `C:\ssbot\live_r1cfix_ed65873`, seeds 140000+, 9 h from
+  02:28): run dir `C:\ssbot\data\runs\m2\20261005_022858_Forum_A_w2_mix_data2`, log `C:\ssbot\sandbox\r3_collect_i3.log`.
+  Stop: `cd C:\ssbot\live_r1cfix_ed65873\brain; ..\scripts\uv.cmd run python -m ssbot.tools.combat_run stop <run dir>`.
+- Instances 0 and 1: their collection runs (195019, 195800) ended on their timeboxes at 01:50 / 01:58 (not restarted
+  here); instance 2's 233950 runs to about 07:39; instance 4 untouched.
+- Offline: nothing.
+
+### Needs deploy
+
+- Nothing (no oracle change).
+
+### Next
+
+1. R4: wire the fast layer into the live loop (MultiForecaster per episode on shared tables, ForumPlanner with the
+   Forum params and `with_weighted()` when `ws.res.equipped` has the Weighted Anklet, `forum_supervisor_config`,
+   `SupervisorInput.unpredicted_sources`, FilterContext.kill_hp = `forum_kill_hp`, kill_prims from
+   `forum_yellow_kill_hp`), then the A0 baseline.
+2. The hit-branch cap (32 / tick) left 1,464 attack rows of wave 11 at S = 1: order the hit branches by J across
+   chunks, or raise the cap with the margin the bench leaves (wave 11 p50 6.1 ms).
+3. Wave 6's p99 has no margin over the Bell Beast's: the stage-1 support query (1.4 ms p50, 3.5 p99) and the rollout
+   (1.8 / 3.6) are the next to cut (fuse rollout and support, §4.5).
+4. The killing blow's branches for the final kill (certified kill instead of I3 only); comfort templates for the
+   multi path; the lock check past the horizon if Silkspear comes back into the Forum set.
+5. bounds_lo vs bounds_lo_mix for the envelope (kin_check validates the latter).
+6. Sprint Grace 0.2583 s is fitted (template 0.3 s): read the hornet_sprint Sprint Timer actions; check the landing
+   reset (ResetAttacks) on live Forum recordings (no excitation window isolates it).
+7. A recording with the Weighted Anklet equipped to check `with_weighted()` and the 1.3 s post-hit window.
+8. Frozen checkouts to remove when done: `C:\ssbot\live_r3cert_5d0243b`, `live_r3_2a10a0d`, `live_r3kin_d9dd529`,
+   `live_r3_0d735f4`, `live_r3_2b8f5c7`, `live_main_fe50ef9` (plain directories, not git worktrees).

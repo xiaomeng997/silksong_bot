@@ -25,6 +25,7 @@ templates. The behaviour builder imports the oracle IPC (the import firewall), s
 and npz files here, and the static type facts from ssbot.core.forum.
 """
 import json
+import math
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -346,6 +347,20 @@ class TemplateStore:
             boxes, t0 = self.bbox_level0(tid)
             r = self.add_bbox(tid, boxes, t0)
         return r
+
+    def active_span(self, tid: int) -> tuple[float, float]:
+        """(t0, t1) of the bins of an id's bounding-box table that hold a box (span() covers the empty ones too: a
+        family walk of a parked Tiny spans from -332 s; forum.md 15.2), cached."""
+        c = self._active.get(tid) if hasattr(self, "_active") else None
+        if c is None:
+            if not hasattr(self, "_active"):
+                self._active = {}
+            offs, nt, t0 = self.bbox_table(tid)
+            b = self.bb_rows()[int(offs[0]):int(offs[0]) + nt]
+            nz = np.flatnonzero(b[:, 2] >= b[:, 0])
+            c = (t0 + float(nz[0]) * BIN, t0 + float(nz[-1]) * BIN) if len(nz) else (math.inf, -math.inf)
+            self._active[tid] = c
+        return c
 
     def bb_rows(self) -> np.ndarray:
         if self._bb_arr.shape[0] != self._bb_n:

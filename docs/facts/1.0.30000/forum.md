@@ -716,3 +716,160 @@ cd brain   # 低优先级、NUMBA_NUM_THREADS ≤ 4
 10. 对用户问题"bot 反应会比我 0.5 倍速快吗"的回答原来把"召回在 2–4 帧前就盖住接触"当成反应速度，不对（见 HANDOFF Task R2 的更正）。
 
 全部测试（`pytest -q`，tests + ssbot/tests，e516f22 时的工作区，整机忙）：1071 passed、2 skipped（其一是上面这条计时测试，按负载跳过）、1 xfailed；`tests/test_multi_forecast.py` 25 个。
+
+## 15. R3：快层（ForumPlanner）（2026-10-05，forum_planner_plan.md §5 R3；离线 + 实例 3 的 Bell Beast 小批）
+
+代码：`combat/forum_planner.py`（ForumPlanner，Planner 的子类；Forum 开关 = 胶水层用哪个类，Bell Beast 的 `Planner` 一行没改）、`combat/candidates.py`（`build_forum`：姿态族 + 核心躲避集）、`combat/tactics/modes.py`（`GoalPrefs`）、`combat/multi_forecast.py`（重新锚定、受击反应预报、三处收紧）、`knowledge/kin_jit.py` / `kinematics.py`（冲刺两处、落地清后摇，只在 Forum 配装下生效）、`safety/supervisor.py`（`forum_supervisor_config`）；工具 `planner_bench --encounter Forum --multi --planner --forum`；测试 `tests/test_forum_planner.py`（14 个）、`tests/test_multi_forecast.py` 新增 2 个。输出（不进仓库）：`C:\ssbot\data\m2_forum_r3\`（驱动 `cert.cmd`、`kin.cmd`、`bench.cmd`、`bb_batch.cmd`、`bb_identity.cmd`、`scan_new.cmd`）。
+
+### 15.1 13.13 的漏网与重新锚定
+
+- **经 MultiForecast 重放这一次接触**（`20261004_162411` i3/ep9 f482061，折 1 的表；R0 的表和 R0+R1 候选表都试了）：L2 / L3 / L4 都盖住。盖住它的是窗口放置和外包盒（当前招 CM_SLASH 的家族并集与后续实例），细模板没有盖住；把主角盒再往 Clawmaiden 冲的方向挪 2 u 仍然盖住。13.13 的漏网是 R0 的 SubjectRecall（逐状态模板 + 余量）的，不是运行时预报的。
+- **结构上的原因**：CM_SLASH 从 `Fly To Slash` 开始，锚点是那时的位置 (32.70, 7.53)；到 `Slash Antic` 0.475 s 时 Clawmaiden 已经飞到 (29.40, 6.21)，离锚点 3.3 u。按锚点坐标系的模板只含录像里出现过的飞行距离。
+- **改法（重新锚定）**：一个实例进入**同一家族的另一个起始状态**（`Fly To Slash` → `Slash Antic`；表里 CM_SLASH 的 `start_states` 本来就是这两个）时，实例照旧继续，同时把剩下的部分当作"从这个状态开始、锚在那一刻位置的新实例"再放一份（该起点的家族行走模板，外包盒形式）。直接从 `Slash Antic` 开始的实例没有飞行段，所以这一份不管之前飞了多远都对得上。测试：合成 Reed 飞 3 u 后，只有重新锚定的那份盖住刀（`test_an_attack_that_moved_is_re_anchored_at_its_later_start_state`）。
+- **重新认证**：15.8。
+
+### 15.2 第 6 波开环 FORCED_RISK 的诊断：预报的三处收紧（都要重新认证）
+
+ForumPlanner 第一版在第 6 波回放（074719 i3 ep0）里阶段 1 通过的行中位数是 0；逐 tick 查主角站位被谁盖住：
+
+1. **行走的下界跑到 −333 s**：Tiny 的 `Ready → Ready` 自环最小停留 0，每走一圈出口区间按 1 帧松弛往前挪一帧；"区间一直在长就直接取边界"对下界取的是 min(lo, 0)，已经是负数就一直往下，直到步数上限 20 000（= −333 s）。于是 Tiny 的待机家族行走模板从实例开始前 333 s 起就有盒子，任何一只 Tiny 的后续实例都成了覆盖整个视野的全场盒。改：根之后的节点进入时间不早于根 1 帧（`walk` 的 `push`：lo ≥ −DWELL_SLACK_S）；测试 `test_a_zero_dwell_loop_never_enters_before_the_root`。不只 Tiny：R2 的代码里 610 次行走（9 类的每个状态 × 是否超时）有 **494 次**跑到 −1 s 以下、一直走到步数上限（8 类，只有 Choristor 没有）；撞上上限的行走在那一刻停下，后面的节点可能没走到。改后 0 次。副作用：召回里每次预报从约 2.4 ms 降到约 0.7 ms；dev 召回里之前每个滞后约 1 290 次只由待机身体管盖住的接触，现在全部由预报本身盖住（推断是行走不再被截断，没有逐次核对）。
+2. **全场盒取的是一个 owner 所有窗口的外包区间**：改为模板里**有盒子的那些帧**（`TemplateStore.active_span`），按窗口合并。
+3. **死掉 / 停放的 Tiny 随时可能回来**：8 场 R0 完整连战里 105 次 Tiny 离开 `Dead`（全部进 `Set Pos`），**105 次都在某只 Maestro 进入 `Summon` 的同一帧**（间隔 0）。改：它们最早在"在场 Maestro 最早可能进入 `Summon`"时离开 `Dead`（Maestro 的行走：当前实例里的 `Summon` 节点，或含 `Summon` 的家族（MA_SUMMON，`Call` 0.48–0.52 s 之后）的后续实例起点加该家族记录的最早 `Summon` 进入时间，减 1 帧）；没有在场 Maestro 时照旧不走。
+
+这三处之后第 6 波的全场盒从 0.73–0.93 s 才开始（之前从 −332 s 起）。但开环里主角站位本身在第 1 帧就被盖住的 tick 仍占绝大多数（数据策略的主角贴着 Tiny 群和 Maestro），开环 FORCED_RISK 比例几乎不变（15.5）；这三处改的是 0.6 s 视野后段的支撑，闭环里规划器自己保持距离时才看得出。
+
+### 15.3 ForumPlanner（快层）
+
+- **候选**：起始状态的姿态族（`posture_of`：WSIDE 或 CLING → 墙，否则按 GROUND 分地面 / 空中）。核心躲避集 56 行 = {WAIT, MOVE 左右, JUMP 11 / 24 / 48 帧 × 原地 / 左 / 右, DASH 左右} × {idle, 左跑, 右跑, 满跳}，三个族里命令逐位相同、没有攻击键；姿态的攻击首段（地面：横砍 3、上砍 2；空中再加收割者下劈 2；墙上：横砍 3 = 墙砍）× 全部续段（Bell Beast 的续段去掉 4 个，加"冲刺"和"冲刺后第 10 帧横砍"各两向）。行数：地面 399、空中 441、墙 357，加 CONTINUE；没有丝技。失去控制（受击冻结 / 后退、锁）时只用核心行。
+- **阶段 1**：所有行只推标称一条，标称碰撞盒中心查支撑（模板按主角受击盒膨胀，这就是标称盒的精确检查）。它是必要条件：阶段 1 接触 ⇒ 包络接触（包络盒含标称盒，包络按子盒的检查偏保守，各条都无敌的帧在标称里也无敌），所以阶段 1 接触的行 S = 1 已定，不用包络。J、Hz、U 都在标称上算。
+- **阶段 2（包络，bounds_lo）**：每块 32 行，顺序：通过阶段 1 的核心行（**总是，不受截止时间限制**）、CONTINUE、其余按 (Hz, Hz_soft, U, −J) 的前 K_b = 96 行、前 8 名各自同首段的最多 3 个兄弟（V 要两条同首段的安全路），然后其余。优先部分之后，遇到留下安全行的块就停；优先部分之内，过了截止时间（11 ms）且已有安全行才停；**没有安全行就一直查到底**（慢 tick，计 overrun，不算 FORCED_RISK）。
+- **命中效果**：每块里有预测命中、包络安全的行（每 tick 最多 32 行）带着第一下命中的效果重推（横砍 / 墙砍：背向后坐；上砍：RecoilDown；下劈：弹起）并重查；超出上限的、有预测命中的行 S = 1。命中分支还要查**被打敌人的受击反应**：`hero_caused.json` 的 TOOK DAMAGE 出边（Clapper `Idle` → `Dmg Attack`、Reed `Alert` → `Stab Pos`、Minister `Chase` → `Range Check`、Maestro `Fly` → `Summon?`、Envoy `Charge` → `Reset` 等，只用跟踪器所跟 FSM 的出边），`MultiForecaster.forecast_reaction` 从命中那一帧按反应状态单独给这只敌人做一份预报（每 tick 最多 4 份，超出的行 S = 1）。测试：Reed 在 `Alert` 被打，反应预报的刺比平常的支撑早到（平常要等 `Alert` 的最小停留）。
+- **打分**：收割者横砍 / 上砍 / 墙砍 / 下劈的多边形（`attacks/reaper.json`，生效帧 5–12 / 5–15 / 5–12；下劈前摇 9 帧、斩 11 帧；墙砍 = 不着地且碰撞盒离竞技场墙 ≤ 0.15 u 时的横砍）对最近 K = 4 个、14 u 内的敌人（MultiForecast.targets：受击框沿速度外推），每个目标按 `GoalPrefs.hit_w[iid]` 加权（默认 1）。测试：横砍打到前上方、上砍只打到正上方和身后（M2.md 你的经验那一条）。冲刺 / 冲刺跑中按攻击的行（游戏里是冲刺斩，模型没有）否决（R_UNMOD）。
+- **选择**：只在 S 已知的行里选（包络过的，或阶段 1 就接触的）；选中的 S = 0 计划一定包络过（审计 `EnvelopeAudit`：chosen_safe == chosen_safe_enveloped、core_not_enveloped == 0）。FORCED_RISK：第一次接触最晚的 16 行里先比**接触帧占比**（代替 P：MultiForecast.prob 每个敌人、每种放置、每个概率值各查一次，第 6 波 p50 3.7 ms），再比接触时刻、J；`ForumConfig.exact_p` 打开就用 P。
+- **U / I3**：致命一击 = 可能结束整场战斗的那一刀（`forum_kill_hp`：终局波在跑（或波次都完）、没有排队的下一波，剩下成员 hp_est − 3σ 的**最大值**：一刀要结束战斗就得把剩下的全打死）；平常波次的击杀不进 U。R3 没有击杀分支，所以这一刀只在 I3（GREEN、满血、h ≥ 3）下放行。
+- **YELLOW 的每敌击杀冻结**：`forum_yellow_kill_hp`：在场、该类型的击杀在 kill_freeze.json 里出现过冻结（`kill_freeze_s`，按类型取最长）的敌人中 hp_est − 3σ 的最小值，给监督器的 kill_prims（接线在 R4）。
+- **不在快层里**：视野末的锁定检查（Forum 候选没有丝技；Bind 宏自己查）、按键经济项、击杀分支、comfort（多敌人路径没有 comfort 模板）。
+- **属性测试（§4.4 第 2、3 条，`tests/test_forum_planner.py`）**：四种局面（刺的前方、身后、待机、刺中）× 8 组随机 GoalPrefs（权重、站位、风险图、hit_w、max_hits；截止时间 0 / 50 ms 交替）：核心行的 S / Hz / U 逐位相同，有目标时 FORCED_RISK ⇒ 默认目标下也 FORCED_RISK；13 个位置 × 截止时间 0 / 2 / 50 ms（块 16）：选中的 S = 0 计划全部包络过；刺中时 FORCED_RISK 只在通过阶段 1 的行全部包络之后。
+
+### 15.4 监督器的 Forum 设置（`forum_supervisor_config`）
+
+worst_known_damage = 2；Q4 按敌人实例计（同一实例 2 次支撑外命中，或全场 3 次；`SupervisorInput.unpredicted_sources`，胶水层在 R4 填）；负重环带装着时受击后窗口 1.3 s（i-frame ×1.3，probes.md 实测 1.30 s；`WEIGHTED_POST_HIT_WINDOW_S`）。多段事件的 hits / damage 已由 MultiForecast.support_set 按 chains.json 的最大整链给出（R2）。Bell Beast 的默认值不变（测试）。负重环带的运动学（`HeroParams.with_weighted()`）在 bench 里按 `ws.res.equipped` 切换；bot 的录像里没有装过它的，没有用装着它的录像核对过【未核实】。
+
+### 15.5 算力：Forum 开环 bench（R3 验收 (c)）
+
+`planner_bench --encounter Forum --multi --planner [--forum]`，074719 i3 ep0 的三段录像：第 6 波（Wave 7 - Maestro × 2，6–8 只敌人）、第 11 波（Wave 12，混合）、第 13 波（Wave 14 - Finale），每段 3000 帧（前 50 个 tick 不计）；"之前" = 今天的 Planner + MultiForecast（R2 的冻结检出 `live_r2fix_e516f22`，即 14.5 (g) 的配置），"之后" = ForumPlanner + Forum 配装的运动学（`hero_reaper_forum.json`）；同一负载下前后各跑一次 Bell Beast bench（20261003_144536 i4_000，6000 帧）。开环：主角的位置来自录像里的数据策略，FORCED_RISK 比例不是闭环实战的比例。
+
+整机 CPU p50 42–58 %（5 个游戏实例（实例 0、1 空闲）+ 3 个扫描进程），冻结检出 `live_r3_2b8f5c7`（之后）与 `live_r2fix_e516f22`（之前），`bench.cmd ... final`：
+
+| 录像 | 敌人 | 之前 tick p50 / p99（ms） | **之后 tick p50 / p99** | 之后规划器 p50 / p99 | FORCED_RISK 之前 → 之后 |
+|---|---|---|---|---|---|
+| 第 6 波（Maestro × 2） | 8 | 19.2 / 31.0 | **8.06 / 18.19** | 4.97 / 15.47 | 90.8 % → 85.9 % |
+| 第 11 波（混合） | 2 | 14.2 / 24.6 | **6.13 / 16.90** | 3.91 / 14.49 | 88.0 % → 84.4 % |
+| 第 13 波（终局） | 2 | 15.3 / 23.9 | **6.31 / 14.52** | 4.45 / 12.19 | 93.7 % → 91.6 % |
+| Bell Beast（同负载，前 / 后） | | | 5.71 / 18.20、5.93 / 18.44 | 5.19 / 15.67 | 2.2 % |
+
+- 验收：三段 tick p50 都 ≤ 9 ms；p99 不高于同负载的 Bell Beast bench（第 6 波 18.19 对 18.20 / 18.44 ms：持平，余量在噪声以内）。**审查复测没有复现**（CPU p50 33 %：第 6 波 p99 16.16 ms，前后三次 Bell Beast 13.68 / 15.65 / 13.33 ms），这一条按"未达到"算；修正与复测见 15.11。之后的分项（第 6 波 p50）：阶段 1 推演 1.80 ms、阶段 1 支撑 1.38 ms、打分 0.42 ms、包络 0.10 ms（p99 9.0 ms：通过阶段 1 的行多时）、选择 0.11 ms；预报 1.27 ms；tick 里规划器之外的约 1.8 ms 是 bench 自己的 HOLD 偏好和风险图（L2 的替身）。
+- 审计（三段合计 9 003 tick）：选中 S = 0 的 1 173 次全部包络过；core_not_enveloped 0；overrun 0；截止时间截断 182 次；命中分支超出上限置 S = 1 的行 1 862 行（第 11 波最多）；受击反应预报 117 份。
+- 高负载对照（`load1`，CPU p50 72–86 %，那时还在跑 6 个召回进程、kin_check 和全套测试）：之后 8.6–11.6 / 19.2–48.4，Bell Beast 6.9–7.5 / 21.1–47.4（同一时段），之前 15.5–22.4 / 28.0–34.6。第 6 波 p50 在 86 % 负载下超过 9 ms。
+- FORCED_RISK 仍然很高：这是开环（主角在数据策略的位置，常常第 1–3 帧就在支撑里，"forced_stage1" 占 forced 的 99.9 %），不能当成闭环实战的比例。第 6 波 R2 时 92 %，R3 前 90.8 %（同一负载、R2 的检出）。
+
+### 15.6 运动学：冲刺两处、落地清后摇（只在 Forum 配装（abilities ≠ 0）下生效；Hunter 逐位不变）
+
+- **贴墙的地面冲刺**：冲刺结束进地面 sprint 时，如果面向的墙在接触距离 + 0.05 u 之内，sprint FSM 立刻结束（Dash To Run），不做 Ground Sprint 的 0.05 u Translate。T1 的 6 次贴墙冲刺（之前把碰撞盒推进墙里、再跑出 3 u）全部对上。
+- **Sprint Grace 只算地面 sprint 的时间**：空中 sprint 落地进地面 sprint 时计时清零（kin_jit 的 LAND 和估计器 `StateTracker` 两处都改）；阈值从模板的 0.3 s 改为 **0.2583 s**：地面时间 0.233 s 松键没有打滑（T2 f1190122，Dash To Run），0.283 s 打滑（s98200 f774201），取中点。注意这个阈值是从录像拟合的，与模板的 0.3 s 不一致，原因没有从模板核实（hornet_sprint 的 Sprint Timer 动作没读）【未核实】。
+- **落地清后摇**（`HeroController.BackOnGround`）：落地时这一刀的斩已经结束（ATK_T ≥ thunk_off：横砍 0.192 s、上砍 0.233 s）→ ATTACKING = 0、WSLASH = 0（攻击冷却不变）。
+- **kin_check**（`--params hero_reaper_forum.json --lanes bounds_lo_mix --bounds-events none`，0.5 s 窗口、0.1 u；before = 2a10a0d，after = d9dd529（阈值 0.2333、估计器未改），final = 0d735f4）：
+
+| 集 | 类别 | before | after | final |
+|---|---|---|---|---|
+| T1 + T2（原留出，本轮用来找错和拟合：开发集） | dash（3 048） | 97.34 % | 98.72 % | **99.67 %** |
+| T1 + T2（同上） | 全部计入（49 700） | 99.262 % | 99.346 % | 99.404 % |
+| 拟合 + 开发（s98000、A、C、B、D） | dash（3 619） | 100 % | 99.83 % | 100 % |
+| 拟合 + 开发 | 全部计入（87 419） | 99.064 % | 99.057 % | 99.064 % |
+
+  其余类别（plain、wall、scramble、glide、reaper_down、contact、slope、locked……）三次完全相同：落地清后摇在这几段激励录像里没有改变任何窗口（落地正好落在斩完到后摇结束之间 0.04–0.11 s 的窗口很少；它的作用要到实战录像里看）。留出 dash 剩下 10 个窗口：T2 f1190519–526（8 个，0.32 u）和 1201973 / 1201979（各 1 个，0.17 u）。T1 / T2 这一轮用来找错（贴墙冲刺）和拟合（Sprint Grace 由 T2 f1190122 定下界），**已经不是留出集**：99.67 % 是开发集上的数，不能当作计划"kin_check dash ≥ 99 %"的留出证据；没碰过的录像上的检查见 15.11。
+
+### 15.7 Bell Beast 回归（R3 验收 (b)）
+
+- **Forum 开关关时逐位相同**：Bell Beast 用的 `Planner`、`Forecaster`、Hunter 运动学一行没改（kin_jit 的新规则都在 `ab != 0` 下）。录像核对（`bb_identity.cmd`：planner_bench 重放，逐 tick 记下选中的索引、名字、S、FORCED_RISK、按键、J、P、整段命令和路径的哈希）：main fe50ef9 对 R3（0d735f4），20261003_144536 i4_000 和 20261004_095304 i0_001 各 4 001 个 tick，**0 差**。
+- **50 场 oracle 小批**（实例 3，冻结检出 `live_r3kin_d9dd529`，`combat_run run --instances 3 --encounter BellBeast --mode eval --policy planner --view oracle --threads 4 --real-quit 0.2 --seed 139100 --episodes 50`）：运行 `20261005_013127_BellBeast_eval_planner_oracle`，**50 / 50 CLEAR、0 WOULD_DIE**、0 次支撑外命中、规划 p99 中位 15.3 ms（最大 18.5）。之前一次（seed 139000，`20261005_012618`）在第 3 局"paused unasked"（游戏自己暂停，时间尺度 0）后停下：2 CLEAR + 1 HARNESS_FAIL，不计入。
+
+### 15.8 重新认证（R3 验收 (d)，R0 的协议，经 MultiForecast）
+
+代码 2a10a0d（重新锚定 + 15.2 的三处收紧；之后的提交没有动预报），R0 的生产表和余量，冻结检出 `C:\ssbot\live_r3_2a10a0d`，低优先级：
+
+| 组 | 场 | L2 / L3 / L4 覆盖（含钩） | 钩 | 按类型 |
+|---|---|---|---|---|
+| dev：R0 的 107 场三分 | 107 | 229 711 / 229 711（三个滞后都是） | 1 378 / 1 378 | 9 类 100 %（own 也是） |
+| fresh：R0 的 35 场 | 35 × 2 份表 | 74 585 / 74 585（每份表） | 465 | 100 % |
+| fresh：R1 的 187 场（w2 幽灵已排除） | 187 × 2 | 113 385 / 113 385（每份表） | 436 | 100 % |
+| fresh：13.13 的新数据去掉 2x 的 155649（130 场，含漏网那一场） | 130 × 2 | 116 102 / 116 102（每份表） | 927 | 100 % |
+| 合计 fresh | 352 × 2 | 每份表 304 072 / 304 072 | 每份表 1 828 | 100 % |
+| **new：没有任何构建或认证见过的场**（收集运行 `20261004_162411` ep60 起 118 场、`195019` 120 场、`195800` 119 场；全部 1x，构建器的速度保护没有去掉任何一场；`scan3.cmd` 三个并行扫描） | 357 × 2 | 每份表 180 145 / 180 145 | 每份表 1 770 | 8 类 100 %（没有 Envoy：波次起点从第 2 波起） |
+
+**结论：按 R0 的协议（三分开发 + 两批留出 + 一批全新数据，L = 2 / 3 / 4，联合与按类型）全部 100 %，`known = True` 成立。** 记录写进 `support_margins.json` 的 `runtime_certification`：代码里 `known` 仍读该文件的 `certified`（true），它的依据现在是这次经 MultiForecast 的认证，不是 R0 那次 35 场的 SubjectRecall（13.13 推翻了它）。13.13 漏网的那一场在 fresh_r1c_1x 组里，两份表都盖住。
+
+全部由预报本身盖住（"by forecast" = n；之前 dev 每个滞后约 1 290 次要靠待机身体管）。
+
+### 15.9 没做完 / 未核实
+
+- 快层没有接进实战循环（R4）：MultiForecaster + ForumPlanner + forum_supervisor_config + forum_kill_hp / forum_yellow_kill_hp 的胶水（`SupervisorInput.unpredicted_sources`、kill_prims、负重环带按 `ws.res.equipped` 切 HeroParams 和监督器配置）。
+- 最后一击没有击杀分支，所以只在 I3 下放行；FORCED_RISK 用接触帧占比代替 P（`exact_p` 可开）；没有 comfort 模板；视野末的锁定检查、按键经济项不在快层里。
+- 命中分支上限（32 行 / tick）在第 11 波截掉了 1 464 行有预测命中的行（S = 1）：贴着敌人时多数攻击行拿不到命中分支；要么提高上限（算力）、要么按 J 先排（现在按块的顺序）。
+- 包络用 bounds_lo（计划 §4.1），kin_check 验收用的是 bounds_lo_mix（多两条收割者下劈 / 滑翔的混合时序，贵约 1.5 倍）。
+- Sprint Grace 0.2583 s 是从录像拟合的，与 hornet_sprint 模板的 0.3 s 不一致，原因没核实；落地清后摇在激励录像里没有改变任何窗口，它的效果要在实战录像里看。
+- 负重环带：运动学和受击后窗口都按资产值 / probes.md，bot 录像里从没装过，没有用装着它的录像核对。
+- 受击反应只用 `hero_caused.json` 的 TOOK DAMAGE 出边（每 tick 最多 4 份预报）；反应的概率（闪避随被打时刻变）只进 R5 的打分。
+- 开环 FORCED_RISK 高（84–92 %），主要是数据策略的主角位置；闭环比例要等 R4 的 A0 实战。
+
+### 15.10 复现
+
+```
+cd brain   # 冻结检出（git archive，没有 .git）：behaviour_build 要加 --allow-no-sha；低优先级、NUMBA_NUM_THREADS ≤ 4
+# 认证（C:\ssbot\data\m2_forum_r3\cert.cmd <dev|fresh|new> 2a10a0d）
+..\scripts\uv.cmd run python -m ssbot.tools.multi_recall dev --workers 3 --json <out>
+..\scripts\uv.cmd run python -m ssbot.tools.multi_recall fresh --fresh C:\ssbot\data\m2_forum_r0\fresh --fresh C:\ssbot\data\m2_forum_r2\r1 --fresh C:\ssbot\data\m2_forum_r3\fresh_r1c_1x --workers 3 --json <out>
+..\scripts\uv.cmd run python -m ssbot.tools.behaviour_build C:\ssbot\data\runs\m2\<run> --encounter Forum --report-only --exclude-fights C:\ssbot\data\m2_forum_r1c\fresh\fights.json --fights-list <dir>\fights.json --contacts-only <dir> --allow-no-sha   # scan3.cmd
+..\scripts\uv.cmd run python -m ssbot.tools.multi_recall fresh --fresh <new_a> --fresh <new_b> --fresh <new_c> --workers 3 --json <out>
+# bench（bench.cmd <checkout> <tag>）
+..\scripts\uv.cmd run python -m ssbot.tools.planner_bench --encounter Forum --multi --planner --forum --fight 20261003_074719_Forum_A_data/i3/ep0 --wave 6 --frames 3000 --threads 4 --json <out>
+..\scripts\uv.cmd run python -m ssbot.tools.planner_bench C:\ssbot\data\runs\m2\20261003_144536_BellBeast_eval_planner_oracle\rec\2026-10-03\TRAIN\i4_000 --frames 6000 --threads 4 --json <out>
+# kin_check（kin.cmd <checkout> <tag>）
+..\scripts\uv.cmd run python -m ssbot.tools.kin_check <T1> <T2> --params ..\knowledge\1.0.30000\kinematics\hero_reaper_forum.json --lanes bounds_lo_mix --bounds-events none --json <out>
+# Bell Beast：逐 tick 决策比较（bb_identity.cmd）与 50 场小批（bb_batch.cmd <checkout> <seed> 50）
+..\scripts\uv.cmd run pytest -q tests/test_forum_planner.py tests/test_multi_forecast.py
+```
+
+### 15.11 审查之后的修正（fixer 轮，2026-10-05；代码 9a8b05d .. 2b3a467）
+
+审查推翻了 15.5 的"p99 不高于 Bell Beast"（复测时第 6 波 p99 16.16 ms，前后三次 Bell Beast 13.68 / 15.65 / 13.33 ms），另有 3 条中等、7 条轻微。逐条处理：
+
+1. **FORCED_RISK 的排序看不见命中分支的接触**（中）：之前 t_hit 和接触占比只来自不命中分支的包络，命中分支里后坐撞进支撑、或被上限截掉的行在排序里是"没有接触"。改：命中分支的接触帧并进这一行（t_hit 取两者较早的，`_note_hit`）；被上限截掉的行从命中那一帧起算在接触里。测试 `test_note_hit_puts_the_hit_branch_into_the_forced_ranking`、`test_forced_ranking_never_takes_a_row_in_contact_for_contact_free`。
+2. **分母混用**（轻）：阶段 1 的行在采样帧、标称上算占比，包络过的行在全部帧、包络上算。改：前 p_k 个候选统一在**阶段 1 的帧、标称一条**上比（标称中心点查支撑，阶段 1 已经对每一行算过）或上命中分支的接触；阶段 1 的首次接触改为下界（上一个没接触的采样帧 + 1）；排序 = 接触帧占比、标称上最晚的首次接触、包络上的首次接触、J。没有另查跳过的帧：那一次支撑查询在第 6 波 p50 要 0.7 ms（试过，第一版复测里 prob_bind p50 0.06 → 0.79 ms）。
+3. **受击反应只按当前状态取、锚点**（中）：改为行走在命中时刻可能所处的**所有**状态（当前状态 + 行走里最早进入时间 ≤ 命中时刻的每个状态；`_WalkCache.states`、`MultiForecaster.reaction_states`）的 TOOK DAMAGE 出边，一份预报放下全部（`forecast_reaction` 接受多个状态）。锚点：命中时刻的航位推算位置（命中目标的盒子是同一个航位推算），按待机增长和视野偏差放大，两种朝向（Reed 转身刺）；同家族另一个起始状态的反应（Reed `Stab Pos` → `Stab Antic`）以前对假设的反应**根本不放**重新锚定的那一份（re_anchor 要等下一帧导出），现在放在这个锚点盒。审查说新开始的反应"放在敌人现在的位置"不准确：之前也是航位推算到命中时刻 + 待机增长（与所有后续实例的锚点同一个模型，经过 15.8 的认证；Envoy 0.3 s 的增长 3.6 u）；锚点再按敌人的最高速放大会让 0.3 s 后的盒子宽过 COARSE_MAX_U、变成全场盒，没有这么做。真实预报（`react_box` 为空）逐位不变，认证不受影响。测试 `test_reactions_come_from_every_state_the_walk_allows_at_the_hit`。代价：反应预报从每 3 000 tick 约 37 份变成约 166 份（第 6 波）。
+4. **上限决定 FORCED_RISK**（轻）：命中分支的上限（hitfx_k 32、react_k 4）按队列顺序分，队列按 J 排、J 随目标变，所以"目标下 FORCED_RISK ⇒ 默认下 FORCED_RISK"不成立。改：没有安全行时，被上限置 S = 1 的行先**不设上限**地做命中分支再判定（审计 `uncapped_ticks` / `uncapped_rows`）。属性测试 `test_forced_risk_does_not_depend_on_the_caps_order`（hitfx_k = 1、react_k = 0，3 个位置 × 6 组目标）。最坏情况没有界：每个不同的（敌人，命中帧）一份反应预报（约 0.6 ms），只在"包络全部查完仍没有安全行"时发生；开环 bench 里 0 次。
+5. **只在最近 4 个目标里找第一下命中**（轻）：14 u 内的所有敌人都参加第一下命中（命中分支、受击反应的对象），只有最近 K_tgt = 4 个计分（其余权重 0：J、hits、waste 不变）。
+6. **决策依赖计时**（轻）：`ForumConfig.deadline_ms = inf` 是确定模式（截止时间是唯一与计时有关的规则），`planner_bench --deadline-ms`；审计和逐位比较用它。
+7. **p99（被推翻）**：逐 tick 记录（`planner_bench --ticks-json`）显示 p99 的 tick 全是"有安全行"的 tick：阶段 1 之后包络在优先部分里一直查到 11 ms 截止时间（96–160 行 + 32 个命中分支）。改：截止时间 **8 ms**，并且"下一块预计（按上一块的耗时）会超过截止时间就在它之前停"；核心行仍然总是包络。cProfile 找到的两处固定开销：命中分支里反应的支撑查询每行一次（每次约 0.37 ms）→ 每个反应一次；支撑查询里五种盒子（死亡、全场、待机管、碰撞体管、危险管）各自重建数组并各调一次核（每次查询约 0.45 ms）→ 一次构建、一次调用（与分开查的并集逐位相同，测试 `test_occupied_is_the_union_of_its_parts`）。
+8. 折行（轻）：kin_jit `forum_fixed` 与 planner_bench 的两处续行恢复。
+9. **模板文件**（轻）：生产模板（`*_hitboxes.npz`，157 MB，不进 git）的 sha256 写进 `support_margins.json` 的 `runtime_certification.table_files`；规范副本 `C:\ssbot\tables\forum_r3_2a10a0d`（与认证检出 `live_r3_2a10a0d` 的逐个相同）。新检出要先把它们拷进 `knowledge/1.0.30000/enemies/forum/`。
+10. **kin_check 的"留出"**（轻）：15.6 表里 T1 + T2 改标为开发集。没碰过的激励录像（s98400 / s98410 / kn_excite_forum_test s98990）里只有 **1 个** dash 窗口，证明不了什么。换成一段没参与任何拟合的 **Forum 实战录像**（收集运行 `20261004_195019` i0_000，131 328 个窗口，数据策略的主角在竞技场里打）：planner_bounds 的 dash **78.45 %**（4 259 个窗口），R3 之前的运动学（2a10a0d）在同一段上完全相同（78.45 %）。R3 的冲刺修正在实战录像上没有变化；**计划的"kin_check dash ≥ 99 %"在实战录像上远没有达到**，原因没查（敌人、竞技场的斜边、受击打断都可能）【未核实】。输出 `C:\ssbot\data\m2_forum_r3fix\kin_fresh*.json`、`kin_forum_before.json`。
+
+**复测（验收 (c)）**：冻结检出 `C:\ssbot\live_r3fix_1e45c67`（= 1e45c67，之后只加了审计计数），`C:\ssbot\data\m2_forum_r3fix\bench_fix.cmd live_r3fix_1e45c67 fix2`：同一负载下交错跑 Bell Beast、第 6 波、Bell Beast、第 11 波、第 13 波、第 6 波、Bell Beast（整机 CPU p50 29–31 %，实例 2、3 的收集在跑）：
+
+| 录像 | tick p50 / p99（ms） | 规划器 p50 / p99 | FORCED_RISK |
+|---|---|---|---|
+| Bell Beast（三次） | 4.53 / 15.12、4.69 / 15.37、4.66 / 13.88 | | 2.15 % |
+| 第 6 波（两次） | **6.04 / 13.49**、**5.84 / 13.51** | 3.66 / 11.41、3.45 / 11.54 | 85.9 % |
+| 第 11 波 | **4.30 / 11.25** | 2.71 / 9.37 | 84.4 % |
+| 第 13 波 | **4.96 / 10.88** | 3.44 / 8.57 | 91.6 % |
+
+- 三段 tick p50 ≤ 9 ms；**p99 两次第 6 波都低于三次 Bell Beast 中的每一次**（13.49 / 13.51 对 13.88–15.37）。余量不大（0.4 ms 到最低的那次）。负载更高时没有复测（15.5 的 load1 那种 72–86 %）。
+- 对照：同样的代码只差截止时间 11 ms、反应逐行查询、盒子分查（9a8b05d，`w6_base`，CPU 34 %）：第 6 波 6.60 / 16.90；第一版修正（762d90f，8 ms 但还没去掉固定开销，`fix1`）：第 6 波 7.46 / 15.12、8.34 / 17.08，Bell Beast 13.11 / 16.12 / 13.79。
+- p99 的 tick（前 1.5 %）现在是：阶段 1 约 2.9–3.1 ms、包络 7.1–7.6 ms（约 64 行：核心 56 行是必查的两块）、选择（尾部检查）1.3–1.6 ms。再往下要靠计划 §4.5 的"推演与支撑融合"。
+- FORCED_RISK 与 15.5 相同（开环：主角在数据策略的位置）。审计（三段 9 003 tick）：选中 S = 0 的 1 173 次全部包络过；core_not_enveloped 0；overrun 0；截止时间截断 216 次；命中分支 1 727；反应预报 341；上限截掉 258 行。
+- 质量的代价：有安全行的 tick 里大多数（约 340 / 416）本来就只包络核心行和 CONTINUE（57 行），不受影响；p99 的那些 tick 从 96–160 行变成约 64 行：贴着很多敌人时，能被选上的攻击行更少（安全不受影响：S、FORCED_RISK 与截止时间无关）。
+
+**Bell Beast（验收 (b)）**：53513b2 之后 Bell Beast 路径（`Planner`、`Forecaster`、Hunter 运动学、planner_bench 的 Bell Beast 分支）没有改动（kin_jit 只改了一处续行的空白），审查在 53513b2 上的逐 tick 比较（4 001 tick，与 main 逐字节相同）和 15.7 的 50 场小批仍然适用；三次 Bell Beast bench 的 FORCED_RISK 2.15 % 与之前相同。
+
+**测试**：全套 1 107 passed、2 skipped、1 xfailed（tests + ssbot/tests，低优先级，6 分 12 秒）；`tests/test_forum_planner.py` 现在 22 项（含参数化）。

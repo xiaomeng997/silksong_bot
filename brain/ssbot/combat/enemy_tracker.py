@@ -54,6 +54,13 @@ class Instance:
     mirror: int = 1
     sd: float = 0.0                # VE: the anchor's uncertainty half-extent (u); 0 in the oracle view
     t_end: float | None = None
+    # re-anchor (forum.md 15.1): the instance entered another start state of its family (Fly To Slash -> Slash
+    # Antic): the rest of it is also an instance from that state anchored where the enemy is then
+    re_state: str | None = None
+    re_t: float = 0.0
+    re_anchor: tuple[float, float] | None = None
+    re_mirror: int = 1
+    re_sd: float = 0.0
 
 
 @dataclass(slots=True)
@@ -117,7 +124,9 @@ class EnemyTracker:
         if to in sp.death_states:
             self.kill(T)
         elif to in tb.attack_starts and cur is not None and cur.family == tb.attack_starts[to] and to != cur.start:
-            pass
+            # the same instance goes on; it moved since its start (the Clawmaiden's flight to the hero): re-anchored at
+            # the next exported position as an instance starting here
+            cur.re_state, cur.re_t, cur.re_anchor = to, T, None
         elif to in tb.attack_starts:
             if cur is not None:
                 self._end(T)
@@ -201,6 +210,8 @@ class EnemyTracker:
             self.body = (min(xs), min(ys), max(xs), max(ys))
         if self.cur is not None and self.cur.anchor is None:
             self.cur.anchor, self.cur.mirror, self.cur.sd = self.pos, FACES_LEFT[self.flip], self.pos_sd
+        if self.cur is not None and self.cur.re_state is not None and self.cur.re_anchor is None:
+            self.cur.re_anchor, self.cur.re_mirror, self.cur.re_sd = self.pos, FACES_LEFT[self.flip], self.pos_sd
 
     def _hit(self, d) -> None:
         """HP from the hits seen: the oracle's amount (an O field: None in the vision view), else the price of the

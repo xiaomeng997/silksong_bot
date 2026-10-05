@@ -91,6 +91,8 @@ COARSE_MAX_U = 24.0               # an anchor box wider than this places an aren
 ARENA_BOX = (0.0, -5.0, 64.0, 40.0)
 TINY = "Song Automaton Tiny"
 MAESTRO = "Song Pilgrim Maestro"
+SUMMON_STATE = "Summon"           # a dead Tiny leaves Dead on the frame a Maestro enters Summon (forum.md 15.2: 105 of
+#                                   105 revivals in 8 R0 fights, gap 0): its walk starts no earlier
 TINY_GROUP = 3                    # Tinies at least this many: group placement
 TINY_CLUSTER_U = 4.0              # Tinies in one cell of this grid share one placement set
 ENTRY_LAG_S = 1.0                 # a wave's activation -> its member's entry family start (upper bound)
@@ -133,6 +135,11 @@ def walk(tt: TypeTable, state: str, ctx: tuple | None, dead: bool, overdue: bool
         if lo > cap:
             return
         hi = min(hi, cap)
+        if not current:
+            # nothing after the walk's root is entered before it: a zero-dwell loop (the Tiny's Ready -> Ready) took
+            # one bin of slack per pass down to -333 s at the step cap (forum.md 15.2), so every Tiny's idle family
+            # walk spanned 333 s before its start (an arena-wide box over the whole horizon)
+            lo = max(lo, -DWELL_SLACK_S)
         k = (st, c, d, current)
         iv = nodes.get(k)
         if iv is None:
@@ -202,6 +209,7 @@ class _WalkCache:
 
     def __init__(self):
         self.d: dict = {}
+        self.s: dict = {}                    # the same key -> {state: its earliest entry} (every state reached)
         self.hits = 0
         self.misses = 0
 
@@ -213,9 +221,22 @@ class _WalkCache:
             nodes = walk(tt, state, ctx, dead, overdue)
             r = self.d[k] = ([n for n in nodes if n.kind == "cur"],
                              [n for n in nodes if n.kind == "new" and n.state == n.start])
+            st: dict = {}
+            for n in nodes:
+                if n.state != TAIL:
+                    st[n.state] = min(st.get(n.state, math.inf), n.lo)
+            self.s[k] = st
         else:
             self.hits += 1
         return r
+
+    def states(self, tt: TypeTable, state: str, ctx, dead: bool, overdue: bool) -> dict[str, float]:
+        """Every state the walk reaches, current instance or later ones: its earliest entry (relative to the walk's
+        reference time)."""
+        k = (tt.tk, state, ctx, dead, overdue)
+        if k not in self.s:
+            self.get(tt, state, ctx, dead, overdue)
+        return self.s[k]
 
 
 @dataclass(slots=True)
@@ -518,6 +539,92 @@ class MultiForecaster:
             self.trackers, self.waves = keep_tr, keep_waves
 
 
+    def reaction_state(self, iid: int) -> str | None:
+        """The Control state enemy iid goes to when the hero's nail hits it now (hero_caused.json "TOOK DAMAGE" exits
+        of its current state: a Clapper's Idle -> Dmg Attack, a Minister's Chase -> Range Check, ...), None: no such
+        exit (the hit does not change its FSM; static FSM structure, legal in both views)."""
+        tr = self.trackers.get(iid)
+        if tr is None or tr.dead or tr.state is None:
+            return None
+        return hit_reactions().get(tr.tk, {}).get(tr.state)
+
+    def reaction_states(self, iid: int, t_react: float, horizon_s: float = MIN_HORIZON_S) -> list[str]:
+        """The Control states enemy iid may go to when the hero's nail hits it at game time t_react: the TOOK DAMAGE
+        exits of its current state and of every state its walk can have entered by t_react (a Clapper in Spell Antic
+        now, back in Idle before a hit 0.4 s on, answers it with Dmg Attack; the walk's entry hulls are supersets, so
+        this is too). [] when none of them has such an exit. Static FSM structure and the tracker: both views."""
+        tr = self.trackers.get(iid)
+        if tr is None or tr.dead or tr.state is None or tr.t_entry is None:
+            return []
+        ex = hit_reactions().get(tr.tk)
+        if not ex:
+            return []
+        tt = tr.table
+        T = self.t
+        dw = tt.dwell.get(tr.state)
+        age = T - tr.t_entry
+        overdue = dw is not None and (age > dw[1] + DWELL_SLACK_S
+                                      or age + max(MIN_HORIZON_S, horizon_s) + BIN > WALK_CAP_S)
+        ref = T if overdue else tr.t_entry
+        cur = tr.cur
+        ctx = (cur.family, cur.start) if cur is not None else None
+        out = {ex[tr.state]} if tr.state in ex else set()
+        for st, lo in self.walks.states(tt, tr.state, ctx, tr.dead, overdue).items():
+            if st in ex and ref + lo <= t_react + BIN:
+                out.add(ex[st])
+        return sorted(out)
+
+    def forecast_reaction(self, iid: int, to_state, t_react: float, horizon_s: float = MIN_HORIZON_S,
+                          origin_t: float | None = None) -> "MultiForecast | None":
+        """Only enemy iid's support as if it entered to_state (a state, or several: one forecast holding each) at game
+        time t_react (a hit's reaction, forum_planner_plan R3: the planner's hit branch checks against the forecast
+        and this), from origin_t over horizon_s. The reaction is anchored where the enemy is at the hit: its
+        transform dead-reckoned to t_react (the hit target's box is the same dead reckoning of its body), grown by
+        the type's idle growth since the sighting and the view's spread (as every later instance's anchor), both
+        mirrors (a Reed turns to stab); an entry into another start state of its current attack is re-anchored
+        there the same way (forum.md 15.1). The real state is left as it was."""
+        if self.boss is not None:
+            raise NotImplementedError("the single-boss path has no hit reactions")
+        tr = self.trackers.get(iid)
+        if tr is None or tr.dead:
+            return None
+        origin = self.t if origin_t is None else origin_t
+        b = _Builder(self, origin, horizon_s)
+        if tr.pos is not None:
+            s = max(t_react - origin, 0.0)
+            g = float(self.tables.tubes.g(tr.tk, np.array([(origin - tr.seen_T) + s]))[0]) + tr.pos_sd
+            b.react_box[iid] = np.array([tr.pos[0] + tr.vel[0] * s, tr.pos[1] + tr.vel[1] * s, g, g])
+        for to in ([to_state] if isinstance(to_state, str) else to_state):
+            t2 = copy.copy(tr)
+            t2.cur = copy.copy(tr.cur)
+            t2.ends = list(tr.ends)
+            t2.enter(to, t_react)
+            b.subject(t2)
+        b.groups()
+        return b.finish()
+
+
+_HIT_REACTIONS: dict | None = None
+
+
+def hit_reactions() -> dict:
+    """{type key: {state: the state a nail hit sends it to}} from hero_caused.json (TOOK DAMAGE exits)."""
+    global _HIT_REACTIONS
+    if _HIT_REACTIONS is None:
+        out: dict = {}
+        p = FORUM_DIR / "hero_caused.json"
+        if p.exists():
+            for tk, d in json.loads(p.read_text("utf-8")).get("types", {}).items():
+                sp = FORUM_TYPES.get(tk)
+                if sp is None or d.get("fsm", sp.control_fsm) != sp.control_fsm:
+                    continue                   # the tracker follows another FSM's states
+                ex = {s: e["TOOK DAMAGE"] for s, e in (d.get("exits") or {}).items() if "TOOK DAMAGE" in e}
+                if ex:
+                    out[tk] = ex
+        _HIT_REACTIONS = out
+    return _HIT_REACTIONS
+
+
 def _window_union(rows: np.ndarray, offs: np.ndarray, nt: int, b_lo: np.ndarray, b_hi: np.ndarray) -> np.ndarray:
     """Union of a box sparse table's bins [b_lo, b_hi] (vectorised over rows; empty where the window misses)."""
     out = np.tile(np.array(EMPTY), (len(b_lo), 1))
@@ -574,8 +681,10 @@ class _Builder:
         self.unknown: list[int] = []
         self.meta_group: dict = {}           # group owner -> the other Tinies its placements stand for
         self.clusters: list = []             # Tiny cluster index -> its Tinies (the group rows' gcl)
-        self.arena: dict = {}                # owner -> [t_from, t_to] of its arena-wide box
+        self.arena: dict = {}                # owner -> [(t_from, t_to)] of its arena-wide boxes (merged at finish)
         self._maestro: bool | None = None    # a Maestro in play (lazily)
+        self._summon_t: float | None = None  # the earliest a Maestro in play can enter Summon (lazily)
+        self.react_box: dict = {}            # iid -> (cx, cy, hx, hy): a hit reaction's anchor box (forecast_reaction)
 
     # ---- placements ----
 
@@ -635,13 +744,10 @@ class _Builder:
                                np.full(n, -1, np.int64)))
 
     def _arena(self, owner: int, t_from: float, t_to: float) -> None:
-        """An arena-wide box of owner over [t_from, t_to]: one per owner, over the hull of its windows (a superset;
-        the query loops over the box rows)."""
-        a = self.arena.get(owner)
-        if a is None:
-            self.arena[owner] = [float(t_from), float(t_to)]
-        else:
-            a[0], a[1] = min(a[0], float(t_from)), max(a[1], float(t_to))
+        """An arena-wide box of owner over [t_from, t_to]: the union of its windows, overlapping ones merged (forum.md
+        15.2: the hull of all of them put a Tiny's arena box from its instance's start 332 s ago over the whole
+        horizon, and every plan of a Maestro wave in contact at frame 0)."""
+        self.arena.setdefault(owner, []).append((float(t_from), float(t_to)))
 
     def _place_anchor(self, tid, lo, hi, anc, owner, fam, committed, p):
         (ax, ay), m, sd = anc
@@ -671,6 +777,35 @@ class _Builder:
         if self._maestro is None:
             self._maestro = any(t.tk == MAESTRO and t.in_play and not t.dead for t in self.fc.trackers.values())
         return self._maestro
+
+    def _summon_earliest(self) -> float:
+        """s from the origin: the earliest any Maestro in play can enter Summon (inf: none within its walk), from its
+        walk: a Summon node of its current instance, else a later instance of a family with Summon, from its start plus
+        the family's least logged Summon entry (one bin of slack)."""
+        if self._summon_t is None:
+            T, H = self.origin, self.H
+            best = math.inf
+            for tr in self.fc.trackers.values():
+                if tr.tk != MAESTRO or not tr.in_play or tr.dead or tr.state is None or tr.t_entry is None:
+                    continue
+                tt = tr.table
+                age = T - tr.t_entry
+                dw = tt.dwell.get(tr.state)
+                overdue = dw is not None and (age > dw[1] + DWELL_SLACK_S or age + H + BIN > WALK_CAP_S)
+                cur = tr.cur
+                ctx = (cur.family, cur.start) if cur is not None else None
+                cur_nodes, roots = self.fc.walks.get(tt, tr.state, ctx, tr.dead, overdue)
+                ref = T if overdue else tr.t_entry
+                for nd in cur_nodes:
+                    if nd.state == SUMMON_STATE and not nd.current:
+                        best = min(best, max(ref + nd.lo - T, BIN))
+                for nd in roots:
+                    fm = tt.families.get(nd.family)
+                    if fm is not None and SUMMON_STATE in fm.states:
+                        e0 = fm.entry.get(SUMMON_STATE, (0.0, 0.0))[0]
+                        best = min(best, max(ref + nd.lo + e0 - BIN - T, BIN))
+            self._summon_t = best
+        return self._summon_t
 
     def _wave_wake(self, tr: EnemyTracker) -> float | None:
         """The earliest game time a waiting wave member can leave its waiting state: its queued wave's earliest
@@ -713,6 +848,13 @@ class _Builder:
         # the state ending at any time from the next frame (a superset of its dwell window)
         overdue = dw is not None and (age > dw[1] + DWELL_SLACK_S or age + H + BIN > WALK_CAP_S)
         wake = self._wave_wake(tr)
+        if sp.pooled and (tr.dead or not tr.in_play):
+            # a dead / parked Tiny comes back only with a Maestro's Summon (SUMMON_STATE): not before the earliest one
+            ts = self._summon_earliest()
+            if not math.isfinite(ts) or ts > H + BIN:
+                self.subjects.append(self._subject_row(tr, False, math.inf))
+                return
+            wake = T + ts
         if wake is not None:
             overdue = True
         ctx = (cur.family, cur.start) if cur is not None else None
@@ -746,10 +888,25 @@ class _Builder:
                     wid = tables.key_id(nd.family, key_state, "world_all")
                     if wid is not None:
                         self._window(wid, lo, hi, None, 1, tr.iid, nd.family, True, nd.p)
-        elif cur is not None and anc is None and not (idle_tube and cur.family == sp.idle_family):
+        rb = self.react_box.get(tr.iid)
+        if committed_now and cur.re_state is not None and (cur.re_anchor is not None or rb is not None):
+            # re-anchored (forum.md 15.1): an attack that moved since its start (the anchor frame's templates hold the
+            # logged travel only) is also the family walk of an instance starting at the start state it entered,
+            # anchored where the enemy was then (13.13: the Clawmaiden's lunge after a 3.3 u flight); a hit
+            # reaction's (forecast_reaction) at its anchor box, both mirrors
+            rid = self.fc.family_walk_id(tt, cur.family, cur.re_state, "anchor")
+            if rid is not None:
+                if cur.re_anchor is not None:
+                    (rx, ry), rsd = cur.re_anchor, cur.re_sd
+                    self._bbox(rid, cur.re_t - T, cur.re_t - T, rx, ry, rsd, rsd, cur.re_mirror, tr.iid, cur.family,
+                               True, 1.0)
+                else:
+                    self._bbox(rid, cur.re_t - T, cur.re_t - T, *rb, 0, tr.iid, cur.family, True, 1.0)
+        if cur is not None and anc is None and not (idle_tube and cur.family == sp.idle_family):
             # the current instance's anchor is not known (not exported at its start): its family walk from the
-            # start, anchored where the enemy is now
-            self._place_family(tr, cur.family, cur.start, cur.t_start - T, cur.t_start - T, 1.0, committed_now)
+            # start, anchored where the enemy is dead-reckoned to then (a hit reaction: its anchor box)
+            self._place_family(tr, cur.family, cur.start, cur.t_start - T, cur.t_start - T, 1.0, committed_now,
+                               boxes_of=None if rb is None else (lambda e0, e1: np.tile(rb, (len(e0), 1))))
         t_strike = math.inf
         for nd in roots:
             lo, hi = max(ref + nd.lo - T, BIN), max(ref + nd.hi - T, BIN)
@@ -983,7 +1140,9 @@ class _Builder:
         if big.any():
             # one arena box per owner over its rows' hull (a dead Tiny walked for a summon: ~160 rows a tick in wave
             # 6); the boxes are filtered by owner: a group row's once per Tiny of its cluster
-            a0, a1 = lo + t0 - BIN, hi + t1 + BIN
+            # the window where the template holds a box (not its whole span: forum.md 15.2)
+            act = np.array([self.store.active_span(int(t)) for t in ut])
+            a0, a1 = lo + act[inv, 0] - BIN, hi + act[inv, 1] + BIN
             for grp_rows in (False, True):
                 m = big & ((gcl >= 0) == grp_rows)
                 if not m.any():
@@ -1057,7 +1216,15 @@ class _Builder:
                 self._window(wid, lo, hi + ENTRY_LAG_S, None, 1, ENTRY_OWNER - w, tt.spec.entry_family, False, 1.0)
 
     def finish(self) -> "MultiForecast":
-        for o, (a, b) in self.arena.items():
+        for o, iv in self.arena.items():
+            iv.sort()
+            a, b = iv[0]
+            for a2, b2 in iv[1:]:
+                if a2 <= b + BIN:
+                    b = max(b, b2)
+                    continue
+                self.boxes.append((o, "arena", *ARENA_BOX, 0.0, 0.0, None, a, b, 0.0))
+                a, b = a2, b2
             self.boxes.append((o, "arena", *ARENA_BOX, 0.0, 0.0, None, a, b, 0.0))
         out = MultiForecast(self.fc, self.origin, self.H)
         out.P = PlaceBatch.from_rows(self.fine)
@@ -1425,15 +1592,18 @@ class MultiForecast:
         f |= self._bbox_occ(x, y, tk, _mask(self.bb, clusters=self.clusters, **kw) if filt and self.n_bbox else None)
         types = ({p.type_key for p in self.paths} - set(names)) if names else None
         f |= self._path_occ(x, y, tk, exclude=ids, only=only, types=types)
+        if not committed_only and not parts:
+            # the boxes of every kind at once: the same union as the parts below, one array build and one kernel call
+            # (each kind on its own rebuilt its arrays per query: ~0.45 ms of a wave-6 tick's support query, R3 fix)
+            return f | self._box_occ(x, y, tk, kinds=("death", "arena", "idle", "collider", "hazard"), exclude=ids,
+                                     only=only)
         f |= self._box_occ(x, y, tk, kinds=("death", "arena"), exclude=ids, only=only)
         if committed_only:
             return f
         tubes = {k: self._box_occ(x, y, tk, kinds=(k,), exclude=ids, only=only) for k in ("idle", "collider",
                                                                                            "hazard")}
-        if parts:
-            return {"forecast": f, "idle body tube": tubes["idle"], "collider tube": tubes["collider"],
-                    "hazard tube": tubes["hazard"]}
-        return f | tubes["idle"] | tubes["collider"] | tubes["hazard"]
+        return {"forecast": f, "idle body tube": tubes["idle"], "collider tube": tubes["collider"],
+                "hazard tube": tubes["hazard"]}
 
     # ---- the interface ----
 
