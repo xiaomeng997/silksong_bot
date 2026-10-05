@@ -159,6 +159,13 @@ class GauntletDataPolicy(DataPolicy):
     person's plan for the last wave. Silk skills and tools: quickcast now and then (neutral or with up held, so both
     the Silkspear and a Cogfly binding get used). With helpers on, enemies die and waves advance without the hero."""
 
+    # The policy's behaviour version, in every AttemptRecord's policy stats ("rev"): 1 up to 59e02a1 (the Maestros'
+    # parked Tinies counted as live: targets, and while one was parked the pocket test "only Clappers left" failed;
+    # records without "rev" whose code_rev is not a descendant of 59e02a1), 2 from 59e02a1 on (gauntlet.WAITING_STATES
+    # has "Dead"; the 38 full gauntlets 20261004_154609 / 154612 at code 28a9417 are rev 2 without the field).
+    # Comparisons of policy-dependent statistics (positions, choices against the hero) keep the revisions apart.
+    REVISION = 2
+
     def reset(self, rng: random.Random, enc: Encounter) -> None:
         super().reset(rng, enc)
         self.mode_frames = {m: 0 for m, _ in G_MODES}
@@ -170,8 +177,8 @@ class GauntletDataPolicy(DataPolicy):
         self.names: list[str] | None = None
 
     def stats(self) -> dict:
-        return {**super().stats(), "targets": dict(self.targets), "cling_frames": self.cling_frames,
-                "pocket_frames": self.pocket_frames}
+        return {**super().stats(), "rev": self.REVISION, "targets": dict(self.targets),
+                "cling_frames": self.cling_frames, "pocket_frames": self.pocket_frames}
 
     def _cstate(self, s: dict) -> dict:
         if self.names is None:

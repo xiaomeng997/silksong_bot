@@ -242,6 +242,7 @@ def test_gauntlet_policy_takes_the_pocket_when_only_clappers_are_left():
     acts = [pol.act(s, None) for _ in range(300)]
     assert all(a & mask("left") for a in acts) and not any(a & mask("jump") for a in acts)
     assert pol.stats()["pocket_frames"] == 300
+    assert pol.stats()["rev"] == GauntletDataPolicy.REVISION == 2      # parked Tinies not in play (59e02a1)
     # lower on the wall: it climbs with wall jumps
     s["hero"]["pos"][1] = 10.0
     acts = [pol.act(s, None) for _ in range(300)]
