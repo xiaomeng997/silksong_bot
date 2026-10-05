@@ -746,7 +746,16 @@ class _Builder:
                     wid = tables.key_id(nd.family, key_state, "world_all")
                     if wid is not None:
                         self._window(wid, lo, hi, None, 1, tr.iid, nd.family, True, nd.p)
-        elif cur is not None and anc is None and not (idle_tube and cur.family == sp.idle_family):
+        if committed_now and cur.re_anchor is not None:
+            # re-anchored (forum.md 15.1): an attack that moved since its start (the anchor frame's templates hold the
+            # logged travel only) is also the family walk of an instance starting at the start state it entered,
+            # anchored where the enemy was then (13.13: the Clawmaiden's lunge after a 3.3 u flight)
+            rid = self.fc.family_walk_id(tt, cur.family, cur.re_state, "anchor")
+            if rid is not None:
+                (rx, ry), rsd = cur.re_anchor, cur.re_sd
+                self._bbox(rid, cur.re_t - T, cur.re_t - T, rx, ry, rsd, rsd, cur.re_mirror, tr.iid, cur.family,
+                           True, 1.0)
+        if cur is not None and anc is None and not (idle_tube and cur.family == sp.idle_family):
             # the current instance's anchor is not known (not exported at its start): its family walk from the
             # start, anchored where the enemy is now
             self._place_family(tr, cur.family, cur.start, cur.t_start - T, cur.t_start - T, 1.0, committed_now)

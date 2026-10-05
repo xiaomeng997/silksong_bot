@@ -284,6 +284,42 @@ def test_forecast_covers_the_attack_drops_the_dead_and_answers_the_interface():
     assert near[:2].any() and not near[5:].any()
 
 
+def test_an_attack_that_moved_is_re_anchored_at_its_later_start_state():
+    """forum.md 15.1 (the 13.13 miss: a Clawmaiden lunge after a 3.3 u flight): an instance that enters another start
+    state of its family is also placed as an instance from that state, anchored where the enemy is then."""
+    def tables(two_starts):
+        d = _reed_table()
+        if two_starts:
+            d["spec"]["attack_starts"]["Stab 1"] = "RE_STAB"
+            d["attacks"]["RE_STAB"]["start_states"] = ["Stab Pos", "Stab 1"]
+        tubes = Tubes({REED: [0.0] + [0.05 * k for k in range(1, 41)]}, {REED: 50.0}, {REED: BODY})
+        return EnemyTables({REED: type_table(d, FORUM_TYPES[REED])}, EnemyTables._store([_templates()]), tubes, {},
+                           True, "synthetic", {})
+
+    def script():
+        out = []
+        for f in range(17):
+            t = f * BIN
+            x = 20.0 + (0.5 * (f - 10) if f >= 10 else 0.0)        # flies 3 u during Stab Pos
+            evs = [_go(7, s, f, t) for ff, s in ((0, "Alert"), (10, "Stab Pos"), (16, "Stab 1")) if ff == f]
+            st = "Alert" if f < 10 else "Stab Pos" if f < 16 else "Stab 1"
+            out.append((f, t, [_ent(7, x, 5.0, st, flip=True, box=(x - 0.5, 4.0, x + 0.5, 6.0))], evs))
+        return out
+
+    tk = np.arange(0, 16) * BIN
+    X, Y = np.full((1, 16), 25.0), np.full((1, 16), 5.0)     # the blade (+1 .. +3) from where Stab 1 began
+    occ = {}
+    for two in (False, True):
+        mf = MultiForecaster(tables(two), ORACLE, waves=False)
+        _run(mf, script())
+        tr = mf.trackers[7]
+        assert tr.cur.start == "Stab Pos" and tr.cur.anchor == (20.0, 5.0)
+        assert (tr.cur.re_state, tr.cur.re_anchor) == (("Stab 1", (23.0, 5.0)) if two else (None, None))
+        occ[two] = mf.forecast(0.8).occupied(X, Y, tk)[0]
+    # past the collider tube's reaction lag (5 bins): only the re-anchored instance reaches the blade
+    assert not occ[False][6:].any() and occ[True][6:].all()
+
+
 def test_a_kill_never_enlarges_the_danger_zone_and_the_what_if_leaves_the_state():
     """forum_planner_plan §4.4 item 6: killed mid-stab, the Reed leaves its death box (3 bins) and no tail; the what-if
     forecast is inside the real one around it, and the real state is untouched."""
