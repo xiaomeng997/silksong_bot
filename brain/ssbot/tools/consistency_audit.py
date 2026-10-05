@@ -19,7 +19,8 @@ of hero-centre positions around the hero's position (near: +-2 u; wide: +-6 u, i
 Violations (cells covered with the action and not without) are classified: kills by what covers them (the wave
 entries queued by a wave's last kill, the dead enemy's death tail box, its instance tails, other), redirects by what
 the redirected path met before the first violating time (dome contact -> undetermined tube, side wall rebound, floor
-bounce, none: direct).
+bounce, none: direct; a violation that the modelled flight alone does not make: its side-bounce branches after a floor
+bounce, projectiles.bell_branches).
 
     cd brain
     ../scripts/uv.cmd run python -m ssbot.tools.consistency_audit --fights C:/ssbot/data/m2_forum_r0/fresh/fights.json
@@ -118,6 +119,24 @@ def _redirect_class(F, iid: int, d: int, t_first: float) -> str:
     return "up hit falls back (gravity)" if d == 2 else "direct"
 
 
+def _redirect_main(F, X, Y, iid: int, d: int) -> np.ndarray:
+    """bell_redirected with only the redirected path's modelled flight (branch 0, no side-bounce branches)."""
+    import dataclasses
+    p = F._fc.hazards.redirect(iid, 0.0, d, F.origin_t, F.horizon)
+    out = F.occupied_without(X, Y, TK, iid)
+    if p is None:
+        return out
+    if np.ndim(p.xs) == 2:
+        p = dataclasses.replace(p, xs=p.xs[:1], ys=p.ys[:1], on=p.on[:1])
+    keep = F.paths
+    F.paths = [p]
+    try:
+        out |= F._path_occ(X, Y, TK)
+    finally:
+        F.paths = keep
+    return out
+
+
 def _haz_dir(vx: float, vy: float) -> int | None:
     if abs(vx) >= 20.0:
         return 1 if vx > 0 else -1
@@ -209,10 +228,13 @@ def _audit_fight(job: dict) -> dict:
             red = F.bell_redirected(X, Y, TK, iid, 0.0, d)
             if red is None:
                 return
-            viol = red & ~F.occupied(X, Y, TK)
+            base = F.occupied(X, Y, TK)
+            viol = red & ~base
             cls = ""
             if viol.any():
                 cls = _redirect_class(F, iid, d, float(TK[np.flatnonzero(viol.any(axis=0))[0]]))
+                if not (_redirect_main(F, X, Y, iid, d) & ~base).any():
+                    cls = "side-bounce branch after a floor bounce (physics: 384 of 8,813 logged floor bounces)"
             h = mf.hazards.h.get(iid)
             note(kind, zone, viol, cls, {"d": d, "hero": [round(hx, 2), round(hy, 2)],
                                          "bell": None if h is None else [round(h.pos[0], 2), round(h.pos[1], 2)],
