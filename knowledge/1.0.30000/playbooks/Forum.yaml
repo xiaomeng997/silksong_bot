@@ -1,0 +1,78 @@
+# High Halls Forum (route S25, Hang_04, 14 BattleScene waves): L3 playbook v0 for the A0 baseline (forum_planner_plan
+# §5 R4). Read by ssbot.combat.tactics.playbook (the common fields) and ssbot.combat.tactics.forum_local (the "forum"
+# section). Safety never comes from here: every candidate still passes the MultiForecast support check (S), the safety
+# filter and the supervisor; these entries only say whom to hit, where to stand and what to prefer.
+# Facts: docs/facts/1.0.30000/forum.md (§2 waves, §9 types, §10 pocket, §12.3 stances, §15 the fast layer).
+enemy: Forum
+boss_type: ""
+scene: Hang_04
+arena:
+  x: [14.6, 48.4]         # hero centre range: wall faces 14.01 / 48.99 (forum.md §8), hero box half width ~0.5
+  hero_y: 4.5677          # hero transform standing on the floor (savestate p7_s3)
+hit_damage: {nail: 9}     # Reaper, Needle 1 (fo_A nailUpgrades 1)
+loadout: {needle_level: 1}
+
+stance:
+  engage_reach_u: 1.8
+  risk_horizon_s: [0.4, 2.0]
+
+# Bind (HEAL, Q1a): only where the support allows the whole Bind (§3.5.6 commit test at the hero's position). No
+# verified safe spot: the left-wall pocket is no heal point until the wall Bind is verified (forum_planner_plan §4.2).
+bind:
+  states: []
+  hp_missing_min: 2
+  safe_spots: []
+  reserve_at_full_hp: false
+  gather_hit_x: 1.5       # Q6: the nail hit weight's factor while h >= 2, below max HP and silk < 9
+
+weights:
+  hit: 10.0
+  stance: 0.6
+  risk: 3.0
+  waste: 0.6
+  face: 0.3
+  ground: 0.2
+  cont: 0.15
+  jump: 0.15
+
+forum:
+  # Target choice: the nearest enemy in play by distance / weight. Clawmaiden first (it steals silk: DESIGN §3.6.4
+  # S25); a Bellbearer or a Maestro farther than far_u last (they throw / summon from afar and are slow to reach).
+  first: [Song Handmaiden]
+  priority:
+    Song Handmaiden: 3.0
+    Song Pilgrim 03: 1.3
+    Song Pilgrim 01: 1.3
+    Song Reed: 1.0
+    Song Administrator: 1.0
+    Song Automaton Tiny: 1.0
+    Song Heavy Sentry: 1.0
+    Pilgrim 03 Song: 1.0
+    Song Pilgrim Maestro: 1.0
+  distant_last: {types: [Pilgrim 03 Song, Song Pilgrim Maestro], far_u: 8.0, weight: 0.4}
+  # No melee into a defensive stance (forum.md §12.3, stances.json): a hit there starts the counter (Minister
+  # Parry Block -> Parry Slash 1-4, Reed Block -> Parry Slash / Multihit). Hits on it score negative.
+  defensive:
+    Song Administrator: [Parry Stance, Parry Block]
+    Song Reed: [Defend, Block]
+  defensive_hit_w: -1.0
+  target_hit_w: 1.5
+  other_hit_w: 1.0
+  engage_reach_u: 1.8
+  evade_s: 0.6
+  # The finale's left-wall pocket (forum.md §10.4): (1) not up there while a Clapper's body left edge is at x <= 14.6
+  # (stances left of stance_x cost extra); (2) in it, a Clapper facing left at transform x <= 18 is a threat: leave.
+  # A0 has no climb macro (CLIMB_POCKET is R7): the rules only shape stances.
+  pocket:
+    box: [14.04, 14.92, 12.53, 13.97]
+    stance_x: 16.0
+    veto_enter_left_edge: 14.6
+    veto_in_x: 18.0
+  # Cogfly (Cogwork Flier, 4 uses in fo_A's Red/Up slot): the plan's default arm, 2 in wave index 6 (Maestro x 2) and 2
+  # in the finale (index 13). A throw goes out only on the ground, standing, with the chosen plan safe and the
+  # support's t_min at the hero's spot >= min_clear_s (the throw's lock is not in the kinematic model yet), gap_s apart.
+  cogfly:
+    enabled: true
+    uses: {6: 2, 13: 2}
+    min_clear_s: 1.0
+    gap_s: 3.0
