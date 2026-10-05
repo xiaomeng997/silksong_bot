@@ -6,7 +6,8 @@ Per tick (the lexicographic order and every rule of Planner.tick unless named he
   candidates  the posture family of the start state (ground / air / wall: candidates.build_forum; T = 36 frames, the
               0.6 s horizon of §4.5) = the core evasion set (56 rows: wait, move, 3 jump holds x 3 ways, dash either
               way, each with idle / run either way / a full jump) + the posture's attack pieces x every continuation,
-              plus CONTINUE (the previous plan carried on).
+              plus CONTINUE (the previous plan carried on); without control (hit-stop, recoil, a lock: the keys only
+              queue) the core rows alone.
   stage 1     every row rolled out on the nominal lane only; its box centre against the support (MultiForecast
               .occupied: the templates are dilated by the hero hurtbox, so this is the nominal box's exact test).
               Necessary: a row in contact here is in contact in stage 2 too (the hull holds the nominal box, the hull
@@ -27,9 +28,14 @@ Per tick (the lexicographic order and every rule of Planner.tick unless named he
               ...): MultiForecaster.forecast_reaction from the hit frame. At most hitfx_k rows a tick get the hit
               branch and react_k reaction forecasts; a row with a predicted hit beyond those caps is S = 1.
   selection   only rows whose S is known: enveloped, or in contact at stage 1. The chosen plan with S = 0 is always an
-              enveloped one (audit: `audit`). FORCED_RISK: no enveloped row is safe after all were checked; P
-              (MultiForecast.prob) only for the p_k best of those by first contact, then J.
+              enveloped one (audit: `audit`). FORCED_RISK: no enveloped row is safe after all were checked; of the
+              p_k latest first contacts, the least share of frames in contact first (P's stand-in: MultiForecast.prob
+              costs 3.7 ms p50 on wave 6, one query per enemy, placement kind and probability value; exact_p turns it
+              back on), then the latest contact, then J.
   unmodelled  a row that presses attack while dashing / sprinting is vetoed (the Reaper's dash stab is R7's).
+  not here    the lock check past the horizon (no Silkspear in the Forum set; the Bind macro checks its own), the key
+              economy terms, the killing blow's branches (so no certified final kill: I3 only), the comfort query (no
+              comfort templates in the multi path).
   U / I3      the killing blow is the one that may end the battle (forum_kill_hp: the final wave's last members),
               FilterContext.kill_hp from it; not certified in R3 (no kill branches): such a blow passes only under I3.
 Scores only (GoalPrefs: hit_w per enemy iid, stance, the risk map): no prefs field reaches stage 1's S, Hz, U or the
