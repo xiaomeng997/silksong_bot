@@ -8,17 +8,87 @@ Per run set: outcomes (CLEAR / QUIT by trigger / WOULD_DIE / STUCK / HARNESS_FAI
 (room.battles' wave starts, the gauntlet record), hits per true wave and per source type, FORCED_RISK share per wave
 (ticks and streaks per minute), unpredicted hits (outside the support: must be 0) with their sources, chain follow-ups,
 the WaveTracker against room.battles, tick / plan times (per-episode p50 / p99, their medians and the max), late ticks,
-modes, targets, Binds, Cogfly throws, the envelope audit (chosen S = 0 plans all enveloped), key presses."""
+modes, targets, Binds, Cogfly throws, the envelope audit (chosen S = 0 plans all enveloped), key presses.
+
+Hits are counted per damage event (the episode's "hits"); the Multihit ticks of a multi-hit chain (special_damage,
+TakeQuickDamage, no source of their own) are HIT_TAKEN too but counted apart ("mh_ticks"). A hit's type is its
+HIT_TAKEN source type, else the one its caller path names (a projectile: the type that throws it, ForumType.spawns).
+Records from before the R4 fixer round have no hit kind / path in hit_log: they are read from the episode's recording
+(events.jsonl, the damage / special_damage events of the hit's frame)."""
 import argparse
 import json
+import re
 from collections import Counter, defaultdict
 from pathlib import Path
 
 import numpy as np
 
+from ssbot.core.forum import FORUM_TYPES
+
+_SPAWNS = {hz: tk for tk, t in FORUM_TYPES.items() for hz, _ in t.spawns}
+
 
 def _q(v, p):
     return round(float(np.percentile(v, p)), 3) if v else None
+
+
+def type_of(path: str | None, src_type: str | None = None) -> str | None:
+    """The Forum type key a hit came from: its HIT_TAKEN source type (a hazard's: its thrower), else the type (or the
+    thrower of the hazard) a part of its caller path names ("Song Reed Pin Projectile(Clone)" -> "Song Reed",
+    "Wave 9/Song Reed (3)" -> "Song Reed", "rune bomb small(Clone)/damager" -> "Song Heavy Sentry"); None: no part
+    names one."""
+    if src_type in FORUM_TYPES:
+        return src_type
+    if src_type in _SPAWNS:
+        return _SPAWNS[src_type]
+    for part in reversed(str(path or "").split("/")):
+        q = re.sub(r"\s*\(\d+\)$", "", part.replace("(Clone)", "").strip())
+        if q in FORUM_TYPES:
+            return q
+        if q in _SPAWNS:
+            return _SPAWNS[q]
+        for tk in sorted(FORUM_TYPES, key=len, reverse=True):
+            if q.startswith(tk):
+                return tk
+    return None
+
+
+def _rec_hits(row: dict) -> dict[int, list[tuple[str, str | None]]]:
+    """frame -> [(kind, path)] of the recording's damage ("damage", source) and special_damage ("tick", fsm) events."""
+    out: dict[int, list] = defaultdict(list)
+    rec = row.get("recording")
+    p = Path(rec) / "events.jsonl" if rec else None
+    if p is None or not p.exists():
+        return out
+    for line in p.read_text("utf-8").splitlines():
+        if 'damage"' not in line:
+            continue
+        e = json.loads(line)
+        k, d = e.get("kind"), e.get("data") or {}
+        if k == "damage":
+            out[int(e["frame"])].append(("damage", d.get("source")))
+        elif k == "special_damage":
+            out[int(e["frame"])].append(("tick", d.get("fsm") or d.get("method")))
+    return out
+
+
+def hit_kinds(row: dict, hit_log: list[dict]) -> list[tuple[str, str | None]]:
+    """(kind, caller path) per hit_log entry: the entry's own (R4 fixer round on), else from the recording (the
+    frame's damage / special_damage events in order; an entry with a source is a damage event's)."""
+    if all("kind" in h for h in hit_log):
+        return [(h["kind"], h.get("path")) for h in hit_log]
+    rec = _rec_hits(row)
+    out = []
+    used: Counter = Counter()
+    for h in hit_log:
+        f = int(h["f"])
+        evs = next((rec[g] for g in (f, f - 1, f + 1) if rec.get(g)), [])
+        if h.get("src_id") is not None or h.get("src_type"):
+            evs = [e for e in evs if e[0] == "damage"] or evs
+        i = used[f]
+        used[f] += 1
+        out.append(evs[min(i, len(evs) - 1)] if evs else ("damage", None))
+    return out
 
 
 def report(runs: list[Path]) -> dict:
@@ -51,14 +121,22 @@ def report(runs: list[Path]) -> dict:
     out["wave_time_s"] = {str(k): {"n": len(v), "p50": _q(v, 50), "max": round(max(v), 1)} for k, v in sorted(wt.items())}
     pol = [r.get("policy") or {} for r in rows]
     hits_w, hits_t, ticks_w, forced_w, streak_w = Counter(), Counter(), Counter(), Counter(), Counter()
+    mh_w, mh_judged = Counter(), Counter()
     hits_wt = defaultdict(Counter)
     unpred, unknown, follow = [], [], 0
     for r, p in zip(rows, pol):
-        for h in p.get("hit_log") or ():
+        hl = p.get("hit_log") or []
+        for h, (kind, path) in zip(hl, hit_kinds(r, hl)):
             w = h.get("wave_t")
+            if kind == "tick":
+                mh_w[str(w)] += 1
+                continue
+            tk = type_of(path, h.get("src_type"))
+            tk = FORUM_TYPES[tk].name if tk in FORUM_TYPES else "unresolved"
             hits_w[str(w)] += 1
-            hits_t[str(h.get("src_type"))] += 1
-            hits_wt[str(w)][str(h.get("src_type"))] += 1
+            hits_t[tk] += 1
+            hits_wt[str(w)][tk] += 1
+        mh_judged.update(x[1] for x in p.get("mh_ticks") or ())
         for w, c in (p.get("per_wave") or {}).items():
             ticks_w[w] += c.get("ticks", 0)
             forced_w[w] += c.get("forced", 0)
@@ -67,12 +145,18 @@ def report(runs: list[Path]) -> dict:
         unpred += [[tag, f, s] for f, s in (p.get("unpredicted_sources") or ())]
         unknown += [[tag, f] for f in p.get("unpredicted_unknown") or ()]
         follow += len(p.get("follow_ups") or ())
-    out["hits"] = {"total": sum(len(p.get("hits_taken") or ()) for p in pol),
-                   "hit_events": sum(hits_w.values()), "per_episode_mean": round(sum(r["hits"] for r in rows) / max(n, 1), 2),
-                   "by_wave": dict(sorted(hits_w.items(), key=lambda kv: int(kv[0]) if kv[0] not in ("None",) else 99)),
+    wkey = (lambda kv: int(kv[0]) if kv[0] not in ("None",) else 99)
+    out["hits"] = {"damage_events": sum(len(p.get("hits_taken") or ()) for p in pol),
+                   "hits_taken": sum(hits_w.values()), "mh_ticks": sum(mh_w.values()),
+                   "per_episode_mean": round(sum(r["hits"] for r in rows) / max(n, 1), 2),
+                   "by_wave": dict(sorted(hits_w.items(), key=wkey)),
+                   "mh_ticks_by_wave": dict(sorted(mh_w.items(), key=wkey)),
+                   "mh_ticks_judged": dict(mh_judged),
                    "by_type": dict(hits_t.most_common()), "by_wave_type": {k: dict(v) for k, v in hits_wt.items()},
                    "hp_lost_mean": round(sum(r.get("hp_lost") or 0 for r in rows) / max(n, 1), 2),
                    "would_die_episodes": sum(1 for r in rows if r.get("would_die"))}
+    shares = [forced_w[w] / ticks_w[w] for w in ticks_w if ticks_w[w]]
+    out["forced_risk_range"] = [round(min(shares), 3), round(max(shares), 3)] if shares else None
     out["forced_risk"] = {w: {"ticks": ticks_w[w], "forced": forced_w[w],
                               "share": round(forced_w[w] / ticks_w[w], 3) if ticks_w[w] else None,
                               "streaks_per_min": round(streak_w[w] / (ticks_w[w] / 3600.0), 2) if ticks_w[w] else None}

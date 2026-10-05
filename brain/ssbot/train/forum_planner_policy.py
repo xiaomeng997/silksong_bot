@@ -67,6 +67,7 @@ BATTLE = "Battle Scene"
 HOOK_LOOKBACK_F = 70       # a multi-hit chain's hook -> its Final Hit: 0.35 - 1.0 s (forum.md §9.2; tools.multi_recall)
 HOOK_FSMS = ("Control", "Attack")
 KEEP_F = 90                # forecasts, hero boxes and FSM entries kept for judging a Final Hit at its hook
+TICK_WAIT_F = HOOK_LOOKBACK_F   # a Multihit tick outside the support waits this long for its chain's Final Hit
 
 
 def true_wave(raw: dict) -> tuple[int | None, bool]:
@@ -186,8 +187,11 @@ class ForumPlannerPolicy(PlannerPolicy):
         self.raw: dict[int, dict] = {}
         self.forecasts: deque = deque(maxlen=KEEP_F)
         self._boxes: dict[int, tuple] = {}         # frame -> (hero box, game time)
-        self._enters: dict = {}                    # (object, fsm) -> [(frame, to state)], kept KEEP_F frames
-        self._obj_state: dict = {}                 # (object, fsm) -> current state
+        self._enters: dict = {}                    # (instance, fsm) -> [(frame, to state)], kept KEEP_F frames
+        self._obj_state: dict = {}                 # (instance, fsm) -> current state
+        self._ent_obj: dict[int, str] = {}         # instance -> object name
+        self._pending_ticks: list[int] = []        # Multihit ticks outside the support at their own frame
+        self.mh_ticks: list = []                   # [frame, "own" | "chain" | "miss"] per Multihit tick
         self.follow_ups: list = []                 # [frame, object, hook frame or None]
         self.decision = None
         self.episode_outcome = None
@@ -239,12 +243,21 @@ class ForumPlannerPolicy(PlannerPolicy):
         b = (raw0.get("hero") or {}).get("box")
         if b:
             self._boxes[fo] = (b, ws.stamp.t_game_s)
+        special, dealt = set(), set()
         for ev in raw0.get("ev") or ():
             d = ev.get("d") or {}
-            if ev.get("k") == "fsm" and d.get("fsm") in HOOK_FSMS and d.get("obj") and d.get("to"):
-                key = (d["obj"], d["fsm"])
+            k = ev.get("k")
+            if k == "fsm" and d.get("fsm") in HOOK_FSMS and d.get("obj") and d.get("to"):
+                ent = d.get("ent")
+                key = (d["obj"] if ent is None else int(ent), d["fsm"])
+                if ent is not None:
+                    self._ent_obj[int(ent)] = d["obj"]
                 self._enters.setdefault(key, []).append((fo, d["to"]))
                 self._obj_state[key] = d["to"]
+            elif k == "special_damage":
+                special.add(d.get("fsm") or d.get("method"))
+            elif k == "damage":
+                dealt.add(d.get("source"))
         if fo % 30 == 0:
             self._boxes = {k: v for k, v in self._boxes.items() if k >= fo - KEEP_F}
             for key in list(self._enters):
@@ -252,10 +265,14 @@ class ForumPlannerPolicy(PlannerPolicy):
         for ev in ws.events:
             if ev.kind == Ev.HIT_TAKEN:
                 d = ev.data
-                self._hit_src.setdefault(ws.stamp.frame, []).append(d.source_id)
+                # a Multihit tick (special_damage, TakeQuickDamage: no source) or a damage event's hit
+                kind = "tick" if d.caller_path in special and d.caller_path not in dealt else "damage"
+                self._hit_src.setdefault(ws.stamp.frame, []).append(
+                    {"path": d.caller_path, "sid": d.source_id, "kind": kind, "used": False})
                 raw = self.raw.get(ws.stamp.frame) or s
                 wt, _ = true_wave(raw)
                 self.hit_log.append({"f": ws.stamp.frame, "t": round(ws.stamp.t_game_s, 3), "amount": d.amount,
+                                     "kind": kind, "path": d.caller_path,
                                      "src_type": d.source_type, "src_id": d.source_id, "wave_t": wt,
                                      "wave_v": self.fc.waves.current(ws.stamp.t_game_s), "S": getattr(self.planner_last, "S", None),
                                      "forced": bool(getattr(self.planner_last, "forced_risk", False)),
@@ -263,7 +280,7 @@ class ForumPlannerPolicy(PlannerPolicy):
                                      "tier": None if self.decision is None else self.decision.tier,
                                      "h": None if self.decision is None else self.decision.h})
                 if wt is not None:
-                    self.per_wave.setdefault(wt, Counter())["hits"] += 1
+                    self.per_wave.setdefault(wt, Counter())["hits" if kind == "damage" else "mh_ticks"] += 1
         if not self.wake_sent and tap is not None and tap.wake_frame is not None:
             # PlannerPolicy._wake with the battle's first wave: a wave-start savestate (Forum_A_w<i>, its intro rebases
             # the start to the wave's activation) starts the WaveTracker at wave i
@@ -277,61 +294,120 @@ class ForumPlannerPolicy(PlannerPolicy):
         """No kill commitment in the Forum (R3: the final blow is I3 only, no certified kill plans)."""
         return None
 
-    def _hook_of(self, obj: str, f: int) -> int | None:
-        """The hook of a multi-hit chain whose Final Hit came at f: the latest entry of the source object's Control /
-        Attack FSM into the state it is in now, at most HOOK_LOOKBACK_F frames before (multi_recall.hook_contacts)."""
-        best = None
-        for fsm in HOOK_FSMS:
-            st = self._obj_state.get((obj, fsm))
-            for fr, to in self._enters.get((obj, fsm), ()):
-                if to == st and f - HOOK_LOOKBACK_F <= fr < f:
-                    best = fr if best is None else max(best, fr)
-        return best
+    def _hook_of(self, sid: int | None, path: str, f: int) -> int | None:
+        """The hook of a multi-hit chain whose Final Hit came at f: the latest entry of the source instance's Control /
+        Attack FSM into the state it is in now, at most HOOK_LOOKBACK_F frames before (multi_recall.hook_contacts, keyed
+        by instance). The instance is the Final Hit's HIT_TAKEN source iid; without one, or with no entry found for it,
+        every instance whose object name is a part of the source path ("Wave 1/Song Reed/ParrySlash Hit": the Reeds)."""
+        def latest(ents) -> int | None:
+            best = None
+            for e in ents:
+                for fsm in HOOK_FSMS:
+                    st = self._obj_state.get((e, fsm))
+                    for fr, to in self._enters.get((e, fsm), ()):
+                        if to == st and f - HOOK_LOOKBACK_F <= fr < f:
+                            best = fr if best is None else max(best, fr)
+            return best
+        if sid is not None:
+            hk = latest((int(sid),))
+            if hk is not None:
+                return hk
+        parts = {p.replace("(Clone)", "").strip() for p in str(path or "").split("/") if p}
+        return latest([e for e, o in self._ent_obj.items() if o in parts] + sorted(parts))
+
+    @staticmethod
+    def _take(hits: list, path) -> dict | None:
+        """The first HIT_TAKEN of the frame not paired yet whose caller path is this event's (a rejected "damage"
+        event is DAMAGE_BLOCKED, not HIT_TAKEN: None)."""
+        for e in hits:
+            if not e["used"] and e["path"] == path:
+                e["used"] = True
+                return e
+        return None
+
+    def _covered(self, fj: int | None, by_f: dict) -> bool | None:
+        """The hero box at fj (or the frame before) inside the support forecast UNPRED_LAGS frames before fj; None:
+        no forecast kept (unknown)."""
+        old = None if fj is None else next((by_f[fj - lag] for lag in UNPRED_LAGS if fj - lag in by_f), None)
+        if old is None:
+            return None
+        _, fcast, t_o = old
+        for fr in (fj, fj - 1):
+            bt = self._boxes.get(fr)
+            if bt is None:
+                continue
+            bx, t = bt
+            x, y = 0.5 * (bx[0] + bx[2]), 0.5 * (bx[1] + bx[3])
+            if fcast.occupied(np.array([[x]]), np.array([[y]]), np.array([t - t_o]))[0, 0]:
+                return True
+        return False
+
+    def _count(self, fo: int, sid, cover: bool | None) -> int:
+        """1 for a hit outside the support (cover False) or not judged (None: unknown), noted with its source."""
+        if cover:
+            return 0
+        (self.unpredicted_unknown if cover is None else self.unpredicted).append(fo)
+        self._unpred_src.append(sid)
+        self.unpred_sources.append([fo, sid])
+        return 1
 
     def _unpredicted(self, raw: dict, fo: int) -> int:
         """PlannerPolicy._unpredicted with the Forum's multi-hit chains (R2 recall's rule): a chain's Final Hit (the
         hero's own "Roar and Wound States" FSM deals it, DamageHeroDirectly) is judged at the chain's hook, the
         source's entry into its chain state (_hook_of): the hero box there (or the frame before) against the
-        support forecast UNPRED_LAGS frames before the hook. No hook found or no forecast kept: unknown (counted)."""
+        support forecast UNPRED_LAGS frames before the hook. No hook found or no forecast kept: unknown (counted).
+        A Multihit tick (special_damage that took health) is judged at its own frame; one outside the support there
+        waits up to TICK_WAIT_F frames for its chain's Final Hit (which judges the chain at its hook) and is counted
+        when none comes (or the episode ends first: _flush_ticks). Each "damage" event takes the source iid of the
+        frame's HIT_TAKEN with its caller path (Q4 per instance); a rejected one (DAMAGE_BLOCKED) is judged with none."""
         n = 0
         by_f = {x[0]: x for x in self.forecasts}
-        src = list(self._hit_src.get(fo, ()))
-        k = 0
+        hits = self._hit_src.get(fo, [])
+        finals = False
         for ev in raw.get("ev") or ():
-            if ev.get("k") != "damage":
+            k = ev.get("k")
+            if k not in ("damage", "special_damage"):
                 continue
             d = ev.get("d") or {}
+            if k == "special_damage":
+                if self._take(hits, d.get("fsm") or d.get("method")) is not None:
+                    if self._covered(fo, by_f):
+                        self.mh_ticks.append([fo, "own"])
+                    else:
+                        self._pending_ticks.append(fo)
+                continue
             self.hits_taken.append(fo)
-            sid = src[k] if k < len(src) else None
-            k += 1
+            e = self._take(hits, d.get("source"))
+            sid = None if e is None else e["sid"]
             fj = fo
             if "Final Hit" in str(d.get("fsm") or ""):
-                obj = str(d.get("source") or "").split("/")[0]
-                fj = self._hook_of(obj, fo)
-                self.follow_ups.append([fo, obj, fj])
-            old = None if fj is None else next((by_f[fj - lag] for lag in UNPRED_LAGS if fj - lag in by_f), None)
-            if old is None:
-                n += 1
-                self.unpredicted_unknown.append(fo)
-                self._unpred_src.append(sid)
-                self.unpred_sources.append([fo, sid])
-                continue
-            _, fcast, t_o = old
-            cover = False
-            for fr in (fj, fj - 1):
-                bt = self._boxes.get(fr)
-                if bt is None:
-                    continue
-                bx, t = bt
-                x, y = 0.5 * (bx[0] + bx[2]), 0.5 * (bx[1] + bx[3])
-                if fcast.occupied(np.array([[x]]), np.array([[y]]), np.array([t - t_o]))[0, 0]:
-                    cover = True
-                    break
-            if not cover:
-                n += 1
-                self.unpredicted.append(fo)
-                self._unpred_src.append(sid)
-                self.unpred_sources.append([fo, sid])
+                path = str(d.get("source") or "")
+                fj = self._hook_of(sid, path, fo)
+                self.follow_ups.append([fo, path.split("/")[0], fj])
+                finals = True
+            n += self._count(fo, sid, self._covered(fj, by_f))
+        if finals and self._pending_ticks:
+            keep = []
+            for x in self._pending_ticks:
+                if fo - HOOK_LOOKBACK_F <= x <= fo:
+                    self.mh_ticks.append([x, "chain"])      # judged with its chain's Final Hit, at the hook
+                else:
+                    keep.append(x)
+            self._pending_ticks = keep
+        return n + self._flush_ticks(fo)
+
+    def _flush_ticks(self, fo: int | None) -> int:
+        """Count the Multihit ticks outside the support at their own frame whose chain's Final Hit did not come
+        within TICK_WAIT_F frames (fo None: the episode ended, all of them)."""
+        n = 0
+        keep = []
+        for x in self._pending_ticks:
+            if fo is None or fo - x >= TICK_WAIT_F:
+                self.mh_ticks.append([x, "miss"])
+                n += self._count(x, None, False)
+            else:
+                keep.append(x)
+        self._pending_ticks = keep
         return n
 
     def _first_tick(self, ws) -> None:
@@ -439,7 +515,7 @@ class ForumPlannerPolicy(PlannerPolicy):
             self.first_pending_f = f
             self.first_pending_reasons = list(r.decision.reasons)
         mask = res.mask if r.mask is None else r.mask
-        cog = self._cogfly(f, ws, raw, res, r, fcast, S0, wt) if r.mask is None else None
+        cog = self._cogfly(f, ws, raw, res, r, fcast, S0, wt)
         if cog is not None:
             mask = cog
             self.cog["frames"].add(f + 2)
@@ -480,10 +556,13 @@ class ForumPlannerPolicy(PlannerPolicy):
     def _cogfly(self, f, ws, raw, res, r, fcast, S0, wt) -> int | None:
         """The Cogfly throw (module docstring, 5): the second frame of a throw under way, or a new one."""
         cg, c = self.rules.cogfly, self.cog
+        if r.mask is not None or res.forced_risk or r.decision.pause_pending:
+            c["hold"] = 0           # the supervisor's keys or the evasive ones: the throw's second frame is dropped
+            return None
         if c["hold"] > 0:
             c["hold"] -= 1
             return COG
-        if not cg.get("enabled") or res.S or res.forced_risk or r.decision.pause_pending:
+        if not cg.get("enabled") or res.S:
             return None
         w = self.fc.waves.current(ws.stamp.t_game_s)
         if c["used"][w] >= cg["uses"].get(w, 0) or sum(c["used"].values()) >= COG_MAX:
@@ -569,6 +648,7 @@ class ForumPlannerPolicy(PlannerPolicy):
         self._emit(rec, event)
 
     def stats(self) -> dict:
+        self._flush_ticks(None)
         self.flush_log()
         keys = self.flush_keys()
         q = (lambda v, p: round(float(np.percentile(v, p)), 3) if v else None)
@@ -583,7 +663,7 @@ class ForumPlannerPolicy(PlannerPolicy):
                 "plan_ms_p50": q(self.plan_ms, 50), "plan_ms_p99": q(self.plan_ms, 99),
                 "ticks": len(self.tick_ms), "late_ticks": sum(1 for x in self.tick_ms if x > 16.7),
                 "unpredicted": self.unpredicted, "unpredicted_unknown": self.unpredicted_unknown,
-                "unpredicted_sources": self.unpred_sources, "follow_ups": self.follow_ups, "hits_taken": self.hits_taken, "hit_log": self.hit_log,
+                "unpredicted_sources": self.unpred_sources, "follow_ups": self.follow_ups, "mh_ticks": self.mh_ticks, "hits_taken": self.hits_taken, "hit_log": self.hit_log,
                 "forced_risk_ticks": len(self.forced_frames), "forced_streaks": self.forced_streaks,
                 "per_wave": {str(k): dict(v) for k, v in sorted(self.per_wave.items())},
                 "wave_check": dict(self.wave_chk), "wave_bad": self.wave_bad,

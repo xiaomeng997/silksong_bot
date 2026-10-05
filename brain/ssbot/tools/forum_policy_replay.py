@@ -75,7 +75,8 @@ def main(argv=None) -> int:
            **{k: st[k] for k in ("tick_ms_p50", "tick_ms_p99", "plan_ms_p50", "plan_ms_p99", "late_ticks", "modes",
                                  "forced_risk_ticks", "forced_streaks", "per_wave", "wave_check", "wave_bad",
                                  "wave_tracker", "audit", "targets", "binds", "cogfly", "unpredicted",
-                                 "unpredicted_unknown", "unpredicted_sources", "follow_ups", "hits_taken", "hit_log")},
+                                 "unpredicted_unknown", "unpredicted_sources", "follow_ups", "mh_ticks", "hits_taken",
+                                 "hit_log")},
            "first_ticks_ms": [round(x, 1) for x in pol.tick_ms[:12]],
            "true_waves": (row.get("gauntlet") or {}).get("waves")}
     js = json.dumps(out, indent=1, default=str)
