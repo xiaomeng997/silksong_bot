@@ -25,6 +25,7 @@ from ssbot.core.worldstate import Ev, WorldState
 
 SLACK_S = 2.0 / 60.0          # kill / activation times are frame times (+- the export lag)
 RESYNC_AFTER_S = 2.0          # a running wave's members are all in play this long after its activation
+_NOT_SEEN = frozenset(("unknown", "hidden"))    # the vision view's phases of a state it cannot tell
 
 
 @dataclass
@@ -96,12 +97,14 @@ class WaveTracker:
 
     @staticmethod
     def _in_play(e, alive: bool = False) -> bool:
-        """Out of its waiting state (alive: and not in a death state; a state not seen counts as not in play)."""
+        """Out of its waiting state (alive: and not in a death state; a state not seen - none, the vision view's
+        "unknown" / "hidden" phase - counts as not in play)."""
         spec = FORUM_TYPES.get(e.type_key.v)
         if spec is None:
             return False
         st = e.fsm[0][1] if e.fsm else (e.phase.top if e.phase is not None else None)
-        return st is not None and st not in spec.waiting and not (alive and st in spec.death_states)
+        return st is not None and st not in _NOT_SEEN and st not in spec.waiting \
+            and not (alive and st in spec.death_states)
 
     def _activate(self, w: int, t: float) -> None:
         self.queued = None

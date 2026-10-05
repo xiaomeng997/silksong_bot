@@ -574,6 +574,7 @@ class _Builder:
         self.unknown: list[int] = []
         self.meta_group: dict = {}           # group owner -> the other Tinies its placements stand for
         self.clusters: list = []             # Tiny cluster index -> its Tinies (the group rows' gcl)
+        self.arena: dict = {}                # owner -> [t_from, t_to] of its arena-wide box
         self._maestro: bool | None = None    # a Maestro in play (lazily)
 
     # ---- placements ----
@@ -621,7 +622,7 @@ class _Builder:
             return
         big = ok & (np.maximum(boxes[:, 2], boxes[:, 3]) > COARSE_MAX_U)
         for i in np.flatnonzero(big):
-            self.boxes.append((owner, "arena", *ARENA_BOX, 0.0, 0.0, None, lo[i] + t0 - BIN, hi[i] + t1 + BIN, 0.0))
+            self._arena(owner, lo[i] + t0 - BIN, hi[i] + t1 + BIN)
         sel = ok & ~big
         n = int(sel.sum())
         if not n:
@@ -632,6 +633,15 @@ class _Builder:
                                np.full(n, p), np.full(n, tid, np.int64), lo[sel], hi[sel], boxes[sel],
                                np.full(n, mir, np.int64), lo[sel] + t0 - BIN, hi[sel] + t1 + BIN,
                                np.full(n, -1, np.int64)))
+
+    def _arena(self, owner: int, t_from: float, t_to: float) -> None:
+        """An arena-wide box of owner over [t_from, t_to]: one per owner, over the hull of its windows (a superset;
+        the query loops over the box rows)."""
+        a = self.arena.get(owner)
+        if a is None:
+            self.arena[owner] = [float(t_from), float(t_to)]
+        else:
+            a[0], a[1] = min(a[0], float(t_from)), max(a[1], float(t_to))
 
     def _place_anchor(self, tid, lo, hi, anc, owner, fam, committed, p):
         (ax, ay), m, sd = anc
@@ -850,22 +860,19 @@ class _Builder:
         if not buf:
             return
         R = len(buf)
-        lo = np.array([b[2] for b in buf])
-        hi = np.array([b[3] for b in buf])
-        fid = np.array([b[1] for b in buf], np.int64)
-        p = np.array([b[4] for b in buf])
+        num = np.array([(b[1], b[2], b[3], b[4]) for b in buf], np.float64)
+        fid = num[:, 0].astype(np.int64)
+        lo, hi, p = num[:, 1], num[:, 2], num[:, 3]
         trs = [b[0] for b in buf]
         by_iid = {t.iid: t for t in trs}
         tlist = list(by_iid.values())
         pos_of = {iid: i for i, iid in enumerate(by_iid)}
         sidx = np.array([pos_of[t.iid] for t in trs], np.int64)
         ok_pos = np.array([t.pos is not None for t in tlist])
-        px = np.array([t.pos[0] if t.pos is not None else 0.0 for t in tlist])
-        py = np.array([t.pos[1] if t.pos is not None else 0.0 for t in tlist])
-        vx = np.array([t.vel[0] for t in tlist])
-        vy = np.array([t.vel[1] for t in tlist])
-        age = np.array([self.origin - t.seen_T for t in tlist])
-        sd = np.array([t.pos_sd for t in tlist])
+        tv = np.array([(t.pos[0], t.pos[1], t.vel[0], t.vel[1], self.origin - t.seen_T, t.pos_sd)
+                       if t.pos is not None else (0.0, 0.0, t.vel[0], t.vel[1], self.origin - t.seen_T, t.pos_sd)
+                       for t in tlist], np.float64)
+        px, py, vx, vy, age, sd = tv.T
         keep = ok_pos[sidx] & (hi >= lo - 1e-9)
         if not keep.any():
             return
@@ -887,10 +894,15 @@ class _Builder:
         s_lo, s_hi = np.maximum(e0, 0.0), np.maximum(e1, 0.0)
         g = np.empty(len(ri))
         tub = self.tables.tubes
-        for t_i, t in enumerate(tlist):
-            m = s == t_i
-            if m.any():
-                g[m] = tub.g(t.tk, age[t_i] + s_hi[m])
+        tks = [t.tk for t in tlist]
+        if len(set(tks)) == 1:
+            g[:] = tub.g(tks[0], age[s] + s_hi)
+        else:
+            tcode = {tk: i for i, tk in enumerate(dict.fromkeys(tks))}
+            tc = np.array([tcode[tk] for tk in tks], np.int64)[s]
+            for tk, c_ in tcode.items():             # one growth lookup per type
+                m = tc == c_
+                g[m] = tub.g(tk, age[s[m]] + s_hi[m])
         g += sd[s]
         mid, half = 0.5 * (s_lo + s_hi), 0.5 * (s_hi - s_lo)
         x0 = px[s] + vx[s] * mid - np.abs(vx[s]) * half - g
@@ -905,14 +917,20 @@ class _Builder:
             # clusters are the cells of a fixed TINY_CLUSTER_U grid: a cluster never spans more than a cell, and a
             # Tiny gone (killed) never joins two others into one (forum_planner_plan §4.4 item 6)
             ti = np.flatnonzero(tiny)
-            cell = np.stack([np.floor(px[ti] / TINY_CLUSTER_U), np.floor(py[ti] / TINY_CLUSTER_U)], axis=1)
+            cell = (np.floor(px[ti] / TINY_CLUSTER_U).astype(np.int64) + 1024) * 4096 \
+                + np.floor(py[ti] / TINY_CLUSTER_U).astype(np.int64) + 1024
             cl = np.full(len(tlist), -1, np.int64)
-            cl[ti] = np.unique(cell, axis=0, return_inverse=True)[1].ravel()
+            cl[ti] = np.unique(cell, return_inverse=True)[1].ravel()
             grp = tiny[s] & (cl[s] >= 0)
             if grp.any():
                 gi = np.flatnonzero(grp)
-                key = np.stack([cl[s[gi]], fid[ri[gi]], k[gi]], axis=1)
-                ukey, inv = np.unique(key, axis=0, return_inverse=True)
+                # one group per (cluster, family walk, grid piece): a 1-d key (np.unique over rows is slow)
+                fu, fi = np.unique(fid[ri[gi]], return_inverse=True)
+                nk = len(E)
+                key = (cl[s[gi]] * len(fu) + fi.ravel()) * nk + k[gi]
+                ukey1, inv = np.unique(key, return_inverse=True)
+                inv = inv.ravel()
+                ukey = np.stack([ukey1 // (len(fu) * nk), fu[(ukey1 // nk) % len(fu)]], axis=1)
                 n = len(ukey)
                 G = {"e0": np.full(n, np.inf), "e1": np.full(n, -np.inf), "x0": np.full(n, np.inf),
                      "x1": np.full(n, -np.inf), "y0": np.full(n, np.inf), "y1": np.full(n, -np.inf),
@@ -962,11 +980,22 @@ class _Builder:
         hi = np.minimum(e1, self.H + BIN - t0)
         ok = hi >= lo - 1e-9
         big = ok & (np.maximum(hx, hy) > COARSE_MAX_U)
-        for i in np.flatnonzero(big):
-            # (the boxes are filtered by owner: a group row's arena box once per Tiny of its cluster)
-            for o in (self.clusters[gcl[i]] if gcl[i] >= 0 else (int(owner[i]),)):
-                self.boxes.append((int(o), "arena", *ARENA_BOX, 0.0, 0.0, None, lo[i] + t0[i] - BIN,
-                                   hi[i] + t1[i] + BIN, 0.0))
+        if big.any():
+            # one arena box per owner over its rows' hull (a dead Tiny walked for a summon: ~160 rows a tick in wave
+            # 6); the boxes are filtered by owner: a group row's once per Tiny of its cluster
+            a0, a1 = lo + t0 - BIN, hi + t1 + BIN
+            for grp_rows in (False, True):
+                m = big & ((gcl >= 0) == grp_rows)
+                if not m.any():
+                    continue
+                u, inv = np.unique(gcl[m] if grp_rows else owner[m], return_inverse=True)
+                inv = inv.ravel()
+                mn, mx = np.full(len(u), np.inf), np.full(len(u), -np.inf)
+                np.minimum.at(mn, inv, a0[m])
+                np.maximum.at(mx, inv, a1[m])
+                for j, key in enumerate(u.tolist()):
+                    for o in (self.clusters[key] if grp_rows else (key,)):
+                        self._arena(int(o), mn[j], mx[j])
         sel = ok & ~big
         n = int(sel.sum())
         if not n:
@@ -1028,6 +1057,8 @@ class _Builder:
                 self._window(wid, lo, hi + ENTRY_LAG_S, None, 1, ENTRY_OWNER - w, tt.spec.entry_family, False, 1.0)
 
     def finish(self) -> "MultiForecast":
+        for o, (a, b) in self.arena.items():
+            self.boxes.append((o, "arena", *ARENA_BOX, 0.0, 0.0, None, a, b, 0.0))
         out = MultiForecast(self.fc, self.origin, self.H)
         out.P = PlaceBatch.from_rows(self.fine)
         out.pm = _meta_arrays(self.fine_m)
@@ -1061,7 +1092,9 @@ def _bb_arrays(chunks: list, store, fam_code: dict | None = None) -> dict:
                 "cx": z, "cy": z, "hx": z, "hy": z, "mir": zi, "on": z, "off": z, "gcl": zi,
                 "loff": np.zeros((0, JMAX + 1), np.int64), "nt": zi, "t0": z}
     cat = [np.concatenate([c[i] for c in chunks]) for i in range(len(chunks[0]))]
-    names = {v: k for k, v in (fam_code or {}).items()}
+    names = np.empty(max(len(fam_code or {}), 1), object)          # family code -> name
+    for k, v in (fam_code or {}).items():
+        names[v] = k
     tid = cat[4]
     uniq, inv = np.unique(tid, return_inverse=True)
     tabs = [store.bbox_table(int(t)) for t in uniq]
@@ -1069,7 +1102,7 @@ def _bb_arrays(chunks: list, store, fam_code: dict | None = None) -> dict:
     nt = np.array([t[1] for t in tabs], np.int64)[inv]
     t0 = np.array([t[2] for t in tabs], np.float64)[inv]
     box = cat[7]
-    return {"owner": cat[0], "family": [names[int(c)] for c in cat[1]], "committed": cat[2], "prob": cat[3],
+    return {"owner": cat[0], "family": names[cat[1]], "committed": cat[2], "prob": cat[3],
             "tid": tid, "e0": cat[5], "e1": cat[6], "cx": box[:, 0].copy(), "cy": box[:, 1].copy(),
             "hx": box[:, 2].copy(), "hy": box[:, 3].copy(), "mir": cat[8], "on": cat[9], "off": cat[10],
             "gcl": cat[11], "loff": np.ascontiguousarray(loff), "nt": nt, "t0": t0}
