@@ -136,6 +136,21 @@ def forum_bench(a: argparse.Namespace) -> int:
     return 0
 
 
+def _forum_prefs(tac, ws, fc):
+    """Today's planner has no Forum tactics (R3/R6): HOLD where the hero stands, the playbook's weights, the risk map
+    over the Forum floor from the MultiForecast (Tactics.risk_map's weighting)."""
+    from ssbot.combat.tactics.modes import HOLD, TacticPrefs
+    from ssbot.core.forum import FLOOR_Y, WALL_L, WALL_R
+    from ssbot.knowledge import hitbox_tables as hb
+    xs = np.arange(WALL_L + 0.5, WALL_R - 0.5 + 1e-9, 0.5)
+    tk = np.arange(0, 61, 2) / 60.0
+    occ = fc.occupied(np.repeat(xs[:, None], len(tk), 1), np.full((len(xs), len(tk)), FLOOR_Y + hb.HERO_HALF_U[1]),
+                      tk)
+    w = 1.0 / (1.0 + tk)
+    return TacticPrefs(HOLD, float(ws.hero.pos.v[0]), dict(tac.pb.weights), risk_x=xs, risk=(occ * w).sum(axis=1) /
+                       w.sum())
+
+
 def forum_multi_bench(a: argparse.Namespace) -> int:
     """--encounter Forum --multi (round R2): replay a fight's recording through OracleBackend and the run-time
     MultiForecaster (production tables: knowledge/.../forum/*_hitboxes.npz + support_margins.json) and time every
@@ -224,7 +239,7 @@ def forum_multi_bench(a: argparse.Namespace) -> int:
         a2 = time.perf_counter()
         n += 1
         if planner is not None and prev is not None:
-            prefs = tac.decide(ws, fc, None, 3)
+            prefs = _forum_prefs(tac, ws, fc)
             ctx = FilterContext.from_world(ws, None, 3, want_bind=prefs.want_bind)
             hold = HoldState.from_act(prev.get("act"))
             prefix = np.array([int((s.get("act") or {}).get("mask") or 0)])
