@@ -39,7 +39,7 @@
 - 研究资料说 "13 波"（research.json，wiki 原文），游戏数据是 14 个 BattleWave；差别大概来自索引 2（2 个敌人、remainingEnemyToEnd 2：开波 1 s 后的子物体检查就会放下一波，所以和索引 3 连成一波）【推测，用 room.battles 实测核对】。
 - 伤害（DamageHero.damageDealt，全部 hazardType 1 = ENEMY）：Song Heavy Sentry 本体与 `Slam Collider 1/2` = **2**；Song Handmaiden `Spear` = **2**，其余 1；Song Reed / Song Pilgrim 01 / Song Pilgrim 03 / Pilgrim 03 Song / Song Administrator / Song Pilgrim Maestro 全部 1（Song Pilgrim 03 的 `Whip Hit 1–6` 和 Song Reed 的 `ParrySlash Hit`、Administrator 的 `Slash Collider` 为 0）。research.json 的 "Choir Clapper：锤、接触、丝砸全为 2，丝内爆 1"：锤、接触 = 2 与场景包一致；丝砸、丝内爆是生成的投射物，场景包里看不到；实测（§9.2、§10）：Bomb Cast 的 `rune bomb small` 伤 1（= 丝内爆），Jump Cast 落地后的 `rune slam` 伤 2（= 丝砸）。
 - 内部名与游戏名：已由游戏图鉴核实，见 §9.1（Song Pilgrim 03 = Choristor，Song Pilgrim 01 = Envoy，Pilgrim 03 Song = Choir Bellbearer）。上面"为 0"的 `Whip Hit 1–6`、`ParrySlash Hit`、`Slash Collider` 是多段攻击，实际每下扣 1 血（§9.2）。
-- 各类型 FSM：Song Heavy Sentry `Control`（`Slam Antic`、`Jump Antic → Jump Aim → Jump → Air → Charged? → Slam`、`Spell Antic → Cast 1/2`（`Bomb Cast` FSM 放丝弹）、`Cast Slam Antic`、`Evade Scuttle`、`Avoid Type`（`AVOID BUDDY`：两只互相让））；其余类型的状态表在 `fo/fsm_enemy_*.txt`（场景包导出），行为表从采集录像生成。
+- 各类型 FSM：Song Heavy Sentry `Control`（`Slam Antic`、`Jump Antic → Jump Aim → Jump → Air → Charged? → Slam`、`Spell Antic → Cast 1/2`（`Bomb Cast` FSM 放丝弹）、`Cast Slam Antic`、`Evade Scuttle`、`Avoid Type`（`AVOID BUDDY`：两只互相让））；**两只不同时出招**（2026-10-04 读 FSM）：`Close Range` 和 `Far Range` 选招前先读另一只（`Buddy`）`Control` FSM 的 `Is Attacking`，为真就 CANCEL 回 `Idle`；所以最后一波一只在出招时另一只只会走 / 待机（身体照样伤人），不会两只同时抡锤；另外每个起手状态（Slam / Jump / Spell / Cast Slam Antic、Jump Aim、Evade Scuttle）第一件事是 `FaceObjectV2` 面向主角（两次转身至少隔 0.5 s）；其余类型的状态表在 `fo/fsm_enemy_*.txt`（场景包导出），行为表从采集录像生成。
 
 ## 3. 怎么结束
 
