@@ -1490,3 +1490,37 @@ identity baseline), `live_r3cert_5d0243b` (superseded).
 7. A recording with the Weighted Anklet equipped to check `with_weighted()` and the 1.3 s post-hit window.
 8. Frozen checkouts to remove when done: `C:\ssbot\live_r3cert_5d0243b`, `live_r3_2a10a0d`, `live_r3kin_d9dd529`,
    `live_r3_0d735f4`, `live_r3_2b8f5c7`, `live_main_fe50ef9` (plain directories, not git worktrees).
+
+## Task R4 - Forum plan round R4: the A0 baseline (branch worktree-wf_89d18409-0b6-1)
+
+Worktree `C:\modeling\silksong_bot\.claude\worktrees\wf_89d18409-0b6-1` (from main 9dddedf). Facts: forum.md section 16
+(Chinese). Frozen checkout `C:\ssbot\live_r4_c86b48e` (git archive of c86b48e + the R3 tables from
+`C:\ssbot\tables\forum_r3_2a10a0d`); outputs `C:\ssbot\data\m2_forum_r4\`; driver `C:\ssbot\sandbox\r4_a0.ps1`
+(log `r4_a0.log`).
+
+### Done (committed)
+
+- `train/forum_planner_policy.py` ForumPlannerPolicy (combat_run `--policy planner` on a gauntlet encounter): the R3
+  fast layer live (ForumPlanner over a MultiForecaster on the production tables, the Forum loadout's kinematics,
+  `with_weighted()` and the 1.3 s post-hit window when `ws.res.equipped` shows the Weighted Anklet - fo_A has none),
+  `forum_supervisor_config` with `unpredicted_sources` (HIT_TAKEN source iids), kill_prims from `forum_yellow_kill_hp`,
+  `FilterContext.kill_hp = forum_kill_hp`; Cogfly throws (Up + QuickCast, 2 frames) gated on the support's t_min;
+  per-wave accounting; the WaveTracker checked against room.battles on every ticked frame (test truth only).
+  The Bell Beast's PlannerPolicy is untouched (bit-identical by construction: no shared code changed except
+  `WaveTracker.current`, which the boss path never calls).
+- Multi-hit chains: a chain's Final Hit (the hero's "Roar and Wound States" FSM, DamageHeroDirectly) is judged at the
+  chain's hook as in R2's recall (`_hook_of`); judged at its own frame it was counted unpredicted (replay 154609 i0 ep0:
+  Choristor Whip Hit 2 Final Hit 20 frames after the hook).
+- `combat/tactics/forum_local.py` ForumTactics (LOCAL: HEAL Q1a / Q6, LEAVE (pocket rule 2), EVADE, ENGAGE with
+  Clawmaiden first and distant Bellbearer / Maestro last, defensive stances hit weight -1, HOOL), `Forum.yaml` v0.
+- `WaveTracker.current(t)`: the wave BattleScene runs (switches at the rule's activation time); `wave` / `t_active`
+  (the forecast's) unchanged.
+- Tools: `forum_policy_replay` (open-loop replay, also warms the numba caches), `forum_a0_report` (6.3 metrics).
+- Tests: `tests/test_forum_tactics.py` (5); test_forum_planner + test_multi_forecast + tactics 54 passed.
+
+### Running
+
+- `C:\ssbot\sandbox\r4_a0.ps1` (started 04:45): warm replay, then 13 full gauntlets per instance 0-3 (Forum_A, eval,
+  oracle, real quits 0.2, seeds 150000+), the report, then it restarts the 1x collections on instances 2 / 3 (seeds
+  162000 / 163000, 9 h, logs `C:\ssbot\sandbox\r4_collect_i2.log` / `_i3.log`). The collections stopped for it:
+  `20261004_233950` (i2) and `20261005_022858` (i3), STOP files written 04:45.
