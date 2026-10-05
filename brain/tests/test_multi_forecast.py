@@ -284,6 +284,18 @@ def test_forecast_covers_the_attack_drops_the_dead_and_answers_the_interface():
     assert near[:2].any() and not near[5:].any()
 
 
+def test_a_zero_dwell_loop_never_enters_before_the_root():
+    """forum.md 15.2: the Tiny's Ready -> Ready loop with a zero least dwell took one bin of slack per pass, down to
+    -333 s at the step cap; nothing after the walk's root is entered more than one bin before it."""
+    d = _reed_table()
+    d["dwell_s"]["Alert"] = {"min": 0.0, "max": 0.5}
+    d["support_transitions"]["Alert"] = ["Alert", "Stab Pos", "Defend Start", "Death"]
+    tt = type_table(d, FORUM_TYPES[REED])
+    for st in ("Stab Recover", "Alert"):
+        nodes = walk(tt, st, None, False, False)
+        assert min(n.lo for n in nodes if not n.current) >= -BIN - 1e-9
+
+
 def test_an_attack_that_moved_is_re_anchored_at_its_later_start_state():
     """forum.md 15.1 (the 13.13 miss: a Clawmaiden lunge after a 3.3 u flight): an instance that enters another start
     state of its family is also placed as an instance from that state, anchored where the enemy is then."""

@@ -44,8 +44,8 @@ import numpy as np
 
 from ssbot.combat import candidates as cmod
 from ssbot.combat.holdfilter import hold_filter_jit
-from ssbot.combat.planner import (KillPlan, MACRO_MARGIN, PlannerConfig, PlanResult, Planner, _is_macro,
-                                  _rect_meets_polys)
+from ssbot.combat.planner import (KillPlan, MACRO_MARGIN, NO_CONTROL_MODES, PlannerConfig, PlanResult, Planner,
+                                  _is_macro, _rect_meets_polys)
 from ssbot.combat.safety_filter import (R_KILL, REASONS, FilterContext, hazard_flags, i3_kill_allowed, kill_frames,
                                         kill_window_frames, unpausable, veto)
 from ssbot.core.forum import FORUM_TYPES, FORUM_WAVES, WALL_L, WALL_R
@@ -76,7 +76,9 @@ class ForumConfig:
     hitfx_k: int = 32
     react_k: int = 4
     K_tgt: int = 4
-    p_k: int = 64
+    p_k: int = 16
+    exact_p: bool = False         # FORCED_RISK ranks by MultiForecast.prob (3.7 ms p50 on wave 6: one query per enemy,
+    #                               placement kind and probability value) instead of the share of frames in contact
 
 
 @dataclass
@@ -267,6 +269,8 @@ class ForumPlanner(Planner):
         self.fcfg = fcfg or ForumConfig()
         super().__init__(params, terrain, cfg or PlannerConfig(T=self.fcfg.T, variants=self.fcfg.variants))
         self.fsets = {p: cmod.build_forum(self.fcfg.T, p) for p in cmod.POSTURES}
+        # without control (hit-stop, recoil, a lock) the keys only queue: the core rows only (Planner's cands_nc)
+        self.fsets_nc = {p: (cs.subset(core), core[core]) for p, (cs, core) in self.fsets.items()}
         self.shapes = _shapes(crest)
         self.audit = EnvelopeAudit()
         self.last_info: dict = {}
@@ -365,7 +369,8 @@ class ForumPlanner(Planner):
         prefix = np.asarray(prefix, np.int64).reshape(-1)
         P = len(prefix)
         posture = posture_of(start)
-        cs, core0 = self.fsets[posture]
+        mode0 = int(np.asarray(start).reshape(kin.K, -1)[kin.MODE, 0])
+        cs, core0 = (self.fsets_nc if mode0 in NO_CONTROL_MODES else self.fsets)[posture]
         N0, T = len(cs.cmd), cs.T
         cont = self.prev_cmd is not None
         rows_ = [cs.cmd]
@@ -401,6 +406,7 @@ class ForumPlanner(Planner):
             occ1 &= (r1.flags & F_INVULN) == 0
         occ1[:, 0] = False
         S1 = occ1.any(axis=1)
+        share = occ1.mean(axis=1)                 # FORCED_RISK's ranking without exact_p: time in contact
         t_hit = np.where(S1, occ1.argmax(axis=1), T1)
         t2 = time.perf_counter()
         sc = self._score_forum(ws, r1, latched, start, f, prefs, tk)
@@ -471,6 +477,7 @@ class ForumPlanner(Planner):
             env[ch] = True
             bound[ch] = r2.bound
             t_hit[ch] = np.where(s2, occ.argmax(axis=1), T1)
+            share[ch] = occ.mean(axis=1)
             hr = ch[~s2 & has_hit[ch]]
             if len(hr):
                 room = fcfg.hitfx_k - budget["hitfx"]
@@ -515,8 +522,11 @@ class ForumPlanner(Planner):
         if forced and sel.any():
             cand = np.flatnonzero(sel)
             cand = cand[np.lexsort((-J[cand], -t_hit[cand]))][:fcfg.p_k]
-            b = r1.box[cand]
-            Pc[cand] = f.prob(0.5 * (b[..., 0] + b[..., 2]), 0.5 * (b[..., 1] + b[..., 3]), tk)
+            if fcfg.exact_p:
+                b = r1.box[cand]
+                Pc[cand] = f.prob(0.5 * (b[..., 0] + b[..., 2]), 0.5 * (b[..., 1] + b[..., 3]), tk)
+            else:
+                Pc[cand] = share[cand]
             sel = np.zeros(N, bool)
             sel[cand] = True
         zero = ~cmd.any(axis=1)

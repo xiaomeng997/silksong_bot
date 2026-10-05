@@ -91,6 +91,8 @@ COARSE_MAX_U = 24.0               # an anchor box wider than this places an aren
 ARENA_BOX = (0.0, -5.0, 64.0, 40.0)
 TINY = "Song Automaton Tiny"
 MAESTRO = "Song Pilgrim Maestro"
+SUMMON_STATE = "Summon"           # a dead Tiny leaves Dead on the frame a Maestro enters Summon (forum.md 15.2: 105 of
+#                                   105 revivals in 8 R0 fights, gap 0): its walk starts no earlier
 TINY_GROUP = 3                    # Tinies at least this many: group placement
 TINY_CLUSTER_U = 4.0              # Tinies in one cell of this grid share one placement set
 ENTRY_LAG_S = 1.0                 # a wave's activation -> its member's entry family start (upper bound)
@@ -133,6 +135,11 @@ def walk(tt: TypeTable, state: str, ctx: tuple | None, dead: bool, overdue: bool
         if lo > cap:
             return
         hi = min(hi, cap)
+        if not current:
+            # nothing after the walk's root is entered before it: a zero-dwell loop (the Tiny's Ready -> Ready) took
+            # one bin of slack per pass down to -333 s at the step cap (forum.md 15.2), so every Tiny's idle family
+            # walk spanned 333 s before its start (an arena-wide box over the whole horizon)
+            lo = max(lo, -DWELL_SLACK_S)
         k = (st, c, d, current)
         iv = nodes.get(k)
         if iv is None:
@@ -624,8 +631,9 @@ class _Builder:
         self.unknown: list[int] = []
         self.meta_group: dict = {}           # group owner -> the other Tinies its placements stand for
         self.clusters: list = []             # Tiny cluster index -> its Tinies (the group rows' gcl)
-        self.arena: dict = {}                # owner -> [t_from, t_to] of its arena-wide box
+        self.arena: dict = {}                # owner -> [(t_from, t_to)] of its arena-wide boxes (merged at finish)
         self._maestro: bool | None = None    # a Maestro in play (lazily)
+        self._summon_t: float | None = None  # the earliest a Maestro in play can enter Summon (lazily)
 
     # ---- placements ----
 
@@ -685,13 +693,10 @@ class _Builder:
                                np.full(n, -1, np.int64)))
 
     def _arena(self, owner: int, t_from: float, t_to: float) -> None:
-        """An arena-wide box of owner over [t_from, t_to]: one per owner, over the hull of its windows (a superset;
-        the query loops over the box rows)."""
-        a = self.arena.get(owner)
-        if a is None:
-            self.arena[owner] = [float(t_from), float(t_to)]
-        else:
-            a[0], a[1] = min(a[0], float(t_from)), max(a[1], float(t_to))
+        """An arena-wide box of owner over [t_from, t_to]: the union of its windows, overlapping ones merged (forum.md
+        15.2: the hull of all of them put a Tiny's arena box from its instance's start 332 s ago over the whole
+        horizon, and every plan of a Maestro wave in contact at frame 0)."""
+        self.arena.setdefault(owner, []).append((float(t_from), float(t_to)))
 
     def _place_anchor(self, tid, lo, hi, anc, owner, fam, committed, p):
         (ax, ay), m, sd = anc
@@ -721,6 +726,35 @@ class _Builder:
         if self._maestro is None:
             self._maestro = any(t.tk == MAESTRO and t.in_play and not t.dead for t in self.fc.trackers.values())
         return self._maestro
+
+    def _summon_earliest(self) -> float:
+        """s from the origin: the earliest any Maestro in play can enter Summon (inf: none within its walk), from its
+        walk: a Summon node of its current instance, else a later instance of a family with Summon, from its start plus
+        the family's least logged Summon entry (one bin of slack)."""
+        if self._summon_t is None:
+            T, H = self.origin, self.H
+            best = math.inf
+            for tr in self.fc.trackers.values():
+                if tr.tk != MAESTRO or not tr.in_play or tr.dead or tr.state is None or tr.t_entry is None:
+                    continue
+                tt = tr.table
+                age = T - tr.t_entry
+                dw = tt.dwell.get(tr.state)
+                overdue = dw is not None and (age > dw[1] + DWELL_SLACK_S or age + H + BIN > WALK_CAP_S)
+                cur = tr.cur
+                ctx = (cur.family, cur.start) if cur is not None else None
+                cur_nodes, roots = self.fc.walks.get(tt, tr.state, ctx, tr.dead, overdue)
+                ref = T if overdue else tr.t_entry
+                for nd in cur_nodes:
+                    if nd.state == SUMMON_STATE and not nd.current:
+                        best = min(best, max(ref + nd.lo - T, BIN))
+                for nd in roots:
+                    fm = tt.families.get(nd.family)
+                    if fm is not None and SUMMON_STATE in fm.states:
+                        e0 = fm.entry.get(SUMMON_STATE, (0.0, 0.0))[0]
+                        best = min(best, max(ref + nd.lo + e0 - BIN - T, BIN))
+            self._summon_t = best
+        return self._summon_t
 
     def _wave_wake(self, tr: EnemyTracker) -> float | None:
         """The earliest game time a waiting wave member can leave its waiting state: its queued wave's earliest
@@ -763,6 +797,13 @@ class _Builder:
         # the state ending at any time from the next frame (a superset of its dwell window)
         overdue = dw is not None and (age > dw[1] + DWELL_SLACK_S or age + H + BIN > WALK_CAP_S)
         wake = self._wave_wake(tr)
+        if sp.pooled and (tr.dead or not tr.in_play):
+            # a dead / parked Tiny comes back only with a Maestro's Summon (SUMMON_STATE): not before the earliest one
+            ts = self._summon_earliest()
+            if not math.isfinite(ts) or ts > H + BIN:
+                self.subjects.append(self._subject_row(tr, False, math.inf))
+                return
+            wake = T + ts
         if wake is not None:
             overdue = True
         ctx = (cur.family, cur.start) if cur is not None else None
@@ -1042,7 +1083,9 @@ class _Builder:
         if big.any():
             # one arena box per owner over its rows' hull (a dead Tiny walked for a summon: ~160 rows a tick in wave
             # 6); the boxes are filtered by owner: a group row's once per Tiny of its cluster
-            a0, a1 = lo + t0 - BIN, hi + t1 + BIN
+            # the window where the template holds a box (not its whole span: forum.md 15.2)
+            act = np.array([self.store.active_span(int(t)) for t in ut])
+            a0, a1 = lo + act[inv, 0] - BIN, hi + act[inv, 1] + BIN
             for grp_rows in (False, True):
                 m = big & ((gcl >= 0) == grp_rows)
                 if not m.any():
@@ -1116,7 +1159,15 @@ class _Builder:
                 self._window(wid, lo, hi + ENTRY_LAG_S, None, 1, ENTRY_OWNER - w, tt.spec.entry_family, False, 1.0)
 
     def finish(self) -> "MultiForecast":
-        for o, (a, b) in self.arena.items():
+        for o, iv in self.arena.items():
+            iv.sort()
+            a, b = iv[0]
+            for a2, b2 in iv[1:]:
+                if a2 <= b + BIN:
+                    b = max(b, b2)
+                    continue
+                self.boxes.append((o, "arena", *ARENA_BOX, 0.0, 0.0, None, a, b, 0.0))
+                a, b = a2, b2
             self.boxes.append((o, "arena", *ARENA_BOX, 0.0, 0.0, None, a, b, 0.0))
         out = MultiForecast(self.fc, self.origin, self.H)
         out.P = PlaceBatch.from_rows(self.fine)
