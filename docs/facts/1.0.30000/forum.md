@@ -878,7 +878,7 @@ cd brain   # 冻结检出（git archive，没有 .git）：behaviour_build 要�
 
 ### 16.1 接线（代码 c86b48e → ffe0e82 → b063cae，分支 worktree-wf_89d18409-0b6-1）
 
-- `train/forum_planner_policy.py` 的 `ForumPlannerPolicy`：`combat_run --policy planner` 遇到连战遭遇（`enc.waves` 非空）时用它；Bell Beast 的 `PlannerPolicy` 一行没改。每个 STATE：`OracleBackend()`（无 boss 规格）→ `StateTracker`（Forum 配装运动学 `hero_reaper_forum.json`；`ws.res.equipped` 有 Weighted Anklet 时 `with_weighted()`，同时监督器受击后窗口 1.3 s——fo_A 没装，这条路径没跑到）→ `MultiForecaster.update`（生产表，WaveTracker 在里面）→ `MultiForecast(2 s)` → `ForumTactics` → `ForumPlanner.tick`（T 36、bounds_lo、截止 8 ms）→ `SupervisedControl.step`（`forum_supervisor_config`：worst_known_damage 2、Q4 按实例、`unpredicted_sources` = 每次未预测命中的 HIT_TAKEN 来源 iid）。`FilterContext.kill_hp = forum_kill_hp`（只在终局：最后一击按 I3）；监督器的 `kill_prims` 用 `forum_yellow_kill_hp`（kill_freeze.json 里会冻结的类型）对主角伤害上界算。击杀承诺（Bell Beast 的 kill commit）在 Forum 不用（R3 没有认证击杀）。
+- `train/forum_planner_policy.py` 的 `ForumPlannerPolicy`：`combat_run --policy planner` 遇到连战遭遇（`enc.waves` 非空）时用它；Bell Beast 的 `PlannerPolicy` 一行没改。每个 STATE：`OracleBackend()`（无 boss 规格）→ `StateTracker`（Forum 配装运动学 `hero_reaper_forum.json`；`ws.res.equipped` 有 Weighted Anklet 时 `with_weighted()`，同时监督器受击后窗口 1.3 s——fo_A 没装，这条路径没跑到）→ `MultiForecaster.update`（生产表，WaveTracker 在里面）→ `MultiForecast(2 s)` → `ForumTactics` → `ForumPlanner.tick`（T 36、bounds_lo、截止 8 ms）→ `SupervisedControl.step`（`forum_supervisor_config`：worst_known_damage 2、Q4 按实例、`unpredicted_sources` = 每次未预测命中的 HIT_TAKEN 来源 iid）。`FilterContext.kill_hp = forum_kill_hp`（只在终局：最后一击按 I3）；监督器的 `kill_prims` 用 `forum_yellow_kill_hp`（kill_freeze.json 里会冻结的类型）对主角伤害上界算（初版里这条在 YELLOW、支撑已认证、h ≥ 2 时不起作用，修正轮补上，§16.5）。击杀承诺（Bell Beast 的 kill commit）在 Forum 不用（R3 没有认证击杀）。
 - **多段攻击的 Final Hit 按钩子判**（与 R2 召回同口径）：多段链最后那下由主角自己的 `Roar and Wound States` FSM（`Final Hit:DamageHeroDirectly`）打出，伤害事件那一帧敌人的碰撞体可能早已不在支撑里。第一次离线回放（`20261004_154609` i0 ep0）就把 Choristor `Whip Hit 2` 的 Final Hit（钩子之后 20 帧）记成了未预测；改为在来源物体的 Control / Attack FSM 进入当前状态的那一帧（≤ 70 帧前）用 L = 3 / 4 / 2 的预报判（`_hook_of`；预报保留 90 帧）。之后回放 26 次受击（4 次 Final Hit）0 次未预测。
 - **`MultiForecast.known` 修正**（ffe0e82）：第 1 波（索引 1）的两只 Choristor 在激活前 `Attack` FSM 被禁用（状态 None，§7），旧规则把"看得见、没状态"的敌人记为 unknown，所以第 0 波每一帧 `known = False`，监督器 Q3 "h = 2 and the support is unknown"。第一次实战（`20261005_044825`，22 场，**作废**）全部这样在 4–14 s 退出。现在只有"有过状态又丢了"的才算 unknown；放置不变，认证照旧有效。
 - **WaveTracker**：新增 `current(t)` = BattleScene 正在跑的波（排队那一波到它规则时刻（窗口中点）就算开始；第 0 波激活前算第 0 波，因为 room.battles 从 StartBattle 起就报 wave 0）。预报用的 `wave` / `t_active` 不变（旧的"看到成员或 hi + 0.5 s"）：旧值在第 3、5、7、10、13 波比 room.battles 晚约 30 帧（这些波的成员激活后约 0.5 s 才出等待状态）。波次起点存档（`Forum_A_w<i>`）的 wake 从第 i 波开始（b063cae）。
@@ -891,8 +891,8 @@ cd brain   # 冻结检出（git archive，没有 .git）：behaviour_build 要�
 |---|---|
 | 结果 | **QUIT 52 / 52**（全部 Q3：h = 2 且支撑里有多段事件——Reed 49 次、Choristor 3 次）；CLEAR 0、WOULD_DIE 0、STUCK 0、HARNESS_FAIL 0 |
 | 到达的波 | 52 场全在第 0 波（Reed + Envoy + Choristor）退出；开战到退出 p50 10.1 s、最长 19.4 s |
-| 受击 | 每场 2.42 次（126 个 damage 事件；HIT_TAKEN 156 个，含多段链各下），掉血每场 3.0；来源：Envoy（Song Pilgrim 01）49、Choristor（Song Pilgrim 03）37、Reed 24、来源未解析 46（投射物 / Final Hit） |
-| **支撑外命中** | **0**（未知 0；24 次多段 Final Hit 按钩子判，全在支撑内） |
+| 受击 | 每场 2.42 次（按 damage 事件：126 个），掉血每场 3.0；另有 30 个多段链的 Multihit tick（special_damage / TakeQuickDamage，也是 HIT_TAKEN，但自身没有来源，单独计）。按 damage 事件的来源（修正轮按调用路径解析）：Envoy（Song Pilgrim 01）49、Reed 40（本体 24 + `Song Reed Pin Projectile` 16）、Choristor（Song Pilgrim 03）37，未解析 0。（初版写的"Envoy 49、Choristor 37、Reed 24、未解析 46"数的是 156 个 HIT_TAKEN，46 = 30 个 tick + 16 根针，不是 Final Hit：24 个 Final Hit 都有来源） |
+| **支撑外命中** | **0**（未知 0；24 次多段 Final Hit 按钩子判，全在支撑内。30 个 tick 里 7 个后面没有 Final Hit——5 个是 10–16 帧后场次结束，2 个还剩 261 / 385 帧——初版的实战记账只通过 Final Hit 判 tick，这 7 个没判；验证者离线逐帧判了全部 156 个掉血事件（含 30 个 tick），0 个在支撑外。修正轮起 tick 单独判，§16.5） |
 | FORCED_RISK | 第 0 波 86.6 % 的 tick（23,461 / 27,090），每分钟 17.5 段；选中 S = 0 的计划 3,629 次，全部做过包络（审计相等，core_not_enveloped 0） |
 | 模式 | EVADE 100 %（主角位置的 t_min 一直 < 0.6 s）；监督器 tick 里 YELLOW 83 %、GREEN 13 %、RED 4 % |
 | 击杀 | 52 场共 1 次（AltSlash）；Bind 0、Cogfly 0（第 6 波没到） |
@@ -910,16 +910,16 @@ cd brain   # 冻结检出（git archive，没有 .git）：behaviour_build 要�
 | 指标 | 结果 |
 |---|---|
 | 结果 | QUIT 24 / 24（Q3 14：h = 2 且有多段事件——Minister、Reed、Choristor；Q1 10：h = 1 时受击后窗口里退出） |
-| 受击 | 每场 3.04 次，掉血 4.1；按波（真波）：3 → 13、4 → 6、5 → 7、6 → 12、7 → 6、8 → 6、9 → 6、10 → 8、11 → 6、12 → 6、13 → 7；来源：Clawmaiden 本体 15 + 矛 7（第 3、5、10 波）、Minister 4、Clapper 4 + `damager` 6、Reed 1、未解析 46 |
-| 支撑外命中 | **0**（多段 Final Hit 6 次按钩子判） |
-| FORCED_RISK（按真波的 tick 占比） | 3: 92.8 %、4: 95.4 %、5: 94.1 %、6: 87.4 %、7: 68.7 %、8: 84.7 %、9: 90.7 %、10: 94.1 %、11: 90.6 %、12: 93.1 %、13: 见报告（终局两只 Clapper） |
+| 受击 | 每场 3.04 次（attempt 行共 73 次；策略看到 72 个 damage 事件，差的 1 次在策略最后一个 tick 之后），掉血 4.1；另有 11 个 Multihit tick（第 3 波 1、4 波 4、8 波 1、9 波 3、11 波 2）。按 damage 事件、按真波：3 → 12、4 → 2、5 → 7、6 → 12、7 → 6、8 → 5、9 → 3、10 → 8、11 → 4、12 → 6、13 → 7；来源（按调用路径解析）：Clawmaiden 22（本体 15 + 矛 7，第 3、5、10 波）、Song Automaton Tiny 14、Clapper 13（本体 7 + rune bomb 5 + rune slam 1）、Reed 12（含针 5）、Minister 4、Bellbearer 3（Throwing Bell）、Choristor 2、未解析 2（`Colliders/Collider ParryStance`、`Colliders/Collider Fly`）。（初版的按波数字数的是 83 个 HIT_TAKEN = 72 + 11 个 tick） |
+| 支撑外命中 | **0**（多段 Final Hit 6 次按钩子判；验证者离线判了全部 83 个掉血事件，0 个在支撑外） |
+| FORCED_RISK（按真波的 tick 占比） | 2: 100 %（只有 149 tick）、3: 92.8 %、4: 95.4 %、5: 94.1 %、6: 87.4 %、7: 68.7 %、8: 84.7 %、9: 90.7 %、10: 94.1 %、11: 90.6 %、12: 93.1 %、13: 65.3 %（终局两只 Clapper，1,107 tick）；范围 65–100 %（初版写的 69–95 % 漏了第 2、13 波） |
 | 战术 | EVADE 96 %、HOLD 3 %；目标按 tick：Clawmaiden 17,767、Tiny 3,432、Minister 2,496……；Cogfly 投 2 次、Bind 0、击杀 2 |
 | tick | p50 中位数 7.4 ms、p99 中位数 12.9 ms（最大 18.5） |
 | WaveTracker | 30,117 / 30,543 帧一致（98.6 %）：不一致全在波次起点的开头 10–113 帧（跟踪器从 wake 起算第 i 波，但 wake 已被 intro 挪到这一波的激活时刻，`start()` 又加了一次 startDelay；完整连战不受影响）和第 3 波起点的前 10–17 帧 |
 
 ### 16.4 R5 / R6 要解决的
 
-1. **FORCED_RISK 太多（87–95 %）**：几只待机敌人的支撑并集（含 3.0 u 的搜索上限余量：Reed 针、Clawmaiden 矛、Minister 格挡、Tiny 冲撞、钟、rune bomb；Envoy 冲锋 2.96 u，§12.2）在 0.6 s 视野里盖住主角能到的几乎所有地方。R5 的终点价值（E / trapped / H_exp）要把主角提前带出"所有出口都会关上"的位置；余量本身（留出残差 p99.9 代替搜索上限）是更大的杠杆，但要重新认证。
+1. **FORCED_RISK 太多（A0 第 0 波 87 %，波次起点各波 65–100 %，多数 85–95 %）**：几只待机敌人的支撑并集（含 3.0 u 的搜索上限余量：Reed 针、Clawmaiden 矛、Minister 格挡、Tiny 冲撞、钟、rune bomb；Envoy 冲锋 2.96 u，§12.2）在 0.6 s 视野里盖住主角能到的几乎所有地方。R5 的终点价值（E / trapped / H_exp）要把主角提前带出"所有出口都会关上"的位置；余量本身（留出残差 p99.9 代替搜索上限）是更大的杠杆，但要重新认证。
 2. **Q3 在 h = 2 时因多段事件退出**（A0 52 / 52，波次起点 14 / 24）：Reed、Choristor、Minister 的多段攻击几乎一直在支撑里，所以 7 面具的主角挨 3 下（7 → 4 HP）就退出。是否放宽 Q3（例如只算主角 t_min 内够得着的多段事件）是 §9 第 2 个决定（你来定）；R5 的 H_exp 项要让主角远离多段源。
 3. **挨打的节奏**：每 3–5 s 一下，主要是 Envoy 冲锋、Choristor 鞭、Clawmaiden 本体和矛；按接触帧占比挑出的 FORCED_RISK 计划会边跑边出刀（`MOVE+run+attack`），这类计划在 FORCED_RISK 时应当降权（R5 的 r̂ / P'）。
 4. **几乎不出手**（76 场共 3 次击杀）：EVADE 一直成立，ENGAGE 没机会；R6 的 BAIT / FOCUS / SPLIT 和惩罚窗口要在"安全出刀空档"里出刀。

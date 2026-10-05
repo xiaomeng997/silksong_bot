@@ -1527,24 +1527,29 @@ Worktree `C:\modeling\silksong_bot\.claude\worktrees\wf_89d18409-0b6-1` (from ma
 
 - A0, 52 full gauntlets from fo_A (`20261005_045446_Forum_A_eval_planner_oracle`, `live_r4_ffe0e82`, seeds 150000+,
   eval, oracle, real quits 0.2): QUIT 52 / 52, all Q3 (h = 2 with a multi-hit event in the support: Reed 49,
-  Choristor 3), all in wave 0, p50 10.1 s after the battle start; 2.42 hits per episode (Envoy 49, Choristor 37, Reed
-  24, unresolved 46 of 156 HIT_TAKEN); **0 hits outside the support** (24 chain Final Hits judged at their hook);
+  Choristor 3), all in wave 0, p50 10.1 s after the battle start; 2.42 hits per episode = 126 damage events (Envoy 49,
+  Reed 40 = body 24 + Pin Projectile 16, Choristor 37; fixer round, per damage event with the caller path) plus 30
+  Multihit ticks (special_damage, no source; the first report's "Envoy 49, Choristor 37, Reed 24, unresolved 46"
+  counted the 156 HIT_TAKEN); **0 hits outside the support** (24 chain Final Hits judged at their hook; 7 of the 30
+  ticks had no Final Hit and were not judged live, the verifier's offline replay found all 156 inside);
   FORCED_RISK 86.6 % of the ticks (17.5 streaks / min), EVADE 100 %; chosen S = 0 plans 3,629 = enveloped 3,629; tick
   p50 / p99 medians 7.4 / 15.4 ms (max 21.6), 1.0 % of ticks > 16.7 ms; real quits 13 / 13 to the main menu, 0 wrong
   submits; 1 kill in 52 episodes. WaveTracker vs room.battles: live 28,170 / 28,170 frames (wave 0 only); offline full
   gauntlet replay (154609 i0 ep0, 14 waves) 43,900 / 43,917 (99.96 %: the replay's first frame, wave 3 three frames
   and wave 5 thirteen frames early).
 - A0 from the 12 wave starts (`20261005_050427_Forum_A_w2_mix_eval_planner_oracle`, instances 0 / 1, 24 episodes):
-  QUIT 24 / 24 (Q3 14, Q1 10), 3.04 hits per episode, FORCED_RISK 69-95 % per wave, 0 hits outside the support,
-  Clawmaiden (body 15 + spear 7) the main named source, WaveTracker 98.6 % (the wave-start offset, below).
+  QUIT 24 / 24 (Q3 14, Q1 10), 3.04 hits per episode (72 damage events seen by the policy + 11 Multihit ticks; per
+  true wave 3:12 4:2 5:7 6:12 7:6 8:5 9:3 10:8 11:4 12:6 13:7), FORCED_RISK 65-100 % per wave (wave 2 100 % over 149
+  ticks, wave 13 65.3 %; the first report's 69-95 % missed both), 0 hits outside the support, sources Clawmaiden 22
+  (body 15 + spear 7), Tiny 14, Clapper 13, Reed 12, Minister 4, Bellbearer 3, Choristor 2, unresolved 2;
+  WaveTracker 98.6 % (the wave-start offset, below). Corrected reports: `C:\ssbot\data\m2_forum_r4\fixer\a0_report_v2.json`,
+  `ws_report_v2.json`.
 
 ### Running
 
 - Instances 2 / 3: the 1x wave-start collections, restarted by the driver at 05:00 from `C:\ssbot\live_r1cfix_ed65873`
-  (seeds 162000 / 163000, 9 h): `C:\ssbot\data
-uns\m261005_050022_Forum_A_w2_mix_data2` (i2) and
-  `20261005_050022_Forum_A_w2_mix_data2_2` (i3); logs `C:\ssbot\sandbox
-4_collect_i2.log` / `_i3.log`. Stop:
+  (seeds 162000 / 163000, 9 h): `C:\ssbot\data\runs\m2\20261005_050022_Forum_A_w2_mix_data2` (i2) and
+  `20261005_050022_Forum_A_w2_mix_data2_2` (i3); logs `C:\ssbot\sandbox\r4_collect_i2.log` / `_i3.log`. Stop:
   `combat_run stop <run dir>` from that checkout's brain.
 - Instances 0 / 1 idle (their collections had ended before this round); instance 4 untouched.
 
@@ -1562,8 +1567,8 @@ uns\m261005_050022_Forum_A_w2_mix_data2` (i2) and
 3. WaveTracker: the view counts a death at the killing hit, BattleScene (probably) at HealthManager.Die after the kill
    freeze (3 / 13 frames early at waves 3 / 5 in the full-gauntlet replay, unverified); on wave starts `start()` adds the
    start delay to a wake the intro already moved to the activation (10-113 frames at the episode start).
-4. HIT_TAKEN source unresolved for 46 + 46 hits (projectiles and Final Hits): resolve from the damage event's source
-   path for the per-type statistics.
+4. (Fixed in the fixer round: the report resolves types from the caller path and counts ticks apart.) Two damage
+   paths stay unresolved (`Colliders/Collider ParryStance`, `Colliders/Collider Fly`, wave-start batch).
 5. The Cogfly throw is not in the kinematic model (gated on t_min >= 1 s, 2 throws seen); the Weighted Anklet path
    (with_weighted, 1.3 s window) never ran (fo_A has no anklet).
 6. Frozen checkouts to remove when done: `C:\ssbot\live_r4_c86b48e` (first try, void), `live_r4_ffe0e82`, `live_r4_b063cae`.
