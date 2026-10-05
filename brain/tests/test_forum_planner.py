@@ -241,3 +241,33 @@ def test_the_weighted_anklet_widens_the_post_hit_window():
 def test_envelope_audit_is_a_plain_record():
     a = EnvelopeAudit()
     assert a.as_dict()["chosen_safe"] == 0
+
+
+# ---- the Reaper's shapes (M2.md: the side slash reaches the front-up, the up slash only above and behind) ----
+
+def test_reaper_side_slash_reaches_front_up_and_up_slash_overhead(params, arena):
+    from ssbot.combat.holdfilter import hold_filter_jit
+    pl = ForumPlanner(params, arena, PlannerConfig(T=36, threads=1, variants="bounds_lo"))
+    cs, _ = cmod.build_forum(36, "ground")
+    names = [cs.name(i) for i in range(len(cs.cmd))]
+    rows = [names.index("ATTACK(side)R+idle"), names.index("ATTACK(up)R+idle")]
+    x0 = 30.0
+    start = kin.initial_state(params, x0, FLOOR + params.foot, facing=1)
+    full = np.concatenate([np.zeros((2, 1), np.int64), cs.cmd[rows]], axis=1)
+    latched, _ = hold_filter_jit(full, kin.HoldState.idle(2))
+    roll = kin.rollout(start, latched, params, arena)
+    tk = np.arange(roll.box.shape[1]) * params.frame_time
+    b = roll.box[0, 0]
+    cx, cy = 0.5 * (b[0] + b[2]), 0.5 * (b[1] + b[3])
+
+    def fc(box):
+        return SimpleNamespace(targets=lambda t: [SimpleNamespace(iid=1, type_key=REED, hazard=False,
+                                                                 box=np.tile(np.array(box), (len(t), 1)),
+                                                                 ok=np.ones(len(t), bool))])
+
+    front_up = (cx + 1.8, cy + 1.6, cx + 2.4, cy + 2.2)
+    overhead = (cx - 0.9, cy + 2.8, cx - 0.3, cy + 3.4)
+    sc = pl._score_forum(_world(x0), roll, latched, start, fc(front_up), _prefs(), tk)
+    assert sc["hits"][0] > 0 and sc["hits"][1] == 0 and sc["first_k"][0] == 1
+    sc = pl._score_forum(_world(x0), roll, latched, start, fc(overhead), _prefs(), tk)
+    assert sc["hits"][1] > 0 and sc["hits"][0] == 0 and sc["first_k"][1] == 2
