@@ -2448,8 +2448,9 @@ class ForumRows:
                     ph = 3.0 if (v0 >= p.scr_end_vy or
                                  abs(vy_log - roof) < abs(vy_log - v0 * p.scr_end_decel)) else 2.0
         if md in (M_GLIDE, M_SPRINT, M_RPR_DS, M_SCRAMBLE):
-            if pr and pmd == md and (pr["ph"] == ph or (md == M_RPR_DS and pr["ph"] == 1 and ph == 4)
-                                     or (md == M_SPRINT and pr["ph"] <= 1 and ph == 2)):
+            # (an air sprint landing into the ground sprint restarts the timer: Sprint Grace counts the ground sprint
+            # only, kin_jit LAND; R3 kin_check dash)
+            if pr and pmd == md and (pr["ph"] == ph or (md == M_RPR_DS and pr["ph"] == 1 and ph == 4)):
                 self.ph_t = np.float32(self.ph_t + dt)
             elif (md == M_SCRAMBLE and ph == 3) or (md == M_SPRINT and not (pr and pmd == M_SPRINT)):
                 self.ph_t = dt                # entered in a FixedUpdate (roof ray; FinishedDashing): the entry
