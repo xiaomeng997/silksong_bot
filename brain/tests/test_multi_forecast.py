@@ -310,6 +310,34 @@ def test_a_kill_never_enlarges_the_danger_zone_and_the_what_if_leaves_the_state(
     assert mf.trackers[7].dead and mf.trackers[7].ends == []
 
 
+def test_a_waiting_wave_member_waits_for_its_wave():
+    """A Reed parked in Fly In Ready (a waiting state) whose wave is queued for 1 s from now: nothing of it (no walk, no
+    collider tube) before the activation, its attacks after it; with the wave unknown it is walked from now."""
+    d = _reed_table()
+    d["dwell_s"]["Fly In Ready"] = {"min": 0.1, "max": 5.0}
+    d["support_transitions"]["Fly In Ready"] = ["Alert"]
+    d["graph"]["edges"].append({"from": "Fly In Ready", "to": "Alert", "p": 1.0})
+    tt = type_table(d, FORUM_TYPES[REED])
+    tabs = EnemyTables({REED: tt}, EnemyTables._store([_templates()]), _tables().tubes, {}, True, "synthetic", {})
+    tk = np.arange(0, 121) * BIN
+    X, Y = np.full((1, 121), 20.0), np.full((1, 121), 5.0)
+
+    def run(queued: bool):
+        mf = MultiForecaster(tabs, ORACLE)
+        ent = _ent(7, 20.0, 5.0, "Fly In Ready", box=(19.5, 4.0, 20.5, 6.0))
+        _run(mf, [(0, 0.0, [ent], [_go(7, "Fly In Ready", 0, 0.0)]), (1, BIN, [ent], [])])
+        mf.t_wake = 0.0
+        mf.waves.queued = (2, BIN + 1.0, BIN + 1.0 + 2 * BIN) if queued else (2, BIN, BIN + 2 * BIN)
+        return mf.forecast(2.0)
+
+    f = run(True)
+    occ = f.occupied(X, Y, tk)[0]
+    assert not occ[:57].any() and occ[60:].any()           # (the templates' +-1 bin pad)
+    assert not any(b[1] == "collider" for b in f.boxes)
+    now = run(False).occupied(X, Y, tk)[0]
+    assert now[:30].any()
+
+
 def _tiny_tables() -> EnemyTables:
     """The synthetic Reed's tables as a pooled type (the Maestro's Tinies: prefix AT)."""
     tiny = "Song Automaton Tiny"
