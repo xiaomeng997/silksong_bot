@@ -1123,38 +1123,57 @@ Facts: `docs/facts/1.0.30000/forum.md` 13.9 onward. Offline outputs (not in git)
   --inject / --a-slice / --b-slice` and per-type family totals (f656330, 3aa1019). Drivers
   `C:\ssbot\data\m2_forum_r1c\speed\run_checks.ps1`, `run_checks2.ps1`.
 - `gauntlet.WAITING_STATES` has "Dead" (59e02a1, forum.md 13.11; every user of live_enemies / in_play checked, tests).
-- Structurally absent moves marked in the tables (abad048, forum.md 13.12; `behaviour_build --stamp-absent DIR` for
-  tables built before).
+- Structurally absent moves marked (abad048, forum.md 13.12) and stamped into R0's committed tables (cb945b9,
+  `behaviour_build --stamp-absent`; templates and decisions unchanged).
+- R0 + R1 rebuild and recertification (forum.md 13.13): NOT certified, the new tables are not committed (R0's stay).
+  The R0 + R1 build (288 fights, 30.07 h, 341,436 contacts) passes the development cross-fit like R0 (100 / 99.9997 /
+  99.9997 %, the same Clawmaiden `Slash 5` miss); on 202 fresh fights (175,437 contacts: 38 full gauntlets, 132 wave
+  starts with w2, the 32 1x speed-check episodes) fold 0's tables cover 100 % at L2 / L3 / L4 and fold 1's miss one
+  contact at L3 and L4: `20261004_162411` i3/ep9 f482061, a blocked contact with `Slash Collider 1` reported on the
+  first frame of `Slash 2` after a 2-frame `Slash 1` while the Clawmaiden lunged 0.66 u. The ablation (R0's tables and
+  margins, same fresh fights) misses the same contact, so R0's "certified" (35 fights) does not hold on this data;
+  with R1 fewer contacts need the tubes / candidates, the Minister charge margin rises to the 3.0 u cap.
 - Tests: 1037 passed (the support-query budget test fails under this load: 3.88 ms p99 vs its budget; unrelated).
 
-### Running (all hidden, all stop by themselves on STOP_AGENTS / DEMO_SOON after the current episode)
+### Measured
+
+- 2x (forum.md 13.10): idle 16 + 16: dwell 18 / 67 keys below 0.05 (cap 8), Holm 7; speed 19 / 42 (cap 6), Holm 4;
+  choices 1 / 13; data2: dwell 20 / 115 (cap 12), Holm 4; speed 9 / 65 (cap 8), Holm 1; choices 0 / 24. Same Clapper
+  keys in both (Air 27 -> 26 coarse steps, Slam 0 / 1, Spell Antic), mean shifts within one 1x frame; physics equal
+  (jump 8.219 u, air 0.932 / 0.933 s). Controls (wave-balanced halves) pass; injected +1/30 s dwell caught (Holm 21-24
+  at 16 + 16), choice shifts below about 20 points and 10 % speed at 8 + 8 not caught.
+- Wave starts: w2 -> wave 3 1.52-1.57 s after the activation with battle.prune (59.7-75 s before); records' frame-based
+  wave times undercount game time for a second or two after a load (load-hitch frames).
+- Collection rates at 1x under full load: full gauntlet about 12.5 min (38 in 4 h on two instances, all CLEAR), wave
+  start about 3.3 min.
+
+### Running (hidden; each run stops by itself on STOP_AGENTS / DEMO_SOON after its current episode)
 
 - Collection at 1x from the frozen checkout `C:\ssbot\live_r1c_28a9417` (`C:\ssbot\sandbox\r1c_collect.cmd`, logs
-  `C:\ssbot\sandbox\r1c_collect_<part>.log`):
-  - instance 0: full gauntlets fo_A, v1 data policy, 4 h from 15:46 (`20261004_154609_Forum_A_data`), then wave starts
-    6 h (i0w); instance 1 the same (`20261004_154612_Forum_A_data`, then i1w). These full gauntlets are the fresh
-    certification fights.
-  - instance 2: wave starts with w2, data2, 9 h from 15:56 (`20261004_155649_Forum_A_w2_mix_data2`); instance 3 the
-    same from 16:24 (`20261004_162411_Forum_A_w2_mix_data2`).
-  - Stop one run: `cd C:\ssbot\live_r1c_28a9417\brain; ..\scripts\uv.cmd run python -m ssbot.tools.combat_run stop
-    <run dir>` (i0fg / i1fg then go on to their wave-start part unless STOP_AGENTS / DEMO_SOON exists).
-- Offline, below normal, frozen checkout `C:\ssbot\live_r1c_off_59e02a1`:
-  - `C:\ssbot\data\m2_forum_r1c\pipeline_build.ps1` (from 15:03): `behaviour_build` R0's 107 fights + 181 R1 fights
-    (exclude list `exclude.json`: R0's 35 fresh fights and the three w2 ghost episodes), tables to `tables\forum`
-    (candidates, NOT the repository), extra `build_all\extra`, then R0 caches hard-linked + R1 extracted to `cache`,
-    then the development cross-fit `recall_dev3.json`; writes `pipeline_build.done`.
-  - `C:\ssbot\data\m2_forum_r1c\pipeline_cert.ps1` (waits): once instances 0 / 1 end their gauntlets, freezes the fresh
-    set (the 1x speed-check arms, the i0 / i1 gauntlets, the i2 / i3 wave starts closed by then), scans contacts only
-    and extracts caches; after the build, certifies (`recall_fresh.json`, margins `support_margins.json`) and runs the
-    ablation on R0's tables over the same fresh fights (`recall_fresh_r0tables.json`); writes `pipeline_cert.done`.
-  - Stop: `Get-CimInstance Win32_Process | Where-Object CommandLine -like '*pipeline_*.ps1*'` and the python children
-    whose command line has `m2_forum_r1c` (started by this task; safe to stop, they only write under m2_forum_r1c).
+  `C:\ssbot\sandbox\r1c_collect_<part>.log`), all data2 wave starts with Forum_A_w2 back in the rotation:
+  - instance 0: `20261004_195019_Forum_A_w2_mix_data2` (6 h from 19:50; after its 4 h of full gauntlets
+    `20261004_154609_Forum_A_data`, 19 CLEAR);
+  - instance 1: `20261004_195800_Forum_A_w2_mix_data2` (6 h from 19:58; after `20261004_154612_Forum_A_data`, 19 CLEAR);
+  - instance 2: `20261004_155649_Forum_A_w2_mix_data2` (9 h from 15:56); instance 3:
+    `20261004_162411_Forum_A_w2_mix_data2` (9 h from 16:24).
+  - Stop one: `cd C:\ssbot\live_r1c_28a9417\brain; ..\scripts\uv.cmd run python -m ssbot.tools.combat_run stop
+    <run dir>`.
+- Offline: nothing (pipelines done: `C:\ssbot\data\m2_forum_r1c\pipeline_build.done`, `pipeline_cert.done`; the
+  pipeline's duplicate ablation step was stopped, its result is `recall_fresh_r0tables_early.json`).
+
+### Needs deploy
+
+- Nothing (no oracle change).
 
 ### Next
 
-1. When `pipeline_cert.done` exists: read `recall_dev3.json` and `recall_fresh.json` (L2 / L3 / L4 recall must be 1.0
-   on the fresh fights with both folds' tables) and the ablation `recall_fresh_r0tables.json`. Only if the
-   certification holds: `behaviour_build --stamp-absent C:\ssbot\data\m2_forum_r1c\tables\forum`, copy the tables
-   (`<enemy>.json`, `coverage.json`; the `_hitboxes.npz` stay out of git as before) and `support_margins.json` into
-   `knowledge/1.0.30000/enemies/forum/`, write forum.md 13.13; otherwise keep R0's and record why.
-2. A 2x retry only with a pre-registered equivalence criterion (forum.md 13.10, last point).
+1. R2 (MultiForecast): the fresh miss is spatial, in a moving attack (the Clawmaiden's slash lunge): re-anchor moving
+   attack families at the current position (R0 Next 2) or condition them on the path, then certify on fights none of
+   the builds or certifications has seen (the 202 fresh fights of 13.13 are seen now). Do not set Forum `known` from
+   `support_margins.json` (`certified: true` is R0's 35-fight result, contradicted by 13.13).
+2. Next table build: R0 + R1 + R0's 35 fresh + this round's 202 fresh fights + the running collection (all 1x); the
+   candidate tables of 13.13 (`C:\ssbot\data\m2_forum_r1c\tables\forum`, stamped) can serve R2's development meanwhile.
+3. Minister charge margin at the 3.0 u cap with R1 data: find the contacts (`build_all\extra\contacts.jsonl.gz`,
+   held-out residuals of MI_CHARGE) before the next build; likely the dash-in / clash segments.
+4. A 2x retry only with a pre-registered equivalence criterion (one 1x frame) and longer fights (forum.md 13.10).
+5. Records: wave times after a load in game time (sum of STATE dt), not frames / 60 (forum.md 13.9).
