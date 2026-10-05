@@ -202,9 +202,17 @@ def gauntlet_main(a: argparse.Namespace, fights: list, skipped: list, code: dict
     for i, fight in enumerate(fights):
         t0 = time.perf_counter()
         info = g.scan(fight)
+        if info.get("skipped"):
+            print(f"[{i + 1}/{len(fights)}] {fight.id}: LEFT OUT ({info['skipped']})", flush=True)
+            continue
         print(f"[{i + 1}/{len(fights)}] {fight.id}: {info['frames']} frames, subjects {info['subjects']}, "
               f"instances {sum(info['instances'].values())}, {fight.outcome or '-'} ({time.perf_counter() - t0:.1f} s)",
               flush=True)
+    if g.skipped_speed:   # not 1x: the build goes on without them, but the run lists should not have had them
+        print(f"WARNING: {len(g.skipped_speed)} fights left out, not played at 1x:",
+              *[f"{x['fight']} x{x['speed']:g}" for x in g.skipped_speed[:20]], sep="\n  ")
+        gone = {x["fight"] for x in g.skipped_speed}
+        fights = [f for f in fights if f.id not in gone]
     if skipped:
         print(f"skipped {len(skipped)}:", *skipped[:20], sep="\n  ")
     if a.contacts_only is not None:

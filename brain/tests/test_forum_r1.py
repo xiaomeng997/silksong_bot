@@ -463,6 +463,58 @@ def test_set_time_scale_waits_out_a_momentary_zero():
         set_time_scale(_L([1.0]), 2.0, 2, wait_s=0.3)
 
 
+def test_set_time_scale_sets_1x_too():
+    """Time.timeScale outlives a run: a 1x run on an instance a 2x run had used collected at 2x with time_scale 1.0 in
+    its records (20261004_155649 i2). The 1x run sets 1 and checks it; an oracle without time.scale is taken as 1x;
+    a scale that stays at 2 stops the run."""
+    import pytest
+
+    from ssbot.ipc.oracle_link import OracleError
+    from ssbot.tools.combat_run import set_time_scale
+
+    class _L:
+        def __init__(self, now, missing=False):
+            self.now, self.missing, self.calls = now, missing, []
+
+        def rpc(self, name, timeout_s=10, **kw):
+            self.calls.append(kw)
+            if self.missing:
+                raise OracleError("unknown rpc time.scale")
+            if "scale" in kw and self.now is not None:
+                self.now = kw["scale"]
+            return {"time_scale": self.now if self.now is not None else 2.0}
+
+    link = _L(2.0)
+    assert set_time_scale(link, 1.0, 2, quiet=True) == 1.0 and link.calls[0] == {"scale": 1.0}
+    assert set_time_scale(_L(None, missing=True), 1.0, 2) is None
+    with pytest.raises(SystemExit):
+        set_time_scale(_L(None, missing=True), 2.0, 2)
+    with pytest.raises(SystemExit):
+        set_time_scale(_L(None), 1.0, 2, wait_s=0.3)            # the game stays at 2
+
+
+def test_builder_leaves_out_fights_not_played_at_1x(monkeypatch):
+    """The game speed from the STATE dt (a 2x fight recorded with time_scale 1.0: 20261004_155649 i2) - the Forum
+    builder leaves such a fight out with a counter; freezes (dt 0) and a load hitch do not count."""
+    from ssbot.knowledge import gauntlet_tables as gt
+    from ssbot.knowledge.behaviour_tables import Fight
+
+    def states(dt):
+        def gen(fight, keys=None):
+            for f in range(700):
+                yield {"f": f, "dt": 0.0 if f % 10 == 0 else (0.3 if f == 5 else dt), "ents": [], "ev": []}
+        return gen
+    fight = Fight("rec", "x", 0, 700, "run/i2/ep0")
+    monkeypatch.setattr(gt, "fight_states", states(2 / 60))
+    assert gt.fight_speed(fight) == 2.0
+    g = gt.GauntletBuilder(gt.FORUM_SPECS)
+    info = g.scan(fight)
+    assert info["skipped"] and g.skipped_speed == [{"fight": "run/i2/ep0", "speed": 2.0}] and not g.fights
+    monkeypatch.setattr(gt, "fight_states", states(1 / 60))
+    assert gt.fight_speed(fight) == 1.0
+    assert "skipped" not in g.scan(fight) and len(g.fights) == 1
+
+
 def test_structurally_absent_moves_marked(tmp_path):
     """forum.md 13.2's unreachable moves: in the specs, in the coverage rows (not missing), in a tables dict, and
     stamped into tables written before (behaviour_build --stamp-absent); Bell Beast has none."""

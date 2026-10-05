@@ -292,6 +292,26 @@ def _gap(b: tuple, box: tuple) -> float:
     return math.hypot(max(b[0] - box[2], box[0] - b[2], 0.0), max(b[1] - box[3], box[1] - b[3], 0.0))
 
 
+SPEED_CHECK_F = 600     # frames read ahead for a fight's game speed
+
+
+def fight_speed(fight: Fight, frames: int = SPEED_CHECK_F) -> float | None:
+    """The game speed a fight was played at: the median STATE dt of its first frames (dt > 5 ms; a freeze or a load
+    reads 0) in 1/60 s, rounded to a half: 1 at 1x, 2 at Time.timeScale 2 (run 20261004_155649 i2 recorded
+    time_scale 1.0 at dt 2/60, forum.md 13.10). None when nothing could be read."""
+    dts = []
+    for i, s in enumerate(fight_states(fight, keys=("f", "dt"))):
+        dt = float(s.get("dt") or 0.0)
+        if dt > 0.005:
+            dts.append(dt)
+        if i >= frames:
+            break
+    if not dts:
+        return None
+    dts.sort()
+    return round(dts[len(dts) // 2] * 60.0 * 2.0) / 2.0
+
+
 def _box_dist(e: dict | None, box: tuple | None, name: str | None = None) -> tuple[float, float]:
     """(distance from the hero box to the entity's enabled damage colliders (only those named name, if given; inf
     without any), distance to its transform position)."""
@@ -322,6 +342,7 @@ class GauntletBuilder:
         self.recordings: dict[str, int] = {}
         self.fights: list[dict] = []
         self.unattributed: list[dict] = []          # hero contacts no subject could take (validation failures)
+        self.skipped_speed: list[dict] = []         # fights not played at 1x (scan, fight_speed)
         self.collider_types: dict[str, set[str]] = defaultdict(set)   # damage collider name -> types exporting it
         self._last_owner: dict[str, tuple[int, int]] = {}
         self._f = 0
@@ -332,7 +353,14 @@ class GauntletBuilder:
 
     def scan(self, fight: Fight, states=None) -> dict:
         """Scan one fight (its STATEs from fight_states unless given); returns a summary (subjects per type,
-        instances added per type)."""
+        instances added per type). A fight not played at 1x (fight_speed) is left out with a counter: the tables are
+        1x tables (forum.md 13.10), and a record's time_scale is what the run asked for, not what the game ran at."""
+        if states is None:
+            speed = fight_speed(fight)
+            if speed is not None and abs(speed - 1.0) > 0.25:
+                self.counters[f"fights left out: game speed x{speed:g}, not 1x"] += 1
+                self.skipped_speed.append({"fight": fight.id, "speed": speed})
+                return {"id": fight.id, "skipped": f"game speed x{speed:g}"}
         rec = str(fight.path)
         fold = len(self.fights) % N_FOLDS     # per fight: a recording holds several gauntlets (module docstring)
         self.recordings.setdefault(rec, fold)
