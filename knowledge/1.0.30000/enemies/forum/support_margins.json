@@ -1957,6 +1957,20 @@
    ]
   },
   "recall": 1.0,
-  "certified": true
+  "certified": true,
+  "table_files": {
+   "what": "the production templates this certification used (gitignored *_hitboxes.npz, 157 MB): sha256 of each; canonical copy C:/ssbot/tables/forum_r3_2a10a0d (the same files as C:/ssbot/live_r3_2a10a0d's); copy them into knowledge/1.0.30000/enemies/forum/ of a checkout before running the Forum forecast",
+   "sha256": {
+    "ChoirBellbearer_hitboxes.npz": "f01cffd708db815b6ea1440d0924abbaafd487515905cab608a85b5f34a99b53",
+    "ChoirClapper_hitboxes.npz": "3561b445f515bd64d91c47b5736425ced88a83ed48bddd13c7c6af7a2379c3d3",
+    "Choristor_hitboxes.npz": "7762b12f3383fa91fd207f9691aa912f700aff992d979574ca563105377a35ce",
+    "Clawmaiden_hitboxes.npz": "eb39a131498d5dd12d0ddbe0a1f34c1513464d0605dd42a2b61cb408189f4498",
+    "Envoy_hitboxes.npz": "c2d56b947da911d6d7ecbede2d8863ea318e6d7b16a3fbbda8ac0e6e240b6eaf",
+    "Maestro_hitboxes.npz": "b8e336f4f0532f466fbfed3ff0c8b6b1a5d9b8f387091a21aa3669f23a21396e",
+    "MaestroAutomaton_hitboxes.npz": "c8a2760b07e8c3c0300777650f150ed5c5a96f9a55e91e04f2bcb7449ebb5907",
+    "Minister_hitboxes.npz": "0fddebf17fd622418e44867f356c0c89c90c42178e6130100f22fa1ae6523e16",
+    "Reed_hitboxes.npz": "6f684549c941a110a22cd081db45490069be85c0d5febe7bca7ed0e5758b9c8d"
+   }
+  }
  }
 }
