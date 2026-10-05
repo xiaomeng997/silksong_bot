@@ -1050,7 +1050,8 @@ def forum_fixed(x, vx, vy, normal, rx0, ry0, P, TT):
         grav_off(x)
         if x[DASH_T] <= 0:
             finished_dashing(x, P)        # (Dash() leaves the velocity as it was)
-            if x[MODE] == M_SPRINT and x[PHASE] == 2 and                     wall_near(x[PX], x[PY], x[FACE], P[P_SKIN] + P[P_W_CONTACT] + P[P_SPR_SHIFT], P, TT):
+            if x[MODE] == M_SPRINT and x[PHASE] == 2 and \
+                    wall_near(x[PX], x[PY], x[FACE], P[P_SKIN] + P[P_W_CONTACT] + P[P_SPR_SHIFT], P, TT):
                 # a ground dash that ends at a wall: the sprint FSM ends at once (Dash To Run; kin_check T1: the
                 # Ground Sprint's 0.05 u Translate put the box into the wall and the model's sprint ran 3 u through
                 # it)

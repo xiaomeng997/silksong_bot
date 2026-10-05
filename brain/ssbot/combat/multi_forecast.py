@@ -209,6 +209,7 @@ class _WalkCache:
 
     def __init__(self):
         self.d: dict = {}
+        self.s: dict = {}                    # the same key -> {state: its earliest entry} (every state reached)
         self.hits = 0
         self.misses = 0
 
@@ -220,9 +221,22 @@ class _WalkCache:
             nodes = walk(tt, state, ctx, dead, overdue)
             r = self.d[k] = ([n for n in nodes if n.kind == "cur"],
                              [n for n in nodes if n.kind == "new" and n.state == n.start])
+            st: dict = {}
+            for n in nodes:
+                if n.state != TAIL:
+                    st[n.state] = min(st.get(n.state, math.inf), n.lo)
+            self.s[k] = st
         else:
             self.hits += 1
         return r
+
+    def states(self, tt: TypeTable, state: str, ctx, dead: bool, overdue: bool) -> dict[str, float]:
+        """Every state the walk reaches, current instance or later ones: its earliest entry (relative to the walk's
+        reference time)."""
+        k = (tt.tk, state, ctx, dead, overdue)
+        if k not in self.s:
+            self.get(tt, state, ctx, dead, overdue)
+        return self.s[k]
 
 
 @dataclass(slots=True)
@@ -534,22 +548,58 @@ class MultiForecaster:
             return None
         return hit_reactions().get(tr.tk, {}).get(tr.state)
 
-    def forecast_reaction(self, iid: int, to_state: str, t_react: float, horizon_s: float = MIN_HORIZON_S,
+    def reaction_states(self, iid: int, t_react: float, horizon_s: float = MIN_HORIZON_S) -> list[str]:
+        """The Control states enemy iid may go to when the hero's nail hits it at game time t_react: the TOOK DAMAGE
+        exits of its current state and of every state its walk can have entered by t_react (a Clapper in Spell Antic
+        now, back in Idle before a hit 0.4 s on, answers it with Dmg Attack; the walk's entry hulls are supersets, so
+        this is too). [] when none of them has such an exit. Static FSM structure and the tracker: both views."""
+        tr = self.trackers.get(iid)
+        if tr is None or tr.dead or tr.state is None or tr.t_entry is None:
+            return []
+        ex = hit_reactions().get(tr.tk)
+        if not ex:
+            return []
+        tt = tr.table
+        T = self.t
+        dw = tt.dwell.get(tr.state)
+        age = T - tr.t_entry
+        overdue = dw is not None and (age > dw[1] + DWELL_SLACK_S
+                                      or age + max(MIN_HORIZON_S, horizon_s) + BIN > WALK_CAP_S)
+        ref = T if overdue else tr.t_entry
+        cur = tr.cur
+        ctx = (cur.family, cur.start) if cur is not None else None
+        out = {ex[tr.state]} if tr.state in ex else set()
+        for st, lo in self.walks.states(tt, tr.state, ctx, tr.dead, overdue).items():
+            if st in ex and ref + lo <= t_react + BIN:
+                out.add(ex[st])
+        return sorted(out)
+
+    def forecast_reaction(self, iid: int, to_state, t_react: float, horizon_s: float = MIN_HORIZON_S,
                           origin_t: float | None = None) -> "MultiForecast | None":
-        """Only enemy iid's support as if it entered to_state at game time t_react (a hit's reaction, forum_planner_plan
-        R3: the planner's hit branch checks against the forecast and this), from origin_t over horizon_s. The real
-        state is left as it was."""
+        """Only enemy iid's support as if it entered to_state (a state, or several: one forecast holding each) at game
+        time t_react (a hit's reaction, forum_planner_plan R3: the planner's hit branch checks against the forecast
+        and this), from origin_t over horizon_s. The reaction is anchored where the enemy is at the hit: its
+        transform dead-reckoned to t_react (the hit target's box is the same dead reckoning of its body), grown by
+        the type's idle growth since the sighting and the view's spread (as every later instance's anchor), both
+        mirrors (a Reed turns to stab); an entry into another start state of its current attack is re-anchored
+        there the same way (forum.md 15.1). The real state is left as it was."""
         if self.boss is not None:
             raise NotImplementedError("the single-boss path has no hit reactions")
         tr = self.trackers.get(iid)
         if tr is None or tr.dead:
             return None
-        t2 = copy.copy(tr)
-        t2.cur = copy.copy(tr.cur)
-        t2.ends = list(tr.ends)
-        t2.enter(to_state, t_react)
-        b = _Builder(self, self.t if origin_t is None else origin_t, horizon_s)
-        b.subject(t2)
+        origin = self.t if origin_t is None else origin_t
+        b = _Builder(self, origin, horizon_s)
+        if tr.pos is not None:
+            s = max(t_react - origin, 0.0)
+            g = float(self.tables.tubes.g(tr.tk, np.array([(origin - tr.seen_T) + s]))[0]) + tr.pos_sd
+            b.react_box[iid] = np.array([tr.pos[0] + tr.vel[0] * s, tr.pos[1] + tr.vel[1] * s, g, g])
+        for to in ([to_state] if isinstance(to_state, str) else to_state):
+            t2 = copy.copy(tr)
+            t2.cur = copy.copy(tr.cur)
+            t2.ends = list(tr.ends)
+            t2.enter(to, t_react)
+            b.subject(t2)
         b.groups()
         return b.finish()
 
@@ -634,6 +684,7 @@ class _Builder:
         self.arena: dict = {}                # owner -> [(t_from, t_to)] of its arena-wide boxes (merged at finish)
         self._maestro: bool | None = None    # a Maestro in play (lazily)
         self._summon_t: float | None = None  # the earliest a Maestro in play can enter Summon (lazily)
+        self.react_box: dict = {}            # iid -> (cx, cy, hx, hy): a hit reaction's anchor box (forecast_reaction)
 
     # ---- placements ----
 
@@ -837,19 +888,25 @@ class _Builder:
                     wid = tables.key_id(nd.family, key_state, "world_all")
                     if wid is not None:
                         self._window(wid, lo, hi, None, 1, tr.iid, nd.family, True, nd.p)
-        if committed_now and cur.re_anchor is not None:
+        rb = self.react_box.get(tr.iid)
+        if committed_now and cur.re_state is not None and (cur.re_anchor is not None or rb is not None):
             # re-anchored (forum.md 15.1): an attack that moved since its start (the anchor frame's templates hold the
             # logged travel only) is also the family walk of an instance starting at the start state it entered,
-            # anchored where the enemy was then (13.13: the Clawmaiden's lunge after a 3.3 u flight)
+            # anchored where the enemy was then (13.13: the Clawmaiden's lunge after a 3.3 u flight); a hit
+            # reaction's (forecast_reaction) at its anchor box, both mirrors
             rid = self.fc.family_walk_id(tt, cur.family, cur.re_state, "anchor")
             if rid is not None:
-                (rx, ry), rsd = cur.re_anchor, cur.re_sd
-                self._bbox(rid, cur.re_t - T, cur.re_t - T, rx, ry, rsd, rsd, cur.re_mirror, tr.iid, cur.family,
-                           True, 1.0)
+                if cur.re_anchor is not None:
+                    (rx, ry), rsd = cur.re_anchor, cur.re_sd
+                    self._bbox(rid, cur.re_t - T, cur.re_t - T, rx, ry, rsd, rsd, cur.re_mirror, tr.iid, cur.family,
+                               True, 1.0)
+                else:
+                    self._bbox(rid, cur.re_t - T, cur.re_t - T, *rb, 0, tr.iid, cur.family, True, 1.0)
         if cur is not None and anc is None and not (idle_tube and cur.family == sp.idle_family):
             # the current instance's anchor is not known (not exported at its start): its family walk from the
-            # start, anchored where the enemy is now
-            self._place_family(tr, cur.family, cur.start, cur.t_start - T, cur.t_start - T, 1.0, committed_now)
+            # start, anchored where the enemy is dead-reckoned to then (a hit reaction: its anchor box)
+            self._place_family(tr, cur.family, cur.start, cur.t_start - T, cur.t_start - T, 1.0, committed_now,
+                               boxes_of=None if rb is None else (lambda e0, e1: np.tile(rb, (len(e0), 1))))
         t_strike = math.inf
         for nd in roots:
             lo, hi = max(ref + nd.lo - T, BIN), max(ref + nd.hi - T, BIN)

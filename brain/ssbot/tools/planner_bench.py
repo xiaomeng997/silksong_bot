@@ -213,7 +213,7 @@ def forum_multi_bench(a: argparse.Namespace) -> int:
         if a.forum:
             # the Forum fast layer (R3): the Forum loadout's kinematics (Reaper, abilities), the Weighted Anklet when
             # the inventory audit shows it equipped (no bot recording has it: forum_planner_plan R3 note)
-            from ssbot.combat.forum_planner import ForumPlanner, forum_kill_hp
+            from ssbot.combat.forum_planner import ForumConfig, ForumPlanner, forum_kill_hp
             params = HeroParams.load(Path(__file__).resolve().parents[3] / "knowledge" / "1.0.30000" / "kinematics"
                                      / "hero_reaper_forum.json")
             forum_kill = forum_kill_hp
@@ -223,7 +223,11 @@ def forum_multi_bench(a: argparse.Namespace) -> int:
             if (m.get("scene_raw") or m.get("scene")) in ("Hang_04", "Hang_04_boss"):
                 terrain = Terrain2D.from_message(m, params.scene("Hang_04"))
         terrain = terrain or Terrain2D.empty()
-        planner = ForumPlanner(params, terrain, PlannerConfig(T=36, threads=a.threads, variants="bounds_lo"))             if a.forum else Planner(params, terrain, PlannerConfig(threads=a.threads))
+        if a.forum:
+            planner = ForumPlanner(params, terrain, PlannerConfig(T=36, threads=a.threads, variants="bounds_lo"),
+                                   ForumConfig(deadline_ms=a.deadline_ms))
+        else:
+            planner = Planner(params, terrain, PlannerConfig(threads=a.threads))
         tac = Tactics(load_playbook())
         trk = StateTracker(params, terrain)
     backend = OracleBackend()
@@ -232,6 +236,7 @@ def forum_multi_bench(a: argparse.Namespace) -> int:
     n_fine, n_win = [], []
     phases: dict = {}
     finfo: dict = {}
+    tick_rows: list = []
     load_samples = []
     psutil.cpu_percent(None)
     n = 0
@@ -274,6 +279,13 @@ def forum_multi_bench(a: argparse.Namespace) -> int:
                     for k in ("stage1_pass", "enveloped", "core_pass", "hitfx", "react", "capped"):
                         finfo.setdefault(k, []).append(li[k])
                     finfo.setdefault("posture", []).append(li["posture"])
+                    if a.ticks_json:
+                        tick_rows.append({"f": int(s["f"]), "tick": round((a3 - a0) * 1e3, 3),
+                                          "forecast": round((a2 - a1) * 1e3, 3),
+                                          **{k: round(v, 3) for k, v in res.t_ms.items()},
+                                          **{k: li[k] for k in ("stage1_pass", "enveloped", "core_pass", "prio",
+                                                                "hitfx", "react", "capped", "cut", "overrun")},
+                                          "forced": bool(res.forced_risk)})
         if n > 50:
             t_up.append((a1 - a0) * 1e3)
             t_fc.append((a2 - a1) * 1e3)
@@ -319,6 +331,8 @@ def forum_multi_bench(a: argparse.Namespace) -> int:
     print(json.dumps(out, indent=1))
     if a.json:
         a.json.write_text(json.dumps(out, indent=1), "utf-8")
+    if getattr(a, "ticks_json", None) and tick_rows:
+        a.ticks_json.write_text(json.dumps(tick_rows), "utf-8")
     return 0
 
 
@@ -346,6 +360,12 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--planner", action="store_true", help="Forum --multi: today's planner and tactics too")
     ap.add_argument("--forum", action="store_true", help="Forum --multi --planner: the Forum fast layer (R3: "
                     "combat.forum_planner.ForumPlanner, the Forum loadout) instead of today's planner")
+    ap.add_argument("--deadline-ms", type=float, default=11.0,
+                    help="--forum: ForumConfig.deadline_ms (inf: deterministic decisions, for audits and "
+                    "identity checks)")
+    ap.add_argument("--ticks-json", type=Path, default=None,
+                    help="--forum: per-tick records (tick / planner / phase ms, rows enveloped, cut, "
+                    "forced, hit branches) for the p99 analysis")
     ap.add_argument("--json", type=Path, default=None)
     a = ap.parse_args(argv)
     if a.encounter == "Forum" and a.multi:
