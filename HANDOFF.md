@@ -1113,8 +1113,8 @@ Facts: `docs/facts/1.0.30000/forum.md` 13.9 onward. Offline outputs (not in git)
 ### Done (committed)
 
 - Post-deploy checks (forum.md 13.9): HELLO and `time.scale` 2 -> dt 1/30 -> 1 on instances 2 and 3 (new probe step
-  `forum_r1 hello`); `battle.prune`: w2 -> wave 3 1.52-1.57 s after the activation (4 loads + the first collection
-  episode, game time), ghosts 5 / 7 / 8 / 17 / 20 for w2 / w3 / w4 / w9 / w10; `battle.wave` skips to 6 (5.1 s) and 13
+  `forum_r1 hello`); `battle.prune`: w2 -> wave 3 about 1.5 s after the activation (4 probe loads 1.52-1.53 s as frames / 60,
+  which undercounts game time right after a load; the first collection episode 1.565 s of game time), ghosts 5 / 7 / 8 / 17 / 20 for w2 / w3 / w4 / w9 / w10; `battle.wave` skips to 6 (5.1 s) and 13
   (16.7 s) with Garmond coming in. `forum_r1 check` records the wave clock at frame resolution. Forum_A_w2 is back in
   the rotation (`C:\ssbot\sandbox\r1c_collect.cmd`).
 - 2x check (forum.md 13.10): NOT passed, 2x not adopted, no 2x data in any table (the Clapper's event-ended states end
@@ -1139,8 +1139,9 @@ Facts: `docs/facts/1.0.30000/forum.md` 13.9 onward. Offline outputs (not in git)
 
 - 2x (forum.md 13.10): idle 16 + 16: dwell 18 / 67 keys below 0.05 (cap 8), Holm 7; speed 19 / 42 (cap 6), Holm 4;
   choices 1 / 13; data2: dwell 20 / 115 (cap 12), Holm 4; speed 9 / 65 (cap 8), Holm 1; choices 0 / 24. Same Clapper
-  keys in both (Air 27 -> 26 coarse steps, Slam 0 / 1, Spell Antic), mean shifts within one 1x frame; physics equal
-  (jump 8.219 u, air 0.932 / 0.933 s). Controls (wave-balanced halves) pass; injected +1/30 s dwell caught (Holm 21-24
+  keys in both (Air 27 -> 26 coarse steps, Slam 0 / 1, Spell Antic), mean shifts within one 1x frame; jump height
+  equal (8.219 u), air time differs by the Air exit (fixer round: from FSM events, 28 steps 39 / 213 at 1x vs 26
+  steps 13 / 203 at 2x); and the Tiny's Ready self-loop (fixer round, not seen by v2). Controls (wave-balanced halves) pass; injected +1/30 s dwell caught (Holm 21-24
   at 16 + 16), choice shifts below about 20 points and 10 % speed at 8 + 8 not caught.
 - Wave starts: w2 -> wave 3 1.52-1.57 s after the activation with battle.prune (59.7-75 s before); records' frame-based
   wave times undercount game time for a second or two after a load (load-hitch frames).
@@ -1154,10 +1155,12 @@ Facts: `docs/facts/1.0.30000/forum.md` 13.9 onward. Offline outputs (not in git)
   - instance 0: `20261004_195019_Forum_A_w2_mix_data2` (6 h from 19:50; after its 4 h of full gauntlets
     `20261004_154609_Forum_A_data`, 19 CLEAR);
   - instance 1: `20261004_195800_Forum_A_w2_mix_data2` (6 h from 19:58; after `20261004_154612_Forum_A_data`, 19 CLEAR);
-  - instance 2: `20261004_155649_Forum_A_w2_mix_data2` (9 h from 15:56); instance 3:
-    `20261004_162411_Forum_A_w2_mix_data2` (9 h from 16:24).
+  - instance 3: `20261004_162411_Forum_A_w2_mix_data2` (9 h from 16:24).
+  - instance 2: `20261004_155649_Forum_A_w2_mix_data2` RAN AT 2x (see the fixer round below), stopped 23:39; replaced
+    by `20261004_233950_Forum_A_w2_mix_data2` (8 h from 23:39, frozen `C:\ssbot\live_r1cfix_ed65873`,
+    `C:\ssbot\sandbox\r1cfix_collect.cmd i2`, log `r1cfix_collect_i2.log`, seeds 138000+).
   - Stop one: `cd C:\ssbot\live_r1c_28a9417\brain; ..\scripts\uv.cmd run python -m ssbot.tools.combat_run stop
-    <run dir>`.
+    <run dir>` (instance 2's from `C:\ssbot\live_r1cfix_ed65873\brain`).
 - Offline: nothing (pipelines done: `C:\ssbot\data\m2_forum_r1c\pipeline_build.done`, `pipeline_cert.done`; the
   pipeline's duplicate ablation step was stopped, its result is `recall_fresh_r0tables_early.json`).
 
@@ -1171,9 +1174,38 @@ Facts: `docs/facts/1.0.30000/forum.md` 13.9 onward. Offline outputs (not in git)
    attack families at the current position (R0 Next 2) or condition them on the path, then certify on fights none of
    the builds or certifications has seen (the 202 fresh fights of 13.13 are seen now). Do not set Forum `known` from
    `support_margins.json` (`certified: true` is R0's 35-fight result, contradicted by 13.13).
-2. Next table build: R0 + R1 + R0's 35 fresh + this round's 202 fresh fights + the running collection (all 1x); the
+2. Next table build: R0 + R1 + R0's 35 fresh + this round's fresh fights except `20261004_155649` (2x) + the running
+   collection (all 1x; the builder now leaves out non-1x fights with a warning); the
    candidate tables of 13.13 (`C:\ssbot\data\m2_forum_r1c\tables\forum`, stamped) can serve R2's development meanwhile.
-3. Minister charge margin at the 3.0 u cap with R1 data: find the contacts (`build_all\extra\contacts.jsonl.gz`,
-   held-out residuals of MI_CHARGE) before the next build; likely the dash-in / clash segments.
-4. A 2x retry only with a pre-registered equivalence criterion (one 1x frame) and longer fights (forum.md 13.10).
+3. (Done in the fixer round: the Minister charge margin at the 3.0 u cap was one mis-attributed contact, fixed in
+   eeb550e; check the new counter "touching up to LAG_F before; this frame's exporters far" in the next build.)
+4. A 2x retry only with a pre-registered equivalence criterion (one 1x frame), every type in 8+ fights per arm, and
+   longer fights (forum.md 13.10, 13.15).
 5. Records: wave times after a load in game time (sum of STATE dt), not frames / 60 (forum.md 13.9).
+
+### Fixer round (after the review; forum.md 13.15; commits 04b6228 .. this one)
+
+- REFUTED and corrected: the 2x difference is not only Clapper states. The Tiny's Control `Ready` self-loop runs on
+  real time or frames (`Ready -> Ready` 953 -> 356 idle, real-time dwell equal, game-time dwell 1.80 -> 3.23 s).
+  `forum_speed_check` v3 (04b6228): `visits` and `next` metrics, attainable p per key from the fights containing it
+  (`underpowered_keys`), Clapper jumps from FSM events, `--inject trans`, `--a-units / --b-units`. An independent 1x vs
+  1x control (153511 vs 16 wave starts of 162411, same four waves): nothing flagged, also with B coarsened to 2x;
+  injected +1/30 s dwell (Holm 33), Clapper-only (23), Clapper speed x1.1 (5) and the Tiny loop x0.37 (`next`, Holm 1)
+  caught at 16 + 16; x0.6 / x0.8 and a 10-point choice shift not. 2x stays not adopted.
+- Instance 2's "1x" collection `20261004_155649` ran every episode at 2x (Time.timeScale left at 2 by the 2x arm
+  153211; `set_time_scale` did nothing at 1x). Stopped, fixed (ed65873: set and read back at 1x too,
+  `time_scale_game` in the records, reset to 1 at the end of a scaled run; the Forum builder leaves out fights whose
+  STATE dt is not 1x), restarted at 1x. All other runs of today checked by STATE dt: 1x. 72 of the 202 fresh
+  certification fights were this run: the certification result does not change (the miss is in 1x run 162411), but
+  do not use 155649 as 1x data anywhere (it can serve as a second-seed 2x arm).
+- MI_CHARGE 3.0 u: one contact (111158 i3/ep10 f400125) attributed to the far Minister on the last frame of a blocked
+  stretch; `GauntletBuilder._attribute` fixed (eeb550e; rescan of that fight: all 11 frames to the adjacent one).
+  Pre-prune wave starts other than w2 stay in the build (ghosts are not exported; only composition / wave timing
+  differ, keep them apart in composition products by code_rev 1c374f8).
+- `GauntletDataPolicy.REVISION` 2 in the policy stats (e2b0873): v1 gauntlets from 59e02a1 on (incl. the 38 fresh
+  full gauntlets) are a different policy version from R0's (the pocket test).
+- Docs: 13.9 probe times labelled frames / 60; 13.10 Jump Antic rounding comparison (24 % expected vs 41 %), jump
+  physics from FSM events, the 8 + 8 controls test only the binomial count; 13.13 fresh-set provenance.
+- Open: whether the Tiny's Ready loop counts frames or wall-clock time (if wall clock, its 1x game-time rate depends
+  on the machine's load: real / game 1.06 now); the next build must show the speed guard's counter at 0 for its
+  run list.
