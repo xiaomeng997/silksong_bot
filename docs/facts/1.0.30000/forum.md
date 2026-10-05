@@ -457,7 +457,7 @@ R1 的记录里有策略造出来的条件，R0 的协变量（|dx| 段、左右
 
 ## 14. R2：多敌人预报（MultiForecast）（2026-10-04，forum_planner_plan.md §5 R2；离线，没有连接游戏）
 
-代码：`combat/enemy_tracker.py`（EnemyTracker，一个敌人实例；BossTracker 不动）、`combat/enemy_tables.py`（9 类共用一个模板库）、`combat/multi_forecast.py`（MultiForecaster / MultiForecast）、`combat/projectiles.py`（投掷物的确定路径）、`combat/wave_tracker.py`（WaveTracker）、`core/forum.py`（静态事实，与 `knowledge.gauntlet_tables.FORUM_SPECS`、`train.encounters` 有一致性测试）；工具 `multi_recall`、`projectile_audit`、`consistency_audit`、`planner_bench --encounter Forum --multi`；测试 `tests/test_multi_forecast.py`（20 个）。
+代码：`combat/enemy_tracker.py`（EnemyTracker，一个敌人实例；BossTracker 不动）、`combat/enemy_tables.py`（9 类共用一个模板库）、`combat/multi_forecast.py`（MultiForecaster / MultiForecast）、`combat/projectiles.py`（投掷物的确定路径）、`combat/wave_tracker.py`（WaveTracker）、`core/forum.py`（静态事实，与 `knowledge.gauntlet_tables.FORUM_SPECS`、`train.encounters` 有一致性测试）；工具 `multi_recall`、`projectile_audit`、`consistency_audit`、`planner_bench --encounter Forum --multi`；测试 `tests/test_multi_forecast.py`（20 个；复核后 25 个，14.7）。
 
 ### 14.1 预报怎么组成
 
@@ -504,7 +504,17 @@ R1 的记录里有策略造出来的条件，R0 的协变量（|dx| 段、左右
 | ve：R0 的 35 场新数据，视觉视角（占位相位表：恒等映射；位置减去行为表的身体偏移） | 35（fold 0 的表） | ve | 74,120 / 74,120 | 100 % |
 
 - 9 类每类在每组、每个滞后都是 100 %（union 和按类型都是）。盖住它们的：预报本身（放置、投掷物路径、死亡框）≥ 99.4 %，其余是待机身体管（dev 每个滞后约 1,290 次、fresh 约 840 次、ve 约 335 次）；视觉视角另有 26 次靠当前碰撞体管（反应延迟那几帧）。
-- Bell Beast 包装（`multi_recall bellbeast`，20261003_144536 i4_000，4001 帧，eb5d221；之后的改动不碰 boss 路径）：放置、occupied、prob、support_set、committed、战术、规划器决策 **0 差**；夹具窗口上的逐位测试和 Bell Beast 的测试在 5332426 上都通过。
+- **复核：上表漏了多段招的第一次接触。** 连段的后续命中（Final Hit，`follow`）不检查，理由是"连段的第一次接触代表它"；但第一次接触（钩：敌人的 Control / Attack FSM 进入 Multihit / Multiwhip，主角挨的是没有来源的快速伤害）不在 contacts.jsonl.gz 里，所以约 91 % 的连段根本没被检查。`multi_recall` 现在为每条连段补一个钩接触（Final Hit 之前 ≤ 70 帧里最近一次进入连段状态的帧，主角盒取该帧和前一帧），计入 n 并单列。e516f22 重跑（冻结检出 `C:\ssbot\live_r2fix_e516f22`）：
+
+| 组 | 场 | 视角 | L2 / L3 / L4 覆盖（含钩） | 钩（覆盖 / 个数） | 按类型 |
+|---|---|---|---|---|---|
+| dev 三分 | 107 | oracle | 229,711 / 229,711 | 1,378 / 1,378 | 100 % |
+| fresh R0 | 35 × 2 份表 | oracle | 74,585 / 74,585（每份表） | 465 / 465 | 100 % |
+| fresh R1（w2 幽灵已排除） | 187 × 2 份表 | oracle | 113,385 / 113,385（每份表） | 436 / 436 | 100 % |
+| ve（占位相位表） | 35（fold 0） | ve | 74,585 / 74,585 | 465 / 465 | 100 % |
+
+  每条 Final Hit 都找到了钩（dev 1,459 行 → 1,378 条连段，fresh 1,872 行 → 1,802 条，没找到的 0）；钩按类型（fresh R0）：Song Administrator 243、Song Pilgrim 03（Choristor）161、Song Reed 61。9 类、三个滞后、union 和按类型都是 100 %。`recall_{dev,fresh,ve}_e516f22.json`。
+- Bell Beast 包装（`multi_recall bellbeast`，20261003_144536 i4_000，4001 帧，eb5d221；之后的改动不碰 boss 路径）：放置、occupied、prob、support_set、committed、战术、规划器决策 **0 差**；夹具窗口上的逐位测试和 Bell Beast 的测试在 5332426 上都通过。**复核：**这些检查只比了查询，没有比实战策略的 `bell_hit_monitor.zone`：它会改写 `f.det` 并清空路径缓存、调用 `f._occ(placements, ...)`，在包装上 100 % 抛 AttributeError（`det` 只读、`_occ` 被多敌人路径同名覆盖）。改为代理之后（e516f22）：i4_000 4001 帧 + 892 次铃区检查、20261004_095304 i0_001 4001 帧 + 1,333 次铃区检查，八项全部 **0 差**（`bellbeast_wrap_*_e516f22.json`）；测试另查了在窗口中途包装一个已经有状态的 Forecaster。
 
 ### 14.4 一致性（forum_planner_plan §4.4 第 6 条：击杀、打铃之后主角周围 1 s 的危险区不得变大；`consistency_audit`）
 
@@ -520,6 +530,7 @@ R1 的记录里有策略造出来的条件，R0 的协变量（|dx| 段、左右
 
 - **击杀：0 违反**。模拟 172,839 次（Tiny 70,266、Maestro 25,191、Clapper 24,332、Bellbearer 15,853、Reed 11,252、Minister 10,868、Choristor 6,805、Clawmaiden 6,659、Envoy 1,613），记录的 1,429 次（击杀前一帧的假设，和击杀前后两份预报的比较），近区、宽区都是 0。
 - **打铃**：记录的 474 次 0 违反。模拟 2,854 次里近区 9 次变大，都是物理，不是模型错误：下劈的铃碰地后要等 Nail Hit 结束才弹起，弹回主角附近（2）；上挑的铃升到顶再落回来（4，0.85–0.98 s）；侧打打向近墙，铃以 10 u/s 弹回（2）；上挑碰到穹顶，之后路径不确定成管（1，这是模型的保守）。宽区 18 次（另有 3 次是铃被打走时穿过主角 6 u 内的远侧格子）。规划器以后算"打铃"的价值时要用 `bell_redirected`，不能假设打走就安全。
+- **复核：`occupied_without` 没被审计。** 上面的击杀比较用的是 `forecast_if_killed`（重新成组），而 §4.3 给规划器的击杀查询是 `occupied_without(iid)`：它按行的 owner 过滤，Tiny 成组的行只记在一只（owner）名下，杀 owner 会把同格其他 Tiny 以后可能开始的招一起去掉（合成例子：92,276 格里丢 17,870；`occupied_only(某成员)` 也漏组行，`t_min(subject)` 偏小）。改为组行代表整簇（14.1）后，审计加了一项：`occupied_without(死者)` 必须盖住击杀后其余敌人的支撑（`forecast_if_killed` 去掉死者、入场和等待中的成员）。568d873（冻结检出 `C:\ssbot\live_r2fix_568d873`，35 场）：**击杀 0 违反**（模拟 172,839 次、记录 1,429 次的假设和前后比较，近区宽区都是 0），**`occupied_without` 0 违反**（同样的 172,839 + 1,429 次）。打铃：记录的 474 次 0；模拟 2,854 次里近区 14 次——上面的 9 类物理（落地反弹 2、上挑落回 4、近墙弹回 2、穹顶管 1）加 5 次只由侧弹分支造成（14.2：落地反弹后 4.4 % 的侧弹是真实物理，模型保守地两边都放）。`consistency_568d873.json`。
 
 ### 14.5 算力与内存（第 6 波回放：20261003_074719 i3 ep0，5951 帧，6–8 只敌人在场，生产表，4 线程）
 
@@ -527,7 +538,17 @@ R1 的记录里有策略造出来的条件，R0 的协变量（|dx| 段、左右
 
 - **forecast(2 s)：p50 0.91 ms、p99 2.75 ms**（最大 10.0 ms，一次）；update p50 0.06 / p99 0.27 ms。每帧放置：细 3（p99 11）、窗口 9（p99 28）、外包盒 179（p99 238）。（同一回放带规划器时 forecast p50 1.4 / p99 3.4 ms；整机满载 CPU p50 98 % 时（9835ced）p50 2.0 / p99 4.2 ms。）
 - **内存**：读表 25 s、warm 55 s；表（模板库）696 MB；进程 RSS 读完表 + warm 938 MB，回放结束 1,012 MB，**峰值工作集 1,109 MB**（带规划器 1,184 MB）。之前峰值 1.94 GB 来自粗化时一次展开整段模板的布尔数组（改成分块）。
-- **今天的规划器 + MultiForecast**（没有 Forum 战术：原地 HOLD、风险图来自 MultiForecast）：tick p50 21.6 ms、p99 37.9 ms；其中 support 6.5 / 16.5 ms、prob_bind 6.4 / 14.7 ms、rollout 3.0 / 4.3 ms；**92 % 的 tick 是 FORCED_RISK**（找不到证明安全的路径）。这是 R3 要做的（Forum 词汇、K 目标打分、查询预算）。
+- **今天的规划器 + MultiForecast**（没有 Forum 战术：原地 HOLD、风险图来自 MultiForecast）：tick p50 21.6 ms、p99 37.9 ms；其中 support 6.5 / 16.5 ms、prob_bind 6.4 / 14.7 ms、rollout 3.0 / 4.3 ms；**92 % 的 tick 是 FORCED_RISK**（找不到证明安全的路径）。这是 R3 要做的（Forum 词汇、K 目标打分、查询预算）。注意这是开环回放：主角的位置来自录像里的数据策略，不是规划器自己走出来的，所以 92 % 不能当成闭环实战的 FORCED_RISK 比例。
+- **复核：(d) 的 2.75 ms 是一次运气好的跑。** 复核者在同样的负载下重跑同一条命令三次：p99 3.08 / 3.23 / 3.21 ms（CPU p50 53 / 57 / 40 %），都超过 3 ms。慢的 tick 是机器噪声不是结构：同一 tick 连做两次，第一次慢的第二次不慢（重负载下第一次 p99 4.67 ms，两次取小 p99 2.51 ms；没有一次 GC 落在预报里，`gc.freeze()` 也不改变尾巴）。剖析（cProfile）：`groups()` 占约 60 %（numpy 小数组调用的固定开销、按行的 `np.unique(axis=0)`、每 tick 约 160 行死掉的 Tiny（Maestro 在场时按"会被召回"继续走）的全场盒逐行追加），`subject()` 约 25 %（每 tick 24 个跟踪器）。改动（语义不变，除全场盒按 owner 合并成外包时间窗，是超集）：Tiny 簇和组用一维键、每种类型查一次增长表、全场盒每个 owner 一个、家族名用对象数组。同一负载下与 5332426 并排：p99 3.14 → 2.72 ms（CPU p50 49 %）、3.05 → 2.61 ms（43–45 %）。e516f22 上三次（`bench_wave6_fc_e516f22_{1,2,3}.json`，5951 tick，同机 5 个游戏实例 + 25–30 个别的 Python 进程）：
+
+| 跑 | 整机 CPU p50 / p99 | forecast(2 s) p50 | p99 | 最大 |
+|---|---|---|---|---|
+| 1 | 50 % / 58 % | 0.77 ms | **2.57 ms** | 10.4 ms |
+| 2 | 44 % / 53 % | 0.69 ms | **2.49 ms** | 10.0 ms |
+| 3 | 36 % / 53 % | 0.64 ms | **2.48 ms** | 9.0 ms |
+
+  结论：**勉强达标**（36–50 % 负载下 p99 2.5–2.7 ms），余量只有约 15 %；整机满载时仍会超过 3 ms。R3 往每个 tick 加活之前要再省：把 `groups()` 的分段 / 锚点盒计算搬进 numba，死掉的 Tiny 直接给全场盒不走分段。
+- **复核后的内存与规划器**（e516f22）：峰值工作集 1,109–1,112 MB（带规划器 1,187 MB），模板库 696 MB，读表 26–29 s、warm 49–61 s（不含 comfort 模板，见 14.1）。今天的规划器：tick p50 14.2 ms、p99 25.6 ms（CPU p50 42 %；support 4.1 / 12.0、prob_bind 3.7 / 9.8、rollout 2.4 / 4.0 ms），FORCED_RISK 仍是 **92.0 %**；带规划器时 forecast p99 2.96 ms。`bench_wave6_planner_e516f22.json`。
 
 ### 14.6 复现
 
@@ -540,7 +561,26 @@ cd brain   # 低优先级、NUMBA_NUM_THREADS ≤ 4
 ..\scripts\uv.cmd run python -m ssbot.tools.multi_recall bellbeast <Bell Beast 录像> --frames 4000
 # R1 运行的接触（behaviour_build --contacts-only，命令见 C:\ssbot\data\m2_forum_r2\r1_scan.cmd）
 ..\scripts\uv.cmd run python -m ssbot.tools.projectile_audit --cache C:\ssbot\data\m2_forum_r0\cache --fights 10 --every 2 --horizon 0.8 --json <out>
+..\scripts\uv.cmd run python -m ssbot.tools.projectile_audit --cache C:\ssbot\data\m2_forum_r0\cache_fresh --fights 35 --every 2 --horizon 0.8 --json <out>   # 留出
+# 复核这一轮的全部跑：C:\ssbot\data\m2_forum_r2\fix_run.cmd <audit|dev|fresh|ve|proj|bench1..3|benchpl|bb1|bb2> <rev>（冻结检出 C:\ssbot\live_r2fix_<rev>）
 ..\scripts\uv.cmd run python -m ssbot.tools.consistency_audit --every 30 --workers 2 --json <out>
 ..\scripts\uv.cmd run python -m ssbot.tools.planner_bench --encounter Forum --multi [--planner] --fight 20261003_074719_Forum_A_data/i3/ep0 --wave 6 --frames 6000 --threads 4 --json <out>
 ..\scripts\uv.cmd run pytest -q tests/test_multi_forecast.py
 ```
+
+### 14.7 复核修正（2026-10-04 晚，提交 421176d–568d873；离线）
+
+两位复核者在 f274317 上找到的问题，逐条：
+
+1. **Bell Beast 包装不是代理**（实战会崩）：只转读不转写，`det` 只读、多敌人路径的 `_occ` 覆盖了 Forecast 的同名方法，`bell_hit_monitor.zone` 在包装上 4,965 / 4,965 次抛错。改为代理：包装模式下没被本类回答的读写都落在 boss 的 Forecast 上（多敌人的并集查询改名 `_union_occ`）；`MultiForecaster(boss=...)` 不再重置被包的 Forecaster（以前在 `__init__` 里 `reset()` 会清掉它的跟踪器和铃）。结果见 14.3。
+2. **Tiny 组行只算在 owner 名下**（高）：见 14.4；组行带簇号（`bb["gcl"]`），`MultiForecast.clusters` 记每簇的 Tiny；全场盒按簇里每只各放一个。
+3. **召回漏了多段招的钩**：见 14.3。
+4. **WaveTracker 漏看击杀后不再同步**：视觉视角漏一次击杀（画面外），计数多一，下一波永远不排队，即使它的成员已经进场（合成例子；录像 20261003_074719 i3 ep33 的第 9–13 波估计晚 28–138 s）。改为：只有"新进场"的成员算激活，激活 2 s 之后看到下一波类型的新成员进场就重新同步（计数取 min(计数, remainingEnemyToEnd) 再加新一波的人数）；视觉视角的"unknown"/"hidden"相位不算在场（之前 ep27 里第 1 波两只 Choristor 等待时的相位是 unknown，被当成在场，新成员判断失效，第 1 波晚 8.5 s）。35 场新数据与 room.battles（测试真值）对照：oracle 视角 455 次激活全部在 −0.133 – 0 s（偏早，保守方向），重新同步 0 次；视觉视角同样 455 次全部在 −0.133 – +0.067 s，重新同步 3 次（074533 ep27 第 1 波、ep34 第 4 波、074719 ep33 第 9 波，都是漏看的击杀）；之前晚 28–138 s 的 074719 ep33 现在每波都在 0.05 s 内。
+5. **铃的确定路径不是支撑的超集**（留出数据）：见 14.2（侧弹分支、穹顶带 1.1 u；留出 35 场 3,469,352 / 3,469,352 在支撑内，p99 0.233 u）。
+6. **(d) 不稳**：见 14.5。
+7. **行走截在 6 s**：见 14.1（老状态从原点走）。
+8. **comfort 被悄悄忽略**：见 14.1（计数、写明）。
+9. **一个 Bell Beast 计时测试在忙机器上必挂**（main 上同样挂：p99 4.0–4.3 ms 对 3 ms）：`test_hitbox_tables.py` 的预算超了且整机 CPU > 30 % 时跳过并写出数字，安静机器上仍然断言。
+10. 对用户问题"bot 反应会比我 0.5 倍速快吗"的回答原来把"召回在 2–4 帧前就盖住接触"当成反应速度，不对（见 HANDOFF Task R2 的更正）。
+
+全部测试（`pytest -q`，tests + ssbot/tests，e516f22 时的工作区，整机忙）：1071 passed、2 skipped（其一是上面这条计时测试，按负载跳过）、1 xfailed；`tests/test_multi_forecast.py` 25 个。
