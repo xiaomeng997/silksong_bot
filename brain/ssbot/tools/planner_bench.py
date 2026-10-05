@@ -136,7 +136,7 @@ def forum_bench(a: argparse.Namespace) -> int:
     return 0
 
 
-def _forum_prefs(tac, ws, fc):
+def _forum_prefs(tac, ws, fc, goal: bool = False):
     """Today's planner has no Forum tactics (R3/R6): HOLD where the hero stands, the playbook's weights, the risk map
     over the Forum floor from the MultiForecast (Tactics.risk_map's weighting)."""
     from ssbot.combat.tactics.modes import HOLD, TacticPrefs
@@ -147,6 +147,10 @@ def _forum_prefs(tac, ws, fc):
     occ = fc.occupied(np.repeat(xs[:, None], len(tk), 1), np.full((len(xs), len(tk)), FLOOR_Y + hb.HERO_HALF_U[1]),
                       tk)
     w = 1.0 / (1.0 + tk)
+    if goal:
+        from ssbot.combat.tactics.modes import GoalPrefs
+        return GoalPrefs(HOLD, float(ws.hero.pos.v[0]), dict(tac.pb.weights), risk_x=xs,
+                         risk=(occ * w).sum(axis=1) / w.sum())
     return TacticPrefs(HOLD, float(ws.hero.pos.v[0]), dict(tac.pb.weights), risk_x=xs, risk=(occ * w).sum(axis=1) /
                        w.sum())
 
@@ -199,19 +203,27 @@ def forum_multi_bench(a: argparse.Namespace) -> int:
     peak_warm = getattr(proc.memory_info(), "peak_wset", 0)
     peak_series = []
     planner = tac = trk = None
+    forum_kill = None
     if a.planner:
         from ssbot.combat.planner import Planner, PlannerConfig
         from ssbot.combat.safety_filter import FilterContext
         from ssbot.combat.tactics import Tactics, load_playbook
         from ssbot.knowledge.kinematics import HeroParams, HoldState, StateTracker, Terrain2D
         params = HeroParams.load()
+        if a.forum:
+            # the Forum fast layer (R3): the Forum loadout's kinematics (Reaper, abilities), the Weighted Anklet when
+            # the inventory audit shows it equipped (no bot recording has it: forum_planner_plan R3 note)
+            from ssbot.combat.forum_planner import ForumPlanner, forum_kill_hp
+            params = HeroParams.load(Path(__file__).resolve().parents[3] / "knowledge" / "1.0.30000" / "kinematics"
+                                     / "hero_reaper_forum.json")
+            forum_kill = forum_kill_hp
         r0 = RecordingReader(fight["path"])
         terrain = None
         for _, m in r0.terrain():
             if (m.get("scene_raw") or m.get("scene")) in ("Hang_04", "Hang_04_boss"):
                 terrain = Terrain2D.from_message(m, params.scene("Hang_04"))
         terrain = terrain or Terrain2D.empty()
-        planner = Planner(params, terrain, PlannerConfig(threads=a.threads))
+        planner = ForumPlanner(params, terrain, PlannerConfig(T=36, threads=a.threads, variants="bounds_lo"))             if a.forum else Planner(params, terrain, PlannerConfig(threads=a.threads))
         tac = Tactics(load_playbook())
         trk = StateTracker(params, terrain)
     backend = OracleBackend()
@@ -219,6 +231,7 @@ def forum_multi_bench(a: argparse.Namespace) -> int:
     t_up, t_fc, t_tick, n_pl, n_bb, n_sub, forced = [], [], [], [], [], [], 0
     n_fine, n_win = [], []
     phases: dict = {}
+    finfo: dict = {}
     load_samples = []
     psutil.cpu_percent(None)
     n = 0
@@ -239,8 +252,14 @@ def forum_multi_bench(a: argparse.Namespace) -> int:
         a2 = time.perf_counter()
         n += 1
         if planner is not None and prev is not None:
-            prefs = _forum_prefs(tac, ws, fc)
-            ctx = FilterContext.from_world(ws, None, 3, want_bind=prefs.want_bind)
+            prefs = _forum_prefs(tac, ws, fc, goal=a.forum)
+            if a.forum:
+                weighted = "Weighted Anklet" in (ws.res.equipped or [])
+                if weighted and not planner.params.weighted:
+                    planner.params = planner.params.with_weighted()
+                ctx = FilterContext.from_world(ws, None, 3, want_bind=prefs.want_bind, kill_hp=forum_kill(mf))
+            else:
+                ctx = FilterContext.from_world(ws, None, 3, want_bind=prefs.want_bind)
             hold = HoldState.from_act(prev.get("act"))
             prefix = np.array([int((s.get("act") or {}).get("mask") or 0)])
             res = planner.tick(ws, trk.state(), hold, prefix, fc, prefs, ctx)
@@ -250,6 +269,11 @@ def forum_multi_bench(a: argparse.Namespace) -> int:
                 for k, v in res.t_ms.items():
                     phases.setdefault(k, []).append(v)
                 forced += res.forced_risk
+                if a.forum:
+                    li = planner.last_info
+                    for k in ("stage1_pass", "enveloped", "core_pass", "hitfx", "react", "capped"):
+                        finfo.setdefault(k, []).append(li[k])
+                    finfo.setdefault("posture", []).append(li["posture"])
         if n > 50:
             t_up.append((a1 - a0) * 1e3)
             t_fc.append((a2 - a1) * 1e3)
@@ -277,6 +301,9 @@ def forum_multi_bench(a: argparse.Namespace) -> int:
            "update_ms": q_(t_up), "forecast_ms": q_(t_fc), "tick_ms": q_(t_tick),
            "planner_phases_ms": {k: q_(v) for k, v in phases.items()},
            "forced_risk_share": round(forced / max(1, len(t_tick)), 4) if t_tick else None,
+           "planner": ("ForumPlanner" if a.forum else "Planner") if a.planner else None,
+           "forum": ({k: (dict(Counter(v)) if k == "posture" else q_(v)) for k, v in finfo.items()}
+                     | {"audit": planner.audit.as_dict()}) if a.forum and planner is not None else None,
            "placements": q_(n_pl), "bbox_placements": q_(n_bb), "enemies_in_play": q_(n_sub),
            "tables_load_s": round(t_load, 1), "warm_s": round(t_warm, 1), "warm_templates": nw,
            "rss_mb": {"before": round(rss0 / 1e6), "tables": round(rss_tables / 1e6),
@@ -317,6 +344,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--wave", type=int, default=None, help="Forum --multi: the frames of this wave")
     ap.add_argument("--horizon", type=float, default=2.0, help="Forum --multi: the forecast's horizon (s)")
     ap.add_argument("--planner", action="store_true", help="Forum --multi: today's planner and tactics too")
+    ap.add_argument("--forum", action="store_true", help="Forum --multi --planner: the Forum fast layer (R3: "
+                    "combat.forum_planner.ForumPlanner, the Forum loadout) instead of today's planner")
     ap.add_argument("--json", type=Path, default=None)
     a = ap.parse_args(argv)
     if a.encounter == "Forum" and a.multi:

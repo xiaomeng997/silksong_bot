@@ -518,6 +518,56 @@ class MultiForecaster:
             self.trackers, self.waves = keep_tr, keep_waves
 
 
+    def reaction_state(self, iid: int) -> str | None:
+        """The Control state enemy iid goes to when the hero's nail hits it now (hero_caused.json "TOOK DAMAGE" exits
+        of its current state: a Clapper's Idle -> Dmg Attack, a Minister's Chase -> Range Check, ...), None: no such
+        exit (the hit does not change its FSM; static FSM structure, legal in both views)."""
+        tr = self.trackers.get(iid)
+        if tr is None or tr.dead or tr.state is None:
+            return None
+        return hit_reactions().get(tr.tk, {}).get(tr.state)
+
+    def forecast_reaction(self, iid: int, to_state: str, t_react: float, horizon_s: float = MIN_HORIZON_S,
+                          origin_t: float | None = None) -> "MultiForecast | None":
+        """Only enemy iid's support as if it entered to_state at game time t_react (a hit's reaction, forum_planner_plan
+        R3: the planner's hit branch checks against the forecast and this), from origin_t over horizon_s. The real
+        state is left as it was."""
+        if self.boss is not None:
+            raise NotImplementedError("the single-boss path has no hit reactions")
+        tr = self.trackers.get(iid)
+        if tr is None or tr.dead:
+            return None
+        t2 = copy.copy(tr)
+        t2.cur = copy.copy(tr.cur)
+        t2.ends = list(tr.ends)
+        t2.enter(to_state, t_react)
+        b = _Builder(self, self.t if origin_t is None else origin_t, horizon_s)
+        b.subject(t2)
+        b.groups()
+        return b.finish()
+
+
+_HIT_REACTIONS: dict | None = None
+
+
+def hit_reactions() -> dict:
+    """{type key: {state: the state a nail hit sends it to}} from hero_caused.json (TOOK DAMAGE exits)."""
+    global _HIT_REACTIONS
+    if _HIT_REACTIONS is None:
+        out: dict = {}
+        p = FORUM_DIR / "hero_caused.json"
+        if p.exists():
+            for tk, d in json.loads(p.read_text("utf-8")).get("types", {}).items():
+                sp = FORUM_TYPES.get(tk)
+                if sp is None or d.get("fsm", sp.control_fsm) != sp.control_fsm:
+                    continue                   # the tracker follows another FSM's states
+                ex = {s: e["TOOK DAMAGE"] for s, e in (d.get("exits") or {}).items() if "TOOK DAMAGE" in e}
+                if ex:
+                    out[tk] = ex
+        _HIT_REACTIONS = out
+    return _HIT_REACTIONS
+
+
 def _window_union(rows: np.ndarray, offs: np.ndarray, nt: int, b_lo: np.ndarray, b_hi: np.ndarray) -> np.ndarray:
     """Union of a box sparse table's bins [b_lo, b_hi] (vectorised over rows; empty where the window misses)."""
     out = np.tile(np.array(EMPTY), (len(b_lo), 1))

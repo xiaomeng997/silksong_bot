@@ -25,7 +25,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from ssbot.core.primitives import Prim
-from ssbot.knowledge.kinematics import B_ATTACK, B_BIND, B_DOWN, B_JUMP, B_LEFT, B_QUICKCAST, B_RIGHT, B_UP
+from ssbot.knowledge.kinematics import B_ATTACK, B_BIND, B_DASH, B_DOWN, B_JUMP, B_LEFT, B_QUICKCAST, B_RIGHT, B_UP
 
 FIRST = 4                      # frames of the first primitive
 PRESS = 3                      # attack / quickcast / bind press length
@@ -170,6 +170,84 @@ def build(T: int = 48) -> CandidateSet:
             i += 1
     return CandidateSet(cmd, first, cont, [p.name for p in firsts], [p.name for p in conts], bits,
                         np.zeros(N, bool), T)
+
+
+# ---- the Forum vocabulary (forum_planner_plan §4.1 / §4.4 item 2, round R3) -------------------------------------------
+
+POSTURES = ("ground", "air", "wall")
+CORE_FIRST = ("WAIT", "MOVE(L)", "MOVE(R)") + tuple(f"JUMP({h}){d}" for h in JUMP_HOLDS for d in ("N", "L", "R")) + \
+    ("DASH(L)", "DASH(R)")
+CORE_CONT = ("idle", "runL", "runR", "jump48N")
+# first pieces per posture family besides the core ones: on a wall a side slash is the wall slash (the hero faces
+# away from the wall), a Reaper down slash only starts in the air; a dash on a wall while holding towards it is the
+# Wall Scramble, away from it a dash off the wall (kinematics hero_dash)
+POSTURE_FIRST = {"ground": ("ATTACK(side)N", "ATTACK(side)L", "ATTACK(side)R", "ATTACK(up)L", "ATTACK(up)R"),
+                 "air": ("ATTACK(side)N", "ATTACK(side)L", "ATTACK(side)R", "ATTACK(up)L", "ATTACK(up)R",
+                         "ATTACK(down)L", "ATTACK(down)R"),
+                 "wall": ("ATTACK(side)N", "ATTACK(side)L", "ATTACK(side)R")}
+DASH_WAIT = 10                 # frames from a dash press to the slash of "dash, then attack" (the dash runs 6 frames:
+#                                an attack pressed while the dash / sprint runs is the Reaper's dash stab, not modelled)
+
+
+def _forum_first_pieces() -> list[Piece]:
+    out = [p for p in _first_pieces() if not p.name.startswith("SILKSKILL")]
+    for d in ("L", "R"):
+        m = _seq(FIRST, DIRS[d])
+        m[:PRESS] |= B_DASH
+        out.append(Piece(f"DASH({d})", m, frozenset({Prim.DASH, Prim.MOVE})))
+    return out
+
+
+FORUM_DROP_CONT = ("runL16_stop", "runR16_stop", "upatk10L", "upatk10R")   # the 0.6 s horizon: kept within ~400 rows
+
+
+def _forum_continuations(T: int) -> list[Piece]:
+    out = [p for p in _continuations(T) if p.name not in FORUM_DROP_CONT]
+    n = T - FIRST
+    for d in ("L", "R"):
+        # dash in, then a normal slash once the dash is over (forum_planner_plan §4.2: "dash + normal attack" first;
+        # the dash stab is R7's)
+        m = _seq(n, DIRS[d])
+        m[:PRESS] |= B_DASH
+        m[DASH_WAIT:DASH_WAIT + PRESS] |= B_ATTACK
+        out.append(Piece(f"dash{d}_attack", m, frozenset({Prim.DASH, Prim.MOVE, Prim.ATTACK_SIDE})))
+        m = _seq(n, DIRS[d])
+        m[:PRESS] |= B_DASH
+        out.append(Piece(f"dash{d}", m, frozenset({Prim.DASH, Prim.MOVE})))
+    return out
+
+
+def build_forum(T: int = 36, posture: str = "ground") -> tuple[CandidateSet, np.ndarray]:
+    """The Forum set of one posture family (forum_planner_plan §4.1: posture families + the core evasion set): the
+    core first pieces (CORE_FIRST: wait, move, jumps 3 holds x 3 ways, dash either way) and the posture's attack pieces,
+    each with every continuation (the Bell Beast library plus dash / dash-then-slash). Returns (set, core [N] bool): the
+    core evasion rows (CORE_FIRST x CORE_CONT), the same commands in every posture family, so their S / Hz / U never
+    depend on the posture's other rows or on the tactics (§4.4 item 2)."""
+    if posture not in POSTURES:
+        raise ValueError(f"posture {posture!r}")
+    fp = {p.name: p for p in _forum_first_pieces()}
+    firsts = [fp[n] for n in CORE_FIRST] + [fp[n] for n in POSTURE_FIRST[posture]]
+    conts = _forum_continuations(T)
+    N = len(firsts) * len(conts)
+    cmd = np.zeros((N, T), np.int64)
+    first = np.zeros(N, np.int64)
+    cont = np.zeros(N, np.int64)
+    bits = np.zeros(N, np.int64)
+    core = np.zeros(N, bool)
+    i = 0
+    for a, p in enumerate(firsts):
+        for b, cp in enumerate(conts):
+            cmd[i, FIRST:] = cp.masks[:T - FIRST]
+            k = min(len(p.masks), T)
+            cmd[i, :FIRST] = p.masks[:FIRST]
+            if k > FIRST:
+                cmd[i, FIRST:k] |= p.masks[FIRST:k] & B_JUMP
+            first[i], cont[i] = a, b
+            bits[i] = _bits(p.prims | cp.prims)
+            core[i] = p.name in CORE_FIRST and cp.name in CORE_CONT
+            i += 1
+    return CandidateSet(cmd, first, cont, [p.name for p in firsts], [p.name for p in conts], bits,
+                        np.zeros(N, bool), T), core
 
 
 LONG_FIRST = ("WAIT", "MOVE(L)", "MOVE(R)", "JUMP(48)N", "JUMP(48)L", "JUMP(48)R")
