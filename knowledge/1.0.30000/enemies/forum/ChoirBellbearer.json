@@ -19671,5 +19671,13 @@
    }
   },
   "npz_sha256": "f01cffd708db815b6ea1440d0924abbaafd487515905cab608a85b5f34a99b53"
+ },
+ "structurally_absent": {
+  "Throw Antic Quick": "Rethrow? sends FINISHED (enabled) before its SendRandomEventV4: always In Range (forum.md 13.2; 910 / 910 in R1)"
+ },
+ "absent_stamped_by": {
+  "sha": "5bf75770cf46d167098d50ab7bfd9817ad2eb662",
+  "branch": "worktree-wf_5031b357-209-2",
+  "dirty": false
  }
 }

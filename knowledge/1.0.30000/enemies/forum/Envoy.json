@@ -14259,7 +14259,8 @@
     "n": 0,
     "by_phase": {},
     "target": 200,
-    "missing": 200
+    "missing": 0,
+    "absent": "Hop Up? sends FINISHED (enabled) before its RayCast2dV2 could send HOP UP: always Slash Antic (forum.md 13.2; 2407 / 2407 in R1)"
    },
    "EN_AMBUSH": {
     "n": 107,
@@ -14273,7 +14274,8 @@
     "n": 0,
     "by_phase": {},
     "target": 200,
-    "missing": 200
+    "missing": 0,
+    "absent": "the Forum Envoy's default clip is Ambush: Init -> Ambush Ready -> Ambush Antic; the Wake states belong to the sleeping variant (forum.md 13.2): its entry is EN_AMBUSH"
    },
    "EN_IDLE": {
     "n": 1082,
@@ -14703,5 +14705,18 @@
    }
   },
   "npz_sha256": "c2d56b947da911d6d7ecbede2d8863ea318e6d7b16a3fbbda8ac0e6e240b6eaf"
+ },
+ "structurally_absent": {
+  "EN_HOPSLASH": "Hop Up? sends FINISHED (enabled) before its RayCast2dV2 could send HOP UP: always Slash Antic (forum.md 13.2; 2407 / 2407 in R1)",
+  "HopSlash Antic": "Hop Up? sends FINISHED (enabled) before its RayCast2dV2 could send HOP UP: always Slash Antic (forum.md 13.2; 2407 / 2407 in R1)",
+  "EN_ENTRY": "the Forum Envoy's default clip is Ambush: Init -> Ambush Ready -> Ambush Antic; the Wake states belong to the sleeping variant (forum.md 13.2): its entry is EN_AMBUSH",
+  "Wake Pause": "the Forum Envoy's default clip is Ambush: Init -> Ambush Ready -> Ambush Antic; the Wake states belong to the sleeping variant (forum.md 13.2): its entry is EN_AMBUSH",
+  "Wake": "the Forum Envoy's default clip is Ambush: Init -> Ambush Ready -> Ambush Antic; the Wake states belong to the sleeping variant (forum.md 13.2): its entry is EN_AMBUSH",
+  "Black Thread Wake": "the Forum Envoy's default clip is Ambush: Init -> Ambush Ready -> Ambush Antic; the Wake states belong to the sleeping variant (forum.md 13.2): its entry is EN_AMBUSH"
+ },
+ "absent_stamped_by": {
+  "sha": "5bf75770cf46d167098d50ab7bfd9817ad2eb662",
+  "branch": "worktree-wf_5031b357-209-2",
+  "dirty": false
  }
 }
