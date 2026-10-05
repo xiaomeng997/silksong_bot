@@ -372,6 +372,35 @@ def test_tiny_group_placement_covers_its_members_with_fewer_rows():
     Y = np.repeat(rng.uniform(2.0, 9.0, (800, 1)), len(tk), axis=1)
     a, b = grouped.occupied(X, Y, tk), single.occupied(X, Y, tk)
     assert b.any() and not (b & ~a).any()
+    # a group row stands for every Tiny of its cluster: killing the row's owner keeps the others' support (the
+    # planner's kill query), one member's own support includes the group rows, one support event per Tiny
+    for owner in grouped.groups:
+        for i in (1, 2, 3, 4):
+            a, b = grouped.occupied_without(X, Y, tk, i), single.occupied_without(X, Y, tk, i)
+            assert b.any() and not (b & ~a).any(), (owner, i)
+            a, b = grouped.occupied_only(X, Y, tk, {i}), single.occupied_only(X, Y, tk, {i})
+            assert b.any() and not (b & ~a).any(), (owner, i)
+    assert not grouped.occupied_without(X, Y, tk, {1, 2, 3, 4}).any()
+    ev = lambda f: sorted((e.source, e.instance) for e in f.support_set(t1=0.8).events)  # noqa: E731
+    assert ev(grouped) == ev(single) == [(tiny, i) for i in (1, 2, 3, 4)]
+
+
+def test_a_state_older_than_the_walk_cap_is_walked_from_the_origin():
+    """A state whose logged dwell reaches past WALK_CAP_S (Minister Chase 5.9 s, a dead Tiny 10.6 s), WALK_CAP_S -
+    H old: the memoised walk from its entry would end at the cap, so the attacks it may start would be cut at
+    WALK_CAP_S - age; walked from the origin they may start anywhere in the horizon."""
+    d = _reed_table()
+    d["dwell_s"]["Alert"] = {"min": 0.2, "max": 8.0}
+    tt = type_table(d, FORUM_TYPES[REED])
+    tabs = EnemyTables({REED: tt}, EnemyTables._store([_templates()]), _tables().tubes, {}, True, "synthetic", {})
+    mf = MultiForecaster(tabs, ORACLE, waves=False)
+    T = 5.5
+    _run(mf, [(0, 0.0, [_ent(7, 20.0, 5.0, "Alert")], [_go(7, "Alert", 0, 0.0)]),
+              (330, T, [_ent(7, 20.0, 5.0, "Alert")], [])])
+    b = mfm._Builder(mf, T, 0.8)
+    b.subject(mf.trackers[7])
+    stab = [(lo, hi) for tr, fid, lo, hi, p, fam in b.root_buf if fam == "RE_STAB"]
+    assert stab and min(lo for lo, _ in stab) <= BIN + 1e-9 and max(hi for _, hi in stab) >= 0.8
 
 
 def test_idle_enemy_is_its_body_tube_and_the_attacks_it_may_start():
@@ -482,6 +511,31 @@ def test_bell_steps_reproduce_a_recorded_flight():
     assert xs2[4] - xs2[3] == pytest.approx(0.6, abs=1e-9) and not on2[3:9].any() and on2[12]
 
 
+def test_bell_side_bounce_after_a_floor_bounce_is_a_branch():
+    """R0 fresh cache 20261003_074533 i2 ep25, bell -719474: on the floor at f 1354430 (27.313, 3.428), vx -8.56;
+    floor Bounce at f 1354431 (27.142, 3.528, vy 18.8); then a side bounce (no wall there): (27.242, 3.528) vx +10 at
+    f 1354432, (27.442, 3.88) at f 1354433, (27.642, 4.208) at f 1354434. The modelled flight keeps vx; a branch
+    follows the side bounce."""
+    from ssbot.combat.projectiles import BELL, bell_branches
+    xs, ys, on, tube = bell_branches(27.313, 3.428, -8.56, 0.0, 30, floor_contact=True)
+    assert xs.shape[0] == 3 and tube is None and on.all()
+    logged = {1: (27.142, 3.528), 2: (27.242, 3.528), 3: (27.442, 3.88), 4: (27.642, 4.208)}
+    side = [b for b in range(3) if all(abs(xs[b, i] - x) < 2e-3 and abs(ys[b, i] - y) < 2e-3
+                                       for i, (x, y) in logged.items())]
+    assert side and side[0] > 0 and xs[0, 2] < 27.142            # branch 0 (the modelled flight) keeps going left
+    # the tracker's path carries the branches: [B S, T] centres, the modelled flight first
+    hz = HazardTracker(ORACLE)
+    bell = Entity(id=-3, type_key=E(BELL), pos=E((27.313, 3.428)), pos_transform=(27.313, 3.428),
+                  vel=E((-8.56, 0.0)), fsm=[("Control", "Air", 0.0)],
+                  dmg_boxes=[DamageBox(poly=[(26.9, 3.0), (27.7, 3.0), (27.7, 3.85), (26.9, 3.85)], active=True)])
+    hz.update(_ws(0, 10.0, [bell]))
+    p = next(p for p in hz.paths(10.0, 0.4) if p.type_key == BELL)
+    cx, cy, on2, grow = p.at(np.arange(0, 25) * BIN)
+    assert cx.shape == (3 * (2 * p.slack + 1), 25) and on2.shape == cx.shape
+    c0 = p.at(np.arange(0, 25) * BIN, slack=False)[0]
+    assert c0.shape == (3, 25) and c0[0, -1] < 27.0 < c0[1:, -1].max()
+
+
 def test_pin_stops_at_the_wall_and_the_clock_narrows():
     xs, ys, on = pin_steps(17.0, 5.0, -31.0, 0.0, 20, (-1.0, -0.05, 1.0, 0.05))
     k = int(np.argmax(~on))
@@ -551,6 +605,37 @@ def test_wave_tracker_follows_battle_scene_rules():
     assert got == want[:len(got)] and len(got) >= 3
 
 
+def test_wave_tracker_resyncs_after_a_kill_it_did_not_see():
+    """The vision view misses an off-screen kill: the count stays one too high and no wave is queued. A member of
+    the next wave coming into play (an instance not among the running wave's members alive: a Choristor of wave 1
+    while wave 0's Choristor is alive does not count) activates it; a killed member's corpse does not."""
+    def member(iid, tk, state="Idle"):
+        return Entity(id=iid, type_key=E(tk), pos=E((30.0, 5.0)), vel=E((0.0, 0.0)), fsm=[("Control", state, 0.0)])
+
+    def kill(t, iid, tk):
+        return Event(Ev.ENEMY_KILLED, 0, t, EnemyKilled(iid, tk))
+
+    reed, envoy, chor = "Song Reed", "Song Pilgrim 01", "Song Pilgrim 03"
+    for missed in (False, True):
+        wt = WaveTracker()
+        wt.start(0.0, 0)
+        live = [member(1, reed), member(2, envoy), member(3, chor)]
+        wt.update(_ws(60, 1.0, live))
+        wt.update(_ws(300, 5.0, live[1:], [kill(5.0, 1, reed)]))
+        wt.update(_ws(360, 6.0, live[2:], [kill(6.0, 2, envoy)]))
+        assert wt.queued is None and wt.wave == 0
+        # wave 0's Choristor alive and in play: not a new member
+        wt.update(_ws(400, 6.6, live[2:]))
+        assert wt.wave == 0 and wt.resyncs == 0
+        if not missed:
+            wt.update(_ws(420, 7.0, [member(3, chor, "Zero HP")], [kill(7.0, 3, chor)]))
+            assert wt.queued is not None and wt.queued[0] == 1
+            wt.update(_ws(430, 7.2, [member(3, chor, "Stun")]))      # its corpse: seen killed, not a new member
+            assert wt.resyncs == 0
+        wt.update(_ws(540, 9.0, [member(4, chor)]))                  # a wave-1 Choristor comes into play
+        assert wt.wave == 1 and wt.resyncs == int(missed) and wt.alive == 2, missed
+
+
 # ---- vision-legal discipline and the single-boss wrap -------------------------------------------------------------
 
 def test_run_time_modules_read_no_oracle_only_truth():
@@ -612,3 +697,79 @@ def test_bell_beast_wrapped_is_bit_identical_on_the_fixture_windows():
             assert np.array_equal(A.prob(X, Y, tk), B.prob(X, Y, tk))
             assert A.support_set(wa) == B.support_set(wb)
             assert B.fc is b.boss and B.known == A.known
+
+
+def test_bell_beast_wrap_is_a_proxy_for_the_live_policy():
+    """bell_hit_monitor.zone (the live policy's bell-hit invariant) swaps f.det, resets the path caches and calls
+    f._occ(placements, ...): on the wrapped forecast the writes land on the boss Forecast and _occ is its own, so the
+    zones are the plain forecast's. A Forecaster wrapped mid-fight keeps its state (no reset)."""
+    from ssbot.backends.oracle_backend import OracleBackend
+    from ssbot.combat.boss_model import BossModel
+    from ssbot.combat.forecast import Forecaster, load_planner_templates
+    from ssbot.core.bosses import BELL_BEAST
+    from ssbot.train.bell_hit_monitor import zone
+    from tests import worldstate_fixture as fx
+    model = BossModel.load()
+    tpl = load_planner_templates(model, 0.0)
+    a = Forecaster(model, ORACLE, templates=tpl)
+    c = Forecaster(model, ORACLE, templates=tpl)
+    ba, bc = OracleBackend(bosses=[BELL_BEAST]), OracleBackend(bosses=[BELL_BEAST])
+    win = list(fx.window(0))
+    half = len(win) // 2
+    b = None
+    rng = np.random.default_rng(5)
+    for k, s in enumerate(win):
+        wa, wc = ba.feed(s), bc.feed(s)
+        a.update(wa)
+        c.update(wc)
+        if k + 1 == half:
+            b = MultiForecaster(boss=c)                    # wrapped mid-window
+        if b is None:
+            continue
+        A, B = a.forecast(2.0), b.forecast(2.0)
+        assert [(p.key, p.t_ref) for p in A.placements] == [(p.key, p.t_ref) for p in B.placements]
+        X = 80.0 + rng.uniform(-15, 15, (8, 13))
+        Y = rng.uniform(2, 10, (8, 13))
+        tk = np.arange(13) * 0.05
+        assert np.array_equal(A.occupied(X, Y, tk), B.occupied(X, Y, tk))
+        hx, hy = wa.hero.pos.v
+        keys = sorted({p for pl in A.placements for p in pl.sources}) + [d.type_key for d in A.det]
+        for key in keys[:3]:
+            assert zone(A, key, hx, hy, 0.0, 0.8) == zone(B, key, hx, hy, 0.0, 0.8)
+        det = B.det
+        B.det = []
+        assert B.boss_fc.det == [] and B.det == []
+        B.det = det
+        assert B._occ.__self__ is B.boss_fc
+    assert b is not None
+
+
+def test_hook_contacts_stand_for_their_chains():
+    """multi_recall.hook_contacts: a chain's Final Hit rows (follow-ups) -> one hook contact at the frame the enemy's
+    Control FSM entered the chain state (the hero's sourceless quick damage), hero boxes of that frame and the one
+    before; a follow-up without one is counted."""
+    from ssbot.tools.multi_recall import hook_contacts
+
+    class Reader:
+        def states(self, a, b):
+            for f in range(a, b):
+                ev = []
+                if f == 80:
+                    ev.append({"k": "fsm", "d": {"ent": 5, "iid": 5, "fsm": "Control", "from": "Attack",
+                                                 "to": "Multihit"}})
+                    ev.append({"k": "fsm", "d": {"ent": 5, "iid": 9, "fsm": "FSM", "from": "Idle", "to": "Hit"}})
+                yield {"f": f, "hero": {"box": [f, 0.0, f + 0.5, 2.0]}, "ev": ev}
+
+    fight = "run/i0/ep0/Song Administrator#5"
+    rows = [{"type": "Song Administrator", "fight": fight, "f": 100, "follow": True, "state": "Multihit",
+             "family": "MI_CHARGE", "src": "Song Administrator/Slash Collider"},
+            {"type": "Song Administrator", "fight": fight, "f": 101, "follow": True, "state": "Multihit",
+             "family": "MI_CHARGE", "src": "Song Administrator/Slash Collider"},
+            {"type": "Song Administrator", "fight": fight, "f": 400, "follow": True, "state": "Multihit",
+             "family": "MI_CHARGE", "src": "Song Administrator/Slash Collider"},
+            {"type": "Song Administrator", "fight": fight, "f": 60, "kind": "damage", "state": "Attack"}]
+    hooks, unmatched = hook_contacts(Reader(), rows)
+    assert unmatched == 1 and len(hooks) == 1
+    h = hooks[0]
+    assert h["f"] == 80 and h["kind"] == "hook" and h["boxes"] == [[79, 0.0, 79.5, 2.0], [80, 0.0, 80.5, 2.0]]
+    assert h["family"] == "MI_CHARGE" and not h.get("follow")

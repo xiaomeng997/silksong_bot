@@ -71,28 +71,24 @@ class WaveTracker:
                 if e.type_key.v in WAVE_TYPES and not e.hidden and self._in_play(e, alive=True)}
         # a killed member that left play (gone, hidden, waiting): its GameObject's next activation is a new member
         self.killed &= set(play)
-        if self.queued is None and not self.done and 0 <= self.wave < len(self.waves) - 1 \
-                and self.t_active is not None and t >= self.t_active + RESYNC_AFTER_S:
-            # a kill not seen: a next-wave member in play that is none of the running waves' members alive
-            exp = set(self.waves[self.wave + 1].types)
-            if any(e.type_key.v in exp and i not in self.live and i not in self.killed for i, e in play.items()):
-                self.resyncs += 1
-                self.alive = min(self.alive, self.to_next)
-                self._activate(self.wave + 1, t)
+        # members new in play: none of the running waves' members alive, no corpse of a member seen killed
+        new = {e.type_key.v for i, e in play.items() if i not in self.live and i not in self.killed}
         self.live |= set(play) - self.killed
-        if self.queued is not None:
+        if self.queued is None and not self.done and 0 <= self.wave < len(self.waves) - 1 \
+                and self.t_active is not None and t >= self.t_active + RESYNC_AFTER_S \
+                and new & set(self.waves[self.wave + 1].types):
+            # a kill not seen: a next-wave member new in play
+            self.resyncs += 1
+            self.alive = min(self.alive, self.to_next)
+            self._activate(self.wave + 1, t)
+        elif self.queued is not None:
             w, lo, hi = self.queued
-            exp = set(self.waves[w].types)
-            # a member of the queued wave seen in play: activated (an earlier-loaded member, waves 1 / 6 / 12, may sit
-            # in its waiting state: not counted)
-            for e in ws.entities:
-                tk = e.type_key.v
-                if tk in exp and not e.hidden and self._in_play(e):
-                    self._activate(w, min(max(lo, t - 1.0), t))
-                    break
-            else:
-                if math.isfinite(hi) and t > hi + 0.5:
-                    self._activate(w, 0.5 * (lo + hi))      # nobody seen (out of the image): the rule's time
+            # a member of the queued wave new in play: activated (an earlier-loaded member, waves 1 / 6 / 12, may sit
+            # in its waiting state: not counted; a running wave's member of the same type alive: not counted)
+            if new & set(self.waves[w].types):
+                self._activate(w, min(max(lo, t - 1.0), t))
+            elif math.isfinite(hi) and t > hi + 0.5:
+                self._activate(w, 0.5 * (lo + hi))          # nobody seen (out of the image): the rule's time
         if self.wave >= 0 and not self._checked and self.t_active is not None and t >= self.t_active + WAVE_CHECK_S:
             self._checked = True
             if self.alive <= self.to_next:
