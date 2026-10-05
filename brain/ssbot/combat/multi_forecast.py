@@ -45,10 +45,16 @@ certification ran on (ssbot.knowledge.forum_support.SubjectRecall; forum.md §12
     the kills and sightings, never room.battles) by their entry family's world-frame template.
 Tiny group placement: with >= TINY_GROUP Tinies, the instances they may start are placed once per cluster (the Tinies
 in one TINY_CLUSTER_U grid cell) starting the same family (one anchor box covering the members) instead of once per
-Tiny.
+Tiny; a group row stands for every Tiny of its cluster (occupied_without keeps it while one of them is in,
+occupied_only / t_min(subject) include it for each of them, support_set counts an event for each of them).
 
-The single-boss path is untouched: MultiForecaster(boss=fc) wraps a Forecaster and its forecast delegates every query
-to the boss's Forecast (bit-identical: tests/test_multi_forecast.py and tools/multi_recall bellbeast).
+The single-boss path is untouched: MultiForecaster(boss=fc) wraps a Forecaster (without resetting it) and its forecast
+is a proxy of the boss's Forecast: every query delegated, every other attribute read and written on the boss Forecast
+(bit-identical: tests/test_multi_forecast.py and tools/multi_recall bellbeast, incl. the live policy's
+bell_hit_monitor.zone).
+
+Not in the multi path yet (R3): comfort templates (occupied(..., comfort=True) answers with the plain support and
+counts the request in MultiForecaster.comfort_requests).
 """
 import copy
 import json
@@ -286,16 +292,20 @@ class MultiForecaster:
                 p = FORUM_DIR / f"{spec.enemy}.json"
                 if p.exists():
                     self.offsets[tk] = body_offsets(json.loads(p.read_text("utf-8")))
-        self.reset()
+        self._reset_multi()                   # a wrapped boss keeps its state (wrapping mid-fight changes nothing)
 
     def reset(self) -> None:
         if self.boss is not None:
             self.boss.reset()
+        self._reset_multi()
+
+    def _reset_multi(self) -> None:
         self.trackers: dict[int, EnemyTracker] = {}
         self.hazards = HazardTracker(self.view)
         self.waves = WaveTracker()
         self.self_haz: dict[int, list] = {}    # hazard iid -> [type, armed, arm_T, arm_pos, last_T, pos, rel_box, vel]
-        self.t = 0.0
+        self.t = getattr(self.boss, "t", 0.0) if self.boss is not None else 0.0
+        self.comfort_requests = 0             # comfort queries answered by the plain support (no comfort templates)
         self._ws: WorldState | None = None
         self.t_wake: float | None = None
 
@@ -563,6 +573,7 @@ class _Builder:
         self.known = fc.tables.certified
         self.unknown: list[int] = []
         self.meta_group: dict = {}           # group owner -> the other Tinies its placements stand for
+        self.clusters: list = []             # Tiny cluster index -> its Tinies (the group rows' gcl)
         self._maestro: bool | None = None    # a Maestro in play (lazily)
 
     # ---- placements ----
@@ -619,7 +630,8 @@ class _Builder:
         code = self.fam_code.setdefault(fam, len(self.fam_code))
         self.bb_chunks.append((np.full(n, owner, np.int64), np.full(n, code, np.int64), np.full(n, committed),
                                np.full(n, p), np.full(n, tid, np.int64), lo[sel], hi[sel], boxes[sel],
-                               np.full(n, mir, np.int64), lo[sel] + t0 - BIN, hi[sel] + t1 + BIN))
+                               np.full(n, mir, np.int64), lo[sel] + t0 - BIN, hi[sel] + t1 + BIN,
+                               np.full(n, -1, np.int64)))
 
     def _place_anchor(self, tid, lo, hi, anc, owner, fam, committed, p):
         (ax, ay), m, sd = anc
@@ -686,7 +698,10 @@ class _Builder:
             self.unknown.append(tr.iid)
         age = T - tr.t_entry
         dw = tt.dwell.get(tr.state)
-        overdue = dw is not None and age > dw[1] + DWELL_SLACK_S
+        # overdue: past its longest logged dwell; or so old that the memoised walk from its entry (cut at WALK_CAP_S)
+        # would not reach the horizon's end (Minister Chase up to 5.9 s, a Tiny dead 10.6 s): walked from the origin,
+        # the state ending at any time from the next frame (a superset of its dwell window)
+        overdue = dw is not None and (age > dw[1] + DWELL_SLACK_S or age + H + BIN > WALK_CAP_S)
         wake = self._wave_wake(tr)
         if wake is not None:
             overdue = True
@@ -912,10 +927,12 @@ class _Builder:
                 first = np.zeros(n, np.int64)
                 first[inv[::-1]] = gi[::-1]                    # a representative row per group (its owner)
                 g_owner = owner[first]
-                # the members a group owner stands for (occupied_without / support accounting)
+                # the Tinies a group row stands for: its cluster's (occupied_without / occupied_only keep a group row
+                # while one of them is in, support_set counts it for each of them)
                 cl_members: dict = defaultdict(set)
                 for t_i in ti:
                     cl_members[int(cl[t_i])].add(tlist[t_i].iid)
+                self.clusters = [frozenset(cl_members[c_]) for c_ in range(int(cl.max()) + 1)]
                 for o, c_ in {(int(a), int(b)) for a, b in zip(g_owner, ukey[:, 0])}:
                     m = cl_members[c_] - {o}
                     if m:
@@ -926,13 +943,16 @@ class _Builder:
                                 np.concatenate([x0[rest], G["x0"]]), np.concatenate([y0[rest], G["y0"]]),
                                 np.concatenate([x1[rest], G["x1"]]), np.concatenate([y1[rest], G["y1"]]),
                                 np.concatenate([owner[rest], g_owner]), np.concatenate([fam_c[rest], fam_c[first]]),
-                                np.concatenate([p[ri[rest]], G["p"]]))
+                                np.concatenate([p[ri[rest]], G["p"]]),
+                                np.concatenate([np.full(int(rest.sum()), -1, np.int64), ukey[:, 0]]))
                 return
         self._emit_bbox(fid[ri], e0, e1, x0, y0, x1, y1, owner, fam_c, p[ri])
 
-    def _emit_bbox(self, tid, e0, e1, x0, y0, x1, y1, owner, fam_c, p) -> None:
+    def _emit_bbox(self, tid, e0, e1, x0, y0, x1, y1, owner, fam_c, p, gcl=None) -> None:
         """Bounding-box rows of later instances (both mirrors, not committed): anchor boxes from their edges; an
-        anchor box wider than COARSE_MAX_U is an arena-wide box."""
+        anchor box wider than COARSE_MAX_U is an arena-wide box. gcl: a Tiny group row's cluster (-1: one enemy's)."""
+        if gcl is None:
+            gcl = np.full(len(tid), -1, np.int64)
         cx, cy = 0.5 * (x0 + x1), 0.5 * (y0 + y1)
         hx, hy = 0.5 * (x1 - x0), 0.5 * (y1 - y0)
         ut, inv = np.unique(tid, return_inverse=True)
@@ -943,8 +963,10 @@ class _Builder:
         ok = hi >= lo - 1e-9
         big = ok & (np.maximum(hx, hy) > COARSE_MAX_U)
         for i in np.flatnonzero(big):
-            self.boxes.append((int(owner[i]), "arena", *ARENA_BOX, 0.0, 0.0, None, lo[i] + t0[i] - BIN,
-                               hi[i] + t1[i] + BIN, 0.0))
+            # (the boxes are filtered by owner: a group row's arena box once per Tiny of its cluster)
+            for o in (self.clusters[gcl[i]] if gcl[i] >= 0 else (int(owner[i]),)):
+                self.boxes.append((int(o), "arena", *ARENA_BOX, 0.0, 0.0, None, lo[i] + t0[i] - BIN,
+                                   hi[i] + t1[i] + BIN, 0.0))
         sel = ok & ~big
         n = int(sel.sum())
         if not n:
@@ -953,7 +975,7 @@ class _Builder:
             self.store.bbox_table(int(t))
         self.bb_chunks.append((owner[sel], fam_c[sel], np.zeros(n, bool), p[sel], tid[sel], lo[sel], hi[sel],
                                np.stack([cx[sel], cy[sel], hx[sel], hy[sel]], axis=1), np.zeros(n, np.int64),
-                               lo[sel] + t0[sel] - BIN, hi[sel] + t1[sel] + BIN))
+                               lo[sel] + t0[sel] - BIN, hi[sel] + t1[sel] + BIN, gcl[sel]))
 
     # ---- hazards ----
 
@@ -1018,6 +1040,7 @@ class _Builder:
         out.known = bool(self.known and not self.unknown)
         out.unknown = self.unknown
         out.groups = self.meta_group
+        out.clusters = self.clusters
         return out
 
 
@@ -1029,12 +1052,13 @@ def _meta_arrays(m: list[tuple]) -> dict:
 
 def _bb_arrays(chunks: list, store, fam_code: dict | None = None) -> dict:
     """The bounding-box placements as arrays: owner, family (one name per row), committed, prob, tid, e0, e1, cx,
-    cy, hx, hy, mir, on, off, and their sparse tables' level offsets, bins and t0."""
+    cy, hx, hy, mir, on, off, gcl (a Tiny group row's cluster, else -1), and their sparse tables' level offsets, bins
+    and t0."""
     if not chunks:
         z = np.zeros(0)
         zi = np.zeros(0, np.int64)
         return {"owner": zi, "family": [], "committed": np.zeros(0, bool), "prob": z, "tid": zi, "e0": z, "e1": z,
-                "cx": z, "cy": z, "hx": z, "hy": z, "mir": zi, "on": z, "off": z,
+                "cx": z, "cy": z, "hx": z, "hy": z, "mir": zi, "on": z, "off": z, "gcl": zi,
                 "loff": np.zeros((0, JMAX + 1), np.int64), "nt": zi, "t0": z}
     cat = [np.concatenate([c[i] for c in chunks]) for i in range(len(chunks[0]))]
     names = {v: k for k, v in (fam_code or {}).items()}
@@ -1048,7 +1072,7 @@ def _bb_arrays(chunks: list, store, fam_code: dict | None = None) -> dict:
     return {"owner": cat[0], "family": [names[int(c)] for c in cat[1]], "committed": cat[2], "prob": cat[3],
             "tid": tid, "e0": cat[5], "e1": cat[6], "cx": box[:, 0].copy(), "cy": box[:, 1].copy(),
             "hx": box[:, 2].copy(), "hy": box[:, 3].copy(), "mir": cat[8], "on": cat[9], "off": cat[10],
-            "loff": np.ascontiguousarray(loff), "nt": nt, "t0": t0}
+            "gcl": cat[11], "loff": np.ascontiguousarray(loff), "nt": nt, "t0": t0}
 
 
 @numba.njit(cache=True)
@@ -1129,30 +1153,50 @@ def _box_hits(x, y, bx0, by0, bx1, by1, ok, hx, hy):
     return out
 
 
-def _mask(meta: dict, ids=None, names=None, only=None, committed_only: bool = False) -> np.ndarray:
+def _mask(meta: dict, ids=None, names=None, only=None, committed_only: bool = False,
+          clusters: list | None = None) -> np.ndarray:
     """Which placements remain: not owned by ids, not of a family / hazard named in names (a suffix match), owned
-    by one of only, committed."""
+    by one of only, committed. A Tiny group row (meta gcl >= 0) stands for every Tiny of its cluster: it stays while
+    one of them is not in ids, and it is one of only's when one of them is."""
     owner = meta["owner"]
     m = np.ones(len(owner), bool)
+    gcl = meta.get("gcl")
+    grp = gcl is not None and clusters and len(gcl) and bool((gcl >= 0).any())
+    gi = np.maximum(gcl, 0) if grp else None
     if ids:
-        m &= ~np.isin(owner, np.fromiter(ids, np.int64))
+        out = np.isin(owner, np.fromiter(ids, np.int64))
+        if grp:
+            gone = np.array([c <= ids for c in clusters], bool)
+            out = np.where(gcl >= 0, gone[gi], out)
+        m &= ~out
     if names:
         m &= ~np.array([any(str(f).endswith(n) for n in names) for f in meta["family"]], bool)
     if only is not None:
-        m &= np.isin(owner, np.fromiter(only, np.int64)) if only else np.zeros(len(owner), bool)
+        inc = np.isin(owner, np.fromiter(only, np.int64)) if only else np.zeros(len(owner), bool)
+        if grp:
+            hit = np.array([bool(c & only) for c in clusters], bool)
+            inc = np.where(gcl >= 0, hit[gi], inc)
+        m &= inc
     if committed_only:
         m &= meta["committed"]
     return m
 
 
 class MultiForecast:
-    """One tick's forecast (see the module docstring). With a wrapped boss: every query is the boss Forecast's."""
+    """One tick's forecast (see the module docstring). With a wrapped boss it is a proxy of the boss Forecast: every
+    read this class does not answer itself goes to the boss (its origin, horizon, placements, det, caches, _occ, ...),
+    every write goes to the boss (bell_hit_monitor.zone swaps f.det and resets the path caches), so a consumer of a
+    single-boss Forecast sees the same object behaviour."""
 
     def __init__(self, fc: MultiForecaster, origin_t: float, horizon: float, boss=None):
-        self._fc = fc
+        object.__setattr__(self, "_fc", fc)
+        object.__setattr__(self, "_cache", {})
+        if boss is not None:
+            object.__setattr__(self, "boss_fc", boss)
+            return
+        self.boss_fc = None
         self.origin_t = origin_t
         self.horizon = horizon
-        self.boss_fc = boss
         self.P = PlaceBatch.from_rows([])
         self.pm = _meta_arrays([])
         self.W = WinBatch.from_rows([])
@@ -1161,10 +1205,10 @@ class MultiForecast:
         self.boxes: list = []
         self.paths: list[HazardPath] = []
         self.subjects: list[Subject] = []
-        self.known = False if boss is None else boss.known
+        self.known = False
         self.unknown: list = []
-        self.groups: dict = {}
-        self._cache: dict = {}
+        self.groups: dict = {}               # Tiny group owner -> the other Tinies of its cluster
+        self.clusters: list = []             # Tiny cluster index (bb["gcl"]) -> the Tinies its group rows stand for
 
     def __getattr__(self, name):
         # the wrapped boss forecast answers everything this class does not define (boss_box, body_polys, det, ...)
@@ -1172,6 +1216,13 @@ class MultiForecast:
         if b is not None:
             return getattr(b, name)
         raise AttributeError(name)
+
+    def __setattr__(self, name, value):
+        b = self.__dict__.get("boss_fc")
+        if b is not None:
+            setattr(b, name, value)
+        else:
+            object.__setattr__(self, name, value)
 
     @property
     def fc(self):
@@ -1329,7 +1380,7 @@ class MultiForecast:
                                 float(hx), float(hy), float(rr))
         return out
 
-    def _occ(self, x, y, tk, ids=None, names=None, only=None, committed_only: bool = False,
+    def _union_occ(self, x, y, tk, ids=None, names=None, only=None, committed_only: bool = False,
              parts: bool = False):
         x = np.asarray(x, np.float64)
         y = np.asarray(y, np.float64)
@@ -1338,7 +1389,7 @@ class MultiForecast:
         kw = dict(ids=ids, names=names, only=only, committed_only=committed_only)
         f = self._fine_occ(x, y, tk, _mask(self.pm, **kw) if filt and len(self.P) else None)
         f |= self._win_occ(x, y, tk, _mask(self.wm, **kw) if filt and len(self.W) else None)
-        f |= self._bbox_occ(x, y, tk, _mask(self.bb, **kw) if filt and self.n_bbox else None)
+        f |= self._bbox_occ(x, y, tk, _mask(self.bb, clusters=self.clusters, **kw) if filt and self.n_bbox else None)
         types = ({p.type_key for p in self.paths} - set(names)) if names else None
         f |= self._path_occ(x, y, tk, exclude=ids, only=only, types=types)
         f |= self._box_occ(x, y, tk, kinds=("death", "arena"), exclude=ids, only=only)
@@ -1358,26 +1409,32 @@ class MultiForecast:
         support: every enemy's placements and tubes, every hazard."""
         if self.boss_fc is not None:
             return self.boss_fc.occupied(x, y, tk, comfort)
-        return self._occ(x, y, tk)
+        if comfort:
+            # no comfort templates in the multi path yet (R3): the plain support answers, the request is counted
+            self._fc.comfort_requests += 1
+        return self._union_occ(x, y, tk)
 
     def occupied_parts(self, x, y, tk) -> dict[str, np.ndarray]:
         """occupied() split by what covers (the recall's accounting): "forecast" (placements, hazard paths, death
         tails, the arena-wide boxes), "idle body tube", "collider tube", "hazard tube"."""
-        return self._occ(x, y, tk, parts=True)
+        return self._union_occ(x, y, tk, parts=True)
 
     def occupied_without(self, x, y, tk, exclude, comfort: bool = False) -> np.ndarray:
         """occupied() without the support of `exclude`: an enemy iid (a kill: its tails, tubes and the instances it
-        may start; its thrown hazards stay), a hazard iid, a set of them, or a hazard type / family name."""
+        may start; its thrown hazards stay; a Tiny group row stays while another Tiny of its cluster is in), a hazard
+        iid, a set of them, or a hazard type / family name."""
         if self.boss_fc is not None:
             return self.boss_fc.occupied_without(x, y, tk, exclude, comfort)
+        if comfort:
+            self._fc.comfort_requests += 1
         ex = set(exclude) if isinstance(exclude, (set, frozenset, list, tuple)) else {exclude}
         ids = {int(e) for e in ex if isinstance(e, (int, np.integer))}
         names = {e for e in ex if isinstance(e, str)}
-        return self._occ(x, y, tk, ids=ids, names=names)
+        return self._union_occ(x, y, tk, ids=ids, names=names)
 
     def occupied_only(self, x, y, tk, iids) -> np.ndarray:
         """occupied() restricted to these enemies' and hazards' support (the recall's per-type check)."""
-        return self._occ(x, y, tk, only={int(i) for i in iids})
+        return self._union_occ(x, y, tk, only={int(i) for i in iids})
 
     def occupied_redirect(self, x, y, tk, type_key, t_hit, d, comfort=False):
         if self.boss_fc is not None:
@@ -1457,6 +1514,7 @@ class MultiForecast:
         out.paths = self.paths
         out.subjects = self.subjects
         out.known = self.known
+        out.groups, out.clusters = self.groups, self.clusters
         return out
 
     def support_set(self, ws: WorldState | None = None, t1: float = SUP_HORIZON_S) -> SupportSet:
@@ -1469,8 +1527,13 @@ class MultiForecast:
         by_owner: dict = defaultdict(set)
         for meta in (self.pm, self.wm, self.bb):
             act = (meta["off"] >= 0.0) & (meta["on"] <= t1)
+            gcl = meta.get("gcl")
             for i in np.flatnonzero(act):
-                by_owner[int(meta["owner"][i])].add(meta["family"][i])
+                if gcl is not None and gcl[i] >= 0:          # a Tiny group row: an event for each of its Tinies
+                    for o in self.clusters[int(gcl[i])]:
+                        by_owner[o].add(meta["family"][i])
+                else:
+                    by_owner[int(meta["owner"][i])].add(meta["family"][i])
         for b in self.boxes:
             if b[9] <= t1 and b[10] >= 0.0:
                 by_owner[b[0]].add(None)

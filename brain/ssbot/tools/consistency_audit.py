@@ -6,7 +6,9 @@ Replays recordings through OracleBackend and the run-time MultiForecaster (produ
 of hero-centre positions around the hero's position (near: +-2 u; wide: +-6 u, informational) and the next 1 s in
 1/60 s bins, what the forecast covers with and without the action:
   kill (simulated)      every in-play enemy at every --every-th frame: MultiForecaster.forecast_if_killed([iid])
-                        against forecast();
+                        against forecast(); and the planner's kill query MultiForecast.occupied_without(iid) against
+                        the what-if without the victim, the wave entries and the waiting members (the others' support
+                        after the kill must stay inside it: a Tiny group row is kept while one of its Tinies is in);
   kill (recorded)       the frame before each recorded kill: the same what-if for the enemy that died; and the
                         forecast after the kill against the one before it (same absolute times), restricted to the
                         dead enemy's support and the wave entries;
@@ -108,7 +110,7 @@ def _redirect_class(F, iid: int, d: int, t_first: float) -> str:
     k = int(max(0, math.floor((t_first - p.t_first) / STEP_S))) + 1
     if p.tube_from is not None and p.tube_from <= t_first + 1e-9:
         return "dome contact (undetermined tube)"
-    xs, ys = p.xs[:k + 1], p.ys[:k + 1]
+    xs, ys = np.atleast_2d(p.xs)[:, :k + 1], np.atleast_2d(p.ys)[:, :k + 1]
     if np.any(xs <= WALL_L + BELL_R + 1e-6) or np.any(xs >= WALL_R - BELL_R - 1e-6):
         return "side wall rebound"
     if np.any(ys <= BELL_FLOOR_Y + 1e-6):
@@ -191,6 +193,14 @@ def _audit_fight(job: dict) -> dict:
                                          None, "hero": [round(hx, 2), round(hy, 2)],
                                          "enemy": None if tr.pos is None else [round(tr.pos[0], 2),
                                                                                round(tr.pos[1], 2)]})
+            # the planner's kill query, occupied_without(victim), must keep everything the others still do after the
+            # kill (the what-if without the victim's own death box, the entries and the next wave's waiting members
+            # the kill may queue): a Tiny group row stays while a Tiny of its cluster is alive
+            wo = F.occupied_without(X, Y, TK, v)
+            rest = Fk.occupied_without(X, Y, TK, {v} | _entry_ids() | _waiting(mf))
+            miss = rest & ~wo
+            note(kind + ", occupied_without", zone, miss, "covered by the others after the kill, not by "
+                 "occupied_without(victim)" if miss.any() else "", {"f": f, "victim": tr.tk})
 
     def redirect_whatif(kind: str, ws, F, iid: int, d: int) -> None:
         hx, hy = ws.hero.pos.v

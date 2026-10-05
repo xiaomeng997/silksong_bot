@@ -11,7 +11,11 @@ activates wave i startDelay(i) after it is queued; a wave ends when its count of
 remainingEnemyToEnd, checked at every member's death and once 1 s after the activation; then the next is queued. The
 tracker counts the members it saw die (a member type's ENEMY_KILLED or killing HIT_DEALT; the Tinies are not members)
 and confirms an activation when a member type of the expected wave is first seen in play. In the vision view a kill
-off-screen is not seen: the next wave's window then stays open (t_hi = inf) until a member shows up.
+off-screen is not seen: the count stays too high and no wave is queued. The tracker resyncs when an enemy of a type of
+the next wave comes into play that is not one of the running waves' members it knows alive (an instance never seen in
+play, or one seen killed: BattleScene reuses GameObjects across waves) RESYNC_AFTER_S after the activation: the running
+wave has ended (its count drops to remainingEnemyToEnd) and the next one is active (a late estimate, not an early one:
+until then its entries are not placed).
 """
 import math
 from dataclasses import dataclass, field
@@ -20,6 +24,7 @@ from ssbot.core.forum import BATTLE_START_PAUSE_S, FORUM_TYPES, FORUM_WAVES, WAV
 from ssbot.core.worldstate import Ev, WorldState
 
 SLACK_S = 2.0 / 60.0          # kill / activation times are frame times (+- the export lag)
+RESYNC_AFTER_S = 2.0          # a running wave's members are all in play this long after its activation
 
 
 @dataclass
@@ -34,6 +39,9 @@ class WaveTracker:
     starts: list = field(default_factory=list)   # (wave, t) activations, as estimated
     kills: int = 0
     seen: set = field(default_factory=set)
+    live: set = field(default_factory=set)         # member iids seen in play and not seen killed since
+    killed: set = field(default_factory=set)       # member iids seen killed and not out of play since
+    resyncs: int = 0
     done: bool = False
     _checked: bool = False
 
@@ -56,7 +64,22 @@ class WaveTracker:
                 tk = getattr(d, "type_key", "") or ""
                 if tk in WAVE_TYPES and (d.target_id, round(t, 3)) not in self.seen:
                     self.seen.add((d.target_id, round(t, 3)))
+                    self.live.discard(d.target_id)
+                    self.killed.add(d.target_id)
                     self._kill(t)
+        play = {e.id: e for e in ws.entities
+                if e.type_key.v in WAVE_TYPES and not e.hidden and self._in_play(e, alive=True)}
+        # a killed member that left play (gone, hidden, waiting): its GameObject's next activation is a new member
+        self.killed &= set(play)
+        if self.queued is None and not self.done and 0 <= self.wave < len(self.waves) - 1 \
+                and self.t_active is not None and t >= self.t_active + RESYNC_AFTER_S:
+            # a kill not seen: a next-wave member in play that is none of the running waves' members alive
+            exp = set(self.waves[self.wave + 1].types)
+            if any(e.type_key.v in exp and i not in self.live and i not in self.killed for i, e in play.items()):
+                self.resyncs += 1
+                self.alive = min(self.alive, self.to_next)
+                self._activate(self.wave + 1, t)
+        self.live |= set(play) - self.killed
         if self.queued is not None:
             w, lo, hi = self.queued
             exp = set(self.waves[w].types)
@@ -76,12 +99,13 @@ class WaveTracker:
                 self._end(self.t_active + WAVE_CHECK_S)
 
     @staticmethod
-    def _in_play(e) -> bool:
+    def _in_play(e, alive: bool = False) -> bool:
+        """Out of its waiting state (alive: and not in a death state; a state not seen counts as not in play)."""
         spec = FORUM_TYPES.get(e.type_key.v)
         if spec is None:
             return False
         st = e.fsm[0][1] if e.fsm else (e.phase.top if e.phase is not None else None)
-        return st is not None and st not in spec.waiting
+        return st is not None and st not in spec.waiting and not (alive and st in spec.death_states)
 
     def _activate(self, w: int, t: float) -> None:
         self.queued = None

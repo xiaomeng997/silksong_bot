@@ -19,7 +19,10 @@ R0's protocol (ssbot.tools.support_recall --encounter Forum; forum.md §12.2):
          without the w2 ghost episodes), against each fold's tables with the production margins and tubes
          (support_margins.json).
 Contacts (behaviour_build's attribution, contacts.jsonl.gz): every "damage" frame and every frame of a damage_blocked
-stretch; multi-hit follow-ups are not checked (the first contact of a chain stands for it). The pairing is the
+stretch; multi-hit follow-ups (a chain's Final Hits) are not checked, its first contact stands for it: the hook, which
+contacts.jsonl.gz does not hold (the hero's quick damage has no source), is added here (hook_contacts: the frame the
+enemy's Control / Attack FSM enters the chain state, Multihit / Multiwhip, at most HOOK_LOOKBACK_F frames before the
+Final Hit; kind "hook", counted in n and apart as "hooks"). The pairing is the
 planner's: the hero box of frame c at t_c or of c - 1 at t_c-1, the forecast made at c - L. A contact counts as
 covered when the union of every enemy's and hazard's support covers it (what the planner and the supervisor read);
 "own" restricts the support to the enemies of the contact's type and the hazards they throw (R0's per-subject check,
@@ -27,7 +30,8 @@ with its same-name / unnamed-source candidates: every enemy of the type). Counte
 (placements, hazard paths, death tails), the idle body tube, the collider / hazard tubes (the reaction-lag safety net).
 
 bellbeast: acceptance (a) - a Bell Beast Forecaster wrapped in MultiForecaster(boss=...) gives the same forecasts,
-support sets and planner decisions as the Forecaster itself, frame by frame on a recording.
+support sets and planner decisions as the Forecaster itself, frame by frame on a recording, and the same drop-bell
+zones through the live policy's bell_hit_monitor.zone (which writes f.det and the path caches: the wrap proxies writes).
 """
 import argparse
 import gzip
@@ -41,6 +45,56 @@ from pathlib import Path
 import numpy as np
 
 LAGS = (2, 3, 4)
+HOOK_LOOKBACK_F = 70               # a chain's hook -> its Final Hit: 0.35 - 1.0 s (forum.md §9.2)
+HOOK_FSMS = ("Control", "Attack")
+
+
+def hook_contacts(reader, contacts: list[dict]) -> tuple[list[dict], int]:
+    """The first contact of each multi-hit chain (the hook) of a fight's follow-up contacts: the latest frame before
+    the Final Hit, at most HOOK_LOOKBACK_F frames, in which the instance's Control / Attack FSM enters the chain state
+    (the hero takes the hook's quick damage there), with the hero boxes of that frame and the one before. One hook per
+    chain (several Final Hit rows of one chain share it); a hook frame that is a contact row already is not added.
+    Returns (hooks, follow-ups without a hook found)."""
+    follows = sorted((c for c in contacts if c.get("follow")), key=lambda c: int(c["f"]))
+    if not follows:
+        return [], 0
+    wins: list[list[int]] = []
+    for c in follows:
+        a, b = int(c["f"]) - HOOK_LOOKBACK_F - 1, int(c["f"])
+        if wins and a <= wins[-1][1] + 1:
+            wins[-1][1] = max(wins[-1][1], b)
+        else:
+            wins.append([a, b])
+    enters: dict = defaultdict(list)
+    boxes: dict = {}
+    for a, b in wins:
+        for s in reader.states(a, b + 1):
+            h = s.get("hero") or {}
+            if h.get("box"):
+                boxes[s["f"]] = [float(v) for v in h["box"]]
+            for ev in s.get("ev") or ():
+                d = ev.get("d") or {}
+                if ev.get("k") == "fsm" and d.get("fsm") in HOOK_FSMS and d.get("ent") is not None:
+                    enters[(int(d["ent"]), d.get("to"))].append(int(s["f"]))
+    rows = {(c["fight"], int(c["f"])) for c in contacts if not c.get("follow")}
+    out, seen, unmatched = [], set(), 0
+    for c in follows:
+        iid = int(c["fight"].rsplit("#", 1)[1])
+        cf = int(c["f"])
+        fr = [f for f in enters.get((iid, c.get("state")), ()) if cf - HOOK_LOOKBACK_F <= f < cf]
+        if not fr:
+            unmatched += 1
+            continue
+        hk = max(fr)
+        key = (c["fight"], hk)
+        if key in seen or key in rows:
+            continue
+        seen.add(key)
+        bx = [b for b in (boxes.get(hk - 1), boxes.get(hk)) if b is not None]
+        out.append({"type": c["type"], "fight": c["fight"], "f": hk, "kind": "hook", "src": c.get("src"),
+                    "tk": c.get("tk"), "family": c.get("family"), "state": c.get("state"), "boxes": bx,
+                    "final_f": cf})
+    return out, unmatched
 
 
 def read_contacts(path: Path) -> list[dict]:
@@ -155,6 +209,7 @@ def run_jobs(a, jobs: list, mode: str) -> int:
     own_misses: list = []
     by_label: dict = defaultdict(lambda: defaultdict(Counter))
     fc_ms = []
+    hook_tot: Counter = Counter()
     jobs.sort(key=lambda j: (j["label"], j["id"]))
     done = 0
     if a.workers > 1:
@@ -175,6 +230,8 @@ def run_jobs(a, jobs: list, mode: str) -> int:
         misses += res["misses"]
         own_misses += res.get("own_misses", [])
         fc_ms.append(res["forecast_ms"])
+        for k in ("hooks", "follow_ups", "hooks_not_found"):
+            hook_tot[k] += res.get(k, 0)
         n = sum(v["n"] for (tk, L), v in stats.items() if L)
         cov = sum(v["covered"] for (tk, L), v in stats.items() if L)
         print(f"[{done}/{len(jobs)}] {j['label']} {j['id']} covered {cov}/{n} misses {len(misses)} "
@@ -186,10 +243,12 @@ def run_jobs(a, jobs: list, mode: str) -> int:
            "miss_by": dict(Counter(f"{m['type']}/{m['family']}/{m['state']}/L{m['lag']}" for m in misses)
                            .most_common(60)),
            "forecast_ms_mean_per_fight": round(float(np.mean(fc_ms)), 3) if fc_ms else None,
+           "chains": {"follow_up_rows": hook_tot["follow_ups"], "hooks_checked": hook_tot["hooks"],
+                      "follow_ups_without_a_hook": hook_tot["hooks_not_found"]},
            "elapsed_s": round(time.perf_counter() - t0, 1)}
     from ssbot.record.recorder import find_repo_root, git_info
     out["code"] = git_info(find_repo_root())
-    print(json.dumps({k: out[k] for k in ("summary", "n_misses", "miss_by")}, indent=1))
+    print(json.dumps({k: out[k] for k in ("summary", "n_misses", "miss_by", "chains")}, indent=1))
     if a.json:
         a.json.parent.mkdir(parents=True, exist_ok=True)
         a.json.write_text(json.dumps(out, indent=1), "utf-8")
@@ -207,10 +266,10 @@ def summarise(stats: dict) -> dict:
         by[f"{tk}/L{L}"] = {"n": v["n"], "covered": v["covered"], "own": v["own"],
                             "recall": round(v["covered"] / v["n"], 6) if v["n"] else None,
                             "own_recall": round(v["own"] / v["n"], 6) if v["n"] else None,
-                            **{k: v[k] for k in sorted(v) if k.startswith(("by ", "outside"))}}
+                            **{k: v[k] for k in sorted(v) if k.startswith(("by ", "outside", "hooks"))}}
     rec = {L: {"n": v["n"], "covered": v["covered"], "recall": round(v["covered"] / v["n"], 6) if v["n"] else None,
                "own": v["own"], "own_recall": round(v["own"] / v["n"], 6) if v["n"] else None,
-               **{k: v[k] for k in sorted(v) if k.startswith("by ")}} for L, v in tot.items()}
+               **{k: v[k] for k in sorted(v) if k.startswith(("by ", "hooks"))}} for L, v in tot.items()}
     return {"recall": rec, "by_type": by}
 
 
@@ -251,14 +310,15 @@ def run_fight2(job: dict) -> dict:
     stats: dict = defaultdict(Counter)
     origins: dict[int, list] = defaultdict(list)
     checks: dict[int, list] = defaultdict(list)       # frame c -> [(contact, L)] checked once c is read
-    for c in job["contacts"]:
+    f0, f1 = job["f0"], job["f1"]
+    r = RecordingReader(job["path"])
+    hooks, unmatched = hook_contacts(r, job["contacts"])
+    for c in job["contacts"] + hooks:
         if c.get("follow"):
             stats[(c["type"], 0)]["follow-up (not checked)"] += 1
             continue
         for L in LAGS:
             origins[int(c["f"]) - L].append((c, L))
-    f0, f1 = job["f0"], job["f1"]
-    r = RecordingReader(job["path"])
     t_of: dict[int, float] = {}
     misses = []
     own_misses: list = []                             # covered, but not by the contact's own type's support
@@ -310,7 +370,9 @@ def run_fight2(job: dict) -> dict:
             stats[(c["type"], L)]["n"] += 1
             stats[(c["type"], L)]["no frame"] += 1
     return {"id": job["id"], "stats": {f"{k[0]}|{k[1]}": dict(v) for k, v in stats.items()}, "misses": misses,
-            "own_misses": own_misses, "forecasts": n_fc, "forecast_ms": round(1e3 * t_fc / max(1, n_fc), 3)}
+            "own_misses": own_misses, "forecasts": n_fc, "forecast_ms": round(1e3 * t_fc / max(1, n_fc), 3),
+            "hooks": len(hooks), "follow_ups": sum(1 for c in job["contacts"] if c.get("follow")),
+            "hooks_not_found": unmatched}
 
 
 def _check2(c: dict, L: int, fc, T_o: float, t_of: dict, by_type: dict, stats: dict, misses: list, label: str,
@@ -318,6 +380,8 @@ def _check2(c: dict, L: int, fc, T_o: float, t_of: dict, by_type: dict, stats: d
     key = (c["type"], L)
     st = stats[key]
     st["n"] += 1
+    hook = c.get("kind") == "hook"
+    st["hooks"] += hook
     if c.get("family") is None:
         st["outside_attacks"] += 1
     cf = int(c["f"])
@@ -344,11 +408,13 @@ def _check2(c: dict, L: int, fc, T_o: float, t_of: dict, by_type: dict, stats: d
     ok = any(hit.values())
     if ok:
         st["covered"] += 1
+        st["hooks covered"] += hook
         how = "forecast" if hit["forecast"] else next(k for k in ("idle body tube", "collider tube", "hazard tube")
                                                        if hit[k])
         st[f"by {how}"] += 1
         own = fc.occupied_only(X, Y, tk, by_type.get(c["type"], set())).any()
         st["own"] += int(bool(own))
+        st["hooks own"] += hook and bool(own)
         if not own and own_misses is not None:
             own_misses.append({"fight": c["fight"], "f": cf, "lag": L, "type": c["type"], "family": c.get("family"),
                                "state": c.get("state"), "src": c.get("src"), "kind": c.get("kind"),
@@ -381,7 +447,9 @@ def main_bellbeast(a) -> int:
     from ssbot.core.worldstate import ORACLE
     from ssbot.knowledge.kinematics import HeroParams, HoldState, StateTracker, Terrain2D
     from ssbot.record.recorder import RecordingReader
+    from ssbot.train.bell_hit_monitor import zone
     numba.set_num_threads(a.threads)
+    n_zone = 0
     r = RecordingReader(a.recording)
     params = HeroParams.load()
     terrain = None
@@ -446,9 +514,17 @@ def main_bellbeast(a) -> int:
         same = (ra.name, ra.idx, ra.S, ra.forced_risk, tuple(np.asarray(ra.cmd).tolist())) == \
             (rb.name, rb.idx, rb.S, rb.forced_risk, tuple(np.asarray(rb.cmd).tolist()))
         diff["planner decision"] += not same
+        # the live policy's bell-hit invariant reads (and swaps) f.det and the path caches: the wrap must proxy writes
+        for tkey in sorted({d.type_key for d in A.det}):
+            n_zone += 1
+            try:
+                zb = zone(B, tkey, hx, hy, 0.0, 0.8)
+            except Exception as e:  # noqa: BLE001 - a failing proxy is a difference, reported
+                zb = f"{type(e).__name__}: {e}"
+            diff["bell zone"] += zone(A, tkey, hx, hy, 0.0, 0.8) != zb
         prev = s
-    out = {"recording": str(a.recording), "frames": n, "differences": {k: diff[k] for k in (
-        "placements", "occupied", "prob", "support_set", "committed", "tactics", "planner decision")}}
+    out = {"recording": str(a.recording), "frames": n, "bell_zone_checks": n_zone, "differences": {k: diff[k] for k in (
+        "placements", "occupied", "prob", "support_set", "committed", "tactics", "planner decision", "bell zone")}}
     print(json.dumps(out, indent=1))
     if a.json:
         a.json.write_text(json.dumps(out, indent=1), "utf-8")

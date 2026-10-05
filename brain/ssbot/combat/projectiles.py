@@ -66,7 +66,8 @@ RUNE_LEAD_S = (1.06, 1.11)
 RUNE_LIT_S = 20 * FRAME_S
 RUNE_Y = 3.34
 HAZARD_DV_U_S = 40.0                         # an undetermined hazard's tube growth (u/s): a bounce reverses ~34 u/s
-DOME_NEAR_U = 0.5                            # a bell this close under the dome line may touch it (forum.md 8.1 vs Box2D)
+DOME_NEAR_U = 1.1                            # a bell this close under the dome line may touch it (forum.md 8.1 vs Box2D:
+#                                              703 logged air contacts away from the walls, gap p99 0.83, max 1.01 u)
 SLACK_STEPS = 1                              # +- physics steps of time slack in the support
 SKIN_U = 0.1                                 # contact skin (Box2D contact offset)
 GONE_S = 0.5                                 # a hazard missing from the export this long has left
@@ -77,7 +78,8 @@ class HazardPath:
     """One hazard over the horizon. Moving: xs[0], ys[0] the observed position (until the first step, at path time
     t_first from the origin), xs[1 + k] after step k (at t_first + k STEP_S); on[i] its collider there; past the
     last step it is gone (or, from tube_from on, a tube from the last determined centre grown by HAZARD_DV_U_S: a dome
-    contact). Static (one position): active over [t_lo, t_hi] (path times)."""
+    contact). A bell's xs, ys, on are [B, n]: branch 0 the modelled flight, the others its side bounces after floor
+    bounces (bell_branches). Static (one position): active over [t_lo, t_hi] (path times)."""
     type_key: str
     iid: int
     kind: str                       # "circle" | "box"
@@ -97,26 +99,30 @@ class HazardPath:
 
     @property
     def static(self) -> bool:
-        return len(self.xs) == 1
+        return self.xs.shape[-1] == 1
 
     def at(self, tk, slack: bool = True) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-        """Centres [S, T] at tk (game s from the origin) for each time-slack copy (S = 2 slack + 1; 1 without slack),
-        collider on [S, T], tube growth [S, T]."""
+        """Centres [B S, T] at tk (game s from the origin) for each branch (B: 1 but for a bell's side bounces;
+        branch-major, the modelled flight first) and time-slack copy (S = 2 slack + 1; 1 without slack), collider on
+        [B S, T], tube growth [B S, T]."""
         tk = np.asarray(tk, np.float64)
         offs = np.arange(-self.slack, self.slack + 1) * STEP_S if (slack and self.slack) else np.zeros(1)
         t = tk[None, :] + offs[:, None]
         if self.static:
-            on = (t >= self.t_lo) & (t <= self.t_hi) & bool(self.on[0])
-            return np.full(t.shape, self.xs[0]), np.full(t.shape, self.ys[0]), on, np.zeros(t.shape)
-        n = len(self.xs)
+            on = (t >= self.t_lo) & (t <= self.t_hi) & bool(np.ravel(self.on)[0])
+            return np.full(t.shape, float(np.ravel(self.xs)[0])), np.full(t.shape, float(np.ravel(self.ys)[0])), on, \
+                np.zeros(t.shape)
+        xs, ys, on_b = (np.atleast_2d(self.xs), np.atleast_2d(self.ys), np.atleast_2d(self.on))
+        B, n = xs.shape
         i = np.floor((t - self.t_first) / STEP_S + 1e-9).astype(np.int64) + 1
         ic = np.clip(i, 0, n - 1)
-        cx, cy = self.xs[ic], self.ys[ic]
-        on = self.on[ic] & (i < n)
-        grow = np.zeros(t.shape)
+        S, T = t.shape
+        cx, cy = xs[:, ic].reshape(B * S, T), ys[:, ic].reshape(B * S, T)
+        on = (on_b[:, ic] & (i < n)[None]).reshape(B * S, T)
+        grow = np.zeros((B * S, T))
         if self.tube_from is not None:
-            past = t >= self.tube_from
-            grow = np.where(past, HAZARD_DV_U_S * np.maximum(t - self.tube_from, 0.0), 0.0)
+            past = np.tile(t >= self.tube_from, (B, 1))
+            grow = np.where(past, HAZARD_DV_U_S * np.maximum(np.tile(t, (B, 1)) - self.tube_from, 0.0), 0.0)
             on = on | past
         return cx, cy, on, grow
 
@@ -312,11 +318,13 @@ class HazardTracker:
         wall = (1 if abs(h.pos[0] - (WALL_L + BELL_R)) < 0.01 else -1 if abs(h.pos[0] - (WALL_R - BELL_R)) < 0.01
                 else 0) if h.vel[0] == 0.0 else 0
         nail = max(0.0, BELL_NAIL_OFF_S - (origin - h.state_T) - t0) if h.state == "Nail Hit" else 0.0
-        xs, ys, on, tube = bell_steps(h.pos[0], h.pos[1], h.vel[0], h.vel[1], n, floor_contact=floor,
-                                      wall_contact=wall, nail_left=nail, redirect=redirect)
+        # just off the floor (the floor bounce's step seen): its side bounce may still come on the next step
+        bounced = h.vel[1] > 0.0 and h.pos[1] <= BELL_FLOOR_Y + BELL_BOUNCE_DY + 0.01 and not floor
+        xs, ys, on, tube = bell_branches(h.pos[0], h.pos[1], h.vel[0], h.vel[1], n, floor_contact=floor,
+                                         wall_contact=wall, nail_left=nail, redirect=redirect, just_bounced=bounced)
         if redirect is None and h.pos[1] + BELL_R >= dome_y(h.pos[0]) - DOME_NEAR_U:
             tube = 1             # touching the dome now: the FSM's Bounce is still to set its velocity
-        on[0] = (h.on or h.state is None) and h.state != "Nail Hit"
+        on[:, 0] = (h.on or h.state is None) and h.state != "Nail Hit"
         return HazardPath(h.tk, h.iid, "circle", BELL_R, 0.0, 0.0, t0, xs, ys, on, 1,
                           tube_from=None if tube is None else t0 + (tube - 1) * STEP_S)
 
@@ -376,10 +384,42 @@ class HazardTracker:
         return self._bell(h, origin, n, redirect=(k_hit, d))
 
 
+def bell_branches(x: float, y: float, vx: float, vy: float, n: int, floor_contact: bool = False,
+                  wall_contact: int = 0, nail_left: float = 0.0, redirect: tuple[int, int] | None = None,
+                  just_bounced: bool = False):
+    """The bell's flight (bell_steps) and its side-bounce branches: xs, ys, on [B, n] (branch 0 the modelled flight),
+    the earliest undetermined index over the branches (None: none).
+    A floor bounce is followed by a side bounce on the next step in 384 of the 8,813 logged floor bounces of the R0
+    caches (forum.md §14; 60 of them away from the side walls; 378 of all to +10 u/s): vx becomes +-10 u/s,
+    the bell shifted BELL_BOUNCE_DY that way, vy kept (Box2D's ghost contact at a floor seam, a resting bell). Each
+    floor bounce of the modelled flight (just_bounced: the one seen just before the origin) gets both directions as
+    branches from its next step (one level: a branch's own later floor bounces do not branch again)."""
+    floors: list[int] = []
+    xs, ys, on, tube = bell_steps(x, y, vx, vy, n, floor_contact, wall_contact, nail_left, redirect, floors=floors)
+    if just_bounced:
+        floors.insert(0, 0)
+    X, Y, O, tubes = [xs], [ys], [on], [tube]
+    for k in floors:
+        if k + 1 >= n:
+            continue
+        for side in (1, -1):
+            a, b, c, t = bell_steps(x, y, vx, vy, n, floor_contact, wall_contact, nail_left, redirect,
+                                    side_at=(k + 1, side))
+            X.append(a)
+            Y.append(b)
+            O.append(c)
+            tubes.append(t)
+    tube = min((t for t in tubes if t is not None), default=None)
+    return np.stack(X), np.stack(Y), np.stack(O), tube
+
+
 def bell_steps(x: float, y: float, vx: float, vy: float, n: int, floor_contact: bool = False,
-               wall_contact: int = 0, nail_left: float = 0.0, redirect: tuple[int, int] | None = None):
+               wall_contact: int = 0, nail_left: float = 0.0, redirect: tuple[int, int] | None = None,
+               floors: list | None = None, side_at: tuple[int, int] | None = None):
     """xs, ys [n]: index 0 the observed position, index i >= 1 after step i - 1; collider on; the index from which the
-    path is not determined (a dome contact; None: determined throughout).
+    path is not determined (a dome contact; None: determined throughout). floors: the indices of its floor-bounce
+    steps are appended; side_at (i, side): a side bounce at step i (vx 10 u/s that side, x moved BELL_BOUNCE_DY, y and
+    vy kept: bell_branches).
     The Control FSM answers a contact with Bounce on the step after it: off the floor vy 20 (vx kept), off a side
     wall (or the dome's slope) vx 10 away from it (vy kept), the bell moved BELL_BOUNCE_DY off the surface; Box2D
     stops the contact's normal velocity on the contact step. In Nail Hit (nail_left game s left: the Tink redirect,
@@ -402,11 +442,17 @@ def bell_steps(x: float, y: float, vx: float, vy: float, n: int, floor_contact: 
             continue
         in_nail = nail > 1e-9
         nail -= STEP_S
-        if not in_nail and cf:
+        if side_at is not None and i == side_at[0]:
+            vx = BELL_WALL_VX * side_at[1]
+            x += BELL_BOUNCE_DY * side_at[1]
+            cw = 0
+        elif not in_nail and cf:
             vy = BELL_BOUNCE_VY - BELL_G * STEP_S
             x += vx * STEP_S
             y = BELL_FLOOR_Y + BELL_BOUNCE_DY
             cf = False           # a corner (floor and wall at once): the wall's Bounce follows on the next step
+            if floors is not None:
+                floors.append(i)
         elif not in_nail and cw:
             vx = BELL_WALL_VX * cw
             vy -= BELL_G * STEP_S
@@ -446,4 +492,4 @@ def pin_steps(x: float, y: float, vx: float, vy: float, n: int, rel_box: tuple):
     return xs, ys, on
 
 
-__all__ = ("HazardTracker", "HazardPath", "PhysClock", "bell_steps", "pin_steps", "DOME", "STEP_S")
+__all__ = ("HazardTracker", "HazardPath", "PhysClock", "bell_branches", "bell_steps", "pin_steps", "DOME", "STEP_S")
