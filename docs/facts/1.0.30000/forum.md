@@ -459,7 +459,6 @@ R1 的记录里有策略造出来的条件，R0 的协变量（|dx| 段、左右
   - w2 的 3 局见 13.1 的排除清单。
 - 首轮 Envoy 专场在 R1 里占 Envoy 数据的绝大多数（普通斩 2407 次 / 1.56 h，R0 692 次 / 25.4 h）；重建表时应保留 R1 来源，能做"去掉 R1"的消融。
 
-<<<<<<< HEAD
 ### 13.9 R1 收尾：部署后的核对（2026-10-04 14:45–15:05，实例 2、3；oracle = main 56845a9，`SsOracle.dll` md5 11E34633…，训练副本 14:37 部署）
 
 代码在分支 `worktree-wf_5031b357-209-2`（收尾轮）。探针结果 JSON 在 `C:\ssbot\sandbox\forum_r1\`（`hello_i2_144523`、`hello_i3_144532`、`check_i2_144745` / `144950`、`skip_i2_145059` / `145135`）。
@@ -588,7 +587,6 @@ C:\ssbot\sandbox\r1cfix_collect.cmd i2
 - 结论：2x 仍然不采用（理由多了 Tiny `Ready`）。v3 用独立的 1x 对 1x（16 + 16，同样四波，别的种子）证实：只粗化不触发任何一项；停留 +1/30 s、Clapper 速度 ×1.1 在 16 + 16 局都查得出（8 + 8 时速度查不出）；Tiny 自循环少六成只有 `next` 刚好查出（`visits` 的键太多，Tiny 只在 5 + 7 局里，Holm 够不着）；自循环少两成到四成、选择挪 10 个百分点都查不出。
 - **功效是按类算的**：4 波轮换（w7、w13、w4、w6）下 16 + 16 局里停留键有 44 / 67（idle）、90 / 115（data2）个单独不可能过 Holm，Tiny 只在 4–5 + 4–8 局。以后要再试 2x（或任何"同一行为"的检查），每类敌人每臂至少 8 局（C(16, 8) = 12,870），比如只轮换两波、或 32 + 32 局，并事先登记等价判据（13.10）。
 - 13.10 的 v2 结果（`speed\idle`、`speed\data`）不变；它们的 8 + 8 对照只检验了二项上限（13.10 已注明）。
-=======
 ## 14. R2：多敌人预报（MultiForecast）（2026-10-04，forum_planner_plan.md §5 R2；离线，没有连接游戏）
 
 代码：`combat/enemy_tracker.py`（EnemyTracker，一个敌人实例；BossTracker 不动）、`combat/enemy_tables.py`（9 类共用一个模板库）、`combat/multi_forecast.py`（MultiForecaster / MultiForecast）、`combat/projectiles.py`（投掷物的确定路径）、`combat/wave_tracker.py`（WaveTracker）、`core/forum.py`（静态事实，与 `knowledge.gauntlet_tables.FORUM_SPECS`、`train.encounters` 有一致性测试）；工具 `multi_recall`、`projectile_audit`、`consistency_audit`、`planner_bench --encounter Forum --multi`；测试 `tests/test_multi_forecast.py`（20 个；复核后 25 个，14.7）。
@@ -718,4 +716,3 @@ cd brain   # 低优先级、NUMBA_NUM_THREADS ≤ 4
 10. 对用户问题"bot 反应会比我 0.5 倍速快吗"的回答原来把"召回在 2–4 帧前就盖住接触"当成反应速度，不对（见 HANDOFF Task R2 的更正）。
 
 全部测试（`pytest -q`，tests + ssbot/tests，e516f22 时的工作区，整机忙）：1071 passed、2 skipped（其一是上面这条计时测试，按负载跳过）、1 xfailed；`tests/test_multi_forecast.py` 25 个。
->>>>>>> worktree-wf_5031b357-209-1
