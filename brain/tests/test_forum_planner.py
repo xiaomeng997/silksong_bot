@@ -332,6 +332,27 @@ def test_q4_counts_unpredicted_hits_per_enemy_instance():
     assert "Q4" in old.step(SupervisorInput(t=1.0, unpredicted_hits=1, **base)).triggers   # Bell Beast unchanged
 
 
+def test_yellow_withholds_a_freezing_kill_even_when_known_at_h2():
+    """forum_planner_plan §4.4 item 7 (R4 fixer round): the Forum cannot certify a kill (no kill branches, and the L0
+    filter's kill_hp is only the battle's last blow), so YELLOW withholds kill_prims with a certified support at h = 2
+    too; Bell Beast's config keeps them for the L0 filter's certification."""
+    from ssbot.combat.hero_damage import HeroDamage
+    from ssbot.core.primitives import Prim
+    dmg = HeroDamage.from_loadout("Reaper", 0)
+    kp = dmg.kill_prims(5.0)                           # an Envoy at hp_est 5 (forum_yellow_kill_hp)
+    assert Prim.ATTACK_SIDE in kp
+    base = dict(t=10.0, hp=3, max_hp=5, support=(SupportEvent(REED, 2, instance=7),), support_known=True, plan_s=0,
+                pausable=True, idle_clear_s=1.0, kill_prims=kp, next_hit_may_kill=True)
+    d = Supervisor(forum_supervisor_config()).step(SupervisorInput(**base))
+    assert d.tier == "YELLOW" and d.h == 2 and d.support_known
+    assert not d.allows("ATTACK(side)") and not d.allows("ATTACK(up)") and not d.allowed & kp
+    assert d.allows("DASH") and d.kill_rule
+    bb = Supervisor(SupervisorConfig(worst_known_damage=2)).step(SupervisorInput(**base))
+    assert bb.allows("ATTACK(side)")                   # Bell Beast unchanged: left to kill_certified
+    d0 = Supervisor(forum_supervisor_config()).step(SupervisorInput(**{**base, "hp": 5}))
+    assert d0.tier == "GREEN" and d0.allows("ATTACK(side)")   # GREEN: the L0 filter's (I3 / forum_kill_hp)
+
+
 def test_the_weighted_anklet_widens_the_post_hit_window():
     assert forum_supervisor_config(weighted=True).post_hit_window_s == WEIGHTED_POST_HIT_WINDOW_S == 1.3
     assert forum_supervisor_config().post_hit_window_s == POST_HIT_WINDOW_S

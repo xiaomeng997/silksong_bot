@@ -114,8 +114,9 @@ vocabulary does not know is never allowed:
                                      Clawline, HIT_TARGET) whose next landed hit may kill (kill_prims: per primitive,
                                      from the crest's / tools' damage bounds, combat.hero_damage; the kill freeze
                                      swallows a pause) when no kill can be certified (the support not certified, or
-                                     h < 2); with a certified support and h >= 2 they stay and kill_rule asks the L0
-                                     filter to pass only plans certified safe through the slow motion
+                                     h < 2, or SupervisorConfig.kills_certifiable False: the Forum); with a certified
+                                     support and h >= 2 they stay and kill_rule asks the L0 filter to pass only plans
+                                     certified safe through the slow motion
                                      (safety_filter.kill_certified; before 2026-10-04 every damaging primitive went
                                      whenever the largest hit seen this attempt, a 15 HP Silkspear, could kill: the
                                      STUCK deadlock). The certified kill is DESIGN I3's exception (lead decision
@@ -188,6 +189,11 @@ class SupervisorConfig:
     q4_total_hits: int | None = None           # with q4_per_instance: the attempt-wide cap (None: none)
     post_hit_window_s: float = POST_HIT_WINDOW_S   # the Weighted Anklet's i-frames 1.30 s (probes.md):
     #                                            forum_supervisor_config(weighted=True)
+    kills_certifiable: bool = True             # can the L0 filter certify a kill of kill_prims' subjects (the planner
+    #                                            has kill branches, safety_filter.kill_certified)? False (the Forum
+    #                                            until R5: no kill branches, and the L0 filter's kill_hp is only the
+    #                                            battle's last blow): YELLOW / RED withhold kill_prims whatever the
+    #                                            support and h, so YELLOW's per-enemy kill freeze rule holds
     risk_factor: float = 2.0
     expected_risk_per_s: float | None = None   # training expectation of the integral's growth; None: Q4 by hits only
     risk_warmup_s: float = 5.0                 # the expectation is never taken over less than this
@@ -750,7 +756,7 @@ class Supervisor:
             kill = kill_prims & allowed
             i3_ok = tier == GREEN and hero is not None and hero.hp >= hero.max_hp and h is not None and h >= 3
             kill_rule = bool(kill) and not i3_ok
-            if careful and kill and not (known and h is not None and h >= 2):
+            if careful and kill and not (cfg.kills_certifiable and known and h is not None and h >= 2):
                 allowed -= kill
             allowed = frozenset(allowed)
         # QS: the rule holding back the nail (every melee hit may kill: below full HP the bot's only damage) with no
@@ -791,8 +797,11 @@ def forum_supervisor_config(weighted: bool = False, **kw) -> SupervisorConfig:
     """The Forum's supervisor settings (forum_planner_plan §4.4 item 7, round R3): worst_known_damage 2 (rune slams,
     the Clawmaiden's spear blast and every 2-mask attack; multi-hit chains come as SupportEvent.hits / damage from
     chains.json through MultiForecast.support_set), Q4 per enemy instance (the attempt-wide total at 3), and with the
-    Weighted Anklet equipped (the route from S09 on) the post-hit window of its 1.30 s i-frames."""
-    d = dict(worst_known_damage=2, q4_per_instance=True, q4_total_hits=3,
+    Weighted Anklet equipped (the route from S09 on) the post-hit window of its 1.30 s i-frames. kills_certifiable
+    False: R3 has no kill branches and the L0 filter's kill_hp is only the battle's last blow (forum_kill_hp), so
+    YELLOW / RED withhold the primitives that may kill an enemy whose kill freezes the game (forum_yellow_kill_hp)
+    even with a certified support and h >= 2 (R4 fixer round; before, neither layer held such a kill back)."""
+    d = dict(worst_known_damage=2, q4_per_instance=True, q4_total_hits=3, kills_certifiable=False,
              post_hit_window_s=WEIGHTED_POST_HIT_WINDOW_S if weighted else POST_HIT_WINDOW_S)
     d.update(kw)
     return SupervisorConfig(**d)
