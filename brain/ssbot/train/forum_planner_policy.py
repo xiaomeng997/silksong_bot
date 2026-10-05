@@ -264,7 +264,14 @@ class ForumPlannerPolicy(PlannerPolicy):
                                      "h": None if self.decision is None else self.decision.h})
                 if wt is not None:
                     self.per_wave.setdefault(wt, Counter())["hits"] += 1
-        super()._wake(ws, s, tap)
+        if not self.wake_sent and tap is not None and tap.wake_frame is not None:
+            # PlannerPolicy._wake with the battle's first wave: a wave-start savestate (Forum_A_w<i>, its intro rebases
+            # the start to the wave's activation) starts the WaveTracker at wave i
+            dt = (s["f"] - tap.wake_frame) * self.params.frame_time
+            name = str(getattr(self.enc, "name", ""))
+            w0 = int(name.rsplit("_w", 1)[1]) if "_w" in name and name.rsplit("_w", 1)[1].isdigit() else 0
+            self.fc.notify_wake(ws.stamp.t_game_s - dt, wave=w0)
+            self.wake_sent = True
 
     def _note_kill(self, ws) -> None:
         """No kill commitment in the Forum (R3: the final blow is I3 only, no certified kill plans)."""
