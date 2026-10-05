@@ -172,7 +172,7 @@ def forum_multi_bench(a: argparse.Namespace) -> int:
     proc = psutil.Process()
     fl = {f["id"]: f for f in json.loads(a.fights_list.read_text("utf-8"))["fights"]}
     fight = fl[a.fight]
-    f0, f1 = int(fight["f0"]), int(fight["f1"])
+    f0 = int(fight["f0"])
     start = a.start
     if a.wave is not None:
         from ssbot.knowledge.forum_cache import cache_name, load_cache

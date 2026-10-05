@@ -1102,3 +1102,93 @@ them in range), savestates `fo_r1_*`. Facts: `docs/facts/1.0.30000/forum.md` sec
 6. `gauntlet.WAITING_STATES` lacks "Dead" (the Maestros' parked Tinies): live_enemies counts nine parked Tinies in play
    from the load on; v1's GauntletDataPolicy targets them. R1 code filters them (`wave_start.fighting`); fixing
    live_enemies itself changes other tools' numbers (left for a reviewed change).
+
+## Task R2 - Forum multi-enemy forecast (branch worktree-wf_5031b357-209-1)
+
+Worktree `C:\modeling\silksong_bot\.claude\worktrees\wf_5031b357-209-1`, branch `worktree-wf_5031b357-209-1`. Offline
+only (no game instance touched). Plan: `docs/plans/forum_planner_plan.md` §4.1 / 4.3 / 4.4 item 6 and the R2 row of
+§5. Facts: `docs/facts/1.0.30000/forum.md` §14 (Chinese). Outputs (not in git): `C:\ssbot\data\m2_forum_r2\` (`r1\` the
+R1 runs' contacts, `recall_*.json` / `*.log`, `consistency_*.json`, `proj_audit_10c.json`, `bench_*.json`, the `.cmd`
+drivers). The production tables need `knowledge/1.0.30000/enemies/forum/*_hitboxes.npz` (gitignored; rebuilt by
+`behaviour_build --encounter Forum`, copied into each frozen checkout by hand).
+
+### Done (committed)
+
+- `core/forum.py`: the Forum's static facts for run-time code (9 types, waves with spawn points, hazard owners / aliases,
+  structurally absent moves, walls / floor / dome), tested against `knowledge.gauntlet_tables.FORUM_SPECS` and
+  `train.encounters` (the import firewall keeps combat code off those modules).
+- `combat/enemy_tables.py`: one template store for the 9 types (fine templates in arenas, coarse 0.25 u bases with time
+  OR pyramids, per-bin bounding-box sparse tables), lazy npz reading and chunked coarsening (peak working set 1.94 ->
+  1.1 GB), type tables without the structurally absent moves, tubes, chains, fold / production configurations.
+- `combat/enemy_tracker.py`: EnemyTracker per enemy instance (SubjectTracker semantics; oracle: Control FSM events;
+  VE: phase + body offset); HP from seen hits only (oracle amount, else the attack's price); a kill leaves its death box
+  for 3 bins, no tail for the attack it cuts short, and keeps the tails of the attacks it finished (their thrown
+  hazards outlive it: VE own-type recall needs them for the Clapper's rune slams / bombs).
+- `combat/multi_forecast.py`: MultiForecaster / MultiForecast with the §4.3 interface (occupied, occupied_without,
+  prob, t_min, committed, support_set, targets, known) + forecast_if_killed + bell_redirected; walk cache with
+  widening; fine / window / bbox placements; family walk templates for later instances; idle body, collider, hazard
+  tubes; death tails; wave entries; waiting wave members bounded by their wave's earliest activation (no collider
+  tube before it); dead Tinies walked only while a Maestro is in play; Tiny groups by 4 u grid cell;
+  `boss=Forecaster` wraps Bell Beast bit for bit. `combat/forecast.py`: the boss-independent walk / place helpers
+  (entry_grid, active_within, exit_interval, placement_occupancy) moved out, Bell Beast unchanged.
+- `combat/projectiles.py`: deterministic paths (bell physics incl. the Nail Hit redirect and the dome tube, javelins,
+  bomb rows with 9-10 frame steps from the latest step seen, rune slams) and the physics clock. `combat/wave_tracker.py`
+  (BattleScene rules from what the view sees; room.battles only as test truth).
+- Tools: `multi_recall` (dev / fresh / bellbeast; oracle and ve), `projectile_audit`, `consistency_audit` (new),
+  `planner_bench --encounter Forum --multi [--planner]`.
+- Tests: `tests/test_multi_forecast.py` 20 (incl. the kill what-if, a waiting wave member, Tiny groups, forecasters
+  sharing tables, bomb rows from a recorded row). Full suite (at eb5d221-ish): 1052 passed, 1 skipped, 1 xfailed;
+  `test_hitbox_tables.py::test_support_query_budget_on_the_committed_bell_beast_templates` failed only on time (p99
+  3.54 ms vs 3 ms) with the machine at ~97 % CPU (my recall runs + 5 game instances); rerun it on a quiet machine.
+
+### Measurements (acceptance)
+
+All on 5332426 (frozen checkouts, below-normal priority, NUMBA_NUM_THREADS 2 per worker) unless noted.
+
+- (a) Bell Beast wrapped: `multi_recall bellbeast` on 20261003_144536 i4_000, 4001 frames (eb5d221; later commits do
+  not touch the boss path): 0 differences in placements, occupied, prob, support_set, committed, tactics, planner
+  decision; the fixture-window bit-identity test and the Bell Beast tests pass on 5332426.
+- (b) Recall through MultiForecast (contact at c vs forecast at c - L), union and own-type: dev (R0's 107 fights,
+  3-way) 228,333 / 228,333 at L2, L3, L4; fresh R0 35 fights 74,120 / 74,120 with each fold's tables; R1 187 fights
+  (w2 ghosts excluded) 112,949 / 112,949 with each fold's tables; ve (35 fresh fights, placeholder phase table,
+  fold-0 tables) 74,120 / 74,120. Every one of the 9 types 100 % in every group and lag, own-type too.
+  `C:\ssbot\data\m2_forum_r2\recall_{dev,fresh,ve}_5332426.json`.
+- (c) Projectile path centre error (`projectile_audit`, 10 R0 caches, 0.8 s): bell p99 0.246 u (0.0005 at 0.1 s, 0.20
+  at 0.4 s; max 7.5), javelin p99 0.050 u, bomb rows x p99 0.025 u with 2020 / 2098 predicted bombs lit inside their
+  window (the rest: sides the bomb pool served late). `proj_audit_10c.json`.
+- (d) Wave-6 replay (074719 i3 ep0, 5951 ticks, 6-8 enemies): forecast(2 s) p50 0.91 ms, p99 2.75 ms (max 10.0, once);
+  machine CPU p50 53 % (4 recall workers + 5 game instances). `bench_wave6_fc_5332426.json`.
+- (e) Memory: peak working set 1,109 MB (with the planner 1,184 MB); tables 696 MB; load 25 s, warm 55 s.
+- (f) Consistency (`consistency_audit`, 35 fresh fights, every 30th frame, +-2 u near / +-6 u wide, 1 s): kills 0
+  violations (172,839 simulated, 1,429 recorded what-if, 1,429 recorded before/after); bell redirects: 0 of 474
+  recorded, 9 of 2,854 simulated in the near zone, all physics (a down hit bounces after Nail Hit 2, an up hit falls
+  back 4, a side hit off a near wall comes back at 10 u/s 2, an up hit reaching the dome becomes a tube 1).
+  `consistency_5332426.json`. Fixed on the way (forum.md 14.4): a kill gave the attack it cut short a tail; a
+  wave-ending kill walked the next wave's parked members at once (with their collider tube); a store bug - a coarse
+  base key registered again took the next new key's id, so the next fight in one process used other family walks'
+  box tables (every multi-fight recall before 5332426 ran with it; they were 100 % anyway).
+- (g) Today's planner fed by the MultiForecast (HOLD prefs, floor risk map): tick p50 21.6 ms, p99 37.9 ms (support
+  6.5 / 16.5, prob_bind 6.4 / 14.7), FORCED_RISK on 92 % of the ticks; machine CPU p50 60 %.
+  `bench_wave6_planner_5332426.json`.
+
+### Running
+
+Nothing. The superseded runs (abca5c9, 948f32c, 9835ced, 69e9b36, 21d697f) all finished; their outputs are kept in
+the data folder for comparison.
+
+### Next
+
+1. R3: today's planner with the MultiForecast spends p50 ~23 ms in its phases (support 8.6, prob_bind 9.4 ms) and is in
+   FORCED_RISK 92 % of the wave-6 ticks (no Forum tactics: HOLD where the hero stands); the Forum vocabulary, K-target
+   scoring and the support query budget are R3's.
+2. The physics clock is not narrowed for the first bell of a fight (p99 0.67 u on 0.2 % of the samples): narrow it from
+   any Rigidbody the export has (the hero) or keep the phase across fights of a session.
+3. Bells: 315 of 1,022,951 logged boxes outside the path's support form (max centre error 7.5 u) are contacts the path
+   does not model (allies' hits, enemy bodies); recall stayed 100 % (other supports), but the planner trusts the path.
+4. VE recall used the placeholder phase table (identity) and the tables' body offsets; rerun with the real vision
+   phase tables when they exist.
+5. Frozen checkouts to remove (their runs are done): `C:\ssbot\live_r2scan_56845a9`, `live_r2recall_abca5c9`,
+   `live_r2recall_948f32c`, `live_r2final_69e9b36`, `live_r2final_9835ced`, `live_r2final_21d697f`,
+   `live_r2final_5332426` (git worktree remove).
+6. Wiring the MultiForecaster into the live loop is not done (R2 is offline): one forecaster per episode on shared
+   tables is now safe (the store fix), `warm()` belongs before the fight.

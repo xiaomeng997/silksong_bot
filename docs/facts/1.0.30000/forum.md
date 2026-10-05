@@ -454,3 +454,82 @@ R1 的记录里有策略造出来的条件，R0 的协变量（|dx| 段、左右
   - 出处：`run_fights` 的 Fight.info 带 `unit`、`protect`、`protect_hp`、`segments`（修复轮起每段的战术），以后可以按战术分层或去掉。
   - w2 的 3 局见 13.1 的排除清单。
 - 首轮 Envoy 专场在 R1 里占 Envoy 数据的绝大多数（普通斩 2407 次 / 1.56 h，R0 692 次 / 25.4 h）；重建表时应保留 R1 来源，能做"去掉 R1"的消融。
+
+## 14. R2：多敌人预报（MultiForecast）（2026-10-04，forum_planner_plan.md §5 R2；离线，没有连接游戏）
+
+代码：`combat/enemy_tracker.py`（EnemyTracker，一个敌人实例；BossTracker 不动）、`combat/enemy_tables.py`（9 类共用一个模板库）、`combat/multi_forecast.py`（MultiForecaster / MultiForecast）、`combat/projectiles.py`（投掷物的确定路径）、`combat/wave_tracker.py`（WaveTracker）、`core/forum.py`（静态事实，与 `knowledge.gauntlet_tables.FORUM_SPECS`、`train.encounters` 有一致性测试）；工具 `multi_recall`、`projectile_audit`、`consistency_audit`、`planner_bench --encounter Forum --multi`；测试 `tests/test_multi_forecast.py`（20 个）。
+
+### 14.1 预报怎么组成
+
+- **接口**：`occupied`、`occupied_without`（击杀：去掉它的尾巴、管和它可能开始的招；它扔出的投掷物留下）、`prob`（只用于打分）、`t_min`、`committed`、`support_set`（每个实例一个事件；多段招 hits > 1、伤害 = 实测最大连段 chains.json）、`targets`、`known`；另有 `forecast_if_killed`（假设这几只现在死：一致性审计和以后的击杀价值用）和 `bell_redirected`（主角现在打铃）。Bell Beast 用 `MultiForecaster(boss=Forecaster)` 包起来，所有查询转给 Forecaster 自己的 Forecast：逐位相同（4001 帧 0 差，`multi_recall bellbeast`；测试用夹具窗口）。
+- **行走**：R0 的支撑行走（Control FSM、日志里的停留区间和后继，±1 帧松弛），每个状态一个进入时间的凸包；区间一直在长的节点直接取到上限（hi → 6 s、lo → min(lo, 0)），概率变大不重走（只影响打分）。按（类型、状态、当前实例、死亡、超时）缓存；`warm()` 在战前把 9 类所有起点的行走、家族行走模板、时间金字塔和盒表建好（2245 个，约 50–80 s）。
+- **放置**：当前招（锚点已知）的每个状态：进入时间不超过 3 帧的用细模板逐帧放，更宽的用一个"窗口放置"（粗化 5×5 = 0.25 u 的模板的时间 OR 金字塔，一次查询覆盖整个进入区间）；以后才开始的实例（攻击、待机）用"家族行走模板"（这个起点能到的所有状态和尾巴、各自按进入区间时间膨胀后的每帧外包盒）× 锚点盒（变换按速度外推、加上该类型的待机增长；视觉视角再加偏移散布），两种朝向，按起始时间分段（离原点越近越细：0.4 s 内 6 帧、1 s 内 12 帧、再往后 24 帧）；锚点盒宽于 24 u 的直接放全场盒。
+- **管**：待机族里的敌人 = 待机身体管（最近看到的伤害框按速度移动、按待机增长变大）；头 5 帧（反应延迟）还有当前碰撞体管（按该类型最高速度长）和投掷物管（40 u/s）。
+- **死亡**：被杀的敌人留最后的伤害框 3 帧（§12.3 的死亡尾巴：导出在击杀那一帧就把它去掉，之后 0 帧接触）；被死亡打断的那一招**不放尾巴**（一致性审计发现的错，见 14.4）；它已经做完的招的尾巴留着：扔出去的东西比它活得久（Clapper 跳跃施法落地后死了，rune slam 照样炸；视觉视角里只有这条尾巴盖它，见 14.3）。Tiny 是池化的：只要还有 Maestro 在场，死后继续走（召唤会把它叫回来，HP 回满）。
+- **等待中的敌人**：只有它马上可能进场时才走（它的波次已排队，或 Maestro 在场时停着的 Tiny）；波次成员**最早在它的波次激活时才离开等待状态**（WaveTracker 的最早激活时间；之前不放碰撞体管）。
+- **波次**：WaveTracker 只用看到的东西（成员类型的击杀事件、在场成员的出现）和静态波次表（BattleScene 的规则：startDelay、remainingEnemyToEnd、激活后 1 s 的检查），**不读 room.battles**（只当测试真值，测试与 WaveSim 逐帧对照）；下一波还没导出的成员用入场族的世界坐标模板放在它的出生点。
+- **Tiny 成组**：≥ 3 只 Tiny 时，同一个 4 u 网格格子里的成一簇（固定网格：杀掉一只不会把另外两只连成一簇，见 14.4），每簇每个家族行走、每个时间段只放一行（锚点盒覆盖所有成员）；是逐只放置的超集（测试），行数更少。
+- **结构上不可达的招**（§13.2：Envoy HopSlash / Wake 入场、Bellbearer Throw Antic Quick、Maestro Point）在类型表里删掉，生产表里没有它们的模板（测试）。
+- **视觉合法**：HP 只按看到的命中扣（oracle 用事件的 amount，视觉视角按攻击的价格表，方差累加），不读 ents.hp；运行时不读 room.battles、不读格挡位；视觉视角的分支只来自相位（PhasePost），位置 = 检测位置减去该类型的身体偏移（行为表 body_offset 的盒心，按朝向镜像）。AST 测试检查运行时模块不读这些字段。
+
+### 14.2 投掷物的确定路径（`projectile_audit`，R0 缓存 10 场，每 2 帧一个原点，到 0.8 s）
+
+- **物理时钟**：Rigidbody2D 50 Hz，一帧（1/60 s）里有 0 或 1 步；导出的位置只在有步的帧变。用"移动中的投掷物这帧没动 = 这帧没有步"把步的相位（模 0.02 s）收窄到 0.1 ms 网格；一局里相位基本不变（例：18.25 ms、0.45 ms，偶尔漂 0.2–1.5 ms 后重新收窄）。收窄之前（每局开头第一只铃）按半步猜，误差大（p99 0.67 u，只占 0.2 % 样本）。
+- **Throwing Bell**（Bellbearer，圆 r 0.425，伤 1）：g 60，半隐式欧拉；落地那一步 vy 停 0，下一步 Bounce vy 20（x 速度不变，第一步抬高 0.1 u）；侧墙那一步 vx 停 0，下一步以 10 u/s 弹回；碰穹顶（§8.1，提前 0.5 u）之后不确定 → 管（40 u/s）；钉击（Nail Hit，9 帧，碰撞体关）把速度设为 30 u/s 沿打击方向，期间碰地 / 墙先滑、Nail Hit 结束再弹。中心误差 p99：≤ 0.1 s 0.0005 u、≤ 0.2 s 0.0006 u、≤ 0.4 s 0.20 u、≤ 0.8 s **0.246 u**（n 1,076,583；最大 7.47 u：没有建模的接触）；记录的伤害框落在支撑形（±1 步、0.1 u 皮）内 1,022,636 / 1,022,951。
+- **Song Reed Pin Projectile**（Reed 的标枪，盒约 2.0 × 0.1）：31 u/s 直线，盒碰到侧墙或地面 → Stick（碰撞体关）。p99 **0.050 u**（n 33,443），支撑内 33,443 / 33,443。
+- **rune bomb small**（Clapper 的 Bomb Cast，圆 r 2.166、y 3.67、伤 1）：出现时就导出（碰撞体未启用，按半径认出别名），出现后 0.335–0.36 s 点亮，最多 18 帧。一排：第一颗在 x0，之后每步一对 x0 ± 4.2 k（最多 9 对）；**一步是 9 或 10 帧**（FSM 等 0.15 s，按帧取整：实测 0.150 / 0.167 s 交替），所以以后的对从这一排最近看到的那一步起算，每步 9–10 帧。炸弹对象是池化的（一局里约 20 个 iid 循环使用）：两排重叠时池子不够，一侧会晚出或不出（一侧的排）——这些在出现时才被跟踪（出现到点亮还有 0.335 s）。预报：在出现前 0.1–1.5 s 做的预测里 2020 / 2098 颗的点亮帧落在预测窗口内（其余是池子推迟的一侧或别的排在同一 x 的预测），x 误差 p99 **0.025 u**；预测了但没出现的 3142 / 6060（超集：池子没给的一侧）。
+- **rune slam**（Jump Cast，圆 r 7.187、y 3.34、伤 2）：出现后 1.06–1.11 s 点亮，亮 20 帧以内。
+- 主角打铃（`bell_redirected`）：打中的下一步起 30 u/s（左、右、上、下），碰撞体关 0.15 s，然后自由飞。
+
+### 14.3 留出召回（`multi_recall`，R0 协议：接触在 c、预报在 c − L 帧，L = 2/3/4；union 覆盖 + 按类型）
+
+全部在 5332426 上（冻结检出，低优先级）：
+
+| 组 | 场 | 视角 | L2 / L3 / L4 覆盖 | 按类型（own） |
+|---|---|---|---|---|
+| dev：R0 的 107 场，三分（第 k 折对 1 − k 折的表，每半用另一半标定的余量） | 107 | oracle | 228,333 / 228,333（三个滞后都是） | 100 %，9 类每类 100 % |
+| fresh：R0 的 35 场新数据 | 35 × 2 份表 | oracle | 74,120 / 74,120（两份表都是） | 100 % |
+| fresh：R1 的 187 场（w2 的 3 局幽灵已排除） | 187 × 2 份表 | oracle | 112,949 / 112,949（两份表都是） | 100 % |
+| ve：R0 的 35 场新数据，视觉视角（占位相位表：恒等映射；位置减去行为表的身体偏移） | 35（fold 0 的表） | ve | 74,120 / 74,120 | 100 % |
+
+- 9 类每类在每组、每个滞后都是 100 %（union 和按类型都是）。盖住它们的：预报本身（放置、投掷物路径、死亡框）≥ 99.4 %，其余是待机身体管（dev 每个滞后约 1,290 次、fresh 约 840 次、ve 约 335 次）；视觉视角另有 26 次靠当前碰撞体管（反应延迟那几帧）。
+- Bell Beast 包装（`multi_recall bellbeast`，20261003_144536 i4_000，4001 帧，eb5d221；之后的改动不碰 boss 路径）：放置、occupied、prob、support_set、committed、战术、规划器决策 **0 差**；夹具窗口上的逐位测试和 Bell Beast 的测试在 5332426 上都通过。
+
+### 14.4 一致性（forum_planner_plan §4.4 第 6 条：击杀、打铃之后主角周围 1 s 的危险区不得变大；`consistency_audit`）
+
+方法：R0 的 35 场新数据，回放到每 30 帧，主角位置周围 ±2 u（"近"，步长 0.25 u）和 ±6 u（"宽"，0.5 u）× 之后 1 s（每帧）的格子：模拟击杀 = 每只在场敌人 `forecast_if_killed` 对 `forecast`；记录的击杀 = 击杀前一帧的同样比较，以及击杀后的预报对击杀前的预报（同一绝对时间，只看死者和入场）；模拟打铃 = 主角 4 u 内每只在路径上的铃，往远离主角的方向打（侧打；在主角下方加下劈、上方加上挑）；记录的打铃 = 记录到的 Nail Hit 前一帧，按它实际飞走的方向。
+
+发现并修掉的模型错误：
+
+1. **被杀的敌人给被打断的招放尾巴**（Song Pilgrim 03：杀在招中途，招的 `_tail` 模板放在击杀时刻，比它自然结束早，盖到原来没有的格子；第一场前 8000 帧 17 / 512 次模拟击杀违反）。按 §12.3 的死亡尾巴，被打断的招不放尾巴。（中间一版连已做完的招的尾巴也清掉了：视觉视角的召回里 Clapper 的接触有 12 次（每个滞后）只被别的敌人的支撑碰巧盖住——都是 Clapper 死后才炸的 rune slam（跳跃施法的尾巴，6 次）和 rune bomb small（Bomb Cast 的尾巴，6 次），于是改回保留已做完的招的尾巴。）
+2. **结束一波的击杀把下一波停着的成员立刻放到主角身上**（例：20261003_074533 i2 ep26 f 1414290–1414380，第 12 波最后一只 Song Administrator：第 13 波（startDelay 2 s）一排队，停在场上 Fly In Ready 的 Reed 就开始走，还带着当前碰撞体管，0.017 s 起就盖到它下方 5 u 的主角；违反的只有 Song Administrator 和 Song Pilgrim 03 的击杀）。改为：等待中的波次成员最早在波次激活时（WaveTracker 的最早时间，startDelay 之后）才离开等待状态，之前不放碰撞体管。修之前（69e9b36，35 场里 26 场有效）：近区 76 / 128,512 次模拟击杀、2 / 1,067 次记录击杀违反，全部属于这一类。
+3. **同一进程里的第二个预报器用错家族行走表**（宽区 20 次，都出在杀 Leave 状态的 Tiny 上，t = 0 起盖住宽区一大片；单独重跑那一场 0 次）：模板库按键登记粗基底，同一个键第二次登记时拿到了下一个新键的 id，于是同一进程、同一份表上的下一场，家族行走用到了别的行走的盒表。修好（已登记的键沿用原 id），加了测试。召回的工作进程一个进程跑多场，修之前的召回都受影响（数字仍是 100 %）；14.3 的召回是修好之后的。追查时还改了两处 Tiny 的规则（单独没有测出违反，按游戏规则保留）：死掉的 Tiny 只在有 Maestro 在场时按"会被召回"继续走；成簇改为固定 4 u 网格的格子（去掉一只不会把两边连成一条长链、锚点盒宽过 24 u 变成全场盒）。
+
+结果（5332426，35 场全部有效）：
+
+- **击杀：0 违反**。模拟 172,839 次（Tiny 70,266、Maestro 25,191、Clapper 24,332、Bellbearer 15,853、Reed 11,252、Minister 10,868、Choristor 6,805、Clawmaiden 6,659、Envoy 1,613），记录的 1,429 次（击杀前一帧的假设，和击杀前后两份预报的比较），近区、宽区都是 0。
+- **打铃**：记录的 474 次 0 违反。模拟 2,854 次里近区 9 次变大，都是物理，不是模型错误：下劈的铃碰地后要等 Nail Hit 结束才弹起，弹回主角附近（2）；上挑的铃升到顶再落回来（4，0.85–0.98 s）；侧打打向近墙，铃以 10 u/s 弹回（2）；上挑碰到穹顶，之后路径不确定成管（1，这是模型的保守）。宽区 18 次（另有 3 次是铃被打走时穿过主角 6 u 内的远侧格子）。规划器以后算"打铃"的价值时要用 `bell_redirected`，不能假设打走就安全。
+
+### 14.5 算力与内存（第 6 波回放：20261003_074719 i3 ep0，5951 帧，6–8 只敌人在场，生产表，4 线程）
+
+5332426，整机同时跑着 4 个召回进程和 5 个游戏实例（整机 CPU p50 53–60 %）：
+
+- **forecast(2 s)：p50 0.91 ms、p99 2.75 ms**（最大 10.0 ms，一次）；update p50 0.06 / p99 0.27 ms。每帧放置：细 3（p99 11）、窗口 9（p99 28）、外包盒 179（p99 238）。（同一回放带规划器时 forecast p50 1.4 / p99 3.4 ms；整机满载 CPU p50 98 % 时（9835ced）p50 2.0 / p99 4.2 ms。）
+- **内存**：读表 25 s、warm 55 s；表（模板库）696 MB；进程 RSS 读完表 + warm 938 MB，回放结束 1,012 MB，**峰值工作集 1,109 MB**（带规划器 1,184 MB）。之前峰值 1.94 GB 来自粗化时一次展开整段模板的布尔数组（改成分块）。
+- **今天的规划器 + MultiForecast**（没有 Forum 战术：原地 HOLD、风险图来自 MultiForecast）：tick p50 21.6 ms、p99 37.9 ms；其中 support 6.5 / 16.5 ms、prob_bind 6.4 / 14.7 ms、rollout 3.0 / 4.3 ms；**92 % 的 tick 是 FORCED_RISK**（找不到证明安全的路径）。这是 R3 要做的（Forum 词汇、K 目标打分、查询预算）。
+
+### 14.6 复现
+
+```
+cd brain   # 低优先级、NUMBA_NUM_THREADS ≤ 4
+# 召回：dev = R0 的 107 场三分；fresh = R0 的 35 场 + R1 的 187 场（w2 的 3 局幽灵已排除）对两份折的表；ve = 35 场新数据、视觉视角（占位相位表）
+..\scripts\uv.cmd run python -m ssbot.tools.multi_recall dev --workers 3 --json <out>
+..\scripts\uv.cmd run python -m ssbot.tools.multi_recall fresh --fresh C:\ssbot\data\m2_forum_r0\fresh --fresh C:\ssbot\data\m2_forum_r2\r1 --workers 3 --json <out>
+..\scripts\uv.cmd run python -m ssbot.tools.multi_recall fresh --fresh C:\ssbot\data\m2_forum_r0\fresh --tables 0 --view ve --workers 2 --json <out>
+..\scripts\uv.cmd run python -m ssbot.tools.multi_recall bellbeast <Bell Beast 录像> --frames 4000
+# R1 运行的接触（behaviour_build --contacts-only，命令见 C:\ssbot\data\m2_forum_r2\r1_scan.cmd）
+..\scripts\uv.cmd run python -m ssbot.tools.projectile_audit --cache C:\ssbot\data\m2_forum_r0\cache --fights 10 --every 2 --horizon 0.8 --json <out>
+..\scripts\uv.cmd run python -m ssbot.tools.consistency_audit --every 30 --workers 2 --json <out>
+..\scripts\uv.cmd run python -m ssbot.tools.planner_bench --encounter Forum --multi [--planner] --fight 20261003_074719_Forum_A_data/i3/ep0 --wave 6 --frames 6000 --threads 4 --json <out>
+..\scripts\uv.cmd run pytest -q tests/test_multi_forecast.py
+```
