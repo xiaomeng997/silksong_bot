@@ -894,7 +894,7 @@ cd brain   # 冻结检出（git archive，没有 .git）：behaviour_build 要�
 | 受击 | 每场 2.42 次（126 个 damage 事件；HIT_TAKEN 156 个，含多段链各下），掉血每场 3.0；来源：Envoy（Song Pilgrim 01）49、Choristor（Song Pilgrim 03）37、Reed 24、来源未解析 46（投射物 / Final Hit） |
 | **支撑外命中** | **0**（未知 0；24 次多段 Final Hit 按钩子判，全在支撑内） |
 | FORCED_RISK | 第 0 波 86.6 % 的 tick（23,461 / 27,090），每分钟 17.5 段；选中 S = 0 的计划 3,629 次，全部做过包络（审计相等，core_not_enveloped 0） |
-| 模式 | EVADE 100 %（主角位置的 t_min 一直 < 0.6 s）；监督器 YELLOW 87 %、GREEN 13 %、RED 4 % |
+| 模式 | EVADE 100 %（主角位置的 t_min 一直 < 0.6 s）；监督器 tick 里 YELLOW 83 %、GREEN 13 %、RED 4 % |
 | 击杀 | 52 场共 1 次（AltSlash）；Bind 0、Cogfly 0（第 6 波没到） |
 | tick | 每场 p50 的中位数 7.4 ms、p99 的中位数 15.4 ms（最大 21.6）；规划 p50 3.1 ms / p99 10.4 ms；> 16.7 ms 的 tick 1.0 %（279 / 28,170） |
 | 真退出 | 13 次：13 次暂停、13 次到主菜单、错误确认 0 |
@@ -902,3 +902,25 @@ cd brain   # 冻结检出（git archive，没有 .git）：behaviour_build 要�
 
 - **结论**：框架、记账、决策日志、真退出都正常，支撑外命中 0；但 A0 打不过第 0 波：三只敌人（Reed 扔针 / 刺 / 多段、Envoy 冲锋、Choristor 鞭）同时在场时 0.6 s 视野里几乎找不到不碰支撑的计划（86.6 % FORCED_RISK，这是闭环数字，与 R3 开环的 85–92 % 一致），按"接触帧占比"挑的计划仍在 10 s 内挨 3 下（7 → 4 HP），h = 2 时 Reed 的多段（2 段）在支撑里 → Q3 退出。战术基本没机会出 ENGAGE（EVADE 一直成立），52 场只打死 1 只。
 - 决策日志（`decisions_i<N>.jsonl`）每次受击前 90 tick 都在：典型序列是 CONTINUE / MOVE+跑+出刀 都是 S = 1、`n_safe = 0`（400 行里一行安全的都没有），挨打那一帧才因为无敌帧回到 S = 0。
+
+### 16.3 补充：从波次起点打（`20261005_050427_Forum_A_w2_mix_eval_planner_oracle`，冻结检出 `live_r4_b063cae`，实例 0、1 各 12 场，12 个波次起点轮转，eval、无真退出；报告 `ws_report.json`）
+
+完整连战全停在第 0 波，后面各波的数字从这里来（波次起点没有助战、没有前面波次的残余，见 §13.1）：
+
+| 指标 | 结果 |
+|---|---|
+| 结果 | QUIT 24 / 24（Q3 14：h = 2 且有多段事件——Minister、Reed、Choristor；Q1 10：h = 1 时受击后窗口里退出） |
+| 受击 | 每场 3.04 次，掉血 4.1；按波（真波）：3 → 13、4 → 6、5 → 7、6 → 12、7 → 6、8 → 6、9 → 6、10 → 8、11 → 6、12 → 6、13 → 7；来源：Clawmaiden 本体 15 + 矛 7（第 3、5、10 波）、Minister 4、Clapper 4 + `damager` 6、Reed 1、未解析 46 |
+| 支撑外命中 | **0**（多段 Final Hit 6 次按钩子判） |
+| FORCED_RISK（按真波的 tick 占比） | 3: 92.8 %、4: 95.4 %、5: 94.1 %、6: 87.4 %、7: 68.7 %、8: 84.7 %、9: 90.7 %、10: 94.1 %、11: 90.6 %、12: 93.1 %、13: 见报告（终局两只 Clapper） |
+| 战术 | EVADE 96 %、HOLD 3 %；目标按 tick：Clawmaiden 17,767、Tiny 3,432、Minister 2,496……；Cogfly 投 2 次、Bind 0、击杀 2 |
+| tick | p50 中位数 7.4 ms、p99 中位数 12.9 ms（最大 18.5） |
+| WaveTracker | 30,117 / 30,543 帧一致（98.6 %）：不一致全在波次起点的开头 10–113 帧（跟踪器从 wake 起算第 i 波，但 wake 已被 intro 挪到这一波的激活时刻，`start()` 又加了一次 startDelay；完整连战不受影响）和第 3 波起点的前 10–17 帧 |
+
+### 16.4 R5 / R6 要解决的
+
+1. **FORCED_RISK 太多（87–95 %）**：几只待机敌人的支撑并集（含 3.0 u 的搜索上限余量：Reed 针、Clawmaiden 矛、Minister 格挡、Tiny 冲撞、钟、rune bomb；Envoy 冲锋 2.96 u，§12.2）在 0.6 s 视野里盖住主角能到的几乎所有地方。R5 的终点价值（E / trapped / H_exp）要把主角提前带出"所有出口都会关上"的位置；余量本身（留出残差 p99.9 代替搜索上限）是更大的杠杆，但要重新认证。
+2. **Q3 在 h = 2 时因多段事件退出**（A0 52 / 52，波次起点 14 / 24）：Reed、Choristor、Minister 的多段攻击几乎一直在支撑里，所以 7 面具的主角挨 3 下（7 → 4 HP）就退出。是否放宽 Q3（例如只算主角 t_min 内够得着的多段事件）是 §9 第 2 个决定（你来定）；R5 的 H_exp 项要让主角远离多段源。
+3. **挨打的节奏**：每 3–5 s 一下，主要是 Envoy 冲锋、Choristor 鞭、Clawmaiden 本体和矛；按接触帧占比挑出的 FORCED_RISK 计划会边跑边出刀（`MOVE+run+attack`），这类计划在 FORCED_RISK 时应当降权（R5 的 r̂ / P'）。
+4. **几乎不出手**（76 场共 3 次击杀）：EVADE 一直成立，ENGAGE 没机会；R6 的 BAIT / FOCUS / SPLIT 和惩罚窗口要在"安全出刀空档"里出刀。
+5. WaveTracker：致命一击和 BattleScene 计死亡之间的几帧（§16.2）、波次起点的 startDelay 重复（§16.3）。
