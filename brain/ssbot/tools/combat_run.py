@@ -91,6 +91,11 @@ def make_policy(name: str, view: str = "oracle", run_dir: Path | None = None, in
         # no input (the 2x speed check: forum_policy.IdlePolicy)
         from ssbot.train.forum_policy import IdlePolicy
         return IdlePolicy()
+    if name == "planner" and gauntlet:
+        # the Forum (forum_planner_plan R4): the R3 fast layer over the MultiForecast, LOCAL tactics, Forum supervisor
+        from ssbot.train.forum_planner_policy import ForumPlannerPolicy
+        return ForumPlannerPolicy(view=view, threads=threads, log_dir=run_dir, instance=instance,
+                                  real_quit_p=real_quit)
     if name == "planner":
         from ssbot.train.planner_policy import PlannerPolicy
         pol = PlannerPolicy(view=view, threads=threads, log_dir=run_dir, instance=instance, real_quit_p=real_quit,

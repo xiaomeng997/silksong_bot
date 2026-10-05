@@ -1490,3 +1490,108 @@ identity baseline), `live_r3cert_5d0243b` (superseded).
 7. A recording with the Weighted Anklet equipped to check `with_weighted()` and the 1.3 s post-hit window.
 8. Frozen checkouts to remove when done: `C:\ssbot\live_r3cert_5d0243b`, `live_r3_2a10a0d`, `live_r3kin_d9dd529`,
    `live_r3_0d735f4`, `live_r3_2b8f5c7`, `live_main_fe50ef9` (plain directories, not git worktrees).
+
+## Task R4 - Forum plan round R4: the A0 baseline (branch worktree-wf_89d18409-0b6-1)
+
+Worktree `C:\modeling\silksong_bot\.claude\worktrees\wf_89d18409-0b6-1` (from main 9dddedf). Facts: forum.md section 16
+(Chinese). Frozen checkout `C:\ssbot\live_r4_c86b48e` (git archive of c86b48e + the R3 tables from
+`C:\ssbot\tables\forum_r3_2a10a0d`); outputs `C:\ssbot\data\m2_forum_r4\`; driver `C:\ssbot\sandbox\r4_a0.ps1`
+(log `r4_a0.log`).
+
+### Done (committed)
+
+- `train/forum_planner_policy.py` ForumPlannerPolicy (combat_run `--policy planner` on a gauntlet encounter): the R3
+  fast layer live (ForumPlanner over a MultiForecaster on the production tables, the Forum loadout's kinematics,
+  `with_weighted()` and the 1.3 s post-hit window when `ws.res.equipped` shows the Weighted Anklet - fo_A has none),
+  `forum_supervisor_config` with `unpredicted_sources` (HIT_TAKEN source iids), kill_prims from `forum_yellow_kill_hp`,
+  `FilterContext.kill_hp = forum_kill_hp`; Cogfly throws (Up + QuickCast, 2 frames) gated on the support's t_min;
+  per-wave accounting; the WaveTracker checked against room.battles on every ticked frame (test truth only).
+  The Bell Beast's PlannerPolicy is untouched (bit-identical by construction: no shared code changed except
+  `WaveTracker.current`, which the boss path never calls).
+- Multi-hit chains: a chain's Final Hit (the hero's "Roar and Wound States" FSM, DamageHeroDirectly) is judged at the
+  chain's hook as in R2's recall (`_hook_of`); judged at its own frame it was counted unpredicted (replay 154609 i0 ep0:
+  Choristor Whip Hit 2 Final Hit 20 frames after the hook).
+- `combat/tactics/forum_local.py` ForumTactics (LOCAL: HEAL Q1a / Q6, LEAVE (pocket rule 2), EVADE, ENGAGE with
+  Clawmaiden first and distant Bellbearer / Maestro last, defensive stances hit weight -1, HOLD), `Forum.yaml` v0.
+- `WaveTracker.current(t)`: the wave BattleScene runs (switches at the rule's activation time); `wave` / `t_active`
+  (the forecast's) unchanged.
+- Tools: `forum_policy_replay` (open-loop replay, also warms the numba caches), `forum_a0_report` (6.3 metrics).
+- Tests: `tests/test_forum_tactics.py` (5); test_forum_planner + test_multi_forecast + tactics 54 passed.
+
+- Fixes found live / in the replay: `MultiForecast.known` (ffe0e82: an enemy whose Control FSM never ran is parked, not
+  unknown; wave index 1's Choristors have their Attack FSM disabled until activation, so the first live try
+  `20261005_044825` (22 episodes, void) had known = False on every wave-0 tick and Q3 quit at once); a wave-start
+  savestate starts the WaveTracker at its wave (b063cae).
+
+### Measured (forum.md 16.2-16.3; reports `C:\ssbot\data\m2_forum_r4\a0_report.json`, `ws_report.json`)
+
+- A0, 52 full gauntlets from fo_A (`20261005_045446_Forum_A_eval_planner_oracle`, `live_r4_ffe0e82`, seeds 150000+,
+  eval, oracle, real quits 0.2): QUIT 52 / 52, all Q3 (h = 2 with a multi-hit event in the support: Reed 49,
+  Choristor 3), all in wave 0, p50 10.1 s after the battle start; 2.42 hits per episode = 126 damage events (Envoy 49,
+  Reed 40 = body 24 + Pin Projectile 16, Choristor 37; fixer round, per damage event with the caller path) plus 30
+  Multihit ticks (special_damage, no source; the first report's "Envoy 49, Choristor 37, Reed 24, unresolved 46"
+  counted the 156 HIT_TAKEN); **0 hits outside the support** (24 chain Final Hits judged at their hook; 7 of the 30
+  ticks had no Final Hit and were not judged live, the verifier's offline replay found all 156 inside);
+  FORCED_RISK 86.6 % of the ticks (17.5 streaks / min), EVADE 100 %; chosen S = 0 plans 3,629 = enveloped 3,629; tick
+  p50 / p99 medians 7.4 / 15.4 ms (max 21.6), 1.0 % of ticks > 16.7 ms; real quits 13 / 13 to the main menu, 0 wrong
+  submits; 1 kill in 52 episodes. WaveTracker vs room.battles: live 28,170 / 28,170 frames (wave 0 only); offline full
+  gauntlet replay (154609 i0 ep0, 14 waves) 43,900 / 43,917 (99.96 %: the replay's first frame, wave 3 three frames
+  and wave 5 thirteen frames early).
+- A0 from the 12 wave starts (`20261005_050427_Forum_A_w2_mix_eval_planner_oracle`, instances 0 / 1, 24 episodes):
+  QUIT 24 / 24 (Q3 14, Q1 10), 3.04 hits per episode (72 damage events seen by the policy + 11 Multihit ticks; per
+  true wave 3:12 4:2 5:7 6:12 7:6 8:5 9:3 10:8 11:4 12:6 13:7), FORCED_RISK 65-100 % per wave (wave 2 100 % over 149
+  ticks, wave 13 65.3 %; the first report's 69-95 % missed both), 0 hits outside the support, sources Clawmaiden 22
+  (body 15 + spear 7), Tiny 14, Clapper 13, Reed 12, Minister 4, Bellbearer 3, Choristor 2, unresolved 2;
+  WaveTracker 98.6 % (the wave-start offset, below). Corrected reports: `C:\ssbot\data\m2_forum_r4\fixer\a0_report_v2.json`,
+  `ws_report_v2.json`.
+
+### Running
+
+- Instances 2 / 3: the 1x wave-start collections, restarted by the driver at 05:00 from `C:\ssbot\live_r1cfix_ed65873`
+  (seeds 162000 / 163000, 9 h): `C:\ssbot\data\runs\m2\20261005_050022_Forum_A_w2_mix_data2` (i2) and
+  `20261005_050022_Forum_A_w2_mix_data2_2` (i3); logs `C:\ssbot\sandbox\r4_collect_i2.log` / `_i3.log`. Stop:
+  `combat_run stop <run dir>` from that checkout's brain.
+- Instances 0 / 1 idle (their collections had ended before this round); instance 4 untouched.
+
+### Fixer round (after the verifier; commits 10adf31, 0f517a0, 95fab30 + this)
+
+- Medium: YELLOW's per-enemy kill freeze rule (plan 4.4 item 7) did nothing with a certified support at h >= 2 (the
+  supervisor left the kill to the L0 filter, whose Forum kill_hp is None before the finale). `SupervisorConfig.
+  kills_certifiable` (default True: Bell Beast unchanged), False in `forum_supervisor_config`: YELLOW / RED withhold
+  kill_prims whatever the support and h. Test `test_yellow_withholds_a_freezing_kill_even_when_known_at_h2`.
+- Lows: HIT_TAKEN sources paired by caller path (a blocked damage event gets none); chain hooks keyed by instance
+  (FSM `ent`) with an object-name fallback over every part of the source path; Multihit ticks judged at their own frame
+  (outside: wait 70 frames for the chain's Final Hit, else counted; flushed at the episode end); the Cogfly's second
+  frame dropped on FORCED_RISK / pause pending / supervisor keys; `forum_a0_report` counts hits per damage event
+  (ticks apart, types from the caller path, old records via the recording's events.jsonl). Tests
+  `tests/test_forum_policy_hits.py` (5); targeted suites 133 passed.
+- Refuted claims corrected above and in forum.md 16.2 / 16.3 (hits by source per damage event; wave-start FORCED_RISK
+  65-100 %).
+- Re-measure (forum.md 16.5): the wave-start batch again from `C:\ssbot\live_r4f_0f517a0` (instances 0 / 1, 24
+  episodes, seeds 170000+, run `20261005_054233_Forum_A_w2_mix_eval_planner_oracle`, report
+  `C:\ssbot\data\m2_forum_r4\fixer\ws_report_fix.json`, driver `C:\ssbot\sandbox\r4f_ws.ps1`): QUIT 24 / 24 (Q1 12,
+  Q3 12), 3.33 hits + 0.25 Multihit ticks per episode, 0 outside the support, 0 unknown (6 ticks all inside at their
+  frame, 4 Final Hits with a hook), FORCED_RISK 90.5 % (69-100 % per wave), kills 0 (2 before), tick p99 median
+  14.0 ms, WaveTracker 98.5 %. Full-gauntlet A0 not re-run (its numbers stand; the kill rule hardly matters while the
+  bot only evades).
+- Frozen checkout `C:\ssbot\live_r4f_0f517a0` can go when done.
+
+### Needs deploy
+
+- Nothing (no oracle change).
+
+### Next / open issues
+
+1. The A0 numbers are the baseline: R5 (terminal value: E / trapped / H_exp) and R6 (BAIT / FOCUS / SPLIT) must cut the
+   87-95 % FORCED_RISK; the 3.0 u search-cap margins (Reed needle, Clawmaiden spear, Minister block, Tiny ram, bells,
+   rune bomb) are the biggest lever but need recertification.
+2. Q3 at h = 2 whenever a multi-hit event is in the support ends every attempt after ~3 hits: the person's decision
+   (forum_planner_plan §9 item 2).
+3. WaveTracker: the view counts a death at the killing hit, BattleScene (probably) at HealthManager.Die after the kill
+   freeze (3 / 13 frames early at waves 3 / 5 in the full-gauntlet replay, unverified); on wave starts `start()` adds the
+   start delay to a wake the intro already moved to the activation (10-113 frames at the episode start).
+4. (Fixed in the fixer round: the report resolves types from the caller path and counts ticks apart.) Two damage
+   paths stay unresolved (`Colliders/Collider ParryStance`, `Colliders/Collider Fly`, wave-start batch).
+5. The Cogfly throw is not in the kinematic model (gated on t_min >= 1 s, 2 throws seen); the Weighted Anklet path
+   (with_weighted, 1.3 s window) never ran (fo_A has no anklet).
+6. Frozen checkouts to remove when done: `C:\ssbot\live_r4_c86b48e` (first try, void), `live_r4_ffe0e82`, `live_r4_b063cae`.

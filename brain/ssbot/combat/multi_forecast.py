@@ -327,6 +327,7 @@ class MultiForecaster:
         self.self_haz: dict[int, list] = {}    # hazard iid -> [type, armed, arm_T, arm_pos, last_T, pos, rel_box, vel]
         self.t = getattr(self.boss, "t", 0.0) if self.boss is not None else 0.0
         self.comfort_requests = 0             # comfort queries answered by the plain support (no comfort templates)
+        self.had_state: set[int] = set()      # iids whose Control FSM state was seen at least once (R4: known)
         self._ws: WorldState | None = None
         self.t_wake: float | None = None
 
@@ -374,6 +375,8 @@ class MultiForecaster:
         for iid, tr in self.trackers.items():
             was_dead = tr.dead
             tr.observe(T, evs.get(iid, ()), ents.get(iid))
+            if tr.state is not None:
+                self.had_state.add(iid)
             if was_dead and not tr.dead and tr.table.spec.pooled:
                 tr.revive()
         self.hazards.update(ws)
@@ -832,7 +835,11 @@ class _Builder:
         self._tails(tr)
         # a killed Tiny comes back only through a Maestro's summon: walked on after its death only while one is in play
         if tr.dead and (not sp.pooled or not self._maestro_in_play()) or tr.state is None or tr.t_entry is None:
-            if not tr.dead and tr.state is None and tr.seen_T > -math.inf and not tr.hidden:
+            # unknown: an enemy that had a state and lost it. One whose Control FSM never ran is parked, not in play
+            # (R4 live: wave index 1's Choristor pair has its "Attack" FSM disabled until BattleSceneEnemy enables it
+            # at the wave's activation, so every wave-0 tick was known = False and Q3 quit at h 2)
+            if not tr.dead and tr.state is None and tr.seen_T > -math.inf and not tr.hidden \
+                    and tr.iid in self.fc.had_state:
                 self.unknown.append(tr.iid)
             self.subjects.append(self._subject_row(tr, False, math.inf))
             return

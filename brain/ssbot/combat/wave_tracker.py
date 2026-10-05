@@ -131,6 +131,19 @@ class WaveTracker:
         d = self.waves[w].start_delay_s
         self.queued = (w, t + d - SLACK_S, t + d + SLACK_S)
 
+    def current(self, t: float) -> int:
+        """The wave BattleScene runs at game time t (its currentWave, forum_planner_plan R4): the queued wave from its
+        rule's activation time (the middle of its window) on, before wave 0's activation the queued wave 0
+        (BattleScene reports wave 0 from StartBattle), else the last activated one. `wave` / `t_active` (what the
+        forecast's entries and waiting members use) are not changed by it: the activation is still confirmed by a
+        sighting, or at hi + 0.5 s by the rule, as before (R4: room.battles switched about 30 frames before that
+        fallback at waves 3, 5, 7, 10 and 13, whose members are not in play at once)."""
+        if self.queued is not None:
+            w, lo, hi = self.queued
+            if (w == 0 and self.wave < 0) or (math.isfinite(hi) and t >= 0.5 * (lo + hi) - 1e-6):
+                return w
+        return self.wave
+
     def next_window(self) -> tuple[int, float, float] | None:
         """(wave, earliest, latest activation) of the next wave, None when none is queued yet or the battle is over:
         the queued one, else the running wave's end is not known yet (its members still alive)."""
