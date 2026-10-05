@@ -511,3 +511,29 @@ R1 的记录里有策略造出来的条件，R0 的协变量（|dx| 段、左右
 ### 13.12 结构上不存在的招在表里标出（abad048）
 
 `BehaviourSpec.absent`（招族或 Control 状态 → 理由，理由引用 13.2）：Envoy `EN_HOPSLASH` / `HopSlash Antic`、`EN_ENTRY` / `Wake Pause` / `Wake` / `Black Thread Wake`；Maestro `MA_POINT` / `Point Start`；Bellbearer `Throw Antic Quick`（不是出招起点，是 `Rethrow?` 的永远走不到的分支）。表里多一项 `structurally_absent`，`coverage.families` 里这些招族 `missing` 为 0、带 `absent`；`coverage.json` 的行带 `absent`、`hours_to_target` 0，`behaviour_build` 打印"structurally absent"。这次重建在加这一项之前就开始了，所以用 `behaviour_build --stamp-absent <表目录>` 事后补标（只改这几项，模板和决策不动；表里记 `absent_stamped_by`）。Bell Beast 的表没有这一项。
+
+### 13.13 R0 + R1 重建与认证（R1 ⑤ 的收尾；**认证没有通过，新表不提交，仓库里仍是 R0 的表**）
+
+输出都在 `C:\ssbot\data\m2_forum_r1c\`（不进仓库）：候选表 `tables\forum`、按折支撑与接触 `build_all\extra`、冻结的输入 `build_all\fights.json`、缓存 `cache`（R0 的 107 场是硬链接）、新数据 `fresh\` + `cache_fresh\`、召回 `recall_*.json`、比较 `table_ablation.json`。代码冻结在 `C:\ssbot\live_r1c_off_59e02a1`（构建、扫描、认证同一份；`support_recall` 的配置和 R0 认证时 da1cd41 相同）。
+
+- **输入**：R0 的 107 场完整连战 + R1 的 181 局 1x（`111158` Envoy 专场 106 局、波次 33 局（去掉 3 局 w2 幽灵）、`130403` 4 + 3、`131323` 23 + 8、`143803` 2 + 2；首轮 06a7c2b 的冒烟运行不进）；R0 认证用过的 35 场不进（两边的差只在 R1）；排除清单 `exclude.json`。288 场，30.07 h 战斗时间（R0 25.4 h），341,436 次接触；构建 6.8 h。`hero_height` 被选进不少决策（Clapper `Idle` / `Walk` / `Dmg Attack` / `After Scuttle`，Choristor `Attack Choice` / `Hop Antic` / `Whip 1/2/4`，Minister `Attack` / `Parry Stance`，Reed `Check Pos` / `Lock R High` / `Parry Slash` / `Throwing Up?`，Envoy `Charge`，Tiny `Defend Ready`）；受保护的 Envoy 去掉了 2,779 个决策、3,867 段停留（`protected Song Pilgrim 01: ...`，HP ≤ 20 时从"主角打中才走"的状态出去的，13.8）。Envoy 实例：普通斩 692 → 3,742、跳斩 241 → 1,440、冲锋 385 → 796、**伏击 107 → 240（≥ 200）**；Choristor 斩 / 鞭 / 跳 1,377 / 1,309 / 914 → 2,920 / 2,217 / 1,530；Reed 各招 +40–60 %；其余 +5–20 %。样本内验证仍不通过（R0 也是，`--allow-failed-validation`）：未覆盖 71、来源没导出 24、攻击外 59 次；留出超 R_FAIL 的比例 0–0.54 %（Clawmaiden 最高）。
+- **新数据（认证用）**：构建开始（15:03）之后才开始、19:58 冻结时已关闭的全部 1x 局：实例 0 / 1 的完整连战 38 场（fo_A，v1 策略，`154609` / `154612`）、实例 2 / 3 的波次起点 132 局（含 w2，`155649` / `162411`）、2x 检查的 1x 两臂 32 局；202 场、175,437 次接触（每个滞后 173,908 次非后续）。2x 的局一律不进。
+- **开发（三份不相交，288 场）**：每个滞后 339,537 次，L2 100 %、L3 / L4 99.9997 %（各 1 次：R0 开发集里就漏的那次 Clawmaiden `Slash 5`，`074719` i3/ep5 f281119）。
+- **认证（新数据，生产余量）**：折 0 的表 L2 / L3 / L4 全 100 %；**折 1 的表 L3、L4 各漏 1 次**（99.9994 %）：`20261004_162411` i3/ep9（w3 读档，只有一只 Clawmaiden）f482061，`damage_blocked`（无敌帧里的碰撞），来源 `Slash Collider 1`，发生在 `Slash 2` 的第 0 帧；起点（f − 3 / f − 4）在 `Slash Antic` 0.475–0.492 s。`Slash 1` 只有 2 帧（482059–482060），`Slash Collider 1` 在这两帧启用，482061 时导出里已换成 `Slash Collider 2`，游戏在 482061 报告了碰到 `Slash Collider 1`。这两帧里 Clawmaiden 前冲了 0.66 u（x 29.34 → 28.68），主角在它前方 4.4 u 左右、向左退。停留区间都在表里（`Slash Antic` [0.500, 0.517] s、`Slash 1` [0.025, 0.055] s），所以是**空间上**没盖住：按状态的模板 + CM_SLASH 余量 0.7048 u + 家族并集（锚在攻击开始处）在折 1 的表里到不了这个位置。
+- **结论**：按 R0 的协议（三份不相交、新数据、L = 2 / 3 / 4 留出召回 100 %）**没有通过**，新表不提交，`knowledge/1.0.30000/enemies/forum/` 仍是 R0 的表和 `support_margins.json`（只补了 13.12 的结构性标记）。
+- **消融（同一批 202 场新数据，R0 的表 + R0 的生产余量）**：**R0 的表漏的是同一次**（折 1，L3 / L4），折 0 全 100 %。所以 R0 在 35 场上的"认证"被这批新数据推翻了（`support_margins.json` 里 `certified: true` 只是那 35 场的结果；Forum 的 `known` 不能据此置真）。加了 R1 之后：要靠预测以外的结构项覆盖的接触变少（攻击中的伤害框管每个滞后 38–41 → 25–26 次，无名来源候选 29 / 26 / 25 → 25 / 21 / 17，同名候选 54–58 不变，待机身体管 506–535 → 484–528）；生产余量变化：**Minister 冲刺 0.19 → 3.0 u（搜索上限）**、Envoy 冲锋 2.96 → 3.0、Tiny 防御 0.98 → 0.76、Maestro 斩 0.54 → 0.39、Reed 闪避 0.14 → 0.02、Envoy 跳斩 0.07 → 0。召回一样，R1 的数据让结构项少用了一些，但 Minister 冲刺的余量撞到上限（R1 的冲刺近身 / 拼刀把它的留出残差推到 3 u 以外），代价更高。
+- 下一步是 R2 的事，不是数据量：Clawmaiden 斩是边冲边砍的招（R0 已指出会移动的攻击家族要按当前位置重新锚定，12.2），这次的漏网正是前冲两帧里的第一段碰撞体；改了预测结构之后要再找一批没见过的数据认证（这 202 场现在也"见过"了）。
+
+### 13.14 复现（收尾轮）
+
+```
+cd brain
+..\scripts\uv.cmd run python -m ssbot.probes.forum_r1 hello --instance 2
+..\scripts\uv.cmd run python -m ssbot.probes.forum_r1 check --instance 2 --waves 2,3,4,9,10 --seconds 10
+..\scripts\uv.cmd run python -m ssbot.probes.forum_r1 skip --instance 2 --method oracle --wave 13 --seconds 8
+# 2x 检查：C:\ssbot\sandbox\r1c_speed.cmd idle1 | idle2 | data1 | data2，然后
+powershell -File C:\ssbot\data\m2_forum_r1c\speed\run_checks.ps1 -Pol idle -A <1x 运行> -B <2x 运行>     # 以及 run_checks2.ps1
+..\scripts\uv.cmd run python -m ssbot.tools.forum_speed_check --a <1x> --a-slice 0:8 --b <1x> --b-slice 8:16 --simulate-b 2 --inject dwell:*:*:+0.033333
+# 表与认证：C:\ssbot\data\m2_forum_r1c\pipeline_build.ps1、pipeline_cert.ps1、ablation_early.ps1（命令在脚本里）
+..\scripts\uv.cmd run python -m ssbot.tools.behaviour_build --encounter Forum --stamp-absent ..\knowledge\1.0.30000\enemies\forum
+```
