@@ -421,6 +421,26 @@ def test_coarse_and_bounding_box_forms_are_supersets():
         assert not (want & ~got).any()
 
 
+def test_forecasters_sharing_tables_agree():
+    """A second forecaster on the same tables (the next fight in the process) reuses the family walk ids: a key
+    registered again used to take the next new key's id, so one family walk got another's box table."""
+    tabs = _tables()
+    script = _script_stab()
+    tk = np.arange(0, 49) * BIN
+    rng = np.random.default_rng(4)
+    X = np.repeat(rng.uniform(15.0, 26.0, (400, 1)), len(tk), axis=1)
+    Y = np.repeat(rng.uniform(2.0, 8.0, (400, 1)), len(tk), axis=1)
+    out = []
+    for _ in range(3):
+        mf = MultiForecaster(tabs, ORACLE, waves=False)
+        mf.warm()
+        _run(mf, script[:12])
+        out.append(mf.forecast(0.8).occupied(X, Y, tk))
+    ids = {k: v for k, v in tabs.store.coarse_keys.items() if k.startswith("fwalk/")}
+    assert len(set(ids.values())) == len(ids)
+    assert out[0].any() and np.array_equal(out[0], out[1]) and np.array_equal(out[0], out[2])
+
+
 def test_family_walk_boxes_cover_the_per_state_walk():
     tabs = _tables()
     mf = MultiForecaster(tabs, ORACLE, waves=False)

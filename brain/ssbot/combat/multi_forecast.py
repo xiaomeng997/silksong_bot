@@ -397,6 +397,11 @@ class MultiForecaster:
         if key in self._fwalk:
             return self._fwalk[key]
         store = self.tables.store
+        skey = f"fwalk/{tt.tk}/{fam}/{start}/{frame}"
+        i = store.coarse_keys.get(skey)
+        if i is not None and i in store._bb:          # built by an earlier forecaster on these tables
+            self._fwalk[key] = i
+            return i
         parts = []
         for nd in walk(tt, start, (fam, start), False, False, instance_only=True):
             tid = self.tables.key_id(fam, TAIL if nd.state == TAIL else nd.state, frame)

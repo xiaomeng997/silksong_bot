@@ -221,7 +221,12 @@ class TemplateStore:
 
     def add_coarse_base(self, key: str, t: hb.SpaceTimeTemplate | None) -> int:
         """Register a template on the coarse grid (cell COARSE_U) as a coarse-only base (None: a bbox-only id whose
-        table is given to add_bbox)."""
+        table is given to add_bbox). A key registered before keeps its id (a new id would take the next key's)."""
+        i = self.coarse_keys.get(key)
+        if i is not None:
+            if t is not None:
+                self._pooled[i] = t
+            return i
         i = -(len(self.coarse_keys) + 1)
         self.coarse_keys[key] = i
         self._base_key[i] = key
