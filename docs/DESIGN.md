@@ -906,6 +906,7 @@ A 类 = 以 2 格攻击为主的 boss 或连战；B 类 = 竞技场、小 boss�
   - **最先舍：** 丝轴碎片、Sting Shard、Memory Locket #3。
   - **Ascendant's Grip（爬墙爪）暂列必留**（2026-10-02 起）：Forum 末波的左墙顶口袋和 Dancers 的贴角都靠它；K1 实测后再定。
   - **仅 A/B，默认不做：** Faydown（除非 Wardenfly 迫使）、Injector Band、Pollip Pouch。
+  - **待评估（2026-10-05，你）：** 蓄力斩 Needle Strike（`hasChargeSlash`，Pinstress 教；High Halls 的社区存档有它，我们的路线没有：`Room_Pinstress` 从路线这边要过 Great Conchflies 的闸门，那是永不交战，benches.md §3.2；另一侧 `Coral_34` 通 Sands of Karak 未查）；蓄力 1.35 s（普通一刀之后才开始计时），伤害倍数未查。
   - **待评估（2026-10-05，你）：** 打掉 `Hang_14` 的丝线机关（`marionettesBurned`）后 Forum 三只 Clawmaiden 开波即死（forum.md）；你说要二段跳才上得去，路线要求和绕路时间待查，若要 Faydown 则连同 Faydown 的绕路一起算价值。
   - **付费 / 有条件的工作台（2026-10-03，你的问题"路线包括买椅子吗"）：** 原路线没有单独列。价值 = 附近 A 类遭遇的预期退出次数 × 每次少走的回撤时间（紧急退出估计约 4.5 次 × 380 s）− 购买的念珠和绕路时间；路线调研从游戏数据列出全部付费 / 有条件工作台（位置、价格、条件），按此排序。**不买地图**：导航用离线提取的世界图（§3.4）。
 - **Fourth Chorus、Moorwing、Sister Splinter 的打/跳决定**在 M1 前由你的游玩和社区路线定下；凡是要打的 boss 都算 A 类，配 playbook 和门槛。
