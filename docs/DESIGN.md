@@ -906,7 +906,7 @@ A 类 = 以 2 格攻击为主的 boss 或连战；B 类 = 竞技场、小 boss�
   - **最先舍：** 丝轴碎片、Sting Shard、Memory Locket #3。
   - **Ascendant's Grip（爬墙爪）暂列必留**（2026-10-02 起）：Forum 末波的左墙顶口袋和 Dancers 的贴角都靠它；K1 实测后再定。
   - **仅 A/B，默认不做：** Faydown（除非 Wardenfly 迫使）、Injector Band、Pollip Pouch。
-  - **待评估（2026-10-05，你）：** 十字绣 Cross Stitch（丝技 `Parry`：格挡姿态里挨任何 ENEMY 伤害都挡下并反击，无敌 0.35 s，含 Clapper 的锤和本体；耗丝、占技能槽）。你说的路线：罪途 → 迷雾 → 管风琴 → 圣堡地铁站，可能比走蚀阶快（限时送货任务时就比蚀阶快）；要和 S17（蚀阶 → Grand Gate → Last Judge）比：路程、途中的 A 类战斗（钢魂风险）、是否仍需 Last Judge 才能进入 Act 2、十字绣对 Forum 的价值。
+  - **待评估（2026-10-05，你）：** 十字绣 Cross Stitch（丝技 `Parry`：格挡姿态里挨任何 ENEMY 伤害都挡下并反击，无敌 0.35 s，含 Clapper 的锤和本体；耗丝、占技能槽）。你说的路线：罪途 → 迷雾 → 管风琴 → 圣堡地铁站，可能比走蚀阶快（限时送货任务时就比蚀阶快）；要和 S17（蚀阶 → Grand Gate → Last Judge）比：路程、途中的 A 类战斗（钢魂风险）、是否仍需 Last Judge 才能进入 Act 2（你：这条路打的是 Phantom，打死拿十字绣，不用打 Last Judge）、Phantom 的 A 类风险、十字绣对 Forum 的价值。
   - **待评估（2026-10-05，你）：** 蓄力斩 Needle Strike（`hasChargeSlash`，Pinstress 教；High Halls 的社区存档有它，我们的路线没有：`Room_Pinstress` 从路线这边要过 Great Conchflies 的闸门，那是永不交战，benches.md §3.2；另一侧 `Coral_34` 通 Sands of Karak 未查）；蓄力 1.35 s（普通一刀之后才开始计时），伤害倍数未查。
   - **待评估（2026-10-05，你）：** 打掉 `Hang_14` 的丝线机关（`marionettesBurned`）后 Forum 三只 Clawmaiden 开波即死（forum.md）；你说要二段跳才上得去，路线要求和绕路时间待查，若要 Faydown 则连同 Faydown 的绕路一起算价值。
   - **付费 / 有条件的工作台（2026-10-03，你的问题"路线包括买椅子吗"）：** 原路线没有单独列。价值 = 附近 A 类遭遇的预期退出次数 × 每次少走的回撤时间（紧急退出估计约 4.5 次 × 380 s）− 购买的念珠和绕路时间；路线调研从游戏数据列出全部付费 / 有条件工作台（位置、价格、条件），按此排序。**不买地图**：导航用离线提取的世界图（§3.4）。
