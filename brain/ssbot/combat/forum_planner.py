@@ -366,6 +366,11 @@ class ForumPlanner(Planner):
                     s[n] |= bool(o2.any())
         return s
 
+    @staticmethod
+    def _s1_frames(T1: int) -> np.ndarray:
+        """Stage 1's frames: 1-3 each, then every other one, and the last."""
+        return np.unique(np.concatenate([np.arange(1, min(4, T1)), np.arange(5, T1, 2), [T1 - 1]])).astype(np.int64)
+
     # ---- the tick ----
 
     def tick(self, ws, start: np.ndarray, hold: HoldState, prefix: np.ndarray, f, prefs, ctx: FilterContext
@@ -402,17 +407,22 @@ class ForumPlanner(Planner):
         t1 = time.perf_counter()
         # ---- stage 1: the nominal lane, its box centre against the support ----
         r1 = kin.rollout(start, latched, params, self.terrain, threads=cfg.threads)
+        t1r = time.perf_counter()
         T1 = P + T + 1
         tk = np.arange(T1, dtype=np.float64) * params.frame_time
         enemy_only = not any(fm.hazard for fm in f.fc.model.families.values())
-        cx = 0.5 * (r1.box[..., 0] + r1.box[..., 2])
-        cy = 0.5 * (r1.box[..., 1] + r1.box[..., 3])
-        occ1 = f.occupied(cx, cy, tk)
+        # the first frames each, then every other one: a contact found is real, so S1 stays a necessary condition;
+        # a row in contact only on a skipped frame passes on to the envelope
+        fr = self._s1_frames(T1)
+        cx = 0.5 * (r1.box[:, fr, 0] + r1.box[:, fr, 2])
+        cy = 0.5 * (r1.box[:, fr, 1] + r1.box[:, fr, 3])
+        o = f.occupied(cx, cy, tk[fr])
         if enemy_only:
-            occ1 &= (r1.flags & F_INVULN) == 0
-        occ1[:, 0] = False
+            o &= (r1.flags[:, fr] & F_INVULN) == 0
+        occ1 = np.zeros((N, T1), bool)
+        occ1[:, fr] = o
         S1 = occ1.any(axis=1)
-        share = occ1.mean(axis=1)                 # FORCED_RISK's ranking without exact_p: time in contact
+        share = o.mean(axis=1)                    # FORCED_RISK's ranking without exact_p: time in contact
         t_hit = np.where(S1, occ1.argmax(axis=1), T1)
         t2 = time.perf_counter()
         sc = self._score_forum(ws, r1, latched, start, f, prefs, tk)
@@ -616,5 +626,5 @@ class ForumPlanner(Planner):
                           "S": S, "Hz": hz, "U": U, "core_mask": core, "env": env}
         res.t_ms = {"filter": (t1 - t0) * 1e3, "rollout": (t2 - t1) * 1e3, "score": (t3 - t2) * 1e3,
                     "envelope": (t4 - t3) * 1e3, "prob_bind": (t5 - t4) * 1e3, "select": (t6 - t5) * 1e3,
-                    "total": (t6 - t0) * 1e3}
+                    "total": (t6 - t0) * 1e3, "s1_rollout": (t1r - t1) * 1e3, "s1_support": (t2 - t1r) * 1e3}
         return res
