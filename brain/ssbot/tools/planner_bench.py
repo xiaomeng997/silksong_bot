@@ -284,7 +284,8 @@ def forum_multi_bench(a: argparse.Namespace) -> int:
                                           "forecast": round((a2 - a1) * 1e3, 3),
                                           **{k: round(v, 3) for k, v in res.t_ms.items()},
                                           **{k: li[k] for k in ("stage1_pass", "enveloped", "core_pass", "prio",
-                                                                "hitfx", "react", "capped", "cut", "overrun")},
+                                                                "hitfx", "react", "capped", "uncapped", "cut",
+                                                                "overrun")},
                                           "forced": bool(res.forced_risk)})
         if n > 50:
             t_up.append((a1 - a0) * 1e3)

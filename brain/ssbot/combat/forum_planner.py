@@ -113,6 +113,8 @@ class EnvelopeAudit:
     hit_branches: int = 0
     reactions: int = 0
     capped: int = 0
+    uncapped_ticks: int = 0       # ticks without a safe row whose capped rows got their hit branch uncapped
+    uncapped_rows: int = 0
     core_not_enveloped: int = 0   # core rows past stage 1 left without the envelope (must stay 0)
 
     def as_dict(self) -> dict:
@@ -632,6 +634,8 @@ class ForumPlanner(Planner):
         a.hit_branches += budget["hitfx"]
         a.reactions += budget["react"]
         a.capped += budget["capped"]
+        a.uncapped_ticks += int(budget.get("uncapped", 0) > 0)
+        a.uncapped_rows += budget.get("uncapped", 0)
         a.overrun += int(overrun)
         a.deadline_cut += int(cut)
         a.core_not_enveloped += int((core & pass1 & ~env).sum())
