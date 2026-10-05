@@ -552,6 +552,19 @@ class GauntletBuilder:
                 leaf = parts[-1] if parts else None
                 cands = [s for s in subjects.values() if ent(s) is not None and leaf and
                          _box_dist(ent(s), box, leaf)[0] < math.inf]
+                if cands and not any(_box_dist(ent(s), box, leaf)[0] <= TOUCH_U for s in cands):
+                    # none of this frame's exporters touches the hero: one whose collider of that name touched it
+                    # within the export lag turned it off on this frame (run 20261004_111158 i3/ep10 f400125: the
+                    # last frame of a blocked stretch, when the adjacent Minister's "Collider AttackAntic" was off and
+                    # the other Minister's, 8 u away, had just come on; that one got the contact and MI_CHARGE's
+                    # held-out residual went past the 3 u search cap, R1 close-out review)
+                    for snap in back or ():
+                        recent = [s for s in subjects.values() if snap.get(s.iid) is not None and
+                                  _box_dist(snap.get(s.iid), box, leaf)[0] <= TOUCH_U]
+                        if recent:
+                            self.counters["contacts named by a collider child only (touching up to LAG_F before; "
+                                          "this frame's exporters far)"] += 1
+                            return min(recent, key=lambda s: _box_dist(snap.get(s.iid), box, leaf)[0]).iid
                 if cands:
                     self.counters["contacts named by a collider child only (subject exporting it)"] += 1
                 for snap in back or ():       # the collider was swapped out within the export lag
