@@ -189,6 +189,10 @@ class SupervisorConfig:
     q4_total_hits: int | None = None           # with q4_per_instance: the attempt-wide cap (None: none)
     post_hit_window_s: float = POST_HIT_WINDOW_S   # the Weighted Anklet's i-frames 1.30 s (probes.md):
     #                                            forum_supervisor_config(weighted=True)
+    q3_chain_max_damage: int | None = None     # Q3's multi-hit clause: None = any event of hits > 1 quits at h = 2 (Bell
+    #                                            Beast, unchanged); an int = a chain whose measured total damage is at
+    #                                            most this counts as one hit of that damage (the person 2026-10-05:
+    #                                            "a chain of at most 2 masks is one 2-mask hit; quit only at h = 1")
     kills_certifiable: bool = True             # can the L0 filter certify a kill of kill_prims' subjects (the planner
     #                                            has kill branches, safety_filter.kill_certified)? False (the Forum
     #                                            until R5: no kill branches, and the L0 filter's kill_hp is only the
@@ -415,14 +419,17 @@ def base_tier(h: int | None, plan_s: int | None, support_known: bool = True) -> 
     return RED
 
 
-def q3_threat(support: Sequence[SupportEvent], support_known: bool = True) -> str | None:
-    """Why the support makes h = 2 a quit (Q3), or None."""
+def q3_threat(support: Sequence[SupportEvent], support_known: bool = True,
+              chain_max_damage: int | None = None) -> str | None:
+    """Why the support makes h = 2 a quit (Q3), or None. chain_max_damage (SupervisorConfig.q3_chain_max_damage):
+    a multi-hit event whose total damage is at most this is one hit of that damage, which hits_to_death already
+    counts in h, so it does not quit at h = 2 by itself."""
     if not support_known:
         return "the support is unknown"
     for e in support:
         if not e.mask_covers:
             return f"{e.source} bypasses the mask"
-        if e.hits > 1:
+        if e.hits > 1 and (chain_max_damage is None or e.damage > chain_max_damage):
             return f"{e.source} is a {e.hits}-hit event"
         if e.hazard:
             return f"{e.source} is a hazard"
@@ -587,7 +594,7 @@ class Supervisor:
             out.append(("Q2", "I2 broken, no escape within "
                               f"{cfg.q2_escape_s} s" + ("" if inp.escape_s is None else f" ({inp.escape_s:.2f} s)")))
         if h == 2:
-            why = q3_threat(support, known)
+            why = q3_threat(support, known, cfg.q3_chain_max_damage)
             if why:
                 out.append(("Q3", f"h = 2 and {why}"))
         if cfg.q4_per_instance:
@@ -801,7 +808,7 @@ def forum_supervisor_config(weighted: bool = False, **kw) -> SupervisorConfig:
     False: R3 has no kill branches and the L0 filter's kill_hp is only the battle's last blow (forum_kill_hp), so
     YELLOW / RED withhold the primitives that may kill an enemy whose kill freezes the game (forum_yellow_kill_hp)
     even with a certified support and h >= 2 (R4 fixer round; before, neither layer held such a kill back)."""
-    d = dict(worst_known_damage=2, q4_per_instance=True, q4_total_hits=3, kills_certifiable=False,
+    d = dict(worst_known_damage=2, q4_per_instance=True, q4_total_hits=3, kills_certifiable=False, q3_chain_max_damage=2,
              post_hit_window_s=WEIGHTED_POST_HIT_WINDOW_S if weighted else POST_HIT_WINDOW_S)
     d.update(kw)
     return SupervisorConfig(**d)

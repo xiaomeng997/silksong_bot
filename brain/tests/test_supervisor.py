@@ -570,3 +570,14 @@ def test_bind_reserve_at_full_hp_is_opt_in():
     assert not v.ok and "Bind reserve" in v.reason
     assert sv.silk_spend_allowed(13, 4, 5, 5, reserve_at_full_hp=True).ok
     assert not sv.silk_spend_allowed(13, 4, 4, 5, reserve_at_full_hp=True).ok     # a skill below full HP: never
+
+
+def test_q3_forum_chain_of_two_masks_is_one_hit():
+    """The person 2026-10-05: a multi-hit chain of at most 2 masks counts as one 2-mask hit; quit only at h = 1."""
+    chain2 = (SupportEvent("Choristor whip", 2, hits=6),)
+    chain3 = (SupportEvent("long chain", 3, hits=3),)
+    assert sv.q3_threat(chain2) == "Choristor whip is a 6-hit event"            # Bell Beast default: unchanged
+    assert sv.q3_threat(chain2, chain_max_damage=2) is None
+    assert sv.q3_threat(chain3, chain_max_damage=2) == "long chain is a 3-hit event"
+    assert sv.forum_supervisor_config().q3_chain_max_damage == 2
+    assert sv.SupervisorConfig(worst_known_damage=2).q3_chain_max_damage is None
