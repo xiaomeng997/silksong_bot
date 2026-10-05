@@ -48,6 +48,7 @@ Tinies starting the same family (one anchor box covering the members) instead of
 The single-boss path is untouched: MultiForecaster(boss=fc) wraps a Forecaster and its forecast delegates every query
 to the boss's Forecast (bit-identical: tests/test_multi_forecast.py and tools/multi_recall bellbeast).
 """
+import copy
 import json
 import math
 from collections import defaultdict
@@ -63,7 +64,7 @@ from ssbot.combat.fastquery import circle_hits
 from ssbot.combat.forecast import active_within, entry_grid, exit_interval
 from ssbot.combat.projectiles import BELL, HAZARD_DV_U_S, RUNE, SKIN_U, HazardPath, HazardTracker, hazard_type
 from ssbot.combat.wave_tracker import WaveTracker
-from ssbot.core.forum import FORUM_TYPES, FORUM_WAVES, HAZARD_ALIASES, HAZARD_OWNER, _type_key
+from ssbot.core.forum import FORUM_TYPES, FORUM_WAVES, HAZARD_ALIASES, HAZARD_OWNER, WAVE_TYPES, _type_key
 from ssbot.core.worldstate import ORACLE, Ev, WorldState
 from ssbot.knowledge import hitbox_tables as hb
 from ssbot.safety.hits_to_death import SupportEvent, SupportSet
@@ -471,6 +472,33 @@ class MultiForecaster:
         if self.use_waves:
             b.entries()
         return b.finish()
+
+    def forecast_if_killed(self, iids, horizon_s: float = MIN_HORIZON_S, origin_t: float | None = None,
+                           clamp: bool = True) -> "MultiForecast":
+        """The forecast as if the enemies iids died now (a kill's value; forum_planner_plan §4.4 item 6, the
+        consistency audit): each one's tracker ends its instance and dies at the origin (its death tail), the wave
+        tracker counts the kills (a wave's last member queues the next wave). The real state is left as it was."""
+        if self.boss is not None:
+            raise NotImplementedError("the single-boss path has its own kill handling")
+        T = self.t if origin_t is None else origin_t
+        keep_tr, keep_waves = self.trackers, self.waves
+        try:
+            self.trackers = dict(keep_tr)
+            self.waves = copy.deepcopy(keep_waves)
+            for i in iids:
+                tr = keep_tr.get(i)
+                if tr is None or tr.dead:
+                    continue
+                t2 = copy.copy(tr)
+                t2.cur = copy.copy(tr.cur)
+                t2.ends = list(tr.ends)
+                t2.kill(T)
+                self.trackers[i] = t2
+                if self.use_waves and tr.tk in WAVE_TYPES:
+                    self.waves._kill(T)
+            return self.forecast(horizon_s, origin_t, clamp)
+        finally:
+            self.trackers, self.waves = keep_tr, keep_waves
 
 
 def _window_union(rows: np.ndarray, offs: np.ndarray, nt: int, b_lo: np.ndarray, b_hi: np.ndarray) -> np.ndarray:

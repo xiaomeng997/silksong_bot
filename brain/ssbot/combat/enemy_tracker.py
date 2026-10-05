@@ -94,11 +94,11 @@ class EnemyTracker:
 
     # ---- the walk's segmentation ----
 
-    def _end(self, T: float) -> None:
+    def _end(self, T: float, tail: bool = True) -> None:
         c = self.cur
         if c is not None:
             c.t_end = T
-            if c.anchor is not None:
+            if c.anchor is not None and tail:
                 self.ends = [e for e in self.ends if T - e.t_end <= TAIL_KEEP_S] + [c]
         self.cur = None
 
@@ -115,9 +115,7 @@ class EnemyTracker:
         self.in_play = to not in sp.waiting
         cur, idle = self.cur, sp.idle_family
         if to in sp.death_states:
-            if cur is not None:
-                self._end(T)
-            self._die(T)
+            self.kill(T)
         elif to in tb.attack_starts and cur is not None and cur.family == tb.attack_starts[to] and to != cur.start:
             pass
         elif to in tb.attack_starts:
@@ -136,10 +134,14 @@ class EnemyTracker:
             self.t_dead = T
             self.death_box = self.box if self.box is not None else self.seen_box
         self.dead = True
+        self.ends = []
 
     def kill(self, T: float) -> None:
+        """Death: the instance ends without a tail and the ended ones' tails go (the export drops a killed enemy on
+        its kill frame and its colliders hurt on that frame only: forum.md death_tails, covered by the death box;
+        forum_planner_plan §4.4 item 6: a kill must not enlarge the danger zone)."""
         if self.cur is not None:
-            self._end(T)
+            self._end(T, tail=False)
         self._die(T)
 
     # ---- per frame ----

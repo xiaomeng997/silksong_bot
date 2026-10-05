@@ -3,6 +3,7 @@ projectiles, wave_tracker; ssbot.core.forum). Synthetic tables of one type (a Re
 family) for the walk, the placements and the queries; the static facts against the builder and the encounter; the
 structurally absent moves; the vision-legal discipline; the Bell Beast wrap bit for bit on the fixture windows."""
 import inspect
+import json
 import math
 
 import numpy as np
@@ -281,6 +282,68 @@ def test_forecast_covers_the_attack_drops_the_dead_and_answers_the_interface():
     f2 = mf.forecast(0.8)
     near = f2.occupied(np.full((1, 31), 20.0), np.full((1, 31), 5.0), tk)[0]
     assert near[:2].any() and not near[5:].any()
+
+
+def test_a_kill_never_enlarges_the_danger_zone_and_the_what_if_leaves_the_state():
+    """forum_planner_plan §4.4 item 6: killed mid-stab, the Reed leaves its death box (3 bins) and no tail; the what-if
+    forecast is inside the real one around it, and the real state is untouched."""
+    tabs = _tables()
+    mf = MultiForecaster(tabs, ORACLE, waves=False)
+    script = _script_stab()
+    _run(mf, script[:17])                                  # f 16: Stab 1 entered
+    tk = np.arange(0, 61) * BIN
+    g = np.arange(-4.0, 4.01, 0.25)
+    gx, gy = np.meshgrid(20.0 + g, 5.0 + g, indexing="ij")
+    X = np.repeat(gx.reshape(-1, 1), len(tk), axis=1)
+    Y = np.repeat(gy.reshape(-1, 1), len(tk), axis=1)
+    f = mf.forecast(1.1)
+    fk = mf.forecast_if_killed([7], 1.1)
+    base, kill = f.occupied(X, Y, tk), fk.occupied(X, Y, tk)
+    assert kill.any() and not (kill & ~base).any()
+    assert not kill[:, 4:].any()                           # the death box only: 3 bins from the kill
+    assert {b[1] for b in fk.boxes} == {"death"}
+    tr = mf.trackers[7]
+    assert not tr.dead and tr.cur.family == "RE_STAB" and tr.cur.t_end is None
+    assert np.array_equal(mf.forecast(1.1).occupied(X, Y, tk), base)
+    # the recorded kill: no tail of the stab either
+    _run(mf, script[17:26])
+    assert mf.trackers[7].dead and mf.trackers[7].ends == []
+
+
+def _tiny_tables() -> EnemyTables:
+    """The synthetic Reed's tables as a pooled type (the Maestro's Tinies: prefix AT)."""
+    tiny = "Song Automaton Tiny"
+    d = json.loads(json.dumps(_reed_table()).replace("RE_", "AT_"))
+    tt = type_table(d, FORUM_TYPES[tiny])
+    store = EnemyTables._store([{k.replace("RE_", "AT_"): v for k, v in _templates().items()}])
+    tubes = Tubes({tiny: [0.0] + [0.05 * k for k in range(1, 41)]}, {tiny: 50.0}, {tiny: BODY})
+    return EnemyTables({tiny: tt}, store, tubes, {}, True, "synthetic", {})
+
+
+def test_tiny_group_placement_covers_its_members_with_fewer_rows():
+    """With >= TINY_GROUP Tinies, the instances the ones within TINY_CLUSTER_U of each other may start are placed once
+    per cluster (one anchor box over the members): a superset of the per-Tiny placements, fewer rows."""
+    tiny = "Song Automaton Tiny"
+    tabs = _tiny_tables()
+    xs = {1: 20.0, 2: 21.5, 3: 23.0, 4: 40.0}
+
+    def run(group: int):
+        mf = MultiForecaster(tabs, ORACLE, waves=False, tiny_group=group)
+        evs = [Event(Ev.FSM_TRANSITION, 0, 0.0, FsmTransition(enemy_id=i, type_key=tiny, fsm="Control",
+                                                               to_state="Alert")) for i in xs]
+        ents = [_ent(i, x, 5.0, "Alert", tk=tiny) for i, x in xs.items()]
+        _run(mf, [(0, 0.0, ents, evs), (1, BIN, ents, [])])
+        return mf.forecast(0.8)
+
+    grouped, single = run(mfm.TINY_GROUP), run(0)
+    assert grouped.groups and set().union(*grouped.groups.values()) | set(grouped.groups) == {1, 2, 3}
+    assert grouped.n_bbox < single.n_bbox
+    tk = np.arange(0, 49) * BIN
+    rng = np.random.default_rng(3)
+    X = np.repeat(rng.uniform(15.0, 45.0, (800, 1)), len(tk), axis=1)
+    Y = np.repeat(rng.uniform(2.0, 9.0, (800, 1)), len(tk), axis=1)
+    a, b = grouped.occupied(X, Y, tk), single.occupied(X, Y, tk)
+    assert b.any() and not (b & ~a).any()
 
 
 def test_idle_enemy_is_its_body_tube_and_the_attacks_it_may_start():
