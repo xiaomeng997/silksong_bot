@@ -288,7 +288,101 @@ def test_speed_check_grid_and_holm():
 
     res = perm_tests(arm(-1), arm(7), 10, n_perm=100, n_perm_max=2000)["dwell"]
     assert [k for k, _ in res["holm_significant"]] == ["T/S7"], res["holm_significant"]
-    assert not res["underpowered"]
+    assert not res["underpowered"] and res["underpowered_keys"] == 0
+
+
+def _fight_arm(fights):
+    """An Arm of per-fight Arms (each fight: fn(one) fills it)."""
+    from ssbot.tools.forum_speed_check import Arm
+    a = Arm()
+    for fill in fights:
+        one = Arm()
+        fill(one)
+        a.merge(one)
+        a.per_fight.append(one)
+    return a
+
+
+def test_speed_check_visit_rate_and_successors():
+    """A self-loop that runs on another clock (Song Automaton Tiny Control "Ready" at 2x, R1 close-out review):
+    the same time in the state and the same exits elsewhere, fewer self-loops. The visits and next metrics catch it;
+    the dwell test sees only longer stays."""
+    import numpy as np
+
+    from ssbot.tools.forum_speed_check import perm_tests
+    rng = np.random.default_rng(3)
+
+    def fight(loops):
+        def fill(one):
+            n_loop = int(rng.poisson(loops))
+            n_out = int(rng.poisson(20))
+            one.trans[("T", "Ready")]["Ready"] = n_loop
+            one.trans[("T", "Ready")]["Fire"] = n_out
+            one.trans[("T", "Fire")]["Ready"] = n_out          # a fixed successor: not a "next" key
+            one.type_s["T"] = 240.0
+            one.dwell[("T", "Ready")] = list(rng.uniform(0, 2 * 200.0 / (n_loop + n_out), n_loop + n_out))
+        return fill
+    a = _fight_arm([fight(60) for _ in range(8)])
+    b = _fight_arm([fight(22) for _ in range(8)])
+    res = perm_tests(a, b, 10, n_perm=100, n_perm_max=2000)
+    assert [k for k, _ in res["visits"]["holm_significant"]] == ["T/Ready"]
+    assert [k for k, _ in res["next"]["holm_significant"]] == ["T/Ready"] and res["next"]["keys"] == 1
+    same = perm_tests(a, _fight_arm([fight(60) for _ in range(8)]), 10, n_perm=100, n_perm_max=2000)
+    assert not same["visits"]["holm_significant"] and not same["next"]["holm_significant"]
+
+
+def test_speed_check_jumps_from_fsm_events(monkeypatch):
+    """Clapper jumps come from the FSM events (a one-frame "Jump" between two coarse entity reads still counts) and
+    their air time goes on the common grid; the scan also counts exits per successor and the type's FSM seconds."""
+    from ssbot.tools import forum_speed_check as sc
+    CL = "Song Heavy Sentry"
+
+    def ev(frm, to, t):
+        return {"k": "fsm", "d": {"obj": f"{CL} (1)", "fsm": "Control", "ent": 5, "from": frm, "to": to,
+                                  "t_in_prev": t}}
+
+    def states():
+        for f in range(80):
+            y = 4.6 + max(0.0, 8.0 - ((f - 35) / 4.0) ** 2) if 4 <= f < 64 else 4.6    # read: odd f
+            evs = {3: [ev("Jump Antic", "Jump", 0.25)], 4: [ev("Jump", "Air", 1 / 60)],
+                   64: [ev("Air", "Land", 60 / 60)], 70: [ev("Land", "Idle", 0.1)]}.get(f, [])
+            yield {"f": f, "dt": 1 / 60, "ev": evs, "hero": {"pos": [20.0, 4.6]},
+                   "ents": [{"iid": 5, "type_key": CL, "pos": [30.0, y], "flipX": False,
+                             "fsms": [{"name": "Control", "state": "Air", "t": 0.0}]}]}
+    monkeypatch.setattr(sc, "fight_states", lambda fight, keys=None: states())
+    one = sc.Arm()
+    sc.scan(None, one, with_ents=True, stride=2)
+    assert len(one.apex) == 1
+    h, t, ndt = one.apex[0]
+    assert abs(h - 8.0) < 1e-9 and abs(t - 61 / 60) < 1e-9 and abs(ndt - 1 / 60) < 1e-9
+    assert dict(one.trans[(CL, "Jump")]) == {"Air": 1} and abs(one.type_s[CL] - (0.25 + 1 / 60 + 1.0 + 0.1)) < 1e-9
+    two = sc.Arm()
+    sc.scan(None, two, with_ents=True, stride=2)
+    out = sc.apex_cmp(one, two, grid=1 / 30)
+    assert out["air_steps"]["a"] == {31: 1} and out["height_ks"] == 0.0
+
+
+def test_speed_check_attainable_p_per_key():
+    """A key in 4 + 4 of 8 + 8 fights (a type of two waves in a 4-wave rotation) can never pass Holm over 40 keys:
+    smallest p 1 / C(8, 4) = 1 / 70 (R1 close-out review: the 8 + 8 controls said "not underpowered")."""
+    import numpy as np
+
+    from ssbot.tools.forum_speed_check import perm_tests
+    rng = np.random.default_rng(4)
+
+    def fight(i, shift):
+        def fill(one):
+            for k in range(40):
+                one.dwell[("All", f"S{k}")] = list(rng.normal(1.0, 0.1, 20))
+            if i % 2 == 0:                                      # the type of half the waves
+                one.dwell[("Half", "S")] = list(rng.normal(1.0 + shift, 0.1, 20))
+        return fill
+    res = perm_tests(_fight_arm([fight(i, 0.0) for i in range(8)]), _fight_arm([fight(i, 1.0) for i in range(8)]),
+                     10, n_perm=100, n_perm_max=2000)["dwell"]
+    assert res["underpowered_keys"] == 1 and res["underpowered_list"] == ["Half/S"] and not res["underpowered"]
+    assert not res["holm_significant"]                          # the real shift cannot be rejected on its own
+    low = {k: (na, nb, p_min) for k, _, _, na, nb, p_min in res["lowest"]}
+    assert low["Half/S"][:2] == (4, 4) and abs(low["Half/S"][2] - 1 / 70) < 1e-6
 
 
 def test_speed_check_injections():
@@ -307,6 +401,10 @@ def test_speed_check_injections():
     parse_inject("dwellx:*:S1:2")(one)
     parse_inject("choice:A:F1:F2:0.1")(one)
     parse_inject("speed:B:1.1")(one)
+    one.trans[("A", "R")]["R"] = 10
+    one.trans[("A", "R")]["F"] = 5
+    parse_inject("trans:A:R:R:0.37")(one)
+    assert dict(one.trans[("A", "R")]) == {"R": 4, "F": 5}
     assert [round(v, 4) for v in one.dwell[("A", "S1")]] == [1.0666, 2.0666] and one.dwell[("B", "S1")] == [1.0]
     assert dict(one.choice[("A", "0-3")]) == {"F1": 9, "F2": 1} and dict(one.choice[("A", "3-6")]) == {"F1": 3, "F2": 0}
     assert dict(one.choice[("B", "0-3")]) == {"F1": 10}
@@ -411,3 +509,29 @@ def test_builder_last_resort_attribution_skips_parked_tinies():
     ents = {1: parked, 2: active}
     assert g._attribute(tk, subs, {}, [], box, ents=ents) == 2
     assert g._attribute(tk, {1: subs[1]}, {}, [], box, ents={1: parked}) == 1
+
+
+def test_builder_collider_child_source_prefers_the_one_that_touched():
+    """A source naming only a collider child ("Colliders/Collider AttackAntic", the Minister's): on the last frame of a
+    blocked stretch the adjacent Minister has turned it off and the other one, 8 u away, has just turned its own on
+    (run 20261004_111158 i3/ep10 f400125). The contact belongs to the one whose collider touched the hero within the
+    export lag, not to this frame's only exporter; with nobody touching before, this frame's exporter as before."""
+    from types import SimpleNamespace
+
+    from ssbot.knowledge.gauntlet_tables import FORUM_SPECS, GauntletBuilder, _Subject
+    g = GauntletBuilder(FORUM_SPECS)
+    tk = "Song Administrator"
+
+    def col(x0, y0, x1, y1, on=True):
+        return {**_box(x0, y0, x1, y1, enabled=on), "name": "Collider AttackAntic"}
+    near_then = _ent(1, tk, 15.2, 8.6, cols=[col(14.0, 6.6, 15.9, 9.0)], state="Attack Antic", hp=33)
+    near_now = _ent(1, tk, 15.2, 8.9, cols=[col(14.0, 6.6, 15.9, 9.0, on=False)], state="Attack", hp=33)
+    far_now = _ent(2, tk, 22.3, 8.2, cols=[col(21.6, 6.2, 23.5, 8.5)], state="Attack Antic", hp=24)
+    subs = {1: _Subject(1, tk, SimpleNamespace(dead=False), name="Song Administrator", ent=near_now),
+            2: _Subject(2, tk, SimpleNamespace(dead=False), name="Song Administrator (1)", ent=far_now)}
+    box = (14.03, 8.35, 14.53, 10.43)
+    src = "Colliders/Collider AttackAntic"
+    ents = {1: near_now, 2: far_now}
+    assert g._attribute(src, subs, {}, [], box, ents=ents, back=[{1: near_then, 2: far_now}]) == 1
+    assert g._attribute(src, subs, {}, [], box, ents=ents, back=[{1: near_now, 2: far_now}]) == 2
+    assert g._attribute(src, subs, {}, [], box, ents=ents) == 2
