@@ -1553,6 +1553,29 @@ Worktree `C:\modeling\silksong_bot\.claude\worktrees\wf_89d18409-0b6-1` (from ma
   `combat_run stop <run dir>` from that checkout's brain.
 - Instances 0 / 1 idle (their collections had ended before this round); instance 4 untouched.
 
+### Fixer round (after the verifier; commits 10adf31, 0f517a0, 95fab30 + this)
+
+- Medium: YELLOW's per-enemy kill freeze rule (plan 4.4 item 7) did nothing with a certified support at h >= 2 (the
+  supervisor left the kill to the L0 filter, whose Forum kill_hp is None before the finale). `SupervisorConfig.
+  kills_certifiable` (default True: Bell Beast unchanged), False in `forum_supervisor_config`: YELLOW / RED withhold
+  kill_prims whatever the support and h. Test `test_yellow_withholds_a_freezing_kill_even_when_known_at_h2`.
+- Lows: HIT_TAKEN sources paired by caller path (a blocked damage event gets none); chain hooks keyed by instance
+  (FSM `ent`) with an object-name fallback over every part of the source path; Multihit ticks judged at their own frame
+  (outside: wait 70 frames for the chain's Final Hit, else counted; flushed at the episode end); the Cogfly's second
+  frame dropped on FORCED_RISK / pause pending / supervisor keys; `forum_a0_report` counts hits per damage event
+  (ticks apart, types from the caller path, old records via the recording's events.jsonl). Tests
+  `tests/test_forum_policy_hits.py` (5); targeted suites 133 passed.
+- Refuted claims corrected above and in forum.md 16.2 / 16.3 (hits by source per damage event; wave-start FORCED_RISK
+  65-100 %).
+- Re-measure (forum.md 16.5): the wave-start batch again from `C:\ssbot\live_r4f_0f517a0` (instances 0 / 1, 24
+  episodes, seeds 170000+, run `20261005_054233_Forum_A_w2_mix_eval_planner_oracle`, report
+  `C:\ssbot\data\m2_forum_r4ixer\ws_report_fix.json`, driver `C:\ssbot\sandbox4f_ws.ps1`): QUIT 24 / 24 (Q1 12,
+  Q3 12), 3.33 hits + 0.25 Multihit ticks per episode, 0 outside the support, 0 unknown (6 ticks all inside at their
+  frame, 4 Final Hits with a hook), FORCED_RISK 90.5 % (69-100 % per wave), kills 0 (2 before), tick p99 median
+  14.0 ms, WaveTracker 98.5 %. Full-gauntlet A0 not re-run (its numbers stand; the kill rule hardly matters while the
+  bot only evades).
+- Frozen checkout `C:\ssbot\live_r4f_0f517a0` can go when done.
+
 ### Needs deploy
 
 - Nothing (no oracle change).
