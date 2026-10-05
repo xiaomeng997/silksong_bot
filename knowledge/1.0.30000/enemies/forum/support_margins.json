@@ -1909,5 +1909,54 @@
     }
    }
   ]
+ },
+ "runtime_certification": {
+  "what": "held-out recall of the run-time MultiForecast (ssbot.tools.multi_recall, R0's protocol: contact at c, forecast at c - L, L = 2 / 3 / 4, union and own type, every multi-hit chain's hook counted) with these tables and margins; MultiForecast.known rests on this, not on 'certified' above (R0's SubjectRecall on 35 fights, contradicted by forum.md 13.13). forum.md 15.8",
+  "code": "2a10a0d (re-anchoring, the walk floor, arena boxes from boxed bins, dead Tinies after a Maestro's Summon)",
+  "date": "2026-10-05",
+  "dev": {
+   "fights": 107,
+   "split": "3way",
+   "per_lag": {
+    "n": 229711,
+    "covered": 229711
+   },
+   "hooks": 1378
+  },
+  "fresh": {
+   "fights": 352,
+   "groups": [
+    "m2_forum_r0/fresh (35)",
+    "m2_forum_r2/r1 (187)",
+    "m2_forum_r3/fresh_r1c_1x (130: forum.md 13.13's fresh set without the 2x run 155649)"
+   ],
+   "per_lag_per_tables": {
+    "n": 304072,
+    "covered": 304072
+   },
+   "tables": [
+    0,
+    1
+   ]
+  },
+  "new": {
+   "fights": 357,
+   "groups": [
+    "20261004_162411 ep60+ (118)",
+    "20261004_195019 (120)",
+    "20261004_195800 (119)"
+   ],
+   "note": "fights no build or certification had seen; all 1x (the builder's speed guard left none out); 8 types (no Envoy: wave starts from wave 2 on)",
+   "per_lag_per_tables": {
+    "n": 180145,
+    "covered": 180145
+   },
+   "tables": [
+    0,
+    1
+   ]
+  },
+  "recall": 1.0,
+  "certified": true
  }
 }
