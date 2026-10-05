@@ -87,8 +87,8 @@ def _classify_kill(F, v: int, X, Y, tk, viol: np.ndarray, waiting: set) -> Count
     death = F._box_occ(X, Y, np.asarray(tk, np.float64), kinds=("death",), only={v}) & left
     out["death box"] += int(death.sum())
     left &= ~death
-    own = F.occupied_only(X, Y, tk, {v}) & left
-    out["victim tails"] += int(own.sum())
+    own = F.occupied_only(X, Y, tk, {v} | {o for o, m in F.groups.items() if v in m}) & left
+    out["victim (tails; a pooled Tiny's walk, its group's rows)"] += int(own.sum())
     left &= ~own
     out["other"] += int(left.sum())
     return out
@@ -113,7 +113,7 @@ def _redirect_class(F, iid: int, d: int, t_first: float) -> str:
         return "side wall rebound"
     if np.any(ys <= BELL_FLOOR_Y + 1e-6):
         return "floor bounce"
-    return "direct"
+    return "up hit falls back (gravity)" if d == 2 else "direct"
 
 
 def _haz_dir(vx: float, vy: float) -> int | None:
@@ -304,6 +304,7 @@ def main(argv=None) -> int:
     ap.add_argument("--fights", type=Path, default=Path("C:/ssbot/data/m2_forum_r0/fresh/fights.json"))
     ap.add_argument("--max-fights", type=int, default=0)
     ap.add_argument("--skip", type=int, default=0)
+    ap.add_argument("--ids", nargs="+", default=None, help="only these fights")
     ap.add_argument("--every", type=int, default=30)
     ap.add_argument("--frames", type=int, default=0, help="only the first N frames of each fight")
     ap.add_argument("--bell-near", type=float, default=4.0)
@@ -311,6 +312,8 @@ def main(argv=None) -> int:
     ap.add_argument("--json", type=Path, default=None)
     a = ap.parse_args(argv)
     fl = json.loads(a.fights.read_text("utf-8"))["fights"][a.skip:]
+    if a.ids:
+        fl = [f for f in fl if f["id"] in a.ids]
     if a.max_fights:
         fl = fl[:a.max_fights]
     jobs = [{"id": f["id"], "path": f["path"], "f0": f["f0"], "f1": f["f1"], "every": a.every,

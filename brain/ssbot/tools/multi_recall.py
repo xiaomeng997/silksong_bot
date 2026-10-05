@@ -127,6 +127,8 @@ def main_fresh_dev(a, mode: str) -> int:
 
 
 def _job(fid: str, f: dict, contacts: list, cfg: dict, label: str, a) -> dict:
+    if a.types:
+        contacts = [c for c in contacts if c["type"] in a.types]
     return {"id": fid, "path": f["path"], "f0": int(f["f0"]), "f1": int(f["f1"]), "contacts": contacts,
             "config": cfg, "label": label, "view": a.view, "horizon": a.horizon}
 
@@ -150,6 +152,7 @@ def run_jobs(a, jobs: list, mode: str) -> int:
     t0 = time.perf_counter()
     stats: dict = defaultdict(Counter)
     misses: list = []
+    own_misses: list = []
     by_label: dict = defaultdict(lambda: defaultdict(Counter))
     fc_ms = []
     jobs.sort(key=lambda j: (j["label"], j["id"]))
@@ -170,6 +173,7 @@ def run_jobs(a, jobs: list, mode: str) -> int:
             stats[(tk, int(L))].update(v)
             by_label[j["label"]][(tk, int(L))].update(v)
         misses += res["misses"]
+        own_misses += res.get("own_misses", [])
         fc_ms.append(res["forecast_ms"])
         n = sum(v["n"] for (tk, L), v in stats.items() if L)
         cov = sum(v["covered"] for (tk, L), v in stats.items() if L)
@@ -177,7 +181,8 @@ def run_jobs(a, jobs: list, mode: str) -> int:
               f"({res['forecast_ms']} ms/forecast, {time.perf_counter() - t0:.0f} s)", flush=True)
     out = {"mode": mode, "view": a.view, "lags": list(LAGS), "fights": done, "horizon_s": a.horizon,
            "summary": summarise(stats), "by_group": {k: summarise(v)["recall"] for k, v in by_label.items()},
-           "misses": misses[:500], "n_misses": len(misses),
+           "misses": misses[:500], "n_misses": len(misses), "own_misses": own_misses[:300],
+           "n_own_misses": len(own_misses),
            "miss_by": dict(Counter(f"{m['type']}/{m['family']}/{m['state']}/L{m['lag']}" for m in misses)
                            .most_common(60)),
            "forecast_ms_mean_per_fight": round(float(np.mean(fc_ms)), 3) if fc_ms else None,
@@ -256,6 +261,7 @@ def run_fight2(job: dict) -> dict:
     r = RecordingReader(job["path"])
     t_of: dict[int, float] = {}
     misses = []
+    own_misses: list = []                             # covered, but not by the contact's own type's support
     held: dict = {}                                   # (origin frame) -> (forecast, T_o, iids by type)
     n_fc, t_fc = 0, 0.0
     wave = wave_of(job["id"])
@@ -296,7 +302,7 @@ def run_fight2(job: dict) -> dict:
                 checks[int(c["f"])].append((c, L, f))
         for c, L, o in checks.pop(f, ()):
             fc, T_o, by_type = held[o]
-            _check2(c, L, fc, T_o, t_of, by_type, stats, misses, job["label"], s)
+            _check2(c, L, fc, T_o, t_of, by_type, stats, misses, job["label"], s, own_misses)
         for o in [o for o in held if o < f - 8]:
             del held[o]
     for cf, lst in checks.items():           # contact frames past the recording's end
@@ -304,11 +310,11 @@ def run_fight2(job: dict) -> dict:
             stats[(c["type"], L)]["n"] += 1
             stats[(c["type"], L)]["no frame"] += 1
     return {"id": job["id"], "stats": {f"{k[0]}|{k[1]}": dict(v) for k, v in stats.items()}, "misses": misses,
-            "forecasts": n_fc, "forecast_ms": round(1e3 * t_fc / max(1, n_fc), 3)}
+            "own_misses": own_misses, "forecasts": n_fc, "forecast_ms": round(1e3 * t_fc / max(1, n_fc), 3)}
 
 
 def _check2(c: dict, L: int, fc, T_o: float, t_of: dict, by_type: dict, stats: dict, misses: list, label: str,
-            s: dict) -> None:
+            s: dict, own_misses: list | None = None) -> None:
     key = (c["type"], L)
     st = stats[key]
     st["n"] += 1
@@ -343,6 +349,13 @@ def _check2(c: dict, L: int, fc, T_o: float, t_of: dict, by_type: dict, stats: d
         st[f"by {how}"] += 1
         own = fc.occupied_only(X, Y, tk, by_type.get(c["type"], set())).any()
         st["own"] += int(bool(own))
+        if not own and own_misses is not None:
+            own_misses.append({"fight": c["fight"], "f": cf, "lag": L, "type": c["type"], "family": c.get("family"),
+                               "state": c.get("state"), "src": c.get("src"), "kind": c.get("kind"),
+                               "hero": [round(v, 3) for v in (xs[-1], ys[-1])], "label": label, "by": how,
+                               "subjects": [(sb.iid, sb.state, sb.family, sb.alive, sb.in_play, None if sb.pos is None
+                                             else [round(sb.pos[0], 2), round(sb.pos[1], 2)]) for sb in fc.subjects
+                                            if sb.type_key == c["type"]][:6]})
         return
     misses.append({"fight": c["fight"], "f": cf, "lag": L, "type": c["type"], "family": c.get("family"),
                    "state": c.get("state"), "src": c.get("src"), "kind": c.get("kind"), "tk": c.get("tk"),
@@ -456,6 +469,7 @@ def main(argv=None) -> int:
     ap.add_argument("--horizon", type=float, default=0.1)
     ap.add_argument("--workers", type=int, default=1)
     ap.add_argument("--max-fights", type=int, default=0, help="per group")
+    ap.add_argument("--types", nargs="+", default=None, help="only these types' contacts (a quicker partial check)")
     ap.add_argument("--frames", type=int, default=4000)
     ap.add_argument("--start", type=int, default=None)
     ap.add_argument("--threads", type=int, default=4)

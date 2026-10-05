@@ -35,8 +35,9 @@ certification ran on (ssbot.knowledge.forum_support.SubjectRecall; forum.md §12
   - for the first frames only (COLLIDER_TUBE_S, the reaction lag the certification needed them for): the
     current-collider tube (its box grown at the type's top speed) and the hazard tube;
   - a killed enemy's last damage box for DEATH_TAIL_S (forum_products death_tails: contacts on the kill frame only);
-    a pooled enemy (the Maestro's Tinies) is walked on after its death (it comes back), the others are not; an enemy
-    in a waiting state only while it may enter soon (its wave queued, a Maestro in play for a parked Tiny);
+    a pooled enemy (the Maestro's Tinies) is walked on after its death while a Maestro is in play (a summon brings it
+    back), the others are not; an enemy in a waiting state only while it may enter soon (its wave queued, a Maestro in
+    play for a parked Tiny), a wave member not before its wave's earliest activation;
   - thrown hazards: on deterministic paths (ssbot.combat.projectiles: bells incl. the nail redirect, javelins, bomb
     rows, rune slams), the others by their self template from where they armed (the Clawmaiden's spear and blast;
     every hazard in the vision view too, where the paths come from tracked velocities);
@@ -555,8 +556,8 @@ class _Builder:
         self.subjects: list[Subject] = []
         self.known = fc.tables.certified
         self.unknown: list[int] = []
-        self.tiny_new: list[tuple] = []      # deferred later-instance roots of Tinies (group placement)
         self.meta_group: dict = {}           # group owner -> the other Tinies its placements stand for
+        self._maestro: bool | None = None    # a Maestro in play (lazily)
 
     # ---- placements ----
 
@@ -630,13 +631,18 @@ class _Builder:
         while a Maestro is in play (a summon), a wave member when its wave is queued or no wave is known yet."""
         fc = self.fc
         if tr.table.spec.pooled:
-            return any(t.tk == MAESTRO and t.in_play and not t.dead for t in fc.trackers.values())
+            return self._maestro_in_play()
         if not fc.use_waves or fc.t_wake is None:
             return True
         nw = fc.waves.next_window()
         if nw is None:
             return False
         return tr.tk in FORUM_WAVES[nw[0]].types and nw[1] - self.origin <= self.H + ENTRY_LAG_S
+
+    def _maestro_in_play(self) -> bool:
+        if self._maestro is None:
+            self._maestro = any(t.tk == MAESTRO and t.in_play and not t.dead for t in self.fc.trackers.values())
+        return self._maestro
 
     def _wave_wake(self, tr: EnemyTracker) -> float | None:
         """The earliest game time a waiting wave member can leave its waiting state: its queued wave's earliest
@@ -661,7 +667,8 @@ class _Builder:
             self.boxes.append((tr.iid, "death", *tr.death_box, 0.0, 0.0, None, -BIN, tr.t_dead + DEATH_TAIL_S - T,
                                0.0))
         self._tails(tr)
-        if tr.dead and not sp.pooled or tr.state is None or tr.t_entry is None:
+        # a killed Tiny comes back only through a Maestro's summon: walked on after its death only while one is in play
+        if tr.dead and (not sp.pooled or not self._maestro_in_play()) or tr.state is None or tr.t_entry is None:
             if not tr.dead and tr.state is None and tr.seen_T > -math.inf and not tr.hidden:
                 self.unknown.append(tr.iid)
             self.subjects.append(self._subject_row(tr, False, math.inf))
