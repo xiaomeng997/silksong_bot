@@ -1569,7 +1569,7 @@ Worktree `C:\modeling\silksong_bot\.claude\worktrees\wf_89d18409-0b6-1` (from ma
   65-100 %).
 - Re-measure (forum.md 16.5): the wave-start batch again from `C:\ssbot\live_r4f_0f517a0` (instances 0 / 1, 24
   episodes, seeds 170000+, run `20261005_054233_Forum_A_w2_mix_eval_planner_oracle`, report
-  `C:\ssbot\data\m2_forum_r4ixer\ws_report_fix.json`, driver `C:\ssbot\sandbox4f_ws.ps1`): QUIT 24 / 24 (Q1 12,
+  `C:\ssbot\data\m2_forum_r4\fixer\ws_report_fix.json`, driver `C:\ssbot\sandbox\r4f_ws.ps1`): QUIT 24 / 24 (Q1 12,
   Q3 12), 3.33 hits + 0.25 Multihit ticks per episode, 0 outside the support, 0 unknown (6 ticks all inside at their
   frame, 4 Final Hits with a hook), FORCED_RISK 90.5 % (69-100 % per wave), kills 0 (2 before), tick p99 median
   14.0 ms, WaveTracker 98.5 %. Full-gauntlet A0 not re-run (its numbers stand; the kill rule hardly matters while the
