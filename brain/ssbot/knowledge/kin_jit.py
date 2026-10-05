@@ -1050,6 +1050,12 @@ def forum_fixed(x, vx, vy, normal, rx0, ry0, P, TT):
         grav_off(x)
         if x[DASH_T] <= 0:
             finished_dashing(x, P)        # (Dash() leaves the velocity as it was)
+            if x[MODE] == M_SPRINT and x[PHASE] == 2 and                     wall_near(x[PX], x[PY], x[FACE], P[P_SKIN] + P[P_W_CONTACT] + P[P_SPR_SHIFT], P, TT):
+                # a ground dash that ends at a wall: the sprint FSM ends at once (Dash To Run; kin_check T1: the
+                # Ground Sprint's 0.05 u Translate put the box into the wall and the model's sprint ran 3 u through
+                # it)
+                regain(x, pm)
+                return x[VX], x[VY]
             if x[MODE] == M_SPRINT:
                 if x[PHASE] == 2:
                     sprint_translate(x, rx0, ry0, P)
@@ -1336,8 +1342,9 @@ def forum_after_queue(x, mask, pressed, mode0, dt, P, TT):
         if ph <= 1:
             if x[GROUND] > 0:             # LAND -> Land: sprint on if the dash is held
                 if (mask & B_DASH) != 0:
-                    x[PHASE] = 2.0                # (the Sprint Grace timer runs on from Start Sprint: s98200
-                    x[SP_X] = x[FACE] * P[P_SPR_SPEED]   # f774201, 0.28 s on the ground after 0.20 s in the air, skidded)
+                    x[PHASE] = 2.0                # the Sprint Grace timer counts the ground sprint only (kin_check: 7
+                    x[MODE_T] = 0.0               # ground releases fit 0.183 < grace <= 0.283 s of ground time;
+                    x[SP_X] = x[FACE] * P[P_SPR_SPEED]   # from Start Sprint, T2 f1201778 did not skid)
                     # LAND comes from the landing step's collision callback, where the transform sits at the body
                     # (live: the landing frame moved the step's 17.0 u/s x 0.02 + 0.05)
                     sprint_translate(x, x[PX], x[PY], P)
@@ -1695,6 +1702,15 @@ def fixed_step(x, P, TT):
         x[VY] = P[P_DS_ENDVY]
     if (lands or land_sp) and not was:
         x[LANDQ] = 1.0
+        # BackOnGround (HeroController 10286-10290): a swing whose slash is over by the landing is reset (ResetAttacks:
+        # attacking false, the AttackRecoveryTime lock on turning, dashing, Bind, ... gone at once; the cooldown
+        # stays). Forum loadout only: the Reaper's slash ends at 0.19 s and its recovery at 0.3 s, so the model locked
+        # up to 0.09 s too long on such a landing; the Hunter's 0.15 s recovery ends before its slash (forum_planner
+        # _plan R3 note; kin_check)
+        if ab != 0 and lands and x[ATTACKING] > 0 and \
+                ge32(x[ATK_T], P[P_THK_OFF_UP] if abs(x[ATK_KIND]) == 3 else P[P_THK_OFF]):
+            x[ATTACKING] = 0.0
+            x[WSLASH] = 0.0
     if ab != 0:
         if (ab & AB_WALL) != 0 or (lands and x[HARD] > 0):
             forum_contacts(x, lands, P, TT)
