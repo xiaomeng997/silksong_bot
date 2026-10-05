@@ -1592,15 +1592,18 @@ class MultiForecast:
         f |= self._bbox_occ(x, y, tk, _mask(self.bb, clusters=self.clusters, **kw) if filt and self.n_bbox else None)
         types = ({p.type_key for p in self.paths} - set(names)) if names else None
         f |= self._path_occ(x, y, tk, exclude=ids, only=only, types=types)
+        if not committed_only and not parts:
+            # the boxes of every kind at once: the same union as the parts below, one array build and one kernel call
+            # (each kind on its own rebuilt its arrays per query: ~0.45 ms of a wave-6 tick's support query, R3 fix)
+            return f | self._box_occ(x, y, tk, kinds=("death", "arena", "idle", "collider", "hazard"), exclude=ids,
+                                     only=only)
         f |= self._box_occ(x, y, tk, kinds=("death", "arena"), exclude=ids, only=only)
         if committed_only:
             return f
         tubes = {k: self._box_occ(x, y, tk, kinds=(k,), exclude=ids, only=only) for k in ("idle", "collider",
                                                                                            "hazard")}
-        if parts:
-            return {"forecast": f, "idle body tube": tubes["idle"], "collider tube": tubes["collider"],
-                    "hazard tube": tubes["hazard"]}
-        return f | tubes["idle"] | tubes["collider"] | tubes["hazard"]
+        return {"forecast": f, "idle body tube": tubes["idle"], "collider tube": tubes["collider"],
+                "hazard tube": tubes["hazard"]}
 
     # ---- the interface ----
 

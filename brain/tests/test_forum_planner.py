@@ -251,6 +251,22 @@ def test_a_hit_reed_in_alert_stabs_at_once():
     assert mf.trackers[7].state == "Alert"             # the real state is untouched
 
 
+@pytest.mark.parametrize("stab_at", [None, 10])
+def test_occupied_is_the_union_of_its_parts(stab_at):
+    """The support query's boxes of every kind in one call (R3 fix) answer exactly what the parts do."""
+    mf = _reed_forecaster(stab_at, frames=12)
+    f = mf.forecast(0.8)
+    tk = np.arange(0, 40) * BIN
+    xs = np.linspace(24.0, 36.0, 49)
+    X = np.repeat(xs[:, None], len(tk), axis=1)
+    for y in (FLOOR + 0.5, FLOOR + 1.5, FLOOR + 3.5):
+        Y = np.full_like(X, y)
+        parts = f.occupied_parts(X, Y, tk)
+        union = np.logical_or.reduce(list(parts.values()))
+        assert np.array_equal(f.occupied(X, Y, tk), union)
+        assert union.any()
+
+
 def test_reactions_come_from_every_state_the_walk_allows_at_the_hit():
     """A Reed in Stab Pos now (its TOOK DAMAGE exit: Stab Antic) is back in Alert (exit: Stab Pos) by a hit 0.8 s on,
     not by one 2 frames on; the reaction forecast holds all of them, anchored at the hit time."""

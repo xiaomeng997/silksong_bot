@@ -33,9 +33,9 @@ Per tick (the lexicographic order and every rule of Planner.tick unless named he
   selection   only rows whose S is known: enveloped, or in contact at stage 1. The chosen plan with S = 0 is always an
               enveloped one (audit: `audit`). FORCED_RISK: no enveloped row is safe after all were checked; the p_k
               latest first contacts (estimates: stage 1's lower bound, the envelope's first frame, the hit branch's)
-              are then put on one lane over every frame (the nominal box against the support, or'ed with the hit
-              branch's contact, from the hit frame on where a cap left it unchecked) and ranked by the share of frames
-              in contact (P's stand-in: MultiForecast.prob costs 3.7 ms p50 on wave 6, one query per enemy, placement
+              are then put on one lane over one frame set (stage 1's: the nominal box against the support, or'ed with
+              the hit branch's contact, from the hit frame on where a cap left it unchecked) and ranked by the share
+              of those frames in contact (P's stand-in: MultiForecast.prob costs 3.7 ms p50 on wave 6, one query per enemy, placement
               kind and probability value; exact_p turns it back on), the latest first contact, the envelope's, J.
   determinism deadline_ms = inf: decisions do not depend on the machine's speed (audits, identity checks).
   unmodelled  a row that presses attack while dashing / sprinting is vetoed (the Reaper's dash stab is R7's).
@@ -359,6 +359,7 @@ class ForumPlanner(Planner):
         tg = sc["targets"]
         if mf is not None and hasattr(mf, "reaction_states"):
             cache = budget["react_cache"]
+            by_rf: dict = {}                             # reaction key -> the rows meeting it (one query each)
             for n, r in enumerate(rows):
                 if s[n]:
                     continue
@@ -379,8 +380,11 @@ class ForumPlanner(Planner):
                         rf = mf.forecast_reaction(t.iid, to, t_react, f.horizon, f.origin_t)
                     cache[key] = rf
                 if rf is not None:
-                    occ[n] |= self._contacts(rf, rh.bound[n:n + 1], tk, skip[n:n + 1])[0]
-                    s[n] = bool(occ[n].any())
+                    by_rf.setdefault(key, []).append(n)
+            for key, ns in by_rf.items():
+                ns = np.array(ns, np.int64)
+                occ[ns] |= self._contacts(cache[key], rh.bound[ns], tk, skip[ns])
+            s = occ.any(axis=1) | capped
         return s, occ, capped
 
     @staticmethod
@@ -599,23 +603,22 @@ class ForumPlanner(Planner):
         if forced and sel.any():
             cand = np.flatnonzero(sel)
             cand = cand[np.lexsort((-J[cand], -t_hit[cand]))][:fcfg.p_k]
-            # the candidates on one lane over every frame: the nominal box's centre against the support (stage 1's
-            # exact test, now on the frames stage 1 skipped too), or'ed with the hit branch's contact (its hull;
-            # from the hit frame on where a cap left it unchecked): the share of frames in contact and the first
-            b = r1.box[cand]
-            on = f.occupied(0.5 * (b[..., 0] + b[..., 2]), 0.5 * (b[..., 1] + b[..., 3]), tk)
-            if enemy_only:
-                on &= (r1.flags[cand] & F_INVULN) == 0
-            on[:, 0] = False
+            # the candidates on one lane over one frame set: the nominal box's centre against the support on stage
+            # 1's frames (its exact test, known for every row), or'ed with the hit branch's contact there (its hull;
+            # from the hit frame on where a cap left it unchecked): the share of those frames in contact and the
+            # first contact's lower bound (another support query for the skipped frames cost 0.7 ms p50 on wave 6)
+            on = o[cand].copy()
             for m, i in enumerate(cand):
                 h = hit_occ.get(int(i))
                 if h is not None:
-                    on[m] |= h
-            t_c[cand] = np.where(on.any(axis=1), on.argmax(axis=1), T1)
+                    on[m] |= h[fr]
+            kc = on.argmax(axis=1)
+            t_c[cand] = np.where(on.any(axis=1), np.where(kc > 0, fr[np.maximum(kc - 1, 0)] + 1, fr[0]), T1)
             if fcfg.exact_p:
+                b = r1.box[cand]
                 Pc[cand] = f.prob(0.5 * (b[..., 0] + b[..., 2]), 0.5 * (b[..., 1] + b[..., 3]), tk)
             else:
-                Pc[cand] = on[:, 1:].mean(axis=1)
+                Pc[cand] = on.mean(axis=1)
             sel = np.zeros(N, bool)
             sel[cand] = True
         zero = ~cmd.any(axis=1)
