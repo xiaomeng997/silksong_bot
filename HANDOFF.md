@@ -1523,7 +1523,7 @@ Worktree `C:\modeling\silksong_bot\.claude\worktrees\wf_89d18409-0b6-1` (from ma
   `20261005_044825` (22 episodes, void) had known = False on every wave-0 tick and Q3 quit at once); a wave-start
   savestate starts the WaveTracker at its wave (b063cae).
 
-### Measured (forum.md 16.2-16.3; reports `C:\ssbot\data\m2_forum_r40_report.json`, `ws_report.json`)
+### Measured (forum.md 16.2-16.3; reports `C:\ssbot\data\m2_forum_r4\a0_report.json`, `ws_report.json`)
 
 - A0, 52 full gauntlets from fo_A (`20261005_045446_Forum_A_eval_planner_oracle`, `live_r4_ffe0e82`, seeds 150000+,
   eval, oracle, real quits 0.2): QUIT 52 / 52, all Q3 (h = 2 with a multi-hit event in the support: Reed 49,
