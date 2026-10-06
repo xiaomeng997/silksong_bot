@@ -324,14 +324,20 @@ LACE_1 = _route_spec(
     {"Scene Start": "L1_INTRO", "Evade": "L1_EVADE", "Evade 2": "L1_EVADE",
      "Hop To Charge": "L1_HOP", "Hop To J Slash": "L1_HOP", "Hop To Combo": "L1_HOP",
      "Charge Antic": "L1_CHARGE", "J Slash Antic": "L1_JSLASH", "ComboSlash 1": "L1_COMBO",
-     "Counter Antic": "L1_COUNTER", "CrossSlash Aim": "L1_CROSS", "Sing Antic": "L1_SING", "Stun Start": "L1_STUN",
-     # the global LAVA DAMAGE: she lands in the lava, hops and teleports back (Lava Hop -> Lava Tele Out -> Tele In
-     # -> Lava End -> Idle); in two of the collection's first five Lace fights (i2 / i3 ep0) the FSM was still there
-     # at the 300 s timebox (STUCK), so this tail stays in its own family instead of stretching the attack it cut
+     # the cross slash starts at its antic: CrossSlash Aim, CS Evade and CS Evade Cancel are zero-time logic states
+     # (t_in_prev 0.0 in all 96 / 61 / 18 exits of the first Lace fights) and decisions here. Aim -> EVADE -> CS Evade
+     # -> Evade -> Evade Recover -> Evade Move -> CROSS SLASH -> Aim again (43 of 61 CS Evades) is the ordinary Evade
+     # state (L1_EVADE, its ctx.frm "CS Evade" tells it apart); CS Evade -> END -> CS Evade Cancel (turns her round)
+     # -> CrossSlash Antic once the evade count is used up. With Aim as the start, half the L1_CROSS instances were
+     # aim-only stubs ended by the chain into Evade
+     "Counter Antic": "L1_COUNTER", "CrossSlash Antic": "L1_CROSS", "Sing Antic": "L1_SING", "Stun Start": "L1_STUN",
+     # the global LAVA DAMAGE: she lands in the lava, hops and teleports back (Lava Hop -> Lava Tele Out -> Set Tele
+     # Pos X -> Tele In -> Lava End -> Idle), a motion of its own. Its SubtractHP can take her HP to <= 0 without a
+     # hit event; she fights on and the next hit is the kill (FightTap / the builder take the first dead hit)
      "Lava Damage": "L1_LAVA"},
     ("Idle", "Distance Check", "Close", "Far", "Evade Move", "Hop End", "Will Counter?", "Pose", "Pose Swish",
-     "Pose Swish 2", "Pose Swish 3", "Pose Lean", "Pose Upright", "CrossSlash?", "Keep Evading?", "Range Out",
-     "Swish Block", "Range Return", "Death Pose", "Trap Stun"),
+     "Pose Swish 2", "Pose Swish 3", "Pose Lean", "Pose Upright", "CrossSlash?", "CrossSlash Aim", "CS Evade",
+     "CS Evade Cancel", "Keep Evading?", "Range Out", "Swish Block", "Range Return", "Death Pose", "Trap Stun"),
     phase_marks={"CrossSlash Aim": "P2"},
     phases={"P1": "until the first cross slash (CrossSlash? tests the boss HP)", "P2": "after it"})
 

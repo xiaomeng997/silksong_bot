@@ -36,6 +36,19 @@ def test_lace_kill_is_the_boss_hit_event_with_dead():
     assert tap.death_frame == 40
 
 
+def test_lace_kill_after_the_lava_took_her_hp_below_zero():
+    # LAVA DAMAGE subtracts HP in the FSM (no hit event); the next hit kills with hp_before already <= 0
+    link = _Link()
+    tap = FightTap(link, LACE_1)
+    link.feed(10, _fsm("Lace Boss1", "Dormant", "Refight"))
+    link.feed(20, ("hit", {"type_key": "Lace Boss1", "hp_before": 15, "hp_after": 10, "dead": False}))
+    link.feed(30, _fsm("Lace Boss1", None, "Lava Damage"))
+    assert tap.death_frame is None
+    link.feed(40, ("hit", {"type_key": "Lace Boss1", "hp_before": -30, "hp_after": -35, "dead": True}))
+    link.feed(41, ("hit", {"type_key": "Lace Boss1", "hp_before": -35, "hp_after": -40, "dead": True}))
+    assert tap.death_frame == 40
+
+
 def test_hit_event_does_not_kill_a_boss_with_death_states():
     link = _Link()
     tap = FightTap(link, BELL_BEAST)

@@ -148,9 +148,12 @@ class FightTap:
                     if self.death_frame is None and d["to"] in enc.death_states:
                         self.death_frame = f
             elif k == "hit":
-                # the kill when the Control FSM has no death state (Encounter.death_on_kill: Lace 1)
+                # the kill when the Control FSM has no death state (Encounter.death_on_kill: Lace 1): the first boss
+                # hit with dead, whatever hp_before. Lace's LAVA DAMAGE takes HP through the FSM's SubtractHP (no hit
+                # event) and can leave it <= 0 with her still fighting; the defeat (BossDeathSlow) starts at the next
+                # hit, whose hp_before is already negative (collection 20261006_070641 i2 / i3 ep0: -30 -> -35)
                 if (self.death_frame is None and getattr(enc, "death_on_kill", False) and d.get("dead")
-                        and d.get("type_key") == enc.boss_type and (d.get("hp_before") or 0) > 0):
+                        and d.get("type_key") == enc.boss_type):
                     self.death_frame = f
             elif k == "damage":
                 self.damage.append((f, d))
