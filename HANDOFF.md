@@ -1624,6 +1624,45 @@ bosses. Facts: `docs/facts/1.0.30000/route_bosses.md` (Chinese). Probe outputs: 
 - Oracle: RPC `enemy.hp` {type_key, hp | frac} (`oracle/src/Train/EnemyHpRpc.cs`, training profiles only), built with
   -p:Deploy=false.
 
+### Measured (smoke, data policy, 1x, worktree code)
+
+- Lace 1 `20261006_065722_Lace1_data` (i0): 2 / 2 CLEAR, 112.9 / 78.2 s game time, wake frames set. The first try
+  (`065020`) had the savestate at the community x 89.94: the fight began before the tap's reset (no wake frame,
+  void); the next (`065605`, i0) ended HARNESS_FAIL "paused unasked" 0.9 s after the wake (once; cause not found).
+- Last Judge `20261006_065020_LastJudge_data` (i1): 3 / 3 CLEAR, 235.8 / 159.7 / 154.9 s; every phase reached.
+- Trobbio `20261006_065020_Trobbio_data` (i4): 3 / 3 CLEAR, 233.7 / 288.5 / 244.4 s; Phase Roar every fight.
+- Rotation `20261006_065605_Lace1_mix_data` (i2, Lace1,LastJudge,Trobbio): CLEAR 85.5 / 169.0 / 365.6 s.
+- `behaviour_build --report-only --include-open` on the first two LJ and TR fights: scans clean (14,152 / 9,584 and
+  14,024 / 17,313 frames); per fight LJ_INTRO / LJ_FLAME_ROAR / TR_INTRO / TR_PHASE about once, LJ_RAGE_ROAR 1.5,
+  the rest 4-30: about 200 fights per boss for the 200-instance rule. Validation fails on a few contacts (expected
+  on 2 fights; see open issues): LJ 6 uncovered (Flame Wave Dmg Full self template, Swing Attack Flame in Spin End /
+  Stunned) + 25 outside attacks (Roar Glow/Damager, not exported); TR 16 uncovered (dazzle flash Damager self
+  template) + 41 unexplained + 6 outside.
+- Tests: `tests/test_route_bosses.py` 5, episode / combat_run tests 25, test_behaviour_tables 27: all pass.
+
+### Running
+
+- `C:\ssbot\data\runs\m2\20261006_070641_Lace1_mix_data`: instances 0-4, Lace1,LastJudge,Trobbio rotated per
+  episode, data policy, 1x, 10 h from 07:06 (seeds 1,000,000+), frozen checkout `C:\ssbot\live_rb_242ed28` (git
+  archive of 242ed28, no .git: rev null in config_fp; behaviour_build there needs --allow-no-sha only for gauntlets).
+  Log `C:\ssbot\sandbox\rb_collect.log`. Expected ~11 min per three-boss cycle per instance: ~270 fights per boss.
+  Stop: `cd C:\ssbot\live_rb_242ed28\brain; ..\scripts\uv.cmd run python -m ssbot.tools.combat_run stop <run dir>`.
+
 ### Needs deploy
 
 - `enemy.hp` (oracle). Until it is deployed the `*_low` encounters end HARNESS_FAIL (enemy.hp unknown).
+
+### Next / open issues
+
+1. When the run ends: `behaviour_build <run> --encounter Lace1|LastJudge|Trobbio --fsm-graph
+   C:\ssbot\sandbox\route_bosses\graph_<name>.json` (unit filter splits the rotated run), then held-out recall.
+2. Validation gaps to look at with the full data: LJ "Roar Glow/Damager" contacts with no exported collider and
+   outside every attack (an unexported hazard child: oracle export or a spawn rule); Trobbio's dazzle flash
+   (Damager self template, unexplained contacts); the Lace 1 "Lava Box" static hazard (world hazard, the arena
+   bounds of LACE_1 are still the provisional 80-115).
+3. The *_SING families need the Needolin (the data policy never sings): absent under this policy.
+4. Not wired: Widow (dialogue start via the Speak Region), Cogwork Dancers (two bosses: needs the gauntlet builder or a
+   two-boss spec), Fourth Chorus (no savestate: walk from the skip trick's), Lace 2, GMS. The community savestates
+   carry 5 masks; our route plans 7 by Trobbio.
+5. After deploying enemy.hp: smoke `Lace1_low,LastJudge_low,Trobbio_low` and add them to the rotation if the late
+   phases lag.

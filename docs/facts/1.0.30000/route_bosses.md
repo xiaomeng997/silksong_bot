@@ -44,7 +44,10 @@ Trobbio 的炸弹、龙卷风物体名以 "Trobbio " 开头且各有自己的 "C
 
 - Last Judge `20261006_065020_LastJudge_data` ep0：CLEAR，游戏时间 235.9 s，Flame Roar 1、Rage Roar 1 都出现了；命中来源有 Swing Attack（Flame）、Censer Throw、Flame Wave、Charge Bomb、Roar Glow。
 - Trobbio `20261006_065020_Trobbio_data` ep0：CLEAR，233.7 s，Phase Roar 出现；来源有 dazzle flash、Tornado Damager、Bomb、Tornado、Blast。
-- Lace 1 `20261006_065020_Lace1_data`：2 场 CLEAR（约 96 s 实时），但没有醒来帧（存档离触发太近，见上），已作废；改存档后重跑。
+- Lace 1 `20261006_065020_Lace1_data`：2 场 CLEAR（约 96 s 实时），但没有醒来帧（存档离触发太近，见上），已作废；改存档后 `20261006_065722_Lace1_data` 2 场 CLEAR（112.9 / 78.2 s，有醒来帧）。另有一次 "paused unasked"（醒来后 0.9 s，原因未查明，只出现一次）。
+- 三个 boss 轮换（同一个 worker，`20261006_065605_Lace1_mix_data`）：CLEAR 85.5 / 169.0 / 365.6 s。
+- 每场的稀有动作：LJ_INTRO、LJ_FLAME_ROAR、TR_INTRO、TR_PHASE 约 1 次，LJ_RAGE_ROAR 约 1.5 次；每族 ≥ 200 次就要约 200 场。
+- 两场的报表构建（只报告）：录像与 AttemptRecord 都能扫描；验证有少量接触没覆盖（Flame Wave、Roar Glow 没有导出碰撞体、Trobbio 的 dazzle flash），留待全量数据后处理。
 
 ## 5. 低血量起点
 
