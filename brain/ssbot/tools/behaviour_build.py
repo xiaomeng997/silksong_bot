@@ -333,6 +333,11 @@ def main(argv: list[str] | None = None) -> int:
         used = {x["id"] for x in json.loads(a.exclude_fights.read_text("utf-8"))["fights"]}
         skipped += [f"{f.id}: in {a.exclude_fights}" for f in fights if f.id in used]
         fights = [f for f in fights if f.id not in used]
+    units = SPECS[a.encounter].units if a.encounter in SPECS else ()
+    if units:
+        # a run rotating several bosses: only this enemy's fights (AttemptRecord unit = the encounter name)
+        skipped += [f"{f.id}: unit {f.info.get('unit')}" for f in fights if f.info.get("unit") not in units]
+        fights = [f for f in fights if f.info.get("unit") in units]
     fights += [parse_human(h) for h in a.human]
     if a.max_fights:
         fights = fights[:a.max_fights]

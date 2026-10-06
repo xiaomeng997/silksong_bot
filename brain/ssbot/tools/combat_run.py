@@ -51,12 +51,28 @@ def stop_requested(run_dir: Path) -> bool:
     return (run_dir / "STOP").exists() or any(f.exists() for f in STOP_FILES)
 
 
+CODE_REV_FILE = "CODE_REV"   # a frozen checkout (git archive, no .git) names its commit here, at its root
+
+
 def git_rev() -> str | None:
+    """The code's commit: HEAD with "+dirty" when brain/ has uncommitted changes (a smoke run from a worktree being
+    edited is not the commit it names), else a frozen checkout's CODE_REV file, else None."""
+    brain = Path(__file__).resolve().parents[2]
     try:
-        return subprocess.run(["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True,
-                              cwd=Path(__file__).resolve().parents[2], timeout=10).stdout.strip() or None
+        rev = subprocess.run(["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True, cwd=brain,
+                             timeout=10).stdout.strip()
+        if rev:
+            dirty = subprocess.run(["git", "status", "--porcelain", "--", "."], capture_output=True, text=True,
+                                   cwd=brain, timeout=30).stdout.strip()
+            return f"{rev}+dirty" if dirty else rev
     except (OSError, subprocess.SubprocessError):
-        return None
+        pass
+    for p in (brain.parent / CODE_REV_FILE, brain / CODE_REV_FILE):
+        try:
+            return p.read_text("utf-8").strip() or None
+        except OSError:
+            continue
+    return None
 
 
 def env_overrides(environ=None) -> dict[str, str]:

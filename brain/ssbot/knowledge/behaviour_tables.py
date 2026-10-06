@@ -140,6 +140,7 @@ import numpy as np
 from ssbot.ipc.ents import DAMAGE_FLAGS, DAMAGE_SRC, PARRY_BITS, SRC_BITS, bits, hazard_name, is_threat
 from ssbot.knowledge import hitbox_tables as hb
 from ssbot.train.encounters import BELL_BEAST as _BELL_BEAST_ENC
+from ssbot.train.encounters import ENCOUNTERS as _ROUTE_ENC
 
 SCHEMA = 2
 BUILD = "1.0.30000"
@@ -260,6 +261,9 @@ class BehaviourSpec:
     # attack families or Control states the FSM cannot reach (structure, not missing data): (name, reason) pairs.
     # The tables list them under "structurally_absent" and the coverage does not count such a family as missing
     absent: tuple[tuple[str, str], ...] = ()
+    # AttemptRecord units (encounter names) whose fights belong to this enemy; () = every fight of the runs given.
+    # A run that rotates several bosses (the route bosses' collection) holds the fights of all of them
+    units: tuple[str, ...] = ()
 
 
 def absent_marks(spec: BehaviourSpec, tables: dict) -> dict:
@@ -293,7 +297,78 @@ BELL_BEAST = BehaviourSpec(
     initial_phase="P1", world_fixed=("BoneBeast DropBell",), arena_x=_BELL_BEAST_ENC.arena_x,
     floor_y=_BELL_BEAST_ENC.floor_y)
 
-SPECS = {s.enemy: s for s in (BELL_BEAST,)}
+
+# ---- route bosses (Task route bosses; docs/facts/1.0.30000/route_bosses.md). Families and decision states read from
+# the Control FSMs' static graphs (fsm.graph via ssbot.probes.route_bosses scout, C:\ssbot\sandbox\route_bosses\
+# *_scout.json): an attack starts at the state its decision state branches into and ends when a decision state is
+# entered; the time between attacks is the <prefix>_IDLE family (the body hurts while they walk, hop and pose);
+# the wake chain (trigger -> first decision) is <prefix>_INTRO. The sprites face -x at flipX False (FaceObjectV2
+# spriteFacesRight 0, as the Forum's enemies: gauntlet_tables.FACES_LEFT); every family is directed by flipX.
+_FACES_LEFT = (-1, 1)
+
+
+def _route_spec(enc, enemy: str, hp: int, prefix: str, attacks: dict[str, str], decisions: tuple[str, ...],
+                phase_marks: dict[str, str] | None = None, phases: dict[str, str] | None = None) -> BehaviourSpec:
+    fams = tuple(dict.fromkeys(attacks.values()))
+    return BehaviourSpec(
+        enemy=enemy, scene=enc.scene, boss_type=enc.boss_type, control_fsm=enc.control_fsm, hp=hp,
+        dormant=enc.dormant, death_states=enc.death_states, attack_starts=attacks, decision_states=decisions,
+        dir_states={}, directed=fams + (f"{prefix}_IDLE",), phase_marks=phase_marks or {},
+        phases=phases or {"P1": "the whole fight"}, initial_phase="P1", world_fixed=(), flip_mirror=_FACES_LEFT,
+        arena_x=enc.arena_x, floor_y=enc.floor_y, idle_family=f"{prefix}_IDLE", death_on_kill=enc.death_on_kill,
+        multi_wounder=True, units=(enc.name, f"{enc.name}_low"))   # _low: the late-phase starts (encounters)
+
+
+LACE_1 = _route_spec(
+    _ROUTE_ENC["Lace1"], "Lace1", 250, "L1",
+    {"Scene Start": "L1_INTRO", "Evade": "L1_EVADE", "Evade 2": "L1_EVADE",
+     "Hop To Charge": "L1_HOP", "Hop To J Slash": "L1_HOP", "Hop To Combo": "L1_HOP",
+     "Charge Antic": "L1_CHARGE", "J Slash Antic": "L1_JSLASH", "ComboSlash 1": "L1_COMBO",
+     # the cross slash starts at its antic: CrossSlash Aim, CS Evade and CS Evade Cancel are zero-time logic states
+     # (t_in_prev 0.0 in all 96 / 61 / 18 exits of the first Lace fights) and decisions here. Aim -> EVADE -> CS Evade
+     # -> Evade -> Evade Recover -> Evade Move -> CROSS SLASH -> Aim again (43 of 61 CS Evades) is the ordinary Evade
+     # state (L1_EVADE, its ctx.frm "CS Evade" tells it apart); CS Evade -> END -> CS Evade Cancel (turns her round)
+     # -> CrossSlash Antic once the evade count is used up. With Aim as the start, half the L1_CROSS instances were
+     # aim-only stubs ended by the chain into Evade
+     "Counter Antic": "L1_COUNTER", "CrossSlash Antic": "L1_CROSS", "Sing Antic": "L1_SING", "Stun Start": "L1_STUN",
+     # the global LAVA DAMAGE: she lands in the lava, hops and teleports back (Lava Hop -> Lava Tele Out -> Set Tele
+     # Pos X -> Tele In -> Lava End -> Idle), a motion of its own. Its SubtractHP can take her HP to <= 0 without a
+     # hit event; she fights on and the next hit is the kill (FightTap / the builder take the first dead hit)
+     "Lava Damage": "L1_LAVA"},
+    ("Idle", "Distance Check", "Close", "Far", "Evade Move", "Hop End", "Will Counter?", "Pose", "Pose Swish",
+     "Pose Swish 2", "Pose Swish 3", "Pose Lean", "Pose Upright", "CrossSlash?", "CrossSlash Aim", "CS Evade",
+     "CS Evade Cancel", "Keep Evading?", "Range Out", "Swish Block", "Range Return", "Death Pose", "Trap Stun"),
+    phase_marks={"CrossSlash Aim": "P2"},
+    phases={"P1": "until the first cross slash (CrossSlash? tests the boss HP)", "P2": "after it"})
+
+LAST_JUDGE = _route_spec(
+    _ROUTE_ENC["LastJudge"], "LastJudge", 720, "LJ",
+    {"Intro Fall Antic Q": "LJ_INTRO", "Intro Fall Antic": "LJ_INTRO",
+     "Throw Antic": "LJ_THROW", "Throw Face Hero": "LJ_THROW", "Jump Antic": "LJ_JUMP", "OJump Antic": "LJ_JUMP",
+     "Spin Antic": "LJ_SPIN", "Dash Antic": "LJ_DASH", "Evade Antic": "LJ_EVADE", "Charge Antic 1": "LJ_CHARGE",
+     "Stomp JumpAntic": "LJ_STOMP", "Flame Roar 1": "LJ_FLAME_ROAR", "Rage Roar 1": "LJ_RAGE_ROAR",
+     "Stun Start": "LJ_STUN", "Sing": "LJ_SING"},
+    ("Idle", "First Idle", "Set Encountered", "Flame Up Check", "Rage Check", "Range Check", "Close Range",
+     "Far Range", "Close Range F", "Far Range F", "Range Out", "Short Idle", "Spin Check", "Throw Check", "Can Slam?",
+     "Charge Check", "Evade To Slam", "Throw Cancel", "Spin Cancel", "After Land", "Evade Land", "Sing End",
+     "Hornet Dead", "Hornet Dead 2"),
+    phase_marks={"Flame Roar 1": "P2", "Rage Roar 1": "P3"},
+    phases={"P1": "until the first flame roar (Flame Up Check tests the boss HP)", "P2": "after the flame roar",
+            "P3": "after the first rage roar (Rage Check tests the boss HP)"})
+
+TROBBIO = _route_spec(
+    _ROUTE_ENC["Trobbio"], "Trobbio", 700, "TR",
+    {"Start Pause": "TR_INTRO", "Take Control": "TR_INTRO", "Flash Antic": "TR_FLASH", "Tornado Antic": "TR_TORNADO",
+     "Throw Antic": "TR_THROW", "Jump Antic": "TR_JUMP", "Tornado Evade": "TR_EVADE", "Exit 1": "TR_EXIT",
+     "Move Dir 2": "TR_FLURRY", "BC Pause": "TR_COLUMNS", "Spin F": "TR_SPIN", "Spin B": "TR_SPIN",
+     "Phase Roar Antic": "TR_PHASE", "Stun Start": "TR_STUN", "Sing": "TR_SING"},
+    ("Start Idle", "Pose Set", "Evade?", "Reset Evade CD", "Choice", "Pose Idle", "Pose?", "Spin Check",
+     "Quick Idle", "Throw Idle", "Rethrow?", "Tornado Evade Land", "Post Dazzle Idle", "Idle", "Sing End",
+     "Will Burst Column", "Hornet Dead"),
+    phase_marks={"Phase Roar Antic": "P2"},
+    phases={"P1": "until the phase roar (Choice / Pose Idle send TO P2 by the boss HP)", "P2": "after it"})
+
+SPECS = {s.enemy: s for s in (BELL_BEAST, LACE_1, LAST_JUDGE, TROBBIO)}
 
 
 # ---- small statistics --------------------------------------------------------------------------------------

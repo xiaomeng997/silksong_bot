@@ -1595,3 +1595,94 @@ Worktree `C:\modeling\silksong_bot\.claude\worktrees\wf_89d18409-0b6-1` (from ma
 5. The Cogfly throw is not in the kinematic model (gated on t_min >= 1 s, 2 throws seen); the Weighted Anklet path
    (with_weighted, 1.3 s window) never ran (fo_A has no anklet).
 6. Frozen checkouts to remove when done: `C:\ssbot\live_r4_c86b48e` (first try, void), `live_r4_ffe0e82`, `live_r4_b063cae`.
+
+## Task route bosses - Lace 1, Last Judge, Trobbio (branch worktree-wf_b1f47269-5cc-1)
+
+The person (2026-10-06, "全停了吧，换个boss"): the Forum has enough data; stop it and move the machines to the other route
+bosses. Facts: `docs/facts/1.0.30000/route_bosses.md` (Chinese). Probe outputs: `C:\ssbot\sandbox\route_bosses\`
+(`*_scout.json` hold the full Control graphs, `smoke*.log`).
+
+### Done (committed)
+
+- Stopped the five Forum collections (`20261006_062333_Forum_A_w2_mix_data2*`, instances 0-4) gracefully via their
+  STOP files; all five ended after their current episode.
+- Survey of the community savestates (route_bosses.md §1): Lace 1, Widow, Last Judge, Cogwork Dancers, Trobbio, Lace 2
+  and GMS have a "Boss - <name>" savestate; Fourth Chorus has only the skip trick's. Wired: Lace 1, Last Judge,
+  Trobbio. Widow needs a dialogue (Speak Region) to start, Dancers are two bosses (the single-boss builder does not
+  fit), Lace 2 / GMS left for budget.
+- `probes/route_bosses.py` (scout / save / graph); training savestates `rb_lace1` (vs_p6_s3 walked left to x 83.50,
+  encounteredLace1 True: refight, no dialogue), `rb_lastjudge`, `rb_trobbio` (community positions).
+- `train/encounters.py`: LACE_1 / LAST_JUDGE / TROBBIO (`walk_intro`, `death_on_kill` for Lace 1 whose Control has no
+  death state), `<name>_low` late-phase variants (`start_boss_hp` 0.25-0.6 via the oracle's `enemy.hp`).
+  `train/episode.py`: FightTap follows the episode's encounter (rotation of bosses on one worker), the kill from the
+  boss's hit event when `death_on_kill`, the boss's Control matched exactly (Trobbio's bombs / tornadoes run a
+  "Control" FSM under a "Trobbio ..." name), the late-phase HP cut after the start randomisation. Bell Beast / Forum
+  paths unchanged (GauntletTap untouched; the exact match equals the old prefix match for "Bone Beast").
+- `knowledge/behaviour_tables.py`: SPECS Lace1 / LastJudge / Trobbio (`_route_spec`: families from the FSM graphs, an
+  IDLE family between attacks, INTRO family for the wake chain, `units` so a rotated run's fights are split per boss;
+  `behaviour_build` filters by it).
+- Oracle: RPC `enemy.hp` {type_key, hp | frac} (`oracle/src/Train/EnemyHpRpc.cs`, training profiles only), built with
+  -p:Deploy=false (rebuilt in the fixer round: 0 warnings, 0 errors).
+- Fixer round (3039044): FightTap's death_on_kill kill is the first dead boss hit whatever hp_before (open issue 6);
+  LACE_1's cross slash starts at CrossSlash Antic, with CrossSlash Aim / CS Evade / CS Evade Cancel as decisions
+  (zero-time logic states: t_in_prev 0.0 in 96 / 61 / 18 exits). Aim -> CS Evade -> Evade (43 of 61) is the ordinary
+  Evade state (L1_EVADE, ctx.frm "CS Evade"); with Aim as the start half the L1_CROSS instances were aim-only stubs.
+  The fixed tap, replayed on all 12 cleared Lace fights of the smoke / collection runs, gives their recorded f_kill.
+
+### Measured (smoke, data policy, 1x, worktree code)
+
+- Lace 1 `20261006_065722_Lace1_data` (i0): 2 / 2 CLEAR, 112.9 / 78.2 s game time, wake frames set. The first try
+  (`065020`) had the savestate at the community x 89.94: the fight began before the tap's reset (no wake frame,
+  void); the next (`065605`, i0) ended HARNESS_FAIL "paused unasked" 0.9 s after the wake (once; cause not found).
+- Last Judge `20261006_065020_LastJudge_data` (i1): 3 / 3 CLEAR, 235.8 / 159.7 / 154.9 s; every phase reached.
+- Trobbio `20261006_065020_Trobbio_data` (i4): 3 / 3 CLEAR, 233.7 / 288.5 / 244.4 s; Phase Roar every fight.
+- Rotation `20261006_065605_Lace1_mix_data` (i2, Lace1,LastJudge,Trobbio): CLEAR 85.5 / 169.0 / 365.6 s.
+- `behaviour_build --report-only --include-open` on the first two LJ and TR fights: scans clean (14,152 / 9,584 and
+  14,024 / 17,313 frames); per fight LJ_INTRO / LJ_FLAME_ROAR / TR_INTRO / TR_PHASE about once, LJ_RAGE_ROAR 1.5,
+  the rest 4-30: about 200 fights per boss for the 200-instance rule. Validation fails on a few contacts (expected
+  on 2 fights; see open issues): LJ 6 uncovered (Flame Wave Dmg Full self template, Swing Attack Flame in Spin End /
+  Stunned) + 25 outside attacks (Roar Glow/Damager, not exported); TR 16 uncovered (dazzle flash Damager self
+  template) + 41 unexplained + 6 outside.
+- Tests: `tests/test_route_bosses.py` 5, episode / combat_run tests 25, test_behaviour_tables 27: all pass.
+
+### Running
+
+- `C:\ssbot\data\runs\m2\20261006_072930_Lace1_mix_data`: instances 0-4, Lace1,LastJudge,Trobbio rotated per
+  episode, data policy, 1x, 10 h from 07:29 (ends ~17:29; seeds 10,000,000+), frozen checkout
+  `C:\ssbot\live_rb_3039044` (git archive of 3039044 + a `CODE_REV` file: code_rev "3039044" in every row). Log
+  `C:\ssbot\sandbox\rb_collect2.log`. Measured cycle (first run's 32 episodes, missed kills taken out): Lace 84 s,
+  LJ 167 s, TR 309 s wall per fight + ~17 s between episodes = ~10 min per three-boss cycle per instance, so ~290
+  fights per boss in 10 h (the rare families come about once per fight: just over the 200 rule).
+  Stop: `cd C:\ssbot\live_rb_3039044\brain; ..\scripts\uv.cmd run python -m ssbot.tools.combat_run stop <run dir>`.
+- Ended (stopped 07:25 for the fixes below): `20261006_070641_Lace1_mix_data` (frozen checkout
+  `C:\ssbot\live_rb_242ed28` = 242ed28, code_rev null), 32 episodes, all CLEAR after the relabel: its 3 Lace STUCK
+  records (i2 ep0, i3 ep0, i3 ep3) were missed lava kills, rewritten offline with the fixed tap (outcome CLEAR,
+  f_kill = the first dead hit, `outcome_orig` / `reason_orig` kept; the originals in `attempts_i2/3.jsonl.orig`).
+  Its frames are good data and belong in the build together with the new run.
+
+### Needs deploy
+
+- `enemy.hp` (oracle). Until it is deployed the `*_low` encounters end HARNESS_FAIL (enemy.hp unknown).
+
+### Next / open issues
+
+1. When the run ends: `behaviour_build <run> --encounter Lace1|LastJudge|Trobbio --fsm-graph
+   C:\ssbot\sandbox\route_bosses\graph_<name>.json` (unit filter splits the rotated run), then held-out recall.
+2. Validation gaps to look at with the full data: LJ "Roar Glow/Damager" contacts with no exported collider and
+   outside every attack (an unexported hazard child: oracle export or a spawn rule); Trobbio's dazzle flash
+   (Damager self template, unexplained contacts); the Lace 1 "Lava Box" static hazard (world hazard, the arena
+   bounds of LACE_1 are still the provisional 80-115).
+3. The *_SING families need the Needolin (the data policy never sings): absent under this policy.
+4. Not wired: Widow (dialogue start via the Speak Region), Cogwork Dancers (two bosses: needs the gauntlet builder or a
+   two-boss spec), Fourth Chorus (no savestate: walk from the skip trick's), Lace 2, GMS. The community savestates
+   carry 5 masks; our route plans 7 by Trobbio.
+5. After deploying enemy.hp: smoke `Lace1_low,LastJudge_low,Trobbio_low` and add them to the rotation if the late
+   phases lag.
+6. (Fixed, fixer round) The Lace 1 STUCK episodes were missed kills, not a hang in the lava teleport: LAVA DAMAGE
+   takes HP through SubtractHP (no hit event) and can leave it <= 0 (i2 ep0: 10 -> -30); she runs Lava Hop -> Tele
+   -> Lava End -> Idle -> ComboSlash and the next slash, a dead hit with hp_before -30, starts BossDeathSlow. FightTap
+   required hp_before > 0 for the death_on_kill kill; it now takes the first dead boss hit (3039044). The timebox is
+   not the issue; L1_LAVA stays its own family (a motion of its own).
+7. Run provenance: smoke runs 065020 / 065605 recorded code_rev f20471d (main) although they ran uncommitted worktree
+   code (065020's Trobbio rows still have the old prefix match: Fling / Air / Explode in attacks). `git_rev` now
+   appends "+dirty" when brain/ has uncommitted changes and reads `CODE_REV` in a frozen checkout without .git.

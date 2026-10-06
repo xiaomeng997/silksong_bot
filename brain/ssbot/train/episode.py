@@ -81,8 +81,10 @@ class FightTap:
         self.reset()
         link.subscribe_state(self._on)
 
-    def reset(self) -> None:
+    def reset(self, enc: Encounter | None = None) -> None:
         with self._lock:
+            if enc is not None:
+                self.enc = enc      # a worker rotating boss encounters: the tap follows the episode's boss
             self.control: str | None = None
             self.control_log: list[tuple[int, str | None, str]] = []
             self.wake_frame: int | None = None
@@ -134,13 +136,25 @@ class FightTap:
             k = ev.get("k")
             d = ev.get("d") or {}
             if k == "fsm":
-                if d.get("fsm") == enc.control_fsm and str(d.get("obj", "")).startswith(enc.boss_type):
+                # the boss object itself (as behaviour_tables FightScanner._is_boss): its spawned hazards can share the
+                # prefix and run a "Control" FSM of their own ("Trobbio Bomb(Clone)", "Trobbio Tornado(Clone)")
+                obj = str(d.get("obj", ""))
+                b = enc.boss_type
+                if d.get("fsm") == enc.control_fsm and (obj == b or obj.startswith(b + "(") or obj.startswith(b + " (")):
                     self.control = d["to"]
                     self.control_log.append((f, d["from"], d["to"]))
                     if self.wake_frame is None and d["from"] in enc.dormant and d["to"] not in enc.dormant:
                         self.wake_frame = f
                     if self.death_frame is None and d["to"] in enc.death_states:
                         self.death_frame = f
+            elif k == "hit":
+                # the kill when the Control FSM has no death state (Encounter.death_on_kill: Lace 1): the first boss
+                # hit with dead, whatever hp_before. Lace's LAVA DAMAGE takes HP through the FSM's SubtractHP (no hit
+                # event) and can leave it <= 0 with her still fighting; the defeat (BossDeathSlow) starts at the next
+                # hit, whose hp_before is already negative (collection 20261006_070641 i2 / i3 ep0: -30 -> -35)
+                if (self.death_frame is None and getattr(enc, "death_on_kill", False) and d.get("dead")
+                        and d.get("type_key") == enc.boss_type):
+                    self.death_frame = f
             elif k == "damage":
                 self.damage.append((f, d))
             elif k in ("catastrophe", "would_die"):
@@ -321,7 +335,10 @@ def _run(link: OracleLink, enc: Encounter, tap: FightTap, policy, cfg: EpisodeCo
             time.sleep(2.0)
     else:
         raise RuntimeError(f"savestate.load failed 3 times: {errors}")
-    tap.reset()
+    if isinstance(tap, FightTap):
+        tap.reset(enc)
+    else:
+        tap.reset()
     s = wait_settled(link, enc.scene)
     rec.f_reset = s["f"]
     _rand(link, seed=cfg.seed, wait_frames=[0, 10])
@@ -339,6 +356,13 @@ def _run(link: OracleLink, enc: Encounter, tap: FightTap, policy, cfg: EpisodeCo
     if cfg.facing:
         args["facing"] = cfg.facing
     rec.rand = _rand(link, **args)
+    lo_hi = getattr(enc, "start_boss_hp", None)
+    if lo_hi is not None:
+        # a training-only late-phase start (Encounter.start_boss_hp): the boss's HP cut to a seeded fraction of what
+        # it has now, through the oracle's enemy.hp (training profiles only); its phase checks read the HP later
+        frac = round(random.Random(cfg.seed ^ 0x5EED).uniform(*lo_hi), 3)
+        r = link.rpc("enemy.hp", timeout_s=10, type_key=enc.boss_type, frac=frac)
+        rec.intro = list(rec.intro or ()) + [{"boss_hp_frac": frac, "set": r.get("set")}]
 
     policy.reset(random.Random(cfg.seed), enc)
     timebox = cfg.timebox_s or enc.timebox_s

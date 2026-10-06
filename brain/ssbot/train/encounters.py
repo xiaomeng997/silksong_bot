@@ -55,6 +55,14 @@ class Encounter:
     tail_quiet_s: float | None = None
     tail_max_s: float = 15.0
     tail_armed: tuple[tuple[str, tuple[str, ...]], ...] = ()   # (type_key prefix, FSM states) armed, no collider yet
+    # the kill as the boss's "hit" event with dead (hp_before > 0, hp_after <= 0) when its Control FSM has no death
+    # state (Lace 1: the defeat runs outside Control); the death states still count when there are any
+    death_on_kill: bool = False
+    # how the savestate differs from the route at this point (docs/facts/1.0.30000/route_bosses.md), for the record
+    notes: str = ""
+    # training-only late-phase start: after the wake the boss's HP is multiplied by a seeded draw from this range
+    # (oracle RPC enemy.hp; ssbot.train.episode). None: the boss keeps its HP
+    start_boss_hp: tuple[float, float] | None = None
 
 
 @dataclass
@@ -251,5 +259,66 @@ FORUM_WAVE_STARTS = tuple(replace(FORUM, name=f"Forum_A_w{i}", savestate=f"fo_r1
                                   timebox_s=180.0) for i in range(14))
 
 
-ENCOUNTERS = {e.name: e for e in (BELL_BEAST, BELL_BEAST_REAPER, FORUM,
+# ---- route bosses (Task route bosses, 2026-10-06; docs/facts/1.0.30000/route_bosses.md) ----------------------------
+# Training savestates rb_* (ssbot.probes.route_bosses save): a community "Boss - <name>" savestate (vichisuki
+# BellRoute-LP, pinned 0557f703fa25; copies vs_p6_* / vs_p7_*) loaded, the encounter flag set where the first meeting
+# has a dialogue (the refight path starts the same battle without it), saved by the game. The intro walks into the
+# arena trigger until the boss's Control FSM leaves its dormant states; that frame is the wake.
+
+
+def walk_intro(enc_name: str, button: int, timeout_s: float = 8.0) -> Callable[[Ctx], int]:
+    """Walk with `button` held until the boss wakes (its Control FSM leaves the encounter's dormant states)."""
+    def intro(ctx: Ctx) -> int:
+        enc = ENCOUNTERS[enc_name]
+        tap = ctx.tap
+        s = _walk_until(ctx, button, lambda s: tap.control not in enc.dormant + (None,), timeout_s=timeout_s)
+        ctx.log.append({"walked_to_x": round(s["hero"]["pos"][0], 2), "f": s["f"], "control": tap.control})
+        if tap.wake_frame is None:
+            # the boss left its dormant states before the tap's reset (the first Lace 1 smoke: the savestate stood
+            # inside the trigger), so the fight has no wake frame and is useless for the tables
+            raise RuntimeError(f"intro: the boss woke before the walk (control {tap.control})")
+        return tap.wake_frame
+    return intro
+
+
+# Lace 1 (route S07): Bone_East_12, "Lace Boss1" (250 HP). Control: Dormant -> (ENTER at hero x ~90.5) Scene Start ->
+# Location Check -> Encountered? (PlayerData encounteredLace1) -> Refight -> Start Battle -> Evade; the first meeting
+# (MEET) runs Take Control and three dialogues first. No ZERO HP state in Control: the kill is the hit event.
+# rb_lace1 = vs_p6_s3 (x 89.94, 5 / 5 masks, 9 silk) walked left to x 83.50 (at 89.94 the load itself started the
+# fight before the tap's reset: no wake frame) + encounteredLace1 True. The walk wakes her at hero x ~88.2.
+LACE_1 = Encounter(
+    name="Lace1", scene="Bone_East_12", savestate="rb_lace1", boss_type="Lace Boss1", control_fsm="Control",
+    dormant=("Pause", "Init", "Use Wall Range?", "Grotto Refight Setup", "Dormant"), death_states=(),
+    intro=walk_intro("Lace1", R), timebox_s=300.0, arena_x=(80.0, 115.0), floor_y=7.5677, death_on_kill=True,
+    notes="encounteredLace1 True (refight: no dialogue); the route meets her for the first time")
+
+# Last Judge (route S17): Coral_Judge_Arena, "Last Judge" (720 HP). Control: Dormant -> (REFIGHT: the savestate has met
+# the judge) Intro Fall Antic Q -> Intro Fall -> Intro Land -> Intro Roar Antic -> Intro Roar -> First Idle; global
+# ZERO HP -> Death. rb_lastjudge = vs_p6_s8 (x 33.54, y 24.57).
+LAST_JUDGE = Encounter(
+    name="LastJudge", scene="Coral_Judge_Arena", savestate="rb_lastjudge", boss_type="Last Judge",
+    control_fsm="Control", dormant=("Pause", "Init", "Dormant"), death_states=("Death",),
+    # arena: the first smoke fight (hero x 7.56-52.41, boss 8.05-53.73, floor y 24.568 on 5,881 frames)
+    intro=walk_intro("LastJudge", R), timebox_s=420.0, arena_x=(7.5, 53.7), floor_y=24.5677,
+    notes="the savestate is a refight (Intro Fall Antic Q); the route's first fight takes Intro Fall Antic")
+
+# Trobbio (route S22): Library_13, "Trobbio" (700 HP). Control: State (PlayerData test) -> Wait Refight -> (ENTER)
+# Start Pause -> Quick Entrance 1-3 -> Appear 1 / Rise / Burst -> Fall 2 -> Land 2 -> Start Idle; the first meeting
+# goes Wait -> Take Control -> Intro Jet -> Convo 1. Global ZERO HP -> Death Hit (then a long fake-death show).
+# rb_trobbio = vs_p7_s1 (x 57.73, y 14.57).
+TROBBIO = Encounter(
+    name="Trobbio", scene="Library_13", savestate="rb_trobbio", boss_type="Trobbio", control_fsm="Control",
+    dormant=("Init", "State", "Wait Refight", "Wait"), death_states=("Death Hit",),
+    # arena: the first smoke fight (hero x 59.28-88.72, boss 59.61-88.41, floor y 14.568 on 6,079 frames)
+    intro=walk_intro("Trobbio", R), timebox_s=420.0, arena_x=(59.3, 88.7), floor_y=14.5677,
+    notes="the savestate is a refight (Wait Refight); the route's first fight has Convo 1")
+
+ROUTE_BOSSES = (LACE_1, LAST_JUDGE, TROBBIO)
+
+# Late-phase starts (data only, never a gate): the boss HP cut to 25-60 % right after the wake, so the phases its
+# Control FSM enters by HP (CompareHP) get data at the rate of the early ones. Needs the oracle's enemy.hp (deploy).
+ROUTE_BOSSES_LOW = tuple(replace(e, name=f"{e.name}_low", start_boss_hp=(0.25, 0.6)) for e in ROUTE_BOSSES)
+
+
+ENCOUNTERS = {e.name: e for e in (BELL_BEAST, BELL_BEAST_REAPER, *ROUTE_BOSSES, *ROUTE_BOSSES_LOW, FORUM,
                                   *(forum_variant(a) for a in ("A", "B", "C", "A5")), *FORUM_WAVE_STARTS)}
