@@ -1595,3 +1595,35 @@ Worktree `C:\modeling\silksong_bot\.claude\worktrees\wf_89d18409-0b6-1` (from ma
 5. The Cogfly throw is not in the kinematic model (gated on t_min >= 1 s, 2 throws seen); the Weighted Anklet path
    (with_weighted, 1.3 s window) never ran (fo_A has no anklet).
 6. Frozen checkouts to remove when done: `C:\ssbot\live_r4_c86b48e` (first try, void), `live_r4_ffe0e82`, `live_r4_b063cae`.
+
+## Task route bosses - Lace 1, Last Judge, Trobbio (branch worktree-wf_b1f47269-5cc-1)
+
+The person (2026-10-06, "全停了吧，换个boss"): the Forum has enough data; stop it and move the machines to the other route
+bosses. Facts: `docs/facts/1.0.30000/route_bosses.md` (Chinese). Probe outputs: `C:\ssbot\sandbox\route_bosses\`
+(`*_scout.json` hold the full Control graphs, `smoke*.log`).
+
+### Done (committed)
+
+- Stopped the five Forum collections (`20261006_062333_Forum_A_w2_mix_data2*`, instances 0-4) gracefully via their
+  STOP files; all five ended after their current episode.
+- Survey of the community savestates (route_bosses.md §1): Lace 1, Widow, Last Judge, Cogwork Dancers, Trobbio, Lace 2
+  and GMS have a "Boss - <name>" savestate; Fourth Chorus has only the skip trick's. Wired: Lace 1, Last Judge,
+  Trobbio. Widow needs a dialogue (Speak Region) to start, Dancers are two bosses (the single-boss builder does not
+  fit), Lace 2 / GMS left for budget.
+- `probes/route_bosses.py` (scout / save / graph); training savestates `rb_lace1` (vs_p6_s3 walked left to x 83.50,
+  encounteredLace1 True: refight, no dialogue), `rb_lastjudge`, `rb_trobbio` (community positions).
+- `train/encounters.py`: LACE_1 / LAST_JUDGE / TROBBIO (`walk_intro`, `death_on_kill` for Lace 1 whose Control has no
+  death state), `<name>_low` late-phase variants (`start_boss_hp` 0.25-0.6 via the oracle's `enemy.hp`).
+  `train/episode.py`: FightTap follows the episode's encounter (rotation of bosses on one worker), the kill from the
+  boss's hit event when `death_on_kill`, the boss's Control matched exactly (Trobbio's bombs / tornadoes run a
+  "Control" FSM under a "Trobbio ..." name), the late-phase HP cut after the start randomisation. Bell Beast / Forum
+  paths unchanged (GauntletTap untouched; the exact match equals the old prefix match for "Bone Beast").
+- `knowledge/behaviour_tables.py`: SPECS Lace1 / LastJudge / Trobbio (`_route_spec`: families from the FSM graphs, an
+  IDLE family between attacks, INTRO family for the wake chain, `units` so a rotated run's fights are split per boss;
+  `behaviour_build` filters by it).
+- Oracle: RPC `enemy.hp` {type_key, hp | frac} (`oracle/src/Train/EnemyHpRpc.cs`, training profiles only), built with
+  -p:Deploy=false.
+
+### Needs deploy
+
+- `enemy.hp` (oracle). Until it is deployed the `*_low` encounters end HARNESS_FAIL (enemy.hp unknown).
