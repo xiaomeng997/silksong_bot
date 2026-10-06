@@ -1666,3 +1666,8 @@ bosses. Facts: `docs/facts/1.0.30000/route_bosses.md` (Chinese). Probe outputs: 
    carry 5 masks; our route plans 7 by Trobbio.
 5. After deploying enemy.hp: smoke `Lace1_low,LastJudge_low,Trobbio_low` and add them to the rotation if the late
    phases lag.
+6. Collection, first 8 episodes: 6 CLEAR, 2 Lace 1 STUCK at the 300 s timebox (i2 / i3 ep0), both after a Lava
+   Damage -> ... -> Lava End chain with no Idle after it (the boss stays in the lava teleport). The frames are kept
+   (STUCK fights are scanned); the spec gives that tail its own family L1_LAVA (6fb1592, build time only). If the
+   share stays high, shorten LACE_1.timebox_s (~200 s; fights took 76-113 s) or end on a Control FSM silent for 20 s,
+   and restart from a new frozen checkout.
