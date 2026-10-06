@@ -1622,7 +1622,12 @@ bosses. Facts: `docs/facts/1.0.30000/route_bosses.md` (Chinese). Probe outputs: 
   IDLE family between attacks, INTRO family for the wake chain, `units` so a rotated run's fights are split per boss;
   `behaviour_build` filters by it).
 - Oracle: RPC `enemy.hp` {type_key, hp | frac} (`oracle/src/Train/EnemyHpRpc.cs`, training profiles only), built with
-  -p:Deploy=false.
+  -p:Deploy=false (rebuilt in the fixer round: 0 warnings, 0 errors).
+- Fixer round (3039044): FightTap's death_on_kill kill is the first dead boss hit whatever hp_before (open issue 6);
+  LACE_1's cross slash starts at CrossSlash Antic, with CrossSlash Aim / CS Evade / CS Evade Cancel as decisions
+  (zero-time logic states: t_in_prev 0.0 in 96 / 61 / 18 exits). Aim -> CS Evade -> Evade (43 of 61) is the ordinary
+  Evade state (L1_EVADE, ctx.frm "CS Evade"); with Aim as the start half the L1_CROSS instances were aim-only stubs.
+  The fixed tap, replayed on all 12 cleared Lace fights of the smoke / collection runs, gives their recorded f_kill.
 
 ### Measured (smoke, data policy, 1x, worktree code)
 
@@ -1642,11 +1647,18 @@ bosses. Facts: `docs/facts/1.0.30000/route_bosses.md` (Chinese). Probe outputs: 
 
 ### Running
 
-- `C:\ssbot\data\runs\m2\20261006_070641_Lace1_mix_data`: instances 0-4, Lace1,LastJudge,Trobbio rotated per
-  episode, data policy, 1x, 10 h from 07:06 (seeds 1,000,000+), frozen checkout `C:\ssbot\live_rb_242ed28` (git
-  archive of 242ed28, no .git: rev null in config_fp; behaviour_build there needs --allow-no-sha only for gauntlets).
-  Log `C:\ssbot\sandbox\rb_collect.log`. Expected ~11 min per three-boss cycle per instance: ~270 fights per boss.
-  Stop: `cd C:\ssbot\live_rb_242ed28\brain; ..\scripts\uv.cmd run python -m ssbot.tools.combat_run stop <run dir>`.
+- `C:\ssbot\data\runs\m2\20261006_072930_Lace1_mix_data`: instances 0-4, Lace1,LastJudge,Trobbio rotated per
+  episode, data policy, 1x, 10 h from 07:29 (ends ~17:29; seeds 10,000,000+), frozen checkout
+  `C:\ssbot\live_rb_3039044` (git archive of 3039044 + a `CODE_REV` file: code_rev "3039044" in every row). Log
+  `C:\ssbot\sandbox\rb_collect2.log`. Measured cycle (first run's 32 episodes, missed kills taken out): Lace 84 s,
+  LJ 167 s, TR 309 s wall per fight + ~17 s between episodes = ~10 min per three-boss cycle per instance, so ~290
+  fights per boss in 10 h (the rare families come about once per fight: just over the 200 rule).
+  Stop: `cd C:\ssbot\live_rb_3039044\brain; ..\scripts\uv.cmd run python -m ssbot.tools.combat_run stop <run dir>`.
+- Ended (stopped 07:25 for the fixes below): `20261006_070641_Lace1_mix_data` (frozen checkout
+  `C:\ssbot\live_rb_242ed28` = 242ed28, code_rev null), 32 episodes, all CLEAR after the relabel: its 3 Lace STUCK
+  records (i2 ep0, i3 ep0, i3 ep3) were missed lava kills, rewritten offline with the fixed tap (outcome CLEAR,
+  f_kill = the first dead hit, `outcome_orig` / `reason_orig` kept; the originals in `attempts_i2/3.jsonl.orig`).
+  Its frames are good data and belong in the build together with the new run.
 
 ### Needs deploy
 
@@ -1666,8 +1678,11 @@ bosses. Facts: `docs/facts/1.0.30000/route_bosses.md` (Chinese). Probe outputs: 
    carry 5 masks; our route plans 7 by Trobbio.
 5. After deploying enemy.hp: smoke `Lace1_low,LastJudge_low,Trobbio_low` and add them to the rotation if the late
    phases lag.
-6. Collection, first 8 episodes: 6 CLEAR, 2 Lace 1 STUCK at the 300 s timebox (i2 / i3 ep0), both after a Lava
-   Damage -> ... -> Lava End chain with no Idle after it (the boss stays in the lava teleport). The frames are kept
-   (STUCK fights are scanned); the spec gives that tail its own family L1_LAVA (6fb1592, build time only). If the
-   share stays high, shorten LACE_1.timebox_s (~200 s; fights took 76-113 s) or end on a Control FSM silent for 20 s,
-   and restart from a new frozen checkout.
+6. (Fixed, fixer round) The Lace 1 STUCK episodes were missed kills, not a hang in the lava teleport: LAVA DAMAGE
+   takes HP through SubtractHP (no hit event) and can leave it <= 0 (i2 ep0: 10 -> -30); she runs Lava Hop -> Tele
+   -> Lava End -> Idle -> ComboSlash and the next slash, a dead hit with hp_before -30, starts BossDeathSlow. FightTap
+   required hp_before > 0 for the death_on_kill kill; it now takes the first dead boss hit (3039044). The timebox is
+   not the issue; L1_LAVA stays its own family (a motion of its own).
+7. Run provenance: smoke runs 065020 / 065605 recorded code_rev f20471d (main) although they ran uncommitted worktree
+   code (065020's Trobbio rows still have the old prefix match: Fling / Air / Explode in attacks). `git_rev` now
+   appends "+dirty" when brain/ has uncommitted changes and reads `CODE_REV` in a frozen checkout without .git.

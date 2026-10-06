@@ -24,7 +24,7 @@
 | 训练存档 | `rb_lace1`：vs_p6_s3 向左走到 x 83.50，`encounteredLace1` 设为真 | `rb_lastjudge`：vs_p6_s8 原样（x 33.54, y 24.57） | `rb_trobbio`：vs_p7_s1 原样（x 57.73, y 14.57） |
 | 触发 | 向右走，英雄 x ≈ 88.2：Dormant → Refight（社区原位 x 89.94 离触发太近：载入后在 tap 复位前就开打，没有醒来帧） | 向右走约 0.8 s：Dormant → Intro Fall Antic Q（存档里已见过审判者 = REFIGHT 路径） | 向右走，英雄 x ≈ 61.7：Wait Refight → Start Pause → Quick Entrance 1 |
 | 首次相遇（路线上） | Encountered? → MEET：Take Control、Convo 1/2/4 三段对话 | Dormant → INTRO FALL：Intro Fall Antic（长版） | State → MEET：Wait → Take Control → Intro Jet → Convo 1 |
-| 死亡 | Control 里没有死亡状态（没有 ZERO HP 全局转移）：以 boss 的 "hit" 事件 dead 为击杀（`Encounter.death_on_kill`） | 全局 ZERO HP → Death | 全局 ZERO HP → Death Hit（之后是一长段假死表演） |
+| 死亡 | Control 里没有死亡状态（没有 ZERO HP 全局转移）：以 boss 的第一次 dead "hit" 事件为击杀（`Encounter.death_on_kill`），不管 hp_before。全局 LAVA DAMAGE 用 FSM 的 SubtractHP 扣血（没有 hit 事件），可以把 HP 扣到 ≤ 0 而她继续打；下一次命中（hp_before 已为负，如 −30 → −35）才开始 BossDeathSlow，即击杀 | 全局 ZERO HP → Death | 全局 ZERO HP → Death Hit（之后是一长段假死表演） |
 | 按 HP 分支 | CrossSlash?（CompareHP）→ 十字斩 | Flame Up Check / Rage Check（CompareHP）→ Flame Roar / Rage Roar | Choice / Pose Idle 送 TO P2 → Phase Roar |
 | 场地（冒烟战斗） | 待测（有 "Lava Box" 危险物，冒烟第一场被它打中 1 次、第二场 3 次） | 英雄 x 7.56–52.41，boss 8.05–53.73，地面 y 24.568 | 英雄 x 59.28–88.72，boss 59.61–88.41，地面 y 14.568 |
 
@@ -34,7 +34,8 @@
 
 由 Control 静态图读出：决策状态分支进去的那个状态是动作的开始，进入任一决策状态即结束；两次动作之间是 `<前缀>_IDLE` 族（身体接触），醒来链是 `<前缀>_INTRO`。全部按 flipX 定向（精灵在 flipX 假时朝 −x，与 Forum 敌人相同，未单独核对）。
 
-- Lace 1（L1_）：INTRO、EVADE（Evade / Evade 2）、HOP（三个 Hop To *）、CHARGE、JSLASH（含 Downstab、Wallcling、Kickoff）、COMBO（ComboSlash 1–5）、COUNTER（含 RapidSlash 与多段连击）、CROSS（CrossSlash Aim 起）、SING、STUN。
+- Lace 1（L1_）：INTRO、EVADE（Evade / Evade 2）、HOP（三个 Hop To *）、CHARGE、JSLASH（含 Downstab、Wallcling、Kickoff）、COMBO（ComboSlash 1–5）、COUNTER（含 RapidSlash 与多段连击）、CROSS（CrossSlash Antic 起）、SING、STUN、LAVA（全局 Lava Damage → Lava Hop → Lava Tele Out → Set Tele Pos X → Tele In → Lava End → Idle，掉进熔岩后跳起并传送回场地）。
+  - 十字斩前的 CrossSlash Aim、CS Evade、CS Evade Cancel 是零时长的逻辑状态（前 12 场 Lace 里 96 / 61 / 18 次退出，t_in_prev 全是 0.0），按决策状态处理。Aim 之后 61/96 次走 EVADE：CS Evade → Evade → Evade Recover → Evade Move → CROSS SLASH → 再 Aim（43 次，就是普通的 Evade 状态，算 EVADE 族，ctx 的来源状态 "CS Evade" 可以区分）；闪避次数用完时 CS Evade → END → CS Evade Cancel（转身）→ CrossSlash Antic（18 次）；直接 FINISHED → CrossSlash Antic 35 次。原来以 CrossSlash Aim 作为 CROSS 的开始，一半的 CROSS 实例只有 Aim（被接着的 Evade 以 chain 结束）。
 - Last Judge（LJ_）：INTRO、THROW（Throw Face Hero / Throw Antic，含 Censer Slam 与 Pull）、JUMP（Jump Antic / OJump Antic）、SPIN（含 Flame Spin、Rerage）、DASH、EVADE、CHARGE、STOMP、FLAME_ROAR、RAGE_ROAR、STUN、SING。
 - Trobbio（TR_）：INTRO、FLASH、TORNADO、THROW、JUMP（含空中投掷、Flash Start Air）、EVADE（Tornado Evade）、EXIT（退场再入场）、FLURRY（Move Dir 2 起的炸弹连射）、COLUMNS（BC Pause 起）、SPIN、PHASE（Phase Roar）、STUN、SING。
 
