@@ -324,7 +324,11 @@ LACE_1 = _route_spec(
     {"Scene Start": "L1_INTRO", "Evade": "L1_EVADE", "Evade 2": "L1_EVADE",
      "Hop To Charge": "L1_HOP", "Hop To J Slash": "L1_HOP", "Hop To Combo": "L1_HOP",
      "Charge Antic": "L1_CHARGE", "J Slash Antic": "L1_JSLASH", "ComboSlash 1": "L1_COMBO",
-     "Counter Antic": "L1_COUNTER", "CrossSlash Aim": "L1_CROSS", "Sing Antic": "L1_SING", "Stun Start": "L1_STUN"},
+     "Counter Antic": "L1_COUNTER", "CrossSlash Aim": "L1_CROSS", "Sing Antic": "L1_SING", "Stun Start": "L1_STUN",
+     # the global LAVA DAMAGE: she lands in the lava, hops and teleports back (Lava Hop -> Lava Tele Out -> Tele In
+     # -> Lava End -> Idle); in two of the collection's first five Lace fights (i2 / i3 ep0) the FSM was still there
+     # at the 300 s timebox (STUCK), so this tail stays in its own family instead of stretching the attack it cut
+     "Lava Damage": "L1_LAVA"},
     ("Idle", "Distance Check", "Close", "Far", "Evade Move", "Hop End", "Will Counter?", "Pose", "Pose Swish",
      "Pose Swish 2", "Pose Swish 3", "Pose Lean", "Pose Upright", "CrossSlash?", "Keep Evading?", "Range Out",
      "Swish Block", "Range Return", "Death Pose", "Trap Stun"),
