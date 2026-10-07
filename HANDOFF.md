@@ -1681,11 +1681,9 @@ bosses. Facts: `docs/facts/1.0.30000/route_bosses.md` (Chinese). Probe outputs: 
 ### Running
 
 - Started ~23:20 (hidden, below normal, frozen checkout `C:\ssbot\live_bb_edcbd36`): builds into
-  `C:\ssbot\data
-oute_bosses5` - Lace1 full, LastJudge 4 shards (s0-s3), **Trobbio full** (~2 h: the final-code
+  `C:\ssbot\data\route_bosses\b5` - Lace1 full, LastJudge 4 shards (s0-s3), **Trobbio full** (~2 h: the final-code
   full held-out recall that replaces the pre-fix b0 numbers). Logs `b5_<boss>[_s<k>].log`; done when a log has
-  "wrote". Summarise: `python <scratchpad>
-b_summary.py C:/ssbot/data/route_bosses/b5 Trobbio` (shards:
+  "wrote". Summarise: `python <scratchpad>\rb_summary.py C:/ssbot/data/route_bosses/b5 Trobbio` (shards:
   comma-separated dirs). Script copies: `rb_build.py` / `rb_build.cmd` / `rb_summary.py` in the session scratchpad.
 
 - None of this round's jobs (the builds ended; the single-process LJ build `b0` died at 271 / 337 when the session's
