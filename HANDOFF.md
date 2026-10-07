@@ -1,4 +1,4 @@
-﻿# HANDOFF - M2 integration (branch m2-integration-6)
+# HANDOFF - M2 integration (branch m2-integration-6)
 
 One section per merged chain; each keeps its chain's own text (headings demoted one level) including its Next steps.
 Paths to worktrees / run dirs in a section are that chain's, not this integration worktree's.
