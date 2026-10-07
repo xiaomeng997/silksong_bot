@@ -263,6 +263,9 @@ class BehaviourSpec:
     # Multihit -> Hero Facing -> Multihitting -> Multihit Slash, the hero 0.5-6 u from her). The hook is the contact
     # the support must cover; boss contacts in these states are multi-hit follow-ups (not checked, counted apart)
     direct_damage_states: tuple[str, ...] = ()
+    # GameObjects under the boss whose damage events name them without the boss: Last Judge's "Roar Glow/Damager" is
+    # exported as the boss's own "Damager" circle (r 4.04, dealt 1) during the roars; such a contact is the boss's
+    boss_parts: tuple[str, ...] = ()
     # attack families or Control states the FSM cannot reach (structure, not missing data): (name, reason) pairs.
     # The tables list them under "structurally_absent" and the coverage does not count such a family as missing
     absent: tuple[tuple[str, str], ...] = ()
@@ -314,7 +317,7 @@ _FACES_LEFT = (-1, 1)
 
 def _route_spec(enc, enemy: str, hp: int, prefix: str, attacks: dict[str, str], decisions: tuple[str, ...],
                 phase_marks: dict[str, str] | None = None, phases: dict[str, str] | None = None,
-                direct_damage_states: tuple[str, ...] = ()) -> BehaviourSpec:
+                direct_damage_states: tuple[str, ...] = (), boss_parts: tuple[str, ...] = ()) -> BehaviourSpec:
     fams = tuple(dict.fromkeys(attacks.values()))
     return BehaviourSpec(
         enemy=enemy, scene=enc.scene, boss_type=enc.boss_type, control_fsm=enc.control_fsm, hp=hp,
@@ -322,7 +325,7 @@ def _route_spec(enc, enemy: str, hp: int, prefix: str, attacks: dict[str, str], 
         dir_states={}, directed=fams + (f"{prefix}_IDLE",), phase_marks=phase_marks or {},
         phases=phases or {"P1": "the whole fight"}, initial_phase="P1", world_fixed=(), flip_mirror=_FACES_LEFT,
         arena_x=enc.arena_x, floor_y=enc.floor_y, idle_family=f"{prefix}_IDLE", death_on_kill=enc.death_on_kill,
-        multi_wounder=True, direct_damage_states=direct_damage_states,
+        multi_wounder=True, direct_damage_states=direct_damage_states, boss_parts=boss_parts,
         units=(enc.name, f"{enc.name}_low"))   # _low: the late-phase starts (encounters)
 
 
@@ -362,6 +365,9 @@ LAST_JUDGE = _route_spec(
      "Far Range", "Close Range F", "Far Range F", "Range Out", "Short Idle", "Spin Check", "Throw Check", "Can Slam?",
      "Charge Check", "Evade To Slam", "Throw Cancel", "Spin Cancel", "After Land", "Evade Land", "Sing End",
      "Hornet Dead", "Hornet Dead 2"),
+    # the roar glow's contacts ("Roar Glow/Damager"; with the unexported "censer sphere/hero_damager" 4,370 contacts
+    # of the 337 fights were outside every attack before this)
+    boss_parts=("Roar Glow",),
     phase_marks={"Flame Roar 1": "P2", "Rage Roar 1": "P3"},
     phases={"P1": "until the first flame roar (Flame Up Check tests the boss HP)", "P2": "after the flame roar",
             "P3": "after the first rage roar (Rage Check tests the boss HP)"})
@@ -1112,9 +1118,16 @@ class FightScanner:
                     return inst
         return self.cur or next((i for i in reversed(self.done) if i.f_end == f), None)
 
+    def _source_type(self, src: str) -> str | None:
+        """The type_key a damage source belongs to (match_source); a boss part (spec.boss_parts) is the boss."""
+        tk, _ = match_source(src, self.known)
+        if tk is None and str(src).split("/")[0] in self.spec.boss_parts:
+            tk = self.spec.boss_type
+        return tk
+
     def _hit(self, f: int, d: dict) -> None:
         src = str(d.get("source"))
-        tk, _ = match_source(src, self.known)
+        tk = self._source_type(src)
         if tk in self.ambient_now:   # an ambient hazard's hit belongs to no attack (validated against _ambient/world)
             self.b.counters["hits by ambient hazards"] += 1
             return
@@ -1130,7 +1143,7 @@ class FightScanner:
     def _resolve(self, f: int) -> None:
         """Turn the contacts reported so far into Contact records (blocked stretches arrive when they end)."""
         for kind, f0, f1, src in self.pending:
-            tk, _ = match_source(src, self.known)
+            tk = self._source_type(src)
             go = _strip_clone(str(src).split("/")[-1])  # the GameObject that dealt the damage: its collider's name
             for ff in range(f0, f1 + 1):
                 fr = self.ring.get(ff)
