@@ -1,4 +1,4 @@
-# HANDOFF - M2 integration (branch m2-integration-6)
+﻿# HANDOFF - M2 integration (branch m2-integration-6)
 
 One section per merged chain; each keeps its chain's own text (headings demoted one level) including its Next steps.
 Paths to worktrees / run dirs in a section are that chain's, not this integration worktree's.
@@ -1707,7 +1707,8 @@ Done (commits 7ac8e36, e448e7b):
   `BehaviourSpec.phase_fsm` (phase marks and the death from that FSM), SPECS Widow (WI_*, 17 families + IDLE) and GMS
   (GM_*, 12 families + IDLE, from Attack Control; her movement in Control is not a family). Graphs for the builder:
   `C:\ssbot\sandbox\route_bosses\graph_Widow.json` (Control), `graph_GMS.json` (Attack Control), `graph_GMS_phase.json`.
-- Tests: `tests/test_route_bosses.py` 8 (3 new), test_behaviour_tables: 36 pass.
+- Tests: `tests/test_route_bosses.py` 9 (3 new) + test_behaviour_tables 27: 36 pass.
+- Collection check: the first 5 episodes (Widow, i0-i4) CLEAR in 236.7-259.7 s game, code_rev e448e7b in every row.
 
 Measured (smoke, data policy, 1x, worktree code 7ac8e36):
 - Widow `20261006_202750_Widow_data` (i0, i1): 4 / 4 CLEAR, 289.6 / 244.0 / 236.7 / 317.8 s game; wake frames, P1-P3
