@@ -263,8 +263,10 @@ class BehaviourSpec:
     # Multihit -> Hero Facing -> Multihitting -> Multihit Slash, the hero 0.5-6 u from her). The hook is the contact
     # the support must cover; boss contacts in these states are multi-hit follow-ups (not checked, counted apart)
     direct_damage_states: tuple[str, ...] = ()
-    # GameObjects under the boss whose damage events name them without the boss: Last Judge's "Roar Glow/Damager" is
-    # exported as the boss's own "Damager" circle (r 4.04, dealt 1) during the roars; such a contact is the boss's
+    # GameObjects under the boss whose damage events name them without the boss, exported as the boss's own colliders:
+    # Last Judge's "Roar Glow/Damager" (the boss's "Damager" circle r 4.04 during the roars), Trobbio's
+    # "Trobbio_dazzle_flash/Damager" (its "Damager" circle r 3.77 in Flash Burst; now and then also exported as an entity
+    # of its own, so the part wins over a known type_key). Such a contact is the boss's
     boss_parts: tuple[str, ...] = ()
     # attack families or Control states the FSM cannot reach (structure, not missing data): (name, reason) pairs.
     # The tables list them under "structurally_absent" and the coverage does not count such a family as missing
@@ -381,6 +383,8 @@ TROBBIO = _route_spec(
     ("Start Idle", "Pose Set", "Evade?", "Reset Evade CD", "Choice", "Pose Idle", "Pose?", "Spin Check",
      "Quick Idle", "Throw Idle", "Rethrow?", "Tornado Evade Land", "Post Dazzle Idle", "Idle", "Sing End",
      "Will Burst Column", "Hornet Dead"),
+    # the dazzle flash: 8,697 unexplained + 2,174 outside + most of the 2,148 uncovered contacts of the 335 fights before
+    boss_parts=("Trobbio_dazzle_flash",),
     phase_marks={"Phase Roar Antic": "P2"},
     phases={"P1": "until the phase roar (Choice / Pose Idle send TO P2 by the boss HP)", "P2": "after it"})
 
@@ -1120,9 +1124,9 @@ class FightScanner:
 
     def _source_type(self, src: str) -> str | None:
         """The type_key a damage source belongs to (match_source); a boss part (spec.boss_parts) is the boss."""
+        if str(src).split("/")[0] in self.spec.boss_parts:
+            return self.spec.boss_type
         tk, _ = match_source(src, self.known)
-        if tk is None and str(src).split("/")[0] in self.spec.boss_parts:
-            tk = self.spec.boss_type
         return tk
 
     def _hit(self, f: int, d: dict) -> None:
