@@ -140,13 +140,18 @@ class FightTap:
                 # prefix and run a "Control" FSM of their own ("Trobbio Bomb(Clone)", "Trobbio Tornado(Clone)")
                 obj = str(d.get("obj", ""))
                 b = enc.boss_type
-                if d.get("fsm") == enc.control_fsm and (obj == b or obj.startswith(b + "(") or obj.startswith(b + " (")):
+                is_boss = obj == b or obj.startswith(b + "(") or obj.startswith(b + " (")
+                if d.get("fsm") == enc.control_fsm and is_boss:
                     self.control = d["to"]
                     self.control_log.append((f, d["from"], d["to"]))
                     if self.wake_frame is None and d["from"] in enc.dormant and d["to"] not in enc.dormant:
                         self.wake_frame = f
                     if self.death_frame is None and d["to"] in enc.death_states:
                         self.death_frame = f
+                elif (is_boss and getattr(enc, "phase_fsm", "") and d.get("fsm") == enc.phase_fsm
+                      and self.death_frame is None and d["to"] in enc.death_states):
+                    # the defeat runs in another FSM of the boss (Grand Mother Silk: Phase Control -> Death Hit)
+                    self.death_frame = f
             elif k == "hit":
                 # the kill when the Control FSM has no death state (Encounter.death_on_kill: Lace 1): the first boss
                 # hit with dead, whatever hp_before. Lace's LAVA DAMAGE takes HP through the FSM's SubtractHP (no hit
