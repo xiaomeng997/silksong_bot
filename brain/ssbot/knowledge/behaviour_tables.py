@@ -265,8 +265,9 @@ class BehaviourSpec:
     direct_damage_states: tuple[str, ...] = ()
     # GameObjects under the boss whose damage events name them without the boss, exported as the boss's own colliders:
     # Last Judge's "Roar Glow/Damager" (the boss's "Damager" circle r 4.04 during the roars), Trobbio's
-    # "Trobbio_dazzle_flash/Damager" (its "Damager" circle r 3.77 in Flash Burst; now and then also exported as an entity
-    # of its own, so the part wins over a known type_key). Such a contact is the boss's
+    # "Trobbio_dazzle_flash/Damager" (its "Damager" circle r 3.77 in Flash Burst; the flash that lingers after it is
+    # exported as an entity of its own, or not at all). A contact while the boss exports the part's collider is the
+    # boss's, whatever else matched; an unmatched one is the boss's too
     boss_parts: tuple[str, ...] = ()
     # attack families or Control states the FSM cannot reach (structure, not missing data): (name, reason) pairs.
     # The tables list them under "structurally_absent" and the coverage does not count such a family as missing
@@ -1123,10 +1124,11 @@ class FightScanner:
         return self.cur or next((i for i in reversed(self.done) if i.f_end == f), None)
 
     def _source_type(self, src: str) -> str | None:
-        """The type_key a damage source belongs to (match_source); a boss part (spec.boss_parts) is the boss."""
-        if str(src).split("/")[0] in self.spec.boss_parts:
-            return self.spec.boss_type
+        """The type_key a damage source belongs to (match_source); an unmatched boss part (spec.boss_parts) is the
+        boss. _resolve also takes a matched part for the boss while the boss exports its collider."""
         tk, _ = match_source(src, self.known)
+        if tk is None and str(src).split("/")[0] in self.spec.boss_parts:
+            tk = self.spec.boss_type
         return tk
 
     def _hit(self, f: int, d: dict) -> None:
@@ -1147,7 +1149,8 @@ class FightScanner:
     def _resolve(self, f: int) -> None:
         """Turn the contacts reported so far into Contact records (blocked stretches arrive when they end)."""
         for kind, f0, f1, src in self.pending:
-            tk = self._source_type(src)
+            tk0 = self._source_type(src)
+            part = str(src).split("/")[0] in self.spec.boss_parts
             go = _strip_clone(str(src).split("/")[-1])  # the GameObject that dealt the damage: its collider's name
             for ff in range(f0, f1 + 1):
                 fr = self.ring.get(ff)
@@ -1155,6 +1158,10 @@ class FightScanner:
                     self.b.counters["contact frames outside the scanned range"] += 1
                     continue
                 near = [self.ring[g] for g in range(ff - LAG_F, ff + 1) if g in self.ring]
+                # a boss part exported as the boss's own collider now is the boss's, also when the part was seen as
+                # an entity of its own at other times (Trobbio's dazzle flash); otherwise as matched
+                tk = self.spec.boss_type if part and any(
+                    go in r.names.get(self.spec.boss_type, ()) for r in near) else tk0
                 boss = tk == self.spec.boss_type
                 ambient = tk is not None and not boss and any(tk in r.ambient for r in near) \
                     and not any(tk in r.armed for r in near)
