@@ -1657,19 +1657,34 @@ bosses. Facts: `docs/facts/1.0.30000/route_bosses.md` (Chinese). Probe outputs: 
   within the full build's support radius (+-4 bins). The Bell Beast way (support_recall with the Forecaster, L 2-4)
   needs a BossSpec / Forecaster for these bosses (not wired).
 - Counts: every family of all three >= 200 except *_SING (0: Needolin). Lace 1: validation ok, support conservative,
-  held-out anchor 100 % except L1_JSLASH 4,133 / 4,141 and L1_STUN 1,121 / 1,128. LJ: 588 uncovered, 1,398 outside
-  (censer sphere), held-out 100 % except THROW 2, CHARGE 52, STOMP 19, STUN 132 misses. TR: 792 uncovered (Blast/Damager self templates,
-  the lingering dazzle flash in TR_EXIT), 0 unexplained, 0 outside (before: 2,148 / 8,697 / 2,174); held-out (full build, ~167
-  fights per fold) >= 99.4 % in every family but TR_EVADE 235 / 262 and TR_PHASE 1,291 / 1,326: data-limited (the sharded folds
-  give 80.2 / 89.4 %): ~2-3x the Trobbio fights (350-700 more), or Trobbio_low after the enemy.hp deploy.
+  held-out anchor 100 % except L1_JSLASH 4,133 / 4,141 and L1_STUN 1,121 / 1,128. LJ: 588 uncovered pairs (447 distinct contacts), 1,398 outside
+  (censer sphere), held-out 100 % except THROW 2, CHARGE 52, STOMP 19, STUN 132 misses. TR: 792 uncovered pairs (618 distinct) (Blast/Damager self templates,
+  the lingering dazzle flash in TR_EXIT), 0 unexplained, 0 outside (before: 2,148 / 8,697 / 2,174); held-out, final code (b26cf2c
+  shards, ~42 fights per fold): >= 99.4 % but TR_EVADE 80.2 %, TR_PHASE 89.4 %, FLURRY 97.4 %, STUN 97.3 %, EXIT 98.8 %;
+  the full build b0 (~167 per fold) gave >= 99.4 % but EVADE 235 / 262, PHASE 1,291 / 1,326 - but b0 is the PRE-FIX
+  code (dazzle flash attribution old), a training-size comparison only (EVADE / PHASE have identical n in both).
+  LJ_INTRO / LJ_DASH / L1_INTRO have no held-out contacts: unmeasured, not 100 %. Strict recall (the planner's +-1 bin
+  pairing, no +-4 bin slack) is lower: L1_CROSS 682 / 968 (70.5 %: timing jitter), TR_PHASE 87.5 %, TR_EVADE 75.2 %
+  (route_bosses.md 6.1). TR_EVADE / TR_PHASE look data-limited: ~2-3x the Trobbio fights (350-700 more), or Trobbio_low after the enemy.hp deploy.
 - Fixes (36f99ef, 979cc57, 3a4e90b, b26cf2c): `direct_damage_states` (Lace's DamageHeroDirectly multi-hit: 173
   uncovered -> follow-ups), `boss_parts` (LJ "Roar Glow", TR "Trobbio_dazzle_flash": the boss's own exported
   "Damager" circle named without the boss; a part counts as the boss's while the boss exports its collider),
   `LACE_1.arena_x` (80, 115) -> (82.0, 106.0) measured (lava pits beyond), `TROBBIO.timebox_s` 420 -> 540 (the two
   STUCK were ordinary slow fights: CLEAR p99 392 s, max 415 s; attack rates as in CLEAR fights, Phase Roar reached).
 - Tests: test_route_bosses + test_behaviour_tables 33 passed.
+- Review fixes (edcbd36): `boss_parts` are (part root, "name:kind" of the boss collider) pairs - the bare name
+  "Damager" also matched TR poly11 / poly7 and LJ poly6, so a part contact went to the boss while it exported a
+  different Damager; `direct_damage_states` follow-ups only when the source is the boss GameObject itself (all 543
+  Lace follow-ups were "Boss Scene/Lace Boss1": same set), the validation JSON splits follow-ups by export.
+  Rebuild with the final code running (below); route_bosses.md 6.5.
 
 ### Running
+
+- Started ~23:20 (hidden, below normal, frozen checkout `C:\ssbot\live_bb_edcbd36`): builds into
+  `C:\ssbot\dataoute_bosses5` - Lace1 full, LastJudge 4 shards (s0-s3), **Trobbio full** (~2 h: the final-code
+  full held-out recall that replaces the pre-fix b0 numbers). Logs `b5_<boss>[_s<k>].log`; done when a log has
+  "wrote". Summarise: `python <scratchpad>b_summary.py C:/ssbot/data/route_bosses/b5 Trobbio` (shards:
+  comma-separated dirs). Script copies: `rb_build.py` / `rb_build.cmd` / `rb_summary.py` in the session scratchpad.
 
 - None of this round's jobs (the builds ended; the single-process LJ build `b0` died at 271 / 337 when the session's
   wrapper task hit its 2 h limit - superseded by the shards).
