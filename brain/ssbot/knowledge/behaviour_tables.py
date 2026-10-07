@@ -384,14 +384,16 @@ WIDOW = _route_spec(
      "Chase Antic": "WI_CHASE", "Chase 7": "WI_CHASE", "Chase 4": "WI_CHASE",
      "Evade 1": "WI_EVADE", "Evade 4": "WI_EVADE",
      "Death Stagger F": "WI_FAKE_DEATH",                             # the fake death at the P3 threshold
-     "Rage Start 1": "WI_RAGE",                                      # rage scream (SetHP), the P3 entry
+     # Rage Start 1 is entered on every P3 move (23 times in the first smoke fight: BoolTest, NEXT -> Rage Attack);
+     # only its first pass runs the rage scream (Rage Scream 2 -> Rage Scream End 2), the P3 entry
+     "Rage Scream 2": "WI_RAGE",
      "Rage Screaming": "WI_RAGE_SCREAM", "Rage Strum 1": "WI_RAGE_STRUM", "Rage Scuttle Antic": "WI_RAGE_DASH",
      "Stun Start": "WI_STUN", "Sing": "WI_SING", "Sing 2": "WI_SING"},
     ("Idle", "Idle Recover", "Extra Idle", "Tele Or Idle", "Phase Check", "Move Choice P1", "Move Choice P2",
      "Move Choice P3", "Set Strum Shot", "Set Chase Slam", "Set Scuttle", "Set Scream", "Set Dash Slash", "Set Rage",
      "Cancel Strum Shot", "Random Pos", "Retry Pos", "Retry Pos 2", "Retry Pos 3", "Close Pos", "Close Pos Low",
      "Pos L", "Pos R", "Next Event", "Rage Charge?", "Chase?", "Chase? 2", "Dmg Response", "Dmg Evade",
-     "Set Evade To Idle", "Evade End", "Evade End 2", "Rage Idle", "Rage Move", "Rage Attack", "Rage Dmg Response",
+     "Set Evade To Idle", "Evade End", "Evade End 2", "Rage Start 1", "Rage Idle", "Rage Move", "Rage Attack", "Rage Dmg Response",
      "P3 Wait"),
     phase_marks={"Move Choice P2": "P2", "Move Choice P3": "P3", "Death Stagger F": "P3"},
     phases={"P1": "Phase Check -> Move Choice P1 (CompareHP)", "P2": "Move Choice P2 (adds the scream)",
