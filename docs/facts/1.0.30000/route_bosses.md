@@ -136,5 +136,7 @@ Trobbio 的炸弹、龙卷风物体名以 "Trobbio " 开头且各有自己的 "C
 
 ### 6.5 复核后的修正（edcbd36，构建 b5 在跑）
 
-- `boss_parts` 按名字 + 形状匹配，`direct_damage_states` 只认 boss 本身的事件（见 6.2）。最终代码的构建 `C:\ssbot\dataoute_bosses5`：Lace 全量、LJ 4 片、**Trobbio 全量**（单进程，约 2 h，留出两折各约 167 场：给出最终代码的全量召回，取代上面的 b0 对照），冻结检出 `C:\ssbot\live_bb_edcbd36`。汇总：`python <scratchpad>b_summary.py <目录[,目录...]> <boss>`（报 t4 与严格召回、未覆盖的对与不同接触、无留出接触的族标 UNMEASURED）。
+- `boss_parts` 按名字 + 形状匹配，`direct_damage_states` 只认 boss 本身的事件（见 6.2）。最终代码的构建 `C:\ssbot\data
+oute_bosses5`：Lace 全量、LJ 4 片、**Trobbio 全量**（单进程，约 2 h，留出两折各约 167 场：给出最终代码的全量召回，取代上面的 b0 对照），冻结检出 `C:\ssbot\live_bb_edcbd36`。汇总：`python <scratchpad>
+b_summary.py <目录[,目录...]> <boss>`（报 t4 与严格召回、未覆盖的对与不同接触、无留出接触的族标 UNMEASURED）。
 - 结果写好前，6.1 里 LJ / TR 的数是 979cc57 / b26cf2c 的；LJ 的光环与 Trobbio 的炫光只在 boss 导出 "Damager:circle" 时归 boss，b5 的家族接触数若有变动，就是旧代码误归的那部分。
