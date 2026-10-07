@@ -289,7 +289,10 @@ def walk_intro(enc_name: str, button: int, timeout_s: float = 8.0) -> Callable[[
 LACE_1 = Encounter(
     name="Lace1", scene="Bone_East_12", savestate="rb_lace1", boss_type="Lace Boss1", control_fsm="Control",
     dormant=("Pause", "Init", "Use Wall Range?", "Grotto Refight Setup", "Dormant"), death_states=(),
-    intro=walk_intro("Lace1", R), timebox_s=300.0, arena_x=(80.0, 115.0), floor_y=7.5677, death_on_kill=True,
+    # arena (341 fights of 20261006_070641 / 072930, route_bosses.md §6): the floor y 7.568 spans hero x 82.0-106.0;
+    # lava pits on both sides (hero x 77.4-81.5 and 106.5-110.4, pit bottom y ~2.2-2.5; the "Lava Box" hazard
+    # x 70.7-119.4 below y 2.41: all 1,553 lava contacts inside the static support); boss x 78.2-109.7
+    intro=walk_intro("Lace1", R), timebox_s=300.0, arena_x=(82.0, 106.0), floor_y=7.5677, death_on_kill=True,
     notes="encounteredLace1 True (refight: no dialogue); the route meets her for the first time")
 
 # Last Judge (route S17): Coral_Judge_Arena, "Last Judge" (720 HP). Control: Dormant -> (REFIGHT: the savestate has met
@@ -310,7 +313,9 @@ TROBBIO = Encounter(
     name="Trobbio", scene="Library_13", savestate="rb_trobbio", boss_type="Trobbio", control_fsm="Control",
     dormant=("Init", "State", "Wait Refight", "Wait"), death_states=("Death Hit",),
     # arena: the first smoke fight (hero x 59.28-88.72, boss 59.61-88.41, floor y 14.568 on 6,079 frames)
-    intro=walk_intro("Trobbio", R), timebox_s=420.0, arena_x=(59.3, 88.7), floor_y=14.5677,
+    # timebox: CLEAR game time p50 287, p99 392, max 415 s over 324 fights of 20261006_072930 (the data policy's
+    # damage rate); the two STUCK at 420 s were ordinary fights with 52 / 7 HP left (route_bosses.md §6)
+    intro=walk_intro("Trobbio", R), timebox_s=540.0, arena_x=(59.3, 88.7), floor_y=14.5677,
     notes="the savestate is a refight (Wait Refight); the route's first fight has Convo 1")
 
 ROUTE_BOSSES = (LACE_1, LAST_JUDGE, TROBBIO)

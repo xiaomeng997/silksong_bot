@@ -258,6 +258,11 @@ class BehaviourSpec:
     # enemies with the oracle's multi_wounder src bit: their multi-hit colliders (Choristor Whip Hit 1-6, Reed
     # ParrySlash Hit, Minister Slash Collider) are exported with damage dealt 0 but hurt (hornet_multi_wounder FSM)
     multi_wounder: bool = False
+    # Control states that hurt the hero by script (PlayMaker DamageHeroDirectly) once a hook has connected: the hits
+    # land wherever the caught hero is, not where a collider is (Lace 1: RapidSlash Charge -HERO COLLIDE-> Collide To
+    # Multihit -> Hero Facing -> Multihitting -> Multihit Slash, the hero 0.5-6 u from her). The hook is the contact
+    # the support must cover; boss contacts in these states are multi-hit follow-ups (not checked, counted apart)
+    direct_damage_states: tuple[str, ...] = ()
     # attack families or Control states the FSM cannot reach (structure, not missing data): (name, reason) pairs.
     # The tables list them under "structurally_absent" and the coverage does not count such a family as missing
     absent: tuple[tuple[str, str], ...] = ()
@@ -308,7 +313,8 @@ _FACES_LEFT = (-1, 1)
 
 
 def _route_spec(enc, enemy: str, hp: int, prefix: str, attacks: dict[str, str], decisions: tuple[str, ...],
-                phase_marks: dict[str, str] | None = None, phases: dict[str, str] | None = None) -> BehaviourSpec:
+                phase_marks: dict[str, str] | None = None, phases: dict[str, str] | None = None,
+                direct_damage_states: tuple[str, ...] = ()) -> BehaviourSpec:
     fams = tuple(dict.fromkeys(attacks.values()))
     return BehaviourSpec(
         enemy=enemy, scene=enc.scene, boss_type=enc.boss_type, control_fsm=enc.control_fsm, hp=hp,
@@ -316,7 +322,8 @@ def _route_spec(enc, enemy: str, hp: int, prefix: str, attacks: dict[str, str], 
         dir_states={}, directed=fams + (f"{prefix}_IDLE",), phase_marks=phase_marks or {},
         phases=phases or {"P1": "the whole fight"}, initial_phase="P1", world_fixed=(), flip_mirror=_FACES_LEFT,
         arena_x=enc.arena_x, floor_y=enc.floor_y, idle_family=f"{prefix}_IDLE", death_on_kill=enc.death_on_kill,
-        multi_wounder=True, units=(enc.name, f"{enc.name}_low"))   # _low: the late-phase starts (encounters)
+        multi_wounder=True, direct_damage_states=direct_damage_states,
+        units=(enc.name, f"{enc.name}_low"))   # _low: the late-phase starts (encounters)
 
 
 LACE_1 = _route_spec(
@@ -338,6 +345,9 @@ LACE_1 = _route_spec(
     ("Idle", "Distance Check", "Close", "Far", "Evade Move", "Hop End", "Will Counter?", "Pose", "Pose Swish",
      "Pose Swish 2", "Pose Swish 3", "Pose Lean", "Pose Upright", "CrossSlash?", "CrossSlash Aim", "CS Evade",
      "CS Evade Cancel", "Keep Evading?", "Range Out", "Swish Block", "Range Return", "Death Pose", "Trap Stun"),
+    # DamageHeroDirectly (graph_Lace1.json): the multi-hit after RapidSlash Charge's HERO COLLIDE, the cross slash's
+    # Finish Multihit, the bell bind; 173 Multihit Slash hits of the 341 fights lay 0.5-6 u from her colliders
+    direct_damage_states=("Multihit Slash", "Finish Multihit", "Bind Bell Damage"),
     phase_marks={"CrossSlash Aim": "P2"},
     phases={"P1": "until the first cross slash (CrossSlash? tests the boss HP)", "P2": "after it"})
 
@@ -1161,8 +1171,9 @@ class FightScanner:
                 self.b.contacts.append(Contact(kind, ff, self.fight, src, tk, owner, t, st, ts, [b for b, _ in pairs],
                                                exported, hole, fr.T, arm, [d for _, d in pairs], ambient,
                                                bool(named) and not exported, self.fold,
-                                               follow=not exported and ff - self.mw_seen.get((tk, go), -10**9)
-                                               <= MW_FOLLOW_F))
+                                               follow=(not exported and ff - self.mw_seen.get((tk, go), -10**9)
+                                                       <= MW_FOLLOW_F) or
+                                               (boss and st in self.spec.direct_damage_states)))
         self.pending = []
 
     # ---- colliders ----
