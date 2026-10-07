@@ -116,3 +116,15 @@ def test_taunt_starts_widow_and_gms():
     for enc in (WIDOW, GRAND_MOTHER_SILK):
         assert enc.intro.__qualname__.startswith("taunt_intro")
     assert SPECS["GMS"].phase_fsm == "Phase Control" and SPECS["Widow"].phase_fsm == ""
+
+
+def test_gms_dash_slash_hits_are_the_boss():
+    # "DashSlash Effect/SlashHit 1-5" hits do not pass through "Silk Boss" in their source path, but their polys are
+    # the boss's colliders: they belong to the boss (its current attack, GM_DASH), not outside every attack
+    from ssbot.knowledge.behaviour_tables import BehaviourBuilder, FightScanner
+    spec = SPECS["GMS"]
+    sc = FightScanner(spec, "t", BehaviourBuilder(spec))
+    assert sc._source_tk("DashSlash Effect/SlashHit 5") == spec.boss_type
+    assert sc._source_tk("DashSlash End Effect/SlashHit 1") == spec.boss_type
+    assert sc._source_tk("Sprites/Sprite type 2") is None
+    assert FightScanner(SPECS["Widow"], "t", BehaviourBuilder(SPECS["Widow"]))._source_tk("DashSlash Effect/x") is None

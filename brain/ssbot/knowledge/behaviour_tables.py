@@ -266,6 +266,10 @@ class BehaviourSpec:
     units: tuple[str, ...] = ()
     # a second FSM on the boss whose transitions also give phase marks and the death (Encounter.phase_fsm); "" none
     phase_fsm: str = ""
+    # root GameObjects of damage sources whose colliders the oracle exports on the boss entity although the hit's
+    # source path does not pass through it (GMS: "DashSlash Effect/SlashHit 1-5", whose Hitbox Control FSM events
+    # carry the boss's iid and whose SlashHit polys are the boss's colliders); their contacts are the boss's
+    boss_parts: tuple[str, ...] = ()
 
 
 def absent_marks(spec: BehaviourSpec, tables: dict) -> dict:
@@ -310,7 +314,8 @@ _FACES_LEFT = (-1, 1)
 
 
 def _route_spec(enc, enemy: str, hp: int, prefix: str, attacks: dict[str, str], decisions: tuple[str, ...],
-                phase_marks: dict[str, str] | None = None, phases: dict[str, str] | None = None) -> BehaviourSpec:
+                phase_marks: dict[str, str] | None = None, phases: dict[str, str] | None = None,
+                boss_parts: tuple[str, ...] = ()) -> BehaviourSpec:
     fams = tuple(dict.fromkeys(attacks.values()))
     return BehaviourSpec(
         enemy=enemy, scene=enc.scene, boss_type=enc.boss_type, control_fsm=enc.control_fsm, hp=hp,
@@ -319,7 +324,7 @@ def _route_spec(enc, enemy: str, hp: int, prefix: str, attacks: dict[str, str], 
         phases=phases or {"P1": "the whole fight"}, initial_phase="P1", world_fixed=(), flip_mirror=_FACES_LEFT,
         arena_x=enc.arena_x, floor_y=enc.floor_y, idle_family=f"{prefix}_IDLE", death_on_kill=enc.death_on_kill,
         multi_wounder=True, units=(enc.name, f"{enc.name}_low"),   # _low: the late-phase starts (encounters)
-        phase_fsm=enc.phase_fsm)
+        phase_fsm=enc.phase_fsm, boss_parts=boss_parts)
 
 
 LACE_1 = _route_spec(
@@ -414,7 +419,10 @@ GRAND_MOTHER_SILK = _route_spec(
     ("Idle", "Init Pause", "Rubble Attack?", "Attack Choice", "Set Primary Hand", "Hand Ptn Choice"),
     phase_marks={"Set P2": "P2", "Set P3": "P3", "Stagger Hit": "P4", "Set P5": "P5", "Set P6": "P6"},
     phases={"P1": "100 HP", "P2": "192 HP (AddHP)", "P3": "240 HP, web strands", "P4": "from the stagger "
-            "(Stagger Hit -> BG Break -> Rubble, Set P4: 110 HP)", "P5": "242 HP", "P6": "340 HP, until Death Hit"})
+            "(Stagger Hit -> BG Break -> Rubble, Set P4: 110 HP)", "P5": "242 HP", "P6": "340 HP, until Death Hit"},
+    # the dash slash (GM_DASH: Dash Attack / Dash Attack End): hits come from "DashSlash Effect/SlashHit 1-5" and
+    # "DashSlash End Effect/SlashHit 1", exported as the boss's SlashHit colliders (smoke i2 ep0: 181 contacts)
+    boss_parts=("DashSlash Effect", "DashSlash End Effect"))
 
 SPECS = {s.enemy: s for s in (BELL_BEAST, LACE_1, LAST_JUDGE, TROBBIO, WIDOW, GRAND_MOTHER_SILK)}
 
@@ -1158,9 +1166,16 @@ class FightScanner:
                     return inst
         return self.cur or next((i for i in reversed(self.done) if i.f_end == f), None)
 
+    def _source_tk(self, src: str) -> str | None:
+        """The entity type_key a damage source belongs to (match_source; a BehaviourSpec.boss_parts root: the boss)."""
+        tk, _ = match_source(src, self.known)
+        if tk is None and self.spec.boss_parts and _strip_clone(str(src).split("/")[0]) in self.spec.boss_parts:
+            tk = self.spec.boss_type
+        return tk
+
     def _hit(self, f: int, d: dict) -> None:
         src = str(d.get("source"))
-        tk, _ = match_source(src, self.known)
+        tk = self._source_tk(src)
         if tk in self.ambient_now:   # an ambient hazard's hit belongs to no attack (validated against _ambient/world)
             self.b.counters["hits by ambient hazards"] += 1
             return
@@ -1176,7 +1191,7 @@ class FightScanner:
     def _resolve(self, f: int) -> None:
         """Turn the contacts reported so far into Contact records (blocked stretches arrive when they end)."""
         for kind, f0, f1, src in self.pending:
-            tk, _ = match_source(src, self.known)
+            tk = self._source_tk(src)
             go = _strip_clone(str(src).split("/")[-1])  # the GameObject that dealt the damage: its collider's name
             for ff in range(f0, f1 + 1):
                 fr = self.ring.get(ff)
