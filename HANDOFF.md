@@ -1645,9 +1645,35 @@ bosses. Facts: `docs/facts/1.0.30000/route_bosses.md` (Chinese). Probe outputs: 
   template) + 41 unexplained + 6 outside.
 - Tests: `tests/test_route_bosses.py` 5, episode / combat_run tests 25, test_behaviour_tables 27: all pass.
 
+### Tables and held-out recall (round 2, branch worktree-wf_91bca580-b72-1, offline; facts: route_bosses.md §6)
+
+- Built from both runs (Lace 341, LJ 337, TR 335 fights; unit filter) with `--fsm-graph graph_<name>.json`; driver =
+  behaviour_build's flow plus a builder pickle (scratchpad `rb_build.py`), frozen checkouts `C:\ssbot\live_bb_<rev>`,
+  outputs `C:\ssbot\data\route_bosses\b0..b4` (b1 Lace final, b2 LJ final 4 shards, b4 TR final 4 shards; the
+  pickles are 0.6-9.4 GB each and can be deleted). The full LJ / TR table phase is slow (TR 6,432 s; LJ ~20 s per
+  fight scan), so the final LJ / TR builds are 4 shards (every 4th fight): counts add up, the held-out folds inside a
+  shard train on ~42 fights (stricter than the full build: TR_PHASE 97.4 % full vs 89.4 % sharded, same code).
+- Held-out recall = the builder's own 2-fold held-out (folds by recording = whole fights): held-out anchor contacts
+  within the full build's support radius (+-4 bins). The Bell Beast way (support_recall with the Forecaster, L 2-4)
+  needs a BossSpec / Forecaster for these bosses (not wired).
+- Counts: every family of all three >= 200 except *_SING (0: Needolin). Lace 1: validation ok, support conservative,
+  held-out anchor 100 % except L1_JSLASH 4,133 / 4,141 and L1_STUN 1,121 / 1,128. LJ: 588 uncovered, 1,398 outside
+  (censer sphere), held-out 100 % except THROW 2, CHARGE 52, STOMP 19, STUN 132 misses. TR: 792 uncovered (Blast/Damager self templates,
+  the lingering dazzle flash in TR_EXIT), 0 unexplained, 0 outside (before: 2,148 / 8,697 / 2,174); held-out (full build, ~167
+  fights per fold) >= 99.4 % in every family but TR_EVADE 235 / 262 and TR_PHASE 1,291 / 1,326: data-limited (the sharded folds
+  give 80.2 / 89.4 %): ~2-3x the Trobbio fights (350-700 more), or Trobbio_low after the enemy.hp deploy.
+- Fixes (36f99ef, 979cc57, 3a4e90b, b26cf2c): `direct_damage_states` (Lace's DamageHeroDirectly multi-hit: 173
+  uncovered -> follow-ups), `boss_parts` (LJ "Roar Glow", TR "Trobbio_dazzle_flash": the boss's own exported
+  "Damager" circle named without the boss; a part counts as the boss's while the boss exports its collider),
+  `LACE_1.arena_x` (80, 115) -> (82.0, 106.0) measured (lava pits beyond), `TROBBIO.timebox_s` 420 -> 540 (the two
+  STUCK were ordinary slow fights: CLEAR p99 392 s, max 415 s; attack rates as in CLEAR fights, Phase Roar reached).
+- Tests: test_route_bosses + test_behaviour_tables 33 passed.
+
 ### Running
 
-- `C:\ssbot\data\runs\m2\20261006_072930_Lace1_mix_data`: instances 0-4, Lace1,LastJudge,Trobbio rotated per
+- None of this round's jobs (the builds ended; the single-process LJ build `b0` died at 271 / 337 when the session's
+  wrapper task hit its 2 h limit - superseded by the shards).
+- Ended 17:30: `C:\ssbot\data\runs\m2\20261006_072930_Lace1_mix_data`: instances 0-4, Lace1,LastJudge,Trobbio rotated per
   episode, data policy, 1x, 10 h from 07:29 (ends ~17:29; seeds 10,000,000+), frozen checkout
   `C:\ssbot\live_rb_3039044` (git archive of 3039044 + a `CODE_REV` file: code_rev "3039044" in every row). Log
   `C:\ssbot\sandbox\rb_collect2.log`. Measured cycle (first run's 32 episodes, missed kills taken out): Lace 84 s,
@@ -1666,14 +1692,21 @@ bosses. Facts: `docs/facts/1.0.30000/route_bosses.md` (Chinese). Probe outputs: 
 
 ### Next / open issues
 
-1. When the run ends: `behaviour_build <run> --encounter Lace1|LastJudge|Trobbio --fsm-graph
-   C:\ssbot\sandbox\route_bosses\graph_<name>.json` (unit filter splits the rotated run), then held-out recall.
-2. Validation gaps to look at with the full data: LJ "Roar Glow/Damager" contacts with no exported collider and
-   outside every attack (an unexported hazard child: oracle export or a spawn rule); Trobbio's dazzle flash
-   (Damager self template, unexplained contacts); the Lace 1 "Lava Box" static hazard (world hazard, the arena
-   bounds of LACE_1 are still the provisional 80-115).
+1. (Done, round 2) Tables + held-out recall: see above and route_bosses.md §6. Verdict: no more data under the data
+   policy (every family >= 200 but *_SING); Lace 1 can stop (validation ok, 15 held-out misses in JSLASH / STUN, none
+   in the 0.5 u sense for STUN); LJ / TR gaps are structural (export / attribution), more fights do not close them.
+   The Forecaster-level recall (support_recall L 2-4) needs a BossSpec / Forecaster for these bosses.
+2. Validation gaps left: LJ "censer sphere/hero_damager" (1,398 contacts outside every attack: not in the export at
+   all, the boss exports only its Censer Slam circle then -> oracle export change); LJ 588 uncovered (Stun Air /
+   Stun Start body contacts at the stun's first frames: the body is dealt 0 in the stun, the contact is the previous
+   attack's; Swing Attack Flame/Hit Circle in Stunned; Flame Wave(Clone) Dmg 5/6/7 self templates with infinite
+   residual). Trobbio 792 uncovered: Blast/Damager (bomb blasts) self templates with
+   infinite residual in BC Attack and the idle tail; the lingering dazzle flash (after Flash Burst exported as an entity of its
+   own or not at all) in TR_EXIT and others.
 3. The *_SING families need the Needolin (the data policy never sings): absent under this policy.
-4. Not wired: Widow (dialogue start via the Speak Region), Cogwork Dancers (two bosses: needs the gauntlet builder or a
+4. Not wired: Widow (dialogue start via the Speak Region; the person, 2026-10-06: "黑寡妇可以直接挑衅" - she can be
+   started directly by taunting, no dialogue needed; "灵丝奶奶不知道" - unknown for Grand Mother Silk), Cogwork
+   Dancers (two bosses: needs the gauntlet builder or a
    two-boss spec), Fourth Chorus (no savestate: walk from the skip trick's), Lace 2, GMS. The community savestates
    carry 5 masks; our route plans 7 by Trobbio.
 5. After deploying enemy.hp: smoke `Lace1_low,LastJudge_low,Trobbio_low` and add them to the rotation if the late
