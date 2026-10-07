@@ -270,7 +270,9 @@ class BehaviourSpec:
     # exported as an entity of its own, or not at all): (part root, the boss collider it is exported as, "name:kind"
     # as collider_key: the boss has other "Damager"s, LJ poly6 in Charge End, TR poly11 / poly7 in the flurry / the
     # columns). A contact while the boss exports that collider is the boss's, whatever else matched; an unmatched one
-    # is the boss's too
+    # is the boss's too. An empty collider key: the part is the boss's only when unmatched (GMS: "DashSlash
+    # Effect/SlashHit 1-5", whose Hitbox Control FSM events carry the boss's iid and whose SlashHit polys are
+    # exported as the boss's colliders, though the hit's source path does not pass through the boss)
     boss_parts: tuple[tuple[str, str], ...] = ()
     # attack families or Control states the FSM cannot reach (structure, not missing data): (name, reason) pairs.
     # The tables list them under "structurally_absent" and the coverage does not count such a family as missing
@@ -278,6 +280,8 @@ class BehaviourSpec:
     # AttemptRecord units (encounter names) whose fights belong to this enemy; () = every fight of the runs given.
     # A run that rotates several bosses (the route bosses' collection) holds the fights of all of them
     units: tuple[str, ...] = ()
+    # a second FSM on the boss whose transitions also give phase marks and the death (Encounter.phase_fsm); "" none
+    phase_fsm: str = ""
 
 
 def absent_marks(spec: BehaviourSpec, tables: dict) -> dict:
@@ -333,7 +337,7 @@ def _route_spec(enc, enemy: str, hp: int, prefix: str, attacks: dict[str, str], 
         phases=phases or {"P1": "the whole fight"}, initial_phase="P1", world_fixed=(), flip_mirror=_FACES_LEFT,
         arena_x=enc.arena_x, floor_y=enc.floor_y, idle_family=f"{prefix}_IDLE", death_on_kill=enc.death_on_kill,
         multi_wounder=True, direct_damage_states=direct_damage_states, boss_parts=boss_parts,
-        units=(enc.name, f"{enc.name}_low"))   # _low: the late-phase starts (encounters)
+        phase_fsm=enc.phase_fsm, units=(enc.name, f"{enc.name}_low"))   # _low: the late-phase starts (encounters)
 
 
 LACE_1 = _route_spec(
@@ -393,7 +397,55 @@ TROBBIO = _route_spec(
     phase_marks={"Phase Roar Antic": "P2"},
     phases={"P1": "until the phase roar (Choice / Pose Idle send TO P2 by the boss HP)", "P2": "after it"})
 
-SPECS = {s.enemy: s for s in (BELL_BEAST, LACE_1, LAST_JUDGE, TROBBIO)}
+# Widow ("Spinner Boss"): between attacks she teleports (Tele Out -> Away -> Phase Check ... Random Pos / Retry Pos,
+# zero-time position draws -> Tele In -> Next Event, which branches into the attack chosen in Move Choice P1-P3).
+WIDOW = _route_spec(
+    _ROUTE_ENC["Widow"], "Widow", 360, "WI",
+    {"Set Intro Pos": "WI_INTRO", "Tele Out": "WI_TELE_OUT", "Tele In": "WI_TELE_IN",
+     "Start Spinning": "WI_SLAM",                                    # chase slam: SlamString 1 / 3 / 4 (Followup?)
+     "Strum Start 1": "WI_STRUM", "Strum Start 2": "WI_STRUM",       # strum shot patterns (Followup? 2 / 3)
+     "Charge": "WI_CHARGE", "Rage Charge 1": "WI_CHARGE",            # scuttle: charge across, Charge Tele
+     "Scream Antic": "WI_SCREAM",                                    # scream + thread slams (L / R / Mid / Outer)
+     "Dash Slash Dir": "WI_DASH",                                    # dash slash -> DashCharge (Multihit Slash)
+     "Chase Antic": "WI_CHASE", "Chase 7": "WI_CHASE", "Chase 4": "WI_CHASE",
+     "Evade 1": "WI_EVADE", "Evade 4": "WI_EVADE",
+     "Death Stagger F": "WI_FAKE_DEATH",                             # the fake death at the P3 threshold
+     # Rage Start 1 is entered on every P3 move (23 times in the first smoke fight: BoolTest, NEXT -> Rage Attack);
+     # only its first pass runs the rage scream (Rage Scream 2 -> Rage Scream End 2), the P3 entry
+     "Rage Scream 2": "WI_RAGE",
+     "Rage Screaming": "WI_RAGE_SCREAM", "Rage Strum 1": "WI_RAGE_STRUM", "Rage Scuttle Antic": "WI_RAGE_DASH",
+     "Stun Start": "WI_STUN", "Sing": "WI_SING", "Sing 2": "WI_SING"},
+    ("Idle", "Idle Recover", "Extra Idle", "Tele Or Idle", "Phase Check", "Move Choice P1", "Move Choice P2",
+     "Move Choice P3", "Set Strum Shot", "Set Chase Slam", "Set Scuttle", "Set Scream", "Set Dash Slash", "Set Rage",
+     "Cancel Strum Shot", "Random Pos", "Retry Pos", "Retry Pos 2", "Retry Pos 3", "Close Pos", "Close Pos Low",
+     "Pos L", "Pos R", "Next Event", "Rage Charge?", "Chase?", "Chase? 2", "Dmg Response", "Dmg Evade",
+     "Set Evade To Idle", "Evade End", "Evade End 2", "Rage Start 1", "Rage Idle", "Rage Move", "Rage Attack", "Rage Dmg Response",
+     "P3 Wait"),
+    phase_marks={"Move Choice P2": "P2", "Move Choice P3": "P3", "Death Stagger F": "P3"},
+    phases={"P1": "Phase Check -> Move Choice P1 (CompareHP)", "P2": "Move Choice P2 (adds the scream)",
+            "P3": "after the fake death: rage (Rage Start 1 sets her HP), Move Choice P3"})
+
+# Grand Mother Silk ("Silk Boss"): the families come from "Attack Control" (her movement in "Control" - drift, dash,
+# juke, stun - runs alongside and is not a family); the phases and the defeat from "Phase Control" (phase_fsm).
+GRAND_MOTHER_SILK = _route_spec(
+    _ROUTE_ENC["GMS"], "GMS", 1224, "GM",
+    {"Stomp Swipe": "GM_STOMP_SWIPE", "Swipe Stomp": "GM_STOMP_SWIPE", "Swp Stomp Swp": "GM_STOMP_SWIPE",
+     "Stomp Swp Stomp": "GM_STOMP_SWIPE", "Swipe Claw": "GM_CLAW", "Claw Swipe": "GM_CLAW",
+     "Pincer Claw": "GM_PINCER", "Pincer Stomp": "GM_PINCER", "Pincer Swipe": "GM_PINCER",
+     "Web Prepare": "GM_WEB", "Rubble Pull Pos": "GM_RUBBLE", "Spike Lift Type": "GM_SPIKE",
+     "Roar Prepare": "GM_ROAR", "Sing Prepare": "GM_SING", "DashAttack Prepare": "GM_DASH",
+     "Prepare Dash": "GM_HAND_DASH",            # global PREPARE DASH (her Control's Dash): hands sweep L / R
+     "Catch": "GM_CATCH",                       # global HORNET CAUGHT: a web strand caught the hero, the slash
+     "Uncatch Hornet?": "GM_STOP"},             # global STUN / ATTACK STOP: stunned, or the P3 -> P4 stagger
+    ("Idle", "Init Pause", "Rubble Attack?", "Attack Choice", "Set Primary Hand", "Hand Ptn Choice"),
+    phase_marks={"Set P2": "P2", "Set P3": "P3", "Stagger Hit": "P4", "Set P5": "P5", "Set P6": "P6"},
+    phases={"P1": "100 HP", "P2": "192 HP (AddHP)", "P3": "240 HP, web strands", "P4": "from the stagger "
+            "(Stagger Hit -> BG Break -> Rubble, Set P4: 110 HP)", "P5": "242 HP", "P6": "340 HP, until Death Hit"},
+    # the dash slash (GM_DASH: Dash Attack / Dash Attack End): hits come from "DashSlash Effect/SlashHit 1-5" and
+    # "DashSlash End Effect/SlashHit 1", exported as the boss's SlashHit colliders (smoke i2 ep0: 181 contacts)
+    boss_parts=(("DashSlash Effect", ""), ("DashSlash End Effect", "")))
+
+SPECS = {s.enemy: s for s in (BELL_BEAST, LACE_1, LAST_JUDGE, TROBBIO, WIDOW, GRAND_MOTHER_SILK)}
 
 
 # ---- small statistics --------------------------------------------------------------------------------------
@@ -996,6 +1048,14 @@ class FightScanner:
             k, d = ev.get("k"), ev.get("d") or {}
             if k == "fsm" and d.get("fsm") == self.spec.control_fsm and self._is_boss(d.get("obj")):
                 self._control(f, d)
+            elif k == "fsm" and self.spec.phase_fsm and d.get("fsm") == self.spec.phase_fsm \
+                    and self._is_boss(d.get("obj")):
+                # the boss's phase FSM (Grand Mother Silk's Phase Control): its phase marks and its death state
+                to = d.get("to")
+                if to in self.spec.phase_marks:
+                    self.phase = self.spec.phase_marks[to]
+                if to in self.spec.death_states and not self.dead:
+                    self._kill(f)
             elif k == "damage":
                 self._hit(f, d)
                 self.pending.append(("damage", f, f, str(d.get("source"))))
@@ -1135,7 +1195,7 @@ class FightScanner:
         """The type_key a damage source belongs to (match_source); an unmatched boss part (spec.boss_parts) is the
         boss. _resolve also takes a matched part for the boss while the boss exports its collider."""
         tk, _ = match_source(src, self.known)
-        if tk is None and str(src).split("/")[0] in self.part_keys:
+        if tk is None and _strip_clone(str(src).split("/")[0]) in self.part_keys:
             tk = self.spec.boss_type
         return tk
 
@@ -1158,7 +1218,7 @@ class FightScanner:
         """Turn the contacts reported so far into Contact records (blocked stretches arrive when they end)."""
         for kind, f0, f1, src in self.pending:
             tk0 = self._source_type(src)
-            part = self.part_keys.get(str(src).split("/")[0])   # the boss collider a boss part is exported as
+            part = self.part_keys.get(_strip_clone(str(src).split("/")[0]))   # the boss collider it is exported as
             go = _strip_clone(str(src).split("/")[-1])  # the GameObject that dealt the damage: its collider's name
             for ff in range(f0, f1 + 1):
                 fr = self.ring.get(ff)
@@ -1168,7 +1228,7 @@ class FightScanner:
                 near = [self.ring[g] for g in range(ff - LAG_F, ff + 1) if g in self.ring]
                 # a boss part exported as the boss's own collider now is the boss's, also when the part was seen as
                 # an entity of its own at other times (Trobbio's dazzle flash); otherwise as matched
-                tk = self.spec.boss_type if part is not None and any(part in r.parts for r in near) else tk0
+                tk = self.spec.boss_type if part and any(part in r.parts for r in near) else tk0
                 boss = tk == self.spec.boss_type
                 ambient = tk is not None and not boss and any(tk in r.ambient for r in near) \
                     and not any(tk in r.armed for r in near)

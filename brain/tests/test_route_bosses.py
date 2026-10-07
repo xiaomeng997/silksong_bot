@@ -2,7 +2,8 @@
 event), the exact boss match (Trobbio's bombs run their own "Control"), the tap following a rotated encounter, and the
 encounters / behaviour specs agreeing with each other."""
 from ssbot.knowledge.behaviour_tables import SPECS
-from ssbot.train.encounters import BELL_BEAST, ENCOUNTERS, LACE_1, ROUTE_BOSSES, TROBBIO
+from ssbot.train.encounters import (BELL_BEAST, ENCOUNTERS, GRAND_MOTHER_SILK, LACE_1, ROUTE_BOSSES, TROBBIO,
+                                    WIDOW)
 from ssbot.train.episode import FightTap
 
 
@@ -83,4 +84,47 @@ def test_route_specs_match_their_encounters():
         assert enc.name in spec.units and f"{enc.name}_low" in spec.units
         assert not set(spec.attack_starts) & set(spec.decision_states)
         assert not set(spec.attack_starts) & set(spec.dormant)
-        assert spec.death_on_kill == enc.death_on_kill
+        assert spec.death_on_kill == enc.death_on_kill and spec.phase_fsm == enc.phase_fsm
+
+
+def test_gms_wakes_in_attack_control_and_dies_in_phase_control():
+    link = _Link()
+    tap = FightTap(link, GRAND_MOTHER_SILK)
+    link.feed(1, ("fsm", {"obj": "Silk Boss", "fsm": "Control", "from": "Dormant", "to": "Ready"}))
+    assert tap.wake_frame is None
+    link.feed(2, ("fsm", {"obj": "Silk Boss", "fsm": "Attack Control", "from": "Dormant", "to": "Init Pause"}))
+    assert (tap.wake_frame, tap.control) == (2, "Init Pause")
+    # the phase changes are no kill (HP Check -> Set P2 adds HP); Phase Control's Death Hit is
+    link.feed(3, ("fsm", {"obj": "Silk Boss", "fsm": "Phase Control", "from": "HP Check 1", "to": "Set P2"}))
+    link.feed(4, ("hit", {"type_key": "Silk Boss", "hp_before": 3, "hp_after": -2, "dead": True}))
+    assert tap.death_frame is None
+    link.feed(5, ("fsm", {"obj": "Silk Boss", "fsm": "Phase Control", "from": "HP Check 6", "to": "Death Hit"}))
+    assert tap.death_frame == 5 and tap.control == "Init Pause"
+
+
+def test_widow_fake_death_is_not_the_kill():
+    link = _Link()
+    tap = FightTap(link, WIDOW)
+    link.feed(1, _fsm("Spinner Boss", "Dormant", "Set Intro Pos"))
+    link.feed(2, _fsm("Spinner Boss", "Idle", "Death Stagger F"))
+    assert (tap.wake_frame, tap.death_frame) == (1, None)
+    link.feed(3, _fsm("Spinner Boss", "Rage Idle", "Death Stagger"))
+    assert tap.death_frame == 3
+
+
+def test_taunt_starts_widow_and_gms():
+    for enc in (WIDOW, GRAND_MOTHER_SILK):
+        assert enc.intro.__qualname__.startswith("taunt_intro")
+    assert SPECS["GMS"].phase_fsm == "Phase Control" and SPECS["Widow"].phase_fsm == ""
+
+
+def test_gms_dash_slash_hits_are_the_boss():
+    # "DashSlash Effect/SlashHit 1-5" hits do not pass through "Silk Boss" in their source path, but their polys are
+    # the boss's colliders: they belong to the boss (its current attack, GM_DASH), not outside every attack
+    from ssbot.knowledge.behaviour_tables import BehaviourBuilder, FightScanner
+    spec = SPECS["GMS"]
+    sc = FightScanner(spec, "t", BehaviourBuilder(spec))
+    assert sc._source_type("DashSlash Effect/SlashHit 5") == spec.boss_type
+    assert sc._source_type("DashSlash End Effect/SlashHit 1") == spec.boss_type
+    assert sc._source_type("Sprites/Sprite type 2") is None
+    assert FightScanner(SPECS["Widow"], "t", BehaviourBuilder(SPECS["Widow"]))._source_type("DashSlash Effect/x") is None

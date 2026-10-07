@@ -1738,3 +1738,73 @@ bosses. Facts: `docs/facts/1.0.30000/route_bosses.md` (Chinese). Probe outputs: 
 7. Run provenance: smoke runs 065020 / 065605 recorded code_rev f20471d (main) although they ran uncommitted worktree
    code (065020's Trobbio rows still have the old prefix match: Fling / Air / Explode in attacks). `git_rev` now
    appends "+dirty" when brain/ has uncommitted changes and reads `CODE_REV` in a frozen checkout without .git.
+
+### Round 2 - Widow, Grand Mother Silk (branch worktree-wf_91bca580-b72-2, 2026-10-06 evening)
+
+The person (2026-10-06): the Widow fight starts by the taunt, no dialogue (round 1's "needs the Speak Region dialogue"
+was wrong). Facts: `route_bosses.md` sections 1 (status), 7 (Widow), 8 (GMS), 9 (Lace 2).
+
+Done (commits 7ac8e36, e448e7b):
+- Taunt start, measured: the "Challenge Region" ("Challenge" FSM) takes the taunt (ACTION bit "taunt", the game's
+  HeroActions.Taunt) as SPECIAL CHALLENGE while the hero stands in it. Widow: Boss Scene Speak Ready -> Spinner Tele
+  Out -> Battle Start, Spinner Boss Control Dormant -> Set Intro Pos 2.85 s after the taunt. GMS needs it too:
+  CHALLENGE START -> Intro Sequence "First Challenge" (~11 s cinematic) -> Silk Boss Control Ready -> ... -> Begin ->
+  Attack Control Dormant -> Init Pause (the wake). Both community saves stand inside the region at the load.
+- `encounters.py`: `taunt_intro` (taunt 6 frames, no input until the boss wakes), WIDOW (`rb_widow` = vs_p6_s7,
+  "Spinner Boss", death Death Stagger; Death Stagger F is the fake death into P3), GRAND_MOTHER_SILK (`GMS`, `rb_gms`
+  = vs_p7_s5, control_fsm "Attack Control", new `Encounter.phase_fsm` = "Phase Control" whose Death Hit is the kill;
+  phase changes add HP, so no death_on_kill). Both in ROUTE_BOSSES (and `_low`, which needs enemy.hp; meaningless for
+  GMS whose phases add HP).
+- `episode.FightTap`: the kill also from the encounter's phase_fsm entering a death state. `behaviour_tables`:
+  `BehaviourSpec.phase_fsm` (phase marks and the death from that FSM), SPECS Widow (WI_*, 17 families + IDLE) and GMS
+  (GM_*, 12 families + IDLE, from Attack Control; her movement in Control is not a family). Graphs for the builder:
+  `C:\ssbot\sandbox\route_bosses\graph_Widow.json` (Control), `graph_GMS.json` (Attack Control), `graph_GMS_phase.json`.
+- Tests: `tests/test_route_bosses.py` 9 (3 new) + test_behaviour_tables 27: 36 pass.
+- Collection check: the first 5 episodes (Widow, i0-i4) CLEAR in 236.7-259.7 s game, code_rev e448e7b in every row.
+- Fixer round 2 (after the verifier): GMS's 621 outside-attack contacts were the dash slash (boss_parts, 0c73ba7,
+  builder only: the running collection's recordings are unaffected and it keeps running); the Widow validation
+  figures below are now the 4-fight ones, and both bosses' validation is FAILED, not clean. Tests 37 pass.
+
+Measured (smoke, data policy, 1x, worktree code 7ac8e36):
+- Widow `20261006_202750_Widow_data` (i0, i1): 4 / 4 CLEAR, 289.6 / 244.0 / 236.7 / 317.8 s game; wake frames, P1-P3
+  and the fake death every fight. Report-only build of all 4 fights (fixer re-run): every fight scans (17,376 /
+  14,642 / 14,204 / 19,068 frames), but **validation FAILED**: 3,416 contacts, uncovered 4 (3 arena "Spike Collider"
+  blocked frames, set1 / set4, at t ~4.05 s in a WI_CHARGE `_tail`, residual inf: past the end of the self template's
+  armed stretch; 1 blade/hero_damager in a WI_IDLE `_tail`, 0.70 u), unexplained 0, outside 0. (The 1,714 / 2 first
+  reported were a 2-fight scan.) Counters: 244 boss damage-collider frames during Death Stagger (after the kill), 1
+  Spinner AtkBell armed outside attacks. Rare families once per fight (WI_INTRO, WI_FAKE_DEATH, WI_RAGE).
+- GMS `20261006_202750_GMS_data` (i2-i4): 3 / 3 CLEAR, 519.2 / 596.2 / 510.9 s game (timebox 720 s); all six phases
+  every fight. Report-only build: every fight scans; GM_ROAR 2 per fight, GM_STOP 7; GM_CLAW, GM_HAND_DASH, GM_SING
+  0. Validation 3,879 contacts, **FAILED**: uncovered 1 (Sprites/Sprite type 2 in GM_STOMP_SWIPE, residual inf),
+  unexplained 39 (GM_CATCH's Slash End: DamageHeroDirectly, no collider), outside attacks 621 at e448e7b -> **0 after
+  the fixer's 0c73ba7**: all 621 were the dash slash ("DashSlash Effect/SlashHit 1-5", "DashSlash End Effect/SlashHit
+  1"), whose polys the oracle exports on the Silk Boss entity but whose hit source path does not pass through it, so
+  no entity matched; `BehaviourSpec.boss_parts` maps those roots to the boss (GM_DASH now 905 contacts, residual 0).
+- A real build of either boss writes nothing unless `--allow-failed-validation` (round 1's bosses fail the same way);
+  judge the uncovered / unexplained by the held-out recall.
+
+Running:
+- `C:\ssbot\data\runs\m2\20261006_204303_Widow_mix_data`: instances 0-4, `Widow,Widow,GMS` rotated per episode, data
+  policy, 1x, 9 h from 20:43 (ends ~05:45; seeds 20,000,000+), frozen checkout `C:\ssbot\live_rb2_e448e7b` (git archive
+  of e448e7b + CODE_REV). Log `C:\ssbot\sandbox\rb2_collect.log`. Sizing: Widow ~300 s and GMS ~580 s wall per fight
+  -> ~1,180 s per cycle -> ~27 cycles per instance: ~270 Widow and ~135 GMS fights (GMS's rarest seen family, ROAR,
+  comes twice per fight).
+  Stop: `cd C:\ssbot\live_rb2_e448e7b\brain; ..\scripts\uv.cmd run python -m ssbot.tools.combat_run stop
+  C:\ssbot\data\runs\m2\20261006_204303_Widow_mix_data`.
+
+Next / open issues (round 2):
+1. When the run ends: `behaviour_build <run> --encounter Widow --fsm-graph ...\graph_Widow.json` and `--encounter GMS
+   --fsm-graph ...\graph_GMS.json` (the unit filter splits the rotation), then held-out recall. Round 1's build of the
+   Lace1 / LastJudge / Trobbio run (`20261006_072930_Lace1_mix_data` + `20261006_070641_Lace1_mix_data`) is still open
+   (this round did not touch it).
+2. GMS: the never-seen GM_CLAW / GM_HAND_DASH (Swipe Claw / Claw Swipe, global
+   PREPARE DASH): check with the full data whether they are gated (Attack Choice's BoolTests) or just rare; the arena
+   bounds (20-60, floor y 133.57) are provisional; her Control (drift / dash / juke) runs alongside the attacks.
+3. Lace 2 not wired: the community save is in Cog_Dancers, the fight in Song_Tower_01 behind the melody lift
+   (UnlockedMelodyLift); needs a training savestate there first (route_bosses.md section 9).
+4. Widow's arena bounds (38-66, floor y 8.57) are provisional; the arena has spike hazards (Spike Collider sets).
+   Kept as self templates (not world_fixed): the 3 uncovered spike contacts are a time-extent miss at the end of the
+   armed stretch (held out 1,254 of 1,257 inside); a world frame would not change the time extent.
+5. The route's Widow end is a scripted bind sequence (Death Stagger -> Can Bind waits for BIND): the route runner must
+   press bind there; training episodes end at the kill. Her damage colliders stay armed in Death Stagger (244 frames
+   in 4 smoke fights, + 1 Spinner AtkBell armed outside attacks): the runner must keep evading until the bind.

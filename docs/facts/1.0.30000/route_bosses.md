@@ -8,12 +8,12 @@
 |---|---|---|---|---|
 | S07 | Lace 1 | p6_s3 = vs_p6_s3 | Bone_East_12 | **已接入**（`rb_lace1`） |
 | S08 | Fourth Chorus | 无 boss 存档（社区路线跳过它：p8_s5 / p8_s6 "Fourth Chorus Skip"，Bone_East_08 x 98） | Bone_East_08 | 未做：要从跳过存档走到竞技场再存 |
-| S13 | Widow | p6_s7 = vs_p6_s7 | Belltown_Shrine | 未做：boss 名 "Spinner Boss"，Control 停在 Dormant；"Boss Scene" Control 走 Unencountered → Speak Pause → Speak Ready，要先对话（交互区 "Speak Region"），向右 / 向左走 18 s 都没触发 |
+| S13 | Widow | p6_s7 = vs_p6_s7 | Belltown_Shrine | **已接入**（第 2 轮，`rb_widow`）：不需要对话，**挑衅（taunt 键）**即开打（§7）。第 1 轮"要先对话"的结论是错的 |
 | S17 | Last Judge | p6_s8 = vs_p6_s8 | Coral_Judge_Arena | **已接入**（`rb_lastjudge`） |
 | S19 | Cogwork Dancers | p6_s9 = vs_p6_s9 | Cog_Dancers | 未做：两个 boss（"Dancer A" / "Dancer B" 各 190 HP），走 5.4 s 后醒；单 boss 的表格构建器不适用 |
 | S22 | Trobbio | p7_s1 = vs_p7_s1 | Library_13 | **已接入**（`rb_trobbio`） |
-| S26 | Lace 2 | p7_s4 = vs_p7_s4 | Cog_Dancers | 未做（预算） |
-| S27 | Grand Mother Silk | p7_s5 = vs_p7_s5 | Cradle_03 | 未做（预算） |
+| S26 | Lace 2 | p7_s4 = vs_p7_s4 | Cog_Dancers（战斗在 Song_Tower_01） | 未做：存档在 Cog_Dancers（Dancers 已打完，x 39.93），Lace 2 在 `Song_Tower_01`，要坐旋律升降梯（`UnlockedMelodyLift`，第一次要演奏 Threefold Melody，benches.md §1）换场景才到；scout 自动左右走 24 s 没有 boss、还掉进了尖刺。要先做一个 Song_Tower_01 里的训练存档（§9） |
+| S27 | Grand Mother Silk | p7_s5 = vs_p7_s5 | Cradle_03 | **已接入**（第 2 轮，`rb_gms`）：同样挑衅开打（§8） |
 
 ## 2. 三个已接入的 boss
 
@@ -138,3 +138,25 @@ Trobbio 的炸弹、龙卷风物体名以 "Trobbio " 开头且各有自己的 "C
 
 - `boss_parts` 按名字 + 形状匹配，`direct_damage_states` 只认 boss 本身的事件（见 6.2）。最终代码的构建 `C:\ssbot\data\route_bosses\b5`：Lace 全量、LJ 4 片、**Trobbio 全量**（单进程，约 2 h，留出两折各约 167 场：给出最终代码的全量召回，取代上面的 b0 对照），冻结检出 `C:\ssbot\live_bb_edcbd36`。汇总：`python <scratchpad>\rb_summary.py <目录[,目录...]> <boss>`（报 t4 与严格召回、未覆盖的对与不同接触、无留出接触的族标 UNMEASURED）。
 - 结果（b5）：Lace 全量与 b1 完全一致（1,461 s）：543 个后续命中全部来自 boss 本身，而且全部算"已导出"（她的身体框就叫 Lace Boss1），所以"只排除未导出的接触"那种改法会把 173 个未覆盖放回来，按来源收窄才对。LJ 4 片与 b2 完全一致（588 对 / 447 个、0、1,398，各族留出不变）。Trobbio 全量（5,899 s）：各族留出接触数与 b26cf2c 的分片相同（名字 + 形状的收窄在这批数据里没有改动任何归属），验证 700 对 / 597 个未覆盖、0、0，留出见 6.1 括号。
+
+## 7. Widow（第 2 轮，2026-10-06 晚）
+
+- **开打方式：挑衅**（人 2026-10-06："黑寡妇可以直接挑衅"）。场景里有 "Challenge Region"（FSM "Challenge"：Init → Idle →（ENTER）In Region；In Region 的转移是 INTERACT → Hornet Voice、EXIT → Exit、SPECIAL CHALLENGE → Take Control）。英雄站在区域内（scout 中 x ≈ 45.8–63.2，y 8.57；社区原位 x 51.97 在区内，载入即 In Region）按 taunt 键（游戏动作 HeroActions.Taunt，键盘默认 V；我们的 ACTION 位 "taunt"），实测：In Region → Take Control → Facing → Face R → Challenge 1；"Speak Region" Dialogue Idle → Challenge → Look →（1.8 s）Challenge End；"Boss Scene" Control Speak Ready → Spinner Tele Out → Spinner Away → Battle Start；"Spinner Boss" Control Dormant → Set Intro Pos（挑衅后 171 帧 ≈ 2.85 s）→ Intro In → Scream Start → Intro Scream → Start Fight → Idle。不需要对话。第 1 轮看到 Boss Scene 停在 Speak Ready，以为要在 "Speak Region" 对话，是错的。
+- 训练存档 `rb_widow` = vs_p6_s7 原样（x 51.97，y 8.57，5 面具，1 丝）。遭遇 `Widow`：`taunt_intro`（按 taunt 6 帧，然后不输入，等 Control 离开 Dormant），type_key "Spinner Boss"，HP 360。
+- 死亡：全局 ZERO HP → Death Stagger（之后是剧本：Hornet Dash → Hornet Connect → Can Bind 等英雄按 BIND → Bind / Bind Burst …，路线上要按绑定，训练回合在击杀后就结束）。假死：另一个 FSM "Fake Death"（TOOK DAMAGE → Check（CompareHP）→ Send Event）发 FAKE DEATH → Death Stagger F → Fake Death End → Tele Out，之后是 P3（狂暴）；第一次进 Rage Start 1 时 SetHP 改她的血量（不是命中造成的 HP 变化）。
+- 阶段：Phase Check（CompareHP）→ Move Choice P1 / P2 / P3。动作族（WI_）：INTRO、TELE_OUT（Tele Out → Away）、TELE_IN、SLAM（Start Spinning 起的 SlamString）、STRUM（Strum Start 1 / 2）、CHARGE（Charge / Rage Charge 1）、SCREAM（P2 起，Scream Antic + 线砸 L/R/Mid/Outer）、DASH（Dash Slash Dir → DashSlash → DashCharge，可接 Multihit Slash）、CHASE、EVADE、FAKE_DEATH、RAGE（Rage Scream 2，只第一次进 Rage Start 1 时走；Rage Start 1 本身每次 P3 出招都会进（冒烟第一场 23 次），按决策状态处理）、RAGE_SCREAM、RAGE_STRUM、RAGE_DASH（Rage Scuttle Antic）、STUN、SING。Random Pos / Retry Pos 是零时长的取位循环（一帧里来回几十次），算决策状态。
+- 冒烟 `C:\ssbot\data\runs\m2\20261006_202750_Widow_data`（i0、i1，各 2 场，数据策略，1x，代码 7ac8e36）：4/4 CLEAR，游戏时间 289.6 / 244.0 / 236.7 / 317.8 s，每场都有醒来帧、Death Stagger、P1–P3 全部走到（Fake Death 1 次 / 场）。命中来源：Spinner AtkBell(Clone)（铃铛弹）、Spike Collider（场地尖刺组 set1/2/4）、NewCharge Hit、DashSlash Hit、boss 身体。
+- 4 场的报表构建（只报告，修复轮重跑，`--fsm-graph C:\ssbot\sandbox\route_bosses\graph_Widow.json`）：每场都能扫描（17,376 / 14,642 / 14,204 / 19,068 帧），但**验证 FAILED**：3,416 个接触，没覆盖 4（3 个场地 Spike Collider（set1 / set4）的挡下帧，在 WI_CHARGE 的 `_tail` 里 t ≈ 4.05 s，残差 inf：超出自身模板的武装时长；1 个 blade/hero_damager，WI_IDLE `_tail`，0.70 u）、无法解释 0、攻击之外 0。（第一次报的 1,714 / 2 只是 2 场。）尖刺仍按自身模板（不改 world_fixed）：没覆盖的是时间上的尾巴，换成世界坐标也不变；留出验证 1,257 个里 1,254 个在内。计数：Death Stagger 中（击杀之后）boss 的伤害碰撞体还开着 244 帧，另有 1 个 Spinner AtkBell 在攻击之外武装；路线上击杀后到按绑定之前还要继续躲。每场的稀有族：WI_INTRO、WI_FAKE_DEATH、WI_RAGE 各 1，WI_STUN 2，WI_SCREAM 6，WI_CHASE 5；WI_SING 0（数据策略不唱）。要 200 次就要约 200–250 场。
+
+## 8. Grand Mother Silk（第 2 轮）
+
+- 开打同样是挑衅：载入后英雄（x 38.26，y 133.57）立刻在 "Challenge Region" 里（In Region），taunt → Take Control → Hornet Voice → Facing → Straight Back? → Face Straight Back → Challenge 2 → Challenge Complete；"Intro Sequence" 的 "First Challenge"：Idle →（CHALLENGE START）Challenge Cam → Wait For Beat End（2.5 s）→ Burst Anim（7.9 s）→ Ready Wait →（2.5 s）Intro Shake → Hero Facing → Silk Enter；"Silk Boss" Control Dormant → Ready（挑衅后约 11.3 s）→ Intro Up → Intro Roar → Title Up → Begin；Attack Control Dormant →（ATTACK）Init Pause 是开打（醒来帧）。
+- 三个 FSM：Control（移动：Drift F/B、Dash、Juke，眩晕）、Attack Control（全部攻击）、Phase Control（P1–P6，每次换阶段 AddHP；P3 → P4 是剧本：Stagger Hit → Stagger Fall → Stagger Pause → BG Break Sequence → Rubble M → Rubble Sides → Set P4；HP Check 6 → Death Hit 是击杀）。研究资料里的阶段 HP 是 100 / 192 / 240 / 110 / 242 / 340（共 1,224）；ents 里载入时 HP 100。
+- 接入：遭遇 `GMS`（`rb_gms` = vs_p7_s5 原样），`control_fsm` = "Attack Control"，新字段 `phase_fsm` = "Phase Control"：它进入 death_states（Death Hit）也算击杀（`FightTap`），表格构建器从它读阶段标记（Set P2 / Set P3 / Stagger Hit / Set P5 / Set P6）和死亡。换阶段的命中不是击杀（HP 会加回来），所以不能用 death_on_kill。
+- 动作族（GM_，来自 Attack Control）：STOMP_SWIPE、CLAW、PINCER（手的组合，Hand Ptn Choice 选；Wait For Hands Ready 是手执行的时间，算在族里）、WEB、RUBBLE、SPIKE、ROAR、SING、DASH（DashAttack Prepare）、HAND_DASH（全局 PREPARE DASH）、CATCH（全局 HORNET CAUGHT：被丝线抓住后的斩击，DamageHeroDirectly，没有碰撞体）、STOP（全局 STUN / ATTACK STOP：眩晕或 P3→P4 的硬直）。她的移动（Control 的 Drift / Dash / Juke）与攻击同时进行，不单独成族。
+- 冒烟 `C:\ssbot\data\runs\m2\20261006_202750_GMS_data`（i2、i3、i4 各 1 场）：3/3 CLEAR，游戏时间 519.2 / 596.2 / 510.9 s（时限 720 s），boss_hp_end −9 / −9 / −27。报表构建（只报告，`graph_GMS.json` = Attack Control）：扫描干净（31,154 / 35,774 / 30,655 帧），六个阶段每场都到；每 3 场：STOMP_SWIPE 162、PINCER 73、DASH 70、WEB 48、SPIKE 46（P5 起）、RUBBLE 45（P4 起）、CATCH 39、STOP 21、ROAR 6，**CLAW、HAND_DASH、SING 0**。验证 3,879 个接触：没覆盖 1、无法解释 39（CATCH 的 Slash End 直接伤害，没有导出的碰撞体）、攻击之外 621，**验证 FAILED**。修复轮查明：621 个全是冲刺斩（"DashSlash Effect/SlashHit 1-5"、"DashSlash End Effect/SlashHit 1"）：它们的多边形碰撞体被 oracle 导出在 Silk Boss 实体上（Hitbox Control 的 FSM 事件也带 boss 的 iid），但命中来源路径不经过 "Silk Boss"，所以匹配不到实体。新字段 `BehaviourSpec.boss_parts`（0c73ba7）把这两个根对象算作 boss：攻击之外 0，GM_DASH 905 个接触、残差 0。剩下没覆盖 1（Sprites/Sprite type 2，GM_STOMP_SWIPE，残差 inf）和无法解释 39，验证仍 FAILED（第 1 轮的 boss 也一样），正式构建要 `--allow-failed-validation`，靠留出召回判断。
+- 场地 arena_x (20, 60)、floor_y 133.5677 是暂定值（没量）。
+
+## 9. Lace 2（未接入）
+
+社区存档 p7_s4（"Boss - Lace 2"）在 `Cog_Dancers`（x 39.93，y 4.60，Dancers 已打败：Boss Scene "Sequence" 走 Check → Defeated → Gates Opened → Door Entry → Idle Unlocked），Lace 2 本身在 `Song_Tower_01`：要用旋律升降梯（第一次要在 Cog_Dancers 演奏 Threefold Melody，之后 `UnlockedMelodyLift`，benches.md §1）。scout 自动左右走 24 s 没有找到 boss（ents 里没有 Lace，英雄还掉进尖刺）。要接入得先到 Song_Tower_01（例如 pdset UnlockedMelodyLift 后坐升降梯，或者找一个 Song_Tower_01 的存档），在触发前存训练存档。研究资料：Lace 2 800 HP。

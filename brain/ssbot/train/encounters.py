@@ -58,6 +58,9 @@ class Encounter:
     # the kill as the boss's "hit" event with dead (hp_before > 0, hp_after <= 0) when its Control FSM has no death
     # state (Lace 1: the defeat runs outside Control); the death states still count when there are any
     death_on_kill: bool = False
+    # a second FSM on the boss whose entry into one of death_states is the kill too (Grand Mother Silk: her attacks run
+    # in "Attack Control", her phases and the defeat in "Phase Control"); "" for none
+    phase_fsm: str = ""
     # how the savestate differs from the route at this point (docs/facts/1.0.30000/route_bosses.md), for the record
     notes: str = ""
     # training-only late-phase start: after the wake the boss's HP is multiplied by a seeded draw from this range
@@ -318,7 +321,56 @@ TROBBIO = Encounter(
     intro=walk_intro("Trobbio", R), timebox_s=540.0, arena_x=(59.3, 88.7), floor_y=14.5677,
     notes="the savestate is a refight (Wait Refight); the route's first fight has Convo 1")
 
-ROUTE_BOSSES = (LACE_1, LAST_JUDGE, TROBBIO)
+TAUNT = mask("taunt")
+
+
+def taunt_intro(enc_name: str, timeout_s: float = 10.0) -> Callable[[Ctx], int]:
+    """Challenge the boss with the taunt and wait, with no input, until it wakes. Widow / Grand Mother Silk: the scene's
+    "Challenge Region" ("Challenge" FSM, Idle -> In Region while the hero stands in its trigger) takes the taunt as
+    SPECIAL CHALLENGE -> Take Control -> Hornet Voice -> Facing -> Challenge 1/2 -> Challenge Complete, which starts
+    the boss scene; the savestates stand inside the region, so the taunt works at once after the load."""
+    def intro(ctx: Ctx) -> int:
+        enc = ENCOUNTERS[enc_name]
+        tap = ctx.tap
+        _hold(ctx, TAUNT, 6)
+        s = _walk_until(ctx, 0, lambda s: tap.control not in enc.dormant + (None,), timeout_s=timeout_s)
+        ctx.log.append({"taunt_x": round(s["hero"]["pos"][0], 2), "f": s["f"], "control": tap.control})
+        if tap.wake_frame is None:
+            raise RuntimeError(f"intro: the boss woke before the taunt (control {tap.control})")
+        return tap.wake_frame
+    return intro
+
+
+# Widow (route S13): Belltown_Shrine, "Spinner Boss" (360 HP). No dialogue: the fight starts by the taunt in the
+# "Challenge Region" (x ~45.8-63.2 at y 8.57; the community position x 51.97 is inside it). Challenge Complete ->
+# "Speak Region" Dialogue Challenge -> Look -> Challenge End -> "Boss Scene" Control Speak Ready -> Spinner Tele Out ->
+# Spinner Away -> Battle Start -> Control Dormant -> Set Intro Pos (2.85 s after the taunt) -> Intro In -> Scream
+# Start -> Intro Scream -> Start Fight -> Idle. Global ZERO HP -> Death Stagger (then the scripted bind sequence:
+# Hornet Dash -> Can Bind waits for the hero's BIND); FAKE DEATH (the "Fake Death" FSM's CompareHP) -> Death Stagger F
+# -> Fake Death End -> Tele Out, then P3 (Rage Start 1 sets her HP: an HP change without a hit).
+# rb_widow = vs_p6_s7 as it is (x 51.97, y 8.57).
+WIDOW = Encounter(
+    name="Widow", scene="Belltown_Shrine", savestate="rb_widow", boss_type="Spinner Boss", control_fsm="Control",
+    dormant=("Init", "Dormant"), death_states=("Death Stagger",),
+    # arena: provisional (the scout's hero x 45.8-63.2; the boss teleports about); see route_bosses.md
+    intro=taunt_intro("Widow"), timebox_s=420.0, arena_x=(38.0, 66.0), floor_y=8.5677,
+    notes="the community save is unencountered (Boss Scene Unencountered -> Speak Ready); the taunt starts it")
+
+# Grand Mother Silk (route S27): Cradle_03, "Silk Boss" (phases 100 / 192 / 240 / 110 / 242 / 340 HP, AddHP at each
+# phase change: HP rises without a hit). Three FSMs: "Control" moves her (Drift / Dash / Juke, stun), "Attack Control"
+# runs the attacks (hands, web, rubble, spike lift, roar, dash attack, the web catch), "Phase Control" the phases
+# (P1-P6; P3 -> P4 is the scripted Stagger Hit / BG Break / Rubble sequence) and the defeat (HP Check 6 -> Death Hit).
+# The taunt in the "Challenge Region" sends CHALLENGE START to "Intro Sequence" ("First Challenge": Challenge Cam ->
+# Wait For Beat End -> Burst Anim, ~11 s) -> Control Dormant -> Ready -> Intro Up -> Intro Roar -> Title Up -> Begin;
+# the fight is Attack Control leaving Dormant. rb_gms = vs_p7_s5 as it is (x 38.26, y 133.57).
+GRAND_MOTHER_SILK = Encounter(
+    name="GMS", scene="Cradle_03", savestate="rb_gms", boss_type="Silk Boss", control_fsm="Attack Control",
+    dormant=("Init", "Dormant"), death_states=("Death Hit",), phase_fsm="Phase Control",
+    # arena: provisional until the smoke fights (the boss at x 39.75 on load)
+    intro=taunt_intro("GMS", timeout_s=40.0), timebox_s=720.0, arena_x=(20.0, 60.0), floor_y=133.5677,
+    notes="the community save has not fought her; the first meeting is the same intro")
+
+ROUTE_BOSSES = (LACE_1, LAST_JUDGE, TROBBIO, WIDOW, GRAND_MOTHER_SILK)
 
 # Late-phase starts (data only, never a gate): the boss HP cut to 25-60 % right after the wake, so the phases its
 # Control FSM enters by HP (CompareHP) get data at the rate of the early ones. Needs the oracle's enemy.hp (deploy).
