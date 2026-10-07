@@ -125,6 +125,16 @@ Trobbio 的炸弹、龙卷风物体名以 "Trobbio " 开头且各有自己的 "C
 - **Last Judge 剩下的**（没修）：攻击之外的 1,398 个是 "censer sphere/hero_damager"（香炉链球；那一帧 boss 只导出 Censer Slam 圆，没有 hero_damager：真的漏导出，要改 oracle 导出）；588 个未覆盖：Stun Air / Stun Start 一开始的身体接触（boss 身体框在硕直里 dealt 0，接触其实是上一个攻击的身体，归到了 STUN 的第 0 帧）、Stunned 里的 Swing Attack Flame/Hit Circle、Flame Wave(Clone) 的 Dmg 5/6/7 自身模板（无穷远残差）。
 - **Trobbio 炫光**（部分修了）：Flash Burst 里炫光是 boss 自己导出的 "Damager" 圆（r 3.77，dealt 1），来源路径 "Trobbio_dazzle_flash/Damager"；但炫光在 Flash Burst 之后还会停留，这时它有时作为单独的实体导出、有时根本不导出。boss 导出该碰撞体时（近 LAG_F 帧内）算 boss 的，否则按原来的匹配。先试的"总算 boss 的"把无法解释从 8,697 推到 25,570（停留的炫光那时 boss 没导出它），已改正。复核发现只比名字不够：boss 还导出别的 "Damager"（Trobbio 的 poly11 在 TR_FLURRY、poly7 在 TR_COLUMNS，LJ 的 poly6 在 Charge End），edcbd36 起 `boss_parts` 是（部件根名，boss 导出它用的碰撞体 "名字:形状"）对：LJ ("Roar Glow", "Damager:circle")、TR ("Trobbio_dazzle_flash", "Damager:circle")，只在 boss 导出这个圆时算 boss 的。b26cf2c（4 片）：未覆盖 2,148 → 792、无法解释 8,697 → 0、攻击之外 2,174 → 0。剩下的未覆盖主要是 Blast/Damager（炸弹爆炸：BC Attack 与空闲尾巴里自身模板残差无穷远）和 TR_EXIT 等状态里停留的炫光。
 
+- **Trobbio 炸弹可以打飞**（人 2026-10-07 提醒；未修）：炸弹 "Trobbio Bomb(Clone)" 有自己的 Control FSM：Init → Fling → Air，
+  落地 / 撞墙弹起（Floor、Wall L / R → Air），被针打中 Air → Stopped Fix → Hit R / Hit L → Air（往打的方向飞），引信
+  Antic → Explode → Recycle，碰到英雄 Air → Hit Hero → Explode。10 h 采集的 326 场 Trobbio（全部录像）：扔出 28,693 个
+  （每场 88），被数据策略打飞 32,803 次（每场 101，一个炸弹可以被打好几次），引信爆炸 23,891，撞到英雄 2,616；英雄
+  被炸弹本体打中 2,942 次、被爆炸 "Blast/Damager" 打中 3,148 次（占全部 21,653 次的 28 %）。打飞的炸弹**伤不到**
+  Trobbio：boss 的 hit 事件只有 Nail（Slash / UpSlash / AltSlash / DownSlash）和 Heavy（Needle Damage），没有爆炸类。
+  所以打飞后的炸弹在哪里爆炸取决于英雄怎么打，与 Trobbio 的动作时间线无关：Blast/Damager 的自模板残差无穷大（上面
+  的未覆盖接触）多半就是这个。规划器要把炸弹当成实时跟踪的弹体（像 Forum 的弹体预测），打飞（方向 = 出刀方向）是
+  一个防御动作，类似拼刀。
+
 ### 6.3 Trobbio 的两场 STUCK（i3 ep110 剩 52 HP，i4 ep101 剩 7 HP）
 
 不是 tap 的问题：两场都到了 Phase Roar、各 4 次硬直，每 100 s 的 Exit / Tornado Evade / Flash / Jump / Throw / Tornado 次数与 CLEAR 战斗相同（如 Exit 8.3 对中位 8.1、Tornado Evade 11.9 / 12.6 对 12.3），只是数据策略的输出慢：324 场 CLEAR 的游戏时间中位 287 s、p99 392 s、最长 415 s，420 s 的时限正好落在分布的尾巴里。`TROBBIO.timebox_s` 420 → 540 s。（Lace CLEAR 最长 141 s / 时限 300，LJ 最长 227 s / 420，都够。）
