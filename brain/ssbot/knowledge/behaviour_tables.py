@@ -258,6 +258,20 @@ class BehaviourSpec:
     # enemies with the oracle's multi_wounder src bit: their multi-hit colliders (Choristor Whip Hit 1-6, Reed
     # ParrySlash Hit, Minister Slash Collider) are exported with damage dealt 0 but hurt (hornet_multi_wounder FSM)
     multi_wounder: bool = False
+    # Control states that hurt the hero by script (PlayMaker DamageHeroDirectly) once a hook has connected: the hits
+    # land wherever the caught hero is, not where a collider is (Lace 1: RapidSlash Charge -HERO COLLIDE-> Collide To
+    # Multihit -> Hero Facing -> Multihitting -> Multihit Slash, the hero 0.5-6 u from her). The hook is the contact
+    # the support must cover; contacts in these states whose source is the boss itself (not one of its collider
+    # GameObjects) are multi-hit follow-ups (not checked, counted apart)
+    direct_damage_states: tuple[str, ...] = ()
+    # GameObjects under the boss whose damage events name them without the boss, exported as the boss's own colliders:
+    # Last Judge's "Roar Glow/Damager" (the boss's "Damager" circle r 4.04 during the roars), Trobbio's
+    # "Trobbio_dazzle_flash/Damager" (its "Damager" circle r 3.77 in Flash Burst; the flash that lingers after it is
+    # exported as an entity of its own, or not at all): (part root, the boss collider it is exported as, "name:kind"
+    # as collider_key: the boss has other "Damager"s, LJ poly6 in Charge End, TR poly11 / poly7 in the flurry / the
+    # columns). A contact while the boss exports that collider is the boss's, whatever else matched; an unmatched one
+    # is the boss's too
+    boss_parts: tuple[tuple[str, str], ...] = ()
     # attack families or Control states the FSM cannot reach (structure, not missing data): (name, reason) pairs.
     # The tables list them under "structurally_absent" and the coverage does not count such a family as missing
     absent: tuple[tuple[str, str], ...] = ()
@@ -308,7 +322,9 @@ _FACES_LEFT = (-1, 1)
 
 
 def _route_spec(enc, enemy: str, hp: int, prefix: str, attacks: dict[str, str], decisions: tuple[str, ...],
-                phase_marks: dict[str, str] | None = None, phases: dict[str, str] | None = None) -> BehaviourSpec:
+                phase_marks: dict[str, str] | None = None, phases: dict[str, str] | None = None,
+                direct_damage_states: tuple[str, ...] = (),
+                boss_parts: tuple[tuple[str, str], ...] = ()) -> BehaviourSpec:
     fams = tuple(dict.fromkeys(attacks.values()))
     return BehaviourSpec(
         enemy=enemy, scene=enc.scene, boss_type=enc.boss_type, control_fsm=enc.control_fsm, hp=hp,
@@ -316,7 +332,8 @@ def _route_spec(enc, enemy: str, hp: int, prefix: str, attacks: dict[str, str], 
         dir_states={}, directed=fams + (f"{prefix}_IDLE",), phase_marks=phase_marks or {},
         phases=phases or {"P1": "the whole fight"}, initial_phase="P1", world_fixed=(), flip_mirror=_FACES_LEFT,
         arena_x=enc.arena_x, floor_y=enc.floor_y, idle_family=f"{prefix}_IDLE", death_on_kill=enc.death_on_kill,
-        multi_wounder=True, units=(enc.name, f"{enc.name}_low"))   # _low: the late-phase starts (encounters)
+        multi_wounder=True, direct_damage_states=direct_damage_states, boss_parts=boss_parts,
+        units=(enc.name, f"{enc.name}_low"))   # _low: the late-phase starts (encounters)
 
 
 LACE_1 = _route_spec(
@@ -338,6 +355,9 @@ LACE_1 = _route_spec(
     ("Idle", "Distance Check", "Close", "Far", "Evade Move", "Hop End", "Will Counter?", "Pose", "Pose Swish",
      "Pose Swish 2", "Pose Swish 3", "Pose Lean", "Pose Upright", "CrossSlash?", "CrossSlash Aim", "CS Evade",
      "CS Evade Cancel", "Keep Evading?", "Range Out", "Swish Block", "Range Return", "Death Pose", "Trap Stun"),
+    # DamageHeroDirectly (graph_Lace1.json): the multi-hit after RapidSlash Charge's HERO COLLIDE, the cross slash's
+    # Finish Multihit, the bell bind; 173 Multihit Slash hits of the 341 fights lay 0.5-6 u from her colliders
+    direct_damage_states=("Multihit Slash", "Finish Multihit", "Bind Bell Damage"),
     phase_marks={"CrossSlash Aim": "P2"},
     phases={"P1": "until the first cross slash (CrossSlash? tests the boss HP)", "P2": "after it"})
 
@@ -352,6 +372,9 @@ LAST_JUDGE = _route_spec(
      "Far Range", "Close Range F", "Far Range F", "Range Out", "Short Idle", "Spin Check", "Throw Check", "Can Slam?",
      "Charge Check", "Evade To Slam", "Throw Cancel", "Spin Cancel", "After Land", "Evade Land", "Sing End",
      "Hornet Dead", "Hornet Dead 2"),
+    # the roar glow's contacts ("Roar Glow/Damager"; with the unexported "censer sphere/hero_damager" 4,370 contacts
+    # of the 337 fights were outside every attack before this)
+    boss_parts=(("Roar Glow", "Damager:circle"),),
     phase_marks={"Flame Roar 1": "P2", "Rage Roar 1": "P3"},
     phases={"P1": "until the first flame roar (Flame Up Check tests the boss HP)", "P2": "after the flame roar",
             "P3": "after the first rage roar (Rage Check tests the boss HP)"})
@@ -365,6 +388,8 @@ TROBBIO = _route_spec(
     ("Start Idle", "Pose Set", "Evade?", "Reset Evade CD", "Choice", "Pose Idle", "Pose?", "Spin Check",
      "Quick Idle", "Throw Idle", "Rethrow?", "Tornado Evade Land", "Post Dazzle Idle", "Idle", "Sing End",
      "Will Burst Column", "Hornet Dead"),
+    # the dazzle flash: 8,697 unexplained + 2,174 outside + most of the 2,148 uncovered contacts of the 335 fights before
+    boss_parts=(("Trobbio_dazzle_flash", "Damager:circle"),),
     phase_marks={"Phase Roar Antic": "P2"},
     phases={"P1": "until the phase roar (Choice / Pose Idle send TO P2 by the boss HP)", "P2": "after it"})
 
@@ -889,6 +914,7 @@ class _Frame:
     holes: set               #   exported; holes: type_keys exported without colliders while not hidden
     ambient: set             # type_keys of ambient hazards armed this frame
     ended: Instance | None = None   # the instance that ended on this frame (a kill frame's contact belongs to it)
+    parts: frozenset = frozenset()  # "name:kind" of the boss's support_threat colliders (when spec.boss_parts)
 
 
 class FightScanner:
@@ -925,6 +951,8 @@ class FightScanner:
         self.ended_now: Instance | None = None
         self.ambient_now: set[str] = set()      # type_keys of ambient hazards armed on the last frame
         self.mw_seen: dict[tuple, int] = {}     # (type_key, collider name) -> last frame enabled as a multi-hit
+        self.part_keys: dict[str, str] = dict(spec.boss_parts)   # boss part root -> the boss collider it is
+        self.parts_now: frozenset = frozenset()                  # the boss's "name:kind" colliders this frame
 
     # ---- feed ----
 
@@ -978,13 +1006,14 @@ class FightScanner:
                 if d.get("dead") and self.spec.death_on_kill:
                     self._kill(f)
         threat, names, holes, ambient = set(), {}, set(), set()
+        self.parts_now = frozenset()
         self._boss(f, boss, threat, names, holes)
         if self.cur is not None and self.boss_hidden is not None and self.cur.anchor_hidden is None \
                 and self.cur.anchor is None:
             self.cur.anchor_hidden = (*self.boss_hidden, self.T - self.cur.t_start)
         owners, armed = self._entities(f, ents, first, threat, names, holes, ambient)
         self.ring[f] = _Frame(self.T, self.hero_box, self.cur, owners, armed, threat, names, holes, ambient,
-                              self.ended_now)
+                              self.ended_now, self.parts_now)
         self.ambient_now = ambient - set(armed)
         self.ended_now = None
         self.ring.pop(f - RING_F, None)
@@ -1102,9 +1131,17 @@ class FightScanner:
                     return inst
         return self.cur or next((i for i in reversed(self.done) if i.f_end == f), None)
 
+    def _source_type(self, src: str) -> str | None:
+        """The type_key a damage source belongs to (match_source); an unmatched boss part (spec.boss_parts) is the
+        boss. _resolve also takes a matched part for the boss while the boss exports its collider."""
+        tk, _ = match_source(src, self.known)
+        if tk is None and str(src).split("/")[0] in self.part_keys:
+            tk = self.spec.boss_type
+        return tk
+
     def _hit(self, f: int, d: dict) -> None:
         src = str(d.get("source"))
-        tk, _ = match_source(src, self.known)
+        tk = self._source_type(src)
         if tk in self.ambient_now:   # an ambient hazard's hit belongs to no attack (validated against _ambient/world)
             self.b.counters["hits by ambient hazards"] += 1
             return
@@ -1120,7 +1157,8 @@ class FightScanner:
     def _resolve(self, f: int) -> None:
         """Turn the contacts reported so far into Contact records (blocked stretches arrive when they end)."""
         for kind, f0, f1, src in self.pending:
-            tk, _ = match_source(src, self.known)
+            tk0 = self._source_type(src)
+            part = self.part_keys.get(str(src).split("/")[0])   # the boss collider a boss part is exported as
             go = _strip_clone(str(src).split("/")[-1])  # the GameObject that dealt the damage: its collider's name
             for ff in range(f0, f1 + 1):
                 fr = self.ring.get(ff)
@@ -1128,6 +1166,9 @@ class FightScanner:
                     self.b.counters["contact frames outside the scanned range"] += 1
                     continue
                 near = [self.ring[g] for g in range(ff - LAG_F, ff + 1) if g in self.ring]
+                # a boss part exported as the boss's own collider now is the boss's, also when the part was seen as
+                # an entity of its own at other times (Trobbio's dazzle flash); otherwise as matched
+                tk = self.spec.boss_type if part is not None and any(part in r.parts for r in near) else tk0
                 boss = tk == self.spec.boss_type
                 ambient = tk is not None and not boss and any(tk in r.ambient for r in near) \
                     and not any(tk in r.armed for r in near)
@@ -1161,8 +1202,10 @@ class FightScanner:
                 self.b.contacts.append(Contact(kind, ff, self.fight, src, tk, owner, t, st, ts, [b for b, _ in pairs],
                                                exported, hole, fr.T, arm, [d for _, d in pairs], ambient,
                                                bool(named) and not exported, self.fold,
-                                               follow=not exported and ff - self.mw_seen.get((tk, go), -10**9)
-                                               <= MW_FOLLOW_F))
+                                               follow=(not exported and ff - self.mw_seen.get((tk, go), -10**9)
+                                                       <= MW_FOLLOW_F) or
+                                               (boss and go == self.spec.boss_type and
+                                                st in self.spec.direct_damage_states)))
         self.pending = []
 
     # ---- colliders ----
@@ -1203,6 +1246,9 @@ class FightScanner:
         self.b.entity_frame(boss, self.ctl, boss=True)
         cur = self.cur
         threats = self._threats(boss, tk, threat, names)
+        if self.part_keys:
+            self.parts_now = frozenset(f"{_strip_clone(c['name'])}{collider_key('', c)}" for c in threats
+                                       if c.get("name"))
         if hole:
             holes.add(tk)
             self.b.holes[(tk, str(self.ctl))] += 1
@@ -2311,9 +2357,12 @@ class BehaviourBuilder:
                         **held_rows},
             "ok": ok, "r_fail_u": R_FAIL_U, "lag_frames": LAG_F,
             "multi_hit_follow_ups": {"desc": f"hits of a connected multi-hit (multi_wounder) whose collider was "
-                                             f"exported within {MW_FOLLOW_F} frames before, not then: not checked "
-                                             f"against the support", "n": len(follow),
-                                     "by_source": dict(Counter(c.src for c in follow))},
+                                             f"exported within {MW_FOLLOW_F} frames before, not then, and the "
+                                             f"boss's own hits in its direct_damage_states (DamageHeroDirectly): "
+                                             f"not checked against the support", "n": len(follow),
+                                     "by_source": dict(Counter(c.src for c in follow)),
+                                     "by_export": dict(Counter("exported" if c.exported else "not exported"
+                                                               for c in follow))},
             "contacts": len(cs), "damage": len(dmg), "blocked_frames": len(cs) - len(dmg),
             "no_hero_box": sum(1 for c in cs if not c.boxes),
             "no_exported_collider_explained_by_export_hole": {"n": len(hole_c), "damage": sum(
