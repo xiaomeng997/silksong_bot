@@ -1659,12 +1659,13 @@ bosses. Facts: `docs/facts/1.0.30000/route_bosses.md` (Chinese). Probe outputs: 
 - Counts: every family of all three >= 200 except *_SING (0: Needolin). Lace 1: validation ok, support conservative,
   held-out anchor 100 % except L1_JSLASH 4,133 / 4,141 and L1_STUN 1,121 / 1,128. LJ: 588 uncovered pairs (447 distinct contacts), 1,398 outside
   (censer sphere), held-out 100 % except THROW 2, CHARGE 52, STOMP 19, STUN 132 misses. TR: 792 uncovered pairs (618 distinct) (Blast/Damager self templates,
-  the lingering dazzle flash in TR_EXIT), 0 unexplained, 0 outside (before: 2,148 / 8,697 / 2,174); held-out, final code (b26cf2c
-  shards, ~42 fights per fold): >= 99.4 % but TR_EVADE 80.2 %, TR_PHASE 89.4 %, FLURRY 97.4 %, STUN 97.3 %, EXIT 98.8 %;
-  the full build b0 (~167 per fold) gave >= 99.4 % but EVADE 235 / 262, PHASE 1,291 / 1,326 - but b0 is the PRE-FIX
-  code (dazzle flash attribution old), a training-size comparison only (EVADE / PHASE have identical n in both).
+  the lingering dazzle flash in TR_EXIT), 0 unexplained, 0 outside (before: 2,148 / 8,697 / 2,174); held-out, final code full build
+  b5 (edcbd36, ~167 fights per fold): >= 99.4 % in every family but TR_EVADE 235 / 262 (89.7 %) and TR_PHASE
+  1,291 / 1,326 (97.4 %); the b26cf2c shards (~42 per fold) give EVADE 80.2 %, PHASE 89.4 %, FLURRY 97.4 %, STUN
+  97.3 %, EXIT 98.8 % (fold size). An earlier quote of the full numbers came from b0 (pre-fix code); b5 equals it but
+  INTRO / FLASH (n 2,993 / 15,229, all recalled).
   LJ_INTRO / LJ_DASH / L1_INTRO have no held-out contacts: unmeasured, not 100 %. Strict recall (the planner's +-1 bin
-  pairing, no +-4 bin slack) is lower: L1_CROSS 682 / 968 (70.5 %: timing jitter), TR_PHASE 87.5 %, TR_EVADE 75.2 %
+  pairing, no +-4 bin slack) is lower: L1_CROSS 682 / 968 (70.5 %: timing jitter), TR_PHASE 94.9 %, TR_EVADE 84.7 % (full b5)
   (route_bosses.md 6.1). TR_EVADE / TR_PHASE look data-limited: ~2-3x the Trobbio fights (350-700 more), or Trobbio_low after the enemy.hp deploy.
 - Fixes (36f99ef, 979cc57, 3a4e90b, b26cf2c): `direct_damage_states` (Lace's DamageHeroDirectly multi-hit: 173
   uncovered -> follow-ups), `boss_parts` (LJ "Roar Glow", TR "Trobbio_dazzle_flash": the boss's own exported
@@ -1676,11 +1677,14 @@ bosses. Facts: `docs/facts/1.0.30000/route_bosses.md` (Chinese). Probe outputs: 
   "Damager" also matched TR poly11 / poly7 and LJ poly6, so a part contact went to the boss while it exported a
   different Damager; `direct_damage_states` follow-ups only when the source is the boss GameObject itself (all 543
   Lace follow-ups were "Boss Scene/Lace Boss1": same set), the validation JSON splits follow-ups by export.
-  Rebuild with the final code running (below); route_bosses.md 6.5.
+  Rebuilt with the final code (b5): Lace identical to b1 (all 543 follow-ups are the boss itself and all count as
+  exported - her body box is named Lace Boss1 - so 'non-exported only' would have brought the 173 uncovered back),
+  LJ shards identical to b2, Trobbio full: family n as the b26cf2c shards, 700 uncovered pairs (597 distinct) / 0 /
+  0. The name + shape narrowing changed no attribution in this data. route_bosses.md 6.1 / 6.5.
 
 ### Running
 
-- Started ~23:20 (hidden, below normal, frozen checkout `C:\ssbot\live_bb_edcbd36`): builds into
+- Ended 00:55 (started 23:20 hidden, below normal, frozen checkout `C:\ssbot\live_bb_edcbd36`): builds into
   `C:\ssbot\data\route_bosses\b5` - Lace1 full, LastJudge 4 shards (s0-s3), **Trobbio full** (~2 h: the final-code
   full held-out recall that replaces the pre-fix b0 numbers). Logs `b5_<boss>[_s<k>].log`; done when a log has
   "wrote". Summarise: `python <scratchpad>\rb_summary.py C:/ssbot/data/route_bosses/b5 Trobbio` (shards:
