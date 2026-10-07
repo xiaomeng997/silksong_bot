@@ -1791,6 +1791,11 @@ Running:
   comes twice per fight).
   Stop: `cd C:\ssbot\live_rb2_e448e7b\brain; ..\scripts\uv.cmd run python -m ssbot.tools.combat_run stop
   C:\ssbot\data\runs\m2\20261006_204303_Widow_mix_data`.
+- Queued (main session, 2026-10-07 01:00): `C:\ssbot\sandbox\rb3_after.ps1` (hidden, log `rb3_after.log`) waits for
+  that run to exit, then starts `Trobbio,Trobbio,GMS` on instances 0-4 for 20 h (seeds 30,000,000+) from the frozen
+  checkout `C:\ssbot\live_rb3_146876f` (main 146876f, Trobbio timebox 540 s), log `rb3_collect.log`: Trobbio
+  TR_EVADE / TR_PHASE are data-limited (350-700 more fights) and GMS got only ~135 fights. It does not start if
+  DEMO_SOON / STOP_AGENTS exists or workers are still running at 08:00.
 
 Next / open issues (round 2):
 1. When the run ends: `behaviour_build <run> --encounter Widow --fsm-graph ...\graph_Widow.json` and `--encounter GMS
