@@ -1854,23 +1854,43 @@ Done (commits 7ba7470, 0a326c3, 02469ab):
   the full suite at b10b251: 1141 passed, 3 skipped, 1 xfailed (an earlier run under load failed only the known
   timing budget test_hitbox_tables::test_support_query_matches_reference_and_meets_the_budget, 3.39 ms > 3 ms).
 
-STOPPED 2026-10-08 ~01:00 PDT (weekly usage 99 %, stop protocol) before the live check: the Trobbio / GMS collection
-was still running (884 episodes, ends ~01:55). Live check still to do (<= 20 min on instance 4 once the collection
-has ended; lock `C:\ssbot\sandbox\locks\inst4.lock` with the track name, delete it after): frozen checkout
-`C:\ssbot\live_recov_02469ab` (02469ab + CODE_REV; later commits are docs / a comment only), venv ready:
-  cd C:\ssbot\live_recov_02469ab\brain
-  ..\scripts\uv.cmd run python -m ssbot.probes.recovery_check --instance 4
-It loads BellBeast's savestate, sets save suppression, runs the 8 cases (pause menu highlight on Options / Quit,
-Options, a settings sub-menu, the exit prompt on Yes, a brain-lost watchdog pause, one real quit then the title's
-Game options, the title's highlight on Options) and writes `C:\ssbot\sandbox\recovery_check\<time>_i4.json`. Check:
-every case ok, the Submits only on continue / back / no, whether Down reaches Back on the real Options menus, which
-main-menu item is highlighted after Esc back from Options (MenuError on the retry or not), the watchdog case's
-pause_cause. Fill pause_quit.md 11.3 with the result.
+Round 1 stopped 2026-10-08 ~01:00 PDT (weekly usage 99 %) before the live check. Round 2 (2026-10-08 03:10 - 03:45
+PDT, commits 6921f95, 76d5b36, 8148fd4, 2e11ffe):
+- `recovery.pause_cause`: act.lost -> the watchdog (BrainLost stays set until the next ACTION, so the first paused STATE
+  of a watchdog pause always shows it); a Pause bit in the harness's own ACTION with act.lost false -> "a Pause key in
+  the harness's own ACTION (policy / probe)" (was counted as the watchdog).
+- `combat_run` worker: a pause still showing before the next episode is resumed before set_time_scale (a paused game
+  reads Time.timeScale 0 and set_time_scale stopped the worker: 20261008_015907 i0); still paused -> no scale read, the
+  episode's start check makes it a HARNESS_FAIL (5-in-a-row stop); set_time_scale's stop names a pause.
+- `probes/recovery_check`: two episode cases (PauseAt wraps the data policy and presses Pause mid-fight from the
+  harness side): episode_pause (HARNESS_FAIL, after_harness_fail, a second episode) and episode_settings (then the
+  pause menu's Options -> Game, the next episode's own start resume, no after_harness_fail). Seeds 990000+ (probe
+  only, no attempt rows).
+- Sample 20261008_015907_Forum_A_eval_planner_oracle i0 (r5value A/B, code 35e5fe6, before the recovery code): the
+  only HARNESS_FAIL in 1104 episodes of 10-07 / 08. Watchdog signature (last ACTION applied 12361193, act.lost at
+  12361207, paused 12361208); cause: one planner decision of 1599 ms (decisions_i0 f 12361192, plan "WAIT+runR"; the
+  other 235 decisions median 3.6 ms, max 15 ms) after an 8.3 s warm-up. The old worker left the pause and stopped on
+  "time.scale 1.0: the game runs at 0.0": the run has 1 episode. Both halves are handled now.
+- Live check on instance 4 (lock ops 03:37:27 - 03:40:02, frozen `C:\ssbot\live_recov_8148fd4`): all 10 cases ok,
+  every Submit on continue / back / no, no Esc while paused. `C:\ssbot\sandbox\recovery_check\20261008_033740_i4.json`.
+  The real Options (menu 2) and Game options (menu 12) reach Back with Down x5 (nothing named before it); the
+  watchdog case paused 252 ms after the last ACTION, cause "brain-lost watchdog, last ACTION applied 14 frames
+  before"; after Esc back from the title's Options the main menu highlight stays on Options, so load_slot's first
+  Enter is a MenuError and the second try gets in (11.8 - 13.7 s); both episode cases: ep1 HARNESS_FAIL "paused
+  unasked ... (a Pause key in the harness's own ACTION ...)", ep2 ran its 12 s timebox (STUCK, 704 / 719 ACTIONs),
+  loop_gap_ms_max 19 - 25 ms. Instance 4 was in routes' Song_Tower_01 at the start; it was left in Bone_05 (Bell
+  Beast savestate), unpaused, save suppression on. Facts: pause_quit.md 11.3.
+- Tests: test_harness_recovery.py now 27 (+ PauseAt's press timing, the harness's own Pause cause, set_time_scale
+  naming a pause). Full suite at 8148fd4: 1155 passed, 3 skipped, 1 xfailed (NUMBA_NUM_THREADS 4, below-normal
+  priority).
 
 Next / open issues:
 1. The watchdog pauses come from fight-loop stalls >= 250 ms; loop_gap_ms in the summaries will show where. Reducing
-   them (planner warm-up, CPU sharing) is not done here.
+   them (planner warm-up, CPU sharing) is not done here. The latest (015907) was one 1.6 s planner decision on a
+   path the warm-up did not cover (r5value code).
 2. In data mode a watchdog pause could be resumed and the episode continued; it still ends HARNESS_FAIL (the policies
    and taps do not handle paused frames).
 3. Keep the mouse off the training windows (it moves menu highlights, P7); the recovery now copes, but every
    MenuError costs a few seconds.
+4. load_slot after Esc back from a title sub-menu always pays one MenuError (the highlight stays on the item it came
+   from); an Up before the Enter would save ~6 s but needs each sub-menu's menuState mapped to its main-menu item.
