@@ -126,6 +126,8 @@ def decompose_categories(fcast, cx, cy, t, live) -> dict:
             "clear_wo_unstarted_committed": clear(un + COMMITTED),
             "clear_wo_unstarted_committed_chain": clear(un + COMMITTED + ("chain",)),
             "clear_body_hazard_only": clear(un + COMMITTED + ("chain", "death", "arena")),
+            "clear_body_only": clear(tuple(c for c in CATS if c != "body")),
+            "clear_hazard_only": clear(tuple(c for c in CATS if c != "hazard")),
             "cats": {c: [round(float(occ[c].sum() / tot), 3), round(float(occ[c][:, 0].sum() / tot1), 3),
                          clear((c,))] for c in CATS if occ[c].any()}}
 
