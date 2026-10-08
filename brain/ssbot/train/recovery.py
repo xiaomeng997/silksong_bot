@@ -111,10 +111,11 @@ def pause_cause(s: dict | None) -> str:
     s = s or {}
     a = s.get("act") or {}
     if a.get("lost"):
-        # BrainLost stays set until the next ACTION arrives, a stale one (not applied) too (20261008_015907 i0: the
-        # stalled planner's late ACTION, act.stale 1 -> 2 at f 12361289, cleared it one frame after the episode read
-        # the pause), so a later paused STATE can read "no Pause key": the episode reads the first paused STATE
-        # (PauseWatch), where a watchdog pause always shows it
+        # BrainLost stays set until an ACTION is accepted or input.release (ActionScheduler.Accept / StopDriving ->
+        # EndLost; a stale ACTION, over 3 frames late, is dropped first and leaves it set), so the first paused STATE
+        # of a watchdog pause always shows it. Any later one may not: 20261008_015907 i0 read false at f 12361289,
+        # when run_episode's closing zero ACTION and input.release landed (the stalled decision's late ACTION was
+        # dropped stale in the same tick, act.stale 1 -> 2); the episode reads the first one (PauseWatch)
         applied = a.get("applied")
         age = f", last ACTION applied {s.get('f') - applied} frames before" if isinstance(applied, int) and \
             isinstance(s.get("f"), int) else ""
@@ -129,7 +130,9 @@ def pause_cause(s: dict | None) -> str:
 class PauseWatch:
     """The first STATE of the pause under way (None while the game is not paused), from every STATE
     (OracleLink.subscribe_state, reader thread): pause_cause reads it rather than the STATE the episode loop happened
-    to see, which can come after the watchdog's act.lost was cleared (pause_cause)."""
+    to see. The loop reads the newest STATE after a stall and breaks on the first paused one it sees, before it sends
+    another ACTION, so that one still shows act.lost today; the first STATE keeps the cause right whatever clears
+    act.lost later (an ACTION accepted, input.release: pause_cause)."""
 
     def __init__(self, link):
         self.onset: dict | None = None

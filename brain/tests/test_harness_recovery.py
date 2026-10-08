@@ -538,9 +538,10 @@ def test_set_time_scale_names_a_pause_when_the_game_reads_0():
 # ---- the pause's first STATE (PauseWatch) ---------------------------------------------------------------------------
 
 def test_the_cause_comes_from_the_pauses_first_state_not_the_one_the_loop_saw():
-    """20261008_015907 i0: the stalled planner's late ACTION (stale, not applied) cleared act.lost at f 12361289, one
-    frame after the episode read the pause (12361288). Had the loop seen 12361289 first, the reason would have read
-    "no Pause key"; it reads the pause's first STATE (the tap's PauseWatch) now."""
+    """20261008_015907 i0: act.lost read false at f 12361289, one frame after the episode read the pause (12361288),
+    once run_episode's closing zero ACTION / input.release was accepted. A paused STATE after the pause's first one
+    can lack act.lost (an ACTION accepted meanwhile) and would read "no Pause key"; the reason comes from the pause's
+    first STATE (the tap's PauseWatch)."""
     scene = BELL_BEAST.scene
     states = [_st(f, scene) for f in range(1, 15)] + [_st(15, scene, ev=[WAKE])]
     states += [_st(f, scene) for f in range(16, 60)]

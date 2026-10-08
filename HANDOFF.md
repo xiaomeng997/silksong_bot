@@ -1880,8 +1880,8 @@ PDT, commits 6921f95, 76d5b36, 8148fd4, 2e11ffe):
   unasked ... (a Pause key in the harness's own ACTION ...)", ep2 ran its 12 s timebox (STUCK, 704 / 719 ACTIONs),
   loop_gap_ms_max 19 - 25 ms. Instance 4 was in routes' Song_Tower_01 at the start; it was left in Bone_05 (Bell
   Beast savestate), unpaused, save suppression on. Facts: pause_quit.md 11.3.
-- Tests: test_harness_recovery.py now 27 (+ PauseAt's press timing, the harness's own Pause cause, set_time_scale
-  naming a pause). Full suite at 8148fd4: 1155 passed, 3 skipped, 1 xfailed (NUMBA_NUM_THREADS 4, below-normal
+- Tests: test_harness_recovery.py now 27 (+2 tests: PauseAt's press timing, set_time_scale naming a pause; the
+  harness's own Pause cause is an assert added to test_pause_cause, not a new test). Full suite at 8148fd4: 1155 passed, 3 skipped, 1 xfailed (NUMBA_NUM_THREADS 4, below-normal
   priority).
 
 Next / open issues:
