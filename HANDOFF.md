@@ -1840,7 +1840,9 @@ checks are done, the live A/B is queued on a detached driver (below).
 - Tools: `forum_policy_replay --skip / --deadline-ms / --ticks-out`; `forum_a0_report` L2 section, hits / kills per
   episode.
 - Tests: `tests/test_forum_l2.py` 13 (far target long / short window, rules, Clapper controller, two Clappers, facing,
-  §4.4 item 4 three ways, switch, PUNISH hit count); `test_forum_tactics.py` 5 still pass. Full suite not run (quota).
+  §4.4 item 4 three ways, switch, PUNISH hit count); `test_forum_tactics.py` 5 still pass. Full suite (tests +
+  ssbot/tests, at 4c7a7a3, below-normal priority): 1142 passed, 2 skipped, 1 xfailed (the Bell Beast equivalence tests
+  among them; no shared planner / forecast code was touched).
 
 ### Measured (forum.md 17.1-17.3; scratch outputs in this session's scratchpad `r6\replay\`)
 
@@ -1879,8 +1881,7 @@ checks are done, the live A/B is queued on a detached driver (below).
    (the full gauntlets never get past wave 0).
 3. PUNISH needs a support that sometimes leaves an idle enemy's surroundings free (R5's margins / timing, R8's clash
    branches); a 3.0 u spot changed nothing (17.2). Until then the far-target rule fires only near lone enemies.
-4. Full test suite + the Bell Beast equivalence tests (nothing shared was touched: tactics only; run them anyway).
-5. Frozen checkouts to remove when done: `C:\ssbot\live_r6_5d24020`, then `live_r6_ef036d5`.
+4. Frozen checkouts to remove when done: `C:\ssbot\live_r6_5d24020`, then `live_r6_ef036d5`.
 
 ### Needs deploy
 
