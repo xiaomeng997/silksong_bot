@@ -534,14 +534,14 @@ def run_episode(job: dict) -> dict:
 _POL: dict = {}
 
 
-def _init(threads: int) -> None:
+def _init(threads: int, crest: str = "Reaper", clash: str = "off") -> None:
     try:
         import psutil
         psutil.Process().nice(psutil.BELOW_NORMAL_PRIORITY_CLASS)
     except Exception:
         pass
     from ssbot.train.forum_planner_policy import ForumPlannerPolicy
-    pol = ForumPlannerPolicy(threads=threads)
+    pol = ForumPlannerPolicy(threads=threads, crest=crest, clash=clash)
     pol.warmup()
     import dataclasses
     step0 = pol.sc.step
@@ -606,6 +606,9 @@ def main(argv=None) -> int:
     ap.add_argument("--deadline-ms", type=float, default=math.inf)
     ap.add_argument("--forced-rank", default="share", choices=("share", "seen", "seen_cf"),
                     help="the replayed planner's ForumConfig.forced_rank (its picks are 'replay')")
+    ap.add_argument("--crest", default="Reaper", help="the policy's crest (Forum_W runs: Wanderer)")
+    ap.add_argument("--clash", default="off", choices=("off", "on", "yellow", "cont", "main"),
+                    help="the policy's clash mode (combat_run --forum-clash; the de-saturation arms: main)")
     a = ap.parse_args(argv)
     a.out.mkdir(parents=True, exist_ok=True)
     jobs = []
@@ -621,11 +624,11 @@ def main(argv=None) -> int:
         print(f"{p.name} {'ERROR' if 'error' in res else ''} {res.get('secs')} s "
               f"({time.perf_counter() - t0:.0f} s)", flush=True)
     if a.workers <= 1:
-        _init(a.threads)
+        _init(a.threads, a.crest, a.clash)
         for j in jobs:
             write(_job_safe(j))
     else:
-        with ProcessPoolExecutor(a.workers, initializer=_init, initargs=(a.threads,)) as ex:
+        with ProcessPoolExecutor(a.workers, initializer=_init, initargs=(a.threads, a.crest, a.clash)) as ex:
             for res in ex.map(_job_safe, jobs):
                 write(res)
     return 0
