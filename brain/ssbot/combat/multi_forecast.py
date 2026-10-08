@@ -67,6 +67,7 @@ import numpy as np
 
 from ssbot.combat.enemy_tables import BIN, EMPTY, FORUM_DIR, JMAX, TAIL, EnemyTables, PlaceBatch, TypeTable, \
     WinBatch
+from ssbot.combat.branch_model import BranchModel, BranchView, memory_for_table
 from ssbot.combat.enemy_tracker import TAIL_KEEP_S, EnemyTracker, body_offsets
 from ssbot.combat.fastquery import circle_hits
 from ssbot.combat.forecast import active_within, entry_grid, exit_interval
@@ -254,6 +255,9 @@ class Subject:
     pos: tuple | None
     t_free: float                 # earliest time its current attack can end (s from the origin; 0 when idle)
     t_strike: float               # earliest time it may start a new attack (s from the origin; inf: none in H)
+    # the branch model (MultiForecaster(branch=...)): {next family or "wait:<state>": p} when it is in a modelled
+    # decision state (scoring only: P / J, O / BAIT; never the support)
+    next_p: dict | None = None
 
 
 @dataclass(slots=True)
@@ -290,8 +294,10 @@ class MultiForecaster:
 
     def __init__(self, tables: EnemyTables | None = None, view: str = ORACLE, boss=None, margin: float = 0.0,
                  waves: bool = True, collider_tube: bool = True, self_templates: str = "auto",
-                 tiny_group: int = TINY_GROUP):
+                 tiny_group: int = TINY_GROUP, branch: BranchModel | None = None):
         self.tables = tables
+        # the branch model (R5): history per enemy and Subject.next_p; scoring only, the placements do not see it
+        self.bv = BranchView(branch) if branch is not None and boss is None else None
         self.view = view
         self.boss = boss
         self.margin = margin
@@ -379,6 +385,8 @@ class MultiForecaster:
                 self.had_state.add(iid)
             if was_dead and not tr.dead and tr.table.spec.pooled:
                 tr.revive()
+        if self.bv is not None:
+            self.bv.observe(T, ws, self.trackers)
         self.hazards.update(ws)
         self._self_hazards(ws, T)
         if self.use_waves:
@@ -387,7 +395,24 @@ class MultiForecaster:
             self.waves.update(ws)
 
     def _new(self, iid: int, tk: str) -> None:
-        self.trackers[iid] = EnemyTracker(self.tables.types[tk], self.view, iid, self.offsets.get(tk))
+        tr = self.trackers[iid] = EnemyTracker(self.tables.types[tk], self.view, iid, self.offsets.get(tk))
+        if self.bv is not None:
+            tr.mem = memory_for_table(self.tables.types[tk])
+
+    def branch_probs(self, iid: int, state: str | None = None) -> dict[str, float] | None:
+        """The branch model's {successor: p} for enemy iid's decision `state` (default: its current state) taken now
+        (None: no branch model, unknown enemy or a state the model does not cover). Scoring only."""
+        tr = self.trackers.get(iid)
+        if self.bv is None or tr is None:
+            return None
+        return self.bv.branch_probs(tr, self.t, self.trackers, state)
+
+    def next_attack_probs(self, iid: int) -> dict[str, float] | None:
+        """{next attack family or "wait:<state>": p} for enemy iid in a modelled decision state (Subject.next_p)."""
+        tr = self.trackers.get(iid)
+        if self.bv is None or tr is None:
+            return None
+        return self.bv.next_attack_probs(tr, self.t, self.trackers)
 
     def _self_hazards(self, ws: WorldState, T: float) -> None:
         """Thrown hazards placed by their self templates (forum_support.SubjectTracker.hazard): armed when a damage
@@ -944,8 +969,10 @@ class _Builder:
     def _subject_row(self, tr: EnemyTracker, alive: bool, t_strike: float) -> Subject:
         c = tr.cur
         committed = c is not None and c.family != tr.table.spec.idle_family
+        bv = self.fc.bv
+        nxt = None if bv is None or not alive or tr.dead else bv.next_attack_probs(tr, self.fc.t, self.fc.trackers)
         return Subject(tr.iid, tr.tk, alive and not tr.dead, tr.in_play, committed, None if c is None else c.family,
-                       tr.state, tr.hp_est, tr.hp_sd, tr.pos, 0.0, t_strike)
+                       tr.state, tr.hp_est, tr.hp_sd, tr.pos, 0.0, t_strike, nxt)
 
     def _tails(self, tr: EnemyTracker) -> None:
         T = self.origin

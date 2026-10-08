@@ -171,3 +171,40 @@ def test_decisions_are_decision_or_attack_states(tk):
     for st in fb.decisions_of(tk):
         assert st, tk
     assert known
+
+
+def test_multi_forecaster_branch_view_is_scoring_only():
+    """The branch model hangs on the trackers (BranchMemory) and fills Subject.next_p; the placements, the occupancy,
+    the probability map and the support set are the same with and without it."""
+    from ssbot.combat.multi_forecast import MultiForecaster
+    from ssbot.core.worldstate import ORACLE
+    from tests import test_multi_forecast as tm
+    model = BranchModel({"types": {"Song Reed": {"Alert": {
+        "outcomes": ["Defend Start", "Stab Pos"], "covariates": ["prev"], "timing": "branch",
+        "counts": [{"": [10, 30]}, {"none": [1, 9]}]}}}})
+    plain = MultiForecaster(tm._tables(), ORACLE, waves=False)
+    withb = MultiForecaster(tm._tables(), ORACLE, waves=False, branch=model)
+    script = tm._script_stab()
+    tk = np.arange(0, 31) * tm.BIN
+    xs, ys = np.full((3, 31), 22.0), np.full((3, 31), 5.0)
+    xs[1] += 3.0
+    xs[2] -= 4.0
+    for f, t, ents, evs in script[:20]:
+        plain.update(tm._ws(f, t, ents, evs))
+        withb.update(tm._ws(f, t, ents, evs))
+        a, b = plain.forecast(0.8), withb.forecast(0.8)
+        assert np.array_equal(a.occupied(xs, ys, tk), b.occupied(xs, ys, tk))
+        assert np.array_equal(a.prob(xs, ys, tk), b.prob(xs, ys, tk))
+        assert [(e.instance, e.hits, e.damage) for e in a.support_set().events] == \
+            [(e.instance, e.hits, e.damage) for e in b.support_set().events]
+        sa = {s.iid: s.next_p for s in a.subjects}
+        sb = {s.iid: s.next_p for s in b.subjects}
+        assert all(v is None for v in sa.values())
+        if f < 10:
+            assert sb[7] == pytest.approx({"RE_DEFEND": (1 + 4 * 10.5 / 41) / 14,
+                                           "RE_STAB": (9 + 4 * 30.5 / 41) / 14})
+        else:
+            assert sb[7] is None                      # in an attack: no decision to predict
+    tr = withb.trackers[7]
+    assert tr.mem is not None and tr.mem.fam == "RE_STAB" and plain.trackers[7].mem is None
+    assert withb.branch_probs(7, "Alert") is not None and plain.branch_probs(7) is None

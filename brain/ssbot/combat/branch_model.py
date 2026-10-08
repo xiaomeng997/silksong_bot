@@ -173,9 +173,17 @@ _GATES: dict[str, dict[str, dict[str, bool]]] = {
 }
 _GATE_INIT = {"Pilgrim 03 Song": {"evade_cd": False}, "Song Reed": {"armed": True, "jdd": False},
               "Song Heavy Sentry": {"evaded": False}, "Song Pilgrim 01": {"charge_armed": False}}
+TINY_DECISIONS = ("Ready", "Fire Ready", "Fire", "Brake", "Pull Up", "Return", "Defend Ready", "Defend Buzz", "Dead")
 HIT_RECENT_S = (0.25, 1.0)      # "hit" bins: hit within 0.25 s / 1 s / earlier or never
 SINCE_END_S = (0.25, 0.75, 1.5)
 LOCAL_KEEP = 6
+
+
+def decisions_of(tk: str) -> tuple[str, ...]:
+    """The decision states whose exits the model covers (the SENSING table; the Tiny's, which the Maestro drives)."""
+    if tk == "Song Automaton Tiny":
+        return TINY_DECISIONS
+    return tuple(SENSING.get(tk, {}))
 
 
 def _bin(v: float, edges: tuple[float, ...]) -> int:
@@ -430,3 +438,141 @@ class BranchModel:
         if mem is not None:
             feats.update(mem.features(state, T, context))
         return m.predict(feats)
+
+
+def memory_for_table(tt) -> BranchMemory:
+    """A BranchMemory for a combat.enemy_tables.TypeTable (its segmentation and the type's choice states)."""
+    tk = tt.spec.type_key
+    return BranchMemory(tk, dict(tt.attack_starts), frozenset(tt.decision_states), frozenset(decisions_of(tk)))
+
+
+CLAPPER_ATTACKS = ("CC_SLAM", "CC_JUMP", "CC_CAST", "CC_JUMP_CAST")
+TINY_DEAD = ("Death Fx", "Dead", "Die")
+KEEP_S = 1.0
+MAX_CHAIN = 4
+
+
+class BranchView:
+    """The branch model at runtime (MultiForecaster(branch=...)): each EnemyTracker carries a BranchMemory (fed by its
+    Control entries and hits), this keeps the hero's recent box and silk and the enemies' recent positions so a
+    decision's geometry can be taken at the model's timing (branch: now; entry: when the state was entered; stored:
+    when the stored state was entered; lead<s>: s before now)."""
+
+    def __init__(self, model: BranchModel, keep_s: float = KEEP_S):
+        self.model = model
+        self.keep_s = keep_s
+        self.hero: deque = deque()                          # (T, box, x, y, silk)
+        self.enemy: dict[int, deque] = defaultdict(deque)   # iid -> (T, x, y, flip)
+        self.owner: dict[int, int] = {}                     # Tiny iid -> Maestro iid (the one it hovers by in Ready)
+
+    def observe(self, T: float, ws, trackers: dict) -> None:
+        h = ws.hero
+        if h.hurtbox:
+            xs = [p[0] for p in h.hurtbox]
+            ys = [p[1] for p in h.hurtbox]
+            box = (min(xs), min(ys), max(xs), max(ys))
+        else:
+            box = None
+        silk = ws.res.silk.v if ws.res.silk.conf > 0 else None
+        self.hero.append((T, box, float(h.pos.v[0]), float(h.pos.v[1]), silk))
+        while self.hero and T - self.hero[0][0] > self.keep_s:
+            self.hero.popleft()
+        maes = [tr for tr in trackers.values() if tr.tk == "Song Pilgrim Maestro" and tr.pos is not None
+                and not tr.dead]
+        for iid, tr in trackers.items():
+            if tr.pos is None or tr.hidden:
+                continue
+            q = self.enemy[iid]
+            if not q or q[-1][0] < T:
+                q.append((T, tr.pos[0], tr.pos[1], tr.flip))
+            while q and T - q[0][0] > self.keep_s:
+                q.popleft()
+            if tr.tk == "Song Automaton Tiny" and tr.state == "Ready" and maes:
+                m = min(maes, key=lambda mt: math.hypot(mt.pos[0] - tr.pos[0], mt.pos[1] - tr.pos[1]))
+                if math.hypot(m.pos[0] - tr.pos[0], m.pos[1] - tr.pos[1]) < 8.0:
+                    self.owner[iid] = m.iid
+
+    @staticmethod
+    def _at(q, t: float):
+        best = None
+        for row in q:
+            if row[0] <= t + 1e-9:
+                best = row
+            else:
+                break
+        return best if best is not None else (q[0] if q else None)
+
+    def geo_at(self, tr, t: float) -> dict:
+        e = self._at(self.enemy.get(tr.iid) or (), t)
+        h = self._at(self.hero, t)
+        if h is None:
+            return {}
+        _, box, hx, hy, silk = h
+        if e is None:
+            return geometry(tr.tk, None, None, 0, hx, hy, box, silk)
+        return geometry(tr.tk, e[1], e[2], e[3], hx, hy, box, silk)
+
+    def _timing_t(self, tr, state: str, T: float) -> float:
+        tm = self.model.timing(tr.tk, state)
+        mem = tr.mem
+        if tm == "entry" and mem is not None and mem.state == state and mem.t_entry is not None:
+            return mem.t_entry
+        if tm == "stored" and mem is not None:
+            kind = SENSING.get(tr.tk, {}).get(state, ("branch", ""))[0]
+            src = kind.split(":", 1)[1] if kind.startswith("stored:") else None
+            if src is not None and src in mem.entries:
+                return mem.entries[src]
+        if tm.startswith("lead"):
+            return T - float(tm[4:])
+        return T
+
+    def context(self, tr, trackers: dict) -> dict:
+        ctx: dict = {}
+        if tr.tk == "Song Heavy Sentry":
+            buddies = [b for b in trackers.values() if b.tk == tr.tk and b.iid != tr.iid and b.in_play and not b.dead]
+            ctx["buddy"] = bool(buddies)
+            ctx["buddy_attacking"] = any(b.mem is not None and b.mem.fam in CLAPPER_ATTACKS for b in buddies)
+            ctx["buddy_close"] = bool(tr.pos is not None and any(
+                b.pos is not None and abs(b.pos[0] - tr.pos[0]) < 4.0 for b in buddies))
+        elif tr.tk == "Song Pilgrim Maestro":
+            ctx["dead_tinies"] = sum(1 for j, o in self.owner.items() if o == tr.iid and j in trackers
+                                     and trackers[j].state in TINY_DEAD)
+        return ctx
+
+    def branch_probs(self, tr, T: float, trackers: dict, state: str | None = None) -> dict[str, float] | None:
+        """{successor: p} of tr's decision `state` (default: its current state) taken now."""
+        st = state or tr.state
+        if st is None or tr.mem is None or not self.model.has(tr.tk, st):
+            return None
+        geo = self.geo_at(tr, self._timing_t(tr, st, T))
+        return self.model.predict(tr.tk, st, tr.mem, geo, T, self.context(tr, trackers))
+
+    def next_attack_probs(self, tr, T: float, trackers: dict) -> dict[str, float] | None:
+        """{family or "wait:<state>": p}: the next attack family when tr's current decision (and the instant ones
+        after it, with the same geometry and history) resolves; "wait:<state>" for paths that first reach a state the
+        model does not cover. None: tr is not in a modelled decision state."""
+        p0 = self.branch_probs(tr, T, trackers)
+        if p0 is None:
+            return None
+        starts = tr.table.attack_starts
+        out: dict[str, float] = defaultdict(float)
+        frontier = list(p0.items())
+        for _ in range(MAX_CHAIN):
+            nxt = []
+            for st, p in frontier:
+                if p < 1e-4:
+                    continue
+                if st in starts:
+                    out[starts[st]] += p
+                    continue
+                q = self.branch_probs(tr, T, trackers, st) if st != tr.state else None
+                if q is None:
+                    out[f"wait:{st}"] += p
+                    continue
+                nxt += [(s2, p * p2) for s2, p2 in q.items()]
+            frontier = nxt
+            if not frontier:
+                break
+        for st, p in frontier:
+            out[f"wait:{st}"] += p
+        return dict(out)

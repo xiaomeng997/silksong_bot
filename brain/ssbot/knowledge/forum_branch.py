@@ -24,7 +24,8 @@ from pathlib import Path
 
 import numpy as np
 
-from ssbot.combat.branch_model import (ALPHA_BACKOFF, SENSING, BranchMemory, _key, geometry)
+from ssbot.combat.branch_model import (ALPHA_BACKOFF, CLAPPER_ATTACKS, SENSING, TINY_DEAD, BranchMemory, _key,
+                                       decisions_of, geometry)
 from ssbot.knowledge.behaviour_tables import Fight, fight_states
 from ssbot.knowledge.forum_cache import load_cache
 from ssbot.knowledge.gauntlet_tables import FORUM_SPECS
@@ -34,9 +35,6 @@ TIMINGS = ("branch", "entry", "stored") + tuple(f"lead{x}" for x in LEADS_S)
 STALE_S = 0.25                   # an enemy position older than this at the timing is "not seen"
 SELECT_GAIN = 0.002              # nats per decision a covariate must gain on the CV log loss
 MAX_COVARIATES = 4
-TINY_DECISIONS = ("Ready", "Fire Ready", "Fire", "Brake", "Pull Up", "Return", "Defend Ready", "Defend Buzz", "Dead")
-CLAPPER_ATTACKS = ("CC_SLAM", "CC_JUMP", "CC_CAST", "CC_JUMP_CAST")
-TINY_DEAD = ("Death Fx", "Dead", "Die")
 ARENA_X3 = (25.67, 37.33)        # thirds of the Forum band x 14.01-48.99 (R0's hero_x / last_seen_x stand-ins)
 GEO_KEYS = ("x", "y", "flip", "hx", "hy", "b0", "b1", "b2", "b3", "silk")
 
@@ -45,12 +43,6 @@ def memory_for(tk: str) -> BranchMemory:
     """A BranchMemory with the type's segmentation (gauntlet_tables.FORUM_SPECS) and choice states."""
     sp = next(s for s in FORUM_SPECS.values() if s.boss_type == tk)
     return BranchMemory(tk, dict(sp.attack_starts), frozenset(sp.decision_states), frozenset(decisions_of(tk)))
-
-
-def decisions_of(tk: str) -> tuple[str, ...]:
-    if tk == "Song Automaton Tiny":
-        return TINY_DECISIONS
-    return tuple(SENSING.get(tk, {}))
 
 
 @dataclass(slots=True)

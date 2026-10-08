@@ -85,7 +85,8 @@ class ForumPlannerPolicy(PlannerPolicy):
     act_after_clear = True
 
     def __init__(self, view: str = "oracle", threads: int = 4, log_dir: Path | None = None, instance: int = 0,
-                 real_quit_p: float = 0.0, playbook: Path | str | None = None, tables: EnemyTables | None = None):
+                 real_quit_p: float = 0.0, playbook: Path | str | None = None, tables: EnemyTables | None = None,
+                 branch_model: bool = False):
         import cv2
         import numba
         numba.set_num_threads(threads)
@@ -98,7 +99,13 @@ class ForumPlannerPolicy(PlannerPolicy):
         self.pb, self.rules = load_forum_playbook(playbook)
         self.floor_hero_y = FLOOR_Y + hb.HERO_HALF_U[1]
         self.tac = ForumTactics(self.pb, self.rules, self.floor_hero_y)
-        self.fc = MultiForecaster(tables if tables is not None else EnemyTables.production())
+        # branch_model: the R5 branch model's history per enemy and Subject.next_p (scoring consumers: O / BAIT);
+        # off by default, the planner does not read it yet
+        branch = None
+        if branch_model:
+            from ssbot.combat.branch_model import BranchModel
+            branch = BranchModel.load()
+        self.fc = MultiForecaster(tables if tables is not None else EnemyTables.production(), branch=branch)
         self.freeze = kill_freeze_s()
         self.kill_know = KillKnowledge.load()
         self.kill_window_s = END_SLOW_S
