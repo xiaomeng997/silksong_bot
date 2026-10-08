@@ -57,6 +57,9 @@ from ssbot.train.planner_policy import HORIZON_S, LOG_BEFORE, UNPRED_LAGS, Plann
 
 REPO = Path(__file__).resolve().parents[3]
 FORUM_PARAMS = REPO / "knowledge" / "1.0.30000" / "kinematics" / "hero_reaper_forum.json"
+# the Forum loadout's kinematics per crest (fo_A: Reaper; fo_W: Wanderer, the R8 clash arm)
+CREST_PARAMS = {"Reaper": FORUM_PARAMS,
+                "Wanderer": REPO / "knowledge" / "1.0.30000" / "kinematics" / "hero_wanderer_forum.json"}
 END_SLOW_S = 1.85          # EnemyBattleEndSlow in real time (forum.md §3): the final blow's unpausable window
 ANKLET = "Weighted Anklet"
 COG = kin.B_UP | kin.B_QUICKCAST
@@ -85,7 +88,8 @@ class ForumPlannerPolicy(PlannerPolicy):
     act_after_clear = True
 
     def __init__(self, view: str = "oracle", threads: int = 4, log_dir: Path | None = None, instance: int = 0,
-                 real_quit_p: float = 0.0, playbook: Path | str | None = None, tables: EnemyTables | None = None):
+                 real_quit_p: float = 0.0, playbook: Path | str | None = None, tables: EnemyTables | None = None,
+                 crest: str = "Reaper", clash: bool = False):
         import cv2
         import numba
         numba.set_num_threads(threads)
@@ -93,7 +97,10 @@ class ForumPlannerPolicy(PlannerPolicy):
         if view != "oracle":
             raise ValueError("ForumPlannerPolicy: the oracle view only (the Forum's vision view is M3)")
         self.view, self.threads, self.instance = view, threads, instance
-        self.params0 = HeroParams.load(FORUM_PARAMS)
+        # the crest's kinematics and slash shapes; clash: the R8 EV_CLASH branch (ForumConfig.clash)
+        self.crest, self.clash = crest, clash
+        self.crest_seen: str | None = None
+        self.params0 = HeroParams.load(CREST_PARAMS[crest])
         self.params = self.params0
         self.pb, self.rules = load_forum_playbook(playbook)
         self.floor_hero_y = FLOOR_Y + hb.HERO_HALF_U[1]
@@ -132,7 +139,8 @@ class ForumPlannerPolicy(PlannerPolicy):
         t0 = time.perf_counter()
         self.fc.warm()
         planner = ForumPlanner(self.params, Terrain2D.empty(), PlannerConfig(T=36, threads=self.threads,
-                                                                             variants="bounds_lo"), ForumConfig())
+                                                                             variants="bounds_lo"),
+                               ForumConfig(clash=self.clash), crest=self.crest)
         fcast = self.fc.forecast(HORIZON_S)
         for x, mode in ((30.0, kin.M_NORMAL), (33.0, kin.M_NORMAL), (36.0, kin.M_HURT_FREEZE)):
             ws = WorldState()
@@ -141,7 +149,7 @@ class ForumPlannerPolicy(PlannerPolicy):
             prefs = self.tac.decide(ws, fcast, None, 3)
             prefs.want_bind = True
             ctx = FilterContext.from_world(ws, None, 3, want_bind=True, kill_hp=5.0, kill_window_s=END_SLOW_S,
-                                           damage=HeroDamage.from_loadout("Reaper", 1, ()))
+                                           damage=HeroDamage.from_loadout(self.crest, 1, ()))
             ctx.support_known = True
             S = kin.initial_state(self.params, x, FLOOR_Y + self.params.foot, mode=mode)
             planner.tick(ws, S, HoldState.idle(1), np.zeros(1, np.int64), fcast, prefs, ctx)
@@ -170,7 +178,8 @@ class ForumPlannerPolicy(PlannerPolicy):
         self.params = self.params0
         if self.planner is None:
             self.planner = ForumPlanner(self.params, self.terrain, PlannerConfig(T=36, threads=self.threads,
-                                                                                 variants="bounds_lo"), ForumConfig())
+                                                                                 variants="bounds_lo"),
+                                        ForumConfig(clash=self.clash), crest=self.crest)
         self.planner.params = self.params
         self.planner.terrain = self.terrain
         self.planner.reset()
@@ -410,9 +419,12 @@ class ForumPlannerPolicy(PlannerPolicy):
         self._pending_ticks = keep
         return n
 
-    def _first_tick(self, ws) -> None:
+    def _first_tick(self, ws, raw: dict | None = None) -> None:
         if self.weighted is not None:
             return
+        # the crest the savestate has (the policy's kinematics and slash shapes are the constructor's: a mismatch is
+        # counted in stats, never silently fixed)
+        self.crest_seen = ((raw or {}).get("hero") or {}).get("crest")
         self.weighted = ANKLET in (ws.res.equipped or ())
         if self.weighted:
             self.params = self.params0.with_weighted()
@@ -465,7 +477,7 @@ class ForumPlannerPolicy(PlannerPolicy):
         fo = ws.stamp.frame
         raw = self.raw.get(fo, s)
         raw["_t"] = ws.stamp.t_game_s
-        self._first_tick(ws)
+        self._first_tick(ws, raw)
         self.trk.push(raw)
         self._wake(ws, s, tap)
         self.fc.update(ws)
@@ -532,6 +544,8 @@ class ForumPlannerPolicy(PlannerPolicy):
         self.plan_ms.append((t2 - t1) * 1e3)
         self.counts[prefs.mode] += 1
         self.counts["forced_risk"] += res.forced_risk
+        if getattr(res, "clash", None):
+            self.counts["clash_plan"] += 1
         self.binds += int(res.name == "BIND")
         tt = self.tac.last.get("target_type")
         if tt:

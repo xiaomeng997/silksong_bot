@@ -226,7 +226,8 @@ FORUM = Encounter(
 
 
 def forum_variant(arm: str) -> Encounter:
-    """FORUM on another savestate arm (fo_A, fo_B, fo_C, fo_A5; docs/facts/1.0.30000/forum.md)."""
+    """FORUM on another savestate arm (fo_A, fo_B, fo_C, fo_A5; fo_W: fo_A's loadout with the Wanderer crest, the
+    person's practice state and the R8 clash arm; docs/facts/1.0.30000/forum.md)."""
     return replace(FORUM, name=f"Forum_{arm}", savestate=f"fo_{arm}")
 
 
@@ -378,4 +379,4 @@ ROUTE_BOSSES_LOW = tuple(replace(e, name=f"{e.name}_low", start_boss_hp=(0.25, 0
 
 
 ENCOUNTERS = {e.name: e for e in (BELL_BEAST, BELL_BEAST_REAPER, *ROUTE_BOSSES, *ROUTE_BOSSES_LOW, FORUM,
-                                  *(forum_variant(a) for a in ("A", "B", "C", "A5")), *FORUM_WAVE_STARTS)}
+                                  *(forum_variant(a) for a in ("A", "B", "C", "A5", "W")), *FORUM_WAVE_STARTS)}
