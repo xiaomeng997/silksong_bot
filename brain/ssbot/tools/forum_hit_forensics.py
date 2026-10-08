@@ -52,7 +52,7 @@ K_SET = (1, 2, 3, 4, 6, 9, 12, 15, 18, 24, 30, 36, 45, 60, 75, 90)   # frames be
 EXEC_K = (12, 24)
 DECOMP_K = (1, 6, 12, 24, 36)                # ticks before a hit whose support is decomposed by group
 RANKS = ("replay", "live", "share", "committed", "near", "dr", "dr_first", "dr_g", "dr18", "seen", "seen_cf",
-         "cf_seen")
+         "cf_seen", "seen_cm")
 NEAR_KINDS = ("idle", "collider", "hazard", "death")
 
 
@@ -455,6 +455,7 @@ def run_episode(job: dict) -> dict:
                         scnt, sfst = np.zeros(len(J), np.int64), np.full(len(J), T1, np.int64)
                     picks["seen"] = _pick([scnt, -sfst, sh["full"], -sh["first"], -J], rows)
                     picks["seen_cf"] = _pick([scnt, -sfst, sh["cfine"], sh["full"], -sh["first"], -J], rows)
+                    picks["seen_cm"] = _pick([scnt, -sfst, sh["committed"], sh["full"], -sh["first"], -J], rows)
                     picks["cf_seen"] = _pick([scnt + np.round(sh["cfine"] * (T1 - 1)).astype(np.int64), -sfst,
                                               sh["full"], -sh["first"], -J], rows)
                     rec["seen_clear"] = int((scnt[rows] == 0).sum())
