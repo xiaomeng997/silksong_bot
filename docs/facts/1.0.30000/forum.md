@@ -934,7 +934,7 @@ cd brain   # 冻结检出（git archive，没有 .git）：behaviour_build 要�
 
 ## 17. R5 终点价值（2026-10-08，forum_planner_plan.md §5 R5 的"终点价值"一半；分支 worktree-wf_814dfeea-b10-2；离线 + 实例 0 的 A/B）
 
-代码：`combat/terminal.py`（新：支撑场 `EnemyFields.build`、身体场 `EnemyFields.from_bodies`、可达模板 `reach_templates`、`TerminalValue.rows`、击杀价值 `kill_value`）、`combat/forum_planner.py`（`ForumConfig.terminal` 与权重，`_terminal` / `_score_forum`）、`core/worldstate.py` + `backends/oracle_backend.py`（`Entity.hit_polys`）、`combat/enemy_tracker.py`（命中目标用 `hit_polys`）、`train/forum_planner_policy.py`（T 取 `ForumConfig().T`，日志和 stats 记终点价值）；可达模板文件 `knowledge/1.0.30000/kinematics/forum_reach.npz`（`python -m ssbot.combat.terminal` 重建）；测试 `tests/test_terminal.py`（8 项）。开关（A/B 用，写进 config_fp）：`SSBOT_FORUM_TV=0` 关终点价值、`SSBOT_FORUM_T=48` 视野 48 帧、`SSBOT_FORUM_HITBODY=0` 恢复 R4 的命中目标。Bell Beast 路径（`Planner`、`Forecaster`、`PlannerPolicy`）一行没改：它不读 `hit_polys`，Forum 开关是胶水层用哪个类。
+代码：`combat/terminal.py`（新：支撑场 `EnemyFields.build`、身体场 `EnemyFields.from_bodies`、可达模板 `reach_templates`、`TerminalValue.rows`、击杀价值 `kill_value`）、`combat/forum_planner.py`（`ForumConfig.terminal` 与权重，`_terminal` / `_score_forum`）、`core/worldstate.py` + `backends/oracle_backend.py`（`Entity.hit_polys`）、`combat/enemy_tracker.py`（命中目标用 `hit_polys`）、`train/forum_planner_policy.py`（T 取 `ForumConfig().T`，日志和 stats 记终点价值）；可达模板文件 `knowledge/1.0.30000/kinematics/forum_reach.npz`（`python -m ssbot.combat.terminal` 重建）；测试 `tests/test_terminal.py`（8 项）。开关（A/B 用，写进 config_fp）：`SSBOT_FORUM_TV=0` 关终点价值（第 3 轮起默认关，`SSBOT_FORUM_TV=1` 开，17.11）、`SSBOT_FORUM_T=48` 视野 48 帧、`SSBOT_FORUM_HITBODY=0` 恢复 R4 的命中目标。Bell Beast 路径（`Planner`、`Forecaster`、`PlannerPolicy`）一行没改：它不读 `hit_polys`，Forum 开关是胶水层用哪个类。
 
 ### 17.1 计划里的场（支撑场）：做了、保守，但第 0 波完全饱和
 
@@ -1076,7 +1076,7 @@ cd brain   # 冻结检出（git archive，没有 .git）：behaviour_build 要�
 
   commit_rank 现在合计多 0.25–0.4 ms 规划 p50（阶段 1 +0.1，排序段 +0.1，其余是开环下选择不同带来的差异），旧实现单是那两次查询就 0.6–0.9 ms p50、2.7–4.8 ms p99；seen 的 `seen_contacts` p50 0.09–0.12 ms、p99 0.4–1.0 ms。迟到比例在同一负载下没有可分辨的差别（第 0 / 7 波 PC、SPC 反而略低；第 13 波 522 帧里 91 对 101–104 个，在泊松误差内）。
 
-**2. 终点价值默认关**（`SSBOT_FORUM_TV=1` 开，b96559f 之前的 2ef6383 起；核对者：低）：闭环没有收益（17.5：TV 18.41 对只修目标 18.42 次/分钟），离线只多约 1 个点（17.7），而它在包络之前、占包络的截止预算（0.9–1.3 ms p50，满载 p99 到 3 ms）。代码、权重和开关都留着，等有闭环收益再开。
+**2. 终点价值默认关**（2ef6383 起，`SSBOT_FORUM_TV=1` 开；核对者：低）：闭环没有收益（17.5：TV 18.41 对只修目标 18.42 次/分钟），离线只多约 1 个点（17.7），而它在包络之前、占包络的截止预算（0.9–1.3 ms p50，满载 p99 到 3 ms）。代码、权重和开关都留着，等有闭环收益再开。
 
 **3. 事后判定的选择偏差（核对者：低；`round3\base_eval.py`，round2 的转储）**：开环重放时实战排序选的基本就是录像里实际走的那条（重放和实际选择 99.5–99.8 % 一致），而录像里的威胁是冲着录像里的主角去的，所以靠近录像路径的行事后判"不安全"偏多：和选中行前 6 帧按键相同的行，受击前事后安全只有 30.8 % / 33.0 %，低于随机一个允许行的 36.8 % / 39.1 %。因此：
 

@@ -1829,7 +1829,7 @@ CODE_REV + the R3 tables from `C:\ssbot\tables\forum_r3_2a10a0d`); outputs `C:\s
   0.2 / 0.5 / 0.9 / 1.4 s from 135 primitives of the Forum kinematics; rebuild: `python -m ssbot.combat.terminal`),
   `TerminalValue.rows` (E, trapped, overlap, H_exp per row, numba), `kill_value` (leave-one-out near the hero / hits
   needed).
-- ForumPlanner: `ForumConfig.terminal` (env `SSBOT_FORUM_TV`, default on) adds w_E E - w_trap trapped - w_ov overlap -
+- ForumPlanner: `ForumConfig.terminal` (env `SSBOT_FORUM_TV`; default on in rounds 1-2, off since round 3) adds w_E E - w_trap trapped - w_ov overlap -
   w_H H_W[h] H_exp to J and multiplies each target's hit weight by (1 + w_K kill value); `ForumConfig.T` from
   `SSBOT_FORUM_T` (default 36; the policy's PlannerConfig follows it). Scores only (test: Hz, U and FORCED_RISK equal
   with and without, deterministic mode).
