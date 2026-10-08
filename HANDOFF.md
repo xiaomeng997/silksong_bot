@@ -2229,3 +2229,139 @@ Next / open issues (after the review fixes):
    not sampled; the Clash Tink window taken as the damager's.
 7. Frozen checkouts to remove after integration: `C:\ssbot\live_r8_c1ca21a`, `live_r8_64a48cc`, `live_r8_895137b`,
    `live_r8_603fc7b`, `live_r8_532f8e2` (stats), `live_r8_d24ef17` (this A/B).
+
+## Task harness recovery (branch worktree-wf_814dfeea-b10-6, 2026-10-08)
+
+Facts: `docs/facts/1.0.30000/pause_quit.md` section 11 (Chinese). Training profile only: safety/pause_quit and the
+supervisor are untouched, the formal-run path gains no key.
+
+Signatures found (all attempt rows / worker logs / STATE recordings of 2026-10-01 .. 07):
+- (b) "paused unasked": 60 of 61 were the oracle's brain-lost watchdog (STATE act.lost, the Pause bit in the injected
+  mask on the pause frame, last ACTION applied 13-15 frames before): the worker's fight loop stalled >= 250 ms (first
+  compiles at ep 0 / 1, CPU contention, four runs in the same second on 10-04 21:01:15). Not a stray Esc, not focus
+  (half had focus, the game does not pause on focus loss). The one other (20261006_065605_Lace1_data i0) had no Pause
+  key at all: InputHandler.ControllerDetached is the only other way into PAUSED (a gamepad going to sleep?).
+- (a) the "settings menu": 20261005_164501_Forum_A_w2_mix_data2_2 i1 at 16:45 sat in the title's Game options (menu
+  12): load_slot's retried Enter on a main menu highlighting Options (mouse hover / a cursor over the new window) went
+  Main -> Options -> Game options -> a setting, then waited 2 x 60 s for the main menu and died. Same minute, instance 4
+  (20261005_164455_..._inject) Enter'd Extras and then the credits. The old unpause() had the same blind Submit in game.
+- (c) "kept running while the hero stood still being hit" (Forum data2, 10-05 / 06, 961 episodes, ~49 h): not a
+  stall. 1944 no-key windows >= 1.5 s with 1062 hits, every one inside an episode with ACTIONs applied each frame, no
+  lost brain, no pause; they are the data2 policy's own waits (WALL_BAIT 920 windows / 786 hits, CLASH, UNDER,
+  JUMP_OVER, BAIT); between episodes 2-7 s of reset. The 180 s timebox resets at once.
+- Also: 10-05 14:15 all instances' frame rate fell to ~4 fps (machine-level; the 5-in-a-row stop was right);
+  20261002_080522 i0 "left the scene: Quit_To_Menu" then failed 3 episodes on "no game loaded" (no way back).
+
+Done (commits 7ba7470, 0a326c3, 02469ab):
+- `ssbot/train/recovery.py`: where() (title / title sub-menu / save select / quitting / pause menu / exit prompt /
+  pause sub-menu / opening / game), pause_cause(), resume() (Up to Continue, Down to Back, Down to No, Submit only on
+  those roles, never Esc, lockout respected, input.release before and after, <= 24 navigation taps), title_home() (Esc
+  on title sub-menus only).
+- `episode`: unpause() = resume(); a pause before the reset that does not end -> HARNESS_FAIL "still paused before
+  the reset" (no hang); "paused unasked at frame N (<cause>)"; AttemptRecord.loop_gap_ms_max / loop_gaps_250.
+- `probes/common.load_slot`: Enter retried only while still on the main menu; another menu -> MenuError; a title
+  sub-menu is left first.
+- `combat_run`: _unstick backs out of title sub-menus and moves Up towards Start Game after a MenuError, resumes a
+  paused game instead of loading under the pause menu; worker start resumes; after_harness_fail() after every
+  HARNESS_FAIL (paused -> resume; quitting -> wait for the title; title / sub-menu / save select -> back_into_slot);
+  summary: harness_fails by kind, loop_gap_ms.
+- `probes/recovery_check.py`: live check of every case on one instance.
+- Tests: `tests/test_harness_recovery.py` (26, a stand-in game with the pause / options / prompt / title menus);
+  the full suite at b10b251: 1141 passed, 3 skipped, 1 xfailed (an earlier run under load failed only the known
+  timing budget test_hitbox_tables::test_support_query_matches_reference_and_meets_the_budget, 3.39 ms > 3 ms).
+
+Round 1 stopped 2026-10-08 ~01:00 PDT (weekly usage 99 %) before the live check. Round 2 (2026-10-08 03:10 - 03:45
+PDT, commits 6921f95, 76d5b36, 8148fd4, 2e11ffe):
+- `recovery.pause_cause`: act.lost -> the watchdog (BrainLost stays set until the next ACTION, so the first paused STATE
+  of a watchdog pause always shows it); a Pause bit in the harness's own ACTION with act.lost false -> "a Pause key in
+  the harness's own ACTION (policy / probe)" (was counted as the watchdog).
+- `combat_run` worker: a pause still showing before the next episode is resumed before set_time_scale (a paused game
+  reads Time.timeScale 0 and set_time_scale stopped the worker: 20261008_015907 i0); still paused -> no scale read, the
+  episode's start check makes it a HARNESS_FAIL (5-in-a-row stop); set_time_scale's stop names a pause.
+- `probes/recovery_check`: two episode cases (PauseAt wraps the data policy and presses Pause mid-fight from the
+  harness side): episode_pause (HARNESS_FAIL, after_harness_fail, a second episode) and episode_settings (then the
+  pause menu's Options -> Game, the next episode's own start resume, no after_harness_fail). Seeds 990000+ (probe
+  only, no attempt rows).
+- Sample 20261008_015907_Forum_A_eval_planner_oracle i0 (r5value A/B, code 35e5fe6, before the recovery code): the
+  only HARNESS_FAIL in 1104 episodes of 10-07 / 08. Watchdog signature (last ACTION applied 12361193, act.lost at
+  12361207, paused 12361208); cause: one planner decision of 1599 ms (decisions_i0 f 12361192, plan "WAIT+runR"; the
+  other 235 decisions median 3.6 ms, max 15 ms) after an 8.3 s warm-up. The old worker left the pause and stopped on
+  "time.scale 1.0: the game runs at 0.0": the run has 1 episode. Both halves are handled now.
+- Live check on instance 4 (lock ops 03:37:27 - 03:40:02, frozen `C:\ssbot\live_recov_8148fd4`): all 10 cases ok,
+  every Submit on continue / back / no, no Esc while paused. `C:\ssbot\sandbox\recovery_check\20261008_033740_i4.json`.
+  The real Options (menu 2) and Game options (menu 12) reach Back with Down x5 (nothing named before it); the
+  watchdog case paused 252 ms after the last ACTION, cause "brain-lost watchdog, last ACTION applied 14 frames
+  before"; after Esc back from the title's Options the main menu highlight stays on Options, so load_slot's first
+  Enter is a MenuError and the second try gets in (11.8 - 13.7 s); both episode cases: ep1 HARNESS_FAIL "paused
+  unasked ... (a Pause key in the harness's own ACTION ...)", ep2 ran its 12 s timebox (STUCK, 704 / 719 ACTIONs),
+  loop_gap_ms_max 19 - 25 ms. Instance 4 was in routes' Song_Tower_01 at the start; it was left in Bone_05 (Bell
+  Beast savestate), unpaused, save suppression on. Facts: pause_quit.md 11.3.
+- Tests: test_harness_recovery.py now 27 (+2 tests: PauseAt's press timing, set_time_scale naming a pause; the
+  harness's own Pause cause is an assert added to test_pause_cause, not a new test). Full suite at 8148fd4: 1155 passed, 3 skipped, 1 xfailed (NUMBA_NUM_THREADS 4, below-normal
+  priority).
+
+Round 2 fixer (2026-10-08 04:00 - , commits 3b18248, 772dfe8, ef67b89, f0dba93 and on), after the verifier:
+- `combat_run.ready_for_episode` / `after_episode` (out of the worker loop, so they are tested): a pause still showing
+  before an episode is resumed before set_time_scale; still paused -> that episode is NOT run (it would have run
+  without the time scale set when its own start resume worked), its row is HARNESS_FAIL "still paused before the
+  episode (...)" with time_scale_game None, and the 5-in-a-row stop ends a worker that cannot recover. After the row:
+  real quit -> back_into_slot; HARNESS_FAIL -> after_harness_fail (exceptions logged).
+- Worker-loop tests: `combat_run.main(["_worker", ...])` on the stand-in game (OracleLink / run_episode / make_policy
+  patched): watchdog pause -> after_harness_fail resumes -> next episode at time scale 1.0; after_harness_fail doing
+  nothing -> ready_for_episode resumes (the 015907 path); a pause no resume leaves -> no run_episode, 5 rows, stop, no
+  SystemExit. Plus ready_for_episode by place, PauseWatch. test_harness_recovery.py: 33 (+6).
+- `recovery.PauseWatch` (on FightTap / GauntletTap as `tap.pause`): the cause of "paused unasked" comes from the
+  pause's first STATE. Oracle fact (ActionScheduler.Accept): a stale ACTION (> 3 frames late) is dropped before
+  EndLost and does NOT clear BrainLost; 015907's act.lost went false at 12361289 on run_episode's closing zero ACTION
+  / input.release, after the loop had read the pause, so the loop's STATE was never one frame from a wrong cause (the
+  verifier's reading); PauseWatch is insurance. The watchdog's 250 ms counts from the last ACTION received (stale
+  ones too), its 6 frames from the last accepted.
+- `AttemptRecord.start_resume`: the taps of the episode start's resume (the live check's episode_settings now shows
+  them).
+- 10-08 after 03:00 (1228 rows to 04:02): 4 more HARNESS_FAILs, all old code. 3 watchdog pauses that died exactly like
+  015907 (time_scale 0.0, "not collecting"): 034416 i0 ep5 and 034525 i1 ep6 in the same second (03:48:02), 034808 i1
+  ep0 (03:49:18); last ACTION 25 / 28 / 15 frames before the first paused STATE; no long planner decision logged
+  (max 17 ms) and STATE latency up from 0.8 to 4-11 ms: a machine-level stall like 10-04 21:01:15, not a planner path.
+  1 wave-start savestate timeout (031851 i3). pause_quit.md 11.1.
+- `recovery_check`: worker_pause / worker_norecover run `combat_run.worker` itself on the probe's link (_Shared, no
+  second connection), title_items maps the title's main menu (Down x1..4 + Enter, Up x1 + Enter: does it wrap?).
+- Full suite (tree at f0dba93 minus comments): 1160 passed, 3 skipped, 1 xfailed, 1 failed = the known timing budget
+  test_hitbox_tables::test_support_query_matches_reference_and_meets_the_budget (3.93 ms > 3 ms: run pinned to the
+  E-cores at below-normal priority); it passes alone (2.5 s).
+- Process safety (round 1, disclosed then): at ~01:00 PDT round 1 ran Stop-Process -Force on pids 32988 and 58000
+  (sleep.exe), thinking 32988 was its own finished pytest; the pid had been reused, so another session's wait loop
+  was probably killed. If a track's wait script vanished around 10-08 01:00, that is why. Rule followed since: stop
+  only what this session started, through its STOP file or TaskStop, and check Win32_Process CreationDate /
+  CommandLine before touching a pid. Round 2's dev left `tail -n +1 -f ...live_20261008_033740_i4.log` running (pid
+  44972, started 03:37:44, parent 52292): harmless, not started by this session, left alone; its session should stop
+  it.
+- Live check NOT run this round: instance 4 has been locked by routes since 04:07 for a 4-hour Lace2 data collection
+  (run 20261008_040729_Lace2_data, worker pid 51860, frozen C:\ssbot\live_rb4_2f74075, until ~08:07), and 0-3 are
+  locked by diag / r6rules / r8. Waited 04:12 - 04:47, then stopped waiting (no lock was taken). Ready to run (frozen
+  checkout C:\ssbot\live_recov_ef67b89, CODE_REV ef67b89, venv built; its code equals the branch head, later commits
+  touch comments / docs / tests only), through the lock, about 5 min:
+    cd C:\ssbot\live_recov_ef67b89\brain
+    ..\scripts\uv.cmd run python -m ssbot.probes.recovery_check --instance 4 --cases worker_pause,worker_norecover,title_items,episode_settings,brain_lost
+  It writes C:\ssbot\sandbox\recovery_check\<time>_i4.json (worker rows under recovery_check\worker_*). worker_pause /
+  worker_norecover check the worker path live (rows: ep0 HARNESS_FAIL "paused unasked ... (a Pause key in the
+  harness's own ACTION ...)", ep1 not HARNESS_FAIL with time_scale_game 1.0; the log shows "after the harness
+  failure: ..." or "paused before the episode (...): unpaused"). title_items answers the open TITLE_ITEM question
+  below. Afterwards instance 4 is in the sandbox slot / Bell Beast savestate: tell routes to reload its own state.
+
+Next / open issues:
+1. The watchdog pauses come from fight-loop stalls >= 250 ms; loop_gap_ms in the summaries will show where. Reducing
+   them (planner warm-up, CPU sharing) is not done here. The latest (015907) was one 1.6 s planner decision on a
+   path the warm-up did not cover (r5value code).
+2. In data mode a watchdog pause could be resumed and the episode continued; it still ends HARNESS_FAIL (the policies
+   and taps do not handle paused frames).
+3. Keep the mouse off the training windows (it moves menu highlights, P7); the recovery now copes, but every
+   MenuError costs a few seconds.
+4. load_slot after Esc back from a title sub-menu always pays one MenuError (the highlight stays on the item it came
+   from); an Up before the Enter would save ~6 s but needs each sub-menu's menuState mapped to its main-menu item.
+5. recovery.TITLE_ITEM (Up count after a MenuError) assumes the main menu lists Start Game / Options / Achievements /
+   Extras / Quit and only Options (Up x1) is verified live. If the list does not wrap, Up x4 always reaches Start
+   Game and is the robust choice; if it wraps and an item is hidden, the count overshoots and the same MenuError can
+   repeat until SLOT_TRIES (3) runs out (no setting is changed). The live case title_items measures both; change
+   _unstick after it, not before.
+6. The live re-check of this round's worker path (worker_pause / worker_norecover) is pending (see above); the unit
+   tests cover it on the stand-in game.
