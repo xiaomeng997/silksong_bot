@@ -931,3 +931,28 @@ cd brain   # 冻结检出（git archive，没有 .git）：behaviour_build 要�
 - **记账**：(1) 来源 iid 按调用路径配对（以前按下标配，被格挡的 damage 事件会错位）；(2) 多段链的钩子按实例找（FSM 事件的 `ent`；以前按物体名，两只同名 Reed 会串，`Wave 1/Song Reed/...` 这种嵌套路径找不到钩子），没有 iid 或找不到时按路径里的物体名回退；(3) Multihit tick（special_damage 掉血）在自己那一帧判，不在支撑里就等 70 帧看有没有本链的 Final Hit（有就随链在钩子判），没有或场次先结束就计为支撑外（以前只通过 Final Hit 判，没有 Final Hit 的 tick 根本不判）；(4) Cogfly 第二帧在 FORCED_RISK、暂停待定或监督器接管按键时丢掉（以前照按）。
 - **报告**：`forum_a0_report` 按 damage 事件计受击，tick 单独计，类型按调用路径解析（投射物归投掷者：针 → Reed、钟 → Bellbearer、rune bomb / slam → Clapper、矛 → Clawmaiden）；旧记录没有 kind / path，从录像的 events.jsonl 读。修正后的 A0 / 波次起点数字见 §16.2 / §16.3（`C:\ssbot\data\m2_forum_r4\fixer\a0_report_v2.json`、`ws_report_v2.json`）。
 - **复测**（波次起点批次重跑一次：`20261005_054233_Forum_A_w2_mix_eval_planner_oracle`，冻结检出 `C:\ssbot\live_r4f_0f517a0`，实例 0、1 各 12 场，种子 170000+，eval、无真退出；报告 `C:\ssbot\data\m2_forum_r4\fixer\ws_report_fix.json`）：QUIT 24 / 24（Q1 12、Q3 12：Reed 6、Minister 4、Choristor 2）；每场 3.33 次受击（80 个 damage 事件）+ 6 个 Multihit tick（全部在自己那一帧就在支撑内）；**支撑外 0、未知 0**（4 个 Final Hit 按钩子判，钩子都找到了，包括 iid 解析不出来的 `Song Reed (1)` / `Song Administrator (1)`，靠物体名回退）；来源 Clawmaiden 27、Tiny 16、Clapper 13、Reed 9、Bellbearer 7、Minister 3、Choristor 3、未解析 2；FORCED_RISK 90.5 %（各波 69–100 %）；EVADE 98 %、HOLD 2 %；YELLOW 下 `kill_prims` 含钉子攻击的 tick 被拿掉攻击（日志里 1,480 个 YELLOW tick）；击杀 0（上一批 2）；Cogfly 2 次；tick p50 中位数 7.4 ms、p99 中位数 14.0 ms（最大 18.9），> 16.7 ms 0.45 %；WaveTracker 29,522 / 29,970（98.5 %，同 §16.3 的波次起点偏移）；包络审计：选中 S = 0 的 2,794 次全部包络，core_not_enveloped 0、overrun 0。结论：修正没有改变基线的样子（还是 EVADE、还是第一波里 3 下左右退出），记账现在每个掉血事件都判。
+
+## 17. R8：拼刀（2026-10-08，forum_planner_plan.md §5 R8；分支 worktree-wf_814dfeea-b10-4；离线 + 实例 2、3）
+
+### 17.1 Wanderer 的刀（你 10-05：拼刀用 Wanderer 不用 Reaper）
+
+- `knowledge/1.0.30000/attacks/wanderer.json`（`attack_table_build --crest Wanderer`，P17 的 slash.dump，**还没有实测帧**）：横砍 / 交替横砍 / 上挑 / 贴墙砍都在出刀那一帧生效、到 0.12 s（剪辑第一个动画事件 0/24 s，和 Hunter 一样，不是 Reaper 的 0.083 s），下劈 0.04–0.16 s；够距：横砍 x 0.19–3.12 u（拼刀盒 0.19–2.92）、上挑 y 0–3.39 u、下劈 y −2.16–0.13 u。所以**按导出 Wanderer 连拼是无缝的**：拼中后 0.1 s `NailParryRecover` 把攻击冷却和这一刀都清掉，新一刀立即生效，同一碰撞体 0.117 s 后能再拼，无敌到 0.15 s，0.117–0.15 s 之间再出刀就接上。实测（`kin_excite_forum --attack-frames`，fo_W，60 刀）在实例空出来后跑（HANDOFF R8）。
+- 纹章配置（crests.json）：持续 0.25 s、冷却 0.3 s、后摇 0.1 s，下劈类型 `Slash`（`HeroController.DownAttack`：就是一刀 `downSlash`，`cState.attacking`，没有 Hunter 的俯冲、没有 Reaper 的 FSM）；`DASHCOMBO_WINDOW_TIME` 0.15 s：冲刺（Sprint FSM 打开窗口）后 0.15 s 内按攻击是 `WANDERER DASH COMBO`，不是普通一刀（规划器不建模，否决这样的行）。
+- 运动学：`hero_wanderer_forum.json` = Reaper 的 Forum 配装参数换成 Wanderer 的计时，能力位去掉 reaper_down、加新的 `down_slash`（kin_jit）；**没在 Wanderer 录像上拟合**，kin_check 在你的 fo_W 练习录像上核对中（HANDOFF R8）。
+
+### 17.2 可拼层（静态表，按行为表里每个家族伤害碰撞体的 parry 位）
+
+- 有可拼碰撞体的家族 13 个：Choristor 斩（`Slash 1/2`、`ComboSlash 1`）、鞭（`Whip 1–6`）、跳（`Jump Spin`、`Spin Slash`）；Clawmaiden 斩（`Slash 1/2/4/5`）；Envoy 普通斩（`Slash1`、`Slash1 2`）、跳斩（`JumpSlash 2/3`）、冲锋（`Charge`）；Maestro 斩（`Slash 1/2`）；Minister 冲刺（`Attack`）、格挡反击（`Parry Slash 1–4`）；Reed 刺（`Stab 1/3/5`）、扔针（`Song Reed Pin Projectile`）、防御反击（`Parry Slash`）。
+- 永远不拼（照旧要躲）：所有本体（待机 / 入场 / 闪避 / 瞬移家族）、Clapper 全部（本体和锤 canClashTink 0）、Clawmaiden 旋转（矛和矛爆炸 canClashTink 0）、Bellbearer（钟只有 counter 位：只能打改向）、Tiny（用本体撞）。
+
+### 17.3 拼刀成败（录像统计，`ssbot.tools.forum_clash_stats`）
+
+- 两种口径：**拼刀局面**（出刀生效窗口里，主角的拼刀盒先碰到敌人的可拼碰撞体，之前敌人任何伤害碰撞体都没碰到主角受伤框（放大 0.3 u））和**接触局面**（规划器的规则：敌人第一次碰到放大的受伤框落在出刀生效窗口里，本体也算）。结果：拼中（NailClashEffect，最近的可拼碰撞体是它的）/ 挨打（12 帧内它打中主角）/ 都没有。
+- 你的 5 次练习（4,439 刀、239 次拼刀；Reaper 1,059 刀、Wanderer 3,380 刀）：拼刀局面几乎不挨打（例：Wanderer 上挑拼 Minister 冲刺 10 次里 7 拼中、0 挨打；Reaper 横砍拼 Choristor 鞭 13 次 12 拼中）；接触局面会：Choristor 斩横砍 14 次 7 拼中、3 挨打，Reed 刺横砍 11 次 3 拼中、4 挨打。也就是"刀在接触时已经出来"不够，要在它的判定碰到身体之前先碰到刀。拼完之后 0.2 s 内被无敌挡掉的伤害 30 次（29 次来自同类型）；拼完 0.5 s 内同一只再拼 1 次、再挨打 0 次。
+- R1 v2 数据（36 个 data2 运行）统计中，结果写进 `clash.json` 后补到这里。
+
+### 17.4 规划器里的 EV_CLASH（`ForumConfig.clash`，默认关 = R3 / R4 的规划器）
+
+- 只在没有安全行的 tick 跑（普通安全行永远排在前面）；按 J 取最多 16 行"有接触、有出刀"的行：包络上第一次接触落在某一刀的生效窗口里，接触按敌人归属（每只敌人自己的支撑在外壳中心查一次），每只都要是 `clash.json` 里有的（类型 × 当前攻击家族 × 刀向）且在刀的那一侧（横砍在面朝方向、上挑在上面、下劈在下面）；拼刀放在接触前一帧（拼刀盒在受伤框外面）。
+- 成功分支：从拼刀帧起 9 帧（0.15 s）不受任何敌人伤害（两侧规则：背后那刀在无敌里就吃掉）、按刀向后坐（横砍反向、上挑 RecoilDown、下劈弹起、贴墙砍不动）、6 帧后 `EV_PARRY_RECOVER`（下一刀马上能出）；之后的接触可以再拼（多段招的下一段、另一侧），最多 3 次；整条成功分支干净 → 失败概率 1 − ∏(1 − p_k) ≤ 0.25 且 h ≥ 2 时这一行算安全（排在普通安全行之后，按失败概率排）。拼刀开着时候选里加"一直出刀"的续段（每 8 帧一刀：不按方向 / 按左 / 按右 / 上挑），给第二次拼、转身拼和 Minister 正下方连续上挑用。
+- 开环回放（A0b i1 ep0，648 tick，483 个 FORCED_RISK；机器忙）：拼刀分支在 483 个 tick 上跑，看了 7,200 行，234 行接触时刀在生效窗口里、都能归属，59 行归属的怪可拼且在刀那一侧，7 行成功分支干净（3 次被选中）；没有"一直出刀"的续段时 0 行干净（0.15 s 后支撑还罩着主角）。分支每个 FORCED_RISK tick 2.4 ms。
