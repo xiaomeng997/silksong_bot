@@ -917,6 +917,7 @@ A 类 = 以 2 格攻击为主的 boss 或连战；B 类 = 竞技场、小 boss�
 #### 3.6.5 配装、槽位可行性与经济
 
 - **纹章：** 默认全程 Hunter（S15 进化为 Hunter_v2）。Wanderer 和 Reaper 是 A/B 候选，K1（M2 结束）用 S15 之后的 boss savestate（Last Judge、Lace 2，另加 Forum、Widow）比较**纹章 + 配装的组合**，每组 ≥ 200 次随机起点：先看 WOULD_DIE 上界和险情率，击杀时间次之；纹章可在工作台按 playbook 切换，结论可以按 boss 选。Wanderer 的取得（S12 后经 Cling Grip 进 Bonegrave 的 4 波竞技场，死亡为真死；或 500 念珠买 Simple Key 提早拿）、数值和代价见 [`research/crests.md`](research/crests.md) [asset][code]（2026-09-30 调研，起因是你的建议：漫游攻速快、丝多、弹刀多）。
+  - **高庭定为漫游（你 2026-10-08）：** 拼刀连得上——漫游横砍 / 上挑 / 贴墙砍出刀当帧生效，拼中后 0.1 s 冷却清零再出的刀在 0.15 s 无敌结束前生效，下劈 0.04 s 生效也接得上；收割 0.083 s 才生效，每次连拼约 0.03 s 空档。待核：路线在高庭之前拿到漫游的方式和代价（Bonegrave 4 波竞技场、真死；或 500 念珠的 Simple Key），漫游开着的槽少（技能 1 + 红 1 + 黄 1，forum_tools.md），高庭配装要按它重排。
 - **槽位（Hunter：红/蓝/黄各 1 个已解锁 + 1 个锁定）：**
   - Locket #1（S09）→ 红 2：Straight Pin + playbook 工具。
   - Locket #2（S10）→ 蓝 2：Fractured Mask + Warding 或 Magma Bell。
