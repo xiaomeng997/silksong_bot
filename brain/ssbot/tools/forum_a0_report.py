@@ -216,10 +216,12 @@ def report(runs: list[Path]) -> dict:
     # PUNISH goals and those with a nail hit on the target inside the window they were picked for, the layer's cost
     l2 = [p["l2"] for p in pol if p.get("l2")]
     if l2:
-        goals, hits = Counter(), Counter()
+        goals, hits, kinds, rules = Counter(), Counter(), Counter(), Counter()
         for x in l2:
             goals.update(x.get("goals") or {})
             hits.update(x.get("goal_hits") or {})
+            kinds.update(x.get("switch_kinds") or {})
+            rules.update(x.get("rule_changes") or {})
         play_min = sum(ing) / 60.0 if ing else 0.0
         ms50 = [x["ms_p50"] for x in l2 if x.get("ms_p50") is not None]
         ms99 = [x["ms_p99"] for x in l2 if x.get("ms_p99") is not None]
@@ -228,6 +230,9 @@ def report(runs: list[Path]) -> dict:
                      # target switches (another enemy; round 2 on: tgt_switches) per minute of play
                      "tgt_switches_per_min": round(sum(x.get("tgt_switches", 0) for x in l2) / play_min, 2)
                      if play_min and all("tgt_switches" in x for x in l2) else None,
+                     # why a target was switched (gone / ineligible / better / turn / punish) and the same target's
+                     # rule changes (round 3: "RUSH>KITE" ...): changes = the first goal + target switches + these
+                     "switch_kinds": dict(kinds.most_common()), "rule_changes": dict(rules.most_common()),
                      "switches": sum(x.get("switches", 0) for x in l2), "fails": sum(x.get("fails", 0) for x in l2),
                      "errors": sum(x.get("errors", 0) for x in l2),
                      "punish_goals": sum(x.get("punish_goals", 0) for x in l2),

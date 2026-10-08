@@ -106,6 +106,7 @@ class L2Rules:
     goal_dwell_s: float = 1.0                             # the same target under another rule after this long
     iso_u: float = 8.0                                    # isolated: no other enemy in play within this (|dx|, u)
     iso_hyst_u: float = 2.0                               # the kept target stays isolated down to iso_u - this
+    rule_hyst_u: float = 0.0                              # from KITE, RUSH needs one isolated by iso_u + this
     run_u_s: float = 17.5                                 # dash + sprint (the person)
     start_s: float = 0.05
     swing_s: float = 0.25                                 # press -> the Reaper side slash's active end (0.208 s)
@@ -186,6 +187,7 @@ class Cand:
     t_run: float
     window: float = math.inf
     iso: bool = False
+    sep: float = math.inf                                 # |dx| to the nearest other enemy in play
     eta: float = math.inf
     prio: float = 1.0
     cov0: bool = False                                    # the spot covered now (the arbitration log)
@@ -209,7 +211,7 @@ class Goal:
 
 def _new_stats() -> dict:
     return {"picks": 0, "switches": 0, "changes": 0, "tgt_switches": 0, "fails": 0, "errors": 0, "ms": [], "goals": {},
-            "goal_hits": {}, "punish_goals": 0, "punish_landed": 0, "switch_kinds": {}}
+            "goal_hits": {}, "punish_goals": 0, "punish_landed": 0, "switch_kinds": {}, "rule_changes": {}}
 
 
 class GauntletTactics:
@@ -320,7 +322,8 @@ class GauntletTactics:
             spot, _, _ = self._spot(ws, s, hx)
             c = Cand(s, x, y, abs(x - hx), spot, r.start_s + abs(spot - hx) / r.run_u_s)
             others = [abs(float(o.pos[0]) - x) for o in live if o.iid != s.iid]
-            c.iso = not others or min(others) >= r.iso_u - (r.iso_hyst_u if s.iid == kept else 0.0)
+            c.sep = min(others) if others else math.inf
+            c.iso = c.sep >= r.iso_u - (r.iso_hyst_u if s.iid == kept else 0.0)
             v = r.pursuit_u_s.get(s.type_key, 5.0)
             c.eta = max(0.0, c.d - r.reach_u) / max(v, 0.1)
             c.prio = r.priority.get(s.type_key, 1.0)
@@ -392,6 +395,10 @@ class GauntletTactics:
             go = better
             self._sw_why = "punish"
         iso = [c for c in pool if c.iso]
+        if old is not None and old.name == KITE:
+            # the rule's own hysteresis (round 3: RUSH <-> KITE at the 8 u edge was most of the goal changes): from
+            # KITE, RUSH only on one isolated by iso_u + rule_hyst_u
+            iso = [c for c in iso if c.sep >= r.iso_u + r.rule_hyst_u]
         rule = PUNISH if go else RUSH if iso else KITE
         kept = next((c for c in pool if old is not None and c.s.iid == old.target), None)
         if rule == RUSH and kept is not None and not kept.iso and t - old.t_pick < r.dwell_s:
@@ -521,6 +528,10 @@ class GauntletTactics:
                 new.family = next(s.family for s in fc.subjects if s.iid == new.target)   # an event is handled
                 if prev is None or new.target != prev.target or new.name != prev.name:
                     self.stats["changes"] += 1
+                    if prev is not None and new.target == prev.target:
+                        rc = self.stats["rule_changes"]           # the same target under another rule
+                        k = f"{prev.name}>{new.name}"
+                        rc[k] = rc.get(k, 0) + 1
                     if prev is not None and new.target != prev.target:
                         self.stats["tgt_switches"] += 1
                         self.stats["switches"] += int(old is not None)  # a kept target given up (not one gone)
