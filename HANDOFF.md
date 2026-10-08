@@ -1837,13 +1837,24 @@ attack outcomes), `live_w0f_3608489` (live check). Seeds used: 340000-340024.
   EN_CHARGE start-later box 92 %, plus committed windows; a median of 7-8 groups each saturate alone, so tightening one
   family (R5 value's finding) is not enough, and MultiForecast.committed() saturates too. With Pc / t_c / t_hit tied the
   p_k preselection and the order are J's; EVADE's stance comes from the same saturated risk map (= stay put), so the bot
-  approaches / faces / swings at its target while believing every plan equally dangerous. R5 value / R6 v0 only change
-  J or the target, hence no change in outcome.
+  approaches / faces / swings at its target while believing every plan equally dangerous. Why R5 value / R6 v0 changed
+  nothing is argued from their code, not tested: R5 adds terminal-value terms to J and kill value to the target
+  weights (T48 also lengthens the horizon), R6 v0 changes the tactic, which reaches the planner as GoalPrefs (scores
+  only); FORCED_RISK's keys come from the same saturated support in every arm. My replays of their episodes use main's
+  planner and match their live picks 64 % (R5 015959) / 83 % (R6 L2 on 015904) / 98.5 % (R6 L2 off 020919). Their live
+  outcomes (QUIT medians 11.8-16.5 s, 4.0-4.4 hits) are consistent with no effect.
 - Hindsight (open loop, each row's nominal path vs the recorded damage colliders of the next 0.6 s): 78 % of the hits
-  still had a clear row 0.15 s before, 99.6 % 0.6 s before; the planner's pick 6 frames before a hit was clear 9.4 %
-  of the time vs 24.3 % for a random row (worse than random); over all ticks 75.9 % vs random 75.0 %.
-- Not causes: kinematics (recorded keys rolled out: miss 15 / 413 = 3.6 %, error p90 0.17 u), planner deadline (3 of
-  28,561 ticks before hits > 16.7 ms), support holes (0).
+  still had a clear row 0.15 s before, 99.6 % 0.6 s before. The "no information" claim rests on the saturation / tie
+  evidence above, NOT on pick-vs-random rates: before a hit the replayed pick IS the executed plan (A0b 98.5 %), which
+  was hit by construction, and open-loop hindsight favours unexecuted rows. (forum.md 19.5; the first version's
+  "planner 9.4 % vs random 24.3 % six frames before a hit, worse than random" mostly measured that the hero was hit.)
+  On the 316 ticks 1-12 frames before a hit where the replayed pick is NOT the executed one: pick 21.8 %, executed
+  17.7 %, random 31.8 %, recorded-collider key 52.5 %. Over all ticks (every 3rd) pick 75.9 % vs random 75.0 %, biased
+  both ways (near hits against the executed plan, away from hits for it).
+- Not causes: kinematics (recorded keys rolled out over the last 12 frames, 413 non-Final direct hits: miss 15 = 3.6 %,
+  error p90 0.17 u; over 24 frames the drift is larger, p90 0.67 u, 17 % > 0.3 u, 25 misses, so the second half of the
+  36-frame horizon is less accurate), planner deadline (plan time > 16.7 ms: 3 of 28,561 ticks before hits, 14 of
+  107,964 logged ticks = 0.013 %; whole ticks late 0.25 %), support holes (0).
 - The person in the same wave-0 situations (forum_attack_outcomes, attack starts within 8 u): per-instance hit rates
   close to the bot's except Envoy charge (bot 43 % vs 1x 17 %: you jump over it, 75 % vs bot 41 %), Envoy slash (26 %
   vs 14 %: you are already airborne, 70 % vs 38 %), Choristor whip (38 % vs 21 %: you back off ~6 u and dash; the bot
@@ -1855,17 +1866,24 @@ attack outcomes), `live_w0f_3608489` (live check). Seeds used: 340000-340024.
 - On FORCED_RISK ticks only, rows are ranked first by the frames their nominal box meets the damage colliders seen now
   (Entity.dmg_boxes active polygons) moved along their entity's velocity (`seen_contacts`, 0.14 / 0.54 ms p50 / p99),
   then the old share; the p_k preselection too. Safe ticks: keys all 0, order unchanged; Bell Beast not affected
-  (ForumPlanner only). Offline: picks clear in hindsight 46 % six frames before a hit (planner 9 %, random 24 %).
-- Live, instance 0, A0b protocol, seeds 340000 paired (control first, then fix, same machine load): seen
+  (ForumPlanner only). Offline, the recorded-collider version of the key (`dr`, multi-hit colliders included): pick
+  clear in hindsight 45.7 % six frames before a hit vs random 24.3 %; 52.5 % vs 31.8 % on the ticks where neither is
+  the executed plan. The production key replayed (`--forced-rank seen`): 58 % vs random 45 % within 12 frames.
+- Live, instance 0, A0b protocol, seeds 340000 paired (control first, then fix; NOT the same load: late ticks share
+  12.8 % vs seen 5.4 %; the effect is not load-driven, the 9 earlier share-type runs at 0.06-0.4 % late had QUIT
+  medians 11.8-16.5 s): seen
   `C:\ssbot\data\runs\m2\20261008_040149_Forum_A_eval_planner_oracle` (24 QUIT + 1 HARNESS_FAIL "paused unasked")
   vs share `20261008_034918_Forum_A_eval_planner_oracle` (25 QUIT): time to QUIT median 19.1 vs 14.0 s, paired +5.0 s
   (95 % CI 3.4-6.6, longer in 23 / 24), hits / min 12.0 vs 16.5, Envoy charge hits 0.04 vs 0.92 per episode; still
   100 % QUIT in wave 0, 0 kills. A first seen chunk `20261008_034416` (6 episodes) ran while my offline batch loaded
-  the machine (27 % late ticks, 1 HARNESS_FAIL): not counted.
+  the machine (27 % late ticks, 1 HARNESS_FAIL): not counted. The seen arm's HARNESS_FAIL "paused unasked" is a
+  known generic harness failure (48 attempts files across Bell Beast, Lace1 and older Forum runs), not seen-related.
 - `forced_rank = "seen_cf"` (env `SSBOT_FORUM_FR=seen_cf`, 82e94fa): after the seen key, the share of stage-1 frames in
   the committed fine placements (`committed_fine_share`: attacks under way with a known entry; the windows and the
   start-later boxes, which saturate, are left out) - the strikes that open after their antic. Offline the hindsight-
-  clear pick within 12 frames of a hit goes 60 % -> 73 % (whip 35 -> 68 %). Live on instance 1 (instance 0 was
+  clear pick within 12 frames of a hit goes 60 % -> 73 % (random 45 %; whip 35 -> 68 %); both are counterfactual
+  picks, but seen falls back to the executed order when its key is all 0, which biases it down - on the ticks where
+  seen's pick is not the live one: 62 % -> 78 % (random 40 %). Live on instance 1 (instance 0 was
   r5value's), `20261008_045005_Forum_A_eval_planner_oracle`, 25 QUIT: time to QUIT median 25.2 s, hits / min 10.1
   (the person at 1x: 11.4). NOT paired with the two runs above (combat_run prefixes the seeds with the instance:
   1340000+), lighter machine load (1.3 % late ticks): unpaired seen_cf - seen +6.2 s (bootstrap 95 % CI 3.1-9.4),
@@ -1891,9 +1909,9 @@ attack outcomes), `live_w0f_3608489` (live check). Seeds used: 340000-340024.
 2. Antic-driven attacks (whip, Envoy slash, Reed stab, Choristor slash: over half of the remaining hits) are invisible
    to the "seen" key until their collider opens. A second key after it, the share of stage-1 frames in the committed
    fine placements (`forced_rank = "seen_cf"`, `SSBOT_FORUM_FR=seen_cf`, 82e94fa, tested), lifts the hindsight-clear
-   pick within 12 frames of a hit from 60 % to 73 % offline (whip 35 -> 68 %, Choristor slash 0 -> 33 %; the Envoy
-   slash stays hard, 19 -> 24 %) and lived 6 s longer than seen (above, unpaired). The real fix is a committed-attack
-   template at its nominal (median dwell) timing instead of the entry-interval window union.
+   pick within 12 frames of a hit from 60 % to 73 % offline (random 45 %; whip 35 -> 68 %, Choristor slash 0 -> 33 %;
+   the Envoy slash stays hard, 19 -> 24 %) and lived 6 s longer than seen (above, unpaired). The real fix is a
+   committed-attack template at its nominal (median dwell) timing instead of the entry-interval window union.
 3. Support de-saturation (R2 / R3 owners, recertification needed): start-later families should not strike before
    their antic's minimum dwell; the flying Reed's idle growth capped by its measured top speed.
 4. Offense: 0 kills in 274 live episodes; wave 0 never ends. R6's punish windows (Envoy Charge End, Slash1 Recover)
