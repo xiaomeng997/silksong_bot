@@ -1936,5 +1936,6 @@ share): recommend both on (SPC) at integration. Heavier ticks: late ticks 18-24 
 7. Frozen checkouts `C:\ssbot\live_r5v_35e5fe6`, `C:\ssbot\live_r5v2_737048f` (unused) and `C:\ssbot\live_r5v2_8617aa6`
    can go; audit dumps (~60 MB each set) in `C:\ssbot\data\m2_forum_r5v\round2\` can go after integration.
 8. Tests: full suite at 737048f 1,138 passed, 2 skipped, 1 xfailed; after the port and the default flip the Forum /
-   planner / terminal / multi_forecast / worldstate / observability subset 224 passed; the final full run is in
-   `C:\ssbot\data\m2_forum_r5v\round2\fullsuite2.txt`.
+   planner / terminal / multi_forecast / worldstate / observability subset 224 passed; final full suite (code of
+   3797b3e): 1,141 passed, 2 skipped, 1 xfailed (`C:\ssbot\data\m2_forum_r5v\round2\fullsuite2.txt`). Bell Beast:
+   untouched by construction (ForumPlanner / ForumPlannerPolicy only); its equivalence tests are in the suite.
