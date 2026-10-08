@@ -16,10 +16,13 @@ a frame of the swing before k_c (a contact that came first is a hit the clash di
 EV_CLASH premise (the swing out when the enemy's clashable layer arrives, before the hurtbox contact).
 Outcome of a setup: clash = a NailClashEffect freeze starts in [k_c - 1, window end + 1] and the nearest enabled
 clashable collider on the frame before belongs to e; other_clash = it belongs to another enemy (the hero is
-invulnerable 0.15 s either way); hit = a damage event (or a Multihit special damage) from e's type, e the nearest of
-its type, in [swing start, k_c + 12 frames] and no clash before it; neither = none of these (the enemy's collider did
-not come on). The move is e's Control state at k_c and its attack family (the type's behaviour table); same_frame:
-the inflated hero box already met e's collider at k_c.
+invulnerable 0.15 s either way); hit = a damage event from e's type, e the nearest of its type, or a Multihit special
+damage whose nearest damaging enemy is e, in [swing start, k_c + 12 frames] and no clash before it; neither = none of
+these (the enemy's collider did not come on, or it missed). The move is e's Control state at k_c and its attack family
+(the type's behaviour table); same_frame: the inflated hero box already met e's collider at k_c. The union of the two
+setups of a swing x enemy takes the worse outcome (hit > clash > other_clash > neither) and is keyed by the state at
+its first frame; each setup also carries its attack instance (the enemy's run of frames in one family), the
+clustering unit of the success rates in clash.json (several swings meet one attack instance).
 Also per clash: what came in the next 0.5 s from the same enemy (another clash, a hit, the collider's name: the
 multi-segment chains), and damage blocked within 0.2 s after (the two-sided rule: the parry i-frames take any enemy
 damage).
@@ -29,6 +32,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import zlib
 from collections import Counter, defaultdict
 from pathlib import Path
 
@@ -46,7 +50,8 @@ CD_JUMP = 0.15                   # atk_cd rising by more than this from one fram
 FAIL_F = 12                      # a hit from e up to this many frames after k_c is the setup's failure
 CHAIN_F = 30                     # frames after a clash whose events from the same enemy are recorded (0.5 s)
 BLOCK_F = 12                     # frames after a clash whose damage_blocked events are counted (0.2 s)
-RPR_DOWN = (9, 20)               # Reaper down slash: antic 0.150 s, slash 0.167 s (forum_planner RPR_ANTIC_F / _SLASH_F)
+RPR_DOWN = (9, 19)               # Reaper down slash, first and last active frame: antic 9 frames, slash 11
+#                                  (forum_planner RPR_ANTIC_F / _SLASH_F: the planner's window [9, 20) half-open)
 CLASH_BIT = 1                    # export parry bits: 1 clash (canClashTink), 4 counter
 PROJECTILES = {"Throwing Bell": "Pilgrim 03 Song", "Song Reed Pin Projectile": "Song Reed",
                "Spear": "Song Handmaiden", "handmaiden_spear_silk_explosion": "Song Handmaiden"}
@@ -206,6 +211,7 @@ def _contact_setup(buf, i0, iid, a, b, inflate, clash_at, hits, hit_owner, fams,
         return None
     tk, st, cols, pos = buf[k_h]["ents"][iid]
     fam = fams.get(tk, {}).get(st or "", "?")
+    inst = buf[k_h]["inst"].get(iid)
     hb = buf[k_h]["box"]
     dx = pos[0] - 0.5 * (hb[0] + hb[2])
     side = "front" if dx * buf[i0]["face"] >= 0 else "behind"
@@ -226,7 +232,7 @@ def _contact_setup(buf, i0, iid, a, b, inflate, clash_at, hits, hit_owner, fams,
                 break
     clashable = any(cl for _, cl, _ in cols)
     acc["contact_setups"][f"{crest}|{tk}|{fam}|{slot}|{side}|{int(clashable)}"][out] += 1
-    return k_h, tk, fam, side, out
+    return k_h, tk, fam, side, out, st, inst
 
 
 def scan(unit: str, states, reach: Reach, fams: dict, inflate: float, acc: dict) -> None:
@@ -247,6 +253,18 @@ def scan(unit: str, states, reach: Reach, fams: dict, inflate: float, acc: dict)
     if not buf:
         return
     n = len(buf)
+    # attack instances: an enemy's run of consecutive frames in one family (the start frame's index identifies it)
+    run: dict = {}
+    for k, fr in enumerate(buf):
+        inst = {}
+        for iid, (tk, st, cols, pos) in fr["ents"].items():
+            fam = fams.get(tk, {}).get(st or "", "?")
+            p = run.get(iid)
+            if p is None or p[0] != fam or p[2] != k - 1:
+                p = (fam, k, k)
+            run[iid] = (fam, p[1], k)
+            inst[iid] = p[1]
+        fr["inst"] = inst
     # clash events: index, owner iid (nearest clashable collider on the frame before), collider name
     clashes = []
     hits = []                     # (index, type key or None, source)
@@ -287,11 +305,29 @@ def scan(unit: str, states, reach: Reach, fams: dict, inflate: float, acc: dict)
             if best is None or g < best[0]:
                 best = (g, iid)
         return best[1] if best else None
-    # the hit's enemy: for a typed source the nearest enemy of that type on the frame before; a Multihit tick: the
-    # chain's owner is the nearest enemy whose clashable / damaging collider touched within 70 frames (left None)
+    def nearest_any(i: int):
+        fr = buf[i]
+        hb = fr["box"]
+        best = None
+        for iid, (t, st, cols, pos) in fr["ents"].items():
+            if not cols:
+                continue
+            g = min(_gap(bb, hb) for bb, _, _ in cols)
+            if best is None or g < best[0]:
+                best = (g, iid, t)
+        return best
+    # the hit's enemy: for a typed source the nearest enemy of that type on the frame before; a Multihit tick (the
+    # special damage names no source): the nearest enemy with an enabled damaging collider on the frame before, whose
+    # type the hit then takes
     hit_owner = []
-    for i, tk, src in hits:
-        hit_owner.append(nearest_of_type(max(i - 1, 0), tk) if tk and tk in FORUM_SPECS else None)
+    for j, (i, tk, src) in enumerate(hits):
+        if tk == "?multihit":
+            b = nearest_any(max(i - 1, 0))
+            hit_owner.append(b[1] if b else None)
+            if b:
+                hits[j] = (i, b[2], src)
+        else:
+            hit_owner.append(nearest_of_type(max(i - 1, 0), tk) if tk and tk in FORUM_SPECS else None)
     i = 1
     while i < n:
         fr, pv = buf[i], buf[i - 1]
@@ -313,13 +349,16 @@ def scan(unit: str, states, reach: Reach, fams: dict, inflate: float, acc: dict)
             cl = _clash_setup(buf, i0, iid, a, b, polys, inflate, clash_at, hits, hit_owner, fams, crest, slot, unit,
                               fr["face"], acc)
             # the union (an opportunity the planner's rule may see either way: the attack meets the clash reach first,
-            # or reaches the hurtbox while the swing is out), keyed at its first frame
+            # or reaches the hurtbox while the swing is out), keyed at its first frame (state included), the worse
+            # outcome of the two (a hit the contact setup saw before a later clash is a hit)
             u = [x for x in (cs, cl) if x is not None]
             if u:
                 first = min(u, key=lambda x: x[0])
-                outs = {x[-1] for x in u}
-                out = next(o for o in ("clash", "hit", "other_clash", "neither") if o in outs)
-                acc["union_setups"][f"{crest}|{first[1]}|{first[2]}|{slot}|{first[3]}"][out] += 1
+                outs = {x[4] for x in u}
+                out = next(o for o in ("hit", "clash", "other_clash", "neither") if o in outs)
+                key = f"{crest}|{first[1]}|{first[2]}|{slot}|{first[3]}|{first[5]}"
+                acc["union_setups"][key][out] += 1
+                acc["union_inst"][key].add(f"{zlib.crc32(unit.encode()):08x}:{iid}:{first[6]}")
         i += 1
     _after(clashes, hits, blocked, buf, fams, acc)
     acc["clashes"] += len(clashes)
@@ -358,6 +397,7 @@ def _clash_setup(buf, i0, iid, a, b, polys, inflate, clash_at, hits, hit_owner, 
         return None
     tk, st, cols, pos = buf[k_c]["ents"][iid]
     fam = fams.get(tk, {}).get(st or "", "?")
+    inst = buf[k_c]["inst"].get(iid)
     dx = pos[0] - 0.5 * (buf[k_c]["box"][0] + buf[k_c]["box"][2])
     dy = pos[1] - 0.5 * (buf[k_c]["box"][1] + buf[k_c]["box"][3])
     out = "neither"
@@ -389,7 +429,7 @@ def _clash_setup(buf, i0, iid, a, b, polys, inflate, clash_at, hits, hit_owner, 
         acc["examples"][out].append({"unit": unit, "f": buf[i0]["f"], "k_c": k_c - i0, "type": tk,
                                      "state": st, "slot": slot, "crest": crest, "t_out": None if t_out is None
                                      else t_out - i0, "dx": round(dx, 2), "dy": round(dy, 2)})
-    return k_c, tk, fam, side, out
+    return k_c, tk, fam, side, out, st, inst
 
 
 def _after(clashes, hits, blocked, buf, fams, acc) -> None:
@@ -404,7 +444,7 @@ def _after(clashes, hits, blocked, buf, fams, acc) -> None:
         if nxt:
             row["reclash_gap_f"].append(nxt[0][0] - ci)
             row["reclash_names"][str(nxt[0][4])] += 1
-        hx = [(hi, htk) for hi, htk, _ in hits if ci < hi <= ci + CHAIN_F and (htk == tk or htk == "?multihit")]
+        hx = [(hi, htk) for hi, htk, _ in hits if ci < hi <= ci + CHAIN_F and htk == tk]
         row["hit_after"] += int(bool(hx))
         if hx:
             row["hit_gap_f"].append(hx[0][0] - ci)
@@ -458,10 +498,12 @@ def summarise(acc: dict) -> dict:
                         "p_clash": _rate(c["clash"], n), "p_hit": _rate(c["hit"], n)})
     union = []
     for key, c in sorted(acc["union_setups"].items()):
-        crest, tk, fam, slot, side = key.split("|")
+        crest, tk, fam, slot, side, st = key.split("|")
         n = sum(c.values())
-        union.append({"crest": crest, "type": tk, "family": fam, "slot": slot, "side": side, "n": n, **dict(c),
-                      "p_clash": _rate(c["clash"], n), "p_hit": _rate(c["hit"], n)})
+        inst = sorted(acc["union_inst"][key])
+        union.append({"crest": crest, "type": tk, "family": fam, "slot": slot, "side": side, "state": st, "n": n,
+                      **dict(c), "p_clash": _rate(c["clash"], n), "p_hit": _rate(c["hit"], n), "n_inst": len(inst),
+                      "inst": inst})
     return {"swings": dict(acc["swings"]), "clashes": acc["clashes"], "hits": acc["hits"], "frames": acc["frames"],
             "units": acc["units"], "by_family": fams, "by_state": rows, "contact_setups": contact,
             "union_setups": union,
@@ -473,6 +515,7 @@ def summarise(acc: dict) -> dict:
 def new_acc() -> dict:
     return {"swings": Counter(), "setups": defaultdict(Counter), "by_side": defaultdict(Counter),
             "contact_setups": defaultdict(Counter), "union_setups": defaultdict(Counter),
+            "union_inst": defaultdict(set),
             "after_clash": defaultdict(lambda: {"n": 0, "reclash": 0, "reclash_gap_f": [], "reclash_names": Counter(),
                                                 "hit_after": 0, "hit_gap_f": []}),
             "blocked_after_clash": Counter(), "examples": defaultdict(list), "clashes": 0, "hits": 0, "frames": 0,
@@ -495,39 +538,100 @@ def wilson_ub(k: int, n: int, z: float = 1.96) -> float:
     return (p + z * z / (2 * n) + z * math.sqrt(p * (1 - p) / n + z * z / (4 * n * n))) / (1 + z * z / n)
 
 
-def build_table(stats: list[dict], min_n: int = 10, kind: str = "union_setups") -> dict:
+def wilson_lb(k: float, n: float, z: float = 1.96) -> float:
+    if n <= 0:
+        return 0.0
+    p = k / n
+    return max(0.0, (p + z * z / (2 * n) - z * math.sqrt(p * (1 - p) / n + z * z / (4 * n * n))) / (1 + z * z / n))
+
+
+OUTS = ("clash", "hit", "neither", "other_clash")
+
+
+def _bounds(c: Counter, inst: set | None) -> dict:
+    """Counts and their bounds: n_eff = the attack instances behind the setups (a cluster's setups are correlated:
+    the conservative design effect), p_clash_lb / p_fail = the Wilson 95 % lower / upper bound of the clash / hit
+    share at n_eff (old stats without instances: n_eff = n)."""
+    n = sum(c[x] for x in OUTS)
+    n_eff = min(n, len(inst)) if inst is not None else n
+    pc = c["clash"] / n if n else 0.0
+    ph = c["hit"] / n if n else 1.0
+    return {"n": n, "n_inst": len(inst) if inst is not None else None, "n_eff": n_eff, **{x: c[x] for x in OUTS},
+            "p_clash": round(pc, 4), "p_hit": round(ph, 4), "p_clash_lb": round(wilson_lb(pc * n_eff, n_eff), 4),
+            "p_fail": round(wilson_ub(ph * n_eff, n_eff), 4)}
+
+
+def build_table(stats: list[dict], min_n: int = 10, kind: str = "union_setups", min_state_clashes: int = 2,
+                min_state_share: float = 0.05) -> dict:
     """clash.json from forum_clash_stats outputs: per (type, family, slot) the union setups (the planner's EV_CLASH
     premise on the recordings: the enemy's attack meets the swing's clash reach first, or reaches the inflated hurtbox
-    while the swing is out; a contact setup alone misses the clashes that kept the attack off the hurtbox), a side or
+    while the swing is out; a contact setup alone misses the clashes that kept the attack off the hurtbox) in the
+    family's clashable states (clash_states: the Control states its clashes happened in, at least min_state_clashes
+    and min_state_share of the family's; the planner clashes only a contact that can come from one of them), a side or
     wall slash only with the enemy in front, up / down whatever the horizontal side, both crests pooled (the rule
-    conditions on the window, which is where the crests differ), p_fail = the Wilson 95 % upper bound of hit / n;
-    keys with n < min_n, the NEVER types / families and the body-only families are left out (= not clashable)."""
-    agg: dict = defaultdict(Counter)
-    by_crest: dict = defaultdict(Counter)
+    conditions on the window, which is where the crests differ; by_crest: each crest's own counts and bounds), p_clash_lb
+    = the Wilson 95 % lower bound of clash / n (the branch's weight: "neither" is not a clash), p_fail = the upper bound
+    of hit / n, both at n_eff = the attack instances behind the setups; keys with n_eff < min_n, the NEVER types /
+    families, the body-only families and the families never clashed are left out (= not clashable)."""
+    rows = []
     for st in stats:
         for r in st.get(kind) or ():
             slot = "side" if r["slot"] == "normal" else r["slot"]
             if slot in ("side", "wall") and r["side"] != "front":
                 continue
-            key = (r["type"], r["family"], slot)
-            for x in ("clash", "hit", "neither", "other_clash"):
-                agg[key][x] += int(r.get(x) or 0)
-                by_crest[key + (r["crest"],)][x] += int(r.get(x) or 0)
-    p_fail, left_out = {}, {}
-    for (tk, fam, slot), c in sorted(agg.items()):
-        n = sum(c.values())
+            rows.append((r, slot))
+    has_state = any(r.get("state") is not None for r, _ in rows)
+    st_cl: dict = defaultdict(Counter)
+    for r, _ in rows:
+        st_cl[(r["type"], r["family"])][r.get("state")] += int(r.get("clash") or 0)
+    cstates = {}
+    for k, c in st_cl.items():
+        tot = sum(c.values())
+        cstates[k] = sorted(s for s, v in c.items() if s is not None and v >= max(min_state_clashes,
+                                                                                  min_state_share * tot))
+    agg: dict = defaultdict(Counter)
+    by_crest: dict = defaultdict(Counter)
+    by_state: dict = defaultdict(Counter)
+    inst: dict = defaultdict(set)
+    inst_c: dict = defaultdict(set)
+    no_inst = False
+    for r, slot in rows:
+        key = (r["type"], r["family"], slot)
+        st = r.get("state")
+        for x in OUTS:
+            by_state[key + (st,)][x] += int(r.get(x) or 0)
+        if has_state and st not in cstates.get(key[:2], ()):
+            continue
+        for x in OUTS:
+            agg[key][x] += int(r.get(x) or 0)
+            by_crest[key + (r["crest"],)][x] += int(r.get(x) or 0)
+        if r.get("inst") is None:
+            no_inst = True
+        else:
+            inst[key].update(r["inst"])
+            inst_c[key + (r["crest"],)].update(r["inst"])
+    p_fail, left_out, used = {}, {}, set()
+    for key in sorted(set(agg) | {k[:3] for k in by_state}):
+        tk, fam, slot = key
+        c = agg.get(key, Counter())
+        row = _bounds(c, None if no_inst else inst.get(key, set()))
+        row["states"] = {str(s): {**{x: v[x] for x in OUTS}, "clash_state": s in cstates.get((tk, fam), ())}
+                         for (t2, f2, s2, s), v in sorted(by_state.items(), key=lambda z: str(z[0]))
+                         if (t2, f2, s2) == key}
+        row["by_crest"] = {cr: _bounds(v, None if no_inst else inst_c.get(key + (cr,), set()))
+                           for (t2, f2, s2, cr), v in sorted(by_crest.items()) if (t2, f2, s2) == key}
         why = NEVER_TYPES.get(tk) or NEVER_FAMILIES.get((tk, fam)) or \
             ("body / movement family" if fam == "?" or fam.endswith(BODY_SUFFIX) else None) or \
-            (f"n {n} < {min_n}" if n < min_n else None)
-        row = {"n": n, **{x: c[x] for x in ("clash", "hit", "neither", "other_clash")},
-               "p_hit": round(c["hit"] / n, 4) if n else None, "p_fail": round(wilson_ub(c["hit"], n), 4),
-               "by_crest": {cr: dict(v) for (t2, f2, s2, cr), v in by_crest.items() if (t2, f2, s2) == (tk, fam, slot)}}
+            ("never clashed in the data" if has_state and not cstates.get((tk, fam)) else None) or \
+            (f"n_eff {row['n_eff']} < {min_n}" if row["n_eff"] < min_n else None)
         if why:
             left_out[f"{tk}|{fam}|{slot}"] = {**row, "why": why}
         else:
             p_fail[f"{tk}|{fam}|{slot}"] = row
+            used.add((tk, fam))
     return {"build": "1.0.30000", "rule": build_table.__doc__.split("\n\n")[0].replace("\n", " "),
             "min_n": min_n, "kind": kind, "p_fail": p_fail, "left_out": left_out,
+            "clash_states": {f"{tk}|{fam}": cstates[(tk, fam)] for tk, fam in sorted(used)} if has_state else {},
             "never_types": NEVER_TYPES, "never_families": {f"{a}|{b}": v for (a, b), v in NEVER_FAMILIES.items()}}
 
 
@@ -546,7 +650,10 @@ def main(argv: list[str] | None = None) -> int:
         tab["source"] = a.src
         Path(a.out).write_text(json.dumps(tab, indent=1) + "\n", encoding="utf-8")
         for k, v in tab["p_fail"].items():
-            print(f"{k:50s} n {v['n']:5d} clash {v['clash']:4d} hit {v['hit']:3d} p_fail {v['p_fail']}")
+            print(f"{k:50s} n {v['n']:5d} n_eff {v['n_eff']:5d} clash {v['clash']:4d} hit {v['hit']:3d} "
+                  f"p_clash_lb {v['p_clash_lb']} p_fail {v['p_fail']}")
+        for k, v in tab["clash_states"].items():
+            print(f"{k:40s} clash states {v}")
         return 0
     reach, fams, acc = Reach(), state_families(), new_acc()
     for src in a.src:
