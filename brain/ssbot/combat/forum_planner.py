@@ -78,8 +78,9 @@ R_UNMOD = 6                       # veto reason: presses a move the model does n
 ESC_LOCK_MODES = NO_CONTROL_MODES + (kin.M_RPR_DS, kin.M_DS_ANTIC, kin.M_DS_SPIKE, kin.M_HARD_LAND)
 ESC_MAX_F = 72                    # escape rollouts at most this long (frames)
 ESC_CHUNK = 2                     # safe rows per escape check batch
-ESC_NEAR_U = 14.0                 # an attack is looked at when its reach + this (the hero's travel over a plan and an
-#                                   escape, the enemy's) is past the hero
+ESC_NEAR_U = 9.0                  # an attack is looked at when its reach over the check + this (the hero's travel over a
+#                                   plan, the enemy's dead reckoning) is past the hero
+ESC_COUNTERS = frozenset({"RE_DEFEND", "MI_PARRY"})   # guard stances: their strike is the counter to a hit
 REASONS_FORUM = dict(REASONS) | {R_UNMOD: "unmodelled move (attack while dashing)"}
 SLOTS = ("normal", "up", "wall", "down")   # kernel slot order (_SHAPE_*)
 K_SIDE, K_UP, K_WALL, K_DOWN = 1, 2, 3, 4  # first_kind codes
@@ -115,7 +116,7 @@ class ForumConfig:
     #                               escape check: the chosen safe plan leaves the hero able to get out of the reach of
     #                               any attack an enemy may start at its end or at a late lock-in); "+c" / "+i" / "+p5"
     #                               extensions (multi_forecast.ReactConfig)
-    esc_k: int = 8                # safe rows (in the order) the escape check looks at for one that passes
+    esc_k: int = 4                # safe rows (in the order) the escape check looks at for one that passes
     esc_after_f: int = 18         # frames past an attack's first damage its escape path must stay out of it
 
     @property
@@ -549,18 +550,21 @@ class ForumPlanner(Planner):
             if tr is None or tr.pos is None:
                 continue
             for fam, d in by_type.get(s.type_key, ()):
+                if fam in ESC_COUNTERS:
+                    continue                      # a counter strikes only a hero hitting the guard (the hit branch's)
                 d_f = max((d - lat) / dt, 1.0)
                 if d_f + self.fcfg.esc_after_f > ESC_MAX_F:
                     continue                      # a strike this far off is the later ticks' (its wind-up only here)
                 ftid = mf.tables.key_id(fam, None, "anchor")
                 if ftid is None:
                     continue
-                r = reach.get(ftid)
-                if r is None:                     # the family template's farthest cell from its anchor (u)
-                    offs, nt, _ = mf.tables.store.bbox_table(int(ftid))
-                    b = mf.tables.store.bb_rows()[offs[0]:offs[0] + nt]
+                n_on = int(math.ceil(d_f)) + self.fcfg.esc_after_f
+                r = reach.get((ftid, n_on))
+                if r is None:                     # the family template's farthest cell from its anchor over the check
+                    offs, nt, t0 = mf.tables.store.bbox_table(int(ftid))
+                    b = mf.tables.store.bb_rows()[offs[0]:offs[0] + min(nt, n_on + 2 + int(round(-t0 / dt)))]
                     b = b[b[:, 0] <= b[:, 2]]
-                    r = reach[ftid] = float(np.abs(b).max()) if len(b) else 0.0
+                    r = reach[(ftid, n_on)] = float(np.abs(b).max()) if len(b) else 0.0
                 # out of reach even if the hero runs at it over the escape (the dead reckoning included)
                 ax = tr.pos[0] + tr.vel[0] * (f.origin_t - tr.seen_T)
                 ay = tr.pos[1] + tr.vel[1] * (f.origin_t - tr.seen_T)
@@ -571,8 +575,8 @@ class ForumPlanner(Planner):
         return out
 
     def _esc_cmds(self, L: int) -> np.ndarray:
-        """[8, L] escape commands: stay, run either way, a full jump in place or either way (the tails), a dash
-        either way then run."""
+        """[7, L] escape commands: stay, run either way, a full jump either way (the tails but the jump in place), a
+        dash either way then run."""
         c = getattr(self, "_esc_cache", None)
         if c is not None and c.shape[1] == L:
             return c
@@ -580,7 +584,7 @@ class ForumPlanner(Planner):
         d = np.zeros((2, L), np.int64)
         d[0], d[1] = kin.B_LEFT, kin.B_RIGHT
         d[:, :3] |= B_DASH
-        self._esc_cache = np.ascontiguousarray(np.concatenate([t, d]))
+        self._esc_cache = np.ascontiguousarray(np.concatenate([t[[0, 1, 2, 4, 5]], d]))
         return self._esc_cache
 
     def _escape_fail(self, f, start, hold, full, hold_end, r1, rows: np.ndarray, threats: list

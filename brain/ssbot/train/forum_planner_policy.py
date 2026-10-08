@@ -678,7 +678,9 @@ class ForumPlannerPolicy(PlannerPolicy):
         for x in self.hit_log:
             x["unpred"] = x["f"] in unpred_f
         modes = {k: v for k, v in self.counts.items() if not k.startswith("_")}
+        fc = self.planner.fcfg if self.planner is not None else None
         return {"view": self.view, "policy": "forum_planner", "k": 0, "modes": modes,
+                "fcfg": None if fc is None else {"forced_rank": fc.forced_rank, "react": fc.react},
                 "tick_ms_p50": q(self.tick_ms, 50), "tick_ms_p99": q(self.tick_ms, 99),
                 "plan_ms_p50": q(self.plan_ms, 50), "plan_ms_p99": q(self.plan_ms, 99),
                 "ticks": len(self.tick_ms), "late_ticks": sum(1 for x in self.tick_ms if x > 16.7),

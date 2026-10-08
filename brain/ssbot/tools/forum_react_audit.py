@@ -36,7 +36,9 @@ import numpy as np
 from ssbot.tools.forum_hit_forensics import K_SET, FramePolys, _mask_of, _own_ids, first_contact
 
 LAGS = (2, 3, 4, 12, 24, 36)
-CATS = ("start_attack", "start_idle", "entry", "committed", "chain", "hazard", "body", "death", "arena")
+CATS = ("start_attack", "start_idle", "entry", "committed_fine", "committed_window", "committed_bbox", "chain",
+        "hazard", "body", "death", "arena")
+COMMITTED = ("committed_fine", "committed_window", "committed_bbox")
 EXT = {"delay": "delay", "delay_c": "delay+c", "delay_i": "delay+i", "delay_ci": "delay+c+i",
        "delay_cip5": "delay+c+i+p5"}
 
@@ -45,7 +47,9 @@ def categories(fcast) -> dict[str, dict]:
     """Per category (CATS) the placement masks (fine pm / window wm / bbox bb) and box kinds of a MultiForecast:
     start_attack  a later instance of an attack family (not committed); start_idle  of the idle family (and the
     current idle instance without its tube); entry  the entry families and the next wave's entries; committed  the
-    current attacks, their re-anchors and tails (not a multi-hit family); chain  a committed multi-hit family
+    current attacks, their re-anchors and tails (not a multi-hit family), by placement kind (fine: entry known to a
+    few bins; window: an entry interval, the walk's hull; bbox: the family template from the start when the anchor is
+    not known, a re-anchor); chain  a committed multi-hit family
     (MULTI_HIT); hazard  thrown hazards (self templates, paths, hazard tubes); body  the idle body and collider
     tubes; death  death tails; arena  arena-wide boxes."""
     from ssbot.combat.multi_forecast import ENTRY_OWNER, MULTI_HIT
@@ -66,7 +70,8 @@ def categories(fcast) -> dict[str, dict]:
             elif sp is not None and fam == sp.idle_family:
                 c = "start_idle"
             elif com:
-                c = "chain" if (tk, fam) in MULTI_HIT else "committed"
+                c = "chain" if (tk, fam) in MULTI_HIT else \
+                    {"pm": "committed_fine", "wm": "committed_window", "bb": "committed_bbox"}[name]
             else:
                 c = "start_attack"
             cat[i] = c
@@ -113,9 +118,14 @@ def decompose_categories(fcast, cx, cy, t, live) -> dict:
             if c not in skip:
                 u |= occ[c]
         return int((~u.any(axis=1)).sum())
+    un = ("start_attack", "start_idle", "entry")
     return {"R": int(live.shape[0]), "clear": clear(), "share": round(float(full.sum() / tot), 3),
             "clear_wo_start": clear(("start_attack", "start_idle")),
-            "clear_wo_unstarted": clear(("start_attack", "start_idle", "entry")),
+            "clear_wo_unstarted": clear(un),
+            "clear_wo_unstarted_cwin": clear(un + ("committed_window",)),
+            "clear_wo_unstarted_committed": clear(un + COMMITTED),
+            "clear_wo_unstarted_committed_chain": clear(un + COMMITTED + ("chain",)),
+            "clear_body_hazard_only": clear(un + COMMITTED + ("chain", "death", "arena")),
             "cats": {c: [round(float(occ[c].sum() / tot), 3), round(float(occ[c][:, 0].sum() / tot1), 3),
                          clear((c,))] for c in CATS if occ[c].any()}}
 
