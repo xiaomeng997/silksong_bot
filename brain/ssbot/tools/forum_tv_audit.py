@@ -29,7 +29,10 @@ import sys
 from collections import Counter, defaultdict
 from pathlib import Path
 
+import numba
 import numpy as np
+
+from ssbot.combat.planner import _rect_meets_polys
 
 CHANGE_F = 6                      # two choices differ when their keys differ in the first this many frames
 PRE_HIT_F = 36                    # "pre_hit": ticks at most this many frames before a recorded hit (any kind of tick)
@@ -163,6 +166,54 @@ class Acc:
         return a
 
 
+@numba.njit(cache=True)
+def seen_contacts(box, inv, verts, starts, pbox, vel, tk, rows):
+    """The wave-0 forensics track's FORCED_RISK key "seen" (track diag, branch worktree-wf_fa16f06f-127-8: ForumConfig
+    .forced_rank, forum.md 19), re-implemented here to compare it with commit_rank on the same ticks: per row, the
+    frames 1 .. T1 - 1 its nominal box (invulnerable frames clear) meets a damage polygon seen now moved along its
+    entity's velocity, and the first such frame (T1: none)."""
+    N, T1 = box.shape[0], box.shape[1]
+    n_p = len(starts) - 1
+    cnt = np.zeros(N, np.int64)
+    first = np.full(N, T1, np.int64)
+    for m in range(len(rows)):
+        c = rows[m]
+        for k in range(1, T1):
+            if inv[c, k]:
+                continue
+            x0, y0, x1, y1 = box[c, k, 0], box[c, k, 1], box[c, k, 2], box[c, k, 3]
+            for p in range(n_p):
+                dx, dy = vel[p, 0] * tk[k], vel[p, 1] * tk[k]
+                if pbox[p, 0] + dx > x1 or pbox[p, 2] + dx < x0 or pbox[p, 1] + dy > y1 or pbox[p, 3] + dy < y0:
+                    continue
+                if _rect_meets_polys(x0, y0, x1, y1, verts, starts[p:p + 2], dx, dy):
+                    cnt[c] += 1
+                    if first[c] == T1:
+                        first[c] = k
+                    break
+    return cnt, first
+
+
+def seen_polys(ws):
+    """Every entity's active damage polygons now with its velocity (verts, starts, bounding boxes, velocities)."""
+    vs, st, bb, vel = [], [0], [], []
+    for e in getattr(ws, "entities", None) or ():
+        polys = [b.poly for b in e.dmg_boxes if b.active and len(b.poly) >= 3]
+        if not polys:
+            continue
+        v = e.vel.v if getattr(e.vel, "conf", 1.0) > 0 else (0.0, 0.0)
+        for poly in polys:
+            a = np.asarray(poly, np.float64).reshape(-1, 2)
+            vs.append(a)
+            st.append(st[-1] + len(a))
+            bb.append((a[:, 0].min(), a[:, 1].min(), a[:, 0].max(), a[:, 1].max()))
+            vel.append((float(v[0]), float(v[1])))
+    if not vs:
+        return np.zeros((0, 2)), np.zeros(1, np.int64), np.zeros((0, 4)), np.zeros((0, 2))
+    return (np.ascontiguousarray(np.concatenate(vs)), np.array(st, np.int64), np.array(bb, np.float64),
+            np.array(vel, np.float64))
+
+
 def contact_scores(ls: dict, f, allowed: np.ndarray, frame_time: float) -> dict[str, np.ndarray]:
     """Per row (higher = less contact), on stage 1's frames and the nominal box centre: the committed support's share
     of frames in contact ("P_com": current attacks, tails, death tails, hazards), the fine placements' ("P_fine": the
@@ -185,6 +236,20 @@ def contact_scores(ls: dict, f, allowed: np.ndarray, frame_time: float) -> dict[
     v = np.zeros(N)
     v[allowed] = -f.prob(cx, cy, tk)
     out["prob"] = v
+    ws = getattr(getattr(f, "_fc", None), "_ws", None)
+    sn, sf = np.zeros(N), np.zeros(N)
+    if ws is not None:
+        verts, starts, pbox, pvel = seen_polys(ws)
+        if len(pbox):
+            T1 = box.shape[1]
+            cnt, fst = seen_contacts(np.ascontiguousarray(box, np.float64),
+                                     np.ascontiguousarray((ls["flags"] & __import__(
+                                         "ssbot.knowledge.kinematics", fromlist=["F_INVULN"]).F_INVULN) != 0),
+                                     verts, starts, pbox, pvel, np.arange(T1, dtype=np.float64) * frame_time,
+                                     np.ascontiguousarray(allowed, np.int64))
+            sn[allowed], sf[allowed] = -cnt[allowed], fst[allowed]
+    out["seen_n"] = sn                  # higher = better: minus the frames in contact, the first contact frame
+    out["seen_f"] = sf
     return out
 
 
@@ -234,7 +299,8 @@ def _audit_tick(pol, fo: int, boxes: dict, a: "Acc", ls: dict):
     f = pol.forecasts[-1][1]
     extra = contact_scores(ls, f, allowed, pol.params.frame_time) if len(allowed) else {}
     for k, v in extra.items():
-        alts[k + "_first"] = order_of(ls, J, first="X", extra=v, presel=False)
+        if k != "seen_f":
+            alts[k + "_first"] = order_of(ls, J, first="X", extra=v, presel=False)
     for k, oo in alts.items():
         if len(oo) and not same_keys(cmd, int(oo[0]), int(o[0])):
             a.changed[k] += 1
