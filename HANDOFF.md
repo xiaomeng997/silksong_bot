@@ -3101,3 +3101,38 @@ on, L2 on, terminal value off, T 36). Runs `C:\ssbot\data\runs\m2\20261008_10455
    dodges well; the lead's call (DESIGN 3.5.6 / the kill rule), not changed here.
 6. Frozen checkouts made here: `C:\ssbot\live_int_41c4bd4` (main, for the Bell Beast identity) can go;
    `C:\ssbot\live_int_6c160ac` is the smoke's. The tracks' own frozen checkouts are listed in their sections.
+
+## Task wave-0 de-saturation (branch worktree-wf_34e9717f-fa3-2, 2026-10-08; forum.md §23)
+
+Main 70f8324 + `forum-integration-1008` (6dce435) merged first. Work in progress; this section is rewritten at the end
+of the task.
+
+### Done (committed)
+
+- `tools/forum_layer_audit` (b75b63a): the support split into layers (bodies, committed fine / window / family-wide /
+  bbox / tail / chain, not-started, hazards, death, arena) over the planner's candidate rows on recorded ticks;
+  leave-one-out at level 1 (not-started gone), margins x0 / x0.5, idle growth x0 / x0.5, the +-1 bin lag, a greedy
+  peel. Output `C:\ssbot\data\m2_forum_w0d\layers\` (30 Wanderer episodes of the reactive A/B, seen_cf + escape).
+- Switches (all off by default except the kill-freeze fix):
+  - `SSBOT_FORUM_REACT` extensions `+n` (attacks not started out of the support, the escape check over every lock-in,
+    pins / bells not thrown yet only their reaction-window reach, a throw family's templates replaced by its body tube
+    and its hazards' paths in the oracle view), `+g` (the idle tube's growth held after the 5-frame reaction window),
+    `+l` (light cone: the escape check also asks the plan's end for a way out of the committed must-escape fine
+    placements past the horizon).
+  - `combat_run --forum-clash main`: the clash pass also in a YELLOW at h >= 3, clean clash rows safe on the clash
+    geometry with the hit-anyway bound <= 0.3, ranked after the plain safe rows; seen keys skip a clash row's parry
+    i-frames; clash depth 3.
+  - `SSBOT_FORUM_MARGIN=state`: per-state support margins (`tools/forum_state_margins`, knowledge
+    `support_margins_state.json`: the largest held-out residual per Control state, >= 100 contacts else the family's).
+  - `SSBOT_FORUM_KF` (default `kill`): `kill_freeze_s` counts only the kill's own freezes (the Clapper's death slow
+    motion); `any` = before (every wave-0 type had a 0.4 s "kill freeze" from the hero's NailClashEffect /
+    StartRecoil, so YELLOW's kill rule withheld every slash that might finish an enemy).
+  - Hit-back bells (no switch): a bell after Tink / Nail Hit is no hazard to the hero; the planner's own redirect
+    leaves it harmless from the hit on.
+- `multi_recall --react / --state-margins` for the R2 held-out recall on these supports.
+
+### Running
+
+- Live A/B round 1 (`C:\ssbot\sandbox\w0d_live.ps1`, frozen `C:\ssbot\live_w0d_016417b`, instances 0-3, locks
+  `w0d`, manifest `C:\ssbot\sandbox\w0d_manifest_a.txt`): int (seen_cf + escape + clash on, KF any) / intk (KF kill)
+  / new (escape+n+g+l, clash main, KF kill).
