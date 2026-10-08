@@ -1884,6 +1884,54 @@ PDT, commits 6921f95, 76d5b36, 8148fd4, 2e11ffe):
   harness's own Pause cause is an assert added to test_pause_cause, not a new test). Full suite at 8148fd4: 1155 passed, 3 skipped, 1 xfailed (NUMBA_NUM_THREADS 4, below-normal
   priority).
 
+Round 2 fixer (2026-10-08 04:00 - , commits 3b18248, 772dfe8, ef67b89, f0dba93 and on), after the verifier:
+- `combat_run.ready_for_episode` / `after_episode` (out of the worker loop, so they are tested): a pause still showing
+  before an episode is resumed before set_time_scale; still paused -> that episode is NOT run (it would have run
+  without the time scale set when its own start resume worked), its row is HARNESS_FAIL "still paused before the
+  episode (...)" with time_scale_game None, and the 5-in-a-row stop ends a worker that cannot recover. After the row:
+  real quit -> back_into_slot; HARNESS_FAIL -> after_harness_fail (exceptions logged).
+- Worker-loop tests: `combat_run.main(["_worker", ...])` on the stand-in game (OracleLink / run_episode / make_policy
+  patched): watchdog pause -> after_harness_fail resumes -> next episode at time scale 1.0; after_harness_fail doing
+  nothing -> ready_for_episode resumes (the 015907 path); a pause no resume leaves -> no run_episode, 5 rows, stop, no
+  SystemExit. Plus ready_for_episode by place, PauseWatch. test_harness_recovery.py: 33 (+6).
+- `recovery.PauseWatch` (on FightTap / GauntletTap as `tap.pause`): the cause of "paused unasked" comes from the
+  pause's first STATE. Oracle fact (ActionScheduler.Accept): a stale ACTION (> 3 frames late) is dropped before
+  EndLost and does NOT clear BrainLost; 015907's act.lost went false at 12361289 on run_episode's closing zero ACTION
+  / input.release, after the loop had read the pause, so the loop's STATE was never one frame from a wrong cause (the
+  verifier's reading); PauseWatch is insurance. The watchdog's 250 ms counts from the last ACTION received (stale
+  ones too), its 6 frames from the last accepted.
+- `AttemptRecord.start_resume`: the taps of the episode start's resume (the live check's episode_settings now shows
+  them).
+- 10-08 after 03:00 (1228 rows to 04:02): 4 more HARNESS_FAILs, all old code. 3 watchdog pauses that died exactly like
+  015907 (time_scale 0.0, "not collecting"): 034416 i0 ep5 and 034525 i1 ep6 in the same second (03:48:02), 034808 i1
+  ep0 (03:49:18); last ACTION 25 / 28 / 15 frames before the first paused STATE; no long planner decision logged
+  (max 17 ms) and STATE latency up from 0.8 to 4-11 ms: a machine-level stall like 10-04 21:01:15, not a planner path.
+  1 wave-start savestate timeout (031851 i3). pause_quit.md 11.1.
+- `recovery_check`: worker_pause / worker_norecover run `combat_run.worker` itself on the probe's link (_Shared, no
+  second connection), title_items maps the title's main menu (Down x1..4 + Enter, Up x1 + Enter: does it wrap?).
+- Full suite (tree at f0dba93 minus comments): 1160 passed, 3 skipped, 1 xfailed, 1 failed = the known timing budget
+  test_hitbox_tables::test_support_query_matches_reference_and_meets_the_budget (3.93 ms > 3 ms: run pinned to the
+  E-cores at below-normal priority); it passes alone (2.5 s).
+- Process safety (round 1, disclosed then): at ~01:00 PDT round 1 ran Stop-Process -Force on pids 32988 and 58000
+  (sleep.exe), thinking 32988 was its own finished pytest; the pid had been reused, so another session's wait loop
+  was probably killed. If a track's wait script vanished around 10-08 01:00, that is why. Rule followed since: stop
+  only what this session started, through its STOP file or TaskStop, and check Win32_Process CreationDate /
+  CommandLine before touching a pid. Round 2's dev left `tail -n +1 -f ...live_20261008_033740_i4.log` running (pid
+  44972, started 03:37:44, parent 52292): harmless, not started by this session, left alone; its session should stop
+  it.
+- Live check NOT run this round: instance 4 has been locked by routes since 04:07 for a 4-hour Lace2 data collection
+  (run 20261008_040729_Lace2_data, worker pid 51860, frozen C:\ssbot\live_rb4_2f74075, until ~08:07), and 0-3 are
+  locked by diag / r6rules / r8. Waited 04:12 - 04:47, then stopped waiting (no lock was taken). Ready to run (frozen
+  checkout C:\ssbot\live_recov_ef67b89, CODE_REV ef67b89, venv built; its code equals the branch head, later commits
+  touch comments / docs / tests only), through the lock, about 5 min:
+    cd C:\ssbot\live_recov_ef67b89\brain
+    ..\scripts\uv.cmd run python -m ssbot.probes.recovery_check --instance 4 --cases worker_pause,worker_norecover,title_items,episode_settings,brain_lost
+  It writes C:\ssbot\sandbox\recovery_check\<time>_i4.json (worker rows under recovery_check\worker_*). worker_pause /
+  worker_norecover check the worker path live (rows: ep0 HARNESS_FAIL "paused unasked ... (a Pause key in the
+  harness's own ACTION ...)", ep1 not HARNESS_FAIL with time_scale_game 1.0; the log shows "after the harness
+  failure: ..." or "paused before the episode (...): unpaused"). title_items answers the open TITLE_ITEM question
+  below. Afterwards instance 4 is in the sandbox slot / Bell Beast savestate: tell routes to reload its own state.
+
 Next / open issues:
 1. The watchdog pauses come from fight-loop stalls >= 250 ms; loop_gap_ms in the summaries will show where. Reducing
    them (planner warm-up, CPU sharing) is not done here. The latest (015907) was one 1.6 s planner decision on a
@@ -1894,3 +1942,10 @@ Next / open issues:
    MenuError costs a few seconds.
 4. load_slot after Esc back from a title sub-menu always pays one MenuError (the highlight stays on the item it came
    from); an Up before the Enter would save ~6 s but needs each sub-menu's menuState mapped to its main-menu item.
+5. recovery.TITLE_ITEM (Up count after a MenuError) assumes the main menu lists Start Game / Options / Achievements /
+   Extras / Quit and only Options (Up x1) is verified live. If the list does not wrap, Up x4 always reaches Start
+   Game and is the robust choice; if it wraps and an item is hidden, the count overshoots and the same MenuError can
+   repeat until SLOT_TRIES (3) runs out (no setting is changed). The live case title_items measures both; change
+   _unstick after it, not before.
+6. The live re-check of this round's worker path (worker_pause / worker_norecover) is pending (see above); the unit
+   tests cover it on the stand-in game.
