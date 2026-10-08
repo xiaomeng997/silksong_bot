@@ -40,7 +40,10 @@ Per tick (the lexicographic order and every rule of Planner.tick unless named he
               forced_rank "seen" (forum.md §19) puts a key before that share, in the preselection too: the frames
               each row's nominal box meets the damage colliders seen now, moved along their entity's velocity
               (seen_contacts; fewest first, then the latest first contact). In wave 0 the support saturates (every
-              row in it on every frame) and the share ties: the pick then fell to J.
+              row in it on every frame) and the share ties: the pick then fell to J. "seen_cf" adds, after it, the
+              share of stage 1's frames in the committed fine placements (committed_fine_share: an attack under way
+              whose entry is known to a few bins, its strike at its anchor; the windows and the start-later boxes,
+              which saturate, are left out): the strikes that open after their antic, which "seen" cannot see yet.
   determinism deadline_ms = inf: decisions do not depend on the machine's speed (audits, identity checks).
   unmodelled  a row that presses attack while dashing / sprinting is vetoed (the Reaper's dash stab is R7's).
   not here    the lock check past the horizon (no Silkspear in the Forum set; the Bind macro checks its own), the key
@@ -99,7 +102,9 @@ class ForumConfig:
     #                               placement kind and probability value) instead of the share of frames in contact
     forced_rank: str = "share"    # FORCED_RISK's first risk key: "share" (the support share, above), "seen" (frames in
     #                               contact with the damage colliders seen now, moved along their entity's velocity,
-    #                               then the share; forum.md §19: the support saturates in wave 0 and the share ties)
+    #                               then the share; forum.md §19: the support saturates in wave 0 and the share ties),
+    #                               "seen_cf" (seen, then the share of frames in the committed attacks' fine
+    #                               placements: the strikes of attacks already under way whose entry is known)
 
 
 @dataclass
@@ -189,6 +194,23 @@ def seen_contacts(box, inv, verts, starts, pbox, vel, tk, rows, grow):
                         first[c] = k
                     break
     return cnt, first
+
+
+def committed_fine_share(f, box: np.ndarray, inv: np.ndarray, rows: np.ndarray, fr: np.ndarray,
+                         tk: np.ndarray) -> np.ndarray:
+    """[len(rows)] the share of the frames fr each row's nominal box centre spends in the committed fine placements
+    (MultiForecast.pm["committed"]: the current attacks' templates at their anchor, entry known to FINE_MAX_BINS),
+    invulnerable frames clear; zeros without such placements (or for a forecast without them)."""
+    pm = getattr(f, "pm", None)
+    out = np.zeros(len(rows))
+    if pm is None or not len(rows) or not len(pm.get("owner", ())):
+        return out
+    sel = np.asarray(pm["committed"], bool)
+    if not sel.any():
+        return out
+    b = box[rows][:, fr]
+    occ = f._fine_occ(0.5 * (b[..., 0] + b[..., 2]), 0.5 * (b[..., 1] + b[..., 3]), tk[fr], sel) & ~inv[rows][:, fr]
+    return occ.mean(axis=1)
 
 
 def seen_polys(ws) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
@@ -670,19 +692,23 @@ class ForumPlanner(Planner):
         forced = not safe.any() and not (bind_res is not None and bind_res[0])
         Pc = np.zeros(N)
         t_c = np.full(N, T1, np.int64)
-        sk_n = np.zeros(N, np.int64)          # the "seen" key (0 on every row otherwise: the order is unchanged)
+        sk_n = np.zeros(N, np.int64)          # the "seen" keys (0 on every row otherwise: the order is unchanged)
         sk_f = np.full(N, T1, np.int64)
+        sk_c = np.zeros(N)
         sel = ok & known
         if forced and sel.any():
             cand = np.flatnonzero(sel)
-            if fcfg.forced_rank == "seen":
+            if fcfg.forced_rank in ("seen", "seen_cf"):
+                inv1 = (r1.flags & F_INVULN) != 0
                 verts, starts, pbox, pvel = seen_polys(ws)
                 if len(pbox):
-                    cnt, fst = seen_contacts(np.ascontiguousarray(r1.box, np.float64), np.ascontiguousarray(
-                        (r1.flags & F_INVULN) != 0), verts, starts, pbox, pvel, np.ascontiguousarray(tk, np.float64),
-                        np.ascontiguousarray(cand, np.int64), 0.0)
+                    cnt, fst = seen_contacts(np.ascontiguousarray(r1.box, np.float64), np.ascontiguousarray(inv1),
+                                             verts, starts, pbox, pvel, np.ascontiguousarray(tk, np.float64),
+                                             np.ascontiguousarray(cand, np.int64), 0.0)
                     sk_n[cand], sk_f[cand] = cnt[cand], fst[cand]
-                cand = cand[np.lexsort((-J[cand], -t_hit[cand], -sk_f[cand], sk_n[cand]))][:fcfg.p_k]
+                if fcfg.forced_rank == "seen_cf":
+                    sk_c[cand] = committed_fine_share(f, r1.box, inv1, cand, fr, tk)
+                cand = cand[np.lexsort((-J[cand], -t_hit[cand], sk_c[cand], -sk_f[cand], sk_n[cand]))][:fcfg.p_k]
             else:
                 cand = cand[np.lexsort((-J[cand], -t_hit[cand]))][:fcfg.p_k]
             # the candidates on one lane over one frame set: the nominal box's centre against the support on stage
@@ -730,7 +756,7 @@ class ForumPlanner(Planner):
                 mkeep[N - 1] = True
             # FORCED_RISK: the least share in contact, the latest first contact on the nominal lane, then on the
             # envelope (rows clear on the nominal lane), J (a tick with a safe row: those rows all tie on these)
-            order = np.lexsort((-J, -t_hit, -t_c, Pc, -sk_f, sk_n, ~V, ~mkeep, ~keep, S, U, hz_soft, hz))
+            order = np.lexsort((-J, -t_hit, -t_c, Pc, sk_c, -sk_f, sk_n, ~V, ~mkeep, ~keep, S, U, hz_soft, hz))
             order = order[sel[order]]
             i = int(order[0])
             tail_ok = None
@@ -788,7 +814,8 @@ class ForumPlanner(Planner):
                           "uncapped": budget.get("uncapped", 0),
                           "S": S, "Hz": hz, "U": U, "core_mask": core, "env": env, "Pc": Pc, "t_c": t_c,
                           "cand": sel if forced else np.zeros(N, bool), "hit_occ": hit_occ,
-                          "seen": int(sk_n[res.idx]) if res.idx >= 0 else None}
+                          "seen": int(sk_n[res.idx]) if res.idx >= 0 else None,
+                          "seen_cf": round(float(sk_c[res.idx]), 3) if res.idx >= 0 else None}
         if self.debug:
             self.last_info["dbg"] = {"box": r1.box, "flags": r1.flags, "mode": r1.mode, "latched": latched, "P": P,
                                      "J": J, "ok": ok, "known": known, "t_hit": t_hit, "V": V, "keep": keep,

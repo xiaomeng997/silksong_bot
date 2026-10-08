@@ -5,7 +5,7 @@ recorded future would have left untouched existed, and whether the hero moved as
     cd brain
     ../scripts/uv.cmd run python -m ssbot.tools.forum_hit_forensics C:/ssbot/data/runs/m2/<run> [<run> ...]
         --out <dir> [--episodes 0,3] [--instances 1] [--every 3] [--workers 3] [--threads 4] [--deadline-ms inf]
-        [--forced-rank share|seen]
+        [--forced-rank share|seen|seen_cf]
 
 Per episode the recording is replayed open loop through ForumPlannerPolicy (as tools.forum_policy_replay: the recorded
 STATEs drive it, the supervisor never takes the keys; the prefix of each tick is the recorded ACTION masks, so every
@@ -604,7 +604,7 @@ def main(argv=None) -> int:
     ap.add_argument("--workers", type=int, default=1)
     ap.add_argument("--threads", type=int, default=4)
     ap.add_argument("--deadline-ms", type=float, default=math.inf)
-    ap.add_argument("--forced-rank", default="share", choices=("share", "seen"),
+    ap.add_argument("--forced-rank", default="share", choices=("share", "seen", "seen_cf"),
                     help="the replayed planner's ForumConfig.forced_rank (its picks are 'replay')")
     a = ap.parse_args(argv)
     a.out.mkdir(parents=True, exist_ok=True)

@@ -268,6 +268,8 @@ def test_the_policy_reads_the_forced_rank_switch(monkeypatch):
     assert ForumPlannerPolicy._fcfg().forced_rank == "share" == ForumConfig().forced_rank
     monkeypatch.setenv("SSBOT_FORUM_FR", "seen")
     assert ForumPlannerPolicy._fcfg().forced_rank == "seen"
+    monkeypatch.setenv("SSBOT_FORUM_FR", "seen_cf")
+    assert ForumPlannerPolicy._fcfg().forced_rank == "seen_cf"
     monkeypatch.setenv("SSBOT_FORUM_FR", "bogus")
     with pytest.raises(ValueError):
         ForumPlannerPolicy._fcfg()
@@ -314,6 +316,32 @@ def test_seen_rank_takes_the_row_clear_of_a_collider_coming_at_the_hero(params, 
         assert cnt[rows].max() > 0                     # standing still is met
         assert pl.last_info["seen"] == cnt[rows].min() == cnt[r.idx]
     assert n_forced > 0
+
+
+def test_seen_cf_then_takes_the_row_least_in_the_committed_strike(params, arena):
+    """"seen_cf": no damage collider seen (the stab not out yet), the committed stab's fine placements decide: the pick
+    has the least share of stage 1's frames in them among the known rows."""
+    from ssbot.combat.forum_planner import committed_fine_share
+    n_checked = 0
+    for x in (30.6, 31.0, 31.6, 32.0):
+        mf = _reed_forecaster(10, frames=12)
+        f = mf.forecast(0.8)
+        if not np.asarray(f.pm["committed"], bool).any():
+            continue
+        pl = ForumPlanner(params, arena, PlannerConfig(T=36, threads=2, variants="bounds_lo"),
+                          ForumConfig(deadline_ms=math.inf, chunk=16, forced_rank="seen_cf"))
+        pl.debug = True
+        r = pl.tick(_world(x), kin.initial_state(params, x, FLOOR + params.foot), kin.HoldState.idle(1),
+                    np.zeros(1, np.int64), f, _prefs(), _ctx())
+        if not r.forced_risk:
+            continue
+        dbg = pl.last_info["dbg"]
+        rows = np.flatnonzero(dbg["ok"] & dbg["known"])
+        cf = committed_fine_share(f, dbg["box"], (dbg["flags"] & kin.F_INVULN) != 0, rows, dbg["fr"], dbg["tk"])
+        assert cf.max() > cf.min()                       # the strike separates the rows
+        assert pl.last_info["seen_cf"] == round(float(cf.min()), 3)
+        n_checked += 1
+    assert n_checked > 0
 
 
 # ---- hit reactions ----

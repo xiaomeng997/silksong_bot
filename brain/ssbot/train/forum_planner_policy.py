@@ -126,11 +126,11 @@ class ForumPlannerPolicy(PlannerPolicy):
 
     @staticmethod
     def _fcfg() -> ForumConfig:
-        """ForumConfig with the A/B switch SSBOT_FORUM_FR: FORCED_RISK's first risk key, "share" (default) or "seen"
-        (ForumConfig.forced_rank; forum.md §19)."""
+        """ForumConfig with the A/B switch SSBOT_FORUM_FR: FORCED_RISK's first risk key, "share" (default), "seen" or
+        "seen_cf" (ForumConfig.forced_rank; forum.md §19)."""
         fr = os.environ.get("SSBOT_FORUM_FR", "share").strip().lower() or "share"
-        if fr not in ("share", "seen"):
-            raise ValueError(f"SSBOT_FORUM_FR={fr!r}: share | seen")
+        if fr not in ("share", "seen", "seen_cf"):
+            raise ValueError(f"SSBOT_FORUM_FR={fr!r}: share | seen | seen_cf")
         return ForumConfig(forced_rank=fr)
 
     # ---- warm-up ----
@@ -649,7 +649,7 @@ class ForumPlannerPolicy(PlannerPolicy):
                "triggers": list(r.decision.triggers), "unpred": unpred, "ms": round(res.t_ms.get("total", 0.0), 3),
                "kill_hp": kill_hp, "ykill": ykill, "kill_prims": sorted(p.name for p in r.decision.kill_prims),
                "fi": {k: li.get(k) for k in ("posture", "N", "stage1_pass", "enveloped", "hitfx", "react", "capped",
-                                             "cut", "overrun", "seen")},
+                                             "cut", "overrun", "seen", "seen_cf")},
                "pocket": self.tac.last.get("pocket_veto"), "subj": subj}
         hit = any(ev.get("k") in ("damage", "catastrophe", "would_die") for ev in s.get("ev") or ())
         event = hit or streak or (r.decision.pause_pending and self.counts["_pend_logged"] == 0)
