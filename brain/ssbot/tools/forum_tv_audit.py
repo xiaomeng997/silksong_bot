@@ -17,7 +17,12 @@ still among the p_k preselected, so the decisions are the live ones). Per tick, 
   hindsight  every allowed known row's nominal hero box against the recording's own threat colliders (enabled, can
              cause damage; their AABBs) on the same frames, the row's invulnerable frames skipped: clear = no overlap in
              the horizon. The enemies are the recording's (they reacted to the recorded hero, not to the row), so this
-             is an estimate. Shares of ticks with a clear row, with each ranking's choice clear, and per key the
+             is an estimate, and a biased one: the live ranking's choice is mostly the recorded path, the one the
+             threats aimed at, so rows near it are judged unsafe more often (before hits the live choice is clear
+             less often than a random allowed row: forum.md 17.11). Compare rankings with the random row's share
+             ("random": the tick's share of clear allowed rows, averaged over ticks), not with the live choice; a key
+             that tracks the recorded path (J0) gets an AUC below 0.5 without being harmful. Shares of ticks with a
+             clear row, with each ranking's choice clear, and per key the
              within-tick AUC for clear rows (Mann-Whitney over the tick's allowed rows, pooled by pair count; 0.5: no
              information). Scores besides the planner's keys: the committed support's / the fine placements' share
              (P_com, P_fine: commit_rank), MultiForecast.prob, and the wave-0 forensics track's "seen" key (seen_n /
@@ -272,6 +277,7 @@ def _audit_tick(pol, fo: int, boxes: dict, a: "Acc", ls: dict):
     a.n["rows"] += len(allowed)
     a.n["clear_rows"] += int(clr[allowed].sum())
     a.clear["any"] += bool(clr[allowed].any())
+    a.clear["random"] += float(clr[allowed].mean())
     a.clear["chosen"] += bool(clr[chosen])
     for k, oo in alts.items():
         if len(oo):
