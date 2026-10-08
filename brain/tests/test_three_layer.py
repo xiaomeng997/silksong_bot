@@ -205,6 +205,30 @@ def test_light_cone_switch_and_its_layer(params, arena):
     assert not pl._light_cone_occ(f, X, Y, tk)[0].any()
 
 
+def test_aimed_pins_hit_the_row_that_stays_where_it_was_aimed_at(params, arena):
+    """"+a": a pin released at 0.2 s from a Reed at (30, 4) is aimed at where each row is 20 frames before (here: now,
+    the release is within the aim lag): a row standing at (20, 4) meets it about 0.3 s later, a row that has jumped
+    5 u above by then does not (the 15 deg rays stay below it); a row on the far side is aimed at too."""
+    from types import SimpleNamespace
+    assert ForumConfig(react="escape+n+a").pin_aim and not ForumConfig(react="escape+n").pin_aim
+    pl = ForumPlanner(params, arena, PlannerConfig(T=36, threads=2, variants="bounds_lo"),
+                      ForumConfig(react="escape+n+a"))
+    T1 = 37
+    box = np.zeros((3, T1, 4))
+    for i, (x0, dy) in enumerate(((20.0, 0.0), (20.0, 5.0), (40.0, 0.0))):
+        y = 4.0 + np.clip(np.arange(T1) - 2, 0, None) * dy / 10.0
+        y = np.where(np.arange(T1) > 12, 4.0 + dy, y) if dy else y
+        box[i, :, 0], box[i, :, 2] = x0 - 0.25, x0 + 0.25
+        box[i, :, 1], box[i, :, 3] = y - 1.04, y + 1.04
+    r1 = SimpleNamespace(box=box, flags=np.zeros((3, T1), np.int64))
+    tk = np.arange(T1) * BIN
+    pins = [((30.0, 4.0), (0.0, 0.0), 0.0, np.array([12 * BIN]))]
+    first = pl._pin_contacts(pins, r1, np.arange(3), tk, True)
+    assert first[0] >= 12 and first[0] < T1
+    assert first[2] >= 12                     # aimed at it too (behind the Reed means toward +x here)
+    assert first[1] == -1
+
+
 def test_state_margins_dilate_a_state_by_its_own_residual():
     """forum.md §23: with the per-state margins a per-state template takes its state's held-out residual (EN_CHARGE
     Charge End 0.40 u instead of the family's 2.96 u, set by its Charge), the family-wide and tail ones the family's."""

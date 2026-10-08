@@ -105,6 +105,17 @@ PARRY_INVULN_F = 9                # INVUL_TIME_PARRY 0.15 s: parryInvulnTimer, s
 #                                   deltaTime in Update, is > 0 on that frame and the 8 after: no enemy damage there
 PARRY_RECOVER_F = 6               # NailParryRecover 0.1 s after the clash: attack cooldown 0, the swing cancelled
 CLASH_FILE = "clash.json"
+# the aimed pins (ForumConfig.pin_aim, "+a"; forum.md §23.7, 115 pins of the round-2 runs): a Reed's pin flies on the
+# frame it enters Throw, from about 1.6 u off it at 31 u/s, aimed at where the hero was about 20 frames before
+# (angle p50 5 deg, p90 18 deg, max 55 deg)
+PIN_THROWS = frozenset({("Song Reed", "RE_THROW")})
+PIN_RELEASE = "Throw"
+PIN_AIM_F = 20
+PIN_SPREAD = tuple(math.radians(a) for a in (-15.0, 0.0, 15.0))
+PIN_SPAWN_U = 1.6
+PIN_SPEED = 31.0
+PIN_HALF_U = 1.0                  # the pin's box is about 2.0 x 0.1, along its flight
+PIN_SKIN = 0.15
 # The Forum attacks whose Control FSM catches PARRIED, by the Control state the clash meets (forum.md 9 / 17.5: Envoy
 # Charge / Reset -> Deflect -> Charge End 0.42 s; Reed Parry Slash -> Multihit Clashed 0.39 s -> Parry Slash End
 # 0.33 s; the R1 v2 recordings: 171 Envoy clashes all in Charge, 24 Reed counter clashes all in Parry Slash): a clash
@@ -236,6 +247,13 @@ class ForumConfig:
         return "n" in self.react.strip().lower().split("+")[1:]
 
     @property
+    def pin_aim(self) -> bool:
+        """"+a": a Reed's pin not thrown yet is checked per row, aimed at where that row puts the hero PIN_AIM_F
+        frames before each possible release (ForumPlanner._pin_contacts, forum.md §23.7); with "+n" its throw is
+        otherwise only its body and the pin's path once it flies."""
+        return "a" in self.react.strip().lower().split("+")[1:]
+
+    @property
     def light_cone(self) -> bool:
         """"+l" (escape only): the escape check also asks that the plan's end has a way out of the committed
         must-escape placements with a known timing past the horizon (ForumPlanner._light_cone_occ, forum.md §23)."""
@@ -285,6 +303,8 @@ class EnvelopeAudit:
     clash_partial: int = 0        # rows in FORCED_RISK's ranking with their branch's share (partial, or w below min_p)
     clash_partial_chosen: int = 0 # chosen FORCED_RISK plans that are such rows
     clash_ms: float = 0.0         # time in the clash branch
+    pin_ticks: int = 0            # ticks with an aimed-pin threat (pin_aim)
+    pin_rows: int = 0             # ... rows it set S = 1
 
     def as_dict(self) -> dict:
         return dict(self.__dict__)
@@ -1085,6 +1105,80 @@ class ForumPlanner(Planner):
                     labels[cps[m][0]].append("light cone")
         return fail, labels
 
+    # ---- the aimed pins (pin_aim, forum.md §23.7) ----
+
+    def _pin_threats(self, f, tk: np.ndarray) -> list[tuple]:
+        """The Reed throws under way whose pin is not out yet (oracle view): (Reed position, velocity, age of the
+        sighting, release times [s from the origin: the walk's Throw entry window inside the horizon, every 2 frames])."""
+        from ssbot.combat.multi_forecast import BIN as MBIN, DWELL_SLACK_S, WALK_CAP_S
+        from ssbot.core.worldstate import ORACLE
+        mf = getattr(f, "_fc", None)
+        if mf is None or not hasattr(mf, "trackers") or mf.view != ORACLE:
+            return []
+        T0 = float(f.origin_t)
+        t_end = float(tk[-1])
+        dt = self.params.frame_time
+        out = []
+        for tr in mf.trackers.values():
+            c = tr.cur
+            if tr.dead or not tr.in_play or tr.pos is None or c is None or (tr.tk, c.family) not in PIN_THROWS:
+                continue
+            fam = tr.table.families.get(c.family)
+            if fam is None or tr.state not in fam.states or tr.state == PIN_RELEASE or tr.t_entry is None:
+                continue
+            dw = tr.table.dwell.get(tr.state)
+            age = T0 - tr.t_entry
+            overdue = dw is not None and (age > dw[1] + DWELL_SLACK_S or age + f.horizon + MBIN > WALK_CAP_S)
+            cur_nodes, _ = mf.walks.get(tr.table, tr.state, (c.family, c.start), tr.dead, overdue)
+            ref = T0 if overdue else tr.t_entry
+            for nd in cur_nodes:
+                if nd.state != PIN_RELEASE or nd.current:
+                    continue
+                lo, hi = max(ref + nd.lo - T0, MBIN), ref + nd.hi - T0
+                if lo > t_end:
+                    continue
+                rel = np.arange(lo, min(hi, t_end) + 1e-9, 2 * dt)
+                out.append((tr.pos, tr.vel, T0 - tr.seen_T, rel if len(rel) else np.array([lo])))
+        return out
+
+    def _pin_contacts(self, pins: list, r1, rows: np.ndarray, tk: np.ndarray, enemy_only: bool) -> np.ndarray:
+        """[len(rows)] the first frame a row's nominal box meets a pin thrown at where that row is PIN_AIM_F frames
+        before each release time (rays at PIN_SPREAD around it, from PIN_SPAWN_U off the Reed, PIN_SPEED; the
+        pin's segment sampled at 5 points, grown by PIN_SKIN), -1: none. The first frames before a release that is
+        within the aim lag look at where the hero is now."""
+        dt = self.params.frame_time
+        box = r1.box[rows]
+        cx = 0.5 * (box[..., 0] + box[..., 2])
+        cy = 0.5 * (box[..., 1] + box[..., 3])
+        T1 = box.shape[1]
+        inv = ((r1.flags[rows] & F_INVULN) != 0) if enemy_only else np.zeros(cx.shape, bool)
+        hx = 0.5 * float(np.median(box[:, 0, 2] - box[:, 0, 0])) + PIN_SKIN
+        hy = 0.5 * float(np.median(box[:, 0, 3] - box[:, 0, 1])) + PIN_SKIN
+        first = np.full(len(rows), T1, np.int64)
+        seg = np.array([-1.0, -0.5, 0.0, 0.5, 1.0]) * PIN_HALF_U
+        for pos, vel, age, rel in pins:
+            for r in rel:
+                kr = int(round(r / dt))
+                if kr >= T1 - 1:
+                    continue
+                ka = max(kr - PIN_AIM_F, 0)
+                rx, ry = pos[0] + vel[0] * (age + r), pos[1] + vel[1] * (age + r)
+                ks = np.arange(kr, T1)
+                s = PIN_SPEED * (ks - kr) * dt                           # [F]
+                for ang in PIN_SPREAD:
+                    ax, ay = cx[:, ka] - rx, cy[:, ka] - ry
+                    nrm = np.maximum(np.hypot(ax, ay), 1e-6)
+                    ca, sa = math.cos(ang), math.sin(ang)
+                    ux, uy = (ax * ca - ay * sa) / nrm, (ax * sa + ay * ca) / nrm   # [n]
+                    ox, oy = rx + PIN_SPAWN_U * ux, ry + PIN_SPAWN_U * uy
+                    px = ox[:, None, None] + ux[:, None, None] * (s[None, :, None] + seg[None, None, :])
+                    py = oy[:, None, None] + uy[:, None, None] * (s[None, :, None] + seg[None, None, :])
+                    hit = ((np.abs(px - cx[:, ks, None]) <= hx) & (np.abs(py - cy[:, ks, None]) <= hy)).any(axis=2)
+                    hit &= ~inv[:, ks]
+                    k1 = np.where(hit.any(axis=1), ks[hit.argmax(axis=1)], T1)
+                    first = np.minimum(first, k1)
+        return np.where(first < T1, first, -1)
+
     def _light_cone_occ(self, f, x: np.ndarray, y: np.ndarray, tq: np.ndarray) -> np.ndarray:
         """The must-escape layer with a known timing at the points x, y [n, T] at tq [T] (s from the origin): the
         committed fine placements of the families clash.json does not clash, the hazards on deterministic paths and
@@ -1555,6 +1649,8 @@ class ForumPlanner(Planner):
         n_prio = len(prio)
         queue = prio + [i for i in rest if i not in seen]
         budget = {"hitfx": 0, "react": 0, "capped": 0, "react_cache": {}}
+        pins = self._pin_threats(f, tk) if fcfg.pin_aim else []
+        self.audit.pin_ticks += int(bool(pins))
         has_hit = sc["first_f"] >= 0
         hit_occ: dict = {}                        # row -> its hit branch's contact [T1] (FORCED_RISK's ranking)
         capped_rows: list = []                    # rows S = 1 by a cap only (checked uncapped before FORCED_RISK)
@@ -1603,6 +1699,14 @@ class ForumPlanner(Planner):
                     sh, oh, cp = self._hit_branch(f, start, latched, sc, hr, tk, enemy_only, budget)
                     S[hr] |= sh
                     self._note_hit(hr, sh, oh, cp, sc, t_hit, hit_occ, capped_rows, T1)
+            if pins:
+                # the aimed pins (pin_aim): a row still safe meets a pin the Reed will throw at where the row is then
+                pr = ch[~S[ch]]
+                if len(pr):
+                    pk = self._pin_contacts(pins, r1, pr, tk, enemy_only)
+                    S[pr[pk >= 0]] = True
+                    t_hit[pr[pk >= 0]] = pk[pk >= 0]
+                    self.audit.pin_rows += int((pk >= 0).sum())
             safe_now = bool((env & ok & ~S & ~hz).any())
             safe_any = safe_any or safe_now
             now = time.perf_counter()

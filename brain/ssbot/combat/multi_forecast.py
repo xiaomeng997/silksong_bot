@@ -153,13 +153,14 @@ class ReactConfig:
     def parse(cls, s: str | None) -> "ReactConfig | None":
         """'off' / '' -> None; 'delay' (or 'escape': the planner's layer over the same support) with '+'-joined
         extensions c (committed), i (idle), p5 (exceptions), n (not-started out), g (idle growth held); l (the
-        planner's light cone in its escape check, ForumConfig.light_cone: no change to the support)."""
+        planner's light cone in its escape check, ForumConfig.light_cone) and a (the planner's aimed pins,
+        ForumConfig.pin_aim): no change to the support."""
         toks = [t for t in (s or "").strip().lower().split("+") if t]
         if not toks or toks[0] == "off":
             return None
         if toks[0] not in ("delay", "escape"):
-            raise ValueError(f"reactive support {s!r}: off | delay | escape [+c][+i][+p5][+n][+g][+l]")
-        bad = set(toks[1:]) - {"c", "i", "p5", "n", "g", "l"}
+            raise ValueError(f"reactive support {s!r}: off | delay | escape [+c][+i][+p5][+n][+g][+l][+a]")
+        bad = set(toks[1:]) - {"c", "i", "p5", "n", "g", "l", "a"}
         if bad:
             raise ValueError(f"reactive support {s!r}: unknown extension(s) {sorted(bad)}")
         return cls(True, "c" in toks, "i" in toks, "p5" if "p5" in toks else "keep", "n" in toks, "g" in toks)
