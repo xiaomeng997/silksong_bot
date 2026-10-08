@@ -279,3 +279,27 @@ def test_an_opening_and_a_rule_change_do_not_wait():
     assert _run(t, [a, b], 20.0, 10.3, t_min=9.0).goal == RUSH    # 0.3 s < goal_dwell 0.5 s
     p = _run(t, [a, b], 20.0, 10.6, t_min=9.0)
     assert p.goal == KITE and p.target == 1 and t.stats["tgt_switches"] == 0
+
+
+def test_the_rule_moves_the_target_when_the_kept_one_is_not_eligible():
+    # KITE on the Choristor; then the Envoy alone far off is isolated and the Choristor is not: RUSH takes the Envoy
+    # after goal_dwell_s (the kept target is not eligible under RUSH: no dwell_s, no hysteresis)
+    t = l2()
+    s = [subj(1, CH, 30.0), subj(2, RE, 33.0), subj(3, EN, 36.0)]
+    p = t.decide(world(20.0, t=10.0), WinFc(s, t_min=9.0), None, 3)
+    assert p.goal == KITE and p.target == 1
+    s = [subj(1, CH, 30.0), subj(2, RE, 33.0), subj(3, EN, 45.0)]
+    p = _run(t, s, 20.0, 10.6, t_min=9.0)
+    assert p.goal == RUSH and p.target == 3 and t.stats["tgt_switches"] == 1
+
+
+def test_the_idle_clappers_turn_does_not_wait():
+    # (ETA 0.66 s against 0.87 s; with the other one in its slam the idle one's priority x 2: 0.44 s)
+    t = l2()
+    s = [subj(1, CC, 22.0, y=7.45), subj(2, CC, 40.0, y=7.45)]
+    ents = [clapper(1, 22.0, False), clapper(2, 40.0, True)]
+    p = t.decide(world(30.0, t=10.0, ents=ents), WinFc(s), None, 3)
+    assert p.target == 1
+    s[0] = subj(1, CC, 22.0, y=7.45, state="Slam Antic", family="CC_SLAM", committed=True)
+    p = t.decide(world(30.0, t=10.2, ents=ents), WinFc(s), None, 3)
+    assert p.target == 2                                          # its turn: inside the dwell
