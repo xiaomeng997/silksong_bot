@@ -51,7 +51,8 @@ LAGS = (2, 3, 4)
 K_SET = (1, 2, 3, 4, 6, 9, 12, 15, 18, 24, 30, 36, 45, 60, 75, 90)   # frames before a hit analysed in full
 EXEC_K = (12, 24)
 DECOMP_K = (1, 6, 12, 24, 36)                # ticks before a hit whose support is decomposed by group
-RANKS = ("replay", "live", "share", "committed", "near", "dr", "dr_first", "dr_g", "dr18", "seen")
+RANKS = ("replay", "live", "share", "committed", "near", "dr", "dr_first", "dr_g", "dr18", "seen", "seen_cf",
+         "cf_seen")
 NEAR_KINDS = ("idle", "collider", "hazard", "death")
 
 
@@ -286,7 +287,11 @@ def _shares(fcast, box, inv, tk, frames) -> dict[str, np.ndarray]:
     near = (com | fcast._box_occ(np.asarray(cx, np.float64), np.asarray(cy, np.float64), np.asarray(t, np.float64),
                                  kinds=NEAR_KINDS)) & live
     first = np.where(full.any(axis=1), full.argmax(axis=1), len(frames))
-    return {"full": full.mean(axis=1), "committed": com.mean(axis=1), "near": near.mean(axis=1), "first": first}
+    pm = fcast.pm
+    cfine = (fcast._fine_occ(np.asarray(cx, np.float64), np.asarray(cy, np.float64), np.asarray(t, np.float64),
+                             np.asarray(pm["committed"], bool)) if len(pm["owner"]) else np.zeros(cx.shape, bool)) & live
+    return {"full": full.mean(axis=1), "committed": com.mean(axis=1), "near": near.mean(axis=1), "first": first,
+            "cfine": cfine.mean(axis=1)}
 
 
 def _pick(keys: list[np.ndarray], rows: np.ndarray) -> int:
@@ -449,6 +454,9 @@ def run_episode(job: dict) -> dict:
                     else:
                         scnt, sfst = np.zeros(len(J), np.int64), np.full(len(J), T1, np.int64)
                     picks["seen"] = _pick([scnt, -sfst, sh["full"], -sh["first"], -J], rows)
+                    picks["seen_cf"] = _pick([scnt, -sfst, sh["cfine"], sh["full"], -sh["first"], -J], rows)
+                    picks["cf_seen"] = _pick([scnt + np.round(sh["cfine"] * (T1 - 1)).astype(np.int64), -sfst,
+                                              sh["full"], -sh["first"], -J], rows)
                     rec["seen_clear"] = int((scnt[rows] == 0).sum())
                     rec["seen_clear_hs"] = int(((scnt[rows] == 0) & clear).sum())
                 picks["dr_first"] = _pick([-dfk, dcnt, sh["full"], -sh["first"], -J], rows)
@@ -458,6 +466,9 @@ def run_episode(job: dict) -> dict:
                 rec["share_min"] = round(float(sh["full"][rows].min()), 3)
                 rec["committed_min"] = round(float(sh["committed"][rows].min()), 3)
                 rec["near_min"] = round(float(sh["near"][rows].min()), 3)
+                rec["cfine_min"] = round(float(sh["cfine"][rows].min()), 3)
+                rec["clear_cfine"] = round(float(sh["cfine"][rows][clear].mean()), 3) if clear.any() else None
+                rec["hit_cfine"] = round(float(sh["cfine"][rows][~clear].mean()), 3) if (~clear).any() else None
                 rec["clear_share"] = round(float(sh["full"][rows][clear].mean()), 3) if clear.any() else None
                 rec["hit_share"] = round(float(sh["full"][rows][~clear].mean()), 3) if (~clear).any() else None
                 rec["clear_committed"] = round(float(sh["committed"][rows][clear].mean()), 3) if clear.any() else None
