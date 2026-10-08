@@ -1817,41 +1817,82 @@ Next / open issues (round 2):
 ## Task wave-0 forensics - why the Forum planner QUITs in wave 0 (branch worktree-wf_fa16f06f-127-8, track diag)
 
 Worktree `C:\modeling\silksong_bot\.claude\worktrees\wf_fa16f06f-127-8` (from main bc46dc9). Facts: forum.md section 19
-(Chinese). Outputs (not in git): `C:\ssbot\data\m2_forum_w0f\`. Seeds 340000-349999.
+(Chinese, the full write-up with tables). Outputs (not in git): `C:\ssbot\data\m2_forum_w0f\` (drivers `fx_run.cmd`,
+`fx_seen_run.cmd`, `ao_run.cmd`; per-episode forensics `fx\`, `fx_seen\`; `ao_all.json`). Frozen checkouts:
+`C:\ssbot\live_w0f_417d4a8` (forensics batch), `live_w0f_fx2` (b4345c6, the seen replay), `live_w0f_ao` (81722c6,
+attack outcomes), `live_w0f_3608489` (live check). Seeds used: 340000-340024.
 
-### Early findings (2026-10-08 03:45, other tracks: read this first)
+### Findings (read this first)
 
-- Every hit of the 251 episodes (A0b 50 + the 7 overnight R5 / R6 arms, 175; 949 damage events + 176 Multihit
-  ticks) is inside the support (0 outside, L 2 / 3 / 4, union and own type), and FORCED_RISK was on at the tick
-  before every one of the 949. 594 / 949 had no tick with a safe row in the 1.6 s before; the rest last had one
-  0.65-1.38 s (median 0.92 s) before.
-- The cause is not R5's value terms or R6's targets: **the support saturates, so FORCED_RISK's ranking ties and the
-  pick falls to J**. On 77 % of the logged FORCED_RISK ticks the chosen row (and its 5 best alternatives) has P = 1.0:
-  its nominal box is in the support on every stage-1 frame, frame 1 included. Decomposing the support at the ticks
-  before hits: about ten single placement groups EACH cover 100 % of every row's live cells - Reed RE_THROW / RE_STAB /
-  RE_IDLE / RE_DEFEND start-later bounding boxes, Envoy EN_CHARGE / EN_IDLE / EN_SLASH bounding boxes, the committed
-  RE_THROW / EN_CHARGE / CH_JUMP window placements, a Reed pin's self-template window - and the committed support
-  (MultiForecast.committed()) is just as saturated. So share = 1 (or the post-i-frame share) on every row, t_c ties,
-  and the order is decided by -t_hit / -J: the preselection (p_k 16) keeps the 16 best J. In wave 0 the bot plays
-  J-greedy (approach / attack the target) while believing every plan is equally dangerous.
-- Hindsight (tools.forum_hit_forensics: every known row's nominal path against the recorded damage colliders of the
-  next 0.6 s; open loop): on 2 A0b episodes the planner's pick is clear in hindsight on 70 % of all ticks while a
-  random row is clear 77 %: the pick is worse than random. In the 12 frames before a hit a clear row existed on 56 %
-  of the ticks; the pick was clear on 7 %.
-- A ranking key the support cannot give: contact with the damage colliders seen NOW, moved along their entity's
-  velocity (no forecast, no growth). Rows clear of it are clear in hindsight 89 %, rows meeting it 20 %. Implemented:
-  `ForumConfig.forced_rank = "seen"` (env `SSBOT_FORUM_FR=seen`, default `share` = unchanged): on FORCED_RISK ticks only,
-  that count (then its first frame) goes before the share, in the p_k preselection too; safe ticks and Bell Beast are
-  untouched. Replay on the 2 episodes: picks clear in hindsight 80 % of all ticks (70 % before), 32 % in the last 12
-  frames before a hit (7 %).
-- Live check running (below). Full batch over all 225 hit episodes running offline.
+- Every hit of the 225 analysed episodes (A0b 50 + the 7 overnight R5 / R6 arms 175; 949 damage events + 176 Multihit
+  ticks) is inside the support (0 outside, L 2 / 3 / 4, union and own type). FORCED_RISK was on at the tick before
+  every one of the 949. Sources: Envoy charge 205, Choristor whip chain 143, Envoy slash 100, Reed needle 88, Reed body
+  80, Choristor jump spin 73, Envoy body 63, Choristor slash 63, Choristor body 51, Reed stab 48, Envoy jump slash 24,
+  Reed parry counter 11. 0 kills in 225 episodes.
+- **Root cause: the support saturates in wave 0, FORCED_RISK's ranking ties, and the pick falls to J.** At the last
+  tick before every replayed hit (489 / 489) every candidate row is in the support on every non-invulnerable frame
+  (share 1, frame 1 included); rows that the recorded future leaves clear and rows it hits have the SAME support share
+  (274 / 274 ticks where both exist). Decomposed by placement group (2,854 ticks before hits): the Reed's start-later
+  RE_STAB / RE_THROW / RE_IDLE bounding boxes EACH alone cover >= 99 % of the candidates on ~every tick, the Envoy's
+  EN_CHARGE start-later box 92 %, plus committed windows; a median of 7-8 groups each saturate alone, so tightening one
+  family (R5 value's finding) is not enough, and MultiForecast.committed() saturates too. With Pc / t_c / t_hit tied the
+  p_k preselection and the order are J's; EVADE's stance comes from the same saturated risk map (= stay put), so the bot
+  approaches / faces / swings at its target while believing every plan equally dangerous. R5 value / R6 v0 only change
+  J or the target, hence no change in outcome.
+- Hindsight (open loop, each row's nominal path vs the recorded damage colliders of the next 0.6 s): 78 % of the hits
+  still had a clear row 0.15 s before, 99.6 % 0.6 s before; the planner's pick 6 frames before a hit was clear 9.4 %
+  of the time vs 24.3 % for a random row (worse than random); over all ticks 75.9 % vs random 75.0 %.
+- Not causes: kinematics (recorded keys rolled out: miss 15 / 413 = 3.6 %, error p90 0.17 u), planner deadline (3 of
+  28,561 ticks before hits > 16.7 ms), support holes (0).
+- The person in the same wave-0 situations (forum_attack_outcomes, attack starts within 8 u): per-instance hit rates
+  close to the bot's except Envoy charge (bot 43 % vs 1x 17 %: you jump over it, 75 % vs bot 41 %), Envoy slash (26 %
+  vs 14 %: you are already airborne, 70 % vs 38 %), Choristor whip (38 % vs 21 %: you back off ~6 u and dash; the bot
+  stays). The bot also faces more attacks (41 / min within 8 u vs 33) and never kills; you clear wave 0 (1x 24 / 46,
+  0.5x 17 / 17) by killing the Envoy first.
+
+### Fix tested: `ForumConfig.forced_rank = "seen"` (env `SSBOT_FORUM_FR=seen`, default `share` = unchanged)
+
+- On FORCED_RISK ticks only, rows are ranked first by the frames their nominal box meets the damage colliders seen now
+  (Entity.dmg_boxes active polygons) moved along their entity's velocity (`seen_contacts`, 0.14 / 0.54 ms p50 / p99),
+  then the old share; the p_k preselection too. Safe ticks: keys all 0, order unchanged; Bell Beast not affected
+  (ForumPlanner only). Offline: picks clear in hindsight 46 % six frames before a hit (planner 9 %, random 24 %).
+- Live, instance 0, A0b protocol, seeds 340000 paired (control first, then fix, same machine load): seen
+  `C:\ssbot\data\runs\m2\20261008_040149_Forum_A_eval_planner_oracle` (24 QUIT + 1 HARNESS_FAIL "paused unasked")
+  vs share `20261008_034918_Forum_A_eval_planner_oracle` (25 QUIT): time to QUIT median 19.1 vs 14.0 s, paired +5.0 s
+  (95 % CI 3.4-6.6, longer in 23 / 24), hits / min 12.0 vs 16.5, Envoy charge hits 0.04 vs 0.92 per episode; still
+  100 % QUIT in wave 0, 0 kills. A first seen chunk `20261008_034416` (6 episodes) ran while my offline batch loaded
+  the machine (27 % late ticks, 1 HARNESS_FAIL): not counted.
 
 ### Running
 
-- Offline: `C:\ssbot\data\m2_forum_w0f\fx_run.cmd` (hidden, below normal, 3 workers x 4 threads; frozen
-  `C:\ssbot\live_w0f_417d4a8`): forum_hit_forensics over the 9 run dirs -> `C:\ssbot\data\m2_forum_w0f\fx\` (one JSON
-  per episode), log `fx_run.log` (ends with DONE).
-- Instance 0 (lock `inst0.lock` = "diag"): `C:\ssbot\sandbox\w0f_live.ps1 -Rev 3608489 -Inst 0` (hidden; frozen
-  `C:\ssbot\live_w0f_3608489`), A0b protocol (fo_A, eval, planner, oracle, real quits 0.2), seeds 340000: 25 episodes
-  SSBOT_FORUM_FR=seen, then 25 SSBOT_FORUM_FR=share on the same seeds (paired control). Log `C:\ssbot\sandbox\w0f_live.log`;
-  it stops before a chunk on DEMO_SOON / STOP_AGENTS and releases the lock at the end (`w0f_live.done`).
+- `C:\ssbot\sandbox\w0f_live.ps1 -Rev cf -Insts 0,1 -Arms seen_cf -Seed 340000 -MaxWaitMin 90` (hidden, started
+  04:31): waits for instance 0 or 1 to be free (both were locked by r5value / r6rules at 04:31), takes the lock as
+  "diag", runs 25 episodes of the A0b protocol with `SSBOT_FORUM_FR=seen_cf` from the frozen `C:\ssbot\live_w0f_cf`
+  (82e94fa), then releases the lock (`w0f_live.done`). Gives up after 90 min without a free instance. Log
+  `C:\ssbot\sandbox\w0f_live.log`; stop: `combat_run stop <run dir>` from `C:\ssbot\live_w0f_cf\brain`. Compare on
+  seeds 340000 with the seen (`20261008_040149`) and share (`20261008_034918`) runs.
+- Offline: nothing. The forensics replay covers 115 of the 225 episodes (A0b 50, R6 40, R5 25); the other 110 were not
+  replayed so as not to load the machine next to the other tracks' live runs (`fx_run.cmd` resumes where it stopped).
+
+### Needs deploy
+
+- Nothing (no oracle change).
+
+### Next / open issues
+
+1. Merge `forced_rank = "seen"` (default stays `share`); the integrator's Forum A/B with `SSBOT_FORUM_FR=seen`. It is
+   orthogonal to R5 / R6 / R8 (only FORCED_RISK's first keys); their terms can only act once the tie is gone.
+2. Antic-driven attacks (whip, Envoy slash, Reed stab, Choristor slash: over half of the remaining hits) are invisible
+   to the "seen" key until their collider opens. A second key after it, the share of stage-1 frames in the committed
+   fine placements (`forced_rank = "seen_cf"`, `SSBOT_FORUM_FR=seen_cf`, 82e94fa, tested), lifts the hindsight-clear
+   pick within 12 frames of a hit from 60 % to 73 % offline (whip 35 -> 68 %, Choristor slash 0 -> 33 %; the Envoy
+   slash stays hard, 19 -> 24 %); its live check is queued (Running). The real fix is a committed-attack template at
+   its nominal (median dwell) timing instead of the entry-interval window union.
+3. Support de-saturation (R2 / R3 owners, recertification needed): start-later families should not strike before
+   their antic's minimum dwell; the flying Reed's idle growth capped by its measured top speed.
+4. Offense: 0 kills in 274 live episodes; wave 0 never ends. R6's punish windows (Envoy Charge End, Slash1 Recover)
+   should be re-measured under "seen".
+5. Concurrent live runs raise tick p50 to 12-15 ms and late ticks to 5-28 % on this machine: compare arms paired under
+   the same load; do not run offline batches next to a live check (it ruined my first fix chunk).
+6. Frozen checkouts to remove when done: `C:\ssbot\live_w0f_417d4a8`, `live_w0f_fx2`, `live_w0f_ao`,
+   `live_w0f_3608489`, `live_w0f_cf`.
