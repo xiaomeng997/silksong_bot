@@ -422,8 +422,8 @@ class GauntletTactics:
             iso = [c for c in iso if c.sep >= r.iso_u + r.rule_hyst_u]
         rule = PUNISH if go else RUSH if iso else KITE
         kept = next((c for c in pool if old is not None and c.s.iid == old.target), None)
-        if rule == RUSH and kept is not None and not kept.iso and t - old.t_pick < r.dwell_s:
-            rule = KITE                                   # the kept target lost its isolation: kite with it first
+        if rule == RUSH and kept is not None and old.name == RUSH and not kept.iso and t - old.t_pick < r.dwell_s:
+            rule = KITE                                   # the rushed target lost its isolation: kite with it first
         held = old is not None and rule != old.name and rule != PUNISH and t - old.t_goal < r.goal_dwell_s
         if held:
             rule = old.name                               # the kept rule runs goal_dwell_s first

@@ -230,6 +230,9 @@ def test_punish_hit_inside_the_window_is_counted():
     assert st["punish_goals"] == 1 and st["punish_landed"] == 1 and st["goal_hits"]["PUNISH"] == 1
 
 
+R2_HOLD = dict(dwell_s=4.0, goal_dwell_s=1.0, switch_x=1.5, rule_hyst_u=0.0)     # round 2's holding (17.6.1)
+
+
 def _run(t, ss, hx, at, n=6, t_min=0.2, covers=()):
     """n decisions at game time `at` (n = period: one periodic pick among them)."""
     p = None
@@ -240,7 +243,7 @@ def _run(t, ss, hx, at, n=6, t_min=0.2, covers=()):
 
 def test_a_kept_target_is_held_for_the_dwell():
     # round 2: the round-1 A/B changed goals 33 times a minute in wave 0; another target needs switch_x and dwell_s
-    t = l2()
+    t = l2(**R2_HOLD)
     a, b = subj(1, CH, 30.0), subj(2, EN, 45.0)
     p = t.decide(world(20.0, t=10.0), WinFc([a, b]), None, 3)
     assert p.goal == RUSH and p.target == 1                       # spread: the fastest pursuer
@@ -267,14 +270,14 @@ def test_a_move_change_of_the_target_does_not_drop_it():
 
 def test_an_opening_and_a_rule_change_do_not_wait():
     # PUNISH (rank 2) takes over inside the dwell
-    t = l2()
+    t = l2(**R2_HOLD)
     a, b = subj(1, CH, 30.0), subj(2, EN, 45.0)
     t.decide(world(20.0, t=10.0), WinFc([a, b]), None, 3)
     b = subj(2, EN, 15.0, state="Slash Recover", family="EN_SLASH", committed=True)
     p = _run(t, [a, b], 20.0, 10.2, covers=[(16.0, 18.0, 1.5)])  # its spot (16.8) clear for 1.5 s
     assert p.goal == PUNISH and p.target == 2
     # the same target under another rule (isolated -> clustered: RUSH -> KITE) after goal_dwell_s
-    t = l2()
+    t = l2(**R2_HOLD)
     a, b = subj(1, CH, 30.0), subj(2, EN, 45.0)
     t.decide(world(20.0, t=10.0), WinFc([a, b], t_min=9.0), None, 3)
     b = subj(2, EN, 36.0)                                         # 6 u: the kept one still isolated (8 - 2 u)
@@ -288,7 +291,7 @@ def test_an_opening_and_a_rule_change_do_not_wait():
 def test_a_rush_target_that_gets_company_is_kited_with_then_left():
     # RUSH on the Choristor (all spread); the Reed comes within 3 u of it while the Envoy is alone: KITE on the
     # Choristor until dwell_s (no switch), then RUSH the isolated Envoy (the kept one not eligible: no hysteresis)
-    t = l2()
+    t = l2(**R2_HOLD)
     s = [subj(1, CH, 30.0), subj(2, RE, 40.0), subj(3, EN, 48.0)]
     p = t.decide(world(20.0, t=10.0), WinFc(s, t_min=9.0), None, 3)
     assert p.goal == RUSH and p.target == 1
@@ -519,3 +522,31 @@ def test_jump_cast_rune_circle_kept_out_of_after_the_move():
     p = t.decide(world(land + 3.0, t=12.2, ents=[clapper(9, land, False)]), WinFc([subj(9, CC, land, y=7.45)]),
                  None, 3)
     assert t.last["goal_why"].endswith("rune: behind") and p.stance_x == pytest.approx(land + 2.5)
+
+
+def test_round3_holding_rule_hysteresis():
+    # round 3 (forum.md 17.7.3): goal switches (target or rule) were 25.9 / min live in wave 0, most of them RUSH <->
+    # KITE at the 8 u edge. The playbook's holding: the rule 4 s, the target 8 s and x 2, and from KITE, RUSH only on
+    # one isolated by 8 + 2 u
+    r = load_l2_rules()
+    assert (r.goal_dwell_s, r.dwell_s, r.switch_x, r.rule_hyst_u) == (4.0, 8.0, 2.0, 2.0)
+    t = l2()
+    s = [subj(1, CH, 30.0), subj(2, RE, 33.0), subj(3, EN, 36.0)]
+    p = t.decide(world(20.0, t=10.0), WinFc(s, t_min=9.0), None, 3)
+    assert p.goal == KITE and p.target == 1                       # nobody isolated
+    s = [subj(1, CH, 30.0), subj(2, RE, 33.0), subj(3, EN, 42.0)]  # the Envoy 9 u from the Reed: isolated (8 u)
+    assert _run(t, s, 20.0, 14.5, t_min=9.0).goal == KITE           # but not by 10 u: KITE stays
+    s = [subj(1, CH, 30.0), subj(2, RE, 33.0), subj(3, EN, 44.0)]  # 11 u
+    p = _run(t, s, 20.0, 14.6, t_min=9.0)
+    assert p.goal == RUSH and p.target == 3
+    assert t.stats["rule_changes"] == {} and t.stats["switch_kinds"] == {"ineligible": 1}
+    # with no kept KITE (the first goal) 8 u is enough
+    t = l2()
+    p = t.decide(world(20.0, t=10.0), WinFc([subj(1, CH, 30.0), subj(2, RE, 33.0), subj(3, EN, 42.0)], t_min=9.0),
+                 None, 3)
+    assert p.goal == RUSH and p.target == 3
+    # the rule held goal_dwell_s: RUSH on the Envoy, it gets company at 2 s: still RUSH, KITE on it after 4 s
+    s = [subj(1, CH, 30.0), subj(2, RE, 33.0), subj(3, EN, 37.0)]
+    assert _run(t, s, 20.0, 12.0, t_min=9.0).goal == RUSH
+    p = _run(t, s, 20.0, 14.1, t_min=9.0)
+    assert p.goal == KITE and p.target == 3 and t.stats["rule_changes"] == {"RUSH>KITE": 1}

@@ -83,13 +83,16 @@ forum:
     enabled: true
     period: 6               # ticks between picks (10 Hz); events (target gone / new family / window over) pick at once
     # holding (round 2, forum.md 17.6: round 1 changed goals 33 / min in wave 0): another target after dwell_s on the
-    # kept one and switch_x times its score; another rule on the same target after goal_dwell_s; open-loop wave-0
-    # replays (20 episodes): target switches 23.8 / min (round 1) -> 10.3 (1.25, 3 s), 9.2 (2.0, 3 s)
-    switch_x: 1.5
-    dwell_s: 4.0
-    goal_dwell_s: 1.0
+    # kept one and switch_x times its score; another rule on the same target after goal_dwell_s; from KITE, RUSH only
+    # on one isolated by iso_u + rule_hyst_u. Round 3 (17.7.3), open-loop wave 0 (26 episodes, 041945 + 043128):
+    # goal switches (target or rule, not the first goal) 19.9 / min (1 s, 0 u, 4 s, 1.5) -> 12.9 (3 s, 2 u, 4 s,
+    # 1.5) -> 9.0 (4 s, 2 u, 6 s, 2.0) -> 8.2 (4 s, 2 u, 8 s, 2.0)
+    switch_x: 2.0
+    dwell_s: 8.0
+    goal_dwell_s: 4.0
     iso_u: 8.0              # isolated: no other enemy in play within 8 u (|dx|)
     iso_hyst_u: 2.0         # the kept target stays isolated down to 6 u
+    rule_hyst_u: 2.0        # from KITE, RUSH needs one isolated by 10 u
     run_u_s: 17.5           # dash + sprint (the person)
     start_s: 0.05
     swing_s: 0.25           # press -> the Reaper side slash's active end (0.208 s)
