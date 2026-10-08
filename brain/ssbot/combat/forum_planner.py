@@ -48,6 +48,7 @@ Scores only (GoalPrefs: hit_w per enemy iid, stance, the risk map): no prefs fie
 core rows' envelope, so the core rows' S / Hz / U are the same under any prefs (tests/test_forum_planner.py).
 """
 import math
+import os
 import time
 from dataclasses import dataclass, field
 
@@ -60,6 +61,7 @@ from ssbot.combat.planner import (KillPlan, MACRO_MARGIN, NO_CONTROL_MODES, Plan
                                   _is_macro, _rect_meets_polys)
 from ssbot.combat.safety_filter import (R_KILL, REASONS, FilterContext, hazard_flags, i3_kill_allowed, kill_frames,
                                         kill_window_frames, unpausable, veto)
+from ssbot.combat.terminal import EnemyFields, TerminalValue, end_class
 from ssbot.core.forum import FORUM_TYPES, FORUM_WAVES, WALL_L, WALL_R
 from ssbot.knowledge import kinematics as kin
 from ssbot.knowledge.attack_shapes import AttackTable
@@ -75,11 +77,17 @@ WALL_TOUCH_U = 0.15               # a box edge this close to the arena wall in t
 TARGET_REACH_U = 14.0             # enemies farther than this from the hero are not scored (0.6 s: dash + run ~ 8 u)
 RPR_ANTIC_F, RPR_SLASH_F = 9, 11  # Reaper down slash: antic 0.150 s, slash 0.167 s (hero_reaper_forum.json)
 KILL_Z = 3.0                      # hp_est - z sigma: the least HP an enemy may have (forum_planner_plan §4.2 U)
+H_W = {1: 1.0, 2: 1.0, 3: 0.6}     # H_exp's weight by h (hits to death; 4 and more: H_W_FAR, unknown: H_W_NONE)
+H_W_FAR, H_W_NONE = 0.3, 0.5
+
+
+TV_ON = os.environ.get("SSBOT_FORUM_TV", "1") != "0"        # 0: no terminal value (the R4 / A0b scores, A/B)
+T_ENV = int(os.environ.get("SSBOT_FORUM_T", "36") or 36)     # the horizon arm (§4.5: T 36 / 48)
 
 
 @dataclass
 class ForumConfig:
-    T: int = 36                   # 0.6 s (§4.5)
+    T: int = T_ENV                # 0.6 s (§4.5); SSBOT_FORUM_T=48: the R5 horizon arm
     variants: str = "bounds_lo"
     chunk: int = 32
     K_b: int = 96
@@ -93,6 +101,14 @@ class ForumConfig:
     p_k: int = 16
     exact_p: bool = False         # FORCED_RISK ranks by MultiForecast.prob (3.7 ms p50 on wave 6: one query per enemy,
     #                               placement kind and probability value) instead of the share of frames in contact
+    terminal: bool = TV_ON        # the terminal value (R5, combat.terminal): E / trapped / overlap / H_exp into J, the
+    #                               kill value into the target weights; scores only
+    w_E: float = 4.0              # J per unit of E (the reachable share clear of the enemies' bodies, 0..1)
+    w_trap: float = 3.0           # J off when every way out closes within TRAP_S
+    w_ov: float = 1.5             # J off per unit of overlap (reachable share inside two enemies' zones)
+    w_H: float = 2.0              # J off per unit of H_exp (reachable share inside a 2-mask / multi-hit enemy's zone),
+    #                               times H_W[h]
+    w_K: float = 3.0              # a target's hit weight x (1 + w_K kill value)
 
 
 @dataclass
@@ -290,6 +306,8 @@ class ForumPlanner(Planner):
         self.shapes = _shapes(crest)
         self.audit = EnvelopeAudit()
         self.last_info: dict = {}
+        self.tv = TerminalValue(params) if self.fcfg.terminal else None
+        self._two: dict = {}
 
     # ---- scoring ----
 
@@ -310,11 +328,44 @@ class ForumPlanner(Planner):
                 np.array([float(hw.get(t.iid, 1.0)) if k < self.fcfg.K_tgt else 0.0 for k, t in enumerate(keep)]),
                 keep)
 
-    def _score_forum(self, ws, roll, latched, start, f, prefs, tk):
+    def _two_mask(self, f):
+        """owner -> it has a 2-mask attack or a multi-hit chain (per type, from the tables: family damage >= 2 or a
+        chain of more than one hit)."""
+        from ssbot.combat.multi_forecast import _chain
+        fc = f._fc
+        tables = fc.tables
+        if id(tables) not in self._two:
+            two = set()
+            for tk_, tt in tables.types.items():
+                if any(fm.damage >= 2 or _chain(tables.chains, tk_, name)[0] > 1 for name, fm in tt.families.items()):
+                    two.add(tk_)
+            self._two = {id(tables): two}
+        two = self._two[id(tables)]
+        return lambda k: (k in fc.trackers and fc.trackers[k].tk in two)
+
+    def _terminal(self, f, ctx):
+        """The tick's body field (combat.terminal) and the kill value per enemy iid; (None, {}) without a multi-enemy
+        forecast or with the terminal value off."""
+        if self.tv is None or f.__dict__.get("boss_fc") is not None or not hasattr(f._fc, "trackers"):
+            return None, {}
+        fields = EnemyFields.from_bodies(f, self._two_mask(f))
+        ws = getattr(f._fc, "_ws", None)
+        if ws is None or ws.hero is None:
+            return fields, {}
+        dmg = getattr(getattr(ctx, "damage", None), "nail", None)
+        hit = float(dmg) if dmg is not None and math.isfinite(dmg) and dmg > 0 else 9.0
+        hx, hy = float(ws.hero.pos.v[0]), float(ws.hero.pos.v[1])
+        return fields, fields.kill_value(hx, hy, hit)
+
+    def _score_forum(self, ws, roll, latched, start, f, prefs, tk, ctx=None):
         w = prefs.weights
         N, T1 = roll.flags.shape
         face0 = 1 if np.asarray(start).reshape(kin.K, -1)[kin.FACE, 0] >= 0 else -1
         tbox, tok, tw, keep = self._forum_targets(ws, f, tk, prefs)
+        t_tv = time.perf_counter()
+        fields, kv = self._terminal(f, ctx)
+        if kv and len(keep):
+            tw = tw * np.array([1.0 + self.fcfg.w_K * kv.get(t.iid, 0.0) for t in keep])
         wv = np.array([w.get("hit", 10.0), w.get("waste", 0.6), w.get("jump", 0.15), w.get("stance", 0.6),
                        w.get("risk", 3.0), w.get("face", 0.3), w.get("ground", 0.2), 0.0])
         rx = prefs.risk_x if len(prefs.risk_x) else np.zeros(1)
@@ -333,6 +384,16 @@ class ForumPlanner(Planner):
                             out["J"], out["hits"], out["first_f"], out["first_t"], out["first_k"], out["first_face"],
                             out["risk"], out["unmod"])
         out["targets"] = keep
+        if fields is not None:
+            fc_ = self.fcfg
+            c = 0.5 * (roll.box[:, T1 - 1, :2] + roll.box[:, T1 - 1, 2:])
+            ecls = end_class(roll.flags[:, T1 - 1], roll.vel[:, T1 - 1, 1])
+            E, trapped, ov, he = self.tv.rows(fields, c[:, 0], c[:, 1], ecls, float(tk[T1 - 1]))
+            h = getattr(ctx, "h", None)
+            hw = H_W_NONE if h is None else H_W.get(int(h), H_W_FAR)
+            out["J"] += fc_.w_E * E - fc_.w_trap * trapped - fc_.w_ov * ov - fc_.w_H * hw * he
+            out.update(E=E, trapped=trapped, overlap=ov, hexp=he, kv=kv,
+                       tv_ms=(time.perf_counter() - t_tv) * 1e3, field_ms=fields.ms)
         return out
 
     # ---- hit branches ----
@@ -466,7 +527,7 @@ class ForumPlanner(Planner):
         k1 = o.argmax(axis=1)
         t_hit = np.where(S1, np.where(k1 > 0, fr[np.maximum(k1 - 1, 0)] + 1, fr[0]), T1)
         t2 = time.perf_counter()
-        sc = self._score_forum(ws, r1, latched, start, f, prefs, tk)
+        sc = self._score_forum(ws, r1, latched, start, f, prefs, tk, ctx)
         J = sc["J"]
         if cont:
             J[-1] += prefs.weights.get("cont", 0.0)
@@ -708,6 +769,16 @@ class ForumPlanner(Planner):
                           "uncapped": budget.get("uncapped", 0),
                           "S": S, "Hz": hz, "U": U, "core_mask": core, "env": env, "Pc": Pc, "t_c": t_c,
                           "cand": sel if forced else np.zeros(N, bool), "hit_occ": hit_occ}
+        if "E" in sc:
+            ci = res.idx if 0 <= res.idx < N else None
+            self.last_info["tv"] = {"ms": round(sc["tv_ms"], 3), "field_ms": round(sc["field_ms"], 3),
+                                    "kv": {str(k): round(v, 3) for k, v in sc["kv"].items() if v > 0},
+                                    **({} if ci is None else {"E": round(float(sc["E"][ci]), 3),
+                                                              "trapped": bool(sc["trapped"][ci]),
+                                                              "overlap": round(float(sc["overlap"][ci]), 3),
+                                                              "hexp": round(float(sc["hexp"][ci]), 3)}),
+                                    "E_max": round(float(sc["E"].max()), 3),
+                                    "trapped_share": round(float(sc["trapped"].mean()), 3)}
         res.t_ms = {"filter": (t1 - t0) * 1e3, "rollout": (t2 - t1) * 1e3, "score": (t3 - t2) * 1e3,
                     "envelope": (t4 - t3) * 1e3, "prob_bind": (t5 - t4) * 1e3, "select": (t6 - t5) * 1e3,
                     "total": (t6 - t0) * 1e3, "s1_rollout": (t1r - t1) * 1e3, "s1_support": (t2 - t1r) * 1e3}

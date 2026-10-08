@@ -377,6 +377,9 @@ class Entity:
     acc: Vec2 = fld(D, (0.0, 0.0))
     facing: E[int] = fld(V, factory=lambda: unknown(1))
     body_polys: list[list[Vec2]] = fld(V, factory=list)
+    # the colliders a nail can hit: body_polys less the range triggers (layer 13), the physics pusher (27) and
+    # terrain blocks (14), whose boxes span 5-47 u in the Forum (forum.md §17); oracle only (the Forum's hit targets)
+    hit_polys: list[list[Vec2]] = fld(O, factory=list)
     dmg_boxes: list[DamageBox] = fld(D, factory=list)
     phase: PhasePost | None = fld(D, None)          # A-class bosses / arena enemies only
     keepout: list[Vec2] | None = fld(D, None)       # ordinary enemies: reach union from the tables

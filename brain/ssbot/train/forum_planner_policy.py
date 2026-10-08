@@ -70,6 +70,17 @@ KEEP_F = 90                # forecasts, hero boxes and FSM entries kept for judg
 TICK_WAIT_F = HOOK_LOOKBACK_F   # a Multihit tick outside the support waits this long for its chain's Final Hit
 
 
+def _tv_summary(rows: list) -> dict | None:
+    """The chosen rows' terminal terms over an episode: mean E / overlap / H_exp, share trapped, mean share of rows
+    trapped."""
+    if not rows:
+        return None
+    a = [r for r in rows if r[0] is not None]
+    m = (lambda i: round(float(np.mean([r[i] for r in a])), 4) if a else None)
+    return {"ticks": len(rows), "E": m(0), "trapped": m(1), "overlap": m(2), "hexp": m(3),
+            "rows_trapped": round(float(np.mean([r[4] for r in rows])), 4)}
+
+
 def true_wave(raw: dict) -> tuple[int | None, bool]:
     """(BattleScene.currentWave from STATE room.battles while the battle runs, completed): test truth only."""
     battles = (raw.get("room") or {}).get("battles") or ()
@@ -131,8 +142,9 @@ class ForumPlannerPolicy(PlannerPolicy):
         from ssbot.core.worldstate import E, WorldState
         t0 = time.perf_counter()
         self.fc.warm()
-        planner = ForumPlanner(self.params, Terrain2D.empty(), PlannerConfig(T=36, threads=self.threads,
-                                                                             variants="bounds_lo"), ForumConfig())
+        fcfg = ForumConfig()
+        planner = ForumPlanner(self.params, Terrain2D.empty(), PlannerConfig(T=fcfg.T, threads=self.threads,
+                                                                             variants="bounds_lo"), fcfg)
         fcast = self.fc.forecast(HORIZON_S)
         for x, mode in ((30.0, kin.M_NORMAL), (33.0, kin.M_NORMAL), (36.0, kin.M_HURT_FREEZE)):
             ws = WorldState()
@@ -169,8 +181,9 @@ class ForumPlannerPolicy(PlannerPolicy):
         self.terrain = self.terrain or Terrain2D.empty()
         self.params = self.params0
         if self.planner is None:
-            self.planner = ForumPlanner(self.params, self.terrain, PlannerConfig(T=36, threads=self.threads,
-                                                                                 variants="bounds_lo"), ForumConfig())
+            fcfg = ForumConfig()
+            self.planner = ForumPlanner(self.params, self.terrain, PlannerConfig(T=fcfg.T, threads=self.threads,
+                                                                                 variants="bounds_lo"), fcfg)
         self.planner.params = self.params
         self.planner.terrain = self.terrain
         self.planner.reset()
@@ -205,6 +218,8 @@ class ForumPlannerPolicy(PlannerPolicy):
         self.counts: Counter = Counter()
         self.tick_ms: list[float] = []
         self.plan_ms: list[float] = []
+        self.tv_ms: list[float] = []               # the terminal value's share of the tick (field + rows + kill value)
+        self.tv_rows: list[tuple] = []             # the chosen row's (E, trapped, overlap, H_exp), trapped share
         self._last_f = None
         self._unpred_backlog = 0
         self._unpred_src: list = []
@@ -530,6 +545,11 @@ class ForumPlannerPolicy(PlannerPolicy):
                          sup=r.mask is not None)
         self.tick_ms.append((time.perf_counter() - t0) * 1e3)
         self.plan_ms.append((t2 - t1) * 1e3)
+        tvi = self.planner.last_info.get("tv")
+        if tvi is not None:
+            self.tv_ms.append(tvi["ms"])
+            self.tv_rows.append((tvi.get("E"), tvi.get("trapped"), tvi.get("overlap"), tvi.get("hexp"),
+                                 tvi["trapped_share"]))
         self.counts[prefs.mode] += 1
         self.counts["forced_risk"] += res.forced_risk
         self.binds += int(res.name == "BIND")
@@ -639,7 +659,7 @@ class ForumPlannerPolicy(PlannerPolicy):
                "triggers": list(r.decision.triggers), "unpred": unpred, "ms": round(res.t_ms.get("total", 0.0), 3),
                "kill_hp": kill_hp, "ykill": ykill, "kill_prims": sorted(p.name for p in r.decision.kill_prims),
                "fi": {k: li.get(k) for k in ("posture", "N", "stage1_pass", "enveloped", "hitfx", "react", "capped",
-                                             "cut", "overrun")},
+                                             "cut", "overrun", "tv")},
                "pocket": self.tac.last.get("pocket_veto"), "subj": subj}
         hit = any(ev.get("k") in ("damage", "catastrophe", "would_die") for ev in s.get("ev") or ())
         event = hit or streak or (r.decision.pause_pending and self.counts["_pend_logged"] == 0)
@@ -661,6 +681,7 @@ class ForumPlannerPolicy(PlannerPolicy):
         return {"view": self.view, "policy": "forum_planner", "k": 0, "modes": modes,
                 "tick_ms_p50": q(self.tick_ms, 50), "tick_ms_p99": q(self.tick_ms, 99),
                 "plan_ms_p50": q(self.plan_ms, 50), "plan_ms_p99": q(self.plan_ms, 99),
+                "tv_ms_p50": q(self.tv_ms, 50), "tv_ms_p99": q(self.tv_ms, 99), "terminal": _tv_summary(self.tv_rows),
                 "ticks": len(self.tick_ms), "late_ticks": sum(1 for x in self.tick_ms if x > 16.7),
                 "unpredicted": self.unpredicted, "unpredicted_unknown": self.unpredicted_unknown,
                 "unpredicted_sources": self.unpred_sources, "follow_ups": self.follow_ups, "mh_ticks": self.mh_ticks, "hits_taken": self.hits_taken, "hit_log": self.hit_log,
