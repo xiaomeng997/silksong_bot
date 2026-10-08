@@ -67,6 +67,7 @@ from ssbot.knowledge.attack_shapes import AttackTable
 from ssbot.knowledge.knockback import knockback_hull
 from ssbot.knowledge.kinematics import (B_ATTACK, B_DASH, B_DOWN, B_JUMP, B_QUICKCAST, B_UP, F_ATTACKING, F_GROUND, F_INVULN,
                                         M_DASH, M_NORMAL, M_RPR_DS, M_SPRINT, HeroParams, HoldState, Terrain2D)
+from ssbot.safety.supervisor import GREEN
 
 R_UNMOD = 6                       # veto reason: presses a move the model does not have (the dash stab)
 REASONS_FORUM = dict(REASONS) | {R_UNMOD: "unmodelled move (attack while dashing)"}
@@ -78,19 +79,21 @@ RPR_ANTIC_F, RPR_SLASH_F = 9, 11  # Reaper down slash: antic 0.150 s, slash 0.16
 KILL_Z = 3.0                      # hp_est - z sigma: the least HP an enemy may have (forum_planner_plan §4.2 U)
 WANDERER_COMBO_F = 9              # DASHCOMBO_WINDOW_TIME 0.15 s (hero_constants.json): an attack this soon after a dash
 #                                   is the Wanderer's dash combo (vetoed: not modelled)
-PARRY_INVULN_F = 9                # INVUL_TIME_PARRY 0.15 s: frames after the clash frame the hero takes no enemy damage
+PARRY_INVULN_F = 9                # INVUL_TIME_PARRY 0.15 s: parryInvulnTimer, set on the clash frame and decremented by
+#                                   deltaTime in Update, is > 0 on that frame and the 8 after: no enemy damage there
 PARRY_RECOVER_F = 6               # NailParryRecover 0.1 s after the clash: attack cooldown 0, the swing cancelled
 CLASH_FILE = "clash.json"
-# The Forum attacks whose Control FSM catches PARRIED (forum.md 9: Envoy Charge / Reset -> Deflect -> Charge End 0.42 s;
-# Reed Parry Slash -> Multihit Clashed 0.39 s -> Parry Slash End 0.33 s): a clash ends the attack, so the success
-# branch holds that enemy's support where it was at the clash frame (PARRY_STOP_F frames: Charge End -> Attack Wait
-# -> Walker can start a new attack at once, whose first hit comes 0.41 s or more later (strikes.json p5 of the jump
-# slash); the Reed goes on to Alert, 0.72 s, then 0.65 s or more to a stab's first hit), the hero's hull grown by what
-# the enemy still moves after a clash (PARRY_STOP_GROW: x, y in u at 3-frame steps of game time from the clash, each
-# step the measured maximum at its end; the R1 v2 Envoy campaign runs, 55 Envoy charges and 21 Reed counters that ended
-# in a clash: the Envoy slides on in Charge End up to 0.93 u, the Reed drifts up to 0.96 u and then flies off;
-# forum.md 17), instead of the rest of the attack
-PARRY_STOPS = frozenset({("Song Pilgrim 01", "EN_CHARGE"), ("Song Reed", "RE_DEFEND")})
+# The Forum attacks whose Control FSM catches PARRIED, by the Control state the clash meets (forum.md 9 / 17.5: Envoy
+# Charge / Reset -> Deflect -> Charge End 0.42 s; Reed Parry Slash -> Multihit Clashed 0.39 s -> Parry Slash End
+# 0.33 s; the R1 v2 recordings: 171 Envoy clashes all in Charge, 24 Reed counter clashes all in Parry Slash): a clash
+# there ends the attack, so the success branch holds that enemy's support where it was at the clash frame
+# (PARRY_STOP_F frames: Charge End -> Attack Wait -> Walker can start a new attack at once, whose first hit comes 0.41 s
+# or more later (strikes.json p5 of the jump slash); the Reed goes on to Alert, 0.72 s, then 0.65 s or more to a stab's
+# first hit), the hero's hull grown by what the enemy still moves after a clash (PARRY_STOP_GROW: x, y in u at 3-frame
+# steps of game time from the clash, each step the measured maximum at its end; the R1 v2 Envoy campaign runs, 55 Envoy
+# charges and 21 Reed counters that ended in a clash: the Envoy slides on in Charge End up to 0.93 u, the Reed drifts up
+# to 0.96 u and then flies off; forum.md 17), instead of the rest of the attack
+PARRY_STOPS = frozenset({("Song Pilgrim 01", "Charge"), ("Song Pilgrim 01", "Reset"), ("Song Reed", "Parry Slash")})
 PARRY_STOP_F = 48
 PARRY_STOP_GROW = {"Song Pilgrim 01": ((0.372, 0.6, 0.701, 0.802, 0.847, 0.892, 0.912, 0.932), (0.01,)),
                    "Song Reed": ((0.36, 0.6, 0.96), (0.312, 0.624, 0.832, 0.832, 0.832, 0.832, 0.832, 0.832, 1.222,
@@ -101,6 +104,12 @@ def stop_grow(tk_name: str, d: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """PARRY_STOP_GROW (x, y) d frames after the clash (d >= 0: the step that ends after d)."""
     gx, gy = PARRY_STOP_GROW[tk_name]
     return (np.asarray(gx)[np.minimum(d // 3, len(gx) - 1)], np.asarray(gy)[np.minimum(d // 3, len(gy) - 1)])
+
+
+def clash_mix(w: float, share_branch: float, share_plain: float) -> float:
+    """FORCED_RISK's share in contact of a row with a clash branch: w (every clash in it happens) x the branch's +
+    (1 - w) x the plain row's (a clash that does not happen leaves the plain row: its contact, the hit included)."""
+    return w * share_branch + (1.0 - w) * share_plain
 
 
 @dataclass
@@ -121,15 +130,25 @@ class ForumConfig:
     #                               placement kind and probability value) instead of the share of frames in contact
     # EV_CLASH (forum_planner_plan R8; off: the R3 / R4 planner bit for bit): when no row is safe, rows in contact whose
     # swing is out at the first contact get the clash branch (success: 0.15 s i-frames against all enemy damage, the
-    # direction's recoil, the attack reset 0.1 s later; failure: the hit) and count as safe when it is clean and the
-    # failure probability (clash.json, by type x family x slot) is at most clash_max_fail
+    # direction's recoil, the attack reset 0.1 s later; failure: the hit); its weight w is the probability that every
+    # clash in it happens (the product of clash.json's p_clash_lb by type x family x slot, in the family's clashable
+    # states): a clean branch counts as safe when w >= clash_min_p and its hit probability (1 - prod(1 - p_fail)) is at
+    # most clash_max_fail; any other branch with w >= clash_partial_min_p enters FORCED_RISK's ranking with the share
+    # w x the branch's + (1 - w) x the share without (a clash that does not happen leaves the plain row)
     clash: bool = False
-    clash_k: int = 16             # rows a tick get the clash branch (the plan's cap)
+    clash_branch: bool = True     # False: the clash continuations only (candidates.build_forum(clash=True); the A/B's
+    #                               control for the extra rows)
+    clash_tiers: tuple = ("GREEN",)   # DESIGN 3.5.6: no parry / clash in YELLOW / RED or PAUSE_PENDING (the clash
+    #                                   freeze swallows a pause); ("GREEN", "YELLOW"): the R8 experiment (lead's call)
+    clash_k: int = 8              # rows a tick get the clash branch
+    clash_min_p: float = 0.75
     clash_max_fail: float = 0.25
-    clash_partial_max_fail: float = 0.5   # a partial clash (contact left after it) in FORCED_RISK's ranking: its share
-    #                                       in contact is p_fail x the share without + (1 - p_fail) x the branch's
+    clash_partial_min_p: float = 0.25
     clash_min_h: int = 2          # masks the hero must have (a failed clash costs 1-2)
-    clash_depth: int = 3          # clashes chained in one row (multi-segment attacks, the two-sided rule)
+    clash_depth: int = 2          # clashes chained in one row (multi-segment attacks, the two-sided rule)
+    clash_deadline_ms: float | None = None   # the clash pass starts no level that would end past this many ms from the
+    #                                           tick's start (it costs about what its last level did); None:
+    #                                           deadline_ms + 2 (inf: deterministic)
 
 
 @dataclass
@@ -154,15 +173,18 @@ class EnvelopeAudit:
     uncapped_rows: int = 0
     core_not_enveloped: int = 0   # core rows past stage 1 left without the envelope (must stay 0)
     clash_ticks: int = 0          # ticks the clash branch ran (no safe row, clash on)
+    clash_tier_skip: int = 0      # ... skipped: the tier is not in clash_tiers, or a pause is pending
+    clash_cut: int = 0            # ... stopped before a level by clash_deadline_ms
     clash_rows: int = 0           # rows it made safe
     clash_chosen: int = 0         # chosen plans that rely on a clash
     clash_cand: int = 0           # rows the branch looked at (in contact, a swing, latest contact first, capped)
     clash_inwin: int = 0          # ... whose first contact fell in a swing's active window (per clash level)
     clash_owned: int = 0          # ... in contact there with an enemy in an attack of its own
+    clash_off_state: int = 0      # ... with an owner in a clashable family outside its clashable states there
     clash_known: int = 0          # ... all of them clashable with that slot on the slash's side (clash.json)
     clash_stops: int = 0          # ... of which an attack the clash ends (PARRY_STOPS)
-    clash_partial: int = 0        # rows still in contact after one clash or more (FORCED_RISK ranks their branch)
-    clash_partial_chosen: int = 0 # chosen FORCED_RISK plans that are partial clashes
+    clash_partial: int = 0        # rows in FORCED_RISK's ranking with their branch's share (partial, or w below min_p)
+    clash_partial_chosen: int = 0 # chosen FORCED_RISK plans that are such rows
     clash_ms: float = 0.0         # time in the clash branch
 
     def as_dict(self) -> dict:
@@ -345,28 +367,104 @@ def forum_yellow_kill_hp(mf, freeze: dict[str, float], z: float = KILL_Z, min_fr
 KIND_SLOT = {K_SIDE: "side", K_UP: "up", K_WALL: "wall", K_DOWN: "down"}
 
 
+def _wilson_lb(k: float, n: float, z: float = 1.96) -> float:
+    if n <= 0:
+        return 0.0
+    p = k / n
+    return max(0.0, (p + z * z / (2 * n) - z * math.sqrt(p * (1 - p) / n + z * z / (4 * n * n))) / (1 + z * z / n))
+
+
 @dataclass
 class ClashTable:
-    """The EV_CLASH branch's failure probability per (type, attack family, slot) (knowledge/<build>/enemies/forum/
-    clash.json, ssbot.tools.forum_clash_stats --table): the share of the recorded swings whose active window held the
-    enemy's first contact and that were hit by it anyway (Wilson 95 % upper bound). A key that is not there is not
-    clashable (no clash collider in the family, the type's moves never clash: every body, the Clapper, the Clawmaiden
-    spear, the Bellbearer bell, the Tinies; or too few samples)."""
+    """The EV_CLASH branch's rates per (type, attack family, slot) (knowledge/<build>/enemies/forum/clash.json,
+    ssbot.tools.forum_clash_stats --table), over the recorded swings whose clash reach met the enemy's attack first or
+    whose active window held its first contact, in the family's clashable states: p (p_fail) the Wilson 95 % upper
+    bound of the share hit anyway, q (p_clash_lb) the lower bound of the share that clashed (a setup that neither
+    clashed nor was hit gave none of the clash's effects), both at the attack instances behind them; crest_rows: a
+    crest's own bounds where it has min_n instances. states: the Control states a family's clashes happen in (a contact
+    from another state of it is not clashable; None for a table without them: the whole family). A key that is not
+    there is not clashable (no clash collider in the family, the type's moves never clash: every body, the Clapper, the
+    Clawmaiden spear, the Bellbearer bell, the Tinies; or too few samples)."""
     p: dict
+    q: dict = field(default_factory=dict)
+    states: dict = field(default_factory=dict)
+    crest_rows: dict = field(default_factory=dict)
 
     @classmethod
     def load(cls, path=None) -> "ClashTable":
         import json
         from ssbot.combat.enemy_tables import FORUM_DIR
         d = json.loads(Path(path or FORUM_DIR / CLASH_FILE).read_text("utf-8"))
-        return cls({tuple(k.split("|")): float(v["p_fail"]) for k, v in (d.get("p_fail") or {}).items()})
+        min_n = int(d.get("min_n") or 10)
+        p, q, cr = {}, {}, {}
+        for k, v in (d.get("p_fail") or {}).items():
+            key = tuple(k.split("|"))
+            p[key] = float(v["p_fail"])
+            # a table from before the clash share: the lower bound from its counts
+            q[key] = float(v["p_clash_lb"]) if "p_clash_lb" in v else _wilson_lb(float(v.get("clash") or 0),
+                                                                                  float(v.get("n") or 0))
+            for crest, c in (v.get("by_crest") or {}).items():
+                if "p_clash_lb" in c and int(c.get("n_eff") or 0) >= min_n:
+                    cr[(crest,) + key] = (float(c["p_fail"]), float(c["p_clash_lb"]))
+        st = {tuple(k.split("|")): frozenset(v) for k, v in (d.get("clash_states") or {}).items()}
+        return cls(p, q, st, cr)
 
     def p_fail(self, tk: str, family: str | None, slot: str) -> float | None:
         return None if family is None else self.p.get((tk, family, slot))
 
+    def rate(self, tk: str, family: str | None, slot: str, crest: str | None = None) -> tuple[float, float] | None:
+        """(p_fail, p_clash_lb), the crest's own where it has them; None: not clashable."""
+        key = (tk, family, slot)
+        if family is None or key not in self.p:
+            return None
+        return self.crest_rows.get((crest,) + key) or (self.p[key], self.q.get(key, 0.0))
+
+    def clash_states(self, tk: str, family: str) -> frozenset | None:
+        return self.states.get((tk, family)) if self.states else None
+
     def families(self) -> set[tuple[str, str]]:
         """(type, family) with a clashable slot."""
         return {(tk, fam) for tk, fam, _ in self.p}
+
+
+def clash_windows(tt, family: str, state: str | None, t_entry: float | None, T0: float, clash_states: frozenset,
+                  stop_states: frozenset, horizon: float) -> list[tuple[float, float, bool]]:
+    """[(lo, hi, stop)]: the game-time spans in which an enemy now in `state` (entered at t_entry) of its attack
+    `family` may be in each of the family's clashable states (TypeTable's logged dwell (min, max) and successors,
+    inside the family: a decision state ends the attack), stop: that state is a PARRIED-catching one. Empty when no
+    clashable state is current or ahead (a recovery state: Charge End, Stab Recover, ...). Capped at T0 + horizon."""
+    fam = tt.families.get(family)
+    if fam is None or state is None or t_entry is None or state not in fam.states:
+        return []
+    inside = set(fam.states)
+    cap = T0 + horizon
+    lo, hi = {state: t_entry}, {state: t_entry}
+
+    def exits(s):
+        dmin, dmax = tt.dwell.get(s, (0.0, horizon))
+        if s == state:                           # still in it at T0: it may end any time from then
+            return max(t_entry + dmin, T0), max(t_entry + dmax, T0)
+        return lo[s] + dmin, hi[s] + dmax
+    for _ in range(len(inside)):
+        changed = False
+        for s in list(lo):
+            x_lo, x_hi = exits(s)
+            for t in tt.succ.get(s, ()):
+                if t not in inside or t in tt.decision_states or x_lo > cap:
+                    continue
+                if t not in lo or x_lo < lo[t]:
+                    lo[t] = x_lo
+                    changed = True
+                h2 = min(x_hi, cap)
+                if t not in hi or h2 > hi[t]:
+                    hi[t] = h2
+                    changed = True
+        if not changed:
+            break
+    out = []
+    for s in sorted(clash_states & set(lo)):
+        out.append((lo[s], min(exits(s)[1], cap), s in stop_states))
+    return out
 
 
 def swings(flags: np.ndarray, mode: np.ndarray, latched: np.ndarray, box: np.ndarray, face0: int,
@@ -413,6 +511,19 @@ class ForumPlanner(Planner):
         self.combo_f = WANDERER_COMBO_F if crest == "Wanderer" else 0
         self.clash_tab = ClashTable.load() if self.fcfg.clash else None
         self.clash_fams = self.clash_tab.families() if self.clash_tab is not None else set()
+        # the clash reach per kind: the slot's Clash Tink box (x0, x1, y0, y1; facing frame, from the hero collider
+        # centre), else its damage polygons' bounding box
+        tab = AttackTable.load(crest)
+        self.reach = {}
+        for kind, s in ((K_SIDE, "normal"), (K_UP, "up"), (K_WALL, "wall"), (K_DOWN, "down")):
+            sh = tab.shapes.get(s) or tab.shapes.get("normal")
+            if sh.clash_box:
+                self.reach[kind] = tuple(float(v) for v in sh.clash_box)
+            else:
+                p = np.concatenate(sh.polys)
+                self.reach[kind] = (float(p[:, 0].min()), float(p[:, 0].max()), float(p[:, 1].min()),
+                                    float(p[:, 1].max()))
+        self._clash_lvl_ms = 0.0          # the clash pass's first level, running mean (its deadline check)
         self.audit = EnvelopeAudit()
         self.last_info: dict = {}
 
@@ -577,62 +688,145 @@ class ForumPlanner(Planner):
             occ[qs] = o
         return occ
 
-    def _clash_pass(self, f, start, latched, sc, S, ok, hz, tk, enemy_only, ctx, t_hit) -> dict:
+    def _reach_first(self, f, bound: np.ndarray, tk: np.ndarray, k0: int, j_hi: int, kind: int, face: int,
+                     iids) -> int:
+        """The earliest frame in [k0, j_hi] on which the swing's clash reach (placed on the hull's centres) can meet
+        the support of the enemies iids (a lower bound of the clash frame: the support holds the body too); j_hi
+        when it cannot before."""
+        if j_hi <= k0:
+            return j_hi
+        x0, x1, y0, y1 = self.reach[kind]
+        fx0, fx1 = sorted((face * x0, face * x1))
+        hx, hy = f.fc.half
+        ks = np.arange(k0 - 1, j_hi + 1)             # one frame before: _contacts_only clears its first frame
+        b = bound[ks]
+        cx0, cx1 = b[:, 0] + hx, b[:, 2] - hx
+        cy0, cy1 = b[:, 1] + hy, b[:, 3] - hy
+        mx, my = 0.5 * (cx0 + cx1), 0.5 * (cy0 + cy1)
+        cx0, cx1 = np.minimum(cx0, mx), np.maximum(cx1, mx)
+        cy0, cy1 = np.minimum(cy0, my), np.maximum(cy1, my)
+        rb = np.stack([cx0 + fx0, cy0 + y0, cx1 + fx1, cy1 + y1], axis=1)[None]
+        o = self._contacts_only(f, rb, np.ascontiguousarray(tk[ks]), np.zeros(rb.shape[:2], bool), list(iids))[0]
+        o[0] = False
+        return int(ks[int(np.argmax(o))]) if o.any() else j_hi
+
+    def _owner_rule(self, owners, kind: int, face: int, cx: float, cy: float, ta: float, tb: float, cw: dict
+                    ) -> tuple[list, list, bool]:
+        """The enemies in contact at a planned clash (owners: their trackers): (rates [(p_fail, p_clash_lb)] and
+        clashed [(tracker, stop)] of those whose current family the table clashes with this slot, on the slash's side
+        (side: in front of the facing, up: above, down: below), that may be in a clashable state in [ta, tb] (cw: their
+        clash_windows), blocked). The clash needs one such committed attack; another enemy in contact at the same
+        frame must not be in an attack of its own (a committed one outside its clashable states included: its contact
+        is not clashable; an idle one's support there is its body tube and the attacks it may start, none of which
+        strikes within 0.4 s of its start, forum.md 12: the parry i-frames cover the frames after the clash; its later
+        contacts come up again on the next level)."""
+        rates, clashed, other = [], [], False
+        for tr in owners:
+            fam = tr.cur.family if tr.cur is not None and tr.cur.t_end is None else None
+            rt = self.clash_tab.rate(tr.tk, fam, KIND_SLOT[kind], self.crest)
+            dx, dy = tr.pos[0] - cx, tr.pos[1] - cy
+            side_ok = (kind == K_SIDE and dx * face >= 0) or (kind == K_UP and dy > 0) or \
+                (kind == K_DOWN and dy < 0) or kind == K_WALL
+            spans = [w for w in cw.get(tr.iid, ()) if w[0] <= tb and w[1] >= ta]
+            if rt is not None and side_ok and spans:
+                rates.append(rt)
+                clashed.append((tr, all(w[2] for w in spans)))
+            elif fam is not None and fam != tr.table.spec.idle_family:
+                other = True
+                self.audit.clash_off_state += int(rt is not None and side_ok)
+        return rates, clashed, other
+
+    def _clash_pass(self, f, start, latched, sc, S, ok, hz, tk, enemy_only, ctx, t_hit, t0: float) -> dict:
         """EV_CLASH (forum_planner_plan R8): for up to clash_k rows in contact the clash branch (the latest first
         contact first, then the row index: never J, so whether a tick ends in FORCED_RISK does not depend on the prefs,
-        §4.4 item 2). A row's first
-        contact (the envelope) must fall in a swing's active window (crest table) and come from an enemy whose current
-        attack family can be clashed with that slot (ClashTable), on the slash's side of the hero (side: in front of
-        the facing, up: above, down: below), with no other enemy in contact there in an attack of its own; the clash is put on the frame before the contact (the clash reach lies
-        outside the hurtbox) or the window's first frame. Success branch: no enemy damage for PARRY_INVULN_F frames
-        from the clash frame (parryInvulnTimer covers every ENEMY hazard: the two-sided rule), the direction's recoil
-        (side: away from the facing, up: RecoilDown, down: the bounce; a wall slash none), the attack reset
-        PARRY_RECOVER_F frames later (EV_PARRY_RECOVER: the next swing may come at once); its next contact may be
-        clashed again (a later segment of a multi-hit attack, the other side) up to clash_depth times; a clash on an
-        attack whose FSM catches PARRIED (PARRY_STOPS: the Envoy's charge, the Reed's counter) ends that attack
-        (_clash_contacts). A row whose success branch is clean gets p_fail = 1 - prod(1 - p_k); a row whose branch
-        clashed at least once and then met a contact it cannot clash (another enemy's support, an attack not in the
-        table) keeps that branch's contact for FORCED_RISK's ranking. Returns {row: (p_fail, clashes, first contact
-        left (T1: clean), the branch's contact [T1] or None when clean)}, clean rows with p_fail <= clash_max_fail,
-        partial ones with p_fail <= clash_partial_max_fail."""
+        Â§4.4 item 2). Only in the tiers clash_tiers (DESIGN 3.5.6: GREEN), never with a pause pending, with h >=
+        clash_min_h. A row's first contact (the envelope) must fall in a swing's active window (crest table: the clash
+        frame below inside [k_s + f0, k_s + f1], the frames the kernel scores) and come from an enemy whose current
+        attack family can be clashed with that slot (ClashTable) and that may be in one of the family's clashable
+        Control states at the clash (clash_windows: a contact from its antic body or its recovery is not clashable),
+        on the slash's side of the hero (side: in front of the facing, up: above, down: below); another enemy in
+        contact there in an attack of its own (a committed one outside its clashable states included) blocks it. The
+        clash is put on the frame before the contact (the clash reach lies outside the hurtbox) or the window's first
+        frame (j_hi); the reach can meet the support from j_lo (_reach_first) on, so the parry i-frames (no enemy
+        damage: parryInvulnTimer covers every ENEMY hazard, the two-sided rule) are the frames covered whichever frame
+        in [j_lo, j_hi] the clash takes: [j_hi, j_lo + PARRY_INVULN_F). The direction's recoil (side: away from the
+        facing, up: RecoilDown, down: the bounce; a wall slash none) and the attack reset PARRY_RECOVER_F frames later
+        (EV_PARRY_RECOVER: the next swing may come at once) on j_hi; its next contact may be clashed again (a later
+        segment of a multi-hit attack, the other side) up to clash_depth times; a clash in a PARRIED-catching state
+        (PARRY_STOPS: the Envoy's charge, the Reed's counter) ends that attack (_clash_contacts). The deadline: no level
+        starts that would end past clash_deadline_ms (it costs about what the last one did). Returns {row: (w, p_hit,
+        clashes, first contact left (T1: clean), the branch's contact [T1] or None when clean)} for rows with at least
+        one clash and w >= clash_partial_min_p, w = prod(p_clash_lb) (every clash happens), p_hit = 1 - prod(1 -
+        p_fail)."""
         fcfg = self.fcfg
+        au = self.audit
         mf = getattr(f, "_fc", None)
         h = getattr(ctx, "h", None)
-        if mf is None or self.clash_tab is None or not hasattr(mf, "trackers") or \
+        if mf is None or self.clash_tab is None or not fcfg.clash_branch or not hasattr(mf, "trackers") or \
                 (h is not None and h < fcfg.clash_min_h):
+            return {}
+        if getattr(ctx, "pause_pending", False) or getattr(ctx, "tier", GREEN) not in fcfg.clash_tiers:
+            au.clash_tier_skip += 1
             return {}
         cand = np.flatnonzero(ok & ~hz & S & (sc["sw_f"] >= 1))
         if not len(cand):
             return {}
-        cand = cand[np.lexsort((cand, -t_hit[cand]))][:fcfg.clash_k]
-        n = len(cand)
-        au = self.audit
-        au.clash_cand += n
         T = latched.shape[1]
         T1 = T + 1
-        lat = np.ascontiguousarray(latched[cand])
+        T0 = float(f.origin_t)
+        hor = float(tk[-1]) + float(tk[1] - tk[0])
+        fr_s = float(tk[1] - tk[0])
+        # only enemies in an attack of their own can own a contact that matters here (an idle one never stops a clash,
+        # see the attribution below); the clashable spans of those in a clashable family: without one in the horizon
+        # no row can clash
+        trs = {iid: tr for iid, tr in mf.trackers.items() if tr.in_play and not tr.dead and tr.pos is not None
+               and tr.cur is not None and tr.cur.t_end is None and tr.cur.family != tr.table.spec.idle_family}
+        cw: dict = {}
+        for iid, tr in trs.items():
+            if (tr.tk, tr.cur.family) not in self.clash_fams:
+                continue
+            cs_ = self.clash_tab.clash_states(tr.tk, tr.cur.family)
+            if cs_ is None:
+                w_ = [(-math.inf, math.inf, False)]
+            else:
+                w_ = clash_windows(tr.table, tr.cur.family, tr.state, tr.t_entry, T0, cs_,
+                                   frozenset(s for t2, s in PARRY_STOPS if t2 == tr.tk), hor)
+            w_ = [x for x in w_ if x[1] >= T0 and x[0] <= T0 + hor]
+            if w_:
+                cw[iid] = w_
+        if not cw:
+            return {}
+        deadline = fcfg.clash_deadline_ms if fcfg.clash_deadline_ms is not None else fcfg.deadline_ms + 2.0
+        if (time.perf_counter() - t0) * 1e3 + self._clash_lvl_ms > deadline:
+            au.clash_cut += 1
+            return {}
+        # rows whose first swing is out at their first contact first (the nominal lane's swing, the contact's
+        # estimate), then the latest first contact, then the row index
         win = self.shapes[3]
+        si = np.clip(sc["sw_k"][cand] - 1, 0, len(win) - 1)
+        k_on, th = sc["sw_f"][cand] + win[si, 0], t_hit[cand]
+        inw = (k_on <= th) & (np.maximum(th - 1, k_on) < sc["sw_f"][cand] + win[si, 1])
+        cand = cand[np.lexsort((cand, -th, ~inw))][:fcfg.clash_k]
+        n = len(cand)
+        au.clash_cand += n
+        lat = np.ascontiguousarray(latched[cand])
         slot_i = {K_SIDE: 0, K_UP: 1, K_WALL: 2, K_DOWN: 3}
         face0 = 1 if np.asarray(start).reshape(kin.K, -1)[kin.FACE, 0] >= 0 else -1
         ev = np.zeros((n, T), np.int64)
         inv = np.zeros((n, T1), bool)
-        p_ok = np.ones(n)
+        w_ok = np.ones(n)                            # prod p_clash_lb: every clash so far happens
+        h_ok = np.ones(n)                            # prod (1 - p_fail)
         ncl = np.zeros(n, np.int64)
         alive = np.ones(n, bool)
         last_cl = np.full(n, -100, np.int64)
         stops: list[dict] = [{} for _ in range(n)]
         part: dict[int, tuple] = {}                  # row m -> (first contact, contact [T1]) after its clashes so far
-        # only enemies in an attack of their own can own a contact that matters here (an idle one never stops a clash,
-        # see the attribution below); without one in a clashable attack no row can clash
-        trs = {iid: tr for iid, tr in mf.trackers.items() if tr.in_play and not tr.dead and tr.pos is not None
-               and tr.cur is not None and tr.cur.t_end is None and tr.cur.family != tr.table.spec.idle_family}
-        if not any((tr.tk, tr.cur.family) in self.clash_fams for tr in trs.values()):
-            return {}
         out = {}
         for depth in range(fcfg.clash_depth + 1):
             idx = np.flatnonzero(alive)
             if not len(idx):
                 break
+            tl = time.perf_counter()
             r2 = kin.rollout(start, lat[idx], self.params, self.terrain, events=ev[idx], variants=fcfg.variants,
                              threads=self.cfg.threads)
             skip = ((r2.flags_all & F_INVULN) != 0) if enemy_only else np.zeros(r2.flags_all.shape, bool)
@@ -642,86 +836,85 @@ class ForumPlanner(Planner):
                 if not hit[q]:
                     alive[m] = False
                     if ncl[m] > 0:
-                        out[int(cand[m])] = (1.0 - float(p_ok[m]), int(ncl[m]), T1, None)
+                        out[int(cand[m])] = (float(w_ok[m]), 1.0 - float(h_ok[m]), int(ncl[m]), T1, None)
                 elif ncl[m] > 0:
                     part[m] = (int(np.argmax(occ[q])), occ[q].copy())
+            lvl_ms = (time.perf_counter() - tl) * 1e3
+            if depth == 0:
+                self._clash_lvl_ms = 0.8 * self._clash_lvl_ms + 0.2 * lvl_ms
             if depth == fcfg.clash_depth:
                 break
+            if (time.perf_counter() - t0) * 1e3 + lvl_ms > deadline:
+                au.clash_cut += 1
+                break
             # the swing out at each pending row's first contact
-            plan = []                                # (m, t_c, j_c, kind, face, cx, cy)
+            plan = []                                # (m, q, t_c, j_hi, k_on, kind, face, cx, cy)
             for q, m in enumerate(idx):
                 if not hit[q]:
                     continue
                 t_c = int(np.argmax(occ[q]))
                 got = None
                 for k_s, kind, face in swings(r2.flags[q], r2.mode[q], lat[m], r2.box[q], face0, self.down_slash):
-                    a, b = int(win[slot_i[kind], 0]), int(win[slot_i[kind], 1])
-                    if k_s + a <= t_c <= k_s + b and k_s + a >= 1:
-                        got = (max(t_c - 1, k_s + a), kind, face)
-                if got is None or got[0] - last_cl[m] <= PARRY_INVULN_F:
+                    a, b = int(win[slot_i[kind], 0]), int(win[slot_i[kind], 1])     # active frames [k_s + a, k_s + b)
+                    j = max(t_c - 1, k_s + a)
+                    if k_s + a >= 1 and k_s + a <= t_c and j < k_s + b:
+                        got = (j, kind, face, k_s + a)
+                if got is None or got[0] <= last_cl[m]:
                     alive[m] = False
                     continue
                 au.clash_inwin += 1
                 bx = r2.bound[q, t_c]
-                plan.append((m, t_c, got[0], got[1], got[2], 0.5 * (bx[0] + bx[2]), 0.5 * (bx[1] + bx[3])))
+                plan.append((m, q, t_c, got[0], got[3], got[1], got[2], 0.5 * (bx[0] + bx[2]),
+                             0.5 * (bx[1] + bx[3])))
             if not plan:
                 break
             # who is in contact at t_c (each enemy's own support at the hull centre), grouped by contact frame
             owners: dict[int, list] = {e[0]: [] for e in plan}
             by_t: dict[int, list] = {}
             for e in plan:
-                by_t.setdefault(e[1], []).append(e)
+                by_t.setdefault(e[2], []).append(e)
             for t_c, es in by_t.items():
-                X = np.array([[e[5]] for e in es])
-                Y = np.array([[e[6]] for e in es])
+                X = np.array([[e[7]] for e in es])
+                Y = np.array([[e[8]] for e in es])
                 tt = tk[t_c:t_c + 1]
                 for iid, tr in trs.items():
-                    if not any(abs(tr.pos[0] - e[5]) < 12.0 and abs(tr.pos[1] - e[6]) < 12.0 for e in es):
+                    if not any(abs(tr.pos[0] - e[7]) < 12.0 and abs(tr.pos[1] - e[8]) < 12.0 for e in es):
                         continue
                     o = f.occupied_only(X, Y, tt, [iid])[:, 0]
                     for e, hit_e in zip(es, o):
                         if hit_e:
                             owners[e[0]].append(tr)
-            for m, t_c, j_c, kind, face, cx, cy in plan:
-                ps, clashed, other = [], [], False
-                for tr in owners[m]:
-                    fam = tr.cur.family if tr.cur is not None and tr.cur.t_end is None else None
-                    p = self.clash_tab.p_fail(tr.tk, fam, KIND_SLOT[kind])
-                    dx, dy = tr.pos[0] - cx, tr.pos[1] - cy
-                    side_ok = (kind == K_SIDE and dx * face >= 0) or (kind == K_UP and dy > 0) or \
-                        (kind == K_DOWN and dy < 0) or kind == K_WALL
-                    if p is not None and side_ok:
-                        ps.append(p)
-                        clashed.append(tr)
-                    elif fam is not None and fam != tr.table.spec.idle_family:
-                        other = True
-                # the clash needs one committed clashable attack there; another enemy in contact at the same frame
-                # must not be in an attack of its own (an idle one's support there is its body tube and the attacks
-                # it may start, none of which strikes within 0.4 s of its start, forum.md 12: the parry i-frames
-                # cover the frames after the clash; its later contacts come up again on the next level)
+            for m, q, t_c, j_hi, k_on, kind, face, cx, cy in plan:
+                rates, clashed, other = self._owner_rule(owners[m], kind, face, cx, cy,
+                                                         T0 + float(tk[j_hi]) - fr_s, T0 + float(tk[t_c]) + fr_s, cw)
                 au.clash_owned += int(bool(owners[m]))
-                if not ps or other:
+                if not rates or other:
                     alive[m] = False
                     continue
                 au.clash_known += 1
-                for tr in clashed:
-                    if (tr.tk, tr.cur.family) in PARRY_STOPS:
-                        stops[m].setdefault(tr.iid, (j_c, tr.tk))
+                w_new = w_ok[m] * min(r[1] for r in rates)
+                if w_new < fcfg.clash_partial_min_p:
+                    alive[m] = False                 # too unlikely to rank on: the branch so far stays (part)
+                    continue
+                for tr, stop in clashed:
+                    if stop:
+                        stops[m].setdefault(tr.iid, (j_hi, tr.tk))
                         au.clash_stops += 1
-                p_ok[m] *= 1.0 - max(ps)
+                j_lo = self._reach_first(f, r2.bound[q], tk, k_on, j_hi, kind, face, [tr.iid for tr, _ in clashed])
+                w_ok[m] = w_new
+                h_ok[m] *= 1.0 - max(r[0] for r in rates)
                 ncl[m] += 1
-                last_cl[m] = j_c
+                last_cl[m] = j_hi
                 bit = kin.EV_POGO if kind == K_DOWN else kin.EV_RECOIL_DOWN if kind == K_UP else \
                     0 if kind == K_WALL else (kin.EV_RECOIL_L if face > 0 else kin.EV_RECOIL_R)
-                if j_c < T:
-                    ev[m, j_c] |= bit
-                if j_c + PARRY_RECOVER_F < T:
-                    ev[m, j_c + PARRY_RECOVER_F] |= kin.EV_PARRY_RECOVER
-                inv[m, j_c:j_c + PARRY_INVULN_F + 1] = True
+                if j_hi < T:
+                    ev[m, j_hi] |= bit
+                if j_hi + PARRY_RECOVER_F < T:
+                    ev[m, j_hi + PARRY_RECOVER_F] |= kin.EV_PARRY_RECOVER
+                inv[m, j_hi:max(j_hi, j_lo + PARRY_INVULN_F)] = True
         for m, (tn, oc) in part.items():
-            out.setdefault(int(cand[m]), (1.0 - float(p_ok[m]), int(ncl[m]), tn, oc))
-        return {i: v for i, v in out.items()
-                if v[0] <= (fcfg.clash_max_fail if v[3] is None else fcfg.clash_partial_max_fail)}
+            out.setdefault(int(cand[m]), (float(w_ok[m]), 1.0 - float(h_ok[m]), int(ncl[m]), tn, oc))
+        return {i: v for i, v in out.items() if v[0] >= fcfg.clash_partial_min_p}
 
     @staticmethod
     def _s1_frames(T1: int) -> np.ndarray:
@@ -899,27 +1092,29 @@ class ForumPlanner(Planner):
                 budget["uncapped"] = len(cr)
         clash_p = np.zeros(N)
         clash_n = np.zeros(N, np.int64)
-        clash_occ: dict = {}                      # row -> (p_fail, its clash branch's contact [T1]): a partial clash
-        if fcfg.clash and not (env & ok & ~S & ~hz).any():
+        clash_w = np.zeros(N)
+        clash_occ: dict = {}                      # row -> (w, its clash branch's contact [T1] or None: clean)
+        if fcfg.clash and fcfg.clash_branch and not (env & ok & ~S & ~hz).any():
             # no safe row: the clash branch (the plan's "成功率高的招不再逼出 FORCED_RISK"); plain safe rows always
             # come first, so it never runs on a tick that has one
             self.audit.clash_ticks += 1
             tcl = time.perf_counter()
-            cl = self._clash_pass(f, start, latched, sc, S, ok, hz, tk, enemy_only, ctx, t_hit)
+            cl = self._clash_pass(f, start, latched, sc, S, ok, hz, tk, enemy_only, ctx, t_hit, t0)
             self.audit.clash_ms += (time.perf_counter() - tcl) * 1e3
-            for i, (pf, nc, tn, oc) in cl.items():
+            for i, (w, ph, nc, tn, oc) in cl.items():
                 clash_n[i] = nc
-                if oc is None:
+                clash_w[i] = w
+                if oc is None and w >= fcfg.clash_min_p and ph <= fcfg.clash_max_fail:
                     S[i] = False
                     env[i] = True
                     t_hit[i] = T1
-                    clash_p[i] = pf
+                    clash_p[i] = 1.0 - w
                     self.audit.clash_rows += 1
                 else:
-                    # still in contact after its clashes (another enemy's support, an attack it cannot clash): S = 1;
-                    # FORCED_RISK ranks it by the branch's contact (the first contact left, the share in contact)
-                    clash_occ[i] = (pf, oc)
-                    t_hit[i] = max(int(t_hit[i]), tn)
+                    # in contact after its clashes (another enemy's support, an attack it cannot clash), or clean but
+                    # not likely enough: S = 1; FORCED_RISK ranks it by w x the branch's share + (1 - w) x the plain
+                    # row's (its first contacts stay the plain row's)
+                    clash_occ[i] = (w, oc)
                     self.audit.clash_partial += 1
         t4 = time.perf_counter()
         known = env | S1
@@ -945,6 +1140,10 @@ class ForumPlanner(Planner):
         if forced and sel.any():
             cand = np.flatnonzero(sel)
             cand = cand[np.lexsort((-J[cand], -t_hit[cand]))][:fcfg.p_k]
+            # the rows with a clash branch are ranked whatever their first contact (their branch is the point)
+            cset = set(int(i) for i in cand)
+            cand = np.concatenate([cand, np.array(sorted(i for i in clash_occ if sel[i] and i not in cset),
+                                                  np.int64)]).astype(np.int64)
             # the candidates on one lane over one frame set: the nominal box's centre against the support on stage
             # 1's frames (its exact test, known for every row), or'ed with the hit branch's contact there (its hull;
             # from the hit frame on where a cap left it unchecked): the share of those frames in contact and the
@@ -954,10 +1153,6 @@ class ForumPlanner(Planner):
                 h = hit_occ.get(int(i))
                 if h is not None:
                     on[m] |= h[fr]
-            # a partial clash: the clash branch's contact on the frame set (the share weighted by p_fail below)
-            pc_fail = {m: (clash_occ[int(i)][0], on[m].mean()) for m, i in enumerate(cand) if int(i) in clash_occ}
-            for m in pc_fail:
-                on[m] = clash_occ[int(cand[m])][1][fr]
             kc = on.argmax(axis=1)
             t_c[cand] = np.where(on.any(axis=1), np.where(kc > 0, fr[np.maximum(kc - 1, 0)] + 1, fr[0]), T1)
             if fcfg.exact_p:
@@ -965,8 +1160,10 @@ class ForumPlanner(Planner):
                 Pc[cand] = f.prob(0.5 * (b[..., 0] + b[..., 2]), 0.5 * (b[..., 1] + b[..., 3]), tk)
             else:
                 Pc[cand] = on.mean(axis=1)
-            for m, (pf, p0) in pc_fail.items():
-                Pc[cand[m]] = pf * p0 + (1.0 - pf) * Pc[cand[m]]
+            for m, i in enumerate(cand):
+                if int(i) in clash_occ:
+                    w, oc = clash_occ[int(i)]
+                    Pc[i] = clash_mix(w, 0.0 if oc is None else float(oc[fr].mean()), float(Pc[i]))
             sel = np.zeros(N, bool)
             sel[cand] = True
         zero = ~cmd.any(axis=1)
@@ -1013,8 +1210,7 @@ class ForumPlanner(Planner):
                              bool(hz[i]), bool(U[i]), N, int(ok.sum()), int(safe.sum()), sel_cmd, r1.box[i].copy(),
                              bound[i].copy(), hits=float(sc["hits"][i]))
             res.tail_ok = tail_ok
-            res.clash = (float(clash_occ[i][0] if i in clash_occ else clash_p[i]), int(clash_n[i]),
-                         i in clash_occ) if clash_n[i] else None
+            res.clash = (float(clash_w[i]), int(clash_n[i]), i in clash_occ) if clash_n[i] else None
             a.clash_chosen += int(clash_n[i] > 0 and i not in clash_occ)
             a.clash_partial_chosen += int(i in clash_occ)
             if may_kill[i] or in_flight[i]:

@@ -95,7 +95,7 @@ def config_fp(encounter: str, policy: str, mode: str, view: str, rev: str | None
 
 def make_policy(name: str, view: str = "oracle", run_dir: Path | None = None, instance: int = 0,
                 threads: int = 8, real_quit: float = 0.0, inject_hits: float = 0.0, gauntlet: bool = False,
-                key_cost: tuple[float, ...] | None = None, crest: str = "Reaper", clash: bool = False):
+                key_cost: tuple[float, ...] | None = None, crest: str = "Reaper", clash: bool | str = False):
     if name == "data":
         from ssbot.train.data_policy import DataPolicy, GauntletDataPolicy
         return GauntletDataPolicy() if gauntlet else DataPolicy()
@@ -423,8 +423,8 @@ def run(a: argparse.Namespace) -> int:
         tag += f"_x{a.time_scale:g}"
     if a.inject_hits > 0:
         tag += "_inject"
-    if a.forum_clash:
-        tag += "_clash"
+    if a.forum_clash != "off":
+        tag += {"on": "_clash", "yellow": "_clashY", "cont": "_clashC"}[a.forum_clash]
     run_dir = new_run_dir(a.encounter if "," not in a.encounter else a.encounter.split(",")[0] + "_mix", tag)
     (run_dir / "config.json").write_text(json.dumps({**vars(a), "env": env_overrides()}, indent=1, default=str),
                                          encoding="utf-8")
@@ -443,8 +443,8 @@ def run(a: argparse.Namespace) -> int:
             cmd += ["--time-scale", str(a.time_scale)]
         if a.same_seeds:
             cmd.append("--same-seeds")
-        if a.forum_clash:
-            cmd.append("--forum-clash")
+        if a.forum_clash != "off":
+            cmd += ["--forum-clash", a.forum_clash]
         if a.key_cost:
             cmd += ["--key-cost"] + [str(v) for v in a.key_cost]
         if a.start_hp:
@@ -587,9 +587,10 @@ def main(argv: list[str] | None = None) -> int:
         p.add_argument("--encounter", default="BellBeast")
         p.add_argument("--mode", choices=("data", "eval"), default="data")
         p.add_argument("--policy", default="data")
-        p.add_argument("--forum-clash", action="store_true",
-                       help="Forum planner policy: the R8 EV_CLASH branch (ForumConfig.clash; the crest follows the "
-                            "savestate: fo_W Wanderer, else Reaper)")
+        p.add_argument("--forum-clash", nargs="?", const="on", default="off", choices=("off", "on", "yellow", "cont"),
+                       help="Forum planner policy: the R8 EV_CLASH mode (forum_planner_policy.CLASH_MODES: on = GREEN "
+                            "only, yellow = GREEN and YELLOW (experiment), cont = the continuation rows only; the "
+                            "crest follows the savestate: fo_W Wanderer, else Reaper)")
         p.add_argument("--episodes", type=int, default=10)
         p.add_argument("--hours", type=float, default=0.0)
         p.add_argument("--rotate", type=int, default=25)

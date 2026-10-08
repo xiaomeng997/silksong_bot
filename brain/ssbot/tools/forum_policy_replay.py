@@ -27,7 +27,8 @@ def main(argv=None) -> int:
     ap.add_argument("--out", type=Path, default=None)
     ap.add_argument("--crest", default=None, help="the policy's crest (default: the recording's encounter: fo_W "
                                                   "Wanderer, else Reaper)")
-    ap.add_argument("--clash", action="store_true", help="the R8 EV_CLASH branch on")
+    ap.add_argument("--clash", nargs="?", const="on", default="off", choices=("off", "on", "yellow", "cont"),
+                    help="the R8 EV_CLASH mode (forum_planner_policy.CLASH_MODES)")
     a = ap.parse_args(argv)
     from ssbot.record.recorder import RecordingReader
     from ssbot.train.encounters import ENCOUNTERS

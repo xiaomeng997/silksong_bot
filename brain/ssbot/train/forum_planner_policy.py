@@ -60,6 +60,11 @@ FORUM_PARAMS = REPO / "knowledge" / "1.0.30000" / "kinematics" / "hero_reaper_fo
 # the Forum loadout's kinematics per crest (fo_A: Reaper; fo_W: Wanderer, the R8 clash arm)
 CREST_PARAMS = {"Reaper": FORUM_PARAMS,
                 "Wanderer": REPO / "knowledge" / "1.0.30000" / "kinematics" / "hero_wanderer_forum.json"}
+# the R8 clash modes (ForumConfig): on = the EV_CLASH branch and its continuation rows in GREEN only (DESIGN 3.5.6's
+# whitelist: no clash in YELLOW / RED or with a pause pending), yellow = also in YELLOW (the R8 experiment: the lead's
+# decision before any production use), cont = the continuation rows without the branch (the A/B's control for them)
+CLASH_MODES = {"off": {}, "on": {"clash": True}, "yellow": {"clash": True, "clash_tiers": ("GREEN", "YELLOW")},
+               "cont": {"clash": True, "clash_branch": False}}
 END_SLOW_S = 1.85          # EnemyBattleEndSlow in real time (forum.md §3): the final blow's unpausable window
 ANKLET = "Weighted Anklet"
 COG = kin.B_UP | kin.B_QUICKCAST
@@ -89,7 +94,7 @@ class ForumPlannerPolicy(PlannerPolicy):
 
     def __init__(self, view: str = "oracle", threads: int = 4, log_dir: Path | None = None, instance: int = 0,
                  real_quit_p: float = 0.0, playbook: Path | str | None = None, tables: EnemyTables | None = None,
-                 crest: str = "Reaper", clash: bool = False):
+                 crest: str = "Reaper", clash: bool | str = False):
         import cv2
         import numba
         numba.set_num_threads(threads)
@@ -97,8 +102,10 @@ class ForumPlannerPolicy(PlannerPolicy):
         if view != "oracle":
             raise ValueError("ForumPlannerPolicy: the oracle view only (the Forum's vision view is M3)")
         self.view, self.threads, self.instance = view, threads, instance
-        # the crest's kinematics and slash shapes; clash: the R8 EV_CLASH branch (ForumConfig.clash)
-        self.crest, self.clash = crest, clash
+        # the crest's kinematics and slash shapes; clash: the R8 EV_CLASH mode (CLASH_MODES; True = "on")
+        self.crest, self.clash = crest, {True: "on", False: "off"}.get(clash, clash)
+        if self.clash not in CLASH_MODES:
+            raise ValueError(f"clash mode {clash!r}: one of {sorted(CLASH_MODES)}")
         self.crest_seen: str | None = None
         self.params0 = HeroParams.load(CREST_PARAMS[crest])
         self.params = self.params0
@@ -140,7 +147,7 @@ class ForumPlannerPolicy(PlannerPolicy):
         self.fc.warm()
         planner = ForumPlanner(self.params, Terrain2D.empty(), PlannerConfig(T=36, threads=self.threads,
                                                                              variants="bounds_lo"),
-                               ForumConfig(clash=self.clash), crest=self.crest)
+                               ForumConfig(**CLASH_MODES[self.clash]), crest=self.crest)
         fcast = self.fc.forecast(HORIZON_S)
         for x, mode in ((30.0, kin.M_NORMAL), (33.0, kin.M_NORMAL), (36.0, kin.M_HURT_FREEZE)):
             ws = WorldState()
@@ -179,7 +186,7 @@ class ForumPlannerPolicy(PlannerPolicy):
         if self.planner is None:
             self.planner = ForumPlanner(self.params, self.terrain, PlannerConfig(T=36, threads=self.threads,
                                                                                  variants="bounds_lo"),
-                                        ForumConfig(clash=self.clash), crest=self.crest)
+                                        ForumConfig(**CLASH_MODES[self.clash]), crest=self.crest)
         self.planner.params = self.params
         self.planner.terrain = self.terrain
         self.planner.reset()
@@ -656,7 +663,8 @@ class ForumPlannerPolicy(PlannerPolicy):
                                              "cut", "overrun")},
                "pocket": self.tac.last.get("pocket_veto"), "subj": subj}
         if getattr(res, "clash", None):
-            # the chosen plan relies on a clash: p_fail, clashes, partial (still in contact after them: FORCED_RISK)
+            # the chosen plan relies on a clash: w (every clash in it happens), clashes, ranked in FORCED_RISK (partial,
+            # or w below clash_min_p)
             rec["clash"] = [round(res.clash[0], 4), res.clash[1], bool(res.clash[2])]
         hit = any(ev.get("k") in ("damage", "catastrophe", "would_die") for ev in s.get("ev") or ())
         event = hit or streak or (r.decision.pause_pending and self.counts["_pend_logged"] == 0)
