@@ -26,6 +26,7 @@ HP in both views from the hits the view saw (HIT_DEALT: the oracle's amount when
 the attack that dealt it, FORUM_HIT_DAMAGE), never from the exported HP.
 """
 import math
+import os
 from dataclasses import dataclass, field
 
 from ssbot.combat.boss_model import Anchor
@@ -34,6 +35,7 @@ from ssbot.core.worldstate import ORACLE, Entity, Ev, WorldState
 
 FACES_LEFT = (-1, 1)              # flipX False faces -x: mirror -1 (ssbot.knowledge.gauntlet_tables.FACES_LEFT)
 TAIL_KEEP_S = 7.0                 # tail_max_s (6 s) + 1 s
+HIT_BODY = os.environ.get("SSBOT_FORUM_HITBODY", "1") != "0"   # 0: the R4 hit targets (every collider, A/B)
 # Damage per hit by the attacking object (HitDealt.src, else .attack) in the Forum loadout (fo_A: Reaper, needle 1;
 # forum.md §9.2: Hornet's nail 9, Silk Spear 27, Garmond 5, Cogfly 3-4, a redirected bell 9); the vision view's HP
 # counts these (the oracle view takes HitDealt.amount when it has one)
@@ -84,13 +86,14 @@ class EnemyTracker:
     seen_T: float = -math.inf
     seen_box: tuple | None = None                  # its active damage boxes' bounding box when last seen
     box: tuple | None = None                       # ... this frame (None: none active or not exported)
-    body: tuple | None = None                      # its body polygons' bounding box when last seen (hit targets)
+    body: tuple | None = None                      # its hittable polygons' bounding box when last seen (hit targets)
     hp_est: float = 0.0
     hp_sd: float = 0.0
     hits: int = 0
     t: float = 0.0
     in_play: bool = False                          # its Control state is not a waiting one
     _var: float = 0.0
+    mem: object | None = None                      # combat.branch_model.BranchMemory (the branch model's history)
 
     def __post_init__(self) -> None:
         self.hp_est = float(self.table.spec.hp)
@@ -118,6 +121,8 @@ class EnemyTracker:
         """A Control state entry at game time T (SubjectTracker.transition)."""
         tb = self.table
         sp = tb.spec
+        if self.mem is not None:
+            self.mem.enter(self.state, to, T)
         self.state, self.t_entry = to, T
         self.in_play = to not in sp.waiting
         cur, idle = self.cur, sp.idle_family
@@ -204,9 +209,12 @@ class EnemyTracker:
         self.vel = (0.0 if math.isnan(v[0]) else float(v[0]), 0.0 if math.isnan(v[1]) else float(v[1]))
         self.seen_T = T
         self.seen_box = self.box
-        if e.body_polys:
-            xs = [p[0] for q in e.body_polys for p in q]
-            ys = [p[1] for q in e.body_polys for p in q]
+        # the hit target: the colliders a nail can hit (the oracle's hit_polys; the range triggers in body_polys span
+        # 5-47 u, forum.md §20), body_polys where the view has no hit_polys
+        polys = e.hit_polys if (HIT_BODY and getattr(e, "hit_polys", None)) else e.body_polys
+        if polys:
+            xs = [p[0] for q in polys for p in q]
+            ys = [p[1] for q in polys for p in q]
             self.body = (min(xs), min(ys), max(xs), max(ys))
         if self.cur is not None and self.cur.anchor is None:
             self.cur.anchor, self.cur.mirror, self.cur.sd = self.pos, FACES_LEFT[self.flip], self.pos_sd
@@ -217,6 +225,8 @@ class EnemyTracker:
         """HP from the hits seen: the oracle's amount (an O field: None in the vision view), else the price of the
         attacking object; a hit nobody priced adds its whole default damage to the spread."""
         self.hits += 1
+        if self.mem is not None:
+            self.mem.hit(self.t)
         if self.view == ORACLE and d.amount is not None:
             dmg, var = float(d.amount), 0.0
         else:

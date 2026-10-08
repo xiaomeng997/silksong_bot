@@ -78,9 +78,12 @@ FIXED_DEALT = 5.0                           # hero damagers with useNailDamage f
 ROUND_EPS = 1e-3
 UNKNOWN_SCALING = math.inf                  # a target type without an audited damage scaling
 # tools that do not change a nail hit's damage (crests.json gameplay: weighted anklet = knockback / i-frames, dice =
-# luck, long needle = reach, moss = silk; the Silkspear is a silk skill with its own bound; the Fractured Mask)
+# luck, long needle = reach, moss = silk; the Silkspear is a silk skill with its own bound; the Fractured Mask; the
+# Forum loadout's Cogwork Flier (a summon with its own damager) and Wallcling (Ascendant's Grip, wall cling: movement):
+# with both equipped every logged nail hit was the needle's 9 (x the target's scaling: 10) or a Wanderer crit 27,
+# never more: 3,689 Reaper hits of R1 v2 run 20261004_162411, 432 Wanderer hits of the R8 runs, forum.md 17.8)
 KNOWN_NEUTRAL = frozenset({"Silk Spear", "Weighted Anklet", "Magnetite Dice", "Longneedle", "Mosscreep Tool 1",
-                           "Mosscreep Tool 2", "Fractured Mask"})
+                           "Mosscreep Tool 2", "Fractured Mask", "Cogwork Flier", "Wallcling"})
 BARBED_WIRE = "Barbed Wire"
 SPEAR_SRC = ("Needle Damage",)              # the Silkspear's damager ("hit" event src)
 NAIL = frozenset({Prim.ATTACK_SIDE, Prim.ATTACK_UP, Prim.ATTACK_DOWN, Prim.HIT_TARGET})

@@ -50,15 +50,35 @@ def stand_up(link: OracleLink, button: str = "left", timeout_s: float = 10.0) ->
     return press_until(link, button, lambda s: s["hero"]["hero_accepting_input"] and not s["pause"]["bench"], wait_s=3.0)
 
 
+class MenuError(RuntimeError):
+    """A Submit on the main menu opened another menu than the save select: the highlight was not Start Game (mouse
+    hover moves it, probe P7). `menu` is the MainMenuState it opened."""
+
+    def __init__(self, menu: int | None):
+        super().__init__(f"Enter on the main menu opened menu {menu}, not the save select")
+        self.menu = menu
+
+
 def load_slot(link: OracleLink, slot: int = 1, timeout_s: float = 120.0) -> dict:
     """From the title screen: Start game -> save select -> slot `slot` (1-4, moving right from the first slot) ->
-    wait until Hornet accepts input. Returns the first such STATE. No-op if already in gameplay."""
+    wait until Hornet accepts input. Returns the first such STATE. No-op if already in gameplay.
+
+    The main menu's Enter is retried only while the menu stays the main menu (a press dropped during a fade); when it
+    opens another menu, MenuError, never another Enter in there (20261005_164501 i1: the retried Enter went Main ->
+    Options -> Game options -> a setting). A title sub-menu found at the start is left with Esc first
+    (train.recovery.title_home)."""
     s = link.wait_state(lambda s: s.get("game") is not None, timeout_s=timeout_s)  # no GameManager during boot
     if in_gameplay(s):
         return s
+    from ssbot.train.recovery import title_home, where
+    if where(s) == "title_submenu":
+        title_home(link)
+        s = link.state or s
     if s["game"]["menu"] != MENU_SAVE_PROFILES:
         menu_ready(link, MENU_MAIN)
-        press_until(link, "enter", lambda s: s["game"]["menu"] == MENU_SAVE_PROFILES)
+        s = press_until(link, "enter", lambda s: s["game"]["menu"] != MENU_MAIN)
+        if s["game"]["menu"] != MENU_SAVE_PROFILES:
+            raise MenuError(s["game"]["menu"])
     menu_ready(link, MENU_SAVE_PROFILES)
     for _ in range(slot - 1):
         tap(link, "right")
