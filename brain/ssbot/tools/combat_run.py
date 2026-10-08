@@ -526,7 +526,7 @@ def run(a: argparse.Namespace) -> int:
     if a.inject_hits > 0:
         tag += "_inject"
     if a.forum_clash != "off":
-        tag += {"on": "_clash", "yellow": "_clashY", "cont": "_clashC"}[a.forum_clash]
+        tag += {"on": "_clash", "yellow": "_clashY", "cont": "_clashC", "main": "_clashM"}[a.forum_clash]
     run_dir = new_run_dir(a.encounter if "," not in a.encounter else a.encounter.split(",")[0] + "_mix", tag)
     (run_dir / "config.json").write_text(json.dumps({**vars(a), "env": env_overrides()}, indent=1, default=str),
                                          encoding="utf-8")
@@ -698,10 +698,12 @@ def main(argv: list[str] | None = None) -> int:
         p.add_argument("--encounter", default="BellBeast")
         p.add_argument("--mode", choices=("data", "eval"), default="data")
         p.add_argument("--policy", default="data")
-        p.add_argument("--forum-clash", nargs="?", const="on", default="off", choices=("off", "on", "yellow", "cont"),
+        p.add_argument("--forum-clash", nargs="?", const="on", default="off",
+                       choices=("off", "on", "yellow", "cont", "main"),
                        help="Forum planner policy: the R8 EV_CLASH mode (forum_planner_policy.CLASH_MODES: on = GREEN "
-                            "only, yellow = GREEN and YELLOW (experiment), cont = the continuation rows only; the "
-                            "crest follows the savestate: fo_W Wanderer, else Reaper)")
+                            "only, yellow = GREEN and YELLOW (experiment), cont = the continuation rows only, main = "
+                            "the three-layer support's clash layer, forum.md 23; the crest follows the savestate: fo_W "
+                            "Wanderer, else Reaper)")
         p.add_argument("--episodes", type=int, default=10)
         p.add_argument("--hours", type=float, default=0.0)
         p.add_argument("--rotate", type=int, default=25)

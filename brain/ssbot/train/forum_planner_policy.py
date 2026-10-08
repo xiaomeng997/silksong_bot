@@ -66,7 +66,11 @@ CREST_PARAMS = {"Reaper": FORUM_PARAMS,
 # whitelist: no clash in YELLOW / RED or with a pause pending), yellow = also in YELLOW (the R8 experiment: the lead's
 # decision before any production use), cont = the continuation rows without the branch (the A/B's control for them)
 CLASH_MODES = {"off": {}, "on": {"clash": True}, "yellow": {"clash": True, "clash_tiers": ("GREEN", "YELLOW")},
-               "cont": {"clash": True, "clash_branch": False}}
+               "cont": {"clash": True, "clash_branch": False},
+               # the person's three-layer support (forum.md §23): a clean clash row is safe on the clash geometry, its
+               # measured hit-anyway bound at most clash_max_fail, ranked after the plain safe rows by it; also in a
+               # YELLOW that comes from the chosen plan's S = 1 (h >= 3), never at h 2, in RED or with a pause pending
+               "main": {"clash": True, "clash_main": True, "clash_min_p": 0.0, "clash_max_fail": 0.3}}
 END_SLOW_S = 1.85          # EnemyBattleEndSlow in real time (forum.md §3): the final blow's unpausable window
 ANKLET = "Weighted Anklet"
 COG = kin.B_UP | kin.B_QUICKCAST

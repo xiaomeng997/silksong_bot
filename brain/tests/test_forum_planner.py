@@ -466,6 +466,11 @@ def test_the_unpausable_blow_is_the_one_that_may_end_the_battle():
     assert forum_kill_hp(mf) == pytest.approx(6.0)
     freeze = kill_freeze_s()
     assert set(freeze) >= {clap, REED}
+    # only the kill's own freeze counts (the Clapper's death slow motion); the hero's NailClashEffect / StartRecoil that
+    # started on a kill frame of the wave-0 types are not theirs (forum.md 12.3)
+    assert freeze[clap] > 1.0
+    assert freeze[REED] == 0.0 and freeze["Song Pilgrim 01"] == 0.0 and freeze["Song Pilgrim 03"] == 0.0
+    assert kill_freeze_s(any_kind=True)[REED] > 0.3          # SSBOT_FORUM_KF=any: the rule before
     mf2 = SimpleNamespace(trackers={1: _tr(REED, 20.0, 2.0), 2: _tr(clap, 8.0)})
     assert forum_yellow_kill_hp(mf2, {REED: 0.25, clap: 0.0}) == pytest.approx(14.0)
     assert forum_yellow_kill_hp(mf2, {REED: 0.0, clap: 0.0}) is None

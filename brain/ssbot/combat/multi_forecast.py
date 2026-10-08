@@ -109,6 +109,12 @@ REACT_LATENCY_S = {ORACLE: BIN, VISION_EQUIVALENT: 3 * BIN}
 # ReactConfig.exceptions is "p5", none ("keep") otherwise. Body-only families (no own attack collider: evades, the
 # Clawmaiden's teleport, the Tiny's ram, which can commit point-blank) have no delay.
 REACT_EXCEPT = frozenset({"CB_THROW", "RE_THROW", "CC_CAST"})
+REACT_HOLD_S = COLLIDER_TUBE_S    # ReactConfig.hold: the idle tube grows over this window only (the reaction lag the
+#                                   certification's tubes cover)
+# ReactConfig.notstarted: thrown hazards that fly from where they arm (a deterministic path once thrown, forum.md
+# 14.2): not thrown yet, only their reach over the reaction window; half extents (u) when no box was seen (the pin's
+# 2.0 x 0.1 box in any rotation, the bell's r 0.425 circle)
+REACT_THROWN = {"Song Reed Pin Projectile": (1.0, 1.0), "Throwing Bell": (0.45, 0.45)}
 
 
 @dataclass(frozen=True)
@@ -122,25 +128,37 @@ class ReactConfig:
                start + its delay - the latency (its family template from the start is placed as before);
     idle       an enemy with its idle body tube: its idle-family roots are left out (the tube holds its idle body; the
                attack roots' walk templates hold their tails);
-    exceptions REACT_EXCEPT: "keep" (no delay) or "p5"."""
+    exceptions REACT_EXCEPT: "keep" (no delay) or "p5";
+    notstarted ("+n", the not-started layer of the person's three-layer support, forum.md §23): instances that have
+               not started are left out of the support altogether when their family has a strike time (strikes.json:
+               an own attack collider or a thrown hazard after a wind-up of at least its least commit -> first
+               damage) and every later idle instance; the escape check holds them (the planner checks an escape from
+               every lock-in of the plan, not only the late ones). Body-only families (evades, the Clawmaiden's
+               teleport, the Tiny's ram: no wind-up to see) stay;
+    hold       ("+g") the idle body tube grows by the type's idle growth over the reaction window (REACT_HOLD_S) only,
+               then keeps that size while it moves along its velocity: an enemy that is not attacking does not come
+               to the hero (the person's note 5 of 2026-10-08: 152 Envoy body hits, none in its walk); a start or a
+               dash shows within the window and the next ticks see it (the R2 recall checks 2-4 frames: unchanged)."""
     strikes: bool = True
     committed: bool = False
     idle: bool = False
     exceptions: str = "keep"
+    notstarted: bool = False
+    hold: bool = False
 
     @classmethod
     def parse(cls, s: str | None) -> "ReactConfig | None":
         """'off' / '' -> None; 'delay' (or 'escape': the planner's layer over the same support) with '+'-joined
-        extensions c (committed), i (idle), p5 (exceptions)."""
+        extensions c (committed), i (idle), p5 (exceptions), n (not-started out), g (idle growth held)."""
         toks = [t for t in (s or "").strip().lower().split("+") if t]
         if not toks or toks[0] == "off":
             return None
         if toks[0] not in ("delay", "escape"):
-            raise ValueError(f"reactive support {s!r}: off | delay | escape [+c][+i][+p5]")
-        bad = set(toks[1:]) - {"c", "i", "p5"}
+            raise ValueError(f"reactive support {s!r}: off | delay | escape [+c][+i][+p5][+n][+g]")
+        bad = set(toks[1:]) - {"c", "i", "p5", "n", "g"}
         if bad:
             raise ValueError(f"reactive support {s!r}: unknown extension(s) {sorted(bad)}")
-        return cls(True, "c" in toks, "i" in toks, "p5" if "p5" in toks else "keep")
+        return cls(True, "c" in toks, "i" in toks, "p5" if "p5" in toks else "keep", "n" in toks, "g" in toks)
 
 
 _STRIKE_TAB: dict | None = None
@@ -1032,6 +1050,7 @@ class _Builder:
                                boxes_of=None if rb is None else (lambda e0, e1: np.tile(rb, (len(e0), 1))))
         t_strike = math.inf
         rc = self.react
+        ns = strike_table() if rc is not None and rc.notstarted else None
         for nd in roots:
             lo, hi = max(ref + nd.lo - T, BIN), max(ref + nd.hi - T, BIN)
             if lo > H + BIN:
@@ -1040,6 +1059,9 @@ class _Builder:
                 t_strike = min(t_strike, lo)
             elif rc is not None and rc.idle and idle_tube:
                 continue                              # reactive support, idle: the tube holds its idle body
+            if ns is not None and nd.family != sp.entry_family and (nd.family == sp.idle_family
+                                                                    or (tt.tk, nd.family) in ns):
+                continue                              # reactive support, not started: the escape check holds it
             fid = self.fc.family_walk_id(tt, nd.family, nd.start, "anchor")
             if fid is not None:
                 d = self.delays.get((tt.tk, nd.family)) if rc is not None and rc.strikes else None
@@ -1144,7 +1166,10 @@ class _Builder:
             if h is None or tr.pos is None:
                 return
             b = (tr.pos[0] + h[0], tr.pos[1] + h[1], tr.pos[0] + h[2], tr.pos[1] + h[3])
-        self.boxes.append((tr.iid, "idle", *b, tr.vel[0], tr.vel[1], ("idle", tr.tk), -BIN, self.H + BIN,
+        # reactive support, hold: the growth stops at the reaction window's end (dt since the sighting)
+        grow = ("idle", tr.tk) if self.react is None or not self.react.hold else \
+            ("idle", tr.tk, (self.origin - tr.seen_T) + REACT_HOLD_S)
+        self.boxes.append((tr.iid, "idle", *b, tr.vel[0], tr.vel[1], grow, -BIN, self.H + BIN,
                            tr.seen_T - self.origin))
 
     def groups(self) -> None:
@@ -1333,11 +1358,24 @@ class _Builder:
                 self.paths.append(p)
                 if not p.predicted and fc.view == ORACLE:
                     det.add(p.iid)
+        ns = self.react is not None and self.react.notstarted
         for iid, h in fc.self_haz.items():
             tk, armed, arm_T, arm_pos, last_T, pos, rel, vel = h
             if T - last_T > HAZARD_GONE_S:
                 continue
             use_self = iid not in det and fc.self_templates != "none"
+            if use_self and ns and fc.view == ORACLE and tk in REACT_THROWN:
+                # reactive support, not started: a pin / bell not on its path yet (in the thrower's hand, its throw
+                # effect: its self template is every direction one was ever thrown, over the whole horizon, margin
+                # 3 u) is its owner's throw that has not started; once it flies the oracle view has its path
+                # (projectiles: det). Here: its reach over the reaction window only
+                if T - last_T <= 2.5 * BIN:
+                    hx_, hy_ = REACT_THROWN[tk]
+                    b = (pos[0] - hx_, pos[1] - hy_, pos[0] + hx_, pos[1] + hy_) if rel is None else \
+                        (pos[0] + rel[0], pos[1] + rel[1], pos[0] + rel[2], pos[1] + rel[3])
+                    self.boxes.append((iid, "hazard", *b, 0.0, 0.0, ("speed", HAZARD_DV_U_S), -BIN,
+                                       COLLIDER_TUBE_S, 0.0))
+                continue
             if use_self:
                 sid = self.tables.self_id(tk)
                 if sid is not None:
@@ -1721,7 +1759,7 @@ class MultiForecast:
             if grow is None:
                 g = np.zeros(len(tk))
             elif grow[0] == "idle":
-                g = tubes.g(grow[1], dt)
+                g = tubes.g(grow[1], dt if len(grow) < 3 else np.minimum(dt, grow[2]))
             else:
                 g = grow[1] * np.maximum(dt, 0.0)
             ok = (tk >= t_from - 1e-9) & (tk <= t_to + 1e-9)

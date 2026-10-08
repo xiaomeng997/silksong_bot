@@ -83,7 +83,7 @@ from ssbot.knowledge.attack_shapes import AttackTable
 from ssbot.knowledge.knockback import knockback_hull
 from ssbot.knowledge.kinematics import (B_ATTACK, B_DASH, B_DOWN, B_JUMP, B_QUICKCAST, B_UP, F_ATTACKING, F_GROUND, F_INVULN,
                                         M_DASH, M_NORMAL, M_RPR_DS, M_SPRINT, HeroParams, HoldState, Terrain2D)
-from ssbot.safety.supervisor import GREEN
+from ssbot.safety.supervisor import GREEN, YELLOW
 
 R_UNMOD = 6                       # veto reason: presses a move the model does not have (the dash stab)
 ESC_LOCK_MODES = NO_CONTROL_MODES + (kin.M_RPR_DS, kin.M_DS_ANTIC, kin.M_DS_SPIKE, kin.M_HARD_LAND)
@@ -214,10 +214,23 @@ class ForumConfig:
     clash_deadline_ms: float | None = None   # the clash pass starts no level that would end past this many ms from the
     #                                           tick's start (it costs about what its last level did); None:
     #                                           deadline_ms + 2 (inf: deterministic)
+    clash_main: bool = False      # the three-layer support (forum.md §23; combat_run --forum-clash main): the clash pass
+    #                               runs in GREEN and in a YELLOW with h >= clash_main_h (a YELLOW from the last plan's
+    #                               S = 1, not from h 2), a clean branch whose hit-anyway bound (1 - prod(1 - p_fail)) is
+    #                               at most clash_max_fail is safe whatever w (the clash geometry: the swing's active
+    #                               window holds the first contact, on the slash's side, in a clashable state), and the
+    #                               clash-safe rows rank after the plain safe ones by that bound (clash_p)
+    clash_main_h: int = 3
 
     @property
     def escape(self) -> bool:
         return self.react.strip().lower().split("+")[0] == "escape"
+
+    @property
+    def notstarted(self) -> bool:
+        """The reactive support's "+n" (multi_forecast.ReactConfig.notstarted): attacks not started are out of the
+        support, so the escape check looks at every lock-in of a plan, not only the late ones."""
+        return "n" in self.react.strip().lower().split("+")[1:]
 
 
 @dataclass
@@ -482,16 +495,28 @@ def forum_kill_hp(mf, z: float = KILL_Z) -> float | None:
     return max(lo) if lo else None
 
 
-def kill_freeze_s(path=None) -> dict[str, float]:
+KILL_FREEZE_KINDS = ("BigEnemyDeathSlow", "EnemyBattleEndSlow", "EnemyDeath")
+# SSBOT_FORUM_KF=any: every freeze that started on a kill frame counts (the integration's rule before forum.md §23)
+KF_ANY = os.environ.get("SSBOT_FORUM_KF", "kill").strip().lower() == "any"
+
+
+def kill_freeze_s(path=None, any_kind: bool | None = None) -> dict[str, float]:
     """The longest freeze a kill of each Forum type was seen to start (forum_products kill_freeze.json, s of real
-    time), 0 for a type whose kills never froze."""
+    time), 0 for a type whose kills never froze. Only the kill's own freezes count (KILL_FREEZE_KINDS: the enemy's
+    death slow motion, forum.md 12.3: the Clapper's alone); the hero's freezes that happened to start on a kill frame
+    (NailClashEffect 0.4 s, StartRecoil 0.25 s, BindBreak, QuickFreeze: a clash, a hit taken, the hero's own) are not
+    the kill's (task wave-0 de-saturation, forum.md §23: counting them gave every wave-0 type a 0.4 s "kill freeze", so
+    YELLOW's kill rule withheld every slash that might finish an Envoy, Choristor or Reed). any_kind (default
+    SSBOT_FORUM_KF=any): every kind counts, the rule before."""
     import json
     from ssbot.combat.enemy_tables import FORUM_DIR
     p = path or FORUM_DIR / "kill_freeze.json"
     d = json.loads(p.read_text("utf-8"))
     out = {tk: 0.0 for tk in FORUM_TYPES}
     for k, v in (d.get("length") or {}).items():
-        tk = k.split("|")[0]
+        tk, _, kind = k.partition("|")
+        if not (KF_ANY if any_kind is None else any_kind) and kind not in KILL_FREEZE_KINDS:
+            continue
         ms = (v.get("ms") or {}).get("max")
         if ms is not None:
             out[tk] = max(out.get(tk, 0.0), float(ms) / 1e3)
@@ -939,7 +964,9 @@ class ForumPlanner(Planner):
         nE = len(E)
         lock = np.isin(r1.mode[rows], ESC_LOCK_MODES) | ((r1.flags[rows] & F_ATTACKING) != 0)
         rise = lock[:, 1:] & ~lock[:, :-1]
-        k_min = T1 - 1 - int(math.ceil(dmax))
+        # every lock-in when the not-started attacks are out of the support ("+n"); else the late ones (inside the
+        # horizon the delayed support already checks the earlier ones against every start)
+        k_min = 1 if self.fcfg.notstarted else T1 - 1 - int(math.ceil(dmax))
         cps = []                                   # (row position, check frame)
         for n in range(len(rows)):
             ks = [int(k) + 1 for k in np.flatnonzero(rise[n]) if k_min <= int(k) + 1 < T1 - 1]
@@ -1117,6 +1144,18 @@ class ForumPlanner(Planner):
                 self.audit.clash_off_state += int(rt is not None and side_ok)
         return rates, clashed, others
 
+    def clash_allowed(self, ctx) -> bool:
+        """The clash pass's tier gate: never with a pause pending; a tier of clash_tiers (DESIGN 3.5.6: GREEN), or
+        with clash_main (the three-layer support, forum.md §23) a YELLOW at h >= clash_main_h too (the YELLOW of the
+        last plan's S = 1: a clash row is the way back to GREEN; h 2 and RED stay out)."""
+        if getattr(ctx, "pause_pending", False):
+            return False
+        tier = getattr(ctx, "tier", GREEN)
+        if tier in self.fcfg.clash_tiers:
+            return True
+        h = getattr(ctx, "h", None)
+        return bool(self.fcfg.clash_main and tier == YELLOW and h is not None and h >= self.fcfg.clash_main_h)
+
     def _clash_pass(self, f, start, latched, sc, S, ok, hz, tk, enemy_only, ctx, t_hit, t0: float) -> dict:
         """EV_CLASH (forum_planner_plan R8): for up to clash_k rows in contact the clash branch (the latest first
         contact first, then the row index: never J, so whether a tick ends in FORCED_RISK does not depend on the prefs,
@@ -1145,7 +1184,7 @@ class ForumPlanner(Planner):
         if mf is None or self.clash_tab is None or not fcfg.clash_branch or not hasattr(mf, "trackers") or \
                 (h is not None and h < fcfg.clash_min_h):
             return {}
-        if getattr(ctx, "pause_pending", False) or getattr(ctx, "tier", GREEN) not in fcfg.clash_tiers:
+        if not self.clash_allowed(ctx):
             au.clash_tier_skip += 1
             return {}
         cand = np.flatnonzero(ok & ~hz & S & (sc["sw_f"] >= 1))
@@ -1494,7 +1533,8 @@ class ForumPlanner(Planner):
                     S[i] = False
                     env[i] = True
                     t_hit[i] = T1
-                    clash_p[i] = 1.0 - w
+                    # after the plain safe rows: by how likely it fails (main: the hit-anyway bound, never 0)
+                    clash_p[i] = max(ph, 1e-6) if fcfg.clash_main else 1.0 - w
                     self.audit.clash_rows += 1
                 else:
                     # in contact after its clashes (another enemy's support, an attack it cannot clash), or clean but
