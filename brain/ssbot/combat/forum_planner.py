@@ -101,6 +101,8 @@ class ForumConfig:
     p_k: int = 16
     exact_p: bool = False         # FORCED_RISK ranks by MultiForecast.prob (3.7 ms p50 on wave 6: one query per enemy,
     #                               placement kind and probability value) instead of the share of frames in contact
+    p_all: bool = False           # audits (tools/forum_tv_audit): FORCED_RISK's P / first contact for every allowed
+    #                               known row, the choice still among the p_k preselected (decisions unchanged)
     terminal: bool = TV_ON        # the terminal value (R5, combat.terminal): E / trapped / overlap / H_exp into J, the
     #                               kill value into the target weights; scores only
     w_E: float = 4.0              # J per unit of E (the reachable share clear of the enemies' bodies, 0..1)
@@ -306,6 +308,7 @@ class ForumPlanner(Planner):
         self.shapes = _shapes(crest)
         self.audit = EnvelopeAudit()
         self.last_info: dict = {}
+        self.last_sel: dict | None = None
         self.tv = TerminalValue(params) if self.fcfg.terminal else None
         self._two: dict = {}
 
@@ -392,8 +395,9 @@ class ForumPlanner(Planner):
             E, trapped, ov, he = self.tv.rows(fields, c[:, 0], c[:, 1], ecls, float(tk[T1 - 1]))
             h = getattr(ctx, "h", None)
             hw = H_W_NONE if h is None else H_W.get(int(h), H_W_FAR)
-            out["J"] += fc_.w_E * E - fc_.w_trap * trapped - fc_.w_ov * ov - fc_.w_H * hw * he
-            out.update(E=E, trapped=trapped, overlap=ov, hexp=he, kv=kv,
+            j_tv = fc_.w_E * E - fc_.w_trap * trapped - fc_.w_ov * ov - fc_.w_H * hw * he
+            out["J"] += j_tv
+            out.update(E=E, trapped=trapped, overlap=ov, hexp=he, kv=kv, J_tv=j_tv,
                        tv_ms=(time.perf_counter() - t_tv) * 1e3, field_ms=fields.ms)
         return out
 
@@ -658,6 +662,7 @@ class ForumPlanner(Planner):
             wj = cmd[:, :min(rem, T, cfg.release_latency)]
             keep = ((wj & B_JUMP) != 0).all(axis=1) & ((wj & B_QUICKCAST) == 0).all(axis=1)
         bind_res = None
+        self.last_sel = None
         if prefs.want_bind and ctx.want_bind:
             bind_res = self._bind(ws, start, hold, prefix, f, ctx)
         forced = not safe.any() and not (bind_res is not None and bind_res[0])
@@ -666,7 +671,10 @@ class ForumPlanner(Planner):
         sel = ok & known
         if forced and sel.any():
             cand = np.flatnonzero(sel)
-            cand = cand[np.lexsort((-J[cand], -t_hit[cand]))][:fcfg.p_k]
+            cand = cand[np.lexsort((-J[cand], -t_hit[cand]))]
+            n_k = min(fcfg.p_k, len(cand))
+            if not fcfg.p_all:
+                cand = cand[:n_k]
             # the candidates on one lane over one frame set: the nominal box's centre against the support on stage
             # 1's frames (its exact test, known for every row), or'ed with the hit branch's contact there (its hull;
             # from the hit frame on where a cap left it unchecked): the share of those frames in contact and the
@@ -684,7 +692,7 @@ class ForumPlanner(Planner):
             else:
                 Pc[cand] = on.mean(axis=1)
             sel = np.zeros(N, bool)
-            sel[cand] = True
+            sel[cand[:n_k]] = True
         zero = ~cmd.any(axis=1)
         idle_clear = int(min(t_hit[zero & known].min() if (zero & known).any() else T1, T1) - P) \
             if zero.any() else None
@@ -717,11 +725,18 @@ class ForumPlanner(Planner):
             i = int(order[0])
             tail_ok = None
             carried = cont and i == N - 1 and self.prev_tail_ok
+            # the selection's inputs, by reference (offline audits: tools/forum_tv_audit; not logged)
+            self.last_sel = {"J": J, "J_tv": sc.get("J_tv"), "t_hit": t_hit, "t_c": t_c, "Pc": Pc, "V": V,
+                             "mkeep": mkeep, "keep": keep, "S": S, "U": U, "hz": hz, "hz_soft": hz_soft, "sel": sel,
+                             "allowed": ok & known, "safe": safe, "forced": forced, "first": i, "box": r1.box,
+                             "flags": r1.flags, "cmd": cmd, "P": P, "T1": T1, "p_k": fcfg.p_k,
+                             **{k: sc.get(k) for k in ("E", "trapped", "overlap", "hexp")}}
             if not forced and cfg.tail_k > 0 and not carried:
                 ranked = order[safe[order]]
                 i, tail_ok = self._tail_pick(f, r1, hold_end, ranked, P + T, i)
             elif carried:
                 tail_ok = True
+            self.last_sel["chosen"] = i
             self.prev_tail_ok = bool(tail_ok)
             sel_cmd = cmd[i]
             name = "CONTINUE" if cont and i == N - 1 else cs.name(i)
