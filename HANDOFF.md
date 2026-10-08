@@ -3131,8 +3131,24 @@ of the task.
     leaves it harmless from the hit on.
 - `multi_recall --react / --state-margins` for the R2 held-out recall on these supports.
 
+### Measured
+
+- Decomposition (forum.md 23.2-23.3): wave 0's saturation is redundant over layers; with the not-started layer gone
+  only 3.5 % of FORCED_RISK ticks have a clear row; the committed windows / family-wide union / tails / fine placements
+  each cover every row on 50-64 % of them; margins are not the main cause (all 0: 6.2 %), idle growth is the body
+  layer's; the templates are the committed layer's (EN_CHARGE `Charge` holds the `Reset -> Charge` re-charges: 38 u
+  wide at its entry; RE_THROW templates hold every pin ever thrown; family margins set by one state's few contacts).
+- 0 kills came from `kill_freeze_s` (the hero's own freezes counted as the wave-0 types' kill freeze).
+- Live round 1 (forum.md 23.6, 80 episodes per arm, paired): int 0 kills / 0 wave-0 clears / 24.1 s median; intk 0.80
+  kills, 11 clears, +5.6 s; new 1.42 kills, 15 clears (up to wave 5), +26.9 s over int and +21.4 s (CI 10.1-33.6)
+  over intk; hits / min 10.1 / 8.3 / 5.8; FORCED_RISK 0.89 / 0.89 / 0.80; support-outside hits 0 in every arm.
+
 ### Running
 
-- Live A/B round 1 (`C:\ssbot\sandbox\w0d_live.ps1`, frozen `C:\ssbot\live_w0d_016417b`, instances 0-3, locks
-  `w0d`, manifest `C:\ssbot\sandbox\w0d_manifest_a.txt`): int (seen_cf + escape + clash on, KF any) / intk (KF kill)
-  / new (escape+n+g+l, clash main, KF kill).
+- Live A/B round 2 (`C:\ssbot\sandbox\w0d_live.ps1` via `w0d_chain.ps1`, frozen `C:\ssbot\live_w0d_fca0416`,
+  instances 0-3, locks `w0d`, manifest `C:\ssbot\sandbox\w0d_manifest_b.txt`, seed 362000): intk vs newS (escape+n+g+l
+  with the throw substitution, clash main with the seen fix, per-state margins), ABBA.
+- R2 held-out recall on the final support (`multi_recall fresh --react escape+n+g --state-margins`, frozen
+  fca0416, 2 workers): `C:\ssbot\data\m2_forum_w0d\recall_fresh_ngS_fca0416.json` (log `recall_fresh_ngS.log`). A
+  first, interrupted run on 7a8afc9 (+n+g without the throw substitution, family margins): 61 of 444 fight jobs,
+  389,133 contact checks, 0 misses.
