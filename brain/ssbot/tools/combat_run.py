@@ -103,6 +103,10 @@ def make_policy(name: str, view: str = "oracle", run_dir: Path | None = None, in
         # the Forum's targeted data policy v2 (Forum plan R1); data2_envoy never hits the Envoy (wave 0 goes on)
         from ssbot.train.forum_policy import ENVOY, ForumDataPolicyV2
         return ForumDataPolicyV2(protect=(ENVOY,), focus=(ENVOY,)) if name == "data2_envoy" else ForumDataPolicyV2()
+    if name == "minister_below":
+        # the R8 Minister-below experiment (Forum_W_w4): under the nearest Minister, up-slashing without a break
+        from ssbot.train.forum_policy import MinisterBelowPolicy
+        return MinisterBelowPolicy()
     if name == "idle":
         # no input (the 2x speed check: forum_policy.IdlePolicy)
         from ssbot.train.forum_policy import IdlePolicy

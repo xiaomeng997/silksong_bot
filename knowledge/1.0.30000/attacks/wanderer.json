@@ -16,7 +16,8 @@
   "source": "HeroController.Recoil: RECOIL_HOR_VELOCITY x RECOIL_HOR_STEPS (hero_constants.json); the long recoil (16) only for RecoilLeftLong / RightLong callers"
  },
  "notes": [
-  "P17 slash.dump frame 3010 (crests.json captured 2026-09-30T19:22:48), hero [238.78, 7.56769] facing -1, config Wanderer"
+  "P17 slash.dump frame 3010 (crests.json captured 2026-09-30T19:22:48), hero [238.78, 7.56769] facing -1, config Wanderer",
+  "live samples: C:\\ssbot\\data\\runs\\m2\\kn_excite_forum_wanderer\\2026-10-08\\TRAIN\\kn_excite_forum_s320000\\attack_frames.jsonl (charge frames counted from the release)"
  ],
  "shapes": {
   "normal": {
@@ -55,7 +56,10 @@
    ],
    "t_on": 0.0,
    "t_off": 0.12,
-   "frames": [],
+   "frames": [
+    1,
+    7
+   ],
    "damage_mult": 1.0,
    "clash_box": [
     0.18658999999999537,
@@ -63,7 +67,7 @@
     -0.4466499999999991,
     1.1569800000000008
    ],
-   "source": "slash.dump; clip SlashEffect events [0, 3] at 25 fps"
+   "source": "slash.dump; clip SlashEffect events [0, 3] at 25 fps; live frames (1, 7) (285 samples)"
   },
   "alt": {
    "src": "AltSlash",
@@ -93,7 +97,10 @@
    ],
    "t_on": 0.0,
    "t_off": 0.12,
-   "frames": [],
+   "frames": [
+    1,
+    7
+   ],
    "damage_mult": 1.0,
    "clash_box": [
     0.20037999999999556,
@@ -101,7 +108,7 @@
     -0.49135999999999935,
     1.0259400000000003
    ],
-   "source": "slash.dump; clip SlashEffectAlt events [0, 3] at 25 fps"
+   "source": "slash.dump; clip SlashEffectAlt events [0, 3] at 25 fps; live frames (1, 7) (91 samples)"
   },
   "up": {
    "src": "UpSlash",
@@ -135,7 +142,10 @@
    ],
    "t_on": 0.0,
    "t_off": 0.12,
-   "frames": [],
+   "frames": [
+    1,
+    7
+   ],
    "damage_mult": 1.0,
    "clash_box": [
     -0.7509799999999984,
@@ -143,7 +153,7 @@
     -0.024289999999998813,
     3.1941700000000015
    ],
-   "source": "slash.dump; clip SlashEffect events [0, 3] at 25 fps"
+   "source": "slash.dump; clip SlashEffect events [0, 3] at 25 fps; live frames (1, 7) (111 samples)"
   },
   "wall": {
    "src": "WallSlash",
@@ -223,7 +233,10 @@
    ],
    "t_on": 0.04,
    "t_off": 0.16,
-   "frames": [],
+   "frames": [
+    3,
+    9
+   ],
    "damage_mult": 1.0,
    "clash_box": [
     -1.7057299999999884,
@@ -231,7 +244,7 @@
     -1.9032299999999989,
     0.45299000000000067
    ],
-   "source": "slash.dump; clip DownSlashEffect events [1, 4] at 25 fps"
+   "source": "slash.dump; clip DownSlashEffect events [1, 4] at 25 fps; live frames (3, 9) (64 samples)"
   },
   "alt_down": {
    "src": "DownSlashAlt",
