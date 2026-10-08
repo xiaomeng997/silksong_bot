@@ -955,7 +955,7 @@ cd brain   # 冻结检出（git archive，没有 .git）：behaviour_build 要�
 - **§4.4 第 4 条整条决策逐位相同**：`forum_policy_replay`（`074719` i3 ep0 第 0 波，600 tick，截止时间 inf）`SSBOT_FORUM_L2=fail:1` 对 `=0`：600 / 600 tick 的计划名、S、FORCED_RISK、按键、J 0 处不同。
 - 开环回放（同一录像，数据策略的主角位置，所以计划不被执行；机器负载高：5 个游戏实例 + 其他代理）：L2 每 tick p50 0.014–0.047 ms、p99 1.4–3.3 ms（批量查询只在重选的 tick 跑）；异常 0；支撑外命中 0。目标分布：第 0 波 KITE(EVADE) 63 %、RUSH 31 %；第 3 波 Clawmaiden 91 %（first）；第 6 波 KITE(EVADE)（在 Maestro 下方）89 %；第 7 波（单只 Clapper）RUSH 94 %；第 13 波（两只 Clapper）RUSH 48 %、KITE(EVADE) 46 %。
 - **PUNISH 在多敌波次里不成立**：第 0 / 3 / 6 波 1,000 tick 的重选里（Envoy / Choristor / Reed / Bellbearer / Clawmaiden / Tiny / Maestro 共 2,331 个候选），接敌点**此刻就被支撑覆盖的占 99.7 %**，到达之后的空闲时间中位 0.017 s、p90 0.030 s、最长 0.168 s，**≥ 0.35 s（够一刀）的 0 次**：待机敌人的支撑（下一招随时可起 + 待机身体管）一直盖着它身边，与 A0 的 87 % FORCED_RISK 同一个原因（§16.4 第 1 条）。接敌点从 1.8 u 改到 3.0 u（收割者横砍够 3.6 u）重跑一次：同样 0 次（没有采用）。第 7 波单只 Clapper 时有 1 次 PUNISH（Tiny）。第一版把"到达前就被覆盖"也算进窗口（窗口全是 0），已改成从到达算起。
-- Clapper 朝向检查见 17.1。
+- Clapper 控制器在录像上各分支都触发（开环，2,000 tick / 波，按 tick 计）：第 7 波（单只）脸上 1,099、跳（钻到落点背后）513、锤：退到前方 110 / 前方没地方改去背后 82 / 已在背后留在背后 71、PUNISH 12（Tiny）；第 13 波（两只）脸上 790、锤 84 / 83 / 4、KITE(EVADE) 917（两只相距 < 8 u 时没有落单的）。落点公式在实战里的误差没有逐次核对（clapper_face.md 的拟合残差 p50 0、IQR ±0.13 u）。Clapper 朝向检查见 17.1。
 
 ### 17.3 远处目标场景（计划 R6 行的验收）
 

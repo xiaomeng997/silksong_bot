@@ -1855,6 +1855,9 @@ checks are done, the live A/B is queued on a detached driver (below).
   in 99.7 %, free after the arrival p50 0.017 s, p90 0.030, max 0.168 s, >= 0.35 s (one swing) 0 times; the same with
   the spot at 3.0 u instead of 1.8 u (not adopted); 1 PUNISH in wave 7. The idle enemies' support covers their
   surroundings all the time (A0's FORCED_RISK cause).
+- The Clapper controller's branches all fire on the recording (open loop, ticks): wave 7 face 1,099, jump (behind
+  the landing) 513, slam out 110 / behind (no room) 82 / stay behind 71; wave 13 face 790, slam 84 / 83 / 4,
+  KITE(EVADE) 917 (the two within 8 u: nobody isolated).
 - Pursuit speeds from 20 R0 caches (forum.md 17.1).
 
 ### Running (left running on purpose: correctly configured)
