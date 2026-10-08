@@ -1850,11 +1850,22 @@ Done (commits 7ba7470, 0a326c3, 02469ab):
   HARNESS_FAIL (paused -> resume; quitting -> wait for the title; title / sub-menu / save select -> back_into_slot);
   summary: harness_fails by kind, loop_gap_ms.
 - `probes/recovery_check.py`: live check of every case on one instance.
-- Tests: `tests/test_harness_recovery.py` (26, a stand-in game with the pause / options / prompt / title menus) +
-  test_combat_run_retry / _start / episode_kill_pause / episode_post_clear / combat_run_fp: all pass.
+- Tests: `tests/test_harness_recovery.py` (26, a stand-in game with the pause / options / prompt / title menus);
+  the full suite at b10b251: 1141 passed, 3 skipped, 1 xfailed (an earlier run under load failed only the known
+  timing budget test_hitbox_tables::test_support_query_matches_reference_and_meets_the_budget, 3.39 ms > 3 ms).
 
-Live check (instance 4, lock `C:\ssbot\sandbox\locks\inst4.lock`): pending at this commit (after the Trobbio / GMS
-collection ends ~01:55).
+STOPPED 2026-10-08 ~01:00 PDT (weekly usage 99 %, stop protocol) before the live check: the Trobbio / GMS collection
+was still running (884 episodes, ends ~01:55). Live check still to do (<= 20 min on instance 4 once the collection
+has ended; lock `C:\ssbot\sandbox\locks\inst4.lock` with the track name, delete it after): frozen checkout
+`C:\ssbot\live_recov_02469ab` (02469ab + CODE_REV; later commits are docs / a comment only), venv ready:
+  cd C:\ssbot\live_recov_02469ab\brain
+  ..\scripts\uv.cmd run python -m ssbot.probes.recovery_check --instance 4
+It loads BellBeast's savestate, sets save suppression, runs the 8 cases (pause menu highlight on Options / Quit,
+Options, a settings sub-menu, the exit prompt on Yes, a brain-lost watchdog pause, one real quit then the title's
+Game options, the title's highlight on Options) and writes `C:\ssbot\sandbox\recovery_check\<time>_i4.json`. Check:
+every case ok, the Submits only on continue / back / no, whether Down reaches Back on the real Options menus, which
+main-menu item is highlighted after Esc back from Options (MenuError on the retry or not), the watchdog case's
+pause_cause. Fill pause_quit.md 11.3 with the result.
 
 Next / open issues:
 1. The watchdog pauses come from fight-loop stalls >= 250 ms; loop_gap_ms in the summaries will show where. Reducing
