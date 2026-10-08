@@ -1898,3 +1898,8 @@ side caches `hero\`, `study_dev.json`, `holdout_test.json`, `summary.md`, `tiny_
 4. Small-n decisions: cap the covariates by n (Envoy Charge, Reed Throw Up, Escape Jump); hidden V4 counters (e.g.
    Minister Evade? out of range) could be filtered as a hidden state instead of approximated by the visible history.
 5. The Tiny's Control FSM is in a bundle outside the scene (Maestro CreateObject ext:45): not decoded.
+6. Integration: the R5 value track (worktree-wf_814dfeea-b10-2) also appends a forum.md section after 16 (its 17;
+   this one is 18) and both tracks touch combat/enemy_tracker.py and multi_forecast.py: expect textual merge
+   conflicts there (this track adds EnemyTracker.mem, MultiForecaster(branch=...), Subject.next_p). The two
+   sessions share one scratchpad directory (a file of this track was overwritten): keep run scripts in
+   C:\ssbot\data\m2_forum_r5m.
