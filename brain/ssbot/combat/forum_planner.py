@@ -1376,6 +1376,9 @@ class ForumPlanner(Planner):
                 inv[m, j_hi:max(j_hi, j_lo + PARRY_INVULN_F)] = True
         for m, (tn, oc) in part.items():
             out.setdefault(int(cand[m]), (float(w_ok[m]), 1.0 - float(h_ok[m]), int(ncl[m]), tn, oc))
+        # the branch's parry i-frames per row (clash_main: FORCED_RISK's seen keys skip them, R8's open note: the
+        # collider a swing clashes is no contact of that row)
+        self._clash_inv = {int(cand[m]): inv[m].copy() for m in range(n) if int(cand[m]) in out}
         return {i: v for i, v in out.items() if v[0] >= fcfg.clash_partial_min_p}
 
     @staticmethod
@@ -1561,6 +1564,7 @@ class ForumPlanner(Planner):
         clash_n = np.zeros(N, np.int64)
         clash_w = np.zeros(N)
         clash_occ: dict = {}                      # row -> (w, its clash branch's contact [T1] or None: clean)
+        self._clash_inv = {}
         if fcfg.clash and fcfg.clash_branch and not (env & ok & ~S & ~hz).any():
             # no safe row: the clash branch (the plan's "成功率高的招不再逼出 FORCED_RISK"); plain safe rows always
             # come first, so it never runs on a tick that has one
@@ -1615,6 +1619,12 @@ class ForumPlanner(Planner):
             cand = np.flatnonzero(sel)
             if fcfg.forced_rank in ("seen", "seen_cf"):
                 inv1 = (r1.flags & F_INVULN) != 0
+                if fcfg.clash_main and clash_occ:
+                    # a row with a clash branch: the frames its parry i-frames cover are no contact (R8's note)
+                    inv1 = inv1.copy()
+                    for r_, m_ in getattr(self, "_clash_inv", {}).items():
+                        if r_ in clash_occ and r_ < len(inv1):
+                            inv1[r_] |= m_[:inv1.shape[1]]
                 verts, starts, pbox, pvel = seen_polys(ws)
                 if len(pbox):
                     cnt, fst = seen_contacts(np.ascontiguousarray(r1.box, np.float64), np.ascontiguousarray(inv1),

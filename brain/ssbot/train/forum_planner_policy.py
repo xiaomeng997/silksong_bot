@@ -70,7 +70,7 @@ CLASH_MODES = {"off": {}, "on": {"clash": True}, "yellow": {"clash": True, "clas
                # the person's three-layer support (forum.md §23): a clean clash row is safe on the clash geometry, its
                # measured hit-anyway bound at most clash_max_fail, ranked after the plain safe rows by it; also in a
                # YELLOW that comes from the chosen plan's S = 1 (h >= 3), never at h 2, in RED or with a pause pending
-               "main": {"clash": True, "clash_main": True, "clash_min_p": 0.0, "clash_max_fail": 0.3}}
+               "main": {"clash": True, "clash_main": True, "clash_min_p": 0.0, "clash_max_fail": 0.3, "clash_depth": 3}}
 END_SLOW_S = 1.85          # EnemyBattleEndSlow in real time (forum.md §3): the final blow's unpausable window
 ANKLET = "Weighted Anklet"
 COG = kin.B_UP | kin.B_QUICKCAST
