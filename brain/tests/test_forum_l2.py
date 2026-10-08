@@ -131,11 +131,11 @@ def test_clawmaiden_first_minister_last():
 
 
 def test_clapper_controller():
-    # idle: face it on the hero's side
+    # idle: face it on the hero's side, 4 u (its body reaches 2.25 u in front)
     t = l2()
     s = [subj(9, CC, 30.0, y=7.45)]
     p = t.decide(world(24.0, ents=[clapper(9, 30.0, False)]), WinFc(s), None, 3)
-    assert p.target == 9 and p.stance_x == pytest.approx(27.0)
+    assert p.target == 9 and p.stance_x == pytest.approx(26.0)
     # the slam: step out in front (facing left, the hero in front), or stay behind with the hero behind it
     t = l2()
     s = [subj(9, CC, 35.0, y=7.45, state="Slam Antic", family="CC_SLAM", committed=True)]
@@ -158,7 +158,7 @@ def test_clapper_controller():
     t = l2()
     s = [subj(9, CC, 30.0, y=7.45, state="Spell Antic", family="CC_CAST", committed=True)]
     p = t.decide(world(24.0, ents=[clapper(9, 30.0, False)]), WinFc(s), None, 3)
-    assert GLIDE_SPIKE in p.vocab and p.stance_x == pytest.approx(27.0)
+    assert GLIDE_SPIKE in p.vocab and p.stance_x == pytest.approx(26.0)
 
 
 def test_two_clappers_never_attack_together():
@@ -323,3 +323,32 @@ def test_a_spot_past_the_window_query_is_no_punish():
     near = subj(2, EN, 30.0, state="Slash Recover", family="EN_SLASH", committed=True)
     p = t.decide(world(15.0), WinFc([near], default=math.inf), None, 3)
     assert p.goal == PUNISH and t.last["l2_cands"][0][2] == 9.0  # inside the query: open (inf, logged as 9)
+
+
+def test_clapper_jump_back_off_when_the_run_is_late_or_through_its_body():
+    # CC_JUMP from 35 at the hero at 26: landing 31.32; behind it (33.82) is 7.8 u away: 0.50 s, in time at the commit
+    land = jump_landing(35.0, 26.0, -1.0)
+    s = [subj(9, CC, 35.0, y=7.45, state="Jump Aim", family="CC_JUMP", committed=True)]
+    ents = [clapper(9, 35.0, False)]
+    t = l2()
+    p = t.decide(world(26.0, t=10.0, ents=ents), WinFc(s), None, 3)
+    assert p.stance_x == pytest.approx(land + 2.5) and "under and behind" in t.last["goal_why"]
+    # 1.0 s into it (lands at 1.415 s): 0.50 s > 0.415 - 0.25 -> back off past the landing slam (8.5 u in front)
+    s = [subj(9, CC, 33.0, y=12.0, state="Air", family="CC_JUMP", committed=True)]
+    p = t.decide(world(26.0, t=11.0, ents=ents), WinFc(s), None, 3)
+    assert p.stance_x == pytest.approx(land - 8.5) and "back off" in t.last["goal_why"]
+    # at its face (3 u) it jumps back: behind the landing is past its body, still on the ground -> back off
+    t = l2()
+    s = [subj(9, CC, 35.0, y=7.45, state="Jump Antic", family="CC_JUMP", committed=True)]
+    p = t.decide(world(32.0, t=10.0, ents=ents), WinFc(s), None, 3)
+    land = jump_landing(35.0, 32.0, -1.0)
+    assert land > 35.0 - 1e-9 or land == pytest.approx(35.0 + 0.92 * (27.0 - 35.0))
+    assert "back off" in t.last["goal_why"] and p.stance_x == pytest.approx(land - 8.5)
+    # CC_JUMP_CAST: past the rune circle (14.5 u in front of the landing), behind it when the wall leaves no room
+    t = l2()
+    s = [subj(9, CC, 44.0, y=7.45, state="Cast Slam Antic", family="CC_JUMP_CAST", committed=True)]
+    p = t.decide(world(30.0, t=10.0, ents=[clapper(9, 44.0, False)]), WinFc(s), None, 3)
+    land = jump_landing(44.0, 30.0, -1.0)
+    assert "under and behind" in t.last["goal_why"] and p.stance_x == pytest.approx(land + 2.5)
+    p = t.decide(world(30.0, t=11.5, ents=[clapper(9, 44.0, False)]), WinFc(s), None, 3)
+    assert "no room out" in t.last["goal_why"] or p.stance_x == pytest.approx(land - 14.5)

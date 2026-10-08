@@ -43,7 +43,11 @@ side for the rest, and the Choir Clapper by its own controller (cannot be clashe
   CC_JUMP / CC_JUMP_CAST  go under it and behind its landing: landing = take-off + 0.92 clamp(aim - take-off, +-12),
           aim = hero x at Jump Aim -/+ 5 on its side; the stance behind_land_u behind the landing (the slam collider
           and the rune slam, 6.62 u in front of it with r 7.19, reach 0.58 u behind it); up slashes on the way scored
-          with up_hit_x.
+          with up_hit_x. Only when the run gets there land_margin_s before the landing (jump_land_s / jump_cast_land_s
+          after the commit, clapper_face.md §1.1 p50) and does not cross its body on the ground (before its take-off);
+          else back off in front of the landing: CC_JUMP past its landing slam (0.67-7.76 u in front: jump_out_u),
+          CC_JUMP_CAST past the rune circle too (to 13.8 u: cast_out_u), behind it when the wall leaves no room (round
+          2: live w7 / w13, 5 of 18 hits were the body landing on a hero running under it, forum.md §17.6).
   Two Clappers never attack together (Buddy Is Attacking): while one is committed, the other one, if not, is the
           RUSH / PUNISH pick between the two (priority x 2).
 What a goal sets (scores only: the planner's S / Hz / U never see prefs, §4.4 item 2): mode (the goal's name), target,
@@ -72,6 +76,7 @@ MINISTER = "Song Administrator"
 TINY = "Song Automaton Tiny"
 CC_IDLE, CC_SLAM, CC_JUMP, CC_JUMP_CAST, CC_CAST = "CC_IDLE", "CC_SLAM", "CC_JUMP", "CC_JUMP_CAST", "CC_CAST"
 CC_AIM_STATES = ("Jump Aim",)
+CC_AIR_STATES = ("Jump", "Air", "Cast Jump")              # its body off the ground (a jump's flight)
 GLIDE_SPIKE = "GLIDE_SPIKE"
 NAIL_SRC = ("Slash", "UpSlash", "DownSlash New", "AltSlash", "WallSlash", "DashSlash")
 
@@ -101,10 +106,15 @@ class L2Rules:
     wall_room_u: float = 2.5
     target_hit_w: float = 3.0
     up_hit_x: float = 1.5                                 # the Clapper in the air: its hit weight's extra factor
-    face_u: float = 3.0                                   # the Clapper: face-hit distance (2.5-5.4 u, clapper_face §2)
+    face_u: float = 4.0                                   # the Clapper: face-hit distance (2.5-5.4 u, clapper_face §2)
     slam_out_u: float = 13.0
     slam_behind_u: float = 3.5
     behind_land_u: float = 2.5
+    jump_land_s: float = 1.415                            # CC_JUMP: commit -> landing (clapper_face §1.1 p50)
+    jump_cast_land_s: float = 1.85                        # CC_JUMP_CAST
+    land_margin_s: float = 0.25                           # behind the landing this long before it lands
+    jump_out_u: float = 8.5                               # CC_JUMP: in front of the landing past its slam (7.76 u)
+    cast_out_u: float = 14.5                              # CC_JUMP_CAST: past the rune circle (6.62 + 7.19 u)
     below: tuple = ("Pilgrim 03 Song", "Song Reed", "Song Administrator", MAESTRO)
     priority: dict = field(default_factory=dict)          # type_key -> factor (Clawmaiden first, Minister last)
     first: tuple = (CLAWMAIDEN,)                          # while one is in play, only these are picked
@@ -202,6 +212,8 @@ class GauntletTactics:
         self._sw_why: str | None = None                   # why _pick moved off the kept target (stats switch_kinds)
         self.n = 0
         self.aim: dict[int, float] = {}                   # Clapper iid -> hero x at its Jump Aim
+        self.t_commit: dict[int, float] = {}              # Clapper iid -> game time its current jump was first seen
+        self._t = 0.0                                     # the tick's game time
         self.stats = _new_stats()
         self.last: dict = {}
 
@@ -211,7 +223,7 @@ class GauntletTactics:
 
     def reset(self) -> None:
         """A new episode: no goal, no stored aims, the per-episode counters cleared."""
-        self.goal, self.n, self.aim = None, 0, {}
+        self.goal, self.n, self.aim, self.t_commit = None, 0, {}, {}
         self.stats = _new_stats()
 
     # ---- geometry ----
@@ -248,7 +260,19 @@ class GauntletTactics:
             # before its Jump Aim it will aim at where the hero is then; after, at the stored aim from the take-off
             aim_x, x0, front = self.aim.get(s.iid, (hx, x, front))
             land = jump_landing(x0, aim_x, front)
-            return self._clamp(land - front * r.behind_land_u), frozenset(), "jump: under and behind"
+            behind = self._clamp(land - front * r.behind_land_u)
+            t = self._t
+            t_land = (r.jump_land_s if fam == CC_JUMP else r.jump_cast_land_s) - (t - self.t_commit.get(s.iid, t))
+            t_run = r.start_s + abs(behind - hx) / r.run_u_s
+            # the stance past its body while it is still on the ground: the run would go through it
+            through = s.state not in CC_AIR_STATES and (behind - x) * (hx - x) < 0
+            if t_run <= t_land - r.land_margin_s and not through:
+                return behind, frozenset(), "jump: under and behind"
+            out = land + front * (r.jump_out_u if fam == CC_JUMP else r.cast_out_u)
+            x0_, x1_ = self.pb.arena_x
+            if x0_ + r.wall_room_u <= out <= x1_ - r.wall_room_u:
+                return out, frozenset(), "jump: back off"
+            return behind, frozenset(), "jump: under and behind (no room out)"
         vocab = frozenset({GLIDE_SPIKE}) if fam == CC_CAST else frozenset()
         return self._clamp(x + side * r.face_u), vocab, "face"
 
@@ -436,9 +460,14 @@ class GauntletTactics:
         r = self.rules
         hx = float(ws.hero.pos.v[0])
         t = float(ws.stamp.t_game_s) if getattr(ws, "stamp", None) is not None else 0.0
+        self._t = t
         for s in getattr(fc, "subjects", ()) or ():
             if s.type_key != CLAPPER or s.pos is None:
                 continue
+            if s.family in (CC_JUMP, CC_JUMP_CAST):
+                self.t_commit.setdefault(s.iid, t)
+            else:
+                self.t_commit.pop(s.iid, None)
             if s.state in CC_AIM_STATES and s.iid not in self.aim:
                 e = self._ent(ws, s.iid)
                 fa = clapper_facing(e) if e is not None else None
@@ -482,9 +511,10 @@ class GauntletTactics:
         s = next((s for s in fc.subjects if s.iid == g.target), None)
         if s is not None and s.pos is not None:
             if g.name == KITE:
-                g.stance_x, _ = self._kite_spot(fc.subjects, s, hx)
+                g.stance_x, how = self._kite_spot(fc.subjects, s, hx)
             else:
-                g.stance_x, g.vocab, _ = self._spot(ws, s, hx)
+                g.stance_x, g.vocab, how = self._spot(ws, s, hx)
+            g.why = f"{g.why.split('; ')[0]}; {how}" if "; " in g.why else how     # the controller's branch now
             g.face_x = float(s.pos[0])
         wts = dict(prefs.weights)                         # LOCAL's (Q6's silk gathering in it), EVADE's factors undone
         if prefs.mode == EVADE:
