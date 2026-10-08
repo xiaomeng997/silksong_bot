@@ -349,35 +349,8 @@ def test_inside_the_stab_every_way_out_is_checked_before_forced_risk(params, are
         assert li["env"][r.idx] and r.S == 0
 
 
-# ---- FORCED_RISK's "seen" key (forum.md §19) ----
-
-def _with_collider(ws: WorldState, box: tuple, vx: float) -> WorldState:
-    from ssbot.core.worldstate import DamageBox, Entity
-    x0, y0, x1, y1 = box
-    ws.entities = [Entity(id=99, vel=E((vx, 0.0)),
-                          dmg_boxes=[DamageBox(poly=[(x0, y0), (x1, y0), (x1, y1), (x0, y1)], active=True)])]
-    return ws
-
-
-def test_seen_contacts_counts_frames_against_the_moving_collider():
-    from ssbot.combat.forum_planner import seen_contacts
-    T1 = 11
-    tk = np.arange(T1) * 0.1
-    box = np.zeros((2, T1, 4))
-    box[0] = (10.0, 0.0, 10.5, 2.0)             # stands still at x 10
-    box[1] = (0.0, 0.0, 0.5, 2.0)               # stands far away
-    inv = np.zeros((2, T1), np.bool_)
-    verts = np.array([[14.0, 0.0], [15.0, 0.0], [15.0, 2.0], [14.0, 2.0]])
-    pbox = np.array([[14.0, 0.0, 15.0, 2.0]])
-    cnt, first = seen_contacts(box, inv, verts, np.array([0, 4], np.int64), pbox, np.array([[-10.0, 0.0]]), tk,
-                               np.arange(2, dtype=np.int64), 0.0)
-    # its left edge reaches x 10.5 at 0.35 s, its right edge leaves x 10 at 0.5 s: frames 4 and 5
-    assert first[0] == 4 and cnt[0] == 2 and first[1] == T1 and cnt[1] == 0
-    inv[0, :5] = True                           # invulnerable frames are clear
-    cnt, first = seen_contacts(box, inv, verts, np.array([0, 4], np.int64), pbox, np.array([[-10.0, 0.0]]), tk,
-                               np.arange(2, dtype=np.int64), 0.0)
-    assert first[0] == 5 and cnt[0] == 1
-
+# ---- FORCED_RISK's "seen" key (forum.md §19; the wave-0 forensics track's copies of _with_collider and the seen
+# tests above were merged here twice, the R5 value port's stacked versions kept) ----
 
 def test_the_policy_reads_the_forced_rank_switch(monkeypatch):
     from ssbot.train.forum_planner_policy import ForumPlannerPolicy
@@ -390,49 +363,6 @@ def test_the_policy_reads_the_forced_rank_switch(monkeypatch):
     monkeypatch.setenv("SSBOT_FORUM_FR", "bogus")
     with pytest.raises(ValueError):
         ForumPlannerPolicy._fcfg()
-
-
-def test_seen_rank_without_seen_colliders_is_the_share_ranking(params, arena):
-    """No damage collider seen: the "seen" key ties on every row and the choice is the share ranking's."""
-    rng = np.random.default_rng(3)
-    for x in (30.6, 31.0, 31.6, 32.0):
-        picks = []
-        for fr in ("share", "seen"):
-            mf = _reed_forecaster(10, frames=17)
-            pl = ForumPlanner(params, arena, PlannerConfig(T=36, threads=2, variants="bounds_lo"),
-                              ForumConfig(deadline_ms=math.inf, chunk=16, forced_rank=fr))
-            r = pl.tick(_world(x), kin.initial_state(params, x, FLOOR + params.foot), kin.HoldState.idle(1),
-                        np.zeros(1, np.int64), mf.forecast(0.8), _prefs(np.random.default_rng(int(x * 10)), x), _ctx())
-            picks.append((r.idx, r.S, r.forced_risk))
-        assert picks[0] == picks[1]
-    del rng
-
-
-def test_seen_rank_takes_the_row_clear_of_a_collider_coming_at_the_hero(params, arena):
-    """FORCED_RISK with a damage box charging at the hero from the right: "seen" picks a row whose nominal path the
-    moving box never meets when one exists (the share ranking ties or does not look at it); safe ticks unchanged."""
-    from ssbot.combat.forum_planner import seen_contacts, seen_polys
-    n_forced = 0
-    for x in (30.6, 31.0, 31.6):
-        ws = _with_collider(_world(x), (x + 4.0, FLOOR, x + 5.5, FLOOR + 2.0), -18.0)
-        mf = _reed_forecaster(10, frames=17)
-        pl = ForumPlanner(params, arena, PlannerConfig(T=36, threads=2, variants="bounds_lo"),
-                          ForumConfig(deadline_ms=math.inf, chunk=16, forced_rank="seen"))
-        pl.debug = True
-        r = pl.tick(ws, kin.initial_state(params, x, FLOOR + params.foot), kin.HoldState.idle(1),
-                    np.zeros(1, np.int64), mf.forecast(0.8), _prefs(), _ctx())
-        if not r.forced_risk:
-            continue
-        n_forced += 1
-        dbg = pl.last_info["dbg"]
-        verts, starts, pbox, pvel = seen_polys(ws)
-        rows = np.flatnonzero(dbg["ok"] & dbg["known"])
-        cnt, _ = seen_contacts(np.ascontiguousarray(dbg["box"], np.float64),
-                               np.ascontiguousarray((dbg["flags"] & kin.F_INVULN) != 0), verts, starts, pbox, pvel,
-                               np.ascontiguousarray(dbg["tk"], np.float64), rows, 0.0)
-        assert cnt[rows].max() > 0                     # standing still is met
-        assert pl.last_info["seen"] == cnt[rows].min() == cnt[r.idx]
-    assert n_forced > 0
 
 
 def test_seen_cf_then_takes_the_row_least_in_the_committed_strike(params, arena):
