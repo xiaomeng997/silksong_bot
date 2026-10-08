@@ -1889,6 +1889,13 @@ attack outcomes), `live_w0f_3608489` (live check). Seeds used: 340000-340024.
   1340000+), lighter machine load (1.3 % late ticks): unpaired seen_cf - seen +6.2 s (bootstrap 95 % CI 3.1-9.4),
   seen_cf - share +11.1 s (8.4-14.1). Still 25 / 25 QUIT in wave 0, 0 kills; the top remaining sources are the
   whip 0.64, Envoy slash 0.56 and jump slash 0.52 per episode.
+- **seen_cf vs seen PAIRED** (review-fix round, 05:57-06:32, `C:\ssbot\sandbox\w0f_pair.ps1`): instance 0, frozen
+  `C:\ssbot\live_w0f_cf` (82e94fa = final code), seeds 340100-340124, ABBA blocks of 5 (same instance, same seeds,
+  alternating slots: late ticks 1.8 % vs 1.4 %). seen_cf runs `20261008_055737` / `060704` / `061017` / `062102` /
+  `062440`, seen runs `060111` / `060410` / `061410` / `061752` / `062846`. Time to QUIT median 24.1 vs 19.4 s,
+  paired mean +4.6 s (bootstrap 95 % CI 2.1-7.2), median difference +2.3 s (0.7-8.1), seen_cf longer in 18 / 25
+  (sign test p 0.043); hits / min 9.4 vs 12.3; Envoy slash hits 0.60 vs 1.00 per episode. Both arms reproduce their
+  earlier medians (seen 19.1, seen_cf 25.2). Still 50 / 50 QUIT in wave 0, 0 kills.
 
 ### Review fixes (verifier of 8fd77b0)
 
@@ -1897,7 +1904,7 @@ attack outcomes), `live_w0f_3608489` (live check). Seeds used: 340000-340024.
   stated; the "no information" claim rests on the saturation / tie evidence. The split by "pick = executed plan" is in
   19.5 (scratch scripts `w0fx\split.py` / `split3.py`).
 - 19.10: the seen / share pair did NOT run under the same load (late ticks 5.4 % vs 12.8 %); cross-run reference added
-  (9 low-load share-type runs: QUIT medians 11.8-16.5 s), plus the paired, interleaved seen vs seen_cf re-run below.
+  (9 low-load share-type runs: QUIT medians 11.8-16.5 s), plus the paired, interleaved seen vs seen_cf re-run above.
 - 19.6: kinematics at 24 frames too (non-Final 413: p90 0.67 u, 17 % > 0.3 u, 25 misses; all 489: p90 0.95 u); why 12.
 - 19.4: "0.25 % of ticks plan > 16.7 ms" was the whole-tick late rate; plan time > 16.7 ms is 14 / 107,964 (0.013 %).
 - 19.5: 2,854 of 2,871 decomposed ticks (17 empty), median 8 saturating groups; 19.9: the 45.7 % key is the
@@ -1911,12 +1918,8 @@ attack outcomes), `live_w0f_3608489` (live check). Seeds used: 340000-340024.
 
 ### Running
 
-- Review-fix round (from 05:56): `C:\ssbot\sandbox\w0f_pair.ps1` on instance 0 (lock `inst0.lock` = "diag"), frozen
-  checkout `C:\ssbot\live_w0f_cf` (82e94fa = the final code), seen vs seen_cf PAIRED on seeds 340100-340124, ABBA
-  blocks of 5 (even blocks seen_cf first) so both arms share the machine load; 10 combat_run chunks, log
-  `C:\ssbot\sandbox\w0f_pair.log`. Stop gracefully: create `C:\ssbot\sandbox\w0f_pair.stop` (no new chunk), then
-  `combat_run stop <run dir>` from the checkout's brain for the running chunk; the driver releases the lock.
-- Earlier: instance 1's lock (taken 04:46 as "diag") was released at 05:05.
+- Nothing. The review-fix paired run (`w0f_pair.ps1`, instance 0) ended at 06:32 and released `inst0.lock` (r5value
+  took it right after); instance 1's lock (04:46) was released at 05:05.
 - Offline: nothing. The forensics replay covers 115 of the 225 episodes (A0b 50, R6 40, R5 25); the other 110 were not
   replayed so as not to load the machine next to the other tracks' live runs (`fx_run.cmd` resumes where it stopped).
 
@@ -1927,9 +1930,8 @@ attack outcomes), `live_w0f_3608489` (live check). Seeds used: 340000-340024.
 ### Next / open issues
 
 1. Merge `forced_rank` ("seen" / "seen_cf"; default stays `share`); the integrator's Forum A/B with
-   `SSBOT_FORUM_FR=seen_cf`, and once paired against `seen` on the same instance and seeds (my seen_cf run was not
-   paired). It is orthogonal to R5 / R6 / R8 (only FORCED_RISK's first keys); their terms can only act once the tie
-   is gone.
+   `SSBOT_FORUM_FR=seen_cf` (paired against `seen` on the same instance and seeds: +4.6 s, above). It is orthogonal
+   to R5 / R6 / R8 (only FORCED_RISK's first keys); their terms can only act once the tie is gone.
 2. Antic-driven attacks (whip, Envoy slash, Reed stab, Choristor slash: over half of the remaining hits) are invisible
    to the "seen" key until their collider opens. A second key after it, the share of stage-1 frames in the committed
    fine placements (`forced_rank = "seen_cf"`, `SSBOT_FORUM_FR=seen_cf`, 82e94fa, tested), lifts the hindsight-clear
