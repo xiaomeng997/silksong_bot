@@ -1820,7 +1820,8 @@ Worktree `C:\modeling\silksong_bot\.claude\worktrees\wf_814dfeea-b10-3` (from ma
 after the route-boss collection; seeds 310000-319999). Facts: `docs/facts/1.0.30000/forum.md` section 17 (Chinese);
 plan R6 row: the dated note of 2026-10-08. Stopped early on the weekly quota (99 % rule): the code and the offline
 checks are done, the live A/B is queued on a detached driver (below). Round 2 (same branch): the A/B's result,
-target holding, the Clapper controller live on wave starts, a full-gauntlet re-run (section "Round 2" below).
+target holding, the Clapper controller live on wave starts, a full-gauntlet re-run (section "Round 2" below). Round 3:
+the verifier's findings on ba7dddb, fixes and interleaved live re-runs (section "Round 3" below).
 
 ### Done (committed)
 
@@ -1929,29 +1930,101 @@ Merged main (already up to date at bc46dc9). Commits 6972e01 .. this one.
   8754008, below normal): 1152 passed, 2 skipped, 1 xfailed (716b539: 1151; Bell Beast equivalence among them; no shared
   planner / forecast code touched).
 
+### Round 3 (2026-10-08 06:00-, the verifier's findings on ba7dddb; forum.md 17.5-17.6 "第 3 轮更正" notes and 17.7)
+
+Commits 23e56af .. this one. Round 2's claims that did not hold are corrected in place (forum.md 17.5 / 17.6, the
+plan R6 row note); below, the round-2 bullets above stand as written then.
+
+- **Jump aim (high)**: Jump Aim (and Cast Jump) are instant states (one frame goes Jump Antic / Cast Slam Antic 2 ->
+  Jump Aim -> Jump), so the tracker never ends a tick in Jump Aim and round 2's aim (keyed on that state) was never
+  stored live: jump_how never fixed, the landing re-computed from the hero's x and the Clapper's in-air x (102 / 103
+  in-jump branch flips in the v3 / v4 logs). First fix (23e56af): the take-off x kept from the antic ticks, the aim
+  taken on the first tick past the antic, the way round fixed there (open loop on 052126: 7 / 8 jumps aimed, 0 flips
+  after the aim). **Live it was worse**: 4a0c212's first block (20261008_064118, seeds 310300-307) w7 alive 15.7 /
+  15.4 / 16.2 / 9.8 s vs v4 on the same seeds (064410) 45.0 / 34.3 / 10.9 / 17.1 s; the hero ran under the airborne
+  Clapper on 8 / 8 w7 jumps and took its body 8 times (per-jump count over the decision logs, jump_live.py: v2 6
+  crossings / 14 body, v3 0 / 0, v4 1 / 0). It turns to face the hero at Jump Aim, so "behind the landing" lies on its
+  flight path: going there is going under it; v3 / v4's per-tick re-judgement with the drifting landing rarely went.
+  The driver was stopped after that block (r6_ws.stop). **afb89a8** (aim kept, never under it: behind the landing
+  only from its back side, else back off to the wall) was cornered live: w7 alive 16.0 vs v4 28.0 s (8 pairs, -12.0
+  s, se 4.3), landing-slam hits 9 vs 4 (it jumps at the hero and lands 5 u short; "8.5 u in front of the landing" is
+  the wall in a 28.8 u arena). **fd57819** (final): the jump stance is v4's live rule again, now stated as what it
+  is: judged every tick from where the hero and it are now (jump_landing(its x, hero x, facing) is a stance rule,
+  not a landing forecast), under and behind while the run fits 0.25 s before the landing and not through its body on
+  the ground, else back off; up slashes x 1.5 back. No aim is stored any more (the jump cast's rune circle uses where
+  it stands when the move ends). The round-2 claim "the way round fixed at Jump Aim" is withdrawn (it never ran);
+  v4's per-tick rule crossed under it once in 25 jumps with 0 body hits. Tests: test_clapper_jump_judged_from_now,
+  test_clapper_controller's jump part.
+- **Buddy turn (medium, 23e56af)**: MultiForecast gave every Subject t_free 0.0, so the reach test of the idle
+  Clapper's turn never held (a637d77 on: turn 0 times in v3 / v4's 32 w13 episodes; round 2's "13.2 -> 3.7 switches /
+  min by the gate" was the rule switched off). Now t_free = the attack's start + its family's logged duration p0.5
+  (enemy_tables.Family.dur from duration_s) - the origin; the walk's own earliest exit is ~0 (rare aborts). Only L2
+  reads t_free (Bell Beast untouched). Tests: a synthetic Reed table in test_multi_forecast; production tables + a
+  real MultiForecaster in test_forum_l2 (a slam 0.1 s in: the idle one's turn; 1.0 s in: none). Open loop on 052126:
+  turn 6 times in 8 w13 episodes.
+- **Goal switches (medium, the refuted "<= 10 / min passed")**: round 2 reported tgt_switches (7.65) against round 1's
+  changes (33.0); the same lens live in round 2 was 25.9. The lens now: switches = tgt_switches + rule_changes (new
+  stat: the same target under another rule, "RUSH>KITE" ...), the episode's first goal excluded (4.2 / min on its own
+  in 13-15 s wave-0 episodes); both reported, forum_a0_report gains switch_kinds / rule_changes. Open loop wave 0 (26
+  episodes of 041945 + 043128): round 2's holding 19.9 switches / min (7.7 target + 12.2 rule; RUSH>KITE 58,
+  KITE>RUSH 18). Added rule_hyst_u (from KITE, RUSH needs one isolated by 8 + 2 u) and kite-with-the-kept-target only
+  for a rushed one; a grid (forum.md 17.7.3) -> adopted goal_dwell_s 4, rule_hyst_u 2, dwell_s 8, switch_x 2.0 (Forum.yaml):
+  8.2 switches / min open loop (3.9 target + 4.3 rule), changes incl. first goals 12.4.
+- **Big rune (round-2 Next 1, 04dcad8)**: after a CC_JUMP_CAST the rune circle (6.62 u in front of the landing, r
+  7.19) bursts about 0.75-0.87 s after the move ends (its tail, ChoirClapper.json); until rune_hold_s 1 s after the
+  move the stance stays behind the landing (2.5 u, when the way round went under it and not through its body) or out
+  past the circle (14.5 u, "rune: out", no hit reward), not at the face (v4 w7 took 20 hits there).
+- **Wave-0 hits over all ticks (low)**: three paired full-gauntlet runs of rounds 1-2 (75 pairs): damage hits per tick
+  0.00612 on vs 0.00565 off (+8 %, paired +0.11 / episode, se 0.11), alive -0.62 s (se 0.36); Choristor Body Damager
+  28 vs 8 (paired +0.27, se 0.08): of the 28, RUSH on that Choristor 6, RUSH on another 8, KITE(EVADE) 14. Not fixed in
+  L2 (the planner cannot rank the escape under the saturated support); re-check with diag's FR=seen.
+- **Other corrections (low)**: v3's w7 body-hit drop came from "behind only with room", not the fixed way round;
+  v2's w13 switches were turn 36 + better 3; the open-loop 23.8 / 9.6 came from different samples / settings (the
+  final 4 s setting: 8.22, changes 23.0); presses / s on the Clapper waves 7.64 / 7.71 (L2 on) vs 6.48 (paired off),
+  +18 %, plan-change rate 0.46 / 0.53 vs 0.50; v3 / v4 ran an hour after their control (not interleaved).
+- **§4.4 item 4 re-run on the final code**: forum_policy_replay 074719 i3 ep0, 600 ticks, deadline inf,
+  SSBOT_FORUM_L2=fail:1 vs =0: mode, target, plan, S, FORCED_RISK, mask, J equal in all 600 ticks (only the record's
+  goal label differs: "LOCAL" vs none).
+- **Live re-runs (r6_ws5.ps1, instance 1, interleaved blocks; forum.md 17.7.5)**, final code **fd57819**:
+  wave starts w7 / w13 vs v4 (8754008), seeds 310300-310331, 16 pairs each (fd57819 runs 070851 / 071230 / 071658 /
+  072800, v4 064410 / 065752 / 072118 / 072437): **w7 alive 37.4 vs 26.9 s (paired +10.6 s, se 4.0; 12 / 16
+  longer)**, hits 6.9 vs 8.1 / min, big rune 2 vs 20, rune bombs 55 vs 30, landing / ground slam 11 vs 6, body 1 vs
+  2, Clapper hits 9.9 vs 6.5 per episode; w13 -0.51 s (se 0.52; 5 / 16 longer), turn now fires (12), goal switches
+  10.0 / min. Full gauntlet (A0b protocol, seeds 310400-310424, L2 on / off with the same checkout, 25 + 25
+  interleaved; on 073208 / 074014 / 074246 / 075109 / 075408, off 073432 / 073649 + 073758 / 074531 / 074824 / 075636;
+  one "paused unasked" HARNESS_FAIL in the off arm, made up with its seed): all QUIT in wave 0; paired hits -0.28
+  (se 0.19), alive +0.78 s (se 0.71), Choristor body 5 vs 5; FORCED_RISK 82.2 / 80.0 %; unpredicted 0 / 0; real
+  quits 3 / 3 / 3, 0 wrong submits; **goal switches 8.1 / min (pass; target 19 + rule 28; changes incl. first goals
+  12.5)**, plan-change rate 0.575 (A0b 0.615, pass), **presses / s 7.88 vs A0b 7.75 (+1.7 %, a marginal fail; L2 off
+  in the same blocks 7.31)**; L2 p99 1.07 ms; tick p50 / p99 10.5 / 19.8 ms (off 9.3 / 18.3). Machine at about 50 %
+  CPU (round 2: 100 %).
+- Tests: test_forum_l2.py 26 cases (+ the real-forecast turn test, the round-3 holding, the rune circle, the
+  per-tick jump; the jump tests rewritten), test_multi_forecast.py + 1 (t_free); full suite (tests + ssbot/tests,
+  below normal) at fd57819: 1156 passed, 2 skipped, 1 xfailed (4a0c212 / afb89a8: 1158 with the since-removed jump
+  tests; Bell Beast equivalence among them). Shared code touched: MultiForecast's Subject.t_free (read by L2 only)
+  and enemy_tables.Family.dur (new field).
+
 ### Running
 
-- Nothing. Drivers `C:\ssbot\sandbox\r6_ws2.ps1` (v2 171cf28, both arms), `r6_ws3.ps1` (v3 716b539) and `r6_ws4.ps1`
-  (v4 8754008), all done (`r6_ws2.done`, `r6_ws3.done`, `r6_ws4.done`); `inst1.lock` released. Analysis script
-  `ws_anal.py` (session scratchpad `r6\`): `--on <runs> --off 20261008_040451 20261008_041508`.
+- Nothing. Driver `C:\ssbot\sandbox\r6_ws5.ps1` (round 3) done (`r6_ws5.done`, log `r6_ws5.log`, one line per block
+  in `r6_ws5_runs.txt`); `inst1.lock` released. Earlier drivers r6_ws2-ws4 done. Analysis scripts in this session's
+  scratchpad `r6\r3\` (ws_anal3.py, jump_live.py, w0_hits.py, l2_sw3.py, jump_check.py).
 
 ### Next
 
-1. The jump cast's big rune (v4 w7: 20 hits): from a CC_JUMP_CAST landing until the rune explodes (about 3.3 s),
-   keep the stance out of its circle (behind the landing >= 1.6 u or > 13.8 u in front) instead of the face.
-2. The rune-bomb hits (the cast) and the jump timing are the planner's: re-run the w7 / w13 pair with diag's
-   `SSBOT_FORUM_FR=seen` once it lands (runes are drawn 0.33-0.35 s before they explode).
-3. A Clapper kill needs about 26 Reaper hits: tools (Cogfly, R7's glide spike in the cast window) or a longer life;
-   the next gate for the controller is a wave-13 CLEAR, not time alive.
-4. PUNISH stays dead in multi-enemy waves until the support stops saturating (diag / R5 / R8).
-5. Frozen checkouts to remove when done (no live run uses them): `C:\ssbot\live_r6_5d24020`, `live_r6_ef036d5`,
-   `live_r6_f7a403c` (never ran), `live_r6_6d2f457`, `live_r6_171cf28`, `live_r6_716b539`, then `live_r6_8754008`
-   after the integration.
-6. Main's `knowledge/1.0.30000/enemies/forum/` has no `*_hitboxes.npz` (git-ignored): the frozen checkouts took them
-   from this worktree (md5 of ChoirClapper e66bafe2..., the R3 tables, same as diag's worktree).
-7. w13: with the two Clappers within 8 u nobody is isolated, KITE yields to LOCAL's EVADE (20 of the v4 hits); a
-   cornered slam's "out to the wall" still meets its body charge (7). A FOCUS goal for the final wave (clapper_face.md:
-   pick one, keep it between) is the next controller step.
+1. Wave 0 is decided below L2 (the saturated support ties FORCED_RISK, diag): re-run the full-gauntlet pair and the w7 /
+   w13 pair with diag's `SSBOT_FORUM_FR=seen` once it lands (rune bombs, the Choristor's body, the Envoy's charge).
+2. w13 (two Clappers) did not improve with the working Buddy turn: a FOCUS goal for the final wave (pick one, keep the
+   other behind it; clapper_face.md) and the KITE(EVADE) share when the two stand together.
+3. The w7 rune bombs (55 of the hits left) are the planner's jump timing (the near rune's 5-7 frames).
+4. Presses / s 1.7 % above A0b in the full gauntlet (more continuous RUSH after the holding): decide whether the lens
+   should be per arm (L2 off in the same blocks: 7.31) or tune.
+5. A Clapper kill needs about 26 Reaper hits (best w7 episode: 54 s, about 10 hits): tools / glide spike (R7).
+6. Frozen checkouts to remove when done (no live run uses them): `C:\ssbot\live_r6_5d24020`, `live_r6_ef036d5`,
+   `live_r6_f7a403c`, `live_r6_6d2f457`, `live_r6_171cf28`, `live_r6_716b539`, `live_r6_4a0c212`, `live_r6_afb89a8`
+   (both withdrawn mid-run), then `live_r6_8754008` and `live_r6_fd57819` after the integration.
+7. Main's `knowledge/1.0.30000/enemies/forum/` has no `*_hitboxes.npz` (git-ignored): the frozen checkouts take them
+   from this worktree (`C:\ssbot\sandbox\r6_freeze.ps1`).
 
 ### Needs deploy
 
