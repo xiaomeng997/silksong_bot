@@ -41,7 +41,7 @@ from ssbot.combat.enemy_tables import EnemyTables
 from ssbot.combat.forum_planner import (ForumConfig, ForumPlanner, forum_kill_hp, forum_yellow_kill_hp,
                                         kill_freeze_s)
 from ssbot.combat.hero_damage import HeroDamage
-from ssbot.combat.multi_forecast import MultiForecaster
+from ssbot.combat.multi_forecast import MultiForecaster, ReactConfig
 from ssbot.combat.planner import PlannerConfig
 from ssbot.combat.safety_filter import FilterContext, KillKnowledge
 from ssbot.combat.tactics.forum_local import ForumTactics, load_forum_playbook
@@ -126,12 +126,19 @@ class ForumPlannerPolicy(PlannerPolicy):
 
     @staticmethod
     def _fcfg() -> ForumConfig:
-        """ForumConfig with the A/B switch SSBOT_FORUM_FR: FORCED_RISK's first risk key, "share" (default), "seen" or
-        "seen_cf" (ForumConfig.forced_rank; forum.md §19)."""
+        """ForumConfig with the A/B switches SSBOT_FORUM_FR: FORCED_RISK's first risk key, "share" (default), "seen" or
+        "seen_cf" (ForumConfig.forced_rank; forum.md §19); SSBOT_FORUM_REACT: the reactive support, "off" (default),
+        "delay" or "escape", with "+c" / "+i" / "+p5" (ForumConfig.react; forum.md §20)."""
         fr = os.environ.get("SSBOT_FORUM_FR", "share").strip().lower() or "share"
         if fr not in ("share", "seen", "seen_cf"):
             raise ValueError(f"SSBOT_FORUM_FR={fr!r}: share | seen | seen_cf")
-        return ForumConfig(forced_rank=fr)
+        rx = os.environ.get("SSBOT_FORUM_REACT", "off").strip().lower() or "off"
+        ReactConfig.parse(rx)                    # validates
+        return ForumConfig(forced_rank=fr, react=rx)
+
+    def _set_react(self, fcfg: ForumConfig) -> None:
+        """The forecaster's reactive support from the planner's config (None when off: the support as before)."""
+        self.fc.react = ReactConfig.parse(fcfg.react)
 
     # ---- warm-up ----
 
@@ -141,8 +148,10 @@ class ForumPlannerPolicy(PlannerPolicy):
         from ssbot.core.worldstate import E, WorldState
         t0 = time.perf_counter()
         self.fc.warm()
+        fcfg = self._fcfg()
+        self._set_react(fcfg)
         planner = ForumPlanner(self.params, Terrain2D.empty(), PlannerConfig(T=36, threads=self.threads,
-                                                                             variants="bounds_lo"), self._fcfg())
+                                                                             variants="bounds_lo"), fcfg)
         fcast = self.fc.forecast(HORIZON_S)
         for x, mode in ((30.0, kin.M_NORMAL), (33.0, kin.M_NORMAL), (36.0, kin.M_HURT_FREEZE)):
             ws = WorldState()
@@ -184,6 +193,7 @@ class ForumPlannerPolicy(PlannerPolicy):
         self.planner.params = self.params
         self.planner.terrain = self.terrain
         self.planner.reset()
+        self._set_react(self.planner.fcfg)
         self._audit0 = self.planner.audit.as_dict()
         self.trk = StateTracker(self.params, self.terrain)
         self.fc.reset()
@@ -649,7 +659,7 @@ class ForumPlannerPolicy(PlannerPolicy):
                "triggers": list(r.decision.triggers), "unpred": unpred, "ms": round(res.t_ms.get("total", 0.0), 3),
                "kill_hp": kill_hp, "ykill": ykill, "kill_prims": sorted(p.name for p in r.decision.kill_prims),
                "fi": {k: li.get(k) for k in ("posture", "N", "stage1_pass", "enveloped", "hitfx", "react", "capped",
-                                             "cut", "overrun", "seen", "seen_cf")},
+                                             "cut", "overrun", "seen", "seen_cf", "esc")},
                "pocket": self.tac.last.get("pocket_veto"), "subj": subj}
         hit = any(ev.get("k") in ("damage", "catastrophe", "would_die") for ev in s.get("ev") or ())
         event = hit or streak or (r.decision.pause_pending and self.counts["_pend_logged"] == 0)

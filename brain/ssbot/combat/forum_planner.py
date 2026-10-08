@@ -75,6 +75,11 @@ from ssbot.knowledge.kinematics import (B_ATTACK, B_DASH, B_JUMP, B_QUICKCAST, B
                                         M_DASH, M_NORMAL, M_RPR_DS, M_SPRINT, HeroParams, HoldState, Terrain2D)
 
 R_UNMOD = 6                       # veto reason: presses a move the model does not have (the dash stab)
+ESC_LOCK_MODES = NO_CONTROL_MODES + (kin.M_RPR_DS, kin.M_DS_ANTIC, kin.M_DS_SPIKE, kin.M_HARD_LAND)
+ESC_MAX_F = 72                    # escape rollouts at most this long (frames)
+ESC_CHUNK = 2                     # safe rows per escape check batch
+ESC_NEAR_U = 14.0                 # an attack is looked at when its reach + this (the hero's travel over a plan and an
+#                                   escape, the enemy's) is past the hero
 REASONS_FORUM = dict(REASONS) | {R_UNMOD: "unmodelled move (attack while dashing)"}
 SLOTS = ("normal", "up", "wall", "down")   # kernel slot order (_SHAPE_*)
 K_SIDE, K_UP, K_WALL, K_DOWN = 1, 2, 3, 4  # first_kind codes
@@ -105,6 +110,17 @@ class ForumConfig:
     #                               then the share; forum.md §19: the support saturates in wave 0 and the share ties),
     #                               "seen_cf" (seen, then the share of frames in the committed attacks' fine
     #                               placements: the strikes of attacks already under way whose entry is known)
+    react: str = "off"            # reactive support (forum.md §20): "off"; "delay" (MultiForecaster.react: an attack
+    #                               that has not started strikes no earlier than its wind-up); "escape" (delay and the
+    #                               escape check: the chosen safe plan leaves the hero able to get out of the reach of
+    #                               any attack an enemy may start at its end or at a late lock-in); "+c" / "+i" / "+p5"
+    #                               extensions (multi_forecast.ReactConfig)
+    esc_k: int = 8                # safe rows (in the order) the escape check looks at for one that passes
+    esc_after_f: int = 18         # frames past an attack's first damage its escape path must stay out of it
+
+    @property
+    def escape(self) -> bool:
+        return self.react.strip().lower().split("+")[0] == "escape"
 
 
 @dataclass
@@ -128,6 +144,9 @@ class EnvelopeAudit:
     uncapped_ticks: int = 0       # ticks without a safe row whose capped rows got their hit branch uncapped
     uncapped_rows: int = 0
     core_not_enveloped: int = 0   # core rows past stage 1 left without the envelope (must stay 0)
+    esc_ticks: int = 0            # ticks with a safe row and threats the escape check looked at ("escape")
+    esc_pass: int = 0             # ... whose chosen row passed it
+    esc_rows: int = 0             # rows it checked
 
     def as_dict(self) -> dict:
         return dict(self.__dict__)
@@ -498,6 +517,171 @@ class ForumPlanner(Planner):
             hit_occ[i] = h
             t_hit[i] = min(int(t_hit[i]), int(np.argmax(h)))
 
+    # ---- the escape check (reactive support, ForumConfig.react "escape") ----
+
+    def _threats(self, f, hero: tuple[float, float]) -> list[tuple]:
+        """The attacks enemies in play may start (forum.md §20): per enemy whose walk lets it start an attack within
+        the forecast (Subject.t_strike) and per family of its type with a strike time (strikes.json: the least commit
+        -> first own damage, the p5 for REACT_EXCEPT): (t_strike, family template id, frames from a commit to its
+        first damage less the view's latency, its position, velocity and age). The family template (the logged
+        instances' union over the time since their start, coarse) is the attack's reach, wind-up body included."""
+        from ssbot.combat.multi_forecast import REACT_EXCEPT, REACT_LATENCY_S, strike_table
+        mf = getattr(f, "_fc", None)
+        if mf is None or not hasattr(mf, "trackers"):
+            return []
+        dt = self.params.frame_time
+        lat = REACT_LATENCY_S.get(mf.view, 3 * dt)
+        by_type = getattr(self, "_strike_by_type", None)
+        if by_type is None:
+            by_type = {}
+            for (tk, fam), (lo, p5) in strike_table().items():
+                by_type.setdefault(tk, []).append((fam, p5 if fam in REACT_EXCEPT else lo))
+            self._strike_by_type = by_type
+        reach = getattr(self, "_esc_reach", None)
+        if reach is None:
+            reach = self._esc_reach = {}
+        out = []
+        hx, hy = hero
+        for s in f.subjects:
+            if not s.alive or not s.in_play or not math.isfinite(s.t_strike):
+                continue
+            tr = mf.trackers.get(s.iid)
+            if tr is None or tr.pos is None:
+                continue
+            for fam, d in by_type.get(s.type_key, ()):
+                d_f = max((d - lat) / dt, 1.0)
+                if d_f + self.fcfg.esc_after_f > ESC_MAX_F:
+                    continue                      # a strike this far off is the later ticks' (its wind-up only here)
+                ftid = mf.tables.key_id(fam, None, "anchor")
+                if ftid is None:
+                    continue
+                r = reach.get(ftid)
+                if r is None:                     # the family template's farthest cell from its anchor (u)
+                    offs, nt, _ = mf.tables.store.bbox_table(int(ftid))
+                    b = mf.tables.store.bb_rows()[offs[0]:offs[0] + nt]
+                    b = b[b[:, 0] <= b[:, 2]]
+                    r = reach[ftid] = float(np.abs(b).max()) if len(b) else 0.0
+                # out of reach even if the hero runs at it over the escape (the dead reckoning included)
+                ax = tr.pos[0] + tr.vel[0] * (f.origin_t - tr.seen_T)
+                ay = tr.pos[1] + tr.vel[1] * (f.origin_t - tr.seen_T)
+                if math.hypot(ax - hx, ay - hy) > r + ESC_NEAR_U:
+                    continue
+                out.append((float(s.t_strike), int(ftid), d_f, tr.pos, tr.vel, f.origin_t - tr.seen_T, lat,
+                            f"{s.type_key}/{fam}"))
+        return out
+
+    def _esc_cmds(self, L: int) -> np.ndarray:
+        """[8, L] escape commands: stay, run either way, a full jump in place or either way (the tails), a dash
+        either way then run."""
+        c = getattr(self, "_esc_cache", None)
+        if c is not None and c.shape[1] == L:
+            return c
+        t = cmod.tails(L)
+        d = np.zeros((2, L), np.int64)
+        d[0], d[1] = kin.B_LEFT, kin.B_RIGHT
+        d[:, :3] |= B_DASH
+        self._esc_cache = np.ascontiguousarray(np.concatenate([t, d]))
+        return self._esc_cache
+
+    def _escape_fail(self, f, start, hold, full, hold_end, r1, rows: np.ndarray, threats: list
+                     ) -> tuple[np.ndarray, list]:
+        """[len(rows)] how many (threat, check point) pairs leave the row's hero no escape. Check points: the plan's
+        end and its late lock-ins (an attack pressed, a lock or a mode without control entered within a strike's
+        delay of the end: inside the horizon the delayed support already checks it against every start). At a check
+        point the threat's family template is placed starting then (or up to the latency before), at the enemy's
+        position dead-reckoned there, both facings; an escape (_esc_cmds, from the hero's state there, the lock it is
+        in played out) must keep the nominal box centre out of it until esc_after_f frames past its first damage."""
+        from ssbot.combat.enemy_tables import WinBatch
+        params = self.params
+        dt = params.frame_time
+        store = f._fc.tables.store
+        T1 = r1.box.shape[1]
+        dmax = max(t[2] for t in threats)
+        L = int(min(ESC_MAX_F, math.ceil(dmax) + self.fcfg.esc_after_f))
+        E = self._esc_cmds(L)
+        nE = len(E)
+        lock = np.isin(r1.mode[rows], ESC_LOCK_MODES) | ((r1.flags[rows] & F_ATTACKING) != 0)
+        rise = lock[:, 1:] & ~lock[:, :-1]
+        k_min = T1 - 1 - int(math.ceil(dmax))
+        cps = []                                   # (row position, check frame)
+        for n in range(len(rows)):
+            ks = [int(k) + 1 for k in np.flatnonzero(rise[n]) if k_min <= int(k) + 1 < T1 - 1]
+            cps += [(n, k) for k in ks] + [(n, T1 - 1)]
+        K = r1.final.shape[0]
+        st = np.empty((K, len(cps)))
+        hs = [np.empty((len(cps),) + np.asarray(a).shape[1:], np.asarray(a).dtype)
+              for a in (hold_end.latched, hold_end.desired, hold_end.pending, hold_end.age)]
+        by_k: dict = {}
+        for m, (n, k) in enumerate(cps):
+            by_k.setdefault(k, []).append(m)
+        for k, ms in by_k.items():
+            ms = np.array(ms, np.int64)
+            rr = rows[[cps[m][0] for m in ms]]
+            if k == T1 - 1:
+                st[:, ms] = r1.final[:, rr]
+                h = hold_end
+                src = (np.asarray(h.latched)[rr], np.asarray(h.desired)[rr], np.asarray(h.pending)[rr],
+                       np.asarray(h.age)[rr])
+            else:
+                lat_k, h = hold_filter_jit(full[rr, :k], hold)
+                st[:, ms] = kin.rollout(start, lat_k, params, self.terrain, threads=self.cfg.threads).final
+                src = (h.latched, h.desired, h.pending, h.age)
+            for a, b in zip(hs, src):
+                a[ms] = b
+        hsr = HoldState(*(np.repeat(a, nE, axis=0) for a in hs))
+        lat_e, _ = hold_filter_jit(np.tile(E, (len(cps), 1)), hsr)
+        re = kin.rollout(np.repeat(st, nE, axis=1), lat_e, params, self.terrain, threads=self.cfg.threads)
+        cx = 0.5 * (re.box[..., 0] + re.box[..., 2])
+        cy = 0.5 * (re.box[..., 1] + re.box[..., 3])
+        inv = (re.flags & F_INVULN) != 0
+        j = np.arange(L + 1)
+        tk_rel = j * dt
+        t_cp = np.array([k * dt for _, k in cps])
+        cp_of = np.repeat(np.arange(len(cps)), nE)
+        fail = np.zeros(len(rows), np.int64)
+        labels: list = [[] for _ in rows]
+        for t_strike, ftid, d_f, pos, vel, age, lat, label in threats:
+            app = t_cp >= t_strike - dt                 # the enemy may start it then
+            if not app.any():
+                continue
+            ax = pos[0] + vel[0] * (age + t_cp)
+            ay = pos[1] + vel[1] * (age + t_cp)
+            last = min(L, int(math.ceil(d_f)) + self.fcfg.esc_after_f)
+            x = cx - ax[cp_of][:, None]
+            y = cy - ay[cp_of][:, None]
+            x[:, last + 1:] = np.nan
+            x[:, 0] = np.nan
+            x[~app[cp_of]] = np.nan
+            W = WinBatch(np.array([ftid, ftid], np.int64), np.array([-lat, -lat]), np.zeros(2), np.zeros(2),
+                         np.zeros(2), np.array([1, -1], np.int64))
+            occ = store.query_win(W, x, y, tk_rel) & ~inv
+            esc = (~occ.any(axis=1)).reshape(len(cps), nE).any(axis=1)
+            for m in np.flatnonzero(app & ~esc):
+                fail[cps[m][0]] += 1
+                labels[cps[m][0]].append(label)
+        return fail, labels
+
+    def _escape_pick(self, f, start, hold, full, hold_end, r1, ranked: np.ndarray, hero: tuple[float, float]
+                     ) -> tuple[int | None, int, int, int, list]:
+        """Of the best esc_k safe rows (in the order), the first that passes the escape check, else the one with the
+        fewest failures (the first of them). Returns (row or None: no threats / rows, its failures, rows checked,
+        threats, its failing threats)."""
+        threats = self._threats(f, hero)
+        if not threats or not len(ranked):
+            return None, 0, 0, len(threats), []
+        best, best_fail, checked, best_lab = None, 0, 0, []
+        K = min(self.fcfg.esc_k, len(ranked))
+        for c0 in range(0, K, ESC_CHUNK):
+            rows = np.asarray(ranked[c0:min(K, c0 + ESC_CHUNK)], np.int64)
+            nf, lab = self._escape_fail(f, start, hold, full, hold_end, r1, rows, threats)
+            checked += len(rows)
+            for r, n, lb in zip(rows, nf, lab):
+                if n == 0:
+                    return int(r), 0, checked, len(threats), []
+                if best is None or n < best_fail:
+                    best, best_fail, best_lab = int(r), int(n), lb
+        return best, best_fail, checked, len(threats), best_lab
+
     @staticmethod
     def _s1_frames(T1: int) -> np.ndarray:
         """Stage 1's frames: 1-3 each, then every other one, and the last."""
@@ -734,6 +918,7 @@ class ForumPlanner(Planner):
             if zero.any() else None
         t5 = time.perf_counter()
         a = self.audit
+        esc_info: dict = {}
         a.ticks += 1
         a.rows_enveloped += int(env.sum())
         a.rows_stage1 += N
@@ -761,8 +946,23 @@ class ForumPlanner(Planner):
             i = int(order[0])
             tail_ok = None
             carried = cont and i == N - 1 and self.prev_tail_ok
+            esc_row = None
+            if not forced and fcfg.escape and not carried:
+                # reactive support: of the safe rows in the order, the first that leaves the hero an escape from
+                # every attack an enemy may start at its end or late lock-in (the tail check then looks at it alone)
+                te = time.perf_counter()
+                hero = (float(ws.hero.pos.v[0]), float(ws.hero.pos.v[1])) if ws is not None and ws.hero is not None                     else (0.0, 0.0)
+                esc_row, nf, nchk, nth, lab = self._escape_pick(f, start, hold, full, hold_end, r1, order[safe[order]],
+                                                                hero)
+                esc_info.update(fail=nf, checked=nchk, threats=nth, ms=round((time.perf_counter() - te) * 1e3, 3),
+                                why=sorted(set(lab)))
+                if esc_row is not None:
+                    i = esc_row
+                    a.esc_ticks += 1
+                    a.esc_pass += int(nf == 0)
+                    a.esc_rows += nchk
             if not forced and cfg.tail_k > 0 and not carried:
-                ranked = order[safe[order]]
+                ranked = order[safe[order]] if esc_row is None else np.array([esc_row], np.int64)
                 i, tail_ok = self._tail_pick(f, r1, hold_end, ranked, P + T, i)
             elif carried:
                 tail_ok = True
@@ -815,7 +1015,8 @@ class ForumPlanner(Planner):
                           "S": S, "Hz": hz, "U": U, "core_mask": core, "env": env, "Pc": Pc, "t_c": t_c,
                           "cand": sel if forced else np.zeros(N, bool), "hit_occ": hit_occ,
                           "seen": int(sk_n[res.idx]) if res.idx >= 0 else None,
-                          "seen_cf": round(float(sk_c[res.idx]), 3) if res.idx >= 0 else None}
+                          "seen_cf": round(float(sk_c[res.idx]), 3) if res.idx >= 0 else None,
+                          "esc": esc_info or None}
         if self.debug:
             self.last_info["dbg"] = {"box": r1.box, "flags": r1.flags, "mode": r1.mode, "latched": latched, "P": P,
                                      "J": J, "ok": ok, "known": known, "t_hit": t_hit, "V": V, "keep": keep,
