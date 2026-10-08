@@ -18,7 +18,10 @@ tick plans from what really happened). The planner keeps its rows (ForumPlanner.
             safe rows; hindsight: each known row's first contact with the recorded damage colliders over its horizon
             (the nominal box, its invulnerable frames skipped; the recorded future is open loop: the enemies' later
             reactions to a different hero are not modelled), the rows clear in hindsight, and which of them each
-            ranking would pick: "replay" (the planner's choice), "live" (the run's logged choice, matched by name),
+            ranking would pick: "replay" (the planner's choice, with --forced-rank), "live" (the run's logged choice,
+            matched by name), "seen" (ForumConfig.forced_rank "seen"'s key over every known row: frames in contact
+            with the damage colliders seen now moved along their velocity, then the share, -J), "dr" (the same with
+            the recorded colliders incl. multi-hit ones),
             "share" (least share of frames in the support over all known rows, then -J), "committed" (least share in
             the committed support: current attacks, tails, hazards; then the full share, then -J), "near" (least share
             in the committed support or the tubes, then the full share, -J), "random" (the share of clear rows).
@@ -48,7 +51,7 @@ LAGS = (2, 3, 4)
 K_SET = (1, 2, 3, 4, 6, 9, 12, 15, 18, 24, 30, 36, 45, 60, 75, 90)   # frames before a hit analysed in full
 EXEC_K = (12, 24)
 DECOMP_K = (1, 6, 12, 24, 36)                # ticks before a hit whose support is decomposed by group
-RANKS = ("replay", "live", "share", "committed", "near", "dr", "dr_first", "dr_g", "dr18")
+RANKS = ("replay", "live", "share", "committed", "near", "dr", "dr_first", "dr_g", "dr18", "seen")
 NEAR_KINDS = ("idle", "collider", "hazard", "death")
 
 
@@ -311,6 +314,15 @@ def run_episode(job: dict) -> dict:
     pol.planner.debug = True
     if job["deadline_ms"] is not None:
         pol.planner.fcfg.deadline_ms = job["deadline_ms"]
+    pol.planner.fcfg.forced_rank = job.get("forced_rank") or "share"
+    feed0 = pol.backend.feed
+    last_ws: list = [None]
+
+    def feed(st):
+        w = feed0(st)
+        last_ws[0] = w
+        return w
+    pol.backend.feed = feed
     fp = FramePolys(states)
     by_f = {int(s["f"]): s for s in states}
     dmg_f = []
@@ -427,6 +439,18 @@ def run_episode(job: dict) -> dict:
                 picks["dr_g"] = _pick([gcnt, -np.where(gfirst < 0, T1, gfirst), sh["full"], -sh["first"], -J], rows)
                 picks["dr18"] = _pick([c18, -np.where(f18 < 0, T1, f18), sh["full"], -sh["first"], -J], rows)
                 picks["dr"] = _pick([dcnt, -dfk, sh["full"], -sh["first"], -J], rows)
+                if last_ws[0] is not None:
+                    from ssbot.combat.forum_planner import seen_contacts, seen_polys
+                    sv, ss, sb, svel = seen_polys(last_ws[0])
+                    if len(sb):
+                        scnt, sfst = seen_contacts(np.ascontiguousarray(box, np.float64), np.ascontiguousarray(inv),
+                                                   sv, ss, sb, svel, np.ascontiguousarray(dbg["tk"], np.float64),
+                                                   np.ascontiguousarray(rows, np.int64), 0.0)
+                    else:
+                        scnt, sfst = np.zeros(len(J), np.int64), np.full(len(J), T1, np.int64)
+                    picks["seen"] = _pick([scnt, -sfst, sh["full"], -sh["first"], -J], rows)
+                    rec["seen_clear"] = int((scnt[rows] == 0).sum())
+                    rec["seen_clear_hs"] = int(((scnt[rows] == 0) & clear).sum())
                 picks["dr_first"] = _pick([-dfk, dcnt, sh["full"], -sh["first"], -J], rows)
                 rec["dr_clear"] = int((dcnt[rows] == 0).sum())
                 rec["dr_clear_hs"] = int(((dcnt[rows] == 0) & clear).sum())
@@ -552,7 +576,7 @@ def jobs_of(run: Path, a) -> list[dict]:
             r["_inst"] = inst
             r.pop("acts", None)
             out.append({"run": run.name, "row": r, "dec": dec.get(r["episode"], []), "every": a.every,
-                        "deadline_ms": a.deadline_ms})
+                        "deadline_ms": a.deadline_ms, "forced_rank": a.forced_rank})
     return out
 
 
@@ -566,6 +590,8 @@ def main(argv=None) -> int:
     ap.add_argument("--workers", type=int, default=1)
     ap.add_argument("--threads", type=int, default=4)
     ap.add_argument("--deadline-ms", type=float, default=math.inf)
+    ap.add_argument("--forced-rank", default="share", choices=("share", "seen"),
+                    help="the replayed planner's ForumConfig.forced_rank (its picks are 'replay')")
     a = ap.parse_args(argv)
     a.out.mkdir(parents=True, exist_ok=True)
     jobs = []

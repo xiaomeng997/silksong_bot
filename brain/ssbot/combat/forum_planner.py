@@ -37,6 +37,10 @@ Per tick (the lexicographic order and every rule of Planner.tick unless named he
               the hit branch's contact, from the hit frame on where a cap left it unchecked) and ranked by the share
               of those frames in contact (P's stand-in: MultiForecast.prob costs 3.7 ms p50 on wave 6, one query per enemy, placement
               kind and probability value; exact_p turns it back on), the latest first contact, the envelope's, J.
+              forced_rank "seen" (forum.md §19) puts a key before that share, in the preselection too: the frames
+              each row's nominal box meets the damage colliders seen now, moved along their entity's velocity
+              (seen_contacts; fewest first, then the latest first contact). In wave 0 the support saturates (every
+              row in it on every frame) and the share ties: the pick then fell to J.
   determinism deadline_ms = inf: decisions do not depend on the machine's speed (audits, identity checks).
   unmodelled  a row that presses attack while dashing / sprinting is vetoed (the Reaper's dash stab is R7's).
   not here    the lock check past the horizon (no Silkspear in the Forum set; the Bind macro checks its own), the key
@@ -93,6 +97,9 @@ class ForumConfig:
     p_k: int = 16
     exact_p: bool = False         # FORCED_RISK ranks by MultiForecast.prob (3.7 ms p50 on wave 6: one query per enemy,
     #                               placement kind and probability value) instead of the share of frames in contact
+    forced_rank: str = "share"    # FORCED_RISK's first risk key: "share" (the support share, above), "seen" (frames in
+    #                               contact with the damage colliders seen now, moved along their entity's velocity,
+    #                               then the share; forum.md §19: the support saturates in wave 0 and the share ties)
 
 
 @dataclass
@@ -154,6 +161,56 @@ def _meets(tb0, tb1, tb2, tb3, verts, a, b, cx, cy):
     starts = np.empty(2, np.int64)
     starts[0], starts[1] = a, b
     return _rect_meets_polys(tb0, tb1, tb2, tb3, verts, starts, cx, cy)
+
+
+@numba.njit(cache=True, parallel=True)
+def seen_contacts(box, inv, verts, starts, pbox, vel, tk, rows, grow):
+    """FORCED_RISK's "seen" key (ForumConfig.forced_rank): per row of `rows`, the frames 1 .. T1 - 1 its nominal box
+    (grown by `grow`; invulnerable frames clear) meets a damage polygon seen now moved along its entity's velocity
+    (tk[k] s on), and the first such frame (T1: none). pbox [n, 4]: each polygon's bounding box (a cheap reject).
+    No forecast: what is already there and where it is going, not what may start."""
+    N, T1 = box.shape[0], box.shape[1]
+    n_p = len(starts) - 1
+    cnt = np.zeros(N, np.int64)
+    first = np.full(N, T1, np.int64)
+    for m in numba.prange(len(rows)):
+        c = rows[m]
+        for k in range(1, T1):
+            if inv[c, k]:
+                continue
+            x0, y0, x1, y1 = box[c, k, 0] - grow, box[c, k, 1] - grow, box[c, k, 2] + grow, box[c, k, 3] + grow
+            for p in range(n_p):
+                dx, dy = vel[p, 0] * tk[k], vel[p, 1] * tk[k]
+                if pbox[p, 0] + dx > x1 or pbox[p, 2] + dx < x0 or pbox[p, 1] + dy > y1 or pbox[p, 3] + dy < y0:
+                    continue
+                if _rect_meets_polys(x0, y0, x1, y1, verts, starts[p:p + 2], dx, dy):
+                    cnt[c] += 1
+                    if first[c] == T1:
+                        first[c] = k
+                    break
+    return cnt, first
+
+
+def seen_polys(ws) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """The damage polygons the hero could meet now: every entity's active damage boxes (oracle: enabled colliders
+    able to deal damage; vision: the detected boxes), with the entity's velocity. Returns (verts [m, 2], starts
+    [n + 1], bounding boxes [n, 4], velocities [n, 2])."""
+    vs, st, bb, vel = [], [0], [], []
+    for e in getattr(ws, "entities", None) or ():
+        polys = [b.poly for b in e.dmg_boxes if b.active and len(b.poly) >= 3]
+        if not polys:
+            continue
+        v = e.vel.v if getattr(e.vel, "conf", 1.0) > 0 else (0.0, 0.0)
+        for poly in polys:
+            a = np.asarray(poly, np.float64).reshape(-1, 2)
+            vs.append(a)
+            st.append(st[-1] + len(a))
+            bb.append((a[:, 0].min(), a[:, 1].min(), a[:, 0].max(), a[:, 1].max()))
+            vel.append((float(v[0]), float(v[1])))
+    if not vs:
+        return np.zeros((0, 2)), np.zeros(1, np.int64), np.zeros((0, 4)), np.zeros((0, 2))
+    return (np.ascontiguousarray(np.concatenate(vs)), np.array(st, np.int64), np.array(bb, np.float64),
+            np.array(vel, np.float64))
 
 
 @numba.njit(cache=True, parallel=True)
@@ -292,6 +349,16 @@ class ForumPlanner(Planner):
         self.last_info: dict = {}
         self.debug = False                # offline forensics (tools.forum_hit_forensics): last_info["dbg"] keeps the
         #                                   tick's rows (nominal boxes, flags, J, ...); no effect on any decision
+
+    def warm_kernels(self) -> None:
+        """Planner.warm_kernels and the "seen" key's kernel (it runs only on FORCED_RISK ticks: a first call mid-fight
+        compiles past the oracle's brain-lost watchdog)."""
+        super().warm_kernels()
+        box = np.zeros((2, 5, 4))
+        box[..., 2:] = 1.0
+        seen_contacts(box, np.zeros((2, 5), np.bool_), np.array([[0.0, 0.0], [1.0, 0.0], [1.0, 1.0]]),
+                      np.array([0, 3], np.int64), np.array([[0.0, 0.0, 1.0, 1.0]]), np.zeros((1, 2)),
+                      np.arange(5, dtype=np.float64), np.arange(2, dtype=np.int64), 0.0)
 
     # ---- scoring ----
 
@@ -603,10 +670,21 @@ class ForumPlanner(Planner):
         forced = not safe.any() and not (bind_res is not None and bind_res[0])
         Pc = np.zeros(N)
         t_c = np.full(N, T1, np.int64)
+        sk_n = np.zeros(N, np.int64)          # the "seen" key (0 on every row otherwise: the order is unchanged)
+        sk_f = np.full(N, T1, np.int64)
         sel = ok & known
         if forced and sel.any():
             cand = np.flatnonzero(sel)
-            cand = cand[np.lexsort((-J[cand], -t_hit[cand]))][:fcfg.p_k]
+            if fcfg.forced_rank == "seen":
+                verts, starts, pbox, pvel = seen_polys(ws)
+                if len(pbox):
+                    cnt, fst = seen_contacts(np.ascontiguousarray(r1.box, np.float64), np.ascontiguousarray(
+                        (r1.flags & F_INVULN) != 0), verts, starts, pbox, pvel, np.ascontiguousarray(tk, np.float64),
+                        np.ascontiguousarray(cand, np.int64), 0.0)
+                    sk_n[cand], sk_f[cand] = cnt[cand], fst[cand]
+                cand = cand[np.lexsort((-J[cand], -t_hit[cand], -sk_f[cand], sk_n[cand]))][:fcfg.p_k]
+            else:
+                cand = cand[np.lexsort((-J[cand], -t_hit[cand]))][:fcfg.p_k]
             # the candidates on one lane over one frame set: the nominal box's centre against the support on stage
             # 1's frames (its exact test, known for every row), or'ed with the hit branch's contact there (its hull;
             # from the hit frame on where a cap left it unchecked): the share of those frames in contact and the
@@ -652,7 +730,7 @@ class ForumPlanner(Planner):
                 mkeep[N - 1] = True
             # FORCED_RISK: the least share in contact, the latest first contact on the nominal lane, then on the
             # envelope (rows clear on the nominal lane), J (a tick with a safe row: those rows all tie on these)
-            order = np.lexsort((-J, -t_hit, -t_c, Pc, ~V, ~mkeep, ~keep, S, U, hz_soft, hz))
+            order = np.lexsort((-J, -t_hit, -t_c, Pc, -sk_f, sk_n, ~V, ~mkeep, ~keep, S, U, hz_soft, hz))
             order = order[sel[order]]
             i = int(order[0])
             tail_ok = None
@@ -709,7 +787,8 @@ class ForumPlanner(Planner):
                           "cut": cut, "hitfx": budget["hitfx"], "react": budget["react"], "capped": budget["capped"],
                           "uncapped": budget.get("uncapped", 0),
                           "S": S, "Hz": hz, "U": U, "core_mask": core, "env": env, "Pc": Pc, "t_c": t_c,
-                          "cand": sel if forced else np.zeros(N, bool), "hit_occ": hit_occ}
+                          "cand": sel if forced else np.zeros(N, bool), "hit_occ": hit_occ,
+                          "seen": int(sk_n[res.idx]) if res.idx >= 0 else None}
         if self.debug:
             self.last_info["dbg"] = {"box": r1.box, "flags": r1.flags, "mode": r1.mode, "latched": latched, "P": P,
                                      "J": J, "ok": ok, "known": known, "t_hit": t_hit, "V": V, "keep": keep,
