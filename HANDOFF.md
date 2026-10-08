@@ -3104,61 +3104,82 @@ on, L2 on, terminal value off, T 36). Runs `C:\ssbot\data\runs\m2\20261008_10455
 
 ## Task wave-0 de-saturation (branch worktree-wf_34e9717f-fa3-2, 2026-10-08; forum.md §23)
 
-Main 70f8324 + `forum-integration-1008` (6dce435) merged first. Work in progress; this section is rewritten at the end
-of the task.
+Main 70f8324 + `forum-integration-1008` (6dce435) merged first. Facts: forum.md §23 (Chinese); plan sec. 5 dated note.
 
 ### Done (committed)
 
 - `tools/forum_layer_audit` (b75b63a): the support split into layers (bodies, committed fine / window / family-wide /
   bbox / tail / chain, not-started, hazards, death, arena) over the planner's candidate rows on recorded ticks;
   leave-one-out at level 1 (not-started gone), margins x0 / x0.5, idle growth x0 / x0.5, the +-1 bin lag, a greedy
-  peel. Output `C:\ssbot\data\m2_forum_w0d\layers\` (30 Wanderer episodes of the reactive A/B, seen_cf + escape).
-- Switches (all off by default except the kill-freeze fix):
-  - `SSBOT_FORUM_REACT` extensions `+n` (attacks not started out of the support, the escape check over every lock-in,
-    pins / bells not thrown yet only their reaction-window reach, a throw family's templates replaced by its body tube
-    and its hazards' paths in the oracle view), `+g` (the idle tube's growth held after the 5-frame reaction window),
-    `+l` (light cone: the escape check also asks the plan's end for a way out of the committed must-escape fine
-    placements past the horizon).
-  - `combat_run --forum-clash main`: the clash pass also in a YELLOW at h >= 3, clean clash rows safe on the clash
-    geometry with the hit-anyway bound <= 0.3, ranked after the plain safe rows; seen keys skip a clash row's parry
-    i-frames; clash depth 3.
-  - `SSBOT_FORUM_MARGIN=state`: per-state support margins (`tools/forum_state_margins`, knowledge
-    `support_margins_state.json`: the largest held-out residual per Control state, >= 100 contacts else the family's).
-  - `SSBOT_FORUM_KF` (default `kill`): `kill_freeze_s` counts only the kill's own freezes (the Clapper's death slow
-    motion); `any` = before (every wave-0 type had a 0.4 s "kill freeze" from the hero's NailClashEffect /
-    StartRecoil, so YELLOW's kill rule withheld every slash that might finish an enemy).
-  - Hit-back bells (no switch): a bell after Tink / Nail Hit is no hazard to the hero; the planner's own redirect
-    leaves it harmless from the hit on.
-- `multi_recall --react / --state-margins` for the R2 held-out recall on these supports.
+  peel, hindsight precision. Output `C:\ssbot\data\m2_forum_w0d\layers\` (30 Wanderer episodes, seen_cf + escape).
+- Kill-freeze fix (default; `SSBOT_FORUM_KF=any` = before): `kill_freeze_s` counts only the kill's own freezes
+  (`KILL_FREEZE_KINDS`, the Clapper's); it had given every wave-0 type a 0.4 s "kill freeze" from the hero's
+  NailClashEffect / StartRecoil, so YELLOW's kill rule withheld every slash that might finish an enemy (the 0 kills).
+- Switches (off by default):
+  - `SSBOT_FORUM_REACT` extensions: `+n` (attacks not started out of the support; the escape check over every lock-in;
+    pins / bells not thrown yet only their reaction-window reach; in the oracle view a throw family's templates (Reed
+    RE_THROW, Bellbearer CB_THROW: every pin / bell ever thrown) replaced by its body tube and its hazards' paths, its
+    tails and escape threats dropped), `+g` (the idle tube's growth held after the 5-frame reaction window), `+l`
+    (light cone: the escape check asks the plan's end for a way out of the committed must-escape fine placements past
+    the horizon, simulated over the 7 escapes), `+a` (aimed pins: a pin not thrown yet checked per row, aimed at where
+    the row is 20 frames before each possible release).
+  - `combat_run --forum-clash main` (`CLASH_MODES["main"]`): the clash pass also in a YELLOW at h >= 3 (never h 2, RED,
+    pause pending), clean clash rows safe on the clash geometry with the hit-anyway bound <= 0.3, ranked after the plain
+    safe rows; FORCED_RISK's seen keys skip a clash row's parry i-frames (R8's open note); clash depth 3.
+  - `SSBOT_FORUM_MARGIN=state`: per-state support margins (`tools/forum_state_margins` -> knowledge
+    `support_margins_state.json`: the largest held-out residual of the R0 contacts per Control state, >= 100 contacts
+    else the family's; family-wide / tail / world / self templates keep the family margin).
+- No switch: hit-back bells (a bell after Tink / Nail Hit is no hazard to the hero; the planner's own redirect leaves
+  it harmless from the hit on); bells as hit targets of weight 0 (`ForumConfig.bell_hits`): a row whose swing meets an
+  incoming bell before its contact gets the hit branch with the bell knocked back (also from a stage-1 contact).
+- `multi_recall --react / --state-margins`; `tests/test_three_layer.py` (13 tests); one assert in test_forum_planner.
 
-### Measured
+### Measured (forum.md 23.2-23.11)
 
-- Decomposition (forum.md 23.2-23.3): wave 0's saturation is redundant over layers; with the not-started layer gone
-  only 3.5 % of FORCED_RISK ticks have a clear row; the committed windows / family-wide union / tails / fine placements
-  each cover every row on 50-64 % of them; margins are not the main cause (all 0: 6.2 %), idle growth is the body
-  layer's; the templates are the committed layer's (EN_CHARGE `Charge` holds the `Reset -> Charge` re-charges: 38 u
-  wide at its entry; RE_THROW templates hold every pin ever thrown; family margins set by one state's few contacts).
-- 0 kills came from `kill_freeze_s` (the hero's own freezes counted as the wave-0 types' kill freeze).
-- Live round 1 (forum.md 23.6, 80 episodes per arm, paired): int 0 kills / 0 wave-0 clears / 24.1 s median; intk 0.80
-  kills, 11 clears, +5.6 s; new 1.42 kills, 15 clears (up to wave 5), +26.9 s over int and +21.4 s (CI 10.1-33.6)
-  over intk; hits / min 10.1 / 8.3 / 5.8; FORCED_RISK 0.89 / 0.89 / 0.80; support-outside hits 0 in every arm.
-
-- Live round 2 (forum.md 23.7, frozen `C:\ssbot\live_w0d_fca0416`, 80 + 80, ABBA): newS (escape+n+g+l with the
-  throw substitution, clash main with the seen fix, per-state margins, bells as targets) vs intk: +18.2 s paired (CI
-  6.5-31.1), hits / min 5.9 vs 7.3, kills / episode equal (1.19 vs 1.18), wave-0 clears equal (15 vs 16): survival up,
-  damage per minute down ~30 %; Reed pin hits up (46 vs 27 / 80 episodes: the throw substitution).
-- R2 held-out recall on the final support (forum.md 23.8; `multi_recall fresh --react escape+n+g --state-margins`,
-  `C:\ssbot\data\m2_forum_w0d\recall_fresh_ngS_fca0416.json`): 375,940 / 375,940 at L2 / L3 / L4, own type too, 1,802
-  / 1,802 chain hooks: the per-state margins uncover no held-out contact.
-
-- Live round 3 (forum.md 23.9, fca0416, 80 + 80): noL (newS without the light cone) vs newS: wave-0 clears 17 vs 11,
-  kills 1.30 vs 0.86 / episode, +5.2 s paired (n.s.): the light cone gives nothing in wave 0 (its use is the later
-  waves' delayed area attacks); recommended off for now.
-- Tests (33762ee): full suite 1249 passed, 2 skipped, 1 xfailed, 15 failed only because the run had
-  NUMBA_NUM_THREADS=2 (test_key_economy / test_kinematics / test_planner / test_planner_policy need 4): those four files
-  rerun with 4 threads, 73 / 73 passed. New `tests/test_three_layer.py` (13).
+- Decomposition: wave 0's saturation is redundant over layers; with the not-started layer gone only 3.5 % of
+  FORCED_RISK ticks have a clear row; committed windows / family-wide union / tails / fine placements each cover every
+  row on 50-64 % of them; margins are not the main cause (all 0: 6.2 %), idle growth is the body layer's (0: body +
+  hazards alone 58.8 %); rows freed by dropping margins / growth are 93-96 % clear in hindsight, by dropping the
+  committed layer only 77-87 %. Causes: family margins set by one state's few contacts (EN_CHARGE 2.96 u all from
+  `Charge`, RE_DEFEND 2.62 u from `Multihit Clashed`), the `Charge` template holds the `Reset -> Charge` re-charges (38 u
+  wide at entry), RE_THROW templates hold every pin ever thrown, pins in hand by their self template.
+- Offline replay (10 episodes): the switches add 1-2 points of safe ticks (the committed layer is untouched).
+- R2 held-out recall on `escape+n+g` + per-state margins: 375,940 / 375,940 at L2 / L3 / L4 (own type too), 1,802 /
+  1,802 chain hooks (`C:\ssbot\data\m2_forum_w0d\recall_fresh_ngS_fca0416.json`): no held-out contact uncovered.
+- Live, 4 rounds of 80 + 80 (paired same instance / seed; summaries `C:\ssbot\data\m2_forum_w0d\ab_round1..4.json`):
+  - r1: int (integration best: seen_cf + clash on + escape) 0 kills, 0 / 80 wave-0 clears; intk (+ kill fix) 0.80
+    kills, 11 / 80, +5.6 s; new (+ escape+n+g+l, clash main) 1.42 kills, 15 / 79, +21.4 s over intk (CI 10.1-33.6).
+  - r2: newS (+ throw substitution, per-state margins, bells as targets) vs intk: +18.2 s (6.5-31.1), kills equal,
+    clears 15 vs 16, hits / min 5.9 vs 7.3, damage per minute down ~25 %.
+  - r3: noL (newS without `+l`) vs newS: clears 17 vs 11, kills 1.30 vs 0.86, +5.2 s (n.s.): no light-cone gain.
+  - r4: newSa (`+a`) vs newS: clears 17 vs 23, -1.7 s (n.s.): no aimed-pin gain.
+  - Support-outside hits 0 in all 640 episodes; 2 "unjudged" (no forecast kept at the lag: 20 % late ticks) both
+    covered at every lag on replay (`scratchpad` `unk.py`).
+- Recommended live configuration: `SSBOT_FORUM_FR=seen_cf SSBOT_FORUM_REACT=escape+n+g SSBOT_FORUM_MARGIN=state
+  --forum-clash main` (r3's noL), kill fix default.
+- Tests (33762ee): full suite 1249 passed, 2 skipped, 1 xfailed, plus 15 that failed only because that run had
+  NUMBA_NUM_THREADS=2: their four files rerun with 4 threads, 73 / 73 passed.
 
 ### Running
 
-- Live round 4 (33762ee, frozen `C:\ssbot\live_w0d_33762ee`, manifest `C:\ssbot\sandbox\w0d_manifest_d.txt`, seed
-  364000): newS vs newSa (+ aimed pins `+a`), ABBA, 80 + 80.
+- Nothing. All drivers ended and released inst0-3 locks; instance 4 (routes) untouched.
+
+### Needs deploy
+
+- Nothing (no oracle change).
+
+### Next / open issues
+
+1. The committed layer (FORCED_RISK still 75-80 % of ticks): rebuild the templates re-anchored per state (a
+   re-entered `Charge` anchored at its entry, thrown hazards out of the thrower's templates) and re-certify (R2).
+2. Offense: with the three-layer switches the bot lives longer but lands ~25 % fewer hits a minute (first kill 21-27 s
+   vs the person's 17.5 s); in safe ticks only 2-4 % of chosen plans start with an attack (mostly CONTINUE): J /
+   punish windows (R5 / R6).
+3. After wave 0: wave 1's two Choristors (Spin Hit, whip), wave 3's bells and the spear blast are the main hits.
+4. `+l` (light cone) and `+a` (aimed pins) showed nothing in wave 0; the light cone is for the later waves' delayed
+   area attacks (rune circles, rune slam, spear blast): measure there.
+5. Late ticks were 10-24 % with 4 instances (escape check + clash main + light cone); the formal run has one instance.
+6. Defaults: every switch is still off (the integration rule); the lead decides whether to make the recommended
+   configuration the default.
+7. Frozen checkouts made here (can go after review): `C:\ssbot\live_w0d_b75b63a`, `45c4d6c`, `7a8afc9`, `016417b`,
+   `d89f7ba`, `cc11343`, `fca0416`, `33762ee`.
