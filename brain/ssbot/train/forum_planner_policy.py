@@ -545,7 +545,7 @@ class ForumPlannerPolicy(PlannerPolicy):
         self.counts[prefs.mode] += 1
         self.counts["forced_risk"] += res.forced_risk
         if getattr(res, "clash", None):
-            self.counts["clash_plan"] += 1
+            self.counts["clash_partial" if res.clash[2] else "clash_plan"] += 1
         self.binds += int(res.name == "BIND")
         tt = self.tac.last.get("target_type")
         if tt:
@@ -655,6 +655,9 @@ class ForumPlannerPolicy(PlannerPolicy):
                "fi": {k: li.get(k) for k in ("posture", "N", "stage1_pass", "enveloped", "hitfx", "react", "capped",
                                              "cut", "overrun")},
                "pocket": self.tac.last.get("pocket_veto"), "subj": subj}
+        if getattr(res, "clash", None):
+            # the chosen plan relies on a clash: p_fail, clashes, partial (still in contact after them: FORCED_RISK)
+            rec["clash"] = [round(res.clash[0], 4), res.clash[1], bool(res.clash[2])]
         hit = any(ev.get("k") in ("damage", "catastrophe", "would_die") for ev in s.get("ev") or ())
         event = hit or streak or (r.decision.pause_pending and self.counts["_pend_logged"] == 0)
         if r.decision.pause_pending:

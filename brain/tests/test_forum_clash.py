@@ -5,7 +5,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from ssbot.combat.forum_planner import K_DOWN, K_SIDE, K_UP, ClashTable, swings
+from ssbot.combat.forum_planner import K_DOWN, K_SIDE, K_UP, PARRY_STOP_GROW, PARRY_STOPS, ClashTable, stop_grow, swings
 from ssbot.knowledge import kinematics as kin
 from ssbot.tools.forum_clash_stats import build_table, slot_of, wilson_ub
 
@@ -135,3 +135,37 @@ def test_clash_table_and_builder(tmp_path):
     assert ct.p_fail("Song Heavy Sentry", "CC_SLAM", "side") is None
     assert slot_of("UpSlash", False) == "up" and slot_of("DownSlashAlt", False) == "down"
     assert slot_of("SlashAlt", False) == "normal" and slot_of("Slash", True) == "wall"
+
+
+def test_parry_stop_growth_is_the_next_measured_step():
+    gx, gy = stop_grow("Song Pilgrim 01", np.array([0, 2, 3, 5, 6, 30, 47]))
+    assert gx.tolist() == [0.372, 0.372, 0.6, 0.6, 0.701, 0.932, 0.932]
+    assert gy.tolist() == [0.01] * 7
+    gx, gy = stop_grow("Song Reed", np.array([0, 8, 26, 27, 47]))
+    assert gx.tolist() == [0.36, 0.96, 0.96, 0.96, 0.96]
+    assert gy.tolist() == [0.312, 0.832, 1.222, 2.392, 3.952]
+    # every PARRIED-catching attack has a measured stop, and its growth never shrinks
+    assert {tk for tk, _ in PARRY_STOPS} == set(PARRY_STOP_GROW)
+    for gx, gy in PARRY_STOP_GROW.values():
+        assert list(gx) == sorted(gx) and list(gy) == sorted(gy)
+
+
+def test_minister_below_policy():
+    from ssbot.ipc.framing import mask
+    from ssbot.train.forum_policy import MinisterBelowPolicy
+    pol = MinisterBelowPolicy()
+    assert pol.stats()["frames"] == 0              # stats before any episode (a harness failure in the intro)
+
+    def st(mx):
+        m = {"type_key": "Song Administrator", "pos": [mx, 9.0], "hp": 60, "src": 1, "fsms": [{"state": "Chase"}],
+             "colliders": [{"enabled": True, "damage": {"eff": 1}, "verts_world": [mx - 0.5, 8.0, mx + 0.5, 8.0,
+                                                                                     mx + 0.5, 10.0, mx - 0.5, 10.0]}]}
+        return {"hero": {"pos": [30.0, 4.6]}, "ents": [m]}
+    outs = [pol.act(st(33.0), None) for _ in range(4)]
+    assert all(o & mask("up") and o & mask("right") for o in outs)
+    assert sum(bool(o & mask("attack")) for o in outs) == 2
+    o = pol.act(st(30.1), None)
+    assert not o & (mask("left") | mask("right"))
+    assert pol.act({"hero": {"pos": [30.0, 4.6]}, "ents": []}, None) == 0
+    s = pol.stats()
+    assert s["frames_under"] == 1 and s["frames_minister"] == 5
