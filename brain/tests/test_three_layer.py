@@ -141,6 +141,30 @@ def test_a_bell_the_nail_hit_is_the_heros_projectile():
     assert [p.iid for p in hz.paths(5 * BIN, 0.6)] == [9]
 
 
+def test_a_bell_in_reach_is_a_hit_target_of_weight_0(params, arena):
+    """bell_hits: the bells in reach join the hit targets after the enemies, weight 0 (no J), so the hit branch can
+    knock one back; _contacts_fn with the plain support is _contacts."""
+    from tests.test_forum_planner import _prefs, _reed_forecaster, _world
+    mf = _reed_forecaster(None, frames=3, x=24.0)
+    mf.update(_ws(3, 3 * BIN, [_ent(7, 24.0, 4.0, "Alert", flip=True, box=(23.5, 3.0, 24.5, 5.0)),
+                               _bell(9, 21.0, 6.0, "Air")]))
+    f = mf.forecast(0.8)
+    pl = ForumPlanner(params, arena, PlannerConfig(T=36, threads=2, variants="bounds_lo"), ForumConfig())
+    tk = np.arange(37) * BIN
+    tbox, tok, tw, keep = pl._forum_targets(_world(20.0), f, tk, _prefs())
+    kinds = [t.hazard for t in keep]
+    assert kinds == [False, True] and tw[1] == 0.0 and tw[0] > 0.0
+    pl2 = ForumPlanner(params, arena, PlannerConfig(T=36, threads=2, variants="bounds_lo"), ForumConfig(bell_hits=False))
+    assert [t.hazard for t in pl2._forum_targets(_world(20.0), f, tk, _prefs())[3]] == [False]
+    bound = np.zeros((2, 37, 4))
+    bound[:, :, 0], bound[:, :, 2] = 20.75, 21.25
+    bound[:, :, 1], bound[:, :, 3] = 5.0, 7.08
+    skip = np.zeros((2, 37), bool)
+    a = pl._contacts(f, bound, tk, skip)
+    b = pl._contacts_fn(f, bound, tk, skip, lambda X, Y: f.occupied(X, Y, tk))
+    assert np.array_equal(a, b) and a.any()
+
+
 def test_clash_main_runs_in_a_yellow_from_the_plan_not_at_h2(params, arena):
     pl = ForumPlanner(params, arena, PlannerConfig(T=36, threads=2, variants="bounds_lo"),
                       ForumConfig(clash=True, clash_main=True, clash_min_p=0.0, clash_max_fail=0.3))

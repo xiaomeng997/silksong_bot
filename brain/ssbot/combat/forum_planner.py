@@ -221,6 +221,9 @@ class ForumConfig:
     #                               window holds the first contact, on the slash's side, in a clashable state), and the
     #                               clash-safe rows rank after the plain safe ones by that bound (clash_p)
     clash_main_h: int = 3
+    bell_hits: bool = True        # bells in reach are hit targets (weight 0): a row whose first hit is a bell before
+    #                               its contact gets the hit branch with that bell knocked back (the hit-back bells,
+    #                               forum.md bell paragraph / §23: no hazard to the hero from the hit on)
 
     @property
     def escape(self) -> bool:
@@ -724,18 +727,27 @@ class ForumPlanner(Planner):
     def _forum_targets(self, ws, f, tk: np.ndarray, prefs) -> tuple[np.ndarray, np.ndarray, np.ndarray, list]:
         hx, hy = (float(ws.hero.pos.v[0]), float(ws.hero.pos.v[1])) if ws is not None and ws.hero is not None \
             else (0.0, 0.0)
-        tg = [t for t in f.targets(tk) if not t.hazard]
+        allt = f.targets(tk)
+        tg = [t for t in allt if not t.hazard]
         d = [math.hypot(0.5 * (t.box[0, 0] + t.box[0, 2]) - hx, 0.5 * (t.box[0, 1] + t.box[0, 3]) - hy) for t in tg]
         # every enemy in reach: the first hit (the hit branch's) can be on any of them (a 5th-nearest Tiny of a
         # cluster); only the K_tgt nearest are scored (weight 0 for the rest: J, hits and waste unchanged)
         keep = [t for _, t in sorted(zip(d, tg), key=lambda z: z[0]) if _ <= TARGET_REACH_U]
+        if self.fcfg.bell_hits:
+            # the bells in reach after them, weight 0: a swing that meets one first knocks it back (the hit branch
+            # takes it out of the support from the hit on: forum.md bell paragraph, the hit-back bells)
+            for t in allt:
+                if t.hazard and math.hypot(0.5 * (t.box[0, 0] + t.box[0, 2]) - hx,
+                                           0.5 * (t.box[0, 1] + t.box[0, 3]) - hy) <= TARGET_REACH_U:
+                    keep.append(t)
         T1 = len(tk)
         if not keep:
             return np.zeros((0, T1, 4)), np.zeros((0, T1), bool), np.zeros(0), []
         hw = getattr(prefs, "hit_w", None) or {}
         return (np.ascontiguousarray(np.stack([t.box for t in keep]), np.float64),
                 np.ascontiguousarray(np.stack([t.ok for t in keep])),
-                np.array([float(hw.get(t.iid, 1.0)) if k < self.fcfg.K_tgt else 0.0 for k, t in enumerate(keep)]),
+                np.array([float(hw.get(t.iid, 1.0)) if k < self.fcfg.K_tgt and not t.hazard else 0.0
+                          for k, t in enumerate(keep)]),
                 keep)
 
     def _two_mask(self, f):
@@ -828,12 +840,32 @@ class ForumPlanner(Planner):
         rh = kin.rollout(start, latched[rows], self.params, self.terrain, events=ev, variants=self.fcfg.variants,
                          threads=self.cfg.threads)
         skip = ((rh.flags_all & F_INVULN) != 0) if enemy_only else np.zeros(rh.flags_all.shape, bool)
-        occ = self._contacts(f, rh.bound, tk, skip)
+        tg = sc["targets"]
+        bell = np.array([bool(getattr(tg[int(sc["first_t"][r])], "hazard", False)) for r in rows], bool) \
+            if len(tg) else np.zeros(len(rows), bool)
+        occ = np.zeros(rh.bound.shape[:2], bool)
+        if (~bell).any():
+            occ[~bell] = self._contacts(f, rh.bound[~bell], tk, skip[~bell])
+        if bell.any():
+            # a bell knocked back by the swing: the support without it from the hit on (MultiForecast.bell_redirected:
+            # its redirected path, harmless to the hero), one query per (bell, hit frame, direction)
+            by_b: dict = {}
+            for n in np.flatnonzero(bell):
+                r = rows[n]
+                k_, face_ = int(sc["first_k"][r]), int(sc["first_face"][r])
+                d_ = 2 if k_ == K_UP else (0 if k_ == K_DOWN else (1 if face_ > 0 else -1))
+                by_b.setdefault((tg[int(sc["first_t"][r])].iid, int(fr[n]), d_), []).append(n)
+            for (iid, hf, d_), ns in by_b.items():
+                ns = np.array(ns, np.int64)
+                t_hit = float(tk[min(hf, len(tk) - 1)])
+                o = self._contacts_fn(f, rh.bound[ns], tk, skip[ns],
+                                      lambda X, Y, iid=iid, t_hit=t_hit, d_=d_: f.bell_redirected(X, Y, tk, iid, t_hit,
+                                                                                                    d_))
+                occ[ns] = o if o is not None else self._contacts(f, rh.bound[ns], tk, skip[ns])
         s = occ.any(axis=1)
         capped = np.zeros(len(rows), bool)
         # the hit enemy's reaction (hero_caused TOOK DAMAGE exits), one forecast per (enemy, hit frame)
         mf = getattr(f, "_fc", None)
-        tg = sc["targets"]
         if mf is not None and hasattr(mf, "reaction_states"):
             cache = budget["react_cache"]
             by_rf: dict = {}                             # reaction key -> the rows meeting it (one query each)
@@ -1099,6 +1131,22 @@ class ForumPlanner(Planner):
                 if best is None or n < best_fail:
                     best, best_fail, best_lab = int(r), int(n), lb
         return best, best_fail, checked, len(threats), best_lab
+
+    def _contacts_fn(self, f, bound: np.ndarray, tk: np.ndarray, skip: np.ndarray, occ_fn) -> np.ndarray | None:
+        """Planner._contacts against occ_fn(X, Y) (an occupancy of the hull points [n, T1]; None: not applicable)."""
+        hx, hy = f.fc.half
+        X, Y, rows, too_wide = _hull_points(np.ascontiguousarray(bound), hx, hy, self.cfg.max_points)
+        hit = occ_fn(X, Y)
+        if hit is None:
+            return None
+        N = bound.shape[0]
+        occ = hit[:N].copy()
+        if len(rows):
+            occ[rows] |= hit[N:].reshape(-1, len(rows), hit.shape[1]).any(axis=0)
+        occ |= too_wide
+        occ &= ~skip
+        occ[:, 0] = False
+        return occ
 
     def _contacts_only(self, f, bound: np.ndarray, tk: np.ndarray, skip: np.ndarray, iids) -> np.ndarray:
         """Planner._contacts against the support of the enemies `iids` only."""
@@ -1474,7 +1522,12 @@ class ForumPlanner(Planner):
         S = S1.copy()
         env = np.zeros(N, bool)
         bound = r1.box.copy()
-        pass1 = ok & ~S1
+        tg_ = sc["targets"]
+        # rows whose first predicted hit is a bell (bell_hits): knocking it back is a defence (the hit branch drops it),
+        # so a row in contact at stage 1 whose swing meets a bell first goes on to the envelope and that branch
+        bell_first = np.array([0 <= int(t) < len(tg_) and bool(tg_[int(t)].hazard) for t in sc["first_t"]], bool) \
+            if self.fcfg.bell_hits and any(t.hazard for t in tg_) else np.zeros(N, bool)
+        pass1 = ok & (~S1 | (bell_first & (sc["first_f"] <= t_hit)))
         pre = np.lexsort((-J, U, hz_soft, hz))
         pre = pre[pass1[pre]]
         core_rows = pre[core[pre]]
@@ -1523,6 +1576,15 @@ class ForumPlanner(Planner):
             bound[ch] = r2.bound
             t_hit[ch] = np.where(s2, occ.argmax(axis=1), T1)
             hr = ch[~s2 & has_hit[ch]]
+            if bell_first.any():
+                # in contact, but the swing meets a bell first: the branch with the bell knocked back decides
+                hb_ = ch[s2 & bell_first[ch] & (sc["first_f"][ch] <= t_hit[ch])]
+                if len(hb_):
+                    budget["hitfx"] += len(hb_)
+                    sh, oh, cp = self._hit_branch(f, start, latched, sc, hb_, tk, enemy_only, budget)
+                    S[hb_] = sh
+                    t_hit[hb_] = T1
+                    self._note_hit(hb_, sh, oh, cp, sc, t_hit, hit_occ, capped_rows, T1)
             if len(hr):
                 room = fcfg.hitfx_k - budget["hitfx"]
                 over = hr[max(room, 0):]
