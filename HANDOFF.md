@@ -1871,7 +1871,7 @@ R8 row and its notes. Outputs (not in git): `C:\ssbot\data\m2_forum_r8\` (driver
 
 - Offline stats (hidden, below normal; this worktree's code): `C:\ssbot\data\m2_forum_r8\clash_d0..d3.cmd` (the 36
   data2 runs split four ways), outputs `clash_d*.json` / `.log`; `clash_h.json` (the person's sessions) is done.
-- Live driver `C:\ssbot\sandbox\r8_live.ps1 -co C:\ssbot\live_r8_43aeef5` (hidden, log `C:\ssbot\sandbox\r8_live.log`):
+- Live driver `C:\ssbot\sandbox\r8_live.ps1 -co C:\ssbot\live_r8_c1ca21a` (hidden, log `C:\ssbot\sandbox\r8_live.log`):
   builds `clash.json` from the stats when all five exist (into the checkout and `m2_forum_r8\clash_table.json`;
   commit it to the branch afterwards), warm replay (aborts on failure), waits for the Trobbio collection to end,
   takes `locks\inst2.lock` / `inst3.lock` ("r8"), Wanderer slash frames probe on instance 2 (fo_W, 60 swings,
