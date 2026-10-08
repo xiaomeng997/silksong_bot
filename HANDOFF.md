@@ -1813,3 +1813,87 @@ Next / open issues (round 2):
 5. The route's Widow end is a scripted bind sequence (Death Stagger -> Can Bind waits for BIND): the route runner must
    press bind there; training episodes end at the kill. Her damage colliders stay armed in Death Stagger (244 frames
    in 4 smoke fights, + 1 Spinner AtkBell armed outside attacks): the runner must keep evading until the bind.
+
+## Task R5 model - Forum plan round R5, the behaviour-model half (branch worktree-wf_814dfeea-b10-1)
+
+Worktree `C:\modeling\silksong_bot\.claude\worktrees\wf_814dfeea-b10-1`, branch `worktree-wf_814dfeea-b10-1` (from main
+bc46dc9). Offline only (no game instance touched, no seeds). Facts: `docs/facts/1.0.30000/forum.md` section 17 (Chinese).
+Large outputs (not in git): `C:\ssbot\data\m2_forum_r5m\` (decision records `recs_dev.pkl` / `recs_test.pkl`, hero silk
+side caches `hero\`, `study_dev.json`, `holdout_test.json`, `summary.md`, `tiny_orbit_report.json`, `branch_gap.json`,
+`pipeline_v2.cmd`, `val_run.cmd` and the validation logs). Frozen checkout of the validation: `C:\ssbot\live_r5m_092e3e2`.
+
+### Done (committed)
+
+- **Sensing time from the FSM statics** (`combat/branch_model.SENSING`, forum.md 17.1): for every Forum decision state
+  what its Control FSM reads (trigger ranges every frame / once at entry, GetDistance, stored angles, the hero's silk,
+  SendRandomEventV4 counters) and when: "branch" (the exit frame is the sensing frame), "entry" (Choristor Hop Antic,
+  Clawmaiden Spin Antic, Clapper Evade Scuttle, Minister Retreat?'s coin, Maestro Slash Recover), "stored:<state>"
+  (the Reed's throw: Throw Antic Anim stores aiming-up, Throw Aim stores the angle read 0.4 s later). V4 semantics read
+  from the decompiled source (eventMax / missedMax). Trigger shapes `RANGES` (scene bundle AlertRanges, mirrored with
+  flipX), `geometry()` / `in_range()`.
+- **Cooldowns and branch-split history as view-legal covariates** (`BranchMemory`, fed by Control entries and hits):
+  gates (Bellbearer Evade Cooldown + can_evade, Reed armed / Just Did Defend, Clapper Evaded, Envoy Charge Range),
+  counters / timers (Choristor hops + last hop, Clawmaiden suck timer age, Maestro dead Tinies), anti-repeat history
+  of each decision state (last / last two choices, run, decisions since each outcome = the V4 counters), the previous
+  attack and its last state (`prev_end`: defend not hit vs countered), time since it ended, where the state was
+  entered from, a hit strictly before this frame (a same-frame hit is the TOOK DAMAGE / BLOCKED HIT cause, the
+  planner's hit branch), Clapper buddy facts, the hero's silk.
+- **Study and product** (`knowledge/forum_branch.py`, `tools/forum_branch scan|study|build`): one record per exit of a
+  decision state with geometry at 8 timings (branch, entry, stored, lead 0.1-0.5 s); per decision a greedy forward
+  selection by 2-fold (by fight) CV log loss over geometry at each timing + history, backoff tables
+  (`DecisionModel`); the best timing kept. `knowledge/1.0.30000/enemies/forum/branch_model.json` (61 decisions, fit
+  on all 142 DEV fights).
+- **Runtime** (scoring only): `EnemyTracker.mem` (one line each in `enter` / `_hit`), `MultiForecaster(branch=...)`
+  -> `BranchView` (hero box / silk and enemy positions kept 1 s so a decision's geometry is taken at its timing),
+  `branch_probs(iid)`, `next_attack_probs(iid)`, `Subject.next_p`; `ForumPlannerPolicy(branch_model=True)` switches
+  it on (default off: nothing in the planner consumes it yet; the R5 value / R6 O and BAIT are the consumers).
+  `multi_recall --branch` runs the recall with it on.
+- **Body-entry reactive branches** (`branch_model.REACTIVE`, `BranchView.reactive` / `entry_prob`): Bellbearer evade
+  0.97, Clapper evade (coin) 0.49, Reed evade 0.95 / defend (coin) 0.45 with gates from BranchMemory and the revealed
+  coin (in the box with the gate open for 2+ frames and no reaction -> 0 for the visit); `entry_prob` gives the first
+  gate-open entry of a candidate's hero-box path. J / P only.
+- **Tiny one by one** (`combat/tiny_orbit.py`, `tools/tiny_orbit`, `knowledge/.../tiny_orbit.json`): defend orbit
+  around Maestro + (0, -0.22), radius schedule by defend age, measured angular rate +-216 deg/s with the sign following
+  the Maestro's flipX, clamped to the terrain bounds; charge facts measured (below).
+- Tests: `tests/test_branch_model.py` 19 (gates, hops / suck age / same-frame hit, backoff, shapes and mirroring, the
+  SENSING table, orbit sign and clamp, greedy on synthetic data, reactive gates and the revealed coin, and the
+  scoring-only check: occupancy, probability map and support set identical with / without the branch model on the
+  synthetic Reed, next_p filled only in decisions).
+
+### Measured (forum.md 17.3-17.8)
+
+- **Held-out log loss** (nats / decision, weighted): DEV 142 fights (2-fold CV) unconditional 0.740 (the runtime's
+  p_succ today), R0 conditioners 0.539, new **0.332**; **TEST 202 R1 fights never used for selection: 0.695 / 0.512 /
+  0.315; ECE 0.018 -> 0.009**. Largest gains: trigger-shape decisions become near deterministic (Clapper After
+  Scuttle / Dmg Attack / Walk, Choristor Hop Antic at its entry, Slash Check), Bellbearer In Range 1.06 -> 0.11,
+  Clawmaiden Fly 1.16 -> 0.31 and Spin Antic 1.10 -> 0.59 (hero silk at entry), Reed Alert 1.43 -> 0.39, Minister
+  Chase 0.52 -> 0.20. Worse than R0: Maestro Attack Choice (0.318 -> 0.331), Clapper Escape Jump on TEST (0.290 ->
+  0.302); small-n calibration worse: Envoy Charge, Reed Throw Up (overfit, 4 covariates on 311).
+- **Timing** (61 decisions): branch frame 45, entry 3, stored 4, fixed lead 9 (clear only for Clawmaiden Spin 1 / 2:
+  the silk is already taken at the branch frame, Tiny Pull Up 0.3 s, Reed Throw Lock = the Throw Aim facing; the rest
+  within 0.005-0.02 nats of the branch frame). Geometry alone confirms the FSM: Hop Antic branch 0.081 vs entry 0.006;
+  Throwing Up? 0.245 vs stored 0.069; every-frame decisions degrade with any lead (Dmg Attack 0.006 -> 0.169 at 0.1 s).
+- **Defend branches** (time to the next attack, p50): Minister not hit 0.97 s vs countered 1.11 s (same next-move
+  mix); Reed not hit 0.67 s, counter missed 0.80 s, counter hooked 1.10 s (fewer evades); Bellbearer after an evade
+  the next attack is a throw 2,229 / 2,229; Maestro never defends twice.
+- **Tiny**: settled orbit (>= 1 s into the defend) held-out error p50 0.33 / 0.67 / 1.32 / 2.54 u at 0.1 / 0.2 / 0.4 /
+  0.8 s but p99 4.0-9.9 and max 20-28 u (terrain blocks the low half of the orbit, hits, Maestro motion): fine for
+  scoring, **not** a support replacement. Charge: FIRE READY -> Fire 0.717 s (p1 0.692, p99 0.733), about 52 deg
+  down, toward the hero's side 99.7 %, the pick is random (nearest-to-hero 3,050 vs 3,042 expected); a standing hero
+  is hit 0.8-0.9 % 2-8 u behind the Maestro, 7.1 % right under it, 31 % / 56 % / ~59 % at 3 / 6 / 8-10 u in front.
+- **Cost** of next_p for every enemy in a decision (full gauntlet replay, 51,823 frames): p50 0.17 ms, p99 1.05 ms,
+  max 7.8 ms per frame -> off by default.
+- Validation (frozen 092e3e2): running (recall fresh R0 35 x fold-0 tables with the branch model on, Bell Beast wrap i4_000 / i0_001, full pytest); results to follow in this section.
+
+### Next / open issues
+
+1. Consumers: the R5 value track's O / BAIT and R6's targets should read `Subject.next_p` / `branch_probs` (timing
+   via `BranchModel.timing`) and `BranchView.entry_prob` for the reactive branch; switch `branch_model=True` in the
+   policy then and re-measure the tick cost (cache the per-frame geometry first if p99 matters).
+2. The walk's own placement probabilities (`MultiForecast.prob`) still come from the unconditional p_succ; a per-subject
+   rescale of the next instance's rows by `next_p` is the obvious next step (scoring only, needs an A/B).
+3. Tiny: a follower model (defense point + terrain block + speed cap) and a fresh certification before the per-fly
+   orbit can replace the R2 cluster union in the support.
+4. Small-n decisions: cap the covariates by n (Envoy Charge, Reed Throw Up, Escape Jump); hidden V4 counters (e.g.
+   Minister Evade? out of range) could be filtered as a hidden state instead of approximated by the visible history.
+5. The Tiny's Control FSM is in a bundle outside the scene (Maestro CreateObject ext:45): not decoded.
