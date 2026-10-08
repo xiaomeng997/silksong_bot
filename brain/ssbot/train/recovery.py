@@ -11,8 +11,9 @@ here and gains no key.
 
 Failures seen (docs/facts/1.0.30000/pause_quit.md section 11):
 - "paused unasked": 60 of the 61 HARNESS_FAILs of 2026-10-02 .. 06 were the oracle's brain-lost watchdog (STATE
-  act.lost, the Pause bit in the injected mask on the pause frame, the last ACTION applied 13-15 frames earlier: the
-  worker sent no ACTION for 250 ms); the other one (20261006_065605_Lace1_data i0) paused with no Pause key read, no
+  act.lost, the Pause bit in the injected mask on the pause frame, the last ACTION applied 13-16 frames earlier, more
+  when a stale ACTION restarted the 250 ms (25 / 28 on 2026-10-08): the worker sent no ACTION for 250 ms; four more on
+  2026-10-08 under the old worker, which then stopped on time_scale 0.0); the other one (20261006_065605_Lace1_data i0) paused with no Pause key read, no
   lost brain and focus (InputHandler.ControllerDetached is the one other path to PAUSED). unpause() pressed Submit
   blindly, which on a highlight other than Continue opens the Options menu (the pause menu takes mouse hover, probe P7).
 - the title's Game options (20261005_164501_..._2 i1, menuState 12 on Menu_Title): load_slot's retried Enter on a main
