@@ -1813,3 +1813,45 @@ Next / open issues (round 2):
 5. The route's Widow end is a scripted bind sequence (Death Stagger -> Can Bind waits for BIND): the route runner must
    press bind there; training episodes end at the kill. Her damage colliders stay armed in Death Stagger (244 frames
    in 4 smoke fights, + 1 Spinner AtkBell armed outside attacks): the runner must keep evading until the bind.
+
+## Task wave-0 forensics - why the Forum planner QUITs in wave 0 (branch worktree-wf_fa16f06f-127-8, track diag)
+
+Worktree `C:\modeling\silksong_bot\.claude\worktrees\wf_fa16f06f-127-8` (from main bc46dc9). Facts: forum.md section 19
+(Chinese). Outputs (not in git): `C:\ssbot\data\m2_forum_w0f\`. Seeds 340000-349999.
+
+### Early findings (2026-10-08 03:45, other tracks: read this first)
+
+- Every hit of the 251 episodes (A0b 50 + the 7 overnight R5 / R6 arms, 175; 949 damage events + 176 Multihit
+  ticks) is inside the support (0 outside, L 2 / 3 / 4, union and own type), and FORCED_RISK was on at the tick
+  before every one of the 949. 594 / 949 had no tick with a safe row in the 1.6 s before; the rest last had one
+  0.65-1.38 s (median 0.92 s) before.
+- The cause is not R5's value terms or R6's targets: **the support saturates, so FORCED_RISK's ranking ties and the
+  pick falls to J**. On 77 % of the logged FORCED_RISK ticks the chosen row (and its 5 best alternatives) has P = 1.0:
+  its nominal box is in the support on every stage-1 frame, frame 1 included. Decomposing the support at the ticks
+  before hits: about ten single placement groups EACH cover 100 % of every row's live cells - Reed RE_THROW / RE_STAB /
+  RE_IDLE / RE_DEFEND start-later bounding boxes, Envoy EN_CHARGE / EN_IDLE / EN_SLASH bounding boxes, the committed
+  RE_THROW / EN_CHARGE / CH_JUMP window placements, a Reed pin's self-template window - and the committed support
+  (MultiForecast.committed()) is just as saturated. So share = 1 (or the post-i-frame share) on every row, t_c ties,
+  and the order is decided by -t_hit / -J: the preselection (p_k 16) keeps the 16 best J. In wave 0 the bot plays
+  J-greedy (approach / attack the target) while believing every plan is equally dangerous.
+- Hindsight (tools.forum_hit_forensics: every known row's nominal path against the recorded damage colliders of the
+  next 0.6 s; open loop): on 2 A0b episodes the planner's pick is clear in hindsight on 70 % of all ticks while a
+  random row is clear 77 %: the pick is worse than random. In the 12 frames before a hit a clear row existed on 56 %
+  of the ticks; the pick was clear on 7 %.
+- A ranking key the support cannot give: contact with the damage colliders seen NOW, moved along their entity's
+  velocity (no forecast, no growth). Rows clear of it are clear in hindsight 89 %, rows meeting it 20 %. Implemented:
+  `ForumConfig.forced_rank = "seen"` (env `SSBOT_FORUM_FR=seen`, default `share` = unchanged): on FORCED_RISK ticks only,
+  that count (then its first frame) goes before the share, in the p_k preselection too; safe ticks and Bell Beast are
+  untouched. Replay on the 2 episodes: picks clear in hindsight 80 % of all ticks (70 % before), 32 % in the last 12
+  frames before a hit (7 %).
+- Live check running (below). Full batch over all 225 hit episodes running offline.
+
+### Running
+
+- Offline: `C:\ssbot\data\m2_forum_w0f\fx_run.cmd` (hidden, below normal, 3 workers x 4 threads; frozen
+  `C:\ssbot\live_w0f_417d4a8`): forum_hit_forensics over the 9 run dirs -> `C:\ssbot\data\m2_forum_w0f\fx\` (one JSON
+  per episode), log `fx_run.log` (ends with DONE).
+- Instance 0 (lock `inst0.lock` = "diag"): `C:\ssbot\sandbox\w0f_live.ps1 -Rev 3608489 -Inst 0` (hidden; frozen
+  `C:\ssbot\live_w0f_3608489`), A0b protocol (fo_A, eval, planner, oracle, real quits 0.2), seeds 340000: 25 episodes
+  SSBOT_FORUM_FR=seen, then 25 SSBOT_FORUM_FR=share on the same seeds (paired control). Log `C:\ssbot\sandbox\w0f_live.log`;
+  it stops before a chunk on DEMO_SOON / STOP_AGENTS and releases the lock at the end (`w0f_live.done`).
