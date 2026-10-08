@@ -1813,3 +1813,53 @@ Next / open issues (round 2):
 5. The route's Widow end is a scripted bind sequence (Death Stagger -> Can Bind waits for BIND): the route runner must
    press bind there; training episodes end at the kill. Her damage colliders stay armed in Death Stagger (244 frames
    in 4 smoke fights, + 1 Spinner AtkBell armed outside attacks): the runner must keep evading until the bind.
+
+## Task harness recovery (branch worktree-wf_814dfeea-b10-6, 2026-10-08)
+
+Facts: `docs/facts/1.0.30000/pause_quit.md` section 11 (Chinese). Training profile only: safety/pause_quit and the
+supervisor are untouched, the formal-run path gains no key.
+
+Signatures found (all attempt rows / worker logs / STATE recordings of 2026-10-01 .. 07):
+- (b) "paused unasked": 60 of 61 were the oracle's brain-lost watchdog (STATE act.lost, the Pause bit in the injected
+  mask on the pause frame, last ACTION applied 13-15 frames before): the worker's fight loop stalled >= 250 ms (first
+  compiles at ep 0 / 1, CPU contention, four runs in the same second on 10-04 21:01:15). Not a stray Esc, not focus
+  (half had focus, the game does not pause on focus loss). The one other (20261006_065605_Lace1_data i0) had no Pause
+  key at all: InputHandler.ControllerDetached is the only other way into PAUSED (a gamepad going to sleep?).
+- (a) the "settings menu": 20261005_164501_Forum_A_w2_mix_data2_2 i1 at 16:45 sat in the title's Game options (menu
+  12): load_slot's retried Enter on a main menu highlighting Options (mouse hover / a cursor over the new window) went
+  Main -> Options -> Game options -> a setting, then waited 2 x 60 s for the main menu and died. Same minute, instance 4
+  (20261005_164455_..._inject) Enter'd Extras and then the credits. The old unpause() had the same blind Submit in game.
+- (c) "kept running while the hero stood still being hit" (Forum data2, 10-05 / 06, 961 episodes, ~49 h): not a
+  stall. 1944 no-key windows >= 1.5 s with 1062 hits, every one inside an episode with ACTIONs applied each frame, no
+  lost brain, no pause; they are the data2 policy's own waits (WALL_BAIT 920 windows / 786 hits, CLASH, UNDER,
+  JUMP_OVER, BAIT); between episodes 2-7 s of reset. The 180 s timebox resets at once.
+- Also: 10-05 14:15 all instances' frame rate fell to ~4 fps (machine-level; the 5-in-a-row stop was right);
+  20261002_080522 i0 "left the scene: Quit_To_Menu" then failed 3 episodes on "no game loaded" (no way back).
+
+Done (commits 7ba7470, 0a326c3, 02469ab):
+- `ssbot/train/recovery.py`: where() (title / title sub-menu / save select / quitting / pause menu / exit prompt /
+  pause sub-menu / opening / game), pause_cause(), resume() (Up to Continue, Down to Back, Down to No, Submit only on
+  those roles, never Esc, lockout respected, input.release before and after, <= 24 navigation taps), title_home() (Esc
+  on title sub-menus only).
+- `episode`: unpause() = resume(); a pause before the reset that does not end -> HARNESS_FAIL "still paused before
+  the reset" (no hang); "paused unasked at frame N (<cause>)"; AttemptRecord.loop_gap_ms_max / loop_gaps_250.
+- `probes/common.load_slot`: Enter retried only while still on the main menu; another menu -> MenuError; a title
+  sub-menu is left first.
+- `combat_run`: _unstick backs out of title sub-menus and moves Up towards Start Game after a MenuError, resumes a
+  paused game instead of loading under the pause menu; worker start resumes; after_harness_fail() after every
+  HARNESS_FAIL (paused -> resume; quitting -> wait for the title; title / sub-menu / save select -> back_into_slot);
+  summary: harness_fails by kind, loop_gap_ms.
+- `probes/recovery_check.py`: live check of every case on one instance.
+- Tests: `tests/test_harness_recovery.py` (26, a stand-in game with the pause / options / prompt / title menus) +
+  test_combat_run_retry / _start / episode_kill_pause / episode_post_clear / combat_run_fp: all pass.
+
+Live check (instance 4, lock `C:\ssbot\sandbox\locks\inst4.lock`): pending at this commit (after the Trobbio / GMS
+collection ends ~01:55).
+
+Next / open issues:
+1. The watchdog pauses come from fight-loop stalls >= 250 ms; loop_gap_ms in the summaries will show where. Reducing
+   them (planner warm-up, CPU sharing) is not done here.
+2. In data mode a watchdog pause could be resumed and the episode continued; it still ends HARNESS_FAIL (the policies
+   and taps do not handle paused frames).
+3. Keep the mouse off the training windows (it moves menu highlights, P7); the recovery now copes, but every
+   MenuError costs a few seconds.

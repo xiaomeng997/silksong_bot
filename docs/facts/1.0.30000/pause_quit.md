@@ -363,3 +363,38 @@
 - 视觉训练里 FOCUS_LOST 不再挡"可暂停"，Q4 的"可暂停的 GREEN 帧"在视觉训练里第一次能成立，视觉门控的退出构成可能变化，合并后重跑视觉门控再引用旧数字。
 - `test_support_query_budget_on_the_committed_bell_beast_templates`（计时预算 3 ms）在机器满载时 3.94 ms 失败，代码未改动；空闲时复跑。
 - 实战检出 `C:/ssbot/live_stuck_f140a49`（名字是旧的，检出 d356c8e）和第一轮的 `C:/ssbot/live_stuck_9b42247` 可以删除。
+
+## 11. 训练 harness 的恢复（任务 harness recovery，2026-10-08；`ssbot/train/recovery.py`，只用于训练）
+
+数据：`C:\ssbot\data\runs\m2` 下 2026-10-01 … 10-07 全部 attempts 行、worker 日志、STATE 录像（act / input / focus / menu 段）；扫描脚本在该会话的 scratchpad（pause_cause.py、idle_scan.py、still_scan.py），结论如下。
+
+### 11.1 失败的特征
+
+- **HARNESS_FAIL 112 行**：paused unasked 61；Silkspear 没砍断藤 17（10-01 第一批数据，之后再没出现）；Forum 波次存档 30 s 内没开始 20 + 介绍走路超时 5（10-05 14:15 起 5 个实例同时：渲染帧率塌到约 4 fps，ep124 的 180 s 时限用了 539 s 墙钟，之后每场 38 s 只有约 144 帧；机器级事件，worker 按"连续 5 次"停下是对的）；savestate.load "no game loaded" 3（20261002_080522 i0：ep0 "left the scene: Quit_To_Menu" 之后游戏在标题，worker 没有回存档槽，连败）；wait_state 2 s 超时 3；击杀后退出 2（已修，45c8ebb）；left the scene 1。
+- **paused unasked（问题 b）**：61 次中 **60 次是 oracle 的失联看门狗**，不是外来 Esc，也不是失焦。暂停帧上 STATE `act.lost = true`，注入掩码里有 Pause 位（oracle 自己按的），最后一次 ACTION 在 13–15 帧前应用（看门狗条件：250 ms 且 ≥ 6 帧没有 ACTION）。焦点一半 true 一半 false，与暂停无关：训练副本 IgnoreFocus + runInBackground，游戏代码里失焦不会暂停（`UIManager.OnApplicationFocus` 只保存 / 恢复选中项）。暂停前 1 s 内录像的接收间隔多为 17–50 ms（读线程照常收 STATE，停住的是 worker 主循环：规划器首次编译、CPU 争抢），少数 260–290 ms（整个进程停顿：10-04 21:01:15 四个运行同一秒、20261002_125420 i1 ep12、20261003_201131 i1）。多个实例同一秒一起暂停：10-02 12:55:25 和 16:30:05 各四个，都是同时启动的 worker 的第 0 / 1 场（首次编译，之后加了预热，见 10.4）；10-04 21:01:15 是四个不同运行的中途（接收间隔 260–290 ms，整机停顿）。
+  - 唯一例外 20261006_065605_Lace1_data i0 ep0（醒来后 0.9 s）：暂停帧上读到的和注入的都没有 Pause 键、看门狗没触发、focus true。游戏进 PAUSED 只有两条路（反编译）：`InputHandler` 读到 `Pause.WasPressed`（同帧 input.mask 会有 Pause 位），或 `InputHandler.ControllerDetached`（手柄断开时 PLAYING 且可暂停就暂停）。所以只可能是手柄断开（蓝牙手柄休眠？）；当时的 player log 已被覆盖，无法再证实。
+- **设置菜单（问题 a）**：20261005_164501_Forum_A_w2_mix_data2_2 i1（16:45，实例刚重启）：worker 日志 "gs 1 menu 12 scene Menu_Title"，即标题画面的 Game options（MainMenuState 12）。`load_slot` 的 `press_until` 在主菜单上按 Enter 后等 SAVE_PROFILES；主菜单高亮在 Options（鼠标悬停会移动高亮，P7；刚打开的窗口出现在静止的鼠标下也算悬停），第一下 Enter 进 Options（2），5 s 后重按进 Game（12），第三下按在第一个设置项上；之后 `menu_ready(MAIN)` 等了 2 × 60 s，worker 退出，你按 Esc 才回来。旧 `_unstick` 对标题上的菜单什么都不做。同一分钟实例 4 也一样（20261005_164455_BellBeast_..._inject）：主菜单高亮在 Extras，第一下 Enter 进 Extras（19），重按进了制作人员名单（Menu_Credits，gs 7），靠"新游戏"分支按跳跃 + 读档碰巧回来。
+  - 游戏内的同一缺陷：旧 `unpause()` 在暂停时盲按 Submit；高亮不在 Continue（鼠标悬停）时会打开 Options，之后每次 Submit 都按在选项里。
+- **站着挨打（问题 c）**：10-05 / 06 的 6 个 Forum data2 运行（961 场、约 49 h 录像）逐帧扫描。场内无输入（注入掩码 0）≥ 1.5 s 的窗口 1944 个、其中受击 1062 次，最长 12.8 s；这些窗口里 act.lost、暂停、过期 ACTION 都是 0，hero_accepting_input 全程为真；worker 每帧都发了 ACTION（acts / 帧 ≥ 0.97，late 0）。对照策略的 segments，**都是 data2 策略自己的等待**：WALL_BAIT（背靠墙等目标过来，每段 2–5 s，可以连着几段）920 个窗口、786 次受击；CLASH（等可拼刀的碰撞体）415 / 67；UNDER 156 / 100；JUMP_OVER 160 / 45；BAIT 128 / 40；其余 165 / 24。HP 1 是 data 模式 LethalBlock 保住的。场间（读档 + 波次开始）无输入 2–7 s，偶尔 1–4 次受击；180 s 时限一到就重置。以位置不动为判据：≥ 3 s 不动且 ≥ 3 次受击的窗口 0 个，长时间不动的是爬墙后的顶部口袋 (14.27, 13.6)，0 次受击。结论：不是 harness 停住，是策略设计的等待加场间重置。
+
+### 11.2 恢复（代码 7ba7470 … 02469ab）
+
+- `recovery.where(s)`：标题 / 标题子菜单 / 存档选择 / 正在退出（menu.quitting 或 Quit_To_Menu 场景）/ 暂停菜单 / 退出提示 / 暂停子菜单 / 暂停菜单淡入中（等）/ 游戏。暂停时先按高亮的角色判断菜单（continue / options / quit → 暂停菜单，yes / no → 退出提示），角色为空才看 menuState（menuState 在暂停后的前几帧是旧值）。
+- `recovery.pause_cause(s)`：暂停帧上 act.lost 或注入的 Pause 位 → "brain-lost watchdog, last ACTION applied N frames before"；读到但没有注入 → 外来 Pause 键；都没有 → "no Pause key (a gamepad detach?)"。episode 的 "paused unasked" 原因里带上它。
+- `recovery.resume(link)`：暂停菜单高亮在 Options / Quit → Up 到 Continue；Options 及其子菜单 → Down 到 Back（MenuExporter 只给 Back 命名，同 pause_quit 的 UNLABELLED 规则）再 Submit；退出提示在 Yes → Down 到 No 再 Submit；Continue 等 0.3 s 锁定（pause.blk PAUSE_LOCKOUT）结束才 Submit。只在读到 continue / back / no 时 Submit，从不按 Esc。开始和结束各一次 input.release（oracle 不再把连接当作 driving，看门狗不会在点按后 250 ms 再次暂停）。最多 24 次导航，超出返回失败。
+- `recovery.title_home(link)`：标题子菜单里按 Esc（标题上 Esc 只是 MenuCancel：InputHandler 只在 PLAYING / PAUSED 时切换暂停），每次退一级，直到主菜单；主菜单本身不按（Cancel 会弹出退出游戏提示）。
+- `probes.common.load_slot`：主菜单的 Enter 只在菜单仍是主菜单时重按（淡入淡出吞键）；进了别的菜单抛 `MenuError`，不再在里面按 Enter；开始时若在标题子菜单先 `title_home`。
+- `combat_run`：`_unstick` 处理标题子菜单（Esc 回主菜单；MenuError 后按打开的菜单在主菜单里的位置 Up 若干次到 Start Game：Options 1、Achievements 2、Extras 3、Quit 4）；暂停时先 `resume`，不再在暂停菜单下读档（DebugMod 读档只清 isPaused，菜单留着；`_in_game_without_control` 对暂停返回假）。worker 启动时 `resume`；**每次 HARNESS_FAIL 之后** `after_harness_fail`：暂停 → resume；正在退出 / 没有 GameManager → 等标题（≤ 60 s）；标题 / 标题子菜单 / 存档选择 → back_into_slot；其他 → 不动（下一场读档就是重置）。连续 5 次仍停止，日志带当时状态。episode 开始时发现暂停而 resume 失败 → 本场 HARNESS_FAIL "still paused before the reset"，不会挂起。
+- 记录：`AttemptRecord.loop_gap_ms_max` / `loop_gaps_250`（战斗循环相邻两轮的最长墙钟间隔 / ≥ 250 ms 的轮数，看门狗的阈值）；summary 增加 `harness_fails`（按原因归类，去掉帧号）和 `loop_gap_ms`。
+- 正式运行路径没有改动：`safety/pause_quit`、监督器不变，没有新按键；recovery 只由 combat_run、run_episode 和训练探针调用。
+- 测试：`tests/test_harness_recovery.py`（替身游戏：暂停菜单、选项、设置子菜单、退出提示、标题主菜单和子菜单；断言 Submit 只落在 continue / back / no、暂停时从不按 Esc、主菜单 Enter 不会在别的菜单里重按）。
+
+### 11.3 实战检查
+
+（实例 4，见下一次提交。）
+
+### 11.4 待定
+
+- 看门狗暂停的根因是 worker 主循环停顿 ≥ 250 ms（读线程照常）。新的 loop_gap 统计会显示哪些场有；要减少它需要看规划器首次编译的预热和多代理共享 CPU，本任务没有动。
+- data 模式下看门狗暂停后本可以恢复后接着打（时间冻结，只少了 250 ms 的输入），现在仍按 HARNESS_FAIL 结束这一场：策略和 tap 没有处理暂停中的帧。
+- 主菜单 / 暂停菜单的高亮会被窗口下静止的鼠标改变；训练时鼠标最好不停在训练窗口上（正式运行已有此规定，P7）。
