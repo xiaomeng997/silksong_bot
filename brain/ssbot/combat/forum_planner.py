@@ -290,6 +290,8 @@ class ForumPlanner(Planner):
         self.shapes = _shapes(crest)
         self.audit = EnvelopeAudit()
         self.last_info: dict = {}
+        self.debug = False                # offline forensics (tools.forum_hit_forensics): last_info["dbg"] keeps the
+        #                                   tick's rows (nominal boxes, flags, J, ...); no effect on any decision
 
     # ---- scoring ----
 
@@ -708,6 +710,11 @@ class ForumPlanner(Planner):
                           "uncapped": budget.get("uncapped", 0),
                           "S": S, "Hz": hz, "U": U, "core_mask": core, "env": env, "Pc": Pc, "t_c": t_c,
                           "cand": sel if forced else np.zeros(N, bool), "hit_occ": hit_occ}
+        if self.debug:
+            self.last_info["dbg"] = {"box": r1.box, "flags": r1.flags, "mode": r1.mode, "latched": latched, "P": P,
+                                     "J": J, "ok": ok, "known": known, "t_hit": t_hit, "V": V, "keep": keep,
+                                     "names": [cs.name(i) for i in range(N0)] + (["CONTINUE"] if cont else []),
+                                     "chosen": int(res.idx), "fr": fr, "o": o, "tk": tk}
         res.t_ms = {"filter": (t1 - t0) * 1e3, "rollout": (t2 - t1) * 1e3, "score": (t3 - t2) * 1e3,
                     "envelope": (t4 - t3) * 1e3, "prob_bind": (t5 - t4) * 1e3, "select": (t6 - t5) * 1e3,
                     "total": (t6 - t0) * 1e3, "s1_rollout": (t1r - t1) * 1e3, "s1_support": (t2 - t1r) * 1e3}
