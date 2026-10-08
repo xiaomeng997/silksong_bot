@@ -262,6 +262,17 @@ def test_seen_contacts_counts_frames_against_the_moving_collider():
     assert first[0] == 5 and cnt[0] == 1
 
 
+def test_the_policy_reads_the_forced_rank_switch(monkeypatch):
+    from ssbot.train.forum_planner_policy import ForumPlannerPolicy
+    monkeypatch.delenv("SSBOT_FORUM_FR", raising=False)
+    assert ForumPlannerPolicy._fcfg().forced_rank == "share" == ForumConfig().forced_rank
+    monkeypatch.setenv("SSBOT_FORUM_FR", "seen")
+    assert ForumPlannerPolicy._fcfg().forced_rank == "seen"
+    monkeypatch.setenv("SSBOT_FORUM_FR", "bogus")
+    with pytest.raises(ValueError):
+        ForumPlannerPolicy._fcfg()
+
+
 def test_seen_rank_without_seen_colliders_is_the_share_ranking(params, arena):
     """No damage collider seen: the "seen" key ties on every row and the choice is the share ranking's."""
     rng = np.random.default_rng(3)
