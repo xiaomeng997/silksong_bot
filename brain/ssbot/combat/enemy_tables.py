@@ -57,6 +57,7 @@ class Family:
     damage: int                                     # largest logged damage of its colliders (masks)
     sources: dict[str, frozenset[str]]              # state -> damage source type keys
     hazard_sources: frozenset[str] = frozenset()    # thrown hazard types among its sources
+    dur: tuple[float, float] = (0.0, math.inf)      # its logged duration p0.5, p99.5 (s; Subject.t_free)
 
 
 @dataclass(slots=True)
@@ -605,8 +606,10 @@ def _family(name: str, a: dict, spec: ForumType) -> Family:
         damage = max([damage] + [int(v) for v in h.get("dmg") or ()])
     entry = {s: (float(q["min"]), float(q["max"])) for s, q in (a.get("state_entry_s") or {}).items() if q.get("n")}
     hz = frozenset(x for v in srcs.values() for x in v if x in spec.hazards)
+    du = a.get("duration_s") or {}
+    dur = (float(du.get("p0_5", 0.0)), float(du.get("p99_5", math.inf))) if du.get("n") else (0.0, math.inf)
     return Family(name, tuple(a.get("states") or ()), tuple(a.get("start_states") or ()), entry, damage,
-                  {k: frozenset(v) for k, v in srcs.items()}, hz)
+                  {k: frozenset(v) for k, v in srcs.items()}, hz, dur)
 
 
 def type_table(d: dict, spec: ForumType, walk: dict | None = None) -> TypeTable:

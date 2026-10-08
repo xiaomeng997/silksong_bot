@@ -284,6 +284,27 @@ def test_forecast_covers_the_attack_drops_the_dead_and_answers_the_interface():
     assert near[:2].any() and not near[5:].any()
 
 
+def test_subject_t_free_is_the_attacks_earliest_end():
+    """Subject.t_free (L2's Buddy rule; forum.md 17.7: it was 0 for everyone): an attack's start + its family's logged
+    duration p0.5, from the origin; 0 while idle or with no duration logged."""
+    d = _reed_table()
+    d["attacks"]["RE_STAB"]["duration_s"] = {"p0_5": 0.45, "p99_5": 0.6, "n": 9}
+    tabs = _tables()
+    tabs.types[REED] = type_table(d, FORUM_TYPES[REED])
+    assert tabs.types[REED].families["RE_STAB"].dur == (0.45, 0.6)
+    assert tabs.types[REED].families["RE_DEFEND"].dur == (0.0, math.inf)
+    mf = MultiForecaster(tabs, ORACLE, waves=False)
+    script = _script_stab()
+    _run(mf, script[:6])
+    assert [(s.committed, s.t_free) for s in mf.forecast(0.8).subjects] == [(False, 0.0)]
+    _run(mf, script[6:14])                                 # the stab started at f 10; the origin f 13
+    (s,) = mf.forecast(0.8).subjects
+    assert s.committed and s.t_free == pytest.approx(0.45 - 3 * BIN)
+    _run(mf, script[14:21])                                # f 20: 10 bins into it
+    (s,) = mf.forecast(0.8).subjects
+    assert s.t_free == pytest.approx(0.45 - 10 * BIN)
+
+
 def test_a_zero_dwell_loop_never_enters_before_the_root():
     """forum.md 15.2: the Tiny's Ready -> Ready loop with a zero least dwell took one bin of slack per pass, down to
     -333 s at the step cap; nothing after the walk's root is entered more than one bin before it."""

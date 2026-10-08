@@ -48,8 +48,10 @@ side for the rest, and the Choir Clapper by its own controller (cannot be clashe
           after the commit, clapper_face.md §1.1 p50), does not cross its body on the ground (before its take-off)
           and the wall leaves room behind; else back off in front of the landing: CC_JUMP past its landing slam
           (0.67-7.76 u in front: jump_out_u), CC_JUMP_CAST past the rune circle too (to 13.8 u: cast_out_u), behind it
-          when only there is room. The way round is fixed at its Jump Aim (the landing known) for the rest of the jump
-          (round 2, live w7 / w13: the body landing on a hero running under it, and on one turning back under it).
+          when only there is room. The aim (the hero's x then, the take-off x from its antic, its facing) is taken on
+          the first tick past the antic (Jump Aim is instant: never a tick's state), and the way round is fixed then
+          for the rest of the jump (round 2, live w7 / w13: the body landing on a hero running under it, and on one
+          turning back under it).
   Two Clappers never attack together (Buddy Is Attacking): while one is committed, the other one, if not and its
           spot is reached before that attack can end (Subject.t_free), is the RUSH / PUNISH pick between the two
           (priority x 2, a switch at once).
@@ -78,8 +80,12 @@ MAESTRO = "Song Pilgrim Maestro"
 MINISTER = "Song Administrator"
 TINY = "Song Automaton Tiny"
 CC_IDLE, CC_SLAM, CC_JUMP, CC_JUMP_CAST, CC_CAST = "CC_IDLE", "CC_SLAM", "CC_JUMP", "CC_JUMP_CAST", "CC_CAST"
-CC_AIM_STATES = ("Jump Aim",)
-CC_AIR_STATES = ("Jump", "Air", "Cast Jump")              # its body off the ground (a jump's flight)
+# a jump's states before its Jump Aim (the antic: standing). Jump Aim (and Cast Jump) are instant: one frame goes
+# Jump Antic / Cast Slam Antic 2 -> (Cast Jump ->) Jump Aim -> Jump, so the tracker never ends a frame in Jump Aim and
+# the first tick past the antic (Jump, 1 frame, then Air) is where the aim is taken (round 3: keyed on Jump Aim as a
+# tick state the aim was never stored live, forum.md 17.7)
+CC_PRE_AIM_STATES = ("Jump Antic", "Cast Slam Antic", "Cast Slam Antic 2", "Cast Jump")
+CC_AIR_STATES = ("Jump", "Air")                           # its body off the ground (a jump's flight)
 CC_RETREAT = ("slam: step out", "slam: out to the wall", "jump: back off")     # controller branches that step away
 GLIDE_SPIKE = "GLIDE_SPIKE"
 NAIL_SRC = ("Slash", "UpSlash", "DownSlash New", "AltSlash", "WallSlash", "DashSlash")
@@ -215,7 +221,8 @@ class GauntletTactics:
         self.goal: Goal | None = None
         self._sw_why: str | None = None                   # why _pick moved off the kept target (stats switch_kinds)
         self.n = 0
-        self.aim: dict[int, float] = {}                   # Clapper iid -> hero x at its Jump Aim
+        self.aim: dict[int, tuple] = {}                   # Clapper iid -> (hero x, take-off x, facing) at its aim
+        self.antic: dict[int, float] = {}                 # Clapper iid -> its x in its jump's antic (the take-off)
         self.t_commit: dict[int, float] = {}              # Clapper iid -> game time its current jump was first seen
         self.jump_how: dict[int, str] = {}                # Clapper iid -> the way round its jump, fixed at Jump Aim
         self._t = 0.0                                     # the tick's game time
@@ -228,7 +235,7 @@ class GauntletTactics:
 
     def reset(self) -> None:
         """A new episode: no goal, no stored aims, the per-episode counters cleared."""
-        self.goal, self.n, self.aim, self.t_commit, self.jump_how = None, 0, {}, {}, {}
+        self.goal, self.n, self.aim, self.antic, self.t_commit, self.jump_how = None, 0, {}, {}, {}, {}
         self.stats = _new_stats()
 
     # ---- geometry ----
@@ -265,7 +272,7 @@ class GauntletTactics:
             # as the wall lets (the hammer reaches 12 u in front: the farther the likelier it misses)
             return self._clamp(out), frozenset(), "slam: out to the wall"
         if fam in (CC_JUMP, CC_JUMP_CAST):
-            # before its Jump Aim it will aim at where the hero is then; after, at the stored aim from the take-off
+            # before its Jump Aim it will aim at where the hero is then (from where it stands); after, the stored aim
             aim_x, x0, front = self.aim.get(s.iid, (hx, x, front))
             land = jump_landing(x0, aim_x, front)
             behind = land - front * r.behind_land_u
@@ -284,8 +291,8 @@ class GauntletTactics:
                 else:
                     how = "under and behind (no room out)"
                 if s.iid in self.aim:
-                    # its Jump Aim fixed the landing: so is the way round (round 2: turning back mid-way, under it,
-                    # was 10 of the w7 body hits)
+                    # its aim fixed the landing: so is the way round (round 2: turning back mid-way, under it, was 10
+                    # of the w7 body hits)
                     self.jump_how[s.iid] = how
             return self._clamp(behind if how.startswith("under") else out), frozenset(), f"jump: {how}"
         vocab = frozenset({GLIDE_SPIKE}) if fam == CC_CAST else frozenset()
@@ -481,18 +488,23 @@ class GauntletTactics:
         for s in getattr(fc, "subjects", ()) or ():
             if s.type_key != CLAPPER or s.pos is None:
                 continue
-            if s.family in (CC_JUMP, CC_JUMP_CAST):
-                self.t_commit.setdefault(s.iid, t)
+            if s.family not in (CC_JUMP, CC_JUMP_CAST):
+                for m in (self.t_commit, self.jump_how, self.aim, self.antic):
+                    m.pop(s.iid, None)
+                continue
+            self.t_commit.setdefault(s.iid, t)
+            if s.iid in self.aim:
+                continue
+            x = float(s.pos[0])
+            e = self._ent(ws, s.iid)
+            fa = clapper_facing(e) if e is not None else None
+            front = float(fa) if fa is not None else (1.0 if hx >= x else -1.0)
+            if s.state in CC_PRE_AIM_STATES:
+                self.antic[s.iid] = x                     # standing: the take-off x
             else:
-                self.t_commit.pop(s.iid, None)
-                self.jump_how.pop(s.iid, None)
-            if s.state in CC_AIM_STATES and s.iid not in self.aim:
-                e = self._ent(ws, s.iid)
-                fa = clapper_facing(e) if e is not None else None
-                x = float(s.pos[0])
-                self.aim[s.iid] = (hx, x, float(fa) if fa is not None else (1.0 if hx >= x else -1.0))
-            elif s.family not in (CC_JUMP, CC_JUMP_CAST):
-                self.aim.pop(s.iid, None)
+                # past its (instant) Jump Aim: aimed at the hero's x of that frame from where it stood in the antic,
+                # facing as Jump Aim turned it (FaceObject; it does not turn in the air)
+                self.aim[s.iid] = (hx, self.antic.get(s.iid, x), front)
         self._count_hits(ws, t)
         self.n += 1
         status = self._status(fc, t)

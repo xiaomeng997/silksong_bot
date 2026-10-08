@@ -395,3 +395,90 @@ def test_clapper_retreat_branches_do_not_reward_hitting_it():
     t = l2()
     p = t.decide(world(24.0, ents=[clapper(9, 30.0, False)]), WinFc([subj(9, CC, 30.0, y=7.45)]), None, 3)
     assert p.hit_w[9] == pytest.approx(3.0)
+
+
+def test_clapper_jump_aim_in_the_trackers_order():
+    # round 3 (forum.md 17.7): Jump Aim is instant (Jump Antic -> Jump Aim -> Jump in one frame), so the tracker never
+    # ends a tick in it: the ticks go Jump Antic, Jump (1 frame), Air. The aim is taken on the first tick past the
+    # antic (the hero's x then, the take-off x from the antic) and the way round fixed there for the whole jump.
+    t = l2()
+    ents = [clapper(9, 35.0, False)]
+    for k in range(5):                                            # the antic, 0.5 s, standing at 35
+        p = t.decide(world(26.0 + 0.5 * k, t=10.0 + 0.1 * k, ents=ents),
+                     WinFc([subj(9, CC, 35.0, y=7.45, state="Jump Antic", family="CC_JUMP", committed=True)]), None, 3)
+    assert 9 not in t.aim and 9 not in t.jump_how
+    # the Jump frame: the hero at 26 now, the Clapper 0.2 u on its way
+    p = t.decide(world(26.0, t=10.5, ents=[clapper(9, 34.8, False)]),
+                 WinFc([subj(9, CC, 34.8, y=7.6, state="Jump", family="CC_JUMP", committed=True)]), None, 3)
+    land = jump_landing(35.0, 26.0, -1.0)
+    assert t.aim[9] == (26.0, 35.0, -1.0) and t.jump_how[9] == "under and behind"
+    assert p.stance_x == pytest.approx(land + 2.5)
+    # in the air the hero drifts away (behind the landing is now too far to reach in time: re-judged it would back
+    # off); the landing and the way round stay those of the aim
+    for k, hx in enumerate((24.0, 20.0, 17.0, 15.0, 15.0)):
+        x = 34.8 - 0.8 * (k + 1)
+        p = t.decide(world(hx, t=10.6 + 0.15 * k, ents=[clapper(9, x, False)]),
+                     WinFc([subj(9, CC, x, y=10.0, state="Air", family="CC_JUMP", committed=True)]), None, 3)
+        assert p.stance_x == pytest.approx(land + 2.5) and t.last["goal_why"].endswith("jump: under and behind")
+    # landed and back to idle: the stored jump is dropped
+    t.decide(world(20.0, t=11.6, ents=[clapper(9, land, False)]), WinFc([subj(9, CC, land, y=7.45)]), None, 3)
+    assert 9 not in t.aim and 9 not in t.jump_how and 9 not in t.antic and 9 not in t.t_commit
+
+
+def test_clapper_jump_aim_with_no_antic_tick_seen():
+    # first seen in the air (a late tick): the aim from where it is then
+    t = l2()
+    t.decide(world(26.0, t=10.0, ents=[clapper(9, 33.0, False)]),
+             WinFc([subj(9, CC, 33.0, y=12.0, state="Air", family="CC_JUMP", committed=True)]), None, 3)
+    assert t.aim[9] == (26.0, 33.0, -1.0) and 9 in t.jump_how
+
+
+@pytest.fixture(scope="module")
+def prod_tables():
+    from ssbot.combat import enemy_tables as et
+    if not (et.FORUM_DIR / "ChoirClapper_hitboxes.npz").exists():
+        pytest.skip("the Forum tables' npz files are not built here (behaviour_build --encounter Forum)")
+    return et.EnemyTables.production()
+
+
+def _cc_ent(iid, x, flip, state, tin=0.0):
+    y = 7.45
+    return Entity(id=iid, type_key=E(CC), pos=E((x, y - 2.5)), vel=E((0.0, 0.0)), pos_transform=(x, y), flip_x=flip,
+                  fsm=[("Control", state, tin)],
+                  body_polys=[[(x - 1.5, y - 3.5), (x + 1.5, y - 3.5), (x + 1.5, y + 1.0), (x - 1.5, y + 1.0)]])
+
+
+def test_the_idle_clappers_turn_with_a_real_forecast(prod_tables):
+    # round 3 (forum.md 17.7): MultiForecast gave every Subject t_free = 0, so the Buddy rule's reach test (the idle
+    # one's spot reached before the busy one's attack can end) never held live. With the family's duration p0.5
+    # (CC_SLAM 1.26 s) the slamming one has t_free > 0 and the idle one's turn comes; late in the slam it does not.
+    from ssbot.combat.multi_forecast import MultiForecaster
+    from ssbot.core.worldstate import FsmTransition, ORACLE, Stamp
+
+    def go(iid, to, t):
+        return Event(Ev.FSM_TRANSITION, 0, t, FsmTransition(enemy_id=iid, type_key=CC, fsm="Control", to_state=to))
+
+    def frame(mf, t, s1, evs=()):
+        ents = [_cc_ent(1, 22.0, False, s1), _cc_ent(2, 40.0, True, "Idle")]
+        ws = WorldState(stamp=Stamp(frame=int(t * 60), t_game_s=t), entities=ents, events=list(evs))
+        mf.update(ws)
+        w = world(30.0, t=t, ents=ents)
+        return w, mf.forecast(0.8)
+
+    for late, want in ((0.1, 2), (1.0, 1)):
+        mf = MultiForecaster(prod_tables, ORACLE, waves=False)
+        tac = l2()
+        w, fc = frame(mf, 10.0, "Idle", [go(1, "Idle", 10.0), go(2, "Idle", 10.0)])
+        assert all(s.t_free == 0.0 and not s.committed for s in fc.subjects)
+        assert tac.decide(w, fc, None, 3).target == 1                 # both idle: the nearer (8 u against 10 u)
+        frame(mf, 10.1, "Slam Antic", [go(1, "Slam Antic", 10.1)])
+        w, fc = frame(mf, 10.1 + late, "Slam Antic")
+        busy = next(s for s in fc.subjects if s.iid == 1)
+        assert busy.committed and busy.family == "CC_SLAM"
+        assert busy.t_free == pytest.approx(prod_tables.types[CC].families["CC_SLAM"].dur[0] - late, abs=1e-6)
+        p = tac.decide(w, fc, None, 3)
+        assert p.target == want, (late, busy.t_free, tac.last.get("l2_cands"))
+        if want == 2:
+            assert tac.stats["switch_kinds"] == {"turn": 1}
+        else:                                                         # 0.26 s left < the run (0.05 + 6 / 17.5)
+            assert tac.stats["tgt_switches"] == 0
