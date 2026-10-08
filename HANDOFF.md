@@ -1852,10 +1852,46 @@ R8 row and its notes. Outputs (not in git): `C:\ssbot\data\m2_forum_r8\` (driver
 - `Forum_W` encounter (fo_W), `combat_run --forum-clash` (run tag `_clash`), `ForumPlannerPolicy(crest, clash)`
   (crest from the savestate: fo_W Wanderer), `forum_policy_replay --clash --crest`.
 
+- Clash continuations (`candidates.build_forum(clash=True)`, only with clash on): keep swinging every 8 frames
+  (N / L / R / U): a second clash after NailParryRecover, the other side, the up slashes under the Minister.
+
+### Measured so far (offline)
+
+- Open-loop replay of A0b i1 ep0 (648 ticks, 483 FORCED_RISK, the machine busy): with a permissive test table
+  (every statically clashable family p 0.1) the clash branch ran on 483 ticks, looked at 7,200 rows, 234 had a swing
+  active at the first contact, all 234 attributed, 59 to clashable families on the slash's side, 7 clean success
+  branches (3 chosen); without the clash continuations 0 clean (the support still covers the hero after 0.15 s).
+  Clash branch 2.4 ms per forced tick; plan p50 6.5 -> 8.4 ms with the extra rows (busy machine).
+- The person's sessions (5, 4,439 swings, 239 clashes): clash setups (clash reach meets a clash collider before any
+  hurtbox contact) almost never end in a hit (e.g. Wanderer Minister charge up 7 / 10 clash, 0 hit); contact setups
+  (the planner's rule) do: Choristor slash side 14: 7 clash, 3 hit; Reed stab side 11: 3 clash, 4 hit. The R1 v2
+  data2 runs are being counted (below).
+
 ### Running
 
-- (see the end of this section)
+- Offline stats (hidden, below normal; this worktree's code): `C:\ssbot\data\m2_forum_r8\clash_d0..d3.cmd` (the 36
+  data2 runs split four ways), outputs `clash_d*.json` / `.log`; `clash_h.json` (the person's sessions) is done.
+- Live driver `C:\ssbot\sandbox\r8_live.ps1 -co C:\ssbot\live_r8_43aeef5` (hidden, log `C:\ssbot\sandbox\r8_live.log`):
+  builds `clash.json` from the stats when all five exist (into the checkout and `m2_forum_r8\clash_table.json`;
+  commit it to the branch afterwards), warm replay (aborts on failure), waits for the Trobbio collection to end,
+  takes `locks\inst2.lock` / `inst3.lock` ("r8"), Wanderer slash frames probe on instance 2 (fo_W, 60 swings,
+  `C:\ssbot\data\runs\m2\kn_excite_forum_wanderer`), then three arms of 25 + 25 full gauntlets on instances 2, 3
+  (eval, oracle, real quits 0.2, the A0b protocol): R8W = Forum_W + --forum-clash (seed 320000), W0 = Forum_W
+  (320200), R8R = Forum_A + --forum-clash (320400); per arm forum_a0_report and forum_clash_stats into
+  `m2_forum_r8\report_<arm>.json` / `clash_live_<arm>.json`; releases the locks, logs R8_DONE. Stops after the
+  current episode on STOP_AGENTS / DEMO_SOON. Stop now: `combat_run stop <run dir>` from the checkout's brain, then
+  delete the two lock files if the driver did not.
+- kin_check of the Wanderer / Reaper parameters on the fo_W session 20261004_012300 (`m2_forum_r8\kin_*.json`).
 
 ### Next / open issues
 
-- (filled in as the round goes)
+1. After the driver: compare the arms with A0b (CLEAR / QUIT / WOULD_DIE, hits per episode, waves, time alive,
+   support-outside hits, tick p50 / p99), the live clash outcomes per family, Wanderer frames ->
+   `attack_table_build --crest Wanderer --live <rec>\attack_frames.jsonl`; forum.md 17 and the plan's R8 note.
+2. Not done: the Minister-from-below up-slash experiment (the clashrepU rows give the planner the move; no scripted
+   probe); the javelin (Reed Pin Projectile, clashable) is a hazard path the branch does not attribute; the
+   PARRIED-interrupted attacks (Envoy charge -> Deflect, Reed counter -> Multihit Clashed) keep their remaining support
+   in the success branch (conservative); the supervisor does not see a clash plan's failure risk (S = 0, P 0; clash
+   rows need h >= 2); VE view rates = oracle's (no VE data).
+3. The Bell Beast: the shared changes are new bits / branches only (AB_DOWN_SLASH, EV_PARRY_RECOVER, build_forum's
+   clash flag): bit-identical by construction; the full test suite is the check (running at the time of writing).
