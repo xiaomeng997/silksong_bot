@@ -185,7 +185,7 @@ def _job(fid: str, f: dict, contacts: list, cfg: dict, label: str, a) -> dict:
         contacts = [c for c in contacts if c["type"] in a.types]
     return {"id": fid, "path": f["path"], "f0": int(f["f0"]), "f1": int(f["f1"]), "contacts": contacts,
             "config": cfg, "label": label, "view": a.view, "horizon": a.horizon,
-            "branch": None if a.branch is None else str(a.branch)}
+            "branch": None if a.branch is None else str(a.branch), "react": a.react}
 
 
 _TABLES: dict = {}
@@ -237,7 +237,7 @@ def run_jobs(a, jobs: list, mode: str) -> int:
         cov = sum(v["covered"] for (tk, L), v in stats.items() if L)
         print(f"[{done}/{len(jobs)}] {j['label']} {j['id']} covered {cov}/{n} misses {len(misses)} "
               f"({res['forecast_ms']} ms/forecast, {time.perf_counter() - t0:.0f} s)", flush=True)
-    out = {"mode": mode, "view": a.view, "lags": list(LAGS), "fights": done, "horizon_s": a.horizon,
+    out = {"mode": mode, "view": a.view, "react": a.react, "lags": list(LAGS), "fights": done, "horizon_s": a.horizon,
            "summary": summarise(stats), "by_group": {k: summarise(v)["recall"] for k, v in by_label.items()},
            "misses": misses[:500], "n_misses": len(misses), "own_misses": own_misses[:300],
            "n_own_misses": len(own_misses),
@@ -305,6 +305,9 @@ def run_fight2(job: dict) -> dict:
         from ssbot.combat.branch_model import BranchModel
         branch = BranchModel.load(Path(job["branch"]))      # R5: the branch model on (it must not move the recall)
     mf = MultiForecaster(tables, ORACLE if view == "oracle" else VISION_EQUIVALENT, branch=branch)
+    if job.get("react"):
+        from ssbot.combat.multi_forecast import ReactConfig
+        mf.react = ReactConfig.parse(job["react"])            # the reactive support (forum.md §22 / §23)
     bosses = placeholder_specs() if view != "oracle" else []
     backend = OracleBackend(bosses=bosses)
     filt = None
@@ -557,6 +560,9 @@ def main(argv=None) -> int:
     ap.add_argument("--json", type=Path, default=None)
     ap.add_argument("--branch", type=Path, default=None,
                     help="fresh / dev: run with this branch model on (R5: scoring only, the recall must not change)")
+    ap.add_argument("--react", default=None,
+                    help="fresh / dev: the reactive support (multi_forecast.ReactConfig, e.g. escape+n+g: forum.md "
+                         "23; default off)")
     a = ap.parse_args(argv)
     if a.mode == "bellbeast":
         if a.recording is None:
