@@ -1,7 +1,7 @@
 """The Maestro's Tinies (Song Automaton Tiny) one by one (forum_planner_plan §5 R5 note: the Tiny orbit model; scoring
 only until its held-out containment is 100 %, then the R2 cluster union can be replaced).
 
-Statics (Maestro Control FSM, scene bundle; forum.md §17.4):
+Statics (Maestro Control FSM, scene bundle; forum.md §18.6):
 - Defend Start sends DEFEND READY to its three flies; Defending (1.75 s) rotates the "Defense Formation" child (local
   (0, -0.22)) by -180 deg/s and eases its scale 0.5 -> 2.5 in 0.75 s (EaseFloat easeOutSine); Defense Point 1-3 sit
   at radius 2 (local) at 90 / -30 / 210 deg, so the orbit is radius 1 -> 5 u around the Maestro, 120 deg apart, and

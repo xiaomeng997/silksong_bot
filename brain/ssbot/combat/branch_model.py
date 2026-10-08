@@ -6,7 +6,7 @@ Three things the R0 behaviour tables (ssbot.knowledge.behaviour_tables, at runti
 did not have:
 
 1. The sensing time (the person 2026-10-04: "which moment's distance"). From the control FSMs (scene bundle, decoded
-   in docs/facts/1.0.30000/forum.md §17): most decisions read the hero in the state they leave, either every frame
+   in docs/facts/1.0.30000/forum.md §18): most decisions read the hero in the state they leave, either every frame
    (range checks: the exit frame is the frame the hero was in range) or once at entry with an instant exit; a few
    read it earlier: at the entry of a state left later (Choristor Hop Antic's Close Range, the Clawmaiden's silk test
    in Spin Antic, the Minister's Retreat? coin), or in an earlier state (the Reed's throw: Throw Antic Anim stores
@@ -65,7 +65,7 @@ RANGES: dict[str, dict[str, tuple]] = {
     "Song Pilgrim Maestro": {"Attack Range": (("box", 0.0, -0.47, 13.5, 8.65),)},
 }
 
-# ---- what each decision reads and when (Control FSM statics, forum.md §17.1). kind: "branch" = the state's checks
+# ---- what each decision reads and when (Control FSM statics, forum.md §18.1). kind: "branch" = the state's checks
 # run every frame or once with an instant exit, so the exit frame is the sensing frame; "entry" = read once when the
 # state is entered, left later (a wait or an animation); "stored:<state>" = a value an earlier state stored.
 SENSING: dict[str, dict[str, tuple[str, str]]] = {

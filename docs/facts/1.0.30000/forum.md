@@ -932,13 +932,13 @@ cd brain   # 冻结检出（git archive，没有 .git）：behaviour_build 要�
 - **报告**：`forum_a0_report` 按 damage 事件计受击，tick 单独计，类型按调用路径解析（投射物归投掷者：针 → Reed、钟 → Bellbearer、rune bomb / slam → Clapper、矛 → Clawmaiden）；旧记录没有 kind / path，从录像的 events.jsonl 读。修正后的 A0 / 波次起点数字见 §16.2 / §16.3（`C:\ssbot\data\m2_forum_r4\fixer\a0_report_v2.json`、`ws_report_v2.json`）。
 - **复测**（波次起点批次重跑一次：`20261005_054233_Forum_A_w2_mix_eval_planner_oracle`，冻结检出 `C:\ssbot\live_r4f_0f517a0`，实例 0、1 各 12 场，种子 170000+，eval、无真退出；报告 `C:\ssbot\data\m2_forum_r4\fixer\ws_report_fix.json`）：QUIT 24 / 24（Q1 12、Q3 12：Reed 6、Minister 4、Choristor 2）；每场 3.33 次受击（80 个 damage 事件）+ 6 个 Multihit tick（全部在自己那一帧就在支撑内）；**支撑外 0、未知 0**（4 个 Final Hit 按钩子判，钩子都找到了，包括 iid 解析不出来的 `Song Reed (1)` / `Song Administrator (1)`，靠物体名回退）；来源 Clawmaiden 27、Tiny 16、Clapper 13、Reed 9、Bellbearer 7、Minister 3、Choristor 3、未解析 2；FORCED_RISK 90.5 %（各波 69–100 %）；EVADE 98 %、HOLD 2 %；YELLOW 下 `kill_prims` 含钉子攻击的 tick 被拿掉攻击（日志里 1,480 个 YELLOW tick）；击杀 0（上一批 2）；Cogfly 2 次；tick p50 中位数 7.4 ms、p99 中位数 14.0 ms（最大 18.9），> 16.7 ms 0.45 %；WaveTracker 29,522 / 29,970（98.5 %，同 §16.3 的波次起点偏移）；包络审计：选中 S = 0 的 2,794 次全部包络，core_not_enveloped 0、overrun 0。结论：修正没有改变基线的样子（还是 EVADE、还是第一波里 3 下左右退出），记账现在每个掉血事件都判。
 
-## 17. R5 行为模型：感知时刻、冷却、分支历史、Tiny 一只一只、身体触发（2026-10-08，forum_planner_plan.md §5 R5 的行为模型半；离线，没有连接游戏）
+## 18. R5 行为模型：感知时刻、冷却、分支历史、Tiny 一只一只、身体触发（2026-10-08，forum_planner_plan.md §5 R5 的行为模型半；离线，没有连接游戏）
 
 代码：`combat/branch_model.py`（SENSING 表、触发形状 RANGES、BranchMemory、BranchModel、运行时 BranchView、身体触发 REACTIVE）、`combat/tiny_orbit.py`、`knowledge/forum_branch.py`（扫描、选择、校准）；工具 `forum_branch`（scan / study / build）、`tiny_orbit`；`multi_recall --branch`。产品 `knowledge/1.0.30000/enemies/forum/branch_model.json`（148 KB）、`tiny_orbit.json`。测试 `tests/test_branch_model.py`（19 个）。**全部只进打分（P / J、O / BAIT），支撑、放置、监督器都不读它**；接线：`MultiForecaster(branch=BranchModel.load())` 时每个 EnemyTracker 带一个 BranchMemory，`Subject.next_p` = 下一招家族的概率，`branch_probs(iid)` / `next_attack_probs(iid)` / `BranchView.reactive` / `entry_prob`；`ForumPlannerPolicy(branch_model=True)` 打开，默认关（规划器还没有消费者，R5 终点价值 / R6 的 O、BAIT 用）。
 
 数据：DEV = R0 的 142 场完整连战（`m2_forum_r0\cache` 107 + `cache_fresh` 35，随机数据策略），按场两折交替；**TEST = R1 收尾的 202 场**（`m2_forum_r1c\cache_fresh`：w7 / w2 波次起点、154609 / 154612 完整连战，data2 / idle 策略），选择和调参时没有看过，表在 DEV 全部上拟合后只评估一次。决策 = 控制 FSM 离开一个决策状态的一次转移：DEV 428,997 个、TEST 253,222 个（61 个决策状态，n ≥ 60 且至少两个后继）。主角的丝从录像读（`hero.silk`，每场约 2 s，缓存在 `C:\ssbot\data\m2_forum_r5m\hero\`）。
 
-### 17.1 FSM 静态：每个决策读主角的什么、在哪一刻（场景包 `hang_04_boss` 控制 FSM，`reactive_scripts\out\*.txt` 逐动作解码）
+### 18.1 FSM 静态：每个决策读主角的什么、在哪一刻（场景包 `hang_04_boss` 控制 FSM，`reactive_scripts\out\*.txt` 逐动作解码）
 
 PlayMaker 的三条规则决定了"哪一刻"：(1) 动作在 OnEnter 里发出有出边的事件会**当场**换状态，后面的动作不再执行（13.2 已用过）；(2) 状态里的动作全部结束（没有 everyFrame）时自动发 FINISHED；(3) `SendRandomEventV4`（反编译 `SendRandomEventV4.cs`）每个动作实例有两个计数：`trackingInts[i]`（i 连着出了几次）和 `trackingIntsMissed[i]`（多少次没出 i）；先看有没有 `missed ≥ missedMax` 的事件（有就强制出它），否则按权重抽、抽到已连出 `eventMax` 次的就重抽。`activeBool` 为假时整个动作不跑、计数不动。所以 V4 的"冷却"完全由这个状态自己过去的选择决定——这就是 `last_choice` / `prev2_choice` / `choice_run` / `miss_<后继>` 这些历史量。
 
@@ -980,9 +980,9 @@ PlayMaker 的三条规则决定了"哪一刻"：(1) 动作在 OnEnter 里发出�
 | | Evade End | 瞬时 Throw Range；V4 1:1（eventMax 2） | 分支帧 |
 | 各类 | Check Pos | 瞬时 GetDistance < 6（Maestro 8）→ Shift（换出生点） | 分支帧 |
 
-Tiny 的控制 FSM 在别的包里（Maestro 用 `CreateObject` 生成的预制体，场景包外部文件 45），这次没有解码；它的 Ready → Fire Ready / Defend Ready 由 Maestro 的事件指挥（§17.6）。机器可读的表在 `branch_model.SENSING`（类型 → 状态 → (时刻, 说明)）。
+Tiny 的控制 FSM 在别的包里（Maestro 用 `CreateObject` 生成的预制体，场景包外部文件 45），这次没有解码；它的 Ready → Fire Ready / Defend Ready 由 Maestro 的事件指挥（§18.6）。机器可读的表在 `branch_model.SENSING`（类型 → 状态 → (时刻, 说明)）。
 
-### 17.2 冷却：FSM 里的历史，换成看得见的条件（`BranchMemory`，从控制状态的进入和看到的命中推出）
+### 18.2 冷却：FSM 里的历史，换成看得见的条件（`BranchMemory`，从控制状态的进入和看到的命中推出）
 
 - **门**（布尔变量 + 哪个状态设 / 清，`branch_model._GATES`）：Bellbearer `Evade Cooldown`（Evade 设、只有 Throw Antic 清：扔一次钟补一发闪避；`can_evade` = 上一次 In Range 待够 0.5 s，带到 Insta Throw?）；Reed `armed`（Evade Antic 关、Defend Start / Stab Antic 开）、`jdd` = Just Did Defend（Defend Start 设、Stab Antic / Throw Antic 清）；Clapper `evaded`（Evade Scuttle 设、任何招的前摇清）；Envoy `charge_armed`（Charge Antic 关、Slash Antic 开，或进 Walker 1.5 s）。
 - **计数 / 计时**：Choristor 这一串跳的第几跳和上一跳方向（`hops`、`last_hop`）；Clawmaiden 吸丝计时（Startle 设 U(1, 3)、Spear Fire Recover 设 U(1.5, 2)，只在 Fly 里减）→ 在 Fly 里累计的时间 `suck_age`；Maestro 自己的死 Tiny 数 `dead_tinies`（Tiny 归属：它在 Ready 时离哪只 Maestro 最近）。
@@ -993,7 +993,7 @@ Tiny 的控制 FSM 在别的包里（Maestro 用 `CreateObject` 生成的预制�
 
 **数据核对**（DEV，`C:\ssbot\data\m2_forum_r5m\branch_gap.json`；"下一招"= 上一招结束后的第一招，不算入场 / 待机）：Bellbearer 闪过之后下一招 **2,229 / 2,229 是扔钟**（Evade Cooldown）；Maestro 防御之后 89 % 斩、11 % 召唤、**0 防御**（V4 eventMax 1），斩之后 53 % 斩 / 39 % 防御 / 8 % 召唤。
 
-### 17.3 结果：留出对数损失与校准（前 / 后）
+### 18.3 结果：留出对数损失与校准（前 / 后）
 
 "无条件" = 运行时今天用的 `p_succ`（平滑边际）；"R0" = R0 表选出的协变量（分支帧取值，同一套平滑在训练折上重拟）；"新" = 本节的模型。DEV 列是两折交叉验证，TEST 列是 DEV 全部拟合后在 202 场上一次评估。nats / 决策，加权平均（按决策数）：
 
@@ -1002,7 +1002,7 @@ Tiny 的控制 FSM 在别的包里（Maestro 用 `CreateObject` 生成的预制�
 | DEV（428,997，交叉验证） | 0.740 | 0.539 | **0.332** | — |
 | TEST（253,222，留出） | 0.695 | 0.512 | **0.315** | 0.018 → **0.009** |
 
-逐个决策（ECE = 所有（决策, 后继）对按预测概率分 10 档的期望校准误差；时刻见 §17.4）：
+逐个决策（ECE = 所有（决策, 后继）对按预测概率分 10 档的期望校准误差；时刻见 §18.4）：
 
 | 类型 | 决策 | DEV n | 无条件 | R0 | 新 | 时刻 | 协变量 | TEST n | 无条件 | R0 | 新 | ECE 前 → 后 |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
@@ -1068,9 +1068,9 @@ Tiny 的控制 FSM 在别的包里（Maestro 用 `CreateObject` 生成的预制�
 | Tiny | Ready | 52160 | 1.061 | 0.934 | 0.744 | branch | front,prev2_choice,since_end,prev | 31813 | 1.105 | 1.059 | 0.829 | 0.027→0.023 |
 | Tiny | Return | 10017 | 0.730 | 0.667 | 0.441 | branch | front,side,from,hero_x | 7334 | 0.626 | 0.610 | 0.391 | 0.014→0.015 |
 
-读法：(1) 由距离 / 范围决定的瞬时或每帧决策，换成**精确的触发形状**（主角物理盒进不进 FSM 的那个盒 / 圆）后几乎确定：Clapper After Scuttle / Dmg Attack 0.39 / 0.69 → 0.006 / 0.006（TEST 0.009 / 0.036），Walk 0.54 → 0.047，Choristor Hop Antic（进入时刻）0.35 → 0.006，Slash Check 0.59 → 0.023。(2) 防重复和门：Bellbearer In Range 1.06 → 0.11（`in_Evade Range` + 距离 + 离上一招多久）、Minister Attack Choice 0.693 → 0.493（`prev2_choice`：两次一样就必是另一个）、Evade? 0.54 → 0.31、Maestro Summon? 0.29 → 0.17（`dead_tinies`）。(3) 主角的丝：Clawmaiden Spin Antic 1.10 → 0.59（进入时刻的丝）、Spin 2 0.69 → 0.17（提前 0.1 s 的丝：分支帧的丝已经被吸掉一格）。(4) 变化小或变差的：Maestro Attack Choice（R0 0.318 → 0.331，V4 本身就随机；R0 的 `run` / `choice_run` 组合在这里略好）、Escape Jump（TEST 0.290 → 0.302）、几个小样本决策（Envoy Charge TEST n 118 ECE 0.004 → 0.032、Reed Throw Up n 172 0.689 → 0.342 但 ECE 0.000 → 0.043：DEV 交叉验证 0.180，4 个协变量对 311 个样本过拟合）。Tiny 的 Ready（哪只被 Maestro 叫去冲 / 防）本质上是 Maestro 那边的随机选择，0.83 nats 是预期之内（§17.6：真正的选择提前 0.7 s 就看得见）。
+读法：(1) 由距离 / 范围决定的瞬时或每帧决策，换成**精确的触发形状**（主角物理盒进不进 FSM 的那个盒 / 圆）后几乎确定：Clapper After Scuttle / Dmg Attack 0.39 / 0.69 → 0.006 / 0.006（TEST 0.009 / 0.036），Walk 0.54 → 0.047，Choristor Hop Antic（进入时刻）0.35 → 0.006，Slash Check 0.59 → 0.023。(2) 防重复和门：Bellbearer In Range 1.06 → 0.11（`in_Evade Range` + 距离 + 离上一招多久）、Minister Attack Choice 0.693 → 0.493（`prev2_choice`：两次一样就必是另一个）、Evade? 0.54 → 0.31、Maestro Summon? 0.29 → 0.17（`dead_tinies`）。(3) 主角的丝：Clawmaiden Spin Antic 1.10 → 0.59（进入时刻的丝）、Spin 2 0.69 → 0.17（提前 0.1 s 的丝：分支帧的丝已经被吸掉一格）。(4) 变化小或变差的：Maestro Attack Choice（R0 0.318 → 0.331，V4 本身就随机；R0 的 `run` / `choice_run` 组合在这里略好）、Escape Jump（TEST 0.290 → 0.302）、几个小样本决策（Envoy Charge TEST n 118 ECE 0.004 → 0.032、Reed Throw Up n 172 0.689 → 0.342 但 ECE 0.000 → 0.043：DEV 交叉验证 0.180，4 个协变量对 311 个样本过拟合）。Tiny 的 Ready（哪只被 Maestro 叫去冲 / 防）本质上是 Maestro 那边的随机选择，0.83 nats 是预期之内（§18.6：真正的选择提前 0.7 s 就看得见）。
 
-### 17.4 感知时刻：分支帧 / FSM 的感知时刻 / 固定提前 0.1–0.5 s（DEV 交叉验证，几何 + 历史一起选；最后一列只用几何）
+### 18.4 感知时刻：分支帧 / FSM 的感知时刻 / 固定提前 0.1–0.5 s（DEV 交叉验证，几何 + 历史一起选；最后一列只用几何）
 
 | 类型 | 决策 | 分支帧 | 进入 | 存储 | 提前 0.1 | 0.2 | 0.3 | 0.4 | 0.5 | 只用几何：分支帧 / 最好 |
 |---|---|---|---|---|---|---|---|---|---|---|
@@ -1140,7 +1140,7 @@ Tiny 的控制 FSM 在别的包里（Maestro 用 `CreateObject` 生成的预制�
 - **和 FSM 静态一致**：FSM 说"进入时读"的，进入时刻的几何明显更好（只用几何：Hop Antic 分支帧 0.081 → 进入 0.006；Spin Antic 0.603 → 0.593 加历史后 0.590）；"存储"的，存储时刻好（只用几何：Throwing Up? 0.245 → 0.069、Throw Up 0.685 → 0.185、Lock R High 0.365 → 0.147；固定提前 0.4 s 几乎一样好，因为 Throw Aim 正好 0.4 s）；"每帧 / 瞬时"的，分支帧最好，越往前越差（Clapper Dmg Attack 0.006 → 提前 0.1 s 0.169、Choristor Combo? 0.013 → 0.242、Minister Evade? 0.311 → 0.386）。
 - **诱招（O、BAIT）用哪个**：`BranchModel.timing(tk, state)`；`BranchView` 按它取主角 / 敌人的历史位置（保留 1 s）。
 
-### 17.5 防御两支的冷却（你 10-04：被打 → 反击 和 没被打 两支）
+### 18.5 防御两支的冷却（你 10-04：被打 → 反击 和 没被打 两支）
 
 上一招结束到下一招开始的时间（DEV，`branch_gap.json`，中间没有被打；p10 / p50 / p90 s）和下一招的分布：
 
@@ -1157,7 +1157,7 @@ Tiny 的控制 FSM 在别的包里（Maestro 用 `CreateObject` 生成的预制�
 
 结论：Minister 的两支差别小（都经 `Evade?` → `Retreat?` → `Set Attack Time` U(0.5, 1.5)，FSM 里没有按分支的冷却）；Reed 反击**钩住**之后下一招明显晚（p50 1.10 vs 0.67 s）、闪避少（主角被打飞，不在它的闪避盒里）；两支的差别作为 `prev_end` 进了模型（Minister Parry Stance、Reed Alert 都选了 `since_end` / `prev_end`）。格挡没被打、之后中间又被打（`hit`，n 498）时 Minister 的间隔反而长（p50 1.47 s）：被打把攻击计时夹到 ≤ 0.5 s，但出招还要主角在 Attack Range 里。
 
-### 17.6 Tiny 一只一只（`tiny_orbit`，DEV 拟合、TEST 评估）
+### 18.6 Tiny 一只一只（`tiny_orbit`，DEV 拟合、TEST 评估）
 
 - **静态**：Maestro `Defend Start` 给三只发 DEFEND READY；`Defending`（1.75 s）把子物体 Defense Formation（局部 (0, −0.22)）转 −180°/s、缩放 0.5 → 2.5（0.75 s，easeOutSine），三个 Defense Point 在局部半径 2、90° / −30° / 210°：轨道半径 1 → 5 u、120° 间隔。`Fire Antic` 用 `GetRandomChild(Ready Flies)` 挑一只，**当场**发 FIRE READY，0.7 s 后（Slash 1）发 FIRE。
 - **实测角速度**：±216°/s（DEV 中位数 −216.2 / +216.2，p25–p75 176–242），**方向跟 Maestro 的朝向**（flipX 0 顺时针、1 逆时针：Formation 是它的子物体，Rotate 在本地空间转）。半径：防御开始约 1.25 s 后中位数 5.07 u（p1–p99 约 3.8–5.4，6 场抽查），之前在成形（Tiny 从头顶飞过来）。
@@ -1172,28 +1172,28 @@ Tiny 的控制 FSM 在别的包里（Maestro 用 `CreateObject` 生成的预制�
 - **冲锋**（TEST 7,638 次）：FIRE READY → Fire **0.717 s**（p1 0.692、p99 0.733）；方向 **斜下约 52°**（前 0.1 s 位移，p5–p95 48.7–52.4°），**朝主角那一侧 99.7 %**（7,473 / 7,495）；挑哪只：被挑中的是离主角最近那只 3,050 次，随机期望 3,042（**就是随机，不看与主角的连线**）。站在地上被撞的比例（相对 FIRE READY 时 Maestro 的 x，冲锋方向为正）：身后 2–8 u 0.8–0.9 %、**正下方 7.1 %**、前方 3 u 31 %、6 u 56 %、8–10 u 约 59 %（DEV 同：0.4 % / 6.2 % / 27 % / 52 % / 58–60 %）——和你说的"站在指挥家正下方、走到另一侧"一致，也和 R0 逐只回放（7.1 % / 34 % / 58 %）一致。
 - 所以对规划器：Fire Ready 一出现就知道是哪只、0.7 s 后冲、往主角那一侧斜下 52°；走到 Maestro 身后 2 u 以外就基本不会被这一冲撞到。
 
-### 17.7 身体触发的反应分支（forum_reactive_moves.md 的 3.2 落到代码里，只进 J / P）
+### 18.7 身体触发的反应分支（forum_reactive_moves.md 的 3.2 落到代码里，只进 J / P）
 
-- `branch_model.REACTIVE`：Bellbearer In Range → Evade（Evade Range、≥ 0.5 s、¬Evade Cooldown，每次 0.97）；Clapper Idle → Evade Scuttle（Slam Range、≥ 0.25 s、硬币 0.49）；Reed Alert → Evade Antic（已上膛，0.95；它进 Alert 时已在盒里约 0.8）、→ Defend Start（Defend Range、¬Just Did Defend、硬币 0.45）。门从 BranchMemory 来（§17.2）；**硬币已亮出反面**（这一次访问里主角已在盒里、门开着两帧以上它没反应）→ 这次访问 p = 0。
+- `branch_model.REACTIVE`：Bellbearer In Range → Evade（Evade Range、≥ 0.5 s、¬Evade Cooldown，每次 0.97）；Clapper Idle → Evade Scuttle（Slam Range、≥ 0.25 s、硬币 0.49）；Reed Alert → Evade Antic（已上膛，0.95；它进 Alert 时已在盒里约 0.8）、→ Defend Start（Defend Range、¬Just Did Defend、硬币 0.45）。门从 BranchMemory 来（§18.2）；**硬币已亮出反面**（这一次访问里主角已在盒里、门开着两帧以上它没反应）→ 这次访问 p = 0。
 - `BranchView.reactive(tr, T)`：现在开着的触发和 p；`entry_prob(tr, T, path)`：候选的主角盒路径第一次在门开之后进盒的时刻和 p（敌人按最后看到的位置不动：这些源状态都是悬停 / 站着）。规划器（R6 / R7）把它当成和命中分支同类的 J / P 分支用；**S / Hz / U 不变**。
-- 行为表里，同一件事由精确的触发形状协变量表达：Bellbearer In Range 选 `in_Evade Range`、Reed Alert 选 `in_Evade Range` + `in_Defend Range`、Clapper Idle 选 `in_Slam Range`、Minister Evade? 选 `in_Evade Range`（§17.3）。
+- 行为表里，同一件事由精确的触发形状协变量表达：Bellbearer In Range 选 `in_Evade Range`、Reed Alert 选 `in_Evade Range` + `in_Defend Range`、Clapper Idle 选 `in_Slam Range`、Minister Evade? 选 `in_Evade Range`（§18.3）。
 
-### 17.8 支撑、召回、Bell Beast、算力
+### 18.8 支撑、召回、Bell Beast、算力
 
 - **支撑不动**：BranchMemory 挂在 EnemyTracker 上（只在 `enter` / `_hit` 里各多一行），放置、`occupied`、`prob`、`support_set` 都不读它；测试 `test_multi_forecaster_branch_view_is_scoring_only` 在合成 Reed 上逐帧比较有 / 没有分支模型的占据、概率图、支撑集：完全相同。
-- **留出召回（R2 / R3 的协议，分支模型打开：`multi_recall fresh --tables 0 --branch`，冻结检出 `C:\ssbot\live_r5m_092e3e2`）**：（运行中，结果见 HANDOFF）
-- **Bell Beast**：它不走 EnemyTracker（`MultiForecaster(boss=...)` 包装时 `bv` 为 None）；（运行中，结果见 HANDOFF）
+- **留出召回（R2 / R3 的协议，分支模型打开：`multi_recall fresh --tables 0 --branch`，冻结检出 `C:\ssbot\live_r5m_092e3e2`）**：R0 的 35 场留出、fold 0 的表：L2 / L3 / L4 各 74,585 / 74,585（全部由预报本身盖住，钩 465 / 465，按类型 100 %），与 R3 认证（2a10a0d，`C:\ssbot\data\m2_forum_r3\recall_fresh_2a10a0d.json` 的 fresh/tables0）逐项相同（`C:\ssbot\data\m2_forum_r5m\recall_fresh_t0_branch_092e3e2.json`）。
+- **Bell Beast**：它不走 EnemyTracker（`MultiForecaster(boss=...)` 包装时 `bv` 为 None）；`multi_recall bellbeast`（20261003_144536 i4_000 4,001 帧 + 892 次铃区检查、20261004_095304 i0_001 4,001 帧 + 1,333 次）放置、occupied、prob、support_set、committed、战术、规划器决策、铃区八项全部 **0 差**；全部测试（冻结检出 092e3e2）1,146 passed、3 skipped、1 xfailed（第一遍有 15 个规划器 / 运动学测试只因为环境里 NUMBA_NUM_THREADS = 3 报线程数错，按 4 线程重跑 73 / 73 通过），之后的提交（反应分支、换行）`test_branch_model.py` 19 / 19。
 - **算力**（`scratchpad bench_bv.py`：第 6 波所在的完整连战 20261003_074719 i3 ep0，51,823 帧，每帧对每个在模型决策状态里的敌人算 `next_attack_probs`，相当于 `Subject.next_p` 的工作）：每帧 p50 0.17 ms、p99 1.05 ms、最大 7.8 ms（平均 3 只、最多 8 只在决策里）。打开时 p99 约占 8 ms 预算的 13 %，所以默认关；要常开先把几何按帧缓存。
 
-### 17.9 没做完 / 未核实
+### 18.9 没做完 / 未核实
 
 - Tiny 的控制 FSM 没解码（预制体在场景包外）；冲锋 52° 和"贴地段"只来自录像。
 - 逐只轨道的跟随模型（防御点 + 地形阻挡 + 速度上限）没做，所以还不能替换支撑。
-- 时刻比较里几个"提前"胜出的差距在噪声内（§17.4），模型照选中的用；小样本决策（Envoy Charge、Reed Throw Up、Escape Jump）校准变差，可以把协变量数按 n 限制（现在一律 ≤ 4）。
+- 时刻比较里几个"提前"胜出的差距在噪声内（§18.4），模型照选中的用；小样本决策（Envoy Charge、Reed Throw Up、Escape Jump）校准变差，可以把协变量数按 n 限制（现在一律 ≤ 4）。
 - 反应分支的 p 是 R0 的每次访问比例（forum_reactive_moves §2.2），没有按距离 / 进盒方式细分；规划器还没接 `entry_prob`。
 - V4 的计数在结果看不见时（例 Minister Evade? 主角在盒外两种抽法都去 Retreat?）是隐藏的，现在用看得见的历史近似，没有做隐状态滤波。
 
-### 17.10 复现
+### 18.10 复现
 
 ```
 cd brain   # 低优先级，NUMBA_NUM_THREADS ≤ 4；完整流程见 C:\ssbot\data\m2_forum_r5m\pipeline_v2.cmd

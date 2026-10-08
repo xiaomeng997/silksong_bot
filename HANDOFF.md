@@ -1817,14 +1817,15 @@ Next / open issues (round 2):
 ## Task R5 model - Forum plan round R5, the behaviour-model half (branch worktree-wf_814dfeea-b10-1)
 
 Worktree `C:\modeling\silksong_bot\.claude\worktrees\wf_814dfeea-b10-1`, branch `worktree-wf_814dfeea-b10-1` (from main
-bc46dc9). Offline only (no game instance touched, no seeds). Facts: `docs/facts/1.0.30000/forum.md` section 17 (Chinese).
+bc46dc9). Offline only (no game instance touched, no seeds). Facts: `docs/facts/1.0.30000/forum.md` section 18 (Chinese;
+the R5 value track's section is 17).
 Large outputs (not in git): `C:\ssbot\data\m2_forum_r5m\` (decision records `recs_dev.pkl` / `recs_test.pkl`, hero silk
 side caches `hero\`, `study_dev.json`, `holdout_test.json`, `summary.md`, `tiny_orbit_report.json`, `branch_gap.json`,
 `pipeline_v2.cmd`, `val_run.cmd` and the validation logs). Frozen checkout of the validation: `C:\ssbot\live_r5m_092e3e2`.
 
 ### Done (committed)
 
-- **Sensing time from the FSM statics** (`combat/branch_model.SENSING`, forum.md 17.1): for every Forum decision state
+- **Sensing time from the FSM statics** (`combat/branch_model.SENSING`, forum.md 18.1): for every Forum decision state
   what its Control FSM reads (trigger ranges every frame / once at entry, GetDistance, stored angles, the hero's silk,
   SendRandomEventV4 counters) and when: "branch" (the exit frame is the sensing frame), "entry" (Choristor Hop Antic,
   Clawmaiden Spin Antic, Clapper Evade Scuttle, Minister Retreat?'s coin, Maestro Slash Recover), "stored:<state>"
@@ -1860,7 +1861,7 @@ side caches `hero\`, `study_dev.json`, `holdout_test.json`, `summary.md`, `tiny_
   scoring-only check: occupancy, probability map and support set identical with / without the branch model on the
   synthetic Reed, next_p filled only in decisions).
 
-### Measured (forum.md 17.3-17.8)
+### Measured (forum.md 18.3-18.8)
 
 - **Held-out log loss** (nats / decision, weighted): DEV 142 fights (2-fold CV) unconditional 0.740 (the runtime's
   p_succ today), R0 conditioners 0.539, new **0.332**; **TEST 202 R1 fights never used for selection: 0.695 / 0.512 /
@@ -1883,7 +1884,7 @@ side caches `hero\`, `study_dev.json`, `holdout_test.json`, `summary.md`, `tiny_
   is hit 0.8-0.9 % 2-8 u behind the Maestro, 7.1 % right under it, 31 % / 56 % / ~59 % at 3 / 6 / 8-10 u in front.
 - **Cost** of next_p for every enemy in a decision (full gauntlet replay, 51,823 frames): p50 0.17 ms, p99 1.05 ms,
   max 7.8 ms per frame -> off by default.
-- Validation (frozen 092e3e2): running (recall fresh R0 35 x fold-0 tables with the branch model on, Bell Beast wrap i4_000 / i0_001, full pytest); results to follow in this section.
+- Validation (frozen 092e3e2): recall with the branch model ON (`multi_recall fresh --tables 0 --branch`, R0's 35 fresh fights): L2 / L3 / L4 74,585 / 74,585 each, all by the forecast, hooks 465 / 465, identical to the R3 certification (2a10a0d, fresh/tables0). Bell Beast wrap (`multi_recall bellbeast` i4_000 + 20261004_095304 i0_001, 4,001 frames each): 0 differences in all eight checks. Full pytest at 092e3e2: 1,146 passed, 3 skipped, 1 xfailed (15 planner / kinematics tests first failed only because the run's NUMBA_NUM_THREADS was 3; rerun with 4: 73 / 73); the later commits' tests/test_branch_model.py 19 / 19.
 
 ### Next / open issues
 
