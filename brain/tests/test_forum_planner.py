@@ -198,6 +198,39 @@ def test_forced_ranking_never_takes_a_row_in_contact_for_contact_free(params, ar
     assert forced > 0
 
 
+def test_fine_rank_refines_forced_risk_by_the_current_attack_only(params, arena):
+    """fine_rank (SSBOT_FORUM_PF, forum.md 17.7): S / Hz / U and FORCED_RISK are the same with and without it; in a
+    FORCED_RISK tick no candidate tied with the chosen row on every key before P_f has a smaller P_f; off, P_f is 0
+    everywhere and the decisions are the default's."""
+    seen_pf = False
+    for x in (30.6, 31.0, 31.6, 32.0):
+        got = {}
+        for on in (False, True):
+            mf = _reed_forecaster(10, frames=17)
+            pl = ForumPlanner(params, arena, PlannerConfig(T=36, threads=2, variants="bounds_lo"),
+                              ForumConfig(deadline_ms=math.inf, chunk=16, fine_rank=on))
+            r = pl.tick(_world(x), kin.initial_state(params, x, FLOOR + params.foot), kin.HoldState.idle(1),
+                        np.zeros(1, np.int64), mf.forecast(0.8), _prefs(None, x), _ctx())
+            li = pl.last_info
+            got[on] = (r, {k: li[k].copy() for k in ("S", "Hz", "U")}, li["Pf"].copy(), li["cand"].copy(),
+                       pl.last_sel)
+        (r0, k0, pf0, _, _), (r1, k1, pf1, cand, ls) = got[False], got[True]
+        assert r0.forced_risk == r1.forced_risk
+        for k in k0:
+            assert np.array_equal(k0[k], k1[k])
+        assert not pf0.any()
+        if not r1.forced_risk:
+            continue
+        seen_pf |= bool(pf1[cand].any())
+        i = r1.idx
+        pre = lambda j: (ls["hz"][j], ls["hz_soft"][j], ls["U"][j], ls["S"][j], ls["keep"][j], ls["mkeep"][j],
+                         ls["V"][j], ls["Pc"][j])
+        for j in np.flatnonzero(cand):
+            if pre(j) == pre(i):
+                assert pf1[j] >= pf1[i]
+    assert seen_pf
+
+
 # ---- §4.4 item 3: the chosen plan is always enveloped ----
 
 def test_the_chosen_safe_plan_was_always_enveloped(params, arena):

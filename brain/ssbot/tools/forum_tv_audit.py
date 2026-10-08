@@ -36,7 +36,7 @@ PRE_HIT_F = 36                    # "pre_hit": ticks at most this many frames be
 ACCS = ("forced", "safe", "pre_hit")
 DUMP: list | None = None          # --dump: per tick, the allowed rows' keys, scores and hindsight (offline rankings)
 EP_KEY = [""]
-KEY_NAMES = ("hz", "hz_soft", "U", "S", "keep", "mkeep", "V", "P", "t_c", "t_hit", "J")
+KEY_NAMES = ("hz", "hz_soft", "U", "S", "keep", "mkeep", "V", "P", "Pf", "t_c", "t_hit", "J")
 
 
 def threat_boxes(s: dict) -> np.ndarray:
@@ -94,10 +94,11 @@ def order_of(ls: dict, J: np.ndarray, pre: str = "J", first: str | None = None, 
     sel = ls["allowed"].copy()
     forced = ls["forced"]
     t_hit, t_c, Pc = ls["t_hit"], ls["t_c"], ls["Pc"]
+    Pf = ls.get("Pf", np.zeros(len(sel)))
     if forced and presel:
         cand = np.flatnonzero(sel)
         Jp = J if pre == "J" else ls["J"]
-        cand = cand[np.lexsort((-Jp[cand], -t_hit[cand]))][:ls["p_k"]]
+        cand = cand[np.lexsort((-Jp[cand], -t_hit[cand], Pf[cand]))][:ls["p_k"]]
         sel = np.zeros_like(sel)
         sel[cand] = True
     tail = (-J, -t_hit, -t_c)
@@ -105,13 +106,14 @@ def order_of(ls: dict, J: np.ndarray, pre: str = "J", first: str | None = None, 
         tail = (-t_hit, -t_c, -J)
     elif first == "X":
         tail = (-J, -t_hit, -t_c, -extra)
-    o = np.lexsort(tail + (Pc, ~ls["V"], ~ls["mkeep"], ~ls["keep"], ls["S"], ls["U"], ls["hz_soft"], ls["hz"]))
+    o = np.lexsort(tail + (Pf, Pc, ~ls["V"], ~ls["mkeep"], ~ls["keep"], ls["S"], ls["U"], ls["hz_soft"], ls["hz"]))
     return o[sel[o]]
 
 
 def decided_key(ls: dict, a: int, b: int) -> str:
     keys = {"hz": ls["hz"], "hz_soft": ls["hz_soft"], "U": ls["U"], "S": ls["S"], "keep": ls["keep"],
-            "mkeep": ls["mkeep"], "V": ls["V"], "P": ls["Pc"], "t_c": ls["t_c"], "t_hit": ls["t_hit"], "J": ls["J"]}
+            "mkeep": ls["mkeep"], "V": ls["V"], "P": ls["Pc"], "Pf": ls.get("Pf", ls["Pc"] * 0), "t_c": ls["t_c"],
+            "t_hit": ls["t_hit"], "J": ls["J"]}
     for k in KEY_NAMES:
         if keys[k][a] != keys[k][b]:
             return k
