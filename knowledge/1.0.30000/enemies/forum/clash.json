@@ -1,2132 +1,5039 @@
 {
  "build": "1.0.30000",
- "rule": "clash.json from forum_clash_stats outputs: per (type, family, slot) the union setups (the planner's EV_CLASH premise on the recordings: the enemy's attack meets the swing's clash reach first, or reaches the inflated hurtbox while the swing is out; a contact setup alone misses the clashes that kept the attack off the hurtbox), a side or wall slash only with the enemy in front, up / down whatever the horizontal side, both crests pooled (the rule conditions on the window, which is where the crests differ), p_fail = the Wilson 95 % upper bound of hit / n; keys with n < min_n, the NEVER types / families and the body-only families are left out (= not clashable).",
+ "rule": "clash.json from forum_clash_stats outputs: per (type, family, slot) the union setups (the planner's EV_CLASH premise on the recordings: the enemy's attack meets the swing's clash reach first, or reaches the inflated hurtbox while the swing is out; a contact setup alone misses the clashes that kept the attack off the hurtbox) in the family's clashable states (clash_states: the Control states its clashes happened in, at least min_state_clashes and min_state_share of the family's; the planner clashes only a contact that can come from one of them), a side or wall slash only with the enemy in front, up / down whatever the horizontal side, both crests pooled (the rule conditions on the window, which is where the crests differ; by_crest: each crest's own counts and bounds), p_clash_lb = the Wilson 95 % lower bound of clash / n (the branch's weight: \"neither\" is not a clash), p_fail = the upper bound of hit / n, both at n_eff = the attack instances behind the setups; keys with n_eff < min_n, the NEVER types / families, the body-only families and the families never clashed are left out (= not clashable).",
  "min_n": 10,
  "kind": "union_setups",
  "p_fail": {
   "Song Administrator|MI_CHARGE|down": {
-   "n": 139,
+   "n": 124,
+   "n_inst": 123,
+   "n_eff": 123,
    "clash": 20,
-   "hit": 9,
-   "neither": 109,
+   "hit": 56,
+   "neither": 47,
    "other_clash": 1,
-   "p_hit": 0.0647,
-   "p_fail": 0.1185,
+   "p_clash": 0.1613,
+   "p_hit": 0.4516,
+   "p_clash_lb": 0.1067,
+   "p_fail": 0.5397,
+   "states": {
+    "Attack Antic": {
+     "clash": 0,
+     "hit": 3,
+     "neither": 2,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Attack End": {
+     "clash": 0,
+     "hit": 2,
+     "neither": 1,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Attack": {
+     "clash": 20,
+     "hit": 56,
+     "neither": 47,
+     "other_clash": 1,
+     "clash_state": true
+    }
+   },
    "by_crest": {
     "Reaper": {
+     "n": 124,
+     "n_inst": 123,
+     "n_eff": 123,
      "clash": 20,
-     "hit": 9,
-     "neither": 109,
-     "other_clash": 1
+     "hit": 56,
+     "neither": 47,
+     "other_clash": 1,
+     "p_clash": 0.1613,
+     "p_hit": 0.4516,
+     "p_clash_lb": 0.1067,
+     "p_fail": 0.5397
     }
    }
   },
   "Song Administrator|MI_CHARGE|side": {
-   "n": 2493,
-   "clash": 1872,
-   "hit": 22,
-   "neither": 484,
+   "n": 2466,
+   "n_inst": 1977,
+   "n_eff": 1977,
+   "clash": 1869,
+   "hit": 86,
+   "neither": 396,
    "other_clash": 115,
-   "p_hit": 0.0088,
-   "p_fail": 0.0133,
+   "p_clash": 0.7579,
+   "p_hit": 0.0349,
+   "p_clash_lb": 0.7385,
+   "p_fail": 0.0439,
+   "states": {
+    "Attack Antic": {
+     "clash": 0,
+     "hit": 3,
+     "neither": 12,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Attack End": {
+     "clash": 0,
+     "hit": 3,
+     "neither": 6,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Attack": {
+     "clash": 1869,
+     "hit": 86,
+     "neither": 396,
+     "other_clash": 115,
+     "clash_state": true
+    }
+   },
    "by_crest": {
     "Reaper": {
-     "clash": 1867,
-     "hit": 22,
-     "neither": 479,
-     "other_clash": 115
+     "n": 2459,
+     "n_inst": 1970,
+     "n_eff": 1970,
+     "clash": 1866,
+     "hit": 85,
+     "neither": 393,
+     "other_clash": 115,
+     "p_clash": 0.7588,
+     "p_hit": 0.0346,
+     "p_clash_lb": 0.7395,
+     "p_fail": 0.0436
     },
     "Wanderer": {
-     "clash": 5,
-     "hit": 0,
-     "neither": 5,
-     "other_clash": 0
+     "n": 7,
+     "n_inst": 7,
+     "n_eff": 7,
+     "clash": 3,
+     "hit": 1,
+     "neither": 3,
+     "other_clash": 0,
+     "p_clash": 0.4286,
+     "p_hit": 0.1429,
+     "p_clash_lb": 0.1582,
+     "p_fail": 0.5131
     }
    }
   },
   "Song Administrator|MI_CHARGE|up": {
-   "n": 308,
-   "clash": 178,
-   "hit": 7,
-   "neither": 113,
-   "other_clash": 10,
-   "p_hit": 0.0227,
-   "p_fail": 0.0462,
+   "n": 411,
+   "n_inst": 361,
+   "n_eff": 361,
+   "clash": 243,
+   "hit": 17,
+   "neither": 142,
+   "other_clash": 9,
+   "p_clash": 0.5912,
+   "p_hit": 0.0414,
+   "p_clash_lb": 0.5398,
+   "p_fail": 0.0672,
+   "states": {
+    "Attack Antic": {
+     "clash": 0,
+     "hit": 3,
+     "neither": 8,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Attack End": {
+     "clash": 0,
+     "hit": 2,
+     "neither": 7,
+     "other_clash": 1,
+     "clash_state": false
+    },
+    "Attack": {
+     "clash": 243,
+     "hit": 17,
+     "neither": 142,
+     "other_clash": 9,
+     "clash_state": true
+    }
+   },
    "by_crest": {
     "Reaper": {
+     "n": 279,
+     "n_inst": 274,
+     "n_eff": 274,
      "clash": 171,
-     "hit": 7,
-     "neither": 110,
-     "other_clash": 10
+     "hit": 12,
+     "neither": 87,
+     "other_clash": 9,
+     "p_clash": 0.6129,
+     "p_hit": 0.043,
+     "p_clash_lb": 0.554,
+     "p_fail": 0.074
     },
     "Wanderer": {
-     "clash": 7,
-     "hit": 0,
-     "neither": 3,
-     "other_clash": 0
+     "n": 132,
+     "n_inst": 87,
+     "n_eff": 87,
+     "clash": 72,
+     "hit": 5,
+     "neither": 55,
+     "other_clash": 0,
+     "p_clash": 0.5455,
+     "p_hit": 0.0379,
+     "p_clash_lb": 0.4411,
+     "p_fail": 0.1013
     }
    }
   },
   "Song Administrator|MI_PARRY|down": {
-   "n": 192,
-   "clash": 2,
-   "hit": 95,
-   "neither": 95,
+   "n": 155,
+   "n_inst": 155,
+   "n_eff": 155,
+   "clash": 1,
+   "hit": 78,
+   "neither": 76,
    "other_clash": 0,
-   "p_hit": 0.4948,
-   "p_fail": 0.5649,
+   "p_clash": 0.0065,
+   "p_hit": 0.5032,
+   "p_clash_lb": 0.0011,
+   "p_fail": 0.5809,
+   "states": {
+    "Parry Block": {
+     "clash": 0,
+     "hit": 3,
+     "neither": 5,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Parry Slash 1": {
+     "clash": 1,
+     "hit": 78,
+     "neither": 76,
+     "other_clash": 0,
+     "clash_state": true
+    },
+    "Parry Slash 2": {
+     "clash": 0,
+     "hit": 1,
+     "neither": 0,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Parry Slash 3": {
+     "clash": 1,
+     "hit": 0,
+     "neither": 0,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Parry Stance Antic": {
+     "clash": 0,
+     "hit": 3,
+     "neither": 5,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Parry Stance End": {
+     "clash": 0,
+     "hit": 1,
+     "neither": 0,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Parry Stance": {
+     "clash": 0,
+     "hit": 9,
+     "neither": 8,
+     "other_clash": 0,
+     "clash_state": false
+    }
+   },
    "by_crest": {
     "Reaper": {
-     "clash": 2,
-     "hit": 95,
-     "neither": 95,
-     "other_clash": 0
+     "n": 155,
+     "n_inst": 155,
+     "n_eff": 155,
+     "clash": 1,
+     "hit": 78,
+     "neither": 76,
+     "other_clash": 0,
+     "p_clash": 0.0065,
+     "p_hit": 0.5032,
+     "p_clash_lb": 0.0011,
+     "p_fail": 0.5809
     }
    }
   },
   "Song Administrator|MI_PARRY|side": {
-   "n": 492,
-   "clash": 209,
-   "hit": 93,
-   "neither": 166,
-   "other_clash": 24,
-   "p_hit": 0.189,
-   "p_fail": 0.226,
+   "n": 367,
+   "n_inst": 366,
+   "n_eff": 366,
+   "clash": 207,
+   "hit": 57,
+   "neither": 83,
+   "other_clash": 20,
+   "p_clash": 0.564,
+   "p_hit": 0.1553,
+   "p_clash_lb": 0.5128,
+   "p_fail": 0.196,
+   "states": {
+    "Parry Block": {
+     "clash": 0,
+     "hit": 5,
+     "neither": 32,
+     "other_clash": 2,
+     "clash_state": false
+    },
+    "Parry Slash 1": {
+     "clash": 207,
+     "hit": 57,
+     "neither": 83,
+     "other_clash": 20,
+     "clash_state": true
+    },
+    "Parry Slash 2": {
+     "clash": 1,
+     "hit": 1,
+     "neither": 1,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Parry Slash 3": {
+     "clash": 1,
+     "hit": 0,
+     "neither": 6,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Parry Slash 4": {
+     "clash": 0,
+     "hit": 0,
+     "neither": 4,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Parry Stance Antic": {
+     "clash": 0,
+     "hit": 8,
+     "neither": 11,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Parry Stance End": {
+     "clash": 0,
+     "hit": 1,
+     "neither": 8,
+     "other_clash": 1,
+     "clash_state": false
+    },
+    "Parry Stance": {
+     "clash": 0,
+     "hit": 21,
+     "neither": 21,
+     "other_clash": 1,
+     "clash_state": false
+    }
+   },
    "by_crest": {
     "Reaper": {
-     "clash": 209,
-     "hit": 93,
-     "neither": 166,
-     "other_clash": 24
+     "n": 367,
+     "n_inst": 366,
+     "n_eff": 366,
+     "clash": 207,
+     "hit": 57,
+     "neither": 83,
+     "other_clash": 20,
+     "p_clash": 0.564,
+     "p_hit": 0.1553,
+     "p_clash_lb": 0.5128,
+     "p_fail": 0.196
     }
    }
   },
   "Song Administrator|MI_PARRY|up": {
-   "n": 161,
-   "clash": 59,
-   "hit": 48,
-   "neither": 51,
-   "other_clash": 3,
-   "p_hit": 0.2981,
-   "p_fail": 0.3728,
-   "by_crest": {
-    "Reaper": {
-     "clash": 52,
-     "hit": 48,
-     "neither": 44,
-     "other_clash": 3
+   "n": 69,
+   "n_inst": 69,
+   "n_eff": 69,
+   "clash": 57,
+   "hit": 1,
+   "neither": 11,
+   "other_clash": 0,
+   "p_clash": 0.8261,
+   "p_hit": 0.0145,
+   "p_clash_lb": 0.7202,
+   "p_fail": 0.0776,
+   "states": {
+    "Parry Block": {
+     "clash": 0,
+     "hit": 35,
+     "neither": 23,
+     "other_clash": 1,
+     "clash_state": false
     },
-    "Wanderer": {
-     "clash": 7,
+    "Parry Slash 1": {
+     "clash": 57,
+     "hit": 1,
+     "neither": 11,
+     "other_clash": 0,
+     "clash_state": true
+    },
+    "Parry Slash 2": {
+     "clash": 5,
+     "hit": 0,
+     "neither": 8,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Parry Slash 3": {
+     "clash": 0,
      "hit": 0,
      "neither": 7,
-     "other_clash": 0
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Parry Slash 4": {
+     "clash": 1,
+     "hit": 0,
+     "neither": 5,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Parry Slash End": {
+     "clash": 0,
+     "hit": 0,
+     "neither": 1,
+     "other_clash": 1,
+     "clash_state": false
+    },
+    "Parry Stance Antic": {
+     "clash": 0,
+     "hit": 1,
+     "neither": 4,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Parry Stance End": {
+     "clash": 0,
+     "hit": 1,
+     "neither": 7,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Parry Stance": {
+     "clash": 0,
+     "hit": 15,
+     "neither": 8,
+     "other_clash": 1,
+     "clash_state": false
+    }
+   },
+   "by_crest": {
+    "Reaper": {
+     "n": 56,
+     "n_inst": 56,
+     "n_eff": 56,
+     "clash": 49,
+     "hit": 1,
+     "neither": 6,
+     "other_clash": 0,
+     "p_clash": 0.875,
+     "p_hit": 0.0179,
+     "p_clash_lb": 0.7637,
+     "p_fail": 0.0945
+    },
+    "Wanderer": {
+     "n": 13,
+     "n_inst": 13,
+     "n_eff": 13,
+     "clash": 8,
+     "hit": 0,
+     "neither": 5,
+     "other_clash": 0,
+     "p_clash": 0.6154,
+     "p_hit": 0.0,
+     "p_clash_lb": 0.3552,
+     "p_fail": 0.2281
     }
    }
   },
   "Song Handmaiden|CM_SLASH|down": {
-   "n": 113,
-   "clash": 20,
-   "hit": 29,
-   "neither": 62,
-   "other_clash": 2,
-   "p_hit": 0.2566,
-   "p_fail": 0.3442,
+   "n": 75,
+   "n_inst": 75,
+   "n_eff": 75,
+   "clash": 17,
+   "hit": 25,
+   "neither": 33,
+   "other_clash": 0,
+   "p_clash": 0.2267,
+   "p_hit": 0.3333,
+   "p_clash_lb": 0.1466,
+   "p_fail": 0.4458,
+   "states": {
+    "Slash 1": {
+     "clash": 8,
+     "hit": 23,
+     "neither": 27,
+     "other_clash": 0,
+     "clash_state": true
+    },
+    "Slash 2": {
+     "clash": 6,
+     "hit": 0,
+     "neither": 5,
+     "other_clash": 0,
+     "clash_state": true
+    },
+    "Slash 3": {
+     "clash": 0,
+     "hit": 0,
+     "neither": 2,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Slash 4": {
+     "clash": 3,
+     "hit": 2,
+     "neither": 1,
+     "other_clash": 0,
+     "clash_state": true
+    },
+    "Slash 5": {
+     "clash": 3,
+     "hit": 0,
+     "neither": 3,
+     "other_clash": 1,
+     "clash_state": false
+    },
+    "Slash Antic": {
+     "clash": 0,
+     "hit": 2,
+     "neither": 23,
+     "other_clash": 1,
+     "clash_state": false
+    }
+   },
    "by_crest": {
     "Reaper": {
-     "clash": 20,
-     "hit": 29,
-     "neither": 62,
-     "other_clash": 2
+     "n": 75,
+     "n_inst": 75,
+     "n_eff": 75,
+     "clash": 17,
+     "hit": 25,
+     "neither": 33,
+     "other_clash": 0,
+     "p_clash": 0.2267,
+     "p_hit": 0.3333,
+     "p_clash_lb": 0.1466,
+     "p_fail": 0.4458
     }
    }
   },
   "Song Handmaiden|CM_SLASH|side": {
-   "n": 504,
-   "clash": 195,
-   "hit": 67,
-   "neither": 237,
+   "n": 353,
+   "n_inst": 340,
+   "n_eff": 340,
+   "clash": 187,
+   "hit": 41,
+   "neither": 120,
    "other_clash": 5,
-   "p_hit": 0.1329,
-   "p_fail": 0.1654,
+   "p_clash": 0.5297,
+   "p_hit": 0.1161,
+   "p_clash_lb": 0.4767,
+   "p_fail": 0.1546,
+   "states": {
+    "Slash 1": {
+     "clash": 79,
+     "hit": 28,
+     "neither": 50,
+     "other_clash": 3,
+     "clash_state": true
+    },
+    "Slash 2": {
+     "clash": 11,
+     "hit": 0,
+     "neither": 14,
+     "other_clash": 1,
+     "clash_state": true
+    },
+    "Slash 3": {
+     "clash": 0,
+     "hit": 3,
+     "neither": 2,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Slash 4": {
+     "clash": 97,
+     "hit": 13,
+     "neither": 56,
+     "other_clash": 1,
+     "clash_state": true
+    },
+    "Slash 5": {
+     "clash": 4,
+     "hit": 0,
+     "neither": 37,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Slash Antic": {
+     "clash": 0,
+     "hit": 23,
+     "neither": 74,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Slash Recover": {
+     "clash": 0,
+     "hit": 0,
+     "neither": 2,
+     "other_clash": 0,
+     "clash_state": false
+    }
+   },
    "by_crest": {
     "Reaper": {
-     "clash": 189,
-     "hit": 67,
-     "neither": 234,
-     "other_clash": 5
+     "n": 350,
+     "n_inst": 338,
+     "n_eff": 338,
+     "clash": 185,
+     "hit": 41,
+     "neither": 119,
+     "other_clash": 5,
+     "p_clash": 0.5286,
+     "p_hit": 0.1171,
+     "p_clash_lb": 0.4753,
+     "p_fail": 0.1558
     },
     "Wanderer": {
-     "clash": 6,
+     "n": 3,
+     "n_inst": 2,
+     "n_eff": 2,
+     "clash": 2,
      "hit": 0,
-     "neither": 3,
-     "other_clash": 0
+     "neither": 1,
+     "other_clash": 0,
+     "p_clash": 0.6667,
+     "p_hit": 0.0,
+     "p_clash_lb": 0.1594,
+     "p_fail": 0.6576
     }
    }
   },
   "Song Handmaiden|CM_SLASH|up": {
-   "n": 201,
-   "clash": 53,
-   "hit": 21,
-   "neither": 125,
+   "n": 112,
+   "n_inst": 110,
+   "n_eff": 110,
+   "clash": 47,
+   "hit": 4,
+   "neither": 59,
    "other_clash": 2,
-   "p_hit": 0.1045,
-   "p_fail": 0.1544,
+   "p_clash": 0.4196,
+   "p_hit": 0.0357,
+   "p_clash_lb": 0.3317,
+   "p_fail": 0.0889,
+   "states": {
+    "Slash 1": {
+     "clash": 9,
+     "hit": 3,
+     "neither": 18,
+     "other_clash": 1,
+     "clash_state": true
+    },
+    "Slash 2": {
+     "clash": 1,
+     "hit": 1,
+     "neither": 12,
+     "other_clash": 0,
+     "clash_state": true
+    },
+    "Slash 3": {
+     "clash": 0,
+     "hit": 2,
+     "neither": 2,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Slash 4": {
+     "clash": 37,
+     "hit": 0,
+     "neither": 29,
+     "other_clash": 1,
+     "clash_state": true
+    },
+    "Slash 5": {
+     "clash": 6,
+     "hit": 0,
+     "neither": 25,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Slash Antic": {
+     "clash": 0,
+     "hit": 16,
+     "neither": 38,
+     "other_clash": 0,
+     "clash_state": false
+    }
+   },
    "by_crest": {
     "Reaper": {
-     "clash": 49,
-     "hit": 21,
-     "neither": 120,
-     "other_clash": 2
+     "n": 105,
+     "n_inst": 104,
+     "n_eff": 104,
+     "clash": 43,
+     "hit": 4,
+     "neither": 56,
+     "other_clash": 2,
+     "p_clash": 0.4095,
+     "p_hit": 0.0381,
+     "p_clash_lb": 0.3199,
+     "p_fail": 0.0942
     },
     "Wanderer": {
+     "n": 7,
+     "n_inst": 6,
+     "n_eff": 6,
      "clash": 4,
      "hit": 0,
-     "neither": 5,
-     "other_clash": 0
+     "neither": 3,
+     "other_clash": 0,
+     "p_clash": 0.5714,
+     "p_hit": 0.0,
+     "p_clash_lb": 0.2331,
+     "p_fail": 0.3903
     }
    }
   },
   "Song Pilgrim 01|EN_CHARGE|down": {
-   "n": 16,
-   "clash": 5,
+   "n": 14,
+   "n_inst": 14,
+   "n_eff": 14,
+   "clash": 4,
    "hit": 0,
-   "neither": 7,
+   "neither": 6,
    "other_clash": 4,
+   "p_clash": 0.2857,
    "p_hit": 0.0,
-   "p_fail": 0.1936,
-   "by_crest": {
-    "Reaper": {
-     "clash": 2,
+   "p_clash_lb": 0.1172,
+   "p_fail": 0.2153,
+   "states": {
+    "Charge End": {
+     "clash": 0,
+     "hit": 0,
+     "neither": 2,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Charge": {
+     "clash": 4,
      "hit": 0,
      "neither": 6,
-     "other_clash": 4
+     "other_clash": 4,
+     "clash_state": true
+    }
+   },
+   "by_crest": {
+    "Reaper": {
+     "n": 11,
+     "n_inst": 11,
+     "n_eff": 11,
+     "clash": 2,
+     "hit": 0,
+     "neither": 5,
+     "other_clash": 4,
+     "p_clash": 0.1818,
+     "p_hit": 0.0,
+     "p_clash_lb": 0.0514,
+     "p_fail": 0.2588
     },
     "Wanderer": {
-     "clash": 3,
+     "n": 3,
+     "n_inst": 3,
+     "n_eff": 3,
+     "clash": 2,
      "hit": 0,
      "neither": 1,
-     "other_clash": 0
+     "other_clash": 0,
+     "p_clash": 0.6667,
+     "p_hit": 0.0,
+     "p_clash_lb": 0.2077,
+     "p_fail": 0.5615
     }
    }
   },
   "Song Pilgrim 01|EN_CHARGE|side": {
-   "n": 42,
-   "clash": 35,
-   "hit": 2,
-   "neither": 3,
-   "other_clash": 2,
-   "p_hit": 0.0476,
-   "p_fail": 0.1579,
+   "n": 184,
+   "n_inst": 184,
+   "n_eff": 184,
+   "clash": 145,
+   "hit": 3,
+   "neither": 29,
+   "other_clash": 7,
+   "p_clash": 0.788,
+   "p_hit": 0.0163,
+   "p_clash_lb": 0.7234,
+   "p_fail": 0.0468,
+   "states": {
+    "Charge": {
+     "clash": 145,
+     "hit": 3,
+     "neither": 29,
+     "other_clash": 7,
+     "clash_state": true
+    }
+   },
    "by_crest": {
     "Reaper": {
-     "clash": 30,
-     "hit": 1,
-     "neither": 3,
-     "other_clash": 2
+     "n": 142,
+     "n_inst": 142,
+     "n_eff": 142,
+     "clash": 116,
+     "hit": 2,
+     "neither": 21,
+     "other_clash": 3,
+     "p_clash": 0.8169,
+     "p_hit": 0.0141,
+     "p_clash_lb": 0.7452,
+     "p_fail": 0.0499
     },
     "Wanderer": {
-     "clash": 5,
+     "n": 42,
+     "n_inst": 42,
+     "n_eff": 42,
+     "clash": 29,
      "hit": 1,
-     "neither": 0,
-     "other_clash": 0
+     "neither": 8,
+     "other_clash": 4,
+     "p_clash": 0.6905,
+     "p_hit": 0.0238,
+     "p_clash_lb": 0.5397,
+     "p_fail": 0.1232
     }
    }
   },
   "Song Pilgrim 01|EN_JUMPSLASH|down": {
    "n": 19,
+   "n_inst": 19,
+   "n_eff": 19,
    "clash": 11,
    "hit": 1,
    "neither": 7,
    "other_clash": 0,
+   "p_clash": 0.5789,
    "p_hit": 0.0526,
+   "p_clash_lb": 0.3628,
    "p_fail": 0.2464,
+   "states": {
+    "JumpSlash 2": {
+     "clash": 7,
+     "hit": 1,
+     "neither": 4,
+     "other_clash": 0,
+     "clash_state": true
+    },
+    "JumpSlash 3": {
+     "clash": 4,
+     "hit": 0,
+     "neither": 3,
+     "other_clash": 0,
+     "clash_state": true
+    }
+   },
    "by_crest": {
     "Reaper": {
+     "n": 19,
+     "n_inst": 19,
+     "n_eff": 19,
      "clash": 11,
      "hit": 1,
      "neither": 7,
-     "other_clash": 0
+     "other_clash": 0,
+     "p_clash": 0.5789,
+     "p_hit": 0.0526,
+     "p_clash_lb": 0.3628,
+     "p_fail": 0.2464
     }
    }
   },
   "Song Pilgrim 01|EN_JUMPSLASH|side": {
-   "n": 10,
-   "clash": 7,
-   "hit": 0,
-   "neither": 3,
-   "other_clash": 0,
-   "p_hit": 0.0,
-   "p_fail": 0.2775,
-   "by_crest": {
-    "Reaper": {
-     "clash": 5,
-     "hit": 0,
-     "neither": 2,
-     "other_clash": 0
-    },
-    "Wanderer": {
-     "clash": 2,
+   "n": 22,
+   "n_inst": 22,
+   "n_eff": 22,
+   "clash": 14,
+   "hit": 1,
+   "neither": 6,
+   "other_clash": 1,
+   "p_clash": 0.6364,
+   "p_hit": 0.0455,
+   "p_clash_lb": 0.4295,
+   "p_fail": 0.218,
+   "states": {
+    "JumpSlash 2": {
+     "clash": 1,
      "hit": 0,
      "neither": 1,
-     "other_clash": 0
+     "other_clash": 0,
+     "clash_state": true
+    },
+    "JumpSlash 3": {
+     "clash": 13,
+     "hit": 1,
+     "neither": 5,
+     "other_clash": 1,
+     "clash_state": true
+    },
+    "JumpSlash 4": {
+     "clash": 0,
+     "hit": 0,
+     "neither": 1,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "JumpSlash Antic": {
+     "clash": 0,
+     "hit": 0,
+     "neither": 1,
+     "other_clash": 0,
+     "clash_state": false
+    }
+   },
+   "by_crest": {
+    "Reaper": {
+     "n": 13,
+     "n_inst": 13,
+     "n_eff": 13,
+     "clash": 7,
+     "hit": 1,
+     "neither": 4,
+     "other_clash": 1,
+     "p_clash": 0.5385,
+     "p_hit": 0.0769,
+     "p_clash_lb": 0.2914,
+     "p_fail": 0.3331
+    },
+    "Wanderer": {
+     "n": 9,
+     "n_inst": 9,
+     "n_eff": 9,
+     "clash": 7,
+     "hit": 0,
+     "neither": 2,
+     "other_clash": 0,
+     "p_clash": 0.7778,
+     "p_hit": 0.0,
+     "p_clash_lb": 0.4526,
+     "p_fail": 0.2992
     }
    }
   },
   "Song Pilgrim 01|EN_SLASH|down": {
-   "n": 108,
+   "n": 93,
+   "n_inst": 91,
+   "n_eff": 91,
    "clash": 63,
-   "hit": 2,
-   "neither": 38,
-   "other_clash": 5,
-   "p_hit": 0.0185,
-   "p_fail": 0.065,
-   "by_crest": {
-    "Reaper": {
-     "clash": 63,
-     "hit": 2,
-     "neither": 37,
-     "other_clash": 5
+   "hit": 0,
+   "neither": 26,
+   "other_clash": 4,
+   "p_clash": 0.6774,
+   "p_hit": 0.0,
+   "p_clash_lb": 0.5759,
+   "p_fail": 0.0405,
+   "states": {
+    "Attack End": {
+     "clash": 0,
+     "hit": 1,
+     "neither": 2,
+     "other_clash": 1,
+     "clash_state": false
     },
-    "Wanderer": {
+    "Slash Antic": {
+     "clash": 0,
+     "hit": 0,
+     "neither": 7,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Slash1 2": {
+     "clash": 8,
+     "hit": 0,
+     "neither": 5,
+     "other_clash": 0,
+     "clash_state": true
+    },
+    "Slash1 Recover": {
      "clash": 0,
      "hit": 0,
      "neither": 1,
-     "other_clash": 0
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Slash1": {
+     "clash": 55,
+     "hit": 0,
+     "neither": 21,
+     "other_clash": 4,
+     "clash_state": true
+    }
+   },
+   "by_crest": {
+    "Reaper": {
+     "n": 93,
+     "n_inst": 91,
+     "n_eff": 91,
+     "clash": 63,
+     "hit": 0,
+     "neither": 26,
+     "other_clash": 4,
+     "p_clash": 0.6774,
+     "p_hit": 0.0,
+     "p_clash_lb": 0.5759,
+     "p_fail": 0.0405
     }
    }
   },
   "Song Pilgrim 01|EN_SLASH|side": {
-   "n": 46,
-   "clash": 26,
-   "hit": 7,
-   "neither": 13,
-   "other_clash": 0,
-   "p_hit": 0.1522,
-   "p_fail": 0.2822,
+   "n": 82,
+   "n_inst": 79,
+   "n_eff": 79,
+   "clash": 47,
+   "hit": 4,
+   "neither": 29,
+   "other_clash": 2,
+   "p_clash": 0.5732,
+   "p_hit": 0.0488,
+   "p_clash_lb": 0.4632,
+   "p_fail": 0.1206,
+   "states": {
+    "Attack End": {
+     "clash": 0,
+     "hit": 3,
+     "neither": 1,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Slash Antic": {
+     "clash": 0,
+     "hit": 2,
+     "neither": 2,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Slash1 2": {
+     "clash": 31,
+     "hit": 1,
+     "neither": 11,
+     "other_clash": 2,
+     "clash_state": true
+    },
+    "Slash1 Recover": {
+     "clash": 0,
+     "hit": 0,
+     "neither": 1,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Slash1": {
+     "clash": 16,
+     "hit": 3,
+     "neither": 18,
+     "other_clash": 0,
+     "clash_state": true
+    }
+   },
    "by_crest": {
     "Reaper": {
-     "clash": 23,
-     "hit": 7,
-     "neither": 13,
-     "other_clash": 0
+     "n": 69,
+     "n_inst": 66,
+     "n_eff": 66,
+     "clash": 36,
+     "hit": 4,
+     "neither": 27,
+     "other_clash": 2,
+     "p_clash": 0.5217,
+     "p_hit": 0.058,
+     "p_clash_lb": 0.4034,
+     "p_fail": 0.1422
     },
     "Wanderer": {
-     "clash": 3,
+     "n": 13,
+     "n_inst": 13,
+     "n_eff": 13,
+     "clash": 11,
      "hit": 0,
-     "neither": 0,
-     "other_clash": 0
+     "neither": 2,
+     "other_clash": 0,
+     "p_clash": 0.8462,
+     "p_hit": 0.0,
+     "p_clash_lb": 0.5776,
+     "p_fail": 0.2281
     }
    }
   },
   "Song Pilgrim 03|CH_JUMP|down": {
-   "n": 18,
+   "n": 16,
+   "n_inst": 16,
+   "n_eff": 16,
    "clash": 4,
    "hit": 2,
-   "neither": 11,
+   "neither": 9,
    "other_clash": 1,
-   "p_hit": 0.1111,
-   "p_fail": 0.328,
-   "by_crest": {
-    "Reaper": {
-     "clash": 4,
-     "hit": 2,
-     "neither": 10,
-     "other_clash": 1
-    },
-    "Wanderer": {
+   "p_clash": 0.25,
+   "p_hit": 0.125,
+   "p_clash_lb": 0.1018,
+   "p_fail": 0.3602,
+   "states": {
+    "Jump Rise": {
      "clash": 0,
      "hit": 0,
      "neither": 1,
-     "other_clash": 0
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Jump Spin": {
+     "clash": 4,
+     "hit": 2,
+     "neither": 9,
+     "other_clash": 1,
+     "clash_state": true
+    }
+   },
+   "by_crest": {
+    "Reaper": {
+     "n": 15,
+     "n_inst": 15,
+     "n_eff": 15,
+     "clash": 4,
+     "hit": 2,
+     "neither": 8,
+     "other_clash": 1,
+     "p_clash": 0.2667,
+     "p_hit": 0.1333,
+     "p_clash_lb": 0.109,
+     "p_fail": 0.3788
+    },
+    "Wanderer": {
+     "n": 1,
+     "n_inst": 1,
+     "n_eff": 1,
+     "clash": 0,
+     "hit": 0,
+     "neither": 1,
+     "other_clash": 0,
+     "p_clash": 0.0,
+     "p_hit": 0.0,
+     "p_clash_lb": 0.0,
+     "p_fail": 0.7935
     }
    }
   },
   "Song Pilgrim 03|CH_JUMP|side": {
-   "n": 46,
-   "clash": 4,
-   "hit": 7,
-   "neither": 34,
-   "other_clash": 1,
-   "p_hit": 0.1522,
-   "p_fail": 0.2822,
+   "n": 87,
+   "n_inst": 86,
+   "n_eff": 86,
+   "clash": 6,
+   "hit": 14,
+   "neither": 64,
+   "other_clash": 3,
+   "p_clash": 0.069,
+   "p_hit": 0.1609,
+   "p_clash_lb": 0.0319,
+   "p_fail": 0.2528,
+   "states": {
+    "Jump Rise": {
+     "clash": 0,
+     "hit": 0,
+     "neither": 1,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Jump Spin": {
+     "clash": 3,
+     "hit": 14,
+     "neither": 63,
+     "other_clash": 3,
+     "clash_state": true
+    },
+    "Spin Slash End": {
+     "clash": 0,
+     "hit": 0,
+     "neither": 2,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Spin Slash": {
+     "clash": 3,
+     "hit": 0,
+     "neither": 1,
+     "other_clash": 0,
+     "clash_state": true
+    }
+   },
    "by_crest": {
     "Reaper": {
-     "clash": 2,
-     "hit": 6,
-     "neither": 30,
-     "other_clash": 1
+     "n": 73,
+     "n_inst": 73,
+     "n_eff": 73,
+     "clash": 5,
+     "hit": 10,
+     "neither": 56,
+     "other_clash": 2,
+     "p_clash": 0.0685,
+     "p_hit": 0.137,
+     "p_clash_lb": 0.0296,
+     "p_fail": 0.2341
     },
     "Wanderer": {
-     "clash": 2,
-     "hit": 1,
-     "neither": 4,
-     "other_clash": 0
+     "n": 14,
+     "n_inst": 13,
+     "n_eff": 13,
+     "clash": 1,
+     "hit": 4,
+     "neither": 8,
+     "other_clash": 1,
+     "p_clash": 0.0714,
+     "p_hit": 0.2857,
+     "p_clash_lb": 0.0121,
+     "p_fail": 0.5558
     }
    }
   },
   "Song Pilgrim 03|CH_JUMP|up": {
-   "n": 22,
-   "clash": 8,
-   "hit": 5,
-   "neither": 9,
+   "n": 44,
+   "n_inst": 44,
+   "n_eff": 44,
+   "clash": 6,
+   "hit": 6,
+   "neither": 32,
    "other_clash": 0,
-   "p_hit": 0.2273,
-   "p_fail": 0.4344,
+   "p_clash": 0.1364,
+   "p_hit": 0.1364,
+   "p_clash_lb": 0.064,
+   "p_fail": 0.2671,
+   "states": {
+    "Jump Spin": {
+     "clash": 6,
+     "hit": 6,
+     "neither": 32,
+     "other_clash": 0,
+     "clash_state": true
+    },
+    "Spin Slash End": {
+     "clash": 0,
+     "hit": 3,
+     "neither": 0,
+     "other_clash": 0,
+     "clash_state": false
+    }
+   },
    "by_crest": {
     "Reaper": {
-     "clash": 4,
-     "hit": 5,
-     "neither": 8,
-     "other_clash": 0
+     "n": 30,
+     "n_inst": 30,
+     "n_eff": 30,
+     "clash": 5,
+     "hit": 4,
+     "neither": 21,
+     "other_clash": 0,
+     "p_clash": 0.1667,
+     "p_hit": 0.1333,
+     "p_clash_lb": 0.0734,
+     "p_fail": 0.2968
     },
     "Wanderer": {
-     "clash": 4,
-     "hit": 0,
-     "neither": 1,
-     "other_clash": 0
+     "n": 14,
+     "n_inst": 14,
+     "n_eff": 14,
+     "clash": 1,
+     "hit": 2,
+     "neither": 11,
+     "other_clash": 0,
+     "p_clash": 0.0714,
+     "p_hit": 0.1429,
+     "p_clash_lb": 0.0127,
+     "p_fail": 0.3994
     }
    }
   },
   "Song Pilgrim 03|CH_SLASH|down": {
-   "n": 26,
+   "n": 24,
+   "n_inst": 23,
+   "n_eff": 23,
    "clash": 10,
-   "hit": 3,
-   "neither": 10,
+   "hit": 2,
+   "neither": 9,
    "other_clash": 3,
-   "p_hit": 0.1154,
-   "p_fail": 0.2898,
+   "p_clash": 0.4167,
+   "p_hit": 0.0833,
+   "p_clash_lb": 0.2417,
+   "p_fail": 0.2633,
+   "states": {
+    "ComboSlash 1": {
+     "clash": 3,
+     "hit": 0,
+     "neither": 2,
+     "other_clash": 1,
+     "clash_state": true
+    },
+    "Slash 1": {
+     "clash": 5,
+     "hit": 2,
+     "neither": 4,
+     "other_clash": 1,
+     "clash_state": true
+    },
+    "Slash 2": {
+     "clash": 2,
+     "hit": 0,
+     "neither": 3,
+     "other_clash": 1,
+     "clash_state": true
+    },
+    "Slash Antic": {
+     "clash": 0,
+     "hit": 1,
+     "neither": 0,
+     "other_clash": 0,
+     "clash_state": false
+    }
+   },
    "by_crest": {
     "Reaper": {
+     "n": 24,
+     "n_inst": 23,
+     "n_eff": 23,
      "clash": 10,
-     "hit": 3,
-     "neither": 10,
-     "other_clash": 3
+     "hit": 2,
+     "neither": 9,
+     "other_clash": 3,
+     "p_clash": 0.4167,
+     "p_hit": 0.0833,
+     "p_clash_lb": 0.2417,
+     "p_fail": 0.2633
     }
    }
   },
   "Song Pilgrim 03|CH_SLASH|side": {
-   "n": 140,
-   "clash": 68,
-   "hit": 13,
-   "neither": 58,
-   "other_clash": 1,
-   "p_hit": 0.0929,
-   "p_fail": 0.1524,
+   "n": 148,
+   "n_inst": 141,
+   "n_eff": 141,
+   "clash": 90,
+   "hit": 12,
+   "neither": 44,
+   "other_clash": 2,
+   "p_clash": 0.6081,
+   "p_hit": 0.0811,
+   "p_clash_lb": 0.5257,
+   "p_fail": 0.138,
+   "states": {
+    "ComboSlash 1": {
+     "clash": 29,
+     "hit": 3,
+     "neither": 23,
+     "other_clash": 0,
+     "clash_state": true
+    },
+    "ComboSlash 3": {
+     "clash": 0,
+     "hit": 0,
+     "neither": 1,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "ComboSlash Antic1": {
+     "clash": 0,
+     "hit": 0,
+     "neither": 4,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "ComboSlash Antic2": {
+     "clash": 2,
+     "hit": 0,
+     "neither": 2,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Slash 1": {
+     "clash": 48,
+     "hit": 9,
+     "neither": 10,
+     "other_clash": 1,
+     "clash_state": true
+    },
+    "Slash 2": {
+     "clash": 13,
+     "hit": 0,
+     "neither": 11,
+     "other_clash": 1,
+     "clash_state": true
+    },
+    "Slash Antic Jump": {
+     "clash": 1,
+     "hit": 2,
+     "neither": 0,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Slash Antic": {
+     "clash": 0,
+     "hit": 2,
+     "neither": 5,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Slash Recover": {
+     "clash": 0,
+     "hit": 0,
+     "neither": 5,
+     "other_clash": 0,
+     "clash_state": false
+    }
+   },
    "by_crest": {
     "Reaper": {
-     "clash": 64,
-     "hit": 11,
-     "neither": 54,
-     "other_clash": 1
+     "n": 125,
+     "n_inst": 119,
+     "n_eff": 119,
+     "clash": 78,
+     "hit": 8,
+     "neither": 38,
+     "other_clash": 1,
+     "p_clash": 0.624,
+     "p_hit": 0.064,
+     "p_clash_lb": 0.5344,
+     "p_fail": 0.123
     },
     "Wanderer": {
-     "clash": 4,
-     "hit": 2,
-     "neither": 4,
-     "other_clash": 0
+     "n": 23,
+     "n_inst": 22,
+     "n_eff": 22,
+     "clash": 12,
+     "hit": 4,
+     "neither": 6,
+     "other_clash": 1,
+     "p_clash": 0.5217,
+     "p_hit": 0.1739,
+     "p_clash_lb": 0.3259,
+     "p_fail": 0.3764
     }
    }
   },
   "Song Pilgrim 03|CH_WHIP|down": {
-   "n": 20,
+   "n": 17,
+   "n_inst": 17,
+   "n_eff": 17,
    "clash": 12,
    "hit": 1,
-   "neither": 7,
+   "neither": 4,
    "other_clash": 0,
-   "p_hit": 0.05,
-   "p_fail": 0.2361,
+   "p_clash": 0.7059,
+   "p_hit": 0.0588,
+   "p_clash_lb": 0.4687,
+   "p_fail": 0.2698,
+   "states": {
+    "Whip 1": {
+     "clash": 1,
+     "hit": 0,
+     "neither": 0,
+     "other_clash": 0,
+     "clash_state": true
+    },
+    "Whip 2": {
+     "clash": 2,
+     "hit": 1,
+     "neither": 0,
+     "other_clash": 0,
+     "clash_state": true
+    },
+    "Whip 3": {
+     "clash": 2,
+     "hit": 0,
+     "neither": 0,
+     "other_clash": 0,
+     "clash_state": true
+    },
+    "Whip 4": {
+     "clash": 7,
+     "hit": 0,
+     "neither": 4,
+     "other_clash": 0,
+     "clash_state": true
+    },
+    "Whip 6": {
+     "clash": 0,
+     "hit": 0,
+     "neither": 1,
+     "other_clash": 0,
+     "clash_state": false
+    }
+   },
    "by_crest": {
     "Reaper": {
+     "n": 17,
+     "n_inst": 17,
+     "n_eff": 17,
      "clash": 12,
      "hit": 1,
-     "neither": 7,
-     "other_clash": 0
+     "neither": 4,
+     "other_clash": 0,
+     "p_clash": 0.7059,
+     "p_hit": 0.0588,
+     "p_clash_lb": 0.4687,
+     "p_fail": 0.2698
     }
    }
   },
   "Song Pilgrim 03|CH_WHIP|side": {
-   "n": 57,
-   "clash": 36,
-   "hit": 2,
+   "n": 111,
+   "n_inst": 109,
+   "n_eff": 109,
+   "clash": 78,
+   "hit": 12,
    "neither": 18,
-   "other_clash": 1,
-   "p_hit": 0.0351,
-   "p_fail": 0.1192,
+   "other_clash": 3,
+   "p_clash": 0.7027,
+   "p_hit": 0.1081,
+   "p_clash_lb": 0.6112,
+   "p_fail": 0.1803,
+   "states": {
+    "Whip 1": {
+     "clash": 47,
+     "hit": 10,
+     "neither": 3,
+     "other_clash": 2,
+     "clash_state": true
+    },
+    "Whip 2": {
+     "clash": 17,
+     "hit": 1,
+     "neither": 7,
+     "other_clash": 1,
+     "clash_state": true
+    },
+    "Whip 3": {
+     "clash": 7,
+     "hit": 0,
+     "neither": 2,
+     "other_clash": 0,
+     "clash_state": true
+    },
+    "Whip 4": {
+     "clash": 7,
+     "hit": 1,
+     "neither": 6,
+     "other_clash": 0,
+     "clash_state": true
+    },
+    "Whip 5": {
+     "clash": 0,
+     "hit": 0,
+     "neither": 2,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Whip Antic": {
+     "clash": 0,
+     "hit": 0,
+     "neither": 1,
+     "other_clash": 0,
+     "clash_state": false
+    }
+   },
    "by_crest": {
     "Reaper": {
-     "clash": 33,
-     "hit": 2,
-     "neither": 18,
-     "other_clash": 1
+     "n": 87,
+     "n_inst": 85,
+     "n_eff": 85,
+     "clash": 57,
+     "hit": 11,
+     "neither": 17,
+     "other_clash": 2,
+     "p_clash": 0.6552,
+     "p_hit": 0.1264,
+     "p_clash_lb": 0.5494,
+     "p_fail": 0.2136
     },
     "Wanderer": {
-     "clash": 3,
-     "hit": 0,
-     "neither": 0,
-     "other_clash": 0
+     "n": 24,
+     "n_inst": 24,
+     "n_eff": 24,
+     "clash": 21,
+     "hit": 1,
+     "neither": 1,
+     "other_clash": 1,
+     "p_clash": 0.875,
+     "p_hit": 0.0417,
+     "p_clash_lb": 0.69,
+     "p_fail": 0.2024
     }
    }
   },
-  "Song Pilgrim Maestro|MA_DEFEND|up": {
-   "n": 12,
-   "clash": 0,
-   "hit": 1,
-   "neither": 11,
+  "Song Pilgrim 03|CH_WHIP|up": {
+   "n": 19,
+   "n_inst": 19,
+   "n_eff": 19,
+   "clash": 3,
+   "hit": 7,
+   "neither": 9,
    "other_clash": 0,
-   "p_hit": 0.0833,
-   "p_fail": 0.3539,
-   "by_crest": {
-    "Reaper": {
+   "p_clash": 0.1579,
+   "p_hit": 0.3684,
+   "p_clash_lb": 0.0552,
+   "p_fail": 0.5896,
+   "states": {
+    "Whip 1": {
+     "clash": 1,
+     "hit": 4,
+     "neither": 3,
+     "other_clash": 0,
+     "clash_state": true
+    },
+    "Whip 2": {
+     "clash": 2,
+     "hit": 2,
+     "neither": 4,
+     "other_clash": 0,
+     "clash_state": true
+    },
+    "Whip 3": {
      "clash": 0,
      "hit": 1,
-     "neither": 11,
-     "other_clash": 0
+     "neither": 1,
+     "other_clash": 0,
+     "clash_state": true
+    },
+    "Whip 4": {
+     "clash": 0,
+     "hit": 0,
+     "neither": 1,
+     "other_clash": 0,
+     "clash_state": true
+    },
+    "Whip Antic": {
+     "clash": 0,
+     "hit": 1,
+     "neither": 0,
+     "other_clash": 0,
+     "clash_state": false
+    }
+   },
+   "by_crest": {
+    "Reaper": {
+     "n": 17,
+     "n_inst": 17,
+     "n_eff": 17,
+     "clash": 2,
+     "hit": 7,
+     "neither": 8,
+     "other_clash": 0,
+     "p_clash": 0.1176,
+     "p_hit": 0.4118,
+     "p_clash_lb": 0.0329,
+     "p_fail": 0.6399
+    },
+    "Wanderer": {
+     "n": 2,
+     "n_inst": 2,
+     "n_eff": 2,
+     "clash": 1,
+     "hit": 0,
+     "neither": 1,
+     "other_clash": 0,
+     "p_clash": 0.5,
+     "p_hit": 0.0,
+     "p_clash_lb": 0.0945,
+     "p_fail": 0.6576
     }
    }
   },
   "Song Pilgrim Maestro|MA_SLASH|side": {
-   "n": 65,
+   "n": 46,
+   "n_inst": 45,
+   "n_eff": 45,
    "clash": 16,
-   "hit": 7,
-   "neither": 42,
+   "hit": 5,
+   "neither": 25,
    "other_clash": 0,
-   "p_hit": 0.1077,
-   "p_fail": 0.206,
+   "p_clash": 0.3478,
+   "p_hit": 0.1087,
+   "p_clash_lb": 0.2257,
+   "p_fail": 0.232,
+   "states": {
+    "Fire Antic": {
+     "clash": 0,
+     "hit": 2,
+     "neither": 9,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Slash 1": {
+     "clash": 6,
+     "hit": 4,
+     "neither": 12,
+     "other_clash": 0,
+     "clash_state": true
+    },
+    "Slash 2": {
+     "clash": 10,
+     "hit": 1,
+     "neither": 13,
+     "other_clash": 0,
+     "clash_state": true
+    },
+    "Slash Recover F": {
+     "clash": 0,
+     "hit": 0,
+     "neither": 7,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Slash Recover": {
+     "clash": 0,
+     "hit": 0,
+     "neither": 1,
+     "other_clash": 0,
+     "clash_state": false
+    }
+   },
    "by_crest": {
     "Reaper": {
+     "n": 46,
+     "n_inst": 45,
+     "n_eff": 45,
      "clash": 16,
-     "hit": 7,
-     "neither": 42,
-     "other_clash": 0
+     "hit": 5,
+     "neither": 25,
+     "other_clash": 0,
+     "p_clash": 0.3478,
+     "p_hit": 0.1087,
+     "p_clash_lb": 0.2257,
+     "p_fail": 0.232
     }
    }
   },
   "Song Pilgrim Maestro|MA_SLASH|up": {
-   "n": 115,
+   "n": 70,
+   "n_inst": 69,
+   "n_eff": 69,
    "clash": 33,
-   "hit": 5,
-   "neither": 77,
+   "hit": 0,
+   "neither": 37,
    "other_clash": 0,
-   "p_hit": 0.0435,
-   "p_fail": 0.0978,
+   "p_clash": 0.4714,
+   "p_hit": 0.0,
+   "p_clash_lb": 0.3583,
+   "p_fail": 0.0527,
+   "states": {
+    "Fire Antic": {
+     "clash": 0,
+     "hit": 2,
+     "neither": 27,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Slash 1": {
+     "clash": 14,
+     "hit": 0,
+     "neither": 14,
+     "other_clash": 0,
+     "clash_state": true
+    },
+    "Slash 2": {
+     "clash": 19,
+     "hit": 0,
+     "neither": 23,
+     "other_clash": 0,
+     "clash_state": true
+    },
+    "Slash End": {
+     "clash": 0,
+     "hit": 0,
+     "neither": 7,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Slash Recover F": {
+     "clash": 0,
+     "hit": 2,
+     "neither": 4,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Slash Recover": {
+     "clash": 0,
+     "hit": 1,
+     "neither": 2,
+     "other_clash": 0,
+     "clash_state": false
+    }
+   },
    "by_crest": {
     "Reaper": {
+     "n": 69,
+     "n_inst": 68,
+     "n_eff": 68,
      "clash": 33,
-     "hit": 5,
-     "neither": 76,
-     "other_clash": 0
+     "hit": 0,
+     "neither": 36,
+     "other_clash": 0,
+     "p_clash": 0.4783,
+     "p_hit": 0.0,
+     "p_clash_lb": 0.3639,
+     "p_fail": 0.0535
     },
     "Wanderer": {
+     "n": 1,
+     "n_inst": 1,
+     "n_eff": 1,
      "clash": 0,
      "hit": 0,
      "neither": 1,
-     "other_clash": 0
+     "other_clash": 0,
+     "p_clash": 0.0,
+     "p_hit": 0.0,
+     "p_clash_lb": 0.0,
+     "p_fail": 0.7935
     }
    }
   },
   "Song Reed|RE_DEFEND|down": {
-   "n": 105,
+   "n": 90,
+   "n_inst": 90,
+   "n_eff": 90,
    "clash": 13,
-   "hit": 7,
-   "neither": 83,
-   "other_clash": 2,
-   "p_hit": 0.0667,
-   "p_fail": 0.1313,
+   "hit": 15,
+   "neither": 61,
+   "other_clash": 1,
+   "p_clash": 0.1444,
+   "p_hit": 0.1667,
+   "p_clash_lb": 0.0864,
+   "p_fail": 0.2569,
+   "states": {
+    "Block": {
+     "clash": 0,
+     "hit": 3,
+     "neither": 4,
+     "other_clash": 1,
+     "clash_state": false
+    },
+    "Defend End": {
+     "clash": 0,
+     "hit": 1,
+     "neither": 1,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Defend Start": {
+     "clash": 0,
+     "hit": 0,
+     "neither": 1,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Defend": {
+     "clash": 0,
+     "hit": 1,
+     "neither": 1,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Parry Slash End": {
+     "clash": 0,
+     "hit": 0,
+     "neither": 1,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Parry Slash": {
+     "clash": 13,
+     "hit": 15,
+     "neither": 61,
+     "other_clash": 1,
+     "clash_state": true
+    }
+   },
    "by_crest": {
     "Reaper": {
+     "n": 90,
+     "n_inst": 90,
+     "n_eff": 90,
      "clash": 13,
-     "hit": 7,
-     "neither": 83,
-     "other_clash": 2
+     "hit": 15,
+     "neither": 61,
+     "other_clash": 1,
+     "p_clash": 0.1444,
+     "p_hit": 0.1667,
+     "p_clash_lb": 0.0864,
+     "p_fail": 0.2569
     }
    }
   },
   "Song Reed|RE_DEFEND|side": {
-   "n": 183,
+   "n": 99,
+   "n_inst": 98,
+   "n_eff": 98,
    "clash": 73,
-   "hit": 26,
-   "neither": 83,
+   "hit": 5,
+   "neither": 20,
    "other_clash": 1,
-   "p_hit": 0.1421,
-   "p_fail": 0.2,
+   "p_clash": 0.7374,
+   "p_hit": 0.0505,
+   "p_clash_lb": 0.6425,
+   "p_fail": 0.1132,
+   "states": {
+    "Block": {
+     "clash": 0,
+     "hit": 11,
+     "neither": 47,
+     "other_clash": 2,
+     "clash_state": false
+    },
+    "Defend End": {
+     "clash": 0,
+     "hit": 1,
+     "neither": 10,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Defend Start": {
+     "clash": 0,
+     "hit": 0,
+     "neither": 1,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Defend": {
+     "clash": 0,
+     "hit": 14,
+     "neither": 3,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Parry Slash End": {
+     "clash": 0,
+     "hit": 0,
+     "neither": 1,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Parry Slash": {
+     "clash": 73,
+     "hit": 5,
+     "neither": 20,
+     "other_clash": 1,
+     "clash_state": true
+    }
+   },
    "by_crest": {
     "Reaper": {
-     "clash": 67,
-     "hit": 26,
-     "neither": 79,
-     "other_clash": 1
+     "n": 96,
+     "n_inst": 95,
+     "n_eff": 95,
+     "clash": 72,
+     "hit": 5,
+     "neither": 18,
+     "other_clash": 1,
+     "p_clash": 0.75,
+     "p_hit": 0.0521,
+     "p_clash_lb": 0.6544,
+     "p_fail": 0.1166
     },
     "Wanderer": {
-     "clash": 6,
+     "n": 3,
+     "n_inst": 3,
+     "n_eff": 3,
+     "clash": 1,
      "hit": 0,
-     "neither": 4,
-     "other_clash": 0
+     "neither": 2,
+     "other_clash": 0,
+     "p_clash": 0.3333,
+     "p_hit": 0.0,
+     "p_clash_lb": 0.0615,
+     "p_fail": 0.5615
     }
    }
   },
   "Song Reed|RE_DEFEND|up": {
-   "n": 97,
-   "clash": 35,
-   "hit": 37,
-   "neither": 22,
+   "n": 36,
+   "n_inst": 36,
+   "n_eff": 36,
+   "clash": 29,
+   "hit": 2,
+   "neither": 2,
    "other_clash": 3,
-   "p_hit": 0.3814,
-   "p_fail": 0.4809,
+   "p_clash": 0.8056,
+   "p_hit": 0.0556,
+   "p_clash_lb": 0.6497,
+   "p_fail": 0.1814,
+   "states": {
+    "Block": {
+     "clash": 1,
+     "hit": 26,
+     "neither": 11,
+     "other_clash": 1,
+     "clash_state": false
+    },
+    "Defend End": {
+     "clash": 0,
+     "hit": 0,
+     "neither": 3,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Defend": {
+     "clash": 0,
+     "hit": 12,
+     "neither": 4,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Multihit End": {
+     "clash": 0,
+     "hit": 0,
+     "neither": 1,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Parry Slash": {
+     "clash": 29,
+     "hit": 2,
+     "neither": 2,
+     "other_clash": 3,
+     "clash_state": true
+    }
+   },
    "by_crest": {
     "Reaper": {
-     "clash": 28,
-     "hit": 34,
-     "neither": 20,
-     "other_clash": 3
+     "n": 33,
+     "n_inst": 33,
+     "n_eff": 33,
+     "clash": 27,
+     "hit": 1,
+     "neither": 2,
+     "other_clash": 3,
+     "p_clash": 0.8182,
+     "p_hit": 0.0303,
+     "p_clash_lb": 0.6561,
+     "p_fail": 0.1532
     },
     "Wanderer": {
-     "clash": 7,
-     "hit": 3,
-     "neither": 2,
-     "other_clash": 0
+     "n": 3,
+     "n_inst": 3,
+     "n_eff": 3,
+     "clash": 2,
+     "hit": 1,
+     "neither": 0,
+     "other_clash": 0,
+     "p_clash": 0.6667,
+     "p_hit": 0.3333,
+     "p_clash_lb": 0.2077,
+     "p_fail": 0.7923
     }
    }
   },
   "Song Reed|RE_STAB|down": {
-   "n": 59,
+   "n": 35,
+   "n_inst": 35,
+   "n_eff": 35,
    "clash": 10,
-   "hit": 23,
-   "neither": 25,
-   "other_clash": 1,
-   "p_hit": 0.3898,
-   "p_fail": 0.5173,
-   "by_crest": {
-    "Reaper": {
-     "clash": 10,
-     "hit": 23,
-     "neither": 24,
-     "other_clash": 1
+   "hit": 13,
+   "neither": 12,
+   "other_clash": 0,
+   "p_clash": 0.2857,
+   "p_hit": 0.3714,
+   "p_clash_lb": 0.1633,
+   "p_fail": 0.5366,
+   "states": {
+    "Stab 1": {
+     "clash": 6,
+     "hit": 12,
+     "neither": 8,
+     "other_clash": 0,
+     "clash_state": true
     },
-    "Wanderer": {
+    "Stab 3": {
+     "clash": 3,
+     "hit": 1,
+     "neither": 0,
+     "other_clash": 0,
+     "clash_state": true
+    },
+    "Stab 4": {
      "clash": 0,
      "hit": 0,
      "neither": 1,
-     "other_clash": 0
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Stab 5": {
+     "clash": 1,
+     "hit": 0,
+     "neither": 4,
+     "other_clash": 0,
+     "clash_state": true
+    },
+    "Stab Antic": {
+     "clash": 0,
+     "hit": 7,
+     "neither": 3,
+     "other_clash": 1,
+     "clash_state": false
+    },
+    "Stab End": {
+     "clash": 0,
+     "hit": 1,
+     "neither": 4,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Stab Recover": {
+     "clash": 0,
+     "hit": 1,
+     "neither": 1,
+     "other_clash": 0,
+     "clash_state": false
+    }
+   },
+   "by_crest": {
+    "Reaper": {
+     "n": 34,
+     "n_inst": 34,
+     "n_eff": 34,
+     "clash": 10,
+     "hit": 13,
+     "neither": 11,
+     "other_clash": 0,
+     "p_clash": 0.2941,
+     "p_hit": 0.3824,
+     "p_clash_lb": 0.1683,
+     "p_fail": 0.5496
+    },
+    "Wanderer": {
+     "n": 1,
+     "n_inst": 1,
+     "n_eff": 1,
+     "clash": 0,
+     "hit": 0,
+     "neither": 1,
+     "other_clash": 0,
+     "p_clash": 0.0,
+     "p_hit": 0.0,
+     "p_clash_lb": 0.0,
+     "p_fail": 0.7935
     }
    }
   },
   "Song Reed|RE_STAB|side": {
-   "n": 580,
-   "clash": 217,
-   "hit": 151,
-   "neither": 207,
-   "other_clash": 5,
-   "p_hit": 0.2603,
-   "p_fail": 0.2976,
+   "n": 577,
+   "n_inst": 535,
+   "n_eff": 535,
+   "clash": 249,
+   "hit": 131,
+   "neither": 183,
+   "other_clash": 14,
+   "p_clash": 0.4315,
+   "p_hit": 0.227,
+   "p_clash_lb": 0.3902,
+   "p_fail": 0.2644,
+   "states": {
+    "Stab 1": {
+     "clash": 101,
+     "hit": 53,
+     "neither": 71,
+     "other_clash": 9,
+     "clash_state": true
+    },
+    "Stab 2": {
+     "clash": 0,
+     "hit": 27,
+     "neither": 4,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Stab 3": {
+     "clash": 91,
+     "hit": 71,
+     "neither": 74,
+     "other_clash": 4,
+     "clash_state": true
+    },
+    "Stab 4": {
+     "clash": 1,
+     "hit": 1,
+     "neither": 7,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Stab 5": {
+     "clash": 57,
+     "hit": 7,
+     "neither": 38,
+     "other_clash": 1,
+     "clash_state": true
+    },
+    "Stab Antic": {
+     "clash": 0,
+     "hit": 5,
+     "neither": 11,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Stab End": {
+     "clash": 0,
+     "hit": 0,
+     "neither": 13,
+     "other_clash": 1,
+     "clash_state": false
+    },
+    "Stab Recover": {
+     "clash": 0,
+     "hit": 0,
+     "neither": 6,
+     "other_clash": 0,
+     "clash_state": false
+    }
+   },
    "by_crest": {
     "Reaper": {
-     "clash": 213,
-     "hit": 149,
-     "neither": 203,
-     "other_clash": 5
+     "n": 547,
+     "n_inst": 508,
+     "n_eff": 508,
+     "clash": 236,
+     "hit": 122,
+     "neither": 178,
+     "other_clash": 11,
+     "p_clash": 0.4314,
+     "p_hit": 0.223,
+     "p_clash_lb": 0.389,
+     "p_fail": 0.2612
     },
     "Wanderer": {
-     "clash": 4,
-     "hit": 2,
-     "neither": 4,
-     "other_clash": 0
+     "n": 30,
+     "n_inst": 27,
+     "n_eff": 27,
+     "clash": 13,
+     "hit": 9,
+     "neither": 5,
+     "other_clash": 3,
+     "p_clash": 0.4333,
+     "p_hit": 0.3,
+     "p_clash_lb": 0.2666,
+     "p_fail": 0.4886
     }
    }
   },
   "Song Reed|RE_STAB|up": {
-   "n": 139,
-   "clash": 45,
-   "hit": 15,
-   "neither": 75,
+   "n": 121,
+   "n_inst": 117,
+   "n_eff": 117,
+   "clash": 52,
+   "hit": 12,
+   "neither": 53,
    "other_clash": 4,
-   "p_hit": 0.1079,
-   "p_fail": 0.1704,
-   "by_crest": {
-    "Reaper": {
-     "clash": 42,
-     "hit": 15,
-     "neither": 69,
-     "other_clash": 4
+   "p_clash": 0.4298,
+   "p_hit": 0.0992,
+   "p_clash_lb": 0.3437,
+   "p_fail": 0.1667,
+   "states": {
+    "Stab 1": {
+     "clash": 30,
+     "hit": 8,
+     "neither": 26,
+     "other_clash": 2,
+     "clash_state": true
     },
-    "Wanderer": {
-     "clash": 3,
-     "hit": 0,
-     "neither": 6,
-     "other_clash": 0
-    }
-   }
-  },
-  "Song Reed|RE_THROW|side": {
-   "n": 15,
-   "clash": 0,
-   "hit": 4,
-   "neither": 11,
-   "other_clash": 0,
-   "p_hit": 0.2667,
-   "p_fail": 0.5195,
-   "by_crest": {
-    "Reaper": {
-     "clash": 0,
-     "hit": 4,
-     "neither": 11,
-     "other_clash": 0
-    }
-   }
-  },
-  "Song Reed|RE_THROW|up": {
-   "n": 19,
-   "clash": 0,
-   "hit": 6,
-   "neither": 13,
-   "other_clash": 0,
-   "p_hit": 0.3158,
-   "p_fail": 0.5399,
-   "by_crest": {
-    "Reaper": {
-     "clash": 0,
-     "hit": 6,
-     "neither": 12,
-     "other_clash": 0
-    },
-    "Wanderer": {
+    "Stab 2": {
      "clash": 0,
      "hit": 0,
      "neither": 1,
-     "other_clash": 0
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Stab 3": {
+     "clash": 16,
+     "hit": 4,
+     "neither": 16,
+     "other_clash": 2,
+     "clash_state": true
+    },
+    "Stab 5": {
+     "clash": 6,
+     "hit": 0,
+     "neither": 11,
+     "other_clash": 0,
+     "clash_state": true
+    },
+    "Stab Antic": {
+     "clash": 0,
+     "hit": 3,
+     "neither": 16,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Stab End": {
+     "clash": 0,
+     "hit": 2,
+     "neither": 3,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Stab Recover": {
+     "clash": 0,
+     "hit": 0,
+     "neither": 10,
+     "other_clash": 0,
+     "clash_state": false
+    }
+   },
+   "by_crest": {
+    "Reaper": {
+     "n": 111,
+     "n_inst": 107,
+     "n_eff": 107,
+     "clash": 46,
+     "hit": 11,
+     "neither": 50,
+     "other_clash": 4,
+     "p_clash": 0.4144,
+     "p_hit": 0.0991,
+     "p_clash_lb": 0.3256,
+     "p_fail": 0.1703
+    },
+    "Wanderer": {
+     "n": 10,
+     "n_inst": 10,
+     "n_eff": 10,
+     "clash": 6,
+     "hit": 1,
+     "neither": 3,
+     "other_clash": 0,
+     "p_clash": 0.6,
+     "p_hit": 0.1,
+     "p_clash_lb": 0.3127,
+     "p_fail": 0.4042
     }
    }
   }
  },
  "left_out": {
   "Pilgrim 03 Song|CB_EVADE|side": {
-   "n": 9,
+   "n": 0,
+   "n_inst": 0,
+   "n_eff": 0,
    "clash": 0,
-   "hit": 3,
-   "neither": 6,
+   "hit": 0,
+   "neither": 0,
    "other_clash": 0,
-   "p_hit": 0.3333,
-   "p_fail": 0.6458,
-   "by_crest": {
-    "Reaper": {
+   "p_clash": 0.0,
+   "p_hit": 1.0,
+   "p_clash_lb": 0.0,
+   "p_fail": 1.0,
+   "states": {
+    "Evade Antic": {
      "clash": 0,
      "hit": 3,
-     "neither": 6,
-     "other_clash": 0
+     "neither": 3,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Evade": {
+     "clash": 0,
+     "hit": 0,
+     "neither": 3,
+     "other_clash": 0,
+     "clash_state": false
     }
    },
+   "by_crest": {},
    "why": "Bellbearer: the bell has the counter bit only (redirect, no clash)"
   },
   "Pilgrim 03 Song|CB_EVADE|up": {
-   "n": 11,
+   "n": 0,
+   "n_inst": 0,
+   "n_eff": 0,
    "clash": 0,
-   "hit": 2,
-   "neither": 9,
+   "hit": 0,
+   "neither": 0,
    "other_clash": 0,
-   "p_hit": 0.1818,
-   "p_fail": 0.477,
-   "by_crest": {
-    "Reaper": {
+   "p_clash": 0.0,
+   "p_hit": 1.0,
+   "p_clash_lb": 0.0,
+   "p_fail": 1.0,
+   "states": {
+    "Evade Antic": {
      "clash": 0,
-     "hit": 2,
-     "neither": 9,
-     "other_clash": 0
+     "hit": 1,
+     "neither": 6,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Evade": {
+     "clash": 0,
+     "hit": 1,
+     "neither": 3,
+     "other_clash": 0,
+     "clash_state": false
     }
    },
+   "by_crest": {},
    "why": "Bellbearer: the bell has the counter bit only (redirect, no clash)"
   },
   "Pilgrim 03 Song|CB_IDLE|down": {
-   "n": 10,
+   "n": 0,
+   "n_inst": 0,
+   "n_eff": 0,
    "clash": 0,
-   "hit": 6,
-   "neither": 2,
-   "other_clash": 2,
-   "p_hit": 0.6,
-   "p_fail": 0.8318,
-   "by_crest": {
-    "Reaper": {
+   "hit": 0,
+   "neither": 0,
+   "other_clash": 0,
+   "p_clash": 0.0,
+   "p_hit": 1.0,
+   "p_clash_lb": 0.0,
+   "p_fail": 1.0,
+   "states": {
+    "In Range": {
      "clash": 0,
      "hit": 6,
      "neither": 2,
-     "other_clash": 2
+     "other_clash": 2,
+     "clash_state": false
     }
    },
+   "by_crest": {},
    "why": "Bellbearer: the bell has the counter bit only (redirect, no clash)"
   },
   "Pilgrim 03 Song|CB_IDLE|side": {
-   "n": 30,
+   "n": 0,
+   "n_inst": 0,
+   "n_eff": 0,
    "clash": 0,
-   "hit": 13,
-   "neither": 17,
+   "hit": 0,
+   "neither": 0,
    "other_clash": 0,
-   "p_hit": 0.4333,
-   "p_fail": 0.608,
-   "by_crest": {
-    "Reaper": {
+   "p_clash": 0.0,
+   "p_hit": 1.0,
+   "p_clash_lb": 0.0,
+   "p_fail": 1.0,
+   "states": {
+    "In Range": {
      "clash": 0,
      "hit": 13,
      "neither": 17,
-     "other_clash": 0
+     "other_clash": 0,
+     "clash_state": false
     }
    },
+   "by_crest": {},
    "why": "Bellbearer: the bell has the counter bit only (redirect, no clash)"
   },
   "Pilgrim 03 Song|CB_IDLE|up": {
-   "n": 84,
+   "n": 0,
+   "n_inst": 0,
+   "n_eff": 0,
    "clash": 0,
-   "hit": 16,
-   "neither": 68,
+   "hit": 0,
+   "neither": 0,
    "other_clash": 0,
-   "p_hit": 0.1905,
-   "p_fail": 0.2872,
-   "by_crest": {
-    "Reaper": {
+   "p_clash": 0.0,
+   "p_hit": 1.0,
+   "p_clash_lb": 0.0,
+   "p_fail": 1.0,
+   "states": {
+    "In Range": {
      "clash": 0,
      "hit": 16,
      "neither": 68,
-     "other_clash": 0
+     "other_clash": 0,
+     "clash_state": false
     }
    },
+   "by_crest": {},
    "why": "Bellbearer: the bell has the counter bit only (redirect, no clash)"
   },
   "Pilgrim 03 Song|CB_THROW|down": {
-   "n": 17,
+   "n": 0,
+   "n_inst": 0,
+   "n_eff": 0,
    "clash": 0,
-   "hit": 11,
-   "neither": 4,
-   "other_clash": 2,
-   "p_hit": 0.6471,
-   "p_fail": 0.8269,
-   "by_crest": {
-    "Reaper": {
-     "clash": 0,
-     "hit": 10,
-     "neither": 4,
-     "other_clash": 2
-    },
-    "Wanderer": {
+   "hit": 0,
+   "neither": 0,
+   "other_clash": 0,
+   "p_clash": 0.0,
+   "p_hit": 1.0,
+   "p_clash_lb": 0.0,
+   "p_fail": 1.0,
+   "states": {
+    "Recover": {
      "clash": 0,
      "hit": 1,
      "neither": 0,
-     "other_clash": 0
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Throw Antic": {
+     "clash": 0,
+     "hit": 5,
+     "neither": 1,
+     "other_clash": 2,
+     "clash_state": false
+    },
+    "Throw": {
+     "clash": 0,
+     "hit": 4,
+     "neither": 3,
+     "other_clash": 0,
+     "clash_state": false
     }
    },
+   "by_crest": {},
    "why": "Bellbearer: the bell has the counter bit only (redirect, no clash)"
   },
   "Pilgrim 03 Song|CB_THROW|side": {
-   "n": 67,
+   "n": 0,
+   "n_inst": 0,
+   "n_eff": 0,
    "clash": 0,
-   "hit": 28,
-   "neither": 37,
-   "other_clash": 2,
-   "p_hit": 0.4179,
-   "p_fail": 0.5373,
-   "by_crest": {
-    "Reaper": {
+   "hit": 0,
+   "neither": 0,
+   "other_clash": 0,
+   "p_clash": 0.0,
+   "p_hit": 1.0,
+   "p_clash_lb": 0.0,
+   "p_fail": 1.0,
+   "states": {
+    "Recover": {
      "clash": 0,
-     "hit": 28,
-     "neither": 37,
-     "other_clash": 2
+     "hit": 4,
+     "neither": 7,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Throw Antic": {
+     "clash": 0,
+     "hit": 15,
+     "neither": 26,
+     "other_clash": 1,
+     "clash_state": false
+    },
+    "Throw": {
+     "clash": 0,
+     "hit": 9,
+     "neither": 4,
+     "other_clash": 1,
+     "clash_state": false
     }
    },
+   "by_crest": {},
    "why": "Bellbearer: the bell has the counter bit only (redirect, no clash)"
   },
   "Pilgrim 03 Song|CB_THROW|up": {
-   "n": 90,
+   "n": 0,
+   "n_inst": 0,
+   "n_eff": 0,
    "clash": 0,
-   "hit": 26,
-   "neither": 64,
+   "hit": 0,
+   "neither": 0,
    "other_clash": 0,
-   "p_hit": 0.2889,
-   "p_fail": 0.3896,
-   "by_crest": {
-    "Reaper": {
+   "p_clash": 0.0,
+   "p_hit": 1.0,
+   "p_clash_lb": 0.0,
+   "p_fail": 1.0,
+   "states": {
+    "Recover": {
      "clash": 0,
-     "hit": 26,
-     "neither": 64,
-     "other_clash": 0
+     "hit": 3,
+     "neither": 6,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Throw Antic": {
+     "clash": 0,
+     "hit": 11,
+     "neither": 25,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Throw": {
+     "clash": 0,
+     "hit": 12,
+     "neither": 33,
+     "other_clash": 0,
+     "clash_state": false
     }
    },
+   "by_crest": {},
    "why": "Bellbearer: the bell has the counter bit only (redirect, no clash)"
   },
   "Song Administrator|MI_CHARGE|wall": {
    "n": 1,
+   "n_inst": 1,
+   "n_eff": 1,
    "clash": 1,
    "hit": 0,
    "neither": 0,
    "other_clash": 0,
+   "p_clash": 1.0,
    "p_hit": 0.0,
+   "p_clash_lb": 0.2065,
    "p_fail": 0.7935,
-   "by_crest": {
-    "Reaper": {
+   "states": {
+    "Attack": {
      "clash": 1,
      "hit": 0,
      "neither": 0,
-     "other_clash": 0
+     "other_clash": 0,
+     "clash_state": true
     }
    },
-   "why": "n 1 < 10"
-  },
-  "Song Administrator|MI_EVADE|down": {
-   "n": 2,
-   "clash": 0,
-   "hit": 0,
-   "neither": 2,
-   "other_clash": 0,
-   "p_hit": 0.0,
-   "p_fail": 0.6576,
    "by_crest": {
     "Reaper": {
-     "clash": 0,
+     "n": 1,
+     "n_inst": 1,
+     "n_eff": 1,
+     "clash": 1,
      "hit": 0,
-     "neither": 2,
-     "other_clash": 0
+     "neither": 0,
+     "other_clash": 0,
+     "p_clash": 1.0,
+     "p_hit": 0.0,
+     "p_clash_lb": 0.2065,
+     "p_fail": 0.7935
     }
    },
+   "why": "n_eff 1 < 10"
+  },
+  "Song Administrator|MI_EVADE|down": {
+   "n": 0,
+   "n_inst": 0,
+   "n_eff": 0,
+   "clash": 0,
+   "hit": 0,
+   "neither": 0,
+   "other_clash": 0,
+   "p_clash": 0.0,
+   "p_hit": 1.0,
+   "p_clash_lb": 0.0,
+   "p_fail": 1.0,
+   "states": {
+    "Evade Antic": {
+     "clash": 0,
+     "hit": 0,
+     "neither": 1,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Evade": {
+     "clash": 0,
+     "hit": 0,
+     "neither": 1,
+     "other_clash": 0,
+     "clash_state": false
+    }
+   },
+   "by_crest": {},
    "why": "body / movement family"
   },
   "Song Administrator|MI_EVADE|side": {
-   "n": 22,
+   "n": 0,
+   "n_inst": 0,
+   "n_eff": 0,
    "clash": 0,
-   "hit": 8,
-   "neither": 14,
+   "hit": 0,
+   "neither": 0,
    "other_clash": 0,
-   "p_hit": 0.3636,
-   "p_fail": 0.5705,
-   "by_crest": {
-    "Reaper": {
+   "p_clash": 0.0,
+   "p_hit": 1.0,
+   "p_clash_lb": 0.0,
+   "p_fail": 1.0,
+   "states": {
+    "Evade Antic": {
      "clash": 0,
-     "hit": 8,
-     "neither": 14,
-     "other_clash": 0
+     "hit": 3,
+     "neither": 3,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Evade": {
+     "clash": 0,
+     "hit": 5,
+     "neither": 11,
+     "other_clash": 0,
+     "clash_state": false
     }
    },
+   "by_crest": {},
    "why": "body / movement family"
   },
   "Song Administrator|MI_EVADE|up": {
-   "n": 12,
+   "n": 0,
+   "n_inst": 0,
+   "n_eff": 0,
    "clash": 0,
-   "hit": 3,
-   "neither": 8,
-   "other_clash": 1,
-   "p_hit": 0.25,
-   "p_fail": 0.5323,
-   "by_crest": {
-    "Reaper": {
+   "hit": 0,
+   "neither": 0,
+   "other_clash": 0,
+   "p_clash": 0.0,
+   "p_hit": 1.0,
+   "p_clash_lb": 0.0,
+   "p_fail": 1.0,
+   "states": {
+    "Evade Antic": {
      "clash": 0,
-     "hit": 3,
-     "neither": 8,
-     "other_clash": 1
+     "hit": 1,
+     "neither": 1,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Evade": {
+     "clash": 0,
+     "hit": 2,
+     "neither": 7,
+     "other_clash": 1,
+     "clash_state": false
     }
    },
+   "by_crest": {},
    "why": "body / movement family"
   },
   "Song Administrator|MI_IDLE|down": {
-   "n": 13,
+   "n": 0,
+   "n_inst": 0,
+   "n_eff": 0,
    "clash": 0,
-   "hit": 5,
-   "neither": 7,
-   "other_clash": 1,
-   "p_hit": 0.3846,
-   "p_fail": 0.6448,
-   "by_crest": {
-    "Reaper": {
-     "clash": 0,
-     "hit": 5,
-     "neither": 7,
-     "other_clash": 1
-    }
-   },
-   "why": "body / movement family"
-  },
-  "Song Administrator|MI_IDLE|side": {
-   "n": 53,
-   "clash": 0,
-   "hit": 13,
-   "neither": 36,
-   "other_clash": 4,
-   "p_hit": 0.2453,
-   "p_fail": 0.3757,
-   "by_crest": {
-    "Reaper": {
-     "clash": 0,
-     "hit": 13,
-     "neither": 35,
-     "other_clash": 4
-    },
-    "Wanderer": {
-     "clash": 0,
-     "hit": 0,
-     "neither": 1,
-     "other_clash": 0
-    }
-   },
-   "why": "body / movement family"
-  },
-  "Song Administrator|MI_IDLE|up": {
-   "n": 42,
-   "clash": 0,
-   "hit": 23,
-   "neither": 19,
-   "other_clash": 0,
-   "p_hit": 0.5476,
-   "p_fail": 0.6878,
-   "by_crest": {
-    "Reaper": {
-     "clash": 0,
-     "hit": 22,
-     "neither": 18,
-     "other_clash": 0
-    },
-    "Wanderer": {
-     "clash": 0,
-     "hit": 1,
-     "neither": 1,
-     "other_clash": 0
-    }
-   },
-   "why": "body / movement family"
-  },
-  "Song Administrator|MI_IDLE|wall": {
-   "n": 1,
-   "clash": 0,
-   "hit": 1,
+   "hit": 0,
    "neither": 0,
    "other_clash": 0,
+   "p_clash": 0.0,
    "p_hit": 1.0,
+   "p_clash_lb": 0.0,
    "p_fail": 1.0,
-   "by_crest": {
-    "Reaper": {
+   "states": {
+    "Chase": {
+     "clash": 0,
+     "hit": 4,
+     "neither": 7,
+     "other_clash": 1,
+     "clash_state": false
+    },
+    "Retreat?": {
      "clash": 0,
      "hit": 1,
      "neither": 0,
-     "other_clash": 0
+     "other_clash": 0,
+     "clash_state": false
     }
    },
+   "by_crest": {},
+   "why": "body / movement family"
+  },
+  "Song Administrator|MI_IDLE|side": {
+   "n": 0,
+   "n_inst": 0,
+   "n_eff": 0,
+   "clash": 0,
+   "hit": 0,
+   "neither": 0,
+   "other_clash": 0,
+   "p_clash": 0.0,
+   "p_hit": 1.0,
+   "p_clash_lb": 0.0,
+   "p_fail": 1.0,
+   "states": {
+    "Chase": {
+     "clash": 0,
+     "hit": 11,
+     "neither": 28,
+     "other_clash": 4,
+     "clash_state": false
+    },
+    "Retreat?": {
+     "clash": 0,
+     "hit": 2,
+     "neither": 8,
+     "other_clash": 0,
+     "clash_state": false
+    }
+   },
+   "by_crest": {},
+   "why": "body / movement family"
+  },
+  "Song Administrator|MI_IDLE|up": {
+   "n": 0,
+   "n_inst": 0,
+   "n_eff": 0,
+   "clash": 0,
+   "hit": 0,
+   "neither": 0,
+   "other_clash": 0,
+   "p_clash": 0.0,
+   "p_hit": 1.0,
+   "p_clash_lb": 0.0,
+   "p_fail": 1.0,
+   "states": {
+    "Chase": {
+     "clash": 0,
+     "hit": 22,
+     "neither": 22,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Retreat?": {
+     "clash": 0,
+     "hit": 1,
+     "neither": 1,
+     "other_clash": 0,
+     "clash_state": false
+    }
+   },
+   "by_crest": {},
+   "why": "body / movement family"
+  },
+  "Song Administrator|MI_IDLE|wall": {
+   "n": 0,
+   "n_inst": 0,
+   "n_eff": 0,
+   "clash": 0,
+   "hit": 0,
+   "neither": 0,
+   "other_clash": 0,
+   "p_clash": 0.0,
+   "p_hit": 1.0,
+   "p_clash_lb": 0.0,
+   "p_fail": 1.0,
+   "states": {
+    "Chase": {
+     "clash": 0,
+     "hit": 1,
+     "neither": 0,
+     "other_clash": 0,
+     "clash_state": false
+    }
+   },
+   "by_crest": {},
    "why": "body / movement family"
   },
   "Song Administrator|MI_PARRY|wall": {
    "n": 1,
+   "n_inst": 1,
+   "n_eff": 1,
    "clash": 1,
    "hit": 0,
    "neither": 0,
    "other_clash": 0,
+   "p_clash": 1.0,
    "p_hit": 0.0,
+   "p_clash_lb": 0.2065,
    "p_fail": 0.7935,
-   "by_crest": {
-    "Reaper": {
+   "states": {
+    "Parry Slash 1": {
      "clash": 1,
      "hit": 0,
      "neither": 0,
-     "other_clash": 0
+     "other_clash": 0,
+     "clash_state": true
     }
    },
-   "why": "n 1 < 10"
-  },
-  "Song Automaton Tiny|AT_DEFEND|down": {
-   "n": 22,
-   "clash": 0,
-   "hit": 16,
-   "neither": 6,
-   "other_clash": 0,
-   "p_hit": 0.7273,
-   "p_fail": 0.8685,
    "by_crest": {
     "Reaper": {
-     "clash": 0,
-     "hit": 15,
-     "neither": 6,
-     "other_clash": 0
-    },
-    "Wanderer": {
-     "clash": 0,
-     "hit": 1,
+     "n": 1,
+     "n_inst": 1,
+     "n_eff": 1,
+     "clash": 1,
+     "hit": 0,
      "neither": 0,
-     "other_clash": 0
+     "other_clash": 0,
+     "p_clash": 1.0,
+     "p_hit": 0.0,
+     "p_clash_lb": 0.2065,
+     "p_fail": 0.7935
     }
    },
+   "why": "n_eff 1 < 10"
+  },
+  "Song Automaton Tiny|AT_DEFEND|down": {
+   "n": 0,
+   "n_inst": 0,
+   "n_eff": 0,
+   "clash": 0,
+   "hit": 0,
+   "neither": 0,
+   "other_clash": 0,
+   "p_clash": 0.0,
+   "p_hit": 1.0,
+   "p_clash_lb": 0.0,
+   "p_fail": 1.0,
+   "states": {
+    "Defend Buzz": {
+     "clash": 0,
+     "hit": 14,
+     "neither": 3,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Defend Ready": {
+     "clash": 0,
+     "hit": 1,
+     "neither": 2,
+     "other_clash": 0,
+     "clash_state": false
+    }
+   },
+   "by_crest": {},
    "why": "Tiny: rams with its body"
   },
   "Song Automaton Tiny|AT_DEFEND|side": {
-   "n": 67,
+   "n": 0,
+   "n_inst": 0,
+   "n_eff": 0,
    "clash": 0,
-   "hit": 31,
-   "neither": 36,
+   "hit": 0,
+   "neither": 0,
    "other_clash": 0,
-   "p_hit": 0.4627,
-   "p_fail": 0.5808,
-   "by_crest": {
-    "Reaper": {
+   "p_clash": 0.0,
+   "p_hit": 1.0,
+   "p_clash_lb": 0.0,
+   "p_fail": 1.0,
+   "states": {
+    "Defend Buzz": {
      "clash": 0,
-     "hit": 31,
-     "neither": 36,
-     "other_clash": 0
+     "hit": 30,
+     "neither": 31,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Defend Ready": {
+     "clash": 0,
+     "hit": 1,
+     "neither": 5,
+     "other_clash": 0,
+     "clash_state": false
     }
    },
+   "by_crest": {},
    "why": "Tiny: rams with its body"
   },
   "Song Automaton Tiny|AT_DEFEND|up": {
-   "n": 70,
+   "n": 0,
+   "n_inst": 0,
+   "n_eff": 0,
    "clash": 0,
-   "hit": 38,
-   "neither": 32,
+   "hit": 0,
+   "neither": 0,
    "other_clash": 0,
-   "p_hit": 0.5429,
-   "p_fail": 0.6543,
-   "by_crest": {
-    "Reaper": {
+   "p_clash": 0.0,
+   "p_hit": 1.0,
+   "p_clash_lb": 0.0,
+   "p_fail": 1.0,
+   "states": {
+    "Defend Buzz": {
      "clash": 0,
-     "hit": 36,
-     "neither": 31,
-     "other_clash": 0
+     "hit": 37,
+     "neither": 28,
+     "other_clash": 0,
+     "clash_state": false
     },
-    "Wanderer": {
+    "Defend Ready": {
      "clash": 0,
      "hit": 2,
-     "neither": 1,
-     "other_clash": 0
+     "neither": 5,
+     "other_clash": 0,
+     "clash_state": false
     }
    },
+   "by_crest": {},
    "why": "Tiny: rams with its body"
   },
   "Song Automaton Tiny|AT_DEFEND|wall": {
-   "n": 6,
+   "n": 0,
+   "n_inst": 0,
+   "n_eff": 0,
    "clash": 0,
-   "hit": 1,
-   "neither": 5,
+   "hit": 0,
+   "neither": 0,
    "other_clash": 0,
-   "p_hit": 0.1667,
-   "p_fail": 0.5635,
-   "by_crest": {
-    "Reaper": {
+   "p_clash": 0.0,
+   "p_hit": 1.0,
+   "p_clash_lb": 0.0,
+   "p_fail": 1.0,
+   "states": {
+    "Defend Buzz": {
      "clash": 0,
      "hit": 1,
      "neither": 5,
-     "other_clash": 0
+     "other_clash": 0,
+     "clash_state": false
     }
    },
+   "by_crest": {},
    "why": "Tiny: rams with its body"
   },
   "Song Automaton Tiny|AT_FIRE|down": {
-   "n": 22,
+   "n": 0,
+   "n_inst": 0,
+   "n_eff": 0,
    "clash": 0,
-   "hit": 13,
-   "neither": 9,
+   "hit": 0,
+   "neither": 0,
    "other_clash": 0,
-   "p_hit": 0.5909,
-   "p_fail": 0.7674,
-   "by_crest": {
-    "Reaper": {
+   "p_clash": 0.0,
+   "p_hit": 1.0,
+   "p_clash_lb": 0.0,
+   "p_fail": 1.0,
+   "states": {
+    "Fire Ready": {
      "clash": 0,
-     "hit": 13,
-     "neither": 9,
-     "other_clash": 0
+     "hit": 0,
+     "neither": 1,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Fire": {
+     "clash": 0,
+     "hit": 5,
+     "neither": 2,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Return": {
+     "clash": 0,
+     "hit": 8,
+     "neither": 6,
+     "other_clash": 0,
+     "clash_state": false
     }
    },
+   "by_crest": {},
    "why": "Tiny: rams with its body"
   },
   "Song Automaton Tiny|AT_FIRE|side": {
-   "n": 120,
+   "n": 0,
+   "n_inst": 0,
+   "n_eff": 0,
    "clash": 0,
-   "hit": 57,
-   "neither": 60,
-   "other_clash": 3,
-   "p_hit": 0.475,
-   "p_fail": 0.5637,
-   "by_crest": {
-    "Reaper": {
+   "hit": 0,
+   "neither": 0,
+   "other_clash": 0,
+   "p_clash": 0.0,
+   "p_hit": 1.0,
+   "p_clash_lb": 0.0,
+   "p_fail": 1.0,
+   "states": {
+    "Brake": {
      "clash": 0,
-     "hit": 57,
-     "neither": 60,
-     "other_clash": 3
+     "hit": 21,
+     "neither": 12,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Fire Ready": {
+     "clash": 0,
+     "hit": 0,
+     "neither": 2,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Fire": {
+     "clash": 0,
+     "hit": 20,
+     "neither": 11,
+     "other_clash": 2,
+     "clash_state": false
+    },
+    "Return": {
+     "clash": 0,
+     "hit": 14,
+     "neither": 24,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Wall Bonk": {
+     "clash": 0,
+     "hit": 2,
+     "neither": 11,
+     "other_clash": 1,
+     "clash_state": false
     }
    },
+   "by_crest": {},
    "why": "Tiny: rams with its body"
   },
   "Song Automaton Tiny|AT_FIRE|up": {
-   "n": 80,
+   "n": 0,
+   "n_inst": 0,
+   "n_eff": 0,
    "clash": 0,
-   "hit": 50,
-   "neither": 26,
-   "other_clash": 4,
-   "p_hit": 0.625,
-   "p_fail": 0.7231,
-   "by_crest": {
-    "Reaper": {
+   "hit": 0,
+   "neither": 0,
+   "other_clash": 0,
+   "p_clash": 0.0,
+   "p_hit": 1.0,
+   "p_clash_lb": 0.0,
+   "p_fail": 1.0,
+   "states": {
+    "Brake": {
      "clash": 0,
-     "hit": 48,
-     "neither": 26,
-     "other_clash": 4
+     "hit": 23,
+     "neither": 6,
+     "other_clash": 0,
+     "clash_state": false
     },
-    "Wanderer": {
+    "Fire Ready": {
      "clash": 0,
-     "hit": 2,
+     "hit": 1,
      "neither": 0,
-     "other_clash": 0
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Fire": {
+     "clash": 0,
+     "hit": 13,
+     "neither": 6,
+     "other_clash": 4,
+     "clash_state": false
+    },
+    "Return": {
+     "clash": 0,
+     "hit": 10,
+     "neither": 11,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Wall Bonk": {
+     "clash": 0,
+     "hit": 3,
+     "neither": 3,
+     "other_clash": 0,
+     "clash_state": false
     }
    },
+   "by_crest": {},
    "why": "Tiny: rams with its body"
   },
   "Song Automaton Tiny|AT_IDLE|down": {
-   "n": 19,
+   "n": 0,
+   "n_inst": 0,
+   "n_eff": 0,
    "clash": 0,
-   "hit": 12,
-   "neither": 7,
+   "hit": 0,
+   "neither": 0,
    "other_clash": 0,
-   "p_hit": 0.6316,
-   "p_fail": 0.8085,
-   "by_crest": {
-    "Reaper": {
+   "p_clash": 0.0,
+   "p_hit": 1.0,
+   "p_clash_lb": 0.0,
+   "p_fail": 1.0,
+   "states": {
+    "Ready": {
      "clash": 0,
-     "hit": 12,
-     "neither": 7,
-     "other_clash": 0
+     "hit": 10,
+     "neither": 6,
+     "other_clash": 0,
+     "clash_state": false
     }
    },
+   "by_crest": {},
    "why": "Tiny: rams with its body"
   },
   "Song Automaton Tiny|AT_IDLE|side": {
-   "n": 41,
+   "n": 0,
+   "n_inst": 0,
+   "n_eff": 0,
    "clash": 0,
-   "hit": 8,
-   "neither": 33,
+   "hit": 0,
+   "neither": 0,
    "other_clash": 0,
-   "p_hit": 0.1951,
-   "p_fail": 0.3401,
-   "by_crest": {
-    "Reaper": {
+   "p_clash": 0.0,
+   "p_hit": 1.0,
+   "p_clash_lb": 0.0,
+   "p_fail": 1.0,
+   "states": {
+    "Ready": {
      "clash": 0,
      "hit": 8,
      "neither": 33,
-     "other_clash": 0
+     "other_clash": 0,
+     "clash_state": false
     }
    },
+   "by_crest": {},
    "why": "Tiny: rams with its body"
   },
   "Song Automaton Tiny|AT_IDLE|up": {
-   "n": 24,
+   "n": 0,
+   "n_inst": 0,
+   "n_eff": 0,
    "clash": 0,
-   "hit": 10,
-   "neither": 13,
-   "other_clash": 1,
-   "p_hit": 0.4167,
-   "p_fail": 0.6117,
-   "by_crest": {
-    "Reaper": {
+   "hit": 0,
+   "neither": 0,
+   "other_clash": 0,
+   "p_clash": 0.0,
+   "p_hit": 1.0,
+   "p_clash_lb": 0.0,
+   "p_fail": 1.0,
+   "states": {
+    "Ready": {
      "clash": 0,
      "hit": 10,
      "neither": 13,
-     "other_clash": 1
+     "other_clash": 1,
+     "clash_state": false
     }
    },
+   "by_crest": {},
    "why": "Tiny: rams with its body"
   },
   "Song Automaton Tiny|AT_IDLE|wall": {
-   "n": 2,
+   "n": 0,
+   "n_inst": 0,
+   "n_eff": 0,
    "clash": 0,
-   "hit": 1,
-   "neither": 1,
+   "hit": 0,
+   "neither": 0,
    "other_clash": 0,
-   "p_hit": 0.5,
-   "p_fail": 0.9055,
-   "by_crest": {
-    "Reaper": {
+   "p_clash": 0.0,
+   "p_hit": 1.0,
+   "p_clash_lb": 0.0,
+   "p_fail": 1.0,
+   "states": {
+    "Ready": {
      "clash": 0,
      "hit": 1,
      "neither": 1,
-     "other_clash": 0
+     "other_clash": 0,
+     "clash_state": false
     }
    },
+   "by_crest": {},
    "why": "Tiny: rams with its body"
   },
   "Song Automaton Tiny|AT_LEAVE|up": {
-   "n": 1,
+   "n": 0,
+   "n_inst": 0,
+   "n_eff": 0,
    "clash": 0,
    "hit": 0,
-   "neither": 1,
+   "neither": 0,
    "other_clash": 0,
-   "p_hit": 0.0,
-   "p_fail": 0.7935,
-   "by_crest": {
-    "Reaper": {
+   "p_clash": 0.0,
+   "p_hit": 1.0,
+   "p_clash_lb": 0.0,
+   "p_fail": 1.0,
+   "states": {
+    "Leave Pause": {
      "clash": 0,
      "hit": 0,
      "neither": 1,
-     "other_clash": 0
+     "other_clash": 0,
+     "clash_state": false
     }
    },
+   "by_crest": {},
    "why": "Tiny: rams with its body"
   },
   "Song Handmaiden|CM_SLASH|wall": {
-   "n": 2,
+   "n": 1,
+   "n_inst": 1,
+   "n_eff": 1,
    "clash": 1,
-   "hit": 1,
+   "hit": 0,
    "neither": 0,
    "other_clash": 0,
-   "p_hit": 0.5,
-   "p_fail": 0.9055,
-   "by_crest": {
-    "Reaper": {
+   "p_clash": 1.0,
+   "p_hit": 0.0,
+   "p_clash_lb": 0.2065,
+   "p_fail": 0.7935,
+   "states": {
+    "Slash 4": {
      "clash": 1,
+     "hit": 0,
+     "neither": 0,
+     "other_clash": 0,
+     "clash_state": true
+    },
+    "Slash Antic": {
+     "clash": 0,
      "hit": 1,
      "neither": 0,
-     "other_clash": 0
+     "other_clash": 0,
+     "clash_state": false
     }
    },
-   "why": "n 2 < 10"
-  },
-  "Song Handmaiden|CM_SPIN|down": {
-   "n": 4,
-   "clash": 0,
-   "hit": 3,
-   "neither": 1,
-   "other_clash": 0,
-   "p_hit": 0.75,
-   "p_fail": 0.9544,
    "by_crest": {
     "Reaper": {
-     "clash": 0,
-     "hit": 3,
+     "n": 1,
+     "n_inst": 1,
+     "n_eff": 1,
+     "clash": 1,
+     "hit": 0,
      "neither": 0,
-     "other_clash": 0
-    },
-    "Wanderer": {
+     "other_clash": 0,
+     "p_clash": 1.0,
+     "p_hit": 0.0,
+     "p_clash_lb": 0.2065,
+     "p_fail": 0.7935
+    }
+   },
+   "why": "n_eff 1 < 10"
+  },
+  "Song Handmaiden|CM_SPIN|down": {
+   "n": 0,
+   "n_inst": 0,
+   "n_eff": 0,
+   "clash": 0,
+   "hit": 0,
+   "neither": 0,
+   "other_clash": 0,
+   "p_clash": 0.0,
+   "p_hit": 1.0,
+   "p_clash_lb": 0.0,
+   "p_fail": 1.0,
+   "states": {
+    "Spin 0": {
      "clash": 0,
      "hit": 0,
      "neither": 1,
-     "other_clash": 0
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Spin 1": {
+     "clash": 0,
+     "hit": 1,
+     "neither": 0,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Spin Antic": {
+     "clash": 0,
+     "hit": 1,
+     "neither": 0,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Spin Wind Down": {
+     "clash": 0,
+     "hit": 1,
+     "neither": 0,
+     "other_clash": 0,
+     "clash_state": false
     }
    },
+   "by_crest": {},
    "why": "Clawmaiden spear and its explosion: canClashTink 0"
   },
   "Song Handmaiden|CM_SPIN|side": {
-   "n": 40,
+   "n": 0,
+   "n_inst": 0,
+   "n_eff": 0,
    "clash": 0,
-   "hit": 12,
-   "neither": 28,
+   "hit": 0,
+   "neither": 0,
    "other_clash": 0,
-   "p_hit": 0.3,
-   "p_fail": 0.4543,
-   "by_crest": {
-    "Reaper": {
+   "p_clash": 0.0,
+   "p_hit": 1.0,
+   "p_clash_lb": 0.0,
+   "p_fail": 1.0,
+   "states": {
+    "Spear Cast Antic": {
      "clash": 0,
-     "hit": 12,
-     "neither": 28,
-     "other_clash": 0
+     "hit": 2,
+     "neither": 3,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Spear Fire Recover": {
+     "clash": 0,
+     "hit": 0,
+     "neither": 2,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Spin 0": {
+     "clash": 0,
+     "hit": 5,
+     "neither": 6,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Spin 1": {
+     "clash": 0,
+     "hit": 2,
+     "neither": 5,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Spin 2": {
+     "clash": 0,
+     "hit": 1,
+     "neither": 10,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Spin Antic": {
+     "clash": 0,
+     "hit": 1,
+     "neither": 1,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Spin Wind Down": {
+     "clash": 0,
+     "hit": 1,
+     "neither": 1,
+     "other_clash": 0,
+     "clash_state": false
     }
    },
+   "by_crest": {},
    "why": "Clawmaiden spear and its explosion: canClashTink 0"
   },
   "Song Handmaiden|CM_SPIN|up": {
-   "n": 35,
+   "n": 0,
+   "n_inst": 0,
+   "n_eff": 0,
    "clash": 0,
-   "hit": 8,
-   "neither": 27,
+   "hit": 0,
+   "neither": 0,
    "other_clash": 0,
-   "p_hit": 0.2286,
-   "p_fail": 0.3902,
-   "by_crest": {
-    "Reaper": {
-     "clash": 0,
-     "hit": 8,
-     "neither": 22,
-     "other_clash": 0
-    },
-    "Wanderer": {
+   "p_clash": 0.0,
+   "p_hit": 1.0,
+   "p_clash_lb": 0.0,
+   "p_fail": 1.0,
+   "states": {
+    "Spear Cast Antic": {
      "clash": 0,
      "hit": 0,
-     "neither": 5,
-     "other_clash": 0
+     "neither": 1,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Spear Fire Recover": {
+     "clash": 0,
+     "hit": 1,
+     "neither": 2,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Spin 0": {
+     "clash": 0,
+     "hit": 2,
+     "neither": 9,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Spin 1": {
+     "clash": 0,
+     "hit": 0,
+     "neither": 6,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Spin 2": {
+     "clash": 0,
+     "hit": 3,
+     "neither": 4,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Spin Antic": {
+     "clash": 0,
+     "hit": 2,
+     "neither": 3,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Spin Cancel": {
+     "clash": 0,
+     "hit": 0,
+     "neither": 1,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Spin Wind Down": {
+     "clash": 0,
+     "hit": 1,
+     "neither": 1,
+     "other_clash": 0,
+     "clash_state": false
     }
    },
+   "by_crest": {},
    "why": "Clawmaiden spear and its explosion: canClashTink 0"
   },
   "Song Handmaiden|CM_TELE|side": {
-   "n": 3,
+   "n": 0,
+   "n_inst": 0,
+   "n_eff": 0,
    "clash": 0,
-   "hit": 1,
-   "neither": 2,
+   "hit": 0,
+   "neither": 0,
    "other_clash": 0,
-   "p_hit": 0.3333,
-   "p_fail": 0.7923,
-   "by_crest": {
-    "Reaper": {
+   "p_clash": 0.0,
+   "p_hit": 1.0,
+   "p_clash_lb": 0.0,
+   "p_fail": 1.0,
+   "states": {
+    "Tele Out Antic": {
      "clash": 0,
      "hit": 1,
      "neither": 2,
-     "other_clash": 0
+     "other_clash": 0,
+     "clash_state": false
     }
    },
+   "by_crest": {},
    "why": "body / movement family"
   },
   "Song Heavy Sentry|CC_CAST|down": {
-   "n": 1,
+   "n": 0,
+   "n_inst": 0,
+   "n_eff": 0,
    "clash": 0,
-   "hit": 1,
+   "hit": 0,
    "neither": 0,
    "other_clash": 0,
+   "p_clash": 0.0,
    "p_hit": 1.0,
+   "p_clash_lb": 0.0,
    "p_fail": 1.0,
-   "by_crest": {
-    "Reaper": {
+   "states": {
+    "Spell Antic": {
      "clash": 0,
      "hit": 1,
      "neither": 0,
-     "other_clash": 0
+     "other_clash": 0,
+     "clash_state": false
     }
    },
+   "by_crest": {},
    "why": "Clapper: body and slams canClashTink 0"
   },
   "Song Heavy Sentry|CC_CAST|side": {
-   "n": 78,
+   "n": 0,
+   "n_inst": 0,
+   "n_eff": 0,
    "clash": 0,
-   "hit": 5,
-   "neither": 73,
+   "hit": 0,
+   "neither": 0,
    "other_clash": 0,
-   "p_hit": 0.0641,
-   "p_fail": 0.1414,
-   "by_crest": {
-    "Reaper": {
+   "p_clash": 0.0,
+   "p_hit": 1.0,
+   "p_clash_lb": 0.0,
+   "p_fail": 1.0,
+   "states": {
+    "Cast 1": {
      "clash": 0,
-     "hit": 5,
-     "neither": 72,
-     "other_clash": 0
+     "hit": 1,
+     "neither": 3,
+     "other_clash": 0,
+     "clash_state": false
     },
-    "Wanderer": {
+    "Cast 2": {
      "clash": 0,
-     "hit": 0,
-     "neither": 1,
-     "other_clash": 0
+     "hit": 3,
+     "neither": 45,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Spell Antic": {
+     "clash": 0,
+     "hit": 1,
+     "neither": 25,
+     "other_clash": 0,
+     "clash_state": false
     }
    },
+   "by_crest": {},
    "why": "Clapper: body and slams canClashTink 0"
   },
   "Song Heavy Sentry|CC_CAST|up": {
-   "n": 32,
+   "n": 0,
+   "n_inst": 0,
+   "n_eff": 0,
    "clash": 0,
-   "hit": 9,
-   "neither": 23,
+   "hit": 0,
+   "neither": 0,
    "other_clash": 0,
-   "p_hit": 0.2812,
-   "p_fail": 0.4537,
-   "by_crest": {
-    "Reaper": {
+   "p_clash": 0.0,
+   "p_hit": 1.0,
+   "p_clash_lb": 0.0,
+   "p_fail": 1.0,
+   "states": {
+    "Cast 2": {
      "clash": 0,
-     "hit": 9,
-     "neither": 23,
-     "other_clash": 0
+     "hit": 6,
+     "neither": 11,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Spell Antic": {
+     "clash": 0,
+     "hit": 3,
+     "neither": 12,
+     "other_clash": 0,
+     "clash_state": false
     }
    },
+   "by_crest": {},
    "why": "Clapper: body and slams canClashTink 0"
   },
   "Song Heavy Sentry|CC_ENTRY|side": {
-   "n": 3,
+   "n": 0,
+   "n_inst": 0,
+   "n_eff": 0,
    "clash": 0,
-   "hit": 1,
-   "neither": 2,
+   "hit": 0,
+   "neither": 0,
    "other_clash": 0,
-   "p_hit": 0.3333,
-   "p_fail": 0.7923,
-   "by_crest": {
-    "Reaper": {
+   "p_clash": 0.0,
+   "p_hit": 1.0,
+   "p_clash_lb": 0.0,
+   "p_fail": 1.0,
+   "states": {
+    "Enter Land": {
      "clash": 0,
      "hit": 1,
      "neither": 2,
-     "other_clash": 0
+     "other_clash": 0,
+     "clash_state": false
     }
    },
+   "by_crest": {},
    "why": "Clapper: body and slams canClashTink 0"
   },
   "Song Heavy Sentry|CC_ENTRY|up": {
-   "n": 5,
+   "n": 0,
+   "n_inst": 0,
+   "n_eff": 0,
    "clash": 0,
-   "hit": 4,
-   "neither": 1,
+   "hit": 0,
+   "neither": 0,
    "other_clash": 0,
-   "p_hit": 0.8,
-   "p_fail": 0.9638,
-   "by_crest": {
-    "Reaper": {
+   "p_clash": 0.0,
+   "p_hit": 1.0,
+   "p_clash_lb": 0.0,
+   "p_fail": 1.0,
+   "states": {
+    "Enter Land": {
+     "clash": 0,
+     "hit": 0,
+     "neither": 1,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Roar End": {
      "clash": 0,
      "hit": 4,
-     "neither": 1,
-     "other_clash": 0
+     "neither": 0,
+     "other_clash": 0,
+     "clash_state": false
     }
    },
+   "by_crest": {},
    "why": "Clapper: body and slams canClashTink 0"
   },
   "Song Heavy Sentry|CC_IDLE|down": {
-   "n": 1,
+   "n": 0,
+   "n_inst": 0,
+   "n_eff": 0,
    "clash": 0,
-   "hit": 1,
+   "hit": 0,
    "neither": 0,
    "other_clash": 0,
+   "p_clash": 0.0,
    "p_hit": 1.0,
+   "p_clash_lb": 0.0,
    "p_fail": 1.0,
-   "by_crest": {
-    "Reaper": {
+   "states": {
+    "Idle": {
      "clash": 0,
      "hit": 1,
      "neither": 0,
-     "other_clash": 0
+     "other_clash": 0,
+     "clash_state": false
     }
    },
+   "by_crest": {},
    "why": "Clapper: body and slams canClashTink 0"
   },
   "Song Heavy Sentry|CC_IDLE|side": {
-   "n": 73,
+   "n": 0,
+   "n_inst": 0,
+   "n_eff": 0,
    "clash": 0,
-   "hit": 6,
-   "neither": 67,
+   "hit": 0,
+   "neither": 0,
    "other_clash": 0,
-   "p_hit": 0.0822,
-   "p_fail": 0.1679,
-   "by_crest": {
-    "Reaper": {
+   "p_clash": 0.0,
+   "p_hit": 1.0,
+   "p_clash_lb": 0.0,
+   "p_fail": 1.0,
+   "states": {
+    "Idle": {
      "clash": 0,
      "hit": 6,
-     "neither": 65,
-     "other_clash": 0
+     "neither": 63,
+     "other_clash": 0,
+     "clash_state": false
     },
-    "Wanderer": {
+    "Walk": {
      "clash": 0,
      "hit": 0,
-     "neither": 2,
-     "other_clash": 0
+     "neither": 4,
+     "other_clash": 0,
+     "clash_state": false
     }
    },
+   "by_crest": {},
    "why": "Clapper: body and slams canClashTink 0"
   },
   "Song Heavy Sentry|CC_IDLE|up": {
-   "n": 55,
+   "n": 0,
+   "n_inst": 0,
+   "n_eff": 0,
    "clash": 0,
-   "hit": 7,
-   "neither": 48,
+   "hit": 0,
+   "neither": 0,
    "other_clash": 0,
-   "p_hit": 0.1273,
-   "p_fail": 0.2402,
-   "by_crest": {
-    "Reaper": {
+   "p_clash": 0.0,
+   "p_hit": 1.0,
+   "p_clash_lb": 0.0,
+   "p_fail": 1.0,
+   "states": {
+    "Idle": {
      "clash": 0,
      "hit": 7,
-     "neither": 48,
-     "other_clash": 0
+     "neither": 47,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Walk": {
+     "clash": 0,
+     "hit": 0,
+     "neither": 1,
+     "other_clash": 0,
+     "clash_state": false
     }
    },
+   "by_crest": {},
    "why": "Clapper: body and slams canClashTink 0"
   },
   "Song Heavy Sentry|CC_JUMP|side": {
-   "n": 50,
+   "n": 0,
+   "n_inst": 0,
+   "n_eff": 0,
    "clash": 0,
-   "hit": 39,
-   "neither": 11,
+   "hit": 0,
+   "neither": 0,
    "other_clash": 0,
-   "p_hit": 0.78,
-   "p_fail": 0.8725,
-   "by_crest": {
-    "Reaper": {
+   "p_clash": 0.0,
+   "p_hit": 1.0,
+   "p_clash_lb": 0.0,
+   "p_fail": 1.0,
+   "states": {
+    "Air": {
      "clash": 0,
-     "hit": 39,
-     "neither": 11,
-     "other_clash": 0
+     "hit": 35,
+     "neither": 6,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Jump Antic": {
+     "clash": 0,
+     "hit": 1,
+     "neither": 4,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Jump": {
+     "clash": 0,
+     "hit": 3,
+     "neither": 1,
+     "other_clash": 0,
+     "clash_state": false
     }
    },
+   "by_crest": {},
    "why": "Clapper: body and slams canClashTink 0"
   },
   "Song Heavy Sentry|CC_JUMP|up": {
-   "n": 37,
+   "n": 0,
+   "n_inst": 0,
+   "n_eff": 0,
    "clash": 0,
-   "hit": 21,
-   "neither": 16,
+   "hit": 0,
+   "neither": 0,
    "other_clash": 0,
-   "p_hit": 0.5676,
-   "p_fail": 0.7133,
-   "by_crest": {
-    "Reaper": {
+   "p_clash": 0.0,
+   "p_hit": 1.0,
+   "p_clash_lb": 0.0,
+   "p_fail": 1.0,
+   "states": {
+    "Air": {
      "clash": 0,
      "hit": 21,
-     "neither": 16,
-     "other_clash": 0
+     "neither": 11,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Jump Antic": {
+     "clash": 0,
+     "hit": 0,
+     "neither": 5,
+     "other_clash": 0,
+     "clash_state": false
     }
    },
+   "by_crest": {},
    "why": "Clapper: body and slams canClashTink 0"
   },
   "Song Heavy Sentry|CC_JUMP_CAST|side": {
-   "n": 9,
+   "n": 0,
+   "n_inst": 0,
+   "n_eff": 0,
    "clash": 0,
-   "hit": 1,
-   "neither": 8,
+   "hit": 0,
+   "neither": 0,
    "other_clash": 0,
-   "p_hit": 0.1111,
-   "p_fail": 0.435,
-   "by_crest": {
-    "Reaper": {
+   "p_clash": 0.0,
+   "p_hit": 1.0,
+   "p_clash_lb": 0.0,
+   "p_fail": 1.0,
+   "states": {
+    "Cast Slam Antic 2": {
      "clash": 0,
      "hit": 1,
-     "neither": 8,
-     "other_clash": 0
+     "neither": 7,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Cast Slam Antic": {
+     "clash": 0,
+     "hit": 0,
+     "neither": 1,
+     "other_clash": 0,
+     "clash_state": false
     }
    },
+   "by_crest": {},
    "why": "Clapper: body and slams canClashTink 0"
   },
   "Song Heavy Sentry|CC_JUMP_CAST|up": {
-   "n": 5,
+   "n": 0,
+   "n_inst": 0,
+   "n_eff": 0,
    "clash": 0,
-   "hit": 1,
-   "neither": 4,
+   "hit": 0,
+   "neither": 0,
    "other_clash": 0,
-   "p_hit": 0.2,
-   "p_fail": 0.6245,
-   "by_crest": {
-    "Reaper": {
+   "p_clash": 0.0,
+   "p_hit": 1.0,
+   "p_clash_lb": 0.0,
+   "p_fail": 1.0,
+   "states": {
+    "Cast Slam Antic 2": {
+     "clash": 0,
+     "hit": 0,
+     "neither": 4,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Cast Slam Antic": {
      "clash": 0,
      "hit": 1,
-     "neither": 4,
-     "other_clash": 0
+     "neither": 0,
+     "other_clash": 0,
+     "clash_state": false
     }
    },
+   "by_crest": {},
    "why": "Clapper: body and slams canClashTink 0"
   },
   "Song Heavy Sentry|CC_SLAM|down": {
-   "n": 5,
+   "n": 0,
+   "n_inst": 0,
+   "n_eff": 0,
    "clash": 0,
-   "hit": 4,
-   "neither": 1,
+   "hit": 0,
+   "neither": 0,
    "other_clash": 0,
-   "p_hit": 0.8,
-   "p_fail": 0.9638,
-   "by_crest": {
-    "Reaper": {
+   "p_clash": 0.0,
+   "p_hit": 1.0,
+   "p_clash_lb": 0.0,
+   "p_fail": 1.0,
+   "states": {
+    "Slam 0": {
+     "clash": 0,
+     "hit": 2,
+     "neither": 0,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Slam Antic": {
      "clash": 0,
      "hit": 0,
      "neither": 1,
-     "other_clash": 0
-    },
-    "Wanderer": {
-     "clash": 0,
-     "hit": 4,
-     "neither": 0,
-     "other_clash": 0
+     "other_clash": 0,
+     "clash_state": false
     }
    },
+   "by_crest": {},
    "why": "Clapper: body and slams canClashTink 0"
   },
   "Song Heavy Sentry|CC_SLAM|side": {
-   "n": 382,
+   "n": 0,
+   "n_inst": 0,
+   "n_eff": 0,
    "clash": 0,
-   "hit": 234,
-   "neither": 148,
+   "hit": 0,
+   "neither": 0,
    "other_clash": 0,
-   "p_hit": 0.6126,
-   "p_fail": 0.6601,
-   "by_crest": {
-    "Reaper": {
+   "p_clash": 0.0,
+   "p_hit": 1.0,
+   "p_clash_lb": 0.0,
+   "p_fail": 1.0,
+   "states": {
+    "Slam 0": {
      "clash": 0,
-     "hit": 234,
-     "neither": 147,
-     "other_clash": 0
+     "hit": 85,
+     "neither": 18,
+     "other_clash": 0,
+     "clash_state": false
     },
-    "Wanderer": {
+    "Slam 1": {
+     "clash": 0,
+     "hit": 83,
+     "neither": 17,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Slam 2": {
+     "clash": 0,
+     "hit": 46,
+     "neither": 26,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Slam Antic": {
+     "clash": 0,
+     "hit": 20,
+     "neither": 64,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Slam Recover": {
      "clash": 0,
      "hit": 0,
-     "neither": 1,
-     "other_clash": 0
+     "neither": 23,
+     "other_clash": 0,
+     "clash_state": false
     }
    },
+   "by_crest": {},
    "why": "Clapper: body and slams canClashTink 0"
   },
   "Song Heavy Sentry|CC_SLAM|up": {
-   "n": 58,
+   "n": 0,
+   "n_inst": 0,
+   "n_eff": 0,
    "clash": 0,
-   "hit": 26,
-   "neither": 32,
+   "hit": 0,
+   "neither": 0,
    "other_clash": 0,
-   "p_hit": 0.4483,
-   "p_fail": 0.5755,
-   "by_crest": {
-    "Reaper": {
+   "p_clash": 0.0,
+   "p_hit": 1.0,
+   "p_clash_lb": 0.0,
+   "p_fail": 1.0,
+   "states": {
+    "Slam 0": {
      "clash": 0,
-     "hit": 26,
-     "neither": 32,
-     "other_clash": 0
+     "hit": 2,
+     "neither": 6,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Slam 1": {
+     "clash": 0,
+     "hit": 2,
+     "neither": 1,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Slam 2": {
+     "clash": 0,
+     "hit": 4,
+     "neither": 2,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Slam Antic": {
+     "clash": 0,
+     "hit": 13,
+     "neither": 9,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Slam Recover": {
+     "clash": 0,
+     "hit": 5,
+     "neither": 14,
+     "other_clash": 0,
+     "clash_state": false
     }
    },
+   "by_crest": {},
    "why": "Clapper: body and slams canClashTink 0"
   },
   "Song Heavy Sentry|CC_SLAM|wall": {
-   "n": 1,
+   "n": 0,
+   "n_inst": 0,
+   "n_eff": 0,
    "clash": 0,
    "hit": 0,
-   "neither": 1,
+   "neither": 0,
    "other_clash": 0,
-   "p_hit": 0.0,
-   "p_fail": 0.7935,
-   "by_crest": {
-    "Reaper": {
+   "p_clash": 0.0,
+   "p_hit": 1.0,
+   "p_clash_lb": 0.0,
+   "p_fail": 1.0,
+   "states": {
+    "Slam Recover": {
      "clash": 0,
      "hit": 0,
      "neither": 1,
-     "other_clash": 0
+     "other_clash": 0,
+     "clash_state": false
     }
    },
+   "by_crest": {},
    "why": "Clapper: body and slams canClashTink 0"
   },
-  "Song Pilgrim 01|EN_IDLE|down": {
-   "n": 3,
-   "clash": 0,
-   "hit": 0,
+  "Song Pilgrim 01|EN_CHARGE|up": {
+   "n": 7,
+   "n_inst": 7,
+   "n_eff": 7,
+   "clash": 2,
+   "hit": 3,
    "neither": 2,
-   "other_clash": 1,
-   "p_hit": 0.0,
-   "p_fail": 0.5615,
-   "by_crest": {
-    "Reaper": {
-     "clash": 0,
-     "hit": 0,
-     "neither": 2,
-     "other_clash": 1
-    }
-   },
-   "why": "body / movement family"
-  },
-  "Song Pilgrim 03|CH_ENTRY|side": {
-   "n": 1,
-   "clash": 0,
-   "hit": 1,
-   "neither": 0,
    "other_clash": 0,
-   "p_hit": 1.0,
-   "p_fail": 1.0,
-   "by_crest": {
-    "Reaper": {
+   "p_clash": 0.2857,
+   "p_hit": 0.4286,
+   "p_clash_lb": 0.0822,
+   "p_fail": 0.7495,
+   "states": {
+    "Charge End": {
      "clash": 0,
      "hit": 1,
      "neither": 0,
-     "other_clash": 0
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Charge": {
+     "clash": 2,
+     "hit": 3,
+     "neither": 2,
+     "other_clash": 0,
+     "clash_state": true
     }
    },
+   "by_crest": {
+    "Reaper": {
+     "n": 5,
+     "n_inst": 5,
+     "n_eff": 5,
+     "clash": 0,
+     "hit": 3,
+     "neither": 2,
+     "other_clash": 0,
+     "p_clash": 0.0,
+     "p_hit": 0.6,
+     "p_clash_lb": 0.0,
+     "p_fail": 0.8824
+    },
+    "Wanderer": {
+     "n": 2,
+     "n_inst": 2,
+     "n_eff": 2,
+     "clash": 2,
+     "hit": 0,
+     "neither": 0,
+     "other_clash": 0,
+     "p_clash": 1.0,
+     "p_hit": 0.0,
+     "p_clash_lb": 0.3424,
+     "p_fail": 0.6576
+    }
+   },
+   "why": "n_eff 7 < 10"
+  },
+  "Song Pilgrim 01|EN_IDLE|down": {
+   "n": 0,
+   "n_inst": 0,
+   "n_eff": 0,
+   "clash": 0,
+   "hit": 0,
+   "neither": 0,
+   "other_clash": 0,
+   "p_clash": 0.0,
+   "p_hit": 1.0,
+   "p_clash_lb": 0.0,
+   "p_fail": 1.0,
+   "states": {
+    "Attack Wait": {
+     "clash": 0,
+     "hit": 0,
+     "neither": 2,
+     "other_clash": 1,
+     "clash_state": false
+    }
+   },
+   "by_crest": {},
+   "why": "body / movement family"
+  },
+  "Song Pilgrim 01|EN_SLASH|up": {
+   "n": 4,
+   "n_inst": 4,
+   "n_eff": 4,
+   "clash": 3,
+   "hit": 0,
+   "neither": 1,
+   "other_clash": 0,
+   "p_clash": 0.75,
+   "p_hit": 0.0,
+   "p_clash_lb": 0.3006,
+   "p_fail": 0.4899,
+   "states": {
+    "Slash Antic": {
+     "clash": 0,
+     "hit": 0,
+     "neither": 2,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Slash1 2": {
+     "clash": 3,
+     "hit": 0,
+     "neither": 1,
+     "other_clash": 0,
+     "clash_state": true
+    }
+   },
+   "by_crest": {
+    "Reaper": {
+     "n": 2,
+     "n_inst": 2,
+     "n_eff": 2,
+     "clash": 2,
+     "hit": 0,
+     "neither": 0,
+     "other_clash": 0,
+     "p_clash": 1.0,
+     "p_hit": 0.0,
+     "p_clash_lb": 0.3424,
+     "p_fail": 0.6576
+    },
+    "Wanderer": {
+     "n": 2,
+     "n_inst": 2,
+     "n_eff": 2,
+     "clash": 1,
+     "hit": 0,
+     "neither": 1,
+     "other_clash": 0,
+     "p_clash": 0.5,
+     "p_hit": 0.0,
+     "p_clash_lb": 0.0945,
+     "p_fail": 0.6576
+    }
+   },
+   "why": "n_eff 4 < 10"
+  },
+  "Song Pilgrim 03|CH_ENTRY|side": {
+   "n": 0,
+   "n_inst": 0,
+   "n_eff": 0,
+   "clash": 0,
+   "hit": 0,
+   "neither": 0,
+   "other_clash": 0,
+   "p_clash": 0.0,
+   "p_hit": 1.0,
+   "p_clash_lb": 0.0,
+   "p_fail": 1.0,
+   "states": {
+    "Enter Fall": {
+     "clash": 0,
+     "hit": 1,
+     "neither": 0,
+     "other_clash": 0,
+     "clash_state": false
+    }
+   },
+   "by_crest": {},
    "why": "body / movement family"
   },
   "Song Pilgrim 03|CH_ENTRY|up": {
-   "n": 1,
+   "n": 0,
+   "n_inst": 0,
+   "n_eff": 0,
    "clash": 0,
-   "hit": 1,
+   "hit": 0,
    "neither": 0,
    "other_clash": 0,
+   "p_clash": 0.0,
    "p_hit": 1.0,
+   "p_clash_lb": 0.0,
    "p_fail": 1.0,
-   "by_crest": {
-    "Reaper": {
+   "states": {
+    "Enter Land": {
      "clash": 0,
      "hit": 1,
      "neither": 0,
-     "other_clash": 0
+     "other_clash": 0,
+     "clash_state": false
     }
    },
+   "by_crest": {},
    "why": "body / movement family"
   },
   "Song Pilgrim 03|CH_IDLE|down": {
-   "n": 1,
+   "n": 0,
+   "n_inst": 0,
+   "n_eff": 0,
    "clash": 0,
    "hit": 0,
-   "neither": 1,
+   "neither": 0,
    "other_clash": 0,
-   "p_hit": 0.0,
-   "p_fail": 0.7935,
-   "by_crest": {
-    "Reaper": {
+   "p_clash": 0.0,
+   "p_hit": 1.0,
+   "p_clash_lb": 0.0,
+   "p_fail": 1.0,
+   "states": {
+    "Hop Back": {
      "clash": 0,
      "hit": 0,
      "neither": 1,
-     "other_clash": 0
+     "other_clash": 0,
+     "clash_state": false
     }
    },
+   "by_crest": {},
    "why": "body / movement family"
   },
   "Song Pilgrim 03|CH_IDLE|side": {
-   "n": 7,
+   "n": 0,
+   "n_inst": 0,
+   "n_eff": 0,
    "clash": 0,
-   "hit": 1,
-   "neither": 6,
+   "hit": 0,
+   "neither": 0,
    "other_clash": 0,
-   "p_hit": 0.1429,
-   "p_fail": 0.5131,
-   "by_crest": {
-    "Reaper": {
+   "p_clash": 0.0,
+   "p_hit": 1.0,
+   "p_clash_lb": 0.0,
+   "p_fail": 1.0,
+   "states": {
+    "Battle Idle": {
+     "clash": 0,
+     "hit": 0,
+     "neither": 6,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Hop Antic": {
      "clash": 0,
      "hit": 1,
-     "neither": 6,
-     "other_clash": 0
+     "neither": 0,
+     "other_clash": 0,
+     "clash_state": false
     }
    },
+   "by_crest": {},
    "why": "body / movement family"
   },
   "Song Pilgrim 03|CH_IDLE|up": {
-   "n": 2,
+   "n": 0,
+   "n_inst": 0,
+   "n_eff": 0,
    "clash": 0,
    "hit": 0,
-   "neither": 2,
+   "neither": 0,
    "other_clash": 0,
-   "p_hit": 0.0,
-   "p_fail": 0.6576,
-   "by_crest": {
-    "Reaper": {
+   "p_clash": 0.0,
+   "p_hit": 1.0,
+   "p_clash_lb": 0.0,
+   "p_fail": 1.0,
+   "states": {
+    "Battle Idle": {
      "clash": 0,
      "hit": 0,
-     "neither": 2,
-     "other_clash": 0
+     "neither": 3,
+     "other_clash": 0,
+     "clash_state": false
     }
    },
+   "by_crest": {},
    "why": "body / movement family"
   },
   "Song Pilgrim 03|CH_SLASH|up": {
-   "n": 8,
-   "clash": 1,
-   "hit": 4,
-   "neither": 3,
-   "other_clash": 0,
-   "p_hit": 0.5,
-   "p_fail": 0.7848,
-   "by_crest": {
-    "Reaper": {
-     "clash": 1,
-     "hit": 4,
-     "neither": 3,
-     "other_clash": 0
-    }
-   },
-   "why": "n 8 < 10"
-  },
-  "Song Pilgrim 03|CH_WHIP|up": {
-   "n": 8,
-   "clash": 2,
-   "hit": 2,
-   "neither": 4,
-   "other_clash": 0,
-   "p_hit": 0.25,
-   "p_fail": 0.5907,
-   "by_crest": {
-    "Reaper": {
-     "clash": 2,
-     "hit": 2,
-     "neither": 4,
-     "other_clash": 0
-    }
-   },
-   "why": "n 8 < 10"
-  },
-  "Song Pilgrim Maestro|MA_DEFEND|down": {
-   "n": 9,
-   "clash": 0,
-   "hit": 5,
-   "neither": 4,
-   "other_clash": 0,
-   "p_hit": 0.5556,
-   "p_fail": 0.8112,
-   "by_crest": {
-    "Reaper": {
-     "clash": 0,
-     "hit": 5,
-     "neither": 4,
-     "other_clash": 0
-    }
-   },
-   "why": "n 9 < 10"
-  },
-  "Song Pilgrim Maestro|MA_DEFEND|side": {
-   "n": 5,
-   "clash": 0,
-   "hit": 1,
-   "neither": 4,
-   "other_clash": 0,
-   "p_hit": 0.2,
-   "p_fail": 0.6245,
-   "by_crest": {
-    "Reaper": {
-     "clash": 0,
-     "hit": 1,
-     "neither": 4,
-     "other_clash": 0
-    }
-   },
-   "why": "n 5 < 10"
-  },
-  "Song Pilgrim Maestro|MA_IDLE|down": {
-   "n": 6,
-   "clash": 0,
-   "hit": 6,
-   "neither": 0,
-   "other_clash": 0,
-   "p_hit": 1.0,
-   "p_fail": 1.0,
-   "by_crest": {
-    "Reaper": {
-     "clash": 0,
-     "hit": 6,
-     "neither": 0,
-     "other_clash": 0
-    }
-   },
-   "why": "body / movement family"
-  },
-  "Song Pilgrim Maestro|MA_IDLE|side": {
-   "n": 16,
-   "clash": 0,
-   "hit": 8,
-   "neither": 8,
-   "other_clash": 0,
-   "p_hit": 0.5,
-   "p_fail": 0.72,
-   "by_crest": {
-    "Reaper": {
-     "clash": 0,
-     "hit": 8,
-     "neither": 8,
-     "other_clash": 0
-    }
-   },
-   "why": "body / movement family"
-  },
-  "Song Pilgrim Maestro|MA_IDLE|up": {
-   "n": 12,
-   "clash": 0,
-   "hit": 4,
-   "neither": 8,
-   "other_clash": 0,
-   "p_hit": 0.3333,
-   "p_fail": 0.6094,
-   "by_crest": {
-    "Reaper": {
-     "clash": 0,
-     "hit": 4,
-     "neither": 8,
-     "other_clash": 0
-    }
-   },
-   "why": "body / movement family"
-  },
-  "Song Pilgrim Maestro|MA_SLASH|down": {
-   "n": 7,
-   "clash": 0,
-   "hit": 2,
-   "neither": 5,
-   "other_clash": 0,
-   "p_hit": 0.2857,
-   "p_fail": 0.6411,
-   "by_crest": {
-    "Reaper": {
-     "clash": 0,
-     "hit": 2,
-     "neither": 5,
-     "other_clash": 0
-    }
-   },
-   "why": "n 7 < 10"
-  },
-  "Song Pilgrim Maestro|MA_SUMMON|side": {
    "n": 3,
-   "clash": 0,
-   "hit": 1,
-   "neither": 2,
-   "other_clash": 0,
-   "p_hit": 0.3333,
-   "p_fail": 0.7923,
-   "by_crest": {
-    "Reaper": {
-     "clash": 0,
-     "hit": 1,
-     "neither": 2,
-     "other_clash": 0
-    }
-   },
-   "why": "n 3 < 10"
-  },
-  "Song Pilgrim Maestro|MA_SUMMON|up": {
-   "n": 8,
-   "clash": 0,
-   "hit": 5,
-   "neither": 3,
-   "other_clash": 0,
-   "p_hit": 0.625,
-   "p_fail": 0.8632,
-   "by_crest": {
-    "Reaper": {
-     "clash": 0,
-     "hit": 5,
-     "neither": 3,
-     "other_clash": 0
-    }
-   },
-   "why": "n 8 < 10"
-  },
-  "Song Reed|RE_ENTRY|up": {
-   "n": 2,
-   "clash": 0,
+   "n_inst": 3,
+   "n_eff": 3,
+   "clash": 1,
    "hit": 0,
    "neither": 2,
    "other_clash": 0,
+   "p_clash": 0.3333,
    "p_hit": 0.0,
-   "p_fail": 0.6576,
-   "by_crest": {
-    "Reaper": {
+   "p_clash_lb": 0.0615,
+   "p_fail": 0.5615,
+   "states": {
+    "ComboSlash 1": {
      "clash": 0,
      "hit": 0,
      "neither": 2,
-     "other_clash": 0
-    }
-   },
-   "why": "body / movement family"
-  },
-  "Song Reed|RE_EVADE|down": {
-   "n": 11,
-   "clash": 0,
-   "hit": 3,
-   "neither": 8,
-   "other_clash": 0,
-   "p_hit": 0.2727,
-   "p_fail": 0.5657,
-   "by_crest": {
-    "Reaper": {
-     "clash": 0,
-     "hit": 3,
-     "neither": 8,
-     "other_clash": 0
-    }
-   },
-   "why": "body / movement family"
-  },
-  "Song Reed|RE_EVADE|side": {
-   "n": 24,
-   "clash": 0,
-   "hit": 2,
-   "neither": 22,
-   "other_clash": 0,
-   "p_hit": 0.0833,
-   "p_fail": 0.2585,
-   "by_crest": {
-    "Reaper": {
-     "clash": 0,
-     "hit": 1,
-     "neither": 20,
-     "other_clash": 0
+     "other_clash": 0,
+     "clash_state": true
     },
-    "Wanderer": {
+    "ComboSlash 3": {
      "clash": 0,
      "hit": 1,
-     "neither": 2,
-     "other_clash": 0
-    }
-   },
-   "why": "body / movement family"
-  },
-  "Song Reed|RE_EVADE|up": {
-   "n": 12,
-   "clash": 0,
-   "hit": 2,
-   "neither": 10,
-   "other_clash": 0,
-   "p_hit": 0.1667,
-   "p_fail": 0.448,
-   "by_crest": {
-    "Reaper": {
-     "clash": 0,
-     "hit": 2,
-     "neither": 10,
-     "other_clash": 0
-    }
-   },
-   "why": "body / movement family"
-  },
-  "Song Reed|RE_IDLE|down": {
-   "n": 1,
-   "clash": 0,
-   "hit": 1,
-   "neither": 0,
-   "other_clash": 0,
-   "p_hit": 1.0,
-   "p_fail": 1.0,
-   "by_crest": {
-    "Reaper": {
+     "neither": 1,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Slash 1": {
+     "clash": 1,
+     "hit": 0,
+     "neither": 0,
+     "other_clash": 0,
+     "clash_state": true
+    },
+    "Slash Antic": {
      "clash": 0,
      "hit": 1,
      "neither": 0,
-     "other_clash": 0
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Slash End": {
+     "clash": 0,
+     "hit": 1,
+     "neither": 0,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Slash Recover": {
+     "clash": 0,
+     "hit": 1,
+     "neither": 1,
+     "other_clash": 0,
+     "clash_state": false
     }
    },
+   "by_crest": {
+    "Reaper": {
+     "n": 3,
+     "n_inst": 3,
+     "n_eff": 3,
+     "clash": 1,
+     "hit": 0,
+     "neither": 2,
+     "other_clash": 0,
+     "p_clash": 0.3333,
+     "p_hit": 0.0,
+     "p_clash_lb": 0.0615,
+     "p_fail": 0.5615
+    }
+   },
+   "why": "n_eff 3 < 10"
+  },
+  "Song Pilgrim Maestro|MA_DEFEND|down": {
+   "n": 0,
+   "n_inst": 0,
+   "n_eff": 0,
+   "clash": 0,
+   "hit": 0,
+   "neither": 0,
+   "other_clash": 0,
+   "p_clash": 0.0,
+   "p_hit": 1.0,
+   "p_clash_lb": 0.0,
+   "p_fail": 1.0,
+   "states": {
+    "Defend Start": {
+     "clash": 0,
+     "hit": 4,
+     "neither": 3,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Defending": {
+     "clash": 0,
+     "hit": 1,
+     "neither": 0,
+     "other_clash": 0,
+     "clash_state": false
+    }
+   },
+   "by_crest": {},
+   "why": "never clashed in the data"
+  },
+  "Song Pilgrim Maestro|MA_DEFEND|side": {
+   "n": 0,
+   "n_inst": 0,
+   "n_eff": 0,
+   "clash": 0,
+   "hit": 0,
+   "neither": 0,
+   "other_clash": 0,
+   "p_clash": 0.0,
+   "p_hit": 1.0,
+   "p_clash_lb": 0.0,
+   "p_fail": 1.0,
+   "states": {
+    "Defend Start": {
+     "clash": 0,
+     "hit": 1,
+     "neither": 1,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Defending": {
+     "clash": 0,
+     "hit": 0,
+     "neither": 3,
+     "other_clash": 0,
+     "clash_state": false
+    }
+   },
+   "by_crest": {},
+   "why": "never clashed in the data"
+  },
+  "Song Pilgrim Maestro|MA_DEFEND|up": {
+   "n": 0,
+   "n_inst": 0,
+   "n_eff": 0,
+   "clash": 0,
+   "hit": 0,
+   "neither": 0,
+   "other_clash": 0,
+   "p_clash": 0.0,
+   "p_hit": 1.0,
+   "p_clash_lb": 0.0,
+   "p_fail": 1.0,
+   "states": {
+    "Defend Start": {
+     "clash": 0,
+     "hit": 1,
+     "neither": 10,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Defending": {
+     "clash": 0,
+     "hit": 0,
+     "neither": 1,
+     "other_clash": 0,
+     "clash_state": false
+    }
+   },
+   "by_crest": {},
+   "why": "never clashed in the data"
+  },
+  "Song Pilgrim Maestro|MA_IDLE|down": {
+   "n": 0,
+   "n_inst": 0,
+   "n_eff": 0,
+   "clash": 0,
+   "hit": 0,
+   "neither": 0,
+   "other_clash": 0,
+   "p_clash": 0.0,
+   "p_hit": 1.0,
+   "p_clash_lb": 0.0,
+   "p_fail": 1.0,
+   "states": {
+    "Forum Fly": {
+     "clash": 0,
+     "hit": 5,
+     "neither": 0,
+     "other_clash": 0,
+     "clash_state": false
+    }
+   },
+   "by_crest": {},
+   "why": "body / movement family"
+  },
+  "Song Pilgrim Maestro|MA_IDLE|side": {
+   "n": 0,
+   "n_inst": 0,
+   "n_eff": 0,
+   "clash": 0,
+   "hit": 0,
+   "neither": 0,
+   "other_clash": 0,
+   "p_clash": 0.0,
+   "p_hit": 1.0,
+   "p_clash_lb": 0.0,
+   "p_fail": 1.0,
+   "states": {
+    "Fly": {
+     "clash": 0,
+     "hit": 0,
+     "neither": 3,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Forum Fly": {
+     "clash": 0,
+     "hit": 8,
+     "neither": 5,
+     "other_clash": 0,
+     "clash_state": false
+    }
+   },
+   "by_crest": {},
+   "why": "body / movement family"
+  },
+  "Song Pilgrim Maestro|MA_IDLE|up": {
+   "n": 0,
+   "n_inst": 0,
+   "n_eff": 0,
+   "clash": 0,
+   "hit": 0,
+   "neither": 0,
+   "other_clash": 0,
+   "p_clash": 0.0,
+   "p_hit": 1.0,
+   "p_clash_lb": 0.0,
+   "p_fail": 1.0,
+   "states": {
+    "Fly": {
+     "clash": 0,
+     "hit": 1,
+     "neither": 1,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Forum Fly": {
+     "clash": 0,
+     "hit": 3,
+     "neither": 7,
+     "other_clash": 0,
+     "clash_state": false
+    }
+   },
+   "by_crest": {},
+   "why": "body / movement family"
+  },
+  "Song Pilgrim Maestro|MA_SLASH|down": {
+   "n": 3,
+   "n_inst": 3,
+   "n_eff": 3,
+   "clash": 0,
+   "hit": 0,
+   "neither": 3,
+   "other_clash": 0,
+   "p_clash": 0.0,
+   "p_hit": 0.0,
+   "p_clash_lb": 0.0,
+   "p_fail": 0.5615,
+   "states": {
+    "Fire Antic": {
+     "clash": 0,
+     "hit": 1,
+     "neither": 0,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Slash 1": {
+     "clash": 0,
+     "hit": 0,
+     "neither": 2,
+     "other_clash": 0,
+     "clash_state": true
+    },
+    "Slash 2": {
+     "clash": 0,
+     "hit": 0,
+     "neither": 1,
+     "other_clash": 0,
+     "clash_state": true
+    },
+    "Slash Recover F": {
+     "clash": 0,
+     "hit": 1,
+     "neither": 1,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Slash Recover": {
+     "clash": 0,
+     "hit": 0,
+     "neither": 1,
+     "other_clash": 0,
+     "clash_state": false
+    }
+   },
+   "by_crest": {
+    "Reaper": {
+     "n": 3,
+     "n_inst": 3,
+     "n_eff": 3,
+     "clash": 0,
+     "hit": 0,
+     "neither": 3,
+     "other_clash": 0,
+     "p_clash": 0.0,
+     "p_hit": 0.0,
+     "p_clash_lb": 0.0,
+     "p_fail": 0.5615
+    }
+   },
+   "why": "n_eff 3 < 10"
+  },
+  "Song Pilgrim Maestro|MA_SUMMON|side": {
+   "n": 0,
+   "n_inst": 0,
+   "n_eff": 0,
+   "clash": 0,
+   "hit": 0,
+   "neither": 0,
+   "other_clash": 0,
+   "p_clash": 0.0,
+   "p_hit": 1.0,
+   "p_clash_lb": 0.0,
+   "p_fail": 1.0,
+   "states": {
+    "Call": {
+     "clash": 0,
+     "hit": 0,
+     "neither": 2,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Summon Recover": {
+     "clash": 0,
+     "hit": 1,
+     "neither": 0,
+     "other_clash": 0,
+     "clash_state": false
+    }
+   },
+   "by_crest": {},
+   "why": "never clashed in the data"
+  },
+  "Song Pilgrim Maestro|MA_SUMMON|up": {
+   "n": 0,
+   "n_inst": 0,
+   "n_eff": 0,
+   "clash": 0,
+   "hit": 0,
+   "neither": 0,
+   "other_clash": 0,
+   "p_clash": 0.0,
+   "p_hit": 1.0,
+   "p_clash_lb": 0.0,
+   "p_fail": 1.0,
+   "states": {
+    "Call": {
+     "clash": 0,
+     "hit": 2,
+     "neither": 1,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Summon Recover": {
+     "clash": 0,
+     "hit": 2,
+     "neither": 1,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Summon": {
+     "clash": 0,
+     "hit": 1,
+     "neither": 1,
+     "other_clash": 0,
+     "clash_state": false
+    }
+   },
+   "by_crest": {},
+   "why": "never clashed in the data"
+  },
+  "Song Reed|RE_ENTRY|up": {
+   "n": 0,
+   "n_inst": 0,
+   "n_eff": 0,
+   "clash": 0,
+   "hit": 0,
+   "neither": 0,
+   "other_clash": 0,
+   "p_clash": 0.0,
+   "p_hit": 1.0,
+   "p_clash_lb": 0.0,
+   "p_fail": 1.0,
+   "states": {
+    "Fly In": {
+     "clash": 0,
+     "hit": 0,
+     "neither": 2,
+     "other_clash": 0,
+     "clash_state": false
+    }
+   },
+   "by_crest": {},
+   "why": "body / movement family"
+  },
+  "Song Reed|RE_EVADE|down": {
+   "n": 0,
+   "n_inst": 0,
+   "n_eff": 0,
+   "clash": 0,
+   "hit": 0,
+   "neither": 0,
+   "other_clash": 0,
+   "p_clash": 0.0,
+   "p_hit": 1.0,
+   "p_clash_lb": 0.0,
+   "p_fail": 1.0,
+   "states": {
+    "Evade Antic": {
+     "clash": 0,
+     "hit": 2,
+     "neither": 5,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Evade": {
+     "clash": 0,
+     "hit": 1,
+     "neither": 2,
+     "other_clash": 0,
+     "clash_state": false
+    }
+   },
+   "by_crest": {},
+   "why": "body / movement family"
+  },
+  "Song Reed|RE_EVADE|side": {
+   "n": 0,
+   "n_inst": 0,
+   "n_eff": 0,
+   "clash": 0,
+   "hit": 0,
+   "neither": 0,
+   "other_clash": 0,
+   "p_clash": 0.0,
+   "p_hit": 1.0,
+   "p_clash_lb": 0.0,
+   "p_fail": 1.0,
+   "states": {
+    "Evade Antic": {
+     "clash": 0,
+     "hit": 2,
+     "neither": 13,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Evade": {
+     "clash": 0,
+     "hit": 0,
+     "neither": 9,
+     "other_clash": 0,
+     "clash_state": false
+    }
+   },
+   "by_crest": {},
+   "why": "body / movement family"
+  },
+  "Song Reed|RE_EVADE|up": {
+   "n": 0,
+   "n_inst": 0,
+   "n_eff": 0,
+   "clash": 0,
+   "hit": 0,
+   "neither": 0,
+   "other_clash": 0,
+   "p_clash": 0.0,
+   "p_hit": 1.0,
+   "p_clash_lb": 0.0,
+   "p_fail": 1.0,
+   "states": {
+    "Evade Antic": {
+     "clash": 0,
+     "hit": 2,
+     "neither": 9,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Evade": {
+     "clash": 0,
+     "hit": 0,
+     "neither": 1,
+     "other_clash": 0,
+     "clash_state": false
+    }
+   },
+   "by_crest": {},
    "why": "body / movement family"
   },
   "Song Reed|RE_IDLE|side": {
-   "n": 5,
+   "n": 0,
+   "n_inst": 0,
+   "n_eff": 0,
    "clash": 0,
-   "hit": 3,
-   "neither": 2,
+   "hit": 0,
+   "neither": 0,
    "other_clash": 0,
-   "p_hit": 0.6,
-   "p_fail": 0.8824,
-   "by_crest": {
-    "Reaper": {
+   "p_clash": 0.0,
+   "p_hit": 1.0,
+   "p_clash_lb": 0.0,
+   "p_fail": 1.0,
+   "states": {
+    "Alert": {
      "clash": 0,
      "hit": 3,
      "neither": 2,
-     "other_clash": 0
+     "other_clash": 0,
+     "clash_state": false
     }
    },
+   "by_crest": {},
    "why": "body / movement family"
   },
   "Song Reed|RE_IDLE|up": {
-   "n": 11,
+   "n": 0,
+   "n_inst": 0,
+   "n_eff": 0,
    "clash": 0,
-   "hit": 5,
-   "neither": 6,
+   "hit": 0,
+   "neither": 0,
    "other_clash": 0,
-   "p_hit": 0.4545,
-   "p_fail": 0.7199,
-   "by_crest": {
-    "Reaper": {
+   "p_clash": 0.0,
+   "p_hit": 1.0,
+   "p_clash_lb": 0.0,
+   "p_fail": 1.0,
+   "states": {
+    "Alert": {
      "clash": 0,
      "hit": 5,
      "neither": 6,
-     "other_clash": 0
+     "other_clash": 0,
+     "clash_state": false
     }
    },
+   "by_crest": {},
    "why": "body / movement family"
   },
   "Song Reed|RE_STAB|wall": {
    "n": 1,
+   "n_inst": 1,
+   "n_eff": 1,
    "clash": 0,
    "hit": 0,
    "neither": 1,
    "other_clash": 0,
+   "p_clash": 0.0,
    "p_hit": 0.0,
+   "p_clash_lb": 0.0,
    "p_fail": 0.7935,
-   "by_crest": {
-    "Reaper": {
+   "states": {
+    "Stab 3": {
      "clash": 0,
      "hit": 0,
      "neither": 1,
-     "other_clash": 0
+     "other_clash": 0,
+     "clash_state": true
     }
    },
-   "why": "n 1 < 10"
-  },
-  "Song Reed|RE_THROW|down": {
-   "n": 7,
-   "clash": 0,
-   "hit": 3,
-   "neither": 4,
-   "other_clash": 0,
-   "p_hit": 0.4286,
-   "p_fail": 0.7495,
    "by_crest": {
     "Reaper": {
+     "n": 1,
+     "n_inst": 1,
+     "n_eff": 1,
      "clash": 0,
-     "hit": 3,
-     "neither": 4,
-     "other_clash": 0
+     "hit": 0,
+     "neither": 1,
+     "other_clash": 0,
+     "p_clash": 0.0,
+     "p_hit": 0.0,
+     "p_clash_lb": 0.0,
+     "p_fail": 0.7935
     }
    },
-   "why": "n 7 < 10"
+   "why": "n_eff 1 < 10"
+  },
+  "Song Reed|RE_THROW|down": {
+   "n": 0,
+   "n_inst": 0,
+   "n_eff": 0,
+   "clash": 0,
+   "hit": 0,
+   "neither": 0,
+   "other_clash": 0,
+   "p_clash": 0.0,
+   "p_hit": 1.0,
+   "p_clash_lb": 0.0,
+   "p_fail": 1.0,
+   "states": {
+    "Throw Antic": {
+     "clash": 0,
+     "hit": 1,
+     "neither": 0,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Throw Recover": {
+     "clash": 0,
+     "hit": 0,
+     "neither": 1,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Throw": {
+     "clash": 0,
+     "hit": 2,
+     "neither": 3,
+     "other_clash": 0,
+     "clash_state": false
+    }
+   },
+   "by_crest": {},
+   "why": "never clashed in the data"
+  },
+  "Song Reed|RE_THROW|side": {
+   "n": 0,
+   "n_inst": 0,
+   "n_eff": 0,
+   "clash": 0,
+   "hit": 0,
+   "neither": 0,
+   "other_clash": 0,
+   "p_clash": 0.0,
+   "p_hit": 1.0,
+   "p_clash_lb": 0.0,
+   "p_fail": 1.0,
+   "states": {
+    "Throw Aim": {
+     "clash": 0,
+     "hit": 2,
+     "neither": 5,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Throw Antic": {
+     "clash": 0,
+     "hit": 0,
+     "neither": 1,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Throw Recover": {
+     "clash": 0,
+     "hit": 0,
+     "neither": 1,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Throw": {
+     "clash": 0,
+     "hit": 2,
+     "neither": 5,
+     "other_clash": 0,
+     "clash_state": false
+    }
+   },
+   "by_crest": {},
+   "why": "never clashed in the data"
+  },
+  "Song Reed|RE_THROW|up": {
+   "n": 0,
+   "n_inst": 0,
+   "n_eff": 0,
+   "clash": 0,
+   "hit": 0,
+   "neither": 0,
+   "other_clash": 0,
+   "p_clash": 0.0,
+   "p_hit": 1.0,
+   "p_clash_lb": 0.0,
+   "p_fail": 1.0,
+   "states": {
+    "Throw Aim": {
+     "clash": 0,
+     "hit": 1,
+     "neither": 5,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Throw Recover": {
+     "clash": 0,
+     "hit": 0,
+     "neither": 5,
+     "other_clash": 0,
+     "clash_state": false
+    },
+    "Throw": {
+     "clash": 0,
+     "hit": 5,
+     "neither": 3,
+     "other_clash": 0,
+     "clash_state": false
+    }
+   },
+   "by_crest": {},
+   "why": "never clashed in the data"
   }
+ },
+ "clash_states": {
+  "Song Administrator|MI_CHARGE": [
+   "Attack"
+  ],
+  "Song Administrator|MI_PARRY": [
+   "Parry Slash 1"
+  ],
+  "Song Handmaiden|CM_SLASH": [
+   "Slash 1",
+   "Slash 2",
+   "Slash 4"
+  ],
+  "Song Pilgrim 01|EN_CHARGE": [
+   "Charge"
+  ],
+  "Song Pilgrim 01|EN_JUMPSLASH": [
+   "JumpSlash 2",
+   "JumpSlash 3"
+  ],
+  "Song Pilgrim 01|EN_SLASH": [
+   "Slash1",
+   "Slash1 2"
+  ],
+  "Song Pilgrim 03|CH_JUMP": [
+   "Jump Spin",
+   "Spin Slash"
+  ],
+  "Song Pilgrim 03|CH_SLASH": [
+   "ComboSlash 1",
+   "Slash 1",
+   "Slash 2"
+  ],
+  "Song Pilgrim 03|CH_WHIP": [
+   "Whip 1",
+   "Whip 2",
+   "Whip 3",
+   "Whip 4"
+  ],
+  "Song Pilgrim Maestro|MA_SLASH": [
+   "Slash 1",
+   "Slash 2"
+  ],
+  "Song Reed|RE_DEFEND": [
+   "Parry Slash"
+  ],
+  "Song Reed|RE_STAB": [
+   "Stab 1",
+   "Stab 3",
+   "Stab 5"
+  ]
  },
  "never_types": {
   "Song Heavy Sentry": "Clapper: body and slams canClashTink 0",
@@ -2137,10 +5044,17 @@
   "Song Handmaiden|CM_SPIN": "Clawmaiden spear and its explosion: canClashTink 0"
  },
  "source": [
-  "C:\\ssbot\\data\\m2_forum_r8\\clash_d0.json",
-  "C:\\ssbot\\data\\m2_forum_r8\\clash_d1.json",
-  "C:\\ssbot\\data\\m2_forum_r8\\clash_d2.json",
-  "C:\\ssbot\\data\\m2_forum_r8\\clash_d3.json",
-  "C:\\ssbot\\data\\m2_forum_r8\\clash_h.json"
+  "C:\\ssbot\\data\\m2_forum_r8\\fix\\clash_d0.json",
+  "C:\\ssbot\\data\\m2_forum_r8\\fix\\clash_d1.json",
+  "C:\\ssbot\\data\\m2_forum_r8\\fix\\clash_d2.json",
+  "C:\\ssbot\\data\\m2_forum_r8\\fix\\clash_d3.json",
+  "C:\\ssbot\\data\\m2_forum_r8\\fix\\clash_d4.json",
+  "C:\\ssbot\\data\\m2_forum_r8\\fix\\clash_d5.json",
+  "C:\\ssbot\\data\\m2_forum_r8\\fix\\clash_d6.json",
+  "C:\\ssbot\\data\\m2_forum_r8\\fix\\clash_d7.json",
+  "C:\\ssbot\\data\\m2_forum_r8\\fix\\clash_h.json",
+  "C:\\ssbot\\data\\m2_forum_r8\\fix\\clash_live_a0b.json",
+  "C:\\ssbot\\data\\m2_forum_r8\\fix\\clash_live_r.json",
+  "C:\\ssbot\\data\\m2_forum_r8\\fix\\clash_live_w.json"
  ]
 }
