@@ -65,7 +65,8 @@ def test_reed_armed_and_just_did_defend():
 def test_choristor_hops_and_hit_same_frame_excluded():
     m = _mem("Song Pilgrim 03")
     for frm, to, t in [("Alert Tick", "Move Start", 0.0), ("Move Start", "Hop Antic", 0.0),
-                       ("Hop Antic", "Hop Check", 0.2), ("Hop Check", "Hop Back", 0.2), ("Hop Back", "Ground Check", 0.3),
+                       ("Hop Antic", "Hop Check", 0.2), ("Hop Check", "Hop Back", 0.2),
+                       ("Hop Back", "Ground Check", 0.3),
                        ("Ground Check", "Hop Land", 0.4)]:
         m.enter(frm, to, t)
     f = m.features("Hop Land", 0.4)

@@ -39,7 +39,7 @@ from pathlib import Path
 
 BRANCH_MODEL_PATH = Path(__file__).resolve().parents[3] / "knowledge" / "1.0.30000" / "enemies" / "forum" / \
     "branch_model.json"
-PAD_U = 0.05                    # hero box padding against a trigger shape (reactive_moves §2: transform vs physics step)
+PAD_U = 0.05                    # hero box padding against a trigger shape (reactive_moves §2: transform vs step)
 
 # ---- trigger shapes (scene bundle AlertRange children, world size incl. the root scale; reactive_scripts ranges.json):
 # ("box", cx, cy, hw, hh) / ("circ", cx, cy, r) relative to the enemy transform with cx for flipX False (the sprite
@@ -96,7 +96,8 @@ SENSING: dict[str, dict[str, tuple[str, str]]] = {
         "Spin 2": ("entry", "as Spin 0"),
     },
     "Song Administrator": {
-        "Chase": ("branch", "every frame: attack timer out & Attack Range -> Attack Choice; TOOK DAMAGE -> Range Check"),
+        "Chase": ("branch", "every frame: attack timer out & Attack Range -> Attack Choice; TOOK DAMAGE -> Range "
+                            "Check"),
         "Attack Choice": ("branch", "instant: V4 CHARGE / PARRY 1:1, eventMax 2 missedMax 2 (no 3 in a row)"),
         "Evade?": ("branch", "instant: V4 FINISHED / none 1:1 (eventMax 2), then Evade Range -> Evade Antic"),
         "Retreat?": ("entry", "at entry: V4 FINISHED / none 1:1 (eventMax 2); else 0.5-1 s; TOOK DAMAGE -> Range "
@@ -646,7 +647,8 @@ class Reactive:
 
 REACTIVE: dict[tuple[str, str], tuple[Reactive, ...]] = {
     # Bellbearer: Evade Range & no wall behind & Can Evade (0.5 s into In Range) & no Evade Cooldown: 0.97 per visit
-    ("Pilgrim 03 Song", "In Range"): (Reactive("Evade Range", "Evade Antic", 0.97, 0.5, False, (("evade_cd", False),)),),
+    ("Pilgrim 03 Song", "In Range"): (Reactive("Evade Range", "Evade Antic", 0.97, 0.5, False,
+                                               (("evade_cd", False),)),),
     # Clapper: Slam Range & Will Evade (coin at Idle entry) & Can Evade (0.25 s): 0.49
     ("Song Heavy Sentry", "Idle"): (Reactive("Slam Range", "Evade Scuttle", 0.49, 0.25, True),),
     # Reed: armed Evade Range (one shot: off at Evade Antic, on at Defend Start / Stab Antic): 0.95 entering during

@@ -116,7 +116,8 @@ def scan(c: dict) -> dict:
         m = next((mm for ff, mm in fire_antic if abs(ff - fi) <= 1), None)
         f_fire = next((x for x, i2, a2, b2 in tr if i2 == iid and b2 == "Fire" and x >= fi), None)
         f_end = next((x for x, i2, a2, b2 in tr if i2 == iid and x > (f_fire or fi) and b2 not in CHARGE), None)
-        row = {"fight": fight, "tiny": iid, "maestro": m, "lead_s": None if f_fire is None else float(T[f_fire] - T[fi])}
+        row = {"fight": fight, "tiny": iid, "maestro": m,
+               "lead_s": None if f_fire is None else float(T[f_fire] - T[fi])}
         if m is not None:
             mine = [t for t, o in owner.items() if o == m]
             ready = []
