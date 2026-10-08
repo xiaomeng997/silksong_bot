@@ -1020,7 +1020,18 @@ cd brain   # 冻结检出（git archive，没有 .git）：behaviour_build 要�
 
 - 只在 FORCED_RISK 时：对每个允许且已知的行，标称受击盒中心在阶段 1 的帧上（跳过无敌帧）和承诺支撑接触的比例 P_cm、和当前招细放置接触的比例 P_f；预选 16 行按 (P_cm, P_f, 最晚首次接触, J)，排序 `hz > hz_soft > U > S > 保持的跳 > 宏 > V > P > P_cm > P_f > 首次接触（包络 / 标称）> J`。有安全行的 tick 不算（P_cm = P_f = 0），S / Hz / U、FORCED_RISK 与否都不变（`tests/test_forum_planner.py::test_commit_rank_refines_forced_risk_by_the_committed_support`）；关掉时与之前逐位相同（预选和排序多的键全是 0）。Bell Beast 不经过 ForumPlanner。
 - 开销（开环 `forum_policy_replay`，TV 录像 ep3 960 帧，关 / 开各两次交替，整机中等负载）：规划 p50 7.0–7.3 → 8.0–8.7 ms，p99 17.4–18.8 → 16.5–17.5 ms；FORCED_RISK 754 / 960、包络审计、截止次数不变。
-- A/B（实例 0，按 A0b 的协议，种子 300400–300600）：驱动 `C:\ssbot\sandbox\r5v_ab2.ps1`（冻结检出 `C:\ssbot\live_r5v2_737048f`），PC 臂 25 场（300400）→ 当场对照 TV 臂 25 场（300500，PC 关）→ PC 臂 25 场（300600）；结果见 17.9 之后补的小节。
+- **和 wave-0 取证轨（diag，§19）的 "seen" 键比**：取证轨独立得出同一个原因（支撑饱和，选择落到 J），做了 `forced_rank = "seen"`（`SSBOT_FORUM_FR=seen`）：每行标称受击盒和"现在看到的伤害碰撞体按其实体速度平移"相碰的帧数（再按首次接触），放在 P **之前**。在同一批 tick 上（`forum_tv_audit` 用规划器的 `seen_contacts` 算这个分数，`aud2_*`）：seen 的 AUC 0.72–0.75（P_f 0.56–0.58、P_cm 0.51–0.54），说明"已经在场上的判定"信息最多；但两者互补：
+
+| 排序（FORCED_RISK，选中行事后安全） | TV 录像：全部 / 受击前 | A0b 录像：全部 / 受击前 |
+|---|---|---|
+| 实战（P、首次接触、J） | 68.4 / 30.4 % | 64.9 / 32.7 % |
+| seen（取证轨） | 71.8 / 37.5 % | 71.7 / 41.7 % |
+| commit_rank（本轨） | 74.3 / 41.5 % | 70.9 / 42.3 % |
+| **seen > P > P_cm > P_f（叠加）** | **78.7 / 48.7 %** | **76.3 / 51.0 %** |
+| 存在事后安全行（上限） | 90.3 / 72.7 % | 89.7 / 73.0 % |
+
+  叠加比任何一个单独都好（两份录像一致），所以本分支把取证轨 3608489 的规划器部分（`seen_contacts`、`seen_polys`、`warm_kernels`、`SSBOT_FORUM_FR`、它的测试）原样移植过来、和 commit_rank 叠在一起（8617aa6：预选和排序都是 seen > P > P_cm > P_f；两个开关都关时与之前逐位相同）。
+- A/B（实例 0，按 A0b 的协议，种子 300400–300799）：驱动 `C:\ssbot\sandbox\r5v_ab2.ps1`（冻结检出 `C:\ssbot\live_r5v2_8617aa6`），等取证轨在实例 0 上的 seen / share 对照跑完后：SPC（seen + commit_rank）25 场（300400）→ PC 25 场（300500）→ 当场对照 TV 25 场（300600，都关）→ SPC 25 场（300700）；一批因真退出后的 HARNESS_FAIL 提前结束时用种子 + 50 补齐。结果补在下面。
 
 ### 17.9 没做 / 未核实（第 2 轮）
 

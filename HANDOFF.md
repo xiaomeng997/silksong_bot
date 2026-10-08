@@ -1890,19 +1890,25 @@ Done (committed):
 
 Diag track (wave-0 forensics, worktree-wf_fa16f06f-127-8, HANDOFF "Task wave-0 forensics") found the same cause
 independently (support saturates, the pick falls to J, "J-greedy") and built `forced_rank = "seen"`
-(`SSBOT_FORUM_FR=seen`: contact with the damage colliders seen now, moved along their velocity, BEFORE the share). Both
-are FORCED_RISK keys for "what is already coming"; forum_tv_audit re-implements "seen" as a score to compare them on
-the same ticks (running, below). The integration step should pick one or stack them (P / seen / P_cm / P_f).
+(`SSBOT_FORUM_FR=seen`: contact with the damage colliders seen now, moved along their velocity, BEFORE the share).
+Same ticks (forum.md 17.8): seen alone 71.8 / 71.7 % clear (before hits 37.5 / 41.7 %), commit_rank alone 74.3 / 70.9
+(41.5 / 42.3), **stacked seen > P > P_cm > P_f 78.7 / 76.3 (48.7 / 51.0)**, live 68.4 / 64.9 (30.4 / 32.7). So
+8617aa6 ports diag's planner part of 3608489 verbatim (seen_contacts, seen_polys, warm_kernels, SSBOT_FORUM_FR, its
+tests; the policy's `_fcfg`) and stacks commit_rank after it. **Merge note**: this branch and diag's both change the
+FORCED_RISK block of `combat/forum_planner.py` and the policy's planner construction; this branch's version is the
+superset (diag's key first, then P, P_cm, P_f), so take it when the hunks conflict (diag's later commits up to
+b4345c6 touch only its tools and HANDOFF).
 
 ### Running
 
 - Offline (hidden, below normal; `C:\ssbot\data\m2_forum_r5v\round2\audit_batch.ps1`): forum_tv_audit with the
   "seen" score over the same 25 + 9 episodes -> `aud2_*.json` + `.pkl.gz`; then `rank_eval.py` (same folder).
-- Instance 0 A/B driver `C:\ssbot\sandbox\r5v_ab2.ps1 -Root C:\ssbot\live_r5v2_737048f` (hidden; log
-  `C:\ssbot\sandbox\r5v_ab2.log`): waits for `locks\inst0.lock` (held by diag for its own A/B), takes it (r5value),
-  warms, then 25 episodes each PC (300400) -> TV control (300500, PC off) -> PC (300600), A0b protocol; no batch on
+- Instance 0 A/B driver `C:\ssbot\sandbox\r5v_ab2.ps1 -Root C:\ssbot\live_r5v2_8617aa6` (hidden; log
+  `C:\ssbot\sandbox\r5v_ab2.log`): waits for `locks\inst0.lock` (held by diag for its own seen / share A/B), takes
+  it (r5value), warms, then 25 valid episodes each SPC (seen + commit_rank, 300400) -> PC (300500) -> TV control (both
+  off, 300600) -> SPC (300700), A0b protocol; an early-ended batch is continued with seed + 50; no batch on
   DEMO_SOON / STOP_AGENTS; releases the lock at the end. Batch logs in `C:\ssbot\data\m2_forum_r5v\round2\`.
-  Stop: `cd C:\ssbot\live_r5v2_737048f\brain; ..\scripts\uv.cmd run python -m ssbot.tools.combat_run stop <run dir>`
+  Stop: `cd C:\ssbot\live_r5v2_8617aa6\brain; ..\scripts\uv.cmd run python -m ssbot.tools.combat_run stop <run dir>`
   (run dirs `C:\ssbot\data\runs\m2\20261008_*_Forum_A_eval_planner_oracle`), then end the driver's powershell.
 
 ### Needs deploy
@@ -1919,5 +1925,7 @@ the same ticks (running, below). The integration step should pick one or stack t
 4. Hit-target fix and the value terms change J on every Forum tick; integrate with R6 / R8 / diag's "seen".
 5. Main's working copy has no `knowledge/1.0.30000/enemies/forum/*_hitboxes.npz` (git-ignored); this worktree's copy
    (= `C:\ssbot\tables\forum_r3_2a10a0d`) was used for the frozen checkouts.
-6. Frozen checkouts `C:\ssbot\live_r5v_35e5fe6` (round 1, A/B done) and `C:\ssbot\live_r5v2_737048f` can go after the
-   A/B is reported.
+6. Frozen checkouts `C:\ssbot\live_r5v_35e5fe6` (round 1, A/B done), `C:\ssbot\live_r5v2_737048f` (unused: replaced
+   by 8617aa6 before the A/B started) and `C:\ssbot\live_r5v2_8617aa6` can go after the A/B is reported.
+7. Full suite at 737048f: 1,138 passed, 2 skipped, 1 xfailed (tests + ssbot/tests, 4 threads); after the port
+   (8617aa6) the Forum / planner / terminal / multi_forecast / worldstate / observability subset: 224 passed.
