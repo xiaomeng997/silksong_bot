@@ -1987,3 +1987,29 @@ v4 的 w7 有 20 次受击是跳施法的大符文（`rune slam`）。行为表�
 - 两波都没打死 Clapper（w7 最长 54 s、打中 9.9 下 / 场，要 26 下）。
 - PUNISH 在多敌波次里仍不触发；落单判据仍只看水平距离；L2 不查跑过去的路线。
 - 被撤回的两版代码的冻结检出 `C:\ssbot\live_r6_4a0c212`、`live_r6_afb89a8` 可删（按安全规则我没删）。
+
+## 22. 反应式支撑（`SSBOT_FORUM_REACT`；2026-10-08，task reactive support，分支 worktree-wf_08175c18-693-1 到 8b1dd82；离线 + 实例 0–3。这条轨道在做 `forum_react_audit` 的细分解（groups2）时被打断，没有写本节；本节是集成步骤按它的代码和 A/B 汇总文件补写的）
+
+起因（你 2026-10-08）：怪的前摇很长，前摇开始了再躲也不晚；第 0 波的危险区被"还没开始的招"盖满（§19.5）。
+
+### 22.1 做了什么（`multi_forecast.ReactConfig`、`ForumPlanner._escape_pick`；默认 off = 支撑逐位不变，`tests/test_reactive_support.py`）
+
+- **delay**：以后才可能开始的攻击实例（攻击家族的 walk 根），最早在"最早开始时刻 − 1 帧 + 该家族的出手延迟 − 视图的感知延迟"之后才放它的 walk 模板，之前只放家族模板（前摇时的身体，按开始后的时间分辨）。出手延迟 = `strikes.json` 里 commit → 第一个攻击碰撞体（或扔出的危险物）的最小值；感知延迟 oracle 1 帧、视觉等价 3 帧（DESIGN §3.9.5 的 33 ms）。例外：钟（CB_THROW）、Reed 针（RE_THROW）、符文弹（CC_CAST）的 commit 可能重新武装之前实例的东西，默认不延迟（`+p5`：按 p5 延迟）；只有身体的家族（闪避、Clawmaiden 瞬移、Tiny 冲撞，可以贴脸开始）不延迟。
+- 扩展：`+c` 当前招之后的状态也按"开始 + 延迟 − 感知延迟"放（当前状态和尾巴照旧）；`+i` 有待机身体管的敌人去掉 idle 家族的根（管里已有它的身体）。
+- **escape** = delay + 规划器的可逃检查：有安全行时，在排序的前 `esc_k` = 4 行里选第一条"计划结束时（或晚锁定时），对任何敌人可能开始的招都还能逃出它的够距"的行（尾检查只再看这一行）；FORCED_RISK 时在排序前 `esc_k_forced` = 8 行里、与第一行在份额之上的每个键都打平的行中选第一条有逃路的（29835a0）。每批 4 行；`esc_deadline_ms`（默认 deadline_ms + 2，从 tick 开始算）之后不再开新批（8b1dd82，计数 `esc_cut`）。审计 `ssbot.tools.forum_react_audit`（`--crest`：Wanderer 录像）。
+
+### 22.2 实战 A/B（Forum_W = fo_A 换 Wanderer，A0b 协议：eval、planner、oracle、真退出 0.2；实例 0–3，种子 350100–350514，每块 5 场、臂的顺序按块轮换；代码 29835a0 与 8b1dd82 两轮合在一起；驱动 `C:\ssbot\sandbox\react2_live.ps1`，清单 `C:\ssbot\data\m2_forum_react2\manifest_29835a0.txt` / `manifest_8b1dd82.txt`，汇总 `ab_pooled_vs_share.json` / `ab_pooled_vs_seencf.json`）
+
+| 臂（FR : REACT : 拼刀） | 场 | 退出中位 s | 每分钟受击 | FORCED_RISK | late_mean | plan p50 ms | 对 share:off:off 成对（s，95 % 区间） | 对 seen_cf:off:off 成对 |
+|---|---|---|---|---|---|---|---|---|
+| share : off : off | 60 | 12.0 | 20.4 | 0.778 | 0.75 | 3.3 | — | |
+| share : delay : off | 30 | 12.4 | 19.5 | 0.775 | 0.93 | 3.2 | −0.6（−1.6…0.4） | |
+| share : escape : off | 60 | 14.2 | 19.0 | 0.792 | 4.55 | 6.2 | +1.7（0.8…2.6） | |
+| seen_cf : off : off | 60 | 22.9 | 10.9 | 0.883 | 0.56 | 3.8 | +10.3（8.8…11.9） | — |
+| seen_cf : escape : off | 60 | 23.9 | 10.1 | 0.886 | 7.71 | 6.6 | +12.4（10.2…14.6） | +2.0（−0.5…4.7），35 / 60 更久 |
+| seen_cf : off : on | 30 | 21.6 | 11.4 | 0.876 | 0.58 | 4.2 | +9.2（6.9…11.4） | **−3.2（−6.1…−0.5）**，12 / 30 |
+| seen_cf : escape : on | 30 | 23.4 | 10.3 | 0.885 | 8.43 | 6.9 | +11.1（8.7…13.5） | −1.2（−4.5…1.8），17 / 30 |
+
+- 全部臂每场都在第 0 波退出（QUIT），0 击杀、0 WOULD_DIE、支撑外命中 0。
+- 只做 delay 没有作用；escape 在 share 上 +1.7 s（显著）、在 seen_cf 上 +2.0 s（区间含 0）；拼刀（`--forum-clash on`，只在 GREEN）在 seen_cf 上短 3.2 s（显著），和 escape 一起 −1.2 s（不显著）。escape 让 plan p50 多约 3 ms、late_mean 从 0.6–0.9 升到 4.6–8.4（汇总脚本的迟到指标）。
+- **FORCED_RISK 的比例开了反应式支撑之后没有降（0.78–0.89）**：去掉"还没开始的招"没有让第 0 波的支撑不再饱和，盖住主角选项的是别的东西。集成任务说明列的候选（未核实）：支撑的余量（`support_margins.json`：Reed 钉、Minister 招架、Tiny 冲撞、钟、符文弹到 3.0 u 的搜索上限，Envoy 冲锋 2.96 u，主角只有 0.5 u 宽）、敌人的身体管、按时间窗放置的已承诺招（入场时刻不确定，0.25 u 粗金字塔）、死亡尾巴、导出的 ±1 bin 延迟。逐组分解（groups2）没有结果。
