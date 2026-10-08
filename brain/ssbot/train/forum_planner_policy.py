@@ -45,6 +45,7 @@ from ssbot.combat.multi_forecast import MultiForecaster, ReactConfig
 from ssbot.combat.planner import PlannerConfig
 from ssbot.combat.safety_filter import FilterContext, KillKnowledge
 from ssbot.combat.tactics.forum_local import ForumTactics, load_forum_playbook
+from ssbot.combat.tactics.gauntlet import GauntletTactics, load_l2_rules
 from ssbot.core.forum import FLOOR_Y
 from ssbot.core.worldstate import Ev
 from ssbot.ipc.framing import ACTION_EXCLUSIVE
@@ -123,7 +124,10 @@ class ForumPlannerPolicy(PlannerPolicy):
         self.params = self.params0
         self.pb, self.rules = load_forum_playbook(playbook)
         self.floor_hero_y = FLOOR_Y + hb.HERO_HALF_U[1]
-        self.tac = ForumTactics(self.pb, self.rules, self.floor_hero_y)
+        local = ForumTactics(self.pb, self.rules, self.floor_hero_y)
+        # R6 v0's L2 target layer above LOCAL (Forum.yaml forum.l2; SSBOT_FORUM_L2=0: LOCAL alone, the A0 tactics)
+        self.l2_rules = load_l2_rules(playbook, os.environ.get("SSBOT_FORUM_L2"))
+        self.tac = GauntletTactics(local, self.l2_rules) if self.l2_rules.enabled else local
         # branch_model: the R5 branch model's history per enemy and Subject.next_p (scoring consumers: O / BAIT);
         # off by default, the planner does not read it yet
         branch = None
@@ -242,6 +246,9 @@ class ForumPlannerPolicy(PlannerPolicy):
         rng.randrange(1 << 30)
         self.backend = OracleBackend()
         self.k = 0
+        if isinstance(self.tac, GauntletTactics):
+            self.tac.reset()
+            self.tac.rng = random.Random(self.episode)    # injected L2 failures: never from the episode's rng
         msg = None
         if self.terrain_tap is not None:
             msg = self.terrain_tap.wait(enc.scene, timeout_s=5.0)
@@ -740,7 +747,9 @@ class ForumPlannerPolicy(PlannerPolicy):
                "kill_hp": kill_hp, "ykill": ykill, "kill_prims": sorted(p.name for p in r.decision.kill_prims),
                "fi": {k: li.get(k) for k in ("posture", "N", "stage1_pass", "enveloped", "hitfx", "react", "capped",
                                              "cut", "overrun", "tv", "seen", "seen_cf", "esc")},
-               "pocket": self.tac.last.get("pocket_veto"), "subj": subj}
+               "pocket": self.tac.last.get("pocket_veto"), "goal": self.tac.last.get("goal"),
+               "goal_why": self.tac.last.get("goal_why"), "goal_t_end": self.tac.last.get("goal_t_end"),
+               "l2_cands": self.tac.last.get("l2_cands"), "subj": subj}
         if getattr(res, "clash", None):
             # the chosen plan relies on a clash: w (every clash in it happens), clashes, ranked in FORCED_RISK (partial,
             # or w below clash_min_p)
@@ -784,4 +793,5 @@ class ForumPlannerPolicy(PlannerPolicy):
                 "first_pending_f": self.first_pending_f, "first_pending_reasons": self.first_pending_reasons,
                 "outcome_reason": self.outcome_reason, "alerts": list(self.sc.alerts),
                 "q4_by_instance": {str(k): v for k, v in getattr(self.sc.sup, "unpredicted_by", {}).items()},
-                "real_quit": self.real_quit_stats(), "keys": keys}
+                "real_quit": self.real_quit_stats(), "keys": keys,
+                "l2": self.tac.stats_dict() if isinstance(self.tac, GauntletTactics) else None}

@@ -329,7 +329,8 @@ class Subject:
     hp_est: float
     hp_sd: float
     pos: tuple | None
-    t_free: float                 # earliest time its current attack can end (s from the origin; 0 when idle)
+    t_free: float                 # earliest time its current attack can end (s from the origin: its start + the
+                                  # family's duration p0.5; 0 when idle)
     t_strike: float               # earliest time it may start a new attack (s from the origin; inf: none in H)
     # the branch model (MultiForecaster(branch=...)): {next family or "wait:<state>": p} when it is in a modelled
     # decision state (scoring only: P / J, O / BAIT; never the support)
@@ -1067,10 +1068,17 @@ class _Builder:
     def _subject_row(self, tr: EnemyTracker, alive: bool, t_strike: float) -> Subject:
         c = tr.cur
         committed = c is not None and c.family != tr.table.spec.idle_family
+        t_free = 0.0
+        if committed:
+            # its current attack's earliest end: the start + the family's logged duration p0.5 (the walk's own
+            # earliest exit is the rare abort's ~0: a Jump Antic -> Start Battle? at 0.0 s; used by L2's Buddy rule)
+            f = tr.table.families.get(c.family)
+            if f is not None and c.t_start is not None:
+                t_free = max(0.0, c.t_start + f.dur[0] - self.origin)
         bv = self.fc.bv
         nxt = None if bv is None or not alive or tr.dead else bv.next_attack_probs(tr, self.fc.t, self.fc.trackers)
         return Subject(tr.iid, tr.tk, alive and not tr.dead, tr.in_play, committed, None if c is None else c.family,
-                       tr.state, tr.hp_est, tr.hp_sd, tr.pos, 0.0, t_strike, nxt)
+                       tr.state, tr.hp_est, tr.hp_sd, tr.pos, t_free, t_strike, nxt)
 
     def _tails(self, tr: EnemyTracker) -> None:
         T = self.origin
