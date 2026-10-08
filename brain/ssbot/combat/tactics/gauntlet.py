@@ -1,0 +1,442 @@
+"""The Forum's L2 target layer, v0 (forum_planner_plan §5 R6, the person's rules of 2026-10-04 / 05): a few rules above
+LOCAL (combat.tactics.forum_local.ForumTactics) that say whom to go for and where to stand. Not the GoalArbiter of the
+plan (§4.1) yet: no fields, no BAIT / SPLIT / POCKET goals, no terminal value.
+
+    tac = GauntletTactics(ForumTactics(pb, rules, floor_y), L2Rules.from_dict(d["forum"]["l2"]))
+    prefs = tac.decide(ws, mf_forecast, decision, h)     # every tick, before ForumPlanner.tick (same call as LOCAL)
+
+Every tick LOCAL decides first (HEAL, LEAVE, EVADE, ENGAGE, HOLD); HEAL and LEAVE stand. Otherwise, every `period`
+ticks and on events (the goal's target gone, out of play or into another family, the goal's time up), L2 picks a goal
+and keeps it until the next pick (hysteresis: a new goal must score `switch_x` times the kept one's). Goals, first that
+applies:
+  PUNISH  an enemy whose engagement spot stays out of every support (all enemies, hazards, entries: MultiForecast
+          .occupied, one batched query for all spots) long enough to get there and swing: window >= t_run + swing_s +
+          margin_s, t_run = start_s + |dx| / run_u_s (dash + sprint, ~17.5 u/s, the person). Picked by slack (window -
+          what it needs) x type priority. This is the far-target rule of the plan's R6 row: a near idle enemy (its next
+          attack can start any time: a short window) against a far one in a long recovery (a long window) -> the far
+          one when the window covers the run, the near one when it does not.
+  RUSH    an isolated enemy (no other enemy in play within iso_u): go and hit it. When every enemy is isolated
+          ("spread"), the fastest pursuer first: the least ETA = max(0, d - reach) / its pursuit speed (pursuit_u_s:
+          the mean speed it closes on the hero at, R0 caches, forum.md §17). Clawmaiden first (only it while it is
+          in play), Minister last (only when nobody else is).
+  KITE    nobody isolated: stand kite_u from the fastest pursuer on its side away from the others (it comes first and
+          alone); with Tinies in play, under the nearest Maestro instead (the Tinies' charge is safer there: below.json
+          7.1 % vs 34 / 58 %).
+Engagement spots by type: under the flyers (Bellbearer, Reed, Minister, Maestro: x = theirs, the person's "under it is
+safer"; the Minister's dash slash carries it two bodies on, so from below you end up behind it), reach_u on the hero's
+side for the rest, and the Choir Clapper by its own controller (cannot be clashed; forum.md §10, clapper_face.md):
+  idle / walk / cast / evade  face it at face_u (its front is where the hero is: FaceObject at every attack start);
+          CC_CAST (about 1.25 s standing, only the ground runes hurt: jump when the near rune lights) also opens the
+          GLIDE_SPIKE hook (vocab; R7's Sawtooth Circlet glide spike is not in the planner yet: nothing reads it).
+  CC_SLAM the one move that needs a step back: out to slam_out_u in front (12.5 u: 2.3 %, 13 u: 0) or, with the hero
+          already behind it, slam_behind_u behind (3 u: 0.2 %); the down slash on its head (15 / 22 in the person's
+          practice: the down-slash hit's 0.16 s i-frames + the bounce) is the planner's to pick from its own rows.
+  CC_JUMP / CC_JUMP_CAST  go under it and behind its landing: landing = take-off + 0.92 clamp(aim - take-off, +-12),
+          aim = hero x at Jump Aim -/+ 5 on its side; the stance behind_land_u behind the landing (the slam collider
+          and the rune slam, 6.62 u in front of it with r 7.19, reach 0.58 u behind it); up slashes on the way scored
+          with up_hit_x.
+  Two Clappers never attack together (Buddy Is Attacking): while one is committed, the other one, if not, is the
+          RUSH / PUNISH pick between the two (priority x 2).
+What a goal sets (scores only: the planner's S / Hz / U never see prefs, §4.4 item 2): mode (the goal's name), target,
+stance_x, boss_x (face it), hit_w (the target x target_hit_w x priority; the others as LOCAL, defensive stances still
+negative) and the weights' factors per goal (l2.weights). LOCAL's EVADE stands against KITE when it says the hero's spot
+is covered within evade_s; PUNISH and RUSH replace it (the planner's support check is the safety).
+Failure (§4.4 item 4): an exception or an injected failure (fail_p) returns LOCAL's prefs untouched, so with fail_p = 1
+every decision is LOCAL's bit for bit (tests/test_forum_l2.py).
+"""
+import math
+import random
+import time
+from dataclasses import dataclass, field, replace
+
+import numpy as np
+
+from ssbot.combat.tactics.forum_local import (CLAPPER, EVADE_HIT_X, EVADE_RISK_X, LEAVE, ForumTactics,
+                                               clapper_facing)
+from ssbot.combat.tactics.modes import EVADE, HEAL, GoalPrefs
+from ssbot.core.worldstate import Ev
+
+PUNISH, RUSH, KITE, LOCAL = "PUNISH", "RUSH", "KITE", "LOCAL"
+CLAWMAIDEN = "Song Handmaiden"
+MAESTRO = "Song Pilgrim Maestro"
+MINISTER = "Song Administrator"
+TINY = "Song Automaton Tiny"
+CC_IDLE, CC_SLAM, CC_JUMP, CC_JUMP_CAST, CC_CAST = "CC_IDLE", "CC_SLAM", "CC_JUMP", "CC_JUMP_CAST", "CC_CAST"
+CC_AIM_STATES = ("Jump Aim",)
+GLIDE_SPIKE = "GLIDE_SPIKE"
+NAIL_SRC = ("Slash", "UpSlash", "DownSlash New", "AltSlash", "WallSlash", "DashSlash")
+
+
+def jump_landing(x0: float, aim_x: float, front: float) -> float:
+    """A Choir Clapper's jump landing x (forum.md §10.1, clapper_face.md §2.1: Jump Aim targets the hero's x 5 u on its
+    own side, the jump's vx = clamp(target - x, +-12), the landing fitted as take-off + 0.92 x that, residual p50 0)."""
+    return x0 + 0.92 * max(-12.0, min(12.0, aim_x - front * 5.0 - x0))
+
+
+@dataclass
+class L2Rules:
+    enabled: bool = True
+    period: int = 6                                       # ticks between picks (10 Hz)
+    switch_x: float = 1.25                                # a new goal must score this many times the kept one's
+    iso_u: float = 8.0                                    # isolated: no other enemy in play within this (|dx|, u)
+    run_u_s: float = 17.5                                 # dash + sprint (the person)
+    start_s: float = 0.05
+    swing_s: float = 0.25                                 # press -> the Reaper side slash's active end (0.208 s)
+    margin_s: float = 0.10
+    window_max_s: float = 2.0
+    reach_u: float = 1.8                                  # engagement spot from the transform (LOCAL's)
+    kite_u: float = 8.0
+    wall_room_u: float = 2.5
+    target_hit_w: float = 3.0
+    up_hit_x: float = 1.5                                 # the Clapper in the air: its hit weight's extra factor
+    face_u: float = 3.0                                   # the Clapper: face-hit distance (2.5-5.4 u, clapper_face §2)
+    slam_out_u: float = 13.0
+    slam_behind_u: float = 3.5
+    behind_land_u: float = 2.5
+    below: tuple = ("Pilgrim 03 Song", "Song Reed", "Song Administrator", MAESTRO)
+    priority: dict = field(default_factory=dict)          # type_key -> factor (Clawmaiden first, Minister last)
+    first: tuple = (CLAWMAIDEN,)                          # while one is in play, only these are picked
+    last: tuple = (MINISTER,)                             # picked only when nobody else is in play
+    pursuit_u_s: dict = field(default_factory=dict)       # type_key -> u/s
+    weights: dict = field(default_factory=dict)           # goal -> {weight name: factor}
+    fail_p: float = 0.0                                   # injected failures (§4.4 item 4)
+
+    @classmethod
+    def from_dict(cls, d: dict | None) -> "L2Rules":
+        d = dict(d or {})
+        out = cls()
+        for k, v in d.items():
+            if not hasattr(out, k):
+                raise KeyError(f"forum.l2: unknown key {k!r}")
+            cur = getattr(out, k)
+            if isinstance(cur, dict):
+                v = {str(a): (dict(b) if isinstance(b, dict) else float(b)) for a, b in (v or {}).items()}
+            elif isinstance(cur, tuple):
+                v = tuple(v or ())
+            elif isinstance(cur, bool):
+                v = bool(v)
+            elif isinstance(cur, int):
+                v = int(v)
+            else:
+                v = float(v)
+            setattr(out, k, v)
+        return out
+
+
+def load_l2_rules(path=None, env: str | None = None) -> L2Rules:
+    """The playbook's forum.l2 section (Forum.yaml), then the run's SSBOT_FORUM_L2 switch (combat_run records it in
+    config.json and each row): "0" / "off" -> disabled (the A0 LOCAL tactics), "fail:<p>" -> injected failures."""
+    from pathlib import Path
+
+    import yaml
+
+    from ssbot.combat.tactics.playbook import PLAYBOOKS
+    p = Path(path) if path else PLAYBOOKS / "Forum.yaml"
+    d = yaml.safe_load(p.read_text("utf-8"))
+    r = L2Rules.from_dict((d.get("forum") or {}).get("l2") or {"enabled": False})
+    sw = (env or "").strip().lower()
+    if sw in ("0", "off", "false"):
+        r.enabled = False
+    elif sw.startswith("fail:"):
+        r.fail_p = float(sw[5:])
+    elif sw not in ("", "1", "on", "true"):
+        raise ValueError(f"SSBOT_FORUM_L2={env!r}: 0 / off, 1 / on or fail:<p>")
+    return r
+
+
+@dataclass
+class Cand:
+    s: object                                             # the Subject
+    x: float
+    y: float
+    d: float                                              # |dx| to the hero
+    spot: float                                           # engagement spot x
+    t_run: float
+    window: float = math.inf
+    iso: bool = False
+    eta: float = math.inf
+    prio: float = 1.0
+
+
+@dataclass
+class Goal:
+    name: str
+    target: int | None
+    stance_x: float
+    t_pick: float
+    score: float = 0.0
+    family: str | None = None
+    t_end: float = math.inf                               # PUNISH: the window's end (game time)
+    vocab: frozenset = frozenset()
+    face_x: float | None = None
+    why: str = ""
+    landed: bool = False                                  # PUNISH: a nail hit on the target inside the window
+
+
+def _new_stats() -> dict:
+    return {"picks": 0, "switches": 0, "changes": 0, "fails": 0, "errors": 0, "ms": [], "goals": {}, "goal_hits": {},
+            "punish_goals": 0, "punish_landed": 0}
+
+
+class GauntletTactics:
+    def __init__(self, local: ForumTactics, rules: L2Rules, seed: int = 0):
+        self.local, self.rules = local, rules
+        self.pb = local.pb
+        self.floor_y = local.floor_y
+        self.rng = random.Random(seed)
+        self.goal: Goal | None = None
+        self.n = 0
+        self.aim: dict[int, float] = {}                   # Clapper iid -> hero x at its Jump Aim
+        self.stats = _new_stats()
+        self.last: dict = {}
+
+    @property
+    def xs(self):
+        return self.local.xs
+
+    def reset(self) -> None:
+        """A new episode: no goal, no stored aims, the per-episode counters cleared."""
+        self.goal, self.n, self.aim = None, 0, {}
+        self.stats = _new_stats()
+
+    # ---- geometry ----
+
+    def _clamp(self, x: float) -> float:
+        x0, x1 = self.pb.arena_x
+        r = self.rules.wall_room_u
+        return min(max(x, x0 + r), x1 - r)
+
+    def _ent(self, ws, iid):
+        for e in getattr(ws, "entities", ()) or ():
+            if getattr(e, "id", None) == iid:
+                return e
+        return None
+
+    def _clapper_spot(self, ws, s, hx: float) -> tuple[float, frozenset, str]:
+        """The Clapper controller (module docstring): (stance x, vocab, why)."""
+        r = self.rules
+        x = float(s.pos[0])
+        side = 1.0 if hx >= x else -1.0                   # where the hero is from it
+        e = self._ent(ws, s.iid)
+        fa = clapper_facing(e) if e is not None else None
+        front = float(fa) if fa is not None else side      # it faces the hero at every attack start
+        fam = s.family
+        if fam == CC_SLAM:
+            if side != front:
+                return self._clamp(x - front * r.slam_behind_u), frozenset(), "slam: stay behind"
+            out = x + front * r.slam_out_u
+            x0, x1 = self.pb.arena_x
+            if x0 + r.wall_room_u <= out <= x1 - r.wall_room_u:
+                return out, frozenset(), "slam: step out"
+            return self._clamp(x - front * r.slam_behind_u), frozenset(), "slam: behind (no room out)"
+        if fam in (CC_JUMP, CC_JUMP_CAST):
+            # before its Jump Aim it will aim at where the hero is then; after, at the stored aim from the take-off
+            aim_x, x0, front = self.aim.get(s.iid, (hx, x, front))
+            land = jump_landing(x0, aim_x, front)
+            return self._clamp(land - front * r.behind_land_u), frozenset(), "jump: under and behind"
+        vocab = frozenset({GLIDE_SPIKE}) if fam == CC_CAST else frozenset()
+        return self._clamp(x + side * r.face_u), vocab, "face"
+
+    def _spot(self, ws, s, hx: float) -> tuple[float, frozenset, str]:
+        r = self.rules
+        x = float(s.pos[0])
+        if s.type_key == CLAPPER:
+            return self._clapper_spot(ws, s, hx)
+        if s.type_key in r.below:
+            return self._clamp(x), frozenset(), "below"
+        return self._clamp(x - r.reach_u if hx < x else x + r.reach_u), frozenset(), "reach"
+
+    # ---- the pick ----
+
+    def candidates(self, ws, fc, hx: float) -> list[Cand]:
+        r = self.rules
+        live = [s for s in (getattr(fc, "subjects", ()) or ()) if s.alive and s.in_play and s.pos is not None]
+        out = []
+        for s in live:
+            x, y = float(s.pos[0]), float(s.pos[1])
+            spot, _, _ = self._spot(ws, s, hx)
+            c = Cand(s, x, y, abs(x - hx), spot, r.start_s + abs(spot - hx) / r.run_u_s)
+            others = [abs(float(o.pos[0]) - x) for o in live if o.iid != s.iid]
+            c.iso = not others or min(others) >= r.iso_u
+            v = r.pursuit_u_s.get(s.type_key, 5.0)
+            c.eta = max(0.0, c.d - r.reach_u) / max(v, 0.1)
+            c.prio = r.priority.get(s.type_key, 1.0)
+            out.append(c)
+        if out:
+            tk = np.arange(0, int(round(r.window_max_s * 30)) + 1) / 30.0
+            X = np.repeat(np.array([[c.spot] for c in out]), len(tk), 1)
+            occ = np.asarray(fc.occupied(X, np.full(X.shape, self.floor_y), tk))
+            for c, row in zip(out, occ):
+                i = np.flatnonzero(row)
+                c.window = float(tk[i[0]]) if len(i) else math.inf
+        return out
+
+    def _pick(self, ws, fc, hx: float, t: float) -> Goal | None:
+        r = self.rules
+        cands = self.candidates(ws, fc, hx)
+        if not cands:
+            return None
+        claps = [c for c in cands if c.s.type_key == CLAPPER]
+        if len(claps) >= 2 and any(c.s.committed for c in claps):
+            # Buddy Is Attacking: the idle one cannot start an attack while the other one is in its
+            busy = {c.s.iid for c in claps if c.s.committed}
+            for c in claps:
+                if c.s.iid not in busy:
+                    c.prio *= 2.0
+        firsts = [c for c in cands if c.s.type_key in r.first]
+        pool = firsts or [c for c in cands if c.s.type_key not in r.last] or cands
+        need = lambda c: c.t_run + r.swing_s + r.margin_s
+        go = [c for c in pool if c.window >= need(c)]
+        if go:
+            c = max(go, key=lambda c: (min(c.window, r.window_max_s) - need(c) + 0.05) * c.prio)
+            return self._goal(ws, c, PUNISH, t, (min(c.window, r.window_max_s) - need(c) + 0.05) * c.prio,
+                              t_end=t + c.window, why=f"window {c.window:.2f} >= {need(c):.2f}")
+        iso = [c for c in pool if c.iso]
+        if iso:
+            if len(iso) == len(pool) and len(pool) > 1:
+                c = min(iso, key=lambda c: c.eta / c.prio)
+                return self._goal(ws, c, RUSH, t, 1.0 / (0.2 + c.eta / c.prio), why="spread: fastest pursuer")
+            c = min(iso, key=lambda c: (c.d + 1.0) / c.prio)
+            return self._goal(ws, c, RUSH, t, 1.0 / (0.2 + c.eta / c.prio), why="isolated")
+        c = min(pool, key=lambda c: c.eta / c.prio)
+        return self._kite(cands, c, hx, t)
+
+    def _kite(self, cands: list[Cand], c: Cand, hx: float, t: float) -> Goal:
+        r = self.rules
+        x0, x1 = self.pb.arena_x
+        maestros = [m for m in cands if m.s.type_key == MAESTRO]
+        if maestros and any(m.s.type_key == TINY for m in cands):
+            m = min(maestros, key=lambda m: m.d)
+            return Goal(KITE, c.s.iid, self._clamp(m.x), t, 1.0 / (0.2 + c.eta), c.s.family, why="under the Maestro")
+        others = [o.x for o in cands if o.s.iid != c.s.iid]
+        g = float(np.mean(others)) if others else hx
+        d = 1.0 if c.x >= g else -1.0
+        x = c.x + d * r.kite_u
+        if not (x0 + r.wall_room_u <= x <= x1 - r.wall_room_u):
+            x = c.x + (1.0 if hx >= c.x else -1.0) * r.kite_u
+        return Goal(KITE, c.s.iid, self._clamp(x), t, 1.0 / (0.2 + c.eta), c.s.family, face_x=c.x,
+                    why="kite: fastest first")
+
+    def _goal(self, ws, c: Cand, name: str, t: float, score: float, t_end: float = math.inf, why: str = "") -> Goal:
+        spot, vocab, how = self._spot(ws, c.s, float(ws.hero.pos.v[0]))
+        return Goal(name, c.s.iid, spot, t, score, c.s.family, t_end, vocab, c.x, f"{why}; {how}")
+
+    def _valid(self, fc, t: float) -> bool:
+        g = self.goal
+        if g is None or g.target is None:
+            return False
+        s = next((s for s in (getattr(fc, "subjects", ()) or ()) if s.iid == g.target), None)
+        if s is None or not s.alive or not s.in_play or s.pos is None or s.family != g.family:
+            return False
+        return t <= g.t_end
+
+    # ---- decide ----
+
+    def decide(self, ws, fc, d, h) -> GoalPrefs:
+        prefs = self.local.decide(ws, fc, d, h)
+        self.last = dict(self.local.last)
+        self.last["goal"] = LOCAL
+        r = self.rules
+        if not r.enabled or prefs.mode in (HEAL, LEAVE):
+            return prefs
+        if r.fail_p > 0.0 and self.rng.random() < r.fail_p:
+            self.stats["fails"] += 1
+            return prefs
+        t0 = time.perf_counter()
+        try:
+            out = self._decide(ws, fc, prefs)
+        except Exception as ex:                           # noqa: BLE001  (L2 fails -> LOCAL, §4.4 item 4)
+            self.stats["errors"] += 1
+            self.last["l2_error"] = repr(ex)[:200]
+            self.goal = None
+            return prefs
+        self.stats["ms"].append((time.perf_counter() - t0) * 1e3)
+        return out
+
+    def _decide(self, ws, fc, prefs: GoalPrefs) -> GoalPrefs:
+        r = self.rules
+        hx = float(ws.hero.pos.v[0])
+        t = float(ws.stamp.t_game_s) if getattr(ws, "stamp", None) is not None else 0.0
+        for s in getattr(fc, "subjects", ()) or ():
+            if s.type_key != CLAPPER or s.pos is None:
+                continue
+            if s.state in CC_AIM_STATES and s.iid not in self.aim:
+                e = self._ent(ws, s.iid)
+                fa = clapper_facing(e) if e is not None else None
+                x = float(s.pos[0])
+                self.aim[s.iid] = (hx, x, float(fa) if fa is not None else (1.0 if hx >= x else -1.0))
+            elif s.family not in (CC_JUMP, CC_JUMP_CAST):
+                self.aim.pop(s.iid, None)
+        self._count_hits(ws, t)
+        self.n += 1
+        keep = self._valid(fc, t)
+        if not keep or self.n % r.period == 0:
+            new = self._pick(ws, fc, hx, t)
+            self.stats["picks"] += 1
+            old = self.goal
+            same = old is not None and new is not None and new.target == old.target and new.name == old.name
+            if new is None:
+                self.goal = None
+            elif not keep or same or new.score >= r.switch_x * old.score:
+                if keep and not same:
+                    self.stats["switches"] += 1
+                if same:
+                    new.t_pick, new.landed = old.t_pick, old.landed
+                self.goal = new
+            if self.goal is not None and not same and (old is None or self.goal is not old):
+                self.stats["changes"] += 1
+                if self.goal.name == PUNISH:
+                    self.stats["punish_goals"] += 1
+        g = self.goal
+        if g is None:
+            return prefs
+        if g.name == KITE and prefs.mode == EVADE:
+            self.last["goal"] = f"{KITE}(EVADE)"
+            return prefs
+        # a kept goal's stance follows its target (the spot moves with it)
+        s = next((s for s in fc.subjects if s.iid == g.target), None)
+        if s is not None and s.pos is not None and g.name != KITE:
+            g.stance_x, g.vocab, _ = self._spot(ws, s, hx)
+            g.face_x = float(s.pos[0])
+        wts = dict(prefs.weights)                         # LOCAL's (Q6's silk gathering in it), EVADE's factors undone
+        if prefs.mode == EVADE:
+            wts["hit"] /= EVADE_HIT_X
+            wts["risk"] /= EVADE_RISK_X
+        for k, v in (r.weights.get(g.name) or {}).items():
+            wts[k] = wts.get(k, 0.0) * float(v)
+        hw = {k: (min(v, self.local.rules.other_hit_w) if v > 0 and k != g.target else v)
+              for k, v in prefs.hit_w.items()}           # LOCAL's own target back to the others' weight
+        if g.target in hw and hw[g.target] > 0:
+            w = r.target_hit_w * r.priority.get(getattr(s, "type_key", ""), 1.0)
+            if s is not None and s.type_key == CLAPPER and s.family in (CC_JUMP, CC_JUMP_CAST):
+                w *= r.up_hit_x
+            hw[g.target] = max(hw[g.target], w)
+        out = replace(prefs, mode=g.name, goal=g.name, target=g.target, stance_x=float(g.stance_x),
+                      boss_x=g.face_x, hit_w=hw, weights=wts, vocab=frozenset(prefs.vocab) | g.vocab)
+        self.stats["goals"][g.name] = self.stats["goals"].get(g.name, 0) + 1
+        self.last.update(goal=g.name, goal_why=g.why, target_type=getattr(s, "type_key", None),
+                         goal_t_end=None if math.isinf(g.t_end) else round(g.t_end, 3))
+        return out
+
+    def _count_hits(self, ws, t: float) -> None:
+        """Hornet's nail hits on the current goal's target (the view's HIT_DEALT events): per goal, and for PUNISH
+        whether one landed inside the window it was picked for (stats punish_landed / punish_goals)."""
+        g = self.goal
+        if g is None:
+            return
+        for ev in getattr(ws, "events", ()) or ():
+            if ev.kind != Ev.HIT_DEALT or ev.data.target_id != g.target:
+                continue
+            if ev.data.attack != "Nail" and str(ev.data.src or "") not in NAIL_SRC:
+                continue
+            gh = self.stats["goal_hits"]
+            gh[g.name] = gh.get(g.name, 0) + 1
+            if g.name == PUNISH and t <= g.t_end and not g.landed:
+                g.landed = True
+                self.stats["punish_landed"] += 1
+
+    def stats_dict(self) -> dict:
+        ms = self.stats["ms"]
+        q = (lambda p: round(float(np.percentile(ms, p)), 3) if ms else None)
+        return {k: (dict(v) if isinstance(v, dict) else v) for k, v in self.stats.items() if k != "ms"} | \
+            {"ms_p50": q(50), "ms_p99": q(99), "ms_n": len(ms)}
