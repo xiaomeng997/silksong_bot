@@ -190,3 +190,22 @@ def test_escape_check_fails_against_the_wall_and_passes_in_the_open(params, aren
     pl2.tick(_world(15.2), kin.initial_state(params, 15.2, FLOOR + params.foot), kin.HoldState.idle(1),
              np.zeros(1, np.int64), mf.forecast(0.8), _prefs(), _ctx())
     assert pl2.last_info["esc"] is None and pl2.audit.esc_ticks == 0
+
+
+def test_escape_check_keeps_to_its_deadline(params, arena, strikes):
+    """esc_deadline_ms: no escape batch starts past it (the order's choice stands, counted esc_cut); inf (the
+    default with deadline_ms inf): never cut."""
+    picks = {}
+    for dl in (math.inf, 0.0):
+        mf = _reed_forecaster(None, frames=3, x=16.5)
+        mf.react = ReactConfig()
+        pl = ForumPlanner(params, arena, PlannerConfig(T=36, threads=2, variants="bounds_lo"),
+                          ForumConfig(deadline_ms=math.inf, chunk=16, react="escape", esc_deadline_ms=dl))
+        r = pl.tick(_world(15.2), kin.initial_state(params, 15.2, FLOOR + params.foot), kin.HoldState.idle(1),
+                    np.zeros(1, np.int64), mf.forecast(0.8), _prefs(), _ctx())
+        esc = pl.last_info["esc"]
+        picks[dl] = r.idx
+        if dl == 0.0:
+            assert pl.audit.esc_cut == 1 and esc["cut"] and esc["checked"] == 0
+        else:
+            assert pl.audit.esc_cut == 0 and not esc["cut"] and esc["checked"] >= 1

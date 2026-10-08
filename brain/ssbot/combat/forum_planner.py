@@ -153,6 +153,9 @@ class ForumConfig:
     #                               extensions (multi_forecast.ReactConfig)
     esc_k: int = 4                # safe rows (in the order) the escape check looks at for one that passes
     esc_k_forced: int = 8         # FORCED_RISK: the first rows of the order it looks at (those tied above the share)
+    esc_deadline_ms: float | None = None   # the escape check starts no batch that would end past this many ms from
+    #                                         the tick's start (a batch costs about what the last ones did; none run:
+    #                                         the order's choice); None: deadline_ms + 2 (inf: deterministic)
     esc_after_f: int = 18         # frames past an attack's first damage its escape path must stay out of it
     # EV_CLASH (forum_planner_plan R8; off: the R3 / R4 planner bit for bit): when no row is safe, rows in contact whose
     # swing is out at the first contact get the clash branch (success: 0.15 s i-frames against all enemy damage, the
@@ -208,6 +211,7 @@ class EnvelopeAudit:
     esc_forced_ticks: int = 0     # FORCED_RISK ticks the escape check ranked (rows tied above the share)
     esc_forced_pass: int = 0      # ... whose chosen row passed it
     esc_forced_moved: int = 0     # ... whose chosen row is not the order's first
+    esc_cut: int = 0              # ticks the escape check stopped before a batch at esc_deadline_ms
     clash_ticks: int = 0          # ticks the clash branch ran (no safe row, clash on)
     clash_tier_skip: int = 0      # ... skipped: the tier is not in clash_tiers, or a pause is pending
     clash_cut: int = 0            # ... stopped before a level by clash_deadline_ms
@@ -628,6 +632,8 @@ class ForumPlanner(Planner):
                 self.reach[kind] = (float(p[:, 0].min()), float(p[:, 0].max()), float(p[:, 1].min()),
                                     float(p[:, 1].max()))
         self._clash_lvl_ms = 0.0          # the clash pass's first level, running mean (its deadline check)
+        self.esc_batch_s = 0.003          # the escape check's batch, running mean (its deadline check)
+        self.esc_cut = False
         self.audit = EnvelopeAudit()
         self.last_info: dict = {}
         self.debug = False                # offline forensics (tools.forum_hit_forensics): last_info["dbg"] keeps the
@@ -909,18 +915,25 @@ class ForumPlanner(Planner):
         return fail, labels
 
     def _escape_pick(self, f, start, hold, full, hold_end, r1, ranked: np.ndarray, hero: tuple[float, float],
-                     k: int | None = None) -> tuple[int | None, int, int, int, list]:
+                     k: int | None = None, t_end: float | None = None) -> tuple[int | None, int, int, int, list]:
         """Of the first k (default esc_k) rows of `ranked`, the first that passes the escape check, else the one with
-        the fewest failures (the first of them). Returns (row or None: no threats / rows, its failures, rows checked,
-        threats, its failing threats)."""
+        the fewest failures (the first of them). No batch starts that would end past t_end (perf_counter s; a batch
+        is taken to cost what the last ones did): self.esc_cut. Returns (row or None: no threats / rows / time, its
+        failures, rows checked, threats, its failing threats)."""
+        self.esc_cut = False
         threats = self._threats(f, hero)
         if not threats or not len(ranked):
             return None, 0, 0, len(threats), []
         best, best_fail, checked, best_lab = None, 0, 0, []
         K = min(self.fcfg.esc_k if k is None else k, len(ranked))
         for c0 in range(0, K, ESC_CHUNK):
+            tc = time.perf_counter()
+            if t_end is not None and tc + self.esc_batch_s > t_end:
+                self.esc_cut = True
+                break
             rows = np.asarray(ranked[c0:min(K, c0 + ESC_CHUNK)], np.int64)
             nf, lab = self._escape_fail(f, start, hold, full, hold_end, r1, rows, threats)
+            self.esc_batch_s = 0.5 * self.esc_batch_s + 0.5 * (time.perf_counter() - tc)
             checked += len(rows)
             for r, n, lb in zip(rows, nf, lab):
                 if n == 0:
@@ -1515,9 +1528,12 @@ class ForumPlanner(Planner):
                     te = time.perf_counter()
                     hero = (0.0, 0.0) if ws is None or ws.hero is None else \
                         (float(ws.hero.pos.v[0]), float(ws.hero.pos.v[1]))
-                    esc_row, nf, nchk, nth, lab = self._escape_pick(f, start, hold, full, hold_end, r1, ranked, hero,
-                                                                    fcfg.esc_k_forced if forced else fcfg.esc_k)
-                    esc_info.update(fail=nf, checked=nchk, threats=nth, forced=bool(forced),
+                    dl = fcfg.esc_deadline_ms if fcfg.esc_deadline_ms is not None else fcfg.deadline_ms + 2.0
+                    esc_row, nf, nchk, nth, lab = self._escape_pick(
+                        f, start, hold, full, hold_end, r1, ranked, hero, fcfg.esc_k_forced if forced else fcfg.esc_k,
+                        None if math.isinf(dl) else t0 + dl * 1e-3)
+                    a.esc_cut += int(self.esc_cut)
+                    esc_info.update(fail=nf, checked=nchk, threats=nth, forced=bool(forced), cut=self.esc_cut,
                                     ms=round((time.perf_counter() - te) * 1e3, 3), why=sorted(set(lab)))
                     if esc_row is not None:
                         a.esc_ticks += int(not forced)
