@@ -200,8 +200,15 @@ def report(runs: list[Path]) -> dict:
                          "main_menu": sum(1 for q in rq if q.get("main_menu")),
                          "wrong_submits": sum(q.get("wrong_submits") or 0 for q in rq)}
     keys = [p.get("keys") or {} for p in pol]
-    pps = [k.get("presses_per_s") for k in keys if k.get("presses_per_s") is not None]
+    # presses per second of play: the key stats' own, else latched presses / the episode's game time (the Forum's
+    # policy leaves presses_per_s None); the plan-change rate (changed plans / decided ones) per episode
+    pps = [k.get("presses_per_s") if k.get("presses_per_s") is not None else
+           (k["latched_total"] / r["ingame_s"] if k.get("latched_total") is not None and r.get("ingame_s") else None)
+           for k, r in zip(keys, rows)]
+    pps = [v for v in pps if v is not None]
     out["presses_per_s_median"] = _q(pps, 50)
+    pcr = [k["plan_change_rate"] for k in keys if k.get("plan_change_rate") is not None]
+    out["plan_change_rate_median"] = _q(pcr, 50)
     out["hits_per_episode"] = round(sum(r.get("hits") or 0 for r in rows) / max(n, 1), 2)
     out["kills_per_episode"] = round(sum(((r.get("gauntlet") or {}).get("kills") or {}).get("n", 0) for r in rows)
                                      / max(n, 1), 2)
@@ -218,6 +225,9 @@ def report(runs: list[Path]) -> dict:
         ms99 = [x["ms_p99"] for x in l2 if x.get("ms_p99") is not None]
         out["l2"] = {"episodes": len(l2), "goals": dict(goals.most_common()), "goal_hits": dict(hits),
                      "changes_per_min": round(sum(x.get("changes", 0) for x in l2) / play_min, 2) if play_min else None,
+                     # target switches (another enemy; round 2 on: tgt_switches) per minute of play
+                     "tgt_switches_per_min": round(sum(x.get("tgt_switches", 0) for x in l2) / play_min, 2)
+                     if play_min and all("tgt_switches" in x for x in l2) else None,
                      "switches": sum(x.get("switches", 0) for x in l2), "fails": sum(x.get("fails", 0) for x in l2),
                      "errors": sum(x.get("errors", 0) for x in l2),
                      "punish_goals": sum(x.get("punish_goals", 0) for x in l2),

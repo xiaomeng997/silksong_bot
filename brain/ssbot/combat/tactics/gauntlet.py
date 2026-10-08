@@ -5,10 +5,16 @@ plan (§4.1) yet: no fields, no BAIT / SPLIT / POCKET goals, no terminal value.
     tac = GauntletTactics(ForumTactics(pb, rules, floor_y), L2Rules.from_dict(d["forum"]["l2"]))
     prefs = tac.decide(ws, mf_forecast, decision, h)     # every tick, before ForumPlanner.tick (same call as LOCAL)
 
-Every tick LOCAL decides first (HEAL, LEAVE, EVADE, ENGAGE, HOLD); HEAL and LEAVE stand. Otherwise, every `period`
-ticks and on events (the goal's target gone, out of play or into another family, the goal's time up), L2 picks a goal
-and keeps it until the next pick (hysteresis: a new goal must score `switch_x` times the kept one's). Goals, first that
-applies:
+Every tick LOCAL decides first (HEAL, LEAVE, EVADE, ENGAGE, HOLD); HEAL and LEAVE stand. Otherwise L2 picks a goal
+every `period` ticks and on events (the goal's target gone or out of play, a PUNISH window over or its target into
+another move: the goal ends; the target into another move: a pick that may keep it) and keeps the goal it has unless
+(round 2: the round-1 A/B changed goals 33 times a minute in wave 0, forum.md §17.5):
+  - the kept goal ended (target gone, out of play, PUNISH over),
+  - the new goal outranks it (rank: PUNISH 2 > a `first` type or the idle Clapper while the other one attacks 1 >
+    the rest 0): an opening or a hard rule takes over at once,
+  - the same target under another rule (KITE <-> RUSH as it gets isolated) after `goal_dwell_s` of the kept rule,
+  - another target scoring `switch_x` times the kept one's after `dwell_s` on the kept target.
+Goals, first that applies:
   PUNISH  an enemy whose engagement spot stays out of every support (all enemies, hazards, entries: MultiForecast
           .occupied, one batched query for all spots) from the hero's arrival through the swing: window (the first
           cover at or after t_run; a cover before the arrival does not count) >= t_run + swing_s + margin_s, t_run =
@@ -79,6 +85,8 @@ class L2Rules:
     enabled: bool = True
     period: int = 6                                       # ticks between picks (10 Hz)
     switch_x: float = 1.25                                # a new goal must score this many times the kept one's
+    dwell_s: float = 2.0                                  # a kept target is held this long before another one (same rank)
+    goal_dwell_s: float = 0.5                             # the same target under another rule after this long
     iso_u: float = 8.0                                    # isolated: no other enemy in play within this (|dx|, u)
     run_u_s: float = 17.5                                 # dash + sprint (the person)
     start_s: float = 0.05
@@ -173,11 +181,13 @@ class Goal:
     face_x: float | None = None
     why: str = ""
     landed: bool = False                                  # PUNISH: a nail hit on the target inside the window
+    rank: int = 0                                         # PUNISH 2, a `first` type / the idle Clapper's turn 1, else 0
+    t_goal: float = 0.0                                   # since when this rule on this target (t_pick: this target)
 
 
 def _new_stats() -> dict:
-    return {"picks": 0, "switches": 0, "changes": 0, "fails": 0, "errors": 0, "ms": [], "goals": {}, "goal_hits": {},
-            "punish_goals": 0, "punish_landed": 0}
+    return {"picks": 0, "switches": 0, "changes": 0, "tgt_switches": 0, "fails": 0, "errors": 0, "ms": [], "goals": {},
+            "goal_hits": {}, "punish_goals": 0, "punish_landed": 0}
 
 
 class GauntletTactics:
@@ -286,58 +296,87 @@ class GauntletTactics:
         if not cands:
             return None
         claps = [c for c in cands if c.s.type_key == CLAPPER]
+        turn = set()
         if len(claps) >= 2 and any(c.s.committed for c in claps):
             # Buddy Is Attacking: the idle one cannot start an attack while the other one is in its
             busy = {c.s.iid for c in claps if c.s.committed}
             for c in claps:
                 if c.s.iid not in busy:
                     c.prio *= 2.0
+                    turn.add(c.s.iid)
         firsts = [c for c in cands if c.s.type_key in r.first]
         pool = firsts or [c for c in cands if c.s.type_key not in r.last] or cands
+        rank = (lambda c: 1 if c.s.type_key in r.first or c.s.iid in turn else 0)
         need = lambda c: c.t_run + r.swing_s + r.margin_s
         go = [c for c in pool if c.window >= need(c)]
         if go:
             c = max(go, key=lambda c: (min(c.window, r.window_max_s) - need(c) + 0.05) * c.prio)
             return self._goal(ws, c, PUNISH, t, (min(c.window, r.window_max_s) - need(c) + 0.05) * c.prio,
-                              t_end=t + c.window, why=f"window {c.window:.2f} >= {need(c):.2f}")
+                              t_end=t + c.window, why=f"window {c.window:.2f} >= {need(c):.2f}", rank=2)
         iso = [c for c in pool if c.iso]
         if iso:
             if len(iso) == len(pool) and len(pool) > 1:
                 c = min(iso, key=lambda c: c.eta / c.prio)
-                return self._goal(ws, c, RUSH, t, 1.0 / (0.2 + c.eta / c.prio), why="spread: fastest pursuer")
+                return self._goal(ws, c, RUSH, t, 1.0 / (0.2 + c.eta / c.prio), why="spread: fastest pursuer",
+                                  rank=rank(c))
             c = min(iso, key=lambda c: (c.d + 1.0) / c.prio)
-            return self._goal(ws, c, RUSH, t, 1.0 / (0.2 + c.eta / c.prio), why="isolated")
+            return self._goal(ws, c, RUSH, t, 1.0 / (0.2 + c.eta / c.prio), why="isolated", rank=rank(c))
         c = min(pool, key=lambda c: c.eta / c.prio)
-        return self._kite(cands, c, hx, t)
+        g = self._kite(cands, c, hx, t)
+        g.rank = rank(c)
+        return g
 
-    def _kite(self, cands: list[Cand], c: Cand, hx: float, t: float) -> Goal:
+    def _kite_spot(self, subjects, target, hx: float) -> tuple[float, str]:
+        """KITE's stance (module docstring) from the enemies in play now: kite_u from the target on its side away from
+        the others, or under the nearest Maestro while Tinies are in play."""
         r = self.rules
         x0, x1 = self.pb.arena_x
-        maestros = [m for m in cands if m.s.type_key == MAESTRO]
-        if maestros and any(m.s.type_key == TINY for m in cands):
-            m = min(maestros, key=lambda m: m.d)
-            return Goal(KITE, c.s.iid, self._clamp(m.x), t, 1.0 / (0.2 + c.eta), c.s.family, why="under the Maestro")
-        others = [o.x for o in cands if o.s.iid != c.s.iid]
+        cx = float(target.pos[0])
+        live = [s for s in subjects if s.alive and s.in_play and s.pos is not None]
+        maestros = [m for m in live if m.type_key == MAESTRO]
+        if maestros and any(m.type_key == TINY for m in live):
+            m = min(maestros, key=lambda m: abs(float(m.pos[0]) - hx))
+            return self._clamp(float(m.pos[0])), "under the Maestro"
+        others = [float(o.pos[0]) for o in live if o.iid != target.iid]
         g = float(np.mean(others)) if others else hx
-        d = 1.0 if c.x >= g else -1.0
-        x = c.x + d * r.kite_u
+        d = 1.0 if cx >= g else -1.0
+        x = cx + d * r.kite_u
         if not (x0 + r.wall_room_u <= x <= x1 - r.wall_room_u):
-            x = c.x + (1.0 if hx >= c.x else -1.0) * r.kite_u
-        return Goal(KITE, c.s.iid, self._clamp(x), t, 1.0 / (0.2 + c.eta), c.s.family, face_x=c.x,
-                    why="kite: fastest first")
+            x = cx + (1.0 if hx >= cx else -1.0) * r.kite_u
+        return self._clamp(x), "kite: fastest first"
 
-    def _goal(self, ws, c: Cand, name: str, t: float, score: float, t_end: float = math.inf, why: str = "") -> Goal:
+    def _kite(self, cands: list[Cand], c: Cand, hx: float, t: float) -> Goal:
+        x, why = self._kite_spot([o.s for o in cands], c.s, hx)
+        return Goal(KITE, c.s.iid, x, t, 1.0 / (0.2 + c.eta), c.s.family, face_x=c.x, why=why, t_goal=t)
+
+    def _goal(self, ws, c: Cand, name: str, t: float, score: float, t_end: float = math.inf, why: str = "",
+              rank: int = 0) -> Goal:
         spot, vocab, how = self._spot(ws, c.s, float(ws.hero.pos.v[0]))
-        return Goal(name, c.s.iid, spot, t, score, c.s.family, t_end, vocab, c.x, f"{why}; {how}")
+        return Goal(name, c.s.iid, spot, t, score, c.s.family, t_end, vocab, c.x, f"{why}; {how}", rank=rank,
+                    t_goal=t)
 
-    def _valid(self, fc, t: float) -> bool:
+    def _status(self, fc, t: float) -> str:
+        """The kept goal: "gone" (none, its target dead / out of play, a PUNISH window over or its target into another
+        move: the goal ends), "event" (its target into another move: pick now, the goal may stay), else "ok"."""
         g = self.goal
         if g is None or g.target is None:
-            return False
+            return "gone"
         s = next((s for s in (getattr(fc, "subjects", ()) or ()) if s.iid == g.target), None)
-        if s is None or not s.alive or not s.in_play or s.pos is None or s.family != g.family:
-            return False
-        return t <= g.t_end
+        if s is None or not s.alive or not s.in_play or s.pos is None or t > g.t_end:
+            return "gone"
+        if s.family != g.family:
+            return "gone" if g.name == PUNISH else "event"
+        return "ok"
+
+    def _may_switch(self, old: Goal, new: Goal, t: float) -> bool:
+        """A kept goal gives way (module docstring): to a higher rank at once; to the same target under another rule
+        after goal_dwell_s; to another target scoring switch_x times more after dwell_s on the kept one."""
+        r = self.rules
+        if new.rank > old.rank:
+            return True
+        if new.target == old.target:
+            return t - old.t_goal >= r.goal_dwell_s
+        return new.score >= r.switch_x * old.score and t - old.t_pick >= r.dwell_s
 
     # ---- decide ----
 
@@ -378,22 +417,29 @@ class GauntletTactics:
                 self.aim.pop(s.iid, None)
         self._count_hits(ws, t)
         self.n += 1
-        keep = self._valid(fc, t)
-        if not keep or self.n % r.period == 0:
+        status = self._status(fc, t)
+        keep = status != "gone"
+        if status != "ok" or self.n % r.period == 0:
             new = self._pick(ws, fc, hx, t)
             self.stats["picks"] += 1
             old = self.goal
             same = old is not None and new is not None and new.target == old.target and new.name == old.name
             if new is None:
                 self.goal = None
-            elif not keep or same or new.score >= r.switch_x * old.score:
+            elif not keep or same or self._may_switch(old, new, t):
                 if keep and not same:
                     self.stats["switches"] += 1
                 if same:
-                    new.t_pick, new.landed = old.t_pick, old.landed
+                    new.t_pick, new.t_goal, new.landed = old.t_pick, old.t_goal, old.landed
+                elif keep and new.target == old.target:
+                    new.t_pick = old.t_pick                   # another rule on the same target: still that target
                 self.goal = new
+            else:
+                old.family = next(s.family for s in fc.subjects if s.iid == old.target)    # the event is handled
             if self.goal is not None and not same and (old is None or self.goal is not old):
                 self.stats["changes"] += 1
+                if old is not None and self.goal.target != old.target:
+                    self.stats["tgt_switches"] += 1
                 if self.goal.name == PUNISH:
                     self.stats["punish_goals"] += 1
         g = self.goal
@@ -401,11 +447,15 @@ class GauntletTactics:
             return prefs
         if g.name == KITE and prefs.mode == EVADE:
             self.last["goal"] = f"{KITE}(EVADE)"
+            self.stats["goals"][self.last["goal"]] = self.stats["goals"].get(self.last["goal"], 0) + 1
             return prefs
-        # a kept goal's stance follows its target (the spot moves with it)
+        # a kept goal's stance follows its target (the spot moves with it; KITE's with the others too)
         s = next((s for s in fc.subjects if s.iid == g.target), None)
-        if s is not None and s.pos is not None and g.name != KITE:
-            g.stance_x, g.vocab, _ = self._spot(ws, s, hx)
+        if s is not None and s.pos is not None:
+            if g.name == KITE:
+                g.stance_x, _ = self._kite_spot(fc.subjects, s, hx)
+            else:
+                g.stance_x, g.vocab, _ = self._spot(ws, s, hx)
             g.face_x = float(s.pos[0])
         wts = dict(prefs.weights)                         # LOCAL's (Q6's silk gathering in it), EVADE's factors undone
         if prefs.mode == EVADE:

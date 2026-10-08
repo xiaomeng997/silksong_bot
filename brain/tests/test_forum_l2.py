@@ -227,3 +227,55 @@ def test_punish_hit_inside_the_window_is_counted():
     t.decide(world(31.0, t=10.5, events=[hit]), fc, None, 3)
     st = t.stats_dict()
     assert st["punish_goals"] == 1 and st["punish_landed"] == 1 and st["goal_hits"]["PUNISH"] == 1
+
+
+def _run(t, ss, hx, at, n=6, t_min=0.2, covers=()):
+    """n decisions at game time `at` (n = period: one periodic pick among them)."""
+    p = None
+    for _ in range(n):
+        p = t.decide(world(hx, t=at), WinFc(ss, covers=covers, t_min=t_min), None, 3)
+    return p
+
+
+def test_a_kept_target_is_held_for_the_dwell():
+    # round 2: the round-1 A/B changed goals 33 times a minute in wave 0; another target needs switch_x and dwell_s
+    t = l2()
+    a, b = subj(1, CH, 30.0), subj(2, EN, 45.0)
+    p = t.decide(world(20.0, t=10.0), WinFc([a, b]), None, 3)
+    assert p.goal == RUSH and p.target == 1                       # spread: the fastest pursuer
+    b = subj(2, EN, 15.0)                                         # now the nearer (ETA 0.39 s against 0.85 s)
+    assert _run(t, [a, b], 20.0, 10.5).target == 1                # held: 0.5 s < dwell 2 s
+    assert _run(t, [a, b], 20.0, 12.2).target == 2                # then the switch
+    st = t.stats_dict()
+    assert st["tgt_switches"] == 1 and st["switches"] == 1
+
+
+def test_a_move_change_of_the_target_does_not_drop_it():
+    t = l2()
+    a, b = subj(1, CH, 30.0), subj(2, EN, 45.0)
+    t.decide(world(20.0, t=10.0), WinFc([a, b]), None, 3)
+    a = subj(1, CH, 30.0, state="Slash Antic", family="CH_SLASH", committed=True)
+    b = subj(2, EN, 15.0)
+    picks = t.stats["picks"]
+    p = t.decide(world(20.0, t=10.2), WinFc([a, b]), None, 3)
+    assert p.target == 1 and t.stats["picks"] == picks + 1        # the event picked once and kept the target
+    p = t.decide(world(20.0, t=10.22), WinFc([a, b]), None, 3)
+    assert p.target == 1 and t.stats["picks"] == picks + 1        # handled: no pick on every tick after it
+
+
+def test_an_opening_and_a_rule_change_do_not_wait():
+    # PUNISH (rank 2) takes over inside the dwell
+    t = l2()
+    a, b = subj(1, CH, 30.0), subj(2, EN, 45.0)
+    t.decide(world(20.0, t=10.0), WinFc([a, b]), None, 3)
+    b = subj(2, EN, 15.0, state="Slash Recover", family="EN_SLASH", committed=True)
+    p = _run(t, [a, b], 20.0, 10.2, covers=[(16.0, 18.0, 1.5)])  # its spot (16.8) clear for 1.5 s
+    assert p.goal == PUNISH and p.target == 2
+    # the same target under another rule (isolated -> clustered: RUSH -> KITE) after goal_dwell_s
+    t = l2()
+    a, b = subj(1, CH, 30.0), subj(2, EN, 45.0)
+    t.decide(world(20.0, t=10.0), WinFc([a, b], t_min=9.0), None, 3)
+    b = subj(2, EN, 36.0)
+    assert _run(t, [a, b], 20.0, 10.3, t_min=9.0).goal == RUSH    # 0.3 s < goal_dwell 0.5 s
+    p = _run(t, [a, b], 20.0, 10.6, t_min=9.0)
+    assert p.goal == KITE and p.target == 1 and t.stats["tgt_switches"] == 0
