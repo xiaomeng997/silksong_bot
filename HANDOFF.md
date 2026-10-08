@@ -1852,6 +1852,17 @@ CODE_REV + the R3 tables from `C:\ssbot\tables\forum_r3_2a10a0d`); outputs `C:\s
   FORCED_RISK. Field build p50 1.5-2.0 / p99 3.3-4.1 ms; 0 violations of "empty => fine empty" (synthetic test; on the
   recording 967,492 empty committed-field points, the full field had no empty cell).
 - Body field + terms: see forum.md 17.3 / 17.4 (replay table: tick p50 / p99, tv cost, chosen rows' E / trapped).
+- Terminal value cost (A0b replay i1 ep3, heavy load, offsets per cell, 35e5fe6): p50 1.30 / p99 3.65 ms per tick
+  (before the per-cell offsets 1.65 / 4.52); tick p50 13.7 ms in every config at that load (A0 live 7.4 ms).
+- Bell Beast (Forum switch off): `planner_bench` on 20261003_144536 i4_000, 3000 frames, main bc46dc9 (frozen
+  `C:\ssbot\live_main_bc46dc9`) vs 35e5fe6: every non-timing output equal (2,951 ticks, FORCED_RISK share 0.0285);
+  by construction the Bell Beast path reads neither `hit_polys` nor combat.terminal. Full test suite passed (tests +
+  ssbot/tests). The 50-episode Bell Beast batch is the integration step's.
+
+### Stopped (2026-10-08 01:23 PDT: weekly usage 100 % before its 03:00 reset)
+
+The A/B has not started yet (the collection on 0-4 was still running); its driver is armed and correctly configured
+(below), so it was left to run. Not done: the A/B report (Next 1).
 
 ### Running
 
