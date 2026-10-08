@@ -187,7 +187,7 @@ def _src_type(src: str | None) -> str | None:
     return None
 
 
-def _contact_setup(buf, i0, iid, a, b, inflate, clash_at, hits, hit_owner, fams, crest, slot, acc) -> None:
+def _contact_setup(buf, i0, iid, a, b, inflate, clash_at, hits, hit_owner, fams, crest, slot, acc):
     """The planner's EV_CLASH rule on the recording: e's first contact with the inflated hero box in the swing (any
     damage collider, the body included) falls inside the swing's active window -> clash / hit / neither, keyed by e's
     move at the contact and whether e was in front of the facing (a side slash covers only the front)."""
@@ -203,7 +203,7 @@ def _contact_setup(buf, i0, iid, a, b, inflate, clash_at, hits, hit_owner, fams,
             k_h = k
             break
     if k_h is None or k_h < i0 + a or k_h == i0:
-        return
+        return None
     tk, st, cols, pos = buf[k_h]["ents"][iid]
     fam = fams.get(tk, {}).get(st or "", "?")
     hb = buf[k_h]["box"]
@@ -226,6 +226,7 @@ def _contact_setup(buf, i0, iid, a, b, inflate, clash_at, hits, hit_owner, fams,
                 break
     clashable = any(cl for _, cl, _ in cols)
     acc["contact_setups"][f"{crest}|{tk}|{fam}|{slot}|{side}|{int(clashable)}"][out] += 1
+    return k_h, tk, fam, side, out
 
 
 def scan(unit: str, states, reach: Reach, fams: dict, inflate: float, acc: dict) -> None:
@@ -308,67 +309,91 @@ def scan(unit: str, states, reach: Reach, fams: dict, inflate: float, acc: dict)
         polys, (a, b) = reach.get(crest, slot)
         i0 = i
         for iid in fr["ents"]:
-            _contact_setup(buf, i0, iid, a, b, inflate, clash_at, hits, hit_owner, fams, crest, slot, acc)
-            k_c = None
-            touched_before = False
-            same = False
-            for k in range(i0, min(n, i0 + b + 1)):
-                fk = buf[k]
-                ent = fk["ents"].get(iid)
-                if ent is None:
-                    continue
-                tk, st, cols, pos = ent
-                hb = fk["box"]
-                big = (hb[0] - inflate, hb[1] - inflate, hb[2] + inflate, hb[3] + inflate)
-                touch = any(_gap(bb, big) == 0.0 for bb, _, _ in cols)
-                if k >= i0 + a:
-                    cx, cy = 0.5 * (hb[0] + hb[2]), 0.5 * (hb[1] + hb[3])
-                    v, stt = _poly_world(polys, cx, cy, fk["face"])
-                    meet = any(cl and _rect_meets_polys(bb[0], bb[1], bb[2], bb[3], v, stt, 0.0, 0.0)
-                               for bb, cl, _ in cols)
-                    if meet:
-                        k_c, same = k, touch
-                        break
-                if touch:
-                    touched_before = True
-                    break
-            if k_c is None or touched_before:
-                continue
-            tk, st, cols, pos = buf[k_c]["ents"][iid]
-            fam = fams.get(tk, {}).get(st or "", "?")
-            dx = pos[0] - 0.5 * (buf[k_c]["box"][0] + buf[k_c]["box"][2])
-            dy = pos[1] - 0.5 * (buf[k_c]["box"][1] + buf[k_c]["box"][3])
-            out = "neither"
-            t_out = None
-            for k in range(max(i0, k_c - 1), min(n, i0 + b + 2)):
-                for c in clash_at.get(k, ()):
-                    if c[1] == iid:
-                        out, t_out = "clash", k
-                    elif out != "clash":
-                        out, t_out = "other_clash", k
-                if out == "clash":
-                    break
-            if out not in ("clash",):
-                for j, (hi, htk, hsrc) in enumerate(hits):
-                    if hi < i0 or hi > k_c + FAIL_F:
-                        continue
-                    if htk == tk and hit_owner[j] == iid and (t_out is None or hi <= t_out):
-                        out, t_out = "hit", hi
-                        break
-            key = f"{crest}|{tk}|{fam}|{st}|{slot}"
-            row = acc["setups"][key]
-            row["n"] += 1
-            row[out] += 1
-            row["same_frame"] += int(same)
-            row["same_frame_" + out] += int(same)
-            side = "front" if dx * fr["face"] >= 0 else "behind"
-            acc["by_side"][f"{crest}|{tk}|{slot}|{side}"][out] += 1
-            if len(acc["examples"][out]) < 40:
-                acc["examples"][out].append({"unit": unit, "f": buf[i0]["f"], "k_c": k_c - i0, "type": tk,
-                                             "state": st, "slot": slot, "crest": crest, "t_out": None if t_out is None
-                                             else t_out - i0, "dx": round(dx, 2), "dy": round(dy, 2)})
+            cs = _contact_setup(buf, i0, iid, a, b, inflate, clash_at, hits, hit_owner, fams, crest, slot, acc)
+            cl = _clash_setup(buf, i0, iid, a, b, polys, inflate, clash_at, hits, hit_owner, fams, crest, slot, unit,
+                              fr["face"], acc)
+            # the union (an opportunity the planner's rule may see either way: the attack meets the clash reach first,
+            # or reaches the hurtbox while the swing is out), keyed at its first frame
+            u = [x for x in (cs, cl) if x is not None]
+            if u:
+                first = min(u, key=lambda x: x[0])
+                outs = {x[-1] for x in u}
+                out = next(o for o in ("clash", "hit", "other_clash", "neither") if o in outs)
+                acc["union_setups"][f"{crest}|{first[1]}|{first[2]}|{slot}|{first[3]}"][out] += 1
         i += 1
-    # after each clash: the same enemy's next events (chains) and blocked damage (two-sided)
+    _after(clashes, hits, blocked, buf, fams, acc)
+    acc["clashes"] += len(clashes)
+    acc["hits"] += len(hits)
+    acc["frames"] += n
+
+
+def _clash_setup(buf, i0, iid, a, b, polys, inflate, clash_at, hits, hit_owner, fams, crest, slot, unit, face0, acc):
+    """The clash reach meets one of e's clash colliders inside the window before any of e's colliders touched the
+    inflated hero box: (k_c, type, family, side, outcome) or None."""
+    n = len(buf)
+    k_c = None
+    touched_before = False
+    same = False
+    for k in range(i0, min(n, i0 + b + 1)):
+        fk = buf[k]
+        ent = fk["ents"].get(iid)
+        if ent is None:
+            continue
+        tk, st, cols, pos = ent
+        hb = fk["box"]
+        big = (hb[0] - inflate, hb[1] - inflate, hb[2] + inflate, hb[3] + inflate)
+        touch = any(_gap(bb, big) == 0.0 for bb, _, _ in cols)
+        if k >= i0 + a:
+            cx, cy = 0.5 * (hb[0] + hb[2]), 0.5 * (hb[1] + hb[3])
+            v, stt = _poly_world(polys, cx, cy, fk["face"])
+            meet = any(cl and _rect_meets_polys(bb[0], bb[1], bb[2], bb[3], v, stt, 0.0, 0.0)
+                       for bb, cl, _ in cols)
+            if meet:
+                k_c, same = k, touch
+                break
+        if touch:
+            touched_before = True
+            break
+    if k_c is None or touched_before:
+        return None
+    tk, st, cols, pos = buf[k_c]["ents"][iid]
+    fam = fams.get(tk, {}).get(st or "", "?")
+    dx = pos[0] - 0.5 * (buf[k_c]["box"][0] + buf[k_c]["box"][2])
+    dy = pos[1] - 0.5 * (buf[k_c]["box"][1] + buf[k_c]["box"][3])
+    out = "neither"
+    t_out = None
+    for k in range(max(i0, k_c - 1), min(n, i0 + b + 2)):
+        for c in clash_at.get(k, ()):
+            if c[1] == iid:
+                out, t_out = "clash", k
+            elif out != "clash":
+                out, t_out = "other_clash", k
+        if out == "clash":
+            break
+    if out not in ("clash",):
+        for j, (hi, htk, hsrc) in enumerate(hits):
+            if hi < i0 or hi > k_c + FAIL_F:
+                continue
+            if htk == tk and hit_owner[j] == iid and (t_out is None or hi <= t_out):
+                out, t_out = "hit", hi
+                break
+    key = f"{crest}|{tk}|{fam}|{st}|{slot}"
+    row = acc["setups"][key]
+    row["n"] += 1
+    row[out] += 1
+    row["same_frame"] += int(same)
+    row["same_frame_" + out] += int(same)
+    side = "front" if dx * face0 >= 0 else "behind"
+    acc["by_side"][f"{crest}|{tk}|{slot}|{side}"][out] += 1
+    if len(acc["examples"][out]) < 40:
+        acc["examples"][out].append({"unit": unit, "f": buf[i0]["f"], "k_c": k_c - i0, "type": tk,
+                                     "state": st, "slot": slot, "crest": crest, "t_out": None if t_out is None
+                                     else t_out - i0, "dx": round(dx, 2), "dy": round(dy, 2)})
+    return k_c, tk, fam, side, out
+
+
+def _after(clashes, hits, blocked, buf, fams, acc) -> None:
+    """After each clash: the same enemy's next events (chains) and blocked damage (two-sided)."""
     for ci, owner, tk, st, name in clashes:
         fam = fams.get(tk or "", {}).get(st or "", "?")
         key = f"{buf[ci]['crest']}|{tk}|{fam}|{st}|{name}"
@@ -386,9 +411,6 @@ def scan(unit: str, states, reach: Reach, fams: dict, inflate: float, acc: dict)
         for bi, why, btk in blocked:
             if ci <= bi <= ci + BLOCK_F:
                 acc["blocked_after_clash"][f"{why}|same={btk == tk}"] += 1
-    acc["clashes"] += len(clashes)
-    acc["hits"] += len(hits)
-    acc["frames"] += n
 
 
 def _rate(a: int, n: int) -> float | None:
@@ -434,8 +456,15 @@ def summarise(acc: dict) -> dict:
         contact.append({"crest": crest, "type": tk, "family": fam, "slot": slot, "side": side,
                         "clashable_collider_on": bool(int(cl)), "n": n, **dict(c),
                         "p_clash": _rate(c["clash"], n), "p_hit": _rate(c["hit"], n)})
+    union = []
+    for key, c in sorted(acc["union_setups"].items()):
+        crest, tk, fam, slot, side = key.split("|")
+        n = sum(c.values())
+        union.append({"crest": crest, "type": tk, "family": fam, "slot": slot, "side": side, "n": n, **dict(c),
+                      "p_clash": _rate(c["clash"], n), "p_hit": _rate(c["hit"], n)})
     return {"swings": dict(acc["swings"]), "clashes": acc["clashes"], "hits": acc["hits"], "frames": acc["frames"],
             "units": acc["units"], "by_family": fams, "by_state": rows, "contact_setups": contact,
+            "union_setups": union,
             "after_clash": after,
             "blocked_after_clash": dict(acc["blocked_after_clash"]),
             "by_side": {k: dict(v) for k, v in sorted(acc["by_side"].items())}, "examples": acc["examples"]}
@@ -443,7 +472,7 @@ def summarise(acc: dict) -> dict:
 
 def new_acc() -> dict:
     return {"swings": Counter(), "setups": defaultdict(Counter), "by_side": defaultdict(Counter),
-            "contact_setups": defaultdict(Counter),
+            "contact_setups": defaultdict(Counter), "union_setups": defaultdict(Counter),
             "after_clash": defaultdict(lambda: {"n": 0, "reclash": 0, "reclash_gap_f": [], "reclash_names": Counter(),
                                                 "hit_after": 0, "hit_gap_f": []}),
             "blocked_after_clash": Counter(), "examples": defaultdict(list), "clashes": 0, "hits": 0, "frames": 0,
@@ -466,16 +495,17 @@ def wilson_ub(k: int, n: int, z: float = 1.96) -> float:
     return (p + z * z / (2 * n) + z * math.sqrt(p * (1 - p) / n + z * z / (4 * n * n))) / (1 + z * z / n)
 
 
-def build_table(stats: list[dict], min_n: int = 10) -> dict:
-    """clash.json from forum_clash_stats outputs: per (type, family, slot) the contact setups (the planner's EV_CLASH
-    rule on the recordings: the enemy's first contact inside the swing's active window; a side or wall slash only
-    with the enemy in front, up / down whatever the horizontal side), both crests pooled (the rule conditions on the
-    window, which is where the crests differ), p_fail = the Wilson 95 % upper bound of hit / n; keys with n < min_n,
-    the NEVER types / families and the body-only families are left out (= not clashable)."""
+def build_table(stats: list[dict], min_n: int = 10, kind: str = "union_setups") -> dict:
+    """clash.json from forum_clash_stats outputs: per (type, family, slot) the union setups (the planner's EV_CLASH
+    premise on the recordings: the enemy's attack meets the swing's clash reach first, or reaches the inflated hurtbox
+    while the swing is out; a contact setup alone misses the clashes that kept the attack off the hurtbox), a side or
+    wall slash only with the enemy in front, up / down whatever the horizontal side, both crests pooled (the rule
+    conditions on the window, which is where the crests differ), p_fail = the Wilson 95 % upper bound of hit / n;
+    keys with n < min_n, the NEVER types / families and the body-only families are left out (= not clashable)."""
     agg: dict = defaultdict(Counter)
     by_crest: dict = defaultdict(Counter)
     for st in stats:
-        for r in st.get("contact_setups") or ():
+        for r in st.get(kind) or ():
             slot = "side" if r["slot"] == "normal" else r["slot"]
             if slot in ("side", "wall") and r["side"] != "front":
                 continue
@@ -497,7 +527,7 @@ def build_table(stats: list[dict], min_n: int = 10) -> dict:
         else:
             p_fail[f"{tk}|{fam}|{slot}"] = row
     return {"build": "1.0.30000", "rule": build_table.__doc__.split("\n\n")[0].replace("\n", " "),
-            "min_n": min_n, "p_fail": p_fail, "left_out": left_out,
+            "min_n": min_n, "kind": kind, "p_fail": p_fail, "left_out": left_out,
             "never_types": NEVER_TYPES, "never_families": {f"{a}|{b}": v for (a, b), v in NEVER_FAMILIES.items()}}
 
 

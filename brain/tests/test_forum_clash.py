@@ -120,7 +120,7 @@ def test_clash_table_and_builder(tmp_path):
                  "side": "front", "clashable_collider_on": False, "n": 50, "neither": 50})
     rows.append({"crest": "Reaper", "type": "Song Reed", "family": "RE_IDLE", "slot": "up",
                  "side": "front", "clashable_collider_on": False, "n": 50, "clash": 50})
-    tab = build_table([{"contact_setups": rows}], min_n=10)
+    tab = build_table([{"union_setups": rows}], min_n=10)
     k = "Song Pilgrim 01|EN_SLASH|side"
     assert tab["p_fail"][k]["n"] == 40 and tab["p_fail"][k]["hit"] == 1      # the behind rows are left out
     assert tab["p_fail"][k]["p_fail"] == round(wilson_ub(1, 40), 4)
