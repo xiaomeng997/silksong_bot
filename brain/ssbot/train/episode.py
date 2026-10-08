@@ -239,7 +239,8 @@ class AttemptRecord:
     tail_end: str | None = None                  # how the tail ended: "quiet", "scene <name>" (None: no tail / cut)
     loop_gap_ms_max: float | None = None         # the longest wall time between two turns of the fight loop (each
                                                  # sends one ACTION): the oracle's brain-lost watchdog pauses the game
-                                                 # after 250 ms and 6 frames without one
+                                                 # after 250 ms and 6 frames without one (a game hitch that sends no
+                                                 # STATE for as long shows here too, but does not trip the watchdog)
     loop_gaps_250: int = 0                       # turns that came 250 ms or more after the one before
 
 
