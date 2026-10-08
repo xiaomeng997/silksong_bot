@@ -1883,8 +1883,29 @@ R8 row and its notes. Outputs (not in git): `C:\ssbot\data\m2_forum_r8\` (driver
   delete the two lock files if the driver did not.
 - kin_check of the Wanderer / Reaper parameters on the fo_W session 20261004_012300 (`m2_forum_r8\kin_*.json`).
 
+### Stopped (2026-10-08 00:45 PDT, weekly usage 99 % before the 03:00 reset; the stop protocol)
+
+- Left running on purpose (correctly configured, both mine): the five offline stats batches (`clash_d0..d3.cmd`,
+  `clash_h.cmd`, this worktree's code at c1ca21a, union setups; the first version's outputs are kept as
+  `clash_*_v1.json`) and the live driver above (it waits for them, then for the Trobbio run, then takes the locks).
+- A0b report for the comparison: `C:\ssbot\data\m2_forum_r8\report_A0b.json` (forum_a0_report over 205437 +
+  205857: 51 episodes, QUIT 50 (Q1), HARNESS_FAIL 1, 4.27 hits per episode (Envoy 105, Reed 57, Choristor 56, all wave
+  0), FORCED_RISK 80.3 %, 1 hit outside the support).
+- The first table (contact setups only, `clash_table_v1.json`) admitted at p_fail <= 0.25 only the Minister charge
+  (side 563 setups, 457 clash, 13 hit, UB 0.039), Choristor slash side (0.19), Choristor whip side (0.22), Maestro
+  slash up (0.20), Minister charge down / up (0.15 / 0.19), Envoy slash down (0.14), Reed defend down (0.17); Reed stab
+  side 0.47, Clawmaiden slash side 0.28, Minister counter side 0.25. Contact setups miss the clashes that kept the
+  attack off the hurtbox, hence the union rerun.
+- Wanderer kinematics on the person's fo_W session (kin_check planner_bounds, bounds_lo_mix): Wanderer parameters
+  0.6911 all / attack windows 0.9846 / contact 0.9398 vs the Reaper parameters 0.6879 / 0.9823 / 0.9319 (the session
+  includes the bench runs, deaths and dashes: dash 0.81 for both, as R3 found on live Forum data).
+- Full test suite at 43aeef5: 1135 passed, 2 skipped, 1 xfailed.
+
 ### Next / open issues
 
+0. When the driver logs R8_DONE (`C:\ssbot\sandbox\r8_live.log`): commit `C:\ssbot\data\m2_forum_r8\clash_table.json`
+   as `knowledge/1.0.30000/enemies/forum/clash.json` (the worktree's untracked clash.json was a permissive test table,
+   deleted); fill forum.md 17 (union table, live clash outcomes per arm, A/B) and the plan's R8 note.
 1. After the driver: compare the arms with A0b (CLEAR / QUIT / WOULD_DIE, hits per episode, waves, time alive,
    support-outside hits, tick p50 / p99), the live clash outcomes per family, Wanderer frames ->
    `attack_table_build --crest Wanderer --live <rec>\attack_frames.jsonl`; forum.md 17 and the plan's R8 note.
