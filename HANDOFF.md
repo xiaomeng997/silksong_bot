@@ -1859,19 +1859,50 @@ CODE_REV + the R3 tables from `C:\ssbot\tables\forum_r3_2a10a0d`); outputs `C:\s
   by construction the Bell Beast path reads neither `hit_polys` nor combat.terminal. Full test suite passed (tests +
   ssbot/tests). The 50-episode Bell Beast batch is the integration step's.
 
-### Stopped (2026-10-08 01:23 PDT: weekly usage 100 % before its 03:00 reset)
+### Round 1 stop (2026-10-08 01:23 PDT, weekly usage 100 %) and the overnight A/B
 
-The A/B has not started yet (the collection on 0-4 was still running); its driver is armed and correctly configured
-(below), so it was left to run. Not done: the A/B report (Next 1).
+The armed driver `C:\ssbot\sandbox\r5v_ab.ps1` (frozen `C:\ssbot\live_r5v_35e5fe6`) ran on instance 0 01:59-02:33
+and released the lock: TV 26 (`20261008_015907` 1 HARNESS_FAIL + `015959` 25), HB 25 (`021002`), T48 25 (`022115`).
+Report: forum.md 17.5 (all QUIT in wave 0, no arm changed the outcome).
+
+### Round 2 (2026-10-08 03:00-, after the weekly reset)
+
+Merged main (already up to date at bc46dc9). Commits from f7b6217 on.
+
+Done (committed):
+- forum.md 17.5: the overnight A/B (`forum_a0_report`): every episode a Q1 QUIT in wave 0; hits / episode 4.0 (TV) /
+  4.16 (HB) / 4.4 (T48) vs 4.27 (A0b); hits / min 18.4 / 18.4 / 16.6 vs 19.1 (bootstrap CIs overlap); support-outside
+  hits 0; FORCED_RISK 0.82 / 0.81 / 0.89 vs 0.80; hit sources moved from the Envoy to the Choristor (target fix).
+- Why (forum.md 17.7): `ForumPlanner.last_sel` (the selection's inputs by reference), `ForumConfig.p_all` (audits:
+  FORCED_RISK P / first contact for every row, choice unchanged) and `tools/forum_tv_audit` (open-loop replay; per
+  tick the deciding key, rankings, hindsight-clear rows against the recording's threat colliders, per-key AUC;
+  `--dump` per-tick rows, `--merge`). On 25 TV-arm episodes + 9 A0b ones: in FORCED_RISK (3/4 of EVADE ticks) P = 1
+  and the first contacts tie, their AUC is exactly 0.5, so J decides 83 % / 75 % of the picks; the terminal value
+  changes 18-25 % of the picks but the pick is clear in hindsight only ~1 point more often (68.4 vs 67.4 %; before
+  hits 30.4 vs 27.8 %): the body field is weakly informative (AUC 0.60-0.65 on the TV recordings, ~0.55 on A0b) and
+  rides on J0's target terms (AUC 0.46 before hits). R5 model's next_p not used (the verifier's verdict; not merged).
+- `ForumConfig.commit_rank` (`SSBOT_FORUM_PC=1`, default off, 737048f; forum.md 17.8): in FORCED_RISK, after P, the
+  share of stage 1's frames in contact with the committed support (P_cm) then with the current attacks' fine
+  placements (P_f); they lead the p_k preselection too. Offline (same ticks): picks clear in hindsight 74.3 / 70.9 %
+  (+5.9 / +6.0 points), before hits 41.5 / 42.3 % (+11 / +10). Plan p50 +0.7-1.6 ms (open-loop replay). Test
+  `test_commit_rank_refines_forced_risk_by_the_committed_support`; off = bit-identical (the added keys are all 0).
+- Plan R5 row: the 2026-10-08 round-2 note.
+
+Diag track (wave-0 forensics, worktree-wf_fa16f06f-127-8, HANDOFF "Task wave-0 forensics") found the same cause
+independently (support saturates, the pick falls to J, "J-greedy") and built `forced_rank = "seen"`
+(`SSBOT_FORUM_FR=seen`: contact with the damage colliders seen now, moved along their velocity, BEFORE the share). Both
+are FORCED_RISK keys for "what is already coming"; forum_tv_audit re-implements "seen" as a score to compare them on
+the same ticks (running, below). The integration step should pick one or stack them (P / seen / P_cm / P_f).
 
 ### Running
 
-- `C:\ssbot\sandbox\r5v_ab.ps1` (hidden powershell, log `C:\ssbot\sandbox\r5v_ab.log`): waits for the Trobbio
-  collection on 0-4 to end (summary.json + no Trobbio combat_run left), waits for / takes `locks\inst0.lock`
-  (r5value), warms, then on instance 0: TV 25 (seed 300000) + TV 25 (300100), HB 25 (300200, `SSBOT_FORUM_TV=0`),
-  T48 25 (300300, `SSBOT_FORUM_T=48`); fo_A, eval, planner, oracle, real quits 0.2, threads 4 (the A0b protocol).
-  No batch starts with DEMO_SOON / STOP_AGENTS; releases the lock at the end. Batch logs `C:\ssbot\data\m2_forum_r5v\`.
-  Stop: `cd C:\ssbot\live_r5v_35e5fe6\brain; ..\scripts\uv.cmd run python -m ssbot.tools.combat_run stop <run dir>`
+- Offline (hidden, below normal; `C:\ssbot\data\m2_forum_r5v\round2\audit_batch.ps1`): forum_tv_audit with the
+  "seen" score over the same 25 + 9 episodes -> `aud2_*.json` + `.pkl.gz`; then `rank_eval.py` (same folder).
+- Instance 0 A/B driver `C:\ssbot\sandbox\r5v_ab2.ps1 -Root C:\ssbot\live_r5v2_737048f` (hidden; log
+  `C:\ssbot\sandbox\r5v_ab2.log`): waits for `locks\inst0.lock` (held by diag for its own A/B), takes it (r5value),
+  warms, then 25 episodes each PC (300400) -> TV control (300500, PC off) -> PC (300600), A0b protocol; no batch on
+  DEMO_SOON / STOP_AGENTS; releases the lock at the end. Batch logs in `C:\ssbot\data\m2_forum_r5v\round2\`.
+  Stop: `cd C:\ssbot\live_r5v2_737048f\brain; ..\scripts\uv.cmd run python -m ssbot.tools.combat_run stop <run dir>`
   (run dirs `C:\ssbot\data\runs\m2\20261008_*_Forum_A_eval_planner_oracle`), then end the driver's powershell.
 
 ### Needs deploy
@@ -1880,12 +1911,13 @@ The A/B has not started yet (the collection on 0-4 was still running); its drive
 
 ### Next / open issues
 
-1. Report the A/B when the driver ends: `forum_a0_report` over the TV runs vs A0b (205437 + 205857): CLEAR / QUIT /
-   WOULD_DIE, hits per episode, waves, time alive, support-outside hits (must stay 0), tick p50 / p99, `tv_ms`; HB and
-   T48 arms separately; forum.md 17.5 and the plan's R5 note.
-2. The support field saturates: R2 / R3 placements (bbox rows of later instances time-dilated from the family start;
-   p = 1 idle-family boxes) need a time-resolved form before E can come from the support (recertify).
-3. Body-field radius / speed and the J weights are hand-set (R9 fits); the kill value uses 9 per hit.
-4. The hit-target fix changes hit branches and J for every Forum tick: the integration step should A/B it with R6 / R8
-   (HB arm above is the fix alone).
-5. Frozen checkout `C:\ssbot\live_r5v_35e5fe6` can go when the A/B is reported.
+1. Report the PC A/B (forum_a0_report over the two PC runs vs the TV control and A0b; hits / min, FORCED_RISK, tick
+   p50 / p99) in forum.md 17.8 and the plan note; flip the default only if it helps.
+2. The support still saturates (17.1): the remaining hindsight gap (~16 points) is the attacks not started yet; it
+   needs time-resolved later-instance placements (R2 / R3, recertify) or branch probabilities fitted on lead frames.
+3. Terminal-value weights / body-field radius are hand-set; in wave 0 the value is not the bottleneck (17.7).
+4. Hit-target fix and the value terms change J on every Forum tick; integrate with R6 / R8 / diag's "seen".
+5. Main's working copy has no `knowledge/1.0.30000/enemies/forum/*_hitboxes.npz` (git-ignored); this worktree's copy
+   (= `C:\ssbot\tables\forum_r3_2a10a0d`) was used for the frozen checkouts.
+6. Frozen checkouts `C:\ssbot\live_r5v_35e5fe6` (round 1, A/B done) and `C:\ssbot\live_r5v2_737048f` can go after the
+   A/B is reported.
