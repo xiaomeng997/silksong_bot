@@ -41,19 +41,22 @@ side for the rest, and the Choir Clapper by its own controller (cannot be clashe
           already behind it, slam_behind_u behind (3 u: 0.2 %); with no room out, as far out as the wall lets (not
           behind: that is through its body on the ground); the down slash on its head (15 / 22 in the person's
           practice: the down-slash hit's 0.16 s i-frames + the bounce) is the planner's to pick from its own rows.
-  CC_JUMP / CC_JUMP_CAST  landing = take-off + 0.92 clamp(aim - take-off, +-12), aim = hero x at Jump Aim -/+ 5 on
-          its side. The aim (the hero's x then, the take-off x from its antic, its facing) is taken on the first tick
-          past the antic (Jump Aim is instant: never a tick's state); before it the landing follows the hero. Behind
-          the landing (behind_land_u: the slam collider and the rune slam, 6.62 u in front of it with r 7.19, reach
-          0.58 u behind it) only following it from its back side (the hero not in front of it: it jumps the way it
-          faces) with room there, never under it; else back off in front of the landing: CC_JUMP past its landing slam (0.67-7.76 u in front:
-          jump_out_u), CC_JUMP_CAST past the rune circle too (to 13.8 u: cast_out_u), as far as the wall lets.
-          Judged every tick. (Rounds 1-3: running under it to get behind it took its body: v2 6 crossings / 14 body
-          hits on w7, the round-3 way round fixed at the aim 8 / 8 crossings / 8 body hits; v3 / v4, whose judgement
-          followed the hero, 0-1 crossings / 0 body hits; forum.md 17.7.1.)
-          After a CC_JUMP_CAST its rune circle bursts about 0.75-0.87 s after the move ends (rune_hold_s 1 s): until
-          then the stance stays behind the landing (the hero on its back side; not through its body) or out past
-          the circle, not at its face (round 3).
+  CC_JUMP / CC_JUMP_CAST  judged every tick from where the hero and it are now (live v3 / v4, forum.md 17.7.1):
+          "landing" = its x + 0.92 clamp(hero x -/+ 5 on its side - its x, +-12) (jump_landing: the true landing from
+          the take-off and the hero's x at its Jump Aim, here re-estimated from the current positions: a stance rule,
+          not a landing forecast); behind_land_u behind it (the slam collider and the rune slam, 6.62 u in front of
+          the landing with r 7.19, reach 0.58 u behind it) when the run gets there land_margin_s before the landing
+          (jump_land_s / jump_cast_land_s after the commit, clapper_face.md §1.1 p50), does not cross its body on the
+          ground and the wall leaves room behind, with up slashes scored up_hit_x; else back off in front of it:
+          CC_JUMP past its landing slam (0.67-7.76 u in front: jump_out_u), CC_JUMP_CAST past the rune circle too (to
+          13.8 u: cast_out_u), behind it when only there is room. Round 3 tried the true landing (the aim taken on
+          the first tick past the antic: Jump Aim is instant, never a tick's state) with the way round fixed there,
+          then with "behind only from its back side": live, the first ran under it on 8 / 8 w7 jumps (8 body hits),
+          the second was cornered at the wall by the landing slam; this rule, re-judged with the drifting estimate,
+          crossed under it 1 time in 25 jumps with 0 body hits (v4).
+          After a CC_JUMP_CAST (it stands at its landing) its rune circle bursts about 0.75-0.87 s after the move ends
+          (rune_hold_s 1 s): until then the stance stays behind the landing (the way round went under it; not through
+          its body) or out past the circle, not at its face (round 3).
   Two Clappers never attack together (Buddy Is Attacking): while one is committed, the other one, if not and its
           spot is reached before that attack can end (Subject.t_free), is the RUSH / PUNISH pick between the two
           (priority x 2, a switch at once).
@@ -82,11 +85,9 @@ MAESTRO = "Song Pilgrim Maestro"
 MINISTER = "Song Administrator"
 TINY = "Song Automaton Tiny"
 CC_IDLE, CC_SLAM, CC_JUMP, CC_JUMP_CAST, CC_CAST = "CC_IDLE", "CC_SLAM", "CC_JUMP", "CC_JUMP_CAST", "CC_CAST"
-# a jump's states before its Jump Aim (the antic: standing). Jump Aim (and Cast Jump) are instant: one frame goes
-# Jump Antic / Cast Slam Antic 2 -> (Cast Jump ->) Jump Aim -> Jump, so the tracker never ends a frame in Jump Aim and
-# the first tick past the antic (Jump, 1 frame, then Air) is where the aim is taken (round 3: keyed on Jump Aim as a
-# tick state the aim was never stored live, forum.md 17.7)
-CC_PRE_AIM_STATES = ("Jump Antic", "Cast Slam Antic", "Cast Slam Antic 2", "Cast Jump")
+# Jump Aim (and Cast Jump) are instant: one frame goes Jump Antic / Cast Slam Antic 2 -> (Cast Jump ->) Jump Aim ->
+# Jump, so the tracker never ends a tick in them (forum.md 17.7.1)
+CC_AIR_STATES = ("Jump", "Air")                           # its body off the ground (a jump's flight)
 CC_RETREAT = ("slam: step out", "slam: out to the wall", "jump: back off", "rune: out")  # branches that step away
 GLIDE_SPIKE = "GLIDE_SPIKE"
 NAIL_SRC = ("Slash", "UpSlash", "DownSlash New", "AltSlash", "WallSlash", "DashSlash")
@@ -117,10 +118,14 @@ class L2Rules:
     kite_u: float = 8.0
     wall_room_u: float = 2.5
     target_hit_w: float = 3.0
+    up_hit_x: float = 1.5                                 # the Clapper in the air: its hit weight's extra factor
     face_u: float = 4.0                                   # the Clapper: face-hit distance (2.5-5.4 u, clapper_face §2)
     slam_out_u: float = 13.0
     slam_behind_u: float = 3.5
     behind_land_u: float = 2.5
+    jump_land_s: float = 1.415                            # CC_JUMP: commit -> landing (clapper_face §1.1 p50)
+    jump_cast_land_s: float = 1.85                        # CC_JUMP_CAST
+    land_margin_s: float = 0.25                           # behind the landing this long before it lands
     jump_out_u: float = 8.5                               # CC_JUMP: in front of the landing past its slam (7.76 u)
     cast_out_u: float = 14.5                              # CC_JUMP_CAST: past the rune circle (6.62 + 7.19 u)
     rune_hold_s: float = 1.0                              # CC_JUMP_CAST's rune circle: off this long after the move
@@ -221,8 +226,7 @@ class GauntletTactics:
         self.goal: Goal | None = None
         self._sw_why: str | None = None                   # why _pick moved off the kept target (stats switch_kinds)
         self.n = 0
-        self.aim: dict[int, tuple] = {}                   # Clapper iid -> (hero x, take-off x, facing) at its aim
-        self.antic: dict[int, float] = {}                 # Clapper iid -> its x in its jump's antic (the take-off)
+        self.t_commit: dict[int, float] = {}              # Clapper iid -> game time its current jump was first seen
         self.jump_how: dict[int, str] = {}                # Clapper iid -> its jump's way round (the last tick's)
         self.jfam: dict[int, str] = {}                    # Clapper iid -> the jump family it is in
         self.rune: dict[int, tuple] = {}                  # Clapper iid -> (landing, facing, way round, until): a jump
@@ -237,7 +241,7 @@ class GauntletTactics:
 
     def reset(self) -> None:
         """A new episode: no goal, no stored aims, the per-episode counters cleared."""
-        self.goal, self.n, self.aim, self.antic, self.jump_how = None, 0, {}, {}, {}
+        self.goal, self.n, self.t_commit, self.jump_how = None, 0, {}, {}
         self.jfam, self.rune = {}, {}
         self.stats = _new_stats()
 
@@ -275,18 +279,22 @@ class GauntletTactics:
             # as the wall lets (the hammer reaches 12 u in front: the farther the likelier it misses)
             return self._clamp(out), frozenset(), "slam: out to the wall"
         if fam in (CC_JUMP, CC_JUMP_CAST):
-            # before its Jump Aim it will aim at where the hero is then (from where it stands); after, the stored aim
-            aim_x, x0, front = self.aim.get(s.iid, (hx, x, front))
-            land = jump_landing(x0, aim_x, front)
+            land = jump_landing(x, hx, front)              # from where both are now (module docstring)
             behind = land - front * r.behind_land_u
             out = land + front * (r.jump_out_u if fam == CC_JUMP else r.cast_out_u)
-            # never under it (round 3, live: with the way round fixed at the aim the hero ran under it on 8 / 8 w7
-            # jumps and took its body 8 times; v2 6 crossings / 14 body hits, v3 / v4 0-1 crossings / 0 body hits):
-            # behind the landing only following it from its back side (it jumps the way it faces), else back off in
-            # front of the landing, away from where it comes down
-            how = "behind" if room(behind) and (hx - x) * front <= 0 else "back off"
+            t = self._t
+            t_land = (r.jump_land_s if fam == CC_JUMP else r.jump_cast_land_s) - (t - self.t_commit.get(s.iid, t))
+            t_run = r.start_s + abs(behind - hx) / r.run_u_s
+            # the stance past its body while it is still on the ground: the run would go through it
+            through = s.state not in CC_AIR_STATES and (behind - x) * (hx - x) < 0
+            if room(behind) and t_run <= t_land - r.land_margin_s and not through:
+                how = "under and behind"
+            elif room(out) or not room(behind):
+                how = "back off"
+            else:
+                how = "under and behind (no room out)"
             self.jump_how[s.iid] = how                    # the last way round (a jump cast's rune circle after it)
-            return self._clamp(behind if how == "behind" else out), frozenset(), f"jump: {how}"
+            return self._clamp(behind if how.startswith("under") else out), frozenset(), f"jump: {how}"
         rp = self.rune.get(s.iid)
         if rp is not None and fam != CC_SLAM and self._t <= rp[3]:
             # a jump cast's rune circle (6.62 u in front of the landing, r 7.19: from 0.58 u behind it to 13.8 u in
@@ -297,7 +305,7 @@ class GauntletTactics:
             behind = land - f0 * r.behind_land_u
             out = land + f0 * r.cast_out_u
             through = (behind - x) * (hx - x) < 0
-            if room(behind) and not through and (how == "behind" or not room(out)):
+            if room(behind) and not through and (how.startswith("under") or not room(out)):
                 return behind, frozenset(), "rune: behind"
             return self._clamp(out), frozenset(), "rune: out"
         vocab = frozenset({GLIDE_SPIKE}) if fam == CC_CAST else frozenset()
@@ -499,30 +507,21 @@ class GauntletTactics:
             if s.type_key != CLAPPER or s.pos is None:
                 continue
             if s.family not in (CC_JUMP, CC_JUMP_CAST):
-                if self.jfam.pop(s.iid, None) == CC_JUMP_CAST and s.iid in self.aim:
-                    # a jump cast just ended: its rune circle bursts later, around its landing
-                    aim_x, x0, f0 = self.aim[s.iid]
-                    self.rune[s.iid] = (jump_landing(x0, aim_x, f0), f0, self.jump_how.get(s.iid) or "back off",
-                                        t + r.rune_hold_s)
+                if self.jfam.pop(s.iid, None) == CC_JUMP_CAST:
+                    # a jump cast just ended: it stands at its landing, and its rune circle bursts later in front
+                    e = self._ent(ws, s.iid)
+                    fa = clapper_facing(e) if e is not None else None
+                    x = float(s.pos[0])
+                    f0 = float(fa) if fa is not None else (1.0 if hx >= x else -1.0)
+                    self.rune[s.iid] = (x, f0, self.jump_how.get(s.iid) or "back off", t + r.rune_hold_s)
                 elif s.iid in self.rune and t > self.rune[s.iid][3]:
                     del self.rune[s.iid]
-                for m in (self.jump_how, self.aim, self.antic):
+                for m in (self.t_commit, self.jump_how):
                     m.pop(s.iid, None)
                 continue
             self.jfam[s.iid] = s.family
             self.rune.pop(s.iid, None)
-            if s.iid in self.aim:
-                continue
-            x = float(s.pos[0])
-            e = self._ent(ws, s.iid)
-            fa = clapper_facing(e) if e is not None else None
-            front = float(fa) if fa is not None else (1.0 if hx >= x else -1.0)
-            if s.state in CC_PRE_AIM_STATES:
-                self.antic[s.iid] = x                     # standing: the take-off x
-            else:
-                # past its (instant) Jump Aim: aimed at the hero's x of that frame from where it stood in the antic,
-                # facing as Jump Aim turned it (FaceObject; it does not turn in the air)
-                self.aim[s.iid] = (hx, self.antic.get(s.iid, x), front)
+            self.t_commit.setdefault(s.iid, t)
         self._count_hits(ws, t)
         self.n += 1
         status = self._status(fc, t)
@@ -583,7 +582,10 @@ class GauntletTactics:
             if hw.get(g.target, 0.0) > 0:
                 hw[g.target] = 0.0
         elif g.target in hw and hw[g.target] > 0:
-            hw[g.target] = max(hw[g.target], r.target_hit_w * r.priority.get(getattr(s, "type_key", ""), 1.0))
+            w = r.target_hit_w * r.priority.get(getattr(s, "type_key", ""), 1.0)
+            if s is not None and s.type_key == CLAPPER and str(how).startswith("jump: under"):
+                w *= r.up_hit_x                           # up slashes on the way under it
+            hw[g.target] = max(hw[g.target], w)
         out = replace(prefs, mode=g.name, goal=g.name, target=g.target, stance_x=float(g.stance_x),
                       boss_x=g.face_x, hit_w=hw, weights=wts, vocab=frozenset(prefs.vocab) | g.vocab)
         self.stats["goals"][g.name] = self.stats["goals"].get(g.name, 0) + 1
