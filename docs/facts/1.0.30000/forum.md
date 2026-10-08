@@ -954,7 +954,7 @@ cd brain   # 冻结检出（git archive，没有 .git）：behaviour_build 要�
 - 单元测试 `tests/test_forum_l2.py`（13 项）：远处目标（近处待机的 Choristor 在 2 u、远处后摇里的 Envoy 在 13 u：远处接敌点到达后 1.4 s 内不被覆盖 → PUNISH 远的、站位 31.2；只有 0.8 s → 不去，改 RUSH 近的；近处自己的窗口够 → PUNISH 近的）、落单 / 分散 / 扎堆、Tiny 时站 Maestro 下方、Clawmaiden 先 / Minister 后、Clapper 控制器各招、两只 Clapper 互锁、朝向、失效三种（注入、异常、关闭）逐字段等于 LOCAL、开关解析、PUNISH 窗口内命中计数。`test_forum_tactics.py` 照旧 5 项通过。
 - **§4.4 第 4 条整条决策逐位相同**：`forum_policy_replay`（`074719` i3 ep0 第 0 波，600 tick，截止时间 inf）`SSBOT_FORUM_L2=fail:1` 对 `=0`：600 / 600 tick 的计划名、S、FORCED_RISK、按键、J 0 处不同。
 - 开环回放（同一录像，数据策略的主角位置，所以计划不被执行；机器负载高：5 个游戏实例 + 其他代理）：L2 每 tick p50 0.014–0.047 ms、p99 1.4–3.3 ms（批量查询只在重选的 tick 跑）；异常 0；支撑外命中 0。目标分布：第 0 波 KITE(EVADE) 63 %、RUSH 31 %；第 3 波 Clawmaiden 91 %（first）；第 6 波 KITE(EVADE)（在 Maestro 下方）89 %；第 7 波（单只 Clapper）RUSH 94 %；第 13 波（两只 Clapper）RUSH 48 %、KITE(EVADE) 46 %。
-- **PUNISH 在多敌波次里几乎不成立**：第 0 / 3 / 6 波 1,000 tick 的重选里，各类候选"到达后的空闲时间"中位 0.23–0.60 s，**到达后 ≥ 0.35 s 空闲（够一刀）的 0 次**（Envoy / Choristor / Reed / Bellbearer / Clawmaiden / Tiny / Maestro 共 2,331 个候选）：几只待机敌人的支撑（下一招随时可起 + 待机身体管）把每个接敌点在到达后 0.3–0.6 s 内就盖上了，与 A0 的 87 % FORCED_RISK 同一个原因（§16.4 第 1 条）。第 7 波单只 Clapper 时有 1 次 PUNISH（Tiny）。第一版把"到达前就被覆盖"也算进窗口（窗口全是 0），已改成从到达算起。
+- **PUNISH 在多敌波次里不成立**：第 0 / 3 / 6 波 1,000 tick 的重选里（Envoy / Choristor / Reed / Bellbearer / Clawmaiden / Tiny / Maestro 共 2,331 个候选），接敌点**此刻就被支撑覆盖的占 99.7 %**，到达之后的空闲时间中位 0.017 s、p90 0.030 s、最长 0.168 s，**≥ 0.35 s（够一刀）的 0 次**：待机敌人的支撑（下一招随时可起 + 待机身体管）一直盖着它身边，与 A0 的 87 % FORCED_RISK 同一个原因（§16.4 第 1 条）。接敌点从 1.8 u 改到 3.0 u（收割者横砍够 3.6 u）重跑一次：同样 0 次（没有采用）。第 7 波单只 Clapper 时有 1 次 PUNISH（Tiny）。第一版把"到达前就被覆盖"也算进窗口（窗口全是 0），已改成从到达算起。
 - Clapper 朝向检查见 17.1。
 
 ### 17.3 远处目标场景（计划 R6 行的验收）

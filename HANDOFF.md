@@ -1849,9 +1849,10 @@ checks are done, the live A/B is queued on a detached driver (below).
 - Open-loop replays (same fight, waves 0 / 3 / 6 / 7 / 13, 1000-2000 ticks each, loaded machine): L2 per tick p50
   0.014-0.047 ms, p99 1.4-3.3 ms; errors 0; unpredicted 0. Goals: wave 0 KITE(EVADE) 63 % / RUSH 31 %, wave 3
   Clawmaiden 91 %, wave 6 KITE under the Maestro 89 %, wave 7 RUSH 94 %, wave 13 RUSH 48 % / KITE(EVADE) 46 %.
-- PUNISH almost never holds in multi-enemy waves: free time after arrival at the engagement spots p50 0.23-0.60 s,
-  >= 0.35 s (one swing) in 0 of 2,331 candidates (waves 0 / 3 / 6); 1 PUNISH in wave 7. The idle enemies' support covers
-  every spot within 0.3-0.6 s of arriving (A0's FORCED_RISK cause).
+- PUNISH does not hold in multi-enemy waves: of 2,331 candidates (waves 0 / 3 / 6) the engagement spot is covered now
+  in 99.7 %, free after the arrival p50 0.017 s, p90 0.030, max 0.168 s, >= 0.35 s (one swing) 0 times; the same with
+  the spot at 3.0 u instead of 1.8 u (not adopted); 1 PUNISH in wave 7. The idle enemies' support covers their
+  surroundings all the time (A0's FORCED_RISK cause).
 - Pursuit speeds from 20 R0 caches (forum.md 17.1).
 
 ### Running (left running on purpose: correctly configured)
