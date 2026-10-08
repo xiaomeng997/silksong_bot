@@ -1813,3 +1813,49 @@ Next / open issues (round 2):
 5. The route's Widow end is a scripted bind sequence (Death Stagger -> Can Bind waits for BIND): the route runner must
    press bind there; training episodes end at the kill. Her damage colliders stay armed in Death Stagger (244 frames
    in 4 smoke fights, + 1 Spinner AtkBell armed outside attacks): the runner must keep evading until the bind.
+
+## Task R8 - Forum clash (branch worktree-wf_814dfeea-b10-4)
+
+Worktree `C:\modeling\silksong_bot\.claude\worktrees\wf_814dfeea-b10-4` (from main bc46dc9). Plan: forum_planner_plan
+R8 row and its notes. Outputs (not in git): `C:\ssbot\data\m2_forum_r8\` (drivers `clash_*.cmd`, stats `clash_*.json`
+/ `.log`, replays `replay_*.json`). Facts: forum.md section 17 (Chinese).
+
+### Done (committed)
+
+- Wanderer support (the person: Wanderer over Reaper for clashing): `knowledge/1.0.30000/attacks/wanderer.json`
+  (attack_table_build --crest Wanderer from the P17 slash dump; not live-sampled yet: side / up / wall slash on
+  0-0.12 s from the swing (first animation event 0/24 s, like Hunter: clash chains are seamless), down slash
+  0.04-0.16 s; Clash Tink boxes per slot); `kinematics/hero_wanderer_forum.json` (the Reaper Forum loadout with the
+  Wanderer config: duration 0.25, cooldown 0.3, recovery 0.1; abilities without reaper_down, with the new
+  `AB_DOWN_SLASH` (DownSlashTypes.Slash: the down attack is an ATTACKING swing, no dive / FSM); thunk polygons and
+  windows from the Wanderer table); `kin_jit` handles AB_DOWN_SLASH and the new event `EV_PARRY_RECOVER`
+  (NailParryRecover 0.1 s after a clash: attack cooldown 0, the swing cancelled). Both bits are unused by the Hunter
+  / Reaper parameters (Bell Beast and the Reaper Forum rollouts unchanged by construction).
+- `ForumPlanner(crest=...)`: the crest's shapes (a Slash-type down slash timed like the other slots), the kernel
+  classifies a Wanderer down slash (B_DOWN in the air) and vetoes an attack pressed within 0.15 s after a dash / sprint
+  frame (DASHCOMBO_WINDOW_TIME: the press would be the WANDERER DASH COMBO, not modelled); the kernel also returns
+  each row's first swing.
+- EV_CLASH (`ForumConfig.clash`, off by default = the R3 / R4 planner): only on ticks with no safe row (plain safe rows
+  always rank first), up to 16 rows in contact (by J) whose first contact on the envelope falls inside a swing's
+  active window, attributed to enemies (`occupied_only` at the hull centre) whose current attack family is in
+  `clash.json` for that slot and that are on the slash's side; success branch = the clash on the frame before the
+  contact, PARRY_INVULN_F 9 frames without enemy damage (any source: the two-sided rule), the direction's recoil
+  (side away from the facing, up RecoilDown, down the bounce), EV_PARRY_RECOVER 6 frames later; a later contact may be
+  clashed again (chains, the other side) up to 3 times; p_fail = 1 - prod(1 - p_k) <= clash_max_fail 0.25 and h >= 2
+  -> the row counts as safe (ranked after plain safe rows by p_fail). `res.clash`, audit clash_ticks / clash_rows /
+  clash_chosen, policy counts clash_plan.
+- `ssbot.tools.forum_clash_stats`: clash setups (the clash reach meets an enemy's canClashTink collider before any
+  hurtbox contact) and contact setups (the planner's rule: the enemy's first contact inside the swing's window) with
+  outcomes clash / hit / neither by crest x type x family x state x slot; after-clash chains and blocked damage;
+  `--table` builds `knowledge/1.0.30000/enemies/forum/clash.json` (Wilson 95 % upper bound of the hit share,
+  n >= 10, Clapper / Tiny / Bellbearer / Clawmaiden spear / body families never).
+- `Forum_W` encounter (fo_W), `combat_run --forum-clash` (run tag `_clash`), `ForumPlannerPolicy(crest, clash)`
+  (crest from the savestate: fo_W Wanderer), `forum_policy_replay --clash --crest`.
+
+### Running
+
+- (see the end of this section)
+
+### Next / open issues
+
+- (filled in as the round goes)

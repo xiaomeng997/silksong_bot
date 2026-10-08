@@ -450,13 +450,74 @@ def new_acc() -> dict:
             "units": 0}
 
 
+# never clashed whatever the data (forum.md: canClashTink 0 on the Clapper's body and slams, the Clawmaiden spear; the
+# Bellbearer's bell has the counter bit only; the Tinies ram with their bodies), and the families that are bodies only
+NEVER_TYPES = {"Song Heavy Sentry": "Clapper: body and slams canClashTink 0",
+               "Song Automaton Tiny": "Tiny: rams with its body",
+               "Pilgrim 03 Song": "Bellbearer: the bell has the counter bit only (redirect, no clash)"}
+NEVER_FAMILIES = {("Song Handmaiden", "CM_SPIN"): "Clawmaiden spear and its explosion: canClashTink 0"}
+BODY_SUFFIX = ("_IDLE", "_ENTRY", "_EVADE", "_TELE", "_LEAVE")
+
+
+def wilson_ub(k: int, n: int, z: float = 1.96) -> float:
+    if n == 0:
+        return 1.0
+    p = k / n
+    return (p + z * z / (2 * n) + z * math.sqrt(p * (1 - p) / n + z * z / (4 * n * n))) / (1 + z * z / n)
+
+
+def build_table(stats: list[dict], min_n: int = 10) -> dict:
+    """clash.json from forum_clash_stats outputs: per (type, family, slot) the contact setups (the planner's EV_CLASH
+    rule on the recordings: the enemy's first contact inside the swing's active window; a side or wall slash only
+    with the enemy in front, up / down whatever the horizontal side), both crests pooled (the rule conditions on the
+    window, which is where the crests differ), p_fail = the Wilson 95 % upper bound of hit / n; keys with n < min_n,
+    the NEVER types / families and the body-only families are left out (= not clashable)."""
+    agg: dict = defaultdict(Counter)
+    by_crest: dict = defaultdict(Counter)
+    for st in stats:
+        for r in st.get("contact_setups") or ():
+            slot = "side" if r["slot"] == "normal" else r["slot"]
+            if slot in ("side", "wall") and r["side"] != "front":
+                continue
+            key = (r["type"], r["family"], slot)
+            for x in ("clash", "hit", "neither", "other_clash"):
+                agg[key][x] += int(r.get(x) or 0)
+                by_crest[key + (r["crest"],)][x] += int(r.get(x) or 0)
+    p_fail, left_out = {}, {}
+    for (tk, fam, slot), c in sorted(agg.items()):
+        n = sum(c.values())
+        why = NEVER_TYPES.get(tk) or NEVER_FAMILIES.get((tk, fam)) or \
+            ("body / movement family" if fam == "?" or fam.endswith(BODY_SUFFIX) else None) or \
+            (f"n {n} < {min_n}" if n < min_n else None)
+        row = {"n": n, **{x: c[x] for x in ("clash", "hit", "neither", "other_clash")},
+               "p_hit": round(c["hit"] / n, 4) if n else None, "p_fail": round(wilson_ub(c["hit"], n), 4),
+               "by_crest": {cr: dict(v) for (t2, f2, s2, cr), v in by_crest.items() if (t2, f2, s2) == (tk, fam, slot)}}
+        if why:
+            left_out[f"{tk}|{fam}|{slot}"] = {**row, "why": why}
+        else:
+            p_fail[f"{tk}|{fam}|{slot}"] = row
+    return {"build": "1.0.30000", "rule": build_table.__doc__.split("\n\n")[0].replace("\n", " "),
+            "min_n": min_n, "p_fail": p_fail, "left_out": left_out,
+            "never_types": NEVER_TYPES, "never_families": {f"{a}|{b}": v for (a, b), v in NEVER_FAMILIES.items()}}
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("src", nargs="+", help="run dirs (fights) or human sessions (state.raw.zst)")
+    ap.add_argument("src", nargs="+", help="run dirs (fights) or human sessions (state.raw.zst); with --table: the "
+                                           "stats JSONs to merge")
     ap.add_argument("--out", required=True)
     ap.add_argument("--max-fights", type=int, default=None)
     ap.add_argument("--inflate", type=float, default=0.3)
+    ap.add_argument("--table", action="store_true", help="build clash.json from stats JSONs")
+    ap.add_argument("--min-n", type=int, default=10)
     a = ap.parse_args(argv)
+    if a.table:
+        tab = build_table([json.loads(Path(p).read_text("utf-8")) for p in a.src], a.min_n)
+        tab["source"] = a.src
+        Path(a.out).write_text(json.dumps(tab, indent=1) + "\n", encoding="utf-8")
+        for k, v in tab["p_fail"].items():
+            print(f"{k:50s} n {v['n']:5d} clash {v['clash']:4d} hit {v['hit']:3d} p_fail {v['p_fail']}")
+        return 0
     reach, fams, acc = Reach(), state_families(), new_acc()
     for src in a.src:
         for unit, states in frames_of(Path(src), a.max_fights):

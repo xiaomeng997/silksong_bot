@@ -685,7 +685,7 @@ class ForumPlannerPolicy(PlannerPolicy):
                                  "resyncs": self.fc.waves.resyncs, "kills": self.fc.waves.kills},
                 "audit": audit, "targets": dict(self.targets), "binds": self.binds,
                 "cogfly": {"throws": self.cog["throws"], "n": len(self.cog["throws"])},
-                "weighted": self.weighted,
+                "weighted": self.weighted, "crest": self.crest, "crest_seen": self.crest_seen, "clash": self.clash,
                 "first_pending_f": self.first_pending_f, "first_pending_reasons": self.first_pending_reasons,
                 "outcome_reason": self.outcome_reason, "alerts": list(self.sc.alerts),
                 "q4_by_instance": {str(k): v for k, v in getattr(self.sc.sup, "unpredicted_by", {}).items()},
