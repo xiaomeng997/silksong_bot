@@ -38,16 +38,18 @@ side for the rest, and the Choir Clapper by its own controller (cannot be clashe
           CC_CAST (about 1.25 s standing, only the ground runes hurt: jump when the near rune lights) also opens the
           GLIDE_SPIKE hook (vocab; R7's Sawtooth Circlet glide spike is not in the planner yet: nothing reads it).
   CC_SLAM the one move that needs a step back: out to slam_out_u in front (12.5 u: 2.3 %, 13 u: 0) or, with the hero
-          already behind it, slam_behind_u behind (3 u: 0.2 %); the down slash on its head (15 / 22 in the person's
+          already behind it, slam_behind_u behind (3 u: 0.2 %); with no room out, as far out as the wall lets (not
+          behind: that is through its body on the ground); the down slash on its head (15 / 22 in the person's
           practice: the down-slash hit's 0.16 s i-frames + the bounce) is the planner's to pick from its own rows.
   CC_JUMP / CC_JUMP_CAST  go under it and behind its landing: landing = take-off + 0.92 clamp(aim - take-off, +-12),
           aim = hero x at Jump Aim -/+ 5 on its side; the stance behind_land_u behind the landing (the slam collider
           and the rune slam, 6.62 u in front of it with r 7.19, reach 0.58 u behind it); up slashes on the way scored
           with up_hit_x. Only when the run gets there land_margin_s before the landing (jump_land_s / jump_cast_land_s
-          after the commit, clapper_face.md §1.1 p50) and does not cross its body on the ground (before its take-off);
-          else back off in front of the landing: CC_JUMP past its landing slam (0.67-7.76 u in front: jump_out_u),
-          CC_JUMP_CAST past the rune circle too (to 13.8 u: cast_out_u), behind it when the wall leaves no room (round
-          2: live w7 / w13, 5 of 18 hits were the body landing on a hero running under it, forum.md §17.6).
+          after the commit, clapper_face.md §1.1 p50), does not cross its body on the ground (before its take-off)
+          and the wall leaves room behind; else back off in front of the landing: CC_JUMP past its landing slam
+          (0.67-7.76 u in front: jump_out_u), CC_JUMP_CAST past the rune circle too (to 13.8 u: cast_out_u), behind it
+          when only there is room. The way round is fixed at its Jump Aim (the landing known) for the rest of the jump
+          (round 2, live w7 / w13: the body landing on a hero running under it, and on one turning back under it).
   Two Clappers never attack together (Buddy Is Attacking): while one is committed, the other one, if not and its
           spot is reached before that attack can end (Subject.t_free), is the RUSH / PUNISH pick between the two
           (priority x 2, a switch at once).
@@ -214,6 +216,7 @@ class GauntletTactics:
         self.n = 0
         self.aim: dict[int, float] = {}                   # Clapper iid -> hero x at its Jump Aim
         self.t_commit: dict[int, float] = {}              # Clapper iid -> game time its current jump was first seen
+        self.jump_how: dict[int, str] = {}                # Clapper iid -> the way round its jump, fixed at Jump Aim
         self._t = 0.0                                     # the tick's game time
         self.stats = _new_stats()
         self.last: dict = {}
@@ -224,7 +227,7 @@ class GauntletTactics:
 
     def reset(self) -> None:
         """A new episode: no goal, no stored aims, the per-episode counters cleared."""
-        self.goal, self.n, self.aim, self.t_commit = None, 0, {}, {}
+        self.goal, self.n, self.aim, self.t_commit, self.jump_how = None, 0, {}, {}, {}
         self.stats = _new_stats()
 
     # ---- geometry ----
@@ -249,31 +252,41 @@ class GauntletTactics:
         fa = clapper_facing(e) if e is not None else None
         front = float(fa) if fa is not None else side      # it faces the hero at every attack start
         fam = s.family
+        xa, xb = self.pb.arena_x
+        room = (lambda v: xa + r.wall_room_u <= v <= xb - r.wall_room_u)
         if fam == CC_SLAM:
             if side != front:
                 return self._clamp(x - front * r.slam_behind_u), frozenset(), "slam: stay behind"
             out = x + front * r.slam_out_u
-            x0, x1 = self.pb.arena_x
-            if x0 + r.wall_room_u <= out <= x1 - r.wall_room_u:
+            if room(out):
                 return out, frozenset(), "slam: step out"
-            return self._clamp(x - front * r.slam_behind_u), frozenset(), "slam: behind (no room out)"
+            # behind it means through its body on the ground (round 2, live w13: 7 body hits that way): as far out
+            # as the wall lets (the hammer reaches 12 u in front: the farther the likelier it misses)
+            return self._clamp(out), frozenset(), "slam: out to the wall"
         if fam in (CC_JUMP, CC_JUMP_CAST):
             # before its Jump Aim it will aim at where the hero is then; after, at the stored aim from the take-off
             aim_x, x0, front = self.aim.get(s.iid, (hx, x, front))
             land = jump_landing(x0, aim_x, front)
-            behind = self._clamp(land - front * r.behind_land_u)
-            t = self._t
-            t_land = (r.jump_land_s if fam == CC_JUMP else r.jump_cast_land_s) - (t - self.t_commit.get(s.iid, t))
-            t_run = r.start_s + abs(behind - hx) / r.run_u_s
-            # the stance past its body while it is still on the ground: the run would go through it
-            through = s.state not in CC_AIR_STATES and (behind - x) * (hx - x) < 0
-            if t_run <= t_land - r.land_margin_s and not through:
-                return behind, frozenset(), "jump: under and behind"
+            behind = land - front * r.behind_land_u
             out = land + front * (r.jump_out_u if fam == CC_JUMP else r.cast_out_u)
-            x0_, x1_ = self.pb.arena_x
-            if x0_ + r.wall_room_u <= out <= x1_ - r.wall_room_u:
-                return out, frozenset(), "jump: back off"
-            return behind, frozenset(), "jump: under and behind (no room out)"
+            how = self.jump_how.get(s.iid)
+            if how is None:
+                t = self._t
+                t_land = (r.jump_land_s if fam == CC_JUMP else r.jump_cast_land_s) - (t - self.t_commit.get(s.iid, t))
+                t_run = r.start_s + abs(behind - hx) / r.run_u_s
+                # the stance past its body while it is still on the ground: the run would go through it
+                through = s.state not in CC_AIR_STATES and (behind - x) * (hx - x) < 0
+                if room(behind) and t_run <= t_land - r.land_margin_s and not through:
+                    how = "under and behind"
+                elif room(out) or not room(behind):
+                    how = "back off"
+                else:
+                    how = "under and behind (no room out)"
+                if s.iid in self.aim:
+                    # its Jump Aim fixed the landing: so is the way round (round 2: turning back mid-way, under it,
+                    # was 10 of the w7 body hits)
+                    self.jump_how[s.iid] = how
+            return self._clamp(behind if how.startswith("under") else out), frozenset(), f"jump: {how}"
         vocab = frozenset({GLIDE_SPIKE}) if fam == CC_CAST else frozenset()
         return self._clamp(x + side * r.face_u), vocab, "face"
 
@@ -471,6 +484,7 @@ class GauntletTactics:
                 self.t_commit.setdefault(s.iid, t)
             else:
                 self.t_commit.pop(s.iid, None)
+                self.jump_how.pop(s.iid, None)
             if s.state in CC_AIM_STATES and s.iid not in self.aim:
                 e = self._ent(ws, s.iid)
                 fa = clapper_facing(e) if e is not None else None

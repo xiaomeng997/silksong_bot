@@ -334,9 +334,19 @@ def test_clapper_jump_back_off_when_the_run_is_late_or_through_its_body():
     t = l2()
     p = t.decide(world(26.0, t=10.0, ents=ents), WinFc(s), None, 3)
     assert p.stance_x == pytest.approx(land + 2.5) and "under and behind" in t.last["goal_why"]
-    # 1.0 s into it (lands at 1.415 s): 0.50 s > 0.415 - 0.25 -> back off past the landing slam (8.5 u in front)
+    # fixed at its Jump Aim: 1.0 s on (in the air) it is still under and behind, not turning back under it
     s = [subj(9, CC, 33.0, y=12.0, state="Air", family="CC_JUMP", committed=True)]
     p = t.decide(world(26.0, t=11.0, ents=ents), WinFc(s), None, 3)
+    assert p.stance_x == pytest.approx(land + 2.5) and "under and behind" in t.last["goal_why"]
+    # its Jump Aim seen 1.0 s into it (lands at 1.415 s): 0.50 s > 0.415 - 0.25 -> back off past the landing slam
+    # (8.5 u in front), and that stays
+    t = l2()
+    t.decide(world(26.0, t=10.0, ents=ents),
+             WinFc([subj(9, CC, 35.0, y=7.45, state="Jump Antic", family="CC_JUMP", committed=True)]), None, 3)
+    p = t.decide(world(26.0, t=11.0, ents=ents),
+                 WinFc([subj(9, CC, 35.0, y=7.45, state="Jump Aim", family="CC_JUMP", committed=True)]), None, 3)
+    assert p.stance_x == pytest.approx(land - 8.5) and "back off" in t.last["goal_why"]
+    p = t.decide(world(26.0, t=11.2, ents=ents), WinFc(s), None, 3)
     assert p.stance_x == pytest.approx(land - 8.5) and "back off" in t.last["goal_why"]
     # at its face (3 u) it jumps back: behind the landing is past its body, still on the ground -> back off
     t = l2()
@@ -364,3 +374,12 @@ def test_the_idle_clappers_turn_needs_its_spot_in_time():
     t.decide(world(30.0, t=10.0, ents=ents), WinFc([subj(1, CC, 22.0, y=7.45), s[1]]), None, 3)
     p = t.decide(world(30.0, t=10.2, ents=ents), WinFc(s), None, 3)
     assert p.target == 1 and t.stats["tgt_switches"] == 0
+
+
+def test_clapper_slam_with_no_room_out_stays_in_front():
+    # out 13 u in front is past the left wall: as far out as the wall lets, not behind it (through its body)
+    t = l2()
+    s = [subj(9, CC, 26.0, y=7.45, state="Slam Antic", family="CC_SLAM", committed=True)]
+    p = t.decide(world(22.0, ents=[clapper(9, 26.0, False)]), WinFc(s), None, 3)
+    x0, _ = t.pb.arena_x
+    assert p.stance_x == pytest.approx(x0 + t.rules.wall_room_u) and t.last["goal_why"].endswith("out to the wall")
