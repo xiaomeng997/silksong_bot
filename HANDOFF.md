@@ -1862,15 +1862,19 @@ attack outcomes), `live_w0f_3608489` (live check). Seeds used: 340000-340024.
   (95 % CI 3.4-6.6, longer in 23 / 24), hits / min 12.0 vs 16.5, Envoy charge hits 0.04 vs 0.92 per episode; still
   100 % QUIT in wave 0, 0 kills. A first seen chunk `20261008_034416` (6 episodes) ran while my offline batch loaded
   the machine (27 % late ticks, 1 HARNESS_FAIL): not counted.
+- `forced_rank = "seen_cf"` (env `SSBOT_FORUM_FR=seen_cf`, 82e94fa): after the seen key, the share of stage-1 frames in
+  the committed fine placements (`committed_fine_share`: attacks under way with a known entry; the windows and the
+  start-later boxes, which saturate, are left out) - the strikes that open after their antic. Offline the hindsight-
+  clear pick within 12 frames of a hit goes 60 % -> 73 % (whip 35 -> 68 %). Live on instance 1 (instance 0 was
+  r5value's), `20261008_045005_Forum_A_eval_planner_oracle`, 25 QUIT: time to QUIT median 25.2 s, hits / min 10.1
+  (the person at 1x: 11.4). NOT paired with the two runs above (combat_run prefixes the seeds with the instance:
+  1340000+), lighter machine load (1.3 % late ticks): unpaired seen_cf - seen +6.2 s (bootstrap 95 % CI 3.1-9.4),
+  seen_cf - share +11.1 s (8.4-14.1). Still 25 / 25 QUIT in wave 0, 0 kills; the top remaining sources are the
+  whip 0.64, Envoy slash 0.56 and jump slash 0.52 per episode.
 
 ### Running
 
-- `C:\ssbot\sandbox\w0f_live.ps1 -Rev cf -Insts 0,1 -Arms seen_cf -Seed 340000 -MaxWaitMin 90` (hidden, started
-  04:31): waits for instance 0 or 1 to be free (both were locked by r5value / r6rules at 04:31), takes the lock as
-  "diag", runs 25 episodes of the A0b protocol with `SSBOT_FORUM_FR=seen_cf` from the frozen `C:\ssbot\live_w0f_cf`
-  (82e94fa), then releases the lock (`w0f_live.done`). Gives up after 90 min without a free instance. Log
-  `C:\ssbot\sandbox\w0f_live.log`; stop: `combat_run stop <run dir>` from `C:\ssbot\live_w0f_cf\brain`. Compare on
-  seeds 340000 with the seen (`20261008_040149`) and share (`20261008_034918`) runs.
+- Nothing. Instance 1's lock (taken 04:46 as "diag") was released at 05:05; no job of mine is running.
 - Offline: nothing. The forensics replay covers 115 of the 225 episodes (A0b 50, R6 40, R5 25); the other 110 were not
   replayed so as not to load the machine next to the other tracks' live runs (`fx_run.cmd` resumes where it stopped).
 
@@ -1880,14 +1884,16 @@ attack outcomes), `live_w0f_3608489` (live check). Seeds used: 340000-340024.
 
 ### Next / open issues
 
-1. Merge `forced_rank = "seen"` (default stays `share`); the integrator's Forum A/B with `SSBOT_FORUM_FR=seen`. It is
-   orthogonal to R5 / R6 / R8 (only FORCED_RISK's first keys); their terms can only act once the tie is gone.
+1. Merge `forced_rank` ("seen" / "seen_cf"; default stays `share`); the integrator's Forum A/B with
+   `SSBOT_FORUM_FR=seen_cf`, and once paired against `seen` on the same instance and seeds (my seen_cf run was not
+   paired). It is orthogonal to R5 / R6 / R8 (only FORCED_RISK's first keys); their terms can only act once the tie
+   is gone.
 2. Antic-driven attacks (whip, Envoy slash, Reed stab, Choristor slash: over half of the remaining hits) are invisible
    to the "seen" key until their collider opens. A second key after it, the share of stage-1 frames in the committed
    fine placements (`forced_rank = "seen_cf"`, `SSBOT_FORUM_FR=seen_cf`, 82e94fa, tested), lifts the hindsight-clear
    pick within 12 frames of a hit from 60 % to 73 % offline (whip 35 -> 68 %, Choristor slash 0 -> 33 %; the Envoy
-   slash stays hard, 19 -> 24 %); its live check is queued (Running). The real fix is a committed-attack template at
-   its nominal (median dwell) timing instead of the entry-interval window union.
+   slash stays hard, 19 -> 24 %) and lived 6 s longer than seen (above, unpaired). The real fix is a committed-attack
+   template at its nominal (median dwell) timing instead of the entry-interval window union.
 3. Support de-saturation (R2 / R3 owners, recertification needed): start-later families should not strike before
    their antic's minimum dwell; the flying Reed's idle growth capped by its measured top speed.
 4. Offense: 0 kills in 274 live episodes; wave 0 never ends. R6's punish windows (Envoy Charge End, Slash1 Recover)
