@@ -56,7 +56,7 @@ def test_e_prefers_room_away_from_the_enemy_and_trapped_needs_every_way_closed(p
     t = tv.TerminalValue(params)
     xs = np.array([20.0, 29.0, 30.0, 40.0])
     E_, trapped, ov, he = t.rows(fb, xs, np.full(4, tv.HERO_CY), np.zeros(4, np.int64), 0.6)
-    assert E_[0] > E_[2] and E_[3] > E_[2] and E_[1] > E_[2] - 1e-9
+    assert E_[0] > E_[2] + 0.2 and E_[3] > E_[2] + 0.2      # 10 u away vs on the Reed
     assert not trapped.any()                          # one enemy: a way out on either side
     assert (ov == 0).all()                             # one zone never overlaps itself
     # a reach whose cells all lie in the zone is trapped: a zone over the whole arena

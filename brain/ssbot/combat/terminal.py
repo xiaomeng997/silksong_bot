@@ -55,7 +55,8 @@ PATH_DT_S = 0.01
 TPL_SLACK = 1                                      # template bins of slack each side of a field bin
 CLASSES = ("ground", "air_up", "air_mid", "air_down")
 AIR_VY = 3.0                                       # |vy| above this: rising / falling
-REACH_Q = (0.125, 0.25)                            # offsets quantised to this (x, y) before dedup
+REACH_Q = (0.125, 0.25)                            # offsets quantised to this (x, y) before dedup (the file)
+REACH_RUN_Q = (0.5, 1.0)                           # and to one cell at run time (the rows' cost: forum.md §17)
 HERO_CY = FLOOR_Y + hb.HERO_HALF_U[1]              # a hurtbox centre standing on the floor
 LIKELY_P = 0.5                                     # overlap: owners this likely in the cell
 BODY_APPROACH_U_S = 1.5                            # body field: an enemy's zone grows this fast since its sighting
@@ -541,10 +542,26 @@ def reach_templates(params: kin.HeroParams) -> tuple[np.ndarray, np.ndarray]:
         z = np.load(path)
         if tuple(np.round(z["key"], 6)) == tuple(np.round(np.array(key[:4], np.float64), 6)) \
                 and tuple(z["reach_s"]) == REACH_S:
-            r = _REACH[key] = (z["offs"], z["n"])
+            r = _REACH[key] = _coarse(z["offs"], z["n"])
             return r
-    r = _REACH[key] = _build_reach(params)
+    r = _REACH[key] = _coarse(*_build_reach(params))
     return r
+
+
+def _coarse(offs: np.ndarray, n: np.ndarray, q=REACH_RUN_Q) -> tuple[np.ndarray, np.ndarray]:
+    """The offsets re-quantised to q and deduplicated (a cell's worth of offsets marks one cell at most twice)."""
+    per = {}
+    for ci in range(offs.shape[0]):
+        for mi in range(offs.shape[1]):
+            d = offs[ci, mi, :n[ci, mi]]
+            per[ci, mi] = np.unique(np.round(d / np.array(q)), axis=0) * np.array(q)
+    kmax = max(1, max(len(v) for v in per.values()))
+    out = np.zeros((offs.shape[0], offs.shape[1], kmax, 2))
+    nn = np.zeros(n.shape, np.int64)
+    for (ci, mi), v in per.items():
+        out[ci, mi, :len(v)] = v
+        nn[ci, mi] = len(v)
+    return out, nn
 
 
 def _build_reach(params: kin.HeroParams) -> tuple[np.ndarray, np.ndarray]:
