@@ -3143,12 +3143,16 @@ of the task.
   kills, 11 clears, +5.6 s; new 1.42 kills, 15 clears (up to wave 5), +26.9 s over int and +21.4 s (CI 10.1-33.6)
   over intk; hits / min 10.1 / 8.3 / 5.8; FORCED_RISK 0.89 / 0.89 / 0.80; support-outside hits 0 in every arm.
 
+- Live round 2 (forum.md 23.7, frozen `C:\ssbot\live_w0d_fca0416`, 80 + 80, ABBA): newS (escape+n+g+l with the
+  throw substitution, clash main with the seen fix, per-state margins, bells as targets) vs intk: +18.2 s paired (CI
+  6.5-31.1), hits / min 5.9 vs 7.3, kills / episode equal (1.19 vs 1.18), wave-0 clears equal (15 vs 16): survival up,
+  damage per minute down ~30 %; Reed pin hits up (46 vs 27 / 80 episodes: the throw substitution).
+- R2 held-out recall on the final support (forum.md 23.8; `multi_recall fresh --react escape+n+g --state-margins`,
+  `C:\ssbot\data\m2_forum_w0d\recall_fresh_ngS_fca0416.json`): 375,940 / 375,940 at L2 / L3 / L4, own type too, 1,802
+  / 1,802 chain hooks: the per-state margins uncover no held-out contact.
+
 ### Running
 
-- Live A/B round 2 (`C:\ssbot\sandbox\w0d_live.ps1` via `w0d_chain.ps1`, frozen `C:\ssbot\live_w0d_fca0416`,
-  instances 0-3, locks `w0d`, manifest `C:\ssbot\sandbox\w0d_manifest_b.txt`, seed 362000): intk vs newS (escape+n+g+l
-  with the throw substitution, clash main with the seen fix, per-state margins), ABBA.
-- R2 held-out recall on the final support (`multi_recall fresh --react escape+n+g --state-margins`, frozen
-  fca0416, 2 workers): `C:\ssbot\data\m2_forum_w0d\recall_fresh_ngS_fca0416.json` (log `recall_fresh_ngS.log`). A
-  first, interrupted run on 7a8afc9 (+n+g without the throw substitution, family margins): 61 of 444 fight jobs,
-  389,133 contact checks, 0 misses.
+- Live round 3 (frozen fca0416, manifest `C:\ssbot\sandbox\w0d_manifest_c.txt`, seed 363000): newS vs noL (newS
+  without the light cone `+l`), ABBA, 80 + 80.
+- Then round 4: the better of them vs + aimed pins (`+a`, 33762ee, frozen `C:\ssbot\live_w0d_33762ee`).
