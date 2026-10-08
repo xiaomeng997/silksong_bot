@@ -292,7 +292,14 @@ def _build_ahead(a, fire_study: dict, fire_dd: dict) -> tuple[dict, dict]:
 # ---- parity: the runtime's covariates vs the scan's ---------------------------------------------------------------
 
 def _parity_one(args) -> dict:
-    path, model_path, extra_dir, max_frames = args
+    try:
+        return _parity(*args)
+    except Exception as e:  # noqa: BLE001 - one bad fight must not stop the check
+        return {"id": str(args[0]), "error": f"{type(e).__name__}: {e}", "frames": 0, "stats": {},
+                "differences": {}, "cost_ms": {}}
+
+
+def _parity(path: str, model_path: str, extra_dir: str | None, max_frames: int) -> dict:
     _below_normal()
     from ssbot.backends.oracle_backend import OracleBackend
     from ssbot.combat.branch_model import BranchModel
@@ -373,7 +380,8 @@ def cmd_parity(a) -> int:
     with ProcessPoolExecutor(max_workers=a.workers) as ex:
         for r in ex.map(_parity_one, jobs, chunksize=1):
             res.append(r)
-            print(json.dumps({k: r[k] for k in ("id", "frames", "stats", "differences", "cost_ms")}), flush=True)
+            print(json.dumps({k: r[k] for k in ("id", "frames", "stats", "differences", "cost_ms", "error") if k in r}),
+                  flush=True)
     tot, diff = Counter(), Counter()
     for r in res:
         tot.update(r["stats"])

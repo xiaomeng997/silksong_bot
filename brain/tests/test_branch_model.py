@@ -1,6 +1,7 @@
 """Forum branch model (R5 behaviour model): BranchMemory history and gates, the backoff tables, trigger geometry, the
 Tiny orbit predictor, and the offline selection on synthetic decisions."""
 import math
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -290,3 +291,22 @@ def test_multi_forecaster_branch_view_is_scoring_only():
     tr = withb.trackers[7]
     assert tr.mem is not None and tr.mem.fam == "RE_STAB" and plain.trackers[7].mem is None
     assert withb.branch_probs(7, "Alert") is not None and plain.branch_probs(7) is None
+
+
+PARITY_CACHE = Path("C:/ssbot/data/m2_forum_r0/cache/20261002_223640_Forum_A_data__i2__ep0.npz")
+HITBOXES = Path(__file__).resolve().parents[2] / "knowledge" / "1.0.30000" / "enemies" / "forum" / \
+    "Reed_hitboxes.npz"
+
+
+@pytest.mark.skipif(not (PARITY_CACHE.exists() and HITBOXES.exists()),
+                    reason="R0 Forum cache / recording or the generated forum hitbox tables not on this machine")
+def test_runtime_covariates_equal_the_scans_on_a_recording(tmp_path):
+    """Train / serve parity: the recording replayed through OracleBackend -> MultiForecaster(branch=...) gives, on
+    every frame an enemy is in a modelled decision state, the covariates the offline scan gives that frame (geometry
+    at now / entry / stored, history, gates, context)."""
+    from ssbot.tools.forum_branch import _parity_one
+    model = Path(__file__).resolve().parents[2] / "knowledge" / "1.0.30000" / "enemies" / "forum" / \
+        "branch_model.json"
+    r = _parity_one((str(PARITY_CACHE), str(model), str(tmp_path), 6000))     # the hero's silk read into tmp_path
+    assert r["stats"].get("compared", 0) > 3000
+    assert r["differences"] == {} and set(r["stats"]) == {"compared"}
