@@ -232,6 +232,12 @@ class ForumConfig:
         support, so the escape check looks at every lock-in of a plan, not only the late ones."""
         return "n" in self.react.strip().lower().split("+")[1:]
 
+    @property
+    def light_cone(self) -> bool:
+        """"+l" (escape only): the escape check also asks that the plan's end has a way out of the committed
+        must-escape placements with a known timing past the horizon (ForumPlanner._light_cone_occ, forum.md §23)."""
+        return self.escape and "l" in self.react.strip().lower().split("+")[1:]
+
 
 @dataclass
 class EnvelopeAudit:
@@ -958,8 +964,9 @@ class ForumPlanner(Planner):
         dt = params.frame_time
         store = f._fc.tables.store
         T1 = r1.box.shape[1]
-        dmax = max(t[2] for t in threats)
-        L = int(min(ESC_MAX_F, math.ceil(dmax) + self.fcfg.esc_after_f))
+        lc = self.fcfg.light_cone
+        dmax = max((t[2] for t in threats), default=0.0)
+        L = ESC_MAX_F if lc else int(min(ESC_MAX_F, math.ceil(dmax) + self.fcfg.esc_after_f))
         E = self._esc_cmds(L)
         nE = len(E)
         lock = np.isin(r1.mode[rows], ESC_LOCK_MODES) | ((r1.flags[rows] & F_ATTACKING) != 0)
@@ -1023,7 +1030,42 @@ class ForumPlanner(Planner):
             for m in np.flatnonzero(app & ~esc):
                 fail[cps[m][0]] += 1
                 labels[cps[m][0]].append(label)
+        if lc:
+            # the light cone (the person's note of 2026-10-08, forum.md §23): the plan's end must not lie where every
+            # escape still meets an attack already under way whose timing is known (the committed fine placements of
+            # the families that cannot be clashed, the hazards on their paths, death tails) past the horizon: by
+            # simulation over the escapes instead of eroding each frame by the reachable set (the same question for
+            # the 7 ways out the escape check has)
+            ends = np.array([m for m, (_, k) in enumerate(cps) if k == T1 - 1], np.int64)
+            if len(ends):
+                sel = (ends[:, None] * nE + np.arange(nE)[None]).ravel()
+                tq = (T1 - 1) * dt + tk_rel
+                occ = self._light_cone_occ(f, cx[sel], cy[sel], tq) & ~inv[sel]
+                occ[:, 0] = False
+                esc = (~occ.any(axis=1)).reshape(len(ends), nE).any(axis=1)
+                for m in ends[~esc]:
+                    fail[cps[m][0]] += 1
+                    labels[cps[m][0]].append("light cone")
         return fail, labels
+
+    def _light_cone_occ(self, f, x: np.ndarray, y: np.ndarray, tq: np.ndarray) -> np.ndarray:
+        """The must-escape layer with a known timing at the points x, y [n, T] at tq [T] (s from the origin): the
+        committed fine placements of the families clash.json does not clash, the hazards on deterministic paths and
+        the death tails (no window placement: its timing is not known, the person's note)."""
+        if not hasattr(f, "pm"):
+            return np.zeros(np.shape(x), bool)
+        fams = getattr(self, "_lc_fams", None)
+        if fams is None:
+            tab = self.clash_tab if self.clash_tab is not None else ClashTable.load()
+            fams = self._lc_fams = frozenset(fam for _, fam in tab.families())
+        pm = f.pm
+        sel = None
+        if len(pm["owner"]):
+            sel = pm["committed"] & ~np.array([str(fm) in fams for fm in pm["family"]], bool)
+        out = f._fine_occ(x, y, tq, sel) if sel is not None and sel.any() else np.zeros(np.shape(x), bool)
+        out |= f._path_occ(x, y, tq)
+        out |= f._box_occ(x, y, tq, kinds=("death",))
+        return out
 
     def _escape_pick(self, f, start, hold, full, hold_end, r1, ranked: np.ndarray, hero: tuple[float, float],
                      k: int | None = None, t_end: float | None = None) -> tuple[int | None, int, int, int, list]:
@@ -1033,7 +1075,7 @@ class ForumPlanner(Planner):
         failures, rows checked, threats, its failing threats)."""
         self.esc_cut = False
         threats = self._threats(f, hero)
-        if not threats or not len(ranked):
+        if (not threats and not self.fcfg.light_cone) or not len(ranked):
             return None, 0, 0, len(threats), []
         best, best_fail, checked, best_lab = None, 0, 0, []
         K = min(self.fcfg.esc_k if k is None else k, len(ranked))

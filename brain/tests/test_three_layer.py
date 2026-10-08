@@ -138,3 +138,24 @@ def test_the_policy_has_the_main_clash_mode():
     c = ForumPlannerPolicy._fcfg("main")
     assert c.clash and c.clash_main and c.clash_min_p == 0.0 and c.clash_max_fail == pytest.approx(0.3)
     assert not ForumPlannerPolicy._fcfg("on").clash_main and set(CLASH_MODES) >= {"off", "on", "main"}
+
+
+def test_light_cone_switch_and_its_layer(params, arena):
+    """"+l": the escape check's light cone. Its layer: the committed fine placements of the families clash.json does
+    not clash (a stab committed a frame ago here: its blade in front of the anchor), never a clashable family's."""
+    assert ForumConfig(react="escape+n+l").light_cone and not ForumConfig(react="delay+l").light_cone
+    assert not ForumConfig(react="escape+n").light_cone
+    mf = MultiForecaster(_tables(), ORACLE, waves=False)
+    _run(mf, [(f, f * BIN, [_ent(7, 20.0, 5.0, "Alert" if f < 10 else "Stab Pos", flip=True,
+                                 box=(19.5, 4.0, 20.5, 6.0))],
+               ([_go(7, "Alert", f, 0.0)] if f == 0 else []) + ([_go(7, "Stab Pos", f, f * BIN)] if f == 10 else []))
+              for f in range(12)])
+    f = mf.forecast(0.8)
+    pl = ForumPlanner(params, arena, PlannerConfig(T=36, threads=2, variants="bounds_lo"),
+                      ForumConfig(react="escape+n+l"))
+    tk = np.arange(0, 49) * BIN
+    X, Y = np.full((1, 49), 22.0), np.full((1, 49), 5.0)
+    pl._lc_fams = frozenset()
+    assert pl._light_cone_occ(f, X, Y, tk)[0].any()
+    pl._lc_fams = frozenset({"RE_STAB"})
+    assert not pl._light_cone_occ(f, X, Y, tk)[0].any()
