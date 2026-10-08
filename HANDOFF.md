@@ -1877,8 +1877,8 @@ checks are done, the live A/B is queued on a detached driver (below).
    Write the result into forum.md 17.5, the plan's R6 row and this section.
 2. Then live validation of the Clapper controller: wave-start batch from `Forum_A_w7` / `Forum_A_w13` on instance 1
    (the full gauntlets never get past wave 0).
-3. PUNISH: evaluate the window at the farthest spot the Reaper reaches from (3.6 u) instead of 1.8 u; the support's idle
-   tubes may make it moot (17.2).
+3. PUNISH needs a support that sometimes leaves an idle enemy's surroundings free (R5's margins / timing, R8's clash
+   branches); a 3.0 u spot changed nothing (17.2). Until then the far-target rule fires only near lone enemies.
 4. Full test suite + the Bell Beast equivalence tests (nothing shared was touched: tactics only; run them anyway).
 5. Frozen checkouts to remove when done: `C:\ssbot\live_r6_5d24020`, then `live_r6_ef036d5`.
 
