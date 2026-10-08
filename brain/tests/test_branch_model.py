@@ -173,6 +173,56 @@ def test_decisions_are_decision_or_attack_states(tk):
     assert known
 
 
+class _Tr:
+    """The tracker fields BranchView reads."""
+
+    def __init__(self, tk, iid, state, mem, pos=(30.0, 10.0), flip=0):
+        self.tk, self.iid, self.state, self.mem, self.pos, self.flip = tk, iid, state, mem, pos, flip
+        self.hidden, self.dead, self.in_play = False, False, True
+
+
+class _WS:
+    def __init__(self, hx, hy):
+        from ssbot.core.worldstate import E, HeroState, Resources
+        self.hero = HeroState(pos=E((hx, hy)), hurtbox=[(hx - 0.25, hy - 1.04), (hx + 0.25, hy + 1.04)])
+        self.res = Resources(silk=E(5))
+
+
+def test_reactive_branches_follow_the_gates_and_the_revealed_coin():
+    from ssbot.combat.branch_model import BranchView
+    bv = BranchView(BranchModel({"types": {}}))
+    reed = fb.memory_for("Song Reed")
+    reed.enter("Activate", "Alert", 0.0)
+    tr = _Tr("Song Reed", 1, "Alert", reed)
+    bv.observe(0.0, _WS(45.0, 10.0), {1: tr})
+    got = {rx.successor: p for rx, p in bv.reactive(tr, 0.0)}
+    assert got == {"Evade Antic": 0.95, "Defend Start": 0.45}
+    path = [(0.05 * k, (40.0 - 0.5 * k - 0.25, 8.96, 40.0 - 0.5 * k + 0.25, 11.04)) for k in range(20)]
+    ep = {s: (round(t, 2), p) for s, t, p in bv.entry_prob(tr, 0.0, path)}
+    assert ep["Defend Start"][0] < ep["Evade Antic"][0]          # the 7.65 u circle before the narrow evade boxes
+    reed.enter("Alert", "Evade Antic", 1.0)
+    reed.enter("Evade Antic", "Evade", 1.1)
+    reed.enter("Evade", "Evade End", 1.4)
+    reed.enter("Evade End", "Alert", 1.4)
+    tr.state = "Alert"
+    assert {rx.successor for rx, _ in bv.reactive(tr, 1.5)} == {"Defend Start"}      # the evade is spent
+    bell = fb.memory_for("Pilgrim 03 Song")
+    bell.enter("Startle", "In Range", 0.0)
+    trb = _Tr("Pilgrim 03 Song", 2, "In Range", bell)
+    assert [rx.successor for rx, _ in bv.reactive(trb, 0.6)] == ["Evade Antic"]
+    bell.gates["evade_cd"] = True
+    assert bv.reactive(trb, 0.6) == []
+    # Clapper: the hero stood in Slam Range for frames after the 0.25 s gate and it did not evade: tails, p 0
+    clap = fb.memory_for("Song Heavy Sentry")
+    clap.enter("Slam Recover", "Idle", 0.0)
+    trc = _Tr("Song Heavy Sentry", 3, "Idle", clap)
+    bv2 = BranchView(BranchModel({"types": {}}))
+    for k in range(20):
+        bv2.observe(0.05 * k, _WS(32.0, 9.0), {3: trc})
+    assert [p for _, p in bv2.reactive(trc, 0.2)] == [0.49]
+    assert [p for _, p in bv2.reactive(trc, 0.95)] == [0.0]
+
+
 def test_multi_forecaster_branch_view_is_scoring_only():
     """The branch model hangs on the trackers (BranchMemory) and fills Subject.next_p; the placements, the occupancy,
     the probability map and the support set are the same with and without it."""

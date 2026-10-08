@@ -576,3 +576,82 @@ class BranchView:
         for st, p in frontier:
             out[f"wait:{st}"] += p
         return dict(out)
+
+    # ---- body-entry reactive branches (forum_reactive_moves.md; scoring only)
+
+    def _coin_tails(self, tr, rx: Reactive, T: float) -> bool:
+        """The hidden coin of this visit came up tails: the hero's box was in the trigger with the gates open for two
+        frames or more and the enemy is still in the source state (a heads goes on the first such frame)."""
+        mem = tr.mem
+        if not rx.coin or mem is None or mem.t_entry is None:
+            return False
+        q = self.enemy.get(tr.iid)
+        if not q:
+            return False
+        e = q[-1]
+        n = 0
+        for t, box, _, _, _ in self.hero:
+            if t < mem.t_entry + rx.min_age_s or t > T or box is None:
+                continue
+            if in_range(tr.tk, rx.range_name, e[1], e[2], e[3], box):
+                n += 1
+                if n >= 2:
+                    return True
+        return False
+
+    def reactive(self, tr, T: float) -> list[tuple[Reactive, float]]:
+        """The body-entry branches open for tr now: (the trigger, the chance the hero's body entering it now starts the
+        dodge / defence). Gates from its BranchMemory; a coin already shown tails in this visit gives 0."""
+        out = []
+        mem = tr.mem
+        if mem is None or tr.state is None:
+            return out
+        for rx in REACTIVE.get((tr.tk, tr.state), ()):
+            if not all(bool(mem.gates.get(k, False)) == v for k, v in rx.gates):
+                continue
+            p = 0.0 if self._coin_tails(tr, rx, T) else rx.p_enter
+            out.append((rx, p))
+        return out
+
+    def entry_prob(self, tr, T: float, path) -> list[tuple[str, float, float]]:
+        """For a candidate's hero boxes path [(t, box)] (game time, ascending): per open trigger of tr, (the successor,
+        the first time the box enters the trigger at or after its gate age, the chance it starts then). The enemy is
+        held where it was last seen (the source states hover or stand: forum_reactive_moves §1.2)."""
+        q = self.enemy.get(tr.iid)
+        if not q or tr.mem is None or tr.mem.t_entry is None:
+            return []
+        e = q[-1]
+        out = []
+        for rx, p in self.reactive(tr, T):
+            t_gate = tr.mem.t_entry + rx.min_age_s
+            for t, box in path:
+                if t >= t_gate and in_range(tr.tk, rx.range_name, e[1], e[2], e[3], box):
+                    out.append((rx.successor, t, p))
+                    break
+        return out
+
+
+@dataclass(frozen=True, slots=True)
+class Reactive:
+    """A body-entry branch (forum_reactive_moves.md §1.2 / §2.2, R0 per-visit rates): in source state, the hero's
+    physics box entering range_name with the gates open (BranchMemory.gates name -> required value) and the state at
+    least min_age_s old starts successor with chance p_enter (coin: a hidden 50 % coin drawn at the state's entry)."""
+    range_name: str
+    successor: str
+    p_enter: float
+    min_age_s: float
+    coin: bool
+    gates: tuple = ()
+
+
+REACTIVE: dict[tuple[str, str], tuple[Reactive, ...]] = {
+    # Bellbearer: Evade Range & no wall behind & Can Evade (0.5 s into In Range) & no Evade Cooldown: 0.97 per visit
+    ("Pilgrim 03 Song", "In Range"): (Reactive("Evade Range", "Evade Antic", 0.97, 0.5, False, (("evade_cd", False),)),),
+    # Clapper: Slam Range & Will Evade (coin at Idle entry) & Can Evade (0.25 s): 0.49
+    ("Song Heavy Sentry", "Idle"): (Reactive("Slam Range", "Evade Scuttle", 0.49, 0.25, True),),
+    # Reed: armed Evade Range (one shot: off at Evade Antic, on at Defend Start / Stab Antic): 0.95 entering during
+    # Alert (0.8 when already inside as Alert begins); Defend Range & Will Defend (coin) & not Just Did Defend: 0.45
+    # (EVADE is tested first in the same frame)
+    ("Song Reed", "Alert"): (Reactive("Evade Range", "Evade Antic", 0.95, 0.0, False, (("armed", True),)),
+                             Reactive("Defend Range", "Defend Start", 0.45, 0.0, True, (("jdd", False),))),
+}
