@@ -10,8 +10,9 @@ ticks and on events (the goal's target gone, out of play or into another family,
 and keeps it until the next pick (hysteresis: a new goal must score `switch_x` times the kept one's). Goals, first that
 applies:
   PUNISH  an enemy whose engagement spot stays out of every support (all enemies, hazards, entries: MultiForecast
-          .occupied, one batched query for all spots) long enough to get there and swing: window >= t_run + swing_s +
-          margin_s, t_run = start_s + |dx| / run_u_s (dash + sprint, ~17.5 u/s, the person). Picked by slack (window -
+          .occupied, one batched query for all spots) from the hero's arrival through the swing: window (the first
+          cover at or after t_run; a cover before the arrival does not count) >= t_run + swing_s + margin_s, t_run =
+          start_s + |dx| / run_u_s (dash + sprint, ~17.5 u/s, the person). Picked by slack (window -
           what it needs) x type priority. This is the far-target rule of the plan's R6 row: a near idle enemy (its next
           attack can start any time: a short window) against a far one in a long recovery (a long window) -> the far
           one when the window covers the run, the near one when it does not.
@@ -156,6 +157,7 @@ class Cand:
     iso: bool = False
     eta: float = math.inf
     prio: float = 1.0
+    cov0: bool = False                                    # the spot covered now (the arbitration log)
 
 
 @dataclass
@@ -267,8 +269,11 @@ class GauntletTactics:
             X = np.repeat(np.array([[c.spot] for c in out]), len(tk), 1)
             occ = np.asarray(fc.occupied(X, np.full(X.shape, self.floor_y), tk))
             for c, row in zip(out, occ):
-                i = np.flatnonzero(row)
+                # the window counts from the hero's arrival: the spot covered before it (the enemy's body there now,
+                # an attack ending) does not matter, the first cover at or after t_run ends it
+                i = np.flatnonzero(row & (tk >= c.t_run - 1e-9))
                 c.window = float(tk[i[0]]) if len(i) else math.inf
+                c.cov0 = bool(row[0])
         return out
 
     def _pick(self, ws, fc, hx: float, t: float) -> Goal | None:
@@ -276,7 +281,7 @@ class GauntletTactics:
         cands = self.candidates(ws, fc, hx)
         # the arbitration log (decision records "l2_cands"): iid, type, window, what it needs, isolated, ETA, priority
         self.last["l2_cands"] = [[c.s.iid, c.s.type_key, round(min(c.window, 9.0), 3),
-                                  round(c.t_run + r.swing_s + r.margin_s, 3), c.iso, round(c.eta, 2), c.prio]
+                                  round(c.t_run + r.swing_s + r.margin_s, 3), c.iso, round(c.eta, 2), c.prio, c.cov0]
                                  for c in cands]
         if not cands:
             return None
