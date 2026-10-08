@@ -33,6 +33,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -146,11 +147,14 @@ def _in_game_without_control(s: dict) -> bool:
     a cutscene (the post-kill memory scene), a transition or a load. load_slot only knows the menus and gameplay.
     While PLAYING the menu state is not read: UIManager keeps the save-select menuState after a game starts from it
     (instance 4's first start, 2026-10-02: an empty slot 1 began a new game in Tut_01 with menu still SAVE_PROFILES,
-    and load_slot pressed Enter there and timed out twice)."""
+    and load_slot pressed Enter there and timed out twice). A paused game is not one: it needs an unpause
+    (train.recovery.resume), and a savestate load under the pause menu clears isPaused but leaves the menu up."""
     from ssbot.probes.common import GS_PLAYING, MENU_MAIN, MENU_SAVE_PROFILES, in_gameplay
+    from ssbot.train.recovery import is_paused
     g = s.get("game") or {}
     on_menu = g.get("gs") != GS_PLAYING and g.get("menu") in (MENU_MAIN, MENU_SAVE_PROFILES)
-    return bool(g.get("scene")) and bool(s.get("hero")) and not on_menu and not in_gameplay(s)
+    return (bool(g.get("scene")) and bool(s.get("hero")) and not on_menu and not in_gameplay(s)
+            and not is_paused(s))
 
 
 GS_CUTSCENE = 7                 # GlobalEnums.GameState
@@ -165,20 +169,40 @@ def _describe(s: dict | None) -> str:
             f"paused {g.get('paused')} hero {bool(h)} input {h.get('hero_accepting_input')}")
 
 
-def _unstick(link, enc, log) -> None:
+def _unstick(link, enc, log, err: BaseException | None = None) -> None:
     """One recovery step after a failed way back into the sandbox slot, by what the game shows now.
 
+    - A title sub-menu (Options, Game options, Achievements, Extras, the quit-game prompt): Esc back to the main menu
+      (train.recovery.title_home). 20261005_164501_Forum_A_w2_mix_data2_2 i1 sat in the title's Game options (menuState
+      12): load_slot's retried Enter on a main menu highlighting Options had gone Main -> Options -> Game options, the
+      worker waited 2 x 60 s for the main menu and died, a person pressed Esc. After a MenuError (the main menu's Enter
+      opened such a menu: the highlight was not Start Game) Up as many items as that menu's item lies below Start Game
+      (recovery.TITLE_ITEM), so the next try's Enter lands on Start Game.
     - A cutscene without a hero: a new game started (20261003_010522, 07:13: after a real quit the slot-select Enter
       began a new game, Opening_Sequence, as the save select does for a slot it reads as empty, m0:N30 / probes P5;
       save suppression keeps it off disk). Tap jump (the legacy anyKeyDown shim; a SKIP_PROMPT needs a second press)
       until the game has a hero, then fall through to the next case.
     - A game without control (a hero, no input: the new game's first room, the post-kill memory scene): load the
       encounter's savestate, as at the worker's start.
-    - Paused in a scene: unpause (Continue).
-    - Anything else (the title or save-select menus, a load): nothing; the next try runs load_slot again."""
+    - Paused in a scene, in any pause menu: recovery.resume (Back out of Options, Continue + Submit).
+    - Anything else (the main or save-select menus, a load): nothing; the next try runs load_slot again."""
     from ssbot.ipc.framing import mask
-    from ssbot.train.episode import unpause, wait_settled
+    from ssbot.probes.common import MenuError
+    from ssbot.train import recovery
+    from ssbot.train.episode import wait_settled
     s = link.wait_state(lambda s: s.get("game") is not None, timeout_s=60)
+    if recovery.where(s) == "title_submenu":
+        ok, steps = recovery.title_home(link)
+        log(f"title sub-menu (menu {(s.get('game') or {}).get('menu')}): {'back on the main menu' if ok else 'still there'}"
+            f" after {len(steps)} Esc")
+        s = link.state or s
+    if isinstance(err, MenuError) and recovery.where(s) == "title":
+        ups = recovery.TITLE_ITEM.get(err.menu, 1)
+        log(f"the main menu's Enter opened menu {err.menu}: Up x{ups} towards Start Game")
+        for _ in range(ups):
+            recovery._wait_frame(link, recovery.tap(link, "up"))
+        recovery._release(link)
+        return
     g = s.get("game") or {}
     if g.get("gs") == GS_CUTSCENE and not s.get("hero"):
         log(f"a cutscene without a hero ({g.get('scene')}): a new game? tapping jump until a hero appears")
@@ -198,14 +222,17 @@ def _unstick(link, enc, log) -> None:
                                 timeout_s=30)
         except TimeoutError:
             s = link.state or s
+    if recovery.is_paused(s) and (s.get("game") or {}).get("scene"):
+        ok, steps = recovery.resume(link, log=log)
+        log(f"paused in a scene ({recovery.where(s)}): {'unpaused' if ok else 'still paused'} after {steps}")
+        if not ok:
+            return
+        s = link.state or s
     if _in_game_without_control(s) or (s.get("hero") and (s.get("game") or {}).get("scene") != enc.scene
-                                       and not (s.get("game") or {}).get("paused")):
+                                       and not recovery.is_paused(s)):
         log(f"loading the savestate {enc.savestate} from {(s.get('game') or {}).get('scene')}")
         link.rpc("savestate.load", timeout_s=40, name=enc.savestate, timeout=30)
         wait_settled(link, enc.scene, timeout_s=60)
-    elif (s.get("game") or {}).get("paused") and (s.get("game") or {}).get("scene"):
-        log("paused in a scene: unpausing")
-        unpause(link)
 
 
 def back_into_slot(link, enc, instance: int, tries: int = SLOT_TRIES, slot_timeout_s: float = 120.0) -> None:
@@ -213,9 +240,10 @@ def back_into_slot(link, enc, instance: int, tries: int = SLOT_TRIES, slot_timeo
     suppression on: at the worker's start and after every real quit. Retried up to `tries` times with one _unstick
     step between tries: chain H's campaign died here twice (20261003_010522 at 07:13, load_slot after a real quit
     waited 120 s for gameplay while a new game's opening ran; 20261003_074533, guards.set timed out on a freshly
-    started game). A closed link is not retried (the game is gone; restarting it is the operator's call)."""
+    started game; 20261005_164501_..._2 i1, the title's Game options: see _unstick). A closed link is not retried (the
+    game is gone; restarting it is the operator's call)."""
     from ssbot.ipc.oracle_link import OracleError
-    from ssbot.probes.common import load_slot, stand_up
+    from ssbot.probes.common import MenuError, load_slot, stand_up
 
     def log(msg: str) -> None:
         print(f"[i{instance}] {msg}", flush=True)
@@ -229,17 +257,44 @@ def back_into_slot(link, enc, instance: int, tries: int = SLOT_TRIES, slot_timeo
             if attempt > 1:
                 log(f"back in the sandbox slot on try {attempt}")
             return
-        except (TimeoutError, OracleError) as e:
+        except (TimeoutError, OracleError, MenuError) as e:
             if link.closed or attempt == tries:
                 raise
             log(f"back into the sandbox slot failed (try {attempt} of {tries}): {type(e).__name__}: {e}; "
                 f"{_describe(link.state)}")
             try:
-                _unstick(link, enc, log)
+                _unstick(link, enc, log, e)
             except (TimeoutError, OracleError) as e2:
                 if link.closed:
                     raise
                 log(f"recovery step failed: {type(e2).__name__}: {e2}; {_describe(link.state)}")
+
+
+OFF_TITLE = ("title", "title_submenu", "title_other", "save_select")
+
+
+def after_harness_fail(link, enc, instance: int) -> str | None:
+    """After a HARNESS_FAIL, put the game back where the next episode can start, by where it is (train.recovery.where):
+    paused in any pause menu -> resume (Back out of Options, Continue + Submit; the next episode's start would try once
+    more); the title, a title sub-menu or the save select (a quit nobody asked for: 20261002_080522 i0 left the arena
+    for Quit_To_Menu, and the three episodes after it failed "savestate.load: no game loaded" until the worker stopped)
+    -> back_into_slot; anything else (gameplay, a cutscene, a load) -> nothing, the next savestate load is the reset.
+    Returns what was done (None: nothing), for the worker log; raises what back_into_slot raises when its tries run
+    out."""
+    from ssbot.train import recovery
+
+    def log(msg: str) -> None:
+        print(f"[i{instance}] {msg}", flush=True)
+
+    s = link.state or {}
+    w = recovery.where(s)
+    if w in recovery.PAUSED_PLACES:
+        ok, steps = recovery.resume(link, log=log)
+        return f"{w}: {'unpaused' if ok else 'still paused'} ({len(steps)} taps)"
+    if w in OFF_TITLE:
+        back_into_slot(link, enc, instance)
+        return f"{w}: back into the sandbox slot"
+    return None
 
 
 def set_time_scale(link, scale: float, instance: int, wait_s: float = 5.0, quiet: bool = False) -> float | None:
@@ -301,14 +356,14 @@ def worker(a: argparse.Namespace) -> int:
                    {**env, "time_scale": str(a.time_scale)} if a.time_scale != 1.0 else env)
     if env:
         print(f"[i{a.instance}] SSBOT switches (in config_fp): {env}", flush=True)
-    from ssbot.train.episode import unpause
-    deadline = time.monotonic() + 30     # a previous run may have left it paused (a QUIT, or the oracle's
-    while time.monotonic() < deadline:   # brain-lost watchdog, which pauses a moment after the last ACTION)
-        s0 = link.wait_state(lambda s: s.get("game") is not None, timeout_s=120)
-        if not ((s0.get("game") or {}).get("paused") and (s0.get("game") or {}).get("scene")):
-            break
-        unpause(link)
-        time.sleep(0.6)
+    from ssbot.train import recovery
+    # a previous run may have left it paused (a QUIT, or the oracle's brain-lost watchdog, which pauses a moment after
+    # the last ACTION), possibly in a pause sub-menu: resume from wherever the pause menus are
+    s0 = link.wait_state(lambda s: s.get("game") is not None, timeout_s=120)
+    if recovery.is_paused(s0) and (s0.get("game") or {}).get("scene"):
+        ok, steps = recovery.resume(link, log=lambda m: print(f"[i{a.instance}] {m}", flush=True))
+        print(f"[i{a.instance}] paused at the start ({recovery.where(s0)}): {'unpaused' if ok else 'still paused'}",
+              flush=True)
     s0 = link.wait_state(lambda s: s.get("game") is not None, timeout_s=120)
     if _in_game_without_control(s0):
         # a game is loaded but Hornet takes no input: the post-kill memory scene after a CLEAR (gate run
@@ -375,9 +430,19 @@ def worker(a: argparse.Namespace) -> int:
             if rq and (rq.get("main_menu") or rq.get("steps")):
                 # a real quit left the game on (or on its way to) the main menu: back into the sandbox slot
                 back_into_slot(link, enc, a.instance)
+            elif rec.outcome == "HARNESS_FAIL" and not link.closed:
+                # paused, in a pause or title sub-menu, or on the title: recover now rather than fail the next
+                # episodes on it (after_harness_fail); a recovery that runs out of tries leaves it to the count below
+                try:
+                    done = after_harness_fail(link, enc, a.instance)
+                    if done:
+                        print(f"[i{a.instance}] after the harness failure: {done}", flush=True)
+                except Exception as e:  # noqa: BLE001 - the 5-in-a-row stop below ends a worker that cannot recover
+                    print(f"[i{a.instance}] recovery after the harness failure failed: {type(e).__name__}: {e}; "
+                          f"{_describe(link.state)}", flush=True)
             fails_in_row = fails_in_row + 1 if rec.outcome == "HARNESS_FAIL" else 0
             if fails_in_row >= 5:
-                print(f"[i{a.instance}] 5 harness failures in a row, stopping", flush=True)
+                print(f"[i{a.instance}] 5 harness failures in a row, stopping; {_describe(link.state)}", flush=True)
                 break
             if link.closed:
                 break
@@ -513,6 +578,15 @@ def summary(run_dir: Path, more: list[Path] | None = None, write: bool = True, m
         out["would_die_episodes"] = sum(1 for r in rows if r["would_die"])
         out["late_states_mean"] = round(sum(r.get("late_states", 0) for r in rows) / len(rows), 1)
         out["reasons"] = dict(Counter(r["reason"] for r in rows if r.get("reason")).most_common(10))
+        hf = [r for r in rows if r["outcome"] == "HARNESS_FAIL"]
+        if hf:      # by kind: the frame numbers out of "paused unasked at frame N (cause)"
+            out["harness_fails"] = dict(Counter(re.sub(r"\d{3,}", "N", r.get("reason") or "")[:120]
+                                                for r in hf).most_common(10))
+        gaps = [r["loop_gap_ms_max"] for r in rows if r.get("loop_gap_ms_max") is not None]
+        if gaps:    # the fight loop's longest turn per episode (the brain-lost watchdog pauses after 250 ms)
+            gaps.sort()
+            out["loop_gap_ms"] = {"p50": gaps[len(gaps) // 2], "max": gaps[-1],
+                                  "episodes_over_250": sum(1 for r in rows if r.get("loop_gaps_250"))}
         n = len(rows)
         out["clear_pct"] = round(100.0 * sum(r["outcome"] == "CLEAR" for r in rows) / n, 1)
         # time to kill: wake -> the kill (kill_s; rows before the post-kill tail: ingame_s, which ended 1 s after it)
