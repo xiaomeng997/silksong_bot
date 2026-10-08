@@ -20,6 +20,19 @@ did not have:
 3. Branch-split history (the person 2026-10-04): the previous attack's last state (the defend that was hit and
    countered vs the one that ran out) and a recent hit, so the two branches can have different times to the next move.
 
+Two tables per decision state (branch_model.json):
+
+- "types" (the fire-frame model): P(successor | the decision fires now), fit on the frames the state was left. It
+  answers "if it decides at this moment, which branch": the instant decisions (they fire on the frame they are
+  entered) and a candidate path's what-if. Mid-state it is NOT a forecast: a range check that has not fired yet says
+  little about the branch it will take later (held-out log loss several times the unconditional table's 0.2-0.5 s
+  before the exit, forum.md §18.4).
+- "ahead" (the forecast model): P(the successor this visit ends in | what the view sees now), fit on the frames an
+  enemy spends in the state (every AHEAD_DT s of each visit, labelled with how the visit ended), so it is calibrated on
+  the frames the planner queries. It marginalises over the hero's motion in the recorded fights (the data policies);
+  a candidate-conditioned forecast would combine the fire-frame model with a time-to-fire model along the candidate's
+  hero path (not built). BranchView.next_attack_probs (Subject.next_p) uses it.
+
     mem = BranchMemory("Song Reed")
     mem.enter("Alert", "Defend Start", T)       # every Control transition, in order
     mem.hit(T)                                  # the enemy took a hit (any source)
@@ -27,7 +40,9 @@ did not have:
     p = model.predict("Song Reed", "Alert", mem, geo)   # {successor: p}; geo from geometry(...) at the sensing time
 
 Everything here is view-legal (forum_planner_plan §4.6): states and their entry times (oracle FSM / vision phases),
-hits seen, positions, the hero's own silk. Nothing reads FSM variables.
+hits seen, positions, the hero's own silk. Nothing reads FSM variables. The offline scan (ssbot.knowledge.forum_branch)
+computes every covariate with the functions below (BranchMemory.features, geometry, clapper_context, TinyOwners), so
+the runtime sees the covariates the model was selected on (ssbot.tools.forum_branch parity checks it on recordings).
 """
 from __future__ import annotations
 
@@ -130,8 +145,9 @@ SENSING: dict[str, dict[str, tuple[str, str]]] = {
         "Check Pos": ("branch", "instant: distance < 6 -> Shift"),
     },
     "Song Pilgrim 01": {
-        "Walker": ("branch", "every frame: Attack Range -> Alert Followers; armed Charge Range (1.5 s into Walker or "
-                             "after a slash; off at Charge Antic) -> Charge Antic; TOOK DAMAGE -> Leader?"),
+        "Walker": ("branch", "every frame: Attack Range -> Alert Followers; Alerted & Charge Range (active at scene "
+                             "load, after a slash and once a Walker visit reaches 1.5 s; off at Charge Antic) -> "
+                             "Charge Antic; TOOK DAMAGE -> Leader?"),
         "Combo?": ("branch", "instant: not facing the hero -> Attack End; V4 ATTACK / FINISHED (eventMax 2)"),
         "Charge": ("branch", "every frame: passed the hero 4 u / no floor / stopped -> Charge End; wall -> Wall Bonk; "
                              "PARRIED -> Deflect; TOOK DAMAGE -> Reset"),
@@ -169,15 +185,23 @@ _GATES: dict[str, dict[str, dict[str, bool]]] = {
     "Song Heavy Sentry": {"Evade Scuttle": {"evaded": True}, "Slam Antic": {"evaded": False},
                           "Jump Antic": {"evaded": False}, "Spell Antic": {"evaded": False},
                           "Cast Slam Antic": {"evaded": False}},
-    # Envoy: Charge Antic switches the Charge Range off, Slash Antic on (and 1.5 s into Walker, by time)
-    "Song Pilgrim 01": {"Charge Antic": {"charge_armed": False}, "Slash Antic": {"charge_armed": True}},
+    # Envoy: the Charge Range object is active at scene load; Charge Antic switches it off, Slash Antic on, and
+    # Walker's ActivateGameObjectDelay (1.5 s, resetOnExit 0) on once a Walker visit lasts 1.5 s (it stays on after
+    # Walker is left; a shorter visit does not arm it: BranchMemory.enter). CHARGE also needs Alerted (set by Slash
+    # Antic and Ambush Ready, never cleared).
+    "Song Pilgrim 01": {"Charge Antic": {"charge_armed": False}, "Slash Antic": {"charge_armed": True, "alerted": True},
+                        "Ambush Ready": {"alerted": True}},
 }
 _GATE_INIT = {"Pilgrim 03 Song": {"evade_cd": False}, "Song Reed": {"armed": True, "jdd": False},
-              "Song Heavy Sentry": {"evaded": False}, "Song Pilgrim 01": {"charge_armed": False}}
+              "Song Heavy Sentry": {"evaded": False}, "Song Pilgrim 01": {"charge_armed": True, "alerted": False}}
+ENVOY_ARM_S = 1.5
 TINY_DECISIONS = ("Ready", "Fire Ready", "Fire", "Brake", "Pull Up", "Return", "Defend Ready", "Defend Buzz", "Dead")
 HIT_RECENT_S = (0.25, 1.0)      # "hit" bins: hit within 0.25 s / 1 s / earlier or never
 SINCE_END_S = (0.25, 0.75, 1.5)
+AGE_S = (0.1, 0.25, 0.5, 1.0, 1.5, 2.5)     # time in the state (0 for a state entered now)
 LOCAL_KEEP = 6
+STALE_S = 0.25                  # an enemy position older than this at the timing is "not seen"
+ARENA_X3 = (25.67, 37.33)       # thirds of the Forum band x 14.01-48.99 (the R0 tables' hero_x / last_seen_x)
 
 
 def decisions_of(tk: str) -> tuple[str, ...]:
@@ -214,8 +238,8 @@ class BranchMemory:
     local: dict = field(default_factory=lambda: defaultdict(lambda: deque(maxlen=LOCAL_KEEP)))
     gates: dict = field(default_factory=dict)
     t_hit: float = -math.inf
-    t_hit_before: float = -math.inf          # the hit before t_hit (features at t_hit's own frame see only this)
     entries: dict = field(default_factory=dict)      # state -> last entry time
+    seq: int = 0                                     # entries so far (BranchView snapshots the new ones)
     # Choristor: hops in the current move (Move Start resets), the last hop's direction and |x distance|
     hops: int = 0
     last_hop: str | None = None
@@ -254,6 +278,9 @@ class BranchMemory:
             self.fam_last = fam
         elif to in self.decision_states and self.fam is not None:
             self._end_attack(frm, T)
+        if frm == "Walker" and self.tk == "Song Pilgrim 01" and self.t_walker is not None and \
+                T - self.t_walker >= ENVOY_ARM_S:
+            self.gates["charge_armed"] = True        # the delayed activation fired during this visit and stays
         for k, v in _GATES.get(self.tk, {}).get(to, {}).items():
             self.gates[k] = v
         if self.tk == "Song Pilgrim 03":
@@ -269,25 +296,27 @@ class BranchMemory:
             self.t_walker = T
         self.prev_state, self.state, self.t_entry = frm, to, T
         self.entries[to] = T
+        self.seq += 1
 
     def _end_attack(self, frm: str | None, T: float) -> None:
         self.fam_end_state, self.t_fam_end, self.fam = frm, T, None
 
     def hit(self, T: float) -> None:
-        if T > self.t_hit:
-            self.t_hit_before = self.t_hit
-        self.t_hit = T
+        self.t_hit = max(self.t_hit, T)
 
     def features(self, state: str, T: float, context: dict | None = None) -> dict:
         """History covariates for a decision of `state` at game time T (the state being the current one, or about
         to be: the walk's next decision). context: cross-enemy facts the caller knows (Clapper buddy, Maestro dead
-        Tinies, hero silk)."""
+        Tinies). The hit covariate counts every hit seen up to T, a hit on this frame included: a TOOK DAMAGE exit
+        follows its recorded hit by 12-18 frames when it follows one at all (forum.md §18.2), so a recent hit is past
+        information the view has, not the exit's same-frame cause."""
         loc = self.local.get(state) or ()
         run = 0
         for o in reversed(loc):
             if o != loc[-1]:
                 break
             run += 1
+        cur = self.state == state
         f = {"prev": self.fam_last or "none",
              "prev_end": f"{self.fam_last}:{self.fam_end_state}" if self.fam_last else "none",
              "since_end": "none" if self.t_fam_end is None else _bin(T - self.t_fam_end, SINCE_END_S),
@@ -295,10 +324,16 @@ class BranchMemory:
              "last_choice": loc[-1] if loc else "none",
              "choice_run": min(run, 3) if loc else "none",
              "prev2_choice": "|".join(list(loc)[-2:]) if len(loc) >= 2 else ("|".join(loc) or "none"),
-             # hits before this frame: a hit on the decision's own frame is its cause (TOOK DAMAGE / BLOCKED HIT
-             # exits), the planner's hit-effect branch, not a history covariate
-             "hit": _bin(T - (self.t_hit if self.t_hit < T else self.t_hit_before), HIT_RECENT_S),
-             "from": self.prev_state if self.state == state else self.state}
+             "hit": _bin(T - self.t_hit, HIT_RECENT_S),
+             "from": self.prev_state if cur else self.state,
+             "age": _bin(T - self.t_entry, AGE_S) if cur and self.t_entry is not None else 0}
+        # the R0 tables' anti-repeat counters: attacks since each family (V4 eventMax), choices since each outcome
+        # of this state (V4 missedMax)
+        for fam in set(self.attack_starts.values()):
+            k = self.since.get(fam)
+            f[f"since_{fam}"] = "none" if k is None else min(k, 4)
+        for i, o in enumerate(reversed(loc)):
+            f.setdefault(f"miss_{o}", min(i, 4))
         for k, v in self.gates.items():
             f[k] = v
         if self.tk == "Song Pilgrim 03":
@@ -310,7 +345,7 @@ class BranchMemory:
             f["suck_set"] = self.suck_set or "none"
         elif self.tk == "Song Pilgrim 01":
             on = self.gates.get("charge_armed", False) or (
-                self.state == "Walker" and self.t_walker is not None and T - self.t_walker >= 1.5)
+                self.state == "Walker" and self.t_walker is not None and T - self.t_walker >= ENVOY_ARM_S)
             f["charge_armed"] = on
         elif self.tk == "Pilgrim 03 Song":
             f["can_evade"] = self.inrange_dur >= 0.5
@@ -351,7 +386,9 @@ def in_range(tk: str, name: str, ex: float, ey: float, flip: int, hero_box: tupl
 def geometry(tk: str, ex: float | None, ey: float | None, flip: int, hx: float | None, hy: float | None,
              hero_box: tuple | None, silk: int | None = None) -> dict:
     """Geometric covariates of a decision at one moment: |dx| / dy bins, side, distance bin, the type's trigger
-    ranges (in_<name>), the hero's silk bin. Missing inputs give None values (not available)."""
+    ranges (in_<name>), the hero's silk bin, the R0 tables' dist_visible / last_seen_x / hero_x. (ex, ey): the enemy
+    transform; (hx, hy): the hero transform (STATE hero.pos, WorldState hero.pos_transform); hero_box: the hero's
+    physics box. Missing inputs give None values (not available)."""
     out: dict = {}
     if ex is not None and hx is not None and not (math.isnan(ex) or math.isnan(hx)):
         dx, dy = hx - ex, hy - ey
@@ -360,9 +397,14 @@ def geometry(tk: str, ex: float | None, ey: float | None, flip: int, hx: float |
         out["side"] = "R" if dx >= 0 else "L"
         out["front"] = "front" if (dx < 0) == (not flip) else "back"
         out["dist"] = _bin(math.hypot(dx, dy), DX_BINS)
+        # the R0 tables' geometry (behaviour_tables._covariates): |dx| in 3 / 6 / 10 u bins, the enemy's third
+        out["dist_visible"] = _bin(abs(dx), (3.0, 6.0, 10.0))
+        out["last_seen_x"] = _bin(ex, ARENA_X3)
         if hero_box is not None and not any(math.isnan(v) for v in hero_box):
             for name in RANGES.get(tk, {}):
                 out[f"in_{name}"] = in_range(tk, name, ex, ey, flip, hero_box)
+    if hx is not None and not math.isnan(hx):
+        out["hero_x"] = _bin(hx, ARENA_X3)
     if silk is not None:
         out["silk"] = _bin(silk, SILK_BINS)
     return out
@@ -408,31 +450,39 @@ def _key(v) -> str:
     return str(v)
 
 
+def _tables(rows: dict) -> dict[str, DecisionModel]:
+    return {st: DecisionModel(r["outcomes"], r["covariates"], r.get("timing", "branch"), r["counts"],
+                              float(r.get("alpha", ALPHA_BACKOFF))) for st, r in rows.items()}
+
+
 class BranchModel:
-    """Per type and decision state: a DecisionModel (branch_model.json, ssbot.tools.forum_branch build)."""
+    """Per type and decision state: the fire-frame DecisionModel ("types": P(successor | it fires now)) and the
+    forecast one ("ahead": P(the successor this visit ends in | now)); branch_model.json, ssbot.tools.forum_branch
+    build. Timings: "branch" / "now" (the query frame), "entry" (the state's entry), "stored" (the entry of the state
+    SENSING "stored:<state>" names), "lead<s>" (s before now)."""
 
     def __init__(self, d: dict):
-        self.meta = {k: v for k, v in d.items() if k != "types"}
-        self.types: dict[str, dict[str, DecisionModel]] = {}
-        for tk, rows in (d.get("types") or {}).items():
-            self.types[tk] = {st: DecisionModel(r["outcomes"], r["covariates"], r.get("timing", "branch"),
-                                                r["counts"], float(r.get("alpha", ALPHA_BACKOFF)))
-                              for st, r in rows.items()}
+        self.meta = {k: v for k, v in d.items() if k not in ("types", "ahead")}
+        self.types = {tk: _tables(rows) for tk, rows in (d.get("types") or {}).items()}
+        self.ahead = {tk: _tables(rows) for tk, rows in (d.get("ahead") or {}).items()}
 
     @classmethod
     def load(cls, path: Path | None = None) -> "BranchModel":
         return cls(json.loads(Path(path or BRANCH_MODEL_PATH).read_text("utf-8")))
 
-    def has(self, tk: str, state: str) -> bool:
-        return state in self.types.get(tk, {})
+    def get(self, tk: str, state: str, ahead: bool = False) -> DecisionModel | None:
+        return (self.ahead if ahead else self.types).get(tk, {}).get(state)
 
-    def timing(self, tk: str, state: str) -> str:
-        m = self.types.get(tk, {}).get(state)
+    def has(self, tk: str, state: str, ahead: bool = False) -> bool:
+        return self.get(tk, state, ahead) is not None
+
+    def timing(self, tk: str, state: str, ahead: bool = False) -> str:
+        m = self.get(tk, state, ahead)
         return "branch" if m is None else m.timing
 
     def predict(self, tk: str, state: str, mem: BranchMemory | None, geo: dict | None, T: float = 0.0,
-                context: dict | None = None) -> dict[str, float] | None:
-        m = self.types.get(tk, {}).get(state)
+                context: dict | None = None, ahead: bool = False) -> dict[str, float] | None:
+        m = self.get(tk, state, ahead)
         if m is None:
             return None
         feats = dict(geo or {})
@@ -441,32 +491,86 @@ class BranchModel:
         return m.predict(feats)
 
 
+def memory_for(tk: str) -> BranchMemory:
+    """A BranchMemory with the segmentation the model was fit with (gauntlet_tables.FORUM_SPECS: the scan's; the
+    runtime walk's TypeTable lacks a few families, the Maestro's MA_POINT and the Envoy's EN_HOPSLASH / EN_ENTRY) and
+    the type's choice states."""
+    from ssbot.knowledge.gauntlet_tables import FORUM_SPECS
+    sp = next(s for s in FORUM_SPECS.values() if s.boss_type == tk)
+    return BranchMemory(tk, dict(sp.attack_starts), frozenset(sp.decision_states), frozenset(decisions_of(tk)))
+
+
 def memory_for_table(tt) -> BranchMemory:
-    """A BranchMemory for a combat.enemy_tables.TypeTable (its segmentation and the type's choice states)."""
-    tk = tt.spec.type_key
-    return BranchMemory(tk, dict(tt.attack_starts), frozenset(tt.decision_states), frozenset(decisions_of(tk)))
+    """A BranchMemory for a combat.enemy_tables.TypeTable's enemy type (memory_for: the scan's segmentation)."""
+    return memory_for(tt.spec.type_key)
 
 
+CLAPPER = "Song Heavy Sentry"
+MAESTRO = "Song Pilgrim Maestro"
+TINY = "Song Automaton Tiny"
 CLAPPER_ATTACKS = ("CC_SLAM", "CC_JUMP", "CC_CAST", "CC_JUMP_CAST")
 TINY_DEAD = ("Death Fx", "Dead", "Die")
+TINY_OWNER_U = 8.0
 KEEP_S = 1.0
 MAX_CHAIN = 4
 
 
+def in_play(tk: str, state: str | None) -> bool:
+    """A Control state that takes part in the fight (ssbot.core.forum.ForumType.waiting: not yet)."""
+    from ssbot.core.forum import FORUM_TYPES
+    ft = FORUM_TYPES.get(tk)
+    return state is not None and (ft is None or state not in ft.waiting)
+
+
+def clapper_context(me: tuple | None, buddies: list) -> dict:
+    """The Clapper's cross-enemy facts (its Control: Close Range / Far Range go back to Idle while the buddy attacks;
+    Idle's Avoid Type when the buddy stands within 4 u). me: its (x, y, flip) seen within STALE_S or None; buddies:
+    [(BranchMemory, (x, y, flip))] of the other Clappers in play (in_play) seen within STALE_S."""
+    return {"buddy": bool(buddies),
+            "buddy_attacking": any(m.fam in CLAPPER_ATTACKS for m, _ in buddies),
+            "buddy_close": bool(me is not None and any(abs(r[0] - me[0]) < 4.0 for _, r in buddies))}
+
+
+class TinyOwners:
+    """Which Maestro each Tiny belongs to, assigned online: on every frame a Tiny is seen in Ready, the nearest
+    Maestro seen within STALE_S, if closer than TINY_OWNER_U (the Tinies' Idle Pos is (+-3, 2.5) / (0, 4.5) from their
+    own Maestro); the last assignment holds. The Maestro's dead_tinies context counts its Tinies in TINY_DEAD."""
+
+    def __init__(self):
+        self.owner: dict[int, int] = {}
+
+    def update(self, tinies: list, maes: list) -> None:
+        """tinies: [(iid, (x, y))] seen this frame in Ready; maes: [(iid, (x, y))] seen within STALE_S."""
+        if not maes:
+            return
+        for j, (x, y) in tinies:
+            d, m = min((math.hypot(mx - x, my - y), mi) for mi, (mx, my) in maes)
+            if d < TINY_OWNER_U:
+                self.owner[j] = m
+
+    def dead(self, maestro: int, state_of) -> int:
+        return sum(1 for j, o in self.owner.items() if o == maestro and state_of(j) in TINY_DEAD)
+
+
 class BranchView:
     """The branch model at runtime (MultiForecaster(branch=...)): each EnemyTracker carries a BranchMemory (fed by its
-    Control entries and hits), this keeps the hero's recent box and silk and the enemies' recent positions so a
-    decision's geometry can be taken at the model's timing (branch: now; entry: when the state was entered; stored:
-    when the stored state was entered; lead<s>: s before now)."""
+    Control entries and hits); this keeps the hero's recent box, transform and silk, the enemies' recent positions
+    (the frames they were seen) and a snapshot of both at each state entry, so a decision's geometry is taken at the
+    model's timing exactly as the offline scan takes it (now / branch: this frame; entry: the state's entry; stored:
+    the stored state's entry; lead<s>: s before now)."""
 
     def __init__(self, model: BranchModel, keep_s: float = KEEP_S):
         self.model = model
         self.keep_s = keep_s
         self.hero: deque = deque()                          # (T, box, x, y, silk)
-        self.enemy: dict[int, deque] = defaultdict(deque)   # iid -> (T, x, y, flip)
-        self.owner: dict[int, int] = {}                     # Tiny iid -> Maestro iid (the one it hovers by in Ready)
+        self.enemy: dict[int, deque] = defaultdict(deque)   # iid -> (T, x, y, flip), frames it was seen
+        self.snap: dict[int, dict] = defaultdict(dict)      # iid -> state -> (entry T, hero row, enemy row)
+        self._seq: dict[int, int] = {}
+        self.owners = TinyOwners()
+        self.t = -math.inf
 
     def observe(self, T: float, ws, trackers: dict) -> None:
+        self.t = T
         h = ws.hero
         if h.hurtbox:
             xs = [p[0] for p in h.hurtbox]
@@ -474,38 +578,72 @@ class BranchView:
             box = (min(xs), min(ys), max(xs), max(ys))
         else:
             box = None
+        pt = h.pos_transform if h.pos_transform is not None else h.pos.v     # the transform, as STATE hero.pos
         silk = ws.res.silk.v if ws.res.silk.conf > 0 else None
-        self.hero.append((T, box, float(h.pos.v[0]), float(h.pos.v[1]), silk))
+        self.hero.append((T, box, float(pt[0]), float(pt[1]), silk))
         while self.hero and T - self.hero[0][0] > self.keep_s:
             self.hero.popleft()
-        maes = [tr for tr in trackers.values() if tr.tk == "Song Pilgrim Maestro" and tr.pos is not None
-                and not tr.dead]
         for iid, tr in trackers.items():
-            if tr.pos is None or tr.hidden:
-                continue
             q = self.enemy[iid]
-            if not q or q[-1][0] < T:
+            if tr.pos is not None and not tr.hidden and getattr(tr, "seen_T", T) == T and (not q or q[-1][0] < T):
                 q.append((T, tr.pos[0], tr.pos[1], tr.flip))
             while q and T - q[0][0] > self.keep_s:
                 q.popleft()
-            if tr.tk == "Song Automaton Tiny" and tr.state == "Ready" and maes:
-                m = min(maes, key=lambda mt: math.hypot(mt.pos[0] - tr.pos[0], mt.pos[1] - tr.pos[1]))
-                if math.hypot(m.pos[0] - tr.pos[0], m.pos[1] - tr.pos[1]) < 8.0:
-                    self.owner[iid] = m.iid
+        for iid, tr in trackers.items():
+            m = tr.mem
+            if m is None or m.seq == self._seq.get(iid, 0):
+                continue
+            self._seq[iid] = m.seq
+            snaps = self.snap[iid]
+            for st, te in m.entries.items():
+                old = snaps.get(st)
+                if old is None or old[0] != te:
+                    snaps[st] = (te,) + self._rows(iid, te)
+        tinies, maes = [], []
+        for iid, tr in trackers.items():
+            if tr.tk == TINY and tr.state == "Ready":
+                q = self.enemy.get(iid)
+                if q and q[-1][0] == T:
+                    tinies.append((iid, (q[-1][1], q[-1][2])))
+            elif tr.tk == MAESTRO:
+                e = self._enemy_at(iid, T)
+                if e is not None:
+                    maes.append((iid, (e[1], e[2])))
+        self.owners.update(tinies, maes)
 
-    @staticmethod
-    def _at(q, t: float):
-        best = None
-        for row in q:
+    def _hero_at(self, t: float):
+        for row in reversed(self.hero):
             if row[0] <= t + 1e-9:
-                best = row
-            else:
-                break
-        return best if best is not None else (q[0] if q else None)
+                return row
+        return None
 
-    def geo_at(self, tr, t: float) -> dict:
-        e = self._at(self.enemy.get(tr.iid) or (), t)
-        h = self._at(self.hero, t)
+    def _enemy_at(self, iid: int, t_frame: float):
+        """The enemy's last row seen at or before the frame at t_frame, None if older than STALE_S."""
+        for row in reversed(self.enemy.get(iid) or ()):
+            if row[0] <= t_frame + 1e-9:
+                return row if t_frame - row[0] <= STALE_S + 1e-9 else None
+        return None
+
+    def _rows(self, iid: int, t: float) -> tuple:
+        h = self._hero_at(t)
+        return h, self._enemy_at(iid, t if h is None else h[0])
+
+    def _rows_for(self, tr, state: str, T: float, timing: str) -> tuple:
+        mem = tr.mem
+        if timing == "entry" and mem is not None and mem.state == state:
+            s = self.snap.get(tr.iid, {}).get(state)
+            return (None, None) if s is None else s[1:]
+        if timing == "stored":
+            kind = SENSING.get(tr.tk, {}).get(state, ("branch", ""))[0]
+            src = kind.split(":", 1)[1] if kind.startswith("stored:") else None
+            s = self.snap.get(tr.iid, {}).get(src) if src is not None else None
+            return (None, None) if s is None else s[1:]
+        if timing.startswith("lead"):
+            return self._rows(tr.iid, T - float(timing[4:]))
+        return self._rows(tr.iid, T)
+
+    def geo_at(self, tr, state: str, T: float, timing: str) -> dict:
+        h, e = self._rows_for(tr, state, T, timing)
         if h is None:
             return {}
         _, box, hx, hy, silk = h
@@ -513,46 +651,52 @@ class BranchView:
             return geometry(tr.tk, None, None, 0, hx, hy, box, silk)
         return geometry(tr.tk, e[1], e[2], e[3], hx, hy, box, silk)
 
-    def _timing_t(self, tr, state: str, T: float) -> float:
-        tm = self.model.timing(tr.tk, state)
-        mem = tr.mem
-        if tm == "entry" and mem is not None and mem.state == state and mem.t_entry is not None:
-            return mem.t_entry
-        if tm == "stored" and mem is not None:
-            kind = SENSING.get(tr.tk, {}).get(state, ("branch", ""))[0]
-            src = kind.split(":", 1)[1] if kind.startswith("stored:") else None
-            if src is not None and src in mem.entries:
-                return mem.entries[src]
-        if tm.startswith("lead"):
-            return T - float(tm[4:])
-        return T
+    def context(self, tr, trackers: dict, T: float) -> dict:
+        if tr.tk == CLAPPER:
+            me = self._enemy_at(tr.iid, T)
+            buddies = []
+            for b in trackers.values():
+                if b.tk != tr.tk or b.iid == tr.iid or b.mem is None or not in_play(b.tk, b.mem.state):
+                    continue
+                r = self._enemy_at(b.iid, T)
+                if r is not None:
+                    buddies.append((b.mem, r[1:]))
+            return clapper_context(None if me is None else me[1:], buddies)
+        if tr.tk == MAESTRO:
+            return {"dead_tinies": self.owners.dead(
+                tr.iid, lambda j: trackers[j].mem.state if j in trackers and trackers[j].mem is not None else None)}
+        return {}
 
-    def context(self, tr, trackers: dict) -> dict:
-        ctx: dict = {}
-        if tr.tk == "Song Heavy Sentry":
-            buddies = [b for b in trackers.values() if b.tk == tr.tk and b.iid != tr.iid and b.in_play and not b.dead]
-            ctx["buddy"] = bool(buddies)
-            ctx["buddy_attacking"] = any(b.mem is not None and b.mem.fam in CLAPPER_ATTACKS for b in buddies)
-            ctx["buddy_close"] = bool(tr.pos is not None and any(
-                b.pos is not None and abs(b.pos[0] - tr.pos[0]) < 4.0 for b in buddies))
-        elif tr.tk == "Song Pilgrim Maestro":
-            ctx["dead_tinies"] = sum(1 for j, o in self.owner.items() if o == tr.iid and j in trackers
-                                     and trackers[j].state in TINY_DEAD)
-        return ctx
-
-    def branch_probs(self, tr, T: float, trackers: dict, state: str | None = None) -> dict[str, float] | None:
-        """{successor: p} of tr's decision `state` (default: its current state) taken now."""
-        st = state or tr.state
-        if st is None or tr.mem is None or not self.model.has(tr.tk, st):
+    def features(self, tr, state: str, T: float, trackers: dict, ahead: bool = False,
+                 ctx: dict | None = None) -> dict | None:
+        """The covariates the model's table for tr's decision `state` reads at T (geometry at its timing + history);
+        None when the model has no table for it."""
+        m = self.model.get(tr.tk, state, ahead)
+        if m is None or tr.mem is None:
             return None
-        geo = self.geo_at(tr, self._timing_t(tr, st, T))
-        return self.model.predict(tr.tk, st, tr.mem, geo, T, self.context(tr, trackers))
+        f = self.geo_at(tr, state, T, m.timing)
+        f.update(tr.mem.features(state, T, self.context(tr, trackers, T) if ctx is None else ctx))
+        return f
+
+    def branch_probs(self, tr, T: float, trackers: dict, state: str | None = None,
+                     ahead: bool = False) -> dict[str, float] | None:
+        """{successor: p} of tr's decision `state` (default: its current state). ahead False: the fire-frame model,
+        P(successor | it decides at T); ahead True: the forecast, P(the successor this visit ends in | the view at T)
+        (falls back to the fire-frame table when the state has no forecast table: the instant decisions, which
+        decide on the frame they are entered)."""
+        st = state or tr.state
+        if st is None or tr.mem is None:
+            return None
+        use = ahead and self.model.has(tr.tk, st, True)
+        f = self.features(tr, st, T, trackers, use)
+        return None if f is None else self.model.get(tr.tk, st, use).predict(f)
 
     def next_attack_probs(self, tr, T: float, trackers: dict) -> dict[str, float] | None:
-        """{family or "wait:<state>": p}: the next attack family when tr's current decision (and the instant ones
-        after it, with the same geometry and history) resolves; "wait:<state>" for paths that first reach a state the
-        model does not cover. None: tr is not in a modelled decision state."""
-        p0 = self.branch_probs(tr, T, trackers)
+        """{family or "wait:<state>": p}: the next attack family when tr's current decision resolves (the forecast
+        table of its state, then the decisions it leads to, each as entered now with today's geometry and history:
+        their forecast tables, the fire-frame ones for the instant decisions); "wait:<state>" for paths that first
+        reach a state the model does not cover. None: tr is not in a modelled decision state."""
+        p0 = self.branch_probs(tr, T, trackers, ahead=True)
         if p0 is None:
             return None
         starts = tr.table.attack_starts
@@ -566,7 +710,7 @@ class BranchView:
                 if st in starts:
                     out[starts[st]] += p
                     continue
-                q = self.branch_probs(tr, T, trackers, st) if st != tr.state else None
+                q = self.branch_probs(tr, T, trackers, st, ahead=True) if st != tr.state else None
                 if q is None:
                     out[f"wait:{st}"] += p
                     continue

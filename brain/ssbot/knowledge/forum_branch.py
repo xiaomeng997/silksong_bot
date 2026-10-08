@@ -1,19 +1,30 @@
 """Forum branch model (forum_planner_plan §5 R5, behaviour-model half): decisions from the per-fight caches, their
 covariates at several moments, held-out selection and the branch_model.json product.
 
-    recs = scan_fight(cache, extra)          # one fight: a DecisionRecord per decision-state exit (SENSING states)
+    recs, samples = scan_fight(cache, extra, ahead_dt=AHEAD_DT)   # fire-frame records and forecast samples
     res = study(records, fights_fold)         # per decision: CV log loss per timing, selected covariates, calibration
     model = build_model(records, res)         # the branch_model.json dict (ssbot.combat.branch_model.BranchModel)
 
-A decision's covariates (ssbot.combat.branch_model): geometry (|dx|, dy, side, front, distance, the type's trigger
-ranges, the hero's silk) at a timing, and history (BranchMemory.features: previous attack and its last state,
-anti-repeat history of this state's choices, gate flags, hops, suck timer, recent hit, cross-enemy context). Timings:
-"branch" (the frame the state is left), "entry" (the frame it was entered), "stored" (the entry of the state the
-FSM stored the value in, SENSING "stored:<state>"), "lead<s>" (s seconds before the branch frame).
+Two kinds of rows (ssbot.combat.branch_model, module docstring):
+- a fire-frame record per exit of a decision state (SENSING states): covariates on the frame the state is left, the
+  successor as the label (the "types" tables: P(successor | it decides now));
+- forecast samples (ahead_dt): on the frames an enemy spends in a decision state, every AHEAD_DT s of each visit from
+  its entry (AHEAD_DT_TINY for the Tiny; the Tiny's Dead, a 30 s wait for the Maestro's summon, is left out), the
+  covariates the planner sees on that frame, labelled with the successor the visit ended in (the "ahead" tables).
+  Instant decisions (left on the frame they are entered) have none: the planner never sees them as the current state.
+
+A decision's covariates are those the runtime computes (ssbot.combat.branch_model): geometry (|dx|, dy, side, front,
+distance, the type's trigger ranges, the hero's silk, the R0 tables' dist_visible / last_seen_x / hero_x) at a timing,
+and history (BranchMemory.features: previous attack and its last state, anti-repeat history of this state's choices
+and the V4 counters since_<family> / miss_<outcome>, gate flags, hops, suck timer, recent hit, time in the state,
+cross-enemy context from clapper_context / TinyOwners). The scan walks the frames like the runtime: a frame's events in
+order, then its end (Tiny owners, forecast samples). Timings: "branch" (the frame the state is left; "now" for a
+forecast sample: its frame), "entry" (the frame it was entered), "stored" (the entry of the state the FSM stored the
+value in, SENSING "stored:<state>"), "lead<s>" (s seconds before the branch frame; fire-frame records only).
 
 Selection (per decision and timing): greedy forward over the candidates by 2-fold (by fight) cross-validated log loss,
 backoff tables (ssbot.combat.branch_model.DecisionModel); a covariate is kept when it lowers the CV log loss by at
-least SELECT_GAIN nats. The timing with the lowest CV log loss is kept (ties to "branch").
+least SELECT_GAIN nats. The timing with the lowest CV log loss is kept (ties to the first timing).
 """
 from __future__ import annotations
 
@@ -24,25 +35,20 @@ from pathlib import Path
 
 import numpy as np
 
-from ssbot.combat.branch_model import (ALPHA_BACKOFF, CLAPPER_ATTACKS, SENSING, TINY_DEAD, BranchMemory, _key,
-                                       decisions_of, geometry)
+from ssbot.combat.branch_model import (ALPHA_BACKOFF, CLAPPER, MAESTRO, SENSING, STALE_S, TINY, BranchMemory,
+                                       TinyOwners, _key, clapper_context, decisions_of, geometry, in_play, memory_for)
 from ssbot.knowledge.behaviour_tables import Fight, fight_states
-from ssbot.knowledge.forum_cache import load_cache
 from ssbot.knowledge.gauntlet_tables import FORUM_SPECS
 
 LEADS_S = (0.1, 0.2, 0.3, 0.4, 0.5)
 TIMINGS = ("branch", "entry", "stored") + tuple(f"lead{x}" for x in LEADS_S)
-STALE_S = 0.25                   # an enemy position older than this at the timing is "not seen"
+AHEAD_TIMINGS = ("now", "entry", "stored")
+AHEAD_DT = 0.1                   # forecast samples: one every AHEAD_DT s of a visit (from its entry frame)
+AHEAD_DT_TINY = 0.25
+AHEAD_SKIP = frozenset({(TINY, "Dead")})
 SELECT_GAIN = 0.002              # nats per decision a covariate must gain on the CV log loss
 MAX_COVARIATES = 4
-ARENA_X3 = (25.67, 37.33)        # thirds of the Forum band x 14.01-48.99 (R0's hero_x / last_seen_x stand-ins)
 GEO_KEYS = ("x", "y", "flip", "hx", "hy", "b0", "b1", "b2", "b3", "silk")
-
-
-def memory_for(tk: str) -> BranchMemory:
-    """A BranchMemory with the type's segmentation (gauntlet_tables.FORUM_SPECS) and choice states."""
-    sp = next(s for s in FORUM_SPECS.values() if s.boss_type == tk)
-    return BranchMemory(tk, dict(sp.attack_starts), frozenset(sp.decision_states), frozenset(decisions_of(tk)))
 
 
 @dataclass(slots=True)
@@ -52,10 +58,12 @@ class DecisionRecord:
     iid: int
     state: str
     outcome: str
-    T: float                     # game time of the branch frame
-    t_in: float                  # time in the state when it was left
+    T: float                     # game time of the row's frame (the branch frame; a forecast sample's frame)
+    t_in: float                  # time in the state on that frame
     hist: dict
-    geo: np.ndarray              # [len(TIMINGS), len(GEO_KEYS)] float32 (nan: not available)
+    geo: np.ndarray              # [len(timings), len(GEO_KEYS)] float32 (nan: not available)
+    to_exit: float = 0.0         # forecast samples: s from the frame to the visit's exit (0: a fire-frame record)
+    fi: int = -1                 # the frame's index in the cache
 
 
 # ---- hero extras (silk, health) from the recording ----------------------------------------------------------------
@@ -89,20 +97,32 @@ class _Rows:
         self.st = c["e_st"][idx]
 
     def at(self, fi: int, T: np.ndarray) -> tuple | None:
-        """(x, y, flip) of the last non-hidden row at or before frame index fi, at most STALE_S old."""
+        """(x, y, flip) of the last non-hidden row at or before frame index fi, at most STALE_S old (BranchView's
+        rows: the frames the enemy was seen)."""
         k = int(np.searchsorted(self.fi, fi, side="right")) - 1
         while k >= 0 and self.hidden[k]:
             k -= 1
-        if k < 0 or T[fi] - T[self.fi[k]] > STALE_S:
+        if k < 0 or T[fi] - T[self.fi[k]] > STALE_S + 1e-9:
             return None
         return float(self.x[k]), float(self.y[k]), int(self.flip[k])
 
+    def now(self, fi: int) -> tuple | None:
+        """(x, y) of its row on frame fi, when it was seen (exported, not hidden) on that frame."""
+        k = int(np.searchsorted(self.fi, fi, side="right")) - 1
+        if k < 0 or self.fi[k] != fi or self.hidden[k]:
+            return None
+        return float(self.x[k]), float(self.y[k])
 
-def scan_fight(c: dict, extra: dict | None = None) -> list[DecisionRecord]:
-    """Decision records of one cached fight (forum_cache.load_cache) with its hero extras (hero_extra)."""
+
+def scan_fight(c: dict, extra: dict | None = None, ahead_dt: float | None = None,
+               every_frame: bool = False) -> tuple[list[DecisionRecord], list[DecisionRecord]]:
+    """(fire-frame records, forecast samples) of one cached fight (forum_cache.load_cache) with its hero extras
+    (hero_extra). ahead_dt None: no forecast samples; every_frame: a forecast sample on every frame of every visit
+    (unlabelled visits included, outcome ""; the runtime parity check)."""
     T = c["T"]
     fidx = {int(f): i for i, f in enumerate(c["f"])}
     types = c["types"]
+    fid = c["meta"]["id"]
     silk = None
     if extra is not None:
         xi = {int(f): i for i, f in enumerate(extra["f"])}
@@ -124,148 +144,139 @@ def scan_fight(c: dict, extra: dict | None = None) -> list[DecisionRecord]:
             continue
         rows[int(iid)] = _Rows(c, sel)
         tk_of[int(iid)] = tk
-    mems: dict[int, BranchMemory] = {}
-    for iid, tk in tk_of.items():
-        mems[iid] = memory_for(tk)
+    mems: dict[int, BranchMemory] = {iid: memory_for(tk) for iid, tk in tk_of.items()}
     dec = {tk: set(decisions_of(tk)) for tk in by_tk}
-    tiny_owner = _tiny_owners(c, rows, tk_of, T)
+    tinies = [j for j, tk in tk_of.items() if tk == TINY]
+    maes = [j for j, tk in tk_of.items() if tk == MAESTRO]
+    owners = TinyOwners()
+    sc = _Scan(c, T, rows, tk_of, mems, owners, silk)
     out: list[DecisionRecord] = []
-    hb = c["hbox"]
-    for f, kind, d in c["events"]:
-        fi = fidx.get(int(f))
-        if fi is None:
+    samples: list[DecisionRecord] = []
+    visits: dict[int, list] = {}             # iid -> [state, t_entry, next sample time, samples]
+    events = c["events"]
+    ne, ei = len(events), 0
+    for fi in range(len(T)):
+        Tf = float(T[fi])
+        while ei < ne:
+            f, kind, d = events[ei]
+            fj = fidx.get(int(f))
+            if fj is not None and fj > fi:
+                break
+            ei += 1
+            if fj is None:
+                continue
+            if kind == "hit":
+                m = mems.get(int(d.get("ent") or 0))
+                if m is not None:
+                    m.hit(Tf)
+                continue
+            if kind != "fsm":
+                continue
+            iid = int(d.get("iid") or 0)
+            m = mems.get(iid)
+            if m is None or d.get("fsm") != by_tk[m.tk].control_fsm or not isinstance(d.get("to"), str):
+                continue
+            frm, to = d.get("from"), d["to"]
+            if frm is not None and frm in dec[m.tk] and m.state == frm and m.t_entry is not None:
+                hist = m.features(frm, Tf, sc.context(m, iid, fi))
+                geo = sc.geo(m, frm, iid, fi, TIMINGS)
+                out.append(DecisionRecord(fid, m.tk, iid, frm, to, Tf, Tf - m.t_entry, hist, geo, 0.0, fi))
+            v = visits.pop(iid, None)
+            if v is not None:
+                for r in v[3]:
+                    r.outcome, r.to_exit = to, Tf - r.T
+                samples += v[3]
+            m.enter(frm, to, Tf)
+        # ---- the frame's end: what the runtime's BranchView.observe and a planner query see
+        if tinies and maes:
+            tl = [(j, p) for j in tinies if mems[j].state == "Ready" and (p := rows[j].now(fi)) is not None]
+            if tl:
+                ml = [(j, (e[0], e[1])) for j in maes if (e := rows[j].at(fi, T)) is not None]
+                owners.update(tl, ml)
+        if ahead_dt is None:
             continue
-        if kind == "hit":
-            m = mems.get(int(d.get("ent") or 0))
-            if m is not None:
-                m.hit(float(T[fi]))
-            continue
-        if kind != "fsm":
-            continue
-        iid = int(d.get("iid") or 0)
-        m = mems.get(iid)
-        if m is None or d.get("fsm") != by_tk[m.tk].control_fsm or not isinstance(d.get("to"), str):
-            continue
-        frm, to, Tb = d.get("from"), d["to"], float(T[fi])
-        if frm is not None and frm in dec[m.tk] and m.state == frm and m.t_entry is not None:
-            ctx = _context(m, iid, mems, rows, tk_of, tiny_owner, fi, T, silk)
-            hist = m.features(frm, Tb, ctx)
-            hist.update(_r0_features(m, frm, rows[iid], fi, T, c, hb))
-            geo = _geo(m, frm, iid, rows[iid], fi, T, c, hb, silk)
-            out.append(DecisionRecord(c["meta"]["id"], m.tk, iid, frm, to, Tb, Tb - m.t_entry, hist, geo))
-        m.enter(frm, to, Tb)
-    return out
+        for iid, m in mems.items():
+            st = m.state
+            if st is None or m.t_entry is None or st not in dec[m.tk] or (m.tk, st) in AHEAD_SKIP:
+                continue
+            v = visits.get(iid)
+            if v is None or v[0] != st or v[1] != m.t_entry:
+                v = visits[iid] = [st, m.t_entry, m.t_entry, []]
+            if not every_frame and Tf < v[2] - 1e-9:
+                continue
+            hist = m.features(st, Tf, sc.context(m, iid, fi))
+            geo = sc.geo(m, st, iid, fi, AHEAD_TIMINGS)
+            v[3].append(DecisionRecord(fid, m.tk, iid, st, "", Tf, Tf - m.t_entry, hist, geo, 0.0, fi))
+            if not every_frame:
+                dt = AHEAD_DT_TINY if m.tk == TINY else ahead_dt
+                v[2] = m.t_entry + (math.floor((Tf - m.t_entry) / dt + 1e-6) + 1) * dt
+    if every_frame:
+        for v in visits.values():
+            samples += v[3]
+    return out, samples
 
 
 def _fi_at(T: np.ndarray, t: float) -> int:
-    return max(0, int(np.searchsorted(T, t, side="right")) - 1)
+    return max(0, int(np.searchsorted(T, t + 1e-9, side="right")) - 1)
 
 
-def _geo(m: BranchMemory, state: str, iid: int, r: _Rows, fi: int, T: np.ndarray, c: dict, hb: np.ndarray,
-         silk: np.ndarray | None) -> np.ndarray:
-    g = np.full((len(TIMINGS), len(GEO_KEYS)), np.nan, np.float32)
-    kind = SENSING.get(m.tk, {}).get(state, ("branch", ""))[0]
-    stored = kind.split(":", 1)[1] if kind.startswith("stored:") else None
-    for k, tm in enumerate(TIMINGS):
-        if tm == "branch":
-            fj = fi
-        elif tm == "entry":
-            fj = _fi_at(T, m.t_entry)
-        elif tm == "stored":
-            if stored is None or stored not in m.entries:
-                continue
-            fj = _fi_at(T, m.entries[stored])
-        else:
-            fj = _fi_at(T, T[fi] - float(tm[4:]))
-        e = r.at(fj, T)
-        if e is not None:
-            g[k, 0:3] = e
-        g[k, 3], g[k, 4] = c["hx"][fj], c["hy"][fj]
-        g[k, 5:9] = hb[fj]
-        if silk is not None and silk[fj] >= 0:
-            g[k, 9] = silk[fj]
-    return g
+class _Scan:
+    """One fight's lookups shared by the fire-frame records and the forecast samples."""
+
+    def __init__(self, c: dict, T: np.ndarray, rows: dict, tk_of: dict, mems: dict, owners: TinyOwners,
+                 silk: np.ndarray | None):
+        self.c, self.T, self.rows, self.tk_of, self.mems, self.owners, self.silk = c, T, rows, tk_of, mems, owners, silk
+        self.clappers = [j for j, tk in tk_of.items() if tk == CLAPPER]
+
+    def context(self, m: BranchMemory, iid: int, fi: int) -> dict:
+        """branch_model.BranchView.context on the scan's rows."""
+        if m.tk == CLAPPER:
+            T = self.T
+            me = self.rows[iid].at(fi, T)
+            buddies = [(self.mems[j], b) for j in self.clappers if j != iid and in_play(CLAPPER, self.mems[j].state)
+                       and (b := self.rows[j].at(fi, T)) is not None]
+            return clapper_context(me, buddies)
+        if m.tk == MAESTRO:
+            return {"dead_tinies": self.owners.dead(iid, lambda j: self.mems[j].state if j in self.mems else None)}
+        return {}
+
+    def geo(self, m: BranchMemory, state: str, iid: int, fi: int, timings: tuple) -> np.ndarray:
+        """The enemy and hero rows at each timing (BranchView._rows_for)."""
+        T, c, r, silk = self.T, self.c, self.rows[iid], self.silk
+        g = np.full((len(timings), len(GEO_KEYS)), np.nan, np.float32)
+        kind = SENSING.get(m.tk, {}).get(state, ("branch", ""))[0]
+        stored = kind.split(":", 1)[1] if kind.startswith("stored:") else None
+        for k, tm in enumerate(timings):
+            if tm in ("branch", "now"):
+                fj = fi
+            elif tm == "entry":
+                fj = _fi_at(T, m.t_entry)
+            elif tm == "stored":
+                if stored is None or stored not in m.entries:
+                    continue
+                fj = _fi_at(T, m.entries[stored])
+            else:
+                fj = _fi_at(T, T[fi] - float(tm[4:]))
+            e = r.at(fj, T)
+            if e is not None:
+                g[k, 0:3] = e
+            g[k, 3], g[k, 4] = c["hx"][fj], c["hy"][fj]
+            g[k, 5:9] = c["hbox"][fj]
+            if silk is not None and silk[fj] >= 0:
+                g[k, 9] = silk[fj]
+        return g
 
 
-def geo_features(tk: str, g: np.ndarray, timing: str) -> dict:
-    """ssbot.combat.branch_model.geometry of one record's row at a timing (prefixed by nothing; the timing is the
+def geo_features(tk: str, g: np.ndarray, timing: str, timings: tuple = TIMINGS) -> dict:
+    """ssbot.combat.branch_model.geometry of one row's geometry at a timing (prefixed by nothing; the timing is the
     model's)."""
-    v = g[TIMINGS.index(timing)]
+    v = g[timings.index(timing)]
     ex = None if math.isnan(v[0]) else float(v[0])
     hx = None if math.isnan(v[3]) else float(v[3])
     box = None if math.isnan(v[5]) else tuple(float(x) for x in v[5:9])
     s = None if math.isnan(v[9]) else int(v[9])
     return geometry(tk, ex, None if ex is None else float(v[1]), 0 if ex is None else int(v[2]), hx,
                     None if hx is None else float(v[4]), box, s)
-
-
-def _context(m: BranchMemory, iid: int, mems: dict, rows: dict, tk_of: dict, tiny_owner: dict, fi: int,
-             T: np.ndarray, silk: np.ndarray | None) -> dict:
-    ctx: dict = {}
-    if m.tk == "Song Heavy Sentry":
-        buddies = [j for j, t in tk_of.items() if t == m.tk and j != iid and mems[j].state is not None
-                   and mems[j].state not in ("Init", "Rest", "On-plane Rest", "Start Idle")
-                   and rows[j].at(fi, T) is not None]
-        ctx["buddy"] = bool(buddies)
-        ctx["buddy_attacking"] = any(mems[j].fam in CLAPPER_ATTACKS for j in buddies)
-        me = rows[iid].at(fi, T)
-        ctx["buddy_close"] = bool(me is not None and any(
-            (b := rows[j].at(fi, T)) is not None and abs(b[0] - me[0]) < 4.0 for j in buddies))
-    elif m.tk == "Song Pilgrim Maestro":
-        mine = [j for j, o in tiny_owner.items() if o == iid]
-        ctx["dead_tinies"] = sum(1 for j in mine if mems[j].state in TINY_DEAD)
-    return ctx
-
-
-def _tiny_owners(c: dict, rows: dict, tk_of: dict, T: np.ndarray) -> dict[int, int]:
-    """Tiny iid -> the Maestro iid it hovers by: the Maestro nearest to it over the frames it is in Ready (the Tinies'
-    Idle Pos is (+-3, 2.5) / (0, 4.5) from their own Maestro)."""
-    states = c["states"]
-    ready = {i for i, s in enumerate(states) if s == "Ready"}
-    maes = [j for j, t in tk_of.items() if t == "Song Pilgrim Maestro"]
-    out = {}
-    for j, t in tk_of.items():
-        if t != "Song Automaton Tiny" or not maes:
-            continue
-        r = rows[j]
-        votes: Counter = Counter()
-        for k in range(0, len(r.fi), 15):
-            if int(r.st[k]) not in ready or r.hidden[k]:
-                continue
-            best = None
-            for mj in maes:
-                e = rows[mj].at(int(r.fi[k]), T)
-                if e is None:
-                    continue
-                dd = math.hypot(e[0] - float(r.x[k]), e[1] - float(r.y[k]))
-                if best is None or dd < best[0]:
-                    best = (dd, mj)
-            if best is not None and best[0] < 8.0:
-                votes[best[1]] += 1
-        if votes:
-            out[j] = votes.most_common(1)[0][0]
-    return out
-
-
-def _r0_features(m: BranchMemory, state: str, r: _Rows, fi: int, T: np.ndarray, c: dict, hb) -> dict:
-    """The R0 tables' covariates (behaviour_tables._covariates) at the branch frame, for the baseline."""
-    out: dict = {}
-    e = r.at(fi, T)
-    hx = float(c["hx"][fi])
-    if e is not None and not math.isnan(hx):
-        dx = abs(hx - e[0])
-        out["dist_visible"] = 0 if dx < 3.0 else 1 if dx < 6.0 else 2 if dx < 10.0 else 3
-        out["side_visible"] = "L" if hx - e[0] < 0 else "R"
-        out["last_seen_x"] = 0 if e[0] < ARENA_X3[0] else 2 if e[0] >= ARENA_X3[1] else 1
-    if not math.isnan(hx):
-        out["hero_x"] = 0 if hx < ARENA_X3[0] else 2 if hx >= ARENA_X3[1] else 1
-    for fam, k in m.since.items():
-        out[f"since_{fam}"] = min(k, 4)
-    loc = list(m.local.get(state) or ())
-    for o in set(loc):
-        k = next(j for j, x in enumerate(reversed(loc)) if x == o)
-        out[f"miss_{o}"] = min(k, 4)
-    return out
 
 
 # ---- fit / evaluate ----------------------------------------------------------------------------------------------
@@ -380,10 +391,14 @@ class DecisionData:
     hist: dict[str, list]
     geo: dict[str, dict[str, list]]          # timing -> covariate -> values
     available: dict[str, int] = field(default_factory=dict)
+    to_exit: np.ndarray | None = None        # forecast samples: s to the visit's exit
 
 
-def decision_data(recs: list[DecisionRecord], fold_of: dict[str, int], timings=TIMINGS) -> DecisionData:
+def decision_data(recs: list[DecisionRecord], fold_of: dict[str, int], timings: tuple | None = None) -> DecisionData:
+    """One decision's rows as covariate columns. timings: those to decode (default: all the rows carry: TIMINGS for
+    fire-frame records, AHEAD_TIMINGS for forecast samples)."""
     tk, state = recs[0].tk, recs[0].state
+    all_tm = TIMINGS if recs[0].geo.shape[0] == len(TIMINGS) else AHEAD_TIMINGS
     outs = sorted({r.outcome for r in recs})
     y = np.array([outs.index(r.outcome) for r in recs], np.int64)
     fold = np.array([fold_of.get(r.fight, 0) for r in recs], np.int64)
@@ -391,16 +406,33 @@ def decision_data(recs: list[DecisionRecord], fold_of: dict[str, int], timings=T
     hist = {k: [r.hist.get(k) for r in recs] for k in hk}
     geo: dict[str, dict[str, list]] = {}
     avail = {}
-    for tm in timings:
-        gf = [geo_features(tk, r.geo, tm) for r in recs]
+    for tm in timings or all_tm:
+        gf = [geo_features(tk, r.geo, tm, all_tm) for r in recs]
         keys = sorted({k for g in gf for k in g})
         geo[tm] = {k: [g.get(k) for g in gf] for k in keys}
         avail[tm] = sum(1 for g in gf if g.get("dx") is not None)
-    return DecisionData(tk, state, outs, y, fold, hist, geo, avail)
+    return DecisionData(tk, state, outs, y, fold, hist, geo, avail, np.array([r.to_exit for r in recs]))
+
+
+R0_ALIASES = {"side_visible": "side"}        # an R0 conditioner the geometry carries under another name
+
+
+def _r0_codes(dd: DecisionData, henc: dict, names: list[str]) -> list[np.ndarray]:
+    tm0 = next(iter(dd.geo), None)
+    codes = []
+    for name in names:
+        k = R0_ALIASES.get(name, name)
+        if k in henc:
+            codes.append(henc[k])
+        elif tm0 is not None and k in dd.geo[tm0]:
+            codes.append(_Enc(dd.geo[tm0][k]).codes)
+    return codes
 
 
 def study_decision(dd: DecisionData, r0_conditioners: list[str] | None = None) -> dict:
-    """Per timing: geometry-only and geometry + history greedy selections; baselines; the chosen model."""
+    """Per timing: geometry-only and geometry + history greedy selections; baselines (the unconditional table; the
+    R0 tables' conditioner names refit on these rows with this backoff, "r0_refit": not the shipped R0 tables, whose
+    runtime use is the unconditional p_succ); the chosen model."""
     K = len(dd.outcomes)
     henc = {k: _Enc(v).codes for k, v in dd.hist.items()}
     hist_cand = dict(henc)
@@ -409,15 +441,10 @@ def study_decision(dd: DecisionData, r0_conditioners: list[str] | None = None) -
     ll_u, P_u = cv_logloss(dd.y, K, dd.fold, [])
     res["uncond"] = {"logloss": round(ll_u, 5), **calibration(P_u, dd.y)}
     if r0_conditioners:
-        mp = {"run": "run", "prev": "prev", "last_choice": "last_choice", "choice_run": "choice_run"}
-        codes = []
-        for name in r0_conditioners:
-            k = mp.get(name, name)
-            if k in henc:
-                codes.append(henc[k])
+        codes = _r0_codes(dd, henc, r0_conditioners)
         ll, P = cv_logloss(dd.y, K, dd.fold, codes)
-        res["r0"] = {"conditioners": r0_conditioners, "used": len(codes), "logloss": round(ll, 5),
-                     **calibration(P, dd.y)}
+        res["r0_refit"] = {"conditioners": r0_conditioners, "used": len(codes), "logloss": round(ll, 5),
+                           **calibration(P, dd.y)}
     per = {}
     for tm, gv in dd.geo.items():
         genc = {k: _Enc(v).codes for k, v in gv.items()}
@@ -432,11 +459,12 @@ def study_decision(dd: DecisionData, r0_conditioners: list[str] | None = None) -
     sel_h, ll_h, _ = greedy(dd.y, K, dd.fold, {f"h:{k}": v for k, v in hist_cand.items()})
     res["history_only"] = {"covariates": sel_h, "logloss": round(ll_h, 5)}
     res["timings"] = per
+    first = next(iter(dd.geo), "branch")
     if per:
-        best_tm = min(per, key=lambda t: (per[t]["full"]["logloss"] - (1e-9 if t == "branch" else 0.0)))
+        best_tm = min(per, key=lambda t: (per[t]["full"]["logloss"] - (1e-9 if t == first else 0.0)))
         best = per[best_tm]["full"]
     else:
-        best_tm, best = "branch", {"covariates": sel_h, "logloss": ll_h}
+        best_tm, best = first, {"covariates": sel_h, "logloss": ll_h}
     codes = []
     for name in best["covariates"]:
         kind, k = name.split(":", 1)
@@ -470,26 +498,35 @@ def fit_tables(dd: DecisionData, timing: str, covariates: list[str]) -> dict:
             "counts": counts, "alpha": ALPHA_BACKOFF, "n": int(len(dd.y))}
 
 
-def holdout_eval(train: DecisionData, test: DecisionData, timing: str, covariates: list[str]) -> dict:
-    """Log loss and calibration on another set of fights of the tables fit on `train` (test outcomes unseen in
-    training get the smoothed floor)."""
+def holdout_ll(train: DecisionData, test: DecisionData, timing: str, covariates: list[str],
+               test_timing: str | None = None) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """(P [n, K + 1], y, per-row log loss) on `test` of the tables fit on `train` (test outcomes unseen in training
+    get the smoothed floor, column K). test_timing: the test rows' timing for the geometry (default: timing; a
+    forecast sample's "now" for a fire-frame model's "branch")."""
     from ssbot.combat.branch_model import DecisionModel
     t = fit_tables(train, timing, covariates)
     m = DecisionModel(t["outcomes"], t["covariates"], timing, t["counts"])
     K = len(m.outcomes)
     P = np.zeros((len(test.y), K + 1))
     y = np.zeros(len(test.y), np.int64)
+    gsrc = test.geo.get(test_timing or timing, {})
+    cols = []
+    for name in covariates:
+        kind, k = name.split(":", 1)
+        cols.append((k, gsrc.get(k) if kind == "g" else test.hist.get(k)))
     for i in range(len(test.y)):
-        feats = {}
-        for name in covariates:
-            kind, k = name.split(":", 1)
-            src = test.geo[timing].get(k) if kind == "g" else test.hist.get(k)
-            feats[k] = None if src is None else src[i]
-        p = m.predict(feats)
+        p = m.predict({k: None if src is None else src[i] for k, src in cols})
         P[i, :K] = [p[o] for o in m.outcomes]
         o = test.outcomes[int(test.y[i])]
         y[i] = m.outcomes.index(o) if o in m.outcomes else K
     P[:, K] = 1e-6
     P /= P.sum(axis=1, keepdims=True)
     ll = -np.log(np.clip(P[np.arange(len(y)), y], 1e-12, 1.0))
+    return P, y, ll
+
+
+def holdout_eval(train: DecisionData, test: DecisionData, timing: str, covariates: list[str],
+                 test_timing: str | None = None) -> dict:
+    """Log loss and calibration on another set of fights of the tables fit on `train` (holdout_ll)."""
+    P, y, ll = holdout_ll(train, test, timing, covariates, test_timing)
     return {"n": int(len(y)), "logloss": round(float(ll.mean()), 5), **calibration(P, y)}

@@ -62,7 +62,7 @@ def test_reed_armed_and_just_did_defend():
     assert m.features("Alert", 4.3)["prev2_choice"] == "Defend Start|Choice"
 
 
-def test_choristor_hops_and_hit_same_frame_excluded():
+def test_choristor_hops_and_recent_hits():
     m = _mem("Song Pilgrim 03")
     for frm, to, t in [("Alert Tick", "Move Start", 0.0), ("Move Start", "Hop Antic", 0.0),
                        ("Hop Antic", "Hop Check", 0.2), ("Hop Check", "Hop Back", 0.2),
@@ -70,12 +70,12 @@ def test_choristor_hops_and_hit_same_frame_excluded():
                        ("Ground Check", "Hop Land", 0.4)]:
         m.enter(frm, to, t)
     f = m.features("Hop Land", 0.4)
-    assert f["hops"] == 1 and f["last_hop"] == "Hop Back"
+    assert f["hops"] == 1 and f["last_hop"] == "Hop Back" and f["hit"] == 2 and f["age"] == 0
     m.hit(0.5)
-    assert m.features("Hop Land", 0.5)["hit"] == 2           # the hit on the decision's own frame is not history
+    assert m.features("Hop Land", 0.5)["hit"] == 0           # every hit seen up to now, this frame's included
     assert m.features("Hop Land", 0.6)["hit"] == 0
-    m.hit(1.0)
-    assert m.features("Hop Land", 1.0)["hit"] == 1           # the hit 0.5 s before still counts
+    assert m.features("Hop Land", 1.0)["hit"] == 1
+    assert m.features("Hop Land", 1.0)["age"] == 3            # 0.6 s in Hop Land
     m.enter("Hop Land", "Hop Antic", 1.1)
     m.enter("Hop Antic", "Attack Choice", 1.1)
     m.enter("Attack Choice", "Battle Idle", 1.1)
@@ -83,6 +83,37 @@ def test_choristor_hops_and_hit_same_frame_excluded():
     m.enter("Unalert Tick?", "Alert Tick", 1.4)
     m.enter("Alert Tick", "Move Start", 1.4)
     assert m.features("Hop Land", 1.5)["hops"] == 0
+
+
+def test_envoy_charge_range_gate_follows_the_fsm():
+    """Charge Range is active at scene load, off at Charge Antic, on at Slash Antic, and on once a Walker visit lasts
+    1.5 s (ActivateGameObjectDelay, resetOnExit 0: it stays on after Walker is left; a shorter visit does not arm
+    it). CHARGE also needs Alerted (Slash Antic / Ambush Ready)."""
+    m = _mem("Song Pilgrim 01")
+    f = m.features("Walker", 0.0)
+    assert f["charge_armed"] is True and f["alerted"] is False
+    m.enter("Ambush 2", "Walker", 0.0)
+    m.enter("Walker", "Charge Antic", 0.2)
+    assert m.features("Walker", 0.3)["charge_armed"] is False and m.features("Walker", 0.3)["alerted"] is False
+    m.enter("Charge Antic", "Charge", 0.5)
+    m.enter("Charge", "Charge End", 1.0)
+    m.enter("Charge End", "Attack Wait", 1.2)
+    m.enter("Attack Wait", "Walker", 1.7)
+    assert m.features("Walker", 2.0)["charge_armed"] is False          # 0.3 s into Walker
+    assert m.features("Walker", 3.3)["charge_armed"] is True           # 1.6 s into Walker
+    m.enter("Walker", "Alert Followers", 2.5)                          # left after 0.8 s: not armed
+    m.enter("Alert Followers", "Hop Up?", 2.5)
+    assert m.features("Walker", 2.6)["charge_armed"] is False
+    m.enter("Hop Up?", "Slash Antic", 2.5)                             # a slash arms it and alerts
+    f = m.features("Walker", 2.6)
+    assert f["charge_armed"] is True and f["alerted"] is True
+    m.enter("Slash Antic", "Charge Antic", 3.0)
+    m.enter("Charge Antic", "Charge", 3.3)
+    m.enter("Charge", "Charge End", 3.8)
+    m.enter("Charge End", "Attack Wait", 4.0)
+    m.enter("Attack Wait", "Walker", 4.5)
+    m.enter("Walker", "Leader?", 6.1)                                  # 1.6 s in Walker: armed, and it stays
+    assert m.features("Walker", 6.2)["charge_armed"] is True
 
 
 def test_clawmaiden_suck_age_accumulates_in_fly_only():
@@ -127,7 +158,7 @@ def test_trigger_shapes_mirror_with_flip():
     assert in_range("Song Reed", "Nope", 0, 0, 0, hb(0, 0)) is None
     g = geometry("Song Reed", 30.0, 10.0, 0, 31.0, 10.0, hb(31.0, 10.0), silk=5)
     assert g["in_Evade Range"] and g["side"] == "R" and g["front"] == "back" and g["silk"] == 3
-    assert geometry("Song Reed", None, None, 0, 31.0, 10.0, None) == {}
+    assert geometry("Song Reed", None, None, 0, 31.0, 10.0, None) == {"hero_x": 1}      # the hero alone
 
 
 def test_sensing_table_names_real_states():
