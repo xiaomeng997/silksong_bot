@@ -48,8 +48,9 @@ side for the rest, and the Choir Clapper by its own controller (cannot be clashe
           else back off in front of the landing: CC_JUMP past its landing slam (0.67-7.76 u in front: jump_out_u),
           CC_JUMP_CAST past the rune circle too (to 13.8 u: cast_out_u), behind it when the wall leaves no room (round
           2: live w7 / w13, 5 of 18 hits were the body landing on a hero running under it, forum.md §17.6).
-  Two Clappers never attack together (Buddy Is Attacking): while one is committed, the other one, if not, is the
-          RUSH / PUNISH pick between the two (priority x 2).
+  Two Clappers never attack together (Buddy Is Attacking): while one is committed, the other one, if not and its
+          spot is reached before that attack can end (Subject.t_free), is the RUSH / PUNISH pick between the two
+          (priority x 2, a switch at once).
 What a goal sets (scores only: the planner's S / Hz / U never see prefs, §4.4 item 2): mode (the goal's name), target,
 stance_x, boss_x (face it), hit_w (the target x target_hit_w x priority; the others as LOCAL, defensive stances still
 negative) and the weights' factors per goal (l2.weights). LOCAL's EVADE stands against KITE when it says the hero's spot
@@ -349,10 +350,12 @@ class GauntletTactics:
         claps = [c for c in cands if c.s.type_key == CLAPPER]
         turn = set()
         if len(claps) >= 2 and any(c.s.committed for c in claps):
-            # Buddy Is Attacking: the idle one cannot start an attack while the other one is in its
+            # Buddy Is Attacking: the idle one cannot start an attack while the other one is in its; its turn only
+            # when its spot is reached before that attack can end (round 2: live w13 switched 15 / min on turns)
             busy = {c.s.iid for c in claps if c.s.committed}
+            t_free = max(float(getattr(c.s, "t_free", 0.0) or 0.0) for c in claps if c.s.iid in busy)
             for c in claps:
-                if c.s.iid not in busy:
+                if c.s.iid not in busy and c.t_run <= t_free:
                     c.prio *= 2.0
                     turn.add(c.s.iid)
         firsts = [c for c in cands if c.s.type_key in r.first]

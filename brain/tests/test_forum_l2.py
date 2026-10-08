@@ -42,8 +42,9 @@ class WinFc:
         return min(self._t, t_max)
 
 
-def subj(iid, tk, x, y=5.0, state="Idle", family=None, committed=False):
-    return Subject(iid, tk, True, True, committed, family, state, 50.0, 1.0, (x, y), 0.0, 1.0)
+def subj(iid, tk, x, y=5.0, state="Idle", family=None, committed=False, t_free=None):
+    t_free = (1.0 if committed else 0.0) if t_free is None else t_free
+    return Subject(iid, tk, True, True, committed, family, state, 50.0, 1.0, (x, y), t_free, 1.0)
 
 
 def world(x=20.0, y=FLOOR, hp=7, silk=0, ents=(), t=10.0, events=()):
@@ -352,3 +353,14 @@ def test_clapper_jump_back_off_when_the_run_is_late_or_through_its_body():
     assert "under and behind" in t.last["goal_why"] and p.stance_x == pytest.approx(land + 2.5)
     p = t.decide(world(30.0, t=11.5, ents=[clapper(9, 44.0, False)]), WinFc(s), None, 3)
     assert "no room out" in t.last["goal_why"] or p.stance_x == pytest.approx(land - 14.5)
+
+
+def test_the_idle_clappers_turn_needs_its_spot_in_time():
+    # the busy one's slam can end in 0.3 s: the idle one's spot (6 u off, 0.39 s) is not reached in time -> no turn
+    s = [subj(1, CC, 22.0, y=7.45, state="Slam Antic", family="CC_SLAM", committed=True, t_free=0.3),
+         subj(2, CC, 40.0, y=7.45)]
+    ents = [clapper(1, 22.0, False), clapper(2, 40.0, True)]
+    t = l2()
+    t.decide(world(30.0, t=10.0, ents=ents), WinFc([subj(1, CC, 22.0, y=7.45), s[1]]), None, 3)
+    p = t.decide(world(30.0, t=10.2, ents=ents), WinFc(s), None, 3)
+    assert p.target == 1 and t.stats["tgt_switches"] == 0
