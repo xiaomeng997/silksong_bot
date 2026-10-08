@@ -76,6 +76,9 @@ class MenuGame:
                              "quitting": False},
                     "pause": {"blk": blk | 64, "bench": False}, "hero": {"hero_accepting_input": True,
                                                                          "pos": [78.0, 3.57]}}
+        if self.mode == "quitting":         # the quit's scene on the way to the title (20261002_080522 i0)
+            return {"f": f, "game": {"gs": 6, "ui": 2, "menu": M.MENU_PAUSE, "paused": False, "fading": False,
+                                     "scene": M.QUIT_SCENE}, "menu": None, "pause": None, "hero": None}
         return {"f": f, "game": {"gs": M.GS_MAIN_MENU, "ui": 1, "menu": self.menu, "paused": False, "fading": False,
                                  "scene": "Menu_Title"}, "menu": None, "pause": None, "hero": None}
 
@@ -154,6 +157,8 @@ class MenuGame:
     def wait_state(self, pred=lambda s: True, timeout_s: float = 10.0, newer_than: int | None = None) -> dict:
         for _ in range(self.steps):
             self.f += 1
+            if self.mode == "quitting" and self.f >= self.lock_until:
+                self.mode, self.menu = "title", M.MENU_MAIN
             s = self.snapshot()
             if newer_than is not None and s["f"] <= newer_than:
                 continue
@@ -344,6 +349,15 @@ def test_after_harness_fail_by_place(capsys):
     assert g.mode == "slot"
     g = MenuGame("game")
     assert combat_run.after_harness_fail(g, BELL_BEAST, 1) is None and g.keys == []
+
+
+def test_after_harness_fail_lets_a_quit_reach_the_title_first():
+    """20261002_080522 i0: "left the scene: Quit_To_Menu", then three episodes failed "savestate.load: no game
+    loaded". Now the worker waits for the title and goes back into the sandbox slot."""
+    g = MenuGame("quitting", lockout=25)          # the title comes 25 frames on
+    assert M.where(g.state) == "quitting"
+    assert combat_run.after_harness_fail(g, BELL_BEAST, 1) == "title: back into the sandbox slot"
+    assert g.mode == "slot" and [k for k, _, _ in g.keys] == ["enter", "enter"]
 
 
 def test_a_paused_game_is_not_a_game_without_control():

@@ -41,6 +41,7 @@ MENU_PAUSE, MENU_PLAY_MODE, MENU_EXTRAS, MENU_ENGAGE = 17, 18, 19, 22
 TITLE_ITEM = {MENU_SAVE_PROFILES: 0, MENU_PLAY_MODE: 0, MENU_OPTIONS: 1, MENU_ACHIEVEMENTS: 2, MENU_EXTRAS: 3,
               MENU_QUIT_GAME_PROMPT: 4}
 BLK_PAUSE_LOCKOUT, BLK_NOT_ACCEPTING_INPUT = 4, 32      # STATE pause.blk (PauseGate)
+QUIT_SCENE = "Quit_To_Menu"     # the scene a quit to the title passes (20261002_080522 i0: "left the scene")
 PAUSE_BIT = mask("pause")
 
 TAP_FRAMES = 3          # one-shot press (hold_frames > 0: no brain-lost watchdog), >= 2 frames and >= 34 ms
@@ -65,9 +66,9 @@ def where(s: dict | None) -> str:
     """Where the game is, for the harness:
     "no_game" (no GameManager: boot, or the Save & Quit gap), "title" (the main menu), "save_select",
     "title_submenu" (Options and its sub-menus, Achievements, Extras, the quit-game prompt, the play-mode menu),
-    "title_other" (logo / engage screen), "pause_opening" (paused, the menu still fading in or ignoring input: wait),
-    "pause_menu", "exit_prompt", "pause_submenu" (Options or deeper while paused), "game" (anything else: gameplay,
-    a cutscene, a load)."""
+    "title_other" (logo / engage screen), "quitting" (a quit to the title past its save: STATE menu.quitting),
+    "pause_opening" (paused, the menu still fading in or ignoring input: wait), "pause_menu", "exit_prompt",
+    "pause_submenu" (Options or deeper while paused), "game" (anything else: gameplay, a cutscene, a load)."""
     g = _game(s)
     if not g:
         return "no_game"
@@ -80,9 +81,11 @@ def where(s: dict | None) -> str:
         if menu in (MENU_LOGO, MENU_ENGAGE, None):
             return "title_other"
         return "title_submenu"
+    m = (s or {}).get("menu") or {}
+    if m.get("quitting") or g.get("scene") == QUIT_SCENE:
+        return "quitting"            # past the quit's save, on its way to the title: nothing to press
     if not is_paused(s):
         return "game"
-    m = (s or {}).get("menu") or {}
     blk = ((s or {}).get("pause") or {}).get("blk") or 0
     # menuState is stale for the first frames of a pause (ShowMenu sets it after the fade-in: 8 frames in the person's
     # session), and the menus take no input while they fade or GoToPauseMenu runs

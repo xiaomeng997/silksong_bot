@@ -271,6 +271,7 @@ def back_into_slot(link, enc, instance: int, tries: int = SLOT_TRIES, slot_timeo
 
 
 OFF_TITLE = ("title", "title_submenu", "title_other", "save_select")
+QUIT_WAIT_S = 60.0              # a quit's save + fade to the title: GameManager gone 2.6 s after Yes (pause_quit.py)
 
 
 def after_harness_fail(link, enc, instance: int) -> str | None:
@@ -291,6 +292,13 @@ def after_harness_fail(link, enc, instance: int) -> str | None:
     if w in recovery.PAUSED_PLACES:
         ok, steps = recovery.resume(link, log=log)
         return f"{w}: {'unpaused' if ok else 'still paused'} ({len(steps)} taps)"
+    if w in ("quitting", "no_game"):
+        # a quit under way (past its save) or the Save & Quit gap: let it reach the title first
+        try:
+            link.wait_state(lambda s: recovery.where(s) in OFF_TITLE, timeout_s=QUIT_WAIT_S)
+        except TimeoutError:
+            return f"{w}: the title did not come within {QUIT_WAIT_S:.0f} s"
+        w = recovery.where(link.state)
     if w in OFF_TITLE:
         back_into_slot(link, enc, instance)
         return f"{w}: back into the sandbox slot"
