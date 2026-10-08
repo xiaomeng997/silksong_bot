@@ -43,6 +43,7 @@ from ssbot.combat.forum_planner import (ForumConfig, ForumPlanner, forum_kill_hp
 from ssbot.combat.hero_damage import HeroDamage
 from ssbot.combat.multi_forecast import MultiForecaster, ReactConfig
 from ssbot.combat.planner import PlannerConfig
+from ssbot.combat.projectiles import bells_mode
 from ssbot.combat.safety_filter import FilterContext, KillKnowledge
 from ssbot.combat.tactics.forum_local import ForumTactics, load_forum_playbook
 from ssbot.combat.tactics.gauntlet import GauntletTactics, load_l2_rules
@@ -81,7 +82,38 @@ BATTLE = "Battle Scene"
 HOOK_LOOKBACK_F = 70       # a multi-hit chain's hook -> its Final Hit: 0.35 - 1.0 s (forum.md §9.2; tools.multi_recall)
 HOOK_FSMS = ("Control", "Attack")
 KEEP_F = 90                # forecasts, hero boxes and FSM entries kept for judging a Final Hit at its hook
+# a hit's chosen plan this many frames before it (hit_log "lag", stats "planned_safe"; forum.md §23.12): the reaction
+# lag (12), the commit lag of a typical move (24) and the 0.5 s a plan's first segment runs (30); UNPRED_LAGS (2-4)
+# cannot see a risk the escape check or the idle-growth hold took on further ahead
+PLAN_LAGS = (12, 24, 30)
+PLAN_RING = 64
 TICK_WAIT_F = HOOK_LOOKBACK_F   # a Multihit tick outside the support waits this long for its chain's Final Hit
+
+
+def planned_safe(hit_log: list) -> dict:
+    """The damage hits (hit_log, kind "damage") whose chosen plan was S = 0 at each PLAN_LAGS lag ("12" ...), with a
+    plan chosen S = 0 in the 30 frames before ("any30") or a clean clash row chosen S = 0 there ("clash30"), whose plan
+    at a lag was S = 1 by the escape check ("esc_<L>") or had an aimed-pin threat ("pin_<L>"), and the S = 0 ones by
+    source path ("by_src": the 30-frame rule). A hit outside the support at UNPRED_LAGS is "unpredicted"; these are
+    the hits a plan called safe that far ahead did not avoid (forum.md §23.12)."""
+    out = Counter()
+    src = Counter()
+    for x in hit_log:
+        if x.get("kind") != "damage":
+            continue
+        out["hits"] += 1
+        for L, v in (x.get("lag") or {}).items():
+            if v is None:
+                out[f"unknown_{L}"] += 1
+                continue
+            out[L] += int(v[0] == 0)
+            out[f"esc_{L}"] += int(bool(v[3]))
+            out[f"pin_{L}"] += int(bool(v[4]))
+        out["any30"] += int(bool(x.get("safe30")))
+        out["clash30"] += int(bool(x.get("clash30")))
+        if x.get("safe30"):
+            src[str(x.get("path") or x.get("src_type"))] += 1
+    return {**dict(out), "by_src": dict(src.most_common(12))}
 
 
 def _tv_summary(rows: list) -> dict | None:
@@ -206,14 +238,16 @@ class ForumPlannerPolicy(PlannerPolicy):
         """ForumConfig of the R8 clash mode (CLASH_MODES) with the A/B switches SSBOT_FORUM_FR: FORCED_RISK's first
         risk key, "share" (default), "seen" or "seen_cf" (ForumConfig.forced_rank; forum.md §19); SSBOT_FORUM_REACT:
         the reactive support, "off" (default), "delay" or "escape", with "+c" / "+i" / "+p5" (ForumConfig.react;
-        forum.md §22). The module-level switches SSBOT_FORUM_PC (commit_rank, default on), SSBOT_FORUM_TV (terminal
-        value, default off) and SSBOT_FORUM_T (horizon, default 36) are ForumConfig's defaults (combat.forum_planner)."""
+        forum.md §22); SSBOT_FORUM_BELLS: "on" (default) or "off" (no bells as hit targets, ForumConfig.bell_hits; the
+        HazardTracker keeps a hit-back bell a hazard: forum.md §23.12). The module-level switches SSBOT_FORUM_PC
+        (commit_rank, default on), SSBOT_FORUM_TV (terminal value, default off) and SSBOT_FORUM_T (horizon, default 36)
+        are ForumConfig's defaults (combat.forum_planner)."""
         fr = os.environ.get("SSBOT_FORUM_FR", "share").strip().lower() or "share"
         if fr not in ("share", "seen", "seen_cf"):
             raise ValueError(f"SSBOT_FORUM_FR={fr!r}: share | seen | seen_cf")
         rx = os.environ.get("SSBOT_FORUM_REACT", "off").strip().lower() or "off"
         ReactConfig.parse(rx)                    # validates
-        return ForumConfig(forced_rank=fr, react=rx, **CLASH_MODES[clash])
+        return ForumConfig(forced_rank=fr, react=rx, bell_hits=bells_mode() == "on", **CLASH_MODES[clash])
 
     def _set_react(self, fcfg: ForumConfig) -> None:
         """The forecaster's reactive support from the planner's config (None when off: the support as before)."""
@@ -323,6 +357,11 @@ class ForumPlannerPolicy(PlannerPolicy):
         self.unpredicted_unknown: list[int] = []
         self.unpred_sources: list = []
         self.hits_taken: list[int] = []
+        # the chosen plan per tick (observation frame, S, FORCED_RISK, a clean clash row, S = 1 by the escape check,
+        # an aimed-pin threat): a hit's plan PLAN_LAGS frames before it (forum.md §23.12: the hits the bot did not see
+        # coming at the commit lag, not only at UNPRED_LAGS)
+        self._plan_ring: deque = deque(maxlen=PLAN_RING)
+        self._pin_ticks0: int | None = None
         self.forced_frames: list[int] = []
         self._since_forced = FORCED_STREAK_GAP
         self.forced_streaks = 0
@@ -388,7 +427,8 @@ class ForumPlannerPolicy(PlannerPolicy):
                                      "forced": bool(getattr(self.planner_last, "forced_risk", False)),
                                      "mode": getattr(self, "_mode_last", None),
                                      "tier": None if self.decision is None else self.decision.tier,
-                                     "h": None if self.decision is None else self.decision.h})
+                                     "h": None if self.decision is None else self.decision.h,
+                                     **self._plan_lags(ws.stamp.frame)})
                 if wt is not None:
                     self.per_wave.setdefault(wt, Counter())["hits" if kind == "damage" else "mh_ticks"] += 1
         if not self.wake_sent and tap is not None and tap.wake_frame is not None:
@@ -399,6 +439,20 @@ class ForumPlannerPolicy(PlannerPolicy):
             w0 = int(name.rsplit("_w", 1)[1]) if "_w" in name and name.rsplit("_w", 1)[1].isdigit() else 0
             self.fc.notify_wake(ws.stamp.t_game_s - dt, wave=w0)
             self.wake_sent = True
+
+    def _plan_lags(self, fo: int) -> dict:
+        """A hit at observation frame fo against the chosen plans before it: "lag" {L: [S, FORCED_RISK, clean clash,
+        S = 1 by the escape check, aimed-pin threat] of the last tick at or before fo - L (None: none kept)} for
+        PLAN_LAGS, "safe30": a plan chosen with S = 0 in the 30 frames before fo, "clash30": a clean clash row chosen
+        with S = 0 there (forum.md §23.12)."""
+        ring = list(self._plan_ring)
+        lag = {}
+        for L in PLAN_LAGS:
+            x = next((x for x in reversed(ring) if x[0] <= fo - L), None)
+            lag[str(L)] = None if x is None or fo - L - x[0] > 4 else list(x[1:])
+        recent = [x for x in ring if fo - 30 <= x[0] < fo]
+        return {"lag": lag, "safe30": any(x[1] == 0 for x in recent),
+                "clash30": any(x[1] == 0 and x[3] for x in recent)}
 
     def _note_kill(self, ws) -> None:
         """No kill commitment in the Forum (R3: the final blow is I3 only, no certified kill plans)."""
@@ -606,6 +660,12 @@ class ForumPlannerPolicy(PlannerPolicy):
         S0 = self._start_state(ws, raw)
         res = self.planner.tick(ws, S0, hold, prefix, fcast, prefs, ctx)
         self.planner_last = res
+        pt = self.planner.audit.pin_ticks
+        cl = getattr(res, "clash", None)
+        self._plan_ring.append((fo, int(res.S), bool(res.forced_risk), bool(cl and not cl[2]),
+                                bool((self.planner.last_info.get("esc") or {}).get("unsafe")),
+                                self._pin_ticks0 is not None and pt > self._pin_ticks0))
+        self._pin_ticks0 = pt
         t2 = time.perf_counter()
         unpred = self._unpredicted(raw, fo) + self._unpred_backlog
         self._unpred_backlog = 0
@@ -795,6 +855,7 @@ class ForumPlannerPolicy(PlannerPolicy):
                 "ticks": len(self.tick_ms), "late_ticks": sum(1 for x in self.tick_ms if x > 16.7),
                 "unpredicted": self.unpredicted, "unpredicted_unknown": self.unpredicted_unknown,
                 "unpredicted_sources": self.unpred_sources, "follow_ups": self.follow_ups, "mh_ticks": self.mh_ticks, "hits_taken": self.hits_taken, "hit_log": self.hit_log,
+                "planned_safe": planned_safe(self.hit_log),
                 "forced_risk_ticks": len(self.forced_frames), "forced_streaks": self.forced_streaks,
                 "per_wave": {str(k): dict(v) for k, v in sorted(self.per_wave.items())},
                 "wave_check": dict(self.wave_chk), "wave_bad": self.wave_bad,

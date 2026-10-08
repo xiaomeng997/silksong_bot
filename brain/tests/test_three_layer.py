@@ -210,7 +210,9 @@ def test_aimed_pins_hit_the_row_that_stays_where_it_was_aimed_at(params, arena):
     the release is within the aim lag): a row standing at (20, 4) meets it about 0.3 s later, a row that has jumped
     5 u above by then does not (the 15 deg rays stay below it); a row on the far side is aimed at too."""
     from types import SimpleNamespace
-    assert ForumConfig(react="escape+n+a").pin_aim and not ForumConfig(react="escape+n").pin_aim
+    # on with "+a", and with "+n" (forum.md §23.12: nothing else holds a throw whose wind-up has started)
+    assert ForumConfig(react="escape+n+a").pin_aim and ForumConfig(react="escape+n").pin_aim
+    assert ForumConfig(react="escape+g+a").pin_aim and not ForumConfig(react="escape+g").pin_aim
     pl = ForumPlanner(params, arena, PlannerConfig(T=36, threads=2, variants="bounds_lo"),
                       ForumConfig(react="escape+n+a"))
     T1 = 37
@@ -243,3 +245,92 @@ def test_state_margins_dilate_a_state_by_its_own_residual():
     assert pad(st, "Charge End") < pad(fam, "Charge End") - 2.0
     assert pad(st, "Charge") == pytest.approx(pad(fam, "Charge"))
     assert pad(st, "_tail") == pytest.approx(pad(fam, "_tail"))
+
+
+# ---- the review of 2026-10-08 (forum.md §23.12) ----
+
+def test_a_bellbearer_throw_keeps_its_templates_until_its_release(monkeypatch):
+    """+n, oracle: a throw in a state before its release (REACT_KEEP_UNTIL_THROWN: the Bellbearer's Throw Evade / Roof
+    Avoid / Throw Antic) keeps its templates (nothing else holds its bell); at the release state it is its body and
+    the hazard's path. The synthetic Reed's stab stands in: Stab Pos as the wind-up, Stab as the release."""
+    assert mfm.REACT_KEEP_UNTIL_THROWN[("Pilgrim 03 Song", "CB_THROW")] >= {"Throw Antic"}
+    assert "Throw" not in mfm.REACT_KEEP_UNTIL_THROWN[("Pilgrim 03 Song", "CB_THROW")]
+    monkeypatch.setattr(mfm, "REACT_THROW_FAMS", frozenset({(REED, "RE_STAB")}))
+    monkeypatch.setattr(mfm, "REACT_KEEP_UNTIL_THROWN", {(REED, "RE_STAB"): frozenset({"Stab Pos"})})
+    mf = MultiForecaster(_tables(), ORACLE, waves=False)
+    mf.react = ReactConfig(notstarted=True)
+    _run(mf, [(f, f * BIN, [_ent(7, 20.0, 5.0, "Alert" if f < 10 else "Stab Pos", flip=True,
+                                 box=(19.5, 4.0, 20.5, 6.0))],
+               ([_go(7, "Alert", f, 0.0)] if f == 0 else []) + ([_go(7, "Stab Pos", f, f * BIN)] if f == 10 else []))
+              for f in range(12)])
+    ns = mf.forecast(0.8)
+    stab = [fam for m in (ns.pm, ns.wm, ns.bb) for fam, c in zip(m["family"], m["committed"]) if fam == "RE_STAB" and c]
+    assert stab and not any(b[1] == "idle" and b[0] == 7 for b in ns.boxes)
+
+
+def test_bells_switch_turns_the_hit_back_rule_off(monkeypatch):
+    """SSBOT_FORUM_BELLS=off: a bell the nail hit stays a hazard on its path and the planner has no bell targets."""
+    from ssbot.train.forum_planner_policy import ForumPlannerPolicy
+    monkeypatch.setenv(pj.BELLS_ENV, "off")
+    hz = pj.HazardTracker(ORACLE)
+    assert not hz.hit_back and not ForumPlannerPolicy._fcfg("main").bell_hits
+    hz.update(_ws(0, 0.0, [_bell(9, 30.0, 8.0, "Air")]))
+    hz.update(_ws(1, BIN, [_bell(9, 30.1, 8.0, "Tink L")]))
+    hz.update(_ws(2, 2 * BIN, [_bell(9, 30.2, 8.0, "Nail Hit", vx=30.0)]))
+    hz.update(_ws(3, 3 * BIN, [_bell(9, 30.7, 8.0, "Air", vx=30.0)]))
+    assert [p.iid for p in hz.paths(3 * BIN, 0.6)] == [9]
+    monkeypatch.setenv(pj.BELLS_ENV, "on")
+    assert pj.HazardTracker(ORACLE).hit_back and ForumPlannerPolicy._fcfg("main").bell_hits
+    monkeypatch.delenv(pj.BELLS_ENV)
+    assert pj.bells_mode() == "on"
+    monkeypatch.setenv(pj.BELLS_ENV, "maybe")
+    with pytest.raises(ValueError):
+        pj.bells_mode()
+
+
+def _esc_tick(params, arena, react, dl=math.inf, fail=None):
+    from ssbot.knowledge import kinematics as kin
+    from tests.test_forum_planner import FLOOR, _prefs, _reed_forecaster, _world
+    mf = _reed_forecaster(None, frames=3, x=25.0)       # 5 u off: the stab in the check's reach, safe rows left
+    mf.react = ReactConfig.parse(react)
+    pl = ForumPlanner(params, arena, PlannerConfig(T=36, threads=2, variants="bounds_lo"),
+                      ForumConfig(deadline_ms=math.inf, chunk=16, react=react, esc_deadline_ms=dl))
+    if fail is not None:
+        pl._escape_fail = lambda f, start, hold, full, hold_end, r1, rows, threats: (
+            np.full(len(rows), fail, np.int64), [["test"] for _ in rows])
+    r = pl.tick(_world(20.0), kin.initial_state(params, 20.0, FLOOR + params.foot), kin.HoldState.idle(1),
+                np.zeros(1, np.int64), mf.forecast(0.8), _prefs(), _ctx())
+    return pl, r
+
+
+def test_with_n_a_failed_or_unchecked_escape_is_not_safe(params, arena, strikes):
+    """esc_veto ("escape" + "+n"): the attacks not started are only the escape check's, so a chosen row that failed
+    it (every checked row failed: the fewest failures) or that it could not check before its deadline is S = 1 (a
+    YELLOW, never certified); a row that passed stays S = 0; without "+n" the check stays a ranking preference."""
+    assert ForumConfig(react="escape+n").esc_veto and not ForumConfig(react="escape+g").esc_veto
+    assert not ForumConfig(react="delay+n").esc_veto
+    pl, r = _esc_tick(params, arena, "escape+n", fail=0)
+    assert not r.forced_risk and r.S == 0 and pl.audit.esc_unsafe == 0 and not pl.last_info["esc"]["unsafe"]
+    pl, r = _esc_tick(params, arena, "escape+n", fail=1)
+    assert not r.forced_risk and r.S == 1 and pl.audit.esc_failed == 1 and pl.audit.esc_unsafe == 1
+    assert pl.last_info["esc"]["unsafe"] and pl.prev_esc_unsafe
+    pl, r = _esc_tick(params, arena, "escape+n", dl=0.0)
+    assert not r.forced_risk and r.S == 1 and pl.audit.esc_unchecked == 1 and pl.last_info["esc"]["checked"] == 0
+    pl, r = _esc_tick(params, arena, "escape", fail=1)
+    assert not r.forced_risk and r.S == 0 and pl.audit.esc_unsafe == 0 and "unsafe" not in pl.last_info["esc"]
+
+
+def test_planned_safe_counts_the_hits_a_safe_plan_did_not_avoid():
+    from ssbot.train.forum_planner_policy import planned_safe
+    log = [{"kind": "damage", "path": "a", "lag": {"12": [0, False, False, False, False], "24": [1, True, False,
+                                                                                               False, False],
+                                                   "30": None}, "safe30": True, "clash30": False},
+           {"kind": "damage", "path": "b", "lag": {"12": [1, False, False, True, True], "24": [0, False, True, False,
+                                                                                              False],
+                                                   "30": [0, False, False, False, False]}, "safe30": True,
+            "clash30": True},
+           {"kind": "tick", "path": "c", "lag": {}, "safe30": True}]
+    p = planned_safe(log)
+    assert p["hits"] == 2 and p["12"] == 1 and p["24"] == 1 and p["30"] == 1 and p["unknown_30"] == 1
+    assert p["esc_12"] == 1 and p["pin_12"] == 1 and p["any30"] == 2 and p["clash30"] == 1
+    assert p["by_src"] == {"a": 1, "b": 1}

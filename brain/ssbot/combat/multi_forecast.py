@@ -118,6 +118,11 @@ REACT_THROWN = {"Song Reed Pin Projectile": (1.0, 1.0), "Throwing Bell": (0.45, 
 # ... and the families that throw them (ssbot.core.forum ForumType.spawns): their templates hold every one ever thrown
 REACT_THROW_FAMS = frozenset((tk, fam) for tk, sp in FORUM_TYPES.items() for hz, fams in sp.spawns
                              if hz in REACT_THROWN for fam in fams)
+# ... except a throw under way whose hazard is not out yet and that no aimed check covers (forum.md §23.12, the review
+# of 2026-10-08: with "+n" nothing else holds the wind-up's bell): the Bellbearer's states before its release (Throw)
+# keep the throw's templates (every bell ever thrown, the support as before "+n"); the Reed's pin is the planner's
+# aimed check from its wind-up on (ForumConfig.pin_aim, on with "+n")
+REACT_KEEP_UNTIL_THROWN = {("Pilgrim 03 Song", "CB_THROW"): frozenset(("Throw Evade", "Roof Avoid", "Throw Antic"))}
 
 
 @dataclass(frozen=True)
@@ -1112,9 +1117,12 @@ class _Builder:
 
     def _thrown(self, tr: EnemyTracker) -> bool:
         """ReactConfig.notstarted in the oracle view (where a thrown pin / bell is on its path): the enemy's throw
-        family (REACT_THROW_FAMS) is its body plus its hazards' paths, not its templates."""
-        return bool(self.react is not None and self.react.notstarted and self.fc.view == ORACLE
-                    and tr.cur is not None and (tr.tk, tr.cur.family) in REACT_THROW_FAMS)
+        family (REACT_THROW_FAMS) is its body plus its hazards' paths, not its templates; a Bellbearer's throw before
+        its release keeps them (REACT_KEEP_UNTIL_THROWN)."""
+        if not (self.react is not None and self.react.notstarted and self.fc.view == ORACLE
+                and tr.cur is not None and (tr.tk, tr.cur.family) in REACT_THROW_FAMS):
+            return False
+        return tr.state not in REACT_KEEP_UNTIL_THROWN.get((tr.tk, tr.cur.family), ())
 
     def _tails(self, tr: EnemyTracker) -> None:
         T = self.origin

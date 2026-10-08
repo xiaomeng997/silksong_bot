@@ -31,6 +31,7 @@ predicted centre is the position after the last step before each query time (the
 adds +-SLACK_STEPS steps of time slack and a contact skin.
 """
 import math
+import os
 from dataclasses import dataclass
 
 import numpy as np
@@ -58,6 +59,17 @@ BELL_STATES_ON = frozenset(("Air", "Bounce"))
 # recorded with them all fell on the nail hit's own frame; the redirected bell hurts enemies, "Enemy Damager"); a new
 # throw (Init) makes it the Bellbearer's again
 BELL_HIT_STATES = frozenset(("Tink L", "Tink R", "Tink U", "Nail Hit"))
+# SSBOT_FORUM_BELLS=off (forum.md §23.12): a hit-back bell stays a hazard on its redirected path (the support before the
+# hit-back rule); with ForumConfig.bell_hits off too (forum_planner_policy) the rule's A/B and rollback switch
+BELLS_ENV = "SSBOT_FORUM_BELLS"
+
+
+def bells_mode() -> str:
+    """SSBOT_FORUM_BELLS: "on" (default: hit-back bells and bells as hit targets) or "off"."""
+    v = os.environ.get(BELLS_ENV, "on").strip().lower() or "on"
+    if v not in ("on", "off"):
+        raise ValueError(f"{BELLS_ENV}={v!r}: on | off")
+    return v
 BELL_THROW_STATE = "Init"
 PIN_STATES_ON = frozenset(("Fly",))
 BOMB_R, RUNE_R = 2.166, 7.187
@@ -220,8 +232,10 @@ class HazardTracker:
 
     TYPES = frozenset((BELL, PIN, BOMB, RUNE))
 
-    def __init__(self, view: str = ORACLE):
+    def __init__(self, view: str = ORACLE, hit_back: bool | None = None):
         self.view = view
+        # a bell the hero's nail hit is no hazard to the hero (None: SSBOT_FORUM_BELLS, default on)
+        self.hit_back = bells_mode() == "on" if hit_back is None else bool(hit_back)
         self.reset()
 
     def reset(self) -> None:
@@ -325,7 +339,7 @@ class HazardTracker:
     def _bell(self, h: _Haz, origin: float, n: int, redirect: tuple | None = None) -> HazardPath | None:
         if h.state is not None and h.state not in BELL_STATES_ON and h.state != "Nail Hit":
             return None          # broken or put away (oracle view)
-        if h.hit_back:
+        if h.hit_back and self.hit_back:
             return None          # the hero's nail hit it: the hero's projectile now (BELL_HIT_STATES)
         t0 = self.clock.next_step(origin) - origin
         floor = h.vel[1] == 0.0 and abs(h.pos[1] - BELL_FLOOR_Y) < 0.01

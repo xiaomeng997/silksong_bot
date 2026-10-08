@@ -249,9 +249,18 @@ class ForumConfig:
     @property
     def pin_aim(self) -> bool:
         """"+a": a Reed's pin not thrown yet is checked per row, aimed at where that row puts the hero PIN_AIM_F
-        frames before each possible release (ForumPlanner._pin_contacts, forum.md §23.7); with "+n" its throw is
-        otherwise only its body and the pin's path once it flies."""
-        return "a" in self.react.strip().lower().split("+")[1:]
+        frames before each possible release (ForumPlanner._pin_contacts, forum.md §23.7). On with "+n" too (forum.md
+        §23.12): "+n" takes the Reed's throw out of the support (its body and the pin's path once it flies), so the
+        aimed check is the only layer that sees a throw whose wind-up has started (the review of 2026-10-08)."""
+        toks = self.react.strip().lower().split("+")[1:]
+        return "a" in toks or "n" in toks
+
+    @property
+    def esc_veto(self) -> bool:
+        """With "+n" and the escape check (forum.md §23.12): the attacks not started are only the escape check's, so a
+        chosen row it failed, or could not check in time, is not safe (S = 1: YELLOW, never certified), not a ranking
+        preference over a plan still called safe."""
+        return self.escape and self.notstarted
 
     @property
     def light_cone(self) -> bool:
@@ -305,6 +314,10 @@ class EnvelopeAudit:
     clash_ms: float = 0.0         # time in the clash branch
     pin_ticks: int = 0            # ticks with an aimed-pin threat (pin_aim)
     pin_rows: int = 0             # ... rows it set S = 1
+    esc_unsafe: int = 0           # ticks with a safe row whose chosen row is S = 1 by the escape check (esc_veto):
+    esc_failed: int = 0           # ... it failed the check (every checked row failed: the fewest failures chosen)
+    esc_unchecked: int = 0        # ... no row checked before esc_deadline_ms with threats in reach
+    esc_carried: int = 0          # ... a carried CONTINUE of such a row
 
     def as_dict(self) -> dict:
         return dict(self.__dict__)
@@ -724,6 +737,7 @@ class ForumPlanner(Planner):
         self._clash_lvl_ms = 0.0          # the clash pass's first level, running mean (its deadline check)
         self.esc_batch_s = 0.003          # the escape check's batch, running mean (its deadline check)
         self.esc_cut = False
+        self.prev_esc_unsafe = False      # the last chosen row was S = 1 by the escape check (a carried CONTINUE keeps it)
         self.audit = EnvelopeAudit()
         self.last_info: dict = {}
         self.debug = False                # offline forensics (tools.forum_hit_forensics): last_info["dbg"] keeps the
@@ -1887,6 +1901,7 @@ class ForumPlanner(Planner):
                              "flags": r1.flags, "cmd": cmd, "P": P, "T1": T1, "p_k": fcfg.p_k,
                              **{k: sc.get(k) for k in ("E", "trapped", "overlap", "hexp")}}
             esc_row = None
+            esc_unsafe = False
             if fcfg.escape and not carried:
                 # reactive support: of the safe rows in the order, the first that leaves the hero an escape from
                 # every attack an enemy may start at its end or late lock-in (the tail check then looks at it alone);
@@ -1917,6 +1932,19 @@ class ForumPlanner(Planner):
                         a.esc_forced_pass += int(forced and nf == 0)
                         a.esc_forced_moved += int(forced and esc_row != i)
                         i = esc_row
+                    if fcfg.esc_veto and not forced:
+                        # "+n": the attacks not started are the escape check's only; a row it failed (the fewest
+                        # failures of those checked) or did not reach before its deadline with threats in reach is not
+                        # safe (forum.md §23.12)
+                        failed = esc_row is not None and nf > 0
+                        unchecked = esc_row is None and nchk == 0 and (nth > 0 or fcfg.light_cone) and len(ranked) > 0
+                        esc_unsafe = failed or unchecked
+                        a.esc_failed += int(failed)
+                        a.esc_unchecked += int(unchecked)
+                        esc_info["unsafe"] = esc_unsafe
+            elif carried and fcfg.esc_veto and self.prev_esc_unsafe:
+                esc_unsafe = True                  # the CONTINUE of a row the escape check did not pass
+                a.esc_carried += 1
             if not forced and cfg.tail_k > 0 and not carried:
                 ranked = order[safe[order]] if esc_row is None else np.array([esc_row], np.int64)
                 i, tail_ok = self._tail_pick(f, r1, hold_end, ranked, P + T, i)
@@ -1924,9 +1952,12 @@ class ForumPlanner(Planner):
                 tail_ok = True
             self.last_sel["chosen"] = i
             self.prev_tail_ok = bool(tail_ok)
+            self.prev_esc_unsafe = bool(esc_unsafe and not S[i])
+            a.esc_unsafe += int(esc_unsafe and not S[i])
             sel_cmd = cmd[i]
             name = "CONTINUE" if cont and i == N - 1 else cs.name(i)
-            res = PlanResult(int(sel_cmd[0]), i, name, int(S[i]), forced, float(Pc[i]), float(J[i]), bool(V[i]),
+            res = PlanResult(int(sel_cmd[0]), i, name, int(S[i] or esc_unsafe), forced, float(Pc[i]), float(J[i]),
+                             bool(V[i]),
                              bool(hz[i]), bool(U[i]), N, int(ok.sum()), int(safe.sum()), sel_cmd, r1.box[i].copy(),
                              bound[i].copy(), hits=float(sc["hits"][i]))
             res.tail_ok = tail_ok
