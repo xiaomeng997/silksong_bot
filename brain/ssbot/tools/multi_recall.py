@@ -184,7 +184,8 @@ def _job(fid: str, f: dict, contacts: list, cfg: dict, label: str, a) -> dict:
     if a.types:
         contacts = [c for c in contacts if c["type"] in a.types]
     return {"id": fid, "path": f["path"], "f0": int(f["f0"]), "f1": int(f["f1"]), "contacts": contacts,
-            "config": cfg, "label": label, "view": a.view, "horizon": a.horizon}
+            "config": cfg, "label": label, "view": a.view, "horizon": a.horizon,
+            "branch": None if a.branch is None else str(a.branch)}
 
 
 _TABLES: dict = {}
@@ -299,7 +300,11 @@ def run_fight2(job: dict) -> dict:
     from ssbot.record.recorder import RecordingReader
     tables = _tables(job["config"])
     view = job.get("view", "oracle")
-    mf = MultiForecaster(tables, ORACLE if view == "oracle" else VISION_EQUIVALENT)
+    branch = None
+    if job.get("branch"):
+        from ssbot.combat.branch_model import BranchModel
+        branch = BranchModel.load(Path(job["branch"]))      # R5: the branch model on (it must not move the recall)
+    mf = MultiForecaster(tables, ORACLE if view == "oracle" else VISION_EQUIVALENT, branch=branch)
     bosses = placeholder_specs() if view != "oracle" else []
     backend = OracleBackend(bosses=bosses)
     filt = None
@@ -550,6 +555,8 @@ def main(argv=None) -> int:
     ap.add_argument("--start", type=int, default=None)
     ap.add_argument("--threads", type=int, default=4)
     ap.add_argument("--json", type=Path, default=None)
+    ap.add_argument("--branch", type=Path, default=None,
+                    help="fresh / dev: run with this branch model on (R5: scoring only, the recall must not change)")
     a = ap.parse_args(argv)
     if a.mode == "bellbeast":
         if a.recording is None:

@@ -91,6 +91,7 @@ class EnemyTracker:
     t: float = 0.0
     in_play: bool = False                          # its Control state is not a waiting one
     _var: float = 0.0
+    mem: object | None = None                      # combat.branch_model.BranchMemory (the branch model's history)
 
     def __post_init__(self) -> None:
         self.hp_est = float(self.table.spec.hp)
@@ -118,6 +119,8 @@ class EnemyTracker:
         """A Control state entry at game time T (SubjectTracker.transition)."""
         tb = self.table
         sp = tb.spec
+        if self.mem is not None:
+            self.mem.enter(self.state, to, T)
         self.state, self.t_entry = to, T
         self.in_play = to not in sp.waiting
         cur, idle = self.cur, sp.idle_family
@@ -217,6 +220,8 @@ class EnemyTracker:
         """HP from the hits seen: the oracle's amount (an O field: None in the vision view), else the price of the
         attacking object; a hit nobody priced adds its whole default damage to the spread."""
         self.hits += 1
+        if self.mem is not None:
+            self.mem.hit(self.t)
         if self.view == ORACLE and d.amount is not None:
             dmg, var = float(d.amount), 0.0
         else:
