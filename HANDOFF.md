@@ -1927,7 +1927,8 @@ share): recommend both on (SPC) at integration. Heavier ticks: late ticks 18-24 
 3. The remaining gap (forum.md 17.9): 68-79 % of the stacked ranking's misses have a clear row tied on every risk key;
    the hits come from attacks not started yet (the saturated later-instance boxes): time-resolved later-instance
    placements (R2 / R3, recertify) or lead-time branch probabilities (R5 model's next step).
-4. Wave 0 is still never cleared (no kill in the 177 live episodes of this track): offence (R6 targets, R8 clash) is next.
+4. Wave 0 is still never cleared (no kill in the 177 live episodes of this track): offence (R6 targets, R8
+   clash) is next.
 5. Terminal-value weights / body-field radius are hand-set; in wave 0 the value is not the bottleneck (17.7). Kill value
    untested (no kills).
 6. Main's working copy has no `knowledge/1.0.30000/enemies/forum/*_hitboxes.npz` (git-ignored); this worktree's copy
