@@ -36,9 +36,10 @@ Per tick (the lexicographic order and every rule of Planner.tick unless named he
               are then put on one lane over one frame set (stage 1's: the nominal box against the support, or'ed with
               the hit branch's contact, from the hit frame on where a cap left it unchecked) and ranked by the share
               of those frames in contact (P's stand-in: MultiForecast.prob costs 3.7 ms p50 on wave 6, one query per enemy, placement
-              kind and probability value; exact_p turns it back on), with fine_rank (SSBOT_FORUM_PF=1) the share in
-              contact with the current attacks' fine placements (P_f: the support's P ties at 1 in wave 0, forum.md
-              17.7; it also leads the preselection), the latest first contact, the envelope's, J.
+              kind and probability value; exact_p turns it back on), with commit_rank (SSBOT_FORUM_PC=1) the share in
+              contact with the committed support and then with the current attacks' fine placements (P_cm, P_f: the
+              support's P ties at 1 in wave 0, forum.md 17.7; they also lead the preselection), the latest first
+              contact, the envelope's, J.
   determinism deadline_ms = inf: decisions do not depend on the machine's speed (audits, identity checks).
   unmodelled  a row that presses attack while dashing / sprinting is vetoed (the Reaper's dash stab is R7's).
   not here    the lock check past the horizon (no Silkspear in the Forum set; the Bind macro checks its own), the key
@@ -84,7 +85,7 @@ H_W_FAR, H_W_NONE = 0.3, 0.5
 
 
 TV_ON = os.environ.get("SSBOT_FORUM_TV", "1") != "0"        # 0: no terminal value (the R4 / A0b scores, A/B)
-PF_ON = os.environ.get("SSBOT_FORUM_PF", "0") == "1"        # 1: FORCED_RISK refines P by the current attacks' share
+PC_ON = os.environ.get("SSBOT_FORUM_PC", "0") == "1"        # 1: FORCED_RISK refines P by the committed support's share
 T_ENV = int(os.environ.get("SSBOT_FORUM_T", "36") or 36)     # the horizon arm (§4.5: T 36 / 48)
 
 
@@ -106,9 +107,10 @@ class ForumConfig:
     #                               placement kind and probability value) instead of the share of frames in contact
     p_all: bool = False           # audits (tools/forum_tv_audit): FORCED_RISK's P / first contact for every allowed
     #                               known row, the choice still among the p_k preselected (decisions unchanged)
-    fine_rank: bool = PF_ON       # FORCED_RISK: rows tied on P ranked by their share of stage 1's frames in contact
-    #                               with the current attacks' fine placements (P_f, forum.md 17.7: P ties at 1 in wave 0),
-    #                               the preselection by (P_f, first contact, J); scores only (S, Hz, U unchanged)
+    commit_rank: bool = PC_ON     # FORCED_RISK: rows tied on P ranked by their share of stage 1's frames in contact
+    #                               with the committed support (P_cm: current attacks, tails, death tails, hazards),
+    #                               then with the current attacks' fine placements (P_f) (forum.md 17.7: P ties at 1 in
+    #                               wave 0); they lead the preselection too; scores only (S, Hz, U unchanged)
     terminal: bool = TV_ON        # the terminal value (R5, combat.terminal): E / trapped / overlap / H_exp into J, the
     #                               kill value into the target weights; scores only
     w_E: float = 4.0              # J per unit of E (the reachable share clear of the enemies' bodies, 0..1)
@@ -675,17 +677,18 @@ class ForumPlanner(Planner):
         Pc = np.zeros(N)
         t_c = np.full(N, T1, np.int64)
         sel = ok & known
+        Pcm = np.zeros(N)
         Pf = np.zeros(N)
         if forced and sel.any():
             cand = np.flatnonzero(sel)
-            if fcfg.fine_rank:
-                # P_f: the nominal box centre against the current attacks' fine placements (states with a known entry,
-                # committed) on stage 1's frames, its invulnerable frames skipped
-                fine = getattr(f, "_fine_occ", None)
-                if fine is not None:
-                    of = fine(cx[cand], cy[cand], tk[fr]) & ((r1.flags[cand][:, fr] & F_INVULN) == 0)
-                    Pf[cand] = of.mean(axis=1)
-            cand = cand[np.lexsort((-J[cand], -t_hit[cand], Pf[cand]))]
+            if fcfg.commit_rank and hasattr(f, "_fine_occ"):
+                # the nominal box centre on stage 1's frames (its invulnerable ones skipped) against the committed
+                # support (P_cm) and the current attacks' fine placements (states with a known entry: P_f)
+                live = (r1.flags[cand][:, fr] & F_INVULN) == 0
+                X, Y = cx[cand], cy[cand]
+                Pcm[cand] = (f._union_occ(X, Y, tk[fr], committed_only=True) & live).mean(axis=1)
+                Pf[cand] = (f._fine_occ(X, Y, tk[fr]) & live).mean(axis=1)
+            cand = cand[np.lexsort((-J[cand], -t_hit[cand], Pf[cand], Pcm[cand]))]
             n_k = min(fcfg.p_k, len(cand))
             if not fcfg.p_all:
                 cand = cand[:n_k]
@@ -734,13 +737,14 @@ class ForumPlanner(Planner):
                 mkeep[N - 1] = True
             # FORCED_RISK: the least share in contact, the latest first contact on the nominal lane, then on the
             # envelope (rows clear on the nominal lane), J (a tick with a safe row: those rows all tie on these)
-            order = np.lexsort((-J, -t_hit, -t_c, Pf, Pc, ~V, ~mkeep, ~keep, S, U, hz_soft, hz))
+            order = np.lexsort((-J, -t_hit, -t_c, Pf, Pcm, Pc, ~V, ~mkeep, ~keep, S, U, hz_soft, hz))
             order = order[sel[order]]
             i = int(order[0])
             tail_ok = None
             carried = cont and i == N - 1 and self.prev_tail_ok
             # the selection's inputs, by reference (offline audits: tools/forum_tv_audit; not logged)
-            self.last_sel = {"J": J, "J_tv": sc.get("J_tv"), "t_hit": t_hit, "t_c": t_c, "Pc": Pc, "Pf": Pf, "V": V,
+            self.last_sel = {"J": J, "J_tv": sc.get("J_tv"), "t_hit": t_hit, "t_c": t_c, "Pc": Pc, "Pcm": Pcm, "Pf": Pf,
+                             "V": V,
                              "mkeep": mkeep, "keep": keep, "S": S, "U": U, "hz": hz, "hz_soft": hz_soft, "sel": sel,
                              "allowed": ok & known, "safe": safe, "forced": forced, "first": i, "box": r1.box,
                              "flags": r1.flags, "cmd": cmd, "P": P, "T1": T1, "p_k": fcfg.p_k,
@@ -797,7 +801,8 @@ class ForumPlanner(Planner):
                           "core": int(core.sum()), "core_pass": n_core, "prio": n_prio, "overrun": overrun,
                           "cut": cut, "hitfx": budget["hitfx"], "react": budget["react"], "capped": budget["capped"],
                           "uncapped": budget.get("uncapped", 0),
-                          "S": S, "Hz": hz, "U": U, "core_mask": core, "env": env, "Pc": Pc, "Pf": Pf, "t_c": t_c,
+                          "S": S, "Hz": hz, "U": U, "core_mask": core, "env": env, "Pc": Pc, "Pcm": Pcm, "Pf": Pf,
+                          "t_c": t_c,
                           "cand": sel if forced else np.zeros(N, bool), "hit_occ": hit_occ}
         if "E" in sc:
             ci = res.idx if 0 <= res.idx < N else None
