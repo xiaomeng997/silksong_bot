@@ -95,6 +95,15 @@ def _tv_summary(rows: list) -> dict | None:
             "rows_trapped": round(float(np.mean([r[4] for r in rows])), 4)}
 
 
+def production_tables() -> EnemyTables:
+    """The production tables; SSBOT_FORUM_MARGIN=state: with the per-state margins (support_margins_state.json,
+    tools.forum_state_margins, forum.md §23) on top of the family ones."""
+    if os.environ.get("SSBOT_FORUM_MARGIN", "family").strip().lower() == "state":
+        from ssbot.combat.enemy_tables import FORUM_DIR
+        return EnemyTables.production(state_margins_path=FORUM_DIR / "support_margins_state.json")
+    return EnemyTables.production()
+
+
 def true_wave(raw: dict) -> tuple[int | None, bool]:
     """(BattleScene.currentWave from STATE room.battles while the battle runs, completed): test truth only."""
     battles = (raw.get("room") or {}).get("battles") or ()
@@ -138,7 +147,7 @@ class ForumPlannerPolicy(PlannerPolicy):
         if branch_model:
             from ssbot.combat.branch_model import BranchModel
             branch = BranchModel.load()
-        self.fc = MultiForecaster(tables if tables is not None else EnemyTables.production(), branch=branch)
+        self.fc = MultiForecaster(tables if tables is not None else production_tables(), branch=branch)
         self.freeze = kill_freeze_s()
         self.kill_know = KillKnowledge.load()
         self.kill_window_s = END_SLOW_S

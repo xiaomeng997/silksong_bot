@@ -159,3 +159,19 @@ def test_light_cone_switch_and_its_layer(params, arena):
     assert pl._light_cone_occ(f, X, Y, tk)[0].any()
     pl._lc_fams = frozenset({"RE_STAB"})
     assert not pl._light_cone_occ(f, X, Y, tk)[0].any()
+
+
+def test_state_margins_dilate_a_state_by_its_own_residual():
+    """forum.md §23: with the per-state margins a per-state template takes its state's held-out residual (EN_CHARGE
+    Charge End 0.40 u instead of the family's 2.96 u, set by its Charge), the family-wide and tail ones the family's."""
+    from ssbot.combat.enemy_tables import FORUM_DIR, EnemyTables, parse_state_margins
+    if not (FORUM_DIR / "Envoy_hitboxes.npz").exists() or not (FORUM_DIR / "support_margins_state.json").exists():
+        pytest.skip("no production templates")
+    assert parse_state_margins({"A/B/C D": 0.5}) == {("A", "B", "C D"): 0.5}
+    env = ("Song Pilgrim 01",)
+    fam = EnemyTables.production(types=env)
+    st = EnemyTables.production(types=env, state_margins_path=FORUM_DIR / "support_margins_state.json")
+    pad = lambda tb, s: tb.template(tb.key_id("EN_CHARGE", s, "anchor")).pad_x       # noqa: E731
+    assert pad(st, "Charge End") < pad(fam, "Charge End") - 2.0
+    assert pad(st, "Charge") == pytest.approx(pad(fam, "Charge"))
+    assert pad(st, "_tail") == pytest.approx(pad(fam, "_tail"))
