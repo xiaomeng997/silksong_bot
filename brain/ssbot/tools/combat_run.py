@@ -305,6 +305,41 @@ def after_harness_fail(link, enc, instance: int) -> str | None:
     return None
 
 
+def ready_for_episode(link, scale: float, instance: int) -> tuple[str | None, float | None]:
+    """Before each episode: a game still paused is resumed once more, then the time scale is set and read back. A
+    paused game reads Time.timeScale 0 and set_time_scale stops the worker: the old worker left the brain-lost
+    watchdog's pause of an episode in place and stopped so on the next one (20261008_015907 i0; 034416 i0, 034525 i1
+    and 034808 i1 at 03:44-03:48). Returns (None, the Time.timeScale read back), or (why, None) when the game stays
+    paused: the worker records that episode HARNESS_FAIL without running it (a game its own start unpaused would run
+    without the time scale set) and the 5-in-a-row stop ends a worker that cannot recover."""
+    from ssbot.train import recovery
+    s = link.state or {}
+    if recovery.is_paused(s) and (s.get("game") or {}).get("scene"):
+        ok, steps = recovery.resume(link, log=lambda m: print(f"[i{instance}] {m}", flush=True))
+        print(f"[i{instance}] paused before the episode ({recovery.where(s)}): "
+              f"{'unpaused' if ok else 'still paused'}", flush=True)
+        if not ok:
+            return f"still paused before the episode ({recovery.where(link.state)}; taps {steps[-4:]})", None
+    return None, set_time_scale(link, scale, instance, quiet=True)
+
+
+def after_episode(link, enc, instance: int, d: dict) -> None:
+    """After an episode's row: a real quit left the game on (or on its way to) the main menu -> back_into_slot; a
+    HARNESS_FAIL (paused, in a pause or title sub-menu, on the title) -> after_harness_fail now rather than failing the
+    next episodes on it; a recovery that raises is logged and left to the worker's 5-in-a-row stop."""
+    rq = (d.get("policy") or {}).get("real_quit")
+    if rq and (rq.get("main_menu") or rq.get("steps")):
+        back_into_slot(link, enc, instance)
+    elif d.get("outcome") == "HARNESS_FAIL" and not link.closed:
+        try:
+            done = after_harness_fail(link, enc, instance)
+            if done:
+                print(f"[i{instance}] after the harness failure: {done}", flush=True)
+        except Exception as e:  # noqa: BLE001 - the 5-in-a-row stop ends a worker that cannot recover
+            print(f"[i{instance}] recovery after the harness failure failed: {type(e).__name__}: {e}; "
+                  f"{_describe(link.state)}", flush=True)
+
+
 def set_time_scale(link, scale: float, instance: int, wait_s: float = 5.0, quiet: bool = False) -> float | None:
     """Oracle time.scale (training copy only). Above 1 it needs the oracle of 06a7c2b (through DebugMod's TimeScale):
     the deployed one before it clamps to 1, so the run stops rather than collect at the wrong speed. Time.timeScale
@@ -407,25 +442,19 @@ def worker(a: argparse.Namespace) -> int:
                                            "view": a.view, "time_scale": a.time_scale}).start()
             seed = a.seed + k if a.same_seeds else a.seed + a.instance * 1_000_000 + k
             enc = encs[k % len(encs)]
-            still_paused = False
-            if recovery.is_paused(link.state) and (link.state.get("game") or {}).get("scene"):
-                # still paused (a recovery after the last episode that did not finish): a paused game reads
-                # Time.timeScale 0 and set_time_scale would stop the worker (20261008_015907 i0 stopped so after its
-                # first episode's watchdog pause); one more resume; if the game stays paused the episode's own start
-                # check makes it a HARNESS_FAIL (the 5-in-a-row stop below), with no time scale read back
-                ok, _ = recovery.resume(link, log=lambda m: print(f"[i{a.instance}] {m}", flush=True))
-                print(f"[i{a.instance}] paused before episode {k}: {'unpaused' if ok else 'still paused'}", flush=True)
-                still_paused = not ok
-            game_scale = None if still_paused else set_time_scale(link, a.time_scale, a.instance, quiet=True)
+            why, game_scale = ready_for_episode(link, a.time_scale, a.instance)
             rec = AttemptRecord(unit=enc.name, stage="TRAIN", profile="TRAIN" if a.view == "oracle" else "SIM_FINAL",
                                 build="1.0.30000", code_rev=rev,
                                 config_fp=fp, start_kind="savestate", mode=a.mode, seed=seed)
             # the episode's timebox counts rendered frames / 60 (real seconds): at time scale s that is s times as
             # much game time, so it is divided by s (a 2x wave start covers the same 180 s of game time as at 1x)
             timebox = (a.timebox or enc.timebox_s) / a.time_scale
-            run_episode(link, enc, tap, policy, mode_config(a.mode, seed, timebox,
-                                                            tuple(a.start_silk) if a.start_silk else None,
-                                                            tuple(a.start_hp) if a.start_hp else None), rec)
+            if why is None:
+                run_episode(link, enc, tap, policy, mode_config(a.mode, seed, timebox,
+                                                                tuple(a.start_silk) if a.start_silk else None,
+                                                                tuple(a.start_hp) if a.start_hp else None), rec)
+            else:
+                rec.reason = why          # the record's default outcome, HARNESS_FAIL; no episode ran
             d = asdict(rec)
             d["instance"] = a.instance
             d["episode"] = k
@@ -447,20 +476,7 @@ def worker(a: argparse.Namespace) -> int:
             print(f"[i{a.instance} ep{k}] {rec.outcome:12s} {rec.ingame_s or 0:6.1f}s hits {rec.hits} wd {rec.would_die} "
                   f"boss_hp {rec.boss_hp_end} {atk} {rec.reason or ''}", flush=True)
             k += 1
-            rq = (d.get("policy") or {}).get("real_quit")
-            if rq and (rq.get("main_menu") or rq.get("steps")):
-                # a real quit left the game on (or on its way to) the main menu: back into the sandbox slot
-                back_into_slot(link, enc, a.instance)
-            elif rec.outcome == "HARNESS_FAIL" and not link.closed:
-                # paused, in a pause or title sub-menu, or on the title: recover now rather than fail the next
-                # episodes on it (after_harness_fail); a recovery that runs out of tries leaves it to the count below
-                try:
-                    done = after_harness_fail(link, enc, a.instance)
-                    if done:
-                        print(f"[i{a.instance}] after the harness failure: {done}", flush=True)
-                except Exception as e:  # noqa: BLE001 - the 5-in-a-row stop below ends a worker that cannot recover
-                    print(f"[i{a.instance}] recovery after the harness failure failed: {type(e).__name__}: {e}; "
-                          f"{_describe(link.state)}", flush=True)
+            after_episode(link, enc, a.instance, d)
             fails_in_row = fails_in_row + 1 if rec.outcome == "HARNESS_FAIL" else 0
             if fails_in_row >= 5:
                 print(f"[i{a.instance}] 5 harness failures in a row, stopping; {_describe(link.state)}", flush=True)

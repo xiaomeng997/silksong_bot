@@ -418,6 +418,8 @@ class _Link:
             self.state = s
             for fn in self.subs:
                 fn(s)
+            if s.get("_hidden"):              # the reader thread saw it, the waiting loop did not
+                continue
             if (newer_than is None or s["f"] > newer_than) and (pred is None or pred(s)):
                 return s
         raise TimeoutError("script exhausted")
@@ -492,6 +494,7 @@ def test_a_pause_found_at_the_start_is_resumed_and_the_episode_runs(monkeypatch)
     states = [_st(f, scene) for f in range(2, 15)] + [_st(15, scene, ev=[WAKE])] + [_st(f, scene) for f in range(16, 40)]
     rec, link = _episode(states, start=_st(1, scene, paused=True))
     assert seen == [1] and "savestate.load" in link.calls and rec.f_wake == 15
+    assert rec.start_resume == ["pause_menu:continue:enter"]          # the start's taps in the record
 
 
 def test_the_live_checks_pause_press_waits_for_the_gate_and_repeats_a_dropped_press():
@@ -530,3 +533,154 @@ def test_set_time_scale_names_a_pause_when_the_game_reads_0():
 
     with pytest.raises(SystemExit, match=r"the game is paused \(pause_menu\)"):
         combat_run.set_time_scale(_L(), 1.0, 0, wait_s=0.2)
+
+
+# ---- the pause's first STATE (PauseWatch) ---------------------------------------------------------------------------
+
+def test_the_cause_comes_from_the_pauses_first_state_not_the_one_the_loop_saw():
+    """20261008_015907 i0: the stalled planner's late ACTION (stale, not applied) cleared act.lost at f 12361289, one
+    frame after the episode read the pause (12361288). Had the loop seen 12361289 first, the reason would have read
+    "no Pause key"; it reads the pause's first STATE (the tap's PauseWatch) now."""
+    scene = BELL_BEAST.scene
+    states = [_st(f, scene) for f in range(1, 15)] + [_st(15, scene, ev=[WAKE])]
+    states += [_st(f, scene) for f in range(16, 60)]
+    first = _st(60, scene, paused=True, act={"lost": True, "mask": mask("pause"), "applied": 47})
+    first["_hidden"] = True                       # delivered to the subscribers, not seen by the episode loop
+    states += [first, _st(61, scene, paused=True, act={"lost": False, "mask": 0, "applied": 47, "stale": 2})]
+    assert M.pause_cause(states[-1]).startswith("no Pause key")
+    rec, _ = _episode(states)
+    assert rec.reason == "paused unasked at frame 61 (brain-lost watchdog, last ACTION applied 13 frames before)"
+
+
+def test_pause_watch_forgets_a_pause_that_ended():
+    subs = []
+
+    class _L:
+        def subscribe_state(self, fn):
+            subs.append(fn)
+
+    w = M.PauseWatch(_L())
+    old = {"f": 10, "game": {"paused": True}, "act": {"lost": False, "mask": mask("pause")}}
+    for s in (old, {"f": 11, "game": {"paused": True}}, {"f": 12, "game": {"paused": False}}):
+        subs[0](s)
+    assert w.onset is None
+    later = {"f": 20, "game": {"paused": True}, "act": {"lost": True, "applied": 6}}
+    subs[0](later)
+    assert w.onset is later and w.cause({"f": 21, "game": {"paused": True}, "act": {}}).startswith("brain-lost")
+    # a STATE older than the onset (the loop behind the reader): its own cause
+    assert w.cause(old) == "a Pause key in the harness's own ACTION (policy / probe)"
+
+
+# ---- the worker loop (combat_run.worker on a stand-in game) ---------------------------------------------------------
+
+class WorkerGame(MenuGame):
+    """MenuGame as a worker's link: Time.timeScale reads 0 while paused (time.scale), subscribe_state, close."""
+
+    def rpc(self, name: str, /, timeout_s: float = 10.0, **args):
+        if name == "time.scale":
+            self.calls.append(name)
+            return {"scale": args.get("scale", 1.0), "time_scale": 0.0 if self.mode == "paused" else 1.0,
+                    "via": "none"}
+        return super().rpc(name, timeout_s=timeout_s, **args)
+
+    def subscribe_state(self, fn) -> None:
+        pass
+
+    def close(self) -> None:
+        self.closed = True
+
+
+def _watchdog_pause(g: MenuGame, rec, **menu) -> None:
+    """What run_episode leaves after the brain-lost watchdog: the game paused (Options highlighted unless `menu`
+    says otherwise), the row HARNESS_FAIL "paused unasked"."""
+    g.mode, g.menu, g.idx = "paused", M.MENU_PAUSE, 1
+    for k, v in menu.items():
+        setattr(g, k, v)
+    rec.outcome = HARNESS_FAIL
+    rec.reason = f"paused unasked at frame {g.f} (brain-lost watchdog, last ACTION applied 14 frames before)"
+
+
+def _run_worker(monkeypatch, tmp_path, g: WorkerGame, episodes: int, play) -> tuple[list[dict], list[int]]:
+    """combat_run.worker's loop on `g`; `play(k, g, rec)` is run_episode's part of the k-th episode it runs."""
+    ran: list[int] = []
+
+    def run_episode_(link, enc, tap, policy, cfg, rec):
+        ran.append(len(ran))
+        play(len(ran) - 1, link, rec)
+        return rec
+
+    monkeypatch.setattr("ssbot.ipc.oracle_link.OracleLink", lambda instance, connect_timeout_s: g)
+    monkeypatch.setattr("ssbot.train.episode.run_episode", run_episode_)
+    monkeypatch.setattr("ssbot.train.episode.make_tap", lambda link, enc: None)
+    monkeypatch.setattr(combat_run, "make_policy", lambda *a, **k: object())
+    monkeypatch.setattr(combat_run, "back_into_slot", lambda link, enc, instance, **k: None)
+    monkeypatch.setattr(combat_run, "git_rev", lambda: "test")
+    assert combat_run.main(["_worker", "--instance", "0", "--run-dir", str(tmp_path), "--episodes", str(episodes),
+                            "--no-record"]) == 0
+    rows = [json.loads(line) for line in (tmp_path / "attempts_i0.jsonl").read_text(encoding="utf-8").splitlines()]
+    return rows, ran
+
+
+def test_worker_recovers_a_watchdog_pause_and_runs_the_next_episode(monkeypatch, tmp_path, capsys):
+    """The worker's own path after a "paused unasked" episode: after_harness_fail resumes (Up off Options, Continue),
+    the next episode runs at the time scale read back."""
+    def play(k, g, rec):
+        if k == 0:
+            _watchdog_pause(g, rec)
+        else:
+            assert g.mode == "game"
+            rec.outcome = "STUCK"
+
+    g = WorkerGame("game")
+    rows, ran = _run_worker(monkeypatch, tmp_path, g, 2, play)
+    assert ran == [0, 1] and [r["outcome"] for r in rows] == [HARNESS_FAIL, "STUCK"]
+    assert [r["time_scale_game"] for r in rows] == [1.0, 1.0]
+    assert [k for k, _, _ in g.keys] == ["up", "enter"] and g.submits() == [(M.MENU_PAUSE, "continue")]
+    assert "after the harness failure: pause_menu: unpaused" in capsys.readouterr().out
+
+
+def test_worker_resumes_before_the_time_scale_read_when_the_recovery_did_not(monkeypatch, tmp_path, capsys):
+    """20261008_015907 i0 (and 034416 i0, 034525 i1, 034808 i1): the old worker left the watchdog's pause in place and
+    the next set_time_scale read 0.0 and stopped it. A pause still there before an episode (here after_harness_fail
+    did nothing) is resumed before the read; the worker goes on."""
+    monkeypatch.setattr(combat_run, "after_harness_fail", lambda link, enc, instance: None)
+
+    def play(k, g, rec):
+        if k == 0:
+            _watchdog_pause(g, rec, menu=M.MENU_OPTIONS, idx=2)       # in the pause menu's Options
+        else:
+            assert g.mode == "game"
+            rec.outcome = "STUCK"
+
+    g = WorkerGame("game")
+    rows, ran = _run_worker(monkeypatch, tmp_path, g, 2, play)
+    assert ran == [0, 1] and [r["outcome"] for r in rows] == [HARNESS_FAIL, "STUCK"]
+    assert rows[1]["time_scale_game"] == 1.0
+    assert g.submits() == [(M.MENU_OPTIONS, "back"), (M.MENU_PAUSE, "continue")]
+    assert "paused before the episode (pause_submenu): unpaused" in capsys.readouterr().out
+
+
+def test_worker_skips_episodes_while_the_game_stays_paused_then_stops(monkeypatch, tmp_path, capsys):
+    """A pause no resume can leave (a highlight that never reads): no episode runs on it and no time scale is read
+    (the old worker: a SystemExit), each is a HARNESS_FAIL row, and the 5-in-a-row stop ends the worker."""
+    def play(k, g, rec):
+        assert k == 0
+        _watchdog_pause(g, rec, menu=M.MENU_OPTIONS, stuck_sel=True)
+
+    g = WorkerGame("game")
+    rows, ran = _run_worker(monkeypatch, tmp_path, g, 10, play)
+    assert ran == [0] and len(rows) == 5 and all(r["outcome"] == HARNESS_FAIL for r in rows)
+    assert all(r["reason"].startswith("still paused before the episode (pause_submenu") for r in rows[1:])
+    assert [r["time_scale_game"] for r in rows] == [1.0, None, None, None, None]
+    assert g.submits() == [] and all(k == "down" for k, _, _ in g.keys)
+    assert "5 harness failures in a row, stopping" in capsys.readouterr().out
+
+
+def test_ready_for_episode_by_place():
+    g = WorkerGame("paused", M.MENU_EXIT_PROMPT, idx=0)
+    assert combat_run.ready_for_episode(g, 1.0, 0) == (None, 1.0) and g.mode == "game"
+    g = WorkerGame("paused", 12, stuck_sel=True)
+    why, scale = combat_run.ready_for_episode(g, 1.0, 0)
+    assert scale is None and why.startswith("still paused before the episode") and "time.scale" not in g.calls
+    g = WorkerGame("game")
+    assert combat_run.ready_for_episode(g, 1.0, 0) == (None, 1.0) and g.keys == []

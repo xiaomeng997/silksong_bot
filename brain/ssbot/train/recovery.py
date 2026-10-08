@@ -110,8 +110,10 @@ def pause_cause(s: dict | None) -> str:
     s = s or {}
     a = s.get("act") or {}
     if a.get("lost"):
-        # BrainLost stays set until the next ACTION is accepted (ActionScheduler.EndLost), so the first paused STATE
-        # of a watchdog pause always shows it
+        # BrainLost stays set until the next ACTION arrives, a stale one (not applied) too (20261008_015907 i0: the
+        # stalled planner's late ACTION, act.stale 1 -> 2 at f 12361289, cleared it one frame after the episode read
+        # the pause), so a later paused STATE can read "no Pause key": the episode reads the first paused STATE
+        # (PauseWatch), where a watchdog pause always shows it
         applied = a.get("applied")
         age = f", last ACTION applied {s.get('f') - applied} frames before" if isinstance(applied, int) and \
             isinstance(s.get("f"), int) else ""
@@ -121,6 +123,27 @@ def pause_cause(s: dict | None) -> str:
     if ((s.get("input") or {}).get("mask") or 0) & PAUSE_BIT:
         return "a Pause key the harness did not press"
     return "no Pause key (a gamepad detach?)"
+
+
+class PauseWatch:
+    """The first STATE of the pause under way (None while the game is not paused), from every STATE
+    (OracleLink.subscribe_state, reader thread): pause_cause reads it rather than the STATE the episode loop happened
+    to see, which can come after the watchdog's act.lost was cleared (pause_cause)."""
+
+    def __init__(self, link):
+        self.onset: dict | None = None
+        link.subscribe_state(self._on)
+
+    def _on(self, s: dict) -> None:
+        if not (s.get("game") or {}).get("paused"):
+            self.onset = None
+        elif self.onset is None:
+            self.onset = s
+
+    def cause(self, s: dict) -> str:
+        """pause_cause of the pause `s` shows, read from its first STATE when the watch saw it (else from `s`)."""
+        o = self.onset
+        return pause_cause(o if o is not None and o.get("f", 0) <= s.get("f", 0) else s)
 
 
 def tap(link, key: str, hold_frames: int = TAP_FRAMES) -> int:
