@@ -36,7 +36,7 @@ from pathlib import Path
 import numpy as np
 
 from ssbot.combat.branch_model import (ALPHA_BACKOFF, CLAPPER, MAESTRO, SENSING, STALE_S, TINY, BranchMemory,
-                                       TinyOwners, _key, clapper_context, decisions_of, geometry, in_play, memory_for)
+                                       TinyOwners, _key, clapper_context, decisions_of, geometry, in_play)
 from ssbot.knowledge.behaviour_tables import Fight, fight_states
 from ssbot.knowledge.gauntlet_tables import FORUM_SPECS
 
@@ -64,6 +64,19 @@ class DecisionRecord:
     geo: np.ndarray              # [len(timings), len(GEO_KEYS)] float32 (nan: not available)
     to_exit: float = 0.0         # forecast samples: s from the frame to the visit's exit (0: a fire-frame record)
     fi: int = -1                 # the frame's index in the cache
+
+
+def memory_for(tk: str) -> BranchMemory:
+    """A BranchMemory with the type's segmentation (gauntlet_tables.FORUM_SPECS; branch_model.json stores it for the
+    runtime: segmentation()) and choice states."""
+    sp = next(s for s in FORUM_SPECS.values() if s.boss_type == tk)
+    return BranchMemory(tk, dict(sp.attack_starts), frozenset(sp.decision_states), frozenset(decisions_of(tk)))
+
+
+def segmentation() -> dict:
+    """branch_model.json "segmentation": per type the attack starts and decision states the scan kept history with."""
+    return {s.boss_type: {"attack_starts": dict(s.attack_starts), "decision_states": sorted(s.decision_states)}
+            for s in FORUM_SPECS.values()}
 
 
 # ---- hero extras (silk, health) from the recording ----------------------------------------------------------------

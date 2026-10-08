@@ -397,7 +397,7 @@ class MultiForecaster:
     def _new(self, iid: int, tk: str) -> None:
         tr = self.trackers[iid] = EnemyTracker(self.tables.types[tk], self.view, iid, self.offsets.get(tk))
         if self.bv is not None:
-            tr.mem = memory_for_table(self.tables.types[tk])
+            tr.mem = memory_for_table(self.tables.types[tk], self.bv.model)
 
     def branch_probs(self, iid: int, state: str | None = None) -> dict[str, float] | None:
         """The branch model's {successor: p} for enemy iid's decision `state` (default: its current state) taken now

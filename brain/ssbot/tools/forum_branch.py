@@ -29,7 +29,6 @@ the covariates BranchView computes with the scan's (every-frame samples), and ti
 import argparse
 import ctypes
 import json
-import math
 import os
 import pickle
 import sys
@@ -217,8 +216,8 @@ def cmd_build(a) -> int:
             "decisions": sum(len(rr) for rr in fire_groups.values()),
             "note": "ssbot.tools.forum_branch build; scoring only (P / J, O / BAIT), never the support; types: "
                     "P(successor | the decision fires now); ahead: P(the successor the visit ends in | now)"}
-    Path(a.out).write_text(json.dumps({**meta, "types": model, "ahead": ahead_model}, separators=(",", ":")),
-                           "utf-8")
+    Path(a.out).write_text(json.dumps({**meta, "segmentation": fb.segmentation(), "types": model,
+                                       "ahead": ahead_model}, separators=(",", ":")), "utf-8")
     if a.report:
         Path(a.report).write_text(json.dumps({"test": str(a.test), "ahead_test": str(a.ahead_test), "types": report,
                                               "ahead": ahead_report}, indent=1), "utf-8")

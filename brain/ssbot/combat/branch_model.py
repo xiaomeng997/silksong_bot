@@ -41,8 +41,9 @@ Two tables per decision state (branch_model.json):
 
 Everything here is view-legal (forum_planner_plan §4.6): states and their entry times (oracle FSM / vision phases),
 hits seen, positions, the hero's own silk. Nothing reads FSM variables. The offline scan (ssbot.knowledge.forum_branch)
-computes every covariate with the functions below (BranchMemory.features, geometry, clapper_context, TinyOwners), so
-the runtime sees the covariates the model was selected on (ssbot.tools.forum_branch parity checks it on recordings).
+computes every covariate with the functions below (BranchMemory.features, geometry, clapper_context, TinyOwners) and
+the segmentation the model stores, so the runtime sees the covariates the model was selected on
+(ssbot.tools.forum_branch parity checks it on recordings).
 """
 from __future__ import annotations
 
@@ -457,14 +458,16 @@ def _tables(rows: dict) -> dict[str, DecisionModel]:
 
 class BranchModel:
     """Per type and decision state: the fire-frame DecisionModel ("types": P(successor | it fires now)) and the
-    forecast one ("ahead": P(the successor this visit ends in | now)); branch_model.json, ssbot.tools.forum_branch
-    build. Timings: "branch" / "now" (the query frame), "entry" (the state's entry), "stored" (the entry of the state
+    forecast one ("ahead": P(the successor this visit ends in | now)), and the segmentation the history was kept with
+    ("segmentation"); branch_model.json, ssbot.tools.forum_branch build. Timings: "branch" / "now" (the query frame), "entry" (the state's entry), "stored" (the entry of the state
     SENSING "stored:<state>" names), "lead<s>" (s before now)."""
 
     def __init__(self, d: dict):
-        self.meta = {k: v for k, v in d.items() if k not in ("types", "ahead")}
+        self.meta = {k: v for k, v in d.items() if k not in ("types", "ahead", "segmentation")}
         self.types = {tk: _tables(rows) for tk, rows in (d.get("types") or {}).items()}
         self.ahead = {tk: _tables(rows) for tk, rows in (d.get("ahead") or {}).items()}
+        # type -> {"attack_starts": {state: family}, "decision_states": [...]}: the scan's segmentation
+        self.segmentation: dict = d.get("segmentation") or {}
 
     @classmethod
     def load(cls, path: Path | None = None) -> "BranchModel":
@@ -491,18 +494,16 @@ class BranchModel:
         return m.predict(feats)
 
 
-def memory_for(tk: str) -> BranchMemory:
-    """A BranchMemory with the segmentation the model was fit with (gauntlet_tables.FORUM_SPECS: the scan's; the
-    runtime walk's TypeTable lacks a few families, the Maestro's MA_POINT and the Envoy's EN_HOPSLASH / EN_ENTRY) and
-    the type's choice states."""
-    from ssbot.knowledge.gauntlet_tables import FORUM_SPECS
-    sp = next(s for s in FORUM_SPECS.values() if s.boss_type == tk)
-    return BranchMemory(tk, dict(sp.attack_starts), frozenset(sp.decision_states), frozenset(decisions_of(tk)))
-
-
-def memory_for_table(tt) -> BranchMemory:
-    """A BranchMemory for a combat.enemy_tables.TypeTable's enemy type (memory_for: the scan's segmentation)."""
-    return memory_for(tt.spec.type_key)
+def memory_for_table(tt, model: BranchModel | None = None) -> BranchMemory:
+    """A BranchMemory for a combat.enemy_tables.TypeTable's enemy type with the segmentation the model was fit with
+    (BranchModel.segmentation: the scan's gauntlet_tables.FORUM_SPECS, stored in branch_model.json; the walk's
+    TypeTable lacks a few families, the Maestro's MA_POINT and the Envoy's EN_HOPSLASH / EN_ENTRY), else the table's,
+    and the type's choice states."""
+    tk = tt.spec.type_key
+    seg = (model.segmentation if model is not None else {}).get(tk)
+    if seg is None:
+        return BranchMemory(tk, dict(tt.attack_starts), frozenset(tt.decision_states), frozenset(decisions_of(tk)))
+    return BranchMemory(tk, dict(seg["attack_starts"]), frozenset(seg["decision_states"]), frozenset(decisions_of(tk)))
 
 
 CLAPPER = "Song Heavy Sentry"
