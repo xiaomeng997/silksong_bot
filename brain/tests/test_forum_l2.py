@@ -145,16 +145,16 @@ def test_clapper_controller():
     t = l2()
     p = t.decide(world(38.0, ents=[clapper(9, 35.0, False)]), WinFc(s), None, 3)
     assert p.stance_x == pytest.approx(38.5)
-    # the jump: under it and behind the landing (aim stored at Jump Aim)
+    # the jump, the hero in front of it: back off past the landing slam (8.5 u in front of the landing)
     t = l2()
     s = [subj(9, CC, 35.0, y=7.45, state="Jump Aim", family="CC_JUMP", committed=True)]
     p = t.decide(world(26.0, ents=[clapper(9, 35.0, False)]), WinFc(s), None, 3)
     land = jump_landing(35.0, 26.0, -1.0)
     assert land == pytest.approx(35.0 + 0.92 * (31.0 - 35.0))
-    assert p.stance_x == pytest.approx(land + 2.5)
+    assert p.stance_x == pytest.approx(land - 8.5)
     s = [subj(9, CC, 33.0, y=12.0, state="Air", family="CC_JUMP", committed=True)]
     p = t.decide(world(30.0, ents=[clapper(9, 33.0, False)]), WinFc(s), None, 3)
-    assert p.stance_x == pytest.approx(land + 2.5)                # the take-off's aim, not the hero's x now
+    assert p.stance_x == pytest.approx(land - 8.5)                # the take-off's aim, not the hero's x now
     # the cast: face it, the glide-spike hook on
     t = l2()
     s = [subj(9, CC, 30.0, y=7.45, state="Spell Antic", family="CC_CAST", committed=True)]
@@ -329,43 +329,43 @@ def test_a_spot_past_the_window_query_is_no_punish():
     assert p.goal == PUNISH and t.last["l2_cands"][0][2] == 9.0  # inside the query: open (inf, logged as 9)
 
 
-def test_clapper_jump_back_off_when_the_run_is_late_or_through_its_body():
-    # CC_JUMP from 35 at the hero at 26: landing 31.32; behind it (33.82) is 7.8 u away: 0.50 s, in time at the commit
-    land = jump_landing(35.0, 26.0, -1.0)
-    s = [subj(9, CC, 35.0, y=7.45, state="Jump Aim", family="CC_JUMP", committed=True)]
+def test_clapper_jump_never_under_it():
+    # round 3 (forum.md 17.7.1): getting behind the landing from in front of it means running under it (live: 8 / 8
+    # such w7 jumps took its body); behind the landing only following it from its back side, else back off
+    land = jump_landing(35.0, 26.0, -1.0)                         # facing left at the hero (26): lands at 31.32
     ents = [clapper(9, 35.0, False)]
     t = l2()
-    p = t.decide(world(26.0, t=10.0, ents=ents), WinFc(s), None, 3)
-    assert p.stance_x == pytest.approx(land + 2.5) and "under and behind" in t.last["goal_why"]
-    # fixed at its Jump Aim: 1.0 s on (in the air) it is still under and behind, not turning back under it
-    s = [subj(9, CC, 33.0, y=12.0, state="Air", family="CC_JUMP", committed=True)]
-    p = t.decide(world(26.0, t=11.0, ents=ents), WinFc(s), None, 3)
-    assert p.stance_x == pytest.approx(land + 2.5) and "under and behind" in t.last["goal_why"]
-    # its Jump Aim seen 1.0 s into it (lands at 1.415 s): 0.50 s > 0.415 - 0.25 -> back off past the landing slam
-    # (8.5 u in front), and that stays
+    p = t.decide(world(26.0, t=10.0, ents=ents),
+                 WinFc([subj(9, CC, 35.0, y=7.45, state="Jump Antic", family="CC_JUMP", committed=True)]), None, 3)
+    assert t.last["goal_why"].endswith("jump: back off")
+    assert p.stance_x == pytest.approx(land - 8.5)                # before the aim: from the hero now (the same here)
+    p = t.decide(world(26.0, t=10.5, ents=ents),
+                 WinFc([subj(9, CC, 35.0, y=7.6, state="Jump", family="CC_JUMP", committed=True)]), None, 3)
+    assert p.stance_x == pytest.approx(land - 8.5) and p.hit_w.get(9, 0.0) == 0.0
+    # close at its face (3 u): it lands about where it stands; behind it is still under it -> back off
     t = l2()
-    t.decide(world(26.0, t=10.0, ents=ents),
-             WinFc([subj(9, CC, 35.0, y=7.45, state="Jump Antic", family="CC_JUMP", committed=True)]), None, 3)
-    p = t.decide(world(26.0, t=11.0, ents=ents),
-                 WinFc([subj(9, CC, 35.0, y=7.45, state="Jump Aim", family="CC_JUMP", committed=True)]), None, 3)
-    assert p.stance_x == pytest.approx(land - 8.5) and "back off" in t.last["goal_why"]
-    p = t.decide(world(26.0, t=11.2, ents=ents), WinFc(s), None, 3)
-    assert p.stance_x == pytest.approx(land - 8.5) and "back off" in t.last["goal_why"]
-    # at its face (3 u) it jumps back: behind the landing is past its body, still on the ground -> back off
+    p = t.decide(world(32.0, t=10.0, ents=ents),
+                 WinFc([subj(9, CC, 35.0, y=7.45, state="Jump Antic", family="CC_JUMP", committed=True)]), None, 3)
+    assert t.last["goal_why"].endswith("jump: back off")
+    assert p.stance_x == pytest.approx(jump_landing(35.0, 32.0, -1.0) - 8.5)
+    # the hero on its back side (it took off at 30 facing right, at the hero then at 40; now at 33 in the air, the
+    # hero at 31): follow it to 2.5 u behind the landing, the target's hit weight kept
     t = l2()
-    s = [subj(9, CC, 35.0, y=7.45, state="Jump Antic", family="CC_JUMP", committed=True)]
-    p = t.decide(world(32.0, t=10.0, ents=ents), WinFc(s), None, 3)
-    land = jump_landing(35.0, 32.0, -1.0)
-    assert land > 35.0 - 1e-9 or land == pytest.approx(35.0 + 0.92 * (27.0 - 35.0))
-    assert "back off" in t.last["goal_why"] and p.stance_x == pytest.approx(land - 8.5)
-    # CC_JUMP_CAST: past the rune circle (14.5 u in front of the landing), behind it when the wall leaves no room
+    t.decide(world(40.0, t=10.0, ents=[clapper(9, 30.0, True)]),
+             WinFc([subj(9, CC, 30.0, y=7.45, state="Jump Antic", family="CC_JUMP", committed=True)]), None, 3)
+    t.decide(world(40.0, t=10.5, ents=[clapper(9, 30.0, True)]),
+             WinFc([subj(9, CC, 30.0, y=7.6, state="Jump", family="CC_JUMP", committed=True)]), None, 3)
+    land = jump_landing(30.0, 40.0, 1.0)
+    p = t.decide(world(31.0, t=10.9, ents=[clapper(9, 33.0, True)]),
+                 WinFc([subj(9, CC, 33.0, y=12.0, state="Air", family="CC_JUMP", committed=True)]), None, 3)
+    assert t.last["goal_why"].endswith("jump: behind") and p.stance_x == pytest.approx(land - 2.5)
+    assert p.hit_w[9] == pytest.approx(3.0)
+    # CC_JUMP_CAST in front of it: past the rune circle (14.5 u in front of the landing), as far as the wall lets
     t = l2()
     s = [subj(9, CC, 44.0, y=7.45, state="Cast Slam Antic", family="CC_JUMP_CAST", committed=True)]
-    p = t.decide(world(30.0, t=10.0, ents=[clapper(9, 44.0, False)]), WinFc(s), None, 3)
-    land = jump_landing(44.0, 30.0, -1.0)
-    assert "under and behind" in t.last["goal_why"] and p.stance_x == pytest.approx(land + 2.5)
-    p = t.decide(world(30.0, t=11.5, ents=[clapper(9, 44.0, False)]), WinFc(s), None, 3)
-    assert "no room out" in t.last["goal_why"] or p.stance_x == pytest.approx(land - 14.5)
+    p = t.decide(world(36.0, t=10.0, ents=[clapper(9, 44.0, False)]), WinFc(s), None, 3)
+    land = jump_landing(44.0, 36.0, -1.0)
+    assert t.last["goal_why"].endswith("jump: back off") and p.stance_x == pytest.approx(t._clamp(land - 14.5))
 
 
 def test_the_idle_clappers_turn_needs_its_spot_in_time():
@@ -403,29 +403,28 @@ def test_clapper_retreat_branches_do_not_reward_hitting_it():
 def test_clapper_jump_aim_in_the_trackers_order():
     # round 3 (forum.md 17.7): Jump Aim is instant (Jump Antic -> Jump Aim -> Jump in one frame), so the tracker never
     # ends a tick in it: the ticks go Jump Antic, Jump (1 frame), Air. The aim is taken on the first tick past the
-    # antic (the hero's x then, the take-off x from the antic) and the way round fixed there for the whole jump.
+    # antic (the hero's x then, the take-off x from the antic): the landing for the rest of the jump.
     t = l2()
     ents = [clapper(9, 35.0, False)]
     for k in range(5):                                            # the antic, 0.5 s, standing at 35
         p = t.decide(world(26.0 + 0.5 * k, t=10.0 + 0.1 * k, ents=ents),
                      WinFc([subj(9, CC, 35.0, y=7.45, state="Jump Antic", family="CC_JUMP", committed=True)]), None, 3)
-    assert 9 not in t.aim and 9 not in t.jump_how
+    assert 9 not in t.aim and t.antic[9] == 35.0                  # the take-off x, no aim yet
     # the Jump frame: the hero at 26 now, the Clapper 0.2 u on its way
     p = t.decide(world(26.0, t=10.5, ents=[clapper(9, 34.8, False)]),
                  WinFc([subj(9, CC, 34.8, y=7.6, state="Jump", family="CC_JUMP", committed=True)]), None, 3)
     land = jump_landing(35.0, 26.0, -1.0)
-    assert t.aim[9] == (26.0, 35.0, -1.0) and t.jump_how[9] == "under and behind"
-    assert p.stance_x == pytest.approx(land + 2.5)
-    # in the air the hero drifts away (behind the landing is now too far to reach in time: re-judged it would back
-    # off); the landing and the way round stay those of the aim
-    for k, hx in enumerate((24.0, 20.0, 17.0, 15.0, 15.0)):
+    assert t.aim[9] == (26.0, 35.0, -1.0) and t.jump_how[9] == "back off"
+    assert p.stance_x == pytest.approx(land - 8.5)
+    # in the air the hero moves on: the landing stays the aim's (not re-computed from the hero / its air x)
+    for k, hx in enumerate((24.0, 22.0, 21.0, 22.5, 23.0)):
         x = 34.8 - 0.8 * (k + 1)
         p = t.decide(world(hx, t=10.6 + 0.15 * k, ents=[clapper(9, x, False)]),
                      WinFc([subj(9, CC, x, y=10.0, state="Air", family="CC_JUMP", committed=True)]), None, 3)
-        assert p.stance_x == pytest.approx(land + 2.5) and t.last["goal_why"].endswith("jump: under and behind")
+        assert p.stance_x == pytest.approx(land - 8.5) and t.last["goal_why"].endswith("jump: back off")
     # landed and back to idle: the stored jump is dropped
     t.decide(world(20.0, t=11.6, ents=[clapper(9, land, False)]), WinFc([subj(9, CC, land, y=7.45)]), None, 3)
-    assert 9 not in t.aim and 9 not in t.jump_how and 9 not in t.antic and 9 not in t.t_commit
+    assert 9 not in t.aim and 9 not in t.jump_how and 9 not in t.antic
 
 
 def test_clapper_jump_aim_with_no_antic_tick_seen():
@@ -511,17 +510,20 @@ def test_jump_cast_rune_circle_kept_out_of_after_the_move():
     p = t.decide(world(36.0, t=13.3, ents=[clapper(9, land, False)]), WinFc(idle), None, 3)
     assert t.last["goal_why"].endswith("face") and p.stance_x == pytest.approx(land - 4.0)
     assert 9 not in t.rune
-    # under it: behind the landing (2.5 u, out of the circle's back edge at 0.58 u) while the rune is pending
+    # the hero on its back side: behind the landing (2.5 u, out of the circle's back edge at 0.58 u) while the rune
+    # is pending (it took off at 30 facing right at the hero then at 40; the hero followed it from behind)
     t = l2()
-    t.decide(world(34.0, t=10.0, ents=[clapper(9, 40.0, False)]),
-             WinFc([subj(9, CC, 40.0, state="Cast Slam Antic 2", **cast)]), None, 3)
-    t.decide(world(34.0, t=10.93, ents=[clapper(9, 40.0, False)]),
-             WinFc([subj(9, CC, 39.5, state="Jump", **cast)]), None, 3)
-    land = jump_landing(40.0, 34.0, -1.0)
-    assert t.jump_how[9] == "under and behind"
-    p = t.decide(world(land + 3.0, t=12.2, ents=[clapper(9, land, False)]), WinFc([subj(9, CC, land, y=7.45)]),
+    t.decide(world(40.0, t=10.0, ents=[clapper(9, 30.0, True)]),
+             WinFc([subj(9, CC, 30.0, state="Cast Slam Antic 2", **cast)]), None, 3)
+    t.decide(world(40.0, t=10.93, ents=[clapper(9, 30.0, True)]),
+             WinFc([subj(9, CC, 30.0, state="Jump", **cast)]), None, 3)
+    land = jump_landing(30.0, 40.0, 1.0)
+    t.decide(world(31.0, t=11.5, ents=[clapper(9, 33.0, True)]), WinFc([subj(9, CC, 33.0, state="Air", **cast)]),
+             None, 3)
+    assert t.jump_how[9] == "behind"
+    p = t.decide(world(land - 3.0, t=12.2, ents=[clapper(9, land, True)]), WinFc([subj(9, CC, land, y=7.45)]),
                  None, 3)
-    assert t.last["goal_why"].endswith("rune: behind") and p.stance_x == pytest.approx(land + 2.5)
+    assert t.last["goal_why"].endswith("rune: behind") and p.stance_x == pytest.approx(land - 2.5)
 
 
 def test_round3_holding_rule_hysteresis():
