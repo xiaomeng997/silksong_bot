@@ -402,7 +402,7 @@ PlayMaker 的 `SendEvent`（delay < 0.001、目标 Self）在 OnEnter 里直接 
 
   - 选中比例和 R0 一样（这是敌人的性质）；每小时的增益来自**专场把 Envoy 一直留着**、BAIT 把主角放在边界附近（Envoy 普通斩的 BAIT 样本 43,059 帧），和波次起点把时间集中在少数敌人上：Envoy / Choristor 6–40 倍，Clawmaiden 斩 1.5 倍、Minister 闪避 2.5 倍，Clapper 锤反而只有 R0 的 0.37 倍（口袋）。远距离家族（边界 > 15 u）在 R1 里很少碰到边界（Bellbearer、Maestro、Tiny 每小时与 R0 相近）。
 - 家族计数（首轮两个运行）：Envoy 专场 EN_SLASH 2407、EN_JUMPSLASH 946、EN_CHARGE 327、**EN_AMBUSH 106（每局一次）**；Choristor 斩 / 鞭 / 跳 1166 / 704 / 476；Reed 刺 / 扔 / 防御 / 闪避 1212 / 1412 / 713 / 615。波次 36 局：Clawmaiden 斩 / 旋转 / 瞬移 312 / 287 / 23；Minister 冲刺 / 格挡 / 闪避 383 / 800 / 307；Clapper 施法 / 跳 / 锤 / 后撤 / 跳施法 209 / 172 / 107 / 339 / 169；Bellbearer 扔 / 闪避 919 / 318；Maestro 斩 / 防御 / 召唤 556 / 238 / 33；Tiny 防御 / 开火 711 / 555。Envoy 的每个家族都已 ≥ 200（伏击 R0 107 + 106 = 213）；HopSlash 和 Wake 入场不可达（13.2）。
-- 长跑：修复轮 13:13 起（冻结代码 `C:\ssbot\live_fo_r1f_8a03afb`；实例 2 先跑 40 局受保护的 Envoy 专场核对保护，再跑波次起点；实例 3 波次起点；轮换 w4、w6、w7、w8、w9、w11、w12、w13、w3、w5、w10，每局 180 s），13:36 `DEMO_SOON`（你要 0.5x 练 Forum）后两个运行各在当前一局后停下：实例 2 专场 23 局、实例 3 波次 8 局（`20261004_131323_Forum_A_w4_mix_data2`）。演示后用 `C:\ssbot\sandboxo_r1f_run.cmd i2w` / `i3` 重新开始（HANDOFF R1）。
+- 长跑：修复轮 13:13 起（冻结代码 `C:\ssbot\live_fo_r1f_8a03afb`；实例 2 先跑 40 局受保护的 Envoy 专场核对保护，再跑波次起点；实例 3 波次起点；轮换 w4、w6、w7、w8、w9、w11、w12、w13、w3、w5、w10，每局 180 s），13:36 `DEMO_SOON`（你要 0.5x 练 Forum）后两个运行各在当前一局后停下：实例 2 专场 23 局、实例 3 波次 8 局（`20261004_131323_Forum_A_w4_mix_data2`）。演示后用 `C:\ssbot\sandbox\fo_r1f_run.cmd i2w` / `i3` 重新开始（HANDOFF R1）。
 
 ### 13.5 加速检查（R1 ④）：**没有跑成，2x 不采用**
 
@@ -936,7 +936,7 @@ cd brain   # 冻结检出（git archive，没有 .git）：behaviour_build 要�
 
 ### 17.1 Wanderer 的刀（你 10-05：拼刀用 Wanderer 不用 Reaper）
 
-- `knowledge/1.0.30000/attacks/wanderer.json`（`attack_table_build --crest Wanderer`，P17 的 slash.dump，**还没有实测帧**）：横砍 / 交替横砍 / 上挑 / 贴墙砍都在出刀那一帧生效、到 0.12 s（剪辑第一个动画事件 0/24 s，和 Hunter 一样，不是 Reaper 的 0.083 s），下劈 0.04–0.16 s；够距：横砍 x 0.19–3.12 u（拼刀盒 0.19–2.92）、上挑 y 0–3.39 u、下劈 y −2.16–0.13 u。所以**按导出 Wanderer 连拼是无缝的**：拼中后 0.1 s `NailParryRecover` 把攻击冷却和这一刀都清掉，新一刀立即生效，同一碰撞体 0.117 s 后能再拼，无敌到 0.15 s，0.117–0.15 s 之间再出刀就接上。实测（`kin_excite_forum --attack-frames`，fo_W，60 刀）在实例空出来后跑（HANDOFF R8）。
+- `knowledge/1.0.30000/attacks/wanderer.json`（`attack_table_build --crest Wanderer`，P17 的 slash.dump，**还没有实测帧**）：横砍 / 交替横砍 / 上挑 / 贴墙砍都在出刀那一帧生效、到 0.12 s（剪辑第一个动画事件 0/24 s，和 Hunter 一样，不是 Reaper 的 0.083 s），下劈 0.04–0.16 s；够距：横砍 x 0.19–3.12 u（拼刀盒 0.19–2.92）、上挑 y 0–3.39 u、下劈 y −2.16–0.13 u。所以**按导出 Wanderer 连拼是无缝的**：拼中后 0.1 s `NailParryRecover` 把攻击冷却和这一刀都清掉，新一刀立即生效，同一碰撞体 0.117 s 后能再拼，无敌到 0.15 s，0.117–0.15 s 之间再出刀就接上。**实测（2026-10-08，实例 2，`kin_excite_forum --attack-frames 60`，fo_W，种子 320000，录像 `C:\ssbot\data\runs\m2\kn_excite_forum_wanderer\2026-10-08\TRAIN\kn_excite_forum_s320000`，551 个采样帧）**：横砍（285 帧）/ 交替横砍（91）/ 上挑（111）的伤害碰撞体在出刀后第 1–7 帧开着（0.017–0.117 s），下劈（64）第 3–9 帧（0.05–0.15 s）；多边形和导出一致（偏移 0.000 u）；贴墙砍没采到（沿用导出 0–0.12 s）。写进 `attacks/wanderer.json` 的 `frames`。所以**连拼无缝成立**：拼中帧 c 之后 c+6 `NailParryRecover`，这时按下的新一刀第 c+7 帧起生效，同一碰撞体 c+7（0.1 s + 1 帧）起可再拼，无敌到 c+9，重叠 3 帧；Reaper 实测第 5–12 帧生效，新一刀 c+11 才生效，空档 2 帧（0.033 s），和计划里的推算一致。（采样的是伤害碰撞体；拼刀盒 `Clash Tink` 是同一个 NailSlash 下的子碰撞体，按同一组动画事件开关，没单独采样。）`attack_table_build --live` 修了一个问题：探针第二次按键（+31 帧）的同槽位刀（Wanderer 的第二下上挑 / 横砍）以前算到第一刀的窗口里（得出 1–38 帧），现在减掉按键偏移。
 - 纹章配置（crests.json）：持续 0.25 s、冷却 0.3 s、后摇 0.1 s，下劈类型 `Slash`（`HeroController.DownAttack`：就是一刀 `downSlash`，`cState.attacking`，没有 Hunter 的俯冲、没有 Reaper 的 FSM）；`DASHCOMBO_WINDOW_TIME` 0.15 s：冲刺（Sprint FSM 打开窗口）后 0.15 s 内按攻击是 `WANDERER DASH COMBO`，不是普通一刀（规划器不建模，否决这样的行）。
 - 运动学：`hero_wanderer_forum.json` = Reaper 的 Forum 配装参数换成 Wanderer 的计时，能力位去掉 reaper_down、加新的 `down_slash`（kin_jit）；**没在 Wanderer 录像上拟合**，kin_check 在你的 fo_W 练习录像上核对中（HANDOFF R8）。
 
@@ -949,7 +949,7 @@ cd brain   # 冻结检出（git archive，没有 .git）：behaviour_build 要�
 
 - 两种口径：**拼刀局面**（出刀生效窗口里，主角的拼刀盒先碰到敌人的可拼碰撞体，之前敌人任何伤害碰撞体都没碰到主角受伤框（放大 0.3 u））和**接触局面**（规划器的规则：敌人第一次碰到放大的受伤框落在出刀生效窗口里，本体也算）。结果：拼中（NailClashEffect，最近的可拼碰撞体是它的）/ 挨打（12 帧内它打中主角）/ 都没有。
 - 你的 5 次练习（4,439 刀、239 次拼刀；Reaper 1,059 刀、Wanderer 3,380 刀）：拼刀局面几乎不挨打（例：Wanderer 上挑拼 Minister 冲刺 10 次里 7 拼中、0 挨打；Reaper 横砍拼 Choristor 鞭 13 次 12 拼中）；接触局面会：Choristor 斩横砍 14 次 7 拼中、3 挨打，Reed 刺横砍 11 次 3 拼中、4 挨打。也就是"刀在接触时已经出来"不够，要在它的判定碰到身体之前先碰到刀。拼完之后 0.2 s 内被无敌挡掉的伤害 30 次（29 次来自同类型）；拼完 0.5 s 内同一只再拼 1 次、再挨打 0 次。
-- R1 v2 数据（36 个 data2 运行）统计中，结果写进 `clash.json` 后补到这里。
+- **`clash.json`（2026-10-08 提交，`forum_clash_stats --table`，R1 v2 的 36 个 data2 运行 + 你的 5 次练习，两种口径的并集，两种纹章合并，n ≥ 10，Wilson 95 % 上界）：33 个键，失败概率 ≤ 0.25 的 18 个、≤ 0.5 的 29 个**（另 75 个 n 不够或不可拼，列在 `left_out`）。（n / 拼中 / 挨打 / 失败概率）：Minister 冲刺 横 2493 / 1872 / 22 / 0.013、上 308 / 178 / 7 / 0.046、下 139 / 20 / 9 / 0.12；Minister 格挡反击 横 492 / 209 / 93 / 0.23、上 0.37、下 0.56；Clawmaiden 斩 横 504 / 195 / 67 / 0.17、上 0.15、下 0.34；Envoy 冲锋 横 42 / 35 / 2 / 0.16、下 16 / 5 / 0 / 0.19；Envoy 斩 下 108 / 63 / 2 / 0.065、横 46 / 26 / 7 / 0.28；Envoy 跳斩 下 0.25、横 0.28；Choristor 鞭 横 57 / 36 / 2 / 0.12、下 0.24；Choristor 斩 横 140 / 68 / 13 / 0.15、下 0.29；Choristor 跳 横 0.28、下 0.33、上 0.43；Maestro 斩 上 115 / 33 / 5 / 0.098、横 0.21；Maestro 防御 上 0.35；Reed 防御反击 下 0.13、横 183 / 73 / 26 / 0.20、上 0.48；Reed 刺 上 139 / 45 / 15 / 0.17、横 580 / 217 / 151 / 0.30、下 0.52；Reed 扔针 横 0.52、上 0.54（针是投射物，拼刀分支不归属它）。第一版（只用接触口径，`clash_table_v1.json`）比并集少很多拼中：接触口径漏掉了“刀先碰到判定、判定没碰到身体”的那些拼刀。
 
 ### 17.4 规划器里的 EV_CLASH（`ForumConfig.clash`，默认关 = R3 / R4 的规划器）
 
