@@ -86,9 +86,9 @@ def jump_landing(x0: float, aim_x: float, front: float) -> float:
 class L2Rules:
     enabled: bool = True
     period: int = 6                                       # ticks between picks (10 Hz)
-    switch_x: float = 1.25                                # a new goal must score this many times the kept one's
-    dwell_s: float = 3.0                                  # a kept target is held this long before another one
-    goal_dwell_s: float = 0.5                             # the same target under another rule after this long
+    switch_x: float = 1.5                                 # another target must score this many times the kept one's
+    dwell_s: float = 4.0                                  # a kept target is held this long before another one
+    goal_dwell_s: float = 1.0                             # the same target under another rule after this long
     iso_u: float = 8.0                                    # isolated: no other enemy in play within this (|dx|, u)
     iso_hyst_u: float = 2.0                               # the kept target stays isolated down to iso_u - this
     run_u_s: float = 17.5                                 # dash + sprint (the person)

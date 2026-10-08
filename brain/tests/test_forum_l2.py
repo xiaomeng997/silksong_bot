@@ -244,9 +244,9 @@ def test_a_kept_target_is_held_for_the_dwell():
     p = t.decide(world(20.0, t=10.0), WinFc([a, b]), None, 3)
     assert p.goal == RUSH and p.target == 1                       # spread: the fastest pursuer
     b = subj(2, EN, 15.0)                                         # now the nearer (ETA 0.39 s against 0.85 s)
-    assert _run(t, [a, b], 20.0, 10.5).target == 1                # held: 0.5 s < dwell 3 s
-    assert _run(t, [a, b], 20.0, 12.2).target == 1
-    assert _run(t, [a, b], 20.0, 13.2).target == 2                # then the switch
+    assert _run(t, [a, b], 20.0, 10.5).target == 1                # held: 0.5 s < dwell 4 s
+    assert _run(t, [a, b], 20.0, 13.2).target == 1
+    assert _run(t, [a, b], 20.0, 14.2).target == 2                # then the switch (score x 1.78 >= 1.5)
     st = t.stats_dict()
     assert st["tgt_switches"] == 1 and st["switches"] == 1
 
@@ -279,8 +279,8 @@ def test_an_opening_and_a_rule_change_do_not_wait():
     b = subj(2, EN, 36.0)                                         # 6 u: the kept one still isolated (8 - 2 u)
     assert _run(t, [a, b], 20.0, 10.3, t_min=9.0).goal == RUSH
     b = subj(2, EN, 35.0)
-    assert _run(t, [a, b], 20.0, 10.4, t_min=9.0).goal == RUSH    # 0.4 s < goal_dwell 0.5 s
-    p = _run(t, [a, b], 20.0, 10.6, t_min=9.0)
+    assert _run(t, [a, b], 20.0, 10.9, t_min=9.0).goal == RUSH    # 0.9 s < goal_dwell 1 s
+    p = _run(t, [a, b], 20.0, 11.1, t_min=9.0)
     assert p.goal == KITE and p.target == 1 and t.stats["tgt_switches"] == 0
 
 
@@ -292,9 +292,10 @@ def test_a_rush_target_that_gets_company_is_kited_with_then_left():
     p = t.decide(world(20.0, t=10.0), WinFc(s, t_min=9.0), None, 3)
     assert p.goal == RUSH and p.target == 1
     s = [subj(1, CH, 30.0), subj(2, RE, 33.0), subj(3, EN, 48.0)]
-    p = _run(t, s, 20.0, 10.6, t_min=9.0)
+    assert _run(t, s, 20.0, 10.6, t_min=9.0).goal == RUSH         # the rule held goal_dwell_s (on the kept one)
+    p = _run(t, s, 20.0, 11.1, t_min=9.0)
     assert p.goal == KITE and p.target == 1 and t.stats["tgt_switches"] == 0
-    p = _run(t, s, 20.0, 13.1, t_min=9.0)
+    p = _run(t, s, 20.0, 14.1, t_min=9.0)
     assert p.goal == RUSH and p.target == 3 and t.stats["tgt_switches"] == 1
     assert t.stats["switch_kinds"] == {"ineligible": 1}
 
