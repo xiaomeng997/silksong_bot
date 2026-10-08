@@ -79,6 +79,17 @@ KEEP_F = 90                # forecasts, hero boxes and FSM entries kept for judg
 TICK_WAIT_F = HOOK_LOOKBACK_F   # a Multihit tick outside the support waits this long for its chain's Final Hit
 
 
+def _tv_summary(rows: list) -> dict | None:
+    """The chosen rows' terminal terms over an episode: mean E / overlap / H_exp, share trapped, mean share of rows
+    trapped."""
+    if not rows:
+        return None
+    a = [r for r in rows if r[0] is not None]
+    m = (lambda i: round(float(np.mean([r[i] for r in a])), 4) if a else None)
+    return {"ticks": len(rows), "E": m(0), "trapped": m(1), "overlap": m(2), "hexp": m(3),
+            "rows_trapped": round(float(np.mean([r[4] for r in rows])), 4)}
+
+
 def true_wave(raw: dict) -> tuple[int | None, bool]:
     """(BattleScene.currentWave from STATE room.battles while the battle runs, completed): test truth only."""
     battles = (raw.get("room") or {}).get("battles") or ()
@@ -143,13 +154,43 @@ class ForumPlannerPolicy(PlannerPolicy):
         self.episode = -1
         self._support = None
         self.k = 0
+        self.ab = self._ab_arms()
+        self.ab_arm: str | None = None
+
+    @staticmethod
+    def _ab_arms() -> list[tuple[str, dict]]:
+        """SSBOT_FORUM_AB: arms switched per episode (episode k runs arm k mod n, so the arms share the machine's load
+        within one batch; forum.md 20.11), "name:key=value,...;name:..." with the keys pc (commit_rank 0 / 1), fr
+        (forced_rank share / seen / seen_cf) and rx (the reactive support, SSBOT_FORUM_REACT's values). The clash mode
+        is not an arm key (it changes the candidate sets the planner is built with: combat_run --forum-clash). Empty:
+        one arm, the env switches below."""
+        spec = os.environ.get("SSBOT_FORUM_AB", "").strip()
+        arms = []
+        for part in filter(None, (p.strip() for p in spec.split(";"))):
+            name, _, kv = part.partition(":")
+            over = {}
+            for item in filter(None, (x.strip() for x in kv.split(","))):
+                k, _, v = item.partition("=")
+                if k == "pc" and v in ("0", "1"):
+                    over["commit_rank"] = v == "1"
+                elif k == "fr" and v in ("share", "seen", "seen_cf"):
+                    over["forced_rank"] = v
+                elif k == "rx" and v:
+                    ReactConfig.parse(v)                 # validates
+                    over["react"] = v
+                else:
+                    raise ValueError(f"SSBOT_FORUM_AB={spec!r}: {item!r} (pc=0|1, fr=share|seen|seen_cf, "
+                                     f"rx=off|delay|escape[+c|+i|+p5])")
+            arms.append((name.strip(), over))
+        return arms
 
     @staticmethod
     def _fcfg(clash: str = "off") -> ForumConfig:
         """ForumConfig of the R8 clash mode (CLASH_MODES) with the A/B switches SSBOT_FORUM_FR: FORCED_RISK's first
         risk key, "share" (default), "seen" or "seen_cf" (ForumConfig.forced_rank; forum.md §19); SSBOT_FORUM_REACT:
         the reactive support, "off" (default), "delay" or "escape", with "+c" / "+i" / "+p5" (ForumConfig.react;
-        forum.md §20)."""
+        forum.md §22). The module-level switches SSBOT_FORUM_PC (commit_rank, default on), SSBOT_FORUM_TV (terminal
+        value, default off) and SSBOT_FORUM_T (horizon, default 36) are ForumConfig's defaults (combat.forum_planner)."""
         fr = os.environ.get("SSBOT_FORUM_FR", "share").strip().lower() or "share"
         if fr not in ("share", "seen", "seen_cf"):
             raise ValueError(f"SSBOT_FORUM_FR={fr!r}: share | seen | seen_cf")
@@ -171,7 +212,7 @@ class ForumPlannerPolicy(PlannerPolicy):
         self.fc.warm()
         fcfg = self._fcfg(self.clash)
         self._set_react(fcfg)
-        planner = ForumPlanner(self.params, Terrain2D.empty(), PlannerConfig(T=36, threads=self.threads,
+        planner = ForumPlanner(self.params, Terrain2D.empty(), PlannerConfig(T=fcfg.T, threads=self.threads,
                                                                              variants="bounds_lo"), fcfg,
                                crest=self.crest)
         fcast = self.fc.forecast(HORIZON_S)
@@ -210,11 +251,15 @@ class ForumPlannerPolicy(PlannerPolicy):
         self.terrain = self.terrain or Terrain2D.empty()
         self.params = self.params0
         if self.planner is None:
-            self.planner = ForumPlanner(self.params, self.terrain, PlannerConfig(T=36, threads=self.threads,
+            fcfg = self._fcfg(self.clash)
+            self.planner = ForumPlanner(self.params, self.terrain, PlannerConfig(T=fcfg.T, threads=self.threads,
                                                                                  variants="bounds_lo"),
-                                        self._fcfg(self.clash), crest=self.crest)
+                                        fcfg, crest=self.crest)
         self.planner.params = self.params
         self.planner.terrain = self.terrain
+        if self.ab:
+            self.ab_arm, over = self.ab[self.episode % len(self.ab)]
+            self.planner.fcfg = replace(self._fcfg(self.clash), **over)
         self.planner.reset()
         self._set_react(self.planner.fcfg)
         self._audit0 = self.planner.audit.as_dict()
@@ -248,6 +293,8 @@ class ForumPlannerPolicy(PlannerPolicy):
         self.counts: Counter = Counter()
         self.tick_ms: list[float] = []
         self.plan_ms: list[float] = []
+        self.tv_ms: list[float] = []               # the terminal value's share of the tick (field + rows + kill value)
+        self.tv_rows: list[tuple] = []             # the chosen row's (E, trapped, overlap, H_exp), trapped share
         self._last_f = None
         self._unpred_backlog = 0
         self._unpred_src: list = []
@@ -576,6 +623,11 @@ class ForumPlannerPolicy(PlannerPolicy):
                          sup=r.mask is not None)
         self.tick_ms.append((time.perf_counter() - t0) * 1e3)
         self.plan_ms.append((t2 - t1) * 1e3)
+        tvi = self.planner.last_info.get("tv")
+        if tvi is not None:
+            self.tv_ms.append(tvi["ms"])
+            self.tv_rows.append((tvi.get("E"), tvi.get("trapped"), tvi.get("overlap"), tvi.get("hexp"),
+                                 tvi["trapped_share"]))
         self.counts[prefs.mode] += 1
         self.counts["forced_risk"] += res.forced_risk
         if getattr(res, "clash", None):
@@ -687,7 +739,7 @@ class ForumPlannerPolicy(PlannerPolicy):
                "triggers": list(r.decision.triggers), "unpred": unpred, "ms": round(res.t_ms.get("total", 0.0), 3),
                "kill_hp": kill_hp, "ykill": ykill, "kill_prims": sorted(p.name for p in r.decision.kill_prims),
                "fi": {k: li.get(k) for k in ("posture", "N", "stage1_pass", "enveloped", "hitfx", "react", "capped",
-                                             "cut", "overrun", "seen", "seen_cf", "esc")},
+                                             "cut", "overrun", "tv", "seen", "seen_cf", "esc")},
                "pocket": self.tac.last.get("pocket_veto"), "subj": subj}
         if getattr(res, "clash", None):
             # the chosen plan relies on a clash: w (every clash in it happens), clashes, ranked in FORCED_RISK (partial,
@@ -711,10 +763,13 @@ class ForumPlannerPolicy(PlannerPolicy):
             x["unpred"] = x["f"] in unpred_f
         modes = {k: v for k, v in self.counts.items() if not k.startswith("_")}
         fc = self.planner.fcfg if self.planner is not None else None
-        return {"view": self.view, "policy": "forum_planner", "k": 0, "modes": modes,
-                "fcfg": None if fc is None else {"forced_rank": fc.forced_rank, "react": fc.react},
+        return {"view": self.view, "policy": "forum_planner", "k": 0, "modes": modes, "ab_arm": self.ab_arm,
+                "fcfg": None if fc is None else {"forced_rank": fc.forced_rank, "react": fc.react,
+                                                 "commit_rank": fc.commit_rank, "terminal": fc.terminal, "T": fc.T},
+                "branch_model": self.fc.bv is not None,
                 "tick_ms_p50": q(self.tick_ms, 50), "tick_ms_p99": q(self.tick_ms, 99),
                 "plan_ms_p50": q(self.plan_ms, 50), "plan_ms_p99": q(self.plan_ms, 99),
+                "tv_ms_p50": q(self.tv_ms, 50), "tv_ms_p99": q(self.tv_ms, 99), "terminal": _tv_summary(self.tv_rows),
                 "ticks": len(self.tick_ms), "late_ticks": sum(1 for x in self.tick_ms if x > 16.7),
                 "unpredicted": self.unpredicted, "unpredicted_unknown": self.unpredicted_unknown,
                 "unpredicted_sources": self.unpred_sources, "follow_ups": self.follow_ups, "mh_ticks": self.mh_ticks, "hits_taken": self.hits_taken, "hit_log": self.hit_log,

@@ -36,7 +36,11 @@ Per tick (the lexicographic order and every rule of Planner.tick unless named he
               are then put on one lane over one frame set (stage 1's: the nominal box against the support, or'ed with
               the hit branch's contact, from the hit frame on where a cap left it unchecked) and ranked by the share
               of those frames in contact (P's stand-in: MultiForecast.prob costs 3.7 ms p50 on wave 6, one query per enemy, placement
-              kind and probability value; exact_p turns it back on), the latest first contact, the envelope's, J.
+              kind and probability value; exact_p turns it back on), with commit_rank (default; SSBOT_FORUM_PC=0:
+              off) the share in contact with the committed support and then with the current attacks' fine placements
+              (P_cm, P_f: the support's P ties at 1 in wave 0, forum.md 20.7 / 20.8; they also lead the preselection;
+              stage 1's own support query split by part gives them, MultiForecast.occupied_split, forum.md 20.11),
+              the latest first contact, the envelope's, J.
               forced_rank "seen" (forum.md §19) puts a key before that share, in the preselection too: the frames
               each row's nominal box meets the damage colliders seen now, moved along their entity's velocity
               (seen_contacts; fewest first, then the latest first contact). In wave 0 the support saturates (every
@@ -44,6 +48,9 @@ Per tick (the lexicographic order and every rule of Planner.tick unless named he
               share of stage 1's frames in the committed fine placements (committed_fine_share: an attack under way
               whose entry is known to a few bins, its strike at its anchor; the windows and the start-later boxes,
               which saturate, are left out): the strikes that open after their antic, which "seen" cannot see yet.
+              The keys stack (the integration of the wave-0 forensics and R5 value tracks): seen > committed fine
+              share (seen_cf) > P > P_cm > P_f (commit_rank) > the first contacts > J; each switch off leaves its keys
+              all 0 (the order of the others unchanged).
   determinism deadline_ms = inf: decisions do not depend on the machine's speed (audits, identity checks).
   unmodelled  a row that presses attack while dashing / sprinting is vetoed (the Reaper's dash stab is R7's).
   not here    the lock check past the horizon (no Silkspear in the Forum set; the Bind macro checks its own), the key
@@ -55,6 +62,7 @@ Scores only (GoalPrefs: hit_w per enemy iid, stance, the risk map): no prefs fie
 core rows' envelope, so the core rows' S / Hz / U are the same under any prefs (tests/test_forum_planner.py).
 """
 import math
+import os
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -68,6 +76,7 @@ from ssbot.combat.planner import (KillPlan, MACRO_MARGIN, NO_CONTROL_MODES, Plan
                                   _hull_points, _is_macro, _rect_meets_polys)
 from ssbot.combat.safety_filter import (R_KILL, REASONS, FilterContext, hazard_flags, i3_kill_allowed, kill_frames,
                                         kill_window_frames, unpausable, veto)
+from ssbot.combat.terminal import EnemyFields, TerminalValue, end_class
 from ssbot.core.forum import FORUM_TYPES, FORUM_WAVES, WALL_L, WALL_R
 from ssbot.knowledge import kinematics as kin
 from ssbot.knowledge.attack_shapes import AttackTable
@@ -125,9 +134,18 @@ def clash_mix(w: float, share_branch: float, share_plain: float) -> float:
     return w * share_branch + (1.0 - w) * share_plain
 
 
+H_W = {1: 1.0, 2: 1.0, 3: 0.6}     # H_exp's weight by h (hits to death; 4 and more: H_W_FAR, unknown: H_W_NONE)
+H_W_FAR, H_W_NONE = 0.3, 0.5
+
+
+TV_ON = os.environ.get("SSBOT_FORUM_TV", "0") == "1"        # 1: the terminal value (off by default: forum.md 20.11)
+PC_ON = os.environ.get("SSBOT_FORUM_PC", "1") != "0"        # 0: FORCED_RISK without the committed support's shares
+T_ENV = int(os.environ.get("SSBOT_FORUM_T", "36") or 36)     # the horizon arm (§4.5: T 36 / 48)
+
+
 @dataclass
 class ForumConfig:
-    T: int = 36                   # 0.6 s (§4.5)
+    T: int = T_ENV                # 0.6 s (§4.5); SSBOT_FORUM_T=48: the R5 horizon arm
     variants: str = "bounds_lo"
     chunk: int = 32
     K_b: int = 96
@@ -141,12 +159,30 @@ class ForumConfig:
     p_k: int = 16
     exact_p: bool = False         # FORCED_RISK ranks by MultiForecast.prob (3.7 ms p50 on wave 6: one query per enemy,
     #                               placement kind and probability value) instead of the share of frames in contact
+    p_all: bool = False           # audits (tools/forum_tv_audit): FORCED_RISK's P / first contact for every allowed
+    #                               known row, the choice still among the p_k preselected (decisions unchanged)
     forced_rank: str = "share"    # FORCED_RISK's first risk key: "share" (the support share, above), "seen" (frames in
     #                               contact with the damage colliders seen now, moved along their entity's velocity,
     #                               then the share; forum.md §19: the support saturates in wave 0 and the share ties),
     #                               "seen_cf" (seen, then the share of frames in the committed attacks' fine
     #                               placements: the strikes of attacks already under way whose entry is known)
-    react: str = "off"            # reactive support (forum.md §20): "off"; "delay" (MultiForecaster.react: an attack
+    commit_rank: bool = PC_ON     # FORCED_RISK: rows tied on P ranked by their share of stage 1's frames in contact
+    #                               with the committed support (P_cm: current attacks, tails, death tails, hazards),
+    #                               then with the current attacks' fine placements (P_f) (forum.md 20.7: P ties at 1 in
+    #                               wave 0); they lead the preselection too; scores only (S, Hz, U unchanged); on by
+    #                               default since the round-2 A/B (forum.md 20.8: hits / min 18.9 -> 12.4); the
+    #                               parts come from stage 1's own query (MultiForecast.occupied_split, forum.md 20.11)
+    terminal: bool = TV_ON        # the terminal value (R5, combat.terminal): E / trapped / overlap / H_exp into J, the
+    #                               kill value into the target weights; scores only; off by default (SSBOT_FORUM_TV=1:
+    #                               on): no closed-loop gain in wave 0 (forum.md 20.5: 18.4 hits / min with and
+    #                               without) and it runs before the envelope, inside its deadline (0.9-1.3 ms p50)
+    w_E: float = 4.0              # J per unit of E (the reachable share clear of the enemies' bodies, 0..1)
+    w_trap: float = 3.0           # J off when every way out closes within TRAP_S
+    w_ov: float = 1.5             # J off per unit of overlap (reachable share inside two enemies' zones)
+    w_H: float = 2.0              # J off per unit of H_exp (reachable share inside a 2-mask / multi-hit enemy's zone),
+    #                               times H_W[h]
+    w_K: float = 3.0              # a target's hit weight x (1 + w_K kill value)
+    react: str = "off"            # reactive support (forum.md §22): "off"; "delay" (MultiForecaster.react: an attack
     #                               that has not started strikes no earlier than its wind-up); "escape" (delay and the
     #                               escape check: the chosen safe plan leaves the hero able to get out of the reach of
     #                               any attack an enemy may start at its end or at a late lock-in); "+c" / "+i" / "+p5"
@@ -638,6 +674,9 @@ class ForumPlanner(Planner):
         self.last_info: dict = {}
         self.debug = False                # offline forensics (tools.forum_hit_forensics): last_info["dbg"] keeps the
         #                                   tick's rows (nominal boxes, flags, J, ...); no effect on any decision
+        self.last_sel: dict | None = None
+        self.tv = TerminalValue(params) if self.fcfg.terminal else None
+        self._two: dict = {}
 
     def warm_kernels(self) -> None:
         """Planner.warm_kernels and the "seen" key's kernel (it runs only on FORCED_RISK ticks: a first call mid-fight
@@ -668,11 +707,45 @@ class ForumPlanner(Planner):
                 np.array([float(hw.get(t.iid, 1.0)) if k < self.fcfg.K_tgt else 0.0 for k, t in enumerate(keep)]),
                 keep)
 
-    def _score_forum(self, ws, roll, latched, start, f, prefs, tk):
+    def _two_mask(self, f):
+        """owner -> it has a 2-mask attack or a multi-hit chain (per type, from the tables: family damage >= 2 or a
+        chain of more than one hit)."""
+        from ssbot.combat.multi_forecast import _chain
+        fc = f._fc
+        tables = fc.tables
+        if id(tables) not in self._two:
+            two = set()
+            for tk_, tt in tables.types.items():
+                if any(fm.damage >= 2 or _chain(tables.chains, tk_, name)[0] > 1 for name, fm in tt.families.items()):
+                    two.add(tk_)
+            self._two = {id(tables): two}
+        two = self._two[id(tables)]
+        return lambda k: (k in fc.trackers and fc.trackers[k].tk in two)
+
+    def _terminal(self, f, ctx):
+        """The tick's body field (combat.terminal) and the kill value per enemy iid; (None, {}) without a multi-enemy
+        forecast or with the terminal value off."""
+        fc = getattr(f, "__dict__", {}).get("_fc")
+        if self.tv is None or f.__dict__.get("boss_fc") is not None or not hasattr(fc, "trackers"):
+            return None, {}
+        fields = EnemyFields.from_bodies(f, self._two_mask(f))
+        ws = getattr(f._fc, "_ws", None)
+        if ws is None or ws.hero is None:
+            return fields, {}
+        dmg = getattr(getattr(ctx, "damage", None), "nail", None)
+        hit = float(dmg) if dmg is not None and math.isfinite(dmg) and dmg > 0 else 9.0
+        hx, hy = float(ws.hero.pos.v[0]), float(ws.hero.pos.v[1])
+        return fields, fields.kill_value(hx, hy, hit)
+
+    def _score_forum(self, ws, roll, latched, start, f, prefs, tk, ctx=None):
         w = prefs.weights
         N, T1 = roll.flags.shape
         face0 = 1 if np.asarray(start).reshape(kin.K, -1)[kin.FACE, 0] >= 0 else -1
         tbox, tok, tw, keep = self._forum_targets(ws, f, tk, prefs)
+        t_tv = time.perf_counter()
+        fields, kv = self._terminal(f, ctx)
+        if kv and len(keep):
+            tw = tw * np.array([1.0 + self.fcfg.w_K * kv.get(t.iid, 0.0) for t in keep])
         wv = np.array([w.get("hit", 10.0), w.get("waste", 0.6), w.get("jump", 0.15), w.get("stance", 0.6),
                        w.get("risk", 3.0), w.get("face", 0.3), w.get("ground", 0.2), 0.0])
         rx = prefs.risk_x if len(prefs.risk_x) else np.zeros(1)
@@ -693,6 +766,17 @@ class ForumPlanner(Planner):
                             out["risk"], out["unmod"], self.down_slash, self.combo_f, out["sw_f"], out["sw_k"],
                             out["sw_face"])
         out["targets"] = keep
+        if fields is not None:
+            fc_ = self.fcfg
+            c = 0.5 * (roll.box[:, T1 - 1, :2] + roll.box[:, T1 - 1, 2:])
+            ecls = end_class(roll.flags[:, T1 - 1], roll.vel[:, T1 - 1, 1])
+            E, trapped, ov, he = self.tv.rows(fields, c[:, 0], c[:, 1], ecls, float(tk[T1 - 1]))
+            h = getattr(ctx, "h", None)
+            hw = H_W_NONE if h is None else H_W.get(int(h), H_W_FAR)
+            j_tv = fc_.w_E * E - fc_.w_trap * trapped - fc_.w_ov * ov - fc_.w_H * hw * he
+            out["J"] += j_tv
+            out.update(E=E, trapped=trapped, overlap=ov, hexp=he, kv=kv, J_tv=j_tv,
+                       tv_ms=(time.perf_counter() - t_tv) * 1e3, field_ms=fields.ms)
         return out
 
     # ---- hit branches ----
@@ -770,7 +854,7 @@ class ForumPlanner(Planner):
     # ---- the escape check (reactive support, ForumConfig.react "escape") ----
 
     def _threats(self, f, hero: tuple[float, float]) -> list[tuple]:
-        """The attacks enemies in play may start (forum.md §20): per enemy whose walk lets it start an attack within
+        """The attacks enemies in play may start (forum.md §22): per enemy whose walk lets it start an attack within
         the forecast (Subject.t_strike) and per family of its type with a strike time (strikes.json: the least commit
         -> first own damage, the p5 for REACT_EXCEPT): (t_strike, family template id, frames from a commit to its
         first damage less the view's latency, its position, velocity and age). The family template (the logged
@@ -1263,7 +1347,12 @@ class ForumPlanner(Planner):
         fr = self._s1_frames(T1)
         cx = 0.5 * (r1.box[:, fr, 0] + r1.box[:, fr, 2])
         cy = 0.5 * (r1.box[:, fr, 1] + r1.box[:, fr, 3])
-        o = f.occupied(cx, cy, tk[fr])
+        o_cm = o_f = None
+        if fcfg.commit_rank and hasattr(f, "occupied_split"):
+            # commit_rank's parts from the same queries (the union is occupied()'s array): no work after the envelope
+            o, o_cm, o_f = f.occupied_split(cx, cy, tk[fr])
+        else:
+            o = f.occupied(cx, cy, tk[fr])
         if enemy_only:
             o &= (r1.flags[:, fr] & F_INVULN) == 0
         S1 = o.any(axis=1)
@@ -1272,7 +1361,7 @@ class ForumPlanner(Planner):
         k1 = o.argmax(axis=1)
         t_hit = np.where(S1, np.where(k1 > 0, fr[np.maximum(k1 - 1, 0)] + 1, fr[0]), T1)
         t2 = time.perf_counter()
-        sc = self._score_forum(ws, r1, latched, start, f, prefs, tk)
+        sc = self._score_forum(ws, r1, latched, start, f, prefs, tk, ctx)
         J = sc["J"]
         if cont:
             J[-1] += prefs.weights.get("cont", 0.0)
@@ -1428,6 +1517,7 @@ class ForumPlanner(Planner):
             wj = cmd[:, :min(rem, T, cfg.release_latency)]
             keep = ((wj & B_JUMP) != 0).all(axis=1) & ((wj & B_QUICKCAST) == 0).all(axis=1)
         bind_res = None
+        self.last_sel = None
         if prefs.want_bind and ctx.want_bind:
             bind_res = self._bind(ws, start, hold, prefix, f, ctx)
         forced = not safe.any() and not (bind_res is not None and bind_res[0])
@@ -1437,6 +1527,8 @@ class ForumPlanner(Planner):
         sk_f = np.full(N, T1, np.int64)
         sk_c = np.zeros(N)
         sel = ok & known
+        Pcm = np.zeros(N)                     # commit_rank's keys (0 on every row otherwise: the order is unchanged)
+        Pf = np.zeros(N)
         if forced and sel.any():
             cand = np.flatnonzero(sel)
             if fcfg.forced_rank in ("seen", "seen_cf"):
@@ -1449,13 +1541,25 @@ class ForumPlanner(Planner):
                     sk_n[cand], sk_f[cand] = cnt[cand], fst[cand]
                 if fcfg.forced_rank == "seen_cf":
                     sk_c[cand] = committed_fine_share(f, r1.box, inv1, cand, fr, tk)
-                cand = cand[np.lexsort((-J[cand], -t_hit[cand], sk_c[cand], -sk_f[cand], sk_n[cand]))][:fcfg.p_k]
-            else:
-                cand = cand[np.lexsort((-J[cand], -t_hit[cand]))][:fcfg.p_k]
+            if o_cm is not None:
+                # the nominal box centre on stage 1's frames (its invulnerable ones skipped) against the committed
+                # support (P_cm) and the current attacks' fine placements (states with a known entry: P_f): stage
+                # 1's own query split by part (MultiForecast.occupied_split), so the keys cost two means here
+                live = (r1.flags[cand][:, fr] & F_INVULN) == 0
+                Pcm[cand] = (o_cm[cand] & live).mean(axis=1)
+                Pf[cand] = (o_f[cand] & live).mean(axis=1)
+            # the preselection: seen > the committed fine share (seen_cf) > P_cm > P_f (commit_rank) > the latest first
+            # contact > J (a switched-off key is 0 on every row)
+            cand = cand[np.lexsort((-J[cand], -t_hit[cand], Pf[cand], Pcm[cand], sk_c[cand], -sk_f[cand],
+                                    sk_n[cand]))]
+            n_k = min(fcfg.p_k, len(cand))
             # the rows with a clash branch are ranked whatever their first contact (their branch is the point)
-            cset = set(int(i) for i in cand)
-            cand = np.concatenate([cand, np.array(sorted(i for i in clash_occ if sel[i] and i not in cset),
-                                                  np.int64)]).astype(np.int64)
+            pre = cand[:n_k]
+            pset = set(int(i) for i in pre)
+            pre = np.concatenate([pre, np.array(sorted(i for i in clash_occ if sel[i] and i not in pset),
+                                                np.int64)]).astype(np.int64)
+            if not fcfg.p_all:                    # p_all (audits): P for every allowed known row, the choice in pre
+                cand = pre
             # the candidates on one lane over one frame set: the nominal box's centre against the support on stage
             # 1's frames (its exact test, known for every row), or'ed with the hit branch's contact there (its hull;
             # from the hit frame on where a cap left it unchecked): the share of those frames in contact and the
@@ -1477,7 +1581,7 @@ class ForumPlanner(Planner):
                     w, oc = clash_occ[int(i)]
                     Pc[i] = clash_mix(w, 0.0 if oc is None else float(oc[fr].mean()), float(Pc[i]))
             sel = np.zeros(N, bool)
-            sel[cand] = True
+            sel[pre] = True
         zero = ~cmd.any(axis=1)
         idle_clear = int(min(t_hit[zero & known].min() if (zero & known).any() else T1, T1) - P) \
             if zero.any() else None
@@ -1506,12 +1610,19 @@ class ForumPlanner(Planner):
                 mkeep[N - 1] = True
             # FORCED_RISK: the least share in contact, the latest first contact on the nominal lane, then on the
             # envelope (rows clear on the nominal lane), J (a tick with a safe row: those rows all tie on these)
-            order = np.lexsort((-J, -t_hit, -t_c, Pc, sk_c, -sk_f, sk_n, ~V, ~mkeep, ~keep, clash_p, S, U, hz_soft,
-                                hz))
+            order = np.lexsort((-J, -t_hit, -t_c, Pf, Pcm, Pc, sk_c, -sk_f, sk_n, ~V, ~mkeep, ~keep, clash_p, S, U,
+                                hz_soft, hz))
             order = order[sel[order]]
             i = int(order[0])
             tail_ok = None
             carried = cont and i == N - 1 and self.prev_tail_ok
+            # the selection's inputs, by reference (offline audits: tools/forum_tv_audit; not logged)
+            self.last_sel = {"J": J, "J_tv": sc.get("J_tv"), "t_hit": t_hit, "t_c": t_c, "Pc": Pc, "Pcm": Pcm, "Pf": Pf,
+                             "sk_n": sk_n, "sk_f": sk_f, "sk_c": sk_c, "clash_p": clash_p, "tk": tk, "V": V,
+                             "mkeep": mkeep, "keep": keep, "S": S, "U": U, "hz": hz, "hz_soft": hz_soft, "sel": sel,
+                             "allowed": ok & known, "safe": safe, "forced": forced, "first": i, "box": r1.box,
+                             "flags": r1.flags, "cmd": cmd, "P": P, "T1": T1, "p_k": fcfg.p_k,
+                             **{k: sc.get(k) for k in ("E", "trapped", "overlap", "hexp")}}
             esc_row = None
             if fcfg.escape and not carried:
                 # reactive support: of the safe rows in the order, the first that leaves the hero an escape from
@@ -1548,6 +1659,7 @@ class ForumPlanner(Planner):
                 i, tail_ok = self._tail_pick(f, r1, hold_end, ranked, P + T, i)
             elif carried:
                 tail_ok = True
+            self.last_sel["chosen"] = i
             self.prev_tail_ok = bool(tail_ok)
             sel_cmd = cmd[i]
             name = "CONTINUE" if cont and i == N - 1 else cs.name(i)
@@ -1597,7 +1709,8 @@ class ForumPlanner(Planner):
                           "core": int(core.sum()), "core_pass": n_core, "prio": n_prio, "overrun": overrun,
                           "cut": cut, "hitfx": budget["hitfx"], "react": budget["react"], "capped": budget["capped"],
                           "uncapped": budget.get("uncapped", 0),
-                          "S": S, "Hz": hz, "U": U, "core_mask": core, "env": env, "Pc": Pc, "t_c": t_c,
+                          "S": S, "Hz": hz, "U": U, "core_mask": core, "env": env, "Pc": Pc, "Pcm": Pcm, "Pf": Pf,
+                          "t_c": t_c,
                           "cand": sel if forced else np.zeros(N, bool), "hit_occ": hit_occ,
                           "seen": int(sk_n[res.idx]) if res.idx >= 0 else None,
                           "seen_cf": round(float(sk_c[res.idx]), 3) if res.idx >= 0 else None,
@@ -1607,6 +1720,16 @@ class ForumPlanner(Planner):
                                      "J": J, "ok": ok, "known": known, "t_hit": t_hit, "V": V, "keep": keep,
                                      "names": [cs.name(i) for i in range(N0)] + (["CONTINUE"] if cont else []),
                                      "chosen": int(res.idx), "fr": fr, "o": o, "tk": tk}
+        if "E" in sc:
+            ci = res.idx if 0 <= res.idx < N else None
+            self.last_info["tv"] = {"ms": round(sc["tv_ms"], 3), "field_ms": round(sc["field_ms"], 3),
+                                    "kv": {str(k): round(v, 3) for k, v in sc["kv"].items() if v > 0},
+                                    **({} if ci is None else {"E": round(float(sc["E"][ci]), 3),
+                                                              "trapped": bool(sc["trapped"][ci]),
+                                                              "overlap": round(float(sc["overlap"][ci]), 3),
+                                                              "hexp": round(float(sc["hexp"][ci]), 3)}),
+                                    "E_max": round(float(sc["E"].max()), 3),
+                                    "trapped_share": round(float(sc["trapped"].mean()), 3)}
         res.t_ms = {"filter": (t1 - t0) * 1e3, "rollout": (t2 - t1) * 1e3, "score": (t3 - t2) * 1e3,
                     "envelope": (t4 - t3) * 1e3, "prob_bind": (t5 - t4) * 1e3, "select": (t6 - t5) * 1e3,
                     "total": (t6 - t0) * 1e3, "s1_rollout": (t1r - t1) * 1e3, "s1_support": (t2 - t1r) * 1e3}

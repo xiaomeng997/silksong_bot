@@ -1,4 +1,4 @@
-"""Reactive support audit (task "reactive support", forum.md §20): recorded Forum planner episodes replayed open loop
+"""Reactive support audit (task "reactive support", forum.md §22): recorded Forum planner episodes replayed open loop
 (as tools.forum_hit_forensics: the recorded STATEs drive ForumPlannerPolicy, the prefix of each tick is the recorded
 ACTION masks, the supervisor never takes the keys), once per variant of the reactive support.
 

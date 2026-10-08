@@ -77,7 +77,8 @@ def main(argv=None) -> int:
     st = pol.stats()
     out = {"run": str(a.run), "instance": a.instance, "episode": a.episode, "outcome": row.get("outcome"),
            "states": n, "ticked": min(n, a.frames), "load_s": round(t_load, 1), "warm_s": round(t_warm, 1),
-           **{k: st[k] for k in ("tick_ms_p50", "tick_ms_p99", "plan_ms_p50", "plan_ms_p99", "late_ticks", "modes",
+           **{k: st[k] for k in ("tick_ms_p50", "tick_ms_p99", "plan_ms_p50", "plan_ms_p99", "tv_ms_p50", "tv_ms_p99",
+                                 "terminal", "late_ticks", "modes",
                                  "forced_risk_ticks", "forced_streaks", "per_wave", "wave_check", "wave_bad",
                                  "wave_tracker", "audit", "targets", "binds", "cogfly", "unpredicted",
                                  "unpredicted_unknown", "unpredicted_sources", "follow_ups", "mh_ticks", "hits_taken",

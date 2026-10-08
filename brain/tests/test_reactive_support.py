@@ -1,4 +1,4 @@
-"""Reactive support (task "reactive support", forum.md §20): multi_forecast.ReactConfig (the strike delays of attacks
+"""Reactive support (task "reactive support", forum.md §22): multi_forecast.ReactConfig (the strike delays of attacks
 not started, the committed / idle / p5 extensions), the planner's escape check and the policy switch, on the synthetic
 Reed tables of test_multi_forecast."""
 import math

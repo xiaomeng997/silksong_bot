@@ -498,6 +498,31 @@ def test_coarse_and_bounding_box_forms_are_supersets():
         assert not (want & ~got).any()
 
 
+def test_occupied_split_is_the_union_and_its_committed_and_fine_parts():
+    """occupied_split (ForumPlanner's commit_rank keys from stage 1's query, forum.md 20.11): the union is occupied()
+    bit for bit, the parts are _union_occ(committed_only=True) and _fine_occ() on the same points; idle, attacking
+    and dead enemies (body tubes, fine placements, death boxes)."""
+    tabs = _tables()
+    script = _script_stab()
+    tk = np.arange(0, 25) * BIN
+    rng = np.random.default_rng(7)
+    X = rng.uniform(15.0, 26.0, (300, len(tk)))
+    Y = rng.uniform(2.0, 8.0, (300, len(tk)))
+    mf = MultiForecaster(tabs, ORACLE, waves=False)
+    n_com = n_rest = prev = 0
+    for k in (2, 12, 17, 22, 26):
+        _run(mf, script[prev:k])
+        prev = k
+        f = mf.forecast(0.8)
+        u, com, fine = f.occupied_split(X, Y, tk)
+        assert np.array_equal(u, f.occupied(X, Y, tk))
+        assert np.array_equal(com, f._union_occ(X, Y, tk, committed_only=True))
+        assert np.array_equal(fine, f._fine_occ(X, Y, tk))
+        n_com += int(com.sum())
+        n_rest += int((u & ~com).sum())
+    assert n_com > 0 and n_rest > 0
+
+
 def test_forecasters_sharing_tables_agree():
     """A second forecaster on the same tables (the next fight in the process) reuses the family walk ids: a key
     registered again used to take the next new key's id, so one family walk got another's box table."""

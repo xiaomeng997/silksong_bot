@@ -99,7 +99,7 @@ TINY_CLUSTER_U = 4.0              # Tinies in one cell of this grid share one pl
 ENTRY_LAG_S = 1.0                 # a wave's activation -> its member's entry family start (upper bound)
 ENTRY_OWNER = -(1 << 50)          # placement owner of wave w's entries: ENTRY_OWNER - w
 PIECES_S = ((0.4, 6 * BIN), (1.0, 12 * BIN), (math.inf, 24 * BIN))   # start-time piece length by distance
-# Reactive support (task "reactive support", forum.md §20; the person 2026-10-08: the wind-ups are long, dodging once
+# Reactive support (task "reactive support", forum.md §22; the person 2026-10-08: the wind-ups are long, dodging once
 # one starts is not too late): an attack that has not started cannot strike before its wind-up. The view's sensing
 # latency: the oracle sees a commit one frame late; the vision view adds the M3 attack-start target (33 ms, DESIGN
 # §3.9.5).
@@ -1812,6 +1812,36 @@ class MultiForecast:
         """occupied() split by what covers (the recall's accounting): "forecast" (placements, hazard paths, death
         tails, the arena-wide boxes), "idle body tube", "collider tube", "hazard tube"."""
         return self._union_occ(x, y, tk, parts=True)
+
+    def occupied_split(self, x, y, tk):
+        """(occupied(), its committed part, its fine part) from one pass: the same component queries, each split by
+        the placements' committed flag, so the union is occupied()'s array bit for bit and the parts are
+        _union_occ(committed_only=True) (current attacks, tails, death tails, hazard paths, arena boxes) and
+        _fine_occ() (every fine placement) on the same points: ForumPlanner's commit_rank keys without a second
+        query (forum.md 20.11). A wrapped boss: (occupied(), None, None)."""
+        if self.boss_fc is not None:
+            return self.boss_fc.occupied(x, y, tk), None, None
+        x = np.asarray(x, np.float64)
+        y = np.asarray(y, np.float64)
+        tk = np.asarray(tk, np.float64)
+        cp = self.pm["committed"] if len(self.P) else None
+        fine = self._fine_occ(x, y, tk, cp)
+        com = fine.copy()
+        if cp is not None:
+            fine |= self._fine_occ(x, y, tk, ~cp)
+        rest = np.zeros(x.shape, bool)
+        if len(self.W):
+            cw = self.wm["committed"]
+            com |= self._win_occ(x, y, tk, cw)
+            rest |= self._win_occ(x, y, tk, ~cw)
+        if self.n_bbox:
+            cb = self.bb["committed"]
+            com |= self._bbox_occ(x, y, tk, cb)
+            rest |= self._bbox_occ(x, y, tk, ~cb)
+        com |= self._path_occ(x, y, tk)
+        com |= self._box_occ(x, y, tk, kinds=("death", "arena"))
+        rest |= self._box_occ(x, y, tk, kinds=("idle", "collider", "hazard"))
+        return com | fine | rest, com, fine
 
     def occupied_without(self, x, y, tk, exclude, comfort: bool = False) -> np.ndarray:
         """occupied() without the support of `exclude`: an enemy iid (a kill: its tails, tubes and the instances it

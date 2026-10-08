@@ -2552,3 +2552,190 @@ Open issues (fixer round):
    forecast tables have never run live.
 5. **Integration.** This branch also touches `combat/multi_forecast.py` / `enemy_tracker.py`, as R5 value does. The
    forum.md section is 18; R5 value's is 17.
+
+## Task R5 value - Forum plan round R5, the terminal-value half (branch worktree-wf_814dfeea-b10-2)
+
+Worktree `C:\modeling\silksong_bot\.claude\worktrees\wf_814dfeea-b10-2` (from main bc46dc9). Facts: forum.md section 17
+(Chinese); plan R5 row: the 2026-10-08 note. Frozen checkout `C:\ssbot\live_r5v_35e5fe6` (git archive of 35e5fe6 +
+CODE_REV + the R3 tables from `C:\ssbot\tables\forum_r3_2a10a0d`); outputs `C:\ssbot\data\m2_forum_r5v\`.
+
+### Done (committed)
+
+- `combat/terminal.py`: the plan's support field (`EnemyFields.build`: per owner, 0.5 x 1 u cells x 0.1 s bins from
+  0.6 s to the forecast horizon, the store's per-bin bounding boxes over every entry a placement allows in the bin,
+  tubes / boxes / paths hulled over the bin and dilated by the hurtbox; conservative: field empty => fine empty), the
+  body field (`from_bodies`, what J uses: see below), reachable templates (`forum_reach.npz`, 4 end classes x
+  0.2 / 0.5 / 0.9 / 1.4 s from 135 primitives of the Forum kinematics; rebuild: `python -m ssbot.combat.terminal`),
+  `TerminalValue.rows` (E, trapped, overlap, H_exp per row, numba), `kill_value` (leave-one-out near the hero / hits
+  needed).
+- ForumPlanner: `ForumConfig.terminal` (env `SSBOT_FORUM_TV`; default on in rounds 1-2, off since round 3) adds w_E E - w_trap trapped - w_ov overlap -
+  w_H H_W[h] H_exp to J and multiplies each target's hit weight by (1 + w_K kill value); `ForumConfig.T` from
+  `SSBOT_FORUM_T` (default 36; the policy's PlannerConfig follows it). Scores only (test: Hz, U and FORCED_RISK equal
+  with and without, deterministic mode).
+- Hit-target fix (a bug since R3): `EnemyTracker.body` was the bounding box of every enabled collider incl. the range
+  triggers (layer 13: Envoy 108 u, Choristor 30 u, Reed 24 u wide), so every swing "hit". New oracle-only
+  `Entity.hit_polys` (enabled colliders not on layers 13 / 14 / 27), used by EnemyTracker for the body (env
+  `SSBOT_FORUM_HITBODY=0`: the old targets). The support does not read `body` (unchanged, certification stands).
+- Policy: stats `tv_ms_p50/p99` and `terminal` (chosen rows' E / trapped / overlap / H_exp), decision log `fi.tv`;
+  `forum_policy_replay` prints them.
+- Tests: `tests/test_terminal.py` (8); test_forum_planner + test_multi_forecast + test_worldstate + test_observability +
+  forum tactics / policy hits pass.
+
+### Measured (forum.md 17)
+
+- Support field saturation (A0b recording 20261005_205437 i1 ep0, wave 0): the union is 100 % of the cells in every
+  bin 0.6-2.0 s at every sampled tick, each of Reed / Envoy / Choristor alone 100 %; the fine query covers the whole
+  floor row from t = 0 (bounding-box rows of later RE_STAB / RE_THROW / EN_CHARGE instances, entry 0.02-0.1 s, 50-93 u
+  wide). Probability weighting does not help (p = 1 rows: current-instance windows, CH_IDLE bbox 92 u, arena boxes).
+  So the plan's E / trapped from the support carry no information in wave 0; also a structural cause of the 87 %
+  FORCED_RISK. Field build p50 1.5-2.0 / p99 3.3-4.1 ms; 0 violations of "empty => fine empty" (synthetic test; on the
+  recording 967,492 empty committed-field points, the full field had no empty cell).
+- Body field + terms: see forum.md 17.3 / 17.4 (replay table: tick p50 / p99, tv cost, chosen rows' E / trapped).
+- Terminal value cost (A0b replay i1 ep3, heavy load, offsets per cell, 35e5fe6): p50 1.30 / p99 3.65 ms per tick
+  (before the per-cell offsets 1.65 / 4.52); tick p50 13.7 ms in every config at that load (A0 live 7.4 ms).
+- Bell Beast (Forum switch off): `planner_bench` on 20261003_144536 i4_000, 3000 frames, main bc46dc9 (frozen
+  `C:\ssbot\live_main_bc46dc9`) vs 35e5fe6: every non-timing output equal (2,951 ticks, FORCED_RISK share 0.0285);
+  by construction the Bell Beast path reads neither `hit_polys` nor combat.terminal. Full test suite passed (tests +
+  ssbot/tests). The 50-episode Bell Beast batch is the integration step's.
+
+### Round 1 stop (2026-10-08 01:23 PDT, weekly usage 100 %) and the overnight A/B
+
+The armed driver `C:\ssbot\sandbox\r5v_ab.ps1` (frozen `C:\ssbot\live_r5v_35e5fe6`) ran on instance 0 01:59-02:33
+and released the lock: TV 26 (`20261008_015907` 1 HARNESS_FAIL + `015959` 25), HB 25 (`021002`), T48 25 (`022115`).
+Report: forum.md 17.5 (all QUIT in wave 0, no arm changed the outcome).
+
+### Round 2 (2026-10-08 03:00-, after the weekly reset)
+
+Merged main (already up to date at bc46dc9). Commits from f7b6217 on.
+
+Done (committed):
+- forum.md 17.5: the overnight A/B (`forum_a0_report`): every episode a Q1 QUIT in wave 0; hits / episode 4.0 (TV) /
+  4.16 (HB) / 4.4 (T48) vs 4.27 (A0b); hits / min 18.4 / 18.4 / 16.6 vs 19.1 (bootstrap CIs overlap); support-outside
+  hits 0; FORCED_RISK 0.82 / 0.81 / 0.89 vs 0.80; hit sources moved from the Envoy to the Choristor (target fix).
+- Why (forum.md 17.7): `ForumPlanner.last_sel` (the selection's inputs by reference), `ForumConfig.p_all` (audits:
+  FORCED_RISK P / first contact for every row, choice unchanged) and `tools/forum_tv_audit` (open-loop replay; per
+  tick the deciding key, rankings, hindsight-clear rows against the recording's threat colliders, per-key AUC;
+  `--dump` per-tick rows, `--merge`). On 25 TV-arm episodes + 9 A0b ones: in FORCED_RISK (3/4 of EVADE ticks) P = 1
+  and the first contacts tie, their AUC is exactly 0.5, so J decides 83 % / 75 % of the picks; the terminal value
+  changes 18-25 % of the picks but the pick is clear in hindsight only ~1 point more often (68.4 vs 67.4 %; before
+  hits 30.4 vs 27.8 %): the body field is weakly informative (AUC 0.60-0.65 on the TV recordings, ~0.55 on A0b) and
+  rides on J0's target terms (AUC 0.46 before hits). R5 model's next_p not used (the verifier's verdict; not merged).
+- `ForumConfig.commit_rank` (737048f, default on since 3797b3e, `SSBOT_FORUM_PC=0` off; forum.md 17.8): after P, the
+  share of stage 1's frames in contact with the committed support (P_cm) then with the current attacks' fine
+  placements (P_f); they lead the p_k preselection too. Offline (same ticks): picks clear in hindsight 74.3 / 70.9 %
+  (+5.9 / +6.0 points), before hits 41.5 / 42.3 % (+11 / +10). Plan p50 +0.7-1.6 ms (open-loop replay). Test
+  `test_commit_rank_refines_forced_risk_by_the_committed_support`; off = bit-identical (the added keys are all 0).
+- Plan R5 row: the 2026-10-08 round-2 note.
+
+Diag track (wave-0 forensics, worktree-wf_fa16f06f-127-8, HANDOFF "Task wave-0 forensics") found the same cause
+independently (support saturates, the pick falls to J, "J-greedy") and built `forced_rank = "seen"`
+(`SSBOT_FORUM_FR=seen`: contact with the damage colliders seen now, moved along their velocity, BEFORE the share).
+Same ticks (forum.md 17.8): seen alone 71.8 / 71.7 % clear (before hits 37.5 / 41.7 %), commit_rank alone 74.3 / 70.9
+(41.5 / 42.3), **stacked seen > P > P_cm > P_f 78.7 / 76.3 (48.7 / 51.0)**, live 68.4 / 64.9 (30.4 / 32.7). So
+8617aa6 ports diag's planner part of 3608489 verbatim (seen_contacts, seen_polys, warm_kernels, SSBOT_FORUM_FR, its
+tests; the policy's `_fcfg`) and stacks commit_rank after it. **Merge note**: this branch and diag's both change the
+FORCED_RISK block of `combat/forum_planner.py` and the policy's planner construction; this branch's version is the
+superset (diag's key first, then P, P_cm, P_f), so take it when the hunks conflict (diag's later commits up to
+b4345c6 touch only its tools and HANDOFF).
+
+Round-2 A/B (instance 0, 04:20-05:18, frozen `C:\ssbot\live_r5v2_8617aa6`, driver `C:\ssbot\sandbox\r5v_ab2.ps1`,
+lock released; forum.md 17.10), A0b protocol, TV on, T 36. CORRECTION (round 3, verifier): the arms were NOT
+interleaved; they ran as sequential batches (SPC 04:20-04:37, PC 04:37-04:51, control 04:51-05:03, SPC 05:03-05:18)
+under very different machine load, so the tick / late columns are each batch's load, not the code's cost:
+
+| arm | runs (20261008_) | episodes | hits / min (95 %) | time alive p50 / mean (s) | FORCED_RISK | tick p50 / p99 | late |
+|---|---|---|---|---|---|---|---|
+| TV control (both off) | 045158 | 25 | 19.0 (17.1-21.0) | 12.4 / 13.7 | 0.813 | 9.8 / 19.0 | 3.5 % |
+| PC (commit_rank) | 043725 | 25 | 12.4 (11.3-13.7) | 21.4 / 21.3 | 0.885 | 12.8 / 21.2 | 17.6 % |
+| SPC (seen + commit_rank) | 042011 + 042143 + 050303 | 50 | 10.3 (9.5-11.3) | 23.5 / 24.4 | 0.915 | 12.0 / 20.2 | 40.1 % / 5.8 % (two batches) |
+
+Every episode is still a Q1 QUIT in wave 0 (about 4.2-4.4 hits), 0 WOULD_DIE, 0 kills, 0 support-outside hits, the
+envelope audit clean: the hero survives 55-78 % longer per hit but never kills; the next bottleneck is offence
+(R6 / R8). commit_rank is now on by default (3797b3e, `SSBOT_FORUM_PC=0` off); "seen" stays diag's switch (default
+share). (Superseded by round 3 below: "recommend both on" rested on offline results only, and the "late ticks 18-24 %
+= the code's cost" reading was load; the paired cost is in round 3.)
+
+### Round 3 (fixer, 2026-10-08 06:00-; verifier findings on ec39281; forum.md 17.11)
+
+Done (committed):
+- 2ef6383 `MultiForecast.occupied_split`: stage 1's support query split by the placements' committed flag (union
+  bit-identical to `occupied()`, the committed part = `_union_occ(committed_only=True)`, the fine part = `_fine_occ()`);
+  ForumPlanner takes P_cm / P_f from it when commit_rank is on (no second query after the envelope; stage 1 is inside
+  the envelope's deadline budget). Keys bit-identical to the old ones (tests + 1,907 real FORCED_RISK ticks).
+- 2ef6383 terminal value off by default (`SSBOT_FORUM_TV=1` on): no closed-loop gain (18.41 vs 18.42 hits / min),
+  ~1 point offline, 0.9-1.3 ms before the envelope.
+- 2ef6383 `SSBOT_FORUM_AB="name:pc=0|1,fr=share|seen;..."`: ForumPlannerPolicy switches the arm per episode (episode k
+  runs arm k mod n; `policy.ab_arm` in attempts), so arms share the load inside one batch.
+- b96559f forum.md 17.7 / 17.8 / 17.10 corrections: random-row baseline for the hindsight shares (before hits:
+  commit_rank +4.7 / +3.2 points over a random allowed row, seen +0.7 / +2.5, stacked +11.9 / +11.9; the live pick is
+  6.6 / 7.4 points BELOW random there: selection bias, the recorded path is what the threats aimed at); J0's AUC 0.46
+  is path correlation, not "reversed"; the round-2 arms ran in sequential batches and their late ticks were load
+  (same SPC code 40.1 % vs 5.8 %). `forum_tv_audit` reports `clear.random`. Plan R5 row note corrected.
+- Paired cost (`C:\ssbot\data\m2_forum_r5v\round3\pc_bench.py`: one process, one policy per arm, every STATE to every
+  arm in rotating order): commit_rank +0.25-0.4 ms plan p50 (the old second queries 0.6-0.9 / 2.7-4.8 ms p50 / p99),
+  seen 0.09-0.12 / 0.4-1.0 ms; late ticks equal within noise (wave 0: C 3.0 %, PC 2.6 %, S 2.9 %, SPC 2.4 %).
+
+Round-3 A/B (done, lock released 07:26; driver `C:\ssbot\sandbox\r5v_ab3.ps1`, frozen `C:\ssbot\live_r5v3_2ef6383`,
+instance 0, A0b protocol, terminal value off, T 36): run `20261008_063420` (seed 300900; the first batch 300800 was a
+"paused unasked" HARNESS_FAIL on its first episode), 100 episodes, arms C / PC / S / SPC switched PER EPISODE in one
+batch (same load: 1.4 % late overall). Report `C:\ssbot\data\m2_forum_r5v\round3\ab3_report.txt` (forum.md 17.11):
+
+| arm | hits / min (95 %) | time alive p50 / mean (s) | FORCED_RISK | plan p50 (ms) | late | kills |
+|---|---|---|---|---|---|---|
+| C (both off) | 18.9 (17.1-20.8) | 12.7 / 13.2 | 0.808 | 4.11 | 1.9 % | 0 |
+| PC (commit_rank) | 13.7 (12.5-15.2) | 19.6 / 19.7 | 0.863 | 4.49 | 1.3 % | 0 |
+| S (seen) | 13.8 (12.5-15.3) | 16.9 / 18.3 | 0.879 | 4.29 | 1.3 % | 1 (Envoy) |
+| SPC (seen + commit_rank) | 10.2 (9.1-11.6) | 27.0 / 26.1 | 0.910 | 4.61 | 1.3 % | 1 (Choristor) |
+
+Ratios (bootstrap): PC / C 0.72 (0.63-0.83), S / C 0.73 (0.64-0.84), **SPC / S 0.74 (0.64-0.87)**, SPC / PC 0.75;
+main effects commit_rank 0.73, seen 0.74, no interaction. So commit_rank helps on top of seen in a paired live test
+(round 2 had only offline evidence), and the late ticks do not grow under the same load. Still every episode a Q1
+QUIT in wave 0, 0 WOULD_DIE; the track's first kills (one Envoy, one Choristor). Diag's paired seen vs seen_cf
+(340100-340124, recomputed with `ab3_report.py`, `round3\diag_pair_report.txt`): 12.4 vs 9.4, ratio 0.76 - the same
+effect as SPC / S; seen_cf (seen, then the committed fine placements' share) and SPC (seen > P > P_cm > P_f) are
+near-identical mechanisms; seen_cf pays a second fine query after the envelope (plan p50 5.06 vs 4.35 in its pair),
+SPC gets its keys from stage 1's split (4.61 vs 4.29).
+
+Tests (code 2ef6383 + b96559f): full suite 1,143 passed, 2 skipped, 1 xfailed
+(`C:\ssbot\data\m2_forum_r5v\round3\fullsuite3.txt`; the runner wrote it over round 2's `fullsuite2.txt` first, so the
+round-2 file now holds this run). New tests: `test_occupied_split_is_the_union_and_its_committed_and_fine_parts`,
+`test_ab_arms_switch_per_episode`; the commit_rank test now checks the keys against the old second queries. Bell
+Beast: untouched (MultiForecast gained a method nothing on its path calls; ForumPlanner / ForumPlannerPolicy only).
+
+### Needs deploy
+
+- Nothing (no oracle change).
+
+### Next / open issues
+
+1. Integration: merge this branch with diag's (worktree-wf_fa16f06f-127-8): both change the FORCED_RISK block of
+   `combat/forum_planner.py` and the policy's planner construction. This branch: seen > P > P_cm > P_f (commit_rank,
+   keys from `occupied_split`), `SSBOT_FORUM_AB`; diag's later 82e94fa adds `seen_cf` (seen, then the committed fine
+   share, a second query). Live, paired within each track, they are equivalent (SPC / S 0.74, seen_cf / seen 0.76;
+   10.2 vs 9.4 hits / min in different windows): keep one. If seen_cf is kept, take its key from `occupied_split`
+   (the committed fine part is `com` before the windows are or'ed in: expose it) instead of the second query. Both
+   tracks' paired data support turning the seen key on by default at integration; the 50-episode Bell Beast batch
+   is the integrator's.
+2. Compute: done in round 3 (P_cm / P_f from stage 1's split query: +0.25-0.4 ms plan p50 for commit_rank, the old
+   second queries alone were 0.6-0.9 / 2.7-4.8 ms p50 / p99; no late-tick difference under the same load).
+3. The remaining gap (forum.md 17.9): 68-79 % of the stacked ranking's misses have a clear row tied on every risk key;
+   the hits come from attacks not started yet (the saturated later-instance boxes): time-resolved later-instance
+   placements (R2 / R3, recertify) or lead-time branch probabilities (R5 model's next step).
+4. Wave 0 is still never cleared (2 kills in the 277 live episodes of this track, both in round 3's seen arms):
+   offence (R6 targets, R8 clash) is next.
+5. Terminal value: off by default since round 3 (`SSBOT_FORUM_TV=1` on); weights / body-field radius hand-set; in wave
+   0 it is not the bottleneck (17.7). Kill value untested in closed loop.
+6. Main's working copy has no `knowledge/1.0.30000/enemies/forum/*_hitboxes.npz` (git-ignored); this worktree's copy
+   (= `C:\ssbot\tables\forum_r3_2a10a0d`) was used for the frozen checkouts.
+7. Frozen checkouts `C:\ssbot\live_r5v_35e5fe6`, `C:\ssbot\live_r5v2_737048f` (unused), `C:\ssbot\live_r5v2_8617aa6`
+   and `C:\ssbot\live_r5v3_2ef6383` can go; audit dumps (~60 MB each set) in `C:\ssbot\data\m2_forum_r5v\round2\` can
+   go after integration.
+8. Tests: full suite at 737048f 1,138 passed, 2 skipped, 1 xfailed; after the port and the default flip the Forum /
+   planner / terminal / multi_forecast / worldstate / observability subset 224 passed; full suite (code of 3797b3e):
+   1,141 passed, 2 skipped, 1 xfailed; round 3 (code of 2ef6383 + b96559f): 1,143 passed, 2 skipped, 1 xfailed
+   (`C:\ssbot\data\m2_forum_r5v\round3\fullsuite3.txt`). Bell Beast: untouched by construction (ForumPlanner /
+   ForumPlannerPolicy only, plus a new MultiForecast method); its equivalence tests are in the suite.
+9. The "paused unasked" HARNESS_FAIL after a real quit ended a batch on its first episode again (seed 300800); the
+   drivers work around it with a new seed, the fix is the harness's.
+10. Hindsight audits (`forum_tv_audit`) are biased toward unexecuted rows: compare rankings against `clear.random`,
+    not against the live pick (forum.md 17.11 item 3).
