@@ -911,13 +911,14 @@ A 类 = 以 2 格攻击为主的 boss 或连战；B 类 = 竞技场、小 boss�
   - **待评估（2026-10-05，你）：** 打掉 `Hang_14` 的丝线机关（`marionettesBurned`）后 Forum 三只 Clawmaiden 开波即死（forum.md）；你说要二段跳才上得去，路线要求和绕路时间待查，若要 Faydown 则连同 Faydown 的绕路一起算价值。
   - **付费 / 有条件的工作台（2026-10-03，你的问题"路线包括买椅子吗"）：** 原路线没有单独列。价值 = 附近 A 类遭遇的预期退出次数 × 每次少走的回撤时间（紧急退出估计约 4.5 次 × 380 s）− 购买的念珠和绕路时间；路线调研从游戏数据列出全部付费 / 有条件工作台（位置、价格、条件），按此排序。**不买地图**：导航用离线提取的世界图（§3.4）。
 - **Fourth Chorus、Moorwing、Sister Splinter 的打/跳决定**在 M1 前由你的游玩和社区路线定下；凡是要打的 boss 都算 A 类，配 playbook 和门槛。
+  - **跳过碎骨修女的方法（你 2026-10-08）：** 连续嘲讽（taunt，键盘 V）一只花粉怪，把它引到台子边，在它身上下劈弹起跳上台子，就不用打碎骨修女也能去拿踩墙。待评估：是哪只怪、哪个台子（Shellwood 场景）、嘲讽怎么让它跟过来（它的 FSM 对 taunt 的反应）、bot 能不能稳定做到（引怪失败、下劈落空的后果都不致命，比打一场真死的 boss 风险小）。
 - **永不交战：** Savage Beastfly、Skull Tyrant、Great Conchflies、Forebrothers、Groal、First Sinner、Summoned Saviour、Lumble 的骰子（默认不赌：磁石骰在 Act 1–2 可在 S17 的 `Coral_33` 赢来，或打完 Dancers / 拿到 Clawline 后从他的尸体免费拾取；只在 K1 显示它比负重环带 / 爬墙爪更值时才改，见 [`research/dice_pilgrim.md`](research/dice_pilgrim.md)）、所有 Act 3 内容。
 - **永不做：** 装 Barbed Bracelet；去 Mount Fay 取 Memory Crystal（Act 2 路线外，只在受击时触发，爆炸可能引发 Lace 等的弹反反击 [research/crests.md]）；启动 Rite of Rebirth；在 GMS 竞技场按 Needolin；NMG 禁止的 glitch 或帧精确跳过。
 
 #### 3.6.5 配装、槽位可行性与经济
 
 - **纹章：** 默认全程 Hunter（S15 进化为 Hunter_v2）。Wanderer 和 Reaper 是 A/B 候选，K1（M2 结束）用 S15 之后的 boss savestate（Last Judge、Lace 2，另加 Forum、Widow）比较**纹章 + 配装的组合**，每组 ≥ 200 次随机起点：先看 WOULD_DIE 上界和险情率，击杀时间次之；纹章可在工作台按 playbook 切换，结论可以按 boss 选。Wanderer 的取得（S12 后经 Cling Grip 进 Bonegrave 的 4 波竞技场，死亡为真死；或 500 念珠买 Simple Key 提早拿）、数值和代价见 [`research/crests.md`](research/crests.md) [asset][code]（2026-09-30 调研，起因是你的建议：漫游攻速快、丝多、弹刀多）。
-  - **高庭定为漫游（你 2026-10-08）：** 拼刀连得上——漫游横砍 / 上挑 / 贴墙砍出刀当帧生效，拼中后 0.1 s 冷却清零再出的刀在 0.15 s 无敌结束前生效，下劈 0.04 s 生效也接得上；收割 0.083 s 才生效，每次连拼约 0.03 s 空档。取得没有额外代价（你 2026-10-08）：漫游来自 Bonegrave 的 4 波竞技场，这场**本来就一定要打**（全收集要所有纹章），而且简单；前置是打了碎骨修女（Sister Splinter）拿到踩墙（Cling Grip，S12），或者学会飘飘（Drifter's Cloak，S08）后花 500 念珠买钥匙（Simple Key）——都远早于高庭（S25）。待核：路线表里还没有这场竞技场的位置；S12 写的是"Sister Splinter 默认跳过"，和"打了她才有踩墙"要对一下（社区路线是否有不打她拿踩墙的办法）；竞技场是真死，按 A/B 类配门槛。漫游开着的槽少（技能 1 + 红 1 + 黄 1，forum_tools.md），高庭配装要按它重排。
+  - **高庭定为漫游（你 2026-10-08）：** 拼刀连得上——漫游横砍 / 上挑 / 贴墙砍出刀当帧生效，拼中后 0.1 s 冷却清零再出的刀在 0.15 s 无敌结束前生效，下劈 0.04 s 生效也接得上；收割 0.083 s 才生效，每次连拼约 0.03 s 空档。取得没有额外代价（你 2026-10-08）：漫游来自 Bonegrave 的 4 波竞技场，这场**本来就一定要打**（全收集要所有纹章），而且简单；前置是打了碎骨修女（Sister Splinter）拿到踩墙（Cling Grip，S12），或者学会飘飘（Drifter's Cloak，S08）后花 500 念珠买钥匙（Simple Key）——都远早于高庭（S25）。待核：路线表里还没有这场竞技场的位置；S12 默认跳过碎骨修女、不打也能拿踩墙（跳过方法见下面"打/跳决定"一条）；竞技场是真死，按 A/B 类配门槛。漫游开着的槽少（技能 1 + 红 1 + 黄 1，forum_tools.md），高庭配装要按它重排。
 - **槽位（Hunter：红/蓝/黄各 1 个已解锁 + 1 个锁定）：**
   - Locket #1（S09）→ 红 2：Straight Pin + playbook 工具。
   - Locket #2（S10）→ 蓝 2：Fractured Mask + Warding 或 Magma Bell。
