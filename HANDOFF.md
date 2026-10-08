@@ -1813,3 +1813,74 @@ Next / open issues (round 2):
 5. The route's Widow end is a scripted bind sequence (Death Stagger -> Can Bind waits for BIND): the route runner must
    press bind there; training episodes end at the kill. Her damage colliders stay armed in Death Stagger (244 frames
    in 4 smoke fights, + 1 Spinner AtkBell armed outside attacks): the runner must keep evading until the bind.
+
+## Task R6 v0 - the person's rules as an L2 target layer + the Clapper controller (branch worktree-wf_814dfeea-b10-3)
+
+Worktree `C:\modeling\silksong_bot\.claude\worktrees\wf_814dfeea-b10-3` (from main bc46dc9), track r6rules (instance 1
+after the route-boss collection; seeds 310000-319999). Facts: `docs/facts/1.0.30000/forum.md` section 17 (Chinese);
+plan R6 row: the dated note of 2026-10-08. Stopped early on the weekly quota (99 % rule): the code and the offline
+checks are done, the live A/B is queued on a detached driver (below).
+
+### Done (committed)
+
+- `combat/tactics/gauntlet.py` GauntletTactics (L2 v0 above LOCAL's ForumTactics; Forum.yaml `forum.l2`): PUNISH (the
+  far-target rule: an engagement spot free from the hero's arrival, t_run = 0.05 + |dx| / 17.5, through a swing + margin,
+  one batched `MultiForecast.occupied` query on pick ticks), RUSH (isolated: no other enemy within 8 u; all spread:
+  the least ETA by pursuit speed), KITE (8 u from the fastest pursuer on its side away from the others; with Tinies
+  under the nearest Maestro; LOCAL's EVADE stands against KITE), Clawmaiden first / Minister last (`first` / `last`),
+  under the flyers (Bellbearer, Reed, Minister, Maestro), the Clapper controller (face 3 u; slam: out 13 u or behind 3.5
+  u; jumps: behind the landing from `jump_landing`; Buddy Is Attacking; CC_CAST opens the GLIDE_SPIKE vocab hook, read by
+  nobody until R7's glide_spike). Picks at 10 Hz + events, hysteresis 1.25, scores only.
+- `clapper_facing` (forum_local): the Clapper's facing from flipX (flipX 1 = right; 15 R0 fights). The oracle backend's
+  Entity.facing has the other convention for a standing Clapper, so R4's pocket rule (2) used a reversed facing (never
+  reached in A0 / A0b). EVADE's weight factors named (EVADE_HIT_X / EVADE_RISK_X, bit-identical).
+- ForumPlannerPolicy: GauntletTactics when `forum.l2.enabled` and `SSBOT_FORUM_L2` is not 0 / off (`fail:<p>` injects
+  failures); per-episode `stats()["l2"]`; decision records get goal / goal_why / goal_t_end / l2_cands (the arbitration
+  log: per candidate iid, type, window, need, isolated, ETA, priority, covered now).
+- Tools: `forum_policy_replay --skip / --deadline-ms / --ticks-out`; `forum_a0_report` L2 section, hits / kills per
+  episode.
+- Tests: `tests/test_forum_l2.py` 13 (far target long / short window, rules, Clapper controller, two Clappers, facing,
+  §4.4 item 4 three ways, switch, PUNISH hit count); `test_forum_tactics.py` 5 still pass. Full suite not run (quota).
+
+### Measured (forum.md 17.1-17.3; scratch outputs in this session's scratchpad `r6\replay\`)
+
+- §4.4 item 4: forum_policy_replay 074719 i3 ep0 wave 0, 600 ticks, deadline inf: `SSBOT_FORUM_L2=fail:1` vs `=0`
+  0 differing fields (plan, S, FORCED_RISK, mask, J) in 600 ticks.
+- Open-loop replays (same fight, waves 0 / 3 / 6 / 7 / 13, 1000-2000 ticks each, loaded machine): L2 per tick p50
+  0.014-0.047 ms, p99 1.4-3.3 ms; errors 0; unpredicted 0. Goals: wave 0 KITE(EVADE) 63 % / RUSH 31 %, wave 3
+  Clawmaiden 91 %, wave 6 KITE under the Maestro 89 %, wave 7 RUSH 94 %, wave 13 RUSH 48 % / KITE(EVADE) 46 %.
+- PUNISH almost never holds in multi-enemy waves: free time after arrival at the engagement spots p50 0.23-0.60 s,
+  >= 0.35 s (one swing) in 0 of 2,331 candidates (waves 0 / 3 / 6); 1 PUNISH in wave 7. The idle enemies' support covers
+  every spot within 0.3-0.6 s of arriving (A0's FORCED_RISK cause).
+- Pursuit speeds from 20 R0 caches (forum.md 17.1).
+
+### Running (left running on purpose: correctly configured)
+
+- Driver `C:\ssbot\sandbox\r6_ab.ps1 -Rev ef036d5` (hidden PowerShell, started 00:16 PDT 2026-10-08), frozen checkout
+  `C:\ssbot\live_r6_ef036d5` (git archive of ef036d5 + CODE_REV + the R3 tables). It waits until
+  `20261007_055106_Trobbio_mix_data\summary.json` exists and no Trobbio combat_run is left, then for `locks\inst1.lock`
+  to be free, writes it ("r6rules"), warms (forum_policy_replay, log `r6_warm.log`), and runs on instance 1, protocol
+  A0b (Forum_A, eval, planner, oracle, threads 4, real quits 0.2), 25-episode chunks: L2 on seed 310000, L2 off
+  (`SSBOT_FORUM_L2=0`, the A0b tactics) seed 310000, L2 on 310025, L2 off 310025 = 50 + 50 paired episodes (about 45 min
+  by A0b's pace). Skips further chunks while DEMO_SOON exists; removes its lock at the end; writes
+  `C:\ssbot\sandbox\r6_ab.done`. Logs `r6_ab.log`, `r6_ab_batch.log`. Stop a chunk: `combat_run stop <run dir>` from
+  `C:\ssbot\live_r6_ef036d5\brain`; stop the driver: its powershell process (command line `r6_ab.ps1`).
+- Superseded: `C:\ssbot\live_r6_5d24020` (its driver was stopped while still waiting; nothing ran).
+
+### Next
+
+1. When `r6_ab.done` exists: `forum_a0_report` on the two L2-on runs and the two L2-off runs (run dirs named
+   `<time>_Forum_A_eval_planner_oracle`, config.json env SSBOT_FORUM_L2), pair by seed: CLEAR / QUIT / WOULD_DIE, hits per
+   episode, waves reached, time alive (ingame_s), unpredicted (must stay 0), tick p50 / p99 vs the 8 ms deadline, L2
+   goals, changes per minute (<= 10), punish_goals / punish_landed; also against A0b unpaired (205437 i1, 205857 i4).
+   Write the result into forum.md 17.5, the plan's R6 row and this section.
+2. Then live validation of the Clapper controller: wave-start batch from `Forum_A_w7` / `Forum_A_w13` on instance 1
+   (the full gauntlets never get past wave 0).
+3. PUNISH: evaluate the window at the farthest spot the Reaper reaches from (3.6 u) instead of 1.8 u; the support's idle
+   tubes may make it moot (17.2).
+4. Full test suite + the Bell Beast equivalence tests (nothing shared was touched: tactics only; run them anyway).
+5. Frozen checkouts to remove when done: `C:\ssbot\live_r6_5d24020`, then `live_r6_ef036d5`.
+
+### Needs deploy
+
+- Nothing (no oracle change).

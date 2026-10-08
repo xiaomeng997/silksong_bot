@@ -931,3 +931,45 @@ cd brain   # 冻结检出（git archive，没有 .git）：behaviour_build 要�
 - **记账**：(1) 来源 iid 按调用路径配对（以前按下标配，被格挡的 damage 事件会错位）；(2) 多段链的钩子按实例找（FSM 事件的 `ent`；以前按物体名，两只同名 Reed 会串，`Wave 1/Song Reed/...` 这种嵌套路径找不到钩子），没有 iid 或找不到时按路径里的物体名回退；(3) Multihit tick（special_damage 掉血）在自己那一帧判，不在支撑里就等 70 帧看有没有本链的 Final Hit（有就随链在钩子判），没有或场次先结束就计为支撑外（以前只通过 Final Hit 判，没有 Final Hit 的 tick 根本不判）；(4) Cogfly 第二帧在 FORCED_RISK、暂停待定或监督器接管按键时丢掉（以前照按）。
 - **报告**：`forum_a0_report` 按 damage 事件计受击，tick 单独计，类型按调用路径解析（投射物归投掷者：针 → Reed、钟 → Bellbearer、rune bomb / slam → Clapper、矛 → Clawmaiden）；旧记录没有 kind / path，从录像的 events.jsonl 读。修正后的 A0 / 波次起点数字见 §16.2 / §16.3（`C:\ssbot\data\m2_forum_r4\fixer\a0_report_v2.json`、`ws_report_v2.json`）。
 - **复测**（波次起点批次重跑一次：`20261005_054233_Forum_A_w2_mix_eval_planner_oracle`，冻结检出 `C:\ssbot\live_r4f_0f517a0`，实例 0、1 各 12 场，种子 170000+，eval、无真退出；报告 `C:\ssbot\data\m2_forum_r4\fixer\ws_report_fix.json`）：QUIT 24 / 24（Q1 12、Q3 12：Reed 6、Minister 4、Choristor 2）；每场 3.33 次受击（80 个 damage 事件）+ 6 个 Multihit tick（全部在自己那一帧就在支撑内）；**支撑外 0、未知 0**（4 个 Final Hit 按钩子判，钩子都找到了，包括 iid 解析不出来的 `Song Reed (1)` / `Song Administrator (1)`，靠物体名回退）；来源 Clawmaiden 27、Tiny 16、Clapper 13、Reed 9、Bellbearer 7、Minister 3、Choristor 3、未解析 2；FORCED_RISK 90.5 %（各波 69–100 %）；EVADE 98 %、HOLD 2 %；YELLOW 下 `kill_prims` 含钉子攻击的 tick 被拿掉攻击（日志里 1,480 个 YELLOW tick）；击杀 0（上一批 2）；Cogfly 2 次；tick p50 中位数 7.4 ms、p99 中位数 14.0 ms（最大 18.9），> 16.7 ms 0.45 %；WaveTracker 29,522 / 29,970（98.5 %，同 §16.3 的波次起点偏移）；包络审计：选中 S = 0 的 2,794 次全部包络，core_not_enveloped 0、overrun 0。结论：修正没有改变基线的样子（还是 EVADE、还是第一波里 3 下左右退出），记账现在每个掉血事件都判。
+
+## 17. R6 v0：你的规则作 L2 目标层 + Clapper 控制器（2026-10-08，forum_planner_plan.md §5 R6；分支 worktree-wf_814dfeea-b10-3；离线 + 实例 1 的 A/B（排队，见 17.5））
+
+### 17.1 做了什么（`combat/tactics/gauntlet.py` `GauntletTactics`，`Forum.yaml` `forum.l2`）
+
+- 每 tick 先跑 LOCAL（R4 的 `ForumTactics`，HEAL / LEAVE 照旧优先），再由 L2 选目标：每 6 tick（10 Hz）重选一次，目标死了 / 出场 / 换了招式家族 / PUNISH 窗口过了就立即重选；新目标得分要是旧的 1.25 倍才换（滞回）。只改打分（站位 stance_x、朝向 boss_x、每个敌人的命中权重、按目标的权重系数），**规划器的 S / Hz / U 不看 prefs**（§4.4 第 2 条），安全仍由支撑检查、过滤器、监督器负责。
+- 目标规则（按顺序，第一个成立的）：
+  - **PUNISH（远处目标）**：每个候选敌人一个"接敌点"，一次批量查询 `MultiForecast.occupied`（所有敌人、投射物、入场）得到窗口 = **主角到达（t_run）之后**这个点第一次被支撑覆盖的时刻；t_run = 0.05 + |dx| / 17.5（冲刺 + 疾跑，你说的约 17.5 u/s）；窗口 ≥ t_run + 0.25（出刀到收割者横砍有效段结束 0.208 s）+ 0.10 余量 才去；多个可去时按（窗口 − 需要）× 类型优先级挑。这就是计划 R6 行的远处目标场景：近处待机的（下一招随时可起，窗口短）对远处长后摇的（窗口长）→ 窗口够就去远的，不够就不去。
+  - **RUSH**：有落单的（8 u 内没有别的在场敌人）就冲上去；全都分散时先打"最快追上来的"（ETA = max(0, 距离 − 1.8) / 追击速度）。
+  - **KITE**：没有落单的：站在最快那只的另一侧 8 u（远离其他敌人那一侧），让它单独先到；有 Tiny 时改站最近的 Maestro 正下方（below.json：Tiny 冲撞正下方 7.1 % 对前方 34 / 58 %）。LOCAL 判 EVADE（主角位置 0.6 s 内被覆盖）时 KITE 让给 EVADE；PUNISH / RUSH 不让（支撑检查是安全）。
+  - 优先级：Clawmaiden 在场时只选它（`first`，权重 3）；**Minister 只在没有别的敌人时才选**（`last`）。
+- 接敌点：飞行怪（Bellbearer、Reed、Minister、Maestro）在它正下方（你的"在它下面更安全"；Minister 冲刺斩往前两个身位，所以从下面开始最后在它身后）；其他类型在主角这一侧 1.8 u（LOCAL 的 engage_reach）；Clapper 用下面的控制器。
+- **Clapper 控制器**（不能拼刀；§10、clapper_face.md）：Idle / Walk / 施法 / 后撤：在主角这一侧的脸上 3.0 u（它每招起手 FaceObject 面向主角）；**锤（CC_SLAM）**：主角在它前面 → 退到前方 13 u（12.5 u 2.3 %、13 u 0）；主角已在它背后 → 背后 3.5 u（3 u 0.2 %）；前方没地方时也去背后；下劈踩头（你练习 15 / 22）留给规划器自己的行去选；**跳砸 / 跳施法**：钻到它下面、站到落点背后 2.5 u：落点 = 起跳点 + 0.92 × clamp(瞄准 − 起跳点, ±12)，瞄准 = Jump Aim 那一帧的主角 x ∓ 5（它这一侧）；Jump Aim 之前按当前主角位置估，之后用存下的瞄准（`jump_landing`）；它在空中时对它的命中权重再 ×1.5（顺路上挑）；大符文在落点前方 6.62 u、r 7.19，只伸到落点后 0.58 u，所以落点背后 2.5 u 在圆外；**两只不同时出招**（Buddy Is Attacking）：一只在出招时另一只的优先级 ×2；**施法（CC_CAST，约 1.25 s 原地）**：脸上照砍，`vocab` 里放 `GLIDE_SPIKE` 钩子（R7 的锯齿环 glide_spike 还没进规划器，目前没人读）。
+- **Clapper 朝向的修正**：oracle 后端的 `Entity.facing` 是速度的符号，不动时取 `-1 if flipX else 1`，而 Forum 的精灵不翻转时朝 −x（`enemy_tracker.FACES_LEFT`）：站着的 Clapper 朝向是反的。R0 缓存 15 场核对：Slam Antic 帧 flipX = 1 且主角在它右边 1,564 / 1,631、flipX = 0 且主角在左边 5,414 / 5,434；Idle 6,507 / 6,623、39,630 / 39,651。新函数 `clapper_facing`（flipX 1 = 朝右）给 L2 和 R4 的口袋规则 (2)（以前用的是反的朝向；A0 / A0b 从没到终局，不影响基线）。
+- **追击速度**（`pursuit_u_s`，R0 缓存 20 场，敌人速度在"指向主角"方向上的分量，只算在场、距离 > 4 u、正在靠近（> 0.5 u/s）的帧的均值；数据策略的主角）：Choristor 9.69、Clapper 9.38、Envoy 8.14、Tiny 7.02、Minister 5.64、Reed 4.63、Clawmaiden 4.39、Bellbearer 3.99、Maestro 3.12 u/s（p90：Envoy 12.9、Tiny 8.0、Clapper 7.7、Minister 7.2、Reed 6.7、Clawmaiden 6.4、Bellbearer 5.2、Maestro 4.5、Choristor 1.3——Choristor 多数时间原地鞭，靠近时是跳，所以用"靠近时的均值"）。
+- 失效 → LOCAL（§4.4 第 4 条）：异常或注入失败（`fail_p`）原样返回 LOCAL 的 prefs；开关 `SSBOT_FORUM_L2`（0 / off = A0 的 LOCAL，fail:<p> = 注入），combat_run 把它记进 config.json 和每行。
+- 记账：`stats()["l2"]`（目标按 tick、目标变化 / 换目标、PUNISH 次数与"窗口内打中目标"次数、L2 用时），决策日志多了 `goal`、`goal_why`、`goal_t_end`、`l2_cands`（每次重选时每个候选：iid、类型、窗口、需要、是否落单、ETA、优先级、此刻是否已被覆盖）——目标仲裁逐条可查；`forum_a0_report` 加了 L2 一节、每场受击和击杀数。
+
+### 17.2 离线核对
+
+- 单元测试 `tests/test_forum_l2.py`（13 项）：远处目标（近处待机的 Choristor 在 2 u、远处后摇里的 Envoy 在 13 u：远处接敌点到达后 1.4 s 内不被覆盖 → PUNISH 远的、站位 31.2；只有 0.8 s → 不去，改 RUSH 近的；近处自己的窗口够 → PUNISH 近的）、落单 / 分散 / 扎堆、Tiny 时站 Maestro 下方、Clawmaiden 先 / Minister 后、Clapper 控制器各招、两只 Clapper 互锁、朝向、失效三种（注入、异常、关闭）逐字段等于 LOCAL、开关解析、PUNISH 窗口内命中计数。`test_forum_tactics.py` 照旧 5 项通过。
+- **§4.4 第 4 条整条决策逐位相同**：`forum_policy_replay`（`074719` i3 ep0 第 0 波，600 tick，截止时间 inf）`SSBOT_FORUM_L2=fail:1` 对 `=0`：600 / 600 tick 的计划名、S、FORCED_RISK、按键、J 0 处不同。
+- 开环回放（同一录像，数据策略的主角位置，所以计划不被执行；机器负载高：5 个游戏实例 + 其他代理）：L2 每 tick p50 0.014–0.047 ms、p99 1.4–3.3 ms（批量查询只在重选的 tick 跑）；异常 0；支撑外命中 0。目标分布：第 0 波 KITE(EVADE) 63 %、RUSH 31 %；第 3 波 Clawmaiden 91 %（first）；第 6 波 KITE(EVADE)（在 Maestro 下方）89 %；第 7 波（单只 Clapper）RUSH 94 %；第 13 波（两只 Clapper）RUSH 48 %、KITE(EVADE) 46 %。
+- **PUNISH 在多敌波次里几乎不成立**：第 0 / 3 / 6 波 1,000 tick 的重选里，各类候选"到达后的空闲时间"中位 0.23–0.60 s，**到达后 ≥ 0.35 s 空闲（够一刀）的 0 次**（Envoy / Choristor / Reed / Bellbearer / Clawmaiden / Tiny / Maestro 共 2,331 个候选）：几只待机敌人的支撑（下一招随时可起 + 待机身体管）把每个接敌点在到达后 0.3–0.6 s 内就盖上了，与 A0 的 87 % FORCED_RISK 同一个原因（§16.4 第 1 条）。第 7 波单只 Clapper 时有 1 次 PUNISH（Tiny）。第一版把"到达前就被覆盖"也算进窗口（窗口全是 0），已改成从到达算起。
+- Clapper 朝向检查见 17.1。
+
+### 17.3 远处目标场景（计划 R6 行的验收）
+
+- 合成局面：通过（17.2 第一条）。
+- 录像切片：上面的开环回放里这种局面（远处有到达后够一刀的窗口）在第 0 / 3 / 6 波没有出现，所以录像上只能验证"窗口不够时不去"（全部候选都没去），"窗口够时去"只有合成局面和第 7 波的 1 次。闭环实战里 PUNISH 的次数和"窗口内打中"的次数由 A/B 记（`punish_goals` / `punish_landed`）。
+
+### 17.4 没做 / 未核实
+
+- 接敌点只是一个点（离敌人 1.8 u 或正下方），窗口按"站着的主角"查；收割者横砍够距 3.6 u，换成"够得着的最远点"窗口会长一些（未测）。
+- 跑过去的路上会不会被别的敌人挡住只由规划器逐帧查（L2 不查路径）。
+- 落单判据只用水平距离 8 u，不是计划里的"危险区和危险时段是否重叠"。
+- 下劈踩 Clapper 头（命中无敌 0.16 s）在运动学里有没有建模没查；规划器只会在它的行恰好安全时选。
+- "在 Reed 下面更安全"与 R1 的数据（飞行怪下方对 Reed 无效：3.5 对 3.1 次 / 分）不一致，按你的规则做了，由 A/B 看。
+
+### 17.5 A/B（实例 1，排队中）
+
+驱动 `C:\ssbot\sandbox\r6_ab.ps1`（隐藏窗口，冻结检出 `C:\ssbot\live_r6_ef036d5`），等路线 Boss 采集 `20261007_055106_Trobbio_mix_data` 结束、拿到 `inst1.lock`，按 A0b 的协议（fo_A、eval、planner、oracle、真退出 0.2）在**同一组种子** 310000 起跑：R6（L2 开）与对照（`SSBOT_FORUM_L2=0`，即 A0b 的战术，代码与 f8c0c62 只差 combat_run 的路线 Boss 改动和口袋规则的朝向修正）各 50 场，25 场一块交替；成对比较。A0b 的种子是 180000 / 180100（不在本轨道的范围里），所以与 A0b 本身只能不成对比较。日志 `C:\ssbot\sandbox\r6_ab.log`、`r6_ab_batch.log`。
