@@ -181,7 +181,8 @@ class EnvelopeAudit:
     clash_inwin: int = 0          # ... whose first contact fell in a swing's active window (per clash level)
     clash_owned: int = 0          # ... in contact there with an enemy in an attack of its own
     clash_off_state: int = 0      # ... with an owner in a clashable family outside its clashable states there
-    clash_known: int = 0          # ... all of them clashable with that slot on the slash's side (clash.json)
+    clash_known: int = 0          # ... one of them clashable with that slot on the slash's side, in its clashable states
+    clash_coowned: int = 0        # ... with a committed co-owner that cannot be clashed there (covered by the i-frames)
     clash_stops: int = 0          # ... of which an attack the clash ends (PARRY_STOPS)
     clash_partial: int = 0        # rows in FORCED_RISK's ranking with their branch's share (partial, or w below min_p)
     clash_partial_chosen: int = 0 # chosen FORCED_RISK plans that are such rows
@@ -715,12 +716,12 @@ class ForumPlanner(Planner):
         """The enemies in contact at a planned clash (owners: their trackers): (rates [(p_fail, p_clash_lb)] and
         clashed [(tracker, stop)] of those whose current family the table clashes with this slot, on the slash's side
         (side: in front of the facing, up: above, down: below), that may be in a clashable state in [ta, tb] (cw: their
-        clash_windows), blocked). The clash needs one such committed attack; another enemy in contact at the same
-        frame must not be in an attack of its own (a committed one outside its clashable states included: its contact
-        is not clashable; an idle one's support there is its body tube and the attacks it may start, none of which
-        strikes within 0.4 s of its start, forum.md 12: the parry i-frames cover the frames after the clash; its later
-        contacts come up again on the next level)."""
-        rates, clashed, other = [], [], False
+        clash_windows), others: a committed co-owner that cannot be clashed there (another family, outside its
+        clashable states, behind the slash)). The clash needs one such clashable attack; the co-owners do not block it:
+        the parry i-frames take every enemy's damage (the two-sided rule), the branch meets their support with those
+        frames masked, and its contact after them stays in the branch (partial) or is clashed on the next level; a clash
+        that does not happen leaves the plain row (FORCED_RISK's mixture)."""
+        rates, clashed, others = [], [], 0
         for tr in owners:
             fam = tr.cur.family if tr.cur is not None and tr.cur.t_end is None else None
             rt = self.clash_tab.rate(tr.tk, fam, KIND_SLOT[kind], self.crest)
@@ -732,9 +733,9 @@ class ForumPlanner(Planner):
                 rates.append(rt)
                 clashed.append((tr, all(w[2] for w in spans)))
             elif fam is not None and fam != tr.table.spec.idle_family:
-                other = True
+                others += 1
                 self.audit.clash_off_state += int(rt is not None and side_ok)
-        return rates, clashed, other
+        return rates, clashed, others
 
     def _clash_pass(self, f, start, latched, sc, S, ok, hz, tk, enemy_only, ctx, t_hit, t0: float) -> dict:
         """EV_CLASH (forum_planner_plan R8): for up to clash_k rows in contact the clash branch (the latest first
@@ -744,9 +745,8 @@ class ForumPlanner(Planner):
         frame below inside [k_s + f0, k_s + f1], the frames the kernel scores) and come from an enemy whose current
         attack family can be clashed with that slot (ClashTable) and that may be in one of the family's clashable
         Control states at the clash (clash_windows: a contact from its antic body or its recovery is not clashable),
-        on the slash's side of the hero (side: in front of the facing, up: above, down: below); another enemy in
-        contact there in an attack of its own (a committed one outside its clashable states included) blocks it. The
-        clash is put on the frame before the contact (the clash reach lies outside the hurtbox) or the window's first
+        on the slash's side of the hero (side: in front of the facing, up: above, down: below); other enemies in
+        contact there do not block it (_owner_rule: the parry i-frames take their damage too). The clash is put on the frame before the contact (the clash reach lies outside the hurtbox) or the window's first
         frame (j_hi); the reach can meet the support from j_lo (_reach_first) on, so the parry i-frames (no enemy
         damage: parryInvulnTimer covers every ENEMY hazard, the two-sided rule) are the frames covered whichever frame
         in [j_lo, j_hi] the clash takes: [j_hi, j_lo + PARRY_INVULN_F). The direction's recoil (side: away from the
@@ -885,10 +885,11 @@ class ForumPlanner(Planner):
                         if hit_e:
                             owners[e[0]].append(tr)
             for m, q, t_c, j_hi, k_on, kind, face, cx, cy in plan:
-                rates, clashed, other = self._owner_rule(owners[m], kind, face, cx, cy,
-                                                         T0 + float(tk[j_hi]) - fr_s, T0 + float(tk[t_c]) + fr_s, cw)
+                rates, clashed, others = self._owner_rule(owners[m], kind, face, cx, cy,
+                                                          T0 + float(tk[j_hi]) - fr_s, T0 + float(tk[t_c]) + fr_s, cw)
                 au.clash_owned += int(bool(owners[m]))
-                if not rates or other:
+                au.clash_coowned += int(bool(rates) and others > 0)
+                if not rates:
                     alive[m] = False
                     continue
                 au.clash_known += 1

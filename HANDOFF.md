@@ -1921,18 +1921,18 @@ R8 row and its notes. Outputs (not in git): `C:\ssbot\data\m2_forum_r8\` (driver
 
 Round 1's driver `r8_live.ps1` built the clash table and then stopped at 01:08 on "warm replay failed": the replay
 had succeeded (`warm_replay.json` written), but `Start-Process -PassThru` without a cached `Handle` gives no ExitCode
-in Windows PowerShell 5.1 and the check read `$null` as a failure. Replaced by `C:{BS}ssbot{BS}sandbox{BS}r8_live2.ps1` /
+in Windows PowerShell 5.1 and the check read `$null` as a failure. Replaced by `C:\ssbot\sandbox\r8_live2.ps1` /
 `r8_live3.ps1` (handle cached, the arm's run dir from combat_run's own "run dir:" line in r8_live3; r8_live2 took the
 newest run dir, another track's: its `report_<arm>.json` for R8W / R8R / R0 were redone by hand with
-`C:{BS}ssbot{BS}data{BS}m2_forum_r8{BS}live{BS}arm_report.cmd NAME RUNDIR`, the wrong ones kept as `*_wrongdir.json`).
-Outputs: `C:{BS}ssbot{BS}data{BS}m2_forum_r8{BS}live{BS}` (reports `report_<arm>.json`, live clash stats `clash_live_<arm>.json`,
+`C:\ssbot\data\m2_forum_r8\live\arm_report.cmd NAME RUNDIR`, the wrong ones kept as `*_wrongdir.json`).
+Outputs: `C:\ssbot\data\m2_forum_r8\live\` (reports `report_<arm>.json`, live clash stats `clash_live_<arm>.json`,
 consistency checks `check_<arm>.json` from `scratchpad/r8/clash_live_check.py`).
 
 Done (committed):
 - `clash.json` committed (64a48cc; union setups of the R1 v2 data2 runs + the person's sessions: 33 keys, 18 at
   p_fail <= 0.25, 29 at <= 0.5; forum.md 17.3).
 - Wanderer slash windows measured live (instance 2, fo_W, 60 swings, seed 320000, recording
-  `C:{BS}ssbot{BS}data{BS}runs{BS}m2{BS}kn_excite_forum_wanderer{BS}...{BS}kn_excite_forum_s320000`): side / alt / up frames 1-7, down
+  `C:\ssbot\data\runs\m2\kn_excite_forum_wanderer\...\kn_excite_forum_s320000`): side / alt / up frames 1-7, down
   3-9 (`attacks/wanderer.json` frames); clash chains are seamless (new swing on at c+7, same collider clashable from
   c+7, i-frames to c+9; Reaper 5-12: 2-frame gap). `attack_table_build --live` folds the probe's second press of any
   slot (it read Wanderer's second swings as one 1-38 window).

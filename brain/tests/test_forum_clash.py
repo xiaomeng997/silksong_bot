@@ -231,9 +231,9 @@ def _tr(iid, tk, fam, x, y=4.0, idle="RE_IDLE"):
 
 
 def test_owner_rule():
-    """One committed clashable attack in its clashable span on the slash's side suffices; a committed co-owner in a
-    family the table does not clash, or outside its clashable span, blocks; an enemy behind a side slash does not
-    clash."""
+    """One committed clashable attack in its clashable span on the slash's side suffices; an enemy behind a side
+    slash or outside its clashable span is not clashed (counted as a co-owner); co-owners do not block (the parry
+    i-frames take every enemy's damage; the branch meets their support after them)."""
     from ssbot.combat.forum_planner import ForumConfig, ForumPlanner
     from ssbot.combat.planner import PlannerConfig
     params = kin.HeroParams.load(KDIR / "hero_reaper_forum.json")
@@ -243,21 +243,22 @@ def test_owner_rule():
                               {("Song Reed", "RE_STAB"): frozenset({"Stab 1"})})
     reed = _tr(1, "Song Reed", "RE_STAB", 30.0)
     cw = {1: [(1.0, 1.3, False)]}
-    rates, clashed, other = pl._owner_rule([reed], K_SIDE, -1, 32.0, 4.0, 1.1, 1.2, cw)
-    assert rates == [(0.05, 0.9)] and clashed == [(reed, False)] and not other
+    rates, clashed, others = pl._owner_rule([reed], K_SIDE, -1, 32.0, 4.0, 1.1, 1.2, cw)
+    assert rates == [(0.05, 0.9)] and clashed == [(reed, False)] and others == 0
     # facing away: the Reed is behind the side slash
-    rates, _, other = pl._owner_rule([reed], K_SIDE, 1, 32.0, 4.0, 1.1, 1.2, cw)
-    assert not rates and other
+    rates, _, others = pl._owner_rule([reed], K_SIDE, 1, 32.0, 4.0, 1.1, 1.2, cw)
+    assert not rates and others == 1
     # outside its clashable span (its recovery)
     n0 = pl.audit.clash_off_state
-    rates, _, other = pl._owner_rule([reed], K_SIDE, -1, 32.0, 4.0, 1.4, 1.5, cw)
-    assert not rates and other and pl.audit.clash_off_state == n0 + 1
-    # a committed co-owner the table does not clash blocks; an idle one does not
+    rates, _, others = pl._owner_rule([reed], K_SIDE, -1, 32.0, 4.0, 1.4, 1.5, cw)
+    assert not rates and others == 1 and pl.audit.clash_off_state == n0 + 1
+    # a committed co-owner the table does not clash is counted, an idle one is not; neither blocks
     guard = _tr(2, "Song Reed", "RE_DEFEND", 33.0)
-    assert pl._owner_rule([reed, guard], K_SIDE, -1, 32.0, 4.0, 1.1, 1.2, cw)[2]
+    rates, clashed, others = pl._owner_rule([reed, guard], K_SIDE, -1, 32.0, 4.0, 1.1, 1.2, cw)
+    assert rates == [(0.05, 0.9)] and clashed == [(reed, False)] and others == 1
     idle = _tr(3, "Song Reed", "RE_IDLE", 33.0)
-    rates, _, other = pl._owner_rule([reed, idle], K_SIDE, -1, 32.0, 4.0, 1.1, 1.2, cw)
-    assert rates and not other
+    rates, _, others = pl._owner_rule([reed, idle], K_SIDE, -1, 32.0, 4.0, 1.1, 1.2, cw)
+    assert rates and others == 0
 
 
 def _wall_forecaster(defend: bool = False):
