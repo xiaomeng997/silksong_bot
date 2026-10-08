@@ -931,3 +931,54 @@ cd brain   # 冻结检出（git archive，没有 .git）：behaviour_build 要�
 - **记账**：(1) 来源 iid 按调用路径配对（以前按下标配，被格挡的 damage 事件会错位）；(2) 多段链的钩子按实例找（FSM 事件的 `ent`；以前按物体名，两只同名 Reed 会串，`Wave 1/Song Reed/...` 这种嵌套路径找不到钩子），没有 iid 或找不到时按路径里的物体名回退；(3) Multihit tick（special_damage 掉血）在自己那一帧判，不在支撑里就等 70 帧看有没有本链的 Final Hit（有就随链在钩子判），没有或场次先结束就计为支撑外（以前只通过 Final Hit 判，没有 Final Hit 的 tick 根本不判）；(4) Cogfly 第二帧在 FORCED_RISK、暂停待定或监督器接管按键时丢掉（以前照按）。
 - **报告**：`forum_a0_report` 按 damage 事件计受击，tick 单独计，类型按调用路径解析（投射物归投掷者：针 → Reed、钟 → Bellbearer、rune bomb / slam → Clapper、矛 → Clawmaiden）；旧记录没有 kind / path，从录像的 events.jsonl 读。修正后的 A0 / 波次起点数字见 §16.2 / §16.3（`C:\ssbot\data\m2_forum_r4\fixer\a0_report_v2.json`、`ws_report_v2.json`）。
 - **复测**（波次起点批次重跑一次：`20261005_054233_Forum_A_w2_mix_eval_planner_oracle`，冻结检出 `C:\ssbot\live_r4f_0f517a0`，实例 0、1 各 12 场，种子 170000+，eval、无真退出；报告 `C:\ssbot\data\m2_forum_r4\fixer\ws_report_fix.json`）：QUIT 24 / 24（Q1 12、Q3 12：Reed 6、Minister 4、Choristor 2）；每场 3.33 次受击（80 个 damage 事件）+ 6 个 Multihit tick（全部在自己那一帧就在支撑内）；**支撑外 0、未知 0**（4 个 Final Hit 按钩子判，钩子都找到了，包括 iid 解析不出来的 `Song Reed (1)` / `Song Administrator (1)`，靠物体名回退）；来源 Clawmaiden 27、Tiny 16、Clapper 13、Reed 9、Bellbearer 7、Minister 3、Choristor 3、未解析 2；FORCED_RISK 90.5 %（各波 69–100 %）；EVADE 98 %、HOLD 2 %；YELLOW 下 `kill_prims` 含钉子攻击的 tick 被拿掉攻击（日志里 1,480 个 YELLOW tick）；击杀 0（上一批 2）；Cogfly 2 次；tick p50 中位数 7.4 ms、p99 中位数 14.0 ms（最大 18.9），> 16.7 ms 0.45 %；WaveTracker 29,522 / 29,970（98.5 %，同 §16.3 的波次起点偏移）；包络审计：选中 S = 0 的 2,794 次全部包络，core_not_enveloped 0、overrun 0。结论：修正没有改变基线的样子（还是 EVADE、还是第一波里 3 下左右退出），记账现在每个掉血事件都判。
+
+## 17. R5 终点价值（2026-10-08，forum_planner_plan.md §5 R5 的"终点价值"一半；分支 worktree-wf_814dfeea-b10-2；离线 + 实例 0 的 A/B）
+
+代码：`combat/terminal.py`（新：支撑场 `EnemyFields.build`、身体场 `EnemyFields.from_bodies`、可达模板 `reach_templates`、`TerminalValue.rows`、击杀价值 `kill_value`）、`combat/forum_planner.py`（`ForumConfig.terminal` 与权重，`_terminal` / `_score_forum`）、`core/worldstate.py` + `backends/oracle_backend.py`（`Entity.hit_polys`）、`combat/enemy_tracker.py`（命中目标用 `hit_polys`）、`train/forum_planner_policy.py`（T 取 `ForumConfig().T`，日志和 stats 记终点价值）；可达模板文件 `knowledge/1.0.30000/kinematics/forum_reach.npz`（`python -m ssbot.combat.terminal` 重建）；测试 `tests/test_terminal.py`（8 项）。开关（A/B 用，写进 config_fp）：`SSBOT_FORUM_TV=0` 关终点价值、`SSBOT_FORUM_T=48` 视野 48 帧、`SSBOT_FORUM_HITBODY=0` 恢复 R4 的命中目标。Bell Beast 路径（`Planner`、`Forecaster`、`PlannerPolicy`）一行没改：它不读 `hit_polys`，Forum 开关是胶水层用哪个类。
+
+### 17.1 计划里的场（支撑场）：做了、保守，但第 0 波完全饱和
+
+- **做法**：0.5 u × 1 u 栅格（x 14–49、y 3.5–18.5，主角受击盒中心，1 050 格），时间格 0.1 s 从 0.6 s 到预报视野（2 s：14 格）；每个 owner（敌人 iid、Tiny 群的簇、投射物、波次入场）一张位图，值 = 该 owner 覆盖这一格的放置里最大的路径概率（×255；管、盒、投射物 255）。细 / 窗口 / 外包盒放置都换成模板粗底的逐 bin 外包盒（稀疏表两次查找，时间格内所有入场时刻 ± 1 个模板 bin）；管和盒取 bin 两端的盒子按 bin 末的增长放大；投射物按 10 ms 采样（含 slack 副本和分支）取外包；后两者再按主角受击盒膨胀。所以"场空 ⇒ 格内任何点、bin 内任何帧的细查询都空"（计划 §4.4 第 5 条）。轮转没有做：每 tick 全部 owner 重建（下面的耗时），场永远不过期。
+- **保守性**：合成 Reed（`tests/test_terminal.py`，每个 bin 每一帧、每格 3 个随机点）0 违反；A0b 录像 `20261005_205437` i1 ep0（648 tick，每 10 tick 一次、14 个 bin × 4 200 个随机点）：全集场 0 违反，但空格数为 0（见下），所以这一段录像对全集场的检验是空的；承诺场（`MultiForecast.committed()`）检查了 967 492 个空点，0 违反。
+- **耗时**（同一录像，整机 5 个游戏实例在采集、低优先级）：每 tick 建场 p50 1.5–2.0 ms、p99 3.3–4.1 ms。
+- **饱和**（同一录像，每 20 tick 一次）：并集场在 0.6–2.0 s 的每个 bin、每个采样 tick 都是 **100 %**；单个 owner 也是：Reed、Envoy、Choristor 各自 100 %。细查询本身也一样：主角站在地面任何 x，**t = 0 起**就在 Reed（Alert）和 Envoy（Charge）的支撑里。原因（逐类拆开）：之后才可能开始的实例用家族行走模板的外包盒放置（`bb` 行），`RE_STAB` / `RE_THROW` / `EN_CHARGE` 的入场窗 0.02–0.1 s 那几行在 t = 0 就盖住整条地面（`RE_THROW` 外包盒宽 50–93 u，锚盒 hx 4.7–13.9 u）；路径概率加权也救不回来：p = 1 的行（当前实例的窗口放置、Choristor 待机家族的外包盒 `CH_IDLE` 宽 92 u、全场盒）让 1 − Π(1 − p_i) 处处为 1；承诺场在 0.6 s 也有 80 %，0.9 s 起 100 %。**结论**：在第 0 波，用支撑（或其概率）做的 E 恒为 0、trapped 恒为真，不含信息；这同时说明 A0 / A0b 的 87 % FORCED_RISK 有结构性来源——地面行在第 1 帧就在支撑里，只有空中行可能安全。要改的是 R2 / R3 的放置（外包盒行的时间展开），需要重新认证，不在本轮。
+
+### 17.2 命中目标的 bug（R3 / R4 起就有）
+
+`EnemyTracker.body`（规划器的命中目标、`targets()`、`_nearest`）取的是实体**所有**启用碰撞体的外包盒，其中包括第 13 层的范围触发器（Alert / Throw / Attack / Patrol / Stab / Defend Range，5–47 u）、第 27 层的物理推挤体和第 14 层的 Terrain Block。A0b 录像里：Envoy 的"身体"108 u 宽、Choristor 30 u、Reed 24 u。于是任何一刀在规划器里都"打得到"它们：J 的命中项、第一下命中、命中分支（后坐 + 受击反应）在几乎所有攻击行上都成立（开环回放 ep3：命中分支 325 次、被上限截掉 160 行）。改：`Entity.hit_polys`（oracle 专用字段：启用且不在 13 / 14 / 27 层的碰撞体），`EnemyTracker` 有它就用它（`SSBOT_FORUM_HITBODY=0` 恢复旧的）。改后同一 tick：Reed 1.1 × 2.8 u、Envoy 1.2 × 2.0 u、Choristor 1.5 × 2.9 u。支撑不受影响（待机管用的是 `seen_box` / 伤害盒，不是 `body`）。
+
+### 17.3 实际上线的终点价值：身体场
+
+因为支撑场饱和，J 里的终点项改用**身体场**（敌人身体的可分辨结构，只进打分）：每个在场活敌的身体盒（`hit_polys` 外包）按速度航位推算最多 0.3 s、按主角受击盒膨胀；"区" = 离它 ≤ 1.5 u + 1.5 u/s × t 的格（`BODY_REACH_U`、`BODY_APPROACH_U_S`，启发式，不是认证量）；"余量" = clip((到最近身体的距离 − 1.5) / 4, 0, 1)。可达模板：Forum 运动学（`hero_reaper_forum.json`）从 4 类终点（地面、空中上升 / 顶点 / 下落，按 vy ±3）出发，135 条原语（站 / 左 / 右跑、0.5 s 时转向、5 种跳、2 个时刻的冲刺）在 0.2 / 0.5 / 0.9 / 1.4 s（± 半个 bin）的受击盒中心偏移，运行时按竞技场墙 / 地面截断、量化到一格（每类每时刻 27–149 个偏移）。每行（标称一条的最后一帧）：
+
+- E = Σ_t w_t · R_t 上余量的平均（w_t = 1 / (1 + t) 归一）；trapped = 某个 t ≤ 1.4 s 时 R_t 全在区内；overlap = R_t 在 ≥ 2 个区内的比例；H_exp = t ≤ 0.9 s 时 R_t 在"有 2 格招或多段连击"的敌人（按类型：任一家族 damage ≥ 2 或 chains.json 的整链 > 1 下）区内的比例。
+- J += 4.0·E − 3.0·trapped − 1.5·overlap − 2.0·H_W[h]·H_exp（H_W：h ≤ 2 为 1、h = 3 为 0.6、h ≥ 4 为 0.3、未知 0.5）。
+- 击杀价值：主角周围 ±8 u × ±5 u、所有 bin 里"只有它盖住"的余量下降（留一法）÷ 还需几刀（hp_est / 一刀，默认 9）；目标的命中权重 × (1 + 3.0 × 击杀价值)。
+- 只动 J 和命中权重：`tests/test_terminal.py::test_the_terminal_value_moves_j_only`（确定模式，开 / 关时每行的 Hz、U 和 FORCED_RISK 相同）；字典序不变。
+
+### 17.4 开环回放（`forum_policy_replay`，A0b 录像 i1 ep0 / ep3，同一负载下依次跑四种配置；开环：主角位置是录像的，FORCED_RISK 不是闭环比例）
+
+| 配置 | ep | tick p50 / p99（ms） | 规划 p50 / p99 | 终点价值 p50 / p99 | 命中分支 / 被上限截掉 | 选中行 E / trapped / overlap / H_exp |
+|---|---|---|---|---|---|---|
+| base（R4：`TV=0 HITBODY=0`） | 0 | 13.8 / 103.1 | 5.84 / 64.9 | — | 212 / 0 | — |
+| hitbody（`TV=0`） | 0 | 14.8 / 90.2 | 6.32 / 58.2 | — | 193 / 1 | — |
+| tv（默认，偏移未粗化） | 0 | 14.7 / 27.4 | 7.68 / 19.4 | 1.65 / 4.52 | 185 / 1 | 0.35 / 0.20 / 0.31 / 0.42 |
+| t48（`T=48`） | 0 | 16.3 / 27.3 | 8.96 / 17.6 | 1.77 / 5.06 | 0 / 0 | 0.37 / 0.17 / 0.32 / 0.43 |
+| base | 3 | 13.4 / 76.9 | 4.92 / 36.3 | — | 325 / 160 | — |
+| hitbody | 3 | 12.5 / 24.1 | 4.85 / 17.0 | — | 290 / 97 | — |
+| tv（偏移按格粗化，35e5fe6） | 3 | 13.7 / 26.0 | 6.27 / 19.0 | **1.30 / 3.65** | 219 / 0 | 0.24 / 0.16 / 0.25 / 0.53 |
+
+- 负载很重（这一段整机 5 个游戏实例在采集、其他代理在跑），四种配置的 tick p50 都在 12.5–16.3 ms（A0 实战 7.4 ms），只能互相比；base 的 p99（77–103 ms）是个别慢 tick，不可比。终点价值每 tick 多 1.3 ms（p50）/ 3.7 ms（p99），在规划的打分阶段（包络之前），所以截止时间 8 ms 下包络少查约一块。
+- 开环下 FORCED_RISK 四种配置相同（ep0 483 / 648、ep3 608 / 781；T48 ep0 531）：开环里主角位置是录像的，S 不受打分影响；命中目标修正后命中分支和被截行减少（ep3 325 / 160 → 290 / 97 → 219 / 0）。T48 的 FORCED_RISK 更高（开环）、tick 更贵。闭环效果看 17.5 的 A/B。
+- 审计：所有配置选中 S = 0 的计划全部包络过、core_not_enveloped 0、overrun 0。
+
+### 17.5 A/B（实例 0，计划中）
+
+驱动 `C:\ssbot\sandbox\r5v_ab.ps1`（隐藏窗口，冻结检出 `C:\ssbot\live_r5v_35e5fe6`）：等实例 0–4 的 Trobbio 采集结束、拿 inst0 锁后，按 A0b 的协议（fo_A、eval、planner、oracle、真退出 0.2、4 线程）跑 TV 臂 2 × 25 场（种子 300000、300100）、HB 臂（只修命中目标，`SSBOT_FORUM_TV=0`）25 场（300200）、T48 臂 25 场（300300）。结果写在这里之后的小节。
+
+### 17.6 没做 / 未核实
+
+- 计划 R5 行的"先做"部分（决策感知时刻、FSM 冷却、身体触发反应分支、Tiny 轨道模型）不在本轨（终点价值一半）。
+- 身体场的半径与速度、各项权重是手设的启发式，没有拟合（R9）；击杀价值的"一刀伤害"用 9（Reaper 钉子），没有读装备。
+- 支撑场的饱和要靠 R2 / R3 的放置修正（外包盒行的时间展开）才能变得有用；那之后终点价值可以换回支撑场（代码保留，属性测试在）。
+- 命中目标修正改变了命中分支和 J，对 FORCED_RISK 的影响要看闭环 A/B（17.5）；视觉视图没有 `hit_polys`，回落到全部碰撞体（Forum 的视觉视图是 M3）。

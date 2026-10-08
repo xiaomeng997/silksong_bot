@@ -1813,3 +1813,68 @@ Next / open issues (round 2):
 5. The route's Widow end is a scripted bind sequence (Death Stagger -> Can Bind waits for BIND): the route runner must
    press bind there; training episodes end at the kill. Her damage colliders stay armed in Death Stagger (244 frames
    in 4 smoke fights, + 1 Spinner AtkBell armed outside attacks): the runner must keep evading until the bind.
+
+## Task R5 value - Forum plan round R5, the terminal-value half (branch worktree-wf_814dfeea-b10-2)
+
+Worktree `C:\modeling\silksong_bot\.claude\worktrees\wf_814dfeea-b10-2` (from main bc46dc9). Facts: forum.md section 17
+(Chinese); plan R5 row: the 2026-10-08 note. Frozen checkout `C:\ssbot\live_r5v_35e5fe6` (git archive of 35e5fe6 +
+CODE_REV + the R3 tables from `C:\ssbot\tables\forum_r3_2a10a0d`); outputs `C:\ssbot\data\m2_forum_r5v\`.
+
+### Done (committed)
+
+- `combat/terminal.py`: the plan's support field (`EnemyFields.build`: per owner, 0.5 x 1 u cells x 0.1 s bins from
+  0.6 s to the forecast horizon, the store's per-bin bounding boxes over every entry a placement allows in the bin,
+  tubes / boxes / paths hulled over the bin and dilated by the hurtbox; conservative: field empty => fine empty), the
+  body field (`from_bodies`, what J uses: see below), reachable templates (`forum_reach.npz`, 4 end classes x
+  0.2 / 0.5 / 0.9 / 1.4 s from 135 primitives of the Forum kinematics; rebuild: `python -m ssbot.combat.terminal`),
+  `TerminalValue.rows` (E, trapped, overlap, H_exp per row, numba), `kill_value` (leave-one-out near the hero / hits
+  needed).
+- ForumPlanner: `ForumConfig.terminal` (env `SSBOT_FORUM_TV`, default on) adds w_E E - w_trap trapped - w_ov overlap -
+  w_H H_W[h] H_exp to J and multiplies each target's hit weight by (1 + w_K kill value); `ForumConfig.T` from
+  `SSBOT_FORUM_T` (default 36; the policy's PlannerConfig follows it). Scores only (test: Hz, U and FORCED_RISK equal
+  with and without, deterministic mode).
+- Hit-target fix (a bug since R3): `EnemyTracker.body` was the bounding box of every enabled collider incl. the range
+  triggers (layer 13: Envoy 108 u, Choristor 30 u, Reed 24 u wide), so every swing "hit". New oracle-only
+  `Entity.hit_polys` (enabled colliders not on layers 13 / 14 / 27), used by EnemyTracker for the body (env
+  `SSBOT_FORUM_HITBODY=0`: the old targets). The support does not read `body` (unchanged, certification stands).
+- Policy: stats `tv_ms_p50/p99` and `terminal` (chosen rows' E / trapped / overlap / H_exp), decision log `fi.tv`;
+  `forum_policy_replay` prints them.
+- Tests: `tests/test_terminal.py` (8); test_forum_planner + test_multi_forecast + test_worldstate + test_observability +
+  forum tactics / policy hits pass.
+
+### Measured (forum.md 17)
+
+- Support field saturation (A0b recording 20261005_205437 i1 ep0, wave 0): the union is 100 % of the cells in every
+  bin 0.6-2.0 s at every sampled tick, each of Reed / Envoy / Choristor alone 100 %; the fine query covers the whole
+  floor row from t = 0 (bounding-box rows of later RE_STAB / RE_THROW / EN_CHARGE instances, entry 0.02-0.1 s, 50-93 u
+  wide). Probability weighting does not help (p = 1 rows: current-instance windows, CH_IDLE bbox 92 u, arena boxes).
+  So the plan's E / trapped from the support carry no information in wave 0; also a structural cause of the 87 %
+  FORCED_RISK. Field build p50 1.5-2.0 / p99 3.3-4.1 ms; 0 violations of "empty => fine empty" (synthetic test; on the
+  recording 967,492 empty committed-field points, the full field had no empty cell).
+- Body field + terms: see forum.md 17.3 / 17.4 (replay table: tick p50 / p99, tv cost, chosen rows' E / trapped).
+
+### Running
+
+- `C:\ssbot\sandbox\r5v_ab.ps1` (hidden powershell, log `C:\ssbot\sandbox\r5v_ab.log`): waits for the Trobbio
+  collection on 0-4 to end (summary.json + no Trobbio combat_run left), waits for / takes `locks\inst0.lock`
+  (r5value), warms, then on instance 0: TV 25 (seed 300000) + TV 25 (300100), HB 25 (300200, `SSBOT_FORUM_TV=0`),
+  T48 25 (300300, `SSBOT_FORUM_T=48`); fo_A, eval, planner, oracle, real quits 0.2, threads 4 (the A0b protocol).
+  No batch starts with DEMO_SOON / STOP_AGENTS; releases the lock at the end. Batch logs `C:\ssbot\data\m2_forum_r5v\`.
+  Stop: `cd C:\ssbot\live_r5v_35e5fe6\brain; ..\scripts\uv.cmd run python -m ssbot.tools.combat_run stop <run dir>`
+  (run dirs `C:\ssbot\data\runs\m2\20261008_*_Forum_A_eval_planner_oracle`), then end the driver's powershell.
+
+### Needs deploy
+
+- Nothing (no oracle change).
+
+### Next / open issues
+
+1. Report the A/B when the driver ends: `forum_a0_report` over the TV runs vs A0b (205437 + 205857): CLEAR / QUIT /
+   WOULD_DIE, hits per episode, waves, time alive, support-outside hits (must stay 0), tick p50 / p99, `tv_ms`; HB and
+   T48 arms separately; forum.md 17.5 and the plan's R5 note.
+2. The support field saturates: R2 / R3 placements (bbox rows of later instances time-dilated from the family start;
+   p = 1 idle-family boxes) need a time-resolved form before E can come from the support (recertify).
+3. Body-field radius / speed and the J weights are hand-set (R9 fits); the kill value uses 9 per hit.
+4. The hit-target fix changes hit branches and J for every Forum tick: the integration step should A/B it with R6 / R8
+   (HB arm above is the fix alone).
+5. Frozen checkout `C:\ssbot\live_r5v_35e5fe6` can go when the A/B is reported.
