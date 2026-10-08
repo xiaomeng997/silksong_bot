@@ -1819,7 +1819,8 @@ Next / open issues (round 2):
 Worktree `C:\modeling\silksong_bot\.claude\worktrees\wf_814dfeea-b10-3` (from main bc46dc9), track r6rules (instance 1
 after the route-boss collection; seeds 310000-319999). Facts: `docs/facts/1.0.30000/forum.md` section 17 (Chinese);
 plan R6 row: the dated note of 2026-10-08. Stopped early on the weekly quota (99 % rule): the code and the offline
-checks are done, the live A/B is queued on a detached driver (below).
+checks are done, the live A/B is queued on a detached driver (below). Round 2 (same branch): the A/B's result,
+target holding, the Clapper controller live on wave starts, a full-gauntlet re-run (section "Round 2" below).
 
 ### Done (committed)
 
@@ -1860,31 +1861,89 @@ checks are done, the live A/B is queued on a detached driver (below).
   KITE(EVADE) 917 (the two within 8 u: nobody isolated).
 - Pursuit speeds from 20 R0 caches (forum.md 17.1).
 
-### Running (left running on purpose: correctly configured)
+### Round 2 (2026-10-08 03:10-05:15, week push round 2; forum.md 17.5-17.6, plan R6 row note of 2026-10-08)
 
-- Driver `C:\ssbot\sandbox\r6_ab.ps1 -Rev ef036d5` (hidden PowerShell, started 00:16 PDT 2026-10-08), frozen checkout
-  `C:\ssbot\live_r6_ef036d5` (git archive of ef036d5 + CODE_REV + the R3 tables). It waits until
-  `20261007_055106_Trobbio_mix_data\summary.json` exists and no Trobbio combat_run is left, then for `locks\inst1.lock`
-  to be free, writes it ("r6rules"), warms (forum_policy_replay, log `r6_warm.log`), and runs on instance 1, protocol
-  A0b (Forum_A, eval, planner, oracle, threads 4, real quits 0.2), 25-episode chunks: L2 on seed 310000, L2 off
-  (`SSBOT_FORUM_L2=0`, the A0b tactics) seed 310000, L2 on 310025, L2 off 310025 = 50 + 50 paired episodes (about 45 min
-  by A0b's pace). Skips further chunks while DEMO_SOON exists; removes its lock at the end; writes
-  `C:\ssbot\sandbox\r6_ab.done`. Logs `r6_ab.log`, `r6_ab_batch.log`. Stop a chunk: `combat_run stop <run dir>` from
-  `C:\ssbot\live_r6_ef036d5\brain`; stop the driver: its powershell process (command line `r6_ab.ps1`).
-- Superseded: `C:\ssbot\live_r6_5d24020` (its driver was stopped while still waiting; nothing ran).
+Merged main (already up to date at bc46dc9). Commits 6972e01 .. this one.
+
+- **Round-1 A/B result** (forum.md 17.5; runs 015904 / 021942 L2 on, 020919 / 022951 L2 off, seeds 310000 / 310025,
+  frozen ef036d5): 50 + 50 paired, all QUIT in wave 0. Paired (on - off): hits +0.16 (se 0.14), time alive -0.71 s
+  (se 0.43), nail hits on enemies -0.52; DPS 3.24 vs 3.42; unpredicted 0 / 0; presses / s 7.28 vs A0b 7.75, plan-change
+  rate 0.555 vs 0.615 (both not above A0b); L2 goal changes 33 / min (lens <= 10: failed). L2 did engage in wave 0:
+  RUSH 55 % of the decision ticks (isolated 9,310, spread 4,449), KITE(EVADE) 43 %, PUNISH 0; targets Envoy 42 %, Reed
+  31 %, Choristor 25 %; RUSH brought the hero to the target (|dx| p50 2.5 u vs 3.7 off) but not more attack plans (13 vs
+  12 %). Hits: 122 under RUSH (69 from the rushed target, 53 from others), 91 under KITE(EVADE); the hit rate per
+  decision tick is the same under RUSH, KITE(EVADE) and L2 off (0.0089 / 0.0085 / 0.0085). Tied to diag's early finding
+  (HANDOFF 'Task wave-0 forensics'): the support saturates, FORCED_RISK's ranking ties and the pick falls to J, so the
+  scores L2 sets do pick the plan, but every plan looks equally dangerous to the planner; the wave-0 bottleneck is the
+  FORCED_RISK ranking, not whom to fight.
+- **Target holding** (`gauntlet.py` `_pick` / `_choose`, Forum.yaml `forum.l2`): the rule (PUNISH / RUSH / KITE) is
+  held `goal_dwell_s` 1 s (not into PUNISH); under it the kept target while eligible (RUSH: isolated, the kept one down
+  to 8 - `iso_hyst_u` 2 u; KITE: any) unless another scores `switch_x` 1.5 times more after `dwell_s` 4 s on it; a rushed
+  target that gets company is kited with (KITE on it) until dwell_s; immediate switches only for a target gone, a
+  PUNISH opening, a `first` type, the idle Clapper's turn; a move change of the target re-picks once instead of
+  dropping it. Stats `tgt_switches`, `switch_kinds`; `forum_a0_report` gains `tgt_switches_per_min`, presses / s
+  (latched presses / game time; the Forum policy's own presses_per_s is None) and the plan-change rate. Open-loop
+  wave-0 replays (20 episodes): target switches 23.8 -> 9.6 / min; live (round 2 full gauntlet, 25 episodes): **7.65 /
+  min** (goal changes incl. rule changes on the same target 25.9 / min).
+- **PUNISH bug fixed**: a spot whose run + swing did not fit the 2 s window query was never checked after the arrival
+  and read window inf (always "go"); two such far targets flip-flopped as PUNISH every 0.1 s in a replay (negative
+  scores defeat the 1.25 hysteresis). Now such a window is the query's end (too short).
+- **Clapper controller, live** (forum.md 17.6.3; wave starts Forum_A_w7 / Forum_A_w13 rotated, eval, no real quits,
+  seeds 310100-310131, L2 on vs off paired; v2 = frozen 171cf28): w7 time alive 19.7 vs 11.1 s (paired +8.6 s, se 1.5),
+  hits / min 10.1 vs 16.6, nail hits on the Clapper 6.4 vs 2.1 per episode; w13 11.1 vs 9.2 s (+1.9, se 0.8), hits /
+  min 19.0 vs 20.4, 10.9 vs 5.7 hits on Clappers; slam-collider hits 6 vs 21 (w7), 14 vs 19 (w13). No kills (230 HP,
+  26 Reaper hits), all Q1 QUIT at about 3 hits. v2 changes from round 1: face 3 -> 4 u (its body reaches 2.25 u in
+  front: approach overshoot into it), jumps: under and behind only when the run gets behind the landing 0.25 s before it
+  lands and not through its body on the ground, else back off past the landing slam / rune circle (8.5 / 14.5 u).
+  Remaining on-arm hits by branch: face <- rune bombs 44 (the cast: no safe ground cell, a jump in the near rune's 5-7
+  frames; the planner's timing under the saturated support), jump <- body 14 on w7 (the way round flipped mid-jump,
+  the hero turned back under the landing; the behind spot clamped at the wall), cornered slam (behind) <- body 7 on
+  w13. v3 (716b539): the way round fixed at Jump Aim, behind only with room, a cornered slam goes out to the wall; and
+  (a637d77) the idle Clapper's turn only when its spot is reached before the busy one's attack can end (w13 switched 13
+  / min on turns). v3 runs on the L2-on arm only (Running).
+- **Full gauntlet re-run** (v2 171cf28, A0b protocol, seed 310200, 25 + 25 paired; runs 20261008_041945 on /
+  043128 off): QUIT 25 / 25 both (Q1), hits 4.48 vs 4.48 per episode (paired 0.00, se 0.15), alive p50 14.2 vs 13.9 s
+  (paired -0.45 s, se 0.66), FORCED_RISK 80.4 vs 80.1 %, unpredicted 0 / 0, presses / s 6.97 vs 6.89, plan-change rate
+  0.582 vs 0.625, real quits 7 / 7 / 7, 0 wrong submits; L2 errors 0, L2 p99 1.3 ms; tick p50 11.3 / 10.3 ms, p99
+  22.3 / 19.1 ms (machine load, below).
+- **Machine load** (for the lead): from about 03:30 the machine ran at 100 % CPU (other tracks' forensics / replays /
+  behaviour builds / three full test suites, mostly below normal). Live runs had 34-350 late ticks per episode (round 1:
+  0-2) and "paused unasked" HARNESS_FAILs (the brain missed 14 frames, the oracle watchdog paused; one ends a whole
+  combat_run): r6_ws.ps1's chunks failed after 7 and 1 episodes, diag's and r8's runs showed the same late ticks.
+  From r6_ws2.ps1 on the instance-1 worker runs at AboveNormal (both arms alike) and a chunk cut by a HARNESS_FAIL is
+  made up from its failed episode with the same seeds / rotation: 0 HARNESS_FAIL in 114 episodes, late ticks 8-60 per
+  wave-start episode, 2.6-5.4 % of the full gauntlets' ticks. Round-2 absolute numbers come from worse timing than round 1's; the arms are paired.
+- Checked (round-1 open issue): the reversed Entity.facing of standing Forum sprites matters nowhere else: the
+  forecast places by flipX (enemy_tracker.FACES_LEFT); only R4's pocket rule (fixed) and L2 read an enemy's facing.
+- Tests: `tests/test_forum_l2.py` 22 cases (round 1: 13; new: dwell, a move change keeps the target, opening / rule change, a rushed target
+  with company, the idle Clapper's turn and its reachability, far PUNISH spots, the jump's back off / fixed way round,
+  the cornered slam); full suite (tests + ssbot/tests at 716b539, below normal): 1151 passed, 2 skipped, 1 xfailed
+  (Bell Beast equivalence among them; no shared planner / forecast code touched).
+
+### Running
+
+- Driver `C:\ssbot\sandbox\r6_ws3.ps1 -Rev 716b539` (hidden PowerShell; frozen `C:\ssbot\live_r6_716b539`): the v3
+  controller on the L2-on arm only, wave starts w7 / w13, seeds 310100-310131 (the L2-off control is r6_ws2's
+  040451 / 041508, the same seeds and rotation: L2 off runs no L2 code). Holds `locks\inst1.lock` ("r6rules"), releases
+  it at the end, writes `r6_ws3.done`; log `r6_ws3.log`, `r6_ws3_batch.log`. Started 04:46 (the first start at 04:43
+  ran nothing: a one-chunk PowerShell plan array flattened, log `r6_ws3_failed_start.log`); waiting for the lock while
+  diag borrows instance 1. Stop: `r6_ws.stop` (before the next try)
+  or `combat_run stop <run dir>` from the checkout's brain.
 
 ### Next
 
-1. When `r6_ab.done` exists: `forum_a0_report` on the two L2-on runs and the two L2-off runs (run dirs named
-   `<time>_Forum_A_eval_planner_oracle`, config.json env SSBOT_FORUM_L2), pair by seed: CLEAR / QUIT / WOULD_DIE, hits per
-   episode, waves reached, time alive (ingame_s), unpredicted (must stay 0), tick p50 / p99 vs the 8 ms deadline, L2
-   goals, changes per minute (<= 10), punish_goals / punish_landed; also against A0b unpaired (205437 i1, 205857 i4).
-   Write the result into forum.md 17.5, the plan's R6 row and this section.
-2. Then live validation of the Clapper controller: wave-start batch from `Forum_A_w7` / `Forum_A_w13` on instance 1
-   (the full gauntlets never get past wave 0).
-3. PUNISH needs a support that sometimes leaves an idle enemy's surroundings free (R5's margins / timing, R8's clash
-   branches); a 3.0 u spot changed nothing (17.2). Until then the far-target rule fires only near lone enemies.
-4. Frozen checkouts to remove when done: `C:\ssbot\live_r6_5d24020`, then `live_r6_ef036d5`.
+1. When r6_ws3.done exists (if this round did not get to it): `ws_anal.py` (session scratchpad `r6\`) on the v3 run
+   vs 040451 / 041508 (and v2 035906 / 040911): body / slam hits by branch, time alive; forum.md 17.6.3.
+2. The rune-bomb hits (the cast) and the jump timing are the planner's: re-run the w7 / w13 pair with diag's
+   `SSBOT_FORUM_FR=seen` once it lands (runes are drawn 0.33-0.35 s before they explode).
+3. A Clapper kill needs about 26 Reaper hits: tools (Cogfly, R7's glide spike in the cast window) or a longer life;
+   the next gate for the controller is a wave-13 CLEAR, not time alive.
+4. PUNISH stays dead in multi-enemy waves until the support stops saturating (diag / R5 / R8).
+5. Frozen checkouts to remove when done (no live run uses them): `C:\ssbot\live_r6_5d24020`, `live_r6_ef036d5`,
+   `live_r6_f7a403c` (never ran), `live_r6_6d2f457`, then `live_r6_171cf28` and `live_r6_716b539` after the
+   integration.
+6. Main's `knowledge/1.0.30000/enemies/forum/` has no `*_hitboxes.npz` (git-ignored): the frozen checkouts took them
+   from this worktree (md5 of ChoirClapper e66bafe2..., the R3 tables, same as diag's worktree).
 
 ### Needs deploy
 
