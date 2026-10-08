@@ -391,12 +391,34 @@
 - 正式运行路径没有改动：`safety/pause_quit`、监督器不变，没有新按键；recovery 只由 combat_run、run_episode 和训练探针调用。
 - 测试：`tests/test_harness_recovery.py`（替身游戏：暂停菜单、选项、设置子菜单、退出提示、标题主菜单和子菜单；断言 Submit 只落在 continue / back / no、暂停时从不按 Esc、主菜单 Enter 不会在别的菜单里重按）。
 
-### 11.3 实战检查
+### 11.3 实战检查（实例 4，2026-10-08 03:37–03:40 PDT，冻结检出 `C:/ssbot/live_recov_8148fd4`，`probes/recovery_check`）
 
-（实例 4，见下一次提交。）
+结果 `C:/ssbot/sandbox/recovery_check/20261008_033740_i4.json`（日志 live_20261008_033740_i4.log）。10 个用例全部成功；所有 Submit 都落在 continue / back / no 上，暂停时一次 Esc 都没按。每个用例前读 Bell Beast 存档（Bone_05），存档抑制开着。
+
+| 用例 | 起点 | 恢复的按键 | 用时 |
+|---|---|---|---|
+| pause_options_hl | 暂停菜单，高亮 Options | Up，Continue+Submit | 0.58 s / 34 帧 |
+| pause_quit_hl | 暂停菜单，高亮 Quit | Up ×2，Submit | 0.86 s |
+| pause_options | 暂停中的 Options（menu 2，进来时高亮没有名字） | Down ×5 到 Back，Submit；Up，Submit | 2.45 s |
+| pause_game_options | Options → 第一项 Game（menu 12） | Down ×5 到 Back，Submit；再 Down ×5 到 Back，Submit；Up，Submit | 4.31 s / 258 帧 |
+| exit_prompt | 退出提示，高亮 Yes | Down 到 No，Submit；Up ×2，Submit | 1.6 s |
+| brain_lost | 连续控制按住 Up 后停发 ACTION | 暂停后 Continue+Submit | 0.43 s |
+| title_game_options | 真退出到标题后 Options → Game options（menu 12，即 10-05 那次） | back_into_slot：第 1 次 MenuError，第 2 次进存档槽 | 13.65 s |
+| title_options_hl | 标题主菜单高亮在 Options | 同上：MenuError，Esc，Up ×1，第 2 次进存档槽 | 11.81 s |
+| episode_pause | 真实 data 回合（Bell Beast，data 策略），第 180 个 ACTION 起 harness 自己按 Pause | 本场 HARNESS_FAIL，after_harness_fail 从 pause_opening 按 1 次 Continue；下一场正常跑满 12 s 时限（STUCK，704 次 ACTION） | |
+| episode_settings | 同上，然后进 Options → Game（menu 12），不调 after_harness_fail | 下一场开局自己的 resume 退出两层菜单并取消暂停，正常跑满 12 s 时限（719 次 ACTION） | |
+
+结论：
+- 真实的 Options（menu 2）和 Game options（menu 12）都是 Down ×5 到 Back；进菜单时高亮没有名字（MenuExporter 只命名 Back）。Down 只移动高亮，不改任何设置。
+- 看门狗用例：停发 ACTION 后 252 ms 暂停；第一帧暂停 STATE 上 act.lost 为真、注入掩码 16384（Pause）、最后一个 ACTION 在 14 帧前，`pause_cause` = "brain-lost watchdog, last ACTION applied 14 frames before"，与 60 次 paused unasked 的特征一致。
+- harness 自己按的 Pause（两个 episode 用例）：act.lost 为假，原因记为 "a Pause key in the harness's own ACTION (policy / probe)"，不再误记为看门狗。
+- 标题上从 Options 按 Esc 退回主菜单后，高亮停在 Options（进去之前的那一项），所以 load_slot 的第 1 次 Enter 一定再进 Options → MenuError；`_unstick` 按 Esc 回主菜单再 Up ×1，第 2 次成功。多花约 6 s，3 次重试足够。
+- 战斗循环的 loop_gap_ms_max 在这些回合里是 19–25 ms（没有 ≥ 250 ms 的停顿）。
+- 开始时实例 4 停在 routes 的 Song_Tower_01（Lace 2）里；检查结束时读回 Bell Beast 存档，游戏在 Bone_05、未暂停。
 
 ### 11.4 待定
 
-- 看门狗暂停的根因是 worker 主循环停顿 ≥ 250 ms（读线程照常）。新的 loop_gap 统计会显示哪些场有；要减少它需要看规划器首次编译的预热和多代理共享 CPU，本任务没有动。
+- 看门狗暂停的根因是 worker 主循环停顿 ≥ 250 ms（读线程照常）。新的 loop_gap 统计会显示哪些场有；要减少它需要看规划器首次编译的预热和多代理共享 CPU，本任务没有动。最新一例（20261008_015907 i0）是规划器的一次 1599 ms 决策（计划 "WAIT+runR"，预热之后的 ep0），预热没覆盖到的路径仍会触发看门狗。
 - data 模式下看门狗暂停后本可以恢复后接着打（时间冻结，只少了 250 ms 的输入），现在仍按 HARNESS_FAIL 结束这一场：策略和 tap 没有处理暂停中的帧。
+- 标题上从 Options 退回后高亮停在 Options，load_slot 必然多一次 MenuError（约 6 s）；可以在 title_home 之后按来源菜单先 Up，但这需要知道每个子菜单的 menuState 归属哪一项，没做。
 - 主菜单 / 暂停菜单的高亮会被窗口下静止的鼠标改变；训练时鼠标最好不停在训练窗口上（正式运行已有此规定，P7）。
