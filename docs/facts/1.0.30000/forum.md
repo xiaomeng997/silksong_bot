@@ -2013,3 +2013,12 @@ v4 的 w7 有 20 次受击是跳施法的大符文（`rune slam`）。行为表�
 - 全部臂每场都在第 0 波退出（QUIT），0 击杀、0 WOULD_DIE、支撑外命中 0。
 - 只做 delay 没有作用；escape 在 share 上 +1.7 s（显著）、在 seen_cf 上 +2.0 s（区间含 0）；拼刀（`--forum-clash on`，只在 GREEN）在 seen_cf 上短 3.2 s（显著），和 escape 一起 −1.2 s（不显著）。escape 让 plan p50 多约 3 ms、late_mean 从 0.6–0.9 升到 4.6–8.4（汇总脚本的迟到指标）。
 - **FORCED_RISK 的比例开了反应式支撑之后没有降（0.78–0.89）**：去掉"还没开始的招"没有让第 0 波的支撑不再饱和，盖住主角选项的是别的东西。集成任务说明列的候选（未核实）：支撑的余量（`support_margins.json`：Reed 钉、Minister 招架、Tiny 冲撞、钟、符文弹到 3.0 u 的搜索上限，Envoy 冲锋 2.96 u，主角只有 0.5 u 宽）、敌人的身体管、按时间窗放置的已承诺招（入场时刻不确定，0.25 u 粗金字塔）、死亡尾巴、导出的 ±1 bin 延迟。逐组分解（groups2）没有结果。
+
+### 22.3 集成之后的冒烟（2026-10-08 10:45–10:54，分支 forum-integration-1008，冻结检出 `C:\ssbot\live_int_6c160ac`；只证明合并后的代码能跑，不是 A/B）
+
+Forum_W（漫游），A0b 协议，实例 0 13 场 + 实例 1 12 场，种子 360000；`SSBOT_FORUM_FR=seen_cf`、`SSBOT_FORUM_REACT=escape`、`--forum-clash on`，其余用合并后的默认值（commit_rank 开、L2 开、终点价值关、T 36）。运行 `C:\ssbot\data\runs\m2\20261008_104557_Forum_W_eval_planner_oracle_clash`、`20261008_104618_…_clash`，报告 `C:\ssbot\data\runs\m2\int_smoke_report_6c160ac.json`。
+
+- 25 / 25 第 0 波退出（Q1 23 场；QS 僵持 2 场：漫游 ×3 暴击上界让最后一击规则 20 s 不出刀，R8 的未决问题），0 WOULD_DIE、0 击杀、支撑外命中 0；没有崩溃、没有 HARNESS_FAIL。
+- 局内时长中位 23.3 s（均值 25.6 s），每场受击 4.2、每分钟 9.8；FORCED_RISK 0.917；包络审计干净；tick p50 10.2 ms、plan p50 / p99 6.2 / 11.1 ms、迟到 tick 1.5 %。
+- 拼刀分支在 33,684 个 FORCED_RISK tick 里有 33,633 个被档位门（只在 GREEN）跳过：第 0 波里"拼刀开"实际上只是"一直出刀"的续段行。
+- 和 22.2 的数字不成对（不同种子、不同代码、时长的定义可能不同），只作参照：seen_cf + escape + 拼刀开 23.4 s / 10.3 次每分钟，seen_cf + escape 23.9 s / 10.1。

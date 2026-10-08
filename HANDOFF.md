@@ -2955,3 +2955,149 @@ plan R6 row note); below, the round-2 bullets above stand as written then.
 ### Needs deploy
 
 - Nothing (no oracle change).
+
+## Forum integration 2026-10-08 (branch forum-integration-1008, worktree `C:\modeling\silksong_bot\.claude\worktrees\wf_34e9717f-fa3-1`)
+
+Main (41c4bd4, later d5b652a: docs only) plus the Forum tracks, one `git merge --no-ff` each, in this order: reactive
+support `worktree-wf_08175c18-693-1` 8b1dd82 (it already holds the wave-0 forensics track `worktree-wf_fa16f06f-127-8`
+2c4b089 and R8 up to bda1682), R8 clash `worktree-wf_814dfeea-b10-4` 7738698, harness recovery
+`worktree-wf_814dfeea-b10-6` 01765f0, R5 model `worktree-wf_814dfeea-b10-1` 76e40ad, R5 value
+`worktree-wf_814dfeea-b10-2` 9f28b0e, R6 v0 `worktree-wf_814dfeea-b10-3` 367862c, main d5b652a. Every listed head is an
+ancestor of this branch. The track sections above keep their own text (their forum.md section numbers are the old
+ones, see "forum.md numbering").
+
+### Conflicts and how they were resolved
+
+- `combat/forum_planner.py` (diag / reactive / R8 x R5 value; R5 value had ported diag's `seen` and stacked
+  commit_rank on it): one `ForumConfig` with every track's fields (p_all, forced_rank incl. seen_cf, commit_rank,
+  terminal + weights, react / esc_*, clash_*); `committed_fine_share` (seen_cf) kept; FORCED_RISK's keys stack:
+  preselection (p_k 16) by seen count > seen first contact > the committed fine share (seen_cf) > P_cm > P_f > the latest
+  first contact > J, then the rows with a clash branch appended (R8: ranked whatever their first contact; p_all keeps
+  P for every row, the choice still in the preselection + clash rows); the final order hz > hz_soft > U > S > clash_p >
+  keep > mkeep > V > seen > cf > P (clash-mixed) > P_cm > P_f > t_c > t_hit > J. A switch that is off leaves its keys 0
+  on every row, so each track's own configuration orders exactly as on its branch (the escape check's FORCED_RISK tie
+  set "keys above the share" is unchanged: P_cm / P_f are below it). `last_sel` (R5 value's audit hook) also carries
+  sk_c and clash_p and is set before the escape pick ("first") with "chosen" after it; `last_info` has every track's
+  fields (Pcm / Pf, seen, seen_cf, esc, dbg, tv).
+- `train/forum_planner_policy.py`: one `_fcfg(clash)` (SSBOT_FORUM_FR incl. seen_cf, SSBOT_FORUM_REACT, the clash
+  mode; PC / TV / T from ForumConfig's module defaults), the planner built with the crest, the clash mode and
+  `PlannerConfig(T=fcfg.T)`; `__init__(..., crest, clash, branch_model)`; tactics = R6's `GauntletTactics` over LOCAL
+  (SSBOT_FORUM_L2) with R5 model's forecaster (`branch=` when branch_model); `SSBOT_FORUM_AB` arms now also take
+  `fr=seen_cf` and `rx=<SSBOT_FORUM_REACT value>` (the clash mode is not an arm key: it changes the candidate sets the
+  planner is built with); the per-episode `replace(self._fcfg(self.clash), **arm)` keeps the clash mode; the decision
+  log keeps every track's fields (tv, seen, seen_cf, esc, the L2 goal / why / t_end / l2_cands, clash); `stats()` has
+  ab_arm, fcfg {forced_rank, react, commit_rank, terminal, T}, branch_model.
+- `combat/multi_forecast.py` (R5 model x R6): `Subject` has both R6's t_free (start + family duration p0.5) and R5
+  model's next_p.
+- `tools/forum_policy_replay.py` (R5 value x R6): --skip / --ticks-out / L2 fields and the terminal-value stats.
+- Docs: forum.md, HANDOFF, the plan rows: every track appended; the sections were put in number order (below).
+- `tests/test_forum_planner.py`: diag's and R5 value's copies of `_with_collider` and the three seen tests were both
+  merged (the later copies shadowed the earlier ones): R5 value's stacked versions (they loop commit_rank on / off)
+  kept.
+
+### forum.md numbering (three tracks had used section 17)
+
+R8 clash 17 (17.9 placed at its end), R5 model 18, wave-0 forensics 19, **R5 value 20 (was 17)**, **R6 v0 21 (was
+17)**, **reactive support 22** (the code had referred to a §20 that was never written; written at integration from
+the track's code and its pooled A/B files, `C:\ssbot\data\m2_forum_react2\ab_pooled_vs_*.json`). Cross references in
+the moved sections, the code comments / docstrings / tests / Forum.yaml and the plan's R5 / R6 rows follow (numbers in
+tables that only looked like references, e.g. "17.6 %", were left alone, checked line by line); the track sections
+of this HANDOFF keep the old numbers. Plan sec. 5 has a dated integration note (switches, defaults, the key order,
+the numbering).
+
+### Switches (defaults as the tracks left them)
+
+| switch | values | default | what it does | track / facts |
+|---|---|---|---|---|
+| `SSBOT_FORUM_FR` | share, seen, seen_cf | share | FORCED_RISK's first keys: seen = frames each row's nominal box meets the damage colliders seen now, moved along their velocity; seen_cf = seen, then the share of stage-1 frames in the committed fine placements (attacks under way with a known entry) | diag, forum.md 19 |
+| `SSBOT_FORUM_REACT` | off, delay, escape; + `+c` / `+i` / `+p5` | off | reactive support: an attack not started yet strikes no earlier than its wind-up (strikes.json least commit -> first damage, less the view's latency); escape adds the planner's escape check (safe ticks: first of 4 rows with a way out of every attack that may start; FORCED_RISK: among the first 8 rows tied on the keys above the share); +c committed attacks' later states, +i idle roots left to the body tube, +p5 the bell / pin / rune exceptions at p5 | reactive, forum.md 22 |
+| `combat_run --forum-clash` (`ForumPlannerPolicy(clash=)`, `forum_policy_replay --clash`) | off, on, yellow, cont | off | R8 EV_CLASH: on = the clash branch + the keep-swinging continuation rows, GREEN only (DESIGN 3.5.6); yellow = also YELLOW (experiment, the lead's call); cont = the continuation rows only; run tag `_clash` / `_clashY` / `_clashC` | R8, forum.md 17 |
+| crest (`ForumPlannerPolicy(crest=)`, from the encounter: `Forum_W` / fo_W = Wanderer, else Reaper; `forum_policy_replay --crest`) | Reaper, Wanderer | by encounter | kinematics (`hero_<crest>_forum.json`), slash shapes, the Wanderer dash-combo veto and down slash | R8, forum.md 17 |
+| `SSBOT_FORUM_PC` | 1, 0 | 1 (on) | commit_rank: after P, the shares of stage-1 frames in the committed support (P_cm) and in the current attacks' fine placements (P_f), from stage 1's own query (`MultiForecast.occupied_split`) | R5 value, forum.md 20 |
+| `SSBOT_FORUM_TV` | 0, 1 | 0 (off) | the terminal value (combat.terminal: E / trapped / overlap / H_exp into J, kill value into the target weights) | R5 value, forum.md 20 |
+| `SSBOT_FORUM_T` | 36, 48 | 36 | the planner's horizon in frames (the policy's PlannerConfig follows it) | R5 value |
+| `SSBOT_FORUM_HITBODY` | 1, 0 | 1 | hit targets from `Entity.hit_polys` (0: the R4 targets incl. the 5-47 u range triggers) | R5 value, forum.md 20.2 |
+| `SSBOT_FORUM_AB` | `name:pc=0/1,fr=share/seen/seen_cf,rx=<react>;...` (one value each) | empty | arms switched per episode (episode k runs arm k mod n; `policy.ab_arm` in the attempts) | R5 value (+ fr seen_cf, rx: integration) |
+| `SSBOT_FORUM_L2` | (empty) / 1 / on, 0 / off, fail:<p> | Forum.yaml `forum.l2.enabled: true` (on) | R6 v0's L2 target layer (GauntletTactics: PUNISH / RUSH / KITE, the Clapper controller) above LOCAL; 0 = the A0 LOCAL tactics bit for bit; fail:<p> injected failures | R6, forum.md 21 |
+| `ForumPlannerPolicy(branch_model=)` | False, True | False | R5 model's branch model: per-enemy history (`EnemyTracker.mem`) and `Subject.next_p` (scoring only; nothing consumes it yet; combat_run does not expose it) | R5 model, forum.md 18 |
+
+Note for the A/B: the merged default is NOT any single track's default. The diag / reactive / R8 arms ran without
+commit_rank and without L2 (their branches did not have them); reproducing them on this branch needs
+`SSBOT_FORUM_PC=0 SSBOT_FORUM_L2=0`. R5 value's arms ran without L2, R6's without commit_rank.
+
+### Checks (offline, below-normal priority, NUMBA_NUM_THREADS 4)
+
+- Full suite at 32db232 (all merges, before the integration tests): 1257 passed, 2 skipped (the vision window
+  forecast test, the hitbox-table timing test on a busy machine: the same two as the tracks'), 1 xfailed
+  (`scratchpad/fullsuite_32db232.txt` of this session).
+  Full suite at 6c160ac (the final code): 1264 passed, 2 skipped (the same two), 1 xfailed (ullsuite_6c160ac.txt).
+- New `tests/test_forum_integration.py` (7): the chosen FORCED_RISK row is the least of the choice set on the stacked
+  keys for share / seen / seen_cf x commit_rank off / on, a switched-off key is 0 everywhere; a tick with every switch
+  on (Wanderer, seen_cf, commit_rank, clash, escape, terminal value); the policy's combined switches and the AB arms.
+- Bell Beast bit-identical with the Forum switches off: per-tick decisions (plan name, mask, S, FORCED_RISK, J, P,
+  safe / allowed counts, the chosen command's hash, mode, stance) on `20261003_144536_BellBeast_eval_planner_oracle`
+  i4_000, 3,000 frames, frozen main `C:\ssbot\live_int_41c4bd4` vs frozen integration `C:\ssbot\live_int_6c160ac`:
+  oracle view 3,001 / 3,001 ticks identical (84 FORCED_RISK), vision-equivalent view 3,001 / 3,001 identical (1,023
+  FORCED_RISK). Script `bb_ticks.py` / `bb_ticks.cmd` in this session's scratchpad (planner_bench's Bell Beast loop
+  with a per-tick dump). The 50-episode Bell Beast oracle batch of the plan's merge rule was not run (the Forum
+  priority; it is a live run on a non-Forum encounter).
+- Shared code the Bell Beast path touches changed only by new bits / fields: kin_jit's AB_DOWN_SLASH /
+  EV_PARRY_RECOVER, `Entity.hit_polys`, hero_damage's KNOWN_NEUTRAL (+ Cogwork Flier, Wallcling: not in the Bell
+  Beast loadout), the harness recovery (episode / combat_run: no decision path).
+
+### Smoke: the merged code runs (25 Forum_W episodes, 2026-10-08 10:45-10:54)
+
+Frozen `C:\ssbot\live_int_6c160ac` (6c160ac = this branch's code; the commits after it are docs), driver
+`C:\ssbot\sandbox\int_smoke.ps1` (locks inst0 / inst1 "integration", released; warm replay first), instance 0 13 + instance
+1 12 episodes in parallel, Forum_W (Wanderer), eval, planner, oracle, real quits 0.2 (the A0b protocol), seed 360000,
+`SSBOT_FORUM_FR=seen_cf SSBOT_FORUM_REACT=escape --forum-clash on`, everything else the merged defaults (commit_rank
+on, L2 on, terminal value off, T 36). Runs `C:\ssbot\data\runs\m2\20261008_104557_Forum_W_eval_planner_oracle_clash`
+(i0) and `20261008_104618_..._clash` (i1); report `C:\ssbot\data\runs\m2\int_smoke_report_6c160ac.json`
+(forum_a0_report), summary script `smoke_summary.py` in this session's scratchpad.
+
+- Every row: code_rev 6c160ac, one config_fp (228e3a98d296), fcfg {seen_cf, escape, commit_rank on, terminal off, T 36},
+  clash on, crest Wanderer, L2 on. No crash, no HARNESS_FAIL, every worker exit 0.
+- 25 / 25 QUIT in wave 0 (Q1 23, QS stalemate 2: "the killing-blow rule held back 20.0 s with no hit dealt": the
+  Wanderer x3 crit bound, R8's open issue 2), 0 WOULD_DIE, 0 kills, 0 hits outside the support (0 unknown).
+- In-game time per episode (attempt `ingame_s`) median 23.3 s, mean 25.6 s; 4.2 hits per episode, 9.8 hits / min
+  (Envoy 39, Choristor 35, Reed 31; top colliders Envoy slash 16, Reed pin 10, Reed body 9, Choristor spin 9).
+- FORCED_RISK 0.917 of the ticks (10.7 streaks / min); envelope audit clean (3,062 chosen safe plans all enveloped,
+  core rows never left out). Escape: 2,855 safe ticks checked (486 passed), 31,964 FORCED_RISK ticks ranked (10,056
+  passed, 6,766 moved off the order's first), 888 cut by esc_deadline_ms. Clash: the branch was skipped by its tier
+  gate (GREEN only, DESIGN 3.5.6) on 33,633 of 33,684 FORCED_RISK ticks; 7 partial rows, 1 chosen: in wave 0 "clash on"
+  is in practice the continuation rows.
+- Compute: tick p50 median 10.2 ms, plan p50 / p99 medians 6.2 / 11.1 ms, late ticks 1.5 %.
+- For orientation only (not paired, other seeds, other code): the reactive track's seen_cf + escape + clash on arm had
+  a median 23.4 s and 10.3 hits / min, seen_cf + escape (clash off) 23.9 s / 10.1 (forum.md 22.2; the definition of
+  its time column is the track's `ab.py`, not checked against ingame_s). The A/B is the next step's.
+
+### Running
+
+- Nothing. The smoke driver ended at 10:54 and released inst0.lock / inst1.lock; instance 4 (routes' Lace 2 collection)
+  untouched.
+
+### Needs deploy
+
+- Nothing (no oracle change in any track).
+
+### Next / open issues
+
+1. The A/B (the next step): seen_cf + escape with clash off is the best measured arm so far (reactive pooled data,
+   forum.md 22.2: 23.9 s vs seen_cf alone 22.9 s, paired +2.0 s, CI -0.5..4.7); clash on was worse on top of seen_cf
+   (-3.2 s paired, significant) and seen_cf + escape + clash on -1.2 s (n.s.). The smoke ran the task's "seen_cf +
+   clash on + escape" with the merged defaults (commit_rank on, L2 on): an A/B should include clash off and the
+   commit_rank / L2 settings explicitly (`SSBOT_FORUM_AB` can switch fr / pc / rx per episode; clash and L2 need
+   separate runs).
+2. seen_cf with commit_rank on pays a second fine query for the committed fine share (`committed_fine_share`); R5
+   value's note: take it from `occupied_split` (its committed fine part before the windows are or'ed in) to save it.
+3. Clash rows in FORCED_RISK: P is mixed by the branch weight w, P_cm / P_f stay the plain row's (they only act on P
+   ties); R8's note that the seen key counts the collider a swing would clash as a contact (clash rows ranked last
+   under seen) is still open.
+4. FORCED_RISK stays at 0.78-0.89 of the ticks with reactive support on (forum.md 22.2): what keeps wave 0's support
+   saturated (support margins up to the 3.0 u search cap, body tubes, window placements of committed attacks, death
+   tails, the export lag) is not decomposed yet (the reactive track's `forum_react_audit` groups2 run was cut off).
+5. The Wanderer's x3 crit bound in the killing-blow rule (R8 open issue 2) ended 2 of the 25 smoke episodes as QS
+   stalemates (20 s with the nail held back and no heal): it caps how long a Wanderer run can hold out even when it
+   dodges well; the lead's call (DESIGN 3.5.6 / the kill rule), not changed here.
+6. Frozen checkouts made here: `C:\ssbot\live_int_41c4bd4` (main, for the Bell Beast identity) can go;
+   `C:\ssbot\live_int_6c160ac` is the smoke's. The tracks' own frozen checkouts are listed in their sections.
