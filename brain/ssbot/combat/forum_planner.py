@@ -40,6 +40,12 @@ Per tick (the lexicographic order and every rule of Planner.tick unless named he
               contact with the committed support and then with the current attacks' fine placements (P_cm, P_f: the
               support's P ties at 1 in wave 0, forum.md 17.7; they also lead the preselection), the latest first
               contact, the envelope's, J.
+              forced_rank "seen" (forum.md §19) puts a key before that share, in the preselection too: the frames
+              each row's nominal box meets the damage colliders seen now, moved along their entity's velocity
+              (seen_contacts; fewest first, then the latest first contact). In wave 0 the support saturates (every
+              row in it on every frame) and the share ties: the pick then fell to J. (Ported from the wave-0
+              forensics track, worktree-wf_fa16f06f-127-8 3608489, stacked here with commit_rank: seen > P > P_cm >
+              P_f.)
   determinism deadline_ms = inf: decisions do not depend on the machine's speed (audits, identity checks).
   unmodelled  a row that presses attack while dashing / sprinting is vetoed (the Reaper's dash stab is R7's).
   not here    the lock check past the horizon (no Silkspear in the Forum set; the Bind macro checks its own), the key
@@ -107,6 +113,9 @@ class ForumConfig:
     #                               placement kind and probability value) instead of the share of frames in contact
     p_all: bool = False           # audits (tools/forum_tv_audit): FORCED_RISK's P / first contact for every allowed
     #                               known row, the choice still among the p_k preselected (decisions unchanged)
+    forced_rank: str = "share"    # FORCED_RISK's first risk key: "share" (the support share, above), "seen" (frames in
+    #                               contact with the damage colliders seen now, moved along their entity's velocity,
+    #                               then the share; forum.md §19: the support saturates in wave 0 and the share ties)
     commit_rank: bool = PC_ON     # FORCED_RISK: rows tied on P ranked by their share of stage 1's frames in contact
     #                               with the committed support (P_cm: current attacks, tails, death tails, hazards),
     #                               then with the current attacks' fine placements (P_f) (forum.md 17.7: P ties at 1 in
@@ -180,6 +189,56 @@ def _meets(tb0, tb1, tb2, tb3, verts, a, b, cx, cy):
     starts = np.empty(2, np.int64)
     starts[0], starts[1] = a, b
     return _rect_meets_polys(tb0, tb1, tb2, tb3, verts, starts, cx, cy)
+
+
+@numba.njit(cache=True, parallel=True)
+def seen_contacts(box, inv, verts, starts, pbox, vel, tk, rows, grow):
+    """FORCED_RISK's "seen" key (ForumConfig.forced_rank): per row of `rows`, the frames 1 .. T1 - 1 its nominal box
+    (grown by `grow`; invulnerable frames clear) meets a damage polygon seen now moved along its entity's velocity
+    (tk[k] s on), and the first such frame (T1: none). pbox [n, 4]: each polygon's bounding box (a cheap reject).
+    No forecast: what is already there and where it is going, not what may start."""
+    N, T1 = box.shape[0], box.shape[1]
+    n_p = len(starts) - 1
+    cnt = np.zeros(N, np.int64)
+    first = np.full(N, T1, np.int64)
+    for m in numba.prange(len(rows)):
+        c = rows[m]
+        for k in range(1, T1):
+            if inv[c, k]:
+                continue
+            x0, y0, x1, y1 = box[c, k, 0] - grow, box[c, k, 1] - grow, box[c, k, 2] + grow, box[c, k, 3] + grow
+            for p in range(n_p):
+                dx, dy = vel[p, 0] * tk[k], vel[p, 1] * tk[k]
+                if pbox[p, 0] + dx > x1 or pbox[p, 2] + dx < x0 or pbox[p, 1] + dy > y1 or pbox[p, 3] + dy < y0:
+                    continue
+                if _rect_meets_polys(x0, y0, x1, y1, verts, starts[p:p + 2], dx, dy):
+                    cnt[c] += 1
+                    if first[c] == T1:
+                        first[c] = k
+                    break
+    return cnt, first
+
+
+def seen_polys(ws) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """The damage polygons the hero could meet now: every entity's active damage boxes (oracle: enabled colliders
+    able to deal damage; vision: the detected boxes), with the entity's velocity. Returns (verts [m, 2], starts
+    [n + 1], bounding boxes [n, 4], velocities [n, 2])."""
+    vs, st, bb, vel = [], [0], [], []
+    for e in getattr(ws, "entities", None) or ():
+        polys = [b.poly for b in e.dmg_boxes if b.active and len(b.poly) >= 3]
+        if not polys:
+            continue
+        v = e.vel.v if getattr(e.vel, "conf", 1.0) > 0 else (0.0, 0.0)
+        for poly in polys:
+            a = np.asarray(poly, np.float64).reshape(-1, 2)
+            vs.append(a)
+            st.append(st[-1] + len(a))
+            bb.append((a[:, 0].min(), a[:, 1].min(), a[:, 0].max(), a[:, 1].max()))
+            vel.append((float(v[0]), float(v[1])))
+    if not vs:
+        return np.zeros((0, 2)), np.zeros(1, np.int64), np.zeros((0, 4)), np.zeros((0, 2))
+    return (np.ascontiguousarray(np.concatenate(vs)), np.array(st, np.int64), np.array(bb, np.float64),
+            np.array(vel, np.float64))
 
 
 @numba.njit(cache=True, parallel=True)
@@ -319,6 +378,16 @@ class ForumPlanner(Planner):
         self.last_sel: dict | None = None
         self.tv = TerminalValue(params) if self.fcfg.terminal else None
         self._two: dict = {}
+
+    def warm_kernels(self) -> None:
+        """Planner.warm_kernels and the "seen" key's kernel (it runs only on FORCED_RISK ticks: a first call mid-fight
+        compiles past the oracle's brain-lost watchdog)."""
+        super().warm_kernels()
+        box = np.zeros((2, 5, 4))
+        box[..., 2:] = 1.0
+        seen_contacts(box, np.zeros((2, 5), np.bool_), np.array([[0.0, 0.0], [1.0, 0.0], [1.0, 1.0]]),
+                      np.array([0, 3], np.int64), np.array([[0.0, 0.0, 1.0, 1.0]]), np.zeros((1, 2)),
+                      np.arange(5, dtype=np.float64), np.arange(2, dtype=np.int64), 0.0)
 
     # ---- scoring ----
 
@@ -679,8 +748,17 @@ class ForumPlanner(Planner):
         sel = ok & known
         Pcm = np.zeros(N)
         Pf = np.zeros(N)
+        sk_n = np.zeros(N, np.int64)          # the "seen" key (0 on every row otherwise: the order is unchanged)
+        sk_f = np.full(N, T1, np.int64)
         if forced and sel.any():
             cand = np.flatnonzero(sel)
+            if fcfg.forced_rank == "seen":
+                verts, starts, pbox, pvel = seen_polys(ws)
+                if len(pbox):
+                    cnt, fst = seen_contacts(np.ascontiguousarray(r1.box, np.float64), np.ascontiguousarray(
+                        (r1.flags & F_INVULN) != 0), verts, starts, pbox, pvel, np.ascontiguousarray(tk, np.float64),
+                        np.ascontiguousarray(cand, np.int64), 0.0)
+                    sk_n[cand], sk_f[cand] = cnt[cand], fst[cand]
             if fcfg.commit_rank and hasattr(f, "_fine_occ"):
                 # the nominal box centre on stage 1's frames (its invulnerable ones skipped) against the committed
                 # support (P_cm) and the current attacks' fine placements (states with a known entry: P_f)
@@ -688,7 +766,7 @@ class ForumPlanner(Planner):
                 X, Y = cx[cand], cy[cand]
                 Pcm[cand] = (f._union_occ(X, Y, tk[fr], committed_only=True) & live).mean(axis=1)
                 Pf[cand] = (f._fine_occ(X, Y, tk[fr]) & live).mean(axis=1)
-            cand = cand[np.lexsort((-J[cand], -t_hit[cand], Pf[cand], Pcm[cand]))]
+            cand = cand[np.lexsort((-J[cand], -t_hit[cand], Pf[cand], Pcm[cand], -sk_f[cand], sk_n[cand]))]
             n_k = min(fcfg.p_k, len(cand))
             if not fcfg.p_all:
                 cand = cand[:n_k]
@@ -737,14 +815,14 @@ class ForumPlanner(Planner):
                 mkeep[N - 1] = True
             # FORCED_RISK: the least share in contact, the latest first contact on the nominal lane, then on the
             # envelope (rows clear on the nominal lane), J (a tick with a safe row: those rows all tie on these)
-            order = np.lexsort((-J, -t_hit, -t_c, Pf, Pcm, Pc, ~V, ~mkeep, ~keep, S, U, hz_soft, hz))
+            order = np.lexsort((-J, -t_hit, -t_c, Pf, Pcm, Pc, -sk_f, sk_n, ~V, ~mkeep, ~keep, S, U, hz_soft, hz))
             order = order[sel[order]]
             i = int(order[0])
             tail_ok = None
             carried = cont and i == N - 1 and self.prev_tail_ok
             # the selection's inputs, by reference (offline audits: tools/forum_tv_audit; not logged)
             self.last_sel = {"J": J, "J_tv": sc.get("J_tv"), "t_hit": t_hit, "t_c": t_c, "Pc": Pc, "Pcm": Pcm, "Pf": Pf,
-                             "V": V,
+                             "sk_n": sk_n, "sk_f": sk_f, "tk": tk, "V": V,
                              "mkeep": mkeep, "keep": keep, "S": S, "U": U, "hz": hz, "hz_soft": hz_soft, "sel": sel,
                              "allowed": ok & known, "safe": safe, "forced": forced, "first": i, "box": r1.box,
                              "flags": r1.flags, "cmd": cmd, "P": P, "T1": T1, "p_k": fcfg.p_k,
@@ -803,7 +881,8 @@ class ForumPlanner(Planner):
                           "uncapped": budget.get("uncapped", 0),
                           "S": S, "Hz": hz, "U": U, "core_mask": core, "env": env, "Pc": Pc, "Pcm": Pcm, "Pf": Pf,
                           "t_c": t_c,
-                          "cand": sel if forced else np.zeros(N, bool), "hit_occ": hit_occ}
+                          "cand": sel if forced else np.zeros(N, bool), "hit_occ": hit_occ,
+                          "seen": int(sk_n[res.idx]) if res.idx >= 0 else None}
         if "E" in sc:
             ci = res.idx if 0 <= res.idx < N else None
             self.last_info["tv"] = {"ms": round(sc["tv_ms"], 3), "field_ms": round(sc["field_ms"], 3),

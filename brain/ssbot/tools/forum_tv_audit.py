@@ -19,7 +19,9 @@ still among the p_k preselected, so the decisions are the live ones). Per tick, 
              the horizon. The enemies are the recording's (they reacted to the recorded hero, not to the row), so this
              is an estimate. Shares of ticks with a clear row, with each ranking's choice clear, and per key the
              within-tick AUC for clear rows (Mann-Whitney over the tick's allowed rows, pooled by pair count; 0.5: no
-             information).
+             information). Scores besides the planner's keys: the committed support's / the fine placements' share
+             (P_com, P_fine: commit_rank), MultiForecast.prob, and the wave-0 forensics track's "seen" key (seen_n /
+             seen_f: forced_rank "seen", ForumPlanner.seen_contacts).
 """
 import argparse
 import dataclasses
@@ -29,17 +31,14 @@ import sys
 from collections import Counter, defaultdict
 from pathlib import Path
 
-import numba
 import numpy as np
-
-from ssbot.combat.planner import _rect_meets_polys
 
 CHANGE_F = 6                      # two choices differ when their keys differ in the first this many frames
 PRE_HIT_F = 36                    # "pre_hit": ticks at most this many frames before a recorded hit (any kind of tick)
 ACCS = ("forced", "safe", "pre_hit")
 DUMP: list | None = None          # --dump: per tick, the allowed rows' keys, scores and hindsight (offline rankings)
 EP_KEY = [""]
-KEY_NAMES = ("hz", "hz_soft", "U", "S", "keep", "mkeep", "V", "P", "Pcm", "Pf", "t_c", "t_hit", "J")
+KEY_NAMES = ("hz", "hz_soft", "U", "S", "keep", "mkeep", "V", "sk_n", "sk_f", "P", "Pcm", "Pf", "t_c", "t_hit", "J")
 
 
 def threat_boxes(s: dict) -> np.ndarray:
@@ -99,10 +98,12 @@ def order_of(ls: dict, J: np.ndarray, pre: str = "J", first: str | None = None, 
     t_hit, t_c, Pc = ls["t_hit"], ls["t_c"], ls["Pc"]
     Pf = ls.get("Pf", np.zeros(len(sel)))
     Pcm = ls.get("Pcm", np.zeros(len(sel)))
+    sk_n = ls.get("sk_n", np.zeros(len(sel), np.int64))
+    sk_f = ls.get("sk_f", np.zeros(len(sel), np.int64))
     if forced and presel:
         cand = np.flatnonzero(sel)
         Jp = J if pre == "J" else ls["J"]
-        cand = cand[np.lexsort((-Jp[cand], -t_hit[cand], Pf[cand], Pcm[cand]))][:ls["p_k"]]
+        cand = cand[np.lexsort((-Jp[cand], -t_hit[cand], Pf[cand], Pcm[cand], -sk_f[cand], sk_n[cand]))][:ls["p_k"]]
         sel = np.zeros_like(sel)
         sel[cand] = True
     tail = (-J, -t_hit, -t_c)
@@ -110,14 +111,15 @@ def order_of(ls: dict, J: np.ndarray, pre: str = "J", first: str | None = None, 
         tail = (-t_hit, -t_c, -J)
     elif first == "X":
         tail = (-J, -t_hit, -t_c, -extra)
-    o = np.lexsort(tail + (Pf, Pcm, Pc, ~ls["V"], ~ls["mkeep"], ~ls["keep"], ls["S"], ls["U"], ls["hz_soft"],
-                           ls["hz"]))
+    o = np.lexsort(tail + (Pf, Pcm, Pc, -sk_f, sk_n, ~ls["V"], ~ls["mkeep"], ~ls["keep"], ls["S"], ls["U"],
+                           ls["hz_soft"], ls["hz"]))
     return o[sel[o]]
 
 
 def decided_key(ls: dict, a: int, b: int) -> str:
     keys = {"hz": ls["hz"], "hz_soft": ls["hz_soft"], "U": ls["U"], "S": ls["S"], "keep": ls["keep"],
-            "mkeep": ls["mkeep"], "V": ls["V"], "P": ls["Pc"], "Pcm": ls.get("Pcm", ls["Pc"] * 0),
+            "mkeep": ls["mkeep"], "V": ls["V"], "sk_n": ls.get("sk_n", ls["Pc"] * 0),
+            "sk_f": -ls.get("sk_f", ls["Pc"] * 0), "P": ls["Pc"], "Pcm": ls.get("Pcm", ls["Pc"] * 0),
             "Pf": ls.get("Pf", ls["Pc"] * 0), "t_c": ls["t_c"],
             "t_hit": ls["t_hit"], "J": ls["J"]}
     for k in KEY_NAMES:
@@ -166,54 +168,6 @@ class Acc:
         return a
 
 
-@numba.njit(cache=True)
-def seen_contacts(box, inv, verts, starts, pbox, vel, tk, rows):
-    """The wave-0 forensics track's FORCED_RISK key "seen" (track diag, branch worktree-wf_fa16f06f-127-8: ForumConfig
-    .forced_rank, forum.md 19), re-implemented here to compare it with commit_rank on the same ticks: per row, the
-    frames 1 .. T1 - 1 its nominal box (invulnerable frames clear) meets a damage polygon seen now moved along its
-    entity's velocity, and the first such frame (T1: none)."""
-    N, T1 = box.shape[0], box.shape[1]
-    n_p = len(starts) - 1
-    cnt = np.zeros(N, np.int64)
-    first = np.full(N, T1, np.int64)
-    for m in range(len(rows)):
-        c = rows[m]
-        for k in range(1, T1):
-            if inv[c, k]:
-                continue
-            x0, y0, x1, y1 = box[c, k, 0], box[c, k, 1], box[c, k, 2], box[c, k, 3]
-            for p in range(n_p):
-                dx, dy = vel[p, 0] * tk[k], vel[p, 1] * tk[k]
-                if pbox[p, 0] + dx > x1 or pbox[p, 2] + dx < x0 or pbox[p, 1] + dy > y1 or pbox[p, 3] + dy < y0:
-                    continue
-                if _rect_meets_polys(x0, y0, x1, y1, verts, starts[p:p + 2], dx, dy):
-                    cnt[c] += 1
-                    if first[c] == T1:
-                        first[c] = k
-                    break
-    return cnt, first
-
-
-def seen_polys(ws):
-    """Every entity's active damage polygons now with its velocity (verts, starts, bounding boxes, velocities)."""
-    vs, st, bb, vel = [], [0], [], []
-    for e in getattr(ws, "entities", None) or ():
-        polys = [b.poly for b in e.dmg_boxes if b.active and len(b.poly) >= 3]
-        if not polys:
-            continue
-        v = e.vel.v if getattr(e.vel, "conf", 1.0) > 0 else (0.0, 0.0)
-        for poly in polys:
-            a = np.asarray(poly, np.float64).reshape(-1, 2)
-            vs.append(a)
-            st.append(st[-1] + len(a))
-            bb.append((a[:, 0].min(), a[:, 1].min(), a[:, 0].max(), a[:, 1].max()))
-            vel.append((float(v[0]), float(v[1])))
-    if not vs:
-        return np.zeros((0, 2)), np.zeros(1, np.int64), np.zeros((0, 4)), np.zeros((0, 2))
-    return (np.ascontiguousarray(np.concatenate(vs)), np.array(st, np.int64), np.array(bb, np.float64),
-            np.array(vel, np.float64))
-
-
 def contact_scores(ls: dict, f, allowed: np.ndarray, frame_time: float) -> dict[str, np.ndarray]:
     """Per row (higher = less contact), on stage 1's frames and the nominal box centre: the committed support's share
     of frames in contact ("P_com": current attacks, tails, death tails, hazards), the fine placements' ("P_fine": the
@@ -236,6 +190,7 @@ def contact_scores(ls: dict, f, allowed: np.ndarray, frame_time: float) -> dict[
     v = np.zeros(N)
     v[allowed] = -f.prob(cx, cy, tk)
     out["prob"] = v
+    from ssbot.combat.forum_planner import seen_contacts, seen_polys
     ws = getattr(getattr(f, "_fc", None), "_ws", None)
     sn, sf = np.zeros(N), np.zeros(N)
     if ws is not None:
@@ -246,7 +201,7 @@ def contact_scores(ls: dict, f, allowed: np.ndarray, frame_time: float) -> dict[
                                      np.ascontiguousarray((ls["flags"] & __import__(
                                          "ssbot.knowledge.kinematics", fromlist=["F_INVULN"]).F_INVULN) != 0),
                                      verts, starts, pbox, pvel, np.arange(T1, dtype=np.float64) * frame_time,
-                                     np.ascontiguousarray(allowed, np.int64))
+                                     np.ascontiguousarray(allowed, np.int64), 0.0)
             sn[allowed], sf[allowed] = -cnt[allowed], fst[allowed]
     out["seen_n"] = sn                  # higher = better: minus the frames in contact, the first contact frame
     out["seen_f"] = sf

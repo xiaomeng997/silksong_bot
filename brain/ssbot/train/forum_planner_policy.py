@@ -27,6 +27,7 @@ Cogfly throws, Binds. Decision log (decisions_i<N>.jsonl): 90 ticks before each 
 first tick of a FORCED_RISK streak, 10 after.
 """
 import math
+import os
 import random
 import time
 from collections import Counter, deque
@@ -134,6 +135,15 @@ class ForumPlannerPolicy(PlannerPolicy):
         self._support = None
         self.k = 0
 
+    @staticmethod
+    def _fcfg() -> ForumConfig:
+        """ForumConfig with the A/B switch SSBOT_FORUM_FR: FORCED_RISK's first risk key, "share" (default) or "seen"
+        (ForumConfig.forced_rank; forum.md §19)."""
+        fr = os.environ.get("SSBOT_FORUM_FR", "share").strip().lower() or "share"
+        if fr not in ("share", "seen"):
+            raise ValueError(f"SSBOT_FORUM_FR={fr!r}: share | seen")
+        return ForumConfig(forced_rank=fr)
+
     # ---- warm-up ----
 
     def warmup(self) -> float:
@@ -142,7 +152,7 @@ class ForumPlannerPolicy(PlannerPolicy):
         from ssbot.core.worldstate import E, WorldState
         t0 = time.perf_counter()
         self.fc.warm()
-        fcfg = ForumConfig()
+        fcfg = self._fcfg()
         planner = ForumPlanner(self.params, Terrain2D.empty(), PlannerConfig(T=fcfg.T, threads=self.threads,
                                                                              variants="bounds_lo"), fcfg)
         fcast = self.fc.forecast(HORIZON_S)
@@ -181,7 +191,7 @@ class ForumPlannerPolicy(PlannerPolicy):
         self.terrain = self.terrain or Terrain2D.empty()
         self.params = self.params0
         if self.planner is None:
-            fcfg = ForumConfig()
+            fcfg = self._fcfg()
             self.planner = ForumPlanner(self.params, self.terrain, PlannerConfig(T=fcfg.T, threads=self.threads,
                                                                                  variants="bounds_lo"), fcfg)
         self.planner.params = self.params
@@ -659,7 +669,7 @@ class ForumPlannerPolicy(PlannerPolicy):
                "triggers": list(r.decision.triggers), "unpred": unpred, "ms": round(res.t_ms.get("total", 0.0), 3),
                "kill_hp": kill_hp, "ykill": ykill, "kill_prims": sorted(p.name for p in r.decision.kill_prims),
                "fi": {k: li.get(k) for k in ("posture", "N", "stage1_pass", "enveloped", "hitfx", "react", "capped",
-                                             "cut", "overrun", "tv")},
+                                             "cut", "overrun", "tv", "seen")},
                "pocket": self.tac.last.get("pocket_veto"), "subj": subj}
         hit = any(ev.get("k") in ("damage", "catastrophe", "would_die") for ev in s.get("ev") or ())
         event = hit or streak or (r.decision.pause_pending and self.counts["_pend_logged"] == 0)
