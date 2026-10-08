@@ -1890,6 +1890,25 @@ attack outcomes), `live_w0f_3608489` (live check). Seeds used: 340000-340024.
   seen_cf - share +11.1 s (8.4-14.1). Still 25 / 25 QUIT in wave 0, 0 kills; the top remaining sources are the
   whip 0.64, Envoy slash 0.56 and jump slash 0.52 per episode.
 
+### Review fixes (verifier of 8fd77b0)
+
+- forum.md 19.5 / 19.8 / 19.9 / 19.11: no more "the planner's picks are worse than random". Hit-conditioned pick rates
+  are compared only against random or between counterfactual rankings, with the conditioning and the open-loop bias
+  stated; the "no information" claim rests on the saturation / tie evidence. The split by "pick = executed plan" is in
+  19.5 (scratch scripts `w0fx\split.py` / `split3.py`).
+- 19.10: the seen / share pair did NOT run under the same load (late ticks 5.4 % vs 12.8 %); cross-run reference added
+  (9 low-load share-type runs: QUIT medians 11.8-16.5 s), plus the paired, interleaved seen vs seen_cf re-run below.
+- 19.6: kinematics at 24 frames too (non-Final 413: p90 0.67 u, 17 % > 0.3 u, 25 misses; all 489: p90 0.95 u); why 12.
+- 19.4: "0.25 % of ticks plan > 16.7 ms" was the whole-tick late rate; plan time > 16.7 ms is 14 / 107,964 (0.013 %).
+- 19.5: 2,854 of 2,871 decomposed ticks (17 empty), median 8 saturating groups; 19.9: the 45.7 % key is the
+  recorded-collider `dr` key, not production `seen_polys`.
+- 19.1 / 19.8: the R5 / R6 "only J / target" explanation is marked as argued from code (replay match rates 64 / 83 /
+  98.5 %).
+- The seen arm's HARNESS_FAIL is the generic "paused unasked" failure (48 attempts files), closed.
+- Tests on 8fd77b0 code (the fixes since are docs only), in the worktree (git-ignored Forum hitbox npz present):
+  full suite 1134 passed, 2 skipped (forecast vision window, hitbox-table timing on a busy machine), 1 xfailed; the
+  six focused files 90 passed. From a git-archive export without the npz the verifier got 89 passed + 1 skipped.
+
 ### Running
 
 - Review-fix round (from 05:56): `C:\ssbot\sandbox\w0f_pair.ps1` on instance 0 (lock `inst0.lock` = "diag"), frozen
