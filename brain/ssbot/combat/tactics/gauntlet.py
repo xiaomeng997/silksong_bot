@@ -11,9 +11,11 @@ another move: the goal ends; the target into another move: a pick that may keep 
 applies) and the target are held (round 2: the round-1 A/B changed goals 33 times a minute in wave 0, forum.md §17.5):
   - a rule change waits until the kept rule has run `goal_dwell_s` (KITE <-> RUSH at the 8 u edge), except into
     PUNISH (an opening); a kept PUNISH runs to its window's end unless another one scores `switch_x` times more;
-  - under the rule the kept target stays while it is eligible (RUSH: isolated; KITE: any), unless another one scores
-    `switch_x` times more and the kept one has been the target `dwell_s`, or it is the idle Clapper's turn (Buddy Is
-    Attacking); an ineligible kept target (RUSH: no longer isolated) and a `first` type entering switch at once.
+  - under the rule the kept target stays while it is eligible (RUSH: isolated, for the kept one down to iso_u -
+    iso_hyst_u; KITE: any), unless another one scores `switch_x` times more and the kept one has been the target
+    `dwell_s`, or it is the idle Clapper's turn (Buddy Is Attacking); a kept RUSH target that lost its isolation is
+    kited with (KITE on it) until dwell_s, then RUSH moves to an isolated one; a `first` type entering switches at
+    once. stats: tgt_switches by kind (gone / ineligible / better / turn / punish).
 Goals:
   PUNISH  an enemy whose engagement spot stays out of every support (all enemies, hazards, entries: MultiForecast
           .occupied, one batched query for all spots) from the hero's arrival through the swing: window (the first
@@ -85,9 +87,10 @@ class L2Rules:
     enabled: bool = True
     period: int = 6                                       # ticks between picks (10 Hz)
     switch_x: float = 1.25                                # a new goal must score this many times the kept one's
-    dwell_s: float = 2.0                                  # a kept target is held this long before a better one
+    dwell_s: float = 3.0                                  # a kept target is held this long before another one
     goal_dwell_s: float = 0.5                             # the same target under another rule after this long
     iso_u: float = 8.0                                    # isolated: no other enemy in play within this (|dx|, u)
+    iso_hyst_u: float = 2.0                               # the kept target stays isolated down to iso_u - this
     run_u_s: float = 17.5                                 # dash + sprint (the person)
     start_s: float = 0.05
     swing_s: float = 0.25                                 # press -> the Reaper side slash's active end (0.208 s)
@@ -186,7 +189,7 @@ class Goal:
 
 def _new_stats() -> dict:
     return {"picks": 0, "switches": 0, "changes": 0, "tgt_switches": 0, "fails": 0, "errors": 0, "ms": [], "goals": {},
-            "goal_hits": {}, "punish_goals": 0, "punish_landed": 0}
+            "goal_hits": {}, "punish_goals": 0, "punish_landed": 0, "switch_kinds": {}}
 
 
 class GauntletTactics:
@@ -196,6 +199,7 @@ class GauntletTactics:
         self.floor_y = local.floor_y
         self.rng = random.Random(seed)
         self.goal: Goal | None = None
+        self._sw_why: str | None = None                   # why _pick moved off the kept target (stats switch_kinds)
         self.n = 0
         self.aim: dict[int, float] = {}                   # Clapper iid -> hero x at its Jump Aim
         self.stats = _new_stats()
@@ -259,7 +263,9 @@ class GauntletTactics:
 
     # ---- the pick ----
 
-    def candidates(self, ws, fc, hx: float) -> list[Cand]:
+    def candidates(self, ws, fc, hx: float, kept: int | None = None) -> list[Cand]:
+        """Every enemy in play with its spot, run time, window, isolation (`kept`: the kept target's iid, isolated down
+        to iso_u - iso_hyst_u), ETA and priority."""
         r = self.rules
         live = [s for s in (getattr(fc, "subjects", ()) or ()) if s.alive and s.in_play and s.pos is not None]
         out = []
@@ -268,7 +274,7 @@ class GauntletTactics:
             spot, _, _ = self._spot(ws, s, hx)
             c = Cand(s, x, y, abs(x - hx), spot, r.start_s + abs(spot - hx) / r.run_u_s)
             others = [abs(float(o.pos[0]) - x) for o in live if o.iid != s.iid]
-            c.iso = not others or min(others) >= r.iso_u
+            c.iso = not others or min(others) >= r.iso_u - (r.iso_hyst_u if s.iid == kept else 0.0)
             v = r.pursuit_u_s.get(s.type_key, 5.0)
             c.eta = max(0.0, c.d - r.reach_u) / max(v, 0.1)
             c.prio = r.priority.get(s.type_key, 1.0)
@@ -279,9 +285,12 @@ class GauntletTactics:
             occ = np.asarray(fc.occupied(X, np.full(X.shape, self.floor_y), tk))
             for c, row in zip(out, occ):
                 # the window counts from the hero's arrival: the spot covered before it (the enemy's body there now,
-                # an attack ending) does not matter, the first cover at or after t_run ends it
+                # an attack ending) does not matter, the first cover at or after t_run ends it. Clear to the query's
+                # end: open (inf) when the run and the swing fit in it, else unknown past it (the window = its end,
+                # too short: before round 2 a far spot, t_run + swing > window_max_s, was never checked -> inf)
                 i = np.flatnonzero(row & (tk >= c.t_run - 1e-9))
-                c.window = float(tk[i[0]]) if len(i) else math.inf
+                fits = c.t_run + r.swing_s + r.margin_s <= tk[-1]
+                c.window = float(tk[i[0]]) if len(i) else (math.inf if fits else float(tk[-1]))
                 c.cov0 = bool(row[0])
         return out
 
@@ -291,18 +300,22 @@ class GauntletTactics:
         r = self.rules
         best = max(elig, key=val)
         kept = next((c for c in elig if old is not None and c.s.iid == old.target), None)
+        self._sw_why = "ineligible" if kept is None else None
         if kept is None or best is kept:
             return best
         if best.s.iid in turn and kept.s.iid not in turn:
+            self._sw_why = "turn"
             return best
         if val(best) >= r.switch_x * val(kept) and t - old.t_pick >= r.dwell_s:
+            self._sw_why = "better"
             return best
         return kept
 
     def _pick(self, ws, fc, hx: float, t: float, old: Goal | None = None) -> Goal | None:
         """The goal (module docstring); `old`: the kept goal (its target alive and in play), None when it ended."""
         r = self.rules
-        cands = self.candidates(ws, fc, hx)
+        cands = self.candidates(ws, fc, hx, old.target if old is not None else None)
+        self._sw_why = None
         # the arbitration log (decision records "l2_cands"): iid, type, window, what it needs, isolated, ETA, priority
         self.last["l2_cands"] = [[c.s.iid, c.s.type_key, round(min(c.window, 9.0), 3),
                                   round(c.t_run + r.swing_s + r.margin_s, 3), c.iso, round(c.eta, 2), c.prio, c.cov0]
@@ -329,16 +342,23 @@ class GauntletTactics:
             if not better:
                 return old
             go = better
+            self._sw_why = "punish"
         iso = [c for c in pool if c.iso]
         rule = PUNISH if go else RUSH if iso else KITE
-        if old is not None and rule != old.name and rule != PUNISH and t - old.t_goal < r.goal_dwell_s:
+        kept = next((c for c in pool if old is not None and c.s.iid == old.target), None)
+        if rule == RUSH and kept is not None and not kept.iso and t - old.t_pick < r.dwell_s:
+            rule = KITE                                   # the kept target lost its isolation: kite with it first
+        held = old is not None and rule != old.name and rule != PUNISH and t - old.t_goal < r.goal_dwell_s
+        if held:
             rule = old.name                               # the kept rule runs goal_dwell_s first
         if rule == PUNISH:
             c = self._choose(go, slack, old, t, turn)
+            if old is not None and c.s.iid != old.target:
+                self._sw_why = "punish"
             return self._goal(ws, c, PUNISH, t, slack(c), t_end=t + c.window,
                               why=f"window {c.window:.2f} >= {need(c):.2f}")
-        if rule == RUSH:
-            elig = iso or [c for c in cands if old is not None and c.s.iid == old.target]
+        elig = iso + ([kept] if held and kept is not None and not kept.iso else [])
+        if rule == RUSH and elig:
             spread = len(iso) == len(pool) and len(pool) > 1
             val = (lambda c: 1.0 / (0.2 + c.eta / c.prio)) if spread else (lambda c: c.prio / (c.d + 1.0))
             c = self._choose(elig, val, old, t, turn)
@@ -445,6 +465,9 @@ class GauntletTactics:
                     if prev is not None and new.target != prev.target:
                         self.stats["tgt_switches"] += 1
                         self.stats["switches"] += int(old is not None)  # a kept target given up (not one gone)
+                        kind = (self._sw_why or "?") if old is not None else "gone"
+                        sk = self.stats["switch_kinds"]
+                        sk[kind] = sk.get(kind, 0) + 1
                     if new.name == PUNISH:
                         self.stats["punish_goals"] += 1
             self.goal = new

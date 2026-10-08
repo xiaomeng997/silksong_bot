@@ -932,7 +932,7 @@ cd brain   # 冻结检出（git archive，没有 .git）：behaviour_build 要�
 - **报告**：`forum_a0_report` 按 damage 事件计受击，tick 单独计，类型按调用路径解析（投射物归投掷者：针 → Reed、钟 → Bellbearer、rune bomb / slam → Clapper、矛 → Clawmaiden）；旧记录没有 kind / path，从录像的 events.jsonl 读。修正后的 A0 / 波次起点数字见 §16.2 / §16.3（`C:\ssbot\data\m2_forum_r4\fixer\a0_report_v2.json`、`ws_report_v2.json`）。
 - **复测**（波次起点批次重跑一次：`20261005_054233_Forum_A_w2_mix_eval_planner_oracle`，冻结检出 `C:\ssbot\live_r4f_0f517a0`，实例 0、1 各 12 场，种子 170000+，eval、无真退出；报告 `C:\ssbot\data\m2_forum_r4\fixer\ws_report_fix.json`）：QUIT 24 / 24（Q1 12、Q3 12：Reed 6、Minister 4、Choristor 2）；每场 3.33 次受击（80 个 damage 事件）+ 6 个 Multihit tick（全部在自己那一帧就在支撑内）；**支撑外 0、未知 0**（4 个 Final Hit 按钩子判，钩子都找到了，包括 iid 解析不出来的 `Song Reed (1)` / `Song Administrator (1)`，靠物体名回退）；来源 Clawmaiden 27、Tiny 16、Clapper 13、Reed 9、Bellbearer 7、Minister 3、Choristor 3、未解析 2；FORCED_RISK 90.5 %（各波 69–100 %）；EVADE 98 %、HOLD 2 %；YELLOW 下 `kill_prims` 含钉子攻击的 tick 被拿掉攻击（日志里 1,480 个 YELLOW tick）；击杀 0（上一批 2）；Cogfly 2 次；tick p50 中位数 7.4 ms、p99 中位数 14.0 ms（最大 18.9），> 16.7 ms 0.45 %；WaveTracker 29,522 / 29,970（98.5 %，同 §16.3 的波次起点偏移）；包络审计：选中 S = 0 的 2,794 次全部包络，core_not_enveloped 0、overrun 0。结论：修正没有改变基线的样子（还是 EVADE、还是第一波里 3 下左右退出），记账现在每个掉血事件都判。
 
-## 17. R6 v0：你的规则作 L2 目标层 + Clapper 控制器（2026-10-08，forum_planner_plan.md §5 R6；分支 worktree-wf_814dfeea-b10-3；离线 + 实例 1 的 A/B（排队，见 17.5））
+## 17. R6 v0：你的规则作 L2 目标层 + Clapper 控制器（2026-10-08，forum_planner_plan.md §5 R6；分支 worktree-wf_814dfeea-b10-3；离线 + 实例 1 的 A/B（17.5）；第 2 轮 2026-10-08 早上（17.6））
 
 ### 17.1 做了什么（`combat/tactics/gauntlet.py` `GauntletTactics`，`Forum.yaml` `forum.l2`）
 
@@ -970,6 +970,34 @@ cd brain   # 冻结检出（git archive，没有 .git）：behaviour_build 要�
 - 下劈踩 Clapper 头（命中无敌 0.16 s）在运动学里有没有建模没查；规划器只会在它的行恰好安全时选。
 - "在 Reed 下面更安全"与 R1 的数据（飞行怪下方对 Reed 无效：3.5 对 3.1 次 / 分）不一致，按你的规则做了，由 A/B 看。
 
-### 17.5 A/B（实例 1，排队中）
+### 17.5 第 1 轮 A/B（实例 1，2026-10-08 01:59–02:40，冻结检出 `C:\ssbot\live_r6_ef036d5`）
 
-驱动 `C:\ssbot\sandbox\r6_ab.ps1`（隐藏窗口，冻结检出 `C:\ssbot\live_r6_ef036d5`），等路线 Boss 采集 `20261007_055106_Trobbio_mix_data` 结束、拿到 `inst1.lock`，按 A0b 的协议（fo_A、eval、planner、oracle、真退出 0.2）在**同一组种子** 310000 起跑：R6（L2 开）与对照（`SSBOT_FORUM_L2=0`，即 A0b 的战术，代码与 f8c0c62 只差 combat_run 的路线 Boss 改动和口袋规则的朝向修正）各 50 场，25 场一块交替；成对比较。A0b 的种子是 180000 / 180100（不在本轨道的范围里），所以与 A0b 本身只能不成对比较。日志 `C:\ssbot\sandbox\r6_ab.log`、`r6_ab_batch.log`。
+驱动 `C:\ssbot\sandbox\r6_ab.ps1`（日志 `r6_ab.log`）等路线 Boss 采集结束后在实例 1 上按 A0b 的协议（fo_A、eval、planner、oracle、线程 4、真退出 0.2）跑了同种子成对的四块，每块 25 场：L2 开 `20261008_015904`（种子 310000）、`021942`（310025）；L2 关（`SSBOT_FORUM_L2=0`，即 A0b 的 LOCAL 战术）`020919`（310000）、`022951`（310025）。报告：`forum_a0_report`（会话临时目录 `r6\ab\on.json`、`off.json`、`a0b.json`）；按种子配对、按目标 / 受击的分析 `r6\ab\ab_anal.py` → `ab_anal.json`。A0b = `20261005_205437` + `205857`（种子 180000 / 180100，不成对）。
+
+| 指标 | L2 开（50 场） | L2 关（50 场，成对） | A0b（51 场，不成对） |
+|---|---|---|---|
+| 结果 | QUIT 50（全是 Q1：h = 1） | QUIT 50（全是 Q1） | QUIT 50 + HARNESS_FAIL 1 |
+| 到达的波 | 50 场全在第 0 波 | 同 | 同 |
+| 受击 / 场（damage 事件） | 4.26：Envoy 94、Choristor 77、Reed 42 | 4.10：89 / 73 / 43 | 4.27：105 / 56 / 57 |
+| Multihit tick | 37 | 45 | 35 |
+| 存活（开战到退出）p50 / 最长 | 12.6 / 20.5 s | 13.3 / 18.4 s | 12.7 / 19.9 s |
+| 钉子打中敌人 / 场（录像 `hit` 事件，每下 9） | 4.56（Envoy 107、Choristor 75、Reed 46 下） | 5.08（129 / 63 / 62） | — |
+| 击杀 | 0 | 0 | 0 |
+| FORCED_RISK（tick） | 79.0 % | 80.5 % | 80.3 % |
+| 支撑外命中 / 未知 | **0 / 0** | 0 / 0 | 1 / 1（i4 ep0 f 905007，来源 iid 9655958；A0b 自己的，未查） |
+| tick p50 / p99 的中位、p99 最大 | 6.7 / 13.3 / 17.5 ms | 6.2 / 12.0 / 17.3 ms | 5.9 / 11.8 / 1,471.6 ms（一次卡顿） |
+| L2 自身 p50 / p99（中位） | 0.026 / 0.89 ms | — | — |
+| 每秒按键（锁存按键 / 游戏时间，每场中位） | 7.28 | 7.18 | 7.75 |
+| 计划改动率（每场中位） | 0.555 | 0.620 | 0.615 |
+| 目标变化 | L2 目标（换目标或换规则）**33.0 次 / 分**；决策日志里目标 iid 的变化 37.5 次 / 分 | LOCAL 的目标 iid 变化 71.7 次 / 分 | — |
+| 真退出 | 9 次：暂停 9、到主菜单 9、错误确认 0 | 9 / 9 / 9 / 0 | 7 / 7 / 7 / 0 |
+
+按种子配对（50 对，开 − 关）：受击 +0.16 次（sd 0.98，se 0.14）、存活 −0.71 s（sd 3.03，se 0.43；开活得更久的 20 对、关活得更久的 30 对）、钉子命中 −0.52 下。**R6 v0 没有改变结果**，差异都在噪声以内。
+
+L2 在第 0 波做了什么、受击从哪来（决策日志，L2 开 24,945 个决策 tick）：
+
+- **L2 确实在工作**：RUSH 55 %、KITE(EVADE) 43 %（KITE 时 LOCAL 的 EVADE 成立，原样用 LOCAL 的打分）、其余 2 %（暂停等）；**PUNISH 0 次**（17.2 的原因：待机敌人的支撑一直盖着接敌点）。RUSH 的理由："落单" 9,310 tick、"都分散：最快追来的" 4,449 tick——第 0 波三只敌人在 35 u 的场地里多数时候相距 ≥ 8 u，按 8 u 的水平判据几乎总有落单的。目标：Envoy 42 %、Reed 31 %、Choristor 25 %。
+- RUSH 把主角带到了目标身边：主角到目标的 |dx| 中位 2.5 u（KITE(EVADE) 3.8 u，L2 关 3.7 u），站位离主角中位 1.3 u；但出刀的计划占比几乎不变（13 % 对 L2 关 12 %），钉子命中反而略少。
+- **受击和 L2 选了什么无关**：按受击前 0.2 s 的目标分，RUSH 时 122 次（69 次来自正在冲的目标本身、53 次来自别的）、KITE(EVADE) 时 91 次（45 / 46）；每个决策 tick 的受击率 RUSH 0.0089、KITE(EVADE) 0.0085、L2 关 0.0085——同一个速率（约每 3 s 一下），不管 L2 选谁、站哪。受击时的主角–来源距离中位 4.5 u（关 4.9 u）。受击来源的比例和 A0b 一样（Envoy 冲锋最多）。
+- 原因：FORCED_RISK 的 tick（74 %）里规划器按"候选在支撑里的接触帧占比 → 最晚接触 → J"排序（`forum_planner` 的 FORCED_RISK 选择），站位、命中权重只进 J，只在前几项并列时起作用；S = 0 的 tick 里 L2 的打分才真正挑计划。所以在第 0 波 L2 的打分基本没有抓手。第 0 波的瓶颈不是"打谁"，而是 FORCED_RISK 下怎么挑计划、以及支撑为什么几乎处处覆盖（diag 轨道在查，见 HANDOFF；R5 的终点价值、R8 的拼刀分支也在这一层）。
+- 验收里的两条：每秒按键、计划改动率不高于 A0b（7.28 对 7.75、0.555 对 0.615）✓；**目标变化 ≤ 10 / 分 ✗**（33 / 分）：KITE 的"ETA 最小"目标随主角移动来回换，而且目标每换一招（招式家族变化）旧目标就作废、不经滞回重选。第 2 轮修正见 17.6。

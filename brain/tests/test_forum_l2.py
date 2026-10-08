@@ -244,8 +244,9 @@ def test_a_kept_target_is_held_for_the_dwell():
     p = t.decide(world(20.0, t=10.0), WinFc([a, b]), None, 3)
     assert p.goal == RUSH and p.target == 1                       # spread: the fastest pursuer
     b = subj(2, EN, 15.0)                                         # now the nearer (ETA 0.39 s against 0.85 s)
-    assert _run(t, [a, b], 20.0, 10.5).target == 1                # held: 0.5 s < dwell 2 s
-    assert _run(t, [a, b], 20.0, 12.2).target == 2                # then the switch
+    assert _run(t, [a, b], 20.0, 10.5).target == 1                # held: 0.5 s < dwell 3 s
+    assert _run(t, [a, b], 20.0, 12.2).target == 1
+    assert _run(t, [a, b], 20.0, 13.2).target == 2                # then the switch
     st = t.stats_dict()
     assert st["tgt_switches"] == 1 and st["switches"] == 1
 
@@ -275,22 +276,27 @@ def test_an_opening_and_a_rule_change_do_not_wait():
     t = l2()
     a, b = subj(1, CH, 30.0), subj(2, EN, 45.0)
     t.decide(world(20.0, t=10.0), WinFc([a, b], t_min=9.0), None, 3)
-    b = subj(2, EN, 36.0)
-    assert _run(t, [a, b], 20.0, 10.3, t_min=9.0).goal == RUSH    # 0.3 s < goal_dwell 0.5 s
+    b = subj(2, EN, 36.0)                                         # 6 u: the kept one still isolated (8 - 2 u)
+    assert _run(t, [a, b], 20.0, 10.3, t_min=9.0).goal == RUSH
+    b = subj(2, EN, 35.0)
+    assert _run(t, [a, b], 20.0, 10.4, t_min=9.0).goal == RUSH    # 0.4 s < goal_dwell 0.5 s
     p = _run(t, [a, b], 20.0, 10.6, t_min=9.0)
     assert p.goal == KITE and p.target == 1 and t.stats["tgt_switches"] == 0
 
 
-def test_the_rule_moves_the_target_when_the_kept_one_is_not_eligible():
-    # KITE on the Choristor; then the Envoy alone far off is isolated and the Choristor is not: RUSH takes the Envoy
-    # after goal_dwell_s (the kept target is not eligible under RUSH: no dwell_s, no hysteresis)
+def test_a_rush_target_that_gets_company_is_kited_with_then_left():
+    # RUSH on the Choristor (all spread); the Reed comes within 3 u of it while the Envoy is alone: KITE on the
+    # Choristor until dwell_s (no switch), then RUSH the isolated Envoy (the kept one not eligible: no hysteresis)
     t = l2()
-    s = [subj(1, CH, 30.0), subj(2, RE, 33.0), subj(3, EN, 36.0)]
+    s = [subj(1, CH, 30.0), subj(2, RE, 40.0), subj(3, EN, 48.0)]
     p = t.decide(world(20.0, t=10.0), WinFc(s, t_min=9.0), None, 3)
-    assert p.goal == KITE and p.target == 1
-    s = [subj(1, CH, 30.0), subj(2, RE, 33.0), subj(3, EN, 45.0)]
+    assert p.goal == RUSH and p.target == 1
+    s = [subj(1, CH, 30.0), subj(2, RE, 33.0), subj(3, EN, 48.0)]
     p = _run(t, s, 20.0, 10.6, t_min=9.0)
+    assert p.goal == KITE and p.target == 1 and t.stats["tgt_switches"] == 0
+    p = _run(t, s, 20.0, 13.1, t_min=9.0)
     assert p.goal == RUSH and p.target == 3 and t.stats["tgt_switches"] == 1
+    assert t.stats["switch_kinds"] == {"ineligible": 1}
 
 
 def test_the_idle_clappers_turn_does_not_wait():
@@ -303,3 +309,16 @@ def test_the_idle_clappers_turn_does_not_wait():
     s[0] = subj(1, CC, 22.0, y=7.45, state="Slam Antic", family="CC_SLAM", committed=True)
     p = t.decide(world(30.0, t=10.2, ents=ents), WinFc(s), None, 3)
     assert p.target == 2                                          # its turn: inside the dwell
+
+
+def test_a_spot_past_the_window_query_is_no_punish():
+    # the run + swing past window_max_s (2 s): the spot is not checked that far, so no PUNISH even with no cover
+    # (round 2: such far spots read window inf and two of them flip-flopped as PUNISH every pick)
+    t = l2()
+    far = subj(2, EN, 47.0, state="Slash Recover", family="EN_SLASH", committed=True)
+    p = t.decide(world(15.0), WinFc([far], default=math.inf), None, 3)
+    assert p.goal != PUNISH                                       # t_run 0.05 + 30.2 / 17.5 = 1.78 s, + 0.35 > 2 s
+    t = l2()
+    near = subj(2, EN, 30.0, state="Slash Recover", family="EN_SLASH", committed=True)
+    p = t.decide(world(15.0), WinFc([near], default=math.inf), None, 3)
+    assert p.goal == PUNISH and t.last["l2_cands"][0][2] == 9.0  # inside the query: open (inf, logged as 9)
