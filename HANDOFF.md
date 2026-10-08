@@ -1813,3 +1813,374 @@ Next / open issues (round 2):
 5. The route's Widow end is a scripted bind sequence (Death Stagger -> Can Bind waits for BIND): the route runner must
    press bind there; training episodes end at the kill. Her damage colliders stay armed in Death Stagger (244 frames
    in 4 smoke fights, + 1 Spinner AtkBell armed outside attacks): the runner must keep evading until the bind.
+
+## Task wave-0 forensics - why the Forum planner QUITs in wave 0 (branch worktree-wf_fa16f06f-127-8, track diag)
+
+Worktree `C:\modeling\silksong_bot\.claude\worktrees\wf_fa16f06f-127-8` (from main bc46dc9). Facts: forum.md section 19
+(Chinese, the full write-up with tables). Outputs (not in git): `C:\ssbot\data\m2_forum_w0f\` (drivers `fx_run.cmd`,
+`fx_seen_run.cmd`, `ao_run.cmd`; per-episode forensics `fx\`, `fx_seen\`; `ao_all.json`). Frozen checkouts:
+`C:\ssbot\live_w0f_417d4a8` (forensics batch), `live_w0f_fx2` (b4345c6, the seen replay), `live_w0f_ao` (81722c6,
+attack outcomes), `live_w0f_3608489` (live check). Seeds used: 340000-340024.
+
+### Findings (read this first)
+
+- Every hit of the 225 analysed episodes (A0b 50 + the 7 overnight R5 / R6 arms 175; 949 damage events + 176 Multihit
+  ticks) is inside the support (0 outside, L 2 / 3 / 4, union and own type). FORCED_RISK was on at the tick before
+  every one of the 949. Sources: Envoy charge 205, Choristor whip chain 143, Envoy slash 100, Reed needle 88, Reed body
+  80, Choristor jump spin 73, Envoy body 63, Choristor slash 63, Choristor body 51, Reed stab 48, Envoy jump slash 24,
+  Reed parry counter 11. 0 kills in 225 episodes.
+- **Root cause: the support saturates in wave 0, FORCED_RISK's ranking ties, and the pick falls to J.** At the last
+  tick before every replayed hit (489 / 489) every candidate row is in the support on every non-invulnerable frame
+  (share 1, frame 1 included); rows that the recorded future leaves clear and rows it hits have the SAME support share
+  (274 / 274 ticks where both exist). Decomposed by placement group (2,854 ticks before hits): the Reed's start-later
+  RE_STAB / RE_THROW / RE_IDLE bounding boxes EACH alone cover >= 99 % of the candidates on ~every tick, the Envoy's
+  EN_CHARGE start-later box 92 %, plus committed windows; a median of 7-8 groups each saturate alone, so tightening one
+  family (R5 value's finding) is not enough, and MultiForecast.committed() saturates too. With Pc / t_c / t_hit tied the
+  p_k preselection and the order are J's; EVADE's stance comes from the same saturated risk map (= stay put), so the bot
+  approaches / faces / swings at its target while believing every plan equally dangerous. Why R5 value / R6 v0 changed
+  nothing is argued from their code, not tested: R5 adds terminal-value terms to J and kill value to the target
+  weights (T48 also lengthens the horizon), R6 v0 changes the tactic, which reaches the planner as GoalPrefs (scores
+  only); FORCED_RISK's keys come from the same saturated support in every arm. My replays of their episodes use main's
+  planner and match their live picks 64 % (R5 015959) / 83 % (R6 L2 on 015904) / 98.5 % (R6 L2 off 020919). Their live
+  outcomes (QUIT medians 11.8-16.5 s, 4.0-4.4 hits) are consistent with no effect.
+- Hindsight (open loop, each row's nominal path vs the recorded damage colliders of the next 0.6 s): 78 % of the hits
+  still had a clear row 0.15 s before, 99.6 % 0.6 s before. The "no information" claim rests on the saturation / tie
+  evidence above, NOT on pick-vs-random rates: before a hit the replayed pick IS the executed plan (A0b 98.5 %), which
+  was hit by construction, and open-loop hindsight favours unexecuted rows. (forum.md 19.5; the first version's
+  "planner 9.4 % vs random 24.3 % six frames before a hit, worse than random" mostly measured that the hero was hit.)
+  On the 316 ticks 1-12 frames before a hit where the replayed pick is NOT the executed one: pick 21.8 %, executed
+  17.7 %, random 31.8 %, recorded-collider key 52.5 %. Over all ticks (every 3rd) pick 75.9 % vs random 75.0 %, biased
+  both ways (near hits against the executed plan, away from hits for it).
+- Not causes: kinematics (recorded keys rolled out over the last 12 frames, 413 non-Final direct hits: miss 15 = 3.6 %,
+  error p90 0.17 u; over 24 frames the drift is larger, p90 0.67 u, 17 % > 0.3 u, 25 misses, so the second half of the
+  36-frame horizon is less accurate), planner deadline (plan time > 16.7 ms: 3 of 28,561 ticks before hits, 14 of
+  107,964 logged ticks = 0.013 %; whole ticks late 0.25 %), support holes (0).
+- The person in the same wave-0 situations (forum_attack_outcomes, attack starts within 8 u): per-instance hit rates
+  close to the bot's except Envoy charge (bot 43 % vs 1x 17 %: you jump over it, 75 % vs bot 41 %), Envoy slash (26 %
+  vs 14 %: you are already airborne, 70 % vs 38 %), Choristor whip (38 % vs 21 %: you back off ~6 u and dash; the bot
+  stays). The bot also faces more attacks (41 / min within 8 u vs 33) and never kills; you clear wave 0 (1x 24 / 46,
+  0.5x 17 / 17) by killing the Envoy first.
+
+### Fix tested: `ForumConfig.forced_rank = "seen"` (env `SSBOT_FORUM_FR=seen`, default `share` = unchanged)
+
+- On FORCED_RISK ticks only, rows are ranked first by the frames their nominal box meets the damage colliders seen now
+  (Entity.dmg_boxes active polygons) moved along their entity's velocity (`seen_contacts`, 0.14 / 0.54 ms p50 / p99),
+  then the old share; the p_k preselection too. Safe ticks: keys all 0, order unchanged; Bell Beast not affected
+  (ForumPlanner only). Offline, the recorded-collider version of the key (`dr`, multi-hit colliders included): pick
+  clear in hindsight 45.7 % six frames before a hit vs random 24.3 %; 52.5 % vs 31.8 % on the ticks where neither is
+  the executed plan. The production key replayed (`--forced-rank seen`): 58 % vs random 45 % within 12 frames.
+- Live, instance 0, A0b protocol, seeds 340000 paired (control first, then fix; NOT the same load: late ticks share
+  12.8 % vs seen 5.4 %; the effect is not load-driven, the 9 earlier share-type runs at 0.06-0.4 % late had QUIT
+  medians 11.8-16.5 s): seen
+  `C:\ssbot\data\runs\m2\20261008_040149_Forum_A_eval_planner_oracle` (24 QUIT + 1 HARNESS_FAIL "paused unasked")
+  vs share `20261008_034918_Forum_A_eval_planner_oracle` (25 QUIT): time to QUIT median 19.1 vs 14.0 s, paired +5.0 s
+  (95 % CI 3.4-6.6, longer in 23 / 24), hits / min 12.0 vs 16.5, Envoy charge hits 0.04 vs 0.92 per episode; still
+  100 % QUIT in wave 0, 0 kills. A first seen chunk `20261008_034416` (6 episodes) ran while my offline batch loaded
+  the machine (27 % late ticks, 1 HARNESS_FAIL): not counted. The seen arm's HARNESS_FAIL "paused unasked" is a
+  known generic harness failure (48 attempts files across Bell Beast, Lace1 and older Forum runs), not seen-related.
+- `forced_rank = "seen_cf"` (env `SSBOT_FORUM_FR=seen_cf`, 82e94fa): after the seen key, the share of stage-1 frames in
+  the committed fine placements (`committed_fine_share`: attacks under way with a known entry; the windows and the
+  start-later boxes, which saturate, are left out) - the strikes that open after their antic. Offline the hindsight-
+  clear pick within 12 frames of a hit goes 60 % -> 73 % (random 45 %; whip 35 -> 68 %); both are counterfactual
+  picks, but seen falls back to the executed order when its key is all 0, which biases it down - on the ticks where
+  seen's pick is not the live one: 62 % -> 78 % (random 40 %). Live on instance 1 (instance 0 was
+  r5value's), `20261008_045005_Forum_A_eval_planner_oracle`, 25 QUIT: time to QUIT median 25.2 s, hits / min 10.1
+  (the person at 1x: 11.4). NOT paired with the two runs above (combat_run prefixes the seeds with the instance:
+  1340000+), lighter machine load (1.3 % late ticks): unpaired seen_cf - seen +6.2 s (bootstrap 95 % CI 3.1-9.4),
+  seen_cf - share +11.1 s (8.4-14.1). Still 25 / 25 QUIT in wave 0, 0 kills; the top remaining sources are the
+  whip 0.64, Envoy slash 0.56 and jump slash 0.52 per episode.
+- **seen_cf vs seen PAIRED** (review-fix round, 05:57-06:32, `C:\ssbot\sandbox\w0f_pair.ps1`): instance 0, frozen
+  `C:\ssbot\live_w0f_cf` (82e94fa = final code), seeds 340100-340124, ABBA blocks of 5 (same instance, same seeds,
+  alternating slots: late ticks 1.8 % vs 1.4 %). seen_cf runs `20261008_055737` / `060704` / `061017` / `062102` /
+  `062440`, seen runs `060111` / `060410` / `061410` / `061752` / `062846`. Time to QUIT median 24.1 vs 19.4 s,
+  paired mean +4.6 s (bootstrap 95 % CI 2.1-7.2), median difference +2.3 s (0.7-8.1), seen_cf longer in 18 / 25
+  (sign test p 0.043); hits / min 9.4 vs 12.3; Envoy slash hits 0.60 vs 1.00 per episode. Both arms reproduce their
+  earlier medians (seen 19.1, seen_cf 25.2). Still 50 / 50 QUIT in wave 0, 0 kills.
+
+### Review fixes (verifier of 8fd77b0)
+
+- forum.md 19.5 / 19.8 / 19.9 / 19.11: no more "the planner's picks are worse than random". Hit-conditioned pick rates
+  are compared only against random or between counterfactual rankings, with the conditioning and the open-loop bias
+  stated; the "no information" claim rests on the saturation / tie evidence. The split by "pick = executed plan" is in
+  19.5 (scratch scripts `w0fx\split.py` / `split3.py`).
+- 19.10: the seen / share pair did NOT run under the same load (late ticks 5.4 % vs 12.8 %); cross-run reference added
+  (9 low-load share-type runs: QUIT medians 11.8-16.5 s), plus the paired, interleaved seen vs seen_cf re-run above.
+- 19.6: kinematics at 24 frames too (non-Final 413: p90 0.67 u, 17 % > 0.3 u, 25 misses; all 489: p90 0.95 u); why 12.
+- 19.4: "0.25 % of ticks plan > 16.7 ms" was the whole-tick late rate; plan time > 16.7 ms is 14 / 107,964 (0.013 %).
+- 19.5: 2,854 of 2,871 decomposed ticks (17 empty), median 8 saturating groups; 19.9: the 45.7 % key is the
+  recorded-collider `dr` key, not production `seen_polys`.
+- 19.1 / 19.8: the R5 / R6 "only J / target" explanation is marked as argued from code (replay match rates 64 / 83 /
+  98.5 %).
+- The seen arm's HARNESS_FAIL is the generic "paused unasked" failure (48 attempts files), closed.
+- Tests on 8fd77b0 code (the fixes since are docs only), in the worktree (git-ignored Forum hitbox npz present):
+  full suite 1134 passed, 2 skipped (forecast vision window, hitbox-table timing on a busy machine), 1 xfailed; the
+  six focused files 90 passed. From a git-archive export without the npz the verifier got 89 passed + 1 skipped.
+
+### Running
+
+- Nothing. The review-fix paired run (`w0f_pair.ps1`, instance 0) ended at 06:32 and released `inst0.lock` (r5value
+  took it right after); instance 1's lock (04:46) was released at 05:05.
+- Offline: nothing. The forensics replay covers 115 of the 225 episodes (A0b 50, R6 40, R5 25); the other 110 were not
+  replayed so as not to load the machine next to the other tracks' live runs (`fx_run.cmd` resumes where it stopped).
+
+### Needs deploy
+
+- Nothing (no oracle change).
+
+### Next / open issues
+
+1. Merge `forced_rank` ("seen" / "seen_cf"; default stays `share`); the integrator's Forum A/B with
+   `SSBOT_FORUM_FR=seen_cf` (paired against `seen` on the same instance and seeds: +4.6 s, above). It is orthogonal
+   to R5 / R6 / R8 (only FORCED_RISK's first keys); their terms can only act once the tie is gone.
+2. Antic-driven attacks (whip, Envoy slash, Reed stab, Choristor slash: over half of the remaining hits) are invisible
+   to the "seen" key until their collider opens. A second key after it, the share of stage-1 frames in the committed
+   fine placements (`forced_rank = "seen_cf"`, `SSBOT_FORUM_FR=seen_cf`, 82e94fa, tested), lifts the hindsight-clear
+   pick within 12 frames of a hit from 60 % to 73 % offline (random 45 %; whip 35 -> 68 %, Choristor slash 0 -> 33 %;
+   the Envoy slash stays hard, 19 -> 24 %) and lived 6 s longer than seen (above, unpaired). The real fix is a
+   committed-attack template at its nominal (median dwell) timing instead of the entry-interval window union.
+3. Support de-saturation (R2 / R3 owners, recertification needed): start-later families should not strike before
+   their antic's minimum dwell; the flying Reed's idle growth capped by its measured top speed.
+4. Offense: 0 kills in 274 live episodes; wave 0 never ends. R6's punish windows (Envoy Charge End, Slash1 Recover)
+   should be re-measured under "seen".
+5. Concurrent live runs raise tick p50 to 12-15 ms and late ticks to 5-28 % on this machine: compare arms paired under
+   the same load; do not run offline batches next to a live check (it ruined my first fix chunk).
+6. Frozen checkouts to remove when done: `C:\ssbot\live_w0f_417d4a8`, `live_w0f_fx2`, `live_w0f_ao`,
+   `live_w0f_3608489`, `live_w0f_cf`.
+
+## Task R8 - Forum clash (branch worktree-wf_814dfeea-b10-4)
+
+Worktree `C:\modeling\silksong_bot\.claude\worktrees\wf_814dfeea-b10-4` (from main bc46dc9). Plan: forum_planner_plan
+R8 row and its notes. Outputs (not in git): `C:\ssbot\data\m2_forum_r8\` (drivers `clash_*.cmd`, stats `clash_*.json`
+/ `.log`, replays `replay_*.json`). Facts: forum.md section 17 (Chinese).
+
+### Done (committed)
+
+- Wanderer support (the person: Wanderer over Reaper for clashing): `knowledge/1.0.30000/attacks/wanderer.json`
+  (attack_table_build --crest Wanderer from the P17 slash dump; not live-sampled yet: side / up / wall slash on
+  0-0.12 s from the swing (first animation event 0/24 s, like Hunter: clash chains are seamless), down slash
+  0.04-0.16 s; Clash Tink boxes per slot); `kinematics/hero_wanderer_forum.json` (the Reaper Forum loadout with the
+  Wanderer config: duration 0.25, cooldown 0.3, recovery 0.1; abilities without reaper_down, with the new
+  `AB_DOWN_SLASH` (DownSlashTypes.Slash: the down attack is an ATTACKING swing, no dive / FSM); thunk polygons and
+  windows from the Wanderer table); `kin_jit` handles AB_DOWN_SLASH and the new event `EV_PARRY_RECOVER`
+  (NailParryRecover 0.1 s after a clash: attack cooldown 0, the swing cancelled). Both bits are unused by the Hunter
+  / Reaper parameters (Bell Beast and the Reaper Forum rollouts unchanged by construction).
+- `ForumPlanner(crest=...)`: the crest's shapes (a Slash-type down slash timed like the other slots), the kernel
+  classifies a Wanderer down slash (B_DOWN in the air) and vetoes an attack pressed within 0.15 s after a dash / sprint
+  frame (DASHCOMBO_WINDOW_TIME: the press would be the WANDERER DASH COMBO, not modelled); the kernel also returns
+  each row's first swing.
+- EV_CLASH (`ForumConfig.clash`, off by default = the R3 / R4 planner): only on ticks with no safe row (plain safe rows
+  always rank first), up to 16 rows in contact (by J) whose first contact on the envelope falls inside a swing's
+  active window, attributed to enemies (`occupied_only` at the hull centre) whose current attack family is in
+  `clash.json` for that slot and that are on the slash's side; success branch = the clash on the frame before the
+  contact, PARRY_INVULN_F 9 frames without enemy damage (any source: the two-sided rule), the direction's recoil
+  (side away from the facing, up RecoilDown, down the bounce), EV_PARRY_RECOVER 6 frames later; a later contact may be
+  clashed again (chains, the other side) up to 3 times; p_fail = 1 - prod(1 - p_k) <= clash_max_fail 0.25 and h >= 2
+  -> the row counts as safe (ranked after plain safe rows by p_fail). `res.clash`, audit clash_ticks / clash_rows /
+  clash_chosen, policy counts clash_plan.
+- `ssbot.tools.forum_clash_stats`: clash setups (the clash reach meets an enemy's canClashTink collider before any
+  hurtbox contact) and contact setups (the planner's rule: the enemy's first contact inside the swing's window) with
+  outcomes clash / hit / neither by crest x type x family x state x slot; after-clash chains and blocked damage;
+  `--table` builds `knowledge/1.0.30000/enemies/forum/clash.json` (Wilson 95 % upper bound of the hit share,
+  n >= 10, Clapper / Tiny / Bellbearer / Clawmaiden spear / body families never).
+- `Forum_W` encounter (fo_W), `combat_run --forum-clash` (run tag `_clash`), `ForumPlannerPolicy(crest, clash)`
+  (crest from the savestate: fo_W Wanderer), `forum_policy_replay --clash --crest`.
+
+- Clash continuations (`candidates.build_forum(clash=True)`, only with clash on): keep swinging every 8 frames
+  (N / L / R / U): a second clash after NailParryRecover, the other side, the up slashes under the Minister.
+
+### Measured so far (offline)
+
+- Open-loop replay of A0b i1 ep0 (648 ticks, 483 FORCED_RISK, the machine busy): with a permissive test table
+  (every statically clashable family p 0.1) the clash branch ran on 483 ticks, looked at 7,200 rows, 234 had a swing
+  active at the first contact, all 234 attributed, 59 to clashable families on the slash's side, 7 clean success
+  branches (3 chosen); without the clash continuations 0 clean (the support still covers the hero after 0.15 s).
+  Clash branch 2.4 ms per forced tick; plan p50 6.5 -> 8.4 ms with the extra rows (busy machine).
+- The person's sessions (5, 4,439 swings, 239 clashes): clash setups (clash reach meets a clash collider before any
+  hurtbox contact) almost never end in a hit (e.g. Wanderer Minister charge up 7 / 10 clash, 0 hit); contact setups
+  (the planner's rule) do: Choristor slash side 14: 7 clash, 3 hit; Reed stab side 11: 3 clash, 4 hit. The R1 v2
+  data2 runs are being counted (below).
+
+### Running
+
+- Offline stats (hidden, below normal; this worktree's code): `C:\ssbot\data\m2_forum_r8\clash_d0..d3.cmd` (the 36
+  data2 runs split four ways), outputs `clash_d*.json` / `.log`; `clash_h.json` (the person's sessions) is done.
+- Live driver `C:\ssbot\sandbox\r8_live.ps1 -co C:\ssbot\live_r8_c1ca21a` (hidden, log `C:\ssbot\sandbox\r8_live.log`):
+  builds `clash.json` from the stats when all five exist (into the checkout and `m2_forum_r8\clash_table.json`;
+  commit it to the branch afterwards), warm replay (aborts on failure), waits for the Trobbio collection to end,
+  takes `locks\inst2.lock` / `inst3.lock` ("r8"), Wanderer slash frames probe on instance 2 (fo_W, 60 swings,
+  `C:\ssbot\data\runs\m2\kn_excite_forum_wanderer`), then three arms of 25 + 25 full gauntlets on instances 2, 3
+  (eval, oracle, real quits 0.2, the A0b protocol): R8W = Forum_W + --forum-clash (seed 320000), W0 = Forum_W
+  (320200), R8R = Forum_A + --forum-clash (320400); per arm forum_a0_report and forum_clash_stats into
+  `m2_forum_r8\report_<arm>.json` / `clash_live_<arm>.json`; releases the locks, logs R8_DONE. Stops after the
+  current episode on STOP_AGENTS / DEMO_SOON. Stop now: `combat_run stop <run dir>` from the checkout's brain, then
+  delete the two lock files if the driver did not.
+- kin_check of the Wanderer / Reaper parameters on the fo_W session 20261004_012300 (`m2_forum_r8\kin_*.json`).
+
+### Stopped (2026-10-08 00:45 PDT, weekly usage 99 % before the 03:00 reset; the stop protocol)
+
+- Left running on purpose (correctly configured, both mine): the five offline stats batches (`clash_d0..d3.cmd`,
+  `clash_h.cmd`, this worktree's code at c1ca21a, union setups; the first version's outputs are kept as
+  `clash_*_v1.json`) and the live driver above (it waits for them, then for the Trobbio run, then takes the locks).
+- A0b report for the comparison: `C:\ssbot\data\m2_forum_r8\report_A0b.json` (forum_a0_report over 205437 +
+  205857: 51 episodes, QUIT 50 (Q1), HARNESS_FAIL 1, 4.27 hits per episode (Envoy 105, Reed 57, Choristor 56, all wave
+  0), FORCED_RISK 80.3 %, 1 hit outside the support).
+- The first table (contact setups only, `clash_table_v1.json`) admitted at p_fail <= 0.25 only the Minister charge
+  (side 563 setups, 457 clash, 13 hit, UB 0.039), Choristor slash side (0.19), Choristor whip side (0.22), Maestro
+  slash up (0.20), Minister charge down / up (0.15 / 0.19), Envoy slash down (0.14), Reed defend down (0.17); Reed stab
+  side 0.47, Clawmaiden slash side 0.28, Minister counter side 0.25. Contact setups miss the clashes that kept the
+  attack off the hurtbox, hence the union rerun.
+- Wanderer kinematics on the person's fo_W session (kin_check planner_bounds, bounds_lo_mix): Wanderer parameters
+  0.6911 all / attack windows 0.9846 / contact 0.9398 vs the Reaper parameters 0.6879 / 0.9823 / 0.9319 (the session
+  includes the bench runs, deaths and dashes: dash 0.81 for both, as R3 found on live Forum data).
+- Full test suite at 43aeef5: 1135 passed, 2 skipped, 1 xfailed.
+
+### Next / open issues
+
+0. When the driver logs R8_DONE (`C:\ssbot\sandbox\r8_live.log`): commit `C:\ssbot\data\m2_forum_r8\clash_table.json`
+   as `knowledge/1.0.30000/enemies/forum/clash.json` (the worktree's untracked clash.json was a permissive test table,
+   deleted); fill forum.md 17 (union table, live clash outcomes per arm, A/B) and the plan's R8 note.
+1. After the driver: compare the arms with A0b (CLEAR / QUIT / WOULD_DIE, hits per episode, waves, time alive,
+   support-outside hits, tick p50 / p99), the live clash outcomes per family, Wanderer frames ->
+   `attack_table_build --crest Wanderer --live <rec>\attack_frames.jsonl`; forum.md 17 and the plan's R8 note.
+2. Not done: the Minister-from-below up-slash experiment (the clashrepU rows give the planner the move; no scripted
+   probe); the javelin (Reed Pin Projectile, clashable) is a hazard path the branch does not attribute; the
+   PARRIED-interrupted attacks (Envoy charge -> Deflect, Reed counter -> Multihit Clashed) keep their remaining support
+   in the success branch (conservative); the supervisor does not see a clash plan's failure risk (S = 0, P 0; clash
+   rows need h >= 2); VE view rates = oracle's (no VE data).
+3. The Bell Beast: the shared changes are new bits / branches only (AB_DOWN_SLASH, EV_PARRY_RECOVER, build_forum's
+   clash flag): bit-identical by construction; the full test suite is the check (running at the time of writing).
+
+### Round 2 (2026-10-08 03:00-, week push round 2; main bc46dc9 merged: no change)
+
+Round 1's driver `r8_live.ps1` built the clash table and then stopped at 01:08 on "warm replay failed": the replay
+had succeeded (`warm_replay.json` written), but `Start-Process -PassThru` without a cached `Handle` gives no ExitCode
+in Windows PowerShell 5.1 and the check read `$null` as a failure. Replaced by `C:\ssbot\sandbox\r8_live2.ps1` /
+`r8_live3.ps1` (handle cached, the arm's run dir from combat_run's own "run dir:" line in r8_live3; r8_live2 took the
+newest run dir, another track's: its `report_<arm>.json` for R8W / R8R / R0 were redone by hand with
+`C:\ssbot\data\m2_forum_r8\live\arm_report.cmd NAME RUNDIR`, the wrong ones kept as `*_wrongdir.json`).
+Outputs: `C:\ssbot\data\m2_forum_r8\live\` (reports `report_<arm>.json`, live clash stats `clash_live_<arm>.json`,
+consistency checks `check_<arm>.json` from `scratchpad/r8/clash_live_check.py`).
+
+Done (committed):
+- `clash.json` committed (64a48cc; union setups of the R1 v2 data2 runs + the person's sessions: 33 keys, 18 at
+  p_fail <= 0.25, 29 at <= 0.5; forum.md 17.3).
+- Wanderer slash windows measured live (instance 2, fo_W, 60 swings, seed 320000, recording
+  `C:\ssbot\data\runs\m2\kn_excite_forum_wanderer\...\kn_excite_forum_s320000`): side / alt / up frames 1-7, down
+  3-9 (`attacks/wanderer.json` frames); clash chains are seamless (new swing on at c+7, same collider clashable from
+  c+7, i-frames to c+9; Reaper 5-12: 2-frame gap). `attack_table_build --live` folds the probe's second press of any
+  slot (it read Wanderer's second swings as one 1-38 window).
+- The Minister-below experiment: `Forum_W_w4` (`fo_r8_w4w` = `fo_r1_w4` + Wanderer, `ssbot.probes.forum_states
+  wanderer`), `--policy minister_below` (`forum_policy.MinisterBelowPolicy`: under the nearest Minister, up held,
+  attack every 4 frames), 30 x 20 s on instance 3 (seed 321000, run `20261008_032228_Forum_W_w4_data_minister_below_oracle`).
+- Clash branch v2 (895137b): the PARRIED-catching attacks (Envoy charge, Reed counter) end at the clash (support
+  frozen at the clash frame, hull grown by the measured post-clash motion `PARRY_STOP_GROW`, forum.md 17.5); one
+  committed clashable owner suffices (idle co-owners are covered by the parry i-frames, a co-owner in its own attack
+  blocks); partial clashes (contact left after the clashes) enter FORCED_RISK's ranking with the share p_fail x
+  share without + (1 - p_fail) x the branch's (`clash_partial_max_fail` 0.5); the branch is skipped when no enemy is
+  in a clashable attack; the decision log's `clash` field. Tests: test_forum_clash.py 8.
+- `hero_damage.KNOWN_NEUTRAL` + Cogwork Flier, Wallcling (603fc7b): unlisted, they added the imbuement / Barbed Wire
+  bounds (nail 16), and with the Wanderer's x3 crit the bound was 48 >= every wave-0 HP: the killing-blow rule
+  (YELLOW / RED, Forum kills never certifiable) withheld every swing in YELLOW. Logged nail hits with both tools: 9 /
+  10 / Wanderer crit 27, never more. Bell Beast's loadout has neither tool: unchanged. (Review: it also lowers the
+  default Forum Reaper's bound 16 -> 9 / 10, so YELLOW withholds the nail on fewer ticks; A0b, R0 and R8R ran at 16.
+  The Reaper arms are rerun at the new bound in the review fixes below.)
+- forum.md 17.1, 17.3, 17.5-17.8; a stray form feed in forum.md 13 repaired.
+- Full suite at 895137b (worktree): 1137 passed, 2 skipped, 1 xfailed; test_kill_rule.py 41 passed at 603fc7b.
+
+Measured (live, A0b protocol, 50 episodes per arm, instances 2 / 3; forum.md 17.7 / 17.8):
+- Every arm 50 / 50 QUIT in wave 0 (Q1), 0 kills, 0 hits outside the support. Time to QUIT median / hits per min /
+  Envoy-charge hits per episode: R0 (Reaper, clash off, 895137b, seed 320600, `20261008_042706`) 11.92 s / 19.7 /
+  1.10; **R8R** (Reaper + clash, 320400, `20261008_041514_..._clash`) **13.75 s / 18.0 / 0.60** (+1.83 s, 95 % boot
+  CI about 0.0-3.0); W1 (Wanderer, 603fc7b, 320800, `20261008_044219`) 11.98 / 20.8 / 0.78; R8W1 (Wanderer + clash,
+  320800 paired, `20261008_045259_..._clash`) 11.72 / 21.6 / 0.82 (no effect). A0b 12.81 / 19.1 / 1.08. Void:
+  W0 / R8W (`20261008_040450` / `035419`, nail withheld by the 48 bound): 10.2 / 10.6 s.
+- Clash plans chosen: R8R 18 clean + 218 partial ticks, R8W1 88 + 930. Consistency (streaks of clash ticks, the next
+  36 frames of the recording): R8R 18 streaks, 4 clashed, 5 hit (all before a clash), predicted p_fail 0.26; R8W1 82,
+  14 clashed, 19 hit (16 before a clash), predicted 0.29. Live clashes (forum_clash_stats): R0 104, R8R 151, W1 109,
+  R8W1 117 (Envoy charge setups R8R 48: 39 clash, 1 hit).
+- Compute (loaded machine: other tracks' live runs on 0 / 1 / 4 and offline jobs): plan p50 R0 4.5 / R8R 8.8 ms, W1
+  4.1 / R8W1 5.3 ms; late ticks R0 7.0 % / R8R 36.5 %, W1 3.7 % / R8W1 4.9 % (review: not the machine; R0 overlapped
+  the same busy instance-0 run longer and stayed at 7 %: the clash branch's own 2.2 ms per clash tick, no deadline).
+- Minister below (Wanderer, continuous up slash, 30 x 20 s): up slash meeting the charge: of 114 clash setups 65
+  clashed, 0 hit, 49 neither (review correction: not "65 / 65"), union setups 55 clash / 1 hit of 101 in front; parry
+  counter worse (4 clash / 3 hit of 27); overall 14.9 Minister hits per Minister-minute (data2 random policy, 205 w4
+  starts: 20.2; per episode is not comparable: 20 s-capped episodes vs 180 s ones), both dead in a median 10.7 s
+  (data2 71 s); hits: charge from the side 38, the parry stance body 33, the body 15.
+- Tie to the diag track (HANDOFF "Task wave-0 forensics", forum.md 19): wave 0's support saturates and FORCED_RISK
+  ties; the clash branch only acts on ticks with an enemy in a clashable attack (its parry i-frames lower the
+  saturated share), so it moves the Envoy charge and not the wave-0 outcome. Its `forced_rank = "seen"` (+5.0 s live)
+  is the bigger step; when both are on, seen counts the collider the swing would clash as a contact and ranks clash
+  rows last: the clash branch's success contact should replace seen's for those rows (integration).
+
+Running: nothing. Locks inst2 / inst3 released (r8_live2 / r8_live3 logged R8_DONE).
+
+Needs deploy: nothing (no oracle change).
+
+Next / open issues (round 2):
+1. Clash is not a wave-0 fix: Reaper +1.8 s (CI touching 0), Wanderer flat. Not written into `Forum.yaml`; the plan's
+   acceptance (hits and quits not more) holds for the Reaper and is flat for the Wanderer. Re-measure with
+   `forced_rank = "seen"` merged (seen + clash vs seen), the clash rows' seen contact replaced by the branch's.
+2. The killing-blow rule with the Wanderer's x3 crit bound (27 at needle 1) withholds the nail in YELLOW once any
+   enemy may be at <= 27 HP (37 % of W1's ticks vs 17 % for the Reaper, measured at its old bound 16): a structural
+   cost of the Wanderer under the current safety rules (the crit chance is about 1 %: 4 of 403 logged hits).
+3. Cost: partial clashes roll out 16 rows x 3 levels; try clash_k 8 / clash_depth 2 before the integrator's A/B
+   (R8R's late ticks were 36.5 % on a busy machine).
+4. DESIGN 3.5.6's parry whitelist says no parry / clash in YELLOW / RED (`Restrictions.no_parry`; the clash freeze
+   swallows a pause); the clash branch only requires h >= 2 (PAUSE_PENDING allows no attack at all). The lead should
+   confirm that R8's rule replaces the whitelist for the Forum, or the branch must read `no_parry`.
+5. Still open from round 1: the Reed javelin is clashable but not attributed; the supervisor does not see a clash
+   plan's p_fail; VE view rates = oracle's; the Wanderer kinematics are not refitted on Wanderer recordings; the
+   wall slash's live frames were not sampled (the probe swings no wall slash); the Clash Tink collider's window is
+   taken as the damager's (not sampled).
+6. My mistake to avoid: running `C:\ssbot\tools\uv\uv.exe run` in a frozen checkout WITHOUT
+   UV_PYTHON_INSTALL_DIR made uv delete the checkout's `.venv` (Lib) while an arm was using it (W0 survived; the next
+   `uv run` with the variable rebuilt it). Use scripts/uv.cmd or set the variable.
+7. Frozen checkouts to remove when the integrator is done: `C:\ssbot\live_r8_c1ca21a` (round 1),
+   `live_r8_64a48cc` (Minister run), `live_r8_895137b` (R8W / W0 / R8R / R0), `live_r8_603fc7b` (W1 / R8W1).
+
+### Round 2 review fixes (2026-10-08 05:30-, the fixer; verdict on 67b28d6)
+
+Done (committed):
+- `forum_clash_stats` (532f8e2): union setups keyed by the enemy's Control state and carrying their attack instance
+  (the enemy's run of frames in one family), the worse outcome of the two views (hit > clash > other > neither),
+  Multihit special damage owned by the nearest damaging enemy (was never counted), the Reaper down window [9, 19]
+  as the planner's. `build_table`: each family's clashable states (where its clashes happened, >= 2 and >= 5 % of
+  them), rates over those states only, `p_clash_lb` (Wilson lower bound of clash / n) and `p_fail` (upper bound of
+  hit / n) at n_eff = the attack instances, per-crest rows with their own bounds.
+- `clash.json` rebuilt (d24ef17; stats `C:\ssbot\data\m2_forum_r8\fix\clash_*.json`, driver
+  `C:\ssbot\sandbox\r8f_stats.ps1`, checkout `C:\ssbot\live_r8_532f8e2`): the 36 R1 v2 data2 runs, the person's 5
+  sessions, the round-2 live runs and A0b; 31 keys, 19 at p_fail <= 0.25, 10 at p_clash_lb >= 0.5, none at 0.75
+  (best: Minister charge side 0.74 / 0.044, Envoy charge side 0.72 / 0.047); clashable states e.g. Envoy charge
+  {Charge}, Reed counter {Parry Slash}, Reed stab {Stab 1, 3, 5}, Minister charge {Attack}.
+- Clash branch v3 (f1f2fb1, d997bc7): the branch's weight w = prod p_clash_lb (a setup that neither clashed nor was hit
+  gave none of the clash's effects); a clean branch is a safe row only at w >= 0.75 and hit risk <= 0.25, any other
+  (w >= 0.25) is ranked in FORCED_RISK by w x the branch's share + (1 - w) x the plain row's (first contacts stay the
+  plain row's; such rows always join the ranked candidates); eligibility by state: `clash_windows` (the walk's dwell /
+  successors inside the family) must let the owner be in a clashable state at the clash, PARRY_STOPS by state (Envoy
+  Charge / Reset, Reed Parry Slash); DESIGN 3.5.6: GREEN only by default (`ForumConfig.clash_tiers`), never with a
+  pause pending; `combat_run --forum-clash {on, yellow, cont}` (yellow: GREEN and YELLOW, the experiment; cont: the
+  clash continuation rows without the branch); deadline per level (`clash_deadline_ms`, default deadline_ms + 2),
+  clash_k 8, clash_depth 2; candidates whose first swing is out at their first contact first; parry i-frames 9
+  frames, from j_hi to (the earliest frame the clash reach can meet the owner's support) + 9; co-owners no longer
+  block (the parry i-frames take every enemy's damage; the branch meets their support after them; counted
+  `clash_coowned`); the decision log's `clash` is now [w, clashes, ranked].
+- Window semantics: the kernel already scores the last active frame (`_shapes` gives [f0, f1 + 1)); the clash pass's
+  frame is in the same half-open window; the stats' Reaper down slash now matches (test).
+- Tests: test_forum_clash.py 20 (windows, the table builder's states / n_eff / crest rows, the owner rule, a no-way-out
+  synthetic Reed tick: the branch runs and ranks; gates: YELLOW, pause pending, h 1, branch off, state outside,
+  no states; a skipped pass leaves the tick as the continuation rows alone make it).
+- Docs: forum.md 17.7 / 17.8 corrections (65 of 114, per-minute only, the Reaper bound, the A/B not significant, the
+  late-tick attribution), `{BS}` placeholders replaced (HANDOFF, forum.md). The commit message of 64a48cc says 44 keys:
+  the committed table then had 33.
+- Open-loop replay A0b i1 ep0 with v3 and the provisional table (`--clash yellow`): 483 forced ticks, 210 swings out at
+  the contact, 166 owners outside their clashable states (mostly Envoy JumpSlash 4 / Choristor Slash Recover), 38
+  clashes accepted (all Envoy charge / Reed counter stops), 38 ranked, 4 chosen; 8 levels cut by the deadline; plan
+  p50 5.3 ms (v2: 9.8 ms), clash 0.96 ms per forced tick.
+
+Running: `C:\ssbot\sandbox\r8f_live.ps1 -co C:\ssbot\live_r8_d24ef17` (hidden, log `C:\ssbot\sandbox\r8f_live.log`,
+manifest `C:\ssbot\data\m2_forum_r8\fix\ab_manifest.txt`): locks inst2 / inst3 ("r8"), 4 blocks x 3 arms (order
+rotating), each run 25 + 25 Forum_A gauntlets on instances 2 / 3 (A0b protocol), block seed 322000 + 100 x block for
+every arm (paired): R0 (clash off), RC (`--forum-clash cont`), RY (`--forum-clash yellow`). Stop: STOP_AGENTS /
+DEMO_SOON (between runs), or `combat_run stop <run dir>` from the checkout's brain; then delete the r8 lock files if
+the driver did not. Analysis: `scratchpad/r8f/ab.py <manifest> <out.json>` (paired by seed, sign-flip permutation,
+bootstrap CI, unpaired permutation).
