@@ -649,7 +649,8 @@ class ForumPlannerPolicy(PlannerPolicy):
                "fi": {k: li.get(k) for k in ("posture", "N", "stage1_pass", "enveloped", "hitfx", "react", "capped",
                                              "cut", "overrun")},
                "pocket": self.tac.last.get("pocket_veto"), "goal": self.tac.last.get("goal"),
-               "goal_why": self.tac.last.get("goal_why"), "goal_t_end": self.tac.last.get("goal_t_end"), "subj": subj}
+               "goal_why": self.tac.last.get("goal_why"), "goal_t_end": self.tac.last.get("goal_t_end"),
+               "l2_cands": self.tac.last.get("l2_cands"), "subj": subj}
         hit = any(ev.get("k") in ("damage", "catastrophe", "would_die") for ev in s.get("ev") or ())
         event = hit or streak or (r.decision.pause_pending and self.counts["_pend_logged"] == 0)
         if r.decision.pause_pending:

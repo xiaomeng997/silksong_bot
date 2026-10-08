@@ -274,6 +274,10 @@ class GauntletTactics:
     def _pick(self, ws, fc, hx: float, t: float) -> Goal | None:
         r = self.rules
         cands = self.candidates(ws, fc, hx)
+        # the arbitration log (decision records "l2_cands"): iid, type, window, what it needs, isolated, ETA, priority
+        self.last["l2_cands"] = [[c.s.iid, c.s.type_key, round(min(c.window, 9.0), 3),
+                                  round(c.t_run + r.swing_s + r.margin_s, 3), c.iso, round(c.eta, 2), c.prio]
+                                 for c in cands]
         if not cands:
             return None
         claps = [c for c in cands if c.s.type_key == CLAPPER]
