@@ -234,6 +234,10 @@ def test_pause_cause_from_the_first_paused_state():
     s = {"f": 3064606, "act": {"lost": False, "mask": mask("right", "jump"), "applied": 3064606},
          "input": {"mask": mask("right", "jump")}}
     assert M.pause_cause(s).startswith("no Pause key")
+    # the harness's own Pause (a policy or the live check's probe), the brain not lost: not the watchdog
+    s = {"f": 500, "act": {"lost": False, "mask": mask("pause", "left"), "applied": 499},
+         "input": {"mask": mask("pause", "left")}}
+    assert M.pause_cause(s) == "a Pause key in the harness's own ACTION (policy / probe)"
 
 
 # ---- resume -------------------------------------------------------------------------------------------------------
@@ -488,3 +492,26 @@ def test_a_pause_found_at_the_start_is_resumed_and_the_episode_runs(monkeypatch)
     states = [_st(f, scene) for f in range(2, 15)] + [_st(15, scene, ev=[WAKE])] + [_st(f, scene) for f in range(16, 40)]
     rec, link = _episode(states, start=_st(1, scene, paused=True))
     assert seen == [1] and "savestate.load" in link.calls and rec.f_wake == 15
+
+
+def test_the_live_checks_pause_press_waits_for_the_gate_and_repeats_a_dropped_press():
+    """probes.recovery_check.PauseAt (the episode cases of the live check): the inner policy's keys without a Pause bit
+    until its `at`-th ACTION, then one 3-frame Pause press once pause.blk is 0, again 60 ACTIONs later if no pause
+    ended the episode."""
+    from ssbot.probes.recovery_check import PauseAt
+
+    class Inner:
+        def reset(self, rng, enc):
+            pass
+
+        def act(self, s, tap):
+            return mask("right", "pause")
+
+    p = PauseAt(Inner(), at=3)
+    p.reset(None, None)
+    shut, open_ = {"pause": {"blk": 4}}, {"pause": {"blk": 0}}
+    got = [p.act(shut, None) for _ in range(4)] + [p.act(open_, None) for _ in range(70)]
+    assert all(m == mask("right") for m in got[:4])           # before `at` and while the gate is shut
+    paused = [k for k, m in enumerate(got) if m & M.PAUSE_BIT]
+    assert paused == [4, 5, 6, 65, 66, 67]
+    assert all(m & mask("right") for m in got)

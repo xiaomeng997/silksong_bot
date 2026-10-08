@@ -104,15 +104,20 @@ def where(s: dict | None) -> str:
 def pause_cause(s: dict | None) -> str:
     """Why the game paused, from the first paused STATE (its "act" section: the oracle's injected keys and the
     brain-lost watchdog; "input": what the game read): the watchdog (the worker sent no ACTION for 250 ms and 6
-    frames, ActionScheduler), a Pause key the harness did not inject (a person's Esc, a gamepad's Start), or no Pause
-    key at all (InputHandler.ControllerDetached: a gamepad that went away pauses the game)."""
+    frames, ActionScheduler), a Pause bit in the harness's own ACTION (a policy or probe that pressed it, act.lost
+    false), a Pause key the harness did not inject (a person's Esc, a gamepad's Start), or no Pause key at all
+    (InputHandler.ControllerDetached: a gamepad that went away pauses the game)."""
     s = s or {}
     a = s.get("act") or {}
-    if a.get("lost") or (a.get("mask") or 0) & PAUSE_BIT:
+    if a.get("lost"):
+        # BrainLost stays set until the next ACTION is accepted (ActionScheduler.EndLost), so the first paused STATE
+        # of a watchdog pause always shows it
         applied = a.get("applied")
         age = f", last ACTION applied {s.get('f') - applied} frames before" if isinstance(applied, int) and \
             isinstance(s.get("f"), int) else ""
         return f"brain-lost watchdog{age}"
+    if (a.get("mask") or 0) & PAUSE_BIT:
+        return "a Pause key in the harness's own ACTION (policy / probe)"
     if ((s.get("input") or {}).get("mask") or 0) & PAUSE_BIT:
         return "a Pause key the harness did not press"
     return "no Pause key (a gamepad detach?)"
