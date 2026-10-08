@@ -1892,7 +1892,12 @@ attack outcomes), `live_w0f_3608489` (live check). Seeds used: 340000-340024.
 
 ### Running
 
-- Nothing. Instance 1's lock (taken 04:46 as "diag") was released at 05:05; no job of mine is running.
+- Review-fix round (from 05:56): `C:\ssbot\sandbox\w0f_pair.ps1` on instance 0 (lock `inst0.lock` = "diag"), frozen
+  checkout `C:\ssbot\live_w0f_cf` (82e94fa = the final code), seen vs seen_cf PAIRED on seeds 340100-340124, ABBA
+  blocks of 5 (even blocks seen_cf first) so both arms share the machine load; 10 combat_run chunks, log
+  `C:\ssbot\sandbox\w0f_pair.log`. Stop gracefully: create `C:\ssbot\sandbox\w0f_pair.stop` (no new chunk), then
+  `combat_run stop <run dir>` from the checkout's brain for the running chunk; the driver releases the lock.
+- Earlier: instance 1's lock (taken 04:46 as "diag") was released at 05:05.
 - Offline: nothing. The forensics replay covers 115 of the 225 episodes (A0b 50, R6 40, R5 25); the other 110 were not
   replayed so as not to load the machine next to the other tracks' live runs (`fx_run.cmd` resumes where it stopped).
 
