@@ -2177,10 +2177,55 @@ Done (committed):
   clashes accepted (all Envoy charge / Reed counter stops), 38 ranked, 4 chosen; 8 levels cut by the deadline; plan
   p50 5.3 ms (v2: 9.8 ms), clash 0.96 ms per forced tick.
 
-Running: `C:\ssbot\sandbox\r8f_live.ps1 -co C:\ssbot\live_r8_d24ef17` (hidden, log `C:\ssbot\sandbox\r8f_live.log`,
-manifest `C:\ssbot\data\m2_forum_r8\fix\ab_manifest.txt`): locks inst2 / inst3 ("r8"), 4 blocks x 3 arms (order
-rotating), each run 25 + 25 Forum_A gauntlets on instances 2 / 3 (A0b protocol), block seed 322000 + 100 x block for
-every arm (paired): R0 (clash off), RC (`--forum-clash cont`), RY (`--forum-clash yellow`). Stop: STOP_AGENTS /
-DEMO_SOON (between runs), or `combat_run stop <run dir>` from the checkout's brain; then delete the r8 lock files if
-the driver did not. Analysis: `scratchpad/r8f/ab.py <manifest> <out.json>` (paired by seed, sign-flip permutation,
-bootstrap CI, unpaired permutation).
+Measured (live, forum.md 17.9): `C:\ssbot\sandbox\r8f_live.ps1 -co C:\ssbot\live_r8_d24ef17` (06:08-08:30, log
+`C:\ssbot\sandbox\r8f_live.log`, manifest `C:\ssbot\data\m2_forum_r8\fix\ab_manifest.txt`, 12 runs): 4 blocks x 3
+arms (order rotating), each run 25 + 25 Forum_A gauntlets on instances 2 / 3 (A0b protocol, Reaper at the new bound
+9), block seed 322000 + 100 x block for every arm, so 200 episodes per arm paired by seed. Analysis
+`C:\ssbot\data\m2_forum_r8\fix\ab.py <manifest> <out.json>` -> `ab.json` (sign-flip permutation on the pairs,
+bootstrap CI, unpaired permutation); consistency `check_RY.json` (round 2's `scratchpad/r8/clash_live_check.py`;
+its "p_pred" is now w). All 600 episodes QUIT (Q1) in wave 0, WOULD_DIE 0.
+- R0 (clash off): alive p50 / mean 13.76 / 14.16 s, 4.19 hits / ep, 17.8 / min, HP lost 21.1 / min, Envoy charge
+  1.02 / ep, late 2.4 %, plan p50 4.0 ms.
+- RC (`--forum-clash cont`, the continuation rows only): 13.25 / 13.37 s, paired -0.79 s (p 0.003, CI -1.31..-0.27),
+  hits -0.18 / ep (p 0.01), Envoy charge 0.68 / ep (-0.35, p < 1e-4), HP lost 22.4 / min, 2 kills.
+- RY (`--forum-clash yellow`, the branch in GREEN + YELLOW and the rows): 12.93 / 13.69 s, paired -0.47 s (p 0.11, CI
+  -1.03..+0.09), hits -0.15 (p 0.047), Envoy charge 0.63 (-0.40, p < 1e-4), HP lost 21.9 / min, late 2.9 %, plan p50
+  5.2 ms, 1.12 ms per clash tick, 2 % of clash ticks cut by the deadline, 2,724 chosen ranked clash ticks.
+- RY vs RC (the branch alone): +0.32 s (p 0.22), Envoy charge -0.05 (p 0.50): no measurable effect.
+- Consistency (RY): 207 chosen clash-plan streaks, 48 % clashed, 19 % hit (36 of 39 before a clash), w mean 0.58;
+  base rate of all forced ticks 46 % hit / 11 % clash within 36 frames (not a calibration test: event-sampled log).
+- Reading: round 2's Envoy-charge drop comes from the always-swinging continuation rows (the charge runs into the
+  blade), not from the branch; the rows also swing far more (4.2 vs 1.6 presses / s), move the damage to the
+  Choristor and shorten survival; the branch has little to do in wave 0 (most swings out at a contact meet an enemy
+  in its recovery, not clashable; no key reaches w 0.75). Neither arm is written into Forum.yaml.
+
+Running: nothing. Locks inst2 / inst3 released (R8F_DONE 08:29).
+
+Tests: full suite (`tests` + `ssbot/tests`, NUMBA_NUM_THREADS 4, below normal) at d24ef17: 1150 passed, 2 skipped, 1
+xfailed (log `C:\ssbot\data\m2_forum_r8\fix\pytest_full.log`); test_forum_clash.py 20 passed. Bell Beast: the changes
+are in the Forum planner / policy / combat_run's Forum switch / the clash stats tool; its equivalence tests pass.
+
+Needs deploy: nothing (no oracle change).
+
+Next / open issues (after the review fixes):
+1. Clash is not worth turning on as built: the continuation rows cost 0.8 s of survival (p 0.003) for -0.35 Envoy
+   charge hits / episode, the branch adds nothing measurable on top. If anything is kept, it is the observation that a
+   blade held out stops the Envoy charge: a targeted "swing into the charge" row (only when an Envoy is in Charge
+   Antic / Charge facing the hero) instead of always-swinging continuations, A/B'd the same way.
+2. DESIGN 3.5.6 decision for the lead: the branch now follows the whitelist by default (GREEN only, no pause pending);
+   `--forum-clash yellow` / `clash_tiers` is the experiment. In wave 0 about 85 % of ticks are YELLOW, so the
+   compliant setting barely runs.
+3. No clash.json key reaches p_clash_lb 0.75 (Minister charge side 0.74, Envoy charge side 0.72): no clean clash row
+   can be a safe row; all go through FORCED_RISK's mixture. More clash data (the Wanderer especially: its keys have
+   n_eff 10-87) would narrow the bounds.
+4. Integration: when forced_rank "seen" / commit_rank (diag / R5 value branches) merge, the clash rows' FORCED_RISK
+   keys need the branch's mixture too (seen counts the collider the swing would clash as a contact). forum.md section
+   numbers collide: the R5 value branch also writes 17.5-17.10 under its own section 17; renumber R8's at integration.
+5. The parry i-frames in the branch mask every support the planner queries (enemy_only or not); thrown hazards that
+   the parry i-frames do not cover (DESIGN: they do not stop hazard-type damage) would be under-counted if any Forum
+   source is a true hazard type (the Reed javelin / bells deal ENEMY damage as far as known; not verified).
+6. Still open: the Reed javelin is clashable but not attributed; the supervisor does not see a clash plan's risk;
+   VE view rates = oracle's; the Wanderer kinematics not refitted on Wanderer recordings; the wall slash's live frames
+   not sampled; the Clash Tink window taken as the damager's.
+7. Frozen checkouts to remove after integration: `C:\ssbot\live_r8_c1ca21a`, `live_r8_64a48cc`, `live_r8_895137b`,
+   `live_r8_603fc7b`, `live_r8_532f8e2` (stats), `live_r8_d24ef17` (this A/B).
