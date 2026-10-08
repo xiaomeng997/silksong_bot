@@ -36,10 +36,10 @@ Per tick (the lexicographic order and every rule of Planner.tick unless named he
               are then put on one lane over one frame set (stage 1's: the nominal box against the support, or'ed with
               the hit branch's contact, from the hit frame on where a cap left it unchecked) and ranked by the share
               of those frames in contact (P's stand-in: MultiForecast.prob costs 3.7 ms p50 on wave 6, one query per enemy, placement
-              kind and probability value; exact_p turns it back on), with commit_rank (SSBOT_FORUM_PC=1) the share in
-              contact with the committed support and then with the current attacks' fine placements (P_cm, P_f: the
-              support's P ties at 1 in wave 0, forum.md 17.7; they also lead the preselection), the latest first
-              contact, the envelope's, J.
+              kind and probability value; exact_p turns it back on), with commit_rank (default; SSBOT_FORUM_PC=0:
+              off) the share in contact with the committed support and then with the current attacks' fine placements
+              (P_cm, P_f: the support's P ties at 1 in wave 0, forum.md 17.7 / 17.8; they also lead the preselection),
+              the latest first contact, the envelope's, J.
               forced_rank "seen" (forum.md §19) puts a key before that share, in the preselection too: the frames
               each row's nominal box meets the damage colliders seen now, moved along their entity's velocity
               (seen_contacts; fewest first, then the latest first contact). In wave 0 the support saturates (every
@@ -91,7 +91,7 @@ H_W_FAR, H_W_NONE = 0.3, 0.5
 
 
 TV_ON = os.environ.get("SSBOT_FORUM_TV", "1") != "0"        # 0: no terminal value (the R4 / A0b scores, A/B)
-PC_ON = os.environ.get("SSBOT_FORUM_PC", "0") == "1"        # 1: FORCED_RISK refines P by the committed support's share
+PC_ON = os.environ.get("SSBOT_FORUM_PC", "1") != "0"        # 0: FORCED_RISK without the committed support's shares
 T_ENV = int(os.environ.get("SSBOT_FORUM_T", "36") or 36)     # the horizon arm (§4.5: T 36 / 48)
 
 
@@ -119,7 +119,8 @@ class ForumConfig:
     commit_rank: bool = PC_ON     # FORCED_RISK: rows tied on P ranked by their share of stage 1's frames in contact
     #                               with the committed support (P_cm: current attacks, tails, death tails, hazards),
     #                               then with the current attacks' fine placements (P_f) (forum.md 17.7: P ties at 1 in
-    #                               wave 0); they lead the preselection too; scores only (S, Hz, U unchanged)
+    #                               wave 0); they lead the preselection too; scores only (S, Hz, U unchanged); on by
+    #                               default since the round-2 A/B (forum.md 17.8: hits / min 18.9 -> 12.4)
     terminal: bool = TV_ON        # the terminal value (R5, combat.terminal): E / trapped / overlap / H_exp into J, the
     #                               kill value into the target weights; scores only
     w_E: float = 4.0              # J per unit of E (the reachable share clear of the enemies' bodies, 0..1)
