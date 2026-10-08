@@ -96,3 +96,17 @@ def test_the_hook_is_the_source_instances_and_a_nested_path_falls_back_to_the_na
     assert p._hook_of(None, "Wave 1/Song Reed/ParrySlash Hit", f) == f - 10  # no iid: every Reed, the latest
     assert p._hook_of(3, "Wave 1/Song Reed/ParrySlash Hit", f) == f - 10    # an iid with no entry: the name
     assert p._hook_of(1, "Song Reed/ParrySlash Hit", f + HOOK_LOOKBACK_F) is None   # too old
+
+
+def test_ab_arms_switch_per_episode(monkeypatch):
+    """SSBOT_FORUM_AB (forum.md 20.11): arms parsed in order, each a ForumConfig override; a bad key raises."""
+    import pytest
+    monkeypatch.setenv("SSBOT_FORUM_AB", "C:pc=0,fr=share; P:pc=1 ;SP:pc=1,fr=seen")
+    assert ForumPlannerPolicy._ab_arms() == [("C", {"commit_rank": False, "forced_rank": "share"}),
+                                             ("P", {"commit_rank": True}),
+                                             ("SP", {"commit_rank": True, "forced_rank": "seen"})]
+    monkeypatch.setenv("SSBOT_FORUM_AB", "")
+    assert ForumPlannerPolicy._ab_arms() == []
+    monkeypatch.setenv("SSBOT_FORUM_AB", "X:tv=1")
+    with pytest.raises(ValueError):
+        ForumPlannerPolicy._ab_arms()

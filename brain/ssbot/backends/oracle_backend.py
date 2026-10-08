@@ -236,6 +236,9 @@ def type_key_of(name: str) -> str:
     return name if end == 0 else name[:end]
 
 
+NOT_HITTABLE_LAYERS = (13, 14, 27)   # range triggers, terrain blocks, the physics pusher (Entity.hit_polys)
+
+
 def _pts(flat: Sequence[float]) -> list[tuple[float, float]]:
     return list(zip(flat[0::2], flat[1::2]))
 
@@ -683,6 +686,8 @@ class OracleBackend:
                 E(-1 if flip else 1, conf=0.3, src=Src.PREDICTED)
 
             body = [_pts(c["verts_world"]) for c in e.get("colliders") or () if c.get("enabled")]
+            hit = [_pts(c["verts_world"]) for c in e.get("colliders") or ()
+                   if c.get("enabled") and c.get("layer") not in NOT_HITTABLE_LAYERS]
             boxes = damage_boxes(e)
 
             fsm = []
@@ -709,7 +714,7 @@ class OracleBackend:
             anim = e.get("anim")
             ra = e.get("render_aabb")
             ent = Entity(id=iid, kind=kind, type_key=E(tk), pos=E((px, py)), vel=vel, acc=acc, facing=facing,
-                         body_polys=body, dmg_boxes=boxes, phase=phase,
+                         body_polys=body, hit_polys=hit, dmg_boxes=boxes, phase=phase,
                          hp_est=E(float(hp)) if hp is not None else None, fsm=fsm,
                          visible_frac=0.0 if hidden else 1.0,
                          anim=(str(anim.get("clip")), int(anim.get("frame") or 0)) if anim else None,
