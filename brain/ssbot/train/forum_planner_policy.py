@@ -134,6 +134,8 @@ class ForumPlannerPolicy(PlannerPolicy):
         self.episode = -1
         self._support = None
         self.k = 0
+        self.ab = self._ab_arms()
+        self.ab_arm: str | None = None
 
     @staticmethod
     def _fcfg() -> ForumConfig:
@@ -143,6 +145,27 @@ class ForumPlannerPolicy(PlannerPolicy):
         if fr not in ("share", "seen"):
             raise ValueError(f"SSBOT_FORUM_FR={fr!r}: share | seen")
         return ForumConfig(forced_rank=fr)
+
+    @staticmethod
+    def _ab_arms() -> list[tuple[str, dict]]:
+        """SSBOT_FORUM_AB: arms switched per episode (episode k runs arm k mod n, so the arms share the machine's load
+        within one batch; forum.md 17.11), "name:key=value,...;name:..." with the keys pc (commit_rank 0 / 1) and fr
+        (forced_rank share / seen). Empty: one arm, the env switches above."""
+        spec = os.environ.get("SSBOT_FORUM_AB", "").strip()
+        arms = []
+        for part in filter(None, (p.strip() for p in spec.split(";"))):
+            name, _, kv = part.partition(":")
+            over = {}
+            for item in filter(None, (x.strip() for x in kv.split(","))):
+                k, _, v = item.partition("=")
+                if k == "pc" and v in ("0", "1"):
+                    over["commit_rank"] = v == "1"
+                elif k == "fr" and v in ("share", "seen"):
+                    over["forced_rank"] = v
+                else:
+                    raise ValueError(f"SSBOT_FORUM_AB={spec!r}: {item!r} (pc=0|1, fr=share|seen)")
+            arms.append((name.strip(), over))
+        return arms
 
     # ---- warm-up ----
 
@@ -196,6 +219,9 @@ class ForumPlannerPolicy(PlannerPolicy):
                                                                                  variants="bounds_lo"), fcfg)
         self.planner.params = self.params
         self.planner.terrain = self.terrain
+        if self.ab:
+            self.ab_arm, over = self.ab[self.episode % len(self.ab)]
+            self.planner.fcfg = replace(self._fcfg(), **over)
         self.planner.reset()
         self._audit0 = self.planner.audit.as_dict()
         self.trk = StateTracker(self.params, self.terrain)
@@ -688,7 +714,7 @@ class ForumPlannerPolicy(PlannerPolicy):
         for x in self.hit_log:
             x["unpred"] = x["f"] in unpred_f
         modes = {k: v for k, v in self.counts.items() if not k.startswith("_")}
-        return {"view": self.view, "policy": "forum_planner", "k": 0, "modes": modes,
+        return {"view": self.view, "policy": "forum_planner", "k": 0, "modes": modes, "ab_arm": self.ab_arm,
                 "tick_ms_p50": q(self.tick_ms, 50), "tick_ms_p99": q(self.tick_ms, 99),
                 "plan_ms_p50": q(self.plan_ms, 50), "plan_ms_p99": q(self.plan_ms, 99),
                 "tv_ms_p50": q(self.tv_ms, 50), "tv_ms_p99": q(self.tv_ms, 99), "terminal": _tv_summary(self.tv_rows),

@@ -38,7 +38,8 @@ Per tick (the lexicographic order and every rule of Planner.tick unless named he
               of those frames in contact (P's stand-in: MultiForecast.prob costs 3.7 ms p50 on wave 6, one query per enemy, placement
               kind and probability value; exact_p turns it back on), with commit_rank (default; SSBOT_FORUM_PC=0:
               off) the share in contact with the committed support and then with the current attacks' fine placements
-              (P_cm, P_f: the support's P ties at 1 in wave 0, forum.md 17.7 / 17.8; they also lead the preselection),
+              (P_cm, P_f: the support's P ties at 1 in wave 0, forum.md 17.7 / 17.8; they also lead the preselection;
+              stage 1's own support query split by part gives them, MultiForecast.occupied_split, forum.md 17.11),
               the latest first contact, the envelope's, J.
               forced_rank "seen" (forum.md §19) puts a key before that share, in the preselection too: the frames
               each row's nominal box meets the damage colliders seen now, moved along their entity's velocity
@@ -90,7 +91,7 @@ H_W = {1: 1.0, 2: 1.0, 3: 0.6}     # H_exp's weight by h (hits to death; 4 and m
 H_W_FAR, H_W_NONE = 0.3, 0.5
 
 
-TV_ON = os.environ.get("SSBOT_FORUM_TV", "1") != "0"        # 0: no terminal value (the R4 / A0b scores, A/B)
+TV_ON = os.environ.get("SSBOT_FORUM_TV", "0") == "1"        # 1: the terminal value (off by default: forum.md 17.11)
 PC_ON = os.environ.get("SSBOT_FORUM_PC", "1") != "0"        # 0: FORCED_RISK without the committed support's shares
 T_ENV = int(os.environ.get("SSBOT_FORUM_T", "36") or 36)     # the horizon arm (§4.5: T 36 / 48)
 
@@ -120,9 +121,12 @@ class ForumConfig:
     #                               with the committed support (P_cm: current attacks, tails, death tails, hazards),
     #                               then with the current attacks' fine placements (P_f) (forum.md 17.7: P ties at 1 in
     #                               wave 0); they lead the preselection too; scores only (S, Hz, U unchanged); on by
-    #                               default since the round-2 A/B (forum.md 17.8: hits / min 18.9 -> 12.4)
+    #                               default since the round-2 A/B (forum.md 17.8: hits / min 18.9 -> 12.4); the
+    #                               parts come from stage 1's own query (MultiForecast.occupied_split, forum.md 17.11)
     terminal: bool = TV_ON        # the terminal value (R5, combat.terminal): E / trapped / overlap / H_exp into J, the
-    #                               kill value into the target weights; scores only
+    #                               kill value into the target weights; scores only; off by default (SSBOT_FORUM_TV=1:
+    #                               on): no closed-loop gain in wave 0 (forum.md 17.5: 18.4 hits / min with and
+    #                               without) and it runs before the envelope, inside its deadline (0.9-1.3 ms p50)
     w_E: float = 4.0              # J per unit of E (the reachable share clear of the enemies' bodies, 0..1)
     w_trap: float = 3.0           # J off when every way out closes within TRAP_S
     w_ov: float = 1.5             # J off per unit of overlap (reachable share inside two enemies' zones)
@@ -601,7 +605,12 @@ class ForumPlanner(Planner):
         fr = self._s1_frames(T1)
         cx = 0.5 * (r1.box[:, fr, 0] + r1.box[:, fr, 2])
         cy = 0.5 * (r1.box[:, fr, 1] + r1.box[:, fr, 3])
-        o = f.occupied(cx, cy, tk[fr])
+        o_cm = o_f = None
+        if fcfg.commit_rank and hasattr(f, "occupied_split"):
+            # commit_rank's parts from the same queries (the union is occupied()'s array): no work after the envelope
+            o, o_cm, o_f = f.occupied_split(cx, cy, tk[fr])
+        else:
+            o = f.occupied(cx, cy, tk[fr])
         if enemy_only:
             o &= (r1.flags[:, fr] & F_INVULN) == 0
         S1 = o.any(axis=1)
@@ -760,13 +769,13 @@ class ForumPlanner(Planner):
                         (r1.flags & F_INVULN) != 0), verts, starts, pbox, pvel, np.ascontiguousarray(tk, np.float64),
                         np.ascontiguousarray(cand, np.int64), 0.0)
                     sk_n[cand], sk_f[cand] = cnt[cand], fst[cand]
-            if fcfg.commit_rank and hasattr(f, "_fine_occ"):
+            if o_cm is not None:
                 # the nominal box centre on stage 1's frames (its invulnerable ones skipped) against the committed
-                # support (P_cm) and the current attacks' fine placements (states with a known entry: P_f)
+                # support (P_cm) and the current attacks' fine placements (states with a known entry: P_f): stage
+                # 1's own query split by part (MultiForecast.occupied_split), so the keys cost two means here
                 live = (r1.flags[cand][:, fr] & F_INVULN) == 0
-                X, Y = cx[cand], cy[cand]
-                Pcm[cand] = (f._union_occ(X, Y, tk[fr], committed_only=True) & live).mean(axis=1)
-                Pf[cand] = (f._fine_occ(X, Y, tk[fr]) & live).mean(axis=1)
+                Pcm[cand] = (o_cm[cand] & live).mean(axis=1)
+                Pf[cand] = (o_f[cand] & live).mean(axis=1)
             cand = cand[np.lexsort((-J[cand], -t_hit[cand], Pf[cand], Pcm[cand], -sk_f[cand], sk_n[cand]))]
             n_k = min(fcfg.p_k, len(cand))
             if not fcfg.p_all:

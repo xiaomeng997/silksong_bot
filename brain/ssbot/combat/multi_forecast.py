@@ -1629,6 +1629,36 @@ class MultiForecast:
         tails, the arena-wide boxes), "idle body tube", "collider tube", "hazard tube"."""
         return self._union_occ(x, y, tk, parts=True)
 
+    def occupied_split(self, x, y, tk):
+        """(occupied(), its committed part, its fine part) from one pass: the same component queries, each split by
+        the placements' committed flag, so the union is occupied()'s array bit for bit and the parts are
+        _union_occ(committed_only=True) (current attacks, tails, death tails, hazard paths, arena boxes) and
+        _fine_occ() (every fine placement) on the same points: ForumPlanner's commit_rank keys without a second
+        query (forum.md 17.11). A wrapped boss: (occupied(), None, None)."""
+        if self.boss_fc is not None:
+            return self.boss_fc.occupied(x, y, tk), None, None
+        x = np.asarray(x, np.float64)
+        y = np.asarray(y, np.float64)
+        tk = np.asarray(tk, np.float64)
+        cp = self.pm["committed"] if len(self.P) else None
+        fine = self._fine_occ(x, y, tk, cp)
+        com = fine.copy()
+        if cp is not None:
+            fine |= self._fine_occ(x, y, tk, ~cp)
+        rest = np.zeros(x.shape, bool)
+        if len(self.W):
+            cw = self.wm["committed"]
+            com |= self._win_occ(x, y, tk, cw)
+            rest |= self._win_occ(x, y, tk, ~cw)
+        if self.n_bbox:
+            cb = self.bb["committed"]
+            com |= self._bbox_occ(x, y, tk, cb)
+            rest |= self._bbox_occ(x, y, tk, ~cb)
+        com |= self._path_occ(x, y, tk)
+        com |= self._box_occ(x, y, tk, kinds=("death", "arena"))
+        rest |= self._box_occ(x, y, tk, kinds=("idle", "collider", "hazard"))
+        return com | fine | rest, com, fine
+
     def occupied_without(self, x, y, tk, exclude, comfort: bool = False) -> np.ndarray:
         """occupied() without the support of `exclude`: an enemy iid (a kill: its tails, tubes and the instances it
         may start; its thrown hazards stay; a Tiny group row stays while another Tiny of its cluster is in), a hazard

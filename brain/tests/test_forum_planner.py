@@ -202,19 +202,21 @@ def test_commit_rank_refines_forced_risk_by_the_committed_support(params, arena)
     """commit_rank (SSBOT_FORUM_PC, forum.md 17.7): S / Hz / U and FORCED_RISK are the same with and without it; in
     a FORCED_RISK tick no candidate tied with the chosen row on every key before (P_cm, P_f) is lower on them; off,
     P_cm and P_f are 0 everywhere."""
+    from ssbot.knowledge.kinematics import F_INVULN
     seen_pf = False
     for x in (30.6, 31.0, 31.6, 32.0):
         got = {}
         for on in (False, True):
             mf = _reed_forecaster(10, frames=17)
+            f = mf.forecast(0.8)
             pl = ForumPlanner(params, arena, PlannerConfig(T=36, threads=2, variants="bounds_lo"),
                               ForumConfig(deadline_ms=math.inf, chunk=16, commit_rank=on))
             r = pl.tick(_world(x), kin.initial_state(params, x, FLOOR + params.foot), kin.HoldState.idle(1),
-                        np.zeros(1, np.int64), mf.forecast(0.8), _prefs(None, x), _ctx())
+                        np.zeros(1, np.int64), f, _prefs(None, x), _ctx())
             li = pl.last_info
             got[on] = (r, {k: li[k].copy() for k in ("S", "Hz", "U")}, np.stack([li["Pcm"], li["Pf"]], axis=1),
-                       li["cand"].copy(), pl.last_sel)
-        (r0, k0, pf0, _, _), (r1, k1, pf1, cand, ls) = got[False], got[True]
+                       li["cand"].copy(), pl.last_sel, f)
+        (r0, k0, pf0, _, _, _), (r1, k1, pf1, cand, ls, f) = got[False], got[True]
         assert r0.forced_risk == r1.forced_risk
         for k in k0:
             assert np.array_equal(k0[k], k1[k])
@@ -222,6 +224,14 @@ def test_commit_rank_refines_forced_risk_by_the_committed_support(params, arena)
         if not r1.forced_risk:
             continue
         seen_pf |= bool(pf1[cand].any())
+        # the keys from stage 1's split query are the second queries' (the pre-17.11 computation) on every candidate
+        al = np.flatnonzero(ls["allowed"])
+        fr = ForumPlanner._s1_frames(ls["T1"])
+        b = ls["box"][al][:, fr]
+        X, Y = 0.5 * (b[..., 0] + b[..., 2]), 0.5 * (b[..., 1] + b[..., 3])
+        live = (ls["flags"][al][:, fr] & F_INVULN) == 0
+        assert np.array_equal(pf1[al, 0], (f._union_occ(X, Y, ls["tk"][fr], committed_only=True) & live).mean(1))
+        assert np.array_equal(pf1[al, 1], (f._fine_occ(X, Y, ls["tk"][fr]) & live).mean(1))
         i = r1.idx
         pre = lambda j: (ls["hz"][j], ls["hz_soft"][j], ls["U"][j], ls["S"][j], ls["keep"][j], ls["mkeep"][j],
                          ls["V"][j], ls["Pc"][j])
