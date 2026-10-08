@@ -2051,3 +2051,16 @@ Forum_W（漫游），A0b 协议，实例 0 13 场 + 实例 1 12 场，种子 36
 - **Reed 扔针的模板里有针**：RE_THROW 每个状态的伤害来源包括 `Song Reed Pin Projectile`，所以 `Throw` / `Throw Recover` / 尾巴的模板是所有方向扔出去的针的并集（x −14 … 30、y −15 … 15）；oracle 视图里针一飞起来就有确定路径（§14.2），这是重复计算。
 - **针在手里**（`Throw Effect` 不是休息状态，算已武装）按自模板放：所有方向扔过的针 + 3.0 u 余量。
 - **Choristor 的待机增长** 0.6 s 时 14.9 u（`Hop Back` 的瞬间后跳进了 g），Reed 6.1 u：0.6 s 视野里待机身体管就盖住半个场地。
+- **击杀冻结规则把刀全收走**（这是 0 击杀的直接原因，和支撑无关）：`kill_freeze_s` 把"击杀那一帧开始的任何冻结"都算成该类的击杀冻结，取最大值；第 0 波三类的击杀从来没有自己的冻结（§12.3：只有 Clapper 有），但击杀同帧常有主角自己的 `NailClashEffect`（0.4 s）或 `StartRecoil`（0.25 s），于是 Envoy、Choristor、Reed 都成了"击杀冻结 0.4 s"的类型；YELLOW 的击杀规则（`forum_yellow_kill_hp` → `HeroDamage.kill_prims`）在任何一只的 hp_est − 3σ ≤ 漫游一刀的上界（暴击 27）时收走所有出刀，而 FORCED_RISK 让 tier 86 % 的时间是 YELLOW。集成冒烟的决策日志：46 % 的 tick `kill_prims` 含三种出刀，2 / 25 场以"QS 僵持：杀招规则 20 s 不出刀"结束。
+
+### 23.4 改了什么（开关；默认值照旧，击杀冻结的修正除外）
+
+- **击杀冻结只算击杀自己的冻结**（`KILL_FREEZE_KINDS`：`BigEnemyDeathSlow` / `EnemyBattleEndSlow` / `EnemyDeath`；默认；`SSBOT_FORUM_KF=any` 恢复原样）：第 0 波三类的击杀冻结变成 0，YELLOW 不再因为它们收刀；Clapper 照旧（1.9–2.5 s 的终局慢动作、0.165 s 的击杀减速）。
+- **反应式支撑的新扩展**（`SSBOT_FORUM_REACT=escape+n+g+l`，§22 的开关之上）：
+  - `+n`（还没开始的那一层）：有出手时间的家族（strikes.json）以后才开始的实例、以后的待机实例都不放（入场家族和只用身体的家族——闪避、瞬移、Tiny 冲撞——照旧）；可逃检查从"计划末和末尾一个延迟内的锁定"扩到计划里每一个锁定点（攻击、无控制、冲刺斩、硬着陆）。还没扔出去的针 / 钟（不在确定路径上）只放反应窗口（5 帧）内的够距（当前框按 40 u/s 长）；oracle 视图里扔针 / 扔钟的家族（Reed RE_THROW、Bellbearer CB_THROW）不放模板，改成本体管 + 扔出去之后的确定路径，它们的尾巴和可逃检查的威胁也去掉。
+  - `+g`：待机身体管只在反应窗口（5 帧）里按待机增长长，之后保持那个大小、按速度平移（你的第 ⑤ 条：不出招的怪不会走到你脸上）。R2 的召回只查 2–4 帧前的预报：这两条在 4 帧内不改变支撑（还没开始的、有出手时间的招 4 帧内打不到；身体管 4 帧内照样长）。
+  - `+l`（光锥，只在可逃检查里）：计划末的状态还要对"已承诺、时间确定、不能拼刀的放置"（拼刀表里没有的家族的细放置、危险物的确定路径、死亡尾巴）在视野之后有出路：用可逃检查的 7 种逃法从计划末推演 72 帧，全部碰到就算失败。是"按可达集腐蚀"的模拟版：问的是同一个问题，只对 7 种逃法。
+- **拼刀作主逻辑**（`combat_run --forum-clash main`）：拼刀分支在 GREEN 和"h ≥ 3 的 YELLOW"（来自上一计划 S = 1 的 YELLOW，不是 h = 2）都跑；干净的拼刀行（刀的生效窗口里先碰到、在刀那一侧、在可拼状态里，拼完之后不再碰）只要拼刀表的"仍然挨打"上界之积 ≤ 0.3 就算安全（不再要求拼中率下界之积 ≥ 0.75），排在普通安全行之后、按挨打上界排；FORCED_RISK 的 seen 键跳过拼刀行的拼刀无敌帧（R8 留下的问题：会被拼掉的判定不算接触）；最多连拼 3 次。h = 2、RED、等暂停时仍然不拼（DESIGN 3.5.6）。
+- **按状态的余量**（`SSBOT_FORUM_MARGIN=state`，`ssbot.tools.forum_state_margins` → `support_margins_state.json`）：每个控制状态用自己接触的最大留出残差（同 R0 的规则，接触 < 100 的状态用家族余量）；家族并集、尾巴、世界系模板和危险物自模板照旧用家族余量。第 0 波：EN_CHARGE 的 `Charge End` 2.96 → 0.40 u（`Charge`、`Reset` 不变），RE_DEFEND 除 `Multihit Clashed` 外 ≤ 0.59 u（`Defend` 0.10），RE_STAB 的 `Stab 1` 0.01、`Stab 4` 0.17、`Stab Antic` 0，CH_JUMP 的 `Jump Rise` / `Spin Slash` 0。
+- **打回去的钟**（默认）：钟进入 `Tink L / R / U` 或 `Nail Hit` 之后不再是主角的危险物（新的一次扔出 `Init` 才算回去）；规划器自己打钟（`bell_redirected`）时从打中那一步起无害。**砍来袭的钟算防御**（`ForumConfig.bell_hits`，默认开）：射程内的钟作为权重 0 的命中目标，刀先碰到钟的行（即使阶段 1 已经接触）走命中分支，分支里的支撑把那只钟从打中起拿掉。第 0 波没有钟，A/B 里不起作用。
+- 工具：`forum_layer_audit`（本节的分解）、`forum_state_margins`、`multi_recall --react / --state-margins`（R2 的留出召回在新支撑上重跑）。
