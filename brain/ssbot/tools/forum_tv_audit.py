@@ -34,6 +34,8 @@ import numpy as np
 CHANGE_F = 6                      # two choices differ when their keys differ in the first this many frames
 PRE_HIT_F = 36                    # "pre_hit": ticks at most this many frames before a recorded hit (any kind of tick)
 ACCS = ("forced", "safe", "pre_hit")
+DUMP: list | None = None          # --dump: per tick, the allowed rows' keys, scores and hindsight (offline rankings)
+EP_KEY = [""]
 KEY_NAMES = ("hz", "hz_soft", "U", "S", "keep", "mkeep", "V", "P", "t_c", "t_hit", "J")
 
 
@@ -185,11 +187,22 @@ def audit_tick(pol, fo: int, boxes: dict, acc: dict, pre_hit: bool = False) -> N
     ls = pol.planner.last_sel
     if ls is None:
         return
-    for key in (("forced" if ls["forced"] else "safe"),) + (("pre_hit",) if pre_hit else ()):
-        _audit_tick(pol, fo, boxes, acc[key], ls)
+    for n, key in enumerate((("forced" if ls["forced"] else "safe"),) + (("pre_hit",) if pre_hit else ())):
+        r = _audit_tick(pol, fo, boxes, acc[key], ls)
+        if n == 0 and DUMP is not None and r is not None:
+            clr, scores, allowed = r
+            DUMP.append({"fo": fo, "ep": EP_KEY[0], "forced": bool(ls["forced"]), "pre_hit": bool(pre_hit),
+                         "chosen": int(np.searchsorted(allowed, int(ls["chosen"]))) if ls["allowed"][ls["chosen"]]
+                         else -1,
+                         "presel": np.isin(allowed, order_of(ls, ls["J"])) if ls["forced"] else None,
+                         "cmd": ls["cmd"][allowed, :CHANGE_F].astype(np.int32),
+                         "clr": clr[allowed],
+                         **{k: np.asarray(v)[allowed].astype(np.float32) for k, v in scores.items()},
+                         **{k: np.asarray(ls[k])[allowed] for k in ("V", "keep", "mkeep", "S", "U", "hz",
+                                                                     "hz_soft")}})
 
 
-def _audit_tick(pol, fo: int, boxes: dict, a: "Acc", ls: dict) -> None:
+def _audit_tick(pol, fo: int, boxes: dict, a: "Acc", ls: dict):
     a.n["ticks"] += 1
     cmd, J = ls["cmd"], ls["J"]
     chosen = int(ls["chosen"])
@@ -253,6 +266,7 @@ def _audit_tick(pol, fo: int, boxes: dict, a: "Acc", ls: dict) -> None:
         u, p = auc_counts(np.asarray(v, float)[allowed], pos)
         a.auc[k][0] += u
         a.auc[k][1] += p
+    return clr, scores, allowed
 
 
 def run_episode(pol, run: Path, inst: int, ep: int, frames: int, acc: dict) -> dict:
@@ -282,6 +296,7 @@ def run_episode(pol, run: Path, inst: int, ep: int, frames: int, acc: dict) -> d
     for s in rd.states(f0, f1 + 80):
         boxes[s["f"]] = threat_boxes(s)
     hits = [h["f"] for h in (row.get("policy") or {}).get("hit_log") or () if h.get("kind") == "damage"]
+    EP_KEY[0] = f"{run.name}_i{inst}_ep{ep}"
     n = 0
     for s in rd.states(f0, f1):
         if n >= frames:
@@ -307,7 +322,11 @@ def main(argv=None) -> int:
     ap.add_argument("--threads", type=int, default=4)
     ap.add_argument("--merge", type=Path, nargs="+", default=None, help="merge these outputs instead of auditing")
     ap.add_argument("--out", type=Path, default=None)
+    ap.add_argument("--dump", type=Path, default=None, help="per-tick rows (pickle, gzip) for offline rankings")
     a = ap.parse_args(argv)
+    global DUMP
+    if a.dump:
+        DUMP = []
     if a.merge:
         outs = [json.loads(p.read_text("utf-8")) for p in a.merge]
         out = {"episodes": [e for o in outs for e in o["episodes"]],
@@ -324,6 +343,11 @@ def main(argv=None) -> int:
             except StopIteration:
                 eps.append({"run": str(a.run), "instance": a.instance, "episode": ep, "missing": True})
         out = {"episodes": eps, **{k: v.as_dict() for k, v in acc.items()}}
+    if DUMP is not None:
+        import gzip
+        import pickle
+        with gzip.open(a.dump, "wb") as fh:
+            pickle.dump(DUMP, fh, protocol=pickle.HIGHEST_PROTOCOL)
     txt = json.dumps(out, indent=1)
     print(txt)
     if a.out:
