@@ -1825,13 +1825,13 @@ target holding, the Clapper controller live on wave starts, a full-gauntlet re-r
 ### Done (committed)
 
 - `combat/tactics/gauntlet.py` GauntletTactics (L2 v0 above LOCAL's ForumTactics; Forum.yaml `forum.l2`): PUNISH (the
-  far-target rule: an engagement spot free from the hero's arrival, t_run = 0.05 + |dx| / 17.5, through a swing + margin,
-  one batched `MultiForecast.occupied` query on pick ticks), RUSH (isolated: no other enemy within 8 u; all spread:
-  the least ETA by pursuit speed), KITE (8 u from the fastest pursuer on its side away from the others; with Tinies
-  under the nearest Maestro; LOCAL's EVADE stands against KITE), Clawmaiden first / Minister last (`first` / `last`),
-  under the flyers (Bellbearer, Reed, Minister, Maestro), the Clapper controller (face 3 u; slam: out 13 u or behind 3.5
-  u; jumps: behind the landing from `jump_landing`; Buddy Is Attacking; CC_CAST opens the GLIDE_SPIKE vocab hook, read by
-  nobody until R7's glide_spike). Picks at 10 Hz + events, hysteresis 1.25, scores only.
+  far-target rule: an engagement spot free from the hero's arrival, t_run = 0.05 + |dx| / 17.5, through a swing +
+  margin, one batched `MultiForecast.occupied` query on pick ticks), RUSH (isolated: no other enemy within 8 u; all
+  spread: the least ETA by pursuit speed), KITE (8 u from the fastest pursuer on its side away from the others; with
+  Tinies under the nearest Maestro; LOCAL's EVADE stands against KITE), Clawmaiden first / Minister last (`first` /
+  `last`), under the flyers (Bellbearer, Reed, Minister, Maestro), the Clapper controller (face 3 u; slam: out 13 u or
+  behind 3.5 u; jumps: behind the landing from `jump_landing`; Buddy Is Attacking; CC_CAST opens the GLIDE_SPIKE vocab
+  hook, read by nobody until R7's glide_spike). Picks at 10 Hz + events, hysteresis 1.25, scores only.
 - `clapper_facing` (forum_local): the Clapper's facing from flipX (flipX 1 = right; 15 R0 fights). The oracle backend's
   Entity.facing has the other convention for a standing Clapper, so R4's pocket rule (2) used a reversed facing (never
   reached in A0 / A0b). EVADE's weight factors named (EVADE_HIT_X / EVADE_RISK_X, bit-identical).
@@ -1861,7 +1861,7 @@ target holding, the Clapper controller live on wave starts, a full-gauntlet re-r
   KITE(EVADE) 917 (the two within 8 u: nobody isolated).
 - Pursuit speeds from 20 R0 caches (forum.md 17.1).
 
-### Round 2 (2026-10-08 03:10-05:15, week push round 2; forum.md 17.5-17.6, plan R6 row note of 2026-10-08)
+### Round 2 (2026-10-08 03:10-05:45, week push round 2; forum.md 17.5-17.6, plan R6 row note of 2026-10-08)
 
 Merged main (already up to date at bc46dc9). Commits 6972e01 .. this one.
 
@@ -1876,15 +1876,15 @@ Merged main (already up to date at bc46dc9). Commits 6972e01 .. this one.
   (HANDOFF 'Task wave-0 forensics'): the support saturates, FORCED_RISK's ranking ties and the pick falls to J, so the
   scores L2 sets do pick the plan, but every plan looks equally dangerous to the planner; the wave-0 bottleneck is the
   FORCED_RISK ranking, not whom to fight.
-- **Target holding** (`gauntlet.py` `_pick` / `_choose`, Forum.yaml `forum.l2`): the rule (PUNISH / RUSH / KITE) is
-  held `goal_dwell_s` 1 s (not into PUNISH); under it the kept target while eligible (RUSH: isolated, the kept one down
-  to 8 - `iso_hyst_u` 2 u; KITE: any) unless another scores `switch_x` 1.5 times more after `dwell_s` 4 s on it; a rushed
-  target that gets company is kited with (KITE on it) until dwell_s; immediate switches only for a target gone, a
-  PUNISH opening, a `first` type, the idle Clapper's turn; a move change of the target re-picks once instead of
-  dropping it. Stats `tgt_switches`, `switch_kinds`; `forum_a0_report` gains `tgt_switches_per_min`, presses / s
-  (latched presses / game time; the Forum policy's own presses_per_s is None) and the plan-change rate. Open-loop
-  wave-0 replays (20 episodes): target switches 23.8 -> 9.6 / min; live (round 2 full gauntlet, 25 episodes): **7.65 /
-  min** (goal changes incl. rule changes on the same target 25.9 / min).
+- **Target holding** (`gauntlet.py` `_pick` / `_choose`, Forum.yaml `forum.l2`): the rule (PUNISH / RUSH / KITE) is held
+  `goal_dwell_s` 1 s (not into PUNISH); under it the kept target while eligible (RUSH: isolated, the kept one down to 8
+  - `iso_hyst_u` 2 u; KITE: any) unless another scores `switch_x` 1.5 times more after `dwell_s` 4 s on it; a rushed
+  target that gets company is kited with (KITE on it) until dwell_s; immediate switches only for a target gone, a PUNISH
+  opening, a `first` type, the idle Clapper's turn; a move change of the target re-picks once instead of dropping it.
+  Stats `tgt_switches`, `switch_kinds`; `forum_a0_report` gains `tgt_switches_per_min`, presses / s (latched presses /
+  game time; the Forum policy's own presses_per_s is None) and the plan-change rate. Open-loop wave-0 replays (20
+  episodes): target switches 23.8 -> 9.6 / min; live (round 2 full gauntlet, 25 episodes): **7.65 / min** (goal changes
+  incl. rule changes on the same target 25.9 / min).
 - **PUNISH bug fixed**: a spot whose run + swing did not fit the 2 s window query was never checked after the arrival
   and read window inf (always "go"); two such far targets flip-flopped as PUNISH every 0.1 s in a replay (negative
   scores defeat the 1.25 hysteresis). Now such a window is the query's end (too short).
@@ -1900,7 +1900,14 @@ Merged main (already up to date at bc46dc9). Commits 6972e01 .. this one.
   the hero turned back under the landing; the behind spot clamped at the wall), cornered slam (behind) <- body 7 on
   w13. v3 (716b539): the way round fixed at Jump Aim, behind only with room, a cornered slam goes out to the wall; and
   (a637d77) the idle Clapper's turn only when its spot is reached before the busy one's attack can end (w13 switched 13
-  / min on turns). v3 runs on the L2-on arm only (Running).
+  / min on turns). v3 (L2-on arm only, same seeds, run 050637): w7 body hits 14 -> 1 but slam / landing-slam hits 6 ->
+  19 (stepping out / backing off while the target's hit weight, x 1.5 on jumps, pulled the J-greedy pick back in);
+  v3 - v2 paired: w7 -0.33 s (se 2.3), w13 -0.92 s (se 0.7). **v4 (8754008)**: the target's hit weight 0 on the
+  controller's stepping-away branches (CC_RETREAT), up slashes x 1.5 only on the way under. v4 (run 052126): **w7 time
+  alive 30.6 s** (v4 - v2 +11.0 s, se 2.8; vs L2 off +19.5 s, se 1.9), hits 7.3 / min (off 16.6), slam hits 4 (off 21),
+  body 0, 8.7 hits on the Clapper per episode; w13 unchanged (10.2 s, v4 - v2 -0.85 s, se 1.1; vs off +1.0). What is
+  left on w7 is the cast: rune bombs 36, the jump cast's big rune 20 (it explodes about 3.3 s after the landing, when
+  the controller is back at the face, inside its r 7.19 circle).
 - **Full gauntlet re-run** (v2 171cf28, A0b protocol, seed 310200, 25 + 25 paired; runs 20261008_041945 on /
   043128 off): QUIT 25 / 25 both (Q1), hits 4.48 vs 4.48 per episode (paired 0.00, se 0.15), alive p50 14.2 vs 13.9 s
   (paired -0.45 s, se 0.66), FORCED_RISK 80.4 vs 80.1 %, unpredicted 0 / 0, presses / s 6.97 vs 6.89, plan-change rate
@@ -1909,41 +1916,42 @@ Merged main (already up to date at bc46dc9). Commits 6972e01 .. this one.
 - **Machine load** (for the lead): from about 03:30 the machine ran at 100 % CPU (other tracks' forensics / replays /
   behaviour builds / three full test suites, mostly below normal). Live runs had 34-350 late ticks per episode (round 1:
   0-2) and "paused unasked" HARNESS_FAILs (the brain missed 14 frames, the oracle watchdog paused; one ends a whole
-  combat_run): r6_ws.ps1's chunks failed after 7 and 1 episodes, diag's and r8's runs showed the same late ticks.
-  From r6_ws2.ps1 on the instance-1 worker runs at AboveNormal (both arms alike) and a chunk cut by a HARNESS_FAIL is
-  made up from its failed episode with the same seeds / rotation: 0 HARNESS_FAIL in 114 episodes, late ticks 8-60 per
-  wave-start episode, 2.6-5.4 % of the full gauntlets' ticks. Round-2 absolute numbers come from worse timing than round 1's; the arms are paired.
+  combat_run): r6_ws.ps1's chunks failed after 7 and 1 episodes, diag's and r8's runs showed the same late ticks. From
+  r6_ws2.ps1 on the instance-1 worker runs at AboveNormal (both arms alike) and a chunk cut by a HARNESS_FAIL is made up
+  from its failed episode with the same seeds / rotation: 0 HARNESS_FAIL in 178 episodes (r6_ws2-ws4), late ticks 8-60
+  per wave-start episode, 2.6-5.4 % of the full gauntlets' ticks. Round-2 absolute numbers come from worse timing than
+  round 1's; the arms are paired.
 - Checked (round-1 open issue): the reversed Entity.facing of standing Forum sprites matters nowhere else: the
   forecast places by flipX (enemy_tracker.FACES_LEFT); only R4's pocket rule (fixed) and L2 read an enemy's facing.
-- Tests: `tests/test_forum_l2.py` 22 cases (round 1: 13; new: dwell, a move change keeps the target, opening / rule change, a rushed target
-  with company, the idle Clapper's turn and its reachability, far PUNISH spots, the jump's back off / fixed way round,
-  the cornered slam); full suite (tests + ssbot/tests at 716b539, below normal): 1151 passed, 2 skipped, 1 xfailed
-  (Bell Beast equivalence among them; no shared planner / forecast code touched).
+- Tests: `tests/test_forum_l2.py` 23 cases (round 1: 13; new: dwell, a move change keeps the target, opening / rule
+  change, a rushed target with company, the idle Clapper's turn and its reachability, far PUNISH spots, the jump's back
+  off / fixed way round, the cornered slam, no hit reward while stepping away); full suite (tests + ssbot/tests at
+  8754008, below normal): 1152 passed, 2 skipped, 1 xfailed (716b539: 1151; Bell Beast equivalence among them; no shared
+  planner / forecast code touched).
 
 ### Running
 
-- Driver `C:\ssbot\sandbox\r6_ws3.ps1 -Rev 716b539` (hidden PowerShell; frozen `C:\ssbot\live_r6_716b539`): the v3
-  controller on the L2-on arm only, wave starts w7 / w13, seeds 310100-310131 (the L2-off control is r6_ws2's
-  040451 / 041508, the same seeds and rotation: L2 off runs no L2 code). Holds `locks\inst1.lock` ("r6rules"), releases
-  it at the end, writes `r6_ws3.done`; log `r6_ws3.log`, `r6_ws3_batch.log`. Started 04:46 (the first start at 04:43
-  ran nothing: a one-chunk PowerShell plan array flattened, log `r6_ws3_failed_start.log`); waiting for the lock while
-  diag borrows instance 1. Stop: `r6_ws.stop` (before the next try)
-  or `combat_run stop <run dir>` from the checkout's brain.
+- Nothing. Drivers `C:\ssbot\sandbox\r6_ws2.ps1` (v2 171cf28, both arms), `r6_ws3.ps1` (v3 716b539) and `r6_ws4.ps1`
+  (v4 8754008), all done (`r6_ws2.done`, `r6_ws3.done`, `r6_ws4.done`); `inst1.lock` released. Analysis script
+  `ws_anal.py` (session scratchpad `r6\`): `--on <runs> --off 20261008_040451 20261008_041508`.
 
 ### Next
 
-1. When r6_ws3.done exists (if this round did not get to it): `ws_anal.py` (session scratchpad `r6\`) on the v3 run
-   vs 040451 / 041508 (and v2 035906 / 040911): body / slam hits by branch, time alive; forum.md 17.6.3.
+1. The jump cast's big rune (v4 w7: 20 hits): from a CC_JUMP_CAST landing until the rune explodes (about 3.3 s),
+   keep the stance out of its circle (behind the landing >= 1.6 u or > 13.8 u in front) instead of the face.
 2. The rune-bomb hits (the cast) and the jump timing are the planner's: re-run the w7 / w13 pair with diag's
    `SSBOT_FORUM_FR=seen` once it lands (runes are drawn 0.33-0.35 s before they explode).
 3. A Clapper kill needs about 26 Reaper hits: tools (Cogfly, R7's glide spike in the cast window) or a longer life;
    the next gate for the controller is a wave-13 CLEAR, not time alive.
 4. PUNISH stays dead in multi-enemy waves until the support stops saturating (diag / R5 / R8).
 5. Frozen checkouts to remove when done (no live run uses them): `C:\ssbot\live_r6_5d24020`, `live_r6_ef036d5`,
-   `live_r6_f7a403c` (never ran), `live_r6_6d2f457`, then `live_r6_171cf28` and `live_r6_716b539` after the
-   integration.
+   `live_r6_f7a403c` (never ran), `live_r6_6d2f457`, `live_r6_171cf28`, `live_r6_716b539`, then `live_r6_8754008`
+   after the integration.
 6. Main's `knowledge/1.0.30000/enemies/forum/` has no `*_hitboxes.npz` (git-ignored): the frozen checkouts took them
    from this worktree (md5 of ChoirClapper e66bafe2..., the R3 tables, same as diag's worktree).
+7. w13: with the two Clappers within 8 u nobody is isolated, KITE yields to LOCAL's EVADE (20 of the v4 hits); a
+   cornered slam's "out to the wall" still meets its body charge (7). A FOCUS goal for the final wave (clapper_face.md:
+   pick one, keep it between) is the next controller step.
 
 ### Needs deploy
 
