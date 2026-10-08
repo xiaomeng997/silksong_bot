@@ -134,6 +134,11 @@ class EnvelopeAudit:
     clash_ticks: int = 0          # ticks the clash branch ran (no safe row, clash on)
     clash_rows: int = 0           # rows it made safe
     clash_chosen: int = 0         # chosen plans that rely on a clash
+    clash_cand: int = 0           # rows the branch looked at (in contact, a swing, by J, capped)
+    clash_inwin: int = 0          # ... whose first contact fell in a swing's active window (per clash level)
+    clash_owned: int = 0          # ... attributed to at least one enemy
+    clash_known: int = 0          # ... all of them clashable with that slot on the slash's side (clash.json)
+    clash_ms: float = 0.0         # time in the clash branch
 
     def as_dict(self) -> dict:
         return dict(self.__dict__)
@@ -369,7 +374,7 @@ class ForumPlanner(Planner):
                  fcfg: ForumConfig | None = None, crest: str = "Reaper"):
         self.fcfg = fcfg or ForumConfig()
         super().__init__(params, terrain, cfg or PlannerConfig(T=self.fcfg.T, variants=self.fcfg.variants))
-        self.fsets = {p: cmod.build_forum(self.fcfg.T, p) for p in cmod.POSTURES}
+        self.fsets = {p: cmod.build_forum(self.fcfg.T, p, clash=self.fcfg.clash) for p in cmod.POSTURES}
         # without control (hit-stop, recoil, a lock) the keys only queue: the core rows only (Planner's cands_nc)
         self.fsets_nc = {p: (cs.subset(core), core[core]) for p, (cs, core) in self.fsets.items()}
         self.crest = crest
@@ -521,6 +526,8 @@ class ForumPlanner(Planner):
             return {}
         cand = cand[np.argsort(-sc["J"][cand], kind="stable")][:fcfg.clash_k]
         n = len(cand)
+        au = self.audit
+        au.clash_cand += n
         T = latched.shape[1]
         T1 = T + 1
         lat = np.ascontiguousarray(latched[cand])
@@ -565,6 +572,7 @@ class ForumPlanner(Planner):
                 if got is None or got[0] - last_cl[m] <= PARRY_INVULN_F:
                     alive[m] = False
                     continue
+                au.clash_inwin += 1
                 bx = r2.bound[q, t_c]
                 plan.append((m, t_c, got[0], got[1], got[2], 0.5 * (bx[0] + bx[2]), 0.5 * (bx[1] + bx[3])))
             if not plan:
@@ -594,9 +602,11 @@ class ForumPlanner(Planner):
                     side_ok = (kind == K_SIDE and dx * face >= 0) or (kind == K_UP and dy > 0) or \
                         (kind == K_DOWN and dy < 0) or kind == K_WALL
                     ps.append(p if side_ok else None)
+                au.clash_owned += int(bool(ps))
                 if not ps or any(p is None for p in ps):
                     alive[m] = False
                     continue
+                au.clash_known += 1
                 p_ok[m] *= 1.0 - max(ps)
                 ncl[m] += 1
                 last_cl[m] = j_c
@@ -789,7 +799,10 @@ class ForumPlanner(Planner):
             # no safe row: the clash branch (the plan's "成功率高的招不再逼出 FORCED_RISK"); plain safe rows always
             # come first, so it never runs on a tick that has one
             self.audit.clash_ticks += 1
-            for i, (pf, nc) in self._clash_pass(f, start, latched, sc, S, ok, hz, tk, enemy_only, ctx).items():
+            tcl = time.perf_counter()
+            cl = self._clash_pass(f, start, latched, sc, S, ok, hz, tk, enemy_only, ctx)
+            self.audit.clash_ms += (time.perf_counter() - tcl) * 1e3
+            for i, (pf, nc) in cl.items():
                 S[i] = False
                 env[i] = True
                 t_hit[i] = T1
