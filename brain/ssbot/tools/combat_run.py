@@ -95,7 +95,7 @@ def config_fp(encounter: str, policy: str, mode: str, view: str, rev: str | None
 
 def make_policy(name: str, view: str = "oracle", run_dir: Path | None = None, instance: int = 0,
                 threads: int = 8, real_quit: float = 0.0, inject_hits: float = 0.0, gauntlet: bool = False,
-                key_cost: tuple[float, ...] | None = None):
+                key_cost: tuple[float, ...] | None = None, crest: str = "Reaper", clash: bool | str = False):
     if name == "data":
         from ssbot.train.data_policy import DataPolicy, GauntletDataPolicy
         return GauntletDataPolicy() if gauntlet else DataPolicy()
@@ -103,6 +103,10 @@ def make_policy(name: str, view: str = "oracle", run_dir: Path | None = None, in
         # the Forum's targeted data policy v2 (Forum plan R1); data2_envoy never hits the Envoy (wave 0 goes on)
         from ssbot.train.forum_policy import ENVOY, ForumDataPolicyV2
         return ForumDataPolicyV2(protect=(ENVOY,), focus=(ENVOY,)) if name == "data2_envoy" else ForumDataPolicyV2()
+    if name == "minister_below":
+        # the R8 Minister-below experiment (Forum_W_w4): under the nearest Minister, up-slashing without a break
+        from ssbot.train.forum_policy import MinisterBelowPolicy
+        return MinisterBelowPolicy()
     if name == "idle":
         # no input (the 2x speed check: forum_policy.IdlePolicy)
         from ssbot.train.forum_policy import IdlePolicy
@@ -111,7 +115,7 @@ def make_policy(name: str, view: str = "oracle", run_dir: Path | None = None, in
         # the Forum (forum_planner_plan R4): the R3 fast layer over the MultiForecast, LOCAL tactics, Forum supervisor
         from ssbot.train.forum_planner_policy import ForumPlannerPolicy
         return ForumPlannerPolicy(view=view, threads=threads, log_dir=run_dir, instance=instance,
-                                  real_quit_p=real_quit)
+                                  real_quit_p=real_quit, crest=crest, clash=clash)
     if name == "planner":
         from ssbot.train.planner_policy import PlannerPolicy
         pol = PlannerPolicy(view=view, threads=threads, log_dir=run_dir, instance=instance, real_quit_p=real_quit,
@@ -286,7 +290,8 @@ def worker(a: argparse.Namespace) -> int:
     link = OracleLink(instance=a.instance, connect_timeout_s=120)
     tap = make_tap(link, enc)
     policy = make_policy(a.policy, a.view, run_dir, a.instance, a.threads, a.real_quit, a.inject_hits,
-                         gauntlet=bool(enc.waves), key_cost=tuple(a.key_cost) if a.key_cost else None)
+                         gauntlet=bool(enc.waves), key_cost=tuple(a.key_cost) if a.key_cost else None,
+                         crest="Wanderer" if enc.savestate == "fo_W" else "Reaper", clash=a.forum_clash)
     if a.silk_reserve:
         pb = getattr(getattr(policy, "inner", policy), "pb", None)
         if pb is not None:
@@ -418,6 +423,8 @@ def run(a: argparse.Namespace) -> int:
         tag += f"_x{a.time_scale:g}"
     if a.inject_hits > 0:
         tag += "_inject"
+    if a.forum_clash != "off":
+        tag += {"on": "_clash", "yellow": "_clashY", "cont": "_clashC"}[a.forum_clash]
     run_dir = new_run_dir(a.encounter if "," not in a.encounter else a.encounter.split(",")[0] + "_mix", tag)
     (run_dir / "config.json").write_text(json.dumps({**vars(a), "env": env_overrides()}, indent=1, default=str),
                                          encoding="utf-8")
@@ -436,6 +443,8 @@ def run(a: argparse.Namespace) -> int:
             cmd += ["--time-scale", str(a.time_scale)]
         if a.same_seeds:
             cmd.append("--same-seeds")
+        if a.forum_clash != "off":
+            cmd += ["--forum-clash", a.forum_clash]
         if a.key_cost:
             cmd += ["--key-cost"] + [str(v) for v in a.key_cost]
         if a.start_hp:
@@ -578,6 +587,10 @@ def main(argv: list[str] | None = None) -> int:
         p.add_argument("--encounter", default="BellBeast")
         p.add_argument("--mode", choices=("data", "eval"), default="data")
         p.add_argument("--policy", default="data")
+        p.add_argument("--forum-clash", nargs="?", const="on", default="off", choices=("off", "on", "yellow", "cont"),
+                       help="Forum planner policy: the R8 EV_CLASH mode (forum_planner_policy.CLASH_MODES: on = GREEN "
+                            "only, yellow = GREEN and YELLOW (experiment), cont = the continuation rows only; the "
+                            "crest follows the savestate: fo_W Wanderer, else Reaper)")
         p.add_argument("--episodes", type=int, default=10)
         p.add_argument("--hours", type=float, default=0.0)
         p.add_argument("--rotate", type=int, default=25)

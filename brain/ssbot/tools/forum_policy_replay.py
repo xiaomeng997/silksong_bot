@@ -25,6 +25,10 @@ def main(argv=None) -> int:
     ap.add_argument("--wave-frames", type=int, default=0)
     ap.add_argument("--threads", type=int, default=4)
     ap.add_argument("--out", type=Path, default=None)
+    ap.add_argument("--crest", default=None, help="the policy's crest (default: the recording's encounter: fo_W "
+                                                  "Wanderer, else Reaper)")
+    ap.add_argument("--clash", nargs="?", const="on", default="off", choices=("off", "on", "yellow", "cont"),
+                    help="the R8 EV_CLASH mode (forum_planner_policy.CLASH_MODES)")
     a = ap.parse_args(argv)
     from ssbot.record.recorder import RecordingReader
     from ssbot.train.encounters import ENCOUNTERS
@@ -32,7 +36,8 @@ def main(argv=None) -> int:
     rows = [json.loads(x) for x in (a.run / f"attempts_i{a.instance}.jsonl").read_text("utf-8").splitlines() if x]
     row = next(r for r in rows if r.get("episode") == a.episode)
     t0 = time.perf_counter()
-    pol = ForumPlannerPolicy(threads=a.threads)
+    crest = a.crest or ("Wanderer" if ENCOUNTERS[row["unit"]].savestate == "fo_W" else "Reaper")
+    pol = ForumPlannerPolicy(threads=a.threads, crest=crest, clash=a.clash)
     t_load = time.perf_counter() - t0
     t_warm = pol.warmup()
     rd = RecordingReader(row["recording"])
@@ -77,6 +82,7 @@ def main(argv=None) -> int:
                                  "wave_tracker", "audit", "targets", "binds", "cogfly", "unpredicted",
                                  "unpredicted_unknown", "unpredicted_sources", "follow_ups", "mh_ticks", "hits_taken",
                                  "hit_log")},
+           "crest": crest, "clash": a.clash, "crest_seen": pol.crest_seen,
            "first_ticks_ms": [round(x, 1) for x in pol.tick_ms[:12]],
            "true_waves": (row.get("gauntlet") or {}).get("waves")}
     js = json.dumps(out, indent=1, default=str)
