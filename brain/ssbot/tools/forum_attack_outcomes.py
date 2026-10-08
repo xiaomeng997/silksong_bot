@@ -20,7 +20,7 @@ import argparse
 import json
 import math
 import sys
-from collections import Counter, defaultdict
+from collections import defaultdict
 from pathlib import Path
 
 import numpy as np
@@ -31,7 +31,6 @@ WINDOW_S = 1.6
 NEAR_U = 8.0
 BATTLE = "Battle Scene"
 TYPES = ("Song Pilgrim 01", "Song Pilgrim 03", "Song Reed")
-SHORT = {"Song Pilgrim 01": "Envoy", "Song Pilgrim 03": "Choristor", "Song Reed": "Reed"}
 
 
 def _spec_maps() -> dict:
@@ -159,7 +158,7 @@ def instances(frames: list[dict], src: str, specs: dict) -> list[dict]:
                 dmin = min(dmin, d)
                 ed = abs(fr["x"] - e[2])
             for k, s_ in fr["ev"]:
-                if k == "damage" and hit_t is None and s_ and SHORT_TYPES(s_) == o["type"]:
+                if k == "damage" and hit_t is None and s_ and _type_of(s_) == o["type"]:
                     hit_t = T[j] - t0
         fl0 = _cs_flags(frames[i0]["cs"], idx)
         res.append({"src": o["src"], "type": o["type"], "family": o["family"], "t": round(t0 - T[i_a], 2),
@@ -172,7 +171,7 @@ def instances(frames: list[dict], src: str, specs: dict) -> list[dict]:
     return res
 
 
-def SHORT_TYPES(path: str) -> str | None:
+def _type_of(path: str) -> str | None:
     from ssbot.tools.forum_a0_report import type_of
     return type_of(path, None)
 

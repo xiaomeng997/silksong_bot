@@ -5,40 +5,44 @@ recorded future would have left untouched existed, and whether the hero moved as
     cd brain
     ../scripts/uv.cmd run python -m ssbot.tools.forum_hit_forensics C:/ssbot/data/runs/m2/<run> [<run> ...]
         --out <dir> [--episodes 0,3] [--instances 1] [--every 3] [--workers 3] [--threads 4] [--deadline-ms inf]
+        [--forced-rank share|seen]
 
 Per episode the recording is replayed open loop through ForumPlannerPolicy (as tools.forum_policy_replay: the recorded
 STATEs drive it, the supervisor never takes the keys; the prefix of each tick is the recorded ACTION masks, so every
 tick plans from what really happened). The planner keeps its rows (ForumPlanner.debug). Written per episode
-(<out>/<run>_i<inst>_ep<k>.json) and summed by --summary:
+(<out>/<run>_i<inst>_ep<k>.json; existing ones are skipped):
   hits      each damage event and Multihit tick: source path, type, iid, the source's FSM state, the hero's
-            position / clip / airborne; support coverage at L = 2 / 3 / 4 (the union and the source type's own
-            support with the hazards it throws; a chain's Final Hit at its hook, as the live accounting) and what
-            covered it (forecast / idle body tube / collider tube / hazard tube).
+            position / clip; support coverage at L = 2 / 3 / 4 (the union and the source type's own support with the
+            hazards it throws; a chain's Final Hit at its hook, as the live accounting) and what covered it (forecast /
+            idle body tube / collider tube / hazard tube); the recorded colliders touching the hero the frame before.
   ticks     every `every`-th tick of the battle and every tick of K_SET before a hit: FORCED_RISK, rows (ok, known),
             safe rows; hindsight: each known row's first contact with the recorded damage colliders over its horizon
-            (the nominal box, its invulnerable frames skipped; the recorded future is open loop: the enemies' later
-            reactions to a different hero are not modelled), the rows clear in hindsight, and which of them each
-            ranking would pick: "replay" (the planner's choice, with --forced-rank), "live" (the run's logged choice,
-            matched by name), "seen" (ForumConfig.forced_rank "seen"'s key over every known row: frames in contact
-            with the damage colliders seen now moved along their velocity, then the share, -J), "dr" (the same with
-            the recorded colliders incl. multi-hit ones),
-            "share" (least share of frames in the support over all known rows, then -J), "committed" (least share in
-            the committed support: current attacks, tails, hazards; then the full share, then -J), "near" (least share
-            in the committed support or the tubes, then the full share, -J), "random" (the share of clear rows).
-  exec      per hit, the recorded keys of the last 12 / 24 frames rolled out from the state estimated there
-            (kin_check's estimator, the planner's timing): the model's box against the logged one at the hit frame and
-            whether the model's path meets the recorded colliders there (a kinematic miss if the model stays clear).
-Live decision log context per hit (decisions_i<N>.jsonl): the FORCED_RISK streak, the last tick with a safe row, the
-tick times.
+            (the nominal box, its invulnerable frames skipped, also grown by 0.25 u; the recorded future is open loop:
+            the enemies' later reactions to a different hero are not modelled), the rows clear in hindsight, and which
+            row each ranking picks (each ends with the share, the first support contact, -J):
+              replay     the planner's own choice (ForumConfig.forced_rank = --forced-rank)
+              live       the run's logged choice (decisions_i<N>.jsonl), matched by name
+              share      least share of frames in the support over every known row
+              committed  least share in MultiForecast.committed() (current attacks, tails, hazards)
+              near       least share in the committed support or the tubes / death tails
+              seen       forced_rank "seen"'s key over every known row (production seen_polys / seen_contacts)
+              seen_cm    seen, then the committed share; seen_cf: seen, then the committed fine placements' share;
+                         cf_seen: seen + committed fine frames as one count
+              dr         seen's key on the recorded colliders (multi-hit ones too); dr_first: its first contact
+                         first; dr_g: grown 0.3 u; dr18: the first 18 frames only
+            and, before hits (DECOMP_K), the support decomposed by group (decompose).
+  exec      per damage hit, the recorded keys of the last 12 / 24 frames rolled out from the state estimated there
+            (the kin_check estimator, the planner's timing): the model's box against the logged one at the hit frame,
+            and whether the model's and the logged path meet the recorded colliders (a kinematic miss: the logged path
+            does, the model's does not).
 """
 import argparse
 import json
 import math
-import os
 import random
 import sys
 import time
-from collections import Counter, defaultdict
+from collections import defaultdict
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
@@ -51,8 +55,6 @@ LAGS = (2, 3, 4)
 K_SET = (1, 2, 3, 4, 6, 9, 12, 15, 18, 24, 30, 36, 45, 60, 75, 90)   # frames before a hit analysed in full
 EXEC_K = (12, 24)
 DECOMP_K = (1, 6, 12, 24, 36)                # ticks before a hit whose support is decomposed by group
-RANKS = ("replay", "live", "share", "committed", "near", "dr", "dr_first", "dr_g", "dr18", "seen", "seen_cf",
-         "cf_seen", "seen_cm")
 NEAR_KINDS = ("idle", "collider", "hazard", "death")
 
 
