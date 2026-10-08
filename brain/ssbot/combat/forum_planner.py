@@ -79,7 +79,7 @@ from ssbot.safety.supervisor import GREEN
 R_UNMOD = 6                       # veto reason: presses a move the model does not have (the dash stab)
 ESC_LOCK_MODES = NO_CONTROL_MODES + (kin.M_RPR_DS, kin.M_DS_ANTIC, kin.M_DS_SPIKE, kin.M_HARD_LAND)
 ESC_MAX_F = 72                    # escape rollouts at most this long (frames)
-ESC_CHUNK = 2                     # safe rows per escape check batch
+ESC_CHUNK = 4                     # safe rows per escape check batch
 ESC_NEAR_U = 9.0                  # an attack is looked at when its reach over the check + this (the hero's travel over a
 #                                   plan, the enemy's dead reckoning) is past the hero
 ESC_COUNTERS = frozenset({"RE_DEFEND", "MI_PARRY"})   # guard stances: their strike is the counter to a hit
@@ -152,6 +152,7 @@ class ForumConfig:
     #                               any attack an enemy may start at its end or at a late lock-in); "+c" / "+i" / "+p5"
     #                               extensions (multi_forecast.ReactConfig)
     esc_k: int = 4                # safe rows (in the order) the escape check looks at for one that passes
+    esc_k_forced: int = 8         # FORCED_RISK: the first rows of the order it looks at (those tied above the share)
     esc_after_f: int = 18         # frames past an attack's first damage its escape path must stay out of it
     # EV_CLASH (forum_planner_plan R8; off: the R3 / R4 planner bit for bit): when no row is safe, rows in contact whose
     # swing is out at the first contact get the clash branch (success: 0.15 s i-frames against all enemy damage, the
@@ -204,6 +205,9 @@ class EnvelopeAudit:
     esc_ticks: int = 0            # ticks with a safe row and threats the escape check looked at ("escape")
     esc_pass: int = 0             # ... whose chosen row passed it
     esc_rows: int = 0             # rows it checked
+    esc_forced_ticks: int = 0     # FORCED_RISK ticks the escape check ranked (rows tied above the share)
+    esc_forced_pass: int = 0      # ... whose chosen row passed it
+    esc_forced_moved: int = 0     # ... whose chosen row is not the order's first
     clash_ticks: int = 0          # ticks the clash branch ran (no safe row, clash on)
     clash_tier_skip: int = 0      # ... skipped: the tier is not in clash_tiers, or a pause is pending
     clash_cut: int = 0            # ... stopped before a level by clash_deadline_ms
@@ -904,16 +908,16 @@ class ForumPlanner(Planner):
                 labels[cps[m][0]].append(label)
         return fail, labels
 
-    def _escape_pick(self, f, start, hold, full, hold_end, r1, ranked: np.ndarray, hero: tuple[float, float]
-                     ) -> tuple[int | None, int, int, int, list]:
-        """Of the best esc_k safe rows (in the order), the first that passes the escape check, else the one with the
-        fewest failures (the first of them). Returns (row or None: no threats / rows, its failures, rows checked,
+    def _escape_pick(self, f, start, hold, full, hold_end, r1, ranked: np.ndarray, hero: tuple[float, float],
+                     k: int | None = None) -> tuple[int | None, int, int, int, list]:
+        """Of the first k (default esc_k) rows of `ranked`, the first that passes the escape check, else the one with
+        the fewest failures (the first of them). Returns (row or None: no threats / rows, its failures, rows checked,
         threats, its failing threats)."""
         threats = self._threats(f, hero)
         if not threats or not len(ranked):
             return None, 0, 0, len(threats), []
         best, best_fail, checked, best_lab = None, 0, 0, []
-        K = min(self.fcfg.esc_k, len(ranked))
+        K = min(self.fcfg.esc_k if k is None else k, len(ranked))
         for c0 in range(0, K, ESC_CHUNK):
             rows = np.asarray(ranked[c0:min(K, c0 + ESC_CHUNK)], np.int64)
             nf, lab = self._escape_fail(f, start, hold, full, hold_end, r1, rows, threats)
@@ -1496,20 +1500,33 @@ class ForumPlanner(Planner):
             tail_ok = None
             carried = cont and i == N - 1 and self.prev_tail_ok
             esc_row = None
-            if not forced and fcfg.escape and not carried:
+            if fcfg.escape and not carried:
                 # reactive support: of the safe rows in the order, the first that leaves the hero an escape from
-                # every attack an enemy may start at its end or late lock-in (the tail check then looks at it alone)
-                te = time.perf_counter()
-                hero = (float(ws.hero.pos.v[0]), float(ws.hero.pos.v[1])) if ws is not None and ws.hero is not None                     else (0.0, 0.0)
-                esc_row, nf, nchk, nth, lab = self._escape_pick(f, start, hold, full, hold_end, r1, order[safe[order]],
-                                                                hero)
-                esc_info.update(fail=nf, checked=nchk, threats=nth, ms=round((time.perf_counter() - te) * 1e3, 3),
-                                why=sorted(set(lab)))
-                if esc_row is not None:
-                    i = esc_row
-                    a.esc_ticks += 1
-                    a.esc_pass += int(nf == 0)
-                    a.esc_rows += nchk
+                # every attack an enemy may start at its end or late lock-in (the tail check then looks at it alone);
+                # FORCED_RISK: of the first esc_k rows of the order those tied with the first on every key above the
+                # share (the share saturates in wave 0 and ties, forum.md §19), the first with an escape
+                if not forced:
+                    ranked = order[safe[order]]
+                else:
+                    top = order[:fcfg.esc_k_forced]
+                    kk = np.stack([hz, hz_soft, U, S, clash_p, keep, mkeep, V, sk_n, sk_f, sk_c]).astype(np.float64)
+                    ranked = top[(kk[:, top] == kk[:, [int(order[0])]]).all(axis=0)]
+                if not forced or len(ranked) > 1:
+                    te = time.perf_counter()
+                    hero = (0.0, 0.0) if ws is None or ws.hero is None else \
+                        (float(ws.hero.pos.v[0]), float(ws.hero.pos.v[1]))
+                    esc_row, nf, nchk, nth, lab = self._escape_pick(f, start, hold, full, hold_end, r1, ranked, hero,
+                                                                    fcfg.esc_k_forced if forced else fcfg.esc_k)
+                    esc_info.update(fail=nf, checked=nchk, threats=nth, forced=bool(forced),
+                                    ms=round((time.perf_counter() - te) * 1e3, 3), why=sorted(set(lab)))
+                    if esc_row is not None:
+                        a.esc_ticks += int(not forced)
+                        a.esc_pass += int(not forced and nf == 0)
+                        a.esc_rows += nchk
+                        a.esc_forced_ticks += int(forced)
+                        a.esc_forced_pass += int(forced and nf == 0)
+                        a.esc_forced_moved += int(forced and esc_row != i)
+                        i = esc_row
             if not forced and cfg.tail_k > 0 and not carried:
                 ranked = order[safe[order]] if esc_row is None else np.array([esc_row], np.int64)
                 i, tail_ok = self._tail_pick(f, r1, hold_end, ranked, P + T, i)

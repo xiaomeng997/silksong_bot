@@ -273,7 +273,7 @@ def run_episode(job: dict) -> dict:
 _POL: dict = {}
 
 
-def _init(threads: int) -> None:
+def _init(threads: int, crest: str = "Reaper") -> None:
     try:
         import psutil
         psutil.Process().nice(psutil.BELOW_NORMAL_PRIORITY_CLASS)
@@ -281,7 +281,7 @@ def _init(threads: int) -> None:
         pass
     import dataclasses
     from ssbot.train.forum_planner_policy import ForumPlannerPolicy
-    pol = ForumPlannerPolicy(threads=threads)
+    pol = ForumPlannerPolicy(threads=threads, crest=crest)
     pol.warmup()
     step0 = pol.sc.step
 
@@ -335,6 +335,8 @@ def main(argv=None) -> int:
     ap.add_argument("--deadline-ms", type=float, default=math.inf)
     ap.add_argument("--no-decomp", action="store_true")
     ap.add_argument("--limit", type=int, default=0, help="at most this many episodes per run (0: all)")
+    ap.add_argument("--crest", default=None, help="the policy's crest (default: the first run's encounter: fo_W "
+                    "Wanderer, else Reaper; one crest per call)")
     a = ap.parse_args(argv)
     a.out.mkdir(parents=True, exist_ok=True)
     jobs = []
@@ -350,12 +352,16 @@ def main(argv=None) -> int:
         p.write_text(json.dumps(res, default=str), "utf-8")
         print(f"{p.name} {'ERROR' if 'error' in res else ''} {res.get('secs')} s ({time.perf_counter() - t0:.0f} s)",
               flush=True)
+    crest = a.crest
+    if crest is None and jobs:
+        from ssbot.train.encounters import ENCOUNTERS
+        crest = "Wanderer" if ENCOUNTERS[jobs[0]["row"]["unit"]].savestate == "fo_W" else "Reaper"
     if a.workers <= 1:
-        _init(a.threads)
+        _init(a.threads, crest or "Reaper")
         for j in jobs:
             write(_job_safe(j))
     else:
-        with ProcessPoolExecutor(a.workers, initializer=_init, initargs=(a.threads,)) as ex:
+        with ProcessPoolExecutor(a.workers, initializer=_init, initargs=(a.threads, crest or "Reaper")) as ex:
             for res in ex.map(_job_safe, jobs):
                 write(res)
     return 0
