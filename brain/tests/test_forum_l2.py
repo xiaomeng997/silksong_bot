@@ -383,3 +383,15 @@ def test_clapper_slam_with_no_room_out_stays_in_front():
     p = t.decide(world(22.0, ents=[clapper(9, 26.0, False)]), WinFc(s), None, 3)
     x0, _ = t.pb.arena_x
     assert p.stance_x == pytest.approx(x0 + t.rules.wall_room_u) and t.last["goal_why"].endswith("out to the wall")
+
+
+def test_clapper_retreat_branches_do_not_reward_hitting_it():
+    # stepping out of its slam: its hit weight 0 (the stance pulls out, a hit weight would pull back in)
+    t = l2()
+    s = [subj(9, CC, 35.0, y=7.45, state="Slam Antic", family="CC_SLAM", committed=True)]
+    p = t.decide(world(30.0, ents=[clapper(9, 35.0, False)]), WinFc(s), None, 3)
+    assert t.last["goal_why"].endswith("slam: step out") and p.hit_w.get(9, 0.0) == 0.0
+    # face: the target's weight
+    t = l2()
+    p = t.decide(world(24.0, ents=[clapper(9, 30.0, False)]), WinFc([subj(9, CC, 30.0, y=7.45)]), None, 3)
+    assert p.hit_w[9] == pytest.approx(3.0)

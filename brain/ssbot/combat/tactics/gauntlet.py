@@ -54,8 +54,8 @@ side for the rest, and the Choir Clapper by its own controller (cannot be clashe
           spot is reached before that attack can end (Subject.t_free), is the RUSH / PUNISH pick between the two
           (priority x 2, a switch at once).
 What a goal sets (scores only: the planner's S / Hz / U never see prefs, §4.4 item 2): mode (the goal's name), target,
-stance_x, boss_x (face it), hit_w (the target x target_hit_w x priority; the others as LOCAL, defensive stances still
-negative) and the weights' factors per goal (l2.weights). LOCAL's EVADE stands against KITE when it says the hero's spot
+stance_x, boss_x (face it), hit_w (the target x target_hit_w x priority, 0 while the Clapper controller steps away:
+CC_RETREAT; the others as LOCAL, defensive stances still negative) and the weights' factors per goal (l2.weights). LOCAL's EVADE stands against KITE when it says the hero's spot
 is covered within evade_s; PUNISH and RUSH replace it (the planner's support check is the safety).
 Failure (§4.4 item 4): an exception or an injected failure (fail_p) returns LOCAL's prefs untouched, so with fail_p = 1
 every decision is LOCAL's bit for bit (tests/test_forum_l2.py).
@@ -80,6 +80,7 @@ TINY = "Song Automaton Tiny"
 CC_IDLE, CC_SLAM, CC_JUMP, CC_JUMP_CAST, CC_CAST = "CC_IDLE", "CC_SLAM", "CC_JUMP", "CC_JUMP_CAST", "CC_CAST"
 CC_AIM_STATES = ("Jump Aim",)
 CC_AIR_STATES = ("Jump", "Air", "Cast Jump")              # its body off the ground (a jump's flight)
+CC_RETREAT = ("slam: step out", "slam: out to the wall", "jump: back off")     # controller branches that step away
 GLIDE_SPIKE = "GLIDE_SPIKE"
 NAIL_SRC = ("Slash", "UpSlash", "DownSlash New", "AltSlash", "WallSlash", "DashSlash")
 
@@ -526,6 +527,7 @@ class GauntletTactics:
             return prefs
         # a kept goal's stance follows its target (the spot moves with it; KITE's with the others too)
         s = next((s for s in fc.subjects if s.iid == g.target), None)
+        how = None
         if s is not None and s.pos is not None:
             if g.name == KITE:
                 g.stance_x, how = self._kite_spot(fc.subjects, s, hx)
@@ -541,10 +543,15 @@ class GauntletTactics:
             wts[k] = wts.get(k, 0.0) * float(v)
         hw = {k: (min(v, self.local.rules.other_hit_w) if v > 0 and k != g.target else v)
               for k, v in prefs.hit_w.items()}           # LOCAL's own target back to the others' weight
-        if g.target in hw and hw[g.target] > 0:
+        if how in CC_RETREAT:
+            # the Clapper controller steps away: no reward for chasing a hit on it meanwhile (round 2, v3 live: hits
+            # by its slam / landing slam while stepping out or backing off, the hit weight pulling the other way)
+            if hw.get(g.target, 0.0) > 0:
+                hw[g.target] = 0.0
+        elif g.target in hw and hw[g.target] > 0:
             w = r.target_hit_w * r.priority.get(getattr(s, "type_key", ""), 1.0)
-            if s is not None and s.type_key == CLAPPER and s.family in (CC_JUMP, CC_JUMP_CAST):
-                w *= r.up_hit_x
+            if s is not None and s.type_key == CLAPPER and str(how).startswith("jump: under"):
+                w *= r.up_hit_x                           # up slashes on the way under it
             hw[g.target] = max(hw[g.target], w)
         out = replace(prefs, mode=g.name, goal=g.name, target=g.target, stance_x=float(g.stance_x),
                       boss_x=g.face_x, hit_w=hw, weights=wts, vocab=frozenset(prefs.vocab) | g.vocab)
