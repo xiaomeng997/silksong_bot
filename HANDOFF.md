@@ -1948,7 +1948,9 @@ Done (committed):
 - `hero_damage.KNOWN_NEUTRAL` + Cogwork Flier, Wallcling (603fc7b): unlisted, they added the imbuement / Barbed Wire
   bounds (nail 16), and with the Wanderer's x3 crit the bound was 48 >= every wave-0 HP: the killing-blow rule
   (YELLOW / RED, Forum kills never certifiable) withheld every swing in YELLOW. Logged nail hits with both tools: 9 /
-  10 / Wanderer crit 27, never more. Bell Beast's loadout has neither tool: unchanged.
+  10 / Wanderer crit 27, never more. Bell Beast's loadout has neither tool: unchanged. (Review: it also lowers the
+  default Forum Reaper's bound 16 -> 9 / 10, so YELLOW withholds the nail on fewer ticks; A0b, R0 and R8R ran at 16.
+  The Reaper arms are rerun at the new bound in the review fixes below.)
 - forum.md 17.1, 17.3, 17.5-17.8; a stray form feed in forum.md 13 repaired.
 - Full suite at 895137b (worktree): 1137 passed, 2 skipped, 1 xfailed; test_kill_rule.py 41 passed at 603fc7b.
 
@@ -1964,11 +1966,13 @@ Measured (live, A0b protocol, 50 episodes per arm, instances 2 / 3; forum.md 17.
   14 clashed, 19 hit (16 before a clash), predicted 0.29. Live clashes (forum_clash_stats): R0 104, R8R 151, W1 109,
   R8W1 117 (Envoy charge setups R8R 48: 39 clash, 1 hit).
 - Compute (loaded machine: other tracks' live runs on 0 / 1 / 4 and offline jobs): plan p50 R0 4.5 / R8R 8.8 ms, W1
-  4.1 / R8W1 5.3 ms; late ticks R0 7.0 % / R8R 36.5 %, W1 3.7 % / R8W1 4.9 % (R8R's window was the busiest).
-- Minister below (Wanderer, continuous up slash, 30 x 20 s): up slash meeting the charge: 65 / 65 clash setups
-  clashed, union setups 55 clash / 1 hit of 101 in front; parry counter worse (4 clash / 3 hit of 27); overall 14.9
-  Minister hits per Minister-minute (data2 random policy, 205 w4 starts: 20.2), 2.8 per episode (data2 26.3), both
-  dead in a median 10.7 s (data2 71 s); hits: charge from the side 38, the parry stance body 33, the body 15.
+  4.1 / R8W1 5.3 ms; late ticks R0 7.0 % / R8R 36.5 %, W1 3.7 % / R8W1 4.9 % (review: not the machine; R0 overlapped
+  the same busy instance-0 run longer and stayed at 7 %: the clash branch's own 2.2 ms per clash tick, no deadline).
+- Minister below (Wanderer, continuous up slash, 30 x 20 s): up slash meeting the charge: of 114 clash setups 65
+  clashed, 0 hit, 49 neither (review correction: not "65 / 65"), union setups 55 clash / 1 hit of 101 in front; parry
+  counter worse (4 clash / 3 hit of 27); overall 14.9 Minister hits per Minister-minute (data2 random policy, 205 w4
+  starts: 20.2; per episode is not comparable: 20 s-capped episodes vs 180 s ones), both dead in a median 10.7 s
+  (data2 71 s); hits: charge from the side 38, the parry stance body 33, the body 15.
 - Tie to the diag track (HANDOFF "Task wave-0 forensics", forum.md 19): wave 0's support saturates and FORCED_RISK
   ties; the clash branch only acts on ticks with an enemy in a clashable attack (its parry i-frames lower the
   saturated share), so it moves the Envoy charge and not the wave-0 outcome. Its `forced_rank = "seen"` (+5.0 s live)
@@ -1984,8 +1988,8 @@ Next / open issues (round 2):
    acceptance (hits and quits not more) holds for the Reaper and is flat for the Wanderer. Re-measure with
    `forced_rank = "seen"` merged (seen + clash vs seen), the clash rows' seen contact replaced by the branch's.
 2. The killing-blow rule with the Wanderer's x3 crit bound (27 at needle 1) withholds the nail in YELLOW once any
-   enemy may be at <= 27 HP (37 % of W1's ticks vs 17 % for the Reaper's 9): a structural cost of the Wanderer under
-   the current safety rules (the crit chance is about 1 %: 4 of 403 logged hits).
+   enemy may be at <= 27 HP (37 % of W1's ticks vs 17 % for the Reaper, measured at its old bound 16): a structural
+   cost of the Wanderer under the current safety rules (the crit chance is about 1 %: 4 of 403 logged hits).
 3. Cost: partial clashes roll out 16 rows x 3 levels; try clash_k 8 / clash_depth 2 before the integrator's A/B
    (R8R's late ticks were 36.5 % on a busy machine).
 4. DESIGN 3.5.6's parry whitelist says no parry / clash in YELLOW / RED (`Restrictions.no_parry`; the clash freeze
@@ -2000,3 +2004,50 @@ Next / open issues (round 2):
    `uv run` with the variable rebuilt it). Use scripts/uv.cmd or set the variable.
 7. Frozen checkouts to remove when the integrator is done: `C:\ssbot\live_r8_c1ca21a` (round 1),
    `live_r8_64a48cc` (Minister run), `live_r8_895137b` (R8W / W0 / R8R / R0), `live_r8_603fc7b` (W1 / R8W1).
+
+### Round 2 review fixes (2026-10-08 05:30-, the fixer; verdict on 67b28d6)
+
+Done (committed):
+- `forum_clash_stats` (532f8e2): union setups keyed by the enemy's Control state and carrying their attack instance
+  (the enemy's run of frames in one family), the worse outcome of the two views (hit > clash > other > neither),
+  Multihit special damage owned by the nearest damaging enemy (was never counted), the Reaper down window [9, 19]
+  as the planner's. `build_table`: each family's clashable states (where its clashes happened, >= 2 and >= 5 % of
+  them), rates over those states only, `p_clash_lb` (Wilson lower bound of clash / n) and `p_fail` (upper bound of
+  hit / n) at n_eff = the attack instances, per-crest rows with their own bounds.
+- `clash.json` rebuilt (d24ef17; stats `C:\ssbot\data\m2_forum_r8\fix\clash_*.json`, driver
+  `C:\ssbot\sandbox\r8f_stats.ps1`, checkout `C:\ssbot\live_r8_532f8e2`): the 36 R1 v2 data2 runs, the person's 5
+  sessions, the round-2 live runs and A0b; 31 keys, 19 at p_fail <= 0.25, 10 at p_clash_lb >= 0.5, none at 0.75
+  (best: Minister charge side 0.74 / 0.044, Envoy charge side 0.72 / 0.047); clashable states e.g. Envoy charge
+  {Charge}, Reed counter {Parry Slash}, Reed stab {Stab 1, 3, 5}, Minister charge {Attack}.
+- Clash branch v3 (f1f2fb1, d997bc7): the branch's weight w = prod p_clash_lb (a setup that neither clashed nor was hit
+  gave none of the clash's effects); a clean branch is a safe row only at w >= 0.75 and hit risk <= 0.25, any other
+  (w >= 0.25) is ranked in FORCED_RISK by w x the branch's share + (1 - w) x the plain row's (first contacts stay the
+  plain row's; such rows always join the ranked candidates); eligibility by state: `clash_windows` (the walk's dwell /
+  successors inside the family) must let the owner be in a clashable state at the clash, PARRY_STOPS by state (Envoy
+  Charge / Reset, Reed Parry Slash); DESIGN 3.5.6: GREEN only by default (`ForumConfig.clash_tiers`), never with a
+  pause pending; `combat_run --forum-clash {on, yellow, cont}` (yellow: GREEN and YELLOW, the experiment; cont: the
+  clash continuation rows without the branch); deadline per level (`clash_deadline_ms`, default deadline_ms + 2),
+  clash_k 8, clash_depth 2; candidates whose first swing is out at their first contact first; parry i-frames 9
+  frames, from j_hi to (the earliest frame the clash reach can meet the owner's support) + 9; co-owners no longer
+  block (the parry i-frames take every enemy's damage; the branch meets their support after them; counted
+  `clash_coowned`); the decision log's `clash` is now [w, clashes, ranked].
+- Window semantics: the kernel already scores the last active frame (`_shapes` gives [f0, f1 + 1)); the clash pass's
+  frame is in the same half-open window; the stats' Reaper down slash now matches (test).
+- Tests: test_forum_clash.py 20 (windows, the table builder's states / n_eff / crest rows, the owner rule, a no-way-out
+  synthetic Reed tick: the branch runs and ranks; gates: YELLOW, pause pending, h 1, branch off, state outside,
+  no states; a skipped pass leaves the tick as the continuation rows alone make it).
+- Docs: forum.md 17.7 / 17.8 corrections (65 of 114, per-minute only, the Reaper bound, the A/B not significant, the
+  late-tick attribution), `{BS}` placeholders replaced (HANDOFF, forum.md). The commit message of 64a48cc says 44 keys:
+  the committed table then had 33.
+- Open-loop replay A0b i1 ep0 with v3 and the provisional table (`--clash yellow`): 483 forced ticks, 210 swings out at
+  the contact, 166 owners outside their clashable states (mostly Envoy JumpSlash 4 / Choristor Slash Recover), 38
+  clashes accepted (all Envoy charge / Reed counter stops), 38 ranked, 4 chosen; 8 levels cut by the deadline; plan
+  p50 5.3 ms (v2: 9.8 ms), clash 0.96 ms per forced tick.
+
+Running: `C:\ssbot\sandbox\r8f_live.ps1 -co C:\ssbot\live_r8_d24ef17` (hidden, log `C:\ssbot\sandbox\r8f_live.log`,
+manifest `C:\ssbot\data\m2_forum_r8\fix\ab_manifest.txt`): locks inst2 / inst3 ("r8"), 4 blocks x 3 arms (order
+rotating), each run 25 + 25 Forum_A gauntlets on instances 2 / 3 (A0b protocol), block seed 322000 + 100 x block for
+every arm (paired): R0 (clash off), RC (`--forum-clash cont`), RY (`--forum-clash yellow`). Stop: STOP_AGENTS /
+DEMO_SOON (between runs), or `combat_run stop <run dir>` from the checkout's brain; then delete the r8 lock files if
+the driver did not. Analysis: `scratchpad/r8f/ab.py <manifest> <out.json>` (paired by seed, sign-flip permutation,
+bootstrap CI, unpaired permutation).
