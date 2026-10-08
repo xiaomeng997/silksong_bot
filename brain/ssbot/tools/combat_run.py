@@ -329,7 +329,11 @@ def set_time_scale(link, scale: float, instance: int, wait_s: float = 5.0, quiet
         r = link.rpc("time.scale", timeout_s=10)
     got = float((r or {}).get("time_scale") or 0.0)
     if abs(got - scale) > 1e-3:
-        raise SystemExit(f"[i{instance}] time.scale {scale}: the game runs at {got} ({r}); not collecting")
+        from ssbot.train import recovery
+        s = getattr(link, "state", None)
+        # a paused game reads Time.timeScale 0 (20261008_015907 i0: a watchdog pause the old worker left in place)
+        why = f"; the game is paused ({recovery.where(s)})" if recovery.is_paused(s) else ""
+        raise SystemExit(f"[i{instance}] time.scale {scale}: the game runs at {got} ({r}){why}; not collecting")
     if not quiet:
         print(f"[i{instance}] time.scale {scale}: {r}", flush=True)
     return got
@@ -403,7 +407,16 @@ def worker(a: argparse.Namespace) -> int:
                                            "view": a.view, "time_scale": a.time_scale}).start()
             seed = a.seed + k if a.same_seeds else a.seed + a.instance * 1_000_000 + k
             enc = encs[k % len(encs)]
-            game_scale = set_time_scale(link, a.time_scale, a.instance, quiet=True)
+            still_paused = False
+            if recovery.is_paused(link.state) and (link.state.get("game") or {}).get("scene"):
+                # still paused (a recovery after the last episode that did not finish): a paused game reads
+                # Time.timeScale 0 and set_time_scale would stop the worker (20261008_015907 i0 stopped so after its
+                # first episode's watchdog pause); one more resume; if the game stays paused the episode's own start
+                # check makes it a HARNESS_FAIL (the 5-in-a-row stop below), with no time scale read back
+                ok, _ = recovery.resume(link, log=lambda m: print(f"[i{a.instance}] {m}", flush=True))
+                print(f"[i{a.instance}] paused before episode {k}: {'unpaused' if ok else 'still paused'}", flush=True)
+                still_paused = not ok
+            game_scale = None if still_paused else set_time_scale(link, a.time_scale, a.instance, quiet=True)
             rec = AttemptRecord(unit=enc.name, stage="TRAIN", profile="TRAIN" if a.view == "oracle" else "SIM_FINAL",
                                 build="1.0.30000", code_rev=rev,
                                 config_fp=fp, start_kind="savestate", mode=a.mode, seed=seed)

@@ -515,3 +515,18 @@ def test_the_live_checks_pause_press_waits_for_the_gate_and_repeats_a_dropped_pr
     paused = [k for k, m in enumerate(got) if m & M.PAUSE_BIT]
     assert paused == [4, 5, 6, 65, 66, 67]
     assert all(m & mask("right") for m in got)
+
+
+def test_set_time_scale_names_a_pause_when_the_game_reads_0():
+    """20261008_015907 i0: the first episode's watchdog pause was left in place by the old worker, and the next
+    episode's set_time_scale read Time.timeScale 0.0 and stopped the worker with no word of the pause. The stop names
+    it now (the worker resumes before it reads the scale)."""
+    class _L:
+        state = {"f": 9, "game": {"gs": M.GS_PAUSED, "paused": True, "scene": "Bone_East_08", "menu": M.MENU_PAUSE},
+                 "menu": {"sel": "continue", "alpha": 1.0}, "pause": {"blk": 64}}
+
+        def rpc(self, name, timeout_s=10, **kw):
+            return {"scale": 1.0, "time_scale": 0.0, "via": "none"}
+
+    with pytest.raises(SystemExit, match=r"the game is paused \(pause_menu\)"):
+        combat_run.set_time_scale(_L(), 1.0, 0, wait_s=0.2)
