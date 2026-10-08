@@ -134,7 +134,7 @@ class EnvelopeAudit:
     clash_ticks: int = 0          # ticks the clash branch ran (no safe row, clash on)
     clash_rows: int = 0           # rows it made safe
     clash_chosen: int = 0         # chosen plans that rely on a clash
-    clash_cand: int = 0           # rows the branch looked at (in contact, a swing, by J, capped)
+    clash_cand: int = 0           # rows the branch looked at (in contact, a swing, latest contact first, capped)
     clash_inwin: int = 0          # ... whose first contact fell in a swing's active window (per clash level)
     clash_owned: int = 0          # ... attributed to at least one enemy
     clash_known: int = 0          # ... all of them clashable with that slot on the slash's side (clash.json)
@@ -504,8 +504,10 @@ class ForumPlanner(Planner):
             hit_occ[i] = h
             t_hit[i] = min(int(t_hit[i]), int(np.argmax(h)))
 
-    def _clash_pass(self, f, start, latched, sc, S, ok, hz, tk, enemy_only, ctx) -> dict:
-        """EV_CLASH (forum_planner_plan R8): for up to clash_k rows in contact (by J) the clash branch. A row's first
+    def _clash_pass(self, f, start, latched, sc, S, ok, hz, tk, enemy_only, ctx, t_hit) -> dict:
+        """EV_CLASH (forum_planner_plan R8): for up to clash_k rows in contact the clash branch (the latest first
+        contact first, then the row index: never J, so whether a tick ends in FORCED_RISK does not depend on the prefs,
+        §4.4 item 2). A row's first
         contact (the envelope) must fall in a swing's active window (crest table) and come from enemies whose attack
         family can be clashed with that slot (ClashTable), on the slash's side of the hero (side: in front of the
         facing, up: above, down: below); the clash is put on the frame before the contact (the clash reach lies
@@ -524,7 +526,7 @@ class ForumPlanner(Planner):
         cand = np.flatnonzero(ok & ~hz & S & (sc["sw_f"] >= 1))
         if not len(cand):
             return {}
-        cand = cand[np.argsort(-sc["J"][cand], kind="stable")][:fcfg.clash_k]
+        cand = cand[np.lexsort((cand, -t_hit[cand]))][:fcfg.clash_k]
         n = len(cand)
         au = self.audit
         au.clash_cand += n
@@ -800,7 +802,7 @@ class ForumPlanner(Planner):
             # come first, so it never runs on a tick that has one
             self.audit.clash_ticks += 1
             tcl = time.perf_counter()
-            cl = self._clash_pass(f, start, latched, sc, S, ok, hz, tk, enemy_only, ctx)
+            cl = self._clash_pass(f, start, latched, sc, S, ok, hz, tk, enemy_only, ctx, t_hit)
             self.audit.clash_ms += (time.perf_counter() - tcl) * 1e3
             for i, (pf, nc) in cl.items():
                 S[i] = False
