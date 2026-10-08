@@ -15,6 +15,12 @@ only, oracle STATE, save suppression on (the one real quit to the title is comba
                      HARNESS_FAIL "paused unasked", combat_run.after_harness_fail, then a second episode runs
   episode_settings   the same, then the pause menu's Options -> its first sub-menu (what the person found on 10-05);
                      the next episode starts from there (its own resume before the reset), no after_harness_fail
+  worker_pause       combat_run.worker itself (2 episodes, on this probe's link): episode 0's ACTIONs open the pause
+                     menu (PauseAt), the worker's after_harness_fail resumes, episode 1 runs at the time scale read
+  worker_norecover   the same with after_harness_fail doing nothing (the old worker of 20261008_015907 i0): the
+                     worker's ready_for_episode resumes before the time scale read, episode 1 runs
+  title_items        the title's main menu: which menu Down x1..4 + Enter opens from Start Game (Esc back, Up as
+                     many), then Up x1 + Enter (does the list wrap?), then back_into_slot; recovery.TITLE_ITEM
 
     cd brain
     ..\\scripts\\uv.cmd run python -m ssbot.probes.recovery_check --instance 4 [--cases a,b,...]
@@ -35,7 +41,8 @@ from ssbot.train import recovery as R
 
 OUT = Path(r"C:\ssbot\sandbox\recovery_check")
 CASES = ("pause_options_hl", "pause_quit_hl", "pause_options", "pause_game_options", "exit_prompt", "brain_lost",
-         "title_game_options", "title_options_hl", "episode_pause", "episode_settings")
+         "title_game_options", "title_options_hl", "episode_pause", "episode_settings", "worker_pause",
+         "worker_norecover", "title_items")
 SEED = 990_000          # the episode cases' seeds (probe only: no attempt rows are written)
 EP_TIMEBOX_S = 12.0     # the second episode: a short timebox (STUCK at its end is a healthy episode here)
 
@@ -46,18 +53,22 @@ class PauseAt:
     pause a second later: the episode loop ends at the first paused STATE, so act is not called after one) is
     repeated."""
 
-    def __init__(self, inner, at: int = 180):
-        self.inner, self.at = inner, at
-        self.n, self.pressed = 0, None
+    def __init__(self, inner, at: int = 180, episodes: int | None = None):
+        self.inner, self.at, self.episodes = inner, at, episodes    # episodes: press in the first N only (None: all)
+        self.n, self.pressed, self.ep = 0, None, 0
 
     def reset(self, rng, enc) -> None:
         self.inner.reset(rng, enc)
         self.n, self.pressed = 0, None
+        self.ep += 1
+
+    def stats(self) -> dict:
+        return {"pause_at": self.at, "episode": self.ep}
 
     def act(self, s: dict, tap) -> int:
         m = self.inner.act(s, tap) & ~R.PAUSE_BIT
         self.n += 1
-        if self.n < self.at:
+        if self.n < self.at or (self.episodes is not None and self.ep > self.episodes):
             return m
         if self.pressed is not None and self.n - self.pressed > 60:
             self.pressed = None
@@ -118,7 +129,122 @@ def _episode(link, enc, tap, policy, seed: int, timebox_s: float | None = None) 
     run_episode(link, enc, tap, policy, mode_config("data", seed, timebox_s), rec)
     return {"outcome": rec.outcome, "reason": rec.reason, "acts": rec.acts, "ingame_s": rec.ingame_s,
             "wall_s": round(time.monotonic() - t0, 2), "loop_gap_ms_max": rec.loop_gap_ms_max,
-            "end": _menu_view(link.state or {})}
+            "start_resume": rec.start_resume, "end": _menu_view(link.state or {})}
+
+
+class _Shared:
+    """The probe's link lent to combat_run.worker (one connection per instance): everything but close()."""
+
+    def __init__(self, link):
+        self._link = link
+
+    def __getattr__(self, name):
+        return getattr(self._link, name)
+
+    def close(self) -> None:
+        pass
+
+
+def _worker_case(link, enc, instance: int, recover: bool) -> dict:
+    """combat_run.worker for 2 data episodes on this link (OracleLink lent through _Shared), its policy the data policy
+    with one Pause press in episode 0 (PauseAt): episode 0 must end HARNESS_FAIL "paused unasked", episode 1 must run
+    (not HARNESS_FAIL) with the time scale read back. recover False: after_harness_fail does nothing (the old
+    worker), so the worker's ready_for_episode has to resume. Rows go to a probe directory, not the data runs."""
+    from unittest import mock
+    from ssbot.tools import combat_run
+    from ssbot.train.data_policy import DataPolicy
+    run_dir = OUT / f"worker_{datetime.now():%Y%m%d_%H%M%S}_{'recover' if recover else 'norecover'}"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    patches = [mock.patch("ssbot.ipc.oracle_link.OracleLink", lambda instance, connect_timeout_s: _Shared(link)),
+               mock.patch.object(combat_run, "make_policy", lambda *a, **k: PauseAt(DataPolicy(), episodes=1))]
+    if not recover:
+        patches.append(mock.patch.object(combat_run, "after_harness_fail", lambda link, enc, instance: None))
+    buf = io.StringIO()
+    t0 = time.monotonic()
+    with contextlib.ExitStack() as st:
+        for p in patches:
+            st.enter_context(p)
+        try:
+            with contextlib.redirect_stdout(buf):
+                rc = combat_run.main(["_worker", "--instance", str(instance), "--run-dir", str(run_dir), "--encounter",
+                                      enc.name, "--episodes", "2", "--no-record", "--timebox", str(EP_TIMEBOX_S),
+                                      "--seed", str(SEED + (20 if recover else 30))])
+        except (Exception, SystemExit) as e:  # noqa: BLE001 - recorded
+            rc = f"raised {type(e).__name__}: {e}"
+    rows = [json.loads(x) for x in (run_dir / f"attempts_i{instance}.jsonl").read_text(encoding="utf-8").splitlines()
+            if x.strip()] if (run_dir / f"attempts_i{instance}.jsonl").exists() else []
+    eps = [{k: r.get(k) for k in ("episode", "outcome", "reason", "acts", "time_scale_game", "loop_gap_ms_max",
+                                  "start_resume")} for r in rows]
+    log = buf.getvalue().splitlines()
+    ok = (rc == 0 and len(rows) == 2 and rows[0]["outcome"] == "HARNESS_FAIL"
+          and "paused unasked" in (rows[0]["reason"] or "") and rows[1]["outcome"] != "HARNESS_FAIL"
+          and rows[1]["time_scale_game"] == 1.0)
+    return {"ok": ok, "rc": rc, "episodes": eps, "log": log, "s": round(time.monotonic() - t0, 2),
+            "run_dir": str(run_dir), "end": _menu_view(link.state or {})}
+
+
+def _quit_to_title(link) -> dict:
+    """Pause, Quit, Yes (a real quit; save suppression on), then the title's main menu settled."""
+    _pause(link)
+    _tap_and_wait(link, "down")
+    _tap_and_wait(link, "down")
+    _tap_and_wait(link, "enter")
+    s = _wait_where(link, "exit_prompt")
+    R._wait_frame(link, s["f"] + 20)
+    if (link.state.get("menu") or {}).get("sel") != "yes":
+        _tap_and_wait(link, "up")
+    assert (link.state.get("menu") or {}).get("sel") == "yes", _menu_view(link.state)
+    R.tap(link, "enter")                        # Yes: the real quit (save suppression on)
+    s = link.wait_state(lambda s: R.where(s) == "title" and not (s.get("game") or {}).get("fading"), timeout_s=60)
+    return R._wait_frame(link, s["f"] + 30)
+
+
+def _title_opens(link) -> int | None:
+    """Enter on the main menu: the menu it opens once settled (None: nothing within 10 s)."""
+    _tap_and_wait(link, "enter")
+    try:
+        s = link.wait_state(lambda s: (s.get("game") or {}).get("menu") != R.MENU_MAIN
+                            and not (s.get("game") or {}).get("fading"), timeout_s=10)
+    except TimeoutError:
+        return None
+    R._wait_frame(link, s["f"] + 20)
+    return (s.get("game") or {}).get("menu")
+
+
+def _title_items(link, enc, instance: int) -> dict:
+    """From the title's Start Game highlight: Down x n + Enter for n = 1..4 (each menu left with title_home, then Up x
+    n back to Start Game), then Up x 1 + Enter: the save select (6) if the list stops at its top, the quit-game prompt
+    (14) if it wraps. back_into_slot from wherever that leaves the title."""
+    from ssbot.tools.combat_run import back_into_slot
+    _quit_to_title(link)
+    t0 = time.monotonic()
+    opened, homes = {}, {}
+    for n in range(1, 5):
+        for _ in range(n):
+            _tap_and_wait(link, "down")
+        opened[n] = _title_opens(link)
+        ok, steps = R.title_home(link)
+        homes[n] = {"ok": ok, "esc": len(steps)}
+        for _ in range(n):
+            _tap_and_wait(link, "up")
+    _tap_and_wait(link, "up")
+    up1 = _title_opens(link)
+    if R.where(link.state) == "title_submenu":
+        R.title_home(link)
+    buf = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(buf):
+            back_into_slot(link, enc, instance)
+        back = True
+    except Exception as e:  # noqa: BLE001 - recorded
+        back = False
+        buf.write(f"raised {type(e).__name__}: {e}\n")
+    item = {m: n for n, m in opened.items() if m is not None}
+    ok = all(R.TITLE_ITEM.get(m) == n for m, n in item.items()) and back
+    return {"ok": ok, "down_opens": opened, "title_home": homes, "up1_opens": up1,
+            "wraps": up1 == R.MENU_QUIT_GAME_PROMPT if up1 is not None else None,
+            "title_item_matches": {str(m): R.TITLE_ITEM.get(m) == n for m, n in item.items()}, "back": back,
+            "log": buf.getvalue().splitlines(), "s": round(time.monotonic() - t0, 2), "end": _menu_view(link.state or {})}
 
 
 def _episode_case(link, enc, tap, instance: int, settings: bool) -> dict:
@@ -152,6 +278,10 @@ def _episode_case(link, enc, tap, instance: int, settings: bool) -> dict:
 def run_case(link, enc, name: str, instance: int, tap=None) -> dict:
     if name in ("episode_pause", "episode_settings"):
         return _episode_case(link, enc, tap, instance, settings=name == "episode_settings")
+    if name in ("worker_pause", "worker_norecover"):
+        return _worker_case(link, enc, instance, recover=name == "worker_pause")
+    if name == "title_items":
+        return _title_items(link, enc, instance)
     if name == "pause_options_hl":
         def setup():
             _pause(link)
@@ -220,19 +350,7 @@ def run_case(link, enc, name: str, instance: int, tap=None) -> dict:
         return out
     if name in ("title_game_options", "title_options_hl"):
         from ssbot.tools.combat_run import back_into_slot
-        _pause(link)
-        _tap_and_wait(link, "down")
-        _tap_and_wait(link, "down")
-        _tap_and_wait(link, "enter")
-        s = _wait_where(link, "exit_prompt")
-        R._wait_frame(link, s["f"] + 20)
-        if (link.state.get("menu") or {}).get("sel") != "yes":
-            _tap_and_wait(link, "up")
-        assert (link.state.get("menu") or {}).get("sel") == "yes", _menu_view(link.state)
-        R.tap(link, "enter")                        # Yes: the real quit (save suppression on)
-        s = link.wait_state(lambda s: R.where(s) == "title" and not (s.get("game") or {}).get("fading"),
-                            timeout_s=60)
-        R._wait_frame(link, s["f"] + 30)
+        _quit_to_title(link)
         _tap_and_wait(link, "down")                 # the highlight on Options
         if name == "title_game_options":
             _tap_and_wait(link, "enter")            # Options
