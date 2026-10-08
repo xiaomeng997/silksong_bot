@@ -1900,19 +1900,48 @@ superset (diag's key first, then P, P_cm, P_f), so take it when the hunks confli
 b4345c6 touch only its tools and HANDOFF).
 
 Round-2 A/B (instance 0, 04:20-05:18, frozen `C:\ssbot\live_r5v2_8617aa6`, driver `C:\ssbot\sandbox\r5v_ab2.ps1`,
-lock released; forum.md 17.10), arms interleaved in one window, A0b protocol, TV on, T 36:
+lock released; forum.md 17.10), A0b protocol, TV on, T 36. CORRECTION (round 3, verifier): the arms were NOT
+interleaved; they ran as sequential batches (SPC 04:20-04:37, PC 04:37-04:51, control 04:51-05:03, SPC 05:03-05:18)
+under very different machine load, so the tick / late columns are each batch's load, not the code's cost:
 
 | arm | runs (20261008_) | episodes | hits / min (95 %) | time alive p50 / mean (s) | FORCED_RISK | tick p50 / p99 | late |
 |---|---|---|---|---|---|---|---|
 | TV control (both off) | 045158 | 25 | 19.0 (17.1-21.0) | 12.4 / 13.7 | 0.813 | 9.8 / 19.0 | 3.5 % |
 | PC (commit_rank) | 043725 | 25 | 12.4 (11.3-13.7) | 21.4 / 21.3 | 0.885 | 12.8 / 21.2 | 17.6 % |
-| SPC (seen + commit_rank) | 042011 + 042143 + 050303 | 50 | 10.3 (9.5-11.3) | 23.5 / 24.4 | 0.915 | 12.0 / 20.2 | 23.8 % |
+| SPC (seen + commit_rank) | 042011 + 042143 + 050303 | 50 | 10.3 (9.5-11.3) | 23.5 / 24.4 | 0.915 | 12.0 / 20.2 | 40.1 % / 5.8 % (two batches) |
 
 Every episode is still a Q1 QUIT in wave 0 (about 4.2-4.4 hits), 0 WOULD_DIE, 0 kills, 0 support-outside hits, the
 envelope audit clean: the hero survives 55-78 % longer per hit but never kills; the next bottleneck is offence
 (R6 / R8). commit_rank is now on by default (3797b3e, `SSBOT_FORUM_PC=0` off); "seen" stays diag's switch (default
-share): recommend both on (SPC) at integration. Heavier ticks: late ticks 18-24 % on the fully loaded machine
-(control 3.5 %); trim before going live (Next 2).
+share). (Superseded by round 3 below: "recommend both on" rested on offline results only, and the "late ticks 18-24 %
+= the code's cost" reading was load; the paired cost is in round 3.)
+
+### Round 3 (fixer, 2026-10-08 06:00-; verifier findings on ec39281; forum.md 17.11)
+
+Done (committed):
+- 2ef6383 `MultiForecast.occupied_split`: stage 1's support query split by the placements' committed flag (union
+  bit-identical to `occupied()`, the committed part = `_union_occ(committed_only=True)`, the fine part = `_fine_occ()`);
+  ForumPlanner takes P_cm / P_f from it when commit_rank is on (no second query after the envelope; stage 1 is inside
+  the envelope's deadline budget). Keys bit-identical to the old ones (tests + 1,907 real FORCED_RISK ticks).
+- 2ef6383 terminal value off by default (`SSBOT_FORUM_TV=1` on): no closed-loop gain (18.41 vs 18.42 hits / min),
+  ~1 point offline, 0.9-1.3 ms before the envelope.
+- 2ef6383 `SSBOT_FORUM_AB="name:pc=0|1,fr=share|seen;..."`: ForumPlannerPolicy switches the arm per episode (episode k
+  runs arm k mod n; `policy.ab_arm` in attempts), so arms share the load inside one batch.
+- b96559f forum.md 17.7 / 17.8 / 17.10 corrections: random-row baseline for the hindsight shares (before hits:
+  commit_rank +4.7 / +3.2 points over a random allowed row, seen +0.7 / +2.5, stacked +11.9 / +11.9; the live pick is
+  6.6 / 7.4 points BELOW random there: selection bias, the recorded path is what the threats aimed at); J0's AUC 0.46
+  is path correlation, not "reversed"; the round-2 arms ran in sequential batches and their late ticks were load
+  (same SPC code 40.1 % vs 5.8 %). `forum_tv_audit` reports `clear.random`. Plan R5 row note corrected.
+- Paired cost (`C:\ssbot\data\m2_forum_r5v\round3\pc_bench.py`: one process, one policy per arm, every STATE to every
+  arm in rotating order): commit_rank +0.25-0.4 ms plan p50 (the old second queries 0.6-0.9 / 2.7-4.8 ms p50 / p99),
+  seen 0.09-0.12 / 0.4-1.0 ms; late ticks equal within noise (wave 0: C 3.0 %, PC 2.6 %, S 2.9 %, SPC 2.4 %).
+
+Running: `C:\ssbot\sandbox\r5v_ab3.ps1` on instance 0 (lock `inst0.lock` = r5value, taken 06:32), frozen
+`C:\ssbot\live_r5v3_2ef6383`, 2x2 arms C / PC / S / SPC switched per episode (SSBOT_FORUM_AB), seeds 300800+, 25 per
+arm, terminal value off; log `C:\ssbot\sandbox\r5v_ab3.log`, batch logs `C:\ssbot\data\m2_forum_r5v\round3\`. Report:
+`round3\ab3_report.py <run dirs>`. The driver halts before any batch while DEMO_SOON / STOP_AGENTS exists. To stop
+only this run: end the hidden powershell running `r5v_ab3.ps1` (no make-up batch then), `combat_run stop <run dir>`
+from `C:\ssbot\live_r5v3_2ef6383\brain` (ends after the current episode), then delete `inst0.lock`.
 
 ### Needs deploy
 
@@ -1922,8 +1951,8 @@ share): recommend both on (SPC) at integration. Heavier ticks: late ticks 18-24 
 
 1. Integration: merge this branch with diag's (worktree-wf_fa16f06f-127-8): take this branch's FORCED_RISK block (seen >
    P > P_cm > P_f) and policy `_fcfg`; decide SSBOT_FORUM_FR's default with diag's own seen / share A/B (seeds 340000).
-2. Compute: commit_rank + seen cost about 3 ms per tick under full load (open-loop replay: +1 ms for commit_rank);
-   compute P_cm / P_f only for the rows best on seen / first contact, or only when P ties, and re-measure late ticks.
+2. Compute: done in round 3 (P_cm / P_f from stage 1's split query: +0.25-0.4 ms plan p50 for commit_rank, the old
+   second queries alone were 0.6-0.9 / 2.7-4.8 ms p50 / p99; no late-tick difference under the same load).
 3. The remaining gap (forum.md 17.9): 68-79 % of the stacked ranking's misses have a clear row tied on every risk key;
    the hits come from attacks not started yet (the saturated later-instance boxes): time-resolved later-instance
    placements (R2 / R3, recertify) or lead-time branch probabilities (R5 model's next step).
