@@ -1936,12 +1936,32 @@ Done (committed):
   arm in rotating order): commit_rank +0.25-0.4 ms plan p50 (the old second queries 0.6-0.9 / 2.7-4.8 ms p50 / p99),
   seen 0.09-0.12 / 0.4-1.0 ms; late ticks equal within noise (wave 0: C 3.0 %, PC 2.6 %, S 2.9 %, SPC 2.4 %).
 
-Running: `C:\ssbot\sandbox\r5v_ab3.ps1` on instance 0 (lock `inst0.lock` = r5value, taken 06:32), frozen
-`C:\ssbot\live_r5v3_2ef6383`, 2x2 arms C / PC / S / SPC switched per episode (SSBOT_FORUM_AB), seeds 300800+, 25 per
-arm, terminal value off; log `C:\ssbot\sandbox\r5v_ab3.log`, batch logs `C:\ssbot\data\m2_forum_r5v\round3\`. Report:
-`round3\ab3_report.py <run dirs>`. The driver halts before any batch while DEMO_SOON / STOP_AGENTS exists. To stop
-only this run: end the hidden powershell running `r5v_ab3.ps1` (no make-up batch then), `combat_run stop <run dir>`
-from `C:\ssbot\live_r5v3_2ef6383\brain` (ends after the current episode), then delete `inst0.lock`.
+Round-3 A/B (done, lock released 07:26; driver `C:\ssbot\sandbox\r5v_ab3.ps1`, frozen `C:\ssbot\live_r5v3_2ef6383`,
+instance 0, A0b protocol, terminal value off, T 36): run `20261008_063420` (seed 300900; the first batch 300800 was a
+"paused unasked" HARNESS_FAIL on its first episode), 100 episodes, arms C / PC / S / SPC switched PER EPISODE in one
+batch (same load: 1.4 % late overall). Report `C:\ssbot\data\m2_forum_r5v\round3\ab3_report.txt` (forum.md 17.11):
+
+| arm | hits / min (95 %) | time alive p50 / mean (s) | FORCED_RISK | plan p50 (ms) | late | kills |
+|---|---|---|---|---|---|---|
+| C (both off) | 18.9 (17.1-20.8) | 12.7 / 13.2 | 0.808 | 4.11 | 1.9 % | 0 |
+| PC (commit_rank) | 13.7 (12.5-15.2) | 19.6 / 19.7 | 0.863 | 4.49 | 1.3 % | 0 |
+| S (seen) | 13.8 (12.5-15.3) | 16.9 / 18.3 | 0.879 | 4.29 | 1.3 % | 1 (Envoy) |
+| SPC (seen + commit_rank) | 10.2 (9.1-11.6) | 27.0 / 26.1 | 0.910 | 4.61 | 1.3 % | 1 (Choristor) |
+
+Ratios (bootstrap): PC / C 0.72 (0.63-0.83), S / C 0.73 (0.64-0.84), **SPC / S 0.74 (0.64-0.87)**, SPC / PC 0.75;
+main effects commit_rank 0.73, seen 0.74, no interaction. So commit_rank helps on top of seen in a paired live test
+(round 2 had only offline evidence), and the late ticks do not grow under the same load. Still every episode a Q1
+QUIT in wave 0, 0 WOULD_DIE; the track's first kills (one Envoy, one Choristor). Diag's paired seen vs seen_cf
+(340100-340124, recomputed with `ab3_report.py`, `round3\diag_pair_report.txt`): 12.4 vs 9.4, ratio 0.76 - the same
+effect as SPC / S; seen_cf (seen, then the committed fine placements' share) and SPC (seen > P > P_cm > P_f) are
+near-identical mechanisms; seen_cf pays a second fine query after the envelope (plan p50 5.06 vs 4.35 in its pair),
+SPC gets its keys from stage 1's split (4.61 vs 4.29).
+
+Tests (code 2ef6383 + b96559f): full suite 1,143 passed, 2 skipped, 1 xfailed
+(`C:\ssbot\data\m2_forum_r5v\round3\fullsuite3.txt`; the runner wrote it over round 2's `fullsuite2.txt` first, so the
+round-2 file now holds this run). New tests: `test_occupied_split_is_the_union_and_its_committed_and_fine_parts`,
+`test_ab_arms_switch_per_episode`; the commit_rank test now checks the keys against the old second queries. Bell
+Beast: untouched (MultiForecast gained a method nothing on its path calls; ForumPlanner / ForumPlannerPolicy only).
 
 ### Needs deploy
 
@@ -1949,22 +1969,34 @@ from `C:\ssbot\live_r5v3_2ef6383\brain` (ends after the current episode), then d
 
 ### Next / open issues
 
-1. Integration: merge this branch with diag's (worktree-wf_fa16f06f-127-8): take this branch's FORCED_RISK block (seen >
-   P > P_cm > P_f) and policy `_fcfg`; decide SSBOT_FORUM_FR's default with diag's own seen / share A/B (seeds 340000).
+1. Integration: merge this branch with diag's (worktree-wf_fa16f06f-127-8): both change the FORCED_RISK block of
+   `combat/forum_planner.py` and the policy's planner construction. This branch: seen > P > P_cm > P_f (commit_rank,
+   keys from `occupied_split`), `SSBOT_FORUM_AB`; diag's later 82e94fa adds `seen_cf` (seen, then the committed fine
+   share, a second query). Live, paired within each track, they are equivalent (SPC / S 0.74, seen_cf / seen 0.76;
+   10.2 vs 9.4 hits / min in different windows): keep one. If seen_cf is kept, take its key from `occupied_split`
+   (the committed fine part is `com` before the windows are or'ed in: expose it) instead of the second query. Both
+   tracks' paired data support turning the seen key on by default at integration; the 50-episode Bell Beast batch
+   is the integrator's.
 2. Compute: done in round 3 (P_cm / P_f from stage 1's split query: +0.25-0.4 ms plan p50 for commit_rank, the old
    second queries alone were 0.6-0.9 / 2.7-4.8 ms p50 / p99; no late-tick difference under the same load).
 3. The remaining gap (forum.md 17.9): 68-79 % of the stacked ranking's misses have a clear row tied on every risk key;
    the hits come from attacks not started yet (the saturated later-instance boxes): time-resolved later-instance
    placements (R2 / R3, recertify) or lead-time branch probabilities (R5 model's next step).
-4. Wave 0 is still never cleared (no kill in the 177 live episodes of this track): offence (R6 targets, R8
-   clash) is next.
-5. Terminal-value weights / body-field radius are hand-set; in wave 0 the value is not the bottleneck (17.7). Kill value
-   untested (no kills).
+4. Wave 0 is still never cleared (2 kills in the 277 live episodes of this track, both in round 3's seen arms):
+   offence (R6 targets, R8 clash) is next.
+5. Terminal value: off by default since round 3 (`SSBOT_FORUM_TV=1` on); weights / body-field radius hand-set; in wave
+   0 it is not the bottleneck (17.7). Kill value untested in closed loop.
 6. Main's working copy has no `knowledge/1.0.30000/enemies/forum/*_hitboxes.npz` (git-ignored); this worktree's copy
    (= `C:\ssbot\tables\forum_r3_2a10a0d`) was used for the frozen checkouts.
-7. Frozen checkouts `C:\ssbot\live_r5v_35e5fe6`, `C:\ssbot\live_r5v2_737048f` (unused) and `C:\ssbot\live_r5v2_8617aa6`
-   can go; audit dumps (~60 MB each set) in `C:\ssbot\data\m2_forum_r5v\round2\` can go after integration.
+7. Frozen checkouts `C:\ssbot\live_r5v_35e5fe6`, `C:\ssbot\live_r5v2_737048f` (unused), `C:\ssbot\live_r5v2_8617aa6`
+   and `C:\ssbot\live_r5v3_2ef6383` can go; audit dumps (~60 MB each set) in `C:\ssbot\data\m2_forum_r5v\round2\` can
+   go after integration.
 8. Tests: full suite at 737048f 1,138 passed, 2 skipped, 1 xfailed; after the port and the default flip the Forum /
-   planner / terminal / multi_forecast / worldstate / observability subset 224 passed; final full suite (code of
-   3797b3e): 1,141 passed, 2 skipped, 1 xfailed (`C:\ssbot\data\m2_forum_r5v\round2\fullsuite2.txt`). Bell Beast:
-   untouched by construction (ForumPlanner / ForumPlannerPolicy only); its equivalence tests are in the suite.
+   planner / terminal / multi_forecast / worldstate / observability subset 224 passed; full suite (code of 3797b3e):
+   1,141 passed, 2 skipped, 1 xfailed; round 3 (code of 2ef6383 + b96559f): 1,143 passed, 2 skipped, 1 xfailed
+   (`C:\ssbot\data\m2_forum_r5v\round3\fullsuite3.txt`). Bell Beast: untouched by construction (ForumPlanner /
+   ForumPlannerPolicy only, plus a new MultiForecast method); its equivalence tests are in the suite.
+9. The "paused unasked" HARNESS_FAIL after a real quit ended a batch on its first episode again (seed 300800); the
+   drivers work around it with a new seed, the fix is the harness's.
+10. Hindsight audits (`forum_tv_audit`) are biased toward unexecuted rows: compare rankings against `clear.random`,
+    not against the live pick (forum.md 17.11 item 3).
