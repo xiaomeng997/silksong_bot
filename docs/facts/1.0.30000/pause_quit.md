@@ -425,3 +425,5 @@
 - data 模式下看门狗暂停后本可以恢复后接着打（时间冻结，只少了 250 ms 的输入），现在仍按 HARNESS_FAIL 结束这一场：策略和 tap 没有处理暂停中的帧。
 - 标题上从 Options 退回后高亮停在 Options，load_slot 必然多一次 MenuError（约 6 s）；可以在 title_home 之后按来源菜单先 Up，但这需要知道每个子菜单的 menuState 归属哪一项，没做。
 - 主菜单 / 暂停菜单的高亮会被窗口下静止的鼠标改变；训练时鼠标最好不停在训练窗口上（正式运行已有此规定，P7）。
+- 10-08 03:48:02 两个实例同一秒的看门狗暂停没有长决策，像整机停顿（同 10-04 21:01:15）；原因没查（当时谁在占 CPU / 磁盘不清楚）。
+- 主菜单的项目表（`recovery.TITLE_ITEM`）只实测了 Options（Up ×1）；列表是否循环、Achievements / Extras 是否显示都没测。不循环的话 Up ×4 总能回到 Start Game；循环且有隐藏项时 Up 次数会多，同一个 MenuError 可能重复到 3 次重试用完（不会改设置）。`recovery_check` 的 title_items 用例可以测，这一轮实例 4 被 routes 的 4 小时 Lace2 采集占着，没跑；worker_pause / worker_norecover（worker 本身的恢复路径）也同样待实测，单元测试已覆盖。
