@@ -1132,3 +1132,11 @@ L2 开的受击按当时的控制器分支（受击前 0.2 s）：
 | Choristor `Body Damager` | **28** | 8 | **+0.27 / 场（se 0.08）** |
 
 总受击的差别不显著，但来源变了：Choristor 的身体接触多了 20 次，存活有约 1.7 se 的负向趋势。28 次按受击前 0.2 s 的 L2 目标分：RUSH 冲的正是这只 Choristor 6 次、RUSH 冲别的 8 次、KITE(EVADE)（LOCAL 的打分）14 次——一半发生在 LOCAL 自己的 EVADE 下，所以不是 RUSH 的接敌点离它本体太近这么简单，而是 L2 让主角更多地待在敌群附近（RUSH 时到目标的距离中位 2.5 u，关 3.7 u，17.5）。和 FORCED_RISK 在支撑饱和时的并列是同一个瓶颈（规划器分不出哪一行能躲开它的冲撞），没有改 L2；diag 的 `SSBOT_FORUM_FR=seen` 上线后在同一对 A/B 上复查这一项。第 3 轮完整连战的数字见 17.7.5。
+
+#### 17.7.6 跳施法的大符文（第 2 轮"下一步"第 1 条）
+
+v4 的 w7 有 20 次受击是跳施法的大符文（`rune slam`）。行为表（ChoirClapper.json `CC_JUMP_CAST`）：大符文在落地那帧出现在落点前方 6.62 u（r 7.19，从落点后 0.58 u 到前方 13.8 u），这一招在承诺后约 2.18 s 结束，而大符文在这一招结束后 0.75 s（`_tail` 的 `t_on_state` p5 / p50 0.749 s，p95 2.67 s）才炸、0.87 s（p50）关；那时控制器已经回到"脸上 4 u"，正在圈里。改动（04dcad8）：跳施法结束后 `rune_hold_s` 1 s 内，站位留在落点后方 2.5 u（这一跳的走法是钻到它下面、且现在过去不穿过它的身体时）或圈外前方 14.5 u（`rune: out`，这时对它的命中权重为 0，和其他"走开"的分支一样）；锤（CC_SLAM）照旧优先。测试 `test_jump_cast_rune_circle_kept_out_of_after_the_move`（退开时圈外、1 s 后回到脸上；钻过去时留在落点后方）。实战见 17.7.5。
+
+#### 17.7.7 §4.4 第 4 条在最终代码上复跑
+
+核对者指出 600 tick 的逐位比对是第 1 轮做的。第 3 轮在 4a0c212 上重跑：`forum_policy_replay` 074719 i3 ep0、600 tick、`--deadline-ms inf`，`SSBOT_FORUM_L2=fail:1` 对 `=0`：模式、目标、计划、S、FORCED_RISK、mask、J 600 个 tick 全部相同（只有记录里的 goal 标签不同："LOCAL" 对空）。单元测试 `test_l2_failure_is_local_bit_for_bit` 的 3 种情况照旧通过。
