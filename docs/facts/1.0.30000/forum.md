@@ -934,7 +934,7 @@ cd brain   # 冻结检出（git archive，没有 .git）：behaviour_build 要�
 
 ## 18. R5 行为模型：感知时刻、冷却、分支历史、Tiny 一只一只、身体触发（2026-10-08，forum_planner_plan.md §5 R5 的行为模型半；离线，没有连接游戏）
 
-代码：`combat/branch_model.py`（SENSING 表、触发形状 RANGES、BranchMemory、BranchModel、运行时 BranchView、身体触发 REACTIVE）、`combat/tiny_orbit.py`、`knowledge/forum_branch.py`（扫描、选择、校准）；工具 `forum_branch`（scan / study / build）、`tiny_orbit`；`multi_recall --branch`。产品 `knowledge/1.0.30000/enemies/forum/branch_model.json`（148 KB）、`tiny_orbit.json`。测试 `tests/test_branch_model.py`（19 个）。**全部只进打分（P / J、O / BAIT），支撑、放置、监督器都不读它**；接线：`MultiForecaster(branch=BranchModel.load())` 时每个 EnemyTracker 带一个 BranchMemory，`Subject.next_p` = 下一招家族的概率，`branch_probs(iid)` / `next_attack_probs(iid)` / `BranchView.reactive` / `entry_prob`；`ForumPlannerPolicy(branch_model=True)` 打开，默认关（规划器还没有消费者，R5 终点价值 / R6 的 O、BAIT 用）。
+代码：`combat/branch_model.py`（SENSING 表、触发形状 RANGES、BranchMemory、BranchModel、运行时 BranchView、身体触发 REACTIVE）、`combat/tiny_orbit.py`、`knowledge/forum_branch.py`（扫描、选择、校准）；工具 `forum_branch`（scan / study / build / parity）、`tiny_orbit`；`multi_recall --branch`。产品 `knowledge/1.0.30000/enemies/forum/branch_model.json`（复核后 243 KB：分支帧表 `types`、预报表 `ahead`、分段 `segmentation`）、`tiny_orbit.json`。测试 `tests/test_branch_model.py`（21 个，含录像逐帧核对）。**全部只进打分（P / J、O / BAIT），支撑、放置、监督器都不读它**；接线：`MultiForecaster(branch=BranchModel.load())` 时每个 EnemyTracker 带一个 BranchMemory，`Subject.next_p` = 下一招家族的概率（**预报表 `ahead`**，§18.11；复核前用的是分支帧表，中途查询时严重失准），`branch_probs(iid)` / `next_attack_probs(iid)` / `BranchView.reactive` / `entry_prob`；`ForumPlannerPolicy(branch_model=True)` 打开，默认关（规划器还没有消费者，R5 终点价值 / R6 的 O、BAIT 用）。
 
 数据：DEV = R0 的 142 场完整连战（`m2_forum_r0\cache` 107 + `cache_fresh` 35，随机数据策略），按场两折交替；**TEST = R1 收尾的 202 场**（`m2_forum_r1c\cache_fresh`：w7 / w2 波次起点、154609 / 154612 完整连战，data2 / idle 策略），选择和调参时没有看过，表在 DEV 全部上拟合后只评估一次。决策 = 控制 FSM 离开一个决策状态的一次转移：DEV 428,997 个、TEST 253,222 个（61 个决策状态，n ≥ 60 且至少两个后继）。主角的丝从录像读（`hero.silk`，每场约 2 s，缓存在 `C:\ssbot\data\m2_forum_r5m\hero\`）。
 
@@ -969,7 +969,7 @@ PlayMaker 的三条规则决定了"哪一刻"：(1) 动作在 OnEnter 里发出�
 | | Evade End | SendRandomEvent 0.5（无记忆）→ Alert，否则 Throw Range 内 → 扔 | 分支帧 |
 | | Throw Antic Anim → Throw Antic（0.25 s）→ Throw Aim（0.4 s）→ Throw Lock → Lock R High / Throwing Up? → Throw Up / Down | Throw Antic Anim 进入时存"向上瞄"；Throw Aim 进入时存到主角的角度；Lock / Throwing Up? / Throw Up / Down 读存下来的值 | **存储（更早的状态）** |
 | | Stab Pos | 每帧 Stab Range；1.5 s → Move Cancel | 分支帧 |
-| Envoy | Walker | 每帧：Attack Range → 斩；Charge Range（进 Walker 1.5 s 后或一次斩之后打开，Charge Antic 关）→ 冲锋；TOOK DAMAGE → Leader? | 分支帧 |
+| Envoy | Walker | 每帧：Attack Range → 斩；Alerted ∧ Charge Range（场景加载时就开着；一次斩之后开；一次 Walker 待满 1.5 s 时开（`ActivateGameObjectDelay` 1.5 s、resetOnExit 0：离开 Walker 后仍开着，没待满就不开）；Charge Antic 关）→ 冲锋；TOOK DAMAGE → Leader? | 分支帧 |
 | | Combo? | 瞬时：没面对主角 → Attack End；V4 1:1（eventMax 2） | 分支帧 |
 | Choristor | Hop Antic | 进入时：Close Range → Attack Choice；否则 0.2 s → Hop Check | **进入** |
 | | Hop Check | 瞬时 \|x 距离\| ≤ Hop Distance（Move Start 时抽 U(6, 10)，这一串跳共用）→ 后跳 | 分支帧 + 历史 |
@@ -984,161 +984,161 @@ Tiny 的控制 FSM 在别的包里（Maestro 用 `CreateObject` 生成的预制�
 
 ### 18.2 冷却：FSM 里的历史，换成看得见的条件（`BranchMemory`，从控制状态的进入和看到的命中推出）
 
-- **门**（布尔变量 + 哪个状态设 / 清，`branch_model._GATES`）：Bellbearer `Evade Cooldown`（Evade 设、只有 Throw Antic 清：扔一次钟补一发闪避；`can_evade` = 上一次 In Range 待够 0.5 s，带到 Insta Throw?）；Reed `armed`（Evade Antic 关、Defend Start / Stab Antic 开）、`jdd` = Just Did Defend（Defend Start 设、Stab Antic / Throw Antic 清）；Clapper `evaded`（Evade Scuttle 设、任何招的前摇清）；Envoy `charge_armed`（Charge Antic 关、Slash Antic 开，或进 Walker 1.5 s）。
-- **计数 / 计时**：Choristor 这一串跳的第几跳和上一跳方向（`hops`、`last_hop`）；Clawmaiden 吸丝计时（Startle 设 U(1, 3)、Spear Fire Recover 设 U(1.5, 2)，只在 Fly 里减）→ 在 Fly 里累计的时间 `suck_age`；Maestro 自己的死 Tiny 数 `dead_tinies`（Tiny 归属：它在 Ready 时离哪只 Maestro 最近）。
-- **防重复**：这个状态以前的选择 `last_choice` / `prev2_choice` / `choice_run` / `miss_<后继>`（V4 的两个计数就是它们）。
-- **分支拆开的历史**（你 10-04）：上一招和它最后一个状态 `prev_end`（例 `MI_PARRY:Parry Stance End` 没被打 vs `MI_PARRY:Parry Slash End` 被打后反击）、离上一招结束多久 `since_end`、从哪个状态进来 `from`、**这一帧之前**的最近一次命中 `hit`（< 0.25 s / < 1 s / 更早；决策当帧的命中是它的原因——TOOK DAMAGE / BLOCKED HIT 出边——留给规划器的命中分支，不当历史，否则泄漏）。
-- 跨敌人：Clapper 的伴在不在、在不在出招、x 距离 < 4（`buddy*`）；主角的丝（Clawmaiden）。
+- **门**（布尔变量 + 哪个状态设 / 清，`branch_model._GATES`）：Bellbearer `Evade Cooldown`（Evade 设、只有 Throw Antic 清：扔一次钟补一发闪避；`can_evade` = 上一次 In Range 待够 0.5 s，带到 Insta Throw?）；Reed `armed`（Evade Antic 关、Defend Start / Stab Antic 开）、`jdd` = Just Did Defend（Defend Start 设、Stab Antic / Throw Antic 清）；Clapper `evaded`（Evade Scuttle 设、任何招的前摇清）；Envoy `charge_armed`（初值开：Charge Range 物体在场景里 active；Charge Antic 关、Slash Antic 开；一次 Walker 待满 1.5 s 时开且离开后保持）和 `alerted`（Slash Antic / Ambush Ready 设，从不清；CHARGE 要它）。**复核修正**：第一版初值关、只在 Walker 里按时间开，于是 Walker → Charge Antic 时门是关的 DEV 131 次、TEST 34 次（FSM 里不可能）。
+- **计数 / 计时**：Choristor 这一串跳的第几跳和上一跳方向（`hops`、`last_hop`）；Clawmaiden 吸丝计时（Startle 设 U(1, 3)、Spear Fire Recover 设 U(1.5, 2)，只在 Fly 里减）→ 在 Fly 里累计的时间 `suck_age`；Maestro 自己的死 Tiny 数 `dead_tinies`（Tiny 归属 `TinyOwners`：每一帧 Tiny 在 Ready 且这一帧看得见时，归给 0.25 s 内看得见的最近一只 Maestro（< 8 u），最后一次归属有效；扫描和运行时同一条规则、都只用过去的帧——第一版扫描按整场投票，用到了未来的帧）。
+- **防重复**：这个状态以前的选择 `last_choice` / `prev2_choice` / `choice_run` / `miss_<后继>`，上一次各家族之后过了几招 `since_<家族>`（V4 的两个计数就是它们；第一版 `since_` / `miss_` 只在离线扫描里算，运行时没有，§18.11）。
+- **分支拆开的历史**（你 10-04）：上一招和它最后一个状态 `prev_end`（例 `MI_PARRY:Parry Stance End` 没被打 vs `MI_PARRY:Parry Slash End` 被打后反击）、离上一招结束多久 `since_end`、从哪个状态进来 `from`、在这个状态里待了多久 `age`、到这一帧为止的最近一次命中 `hit`（< 0.25 s / < 1 s / 更早）。**复核修正**：第一版写"决策当帧的命中是 TOOK DAMAGE 出边的原因、不算历史"，实际几乎用不上：TOOK DAMAGE 出边（DEV 22 场，1,011 次）和同一帧的记录命中重合只有 1 次；Clapper Idle → Dmg Attack 194 / 568、Minister Chase → Range Check 84 / 299 在一次记录命中之后 12–18 帧（多数 18 帧 = 0.3 s），Reed Alert → Stab Pos 只有 7 / 176，其余前 0.35 s 内没有记录到的命中（中位数 1.9–4 s 前）。所以 `hit` 带的是看得见的过去信息（不是泄漏），现在当帧的命中也算。
+- 跨敌人：Clapper 的伴在不在、在不在出招、x 距离 < 4（`buddy*`，`clapper_context`：伴的控制状态不在等待集合里、0.25 s 内看得见）；主角的丝（Clawmaiden）。分段（哪个状态开始哪一招）运行时也用扫描的 `FORUM_SPECS`：运行时走子表少 Maestro 的 MA_POINT、Envoy 的 EN_HOPSLASH / EN_ENTRY，第一版运行时的 `prev` / `run` / `since_*` 因此和训练不一样。
 - 全部看得见：状态及其进入时刻（oracle 的 FSM / 视觉的阶段）、看到的命中、位置、主角自己的丝；不读 FSM 变量。
 
 **数据核对**（DEV，`C:\ssbot\data\m2_forum_r5m\branch_gap.json`；"下一招"= 上一招结束后的第一招，不算入场 / 待机）：Bellbearer 闪过之后下一招 **2,229 / 2,229 是扔钟**（Evade Cooldown）；Maestro 防御之后 89 % 斩、11 % 召唤、**0 防御**（V4 eventMax 1），斩之后 53 % 斩 / 39 % 防御 / 8 % 召唤。
 
-### 18.3 结果：留出对数损失与校准（前 / 后）
+### 18.3 结果：分支帧模型的留出对数损失与校准（复核后重建，代码 2f5b96a；第一版的数字和它错在哪见 §18.11）
 
-"无条件" = 运行时今天用的 `p_succ`（平滑边际）；"R0" = R0 表选出的协变量（分支帧取值，同一套平滑在训练折上重拟）；"新" = 本节的模型。DEV 列是两折交叉验证，TEST 列是 DEV 全部拟合后在 202 场上一次评估。nats / 决策，加权平均（按决策数）：
+"分支帧模型"（`branch_model.json` 的 `types` 表）估的是 **P(后继 | 这个决策就在这一帧发生)**：拟合和评估都只用状态离开的那一帧。它回答"如果它现在决定，走哪一支"——瞬时决策（进入的同一帧就离开）和候选路径的"假如"；**它不是状态中途的预报**（中途查询要用 `ahead` 表，§18.11.3）。"无条件" = 每次访问的边际（运行时走子今天的 `p_succ`）；"R0 重拟" = R0 表的协变量名在这些记录上用同一套回退平滑重拟（**不是**发布的 R0 表；R0 表在运行时只以无条件 `p_succ` 出现）；"新" = 本节模型，所有协变量都是运行时 `BranchView` 逐帧算得出来的（§18.11.2：7 场逐帧核对 0 差）。DEV 列两折交叉验证，TEST 列 DEV 全部拟合后在 202 场上一次评估。nats / 决策，按决策数加权：
 
-| | 无条件 | R0 | 新 | ECE（无条件 → 新） |
-|---|---|---|---|---|
-| DEV（428,997，交叉验证） | 0.740 | 0.539 | **0.332** | — |
-| TEST（253,222，留出） | 0.695 | 0.512 | **0.315** | 0.018 → **0.009** |
+| | 无条件 | R0 重拟 | 新 |
+|---|---|---|---|
+| DEV（428,997，交叉验证） | 0.740 | 0.538 | **0.279** |
+| TEST（253,222，留出） | 0.695 | 0.511 | **0.284** |
 
-逐个决策（ECE = 所有（决策, 后继）对按预测概率分 10 档的期望校准误差；时刻见 §18.4）：
+逐个决策（ECE = 所有（决策, 后继）对按预测概率分 10 档的期望校准误差，TEST；时刻见 §18.4）：
 
-| 类型 | 决策 | DEV n | 无条件 | R0 | 新 | 时刻 | 协变量 | TEST n | 无条件 | R0 | 新 | ECE 前 → 后 |
+| 类型 | 决策 | DEV n | 无条件 | R0 重拟 | 新 | 时刻 | 协变量 | TEST n | 无条件 | R0 重拟 | 新 | ECE 前 → 后 |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
-| Bellbearer | Check Pos | 710 | 0.253 | 0.176 | 0.153 | branch | dx,in_Throw Range,dy | 318 | 0.146 | 0.096 | 0.084 | 0.028→0.013 |
+| Bellbearer | Check Pos | 710 | 0.253 | 0.176 | 0.153 | branch | dx,in_Throw Range,dist_visible | 318 | 0.146 | 0.096 | 0.084 | 0.028→0.013 |
 | Bellbearer | Evade End | 4466 | 0.693 | 0.581 | 0.534 | branch | prev2_choice,in_Throw Range,side | 2947 | 0.693 | 0.547 | 0.514 | 0.004→0.012 |
 | Bellbearer | In Range | 15679 | 1.064 | 0.420 | 0.107 | branch | dx,since_end,in_Evade Range,dist | 9928 | 1.044 | 0.402 | 0.117 | 0.015→0.005 |
 | Bellbearer | Insta Throw? | 6196 | 0.667 | 0.323 | 0.318 | branch | prev2_choice | 3601 | 0.665 | 0.298 | 0.298 | 0.000→0.002 |
-| Choristor | Attack Choice | 5678 | 1.300 | 1.051 | 0.673 | branch | in_Attack Range,in_Close Range,prev2_choice,since_CH_JUMP | 1626 | 1.276 | 0.984 | 0.619 | 0.013→0.003 |
-| Choristor | Combo? | 1715 | 0.628 | 0.610 | 0.013 | branch | front,hit | 564 | 0.637 | 0.631 | 0.020 | 0.008→0.002 |
-| Choristor | Hop Antic | 9906 | 0.355 | 0.169 | 0.006 | entry | in_Close Range,dx | 2786 | 0.410 | 0.201 | 0.011 | 0.018→0.000 |
+| Choristor | Attack Choice | 5678 | 1.300 | 1.051 | 0.674 | branch | in_Attack Range,in_Close Range,prev2_choice,since_CH_JUMP | 1626 | 1.276 | 0.984 | 0.622 | 0.013→0.005 |
+| Choristor | Combo? | 1715 | 0.628 | 0.610 | 0.013 | branch | front,hit | 564 | 0.637 | 0.631 | 0.021 | 0.008→0.002 |
+| Choristor | Hop Antic | 9906 | 0.355 | 0.169 | 0.001 | branch | age | 2786 | 0.410 | 0.201 | 0.000 | 0.018→0.000 |
 | Choristor | Hop Check | 8776 | 0.693 | 0.236 | 0.190 | branch | dx,last_hop | 2394 | 0.694 | 0.247 | 0.205 | 0.016→0.006 |
-| Choristor | Hop Land | 8745 | 0.692 | 0.606 | 0.560 | branch | hops,side,hero_x | 2380 | 0.692 | 0.612 | 0.563 | 0.001→0.006 |
+| Choristor | Hop Land | 8745 | 0.692 | 0.606 | 0.557 | lead0.2 | hops,side,hero_x | 2380 | 0.692 | 0.612 | 0.563 | 0.001→0.005 |
 | Choristor | Slash Check | 2463 | 0.591 | 0.226 | 0.023 | branch | in_Slash Range,hit,dy | 757 | 0.509 | 0.181 | 0.050 | 0.029→0.001 |
 | Choristor | Unalert Tick? | 5739 | 0.403 | 0.251 | 0.144 | branch | in_Attack Range,dist,dist_visible,hero_x | 1659 | 0.416 | 0.301 | 0.145 | 0.005→0.012 |
 | Clapper | After Scuttle | 10014 | 0.385 | 0.159 | 0.006 | branch | in_Slam Range,dx | 4758 | 0.397 | 0.188 | 0.009 | 0.004→0.000 |
-| Clapper | Avoid Type | 9734 | 0.675 | 0.623 | 0.599 | lead0.1 | dist_visible,dist,since_end,prev | 4338 | 0.677 | 0.629 | 0.607 | 0.005→0.013 |
-| Clapper | Close Range | 14839 | 1.222 | 1.174 | 0.708 | lead0.2 | buddy_attacking,prev,since_end,dist | 7096 | 1.210 | 1.155 | 0.693 | 0.010→0.004 |
-| Clapper | Dmg Attack | 3656 | 0.693 | 0.329 | 0.006 | branch | in_Slam Range,since_CC_SLAM | 1185 | 0.698 | 0.331 | 0.036 | 0.048→0.002 |
-| Clapper | Escape Jump | 413 | 0.692 | 0.414 | 0.377 | lead0.5 | last_choice,dy,buddy_attacking,since_CC_SLAM | 267 | 0.693 | 0.290 | 0.302 | 0.007→0.018 |
-| Clapper | Evade Scuttle | 10486 | 0.201 | 0.090 | 0.070 | entry | dist_visible,dx,last_seen_x | 5044 | 0.234 | 0.093 | 0.062 | 0.006→0.002 |
-| Clapper | Far Range | 13876 | 1.274 | 1.002 | 0.595 | branch | buddy_attacking,prev2_choice,miss_Cast Slam Antic,miss_Jump Antic | 6563 | 1.339 | 0.950 | 0.506 | 0.026→0.003 |
-| Clapper | Idle | 28014 | 1.319 | 1.054 | 0.425 | branch | buddy_close,since_end,in_Slam Range,from | 13416 | 1.287 | 1.042 | 0.398 | 0.010→0.009 |
-| Clapper | Walk | 15094 | 0.543 | 0.387 | 0.047 | branch | in_Slam Range | 7733 | 0.579 | 0.459 | 0.044 | 0.016→0.000 |
-| Clawmaiden | Fly | 6623 | 1.160 | 0.767 | 0.311 | branch | in_Slash Range,since_end,in_Suck Start Range,suck_age | 4457 | 1.097 | 0.743 | 0.250 | 0.019→0.016 |
-| Clawmaiden | Fly To Slash | 1543 | 0.776 | 0.608 | 0.102 | branch | in_Slash Range,since_end,choice_run | 1094 | 0.705 | 0.508 | 0.067 | 0.052→0.003 |
-| Clawmaiden | Spin 0 | 1018 | 0.233 | - | 0.135 | branch | silk,in_Slash Range,since_CM_TELE | 631 | 0.192 | - | 0.108 | 0.005→0.007 |
-| Clawmaiden | Spin 1 | 968 | 0.233 | - | 0.139 | lead0.1 | silk,since_CM_TELE,dx | 605 | 0.188 | - | 0.145 | 0.007→0.008 |
-| Clawmaiden | Spin 2 | 919 | 0.686 | 0.668 | 0.169 | lead0.1 | silk,in_Suck Start Range | 582 | 0.669 | 0.653 | 0.129 | 0.013→0.005 |
-| Clawmaiden | Spin Antic | 3736 | 1.098 | 1.007 | 0.590 | entry | silk,since_end | 2609 | 1.081 | 0.964 | 0.587 | 0.013→0.004 |
-| Clawmaiden | Tele? | 935 | 0.679 | 0.481 | 0.478 | branch | prev2_choice,since_CM_SPIN,suck_set | 475 | 0.681 | 0.464 | 0.470 | 0.005→0.020 |
-| Envoy | Charge | 568 | 1.322 | 0.895 | 0.716 | lead0.2 | dist_visible,dx,hero_x,miss_Reset | 118 | 1.312 | 0.760 | 0.629 | 0.004→0.032 |
+| Clapper | Avoid Type | 9734 | 0.675 | 0.623 | 0.597 | lead0.3 | dx,since_end,prev | 4338 | 0.677 | 0.629 | 0.594 | 0.005→0.009 |
+| Clapper | Close Range | 14839 | 1.222 | 1.175 | 0.710 | lead0.2 | buddy_attacking,prev,since_end,dist | 7096 | 1.210 | 1.155 | 0.696 | 0.010→0.004 |
+| Clapper | Dmg Attack | 3656 | 0.693 | 0.329 | 0.007 | branch | in_Slam Range,dy | 1185 | 0.698 | 0.331 | 0.020 | 0.048→0.001 |
+| Clapper | Escape Jump | 413 | 0.692 | 0.414 | 0.377 | lead0.5 | last_choice,dy,buddy_attacking,since_CC_SLAM | 267 | 0.693 | 0.290 | 0.300 | 0.007→0.018 |
+| Clapper | Evade Scuttle | 10486 | 0.201 | 0.090 | 0.024 | branch | age,side | 5044 | 0.234 | 0.093 | 0.013 | 0.006→0.003 |
+| Clapper | Far Range | 13876 | 1.274 | 0.974 | 0.596 | branch | buddy_attacking,prev2_choice,miss_Cast Slam Antic,miss_Jump Antic | 6563 | 1.339 | 0.921 | 0.505 | 0.026→0.002 |
+| Clapper | Idle | 28014 | 1.319 | 1.054 | 0.152 | branch | age,buddy,in_Slam Range,buddy_close | 13416 | 1.287 | 1.042 | 0.148 | 0.010→0.003 |
+| Clapper | Walk | 15094 | 0.543 | 0.387 | 0.038 | branch | in_Slam Range,age | 7733 | 0.579 | 0.459 | 0.037 | 0.016→0.000 |
+| Clawmaiden | Fly | 6623 | 1.160 | 0.767 | 0.158 | branch | age,in_Slash Range,in_Suck Start Range,suck_age | 4457 | 1.097 | 0.743 | 0.125 | 0.019→0.010 |
+| Clawmaiden | Fly To Slash | 1543 | 0.776 | 0.608 | 0.036 | branch | age,in_Slash Range,in_Tele Escape Range | 1094 | 0.705 | 0.508 | 0.034 | 0.052→0.002 |
+| Clawmaiden | Spin 0 | 1018 | 0.233 | - | 0.074 | lead0.2 | silk,age,suck_set,dy | 631 | 0.192 | - | 0.184 | 0.005→0.024 |
+| Clawmaiden | Spin 1 | 968 | 0.233 | - | 0.034 | lead0.1 | age,silk,choice_run,in_Slash Range | 605 | 0.188 | - | 0.412 | 0.007→0.066 |
+| Clawmaiden | Spin 2 | 919 | 0.686 | 0.668 | 0.136 | lead0.1 | silk,age | 582 | 0.669 | 0.653 | 0.250 | 0.013→0.044 |
+| Clawmaiden | Spin Antic | 3736 | 1.098 | 1.007 | 0.449 | entry | age,silk | 2609 | 1.081 | 0.964 | 0.473 | 0.013→0.001 |
+| Clawmaiden | Tele? | 935 | 0.679 | 0.481 | 0.474 | branch | prev2_choice,since_CM_SPIN,last_seen_x,in_Suck Start Range | 475 | 0.681 | 0.464 | 0.484 | 0.005→0.046 |
+| Envoy | Charge | 568 | 1.322 | 0.895 | 0.733 | lead0.1 | front,hero_x,last_seen_x,dy | 118 | 1.312 | 0.760 | 0.909 | 0.004→0.046 |
 | Envoy | Combo? | 842 | 0.663 | 0.639 | 0.486 | branch | front,prev2_choice,miss_JumpSlash Antic | 201 | 0.651 | 0.633 | 0.475 | 0.016→0.027 |
-| Envoy | Walker | 1408 | 0.748 | 0.133 | 0.053 | branch | dist_visible,in_Attack Range,prev,charge_armed | 326 | 0.674 | 0.068 | 0.060 | 0.016→0.003 |
+| Envoy | Walker | 1408 | 0.748 | 0.133 | 0.040 | branch | dist_visible,charge_armed,in_Attack Range | 326 | 0.674 | 0.068 | 0.033 | 0.016→0.005 |
 | Maestro | Attack Choice | 15278 | 0.608 | 0.318 | 0.331 | branch | miss_Defend Start | 10901 | 0.610 | 0.312 | 0.324 | 0.002→0.005 |
-| Maestro | Check Pos | 426 | 0.695 | 0.215 | 0.110 | lead0.1 | dist,dist_visible,dead_tinies,dy | 255 | 0.661 | 0.202 | 0.088 | 0.121→0.012 |
+| Maestro | Check Pos | 426 | 0.695 | 0.215 | 0.118 | branch | dx,dist,dist_visible,dy | 255 | 0.661 | 0.202 | 0.115 | 0.121→0.010 |
 | Maestro | Fly | 4460 | 0.846 | 0.169 | 0.037 | branch | last_choice,dx,since_end,in_Attack Range | 2599 | 0.781 | 0.169 | 0.038 | 0.056→0.002 |
-| Maestro | Slash Recover | 10501 | 0.537 | 0.029 | 0.025 | branch | last_choice,last_seen_x | 7539 | 0.543 | 0.019 | 0.017 | 0.005→0.001 |
-| Maestro | Summon? | 16694 | 0.290 | 0.272 | 0.169 | branch | dead_tinies,last_seen_x | 11300 | 0.173 | 0.186 | 0.071 | 0.033→0.004 |
-| Minister | Attack | 3309 | 0.634 | 0.407 | 0.205 | branch | dist,dx,front,dy | 3131 | 0.680 | 0.421 | 0.250 | 0.043→0.015 |
+| Maestro | Slash Recover | 10501 | 0.537 | 0.029 | 0.007 | branch | age | 7539 | 0.543 | 0.019 | 0.003 | 0.005→0.000 |
+| Maestro | Summon? | 16694 | 0.290 | 0.272 | 0.177 | branch | dead_tinies,since_MA_SUMMON | 11300 | 0.173 | 0.186 | 0.079 | 0.033→0.006 |
+| Minister | Attack | 3309 | 0.634 | 0.407 | 0.088 | branch | age,dist,dx,front | 3131 | 0.680 | 0.421 | 0.121 | 0.043→0.009 |
 | Minister | Attack Choice | 6932 | 0.693 | 0.518 | 0.493 | branch | prev2_choice | 6460 | 0.693 | 0.495 | 0.480 | 0.002→0.007 |
-| Minister | Chase | 8804 | 0.518 | 0.374 | 0.196 | branch | in_Attack Range,dist,from,since_end | 7172 | 0.369 | 0.266 | 0.159 | 0.076→0.008 |
+| Minister | Chase | 8804 | 0.518 | 0.374 | 0.167 | branch | in_Attack Range,dist,age,from | 7172 | 0.369 | 0.266 | 0.131 | 0.076→0.010 |
 | Minister | Check Pos | 568 | 0.314 | 0.050 | 0.002 | branch | last_seen_x,dy | 308 | 0.239 | 0.022 | 0.000 | 0.023→0.000 |
 | Minister | Evade? | 5525 | 0.543 | 0.433 | 0.311 | branch | in_Evade Range,prev2_choice,choice_run | 5033 | 0.605 | 0.477 | 0.355 | 0.035→0.001 |
-| Minister | Parry Stance | 3404 | 0.550 | 0.530 | 0.423 | branch | dist,front,since_end,prev_end | 3208 | 0.442 | 0.416 | 0.363 | 0.062→0.058 |
-| Minister | Retreat? | 4243 | 0.297 | 0.276 | 0.242 | branch | dist,since_end | 3594 | 0.211 | 0.199 | 0.186 | 0.024→0.029 |
-| Reed | Alert | 9806 | 1.426 | 0.925 | 0.390 | branch | since_end,in_Evade Range,last_choice,in_Defend Range | 5482 | 1.359 | 0.854 | 0.321 | 0.018→0.008 |
+| Minister | Parry Stance | 3404 | 0.550 | 0.530 | 0.242 | branch | age,front,dist | 3208 | 0.442 | 0.416 | 0.210 | 0.062→0.030 |
+| Minister | Retreat? | 4243 | 0.297 | 0.276 | 0.150 | branch | age,dist | 3594 | 0.211 | 0.199 | 0.097 | 0.024→0.018 |
+| Reed | Alert | 9806 | 1.426 | 0.906 | 0.384 | branch | age,dist,in_Evade Range,last_choice | 5482 | 1.359 | 0.833 | 0.286 | 0.018→0.010 |
 | Reed | Check Pos | 710 | 0.276 | 0.236 | 0.098 | branch | hero_x,last_seen_x,dist_visible,in_Defend Range | 284 | 0.264 | 0.264 | 0.191 | 0.004→0.021 |
 | Reed | Choice | 3551 | 0.693 | 0.624 | 0.480 | branch | in_Throw Range,prev2_choice | 2178 | 0.693 | 0.580 | 0.469 | 0.005→0.008 |
-| Reed | Defend | 2483 | 0.655 | 0.592 | 0.360 | branch | since_end,dist,front | 1439 | 0.574 | 0.524 | 0.343 | 0.049→0.020 |
-| Reed | Evade End | 2212 | 0.693 | - | 0.673 | branch | in_Throw Range,hit | 1291 | 0.692 | - | 0.676 | 0.013→0.017 |
+| Reed | Defend | 2483 | 0.655 | 0.592 | 0.052 | lead0.3 | age,in_Defend Range | 1439 | 0.574 | 0.524 | 0.069 | 0.049→0.002 |
+| Reed | Evade End | 2212 | 0.693 | - | 0.673 | branch | in_Throw Range,dist | 1291 | 0.692 | - | 0.674 | 0.013→0.004 |
 | Reed | Lock R High | 1151 | 0.448 | - | 0.146 | stored | dy,in_Evade Range,in_Defend Range,since_end | 778 | 0.358 | - | 0.147 | 0.037→0.026 |
-| Reed | Stab Pos | 2858 | 0.231 | 0.186 | 0.057 | branch | in_Stab Range,since_end,hit,from | 1441 | 0.177 | 0.138 | 0.031 | 0.007→0.002 |
+| Reed | Stab Pos | 2858 | 0.231 | 0.186 | 0.023 | branch | age,in_Stab Range,from,hit | 1441 | 0.177 | 0.138 | 0.011 | 0.007→0.001 |
 | Reed | Throw Down | 2526 | 0.128 | - | 0.028 | stored | dy | 1545 | 0.106 | - | 0.027 | 0.004→0.003 |
 | Reed | Throw Lock | 2837 | 0.675 | 0.146 | 0.000 | lead0.4 | side,front | 1717 | 0.693 | 0.158 | 0.007 | 0.032→0.001 |
-| Reed | Throw Up | 311 | 0.692 | - | 0.180 | stored | dy,dist_visible,silk,dx | 172 | 0.689 | - | 0.342 | 0.000→0.043 |
-| Reed | Throwing Up? | 2837 | 0.346 | 0.336 | 0.069 | stored | dy,dx,in_Evade Range | 1717 | 0.326 | 0.320 | 0.062 | 0.006→0.003 |
-| Tiny | Brake | 7782 | 0.736 | 0.422 | 0.260 | branch | dx,front,last_seen_x,hero_x | 5511 | 0.710 | 0.391 | 0.195 | 0.011→0.013 |
-| Tiny | Defend Buzz | 12595 | 0.207 | 0.201 | 0.156 | branch | since_end,dist,front,last_seen_x | 9402 | 0.103 | 0.102 | 0.075 | 0.015→0.010 |
-| Tiny | Defend Ready | 12767 | 0.080 | 0.080 | 0.049 | branch | front,dist | 9534 | 0.047 | - | 0.034 | 0.003→0.002 |
+| Reed | Throw Up | 311 | 0.692 | - | 0.182 | stored | dy,in_Stab Range,silk,choice_run | 172 | 0.689 | - | 0.318 | 0.000→0.040 |
+| Reed | Throwing Up? | 2837 | 0.346 | 0.336 | 0.067 | lead0.4 | dy,dist_visible,from | 1717 | 0.326 | 0.320 | 0.061 | 0.006→0.005 |
+| Tiny | Brake | 7782 | 0.736 | 0.422 | 0.170 | branch | dx,age,front,hero_x | 5511 | 0.710 | 0.391 | 0.149 | 0.011→0.003 |
+| Tiny | Defend Buzz | 12595 | 0.207 | 0.201 | 0.065 | branch | age,dist | 9402 | 0.103 | 0.102 | 0.025 | 0.015→0.003 |
+| Tiny | Defend Ready | 12767 | 0.080 | 0.080 | 0.017 | branch | age,dist | 9534 | 0.047 | - | 0.009 | 0.003→0.001 |
 | Tiny | Fire | 10501 | 0.791 | 0.528 | 0.320 | branch | dx,front,dy,last_seen_x | 7531 | 0.778 | 0.519 | 0.291 | 0.006→0.007 |
-| Tiny | Fire Ready | 10744 | 0.120 | 0.106 | 0.098 | branch | dist,front,prev2_choice | 7617 | 0.065 | 0.060 | 0.048 | 0.007→0.006 |
-| Tiny | Pull Up | 6246 | 0.704 | 0.368 | 0.220 | lead0.3 | dx,dist_visible,hero_x,side_visible | 4478 | 0.650 | 0.297 | 0.155 | 0.022→0.004 |
-| Tiny | Ready | 52160 | 1.061 | 0.934 | 0.744 | branch | front,prev2_choice,since_end,prev | 31813 | 1.105 | 1.059 | 0.829 | 0.027→0.023 |
-| Tiny | Return | 10017 | 0.730 | 0.667 | 0.441 | branch | front,side,from,hero_x | 7334 | 0.626 | 0.610 | 0.391 | 0.014→0.015 |
+| Tiny | Fire Ready | 10744 | 0.120 | 0.106 | 0.033 | branch | age,front | 7617 | 0.065 | 0.060 | 0.016 | 0.007→0.001 |
+| Tiny | Pull Up | 6246 | 0.704 | 0.368 | 0.160 | lead0.4 | age,dist_visible,hero_x,side | 4478 | 0.650 | 0.297 | 0.163 | 0.022→0.003 |
+| Tiny | Ready | 52160 | 1.061 | 0.934 | 0.623 | branch | age,front,from,miss_Defend Ready | 31813 | 1.105 | 1.059 | 0.836 | 0.027→0.028 |
+| Tiny | Return | 10017 | 0.730 | 0.667 | 0.400 | branch | front,age,dy,dist | 7334 | 0.626 | 0.610 | 0.313 | 0.014→0.012 |
 
-读法：(1) 由距离 / 范围决定的瞬时或每帧决策，换成**精确的触发形状**（主角物理盒进不进 FSM 的那个盒 / 圆）后几乎确定：Clapper After Scuttle / Dmg Attack 0.39 / 0.69 → 0.006 / 0.006（TEST 0.009 / 0.036），Walk 0.54 → 0.047，Choristor Hop Antic（进入时刻）0.35 → 0.006，Slash Check 0.59 → 0.023。(2) 防重复和门：Bellbearer In Range 1.06 → 0.11（`in_Evade Range` + 距离 + 离上一招多久）、Minister Attack Choice 0.693 → 0.493（`prev2_choice`：两次一样就必是另一个）、Evade? 0.54 → 0.31、Maestro Summon? 0.29 → 0.17（`dead_tinies`）。(3) 主角的丝：Clawmaiden Spin Antic 1.10 → 0.59（进入时刻的丝）、Spin 2 0.69 → 0.17（提前 0.1 s 的丝：分支帧的丝已经被吸掉一格）。(4) 变化小或变差的：Maestro Attack Choice（R0 0.318 → 0.331，V4 本身就随机；R0 的 `run` / `choice_run` 组合在这里略好）、Escape Jump（TEST 0.290 → 0.302）、几个小样本决策（Envoy Charge TEST n 118 ECE 0.004 → 0.032、Reed Throw Up n 172 0.689 → 0.342 但 ECE 0.000 → 0.043：DEV 交叉验证 0.180，4 个协变量对 311 个样本过拟合）。Tiny 的 Ready（哪只被 Maestro 叫去冲 / 防）本质上是 Maestro 那边的随机选择，0.83 nats 是预期之内（§18.6：真正的选择提前 0.7 s 就看得见）。
+读法：(1) 由距离 / 范围决定的瞬时或每帧决策，换成**精确的触发形状**后几乎确定（Clapper After Scuttle / Dmg Attack TEST 0.009 / 0.020、Walk 0.037，Choristor Slash Check 0.050）。(2) 新加的 `age`（在这个状态里待了多久）被 25 个决策选中：计时出边直接由它看出（Clapper Idle 的 0.65 / 1.15 s → Walk：0.425 → 0.152；Reed Defend 的 1.0 s → Defend End：0.360 → 0.052；Choristor Hop Antic 进入当帧 Close Range → Attack Choice、否则 0.2 s → Hop Check：`age` 一个量就 0.001；Minister Attack、Parry Stance、Retreat?、Maestro Slash Recover 同理）。在分支帧模型里这是合法的条件（"它在这个年龄决定"），但正因如此它不能在中途当预报用（§18.11.3）。(3) 防重复和门：Bellbearer In Range 1.06 → 0.11、Minister Attack Choice 0.693 → 0.493（`prev2_choice`）、Envoy Walker 0.748 → 0.040（`charge_armed` 修正后，§18.11.1）、Maestro Summon? 0.29 → 0.18（`dead_tinies`）。(4) DEV 好、TEST 不稳的：Clawmaiden Spin 1（TEST 0.412，比无条件 0.188 差，ECE 0.066）、Spin 0（0.184 vs 0.192）、Envoy Charge（0.909，R0 重拟 0.760）、Reed Throw Up（n 172，0.318）、Maestro Attack Choice（0.324 vs R0 重拟 0.312）：小样本、DEV（R0 随机策略）和 TEST（R1 data2 / idle、波次起点）的主角行为不同（丝的多少、站位）；Tiny Ready 0.836 是 Maestro 那边的随机选择。
 
 ### 18.4 感知时刻：分支帧 / FSM 的感知时刻 / 固定提前 0.1–0.5 s（DEV 交叉验证，几何 + 历史一起选；最后一列只用几何）
 
 | 类型 | 决策 | 分支帧 | 进入 | 存储 | 提前 0.1 | 0.2 | 0.3 | 0.4 | 0.5 | 只用几何：分支帧 / 最好 |
 |---|---|---|---|---|---|---|---|---|---|---|
-| Bellbearer | Check Pos | 0.153 | 0.153 | - | 0.173 | 0.173 | 0.173 | 0.173 | 0.173 | 0.153 / 0.153 |
+| Bellbearer | Check Pos | 0.153 | 0.153 | - | 0.246 | 0.246 | 0.246 | 0.247 | 0.247 | 0.153 / 0.153 |
 | Bellbearer | Evade End | 0.534 | 0.534 | - | 0.542 | 0.546 | 0.546 | 0.546 | 0.546 | 0.686 / 0.686 |
-| Bellbearer | In Range | 0.107 | 0.249 | - | 0.253 | 0.249 | 0.249 | 0.247 | 0.244 | 0.183 / 0.183 |
-| Bellbearer | Insta Throw? | 0.318 | 0.318 | - | 0.318 | 0.318 | 0.318 | 0.318 | 0.318 | 0.667 / 0.662 |
-| Choristor | Attack Choice | 0.673 | 0.673 | - | 0.841 | 0.891 | 0.921 | 0.924 | 0.947 | 0.710 / 0.710 |
-| Choristor | Combo? | 0.013 | 0.013 | - | 0.242 | 0.300 | 0.344 | 0.390 | 0.434 | 0.018 / 0.018 |
-| Choristor | Hop Antic | 0.062 | 0.006 | - | 0.071 | 0.088 | 0.098 | 0.113 | 0.113 | 0.081 / 0.006 |
-| Choristor | Hop Check | 0.190 | 0.190 | - | 0.205 | 0.223 | 0.227 | 0.226 | 0.226 | 0.191 / 0.191 |
-| Choristor | Hop Land | 0.560 | 0.560 | - | 0.560 | 0.561 | 0.560 | 0.561 | 0.561 | 0.692 / 0.692 |
-| Choristor | Slash Check | 0.023 | 0.023 | - | 0.152 | 0.179 | 0.195 | 0.202 | 0.203 | 0.028 / 0.028 |
-| Choristor | Unalert Tick? | 0.144 | 0.144 | - | 0.162 | 0.179 | 0.192 | 0.201 | 0.216 | 0.149 / 0.149 |
-| Clapper | After Scuttle | 0.006 | 0.006 | - | 0.095 | 0.122 | 0.130 | 0.140 | 0.149 | 0.006 / 0.006 |
-| Clapper | Avoid Type | 0.604 | 0.604 | - | 0.599 | 0.608 | 0.601 | 0.610 | 0.607 | 0.608 / 0.608 |
-| Clapper | Close Range | 0.730 | 0.730 | - | 0.712 | 0.708 | 0.716 | 0.725 | 0.725 | 1.185 / 1.172 |
-| Clapper | Dmg Attack | 0.006 | 0.006 | - | 0.169 | 0.237 | 0.248 | 0.272 | 0.289 | 0.007 / 0.007 |
-| Clapper | Escape Jump | 0.394 | 0.394 | - | 0.385 | 0.385 | 0.395 | 0.385 | 0.377 | 0.692 / 0.687 |
-| Clapper | Evade Scuttle | 0.095 | 0.070 | - | 0.084 | 0.082 | 0.080 | 0.084 | 0.084 | 0.099 / 0.099 |
-| Clapper | Far Range | 0.595 | 0.595 | - | 0.595 | 0.595 | 0.595 | 0.595 | 0.595 | 1.262 / 1.261 |
-| Clapper | Idle | 0.425 | 0.471 | - | 0.471 | 0.471 | 0.471 | 0.471 | 0.471 | 1.028 / 1.028 |
-| Clapper | Walk | 0.047 | 0.371 | - | 0.342 | 0.354 | 0.366 | 0.370 | 0.370 | 0.047 / 0.047 |
-| Clawmaiden | Fly | 0.311 | 0.365 | - | 0.349 | 0.365 | 0.365 | 0.365 | 0.365 | 0.480 / 0.480 |
-| Clawmaiden | Fly To Slash | 0.102 | 0.359 | - | 0.330 | 0.359 | 0.359 | 0.359 | 0.359 | 0.169 / 0.169 |
-| Clawmaiden | Spin 0 | 0.135 | 0.215 | - | 0.167 | 0.155 | 0.167 | 0.180 | 0.184 | 0.140 / 0.140 |
-| Clawmaiden | Spin 1 | 0.187 | 0.182 | - | 0.139 | 0.155 | 0.174 | 0.174 | 0.173 | 0.193 / 0.151 |
-| Clawmaiden | Spin 2 | 0.521 | 0.287 | - | 0.169 | 0.199 | 0.232 | 0.251 | 0.245 | 0.527 / 0.169 |
-| Clawmaiden | Spin Antic | 0.603 | 0.590 | - | 0.606 | 0.608 | 0.628 | 0.641 | 0.649 | 0.603 / 0.593 |
-| Clawmaiden | Tele? | 0.478 | 0.478 | - | 0.478 | 0.478 | 0.478 | 0.478 | 0.478 | 0.679 / 0.679 |
-| Envoy | Charge | 0.777 | 0.771 | - | 0.736 | 0.716 | 0.737 | 0.751 | 0.766 | 0.814 / 0.810 |
+| Bellbearer | In Range | 0.107 | 0.374 | - | 0.241 | 0.284 | 0.320 | 0.356 | 0.366 | 0.183 / 0.183 |
+| Bellbearer | Insta Throw? | 0.318 | 0.318 | - | 0.318 | 0.318 | 0.318 | 0.318 | 0.318 | 0.664 / 0.662 |
+| Choristor | Attack Choice | 0.674 | 0.674 | - | 0.844 | 0.892 | 0.927 | 0.955 | 0.981 | 0.710 / 0.710 |
+| Choristor | Combo? | 0.013 | 0.013 | - | 0.242 | 0.317 | 0.386 | 0.431 | 0.472 | 0.018 / 0.018 |
+| Choristor | Hop Antic | 0.001 | 0.001 | - | 0.001 | 0.001 | 0.001 | 0.001 | 0.001 | 0.081 / 0.006 |
+| Choristor | Hop Check | 0.190 | 0.190 | - | 0.241 | 0.313 | 0.370 | 0.420 | 0.455 | 0.191 / 0.191 |
+| Choristor | Hop Land | 0.560 | 0.560 | - | 0.559 | 0.557 | 0.558 | 0.559 | 0.561 | 0.692 / 0.692 |
+| Choristor | Slash Check | 0.023 | 0.023 | - | 0.159 | 0.222 | 0.292 | 0.339 | 0.355 | 0.028 / 0.028 |
+| Choristor | Unalert Tick? | 0.144 | 0.144 | - | 0.162 | 0.179 | 0.195 | 0.212 | 0.224 | 0.144 / 0.144 |
+| Clapper | After Scuttle | 0.006 | 0.006 | - | 0.105 | 0.159 | 0.196 | 0.228 | 0.261 | 0.006 / 0.006 |
+| Clapper | Avoid Type | 0.604 | 0.604 | - | 0.605 | 0.605 | 0.597 | 0.605 | 0.616 | 0.607 / 0.607 |
+| Clapper | Close Range | 0.732 | 0.732 | - | 0.714 | 0.710 | 0.716 | 0.721 | 0.722 | 1.185 / 1.170 |
+| Clapper | Dmg Attack | 0.007 | 0.007 | - | 0.182 | 0.258 | 0.281 | 0.323 | 0.352 | 0.007 / 0.007 |
+| Clapper | Escape Jump | 0.393 | 0.393 | - | 0.388 | 0.390 | 0.395 | 0.381 | 0.377 | 0.692 / 0.687 |
+| Clapper | Evade Scuttle | 0.024 | 0.024 | - | 0.024 | 0.024 | 0.025 | 0.025 | 0.025 | 0.095 / 0.092 |
+| Clapper | Far Range | 0.596 | 0.596 | - | 0.596 | 0.596 | 0.596 | 0.596 | 0.596 | 1.262 / 1.261 |
+| Clapper | Idle | 0.152 | 0.194 | - | 0.176 | 0.182 | 0.187 | 0.191 | 0.195 | 1.028 / 1.028 |
+| Clapper | Walk | 0.038 | 0.427 | - | 0.371 | 0.384 | 0.414 | 0.421 | 0.420 | 0.047 / 0.047 |
+| Clawmaiden | Fly | 0.158 | 0.287 | - | 0.237 | 0.264 | 0.273 | 0.275 | 0.280 | 0.480 / 0.480 |
+| Clawmaiden | Fly To Slash | 0.036 | 0.114 | - | 0.114 | 0.114 | 0.114 | 0.114 | 0.114 | 0.169 / 0.169 |
+| Clawmaiden | Spin 0 | 0.079 | 0.137 | - | 0.080 | 0.074 | 0.098 | 0.109 | 0.112 | 0.140 / 0.140 |
+| Clawmaiden | Spin 1 | 0.077 | 0.064 | - | 0.034 | 0.047 | 0.060 | 0.059 | 0.058 | 0.193 / 0.151 |
+| Clawmaiden | Spin 2 | 0.496 | 0.253 | - | 0.136 | 0.159 | 0.187 | 0.217 | 0.203 | 0.526 / 0.169 |
+| Clawmaiden | Spin Antic | 0.449 | 0.449 | - | 0.452 | 0.454 | 0.455 | 0.457 | 0.459 | 0.603 / 0.593 |
+| Clawmaiden | Tele? | 0.474 | 0.474 | - | 0.478 | 0.480 | 0.480 | 0.480 | 0.480 | 0.679 / 0.679 |
+| Envoy | Charge | 0.777 | 1.151 | - | 0.733 | 0.827 | 1.034 | 0.913 | 0.904 | 0.786 / 0.733 |
 | Envoy | Combo? | 0.486 | 0.486 | - | 0.519 | 0.532 | 0.552 | 0.562 | 0.578 | 0.531 / 0.531 |
-| Envoy | Walker | 0.053 | 0.085 | - | 0.062 | 0.067 | 0.066 | 0.068 | 0.071 | 0.087 / 0.087 |
-| Maestro | Attack Choice | 0.331 | 0.331 | - | 0.331 | 0.331 | 0.331 | 0.331 | 0.331 | 0.606 / 0.604 |
-| Maestro | Check Pos | 0.117 | 0.117 | - | 0.110 | 0.140 | 0.150 | 0.156 | 0.172 | 0.118 / 0.118 |
-| Maestro | Fly | 0.037 | 0.077 | - | 0.068 | 0.084 | 0.076 | 0.078 | 0.077 | 0.505 / 0.505 |
-| Maestro | Slash Recover | 0.025 | 0.025 | - | 0.025 | 0.025 | 0.025 | 0.025 | 0.025 | 0.467 / 0.427 |
-| Maestro | Summon? | 0.169 | 0.169 | - | 0.169 | 0.169 | 0.169 | 0.169 | 0.169 | 0.290 / 0.290 |
-| Minister | Attack | 0.205 | 0.362 | - | 0.250 | 0.236 | 0.248 | 0.277 | 0.327 | 0.205 / 0.205 |
+| Envoy | Walker | 0.040 | 0.229 | - | 0.173 | 0.274 | 0.326 | 0.383 | 0.409 | 0.087 / 0.087 |
+| Maestro | Attack Choice | 0.331 | 0.331 | - | 0.331 | 0.331 | 0.331 | 0.331 | 0.331 | 0.594 / 0.585 |
+| Maestro | Check Pos | 0.118 | 0.118 | - | 0.137 | 0.154 | 0.201 | 0.272 | 0.319 | 0.118 / 0.118 |
+| Maestro | Fly | 0.037 | 0.099 | - | 0.068 | 0.076 | 0.081 | 0.087 | 0.090 | 0.372 / 0.372 |
+| Maestro | Slash Recover | 0.007 | 0.007 | - | 0.007 | 0.007 | 0.007 | 0.007 | 0.007 | 0.363 / 0.317 |
+| Maestro | Summon? | 0.177 | 0.177 | - | 0.177 | 0.177 | 0.177 | 0.177 | 0.177 | 0.290 / 0.290 |
+| Minister | Attack | 0.088 | 0.157 | - | 0.119 | 0.139 | 0.148 | 0.151 | 0.150 | 0.205 / 0.205 |
 | Minister | Attack Choice | 0.493 | 0.493 | - | 0.493 | 0.493 | 0.493 | 0.493 | 0.493 | 0.693 / 0.693 |
-| Minister | Chase | 0.196 | 0.315 | - | 0.309 | 0.315 | 0.315 | 0.315 | 0.315 | 0.255 / 0.255 |
-| Minister | Check Pos | 0.002 | 0.002 | - | 0.002 | 0.002 | 0.002 | 0.002 | 0.002 | 0.250 / 0.250 |
-| Minister | Evade? | 0.311 | 0.311 | - | 0.386 | 0.406 | 0.422 | 0.424 | 0.424 | 0.333 / 0.333 |
-| Minister | Parry Stance | 0.423 | 0.500 | - | 0.492 | 0.501 | 0.497 | 0.492 | 0.500 | 0.450 / 0.450 |
-| Minister | Retreat? | 0.242 | 0.251 | - | 0.252 | 0.252 | 0.256 | 0.255 | 0.252 | 0.259 / 0.259 |
-| Reed | Alert | 0.390 | 0.544 | - | 0.541 | 0.540 | 0.545 | 0.551 | 0.557 | 0.835 / 0.835 |
-| Reed | Check Pos | 0.098 | 0.098 | - | 0.098 | 0.098 | 0.098 | 0.098 | 0.098 | 0.261 / 0.256 |
-| Reed | Choice | 0.480 | 0.480 | - | 0.527 | 0.552 | 0.569 | 0.573 | 0.577 | 0.569 / 0.569 |
-| Reed | Defend | 0.360 | 0.398 | - | 0.398 | 0.398 | 0.398 | 0.398 | 0.398 | 0.520 / 0.520 |
-| Reed | Evade End | 0.673 | 0.673 | - | 0.682 | 0.689 | 0.687 | 0.691 | 0.691 | 0.673 / 0.673 |
-| Reed | Lock R High | 0.358 | 0.358 | 0.146 | 0.310 | 0.254 | 0.177 | 0.147 | 0.189 | 0.365 / 0.147 |
-| Reed | Stab Pos | 0.057 | 0.152 | - | 0.159 | 0.152 | 0.152 | 0.152 | 0.152 | 0.116 / 0.116 |
+| Minister | Chase | 0.167 | 0.372 | - | 0.284 | 0.314 | 0.334 | 0.360 | 0.377 | 0.252 / 0.252 |
+| Minister | Check Pos | 0.002 | 0.002 | - | 0.301 | 0.302 | 0.310 | 0.311 | 0.310 | 0.002 / 0.002 |
+| Minister | Evade? | 0.311 | 0.311 | - | 0.400 | 0.447 | 0.479 | 0.505 | 0.520 | 0.333 / 0.333 |
+| Minister | Parry Stance | 0.242 | 0.383 | - | 0.334 | 0.349 | 0.373 | 0.382 | 0.397 | 0.450 / 0.450 |
+| Minister | Retreat? | 0.150 | 0.158 | - | 0.152 | 0.151 | 0.153 | 0.155 | 0.158 | 0.259 / 0.259 |
+| Reed | Alert | 0.384 | 0.581 | - | 0.519 | 0.567 | 0.597 | 0.616 | 0.630 | 0.835 / 0.835 |
+| Reed | Check Pos | 0.098 | 0.098 | - | 0.219 | 0.226 | 0.230 | 0.240 | 0.239 | 0.098 / 0.098 |
+| Reed | Choice | 0.480 | 0.480 | - | 0.527 | 0.552 | 0.569 | 0.578 | 0.584 | 0.569 / 0.569 |
+| Reed | Defend | 0.053 | 0.053 | - | 0.052 | 0.053 | 0.052 | 0.052 | 0.053 | 0.520 / 0.520 |
+| Reed | Evade End | 0.673 | 0.673 | - | 0.682 | 0.689 | 0.687 | 0.691 | 0.689 | 0.673 / 0.673 |
+| Reed | Lock R High | 0.360 | 0.360 | 0.146 | 0.314 | 0.254 | 0.175 | 0.147 | 0.189 | 0.365 / 0.147 |
+| Reed | Stab Pos | 0.023 | 0.037 | - | 0.067 | 0.059 | 0.067 | 0.065 | 0.073 | 0.116 / 0.116 |
 | Reed | Throw Down | 0.120 | 0.120 | 0.028 | 0.121 | 0.123 | 0.123 | 0.098 | 0.068 | 0.120 / 0.028 |
-| Reed | Throw Lock | 0.000 | 0.000 | - | 0.001 | 0.001 | 0.001 | 0.000 | 0.023 | 0.001 / 0.000 |
-| Reed | Throw Up | 0.656 | 0.656 | 0.180 | 0.637 | 0.641 | 0.617 | 0.571 | 0.444 | 0.685 / 0.185 |
-| Reed | Throwing Up? | 0.195 | 0.195 | 0.069 | 0.175 | 0.141 | 0.095 | 0.070 | 0.104 | 0.245 / 0.069 |
-| Tiny | Brake | 0.260 | 0.385 | - | 0.362 | 0.366 | 0.367 | 0.371 | 0.397 | 0.272 / 0.272 |
-| Tiny | Defend Buzz | 0.156 | 0.166 | - | 0.163 | 0.166 | 0.166 | 0.166 | 0.166 | 0.184 / 0.184 |
-| Tiny | Defend Ready | 0.049 | 0.072 | - | 0.064 | 0.065 | 0.064 | 0.064 | 0.064 | 0.049 / 0.049 |
-| Tiny | Fire | 0.320 | 0.457 | - | 0.402 | 0.424 | 0.435 | 0.466 | 0.487 | 0.339 / 0.339 |
-| Tiny | Fire Ready | 0.098 | 0.103 | - | 0.105 | 0.103 | 0.103 | 0.103 | 0.103 | 0.101 / 0.101 |
-| Tiny | Pull Up | 0.333 | 0.358 | - | 0.343 | 0.260 | 0.220 | 0.239 | 0.277 | 0.473 / 0.235 |
-| Tiny | Ready | 0.744 | 0.866 | - | 0.866 | 0.866 | 0.866 | 0.866 | 0.866 | 0.854 / 0.854 |
-| Tiny | Return | 0.441 | 0.651 | - | 0.625 | 0.634 | 0.634 | 0.621 | 0.619 | 0.470 / 0.470 |
+| Reed | Throw Lock | 0.000 | 0.000 | - | 0.001 | 0.001 | 0.001 | 0.000 | 0.027 | 0.001 / 0.000 |
+| Reed | Throw Up | 0.638 | 0.638 | 0.182 | 0.633 | 0.638 | 0.627 | 0.574 | 0.456 | 0.677 / 0.185 |
+| Reed | Throwing Up? | 0.195 | 0.195 | 0.069 | 0.174 | 0.141 | 0.096 | 0.067 | 0.102 | 0.245 / 0.069 |
+| Tiny | Brake | 0.170 | 0.497 | - | 0.398 | 0.441 | 0.423 | 0.327 | 0.517 | 0.260 / 0.260 |
+| Tiny | Defend Buzz | 0.065 | 0.069 | - | 0.068 | 0.069 | 0.069 | 0.069 | 0.069 | 0.182 / 0.182 |
+| Tiny | Defend Ready | 0.017 | 0.021 | - | 0.020 | 0.024 | 0.024 | 0.024 | 0.024 | 0.049 / 0.049 |
+| Tiny | Fire | 0.320 | 0.508 | - | 0.416 | 0.472 | 0.484 | 0.478 | 0.539 | 0.320 / 0.320 |
+| Tiny | Fire Ready | 0.033 | 0.036 | - | 0.035 | 0.036 | 0.036 | 0.036 | 0.036 | 0.101 / 0.101 |
+| Tiny | Pull Up | 0.204 | 0.176 | - | 0.195 | 0.172 | 0.163 | 0.160 | 0.198 | 0.333 / 0.208 |
+| Tiny | Ready | 0.623 | 0.734 | - | 0.734 | 0.734 | 0.734 | 0.734 | 0.734 | 0.850 / 0.850 |
+| Tiny | Return | 0.400 | 0.541 | - | 0.551 | 0.546 | 0.542 | 0.541 | 0.545 | 0.451 / 0.451 |
 
-- **选中的时刻**：61 个决策里分支帧 45、进入 3（Choristor Hop Antic、Clapper Evade Scuttle、Clawmaiden Spin Antic）、存储 4（Reed 的扔针：Throwing Up?、Lock R High、Throw Up、Throw Down）、固定提前 9（其中只有 Clawmaiden Spin 1 / 2（丝在分支帧已被拿走一格）、Tiny Pull Up（0.3 s）、Reed Throw Lock（朝向在 Throw Aim 定，等于存储）比分支帧明显好；Clapper Avoid Type / Close Range / Escape Jump、Envoy Charge、Maestro Check Pos 的提前与分支帧相差 0.005–0.02 nats，在噪声里）。
-- **和 FSM 静态一致**：FSM 说"进入时读"的，进入时刻的几何明显更好（只用几何：Hop Antic 分支帧 0.081 → 进入 0.006；Spin Antic 0.603 → 0.593 加历史后 0.590）；"存储"的，存储时刻好（只用几何：Throwing Up? 0.245 → 0.069、Throw Up 0.685 → 0.185、Lock R High 0.365 → 0.147；固定提前 0.4 s 几乎一样好，因为 Throw Aim 正好 0.4 s）；"每帧 / 瞬时"的，分支帧最好，越往前越差（Clapper Dmg Attack 0.006 → 提前 0.1 s 0.169、Choristor Combo? 0.013 → 0.242、Minister Evade? 0.311 → 0.386）。
-- **诱招（O、BAIT）用哪个**：`BranchModel.timing(tk, state)`；`BranchView` 按它取主角 / 敌人的历史位置（保留 1 s）。
+- **选中的时刻**（重建后）：61 个决策里分支帧 45、进入 1（Clawmaiden Spin Antic）、存储 3（Reed Lock R High、Throw Up、Throw Down）、固定提前 12。第一版的"进入 3"里 Choristor Hop Antic、Clapper Evade Scuttle 现在由分支帧 + `age` 表达（进入当帧就离开 = 进入时读的那一支），Reed Throwing Up? 选提前 0.4 s（= Throw Aim 的存储时刻，0.067 vs 存储 0.069）；其余提前与分支帧相差多在 0.005–0.02 nats，在噪声里。
+- **和 FSM 静态一致**：FSM 说"进入时读"的，进入时刻的几何明显更好（只用几何：Hop Antic 分支帧 0.081 → 进入 0.006；Spin Antic 0.603 → 0.593，加历史后 0.449（`age`、丝）；"存储"的，存储时刻好（只用几何：Throwing Up? 0.245 → 0.069、Throw Up 0.677 → 0.185、Lock R High 0.365 → 0.147；固定提前 0.4 s 几乎一样好，因为 Throw Aim 正好 0.4 s）；"每帧 / 瞬时"的，分支帧最好，越往前越差（Clapper Dmg Attack 0.007 → 提前 0.1 s 0.182、Choristor Combo? 0.013 → 0.242、Minister Evade? 0.311 → 0.400；数字是重建后的）。
+- **诱招（O、BAIT）用哪个**：`BranchModel.timing(tk, state)`；`BranchView` 按它取主角 / 敌人的位置（提前量用保留 1 s 的逐帧记录；进入 / 存储用每次进入状态时的快照；敌人位置只取看得见的帧、最多 0.25 s 旧；主角用 transform `pos_transform`，与扫描的 STATE hero.pos 相同——第一版用的是受击盒中心，低 0.17–0.84 u）。
 
 ### 18.5 防御两支的冷却（你 10-04：被打 → 反击 和 没被打 两支）
 
@@ -1182,8 +1182,8 @@ Tiny 的控制 FSM 在别的包里（Maestro 用 `CreateObject` 生成的预制�
 
 - **支撑不动**：BranchMemory 挂在 EnemyTracker 上（只在 `enter` / `_hit` 里各多一行），放置、`occupied`、`prob`、`support_set` 都不读它；测试 `test_multi_forecaster_branch_view_is_scoring_only` 在合成 Reed 上逐帧比较有 / 没有分支模型的占据、概率图、支撑集：完全相同。
 - **留出召回（R2 / R3 的协议，分支模型打开：`multi_recall fresh --tables 0 --branch`，冻结检出 `C:\ssbot\live_r5m_092e3e2`）**：R0 的 35 场留出、fold 0 的表：L2 / L3 / L4 各 74,585 / 74,585（全部由预报本身盖住，钩 465 / 465，按类型 100 %），与 R3 认证（2a10a0d，`C:\ssbot\data\m2_forum_r3\recall_fresh_2a10a0d.json` 的 fresh/tables0）逐项相同（`C:\ssbot\data\m2_forum_r5m\recall_fresh_t0_branch_092e3e2.json`）。
-- **Bell Beast**：它不走 EnemyTracker（`MultiForecaster(boss=...)` 包装时 `bv` 为 None）；`multi_recall bellbeast`（20261003_144536 i4_000 4,001 帧 + 892 次铃区检查、20261004_095304 i0_001 4,001 帧 + 1,333 次）放置、occupied、prob、support_set、committed、战术、规划器决策、铃区八项全部 **0 差**；全部测试（冻结检出 092e3e2）1,146 passed、3 skipped、1 xfailed（第一遍有 15 个规划器 / 运动学测试只因为环境里 NUMBA_NUM_THREADS = 3 报线程数错，按 4 线程重跑 73 / 73 通过），之后的提交（反应分支、换行）`test_branch_model.py` 19 / 19。
-- **算力**（`scratchpad bench_bv.py`：第 6 波所在的完整连战 20261003_074719 i3 ep0，51,823 帧，每帧对每个在模型决策状态里的敌人算 `next_attack_probs`，相当于 `Subject.next_p` 的工作）：每帧 p50 0.17 ms、p99 1.05 ms、最大 7.8 ms（平均 3 只、最多 8 只在决策里）。打开时 p99 约占 8 ms 预算的 13 %，所以默认关；要常开先把几何按帧缓存。
+- **Bell Beast**：它不走 EnemyTracker（`MultiForecaster(boss=...)` 包装时 `bv` 为 None，所以这项检查走的是分支模型关闭的路径——这正是回归规则要的"Forum 开关关着时逐位相同"；它不检验分支模型本身）；`multi_recall bellbeast`（20261003_144536 i4_000 4,001 帧 + 892 次铃区检查、20261004_095304 i0_001 4,001 帧 + 1,333 次）放置、occupied、prob、support_set、committed、战术、规划器决策、铃区八项全部 **0 差**；全部测试（冻结检出 092e3e2）1,146 passed、3 skipped、1 xfailed（第一遍有 15 个规划器 / 运动学测试只因为环境里 NUMBA_NUM_THREADS = 3 报线程数错，按 4 线程重跑 73 / 73 通过），之后的提交（反应分支、换行）`test_branch_model.py` 19 / 19。
+- **算力**：第一版 `scratchpad bench_bv.py`（20261003_074719 i3 ep0，51,823 帧）每帧 p50 0.17 ms、p99 1.05 ms、最大 7.8 ms。复核后的数字（预报表、快照、每帧对每个活着的敌人算 `next_attack_probs`）见 §18.11.5。
 
 ### 18.9 没做完 / 未核实
 
@@ -1193,15 +1193,104 @@ Tiny 的控制 FSM 在别的包里（Maestro 用 `CreateObject` 生成的预制�
 - 反应分支的 p 是 R0 的每次访问比例（forum_reactive_moves §2.2），没有按距离 / 进盒方式细分；规划器还没接 `entry_prob`。
 - V4 的计数在结果看不见时（例 Minister Evade? 主角在盒外两种抽法都去 Retreat?）是隐藏的，现在用看得见的历史近似，没有做隐状态滤波。
 
+- （复核后）预报表在 DEV → TEST 有的不迁移：Tiny Ready（TEST 1.19，比每次访问表 0.98 差）；它是 Maestro 那边的选择，要看 Maestro 的状态才有用，现在消费方对 Tiny Ready 的 `next_p` 不要当真。分支帧模型里小样本的 Clawmaiden Spin 0 / 1、Envoy Charge 在 TEST 上不稳（§18.3）。
+- （复核后）预报表是"按数据里主角的走法平均"的：它不随候选路径变。要给候选算"沿这条路下一招是什么"，得把分支帧模型和"何时触发"（每帧状态的危险率）沿候选的主角路径积分，没做。
+
 ### 18.10 复现
 
 ```
-cd brain   # 低优先级，NUMBA_NUM_THREADS ≤ 4；完整流程见 C:\ssbot\data\m2_forum_r5m\pipeline_v2.cmd
-..\scripts\uv.cmd run python -m ssbot.tools.forum_branch scan C:\ssbot\data\m2_forum_r0\cache C:\ssbot\data\m2_forum_r0\cache_fresh --out C:\ssbot\data\m2_forum_r5m\recs_dev.pkl --extra-dir C:\ssbot\data\m2_forum_r5m\hero --workers 3
-..\scripts\uv.cmd run python -m ssbot.tools.forum_branch scan C:\ssbot\data\m2_forum_r1c\cache_fresh --out C:\ssbot\data\m2_forum_r5m\recs_test.pkl --extra-dir C:\ssbot\data\m2_forum_r5m\hero --workers 3
-..\scripts\uv.cmd run python -m ssbot.tools.forum_branch study C:\ssbot\data\m2_forum_r5m\recs_dev.pkl --json C:\ssbot\data\m2_forum_r5m\study_dev.json
-..\scripts\uv.cmd run python -m ssbot.tools.forum_branch build C:\ssbot\data\m2_forum_r5m\recs_dev.pkl --study C:\ssbot\data\m2_forum_r5m\study_dev.json --test C:\ssbot\data\m2_forum_r5m\recs_test.pkl --out ..\knowledge\1.0.30000\enemies\forum\branch_model.json --report C:\ssbot\data\m2_forum_r5m\holdout_test.json
+cd brain   # 低优先级，NUMBA_NUM_THREADS 4；复核后的完整流程：C:\ssbot\data\m2_forum_r5m\fix\pipeline_f1.cmd <rev>（冻结检出 C:\ssbot\live_r5mf_<rev>）
+..\scripts\uv.cmd run python -m ssbot.tools.forum_branch scan C:\ssbot\data\m2_forum_r0\cache C:\ssbot\data\m2_forum_r0\cache_fresh --out recs_dev.pkl --ahead-out ahead_dev.pkl --extra-dir C:\ssbot\data\m2_forum_r5m\hero --workers 3
+..\scripts\uv.cmd run python -m ssbot.tools.forum_branch scan C:\ssbot\data\m2_forum_r1c\cache_fresh --out recs_test.pkl --ahead-out ahead_test.pkl --extra-dir C:\ssbot\data\m2_forum_r5m\hero --workers 3
+..\scripts\uv.cmd run python -m ssbot.tools.forum_branch study recs_dev.pkl --json study_dev.json
+..\scripts\uv.cmd run python -m ssbot.tools.forum_branch study ahead_dev.pkl --json study_ahead_dev.json
+..\scripts\uv.cmd run python -m ssbot.tools.forum_branch build recs_dev.pkl --study study_dev.json --ahead ahead_dev.pkl --ahead-study study_ahead_dev.json --test recs_test.pkl --ahead-test ahead_test.pkl --out ..\knowledge\1.0.30000\enemies\forum\branch_model.json --report holdout_test.json
+..\scripts\uv.cmd run python -m ssbot.tools.forum_branch parity <cache.npz ...> --model ..\knowledge\1.0.30000\enemies\forum\branch_model.json --extra-dir C:\ssbot\data\m2_forum_r5m\hero --json parity.json
 ..\scripts\uv.cmd run python -m ssbot.tools.tiny_orbit --fit C:\ssbot\data\m2_forum_r0\cache --fit C:\ssbot\data\m2_forum_r0\cache_fresh --test C:\ssbot\data\m2_forum_r1c\cache_fresh --out ..\knowledge\1.0.30000\enemies\forum\tiny_orbit.json --json C:\ssbot\data\m2_forum_r5m\tiny_orbit_report.json
-# 召回 / Bell Beast / 全部测试：C:\ssbot\data\m2_forum_r5m\val_run.cmd <recall|bb1|bb2|tests> <rev>（冻结检出 C:\ssbot\live_r5m_<rev>）
+# 召回 / Bell Beast / 全部测试 / 逐帧核对：C:\ssbot\data\m2_forum_r5m\fix\val_f1.cmd <rev>
 ```
-扫描 142 场约 3 min、202 场约 1.5 min（3 个进程）；study 约 3 min；build 约 1 min；tiny_orbit 约 10 min。
+扫描 142 场约 5 min、202 场约 2 min（3 个进程，带预报样本：DEV 1,341,860 个、TEST 893,979 个）；study 分支帧约 5 min、预报约 5 min；build 约 3.5 min；逐帧核对每场约 1–3 min；tiny_orbit 约 10 min。分支帧表要的生成文件 `knowledge/.../forum/*_hitboxes.npz`（git 忽略）只有 parity / 召回用到。
+
+### 18.11 复核之后的修正（fixer 轮，2026-10-08；代码 2f5b96a → dd5cbff，分支 worktree-wf_814dfeea-b10-1；离线，没有连接游戏）
+
+核查（第一轮 week push 的 verifier）推翻了三条说法、给了两条高、一条中、四条低的问题。这一节说第一版错在哪、改了什么、重测的数字。输出在 `C:\ssbot\data\m2_forum_r5m\fix\`（`v_2f5b96a\`：重扫、选择、重建、留出报告 `holdout_test.json`、表 `tables.md`；`val_7db1c2d\`：7 场逐帧核对、召回、Bell Beast；`val_dd5cbff\`：全部测试、2 场整场核对）。
+
+#### 18.11.1 第一版错在哪
+
+1. **训练 / 运行不一致（高）**。第一版选择的候选里有只在离线扫描里算的 R0 协变量（`dist_visible`、`side_visible`、`last_seen_x`、`hero_x`、`since_<家族>`、`miss_<后继>`），61 个决策里 26 个选了至少一个；运行时的 `BranchView` 算不出来，回退在第一个缺的协变量处停下。例：Maestro Attack Choice 唯一的协变量是 `miss_Defend Start`，运行时就成了无条件表，还会在 DEFEND 之后给 DEFEND 概率（FSM 不允许）。核查者只用运行时算得出的协变量重算 TEST：0.340，不是 0.315。这次逐帧核对又找出四处：运行时的 `BranchMemory` 用的是走子表的分段（少 Maestro 的 MA_POINT、Envoy 的 EN_HOPSLASH / EN_ENTRY，`prev` / `run` / `since_*` 和训练不同）；主角参考点（运行时用受击盒中心，扫描用 transform）；敌人位置（运行时用 `tr.pos`，可能是很久以前的，扫描只要 0.25 s 内看得见的）；Tiny 归属（扫描按整场投票，用到了未来的帧）。
+2. **只在分支帧拟合，却当预报用（高）**。每条记录都是状态离开的那一帧，所以模型是 P(后继 | 它就在这一帧决定)；第一版的 `next_attack_probs` / `Subject.next_p` 在敌人还没决定的每一帧都拿它当"下一招"的预报。核查者在 68 场 TEST 上提前 0.2 / 0.5 s 查：2.31 / 2.92 nats，无条件表 0.70 / 0.71（Clapper Idle 4.69 / 7.68、Reed Alert 2.65 / 7.00、Minister Chase 4.17 / 4.70）。第一版的 0.695 → 0.315 比的是"在分支帧条件下"的模型和每次访问的边际，**不是预报能力**。
+3. **Envoy 的 Charge Range 门（中）**。FSM：Charge Range 物体在场景里一开始就 active；Walker 的 `ActivateGameObjectDelay`（1.5 s，resetOnExit 0：反编译 `ActivateGameObjectDelay.cs`，只在待满时激活，离开不复位）待满 1.5 s 才打开、离开后保持；Slash Antic 打开，Charge Antic 关；CHARGE 还要 `Alerted`（Slash Antic / Ambush Ready 设）。第一版初值关、只在 Walker 里按时间算，于是 Walker → Charge Antic 时门是关的 DEV 131 次、TEST 34 次。
+4. 低：当帧命中的排除规则几乎用不上（§18.2 已改，见 18.11.4）；"R0" 基线其实是 R0 协变量名重拟（现在叫"R0 重拟"，§18.3）；Tiny 归属用未来的帧；主角参考点。
+
+#### 18.11.2 改了什么；运行时 = 扫描，逐帧核对
+
+- **一套函数**：R0 时代的几何（`dist_visible`、`last_seen_x`、`hero_x`；`side_visible` 就是 `side`）进 `geometry()`，`since_<家族>`（没出过 = "none"）/ `miss_<后继>` 进 `BranchMemory.features`，Clapper 的伴 `clapper_context`、Tiny 归属 `TinyOwners`（每帧、只用过去）在运行时和扫描里是同一段代码；`BranchMemory` 在两边都用 `FORUM_SPECS` 的分段（离线 `memory_for`；运行时从 `branch_model.json` 的 `segmentation` 取，它在 build 时从 FORUM_SPECS 写进去——combat 包不能 import `knowledge.gauntlet_tables`，`test_import_firewall` 管着）。新加 `age`（在这个状态里待了多久）。
+- **位置**：主角用 transform（`HeroState.pos_transform`，= STATE `hero.pos`）；敌人只取它被看见的帧、最多 0.25 s 旧；"进入" / "存储"时刻用每次进入状态时的快照（第一版只留 1 s 的记录，长状态的进入时刻会取不到）。
+- **扫描按帧走**，和运行时一样：一帧里的事件按顺序，再到帧末（Tiny 归属、预报样本）。
+- **逐帧核对** `forum_branch parity`：把缓存那一场的录像经 `OracleBackend` → `MultiForecaster(branch=...)` 回放，在每一帧、每个处在模型决策状态里的敌人上（Tiny 的 Dead 除外），比较 `BranchView` 算的全部协变量（now / entry / stored 三个时刻的几何 + 全部历史、门、跨敌人）和扫描在同一帧算的。7 场（R0 DEV 3 场、R1 TEST 4 场）：705,805 行（帧 × 敌人）逐项比较，**0 差**（`val_7db1c2d\parity.json`；修正过程中分段还没统一时，第一场前 12,000 帧里 Envoy 的 `since_*` 有 350 处不同，就是这样找出来的）。dd5cbff（分段改从模型里取之后）再核 2 场整场：331,979 行 0 差。测试 `test_runtime_covariates_equal_the_scans_on_a_recording`（录像在本机时跑，6,000 帧，0 差）。说明：分支帧记录是在状态离开那一帧的事件处理中取的，运行时从不在那一刻查询（它查的是帧末、敌人已在下一个状态），所以核对比较的是规划器真正查询的帧末；分支帧表和预报表在帧末用的是同一套函数。
+- **门的数据核对**（重扫的记录，`v_2f5b96a\gates_check.txt`）：Envoy Walker → Charge Antic DEV 465 / 465、TEST 104 / 104 都是 `charge_armed` ∧ `alerted`；Bellbearer 有 Evade Cooldown 时 0 次闪避（DEV 1,378 / TEST 935 次决策）、闪过之后的 In Range 0 次再闪避；Reed 没上膛 0 次 Evade Antic、Just Did Defend 时 0 次 Defend Start；Clapper Evaded 时 0 次 Evade Scuttle；Maestro 防御之后的 Attack Choice 4,412 / 4,412（TEST 3,172 / 3,172）是 Fire Antic。
+
+#### 18.11.3 预报表（`ahead`）：中途查询用的
+
+- **样本**：敌人在一个决策状态里的每一帧都是规划器的一次查询；每次访问从进入那一帧起每 0.1 s 取一个样本（Tiny 0.25 s；Tiny 的 Dead 是等 Maestro 召唤的 30 s 等待，不取），协变量是那一帧看得见的（几何取 now / entry / stored，历史含 `age`），标签是这次访问最后去了哪个后继。瞬时决策（进入当帧就离开）没有样本：规划器从来不会看到它是"当前状态"，链里用分支帧表。DEV 1,341,860 个、TEST 893,979 个样本；29 个决策状态有预报表。同样的贪心选择（两折、按场）。
+- **用法**：`BranchView.next_attack_probs`（= `Subject.next_p`）：当前状态用它的预报表，链到的下一个决策按"现在进入"用它的预报表（瞬时的用分支帧表）；`branch_probs(..., ahead=True)` 直接给。分支帧表仍是 `branch_probs` 的默认（"如果现在决定"）。
+- **TEST 留出**（202 场的样本；"每次访问表" = 今天运行时的 `p_succ`；"分支帧模型（中途查）" = 第一版 next_p 的做法：分支帧表在样本那一帧查，只对分支帧表时刻是 branch / entry / stored 的决策）：
+
+| | 样本 | 每次访问表 | 按样本的无条件 | 分支帧模型（中途查） | **预报表** |
+|---|---|---|---|---|---|
+| 全部 | 889,333 | 0.716 | 0.603 | — | **0.581** |
+| 分支帧模型能查的决策 | 849,049 | 0.729 | 0.612 | 4.995 | **0.596** |
+| 退出前 0.2–0.3 s | 97,553 | 0.639 | 0.554 | 4.378（94,043 个） | **0.427** |
+| 退出前 0.5–0.6 s | 58,428 | 0.767 | 0.630 | 5.364（55,266 个） | **0.576** |
+
+  核查者的结论成立：分支帧模型中途查询比无条件表差得多（这里 4.4–5.4 nats；核查者用第一版的表、68 场、精确的提前帧得 2.31 / 2.92；重建后的分支帧表有 25 个决策用了 `age`，它只在决定那一刻有意义，中途查询多半因此更差）。预报表在规划器真正查询的帧上比今天的 `p_succ` 好（0.716 → 0.581），但这 0.135 nats 里 0.113 来自"按样本的无条件"（0.603：长状态占的帧多，按帧加权的边际本身就不同），全部协变量（`age`、几何、历史）只再降 0.022——中途的下一招主要取决于主角之后怎么走，表里只能按数据里的走法平均。
+
+- **逐个决策**（DEV 交叉验证、TEST 留出，nats / 样本；后两列 n / 每次访问表 / 分支帧模型 / 预报表）：
+
+| 类型 | 决策 | DEV 样本 | DEV CV 无条件 → 预报 | 时刻 | 协变量 | TEST 样本 | 每次访问表 | 分支帧模型（中途查） | 预报 | 退出前 0.2–0.3 s：n / 每次访问表 / 分支帧模型 / 预报 | 0.5–0.6 s：n / 每次访问表 / 分支帧模型 / 预报 | ECE 预报 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| Bellbearer | In Range | 124740 | 0.793 → 0.608 | now | dx,evade_cd,age,dist | 81962 | 0.931 | 3.800 | 0.572 | 8345 / 0.985 / 2.530 / 0.529 | 8124 / 0.970 / 4.457 / 0.645 | 0.007 |
+| Clapper | Evade Scuttle | 40165 | 0.019 → 0.019 | now |  | 19042 | 0.054 | 3.131 | 0.011 | 4741 / 0.048 / 2.301 / 0.005 | 0 / - / - / - | 0.001 |
+| Clapper | Idle | 136026 | 0.748 → 0.561 | now | age,dist,in_Slam Range,hit | 68164 | 1.249 | 14.605 | 0.510 | 8462 / 1.352 / 17.653 / 0.576 | 5827 / 1.185 / 15.580 / 0.468 | 0.023 |
+| Clapper | Walk | 84628 | 0.625 → 0.530 | now | dist,age,dy,last_seen_x | 43719 | 0.762 | 4.265 | 0.584 | 7346 / 0.581 / 4.418 / 0.437 | 2718 / 0.905 / 4.781 / 0.732 | 0.047 |
+| Clawmaiden | Fly | 44708 | 0.937 → 0.609 | now | suck_age,dist,age | 27369 | 1.042 | 7.935 | 0.570 | 3674 / 0.886 / 7.639 / 0.449 | 3252 / 0.841 / 10.394 / 0.456 | 0.005 |
+| Clawmaiden | Fly To Slash | 11255 | 0.775 → 0.622 | now | dist,since_end,age | 6987 | 0.760 | 4.576 | 0.537 | 881 / 0.712 / 4.310 / 0.457 | 646 / 0.783 / 5.041 / 0.629 | 0.019 |
+| Clawmaiden | Spin 0 | 9532 | 0.177 → 0.122 | now | silk,in_Suck Start Range,miss_Spin 1,age | 5601 | 0.154 | - | 0.123 | 609 / 0.164 / - / 0.110 | 579 / 0.140 / - / 0.141 | 0.003 |
+| Clawmaiden | Spin 1 | 10860 | 0.159 → 0.100 | now | silk,prev_end | 6534 | 0.150 | - | 0.111 | 600 / 0.179 / - / 0.156 | 601 / 0.140 / - / 0.082 | 0.002 |
+| Clawmaiden | Spin 2 | 10682 | 0.649 → 0.226 | now | silk,in_Suck Start Range | 6188 | 0.637 | - | 0.148 | 583 / 0.661 / - / 0.135 | 580 / 0.638 / - / 0.144 | 0.009 |
+| Clawmaiden | Spin Antic | 2048 | 0.040 → 0.037 | now | suck_age | 1265 | 1.304 | 4.755 | 0.013 | 76 / 1.300 / 9.503 / 0.006 | 0 / - / - / - | 0.003 |
+| Envoy | Charge | 5836 | 1.266 → 1.076 | now | hero_x,front,side,last_seen_x | 1310 | 1.294 | - | 1.064 | 108 / 1.296 / - / 0.931 | 95 / 1.301 / - / 0.984 | 0.021 |
+| Envoy | Walker | 2799 | 0.910 → 0.755 | now | dx | 720 | 0.710 | 3.025 | 0.507 | 73 / 0.650 / 3.594 / 0.452 | 46 / 0.728 / 3.701 / 0.502 | 0.050 |
+| Maestro | Fly | 31893 | 0.132 → 0.097 | now | dist,since_end | 21979 | 0.509 | 0.237 | 0.081 | 1779 / 0.521 / 0.314 / 0.084 | 1787 / 0.506 / 0.247 / 0.082 | 0.002 |
+| Maestro | Slash Recover | 6986 | 0.020 → 0.020 | now |  | 5222 | 1.514 | 4.781 | 0.009 | 1741 / 1.515 / 9.130 / 0.010 | 0 / - / - / - | 0.001 |
+| Minister | Attack | 18568 | 0.445 → 0.344 | now | age,dist,front,dist_visible | 16967 | 0.555 | 3.700 | 0.411 | 2472 / 0.566 / 5.236 / 0.422 | 2116 / 0.474 / 6.017 / 0.373 | 0.018 |
+| Minister | Chase | 94854 | 0.413 → 0.393 | now | age,dist,last_choice | 83260 | 0.306 | 4.680 | 0.238 | 5877 / 0.358 / 3.916 / 0.264 | 5201 / 0.314 / 4.583 / 0.252 | 0.063 |
+| Minister | Parry Stance | 25059 | 0.414 → 0.380 | now | age,dist | 25872 | 0.368 | 3.808 | 0.283 | 3058 / 0.405 / 0.566 / 0.290 | 2793 / 0.346 / 6.746 / 0.254 | 0.040 |
+| Minister | Retreat? | 14942 | 0.309 → 0.274 | now | dist,age | 13360 | 0.222 | 2.367 | 0.216 | 1739 / 0.270 / 2.095 / 0.216 | 1596 / 0.168 / 3.688 / 0.207 | 0.034 |
+| Reed | Alert | 69796 | 0.952 → 0.758 | now | dist,last_choice,age,armed | 39947 | 1.163 | 5.479 | 0.642 | 3347 / 1.234 / 2.138 / 0.679 | 2978 / 1.172 / 2.859 / 0.624 | 0.015 |
+| Reed | Defend | 21271 | 0.526 → 0.484 | now | age,dist | 12879 | 0.500 | - | 0.404 | 1333 / 0.556 / - / 0.421 | 1307 / 0.492 / - / 0.402 | 0.034 |
+| Reed | Stab Pos | 10376 | 0.412 → 0.292 | now | dx,age | 4542 | 0.457 | 1.264 | 0.236 | 637 / 0.250 / 0.125 / 0.128 | 339 / 0.433 / 1.417 / 0.227 | 0.005 |
+| Tiny | Brake | 17541 | 0.729 → 0.533 | now | hero_x,front,last_seen_x,dist_visible | 11338 | 0.714 | 4.182 | 0.496 | 1850 / 0.713 / 5.377 / 0.510 | 780 / 0.714 / 2.123 / 0.572 | 0.007 |
+| Tiny | Defend Buzz | 86520 | 0.138 → 0.133 | now | since_AT_ENTRY | 65361 | 0.078 | 4.104 | 0.067 | 9303 / 0.066 / 0.013 / 0.054 | 2561 / 0.102 / 5.398 / 0.093 | 0.011 |
+| Tiny | Defend Ready | 12651 | 0.031 → 0.028 | now | dist | 9485 | 0.023 | 5.370 | 0.015 | 9476 / 0.018 / 5.374 / 0.010 | 0 / - / - / - | 0.001 |
+| Tiny | Fire | 20086 | 0.762 → 0.553 | entry | dx,hero_x,side,dist | 13905 | 0.759 | 2.221 | 0.497 | 3185 / 0.756 / 2.314 / 0.459 | 648 / 0.699 / 2.590 / 0.508 | 0.009 |
+| Tiny | Fire Ready | 31710 | 0.044 → 0.044 | now |  | 22705 | 0.038 | 3.908 | 0.025 | 1252 / 0.042 / 0.084 / 0.030 | 3 / 4.858 / 1.277 / 5.879 | 0.002 |
+| Tiny | Pull Up | 10521 | 0.587 → 0.259 | entry | hero_x,side,dx,age | 7772 | 0.578 | - | 0.192 | 277 / 1.253 / - / 0.579 | 0 / - / - / - | 0.004 |
+| Tiny | Ready | 328312 | 0.871 → 0.772 | now | from,age,miss_Defend Ready,prev | 237586 | 0.975 | 3.915 | 1.191 | 12157 / 1.076 / 1.213 / 1.255 | 11673 / 1.030 / 1.587 / 1.176 | 0.044 |
+| Tiny | Return | 39943 | 0.549 → 0.471 | now | age,from,prev_end | 28292 | 0.536 | 6.235 | 0.445 | 2572 / 0.636 / 6.537 / 0.529 | 2178 / 0.585 / 5.888 / 0.457 | 0.006 |
+
+  读法：Clapper Idle 1.249 → 0.510、Reed Alert 1.163 → 0.642、Clawmaiden Fly 1.042 → 0.570、Bellbearer In Range 0.931 → 0.572（每次访问表 → 预报表）；Maestro Slash Recover、Clawmaiden Spin Antic 这类"进入后几乎确定"的状态每次访问表很差（1.5 / 1.3：瞬时离开的那一支在中途已经不可能）而预报表 0.01。**Tiny Ready 不迁移**：DEV 交叉验证 0.871 → 0.772，TEST 1.191，比每次访问表 0.975 还差（ECE 0.044）：它的出边是 Maestro 那边的选择，R1 的波次起点 / 策略改变了它的时间分布；消费方对 Tiny 的 Ready 先别信 `next_p`（18.9）。
+
+#### 18.11.4 其它数字的重测
+
+- **分支帧模型**（§18.3）：TEST 0.695 → **0.284**（第一版说 0.315，而运行时实际只有核查者的 0.340）；R0 重拟 0.511。感知时刻（§18.4）：只用几何时 Choristor Hop Antic 分支帧 0.081 / 进入 0.006、Reed Throwing Up? 0.245 / 存储 0.069，和第一版相同。
+- **当帧命中**（DEV 22 场，`fix\lag_s.txt`）：5 种 TOOK DAMAGE 出边共 1,100 次，和同一帧的记录命中重合的只有 1 次；Clapper Idle → Dmg Attack 194 / 568、Minister Chase → Range Check 84 / 299 在一次记录命中之后 12–18 帧（多数 18 帧 = 0.3 s）；Reed Alert → Stab Pos 只有 7 / 176；其余前 0.35 s 内没有记录到的命中（中位数 1.9–4 s 前；Clapper 20、Minister 36、Reed 29 次之前根本没有记录命中）。`hit` 现在含当帧（过去的、看得见的信息）。
+- 没重测（代码没动）：Tiny 轨道 / 冲锋（§18.6）、防御两支的间隔（§18.5）、Bellbearer 2,229 / 2,229（核查者核了等价的 In Range 条件：0 次再闪避，上面重扫的记录同样 0）。
+
+#### 18.11.5 支撑、召回、Bell Beast、算力、测试（召回 / Bell Beast / 7 场逐帧核对：冻结检出 `C:\ssbot\live_r5mf_7db1c2d`；全部测试和 2 场整场逐帧核对：`live_r5mf_dd5cbff`，只改了分段从哪里取）
+
+- **支撑不动**：放置、`occupied`、`prob`、支撑集都不读分支模型（测试 `test_multi_forecaster_branch_view_is_scoring_only`）。留出召回（`multi_recall fresh --tables 0 --branch`，新模型打开）：R0 的 35 场 L2 / L3 / L4 各 74,585 / 74,585、钩 465 / 465，和第一版（092e3e2）、R3 认证逐项相同（只有耗时：每次预报 1.42 vs 1.34 ms）。
+- **Bell Beast**（`MultiForecaster(boss=...)` 没有 BranchView，走的是分支模型关着的路径，正是回归规则要的）：20261003_144536 i4_000、20261004_095304 i0_001 各 4,001 帧、铃区 892 / 1,333 次检查，放置 / occupied / prob / 支撑集 / committed / 战术 / 规划器决策 / 铃区八项 **0 差**。
+- **算力**（逐帧核对时每帧对每个活着的敌人算 `next_attack_probs`，= `Subject.next_p` 的工作；低优先级、和别的作业并行，偏保守）：第一版量的那一场（20261003_074719 i3 ep0，51,823 帧）每帧 p50 0.13 ms、p99 1.07 ms、最大 5.0 ms（第一版 0.17 / 1.05 / 7.8）；7 场的 p99 0.58–1.14 ms、最大 8.8 ms；dd5cbff 上同一场（并行作业少时）p50 0.11 / p99 0.80 / 最大 3.1 ms。`ForumPlannerPolicy(branch_model=True)` 仍默认关。
+- **测试**：dd5cbff 全部 1,150 passed、2 skipped、1 xfailed（NUMBA_NUM_THREADS 4，`val_dd5cbff	ests.log`）。7db1c2d 那一遍有 1 个失败：`test_import_firewall`（combat → knowledge.gauntlet_tables → ipc：运行时的 `memory_for` 直接读了 FORUM_SPECS），所以分段改成存在模型里、从模型取（dd5cbff）。
+

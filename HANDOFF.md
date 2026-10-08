@@ -1833,19 +1833,22 @@ side caches `hero\`, `study_dev.json`, `holdout_test.json`, `summary.md`, `tiny_
   from the decompiled source (eventMax / missedMax). Trigger shapes `RANGES` (scene bundle AlertRanges, mirrored with
   flipX), `geometry()` / `in_range()`.
 - **Cooldowns and branch-split history as view-legal covariates** (`BranchMemory`, fed by Control entries and hits):
-  gates (Bellbearer Evade Cooldown + can_evade, Reed armed / Just Did Defend, Clapper Evaded, Envoy Charge Range),
+  gates (Bellbearer Evade Cooldown + can_evade, Reed armed / Just Did Defend, Clapper Evaded, Envoy Charge Range +
+  Alerted; the Envoy gate was wrong in round 1, see the fixer round below),
   counters / timers (Choristor hops + last hop, Clawmaiden suck timer age, Maestro dead Tinies), anti-repeat history
   of each decision state (last / last two choices, run, decisions since each outcome = the V4 counters), the previous
   attack and its last state (`prev_end`: defend not hit vs countered), time since it ended, where the state was
-  entered from, a hit strictly before this frame (a same-frame hit is the TOOK DAMAGE / BLOCKED HIT cause, the
-  planner's hit branch), Clapper buddy facts, the hero's silk.
+  entered from, the last hit seen (round 1 excluded a same-frame hit as "the TOOK DAMAGE cause": wrong, the
+  exit follows its hit by 12-18 frames when at all; fixer round), Clapper buddy facts, the hero's silk.
 - **Study and product** (`knowledge/forum_branch.py`, `tools/forum_branch scan|study|build`): one record per exit of a
   decision state with geometry at 8 timings (branch, entry, stored, lead 0.1-0.5 s); per decision a greedy forward
   selection by 2-fold (by fight) CV log loss over geometry at each timing + history, backoff tables
   (`DecisionModel`); the best timing kept. `knowledge/1.0.30000/enemies/forum/branch_model.json` (61 decisions, fit
   on all 142 DEV fights).
 - **Runtime** (scoring only): `EnemyTracker.mem` (one line each in `enter` / `_hit`), `MultiForecaster(branch=...)`
-  -> `BranchView` (hero box / silk and enemy positions kept 1 s so a decision's geometry is taken at its timing),
+  -> `BranchView` (hero box / silk and enemy positions kept 1 s so a decision's geometry is taken at its timing;
+  **round 1 did not compute 26 decisions' selected covariates at runtime: train / serve skew, fixed and checked
+  frame by frame in the fixer round**),
   `branch_probs(iid)`, `next_attack_probs(iid)`, `Subject.next_p`; `ForumPlannerPolicy(branch_model=True)` switches
   it on (default off: nothing in the planner consumes it yet; the R5 value / R6 O and BAIT are the consumers).
   `multi_recall --branch` runs the recall with it on.
@@ -1863,9 +1866,10 @@ side caches `hero\`, `study_dev.json`, `holdout_test.json`, `summary.md`, `tiny_
 
 ### Measured (forum.md 18.3-18.8)
 
-- **Held-out log loss** (nats / decision, weighted): DEV 142 fights (2-fold CV) unconditional 0.740 (the runtime's
-  p_succ today), R0 conditioners 0.539, new **0.332**; **TEST 202 R1 fights never used for selection: 0.695 / 0.512 /
-  0.315; ECE 0.018 -> 0.009**. Largest gains: trigger-shape decisions become near deterministic (Clapper After
+- **Held-out log loss** (nats / decision, weighted; **round 1, superseded by the fixer round**: the fire-frame model,
+  P(successor | the decision fires now), on offline features the runtime did not compute; it is not a forecast
+  mid-state): DEV 142 fights (2-fold CV) unconditional 0.740, R0 conditioners refit 0.539, new 0.332; TEST 202 R1
+  fights: 0.695 / 0.512 / 0.315; ECE 0.018 -> 0.009. Largest gains: trigger-shape decisions become near deterministic (Clapper After
   Scuttle / Dmg Attack / Walk, Choristor Hop Antic at its entry, Slash Check), Bellbearer In Range 1.06 -> 0.11,
   Clawmaiden Fly 1.16 -> 0.31 and Spin Antic 1.10 -> 0.59 (hero silk at entry), Reed Alert 1.43 -> 0.39, Minister
   Chase 0.52 -> 0.20. Worse than R0: Maestro Attack Choice (0.318 -> 0.331), Clapper Escape Jump on TEST (0.290 ->
@@ -1884,7 +1888,7 @@ side caches `hero\`, `study_dev.json`, `holdout_test.json`, `summary.md`, `tiny_
   is hit 0.8-0.9 % 2-8 u behind the Maestro, 7.1 % right under it, 31 % / 56 % / ~59 % at 3 / 6 / 8-10 u in front.
 - **Cost** of next_p for every enemy in a decision (full gauntlet replay, 51,823 frames): p50 0.17 ms, p99 1.05 ms,
   max 7.8 ms per frame -> off by default.
-- Validation (frozen 092e3e2): recall with the branch model ON (`multi_recall fresh --tables 0 --branch`, R0's 35 fresh fights): L2 / L3 / L4 74,585 / 74,585 each, all by the forecast, hooks 465 / 465, identical to the R3 certification (2a10a0d, fresh/tables0). Bell Beast wrap (`multi_recall bellbeast` i4_000 + 20261004_095304 i0_001, 4,001 frames each): 0 differences in all eight checks. Full pytest at 092e3e2: 1,146 passed, 3 skipped, 1 xfailed (15 planner / kinematics tests first failed only because the run's NUMBA_NUM_THREADS was 3; rerun with 4: 73 / 73); the later commits' tests/test_branch_model.py 19 / 19.
+- Validation (frozen 092e3e2): recall with the branch model ON (`multi_recall fresh --tables 0 --branch`, R0's 35 fresh fights): L2 / L3 / L4 74,585 / 74,585 each, all by the forecast, hooks 465 / 465, identical to the R3 certification (2a10a0d, fresh/tables0). Bell Beast wrap (`multi_recall bellbeast` i4_000 + 20261004_095304 i0_001, 4,001 frames each): 0 differences in all eight checks (boss mode has no BranchView: this checks the branch-off path, which is what the regression rule asks for, not the branch model). Full pytest at 092e3e2: 1,146 passed, 3 skipped, 1 xfailed (15 planner / kinematics tests first failed only because the run's NUMBA_NUM_THREADS was 3; rerun with 4: 73 / 73); the later commits' tests/test_branch_model.py 19 / 19.
 
 ### Next / open issues
 
@@ -1903,3 +1907,96 @@ side caches `hero\`, `study_dev.json`, `holdout_test.json`, `summary.md`, `tiny_
    conflicts there (this track adds EnemyTracker.mem, MultiForecaster(branch=...), Subject.next_p). The two
    sessions share one scratchpad directory (a file of this track was overwritten): keep run scripts in
    C:\ssbot\data\m2_forum_r5m.
+
+### Fixer round (week push round 2, 2026-10-08; code 2f5b96a -> dd5cbff, offline, no game instance)
+
+The round-1 verifier refuted three claims: that `MultiForecaster(branch=...)` fills `Subject.next_p` with the model
+scored at 0.315 (train / serve skew), that 0.695 -> 0.315 is a forecasting gain (the model was fit on fire frames
+only), and that the Envoy Charge Range gate is modelled faithfully. Its findings were 2 high, 1 medium and 4 low; all
+are addressed. Outputs are in `C:\ssbot\data\m2_forum_r5m\fix\`: `v_2f5b96a\` (rescan, studies, build, `holdout_test.json`,
+`tables.md`, `gates_check.txt`) and `val_7db1c2d\` (parity, recall, Bell Beast, tests). The facts are in forum.md
+§18.11; §18.2-18.4 and §18.8-18.10 were corrected in place.
+
+- **Train / serve skew (high).** The runtime and the scan now compute every covariate with the same functions:
+  - the R0-era geometry goes in `geometry()`: `dist_visible`, `last_seen_x`, `hero_x` (`side_visible` is `side`);
+  - `since_<family>` ("none" before the family's first attack) and `miss_<outcome>` go in `BranchMemory.features`;
+  - `clapper_context`, and `TinyOwners`, which assigns owners online from past frames only (the scan's whole-fight
+    vote is gone);
+  - the scan's segmentation is used at runtime too: the walk's TypeTable lacks MA_POINT and the Envoy's
+    EN_HOPSLASH / EN_ENTRY, so `prev` / `run` / `since_*` differed. The model now stores it (`branch_model.json`
+    "segmentation", written by build from FORUM_SPECS, read by `memory_for_table(tt, model)`), because
+    `test_import_firewall` forbids combat -> knowledge.gauntlet_tables;
+  - the hero transform (`pos_transform`), where round 1 used the hurtbox centre;
+  - enemy rows only on frames the enemy was seen, at most 0.25 s old;
+  - entry / stored geometry from a snapshot taken at each state entry.
+
+  The scan walks frames the way the runtime does: a frame's events, then the frame's end. A new check,
+  `forum_branch parity`, replays a cached fight's recording through OracleBackend -> MultiForecaster(branch=...). On
+  every frame an enemy is in a modelled decision state, it compares BranchView's covariates with the scan's: geometry
+  at now / entry / stored, all history, gates and context. Over 7 fights (3 R0 DEV, 4 R1 TEST), **705,805 rows
+  matched with 0 differences**. Test: `test_runtime_covariates_equal_the_scans_on_a_recording` (skipped when the
+  recording or the forum hitbox npz is missing).
+- **Fire-frame-only fitting (high).** The `types` tables remain the fire-frame model, now documented as P(successor |
+  it decides now); `branch_probs` defaults to them. A new set of forecast tables, `ahead`, is fitted on samples taken
+  every 0.1 s of every visit to a decision state (0.25 s for the Tiny; the Tiny's Dead is skipped), each labelled with
+  how the visit ended. The greedy selection is the same; 29 states have a table. `next_attack_probs` / `Subject.next_p`
+  use them for the current state, then for chained decisions as if entered now; instant decisions keep the
+  fire-frame table. On the 889,333 TEST samples (the frames the planner queries), in nats per sample:
+
+  | Samples | Per-visit p_succ | Per-sample unconditional | Fire-frame model, queried mid-state | Forecast |
+  |---|---|---|---|---|
+  | All | 0.716 | 0.603 | 4.99 | **0.581** |
+  | 0.2-0.3 s before the exit | 0.639 | - | 4.38 | **0.427** |
+  | 0.5-0.6 s before the exit | 0.767 | - | 5.36 | **0.576** |
+
+  The fire-frame column covers only the 849,049 samples where that model can be queried (0.596 for the forecast on
+  that subset). Of the 0.135 nats gained over the per-visit table, 0.113 comes from the time-weighted marginal
+  alone; all the covariates together (`age`, geometry, history) add only 0.022, because mid-state the next move
+  depends on where the hero goes next.
+- **Envoy gate (medium).** Charge Range is active at scene load. It arms once a Walker visit reaches 1.5 s and stays
+  armed after Walker is left (ActivateGameObjectDelay with resetOnExit 0). Slash Antic turns it on, Charge Antic off,
+  and a new `alerted` gate is added. After the rescan, every Walker -> Charge Antic has both gates open: DEV 465 / 465,
+  TEST 104 / 104 (round 1 had 131 / 34 with the gate shut). Test: `test_envoy_charge_range_gate_follows_the_fsm`.
+- **Lows.**
+  - The same-frame hit exclusion is dropped. It applied to 1 of 1,100 TOOK DAMAGE exits. About a third of the
+    Clapper / Minister exits follow a recorded hit by 12-18 frames; the rest have no recorded hit within 0.35 s.
+    The docs are corrected.
+  - The "R0" baseline is renamed "R0 conditioners refit" (`r0_refit`): it was never the shipped tables.
+  - The hero reference point and the Tiny owner are fixed (see above).
+- **Rebuilt `branch_model.json`** (schema 2, 243 KB). Fire-frame log loss on runtime-computable covariates: TEST 0.695
+  -> **0.284**, DEV CV 0.740 -> 0.279, against 0.511 for the R0 refit. `age` (time in the state) is selected by 25
+  decisions. Timings chosen: branch 45, entry 1, stored 3, lead 12; Hop Antic and Evade Scuttle now use `age` at the
+  branch frame.
+- **Re-measured.**
+  - Gates: 0 violations for the Bellbearer cooldown, Reed armed / jdd and Clapper evaded. The Maestro never defends
+    twice: DEV 4,412 / 4,412, TEST 3,172 / 3,172.
+  - Geometry-only sensing times are unchanged: Hop Antic 0.081 at the branch frame vs 0.006 at entry; Throwing Up?
+    0.245 vs 0.069 at the stored time.
+- **Validation** (recall, Bell Beast and the 7-fight parity: frozen `C:\ssbot\live_r5mf_7db1c2d`; full pytest and a
+  2-fight full parity: `C:\ssbot\live_r5mf_dd5cbff`, which only moved the segmentation into the model):
+  - parity: 0 differences (above);
+  - cost of next_p for every living enemy per frame, on the round-1 fight (20261003_074719 i3 ep0, 51,823 frames):
+    p50 0.13 / p99 1.07 / max 5.0 ms at 7db1c2d, 0.11 / 0.80 / 3.1 at dd5cbff with less load (round 1: 0.17 / 1.05 / 7.8);
+  - parity again at dd5cbff, 2 full fights: 331,979 rows, 0 differences;
+  - recall with the new model on (`multi_recall fresh --tables 0 --branch`, R0's 35 fresh fights): identical to round 1
+    (092e3e2) and the R3 certification, including L2-L4 74,585 / 74,585 and hooks 465 / 465;
+  - Bell Beast wraps: i4_000 and 20261004_095304 i0_001, 4,001 frames each, 0 differences in all eight checks (the
+    branch-off path);
+  - full pytest at dd5cbff: 1,150 passed, 2 skipped, 1 xfailed. The 7db1c2d run had one failure,
+    `test_import_firewall` (combat -> knowledge.gauntlet_tables -> ipc); that is why the segmentation moved into the model.
+
+Open issues (fixer round):
+1. **Tiny Ready's forecast does not transfer.** TEST log loss is 1.19 against 0.98 for the per-visit table, although
+   DEV CV was 0.77. Its exits are the Maestro's choices. Consumers should not trust `next_p` for a Tiny in Ready, or
+   should condition it on the Maestro's state.
+2. **Small-n fire-frame decisions are unstable on TEST.** Clawmaiden Spin 1 scores 0.412 against 0.188 unconditional;
+   Spin 0 is also affected. Envoy Charge scores 0.909 against 0.760 for the R0 refit, and Reed Throw Up is unstable
+   too. Capping covariates by n is still not done.
+3. **The forecast is averaged over the data policies' hero motion.** A forecast conditioned on a candidate (the
+   fire-frame model times a per-frame hazard along the candidate's hero path) is not built. R5 value / R6 consumers
+   asking "what if the hero goes there" should use `branch_probs` (fire-frame) at the candidate's frames plus their
+   own timing.
+4. **Nothing in the planner reads `next_p` yet.** `ForumPlannerPolicy(branch_model=True)` is still off, and the
+   forecast tables have never run live.
+5. **Integration.** This branch also touches `combat/multi_forecast.py` / `enemy_tracker.py`, as R5 value does. The
+   forum.md section is 18; R5 value's is 17.
