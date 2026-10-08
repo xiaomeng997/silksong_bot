@@ -41,6 +41,12 @@ ARENA_X3 = (25.67, 37.33)        # thirds of the Forum band x 14.01-48.99 (R0's 
 GEO_KEYS = ("x", "y", "flip", "hx", "hy", "b0", "b1", "b2", "b3", "silk")
 
 
+def memory_for(tk: str) -> BranchMemory:
+    """A BranchMemory with the type's segmentation (gauntlet_tables.FORUM_SPECS) and choice states."""
+    sp = next(s for s in FORUM_SPECS.values() if s.boss_type == tk)
+    return BranchMemory(tk, dict(sp.attack_starts), frozenset(sp.decision_states), frozenset(decisions_of(tk)))
+
+
 def decisions_of(tk: str) -> tuple[str, ...]:
     if tk == "Song Automaton Tiny":
         return TINY_DECISIONS
@@ -128,8 +134,7 @@ def scan_fight(c: dict, extra: dict | None = None) -> list[DecisionRecord]:
         tk_of[int(iid)] = tk
     mems: dict[int, BranchMemory] = {}
     for iid, tk in tk_of.items():
-        sp = by_tk[tk]
-        mems[iid] = BranchMemory(tk, dict(sp.attack_starts), frozenset(sp.decision_states) | frozenset(decisions_of(tk)))
+        mems[iid] = memory_for(tk)
     dec = {tk: set(decisions_of(tk)) for tk in by_tk}
     tiny_owner = _tiny_owners(c, rows, tk_of, T)
     out: list[DecisionRecord] = []
@@ -406,9 +411,7 @@ def study_decision(dd: DecisionData, r0_conditioners: list[str] | None = None) -
     """Per timing: geometry-only and geometry + history greedy selections; baselines; the chosen model."""
     K = len(dd.outcomes)
     henc = {k: _Enc(v).codes for k, v in dd.hist.items()}
-    r0_names = {"dist_visible", "side_visible", "hero_x", "last_seen_x"} | {k for k in henc if
-                                                                             k.startswith(("since_", "miss_"))}
-    hist_cand = {k: v for k, v in henc.items() if k not in r0_names}
+    hist_cand = dict(henc)
     res: dict = {"n": int(len(dd.y)), "outcomes": dd.outcomes,
                  "counts": dict(Counter(dd.outcomes[i] for i in dd.y))}
     ll_u, P_u = cv_logloss(dd.y, K, dd.fold, [])

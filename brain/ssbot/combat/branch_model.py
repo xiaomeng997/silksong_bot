@@ -191,7 +191,8 @@ class BranchMemory:
     hits it took. Families from the type's attack-start table (ssbot.knowledge.gauntlet_tables.FORUM_SPECS)."""
     tk: str
     attack_starts: dict = field(default_factory=dict)
-    decision_states: frozenset = frozenset()
+    decision_states: frozenset = frozenset()          # the segmentation's (entering one ends an attack)
+    choice_states: frozenset = frozenset()            # states whose outcomes are kept as anti-repeat history
     state: str | None = None
     t_entry: float | None = None
     prev_state: str | None = None
@@ -204,6 +205,7 @@ class BranchMemory:
     local: dict = field(default_factory=lambda: defaultdict(lambda: deque(maxlen=LOCAL_KEEP)))
     gates: dict = field(default_factory=dict)
     t_hit: float = -math.inf
+    t_hit_before: float = -math.inf          # the hit before t_hit (features at t_hit's own frame see only this)
     entries: dict = field(default_factory=dict)      # state -> last entry time
     # Choristor: hops in the current move (Move Start resets), the last hop's direction and |x distance|
     hops: int = 0
@@ -225,7 +227,7 @@ class BranchMemory:
             frm = self.state                         # a missed event: the state we last knew left
         if frm is None:
             frm = self.state
-        if frm is not None and frm in self.decision_states:
+        if frm is not None and (frm in self.decision_states or frm in self.choice_states):
             self.local[frm].append(to)
         if frm == "Fly" and self.tk == "Song Handmaiden" and self.t_entry is not None:
             self.suck_age += max(0.0, T - self.t_entry)
@@ -263,6 +265,8 @@ class BranchMemory:
         self.fam_end_state, self.t_fam_end, self.fam = frm, T, None
 
     def hit(self, T: float) -> None:
+        if T > self.t_hit:
+            self.t_hit_before = self.t_hit
         self.t_hit = T
 
     def features(self, state: str, T: float, context: dict | None = None) -> dict:
@@ -282,7 +286,9 @@ class BranchMemory:
              "last_choice": loc[-1] if loc else "none",
              "choice_run": min(run, 3) if loc else "none",
              "prev2_choice": "|".join(list(loc)[-2:]) if len(loc) >= 2 else ("|".join(loc) or "none"),
-             "hit": _bin(T - self.t_hit, HIT_RECENT_S),
+             # hits before this frame: a hit on the decision's own frame is its cause (TOOK DAMAGE / BLOCKED HIT
+             # exits), the planner's hit-effect branch, not a history covariate
+             "hit": _bin(T - (self.t_hit if self.t_hit < T else self.t_hit_before), HIT_RECENT_S),
              "from": self.prev_state if self.state == state else self.state}
         for k, v in self.gates.items():
             f[k] = v
