@@ -1881,7 +1881,7 @@ Done (committed):
   changes 18-25 % of the picks but the pick is clear in hindsight only ~1 point more often (68.4 vs 67.4 %; before
   hits 30.4 vs 27.8 %): the body field is weakly informative (AUC 0.60-0.65 on the TV recordings, ~0.55 on A0b) and
   rides on J0's target terms (AUC 0.46 before hits). R5 model's next_p not used (the verifier's verdict; not merged).
-- `ForumConfig.commit_rank` (`SSBOT_FORUM_PC=1`, default off, 737048f; forum.md 17.8): in FORCED_RISK, after P, the
+- `ForumConfig.commit_rank` (737048f, default on since 3797b3e, `SSBOT_FORUM_PC=0` off; forum.md 17.8): after P, the
   share of stage 1's frames in contact with the committed support (P_cm) then with the current attacks' fine
   placements (P_f); they lead the p_k preselection too. Offline (same ticks): picks clear in hindsight 74.3 / 70.9 %
   (+5.9 / +6.0 points), before hits 41.5 / 42.3 % (+11 / +10). Plan p50 +0.7-1.6 ms (open-loop replay). Test
@@ -1899,17 +1899,20 @@ FORCED_RISK block of `combat/forum_planner.py` and the policy's planner construc
 superset (diag's key first, then P, P_cm, P_f), so take it when the hunks conflict (diag's later commits up to
 b4345c6 touch only its tools and HANDOFF).
 
-### Running
+Round-2 A/B (instance 0, 04:20-05:18, frozen `C:\ssbot\live_r5v2_8617aa6`, driver `C:\ssbot\sandbox\r5v_ab2.ps1`,
+lock released; forum.md 17.10), arms interleaved in one window, A0b protocol, TV on, T 36:
 
-- Offline (hidden, below normal; `C:\ssbot\data\m2_forum_r5v\round2\audit_batch.ps1`): forum_tv_audit with the
-  "seen" score over the same 25 + 9 episodes -> `aud2_*.json` + `.pkl.gz`; then `rank_eval.py` (same folder).
-- Instance 0 A/B driver `C:\ssbot\sandbox\r5v_ab2.ps1 -Root C:\ssbot\live_r5v2_8617aa6` (hidden; log
-  `C:\ssbot\sandbox\r5v_ab2.log`): waits for `locks\inst0.lock` (held by diag for its own seen / share A/B), takes
-  it (r5value), warms, then 25 valid episodes each SPC (seen + commit_rank, 300400) -> PC (300500) -> TV control (both
-  off, 300600) -> SPC (300700), A0b protocol; an early-ended batch is continued with seed + 50; no batch on
-  DEMO_SOON / STOP_AGENTS; releases the lock at the end. Batch logs in `C:\ssbot\data\m2_forum_r5v\round2\`.
-  Stop: `cd C:\ssbot\live_r5v2_8617aa6\brain; ..\scripts\uv.cmd run python -m ssbot.tools.combat_run stop <run dir>`
-  (run dirs `C:\ssbot\data\runs\m2\20261008_*_Forum_A_eval_planner_oracle`), then end the driver's powershell.
+| arm | runs (20261008_) | episodes | hits / min (95 %) | time alive p50 / mean (s) | FORCED_RISK | tick p50 / p99 | late |
+|---|---|---|---|---|---|---|---|
+| TV control (both off) | 045158 | 25 | 19.0 (17.1-21.0) | 12.4 / 13.7 | 0.813 | 9.8 / 19.0 | 3.5 % |
+| PC (commit_rank) | 043725 | 25 | 12.4 (11.3-13.7) | 21.4 / 21.3 | 0.885 | 12.8 / 21.2 | 17.6 % |
+| SPC (seen + commit_rank) | 042011 + 042143 + 050303 | 50 | 10.3 (9.5-11.3) | 23.5 / 24.4 | 0.915 | 12.0 / 20.2 | 23.8 % |
+
+Every episode is still a Q1 QUIT in wave 0 (about 4.2-4.4 hits), 0 WOULD_DIE, 0 kills, 0 support-outside hits, the
+envelope audit clean: the hero survives 55-78 % longer per hit but never kills; the next bottleneck is offence
+(R6 / R8). commit_rank is now on by default (3797b3e, `SSBOT_FORUM_PC=0` off); "seen" stays diag's switch (default
+share): recommend both on (SPC) at integration. Heavier ticks: late ticks 18-24 % on the fully loaded machine
+(control 3.5 %); trim before going live (Next 2).
 
 ### Needs deploy
 
@@ -1917,15 +1920,20 @@ b4345c6 touch only its tools and HANDOFF).
 
 ### Next / open issues
 
-1. Report the PC A/B (forum_a0_report over the two PC runs vs the TV control and A0b; hits / min, FORCED_RISK, tick
-   p50 / p99) in forum.md 17.8 and the plan note; flip the default only if it helps.
-2. The support still saturates (17.1): the remaining hindsight gap (~16 points) is the attacks not started yet; it
-   needs time-resolved later-instance placements (R2 / R3, recertify) or branch probabilities fitted on lead frames.
-3. Terminal-value weights / body-field radius are hand-set; in wave 0 the value is not the bottleneck (17.7).
-4. Hit-target fix and the value terms change J on every Forum tick; integrate with R6 / R8 / diag's "seen".
-5. Main's working copy has no `knowledge/1.0.30000/enemies/forum/*_hitboxes.npz` (git-ignored); this worktree's copy
+1. Integration: merge this branch with diag's (worktree-wf_fa16f06f-127-8): take this branch's FORCED_RISK block (seen >
+   P > P_cm > P_f) and policy `_fcfg`; decide SSBOT_FORUM_FR's default with diag's own seen / share A/B (seeds 340000).
+2. Compute: commit_rank + seen cost about 3 ms per tick under full load (open-loop replay: +1 ms for commit_rank);
+   compute P_cm / P_f only for the rows best on seen / first contact, or only when P ties, and re-measure late ticks.
+3. The remaining gap (forum.md 17.9): 68-79 % of the stacked ranking's misses have a clear row tied on every risk key;
+   the hits come from attacks not started yet (the saturated later-instance boxes): time-resolved later-instance
+   placements (R2 / R3, recertify) or lead-time branch probabilities (R5 model's next step).
+4. Wave 0 is still never cleared (no kill in the 177 live episodes of this track): offence (R6 targets, R8 clash) is next.
+5. Terminal-value weights / body-field radius are hand-set; in wave 0 the value is not the bottleneck (17.7). Kill value
+   untested (no kills).
+6. Main's working copy has no `knowledge/1.0.30000/enemies/forum/*_hitboxes.npz` (git-ignored); this worktree's copy
    (= `C:\ssbot\tables\forum_r3_2a10a0d`) was used for the frozen checkouts.
-6. Frozen checkouts `C:\ssbot\live_r5v_35e5fe6` (round 1, A/B done), `C:\ssbot\live_r5v2_737048f` (unused: replaced
-   by 8617aa6 before the A/B started) and `C:\ssbot\live_r5v2_8617aa6` can go after the A/B is reported.
-7. Full suite at 737048f: 1,138 passed, 2 skipped, 1 xfailed (tests + ssbot/tests, 4 threads); after the port
-   (8617aa6) the Forum / planner / terminal / multi_forecast / worldstate / observability subset: 224 passed.
+7. Frozen checkouts `C:\ssbot\live_r5v_35e5fe6`, `C:\ssbot\live_r5v2_737048f` (unused) and `C:\ssbot\live_r5v2_8617aa6`
+   can go; audit dumps (~60 MB each set) in `C:\ssbot\data\m2_forum_r5v\round2\` can go after integration.
+8. Tests: full suite at 737048f 1,138 passed, 2 skipped, 1 xfailed; after the port and the default flip the Forum /
+   planner / terminal / multi_forecast / worldstate / observability subset 224 passed; the final full run is in
+   `C:\ssbot\data\m2_forum_r5v\round2\fullsuite2.txt`.
