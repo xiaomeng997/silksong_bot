@@ -346,7 +346,8 @@ class ForumPlanner(Planner):
     def _terminal(self, f, ctx):
         """The tick's body field (combat.terminal) and the kill value per enemy iid; (None, {}) without a multi-enemy
         forecast or with the terminal value off."""
-        if self.tv is None or f.__dict__.get("boss_fc") is not None or not hasattr(f._fc, "trackers"):
+        fc = getattr(f, "__dict__", {}).get("_fc")
+        if self.tv is None or f.__dict__.get("boss_fc") is not None or not hasattr(fc, "trackers"):
             return None, {}
         fields = EnemyFields.from_bodies(f, self._two_mask(f))
         ws = getattr(f._fc, "_ws", None)
