@@ -482,3 +482,40 @@ def test_the_idle_clappers_turn_with_a_real_forecast(prod_tables):
             assert tac.stats["switch_kinds"] == {"turn": 1}
         else:                                                         # 0.26 s left < the run (0.05 + 6 / 17.5)
             assert tac.stats["tgt_switches"] == 0
+
+
+def test_jump_cast_rune_circle_kept_out_of_after_the_move():
+    # round 3 (forum.md 17.7): a CC_JUMP_CAST's rune circle bursts about 0.75-0.87 s after the move ends; the face
+    # (4 u in front) is inside it (v4 w7: 20 hits). Until rune_hold_s after the move: out past the circle when the
+    # way round backed off, behind the landing when it went under; then the face again.
+    t = l2()
+    cast = dict(y=7.45, family="CC_JUMP_CAST", committed=True)
+    t.decide(world(36.0, t=10.0, ents=[clapper(9, 46.0, False)]),
+             WinFc([subj(9, CC, 46.0, state="Cast Slam Antic 2", **cast)]), None, 3)
+    # first seen past the antic 1.3 s in (a late tick): behind the landing (7.9 u off, 0.5 s) is not reached 0.25 s
+    # before it lands (1.85 s) -> back off past the circle
+    t.decide(world(36.0, t=11.3, ents=[clapper(9, 44.0, False)]),
+             WinFc([subj(9, CC, 44.0, state="Air", **cast)]), None, 3)
+    land = jump_landing(46.0, 36.0, -1.0)
+    assert t.jump_how[9] == "back off"
+    # the move over at 12.2 s: idle at its landing, the hero in front of it
+    idle = [subj(9, CC, land, y=7.45)]
+    p = t.decide(world(36.0, t=12.2, ents=[clapper(9, land, False)]), WinFc(idle), None, 3)
+    assert t.last["goal_why"].endswith("rune: out") and p.stance_x == pytest.approx(land - 14.5)
+    assert p.hit_w.get(9, 0.0) == 0.0                             # stepping away: no hit reward on it
+    p = t.decide(world(36.0, t=13.1, ents=[clapper(9, land, False)]), WinFc(idle), None, 3)
+    assert t.last["goal_why"].endswith("rune: out")
+    p = t.decide(world(36.0, t=13.3, ents=[clapper(9, land, False)]), WinFc(idle), None, 3)
+    assert t.last["goal_why"].endswith("face") and p.stance_x == pytest.approx(land - 4.0)
+    assert 9 not in t.rune
+    # under it: behind the landing (2.5 u, out of the circle's back edge at 0.58 u) while the rune is pending
+    t = l2()
+    t.decide(world(34.0, t=10.0, ents=[clapper(9, 40.0, False)]),
+             WinFc([subj(9, CC, 40.0, state="Cast Slam Antic 2", **cast)]), None, 3)
+    t.decide(world(34.0, t=10.93, ents=[clapper(9, 40.0, False)]),
+             WinFc([subj(9, CC, 39.5, state="Jump", **cast)]), None, 3)
+    land = jump_landing(40.0, 34.0, -1.0)
+    assert t.jump_how[9] == "under and behind"
+    p = t.decide(world(land + 3.0, t=12.2, ents=[clapper(9, land, False)]), WinFc([subj(9, CC, land, y=7.45)]),
+                 None, 3)
+    assert t.last["goal_why"].endswith("rune: behind") and p.stance_x == pytest.approx(land + 2.5)
