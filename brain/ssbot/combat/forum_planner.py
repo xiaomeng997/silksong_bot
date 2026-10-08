@@ -890,10 +890,12 @@ class ForumPlanner(Planner):
         -> first own damage, the p5 for REACT_EXCEPT): (t_strike, family template id, frames from a commit to its
         first damage less the view's latency, its position, velocity and age). The family template (the logged
         instances' union over the time since their start, coarse) is the attack's reach, wind-up body included."""
-        from ssbot.combat.multi_forecast import REACT_EXCEPT, REACT_LATENCY_S, strike_table
+        from ssbot.combat.multi_forecast import REACT_EXCEPT, REACT_LATENCY_S, REACT_THROW_FAMS, strike_table
+        from ssbot.core.worldstate import ORACLE
         mf = getattr(f, "_fc", None)
         if mf is None or not hasattr(mf, "trackers"):
             return []
+        thrown_out = self.fcfg.notstarted and mf.view == ORACLE
         dt = self.params.frame_time
         lat = REACT_LATENCY_S.get(mf.view, 3 * dt)
         by_type = getattr(self, "_strike_by_type", None)
@@ -916,6 +918,9 @@ class ForumPlanner(Planner):
             for fam, d in by_type.get(s.type_key, ()):
                 if fam in ESC_COUNTERS:
                     continue                      # a counter strikes only a hero hitting the guard (the hit branch's)
+                if thrown_out and (s.type_key, fam) in REACT_THROW_FAMS:
+                    continue                      # "+n", oracle: a throw's pin / bell is on its path once thrown (its
+                    #                               family template holds every direction one was thrown: no escape)
                 d_f = max((d - lat) / dt, 1.0)
                 if d_f + self.fcfg.esc_after_f > ESC_MAX_F:
                     continue                      # a strike this far off is the later ticks' (its wind-up only here)

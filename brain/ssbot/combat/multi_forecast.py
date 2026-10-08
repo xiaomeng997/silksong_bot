@@ -115,6 +115,9 @@ REACT_HOLD_S = COLLIDER_TUBE_S    # ReactConfig.hold: the idle tube grows over t
 # 14.2): not thrown yet, only their reach over the reaction window; half extents (u) when no box was seen (the pin's
 # 2.0 x 0.1 box in any rotation, the bell's r 0.425 circle)
 REACT_THROWN = {"Song Reed Pin Projectile": (1.0, 1.0), "Throwing Bell": (0.45, 0.45)}
+# ... and the families that throw them (ssbot.core.forum ForumType.spawns): their templates hold every one ever thrown
+REACT_THROW_FAMS = frozenset((tk, fam) for tk, sp in FORUM_TYPES.items() for hz, fams in sp.spawns
+                             if hz in REACT_THROWN for fam in fams)
 
 
 @dataclass(frozen=True)
@@ -1001,7 +1004,10 @@ class _Builder:
                      and T - tr.seen_T <= TUBE_MAX_AGE_S and tt.tk in tubes.growth)
         anc = (cur.anchor, cur.mirror, cur.sd) if cur is not None and cur.anchor is not None else None
         committed_now = cur is not None and cur.family != sp.idle_family
-        if committed_now and anc is not None:
+        # reactive support, not started, oracle view: a throw (its templates hold every pin / bell ever thrown, in every
+        # direction: forum.md §23) is its body (the tube) while what it throws is on its path once thrown
+        thrown = self._thrown(tr) and committed_now
+        if committed_now and anc is not None and not thrown:
             # the current attack's family template from its start (the family-wide union)
             fid = tables.key_id(cur.family, None, "anchor")
             if fid is not None:
@@ -1013,7 +1019,7 @@ class _Builder:
             d = self.delays.get((tt.tk, cur.family))
             if d is not None:
                 c_ton = cur.t_start - T + d - self.lat
-        if anc is not None and not (idle_tube and cur.family == sp.idle_family):
+        if anc is not None and not (idle_tube and cur.family == sp.idle_family) and not thrown:
             for nd in cur_nodes:
                 if nd.current:
                     lo = hi = tr.t_entry - T          # the current state: its entry
@@ -1031,7 +1037,7 @@ class _Builder:
                     if wid is not None:
                         self._window(wid, lo, hi, None, 1, tr.iid, nd.family, True, nd.p)
         rb = self.react_box.get(tr.iid)
-        if committed_now and cur.re_state is not None and (cur.re_anchor is not None or rb is not None):
+        if committed_now and not thrown and cur.re_state is not None and (cur.re_anchor is not None or rb is not None):
             # re-anchored (forum.md 15.1): an attack that moved since its start (the anchor frame's templates hold the
             # logged travel only) is also the family walk of an instance starting at the start state it entered,
             # anchored where the enemy was then (13.13: the Clawmaiden's lunge after a 3.3 u flight); a hit
@@ -1044,7 +1050,7 @@ class _Builder:
                                True, 1.0)
                 else:
                     self._bbox(rid, cur.re_t - T, cur.re_t - T, *rb, 0, tr.iid, cur.family, True, 1.0)
-        if cur is not None and anc is None and not (idle_tube and cur.family == sp.idle_family):
+        if cur is not None and anc is None and not (idle_tube and cur.family == sp.idle_family) and not thrown:
             # the current instance's anchor is not known (not exported at its start): its family walk from the
             # start, anchored where the enemy is dead-reckoned to then (a hit reaction: its anchor box)
             self._place_family(tr, cur.family, cur.start, cur.t_start - T, cur.t_start - T, 1.0, committed_now,
@@ -1075,7 +1081,7 @@ class _Builder:
                 wid = self.fc.family_walk_id(tt, nd.family, nd.start, "world_all")
                 if wid is not None:
                     self._bbox(wid, lo, hi, 0.0, 0.0, 0.0, 0.0, 1, tr.iid, nd.family, False, nd.p)
-        if idle_tube:
+        if idle_tube or thrown:
             self._idle_tube(tr)
         # (a waiting wave member's collider cannot move before its wave is activated)
         if self.fc.collider_tube and T - tr.seen_T <= TUBE_MAX_AGE_S and (wake is None or wake - T <= COLLIDER_TUBE_S):
@@ -1103,11 +1109,20 @@ class _Builder:
         return Subject(tr.iid, tr.tk, alive and not tr.dead, tr.in_play, committed, None if c is None else c.family,
                        tr.state, tr.hp_est, tr.hp_sd, tr.pos, t_free, t_strike, nxt)
 
+    def _thrown(self, tr: EnemyTracker) -> bool:
+        """ReactConfig.notstarted in the oracle view (where a thrown pin / bell is on its path): the enemy's throw
+        family (REACT_THROW_FAMS) is its body plus its hazards' paths, not its templates."""
+        return bool(self.react is not None and self.react.notstarted and self.fc.view == ORACLE
+                    and tr.cur is not None and (tr.tk, tr.cur.family) in REACT_THROW_FAMS)
+
     def _tails(self, tr: EnemyTracker) -> None:
         T = self.origin
+        ns = self.react is not None and self.react.notstarted and self.fc.view == ORACLE
         for inst in tr.ends:
             if inst.t_end is None or T - inst.t_end > TAIL_KEEP_S or inst.anchor is None:
                 continue
+            if ns and (tr.tk, inst.family) in REACT_THROW_FAMS:
+                continue                      # the pins / bells it threw are on their paths
             tid = self.tables.key_id(inst.family, TAIL, "anchor")
             if tid is not None:
                 e = inst.t_end - T

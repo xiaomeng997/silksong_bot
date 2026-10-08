@@ -95,6 +95,26 @@ def test_a_pin_not_thrown_is_only_its_reaction_window_reach():
     assert tubes[0][2:6] == pytest.approx((20.0 - hx, 6.0 - hy, 20.0 + hx, 6.0 + hy))
 
 
+def test_a_throw_is_its_body_and_its_hazards_paths(monkeypatch):
+    """+n, oracle: a throw family (REACT_THROW_FAMS: the Reed's RE_THROW, the Bellbearer's CB_THROW, whose templates
+    hold every pin / bell ever thrown) places none of its templates or tails; its body is the tube; without +n it is
+    as before. The synthetic Reed's stab stands in for a throw here."""
+    assert ("Song Reed", "RE_THROW") in mfm.REACT_THROW_FAMS and ("Pilgrim 03 Song", "CB_THROW") in mfm.REACT_THROW_FAMS
+    monkeypatch.setattr(mfm, "REACT_THROW_FAMS", frozenset({(REED, "RE_STAB")}))
+    mf = MultiForecaster(_tables(), ORACLE, waves=False)
+    _run(mf, [(f, f * BIN, [_ent(7, 20.0, 5.0, "Alert" if f < 10 else "Stab Pos", flip=True,
+                                 box=(19.5, 4.0, 20.5, 6.0))],
+               ([_go(7, "Alert", f, 0.0)] if f == 0 else []) + ([_go(7, "Stab Pos", f, f * BIN)] if f == 10 else []))
+              for f in range(12)])
+    old = mf.forecast(0.8)
+    stab = lambda f: [fam for m in (f.pm, f.wm, f.bb) for fam, c in zip(m["family"], m["committed"])  # noqa: E731
+                      if fam == "RE_STAB" and c]
+    assert stab(old) and not any(b[1] == "idle" for b in old.boxes)
+    mf.react = ReactConfig(notstarted=True)
+    ns = mf.forecast(0.8)
+    assert not stab(ns) and any(b[1] == "idle" and b[0] == 7 for b in ns.boxes)
+
+
 def _bell(iid, x, y, state, vx=5.0, vy=0.0):
     r = pj.BELL_R
     return Entity(id=iid, type_key=E(pj.BELL), pos=E((x, y)), vel=E((vx, vy)), pos_transform=(x, y),
