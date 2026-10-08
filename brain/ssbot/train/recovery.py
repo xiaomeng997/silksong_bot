@@ -87,14 +87,16 @@ def where(s: dict | None) -> str:
     if not is_paused(s):
         return "game"
     blk = ((s or {}).get("pause") or {}).get("blk") or 0
-    # menuState is stale for the first frames of a pause (ShowMenu sets it after the fade-in: 8 frames in the person's
-    # session), and the menus take no input while they fade or GoToPauseMenu runs
+    # the menus take no input while they fade (the shown screen's canvas alpha below 1) or GoToPauseMenu runs
     if (g.get("fading") or m.get("ignore_unpause") or blk & BLK_NOT_ACCEPTING_INPUT
-            or (menu == MENU_PAUSE and m and (m.get("alpha") or 0.0) < READY_ALPHA)):
+            or (m and (m.get("alpha") or 0.0) < READY_ALPHA)):
         return "pause_opening"
-    if menu == MENU_PAUSE:
+    # the highlight's role names the menu before menuState does (ShowMenu sets menuState after the fade-in: it read
+    # stale for 8 paused frames in the person's session); menuState only when nothing named is highlighted
+    sel = m.get("sel")
+    if sel in ("continue", "options", "quit") or (sel is None and menu == MENU_PAUSE):
         return "pause_menu"
-    if menu == MENU_EXIT_PROMPT:
+    if sel in ("yes", "no") or (sel is None and menu == MENU_EXIT_PROMPT):
         return "exit_prompt"
     return "pause_submenu"
 

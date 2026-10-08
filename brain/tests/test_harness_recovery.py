@@ -214,6 +214,14 @@ def test_where_reads_the_menus():
     s = MenuGame("paused", M.MENU_SAVE_PROFILES).state
     s["menu"]["ignore_unpause"] = True
     assert M.where(s) == "pause_opening"
+    # menuState still SAVE_PROFILES from the title, the pause menu already up with Continue: the role decides
+    s["menu"].update(ignore_unpause=False, sel="continue")
+    assert M.where(s) == "pause_menu"
+    s["menu"]["sel"] = "no"
+    assert M.where(s) == "exit_prompt"
+    # past the quit's save (menu.quitting), or the Quit_To_Menu scene: nothing to press
+    s["menu"]["quitting"] = True
+    assert M.where(s) == "quitting"
 
 
 def test_pause_cause_from_the_first_paused_state():
