@@ -3151,8 +3151,14 @@ of the task.
   `C:\ssbot\data\m2_forum_w0d\recall_fresh_ngS_fca0416.json`): 375,940 / 375,940 at L2 / L3 / L4, own type too, 1,802
   / 1,802 chain hooks: the per-state margins uncover no held-out contact.
 
+- Live round 3 (forum.md 23.9, fca0416, 80 + 80): noL (newS without the light cone) vs newS: wave-0 clears 17 vs 11,
+  kills 1.30 vs 0.86 / episode, +5.2 s paired (n.s.): the light cone gives nothing in wave 0 (its use is the later
+  waves' delayed area attacks); recommended off for now.
+- Tests (33762ee): full suite 1249 passed, 2 skipped, 1 xfailed, 15 failed only because the run had
+  NUMBA_NUM_THREADS=2 (test_key_economy / test_kinematics / test_planner / test_planner_policy need 4): those four files
+  rerun with 4 threads, 73 / 73 passed. New `tests/test_three_layer.py` (13).
+
 ### Running
 
-- Live round 3 (frozen fca0416, manifest `C:\ssbot\sandbox\w0d_manifest_c.txt`, seed 363000): newS vs noL (newS
-  without the light cone `+l`), ABBA, 80 + 80.
-- Then round 4: the better of them vs + aimed pins (`+a`, 33762ee, frozen `C:\ssbot\live_w0d_33762ee`).
+- Live round 4 (33762ee, frozen `C:\ssbot\live_w0d_33762ee`, manifest `C:\ssbot\sandbox\w0d_manifest_d.txt`, seed
+  364000): newS vs newSa (+ aimed pins `+a`), ABBA, 80 + 80.
