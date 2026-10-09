@@ -3506,3 +3506,35 @@ A), -073-3 (6a556db, track B).
   N worse than R on every main metric (hits / masks a minute 8.51 / 9.70 vs 7.17 / 8.23, hitless waves 0 vs 6, eff.
   mask loss 4.92 vs 3.42 / min, wave-0 clears 3 vs 14, kills 0.55 vs 0.84, paired survival R - N +9.4 s, CI 0.4..18.7);
   R1 vs R: more landed (21.3 vs 19.2 / min) and kills (1.25 vs 0.84, paired CI -0.05..0.93), hits equal.
+- Part 2 (to reach 200 per arm) not run: DEMO_SOON stayed from 22:18 to the end of this task (23:35). Resume with the
+  same driver / manifest: `fp2_live.ps1 -Inst <0-4> -Tag b -Seed 372000 -Blocks 4 -Arms <the three arms>` (forum.md 28.5),
+  then `forum_remaining_hits collect` + `forum_ab_summary --landed` over `fp2_manifest_b.txt`.
+
+### Offline re-score (forum.md 28.2)
+
+- Frozen merge c54d210, `forum_human_rescore.cmd best`, 32 segments, 0 errors each, `C:\ssbot\data\m2_forum_hs\fp2_{base,
+  A,B,AB}[_summary.json]` (driver `C:\ssbot\sandbox\fp2_rescore.ps1`, two at a time after the live part 1; the first try
+  ran alongside the live start, was stopped and its partial outputs removed). base = best_v2 exactly.
+- FORCED_RISK base / +A / +B / +A+B 82.1 / 82.1 / 79.6 / 79.6 %; matched 71.4 / 71.4 / 73.0 / 73.0 %; the person's
+  matched rows unsafe 86.6 / 86.6 / 85.4 / 85.4 %, of them clear (false alarms) 88.8 / 88.8 / 88.5 / 88.5 %; misses 32
+  each (0.60 / 0.60 / 0.54 / 0.54 % of safe); vetoed 4.1 / 2.9 / 4.1 / 2.9 %; outside the candidate set 28.6 / 28.6 /
+  27.0 / 27.0 %. +B's FORCED_RISK drop is in the later waves (wave 0 78.6 -> 78.3 %).
+
+### Running
+
+- Nothing. The live drivers stopped on DEMO_SOON (locks released), the re-scores and collects ended.
+
+### Needs deploy
+
+- Nothing (no oracle change).
+
+### Next / open issues
+
+1. N (every push-2 switch) is worse than R live on every main metric while the re-score shows no safety change: the
+   behaviour tokens of track A are the suspects. Next round: R vs single-token arms (`edge` first, then `whip`: the
+   Choristor kills fell 33 -> 10; `free`; the rest), and B's `escape+n+g+b+k+s` + WAITS as its own arm.
+2. R1 vs R (did round 2 cut hits landed?): leaning yes (landed 21.3 vs 19.2 / min, kills +0.44 / episode, CI -0.05..0.93);
+   needs part 2.
+3. Load: late ticks 0.53-0.67 this round (round 5 ~0.13) with another agent's `forum_escape_search` running; N's extra
+   compute (late +10 points) is penalised more. Check the machine before the next live A/B.
+4. Frozen checkouts made here: `C:\ssbot\live_fp2_0cac216`, `C:\ssbot\live_fp2_c54d210` (keep for part 2).
