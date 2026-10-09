@@ -64,6 +64,14 @@ What a goal sets (scores only: the planner's S / Hz / U never see prefs, §4.4 i
 stance_x, boss_x (face it), hit_w (the target x target_hit_w x priority, 0 while the Clapper controller steps away:
 CC_RETREAT; the others as LOCAL, defensive stances still negative) and the weights' factors per goal (l2.weights). LOCAL's EVADE stands against KITE when it says the hero's spot
 is covered within evade_s; PUNISH and RUSH replace it (the planner's support check is the safety).
+Track A (the person's tactics of 2026-10-08, GauntletTactics.ta from SSBOT_FORUM_TA; forum.md §26; off by default):
+  edge   RUSH stands edge_u from the target body's edge on the hero's side (the person waits at the edge of reach).
+  guard  a Minister in Parry Stance / Parry Block and a Reed in Defend / Block get hit weights by slash kind
+         (GoalPrefs.hit_kw: the Minister by its height band and grouped / alone; the Reed never) and, as the goal's
+         target, the stance to wait at (_guard_rule).
+  whip   a Choristor in its whip (CH_WHIP: the antic and Whip 1-6; it stands still): the stance leaves the whip's reach
+         (whip_back_u behind, whip_front_u in front: the whip does reach behind, Whip Hit 5-6), picks whose spot lies in
+         it go last, and a whip starting or ending re-picks.
 Failure (§4.4 item 4): an exception or an injected failure (fail_p) returns LOCAL's prefs untouched, so with fail_p = 1
 every decision is LOCAL's bit for bit (tests/test_forum_l2.py).
 """
@@ -77,6 +85,7 @@ import numpy as np
 from ssbot.combat.tactics.forum_local import (CLAPPER, EVADE_HIT_X, EVADE_RISK_X, LEAVE, ForumTactics,
                                                clapper_facing)
 from ssbot.combat.tactics.modes import EVADE, HEAL, GoalPrefs
+from ssbot.core.forum import FLOOR_Y
 from ssbot.core.worldstate import Ev
 
 PUNISH, RUSH, KITE, LOCAL = "PUNISH", "RUSH", "KITE", "LOCAL"
@@ -84,6 +93,11 @@ CLAWMAIDEN = "Song Handmaiden"
 MAESTRO = "Song Pilgrim Maestro"
 MINISTER = "Song Administrator"
 TINY = "Song Automaton Tiny"
+CHORISTOR = "Song Pilgrim 03"
+REED = "Song Reed"
+CH_WHIP = "CH_WHIP"
+MINISTER_GUARD = ("Parry Stance", "Parry Block")          # Forum.yaml forum.defensive
+REED_GUARD = ("Defend", "Block")
 CC_IDLE, CC_SLAM, CC_JUMP, CC_JUMP_CAST, CC_CAST = "CC_IDLE", "CC_SLAM", "CC_JUMP", "CC_JUMP_CAST", "CC_CAST"
 # Jump Aim (and Cast Jump) are instant: one frame goes Jump Antic / Cast Slam Antic 2 -> (Cast Jump ->) Jump Aim ->
 # Jump, so the tracker never ends a tick in them (forum.md 21.7.1)
@@ -136,6 +150,24 @@ class L2Rules:
     pursuit_u_s: dict = field(default_factory=dict)       # type_key -> u/s
     weights: dict = field(default_factory=dict)           # goal -> {weight name: factor}
     fail_p: float = 0.0                                   # injected failures (§4.4 item 4)
+    # track A (2026-10-08, the person's tactics; GauntletTactics.ta, SSBOT_FORUM_TA; forum.md §26)
+    edge_u: float = 2.7                                   # "edge": RUSH stands this far from the target body's edge
+    #                                                       (the Wanderer side slash reaches 3.12 u from the hero's
+    #                                                       centre, less 0.4 u)
+    whip_front_u: float = 9.3                             # "whip": the whip's reach in front of the Choristor's
+    #                                                       transform (Whip Hit 1-4 to 8.75 u) + the hero's half-width
+    #                                                       + 0.3 u
+    whip_back_u: float = 5.3                              # ... behind it (Whip Hit 5-6 sweep over its head to 4.75 u
+    #                                                       behind: the whip does reach behind)
+    whip_prio_x: float = 0.2                              # a pick whose spot is in a whip's reach: its priority x this
+    guard_low_y: float = 4.5                              # "guard": a Minister's stance whose transform is lower than
+    #                                                       this above the floor reaches a standing hero (its stance
+    #                                                       collider's bottom 2.14 u below it; the hero box 2.08 tall
+    #                                                       + 0.3 u): low, no up slash
+    guard_mid_y: float = 5.2                              # ... lower than this its counter (ParrySlash Hit 1-4, down to
+    #                                                       2.8 u below it) reaches a standing hero: mid, one up slash
+    #                                                       and the clash; higher: two up slashes
+    guard_reach_y: float = 8.2                            # ... higher than this a small jump's up slash does not reach it
 
     @classmethod
     def from_dict(cls, d: dict | None) -> "L2Rules":
@@ -234,6 +266,9 @@ class GauntletTactics:
         self._t = 0.0                                     # the tick's game time
         self.stats = _new_stats()
         self.last: dict = {}
+        self.ta: frozenset = frozenset()                  # track A's tokens (combat.forum_planner.TA_TOKENS): "whip",
+        #                                                   "guard", "edge" are read here (the policy sets them)
+        self._whips: frozenset = frozenset()              # iids of the Choristors whipping on the last tick
 
     @property
     def xs(self):
@@ -243,6 +278,7 @@ class GauntletTactics:
         """A new episode: no goal, no stored aims, the per-episode counters cleared."""
         self.goal, self.n, self.t_commit, self.jump_how = None, 0, {}, {}
         self.jfam, self.rune = {}, {}
+        self._whips = frozenset()
         self.stats = _new_stats()
 
     # ---- geometry ----
@@ -311,6 +347,116 @@ class GauntletTactics:
         vocab = frozenset({GLIDE_SPIKE}) if fam == CC_CAST else frozenset()
         return self._clamp(x + side * r.face_u), vocab, "face"
 
+    # ---- track A (2026-10-08, the person's tactics; forum.md §26) ----
+
+    @staticmethod
+    def _body(fc, s) -> tuple[float, float]:
+        """(centre x, half-width) of an enemy's body (its tracker's export box; the transform and 0.8 u without)."""
+        tr = (getattr(getattr(fc, "_fc", None), "trackers", None) or {}).get(s.iid)
+        b = getattr(tr, "body", None)
+        if b is not None and len(b) >= 4 and b[2] >= b[0]:
+            return 0.5 * (float(b[0]) + float(b[2])), 0.5 * (float(b[2]) - float(b[0]))
+        return float(s.pos[0]), 0.8
+
+    def _edge_spot(self, fc, s, hx: float) -> float:
+        """"edge" (forum.md 25.6: the person waits at the edge of reach; RUSH's stance was the target's x): the body's
+        edge on the hero's side + edge_u (the other side when the wall leaves no room)."""
+        r = self.rules
+        cx, half = self._body(fc, s)
+        side = 1.0 if hx >= cx else -1.0
+        x0, x1 = self.pb.arena_x
+        x = cx + side * (half + r.edge_u)
+        if not (x0 + r.wall_room_u <= x <= x1 - r.wall_room_u):
+            x = cx - side * (half + r.edge_u)
+        return self._clamp(x)
+
+    def _whip_zones(self, ws, fc) -> list[tuple[int, float, float, float, float]]:
+        """"whip": (iid, lo, hi, x, facing) of every Choristor in its whip (CH_WHIP: the 0.82 s antic, Whip 1-6), the x
+        span its whip reaches (whip_front_u in front, whip_back_u behind; it stands still while whipping)."""
+        r = self.rules
+        out = []
+        for s in getattr(fc, "subjects", ()) or ():
+            if not (s.alive and s.in_play and s.pos is not None and s.type_key == CHORISTOR and s.family == CH_WHIP):
+                continue
+            e = self._ent(ws, s.iid)
+            fa = clapper_facing(e) if e is not None else None      # flipX: the Forum sprites face -x unflipped
+            x = float(s.pos[0])
+            face = float(fa) if fa is not None else (1.0 if float(ws.hero.pos.v[0]) >= x else -1.0)
+            a, b = x - face * r.whip_back_u, x + face * r.whip_front_u
+            out.append((s.iid, min(a, b), max(a, b), x, face))
+        return out
+
+    def _guard_rule(self, m, subs, w_pos: float, hx: float, fc) -> tuple[tuple | None, float | None, str]:
+        """"guard" for one enemy (the person's Minister / Reed defence rules, forum_planner_plan sec. 5 notes of
+        2026-10-08): ((side, up, wall, down) hit weights, the stance when it is the goal's target, label), or (None,
+        None, "") when it is not guarding. Minister in Parry Stance / Parry Block (no turning, no damage in the stance,
+        Parry Block 0.583 s is hittable, the counter is one forward lunge, ParrySlash Hit 1-4 its segments): by its
+        height (guard_low_y / guard_mid_y / guard_reach_y) and whether another enemy is within iso_u (grouped: trigger
+        it to split the group; alone: wait, or the down slash / harpoon trigger). Side / wall slashes never (its
+        counter lunges level). Low: no up slash (its body reaches the hero), the down slash from above (grouped or
+        alone); wait in reach (the edge spot). Mid: one up slash in the stance when grouped, the down slash, none in
+        Parry Block (the swing is kept for the clash on the lunge); under it. High: up slashes when grouped and in
+        Parry Block (its counter passes above); under it. Out of reach: wait. Reed in Defend / Block (Defend 1.0 s, Block 0.516 s, its counter aims at the hero's
+        height): never trigger it from anywhere; wait in reach (the edge spot) for Defend to end, or clash its counter
+        (the planner's clash branch)."""
+        r = self.rules
+        neg = self.local.rules.defensive_hit_w
+        if m.type_key == MINISTER and m.state in MINISTER_GUARD:
+            ey = float(m.pos[1]) - FLOOR_Y
+            band = "low" if ey < r.guard_low_y else "mid" if ey < r.guard_mid_y else "high" \
+                if ey <= r.guard_reach_y else "out"
+            grouped = any(o.iid != m.iid and abs(float(o.pos[0]) - float(m.pos[0])) < r.iso_u for o in subs)
+            block = m.state == "Parry Block"
+            up = down = neg
+            if band == "high" and (grouped or block):
+                up = w_pos
+            elif band == "mid":
+                up = 0.0 if block else (w_pos if grouped else neg)
+            if band in ("low", "mid") and not block:
+                down = w_pos                  # from above (a full jump's down slash reaches 4.3 u): its lunge is level
+            stance = self._edge_spot(fc, m, hx) if band == "low" else self._clamp(float(m.pos[0]))
+            return (neg, up, neg, down), stance, f"guard {band} {'grouped' if grouped else 'alone'}"
+        if m.type_key == REED and m.state in REED_GUARD:
+            return (neg, neg, neg, neg), self._edge_spot(fc, m, hx), "guard reed: wait"
+        return None, None, ""
+
+    def _ta_rules(self, ws, fc, prefs: GoalPrefs, g: Goal, s, hx: float) -> tuple[GoalPrefs, list]:
+        """Track A's L2 rules on the goal's prefs (scores only): edge, guard, whip (in this order; the whip's stance
+        last: out of a whip's reach wins)."""
+        r = self.rules
+        ta = self.ta
+        why = []
+        stance = float(prefs.stance_x)
+        hw = dict(prefs.hit_w)
+        kw = dict(prefs.hit_kw)
+        subs = [x for x in (getattr(fc, "subjects", ()) or ()) if x.alive and x.in_play and x.pos is not None]
+        if "edge" in ta and g.name == RUSH and s is not None and s.pos is not None and s.type_key != CLAPPER:
+            stance = self._edge_spot(fc, s, hx)
+            why.append("edge")
+        if "guard" in ta:
+            for m in subs:
+                tgt = s is not None and m.iid == s.iid
+                w_pos = r.target_hit_w * r.priority.get(m.type_key, 1.0) if tgt else self.local.rules.other_hit_w
+                w4, st, lab = self._guard_rule(m, subs, w_pos, hx, fc)
+                if w4 is None:
+                    continue
+                kw[m.iid] = w4
+                if tgt and g.name != KITE:
+                    stance = st
+                why.append(lab)
+        if "whip" in ta and g.name != PUNISH:          # a PUNISH spot is clear of the support (the whip's included)
+            x0, x1 = self.pb.arena_x
+            for _, lo, hi, x, face in self._whip_zones(ws, fc):
+                if lo <= stance <= hi:
+                    outs = [v for v in (x - face * r.whip_back_u, x + face * r.whip_front_u)
+                            if x0 + r.wall_room_u <= v <= x1 - r.wall_room_u]
+                    if outs:
+                        stance = min(outs, key=lambda v: abs(v - hx))
+                        why.append("whip: out of its reach")
+        if not why:
+            return prefs, why
+        return replace(prefs, stance_x=float(stance), hit_w=hw, hit_kw=kw), why
+
     def _spot(self, ws, s, hx: float) -> tuple[float, frozenset, str]:
         r = self.rules
         x = float(s.pos[0])
@@ -339,6 +485,13 @@ class GauntletTactics:
             c.eta = max(0.0, c.d - r.reach_u) / max(v, 0.1)
             c.prio = r.priority.get(s.type_key, 1.0)
             out.append(c)
+        if "whip" in self.ta and out:
+            # a target whose spot is in a whipping Choristor's reach (that Choristor included) is picked last: the
+            # person's "switch to a target out of the whip's reach" (it stands still while whipping)
+            zones = self._whip_zones(ws, fc)
+            for c in out:
+                if any(lo <= c.spot <= hi for _, lo, hi, _, _ in zones):
+                    c.prio *= r.whip_prio_x
         if out:
             tk = np.arange(0, int(round(r.window_max_s * 30)) + 1) / 30.0
             X = np.repeat(np.array([[c.spot] for c in out]), len(tk), 1)
@@ -525,6 +678,12 @@ class GauntletTactics:
         self._count_hits(ws, t)
         self.n += 1
         status = self._status(fc, t)
+        if "whip" in self.ta:
+            whips = frozenset(x.iid for x in (getattr(fc, "subjects", ()) or ())
+                              if x.type_key == CHORISTOR and x.family == CH_WHIP and x.alive and x.in_play)
+            if whips != self._whips and status == "ok":
+                status = "event"                          # a whip started or ended: pick again (it may keep the goal)
+            self._whips = whips
         if status != "ok" or self.n % r.period == 0:
             prev = self.goal
             old = prev if status != "gone" else None
@@ -588,6 +747,14 @@ class GauntletTactics:
             hw[g.target] = max(hw[g.target], w)
         out = replace(prefs, mode=g.name, goal=g.name, target=g.target, stance_x=float(g.stance_x),
                       boss_x=g.face_x, hit_w=hw, weights=wts, vocab=frozenset(prefs.vocab) | g.vocab)
+        if self.ta:
+            out, ta_why = self._ta_rules(ws, fc, out, g, s, hx)
+            if ta_why:
+                self.last["ta"] = ta_why
+                tw = self.stats.setdefault("ta", {})
+                for k in ta_why:
+                    k = k.split(":")[0]
+                    tw[k] = tw.get(k, 0) + 1
         self.stats["goals"][g.name] = self.stats["goals"].get(g.name, 0) + 1
         self.last.update(goal=g.name, goal_why=g.why, target_type=getattr(s, "type_key", None),
                          goal_t_end=None if math.isinf(g.t_end) else round(g.t_end, 3))

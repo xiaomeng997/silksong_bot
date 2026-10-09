@@ -2572,3 +2572,109 @@ scripts\forum_human_rescore.cmd best <名字>      &rem 或 default；输出 C:\
 cd brain
 ..\scripts\uv.cmd run python -m ssbot.tools.forum_human_score summary C:/ssbot/data/m2_forum_hs/best_v2 C:/ssbot/data/m2_forum_hs/default_v2 --json C:/ssbot/data/m2_forum_hs/v2_summary.json
 ```
+
+## 26. 第二轮推进 A 轨：你 10-08 的决定和打法进规划器（2026-10-08 晚，task "forum push 2 track A"，分支 worktree-wf_c8fb34ca-073-2 = 基线集成 0cac216；离线 + 实例 0 的 10 场冒烟）
+
+### 26.1 开关：`SSBOT_FORUM_TA`（默认空 = 全部关，和之前逐位相同）
+
+用 "+" 或 "," 连接的记号，`all` = 全部；`SSBOT_FORUM_AB` 多了一个键 `ta=<记号>`（`ta=none` 为空），逐场轮换时监督器和 L2 跟着这一场的臂走。每场的 `stats.fcfg.ta`、决策日志的 `ta` / `free` 字段记下用的是什么。
+
+| 记号 | 做什么 | 代码 |
+|---|---|---|
+| `free` | DESIGN 3.5.6 修订（你：剩的血 > 单次最大伤害时什么都允许）：h ≥ 2（hits_to_death 按支撑里最大的单次事件算，高庭 2 格）且没有挂起的暂停时，监督器的 YELLOW 不再收走可能致死的出刀（`kill_prims`）、不限惩罚刀数、不禁拼刀、没有击杀规则（不会 QS），L0 的 I3 放行最后一击，规划器的拼刀闸门放开；档位的名字照旧（YELLOW），`SupervisorDecision.free` / `FilterContext.free` 带着这个状态。h = 1 照旧 Q1、在受击后的无敌窗口里退出；Q3（绕面具 / 长连段 / 危险物 / 未知支撑）在 h = 2 照旧退出 | `SupervisorConfig.free_until_hit`、`safety_filter.i3_kill_allowed`、`ForumPlanner.clash_allowed` |
+| `whip` | 拼鞭的行仍然安全（可拼层），但 J 减去它的命中分和 1 个命中权重（没收益）；L2：Choristor 甩鞭时（`CH_WHIP`：前摇和 Whip 1–6，它站着不动）站位移出鞭的范围（26.2：身后 5.3 u 外或身前 9.3 u 外，取近的），站位在鞭范围里的候选目标优先级 ×0.2（换鞭够不着的目标），鞭开始 / 结束时重选目标；PUNISH 不动（它的窗口已经算过鞭） | `forum_planner.WHIP_FAMS`、`gauntlet._whip_zones` |
+| `guard` | L2：防御中的 Minister / Reed 按出刀方向给命中权重（`GoalPrefs.hit_kw`：横砍 / 上挑 / 贴墙 / 下劈各一个），是目标时给等待的站位（26.3） | `gauntlet._guard_rule` |
+| `edge` | RUSH 的站位改成目标身体边缘外 2.7 u（漫游横砍够到主角中心前 3.12 u，减 0.4 u）：你在够距边上等（§25.6），不再是目标的 x | `gauntlet._edge_spot` |
+| `under` | J：飞行怪正下方加分 = 10 ×（below.json：前方 3 u 的命中率 − 正下方的，按它当前的招，没有招按类型）× 行在它身体正下方的帧占比 | `forum_planner.under_gains`、`_under_bonus` |
+| `eml` | 等效失血（你：9 丝回 3 血，砍中 4 刀 = 1 格）：J 减去 4 × 命中权重 × 1.154 格 × 第 1 阶段的接触帧占比（安全行为 0）；FORCED_RISK 的排序在首次接触之后、J 之前加一个键：1.154 × P − 预计砍中数 / 4（预选用第 1 阶段的占比，最终排序用 P），原来的预选键不动 | `ForumConfig.eml_*` |
+| `kb` | 命中分支里被打的怪按实测的击退位移移动（26.4）：它自己的支撑和它的受击反应从命中那一帧起跟着平移（用主角的外包盒反向平移去查它一个人的支撑，其他怪的支撑不动） | `forum_planner.knockback`、`_kb_shifts` |
+
+### 26.2 鞭会不会打身后：会（`tools.forum_knockback`，R0 + R1 缓存 395 场）
+
+Choristor 的 `Whip Hit 1–6` 碰撞体在它的朝向坐标里（x 正 = 身前，y 相对变换点；每段的形状固定，各分位相同）：
+
+| 段 | 样本帧 | x | y |
+|---|---|---|---|
+| Whip Hit 1 | 17,165 | 0.52 … 5.68 | −1.13 … −0.14 |
+| Whip Hit 2 | 12,263 | 0.52 … 8.75 | −1.13 … −0.14 |
+| Whip Hit 3 | 11,365 | 0.37 … 7.83 | −0.64 … 0.46 |
+| Whip Hit 4 | 10,885 | −0.90 … 5.87 | 0.39 … 3.42（头顶） |
+| Whip Hit 5 | 10,451 | −3.72 … 0.27 | −0.40 … 3.30（头顶到身后） |
+| Whip Hit 6 | 10,134 | −4.75 … −0.87 | −1.78 … 2.18（身后，主角的高度） |
+
+`Whip Antic` 0.817 s（p0 0.808），Whip 1–6 每段 0.05–0.067 s，所以第一下在前摇开始后约 0.82 s，身后那两段约 1.0–1.15 s；甩鞭各状态里水平速度 p50 0（站着不动）。**鞭是从前面经过头顶甩到身后的一整圈，身后 4.75 u 以内照样打得到**：所以"绕后"要在身后 5.3 u 以外（4.75 + 主角半宽 0.25 + 0.3），身前要在 9.3 u 以外（8.75 + 0.25 + 0.3）。前摇里贴到它身后砍、在身后两段之前离开，这种时机由规划器逐帧查支撑决定，L2 只给站位。
+
+### 26.3 Minister 格挡的高度带；Reed 防御
+
+- **Minister 在 Parry Stance 时**（R0 + R1 缓存 144 万个碰撞体帧）：变换点离地 p5 2.29、p50 5.22、p95 10.89 u；姿态碰撞体 `Collider ParryStance` 的下沿在变换点下 0.46–2.14 u（p50 1.30），上沿在变换点下 0.09 到上 1.49 u。反击 `ParrySlash Hit 1–4`（相对变换点，朝向坐标）：1 段 x −4.34…3.94、y −2.80…0.80；2 段 x −2.65…3.85、y −2.61…−0.56；3 段 x −0.84…3.54、y −2.47…1.55；4 段 x −3.36…3.08、y −0.49…1.33：最低到变换点下 2.8 u。
+- **主角**：受伤框高 2.08 u（中心离地 1.04）；漫游上挑 x −0.79…0.51、到中心上方 3.39 u（站着离地 4.43），下劈到中心下方 2.16 u，横砍到中心前方 3.12 u（`AttackTable`）。
+- **高度带**（Minister 变换点离地）：**低** < 4.5（姿态身体最低到它下面 2.14 u，够到站着的主角头顶 2.08 + 0.3）；**中** 4.5–5.2（身体碰不到，但反击最低 2.8 u 够得到站着的主角）；**高** 5.2–8.2（反击从头顶过去；站着上挑够到 5.7，小跳上挑约 8.2）；**够不着** > 8.2。按你的三档：
+
+| 带 | 聚在一起（它身边 8 u 内还有怪：打它、把它打跑） | 单挑（等防御结束） | 是目标时站哪 |
+|---|---|---|---|
+| 低 | 只给下劈分（从上面触发：反击是水平冲） | 下劈分（下劈 / 飞针触发单挑也能用），别的不打 | 够距边（身体边缘外 2.7 u） |
+| 中 | Parry Stance 里给上挑分（一下）和下劈分；Parry Block 里上挑 0 分（留着刀对反击拼刀，定时拼刀行是 B 轨的） | Stance 里只有下劈分；Block 里上挑 0 分 | 它正下方 |
+| 高 | 上挑给分（Stance 和 Block 都给：被挡后僵 0.583 s，砍它照样掉血，反击从头顶过） | Parry Block 里上挑给分（已经触发了），Stance 里不打 | 它正下方 |
+| 够不着 | 不打 | 不打 | 它正下方 |
+
+  横砍、贴墙砍在任何带都是负分（反击是水平往前冲）。
+- **Reed**：`ParrySlash Hit` x −1.32…3.31、y −1.95…1.41（相对变换点），但它先 `Parry Y Aim` 对准主角的高度，所以从上 / 下触发也不安全：Defend / Block 里四个方向都是负分；是目标时站在够距边（身体边缘外 2.7 u）等 Defend（1.0 s）结束；真被触发了，拼它的反击（拼中整套取消，规划器的拼刀分支）。
+- **格挡被打时会不会被顶走**（你问过 Parry Stance 是被弹开不位移还是照样被顶高）：几乎不动。Parry Stance → Parry Block 那一帧之后 12 帧（0.2 s）：从下面打 上移 0.25 u（中位，n 193），从侧面打 横移 1.34 u（n 425）；Reed Defend → Block：横移 0.95 u（n 352），上移 0.5 u（n 132）。不在防御里时上挑把它们顶高约 3 u（26.4）。所以"上挑两下以后它够高"的推演只对不在防御里的飞行怪成立，防御里的 Minister 按上表的高度带走。
+
+### 26.4 击退：被打的怪往哪动、动多少（`tools.forum_knockback`；`forum_planner.knockback`）
+
+被钉子打中（`hit` 事件，按 src 分横砍 / 上挑 / 下劈）之后变换点的位移，减去打之前 3 帧它自己的速度外推，按类型 × 方向 × 被打时的状态取中位：
+
+- **横砍**：往远离主角的方向每帧约 0.45 u、推 8 帧 = 3.6 u（Choristor / Envoy 在 2 / 4 / 6 / 9 / 12 帧正好 0.9 / 1.35 / 2.25 / 3.15 / 3.6 u；Reed、Minister、Bellbearer、Tiny、Clawmaiden 合并的中位 12 帧 3.0–3.6 u）。
+- **上挑**：往上每帧约 0.375 u、8 帧 = 3.0 u（Reed 12 帧 3.0 u（n 775）、Minister 2.8、Bellbearer 3.0、Tiny 3.1、Clawmaiden 2.9）。
+- Maestro 约 0.65 倍（上 2.0、横 2.3 u）；Clapper 横 0.72 u、上 0；下劈样本少（多是 Tiny），不建模。
+- 12 帧中位 < 2 u 的状态不推（冲刺 / 突刺 / 转圈 / 死亡下落 / 防御反击里）：Minister `Attack`、`Parry Block`、`Parry Slash 1–4`；Reed `Block`、`Multihit Clashed`、`Parry Slash`、`Stab 1–5`；Tiny `Defend Buzz`、`Wall Bonk`、`Die`、`Brake`；Clawmaiden `Slash 1/4/5`；Envoy `JumpSlash Antic`；Choristor `Jump Spin`、`Hop Back`、`Slash End`、`ComboSlash Antic2`、`Slash 2`、`Jump Rise`。防御姿态（Minister Parry Stance、Reed Defend）按上面的格挡数：横 0.35 / 0.25 倍、上 0。
+- 命中分支（`kb`）：第一刀命中的那只怪，按（类型、它此刻的状态、刀的方向、朝向）给出从命中帧起的位移，把它自己的支撑（`occupied_only`）和它的受击反应用反向平移的主角外包盒去查，其他怪照旧（`occupied_without`）。只推第一刀；"连挑两下"的第二刀不推（未做）。
+
+### 26.5 飞行怪正下方的加分（below.json）
+
+below.json 是"空中出招的实例里，碰到站在出招点正下方 / 前方 3 u / 6 u 地面上的主角的比例"。增益 = 前方 3 u − 正下方（带扔出物），截到 ≥ 0，按招；类型的是按实例加权的平均：Bellbearer 扔钟 0.085、Reed 0.032（突刺 0.066、扔针 0.083、防御 0.001、闪避为负）、Tiny 0.126（冲锋 0.268）、Clawmaiden 0.014、Minister 0（冲刺、格挡反击正下方不比前方安全）、Maestro 没有前方的数。J 加 10 × 增益 × 正下方帧占比（例：Reed 一整段都在正下方 +0.32，Bellbearer +0.85，Tiny +1.26；横向站位每 u 0.6）。
+
+### 26.6 检查
+
+- 单测 `tests/test_forum_track_a.py`（18 个，含 `forum_human_score.j_terms` 的核函数签名）：free 模式（h = 2 时解禁、h = 1 照旧 Q1、Q3 照旧、Bell Beast 默认不变、I3 和拼刀闸门）、记号解析和 AB 键、击退表、命中分支里只有被打的那只怪跟着动、below 增益和加分、按刀向的命中权重、eml 只在首次接触之后打破平局、L2 的格挡带 / Reed / 鞭的范围和站位 / 够距边、测量工具。改了一处旧测试的形状（`_forum_targets` 的权重从 [K] 变成 [K, 4]）。
+- **Bell Beast**：它的路径上改动的只有监督器（`free_until_hit` 默认 False：`careful`、I3 的表达式不变）、`FilterContext.free`（从决策取，Bell Beast 恒为 False）和 `GoalPrefs.hit_kw`（Bell Beast 不读），按构造逐位相同，没有重跑逐 tick 比较。
+- 全部测试（4f6842b 之后的工作区，NUMBA_NUM_THREADS 4，低优先级）：1294 通过、2 跳过、1 预期失败；之后改动的文件（L2、单测）单独重跑通过。
+- 开环回放（`forum_policy_replay`，`SSBOT_FORUM_TA=all`，没有异常、L2 错误 0）：A0 录像 600 帧（edge 272 个 tick、kb 81 行）；`20261003_074719` i3 ep0 的第 0–3 波 6,000 帧（edge 2,068、Reed 防御 184、鞭 483 个 tick；拼鞭行 4、kb 50 行）。
+- 重打分（plan §5 的固定检查，`scripts\forum_human_rescore.cmd best`，`SSBOT_FORUM_TA=all`）：第一次（冻结检出 `C:\ssbot\hs_ta_6b8f2ba`）每个 tick 都报错——`forum_human_score.j_terms` 自己调用打分核函数，还是旧的签名（2ef0551 改了，加了单测）；重跑（`C:\ssbot\hs_ta_2ef0551`，输出 `C:\ssbot\data\m2_forum_hs\ta_all_2ef0551`，32 段 0 错误）对基线 best_v2（§25.11）：FORCED_RISK 82.10 → 82.09 %、匹配行 71.4 → 71.4 %、匹配行判不安全 86.57 → 86.57 %、其中事后没碰 88.82 → 88.81 %、**漏报（占判安全）0.60 → 0.60 %（持平）**；误报没降——击退只改命中分支，你被判不安全的行几乎都在第 1 阶段就接触（34,000 / 34,110），碰不到命中分支。**被否决的 tick 4.09 → 2.87 %**（赢的局 3.04 → 1.04 %，你的行"不允许"4.15 → 1.43 %）：`free` 取消了低血时收走出刀；第 0 波不变（那里没有会冻结的击杀）。J 决定的原因 22.8 → 23.0 %、seen_cf 15.1 → 15.9 %（原来被否决的 tick 现在落到这两个键上）。
+- **冒烟（不是 A/B）**：实例 0，10 场，Forum_W、eval、planner、oracle、真退出 0.2，seen_cf + escape+n+g + 按状态余量 + 拼刀主逻辑 + `SSBOT_FORUM_TA=all`，冻结检出 `C:\ssbot\live_ta_4f6842b`（`guard` 的单挑下劈、鞭不动 PUNISH 两处改动之前），种子 370000，驱动 `C:\ssbot\sandbox\ta_smoke.ps1`，运行 `20261008_185856_Forum_W_eval_planner_oracle_clashM`。代码跑通（没有崩溃、0 WOULD_DIE、支撑外受击 0），10 场都在第 0 波 Q1 退出。**结果比第 5 轮的 fix 臂差很多**（同一配置不带 `SSBOT_FORUM_TA`，75 场，不同种子、不同时段，不配对）：存活中位 26.9 对 34.8 s、每分钟受击 10.4 对 4.8、击杀 0.40 对 1.69 / 场、第 0 波 FORCED_RISK 占比 0.82 对 0.64、GREEN tick 0.6 % 对 15 %、L2 的 KITE(EVADE) 63 % 对 42 %、PUNISH 2 % 对 11 %；打中目标每分钟 8.2 对 6.6（`goal_hits`）；选中的第一段是出刀 4.3 % 对 2.5 %。受击多出来的主要是 Choristor 转圈（Spin Hit 1.55 对 0.44 / 分）、Envoy 跳斩（1.33 对 0.26）、Envoy 横斩（1.11 对 0.70）、针（1.11 对 0.47）。RUSH 时主角离目标（Envoy）中位 4.8 u（fix 5.1 u，站位 1.8 u；edge 的站位 3.2 u）。10 场能分出这么大的差，但分不出是哪个记号：`edge`（RUSH 占 1/3–2/5 的 tick，站位从 1.8 u 挪到约 3.5 u，正是 §24.4 说的 bot 在 4–5 u 外转、多招来 Envoy 横斩的距离）、`free`（第 0 波几乎一直 h ≥ 2：YELLOW 的"惩罚最多 1 刀"取消，J 给多刀的行加分，出刀更多）、`kb`、`eml`（FORCED_RISK 平局时偏向砍得多的行）都可能。见 26.7 的开环逐记号比较和建议的 A/B。
+
+### 26.7 逐记号的开环比较和建议的 A/B
+
+冒烟只说明"全开"变差了，不说明是哪一个。不占实例能做的：同一份录像（第 5 轮 fix 臂 `20261008_163913` i0 ep1，15,654 帧，开环，规划器的截止时间照常 8 ms，所以有少量计时噪声），每次只开一个记号，和不开比"选中的行不同"的 tick 比例（`forum_policy_replay --ticks-out`，脚本在本会话 scratchpad `ta\ddiff.py`）：
+
+| 记号 | 选中的行不同 | 第一段按键不同 | 说明 |
+|---|---|---|---|
+| `edge` | 20.3 % | 25.8 % | RUSH 占这一场 65 % 的 tick，站位挪 1.7 u |
+| `free` | 3.8 % | 5.0 % | YELLOW 的"惩罚最多 1 刀"取消（多刀的行 J 变高） |
+| `eml` | 3.5 % | 4.6 % | FORCED_RISK 的平局 + J |
+| `under` | 2.2 % | 2.1 % | |
+| `whip` | 0.8 % | 1.1 % | 这一场甩鞭少 |
+| `kb` | 0.4 % | 0.5 % | 命中分支只在有安全行的 tick 起作用 |
+| `guard` | 0.3 % | 0.4 % | 第 0 波只有 Reed 的防御 |
+| 全开 | 23.0 % | 29.1 % | |
+
+开环里 FORCED_RISK 占比各记号都不变（0.265），所以冒烟里 0.64 → 0.82 是行为（主角站的地方）变了，不是判决变了；改动选择最多的是 `edge`。**判断：冒烟变差的头号嫌疑是 `edge`**：基线 RUSH 时站位在 Envoy 1.8 u、主角实际停在 5.1 u（安全的行到不了站位），`edge` 把站位放到约 3.5 u，主角就真的进到 3–5 u 那一带——正是 §24.4 说的"bot 在 4–5 u 外转、每分钟遇到 Envoy 横斩是你的 2.2 倍"的距离。另一种读法是"够距"指**敌人出招的够距**（站在它够不着的地方等），那样站位应在 5 u 以外（Envoy 横斩选择距离 p99 4.9 u），这次没有实现，留给 A/B 之后定。**建议的 A/B（合并那一步，同一轮、ABBA）**：先 `ta=none` 对 `ta=free`（你的决定，要确认它不让受击变多），`ta=none` 对 `ta=edge`；其余 `whip+guard+under+eml+kb` 作一臂；`edge` 不过就不开。`SSBOT_FORUM_AB` 可以逐场轮换 `ta`。
+
+### 26.8 没做 / 未核实
+
+- 实战 A/B（合并那一步做）：每个记号单独的作用没有分开量（26.7）。
+- 击退只推第一刀；Minister "上挑两下后够高"要连着推两刀（第二刀的命中分支）；下劈的击退没建模。
+- 甩鞭时"贴身后砍、在身后两段之前离开"的时机没有专门的候选行（规划器按支撑自己选）。
+- 中带的"一下上挑之后定时拼反击"：L2 这里只把 Parry Block 里的上挑分设为 0、站在它下面；定时拼刀行是 B 轨的候选。
+- 飞针（R7）在格挡带里的用法没进来。
+- `under` 的权重 10、`eml` 的 1.154 格 / 次和 4 刀 / 格、`edge` 的 0.4 u 余量、格挡带的 0.3 u 余量是取的数，没有调。
+
+复现：
+
+```
+cd brain
+..\scripts\uv.cmd run python -m ssbot.tools.forum_knockback --out C:/ssbot/data/m2_forum_ta/measure.json
+..\scripts\uv.cmd run pytest -q tests/test_forum_track_a.py
+set SSBOT_FORUM_TA=all && ..\scripts\forum_human_rescore.cmd best ta_all_<rev>      &rem 冻结检出里
+```

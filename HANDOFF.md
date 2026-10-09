@@ -3286,3 +3286,101 @@ Main 70f8324 + `forum-integration-1008` (6dce435) merged first. Facts: forum.md 
    matching; not recomputed.
 6. `hit_log` attributes 43 % of whip chains to another Choristor (policy bookkeeping; not fixed).
 7. Frozen checkout `C:\ssbot\hs_da8d104` can go after review.
+
+## Task forum push 2 track A (branch worktree-wf_c8fb34ca-073-2, 2026-10-08 evening; forum.md §26)
+
+Base: main fa43977 + `worktree-wf_c8fb34ca-073-1` (0cac216, the base integration) merged first (fast-forward). Track A
+of the push: the person's decisions and tactics of 2026-10-08 in the planner / L2 / supervisor; track B's files
+(multi_forecast, enemy_tables, candidates.py, the escape check) not touched.
+
+### Done (committed)
+
+- One switch, `SSBOT_FORUM_TA` (tokens joined by "+" or ","; `all`; empty = the planner before, bit for bit), also an
+  `SSBOT_FORUM_AB` key `ta=<tokens>|none` (the supervisor's free mode and the L2 rules follow the episode's arm,
+  `ForumPlannerPolicy._set_ta`); `stats.fcfg.ta` and the decision log's `ta` / `free` record it:
+  - `free` (DESIGN 3.5.6 revision): `SupervisorConfig.free_until_hit` (forum_supervisor_config(free_until_hit=...)):
+    h >= 2 and nothing pending -> no YELLOW restriction (kill primitives stay, no punish limit, parry / clash allowed,
+    no killing-blow rule, so no QS), `SupervisorDecision.free` -> `FilterContext.free` (I3 passes the battle's last
+    blow) and `ForumPlanner.clash_allowed` (any tier). The tier label is unchanged; Q1 (h <= 1, post-hit window), Q3
+    (h = 2 with a mask-bypassing / long-chain / hazard / unknown support) unchanged.
+  - `whip`: a clash-safe row whose clash meets CH_WHIP stays safe, J minus its hits and one hit weight
+    (`ForumConfig.w_whip_clash`, audit `whip_clash_rows`); L2: in a Choristor's whip (antic + Whip 1-6) the stance
+    leaves the whip's reach (5.3 u behind / 9.3 u in front: measured, the whip does reach 4.75 u behind), picks whose
+    spot is in it get priority x 0.2, a whip starting / ending re-picks; PUNISH untouched.
+  - `guard`: L2 hit weights by slash kind (`GoalPrefs.hit_kw`; the score kernel's target weights are [K, 4] now) for a
+    Minister in Parry Stance / Parry Block (height bands low < 4.5 / mid < 5.2 / high <= 8.2 u over the floor, grouped
+    within 8 u or alone; the table in forum.md 26.3) and a Reed in Defend / Block (never); the target's waiting stance.
+  - `edge`: RUSH's stance 2.7 u outside the target body's edge (not its x).
+  - `under`: J + 10 x (below.json: the hit rate 3 u in front less below) x the share of frames under a flyer.
+  - `eml`: J - 4 x the hit weight x 1.154 masks x the stage-1 contact share; FORCED_RISK's order gets the key
+    1.154 x P - hits landed / 4 after the first contacts (preselection and final order), the old keys untouched.
+  - `kb`: the hit branch moves the hit enemy's own support and its reaction by its measured knockback from the hit
+    frame (`forum_planner.knockback`, `_kb_shifts`; audit `kb_rows`); the first hit only.
+- `tools/forum_knockback` (whip / Minister guard / knockback measurement over the Forum caches) ->
+  `C:\ssbot\data\m2_forum_ta\measure.json`.
+- `tools/forum_human_score.j_terms` calls the score kernel with its new signature (2ef0551; the first re-score crashed
+  on every tick without it).
+- Tests: `tests/test_forum_track_a.py` (18); `test_three_layer` one assert reshaped ([K] -> [K, 4] target weights).
+- Docs: forum.md §26 (Chinese).
+
+### Measured
+
+- Whip (395 cached fights, `tools/forum_knockback`): Whip Hit 1-3 in front (to 8.75 u), 4 overhead, 5-6 sweep over its
+  head to 4.75 u behind at the hero's height: the whip does reach behind; Whip Antic 0.817 s, Whip 1-6 0.05-0.067 s
+  each, |vx| p50 0 (it stands still).
+- Minister Parry Stance: transform 2.3 / 5.2 / 10.9 u over the floor (p5 / p50 / p95), stance collider 0.46-2.14 u
+  below the transform, the counter (ParrySlash Hit 1-4) down to 2.8 u below; the guard push: Parry Stance -> Parry
+  Block 1.34 u sideways / 0.25 u up at 12 frames (the person's question: it is barely pushed in the stance); Reed
+  Defend -> Block 0.95 / 0.5 u.
+- Knockback: side 0.45 u / frame for 8 frames (3.6 u), up 0.375 u / frame (3.0 u) for Reed / Minister / Bellbearer /
+  Tiny / Clawmaiden; Maestro x0.65; Clapper side 0.72 u, up 0; no push in dashes / stabs / spins / counters (list in
+  forum.md 26.4).
+- Tests: full suite (code ~4f6842b) 1294 passed, 2 skipped, 1 xfailed; the track A / L2 / human-score files after the
+  later changes 53 passed.
+- Open-loop replays with `SSBOT_FORUM_TA=all`: no exception, L2 errors 0 (A0 600 frames; 20261003_074719 i3 ep0
+  6,000 frames, waves 0-3).
+- **Live smoke (10 episodes, instance 0, not an A/B)**: frozen `C:\ssbot\live_ta_4f6842b` (before the guard alone
+  down-slash and the whip-not-in-PUNISH changes), recommended configuration (seen_cf + escape+n+g + state margins +
+  clash main) + `SSBOT_FORUM_TA=all`, seeds 370000, run `20261008_185856_Forum_W_eval_planner_oracle_clashM`. Runs
+  clean (no crash, 0 WOULD_DIE, 0 support-outside hits), all 10 Q1 in wave 0. **Much worse than round 5's fix arm**
+  (same configuration without TA, 75 episodes, unpaired): median time 26.9 vs 34.8 s, hits / min 10.4 vs 4.8, kills
+  0.40 vs 1.69 / episode, wave-0 FORCED_RISK share 0.82 vs 0.64, GREEN ticks 0.6 vs 15 %, KITE(EVADE) 63 vs 42 %,
+  PUNISH 2 vs 11 %; goal hits 8.2 vs 6.6 / min.
+- Per-token open loop (same recording, 15,654 frames, deadline 8 ms): chosen row differs on edge 20.3 %, free 3.8 %,
+  eml 3.5 %, under 2.2 %, whip 0.8 %, kb 0.4 %, guard 0.3 %, all 23.0 % of the ticks; FORCED_RISK share unchanged by
+  every token (0.265): the smoke's rise is behaviour (where the hero stands), and `edge` moves the most decisions
+  (the RUSH stance 1.8 -> ~3.5 u from the Envoy: into the 3-5 u band of forum.md 24.4 where the bot meets the Envoy's
+  slash 2.2x as often as the person). forum.md 26.7.
+- Re-score (plan sec. 5; frozen `C:\ssbot\hs_ta_2ef0551`, `SSBOT_FORUM_TA=all`, best arm, 32 segments, 0 errors;
+  `C:\ssbot\data\m2_forum_hs\ta_all_2ef0551[_summary.json]`) vs best_v2: FORCED_RISK 82.10 -> 82.09 %, matched
+  71.4 -> 71.4 %, matched unsafe 86.57 -> 86.57 %, of them clear 88.82 -> 88.81 %, misses (of safe) 0.60 -> 0.60 %
+  (flat); false alarms not down (kb acts in the hit branch only; the person's unsafe rows are stage-1 contacts,
+  34,000 / 34,110); vetoed ticks 4.09 -> 2.87 % (wins 3.04 -> 1.04 %, the person's row not allowed 4.15 -> 1.43 %:
+  `free`), wave 0 unchanged. The first re-score (`C:\ssbot\hs_ta_6b8f2ba`) errored on every tick (j_terms).
+
+### Running
+
+- Nothing (the smoke ended 19:06 and released inst0.lock; the re-score and the replays are done). Instance 4 (routes)
+  untouched.
+
+### Needs deploy
+
+- Nothing (no oracle change).
+
+### Next / open issues
+
+1. The A/B (the merge step; same round, ABBA; `SSBOT_FORUM_AB` can rotate `ta=`): `ta=none` vs `ta=free` (the
+   person's decision; check it does not raise hits), `ta=none` vs `ta=edge` (the smoke's prime suspect; if it fails,
+   try the other reading of "the edge of the target's reach": outside the ENEMY's attack reach, about 5 u from an
+   Envoy, not implemented), and `whip+guard+under+eml+kb` as one arm. Do not turn on `all`.
+2. Knockback: the first hit only (the person's "two up slashes, then it is high enough" needs the second hit's
+   branch); no down-slash push.
+3. Minister mid band: L2 only zeroes the up slash in Parry Block and stands under it; the timed clash on its lunge is
+   track B's candidate rows.
+4. The harpoon in the guard bands (R7) is not in.
+5. Untuned numbers: under 10 J per unit, eml 1.154 masks / contact and 4 hits / mask, edge 2.7 u, the band margins
+   0.3 u, whip zone margins 0.3 u.
+6. The main checkout has no `knowledge/1.0.30000/enemies/forum/*_hitboxes.npz` (git-ignored); the frozen checkouts here
+   took them from `C:\ssbot\hs_da8d104`.
+7. Frozen checkouts made here (can go after review): `C:\ssbot\hs_ta_6b8f2ba` (the re-score that crashed),
+   `C:\ssbot\hs_ta_2ef0551` (the re-score), `C:\ssbot\live_ta_4f6842b` (the smoke).

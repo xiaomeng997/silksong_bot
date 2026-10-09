@@ -108,6 +108,8 @@ class FilterContext:
     #                                         press may kill
     kill_window_s: float = KILL_WINDOW_S    # game s from a killing hit to the first pausable frame, for the kinds of
     #                                         kill this encounter has (KillKnowledge.window_s)
+    free: bool = False                      # SupervisorDecision.free (DESIGN 3.5.6 revision 2026-10-08: h >= 2,
+    #                                         anything goes until hit): I3 lets the killing blow through
 
     @classmethod
     def from_world(cls, ws: WorldState, d: SupervisorDecision | None, h: int | None, want_bind: bool = False,
@@ -132,7 +134,8 @@ class FilterContext:
                    pause_pending=bool(d is not None and d.pause_pending), want_bind=want_bind, hazards=hazards,
                    soft=soft, hero_x=float(ws.hero.pos.v[0]), support_known=bool(d is not None and d.support_known),
                    kill_hp=kill_hp_world(ws) if kill_hp is KILL_HP_FROM_WS else kill_hp, damage=damage,
-                   kill_window_s=KILL_WINDOW_S if kill_window_s is None else float(kill_window_s))
+                   kill_window_s=KILL_WINDOW_S if kill_window_s is None else float(kill_window_s),
+                   free=bool(d is not None and getattr(d, "free", False)))
 
 
 def veto(cands: CandidateSet, ctx: FilterContext) -> tuple[np.ndarray, np.ndarray]:
@@ -178,7 +181,10 @@ def hazard_flags(kb_hull: np.ndarray | None, kb_flags: np.ndarray | None, ctx: F
 
 
 def i3_kill_allowed(ctx: FilterContext) -> bool:
-    """I3 lets the hero enter the boss-death slow motion uncertified: GREEN, full HP and h >= 3."""
+    """I3 lets the hero enter the boss-death slow motion uncertified: GREEN, full HP and h >= 3; or the supervisor's
+    free mode (FilterContext.free: h >= 2, one more event cannot kill; the DESIGN 3.5.6 revision of 2026-10-08)."""
+    if getattr(ctx, "free", False) and ctx.h is not None and ctx.h >= 2:
+        return True
     return ctx.tier == GREEN and ctx.max_hp > 0 and ctx.hp >= ctx.max_hp and ctx.h is not None and ctx.h >= 3
 
 

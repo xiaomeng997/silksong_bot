@@ -60,6 +60,12 @@ Per tick (the lexicographic order and every rule of Planner.tick unless named he
               FilterContext.kill_hp from it; not certified in R3 (no kill branches): such a blow passes only under I3.
 Scores only (GoalPrefs: hit_w per enemy iid, stance, the risk map): no prefs field reaches stage 1's S, Hz, U or the
 core rows' envelope, so the core rows' S / Hz / U are the same under any prefs (tests/test_forum_planner.py).
+Track A of the Forum push 2 (SSBOT_FORUM_TA, TA_TOKENS below; forum.md §26; every token off by default): GoalPrefs
+.hit_kw weighs a target's hits by the slash kind (side / up / wall / down); "whip" lowers J of a clash-safe row whose
+clash meets a Choristor whip (it stays safe); "under" adds the under-flier bonus; "eml" prices the stage-1 contact in J
+and puts the effective mask loss (masks x P - hits landed / 4) after FORCED_RISK's first-contact keys; "kb" moves the hit
+enemy's support (and its reaction) by its measured knockback in the hit branch; "free" is the supervisor's (the clash
+gate and I3 follow FilterContext.free).
 """
 import math
 import os
@@ -92,6 +98,7 @@ ESC_CHUNK = 4                     # safe rows per escape check batch
 ESC_NEAR_U = 9.0                  # an attack is looked at when its reach over the check + this (the hero's travel over a
 #                                   plan, the enemy's dead reckoning) is past the hero
 ESC_COUNTERS = frozenset({"RE_DEFEND", "MI_PARRY"})   # guard stances: their strike is the counter to a hit
+WHIP_FAMS = frozenset({("Song Pilgrim 03", "CH_WHIP")})   # the Choristor's whip (forum.md §26)
 REASONS_FORUM = dict(REASONS) | {R_UNMOD: "unmodelled move (attack while dashing)"}
 SLOTS = ("normal", "up", "wall", "down")   # kernel slot order (_SHAPE_*)
 K_SIDE, K_UP, K_WALL, K_DOWN = 1, 2, 3, 4  # first_kind codes
@@ -152,6 +159,32 @@ H_W_FAR, H_W_NONE = 0.3, 0.5
 TV_ON = os.environ.get("SSBOT_FORUM_TV", "0") == "1"        # 1: the terminal value (off by default: forum.md 20.11)
 PC_ON = os.environ.get("SSBOT_FORUM_PC", "1") != "0"        # 0: FORCED_RISK without the committed support's shares
 T_ENV = int(os.environ.get("SSBOT_FORUM_T", "36") or 36)     # the horizon arm (§4.5: T 36 / 48)
+# Track A of the Forum push 2 (2026-10-08, the person's decisions and tactics; forum.md §26): each behind a token of
+# SSBOT_FORUM_TA ("+" or "," separated; "all": every one; empty, the default: none, everything as before):
+#   free   DESIGN 3.5.6 revision: the supervisor's free mode (h >= 2: anything goes until hit; Q1 at h = 1 unchanged)
+#   whip   a clash row whose clash meets a Choristor whip is still safe but scores no gain (J); L2: in its whip antic
+#          leave the whip's reach (it does reach 4.75 u behind: Whip Hit 5-6) or switch to a target out of it
+#   guard  L2: the Minister / Reed defence rules (height bands, wait in reach, triggers only from where its counter
+#          cannot reach; the Reed never from above / below)
+#   edge   RUSH's stance at the edge of the hero's slash reach on the target's body (not its x)
+#   under  J: the under-flier bonus (below.json: the attack-weighted hit rate in front less below, per flyer type)
+#   eml    J and FORCED_RISK's tie-break after the preselection keys: the effective mask loss (P x masks - hits / 4)
+#   kb     the hit branch moves the hit enemy (its support and its reaction) by its measured knockback
+TA_TOKENS = ("free", "whip", "guard", "edge", "under", "eml", "kb")
+
+
+def parse_ta(spec: str | None) -> frozenset:
+    """SSBOT_FORUM_TA's tokens (TA_TOKENS); "all" = every one; unknown tokens raise."""
+    toks = {t.strip().lower() for t in str(spec or "").replace(",", "+").split("+") if t.strip()}
+    if "all" in toks:
+        return frozenset(TA_TOKENS)
+    bad = toks - set(TA_TOKENS)
+    if bad:
+        raise ValueError(f"SSBOT_FORUM_TA={spec!r}: unknown {sorted(bad)} (tokens {TA_TOKENS} or all)")
+    return frozenset(toks)
+
+
+TA_ENV = os.environ.get("SSBOT_FORUM_TA", "")
 
 
 @dataclass
@@ -235,6 +268,18 @@ class ForumConfig:
     bell_hits: bool = True        # bells in reach are hit targets (weight 0): a row whose first hit is a bell before
     #                               its contact gets the hit branch with that bell knocked back (the hit-back bells,
     #                               forum.md bell paragraph / §23: no hazard to the hero from the hit on)
+    ta: str = TA_ENV              # track A's tokens (TA_TOKENS, SSBOT_FORUM_TA; empty: none)
+    w_whip_clash: float = 1.0     # "whip": J off a clash-safe row whose clash meets a whip, in hit weights (the row's
+    #                               own hits on that Choristor are taken off too: no gain)
+    w_under: float = 10.0         # "under": J per unit of the hit-rate gain x the share of frames under a flyer
+    under_dx_u: float = 0.6       # ... under = the box centre within the flyer's body half-width + this (x)
+    eml_mask: float = 1.154       # "eml": masks a contact costs (forum.md 24.3: 1,876 masks in 1,626 hits)
+    eml_hits_per_mask: float = 4.0   # the person's exchange: 4 hits landed = 1 mask (9 silk heal 3)
+    kb_scale: float = 1.0         # "kb": the measured knockback's factor (medians, forum.md §26)
+
+    @property
+    def tac(self) -> frozenset:
+        return parse_ta(self.ta)
 
     @property
     def escape(self) -> bool:
@@ -318,6 +363,8 @@ class EnvelopeAudit:
     esc_failed: int = 0           # ... it failed the check (every checked row failed: the fewest failures chosen)
     esc_unchecked: int = 0        # ... no row checked before esc_deadline_ms with threats in reach
     esc_carried: int = 0          # ... a carried CONTINUE of such a row
+    whip_clash_rows: int = 0      # clash-safe rows whose clash meets a Choristor whip, J lowered (track A "whip")
+    kb_rows: int = 0              # hit-branch rows whose hit enemy was moved by its knockback (track A "kb")
 
     def as_dict(self) -> dict:
         return dict(self.__dict__)
@@ -429,10 +476,12 @@ def seen_polys(ws) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
 @numba.njit(cache=True, parallel=True)
 def _forum_score_kernel(box, flags, mode, latched, face0, tbox, tok, tw, vr, vl, st, win, wall_l, wall_r, wv, stance_x,
                         rx, rv, boss_x, max_hits, J, hits, first_f, first_t, first_k, first_face, risk, unmod,
-                        down_slash, combo_f, sw_f, sw_k, sw_face):
-    """J per row on the nominal lane over K targets (tbox [K, T1, 4], tok [K, T1], weights tw [K]): the crest's side /
+                        down_slash, combo_f, sw_f, sw_k, sw_face, real, nh):
+    """J per row on the nominal lane over K targets (tbox [K, T1, 4], tok [K, T1], weights tw [K, 4] by the slash kind
+    side / up / wall / down: GoalPrefs.hit_kw, else the target's one weight for every kind): the crest's side /
     up / wall / down slash polygons in their active windows against each target's box (an attack counts each target it
-    meets once, weighted); first_f / first_t / first_k / first_face: the first predicted hit (frame, target, kind,
+    meets once, weighted); nh: the hits on targets with real[t] (enemies, not bells), unweighted (the effective mask
+    loss's hits landed); first_f / first_t / first_k / first_face: the first predicted hit (frame, target, kind,
     facing); sw_f / sw_k / sw_face: the first swing (frame, kind, facing); unmod: an attack pressed while dashing or
     sprinting (the dash stab, not modelled) or, combo_f > 0 (Wanderer), up to combo_f frames after a dash / sprint frame
     (HeroController.Attack: inside wandererDashComboWindowTimer the press is the WANDERER DASH COMBO). down_slash: the
@@ -501,7 +550,9 @@ def _forum_score_kernel(box, flags, mode, latched, face0, tbox, tok, tw, vr, vl,
                             first_f[c], first_t[c], first_k[c], first_face[c] = j, t, kind, fc[j]
                         break
                 if got:
-                    h += tw[t]
+                    h += tw[t, kind - 1]
+                    if real[t]:
+                        nh[c] += 1.0
         h = min(h, max_hits)
         waste = max(presses - h, 0.0)
         x_end = cxs[T1 - 1]
@@ -576,6 +627,75 @@ def forum_yellow_kill_hp(mf, freeze: dict[str, float], z: float = KILL_Z, min_fr
 
 
 KIND_SLOT = {K_SIDE: "side", K_UP: "up", K_WALL: "wall", K_DOWN: "down"}
+_UNDER: tuple | None = None
+
+
+def under_gains(path=None) -> tuple[dict, dict]:
+    """The under-flier bonus's rates (track A "under", the person's note ③ of 2026-10-08; knowledge below.json: the
+    share of attack instances committed in the air that touch a hero on the floor at dx from the commit point, the
+    hazards they throw included): ({type: gain}, {(type, family): gain}), gain = the rate 3 u in front less the rate
+    below, clipped at 0; a type's gain is the instance-weighted mean over its families that have both (forum.md §26:
+    Bellbearer 0.085, Reed 0.032 (stab 0.066, throw 0.083), Tiny 0.126, Clawmaiden 0.014, Minister and Maestro 0)."""
+    global _UNDER
+    if _UNDER is not None and path is None:
+        return _UNDER
+    import json
+    from ssbot.combat.enemy_tables import FORUM_DIR
+    d = json.loads(Path(path or FORUM_DIR / "below.json").read_text("utf-8"))["by_family"]
+    fam, acc = {}, {}
+    for k, v in d.items():
+        tk, fm = k.split("/", 1)
+        a, b = v.get("with thrown hazards: dx +3"), v.get("with thrown hazards: dx +0")
+        if a is None or b is None:
+            continue
+        g = float(a) - float(b)
+        fam[(tk, fm)] = max(0.0, g)
+        n = float(v.get("instances") or 0)
+        s0, w0 = acc.get(tk, (0.0, 0.0))
+        acc[tk] = (s0 + n * g, w0 + n)
+    out = ({tk: max(0.0, s0 / w0) for tk, (s0, w0) in acc.items() if w0 > 0}, fam)
+    if path is None:
+        _UNDER = out
+    return out
+
+
+# The hit enemy's knockback (track A "kb"; forum.md §26, the R0 + R1 caches, 395 fights: the transform's displacement
+# after a nail hit less its own motion before it, median over the hits by type x slash x state): a side slash pushes it
+# away from the hero about 0.45 u a frame for 8 frames (3.6 u), an up slash up about 0.375 u a frame (3.0 u); the
+# Maestro about 0.65 of that, the Clapper 0.2 sideways and nothing up; a guard (the Minister's Parry Stance -> Parry
+# Block, the Reed's Defend -> Block) 1.3 / 0.95 u sideways and 0.25 / 0.5 u up (taken as 0 up); states whose median at
+# 12 frames is under 2 u (a dash, a stab, a spin, a death fall) none. Frames after the hit -> u (KB_PROFILE) x scale.
+KB_SIDE_U_F, KB_UP_U_F, KB_FRAMES = 0.45, 0.375, 8
+KB_SCALE = {"Song Pilgrim Maestro": (0.65, 0.65), "Song Heavy Sentry": (0.2, 0.0)}       # (side, up)
+KB_GUARD = {("Song Administrator", "Parry Stance"): (0.35, 0.0), ("Song Administrator", "Parry Stance Antic"): (0.35, 0.0),
+            ("Song Reed", "Defend"): (0.25, 0.0)}
+KB_NONE = frozenset({
+    ("Song Administrator", "Attack"), ("Song Administrator", "Parry Block"), ("Song Administrator", "Parry Slash 1"),
+    ("Song Administrator", "Parry Slash 2"), ("Song Administrator", "Parry Slash 3"),
+    ("Song Administrator", "Parry Slash 4"), ("Song Reed", "Block"), ("Song Reed", "Multihit Clashed"),
+    ("Song Reed", "Parry Slash"), ("Song Reed", "Stab 1"), ("Song Reed", "Stab 2"), ("Song Reed", "Stab 3"),
+    ("Song Reed", "Stab 4"), ("Song Reed", "Stab 5"), ("Song Automaton Tiny", "Defend Buzz"),
+    ("Song Automaton Tiny", "Wall Bonk"), ("Song Automaton Tiny", "Die"), ("Song Automaton Tiny", "Brake"),
+    ("Song Handmaiden", "Slash 1"), ("Song Handmaiden", "Slash 4"), ("Song Handmaiden", "Slash 5"),
+    ("Song Pilgrim 01", "JumpSlash Antic"), ("Song Pilgrim 03", "Jump Spin"), ("Song Pilgrim 03", "Hop Back"),
+    ("Song Pilgrim 03", "Slash End"), ("Song Pilgrim 03", "ComboSlash Antic2"), ("Song Pilgrim 03", "Slash 2"),
+    ("Song Pilgrim 03", "Jump Rise")})
+
+
+def knockback(tk_name: str, state: str | None, kind: int, face: int, n: int, scale: float = 1.0
+              ) -> tuple[np.ndarray, np.ndarray] | None:
+    """(dx [n], dy [n]) the hit enemy is pushed by over the n frames from the hit frame on (frame 0 = the hit), or None
+    when the hit pushes it by nothing measurable (a down slash, a state of KB_NONE, a type with no push that way)."""
+    if kind == K_DOWN or (tk_name, state) in KB_NONE:
+        return None
+    side = kind in (K_SIDE, K_WALL)
+    g = KB_GUARD.get((tk_name, state))
+    sx, sy = g if g is not None else KB_SCALE.get(tk_name, (1.0, 1.0))
+    a = sx * KB_SIDE_U_F if side else sy * KB_UP_U_F
+    if a <= 0.0:
+        return None
+    d = scale * a * np.minimum(np.arange(n), KB_FRAMES)
+    return (face * d, np.zeros(n)) if side else (np.zeros(n), d)
 
 
 def _wilson_lb(k: float, n: float, z: float = 1.96) -> float:
@@ -776,13 +896,44 @@ class ForumPlanner(Planner):
                     keep.append(t)
         T1 = len(tk)
         if not keep:
-            return np.zeros((0, T1, 4)), np.zeros((0, T1), bool), np.zeros(0), []
+            return np.zeros((0, T1, 4)), np.zeros((0, T1), bool), np.zeros((0, 4)), []
         hw = getattr(prefs, "hit_w", None) or {}
+        # per slash kind (side, up, wall, down): GoalPrefs.hit_kw (the L2 guard rules: an up slash on a Minister's
+        # stance may score where a side slash must not), else the target's one weight
+        kw = getattr(prefs, "hit_kw", None) or {}
+        tw = np.zeros((len(keep), 4))
+        for k, t in enumerate(keep):
+            if k < self.fcfg.K_tgt and not t.hazard:
+                w4 = kw.get(t.iid)
+                tw[k] = w4 if w4 is not None else float(hw.get(t.iid, 1.0))
         return (np.ascontiguousarray(np.stack([t.box for t in keep]), np.float64),
-                np.ascontiguousarray(np.stack([t.ok for t in keep])),
-                np.array([float(hw.get(t.iid, 1.0)) if k < self.fcfg.K_tgt and not t.hazard else 0.0
-                          for k, t in enumerate(keep)]),
-                keep)
+                np.ascontiguousarray(np.stack([t.ok for t in keep])), tw, keep)
+
+    def _under_bonus(self, f, box: np.ndarray, keep: list) -> np.ndarray:
+        """Track A "under" (the person's note ③ of 2026-10-08): J per row = w_under x sum over the flyers in reach of
+        the rate gain of standing under it (under_gains: by its current attack family when that has one, else its
+        type's) x the share of frames 1 .. T1 - 1 the row's box centre is under its body (within its half-width +
+        under_dx_u, its body's bottom above the hero box's top). Scores only."""
+        typ, fam = under_gains()
+        mf = getattr(f, "_fc", None)
+        trs = getattr(mf, "trackers", None) or {}
+        cx = 0.5 * (box[..., 0] + box[..., 2])
+        top = box[..., 3]
+        out = np.zeros(box.shape[0])
+        for t in keep:
+            if t.hazard:
+                continue
+            tr = trs.get(t.iid)
+            fm = tr.cur.family if tr is not None and tr.cur is not None and tr.cur.t_end is None else None
+            g = fam.get((t.type_key, fm), typ.get(t.type_key, 0.0))
+            if g <= 0.0:
+                continue
+            tb = np.asarray(t.box, np.float64)
+            half = 0.5 * (tb[:, 2] - tb[:, 0]) + self.fcfg.under_dx_u
+            under = (np.abs(cx - 0.5 * (tb[:, 0] + tb[:, 2])[None]) <= half[None]) & (tb[:, 1][None] > top) & \
+                np.asarray(t.ok, bool)[None]
+            out += g * under[:, 1:].mean(axis=1)
+        return self.fcfg.w_under * out
 
     def _two_mask(self, f):
         """owner -> it has a 2-mask attack or a multi-hit chain (per type, from the tables: family damage >= 2 or a
@@ -822,7 +973,7 @@ class ForumPlanner(Planner):
         t_tv = time.perf_counter()
         fields, kv = self._terminal(f, ctx)
         if kv and len(keep):
-            tw = tw * np.array([1.0 + self.fcfg.w_K * kv.get(t.iid, 0.0) for t in keep])
+            tw = tw * np.array([1.0 + self.fcfg.w_K * kv.get(t.iid, 0.0) for t in keep])[:, None]
         wv = np.array([w.get("hit", 10.0), w.get("waste", 0.6), w.get("jump", 0.15), w.get("stance", 0.6),
                        w.get("risk", 3.0), w.get("face", 0.3), w.get("ground", 0.2), 0.0])
         rx = prefs.risk_x if len(prefs.risk_x) else np.zeros(1)
@@ -830,19 +981,24 @@ class ForumPlanner(Planner):
         out = dict(J=np.zeros(N), hits=np.zeros(N), first_f=np.full(N, -1, np.int64), first_t=np.full(N, -1, np.int64),
                    first_k=np.zeros(N, np.int64), first_face=np.zeros(N, np.int64), risk=np.zeros(N),
                    unmod=np.zeros(N, np.bool_), sw_f=np.full(N, -1, np.int64), sw_k=np.zeros(N, np.int64),
-                   sw_face=np.zeros(N, np.int64))
+                   sw_face=np.zeros(N, np.int64), nh=np.zeros(N))
         vr, vl, st, win = self.shapes
+        real = np.array([not t.hazard for t in keep], np.bool_)
         _forum_score_kernel(np.ascontiguousarray(roll.box), np.ascontiguousarray(roll.flags),
                             np.ascontiguousarray(roll.mode), np.ascontiguousarray(latched), face0,
                             tbox if len(keep) else np.zeros((0, T1, 4)), tok if len(keep) else np.zeros((0, T1), bool),
-                            tw, vr, vl, st, win, WALL_L, WALL_R, wv, float(prefs.stance_x),
+                            np.ascontiguousarray(tw, np.float64), vr, vl, st, win, WALL_L, WALL_R, wv,
+                            float(prefs.stance_x),
                             np.ascontiguousarray(rx, np.float64), np.ascontiguousarray(rv, np.float64),
                             prefs.boss_x if prefs.boss_x is not None else np.nan,
                             float(prefs.max_hits) if prefs.max_hits is not None else np.inf,
                             out["J"], out["hits"], out["first_f"], out["first_t"], out["first_k"], out["first_face"],
                             out["risk"], out["unmod"], self.down_slash, self.combo_f, out["sw_f"], out["sw_k"],
-                            out["sw_face"])
+                            out["sw_face"], real, out["nh"])
         out["targets"] = keep
+        if "under" in self.fcfg.tac and len(keep):
+            out["J_under"] = self._under_bonus(f, roll.box, keep)
+            out["J"] += out["J_under"]
         if fields is not None:
             fc_ = self.fcfg
             c = 0.5 * (roll.box[:, T1 - 1, :2] + roll.box[:, T1 - 1, 2:])
@@ -878,8 +1034,30 @@ class ForumPlanner(Planner):
         bell = np.array([bool(getattr(tg[int(sc["first_t"][r])], "hazard", False)) for r in rows], bool) \
             if len(tg) else np.zeros(len(rows), bool)
         occ = np.zeros(rh.bound.shape[:2], bool)
-        if (~bell).any():
-            occ[~bell] = self._contacts(f, rh.bound[~bell], tk, skip[~bell])
+        # track A "kb": the hit enemy pushed by its knockback from the hit frame on (its support moved with it: the
+        # hero's hull moved the other way against its own support, the rest of the support as it is)
+        kbs = self._kb_shifts(f, sc, rows, rh.bound.shape[1]) if "kb" in self.fcfg.tac else {}
+        moved = np.zeros(len(rows), bool)
+        bnd = rh.bound
+        if kbs:
+            moved[list(kbs)] = True
+            bnd = rh.bound.copy()
+            by_kb: dict = {}
+            for n, (iid, key, dx, dy) in kbs.items():
+                bnd[n, :, 0] -= dx
+                bnd[n, :, 2] -= dx
+                bnd[n, :, 1] -= dy
+                bnd[n, :, 3] -= dy
+                by_kb.setdefault((iid, key), []).append(n)
+            for (iid, _), ns in by_kb.items():
+                ns = np.array(ns, np.int64)
+                o = self._contacts(f, rh.bound[ns], tk, skip[ns], exclude=int(iid))
+                o |= self._contacts_only(f, bnd[ns], tk, skip[ns], [int(iid)])
+                occ[ns] = o
+            self.audit.kb_rows += len(kbs)
+        plain = ~bell & ~moved
+        if plain.any():
+            occ[plain] = self._contacts(f, rh.bound[plain], tk, skip[plain])
         if bell.any():
             # a bell knocked back by the swing: the support without it from the hit on (MultiForecast.bell_redirected:
             # its redirected path, harmless to the hero), one query per (bell, hit frame, direction)
@@ -926,9 +1104,36 @@ class ForumPlanner(Planner):
                     by_rf.setdefault(key, []).append(n)
             for key, ns in by_rf.items():
                 ns = np.array(ns, np.int64)
-                occ[ns] |= self._contacts(cache[key], rh.bound[ns], tk, skip[ns])
+                occ[ns] |= self._contacts(cache[key], bnd[ns], tk, skip[ns])     # the reaction moves with the push
             s = occ.any(axis=1) | capped
         return s, occ, capped
+
+    def _kb_shifts(self, f, sc, rows, T1: int) -> dict:
+        """Track A "kb": {row position n: (enemy iid, group key, dx [T1], dy [T1])} for the rows whose first hit pushes
+        its enemy (knockback(): by its type, its state now, the slash kind and the facing), the push from the hit frame
+        on (0 before it)."""
+        mf = getattr(f, "_fc", None)
+        trs = getattr(mf, "trackers", None)
+        tg = sc["targets"]
+        if not trs or not len(tg):
+            return {}
+        out = {}
+        for n, r in enumerate(rows):
+            t = tg[int(sc["first_t"][r])]
+            tr = trs.get(t.iid)
+            if t.hazard or tr is None:
+                continue
+            j = int(sc["first_f"][r])
+            kind, face = int(sc["first_k"][r]), int(sc["first_face"][r])
+            if j < 0 or j >= T1:
+                continue
+            kb = knockback(t.type_key, tr.state, kind, face, T1 - j, self.fcfg.kb_scale)
+            if kb is None:
+                continue
+            dx, dy = np.zeros(T1), np.zeros(T1)
+            dx[j:], dy[j:] = kb
+            out[n] = (t.iid, (j, kind, face), dx, dy)
+        return out
 
     @staticmethod
     def _note_hit(rows, sh, oh, cp, sc, t_hit, hit_occ, capped_rows, T1) -> None:
@@ -1350,9 +1555,12 @@ class ForumPlanner(Planner):
     def clash_allowed(self, ctx) -> bool:
         """The clash pass's tier gate: never with a pause pending; a tier of clash_tiers (DESIGN 3.5.6: GREEN), or
         with clash_main (the three-layer support, forum.md §23) a YELLOW at h >= clash_main_h too (the YELLOW of the
-        last plan's S = 1: a clash row is the way back to GREEN; h 2 and RED stay out)."""
+        last plan's S = 1: a clash row is the way back to GREEN; h 2 and RED stay out); any tier when the supervisor
+        is in its free mode (FilterContext.free: the DESIGN 3.5.6 revision of 2026-10-08, h >= 2)."""
         if getattr(ctx, "pause_pending", False):
             return False
+        if getattr(ctx, "free", False):
+            return True                      # the DESIGN 3.5.6 revision (2026-10-08): h >= 2, anything goes until hit
         tier = getattr(ctx, "tier", GREEN)
         if tier in self.fcfg.clash_tiers:
             return True
@@ -1442,6 +1650,7 @@ class ForumPlanner(Planner):
         alive = np.ones(n, bool)
         last_cl = np.full(n, -100, np.int64)
         stops: list[dict] = [{} for _ in range(n)]
+        cfams: list[set] = [set() for _ in range(n)]   # (type, family) each row's clashes meet (track A "whip")
         part: dict[int, tuple] = {}                  # row m -> (first contact, contact [T1]) after its clashes so far
         out = {}
         for depth in range(fcfg.clash_depth + 1):
@@ -1520,6 +1729,7 @@ class ForumPlanner(Planner):
                     alive[m] = False                 # too unlikely to rank on: the branch so far stays (part)
                     continue
                 for tr, stop in clashed:
+                    cfams[m].add((tr.tk, tr.cur.family if tr.cur is not None else None))
                     if stop:
                         stops[m].setdefault(tr.iid, (j_hi, tr.tk))
                         au.clash_stops += 1
@@ -1540,6 +1750,7 @@ class ForumPlanner(Planner):
         # the branch's parry i-frames per row (clash_main: FORCED_RISK's seen keys skip them, R8's open note: the
         # collider a swing clashes is no contact of that row)
         self._clash_inv = {int(cand[m]): inv[m].copy() for m in range(n) if int(cand[m]) in out}
+        self._clash_fams = {int(cand[m]): frozenset(cfams[m]) for m in range(n) if int(cand[m]) in out}
         return {i: v for i, v in out.items() if v[0] >= fcfg.clash_partial_min_p}
 
     @staticmethod
@@ -1608,6 +1819,13 @@ class ForumPlanner(Planner):
         t2 = time.perf_counter()
         sc = self._score_forum(ws, r1, latched, start, f, prefs, tk, ctx)
         J = sc["J"]
+        tac = fcfg.tac
+        P1 = o.mean(axis=1) if len(fr) else np.zeros(N)
+        if "eml" in tac:
+            # the effective mask loss (the person, 2026-10-08: 9 silk heal 3 masks, 4 hits landed = 1 mask): the
+            # stage-1 share in contact x the masks a contact costs, priced at hits_per_mask hit weights a mask (the
+            # hits themselves are the hit term already); safe rows have no stage-1 contact: 0
+            J -= fcfg.eml_hits_per_mask * prefs.weights.get("hit", 10.0) * fcfg.eml_mask * P1
         if cont:
             J[-1] += prefs.weights.get("cont", 0.0)
         unm = sc["unmod"] & ok
@@ -1750,6 +1968,7 @@ class ForumPlanner(Planner):
         clash_w = np.zeros(N)
         clash_occ: dict = {}                      # row -> (w, its clash branch's contact [T1] or None: clean)
         self._clash_inv = {}
+        self._clash_fams = {}
         if fcfg.clash and fcfg.clash_branch and not (env & ok & ~S & ~hz).any():
             # no safe row: the clash branch (the plan's "成功率高的招不再逼出 FORCED_RISK"); plain safe rows always
             # come first, so it never runs on a tick that has one
@@ -1767,6 +1986,11 @@ class ForumPlanner(Planner):
                     # after the plain safe rows: by how likely it fails (main: the hit-anyway bound, never 0)
                     clash_p[i] = max(ph, 1e-6) if fcfg.clash_main else 1.0 - w
                     self.audit.clash_rows += 1
+                    if "whip" in tac and any(fm in WHIP_FAMS for fm in self._clash_fams.get(i, ())):
+                        # the person (DESIGN 3.5.6, 2026-10-08): clashing the whip is safe but gains nothing: no hit
+                        # credit, w_whip_clash hits off (behind it / another target score instead)
+                        J[i] -= prefs.weights.get("hit", 10.0) * (float(sc["hits"][i]) + fcfg.w_whip_clash)
+                        self.audit.whip_clash_rows += 1
                 else:
                     # in contact after its clashes (another enemy's support, an attack it cannot clash), or clean but
                     # not likely enough: S = 1; FORCED_RISK ranks it by w x the branch's share + (1 - w) x the plain
@@ -1800,6 +2024,7 @@ class ForumPlanner(Planner):
         sel = ok & known
         Pcm = np.zeros(N)                     # commit_rank's keys (0 on every row otherwise: the order is unchanged)
         Pf = np.zeros(N)
+        eml_k = np.zeros(N)                   # track A "eml": FORCED_RISK's tie-break after the first contacts
         if forced and sel.any():
             cand = np.flatnonzero(sel)
             if fcfg.forced_rank in ("seen", "seen_cf"):
@@ -1827,8 +2052,11 @@ class ForumPlanner(Planner):
                 Pf[cand] = (o_f[cand] & live).mean(axis=1)
             # the preselection: seen > the committed fine share (seen_cf) > P_cm > P_f (commit_rank) > the latest first
             # contact > J (a switched-off key is 0 on every row)
-            cand = cand[np.lexsort((-J[cand], -t_hit[cand], Pf[cand], Pcm[cand], sk_c[cand], -sk_f[cand],
-                                    sk_n[cand]))]
+            if "eml" in tac:
+                # the preselection's estimate: stage 1's share (the final order's is the ranked share Pc)
+                eml_k[cand] = fcfg.eml_mask * P1[cand] - sc["nh"][cand] / fcfg.eml_hits_per_mask
+            cand = cand[np.lexsort((-J[cand], eml_k[cand], -t_hit[cand], Pf[cand], Pcm[cand], sk_c[cand],
+                                    -sk_f[cand], sk_n[cand]))]
             n_k = min(fcfg.p_k, len(cand))
             # the rows with a clash branch are ranked whatever their first contact (their branch is the point)
             pre = cand[:n_k]
@@ -1857,6 +2085,9 @@ class ForumPlanner(Planner):
                 if int(i) in clash_occ:
                     w, oc = clash_occ[int(i)]
                     Pc[i] = clash_mix(w, 0.0 if oc is None else float(oc[fr].mean()), float(Pc[i]))
+            if "eml" in tac:
+                # the person's exchange: a row's expected masks lost (P x masks) against its hits landed / 4
+                eml_k[cand] = fcfg.eml_mask * Pc[cand] - sc["nh"][cand] / fcfg.eml_hits_per_mask
             sel = np.zeros(N, bool)
             sel[pre] = True
         zero = ~cmd.any(axis=1)
@@ -1887,14 +2118,14 @@ class ForumPlanner(Planner):
                 mkeep[N - 1] = True
             # FORCED_RISK: the least share in contact, the latest first contact on the nominal lane, then on the
             # envelope (rows clear on the nominal lane), J (a tick with a safe row: those rows all tie on these)
-            order = np.lexsort((-J, -t_hit, -t_c, Pf, Pcm, Pc, sk_c, -sk_f, sk_n, ~V, ~mkeep, ~keep, clash_p, S, U,
-                                hz_soft, hz))
+            order = np.lexsort((-J, eml_k, -t_hit, -t_c, Pf, Pcm, Pc, sk_c, -sk_f, sk_n, ~V, ~mkeep, ~keep, clash_p, S,
+                                U, hz_soft, hz))
             order = order[sel[order]]
             i = int(order[0])
             tail_ok = None
             carried = cont and i == N - 1 and self.prev_tail_ok
             # the selection's inputs, by reference (offline audits: tools/forum_tv_audit; not logged)
-            self.last_sel = {"J": J, "J_tv": sc.get("J_tv"), "t_hit": t_hit, "t_c": t_c, "Pc": Pc, "Pcm": Pcm, "Pf": Pf,
+            self.last_sel = {"J": J, "J_tv": sc.get("J_tv"), "eml": eml_k, "nh": sc["nh"], "t_hit": t_hit, "t_c": t_c, "Pc": Pc, "Pcm": Pcm, "Pf": Pf,
                              "sk_n": sk_n, "sk_f": sk_f, "sk_c": sk_c, "clash_p": clash_p, "tk": tk, "V": V,
                              "mkeep": mkeep, "keep": keep, "S": S, "U": U, "hz": hz, "hz_soft": hz_soft, "sel": sel,
                              "allowed": ok & known, "safe": safe, "forced": forced, "first": i, "box": r1.box,

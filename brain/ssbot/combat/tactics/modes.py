@@ -81,6 +81,8 @@ class GoalPrefs(TacticPrefs):
     target: int | None = None
     region: tuple | None = None          # (x0, x1, y0, y1, contact)
     hit_w: dict = field(default_factory=dict)
+    hit_kw: dict = field(default_factory=dict)   # iid -> (side, up, wall, down) hit weights by the slash kind (the L2
+    #                                              guard rules, track A); an iid here overrides hit_w for that enemy
     vocab: frozenset = frozenset()
     ttl_s: float = 0.6
 

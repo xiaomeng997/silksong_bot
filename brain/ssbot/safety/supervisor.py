@@ -30,7 +30,11 @@ so at 3 HP with the boss underground the tier was GREEN and the Bind commit test
 (HP 3 > max - 3 and h UNBOUNDED > 2) in the one window where it is safest.
 
 Tiers: GREEN h >= 3, the chosen plan has S = 0 and the support is known; YELLOW h = 2, or S = 1 (or no plan yet, or
-the support unknown) with h >= 3; RED any trigger. Triggers (§3.7.4, Q1 / Q1a the person's rule of 2026-10-03):
+the support unknown) with h >= 3; RED any trigger. With SupervisorConfig.free_until_hit (DESIGN 3.5.6 revision of
+2026-10-08, the person: "with more masks than the largest single event, anything goes until hit"; the Forum's
+SSBOT_FORUM_TA token "free") a YELLOW at h >= 2 with nothing pending has no restriction (SupervisorDecision.free):
+the allowlist keeps the kill primitives, no punish limit, parries / clashes, no killing-blow rule (I3 passes, no QS);
+the triggers are untouched (Q1 at h <= 1 in the post-hit window, Q3 at h = 2). Triggers (§3.7.4, Q1 / Q1a the person's rule of 2026-10-03):
   Q1 h <= 1 (a Fractured Mask just broken at 1 HP included)                  -> PAUSE_PENDING, quit; no Bind attempt
      (the PAUSE_PENDING allowlist is evasive only, and the tactics never ask for a Bind at h <= 1: a model error at
      h <= 1 is death, so the bot bets on its model only where an error is survivable). After a hit (q1_cause "hit":
@@ -212,6 +216,14 @@ class SupervisorConfig:
     tear_frames: int = 3
     unknown_mask_covers: bool = False          # may the Fractured Mask be trusted against an unknown threat (grabs ...)
     evade_exit_timeout_s: float = 20.0
+    free_until_hit: bool = False               # DESIGN 3.5.6 revision (the person, 2026-10-08; the Forum's
+    #                                            SSBOT_FORUM_TA "free"): with more masks left than the largest single
+    #                                            event in play (h >= 2: hits_to_death counts the support's worst
+    #                                            event, Q3's mask-bypassing / long-chain / hazard / Critical / unknown
+    #                                            supports still quit at h = 2) anything goes until hit: no YELLOW
+    #                                            restrictions, no kill withholding, no killing-blow rule (I3 too:
+    #                                            SupervisorDecision.free reaches the L0 filter), no clash ban; after a
+    #                                            hit that leaves h = 1, Q1 quits in the post-hit window as before
     stalemate_s: float = 20.0                  # QS: the killing-blow rule holding back this long, no hit, no heal
     qs_idle_clear_s: float = 0.4               # QS fires only while the no-input path stays clear this long: the
     #                                            pause lands 2-4 frames after the gate, the key guard waits <= 0.25 s
@@ -312,6 +324,8 @@ class SupervisorDecision:
     #                                            no kill can be certified, else left to the L0 filter's certification)
     kill_prims: frozenset[Prim] = frozenset()  # ... those primitives (allowed or not)
     stall_s: float = 0.0                       # how long the rule has held back with no hit and no heal (QS)
+    free: bool = False                         # SupervisorConfig.free_until_hit in force this frame (h >= 2, no
+    #                                            pause pending): the tier keeps its label, its restrictions are off
 
     def allows(self, primitive: "Prim | int | str") -> bool:
         """A primitive (code, int or text name such as "ATTACK(down)") is allowed; unknown names never are."""
@@ -743,7 +757,11 @@ class Supervisor:
         if self.pending or self.paused:
             self.reasons_latched.extend(r for r in reasons if r not in self.reasons_latched)
 
-        careful = tier in (YELLOW, RED)
+        # the DESIGN 3.5.6 revision (free_until_hit): h >= 2 with nothing pending: one more event cannot kill, the
+        # post-hit window's Q1 takes the quit at h = 1, so no tightening before it
+        free = bool(cfg.free_until_hit and h is not None and h >= 2 and not self.pending and not self.paused
+                    and self.evade is None)
+        careful = tier in (YELLOW, RED) and not free
         kill_prims = frozenset(inp.kill_prims) if inp.kill_prims is not None else \
             (DAMAGING if inp.next_hit_may_kill else NOTHING)
         kill_rule, kill = False, NOTHING
@@ -761,7 +779,7 @@ class Supervisor:
             # passes a plan that may kill only when it is certified safe through the slow motion, which needs a
             # certified support and h >= 2: without those no kill can be certified, and the primitives go here
             kill = kill_prims & allowed
-            i3_ok = tier == GREEN and hero is not None and hero.hp >= hero.max_hp and h is not None and h >= 3
+            i3_ok = free or (tier == GREEN and hero is not None and hero.hp >= hero.max_hp and h is not None and h >= 3)
             kill_rule = bool(kill) and not i3_ok
             if careful and kill and not (cfg.kills_certifiable and known and h is not None and h >= 2):
                 allowed -= kill
@@ -795,7 +813,7 @@ class Supervisor:
             risk_integral=self.risk_integral, unpredicted_hits=self.unpredicted, support_known=known,
             hero_known=inp.hp is not None, evade_exit=self.evade is not None, h_basis=basis,
             q1_cause=self.q1_cause(inp.t) if "Q1" in ids else None, t_hit=self.t_hit, kill_rule=kill_rule,
-            kill_prims=kill_prims, stall_s=stall)
+            kill_prims=kill_prims, stall_s=stall, free=free)
 
 
 # ---- §3.5.6 gates ------------------------------------------------------------------------------------------------
@@ -807,7 +825,9 @@ def forum_supervisor_config(weighted: bool = False, **kw) -> SupervisorConfig:
     Weighted Anklet equipped (the route from S09 on) the post-hit window of its 1.30 s i-frames. kills_certifiable
     False: R3 has no kill branches and the L0 filter's kill_hp is only the battle's last blow (forum_kill_hp), so
     YELLOW / RED withhold the primitives that may kill an enemy whose kill freezes the game (forum_yellow_kill_hp)
-    even with a certified support and h >= 2 (R4 fixer round; before, neither layer held such a kill back)."""
+    even with a certified support and h >= 2 (R4 fixer round; before, neither layer held such a kill back).
+    free_until_hit=True (the policy's SSBOT_FORUM_TA "free"): the DESIGN 3.5.6 revision of 2026-10-08 (module
+    docstring)."""
     d = dict(worst_known_damage=2, q4_per_instance=True, q4_total_hits=3, kills_certifiable=False, q3_chain_max_damage=2,
              post_hit_window_s=WEIGHTED_POST_HIT_WINDOW_S if weighted else POST_HIT_WINDOW_S)
     d.update(kw)
