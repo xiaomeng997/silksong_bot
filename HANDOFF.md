@@ -3466,3 +3466,37 @@ has §26). No oracle change.
    (the person heals across the room); count Binds per minute in the A/B.
 7. Frozen checkouts made here (can go after review): `C:\ssbot\hs_e5bef6e`, `hs_c114f88`, `hs_91c01cb`, `hs_tb2`,
    `hs_tb3`, `hs_tb4`.
+
+## Forum push 2 (merge / evaluate; branch worktree-wf_c8fb34ca-073-4, 2026-10-08 night)
+
+From main 53e9fc8. Merged, `--no-ff` each: worktree-wf_c8fb34ca-073-1 (0cac216, base integration), -073-2 (5940cac, track
+A), -073-3 (6a556db, track B).
+
+### Merge
+
+- Conflicts: plan sec. 5 (main's two new notes kept, the base's newer "fixed offline check" paragraph replaced main's
+  older one); `forum_planner.py` (union: track A's `TA_TOKENS` / `parse_ta` / `TA_ENV` and track B's `WAITS_ON`; audit
+  fields `whip_clash_rows` / `kb_rows` and `bind_threat`); forum.md (both tracks wrote section 26: **track B is now
+  section 27**, its 26.x headings and the internal "26.x" references renumbered; the track sections of this HANDOFF and
+  the code comments that say "forum.md 26" for track B mean 27); HANDOFF (both track sections kept whole).
+- Tests (c54d210, NUMBA_NUM_THREADS 4, below normal): full suite 1316 passed, 2 skipped, 1 xfailed.
+- Bell Beast bit-identical with the Forum switches off: frozen base `C:\ssbot\live_fp2_0cac216` vs frozen merge
+  `C:\ssbot\live_fp2_c54d210`, `20261003_144536_BellBeast_eval_planner_oracle` i4_000, 3,000 frames: oracle view 3,001 /
+  3,001 ticks identical (84 FORCED_RISK), vision-equivalent 3,001 / 3,001 (1,023 FORCED_RISK) (the integration's
+  `bb_ticks.py` in the session scratchpad; outputs `scratchpad/fp2m/bb*_{base,merged}.jsonl`).
+- `tools/forum_ab_summary`: masks a minute, hitless waves (a cleared wave with no hit, the policy's per-wave hits),
+  `--landed <forum_remaining_hits collect dir>` (hits landed / effective mask loss a minute), their paired differences.
+
+### Live A/B (one round; WIP)
+
+- Driver `C:\ssbot\sandbox\fp2_live.ps1` (as w0d_live2 + the TA / WAITS env per arm; arms name their checkout), freeze
+  `C:\ssbot\sandbox\fp2_freeze.ps1`. Tag b, manifest `C:\ssbot\sandbox\fp2_manifest_b.txt`, log
+  `C:\ssbot\sandbox\fp2_live.log`, instances 0-4, 8 blocks x 3 arms x 5 episodes, rotated order, chunk seeds 371000 +
+  200 x instance + 5 x block. Stop file `C:\ssbot\sandbox\fp2_live.stop` (between chunks).
+  - R = round-5 recommended (seen_cf, escape+n+g, state margins, clash main, kill fix) on frozen base 0cac216;
+  - N = R + `SSBOT_FORUM_TA=all` + `escape+n+g+b+k+s` + `SSBOT_FORUM_WAITS=1` on frozen merge c54d210;
+  - R1 = round-1 new (seen_cf, escape+n+g+l, clash main, kill fix, family margins) on frozen 016417b.
+- Tag a (`fp2_manifest_a_failed.txt`) failed at once (a driver unpacking bug passed extra arguments): no episodes.
+- Machine load: another agent's `forum_escape_search` (4 below-normal workers) ran alongside; the first chunks had
+  late ticks 0.42-0.75 (round 5: ~0.13) and tick p50 17-18 ms (round 5: ~14 ms). The re-scores were stopped (they
+  had started with the live run) and moved after it.
