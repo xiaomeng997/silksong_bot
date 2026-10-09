@@ -135,6 +135,7 @@ class EnemyTracker:
     hp_est: float = 0.0
     hp_sd: float = 0.0
     hits: int = 0
+    t_hit: float = -math.inf                       # game time of the last hit seen on it (the reach clip's nohit)
     t: float = 0.0
     in_play: bool = False                          # its Control state is not a waiting one
     rendered: bool = True                          # its sprite was rendered when last exported (Entity.render_box)
@@ -295,6 +296,7 @@ class EnemyTracker:
         """HP from the hits seen: the oracle's amount (an O field: None in the vision view), else the price of the
         attacking object; a hit nobody priced adds its whole default damage to the spread."""
         self.hits += 1
+        self.t_hit = self.t
         if self.mem is not None:
             self.mem.hit(self.t)
         if self.view == ORACLE and d.amount is not None:

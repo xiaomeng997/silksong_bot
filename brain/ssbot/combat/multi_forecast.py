@@ -69,7 +69,7 @@ import numpy as np
 from ssbot.combat.enemy_tables import BIN, EMPTY, FORUM_DIR, JMAX, TAIL, EnemyTables, PlaceBatch, TypeTable, \
     WinBatch
 from ssbot.combat.branch_model import BranchModel, BranchView, memory_for_table
-from ssbot.combat.enemy_tracker import AIM_AFTER, TAIL_KEEP_S, EnemyTracker, body_offsets
+from ssbot.combat.enemy_tracker import AIM_AFTER, FACES_LEFT, TAIL_KEEP_S, EnemyTracker, body_offsets
 from ssbot.combat.fastquery import circle_hits
 from ssbot.combat.forecast import active_within, entry_grid, exit_interval
 from ssbot.combat.projectiles import BELL, HAZARD_DV_U_S, RUNE, SKIN_U, HazardPath, HazardTracker, hazard_type
@@ -82,6 +82,27 @@ from ssbot.safety.hits_to_death import SupportEvent, SupportSet
 MIN_HORIZON_S = 0.8
 # a parked later-wave member (not rendered, waiting: EnemyTracker.parked) gets no support (0: the old behaviour)
 PARK = os.environ.get("SSBOT_FORUM_PARK", "1") != "0"
+# SSBOT_FORUM_RCLIP (task "support reach", forum.md §29.11; the person 2026-10-09: a Choristor's whip support 11.7 u
+# away in its wind-up): each enemy's own placements (fine, window, bounding box) and idle body tube are clipped to its
+# real reach from where it is now, in the state it is in now (combat.reach_table: the box its colliders stayed in k
+# frames later in the dev recordings, by its time in that state; without a hit seen for KB_FREE_F frames the
+# no-knockback reach, else every recorded frame's; + the held-out r + the hero half extents); only in the
+# oracle view, for an enemy seen within REACH_SEEN_S, not in a hit-reaction forecast; the families whose templates hold
+# thrown hazards (ForumType.spawns) are not clipped. Off (default): as before, bit-identical
+REACH = os.environ.get("SSBOT_FORUM_RCLIP", "0") not in ("", "0")
+REACH_SEEN_S = 2 * BIN
+REACH_KEEP = frozenset((tk, fam) for tk, sp in FORUM_TYPES.items() for _hz, fams in sp.spawns for fam in fams)
+KB_FREE_F = 20            # frames without a hit seen: the no-knockback reach (combat.reach_table.KB_FREE_F)
+_REACH_CLIP: dict = {}
+
+
+def reach_clip(half: tuple[float, float]):
+    """The ReachClip of the table (knowledge/.../forum/reach_clip.npz), None without it; one per half."""
+    key = (round(half[0], 6), round(half[1], 6))
+    if key not in _REACH_CLIP:
+        from ssbot.combat.reach_table import CLIP_FILE, ReachClip
+        _REACH_CLIP[key] = ReachClip.load(FORUM_DIR / CLIP_FILE, half)
+    return _REACH_CLIP[key]
 SUP_HORIZON_S = 0.8
 DWELL_SLACK_S = BIN               # logged dwell ranges are frame-quantised
 WALK_CAP_S = 6.0                  # memoised walks reach this far past the state's entry
@@ -458,6 +479,7 @@ class MultiForecaster:
         # for every hazard in the vision view; "all": self templates for every hazard too; "none": paths only
         self.self_templates = self_templates
         self.tiny_group = tiny_group
+        self.reach = REACH                    # SSBOT_FORUM_RCLIP: each enemy's support clipped to its real reach
         self.react: ReactConfig | None = None   # reactive support (ReactConfig; None: as before)
         self.model = _Shim._Model()
         self.query_c = None
@@ -1538,6 +1560,31 @@ class _Builder:
         out.unknown = self.unknown
         out.groups = self.meta_group
         out.clusters = self.clusters
+        out.clip = self._clip()
+        return out
+
+    def _clip(self) -> dict:
+        """{owner: [kmax + 1, 4] hero-centre boxes by look-ahead} of the enemies whose support is clipped to their
+        real reach (SSBOT_FORUM_RCLIP); {} when off, in the vision view or in a hit-reaction forecast."""
+        fc = self.fc
+        if not getattr(fc, "reach", False) or fc.view != ORACLE or self.react_box:
+            return {}
+        rc = reach_clip(fc.half)
+        if rc is None:
+            return {}
+        out = {}
+        for s in self.subjects:
+            tr = fc.trackers.get(s.iid)
+            if not s.alive or tr is None or tr.dead or not tr.in_play or tr.parked or tr.hidden or tr.pos is None \
+                    or tr.state is None:
+                continue
+            age = self.origin - tr.seen_T
+            if not -1e-9 <= age <= REACH_SEEN_S + 1e-9:
+                continue
+            # no knockback in sight (no hit seen for KB_FREE_F frames): the no-hit reach, else every recorded frame's
+            part = 1 if self.origin - tr.t_hit > KB_FREE_F * BIN + 1e-9 else 0
+            out[s.iid] = rc.world(tr.tk, tr.state, (tr.seen_T - tr.t_entry) if tr.t_entry is not None else 0.0, part,
+                                  tr.pos, FACES_LEFT[tr.flip], int(round(age / BIN)))
         return out
 
 
@@ -1711,6 +1758,7 @@ class MultiForecast:
         self.unknown: list = []
         self.groups: dict = {}               # Tiny group owner -> the other Tinies of its cluster
         self.clusters: list = []             # Tiny cluster index (bb["gcl"]) -> the Tinies its group rows stand for
+        self.clip: dict = {}                 # owner -> its reach clip boxes by look-ahead (SSBOT_FORUM_RCLIP)
 
     def __getattr__(self, name):
         # the wrapped boss forecast answers everything this class does not define (boss_box, body_polys, det, ...)
@@ -1796,6 +1844,56 @@ class MultiForecast:
         y2[..., m] = np.nan
         return x2, y2
 
+    # ---- the reach clip (SSBOT_FORUM_RCLIP) ----
+
+    def _clip_rows(self, kind: str) -> np.ndarray | None:
+        """[rows] the clipped owner of each placement row of a component ("pm", "wm", "bb"; -1: not clipped: no
+        clip for its owner, a family holding thrown hazards, a Tiny group row), None without a clip."""
+        clip = self.__dict__.get("clip")
+        if not clip:
+            return None
+        c = self.__dict__.setdefault("_crow", {})
+        r = c.get(kind)
+        if r is None:
+            meta = {"pm": self.pm, "wm": self.wm, "bb": self.bb}[kind]
+            tk_of = {s.iid: s.type_key for s in self.subjects}
+            own = np.asarray(meta["owner"], np.int64)
+            r = np.full(len(own), -1, np.int64)
+            gcl = meta.get("gcl")
+            for i, o in enumerate(own.tolist()):
+                if o in clip and (tk_of.get(o), str(meta["family"][i])) not in REACH_KEEP \
+                        and (gcl is None or not len(gcl) or gcl[i] < 0):
+                    r[i] = o
+            c[kind] = r
+        return r
+
+    def _clip_groups(self, kind: str, idx: np.ndarray) -> list:
+        """idx (rows) split into [(rows, None)] not clipped and [(rows, owner)] per clipped owner."""
+        r = self._clip_rows(kind)
+        if r is None:
+            return [(idx, None)]
+        ro = r[idx]
+        out = [(idx[ro < 0], None)] if (ro < 0).any() else []
+        for o in np.unique(ro[ro >= 0]).tolist():
+            out.append((idx[ro == o], int(o)))
+        return out
+
+    def _clip_boxes(self, owner: int, tk) -> np.ndarray:
+        """[T, 4] the owner's clip boxes (x0, y0, x1, y1) at tk (s from the origin; past the table: no clip)."""
+        W = self.clip[owner]
+        k = np.rint(np.asarray(tk, np.float64) / BIN).astype(np.int64)
+        out = W[np.clip(k, 0, len(W) - 1)].copy()
+        out[k >= len(W)] = (-np.inf, -np.inf, np.inf, np.inf)
+        return out
+
+    def _clip_xy(self, x, y, tk, owner: int):
+        """x, y with the points outside the owner's clip box (on the last axis: tk) NaN (the queries skip them)."""
+        b = self._clip_boxes(owner, tk)
+        x = np.asarray(x, np.float64)
+        y = np.asarray(y, np.float64)
+        inside = (x >= b[:, 0]) & (x <= b[:, 2]) & (y >= b[:, 1]) & (y <= b[:, 3])
+        return np.where(inside, x, np.nan), np.where(inside, y, np.nan)
+
     def _fine_occ(self, x, y, tk, sel=None) -> np.ndarray:
         out = np.zeros(np.shape(x), bool)
         if not len(self.P):
@@ -1804,12 +1902,14 @@ class MultiForecast:
         if not act.any():
             return out
         store = self._fc.tables.store
-        for idx, ton in self._ton_groups(self.pm, act, np.asarray(tk, np.float64)):
-            P = self.P if len(idx) == len(self.P) else self.P.take(idx)
-            if ton is None:
-                store.query(P, x, y, tk, out)
-            else:
-                store.query(P, *self._masked(x, y, tk, ton), tk, out)
+        for idx0, ton in self._ton_groups(self.pm, act, np.asarray(tk, np.float64)):
+            for idx, co in self._clip_groups("pm", idx0):
+                P = self.P if len(idx) == len(self.P) else self.P.take(idx)
+                xx, yy = (x, y) if co is None else self._clip_xy(x, y, tk, co)
+                if ton is None:
+                    store.query(P, xx, yy, tk, out)
+                else:
+                    store.query(P, *self._masked(xx, yy, tk, ton), tk, out)
         return out
 
     def _win_occ(self, x, y, tk, sel=None) -> np.ndarray:
@@ -1820,12 +1920,14 @@ class MultiForecast:
         if not act.any():
             return out
         store = self._fc.tables.store
-        for idx, ton in self._ton_groups(self.wm, act, np.asarray(tk, np.float64)):
-            W = self.W if len(idx) == len(self.W) else self.W.take(idx)
-            if ton is None:
-                store.query_win(W, x, y, tk, out)
-            else:
-                store.query_win(W, *self._masked(x, y, tk, ton), tk, out)
+        for idx0, ton in self._ton_groups(self.wm, act, np.asarray(tk, np.float64)):
+            for idx, co in self._clip_groups("wm", idx0):
+                W = self.W if len(idx) == len(self.W) else self.W.take(idx)
+                xx, yy = (x, y) if co is None else self._clip_xy(x, y, tk, co)
+                if ton is None:
+                    store.query_win(W, xx, yy, tk, out)
+                else:
+                    store.query_win(W, *self._masked(xx, yy, tk, ton), tk, out)
         return out
 
     def _bbox_occ(self, x, y, tk, sel=None) -> np.ndarray:
@@ -1841,6 +1943,18 @@ class MultiForecast:
         g = lambda k: np.ascontiguousarray(bb[k][idx])  # noqa: E731
         bx = _bbox_boxes(np.ascontiguousarray(tk, np.float64), rows, g("loff"), g("nt"), g("t0"), g("e0"), g("e1"),
                          g("cx"), g("cy"), g("hx"), g("hy"), g("mir"), g("ton"), BIN)
+        cr = self._clip_rows("bb")
+        if cr is not None:
+            ro = cr[idx]
+            for co in np.unique(ro[ro >= 0]).tolist():
+                # a box and the owner's clip box intersect in a box (the templates are already in hero-centre space)
+                sub = np.flatnonzero(ro == co)
+                cb = self._clip_boxes(int(co), tk)
+                bx[0][sub] = np.maximum(bx[0][sub], cb[None, :, 0])
+                bx[1][sub] = np.maximum(bx[1][sub], cb[None, :, 1])
+                bx[2][sub] = np.minimum(bx[2][sub], cb[None, :, 2])
+                bx[3][sub] = np.minimum(bx[3][sub], cb[None, :, 3])
+                bx[4][sub] &= (bx[0][sub] <= bx[2][sub]) & (bx[1][sub] <= bx[3][sub])
         T = shp[-1]
         x2 = np.ascontiguousarray(x.reshape(-1, T))
         y2 = np.ascontiguousarray(np.asarray(y, np.float64).reshape(-1, T))
@@ -1869,7 +1983,16 @@ class MultiForecast:
             ok = (tk >= t_from - 1e-9) & (tk <= t_to + 1e-9)
             if kind == "idle":
                 ok &= dt >= 0
-            rows.append((x0 + vx * dt - g, y0 + vy * dt - g, x1 + vx * dt + g, y1 + vy * dt + g, ok))
+            bx = (x0 + vx * dt - g, y0 + vy * dt - g, x1 + vx * dt + g, y1 + vy * dt + g)
+            clip = self.__dict__.get("clip")
+            if kind == "idle" and clip and owner in clip:
+                # the reach clip (hero-centre boxes) on the collider box the query grows by the hero half extents
+                cb = self._clip_boxes(owner, tk)
+                hx, hy = self._fc.half
+                bx = (np.maximum(bx[0], cb[:, 0] + hx), np.maximum(bx[1], cb[:, 1] + hy),
+                      np.minimum(bx[2], cb[:, 2] - hx), np.minimum(bx[3], cb[:, 3] - hy))
+                ok = ok & (bx[0] <= bx[2]) & (bx[1] <= bx[3])
+            rows.append((*bx, ok))
         r = None if not rows else tuple(
             np.ascontiguousarray(np.stack([q[i] for q in rows]), np.float64 if i < 4 else np.bool_) for i in range(5))
         if len(self._cache) > 64:
@@ -2089,6 +2212,7 @@ class MultiForecast:
         out.subjects = self.subjects
         out.known = self.known
         out.groups, out.clusters = self.groups, self.clusters
+        out.clip = self.__dict__.get("clip") or {}
         return out
 
     def support_set(self, ws: WorldState | None = None, t1: float = SUP_HORIZON_S) -> SupportSet:

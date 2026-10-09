@@ -84,9 +84,11 @@ def family_states(every: bool = True) -> dict:
     return out
 
 
-def instances(cache: dict, fams: dict) -> dict:
+def instances(cache: dict, fams: dict, threat: bool = False) -> dict:
     """(tk, fam) -> [instance]: instance = {"st": [state per row], "t": [T], "pos": [(x, y)], "flip": [..],
-    "boxes": [[(x0, y0, x1, y1), ...] per row]} in frame order."""
+    "boxes": [[(x0, y0, x1, y1), ...] per row]} in frame order. The boxes: the damage colliders with dealt > 0; threat:
+    also the multi-hit ones exported with dealt 0 and eff != 0 (behaviour_tables.multi_wounder_threat: the Choristor's
+    Whip Hit, the Reed's / Minister's ParrySlash Hit, the Minister's Slash Collider), what the support templates hold."""
     from ssbot.knowledge.forum_cache import frame_index  # noqa: F401  (layout reference)
     types = list(cache["types"])
     states = list(cache["states"])
@@ -104,6 +106,8 @@ def instances(cache: dict, fams: dict) -> dict:
     lo_l = np.searchsorted(ce_sorted, rows_all, "left").tolist()
     hi_l = np.searchsorted(ce_sorted, rows_all, "right").tolist()
     hurt_sorted = dealt[order] > 0
+    if threat:
+        hurt_sorted = hurt_sorted | (np.asarray(cache["c_eff"])[order] != 0)
     out: dict = {}
     for (tk, fam), (starts, sts) in fams.items():
         if tk not in types:
@@ -140,7 +144,7 @@ def instances(cache: dict, fams: dict) -> dict:
                 for r in rr:
                     a, b = lo_l[r], hi_l[r]
                     boxes.append(cbox[order[a:b][hurt_sorted[a:b]]] if b > a else cbox[:0])
-                out.setdefault((tk, fam), []).append({"key": (tk, fam),
+                out.setdefault((tk, fam), []).append({"key": (tk, fam), "iid": int(iid),
                     "st": st, "t": T[cache["e_fi"][rr]],
                     "pos": np.stack([cache["e_x"][rr], cache["e_y"][rr]], axis=1).astype(np.float64),
                     "flip": np.asarray(cache["e_flip"][rr]), "hidden": np.asarray(cache["e_hidden"][rr]),

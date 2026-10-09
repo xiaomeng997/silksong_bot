@@ -94,7 +94,7 @@ ENEMY_COLORS = ((255, 120, 60), (60, 200, 255), (120, 255, 120), (255, 90, 220),
 DEFAULT_ENV = {"SSBOT_FORUM_FR": "seen_cf", "SSBOT_FORUM_REACT": "escape+n+g", "SSBOT_FORUM_MARGIN": "state",
                "SSBOT_FORUM_KF": "kill", "SSBOT_FORUM_AIM": "1"}
 DEFAULT_CLASH = "main"
-SWITCHES = ("FR", "REACT", "MARGIN", "KF", "AIM", "PARK", "PC", "TV", "T", "BELLS", "L2", "AB")
+SWITCHES = ("FR", "REACT", "MARGIN", "KF", "AIM", "PARK", "RCLIP", "PC", "TV", "T", "BELLS", "L2", "AB")
 
 LAYERS = ("body", "committed", "window", "not_started", "hazard", "death", "margins")
 LAYER_OF = {"body": "body", "collider": "body", "idle_now": "body", "idle": "body",
