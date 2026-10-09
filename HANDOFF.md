@@ -3221,3 +3221,40 @@ Main 70f8324 + `forum-integration-1008` (6dce435) merged first. Facts: forum.md 
 7. Frozen checkouts made here (can go after review): `C:\ssbot\live_w0d_b75b63a`, `45c4d6c`, `7a8afc9`, `016417b`,
    `d89f7ba`, `cc11343`, `fca0416`, `33762ee`, `5506b86`. The reviewer's scratchpad exports `wt/` and `int/` (each with
    a .venv) can go too.
+
+## Task idle enemies: the inescapable zone (branch worktree-wf_b572dcee-369-1, 2026-10-08; forum.md §26)
+
+Main fa43977 + worktree-wf_34e9717f-fa3-2 + da8d104 (forum_human_score) merged first. Offline only, planner and
+forecast untouched. Facts: forum.md §26 (Chinese).
+
+### Done (committed)
+
+- `tools/forum_ics` (+ `tests/test_forum_ics.py`, 4 tests: the person's instant / long wind-up AoE thought experiments):
+  - `zones`: per Forum family x hero lock state (free / attack swing / dash toward / air at rest) the inescapable zone
+    of a commit now on the hero-dilated family template: upper bound = no trajectory of a 1,688-sequence library
+    (the planner's kinematics, Wanderer Forum loadout + Weighted Anklet) escapes; lower bound = the person's backward
+    erosion with a one-frame reach box; "late" split by the best trajectory's survival (>= lat + 6 frames); aimed
+    models for the Reed pin and the Tiny dive. Output `C:\ssbot\data\m2_forum_ics\zones_lat1.json/.npz`
+    (`|zl` = late part), `zones_lat12.json`, `zones_lat1_margin.json`.
+  - `replay`: open-loop replay (bot runs / the person's wins): per idle enemy its own placements on a hero-centre grid
+    at plan frames 1-36 by layer; what-if: rows' S with the not-started layer replaced by the ICS; `summary`.
+
+### Measured (forum.md §26)
+
+- Standing hero: no family has a late ICS beyond the body except CC_SLAM (<= 2.4 u ub, lb 0, frame-timing
+  sensitive) and evade edge points (Reed <= 0.4 u, one Bellbearer point); aimed pin / Tiny dive 0. Locks: attack
+  swing 1-4 u beyond the body for melee families, dash toward 3-9.5 u.
+- Current support around a lone idle enemy: integration default marks the whole +-12 x 12 u grid from frame 1;
+  best arm (escape+n+g, state margins): Envoy / Choristor only the body tube ring (3-4 u), the other 7 types still
+  covered by the body-only families kept by `+n` (evades, teleport, Tiny, Maestro).
+- What-if (not-started -> ICS): FORCED_RISK 83.7 -> 72.7 % on the person's wins (68.6 % without the two Clapper
+  waves, whose cast templates hold earlier runes), bot wave 0 87.0 -> 78.5 %; the person's moves judged unsafe
+  86.9 -> 81.1 %; 8 / 7,119 new misses, none recovered by the ICS.
+
+### Next / open issues
+
+1. Lead / the person: take the body-only families out of `+n`'s support and check precomputed ICS per lock state
+   (keep the escape veto); re-certify (R2 recall).
+2. Clapper cast templates hold earlier casts' runes: split them out (the hazard layer's) before using their ICS.
+3. Zones are on an open floor (no walls) with union templates; conditioning aimed families (stab, counter, charge
+   distance) on the hero's position is not done.
