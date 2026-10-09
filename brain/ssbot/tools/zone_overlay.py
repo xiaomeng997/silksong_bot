@@ -56,6 +56,7 @@ import math
 import os
 import queue
 import random
+import re
 import sys
 import threading
 import time
@@ -77,6 +78,7 @@ RENDER = (1920, 1080)
 FORUM_SCENES = ("Hang_04", "Hang_04_boss")
 FORCE_RED_TYPES = frozenset({"Song Heavy Sentry"})       # the Clapper: no move of it can be clashed
 CLASH_BITS = 1 | 2                                        # ipc.ents PARRY_BITS clash | force
+PARKED_STATES = r"Ready|Dormant|Sleep|Wait"                # with no render: a member parked before its entry
 FREEZE_SCALE = 1e-4
 # the round-5 recommended configuration (forum.md, the lead 2026-10-08); the environment wins
 DEFAULT_ENV = {"SSBOT_FORUM_FR": "seen_cf", "SSBOT_FORUM_REACT": "escape+n+g", "SSBOT_FORUM_MARGIN": "state",
@@ -153,6 +155,11 @@ def damage_colliders(s: dict):
     """[(poly [n, 2], clashable, label, entity velocity)] of every enabled collider with damage dealt > 0."""
     out = []
     for e in s.get("ents") or ():
+        # a later wave's member parked off-stage before its entry (e.g. a Reed in "Fly In Ready": not rendered, its body
+        # collider reported enabled, but the hero overlapped it for 136 frames of 20261008_230220 with no damage)
+        sts = [str(f.get("state") or "") for f in e.get("fsms") or ()]
+        if e.get("render_aabb") is None and any(re.search(PARKED_STATES, st) for st in sts):
+            continue
         tk = str(e.get("type_key") or e.get("name") or "")
         vel = e.get("vel") or (0.0, 0.0)
         for c in e.get("cols") or e.get("colliders") or ():
