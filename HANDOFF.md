@@ -3710,3 +3710,51 @@ F8 开 / 关；F9 轮换 黄+红 / 黄 / 红 / 支撑 / 全部；F10 冻结 / �
 
 1. 你第一次现场用时：开 DebugMod 的 `hitbox.show` 对一下红框位置；看帧率。
 2. 如果要精确冻结 / 单步：oracle 加 `time.scale 0` 或 `time.step`（要 build + 部署，lead 决定）。
+
+## Task zone fix (branch worktree-wf_0469f4be-4ea-1, 2026-10-09; forum.md §29)
+
+= main + worktree-wf_c8fb34ca-073-4 (forum push 2 merge, 7de4e05) + worktree-wf_0d680437-615-1 (zone overlay, 339ff40).
+The first developer died in the 00:44 Windows Update reboot after 33295b6 / f14aa52 / 9ceb414; this section covers the
+whole task. Offline only (no game instance).
+
+### What changed
+- `tools/forum_aim.py` (new in 33295b6, reworked): aim-conditioned committed templates, every attack family, binned by
+  the enemy's OWN flight direction at the aim state (`enemy_tracker.aim_frame`: mirror = where it flies when >= 1 u/s,
+  16 sectors + a still bin), certified per bin with R2's held-out rule (2-fold by fight + 35 fresh fights; margin r =
+  the worst held-out distance, r <= 3 u, no late boxes); every state with >= 90 % of instances in usable bins is an aim
+  state and the tracker re-aims at each (`EnemyTracker._aim_now`, only where that bin has a template). The Reed's stab
+  is cut before `Stab End` / `Stab Recover` (`AIM_AFTER`). 92 templates in
+  `knowledge/1.0.30000/enemies/forum/aim_templates.npz` (git-ignored; report `.json` committed). Build ~5 min
+  (`forum_aim build --workers 4`; the loader was 30 s a fight, now 0.3 s).
+- `SSBOT_FORUM_AIM` now defaults ON (accepted: R2 fresh recall 100 % at L2-L4, re-score slightly better, misses equal).
+  Frozen checkouts must copy `aim_templates.npz` with the `*_hitboxes.npz` - without it nothing is loaded (silently off).
+- `multi_forecast`: aim placement by `aim@<state>#<bin>`; `SSBOT_FORUM_PARK` (default on) leaves a parked later-wave
+  member out only while its wave does not activate within the horizon (the first version broke
+  `test_a_waiting_wave_member_waits_for_its_wave`).
+- Overlay yellow (`ZoneEngine.yellow`): committed = each committed instance's own damage colliders carried along its
+  velocity for `KIN_F` = 12 frames (hero-centre Minkowski sum) and eroded back with the one-frame reach; no family
+  templates. Not started = the previous developer's per-family x lock lower bound, throws (`THROWS`) out.
+- Track A (33295b6): `kb` checks the pushed and unpushed support; `free` only for kill slow-motions <= 0.5 s.
+- A/B tool (f14aa52), per-enemy names / colours / legend (9ceb414): see forum.md §29.9 / §29.8.
+- `tools/zone_share.py`: the half-screen measurement (run / summary / png).
+
+### Results (details forum.md §29.6-29.7)
+- Yellow > 50 % of the screen: person's sessions 31.1 % of frames -> 0 (max 0.488); bot wave 0 15.2 % -> 0.
+- Planner support at k = 0 > 50 %: 47.0 % -> 42.2 % (person), 34.9 % -> 28.0 % (bot): NOT met. Every frame:
+  `C:\ssbot\data\m2_forum_zfix\over_half_after.csv`; worst PNGs `C:\ssbot\data\m2_forum_zfix\png\worst_s0_*.png`.
+- R2 fresh recall with AIM: 375,940 / 375,940 at L2, L3, L4; hooks 1,802 / 1,802 (`recall_fresh_aim.json`).
+- Re-score (`C:\ssbot\data\m2_forum_hs\zfix_aim`): FORCED_RISK 82.10 -> 81.84 %, unsafe 86.57 -> 86.43 %, false alarms
+  76.89 -> 76.75 %, misses 0.60 % -> 0.60 % of safe.
+- Replays (final code, k 0,12, video half scale): `C:\ssbot\data\m2_forum_overlay\20261008_230220_zones_fix.rrd`,
+  `20261008_231544_zones_fix.rrd`. PNGs before / after: `C:\ssbot\data\m2_forum_zfix\png\`.
+
+### Open issues
+1. Support k = 0 over half the screen (rule (b)): the remaining causes are pre-aim hero-following segments (Reed
+   `Stab Pos`), the Reed counter chain window, and the Maestro's Automaton Tinies (AT_FIRE / AT_DEFEND / AT_LEAVE: no
+   certified aim template, durations vary). The planner checks contact from frame 0, where every row has the same hero
+   box, so the hero standing in the k = 0 support makes the whole tick FORCED_RISK. Candidates (not done): hero-anchored
+   `Stab Pos` template, duration-binned Tiny templates, oracle colliders for k = 0 until the input takes effect.
+2. `tests/test_harness_recovery.py`: 3 failures (`watchdog_pause`, `resumes_before_the_time_scale_read`,
+   `skips_episodes_while_the_game_stays_paused`) in code merged from the pause-cause work, not touched here; the rest
+   of the suite passes (1330).
+3. No live run: the aim default-on and the kinematic yellow have not been seen in a game.
