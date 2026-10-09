@@ -351,6 +351,40 @@ class ZoneEngine:
     def name(self, iid: int) -> str:
         return self.names.get(int(iid), f"#{iid}")
 
+    def color(self, iid: int) -> tuple:
+        """The enemy's own colour (BGR), by its name's order."""
+        order = list(self.names)
+        return ENEMY_COLORS[order.index(iid) % len(ENEMY_COLORS)] if iid in self.names else (200, 200, 200)
+
+    def enemies(self) -> list:
+        """[(iid, name, Control state, transform, colour)] of the named enemies alive and not parked now."""
+        out = []
+        for iid, name in self.names.items():
+            tr = self.pol.fc.trackers.get(iid)
+            if tr is None or tr.pos is None or tr.dead or tr.parked:
+                continue
+            out.append((iid, name, tr.state, tr.pos, self.color(iid)))
+        return out
+
+    def support_by(self, ks, fcast=None) -> dict:
+        """{k: {iid: [ny, nx]}}: each named enemy's own support (MultiForecast.occupied_only: its placements, boxes
+        and paths), hero-centre grid, inside the arena."""
+        fcast = fcast or self.fcast
+        g = self.grid
+        out = {k: {} for k in ks}
+        if fcast is None:
+            return out
+        tk = np.asarray(ks, np.float64) * FT
+        cx = np.ascontiguousarray(np.repeat(g.gx, len(ks), axis=1))
+        cy = np.ascontiguousarray(np.repeat(g.gy, len(ks), axis=1))
+        for iid, *_ in self.enemies():
+            o = fcast.occupied_only(cx, cy, tk, [iid])
+            for j, k in enumerate(ks):
+                m = o[:, j].reshape(g.shape) & g.inside
+                if m.any():
+                    out[k][iid] = m
+        return out
+
     def state_of(self, iid: int) -> str | None:
         tr = self.pol.fc.trackers.get(iid)
         return tr.state if tr is not None else None
@@ -556,6 +590,7 @@ class ZoneEngine:
                 "support": sup, "ycom": com, "yns": ns, "ycom_by": info.pop("ycom_by", {}),
                 "yns_by": info.pop("yns_by", {}), "info": info, "cols": damage_colliders(s),
                 "names": dict(self.names), "states": {i: self.state_of(i) for i in self.names},
+                "enemies": self.enemies(),
                 "cam": s.get("cam"), "running": fc is not None,
                 "ms": {"forecast": round((t1 - t0) * 1e3, 1), "support": round((t2 - t1) * 1e3, 1),
                        "yellow": round((t3 - t2) * 1e3, 1)}}
@@ -681,6 +716,12 @@ def render(fr: dict, grid: Grid, out_size: tuple[int, int], view: View, legend: 
                 hull = sweep_hull(poly, vel)
                 _blend_poly(img, _to_px(Hw, hull), COLORS["red"], A_SWEEP)
                 _blend_poly(img, _to_px(Hw, poly), COLORS["red"], A_RED, outline=th)
+        fs = 0.5 * H / 1080.0
+        for iid, name, st, pos, col in fr.get("enemies") or ():
+            if view.show("red") or view.show("yellow"):
+                p = _to_px(Hw, np.array([[pos[0], pos[1] + 1.6]]))[0]
+                cv2.putText(img, f"{name} {st or ''}", (int(p[0]) - int(40 * fs * 2), int(p[1])),
+                            cv2.FONT_HERSHEY_SIMPLEX, fs, (*col, 255), max(1, int(round(H / 1080))), cv2.LINE_AA)
         hc = fr.get("hero")
         if hc is not None:
             p = _to_px(Hw, np.array([hc]))[0]
@@ -698,8 +739,8 @@ def legend_lines(fr: dict | None, view: View, config: str, extra: str = "") -> l
     lines = [(f"ZONES  k=+{k} f ({k / 60:.2f} s)  mode {view.mode}" + ("  FROZEN" if view.frozen else "")
               + (f"  {extra}" if extra else ""), None)]
     if view.show("yellow"):
-        lines.append((NAMES["yellow"] + " (hero-centre space; committed: erosion lower bound, "
-                      "not started: zones_lat1 for the lock now)", COLORS["yellow"]))
+        lines.append((NAMES["yellow"] + " (hero-centre space, lower bound: certain branches, aimed attacks from "
+                      "their aim; not started: commit-now erosion for the lock now)", COLORS["yellow"]))
     if view.show("red"):
         lines.append((NAMES["red"] + " (the colliders themselves)", COLORS["red"]))
     if view.show("support"):
@@ -713,6 +754,8 @@ def legend_lines(fr: dict | None, view: View, config: str, extra: str = "") -> l
         inf = fr["info"]
         c = ", ".join(f"{x[1].replace('Song ', '')}:{x[2]}" for x in inf.get("committed", [])[:4])
         lines.append((f"committed: {c or '-'}   not started: {len(inf.get('not_started', []))}", None))
+    for iid, name, st, pos, col in (fr or {}).get("enemies", [])[:8]:
+        lines.append((f"{name}: {st or '?'}", col))
     return lines
 
 
@@ -1251,6 +1294,7 @@ def rerun_zones(session: Path, rec, f0: int | None = None, f1: int | None = None
     size = (int(RENDER[0] * video_scale), int(RENDER[1] * video_scale))
     vf = VideoFrames(session, size) if video else None
     rr_ = 0.04
+    seen_enemies: set = set()
 
     def wl(pts):
         return [(float(x), -float(y)) for x, y in pts]
@@ -1259,10 +1303,13 @@ def rerun_zones(session: Path, rec, f0: int | None = None, f1: int | None = None
         return g.to_world(c[:, 0], c[:, 1])
 
     rec.log("legend", rr.TextDocument(
-        "zones (hero-centre space: where the hero CENTRE must not be): yellow = inescapable (committed: erosion "
-        "lower bound; not started: zones_lat1 for the lock now); red = non-clashable colliders + 6-frame sweep; "
-        "colliders/* = the real damage colliders (ground truth); support/k<k>/<layer> = the planner's support at "
-        f"look-ahead k. Config: {eng.config_text()}"), static=True)
+        "zones (hero-centre space: where the hero CENTRE must not be): yellow = inescapable, a lower bound (committed: "
+        "the certain branches' placements, an aimed attack only from its aim state on, eroded back with the one-frame "
+        "reach, floor / walls / the dome solid; not started: the commit-now erosion of each family for the lock now); "
+        "red = non-clashable colliders + 6-frame sweep; colliders/* = the real damage colliders (ground truth); "
+        "support/k<k>/<layer> = the planner's support at look-ahead k; enemies/<name>/ = per enemy (stable name "
+        "'Reed 2' = type + order of appearance, label = name + Control state, its own colour): colliders, "
+        f"yellow/k<k>, support/k<k> (its own placements). Config: {eng.config_text()}"), static=True)
     for seg in segs:
         terrain, states = load_segment(seg)
         eng.crest = seg.get("crest") or eng.crest
@@ -1291,15 +1338,15 @@ def rerun_zones(session: Path, rec, f0: int | None = None, f1: int | None = None
             rec.log("world/hero", rr.Points2D([(hc[0], -hc[1])] if hc else [], colors=[[255, 255, 255]],
                                               radii=[0.15]))
             cols = fr["cols"]
-            nc = [p for p, c, _, _ in cols if not c]
-            cl = [p for p, c, _, _ in cols if c]
+            nc = [p for p, c, _, _, _ in cols if not c]
+            cl = [p for p, c, _, _, _ in cols if c]
             rec.log("world/colliders/non_clashable", rr.LineStrips2D(
                 [closed(wl(p)) for p in nc], colors=[[255, 60, 60]], radii=[0.03],
-                labels=[lb for p, c, lb, _ in cols if not c]))
+                labels=[lb for p, c, lb, _, _ in cols if not c]))
             rec.log("world/colliders/clashable", rr.LineStrips2D(
                 [closed(wl(p)) for p in cl], colors=[[240, 240, 240]], radii=[0.03],
-                labels=[lb for p, c, lb, _ in cols if c]))
-            sweeps = [sweep_hull(p, v) for p, c, _, v in cols if not c]
+                labels=[lb for p, c, lb, _, _ in cols if c]))
+            sweeps = [sweep_hull(p, v) for p, c, _, v, _ in cols if not c]
             rec.log("world/zones/red", rr.LineStrips2D([closed(wl(h)) for h in sweeps],
                                                        colors=[[255, 130, 130]], radii=[rr_]))
             layers = {}
@@ -1314,6 +1361,38 @@ def rerun_zones(session: Path, rec, f0: int | None = None, f1: int | None = None
                 rgb = [col[2], col[1], col[0]]
                 rec.log(f"world/{path}", rr.LineStrips2D([closed(wl(p)) for p in outlines[path]], colors=[rgb],
                                                          radii=[rr_]))
+            # per enemy (its stable name "Reed 2" and its Control state; its own colour): the real colliders, its
+            # yellow and its own support (MultiForecast.occupied_only) per k
+            sb = eng.support_by(ks)
+            now = set()
+            per = {}
+            for iid, name, st, pos, col in fr["enemies"]:
+                slug = name.replace(" ", "_")
+                now.add(slug)
+                rgb = [col[2], col[1], col[0]]
+                lab = f"{name} {st or ''}"
+                polys = [p for p, _, _, _, o in cols if o == iid]
+                per[f"enemies/{slug}/colliders"] = (polys, rgb, lab)
+                for k in ks:
+                    y = fr["ycom_by"].get(k, {}).get(iid)
+                    yn = fr["yns_by"].get(k, {}).get(iid)
+                    m = y if yn is None else (yn if y is None else (y | yn))
+                    per[f"enemies/{slug}/yellow/k{k:02d}"] = (
+                        [grid_world(c) for c in mask_contours(m) if len(c) >= 2] if m is not None else [], rgb, lab)
+                    m = sb.get(k, {}).get(iid)
+                    per[f"enemies/{slug}/support/k{k:02d}"] = (
+                        [grid_world(c) for c in mask_contours(m) if len(c) >= 2] if m is not None else [], rgb, lab)
+                rec.log(f"world/enemies/{slug}/label", rr.Points2D([(pos[0], -pos[1] - 1.6)], colors=[rgb],
+                                                                   radii=[0.05], labels=[lab]))
+            for slug in seen_enemies - now:                 # gone (dead, parked): clear what it drew
+                for k in ("colliders", *(f"{w}/k{k:02d}" for w in ("yellow", "support") for k in ks)):
+                    per[f"enemies/{slug}/{k}"] = ([], [0, 0, 0], "")
+                rec.log(f"world/enemies/{slug}/label", rr.Points2D([], radii=[0.05]))
+            seen_enemies |= now
+            for path, (polys, rgb, lab) in per.items():
+                rec.log(f"world/{path}", rr.LineStrips2D([closed(wl(p)) for p in polys], colors=[rgb],
+                                                         radii=[rr_ if "/colliders" not in path else 0.03],
+                                                         labels=[lab] * len(polys) if polys else None))
             if vf is not None:
                 vi = vidx.get(fr_raw)
                 img = vf.get(vi) if vi is not None else None
@@ -1330,6 +1409,13 @@ def rerun_zones(session: Path, rec, f0: int | None = None, f1: int | None = None
                         m, col = layers[path]
                         rec.log(f"screen/{path}", rr.LineStrips2D([closed(sp(p)) for p in polys],
                                                                   colors=[[col[2], col[1], col[0]]], radii=[1.0]))
+                    for path, (polys, rgb, lab) in per.items():
+                        rec.log(f"screen/{path}", rr.LineStrips2D([closed(sp(p)) for p in polys], colors=[rgb],
+                                                                  radii=[1.0]))
+                    for iid, name, st, pos, col in fr["enemies"]:
+                        rec.log(f"screen/enemies/{name.replace(' ', '_')}/label", rr.Points2D(
+                            [sp([(pos[0], pos[1] + 1.6)])[0]], colors=[[col[2], col[1], col[0]]], radii=[2.0],
+                            labels=[f"{name} {st or ''}"]))
                     rec.log("screen/zones/red", rr.LineStrips2D([closed(sp(h)) for h in sweeps],
                                                                 colors=[[255, 130, 130]], radii=[1.0]))
                     rec.log("screen/colliders/non_clashable", rr.LineStrips2D([closed(sp(p)) for p in nc],
