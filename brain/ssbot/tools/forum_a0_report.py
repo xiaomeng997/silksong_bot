@@ -200,8 +200,45 @@ def report(runs: list[Path]) -> dict:
                          "main_menu": sum(1 for q in rq if q.get("main_menu")),
                          "wrong_submits": sum(q.get("wrong_submits") or 0 for q in rq)}
     keys = [p.get("keys") or {} for p in pol]
-    pps = [k.get("presses_per_s") for k in keys if k.get("presses_per_s") is not None]
+    # presses per second of play: the key stats' own, else latched presses / the episode's game time (the Forum's
+    # policy leaves presses_per_s None); the plan-change rate (changed plans / decided ones) per episode
+    pps = [k.get("presses_per_s") if k.get("presses_per_s") is not None else
+           (k["latched_total"] / r["ingame_s"] if k.get("latched_total") is not None and r.get("ingame_s") else None)
+           for k, r in zip(keys, rows)]
+    pps = [v for v in pps if v is not None]
     out["presses_per_s_median"] = _q(pps, 50)
+    pcr = [k["plan_change_rate"] for k in keys if k.get("plan_change_rate") is not None]
+    out["plan_change_rate_median"] = _q(pcr, 50)
+    out["hits_per_episode"] = round(sum(r.get("hits") or 0 for r in rows) / max(n, 1), 2)
+    out["kills_per_episode"] = round(sum(((r.get("gauntlet") or {}).get("kills") or {}).get("n", 0) for r in rows)
+                                     / max(n, 1), 2)
+    # R6's L2 target layer (policy "l2", None when it was off): goals by tick, goal changes per minute of play,
+    # PUNISH goals and those with a nail hit on the target inside the window they were picked for, the layer's cost
+    l2 = [p["l2"] for p in pol if p.get("l2")]
+    if l2:
+        goals, hits, kinds, rules = Counter(), Counter(), Counter(), Counter()
+        for x in l2:
+            goals.update(x.get("goals") or {})
+            hits.update(x.get("goal_hits") or {})
+            kinds.update(x.get("switch_kinds") or {})
+            rules.update(x.get("rule_changes") or {})
+        play_min = sum(ing) / 60.0 if ing else 0.0
+        ms50 = [x["ms_p50"] for x in l2 if x.get("ms_p50") is not None]
+        ms99 = [x["ms_p99"] for x in l2 if x.get("ms_p99") is not None]
+        out["l2"] = {"episodes": len(l2), "goals": dict(goals.most_common()), "goal_hits": dict(hits),
+                     "changes_per_min": round(sum(x.get("changes", 0) for x in l2) / play_min, 2) if play_min else None,
+                     # target switches (another enemy; round 2 on: tgt_switches) per minute of play
+                     "tgt_switches_per_min": round(sum(x.get("tgt_switches", 0) for x in l2) / play_min, 2)
+                     if play_min and all("tgt_switches" in x for x in l2) else None,
+                     # why a target was switched (gone / ineligible / better / turn / punish) and the same target's
+                     # rule changes (round 3: "RUSH>KITE" ...): changes = the first goal + target switches + these
+                     "switch_kinds": dict(kinds.most_common()), "rule_changes": dict(rules.most_common()),
+                     "switches": sum(x.get("switches", 0) for x in l2), "fails": sum(x.get("fails", 0) for x in l2),
+                     "errors": sum(x.get("errors", 0) for x in l2),
+                     "punish_goals": sum(x.get("punish_goals", 0) for x in l2),
+                     "punish_landed": sum(x.get("punish_landed", 0) for x in l2),
+                     "ms_p50_median": _q(ms50, 50), "ms_p99_median": _q(ms99, 50),
+                     "ms_p99_max": round(max(ms99), 3) if ms99 else None}
     return out
 
 
