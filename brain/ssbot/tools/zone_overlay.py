@@ -29,8 +29,8 @@ the legend). The planner's tick is not run: the support does not depend on its p
                   sideways, jump speed up, max fall down, ceil to cells), the floor and the walls solid (a cell from
                   which every one-frame move lands in Z is in Z), the first LAT_F frame standing; per enemy, then the
                   union; shown at frame k. (b) every alive, in-play enemy that has not started an attack, from its
-                  earliest start t_strike on: the commit-now zone of zones_lat1.npz (forum_ics Zones, the upper bound
-                  of its library) for the hero's lock state NOW toward that enemy (free / attack / dash; above
+                  earliest start t_strike on (one frame early): the commit-now zone of zones_lat1.npz (forum_ics Zones, the upper bound
+                  of its library, the whole zone "z") for the hero's lock state NOW toward that enemy (free / attack / dash; above
                   standing height: air), placed on the enemy's anchor dead-reckoned to frame k, mirrored to the hero's
                   side (the attack faces the hero at its commit).
   red             NON-CLASHABLE damage colliders of the STATE shown (enabled, dealt > 0, parry bits without clash /
@@ -252,7 +252,9 @@ class ZoneEngine:
         if margins:
             from ssbot.tools.forum_layer_audit import Variants
             self.vs = Variants(self.pol.fc, ("m0",))
-        self.zones = Zones(zones_path) if zones_path.exists() else None
+        # "z": the whole upper-bound zone (the definition); "zl" (late=True) keeps only the points left after
+        # LATE_F frames, and is empty for most families at the anchor heights seen in the Forum
+        self.zones = Zones(zones_path, late=False) if zones_path.exists() else None
         self.grid = Grid(cell)
         p = self.pol.params
         self.reach = (int(math.ceil(p.dash_speed * FT / cell)), int(math.ceil(p.jump_speed * FT / cell)),
@@ -405,7 +407,9 @@ class ZoneEngine:
             shown = False
             for k in ks:
                 t = k * FT
-                if t < s.t_strike - 1e-9:
+                # from its earliest start on; one frame early (t_strike is at least the 1-frame sensing latency, so
+                # "now" would otherwise never show a commit-now zone)
+                if t + 1.5 * FT < s.t_strike:
                     continue
                 ax = tr.pos[0] + tr.vel[0] * (age + t)
                 ay = tr.pos[1] + tr.vel[1] * (age + t)
@@ -788,6 +792,8 @@ class LiveOverlay:
         self.stats = {"computed": 0, "fed": 0, "ms": [], "upd_ms": [], "max_backlog": 0, "errors": [],
                       "excluded_from_capture": None, "starts": 0}
         self.log_path = log_path
+        from ssbot.tools.launcher import set_dpi_aware
+        set_dpi_aware()     # window rects in physical px before the overlay window exists (idempotent)
         link.subscribe_state(self.q.put)
         link.subscribe_raw(self._raw)
         self.thread = threading.Thread(target=self._run, name="ZoneOverlay", daemon=True)
