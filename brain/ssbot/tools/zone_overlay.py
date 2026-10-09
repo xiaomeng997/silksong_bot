@@ -83,7 +83,7 @@ FREEZE_SCALE = 1e-4
 SHORT_NAMES = {"Song Reed": "Reed", "Song Pilgrim 01": "Envoy", "Song Administrator": "Minister",
                "Song Pilgrim 03": "Choristor", "Song Handmaiden": "Clawmaiden", "Pilgrim 03 Song": "Bellbearer",
                "Song Heavy Sentry": "Clapper", "Song Automaton Tiny": "Tiny", "Song Pilgrim Maestro": "Maestro"}
-CERTAIN_P = 0.999                 # yellow: only the placements of branches the walk takes for sure
+KIN_F = 12                        # yellow: frames a committed attack's colliders are carried along its velocity
 LOCK_LAT = {0: LAT_F, 1: LAT_F + 6, 2: LAT_F + 6, 3: LAT_F}   # not-started yellow: free / attack / dash / air
 NS_U = 24.0                       # the not-started lower bound's half width (u) around the anchor
 THROWS = frozenset({"CB_THROW", "RE_THROW", "CC_CAST"})   # yellow: their thrown objects are the hazard layer's
@@ -452,13 +452,15 @@ class ZoneEngine:
         from ssbot.tools.forum_aim import CANDIDATES
         return {(tk, f) for tk, fams in CANDIDATES.items() for f in fams}
 
-    def _aim_tid(self, cur) -> int | None:
-        """The instance's aim template (its state's and direction bin's) when the forecast placed one (multi_forecast:
-        SSBOT_FORUM_AIM, the instance seen at a certified aim state)."""
-        if cur is None or cur.aim_anchor is None:
-            return None
-        tid = self.pol.fc.tables.key_id(cur.family, f"aim@{cur.aim_state}#{cur.aim_bin}", "anchor")
-        return tid if tid is not None and tid >= 0 else None
+    def _fill_hero_centre(self, img: np.ndarray, poly: np.ndarray) -> None:
+        """Mark on img [ny, nx] the hero centres whose hurtbox overlaps the convex polygon (world u)."""
+        import cv2
+        g = self.grid
+        hx, hy = g.half
+        pts = np.concatenate([poly + (sx * hx, sy * hy) for sx in (-1, 1) for sy in (-1, 1)])
+        cell = np.stack([(pts[:, 0] - g.x0) / g.cell, (pts[:, 1] - g.y0) / g.cell], axis=1)
+        hull = cv2.convexHull(np.rint(cell).astype(np.int32))
+        cv2.fillConvexPoly(img, hull, 1)
 
     def _ns_lb(self, fam: str, lat: int, a_h: float) -> np.ndarray | None:
         """The commit-now inescapable zone's LOWER bound of one family ([ny, 2 NS_U / cell + 1] on the grid's rows,
@@ -501,57 +503,34 @@ class ZoneEngine:
         info = {"committed": [], "not_started": [], "ycom_by": {k: {} for k in ks}, "yns_by": {k: {} for k in ks}}
         if fcast is None:
             return com, ns, info
-        pm = fcast.pm
-        n = len(pm["owner"])
-        owner = np.asarray(pm["owner"]) if n else np.zeros(0, np.int64)
-        commit = np.asarray(pm["committed"], bool) if n else np.zeros(0, bool)
-        # only the branches the walk takes for sure: a cell is inescapable when every branch dooms it, and a union of
-        # branches (or of the recorded instances of an aimed attack) is not that
-        certain = np.asarray(pm["prob"], np.float64) >= CERTAIN_P if n else np.zeros(0, bool)
-        fams = np.asarray(pm["family"], object) if n else np.zeros(0, object)
-        tids = np.asarray(fcast.P.tid) if n else np.zeros(0, np.int64)     # the fine placements (pm rows)
-        aimed = self.aim_families()
+        # the committed attacks' certain cells, per instance: its own damage colliders now (the oracle's) carried
+        # along its velocity for KIN_F frames (its flight: the Reed's stab slides along one line with the needle ahead,
+        # the person 2026-10-09: "a thin diagonal strip below it"), in hero-centre space (the Minkowski sum with the hero
+        # box), eroded back with the one-frame reach, the sky above the dome solid; the family templates (the union of
+        # every recorded instance of the family, forum.md §29.2) are the planner's upper bound, not certain cells
+        cols: dict = {}
+        for poly, _clash, _label, vel, iid in damage_colliders(self.raw or {}):
+            cols.setdefault(iid, []).append((poly, vel))
         mf = self.pol.fc
-        K = YELLOW_F
-        tkK = np.arange(K + 1, dtype=np.float64) * FT
-        GX = GY = None
+        aimed = self.aim_families()
         ax_, up, dn = self.reach
         for s in fcast.subjects:
-            if not s.alive or not s.committed:
+            if not s.alive or not s.committed or s.iid not in cols:
                 continue
-            sel = (owner == s.iid) & commit & certain
-            tr = mf.trackers.get(s.iid)
-            cur = tr.cur if tr is not None else None
-            aim_tid = self._aim_tid(cur)
-            if aim_tid is not None:
-                # re-anchored where it is at its aim state: only that template (its other placements, the after-states
-                # and the tail, are unions from the start)
-                sel &= tids == aim_tid
-            elif cur is not None and (s.type_key, cur.family) in aimed:
-                # a family that follows the hero before its aim state, or aimed in a direction bin without a certified
-                # template: where it strikes is not known yet, nothing is certain (the planner keeps the family's
-                # union; its body is red)
-                sel &= fams != cur.family
-            # the throws' templates hold the bells / pins / runes of earlier instances still in flight (forum.md §26-ICS
-            # re-arms): those are the hazard layer's (their paths), not this attack's certain cells
-            sel &= ~np.isin(fams, list(THROWS))
-            if not sel.any():
+            D = np.zeros((KIN_F + 1, *g.shape), np.uint8)
+            for k in range(KIN_F + 1):
+                for poly, vel in cols[s.iid]:
+                    self._fill_hero_centre(D[k], poly + np.asarray(vel, np.float64) * (k * FT))
+            if not D.any():
                 continue
-            if GX is None:
-                GX = np.ascontiguousarray(np.repeat(g.gx, K + 1, axis=1))
-                GY = np.ascontiguousarray(np.repeat(g.gy, K + 1, axis=1))
-            occ = fcast._fine_occ(GX, GY, tkK, sel)
-            if not occ.any():
-                continue
-            D = occ.T.reshape(K + 1, *g.shape)
-            last = int(np.flatnonzero(D.reshape(K + 1, -1).any(axis=1)).max())
-            Z = erode_back(D[:last + 1], ax_, up, dn, solid=~g.inside)
+            Z = erode_back(D.astype(bool), ax_, up, dn, solid=~g.inside)
             for k in ks:
-                if k <= last:
+                if k <= KIN_F:
                     z = Z[k] & g.inside
-                    com[k] |= z
-                    info["ycom_by"][k][s.iid] = z
-            info["committed"].append([s.iid, s.type_key, s.family, last])
+                    if z.any():
+                        com[k] |= z
+                        info["ycom_by"][k][s.iid] = z
+            info["committed"].append([s.iid, s.type_key, s.family, KIN_F])
         hc = self.hero()
         ground, dashing, attacking, facing = self.lock()
         for s in fcast.subjects:
@@ -759,8 +738,8 @@ def legend_lines(fr: dict | None, view: View, config: str, extra: str = "") -> l
     lines = [(f"ZONES  k=+{k} f ({k / 60:.2f} s)  mode {view.mode}" + ("  FROZEN" if view.frozen else "")
               + (f"  {extra}" if extra else ""), None)]
     if view.show("yellow"):
-        lines.append((NAMES["yellow"] + " (hero-centre space, lower bound: certain branches, aimed attacks from "
-                      "their aim; not started: commit-now erosion for the lock now)", COLORS["yellow"]))
+        lines.append((NAMES["yellow"] + " (hero-centre space, lower bound: committed = each attack's own colliders "
+                      "along its flight, 12 f; not started: commit-now erosion for the lock now)", COLORS["yellow"]))
     if view.show("red"):
         lines.append((NAMES["red"] + " (the colliders themselves)", COLORS["red"]))
     if view.show("support"):
@@ -1324,7 +1303,7 @@ def rerun_zones(session: Path, rec, f0: int | None = None, f1: int | None = None
 
     rec.log("legend", rr.TextDocument(
         "zones (hero-centre space: where the hero CENTRE must not be): yellow = inescapable, a lower bound (committed: "
-        "the certain branches' placements, an aimed attack only from its aim state on, eroded back with the one-frame "
+        "each attack's own colliders carried along its velocity for 12 frames, eroded back with the one-frame "
         "reach, floor / walls / the dome solid; not started: the commit-now erosion of each family for the lock now); "
         "red = non-clashable colliders + 6-frame sweep; colliders/* = the real damage colliders (ground truth); "
         "support/k<k>/<layer> = the planner's support at look-ahead k; enemies/<name>/ = per enemy (stable name "
