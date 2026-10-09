@@ -336,7 +336,7 @@ class _Memory:
     tracks: dict[int, _Track] = field(default_factory=dict)
     killed: set[int] = field(default_factory=set)      # iids ENEMY_KILLED was reported for (with or without a track)
     fsm_entry: dict[tuple[int, str], float] = field(default_factory=dict)
-    obj_name: dict[int, str] = field(default_factory=dict)    # iid -> GameObject name (the collider named like its type)
+    obj_name: dict[int, str] = field(default_factory=dict)    # iid -> GameObject name (its collider named so)
 
 
 class OracleBackend:

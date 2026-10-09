@@ -412,7 +412,8 @@ def test_body_reach_threats_and_the_bind_lock(params, arena, body_only):
 
 
 def test_a_tick_with_the_new_switches(params, arena, body_only):
-    """The planner ticks with the timing rows and "+n+g+br+k" (escape check with the body-only threats, dash lock-ins)."""
+    """The planner ticks with the timing rows and "+n+g+br+k+s" (the escape check with the body-only threats, the
+    dash lock-ins, the swept seen key)."""
     from ssbot.knowledge import kinematics as kin
     from tests.test_forum_planner import FLOOR, _prefs, _reed_forecaster, _world
     mf = _reed_forecaster(None, frames=3, x=25.0)

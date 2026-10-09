@@ -287,9 +287,9 @@ def build_forum(T: int = 36, posture: str = "ground", clash: bool = False, waits
     core first pieces (CORE_FIRST: wait, move, jumps 3 holds x 3 ways, dash either way) and the posture's attack pieces,
     each with every continuation (the Bell Beast library plus dash / dash-then-slash; clash: the R8 clash
     continuations too, after the others so the R3 rows keep their indices; waits: the timing rows, WAIT_FIRSTS x
-    the wait continuations and TIMED_FIRSTS x the timed clash ones, after all of those). Returns (set, core [N] bool): the
-    core evasion rows (CORE_FIRST x CORE_CONT), the same commands in every posture family, so their S / Hz / U never
-    depend on the posture's other rows or on the tactics (§4.4 item 2)."""
+    the wait continuations and TIMED_FIRSTS x the timed clash ones, after all of those). Returns (set, core [N]
+    bool): the core evasion rows (CORE_FIRST x CORE_CONT), the same commands in every posture family, so their S /
+    Hz / U never depend on the posture's other rows or on the tactics (§4.4 item 2)."""
     if posture not in POSTURES:
         raise ValueError(f"posture {posture!r}")
     fp = {p.name: p for p in _forum_first_pieces()}

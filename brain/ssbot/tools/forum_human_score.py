@@ -898,7 +898,8 @@ def react_variants(M: list[dict]) -> dict:
     rows = [t for t in M if ok(t) and t["vb"].get("var_esc") is not None]
     if not rows:
         return {}
-    names = sorted({v for t in rows for v in (t["vb"].get("var") or {})} | {v for t in rows for v in t["vb"]["var_esc"]})
+    names = sorted({v for t in rows for v in (t["vb"].get("var") or {})}
+                   | {v for t in rows for v in t["vb"]["var_esc"]})
     names = [v for v in names if v in ("rb", "rbr")]
     uns = [t for t in rows if t["vb"]["S"]]
     fa = [t for t in uns if t["vb"]["hind"] < 0]
