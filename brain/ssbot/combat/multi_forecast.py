@@ -1647,9 +1647,11 @@ class _Builder:
         return out
 
     def _hero_hit_k(self, tr: EnemyTracker) -> int:
-        """The first look-ahead frame at which a hit of the hero can reach the enemy (SSBOT_FORUM_RCLIP=2): the gap
-        between the hero box and the enemy's body (its last collider box, else its hull at its position) less
-        HIT_REACH_U, closed at HERO_V_MAX plus the enemy's own speed; 0 when either box is unknown."""
+        """The first look-ahead frame at which a hit of the hero or of an ally (the oracle's allies export: Garmond's
+        WildSlash / Stomp hit a Maestro 14-23 u from the hero, 20261009_085824 f25585, f26989) can reach the enemy
+        (SSBOT_FORUM_RCLIP=2): the gap between the hitter's box (an ally: the hero's size) and the enemy's body (its
+        last collider box, else its hull at its position) less HIT_REACH_U, closed at HERO_V_MAX plus the enemy's own
+        speed; 0 when the enemy's box or the hero is unknown."""
         ws = getattr(self.fc, "_ws", None)
         b = tr.body if tr.body is not None else tr.seen_box
         if b is None and tr.pos is not None and tr.tk in self.tables.tubes.hull:
@@ -1657,12 +1659,14 @@ class _Builder:
             b = (tr.pos[0] + h[0], tr.pos[1] + h[1], tr.pos[0] + h[2], tr.pos[1] + h[3])
         if ws is None or b is None:
             return 0
-        hx, hy = (float(v) for v in ws.hero.pos.v[:2])
         ax, ay = self.fc.half
-        gx = max(0.0, b[0] - (hx + ax), (hx - ax) - b[2]) - HIT_REACH_U[0]
-        gy = max(0.0, b[1] - (hy + ay), (hy - ay) - b[3]) - HIT_REACH_U[1]
-        t = max(max(gx, 0.0) / (HERO_V_MAX[0] + abs(float(tr.vel[0]))),
-                max(gy, 0.0) / (HERO_V_MAX[1] + abs(float(tr.vel[1]))))
+        vx, vy = HERO_V_MAX[0] + abs(float(tr.vel[0])), HERO_V_MAX[1] + abs(float(tr.vel[1]))
+        t = math.inf
+        for hx, hy in [tuple(float(v) for v in ws.hero.pos.v[:2])] + [(a[1], a[2]) for a in
+                                                                       getattr(ws, "allies", None) or ()]:
+            gx = max(0.0, b[0] - (hx + ax), (hx - ax) - b[2]) - HIT_REACH_U[0]
+            gy = max(0.0, b[1] - (hy + ay), (hy - ay) - b[3]) - HIT_REACH_U[1]
+            t = min(t, max(max(gx, 0.0) / vx, max(gy, 0.0) / vy))
         return int(math.floor(t / BIN + 1e-9))
 
 

@@ -413,9 +413,11 @@ class OracleBackend:
         cam = self._cam(s.get("cam"))
         stamp = Stamp(frame=f, t_sample_qpc_ns=t_ns, t_pub_qpc_ns=self.clock() if self.clock else t_ns,
                       t_game_s=m.t_game, backend=self.backend, config_fp=self.config_fp)
+        allies = [(str(a.get("name")), float(a["pos"][0]), float(a["pos"][1])) for a in s.get("allies") or ()
+                  if a.get("pos") is not None and len(a["pos"]) >= 2]
         return WorldState(stamp=stamp, game=game, cam=cam, hero=hero, res=res, entities=ents, threats=[],
                           terrain=self._terrain(scene, s.get("room")), events=oracle_events + derived,
-                          perception=PerceptionHealth(dropped_frames=gap))
+                          perception=PerceptionHealth(dropped_frames=gap), allies=allies)
 
     # ---- hero --------------------------------------------------------------------------------------------------
 

@@ -160,6 +160,9 @@ def test_clip_widens_from_a_hero_hits_first_reach(monkeypatch):
     near = NS(body=(1.0, 4.0, 2.0, 6.0), seen_box=None, pos=(1.5, 5.0), tk=REED, vel=(0.0, 0.0))
     assert hit_k(me, near) == 0
     assert hit_k(me, NS(body=None, seen_box=None, pos=None, tk=REED, vel=(0.0, 0.0))) == 0
+    # an ally (Garmond) next to the far enemy: its hit can land now
+    fc.__dict__["_ws"] = NS(hero=NS(pos=NS(v=(0.0, 5.0))), allies=[("Garmond Fighter", 13.0, 5.0)])
+    assert hit_k(me, far) == 0
 
 
 def test_prestrike_places_the_reach_of_a_dropped_stab(monkeypatch):

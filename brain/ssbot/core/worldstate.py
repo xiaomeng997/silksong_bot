@@ -613,6 +613,9 @@ class WorldState:
     events: list[Event] = fld(V, factory=list)
     ledger_rev: int = fld(D, 0)
     perception: PerceptionHealth = fld(V, factory=PerceptionHealth)
+    # the oracle's allies export (Garmond Fighter, Shakra Fighter: name, x, y; on screen when near): their hits knock
+    # enemies back like the hero's (multi_forecast SSBOT_FORUM_RCLIP=2, task precision push S1)
+    allies: list[tuple[str, float, float]] = fld(V, factory=list)
 
     def view(self, profile: str) -> "WorldState":
         """ORACLE: self. VISION_EQUIVALENT: a copy with every O field None, O-only events dropped and O payload
