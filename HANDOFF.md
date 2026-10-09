@@ -3258,3 +3258,108 @@ forecast untouched. Facts: forum.md §26 (Chinese).
 2. Clapper cast templates hold earlier casts' runes: split them out (the hazard layer's) before using their ICS.
 3. Zones are on an open floor (no walls) with union templates; conditioning aimed families (stab, counter, charge
    distance) on the hero's position is not done.
+
+## Task zone overlay（分支 worktree-wf_0d680437-615-1，2026-10-08；= main + worktree-wf_34e9717f-fa3-2 + worktree-wf_b572dcee-369-1）
+
+你要的：0.5 倍速练习时，把机器人**实际算出来的**危险区画在游戏上（黄 = 不可逃区，红 = 拼不了刀的判定），
+用眼睛查它算得对不对；另外能倒回去看（现场时间只能往前走，只能冻结、单步向前；**倒回去看用 Rerun 回放**）。
+代码：`brain/ssbot/tools/zone_overlay.py`（计算、绘制、置顶穿透窗口、离线渲染 / 计时），`human_session.py`
+（`--overlay`、`--display`、命令文件里的 `overlay ...`），`viewer.py`（`--zones`），测试 `tests/test_zone_overlay.py`（7 个）。
+游戏、oracle 一行没动；没有连游戏做现场测试（实例 0-4 都占着，human_session 在别的游戏开着时也拒绝启动）。
+
+### 先做一次：表文件
+
+main 的工作区没有 `knowledge/1.0.30000/enemies/forum/*_hitboxes.npz`（git 忽略）。在要运行的检出里先拷：
+`copy C:\ssbot\tables\forum_r3_2a10a0d\*.npz knowledge\1.0.30000\enemies\forum\`（没有它 overlay 线程会报错退出，
+录制照常）。不可逃区的表是 `C:\ssbot\data\m2_forum_ics\zones_lat1.npz`（已在）。
+
+### 命令（在 `brain` 目录下）
+
+现场（实例 8，fo_W，半速，覆盖层；先关掉别的游戏窗口）：
+
+    ..\scripts\uv.cmd run python -u -m ssbot.tools.human_session --instance 8 --savestate fo_W --speed 0.5 --overlay --display borderless
+
+回放（能来回拖、暂停、在 Rerun 左边的实体树里逐层开关）：
+
+    ..\scripts\uv.cmd run python -m ssbot.tools.viewer C:\ssbot\data\human\<会话> --zones --from <帧> --to <帧> --k 0,12 --video
+
+（`--k 0,6,12,18,36` 全部提前量；`--video` 带录像帧，约 75 KB / 游戏帧，所以用 `--from/--to` 截一段；`--save x.rrd`
+存文件不弹窗；`--demo-cache <目录>` 缓存扫描（第一次扫一个会话约 40 s）。帧号是 oracle 原始帧号（半速时 2 个 / 游戏帧），
+时间轴 `frame`；另有 `game_frame`。）已经做好的一份：
+`C:\ssbot\data\m2_forum_overlay\20261005_160435_a0_f7297-10900_zones.rrd`（第 0 次尝试的开头约 30 s 游戏时间，带录像，
+5 个提前量），打开：`..\scripts\uv.cmd run rerun C:\ssbot\data\m2_forum_overlay\20261005_160435_a0_f7297-10900_zones.rrd`。
+
+在录像上画（检查用，PNG / mp4）：
+
+    ..\scripts\uv.cmd run python -m ssbot.tools.zone_overlay render C:\ssbot\data\human\20261005_160435 --attempt 0 --from 7300 --to 8500 --clip a.mp4 --png-every 60 --mode yellow+red --k 0
+
+### 颜色（半透明填充 + 同色描边；白点 = 主角中心）
+
+- **浅黄 = 不可逃区，主角中心空间**：主角的**中心**不能在这里（判定已经按主角受击盒半宽高 0.25 x 1.04 u 胀过）。两部分：
+  (a) 已出招的敌人：它自己的已承诺细放置（`MultiForecast.pm`，按主人过滤，所有分支的并集，和规划器的支撑一样）在第
+  0..72 帧的格子（0.25 u）上，从最后一帧往回：Z_k = D_k ∪ 腐蚀(Z_k+1, 一帧可达框)，一帧可达框 = 冲刺速度横向、跳跃速度向上、
+  最大下落向下（`forum_ics.zone_lb` 的框，向上取整到格子），地板和两面墙算"实心"（逃不进去），第 0 帧不反应；每只敌人
+  分别算再取并。这是**下界**（框不管动量和重力）。(b) 还没出招的敌人（活着、在场、最早出招时间 t_strike 有限）：
+  `zones_lat1.npz` 的"现在出招"区（上界，整个区 `z`），按**主角现在的锁定状态**（自由 / 出刀 / 朝它冲刺；站立高度以上一律
+  按空中）、放在它的锚点（按速度外推到第 k 帧）、镜像到主角那一侧；从 t_strike 前一帧开始显示（t_strike 至少是 1 帧的
+  感知延迟，否则"现在"永远不显示）。
+- **浅红 = 拼不了刀的伤害判定**（判定本身的形状，不是主角中心空间，可以直接和 DebugMod 的 `hitbox.show` 对）：当前 STATE
+  里启用的、dealt > 0、parry 位没有 clash / force 的碰撞体（oracle parry 4 = 只能反击；5 = 拼刀 + 反击，可拼），加上
+  Clapper 的全部判定；更淡的一层是它未来 6 帧的扫掠（按实体速度平移后的凸包）。录像里身体、Clapper 的所有招和符文、
+  铃铛、Tiny、Clawmaiden 本体都是 parry 4；被打回的铃铛 dealt 0，不画。
+- **支撑各层（F9 切到 support / all 才显示，提前量 k 由 1-5 选）**，规划器自己的占用查询（`forum_layer_audit.group_occ`）在
+  主角中心格子上：浅灰 = 身体 + 待机增长（身体管、碰撞体管、当前待机）；浅粉 = 已承诺细放置（含连段、尾巴）；浅蓝 = 窗口 /
+  家族并集 / 外包盒放置；浅绿 = 还没开始（以后的攻击、待机实例、入场）；浅橙 = 投射物 / 危险物；浅紫 = 死亡尾巴（+ 全场盒）；
+  浅青 = 只有余量才加的面积（要 `--overlay-margins` / `--margins`，多做一次预报）。
+- 左下角说明里印着当前配置：默认 = 第 5 轮推荐配置 `FR=seen_cf REACT=escape+n+g MARGIN=state KF=kill clash=main`
+  （环境变量 `SSBOT_FORUM_*` 设了就用环境的）。
+
+### 按键（只在游戏窗口有焦点时读；游戏同样收到这些键）
+
+F8 开 / 关；F9 轮换 黄+红 / 黄 / 红 / 支撑 / 全部；F10 冻结 / 解冻；F11 冻结时前进约一帧；1-5 提前量 现在 / +6 / +12 / +18 /
++36 帧；Ctrl+1..7 开关某一层支撑。也可以写命令文件 `C:\ssbot\sandbox\human_cmd.txt`（每秒读一次）：`overlay k 12`、
+`overlay mode all`、`overlay layer window`、`overlay freeze`、`overlay step`、`overlay off` / `overlay on`。
+
+### 怎么做的
+
+- 计算在 human_session 进程里，吃它自己那条 OracleLink 的 STATE（`subscribe_state` / `subscribe_raw`，不开第二个 IPC
+  客户端），单独一个线程；关掉 `--overlay` 时录制 / 标注和以前完全一样。半速时两帧 STATE 合成一帧游戏帧
+  （`merge_states` = forum_human_score 的 `_merge_pair` 推广到任意个数，测试里核对相等）。走 ForumPlannerPolicy 自己的预报
+  路径（OracleBackend → StateTracker → MultiForecaster.update → forecast(2 s)），**不跑规划器的 tick**（支撑不依赖它的选择）。
+  每进一场新战斗（Battle Scene 的 id 变）重置一次。
+- 区域每 3 个游戏帧重算一次（游戏时间 20 Hz）；只算当前选的 k。投影用 STATE 的相机（`projector.project_cam`，z = 0 平面的
+  单应），格子图整体变换后画，判定多边形直接按相机投影画。
+- 覆盖窗口：Win32 分层窗口（每像素 alpha，`WS_EX_LAYERED | TRANSPARENT | TOPMOST | TOOLWINDOW | NOACTIVATE`，点击穿透、不抢焦点），
+  盖在游戏客户区上（每秒跟一次位置）。`SetWindowDisplayAffinity(WDA_EXCLUDEFROMCAPTURE)`：**录像里没有它**——实测：
+  同一个窗口，ffmpeg ddagrab 截屏里洋红测试块的占比 0.0（排除）对 1.0（不排除）。
+- 全屏方式：这台 4K 桌面上原来的 `-screen-fullscreen 1` 已经是无边框全屏窗口（meta.json：客户区 3840x2160 = 桌面，渲染
+  1080p），覆盖层能显示；`--display borderless` 再加 `-window-mode borderless` 明确一下；`--display popup` 是 1920x1080
+  的无边框窗口（录像会是整个桌面，不算训练数据）。默认 `fullscreen` 不变。
+
+### 量出来的
+
+- 离线（20261005_160435 第 0 次尝试，开头 30 s 游戏时间，k = 12）：喂一帧 1.0 ms（p95 1.6）；算一次 p50 20 ms、p95 42 ms
+  （预报 0.8 ms、支撑 1.2 ms、黄色 18 ms：已出招敌人 73 帧的细放置查询 + 腐蚀）；画 1080p p50 17.5 ms。
+- 进程内整条链（录下的 0.5x STATE 按 60 Hz 实时喂一个假 link，真窗口 1280x720）：20 s 里喂 501 个游戏帧、重算 166 次，
+  积压最多 3 个 STATE，算 p50 3 ms / p95 31 ms，画 + 上屏 p50 8.4 ms / p95 11.7 ms，冻结 / 单步 / 模式命令都走通。
+  4K 窗口：上屏（UpdateLayeredWindow）约 10 ms，所以按 1080p 画再最近邻放大（3 ms）。
+- 对齐：PNG 里白点落在 Hornet 身上，红框落在敌人身上（`C:\ssbot\data\m2_forum_overlay\png\`，录像帧按 labels.npz 的
+  pts 用 ffmpeg 精确定位；OpenCV 在这个 HEVC mkv 里按帧号跳会跳错）。
+- 看到的现象（只是看，没量）：已出招敌人的黄色区常常很大——例如 7554 帧三个敌人同时出招（RE_DEFEND、EN_CHARGE、
+  CH_WHIP）时黄色盖住了地面上大半个场地，主角就站在里面；11304 帧一个 CH_SLASH 的黄色从它向左延伸约 12 u。
+  这是支撑（细放置的分支并集、时间展宽）本身的大小，正是你要检查的东西。
+
+### 已知限制
+
+1. 冻结用 `time.scale 0.0001`（oracle 拒绝 0：`scale must be in (0, 4]`），约 167 s 走一个游戏帧；单步是先恢复速度、等一个
+   游戏帧再冻结，RPC 晚到一两个渲染帧，所以是"约一帧"（1-1.5）。要精确：oracle 允许 0 或加一个 `time.step` RPC（没改、没部署）。
+2. 黄色 (a) 是下界，D 取所有分支的并集，只用细放置（入口时间未知的窗口放置不进黄色，在"窗口"那层里）；截在 72 帧。
+   (b) 用开阔平地、无墙的表，锁定状态取"现在"；两只敌人的联合区没有画（只是各自的并）。
+3. 现场没有在游戏里试过（没有空闲实例）：上面的整条链是用录下的 STATE 和真窗口试的；红框和 `hitbox.show` 的现场对比、
+   帧率、按键不被挡住，要在你的会话里第一次看一下。数字键 1-5 和 F8-F11 游戏也会收到（应该没绑定，未核实）。
+4. 回放的 `.rrd` 每游戏帧一张 960x540 JPEG，约 135 MB / 30 s 游戏时间；只画描边（Rerun 2D 没有半透明填充）。
+
+### Next / open issues
+
+1. 你第一次现场用时：开 DebugMod 的 `hitbox.show` 对一下红框位置；看帧率。
+2. 如果要精确冻结 / 单步：oracle 加 `time.scale 0` 或 `time.step`（要 build + 部署，lead 决定）。
