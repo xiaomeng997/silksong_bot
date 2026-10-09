@@ -153,7 +153,7 @@ def test_a_bell_in_reach_is_a_hit_target_of_weight_0(params, arena):
     tk = np.arange(37) * BIN
     tbox, tok, tw, keep = pl._forum_targets(_world(20.0), f, tk, _prefs())
     kinds = [t.hazard for t in keep]
-    assert kinds == [False, True] and tw[1] == 0.0 and tw[0] > 0.0
+    assert kinds == [False, True] and (tw[1] == 0.0).all() and (tw[0] > 0.0).all()    # [K, 4]: by slash kind
     pl2 = ForumPlanner(params, arena, PlannerConfig(T=36, threads=2, variants="bounds_lo"), ForumConfig(bell_hits=False))
     assert [t.hazard for t in pl2._forum_targets(_world(20.0), f, tk, _prefs())[3]] == [False]
     bound = np.zeros((2, 37, 4))

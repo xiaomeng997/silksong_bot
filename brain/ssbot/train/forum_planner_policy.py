@@ -39,7 +39,7 @@ import numpy as np
 from ssbot.backends.oracle_backend import OracleBackend
 from ssbot.combat.enemy_tables import EnemyTables
 from ssbot.combat.forum_planner import (ForumConfig, ForumPlanner, forum_kill_hp, forum_yellow_kill_hp,
-                                        kill_freeze_s)
+                                        kill_freeze_s, parse_ta)
 from ssbot.combat.hero_damage import HeroDamage
 from ssbot.combat.multi_forecast import MultiForecaster, ReactConfig
 from ssbot.combat.planner import PlannerConfig
@@ -205,6 +205,7 @@ class ForumPlannerPolicy(PlannerPolicy):
         self.k = 0
         self.ab = self._ab_arms()
         self.ab_arm: str | None = None
+        self.free = False                       # track A "free" (_set_ta)
 
     @staticmethod
     def _ab_arms() -> list[tuple[str, dict]]:
@@ -227,9 +228,13 @@ class ForumPlannerPolicy(PlannerPolicy):
                 elif k == "rx" and v:
                     ReactConfig.parse(v)                 # validates
                     over["react"] = v
+                elif k == "ta":
+                    v = "" if v.strip().lower() == "none" else v     # "none": no track A token
+                    parse_ta(v)                          # validates
+                    over["ta"] = v
                 else:
                     raise ValueError(f"SSBOT_FORUM_AB={spec!r}: {item!r} (pc=0|1, fr=share|seen|seen_cf, "
-                                     f"rx=off|delay|escape[+c|+i|+p5])")
+                                     f"rx=off|delay|escape[+c|+i|+p5], ta=none|<tokens>)")
             arms.append((name.strip(), over))
         return arms
 
@@ -247,7 +252,17 @@ class ForumPlannerPolicy(PlannerPolicy):
             raise ValueError(f"SSBOT_FORUM_FR={fr!r}: share | seen | seen_cf")
         rx = os.environ.get("SSBOT_FORUM_REACT", "off").strip().lower() or "off"
         ReactConfig.parse(rx)                    # validates
-        return ForumConfig(forced_rank=fr, react=rx, bell_hits=bells_mode() == "on", **CLASH_MODES[clash])
+        ta = os.environ.get("SSBOT_FORUM_TA", "").strip().lower()
+        parse_ta(ta)                             # validates (track A's tokens, combat.forum_planner.TA_TOKENS)
+        return ForumConfig(forced_rank=fr, react=rx, bell_hits=bells_mode() == "on", ta=ta, **CLASH_MODES[clash])
+
+    def _set_ta(self, fcfg: ForumConfig) -> None:
+        """Track A's tokens (SSBOT_FORUM_TA, or the episode's AB arm) to the supervisor ("free": the DESIGN 3.5.6
+        revision's free mode) and the L2 tactics ("whip", "guard", "edge"); the planner reads its own (fcfg)."""
+        tac = fcfg.tac
+        self.free = "free" in tac
+        if isinstance(self.tac, GauntletTactics):
+            self.tac.ta = tac
 
     def _set_react(self, fcfg: ForumConfig) -> None:
         """The forecaster's reactive support from the planner's config (None when off: the support as before)."""
@@ -316,12 +331,13 @@ class ForumPlannerPolicy(PlannerPolicy):
             self.planner.fcfg = replace(self._fcfg(self.clash), **over)
         self.planner.reset()
         self._set_react(self.planner.fcfg)
+        self._set_ta(self.planner.fcfg)
         self._audit0 = self.planner.audit.as_dict()
         self.trk = StateTracker(self.params, self.terrain)
         self.fc.reset()
         self.weighted = None
         self.real_quit = self.real_quit_p > 0 and rng.random() < self.real_quit_p
-        self.sc.cfg = forum_supervisor_config()
+        self.sc.cfg = forum_supervisor_config(free_until_hit=self.free)
         self.sc.pq_cfg = replace(self._pq_emulated, emulate_quit=not self.real_quit)
         self.rq: dict = {"armed": self.real_quit, "submits": [], "menus": []}
         self.sc.reset()
@@ -585,7 +601,7 @@ class ForumPlannerPolicy(PlannerPolicy):
             self.params = self.params0.with_weighted()
             self.planner.params = self.params
             self.trk = StateTracker(self.params, self.terrain)
-            self.sc.cfg = forum_supervisor_config(weighted=True)
+            self.sc.cfg = forum_supervisor_config(weighted=True, free_until_hit=self.free)
             self.sc.sup.cfg = self.sc.cfg
 
     def _wave_check(self, raw: dict, f: int) -> int | None:
@@ -822,7 +838,8 @@ class ForumPlannerPolicy(PlannerPolicy):
                                              "cut", "overrun", "tv", "seen", "seen_cf", "esc")},
                "pocket": self.tac.last.get("pocket_veto"), "goal": self.tac.last.get("goal"),
                "goal_why": self.tac.last.get("goal_why"), "goal_t_end": self.tac.last.get("goal_t_end"),
-               "l2_cands": self.tac.last.get("l2_cands"), "subj": subj}
+               "l2_cands": self.tac.last.get("l2_cands"), "ta": self.tac.last.get("ta"),
+               "free": bool(getattr(r.decision, "free", False)), "subj": subj}
         if getattr(res, "clash", None):
             # the chosen plan relies on a clash: w (every clash in it happens), clashes, ranked in FORCED_RISK (partial,
             # or w below clash_min_p)
@@ -847,7 +864,8 @@ class ForumPlannerPolicy(PlannerPolicy):
         fc = self.planner.fcfg if self.planner is not None else None
         return {"view": self.view, "policy": "forum_planner", "k": 0, "modes": modes, "ab_arm": self.ab_arm,
                 "fcfg": None if fc is None else {"forced_rank": fc.forced_rank, "react": fc.react,
-                                                 "commit_rank": fc.commit_rank, "terminal": fc.terminal, "T": fc.T},
+                                                 "commit_rank": fc.commit_rank, "terminal": fc.terminal, "T": fc.T,
+                                                 "ta": "+".join(sorted(fc.tac))},
                 "branch_model": self.fc.bv is not None,
                 "tick_ms_p50": q(self.tick_ms, 50), "tick_ms_p99": q(self.tick_ms, 99),
                 "plan_ms_p50": q(self.plan_ms, 50), "plan_ms_p99": q(self.plan_ms, 99),
