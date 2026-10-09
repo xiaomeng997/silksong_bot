@@ -23,7 +23,7 @@ if "%1"=="best" (
 )
 if not "%SSBOT_RESCORE_REACT%"=="" set SSBOT_FORUM_REACT=%SSBOT_RESCORE_REACT%
 set VARIANTS=m0,g0
-if not "%3"=="" set VARIANTS=%3
+if not "%~3"=="" set VARIANTS=%~3
 set OUT=C:\ssbot\data\m2_forum_hs\%2
 set SEGS=--seg C:/ssbot/data/human/20261004_133855:win:1,3,5,6 --seg C:/ssbot/data/human/20261005_160435:win:0,1,2,4 --seg C:/ssbot/data/human/20261004_002749:w0 --seg C:/ssbot/data/human/20261004_012300:w0
 call ..\scripts\uv.cmd run python -m ssbot.tools.forum_human_score run %SEGS% --out %OUT% --clash %CLASH% --workers 3 --threads 4 --variants %VARIANTS% --demo-cache C:/ssbot/data/m2_forum_w0f/demo_cache > %OUT%.log 2>&1
