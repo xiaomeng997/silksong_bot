@@ -1099,9 +1099,11 @@ class _Builder:
         t_strike = math.inf
         rc = self.react
         ns = strike_table() if rc is not None and rc.notstarted else None
-        # (the collider tube below exists: seen lately, a box or a hull at its position, not waiting for its wave)
+        # (an idle enemy, its idle body tube placed: "+n" leaves the later idle instances out, so after an attack the
+        # roots that may follow it hold its body (R2 recall, the Clapper's Idle after Slam Recover: forum.md §26); and
+        # the collider tube below exists: seen lately, a box or a hull at its position, not waiting for its wave)
         body_reach = (ns is not None and rc.bodyreach and (rc.bodyreach_all or tt.tk not in BODYREACH_KEEP)
-                      and self.fc.collider_tube and T - tr.seen_T <= TUBE_MAX_AGE_S and wake is None
+                      and idle_tube and self.fc.collider_tube and T - tr.seen_T <= TUBE_MAX_AGE_S and wake is None
                       and (tr.seen_box is not None or (tr.pos is not None and tt.tk in tubes.hull)))
         for nd in roots:
             lo, hi = max(ref + nd.lo - T, BIN), max(ref + nd.hi - T, BIN)

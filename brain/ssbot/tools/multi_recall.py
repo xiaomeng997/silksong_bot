@@ -171,6 +171,8 @@ def main_fresh_dev(a, mode: str) -> int:
                        if a.state_margins else None}
                 for f in fl:
                     jobs.append(_job(f["id"], f, byf.get(f["id"], []), cfg, cfg["name"], a))
+    if a.only:
+        jobs = [j for j in jobs if any(o in j["id"] for o in a.only)]
     if a.max_fights:
         keep = []
         per: Counter = Counter()
@@ -560,6 +562,7 @@ def main(argv=None) -> int:
     ap.add_argument("--workers", type=int, default=1)
     ap.add_argument("--max-fights", type=int, default=0, help="per group")
     ap.add_argument("--types", nargs="+", default=None, help="only these types' contacts (a quicker partial check)")
+    ap.add_argument("--only", nargs="+", default=None, help="only the fights whose id contains one of these")
     ap.add_argument("--frames", type=int, default=4000)
     ap.add_argument("--start", type=int, default=None)
     ap.add_argument("--threads", type=int, default=4)
