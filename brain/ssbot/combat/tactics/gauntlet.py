@@ -64,6 +64,14 @@ What a goal sets (scores only: the planner's S / Hz / U never see prefs, §4.4 i
 stance_x, boss_x (face it), hit_w (the target x target_hit_w x priority, 0 while the Clapper controller steps away:
 CC_RETREAT; the others as LOCAL, defensive stances still negative) and the weights' factors per goal (l2.weights). LOCAL's EVADE stands against KITE when it says the hero's spot
 is covered within evade_s; PUNISH and RUSH replace it (the planner's support check is the safety).
+Track A (the person's tactics of 2026-10-08, GauntletTactics.ta from SSBOT_FORUM_TA; forum.md §26; off by default):
+  edge   RUSH stands edge_u from the target body's edge on the hero's side (the person waits at the edge of reach).
+  guard  a Minister in Parry Stance / Parry Block and a Reed in Defend / Block get hit weights by slash kind
+         (GoalPrefs.hit_kw: the Minister by its height band and grouped / alone; the Reed never) and, as the goal's
+         target, the stance to wait at (_guard_rule).
+  whip   a Choristor in its whip (CH_WHIP: the antic and Whip 1-6; it stands still): the stance leaves the whip's reach
+         (whip_back_u behind, whip_front_u in front: the whip does reach behind, Whip Hit 5-6), picks whose spot lies in
+         it go last, and a whip starting or ending re-picks.
 Failure (§4.4 item 4): an exception or an injected failure (fail_p) returns LOCAL's prefs untouched, so with fail_p = 1
 every decision is LOCAL's bit for bit (tests/test_forum_l2.py).
 """

@@ -211,7 +211,9 @@ class ForumPlannerPolicy(PlannerPolicy):
     def _ab_arms() -> list[tuple[str, dict]]:
         """SSBOT_FORUM_AB: arms switched per episode (episode k runs arm k mod n, so the arms share the machine's load
         within one batch; forum.md 20.11), "name:key=value,...;name:..." with the keys pc (commit_rank 0 / 1), fr
-        (forced_rank share / seen / seen_cf) and rx (the reactive support, SSBOT_FORUM_REACT's values). The clash mode
+        (forced_rank share / seen / seen_cf), rx (the reactive support, SSBOT_FORUM_REACT's values) and ta (track A's
+        tokens, SSBOT_FORUM_TA's values joined by "+", "none" for none: the supervisor's free mode and the L2 rules
+        follow the arm, _set_ta). The clash mode
         is not an arm key (it changes the candidate sets the planner is built with: combat_run --forum-clash). Empty:
         one arm, the env switches below."""
         spec = os.environ.get("SSBOT_FORUM_AB", "").strip()

@@ -60,6 +60,12 @@ Per tick (the lexicographic order and every rule of Planner.tick unless named he
               FilterContext.kill_hp from it; not certified in R3 (no kill branches): such a blow passes only under I3.
 Scores only (GoalPrefs: hit_w per enemy iid, stance, the risk map): no prefs field reaches stage 1's S, Hz, U or the
 core rows' envelope, so the core rows' S / Hz / U are the same under any prefs (tests/test_forum_planner.py).
+Track A of the Forum push 2 (SSBOT_FORUM_TA, TA_TOKENS below; forum.md §26; every token off by default): GoalPrefs
+.hit_kw weighs a target's hits by the slash kind (side / up / wall / down); "whip" lowers J of a clash-safe row whose
+clash meets a Choristor whip (it stays safe); "under" adds the under-flier bonus; "eml" prices the stage-1 contact in J
+and puts the effective mask loss (masks x P - hits landed / 4) after FORCED_RISK's first-contact keys; "kb" moves the hit
+enemy's support (and its reaction) by its measured knockback in the hit branch; "free" is the supervisor's (the clash
+gate and I3 follow FilterContext.free).
 """
 import math
 import os
