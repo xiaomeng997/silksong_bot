@@ -167,8 +167,9 @@ def apply_live(tab: AttackTable, lines: list[dict]) -> list[str]:
                 continue
             if slot == "charge" and "h" in prm:
                 r["k0"], r["k"] = r["k"], r["k"] - int(prm["h"])          # a charge slash swings at the release
-            elif slot == "alt" and r.get("trial") == "reaper_attack" and prm.get("n") == 2:
-                r["k0"], r["k"] = r["k"], r["k"] - ALT_PRESS          # the probe's second press
+            elif r.get("trial") == "reaper_attack" and prm.get("n") == 2 and (slot == "alt" or r["k"] > ALT_PRESS):
+                # the probe's second press: the alt slash, or (Wanderer) a second swing in the same slot
+                r["k0"], r["k"] = r["k"], r["k"] - ALT_PRESS
         on = sorted({r["k"] for r in rows if any(_on(d) for d in r.get("damagers") or ())})
         polys = defaultdict(list)
         for r in rows:

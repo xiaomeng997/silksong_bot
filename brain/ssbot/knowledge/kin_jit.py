@@ -47,7 +47,7 @@ from ssbot.knowledge.kinematics import (  # Forum loadout (abilities)
     P_SCR_ROOF_RAY, P_SCR_ROOF_T, P_SCR_DETACH, P_SPR_SHIFT, P_SPR_GRACE, P_SKID_DEC_MV, P_SKID_VMIN, P_AFC_LAG, P_RPR_TDEC,
     P_RPR_TREACH0, P_RPR_TREACH1, P_RPR_TREACH_T, P_RPR_TLOBE0,
     P_RPR_TLOBE1, AB_THUNK, AB_SLOPES, ATK_KIND, ALT, ALT_T, ATK_PDIR, P_THK_ON, P_THK_OFF, P_THK_OFF_UP, P_THK,
-    THK_STRIDE, ALT_ATTACK_RESET, P_SLOPE_CONTACT)
+    THK_STRIDE, ALT_ATTACK_RESET, P_SLOPE_CONTACT, AB_DOWN_SLASH, EV_PARRY_RECOVER)
 
 # world freeze presets in start order (kinematics.WF_ORDER): event bit, rampDown, wait, rampUp, target
 _WF = np.array([[float(b), *FREEZE_PRESETS[b]] for b in WF_ORDER])
@@ -1852,6 +1852,10 @@ def apply_events(x, ev, P):
         x[MODE_T] = 0.0
     if (ev & EV_UNLOCK) != 0 and x[MODE] == M_LOCKED:
         x[MODE] = M_NORMAL
+    if (ev & EV_PARRY_RECOVER) != 0:      # NailParryRecover: attack_cooldown 0, CancelAttack (ResetAttacks)
+        x[ATK_CD] = 0.0
+        x[ATTACKING] = 0.0
+        x[WSLASH] = 0.0
 
 
 @njit(cache=True, inline="always", error_model="numpy")
@@ -1884,6 +1888,8 @@ def do_attack(x, mask, P):
         x[AQ] = -1.0
         return
     down = (mask & B_UP) == 0 and (mask & B_DOWN) != 0 and x[GROUND] <= 0
+    if down and (np.int64(P[P_ABIL]) & AB_DOWN_SLASH) != 0:
+        down = False                      # DownSlashTypes.Slash (Wanderer): the down attack is a slash
     if not down:
         x[ATTACKING] = 1.0
     x[ATK_T] = 0.0
