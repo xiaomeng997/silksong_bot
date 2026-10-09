@@ -859,9 +859,15 @@ class ForumPlanner(Planner):
         super().warm_kernels()
         box = np.zeros((2, 5, 4))
         box[..., 2:] = 1.0
-        seen_contacts(box, np.zeros((2, 5), np.bool_), np.array([[0.0, 0.0], [1.0, 0.0], [1.0, 1.0]]),
-                      np.array([0, 3], np.int64), np.array([[0.0, 0.0, 1.0, 1.0]]), np.zeros((1, 2)),
-                      np.arange(5, dtype=np.float64), np.arange(2, dtype=np.int64), 0.0)
+        args = (box, np.zeros((2, 5), np.bool_), np.array([[0.0, 0.0], [1.0, 0.0], [1.0, 1.0]]),
+                np.array([0, 3], np.int64), np.array([[0.0, 0.0, 1.0, 1.0]]), np.zeros((1, 2)),
+                np.arange(5, dtype=np.float64), np.arange(2, dtype=np.int64), 0.0)
+        seen_contacts(*args)
+        # "+s" and the aimed pins (the smoke of 2026-10-08 evening: a 1.8 s first call mid-fight)
+        seen_contacts_swept(*args, 1.0 / 60.0, SEEN_SWEEP_MIN_U_S)
+        z = np.zeros((2, 5))
+        pin_contacts_kernel(z, z, np.zeros((2, 5), np.bool_), 0.5, 0.5, np.array([1], np.int64), np.zeros(1),
+                            np.zeros(1), PIN_AIM_F, np.ones(1), np.zeros(1), PIN_SPAWN_U, 0.5, np.zeros(5))
 
     # ---- scoring ----
 
