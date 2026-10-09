@@ -385,7 +385,7 @@ def test_tracker_aims_an_instance_at_its_aim_state():
                          control_fsm="Control", hp=50.0)
     tb = SimpleNamespace(spec=sp, attack_starts={"Stab Pos": "RE_STAB", "Alert": "RE_IDLE"},
                          decision_states={"Alert"})
-    old = dict(et.AIM_STATES)
+    old, old_keys = dict(et.AIM_STATES), set(et.AIM_KEYS)
     et.AIM_STATES[("Song Reed", "RE_STAB")] = "Stab Antic"
     try:
         tr = et.EnemyTracker(tb, ORACLE, 7)
@@ -398,8 +398,21 @@ def test_tracker_aims_an_instance_at_its_aim_state():
         assert tr.cur.aim_mirror == et.FACES_LEFT[1] and tr.cur.anchor == (30.0, 9.0)
         tr.enter("Stab 1", 1.7)                       # later states keep the aim
         assert tr.cur.aim_t == 1.4
+        # several aim states: a later one re-aims where its direction bin (the enemy's own flight) has a template
+        et.AIM_STATES[("Song Reed", "RE_STAB")] = {"Stab Antic", "Stab 3", "Stab 5"}
+        et.AIM_KEYS.add(("Song Reed", "RE_STAB", "Stab 3", et.aim_bin(10.0, -3.0)))
+        tr.pos, tr.seen_T, tr.vel = (35.0, 9.5), 1.9, (-10.0, -3.0)    # flying left and down, facing right
+        tr.enter("Stab 3", 1.9)
+        assert tr.cur.aim_state == "Stab 3" and tr.cur.aim_t == 1.9 and tr.cur.aim_mirror == -1
+        assert tr.cur.aim_bin == et.aim_bin(10.0, -3.0) == 15 and tr.cur.aim_anchor == (35.0, 9.5)
+        tr.pos, tr.seen_T, tr.vel = (30.0, 8.0), 2.1, (0.0, 0.0)       # still: the still bin, no template there
+        tr.enter("Stab 5", 2.1)
+        assert tr.cur.aim_state == "Stab 3" and tr.cur.aim_t == 1.9
+        assert et.aim_frame(0.2, 0.1, 1) == (1, et.AIM_BINS)
         tr.rendered, tr.in_play, tr.state = False, False, "Fly In Ready"
         assert tr.parked
     finally:
         et.AIM_STATES.clear()
         et.AIM_STATES.update(old)
+        et.AIM_KEYS.clear()
+        et.AIM_KEYS.update(old_keys)

@@ -706,10 +706,15 @@ def load_aim_templates(spec: ForumType, margins: dict, base: float = 0.0, path: 
     tpls, extra = hb.load_templates(p)
     for k, t in tpls.items():
         _, fam, aim, _frame = k.split("/")
-        r = extra.get(f"aim/{spec.type_key}|{fam}")
+        # aim@<state>#<bin>: one template per direction bin of the enemy's flight at the aim (enemy_tracker.aim_bin)
+        state, _, b = aim[len("aim@"):].partition("#")
+        r = extra.get(f"aim/{spec.type_key}|{fam}@{state}#{b}" if b else f"aim/{spec.type_key}|{fam}")
         if r is None:
             continue
-        enemy_tracker.AIM_STATES[(spec.type_key, fam)] = aim[len("aim@"):]
+        st = enemy_tracker.AIM_STATES.get((spec.type_key, fam))
+        st = set() if st is None else {st} if isinstance(st, str) else set(st)
+        enemy_tracker.AIM_STATES[(spec.type_key, fam)] = st | {state}
+        enemy_tracker.AIM_KEYS.add((spec.type_key, fam, state, int(b) if b else 0))
         m = margins.get((spec.type_key, fam), 0.0) + base + float(r[0])
         yield k, t.dilated(rx=hb.HERO_HALF_U[0] + m, ry=hb.HERO_HALF_U[1] + m, key=k)
 

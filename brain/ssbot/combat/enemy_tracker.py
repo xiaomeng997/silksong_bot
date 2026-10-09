@@ -39,6 +39,39 @@ HIT_BODY = os.environ.get("SSBOT_FORUM_HITBODY", "1") != "0"   # 0: the R4 hit t
 # (type key, family) -> its aim state (tools.forum_aim), filled by EnemyTables when SSBOT_FORUM_AIM loads the aim
 # templates; empty: no instance is ever aimed
 AIM_STATES: dict = {}
+# (type key, family, aim state, direction bin) of every aim template loaded: a later aim state re-aims the instance
+# only where its bin has a template (else the earlier aim, certified to the instance's end, stands)
+AIM_KEYS: set = set()
+
+
+def aim_states(key) -> tuple:
+    """The aim states of a (type key, family) (a single state or several, re-aimed at each)."""
+    v = AIM_STATES.get(key, ())
+    return (v,) if isinstance(v, str) else tuple(v)
+# (type key, family) -> its states the aim template leaves out (tools.forum_aim cuts each instance at the first of
+# them; the forecast keeps their per-state nodes): the Reed's stab ends with its body only (Stab End, Stab Recover),
+# where a few instances fall or slide on far away (forum.md §29.2)
+AIM_AFTER = {("Song Reed", "RE_STAB"): ("Stab End", "Stab Recover")}
+AIM_BINS = 16            # direction bins of the enemy's own flight at the aim (tools.forum_aim)
+AIM_STILL_V = 1.0        # u/s: slower is the still bin (AIM_BINS)
+
+
+def aim_frame(vx: float, vy: float, facing: int) -> tuple[int, int]:
+    """(mirror, direction bin) of an enemy at its aim: moving (AIM_STILL_V or faster), forward is where it flies (its
+    sprite's facing can lag a frame behind a turn); still, its facing and the still bin."""
+    if math.hypot(vx, vy) < AIM_STILL_V:
+        return facing, AIM_BINS
+    m = 1 if vx >= 0.0 else -1
+    return m, aim_bin(vx * m, vy)
+
+
+def aim_bin(vx: float, vy: float) -> int:
+    """The direction bin of an enemy's velocity at its aim, x already mirrored by its facing (+ = forward): AIM_BINS
+    sectors, sector 0 centred on straight ahead; AIM_BINS = still."""
+    if math.hypot(vx, vy) < AIM_STILL_V:
+        return AIM_BINS
+    w = 2.0 * math.pi / AIM_BINS
+    return int(((math.atan2(vy, vx) % (2.0 * math.pi) + 0.5 * w) // w) % AIM_BINS)
 # Damage per hit by the attacking object (HitDealt.src, else .attack) in the Forum loadout (fo_A: Reaper, needle 1;
 # forum.md §9.2: Hornet's nail 9, Silk Spear 27, Garmond 5, Cogfly 3-4, a redirected bell 9); the vision view's HP
 # counts these (the oracle view takes HitDealt.amount when it has one)
@@ -73,6 +106,8 @@ class Instance:
     aim_anchor: tuple[float, float] | None = None
     aim_mirror: int = 1
     aim_sd: float = 0.0
+    aim_bin: int = 0
+    aim_pending: tuple | None = None            # (aim state, its entry T) until the enemy is seen
 
 
 @dataclass(slots=True)
@@ -161,10 +196,19 @@ class EnemyTracker:
             if not self.dead and self.cur is None:
                 self._start(idle, to, T)
         c = self.cur
-        if c is not None and c.aim_state is None and AIM_STATES.get((sp.type_key, c.family)) == to:
-            c.aim_state, c.aim_t, c.aim_anchor = to, T, None
+        if c is not None and to in aim_states((sp.type_key, c.family)):
+            c.aim_pending = (to, T)
             if not self.hidden and self.pos is not None and self.seen_T == T:
-                c.aim_anchor, c.aim_mirror, c.aim_sd = self.pos, FACES_LEFT[self.flip], self.pos_sd
+                self._aim_now(c)
+
+    def _aim_now(self, c) -> None:
+        """The pending aim of attack c, now that the enemy is seen: anchored where it is, mirrored and binned by its
+        flight (aim_frame); a re-aim only where that bin has a template."""
+        to, T = c.aim_pending
+        c.aim_pending = None
+        m, b = aim_frame(self.vel[0], self.vel[1], FACES_LEFT[self.flip])
+        if c.aim_state is None or (self.table.spec.type_key, c.family, to, b) in AIM_KEYS:
+            c.aim_state, c.aim_t, c.aim_anchor, c.aim_sd, c.aim_mirror, c.aim_bin = to, T, self.pos, self.pos_sd, m, b
 
     def _die(self, T: float) -> None:
         if not self.dead:
@@ -244,8 +288,8 @@ class EnemyTracker:
             self.cur.anchor, self.cur.mirror, self.cur.sd = self.pos, FACES_LEFT[self.flip], self.pos_sd
         if self.cur is not None and self.cur.re_state is not None and self.cur.re_anchor is None:
             self.cur.re_anchor, self.cur.re_mirror, self.cur.re_sd = self.pos, FACES_LEFT[self.flip], self.pos_sd
-        if self.cur is not None and self.cur.aim_state is not None and self.cur.aim_anchor is None:
-            self.cur.aim_anchor, self.cur.aim_mirror, self.cur.aim_sd = self.pos, FACES_LEFT[self.flip], self.pos_sd
+        if self.cur is not None and self.cur.aim_pending is not None:
+            self._aim_now(self.cur)
 
     def _hit(self, d) -> None:
         """HP from the hits seen: the oracle's amount (an O field: None in the vision view), else the price of the

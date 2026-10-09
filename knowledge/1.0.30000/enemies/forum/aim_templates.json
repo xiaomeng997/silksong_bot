@@ -1,0 +1,5446 @@
+{
+ "families": {
+  "Song Handmaiden|CM_SLASH": {
+   "candidates": [
+    {
+     "state": "Slash 1",
+     "n": [
+      855,
+      802
+     ],
+     "n_fresh": 525,
+     "volume_all": 978822,
+     "expected": 3132230,
+     "cover": 1.0,
+     "bins": {
+      "0": {
+       "n": [
+        855,
+        802
+       ],
+       "n_fresh": 525,
+       "r_2fold": 2.2,
+       "r_fresh": 1.25,
+       "late": 0,
+       "volume_cells": 978822,
+       "nt": 31,
+       "extent": [
+        -8.75,
+        -5.7,
+        9.0,
+        7.15
+       ]
+      }
+     },
+     "used": [
+      0
+     ]
+    },
+    {
+     "state": "Slash 2",
+     "n": [
+      852,
+      799
+     ],
+     "n_fresh": 524,
+     "volume_all": 908813,
+     "expected": 3271320,
+     "cover": 0.985,
+     "bins": {
+      "0": {
+       "n": [
+        843,
+        784
+       ],
+       "n_fresh": 515,
+       "r_2fold": 2.8,
+       "r_fresh": 0.8,
+       "late": 0,
+       "volume_cells": 859461,
+       "nt": 29,
+       "extent": [
+        -8.5,
+        -5.65,
+        8.35,
+        7.05
+       ]
+      }
+     },
+     "used": [
+      0
+     ]
+    },
+    {
+     "state": "Slash 3",
+     "n": [
+      848,
+      796
+     ],
+     "n_fresh": 524,
+     "volume_all": 749448,
+     "expected": 2368867,
+     "cover": 0.777,
+     "bins": {
+      "0": {
+       "n": [
+        495,
+        470
+       ],
+       "n_fresh": 327,
+       "r_2fold": 2.8,
+       "r_fresh": 1.5,
+       "late": 0,
+       "volume_cells": 591888,
+       "nt": 27,
+       "extent": [
+        -7.6,
+        -4.25,
+        8.05,
+        5.85
+       ]
+      },
+      "1": {
+       "n": [
+        179,
+        159
+       ],
+       "n_fresh": 93,
+       "r_2fold": 3.2,
+       "r_fresh": 0.75,
+       "late": 0,
+       "volume_cells": 468556,
+       "nt": 27,
+       "extent": [
+        -7.1,
+        -3.35,
+        7.25,
+        6.65
+       ]
+      },
+      "15": {
+       "n": [
+        164,
+        149
+       ],
+       "n_fresh": 95,
+       "r_2fold": 2.7,
+       "r_fresh": 0.8,
+       "late": 0,
+       "volume_cells": 541208,
+       "nt": 27,
+       "extent": [
+        -8.05,
+        -5.2,
+        7.9,
+        5.35
+       ]
+      }
+     },
+     "used": [
+      0,
+      15
+     ]
+    },
+    {
+     "state": "Slash 4",
+     "n": [
+      835,
+      784
+     ],
+     "n_fresh": 510,
+     "volume_all": 269589,
+     "expected": 730083,
+     "cover": 0.989,
+     "bins": {
+      "0": {
+       "n": [
+        829,
+        772
+       ],
+       "n_fresh": 506,
+       "r_2fold": 1.7,
+       "r_fresh": 0.7,
+       "late": 0,
+       "volume_cells": 268951,
+       "nt": 17,
+       "extent": [
+        -4.95,
+        -4.3,
+        6.05,
+        5.35
+       ]
+      }
+     },
+     "used": [
+      0
+     ]
+    },
+    {
+     "state": "Slash 5",
+     "n": [
+      834,
+      784
+     ],
+     "n_fresh": 507,
+     "volume_all": 190011,
+     "expected": 412452,
+     "cover": 0.988,
+     "bins": {
+      "0": {
+       "n": [
+        791,
+        735
+       ],
+       "n_fresh": 481,
+       "r_2fold": 1.3,
+       "r_fresh": 0.6,
+       "late": 0,
+       "volume_cells": 183214,
+       "nt": 14,
+       "extent": [
+        -4.05,
+        -4.35,
+        5.5,
+        5.15
+       ]
+      },
+      "1": {
+       "n": [
+        12,
+        21
+       ],
+       "n_fresh": 10,
+       "r_2fold": 0.6,
+       "r_fresh": 0.05,
+       "late": 0,
+       "volume_cells": 55831,
+       "nt": 14,
+       "extent": [
+        -3.6,
+        -1.5,
+        3.05,
+        4.0
+       ]
+      },
+      "15": {
+       "n": [
+        21,
+        18
+       ],
+       "n_fresh": 7,
+       "r_2fold": 1.8,
+       "r_fresh": 0.15,
+       "late": 0,
+       "volume_cells": 56355,
+       "nt": 14,
+       "extent": [
+        -3.6,
+        -3.25,
+        2.85,
+        3.7
+       ]
+      }
+     },
+     "used": [
+      0,
+      1,
+      15
+     ]
+    },
+    {
+     "state": "Slash Recover",
+     "n": [
+      832,
+      781
+     ],
+     "n_fresh": 507,
+     "volume_all": 109647,
+     "expected": 175703,
+     "cover": 0.971,
+     "bins": {
+      "0": {
+       "n": [
+        513,
+        490
+       ],
+       "n_fresh": 330,
+       "r_2fold": 0.75,
+       "r_fresh": 0.1,
+       "late": 0,
+       "volume_cells": 99610,
+       "nt": 12,
+       "extent": [
+        -1.8,
+        -4.0,
+        4.5,
+        4.4
+       ]
+      },
+      "1": {
+       "n": [
+        172,
+        154
+       ],
+       "n_fresh": 88,
+       "r_2fold": 0.85,
+       "r_fresh": 0.1,
+       "late": 0,
+       "volume_cells": 63787,
+       "nt": 12,
+       "extent": [
+        -0.4,
+        -2.3,
+        4.4,
+        5.05
+       ]
+      },
+      "15": {
+       "n": [
+        126,
+        112
+       ],
+       "n_fresh": 73,
+       "r_2fold": 1.6,
+       "r_fresh": 0.15,
+       "late": 0,
+       "volume_cells": 80678,
+       "nt": 12,
+       "extent": [
+        -1.8,
+        -3.55,
+        4.35,
+        4.15
+       ]
+      }
+     },
+     "used": [
+      0,
+      1,
+      15
+     ]
+    }
+   ],
+   "chosen": [
+    "Slash 1",
+    "Slash 2",
+    "Slash 4",
+    "Slash 5",
+    "Slash Recover"
+   ],
+   "keys": [
+    "support/CM_SLASH/aim@Slash 1#0/anchor",
+    "support/CM_SLASH/aim@Slash 2#0/anchor",
+    "support/CM_SLASH/aim@Slash 4#0/anchor",
+    "support/CM_SLASH/aim@Slash 5#0/anchor",
+    "support/CM_SLASH/aim@Slash 5#1/anchor",
+    "support/CM_SLASH/aim@Slash 5#15/anchor",
+    "support/CM_SLASH/aim@Slash Recover#0/anchor",
+    "support/CM_SLASH/aim@Slash Recover#1/anchor",
+    "support/CM_SLASH/aim@Slash Recover#15/anchor"
+   ],
+   "r": {
+    "Slash 1": {
+     "0": 2.2
+    },
+    "Slash 2": {
+     "0": 2.8
+    },
+    "Slash 4": {
+     "0": 1.7
+    },
+    "Slash 5": {
+     "0": 1.3,
+     "1": 0.6,
+     "15": 1.8
+    },
+    "Slash Recover": {
+     "0": 0.75,
+     "1": 0.85,
+     "15": 1.6
+    }
+   }
+  },
+  "Song Handmaiden|CM_SPIN": {
+   "candidates": [
+    {
+     "state": "Spin 0",
+     "n": [
+      394,
+      373
+     ],
+     "n_fresh": 251,
+     "volume_all": 43584087,
+     "expected": 174336348,
+     "cover": 0.0,
+     "bins": {
+      "0": {
+       "n": [
+        34,
+        30
+       ],
+       "n_fresh": 15,
+       "r_2fold": Infinity,
+       "r_fresh": 18.95,
+       "late": 72,
+       "volume_cells": 11100269,
+       "nt": 381,
+       "extent": [
+        -16.5,
+        -8.85,
+        20.0,
+        10.3
+       ]
+      },
+      "1": {
+       "n": [
+        13,
+        18
+       ],
+       "n_fresh": 11,
+       "r_2fold": Infinity,
+       "r_fresh": 22.9,
+       "late": 203,
+       "volume_cells": 7031415,
+       "nt": 392,
+       "extent": [
+        -10.65,
+        -8.95,
+        20.0,
+        9.55
+       ]
+      },
+      "2": {
+       "n": [
+        16,
+        18
+       ],
+       "n_fresh": 12,
+       "r_2fold": Infinity,
+       "r_fresh": 6.15,
+       "late": 118,
+       "volume_cells": 7965827,
+       "nt": 413,
+       "extent": [
+        -12.35,
+        -7.9,
+        20.0,
+        9.45
+       ]
+      },
+      "3": {
+       "n": [
+        21,
+        21
+       ],
+       "n_fresh": 13,
+       "r_2fold": Infinity,
+       "r_fresh": 6.5,
+       "late": 6,
+       "volume_cells": 8670903,
+       "nt": 267,
+       "extent": [
+        -13.55,
+        -11.1,
+        19.95,
+        7.45
+       ]
+      },
+      "4": {
+       "n": [
+        27,
+        39
+       ],
+       "n_fresh": 16,
+       "r_2fold": Infinity,
+       "r_fresh": Infinity,
+       "late": 98,
+       "volume_cells": 12944900,
+       "nt": 271,
+       "extent": [
+        -20.0,
+        -9.25,
+        20.0,
+        10.2
+       ]
+      },
+      "12": {
+       "n": [
+        78,
+        72
+       ],
+       "n_fresh": 47,
+       "r_2fold": Infinity,
+       "r_fresh": Infinity,
+       "late": 0,
+       "volume_cells": 26524706,
+       "nt": 442,
+       "extent": [
+        -20.0,
+        -10.3,
+        20.0,
+        10.8
+       ]
+      },
+      "13": {
+       "n": [
+        60,
+        40
+       ],
+       "n_fresh": 29,
+       "r_2fold": Infinity,
+       "r_fresh": Infinity,
+       "late": 56,
+       "volume_cells": 19654107,
+       "nt": 355,
+       "extent": [
+        -20.0,
+        -11.55,
+        20.0,
+        9.35
+       ]
+      },
+      "14": {
+       "n": [
+        58,
+        49
+       ],
+       "n_fresh": 41,
+       "r_2fold": Infinity,
+       "r_fresh": Infinity,
+       "late": 345,
+       "volume_cells": 16933241,
+       "nt": 500,
+       "extent": [
+        -17.95,
+        -9.85,
+        20.0,
+        10.1
+       ]
+      },
+      "15": {
+       "n": [
+        25,
+        25
+       ],
+       "n_fresh": 17,
+       "r_2fold": Infinity,
+       "r_fresh": 4.3,
+       "late": 226,
+       "volume_cells": 10799015,
+       "nt": 400,
+       "extent": [
+        -16.05,
+        -8.2,
+        20.0,
+        8.9
+       ]
+      },
+      "16": {
+       "n": [
+        62,
+        61
+       ],
+       "n_fresh": 50,
+       "r_2fold": Infinity,
+       "r_fresh": Infinity,
+       "late": 111,
+       "volume_cells": 19962512,
+       "nt": 445,
+       "extent": [
+        -20.0,
+        -13.25,
+        20.0,
+        10.15
+       ]
+      }
+     },
+     "used": []
+    },
+    {
+     "state": "Spin 1",
+     "n": [
+      372,
+      355
+     ],
+     "n_fresh": 241,
+     "volume_all": 31007998,
+     "expected": 124031992,
+     "cover": 0.0,
+     "bins": {
+      "0": {
+       "n": [
+        40,
+        38
+       ],
+       "n_fresh": 24,
+       "r_2fold": Infinity,
+       "r_fresh": 15.0,
+       "late": 96,
+       "volume_cells": 10788943,
+       "nt": 405,
+       "extent": [
+        -15.7,
+        -9.75,
+        19.7,
+        10.05
+       ]
+      },
+      "1": {
+       "n": [
+        59,
+        54
+       ],
+       "n_fresh": 41,
+       "r_2fold": Infinity,
+       "r_fresh": 9.2,
+       "late": 3,
+       "volume_cells": 13774808,
+       "nt": 383,
+       "extent": [
+        -16.9,
+        -10.1,
+        20.0,
+        11.45
+       ]
+      },
+      "2": {
+       "n": [
+        77,
+        64
+       ],
+       "n_fresh": 37,
+       "r_2fold": Infinity,
+       "r_fresh": 17.95,
+       "late": 219,
+       "volume_cells": 15017848,
+       "nt": 431,
+       "extent": [
+        -18.4,
+        -10.7,
+        18.25,
+        11.65
+       ]
+      },
+      "3": {
+       "n": [
+        28,
+        27
+       ],
+       "n_fresh": 24,
+       "r_2fold": Infinity,
+       "r_fresh": 4.85,
+       "late": 34,
+       "volume_cells": 8310621,
+       "nt": 243,
+       "extent": [
+        -18.4,
+        -9.9,
+        15.95,
+        11.55
+       ]
+      },
+      "4": {
+       "n": [
+        18,
+        13
+       ],
+       "n_fresh": 18,
+       "r_2fold": Infinity,
+       "r_fresh": 8.7,
+       "late": 270,
+       "volume_cells": 5675588,
+       "nt": 379,
+       "extent": [
+        -19.9,
+        -7.6,
+        11.35,
+        10.5
+       ]
+      },
+      "12": {
+       "n": [
+        9,
+        15
+       ],
+       "n_fresh": 10,
+       "r_2fold": Infinity,
+       "r_fresh": Infinity,
+       "late": 81,
+       "volume_cells": 4050437,
+       "nt": 275,
+       "extent": [
+        -18.35,
+        -8.8,
+        12.05,
+        8.7
+       ]
+      },
+      "13": {
+       "n": [
+        38,
+        36
+       ],
+       "n_fresh": 25,
+       "r_2fold": Infinity,
+       "r_fresh": Infinity,
+       "late": 41,
+       "volume_cells": 10204599,
+       "nt": 231,
+       "extent": [
+        -16.55,
+        -10.6,
+        18.95,
+        8.15
+       ]
+      },
+      "14": {
+       "n": [
+        51,
+        63
+       ],
+       "n_fresh": 34,
+       "r_2fold": Infinity,
+       "r_fresh": 4.15,
+       "late": 12,
+       "volume_cells": 13361190,
+       "nt": 370,
+       "extent": [
+        -16.0,
+        -10.8,
+        20.0,
+        9.5
+       ]
+      },
+      "15": {
+       "n": [
+        52,
+        41
+       ],
+       "n_fresh": 25,
+       "r_2fold": Infinity,
+       "r_fresh": 7.35,
+       "late": 62,
+       "volume_cells": 12417991,
+       "nt": 403,
+       "extent": [
+        -16.1,
+        -10.4,
+        20.0,
+        9.9
+       ]
+      }
+     },
+     "used": []
+    },
+    {
+     "state": "Spin 2",
+     "n": [
+      352,
+      336
+     ],
+     "n_fresh": 231,
+     "volume_all": 20023759,
+     "expected": 80095036,
+     "cover": 0.0,
+     "bins": {
+      "0": {
+       "n": [
+        41,
+        36
+       ],
+       "n_fresh": 28,
+       "r_2fold": Infinity,
+       "r_fresh": Infinity,
+       "late": 82,
+       "volume_cells": 5731709,
+       "nt": 298,
+       "extent": [
+        -7.7,
+        -8.6,
+        17.65,
+        9.0
+       ]
+      },
+      "1": {
+       "n": [
+        45,
+        44
+       ],
+       "n_fresh": 29,
+       "r_2fold": Infinity,
+       "r_fresh": 8.4,
+       "late": 75,
+       "volume_cells": 9388634,
+       "nt": 343,
+       "extent": [
+        -20.0,
+        -8.8,
+        20.0,
+        10.25
+       ]
+      },
+      "2": {
+       "n": [
+        59,
+        64
+       ],
+       "n_fresh": 36,
+       "r_2fold": Infinity,
+       "r_fresh": 11.05,
+       "late": 86,
+       "volume_cells": 7352079,
+       "nt": 317,
+       "extent": [
+        -18.25,
+        -8.7,
+        15.3,
+        10.5
+       ]
+      },
+      "3": {
+       "n": [
+        35,
+        24
+       ],
+       "n_fresh": 15,
+       "r_2fold": Infinity,
+       "r_fresh": 2.8,
+       "late": 53,
+       "volume_cells": 5223307,
+       "nt": 251,
+       "extent": [
+        -14.7,
+        -8.15,
+        14.05,
+        8.35
+       ]
+      },
+      "4": {
+       "n": [
+        12,
+        14
+       ],
+       "n_fresh": 5,
+       "r_2fold": Infinity,
+       "r_fresh": 2.35,
+       "late": 14,
+       "volume_cells": 3008844,
+       "nt": 152,
+       "extent": [
+        -14.35,
+        -7.8,
+        12.1,
+        9.1
+       ]
+      },
+      "12": {
+       "n": [
+        13,
+        13
+       ],
+       "n_fresh": 10,
+       "r_2fold": Infinity,
+       "r_fresh": 3.75,
+       "late": 243,
+       "volume_cells": 4249975,
+       "nt": 369,
+       "extent": [
+        -20.0,
+        -7.65,
+        19.95,
+        7.95
+       ]
+      },
+      "13": {
+       "n": [
+        31,
+        38
+       ],
+       "n_fresh": 26,
+       "r_2fold": Infinity,
+       "r_fresh": 8.0,
+       "late": 7,
+       "volume_cells": 5771427,
+       "nt": 221,
+       "extent": [
+        -16.2,
+        -9.7,
+        14.15,
+        10.25
+       ]
+      },
+      "14": {
+       "n": [
+        65,
+        61
+       ],
+       "n_fresh": 36,
+       "r_2fold": Infinity,
+       "r_fresh": 3.5,
+       "late": 47,
+       "volume_cells": 6982373,
+       "nt": 257,
+       "extent": [
+        -11.5,
+        -8.6,
+        15.55,
+        8.5
+       ]
+      },
+      "15": {
+       "n": [
+        48,
+        38
+       ],
+       "n_fresh": 43,
+       "r_2fold": Infinity,
+       "r_fresh": 3.8,
+       "late": 128,
+       "volume_cells": 6077147,
+       "nt": 295,
+       "extent": [
+        -20.0,
+        -8.85,
+        15.6,
+        8.55
+       ]
+      }
+     },
+     "used": []
+    },
+    {
+     "state": "Spin Wind Down",
+     "n": [
+      263,
+      238
+     ],
+     "n_fresh": 169,
+     "volume_all": 2763987,
+     "expected": 7965231,
+     "cover": 0.585,
+     "bins": {
+      "0": {
+       "n": [
+        29,
+        19
+       ],
+       "n_fresh": 10,
+       "r_2fold": 3.2,
+       "r_fresh": 1.25,
+       "late": 0,
+       "volume_cells": 1126259,
+       "nt": 75,
+       "extent": [
+        -5.6,
+        -4.75,
+        5.0,
+        7.7
+       ]
+      },
+      "1": {
+       "n": [
+        21,
+        18
+       ],
+       "n_fresh": 22,
+       "r_2fold": 3.5,
+       "r_fresh": 2.0,
+       "late": 0,
+       "volume_cells": 1031138,
+       "nt": 75,
+       "extent": [
+        -2.85,
+        -4.5,
+        8.1,
+        9.3
+       ]
+      },
+      "2": {
+       "n": [
+        51,
+        54
+       ],
+       "n_fresh": 39,
+       "r_2fold": 1.45,
+       "r_fresh": 1.35,
+       "late": 0,
+       "volume_cells": 1762913,
+       "nt": 75,
+       "extent": [
+        -3.05,
+        -4.0,
+        8.4,
+        8.0
+       ]
+      },
+      "3": {
+       "n": [
+        17,
+        20
+       ],
+       "n_fresh": 13,
+       "r_2fold": 3.55,
+       "r_fresh": 1.6,
+       "late": 0,
+       "volume_cells": 1244878,
+       "nt": 75,
+       "extent": [
+        -4.15,
+        -3.35,
+        7.55,
+        9.05
+       ]
+      },
+      "12": {
+       "n": [
+        10,
+        12
+       ],
+       "n_fresh": 10,
+       "r_2fold": 3.8,
+       "r_fresh": 3.45,
+       "late": 0,
+       "volume_cells": 978358,
+       "nt": 75,
+       "extent": [
+        -7.85,
+        -5.25,
+        6.95,
+        4.95
+       ]
+      },
+      "13": {
+       "n": [
+        20,
+        18
+       ],
+       "n_fresh": 13,
+       "r_2fold": 3.55,
+       "r_fresh": 2.05,
+       "late": 0,
+       "volume_cells": 1312912,
+       "nt": 75,
+       "extent": [
+        -4.05,
+        -6.95,
+        8.2,
+        5.25
+       ]
+      },
+      "14": {
+       "n": [
+        73,
+        53
+       ],
+       "n_fresh": 38,
+       "r_2fold": 2.75,
+       "r_fresh": 1.55,
+       "late": 0,
+       "volume_cells": 1830941,
+       "nt": 75,
+       "extent": [
+        -3.7,
+        -5.35,
+        8.5,
+        7.25
+       ]
+      },
+      "15": {
+       "n": [
+        27,
+        35
+       ],
+       "n_fresh": 18,
+       "r_2fold": 2.75,
+       "r_fresh": 1.3,
+       "late": 0,
+       "volume_cells": 1601352,
+       "nt": 75,
+       "extent": [
+        -3.9,
+        -5.5,
+        7.35,
+        7.9
+       ]
+      }
+     },
+     "used": [
+      2,
+      14,
+      15
+     ]
+    },
+    {
+     "state": "Spin End",
+     "n": [
+      262,
+      235
+     ],
+     "n_fresh": 167,
+     "volume_all": 1277593,
+     "expected": 4602324,
+     "cover": 0.165,
+     "bins": {
+      "0": {
+       "n": [
+        26,
+        28
+       ],
+       "n_fresh": 16,
+       "r_2fold": 3.5,
+       "r_fresh": 2.15,
+       "late": 0,
+       "volume_cells": 734673,
+       "nt": 56,
+       "extent": [
+        -4.3,
+        -4.55,
+        7.0,
+        7.15
+       ]
+      },
+      "1": {
+       "n": [
+        35,
+        33
+       ],
+       "n_fresh": 20,
+       "r_2fold": 3.6,
+       "r_fresh": 0.9,
+       "late": 0,
+       "volume_cells": 715381,
+       "nt": 56,
+       "extent": [
+        -2.0,
+        -4.45,
+        7.0,
+        6.9
+       ]
+      },
+      "2": {
+       "n": [
+        42,
+        43
+       ],
+       "n_fresh": 30,
+       "r_2fold": 2.45,
+       "r_fresh": 3.4,
+       "late": 0,
+       "volume_cells": 550687,
+       "nt": 56,
+       "extent": [
+        -1.85,
+        -2.55,
+        3.4,
+        6.95
+       ]
+      },
+      "3": {
+       "n": [
+        15,
+        14
+       ],
+       "n_fresh": 21,
+       "r_2fold": 2.4,
+       "r_fresh": 1.95,
+       "late": 0,
+       "volume_cells": 459807,
+       "nt": 56,
+       "extent": [
+        -2.45,
+        -2.35,
+        3.15,
+        5.3
+       ]
+      },
+      "13": {
+       "n": [
+        25,
+        28
+       ],
+       "n_fresh": 12,
+       "r_2fold": 2.7,
+       "r_fresh": 2.2,
+       "late": 0,
+       "volume_cells": 618122,
+       "nt": 56,
+       "extent": [
+        -2.45,
+        -5.5,
+        3.95,
+        5.55
+       ]
+      },
+      "14": {
+       "n": [
+        62,
+        44
+       ],
+       "n_fresh": 32,
+       "r_2fold": 3.25,
+       "r_fresh": 3.1,
+       "late": 0,
+       "volume_cells": 782457,
+       "nt": 56,
+       "extent": [
+        -3.75,
+        -3.75,
+        7.0,
+        7.45
+       ]
+      },
+      "15": {
+       "n": [
+        42,
+        27
+       ],
+       "n_fresh": 21,
+       "r_2fold": 2.0,
+       "r_fresh": 3.6,
+       "late": 0,
+       "volume_cells": 666201,
+       "nt": 56,
+       "extent": [
+        -2.35,
+        -3.25,
+        4.55,
+        5.55
+       ]
+      }
+     },
+     "used": [
+      3,
+      13
+     ]
+    },
+    {
+     "state": "Spear Cast Antic",
+     "n": [
+      260,
+      235
+     ],
+     "n_fresh": 167,
+     "volume_all": 447440,
+     "expected": 1444009,
+     "cover": 0.941,
+     "bins": {
+      "2": {
+       "n": [
+        235,
+        206
+       ],
+       "n_fresh": 144,
+       "r_2fold": 2.4,
+       "r_fresh": 0.9,
+       "late": 0,
+       "volume_cells": 434445,
+       "nt": 41,
+       "extent": [
+        -2.45,
+        -4.0,
+        4.75,
+        7.9
+       ]
+      },
+      "3": {
+       "n": [
+        14,
+        15
+       ],
+       "n_fresh": 15,
+       "r_2fold": 3.3,
+       "r_fresh": 1.6,
+       "late": 0,
+       "volume_cells": 182254,
+       "nt": 41,
+       "extent": [
+        -1.85,
+        -3.45,
+        4.25,
+        5.5
+       ]
+      },
+      "4": {
+       "n": [
+        11,
+        14
+       ],
+       "n_fresh": 8,
+       "r_2fold": 2.25,
+       "r_fresh": 0.0,
+       "late": 0,
+       "volume_cells": 141227,
+       "nt": 41,
+       "extent": [
+        -1.95,
+        -1.5,
+        2.55,
+        4.45
+       ]
+      }
+     },
+     "used": [
+      2,
+      4
+     ]
+    },
+    {
+     "state": "Spear Fire Recover",
+     "n": [
+      258,
+      234
+     ],
+     "n_fresh": 165,
+     "volume_all": 114662,
+     "expected": 320761,
+     "cover": 1.0,
+     "bins": {
+      "0": {
+       "n": [
+        21,
+        27
+       ],
+       "n_fresh": 17,
+       "r_2fold": 2.2,
+       "r_fresh": 0.55,
+       "late": 0,
+       "volume_cells": 48377,
+       "nt": 14,
+       "extent": [
+        -1.6,
+        -2.1,
+        1.6,
+        4.0
+       ]
+      },
+      "16": {
+       "n": [
+        237,
+        207
+       ],
+       "n_fresh": 148,
+       "r_2fold": 2.25,
+       "r_fresh": 0.0,
+       "late": 0,
+       "volume_cells": 104216,
+       "nt": 14,
+       "extent": [
+        -4.15,
+        -3.6,
+        2.8,
+        4.75
+       ]
+      }
+     },
+     "used": [
+      0,
+      16
+     ]
+    },
+    {
+     "state": "Spin Cancel",
+     "n": [
+      98,
+      98
+     ],
+     "n_fresh": 61,
+     "volume_all": 182187,
+     "expected": 335541,
+     "cover": 0.648,
+     "bins": {
+      "0": {
+       "n": [
+        10,
+        16
+       ],
+       "n_fresh": 7,
+       "r_2fold": 0.15,
+       "r_fresh": 0.15,
+       "late": 0,
+       "volume_cells": 41282,
+       "nt": 21,
+       "extent": [
+        -0.55,
+        -1.65,
+        1.45,
+        1.95
+       ]
+      },
+      "1": {
+       "n": [
+        15,
+        10
+       ],
+       "n_fresh": 11,
+       "r_2fold": 0.15,
+       "r_fresh": 0.05,
+       "late": 0,
+       "volume_cells": 44773,
+       "nt": 21,
+       "extent": [
+        -0.55,
+        -1.5,
+        1.45,
+        2.35
+       ]
+      },
+      "2": {
+       "n": [
+        23,
+        14
+       ],
+       "n_fresh": 7,
+       "r_2fold": 3.6,
+       "r_fresh": 0.15,
+       "late": 0,
+       "volume_cells": 106115,
+       "nt": 21,
+       "extent": [
+        -2.05,
+        -1.5,
+        5.05,
+        4.85
+       ]
+      },
+      "13": {
+       "n": [
+        9,
+        9
+       ],
+       "n_fresh": 6,
+       "r_2fold": 1.35,
+       "r_fresh": 0.0,
+       "late": 0,
+       "volume_cells": 53403,
+       "nt": 21,
+       "extent": [
+        -0.55,
+        -2.4,
+        1.05,
+        3.95
+       ]
+      },
+      "14": {
+       "n": [
+        16,
+        20
+       ],
+       "n_fresh": 16,
+       "r_2fold": 2.05,
+       "r_fresh": 2.1,
+       "late": 0,
+       "volume_cells": 70074,
+       "nt": 21,
+       "extent": [
+        -0.55,
+        -2.4,
+        3.45,
+        1.75
+       ]
+      },
+      "15": {
+       "n": [
+        9,
+        13
+       ],
+       "n_fresh": 10,
+       "r_2fold": 1.45,
+       "r_fresh": 1.3,
+       "late": 0,
+       "volume_cells": 53464,
+       "nt": 21,
+       "extent": [
+        -0.55,
+        -2.05,
+        1.45,
+        3.7
+       ]
+      }
+     },
+     "used": [
+      0,
+      1,
+      13,
+      14,
+      15
+     ]
+    }
+   ],
+   "chosen": [
+    "Spear Cast Antic",
+    "Spear Fire Recover"
+   ],
+   "keys": [
+    "support/CM_SPIN/aim@Spear Cast Antic#2/anchor",
+    "support/CM_SPIN/aim@Spear Cast Antic#4/anchor",
+    "support/CM_SPIN/aim@Spear Fire Recover#0/anchor",
+    "support/CM_SPIN/aim@Spear Fire Recover#16/anchor"
+   ],
+   "r": {
+    "Spear Cast Antic": {
+     "2": 2.4,
+     "4": 2.25
+    },
+    "Spear Fire Recover": {
+     "0": 2.2,
+     "16": 2.25
+    }
+   }
+  },
+  "Song Administrator|MI_CHARGE": {
+   "candidates": [
+    {
+     "state": "Attack",
+     "n": [
+      1334,
+      1253
+     ],
+     "n_fresh": 816,
+     "volume_all": 3498364,
+     "expected": 10600984,
+     "cover": 0.388,
+     "bins": {
+      "0": {
+       "n": [
+        412,
+        380
+       ],
+       "n_fresh": 245,
+       "r_2fold": 3.5,
+       "r_fresh": 1.85,
+       "late": 0,
+       "volume_cells": 1283085,
+       "nt": 59,
+       "extent": [
+        -1.75,
+        -6.65,
+        12.35,
+        8.65
+       ]
+      },
+      "1": {
+       "n": [
+        199,
+        191
+       ],
+       "n_fresh": 120,
+       "r_2fold": 2.9,
+       "r_fresh": 2.2,
+       "late": 0,
+       "volume_cells": 1402774,
+       "nt": 58,
+       "extent": [
+        -2.0,
+        -2.4,
+        12.35,
+        11.0
+       ]
+      },
+      "2": {
+       "n": [
+        106,
+        102
+       ],
+       "n_fresh": 57,
+       "r_2fold": 3.7,
+       "r_fresh": 1.8,
+       "late": 0,
+       "volume_cells": 1485699,
+       "nt": 58,
+       "extent": [
+        -3.5,
+        -2.9,
+        11.45,
+        11.65
+       ]
+      },
+      "14": {
+       "n": [
+        312,
+        272
+       ],
+       "n_fresh": 224,
+       "r_2fold": 3.1,
+       "r_fresh": 2.3,
+       "late": 0,
+       "volume_cells": 1390165,
+       "nt": 59,
+       "extent": [
+        -2.3,
+        -11.05,
+        13.55,
+        2.35
+       ]
+      },
+      "15": {
+       "n": [
+        305,
+        308
+       ],
+       "n_fresh": 170,
+       "r_2fold": 2.55,
+       "r_fresh": 2.2,
+       "late": 0,
+       "volume_cells": 1436249,
+       "nt": 59,
+       "extent": [
+        -2.0,
+        -8.4,
+        12.0,
+        6.75
+       ]
+      }
+     },
+     "used": [
+      1,
+      15
+     ]
+    },
+    {
+     "state": "Multihit",
+     "n": [
+      423,
+      408
+     ],
+     "damage": false
+    },
+    {
+     "state": "Attack End",
+     "n": [
+      877,
+      810
+     ],
+     "n_fresh": 532,
+     "volume_all": 232794,
+     "expected": 562885,
+     "cover": 0.933,
+     "bins": {
+      "0": {
+       "n": [
+        250,
+        231
+       ],
+       "n_fresh": 151,
+       "r_2fold": 1.35,
+       "r_fresh": 0.9,
+       "late": 0,
+       "volume_cells": 163555,
+       "nt": 17,
+       "extent": [
+        -5.3,
+        -3.45,
+        3.65,
+        4.2
+       ]
+      },
+      "1": {
+       "n": [
+        127,
+        118
+       ],
+       "n_fresh": 78,
+       "r_2fold": 1.65,
+       "r_fresh": 3.0,
+       "late": 0,
+       "volume_cells": 121117,
+       "nt": 17,
+       "extent": [
+        -4.15,
+        -2.15,
+        3.0,
+        4.75
+       ]
+      },
+      "2": {
+       "n": [
+        60,
+        52
+       ],
+       "n_fresh": 31,
+       "r_2fold": 3.5,
+       "r_fresh": 0.55,
+       "late": 0,
+       "volume_cells": 110711,
+       "nt": 17,
+       "extent": [
+        -4.25,
+        -4.3,
+        1.35,
+        4.6
+       ]
+      },
+      "4": {
+       "n": [
+        9,
+        15
+       ],
+       "n_fresh": 6,
+       "r_2fold": 2.2,
+       "r_fresh": 0.05,
+       "late": 0,
+       "volume_cells": 84781,
+       "nt": 17,
+       "extent": [
+        -1.3,
+        -4.3,
+        1.95,
+        3.4
+       ]
+      },
+      "12": {
+       "n": [
+        12,
+        10
+       ],
+       "n_fresh": 7,
+       "r_2fold": 1.2,
+       "r_fresh": 0.0,
+       "late": 0,
+       "volume_cells": 52944,
+       "nt": 17,
+       "extent": [
+        -1.05,
+        -2.7,
+        1.1,
+        3.15
+       ]
+      },
+      "14": {
+       "n": [
+        218,
+        181
+       ],
+       "n_fresh": 144,
+       "r_2fold": 2.8,
+       "r_fresh": 0.3,
+       "late": 0,
+       "volume_cells": 168310,
+       "nt": 17,
+       "extent": [
+        -4.25,
+        -5.75,
+        4.75,
+        3.75
+       ]
+      },
+      "15": {
+       "n": [
+        190,
+        194
+       ],
+       "n_fresh": 109,
+       "r_2fold": 2.65,
+       "r_fresh": 0.2,
+       "late": 0,
+       "volume_cells": 195033,
+       "nt": 17,
+       "extent": [
+        -4.1,
+        -4.75,
+        4.9,
+        5.35
+       ]
+      },
+      "16": {
+       "n": [
+        10,
+        9
+       ],
+       "n_fresh": 6,
+       "r_2fold": 1.5,
+       "r_fresh": 2.7,
+       "late": 0,
+       "volume_cells": 45124,
+       "nt": 17,
+       "extent": [
+        -1.35,
+        -3.75,
+        0.65,
+        2.1
+       ]
+      }
+     },
+     "used": [
+      0,
+      1,
+      4,
+      12,
+      14,
+      15,
+      16
+     ]
+    }
+   ],
+   "chosen": [
+    "Attack End"
+   ],
+   "keys": [
+    "support/MI_CHARGE/aim@Attack End#0/anchor",
+    "support/MI_CHARGE/aim@Attack End#1/anchor",
+    "support/MI_CHARGE/aim@Attack End#4/anchor",
+    "support/MI_CHARGE/aim@Attack End#12/anchor",
+    "support/MI_CHARGE/aim@Attack End#14/anchor",
+    "support/MI_CHARGE/aim@Attack End#15/anchor",
+    "support/MI_CHARGE/aim@Attack End#16/anchor"
+   ],
+   "r": {
+    "Attack End": {
+     "0": 1.35,
+     "1": 3.0,
+     "4": 2.2,
+     "12": 1.2,
+     "14": 2.8,
+     "15": 2.65,
+     "16": 2.7
+    }
+   }
+  },
+  "Song Administrator|MI_PARRY": {
+   "candidates": [],
+   "chosen": []
+  },
+  "Song Pilgrim Maestro|MA_SLASH": {
+   "candidates": [
+    {
+     "state": "Slash 1",
+     "n": [
+      3857,
+      4065
+     ],
+     "n_fresh": 2627,
+     "volume_all": 559662,
+     "expected": 1623020,
+     "cover": 1.0,
+     "bins": {
+      "0": {
+       "n": [
+        3857,
+        4065
+       ],
+       "n_fresh": 2627,
+       "r_2fold": 1.9,
+       "r_fresh": 1.55,
+       "late": 0,
+       "volume_cells": 559662,
+       "nt": 38,
+       "extent": [
+        -5.4,
+        -3.05,
+        7.9,
+        4.2
+       ]
+      }
+     },
+     "used": [
+      0
+     ]
+    },
+    {
+     "state": "Slash 2",
+     "n": [
+      3854,
+      4059
+     ],
+     "n_fresh": 2621,
+     "volume_all": 415699,
+     "expected": 997846,
+     "cover": 1.0,
+     "bins": {
+      "0": {
+       "n": [
+        3854,
+        4057
+       ],
+       "n_fresh": 2621,
+       "r_2fold": 1.4,
+       "r_fresh": 1.35,
+       "late": 0,
+       "volume_cells": 415699,
+       "nt": 34,
+       "extent": [
+        -5.0,
+        -3.0,
+        6.4,
+        4.2
+       ]
+      }
+     },
+     "used": [
+      0
+     ]
+    },
+    {
+     "state": "Slash End",
+     "n": [
+      3851,
+      4058
+     ],
+     "n_fresh": 2620,
+     "volume_all": 255938,
+     "expected": 536922,
+     "cover": 0.999,
+     "bins": {
+      "0": {
+       "n": [
+        3850,
+        4055
+       ],
+       "n_fresh": 2620,
+       "r_2fold": 1.1,
+       "r_fresh": 1.0,
+       "late": 0,
+       "volume_cells": 255560,
+       "nt": 28,
+       "extent": [
+        -2.8,
+        -3.0,
+        4.65,
+        4.25
+       ]
+      }
+     },
+     "used": [
+      0
+     ]
+    },
+    {
+     "state": "Slash Recover",
+     "n": [
+      879,
+      861
+     ],
+     "n_fresh": 594,
+     "volume_all": 104867,
+     "expected": 278055,
+     "cover": 0.999,
+     "bins": {
+      "0": {
+       "n": [
+        878,
+        860
+       ],
+       "n_fresh": 594,
+       "r_2fold": 1.65,
+       "r_fresh": 0.45,
+       "late": 0,
+       "volume_cells": 104865,
+       "nt": 17,
+       "extent": [
+        -2.9,
+        -2.5,
+        2.85,
+        3.1
+       ]
+      }
+     },
+     "used": [
+      0
+     ]
+    },
+    {
+     "state": "Slash Recover F",
+     "n": [
+      2964,
+      3191
+     ],
+     "n_fresh": 2012,
+     "volume_all": 131222,
+     "expected": 249587,
+     "cover": 0.999,
+     "bins": {
+      "0": {
+       "n": [
+        2962,
+        3187
+       ],
+       "n_fresh": 2012,
+       "r_2fold": 0.9,
+       "r_fresh": 0.45,
+       "late": 0,
+       "volume_cells": 131220,
+       "nt": 17,
+       "extent": [
+        -3.3,
+        -2.75,
+        3.65,
+        3.35
+       ]
+      }
+     },
+     "used": [
+      0
+     ]
+    }
+   ],
+   "chosen": [
+    "Slash 1",
+    "Slash 2",
+    "Slash End",
+    "Slash Recover",
+    "Slash Recover F"
+   ],
+   "keys": [
+    "support/MA_SLASH/aim@Slash 1#0/anchor",
+    "support/MA_SLASH/aim@Slash 2#0/anchor",
+    "support/MA_SLASH/aim@Slash End#0/anchor",
+    "support/MA_SLASH/aim@Slash Recover#0/anchor",
+    "support/MA_SLASH/aim@Slash Recover F#0/anchor"
+   ],
+   "r": {
+    "Slash 1": {
+     "0": 1.9
+    },
+    "Slash 2": {
+     "0": 1.4
+    },
+    "Slash End": {
+     "0": 1.1
+    },
+    "Slash Recover": {
+     "0": 1.65
+    },
+    "Slash Recover F": {
+     "0": 0.9
+    }
+   }
+  },
+  "Song Pilgrim Maestro|MA_DEFEND": {
+   "candidates": [
+    {
+     "state": "Defending",
+     "n": [
+      1637,
+      1721
+     ],
+     "n_fresh": 1125,
+     "volume_all": 5210227,
+     "expected": 13808499,
+     "cover": 0.891,
+     "bins": {
+      "0": {
+       "n": [
+        50,
+        66
+       ],
+       "n_fresh": 25,
+       "r_2fold": 2.25,
+       "r_fresh": 0.95,
+       "late": 0,
+       "volume_cells": 2428721,
+       "nt": 139,
+       "extent": [
+        -10.35,
+        -3.55,
+        11.85,
+        3.0
+       ]
+      },
+      "1": {
+       "n": [
+        172,
+        170
+       ],
+       "n_fresh": 119,
+       "r_2fold": 2.0,
+       "r_fresh": 1.8,
+       "late": 0,
+       "volume_cells": 3003317,
+       "nt": 139,
+       "extent": [
+        -10.9,
+        -2.0,
+        12.0,
+        5.6
+       ]
+      },
+      "2": {
+       "n": [
+        173,
+        194
+       ],
+       "n_fresh": 120,
+       "r_2fold": 3.45,
+       "r_fresh": 1.4,
+       "late": 0,
+       "volume_cells": 3083086,
+       "nt": 139,
+       "extent": [
+        -10.4,
+        -4.3,
+        10.7,
+        7.55
+       ]
+      },
+      "15": {
+       "n": [
+        53,
+        45
+       ],
+       "n_fresh": 24,
+       "r_2fold": 1.55,
+       "r_fresh": 0.85,
+       "late": 0,
+       "volume_cells": 2177268,
+       "nt": 140,
+       "extent": [
+        -10.45,
+        -3.65,
+        11.7,
+        2.55
+       ]
+      },
+      "16": {
+       "n": [
+        1189,
+        1246
+       ],
+       "n_fresh": 837,
+       "r_2fold": 2.0,
+       "r_fresh": 1.85,
+       "late": 0,
+       "volume_cells": 4678877,
+       "nt": 139,
+       "extent": [
+        -10.55,
+        -4.0,
+        13.05,
+        5.75
+       ]
+      }
+     },
+     "used": [
+      0,
+      1,
+      15,
+      16
+     ]
+    },
+    {
+     "state": "Defend End",
+     "n": [
+      1621,
+      1701
+     ],
+     "n_fresh": 1117,
+     "volume_all": 383503,
+     "expected": 1059183,
+     "cover": 0.985,
+     "bins": {
+      "0": {
+       "n": [
+        1465,
+        1538
+       ],
+       "n_fresh": 1002,
+       "r_2fold": 2.25,
+       "r_fresh": 0.25,
+       "late": 0,
+       "volume_cells": 335023,
+       "nt": 33,
+       "extent": [
+        -3.1,
+        -5.0,
+        5.85,
+        3.2
+       ]
+      },
+      "15": {
+       "n": [
+        8,
+        11
+       ],
+       "n_fresh": 5,
+       "r_2fold": 1.2,
+       "r_fresh": 0.15,
+       "late": 0,
+       "volume_cells": 157972,
+       "nt": 33,
+       "extent": [
+        -0.95,
+        -3.7,
+        3.55,
+        2.05
+       ]
+      },
+      "16": {
+       "n": [
+        115,
+        134
+       ],
+       "n_fresh": 98,
+       "r_2fold": 1.9,
+       "r_fresh": 0.15,
+       "late": 0,
+       "volume_cells": 227155,
+       "nt": 33,
+       "extent": [
+        -4.0,
+        -2.65,
+        3.5,
+        3.1
+       ]
+      }
+     },
+     "used": [
+      0,
+      15,
+      16
+     ]
+    },
+    {
+     "state": "Slash Recover F",
+     "n": [
+      1621,
+      1698
+     ],
+     "n_fresh": 1115,
+     "volume_all": 141843,
+     "expected": 249011,
+     "cover": 0.981,
+     "bins": {
+      "0": {
+       "n": [
+        1457,
+        1519
+       ],
+       "n_fresh": 998,
+       "r_2fold": 0.8,
+       "r_fresh": 0.1,
+       "late": 0,
+       "volume_cells": 135855,
+       "nt": 17,
+       "extent": [
+        -3.1,
+        -2.95,
+        4.45,
+        3.2
+       ]
+      },
+      "16": {
+       "n": [
+        127,
+        153
+       ],
+       "n_fresh": 99,
+       "r_2fold": 1.75,
+       "r_fresh": 1.05,
+       "late": 0,
+       "volume_cells": 81785,
+       "nt": 17,
+       "extent": [
+        -2.35,
+        -2.7,
+        2.45,
+        3.15
+       ]
+      }
+     },
+     "used": [
+      0,
+      16
+     ]
+    }
+   ],
+   "chosen": [
+    "Defend End",
+    "Slash Recover F"
+   ],
+   "keys": [
+    "support/MA_DEFEND/aim@Defend End#0/anchor",
+    "support/MA_DEFEND/aim@Defend End#15/anchor",
+    "support/MA_DEFEND/aim@Defend End#16/anchor",
+    "support/MA_DEFEND/aim@Slash Recover F#0/anchor",
+    "support/MA_DEFEND/aim@Slash Recover F#16/anchor"
+   ],
+   "r": {
+    "Defend End": {
+     "0": 2.25,
+     "15": 1.2,
+     "16": 1.9
+    },
+    "Slash Recover F": {
+     "0": 0.8,
+     "16": 1.75
+    }
+   }
+  },
+  "Song Automaton Tiny|AT_FIRE": {
+   "candidates": [
+    {
+     "state": "Fire",
+     "n": [
+      3782,
+      3987
+     ],
+     "n_fresh": 2586,
+     "volume_all": 20139479,
+     "expected": 80557916,
+     "cover": 0.0,
+     "bins": {
+      "13": {
+       "n": [
+        3779,
+        3979
+       ],
+       "n_fresh": 2579,
+       "r_2fold": Infinity,
+       "r_fresh": Infinity,
+       "late": 0,
+       "volume_cells": 20139166,
+       "nt": 212,
+       "extent": [
+        -10.2,
+        -14.15,
+        20.0,
+        8.6
+       ]
+      }
+     },
+     "used": []
+    },
+    {
+     "state": "Brake",
+     "n": [
+      2741,
+      2908
+     ],
+     "n_fresh": 1852,
+     "volume_all": 17925040,
+     "expected": 71700160,
+     "cover": 0.0,
+     "bins": {
+      "0": {
+       "n": [
+        142,
+        166
+       ],
+       "n_fresh": 81,
+       "r_2fold": Infinity,
+       "r_fresh": Infinity,
+       "late": 4,
+       "volume_cells": 6277179,
+       "nt": 160,
+       "extent": [
+        -20.0,
+        -2.0,
+        19.95,
+        12.0
+       ]
+      },
+      "12": {
+       "n": [
+        17,
+        13
+       ],
+       "n_fresh": 9,
+       "r_2fold": Infinity,
+       "r_fresh": 3.4,
+       "late": 26,
+       "volume_cells": 302682,
+       "nt": 128,
+       "extent": [
+        -4.4,
+        -2.0,
+        20.0,
+        11.25
+       ]
+      },
+      "14": {
+       "n": [
+        165,
+        220
+       ],
+       "n_fresh": 140,
+       "r_2fold": Infinity,
+       "r_fresh": Infinity,
+       "late": 5,
+       "volume_cells": 4655585,
+       "nt": 194,
+       "extent": [
+        -10.5,
+        -2.0,
+        20.0,
+        12.0
+       ]
+      },
+      "15": {
+       "n": [
+        2417,
+        2509
+       ],
+       "n_fresh": 1622,
+       "r_2fold": Infinity,
+       "r_fresh": Infinity,
+       "late": 2,
+       "volume_cells": 16802017,
+       "nt": 193,
+       "extent": [
+        -19.3,
+        -2.0,
+        20.0,
+        12.0
+       ]
+      }
+     },
+     "used": []
+    },
+    {
+     "state": "Pull Up",
+     "n": [
+      2160,
+      2335
+     ],
+     "n_fresh": 1588,
+     "volume_all": 10331686,
+     "expected": 41326744,
+     "cover": 0.0,
+     "bins": {
+      "0": {
+       "n": [
+        1457,
+        1584
+       ],
+       "n_fresh": 1072,
+       "r_2fold": Infinity,
+       "r_fresh": Infinity,
+       "late": 0,
+       "volume_cells": 8225135,
+       "nt": 147,
+       "extent": [
+        -20.0,
+        -2.45,
+        19.95,
+        12.0
+       ]
+      },
+      "4": {
+       "n": [
+        10,
+        12
+       ],
+       "n_fresh": 4,
+       "r_2fold": Infinity,
+       "r_fresh": Infinity,
+       "late": 36,
+       "volume_cells": 600381,
+       "nt": 120,
+       "extent": [
+        -20.0,
+        -0.7,
+        20.0,
+        10.85
+       ]
+      },
+      "14": {
+       "n": [
+        207,
+        214
+       ],
+       "n_fresh": 176,
+       "r_2fold": 5.5,
+       "r_fresh": 3.55,
+       "late": 0,
+       "volume_cells": 1927870,
+       "nt": 107,
+       "extent": [
+        -10.65,
+        -7.35,
+        8.2,
+        10.25
+       ]
+      },
+      "15": {
+       "n": [
+        469,
+        498
+       ],
+       "n_fresh": 324,
+       "r_2fold": Infinity,
+       "r_fresh": 2.7,
+       "late": 4,
+       "volume_cells": 2377045,
+       "nt": 142,
+       "extent": [
+        -20.0,
+        -4.35,
+        8.2,
+        12.0
+       ]
+      }
+     },
+     "used": []
+    },
+    {
+     "state": "Return",
+     "n": [
+      3542,
+      3762
+     ],
+     "n_fresh": 2441,
+     "volume_all": 6971104,
+     "expected": 27884416,
+     "cover": 0.0,
+     "bins": {
+      "0": {
+       "n": [
+        1275,
+        1344
+       ],
+       "n_fresh": 824,
+       "r_2fold": Infinity,
+       "r_fresh": Infinity,
+       "late": 128,
+       "volume_cells": 1924005,
+       "nt": 120,
+       "extent": [
+        -15.05,
+        -2.6,
+        20.0,
+        9.75
+       ]
+      },
+      "1": {
+       "n": [
+        405,
+        420
+       ],
+       "n_fresh": 287,
+       "r_2fold": Infinity,
+       "r_fresh": Infinity,
+       "late": 45,
+       "volume_cells": 1677850,
+       "nt": 114,
+       "extent": [
+        -20.0,
+        -2.55,
+        20.0,
+        10.85
+       ]
+      },
+      "2": {
+       "n": [
+        422,
+        466
+       ],
+       "n_fresh": 292,
+       "r_2fold": Infinity,
+       "r_fresh": Infinity,
+       "late": 9,
+       "volume_cells": 1698714,
+       "nt": 114,
+       "extent": [
+        -20.0,
+        -2.5,
+        20.0,
+        11.5
+       ]
+      },
+      "3": {
+       "n": [
+        1037,
+        1131
+       ],
+       "n_fresh": 760,
+       "r_2fold": Infinity,
+       "r_fresh": Infinity,
+       "late": 6,
+       "volume_cells": 4790893,
+       "nt": 125,
+       "extent": [
+        -20.0,
+        -2.7,
+        19.95,
+        11.45
+       ]
+      },
+      "4": {
+       "n": [
+        17,
+        16
+       ],
+       "n_fresh": 10,
+       "r_2fold": Infinity,
+       "r_fresh": Infinity,
+       "late": 146,
+       "volume_cells": 608272,
+       "nt": 112,
+       "extent": [
+        -20.0,
+        -0.6,
+        20.0,
+        8.45
+       ]
+      },
+      "13": {
+       "n": [
+        31,
+        28
+       ],
+       "n_fresh": 18,
+       "r_2fold": 4.55,
+       "r_fresh": 2.8,
+       "late": 0,
+       "volume_cells": 103106,
+       "nt": 37,
+       "extent": [
+        -0.55,
+        -1.8,
+        5.6,
+        4.8
+       ]
+      },
+      "14": {
+       "n": [
+        193,
+        196
+       ],
+       "n_fresh": 141,
+       "r_2fold": Infinity,
+       "r_fresh": Infinity,
+       "late": 6,
+       "volume_cells": 407883,
+       "nt": 66,
+       "extent": [
+        -8.0,
+        -2.4,
+        10.8,
+        6.25
+       ]
+      },
+      "15": {
+       "n": [
+        160,
+        160
+       ],
+       "n_fresh": 108,
+       "r_2fold": Infinity,
+       "r_fresh": 1.8,
+       "late": 27,
+       "volume_cells": 770832,
+       "nt": 95,
+       "extent": [
+        -13.4,
+        -2.15,
+        20.0,
+        7.1
+       ]
+      }
+     },
+     "used": []
+    },
+    {
+     "state": "Wall Bonk",
+     "n": [
+      2225,
+      2314
+     ],
+     "n_fresh": 1473,
+     "volume_all": 2342197,
+     "expected": 9368788,
+     "cover": 0.0,
+     "bins": {
+      "0": {
+       "n": [
+        1029,
+        1079
+       ],
+       "n_fresh": 660,
+       "r_2fold": Infinity,
+       "r_fresh": Infinity,
+       "late": 155,
+       "volume_cells": 1754815,
+       "nt": 141,
+       "extent": [
+        -2.65,
+        -3.0,
+        20.0,
+        9.75
+       ]
+      },
+      "1": {
+       "n": [
+        202,
+        214
+       ],
+       "n_fresh": 155,
+       "r_2fold": Infinity,
+       "r_fresh": Infinity,
+       "late": 209,
+       "volume_cells": 1056852,
+       "nt": 135,
+       "extent": [
+        -0.6,
+        -1.45,
+        20.0,
+        10.0
+       ]
+      },
+      "2": {
+       "n": [
+        267,
+        275
+       ],
+       "n_fresh": 189,
+       "r_2fold": Infinity,
+       "r_fresh": Infinity,
+       "late": 196,
+       "volume_cells": 1052650,
+       "nt": 133,
+       "extent": [
+        -0.5,
+        -1.55,
+        20.0,
+        9.15
+       ]
+      },
+      "3": {
+       "n": [
+        119,
+        139
+       ],
+       "n_fresh": 76,
+       "r_2fold": Infinity,
+       "r_fresh": Infinity,
+       "late": 1248,
+       "volume_cells": 515019,
+       "nt": 120,
+       "extent": [
+        -0.5,
+        -0.7,
+        20.0,
+        8.85
+       ]
+      },
+      "13": {
+       "n": [
+        226,
+        235
+       ],
+       "n_fresh": 144,
+       "r_2fold": Infinity,
+       "r_fresh": Infinity,
+       "late": 11,
+       "volume_cells": 581930,
+       "nt": 75,
+       "extent": [
+        -0.5,
+        -6.15,
+        10.85,
+        6.2
+       ]
+      },
+      "14": {
+       "n": [
+        198,
+        187
+       ],
+       "n_fresh": 140,
+       "r_2fold": Infinity,
+       "r_fresh": 2.25,
+       "late": 7,
+       "volume_cells": 555666,
+       "nt": 89,
+       "extent": [
+        -0.5,
+        -3.85,
+        14.85,
+        6.5
+       ]
+      },
+      "15": {
+       "n": [
+        184,
+        185
+       ],
+       "n_fresh": 109,
+       "r_2fold": Infinity,
+       "r_fresh": 2.35,
+       "late": 25,
+       "volume_cells": 774096,
+       "nt": 127,
+       "extent": [
+        -1.8,
+        -2.65,
+        20.0,
+        8.3
+       ]
+      }
+     },
+     "used": []
+    }
+   ],
+   "chosen": []
+  },
+  "Song Automaton Tiny|AT_DEFEND": {
+   "candidates": [
+    {
+     "state": "Defend Buzz",
+     "n": [
+      4572,
+      4836
+     ],
+     "n_fresh": 3165,
+     "volume_all": 22086952,
+     "expected": 88347808,
+     "cover": 0.0,
+     "bins": {
+      "0": {
+       "n": [
+        713,
+        789
+       ],
+       "n_fresh": 522,
+       "r_2fold": Infinity,
+       "r_fresh": Infinity,
+       "late": 0,
+       "volume_cells": 14640507,
+       "nt": 107,
+       "extent": [
+        -17.2,
+        -13.7,
+        20.0,
+        11.9
+       ]
+      },
+      "1": {
+       "n": [
+        940,
+        968
+       ],
+       "n_fresh": 617,
+       "r_2fold": Infinity,
+       "r_fresh": Infinity,
+       "late": 0,
+       "volume_cells": 18080966,
+       "nt": 107,
+       "extent": [
+        -20.0,
+        -12.95,
+        20.0,
+        12.0
+       ]
+      },
+      "2": {
+       "n": [
+        1198,
+        1301
+       ],
+       "n_fresh": 882,
+       "r_2fold": Infinity,
+       "r_fresh": Infinity,
+       "late": 0,
+       "volume_cells": 16309805,
+       "nt": 107,
+       "extent": [
+        -20.0,
+        -13.6,
+        20.0,
+        12.0
+       ]
+      },
+      "3": {
+       "n": [
+        1035,
+        1000
+       ],
+       "n_fresh": 653,
+       "r_2fold": Infinity,
+       "r_fresh": Infinity,
+       "late": 0,
+       "volume_cells": 13661304,
+       "nt": 107,
+       "extent": [
+        -20.0,
+        -12.05,
+        20.0,
+        11.95
+       ]
+      },
+      "4": {
+       "n": [
+        324,
+        385
+       ],
+       "n_fresh": 224,
+       "r_2fold": 3.65,
+       "r_fresh": 5.8,
+       "late": 0,
+       "volume_cells": 11078124,
+       "nt": 107,
+       "extent": [
+        -17.65,
+        -12.2,
+        18.2,
+        8.05
+       ]
+      },
+      "15": {
+       "n": [
+        50,
+        55
+       ],
+       "n_fresh": 44,
+       "r_2fold": 7.4,
+       "r_fresh": 5.45,
+       "late": 0,
+       "volume_cells": 4106741,
+       "nt": 107,
+       "extent": [
+        -18.65,
+        -11.0,
+        12.2,
+        11.4
+       ]
+      },
+      "16": {
+       "n": [
+        305,
+        326
+       ],
+       "n_fresh": 209,
+       "r_2fold": Infinity,
+       "r_fresh": 2.75,
+       "late": 0,
+       "volume_cells": 8908185,
+       "nt": 107,
+       "extent": [
+        -13.5,
+        -13.4,
+        20.0,
+        10.75
+       ]
+      }
+     },
+     "used": []
+    }
+   ],
+   "chosen": []
+  },
+  "Song Reed|RE_STAB": {
+   "candidates": [
+    {
+     "state": "Stab Antic",
+     "n": [
+      654,
+      650
+     ],
+     "n_fresh": 403,
+     "volume_all": 3642073,
+     "expected": 12680137,
+     "cover": 0.869,
+     "bins": {
+      "1": {
+       "n": [
+        565,
+        568
+       ],
+       "n_fresh": 353,
+       "r_2fold": 2.75,
+       "r_fresh": 2.05,
+       "late": 0,
+       "volume_cells": 3305377,
+       "nt": 76,
+       "extent": [
+        -14.2,
+        -7.2,
+        16.85,
+        9.3
+       ]
+      },
+      "2": {
+       "n": [
+        49,
+        40
+       ],
+       "n_fresh": 29,
+       "r_2fold": 3.35,
+       "r_fresh": 2.2,
+       "late": 0,
+       "volume_cells": 2104543,
+       "nt": 76,
+       "extent": [
+        -12.1,
+        -5.8,
+        15.1,
+        8.0
+       ]
+      },
+      "3": {
+       "n": [
+        28,
+        23
+       ],
+       "n_fresh": 11,
+       "r_2fold": 4.85,
+       "r_fresh": 3.15,
+       "late": 0,
+       "volume_cells": 1465222,
+       "nt": 76,
+       "extent": [
+        -12.15,
+        -6.35,
+        12.45,
+        6.6
+       ]
+      },
+      "4": {
+       "n": [
+        12,
+        19
+       ],
+       "n_fresh": 10,
+       "r_2fold": 5.6,
+       "r_fresh": 3.45,
+       "late": 0,
+       "volume_cells": 1397084,
+       "nt": 76,
+       "extent": [
+        -11.75,
+        -6.0,
+        12.15,
+        8.1
+       ]
+      }
+     },
+     "used": [
+      1
+     ]
+    },
+    {
+     "state": "Stab 1",
+     "n": [
+      636,
+      635
+     ],
+     "n_fresh": 392,
+     "volume_all": 906498,
+     "expected": 3354043,
+     "cover": 1.0,
+     "bins": {
+      "15": {
+       "n": [
+        636,
+        635
+       ],
+       "n_fresh": 392,
+       "r_2fold": 2.7,
+       "r_fresh": 1.1,
+       "late": 0,
+       "volume_cells": 906498,
+       "nt": 36,
+       "extent": [
+        -1.75,
+        -7.65,
+        15.1,
+        4.85
+       ]
+      }
+     },
+     "used": [
+      15
+     ]
+    },
+    {
+     "state": "Stab 2",
+     "n": [
+      633,
+      632
+     ],
+     "n_fresh": 389,
+     "volume_all": 842074,
+     "expected": 1917333,
+     "cover": 0.984,
+     "bins": {
+      "15": {
+       "n": [
+        622,
+        623
+       ],
+       "n_fresh": 378,
+       "r_2fold": 1.75,
+       "r_fresh": 0.7,
+       "late": 0,
+       "volume_cells": 688736,
+       "nt": 32,
+       "extent": [
+        -2.65,
+        -6.4,
+        13.1,
+        4.4
+       ]
+      }
+     },
+     "used": [
+      15
+     ]
+    },
+    {
+     "state": "Stab 3",
+     "n": [
+      631,
+      622
+     ],
+     "n_fresh": 386,
+     "volume_all": 476228,
+     "expected": 1285816,
+     "cover": 1.0,
+     "bins": {
+      "15": {
+       "n": [
+        631,
+        622
+       ],
+       "n_fresh": 386,
+       "r_2fold": 1.7,
+       "r_fresh": 0.45,
+       "late": 0,
+       "volume_cells": 476228,
+       "nt": 22,
+       "extent": [
+        -3.55,
+        -6.1,
+        12.05,
+        4.05
+       ]
+      }
+     },
+     "used": [
+      15
+     ]
+    },
+    {
+     "state": "Stab 4",
+     "n": [
+      631,
+      619
+     ],
+     "n_fresh": 385,
+     "volume_all": 350551,
+     "expected": 717272,
+     "cover": 0.986,
+     "bins": {
+      "12": {
+       "n": [
+        77,
+        64
+       ],
+       "n_fresh": 49,
+       "r_2fold": 2.95,
+       "r_fresh": 0.15,
+       "late": 0,
+       "volume_cells": 219336,
+       "nt": 17,
+       "extent": [
+        -4.45,
+        -5.25,
+        4.4,
+        4.25
+       ]
+      },
+      "15": {
+       "n": [
+        541,
+        550
+       ],
+       "n_fresh": 329,
+       "r_2fold": 1.6,
+       "r_fresh": 0.45,
+       "late": 0,
+       "volume_cells": 264116,
+       "nt": 17,
+       "extent": [
+        -3.25,
+        -4.4,
+        10.45,
+        4.25
+       ]
+      }
+     },
+     "used": [
+      12,
+      15
+     ]
+    },
+    {
+     "state": "Stab 5",
+     "n": [
+      628,
+      609
+     ],
+     "n_fresh": 379,
+     "volume_all": 80569,
+     "expected": 153081,
+     "cover": 1.0,
+     "bins": {
+      "15": {
+       "n": [
+        628,
+        609
+       ],
+       "n_fresh": 379,
+       "r_2fold": 0.9,
+       "r_fresh": 0.0,
+       "late": 0,
+       "volume_cells": 80569,
+       "nt": 7,
+       "extent": [
+        -1.2,
+        -3.45,
+        7.55,
+        2.6
+       ]
+      }
+     },
+     "used": [
+      15
+     ]
+    }
+   ],
+   "chosen": [
+    "Stab 1",
+    "Stab 2",
+    "Stab 3",
+    "Stab 4",
+    "Stab 5"
+   ],
+   "keys": [
+    "support/RE_STAB/aim@Stab 1#15/anchor",
+    "support/RE_STAB/aim@Stab 2#15/anchor",
+    "support/RE_STAB/aim@Stab 3#15/anchor",
+    "support/RE_STAB/aim@Stab 4#12/anchor",
+    "support/RE_STAB/aim@Stab 4#15/anchor",
+    "support/RE_STAB/aim@Stab 5#15/anchor"
+   ],
+   "r": {
+    "Stab 1": {
+     "15": 2.7
+    },
+    "Stab 2": {
+     "15": 1.75
+    },
+    "Stab 3": {
+     "15": 1.7
+    },
+    "Stab 4": {
+     "12": 2.95,
+     "15": 1.6
+    },
+    "Stab 5": {
+     "15": 0.9
+    }
+   }
+  },
+  "Song Reed|RE_DEFEND": {
+   "candidates": [
+    {
+     "state": "Defend",
+     "n": [
+      973,
+      917
+     ],
+     "n_fresh": 593,
+     "volume_all": 7305618,
+     "expected": 29222472,
+     "cover": 0.0,
+     "bins": {
+      "0": {
+       "n": [
+        115,
+        113
+       ],
+       "n_fresh": 74,
+       "r_2fold": Infinity,
+       "r_fresh": 6.2,
+       "late": 25,
+       "volume_cells": 3556530,
+       "nt": 165,
+       "extent": [
+        -8.35,
+        -6.65,
+        9.3,
+        6.85
+       ]
+      },
+      "1": {
+       "n": [
+        87,
+        61
+       ],
+       "n_fresh": 35,
+       "r_2fold": Infinity,
+       "r_fresh": 2.1,
+       "late": 8,
+       "volume_cells": 2056651,
+       "nt": 164,
+       "extent": [
+        -6.3,
+        -6.0,
+        9.4,
+        6.2
+       ]
+      },
+      "2": {
+       "n": [
+        86,
+        86
+       ],
+       "n_fresh": 67,
+       "r_2fold": Infinity,
+       "r_fresh": 6.45,
+       "late": 11,
+       "volume_cells": 2924486,
+       "nt": 173,
+       "extent": [
+        -5.65,
+        -4.8,
+        8.15,
+        8.45
+       ]
+      },
+      "3": {
+       "n": [
+        48,
+        43
+       ],
+       "n_fresh": 31,
+       "r_2fold": Infinity,
+       "r_fresh": 2.1,
+       "late": 4,
+       "volume_cells": 2239347,
+       "nt": 154,
+       "extent": [
+        -6.05,
+        -3.6,
+        8.55,
+        9.05
+       ]
+      },
+      "4": {
+       "n": [
+        20,
+        16
+       ],
+       "n_fresh": 6,
+       "r_2fold": Infinity,
+       "r_fresh": 2.2,
+       "late": 47,
+       "volume_cells": 1820804,
+       "nt": 164,
+       "extent": [
+        -8.4,
+        -3.6,
+        8.35,
+        7.0
+       ]
+      },
+      "12": {
+       "n": [
+        16,
+        14
+       ],
+       "n_fresh": 8,
+       "r_2fold": Infinity,
+       "r_fresh": Infinity,
+       "late": 19,
+       "volume_cells": 1484783,
+       "nt": 159,
+       "extent": [
+        -8.75,
+        -6.05,
+        10.65,
+        3.35
+       ]
+      },
+      "13": {
+       "n": [
+        22,
+        32
+       ],
+       "n_fresh": 10,
+       "r_2fold": Infinity,
+       "r_fresh": 3.8,
+       "late": 17,
+       "volume_cells": 1583827,
+       "nt": 174,
+       "extent": [
+        -8.4,
+        -7.55,
+        7.15,
+        3.9
+       ]
+      },
+      "14": {
+       "n": [
+        403,
+        374
+       ],
+       "n_fresh": 243,
+       "r_2fold": Infinity,
+       "r_fresh": Infinity,
+       "late": 4,
+       "volume_cells": 4858306,
+       "nt": 174,
+       "extent": [
+        -9.9,
+        -7.45,
+        9.2,
+        5.25
+       ]
+      },
+      "15": {
+       "n": [
+        98,
+        89
+       ],
+       "n_fresh": 70,
+       "r_2fold": Infinity,
+       "r_fresh": 5.9,
+       "late": 14,
+       "volume_cells": 2686597,
+       "nt": 177,
+       "extent": [
+        -9.65,
+        -5.6,
+        9.4,
+        5.4
+       ]
+      },
+      "16": {
+       "n": [
+        78,
+        89
+       ],
+       "n_fresh": 49,
+       "r_2fold": Infinity,
+       "r_fresh": 3.4,
+       "late": 43,
+       "volume_cells": 3419730,
+       "nt": 186,
+       "extent": [
+        -8.35,
+        -5.5,
+        10.0,
+        5.5
+       ]
+      }
+     },
+     "used": []
+    },
+    {
+     "state": "Defend End",
+     "n": [
+      673,
+      623
+     ],
+     "n_fresh": 392,
+     "volume_all": 154287,
+     "expected": 360975,
+     "cover": 0.849,
+     "bins": {
+      "0": {
+       "n": [
+        38,
+        41
+       ],
+       "n_fresh": 21,
+       "r_2fold": 3.55,
+       "r_fresh": 0.1,
+       "late": 0,
+       "volume_cells": 81481,
+       "nt": 16,
+       "extent": [
+        -2.8,
+        -1.35,
+        4.5,
+        3.65
+       ]
+      },
+      "1": {
+       "n": [
+        46,
+        50
+       ],
+       "n_fresh": 35,
+       "r_2fold": 2.7,
+       "r_fresh": 2.3,
+       "late": 0,
+       "volume_cells": 74932,
+       "nt": 16,
+       "extent": [
+        -2.45,
+        -1.25,
+        4.5,
+        4.05
+       ]
+      },
+      "2": {
+       "n": [
+        66,
+        49
+       ],
+       "n_fresh": 40,
+       "r_2fold": 2.6,
+       "r_fresh": 2.95,
+       "late": 0,
+       "volume_cells": 99052,
+       "nt": 16,
+       "extent": [
+        -3.85,
+        -1.25,
+        3.85,
+        4.75
+       ]
+      },
+      "3": {
+       "n": [
+        27,
+        21
+       ],
+       "n_fresh": 24,
+       "r_2fold": 3.1,
+       "r_fresh": 0.75,
+       "late": 0,
+       "volume_cells": 94825,
+       "nt": 16,
+       "extent": [
+        -4.2,
+        -4.15,
+        3.9,
+        1.85
+       ]
+      },
+      "12": {
+       "n": [
+        20,
+        25
+       ],
+       "n_fresh": 16,
+       "r_2fold": 3.45,
+       "r_fresh": 0.05,
+       "late": 0,
+       "volume_cells": 67180,
+       "nt": 16,
+       "extent": [
+        -4.1,
+        -3.95,
+        0.7,
+        4.3
+       ]
+      },
+      "13": {
+       "n": [
+        61,
+        58
+       ],
+       "n_fresh": 33,
+       "r_2fold": 2.5,
+       "r_fresh": 0.7,
+       "late": 0,
+       "volume_cells": 97737,
+       "nt": 16,
+       "extent": [
+        -3.2,
+        -2.45,
+        3.8,
+        4.4
+       ]
+      },
+      "14": {
+       "n": [
+        327,
+        295
+       ],
+       "n_fresh": 170,
+       "r_2fold": 1.2,
+       "r_fresh": 2.1,
+       "late": 0,
+       "volume_cells": 106126,
+       "nt": 16,
+       "extent": [
+        -3.85,
+        -3.95,
+        3.35,
+        4.35
+       ]
+      },
+      "15": {
+       "n": [
+        44,
+        51
+       ],
+       "n_fresh": 31,
+       "r_2fold": 2.6,
+       "r_fresh": 2.85,
+       "late": 0,
+       "volume_cells": 59148,
+       "nt": 16,
+       "extent": [
+        -1.55,
+        -1.6,
+        3.55,
+        4.45
+       ]
+      },
+      "16": {
+       "n": [
+        27,
+        26
+       ],
+       "n_fresh": 13,
+       "r_2fold": 1.3,
+       "r_fresh": 0.1,
+       "late": 0,
+       "volume_cells": 67923,
+       "nt": 16,
+       "extent": [
+        -4.1,
+        -1.4,
+        1.45,
+        1.7
+       ]
+      }
+     },
+     "used": [
+      1,
+      2,
+      13,
+      14,
+      15,
+      16
+     ]
+    },
+    {
+     "state": "Block",
+     "n": [
+      298,
+      289
+     ],
+     "n_fresh": 195,
+     "volume_all": 3309062,
+     "expected": 13236248,
+     "cover": 0.0,
+     "bins": {
+      "0": {
+       "n": [
+        298,
+        289
+       ],
+       "n_fresh": 195,
+       "r_2fold": Infinity,
+       "r_fresh": 2.65,
+       "late": 4,
+       "volume_cells": 3309062,
+       "nt": 128,
+       "extent": [
+        -10.5,
+        -4.8,
+        7.7,
+        8.75
+       ]
+      }
+     },
+     "used": []
+    },
+    {
+     "state": "Parry Slash",
+     "n": [
+      289,
+      276
+     ],
+     "n_fresh": 191,
+     "volume_all": 2443053,
+     "expected": 9772212,
+     "cover": 0.0,
+     "bins": {
+      "0": {
+       "n": [
+        135,
+        130
+       ],
+       "n_fresh": 81,
+       "r_2fold": Infinity,
+       "r_fresh": 1.5,
+       "late": 2,
+       "volume_cells": 1629229,
+       "nt": 98,
+       "extent": [
+        -6.2,
+        -4.75,
+        9.35,
+        6.35
+       ]
+      },
+      "1": {
+       "n": [
+        25,
+        25
+       ],
+       "n_fresh": 10,
+       "r_2fold": Infinity,
+       "r_fresh": 4.65,
+       "late": 10,
+       "volume_cells": 983824,
+       "nt": 98,
+       "extent": [
+        -3.0,
+        -2.1,
+        9.35,
+        6.65
+       ]
+      },
+      "15": {
+       "n": [
+        129,
+        121
+       ],
+       "n_fresh": 100,
+       "r_2fold": Infinity,
+       "r_fresh": Infinity,
+       "late": 17,
+       "volume_cells": 1516265,
+       "nt": 93,
+       "extent": [
+        -3.7,
+        -4.8,
+        12.0,
+        5.3
+       ]
+      }
+     },
+     "used": []
+    },
+    {
+     "state": "Parry Slash End",
+     "n": [
+      151,
+      156
+     ],
+     "n_fresh": 112,
+     "volume_all": 176543,
+     "expected": 280343,
+     "cover": 0.961,
+     "bins": {
+      "0": {
+       "n": [
+        32,
+        36
+       ],
+       "n_fresh": 19,
+       "r_2fold": 0.9,
+       "r_fresh": 0.05,
+       "late": 0,
+       "volume_cells": 56926,
+       "nt": 21,
+       "extent": [
+        -2.7,
+        -1.55,
+        1.65,
+        1.75
+       ]
+      },
+      "1": {
+       "n": [
+        13,
+        12
+       ],
+       "n_fresh": 5,
+       "r_2fold": 1.45,
+       "r_fresh": 0.0,
+       "late": 0,
+       "volume_cells": 59649,
+       "nt": 21,
+       "extent": [
+        -0.5,
+        -1.25,
+        2.15,
+        4.85
+       ]
+      },
+      "15": {
+       "n": [
+        52,
+        56
+       ],
+       "n_fresh": 42,
+       "r_2fold": 3.0,
+       "r_fresh": 0.55,
+       "late": 0,
+       "volume_cells": 116918,
+       "nt": 21,
+       "extent": [
+        -0.85,
+        -4.75,
+        5.2,
+        4.2
+       ]
+      },
+      "16": {
+       "n": [
+        48,
+        46
+       ],
+       "n_fresh": 42,
+       "r_2fold": 1.35,
+       "r_fresh": 0.0,
+       "late": 0,
+       "volume_cells": 72768,
+       "nt": 21,
+       "extent": [
+        -2.75,
+        -1.65,
+        2.0,
+        4.55
+       ]
+      }
+     },
+     "used": [
+      0,
+      1,
+      15,
+      16
+     ]
+    },
+    {
+     "state": "Multihit",
+     "n": [
+      123,
+      108
+     ],
+     "n_fresh": 72,
+     "volume_all": 584222,
+     "expected": 2015566,
+     "cover": 1.0,
+     "bins": {
+      "16": {
+       "n": [
+        123,
+        108
+       ],
+       "n_fresh": 72,
+       "r_2fold": 2.4,
+       "r_fresh": 2.45,
+       "late": 0,
+       "volume_cells": 584222,
+       "nt": 55,
+       "extent": [
+        -6.6,
+        -1.25,
+        3.05,
+        6.35
+       ]
+      }
+     },
+     "used": [
+      16
+     ]
+    },
+    {
+     "state": "Multihit End",
+     "n": [
+      120,
+      107
+     ],
+     "n_fresh": 72,
+     "volume_all": 203756,
+     "expected": 601080,
+     "cover": 1.0,
+     "bins": {
+      "0": {
+       "n": [
+        120,
+        107
+       ],
+       "n_fresh": 72,
+       "r_2fold": 1.35,
+       "r_fresh": 1.95,
+       "late": 0,
+       "volume_cells": 203756,
+       "nt": 31,
+       "extent": [
+        -2.25,
+        -2.25,
+        5.7,
+        6.35
+       ]
+      }
+     },
+     "used": [
+      0
+     ]
+    },
+    {
+     "state": "Multihit Clashed",
+     "n": [
+      47,
+      43
+     ],
+     "n_fresh": 40,
+     "volume_all": 357955,
+     "expected": 1020172,
+     "cover": 1.0,
+     "bins": {
+      "16": {
+       "n": [
+        47,
+        43
+       ],
+       "n_fresh": 40,
+       "r_2fold": 1.85,
+       "r_fresh": 0.1,
+       "late": 0,
+       "volume_cells": 357955,
+       "nt": 45,
+       "extent": [
+        -3.65,
+        -2.1,
+        2.5,
+        4.6
+       ]
+      }
+     },
+     "used": [
+      16
+     ]
+    }
+   ],
+   "chosen": [
+    "Parry Slash End",
+    "Multihit",
+    "Multihit End",
+    "Multihit Clashed"
+   ],
+   "keys": [
+    "support/RE_DEFEND/aim@Parry Slash End#0/anchor",
+    "support/RE_DEFEND/aim@Parry Slash End#1/anchor",
+    "support/RE_DEFEND/aim@Parry Slash End#15/anchor",
+    "support/RE_DEFEND/aim@Parry Slash End#16/anchor",
+    "support/RE_DEFEND/aim@Multihit#16/anchor",
+    "support/RE_DEFEND/aim@Multihit End#0/anchor",
+    "support/RE_DEFEND/aim@Multihit Clashed#16/anchor"
+   ],
+   "r": {
+    "Parry Slash End": {
+     "0": 0.9,
+     "1": 1.45,
+     "15": 3.0,
+     "16": 1.35
+    },
+    "Multihit": {
+     "16": 2.45
+    },
+    "Multihit End": {
+     "0": 1.95
+    },
+    "Multihit Clashed": {
+     "16": 1.85
+    }
+   }
+  },
+  "Song Reed|RE_EVADE": {
+   "candidates": [
+    {
+     "state": "Evade",
+     "n": [
+      902,
+      791
+     ],
+     "n_fresh": 548,
+     "volume_all": 290236,
+     "expected": 1088385,
+     "cover": 1.0,
+     "bins": {
+      "0": {
+       "n": [
+        902,
+        791
+       ],
+       "n_fresh": 548,
+       "r_2fold": 2.75,
+       "r_fresh": 1.1,
+       "late": 0,
+       "volume_cells": 290236,
+       "nt": 18,
+       "extent": [
+        -4.05,
+        -3.9,
+        8.15,
+        5.25
+       ]
+      }
+     },
+     "used": [
+      0
+     ]
+    }
+   ],
+   "chosen": [
+    "Evade"
+   ],
+   "keys": [
+    "support/RE_EVADE/aim@Evade#0/anchor"
+   ],
+   "r": {
+    "Evade": {
+     "0": 2.75
+    }
+   }
+  },
+  "Song Pilgrim 01|EN_CHARGE": {
+   "candidates": [
+    {
+     "state": "Charge",
+     "n": [
+      195,
+      181
+     ],
+     "n_fresh": 113,
+     "volume_all": 1128583,
+     "expected": 4514332,
+     "cover": 0.0,
+     "bins": {
+      "0": {
+       "n": [
+        195,
+        181
+       ],
+       "n_fresh": 113,
+       "r_2fold": Infinity,
+       "r_fresh": Infinity,
+       "late": 1493,
+       "volume_cells": 1128583,
+       "nt": 162,
+       "extent": [
+        -4.65,
+        -2.4,
+        20.0,
+        2.4
+       ]
+      }
+     },
+     "used": []
+    },
+    {
+     "state": "Charge End",
+     "n": [
+      187,
+      177
+     ],
+     "n_fresh": 110,
+     "volume_all": 253007,
+     "expected": 842135,
+     "cover": 0.989,
+     "bins": {
+      "0": {
+       "n": [
+        186,
+        174
+       ],
+       "n_fresh": 109,
+       "r_2fold": 2.75,
+       "r_fresh": 1.0,
+       "late": 0,
+       "volume_cells": 224066,
+       "nt": 27,
+       "extent": [
+        -5.55,
+        -2.4,
+        7.85,
+        2.4
+       ]
+      }
+     },
+     "used": [
+      0
+     ]
+    },
+    {
+     "state": "Reset",
+     "n": [
+      35,
+      24
+     ],
+     "n_fresh": 13,
+     "volume_all": 689055,
+     "expected": 2756220,
+     "cover": 0.0,
+     "bins": {
+      "0": {
+       "n": [
+        35,
+        24
+       ],
+       "n_fresh": 13,
+       "r_2fold": Infinity,
+       "r_fresh": 0.95,
+       "late": 18,
+       "volume_cells": 689055,
+       "nt": 91,
+       "extent": [
+        -8.05,
+        -2.4,
+        17.0,
+        1.8
+       ]
+      }
+     },
+     "used": []
+    }
+   ],
+   "chosen": [
+    "Charge End"
+   ],
+   "keys": [
+    "support/EN_CHARGE/aim@Charge End#0/anchor"
+   ],
+   "r": {
+    "Charge End": {
+     "0": 2.75
+    }
+   }
+  },
+  "Song Pilgrim 01|EN_JUMPSLASH": {
+   "candidates": [
+    {
+     "state": "JumpSlash 1",
+     "n": [
+      119,
+      117
+     ],
+     "n_fresh": 76,
+     "volume_all": 389318,
+     "expected": 1557272,
+     "cover": 0.0,
+     "bins": {
+      "0": {
+       "n": [
+        118,
+        117
+       ],
+       "n_fresh": 76,
+       "r_2fold": 2.15,
+       "r_fresh": 3.3,
+       "late": 0,
+       "volume_cells": 328706,
+       "nt": 44,
+       "extent": [
+        -4.55,
+        -2.75,
+        6.9,
+        2.15
+       ]
+      }
+     },
+     "used": []
+    },
+    {
+     "state": "JumpSlash 2",
+     "n": [
+      118,
+      116
+     ],
+     "n_fresh": 76,
+     "volume_all": 323956,
+     "expected": 1295824,
+     "cover": 0.0,
+     "bins": {
+      "0": {
+       "n": [
+        117,
+        115
+       ],
+       "n_fresh": 75,
+       "r_2fold": 2.15,
+       "r_fresh": 3.6,
+       "late": 0,
+       "volume_cells": 279646,
+       "nt": 40,
+       "extent": [
+        -3.95,
+        -2.75,
+        5.7,
+        2.15
+       ]
+      }
+     },
+     "used": []
+    },
+    {
+     "state": "JumpSlash 3",
+     "n": [
+      118,
+      116
+     ],
+     "n_fresh": 76,
+     "volume_all": 240480,
+     "expected": 961920,
+     "cover": 0.0,
+     "bins": {
+      "16": {
+       "n": [
+        117,
+        116
+       ],
+       "n_fresh": 76,
+       "r_2fold": 3.15,
+       "r_fresh": 3.6,
+       "late": 0,
+       "volume_cells": 218867,
+       "nt": 36,
+       "extent": [
+        -4.25,
+        -2.75,
+        4.5,
+        2.15
+       ]
+      }
+     },
+     "used": []
+    },
+    {
+     "state": "JumpSlash 4",
+     "n": [
+      118,
+      116
+     ],
+     "n_fresh": 76,
+     "volume_all": 136800,
+     "expected": 547200,
+     "cover": 0.0,
+     "bins": {
+      "16": {
+       "n": [
+        117,
+        116
+       ],
+       "n_fresh": 76,
+       "r_2fold": 2.7,
+       "r_fresh": 3.6,
+       "late": 0,
+       "volume_cells": 134496,
+       "nt": 32,
+       "extent": [
+        -4.25,
+        -2.4,
+        4.15,
+        1.8
+       ]
+      }
+     },
+     "used": []
+    }
+   ],
+   "chosen": []
+  },
+  "Song Pilgrim 01|EN_SLASH": {
+   "candidates": [
+    {
+     "state": "Slash1",
+     "n": [
+      338,
+      328
+     ],
+     "n_fresh": 207,
+     "volume_all": 639387,
+     "expected": 2557548,
+     "cover": 0.0,
+     "bins": {
+      "16": {
+       "n": [
+        338,
+        325
+       ],
+       "n_fresh": 205,
+       "r_2fold": 2.15,
+       "r_fresh": 3.6,
+       "late": 0,
+       "volume_cells": 554849,
+       "nt": 60,
+       "extent": [
+        -6.1,
+        -2.4,
+        8.2,
+        2.15
+       ]
+      }
+     },
+     "used": []
+    },
+    {
+     "state": "Slash1 2",
+     "n": [
+      331,
+      325
+     ],
+     "n_fresh": 203,
+     "volume_all": 363955,
+     "expected": 1134476,
+     "cover": 0.997,
+     "bins": {
+      "16": {
+       "n": [
+        331,
+        323
+       ],
+       "n_fresh": 202,
+       "r_2fold": 2.15,
+       "r_fresh": 1.8,
+       "late": 0,
+       "volume_cells": 359839,
+       "nt": 47,
+       "extent": [
+        -4.25,
+        -2.4,
+        5.95,
+        1.85
+       ]
+      }
+     },
+     "used": [
+      16
+     ]
+    },
+    {
+     "state": "Slash1 Recover",
+     "n": [
+      331,
+      325
+     ],
+     "n_fresh": 203,
+     "volume_all": 282998,
+     "expected": 891444,
+     "cover": 1.0,
+     "bins": {
+      "16": {
+       "n": [
+        331,
+        325
+       ],
+       "n_fresh": 202,
+       "r_2fold": 2.15,
+       "r_fresh": 0.45,
+       "late": 0,
+       "volume_cells": 282998,
+       "nt": 43,
+       "extent": [
+        -4.25,
+        -2.4,
+        4.15,
+        1.8
+       ]
+      }
+     },
+     "used": [
+      16
+     ]
+    },
+    {
+     "state": "Attack End",
+     "n": [
+      202,
+      202
+     ],
+     "n_fresh": 120,
+     "volume_all": 136071,
+     "expected": 239364,
+     "cover": 0.998,
+     "bins": {
+      "16": {
+       "n": [
+        201,
+        202
+       ],
+       "n_fresh": 120,
+       "r_2fold": 0.9,
+       "r_fresh": 0.1,
+       "late": 0,
+       "volume_cells": 125583,
+       "nt": 22,
+       "extent": [
+        -4.25,
+        -2.4,
+        4.15,
+        -0.35
+       ]
+      }
+     },
+     "used": [
+      16
+     ]
+    }
+   ],
+   "chosen": [
+    "Slash1 2",
+    "Slash1 Recover",
+    "Attack End"
+   ],
+   "keys": [
+    "support/EN_SLASH/aim@Slash1 2#16/anchor",
+    "support/EN_SLASH/aim@Slash1 Recover#16/anchor",
+    "support/EN_SLASH/aim@Attack End#16/anchor"
+   ],
+   "r": {
+    "Slash1 2": {
+     "16": 2.15
+    },
+    "Slash1 Recover": {
+     "16": 2.15
+    },
+    "Attack End": {
+     "16": 0.9
+    }
+   }
+  },
+  "Song Pilgrim 03|CH_JUMP": {
+   "candidates": [
+    {
+     "state": "Jump Launch",
+     "n": [
+      480,
+      421
+     ],
+     "n_fresh": 295,
+     "volume_all": 3013609,
+     "expected": 12054436,
+     "cover": 0.0,
+     "bins": {
+      "3": {
+       "n": [
+        422,
+        370
+       ],
+       "n_fresh": 259,
+       "r_2fold": 1.8,
+       "r_fresh": 3.45,
+       "late": 0,
+       "volume_cells": 2671644,
+       "nt": 95,
+       "extent": [
+        -3.65,
+        -2.35,
+        17.6,
+        11.25
+       ]
+      },
+      "4": {
+       "n": [
+        58,
+        51
+       ],
+       "n_fresh": 36,
+       "r_2fold": Infinity,
+       "r_fresh": 1.75,
+       "late": 7,
+       "volume_cells": 1609381,
+       "nt": 97,
+       "extent": [
+        -4.3,
+        -2.15,
+        9.15,
+        11.25
+       ]
+      }
+     },
+     "used": []
+    },
+    {
+     "state": "Jump Rise",
+     "n": [
+      478,
+      420
+     ],
+     "n_fresh": 295,
+     "volume_all": 3116438,
+     "expected": 12465752,
+     "cover": 0.0,
+     "bins": {
+      "3": {
+       "n": [
+        426,
+        375
+       ],
+       "n_fresh": 266,
+       "r_2fold": 1.9,
+       "r_fresh": 3.45,
+       "late": 0,
+       "volume_cells": 2789484,
+       "nt": 94,
+       "extent": [
+        -3.7,
+        -3.25,
+        17.6,
+        11.2
+       ]
+      },
+      "4": {
+       "n": [
+        52,
+        45
+       ],
+       "n_fresh": 29,
+       "r_2fold": Infinity,
+       "r_fresh": 1.8,
+       "late": 7,
+       "volume_cells": 1617327,
+       "nt": 96,
+       "extent": [
+        -4.35,
+        -2.7,
+        9.15,
+        11.25
+       ]
+      }
+     },
+     "used": []
+    },
+    {
+     "state": "Jump Spin",
+     "n": [
+      476,
+      413
+     ],
+     "n_fresh": 293,
+     "volume_all": 2097796,
+     "expected": 5966934,
+     "cover": 0.952,
+     "bins": {
+      "1": {
+       "n": [
+        168,
+        155
+       ],
+       "n_fresh": 106,
+       "r_2fold": 2.55,
+       "r_fresh": 3.0,
+       "late": 0,
+       "volume_cells": 1389509,
+       "nt": 72,
+       "extent": [
+        -3.2,
+        -10.7,
+        12.7,
+        4.75
+       ]
+      },
+      "2": {
+       "n": [
+        287,
+        236
+       ],
+       "n_fresh": 174,
+       "r_2fold": 2.4,
+       "r_fresh": 2.0,
+       "late": 0,
+       "volume_cells": 1770632,
+       "nt": 74,
+       "extent": [
+        -4.25,
+        -11.4,
+        11.2,
+        4.9
+       ]
+      },
+      "3": {
+       "n": [
+        18,
+        21
+       ],
+       "n_fresh": 12,
+       "r_2fold": Infinity,
+       "r_fresh": 1.35,
+       "late": 5,
+       "volume_cells": 799236,
+       "nt": 76,
+       "extent": [
+        -3.2,
+        -11.3,
+        6.0,
+        2.95
+       ]
+      }
+     },
+     "used": [
+      1,
+      2
+     ]
+    },
+    {
+     "state": "Spin Slash",
+     "n": [
+      471,
+      405
+     ],
+     "n_fresh": 286,
+     "volume_all": 315072,
+     "expected": 1150139,
+     "cover": 0.999,
+     "bins": {
+      "12": {
+       "n": [
+        470,
+        405
+       ],
+       "n_fresh": 286,
+       "r_2fold": 2.65,
+       "r_fresh": 0.85,
+       "late": 0,
+       "volume_cells": 315072,
+       "nt": 33,
+       "extent": [
+        -4.35,
+        -2.7,
+        6.75,
+        2.65
+       ]
+      }
+     },
+     "used": [
+      12
+     ]
+    },
+    {
+     "state": "Spin Slash End",
+     "n": [
+      471,
+      405
+     ],
+     "n_fresh": 285,
+     "volume_all": 225031,
+     "expected": 807949,
+     "cover": 0.991,
+     "bins": {
+      "16": {
+       "n": [
+        466,
+        402
+       ],
+       "n_fresh": 285,
+       "r_2fold": 2.7,
+       "r_fresh": 0.8,
+       "late": 0,
+       "volume_cells": 218135,
+       "nt": 30,
+       "extent": [
+        -6.75,
+        -1.3,
+        4.1,
+        2.35
+       ]
+      }
+     },
+     "used": [
+      16
+     ]
+    }
+   ],
+   "chosen": [
+    "Jump Spin",
+    "Spin Slash",
+    "Spin Slash End"
+   ],
+   "keys": [
+    "support/CH_JUMP/aim@Jump Spin#1/anchor",
+    "support/CH_JUMP/aim@Jump Spin#2/anchor",
+    "support/CH_JUMP/aim@Spin Slash#12/anchor",
+    "support/CH_JUMP/aim@Spin Slash End#16/anchor"
+   ],
+   "r": {
+    "Jump Spin": {
+     "1": 3.0,
+     "2": 2.4
+    },
+    "Spin Slash": {
+     "12": 2.65
+    },
+    "Spin Slash End": {
+     "16": 2.7
+    }
+   }
+  },
+  "Song Pilgrim 03|CH_SLASH": {
+   "candidates": [
+    {
+     "state": "Slash Antic Jump",
+     "n": [
+      647,
+      649
+     ],
+     "n_fresh": 447,
+     "volume_all": 1380824,
+     "expected": 5523296,
+     "cover": 0.0,
+     "bins": {
+      "0": {
+       "n": [
+        637,
+        638
+       ],
+       "n_fresh": 440,
+       "r_2fold": 6.1,
+       "r_fresh": 3.2,
+       "late": 0,
+       "volume_cells": 1202547,
+       "nt": 86,
+       "extent": [
+        -5.25,
+        -2.0,
+        16.0,
+        3.25
+       ]
+      }
+     },
+     "used": []
+    },
+    {
+     "state": "Slash 1",
+     "n": [
+      645,
+      645
+     ],
+     "n_fresh": 444,
+     "volume_all": 1317625,
+     "expected": 5270500,
+     "cover": 0.0,
+     "bins": {
+      "0": {
+       "n": [
+        634,
+        633
+       ],
+       "n_fresh": 432,
+       "r_2fold": 6.25,
+       "r_fresh": 3.15,
+       "late": 0,
+       "volume_cells": 1084182,
+       "nt": 81,
+       "extent": [
+        -6.45,
+        -2.3,
+        14.8,
+        3.1
+       ]
+      }
+     },
+     "used": []
+    },
+    {
+     "state": "Slash 2",
+     "n": [
+      644,
+      645
+     ],
+     "n_fresh": 442,
+     "volume_all": 1163109,
+     "expected": 4652436,
+     "cover": 0.0,
+     "bins": {
+      "0": {
+       "n": [
+        617,
+        626
+       ],
+       "n_fresh": 425,
+       "r_2fold": 6.4,
+       "r_fresh": 3.0,
+       "late": 0,
+       "volume_cells": 938092,
+       "nt": 77,
+       "extent": [
+        -6.65,
+        -1.9,
+        14.15,
+        2.95
+       ]
+      }
+     },
+     "used": []
+    },
+    {
+     "state": "Slash End",
+     "n": [
+      642,
+      644
+     ],
+     "n_fresh": 440,
+     "volume_all": 1086545,
+     "expected": 4346180,
+     "cover": 0.0,
+     "bins": {
+      "12": {
+       "n": [
+        23,
+        15
+       ],
+       "n_fresh": 15,
+       "r_2fold": 3.9,
+       "r_fresh": 1.3,
+       "late": 0,
+       "volume_cells": 516142,
+       "nt": 73,
+       "extent": [
+        -6.8,
+        -3.45,
+        6.8,
+        2.35
+       ]
+      },
+      "16": {
+       "n": [
+        619,
+        629
+       ],
+       "n_fresh": 425,
+       "r_2fold": 6.3,
+       "r_fresh": 3.15,
+       "late": 0,
+       "volume_cells": 863765,
+       "nt": 73,
+       "extent": [
+        -7.05,
+        -1.65,
+        13.7,
+        2.95
+       ]
+      }
+     },
+     "used": []
+    },
+    {
+     "state": "ComboSlash Antic1",
+     "n": [
+      427,
+      442
+     ],
+     "n_fresh": 295,
+     "volume_all": 969489,
+     "expected": 3877956,
+     "cover": 0.0,
+     "bins": {
+      "16": {
+       "n": [
+        412,
+        435
+       ],
+       "n_fresh": 289,
+       "r_2fold": 6.3,
+       "r_fresh": 3.15,
+       "late": 0,
+       "volume_cells": 791879,
+       "nt": 69,
+       "extent": [
+        -7.05,
+        -1.65,
+        13.7,
+        2.95
+       ]
+      }
+     },
+     "used": []
+    },
+    {
+     "state": "ComboSlash Antic2",
+     "n": [
+      405,
+      422
+     ],
+     "n_fresh": 286,
+     "volume_all": 564924,
+     "expected": 1648008,
+     "cover": 0.966,
+     "bins": {
+      "0": {
+       "n": [
+        393,
+        406
+       ],
+       "n_fresh": 277,
+       "r_2fold": 2.7,
+       "r_fresh": 0.5,
+       "late": 0,
+       "volume_cells": 439614,
+       "nt": 39,
+       "extent": [
+        -4.35,
+        -1.65,
+        10.1,
+        2.95
+       ]
+      }
+     },
+     "used": [
+      0
+     ]
+    },
+    {
+     "state": "ComboSlash 1",
+     "n": [
+      399,
+      419
+     ],
+     "n_fresh": 282,
+     "volume_all": 432713,
+     "expected": 1220575,
+     "cover": 0.962,
+     "bins": {
+      "0": {
+       "n": [
+        379,
+        408
+       ],
+       "n_fresh": 262,
+       "r_2fold": 2.4,
+       "r_fresh": 0.3,
+       "late": 0,
+       "volume_cells": 353081,
+       "nt": 33,
+       "extent": [
+        -5.55,
+        -1.85,
+        8.6,
+        2.95
+       ]
+      }
+     },
+     "used": [
+      0
+     ]
+    },
+    {
+     "state": "ComboSlash 2",
+     "n": [
+      397,
+      418
+     ],
+     "n_fresh": 282,
+     "volume_all": 318865,
+     "expected": 1023933,
+     "cover": 0.94,
+     "bins": {
+      "0": {
+       "n": [
+        372,
+        394
+       ],
+       "n_fresh": 256,
+       "r_2fold": 2.7,
+       "r_fresh": 0.3,
+       "late": 0,
+       "volume_cells": 272390,
+       "nt": 29,
+       "extent": [
+        -6.45,
+        -1.85,
+        7.7,
+        2.95
+       ]
+      },
+      "16": {
+       "n": [
+        13,
+        12
+       ],
+       "n_fresh": 12,
+       "r_2fold": 0.0,
+       "r_fresh": 3.6,
+       "late": 0,
+       "volume_cells": 24244,
+       "nt": 29,
+       "extent": [
+        -0.45,
+        -1.3,
+        0.5,
+        0.9
+       ]
+      }
+     },
+     "used": [
+      0
+     ]
+    },
+    {
+     "state": "ComboSlash 3",
+     "n": [
+      392,
+      415
+     ],
+     "n_fresh": 281,
+     "volume_all": 241144,
+     "expected": 720468,
+     "cover": 1.0,
+     "bins": {
+      "12": {
+       "n": [
+        14,
+        17
+       ],
+       "n_fresh": 12,
+       "r_2fold": 1.35,
+       "r_fresh": 0.55,
+       "late": 0,
+       "volume_cells": 130802,
+       "nt": 25,
+       "extent": [
+        -4.1,
+        -3.35,
+        4.1,
+        2.05
+       ]
+      },
+      "16": {
+       "n": [
+        378,
+        398
+       ],
+       "n_fresh": 269,
+       "r_2fold": 2.7,
+       "r_fresh": 0.0,
+       "late": 0,
+       "volume_cells": 199181,
+       "nt": 25,
+       "extent": [
+        -6.3,
+        -1.3,
+        6.8,
+        2.95
+       ]
+      }
+     },
+     "used": [
+      12,
+      16
+     ]
+    },
+    {
+     "state": "Slash Recover",
+     "n": [
+      594,
+      613
+     ],
+     "n_fresh": 420,
+     "volume_all": 136366,
+     "expected": 318515,
+     "cover": 1.0,
+     "bins": {
+      "12": {
+       "n": [
+        20,
+        24
+       ],
+       "n_fresh": 14,
+       "r_2fold": 1.75,
+       "r_fresh": 0.5,
+       "late": 0,
+       "volume_cells": 80386,
+       "nt": 17,
+       "extent": [
+        -1.85,
+        -3.0,
+        4.05,
+        2.6
+       ]
+      },
+      "16": {
+       "n": [
+        574,
+        589
+       ],
+       "n_fresh": 406,
+       "r_2fold": 1.8,
+       "r_fresh": 0.0,
+       "late": 0,
+       "volume_cells": 115072,
+       "nt": 17,
+       "extent": [
+        -4.05,
+        -1.3,
+        5.9,
+        2.95
+       ]
+      }
+     },
+     "used": [
+      12,
+      16
+     ]
+    }
+   ],
+   "chosen": [
+    "ComboSlash Antic2",
+    "ComboSlash 1",
+    "ComboSlash 2",
+    "ComboSlash 3",
+    "Slash Recover"
+   ],
+   "keys": [
+    "support/CH_SLASH/aim@ComboSlash Antic2#0/anchor",
+    "support/CH_SLASH/aim@ComboSlash 1#0/anchor",
+    "support/CH_SLASH/aim@ComboSlash 2#0/anchor",
+    "support/CH_SLASH/aim@ComboSlash 3#12/anchor",
+    "support/CH_SLASH/aim@ComboSlash 3#16/anchor",
+    "support/CH_SLASH/aim@Slash Recover#12/anchor",
+    "support/CH_SLASH/aim@Slash Recover#16/anchor"
+   ],
+   "r": {
+    "ComboSlash Antic2": {
+     "0": 2.7
+    },
+    "ComboSlash 1": {
+     "0": 2.4
+    },
+    "ComboSlash 2": {
+     "0": 2.7
+    },
+    "ComboSlash 3": {
+     "12": 1.35,
+     "16": 2.7
+    },
+    "Slash Recover": {
+     "12": 1.75,
+     "16": 1.8
+    }
+   }
+  },
+  "Song Pilgrim 03|CH_WHIP": {
+   "candidates": [
+    {
+     "state": "Whip 1",
+     "n": [
+      646,
+      622
+     ],
+     "n_fresh": 449,
+     "volume_all": 467492,
+     "expected": 1417827,
+     "cover": 0.972,
+     "bins": {
+      "0": {
+       "n": [
+        629,
+        603
+       ],
+       "n_fresh": 440,
+       "r_2fold": 2.3,
+       "r_fresh": 2.4,
+       "late": 0,
+       "volume_cells": 413122,
+       "nt": 66,
+       "extent": [
+        -3.85,
+        -1.6,
+        5.25,
+        2.95
+       ]
+      }
+     },
+     "used": [
+      0
+     ]
+    },
+    {
+     "state": "Whip 2",
+     "n": [
+      561,
+      546
+     ],
+     "n_fresh": 391,
+     "volume_all": 354646,
+     "expected": 1418584,
+     "cover": 0.0,
+     "bins": {
+      "0": {
+       "n": [
+        543,
+        527
+       ],
+       "n_fresh": 385,
+       "r_2fold": Infinity,
+       "r_fresh": 2.4,
+       "late": 2,
+       "volume_cells": 317239,
+       "nt": 62,
+       "extent": [
+        -3.65,
+        -1.6,
+        4.45,
+        2.6
+       ]
+      }
+     },
+     "used": []
+    },
+    {
+     "state": "Whip 3",
+     "n": [
+      506,
+      461
+     ],
+     "n_fresh": 340,
+     "volume_all": 206253,
+     "expected": 825012,
+     "cover": 0.0,
+     "bins": {
+      "12": {
+       "n": [
+        19,
+        17
+       ],
+       "n_fresh": 6,
+       "r_2fold": Infinity,
+       "r_fresh": 0.55,
+       "late": 1,
+       "volume_cells": 81035,
+       "nt": 53,
+       "extent": [
+        -0.5,
+        -2.75,
+        0.5,
+        2.35
+       ]
+      },
+      "16": {
+       "n": [
+        487,
+        444
+       ],
+       "n_fresh": 334,
+       "r_2fold": Infinity,
+       "r_fresh": 2.4,
+       "late": 2,
+       "volume_cells": 182800,
+       "nt": 58,
+       "extent": [
+        -4.05,
+        -1.3,
+        3.2,
+        2.6
+       ]
+      }
+     },
+     "used": []
+    },
+    {
+     "state": "Whip 4",
+     "n": [
+      493,
+      441
+     ],
+     "n_fresh": 323,
+     "volume_all": 157489,
+     "expected": 612922,
+     "cover": 0.039,
+     "bins": {
+      "12": {
+       "n": [
+        20,
+        16
+       ],
+       "n_fresh": 4,
+       "r_2fold": 1.4,
+       "r_fresh": 0.0,
+       "late": 0,
+       "volume_cells": 78338,
+       "nt": 47,
+       "extent": [
+        -0.5,
+        -2.75,
+        0.5,
+        2.35
+       ]
+      },
+      "16": {
+       "n": [
+        473,
+        425
+       ],
+       "n_fresh": 319,
+       "r_2fold": Infinity,
+       "r_fresh": 2.4,
+       "late": 1,
+       "volume_cells": 123336,
+       "nt": 53,
+       "extent": [
+        -2.7,
+        -1.3,
+        2.6,
+        2.6
+       ]
+      }
+     },
+     "used": [
+      12
+     ]
+    },
+    {
+     "state": "Whip 5",
+     "n": [
+      459,
+      404
+     ],
+     "n_fresh": 291,
+     "volume_all": 71911,
+     "expected": 280765,
+     "cover": 0.025,
+     "bins": {
+      "12": {
+       "n": [
+        10,
+        12
+       ],
+       "n_fresh": 5,
+       "r_2fold": 0.2,
+       "r_fresh": 0.0,
+       "late": 0,
+       "volume_cells": 14819,
+       "nt": 9,
+       "extent": [
+        -0.5,
+        -2.75,
+        0.5,
+        1.95
+       ]
+      },
+      "16": {
+       "n": [
+        449,
+        392
+       ],
+       "n_fresh": 286,
+       "r_2fold": Infinity,
+       "r_fresh": 2.4,
+       "late": 2,
+       "volume_cells": 67630,
+       "nt": 50,
+       "extent": [
+        -2.7,
+        -1.3,
+        1.7,
+        2.6
+       ]
+      }
+     },
+     "used": [
+      12
+     ]
+    },
+    {
+     "state": "Whip 6",
+     "n": [
+      453,
+      399
+     ],
+     "n_fresh": 286,
+     "volume_all": 47054,
+     "expected": 183594,
+     "cover": 0.026,
+     "bins": {
+      "12": {
+       "n": [
+        13,
+        9
+       ],
+       "n_fresh": 4,
+       "r_2fold": 0.3,
+       "r_fresh": 0.0,
+       "late": 0,
+       "volume_cells": 7096,
+       "nt": 5,
+       "extent": [
+        -0.5,
+        -2.25,
+        0.5,
+        1.6
+       ]
+      },
+      "16": {
+       "n": [
+        440,
+        390
+       ],
+       "n_fresh": 282,
+       "r_2fold": Infinity,
+       "r_fresh": 0.6,
+       "late": 50,
+       "volume_cells": 45425,
+       "nt": 46,
+       "extent": [
+        -1.8,
+        -1.3,
+        0.8,
+        1.65
+       ]
+      }
+     },
+     "used": [
+      12
+     ]
+    },
+    {
+     "state": "Multiwhip",
+     "n": [
+      187,
+      218
+     ],
+     "n_fresh": 163,
+     "volume_all": 258562,
+     "expected": 801348,
+     "cover": 0.968,
+     "bins": {
+      "16": {
+       "n": [
+        180,
+        212
+       ],
+       "n_fresh": 160,
+       "r_2fold": 2.4,
+       "r_fresh": 0.75,
+       "late": 0,
+       "volume_cells": 233419,
+       "nt": 46,
+       "extent": [
+        -4.05,
+        -1.3,
+        2.9,
+        2.35
+       ]
+      }
+     },
+     "used": [
+      16
+     ]
+    }
+   ],
+   "chosen": [
+    "Whip 1",
+    "Multiwhip"
+   ],
+   "keys": [
+    "support/CH_WHIP/aim@Whip 1#0/anchor",
+    "support/CH_WHIP/aim@Multiwhip#16/anchor"
+   ],
+   "r": {
+    "Whip 1": {
+     "0": 2.4
+    },
+    "Multiwhip": {
+     "16": 2.4
+    }
+   }
+  },
+  "Pilgrim 03 Song|CB_THROW": {
+   "candidates": [],
+   "chosen": []
+  }
+ },
+ "min_inst": 20,
+ "min_bin": 8,
+ "max_r_bin": 3.0,
+ "n_bins": 16,
+ "cell": 0.05,
+ "fam_template_reference": {
+  "support/RE_STAB/anchor": [
+   -15.200000000000001,
+   -13.3,
+   24.400000000000002,
+   10.4
+  ]
+ }
+}

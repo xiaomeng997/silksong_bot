@@ -69,7 +69,7 @@ import numpy as np
 from ssbot.combat.enemy_tables import BIN, EMPTY, FORUM_DIR, JMAX, TAIL, EnemyTables, PlaceBatch, TypeTable, \
     WinBatch
 from ssbot.combat.branch_model import BranchModel, BranchView, memory_for_table
-from ssbot.combat.enemy_tracker import TAIL_KEEP_S, EnemyTracker, body_offsets
+from ssbot.combat.enemy_tracker import AIM_AFTER, TAIL_KEEP_S, EnemyTracker, body_offsets
 from ssbot.combat.fastquery import circle_hits
 from ssbot.combat.forecast import active_within, entry_grid, exit_interval
 from ssbot.combat.projectiles import BELL, HAZARD_DV_U_S, RUNE, SKIN_U, HazardPath, HazardTracker, hazard_type
@@ -1069,7 +1069,9 @@ class _Builder:
         # template from the start, the family's per-state nodes, a re-anchor); its tail nodes stay
         aim_tid = None
         if committed_now and not thrown and cur.aim_anchor is not None:
-            aim_tid = tables.key_id(cur.family, f"aim@{cur.aim_state}", "anchor")
+            # its direction bin's template; a bin without one (too few instances, or not certified held out): the
+            # family's union as before
+            aim_tid = tables.key_id(cur.family, f"aim@{cur.aim_state}#{cur.aim_bin}", "anchor")
             if aim_tid is not None and aim_tid >= 0:
                 self._place_anchor(aim_tid, cur.aim_t - T, cur.aim_t - T, (cur.aim_anchor, cur.aim_mirror, cur.aim_sd),
                                    tr.iid, cur.family, True, 1.0)
@@ -1089,7 +1091,7 @@ class _Builder:
                 c_ton = cur.t_start - T + d - self.lat
         if anc is not None and not (idle_tube and cur.family == sp.idle_family) and not thrown:
             for nd in cur_nodes:
-                if aim_tid is not None and nd.family == cur.family and nd.state != TAIL:
+                if aim_tid is not None and nd.family == cur.family and nd.state != TAIL                         and nd.state not in AIM_AFTER.get((tt.tk, cur.family), ()):
                     continue
                 if nd.current:
                     lo = hi = tr.t_entry - T          # the current state: its entry

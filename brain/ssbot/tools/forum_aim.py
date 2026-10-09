@@ -36,6 +36,7 @@ from pathlib import Path
 
 import numpy as np
 
+from ssbot.combat.enemy_tracker import AIM_AFTER, AIM_BINS
 from ssbot.knowledge import hitbox_tables as hb
 
 DEV = Path(r"C:\ssbot\data\m2_forum_r0\cache")
@@ -47,6 +48,9 @@ BIN = hb.BIN_S
 FACES_LEFT = (-1, 1)
 MIN_INST = 20
 MAX_R = 0.5
+MIN_BIN = 8              # instances per fold for a bin of its own
+MIN_COVER = 0.9         # a state is an aim state when its usable bins hold this share of the instances
+MAX_R_BIN = 3.0          # a bin's held-out residual (u) for it to be used (its template is dilated by it)
 GAP_F = 3
 # the families whose damage follows the hero (the task's list + the data): type key -> families
 CANDIDATES = {
@@ -89,6 +93,14 @@ def instances(cache: dict, fams: dict) -> dict:
     ce_sorted = cei[order]
     dealt = np.asarray(cache["c_dealt"])
     cbox = np.asarray(cache["c_box"], np.float64)
+    e_st, e_fi = np.asarray(cache["e_st"]), np.asarray(cache["e_fi"])
+    hx, hy = np.asarray(cache["hx"], np.float64), np.asarray(cache["hy"], np.float64)
+    st_l, fi_l = e_st.tolist(), e_fi.tolist()
+    # every row's damage colliders (dealt > 0) as a slice of `order`, found once
+    rows_all = np.arange(len(e_st))
+    lo_l = np.searchsorted(ce_sorted, rows_all, "left").tolist()
+    hi_l = np.searchsorted(ce_sorted, rows_all, "right").tolist()
+    hurt_sorted = dealt[order] > 0
     out: dict = {}
     for (tk, fam), (starts, sts) in fams.items():
         if tk not in types:
@@ -97,20 +109,20 @@ def instances(cache: dict, fams: dict) -> dict:
         codes = {states.index(s): s for s in sts if s in states}
         if not codes:
             continue
-        sel = np.flatnonzero((cache["e_tk"] == ti) & np.isin(cache["e_st"], list(codes)))
+        sel = np.flatnonzero((cache["e_tk"] == ti) & np.isin(e_st, list(codes)))
         if not len(sel):
             continue
         iids = cache["e_iid"][sel]
         for iid in np.unique(iids):
             rows = sel[iids == iid]
-            rows = rows[np.argsort(cache["e_fi"][rows], kind="stable")]
+            rows = rows[np.argsort(e_fi[rows], kind="stable")].tolist()
             cur: list = []
             runs = []
             for r in rows:
-                s = codes[int(cache["e_st"][r])]
+                s = codes[st_l[r]]
                 if cur:
-                    prev = codes[int(cache["e_st"][cur[-1]])]
-                    gap = int(cache["e_fi"][r]) - int(cache["e_fi"][cur[-1]])
+                    prev = codes[st_l[cur[-1]]]
+                    gap = fi_l[r] - fi_l[cur[-1]]
                     if gap > GAP_F or (s in starts and prev not in starts and s != prev):
                         runs.append(cur)
                         cur = []
@@ -118,22 +130,39 @@ def instances(cache: dict, fams: dict) -> dict:
             if cur:
                 runs.append(cur)
             for rr in runs:
-                st = [codes[int(cache["e_st"][r])] for r in rr]
+                st = [codes[st_l[r]] for r in rr]
                 if st[0] not in starts:
                     continue
                 boxes = []
                 for r in rr:
-                    a = np.searchsorted(ce_sorted, r, "left")
-                    b = np.searchsorted(ce_sorted, r, "right")
-                    ci = order[a:b]
-                    ci = ci[dealt[ci] > 0]
-                    boxes.append(cbox[ci])
-                out.setdefault((tk, fam), []).append({
+                    a, b = lo_l[r], hi_l[r]
+                    boxes.append(cbox[order[a:b][hurt_sorted[a:b]]] if b > a else cbox[:0])
+                out.setdefault((tk, fam), []).append({"key": (tk, fam),
                     "st": st, "t": T[cache["e_fi"][rr]],
                     "pos": np.stack([cache["e_x"][rr], cache["e_y"][rr]], axis=1).astype(np.float64),
                     "flip": np.asarray(cache["e_flip"][rr]), "hidden": np.asarray(cache["e_hidden"][rr]),
+                    "hero": np.stack([hx[e_fi[rr]], hy[e_fi[rr]]], axis=1).astype(np.float64),
+                    "vel": np.stack([cache["e_vx"][rr], cache["e_vy"][rr]], axis=1).astype(np.float64),
                     "boxes": boxes})
     return out
+
+
+def aim_frame(inst: dict, i: int) -> tuple[int, int]:
+    """(mirror, direction bin) of the instance at its row i: enemy_tracker.aim_frame, the trackers' own (forward = where
+    it flies; the hero's direction at the aim does not fix the Reed's stab, forum.md §29.2, its own flight does: Stab
+    1-5 slide along one line, the needle ahead of it)."""
+    from ssbot.combat.enemy_tracker import aim_frame as tracker_frame
+    vx, vy = inst["vel"][i]
+    return tracker_frame(float(vx), float(vy), FACES_LEFT[1 if inst["flip"][i] else 0])
+
+
+def aim_rel(inst: dict, S: str) -> int | None:
+    """The direction bin at the instance's first row in S (None: it never entered S)."""
+    try:
+        i = inst["st"].index(S)
+    except ValueError:
+        return None
+    return aim_frame(inst, i)[1]
 
 
 def aim_boxes(inst: dict, S: str) -> np.ndarray | None:
@@ -146,10 +175,13 @@ def aim_boxes(inst: dict, S: str) -> np.ndarray | None:
     if inst["hidden"][i]:
         return None
     ax, ay = inst["pos"][i]
-    m = FACES_LEFT[1 if inst["flip"][i] else 0]
+    m = aim_frame(inst, i)[0]
     t0 = inst["t"][i]
     out = []
+    stop = AIM_AFTER.get(inst.get("key"), ())
     for j in range(i, len(inst["st"])):
+        if inst["st"][j] in stop:
+            break
         bx = inst["boxes"][j]
         if not len(bx):
             continue
@@ -224,6 +256,19 @@ def build_occ(abs_: list[np.ndarray], nt: int) -> Occ:
     return o
 
 
+def _fight_instances(path: str, fams: dict) -> dict:
+    from ssbot.knowledge.forum_cache import load_cache
+    return instances(load_cache(Path(path)), fams)
+
+
+def _low_priority() -> None:
+    try:
+        import psutil
+        psutil.Process().nice(psutil.BELOW_NORMAL_PRIORITY_CLASS)
+    except Exception:  # noqa: BLE001  (not Windows / no psutil: normal priority)
+        pass
+
+
 def _load(d: Path) -> list[dict]:
     from ssbot.knowledge.forum_cache import load_cache
     return [load_cache(Path(p)) for p in sorted(glob.glob(str(d / "*.npz")))]
@@ -233,67 +278,98 @@ def cmd_build(a) -> int:
     t0 = time.perf_counter()
     fams = family_states()
     dev, fresh = {}, {}
+    from concurrent.futures import ProcessPoolExecutor
     for which, d, acc in (("dev", Path(a.dev), dev), ("fresh", Path(a.fresh), fresh)):
         paths = sorted(glob.glob(str(d / "*.npz")))
-        from ssbot.knowledge.forum_cache import load_cache
-        for i, p in enumerate(paths):
-            for key, insts in instances(load_cache(Path(p)), fams).items():
-                for x in insts:
-                    x["fold"] = i % 2
-                acc.setdefault(key, []).extend(insts)
+        # about 30 s a fight in one process (214 dev + the fresh fights): one fight per worker task
+        with ProcessPoolExecutor(max_workers=a.workers, initializer=_low_priority) as ex:
+            for i, got in enumerate(ex.map(_fight_instances, paths, [fams] * len(paths), chunksize=1)):
+                for key, insts in got.items():
+                    for x in insts:
+                        x["fold"] = i % 2
+                    acc.setdefault(key, []).extend(insts)
         print(f"{which}: {len(paths)} fights ({time.perf_counter() - t0:.0f} s)", flush=True)
     from ssbot.combat.enemy_tables import EnemyTables  # noqa: F401
     fam_tpl, _ = hb.load_templates(FORUM_DIR / "Reed_hitboxes.npz", prefix="support/RE_STAB/anchor")
-    report: dict = {"families": {}, "min_inst": MIN_INST, "max_r": MAX_R, "cell": CELL}
+    report: dict = {"families": {}, "min_inst": MIN_INST, "min_bin": MIN_BIN, "max_r_bin": MAX_R_BIN,
+                    "n_bins": AIM_BINS, "cell": CELL}
     chosen = {}
     for (tk, fam), (starts, sts) in fams.items():
         insts = dev.get((tk, fam), [])
         rows = []
         for S in sts:
-            if S in starts:
+            if S in starts or S in AIM_AFTER.get((tk, fam), ()):
                 continue
-            per = [(x["fold"], aim_boxes(x, S)) for x in insts]
-            per = [(f, ab) for f, ab in per if ab is not None]
-            n_f = [sum(1 for f, _ in per if f == k) for k in (0, 1)]
+            per = []
+            for x in insts:
+                ab, rel = aim_boxes(x, S), aim_rel(x, S)
+                if ab is not None and rel is not None:
+                    per.append((x["fold"], rel, ab))
+            n_f = [sum(1 for f, _, _ in per if f == k) for k in (0, 1)]
             if min(n_f) < MIN_INST:
                 continue
-            nt = int(max((ab[:, 0].max() for _, ab in per if len(ab)), default=0)) + 2
-            if nt <= 2:
+            nt_all = int(max((ab[:, 0].max() for _, _, ab in per if len(ab)), default=0)) + 2
+            if nt_all <= 2:
                 rows.append({"state": S, "n": n_f, "damage": False})
                 continue
-            rs = []
-            for k in (0, 1):
-                tr = build_occ([ab for f, ab in per if f != k], nt)
-                rs.append(need_r(tr, [ab for f, ab in per if f == k]))
-            r = max(x[0] for x in rs)
-            full = build_occ([ab for _, ab in per], nt)
-            fr = [aim_boxes(x, S) for x in fresh.get((tk, fam), [])]
-            fr = [ab for ab in fr if ab is not None]
-            rf = need_r(full, fr) if fr else (0.0, 0, 0)
-            vol = int(full.padded().sum())
-            rows.append({"state": S, "n": n_f, "n_fresh": len(fr), "r_2fold": round(r, 3),
-                         "r_fresh": round(rf[0], 3), "boxes_fresh": rf[1], "late_fresh": rf[2],
-                         "late_2fold": sum(x[2] for x in rs), "volume_cells": vol, "nt": nt,
-                         "extent": _extent(full)})
-            print(f"{tk[-12:]:12s} {fam:13s} {S:22s} n {n_f} fresh {len(fr)} r 2-fold {r:.2f} fresh {rf[0]:.2f} "
-                  f"vol {vol} ext {_extent(full)}", flush=True)
-        ok = [x for x in rows if x.get("volume_cells") and x["r_2fold"] <= MAX_R and x["r_fresh"] <= MAX_R
-              and not x["late_2fold"] and not x["late_fresh"]]
-        best = min(ok, key=lambda x: x["volume_cells"] * (1.0 + max(x["r_2fold"], x["r_fresh"]))) if ok else None
-        report["families"][f"{tk}|{fam}"] = {"candidates": rows, "chosen": best and best["state"]}
-        if best is not None:
-            chosen[(tk, fam)] = (best["state"], max(best["r_2fold"], best["r_fresh"]))
+            vol_all = int(build_occ([ab for _, _, ab in per], nt_all).padded().sum())
+            fr = []
+            for x in fresh.get((tk, fam), []):
+                ab, rel = aim_boxes(x, S), aim_rel(x, S)
+                if ab is not None and rel is not None:
+                    fr.append((rel, ab))
+            bins = {}
+            for b in sorted({b for _, b, _ in per}):
+                pb = [(f, ab) for f, bb, ab in per if bb == b]
+                nb = [sum(1 for f, _ in pb if f == k) for k in (0, 1)]
+                if min(nb) < MIN_BIN:
+                    continue
+                nt = int(max((ab[:, 0].max() for _, ab in pb if len(ab)), default=0)) + 2
+                rs = [need_r(build_occ([ab for f, ab in pb if f != k], nt), [ab for f, ab in pb if f == k])
+                      for k in (0, 1)]
+                full = build_occ([ab for _, ab in pb], nt)
+                fb = [ab for bb, ab in fr if bb == b]
+                rf = need_r(full, fb) if fb else (0.0, 0, 0)
+                bins[b] = {"n": nb, "n_fresh": len(fb), "r_2fold": round(max(x[0] for x in rs), 3),
+                           "r_fresh": round(rf[0], 3), "late": sum(x[2] for x in rs) + rf[2],
+                           "volume_cells": int(full.padded().sum()), "nt": nt, "extent": _extent(full)}
+            use = {b: v for b, v in bins.items() if not v["late"] and v["r_2fold"] <= MAX_R_BIN
+                   and v["r_fresh"] <= MAX_R_BIN}
+            # the expected dilated volume per instance: its bin's template, or (no usable bin) the unbinned one
+            n_tot = len(per)
+            ev = 0.0
+            for _, b, _ in per:
+                v = use.get(b)
+                ev += v["volume_cells"] * (1.0 + max(v["r_2fold"], v["r_fresh"])) if v else vol_all * 4.0
+            ev /= max(n_tot, 1)
+            cover = sum(1 for _, b, _ in per if b in use) / max(n_tot, 1)
+            rows.append({"state": S, "n": n_f, "n_fresh": len(fr), "volume_all": vol_all, "expected": round(ev),
+                         "cover": round(cover, 3), "bins": bins, "used": sorted(use)})
+            print(f"{tk[-12:]:12s} {fam:13s} {S:22s} n {n_f} fresh {len(fr)} vol {vol_all} expected {ev:.0f} "
+                  f"cover {cover:.0%} bins " + " ".join(
+                      f"{b}:{v['n'][0] + v['n'][1]}/r{max(v['r_2fold'], v['r_fresh']):.1f}/v{v['volume_cells']}"
+                      f"{'' if b in use else 'x'}" for b, v in bins.items()), flush=True)
+        # every state whose usable bins hold most instances: the tracker re-aims at each (enemy_tracker._aim_now)
+        ok = [x for x in rows if x.get("used") and x["cover"] >= MIN_COVER]
+        report["families"][f"{tk}|{fam}"] = {"candidates": rows, "chosen": [x["state"] for x in ok]}
+        for x in ok:
+            chosen[(tk, fam, x["state"])] = {b: max(x["bins"][b]["r_2fold"], x["bins"][b]["r_fresh"])
+                                             for b in x["used"]}
     tpls, extra = {}, {}
-    for (tk, fam), (S, r) in chosen.items():
-        # dev fights only: the fresh ones stay held out (multi_recall fresh)
-        abs_ = [aim_boxes(x, S) for x in dev.get((tk, fam), [])]
-        abs_ = [ab for ab in abs_ if ab is not None]
-        nt = int(max(ab[:, 0].max() for ab in abs_ if len(ab))) + 2
-        o = build_occ(abs_, nt)
-        key = f"support/{fam}/aim@{S}/anchor"
-        tpls[key] = _template(key, o, len(abs_))
-        extra[f"aim/{tk}|{fam}"] = np.array([r])
-        report["families"][f"{tk}|{fam}"].update({"key": key, "r": r, "n_all": len(abs_)})
+    for (tk, fam, S), rb in chosen.items():
+        keys = []
+        for b, r in rb.items():
+            # dev fights only: the fresh ones stay held out (multi_recall fresh)
+            abs_ = [aim_boxes(x, S) for x in dev.get((tk, fam), [])
+                    if aim_rel(x, S) is not None and aim_rel(x, S) == b]
+            abs_ = [ab for ab in abs_ if ab is not None]
+            nt = int(max(ab[:, 0].max() for ab in abs_ if len(ab))) + 2
+            key = f"support/{fam}/aim@{S}#{b}/anchor"
+            tpls[key] = _template(key, build_occ(abs_, nt), len(abs_))
+            extra[f"aim/{tk}|{fam}@{S}#{b}"] = np.array([r])
+            keys.append(key)
+        report["families"][f"{tk}|{fam}"].setdefault("keys", []).extend(keys)
+        report["families"][f"{tk}|{fam}"].setdefault("r", {})[S] = {str(b): r for b, r in rb.items()}
     out = Path(a.out)
     hb.save_templates(out, tpls, extra)
     report["fam_template_reference"] = {k: list(v.bounds) for k, v in fam_tpl.items()}
@@ -333,6 +409,7 @@ def main(argv=None) -> int:
     b.add_argument("--fresh", default=str(FRESH))
     b.add_argument("--out", default=str(OUT))
     b.add_argument("--json")
+    b.add_argument("--workers", type=int, default=8)
     a = ap.parse_args(argv)
     return {"build": cmd_build}[a.cmd](a)
 
