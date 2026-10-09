@@ -694,7 +694,7 @@ def aim_on() -> bool:
     acceptance (forum.md §29.6: R2 held-out recall 100 % at L2-L4, the re-score's unsafe / false alarms / FORCED_RISK
     down, misses not up); "0" turns them off. Without knowledge/.../forum/aim_templates.npz (git-ignored, built by
     tools.forum_aim) nothing is loaded."""
-    return os.environ.get("SSBOT_FORUM_AIM", "1") not in ("", "0")
+    return os.environ.get("SSBOT_FORUM_AIM", "0") not in ("", "0")   # off until a true held-out recall (review)
 
 
 def load_aim_templates(spec: ForumType, margins: dict, base: float = 0.0, path: Path | None = None):
