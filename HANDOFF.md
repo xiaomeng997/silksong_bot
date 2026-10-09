@@ -3812,5 +3812,7 @@ area is margin, the support is "about 100x". Until now the acceptance only check
 1. The support itself is unchanged: this task only measures. Candidates in order of excess: no family union where a
    per-state template exists (or a time-limited one), chain windows per follow-up time, Tiny templates, not_started
    empty before the antic can end, body tubes from real speed bounds, fine templates conditioned on aim / time.
-2. Optional replay scalars (`metrics/precision/<enemy>` in viewer --zones) not done.
+2. Replay scalars: `viewer <session> --zones --precision` logs `metrics/precision/<enemy>/k<k>/<layer>` (RATIO, 0 = no
+   prediction, -1 = false alarm) and `.../error`; sample `C:\ssbot\data\m2_forum_precision61009_085824_f10300-10460_precision.rrd`.
+   A full-session replay with it was not made.
 3. Geometric recall is not 100 % (above); the gate should compare before / after, plus R2's contact recall.

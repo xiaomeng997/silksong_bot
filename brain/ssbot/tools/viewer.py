@@ -416,11 +416,14 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--zones-every", type=int, default=1, help="--zones: every N-th game frame")
     ap.add_argument("--margins", action="store_true", help="--zones: also the margins layer")
     ap.add_argument("--demo-cache", default=None, help="--zones: tools.forum_demo scan cache directory")
+    ap.add_argument("--precision", action="store_true",
+                    help="--zones: per enemy and k the support's RATIO to its real damage (tools.support_precision) "
+                         "as metrics/precision/<enemy>/k<k>/<layer>")
     a = ap.parse_args(argv)
 
     if a.zones:
         from ssbot.tools.zone_overlay import rerun_zones, zones_blueprint
-        bp = zones_blueprint(a.video)
+        bp = zones_blueprint(a.video, a.precision)
         rec = rr.RecordingStream("ssbot-zones", recording_id=str(Path(a.path).resolve()))
         if a.save:
             rec.save(a.save, default_blueprint=bp)
@@ -428,7 +431,8 @@ def main(argv: list[str] | None = None) -> int:
             rec.spawn(default_blueprint=bp)
         stats = rerun_zones(Path(a.path), rec, a.f0, a.f1, ks=tuple(int(x) for x in a.k.split(",") if x),
                             video=a.video, video_scale=a.video_scale, every=max(1, a.zones_every),
-                            margins=a.margins, demo_cache=Path(a.demo_cache) if a.demo_cache else None)
+                            margins=a.margins, demo_cache=Path(a.demo_cache) if a.demo_cache else None,
+                            precision=a.precision)
         rec.flush()
         print(f"logged {stats}" + (f" -> {a.save}" if a.save else ""))
         return 0

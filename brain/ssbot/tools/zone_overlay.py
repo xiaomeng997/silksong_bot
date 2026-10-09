@@ -1274,12 +1274,15 @@ def mask_contours(mask: np.ndarray) -> list[np.ndarray]:
 
 def rerun_zones(session: Path, rec, f0: int | None = None, f1: int | None = None, ks=(0,), video: bool = False,
                 video_scale: float = 0.5, every: int = 1, margins: bool = False, demo_cache: Path | None = None,
-                threads: int = 4) -> dict:
+                threads: int = 4, precision: bool = False) -> dict:
     """Log a human session's Forum attempts with the zone layers per game frame into a Rerun recording ("frame" =
     the raw oracle frame, as the video labels): world/ (y up, as tools.viewer) hero, the real damage colliders
     (colliders/non_clashable, colliders/clashable: the ground truth), zones/red (the non-clashable sweeps),
     zones/yellow/{committed, not_started}, support/k<k>/<layer>; with video, screen/video (the recorded frame) and the
-    same outlines projected with the STATE camera (screen/zones/...)."""
+    same outlines projected with the STATE camera (screen/zones/...); precision: per enemy and k the support's RATIO
+    to the enemy's real damage at t + k (tools.support_precision; 0 = no prediction, -1 = a prediction with no real
+    damage) as metrics/precision/<name>/k<k>/<layer> (committed, com_all, not_started, total) and the error flag (the
+    person's rule) as metrics/precision/<name>/k<k>/error."""
     import cv2
     import rerun as rr
     from ssbot.tools.forum_human_score import load_segment, segments
@@ -1313,6 +1316,10 @@ def rerun_zones(session: Path, rec, f0: int | None = None, f1: int | None = None
         terrain, states = load_segment(seg)
         eng.crest = seg.get("crest") or eng.crest
         eng.start(terrain)
+        truth = None
+        if precision:
+            from ssbot.tools.support_precision import Truth
+            truth = Truth(states)
         stats["attempts"].append([seg["attempt"], seg["f0"], seg["f1"], seg.get("outcome")])
         if terrain is not None:
             rec.set_time("frame", sequence=max(seg["f0"], f0 or 0))
@@ -1388,6 +1395,8 @@ def rerun_zones(session: Path, rec, f0: int | None = None, f1: int | None = None
                     per[f"enemies/{slug}/{k}"] = ([], [0, 0, 0], "")
                 rec.log(f"world/enemies/{slug}/label", rr.Points2D([], radii=[0.05]))
             seen_enemies |= now
+            if truth is not None and eng.ws is not None:
+                _log_precision(rec, eng, truth, ks)
             for path, (polys, rgb, lab) in per.items():
                 rec.log(f"world/{path}", rr.LineStrips2D([closed(wl(p)) for p in polys], colors=[rgb],
                                                          radii=[rr_ if "/colliders" not in path else 0.03],
@@ -1431,13 +1440,37 @@ def rerun_zones(session: Path, rec, f0: int | None = None, f1: int | None = None
     return stats
 
 
-def zones_blueprint(video: bool):
+def _log_precision(rec, eng, truth, ks) -> None:
+    """The precision scalars of the forecast just computed (rerun_zones precision)."""
+    import rerun as rr
+    from ssbot.tools.support_precision import frame_rows, judge
+    j0 = truth.idx.get(int(eng.ws.stamp.frame))
+    if j0 is None or j0 + max(ks) + 1 >= truth.n:
+        return
+    for r in frame_rows(eng, truth, j0, ks, eng.grid):
+        slug = r["name"].replace(" ", "_")
+        for k, ent in r["k"].items():
+            err = 0.0
+            for lay in ("committed", "com_all", "not_started", "total"):
+                j = judge(ent, lay)
+                v = 0.0 if j is None else (-1.0 if j[2] is None else round(j[2], 2))
+                if j is not None and j[3] and lay in ("com_all", "not_started"):
+                    err = 1.0
+                rec.log(f"metrics/precision/{slug}/k{k:02d}/{lay}", rr.Scalars(v))
+            rec.log(f"metrics/precision/{slug}/k{k:02d}/error", rr.Scalars(err))
+
+
+def zones_blueprint(video: bool, precision: bool = False):
     import rerun.blueprint as rrb
     views = [rrb.Spatial2DView(origin="world", name="world (y up): zones, colliders, hero")]
     if video:
         views.append(rrb.Spatial2DView(origin="screen", name="recorded video + zones"))
-    return rrb.Blueprint(rrb.Horizontal(*views, rrb.TextDocumentView(origin="legend", name="legend"),
-                                        column_shares=[3, 3, 1][:len(views)] + [1]), collapse_panels=True)
+    side = rrb.TextDocumentView(origin="legend", name="legend")
+    if precision:
+        side = rrb.Vertical(side, rrb.TimeSeriesView(origin="metrics/precision",
+                                                     name="precision: RATIO support / real damage (-1 false alarm)"))
+    return rrb.Blueprint(rrb.Horizontal(*views, side, column_shares=[3, 3, 1][:len(views)] + [1]),
+                         collapse_panels=True)
 
 
 def cmd_render(a) -> int:
