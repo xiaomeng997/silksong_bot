@@ -65,8 +65,11 @@ def frame_masks(fr: dict, ks) -> dict:
 
 
 def _jobs(spec: str, cache: Path | None) -> list[dict]:
-    """Human segments (forum_human_score spec) or a bot run's episodes."""
-    if len(spec) > 2 and spec[1] == ":" and spec.count(":") >= 2:
+    """Human segments (forum_human_score spec) or a bot run's episodes ("<run dir>[:<n eps>]": a run dir holds
+    attempts_i*.jsonl; "C:/<run dir>:6" has as many colons as a human "C:/<session>:win")."""
+    head = spec.rpartition(":")[0] if spec.count(":") >= 2 else spec
+    bot = any(Path(head).glob("attempts_i*.jsonl")) or any(Path(spec).glob("attempts_i*.jsonl"))
+    if not bot and len(spec) > 2 and spec[1] == ":" and spec.count(":") >= 2:
         from ssbot.tools.forum_human_score import segments
         return [{"kind": "human", "seg": s} for s in segments(spec, cache)]
     path, _, n = spec.rpartition(":") if spec.count(":") >= 2 else (spec, "", "")

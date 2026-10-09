@@ -168,3 +168,96 @@ def test_spec_of_row_files():
     assert sp._spec_of("20261009_085824_a0", "R") == "C:/ssbot/data/human/20261009_085824:win:0"
     assert sp._spec_of("20261008_211754_Forum_W_eval_planner_oracle_clashM_i3_ep2", "R").endswith(
         "20261008_211754_Forum_W_eval_planner_oracle_clashM#i3ep2")
+
+
+def test_hurts_takes_the_multi_hit_colliders_and_not_the_hit_back_bell():
+    whip = {"enabled": True, "damage": {"dealt": 0, "eff": 2}}
+    assert zo.hurts({"enabled": True, "damage": {"dealt": 1, "eff": 1}}, 0)
+    assert zo.hurts(whip, 8 | 2)                                  # multi_wounder src bit: the whip, ParrySlash Hit
+    assert not zo.hurts(whip, 2)                                  # dealt 0 without the bit
+    assert not zo.hurts({"enabled": True, "damage": {"dealt": 0, "eff": 0}}, 8)   # a hit-back bell: eff 0
+    assert not zo.hurts(dict(whip, enabled=False), 8)
+    c = dict(_col(31.0, 5.0, 36.0, 6.0, dealt=0), damage={"dealt": 0, "eff": 2, "parry": 4})
+    s = {"ents": [_ent(5, "Song Pilgrim 03", 30.0, 6.0, [c], src=8)]}
+    assert len(zo.damage_colliders(s)) == 1
+    s["ents"][0]["src"] = 2
+    assert zo.damage_colliders(s) == []
+
+
+def _two_reed_states(first_thrower_state="Throw", n=12):
+    """Two Reeds 6 u apart; a pin appears at frame 2 next to Reed 2 (x 40) while Reed 1 (x 34) is in a throw state;
+    the pin is unarmed at frames 6-7 and re-armed at frame 8 while Reed 2 throws."""
+    out = []
+    for f in range(n):
+        st1 = first_thrower_state if f <= 2 else "Alert"
+        st2 = "Throw" if 7 <= f <= 8 else "Alert"
+        ents = [_ent(1, "Song Reed", 34.0, 6.0, [_col(33.5, 5.0, 34.5, 7.0)], state=st1),
+                _ent(2, "Song Reed", 40.0, 6.0, [_col(39.5, 5.0, 40.5, 7.0)], state=st2)]
+        if f >= 2:
+            armed = not (6 <= f <= 7)
+            ents.append(_ent(-9, "Song Reed Pin Projectile", 39.0, 7.0,
+                             [_col(38.0, 6.8, 40.0, 7.2, dealt=1 if armed else 0)], state="Fly",
+                             fsm="Javelin Control"))
+        out.append({"f": f, "_f_raw": 100 + f, "ents": ents, "ev": [], "dt": 1 / 60,
+                    "hero": {"box": [20.0, 4.0, 20.5, 6.08]}})
+    return out
+
+
+def test_thrower_by_throw_state_and_owner_as_of_the_frame():
+    t = sp.Truth(_two_reed_states())
+    # nearest is Reed 2, but Reed 1 was throwing: the pin is Reed 1's until it re-arms at frame 8 (Reed 2 throwing)
+    assert t.owner(-9, 3) == 1 and t.owner(-9, 7) == 1 and t.owner(-9, 8) == 2 and t.owner(-9) == 2
+    assert len(t.polys[3][1]) == 2 and len(t.polys[7][1]) == 1 and len(t.polys[9][2]) == 2
+    assert t.assign_how["throw"] == 2
+    t2 = sp.Truth(_two_reed_states("Alert"))
+    assert t2.owner(-9, 3) == 2 and t2.assign_how["nearest"] == 1   # nobody threw: the nearest
+
+
+def test_look_ahead_by_game_time_skips_a_hit_stop():
+    st = _two_reed_states(n=30)
+    for s in st[5:10]:
+        s["dt"] = 0.0                                         # a 5-frame freeze
+    t = sp.Truth(st)
+    assert t.at(2, 0) == 2 and t.at(12, 6) == 18
+    assert t.at(2, 6) == 13                                   # 6 frames of game time after 2: 5 frozen ones skipped
+
+
+def test_ns_any_is_judged_against_any_real_damage():
+    e = _row(1, 40, 30, lay="not_started", Rns=0)["k"]["12"]
+    e["L"]["ns_any"] = e["L"]["not_started"]
+    assert sp.judge(e, "not_started")[3]                       # nothing started: a false alarm by the start rule
+    assert sp.judge(e, "ns_any")[2] == pytest.approx(40 / 30) and not sp.judge(e, "ns_any")[3]
+
+
+def test_hindsight_counts_own_and_all_owners_apart_from_hits(tmp_path):
+    rows = []
+    for f, own, al, intr, ha in ((1, 10, 10, [], None), (2, 6, 10, [], None), (3, 2, 4, [], None),
+                                 (4, 0, 0, ["hit"], None), (5, 0, 10, [], 3)):
+        r = _row(f, 50, 10)
+        ent = r["k"]["12"]
+        ent["L"]["total"] = list(ent["L"]["total"])
+        ent["L"]["total"][2] = own
+        ent["Ia"] = al
+        ent["in"] = intr
+        if ha is not None:
+            r["hit_ago"] = ha
+        rows.append(r)
+    rows.append(dict(_row(6, 50, 10), iid=sp.UNATTR, name=sp.UNATTR, type=sp.UNATTR))
+    (tmp_path / "x_a0.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows), "utf-8")
+    res = sp.hindsight([tmp_path])
+    a = res["k"]["12"]["ALL"]
+    assert a["clean"]["rows"] == 3 and a["hit"]["rows"] == 2
+    assert a["clean"]["own_full_pct"] == pytest.approx(100 / 3, abs=1e-2)
+    assert a["clean"]["all_full_pct"] == pytest.approx(200 / 3, abs=1e-2)
+    assert res["k"]["12"]["families"]["Reed/RE_STAB"]["clean"]["rows"] == 3
+    assert res["misses_clean_n"] == 1 and res["misses_clean"][0][2] == 3
+
+
+def test_summary_reports_unattributed_support_apart(tmp_path):
+    rows = [_row(1, 100, 80, "com_all"), dict(_row(2, 30, 0, "com_all"), iid=sp.UNATTR, name=sp.UNATTR,
+                                               type=sp.UNATTR)]
+    (tmp_path / "20261009_085824_a0.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows), "utf-8")
+    res = sp.summarize([tmp_path], ks=(12,))
+    assert res["k"]["12"]["com_all"]["population"] == 1
+    u = res["unattributed"]["12"]
+    assert u["frames"] == 1 and u["false_alarms"] == 1 and u["errors"] == 1

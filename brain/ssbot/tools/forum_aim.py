@@ -8,10 +8,12 @@ spans the whole flight (RE_STAB's anchor template: 40 x 24 u). Re-anchored at th
 family (its AIM state), where the place and facing are already fixed, what is left of the attack is tight.
 
 Per (type, family) and candidate aim state S (every non-start state of the family): from the per-fight Forum caches
-(ssbot.knowledge.forum_cache), the instances that entered S; per instance the enabled damage colliders (dealt > 0) of
+(ssbot.knowledge.forum_cache), the instances that entered S; per instance the enabled damage colliders (dealt > 0 and
+the multi-hit ones exported with dealt 0: instances(threat=True)) of
 the enemy's own rows from S's first frame to the instance's end, as boxes relative to the enemy's transform at that
 frame, mirrored by its facing then (FACES_LEFT), t from that frame; occupancy on CELL_U cells per 1/60 s bin, +-1 bin.
-Held-out coverage (2 folds by fight, and the fresh fights against all dev fights): for every held-out collider box,
+Held-out coverage (2 folds by fight; with --fresh also those fights against all dev fights, by default not: R2 fresh
+stays held out): for every held-out collider box,
 the Chebyshev distance (u) of its cells from the training occupancy of bins b-1 .. b+1; the margin r = the largest
 over both folds (a template dilated by r plus the hero half extents then covers every held-out box: 100 % of the
 held-out colliders, a stricter test than contacts). The chosen S per family is the one with the smallest dilated
@@ -265,7 +267,7 @@ def build_occ(abs_: list[np.ndarray], nt: int) -> Occ:
 
 def _fight_instances(path: str, fams: dict) -> dict:
     from ssbot.knowledge.forum_cache import load_cache
-    return instances(load_cache(Path(path)), fams)
+    return instances(load_cache(Path(path)), fams, threat=True)
 
 
 def _low_priority() -> None:
@@ -286,7 +288,11 @@ def cmd_build(a) -> int:
     fams = family_states()
     dev, fresh = {}, {}
     from concurrent.futures import ProcessPoolExecutor
-    for which, d, acc in (("dev", Path(a.dev), dev), ("fresh", Path(a.fresh), fresh)):
+    # dev only by default (task "precision push" S0): R2 fresh stays held out for every aim product; --fresh <dir>
+    # adds its held-out margin r_fresh to the bins' r as before
+    for which, d, acc in (("dev", Path(a.dev), dev), ("fresh", Path(a.fresh) if a.fresh else None, fresh)):
+        if d is None:
+            continue
         paths = sorted(glob.glob(str(d / "*.npz")))
         # about 30 s a fight in one process (214 dev + the fresh fights): one fight per worker task
         with ProcessPoolExecutor(max_workers=a.workers, initializer=_low_priority) as ex:
@@ -413,7 +419,7 @@ def main(argv=None) -> int:
     sub = ap.add_subparsers(dest="cmd", required=True)
     b = sub.add_parser("build")
     b.add_argument("--dev", default=str(DEV))
-    b.add_argument("--fresh", default=str(FRESH))
+    b.add_argument("--fresh", default="", help=f"held-out fights for r_fresh (e.g. {FRESH}); default none: dev only")
     b.add_argument("--out", default=str(OUT))
     b.add_argument("--json")
     b.add_argument("--workers", type=int, default=8)

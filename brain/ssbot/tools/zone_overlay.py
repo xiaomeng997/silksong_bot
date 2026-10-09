@@ -33,7 +33,8 @@ the legend). The planner's tick is not run: the support does not depend on its p
                   of its library, the whole zone "z") for the hero's lock state NOW toward that enemy (free / attack / dash; above
                   standing height: air), placed on the enemy's anchor dead-reckoned to frame k, mirrored to the hero's
                   side (the attack faces the hero at its commit).
-  red             NON-CLASHABLE damage colliders of the STATE shown (enabled, dealt > 0, parry bits without clash /
+  red             NON-CLASHABLE damage colliders of the STATE shown (`hurts`: enabled, dealt > 0 or a multi-hit one
+                  exported with dealt 0: the whip, the ParrySlash Hit, the Minister's Slash Collider; parry bits without clash /
                   force: oracle 4 = counter only; 5 = clash + counter is clashable; every Clapper collider), each with
                   its sweep over the next SWEEP_F frames (moved along its entity's velocity, convex hull). Bodies,
                   Clapper moves and runes, Clawmaiden spear / explosion, bells (a hit-back bell deals 0: not drawn),
@@ -78,6 +79,7 @@ RENDER = (1920, 1080)
 FORUM_SCENES = ("Hang_04", "Hang_04_boss")
 FORCE_RED_TYPES = frozenset({"Song Heavy Sentry"})       # the Clapper: no move of it can be clashed
 CLASH_BITS = 1 | 2                                        # ipc.ents PARRY_BITS clash | force
+MW_SRC_BIT = 8                                            # ipc.ents SRC_BITS["multi_wounder"]
 PARKED_STATES = r"Ready|Dormant|Sleep|Wait"                # with no render: a member parked before its entry
 FREEZE_SCALE = 1e-4
 SHORT_NAMES = {"Song Reed": "Reed", "Song Pilgrim 01": "Envoy", "Song Administrator": "Minister",
@@ -169,19 +171,35 @@ def parked(e: dict) -> bool:
     return any(re.search(PARKED_STATES, str(f.get("state") or "")) for f in e.get("fsms") or ())
 
 
+def hurts(c: dict, src: int) -> bool:
+    """A collider that damages the hero: enabled, with damage dealt > 0, or a multi-hit collider exported with dealt 0
+    (eff != 0 on an entity with the multi_wounder src bit: behaviour_tables.multi_wounder_threat as forum_cache keeps
+    it; the Choristor's Whip Hit 1-6, the Reed's / Minister's ParrySlash Hit, the Minister's Slash Collider, whose hits
+    the hornet_multi_wounder FSM deals). A hit-back bell, a parried pin and a Handmaiden's body also export dealt 0,
+    with eff 0 and no multi_wounder bit: no recorded damage event ever came from them (C:/ssbot/data/m2_forum_push/p0
+    mw_proof*.json), so they stay out."""
+    d = c.get("damage")
+    if not d or not c.get("enabled"):
+        return False
+    if (d.get("dealt") or 0) > 0:
+        return True
+    return not d.get("dealt") and (d.get("eff") or 0) != 0 and bool(int(src or 0) & MW_SRC_BIT)
+
+
 def damage_colliders(s: dict):
-    """[(poly [n, 2], clashable, label, entity velocity, owner iid)] of every enabled collider with damage dealt > 0
-    (parked entities skipped)."""
+    """[(poly [n, 2], clashable, label, entity velocity, owner iid)] of every collider that damages the hero (`hurts`:
+    dealt > 0 or a multi-hit one exported with dealt 0; parked entities skipped)."""
     out = []
     for e in s.get("ents") or ():
         if parked(e):
             continue
         tk = str(e.get("type_key") or e.get("name") or "")
         vel = e.get("vel") or (0.0, 0.0)
+        src = int(e.get("src") or 0)
         for c in e.get("cols") or e.get("colliders") or ():
             d = c.get("damage")
             v = c.get("verts_world")
-            if not d or not c.get("enabled") or not v or len(v) < 6 or not (d.get("dealt") or 0) > 0:
+            if not v or len(v) < 6 or not hurts(c, src):
                 continue
             clash = bool(int(d.get("parry") or 0) & CLASH_BITS) and tk not in FORCE_RED_TYPES
             out.append((np.asarray(v, np.float64).reshape(-1, 2), clash, f"{tk}/{c.get('name')}",

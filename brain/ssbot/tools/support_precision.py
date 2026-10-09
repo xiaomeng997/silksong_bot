@@ -10,13 +10,19 @@ tool measures that, per frame t x enemy x support layer x look-ahead k (0, 6, 12
               of forum_layer_audit.classify, tube box, hazard path on the hero-centre grid at t + k, the enemy's thrown
               hazards (pins, bells, runes, spears) counted as the thrower's. Layers as the replay's support/k<k>/<layer>
               (body, committed, window, not_started, hazard, death), com_all = committed | window, total = the union.
-  reference   the enemy's REAL damage at t + k: every enabled collider with damage dealt > 0 of the enemy and of the
-              hazards it threw (tools.zone_overlay.damage_colliders: parked members skipped; a hazard goes to the nearest
-              enemy of its owner type when it arms), the exact Minkowski sum with the hero hurtbox (HERO_HALF_U) on the
-              same grid points the support is queried at. R = frames t+k-1 .. t+k+1 grown by one support cell (CELL_U:
-              the support's +-1 bin in time and space), Rs = strictly at t + k. For not_started the reference is R only
-              when an attack of the enemy actually started in (t, t + k] (a state of its table's attack_starts entered),
-              else empty.
+  reference   the enemy's REAL damage at t + k: every collider that damages the hero (tools.zone_overlay.hurts: dealt
+              > 0 or a multi-hit one exported with dealt 0, the whip / ParrySlash Hit / Slash Collider) of the enemy and
+              of the hazards it threw (damage_colliders: parked members skipped; a hazard goes to the same-type enemy in
+              a throwing state when it appears / arms, the nearest only as fallback, as of that frame: Truth), the
+              exact Minkowski sum with the hero hurtbox (HERO_HALF_U) on the same grid points the support is queried
+              at. t + k is the first frame whose GAME time reaches t + k/60 (hit-stops freeze game time). R = frames
+              t+k-1 .. t+k+1 grown by one support cell (CELL_U: the support's +-1 bin in time and space), Rs = strictly
+              at t + k. For not_started the reference is R only when an attack of the enemy actually started in
+              (t, t + k] (a state of its table's attack_starts entered), else empty; ns_any judges the same layer
+              against R (the person's literal rule: any real damage of that enemy there).
+  unattributed support no named enemy in play owns (hazards of a dead thrower, later-wave entries) is its own row
+              (owner UNATTR), judged against the damage of every owner not named; a Tiny group row counts for every
+              Tiny of its cluster (as MultiForecast.occupied_only).
   numbers     P (predicted cells), RATIO = P / R ('false alarm' when R is empty), recall = |P & Rs| / |Rs|, the excess
               P - R split by side of the reference box relative to the enemy's facing (front / back / up / down / inner)
               and how far the prediction reaches past the reference box on each side (u); the enemy's type, family,
@@ -31,6 +37,9 @@ tool measures that, per frame t x enemy x support layer x look-ahead k (0, 6, 12
         [--aim 0|1]                                  # one .jsonl per attempt / episode (rows: frame x enemy)
     ../scripts/uv.cmd run python -m ssbot.tools.support_precision summary <dir> [<dir> ...] [--json out.json]
         [--ks 0,12]                                  # the gate: error shares, RATIO quantiles, top causes, recall
+    ../scripts/uv.cmd run python -m ssbot.tools.support_precision run <specs> --out <dir> --ks hindsight --lite
+    ../scripts/uv.cmd run python -m ssbot.tools.support_precision hindsight <dir> [...] [--json out.json]
+                                                     # hindsight recall k = 0..12, 36 per family (own / all owners)
     ../scripts/uv.cmd run python -m ssbot.tools.support_precision png <spec> --frames F[,F] [--enemy "Reed 1"]
         [--k 12] --out <dir> [--tag x_]             # world-space PNGs: reference filled, prediction outlined, screen
     ../scripts/uv.cmd run python -m ssbot.tools.support_precision worst <summary.json> --out <dir> [--top 10]
@@ -50,10 +59,16 @@ from pathlib import Path
 import numpy as np
 
 KS = (0, 6, 12, 18)
+HINDSIGHT_KS = tuple(range(13)) + (36,)
 LAYERS = ("body", "committed", "window", "not_started", "hazard", "death")
 DERIVED = ("com_all", "total")
-REPORT = ("committed", "window", "com_all", "not_started", "body", "total")
+# ns_any: the not_started layer judged by the person's literal rule (any real damage of that enemy at that place and
+# time, whether or not an attack started)
+REPORT = ("committed", "window", "com_all", "not_started", "ns_any", "body", "total")
 LIMIT = 1.5
+THROW_F = 120                 # a hazard goes to a same-type enemy in a throwing family's state this recently (frames)
+UNATTR = "unattributed"       # the owner of support no named enemy in play owns (its own row)
+HIT_NEAR_F = 30               # hindsight: a row with a hit on the enemy this recently counts as "hit near"
 STAGGER = re.compile(r"Stun|Stagger|Recoil|Hurt|Knock|Clash|Parried|Bounce|Hit Recover")
 CLASH_U = 6.0
 OUT_DIR = Path(r"C:\ssbot\data\m2_forum_precision")
@@ -172,11 +187,25 @@ def hazard_type(e: dict) -> str | None:
 
 
 def _armed(e: dict) -> bool:
-    for c in e.get("cols") or e.get("colliders") or ():
-        d = c.get("damage")
-        if d and c.get("enabled") and (d.get("dealt") or 0) > 0:
-            return True
-    return False
+    from ssbot.tools.zone_overlay import hurts
+    src = int(e.get("src") or 0)
+    return any(hurts(c, src) for c in e.get("cols") or e.get("colliders") or ())
+
+
+_THROWS: dict | None = None
+
+
+def throw_states() -> dict[str, frozenset]:
+    """Hazard type -> the Control states of the families that throw it (core.forum ForumType.spawns, the committed
+    tables' family states)."""
+    global _THROWS
+    if _THROWS is None:
+        from ssbot.core.forum import FORUM_TYPES
+        from ssbot.tools.forum_aim import family_states
+        fs = family_states()
+        _THROWS = {h: frozenset(s for f in fams for s in fs.get((tk, f), ((), ()))[1])
+                   for tk, sp in FORUM_TYPES.items() for h, fams in sp.spawns}
+    return _THROWS
 
 
 def _hero_xy(s: dict) -> tuple | None:
@@ -186,12 +215,18 @@ def _hero_xy(s: dict) -> tuple | None:
 
 class Truth:
     """The real damage per enemy over one attempt's game-frame STATEs: per frame the damage colliders by enemy (its
-    thrown hazards included), its Control state, and what interrupts a prediction (hits, stagger states, death,
-    nail clashes)."""
+    thrown hazards included, each credited to its thrower as of that frame), its Control state, the game time, and
+    what interrupts a prediction (hits, stagger states, death, nail clashes).
+
+    A hazard's thrower is assigned at its first appearance and again at each (re-)arming (pooled hazards come back
+    under the same iid): the same-type enemy that was in a state of a family throwing that hazard within THROW_F
+    frames before (core.forum spawns; the nearest of them when several), the nearest live one of that type only when
+    none was. owner(o, j) is the assignment in force at frame index j (never a later one)."""
 
     def __init__(self, states: list[dict]):
         from ssbot.core.forum import FORUM_TYPES, HAZARD_OWNER
-        from ssbot.tools.zone_overlay import damage_colliders, parked
+        from ssbot.tools.zone_overlay import FT, damage_colliders, parked
+        throws = throw_states()
         self.n = len(states)
         self.polys: list[dict] = []
         self.ctrl: list[dict] = []
@@ -201,9 +236,23 @@ class Truth:
         self.stag: dict = defaultdict(set)
         self.dead: dict = {}
         self.clash: set = set()
-        self.thrower: dict = {}
+        self.thrower: dict = {}                 # hazard iid -> its latest thrower (the attempt's final map)
+        self.hist: dict = defaultdict(list)     # hazard iid -> [(frame index, thrower iid)] in frame order
+        self.assign_how: dict = defaultdict(int)   # "throw" / "nearest" assignments (the summary reports them)
         self.idx = {int(s["f"]): j for j, s in enumerate(states)}
         self.raw = [int(s.get("_f_raw", s["f"])) for s in states]
+        # game time (s) as the oracle backend counts it: each STATE's dt, a dropped STATE's approximated by the next
+        self.T = np.zeros(self.n)
+        t, prev = 0.0, None
+        for j, s in enumerate(states):
+            dt = s.get("dt")
+            dt = FT if dt is None else float(dt)
+            gap = max(int(s["f"]) - prev - 1, 0) if prev is not None else 0
+            if j:
+                t += dt * (1 + gap)
+            self.T[j] = t
+            prev = int(s["f"])
+        last_throw: dict = {}                   # (enemy iid, hazard type) -> last frame index in a throwing state
         was_armed: set = set()
         for j, s in enumerate(states):
             ents = s.get("ents") or ()
@@ -218,6 +267,9 @@ class Truth:
                 ctrl[iid] = st
                 p = e.get("pos") or (0.0, 0.0)
                 pos[iid] = (float(p[0]), float(p[1]), tk)
+                for h in sp.hazards:
+                    if st is not None and st in throws.get(h, ()):
+                        last_throw[(iid, h)] = j
                 if st is not None and STAGGER.search(str(st)):
                     self.stag[iid].add(j)
                 if (e.get("is_dead") or (e.get("hp") is not None and e["hp"] <= 0)
@@ -226,18 +278,25 @@ class Truth:
             armed_now = set()
             for e in ents:
                 ht = hazard_type(e)
-                if ht is None or e.get("iid") is None or not _armed(e):
+                if ht is None or e.get("iid") is None:
                     continue
                 hid = int(e["iid"])
-                armed_now.add(hid)
-                if hid in was_armed and hid in self.thrower:
+                arm = _armed(e)
+                if arm:
+                    armed_now.add(hid)
+                if hid in self.hist and not (arm and hid not in was_armed):
                     continue
                 owner_tk = HAZARD_OWNER.get(ht)
                 p = e.get("pos") or (0.0, 0.0)
-                cand = [(math.hypot(q[0] - p[0], q[1] - p[1]), iid) for iid, q in pos.items() if q[2] == owner_tk
+                live = [(math.hypot(q[0] - p[0], q[1] - p[1]), iid) for iid, q in pos.items() if q[2] == owner_tk
                         and iid not in self.dead]
+                thr = [c for c in live if j - last_throw.get((c[1], ht), -10 ** 9) <= THROW_F]
+                cand = thr or live
                 if cand:
-                    self.thrower[hid] = min(cand)[1]
+                    o = min(cand)[1]
+                    self.thrower[hid] = o
+                    self.hist[hid].append((j, o))
+                    self.assign_how["throw" if thr else "nearest"] += 1
             was_armed = armed_now
             per: dict = defaultdict(list)
             for poly, _clash, _label, _vel, o in damage_colliders(s):
@@ -255,17 +314,43 @@ class Truth:
                     self.clash.add(j)
         self._cache: dict = {}
 
-    def owner(self, o: int) -> int:
-        return self.thrower.get(int(o), int(o))
+    def owner(self, o: int, j: int | None = None) -> int:
+        """The thrower of hazard o as of frame index j (None: the latest), o itself when it is not a hazard."""
+        h = self.hist.get(int(o))
+        if not h:
+            return int(o)
+        if j is None:
+            return h[-1][1]
+        i = 0
+        while i + 1 < len(h) and h[i + 1][0] <= j:
+            i += 1
+        return h[i][1]
 
-    def mask(self, grid, j: int, iid: int, pad: float) -> np.ndarray | None:
-        """The enemy's real damage at frame index j in hero-centre space (hero box grown by pad), None when none."""
+    def at(self, j0: int, k: int) -> int:
+        """The frame index of look-ahead k from j0 by game time: the first frame whose game time reaches T[j0] + k/60
+        (hit-stops and other freezes advance frames, not game time; the support is queried at k/60 s)."""
+        if k <= 0:
+            return j0
+        j = int(np.searchsorted(self.T, self.T[j0] + k / 60.0 - 1e-3, "left"))
+        return min(max(j, j0 + 1), self.n - 1)
+
+    def hit_ago(self, iid: int, j0: int, cap: int = 60) -> int | None:
+        """Frames since the last hit on the enemy at or before j0 (None: none within cap)."""
+        hs = [j0 - j for j in self.hits.get(iid, ()) if 0 <= j0 - j <= cap]
+        return min(hs) if hs else None
+
+    def mask(self, grid, j: int, iid, pad: float, named=None) -> np.ndarray | None:
+        """The enemy's real damage at frame index j in hero-centre space (hero box grown by pad), None when none.
+        iid UNATTR: the damage of every owner not in `named` (hazards of a dead thrower, later-wave members)."""
         if not (0 <= j < self.n):
             return None
-        key = (j, iid, pad)
+        key = (j, iid, pad) if iid != UNATTR else (j, iid, pad, frozenset(named or ()))
         if key not in self._cache:
             from ssbot.knowledge import hitbox_tables as hb
-            polys = self.polys[j].get(iid)
+            if iid == UNATTR:
+                polys = [p for o, ps in self.polys[j].items() if o not in (named or ()) for p in ps]
+            else:
+                polys = self.polys[j].get(iid)
             m = None
             if polys:
                 m = hero_centre_mask(grid, polys, hb.HERO_HALF_U[0] + pad, hb.HERO_HALF_U[1] + pad) & grid.inside
@@ -274,15 +359,15 @@ class Truth:
             self._cache[key] = m
         return self._cache[key]
 
-    def reference(self, grid, j: int, iid: int) -> tuple[np.ndarray, np.ndarray]:
+    def reference(self, grid, j: int, iid, named=None) -> tuple[np.ndarray, np.ndarray]:
         """(R: frames j-1 .. j+1 grown by one support cell, Rs: exactly frame j) [ny, nx] bool."""
         from ssbot.knowledge import hitbox_tables as hb
         r = np.zeros(grid.shape, bool)
         for jj in (j - 1, j, j + 1):
-            m = self.mask(grid, jj, iid, hb.CELL_U)
+            m = self.mask(grid, jj, iid, hb.CELL_U, named)
             if m is not None:
                 r |= m
-        ms = self.mask(grid, j, iid, 0.0)
+        ms = self.mask(grid, j, iid, 0.0, named)
         return r, (ms if ms is not None else np.zeros(grid.shape, bool))
 
     def interrupted(self, iid: int, j0: int, j1: int) -> list[str]:
@@ -320,7 +405,8 @@ class Truth:
 def owner_layers(fcast, cx, cy, tk, owner_of, ks) -> tuple[dict, dict]:
     """({owner: {layer: [R, F] bool}}, {owner: {k: {"kinds": [group names], "aim": bool}}}) of a MultiForecast on the
     query points: forum_layer_audit.group_occ split by placement owner (a hazard's placements, tubes and paths to its
-    thrower by owner_of; None = left out, e.g. a later wave's entry)."""
+    thrower by owner_of; owner_of gives UNATTR for support no named enemy in play owns, None leaves it out). A Tiny
+    group row (bb gcl >= 0) goes to every Tiny of its cluster, as MultiForecast.occupied_only counts it."""
     from ssbot.tools.forum_layer_audit import BOX_LAYER, _key_name, classify
     from ssbot.tools.zone_overlay import LAYER_OF
     store = fcast.fc.tables.store
@@ -339,11 +425,20 @@ def owner_layers(fcast, cx, cy, tk, owner_of, ks) -> tuple[dict, dict]:
             if m[:, j].any():
                 info[o][k]["kinds"].add(group)
                 info[o][k]["aim"] |= aim
+    clusters = getattr(fcast, "clusters", None) or []
     for key, kind, sel in classify(fcast):
         meta, tids, fn = metas[kind]
         own = np.asarray(meta["owner"]).astype(np.int64)
-        for o in np.unique(own[sel]).tolist():
-            sub = sel & (own == o)
+        gcl = np.asarray(meta["gcl"]) if kind == "bb" and meta.get("gcl") is not None and clusters else None
+        grp = sel & (gcl >= 0) if gcl is not None else np.zeros(len(own), bool)
+        subs: dict = {}
+        for o in np.unique(own[sel & ~grp]).tolist():
+            subs[o] = sel & ~grp & (own == o)
+        for g in (np.unique(gcl[grp]).tolist() if grp.any() else ()):
+            rows = grp & (gcl == g)
+            for o in clusters[int(g)]:
+                subs[int(o)] = subs[int(o)] | rows if int(o) in subs else rows
+        for o, sub in subs.items():
             aim = any("aim@" in _key_name(store, tids[i]) for i in np.flatnonzero(sub))
             add(owner_of(o), key[0], fn(cx, cy, tk, sub), aim)
     for o, kind in sorted({(int(b[0]), b[1]) for b in fcast.boxes}):
@@ -380,8 +475,11 @@ def layer_stats(P: np.ndarray, R: np.ndarray, Rs: np.ndarray, facing: int, rbox,
             round(max(0, int((pr - r1).max())) * cell, 2), round(max(0, int((r0 - pr).max())) * cell, 2)]
 
 
-def frame_rows(eng, truth: Truth, j0: int, ks, grid) -> list[dict]:
-    """The rows (one per named enemy in play) of the forecast made at frame index j0."""
+def frame_rows(eng, truth: Truth, j0: int, ks, grid, lite: bool = False) -> list[dict]:
+    """The rows (one per named enemy in play, plus an UNATTR row when some support has no such owner) of the forecast
+    made at frame index j0. Look-ahead k is judged at frame truth.at(j0, k) (game time). Per k: "Ia" = the reference
+    cells (strict) inside the support of EVERY owner (the hindsight recall's "all"; L.total's Is is the enemy's own).
+    lite: only the total layer (the hindsight runs)."""
     from ssbot.combat.enemy_tracker import FACES_LEFT
     fcast = eng.fcast
     if fcast is None:
@@ -394,33 +492,50 @@ def frame_rows(eng, truth: Truth, j0: int, ks, grid) -> list[dict]:
     names = {iid: name for iid, name, *_ in enemies}
 
     def owner_of(o):
-        o = truth.owner(o)
-        return o if o in names else None
+        o = truth.owner(o, j0)
+        return o if o in names else UNATTR
     occ, info = owner_layers(fcast, cx, cy, tk, owner_of, ks)
+    allm = np.zeros((grid.ny * grid.nx, F), bool)
+    for lays in occ.values():
+        for m in lays.values():
+            allm |= m
     subj = {s.iid: s for s in fcast.subjects}
     mf = eng.pol.fc
+    jt = [truth.at(j0, k) for k in ks]
     rows = []
-    for iid, name, st, pos, _col in enemies:
-        tr = mf.trackers.get(iid)
-        s = subj.get(iid)
-        if tr is None or s is None:
-            continue
-        facing = FACES_LEFT[int(bool(tr.flip))] if tr.flip is not None else 1
-        epos = truth.epos[j0].get(iid) if 0 <= j0 < truth.n else None
-        ecell = None
-        if epos is not None:
-            c = int(round((epos[0] - grid.x0) / grid.cell))
-            r = int(round((epos[1] - grid.y0) / grid.cell))
-            ecell = (c, c, r, r)
-        starts = set(getattr(tr.table, "attack_starts", {}) or {})
-        row = {"iid": int(iid), "name": name, "type": s.type_key, "fam": s.family, "state": st,
-               "tis": round(float(fcast.origin_t - tr.t_entry), 3) if tr.t_entry is not None else None,
-               "com": bool(s.committed), "facing": int(facing),
-               "pos": [round(float(pos[0]), 2), round(float(pos[1]), 2)] if pos is not None else None, "k": {}}
+    todo = [(iid, name, st, pos) for iid, name, st, pos, _col in enemies]
+    if UNATTR in occ:
+        todo.append((UNATTR, UNATTR, None, None))
+    for iid, name, st, pos in todo:
+        if iid == UNATTR:
+            tr = s = None
+            facing, ecell, starts = 1, None, set()
+            row = {"iid": UNATTR, "name": UNATTR, "type": UNATTR, "fam": "-", "state": "-", "tis": None,
+                   "com": False, "facing": 1, "pos": None, "k": {}}
+        else:
+            tr = mf.trackers.get(iid)
+            s = subj.get(iid)
+            if tr is None or s is None:
+                continue
+            facing = FACES_LEFT[int(bool(tr.flip))] if tr.flip is not None else 1
+            epos = truth.epos[j0].get(iid) if 0 <= j0 < truth.n else None
+            ecell = None
+            if epos is not None:
+                c = int(round((epos[0] - grid.x0) / grid.cell))
+                r = int(round((epos[1] - grid.y0) / grid.cell))
+                ecell = (c, c, r, r)
+            starts = set(getattr(tr.table, "attack_starts", {}) or {})
+            row = {"iid": int(iid), "name": name, "type": s.type_key, "fam": s.family, "state": st,
+                   "tis": round(float(fcast.origin_t - tr.t_entry), 3) if tr.t_entry is not None else None,
+                   "com": bool(s.committed), "facing": int(facing),
+                   "pos": [round(float(pos[0]), 2), round(float(pos[1]), 2)] if pos is not None else None, "k": {}}
+            ha = truth.hit_ago(iid, j0)
+            if ha is not None:
+                row["hit_ago"] = ha
         layers = occ.get(iid, {})
         for jk, k in enumerate(ks):
-            j = j0 + k
-            R, Rs = truth.reference(grid, j, iid)
+            j = jt[jk]
+            R, Rs = truth.reference(grid, j, iid, names)
             rbox = _box_of(R) or ecell or (0, 0, 0, 0)
             masks = {lay: layers[lay][:, jk].reshape(grid.shape) & grid.inside for lay in LAYERS if lay in layers}
             com = [masks[x] for x in ("committed", "window") if x in masks]
@@ -431,12 +546,19 @@ def frame_rows(eng, truth: Truth, j0: int, ks, grid) -> list[dict]:
                 if lay in masks:
                     tot |= masks[lay]
             masks["total"] = tot
-            st_att = truth.started(iid, j0, j, starts) if k > 0 else None
-            ent = {"R": int(R.sum()), "Rs": int(Rs.sum()), "in": truth.interrupted(iid, j0, j),
+            if lite:
+                masks = {"total": tot}
+            st_att = truth.started(iid, j0, j, starts) if k > 0 and iid != UNATTR else None
+            ent = {"R": int(R.sum()), "Rs": int(Rs.sum()),
+                   "in": truth.interrupted(iid, j0, j) if iid != UNATTR else [],
                    "kinds": sorted(info[iid][k]["kinds"]) if iid in info else [],
                    "aim": bool(info[iid][k]["aim"]) if iid in info else False,
                    "L": {lay: layer_stats(m, R, Rs, facing, rbox, grid.cell) for lay, m in masks.items()
                          if m.any() or lay == "total"}}
+            if Rs.any():
+                ent["Ia"] = int((allm[:, jk].reshape(grid.shape) & Rs).sum())
+            if j != j0 + k:
+                ent["j"] = j - j0
             if st_att is not None:
                 ent["started"] = st_att
                 Rn = R
@@ -446,6 +568,7 @@ def frame_rows(eng, truth: Truth, j0: int, ks, grid) -> list[dict]:
                 ent["Rns"] = int(Rn.sum())
                 ent["L"]["not_started"] = layer_stats(masks["not_started"], Rn, Rn & Rs, facing,
                                                       _box_of(Rn) or ecell or (0, 0, 0, 0), grid.cell)
+                ent["L"]["ns_any"] = layer_stats(masks["not_started"], R, Rs, facing, rbox, grid.cell)
             row["k"][k] = ent
         rows.append(row)
     return rows
@@ -481,7 +604,7 @@ def _job_states(job: dict, w0: bool, pad_f: int) -> tuple:
 
 
 def run_job(job: dict, ks, every: int, w0: bool, frames: set, threads: int = 4, stop_raw: int | None = None,
-            only_frames: bool = False) -> tuple[list[dict], dict]:
+            only_frames: bool = False, lite: bool = False) -> tuple[list[dict], dict]:
     """The rows of one attempt / episode (every `every`-th game frame and the raw frames asked for, +-1)."""
     eng = _engine(threads)
     terrain, states, stop = _job_states(job, w0, max(ks) + 2)
@@ -508,11 +631,11 @@ def run_job(job: dict, ks, every: int, w0: bool, frames: set, threads: int = 4, 
         if eng.ws is None or not eng.running:
             continue
         j0 = truth.idx.get(int(eng.ws.stamp.frame), i)
-        if j0 + max(ks) + 1 >= truth.n:
+        if j0 + max(ks) + 1 >= truth.n or truth.at(j0, max(ks)) + 1 >= truth.n:
             continue
         t0 = time.perf_counter()
         eng.forecast()
-        rs = frame_rows(eng, truth, j0, ks, grid)
+        rs = frame_rows(eng, truth, j0, ks, grid, lite)
         t_fc += time.perf_counter() - t0
         for r in rs:
             r["f"] = raw
@@ -522,19 +645,21 @@ def run_job(job: dict, ks, every: int, w0: bool, frames: set, threads: int = 4, 
         rows.extend(rs)
         if only_frames and not want:
             break
-    return rows, {"config": eng.config_text(), "seconds": round(t_fc, 1), "frames": len(states)}
+    return rows, {"config": eng.config_text(), "seconds": round(t_fc, 1), "frames": len(states),
+                  "assign": dict(truth.assign_how)}
 
 
-def _run_one(job: dict, out: str, ks, every: int, w0: bool, frames, threads: int) -> str:
+def _run_one(job: dict, out: str, ks, every: int, w0: bool, frames, threads: int, lite: bool = False) -> str:
     from ssbot.tools.zone_share import job_name
     _below_normal()
     name = job_name(job)
     t0 = time.perf_counter()
-    rows, meta = run_job(job, ks, every, w0, set(frames), threads)
+    rows, meta = run_job(job, ks, every, w0, set(frames), threads, lite=lite)
     p = Path(out) / f"{name}.jsonl"
     p.write_text("".join(json.dumps(r, separators=(",", ":")) + "\n" for r in rows), "utf-8")
     (Path(out) / "config.json").write_text(json.dumps({"config": meta["config"], "ks": list(ks), "every": every,
-                                                       "w0": w0}), "utf-8")
+                                                       "w0": w0, "lite": lite}), "utf-8")
+    (Path(out) / f"{name}.meta.json").write_text(json.dumps(meta), "utf-8")
     return f"{name}: {len(rows)} rows ({time.perf_counter() - t0:.0f} s) {meta['config']}"
 
 
@@ -543,17 +668,17 @@ def cmd_run(a) -> int:
     _below_normal()
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
-    ks = tuple(int(x) for x in a.ks.split(","))
+    ks = HINDSIGHT_KS if a.ks == "hindsight" else tuple(int(x) for x in a.ks.split(","))
     frames = [int(x) for x in a.frames.split(",") if x] if a.frames else []
     cache = Path(a.demo_cache) if a.demo_cache else None
     jobs = [j for spec in a.specs for j in _jobs(spec, cache)]
     jobs = [j for j in jobs if a.force or not (out / f"{job_name(j)}.jsonl").exists()]
     if a.workers <= 1:
         for j in jobs:
-            print(_run_one(j, str(out), ks, a.every, a.w0, frames, a.threads), flush=True)
+            print(_run_one(j, str(out), ks, a.every, a.w0, frames, a.threads, a.lite), flush=True)
         return 0
     with ProcessPoolExecutor(a.workers) as ex:
-        futs = [ex.submit(_run_one, j, str(out), ks, a.every, a.w0, frames, a.threads) for j in jobs]
+        futs = [ex.submit(_run_one, j, str(out), ks, a.every, a.w0, frames, a.threads, a.lite) for j in jobs]
         for f in as_completed(futs):
             print(f.result(), flush=True)
     return 0
@@ -598,13 +723,36 @@ def summarize(dirs, ks=(0, 12), cell: float = 0.25) -> dict:
     rec = {k: {"rows": 0, "full": 0, "cells": 0, "cov": 0, "miss": defaultdict(int)} for k in ks}
     worst = []
     files = 0
+    un = {k: {"frames": 0, "err": 0, "fa": 0, "area": [], "ratio": [], "kinds": defaultdict(int)} for k in ks}
+    assign: dict = defaultdict(int)
     for d in dirs:
+        for mp in sorted(Path(d).glob("*.meta.json")):
+            for how, n in (json.loads(mp.read_text("utf-8")).get("assign") or {}).items():
+                assign[how] += n
         for p in sorted(Path(d).glob("*.jsonl")):
             files += 1
             for line in p.read_text("utf-8").splitlines():
                 if not line.strip():
                     continue
                 r = json.loads(line)
+                if r["iid"] == UNATTR:
+                    # support no named enemy in play owns: its own block, judged against the real damage of every
+                    # owner not named (hazards of a dead thrower, later-wave members)
+                    for k in ks:
+                        ent = r["k"].get(str(k))
+                        P = ent["L"]["total"][0] if ent is not None else 0
+                        if not P or ent.get("in"):
+                            continue
+                        u = un[k]
+                        u["frames"] += 1
+                        u["area"].append(P * a2)
+                        if ent["R"]:
+                            u["ratio"].append(P / ent["R"])
+                        else:
+                            u["fa"] += 1
+                        u["err"] += int(not ent["R"] or P / ent["R"] > LIMIT)
+                        u["kinds"]["+".join(ent.get("kinds") or ())] += 1
+                    continue
                 short = SHORT_NAMES.get(r["type"], r["type"])
                 for k in ks:
                     ent = r["k"].get(str(k))
@@ -654,6 +802,11 @@ def summarize(dirs, ks=(0, 12), cell: float = 0.25) -> dict:
                                               None if ratio is None else round(ratio, 2),
                                               f"{short}/{r['fam']}/{r['state']}"])
     res["files"] = files
+    res["hazard_assignments"] = dict(assign)
+    res["unattributed"] = {str(k): {"frames": u["frames"], "errors": u["err"], "false_alarms": u["fa"],
+                                    "area_u2": _q(u["area"]), "ratio": _q(u["ratio"]),
+                                    "kinds": dict(sorted(u["kinds"].items(), key=lambda kv: -kv[1])[:12])}
+                           for k, u in un.items()}
     for k in ks:
         out = res["k"][str(k)] = {}
         for lay in REPORT:
@@ -725,6 +878,86 @@ def cmd_summary(a) -> int:
                 rm = c["reach_max_u"]
                 print(f"    {c['group']:60s} {c['excess_u2']:9.0f} {c['errors']:6d}  p50 {c['ratio_p50']}  "
                       f"{rm['front']:.1f}/{rm['back']:.1f}/{rm['up']:.1f}/{rm['down']:.1f}")
+    for k in ks:
+        u = res["unattributed"][str(k)]
+        print(f"  unattributed k {k}: {u['frames']} frames, area p50 {u['area_u2'].get('p50')} u^2 max "
+              f"{u['area_u2'].get('max')}, errors {u['errors']} (false alarms {u['false_alarms']})")
+    print(f"hazard thrower assignments: {res['hazard_assignments']}")
+    if a.json:
+        Path(a.json).write_text(json.dumps(res, indent=1), "utf-8")
+    return 0
+
+
+# ------------------------------------------------------------------------------------------------ hindsight recall
+
+def hindsight(dirs, near: int = HIT_NEAR_F) -> dict:
+    """The hindsight recall (fix_spec sec. 4 item 2) of `run --ks hindsight [--lite]` rows: for every (frame, enemy)
+    and look-ahead k, are the enemy's real damage cells at t + k (exactly that frame, multi-hit colliders and its
+    thrown hazards included, hero-dilated) inside the support at k? "own" = the enemy's own support, "all" = the
+    support of every owner. Per k and per family of the enemy at t, apart: "hit" = rows with a hit on the enemy within
+    `near` frames before t or an interruption in (t, t + k] (hit, stagger, kill, clash), "clean" = the rest."""
+    from ssbot.tools.zone_overlay import SHORT_NAMES
+    acc: dict = defaultdict(lambda: [0] * 6)
+    misses: list = []
+    ks_seen: set = set()
+    for d in dirs:
+        for p in sorted(Path(d).glob("*.jsonl")):
+            for line in p.read_text("utf-8").splitlines():
+                if not line.strip():
+                    continue
+                r = json.loads(line)
+                if r["iid"] == UNATTR:
+                    continue
+                fam = f"{SHORT_NAMES.get(r['type'], r['type'])}/{r['fam']}"
+                hn = r.get("hit_ago") is not None and r["hit_ago"] <= near
+                for k, ent in r["k"].items():
+                    Rs = ent["Rs"]
+                    if not Rs:
+                        continue
+                    ks_seen.add(int(k))
+                    cls = "hit" if (hn or ent.get("in")) else "clean"
+                    own = ent["L"]["total"][2]
+                    al = ent.get("Ia", own)
+                    for key in ((k, fam, cls), (k, "ALL", cls), (k, fam, "all"), (k, "ALL", "all")):
+                        a = acc[key]
+                        a[0] += 1
+                        a[1] += int(own >= Rs)
+                        a[2] += int(al >= Rs)
+                        a[3] += Rs
+                        a[4] += own
+                        a[5] += al
+                    if al < Rs and cls == "clean":
+                        misses.append([Rs - al, p.stem, r["f"], r["name"], fam, r["state"], int(k), Rs, own, al])
+
+    def pct(a, b):
+        return round(100.0 * a / b, 3) if b else None
+
+    def block(a):
+        return {"rows": a[0], "own_full_pct": pct(a[1], a[0]), "all_full_pct": pct(a[2], a[0]),
+                "cells_own_pct": pct(a[4], a[3]), "cells_all_pct": pct(a[5], a[3])}
+    res: dict = {"dirs": [str(d) for d in dirs], "near_f": near, "k": {}}
+    for k in sorted(ks_seen):
+        sk = str(k)
+        fams = sorted({f for kk, f, _ in acc if kk == sk and f != "ALL"})
+        res["k"][sk] = {"ALL": {c: block(acc[(sk, "ALL", c)]) for c in ("clean", "hit", "all")},
+                        "families": {f: {c: block(acc[(sk, f, c)]) for c in ("clean", "hit", "all")
+                                         if acc[(sk, f, c)][0]} for f in fams}}
+    misses.sort(key=lambda m: -m[0])
+    res["misses_clean"] = misses[:40]
+    res["misses_clean_n"] = len(misses)
+    return res
+
+
+def cmd_hindsight(a) -> int:
+    res = hindsight([Path(d) for d in a.dirs], a.near)
+    print(f"hindsight recall (real damage at t+k inside the support at k; own / all owners; clean | hit near)")
+    for k, r in res["k"].items():
+        c, h = r["ALL"]["clean"], r["ALL"]["hit"]
+        print(f"  k {int(k):2d}: clean {c['rows']:7d} own {c['own_full_pct']} % all {c['all_full_pct']} %"
+              f" | hit {h['rows']:6d} own {h['own_full_pct']} % all {h['all_full_pct']} %")
+    print(f"clean misses (all owners): {res['misses_clean_n']}")
+    for m in res["misses_clean"][:15]:
+        print("   ", m)
     if a.json:
         Path(a.json).write_text(json.dumps(res, indent=1), "utf-8")
     return 0
@@ -815,14 +1048,14 @@ def render_frames(spec: str, frames, k: int, out: Path, tag: str = "", enemy: st
                 continue
             want = [w for w in want if w not in hit]
             j0 = truth.idx.get(int(eng.ws.stamp.frame), i)
-            if j0 + k + 1 >= truth.n:
+            if truth.at(j0, k) + 1 >= truth.n:
                 continue
             eng.forecast()
             tk = np.asarray([k], np.float64) / 60.0
             cx, cy = grid.gx.copy(), grid.gy.copy()
             names = {iid: nm for iid, nm, *_ in eng.enemies()}
             occ, info = owner_layers(eng.fcast, cx, cy, tk,
-                                     lambda o: (truth.owner(o) if truth.owner(o) in names else None), (k,))
+                                     lambda o: (truth.owner(o, j0) if truth.owner(o, j0) in names else None), (k,))
             for iid, nm, st, pos, _c in eng.enemies():
                 if enemy and nm != enemy:
                     continue
@@ -830,7 +1063,7 @@ def render_frames(spec: str, frames, k: int, out: Path, tag: str = "", enemy: st
                 masks = {lay: lays[lay][:, 0].reshape(grid.shape) & grid.inside for lay in LAYERS if lay in lays}
                 if not masks:
                     continue
-                R, Rs = truth.reference(grid, j0 + k, iid)
+                R, Rs = truth.reference(grid, truth.at(j0, k), iid)
                 a2 = grid.cell ** 2
                 ref_a = R.sum() * a2
                 lines = [f"real damage (hero-centre space, +-1 f): {ref_a:.1f} u^2 (filled red; strict at t+k darker)"]
@@ -841,14 +1074,15 @@ def render_frames(spec: str, frames, k: int, out: Path, tag: str = "", enemy: st
                 tr = eng.pol.fc.trackers.get(iid)
                 fam = next((x.family for x in eng.fcast.subjects if x.iid == iid), None)
                 kinds = sorted(info[iid][k]["kinds"]) if iid in info else []
-                intr = truth.interrupted(iid, j0, j0 + k)
+                intr = truth.interrupted(iid, j0, truth.at(j0, k))
                 lines.append(f"kinds {'+'.join(kinds)}{' aim' if iid in info and info[iid][k]['aim'] else ''}"
                              + (f"  INTERRUPTED {','.join(intr)}" if intr else ""))
                 label = (f"{Path(str((job.get('seg') or {}).get('session', job.get('run', '')))).name} f {raw} "
                          f"(origin {truth.raw[j0]}) k {k} ({k / 60:.2f} s)  {nm} {st} fam {fam} "
                          f"t in state {(eng.fcast.origin_t - tr.t_entry) if tr and tr.t_entry else 0:.2f} s")
-                img = draw(grid, s.get("cam"), R, Rs, masks, truth.polys[min(j0 + k, truth.n - 1)].get(iid, []),
-                           truth.hero[min(j0 + k, truth.n - 1)], label, lines)
+                jk_ = truth.at(j0, k)
+                img = draw(grid, s.get("cam"), R, Rs, masks, truth.polys[jk_].get(iid, []), truth.hero[jk_], label,
+                           lines)
                 fn = out / f"{tag}{job_name(job)}_f{raw}_k{k}_{nm.replace(' ', '_')}.png"
                 cv2.imwrite(str(fn), img)
                 n += 1
@@ -906,6 +1140,11 @@ def main(argv=None) -> int:
     r.add_argument("--aim", default=None, help="SSBOT_FORUM_AIM for this run (default: the environment / overlay)")
     r.add_argument("--demo-cache", default=r"C:\ssbot\data\m2_forum_overlay\demo_cache")
     r.add_argument("--force", action="store_true")
+    r.add_argument("--lite", action="store_true", help="only the total layer (hindsight runs: --ks hindsight --lite)")
+    h = sub.add_parser("hindsight")
+    h.add_argument("dirs", nargs="+")
+    h.add_argument("--json")
+    h.add_argument("--near", type=int, default=HIT_NEAR_F)
     s = sub.add_parser("summary")
     s.add_argument("dirs", nargs="+")
     s.add_argument("--ks", default="0,12")
@@ -933,7 +1172,8 @@ def main(argv=None) -> int:
     a = ap.parse_args(argv)
     if getattr(a, "aim", None) is not None:
         os.environ["SSBOT_FORUM_AIM"] = a.aim
-    return {"run": cmd_run, "summary": cmd_summary, "png": cmd_png, "worst": cmd_worst}[a.cmd](a)
+    return {"run": cmd_run, "summary": cmd_summary, "png": cmd_png, "worst": cmd_worst,
+            "hindsight": cmd_hindsight}[a.cmd](a)
 
 
 if __name__ == "__main__":

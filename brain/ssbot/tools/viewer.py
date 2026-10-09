@@ -191,9 +191,13 @@ def color_for(name: str) -> tuple[int, int, int]:
     return 80 + h % 150, 80 + (h >> 8) % 150, 80 + (h >> 16) % 150
 
 
-def _is_damaging(c: dict) -> bool:
+def _is_damaging(c: dict, src: int = 0) -> bool:
+    """Damage dealt > 0, or a multi-hit collider exported with dealt 0 (eff != 0 on an entity with the multi_wounder
+    src bit: the Choristor's whip, the ParrySlash Hit, the Minister's Slash Collider; zone_overlay.hurts)."""
     d = c.get("damage") or c.get("dmg")
     if isinstance(d, dict):
+        if "dealt" in d and not d.get("dealt"):
+            return (d.get("eff") or 0) != 0 and bool(int(src or 0) & 8)
         return bool(d.get("dealt", d.get("amount", 1)))
     return bool(d)
 
@@ -341,7 +345,7 @@ def build(reader: RecordingReader, rec: rr.RecordingStream, *, f0: int | None = 
                     center_labels.append(label)
                 for poly, meta in colliders(e):
                     strips.append(closed(flip(poly)))
-                    colors.append((255, 40, 40) if _is_damaging(meta) else color_for(
+                    colors.append((255, 40, 40) if _is_damaging(meta, e.get("src") or 0) else color_for(
                         str(e.get("category") or e.get("layer") or label)))
                     labels.append(label)
             rec.log("world/ents/colliders", rr.LineStrips2D(strips, colors=colors, radii=[0.03], labels=labels))
