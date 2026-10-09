@@ -189,9 +189,15 @@ class ReactConfig:
                    "b" in toks or "br" in toks, "br" in toks)
 
 
+_BODY_ONLY: frozenset | None = None
+
+
 def body_only_families(path=None) -> frozenset:
     """{(type key, family)} of the body-only families (strikes.json: logged instances, none with an own attack
-    collider or a thrown hazard), not the types' idle / entry families."""
+    collider or a thrown hazard), not the types' idle / entry families. Read once (every forecast asks)."""
+    global _BODY_ONLY
+    if path is None and _BODY_ONLY is not None:
+        return _BODY_ONLY
     p = path or FORUM_DIR / "strikes.json"
     out = set()
     if p.exists():
@@ -202,6 +208,8 @@ def body_only_families(path=None) -> frozenset:
                 continue
             if not int(v.get("instances_with_attack_colliders") or 0) and int(v.get("instances_without") or 0):
                 out.add((tk, fam))
+    if path is None:
+        _BODY_ONLY = frozenset(out)
     return frozenset(out)
 
 
