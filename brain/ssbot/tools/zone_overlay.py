@@ -987,16 +987,19 @@ class LiveOverlay:
                     except queue.Empty:
                         break
                 self._keys(keys, hwnd)
-                if win is not None and (since >= self.every or self.dirty):
+                # redraw on every new STATE (the camera moves when the hero turns or stands at a scene's edge, also out
+                # of battle where no game frame is fed); recompute the zones only every `every` game frames
+                if win is not None and (since >= self.every or self.dirty or n > 0):
                     t0 = time.perf_counter()
-                    if self.eng.running and self.eng.ws is not None:   # new frames, or a new k / mode / layer
-                        fr = self.eng.compute(ks=(self.view.k,), support=self.view.show("support"))
-                        self.stats["computed"] += 1
-                        self.stats["ms"].append((time.perf_counter() - t0) * 1e3)
-                    elif not self.eng.running:
-                        fr = None
-                    since = 0
-                    self.dirty = False
+                    if since >= self.every or self.dirty:
+                        if self.eng.running and self.eng.ws is not None:   # new frames, or a new k / mode / layer
+                            fr = self.eng.compute(ks=(self.view.k,), support=self.view.show("support"))
+                            self.stats["computed"] += 1
+                            self.stats["ms"].append((time.perf_counter() - t0) * 1e3)
+                        elif not self.eng.running:
+                            fr = None
+                        since = 0
+                        self.dirty = False
                     t1 = time.perf_counter()
                     shown = fr
                     if shown is None and self.last_raw is not None:
