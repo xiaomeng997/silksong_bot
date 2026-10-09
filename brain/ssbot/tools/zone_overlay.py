@@ -1463,13 +1463,13 @@ def _log_precision(rec, eng, truth, ks) -> None:
     import rerun as rr
     from ssbot.tools.support_precision import frame_rows, judge
     j0 = truth.idx.get(int(eng.ws.stamp.frame))
-    if j0 is None or j0 + max(ks) + 1 >= truth.n:
+    if j0 is None or j0 + max(ks) + 1 >= truth.n or truth.at(j0, max(ks)) + 1 >= truth.n:
         return
     for r in frame_rows(eng, truth, j0, ks, eng.grid):
         slug = r["name"].replace(" ", "_")
         for k, ent in r["k"].items():
             err = 0.0
-            for lay in ("committed", "com_all", "not_started", "total"):
+            for lay in ("committed", "com_all", "not_started", "ns_any", "total"):
                 j = judge(ent, lay)
                 v = 0.0 if j is None else (-1.0 if j[2] is None else round(j[2], 2))
                 if j is not None and j[3] and lay in ("com_all", "not_started"):
