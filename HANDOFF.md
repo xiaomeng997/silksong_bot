@@ -3221,3 +3221,68 @@ Main 70f8324 + `forum-integration-1008` (6dce435) merged first. Facts: forum.md 
 7. Frozen checkouts made here (can go after review): `C:\ssbot\live_w0d_b75b63a`, `45c4d6c`, `7a8afc9`, `016417b`,
    `d89f7ba`, `cc11343`, `fca0416`, `33762ee`, `5506b86`. The reviewer's scratchpad exports `wt/` and `int/` (each with
    a .venv) can go too.
+
+## Base integration 2026-10-08 evening (branch worktree-wf_c8fb34ca-073-1, from main fa43977)
+
+### Done (committed)
+
+- Merged, in order: worktree-wf_34e9717f-fa3-2 (a6cb2a7: wave-0 de-saturation final after its fixer, contains
+  forum-integration-1008), worktree-wf_14cec809-b56-1 (4ee4e3b: remaining hits, `tools/forum_remaining_hits`),
+  worktree-wf_5bda75c4-6ae-1 (a39f281: the person's wins, `tools/forum_human_score`). forum.md: remaining hits stays
+  section 24, the person's wins renumbered 24 -> 25 (headings, the internal 24.x references, the tool docstrings, the
+  plan sec. 5 references). Planner code = a6cb2a7 (the two analysis branches only added tools).
+- The verifiers' corrections (journals wf_14cec809-b56 / wf_5bda75c4-6ae), in place in forum.md 24 / 25 and the plan
+  sec. 5 notes, with summaries in forum.md 24.8 and 25.11:
+  - remaining hits: "the rounds 2-3 drop is round variance, not the changes" -> not resolved, the same-round DiD leans
+    to round 2 cutting hits landed and kills (+2.18 eq. masks / min, p 0.04); avoidable = any clear row 4-36 frames
+    before = 97.4 % (not 76 %), the 4-6 frame band 36.6 %, pins 100 % / 78 %; the trading claim is outcome-selected
+    (5,010 hits landed = 1,252 masks vs 677 lost: net gain); clash-geometry class dropped (geometry <= 3 frames before
+    contact); whip h <= 2 is 34 % at the attack start; Reed defence per the Reed paragraph (counter aims at the
+    hero's height; wait out Defend or clash the counter; no down-slash trigger); retreat distances are observations;
+    lock breakdown (dash ~30 %, attack ~27 %, Bind 21 masks 10 %, umbrella 8 %); eq. mask loss power in absolute
+    terms (80 eps / arm: 1.5-2.0 masks / min); Poisson tests overdispersed.
+  - the person's wins: the FORCED_RISK preselection keys AUC 0.755 / 0.779 (keep them, no learned score); fix 2's
+    -24 % / -5 % is a whole-layer-removal upper bound; fix 1's cost is 3.5x the existing misses (Reed); keep is a
+    replay artefact; the continuation bonus has little leverage (0.68 % of ticks); jump / dash timing <= 5.1 %; no +l
+    in the replay; bot reference newS.
+- `forum_human_score` (da8d104): the best row must have the person's attack / jump / dash press counts over frames
+  1-18 (rising edges of the latched masks; the person's keys through the same hold filter), else the tick is outside
+  the candidate set; the replay clears the planner's own `jump_until` / `macro_until` every frame; per tick the
+  all-row hindsight base rates, the pick's distance from the person's path, one cause per tick (FORCED_RISK by the
+  deciding key). Tests in tests/test_forum_human_score.py.
+- `forum_remaining_hits` (abd6ba5): avoidable = any analysed tick 4-36 frames before with a clear row (+ the 4-6 band,
+  + the 0.25 u margin variants); tests/test_forum_remaining_hits.py. Re-report `C:\ssbot\data\m2_forum_rh\report_avoid_v2.json`.
+- `scripts/forum_human_rescore.cmd best|default <name>`: the plan's re-score check driver (run from a frozen checkout).
+
+### Measured
+
+- Re-score on the base code (frozen `C:\ssbot\hs_da8d104`, 32 segments, 0 errors; `C:\ssbot\data\m2_forum_hs\best_v2`,
+  `default_v2`, `v2_summary.json`), best arm / default: FORCED_RISK 82.1 / 88.7 %; matched (presses equal and
+  <= 0.35 u) 71.4 / 70.4 % (position only 81.0 %: the nearest row did not attack on 89 % of the person's attack
+  ticks); matched rows unsafe 86.6 / 89.3 %, of them clear 88.8 / 89.1 %; misses 0.60 / 0.41 % of safe (32: Reed body
+  31); matched rows clear 90.2 % vs all allowed candidates 80.9 % (pooled, open loop). Causes (best): outside 28.6 %,
+  FORCED_RISK decided by J 22.8 / seen_cf 15.1 / seen 6.2 / P_cm 6.1 / first contact 4.3 %, safe but ranked behind 9.0 %
+  (J 97 %: stance 55 %, CONTINUE 35 %), vetoed 4.1 %, the pick itself 0.7 % (pick within 0.35 u of the person 17.5 %).
+  These are the baseline numbers of the plan's re-score check (plan sec. 5, forum.md 25.11).
+- Full pytest (at 633e751; later commits are docs / a .cmd): 1290 passed, 2 skipped, 1 xfailed.
+
+### Running
+
+- Nothing (the two re-score runs finished; no game instance used, no lock taken).
+
+### Needs deploy
+
+- Nothing (no oracle change).
+
+### Next / open issues
+
+1. The same-round A/B the verifier asks for: frozen 016417b (new) vs fca0416 (newS), ABBA, then single switches.
+2. Pins: 78 % had a clear row 4-6 frames before: find why the planner did not take it (planner / latency failure).
+3. Bind: 21 masks were taken with the hero in BindCharge / BindBurst at the attack's start (a gap in the Bind commit
+   condition).
+4. The candidate set misses the person's timing (outside 28.6 %; 12.6 % of ticks the keys model is right but no row
+   presses at that time): "wait k frames then jump / dash / attack" rows.
+5. The per-group precision / layer-combination / AUC cuts of forum.md 25.4 / 25.8 were session scripts on the old
+   matching; not recomputed.
+6. `hit_log` attributes 43 % of whip chains to another Choristor (policy bookkeeping; not fixed).
+7. Frozen checkout `C:\ssbot\hs_da8d104` can go after review.
