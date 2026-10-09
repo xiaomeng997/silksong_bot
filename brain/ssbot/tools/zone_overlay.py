@@ -604,10 +604,11 @@ def draw_legend(img: np.ndarray, lines, view: View) -> None:
     H = img.shape[0]
     s = H / 1080.0
     fs, lh = 0.45 * s, int(round(18 * s))
-    x0, y0 = int(round(12 * s)), H - int(round(12 * s)) - lh * len(lines)
+    # top right, under the frame marker's corner (the HUD is top left; the hero lives near the floor)
     w = int(round(820 * s))
-    roi = img[max(y0 - lh, 0):H - int(round(6 * s)), x0 - 6:x0 + w]
-    roi[:] = (roi * 0.35 + np.array([0, 0, 0, 255.0]) * 0.65).astype(np.uint8)
+    x0, y0 = img.shape[1] - w - int(round(12 * s)), int(round(48 * s)) + lh
+    roi = img[max(y0 - lh, 0):y0 + lh * (len(lines) - 1) + int(round(6 * s)), x0 - 6:x0 + w]
+    roi[:] = (roi * 0.5 + np.array([0, 0, 0, 255.0]) * 0.5).astype(np.uint8)
     for i, (t, col) in enumerate(lines):
         y = y0 + i * lh
         tx = x0
