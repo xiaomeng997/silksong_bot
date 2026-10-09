@@ -988,8 +988,7 @@ class LiveOverlay:
                 self._keys(keys, hwnd)
                 if win is not None and (since >= self.every or self.dirty):
                     t0 = time.perf_counter()
-                    if self.eng.running and self.eng.ws is not None and (since >= self.every or fr is None
-                                                                         or self.view.k not in fr["ks"]):
+                    if self.eng.running and self.eng.ws is not None:   # new frames, or a new k / mode / layer
                         fr = self.eng.compute(ks=(self.view.k,), support=self.view.show("support"))
                         self.stats["computed"] += 1
                         self.stats["ms"].append((time.perf_counter() - t0) * 1e3)
