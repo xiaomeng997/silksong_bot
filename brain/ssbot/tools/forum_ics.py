@@ -84,6 +84,7 @@ TURNS = (24, 45, 75)
 ACTS = ("none", "jump_full", "jump_short", "dash", "sprint", "jump_airdash", "dash_jump")
 FACING_EXCEPT = frozenset({"AT_DEFEND", "AT_LEAVE", "MA_SUMMON"})   # instances' mirror != the hero's side often
 RE_ARMS = frozenset({"CB_THROW", "RE_THROW", "CC_CAST"})
+RUNE_LEFTOVERS = frozenset({"CC_CAST", "CC_JUMP_CAST"})     # templates holding earlier casts' runes (summary split)
 PIN_FAMS = frozenset({"RE_THROW"})
 PLAN_F = (1, 6, 12, 18, 24, 36)
 LATE_F = 6                                                   # a zone point the best escape survives this long past
@@ -773,12 +774,12 @@ class Zones:
                 (float(hq), d["x"], d["h"], Z, float(d["meta"][0]), bool(d["meta"][2])))
 
     def occ(self, tk: str, idle_fam: str, entry_fam: str, a_h: float, dx: np.ndarray, hrel: np.ndarray,
-            lock: np.ndarray) -> np.ndarray:
-        """[n] in some family's zone (not the idle / entry family): dx hero centre - anchor x, hrel the hero centre
-        above standing height, lock codes (LOCK_CODE), a_h the anchor's height above the floor."""
+            lock: np.ndarray, skip: frozenset = frozenset()) -> np.ndarray:
+        """[n] in some family's zone (not the idle / entry family, not `skip`): dx hero centre - anchor x, hrel the
+        hero centre above standing height, lock codes (LOCK_CODE), a_h the anchor's height above the floor."""
         out = np.zeros(len(dx), bool)
         for fam, by_lock in self.fams.get(tk, {}).items():
-            if fam in (idle_fam, entry_fam):
+            if fam in (idle_fam, entry_fam) or fam in skip:
                 continue
             for L, code in LOCK_CODE.items():
                 m = lock == code
@@ -981,7 +982,6 @@ def whatif(pol, fcast, groups, dbg, zones: Zones, keys_row=None) -> dict:
 
 def _episodes(spec: str, demo_cache) -> list[dict]:
     """A bot run dir (every episode of attempts_i*.jsonl) or a human segment spec (forum_human_score)."""
-    p = Path(spec.split(":", 2)[0] + (":" + spec.split(":", 2)[1] if len(spec.split(":")[0]) == 1 else ""))
     if len(spec) > 2 and spec[1] == ":" and spec.count(":") >= 2:
         from ssbot.tools.forum_human_score import segments
         return [{"kind": "human", "seg": s} for s in segments(spec, demo_cache)]
@@ -1260,7 +1260,10 @@ def summarize_maps(dirs: list[Path], frames=(0, 2, 5), zones: "Zones | None" = N
             m[c] = {f"f{PLAN_F[j]}": _ascii_map(d[c][:, :, j], d["inside"], n) for j in frames}
         out[tk] = {"n": n, "maps": m}
         if zones is not None and n:
-            out[tk]["vs_ics"] = _vs_ics(tk, d, n, zones, (anchor_h or {}).get(tk))
+            vi = _vs_ics(tk, d, n, zones, (anchor_h or {}).get(tk))
+            ics = vi.pop("_ics")
+            m["ics"] = {"static": _ascii_map(ics.astype(np.int64) * n, d["inside"], n)}
+            out[tk]["vs_ics"] = vi
     return out
 
 
@@ -1281,16 +1284,24 @@ def _vs_ics(tk: str, d: dict, n: int, zones: "Zones", a_h: float | None) -> dict
     dy = (FLOOR_Y + hb.HERO_HALF_U[1] + H) - (FLOOR_Y + a_h)
     body = (np.abs(DX) <= max(abs(hull[0]), hull[2]) + rx) & (dy >= hull[1] - ry) & (dy <= hull[3] + ry)
     lock = np.where(H < 0.25, 0, 3)
-    ics = zones.occ(tk, sp.idle_family, sp.entry_family, a_h, DX.ravel(), H.ravel(), lock.ravel()).reshape(DX.shape)
     ins = d["inside"] / n >= 0.5
     cell = IDLE_U * IDLE_U
     tot = d["total"]
-    res = {"a_h": round(a_h, 2), "ics_beyond_body_u2": round(float((ics & ~body & ins).sum()) * cell, 2),
-           "in_ics_u2": [], "outside_ics_u2": []}
-    for j in range(tot.shape[2]):
-        occ = tot[:, :, j] / n
-        res["in_ics_u2"].append(round(float((occ * (ics & ~body & ins)).sum()) * cell, 2))
-        res["outside_ics_u2"].append(round(float((occ * (~ics & ~body & ins)).sum()) * cell, 2))
+    res = {"a_h": round(a_h, 2)}
+    # the Clapper's casts: their templates hold the runes of earlier casts still out (the hazard layer's)
+    for tag, skip in (("", frozenset()), ("_no_runes", RUNE_LEFTOVERS)):
+        if tag and not (set(zones.fams.get(tk, {})) & skip):
+            continue
+        ics = zones.occ(tk, sp.idle_family, sp.entry_family, a_h, DX.ravel(), H.ravel(), lock.ravel(),
+                        skip).reshape(DX.shape)
+        res["ics_beyond_body_u2" + tag] = round(float((ics & ~body & ins).sum()) * cell, 2)
+        res["in_ics_u2" + tag], res["outside_ics_u2" + tag] = [], []
+        for j in range(tot.shape[2]):
+            occ = tot[:, :, j] / n
+            res["in_ics_u2" + tag].append(round(float((occ * (ics & ~body & ins)).sum()) * cell, 2))
+            res["outside_ics_u2" + tag].append(round(float((occ * (~ics & ~body & ins)).sum()) * cell, 2))
+        if not tag:
+            res["_ics"] = ics & ~body & ins
     return res
 
 
