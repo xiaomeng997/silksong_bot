@@ -27,6 +27,7 @@ Cogfly throws, Binds. Decision log (decisions_i<N>.jsonl): 90 ticks before each 
 first tick of a FORCED_RISK streak, 10 after.
 """
 import math
+import os
 import random
 import time
 from collections import Counter, deque
@@ -38,12 +39,14 @@ import numpy as np
 from ssbot.backends.oracle_backend import OracleBackend
 from ssbot.combat.enemy_tables import EnemyTables
 from ssbot.combat.forum_planner import (ForumConfig, ForumPlanner, forum_kill_hp, forum_yellow_kill_hp,
-                                        kill_freeze_s)
+                                        kill_freeze_s, parse_ta)
 from ssbot.combat.hero_damage import HeroDamage
-from ssbot.combat.multi_forecast import MultiForecaster
+from ssbot.combat.multi_forecast import MultiForecaster, ReactConfig
 from ssbot.combat.planner import PlannerConfig
+from ssbot.combat.projectiles import bells_mode
 from ssbot.combat.safety_filter import FilterContext, KillKnowledge
 from ssbot.combat.tactics.forum_local import ForumTactics, load_forum_playbook
+from ssbot.combat.tactics.gauntlet import GauntletTactics, load_l2_rules
 from ssbot.core.forum import FLOOR_Y
 from ssbot.core.worldstate import Ev
 from ssbot.ipc.framing import ACTION_EXCLUSIVE
@@ -57,6 +60,18 @@ from ssbot.train.planner_policy import HORIZON_S, LOG_BEFORE, UNPRED_LAGS, Plann
 
 REPO = Path(__file__).resolve().parents[3]
 FORUM_PARAMS = REPO / "knowledge" / "1.0.30000" / "kinematics" / "hero_reaper_forum.json"
+# the Forum loadout's kinematics per crest (fo_A: Reaper; fo_W: Wanderer, the R8 clash arm)
+CREST_PARAMS = {"Reaper": FORUM_PARAMS,
+                "Wanderer": REPO / "knowledge" / "1.0.30000" / "kinematics" / "hero_wanderer_forum.json"}
+# the R8 clash modes (ForumConfig): on = the EV_CLASH branch and its continuation rows in GREEN only (DESIGN 3.5.6's
+# whitelist: no clash in YELLOW / RED or with a pause pending), yellow = also in YELLOW (the R8 experiment: the lead's
+# decision before any production use), cont = the continuation rows without the branch (the A/B's control for them)
+CLASH_MODES = {"off": {}, "on": {"clash": True}, "yellow": {"clash": True, "clash_tiers": ("GREEN", "YELLOW")},
+               "cont": {"clash": True, "clash_branch": False},
+               # the person's three-layer support (forum.md §23): a clean clash row is safe on the clash geometry, its
+               # measured hit-anyway bound at most clash_max_fail, ranked after the plain safe rows by it; also in a
+               # YELLOW that comes from the chosen plan's S = 1 (h >= 3), never at h 2, in RED or with a pause pending
+               "main": {"clash": True, "clash_main": True, "clash_min_p": 0.0, "clash_max_fail": 0.3, "clash_depth": 3}}
 END_SLOW_S = 1.85          # EnemyBattleEndSlow in real time (forum.md §3): the final blow's unpausable window
 ANKLET = "Weighted Anklet"
 COG = kin.B_UP | kin.B_QUICKCAST
@@ -67,7 +82,58 @@ BATTLE = "Battle Scene"
 HOOK_LOOKBACK_F = 70       # a multi-hit chain's hook -> its Final Hit: 0.35 - 1.0 s (forum.md §9.2; tools.multi_recall)
 HOOK_FSMS = ("Control", "Attack")
 KEEP_F = 90                # forecasts, hero boxes and FSM entries kept for judging a Final Hit at its hook
+# a hit's chosen plan this many frames before it (hit_log "lag", stats "planned_safe"; forum.md §23.12): the reaction
+# lag (12), the commit lag of a typical move (24) and the 0.5 s a plan's first segment runs (30); UNPRED_LAGS (2-4)
+# cannot see a risk the escape check or the idle-growth hold took on further ahead
+PLAN_LAGS = (12, 24, 30)
+PLAN_RING = 64
 TICK_WAIT_F = HOOK_LOOKBACK_F   # a Multihit tick outside the support waits this long for its chain's Final Hit
+
+
+def planned_safe(hit_log: list) -> dict:
+    """The damage hits (hit_log, kind "damage") whose chosen plan was S = 0 at each PLAN_LAGS lag ("12" ...), with a
+    plan chosen S = 0 in the 30 frames before ("any30") or a clean clash row chosen S = 0 there ("clash30"), whose plan
+    at a lag was S = 1 by the escape check ("esc_<L>") or had an aimed-pin threat ("pin_<L>"), and the S = 0 ones by
+    source path ("by_src": the 30-frame rule). A hit outside the support at UNPRED_LAGS is "unpredicted"; these are
+    the hits a plan called safe that far ahead did not avoid (forum.md §23.12)."""
+    out = Counter()
+    src = Counter()
+    for x in hit_log:
+        if x.get("kind") != "damage":
+            continue
+        out["hits"] += 1
+        for L, v in (x.get("lag") or {}).items():
+            if v is None:
+                out[f"unknown_{L}"] += 1
+                continue
+            out[L] += int(v[0] == 0)
+            out[f"esc_{L}"] += int(bool(v[3]))
+            out[f"pin_{L}"] += int(bool(v[4]))
+        out["any30"] += int(bool(x.get("safe30")))
+        out["clash30"] += int(bool(x.get("clash30")))
+        if x.get("safe30"):
+            src[str(x.get("path") or x.get("src_type"))] += 1
+    return {**dict(out), "by_src": dict(src.most_common(12))}
+
+
+def _tv_summary(rows: list) -> dict | None:
+    """The chosen rows' terminal terms over an episode: mean E / overlap / H_exp, share trapped, mean share of rows
+    trapped."""
+    if not rows:
+        return None
+    a = [r for r in rows if r[0] is not None]
+    m = (lambda i: round(float(np.mean([r[i] for r in a])), 4) if a else None)
+    return {"ticks": len(rows), "E": m(0), "trapped": m(1), "overlap": m(2), "hexp": m(3),
+            "rows_trapped": round(float(np.mean([r[4] for r in rows])), 4)}
+
+
+def production_tables() -> EnemyTables:
+    """The production tables; SSBOT_FORUM_MARGIN=state: with the per-state margins (support_margins_state.json,
+    tools.forum_state_margins, forum.md §23) on top of the family ones."""
+    if os.environ.get("SSBOT_FORUM_MARGIN", "family").strip().lower() == "state":
+        from ssbot.combat.enemy_tables import FORUM_DIR
+        return EnemyTables.production(state_margins_path=FORUM_DIR / "support_margins_state.json")
+    return EnemyTables.production()
 
 
 def true_wave(raw: dict) -> tuple[int | None, bool]:
@@ -85,7 +151,8 @@ class ForumPlannerPolicy(PlannerPolicy):
     act_after_clear = True
 
     def __init__(self, view: str = "oracle", threads: int = 4, log_dir: Path | None = None, instance: int = 0,
-                 real_quit_p: float = 0.0, playbook: Path | str | None = None, tables: EnemyTables | None = None):
+                 real_quit_p: float = 0.0, playbook: Path | str | None = None, tables: EnemyTables | None = None,
+                 crest: str = "Reaper", clash: bool | str = False, branch_model: bool = False):
         import cv2
         import numba
         numba.set_num_threads(threads)
@@ -93,12 +160,26 @@ class ForumPlannerPolicy(PlannerPolicy):
         if view != "oracle":
             raise ValueError("ForumPlannerPolicy: the oracle view only (the Forum's vision view is M3)")
         self.view, self.threads, self.instance = view, threads, instance
-        self.params0 = HeroParams.load(FORUM_PARAMS)
+        # the crest's kinematics and slash shapes; clash: the R8 EV_CLASH mode (CLASH_MODES; True = "on")
+        self.crest, self.clash = crest, {True: "on", False: "off"}.get(clash, clash)
+        if self.clash not in CLASH_MODES:
+            raise ValueError(f"clash mode {clash!r}: one of {sorted(CLASH_MODES)}")
+        self.crest_seen: str | None = None
+        self.params0 = HeroParams.load(CREST_PARAMS[crest])
         self.params = self.params0
         self.pb, self.rules = load_forum_playbook(playbook)
         self.floor_hero_y = FLOOR_Y + hb.HERO_HALF_U[1]
-        self.tac = ForumTactics(self.pb, self.rules, self.floor_hero_y)
-        self.fc = MultiForecaster(tables if tables is not None else EnemyTables.production())
+        local = ForumTactics(self.pb, self.rules, self.floor_hero_y)
+        # R6 v0's L2 target layer above LOCAL (Forum.yaml forum.l2; SSBOT_FORUM_L2=0: LOCAL alone, the A0 tactics)
+        self.l2_rules = load_l2_rules(playbook, os.environ.get("SSBOT_FORUM_L2"))
+        self.tac = GauntletTactics(local, self.l2_rules) if self.l2_rules.enabled else local
+        # branch_model: the R5 branch model's history per enemy and Subject.next_p (scoring consumers: O / BAIT);
+        # off by default, the planner does not read it yet
+        branch = None
+        if branch_model:
+            from ssbot.combat.branch_model import BranchModel
+            branch = BranchModel.load()
+        self.fc = MultiForecaster(tables if tables is not None else production_tables(), branch=branch)
         self.freeze = kill_freeze_s()
         self.kill_know = KillKnowledge.load()
         self.kill_window_s = END_SLOW_S
@@ -122,6 +203,72 @@ class ForumPlannerPolicy(PlannerPolicy):
         self.episode = -1
         self._support = None
         self.k = 0
+        self.ab = self._ab_arms()
+        self.ab_arm: str | None = None
+        self.free = False                       # track A "free" (_set_ta)
+
+    @staticmethod
+    def _ab_arms() -> list[tuple[str, dict]]:
+        """SSBOT_FORUM_AB: arms switched per episode (episode k runs arm k mod n, so the arms share the machine's load
+        within one batch; forum.md 20.11), "name:key=value,...;name:..." with the keys pc (commit_rank 0 / 1), fr
+        (forced_rank share / seen / seen_cf), rx (the reactive support, SSBOT_FORUM_REACT's values) and ta (track A's
+        tokens, SSBOT_FORUM_TA's values joined by "+", "none" for none: the supervisor's free mode and the L2 rules
+        follow the arm, _set_ta). The clash mode
+        is not an arm key (it changes the candidate sets the planner is built with: combat_run --forum-clash). Empty:
+        one arm, the env switches below."""
+        spec = os.environ.get("SSBOT_FORUM_AB", "").strip()
+        arms = []
+        for part in filter(None, (p.strip() for p in spec.split(";"))):
+            name, _, kv = part.partition(":")
+            over = {}
+            for item in filter(None, (x.strip() for x in kv.split(","))):
+                k, _, v = item.partition("=")
+                if k == "pc" and v in ("0", "1"):
+                    over["commit_rank"] = v == "1"
+                elif k == "fr" and v in ("share", "seen", "seen_cf"):
+                    over["forced_rank"] = v
+                elif k == "rx" and v:
+                    ReactConfig.parse(v)                 # validates
+                    over["react"] = v
+                elif k == "ta":
+                    v = "" if v.strip().lower() == "none" else v     # "none": no track A token
+                    parse_ta(v)                          # validates
+                    over["ta"] = v
+                else:
+                    raise ValueError(f"SSBOT_FORUM_AB={spec!r}: {item!r} (pc=0|1, fr=share|seen|seen_cf, "
+                                     f"rx=off|delay|escape[+c|+i|+p5], ta=none|<tokens>)")
+            arms.append((name.strip(), over))
+        return arms
+
+    @staticmethod
+    def _fcfg(clash: str = "off") -> ForumConfig:
+        """ForumConfig of the R8 clash mode (CLASH_MODES) with the A/B switches SSBOT_FORUM_FR: FORCED_RISK's first
+        risk key, "share" (default), "seen" or "seen_cf" (ForumConfig.forced_rank; forum.md §19); SSBOT_FORUM_REACT:
+        the reactive support, "off" (default), "delay" or "escape", with "+c" / "+i" / "+p5" (ForumConfig.react;
+        forum.md §22); SSBOT_FORUM_BELLS: "on" (default) or "off" (no bells as hit targets, ForumConfig.bell_hits; the
+        HazardTracker keeps a hit-back bell a hazard: forum.md §23.12). The module-level switches SSBOT_FORUM_PC
+        (commit_rank, default on), SSBOT_FORUM_TV (terminal value, default off) and SSBOT_FORUM_T (horizon, default 36)
+        are ForumConfig's defaults (combat.forum_planner)."""
+        fr = os.environ.get("SSBOT_FORUM_FR", "share").strip().lower() or "share"
+        if fr not in ("share", "seen", "seen_cf"):
+            raise ValueError(f"SSBOT_FORUM_FR={fr!r}: share | seen | seen_cf")
+        rx = os.environ.get("SSBOT_FORUM_REACT", "off").strip().lower() or "off"
+        ReactConfig.parse(rx)                    # validates
+        ta = os.environ.get("SSBOT_FORUM_TA", "").strip().lower()
+        parse_ta(ta)                             # validates (track A's tokens, combat.forum_planner.TA_TOKENS)
+        return ForumConfig(forced_rank=fr, react=rx, bell_hits=bells_mode() == "on", ta=ta, **CLASH_MODES[clash])
+
+    def _set_ta(self, fcfg: ForumConfig) -> None:
+        """Track A's tokens (SSBOT_FORUM_TA, or the episode's AB arm) to the supervisor ("free": the DESIGN 3.5.6
+        revision's free mode) and the L2 tactics ("whip", "guard", "edge"); the planner reads its own (fcfg)."""
+        tac = fcfg.tac
+        self.free = "free" in tac
+        if isinstance(self.tac, GauntletTactics):
+            self.tac.ta = tac
+
+    def _set_react(self, fcfg: ForumConfig) -> None:
+        """The forecaster's reactive support from the planner's config (None when off: the support as before)."""
+        self.fc.react = ReactConfig.parse(fcfg.react)
 
     # ---- warm-up ----
 
@@ -131,8 +278,11 @@ class ForumPlannerPolicy(PlannerPolicy):
         from ssbot.core.worldstate import E, WorldState
         t0 = time.perf_counter()
         self.fc.warm()
-        planner = ForumPlanner(self.params, Terrain2D.empty(), PlannerConfig(T=36, threads=self.threads,
-                                                                             variants="bounds_lo"), ForumConfig())
+        fcfg = self._fcfg(self.clash)
+        self._set_react(fcfg)
+        planner = ForumPlanner(self.params, Terrain2D.empty(), PlannerConfig(T=fcfg.T, threads=self.threads,
+                                                                             variants="bounds_lo"), fcfg,
+                               crest=self.crest)
         fcast = self.fc.forecast(HORIZON_S)
         for x, mode in ((30.0, kin.M_NORMAL), (33.0, kin.M_NORMAL), (36.0, kin.M_HURT_FREEZE)):
             ws = WorldState()
@@ -141,7 +291,7 @@ class ForumPlannerPolicy(PlannerPolicy):
             prefs = self.tac.decide(ws, fcast, None, 3)
             prefs.want_bind = True
             ctx = FilterContext.from_world(ws, None, 3, want_bind=True, kill_hp=5.0, kill_window_s=END_SLOW_S,
-                                           damage=HeroDamage.from_loadout("Reaper", 1, ()))
+                                           damage=HeroDamage.from_loadout(self.crest, 1, ()))
             ctx.support_known = True
             S = kin.initial_state(self.params, x, FLOOR_Y + self.params.foot, mode=mode)
             planner.tick(ws, S, HoldState.idle(1), np.zeros(1, np.int64), fcast, prefs, ctx)
@@ -160,6 +310,9 @@ class ForumPlannerPolicy(PlannerPolicy):
         rng.randrange(1 << 30)
         self.backend = OracleBackend()
         self.k = 0
+        if isinstance(self.tac, GauntletTactics):
+            self.tac.reset()
+            self.tac.rng = random.Random(self.episode)    # injected L2 failures: never from the episode's rng
         msg = None
         if self.terrain_tap is not None:
             msg = self.terrain_tap.wait(enc.scene, timeout_s=5.0)
@@ -169,17 +322,24 @@ class ForumPlannerPolicy(PlannerPolicy):
         self.terrain = self.terrain or Terrain2D.empty()
         self.params = self.params0
         if self.planner is None:
-            self.planner = ForumPlanner(self.params, self.terrain, PlannerConfig(T=36, threads=self.threads,
-                                                                                 variants="bounds_lo"), ForumConfig())
+            fcfg = self._fcfg(self.clash)
+            self.planner = ForumPlanner(self.params, self.terrain, PlannerConfig(T=fcfg.T, threads=self.threads,
+                                                                                 variants="bounds_lo"),
+                                        fcfg, crest=self.crest)
         self.planner.params = self.params
         self.planner.terrain = self.terrain
+        if self.ab:
+            self.ab_arm, over = self.ab[self.episode % len(self.ab)]
+            self.planner.fcfg = replace(self._fcfg(self.clash), **over)
         self.planner.reset()
+        self._set_react(self.planner.fcfg)
+        self._set_ta(self.planner.fcfg)
         self._audit0 = self.planner.audit.as_dict()
         self.trk = StateTracker(self.params, self.terrain)
         self.fc.reset()
         self.weighted = None
         self.real_quit = self.real_quit_p > 0 and rng.random() < self.real_quit_p
-        self.sc.cfg = forum_supervisor_config()
+        self.sc.cfg = forum_supervisor_config(free_until_hit=self.free)
         self.sc.pq_cfg = replace(self._pq_emulated, emulate_quit=not self.real_quit)
         self.rq: dict = {"armed": self.real_quit, "submits": [], "menus": []}
         self.sc.reset()
@@ -205,6 +365,8 @@ class ForumPlannerPolicy(PlannerPolicy):
         self.counts: Counter = Counter()
         self.tick_ms: list[float] = []
         self.plan_ms: list[float] = []
+        self.tv_ms: list[float] = []               # the terminal value's share of the tick (field + rows + kill value)
+        self.tv_rows: list[tuple] = []             # the chosen row's (E, trapped, overlap, H_exp), trapped share
         self._last_f = None
         self._unpred_backlog = 0
         self._unpred_src: list = []
@@ -213,6 +375,11 @@ class ForumPlannerPolicy(PlannerPolicy):
         self.unpredicted_unknown: list[int] = []
         self.unpred_sources: list = []
         self.hits_taken: list[int] = []
+        # the chosen plan per tick (observation frame, S, FORCED_RISK, a clean clash row, S = 1 by the escape check,
+        # an aimed-pin threat): a hit's plan PLAN_LAGS frames before it (forum.md §23.12: the hits the bot did not see
+        # coming at the commit lag, not only at UNPRED_LAGS)
+        self._plan_ring: deque = deque(maxlen=PLAN_RING)
+        self._pin_ticks0: int | None = None
         self.forced_frames: list[int] = []
         self._since_forced = FORCED_STREAK_GAP
         self.forced_streaks = 0
@@ -278,7 +445,8 @@ class ForumPlannerPolicy(PlannerPolicy):
                                      "forced": bool(getattr(self.planner_last, "forced_risk", False)),
                                      "mode": getattr(self, "_mode_last", None),
                                      "tier": None if self.decision is None else self.decision.tier,
-                                     "h": None if self.decision is None else self.decision.h})
+                                     "h": None if self.decision is None else self.decision.h,
+                                     **self._plan_lags(ws.stamp.frame)})
                 if wt is not None:
                     self.per_wave.setdefault(wt, Counter())["hits" if kind == "damage" else "mh_ticks"] += 1
         if not self.wake_sent and tap is not None and tap.wake_frame is not None:
@@ -289,6 +457,20 @@ class ForumPlannerPolicy(PlannerPolicy):
             w0 = int(name.rsplit("_w", 1)[1]) if "_w" in name and name.rsplit("_w", 1)[1].isdigit() else 0
             self.fc.notify_wake(ws.stamp.t_game_s - dt, wave=w0)
             self.wake_sent = True
+
+    def _plan_lags(self, fo: int) -> dict:
+        """A hit at observation frame fo against the chosen plans before it: "lag" {L: [S, FORCED_RISK, clean clash,
+        S = 1 by the escape check, aimed-pin threat] of the last tick at or before fo - L (None: none kept)} for
+        PLAN_LAGS, "safe30": a plan chosen with S = 0 in the 30 frames before fo, "clash30": a clean clash row chosen
+        with S = 0 there (forum.md §23.12)."""
+        ring = list(self._plan_ring)
+        lag = {}
+        for L in PLAN_LAGS:
+            x = next((x for x in reversed(ring) if x[0] <= fo - L), None)
+            lag[str(L)] = None if x is None or fo - L - x[0] > 4 else list(x[1:])
+        recent = [x for x in ring if fo - 30 <= x[0] < fo]
+        return {"lag": lag, "safe30": any(x[1] == 0 for x in recent),
+                "clash30": any(x[1] == 0 and x[3] for x in recent)}
 
     def _note_kill(self, ws) -> None:
         """No kill commitment in the Forum (R3: the final blow is I3 only, no certified kill plans)."""
@@ -410,15 +592,18 @@ class ForumPlannerPolicy(PlannerPolicy):
         self._pending_ticks = keep
         return n
 
-    def _first_tick(self, ws) -> None:
+    def _first_tick(self, ws, raw: dict | None = None) -> None:
         if self.weighted is not None:
             return
+        # the crest the savestate has (the policy's kinematics and slash shapes are the constructor's: a mismatch is
+        # counted in stats, never silently fixed)
+        self.crest_seen = ((raw or {}).get("hero") or {}).get("crest")
         self.weighted = ANKLET in (ws.res.equipped or ())
         if self.weighted:
             self.params = self.params0.with_weighted()
             self.planner.params = self.params
             self.trk = StateTracker(self.params, self.terrain)
-            self.sc.cfg = forum_supervisor_config(weighted=True)
+            self.sc.cfg = forum_supervisor_config(weighted=True, free_until_hit=self.free)
             self.sc.sup.cfg = self.sc.cfg
 
     def _wave_check(self, raw: dict, f: int) -> int | None:
@@ -465,7 +650,7 @@ class ForumPlannerPolicy(PlannerPolicy):
         fo = ws.stamp.frame
         raw = self.raw.get(fo, s)
         raw["_t"] = ws.stamp.t_game_s
-        self._first_tick(ws)
+        self._first_tick(ws, raw)
         self.trk.push(raw)
         self._wake(ws, s, tap)
         self.fc.update(ws)
@@ -493,6 +678,12 @@ class ForumPlannerPolicy(PlannerPolicy):
         S0 = self._start_state(ws, raw)
         res = self.planner.tick(ws, S0, hold, prefix, fcast, prefs, ctx)
         self.planner_last = res
+        pt = self.planner.audit.pin_ticks
+        cl = getattr(res, "clash", None)
+        self._plan_ring.append((fo, int(res.S), bool(res.forced_risk), bool(cl and not cl[2]),
+                                bool((self.planner.last_info.get("esc") or {}).get("unsafe")),
+                                self._pin_ticks0 is not None and pt > self._pin_ticks0))
+        self._pin_ticks0 = pt
         t2 = time.perf_counter()
         unpred = self._unpredicted(raw, fo) + self._unpred_backlog
         self._unpred_backlog = 0
@@ -530,8 +721,15 @@ class ForumPlannerPolicy(PlannerPolicy):
                          sup=r.mask is not None)
         self.tick_ms.append((time.perf_counter() - t0) * 1e3)
         self.plan_ms.append((t2 - t1) * 1e3)
+        tvi = self.planner.last_info.get("tv")
+        if tvi is not None:
+            self.tv_ms.append(tvi["ms"])
+            self.tv_rows.append((tvi.get("E"), tvi.get("trapped"), tvi.get("overlap"), tvi.get("hexp"),
+                                 tvi["trapped_share"]))
         self.counts[prefs.mode] += 1
         self.counts["forced_risk"] += res.forced_risk
+        if getattr(res, "clash", None):
+            self.counts["clash_partial" if res.clash[2] else "clash_plan"] += 1
         self.binds += int(res.name == "BIND")
         tt = self.tac.last.get("target_type")
         if tt:
@@ -639,8 +837,15 @@ class ForumPlannerPolicy(PlannerPolicy):
                "triggers": list(r.decision.triggers), "unpred": unpred, "ms": round(res.t_ms.get("total", 0.0), 3),
                "kill_hp": kill_hp, "ykill": ykill, "kill_prims": sorted(p.name for p in r.decision.kill_prims),
                "fi": {k: li.get(k) for k in ("posture", "N", "stage1_pass", "enveloped", "hitfx", "react", "capped",
-                                             "cut", "overrun")},
-               "pocket": self.tac.last.get("pocket_veto"), "subj": subj}
+                                             "cut", "overrun", "tv", "seen", "seen_cf", "esc")},
+               "pocket": self.tac.last.get("pocket_veto"), "goal": self.tac.last.get("goal"),
+               "goal_why": self.tac.last.get("goal_why"), "goal_t_end": self.tac.last.get("goal_t_end"),
+               "l2_cands": self.tac.last.get("l2_cands"), "ta": self.tac.last.get("ta"),
+               "free": bool(getattr(r.decision, "free", False)), "subj": subj}
+        if getattr(res, "clash", None):
+            # the chosen plan relies on a clash: w (every clash in it happens), clashes, ranked in FORCED_RISK (partial,
+            # or w below clash_min_p)
+            rec["clash"] = [round(res.clash[0], 4), res.clash[1], bool(res.clash[2])]
         hit = any(ev.get("k") in ("damage", "catastrophe", "would_die") for ev in s.get("ev") or ())
         event = hit or streak or (r.decision.pause_pending and self.counts["_pend_logged"] == 0)
         if r.decision.pause_pending:
@@ -658,12 +863,19 @@ class ForumPlannerPolicy(PlannerPolicy):
         for x in self.hit_log:
             x["unpred"] = x["f"] in unpred_f
         modes = {k: v for k, v in self.counts.items() if not k.startswith("_")}
-        return {"view": self.view, "policy": "forum_planner", "k": 0, "modes": modes,
+        fc = self.planner.fcfg if self.planner is not None else None
+        return {"view": self.view, "policy": "forum_planner", "k": 0, "modes": modes, "ab_arm": self.ab_arm,
+                "fcfg": None if fc is None else {"forced_rank": fc.forced_rank, "react": fc.react,
+                                                 "commit_rank": fc.commit_rank, "terminal": fc.terminal, "T": fc.T,
+                                                 "ta": "+".join(sorted(fc.tac))},
+                "branch_model": self.fc.bv is not None,
                 "tick_ms_p50": q(self.tick_ms, 50), "tick_ms_p99": q(self.tick_ms, 99),
                 "plan_ms_p50": q(self.plan_ms, 50), "plan_ms_p99": q(self.plan_ms, 99),
+                "tv_ms_p50": q(self.tv_ms, 50), "tv_ms_p99": q(self.tv_ms, 99), "terminal": _tv_summary(self.tv_rows),
                 "ticks": len(self.tick_ms), "late_ticks": sum(1 for x in self.tick_ms if x > 16.7),
                 "unpredicted": self.unpredicted, "unpredicted_unknown": self.unpredicted_unknown,
                 "unpredicted_sources": self.unpred_sources, "follow_ups": self.follow_ups, "mh_ticks": self.mh_ticks, "hits_taken": self.hits_taken, "hit_log": self.hit_log,
+                "planned_safe": planned_safe(self.hit_log),
                 "forced_risk_ticks": len(self.forced_frames), "forced_streaks": self.forced_streaks,
                 "per_wave": {str(k): dict(v) for k, v in sorted(self.per_wave.items())},
                 "wave_check": dict(self.wave_chk), "wave_bad": self.wave_bad,
@@ -671,8 +883,9 @@ class ForumPlannerPolicy(PlannerPolicy):
                                  "resyncs": self.fc.waves.resyncs, "kills": self.fc.waves.kills},
                 "audit": audit, "targets": dict(self.targets), "binds": self.binds,
                 "cogfly": {"throws": self.cog["throws"], "n": len(self.cog["throws"])},
-                "weighted": self.weighted,
+                "weighted": self.weighted, "crest": self.crest, "crest_seen": self.crest_seen, "clash": self.clash,
                 "first_pending_f": self.first_pending_f, "first_pending_reasons": self.first_pending_reasons,
                 "outcome_reason": self.outcome_reason, "alerts": list(self.sc.alerts),
                 "q4_by_instance": {str(k): v for k, v in getattr(self.sc.sup, "unpredicted_by", {}).items()},
-                "real_quit": self.real_quit_stats(), "keys": keys}
+                "real_quit": self.real_quit_stats(), "keys": keys,
+                "l2": self.tac.stats_dict() if isinstance(self.tac, GauntletTactics) else None}
