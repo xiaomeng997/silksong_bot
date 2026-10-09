@@ -690,8 +690,11 @@ AIM_FILE = "aim_templates.npz"
 
 
 def aim_on() -> bool:
-    """SSBOT_FORUM_AIM (task "zone fix" item 1): the aim-conditioned committed templates (default off)."""
-    return os.environ.get("SSBOT_FORUM_AIM", "0") not in ("", "0")
+    """SSBOT_FORUM_AIM (task "zone fix" item 1): the aim-conditioned committed templates; default on since their
+    acceptance (forum.md §29.6: R2 held-out recall 100 % at L2-L4, the re-score's unsafe / false alarms / FORCED_RISK
+    down, misses not up); "0" turns them off. Without knowledge/.../forum/aim_templates.npz (git-ignored, built by
+    tools.forum_aim) nothing is loaded."""
+    return os.environ.get("SSBOT_FORUM_AIM", "1") not in ("", "0")
 
 
 def load_aim_templates(spec: ForumType, margins: dict, base: float = 0.0, path: Path | None = None):
