@@ -456,6 +456,43 @@ def seen_contacts_swept(box, inv, verts, starts, pbox, vel, tk, rows, grow, lag,
     return cnt, first
 
 
+@numba.njit(cache=True, parallel=True)
+def pin_contacts_kernel(cx, cy, inv, hx, hy, rel_k, rel_x, rel_y, aim_f, ca, sa, spawn, step, seg):
+    """ForumPlanner._pin_contacts' loop: per row (cx, cy, inv [n, T1]) the first frame a pin released at frame
+    rel_k[j] from (rel_x[j], rel_y[j]), aimed at the row's centre aim_f frames before (rotated by each (ca, sa)),
+    spawned `spawn` u out and flying `step` u a frame, its segment points `seg` along it, meets the box of half extents
+    hx, hy; T1: none."""
+    n, T1 = cx.shape
+    first = np.full(n, T1, np.int64)
+    for i in numba.prange(n):
+        for j in range(len(rel_k)):
+            kr = rel_k[j]
+            if kr >= T1 - 1:
+                continue
+            ka = max(kr - aim_f, 0)
+            ax0, ay0 = cx[i, ka] - rel_x[j], cy[i, ka] - rel_y[j]
+            nrm = max(math.hypot(ax0, ay0), 1e-6)
+            for q in range(len(ca)):
+                ux = (ax0 * ca[q] - ay0 * sa[q]) / nrm
+                uy = (ax0 * sa[q] + ay0 * ca[q]) / nrm
+                ox, oy = rel_x[j] + spawn * ux, rel_y[j] + spawn * uy
+                for k in range(kr, min(T1, first[i])):
+                    if inv[i, k]:
+                        continue
+                    d = step * (k - kr)
+                    hit = False
+                    for g in range(len(seg)):
+                        px = ox + ux * (d + seg[g])
+                        py = oy + uy * (d + seg[g])
+                        if abs(px - cx[i, k]) <= hx and abs(py - cy[i, k]) <= hy:
+                            hit = True
+                            break
+                    if hit:
+                        first[i] = k
+                        break
+    return first
+
+
 def committed_fine_share(f, box: np.ndarray, inv: np.ndarray, rows: np.ndarray, fr: np.ndarray,
                          tk: np.ndarray) -> np.ndarray:
     """[len(rows)] the share of the frames fr each row's nominal box centre spends in the committed fine placements
@@ -1305,6 +1342,19 @@ class ForumPlanner(Planner):
         hy = 0.5 * float(np.median(box[:, 0, 3] - box[:, 0, 1])) + PIN_SKIN
         first = np.full(len(rows), T1, np.int64)
         seg = np.array([-1.0, -0.5, 0.0, 0.5, 1.0]) * PIN_HALF_U
+        if len(rows) and pins and not getattr(self, "_pin_ref", False):
+            # (numba; the numpy loop below is the reference, _pin_ref: tests/test_three_layer.py)
+            rk, rx_, ry_ = [], [], []
+            for pos, vel, age, rel in pins:
+                for r in rel:
+                    rk.append(int(round(r / dt)))
+                    rx_.append(pos[0] + vel[0] * (age + r))
+                    ry_.append(pos[1] + vel[1] * (age + r))
+            first = pin_contacts_kernel(np.ascontiguousarray(cx), np.ascontiguousarray(cy), np.ascontiguousarray(inv),
+                                        hx, hy, np.array(rk, np.int64), np.array(rx_), np.array(ry_), PIN_AIM_F,
+                                        np.cos(np.array(PIN_SPREAD)), np.sin(np.array(PIN_SPREAD)), PIN_SPAWN_U,
+                                        PIN_SPEED * dt, seg)
+            return np.where(first < T1, first, -1)
         for pos, vel, age, rel in pins:
             for r in rel:
                 kr = int(round(r / dt))

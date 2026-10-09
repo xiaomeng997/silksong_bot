@@ -210,6 +210,8 @@ def test_aimed_pins_hit_the_row_that_stays_where_it_was_aimed_at(params, arena):
     the release is within the aim lag): a row standing at (20, 4) meets it about 0.3 s later, a row that has jumped
     5 u above by then does not (the 15 deg rays stay below it); a row on the far side is aimed at too."""
     from types import SimpleNamespace
+
+    from ssbot.knowledge.kinematics import F_INVULN
     # on with "+a", and with "+n" (forum.md §23.12: nothing else holds a throw whose wind-up has started)
     assert ForumConfig(react="escape+n+a").pin_aim and ForumConfig(react="escape+n").pin_aim
     assert ForumConfig(react="escape+g+a").pin_aim and not ForumConfig(react="escape+g").pin_aim
@@ -229,6 +231,19 @@ def test_aimed_pins_hit_the_row_that_stays_where_it_was_aimed_at(params, arena):
     assert first[0] >= 12 and first[0] < T1
     assert first[2] >= 12                     # aimed at it too (behind the Reed means toward +x here)
     assert first[1] == -1
+    # the numba kernel is the numpy loop (random rows around the Reed, a moving Reed, several releases)
+    rng = np.random.default_rng(370001)
+    n = 300
+    c = rng.uniform([18.0, 0.0], [42.0, 10.0], (n, 2))[:, None, :] + np.cumsum(rng.normal(0, 0.15, (n, T1, 2)), axis=1)
+    box = np.concatenate([c - [0.25, 1.04], c + [0.25, 1.04]], axis=2)
+    flags = np.where(rng.random((n, T1)) < 0.1, F_INVULN, 0).astype(np.int64)
+    r1 = SimpleNamespace(box=box, flags=flags)
+    pins = [((30.0, 4.0), (1.5, -0.5), 0.05, np.arange(3, 30, 2) * BIN), ((24.0, 8.0), (0.0, 0.0), 0.0,
+                                                                         np.array([0.5 * BIN]))]
+    fast = pl._pin_contacts(pins, r1, np.arange(n), tk, True)
+    pl._pin_ref = True
+    ref = pl._pin_contacts(pins, r1, np.arange(n), tk, True)
+    assert np.array_equal(fast, ref) and (ref >= 0).sum() > 20
 
 
 def test_state_margins_dilate_a_state_by_its_own_residual():
