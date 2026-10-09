@@ -300,3 +300,31 @@ def test_edge_spot_for_rush():
     assert why == ["edge"] and p.stance_x == pytest.approx(30.0 - 0.8 - 2.7)
     t.ta = frozenset()
     assert t._ta_rules(world(20.0), WinFc([s]), GoalPrefs(RUSH, 28.2, {}), g, s, 20.0)[1] == []
+
+
+# ---- the measurement tool (tools.forum_knockback) ----
+
+def test_forum_knockback_measures_the_whip_frame_and_a_push():
+    from ssbot.tools.forum_knockback import Acc, add_cache, summary
+    F = 20
+    rows = []                                                  # (fi, iid, tk, x, y, flip, st)
+    for fi in range(F):
+        rows.append((fi, 1, 0, 30.0, 4.0, 1, 0))               # a Choristor facing +x, whipping
+        x = 31.0 + (0.45 * min(fi - 5, 8) if fi > 5 else 0.0)  # a Reed pushed 0.45 u a frame after a hit on frame 5
+        rows.append((fi, 2, 1, x, 6.0, 0, 1))
+    a = np.array(rows, dtype=object)
+    c = {"types": ["Song Pilgrim 03", "Song Reed"], "states": ["Whip 1", "Alert"], "names": ["Whip Hit 1"],
+         "f": np.arange(100, 100 + F), "hx": np.full(F, 28.0), "hy": np.full(F, 4.0),
+         "e_fi": a[:, 0].astype(np.int64), "e_iid": a[:, 1].astype(np.int64), "e_tk": a[:, 2].astype(np.int64),
+         "e_x": a[:, 3].astype(float), "e_y": a[:, 4].astype(float), "e_flip": a[:, 5].astype(np.int8),
+         "e_st": a[:, 6].astype(np.int64), "e_vx": np.zeros(len(a)), "e_tin": np.full(len(a), 0.05),
+         "c_ei": np.array([0]), "c_name": np.array([0]), "c_box": np.array([[30.5, 3.0, 35.7, 4.1]]),
+         "events": [(105, "hit", {"ent": 2, "src": "Slash"})]}
+    acc = Acc()
+    add_cache(acc, c)
+    out = summary(acc, min_n=1)
+    w = out["whip"]["Whip Hit 1"]
+    assert w["x0"]["50"] == pytest.approx(0.5) and w["x1"]["50"] == pytest.approx(5.7)
+    kb = out["kb"]["Song Reed|side|Alert|hit"]
+    assert kb["dx_p50"][0] == pytest.approx(0.9) and kb["dx_p50"][4] == pytest.approx(3.6)
+    assert kb["dy_p50"][4] == pytest.approx(0.0)
