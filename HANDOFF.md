@@ -3289,33 +3289,82 @@ Main 70f8324 + `forum-integration-1008` (6dce435) merged first. Facts: forum.md 
 
 ## Task forum push 2 track B (support / candidates / locks; branch worktree-wf_c8fb34ca-073-3, 2026-10-08 evening)
 
-Base: main fa43977 + worktree-wf_c8fb34ca-073-1 (0cac216) merged first. Facts: forum.md §26 (Chinese).
+Base: main fa43977 + worktree-wf_c8fb34ca-073-1 (0cac216) merged first. Facts: forum.md §26 (Chinese; track A may also
+have used 26: renumber at the merge). No oracle change.
 
 ### Done (committed)
 
-- Hit source attribution (b2d44cc, oracle backend; no switch: only the Forum policy reads `source_id`): a damage
-  event's source is the instance the path's GameObject name names ("Song Pilgrim 03 (2)/Spin Hit" resolved to no type
-  before), else the owner of the path's collider nearest the hero box, else the nearest body as before.
-- Switches (all off by default; the react tokens go in `SSBOT_FORUM_REACT` / `ForumConfig.react`):
-  - `+b` / `+br` (with `+n`; `ReactConfig.bodyreach`): the body-only families not started (evades, the Clawmaiden's
-    teleport, the Tiny's ram / orbit, the Maestro's defend / summon, the Envoy's ambush; `body_only_families()` from
-    strikes.json) out of the support when the enemy's collider tube (its body seen last, grown at the type's top speed
-    over 5 frames) is placed; the escape check takes them as threats (no wind-up). `+b` keeps the Reed's
-    (`BODYREACH_KEEP`: its body was 31 of the 32 misses), `+br` drops those too.
-  - `+k` (escape): dash / sprint entries are lock-ins of the escape check; the Bind macro is refused while an attack
-    the escape check holds may start and reach the hero in the Bind's lock (`ForumPlanner._bind_threatened`; audit
-    `bind_threat`; with `+n` only: the hole was `+n` taking the not-started attacks out of the support the Bind check
-    reads).
-  - `+s`: FORCED_RISK's seen key tests a polygon >= 15 u/s a frame early and late (`seen_contacts_swept`), and a row
-    meeting an aimed pin (not thrown yet) counts as a seen contact.
+- Hit source attribution (b2d44cc, `OracleBackend._resolve_source`; no switch: only the Forum policy reads
+  `source_id`, Bell Beast decisions unchanged): the instance the path's GameObject name names (`Song Pilgrim 03 (2)/...`
+  resolved to no type before), else the owner of the path's collider nearest the hero box, else the nearest body as
+  before. Replayed on round-5 recordings: whip hits 13 / 13 to the Choristor in `Whip Multihit` (old 8 / 13), slashes
+  22 / 22 (old 12 / 22), spins 36 / 36 (old 34 / 36).
+- Switches, all off by default (react tokens in `SSBOT_FORUM_REACT` / `ForumConfig.react`; record them in the A/B):
+  - `+b` (with `+n`; `ReactConfig.bodyreach`): an idle enemy's (idle body tube placed) body-only families not started
+    (strikes.json families without an own attack collider: evades, CM_TELE, the Tiny's, MA_DEFEND / SUMMON, EN_AMBUSH;
+    `multi_forecast.body_only_families()`) out of the support when its collider tube is placed (its body seen last,
+    grown at the type's top speed over 5 frames: their reaction-window reach); the escape check takes them as threats
+    (no wind-up). The Reed's are kept (`BODYREACH_KEEP`). `+br`: the Reed's too (not recommended, below).
+  - `+k` (escape): dash / sprint entries are escape-check lock-ins; with `+n` the Bind macro is refused while an
+    escape-check threat may start and reach the hero in the Bind's lock (`ForumPlanner._bind_threatened`, audit
+    `bind_threat`): the Bind hole was `+n` taking the not-started attacks out of the support the Bind check reads.
+  - `+s`: FORCED_RISK's seen key tests polygons >= 15 u/s a frame early and late (`seen_contacts_swept`) and counts a
+    row meeting an aimed pin (not thrown yet) as a seen contact (the aimed pins had no effect in FORCED_RISK, where 39 /
+    41 round-5 pin hits came; the picks grazed the extrapolated pin tip).
   - `SSBOT_FORUM_WAITS=1` (`ForumConfig.waits`): timing rows, WAIT then a jump / dash either way after 3 / 6 / 9 / 12
-    frames, and the attack first pieces then one press at the Reed's (cont. frame 26) / Minister's (30) counter (the
-    person's timed clash rows for track A); +32 rows ground / air, +24 wall (ground with clash 507).
-- Tools: `forum_human_score --variants rb,rbr` (false / true alarms removed on the person's rows, misses, the escape
-  check's veto under each variant), `forum_layer_audit --variants rb,rbr`, `scripts/forum_human_rescore.cmd best|default
-  <name> ["<variants>"]` (+ `SSBOT_RESCORE_REACT` to replace the arm's react string).
+    frames; attack first pieces then one press at the Reed's counter (continuation frame 26) / the Minister's lunge
+    (30), N or U, for track A's rules (`candidates.TIMED_PRESS`); +32 rows ground / air, +24 wall (ground with clash 507).
+- `pin_contacts_kernel` (numba, equal to the numpy loop, tested): the aimed-pin check fast enough for a whole
+  FORCED_RISK set; both new kernels in `warm_kernels` (a first call mid-fight compiled 1.5-1.8 s in the smoke).
+- Tools: `forum_human_score --variants rb,rbr` (false / true alarms removed on the person's rows, misses with and
+  without the escape veto, the escape check under each variant); `forum_layer_audit --variants rb,rbr`; `multi_recall
+  --only <fight id part>`; `scripts/forum_human_rescore.cmd best|default <name> ["<variants>"]` (+ `SSBOT_RESCORE_REACT`).
+
+### Measured (forum.md 26.5-26.10)
+
+- Person's wins (`C:\ssbot\data\m2_forum_hs\b_v2_summary.json`, react_variants; 37,147 matched rows): `+b` removes 721
+  false alarms (2.5 %; wins 3.6 %) and 3 true alarms; misses 32 -> 35 by the support, 30 -> 32 with the escape veto
+  (the 2 new ones Reed body in wave 0); rows safe and passing the escape check +14 %. `+br`: 1,898 FA (6.6 %), 17 TA,
+  misses 30 -> 44 with the veto (Reed 16): rejected.
+- R2 held-out recall `escape+n+g+br` + state margins: 375,940 / 375,940 at L2 / L3 / L4, hooks 1,802 / 1,802
+  (`C:\ssbot\data\m2_forum_tb\recall_fresh_ngSbr_12d9d58.json`; `+b` keeps more, so 100 % too). The first version
+  (`+b` on committed enemies too) missed 8 Clapper Idle contacts after Slam Recover: fixed (idle only, 12d9d58).
+- Bot recordings (`C:\ssbot\data\m2_forum_tb\layers\`, round-5 fix arm, 15 episodes, 2.83 M rows open loop): `+b`
+  frees 18,589 rows, 99.4 % clear in hindsight (base clear rows 95.2 %): FA -1.1 %, TA -0.02 %; `+br` FA -5.6 %, TA -0.56 %.
+- Pins (open-loop replay of the 41 round-5 pin hits, `C:\ssbot\data\m2_forum_tb\pins\`): the replay's own pick clear
+  in hindsight 9-18 frames before 94 -> 104 / 164, 4-6 frames 32 -> 33 / 82; paired 16 vs 5 (p ~ 0.03).
+- Bind: round 5, 6 of 50 Bind commits took a hit inside the Bind (67-87 frames on, attacks started in the Bind by
+  enemies 6-8 u off) - what `+k`'s `_bind_threatened` checks.
+- Timing rows: the person's wins re-scored with `SSBOT_FORUM_WAITS=1` (`C:\ssbot\data\m2_forum_hs\w_v1_summary.json`):
+  outside the candidate set 28.6 -> 27.0 %, matched ticks +878, verdicts and misses unchanged (0.60 %).
+- Smokes (instance 1, 10 each, very heavy machine load): all switches on b1a7f41: QUIT 8 / HARNESS_FAIL 2 (brain-lost
+  watchdog), control (same checkout, switches off) 9 / 1; earlier builds 4 and 6 failures (fixed: numpy pins in
+  FORCED_RISK, unwarmed kernels, strikes.json read every forecast). Support-outside hits 0, 0 WOULD_DIE.
+- Tests: full suite at ae48a1e 1285 passed, 2 skipped, 1 xfailed; later commits ran their test files (three_layer,
+  forum_planner, oracle_backend, forum_human_score).
 
 ### Running
 
-- (filled in below)
+- Nothing of this task after it returns (rescores, recall, layer audit, pin replay, smokes all ended; locks released).
 
+### Needs deploy
+
+- Nothing (no oracle change).
+
+### Next / open issues
+
+1. A/B (merge step, normal load): recommended arm `escape+n+g+b+k+s` + `SSBOT_FORUM_WAITS=1` against `escape+n+g`;
+   single-switch arms if it moves: `+s` (pin hits, a source count test), `+k` (`bind_threat`, Bind count, lock hits),
+   `+b`. Not `+br`.
+2. Under heavy load the escape check was cut on 91-99 % of ticks (control too); `+k` adds check points and raises the
+   per-batch cost: watch `esc_cut` / `esc_unchecked` in the A/B.
+3. Smoke 4: one 3.1 s planner tick at the first episode's second tick, not reproduced by `forum_policy_replay`; a lazy
+   first call not covered by the warm-up is the likely cause; watch `tick_ms_p99` / HARNESS_FAIL in the A/B.
+4. `+b` removes few false alarms (2.5 %): the Reed's evade (32 % of them) stays because its removal adds Reed-body
+   misses; the Reed body misses themselves (31 of 32) need the Reed's own layers re-anchored (plan sec. 5 item 2).
+5. Timed clash rows are candidates only: the hit branch must place the guard's counter at its time (Parry Block 0.583
+   s / Block 0.516 s) for them to score; that is track A's rules' side.
+6. `+k`'s Bind check is conservative (every escape threat within 9 u + its reach): it may stop most in-fight Binds
+   (the person heals across the room); count Binds per minute in the A/B.
+7. Frozen checkouts made here (can go after review): `C:\ssbot\hs_e5bef6e`, `hs_c114f88`, `hs_91c01cb`, `hs_tb2`,
+   `hs_tb3`, `hs_tb4`.
