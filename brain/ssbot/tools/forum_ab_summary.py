@@ -123,14 +123,44 @@ def attach_landed(eps: dict, out_dir: str) -> int:
     return n
 
 
+# waves that overlap (BattleScene starts the next at remainingEnemyToEnd: WaveSim adds its enemies to currentEnemies),
+# counted as one group: cleared when the wave after the group starts (review of forum push 2: index 2 "cleared" 1.5 s
+# before index 3 started was every hitless wave of round b)
+WAVE_GROUPS = ((2, 3), (4, 5), (9, 10))
+
+
+def wave_group(w: int) -> int:
+    return next((g[0] for g in WAVE_GROUPS if w in g), w)
+
+
+def wave_of_path(path) -> int | None:
+    """The wave index a hit's source path names ("Wave 3/Song Reed (1)" -> 2), None for a hazard / unnamed source."""
+    from ssbot.core.forum import FORUM_WAVES
+    head = str(path or "").split("/", 1)[0]
+    return next((w.index for w in FORUM_WAVES if w.name == head), None)
+
+
 def waves_cleared(r: dict) -> tuple[list, list]:
-    """The waves an episode cleared (the next wave started, or the whole battle CLEAR) and those of them with no hit
-    (the policy's per-wave hit counts)."""
+    """The wave groups an episode cleared (the wave after the group started, or the battle CLEAR) and those of them
+    no enemy of the group hit the hero in (a hit's wave from its source path; a hazard's, the group active at the
+    hit frame)."""
     g = r.get("gauntlet") or {}
     reached = int(g.get("wave_reached") or 0)
-    cleared = list(range(reached + (1 if r.get("outcome") == "CLEAR" else 0)))
-    pw = (r.get("policy") or {}).get("per_wave") or {}
-    return cleared, [w for w in cleared if int((pw.get(str(w)) or {}).get("hits") or 0) == 0]
+    clear = r.get("outcome") == "CLEAR"
+    groups = sorted({wave_group(w) for w in range(reached + 1)})
+    last = {gid: max(w for w in range(16) if wave_group(w) == gid) for gid in groups}
+    cleared = [gid for gid in groups if last[gid] < reached or clear]
+    starts = sorted((int(w.get("wave") or 0), int(w.get("f") or 0)) for w in g.get("waves") or ())
+    hit = Counter()
+    for h in (r.get("policy") or {}).get("hit_log") or ():
+        if h.get("kind") != "damage":
+            continue
+        w = wave_of_path(h.get("path"))
+        if w is None:
+            f = int(h.get("f") or 0)
+            w = max((wv for wv, f0 in starts if f0 <= f), default=0)
+        hit[wave_group(w)] += 1
+    return cleared, [gid for gid in cleared if hit[gid] == 0]
 
 
 def masks(r: dict) -> float:
@@ -143,7 +173,9 @@ def eff(r: dict) -> float:
 
 
 def row(name: str, rs: list) -> dict:
-    rs = [r for r in rs if r.get("outcome") != "HARNESS_FAIL"]
+    # HARNESS_FAIL episodes kept (review of forum push 2: dropping them biased the survival means down, most for R):
+    # their time alive is a lower bound (the watchdog ended them), their play counts in every rate
+    hf = [r for r in rs if r.get("outcome") == "HARNESS_FAIL"]
     t = np.array([float(r.get("ingame_s") or 0.0) for r in rs])
     hits = np.array([float(r.get("hits") or 0) for r in rs])
     g = [r.get("gauntlet") or {} for r in rs]
@@ -177,6 +209,8 @@ def row(name: str, rs: list) -> dict:
            "carried": int(au["esc_carried"]), "forced_ticks": int(au["esc_forced_ticks"]),
            "forced_pass": int(au["esc_forced_pass"])}
     return {"arm": name, "n": len(rs), "outcomes": dict(Counter(r.get("outcome") for r in rs)),
+            "harness_fail": [[r["_key"][0], r["_key"][1], r["_key"][2], round(float(r.get("ingame_s") or 0), 1),
+                              r.get("reason")] for r in hf],
             "wave_reached": dict(sorted(wave.items())), "wave0_cleared": sum(v for k, v in wave.items() if k >= 1),
             "t_med": round(float(np.median(t)), 2) if len(t) else None,
             "t_mean": round(float(t.mean()), 2) if len(t) else None, "minutes": round(mins, 1),
@@ -201,8 +235,8 @@ def row(name: str, rs: list) -> dict:
 
 
 def paired(eps: dict, a: str, b: str, boot: int) -> dict | None:
-    ka = {r["_key"]: r for r in eps[a] if r.get("outcome") != "HARNESS_FAIL"}
-    kb = {r["_key"]: r for r in eps[b] if r.get("outcome") != "HARNESS_FAIL"}
+    ka = {r["_key"]: r for r in eps[a]}             # HARNESS_FAIL kept (row())
+    kb = {r["_key"]: r for r in eps[b]}
     common = sorted(set(ka) & set(kb))
     if not common:
         return None

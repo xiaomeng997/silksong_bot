@@ -357,3 +357,49 @@ def test_forum_knockback_measures_the_whip_frame_and_a_push():
     kb = out["kb"]["Song Reed|side|Alert|hit"]
     assert kb["dx_p50"][0] == pytest.approx(0.9) and kb["dx_p50"][4] == pytest.approx(3.6)
     assert kb["dy_p50"][4] == pytest.approx(0.0)
+
+
+def test_ab_summary_groups_overlapping_waves_and_keeps_harness_fails():
+    from ssbot.tools import forum_ab_summary as ab
+    r = {"outcome": "QUIT", "gauntlet": {"wave_reached": 3, "waves": [{"wave": 0, "f": 0}, {"wave": 1, "f": 100},
+                                                                          {"wave": 2, "f": 200}, {"wave": 3, "f": 290}]},
+         "policy": {"hit_log": [{"kind": "damage", "f": 150, "path": "Wave 2/Song Pilgrim 03"},
+                                {"kind": "damage", "f": 295, "path": "Song Reed Pin Projectile"}]}}
+    cleared, hitless = ab.waves_cleared(r)
+    # index 2 is not cleared when index 3 starts (they overlap: one group, cleared when index 4 starts)
+    assert cleared == [0, 1] and hitless == [0]
+    assert ab.wave_of_path("Wave 13 - Maestro/Song Reed") == 12 and ab.wave_of_path("Song Reed/Stab Hit 1") is None
+    hf = dict(r, outcome="HARNESS_FAIL", ingame_s=80.0, _key=(3, 371600, 3), reason="paused unasked", _dec=[])
+    ok = dict(r, ingame_s=40.0, _key=(3, 371600, 4), _dec=[])
+    row = ab.row("R", [hf, ok])
+    assert row["n"] == 2 and row["outcomes"]["HARNESS_FAIL"] == 1 and row["harness_fail"][0][3] == 80.0
+    assert row["t_mean"] == 60.0
+
+
+def test_tracker_aims_an_instance_at_its_aim_state():
+    from types import SimpleNamespace
+
+    from ssbot.combat import enemy_tracker as et
+    from ssbot.core.worldstate import ORACLE
+    sp = SimpleNamespace(type_key="Song Reed", idle_family="RE_IDLE", waiting=("Fly In Ready",), death_states=(),
+                         control_fsm="Control", hp=50.0)
+    tb = SimpleNamespace(spec=sp, attack_starts={"Stab Pos": "RE_STAB", "Alert": "RE_IDLE"},
+                         decision_states={"Alert"})
+    old = dict(et.AIM_STATES)
+    et.AIM_STATES[("Song Reed", "RE_STAB")] = "Stab Antic"
+    try:
+        tr = et.EnemyTracker(tb, ORACLE, 7)
+        tr.hidden, tr.pos, tr.seen_T, tr.flip = False, (30.0, 9.0), 1.0, 1
+        tr.enter("Stab Pos", 1.0)
+        assert tr.cur.family == "RE_STAB" and tr.cur.aim_state is None
+        tr.pos, tr.seen_T = (33.0, 10.0), 1.4
+        tr.enter("Stab Antic", 1.4)
+        assert tr.cur.aim_state == "Stab Antic" and tr.cur.aim_t == 1.4 and tr.cur.aim_anchor == (33.0, 10.0)
+        assert tr.cur.aim_mirror == et.FACES_LEFT[1] and tr.cur.anchor == (30.0, 9.0)
+        tr.enter("Stab 1", 1.7)                       # later states keep the aim
+        assert tr.cur.aim_t == 1.4
+        tr.rendered, tr.in_play, tr.state = False, False, "Fly In Ready"
+        assert tr.parked
+    finally:
+        et.AIM_STATES.clear()
+        et.AIM_STATES.update(old)

@@ -290,15 +290,22 @@ def analyse_episode(job: dict) -> dict:
     gl = row.get("gauntlet") or {}
     dt = 1.0 / 60.0
     # ---- episode numbers ----
+    from ssbot.tools.forum_demo import HERO_ATTACKS, killer
     landed, kills, clashes, landed_f = 0, 0, 0, []
-    by_target = Counter()
+    by_target, team = Counter(), Counter()
     for x in fr:
         for k, d in x["ev"]:
             if k == "hit":
-                landed += 1
-                landed_f.append((x["f"], d.get("ent"), d.get("type_key")))
-                by_target[str(d.get("type_key"))] += 1
                 kills += bool(d.get("dead"))
+                # hits landed = the hero's own (forum_demo.HERO_ATTACKS, dealt > 0: hit events carry no "blocked");
+                # Garmond's / the Cogfly's are team output, apart (plan commit 0322fcf, review of forum push 2)
+                dealt = d.get("dealt", d.get("amount"))
+                if d.get("src") in HERO_ATTACKS and (dealt is None or float(dealt) > 0):
+                    landed += 1
+                    landed_f.append((x["f"], d.get("ent"), d.get("type_key")))
+                    by_target[str(d.get("type_key"))] += 1
+                else:
+                    team[killer(d.get("src"))] += 1
             elif k == "freeze" and "NailClash" in str(d.get("type")):
                 clashes += 1
     presses = 0
@@ -316,7 +323,8 @@ def analyse_episode(job: dict) -> dict:
           "env": row.get("env"), "outcome": row.get("outcome"), "reason": row.get("reason"),
           "t": float(row.get("ingame_s") or 0.0), "masks": int(row.get("hp_lost") or 0),
           "hits": int(row.get("hits") or 0), "chains": sum(1 for h in hl if h.get("kind") == "tick"),
-          "landed": landed, "landed_by": dict(by_target), "kills": int((gl.get("kills") or {}).get("n") or 0),
+          "landed": landed, "landed_by": dict(by_target), "team_hits": dict(team),
+          "kills": int((gl.get("kills") or {}).get("n") or 0),
           "kills_ev": kills, "wave": int(gl.get("wave_reached") or 0), "ticks": int(pol.get("ticks") or 0),
           "forced": int(pol.get("forced_risk_ticks") or 0), "late": int(pol.get("late_ticks") or 0),
           "modes": modes, "presses": presses, "clashes": clashes,

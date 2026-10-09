@@ -108,3 +108,41 @@ def test_view_modes():
         v.cycle()
         seen.append(v.mode)
     assert seen[-1] == "yellow+red" and "support" in seen and v.show("yellow")
+
+
+def test_erode_back_open_walls_and_a_solid_ceiling():
+    K, ny, nx = 3, 8, 30
+    D = _block(K, ny, nx, K, 0, 8, 0, 6)              # the wall test's block, walls open: it erodes at the wall too
+    walled = zo.erode_back(D, ax=1, up=1, dn=1, lat=1)
+    open_ = zo.erode_back(D, ax=1, up=1, dn=1, lat=1, walls=False)
+    assert walled[1, 0, 0] and not open_[1, 0, 0]
+    # a ceiling (rows 4.. solid): a block over rows 0..3 at the last frame, no escape upward
+    D2 = _block(K, ny, nx, K, 0, 4, 10, 20)
+    sky = np.zeros((ny, nx), bool)
+    sky[4:] = True
+    free = zo.erode_back(D2, ax=1, up=1, dn=1, lat=1)
+    capped = zo.erode_back(D2, ax=1, up=1, dn=1, lat=1, solid=sky)
+    assert capped[1, 0].sum() >= free[1, 0].sum() and capped[1, 3].sum() > free[1, 3].sum()
+
+
+def test_parked_entities_and_their_colliders():
+    box = [0, 0, 1, 0, 1, 1, 0, 1]
+    col = {"name": "c", "verts_world": box, "enabled": True, "damage": {"dealt": 1, "parry": 4}}
+    parked = {"iid": 5, "type_key": "Song Reed", "fsms": [{"name": "Control", "state": "Fly In Ready"}],
+              "render_aabb": None, "cols": [col]}
+    shown = dict(parked, iid=6, render_aabb=[0, 0, 1, 1])
+    assert zo.parked(parked) and not zo.parked(shown)
+    out = zo.damage_colliders({"ents": [parked, shown]})
+    assert len(out) == 1 and out[0][4] == 6
+
+
+def test_screen_share_of_the_grid_and_the_dome():
+    from ssbot.core.forum import dome_y
+    from ssbot.tools.zone_share import screen_share
+    g = zo.Grid()
+    sh = screen_share({"all": np.ones(g.shape, bool), "none": np.zeros(g.shape, bool), "arena": g.inside}, g, CAM)
+    assert sh["none"] == 0.0 and 0.3 < sh["all"] <= 1.0
+    assert sh["arena"] < sh["all"]                    # the sky above the dome is not part of the arena
+    j = int(np.argmin(np.abs(g.xs - 31.5)))           # under the dome's top the whole column is inside
+    assert g.inside[:, j].all() and not g.inside[-1, 0]
+    assert g.ys[g.inside[:, 0]].max() <= dome_y(float(g.xs[0])) - 1.0
