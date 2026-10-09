@@ -2818,7 +2818,23 @@ set SSBOT_FORUM_WAITS=1& ..\scripts\forum_human_rescore.cmd best w_v1 g0
 - Bell Beast 逐 tick 相同（高庭开关全关）：冻结基线 0cac216 对冻结合并 c54d210，`20261003_144536_BellBeast` i4_000 的 3,000 帧，oracle 视图 3,001 / 3,001 个 tick 相同（84 个 FORCED_RISK），视觉等效视图 3,001 / 3,001（1,023 个）。
 - `tools/forum_ab_summary` 加了：每分钟掉的格数、无伤波数（打完的波里没挨打的：下一波开始了或整场 CLEAR，按策略的每波受击数）、`--landed`（用 `forum_remaining_hits collect` 的每场文件算砍中数和等效失血 = 掉的格数 − 砍中数 / 4）以及它们的配对差。
 
-### 28.2 离线重打分（你赢的 8 场 + 第 0 波 24 次；进行中，见下面的更新）
+### 28.2 离线重打分（你赢的 8 场 + 第 0 波 24 次；冻结合并 c54d210，`forum_human_rescore.cmd best`，32 段 0 错误；输出 `C:\ssbot\data\m2_forum_hs\fp2_{base,A,B,AB}[_summary.json]`）
+
+base = 第 5 轮推荐配置（所有新开关关）；+A = `SSBOT_FORUM_TA=all`；+B = `SSBOT_RESCORE_REACT=escape+n+g+b+k+s` + `SSBOT_FORUM_WAITS=1`。base 和 §25.11 的 best_v2 每个数都相同（开关全关 = 合并前）。
+
+| 全部 32 段（第 0 波 24 段） | base | +A | +B | +A+B |
+|---|---|---|---|---|
+| FORCED_RISK 占比 | 82.1 %（78.6 %） | 82.1 %（78.5 %） | 79.6 %（78.3 %） | 79.6 %（78.2 %） |
+| 有匹配行（按下次数也对上） | 71.4 % | 71.4 % | 73.0 % | 73.0 % |
+| 你的动作被判不安全（匹配行） | 86.6 % | 86.6 % | 85.4 % | 85.4 % |
+| 其中事后没碰（误报） | 88.8 % | 88.8 % | 88.5 % | 88.5 % |
+| 漏报（判安全却被碰，占判安全；次数） | 0.60 %（32） | 0.60 %（32） | 0.54 %（32） | 0.54 %（32） |
+| 你的行被否决的 tick | 4.1 % | 2.9 % | 4.1 % | 2.9 % |
+| 候选集外 | 28.6 % | 28.6 % | 27.0 % | 27.0 % |
+
+- +A 只动了否决（`free`：h ≥ 2 时不再收刀），危险区的判定一点没变（和 §26.6 一样：A 的记号作用在 J、L2 和受击分支上，不在第一段接触上）。
+- +B：FORCED_RISK 降 2.5 个点，几乎全在赢的那 8 场的后面几波（84.4 → 80.4 %；第 0 波 78.6 → 78.3 %）；定时行把候选集外降 1.6 个点；误报只降 0.3 个点、漏报次数不变（比例降是因为判安全的行多了）。
+- 结论：离线看两轨都没有让安全口径变差（漏报 32 次不变），B 小幅变好，A 中性；**实战里 N 变差来自行为（站位、选目标、J 的取舍），不是危险区的判定**，和 A 轨冒烟后的逐记号开环比较（§26.7：`edge` 改动 20 % 的决策、FORCED_RISK 不变）一致。
 
 ### 28.3 实战 A/B（一轮，三臂轮转；第一部分 = 你 22:18 的 DEMO_SOON 之前）
 
@@ -2854,3 +2870,26 @@ Forum_W（漫游）、eval、planner、oracle、真退出 0.2；实例 0–4 各
 - **R1 对 R（第 2 轮的改动是不是少了砍中）**：R1 每分钟砍中 21.3 对 19.2、击杀 1.25 对 0.84（配对 +0.44，区间刚含 0）、等效失血 2.75 对 3.42，受击和存活差不多：方向和 §24 的同轮双重差分一致（第 2 轮的改动少了砍中和击杀），96 场对 87 对还不显著。
 - 受击来源（前几名，次数）：N：Envoy 冲刺 `P2 Damager` 67、Reed 本体 58、Reed 针 38、Choristor 旋转 37、Choristor 连斩 1 段 29、Envoy 本体 29、鞭 4 段 22、Envoy 跳斩 22；R：Envoy 冲刺 64、Reed 本体 54、Choristor 旋转 44、Reed 针 39、Choristor 本体 32、鞭 4 段 27；R1：Envoy 冲刺 74、Choristor 旋转 38、Reed 针 38、Reed 本体 38、连斩 1 段 26、鞭 4 段 26。N 的针受击没有少（38 对 39：`+s` 在重负载下没显出来），Choristor 本体少了（`edge` / `whip` 让它离 Choristor 远），连斩和 Envoy 本体多了。
 - 计划安全的受击（受击前 30 帧内选过 S = 0 的计划）：N 3 / 436、R 1 / 488、R1 6 / 526；逃逸检查失败率 0.36 / 0.41 / 0.36；N 的逃逸否决 35,193 个 tick（R 60,199）。
+
+### 28.4 结论和下一步
+
+1. **N（两轨全开）不能当默认。** 实战每个主指标都比 R 差，离线安全口径没变差：问题在 A 轨改行为的记号。下一轮按记号拆，每臂只开一个、和 R 同轮 ABBA：`edge`（嫌疑最大：RUSH 站到 Envoy 横斩 3–5 u 的带里，§24.4）、`whip`（Choristor 击杀从 33 掉到 10）、`free`、`eml` / `under` / `guard` / `kb`；B 轨的 `+b+k+s` + 定时行单独一臂（离线小幅变好）。
+2. **R1 对 R**：第 2 轮的改动（抛掷替换、按状态余量、钟当目标、去掉光锥）可能少了砍中和击杀（R1 多 2 刀 / 分、多 0.44 杀 / 场，区间刚含 0），受击没差。凑满每臂 200 场再下结论。
+3. **负载**：这一轮迟到 tick 是第 5 轮的 4–5 倍；以后实战 A/B 前先看机器上有没有别的离线任务，迟到 > 0.2 时轮内比较也要报迟到率，N 这种算得多的臂会被额外拖累。
+4. 第二部分没跑（DEMO_SOON 一直在）：同一驱动、同一清单接着跑即可（种子换成 372000 起，见 28.5），再用 `forum_ab_summary` 合起来算。
+
+### 28.5 复现
+
+```
+# 冻结检出（git archive + CODE_REV + 高庭碰撞盒 npz）
+powershell -File C:\ssbot\sandbox\fp2_freeze.ps1 -rev 0cac216      # R
+powershell -File C:\ssbot\sandbox\fp2_freeze.ps1 -rev c54d210      # N（R1 用已有的 C:\ssbot\live_w0d_016417b）
+# 实战（每个实例一个驱动；第二部分：-Seed 372000 -Blocks 4，同一个 -Tag b）
+powershell -File C:\ssbot\sandbox\fp2_live.ps1 -Inst <0-4> -Tag b -Arms "R:seen_cf:escape+n+g:main:kill:state:live_fp2_0cac216::0,N:seen_cf:escape+n+g+b+k+s:main:kill:state:live_fp2_c54d210:all:1,R1:seen_cf:escape+n+g+l:main:kill::live_w0d_016417b::0"
+# 砍中数（每场一个文件）和汇总
+..\scripts\uv.cmd run python -m ssbot.tools.forum_remaining_hits collect --manifest b=C:/ssbot/sandbox/fp2_manifest_b.txt --out C:/ssbot/data/m2_forum_fp2/rh --workers 2
+..\scripts\uv.cmd run python -m ssbot.tools.forum_ab_summary C:\ssbot\sandbox\fp2_manifest_b.txt --landed C:/ssbot/data/m2_forum_fp2/rh --json C:\ssbot\data\m2_forum_fp2\ab_part1.json
+# 离线重打分（C:\ssbot\sandbox\fp2_rescore.ps1：两个一组，在冻结合并里）
+set SSBOT_FORUM_TA=all& set SSBOT_RESCORE_REACT=escape+n+g+b+k+s& set SSBOT_FORUM_WAITS=1& scripts\forum_human_rescore.cmd best fp2_AB
+```
+Bell Beast 逐 tick：会话临时目录的 `bb_ticks.cmd` / `bb_ticks_ve.cmd <检出> <输出>`（集成那一步的脚本）。
