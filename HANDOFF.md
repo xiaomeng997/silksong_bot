@@ -3487,7 +3487,7 @@ A), -073-3 (6a556db, track B).
 - `tools/forum_ab_summary`: masks a minute, hitless waves (a cleared wave with no hit, the policy's per-wave hits),
   `--landed <forum_remaining_hits collect dir>` (hits landed / effective mask loss a minute), their paired differences.
 
-### Live A/B (one round; WIP)
+### Live A/B (one round; part 1 done, part 2 pending)
 
 - Driver `C:\ssbot\sandbox\fp2_live.ps1` (as w0d_live2 + the TA / WAITS env per arm; arms name their checkout), freeze
   `C:\ssbot\sandbox\fp2_freeze.ps1`. Tag b, manifest `C:\ssbot\sandbox\fp2_manifest_b.txt`, log
