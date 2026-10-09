@@ -392,11 +392,11 @@ class GauntletTactics:
         None, "") when it is not guarding. Minister in Parry Stance / Parry Block (no turning, no damage in the stance,
         Parry Block 0.583 s is hittable, the counter is one forward lunge, ParrySlash Hit 1-4 its segments): by its
         height (guard_low_y / guard_mid_y / guard_reach_y) and whether another enemy is within iso_u (grouped: trigger
-        it to split the group; alone: wait). Side / wall slashes never (its counter lunges level). Low: no up slash
-        (its body reaches the hero), a down slash from above when grouped; wait in reach (the edge spot). Mid: one up
-        slash in the stance when grouped (and a down slash), none in Parry Block (the swing is kept for the clash on
-        the lunge); under it. High: up slashes when grouped and in Parry Block (its counter passes above); under it.
-        Out of reach: wait. Reed in Defend / Block (Defend 1.0 s, Block 0.516 s, its counter aims at the hero's
+        it to split the group; alone: wait, or the down slash / harpoon trigger). Side / wall slashes never (its
+        counter lunges level). Low: no up slash (its body reaches the hero), the down slash from above (grouped or
+        alone); wait in reach (the edge spot). Mid: one up slash in the stance when grouped, the down slash, none in
+        Parry Block (the swing is kept for the clash on the lunge); under it. High: up slashes when grouped and in
+        Parry Block (its counter passes above); under it. Out of reach: wait. Reed in Defend / Block (Defend 1.0 s, Block 0.516 s, its counter aims at the hero's
         height): never trigger it from anywhere; wait in reach (the edge spot) for Defend to end, or clash its counter
         (the planner's clash branch)."""
         r = self.rules
@@ -412,8 +412,8 @@ class GauntletTactics:
                 up = w_pos
             elif band == "mid":
                 up = 0.0 if block else (w_pos if grouped else neg)
-            if grouped and band in ("low", "mid") and not block:
-                down = w_pos
+            if band in ("low", "mid") and not block:
+                down = w_pos                  # from above (a full jump's down slash reaches 4.3 u): its lunge is level
             stance = self._edge_spot(fc, m, hx) if band == "low" else self._clamp(float(m.pos[0]))
             return (neg, up, neg, down), stance, f"guard {band} {'grouped' if grouped else 'alone'}"
         if m.type_key == REED and m.state in REED_GUARD:
@@ -444,7 +444,7 @@ class GauntletTactics:
                 if tgt and g.name != KITE:
                     stance = st
                 why.append(lab)
-        if "whip" in ta:
+        if "whip" in ta and g.name != PUNISH:          # a PUNISH spot is clear of the support (the whip's included)
             x0, x1 = self.pb.arena_x
             for _, lo, hi, x, face in self._whip_zones(ws, fc):
                 if lo <= stance <= hi:

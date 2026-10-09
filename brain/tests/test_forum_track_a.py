@@ -256,9 +256,9 @@ def test_guard_bands_for_a_minister():
         w_a, _, lab_a = t._guard_rule(m, [m], 3.0, 20.0, WinFc([m]))
         assert band in lab_g and "grouped" in lab_g and "alone" in lab_a
         assert w_g[0] == w_g[2] == neg and w_a[0] == w_a[2] == neg         # never from the side
-        assert w_a[1] == neg and w_a[3] == neg                              # alone: wait
+        assert w_a[1] == neg                                                # alone: no up slash (wait)
         assert w_g[1] == (3.0 if band in ("mid", "high") else neg)
-        assert w_g[3] == (3.0 if band in ("low", "mid") else neg)
+        assert w_g[3] == w_a[3] == (3.0 if band in ("low", "mid") else neg)  # the down slash from above: either
     # triggered (Parry Block): high band up slashes even alone; mid keeps the swing for the clash (0)
     hi = subj(1, MI, 24.0, y=FLOOR_Y + 6.0, state="Parry Block", family="MI_PARRY")
     assert t._guard_rule(hi, [hi], 3.0, 20.0, WinFc([hi]))[0][1] == 3.0
