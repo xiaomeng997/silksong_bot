@@ -2,6 +2,8 @@
 
     python -m ssbot.tools.viewer runs/2026-09-30/TRAIN/ep1              # spawn the Rerun viewer
     python -m ssbot.tools.viewer runs/.../ep1 --save ep1.rrd --from 1200 --to 5000 --ents-stride 2
+    python -m ssbot.tools.viewer C:/ssbot/data/human/<session> --zones [--from F --to F] [--k 0,12] [--video]
+                                                       # the Forum planner's zones per frame (tools.zone_overlay)
 
 Shows, as far as the recording has them:
   world/            hero position + per-scene trajectory, entity collider polygons ("ents"), TERRAIN polygons.
@@ -405,7 +407,31 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--ents-stride", type=int, default=1, help="log entity polygons every N frames")
     ap.add_argument("--series", action="append", default=[], help="extra series NAME=dotted.path")
     ap.add_argument("--save", help="write an .rrd file instead of spawning the viewer")
+    ap.add_argument("--zones", action="store_true",
+                    help="a human session (C:/ssbot/data/human/<session>): its Forum attempts replayed through the "
+                         "planner's forecast, the zone layers per game frame (tools.zone_overlay.rerun_zones)")
+    ap.add_argument("--k", default="0", help="--zones: look-ahead frames of the support / yellow layers, e.g. 0,12,36")
+    ap.add_argument("--video", action="store_true", help="--zones: the recorded video frame with the outlines")
+    ap.add_argument("--video-scale", type=float, default=0.5)
+    ap.add_argument("--zones-every", type=int, default=1, help="--zones: every N-th game frame")
+    ap.add_argument("--margins", action="store_true", help="--zones: also the margins layer")
+    ap.add_argument("--demo-cache", default=None, help="--zones: tools.forum_demo scan cache directory")
     a = ap.parse_args(argv)
+
+    if a.zones:
+        from ssbot.tools.zone_overlay import rerun_zones, zones_blueprint
+        bp = zones_blueprint(a.video)
+        rec = rr.RecordingStream("ssbot-zones", recording_id=str(Path(a.path).resolve()))
+        if a.save:
+            rec.save(a.save, default_blueprint=bp)
+        else:
+            rec.spawn(default_blueprint=bp)
+        stats = rerun_zones(Path(a.path), rec, a.f0, a.f1, ks=tuple(int(x) for x in a.k.split(",") if x),
+                            video=a.video, video_scale=a.video_scale, every=max(1, a.zones_every),
+                            margins=a.margins, demo_cache=Path(a.demo_cache) if a.demo_cache else None)
+        rec.flush()
+        print(f"logged {stats}" + (f" -> {a.save}" if a.save else ""))
+        return 0
 
     reader = RecordingReader(a.path)
     rec = rr.RecordingStream("ssbot-viewer", recording_id=str(Path(a.path).resolve()))

@@ -94,6 +94,28 @@ def test_forum_families_share_the_core_rows_and_drop_the_silk_skill():
     assert not any(n.startswith("ATTACK(down)") for n in sets["ground"][0].first_names)
 
 
+def test_timing_rows_follow_the_rows_as_they_were():
+    """waits (SSBOT_FORUM_WAITS): the old rows keep their indices; WAIT then a jump / dash after 3-12 frames; an attack
+    first piece then one press at the Reed's / Minister's counter; ground with the clash rows stays within 512."""
+    for p in cmod.POSTURES:
+        a, core_a = cmod.build_forum(36, p, clash=True)
+        b, core_b = cmod.build_forum(36, p, clash=True, waits=True)
+        n = len(a.cmd)
+        assert np.array_equal(b.cmd[:n], a.cmd) and np.array_equal(core_b[:n], core_a) and not core_b[n:].any()
+        assert len(b.cmd) - n == 16 + 4 * sum(f in cmod.TIMED_FIRSTS for f in b.first_names)
+    b, _ = cmod.build_forum(36, "ground", clash=True, waits=True)
+    assert len(b.cmd) <= 512
+    names = [b.name(i) for i in range(len(b.cmd))]
+    row = b.cmd[names.index("WAIT+wait6_dashL")]
+    assert not row[:cmod.FIRST + 6].any() and (row[cmod.FIRST + 6:cmod.FIRST + 9] & kin.B_DASH).all()
+    row = b.cmd[names.index("WAIT+wait12_jumpR")]
+    assert (row[cmod.FIRST + 12:] & kin.B_JUMP).all() and not (row[:cmod.FIRST + 12] & kin.B_JUMP).any()
+    row = b.cmd[names.index("ATTACK(up)L+clashat_ministerU")]
+    k = cmod.FIRST + cmod.TIMED_PRESS["minister"]
+    presses = np.flatnonzero((row[cmod.FIRST:] & kin.B_ATTACK) != 0) + cmod.FIRST
+    assert list(presses) == [k, k + 1] and (row[k] & kin.B_UP)
+
+
 def test_posture_of_the_start_state(params):
     s = kin.initial_state(params, 30.0, FLOOR + params.foot)
     assert posture_of(s) == "ground"
@@ -198,6 +220,123 @@ def test_forced_ranking_never_takes_a_row_in_contact_for_contact_free(params, ar
     assert forced > 0
 
 
+def test_commit_rank_refines_forced_risk_by_the_committed_support(params, arena):
+    """commit_rank (SSBOT_FORUM_PC, forum.md 20.7): S / Hz / U and FORCED_RISK are the same with and without it; in
+    a FORCED_RISK tick no candidate tied with the chosen row on every key before (P_cm, P_f) is lower on them; off,
+    P_cm and P_f are 0 everywhere."""
+    from ssbot.knowledge.kinematics import F_INVULN
+    seen_pf = False
+    for x in (30.6, 31.0, 31.6, 32.0):
+        got = {}
+        for on in (False, True):
+            mf = _reed_forecaster(10, frames=17)
+            f = mf.forecast(0.8)
+            pl = ForumPlanner(params, arena, PlannerConfig(T=36, threads=2, variants="bounds_lo"),
+                              ForumConfig(deadline_ms=math.inf, chunk=16, commit_rank=on))
+            r = pl.tick(_world(x), kin.initial_state(params, x, FLOOR + params.foot), kin.HoldState.idle(1),
+                        np.zeros(1, np.int64), f, _prefs(None, x), _ctx())
+            li = pl.last_info
+            got[on] = (r, {k: li[k].copy() for k in ("S", "Hz", "U")}, np.stack([li["Pcm"], li["Pf"]], axis=1),
+                       li["cand"].copy(), pl.last_sel, f)
+        (r0, k0, pf0, _, _, _), (r1, k1, pf1, cand, ls, f) = got[False], got[True]
+        assert r0.forced_risk == r1.forced_risk
+        for k in k0:
+            assert np.array_equal(k0[k], k1[k])
+        assert not pf0.any()
+        if not r1.forced_risk:
+            continue
+        seen_pf |= bool(pf1[cand].any())
+        # the keys from stage 1's split query are the second queries' (the pre-17.11 computation) on every candidate
+        al = np.flatnonzero(ls["allowed"])
+        fr = ForumPlanner._s1_frames(ls["T1"])
+        b = ls["box"][al][:, fr]
+        X, Y = 0.5 * (b[..., 0] + b[..., 2]), 0.5 * (b[..., 1] + b[..., 3])
+        live = (ls["flags"][al][:, fr] & F_INVULN) == 0
+        assert np.array_equal(pf1[al, 0], (f._union_occ(X, Y, ls["tk"][fr], committed_only=True) & live).mean(1))
+        assert np.array_equal(pf1[al, 1], (f._fine_occ(X, Y, ls["tk"][fr]) & live).mean(1))
+        i = r1.idx
+        pre = lambda j: (ls["hz"][j], ls["hz_soft"][j], ls["U"][j], ls["S"][j], ls["keep"][j], ls["mkeep"][j],
+                         ls["V"][j], ls["Pc"][j])
+        for j in np.flatnonzero(cand):
+            if pre(j) == pre(i):
+                assert tuple(pf1[j]) >= tuple(pf1[i])
+    assert seen_pf
+
+
+# ---- FORCED_RISK's "seen" key (forum.md §19; ported from the wave-0 forensics track's 3608489) ----
+
+def _with_collider(ws: WorldState, box: tuple, vx: float) -> WorldState:
+    from ssbot.core.worldstate import DamageBox, Entity
+    x0, y0, x1, y1 = box
+    ws.entities = [Entity(id=99, vel=E((vx, 0.0)),
+                          dmg_boxes=[DamageBox(poly=[(x0, y0), (x1, y0), (x1, y1), (x0, y1)], active=True)])]
+    return ws
+
+
+def test_seen_contacts_counts_frames_against_the_moving_collider():
+    from ssbot.combat.forum_planner import seen_contacts
+    T1 = 11
+    tk = np.arange(T1) * 0.1
+    box = np.zeros((2, T1, 4))
+    box[0] = (10.0, 0.0, 10.5, 2.0)             # stands still at x 10
+    box[1] = (0.0, 0.0, 0.5, 2.0)               # stands far away
+    inv = np.zeros((2, T1), np.bool_)
+    verts = np.array([[14.0, 0.0], [15.0, 0.0], [15.0, 2.0], [14.0, 2.0]])
+    pbox = np.array([[14.0, 0.0, 15.0, 2.0]])
+    cnt, first = seen_contacts(box, inv, verts, np.array([0, 4], np.int64), pbox, np.array([[-10.0, 0.0]]), tk,
+                               np.arange(2, dtype=np.int64), 0.0)
+    # its left edge reaches x 10.5 at 0.35 s, its right edge leaves x 10 at 0.5 s: frames 4 and 5
+    assert first[0] == 4 and cnt[0] == 2 and first[1] == T1 and cnt[1] == 0
+    inv[0, :5] = True                           # invulnerable frames are clear
+    cnt, first = seen_contacts(box, inv, verts, np.array([0, 4], np.int64), pbox, np.array([[-10.0, 0.0]]), tk,
+                               np.arange(2, dtype=np.int64), 0.0)
+    assert first[0] == 5 and cnt[0] == 1
+
+
+def test_seen_rank_without_seen_colliders_is_the_share_ranking(params, arena):
+    """No damage collider seen: the "seen" key ties on every row and the choice is the share ranking's (with and
+    without commit_rank stacked on it)."""
+    for pc in (False, True):
+        for x in (30.6, 31.0, 31.6, 32.0):
+            picks = []
+            for fr in ("share", "seen"):
+                mf = _reed_forecaster(10, frames=17)
+                pl = ForumPlanner(params, arena, PlannerConfig(T=36, threads=2, variants="bounds_lo"),
+                                  ForumConfig(deadline_ms=math.inf, chunk=16, forced_rank=fr, commit_rank=pc))
+                r = pl.tick(_world(x), kin.initial_state(params, x, FLOOR + params.foot), kin.HoldState.idle(1),
+                            np.zeros(1, np.int64), mf.forecast(0.8), _prefs(np.random.default_rng(int(x * 10)), x),
+                            _ctx())
+                picks.append((r.idx, r.S, r.forced_risk))
+            assert picks[0] == picks[1]
+
+
+def test_seen_rank_takes_the_row_clear_of_a_collider_coming_at_the_hero(params, arena):
+    """FORCED_RISK with a damage box charging at the hero from the right: "seen" picks a row whose nominal path the
+    moving box meets least (none when one exists), also with commit_rank stacked after it; safe ticks unchanged."""
+    from ssbot.combat.forum_planner import seen_contacts, seen_polys
+    n_forced = 0
+    for pc in (False, True):
+        for x in (30.6, 31.0, 31.6):
+            ws = _with_collider(_world(x), (x + 4.0, FLOOR, x + 5.5, FLOOR + 2.0), -18.0)
+            mf = _reed_forecaster(10, frames=17)
+            pl = ForumPlanner(params, arena, PlannerConfig(T=36, threads=2, variants="bounds_lo"),
+                              ForumConfig(deadline_ms=math.inf, chunk=16, forced_rank="seen", commit_rank=pc))
+            r = pl.tick(ws, kin.initial_state(params, x, FLOOR + params.foot), kin.HoldState.idle(1),
+                        np.zeros(1, np.int64), mf.forecast(0.8), _prefs(), _ctx())
+            if not r.forced_risk:
+                continue
+            n_forced += 1
+            ls = pl.last_sel
+            verts, starts, pbox, pvel = seen_polys(ws)
+            rows = np.flatnonzero(ls["allowed"])
+            cnt, _ = seen_contacts(np.ascontiguousarray(ls["box"], np.float64),
+                                   np.ascontiguousarray((ls["flags"] & kin.F_INVULN) != 0), verts, starts, pbox, pvel,
+                                   np.ascontiguousarray(ls["tk"], np.float64), rows, 0.0)
+            assert cnt[rows].max() > 0                     # standing still is met
+            assert pl.last_info["seen"] == cnt[rows].min() == cnt[r.idx]
+    assert n_forced > 0
+
+
 # ---- §4.4 item 3: the chosen plan is always enveloped ----
 
 def test_the_chosen_safe_plan_was_always_enveloped(params, arena):
@@ -230,6 +369,48 @@ def test_inside_the_stab_every_way_out_is_checked_before_forced_risk(params, are
         assert li["enveloped"] == li["stage1_pass"]
     else:
         assert li["env"][r.idx] and r.S == 0
+
+
+# ---- FORCED_RISK's "seen" key (forum.md §19; the wave-0 forensics track's copies of _with_collider and the seen
+# tests above were merged here twice, the R5 value port's stacked versions kept) ----
+
+def test_the_policy_reads_the_forced_rank_switch(monkeypatch):
+    from ssbot.train.forum_planner_policy import ForumPlannerPolicy
+    monkeypatch.delenv("SSBOT_FORUM_FR", raising=False)
+    assert ForumPlannerPolicy._fcfg().forced_rank == "share" == ForumConfig().forced_rank
+    monkeypatch.setenv("SSBOT_FORUM_FR", "seen")
+    assert ForumPlannerPolicy._fcfg().forced_rank == "seen"
+    monkeypatch.setenv("SSBOT_FORUM_FR", "seen_cf")
+    assert ForumPlannerPolicy._fcfg().forced_rank == "seen_cf"
+    monkeypatch.setenv("SSBOT_FORUM_FR", "bogus")
+    with pytest.raises(ValueError):
+        ForumPlannerPolicy._fcfg()
+
+
+def test_seen_cf_then_takes_the_row_least_in_the_committed_strike(params, arena):
+    """"seen_cf": no damage collider seen (the stab not out yet), the committed stab's fine placements decide: the pick
+    has the least share of stage 1's frames in them among the known rows."""
+    from ssbot.combat.forum_planner import committed_fine_share
+    n_checked = 0
+    for x in (30.6, 31.0, 31.6, 32.0):
+        mf = _reed_forecaster(10, frames=12)
+        f = mf.forecast(0.8)
+        if not np.asarray(f.pm["committed"], bool).any():
+            continue
+        pl = ForumPlanner(params, arena, PlannerConfig(T=36, threads=2, variants="bounds_lo"),
+                          ForumConfig(deadline_ms=math.inf, chunk=16, forced_rank="seen_cf"))
+        pl.debug = True
+        r = pl.tick(_world(x), kin.initial_state(params, x, FLOOR + params.foot), kin.HoldState.idle(1),
+                    np.zeros(1, np.int64), f, _prefs(), _ctx())
+        if not r.forced_risk:
+            continue
+        dbg = pl.last_info["dbg"]
+        rows = np.flatnonzero(dbg["ok"] & dbg["known"])
+        cf = committed_fine_share(f, dbg["box"], (dbg["flags"] & kin.F_INVULN) != 0, rows, dbg["fr"], dbg["tk"])
+        assert cf.max() > cf.min()                       # the strike separates the rows
+        assert pl.last_info["seen_cf"] == round(float(cf.min()), 3)
+        n_checked += 1
+    assert n_checked > 0
 
 
 # ---- hit reactions ----
@@ -307,6 +488,11 @@ def test_the_unpausable_blow_is_the_one_that_may_end_the_battle():
     assert forum_kill_hp(mf) == pytest.approx(6.0)
     freeze = kill_freeze_s()
     assert set(freeze) >= {clap, REED}
+    # only the kill's own freeze counts (the Clapper's death slow motion); the hero's NailClashEffect / StartRecoil that
+    # started on a kill frame of the wave-0 types are not theirs (forum.md 12.3)
+    assert freeze[clap] > 1.0
+    assert freeze[REED] == 0.0 and freeze["Song Pilgrim 01"] == 0.0 and freeze["Song Pilgrim 03"] == 0.0
+    assert kill_freeze_s(any_kind=True)[REED] > 0.3          # SSBOT_FORUM_KF=any: the rule before
     mf2 = SimpleNamespace(trackers={1: _tr(REED, 20.0, 2.0), 2: _tr(clap, 8.0)})
     assert forum_yellow_kill_hp(mf2, {REED: 0.25, clap: 0.0}) == pytest.approx(14.0)
     assert forum_yellow_kill_hp(mf2, {REED: 0.0, clap: 0.0}) is None

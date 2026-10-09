@@ -26,6 +26,7 @@ HP in both views from the hits the view saw (HIT_DEALT: the oracle's amount when
 the attack that dealt it, FORUM_HIT_DAMAGE), never from the exported HP.
 """
 import math
+import os
 from dataclasses import dataclass, field
 
 from ssbot.combat.boss_model import Anchor
@@ -34,6 +35,43 @@ from ssbot.core.worldstate import ORACLE, Entity, Ev, WorldState
 
 FACES_LEFT = (-1, 1)              # flipX False faces -x: mirror -1 (ssbot.knowledge.gauntlet_tables.FACES_LEFT)
 TAIL_KEEP_S = 7.0                 # tail_max_s (6 s) + 1 s
+HIT_BODY = os.environ.get("SSBOT_FORUM_HITBODY", "1") != "0"   # 0: the R4 hit targets (every collider, A/B)
+# (type key, family) -> its aim state (tools.forum_aim), filled by EnemyTables when SSBOT_FORUM_AIM loads the aim
+# templates; empty: no instance is ever aimed
+AIM_STATES: dict = {}
+# (type key, family, aim state, direction bin) of every aim template loaded: a later aim state re-aims the instance
+# only where its bin has a template (else the earlier aim, certified to the instance's end, stands)
+AIM_KEYS: set = set()
+
+
+def aim_states(key) -> tuple:
+    """The aim states of a (type key, family) (a single state or several, re-aimed at each)."""
+    v = AIM_STATES.get(key, ())
+    return (v,) if isinstance(v, str) else tuple(v)
+# (type key, family) -> its states the aim template leaves out (tools.forum_aim cuts each instance at the first of
+# them; the forecast keeps their per-state nodes): the Reed's stab ends with its body only (Stab End, Stab Recover),
+# where a few instances fall or slide on far away (forum.md §29.2)
+AIM_AFTER = {("Song Reed", "RE_STAB"): ("Stab End", "Stab Recover")}
+AIM_BINS = 16            # direction bins of the enemy's own flight at the aim (tools.forum_aim)
+AIM_STILL_V = 1.0        # u/s: slower is the still bin (AIM_BINS)
+
+
+def aim_frame(vx: float, vy: float, facing: int) -> tuple[int, int]:
+    """(mirror, direction bin) of an enemy at its aim: moving (AIM_STILL_V or faster), forward is where it flies (its
+    sprite's facing can lag a frame behind a turn); still, its facing and the still bin."""
+    if math.hypot(vx, vy) < AIM_STILL_V:
+        return facing, AIM_BINS
+    m = 1 if vx >= 0.0 else -1
+    return m, aim_bin(vx * m, vy)
+
+
+def aim_bin(vx: float, vy: float) -> int:
+    """The direction bin of an enemy's velocity at its aim, x already mirrored by its facing (+ = forward): AIM_BINS
+    sectors, sector 0 centred on straight ahead; AIM_BINS = still."""
+    if math.hypot(vx, vy) < AIM_STILL_V:
+        return AIM_BINS
+    w = 2.0 * math.pi / AIM_BINS
+    return int(((math.atan2(vy, vx) % (2.0 * math.pi) + 0.5 * w) // w) % AIM_BINS)
 # Damage per hit by the attacking object (HitDealt.src, else .attack) in the Forum loadout (fo_A: Reaper, needle 1;
 # forum.md §9.2: Hornet's nail 9, Silk Spear 27, Garmond 5, Cogfly 3-4, a redirected bell 9); the vision view's HP
 # counts these (the oracle view takes HitDealt.amount when it has one)
@@ -61,6 +99,15 @@ class Instance:
     re_anchor: tuple[float, float] | None = None
     re_mirror: int = 1
     re_sd: float = 0.0
+    # aim (SSBOT_FORUM_AIM, tools.forum_aim): the instance entered its family's aim state (AIM_STATES), where the
+    # place and facing of the rest of it are fixed: anchored where the enemy is then, t from that entry
+    aim_state: str | None = None
+    aim_t: float = 0.0
+    aim_anchor: tuple[float, float] | None = None
+    aim_mirror: int = 1
+    aim_sd: float = 0.0
+    aim_bin: int = 0
+    aim_pending: tuple | None = None            # (aim state, its entry T) until the enemy is seen
 
 
 @dataclass(slots=True)
@@ -84,13 +131,16 @@ class EnemyTracker:
     seen_T: float = -math.inf
     seen_box: tuple | None = None                  # its active damage boxes' bounding box when last seen
     box: tuple | None = None                       # ... this frame (None: none active or not exported)
-    body: tuple | None = None                      # its body polygons' bounding box when last seen (hit targets)
+    body: tuple | None = None                      # its hittable polygons' bounding box when last seen (hit targets)
     hp_est: float = 0.0
     hp_sd: float = 0.0
     hits: int = 0
+    t_hit: float = -math.inf                       # game time of the last hit seen on it (the reach clip's nohit)
     t: float = 0.0
     in_play: bool = False                          # its Control state is not a waiting one
+    rendered: bool = True                          # its sprite was rendered when last exported (Entity.render_box)
     _var: float = 0.0
+    mem: object | None = None                      # combat.branch_model.BranchMemory (the branch model's history)
 
     def __post_init__(self) -> None:
         self.hp_est = float(self.table.spec.hp)
@@ -98,6 +148,13 @@ class EnemyTracker:
     @property
     def tk(self) -> str:
         return self.table.spec.type_key
+
+    @property
+    def parked(self) -> bool:
+        """A later wave's member parked off-stage before its entry: not rendered, in a waiting / pre-entry state
+        (Fly In Ready, Dormant, Sleep, Wait ...). Its body collider can be reported enabled, but it never hurt in the
+        recordings (forum.md §29.4): SSBOT_FORUM_PARK (default on) leaves it out of the support."""
+        return not self.rendered and not self.in_play and self.state is not None
 
     # ---- the walk's segmentation ----
 
@@ -118,6 +175,8 @@ class EnemyTracker:
         """A Control state entry at game time T (SubjectTracker.transition)."""
         tb = self.table
         sp = tb.spec
+        if self.mem is not None:
+            self.mem.enter(self.state, to, T)
         self.state, self.t_entry = to, T
         self.in_play = to not in sp.waiting
         cur, idle = self.cur, sp.idle_family
@@ -137,6 +196,20 @@ class EnemyTracker:
                 self._end(T)
             if not self.dead and self.cur is None:
                 self._start(idle, to, T)
+        c = self.cur
+        if c is not None and to in aim_states((sp.type_key, c.family)):
+            c.aim_pending = (to, T)
+            if not self.hidden and self.pos is not None and self.seen_T == T:
+                self._aim_now(c)
+
+    def _aim_now(self, c) -> None:
+        """The pending aim of attack c, now that the enemy is seen: anchored where it is, mirrored and binned by its
+        flight (aim_frame); a re-aim only where that bin has a template."""
+        to, T = c.aim_pending
+        c.aim_pending = None
+        m, b = aim_frame(self.vel[0], self.vel[1], FACES_LEFT[self.flip])
+        if c.aim_state is None or (self.table.spec.type_key, c.family, to, b) in AIM_KEYS:
+            c.aim_state, c.aim_t, c.aim_anchor, c.aim_sd, c.aim_mirror, c.aim_bin = to, T, self.pos, self.pos_sd, m, b
 
     def _die(self, T: float) -> None:
         if not self.dead:
@@ -188,6 +261,7 @@ class EnemyTracker:
             if ctl is not None and ctl[1]:       # first seen before any Control event: its exported state
                 self.enter(ctl[1], T - float(ctl[2] or 0.0))
         self.hidden = bool(e.hidden) or (self.view != ORACLE and e.pos.conf <= 0.0)
+        self.rendered = getattr(e, "render_box", None) is not None or self.view != ORACLE
         self.box = _box_of(e)
         if self.hidden:
             return
@@ -204,19 +278,27 @@ class EnemyTracker:
         self.vel = (0.0 if math.isnan(v[0]) else float(v[0]), 0.0 if math.isnan(v[1]) else float(v[1]))
         self.seen_T = T
         self.seen_box = self.box
-        if e.body_polys:
-            xs = [p[0] for q in e.body_polys for p in q]
-            ys = [p[1] for q in e.body_polys for p in q]
+        # the hit target: the colliders a nail can hit (the oracle's hit_polys; the range triggers in body_polys span
+        # 5-47 u, forum.md §20), body_polys where the view has no hit_polys
+        polys = e.hit_polys if (HIT_BODY and getattr(e, "hit_polys", None)) else e.body_polys
+        if polys:
+            xs = [p[0] for q in polys for p in q]
+            ys = [p[1] for q in polys for p in q]
             self.body = (min(xs), min(ys), max(xs), max(ys))
         if self.cur is not None and self.cur.anchor is None:
             self.cur.anchor, self.cur.mirror, self.cur.sd = self.pos, FACES_LEFT[self.flip], self.pos_sd
         if self.cur is not None and self.cur.re_state is not None and self.cur.re_anchor is None:
             self.cur.re_anchor, self.cur.re_mirror, self.cur.re_sd = self.pos, FACES_LEFT[self.flip], self.pos_sd
+        if self.cur is not None and self.cur.aim_pending is not None:
+            self._aim_now(self.cur)
 
     def _hit(self, d) -> None:
         """HP from the hits seen: the oracle's amount (an O field: None in the vision view), else the price of the
         attacking object; a hit nobody priced adds its whole default damage to the spread."""
         self.hits += 1
+        self.t_hit = self.t
+        if self.mem is not None:
+            self.mem.hit(self.t)
         if self.view == ORACLE and d.amount is not None:
             dmg, var = float(d.amount), 0.0
         else:

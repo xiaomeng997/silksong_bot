@@ -284,6 +284,27 @@ def test_forecast_covers_the_attack_drops_the_dead_and_answers_the_interface():
     assert near[:2].any() and not near[5:].any()
 
 
+def test_subject_t_free_is_the_attacks_earliest_end():
+    """Subject.t_free (L2's Buddy rule; forum.md 21.7: it was 0 for everyone): an attack's start + its family's logged
+    duration p0.5, from the origin; 0 while idle or with no duration logged."""
+    d = _reed_table()
+    d["attacks"]["RE_STAB"]["duration_s"] = {"p0_5": 0.45, "p99_5": 0.6, "n": 9}
+    tabs = _tables()
+    tabs.types[REED] = type_table(d, FORUM_TYPES[REED])
+    assert tabs.types[REED].families["RE_STAB"].dur == (0.45, 0.6)
+    assert tabs.types[REED].families["RE_DEFEND"].dur == (0.0, math.inf)
+    mf = MultiForecaster(tabs, ORACLE, waves=False)
+    script = _script_stab()
+    _run(mf, script[:6])
+    assert [(s.committed, s.t_free) for s in mf.forecast(0.8).subjects] == [(False, 0.0)]
+    _run(mf, script[6:14])                                 # the stab started at f 10; the origin f 13
+    (s,) = mf.forecast(0.8).subjects
+    assert s.committed and s.t_free == pytest.approx(0.45 - 3 * BIN)
+    _run(mf, script[14:21])                                # f 20: 10 bins into it
+    (s,) = mf.forecast(0.8).subjects
+    assert s.t_free == pytest.approx(0.45 - 10 * BIN)
+
+
 def test_a_zero_dwell_loop_never_enters_before_the_root():
     """forum.md 15.2: the Tiny's Ready -> Ready loop with a zero least dwell took one bin of slack per pass, down to
     -333 s at the step cap; nothing after the walk's root is entered more than one bin before it."""
@@ -496,6 +517,31 @@ def test_coarse_and_bounding_box_forms_are_supersets():
         want = t.contains(np.full(300, 0.3) - e, xs[:300], ys[:300], tol_bins=0)
         got = store.query_win(W, xq, yq, np.array([0.3]))[:, 0]
         assert not (want & ~got).any()
+
+
+def test_occupied_split_is_the_union_and_its_committed_and_fine_parts():
+    """occupied_split (ForumPlanner's commit_rank keys from stage 1's query, forum.md 20.11): the union is occupied()
+    bit for bit, the parts are _union_occ(committed_only=True) and _fine_occ() on the same points; idle, attacking
+    and dead enemies (body tubes, fine placements, death boxes)."""
+    tabs = _tables()
+    script = _script_stab()
+    tk = np.arange(0, 25) * BIN
+    rng = np.random.default_rng(7)
+    X = rng.uniform(15.0, 26.0, (300, len(tk)))
+    Y = rng.uniform(2.0, 8.0, (300, len(tk)))
+    mf = MultiForecaster(tabs, ORACLE, waves=False)
+    n_com = n_rest = prev = 0
+    for k in (2, 12, 17, 22, 26):
+        _run(mf, script[prev:k])
+        prev = k
+        f = mf.forecast(0.8)
+        u, com, fine = f.occupied_split(X, Y, tk)
+        assert np.array_equal(u, f.occupied(X, Y, tk))
+        assert np.array_equal(com, f._union_occ(X, Y, tk, committed_only=True))
+        assert np.array_equal(fine, f._fine_occ(X, Y, tk))
+        n_com += int(com.sum())
+        n_rest += int((u & ~com).sum())
+    assert n_com > 0 and n_rest > 0
 
 
 def test_forecasters_sharing_tables_agree():
