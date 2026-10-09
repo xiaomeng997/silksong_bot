@@ -152,6 +152,7 @@ H_W_FAR, H_W_NONE = 0.3, 0.5
 TV_ON = os.environ.get("SSBOT_FORUM_TV", "0") == "1"        # 1: the terminal value (off by default: forum.md 20.11)
 PC_ON = os.environ.get("SSBOT_FORUM_PC", "1") != "0"        # 0: FORCED_RISK without the committed support's shares
 T_ENV = int(os.environ.get("SSBOT_FORUM_T", "36") or 36)     # the horizon arm (§4.5: T 36 / 48)
+WAITS_ON = os.environ.get("SSBOT_FORUM_WAITS", "0") == "1"   # 1: the timing rows (candidates.build_forum waits)
 
 
 @dataclass
@@ -214,6 +215,8 @@ class ForumConfig:
     clash: bool = False
     clash_branch: bool = True     # False: the clash continuations only (candidates.build_forum(clash=True); the A/B's
     #                               control for the extra rows)
+    waits: bool = WAITS_ON        # the timing rows: a jump / dash after a 3-12 frame wait, a press at a guard's counter
+    #                               (candidates.build_forum waits; SSBOT_FORUM_WAITS=1; off by default)
     clash_tiers: tuple = ("GREEN",)   # DESIGN 3.5.6: no parry / clash in YELLOW / RED or PAUSE_PENDING (the clash
     #                                   freeze swallows a pause); ("GREEN", "YELLOW"): the R8 experiment (lead's call)
     clash_k: int = 8              # rows a tick get the clash branch
@@ -729,7 +732,8 @@ class ForumPlanner(Planner):
                  fcfg: ForumConfig | None = None, crest: str = "Reaper"):
         self.fcfg = fcfg or ForumConfig()
         super().__init__(params, terrain, cfg or PlannerConfig(T=self.fcfg.T, variants=self.fcfg.variants))
-        self.fsets = {p: cmod.build_forum(self.fcfg.T, p, clash=self.fcfg.clash) for p in cmod.POSTURES}
+        self.fsets = {p: cmod.build_forum(self.fcfg.T, p, clash=self.fcfg.clash, waits=self.fcfg.waits)
+                      for p in cmod.POSTURES}
         # without control (hit-stop, recoil, a lock) the keys only queue: the core rows only (Planner's cands_nc)
         self.fsets_nc = {p: (cs.subset(core), core[core]) for p, (cs, core) in self.fsets.items()}
         self.crest = crest

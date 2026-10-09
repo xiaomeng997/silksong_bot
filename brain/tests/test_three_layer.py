@@ -394,3 +394,16 @@ def test_body_reach_threats_and_the_bind_lock(params, arena, body_only):
         return np.tile(b, (101, 1))
     assert pl._bind_threatened(f, stand(23.0), 1, (23.0, 5.0))
     assert not pl._bind_threatened(f, stand(4.0), 1, (4.0, 5.0))
+
+
+def test_a_tick_with_the_new_switches(params, arena, body_only):
+    """The planner ticks with the timing rows and "+n+g+br+k" (escape check with the body-only threats, dash lock-ins)."""
+    from ssbot.knowledge import kinematics as kin
+    from tests.test_forum_planner import FLOOR, _prefs, _reed_forecaster, _world
+    mf = _reed_forecaster(None, frames=3, x=25.0)
+    mf.react = ReactConfig.parse("escape+n+g+br+k")
+    pl = ForumPlanner(params, arena, PlannerConfig(T=36, threads=2, variants="bounds_lo"),
+                      ForumConfig(deadline_ms=math.inf, chunk=16, react="escape+n+g+br+k", waits=True))
+    r = pl.tick(_world(20.0), kin.initial_state(params, 20.0, FLOOR + params.foot), kin.HoldState.idle(1),
+                np.zeros(1, np.int64), mf.forecast(0.8), _prefs(), _ctx())
+    assert r is not None and len(pl.fsets["ground"][0].cmd) == 399 + 32 and pl.last_info["esc"] is not None
