@@ -7,6 +7,7 @@ import numpy as np
 
 from ssbot.combat import multi_forecast as mfm
 from ssbot.combat.multi_forecast import MultiForecaster
+from ssbot.combat import reach_table
 from ssbot.combat.reach_table import CLIP_BANDS, NT, ClipTable, ReachClip
 from ssbot.core.worldstate import ORACLE, VISION_EQUIVALENT
 
@@ -51,6 +52,7 @@ def _occ(f, tk):
 
 
 def test_clip_off_is_identical_and_on_is_the_support_inside_the_reach(monkeypatch):
+    monkeypatch.setattr(reach_table, "R_FLOOR", 0.0)
     tk = np.arange(0, 31) * BIN
     script = _script_stab()
     a = MultiForecaster(_tables(), ORACLE, waves=False)
@@ -81,6 +83,7 @@ def test_clip_off_is_identical_and_on_is_the_support_inside_the_reach(monkeypatc
 
 
 def test_clip_skips_reactions_the_vision_view_and_falls_back(monkeypatch):
+    monkeypatch.setattr(reach_table, "R_FLOOR", 0.0)
     rc = _clip((0.25, 1.04))
     monkeypatch.setattr(mfm, "reach_clip", lambda half: rc)
     script = _script_stab()
@@ -95,11 +98,12 @@ def test_clip_skips_reactions_the_vision_view_and_falls_back(monkeypatch):
     assert v.forecast(0.8).clip == {}
     # a time bin without its own rows takes the state's (every bin), a state without rows its family's, then the type's
     b1 = _box(-0.5, 9.0, -1, 1)
-    b1[0][7] = (-0.5, 4.0, -1, 1)                         # time bin 7 alone: 4 u
+    b1[0][7:10] = (-0.5, 4.0, -1, 1)                      # time bins 7 .. 9: 4 u (a bin takes the next two too)
     b1[1][2] = 10                                         # time bin 2: too few rows
     tab = _table({(REED, "Stab 1"): b1, (REED, "Alert"): _box(-0.5, 1.0, -1, 1, n=10)},
                  {(REED, "Stab 1"): "RE_STAB", (REED, "Stab Pos"): "RE_STAB", (REED, "Alert"): "RE_IDLE"})
     assert tab.boxes(REED, "Stab 1", 7, 0)[5, 1] == 4.0
+    assert tab.boxes(REED, "Stab 1", 6, 0)[5, 1] == 9.0                # bin 6 + 7 + 8
     assert tab.boxes(REED, "Stab 1", 2, 0)[5, 1] == 9.0
     assert tab.boxes(REED, "Stab Pos", 0, 0)[5, 1] == 9.0         # the family's
     assert tab.boxes(REED, "Alert", 0, 1)[5, 1] == 9.0            # 10 rows < CLIP_MIN_ROWS: the type's

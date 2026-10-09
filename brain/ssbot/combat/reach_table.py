@@ -9,10 +9,11 @@ frame in that state, relative to its transform then, x by its facing then (+ = f
 knockbacks included) and "nohit" (frames whose enemy was not hit from KB_FREE_F frames before to k frames after: no
 knockback; the run time uses it while the tracker saw no hit on the enemy for KB_FREE_F frames).
 
-Lookup: the (state, time bin) box where it has CLIP_MIN_ROWS rows within +-K_SLACK frames, else the state's (every
-time bin), else its family's (the union of the family's states), else its type's; the +-K_SLACK frames union (the
+Lookup: the (state, time bin .. time bin + TAU_AHEAD) box where it has CLIP_MIN_ROWS rows within +-K_SLACK frames,
+else the state's (every time bin), else its family's (the union of the family's states), else its type's; the +-K_SLACK frames union (the
 templates' +-1 bin). Certified 2-fold by fight: r per (type, state, part, look-ahead band) = the most one fold's boxes
-exceed the other fold's run-time boxes (a state the build did not measure: its type's largest). The entry family's,
+exceed the other fold's run-time boxes (a state the build did not measure: its type's largest), at least R_FLOOR.
+The entry family's,
 waiting and death states are never clipped (an entry flies in from off-stage).
 
 Files: knowledge/1.0.30000/enemies/forum/reach_clip.npz (git-ignored, ~10 MB; frozen checkouts copy it with the
@@ -30,7 +31,12 @@ TAU_BIN_S = 0.05         # time-in-state bins (s); the last bin holds everything
 NT = 21
 PARTS = ("all", "nohit")
 KB_FREE_F = 20           # frames: "nohit" (a knockback after a hit lasts 8-15 frames, forum.md §29.11)
+TAU_AHEAD = 2            # a time bin's box is the union with the next TAU_AHEAD bins: a state that ends up to
+#                          TAU_AHEAD x TAU_BIN_S sooner than any recorded one (R2 fresh recall 20261003_074719 i3 ep32:
+#                          a Clawmaiden's slash 3 frames after a Slash Antic time no dev instance struck from)
 K_SLACK = 1
+R_FLOOR = 0.5            # u: the held-out margin is at least this (R2 fresh recall 20261003_074719 i3 ep32: a
+#                          Clawmaiden's slash 0.14 u past every dev instance where the two folds agreed, r 0)
 
 
 def tau_bin(t_in_state) -> np.ndarray:
@@ -90,7 +96,11 @@ class ClipTable:
         b = self.B.get((tk, state))
         if b is not None:
             n = self.N[(tk, state)]
-            levels += [(b[tbin, part], n[tbin, part]), (b[NT, part], n[NT, part])]
+            hi = min(NT - 1, tbin + TAU_AHEAD)
+            bb, nn = b[tbin, part], n[tbin, part]
+            for t in range(tbin + 1, hi + 1):
+                bb, nn = merge_boxes(bb, b[t, part]), nn + n[t, part]
+            levels += [(bb, nn), (b[NT, part], n[NT, part])]
         fam = self.fam_of.get((tk, state))
         if fam is not None and (tk, fam) in self.fam:
             f = self.fam[(tk, fam)]
@@ -186,6 +196,7 @@ class ReachClip:
                     v = self.r.get((tk, state, NT, part, band))
                 out[lo:band + 1] = v if v is not None else self.r.get((tk, "*", NT, part, band), 0.0)
                 lo = band + 1
+            out = np.maximum(out, R_FLOOR)
             self._r[key] = out
         return out
 
