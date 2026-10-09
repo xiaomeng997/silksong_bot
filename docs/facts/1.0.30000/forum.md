@@ -3049,3 +3049,89 @@ cd brain
 ..\scripts\uv.cmd run python -m ssbot.tools.forum_ics summary C:/ssbot/data/m2_forum_ics/replay_best C:/ssbot/data/m2_forum_ics/replay_default --zones C:/ssbot/data/m2_forum_ics/zones_lat1.npz --json C:/ssbot/data/m2_forum_ics/summary.json
 ```
 输出：`C:\ssbot\data\m2_forum_ics\`：`zones_lat1.json` / `.npz`（每个家族 × 锁定 × 锚高的区域数组，`|zl` 是"晚"的部分）、`zones_lat12.json`、`zones_lat1_margin.json`；`replay_best\`、`replay_default\`（每段一个 JSON + 待机地图 `*_maps.npz`）；`summary.json`、`summary.maps.txt`（每类 × 层 × 计划帧的文字地图）。驱动 `scratchpad` `run_replay.ps1`，表格 `ztable.py`、`show.py`。
+
+## 29. 区域修正：黄色、已承诺层按瞄准重锚、停放的怪、半屏规则（2026-10-09，task "zone fix"，分支 worktree-wf_0469f4be-4ea-1 = main + forum push 2 合并（7de4e05）+ 区域叠加层（339ff40）；离线，没有开游戏）
+
+第一个开发者在 00:44 被 Windows 更新重启打断，留下 33295b6 / f14aa52 / 9ceb414 和一处没提交的改动；本节是接手后的全部结果。数都是"之前 = 你 10-08 晚看到的叠加层（3ca18c5 的冻结检出 `C:\ssbot\zf_before_3ca18c5`）"对"之后 = 本分支"。
+
+### 29.1 半屏规则怎么量（`tools/zone_share.py`）
+
+每 3 个游戏帧一次：相机视野（STATE 里的相机，主角所在的 z = 0 平面）里被下面这些盖住的比例（主角中心空间，按叠加层的投影画到 192×108 的屏幕上再数）：(a) 黄色不可逃区（已出招 + 还没开始），(b) 规划器在提前量 k = 0 的支撑（所有层的并），另报 k = 12。场地在屏幕里最多占 81–85 %（墙和天花板之外不算），所以 0.81–0.85 就是"整个场地"。数据：你的两次叠加层会话（`20261008_230220`、`20261008_231544`，4 次尝试，10,842 个测量帧）和 bot 最近的第 0 波录像（forum push 2 A/B 的 4 个运行、19 场，11,167 帧，到第 1 波为止）。
+
+### 29.2 已承诺层按瞄准重锚（`tools/forum_aim.py`，开关 `SSBOT_FORUM_AIM`）
+
+- 你说的 Reed 三连刺：录像里 `Stab 1`–`Stab 5` 是身体沿一条直线滑 7–15 u（往前下方约 17–20°），针（约 3.8 × 1.1 u 的框）在身体前面，`Stab 1 / 3 / 5` 才有针。家族模板（从 `Stab Pos` 开始、所有实例的并）有 40 × 24 u，因为 `Stab Pos` 先飞到主角旁边上方——起点离出刺的地方很远。
+- **按主角方向分箱不行**：`Stab Antic` 时主角相对 Reed 的方向分 16 个扇区，每个扇区的模板还是并集的一半到三分之二大、留出残差 r ≥ 3 u。**按它自己的飞行方向**：`Stab 1` 进入时 1,271 个实例的速度方向全落在同一个 22.5° 扇区（前下方），方向是固定的；镜像按飞的方向（`aim_frame`：速度 ≥ 1 u/s 时朝向 = 速度的正负，否则按贴图朝向，贴图朝向转身时会晚一帧）。
+- 残差 11 u 的来源是少数实例在 `Stab End` / `Stab Recover`（只有身体）里掉下去或滑很远：瞄准模板在这两个状态前截断（`AIM_AFTER`），这两个状态的逐状态节点照旧放。截断后 `Stab 1` 的 r 2.7 u、`Stab 3` 1.7 u、`Stab 5` 0.9 u。
+- 每个家族的**每个**"可用箱占实例 ≥ 90 %"的状态都是瞄准状态，追踪器在每次进入时重新锚定（只在那个方向箱有模板时；否则保留前一次已认证的锚，`_aim_now`）。所有 30 个攻击家族都量了（不只是跟主角走的那些），共 92 个模板（`knowledge/1.0.30000/enemies/forum/aim_templates.json` 是报告，`.npz` 不进 git，`python -m ssbot.tools.forum_aim build` 约 5 min 重建）。没有可用模板的：AT_FIRE / AT_DEFEND / AT_LEAVE（持续时间差别大：留出实例的碰撞体比训练模板的最后一帧还晚）、MI_PARRY、CB_THROW、EN_JUMPSLASH、EN_AMBUSH、CM_TELE、CC_EVADE。
+- 认证规则同 R2：开发集两折互留（按场分折）+ 35 场新场对全部开发场，每个箱的模板膨胀 r（两折和新场取大）后盖住 100 % 的留出碰撞体框；r ≤ 3 u、没有"比模板还晚"的框才用。
+- 构建的加载慢 100 倍（每行一次 `searchsorted`，一场 30 s）：改成每场一次 + 进程池，全部 142 场 20 s。
+
+### 29.3 黄色（叠加层，`ZoneEngine.yellow`）
+
+- **已出招**：每个已出招实例**自己现在的伤害碰撞体**（oracle 的真框）沿它的速度推 12 帧，和主角盒做闵可夫斯基和（主角中心空间），再按一帧的逃离范围往回腐蚀（`erode_back`，地面、墙、穹顶以外是实心）。家族模板（全部录到的实例的并）是规划器的上界，不是"确定躲不开"的格子，不再进黄色。Reed 的刺就是一条往前下方的斜带（PNG 见 29.8）。投掷物（钟、针、符文）是别的实体，本来就不在里面；Clapper 模板里以前施放的符文（`CC_CAST` 等）在"还没开始"的下界里也去掉了（危险物层管）。
+- **还没开始**：第一个开发者的"按家族 × 锁定状态的现在出招下界"（锚点两侧各 24 u 的 `_ns_lb`，不是整个 `zones_lat1` 上界），跟主角走的家族（`forum_aim.CANDIDATES`）不进。
+
+### 29.4 停放的怪（`SSBOT_FORUM_PARK`，默认开）
+
+后面波次的怪停在场外（`Fly In Ready`、`Dormant`、`Sleep`、`Wait` 这类等待状态、没有渲染）时，碰撞体可能报"启用"，但从来没伤过人（任务里的数：主角和那只停着的 Reed 重叠 136 帧，0 次受伤）。叠加层 339ff40 已经不画；预报里它不进支撑（不放碰撞体管、不走状态图）。复核时发现第一版把**波次已经排队、视野内就要激活**的怪也拿掉了（`test_a_waiting_wave_member_waits_for_its_wave` 失败）：改成只在它的波次在视野内不会激活时拿掉，波次排队了就照旧从激活时刻走。
+
+### 29.5 A 轨安全（33295b6，单测在 `test_forum_track_a.py`）
+
+- `kb`：被打的怪的支撑同时查推开的和没推开的两份（中位击退没有下界，墙会挡住）。
+- `free`：h ≥ 2 时只有击杀慢动作 ≤ 0.5 s 的击杀可以不认证；高庭的最后一击（`EnemyBattleEndSlow` / `BigEnemyDeathSlow`，1.85–2.47 s 不暂停，垂死的 Clapper 的身体、符文砸地、钟和别的怪都还会伤人）照旧走 I3。
+
+### 29.6 接受检查（冻结检出 `C:\ssbot\hs_zfix_b0be790`，`SSBOT_FORUM_AIM=1`，停放默认开）
+
+- **R2 留出召回**（`multi_recall fresh --react escape+n+g --state-margins`，444 个对局任务，31 min，`C:\ssbot\data\m2_forum_zfix\recall_fresh_aim.json`）：**L2 / L3 / L4 各 375,940 / 375,940（100 %）**，自己类型也 100 %，多段链的钩 1,802 / 1,802，0 漏。
+- **重打分**（`forum_human_rescore.cmd best zfix_aim`，32 段 0 错误，对 §28.2 的 base = fp2_base；输出 `C:\ssbot\data\m2_forum_hs\zfix_aim[_summary.json]`）：
+
+| 全部 32 段 | base | + 瞄准 + 停放 |
+|---|---|---|
+| FORCED_RISK | 82.10 % | 81.84 % |
+| 第 0 波 24 段的 FORCED_RISK | 78.56 % | 78.30 % |
+| 你的动作被判不安全（匹配行） | 86.57 % | 86.43 % |
+| 误报（匹配行里判不安全且事后没碰） | 76.89 % | 76.75 % |
+| 漏报（占判安全） | 0.60 % | 0.60 % |
+
+  三项都往下、漏报没升，按 plan §5 的规则接受：`SSBOT_FORUM_AIM` 默认改成开（`0` 关；没有 `aim_templates.npz` 就什么也不加载——冻结检出要连它一起拷）。幅度很小：FORCED_RISK 主要不是已出招之后的事（见 29.7）。
+
+### 29.7 半屏规则：之前 / 之后
+
+| | 你的两次会话 之前 | 之后 | bot 第 0 波 之前 | 之后 |
+|---|---|---|---|---|
+| 黄色 > 50 % 的帧 | 3,369（31.1 %），最大 0.852 | **0**，最大 0.488 | 1,700（15.2 %），最大 0.852 | **0**，最大 0.143 |
+| 黄色中位 | 0.280 | 0.041 | 0.238 | 0.030 |
+| 支撑 k = 0 > 50 % 的帧 | 5,098（47.0 %） | 4,577（42.2 %） | 3,899（34.9 %） | 3,130（28.0 %） |
+| 支撑 k = 0 中位 | 0.460 | 0.429 | 0.421 | 0.391 |
+| 支撑 k = 12 > 50 % 的帧 | 8,057（74.3 %） | 7,767（71.6 %） | 8,704（77.9 %） | 7,745（69.4 %） |
+
+- (a) 黄色：达标。之后最大的 0.488 是"还没开始"的下界（已出招部分最大 0.172）。
+- (b) 支撑 k = 0：**没有达标**，每一帧列在 `C:\ssbot\data\m2_forum_zfix\over_half_after.csv`（7,707 行：录像、帧、波次、各份额、k = 0 最大的层、当时已出招的家族）。按放置分组拆开（每 15 帧一次，只看 > 50 % 的帧，平均每组盖住的屏幕份额）：
+  - 第 0 波（`231544` 第 1 次尝试，130 帧里 39 帧超）：Reed 的 RE_DEFEND 反击链窗口 0.27、**RE_STAB 瞄准之前**的细放置 0.25 和家族并 0.15（`Stab Pos` 先飞到主角旁边上方：这段跟主角走，瞄准模板管不到）、还没开始的 RE_EVADE 0.16、Envoy 冲锋 0.10。
+  - 后面的波（`231544` 第 0 次，506 帧里 232 帧超）：**Maestro 召出的小自动机**（Automaton Tiny）——还没开始的 AT_FIRE / AT_DEFEND 各 0.34、AT_LEAVE 0.18，已出招的 AT_FIRE 尾巴 / 家族并 / 细放置各 0.18–0.22；其次 CM_SPIN、CM_TELE、MA_DEFEND。
+  - 最差的四帧（k = 0 支撑 0.813 = 整个场地）PNG：`C:\ssbot\data\m2_forum_zfix\png\worst_s0_*.png`（模式 support）。例如 `230220` 第 1 次 16841 帧：Reed 在 `Stab Pos`、Envoy 在 `Charge`，已出招层（粉）和窗口层（蓝）盖满整个场地。
+  - 为什么这件事重要：规划器第一段的接触检查从第 0 帧查起（`forum_planner` 的 `tk = arange(T1)`），第 0 帧每一行的主角盒都一样——主角现在站的地方在 k = 0 支撑里，**所有行**都判不安全，这就是 FORCED_RISK 约 80 % 的直接机制。
+- 下一步（没做，要 lead / 你定）：① Reed `Stab Pos` 按主角位置锚定（它飞到主角旁边上方 6.7 u：锚点 = 主角 + 偏移，同 §23.7 的 `pinaim`）；② Tiny 的 AT_FIRE 按持续时间分箱或时间伸缩，才能过留出认证；③ k = 0（及输入生效前的几帧）用 oracle 的真碰撞体代替模板——这几帧所有行一样、不区分行，只会把整个 tick 推进 FORCED_RISK。
+
+### 29.8 PNG 和回放
+
+- PNG（`C:\ssbot\data\m2_forum_zfix\png\`，黄 + 红，k = 0）：`before_*` / `after_*` 同一帧。Reed 刺：`230220` 第 0 次 3551（`Stab 1`，之前 47 %（模板版）→ 之后 5 %：一条从 Reed 往左下的斜带）、4043、4361（之前 80 % → 0 %：`Stab End` 只有身体，红框）；`231544` 第 0 次 4940、9728；第 1 次 20959；随机帧 8459、10301、16967、17621、5708、6878、20107、53053。录像里没有对应视频帧的 3605、39115 没出图。
+- 回放（k 0,12，带录像，半尺寸，最终代码）：`C:\ssbot\data\m2_forum_overlay\20261008_230220_zones_fix.rrd`、`20261008_231544_zones_fix.rrd`（旧的 `*_zones.rrd` 留着对比）。每只怪一个固定名字（类型短名 + 出场顺序，如 "Reed 2"）+ 当前 Control 状态，碰撞体、黄色、支撑按怪分开记、各用一种颜色；现场叠加层的说明框列出所有怪。
+
+### 29.9 A/B 工具（f14aa52）
+
+`forum_ab_summary`：没受击的波按那一波自己的怪算（不是"下一波开始就算清"），重叠的波合在一起；砍中数只算主角自己的（HERO_ATTACKS、dealt > 0，Garmond / Cogfly 另算团队输出）；HARNESS_FAIL 行保留并单独列出。
+
+### 29.10 复现
+
+```
+cd brain
+..\scripts\uv.cmd run python -m ssbot.tools.forum_aim build --workers 4                     # 瞄准模板（约 5 min）
+..\scripts\uv.cmd run python -m ssbot.tools.zone_share run C:/ssbot/data/human/20261008_230220:win C:/ssbot/data/human/20261008_231544:win --out <dir>\h --every 3 --ks 0,12
+..\scripts\uv.cmd run python -m ssbot.tools.zone_share run <4 个 runs\m2\20261008_21*_Forum_W_eval_planner_oracle_clashM 目录> --w0 --out <dir>\bot --every 3 --ks 0,12
+..\scripts\uv.cmd run python -m ssbot.tools.zone_share summary <dir>\h <dir>\bot
+..\scripts\uv.cmd run python -m ssbot.tools.zone_share png <session> --attempt N --frames F1,F2 [--mode support] --out <dir> --tag after_
+..\scripts\uv.cmd run python -m ssbot.tools.viewer C:/ssbot/data/human/<session> --zones --k 0,12 --video --video-scale 0.5 --save <out>.rrd
+```
+测量输出：`C:\ssbot\data\m2_forum_zfix\v_before\{h,bot}`（之前，3ca18c5 + zone_share）、`v_after3\{h,bot}`（之后）、`v_after3_summary.json`。
