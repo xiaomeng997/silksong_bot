@@ -448,3 +448,24 @@ def test_swept_seen_key_catches_a_pin_tip_a_frame_off():
         assert n0[0] == 0 and (n1[0] > 0) == swept
         if swept:
             assert f1[0] == T1 - 1
+
+
+def test_reactive_variants_swap_from_the_base_and_restore_it():
+    """forum_layer_audit.Variants rb / rbr: the base's reactive support at the first swap (the tools set it per
+    episode), "+b" / "+br" on it, back to the base on restore even after two swaps in a row."""
+    from types import SimpleNamespace
+
+    from ssbot.tools.forum_layer_audit import Variants
+    fc = SimpleNamespace(tables="T", _fwalk="W", react=None)
+    vs = Variants(fc, ("rb", "rbr"))
+    base = ReactConfig.parse("escape+n+g")
+    fc.react = base
+    vs.swap("rb")
+    assert fc.react.bodyreach and not fc.react.bodyreach_all and fc.react.hold
+    vs.swap("rbr")
+    assert fc.react.bodyreach_all
+    vs.restore()
+    assert fc.react == base and (fc.tables, fc._fwalk) == ("T", "W")
+    fc.react = ReactConfig.parse("escape+g")
+    with pytest.raises(ValueError):
+        vs.swap("rb")

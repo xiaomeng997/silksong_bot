@@ -257,11 +257,11 @@ class Variants:
     walk ids, reactive support), restore() puts the production ones back."""
 
     def __init__(self, fc, names=VARIANTS):
-        import dataclasses
         from ssbot.combat.enemy_tables import FORUM_DIR, EnemyTables, Tubes
         self.fc = fc
         self.base = (fc.tables, fc._fwalk)
         self.react0 = fc.react
+        self.swapped = False
         self.react = {}
         self.sets = {}
         md = json.loads((FORUM_DIR / "support_margins.json").read_text("utf-8"))
@@ -269,9 +269,8 @@ class Variants:
         tmp = Path(tempfile.mkdtemp(prefix="layer_audit_"))
         for v in names:
             if v in ("rb", "rbr"):
-                if fc.react is None or not fc.react.notstarted:
-                    raise ValueError(f"variant {v}: the support has no +n")
-                self.react[v] = dataclasses.replace(fc.react, bodyreach=True, bodyreach_all=v == "rbr")
+                # (the reactive support is the base's at swap time: the tools set it per episode)
+                self.react[v] = {"bodyreach": True, "bodyreach_all": v == "rbr"}
                 self.sets[v] = self.base
                 continue
             if v.startswith("m"):
@@ -299,12 +298,22 @@ class Variants:
         self.fam_margins: set = set()
 
     def swap(self, v: str) -> None:
+        import dataclasses
+        if not self.swapped:                  # the base's reactive support (swaps follow each other until restore)
+            self.react0 = self.fc.react
+            self.swapped = True
         self.fc.tables, self.fc._fwalk = self.sets[v]
-        self.fc.react = self.react.get(v, self.react0)
+        self.fc.react = self.react0
+        if v in self.react:
+            if self.react0 is None or not self.react0.notstarted:
+                raise ValueError(f"variant {v}: the support has no +n")
+            self.fc.react = dataclasses.replace(self.react0, **self.react[v])
 
     def restore(self) -> None:
         self.fc.tables, self.fc._fwalk = self.base
-        self.fc.react = self.react0
+        if self.swapped:
+            self.fc.react = self.react0
+        self.swapped = False
 
 
 def run_episode(job: dict) -> dict:
