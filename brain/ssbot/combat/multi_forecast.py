@@ -1015,9 +1015,11 @@ class _Builder:
             self.boxes.append((tr.iid, "death", *tr.death_box, 0.0, 0.0, None, -BIN, tr.t_dead + DEATH_TAIL_S - T,
                                0.0))
         self._tails(tr)
-        if PARK and tr.parked and not tr.dead:
-            # parked off-stage before its entry (not rendered, waiting): no collider tube at the parked spot, no walk
-            # (the person 2026-10-09: a Reed in Fly In Ready drew a fixed box with no enemy; forum.md §29.4)
+        wk = self._wave_wake(tr) if PARK and tr.parked and not tr.dead else None
+        if PARK and tr.parked and not tr.dead and (wk is None or wk - T > H + BIN):
+            # parked off-stage before its entry (not rendered, waiting) and its wave not activating within the horizon:
+            # no collider tube at the parked spot, no walk (the person 2026-10-09: a Reed in Fly In Ready drew a fixed
+            # box with no enemy; forum.md §29.4); its wave queued: walked from the activation as before
             self.subjects.append(self._subject_row(tr, False, math.inf))
             return
         # a killed Tiny comes back only through a Maestro's summon: walked on after its death only while one is in play
