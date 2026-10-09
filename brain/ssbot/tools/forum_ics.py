@@ -78,6 +78,8 @@ LAT_F = 1                                                    # oracle sensing la
 DX_STEP = 0.1                                                # zone grid (u) along x
 AIR_DX_STEP = 0.25
 WAITS = (0, 6, 12, 20, 30)
+JUMP_STEP_F = 4                                              # timed jumps every this many frames (2: the same
+#                                                              zones for CC_SLAM, CB_EVADE, RE_EVADE, EN_SLASH)
 TURNS = (24, 45, 75)
 ACTS = ("none", "jump_full", "jump_short", "dash", "sprint", "jump_airdash", "dash_jump")
 FACING_EXCEPT = frozenset({"AT_DEFEND", "AT_LEAVE", "MA_SUMMON"})   # instances' mirror != the hero's side often
@@ -148,7 +150,7 @@ def commands(K: int, lat: int) -> tuple[np.ndarray, list]:
         for mode in ("run", "sprint"):
             if mode == "sprint" and d1 == 0:
                 continue
-            for j in range(0, 160, 4):
+            for j in range(0, 160, JUMP_STEP_F):
                 m = np.zeros(K, np.int64)
                 m[lat:] |= D[d1]
                 if mode == "sprint":
@@ -1232,7 +1234,8 @@ def summarize_idle(files: list[Path]) -> dict:
     return out
 
 
-def summarize_maps(dirs: list[Path], frames=(0, 2, 5)) -> dict:
+def summarize_maps(dirs: list[Path], frames=(0, 2, 5), zones: "Zones | None" = None,
+                   anchor_h: dict | None = None) -> dict:
     acc: dict = {}
     for d in dirs:
         for p in sorted(Path(d).glob("*_maps.npz")):
@@ -1251,7 +1254,39 @@ def summarize_maps(dirs: list[Path], frames=(0, 2, 5)) -> dict:
                 continue
             m[c] = {f"f{PLAN_F[j]}": _ascii_map(d[c][:, :, j], d["inside"], n) for j in frames}
         out[tk] = {"n": n, "maps": m}
+        if zones is not None and n:
+            out[tk]["vs_ics"] = _vs_ics(tk, d, n, zones, (anchor_h or {}).get(tk))
     return out
+
+
+def _vs_ics(tk: str, d: dict, n: int, zones: "Zones", a_h: float | None) -> dict:
+    """The support's mean occupancy around a lone idle enemy (the maps) against the ICS of every family it could
+    start (free on the floor row, at rest in the air above it; the type's median anchor height): the mean area per
+    plan frame beyond the body inside / outside the ICS (outside = the false-alarm area) and the ICS's own area
+    beyond the body."""
+    from ssbot.core.forum import FLOOR_Y, FORUM_TYPES
+    from ssbot.knowledge import hitbox_tables as hb
+    sp = FORUM_TYPES[tk]
+    if a_h is None:
+        a_h = 2.0
+    rx, ry = hb.HERO_HALF_U
+    md = json.loads((FORUM_DIR / "support_margins.json").read_text("utf-8"))
+    hull = ((md.get("production_tubes") or {}).get("body_hull") or {}).get(tk) or (-0.5, -0.5, 0.5, 0.5)
+    DX, H = np.meshgrid(REL_DX, REL_H)
+    dy = (FLOOR_Y + hb.HERO_HALF_U[1] + H) - (FLOOR_Y + a_h)
+    body = (np.abs(DX) <= max(abs(hull[0]), hull[2]) + rx) & (dy >= hull[1] - ry) & (dy <= hull[3] + ry)
+    lock = np.where(H < 0.25, 0, 3)
+    ics = zones.occ(tk, sp.idle_family, sp.entry_family, a_h, DX.ravel(), H.ravel(), lock.ravel()).reshape(DX.shape)
+    ins = d["inside"] / n >= 0.5
+    cell = IDLE_U * IDLE_U
+    tot = d["total"]
+    res = {"a_h": round(a_h, 2), "ics_beyond_body_u2": round(float((ics & ~body & ins).sum()) * cell, 2),
+           "in_ics_u2": [], "outside_ics_u2": []}
+    for j in range(tot.shape[2]):
+        occ = tot[:, :, j] / n
+        res["in_ics_u2"].append(round(float((occ * (ics & ~body & ins)).sum()) * cell, 2))
+        res["outside_ics_u2"].append(round(float((occ * (~ics & ~body & ins)).sum()) * cell, 2))
+    return res
 
 
 def summarize_whatif(files: list[Path], close_u: float = 0.35) -> dict:
@@ -1312,12 +1347,15 @@ def summarize_whatif(files: list[Path], close_u: float = 0.35) -> dict:
 
 def cmd_summary(a) -> int:
     res = {}
+    zones = Zones(Path(a.zones)) if a.zones else None
     for d in a.dirs:
         files = sorted(p for p in Path(d).glob("*.json"))
+        idle = summarize_idle(files)
+        ah = {tk: v.get("all", {}).get("h_anchor_p50") for tk, v in idle.items()}
         res[Path(d).name] = {"episodes": len(files), "errors": sum(json.loads(p.read_text("utf-8")).get("n_errors", 0)
                                                                   for p in files),
-                             "idle": summarize_idle(files), "whatif": summarize_whatif(files),
-                             "maps": summarize_maps([Path(d)])}
+                             "idle": idle, "whatif": summarize_whatif(files),
+                             "maps": summarize_maps([Path(d)], zones=zones, anchor_h=ah)}
     Path(a.json).write_text(json.dumps(res, indent=1), "utf-8")
     # the maps as text: per arm, type, layer and plan frame (the enemy's column 'E' at standing height; x from
     # -12 to +12 u, every IDLE_U; rows from standing height up)
@@ -1338,6 +1376,7 @@ def main(argv=None) -> int:
     s = sub.add_parser("summary")
     s.add_argument("dirs", nargs="+")
     s.add_argument("--json", required=True)
+    s.add_argument("--zones", default=None)
     r = sub.add_parser("replay")
     r.add_argument("specs", nargs="+")
     r.add_argument("--out", required=True)
