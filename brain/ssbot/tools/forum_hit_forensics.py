@@ -60,13 +60,21 @@ NEAR_KINDS = ("idle", "collider", "hazard", "death")
 
 # ---- recorded damage colliders ----
 
-def damage_polys(s: dict) -> list[tuple[int, str, str, np.ndarray, tuple]]:
+def damage_polys(s: dict, keep_parked: bool = False) -> list[tuple[int, str, str, np.ndarray, tuple]]:
     """(iid, type key, collider name, world vertices [m, 2], entity velocity) of every enabled damage collider of a
-    STATE (the cache's rule: support_threat, or a multi-hit collider of a multi_wounder entity)."""
+    STATE (the cache's rule: support_threat, or a multi-hit collider of a multi_wounder entity). A later wave's member
+    parked off-stage before its entry (tools.zone_overlay.parked: no render, a Ready / Dormant / Sleep / Wait state)
+    is left out unless keep_parked: its body collider is reported enabled, but it never hurts (task precision push S1:
+    a parked Reed (Fly In Ready) at (39.0-40.1, 9.65-12.45) was 62 of RCLIP's 70 new re-score misses, the person
+    unhurt in every one; the hero box overlapped it in 1,204 frames of the re-score set: s1/parked_check.json and
+    who.log in C:/ssbot/data/m2_forum_push)."""
     from ssbot.ipc.ents import SRC_BITS
     from ssbot.knowledge.behaviour_tables import multi_wounder_threat, support_threat
+    from ssbot.tools.zone_overlay import parked
     out = []
     for e in s.get("ents") or ():
+        if not keep_parked and parked(e):
+            continue
         src = int(e.get("src") or 0)
         vel = tuple(e.get("vel") or (0.0, 0.0))[:2]
         for c in e.get("colliders") or ():

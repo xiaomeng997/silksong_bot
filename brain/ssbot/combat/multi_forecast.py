@@ -90,6 +90,17 @@ PARK = os.environ.get("SSBOT_FORUM_PARK", "1") != "0"
 # oracle view, for an enemy seen within REACH_SEEN_S, not in a hit-reaction forecast; the families whose templates hold
 # thrown hazards (ForumType.spawns) are not clipped. Off (default): as before, bit-identical
 REACH = os.environ.get("SSBOT_FORUM_RCLIP", "0") not in ("", "0")
+# SSBOT_FORUM_RCLIP=2 (task precision push S1, fix_spec P2: the no-hit reach assumes no hit after the origin either):
+# from the first look-ahead frame at which a hit of the hero CAN reach the enemy (any plan row: the gap between the
+# hero box and the enemy's body closed at the dash / fall speed plus the enemy's own speed, less the swing's reach
+# HIT_REACH_U), the clip box also holds the every-frame reach (knockbacks, a defender's counter after a hit); a hit
+# already seen within KB_FREE_F frames takes the every-frame reach throughout, as with 1. 1: the no-hit reach while no
+# hit was seen (before S1)
+REACH_HIT = os.environ.get("SSBOT_FORUM_RCLIP", "0") == "2"
+# u past the hero box a hero hit reaches (x, y): the Reaper's slash 2.35 (hero_reaper_forum.json rpr_thunk_reach1)
+# + 1.65 slack
+HIT_REACH_U = (4.0, 4.0)
+HERO_V_MAX = (28.0, 30.0)  # u/s: the hero's dash speed (kinematics.dash_speed) and its fall cap (max_fall)
 REACH_SEEN_S = 2 * BIN
 REACH_KEEP = frozenset((tk, fam) for tk, sp in FORUM_TYPES.items() for _hz, fams in sp.spawns for fam in fams)
 KB_FREE_F = 20            # frames without a hit seen: the no-knockback reach (combat.reach_table.KB_FREE_F)
@@ -480,6 +491,7 @@ class MultiForecaster:
         self.self_templates = self_templates
         self.tiny_group = tiny_group
         self.reach = REACH                    # SSBOT_FORUM_RCLIP: each enemy's support clipped to its real reach
+        self.reach_hit = REACH_HIT            # SSBOT_FORUM_RCLIP=2: ... widened from a hero hit's first reach on
         self.react: ReactConfig | None = None   # reactive support (ReactConfig; None: as before)
         self.model = _Shim._Model()
         self.query_c = None
@@ -1587,9 +1599,35 @@ class _Builder:
                 continue
             # no knockback in sight (no hit seen for KB_FREE_F frames): the no-hit reach, else every recorded frame's
             part = 1 if self.origin - tr.t_hit > KB_FREE_F * BIN + 1e-9 else 0
-            out[s.iid] = rc.world(tr.tk, tr.state, (tr.seen_T - tr.t_entry) if tr.t_entry is not None else 0.0, part,
-                                  tr.pos, FACES_LEFT[tr.flip], int(round(age / BIN)))
+            args = (tr.tk, tr.state, (tr.seen_T - tr.t_entry) if tr.t_entry is not None else 0.0)
+            W = rc.world(*args, part, tr.pos, FACES_LEFT[tr.flip], int(round(age / BIN)))
+            if part == 1 and getattr(fc, "reach_hit", False):
+                k = self._hero_hit_k(tr)
+                if k < len(W):
+                    A = rc.world(*args, 0, tr.pos, FACES_LEFT[tr.flip], int(round(age / BIN)))
+                    W[k:, :2] = np.minimum(W[k:, :2], A[k:, :2])
+                    W[k:, 2:] = np.maximum(W[k:, 2:], A[k:, 2:])
+            out[s.iid] = W
         return out
+
+    def _hero_hit_k(self, tr: EnemyTracker) -> int:
+        """The first look-ahead frame at which a hit of the hero can reach the enemy (SSBOT_FORUM_RCLIP=2): the gap
+        between the hero box and the enemy's body (its last collider box, else its hull at its position) less
+        HIT_REACH_U, closed at HERO_V_MAX plus the enemy's own speed; 0 when either box is unknown."""
+        ws = getattr(self.fc, "_ws", None)
+        b = tr.body if tr.body is not None else tr.seen_box
+        if b is None and tr.pos is not None and tr.tk in self.tables.tubes.hull:
+            h = self.tables.tubes.hull[tr.tk]
+            b = (tr.pos[0] + h[0], tr.pos[1] + h[1], tr.pos[0] + h[2], tr.pos[1] + h[3])
+        if ws is None or b is None:
+            return 0
+        hx, hy = (float(v) for v in ws.hero.pos.v[:2])
+        ax, ay = self.fc.half
+        gx = max(0.0, b[0] - (hx + ax), (hx - ax) - b[2]) - HIT_REACH_U[0]
+        gy = max(0.0, b[1] - (hy + ay), (hy - ay) - b[3]) - HIT_REACH_U[1]
+        t = max(max(gx, 0.0) / (HERO_V_MAX[0] + abs(float(tr.vel[0]))),
+                max(gy, 0.0) / (HERO_V_MAX[1] + abs(float(tr.vel[1]))))
+        return int(math.floor(t / BIN + 1e-9))
 
 
 def _meta_arrays(m: list[tuple]) -> dict:

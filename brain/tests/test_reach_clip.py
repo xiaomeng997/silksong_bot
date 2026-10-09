@@ -123,3 +123,40 @@ def test_tracker_remembers_the_last_hit():
     _run(b, _script_stab()[:22])                  # hit at f 20
     assert abs(b.trackers[7].t_hit - 20 * BIN) < 1e-9
     assert EnemyTracker.__dataclass_fields__["t_hit"].default == -np.inf
+
+
+def test_clip_widens_from_a_hero_hits_first_reach(monkeypatch):
+    """SSBOT_FORUM_RCLIP=2 (fix_spec P2): no hit seen, the no-hit reach before the first frame a hero hit can reach
+    the enemy, the every-frame reach (knockbacks, counters) from then on."""
+    from types import SimpleNamespace as NS
+    monkeypatch.setattr(reach_table, "R_FLOOR", 0.0)
+    B, N = _box(-0.5, 1.5, -1.0, 1.0)
+    B[:, 0, :, 1] = 3.0                                   # part 0 (every frame): 3 u forward; part 1 (no hit): 1.5 u
+    st = {(REED, s): (B, N) for s in ("Alert", "Stab Pos", "Stab 1", "Stab Recover")}
+    tab = _table(st, {(REED, "Alert"): "RE_IDLE", (REED, "Stab Pos"): "RE_STAB", (REED, "Stab 1"): "RE_STAB",
+                      (REED, "Stab Recover"): "RE_STAB"})
+    rc = ReachClip(tab, {(REED, "*", NT, p, b): 0.0 for p in (0, 1) for b in CLIP_BANDS}, (0.25, 1.04))
+    rc.skip = frozenset()
+    monkeypatch.setattr(mfm, "reach_clip", lambda half: rc)
+    script = _script_stab()
+    hit_k = mfm._Builder._hero_hit_k
+    edges = {}
+    for hit in (False, True):
+        b = MultiForecaster(_tables(), ORACLE, waves=False)
+        b.reach, b.reach_hit = True, hit
+        _run(b, script[:17])
+        monkeypatch.setattr(mfm._Builder, "_hero_hit_k", lambda self, tr: 5)
+        tr = b.trackers[7]
+        edges[hit] = b.forecast(0.8).clip[7][:20, 2] - tr.pos[0] - b.half[0]
+    assert np.allclose(edges[False], 1.5)
+    assert np.allclose(edges[True][:5], 1.5) and np.allclose(edges[True][5:], 3.0)
+    # the first reach: the box gap less HIT_REACH_U, closed at the hero's top speed plus the enemy's
+    fc = NS(_ws=NS(hero=NS(pos=NS(v=(0.0, 5.0)))), half=(0.25, 1.0))
+    me = NS(fc=fc, tables=NS(tubes=NS(hull={})))
+    far = NS(body=(10.25 + mfm.HIT_REACH_U[0] + 0.0, 4.0, 11.0, 6.0), seen_box=None, pos=(10.6, 5.0), tk=REED,
+             vel=(-2.0, 0.0))
+    k = hit_k(me, far)               # 10 u to close at 28 + 2 u/s: 0.333 s
+    assert k == int(np.floor(10.0 / (mfm.HERO_V_MAX[0] + 2.0) / BIN + 1e-9))
+    near = NS(body=(1.0, 4.0, 2.0, 6.0), seen_box=None, pos=(1.5, 5.0), tk=REED, vel=(0.0, 0.0))
+    assert hit_k(me, near) == 0
+    assert hit_k(me, NS(body=None, seen_box=None, pos=None, tk=REED, vel=(0.0, 0.0))) == 0

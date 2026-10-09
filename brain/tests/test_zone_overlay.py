@@ -146,3 +146,16 @@ def test_screen_share_of_the_grid_and_the_dome():
     j = int(np.argmin(np.abs(g.xs - 31.5)))           # under the dome's top the whole column is inside
     assert g.inside[:, j].all() and not g.inside[-1, 0]
     assert g.ys[g.inside[:, 0]].max() <= dome_y(float(g.xs[0])) - 1.0
+
+
+def test_rescore_truth_skips_parked_members():
+    """forum_hit_forensics.damage_polys (the re-score's recorded colliders, task precision push S1): a parked
+    later-wave member's enabled body collider never hurts; keep_parked keeps it."""
+    from ssbot.tools.forum_hit_forensics import damage_polys
+    col = {"name": "Song Reed", "verts_world": [0, 0, 1, 0, 1, 1, 0, 1], "enabled": True,
+           "damage": {"dealt": 1, "parry": 4}}
+    parked = {"iid": 5, "type_key": "Song Reed", "fsms": [{"name": "Control", "state": "Fly In Ready"}],
+              "render_aabb": None, "colliders": [col]}
+    shown = dict(parked, iid=6, render_aabb=[0, 0, 1, 1])
+    assert [p[0] for p in damage_polys({"ents": [parked, shown]})] == [6]
+    assert [p[0] for p in damage_polys({"ents": [parked, shown]}, keep_parked=True)] == [5, 6]
