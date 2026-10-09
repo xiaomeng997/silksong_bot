@@ -282,6 +282,14 @@ class ForumConfig:
         return self.escape and "k" in self.react.strip().lower().split("+")[1:]
 
     @property
+    def seen_sweep(self) -> bool:
+        """"+s" (task forum push 2 track B, the Reed's pins): FORCED_RISK's seen key tests a fast polygon (a flying
+        pin) a frame early and late too (seen_contacts_swept), and counts a row that meets an aimed pin not thrown yet
+        (pin_aim) as a seen contact: the pin hits all came in FORCED_RISK, where the aimed check's S = 1 changes
+        nothing and the seen key let rows graze the pin's predicted tip (forum.md 24.3)."""
+        return "s" in self.react.strip().lower().split("+")[1:]
+
+    @property
     def light_cone(self) -> bool:
         """"+l" (escape only): the escape check also asks that the plan's end has a way out of the committed
         must-escape placements with a known timing past the horizon (ForumPlanner._light_cone_occ, forum.md §23)."""
@@ -404,6 +412,47 @@ def seen_contacts(box, inv, verts, starts, pbox, vel, tk, rows, grow):
                     if first[c] == T1:
                         first[c] = k
                     break
+    return cnt, first
+
+
+# "+s" (task forum push 2 track B, the Reed's pins: forum.md 24.3, all in FORCED_RISK): a seen polygon this fast is
+# tested a frame early and late as well (its timing: the export lags a frame now and then, a pin flies 0.5 u a frame;
+# the chosen rows grazed the pin's predicted tip and were hit)
+SEEN_SWEEP_MIN_U_S = 15.0
+
+
+@numba.njit(cache=True, parallel=True)
+def seen_contacts_swept(box, inv, verts, starts, pbox, vel, tk, rows, grow, lag, vmin):
+    """seen_contacts with the polygons at least vmin u/s fast also tested at tk[k] - lag and tk[k] + lag."""
+    N, T1 = box.shape[0], box.shape[1]
+    n_p = len(starts) - 1
+    cnt = np.zeros(N, np.int64)
+    first = np.full(N, T1, np.int64)
+    for m in numba.prange(len(rows)):
+        c = rows[m]
+        for k in range(1, T1):
+            if inv[c, k]:
+                continue
+            x0, y0, x1, y1 = box[c, k, 0] - grow, box[c, k, 1] - grow, box[c, k, 2] + grow, box[c, k, 3] + grow
+            hit = False
+            for p in range(n_p):
+                fast = vel[p, 0] * vel[p, 0] + vel[p, 1] * vel[p, 1] >= vmin * vmin
+                for j in range(3):
+                    if j != 1 and not fast:
+                        continue
+                    t = tk[k] + (j - 1) * lag
+                    dx, dy = vel[p, 0] * t, vel[p, 1] * t
+                    if pbox[p, 0] + dx > x1 or pbox[p, 2] + dx < x0 or pbox[p, 1] + dy > y1 or pbox[p, 3] + dy < y0:
+                        continue
+                    if _rect_meets_polys(x0, y0, x1, y1, verts, starts[p:p + 2], dx, dy):
+                        hit = True
+                        break
+                if hit:
+                    break
+            if hit:
+                cnt[c] += 1
+                if first[c] == T1:
+                    first[c] = k
     return cnt, first
 
 
@@ -1898,10 +1947,18 @@ class ForumPlanner(Planner):
                             inv1[r_] |= m_[:inv1.shape[1]]
                 verts, starts, pbox, pvel = seen_polys(ws)
                 if len(pbox):
-                    cnt, fst = seen_contacts(np.ascontiguousarray(r1.box, np.float64), np.ascontiguousarray(inv1),
-                                             verts, starts, pbox, pvel, np.ascontiguousarray(tk, np.float64),
-                                             np.ascontiguousarray(cand, np.int64), 0.0)
+                    args = (np.ascontiguousarray(r1.box, np.float64), np.ascontiguousarray(inv1), verts, starts, pbox,
+                            pvel, np.ascontiguousarray(tk, np.float64), np.ascontiguousarray(cand, np.int64), 0.0)
+                    cnt, fst = seen_contacts_swept(*args, self.params.frame_time, SEEN_SWEEP_MIN_U_S) \
+                        if fcfg.seen_sweep else seen_contacts(*args)
                     sk_n[cand], sk_f[cand] = cnt[cand], fst[cand]
+                if fcfg.seen_sweep and pins:
+                    # "+s": a row meeting an aimed pin (not thrown yet) is a seen contact too
+                    pk = self._pin_contacts(pins, r1, cand, tk, enemy_only)
+                    hitp = pk >= 0
+                    sk_n[cand[hitp]] += 1
+                    sk_f[cand[hitp]] = np.minimum(sk_f[cand[hitp]], pk[hitp])
+                    self.audit.pin_rows += int(hitp.sum())
                 if fcfg.forced_rank == "seen_cf":
                     sk_c[cand] = committed_fine_share(f, r1.box, inv1, cand, fr, tk)
             if o_cm is not None:

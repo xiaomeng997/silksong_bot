@@ -401,9 +401,34 @@ def test_a_tick_with_the_new_switches(params, arena, body_only):
     from ssbot.knowledge import kinematics as kin
     from tests.test_forum_planner import FLOOR, _prefs, _reed_forecaster, _world
     mf = _reed_forecaster(None, frames=3, x=25.0)
-    mf.react = ReactConfig.parse("escape+n+g+br+k")
+    mf.react = ReactConfig.parse("escape+n+g+br+k+s")
     pl = ForumPlanner(params, arena, PlannerConfig(T=36, threads=2, variants="bounds_lo"),
-                      ForumConfig(deadline_ms=math.inf, chunk=16, react="escape+n+g+br+k", waits=True))
+                      ForumConfig(deadline_ms=math.inf, chunk=16, react="escape+n+g+br+k+s", waits=True))
     r = pl.tick(_world(20.0), kin.initial_state(params, 20.0, FLOOR + params.foot), kin.HoldState.idle(1),
                 np.zeros(1, np.int64), mf.forecast(0.8), _prefs(), _ctx())
     assert r is not None and len(pl.fsets["ground"][0].cmd) == 399 + 32 and pl.last_info["esc"] is not None
+
+
+def test_swept_seen_key_catches_a_pin_tip_a_frame_off():
+    """+s: a polygon at least SEEN_SWEEP_MIN_U_S fast meets a row a frame early / late too (a pin 30 u/s, the row 0.3 u
+    past its predicted tip); a slow one is tested as before."""
+    from ssbot.combat.forum_planner import SEEN_SWEEP_MIN_U_S, seen_contacts, seen_contacts_swept
+    assert ForumConfig(react="escape+n+s").seen_sweep and not ForumConfig(react="escape+n").seen_sweep
+    dt = 1.0 / 60.0
+    T1 = 6
+    tk = np.arange(T1) * dt
+    verts = np.array([[0.0, 0.0], [2.0, 0.0], [2.0, 0.1], [0.0, 0.1]])
+    starts = np.array([0, 4], np.int64)
+    pbox = np.array([[0.0, 0.0, 2.0, 0.1]])
+    inv = np.zeros((1, T1), bool)
+    rows = np.array([0], np.int64)
+    for v, swept in ((30.0, True), (5.0, False)):
+        tip = 2.0 + v * tk[-1]                                  # the tip's farthest reach over the plan
+        box = np.zeros((1, T1, 4))
+        box[0, :] = (tip + min(0.3, 0.6 * v * dt), -0.5, tip + 1.0, 0.5)
+        vel = np.array([[v, 0.0]])
+        n0, _ = seen_contacts(box, inv, verts, starts, pbox, vel, tk, rows, 0.0)
+        n1, f1 = seen_contacts_swept(box, inv, verts, starts, pbox, vel, tk, rows, 0.0, dt, SEEN_SWEEP_MIN_U_S)
+        assert n0[0] == 0 and (n1[0] > 0) == swept
+        if swept:
+            assert f1[0] == T1 - 1

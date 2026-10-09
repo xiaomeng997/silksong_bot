@@ -171,14 +171,16 @@ class ReactConfig:
         """'off' / '' -> None; 'delay' (or 'escape': the planner's layer over the same support) with '+'-joined
         extensions c (committed), i (idle), p5 (exceptions), n (not-started out), g (idle growth held), b / br (body-
         only families not started out, with n); l (the planner's light cone in its escape check,
-        ForumConfig.light_cone), a (the planner's aimed pins, ForumConfig.pin_aim) and k (the planner's lock checks,
-        ForumConfig.lock_check): no change to the support."""
+        ForumConfig.light_cone), a (the planner's aimed pins, ForumConfig.pin_aim), k (the planner's lock checks,
+        ForumConfig.lock_check) and s (FORCED_RISK's swept seen key, ForumConfig.seen_sweep): no change to the
+        support."""
         toks = [t for t in (s or "").strip().lower().split("+") if t]
         if not toks or toks[0] == "off":
             return None
         if toks[0] not in ("delay", "escape"):
-            raise ValueError(f"reactive support {s!r}: off | delay | escape [+c][+i][+p5][+n][+g][+b|+br][+l][+a][+k]")
-        bad = set(toks[1:]) - {"c", "i", "p5", "n", "g", "l", "a", "b", "br", "k"}
+            raise ValueError(f"reactive support {s!r}: off | delay | escape [+c][+i][+p5][+n][+g][+b|+br][+l][+a][+k]"
+                             f"[+s]")
+        bad = set(toks[1:]) - {"c", "i", "p5", "n", "g", "l", "a", "b", "br", "k", "s"}
         if bad:
             raise ValueError(f"reactive support {s!r}: unknown extension(s) {sorted(bad)}")
         if ("b" in toks or "br" in toks) and "n" not in toks:
