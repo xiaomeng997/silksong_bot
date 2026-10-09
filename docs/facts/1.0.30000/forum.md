@@ -2838,6 +2838,8 @@ base = 第 5 轮推荐配置（所有新开关关）；+A = `SSBOT_FORUM_TA=all`
 
 ### 28.3 实战 A/B（一轮，三臂轮转；第一部分 = 你 22:18 的 DEMO_SOON 之前）
 
+**勘误（核对者，2026-10-08 23:50；修正未做，见 HANDOFF 本节 Review fixes）**：(1) 不是 0 次 HARNESS_FAIL，有 5 次大脑掉线看门狗（R 3、N 1、R1 1，都是 51–139 s 的长局），`forum_ab_summary` 把它们滤掉了，存活均值偏低（R 最多）；(2) 无伤波数 0 / 6 / 9 和它显著的配对 CI 是假象：全是索引 2（remainingEnemyToEnd 2，约 1.5 s 后索引 3 就开始）那段，没有哪一臂有真正的无伤波；(3) 砍中数含加蒙德 / Cogfly（计划 0322fcf），只看第 0 波等效失血 N / R / R1 = 4.89 / 4.06 / 3.48、配对差 −0.11（CI −1.51..1.31，不显著）；(4) "Choristor 击杀 33 → 10 指向 whip"、"edge 首要嫌疑" 没有依据（没打过第 0 波的局里 N 杀 Choristor 反而更多，差别来自波次进度；N 的迟到比例高 10 个点，算力混杂），按单个 token 的原因未知。站得住的只有第 0 波通关（McNemar 12 比 1，p 0.003）和存活（+9.4 s）。
+
 Forum_W（漫游）、eval、planner、oracle、真退出 0.2；实例 0–4 各一个驱动（`C:\ssbot\sandbox\fp2_live.ps1`），每块三臂各 5 场、按块和实例轮转顺序，块种子 371000 + 200 × 实例 + 5 × 块（配对 = 同实例、同块种子、同场序号）。
 - **R** = 第 5 轮推荐配置（seen_cf、escape+n+g、按状态余量、clash main、击杀修正），冻结基线 0cac216；
 - **N** = R + A 轨全部记号（`SSBOT_FORUM_TA=all`：free、whip、guard、edge、under、eml、kb）+ B 轨全部开关（`escape+n+g+b+k+s`、`SSBOT_FORUM_WAITS=1`），冻结合并 c54d210；

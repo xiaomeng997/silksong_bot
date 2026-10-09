@@ -3538,3 +3538,28 @@ A), -073-3 (6a556db, track B).
 3. Load: late ticks 0.53-0.67 this round (round 5 ~0.13) with another agent's `forum_escape_search` running; N's extra
    compute (late +10 points) is penalised more. Check the machine before the next live A/B.
 4. Frozen checkouts made here: `C:\ssbot\live_fp2_0cac216`, `C:\ssbot\live_fp2_c54d210` (keep for part 2).
+
+### Review fixes: STOPPED before any fix (weekly usage 50 %, 2026-10-08 23:50)
+
+The reviewer's verdict refuted three claims of this section and of forum.md 28.3 / 28.4 and the plan note; none of
+the fixes below is done yet. Read these as errata until they are:
+- **"0 HARNESS_FAIL" is wrong**: 5 brain-lost watchdog HARNESS_FAILs ('paused unasked', 51-139 s episodes): R 3
+  (371600 i3 ep3, 371810 i4 ep1, 371010 i0 ep3), N 1 (371805 i4 ep4), R1 1 (371810 i4 ep3). `forum_ab_summary.row()`
+  drops them before `outcomes`, so survival means are biased down (most for R).
+- **"Hitless waves 0 / 6 / 9" and their significant paired CIs are an artifact**: `waves_cleared()` counts index 2
+  (remainingEnemyToEnd 2, index 3 starts ~1.5 s later) as cleared; every hitless wave was that window. No arm had a
+  hitless real wave. Fix: merge each overlapping wave with its successor ({2,3}, {4,5}, {9,10}; WaveSim adds the next
+  wave's enemies to currentEnemies, so the group is cleared when the wave after it starts) and count hits over the group.
+- **"Choristor kills 33 -> 10 point at whip" and "edge is the prime suspect" are unsupported**: in episodes that never
+  cleared wave 0, N killed more Choristors (7 / 96) than R (3 / 82); the deficit is wave progress (and R's 33 include
+  Garmond's kills). The per-token cause is unknown; N's late share is 10 points higher (compute confound).
+- **Hits landed include Garmond / Cogfly** (plan commit 0322fcf): count only `src in forum_demo.HERO_ATTACKS` with
+  `dealt > 0` (hit events have no `blocked` field) as hero landed, report team output apart. Wave 0 only: eff/min
+  N / R / R1 4.89 / 4.06 / 3.48, paired wave-0 eff R - N -0.11 (CI -1.51..1.31): not significant.
+- Significant results that stand: wave-0 clears (McNemar 12 vs 1 discordant, p 0.003) and survival (+9.4 s).
+Code findings still open: track A `kb` uses the median knockback with no wall clamp (use p5 or the union of pushed /
+unpushed supports in the hit branch); `free` lets i3_kill_allowed pass at h >= 2, so the final blow can enter
+EnemyBattleEndSlow uncertified (keep h >= 3 / full HP for the battle's final blow under free; ask the person); the whip
+clash penalty subtracts the row's hits on all targets, not only the Choristor; gauntlet `_guard_rule` scores the
+down-slash trigger for a lone Minister in stance at mid band (rule 3: wait); forum.md 27.1 calls the Minister counter
+"冲刺斩" (it is the Parry counter lunge). Then re-run `forum_ab_summary --landed` and correct 28.3 / 28.4 / plan sec. 5.
