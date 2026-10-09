@@ -86,6 +86,7 @@ SHORT_NAMES = {"Song Reed": "Reed", "Song Pilgrim 01": "Envoy", "Song Administra
 CERTAIN_P = 0.999                 # yellow: only the placements of branches the walk takes for sure
 LOCK_LAT = {0: LAT_F, 1: LAT_F + 6, 2: LAT_F + 6, 3: LAT_F}   # not-started yellow: free / attack / dash / air
 NS_U = 24.0                       # the not-started lower bound's half width (u) around the anchor
+THROWS = frozenset({"CB_THROW", "RE_THROW", "CC_CAST"})   # yellow: their thrown objects are the hazard layer's
 # a distinct colour per enemy (BGR) for its outlines, by name order
 ENEMY_COLORS = ((255, 120, 60), (60, 200, 255), (120, 255, 120), (255, 90, 220), (90, 140, 255), (255, 255, 90),
                 (180, 120, 255), (60, 255, 200), (200, 200, 255), (255, 170, 170))
@@ -515,6 +516,9 @@ class ZoneEngine:
                 # an aimed family before its aim state: where it strikes follows the hero, nothing is certain yet (the
                 # planner keeps the family's union; its body is red)
                 sel &= fams != cur.family
+            # the throws' templates hold the bells / pins / runes of earlier instances still in flight (forum.md §26-ICS
+            # re-arms): those are the hazard layer's (their paths), not this attack's certain cells
+            sel &= ~np.isin(fams, list(THROWS))
             if not sel.any():
                 continue
             if GX is None:
@@ -543,7 +547,7 @@ class ZoneEngine:
                 continue
             # the commit-now lower bound of every attack family it can start (the aimed ones excluded: where they
             # strike follows the hero); its thrown hazards (bells, pins, runes) are the hazard layer's, not here
-            fl = sorted(set(tr.table.attack_starts.values()) - {sp.idle_family, sp.entry_family}
+            fl = sorted(set(tr.table.attack_starts.values()) - {sp.idle_family, sp.entry_family} - THROWS
                         - {f for t_, f in aimed if t_ == s.type_key})
             age = fcast.origin_t - tr.seen_T
             shown = False
