@@ -1,4 +1,4 @@
-﻿"""Idle enemies: the inescapable zone of an attack committed now (task "idle enemies: the inescapable zone", forum.md
+"""Idle enemies: the inescapable zone of an attack committed now (task "idle enemies: the inescapable zone", forum.md
 Â§26; the person 2026-10-08). Measurement only: nothing here changes the planner or the forecast.
 
 The person's definition: an enemy that has not started an attack needs no dodging. For each attack it could start,
@@ -1180,9 +1180,164 @@ def cmd_replay(a) -> int:
     return 0
 
 
+# ------------------------------------------------------------------------------------------------ summary
+
+
+def _ascii_map(occ: np.ndarray, inside: np.ndarray, n: int) -> list[str]:
+    """Rows (top = highest) of the share of ticks a cell was occupied: '#' >= 50 %, '+' >= 10 %, '.' less, ' '
+    outside the arena; 'E' the enemy's column at standing height."""
+    out = []
+    j0 = int(np.argmin(np.abs(REL_DX)))
+    for i in range(occ.shape[0] - 1, -1, -1):
+        s = []
+        for j in range(occ.shape[1]):
+            v = occ[i, j] / max(n, 1)
+            ins = inside[i, j] / max(n, 1)
+            ch = " " if ins < 0.5 else ("#" if v >= 0.5 else "+" if v >= 0.1 else ".")
+            if i == 0 and j == j0 and ch == ".":
+                ch = "E"
+            s.append(ch)
+        out.append("".join(s))
+    return out
+
+
+def summarize_idle(files: list[Path]) -> dict:
+    by = defaultdict(list)
+    for p in files:
+        d = json.loads(p.read_text("utf-8"))
+        for r in d.get("idle") or ():
+            by[r["tk"]].append(r)
+    out = {}
+    for tk, rs in sorted(by.items()):
+        lone = [r for r in rs if r["others8"] == 0]
+        res = {"ticks": len(rs), "lone_ticks": len(lone)}
+        for tag, sub in (("all", rs), ("lone", lone)):
+            if not sub:
+                continue
+            row = {}
+            for c in ("total",) + IDLE_CATS:
+                a = np.array([r[c] for r in sub])          # [n, F, 2]
+                row[c] = {"area_mean_u2": [round(float(x), 2) for x in a[:, :, 0].mean(axis=0)],
+                          "area_p50_u2": [round(float(x), 2) for x in np.median(a[:, :, 0], axis=0)],
+                          "dmax_p50_u": [round(float(x), 2) for x in np.median(a[:, :, 1], axis=0)],
+                          "dmax_p90_u": [round(float(x), 2) for x in np.percentile(a[:, :, 1], 90, axis=0)],
+                          "share_nonzero": [round(float(x), 3) for x in (a[:, :, 0] > 0).mean(axis=0)]}
+            row["only_mean_u2"] = {c: [round(float(x), 2) for x in np.mean([r["only"][c] for r in sub], axis=0)]
+                                   for c in IDLE_CATS if c != "margins"}
+            row["own_q_vs_total_max_diff_u2"] = round(float(max(abs(np.array(r["own_q"])[:, 0]
+                                                                 - np.array(r["total"])[:, 0]).max() for r in sub)), 3)
+            row["h_anchor_p50"] = round(float(np.median([r["h_anchor"] for r in sub])), 2)
+            res[tag] = row
+        out[tk] = res
+    return out
+
+
+def summarize_maps(dirs: list[Path], frames=(0, 2, 5)) -> dict:
+    acc: dict = {}
+    for d in dirs:
+        for p in sorted(Path(d).glob("*_maps.npz")):
+            z = np.load(p)
+            for k in z.files:
+                tk, c = k.split("|")
+                v = z[k]
+                cur = acc.setdefault(tk, {})
+                cur[c] = cur.get(c, 0) + v
+    out = {}
+    for tk, d in acc.items():
+        n = int(np.asarray(d.get("n", [0])).ravel()[0])
+        m = {}
+        for c in ("total", "body", "not_started", "margins"):
+            if c not in d:
+                continue
+            m[c] = {f"f{PLAN_F[j]}": _ascii_map(d[c][:, :, j], d["inside"], n) for j in frames}
+        out[tk] = {"n": n, "maps": m}
+    return out
+
+
+def summarize_whatif(files: list[Path], close_u: float = 0.35) -> dict:
+    out = {}
+    for p in files:
+        d = json.loads(p.read_text("utf-8"))
+        src = "human" if d.get("kind") == "human" else "bot"
+        acc = out.setdefault(src, {"ticks": 0, "pl_forced": 0, "fr_now": 0, "fr_l1": 0, "fr_wi": 0,
+                                   "keys": 0, "k_now": 0, "k_l1": 0, "k_wi": 0, "k_ics_only": 0,
+                                   "k_now_fa": 0, "k_l1_fa": 0, "k_wi_fa": 0, "k_hit": 0, "k_now_miss": 0,
+                                   "k_l1_miss": 0, "k_wi_miss": 0, "rows": 0, "rows_safe_now": 0,
+                                   "rows_safe_l1": 0, "rows_safe_wi": 0, "by_wave": {}})
+        for w in d.get("whatif") or ():
+            if not w["R"]:
+                continue
+            acc["ticks"] += 1
+            acc["pl_forced"] += int(w["forced"])
+            acc["fr_now"] += int(w["safe_now"] == 0)
+            acc["fr_l1"] += int(w["safe_l1"] == 0)
+            acc["fr_wi"] += int(w["safe_wi"] == 0)
+            acc["rows"] += w["R"]
+            for k in ("now", "l1", "wi"):
+                acc[f"rows_safe_{k}"] += w[f"safe_{k}"]
+            bw = acc["by_wave"].setdefault(str(w.get("wave")), [0, 0, 0, 0, 0])
+            bw[0] += 1
+            bw[1] += int(w["forced"])
+            bw[2] += int(w["safe_now"] == 0)
+            bw[3] += int(w["safe_l1"] == 0)
+            bw[4] += int(w["safe_wi"] == 0)
+            if "keys" in w and w.get("kerr18") is not None and w["kerr18"] <= close_u:
+                a, b, c, e = w["keys"]
+                hit = w["khind"] >= 0
+                acc["keys"] += 1
+                acc["k_hit"] += int(hit)
+                for nm, v in (("now", a), ("l1", b), ("wi", c)):
+                    acc[f"k_{nm}"] += int(v)
+                    acc[f"k_{nm}_fa"] += int(v and not hit)
+                    acc[f"k_{nm}_miss"] += int((not v) and hit)
+                acc["k_ics_only"] += int(e)
+    for src, a in out.items():
+        t = max(a["ticks"], 1)
+        k = max(a["keys"], 1)
+        a["share"] = {"pl_forced": round(a["pl_forced"] / t, 4), "forced_now": round(a["fr_now"] / t, 4),
+                      "forced_l1": round(a["fr_l1"] / t, 4), "forced_wi": round(a["fr_wi"] / t, 4),
+                      "rows_safe_now": round(a["rows_safe_now"] / max(a["rows"], 1), 4),
+                      "rows_safe_l1": round(a["rows_safe_l1"] / max(a["rows"], 1), 4),
+                      "rows_safe_wi": round(a["rows_safe_wi"] / max(a["rows"], 1), 4)}
+        if a["keys"]:
+            a["share"].update({f"keys_unsafe_{n}": round(a[f"k_{n}"] / k, 4) for n in ("now", "l1", "wi")})
+            a["share"].update({f"keys_fa_of_unsafe_{n}": round(a[f"k_{n}_fa"] / max(a[f"k_{n}"], 1), 4)
+                               for n in ("now", "l1", "wi")})
+            a["share"].update({f"keys_miss_of_safe_{n}": round(a[f"k_{n}_miss"] / max(a["keys"] - a[f"k_{n}"], 1), 4)
+                               for n in ("now", "l1", "wi")})
+            a["share"]["keys_hit"] = round(a["k_hit"] / k, 4)
+            a["share"]["keys_ics_only"] = round(a["k_ics_only"] / k, 4)
+    return out
+
+
+def cmd_summary(a) -> int:
+    res = {}
+    for d in a.dirs:
+        files = sorted(p for p in Path(d).glob("*.json"))
+        res[Path(d).name] = {"episodes": len(files), "errors": sum(json.loads(p.read_text("utf-8")).get("n_errors", 0)
+                                                                  for p in files),
+                             "idle": summarize_idle(files), "whatif": summarize_whatif(files),
+                             "maps": summarize_maps([Path(d)])}
+    Path(a.json).write_text(json.dumps(res, indent=1), "utf-8")
+    # the maps as text: per arm, type, layer and plan frame (the enemy's column 'E' at standing height; x from
+    # -12 to +12 u, every IDLE_U; rows from standing height up)
+    lines = []
+    for arm, r in res.items():
+        for tk, m in r["maps"].items():
+            for c, fr in m["maps"].items():
+                for f, rows in fr.items():
+                    lines += [f"== {arm} | {tk} | {c} | plan frame {f[1:]} | {m['n']} idle ticks", *rows, ""]
+    Path(a.json).with_suffix(".maps.txt").write_text("\n".join(lines), "utf-8")
+    print(f"wrote {a.json}")
+    return 0
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
+    s = sub.add_parser("summary")
+    s.add_argument("dirs", nargs="+")
+    s.add_argument("--json", required=True)
     r = sub.add_parser("replay")
     r.add_argument("specs", nargs="+")
     r.add_argument("--out", required=True)
@@ -1207,6 +1362,8 @@ def main(argv=None) -> int:
         return cmd_zones(a)
     if a.cmd == "replay":
         return cmd_replay(a)
+    if a.cmd == "summary":
+        return cmd_summary(a)
     return 1
 
 
