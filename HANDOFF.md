@@ -3187,6 +3187,8 @@ Main 70f8324 + `forum-integration-1008` (6dce435) merged first. Facts: forum.md 
   5506b86, same env, seeds 365000, `sum_round5.json`): wave-0 clears 18 vs 19, time alive / kills / hits a minute
   equal (paired all n.s.: +0.8 s, +0.14 kills, -0.23 hits / min), support-outside 0 / 0, hits with an S = 0 plan in
   the 30 frames before 15 -> 9 (at 30 frames 14 -> 5), clean-clash rows followed by a hit within 30 frames 0.
+- Tests (5506b86, NUMBA_NUM_THREADS 4, below normal): full suite 1268 passed, 2 skipped, 1 xfailed (6 new tests in
+  tests/test_three_layer.py, one assert changed: `+n` now implies the aimed pins).
 - Bell Beast: no module on its path imports a changed file (forecast.py mentions multi_forecast in a comment only):
   tick-identical by construction, not re-run.
 - Not done: the clash-safety rule "the Wanderer's own clash rows (n_eff >= min_n)" (review low): the step that read
