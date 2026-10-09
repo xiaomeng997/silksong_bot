@@ -3477,8 +3477,8 @@ A), -073-3 (6a556db, track B).
 - Conflicts: plan sec. 5 (main's two new notes kept, the base's newer "fixed offline check" paragraph replaced main's
   older one); `forum_planner.py` (union: track A's `TA_TOKENS` / `parse_ta` / `TA_ENV` and track B's `WAITS_ON`; audit
   fields `whip_clash_rows` / `kb_rows` and `bind_threat`); forum.md (both tracks wrote section 26: **track B is now
-  section 27**, its 26.x headings and the internal "26.x" references renumbered; the track sections of this HANDOFF and
-  the code comments that say "forum.md 26" for track B mean 27); HANDOFF (both track sections kept whole).
+  section 27**, its 26.x headings and the internal "26.x" references renumbered; the track B section of this HANDOFF says 26.x for
+  27.x; its one code reference, in multi_forecast, renumbered); HANDOFF (both track sections kept whole).
 - Tests (c54d210, NUMBA_NUM_THREADS 4, below normal): full suite 1316 passed, 2 skipped, 1 xfailed.
 - Bell Beast bit-identical with the Forum switches off: frozen base `C:\ssbot\live_fp2_0cac216` vs frozen merge
   `C:\ssbot\live_fp2_c54d210`, `20261003_144536_BellBeast_eval_planner_oracle` i4_000, 3,000 frames: oracle view 3,001 /
