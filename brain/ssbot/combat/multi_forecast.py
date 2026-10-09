@@ -101,6 +101,18 @@ REACH_HIT = os.environ.get("SSBOT_FORUM_RCLIP", "0") == "2"
 # + 1.65 slack
 HIT_REACH_U = (4.0, 4.0)
 HERO_V_MAX = (28.0, 30.0)  # u/s: the hero's dash speed (kinematics.dash_speed) and its fall cap (max_fall)
+# SSBOT_FORUM_PRESTRIKE (task precision push S1, fix_spec P1): with "+n" an attack root of PRESTRIKE_FAMS not started is
+# out of the support, and nothing but another family's not-started box held the enemy's own body in the attack's
+# first frames (the Reed's RE_STAB: 21 u/s in Stab Antic while the exported velocity is about 4 u/s; 4.42 u toward
+# the hero, 5.20 u up / down; RE_DEFEND 5.37 u away, 4.63 u up; its own attack collider only 35-39 frames after the
+# start). On: from the root's earliest start to its latest start + PRESTRIKE_F frames, the enemy's real reach from its
+# current state and time in state (combat.reach_table, built on the dev fights: every recorded continuation's
+# colliders k frames later, + the held-out r + the hero half extents; the every-frame part, hits included), as a box
+# of kind "prestrike" (the not_started layer); the oracle view only (the table's reach needs the transform)
+PRESTRIKE = os.environ.get("SSBOT_FORUM_PRESTRIKE", "0") not in ("", "0")
+PRESTRIKE_FAMS = frozenset({("Song Reed", "RE_STAB"), ("Song Reed", "RE_DEFEND")})
+PRESTRIKE_F = 13          # frames after the start: the body moves before the first own attack collider
+BOX_KINDS = ("death", "arena", "idle", "collider", "hazard", "prestrike")
 REACH_SEEN_S = 2 * BIN
 REACH_KEEP = frozenset((tk, fam) for tk, sp in FORUM_TYPES.items() for _hz, fams in sp.spawns for fam in fams)
 KB_FREE_F = 20            # frames without a hit seen: the no-knockback reach (combat.reach_table.KB_FREE_F)
@@ -492,6 +504,7 @@ class MultiForecaster:
         self.tiny_group = tiny_group
         self.reach = REACH                    # SSBOT_FORUM_RCLIP: each enemy's support clipped to its real reach
         self.reach_hit = REACH_HIT            # SSBOT_FORUM_RCLIP=2: ... widened from a hero hit's first reach on
+        self.prestrike = PRESTRIKE            # SSBOT_FORUM_PRESTRIKE: the pre-strike reach of a not-started root
         self.react: ReactConfig | None = None   # reactive support (ReactConfig; None: as before)
         self.model = _Shim._Model()
         self.query_c = None
@@ -1174,6 +1187,7 @@ class _Builder:
         body_reach = (ns is not None and rc.bodyreach and (rc.bodyreach_all or tt.tk not in BODYREACH_KEEP)
                       and idle_tube and self.fc.collider_tube and T - tr.seen_T <= TUBE_MAX_AGE_S and wake is None
                       and (tr.seen_box is not None or (tr.pos is not None and tt.tk in tubes.hull)))
+        pre = None                                    # SSBOT_FORUM_PRESTRIKE: [earliest, latest] start dropped
         for nd in roots:
             lo, hi = max(ref + nd.lo - T, BIN), max(ref + nd.hi - T, BIN)
             if lo > H + BIN:
@@ -1184,6 +1198,8 @@ class _Builder:
                 continue                              # reactive support, idle: the tube holds its idle body
             if ns is not None and nd.family != sp.entry_family and (nd.family == sp.idle_family
                                                                     or (tt.tk, nd.family) in ns):
+                if (tt.tk, nd.family) in PRESTRIKE_FAMS:
+                    pre = (lo, hi) if pre is None else (min(pre[0], lo), max(pre[1], hi))
                 continue                              # reactive support, not started: the escape check holds it
             if body_reach and nd.family != sp.idle_family and (tt.tk, nd.family) in self.body_only:
                 continue                              # "+b": the collider tube holds its reaction window, the escape
@@ -1200,6 +1216,8 @@ class _Builder:
                 wid = self.fc.family_walk_id(tt, nd.family, nd.start, "world_all")
                 if wid is not None:
                     self._bbox(wid, lo, hi, 0.0, 0.0, 0.0, 0.0, 1, tr.iid, nd.family, False, nd.p)
+        if pre is not None and getattr(self.fc, "prestrike", False):
+            self._prestrike(tr, *pre)
         if idle_tube or thrown:
             self._idle_tube(tr)
         # (a waiting wave member's collider cannot move before its wave is activated)
@@ -1295,6 +1313,24 @@ class _Builder:
                 self._bbox_rows(fid, e0s, e1s, bs, 0, owner, fam, committed, p)
         if wid is not None:
             self._bbox(wid, float(e0s[0]), float(e1s[-1]), 0.0, 0.0, 0.0, 0.0, 1, owner, fam, committed, p)
+
+    def _prestrike(self, tr: EnemyTracker, lo: float, hi: float) -> None:
+        """SSBOT_FORUM_PRESTRIKE: the enemy's real reach from its current state (reach_table, every-frame part) over
+        [lo, hi + PRESTRIKE_F frames] (look-ahead s), a "prestrike" box; nothing without the table, its transform, a
+        state, or outside the oracle view."""
+        fc = self.fc
+        if fc.view != ORACLE or tr.pos is None or tr.state is None or tr.flip is None:
+            return
+        rc = reach_clip(fc.half)
+        if rc is None:
+            return
+        age = max(self.origin - tr.seen_T, 0.0)
+        tis = (tr.seen_T - tr.t_entry) if tr.t_entry is not None else 0.0
+        W = rc.world(tr.tk, tr.state, tis, 0, tr.pos, FACES_LEFT[tr.flip], int(round(age / BIN)))
+        if not np.isfinite(W).all(axis=1).any():
+            return
+        self.boxes.append((tr.iid, "prestrike", 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, ("boxes", W), lo - BIN,
+                           hi + PRESTRIKE_F * BIN, 0.0))
 
     def _idle_tube(self, tr: EnemyTracker) -> None:
         tubes = self.tables.tubes
@@ -2016,13 +2052,23 @@ class MultiForecast:
             if exclude and owner in exclude or only is not None and owner not in only:
                 continue
             dt = tk - t_seen
+            ok = (tk >= t_from - 1e-9) & (tk <= t_to + 1e-9)
+            if grow is not None and grow[0] == "boxes":
+                # hero-centre boxes by look-ahead frame (a "prestrike" reach): the collider box the query grows
+                W = grow[1]
+                k = np.rint(np.asarray(tk, np.float64) / BIN).astype(np.int64)
+                w = W[np.clip(k, 0, len(W) - 1)]
+                hx, hy = self._fc.half
+                fin = np.isfinite(w).all(axis=1) & (k < len(W))
+                w = np.where(fin[:, None], w, 0.0)
+                rows.append((w[:, 0] + hx, w[:, 1] + hy, w[:, 2] - hx, w[:, 3] - hy, ok & fin))
+                continue
             if grow is None:
                 g = np.zeros(len(tk))
             elif grow[0] == "idle":
                 g = tubes.g(grow[1], dt if len(grow) < 3 else np.minimum(dt, grow[2]))
             else:
                 g = grow[1] * np.maximum(dt, 0.0)
-            ok = (tk >= t_from - 1e-9) & (tk <= t_to + 1e-9)
             if kind == "idle":
                 ok &= dt >= 0
             bx = (x0 + vx * dt - g, y0 + vy * dt - g, x1 + vx * dt + g, y1 + vy * dt + g)
@@ -2101,13 +2147,13 @@ class MultiForecast:
         if not committed_only and not parts:
             # the boxes of every kind at once: the same union as the parts below, one array build and one kernel call
             # (each kind on its own rebuilt its arrays per query: ~0.45 ms of a wave-6 tick's support query, R3 fix)
-            return f | self._box_occ(x, y, tk, kinds=("death", "arena", "idle", "collider", "hazard"), exclude=ids,
-                                     only=only)
+            return f | self._box_occ(x, y, tk, kinds=BOX_KINDS, exclude=ids, only=only)
         f |= self._box_occ(x, y, tk, kinds=("death", "arena"), exclude=ids, only=only)
         if committed_only:
             return f
         tubes = {k: self._box_occ(x, y, tk, kinds=(k,), exclude=ids, only=only) for k in ("idle", "collider",
                                                                                            "hazard")}
+        f |= self._box_occ(x, y, tk, kinds=("prestrike",), exclude=ids, only=only)
         return {"forecast": f, "idle body tube": tubes["idle"], "collider tube": tubes["collider"],
                 "hazard tube": tubes["hazard"]}
 
@@ -2155,7 +2201,7 @@ class MultiForecast:
             rest |= self._bbox_occ(x, y, tk, ~cb)
         com |= self._path_occ(x, y, tk)
         com |= self._box_occ(x, y, tk, kinds=("death", "arena"))
-        rest |= self._box_occ(x, y, tk, kinds=("idle", "collider", "hazard"))
+        rest |= self._box_occ(x, y, tk, kinds=("idle", "collider", "hazard", "prestrike"))
         return com | fine | rest, com, fine
 
     def occupied_without(self, x, y, tk, exclude, comfort: bool = False) -> np.ndarray:

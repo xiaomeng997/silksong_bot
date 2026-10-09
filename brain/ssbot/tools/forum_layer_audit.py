@@ -123,7 +123,8 @@ def classify(fcast) -> list[tuple[tuple, str, np.ndarray]]:
     return out
 
 
-BOX_LAYER = {"idle": "body", "collider": "collider", "hazard": "haz_tube", "death": "death", "arena": "arena"}
+BOX_LAYER = {"idle": "body", "collider": "collider", "hazard": "haz_tube", "death": "death", "arena": "arena",
+             "prestrike": "prestrike"}
 
 
 def group_occ(fcast, cx, cy, t, live, groups=None, placements_only: bool = False) -> dict:

@@ -160,3 +160,38 @@ def test_clip_widens_from_a_hero_hits_first_reach(monkeypatch):
     near = NS(body=(1.0, 4.0, 2.0, 6.0), seen_box=None, pos=(1.5, 5.0), tk=REED, vel=(0.0, 0.0))
     assert hit_k(me, near) == 0
     assert hit_k(me, NS(body=None, seen_box=None, pos=None, tk=REED, vel=(0.0, 0.0))) == 0
+
+
+def test_prestrike_places_the_reach_of_a_dropped_stab(monkeypatch):
+    """SSBOT_FORUM_PRESTRIKE (fix_spec P1): with "+n" the Reed's RE_STAB / RE_DEFEND roots not started are out of the
+    support; the switch places its real reach (the clip table's every-frame part) from the earliest start to the latest
+    start + PRESTRIKE_F frames as a "prestrike" box."""
+    from ssbot.combat.multi_forecast import ReactConfig
+    monkeypatch.setattr(reach_table, "R_FLOOR", 0.0)
+    rc = _clip((0.25, 1.04), u1=2.5)
+    monkeypatch.setattr(mfm, "reach_clip", lambda half: rc)
+    script = _script_stab()
+    tk = np.arange(0, 49) * BIN
+    got = {}
+    for on in (False, True):
+        b = MultiForecaster(_tables(), ORACLE, waves=False)
+        b.react = ReactConfig.parse("escape+n+g")
+        b.prestrike = on
+        _run(b, script[:5])                       # Alert, before the stab
+        f = b.forecast(0.8)
+        got[on] = (f, [x for x in f.boxes if x[1] == "prestrike"])
+    assert got[False][1] == []
+    f, rows = got[True]
+    assert len(rows) == 1 and rows[0][0] == 7
+    lo, hi = rows[0][9] + BIN, rows[0][10] - mfm.PRESTRIKE_F * BIN
+    assert 0 < lo <= hi
+    X, Y = _grid()
+    Xr, Yr = np.repeat(X[:, None], len(tk), 1), np.repeat(Y[:, None], len(tk), 1)
+    o = f._box_occ(Xr, Yr, tk, kinds=("prestrike",))
+    on_k = (tk >= lo - BIN - 1e-9) & (tk <= hi + mfm.PRESTRIKE_F * BIN + 1e-9)
+    assert o[:, on_k].any() and not o[:, ~on_k].any()
+    W = rows[0][8][1]
+    j = int(np.flatnonzero(on_k)[0])
+    inside = (X >= W[j, 0]) & (X <= W[j, 2]) & (Y >= W[j, 1]) & (Y <= W[j, 3])
+    assert np.array_equal(o[:, j], inside)        # the hero-centre reach box at that look-ahead
+    assert np.array_equal(f.occupied(Xr, Yr, tk) | o, f.occupied(Xr, Yr, tk))
