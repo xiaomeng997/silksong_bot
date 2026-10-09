@@ -154,7 +154,7 @@ def test_summary_applies_the_persons_rule(tmp_path):
     assert c["causes"][0]["group"].startswith("Reed|RE_STAB|Stab 1|com_fine")
     assert res["k"]["12"]["recall"]["rows"] == 3                 # rows 3 / 4 have no reference
     assert res["k"]["12"]["recall"]["rows_full_pct"] == 100.0
-    assert res["worst"][0][2] == 2                   # the largest excess area
+    assert res["worst"][0][2] == 2 and res["worst_ns"] == []                  # the largest excess area
 
 
 def test_not_started_reference_is_the_attack_that_started():

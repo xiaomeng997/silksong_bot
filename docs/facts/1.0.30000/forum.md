@@ -3135,3 +3135,65 @@ cd brain
 ..\scripts\uv.cmd run python -m ssbot.tools.viewer C:/ssbot/data/human/<session> --zones --k 0,12 --video --video-scale 0.5 --save <out>.rrd
 ```
 测量输出：`C:\ssbot\data\m2_forum_zfix\v_before\{h,bot}`（之前，3ca18c5 + zone_share）、`v_after3\{h,bot}`（之后）、`v_after3_summary.json`。
+
+### 29.11 精度检查：预测框比真伤害框大多少（2026-10-09，task "support precision"，`tools/support_precision.py`，分支 worktree-wf_3821c41a-c3d-1 = main + 区域修正分支 worktree-wf_0469f4be-4ea-1 到 2b23e08；离线，没有开游戏）
+
+你 10-09 的要求：把游戏里真实的伤害框导出来，对每个已承诺的预测做一个通用检查——此刻预测 0.2 s 以后的伤害框，0.2 s 以后那里如果没有真伤害框，预测就有误差；比真的大 50 % 算余量。以前的接受检查只看召回（不漏，R2 留出 L2–L4 100 %）和半屏规则，**没有精度检查**。
+
+**定义**（每帧 t × 每只怪 × 每层 × 提前量 k = 0、6、12、18 帧；每 3 个游戏帧量一次，外加你点名的帧）：
+- **预测**：规划器的支撑，同 `viewer --zones`（`ZoneEngine`，开关同回放：FR=seen_cf REACT=escape+n+g MARGIN=state KF=kill clash=main crest=Wanderer，`SSBOT_FORUM_AIM=1` 和 `0` 各跑一遍），**按放置的主人拆开**：`forum_layer_audit.classify` 的每个放置组、每个管盒、每条危险物路径各归它的怪；投掷物（针、钟、符文、矛、爆炸）归扔它的怪（它武装那一帧离它最近的同类型怪）。层同回放的 `support/kNN/<layer>`：body、committed、window、not_started、hazard、death；另加 com_all = committed ∪ window（所有已承诺的放置）和 total = 全部。核对：拆开再并起来和叠加层的支撑逐格相同（0 格差）。
+- **参考（真值）**：那只怪在 t + k 的**真伤害碰撞体**——它自己的和它扔出去的东西的所有启用、dealt > 0 的碰撞体（`zone_overlay.damage_colliders`，停放的跳过；圆是 8 边形），和主角盒（半宽 0.25 × 半高 1.04 u）做**精确的**闵可夫斯基和，在支撑查询用的同一批网格点（叠加层的 0.25 u 网格）上判。R = t+k−1 … t+k+1 三帧的并、主角盒再长一格 0.05 u（支撑的 ±1 帧 / ±1 格）；Rs = 恰好 t + k。not_started 的参考：只有 (t, t+k] 里它真的进了一个攻击起始状态（它的表的 `attack_starts`）才 = R，否则是空的。
+- **膨胀核对**（"在一个已知紧的帧上比"）：k = 0、只有身体的怪，body 层 / R：Reed `Alert` 中位 0.86、p99 1.0；Choristor `Battle Idle` 0.92；Tiny `Ready` 0.86 / 1.0；Envoy `Walker` 1.0 / 1.0；Minister `Chase` 1.04 / 1.22。全部 body k = 0 的中位 0.89–0.92、p90 1.04–1.12。参考和支撑是同一个膨胀、同一个网格。
+- **打断**：(t, t+k] 里这只怪被砍（`hit` 事件）、进了硬直类状态（Stun / Recoil / Clash / Parried …）、死了、或者离它 6 u 内发生拼刀：预报不可能知道，**单列，不算错**。
+- **你的规则**：预测非空，且 RATIO = 预测面积 / R 面积 > 1.5，或者 R 是空的（误报）且没被打断 → **错误**。
+
+**结果**（`SSBOT_FORUM_AIM=1`，即回放 `20261009_085824_zones.rrd` 的配置；你的 3 次会话 = `20261008_230220`、`20261008_231544`、`20261009_085824` 的 7 次尝试，全程；bot = §29 的 4 个 A/B 运行 19 场，到第 1 波为止）：
+
+| 层 | | 你的会话 k = 0 | k = 12（0.2 s） | bot 第 0 波 k = 0 | k = 12 |
+|---|---|---|---|---|---|
+| committed | (帧, 怪) 数 | 23,218 | 17,991 | 17,493 | 13,218 |
+| | **错误** | **99.56 %** | **99.43 %** | **99.31 %** | **99.43 %** |
+| | RATIO 中位 / p90 / p99 / 最大 | 13.1 / 73 / 141 / 304 | 16.7 / 78 / 145 / 304 | 9.4 / 38 / 59 / 91 | 12.9 / 42 / 60 / 91 |
+| com_all（+ window） | 错误 | 99.73 % | 99.81 % | 99.57 % | 99.57 % |
+| | RATIO 中位 / p90 / p99 | 17.7 / 73 / 143 | 21.4 / 74 / 143 | 13.1 / 42 / 59 | 17.5 / 44 / 60 |
+| not_started | 错误（其中误报） | 100 %（全部误报） | 100 %（30,307 / 32,152 误报） | 100 %（全部误报） | 100 %（10,429 / 11,120） |
+| | RATIO 中位（真起手了的） | – | 26.4 | – | 24.9 |
+| body | 错误 / RATIO 中位 | 8.97 % / 0.89 | 99.45 % / 6.7 | 6.37 % / 0.92 | 100 % / 6.8 |
+| total | 错误 / RATIO 中位 | 91.8 % / 14.3 | 99.99 % / 26.7 | 80.6 % / 8.1 | 99.8 % / 16.6 |
+| 打断（单列） | committed | 0 | 1,590 | 0 | 491 |
+| 几何召回（total） | 真伤害格全被盖住的 (帧, 怪) / 格 | 99.18 % / 99.64 % | 98.81 % / 99.50 % | 100 % / 100 % | 96.88 % / 98.08 % |
+
+- `SSBOT_FORUM_AIM=0`（规划器默认）几乎一样：你的会话 committed 错误 99.61 % / 99.36 %、RATIO 中位 13.3 / 15.5；bot 99.41 % / 99.14 %、8.5 / 9.2。瞄准模板只改了很少的行。
+- 你说"大了 10000 %"（100 倍）：中位是 10–20 倍，p90 40–78 倍，p99 60–145 倍，最大 304 倍。**合格（≤ 1.5 倍）的已承诺预测不到 1 %**；按类型 k = 12 com_all 的中位：Tiny 69、Clawmaiden 42、Reed 34、Minister 21、Envoy 14、Maestro 14、Choristor 13、Bellbearer 11、Clapper 7。
+- not_started 在 k = 0 永远是误报（"还没开始的攻击在前摇结束前不可能伤人"），而它在 k = 0 有 32,987 + 11,366 个非空预测。
+- body：k = 0 是紧的（中位 0.9），k = 12 是 6.7 倍：身体管按这一类的最大速度往每个方向长。
+
+**你点名的帧**（`20261009_085824` 第 0 次尝试，AIM = 1；行在 `aim1\h\20261009_085824_a0.jsonl`，`"asked": true`）——全部判为错误：
+- **5690**（行 5689）Choristor 3，`CH_WHIP` / `Whip Antic`（进状态 0.68 s）：k = 0 committed（chain_fine）29.4 u² 对真的 4.5 u² = **6.5 倍**；k = 12 window（chain_win）112 u² 对 5.2 u² = **21.4 倍**，比真框往前多 12.5 u、往后 7.5 u、往上 4 u。
+- **7939** Bellbearer 1，`CB_EVADE` / `Evade`（0.05 s，瞄准模板放了）：k = 0 committed 86.7 u² 对 8.4 u² = **10.3 倍**，k = 12 107 u² = **14.4 倍**（四周各多 2.5–5.8 u：你看到的"一圈三个主角宽"）；还有 not_started k = 0 94.8 u²、k = 12 200.7 u²：0.2 s 内没有起手，**误报**。
+- **7939** Reed 2，`RE_IDLE` / `Alert`：not_started k = 0 69.8 u²、k = 12 **248 u²**（左右各 10 u、上 9 u），0.2 s 内没有起手：**误报**；身体 k = 12 46.9 u² = 5.4 倍。
+- **10427** Reed 2，`RE_DEFEND` / `Parry Slash`（0.4 s，地面反击）：k = 0 committed（chain_fine）155.8 u² 对 8.0 u² = **19.5 倍**，window（chain_win）306 u² = **38 倍**；k = 12 committed **23 倍**、window **44 倍**。超出真框：committed 前 7.75 u、后 12.5 u、上 5.25 u；window 前 10.75 u、后 12.5 u、上 11 u——和你说的"前面宽 3–4 个主角、后面 2/5 屏、高一个主角"同一个方向，量更大。
+
+**主要原因**（k = 12 com_all 的多出面积按放置种类分，见 summary 的 `causes`）：
+1. **家族并集**（`com_fam`：这个家族所有录到的实例、所有状态的并，当前状态没有逐状态模板时放）：带它的行占全部多出面积的约 55 %，RATIO 中位 37–65。Tiny 的 `AT_FIRE` / `AT_DEFEND` 前后各 32–34 u = 整个场地；Envoy `EN_CHARGE` 往前 34 u（整段冲锋，不是 0.2 s 能走的）；Reed `Stab Pos` / `Stab Antic`（瞄准之前，跟主角走）前后 20–34 u。
+2. **反击链窗口**（`chain_fine + chain_win`：Reed `RE_DEFEND`、Minister `MI_PARRY`）：约 18 %，中位 21–27：链上所有后续段的并，前后各 15 u、上 12 u。
+3. **细放置本身也大**：`com_fine + aim` 中位 9.7（k = 0）/ 14.3（k = 12），只有 `com_fine` 的 41。细模板在某个时间格 = 所有录到的实例在"起手后这么久"的碰撞体的并、锚在起手处，离起手越久越散；再加状态余量（MARGIN=state）和残差垫。
+4. **not_started**：k = 0 起就有（规则说前摇结束前不该有）；最大的是 Tiny `Ready`（整个场地）、Reed `Alert`（两边各 34 u）、Minister `Chase`。
+5. **身体管**：按最大速度四面长，0.2 s 后 6.7 倍。
+
+**几何召回**（每个真伤害格，不只主角实际站过的地方——和 R2 的接触召回不是一个量）：k = 0 漏的是投掷物出手那一刻（Reed `Throw` 143 行、Bellbearer 的钟 194 行：危险物层还没放上它）；k = 12 漏的是攻击收尾时身体走得比剩下的模板远（Envoy `Charge End` 311 行、Choristor `Spin Slash End` 234、`Slash Recover` 191、Envoy `Attack End` 189、`JumpSlash 4` 137）。所以接受门要比"之前 / 之后"，不是要求 100 %。
+
+**作为接受门**（以后每个支撑改动都跑）：
+```
+cd brain
+..\scripts\uv.cmd run python -m ssbot.tools.support_precision run C:/ssbot/data/human/20261008_230220:win C:/ssbot/data/human/20261008_231544:win C:/ssbot/data/human/20261009_085824:win --out <dir>\h --frames 5690,7939,10427 --workers 3 --threads 2 --aim 1
+..\scripts\uv.cmd run python -m ssbot.tools.support_precision run <4 个 C:\ssbot\data\runs\m2\20261008_21*_Forum_W_eval_planner_oracle_clashM 目录> --w0 --out <dir>\bot --workers 3 --threads 2 --aim 1
+..\scripts\uv.cmd run python -m ssbot.tools.support_precision summary <dir>\h <dir>\bot --ks 0,12 --json <dir>\summary.json
+..\scripts\uv.cmd run python -m ssbot.tools.support_precision png C:/ssbot/data/human/20261009_085824:win:0 --frames 5690,7939,10427 --k 12 --out <dir>\png
+..\scripts\uv.cmd run python -m ssbot.tools.support_precision worst <dir>\summary.json --list worst_fam --top 10 --out <dir>\png
+```
+26 个任务每个约 70 s，3 个进程约 10 min。基线：`C:\ssbot\data\m2_forum_precision\summary_aim1.json`、`summary_aim0.json`（合并），`summary_aim{1,0}_{h,bot}.json/.txt`（分开，k = 0、6、12、18）；逐行数据 `aim{1,0}\{h,bot}\*.jsonl`。
+
+**PNG**（世界坐标，y 朝上：真伤害填红（严格的 t + k 更深）、预测各层描边（叠加层的颜色，白 = total）、真碰撞体白线、白点 = 主角中心、黄框 = 相机屏幕）：`C:\ssbot\data\m2_forum_precision\png\flagged\`（你的 4 个帧，k = 0 和 12，每只怪一张）、`png\worst\`（多出面积最大的：全是 Tiny 的整场并）、`png\worst_fam\`（每个类型 × 家族最差的一张：Tiny AT_FIRE / AT_DEFEND、Clawmaiden 旋转 / 飞 / 三连、Reed 刺尾 / 反击、Minister 格挡、Clapper 跳、……）。
+
+**没做**：把逐帧精度标量写进回放（`metrics/precision/<enemy>`，可选）；任何支撑本身的改动（这一节只量）。

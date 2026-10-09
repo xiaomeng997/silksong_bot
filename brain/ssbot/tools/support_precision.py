@@ -651,7 +651,8 @@ def summarize(dirs, ks=(0, 12), cell: float = 0.25) -> dict:
                                 c[5][i] = max(c[5][i], st[8 + i])
                             if lay in ("com_all", "not_started") and k == ks[-1]:
                                 worst.append([round((P - st[1]) * a2, 2), p.stem, r["f"], r["name"], lay, k,
-                                              None if ratio is None else round(ratio, 2)])
+                                              None if ratio is None else round(ratio, 2),
+                                              f"{short}/{r['fam']}/{r['state']}"])
     res["files"] = files
     for k in ks:
         out = res["k"][str(k)] = {}
@@ -680,15 +681,26 @@ def summarize(dirs, ks=(0, 12), cell: float = 0.25) -> dict:
         out["recall"] = {"rows": q["rows"], "rows_full_pct": round(100.0 * q["full"] / q["rows"], 3) if q["rows"]
                          else None, "cells_pct": round(100.0 * q["cov"] / q["cells"], 3) if q["cells"] else None,
                          "missed_by": dict(sorted(q["miss"].items(), key=lambda kv: -kv[1])[:20])}
+    # the worst (frame, enemy) per layer: the largest excess area, one per (attempt, enemy, family / state) so one
+    # enemy standing still for seconds does not fill the list
+    for lay in ("com_all", "not_started"):
+        seen = set()
+        out = res["worst" if lay == "com_all" else "worst_ns"] = []
+        for w in sorted((w for w in worst if w[4] == lay), key=lambda x: -x[0]):
+            if (w[1], w[3], w[7]) in seen:
+                continue
+            seen.add((w[1], w[3], w[7]))
+            out.append(w)
+            if len(out) >= 20:
+                break
+    # and the worst of each enemy type x family (the largest excess area is mostly the Tinies' whole-arena union)
     seen = set()
-    res["worst"] = []
-    for w in sorted(worst, key=lambda x: -x[0]):
-        if (w[1], w[2]) in seen:
-            continue
-        seen.add((w[1], w[2]))
-        res["worst"].append(w)
-        if len(res["worst"]) >= 20:
-            break
+    res["worst_fam"] = []
+    for w in sorted((w for w in worst if w[4] == "com_all"), key=lambda x: -x[0]):
+        fam = tuple(w[7].split("/")[:2])
+        if fam not in seen:
+            seen.add(fam)
+            res["worst_fam"].append(w)
     return res
 
 
@@ -856,8 +868,8 @@ def cmd_worst(a) -> int:
     """PNGs of a summary's worst (frame, enemy) predictions (the largest excess area at its last k)."""
     res = json.loads(Path(a.summary).read_text("utf-8"))
     n = 0
-    for w in res["worst"][:a.top]:
-        excess, stem, f, name, lay, k, ratio = w
+    for w in res[a.list][:a.top] + res.get("worst_ns", [])[:a.top_ns]:
+        excess, stem, f, name, lay, k, ratio = w[:7]
         spec = _spec_of(stem, a.runs_root)
         if spec is None:
             print(f"no spec for {stem}")
@@ -910,6 +922,8 @@ def main(argv=None) -> int:
         else:
             p.add_argument("summary")
             p.add_argument("--top", type=int, default=10)
+            p.add_argument("--top-ns", type=int, default=5)
+            p.add_argument("--list", default="worst", choices=("worst", "worst_fam"))
             p.add_argument("--runs-root", default=r"C:\ssbot\data\runs\m2")
         p.add_argument("--out", required=True)
         p.add_argument("--threads", type=int, default=4)

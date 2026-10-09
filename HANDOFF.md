@@ -3758,3 +3758,59 @@ whole task. Offline only (no game instance).
    `skips_episodes_while_the_game_stays_paused`) in code merged from the pause-cause work, not touched here; the rest
    of the suite passes (1330).
 3. No live run: the aim default-on and the kinematic yellow have not been seen in a game.
+
+## Task precision (branch worktree-wf_3821c41a-c3d-1, 2026-10-09; forum.md §29.11)
+
+= main + worktree-wf_0469f4be-4ea-1 (zone fix + reach clip, committed work to 2b23e08). Offline only (no game instance).
+The person (2026-10-09): export the real damage boxes and check every committed prediction against them; 1.5x the real
+area is margin, the support is "about 100x". Until now the acceptance only checked recall and the half-screen rule.
+
+### What was added
+- `tools/support_precision.py` (+ `tests/test_support_precision.py`, 9 tests):
+  - prediction: the overlay's support (`ZoneEngine`, the viewer's --zones path and switches) split by placement OWNER
+    (`owner_layers`: each `forum_layer_audit.classify` group, tube box and hazard path per owner; a thrown hazard goes to
+    the nearest enemy of its owner type when it arms); the per-owner union equals the overlay's support cell for cell.
+  - reference: the enemy's real enabled dealt > 0 colliders (its own + its thrown hazards; parked skipped), the exact
+    Minkowski sum with the hero box on the same grid points (`hero_centre_mask`; non-convex polygons by edges); R =
+    frames t+k-1 .. t+k+1 + one 0.05 u cell, Rs = exactly t+k; not_started's reference only when an attack actually
+    started in (t, t+k]. Body-only enemies at k = 0 give body / R p50 0.86-1.05, p99 <= 1.3 (same dilation and grid).
+  - interruptions (hit event, stagger-like state, death, a nail clash within 6 u) are counted apart, never errors.
+  - ERROR = non-empty prediction with RATIO = P / R > 1.5, or an empty reference (not interrupted).
+  - CLI: `run` (rows per frame x enemy x k x layer: areas, overlaps, excess by side vs the enemy's facing, reach past
+    the real box, family / state / time in state / placement kinds / aim), `summary` (the gate: error shares, RATIO
+    quantiles, groups per type|family|state|kinds, top causes, geometric recall, worst lists; `--json`), `png`
+    (world-space pictures of given frames), `worst` (pictures of a summary's worst lists).
+- Tables needed in the worktree: the git-ignored `knowledge/1.0.30000/enemies/forum/*_hitboxes.npz`,
+  `aim_templates.npz`, `reach_clip.npz` (copied from the zone-fix worktree).
+
+### Results (AIM=1 = the replay's config; AIM=0 within a few tenths)
+- Committed predictions in ERROR: person's 3 sessions (7 attempts) 99.56 % at k = 0, 99.43 % at k = 12; bot wave 0
+  (19 eps of the §29 A/B runs) 99.31 % / 99.43 %. com_all (+ window) 99.6-99.8 %. RATIO committed p50 / p90 / p99 /
+  max: person k 12 16.7 / 78 / 145 / 304, bot k 12 12.9 / 42 / 60 / 91. Under 1 % of committed predictions are within
+  1.5x. not_started: 100 % errors (all false alarms at k = 0; at k = 12 30,307 of 32,152 false alarms, p50 26x where an
+  attack did start). Body: tight at k = 0 (p50 0.9), 6.7x at k = 12 (tube grown by max speed).
+- The person's four frames (20261009_085824 attempt 0) are all errors: 5690 Choristor whip chain window 21x at k 12;
+  7939 Bellbearer evade committed 10x / 14x + not-started false alarm; 7939 Reed Alert not-started 248 u^2 false alarm;
+  10427 Reed Parry Slash committed 19.5x / 23x, window 38x / 44x (12.5 u behind, 7.75-10.75 u in front, 5-11 u up).
+- Top causes (share of the k 12 com_all excess area): family unions `com_fam` ~55 % (Tiny AT_FIRE / AT_DEFEND whole
+  arena, Envoy charge 34 u ahead, Reed pre-aim stab); counter chain windows ~18 % (Reed RE_DEFEND, Minister MI_PARRY);
+  fine placements themselves p50 10-14x with aim (union of every instance at that time since the start + state
+  margins); not_started present from k = 0; body tubes. By type (k 12 p50): Tiny 69, Clawmaiden 42, Reed 34, Minister
+  21, Envoy 14, Maestro 14, Choristor 13, Bellbearer 11, Clapper 7.
+- Geometric recall (every real damage cell; not R2's contact recall): k 0 person 99.18 % of rows / 99.64 % of cells,
+  bot 100 %; k 12 98.81 % / 99.50 %, bot 96.88 % / 98.08 %. Misses: thrown hazards at release (k 0), attack ends
+  where the body outruns the remaining template (k 12: Envoy Charge End, Choristor Spin Slash End / Slash Recover).
+
+### Outputs (C:\ssbot\data\m2_forum_precision)
+- rows `aim{1,0}\{h,bot}\*.jsonl`; summaries `summary_aim{1,0}.json/.txt` (k 0, 12, both groups) and
+  `summary_aim{1,0}_{h,bot}.json/.txt` (k 0, 6, 12, 18); run logs `run_aim*_*.log`.
+- PNGs: `png\flagged\` (the person's frames, k 0 / 12), `png\worst\` (largest excess: all Tiny), `png\worst_fam\` (the
+  worst per type x family).
+- Reproduce / gate: forum.md §29.11 (26 jobs ~70 s each, 3 workers ~10 min per AIM setting).
+
+### Open issues
+1. The support itself is unchanged: this task only measures. Candidates in order of excess: no family union where a
+   per-state template exists (or a time-limited one), chain windows per follow-up time, Tiny templates, not_started
+   empty before the antic can end, body tubes from real speed bounds, fine templates conditioned on aim / time.
+2. Optional replay scalars (`metrics/precision/<enemy>` in viewer --zones) not done.
+3. Geometric recall is not 100 % (above); the gate should compare before / after, plus R2's contact recall.
