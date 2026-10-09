@@ -3,7 +3,9 @@ summary on synthetic ticks (no recording, no planner)."""
 import numpy as np
 
 from ssbot.ipc.framing import BIT
-from ssbot.tools.forum_human_score import (GAME_MASK, KEY_NAMES, _merge_pair, _rank, action_class, situation,
+from ssbot.knowledge import kinematics as kin
+from ssbot.tools.forum_human_score import (GAME_MASK, KEY_NAMES, _merge_pair, _rank, action_class, cause,
+                                           clear_latches, latched_mask, match_rows, press_counts, situation,
                                            summarize_ticks)
 
 
@@ -53,6 +55,41 @@ def test_rank_and_first_key():
     assert _rank(keys, pool, 3, over={KEY_NAMES.index("S"): 1})[1] == "S"
 
 
+def test_press_counts_rising_edges():
+    A, J, D = kin.B_ATTACK, kin.B_JUMP, kin.B_DASH
+    m = np.zeros((3, 20), np.int64)
+    m[0, 0:2] = A                # held from before frame 1: no press
+    m[0, 5:7] = A                # one press
+    m[1, 3:9] = J                # one jump press, held
+    m[1, 4] |= D
+    m[1, 19] = A                 # frame 20: past the 18 frames
+    m[2, ::2] = A                # every other frame, the first latched before: 8 presses
+    c = press_counts(A, m)
+    assert c.tolist() == [[1, 0, 0], [0, 1, 1], [8, 0, 0]]
+    # the hold filter state's latched keys as a mask
+    hs = kin.HoldState.idle(1)
+    hs.latched[0, BIT["attack"]] = True
+    assert latched_mask(hs) == 1 << BIT["attack"]
+
+
+def test_match_rows_needs_the_presses():
+    err18 = np.array([0.05, 0.20, 0.30, 0.10])
+    errH = np.array([0.1, 0.2, 0.3, 0.1])
+    rows = np.array([[0, 0, 0], [1, 0, 0], [1, 0, 0], [0, 1, 0]])
+    # the person attacked once: the nearest row (0, no attack) loses to the nearest attacking row
+    assert match_rows(err18, errH, rows, np.array([1, 0, 0])) == (1, True, 2, [])
+    # no row dashes: the position-only best, flagged, and the button no row matches
+    assert match_rows(err18, errH, rows, np.array([0, 0, 1])) == (0, False, 0, ["dash"])
+
+
+def test_clear_latches():
+    class Pl:
+        jump_until, macro_until = 40, 52
+    p = Pl()
+    clear_latches(p)
+    assert p.jump_until == -1 and p.macro_until == -1
+
+
 def _tick(err, forced, S, hind, pick_hind=-1, same=False, hits=(0.0, 1.0), defending=()):
     return {"best": ["WAIT+idle", err, err], "kerr": [err, err], "forced": forced, "same_as_pick": same,
             "person": {"hurt": False, "bind": False, "harpoon": err > 1, "tool": False, "dash_attack": False,
@@ -82,3 +119,26 @@ def test_summary_counts():
     sd = s["safe_differ"]
     assert sd["n"] == 2 and sd["worst_term"]["hit"] == 1.0
     assert situation(T[1]) == "waits_by_defender"
+    assert s["causes"] == {"safe_ranked_behind": 0.4, "forced:J": 0.4, "outside": 0.2}
+
+
+def _edge(t, ok, pos_same, pick_err=0.1, edges=(1, 0, 0), miss=()):
+    return dict(t, edge_ok=ok, n_edge=int(ok), edges=list(edges), edge_miss=list(miss),
+                best_pos=["WAIT+idle", t["best"][1], t["best"][2], pos_same, pos_same],
+                pick_err=[pick_err, pick_err, False], all=[10, 8, 6, 5])
+
+
+def test_summary_press_matching():
+    T = [_edge(_tick(0.1, False, False, -1), True, True), _edge(_tick(0.1, False, False, -1), True, False),
+         _edge(_tick(0.1, True, True, -1), False, False, miss=("attack",)), _edge(_tick(2.0, False, False, -1),
+                                                                                    True, True, pick_err=1.0)]
+    s = summarize_ticks(T, 0.35)
+    m = s["match"]
+    # a tick whose rows never press as the person did is outside even when a row is near
+    assert m["close"] == 0.5 and m["no_press_match"] == 0.25 and m["close_position_only"] == 0.75
+    assert m["position_best_same_presses"] == round(1 / 3, 4) and m["pick_near"] == 0.75
+    assert m["no_press_match_by_button"] == {"attack": 0.25}
+    assert s["outside"]["n"] == 2 and s["outside"]["no_press_match"] == 0.25
+    assert s["all_rows"] == {"allowed_clear": 0.8, "unsafe_clear": round(5 / 6, 4)}
+    assert cause(T[2], 0.35) == "outside" and cause(dict(T[0], same_as_pick=True), 0.35) == "pick"
+    assert cause(dict(T[0], vb=dict(T[0]["vb"], S=True, hind=4)), 0.35) == "unsafe:true_alarm"

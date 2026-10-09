@@ -1,4 +1,4 @@
-"""The person's winning Forum games scored by the planner (task "the person's wins under the planner", forum.md §24):
+"""The person's winning Forum games scored by the planner (task "the person's wins under the planner", forum.md §25):
 open-loop replay of the person's recordings through ForumPlannerPolicy; per analysed tick the candidate row nearest
 to what the person did, the planner's verdict on it, hindsight against the recorded colliders, and why the planner
 ranks it below its own pick.
@@ -19,18 +19,25 @@ consecutive pairs are merged into one STATE of a 1/60 s game frame (the second S
 physics steps summed, the input masks or-ed, udt x 0.5 and ts / 0.5 as a 1x STATE reads: the kinematics step by
 udt x ts and take ts < 1 for a world slow motion) and renumbered, so the planner, its kinematics and the hindsight all
 run in game frames. The person's keys: STATE input.mask (gameplay buttons only) put into act.mask, so the policy's
-prefix and hold state are the person's (the open-loop replay of tools.forum_hit_forensics, forum.md §19.1).
+prefix and hold state are the person's (the open-loop replay of tools.forum_hit_forensics, forum.md §19.1). The
+planner's own jump / macro latches (jump_until, macro_until) come from its picks, which the replay never executes:
+they are cleared before every frame (forum.md §25.11: otherwise "keep" ranks rows by a jump the person never held).
 
 Per analysed tick (every `every`-th game frame; <out>/<session>_a<attempt>_<kind>.json):
   match     the recorded hero box centres of the next frames against every row's nominal box centre: err18 (mean
-            over frames 1 .. 18), errH (the whole horizon); the best row (least err18, then errH); keys: the person's
-            own masks rolled out from the tick's start state (the model's error on the person's keys, kerr18 / kerrH)
+            over frames 1 .. 18), errH (the whole horizon); the best row: among the rows whose attack / jump / dash
+            presses over frames 1 .. 18 (rising edges of the latched masks; the person's keys through the same hold
+            filter) number the person's, the least err18, then errH (edge_ok False: no such row; the best row is then
+            the position-only one, and the summary counts the tick outside the candidate set); best_pos: the
+            position-only best row (the matching before forum.md §25.11); keys: the person's own masks rolled out
+            from the tick's start state (the model's error on the person's keys, kerr18 / kerrH)
   person    what the person did over the next 18 frames (clips, cstate, buttons: harpoon, tool, bind, dash attack,
             wall, glide, down slash, air attacks, hurt) and whether a hit came within the horizon
   verdict   for the best row and the keys row: S (stage 1 centre / envelope / hit branch, computed when the planner
             left the row unknown), the planner's own S / known / ok, the row's rank in the planner's order (safe
             ticks: among the safe rows; FORCED_RISK: the preselection order), its keys; the pick's name and keys
-  hindsight each row's first contact with the recorded damage colliders over its horizon (forum.md §19.1, open loop)
+  hindsight each row's first contact with the recorded damage colliders over its horizon (forum.md §19.1, open loop);
+            all: the allowed rows and the planner's known unsafe rows, how many of each clear (the base rates)
   layers    a row judged unsafe: the support groups its centres meet (forum_layer_audit.classify, by layer, type and
             family), the layer categories each alone necessary (leave one out), margins / idle growth variants
   J         the best row and the pick: the score kernel's terms (hit, waste, jumps, stance, risk map, facing, ground)
@@ -222,6 +229,37 @@ def person_action(fi: dict, i: int, k: int = EARLY_K) -> dict:
     return out
 
 
+EDGE_NAMES = ("attack", "jump", "dash")
+
+
+def press_counts(prev: int, masks: np.ndarray, k: int = EARLY_K) -> np.ndarray:
+    """[N, 3] rising edges of attack / jump / dash over frames 1 .. k of each row of masks [N, >= k] (frame j's
+    command in column j - 1), the press on frame 1 against `prev` (the latched mask before it)."""
+    from ssbot.knowledge import kinematics as kin
+    m = np.asarray(masks, np.int64)[:, :k]
+    before = np.concatenate([np.full((m.shape[0], 1), int(prev), np.int64), m[:, :-1]], axis=1)
+    rise = m & ~before
+    return np.stack([((rise & b) != 0).sum(axis=1) for b in (kin.B_ATTACK, kin.B_JUMP, kin.B_DASH)], axis=1)
+
+
+def latched_mask(hold) -> int:
+    """The hold filter state's latched keys as a button mask (lane 0)."""
+    return int(sum(1 << int(b) for b in np.flatnonzero(np.asarray(hold.latched)[0])))
+
+
+def match_rows(err18: np.ndarray, errH: np.ndarray, row_edges: np.ndarray, person_edges: np.ndarray
+               ) -> tuple[int, bool, int, list]:
+    """(the best row, whether it has the person's presses, the rows that do, the buttons no row matches alone): the
+    least err18 then errH among the rows whose attack / jump / dash press counts equal the person's; with none, the
+    position-only best."""
+    same = (row_edges == person_edges[None]).all(axis=1)
+    miss = [EDGE_NAMES[j] for j in range(len(EDGE_NAMES)) if not (row_edges[:, j] == person_edges[j]).any()]
+    order = np.lexsort((errH, err18))
+    if same.any():
+        return int(order[same[order]][0]), True, int(same.sum()), miss
+    return int(order[0]), False, 0, miss
+
+
 def action_class(a: dict) -> str:
     for k in ("hurt", "bind", "harpoon", "tool", "dash_attack", "wall", "glide", "down_slash"):
         if a.get(k):
@@ -292,6 +330,14 @@ def _hind(fp, box: np.ndarray, inv: np.ndarray, fo: int) -> int:
     fb, m = fp.window(fo, box.shape[0])
     return int(first_contact(np.ascontiguousarray(box[None], np.float64), np.ascontiguousarray(inv[None]),
                              fp.verts, fp.starts, fb, m, 0.0)[0])
+
+
+def _hind_all(fp, box: np.ndarray, inv: np.ndarray, fo: int) -> np.ndarray:
+    """[N] first contact frames (-1: none) of every row's nominal box [N, T1, 4]."""
+    from ssbot.tools.forum_hit_forensics import first_contact
+    fb, m = fp.window(fo, box.shape[1])
+    return first_contact(np.ascontiguousarray(box, np.float64), np.ascontiguousarray(inv), fp.verts, fp.starts, fb,
+                         m, 0.0)
 
 
 def _owner(fp, fo: int, k: int, box) -> list:
@@ -523,7 +569,7 @@ def analyse(pol, cap: dict, vs, i: int, states: list, fi: dict, fp, groups_cache
     d = np.hypot(rcx[:, 1:] - pcx[None, 1:], rcy[:, 1:] - pcy[None, 1:])
     d = np.where(np.isfinite(d), d, 99.0)
     err18, errH = d[:, :EARLY_K].mean(axis=1), d.mean(axis=1)
-    best = int(np.lexsort((errH, err18))[0])
+    best_pos = int(np.lexsort((errH, err18))[0])
     # the person's own keys from the tick's start state (the prefix is the recorded next frame already)
     P = int(dbg["P"])
     pm = np.zeros(T1 - 1, np.int64)
@@ -531,6 +577,13 @@ def analyse(pol, cap: dict, vs, i: int, states: list, fi: dict, fp, groups_cache
     pm[:len(seg)] = seg
     if len(seg) < T1 - 1 and len(seg):
         pm[len(seg):] = seg[-1]
+    # the presses: rows' latched masks against the person's keys through the same hold filter
+    from ssbot.combat.holdfilter import hold_filter_jit
+    prev = latched_mask(hold)
+    p_lat, _ = hold_filter_jit(pm[None], hold)
+    pe = press_counts(prev, p_lat)[0]
+    re_ = press_counts(prev, latched)
+    best, edge_ok, n_edge, edge_miss = match_rows(err18, errH, re_, pe)
     rk = kin.rollout(start, pm[None], pl.params, pl.terrain, threads=pl.cfg.threads)
     kcx, kcy = _centres(rk.box[0, :m])
     kd = np.hypot(kcx[1:] - pcx[1:], kcy[1:] - pcy[1:])
@@ -545,9 +598,11 @@ def analyse(pol, cap: dict, vs, i: int, states: list, fi: dict, fp, groups_cache
     vb = verdict(pl, cap, fcast, start, latched[best], roll=_RollRow(box[best], flags[best], mode[best]),
                  sc_row=_sc_row(cap["sc"], best))
     vk = verdict(pl, cap, fcast, start, pm, roll=rk)
-    hb = _hind(fp, box[best], inv_rows[best], fo)
+    h_all = _hind_all(fp, box, inv_rows, fo)
+    hb = int(h_all[best])
     hk = _hind(fp, rk.box[0], (rk.flags[0] & F_INVULN) != 0, fo)
-    hp_ = _hind(fp, box[pick], inv_rows[pick], fo)
+    hp_ = int(h_all[pick])
+    unsafe_known = known & (np.asarray(S_pl) != 0)
     hit_f = np.flatnonzero(fi["dmg"][i + 1:i + T1])
     pool = np.flatnonzero(ok & known)
     keys = _order_keys(ls)
@@ -565,6 +620,12 @@ def analyse(pol, cap: dict, vs, i: int, states: list, fi: dict, fp, groups_cache
            "pick": [names[pick] if pick < len(names) else str(pick), int(S_pl[pick]), hp_],
            "pick_first": int(ls.get("first", pick)), "chosen_moved": int(ls.get("first", pick)) != pick,
            "best": [names[best], round(float(err18[best]), 3), round(float(errH[best]), 3)],
+           "edge_ok": edge_ok, "n_edge": n_edge, "edges": [int(x) for x in pe], "edge_miss": edge_miss,
+           "best_pos": [names[best_pos], round(float(err18[best_pos]), 3), round(float(errH[best_pos]), 3),
+                        bool((re_[best_pos] == pe).all()), best_pos == best],
+           "pick_err": [round(float(err18[pick]), 3), round(float(errH[pick]), 3), bool((re_[pick] == pe).all())],
+           "all": [int(ok.sum()), int((ok & (h_all < 0)).sum()), int(unsafe_known.sum()),
+                   int((unsafe_known & (h_all < 0)).sum())],
            "kerr": [round(float(kd[:EARLY_K].mean()), 3), round(float(kd.mean()), 3)],
            "same_as_pick": best == pick,
            "person": person_action(fi, i), "hit_in": int(hit_f[0]) + 1 if len(hit_f) else -1,
@@ -646,6 +707,13 @@ def _wave(s: dict) -> int | None:
     return None if not b or not b.get("started") else b.get("wave")
 
 
+def clear_latches(pl) -> None:
+    """The planner's jump / macro latches come from its own picks, which an open-loop replay never executes (the
+    person's keys are): no jump hold for "keep" to protect, no attack row or-ed with a jump, no macro for "mkeep"."""
+    pl.jump_until = -1
+    pl.macro_until = -1
+
+
 def run_segment(job: dict) -> dict:
     from ssbot.tools.forum_hit_forensics import FramePolys
     from ssbot.train.encounters import ENCOUNTERS
@@ -674,6 +742,7 @@ def run_segment(job: dict) -> dict:
     for i, s in enumerate(states):
         if i + 1 < len(states):
             pol.sent[int(states[i + 1]["f"])] = int(states[i + 1]["act"]["mask"])
+        clear_latches(pl)
         pol.act(s, None)
         if i % every or i < 3:
             continue
@@ -753,7 +822,7 @@ def _share(n, d):
 
 
 def summarize(files: list[Path], close_u: float = CLOSE_U) -> dict:
-    """The numbers of forum.md §24 from the per-segment files of one configuration."""
+    """The numbers of forum.md §25 from the per-segment files of one configuration."""
     segs = []
     T = []
     for p in files:
@@ -776,30 +845,78 @@ def summarize(files: list[Path], close_u: float = CLOSE_U) -> dict:
     return out
 
 
+def matched(t: dict, close_u: float) -> bool:
+    """The tick's best row has the person's presses (edge_ok; files before forum.md §25.11: position only) and lies
+    within close_u of the person's path."""
+    return bool(t.get("edge_ok", True)) and t["best"][1] <= close_u
+
+
+def cause(t: dict, close_u: float) -> str:
+    """One reason per tick, in order: outside the candidate set, vetoed, the pick itself, then (a tick with a safe
+    row) the row judged unsafe (false / true alarm by hindsight) or safe but ranked behind, and (FORCED_RISK: every
+    allowed row unsafe, so the preselection keys decide) the first key that put the pick ahead."""
+    if not matched(t, close_u):
+        return "outside"
+    v = t["vb"]
+    if not v["ok"]:
+        return "vetoed"
+    if t["same_as_pick"]:
+        return "pick"
+    if t["forced"]:
+        return f"forced:{v['why']}"
+    if v["S"]:
+        return "unsafe:false_alarm" if v["hind"] < 0 else "unsafe:true_alarm"
+    return "safe_ranked_behind"
+
+
 def summarize_ticks(T: list[dict], close_u: float) -> dict:
     n = len(T)
     if not n:
         return {"ticks": 0}
     e18 = np.array([t["best"][1] for t in T])
     k18 = np.array([t["kerr"][0] for t in T])
-    close = e18 <= close_u
+    close = np.array([matched(t, close_u) for t in T])
+    edge = [t for t in T if "edge_ok" in t]
     out = {"ticks": n, "forced": _share(sum(t["forced"] for t in T), n),
            "match": {"err18_p50": _q(e18, 50), "err18_p90": _q(e18, 90), "kerr18_p50": _q(k18, 50),
                      "kerr18_p90": _q(k18, 90), "close": _share(int(close.sum()), n),
-                     "close_at": {str(u): _share(int((e18 <= u).sum()), n) for u in (0.2, 0.35, 0.5, 0.75, 1.0)},
+                     "close_at": {str(u): _share(sum(matched(t, u) for t in T), n)
+                                  for u in (0.2, 0.35, 0.5, 0.75, 1.0)},
                      "best_is_pick": _share(sum(t["same_as_pick"] for t in T), n)}}
+    if edge:
+        pos_close = [t for t in edge if t["best_pos"][1] <= close_u]
+        att = [t for t in pos_close if t["edges"][0] > 0]
+        out["match"].update({
+            "no_press_match": _share(sum(not t["edge_ok"] for t in edge), len(edge)),
+            "no_press_match_by_button": {k: _share(v, len(edge)) for k, v in
+                                         Counter(b for t in edge for b in t["edge_miss"]).most_common()},
+            "close_position_only": _share(len(pos_close), len(edge)),
+            "position_best_same_presses": _share(sum(t["best_pos"][3] for t in pos_close), len(pos_close)),
+            "position_best_same_presses_when_attacking": _share(sum(t["best_pos"][3] for t in att), len(att)),
+            "best_changed": _share(sum(not t["best_pos"][4] for t in edge), len(edge)),
+            "pick_near": _share(sum(t["pick_err"][0] <= close_u for t in edge), len(edge)),
+            "pick_near_same_presses": _share(sum(t["pick_err"][0] <= close_u and t["pick_err"][2] for t in edge),
+                                             len(edge))})
+        al = np.array([t["all"] for t in edge], np.float64)
+        out["all_rows"] = {"allowed_clear": _share(float(al[:, 1].sum()), float(al[:, 0].sum())),
+                           "unsafe_clear": _share(float(al[:, 3].sum()), float(al[:, 2].sum()))}
     # ---- moves outside the candidate set ----
-    far = [t for t in T if t["best"][1] > close_u]
+    far = [t for t, c in zip(T, close) if not c]
     cls = Counter(action_class(t["person"]) for t in far)
     cls_all = Counter(action_class(t["person"]) for t in T)
+    far_pos = [t for t in far if t.get("edge_ok", True)]
+    timing = [t for t in far_pos if t["kerr"][0] <= close_u and action_class(t["person"]) == "other"]
     out["outside"] = {"n": len(far), "share": _share(len(far), n),
+                      "no_press_match": _share(len(far) - len(far_pos), n),
                       "by_action": {k: [v, _share(v, len(far)), _share(cls_all[k] - v, cls_all[k])]
                                     for k, v in cls.most_common()},
                       "keys_model_close": _share(sum(t["kerr"][0] <= close_u for t in far), len(far)),
-                      "timing": _share(sum(t["kerr"][0] <= close_u and action_class(t["person"]) == "other"
-                                           for t in far), len(far))}
+                      "timing": _share(len(timing), len(far)),
+                      "timing_jump_dash": _share(sum(t["person"].get("jumps", 0) + t["person"].get("dashes", 0) > 0
+                                                     for t in timing), len(far))}
+    out["causes"] = {k: _share(v, n) for k, v in Counter(cause(t, close_u) for t in T).most_common()}
     # ---- verdicts on the matched ticks ----
-    M = [t for t in T if t["best"][1] <= close_u]
+    M = [t for t, c in zip(T, close) if c]
     out["matched"] = verdicts(M, "vb")
     out["keys_row"] = verdicts([t for t in T if t["kerr"][0] <= close_u], "vk")
     out["keys_row_all"] = verdicts(T, "vk")
