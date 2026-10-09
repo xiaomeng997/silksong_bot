@@ -3308,3 +3308,50 @@ C:\ssbot\data\m2_forum_push\gate.cmd <precision|hindsight|share|recall|rescore|p
 ..\scripts\uv.cmd run python C:\ssbot\data\m2_forum_push\compare.py old_aim0=之前 base rclip --set seen --md <out>.md
 ```
 重打分（门槛 4）不受 S0 影响：规划器的 AIM 默认关，P0 只改了显示、真值和瞄准模板；基线仍是 0.60 % = 32（`C:\ssbot\data\m2_forum_hs\rclip_base_d51b216_summary.json`）。
+
+### 29.14 精度推进 S1：RCLIP 重打分多出来的漏报、P1 / P2（2026-10-09，task "precision push" S1；同一分支；离线，没有开游戏）
+
+**RCLIP 重打分多出来的 70 个漏报，逐帧查**（b5e9072 对 d51b216，按 tick 比；`C:\ssbot\data\m2_forum_push\s1\miss_diff_rclip.json`、`who.log`、`diag_{base,rclip}.json`）：
+- **62 个是"停放"的 Reed**：后面波次的一只 Reed 停在场外 `Fly In Ready`（不渲染），身体碰撞体导出为启用，固定在 (39.0–40.1, 9.65–12.45)。行的盒子碰到它就算"被打中"。62 个里你**一次都没掉血**（horizon 内没有伤害事件）。重打分的真值（`forum_hit_forensics.damage_polys`）以前不跳过停放的怪；精度工具和叠加层（`zone_overlay.damage_colliders`）早就跳过。重打分那 4 组录像里，主角盒子和停放 Reed 重叠 1,204 帧（`parked_check.json`）。
+- 所以 fix_spec 里"Reed 身体 31 → 68"不是 P1（出招前的身体），而是这只停放的 Reed：RCLIP 把别的怪罩到那里的支撑剪掉了，那里本来就没有危险。
+- **改**：`damage_polys` 默认跳过停放的实体（`keep_parked=True` 保留旧行为）。这是真值修正，不是规划器开关。
+- 另外 8 个是真的碰撞体，全部是"别的怪 / 别的家族的框顺带盖住了"：
+  - Envoy 2 个（k = 34、37）：Envoy 在 k 内被主角打中，之后跳斩 / 斩到行上。base 里盖住它们的是 Reed 的 RE_DEFEND 窗口和 RE_EVADE 未出招框，不是 Envoy 自己的支撑。
+  - Reed 的针 5 个（两次投掷，k = 29–37）：Reed 在 `Throw Aim`，针还没出手。"+n" 下它归规划器的瞄准针检查管，那几行它也判安全（pl_S = 0）。base 里盖住它们的是 Envoy 冲锋的框。
+  - Tiny 1 个（k = 35）：之后才被召回的 Tiny。base 里盖住的是 Maestro 的 MA_SUMMON / MA_DEFEND 框。RCLIP=2 后这一个已经没了。
+  - 都不是 P1。
+- 被打过的行确实是 RCLIP 的问题：后见召回里，RCLIP=1 只在"被打过"的行上掉覆盖（你的会话 k12：Reed RE_DEFEND 100 → 94.2 %，Maestro MA_IDLE 100 → 88.8 %）。原因是"没被打"的可达表默认 horizon 里也不会被打（fix_spec P2）。
+
+**P2：`SSBOT_FORUM_RCLIP=2`**（`multi_forecast._Builder._clip / _hero_hit_k`）
+- 没看到命中时仍先用"没被打"的可达框。
+- 从"一次命中最早能打到这只怪"的那一帧起，并上"所有帧"的可达框（含击退、被打后的反击）。
+- "最早能打到"：打的人盒子和怪身体之间的距离，先减去 HIT_REACH_U = 4 u（Reaper 斩 2.35 u + 1.65 u 余量），再按主角冲刺 28 u/s、下落 30 u/s 加上怪自己的速度来追。
+- 打的人包括主角和**盟友**：新加 `WorldState.allies`，来自 oracle 的 allies 导出。证据：20261009_085824 f25585 和 f26989，Garmond 的 `WildSlash` / `Stomp` 打中了离主角 14–23 u 的 Maestro。
+- 已经看到命中时照旧，全程用"所有帧"。
+- 剪切框只会比 RCLIP=1 大，所以支撑是 RCLIP=1 的超集，召回不会比它低。
+
+**P1：`SSBOT_FORUM_PRESTRIKE`**（默认关）
+- "+n" 丢掉 Reed 还没开始的 RE_STAB / RE_DEFEND 根时，把它从当前状态的真实可达放进支撑：开发集的 reach 表，"所有帧"部分。
+- 时间从最早开始到最晚开始 + 13 帧，盒子类型 `prestrike`，算 not_started 层。
+- 上面已经说明，重打分的 Reed 漏报不需要它。它只为以后 F2 缩小 RE_EVADE 框时兜底。
+
+**门槛**（seen = 你的 3 次会话 + bot 第 0 波；base = S0 的全关，冻结 d08b738；RCLIP=2 冻结 dd96ea9；表 `C:\ssbot\data\m2_forum_push\s1\compare_seen_s1.md`）
+
+| | base | RCLIP=1 | RCLIP=2 |
+|---|---|---|---|
+| 你的会话 committed 判错 / 倍数中位，k0 | 99.6 % / 12.3 | 96.4 % / 2.6 | 97.2 % / 2.8 |
+| 你的会话 committed 判错 / 倍数中位，k12 | 99.4 % / 14.9 | 98.9 % / 7.0 | 99.3 % / 9.3 |
+| bot committed 倍数中位，k0 / k12 | 7.9 / 9.4 | 2.0 / 3.8 | 2.3 / 6.1 |
+| k12 几何召回（你的 / bot，行 %） | 99.46 / 98.40 | 99.07 / 98.22 | 99.45 / 98.40 |
+| 后见 k12：干净行 自己 / 所有，你的会话 | 99.61 / 99.83 | 99.60 / 99.75 | 99.60 / 99.80 |
+| 后见 k12：被打过的行（所有支撑），你的 / bot | 99.55 / 99.34 | 97.92 / 96.63 | 99.47 / 98.77 |
+| 后见 k36：所有支撑 干净行，bot | 99.19 | 93.77 | 95.77 |
+| 超过半屏的帧 k0 / k12，你的会话 | 44.9 / 70.2 % | 23.9 / 33.6 % | 23.9 / 38.9 % |
+| 超过半屏的帧 k0 / k12，bot | 32.7 / 72.6 % | 1.0 / 12.7 % | 1.0 / 15.9 % |
+
+- **后见召回**：k ≤ 12 时，RCLIP=2 自己的覆盖只在 5 帧（14 个 帧×k）比 base 少，原因如下。
+  - Bellbearer `Out of Range` 两帧：算到它头上的钟在飞，它自己没有钟的路径。base 里是被它别的框顺带盖住的。
+  - Reed `Block` 一帧：被打后往下掉了 1.9 u，比"所有帧"可达框低 0.4 u。
+  - Clapper 三帧：差 1–3 格。
+- k36 时，"所有支撑"那一列比 base 低（bot 干净行 99.19 → 95.77）。少掉的都是别的怪的框顺带盖住的部分；"自己的支撑"一列和 base 一样（83.88）。
+- **召回**（multi_recall fresh，L2–L4，自己的 + 钩子）：RCLIP=1 在 R2 的 444 张表上是 100 %（`C:\ssbot\data\m2_forum_reach\recall_fresh_rclip.json`），用的是同一张 reach 表（md5 相同）。RCLIP=2 的剪切框是它的超集，PRESTRIKE 只加支撑，所以两者都是 100 %。直接跑的 `gate.cmd recall rclip2 r2` 在机器过载时开始，还没跑完。

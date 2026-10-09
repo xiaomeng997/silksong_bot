@@ -3973,3 +3973,34 @@ S0 (planner AIM off; P0 is display / truth / aim templates): baseline 0.60 % = 3
    checked in S0. The multi_recall gate (`gate.cmd recall <cfg> seen`) was not run (no planner switch changed). A clean
    set of new recordings needs a `sets\<name>.cmd`.
 4. HeroBox (0.4554 x 2.2498, offset -0.38) vs the exported Bounds box (0.50 x 2.079) in the references: unchanged.
+
+### S1: the RCLIP re-score misses, P1 / P2 (2026-10-09, offline; forum.md §29.14)
+- Diagnosis of RCLIP's 70 new re-score misses (b5e9072 vs d51b216, per tick; `C:\ssbot\data\m2_forum_push\s1\`
+  miss_diff.py / miss_diff_rclip.json, who.py / who.log, diag.py / diag_{base,rclip}.json): 62 were a PARKED later-wave
+  Reed (`Fly In Ready`, not rendered, body collider exported enabled, fixed at (39.0-40.1, 9.65-12.45)); the person was
+  unhurt in all 70. The re-score truth (`forum_hit_forensics.damage_polys`) did not skip parked entities (the
+  precision tool and the overlay did). Fixed: `damage_polys(keep_parked=False)` skips `zone_overlay.parked` entities
+  (1,204 overlap frames in the re-score set, s1\parked_check.json). The fix_spec's "Reed body 31 -> 68" was this, not
+  P1. The 8 live ones (Envoy x2 after a hero hit, k 34-37; Reed pin x5 from Throw Aim, k 29-37, the aimed pin check
+  pl_S 0; Tiny x1 summoned later) were all covered in base only by ANOTHER enemy's or family's box.
+- P2 = `SSBOT_FORUM_RCLIP=2` (`multi_forecast._Builder._clip`, `_hero_hit_k`): the no-hit reach until the first frame
+  a hit of the hero or an ally can reach the enemy (box gap - HIT_REACH_U 4 u, closed at 28 / 30 u/s + the enemy's
+  speed), then also the every-frame reach. Allies come from the new `WorldState.allies` (oracle allies export; Garmond
+  hit Maestros 14-23 u from the hero, 20261009_085824 f25585 / f26989). Its clip boxes contain RCLIP=1's, so the
+  support is a superset and the recall cannot drop below RCLIP=1's 100 % (same reach_clip.npz, md5 bfa8b64b...).
+- P1 = `SSBOT_FORUM_PRESTRIKE` (default off): a dropped ("+n") Reed RE_STAB / RE_DEFEND root gets the Reed's dev
+  reach from its current state (reach_clip.npz, every-frame part) over [earliest start, latest start + 13 f], box
+  kind "prestrike" (layer not_started). Measured effect on the seen set and the re-score is nil to marginal (the
+  clipped RE_EVADE box already holds the same cells); it stays off, ready for F2.
+- Frozen checkouts: C:\ssbot\hs_s1_f7b58a5 (truth fix + RCLIP=2 without allies), hs_s1_1b8c69a (+ PRESTRIKE),
+  hs_s1_dd96ea9 (+ allies: the final RCLIP=2). Configs: `configs\rclip2.cmd`, `rclip2p.cmd` (+ PRESTRIKE),
+  `prestrike.cmd`; gate outputs `rclip2` (f7b58a5), `rclip2a` (dd96ea9, RCLIP=2), `rclip2p` (dd96ea9, + PRESTRIKE).
+  Comparison: `s1\compare_seen_s1.md` (`compare.py base rclip rclip2a=rclip2 --set seen`).
+- Re-score runs (detached, started 13:27-13:36 on 2026-10-09 on an overloaded machine, ~10 of 32 segments at 15:30):
+  `C:\ssbot\data\m2_forum_hs\s1_{base,rclip1,rclip2}_f7b58a5` (truth fix; plain) and
+  `s1rb_{base,rclip2,rclip2p}_1b8c69a` (variant rb: the escape check on every safe row, misses_esc). Each writes
+  `<name>_summary.json` when done. Per-type comparison on the finished segments: `python
+  C:\ssbot\data\m2_forum_push\s1\partial.py <run> ...`; new misses per tick: `miss_diff.py <base dir> <new dir> <out>`.
+- Still running (detached): `gate.cmd recall rclip2 r2` (f7b58a5; started under load, ~15 min per fight table) then
+  `hindsight rclip2 r2`; chain s1\gates_rclip2p.cmd (rclip2a / rclip2p: png, R2 hindsight; writes
+  s1\gates_rclip2p.done); the S0 base R2 hindsight.
