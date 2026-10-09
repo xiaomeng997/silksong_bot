@@ -3351,7 +3351,12 @@ of the push: the person's decisions and tactics of 2026-10-08 in the planner / L
   every token (0.265): the smoke's rise is behaviour (where the hero stands), and `edge` moves the most decisions
   (the RUSH stance 1.8 -> ~3.5 u from the Envoy: into the 3-5 u band of forum.md 24.4 where the bot meets the Envoy's
   slash 2.2x as often as the person). forum.md 26.7.
-- Re-score (plan sec. 5): PLACEHOLDER_RESCORE
+- Re-score (plan sec. 5; frozen `C:\ssbot\hs_ta_2ef0551`, `SSBOT_FORUM_TA=all`, best arm, 32 segments, 0 errors;
+  `C:\ssbot\data\m2_forum_hs\ta_all_2ef0551[_summary.json]`) vs best_v2: FORCED_RISK 82.10 -> 82.09 %, matched
+  71.4 -> 71.4 %, matched unsafe 86.57 -> 86.57 %, of them clear 88.82 -> 88.81 %, misses (of safe) 0.60 -> 0.60 %
+  (flat); false alarms not down (kb acts in the hit branch only; the person's unsafe rows are stage-1 contacts,
+  34,000 / 34,110); vetoed ticks 4.09 -> 2.87 % (wins 3.04 -> 1.04 %, the person's row not allowed 4.15 -> 1.43 %:
+  `free`), wave 0 unchanged. The first re-score (`C:\ssbot\hs_ta_6b8f2ba`) errored on every tick (j_terms).
 
 ### Running
 
