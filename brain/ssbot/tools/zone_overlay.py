@@ -509,7 +509,7 @@ class ZoneEngine:
         # branches (or of the recorded instances of an aimed attack) is not that
         certain = np.asarray(pm["prob"], np.float64) >= CERTAIN_P if n else np.zeros(0, bool)
         fams = np.asarray(pm["family"], object) if n else np.zeros(0, object)
-        tids = np.asarray(pm["tid"]) if n else np.zeros(0, np.int64)
+        tids = np.asarray(fcast.P.tid) if n else np.zeros(0, np.int64)     # the fine placements (pm rows)
         aimed = self.aim_families()
         mf = self.pol.fc
         K = YELLOW_F
