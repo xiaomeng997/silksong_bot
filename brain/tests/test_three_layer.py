@@ -210,6 +210,8 @@ def test_aimed_pins_hit_the_row_that_stays_where_it_was_aimed_at(params, arena):
     the release is within the aim lag): a row standing at (20, 4) meets it about 0.3 s later, a row that has jumped
     5 u above by then does not (the 15 deg rays stay below it); a row on the far side is aimed at too."""
     from types import SimpleNamespace
+
+    from ssbot.knowledge.kinematics import F_INVULN
     # on with "+a", and with "+n" (forum.md §23.12: nothing else holds a throw whose wind-up has started)
     assert ForumConfig(react="escape+n+a").pin_aim and ForumConfig(react="escape+n").pin_aim
     assert ForumConfig(react="escape+g+a").pin_aim and not ForumConfig(react="escape+g").pin_aim
@@ -229,6 +231,19 @@ def test_aimed_pins_hit_the_row_that_stays_where_it_was_aimed_at(params, arena):
     assert first[0] >= 12 and first[0] < T1
     assert first[2] >= 12                     # aimed at it too (behind the Reed means toward +x here)
     assert first[1] == -1
+    # the numba kernel is the numpy loop (random rows around the Reed, a moving Reed, several releases)
+    rng = np.random.default_rng(370001)
+    n = 300
+    c = rng.uniform([18.0, 0.0], [42.0, 10.0], (n, 2))[:, None, :] + np.cumsum(rng.normal(0, 0.15, (n, T1, 2)), axis=1)
+    box = np.concatenate([c - [0.25, 1.04], c + [0.25, 1.04]], axis=2)
+    flags = np.where(rng.random((n, T1)) < 0.1, F_INVULN, 0).astype(np.int64)
+    r1 = SimpleNamespace(box=box, flags=flags)
+    pins = [((30.0, 4.0), (1.5, -0.5), 0.05, np.arange(3, 30, 2) * BIN), ((24.0, 8.0), (0.0, 0.0), 0.0,
+                                                                         np.array([0.5 * BIN]))]
+    fast = pl._pin_contacts(pins, r1, np.arange(n), tk, True)
+    pl._pin_ref = True
+    ref = pl._pin_contacts(pins, r1, np.arange(n), tk, True)
+    assert np.array_equal(fast, ref) and (ref >= 0).sum() > 20
 
 
 def test_state_margins_dilate_a_state_by_its_own_residual():
@@ -334,3 +349,123 @@ def test_planned_safe_counts_the_hits_a_safe_plan_did_not_avoid():
     assert p["hits"] == 2 and p["12"] == 1 and p["24"] == 1 and p["30"] == 1 and p["unknown_30"] == 1
     assert p["esc_12"] == 1 and p["pin_12"] == 1 and p["any30"] == 2 and p["clash30"] == 1
     assert p["by_src"] == {"a": 1, "b": 1}
+
+
+@pytest.fixture
+def body_only(monkeypatch):
+    """The test Reed's stab as a body-only family (no strike time), its defence a strike."""
+    monkeypatch.setattr(mfm, "_STRIKE_TAB", {(REED, "RE_DEFEND"): (0.6, 0.62)})
+    monkeypatch.setattr(mfm, "body_only_families", lambda path=None: frozenset({(REED, "RE_STAB")}))
+
+
+def test_parse_body_reach_and_lock_check():
+    assert ReactConfig.parse("escape+n+g+b").bodyreach and not ReactConfig.parse("escape+n+b").bodyreach_all
+    assert ReactConfig.parse("escape+n+br").bodyreach_all and ReactConfig.parse("escape+n+k") == \
+        ReactConfig.parse("escape+n")
+    with pytest.raises(ValueError):
+        ReactConfig.parse("escape+b")                     # needs +n
+    assert ForumConfig(react="escape+n+b").body_reach == (True, False)
+    assert ForumConfig(react="escape+n+br").body_reach == (True, True)
+    assert ForumConfig(react="escape+n").body_reach == (False, False)
+    assert ForumConfig(react="escape+n+k").lock_check and not ForumConfig(react="delay+n+k").lock_check
+
+
+def test_body_reach_leaves_body_only_families_to_the_tube(body_only):
+    """+b / +br: a body-only family not started is not placed when the collider tube holds its reaction window (the
+    Reed's only with +br, BODYREACH_KEEP); +n alone keeps it; an enemy not seen lately keeps it (no tube)."""
+    def later(rc, frames=2, origin=None):
+        mf = MultiForecaster(_tables(), ORACLE, waves=False)
+        _idle_reed(mf, frames)
+        mf.react = rc
+        f = mf.forecast(0.8) if origin is None else mf.forecast(0.8, origin_t=origin)
+        return {fam for fam, c in zip(f.bb["family"], f.bb["committed"]) if not c}, f
+    fams, _ = later(ReactConfig(notstarted=True))
+    assert "RE_STAB" in fams and "RE_DEFEND" not in fams
+    fams, _ = later(ReactConfig(notstarted=True, bodyreach=True))
+    assert "RE_STAB" in fams                            # the Reed's body is kept with +b
+    fams, f = later(ReactConfig(notstarted=True, bodyreach=True, bodyreach_all=True))
+    assert "RE_STAB" not in fams and any(b[1] == "collider" for b in f.boxes)
+    fams, _ = later(ReactConfig(notstarted=True, bodyreach=True, bodyreach_all=True), origin=0.6 + 2 * BIN)
+    assert "RE_STAB" in fams                            # last seen 0.6 s ago: no collider tube, kept
+
+
+def test_body_reach_threats_and_the_bind_lock(params, arena, body_only):
+    """The escape check takes "+br"'s body-only families as threats (no wind-up); "+k": a Bind is threatened when an
+    attack not started may start and reach the hero during the Bind's lock, not when the hero is far."""
+    from tests.test_forum_planner import _reed_forecaster
+    mf = _reed_forecaster(None, frames=3, x=25.0)
+    mf.react = ReactConfig.parse("escape+n+br")
+    pl = ForumPlanner(params, arena, PlannerConfig(T=36, threads=2, variants="bounds_lo"),
+                      ForumConfig(deadline_ms=math.inf, react="escape+n+br+k"))
+    f = mf.forecast(2.0)
+    th = {t[-1]: t for t in pl._threats(f, (24.0, 5.0))}
+    assert f"{REED}/RE_STAB" in th and th[f"{REED}/RE_STAB"][2] == 1.0
+    pl.fcfg.react = "escape+n"
+    assert f"{REED}/RE_STAB" not in {t[-1] for t in pl._threats(f, (24.0, 5.0))}
+    pl.fcfg.react = "escape+n+br+k"
+
+    def stand(x):
+        b = np.array([x - 0.3, 4.0, x + 0.3, 6.0])
+        return np.tile(b, (101, 1))
+    assert pl._bind_threatened(f, stand(23.0), 1, (23.0, 5.0))
+    assert not pl._bind_threatened(f, stand(4.0), 1, (4.0, 5.0))
+
+
+def test_a_tick_with_the_new_switches(params, arena, body_only):
+    """The planner ticks with the timing rows and "+n+g+br+k+s" (the escape check with the body-only threats, the
+    dash lock-ins, the swept seen key)."""
+    from ssbot.knowledge import kinematics as kin
+    from tests.test_forum_planner import FLOOR, _prefs, _reed_forecaster, _world
+    mf = _reed_forecaster(None, frames=3, x=25.0)
+    mf.react = ReactConfig.parse("escape+n+g+br+k+s")
+    pl = ForumPlanner(params, arena, PlannerConfig(T=36, threads=2, variants="bounds_lo"),
+                      ForumConfig(deadline_ms=math.inf, chunk=16, react="escape+n+g+br+k+s", waits=True))
+    r = pl.tick(_world(20.0), kin.initial_state(params, 20.0, FLOOR + params.foot), kin.HoldState.idle(1),
+                np.zeros(1, np.int64), mf.forecast(0.8), _prefs(), _ctx())
+    assert r is not None and len(pl.fsets["ground"][0].cmd) == 399 + 32 and pl.last_info["esc"] is not None
+
+
+def test_swept_seen_key_catches_a_pin_tip_a_frame_off():
+    """+s: a polygon at least SEEN_SWEEP_MIN_U_S fast meets a row a frame early / late too (a pin 30 u/s, the row 0.3 u
+    past its predicted tip); a slow one is tested as before."""
+    from ssbot.combat.forum_planner import SEEN_SWEEP_MIN_U_S, seen_contacts, seen_contacts_swept
+    assert ForumConfig(react="escape+n+s").seen_sweep and not ForumConfig(react="escape+n").seen_sweep
+    dt = 1.0 / 60.0
+    T1 = 6
+    tk = np.arange(T1) * dt
+    verts = np.array([[0.0, 0.0], [2.0, 0.0], [2.0, 0.1], [0.0, 0.1]])
+    starts = np.array([0, 4], np.int64)
+    pbox = np.array([[0.0, 0.0, 2.0, 0.1]])
+    inv = np.zeros((1, T1), bool)
+    rows = np.array([0], np.int64)
+    for v, swept in ((30.0, True), (5.0, False)):
+        tip = 2.0 + v * tk[-1]                                  # the tip's farthest reach over the plan
+        box = np.zeros((1, T1, 4))
+        box[0, :] = (tip + min(0.3, 0.6 * v * dt), -0.5, tip + 1.0, 0.5)
+        vel = np.array([[v, 0.0]])
+        n0, _ = seen_contacts(box, inv, verts, starts, pbox, vel, tk, rows, 0.0)
+        n1, f1 = seen_contacts_swept(box, inv, verts, starts, pbox, vel, tk, rows, 0.0, dt, SEEN_SWEEP_MIN_U_S)
+        assert n0[0] == 0 and (n1[0] > 0) == swept
+        if swept:
+            assert f1[0] == T1 - 1
+
+
+def test_reactive_variants_swap_from_the_base_and_restore_it():
+    """forum_layer_audit.Variants rb / rbr: the base's reactive support at the first swap (the tools set it per
+    episode), "+b" / "+br" on it, back to the base on restore even after two swaps in a row."""
+    from types import SimpleNamespace
+
+    from ssbot.tools.forum_layer_audit import Variants
+    fc = SimpleNamespace(tables="T", _fwalk="W", react=None)
+    vs = Variants(fc, ("rb", "rbr"))
+    base = ReactConfig.parse("escape+n+g")
+    fc.react = base
+    vs.swap("rb")
+    assert fc.react.bodyreach and not fc.react.bodyreach_all and fc.react.hold
+    vs.swap("rbr")
+    assert fc.react.bodyreach_all
+    vs.restore()
+    assert fc.react == base and (fc.tables, fc._fwalk) == ("T", "W")
+    fc.react = ReactConfig.parse("escape+g")
+    with pytest.raises(ValueError):
+        vs.swap("rb")

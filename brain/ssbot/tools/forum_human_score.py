@@ -655,11 +655,29 @@ def analyse(pol, cap: dict, vs, i: int, states: list, fi: dict, fp, groups_cache
         if not v["S"]:
             continue
         rec[tag]["layers"] = layers_of(fcast, groups, bx, iv, tk)
-        if vs is not None and rec[tag]["hind"] < 0:
+        if vs is not None and (rec[tag]["hind"] < 0 or vs.react):
+            # (the reactive variants also on the rows hit in hindsight: the true alarms they would remove)
             rec[tag]["var"] = variant_clear(pol, vs, fcast, bx, iv, tk)
+    if vs is not None and vs.react and pl.fcfg.escape and ok[best]:
+        # the escape check on the person's row where it would be safe: under the base config when safe, under each
+        # reactive variant (its threats: ForumConfig.body_reach) when safe or freed by it (task forum push 2 track B)
+        full_b = np.concatenate([np.asarray(prefix, np.int64), ls["cmd"][best]])
+        if not vb["S"]:
+            rec["vb"]["esc_b"] = escape_fails(pl, cap, full_b)[0]
+        ve = {}
+        react0 = pl.fcfg.react
+        try:
+            for v in vs.react:
+                if not vb["S"] or (rec["vb"].get("var") or {}).get(v):
+                    pl.fcfg.react = react0 + ("+br" if v == "rbr" else "+b")
+                    ve[v] = escape_fails(pl, cap, full_b)[0]
+        finally:
+            pl.fcfg.react = react0
+        rec["vb"]["var_esc"] = ve
     # ---- a row safe but hit in hindsight: what hit it ----
     for tag, v, bx in (("vb", vb, box[best]), ("vk", vk, rk.box[0])):
-        if not v["S"] and rec[tag]["hind"] >= 0:
+        if rec[tag]["hind"] >= 0 and (not v["S"] or any((rec[tag].get("var") or {}).get(x) for x in ("rb", "rbr"))):
+            # (and a hit row a reactive variant frees: what its true alarm was)
             rec[tag]["hit_by"] = _owner(fp, fo, rec[tag]["hind"], bx[rec[tag]["hind"]])
     # ---- J terms of the best row and the pick ----
     rows2 = np.array([best, pick], np.int64)
@@ -874,6 +892,52 @@ def cause(t: dict, close_u: float) -> str:
     return "safe_ranked_behind"
 
 
+def react_variants(M: list[dict]) -> dict:
+    """The reactive variants (rb / rbr: ReactConfig.bodyreach) on the matched rows (task forum push 2 track B): of
+    the rows the base support calls unsafe, those the variant frees (clear of its support) that hindsight leaves
+    clear (false alarms removed) and that hindsight hits (true alarms removed); misses (safe, hit in hindsight) under
+    the base and under the variant (base-safe or freed), by the support alone and with the escape check's veto (a row
+    the check fails is not safe: ForumConfig.esc_veto), and the share of freed rows the escape check fails."""
+    def ok(t):
+        return t["vb"].get("ok", True) and not t["vb"].get("unmod")
+    rows = [t for t in M if ok(t) and t["vb"].get("var_esc") is not None]
+    if not rows:
+        return {}
+    names = sorted({v for t in rows for v in (t["vb"].get("var") or {})}
+                   | {v for t in rows for v in t["vb"]["var_esc"]})
+    names = [v for v in names if v in ("rb", "rbr")]
+    uns = [t for t in rows if t["vb"]["S"]]
+    fa = [t for t in uns if t["vb"]["hind"] < 0]
+    tr = [t for t in uns if t["vb"]["hind"] >= 0]
+    safe = [t for t in rows if not t["vb"]["S"]]
+
+    def passes(nf):
+        return nf is None or nf == 0
+    base_miss = sum(t["vb"]["hind"] >= 0 for t in safe)
+    base_miss_esc = sum(t["vb"]["hind"] >= 0 and passes(t["vb"].get("esc_b")) for t in safe)
+    out = {"n": len(rows), "unsafe": len(uns), "false_alarms": len(fa), "true_alarms": len(tr), "safe": len(safe),
+           "base": {"misses": base_miss, "misses_esc": base_miss_esc,
+                    "safe_esc": sum(passes(t["vb"].get("esc_b")) for t in safe)}}
+    for v in names:
+        fr = [t for t in uns if (t["vb"].get("var") or {}).get(v)]
+        ffa = [t for t in fr if t["vb"]["hind"] < 0]
+        ftr = [t for t in fr if t["vb"]["hind"] >= 0]
+        ve = [t["vb"]["var_esc"].get(v) for t in fr]
+        new_safe = safe + fr
+        out[v] = {"freed": len(fr), "false_alarms_removed": len(ffa), "true_alarms_removed": len(ftr),
+                  "fa_removed_share": _share(len(ffa), len(fa)), "ta_removed_share": _share(len(ftr), len(tr)),
+                  "freed_fail_escape": _share(sum(not passes(x) for x in ve), len(fr)),
+                  "fa_removed_esc": sum(passes(t["vb"]["var_esc"].get(v)) for t in ffa),
+                  "ta_removed_esc": sum(passes(t["vb"]["var_esc"].get(v)) for t in ftr),
+                  "misses": base_miss + len(ftr),
+                  "misses_esc": sum(t["vb"]["hind"] >= 0 and passes(t["vb"]["var_esc"].get(v)) for t in new_safe),
+                  "safe_esc": sum(passes(t["vb"]["var_esc"].get(v)) for t in new_safe),
+                  "miss_by": dict(Counter(
+                      ((t["vb"].get("hit_by") or [[None, "?", "?"]])[0][1] or "?")
+                      for t in ftr).most_common(8))}
+    return out
+
+
 def summarize_ticks(T: list[dict], close_u: float) -> dict:
     n = len(T)
     if not n:
@@ -923,6 +987,9 @@ def summarize_ticks(T: list[dict], close_u: float) -> dict:
     # ---- verdicts on the matched ticks ----
     M = [t for t, c in zip(T, close) if c]
     out["matched"] = verdicts(M, "vb")
+    rv = react_variants(M)
+    if rv:
+        out["react_variants"] = rv
     out["keys_row"] = verdicts([t for t in T if t["kerr"][0] <= close_u], "vk")
     out["keys_row_all"] = verdicts(T, "vk")
     out["pick"] = {"hind_clear": _share(sum(t["pick"][2] < 0 for t in T), n),

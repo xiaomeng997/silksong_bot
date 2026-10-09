@@ -237,36 +237,88 @@ def _clash_continuations(T: int) -> list[Piece]:
     return out
 
 
-def build_forum(T: int = 36, posture: str = "ground", clash: bool = False) -> tuple[CandidateSet, np.ndarray]:
+# Timing rows (task forum push 2 track B; forum.md 25.3 / 25.11: 12.6 % of the person's ticks are outside the
+# candidate set by timing alone, a jump or a dash a few frames later than the rows' grid): from the first pieces that
+# keep the hero's options (WAIT_FIRSTS), a jump / a dash either way after WAITS frames of the continuation; from the
+# attack first pieces (TIMED_FIRSTS), one press at a guard's counter (the person's timed clash rows, plan sec. 5: hit,
+# wait, slash at the counter's moment): TIMED_PRESS continuation frames after a hit in the first piece's swing, the
+# Reed's counter after its Block 0.516 s, the Minister's lunge after its Parry Block 0.583 s, less the Wanderer's 1-7
+# frames from a press to a live blade. Rows of WAIT_FIRSTS x wait continuations and TIMED_FIRSTS x timed ones only
+# (32 / 32 / 24 rows: the 512-row budget, ground 475 -> 507 with the clash continuations; air was 525 before)
+WAITS = (3, 6, 9, 12)
+WAIT_FIRSTS = ("WAIT",)
+TIMED_FIRSTS = ("ATTACK(side)L", "ATTACK(side)R", "ATTACK(up)L", "ATTACK(up)R")
+TIMED_PRESS = {"reed": 26, "minister": 30}
+
+
+def _wait_continuations(T: int) -> list[Piece]:
+    n = T - FIRST
+    out = []
+    for k in WAITS:
+        for d in ("L", "R"):
+            m = _seq(n)
+            m[k:] = DIRS[d]
+            m[k:k + 48] |= B_JUMP
+            out.append(Piece(f"wait{k}_jump{d}", m, frozenset({Prim.WAIT, Prim.JUMP, Prim.MOVE})))
+            m = _seq(n)
+            m[k:] = DIRS[d]
+            m[k:k + PRESS] |= B_DASH
+            out.append(Piece(f"wait{k}_dash{d}", m, frozenset({Prim.WAIT, Prim.DASH, Prim.MOVE})))
+    return out
+
+
+def _timed_clash_continuations(T: int) -> list[Piece]:
+    n = T - FIRST
+    out = []
+    for who, k in TIMED_PRESS.items():
+        if k + 2 > n:
+            continue
+        for d, bits in (("N", 0), ("U", B_UP)):
+            m = _seq(n)
+            m[k:k + 2] = B_ATTACK | bits
+            prim = Prim.ATTACK_UP if d == "U" else Prim.ATTACK_SIDE
+            out.append(Piece(f"clashat_{who}{d}", m, frozenset({Prim.WAIT, prim})))
+    return out
+
+
+def build_forum(T: int = 36, posture: str = "ground", clash: bool = False, waits: bool = False
+                ) -> tuple[CandidateSet, np.ndarray]:
     """The Forum set of one posture family (forum_planner_plan §4.1: posture families + the core evasion set): the
     core first pieces (CORE_FIRST: wait, move, jumps 3 holds x 3 ways, dash either way) and the posture's attack pieces,
     each with every continuation (the Bell Beast library plus dash / dash-then-slash; clash: the R8 clash
-    continuations too, after the others so the R3 rows keep their indices). Returns (set, core [N] bool): the
-    core evasion rows (CORE_FIRST x CORE_CONT), the same commands in every posture family, so their S / Hz / U never
-    depend on the posture's other rows or on the tactics (§4.4 item 2)."""
+    continuations too, after the others so the R3 rows keep their indices; waits: the timing rows, WAIT_FIRSTS x
+    the wait continuations and TIMED_FIRSTS x the timed clash ones, after all of those). Returns (set, core [N]
+    bool): the core evasion rows (CORE_FIRST x CORE_CONT), the same commands in every posture family, so their S /
+    Hz / U never depend on the posture's other rows or on the tactics (§4.4 item 2)."""
     if posture not in POSTURES:
         raise ValueError(f"posture {posture!r}")
     fp = {p.name: p for p in _forum_first_pieces()}
     firsts = [fp[n] for n in CORE_FIRST] + [fp[n] for n in POSTURE_FIRST[posture]]
     conts = _forum_continuations(T) + (_clash_continuations(T) if clash else [])
-    N = len(firsts) * len(conts)
+    pairs = [(a, b) for a in range(len(firsts)) for b in range(len(conts))]
+    if waits:
+        wc, tc = _wait_continuations(T), _timed_clash_continuations(T)
+        b0 = len(conts)
+        conts = conts + wc + tc
+        pairs += [(a, b0 + j) for a, p in enumerate(firsts) if p.name in WAIT_FIRSTS for j in range(len(wc))]
+        pairs += [(a, b0 + len(wc) + j) for a, p in enumerate(firsts) if p.name in TIMED_FIRSTS
+                  for j in range(len(tc))]
+    N = len(pairs)
     cmd = np.zeros((N, T), np.int64)
     first = np.zeros(N, np.int64)
     cont = np.zeros(N, np.int64)
     bits = np.zeros(N, np.int64)
     core = np.zeros(N, bool)
-    i = 0
-    for a, p in enumerate(firsts):
-        for b, cp in enumerate(conts):
-            cmd[i, FIRST:] = cp.masks[:T - FIRST]
-            k = min(len(p.masks), T)
-            cmd[i, :FIRST] = p.masks[:FIRST]
-            if k > FIRST:
-                cmd[i, FIRST:k] |= p.masks[FIRST:k] & B_JUMP
-            first[i], cont[i] = a, b
-            bits[i] = _bits(p.prims | cp.prims)
-            core[i] = p.name in CORE_FIRST and cp.name in CORE_CONT
-            i += 1
+    for i, (a, b) in enumerate(pairs):
+        p, cp = firsts[a], conts[b]
+        cmd[i, FIRST:] = cp.masks[:T - FIRST]
+        k = min(len(p.masks), T)
+        cmd[i, :FIRST] = p.masks[:FIRST]
+        if k > FIRST:
+            cmd[i, FIRST:k] |= p.masks[FIRST:k] & B_JUMP
+        first[i], cont[i] = a, b
+        bits[i] = _bits(p.prims | cp.prims)
+        core[i] = p.name in CORE_FIRST and cp.name in CORE_CONT
     return CandidateSet(cmd, first, cont, [p.name for p in firsts], [p.name for p in conts], bits,
                         np.zeros(N, bool), T), core
 

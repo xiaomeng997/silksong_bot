@@ -252,18 +252,27 @@ def summarize(base: dict, var: dict, nolag: dict, shape, hind: np.ndarray | None
 
 class Variants:
     """Alternative tables / tubes for the same trackers: m0 / m05 (margins x 0 / x 0.5), g0 / g05 (the idle growth
-    x 0 / x 0.5). swap(name) puts them on the forecaster (tables, family walk ids), restore() puts the production
-    ones back."""
+    x 0 / x 0.5); rb / rbr: the reactive support with "+b" / "+br" (multi_forecast.ReactConfig.bodyreach: the body-
+    only families not started out; needs a "+n" support). swap(name) puts them on the forecaster (tables, family
+    walk ids, reactive support), restore() puts the production ones back."""
 
     def __init__(self, fc, names=VARIANTS):
         from ssbot.combat.enemy_tables import FORUM_DIR, EnemyTables, Tubes
         self.fc = fc
         self.base = (fc.tables, fc._fwalk)
+        self.react0 = fc.react
+        self.swapped = False
+        self.react = {}
         self.sets = {}
         md = json.loads((FORUM_DIR / "support_margins.json").read_text("utf-8"))
         import tempfile
         tmp = Path(tempfile.mkdtemp(prefix="layer_audit_"))
         for v in names:
+            if v in ("rb", "rbr"):
+                # (the reactive support is the base's at swap time: the tools set it per episode)
+                self.react[v] = {"bodyreach": True, "bodyreach_all": v == "rbr"}
+                self.sets[v] = self.base
+                continue
             if v.startswith("m"):
                 s = 0.0 if v == "m0" else 0.5
                 d = copy.deepcopy(md)
@@ -289,10 +298,22 @@ class Variants:
         self.fam_margins: set = set()
 
     def swap(self, v: str) -> None:
+        import dataclasses
+        if not self.swapped:                  # the base's reactive support (swaps follow each other until restore)
+            self.react0 = self.fc.react
+            self.swapped = True
         self.fc.tables, self.fc._fwalk = self.sets[v]
+        self.fc.react = self.react0
+        if v in self.react:
+            if self.react0 is None or not self.react0.notstarted:
+                raise ValueError(f"variant {v}: the support has no +n")
+            self.fc.react = dataclasses.replace(self.react0, **self.react[v])
 
     def restore(self) -> None:
         self.fc.tables, self.fc._fwalk = self.base
+        if self.swapped:
+            self.fc.react = self.react0
+        self.swapped = False
 
 
 def run_episode(job: dict) -> dict:

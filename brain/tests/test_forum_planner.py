@@ -94,6 +94,28 @@ def test_forum_families_share_the_core_rows_and_drop_the_silk_skill():
     assert not any(n.startswith("ATTACK(down)") for n in sets["ground"][0].first_names)
 
 
+def test_timing_rows_follow_the_rows_as_they_were():
+    """waits (SSBOT_FORUM_WAITS): the old rows keep their indices; WAIT then a jump / dash after 3-12 frames; an attack
+    first piece then one press at the Reed's / Minister's counter; ground with the clash rows stays within 512."""
+    for p in cmod.POSTURES:
+        a, core_a = cmod.build_forum(36, p, clash=True)
+        b, core_b = cmod.build_forum(36, p, clash=True, waits=True)
+        n = len(a.cmd)
+        assert np.array_equal(b.cmd[:n], a.cmd) and np.array_equal(core_b[:n], core_a) and not core_b[n:].any()
+        assert len(b.cmd) - n == 16 + 4 * sum(f in cmod.TIMED_FIRSTS for f in b.first_names)
+    b, _ = cmod.build_forum(36, "ground", clash=True, waits=True)
+    assert len(b.cmd) <= 512
+    names = [b.name(i) for i in range(len(b.cmd))]
+    row = b.cmd[names.index("WAIT+wait6_dashL")]
+    assert not row[:cmod.FIRST + 6].any() and (row[cmod.FIRST + 6:cmod.FIRST + 9] & kin.B_DASH).all()
+    row = b.cmd[names.index("WAIT+wait12_jumpR")]
+    assert (row[cmod.FIRST + 12:] & kin.B_JUMP).all() and not (row[:cmod.FIRST + 12] & kin.B_JUMP).any()
+    row = b.cmd[names.index("ATTACK(up)L+clashat_ministerU")]
+    k = cmod.FIRST + cmod.TIMED_PRESS["minister"]
+    presses = np.flatnonzero((row[cmod.FIRST:] & kin.B_ATTACK) != 0) + cmod.FIRST
+    assert list(presses) == [k, k + 1] and (row[k] & kin.B_UP)
+
+
 def test_posture_of_the_start_state(params):
     s = kin.initial_state(params, 30.0, FLOOR + params.foot)
     assert posture_of(s) == "ground"
