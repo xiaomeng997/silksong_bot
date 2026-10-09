@@ -207,9 +207,9 @@ def _production():
 
 # ---- tracker and forecast ----------------------------------------------------------------------------------------
 
-def _script_stab():
+def _script_stab(iid: int = 7):
     """A Reed idles in Alert at x 20, starts a stab at f 10 (Stab Pos, then Stab 1 at f 16), is hit at f 20 and killed
-    at f 24."""
+    at f 24 (iid: its entity id; the pooled Tinies' are negative)."""
     out = []
     t = 0.0
     for f in range(0, 30):
@@ -217,17 +217,17 @@ def _script_stab():
         evs = []
         st = "Alert" if f < 10 else "Stab Pos" if f < 16 else "Stab 1"
         if f == 0:
-            evs.append(_go(7, "Alert", f, t))
+            evs.append(_go(iid, "Alert", f, t))
         if f == 10:
-            evs.append(_go(7, "Stab Pos", f, t))
+            evs.append(_go(iid, "Stab Pos", f, t))
         if f == 16:
-            evs.append(_go(7, "Stab 1", f, t))
+            evs.append(_go(iid, "Stab 1", f, t))
         if f == 20:
-            evs.append(Event(Ev.HIT_DEALT, f, t, HitDealt(7, REED, 9.0, 46.0, attack="Nail", src="Slash")))
+            evs.append(Event(Ev.HIT_DEALT, f, t, HitDealt(iid, REED, 9.0, 46.0, attack="Nail", src="Slash")))
         if f == 24:
-            evs.append(Event(Ev.HIT_DEALT, f, t, HitDealt(7, REED, 50.0, -4.0, killing=True)))
-            evs.append(Event(Ev.ENEMY_KILLED, f, t, EnemyKilled(7, REED)))
-        ents = [] if f > 24 else [_ent(7, 20.0 + (0.05 * (f - 10) if f >= 10 else 0.0), 5.0, st, 0.0, flip=True,
+            evs.append(Event(Ev.HIT_DEALT, f, t, HitDealt(iid, REED, 50.0, -4.0, killing=True)))
+            evs.append(Event(Ev.ENEMY_KILLED, f, t, EnemyKilled(iid, REED)))
+        ents = [] if f > 24 else [_ent(iid, 20.0 + (0.05 * (f - 10) if f >= 10 else 0.0), 5.0, st, 0.0, flip=True,
                                        box=(19.5, 4.0, 20.5, 6.0), hp=999)]
         out.append((f, t, ents, evs))
     return out

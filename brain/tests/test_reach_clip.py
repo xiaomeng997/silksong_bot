@@ -82,6 +82,28 @@ def test_clip_off_is_identical_and_on_is_the_support_inside_the_reach(monkeypatc
     assert not (f1.committed().occupied(Xr, Yr, tk) & ~inside[:, None] & ~tube).any()
 
 
+def test_clip_holds_for_a_negative_iid(monkeypatch):
+    """The pooled Tinies' iids are negative: their own placements are clipped like any other enemy's (until S2 the
+    'not clipped' sentinel was -1 and only owners >= 0 were clipped)."""
+    monkeypatch.setattr(reach_table, "R_FLOOR", 0.0)
+    tk = np.arange(0, 31) * BIN
+    rc = _clip(MultiForecaster(_tables(), ORACLE, waves=False).half)
+    monkeypatch.setattr(mfm, "reach_clip", lambda half: rc)
+    occ = {}
+    for iid in (7, -7):
+        b = MultiForecaster(_tables(), ORACLE, waves=False)
+        b.reach = True
+        _run(b, _script_stab(iid)[:17])
+        f = b.forecast(0.8)
+        assert set(f.clip) == {iid}
+        for kind in ("pm", "wm", "bb"):
+            r = f._clip_rows(kind)
+            own = np.asarray({"pm": f.pm, "wm": f.wm, "bb": f.bb}[kind]["owner"], np.int64)
+            assert (r[own == iid] == iid).all()
+        occ[iid] = _occ(f, tk)[0]
+    assert np.array_equal(occ[7], occ[-7])
+
+
 def test_clip_skips_reactions_the_vision_view_and_falls_back(monkeypatch):
     monkeypatch.setattr(reach_table, "R_FLOOR", 0.0)
     rc = _clip((0.25, 1.04))

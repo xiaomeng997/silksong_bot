@@ -116,6 +116,7 @@ BOX_KINDS = ("death", "arena", "idle", "collider", "hazard", "prestrike")
 REACH_SEEN_S = 2 * BIN
 REACH_KEEP = frozenset((tk, fam) for tk, sp in FORUM_TYPES.items() for _hz, fams in sp.spawns for fam in fams)
 KB_FREE_F = 20            # frames without a hit seen: the no-knockback reach (combat.reach_table.KB_FREE_F)
+NOCLIP = np.iinfo(np.int64).min   # _clip_rows: a row not clipped (iids can be negative: the pooled Tinies)
 _REACH_CLIP: dict = {}
 
 
@@ -1929,8 +1930,10 @@ class MultiForecast:
     # ---- the reach clip (SSBOT_FORUM_RCLIP) ----
 
     def _clip_rows(self, kind: str) -> np.ndarray | None:
-        """[rows] the clipped owner of each placement row of a component ("pm", "wm", "bb"; -1: not clipped: no
-        clip for its owner, a family holding thrown hazards, a Tiny group row), None without a clip."""
+        """[rows] the clipped owner of each placement row of a component ("pm", "wm", "bb"; NOCLIP: not clipped: no
+        clip for its owner, a family holding thrown hazards, a Tiny group row), None without a clip. (Until S2 the
+        sentinel was -1 and only owners >= 0 were clipped: the pooled Tinies' iids are negative, so a Tiny's own
+        rows were never clipped, about 3 / 4 of the person's committed excess with RCLIP on.)"""
         clip = self.__dict__.get("clip")
         if not clip:
             return None
@@ -1940,7 +1943,7 @@ class MultiForecast:
             meta = {"pm": self.pm, "wm": self.wm, "bb": self.bb}[kind]
             tk_of = {s.iid: s.type_key for s in self.subjects}
             own = np.asarray(meta["owner"], np.int64)
-            r = np.full(len(own), -1, np.int64)
+            r = np.full(len(own), NOCLIP, np.int64)
             gcl = meta.get("gcl")
             for i, o in enumerate(own.tolist()):
                 if o in clip and (tk_of.get(o), str(meta["family"][i])) not in REACH_KEEP \
@@ -1955,8 +1958,8 @@ class MultiForecast:
         if r is None:
             return [(idx, None)]
         ro = r[idx]
-        out = [(idx[ro < 0], None)] if (ro < 0).any() else []
-        for o in np.unique(ro[ro >= 0]).tolist():
+        out = [(idx[ro == NOCLIP], None)] if (ro == NOCLIP).any() else []
+        for o in np.unique(ro[ro != NOCLIP]).tolist():
             out.append((idx[ro == o], int(o)))
         return out
 
@@ -2028,7 +2031,7 @@ class MultiForecast:
         cr = self._clip_rows("bb")
         if cr is not None:
             ro = cr[idx]
-            for co in np.unique(ro[ro >= 0]).tolist():
+            for co in np.unique(ro[ro != NOCLIP]).tolist():
                 # a box and the owner's clip box intersect in a box (the templates are already in hero-centre space)
                 sub = np.flatnonzero(ro == co)
                 cb = self._clip_boxes(int(co), tk)
