@@ -1,5 +1,5 @@
-"""Idle enemies: the inescapable zone of an attack committed now (task "idle enemies: the inescapable zone", forum.md
-§26; the person 2026-10-08). Measurement only: nothing here changes the planner or the forecast.
+﻿"""Idle enemies: the inescapable zone of an attack committed now (task "idle enemies: the inescapable zone", forum.md
+Â§26; the person 2026-10-08). Measurement only: nothing here changes the planner or the forecast.
 
 The person's definition: an enemy that has not started an attack needs no dodging. For each attack it could start,
 assume it commits NOW; take its damage boxes over time (the family template, hero-centre configuration space: the
@@ -43,7 +43,7 @@ replay (tasks 1 and 3): recorded episodes (bot runs: <run dir>; the person: <ses
 switches are the environment's, as in forum_human_score); every `every`-th frame:
   idle      every enemy in play, alive and in its idle family (no attack committed): its placements alone (owner
             filter) queried with the forecast's own occupancy (MultiForecast placements / boxes) on a hero-centre
-            grid over the arena (GRID_U cells, hero centres from standing height up) at plan frames 1, 6, 12, 18,
+            grid over the arena (IDLE_U cells, hero centres from standing height up) at plan frames 1, 6, 12, 18,
             24, 36, split by layer (forum_layer_audit.classify): body (idle tube, collider tube, current idle
             states), not_started (later attacks / idle instances), window (window placements, family-wide union),
             committed (fine, bbox, chain), tail; and the margins (the same tick's forecast on tables with every margin
@@ -84,7 +84,9 @@ FACING_EXCEPT = frozenset({"AT_DEFEND", "AT_LEAVE", "MA_SUMMON"})   # instances'
 RE_ARMS = frozenset({"CB_THROW", "RE_THROW", "CC_CAST"})
 PIN_FAMS = frozenset({"RE_THROW"})
 PLAN_F = (1, 6, 12, 18, 24, 36)
-GRID_U = 0.25
+LATE_F = 6                                                   # a zone point the best escape survives this long past
+#                                                              the reaction: the attack itself, not contact at commit
+IDLE_U = 0.5                                                  # task 1 grid (u)
 LIB_SIZE = None                                              # set by commands()
 
 
@@ -141,6 +143,19 @@ def commands(K: int, lat: int) -> tuple[np.ndarray, list]:
                                 jump(m, a2, 40)
                     seqs.append(m)
                     names.append(f"{d1:+d}:{act}:w{w}" + ("" if t2 is None else f":t{t2}{d2:+d}{'j' if j2 else ''}"))
+    # timed jumps: run / sprint / stand, then a full jump at any 4th frame (waves along the floor, late slams)
+    for d1 in (1, -1, 0):
+        for mode in ("run", "sprint"):
+            if mode == "sprint" and d1 == 0:
+                continue
+            for j in range(0, 160, 4):
+                m = np.zeros(K, np.int64)
+                m[lat:] |= D[d1]
+                if mode == "sprint":
+                    m[lat:lat + 400] |= kin.B_DASH
+                jump(m, lat + j, 40)
+                seqs.append(m)
+                names.append(f"{d1:+d}:{mode}:jump@{j}")
     return np.stack(seqs), names
 
 
@@ -207,10 +222,28 @@ def family_templates(margin: bool = False) -> dict:
     return out
 
 
-def body_mask(t) -> np.ndarray:
-    """(ny, nx) the template's cells at the commit (t <= one frame): the body (and anything already out then)."""
-    b1 = int(np.rint((1.0 / 60.0 - t.t0) / t.bin_s))
-    return np.unpackbits(np.bitwise_or.reduce(t.bits[:max(1, b1 + 1)], axis=0), axis=1, count=t.nx).astype(bool)
+_HULLS: dict = {}
+
+
+def body_mask(t, tk: str | None = None) -> np.ndarray:
+    """(ny, nx) on the template's grid: the enemy's body collider (production_tubes body_hull, relative to the
+    transform = the anchor) dilated by the hero hurtbox half extents; without a hull, the template's cells at the
+    commit (t <= one frame)."""
+    from ssbot.knowledge import hitbox_tables as hb
+    if not _HULLS:
+        md = json.loads((FORUM_DIR / "support_margins.json").read_text("utf-8"))
+        _HULLS.update({k: tuple(v) for k, v in (md.get("production_tubes") or {}).get("body_hull", {}).items()})
+    h = _HULLS.get(tk) if tk else None
+    if h is None:
+        b1 = int(np.rint((1.0 / 60.0 - t.t0) / t.bin_s))
+        return np.unpackbits(np.bitwise_or.reduce(t.bits[:max(1, b1 + 1)], axis=0), axis=1, count=t.nx).astype(bool)
+    c = t.cell
+    xs = (np.arange(t.nx) + t.ix0 + 0.5) * c
+    ys = (np.arange(t.ny) + t.iy0 + 0.5) * c
+    rx, ry = hb.HERO_HALF_U
+    inx = (xs >= min(h[0], -h[2]) - rx) & (xs <= max(h[2], -h[0]) + rx)
+    iny = (ys >= h[1] - ry) & (ys <= h[3] + ry)
+    return iny[:, None] & inx[None, :]
 
 
 @numba.njit(cache=True, parallel=True)
@@ -242,6 +275,50 @@ def _ics_kernel(bits, nx, ny, nt, ix0, iy0, cell, b_off, px, py, sgn, disp, use,
                 break
         out[p] = esc < 0
         best[p] = esc
+
+
+@numba.njit(cache=True, parallel=True)
+def _survive_kernel(bits, nx, ny, nt, ix0, iy0, cell, b_off, px, py, sgn, disp, use, k_end, out):
+    """out[p]: the latest first contact frame over the used trajectories (k_end + 1: one escapes)."""
+    P = px.shape[0]
+    N = disp.shape[0]
+    for p in numba.prange(P):
+        best = -1
+        for n in range(N):
+            if not use[n]:
+                continue
+            first = k_end + 1
+            for k in range(k_end + 1):
+                b = k + b_off
+                if b < 0 or b >= nt:
+                    continue
+                x = px[p] + sgn[p] * disp[n, k, 0]
+                y = py[p] + disp[n, k, 1]
+                ix = int(math.floor(x / cell)) - ix0
+                iy = int(math.floor(y / cell)) - iy0
+                if 0 <= ix < nx and 0 <= iy < ny:
+                    if (bits[b, iy, ix >> 3] >> (7 - (ix & 7))) & 1:
+                        first = k
+                        break
+            if first > best:
+                best = first
+                if best > k_end:
+                    break
+        out[p] = best
+
+
+def survival(t, px: np.ndarray, py: np.ndarray, disp: np.ndarray, use: np.ndarray) -> np.ndarray:
+    """[P] the longest any trajectory stays clear from each start (frames; past the template's end: escapes)."""
+    act = t.active()
+    out = np.zeros(len(px), np.int64)
+    if act is None or not len(px):
+        return out
+    k_end = min(int(np.ceil(act[1] * 60.0 - 1e-6)) + 1, disp.shape[1] - 1)
+    b_off = int(np.rint((0.0 - t.t0) / t.bin_s))
+    sgn = np.where(px >= 0, 1.0, -1.0)
+    _survive_kernel(t.bits, t.nx, t.ny, t.nt, t.ix0, t.iy0, t.cell, b_off, np.ascontiguousarray(px, np.float64),
+                    np.ascontiguousarray(py, np.float64), sgn, np.ascontiguousarray(disp), use, k_end, out)
+    return out
 
 
 def zone_ub(t, px: np.ndarray, py: np.ndarray, disp: np.ndarray, use: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
@@ -302,44 +379,100 @@ def zone_lb(t, params, y_floor_rel: float, lat: int) -> tuple[np.ndarray, tuple]
 # ------------------------------------------------------------------------------------------------ pins (aimed)
 
 
-def pin_zone(px: np.ndarray, py: np.ndarray, disp: np.ndarray, use: np.ndarray, t_rel_f: tuple = (40, 60, 80)
-             ) -> np.ndarray:
-    """Inescapable start points of an aimed Reed pin (the planner's model, forum.md §23.7): released t_rel_f frames
-    after the commit (strikes.json: least 0.667 s, p5 0.667 s = 40 frames), from PIN_SPAWN_U off the Reed (at the
-    anchor), PIN_SPEED, aimed at where the hero is PIN_AIM_F frames before the release (+-15 deg), segment of
-    2 x PIN_HALF_U grown by the hero hurtbox and PIN_SKIN; a start is inescapable when every trajectory is hit by one
-    of the releases' rays (any release: the Reed picks the moment)."""
+def aimed_zone(px: np.ndarray, py: np.ndarray, disp: np.ndarray, use: np.ndarray, release_f: tuple, aim_lag_f: int,
+               speed: float, spawn_u: float, seg: np.ndarray, hx: float, hy: float, spread: tuple, flight_f: int,
+               body: tuple | None = None) -> np.ndarray:
+    """Inescapable start points of an aimed straight-line strike (anchor at the origin): released at a frame of
+    release_f after the commit (any: the enemy picks), from spawn_u off the anchor toward where the hero was aim_lag_f
+    frames before the release (rotated by each of `spread`), moving at `speed` for flight_f frames; the strike's
+    sample points (offsets `seg` along the flight) meet the hero when within (hx, hy) of its hurtbox centre (the
+    hero's half extents included). body (x0, y0, x1, y1) in hero-centre terms: the enemy's body until the release
+    (a start inside it is inescapable). A start is inescapable when every trajectory is hit."""
+    out = np.zeros(len(px), np.bool_)
+    bd = np.array(body if body is not None else (np.inf, np.inf, -np.inf, -np.inf), np.float64)
+    _aimed_kernel(np.ascontiguousarray(px, np.float64), np.ascontiguousarray(py, np.float64),
+                  np.ascontiguousarray(disp[use]), np.array(release_f, np.int64), int(aim_lag_f), float(speed),
+                  float(spawn_u), np.asarray(seg, np.float64), float(hx), float(hy), np.array(spread, np.float64),
+                  int(flight_f), bd, out)
+    return out
+
+
+@numba.njit(cache=True, parallel=True)
+def _aimed_kernel(px, py, D, rel, lag, speed, spawn, seg, hx, hy, spread, flight, bd, out):
+    P, N, K = px.shape[0], D.shape[0], D.shape[1]
+    dt = 1.0 / 60.0
+    k_body = min(K, rel.max() + 1)
+    for p in numba.prange(P):
+        sg = 1.0 if px[p] >= 0 else -1.0
+        escaped = False
+        for n in range(N):
+            hit = False
+            for k in range(k_body):
+                x = px[p] + sg * D[n, k, 0]
+                y = py[p] + D[n, k, 1]
+                if bd[0] <= x <= bd[2] and bd[1] <= y <= bd[3]:
+                    hit = True
+                    break
+            if not hit:
+                for r in range(rel.shape[0]):
+                    kr = rel[r]
+                    if kr >= K:
+                        continue
+                    ka = max(kr - lag, 0)
+                    axx = px[p] + sg * D[n, ka, 0]
+                    ayy = py[p] + D[n, ka, 1]
+                    nrm = max(math.hypot(axx, ayy), 1e-6)
+                    for a in range(spread.shape[0]):
+                        ca, sa = math.cos(spread[a]), math.sin(spread[a])
+                        ux = (axx * ca - ayy * sa) / nrm
+                        uy = (axx * sa + ayy * ca) / nrm
+                        for k in range(kr, min(K, kr + flight)):
+                            s = speed * (k - kr) * dt
+                            cx = px[p] + sg * D[n, k, 0]
+                            cy = py[p] + D[n, k, 1]
+                            for q in range(seg.shape[0]):
+                                qx = (spawn + s + seg[q]) * ux
+                                qy = (spawn + s + seg[q]) * uy
+                                if abs(qx - cx) <= hx and abs(qy - cy) <= hy:
+                                    hit = True
+                                    break
+                            if hit:
+                                break
+                        if hit:
+                            break
+                    if hit:
+                        break
+            if not hit:
+                escaped = True
+                break
+        out[p] = not escaped
+
+
+def pin_zone(px, py, disp, use, release_f: tuple = (40, 60, 80)) -> np.ndarray:
+    """The Reed's aimed pin (the planner's model, forum.md Â§23.7): released 40+ frames after the commit (strikes.json:
+    p5 0.667 s), from PIN_SPAWN_U off the Reed, PIN_SPEED, aimed at where the hero is PIN_AIM_F frames before the
+    release (+-15 deg), its 2 x PIN_HALF_U segment grown by PIN_SKIN."""
     from ssbot.combat.forum_planner import PIN_AIM_F, PIN_HALF_U, PIN_SKIN, PIN_SPAWN_U, PIN_SPEED, PIN_SPREAD
     from ssbot.knowledge import hitbox_tables as hb
-    hx, hy = hb.HERO_HALF_U[0] + PIN_SKIN, hb.HERO_HALF_U[1] + PIN_SKIN
-    K = disp.shape[1]
-    seg = np.array([-1.0, -0.5, 0.0, 0.5, 1.0]) * PIN_HALF_U
-    dt = 1.0 / 60.0
-    out = np.ones(len(px), bool)
-    D = disp[use].astype(np.float64)
-    for p in range(len(px)):
-        sg = 1.0 if px[p] >= 0 else -1.0
-        cx = px[p] + sg * D[:, :, 0]
-        cy = py[p] + D[:, :, 1]
-        hit_any = np.zeros(len(D), bool)
-        for kr in t_rel_f:
-            if kr >= K:
-                continue
-            ka = max(kr - PIN_AIM_F, 0)
-            ks = np.arange(kr, min(K, kr + 90))
-            s = PIN_SPEED * (ks - kr) * dt
-            for ang in PIN_SPREAD:
-                ax_, ay_ = cx[:, ka], cy[:, ka]
-                nrm = np.maximum(np.hypot(ax_, ay_), 1e-6)
-                ca, sa = math.cos(ang), math.sin(ang)
-                ux, uy = (ax_ * ca - ay_ * sa) / nrm, (ax_ * sa + ay_ * ca) / nrm
-                ox, oy = PIN_SPAWN_U * ux, PIN_SPAWN_U * uy
-                qx = ox[:, None, None] + ux[:, None, None] * (s[None, :, None] + seg[None, None, :])
-                qy = oy[:, None, None] + uy[:, None, None] * (s[None, :, None] + seg[None, None, :])
-                hit = ((np.abs(qx - cx[:, ks, None]) <= hx) & (np.abs(qy - cy[:, ks, None]) <= hy)).any(axis=(1, 2))
-                hit_any |= hit
-        out[p] = bool(hit_any.all())
-    return out
+    return aimed_zone(px, py, disp, use, release_f, PIN_AIM_F, PIN_SPEED, PIN_SPAWN_U,
+                      np.array([-1.0, -0.5, 0.0, 0.5, 1.0]) * PIN_HALF_U, hb.HERO_HALF_U[0] + PIN_SKIN,
+                      hb.HERO_HALF_U[1] + PIN_SKIN, PIN_SPREAD, 90)
+
+
+# the Tiny's dive (AT_FIRE, body only): Fire 0.70 s (q5) after the commit, 39.4 u/s (every instance), in the anchor
+# frame toward the hero (26 deg median off its position at the commit: aimed later), until Brake (>= 0.72 s)
+TINY_FIRE_F = (42, 48)
+TINY_SPEED = 39.4
+TINY_FLIGHT_F = 60
+
+
+def tiny_zone(px, py, disp, use, hull: tuple, aim_lag_f: int = 0) -> np.ndarray:
+    from ssbot.knowledge import hitbox_tables as hb
+    rx, ry = hb.HERO_HALF_U
+    hx, hy = 0.5 * (hull[2] - hull[0]) + rx, 0.5 * (hull[3] - hull[1]) + ry
+    body = (hull[0] - rx, hull[1] - ry, hull[2] + rx, hull[3] + ry)
+    return aimed_zone(px, py, disp, use, TINY_FIRE_F, aim_lag_f, TINY_SPEED, 0.0, np.zeros(1), hx, hy,
+                      tuple(math.radians(a) for a in (-15.0, 0.0, 15.0)), TINY_FLIGHT_F, body)
 
 
 # ------------------------------------------------------------------------------------------------ zones (task 2)
@@ -385,7 +518,7 @@ def _dist_to(mask_xy: np.ndarray, pts: np.ndarray) -> np.ndarray:
     return out
 
 
-def family_zone(t, hq3: tuple, face: float, fam: str, libs: dict, params, lat: int) -> dict:
+def family_zone(t, hq3: tuple, face: float, fam: str, libs: dict, params, lat: int, tk: str | None = None) -> dict:
     """One family's zones (module docstring): per lock state the ub zone on the floor row (ground locks) or the
     air grid, beyond-the-body extents, and the lb zone."""
     act = t.active()
@@ -393,7 +526,7 @@ def family_zone(t, hq3: tuple, face: float, fam: str, libs: dict, params, lat: i
            "facing": round(face, 3), "anchor_h": [round(x, 2) for x in hq3], "locks": {}}
     if act is None:
         return res
-    bm = body_mask(t)
+    bm = body_mask(t, tk)
     c = t.cell
     by, bx = np.nonzero(bm)
     body_xy = np.stack([(bx + t.ix0 + 0.5) * c, (by + t.iy0 + 0.5) * c], axis=1)
@@ -414,20 +547,31 @@ def family_zone(t, hq3: tuple, face: float, fam: str, libs: dict, params, lat: i
         hs = AIR_H if lock == "air" else (0.0,)
         for hq in _heights(hq3):
             dy0 = _ground_dy(hq)
-            pts, inesc = [], []
+            pts, inesc, survs = [], [], []
             for h in hs:
                 disp, _, use = libs[(lock, h)]
                 step = AIR_DX_STEP if lock == "air" else DX_STEP
                 xx = xs if lock != "air" else np.round(np.arange(xs[0], xs[-1] + 1e-9, step), 3)
                 yy = np.full(len(xx), dy0 + h)
                 z, _ = zone_ub(t, xx, yy, disp, use)
+                sv = np.full(len(xx), 10 ** 6)
+                if z.any():
+                    sv[z] = survival(t, xx[z], yy[z], disp, use)
                 if both:
                     zm, _ = zone_ub(t, -xx, yy, disp, use)
+                    if zm.any():
+                        sm = np.full(len(xx), 10 ** 6)
+                        sm[zm] = survival(t, -xx[zm], yy[zm], disp, use)
+                        sv = np.minimum(sv, sm)
                     z = z | zm
                 pts.append(np.stack([xx, yy], axis=1))
                 inesc.append(z)
+                survs.append(sv)
             P = np.concatenate(pts)
             Z = np.concatenate(inesc)
+            SV = np.concatenate(survs)
+            res.setdefault("_arrays", {})[(lock, round(hq, 2))] = (xx, np.asarray(hs, np.float64), np.stack(inesc),
+                                                                   dy0)
             # the body at the start points: their cell in the commit-time mask
             ix = np.floor(P[:, 0] / c).astype(np.int64) - t.ix0
             iy = np.floor(P[:, 1] / c).astype(np.int64) - t.iy0
@@ -444,9 +588,14 @@ def family_zone(t, hq3: tuple, face: float, fam: str, libs: dict, params, lat: i
             d = _dist_to(body_xy, P[bw]) if bw.any() else np.zeros(0)
             step = AIR_DX_STEP if lock == "air" else DX_STEP
             area = float(bw.sum()) * step * (0.5 if lock == "air" else 1.0)
+            late = SV[bw] >= lat + LATE_F
             rec = {"anchor_h": round(hq, 2), "n_beyond": int(bw.sum()),
                    ("area_u2" if lock == "air" else "length_u"): round(area, 2),
                    "max_dist_u": round(float(d.max()), 2) if len(d) else 0.0,
+                   # zone points the best trajectory leaves only after LATE_F frames (the rest: already there at the
+                   # commit, contact or a hazard of an earlier instance in the union)
+                   "late_n": int(late.sum()), "late_max_dist_u": round(float(d[late].max()), 2) if late.any() else 0.0,
+                   "surv_max_f": int(SV[bw].max()) if bw.any() else 0,
                    "max_dx_u": round(float(np.abs(P[bw, 0]).max()), 2) if bw.any() else 0.0,
                    "inescapable_total": int(Z.sum())}
             if lock != "air":
@@ -488,6 +637,7 @@ def ascii_row(xs: np.ndarray, z: np.ndarray, body: np.ndarray, step: float = 0.5
 
 def cmd_zones(a) -> int:
     from ssbot.combat.multi_forecast import strike_table
+    from ssbot.knowledge import hitbox_tables as hb
     try:
         import psutil
         psutil.Process().nice(psutil.BELOW_NORMAL_PRIORITY_CLASS)
@@ -511,53 +661,540 @@ def cmd_zones(a) -> int:
     print(f"libraries: {len(libs)} starts x {n_lib} sequences ({time.perf_counter() - t0:.1f} s)", flush=True)
     res = {"lat_f": a.lat, "margin": bool(a.margin), "K": K, "lib_size": n_lib,
            "air_h": list(AIR_H), "families": {}}
+    arrays: dict = {}
     if a.only:
         tpl = {k: v for k, v in tpl.items() if k[1] in a.only}
     for (tk, fam), (t, hq3, face, m) in sorted(tpl.items()):
         t1 = time.perf_counter()
-        r = family_zone(t, hq3, face, fam, libs, params, a.lat)
+        r = family_zone(t, hq3, face, fam, libs, params, a.lat, tk)
         r["margin_u"] = m
         st = strike_table().get((tk, fam))
         r["strike_min_p5_s"] = None if st is None else [round(st[0], 3), round(st[1], 3)]
         r["re_arm"] = fam in RE_ARMS
-        if fam in PIN_FAMS:
-            # the aimed pin (the planner's model) instead of the template's every-direction union
-            hq = hq3[1]
-            dy0 = _ground_dy(hq)
+        if fam in PIN_FAMS or fam == "AT_FIRE":
+            # an aimed model instead of the template's every-direction union: the Reed's pin (the planner's model),
+            # the Tiny's dive (TINY_*; the body until the release): the extent beyond the body hull per lock
+            hull = _HULLS.get(tk) or (-0.5, -0.5, 0.5, 0.5)
+            rx, ry = hb.HERO_HALF_U
             pr = {}
-            for lock in ("free", "attack", "dash"):
-                disp, _, use = libs[(lock, 0.0)]
-                xx = np.round(np.arange(-16.0, 16.0 + 1e-9, 0.25), 3)
-                z = pin_zone(xx, np.full(len(xx), dy0), disp, use)
-                pr[lock] = {"n": int(z.sum()), "runs": _runs(xx, z, 0.25)[:8]}
-            r["aimed_pin"] = pr
+            xx = np.round(np.arange(-16.0, 16.0 + 1e-9, 0.25), 3)
+            for lock in LOCKS:
+                worst = {"n_beyond": 0, "max_dx_u": 0.0}
+                for hq in _heights(hq3):
+                    dy0 = _ground_dy(hq)
+                    hs_a = AIR_H[::2] if lock == "air" else (0.0,)
+                    zs = []
+                    for h in hs_a:
+                        disp, _, use = libs[(lock, h)]
+                        yy = np.full(len(xx), dy0 + h)
+                        z = pin_zone(xx, yy, disp, use) if fam in PIN_FAMS else tiny_zone(xx, yy, disp, use, hull)
+                        zs.append(z)
+                        inb = (np.abs(xx) <= max(abs(hull[0]), hull[2]) + rx) & (yy >= hull[1] - ry) & (yy <= hull[3] + ry)
+                        zb = z & ~inb
+                        worst["n_beyond"] += int(zb.sum())
+                        if zb.any():
+                            worst["max_dx_u"] = max(worst["max_dx_u"], round(float(np.abs(xx[zb]).max()), 2))
+                            worst.setdefault("runs", []).append([round(hq, 2), h, _runs(xx, zb, 0.25)[:4]])
+                    r.setdefault("_arrays_aimed", {})[(lock, round(hq, 2))] = (xx, np.asarray(hs_a, np.float64),
+                                                                               np.stack(zs), dy0)
+                pr[lock] = worst
+            r["aimed"] = pr
         # the floor row as text (free lock, median anchor height)
         disp, _, use = libs[("free", 0.0)]
         dy0 = _ground_dy(hq3[1])
         xs = np.round(np.arange(-20.0, 20.0 + 1e-9, DX_STEP), 3)
         z, _ = zone_ub(t, xs, np.full(len(xs), dy0), disp, use)
-        bm = body_mask(t)
+        bm = body_mask(t, tk)
         ix = np.floor(xs / t.cell).astype(np.int64) - t.ix0
         iy = int(math.floor(dy0 / t.cell)) - t.iy0
         body = np.zeros(len(xs), bool)
         ok = (ix >= 0) & (ix < t.nx) & (0 <= iy < t.ny)
         body[ok] = bm[iy, ix[ok]]
         r["row_free"] = ascii_row(xs, z & ~body, body)
+        for tag in ("_arrays", "_arrays_aimed"):
+            for (lock, hq), (xx, hs, zg, dy0) in (r.pop(tag, None) or {}).items():
+                key = f"{tk}|{fam}|{lock}|{hq:.2f}|{'aimed' if tag == '_arrays_aimed' else 'ub'}"
+                arrays[key + "|x"], arrays[key + "|h"], arrays[key + "|z"] = xx, hs, np.packbits(zg, axis=1)
+                arrays[key + "|meta"] = np.array([dy0, zg.shape[1], float(r["both_mirrors"])])
         res["families"][f"{tk}/{fam}"] = r
         lk = r["locks"]
-        print(f"{tk:22s} {fam:13s} act {r['active_s']} beyond-body ub: " + ", ".join(
-            f"{L} {max((x['max_dist_u'] for x in lk[L]), default=0):.2f}u" for L in LOCKS)
+        print(f"{tk[-10:]:10s} {fam:13s} ub beyond body (all/late): " + ", ".join(
+            f"{L} {max((x['max_dist_u'] for x in lk[L]), default=0):.1f}/"
+            f"{max((x['late_max_dist_u'] for x in lk[L]), default=0):.1f}" for L in LOCKS)
+            + ("" if "aimed" not in r else " aimed " + "/".join(f"{r['aimed'][L]['max_dx_u']:.1f}" for L in LOCKS))
             + f" lb {max((x['max_dist_u'] for x in r['lb']), default=0):.2f}u ({time.perf_counter() - t1:.1f} s)",
             flush=True)
     p = out / f"zones_lat{a.lat}{'_margin' if a.margin else ''}.json"
     p.write_text(json.dumps(res, indent=1), "utf-8")
+    np.savez_compressed(p.with_suffix(".npz"), **arrays)
     print(f"wrote {p} ({time.perf_counter() - t0:.0f} s)")
+    return 0
+
+
+# ------------------------------------------------------------------------------------------------ replay (tasks 1, 3)
+
+CAT = {"body": "body", "collider": "body", "idle_now": "body", "idle": "body",
+       "start_attack": "not_started", "start_idle": "not_started", "entry_later": "entry",
+       "com_win": "window", "com_fam": "window", "chain_win": "window",
+       "com_fine": "committed", "com_bbox": "committed", "chain_fine": "committed", "chain_bbox": "committed",
+       "tail": "tail", "entry_now": "entry", "death": "other", "arena": "other",
+       "haz_self": "hazard", "haz_path": "hazard", "haz_tube": "hazard"}
+IDLE_CATS = ("body", "not_started", "window", "committed", "tail", "other", "margins")
+NS_REPLACED = ("start_attack", "start_idle")          # the not-started layer the what-if replaces by the ICS
+REL_DX = np.round(np.arange(-12.0, 12.0 + 1e-9, IDLE_U), 3)
+REL_H = np.round(np.arange(0.0, 12.0 + 1e-9, IDLE_U), 3)    # above the standing hurtbox centre
+LOCK_CODE = {"free": 0, "attack": 1, "dash": 2, "air": 3}
+
+
+class Zones:
+    """The zones file of cmd_zones as lookups: per (type, family) the ub (or the aimed model's) inescapable zone per
+    lock state and anchor height."""
+
+    def __init__(self, path: Path):
+        z = np.load(path)
+        groups = defaultdict(dict)
+        for f in z.files:
+            key, part = f.rsplit("|", 1)
+            groups[key][part] = z[f]
+        self.fams: dict = defaultdict(dict)       # tk -> fam -> lock -> [(hq, x, h, Z, dy0, both)]
+        aimed = {tuple(k.split("|")[:2]) for k in groups if k.endswith("|aimed")}
+        for key, d in groups.items():
+            tk, fam, lock, hq, kind = key.split("|")
+            if kind == "ub" and (tk, fam) in aimed:
+                continue
+            nx = int(d["meta"][1])
+            Z = np.unpackbits(d["z"], axis=1, count=nx).astype(bool)
+            self.fams[tk].setdefault(fam, {}).setdefault(lock, []).append(
+                (float(hq), d["x"], d["h"], Z, float(d["meta"][0]), bool(d["meta"][2])))
+
+    def occ(self, tk: str, idle_fam: str, entry_fam: str, a_h: float, dx: np.ndarray, hrel: np.ndarray,
+            lock: np.ndarray) -> np.ndarray:
+        """[n] in some family's zone (not the idle / entry family): dx hero centre - anchor x, hrel the hero centre
+        above standing height, lock codes (LOCK_CODE), a_h the anchor's height above the floor."""
+        out = np.zeros(len(dx), bool)
+        for fam, by_lock in self.fams.get(tk, {}).items():
+            if fam in (idle_fam, entry_fam):
+                continue
+            for L, code in LOCK_CODE.items():
+                m = lock == code
+                if not m.any() or L not in by_lock:
+                    continue
+                rows = by_lock[L]
+                hq, x, hs, Z, dy0, both = min(rows, key=lambda r: abs(r[0] - a_h))
+                v = dx[m] if both else np.abs(dx[m])
+                step = float(x[1] - x[0]) if len(x) > 1 else 1.0
+                ix = np.rint((v - x[0]) / step).astype(np.int64)
+                if both:
+                    ix2 = np.rint((-v - x[0]) / step).astype(np.int64)
+                    bad = (ix < 0) | (ix >= len(x))
+                    ix = np.where(bad, ix2, ix)
+                ok = (ix >= 0) & (ix < len(x))
+                if L == "air" and len(hs) > 1:
+                    ih = np.clip(np.rint((hrel[m] - hs[0]) / float(hs[1] - hs[0])), 0, len(hs) - 1).astype(np.int64)
+                else:
+                    ih = np.zeros(int(m.sum()), np.int64)
+                hit = np.zeros(int(m.sum()), bool)
+                hit[ok] = Z[ih[ok], ix[ok]]
+                out[m] |= hit
+        return out
+
+
+def _lock_codes(flags: np.ndarray, mode: np.ndarray, cx: np.ndarray, ax: np.ndarray) -> np.ndarray:
+    """[R, F] lock state of each row frame: dash toward the enemy (a dash away: free), attack on the ground, air,
+    free."""
+    from ssbot.knowledge import kinematics as kin
+    ground = (flags & kin.F_GROUND) != 0
+    att = (flags & kin.F_ATTACKING) != 0
+    dash = mode == kin.M_DASH
+    vx = np.gradient(cx, axis=1) if cx.shape[1] > 1 else np.zeros_like(cx)
+    toward = np.sign(vx) == -np.sign(cx - ax)
+    out = np.where(~ground, 3, np.where(dash & toward, 2, np.where(att, 1, 0)))
+    return out.astype(np.int64)
+
+
+def _box_dist(px, py, b) -> np.ndarray:
+    dx = np.maximum(np.maximum(b[0] - px, px - b[2]), 0.0)
+    dy = np.maximum(np.maximum(b[1] - py, py - b[3]), 0.0)
+    return np.hypot(dx, dy)
+
+
+def idle_maps(pol, fcast, vs, groups, ws_hero) -> list:
+    """Task 1 on one tick: every in-play, alive, idle enemy's own placements on the relative grid at PLAN_F."""
+    from ssbot.core.forum import FLOOR_Y, FORUM_TYPES, WALL_L, WALL_R
+    from ssbot.knowledge import hitbox_tables as hb
+    from ssbot.train.planner_policy import HORIZON_S
+    mf = pol.fc
+    tk_f = np.array(PLAN_F, np.float64) / 60.0
+    hero_cy = FLOOR_Y + hb.HERO_HALF_U[1]
+    rx, ry = hb.HERO_HALF_U
+    subs = [s for s in fcast.subjects if s.alive and s.in_play and not s.committed and s.pos is not None
+            and s.family is not None and FORUM_TYPES.get(s.type_key) is not None
+            and s.family == FORUM_TYPES[s.type_key].idle_family]
+    if not subs:
+        return []
+    f2 = None
+    out = []
+    for s in subs:
+        tr = mf.trackers.get(s.iid)
+        if tr is None or tr.pos is None:
+            continue
+        px0, py0 = float(tr.pos[0]), float(tr.pos[1])
+        X = px0 + REL_DX[None, :] + 0 * REL_H[:, None]
+        Y = hero_cy + REL_H[:, None] + 0 * REL_DX[None, :]
+        inside = (X >= WALL_L + rx) & (X <= WALL_R - rx)
+        x = np.repeat(X.reshape(-1, 1), len(tk_f), axis=1)
+        y = np.repeat(Y.reshape(-1, 1), len(tk_f), axis=1)
+        b = tr.seen_box
+        if b is None:
+            h = mf.tables.tubes.hull.get(s.type_key) or (-0.5, -0.5, 0.5, 0.5)
+            b = (px0 + h[0], py0 + h[1], px0 + h[2], py0 + h[3])
+        bd = (b[0] - rx, b[1] - ry, b[2] + rx, b[3] + ry)
+        dist = _box_dist(X, Y, bd).reshape(-1)
+        cats = {c: np.zeros(x.shape, bool) for c in IDLE_CATS}
+        fn = {"pm": fcast._fine_occ, "wm": fcast._win_occ, "bb": fcast._bbox_occ}
+        meta = {"pm": fcast.pm, "wm": fcast.wm, "bb": fcast.bb}
+        for key, kind, sel in groups:
+            own = sel & (np.asarray(meta[kind]["owner"]) == s.iid)
+            if not own.any():
+                continue
+            cats[CAT.get(key[0], "other") if CAT.get(key[0]) in IDLE_CATS else "other"] |= fn[kind](x, y, tk_f, own)
+        for kind in ("idle", "collider", "death", "arena"):
+            cats["body" if kind in ("idle", "collider") else "other"] |= fcast._box_occ(x, y, tk_f, kinds=(kind,),
+                                                                                      only={s.iid})
+        tot = np.zeros(x.shape, bool)
+        for c in IDLE_CATS:
+            tot |= cats[c]
+        # the planner's own query for this enemy alone (the check: tot == occupied_only up to hazards)
+        own_q = fcast.occupied_only(x, y, tk_f, {s.iid})
+        # margins: the same tick on tables with every margin x 0 (forum_layer_audit.Variants m0)
+        if vs is not None:
+            if f2 is None:
+                try:
+                    vs.swap("m0")
+                    f2 = mf.forecast(HORIZON_S, origin_t=fcast.origin_t)
+                finally:
+                    vs.restore()
+            m0 = f2.occupied_only(x, y, tk_f, {s.iid})
+            cats["margins"] = tot & ~m0
+        ok = inside.reshape(-1)[:, None] & (dist[:, None] > 0)
+        rec = {"tk": s.type_key, "iid": int(s.iid), "state": s.state, "pos": [round(px0, 2), round(py0, 2)],
+               "h_anchor": round(py0 - FLOOR_Y, 2),
+               "hero_d": None if ws_hero is None else round(math.hypot(ws_hero[0] - px0, ws_hero[1] - py0), 2),
+               "others8": int(sum(1 for o in fcast.subjects if o.alive and o.in_play and o.iid != s.iid
+                                  and o.pos is not None and math.hypot(o.pos[0] - px0, o.pos[1] - py0) < 8.0)),
+               "t_strike": None if not math.isfinite(s.t_strike) else round(s.t_strike, 3),
+               "body_box": [round(v, 2) for v in bd], "frames": list(PLAN_F)}
+        a_cell = IDLE_U * IDLE_U
+        for c in ("total", "own_q") + IDLE_CATS:
+            o = tot if c == "total" else own_q if c == "own_q" else cats[c]
+            ob = o & ok
+            rec[c] = [[round(float(ob[:, j].sum()) * a_cell, 3),
+                       round(float(dist[ob[:, j]].max()), 2) if ob[:, j].any() else 0.0] for j in range(len(tk_f))]
+        # exclusive: the cells only this category covers (the leave-one-out of the area)
+        rec["only"] = {}
+        for c in IDLE_CATS:
+            if c == "margins":
+                continue
+            rest = np.zeros(x.shape, bool)
+            for c2 in IDLE_CATS:
+                if c2 not in (c, "margins"):
+                    rest |= cats[c2]
+            rec["only"][c] = [round(float((cats[c] & ~rest & ok)[:, j].sum()) * a_cell, 3) for j in range(len(tk_f))]
+        rec["_maps"] = {c: (tot if c == "total" else cats[c]).reshape(len(REL_H), len(REL_DX), len(tk_f))
+                        for c in ("total",) + IDLE_CATS}
+        rec["_inside"] = inside
+        out.append(rec)
+    return out
+
+
+def whatif(pol, fcast, groups, dbg, zones: Zones, keys_row=None) -> dict:
+    """Task 3 on one tick: the rows' S under the whole support, without the not-started layer (NS_REPLACED), and with
+    it replaced by the ICS (module docstring); keys_row (box, flags, mode, inv): the person's own keys judged alike."""
+    from ssbot.core.forum import FLOOR_Y, FORUM_TYPES
+    from ssbot.knowledge import hitbox_tables as hb
+    from ssbot.knowledge.kinematics import F_INVULN
+    from ssbot.tools.forum_layer_audit import group_occ
+    mf = pol.fc
+    hero_cy = FLOOR_Y + hb.HERO_HALF_U[1]
+    rows = np.flatnonzero(dbg["ok"] & dbg["known"])
+    box, flags, mode = dbg["box"], dbg["flags"], dbg["mode"]
+    T1 = box.shape[1]
+    fr = np.arange(1, T1)
+    tk = dbg["tk"][fr]
+
+    def judge(bx, fl, md):
+        cx, cy = 0.5 * (bx[..., 0] + bx[..., 2]), 0.5 * (bx[..., 1] + bx[..., 3])
+        live = (fl & F_INVULN) == 0
+        occ = group_occ(fcast, cx, cy, tk, live, groups)
+        now = np.zeros(cx.shape, bool)
+        l1 = np.zeros(cx.shape, bool)
+        for k, o in occ.items():
+            now |= o
+            if k[0] not in NS_REPLACED:
+                l1 |= o
+        ics = np.zeros(cx.shape, bool)
+        for s in fcast.subjects:
+            if not (s.alive and s.in_play) or not math.isfinite(s.t_strike):
+                continue
+            tr = mf.trackers.get(s.iid)
+            sp = FORUM_TYPES.get(s.type_key)
+            if tr is None or tr.pos is None or sp is None:
+                continue
+            age = fcast.origin_t - tr.seen_T
+            ax = tr.pos[0] + tr.vel[0] * (age + tk)
+            ay = tr.pos[1] + tr.vel[1] * (age + tk)
+            m = (tk[None, :] >= s.t_strike - 1e-9) & live
+            if not m.any():
+                continue
+            lock = _lock_codes(fl, md, cx, ax[None, :])
+            hrel = cy - hero_cy
+            lock = np.where((lock < 3) & (hrel > 0.25), 3, lock)
+            a_h = float(np.median(ay)) - FLOOR_Y
+            dx = cx - ax[None, :]
+            sel = m & (np.abs(dx) < 45.0)
+            if sel.any():
+                ics[sel] |= zones.occ(s.type_key, sp.idle_family, sp.entry_family, a_h, dx[sel], hrel[sel], lock[sel])
+        wi = l1 | ics
+        return now.any(axis=1), l1.any(axis=1), wi.any(axis=1), (ics & ~l1).any(axis=1)
+
+    if len(rows):
+        s_now, s_l1, s_wi, ics_only = judge(box[rows][:, fr], flags[rows][:, fr], mode[rows][:, fr])
+    else:
+        s_now = s_l1 = s_wi = ics_only = np.zeros(0, bool)
+    S_pl = np.asarray(pol.planner.last_info.get("S"))
+    res = {"R": int(len(rows)), "safe_now": int((~s_now).sum()), "safe_l1": int((~s_l1).sum()),
+           "safe_wi": int((~s_wi).sum()), "ics_only_rows": int(ics_only.sum()),
+           "pl_safe": int((S_pl[rows] == 0).sum()) if len(rows) and S_pl.ndim else None}
+    if keys_row is not None:
+        kb, kf, kmode = keys_row
+        a, b_, c, d = judge(kb[None, 1:T1], kf[None, 1:T1], kmode[None, 1:T1])
+        res["keys"] = [bool(a[0]), bool(b_[0]), bool(c[0]), bool(d[0])]
+    return res
+
+
+def _episodes(spec: str, demo_cache) -> list[dict]:
+    """A bot run dir (every episode of attempts_i*.jsonl) or a human segment spec (forum_human_score)."""
+    p = Path(spec.split(":", 2)[0] + (":" + spec.split(":", 2)[1] if len(spec.split(":")[0]) == 1 else ""))
+    if len(spec) > 2 and spec[1] == ":" and spec.count(":") >= 2:
+        from ssbot.tools.forum_human_score import segments
+        return [{"kind": "human", "seg": s} for s in segments(spec, demo_cache)]
+    run = Path(spec)
+    out = []
+    for f in sorted(run.glob("attempts_i*.jsonl")):
+        inst = int(f.stem.split("_i")[1])
+        for x in f.read_text("utf-8").splitlines():
+            if not x.strip():
+                continue
+            r = json.loads(x)
+            if r.get("outcome") == "HARNESS_FAIL" or not r.get("recording"):
+                continue
+            r.pop("acts", None)
+            r["_inst"] = inst
+            out.append({"kind": "bot", "run": run.name, "row": r})
+    return out
+
+
+def _ep_name(ep: dict) -> str:
+    if ep["kind"] == "human":
+        s = ep["seg"]
+        return f"{Path(s['session']).name}_a{s['attempt']}_{s['kind']}"
+    return f"{ep['run']}_i{ep['row']['_inst']}_ep{ep['row']['episode']}"
+
+
+_RP: dict = {}
+
+
+def _replay_policy(crest: str, threads: int, clash: str):
+    if crest in _RP:
+        return _RP[crest]
+    import dataclasses
+    from ssbot.tools.forum_layer_audit import Variants
+    from ssbot.train.forum_planner_policy import ForumPlannerPolicy
+    pol = ForumPlannerPolicy(threads=threads, crest=crest, clash=clash)
+    pol.warmup()
+    step0 = pol.sc.step
+
+    def step(*args, **kw):
+        r = step0(*args, **kw)
+        pol.sc.pq = None
+        return r._replace(mask=None, outcome=None) if hasattr(r, "_replace") else \
+            dataclasses.replace(r, mask=None, outcome=None)
+    pol.sc.step = step
+    vs = Variants(pol.fc, ("m0",))
+    _RP[crest] = (pol, {"wrapped": False}, vs)
+    return _RP[crest]
+
+
+def replay_episode(job: dict) -> dict:
+    from ssbot.knowledge import kinematics as kin
+    from ssbot.knowledge.kinematics import F_INVULN
+    from ssbot.tools.forum_human_score import _hind, _wrap, clear_latches, frame_info, load_segment
+    from ssbot.tools.forum_hit_forensics import FramePolys, _mask_of
+    from ssbot.tools.forum_layer_audit import classify
+    from ssbot.train.encounters import ENCOUNTERS
+    ep = job["ep"]
+    t0 = time.perf_counter()
+    if ep["kind"] == "human":
+        seg = ep["seg"]
+        crest = seg["crest"] if seg["crest"] in ("Wanderer", "Reaper") else "Reaper"
+        terrain, states = load_segment(seg)
+        unit = "Forum"
+    else:
+        from ssbot.record.recorder import RecordingReader
+        row = ep["row"]
+        rd = RecordingReader(row["recording"])
+        terrain = None
+        for _, m in rd.terrain():
+            if (m.get("scene_raw") or m.get("scene")) in ("Hang_04", "Hang_04_boss"):
+                terrain = m
+        states = list(rd.states(row["f_wake"], row["f_end"]))
+        crest = "Wanderer" if ENCOUNTERS[row["unit"]].savestate == "fo_W" else "Reaper"
+        unit = row["unit"]
+    if job.get("limit_s"):
+        states = states[:int(job["limit_s"] * 60)]
+    pol, cap, vs = _replay_policy(crest, job["threads"], job["clash"])
+    zones = Zones(Path(job["zones"]))
+    pol.terrain_msg = terrain
+    pol.reset(random.Random(0), ENCOUNTERS[unit])
+    _wrap(pol, cap)
+    pl = pol.planner
+    pl.debug = True
+    pl.fcfg.deadline_ms = math.inf
+    pl.fcfg.esc_deadline_ms = math.inf
+    pl.fcfg.clash_deadline_ms = math.inf
+    human = ep["kind"] == "human"
+    fp = FramePolys(states) if human else None
+    fi = frame_info(states) if human else None
+    idle, wi, errors = [], [], []
+    maps: dict = {}
+    for i, s in enumerate(states):
+        nxt = states[i + 1] if i + 1 < len(states) else None
+        if nxt is not None:
+            pol.sent[int(nxt["f"])] = _mask_of(nxt) if not human else int(nxt["act"]["mask"])
+        if human:
+            clear_latches(pl)
+        pol.act(s, None)
+        if i < 3 or i % job["every"]:
+            continue
+        li = pl.last_info or {}
+        dbg = li.get("dbg")
+        res = pol.planner_last
+        if dbg is None or res is None or not pol.forecasts or pol.forecasts[-1][0] != int(s["f"]):
+            continue
+        fcast = pol.forecasts[-1][1]
+        try:
+            groups = classify(fcast)
+            hero = (s.get("hero") or {}).get("pos")
+            if i % job["every_idle"] == 0:
+                for r in idle_maps(pol, fcast, vs, groups, hero):
+                    mp = r.pop("_maps")
+                    ins = r.pop("_inside")
+                    acc = maps.setdefault(r["tk"], {"n": 0, "inside": np.zeros(ins.shape, np.int32),
+                                                    **{c: np.zeros(v.shape, np.int32) for c, v in mp.items()}})
+                    acc["n"] += 1
+                    acc["inside"] += ins
+                    for c, v in mp.items():
+                        acc[c] += v
+                    r["i"] = i
+                    idle.append(r)
+            keys_row, kinfo = None, None
+            if human and cap.get("args") is not None:
+                _, start, _, _, _, _, _ = cap["args"]
+                T1 = dbg["box"].shape[1]
+                if i + T1 <= len(states):
+                    pm = np.zeros(T1 - 1, np.int64)
+                    seg_m = fi["mask"][i + 1:i + T1]
+                    pm[:len(seg_m)] = seg_m
+                    rk = kin.rollout(start, pm[None], pl.params, pl.terrain, threads=pl.cfg.threads)
+                    keys_row = (rk.box[0], rk.flags[0], rk.mode[0])
+                    pb = fi["box"][i:i + T1]
+                    pcx, pcy = 0.5 * (pb[:, 0] + pb[:, 2]), 0.5 * (pb[:, 1] + pb[:, 3])
+                    kc = 0.5 * (rk.box[0, :, :2] + rk.box[0, :, 2:])
+                    d = np.hypot(kc[1:19, 0] - pcx[1:19], kc[1:19, 1] - pcy[1:19])
+                    kinfo = [round(float(np.nanmean(d)), 3),
+                             _hind(fp, rk.box[0], (rk.flags[0] & F_INVULN) != 0, int(s["f"]))]
+            w = whatif(pol, fcast, groups, dbg, zones, keys_row)
+            w.update({"i": i, "forced": bool(res.forced_risk), "n_safe": int(res.n_safe),
+                      "wave": (s.get("room") or {}).get("battles") and next(
+                          (b.get("wave") for b in s["room"]["battles"] if b.get("name") == "Battle Scene"), None)})
+            if kinfo is not None:
+                w["kerr18"], w["khind"] = kinfo
+            wi.append(w)
+        except Exception:
+            import traceback
+            errors.append([i, traceback.format_exc()[-1500:]])
+    name = _ep_name(ep)
+    if maps:
+        np.savez_compressed(Path(job["out"]) / f"{name}_maps.npz",
+                            **{f"{tk}|{c}": v for tk, d in maps.items() for c, v in d.items() if c != "n"},
+                            **{f"{tk}|n": np.array([d["n"]]) for tk, d in maps.items()})
+    return {"name": name, "kind": ep["kind"], "crest": crest, "fcfg": pol.stats().get("fcfg"),
+            "n_states": len(states), "idle": idle, "whatif": wi, "errors": errors[:10], "n_errors": len(errors),
+            "secs": round(time.perf_counter() - t0, 1)}
+
+
+def _rp_init(threads: int) -> None:
+    try:
+        import psutil
+        psutil.Process().nice(psutil.BELOW_NORMAL_PRIORITY_CLASS)
+    except Exception:
+        pass
+    numba.set_num_threads(threads)
+
+
+def _rp_safe(job: dict) -> dict:
+    try:
+        return replay_episode(job)
+    except Exception:
+        import traceback
+        return {"name": _ep_name(job["ep"]), "error": traceback.format_exc()[-3000:]}
+
+
+def cmd_replay(a) -> int:
+    out = Path(a.out)
+    out.mkdir(parents=True, exist_ok=True)
+    eps = []
+    for spec in a.specs:
+        e = _episodes(spec, a.demo_cache)
+        eps += e[:a.limit] if a.limit else e
+    jobs = [{"ep": e, "every": a.every, "every_idle": a.every_idle, "threads": a.threads, "clash": a.clash,
+             "zones": a.zones, "out": str(out), "limit_s": a.limit_s}
+            for e in eps if not (out / f"{_ep_name(e)}.json").exists()]
+    jobs.sort(key=lambda j: -((j["ep"]["seg"]["f1"] - j["ep"]["seg"]["f0"]) if j["ep"]["kind"] == "human" else 0))
+    print(f"{len(jobs)} episodes", flush=True)
+    t0 = time.perf_counter()
+
+    def write(res):
+        p = out / f"{res['name']}.json"
+        p.write_text(json.dumps(res, default=str), "utf-8")
+        print(f"{p.name} {'ERROR ' + res['error'][-400:] if 'error' in res else ''} {res.get('secs')} s "
+              f"({time.perf_counter() - t0:.0f} s)", flush=True)
+    if a.workers <= 1:
+        _rp_init(a.threads)
+        for j in jobs:
+            write(_rp_safe(j))
+    else:
+        with ProcessPoolExecutor(a.workers, initializer=_rp_init, initargs=(a.threads,)) as ex:
+            for res in ex.map(_rp_safe, jobs):
+                write(res)
     return 0
 
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
+    r = sub.add_parser("replay")
+    r.add_argument("specs", nargs="+")
+    r.add_argument("--out", required=True)
+    r.add_argument("--zones", required=True)
+    r.add_argument("--every", type=int, default=6)
+    r.add_argument("--every-idle", type=int, default=12)
+    r.add_argument("--workers", type=int, default=1)
+    r.add_argument("--threads", type=int, default=4)
+    r.add_argument("--clash", default="off")
+    r.add_argument("--limit", type=int, default=0)
+    r.add_argument("--limit-s", type=float, default=0.0)
+    r.add_argument("--demo-cache", type=Path, default=None)
     z = sub.add_parser("zones")
     z.add_argument("--out", required=True)
     z.add_argument("--lat", type=int, default=LAT_F)
@@ -568,6 +1205,8 @@ def main(argv=None) -> int:
     a = ap.parse_args(argv)
     if a.cmd == "zones":
         return cmd_zones(a)
+    if a.cmd == "replay":
+        return cmd_replay(a)
     return 1
 
 
