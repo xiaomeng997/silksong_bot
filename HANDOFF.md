@@ -3129,7 +3129,8 @@ Main 70f8324 + `forum-integration-1008` (6dce435) merged first. Facts: forum.md 
   - `SSBOT_FORUM_MARGIN=state`: per-state support margins (`tools/forum_state_margins` -> knowledge
     `support_margins_state.json`: the largest held-out residual of the R0 contacts per Control state, >= 100 contacts
     else the family's; family-wide / tail / world / self templates keep the family margin).
-- No switch: hit-back bells (a bell after Tink / Nail Hit is no hazard to the hero; the planner's own redirect leaves
+- On by default (no switch until the fixer round's `SSBOT_FORUM_BELLS=off`; every arm of rounds 1-4 ran them):
+  hit-back bells (a bell after Tink / Nail Hit is no hazard to the hero; the planner's own redirect leaves
   it harmless from the hit on); bells as hit targets of weight 0 (`ForumConfig.bell_hits`): a row whose swing meets an
   incoming bell before its contact gets the hit branch with the bell knocked back (also from a stage-1 contact).
 - `multi_recall --react / --state-margins`; `tests/test_three_layer.py` (13 tests); one assert in test_forum_planner.
@@ -3160,6 +3161,38 @@ Main 70f8324 + `forum-integration-1008` (6dce435) merged first. Facts: forum.md 
 - Tests (33762ee): full suite 1249 passed, 2 skipped, 1 xfailed, plus 15 that failed only because that run had
   NUMBA_NUM_THREADS=2: their four files rerun with 4 threads, 73 / 73 passed.
 
+### Fixer round (after the review, 2026-10-08 evening; code 5506b86; forum.md §23.12)
+
+- Fixed (code, 5506b86):
+  - `+n` covers a throw whose wind-up has started: the aimed-pin check is on with `+n` (`ForumConfig.pin_aim` = `+a`
+    or `+n`); a Bellbearer throw keeps its templates until its release (`multi_forecast.REACT_KEEP_UNTIL_THROWN`:
+    Throw Evade / Roof Avoid / Throw Antic). The support only gains coverage: the R2 recall (§23.8) cannot drop.
+  - `+n` + escape: the escape check counts (`ForumConfig.esc_veto`): a chosen row that failed it, or that it could
+    not check before its deadline with threats in reach, is S = 1 (YELLOW, never certified), and so is a CONTINUE of
+    such a row; audit `esc_unsafe` / `esc_failed` / `esc_unchecked` / `esc_carried`, `last_info["esc"]["unsafe"]`.
+  - The plan-lag hit metric: `hit_log` entries carry `lag` (the chosen plan 12 / 24 / 30 frames before: S, forced,
+    clean clash, escape S = 1, aimed pin), `safe30`, `clash30`; stats `planned_safe`.
+  - `ssbot.tools.forum_ab_summary <manifest...>` (in the repo; replaces the scratchpad `ab.py`): per arm and paired,
+    with the decision-log plan-lag hits (any code version), the escape check's fail / cut rates and the pin hits with
+    a throw under way.
+  - `SSBOT_FORUM_BELLS=off`: the hit-back bells and bells as hit targets off together (default on, as before).
+  - Docs: forum.md §23.2 (random-row baseline 63.8 % pooled; the freed rows' own precision), §23.4 (the light cone is
+    an under-approximation, not the erosion; the bell rules had no switch), §23.7 (both arms ran the bell rules; the
+    pin hits per minute are the same), §23.11 (the wave-0 clears came with the kill fix); §23.12 new; plan sec. 5 note.
+  - Scratchpad: `bb_ticks.cmd` / `bb_ticks_ve.cmd` now call the reviewer's `bb_ticks.py` with its positional
+    arguments (REC VIEW OUT FRAMES).
+- Measured: rounds 1-4 re-summarised (`C:\ssbot\data\m2_forum_w0d\fix\sum_round1..4.json`): hits with an S = 0 plan
+  in the 30 frames before them 0.10-0.23 / min on the new arms vs 0-0.06 on the controls; the escape check failed on
+  37-42 % of the checked non-FORCED_RISK ticks. Live round 5 (80 + 80, `w0d_live2.ps1`, rec = 33762ee vs fix =
+  5506b86, same env, seeds 365000, `sum_round5.json`): wave-0 clears 18 vs 19, time alive / kills / hits a minute
+  equal (paired all n.s.: +0.8 s, +0.14 kills, -0.23 hits / min), support-outside 0 / 0, hits with an S = 0 plan in
+  the 30 frames before 15 -> 9 (at 30 frames 14 -> 5), clean-clash rows followed by a hit within 30 frames 0.
+- Bell Beast: no module on its path imports a changed file (forecast.py mentions multi_forecast in a comment only):
+  tick-identical by construction, not re-run.
+- Not done: the clash-safety rule "the Wanderer's own clash rows (n_eff >= min_n)" (review low): the step that read
+  the clash table code was refused by the permission classifier; the 0.3 bound and the YELLOW h >= 3 clash are the
+  lead's call (behind `--forum-clash main`, off by default).
+
 ### Running
 
 - Nothing. All drivers ended and released inst0-3 locks; instance 4 (routes) untouched.
@@ -3170,16 +3203,19 @@ Main 70f8324 + `forum-integration-1008` (6dce435) merged first. Facts: forum.md 
 
 ### Next / open issues
 
-1. The committed layer (FORCED_RISK still 75-80 % of ticks): rebuild the templates re-anchored per state (a
-   re-entered `Charge` anchored at its entry, thrown hazards out of the thrower's templates) and re-certify (R2).
+1. The committed layer (FORCED_RISK still 77 % of ticks; most pin hits fall there): rebuild the templates re-anchored
+   per state (a re-entered `Charge` anchored at its entry, thrown hazards out of the thrower's templates) and
+   re-certify (R2).
 2. Offense: with the three-layer switches the bot lives longer but lands ~25 % fewer hits a minute (first kill 21-27 s
    vs the person's 17.5 s); in safe ticks only 2-4 % of chosen plans start with an attack (mostly CONTINUE): J /
-   punish windows (R5 / R6).
+   punish windows (R5 / R6). With the escape veto many safe-row ticks are S = 1 now (round 5: 62k ticks, half of them
+   carried CONTINUEs): watch whether the YELLOW punish limit costs offense (round 5: kills equal).
 3. After wave 0: wave 1's two Choristors (Spin Hit, whip), wave 3's bells and the spear blast are the main hits.
-4. `+l` (light cone) and `+a` (aimed pins) showed nothing in wave 0; the light cone is for the later waves' delayed
-   area attacks (rune circles, rune slam, spear blast): measure there.
-5. Late ticks were 10-24 % with 4 instances (escape check + clash main + light cone); the formal run has one instance.
-6. Defaults: every switch is still off (the integration rule); the lead decides whether to make the recommended
-   configuration the default.
+4. `+l` (light cone) and `+a` showed nothing in wave 0; the light cone is for the later waves' delayed area attacks.
+5. Late ticks were 10-24 % with 4 instances; the escape check is cut 0.24-0.29 times a tick (unchecked rows are S = 1
+   now): a faster check or a later deadline would turn some back into safe rows.
+6. Lead decisions: the recommended configuration as the default (every switch still off); the clash main 0.3 bound
+   and YELLOW h >= 3; the Wanderer-own-data rule for clash safety (not implemented, see above).
 7. Frozen checkouts made here (can go after review): `C:\ssbot\live_w0d_b75b63a`, `45c4d6c`, `7a8afc9`, `016417b`,
-   `d89f7ba`, `cc11343`, `fca0416`, `33762ee`.
+   `d89f7ba`, `cc11343`, `fca0416`, `33762ee`, `5506b86`. The reviewer's scratchpad exports `wt/` and `int/` (each with
+   a .venv) can go too.
