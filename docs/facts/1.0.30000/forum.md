@@ -3196,6 +3196,6 @@ cd brain
 
 **PNG**（世界坐标，y 朝上：真伤害填红（严格的 t + k 更深）、预测各层描边（叠加层的颜色，白 = total）、真碰撞体白线、白点 = 主角中心、黄框 = 相机屏幕）：`C:\ssbot\data\m2_forum_precision\png\flagged\`（你的 4 个帧，k = 0 和 12，每只怪一张）、`png\worst\`（多出面积最大的：全是 Tiny 的整场并）、`png\worst_fam\`（每个类型 × 家族最差的一张：Tiny AT_FIRE / AT_DEFEND、Clawmaiden 旋转 / 飞 / 三连、Reed 刺尾 / 反击、Minister 格挡、Clapper 跳、……）。
 
-**回放里的精度标量**：`viewer <session> --zones --precision [--k 0,12]` 每只怪每个 k 记 `metrics/precision/<名字>/k<k>/{committed, com_all, not_started, total}`（RATIO；0 = 没有预测，−1 = 预测了但没有真伤害）和 `.../error`（你的规则，1 = 错），右边多一个时间序列视图。试跑：`C:\ssbot\data\m2_forum_precision61009_085824_f10300-10460_precision.rrd`（10427 帧附近）。
+**回放里的精度标量**：`viewer <session> --zones --precision [--k 0,12]` 每只怪每个 k 记 `metrics/precision/<名字>/k<k>/{committed, com_all, not_started, total}`（RATIO；0 = 没有预测，−1 = 预测了但没有真伤害）和 `.../error`（你的规则，1 = 错），右边多一个时间序列视图。试跑：`C:\ssbot\data\m2_forum_precision\20261009_085824_f10300-10460_precision.rrd`（10427 帧附近）。
 
 **没做**：任何支撑本身的改动（这一节只量）。

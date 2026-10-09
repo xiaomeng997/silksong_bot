@@ -3813,6 +3813,6 @@ area is margin, the support is "about 100x". Until now the acceptance only check
    per-state template exists (or a time-limited one), chain windows per follow-up time, Tiny templates, not_started
    empty before the antic can end, body tubes from real speed bounds, fine templates conditioned on aim / time.
 2. Replay scalars: `viewer <session> --zones --precision` logs `metrics/precision/<enemy>/k<k>/<layer>` (RATIO, 0 = no
-   prediction, -1 = false alarm) and `.../error`; sample `C:\ssbot\data\m2_forum_precision61009_085824_f10300-10460_precision.rrd`.
+   prediction, -1 = false alarm) and `.../error`; sample `C:\ssbot\data\m2_forum_precision\20261009_085824_f10300-10460_precision.rrd`.
    A full-session replay with it was not made.
 3. Geometric recall is not 100 % (above); the gate should compare before / after, plus R2's contact recall.
