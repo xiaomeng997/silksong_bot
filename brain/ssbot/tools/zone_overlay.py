@@ -447,16 +447,18 @@ class ZoneEngine:
 
     @staticmethod
     def aim_families() -> set:
-        """(type key, family) of the aimed families (tools.forum_aim; loaded with SSBOT_FORUM_AIM)."""
-        from ssbot.combat.enemy_tracker import AIM_STATES
-        return set(AIM_STATES)
+        """(type key, family) of the families whose strike follows the hero (tools.forum_aim CANDIDATES): until their
+        certified aim template is placed, where they strike is not known."""
+        from ssbot.tools.forum_aim import CANDIDATES
+        return {(tk, f) for tk, fams in CANDIDATES.items() for f in fams}
 
-    def _aim_placed(self, cur) -> bool:
-        """The instance's aim template (its direction bin's) is what the forecast placed (multi_forecast)."""
-        if cur.aim_anchor is None:
-            return False
+    def _aim_tid(self, cur) -> int | None:
+        """The instance's aim template (its state's and direction bin's) when the forecast placed one (multi_forecast:
+        SSBOT_FORUM_AIM, the instance seen at a certified aim state)."""
+        if cur is None or cur.aim_anchor is None:
+            return None
         tid = self.pol.fc.tables.key_id(cur.family, f"aim@{cur.aim_state}#{cur.aim_bin}", "anchor")
-        return tid is not None and tid >= 0
+        return tid if tid is not None and tid >= 0 else None
 
     def _ns_lb(self, fam: str, lat: int, a_h: float) -> np.ndarray | None:
         """The commit-now inescapable zone's LOWER bound of one family ([ny, 2 NS_U / cell + 1] on the grid's rows,
@@ -507,6 +509,7 @@ class ZoneEngine:
         # branches (or of the recorded instances of an aimed attack) is not that
         certain = np.asarray(pm["prob"], np.float64) >= CERTAIN_P if n else np.zeros(0, bool)
         fams = np.asarray(pm["family"], object) if n else np.zeros(0, object)
+        tids = np.asarray(pm["tid"]) if n else np.zeros(0, np.int64)
         aimed = self.aim_families()
         mf = self.pol.fc
         K = YELLOW_F
@@ -519,10 +522,15 @@ class ZoneEngine:
             sel = (owner == s.iid) & commit & certain
             tr = mf.trackers.get(s.iid)
             cur = tr.cur if tr is not None else None
-            if cur is not None and (s.type_key, cur.family) in aimed and not self._aim_placed(cur):
-                # an aimed family before its aim state, or aimed in a direction bin without a certified template:
-                # where it strikes is not known yet, nothing is certain (the planner keeps the family's union; its
-                # body is red)
+            aim_tid = self._aim_tid(cur)
+            if aim_tid is not None:
+                # re-anchored where it is at its aim state: only that template (its other placements, the after-states
+                # and the tail, are unions from the start)
+                sel &= tids == aim_tid
+            elif cur is not None and (s.type_key, cur.family) in aimed:
+                # a family that follows the hero before its aim state, or aimed in a direction bin without a certified
+                # template: where it strikes is not known yet, nothing is certain (the planner keeps the family's
+                # union; its body is red)
                 sel &= fams != cur.family
             # the throws' templates hold the bells / pins / runes of earlier instances still in flight (forum.md §26-ICS
             # re-arms): those are the hazard layer's (their paths), not this attack's certain cells

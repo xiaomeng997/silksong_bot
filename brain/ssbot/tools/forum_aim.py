@@ -65,16 +65,19 @@ CANDIDATES = {
 }
 
 
-def family_states() -> dict:
-    """(type key, family) -> (start states, states) from the committed tables."""
+def family_states(every: bool = True) -> dict:
+    """(type key, family) -> (start states, states) from the committed tables: every attack family of every Forum type
+    (every = True: a re-anchor at a later state's entry is never wider than the family's union from the start when it
+    is certified; the hero-following CANDIDATES are the ones the overlay's yellow waits for), or CANDIDATES only."""
     from ssbot.core.forum import FORUM_TYPES
     out = {}
     for tk, sp in FORUM_TYPES.items():
         p = FORUM_DIR / f"{sp.enemy}.json"
-        if tk not in CANDIDATES or not p.exists():
+        if not p.exists() or not (every or tk in CANDIDATES):
             continue
         d = json.loads(p.read_text("utf-8"))
-        for fam in CANDIDATES[tk]:
+        fams = [f for f in d["attacks"] if f not in (sp.idle_family, sp.entry_family)] if every else CANDIDATES[tk]
+        for fam in fams:
             a = d["attacks"].get(fam)
             if a and a.get("states"):
                 out[(tk, fam)] = (tuple(a["start_states"]), tuple(a["states"]))
