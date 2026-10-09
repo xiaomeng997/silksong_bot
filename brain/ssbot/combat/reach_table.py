@@ -137,10 +137,11 @@ def load_clip(path: Path) -> tuple[ClipTable, dict]:
     with np.load(path, allow_pickle=False) as z:
         kmax = int(z["kmax"])
         B, N, fam_of = {}, {}, {}
+        Ball, Nall = z["B"].astype(np.float64), z["N"].astype(np.int64)      # read once (each z[...] decompresses)
         for i, (key, fam) in enumerate(zip(z["keys"].tolist(), z["fam"].tolist())):
             tk, st = key.split("|", 1)
-            B[(tk, st)] = z["B"][i].astype(np.float64)
-            N[(tk, st)] = z["N"][i].astype(np.int64)
+            B[(tk, st)] = Ball[i]
+            N[(tk, st)] = Nall[i]
             if fam:
                 fam_of[(tk, st)] = fam
         r = {}
