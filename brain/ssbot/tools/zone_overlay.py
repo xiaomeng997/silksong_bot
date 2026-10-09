@@ -1003,8 +1003,15 @@ class LiveOverlay:
                                      hero=self.eng.hero(self.last_raw))
                     lines = legend_lines(fr, self.view, config,
                                          "" if self.eng.running else "(no battle: red only)")
-                    img = render(shown or {"ks": (0,), "support": {}}, self.eng.grid, (rect[2], rect[3]), self.view,
+                    # drawn at most at the render size and scaled up nearest (a 4K window: 3 ms instead of 55)
+                    W, H = rect[2], rect[3]
+                    sc = min(1.0, RENDER[0] / W, RENDER[1] / H)
+                    size = (max(1, int(round(W * sc))), max(1, int(round(H * sc))))
+                    img = render(shown or {"ks": (0,), "support": {}}, self.eng.grid, size, self.view,
                                  legend=lines if self.view.on else None)
+                    if size != (W, H):
+                        import cv2
+                        img = cv2.resize(img, (W, H), interpolation=cv2.INTER_NEAREST)
                     win.show(img)
                     self.stats["upd_ms"].append((time.perf_counter() - t1) * 1e3)
                 if win is not None:
@@ -1086,6 +1093,140 @@ class VideoFrames:
             self.proc.kill()
             self.proc.wait()
             self.proc = None
+
+
+def mask_contours(mask: np.ndarray) -> list[np.ndarray]:
+    """[n, 2] (column, row) outlines of a grid mask (row 0 = the lowest hero centre)."""
+    import cv2
+    if mask is None or not mask.any():
+        return []
+    cs, _ = cv2.findContours(mask.astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    return [c.reshape(-1, 2).astype(np.float64) for c in cs]
+
+
+def rerun_zones(session: Path, rec, f0: int | None = None, f1: int | None = None, ks=(0,), video: bool = False,
+                video_scale: float = 0.5, every: int = 1, margins: bool = False, demo_cache: Path | None = None,
+                threads: int = 4) -> dict:
+    """Log a human session's Forum attempts with the zone layers per game frame into a Rerun recording ("frame" =
+    the raw oracle frame, as the video labels): world/ (y up, as tools.viewer) hero, the real damage colliders
+    (colliders/non_clashable, colliders/clashable: the ground truth), zones/red (the non-clashable sweeps),
+    zones/yellow/{committed, not_started}, support/k<k>/<layer>; with video, screen/video (the recorded frame) and the
+    same outlines projected with the STATE camera (screen/zones/...)."""
+    import cv2
+    import rerun as rr
+    from ssbot.tools.forum_human_score import load_segment, segments
+    from ssbot.tools.viewer import closed, polygons_by_key
+    eng = ZoneEngine(crest="Wanderer", threads=threads, margins=margins)
+    g = eng.grid
+    stats: dict = {"frames": 0, "attempts": [], "config": eng.config_text(), "compute_ms": []}
+    segs = [s for s in segments(f"{session}:win", demo_cache)
+            if (f1 is None or s["f0"] <= f1) and (f0 is None or s["f1"] >= f0)]
+    vidx = _video_index(session) if video else {}
+    size = (int(RENDER[0] * video_scale), int(RENDER[1] * video_scale))
+    vf = VideoFrames(session, size) if video else None
+    rr_ = 0.04
+
+    def wl(pts):
+        return [(float(x), -float(y)) for x, y in pts]
+
+    def grid_world(c):
+        return g.to_world(c[:, 0], c[:, 1])
+
+    rec.log("legend", rr.TextDocument(
+        "zones (hero-centre space: where the hero CENTRE must not be): yellow = inescapable (committed: erosion "
+        "lower bound; not started: zones_lat1 for the lock now); red = non-clashable colliders + 6-frame sweep; "
+        "colliders/* = the real damage colliders (ground truth); support/k<k>/<layer> = the planner's support at "
+        f"look-ahead k. Config: {eng.config_text()}"), static=True)
+    for seg in segs:
+        terrain, states = load_segment(seg)
+        eng.crest = seg.get("crest") or eng.crest
+        eng.start(terrain)
+        stats["attempts"].append([seg["attempt"], seg["f0"], seg["f1"], seg.get("outcome")])
+        if terrain is not None:
+            rec.set_time("frame", sequence=max(seg["f0"], f0 or 0))
+            for key, polys in polygons_by_key(terrain).items():
+                rec.log(f"world/terrain/{key}", rr.LineStrips2D([closed(wl(p)) for p in polys],
+                                                                colors=[[120, 120, 120]], radii=[0.04]))
+        for s in states:
+            eng.feed(s)
+            fr_raw = s["_f_raw"]
+            if f0 is not None and fr_raw < f0:
+                continue
+            if f1 is not None and fr_raw > f1:
+                break
+            if s["f"] % every:
+                continue
+            t0 = time.perf_counter()
+            fr = eng.compute(ks=ks, support=True)
+            stats["compute_ms"].append((time.perf_counter() - t0) * 1e3)
+            rec.set_time("frame", sequence=int(fr_raw))
+            rec.set_time("game_frame", sequence=int(s["f"]))
+            hc = fr["hero"]
+            rec.log("world/hero", rr.Points2D([(hc[0], -hc[1])] if hc else [], colors=[[255, 255, 255]],
+                                              radii=[0.15]))
+            cols = fr["cols"]
+            nc = [p for p, c, _, _ in cols if not c]
+            cl = [p for p, c, _, _ in cols if c]
+            rec.log("world/colliders/non_clashable", rr.LineStrips2D(
+                [closed(wl(p)) for p in nc], colors=[[255, 60, 60]], radii=[0.03],
+                labels=[lb for p, c, lb, _ in cols if not c]))
+            rec.log("world/colliders/clashable", rr.LineStrips2D(
+                [closed(wl(p)) for p in cl], colors=[[240, 240, 240]], radii=[0.03],
+                labels=[lb for p, c, lb, _ in cols if c]))
+            sweeps = [sweep_hull(p, v) for p, c, _, v in cols if not c]
+            rec.log("world/zones/red", rr.LineStrips2D([closed(wl(h)) for h in sweeps],
+                                                       colors=[[255, 130, 130]], radii=[rr_]))
+            layers = {}
+            for k in ks:
+                layers[f"zones/yellow/committed/k{k:02d}"] = (fr["ycom"].get(k), COLORS["yellow"])
+                layers[f"zones/yellow/not_started/k{k:02d}"] = (fr["yns"].get(k), (90, 220, 255))
+                for lay in LAYERS:
+                    layers[f"support/k{k:02d}/{lay}"] = (fr["support"].get(k, {}).get(lay), COLORS[lay])
+            outlines = {}
+            for path, (m, col) in layers.items():
+                outlines[path] = [grid_world(c) for c in mask_contours(m) if len(c) >= 2]
+                rgb = [col[2], col[1], col[0]]
+                rec.log(f"world/{path}", rr.LineStrips2D([closed(wl(p)) for p in outlines[path]], colors=[rgb],
+                                                         radii=[rr_]))
+            if vf is not None:
+                vi = vidx.get(fr_raw)
+                img = vf.get(vi) if vi is not None else None
+                cam = fr.get("cam")
+                if img is not None:
+                    ok, jpg = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, 80])
+                    rec.log("screen/video", rr.EncodedImage(contents=jpg.tobytes(), media_type="image/jpeg"))
+                if cam is not None and cam.get("V"):
+                    Hw, _ = homography(g, cam, size)
+
+                    def sp(pts):
+                        return [tuple(map(float, q)) for q in _to_px(Hw, np.asarray(pts))]
+                    for path, polys in outlines.items():
+                        m, col = layers[path]
+                        rec.log(f"screen/{path}", rr.LineStrips2D([closed(sp(p)) for p in polys],
+                                                                  colors=[[col[2], col[1], col[0]]], radii=[1.0]))
+                    rec.log("screen/zones/red", rr.LineStrips2D([closed(sp(h)) for h in sweeps],
+                                                                colors=[[255, 130, 130]], radii=[1.0]))
+                    rec.log("screen/colliders/non_clashable", rr.LineStrips2D([closed(sp(p)) for p in nc],
+                                                                              colors=[[255, 60, 60]], radii=[1.0]))
+                    rec.log("screen/colliders/clashable", rr.LineStrips2D([closed(sp(p)) for p in cl],
+                                                                          colors=[[240, 240, 240]], radii=[1.0]))
+                    rec.log("screen/hero", rr.Points2D([sp([hc])[0]] if hc else [], colors=[[255, 255, 255]],
+                                                       radii=[3.0]))
+            stats["frames"] += 1
+    if vf is not None:
+        vf.close()
+    ms = stats.pop("compute_ms")
+    stats["compute_ms_p50"] = round(float(np.median(ms)), 1) if ms else None
+    return stats
+
+
+def zones_blueprint(video: bool):
+    import rerun.blueprint as rrb
+    views = [rrb.Spatial2DView(origin="world", name="world (y up): zones, colliders, hero")]
+    if video:
+        views.append(rrb.Spatial2DView(origin="screen", name="recorded video + zones"))
+    return rrb.Blueprint(rrb.Horizontal(*views, rrb.TextDocumentView(origin="legend", name="legend"),
+                                        column_shares=[3, 3, 1][:len(views)] + [1]), collapse_panels=True)
 
 
 def cmd_render(a) -> int:
