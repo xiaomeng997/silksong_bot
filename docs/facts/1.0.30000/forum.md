@@ -3135,3 +3135,49 @@ cd brain
 ..\scripts\uv.cmd run python -m ssbot.tools.viewer C:/ssbot/data/human/<session> --zones --k 0,12 --video --video-scale 0.5 --save <out>.rrd
 ```
 测量输出：`C:\ssbot\data\m2_forum_zfix\v_before\{h,bot}`（之前，3ca18c5 + zone_share）、`v_after3\{h,bot}`（之后）、`v_after3_summary.json`。
+
+### 29.11 你说的紫框：Choristor 的鞭子在前摇里"够到"11.7 u 外（2026-10-09，task "support reach"；开关 `SSBOT_FORUM_RCLIP`，默认关；工具 `tools/support_reach.py`，表 `combat/reach_table.py`）
+
+**那个紫框是什么**（`20261009_085824` 第 0 次尝试，原始帧 5690，回放配置 AIM=1、seen_cf、escape+n+g、按状态余量、clash main）：Choristor 3 在 `Whip Antic`（鞭子的前摇）里已经 0.70 s，站着不动（速度 0），transform 在 x 22.79，面朝你；你在 x 34.44，正前方 11.65 u。`enemies/choristor_3/support/k12` 是它自己的 CH_WHIP 支撑：家族模板（从前摇开始的全部实例的并，粗金字塔窗口）+ `Whip 1`–`Whip 6`、`Multiwhip`、`Whip End`、尾巴各自的窗口放置，**全部锚在前摇开始的位置**，入口窗口都很窄（`Whip 1` 0.09–0.15 s 后）。k = 12 时它们往前伸到 x 36.5（13.7 u），其中家族模板和 `Whip 1`–`Whip 4` 盖到你；k = 0 时只有身体附近（没盖到你）。列表和 PNG：`C:\ssbot\data\m2_forum_reach\explain\before_20261009_085824_f5691_Choristor_3{.json,.png,_hero.png}`。
+
+**为什么伸那么远——你的猜想对了一半**：锚点本身没有动、也没有生长（它就是你看到它站的地方）。但模板是 1,309 个录到的实例相对"前摇开始位置"的并集，里面包括**被打退的实例**：142 场录像里 1,774 次 `Whip Antic`，1,649 次身体一动不动，125 次动了 2.7–3.6 u，**每一次都在被打（主角或 Garmond 的 `Charge Damager`）之后 1–9 帧**，击退约 0.47 u/帧、持续约 8 帧，导出的速度是 0（击退直接挪 transform）。鞭子期间也一样（`Whip 3`–`6` 被打后身体最多离锚 4.8 u）。所以模型等于让"别的实例被打飞的那几 u"在每一次前摇里都算上——效果上就是让它"跑着前摇"。鞭子本身离身体最远 8.75 u（`Whip 2`），`Whip 1`/`Whip 2` 自己往前滑 1.3 u。**录像里的真实范围**：前摇 0.70 s 时再过 12 帧，碰撞体离它的 transform 最远 **9.75 u（没被打）/ 10.65 u（中途被打）**（142 场 2,241 个样本），没有一次到过 11.4 u（你身体的边）。你说"它绝对够不着"是对的。
+- 顺带发现：鞭子的碰撞体（`Whip Hit 1`–`6`）和 Reed / Minister 的 `ParrySlash Hit`、Minister 的 `Slash Collider` 都是多段伤害，导出时 dealt = 0。叠加层的红色、黄色"已出招"和 `forum_aim` 的瞄准模板只收 dealt > 0，**所以这几招在红 / 黄里看不到，CH_WHIP 的瞄准模板也没有鞭子**（AIM 现在默认关；`forum_aim.instances(threat=True)` 已经能把它们算进去，重建瞄准模板时要打开）。支撑模板本身是有鞭子的（建表收的是 eff ≠ 0）。
+
+**推广：每只怪自己的支撑超出它真实范围多少**（`support_reach scan`：你的三次会话 7 段 17,869 帧 + bot 第 0 波 19 场 11,483 帧，每 3 帧；真实范围 = 142 场录像里"处在这个状态时，k 帧后它的威胁碰撞体相对它 transform 到过的框"（按朝向镜像，k ± 1 帧），超出 > 1 u 算超出）：
+- 你的会话：k = 0 有支撑的 44,213 个"怪 × 帧"里 40,489 个超出（91.6 %），k = 12 是 39,497 / 43,342；你站的位置落在"超出部分"里的有 21,960（k = 0）/ 16,639（k = 12）次。bot 第 0 波：k = 0 24,650 / 31,721，k = 12 22,342 / 30,447。
+- 按原因排（你站的位置被超出部分盖住的次数，k = 12）：Maestro 的小自动机还没出招的 AT_FIRE / AT_DEFEND 家族游走框（`Ready` 时超出中位 20 u）、Reed 还没开始的 RE_EVADE 框、Clapper CC_EVADE、Minister MI_EVADE、Bellbearer CB_EVADE、Clawmaiden CM_TELE；已出招的：小自动机 AT_FIRE 的 `Return` / `Wall Bonk` 窗口和尾巴（17–19 u）、Envoy 冲锋 EN_CHARGE 的各状态窗口（14 u，bot 第 0 波第一名）、Minister MI_PARRY 的链框（11 u）、Reed RE_DEFEND 反击链的窗口 / 尾巴（5–9 u）、Clawmaiden CM_SPIN 家族模板（14 u）。
+- 四个机制：(1) 从出招开始锚定的并集装着所有实例的位移（击退、飞行、冲到墙边）；(2) 入口时间不确定的窗口放置把"什么时候进这个状态"和"那时身体在哪"拆开了——"撞墙"这个状态在任何入口时间都放在任何距离上；(3) 还没开始的实例：家族游走的逐 bin 包围盒 × 两个镜像 × 锚点框，锚点框按**待机**生长从现在算起——敌人正在前摇里站着不动时也照样长（这才是字面意义上的"跑着前摇"，在后面的实例上）；(4) 余量。逐帧数据：`C:\ssbot\data\m2_forum_reach\scan_before\`、汇总 `scan_before_summary.json`。
+
+**改了什么（`SSBOT_FORUM_RCLIP=1`，默认关）**：每只怪**自己的**放置（细、窗口、包围盒）和待机身体管，在提前量 k 时只保留它"从现在的位置、现在的状态、现在在这个状态里的时间"出发 k 帧内真实到过的框之内的部分。
+- 表（`support_reach clip-build`，**只用开发集 107 场**，新场完全留出给召回）：按 (类型, Control 状态, 在状态里的时间 0.05 s 一档, k = 0–126 帧) 记碰撞体相对 transform 的框，分"全部"和"没被打"（前 20 帧到 k 帧后都没被打：没有击退）两份；一档的框还并上后两档（状态比录到的都短 0.1 s 也盖得住）；行数不够就退到整个状态、家族、类型。运行时：追踪器 20 帧内没看到它挨打就用"没被打"的框，否则用"全部"。
+- 留出余量 r：开发集两折按场互留，每 (类型, 状态, 时间档, 部分, k 段) 取一折超出另一折的最大值，至少 0.5 u；再加主角半宽。
+- 不裁剪：入场 / 等待 / 死亡状态、正在投掷的家族（Reed 的针、Bellbearer 的钟、Clawmaiden 的矛、Clapper 的符文：它们的模板和身体管也代表扔出去的东西）、小自动机的分组行、视觉视图、受击反应预报、超过 2 帧没看到的怪。抛射物、入场、死亡尾巴本来就不归怪自己。
+- 你的那一帧：k = 12 的鞭子支撑从 x 36.5 缩到 33.7（真实范围 + r 0.5 + 主角半宽），**不再盖你**（PNG `after_20261009_085824_f5691_Choristor_3.png`）。另外两帧：7939 撤退的 Bellbearer k = 0 支撑 x 38.5–48.5 → 41.0–45.5、不再盖你；10427 Reed 的地面反击 k = 0 / 12 支撑 x 23.8–48.5（整个场地）→ 32.8–38.0 / 30.5–38.5，不再盖你（`explain\{before,after}_20261009_085824_f{7939,10427}_*.png`）。
+
+**数字（冻结检出 `C:\ssbot\hs_rclip_b5e9072`；半屏和扫描用回放配置 AIM=1）**：
+
+| 半屏规则（支撑 > 屏幕一半的帧） | 你的三次会话 之前 | 之后 | bot 第 0 波 之前 | 之后 |
+|---|---|---|---|---|
+| k = 0 | 7,575 / 17,869（42.4 %），中位 0.430 | **4,184（23.4 %）**，中位 0.135 | 3,130 / 11,167（28.0 %），中位 0.391 | **113（1.0 %）**，中位 0.097 |
+| k = 12 | 12,394（69.4 %），中位 0.607 | **5,963（33.4 %）**，中位 0.301 | 7,745（69.4 %），中位 0.567 | **1,417（12.7 %）**，中位 0.224 |
+
+| 超出真实范围 > 1 u（怪 × 帧） | 你的会话 之前 | 之后 | bot 第 0 波 之前 | 之后 |
+|---|---|---|---|---|
+| k = 0 超出 | 40,489 / 44,213 | 19,312 | 24,650 / 31,721 | 5,214 |
+| k = 0 你站的位置在超出部分里 | 21,960 | 13,778 | 7,313 | 225 |
+| k = 12 超出 | 39,497 / 43,342 | 19,663 | 22,342 / 30,447 | 5,250 |
+| k = 12 你站的位置在超出部分里 | 16,639 | 10,663 | 5,082 | 770 |
+
+- 还剩的大头：**Maestro 的小自动机**（你的会话里剩下的"你站在超出部分里"几乎全是它）——3 只以上时它们后面的实例按簇放一行（一行代表几只、位置不同），这些分组行没有裁剪；后面的波（第 3、5、6、7、12、13 波）占剩下的超半屏帧的 99 %。bot 第 0 波剩下的是 Choristor 的入场（`CH_ENTRY`，故意不裁）和 Reed 还没开始的 RE_EVADE。
+- 代价：同一批帧（`085824` 前 1,800 帧，每 6 帧，400 × 49 的查询），预报 p50 0.66 → 0.98 ms，`occupied` p50 1.09 → 1.90 ms（裁剪按怪分批查询）；读表 0.2 s + 初始化 1 s（每个进程一次）。
+- R2 留出召回和你赢的录像的重打分见 29.12（跑完后补）。中途修过两次（都是新场召回抓到的，表只用开发集）：投掷中的怪不裁（Reed 的针出手那一帧由身体管代表：`074533` i2 ep34 L2）；时间档并上后两档、余量至少 0.5 u（Clawmaiden 的斩比开发集最远还远 0.14 u：`074719` i3 ep32 L3）。
+
+**复现**（`brain` 下）：
+```
+..\scripts\uv.cmd run python -m ssbot.tools.support_reach explain C:/ssbot/data/human/20261009_085824 --attempt 0 --frame 5690 --enemy "Choristor 3" --tag before_   # 加 SSBOT_FORUM_RCLIP=1 / --tag after_
+..\scripts\uv.cmd run python -m ssbot.tools.support_reach reach --out <reach60_all.json>          # 真实范围（开发 + 新场，k 0-60，扫描用）
+..\scripts\uv.cmd run python -m ssbot.tools.support_reach clip-build                                # 裁剪表（只用开发集）-> knowledge/.../forum/reach_clip.npz（不进 git）+ .json
+..\scripts\uv.cmd run python -m ssbot.tools.support_reach scan <session>:win ... | <bot run> ... [--w0] --out <dir> --reach <reach60_all.json>
+..\scripts\uv.cmd run python -m ssbot.tools.support_reach summary <dir>\h <dir>\bot
+```
+驱动：`C:\ssbot\data\m2_forum_reach\share.cmd <tag> <0|1>`（半屏 + 扫描）、`accept.cmd recall|base|rclip`（召回、重打分）。冻结检出要连 `reach_clip.npz` 一起拷。

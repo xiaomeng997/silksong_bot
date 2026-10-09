@@ -3758,3 +3758,58 @@ whole task. Offline only (no game instance).
    `skips_episodes_while_the_game_stays_paused`) in code merged from the pause-cause work, not touched here; the rest
    of the suite passes (1330).
 3. No live run: the aim default-on and the kinematic yellow have not been seen in a game.
+
+## Task support reach (branch worktree-wf_0469f4be-4ea-1, 2026-10-09; forum.md §29.11)
+
+The person's report: at raw frame 5690 of 20261009_085824 (attempt 0) `enemies/choristor_3/support/k12` covered where
+they stood 11.65 u in front of a Choristor 0.7 s into Whip Antic; never hit.
+
+### Diagnosis
+- The anchor did not move or grow (the Choristor stood still at its antic-start transform). The CH_WHIP family template
+  and the per-state windows (Whip 1-6, Multiwhip, Whip End, tail) are unions of every logged instance relative to the
+  antic start, knockbacks included: 125 of 1,774 recorded Whip Antics moved 2.7-3.6 u, every one 1-9 frames after a
+  hit (hero or Garmond), ~0.47 u/frame, exported velocity 0. Real reach 12 frames after Whip Antic at 0.70 s (142
+  fights, 2,241 samples): 9.75 u without a hit, 10.65 u with one; the support reached 13.7 u.
+- Multi-hit colliders (Choristor Whip Hit 1-6, Reed / Minister ParrySlash Hit, Minister Slash Collider) are exported
+  with dealt 0: the overlay's red / committed yellow and the forum_aim templates take dealt > 0 only, so they miss them
+  (the CH_WHIP aim templates have no whip). `forum_aim.instances(threat=True)` includes them; not rebuilt (AIM is off).
+- Generalised (`support_reach scan`, 3 sessions + bot wave 0 vs the recorded reach from the state now, +1 u): beyond in
+  92 % (human) / 78 % (bot) of enemy-frames with support. Causes: start-anchored unions (knockbacks, flights), window
+  placements over long entry intervals, not-started family-walk boxes (both mirrors, anchor box grown at idle speed even
+  during an antic), margins. Top: Tiny not-started AT_FIRE / AT_DEFEND group boxes, Reed RE_EVADE, Clapper / Minister /
+  Bellbearer evades, Clawmaiden teleport; committed Tiny AT_FIRE windows, Envoy EN_CHARGE windows, MI_PARRY chain box,
+  RE_DEFEND chain windows, CM_SPIN family.
+
+### What changed
+- `combat/reach_table.py` + `tools/support_reach.py clip-build`: dev-only table (107 fights) per (type, Control state,
+  time-in-state bin 0.05 s, look-ahead k 0-126), parts all / nohit (no hit from 20 frames before to k after), each bin
+  unioned with the next two; 2-fold held-out r per (type, state, bin, part, look-ahead band), at least 0.5 u.
+  `knowledge/1.0.30000/enemies/forum/reach_clip.npz` is git-ignored (frozen checkouts must copy it; ~4 MB, 6 min build),
+  `reach_clip.json` (report) is committed.
+- `SSBOT_FORUM_RCLIP=1` (multi_forecast, default off = bit-identical): each tracked enemy's own fine / window / bbox
+  rows and idle tube are clipped to its reach box around its transform now (`_Builder._clip`, `MultiForecast._clip_*`);
+  part nohit while the tracker saw no hit for 20 frames (`EnemyTracker.t_hit`, new). Not clipped: entry / waiting /
+  death states, a throw family (REACH_KEEP: the body tube stands for the pin / bell), Tiny group rows, the vision
+  view, hit-reaction forecasts, enemies not seen within 2 frames. terminal.py's field bins read placements directly
+  (not clipped: conservative).
+- `tools/support_reach.py`: explain (placements of one enemy at one frame, PNG), motion, reach, scan, summary.
+- Tests: `tests/test_reach_clip.py` (3); forum suites 237 passed.
+
+### Results (forum.md §29.11)
+- Frame 5690: k12 whip support x 36.5 -> 33.7, the person's position (34.44) no longer covered. Frames 7939
+  (Bellbearer evade) and 10427 (Reed ground counter) likewise (PNGs in C:\ssbot\data\m2_forum_reach\explain\).
+- Half-screen (AIM=1): k0 > 50 % 42.4 -> 23.4 % (human), 28.0 -> 1.0 % (bot w0); k12 69.4 -> 33.4 % / 69.4 -> 12.7 %.
+- Beyond-reach enemy-frames k0: 40,489 -> 19,312 (human), 24,650 -> 5,214 (bot); hero in beyond part 21,960 -> 13,778,
+  7,313 -> 225.
+- Cost: forecast p50 0.66 -> 0.98 ms, occupied (400 x 49) 1.09 -> 1.90 ms.
+- R2 fresh recall / re-score: running at hand-over (see below).
+
+### Open issues
+1. Acceptance runs (frozen `C:\ssbot\hs_rclip_b5e9072`, `C:\ssbot\data\m2_forum_reach\accept.cmd`): R2 fresh recall
+   with RCLIP -> `recall_fresh_rclip.json`; re-score before `C:\ssbot\data\m2_forum_hs\rclip_base_d51b216` (done:
+   FORCED_RISK 82.03 %, unsafe 86.51 %, false alarms 76.83 %, misses 0.60 % of safe, 32) / after `rclip_b5e9072`.
+   Default stays off until the recall is 100 % at L2-L4 and the re-score's misses do not rise.
+2. Tiny group rows (>= 3 Tinies) are not clipped: the main remainder in later waves; clip them by the union of the
+   cluster members' boxes.
+3. The scans' reference reach (reach60_all.json) uses dev + fresh fights; the clip table is dev only.
+4. A stopped copy of this agent wrote `ssbot/combat/reach_clip.py` (other API, unused); moved out of the tree.
