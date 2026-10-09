@@ -163,7 +163,7 @@ T_ENV = int(os.environ.get("SSBOT_FORUM_T", "36") or 36)     # the horizon arm (
 # SSBOT_FORUM_TA ("+" or "," separated; "all": every one; empty, the default: none, everything as before):
 #   free   DESIGN 3.5.6 revision: the supervisor's free mode (h >= 2: anything goes until hit; Q1 at h = 1 unchanged)
 #   whip   a clash row whose clash meets a Choristor whip is still safe but scores no gain (J); L2: in its whip antic
-#          go behind it (the whip never reaches behind) or switch to a target out of the whip's reach
+#          leave the whip's reach (it does reach 4.75 u behind: Whip Hit 5-6) or switch to a target out of it
 #   guard  L2: the Minister / Reed defence rules (height bands, wait in reach, triggers only from where its counter
 #          cannot reach; the Reed never from above / below)
 #   edge   RUSH's stance at the edge of the hero's slash reach on the target's body (not its x)
