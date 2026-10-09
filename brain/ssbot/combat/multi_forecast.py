@@ -110,6 +110,42 @@ HERO_V_MAX = (28.0, 30.0)  # u/s: the hero's dash speed (kinematics.dash_speed) 
 # colliders k frames later, + the held-out r + the hero half extents; the every-frame part, hits included), as a box
 # of kind "prestrike" (the not_started layer); the oracle view only (the table's reach needs the transform)
 PRESTRIKE = os.environ.get("SSBOT_FORUM_PRESTRIKE", "0") not in ("", "0")
+# SSBOT_FORUM_REANCHOR (task precision push S2, fix_spec F1 / the precision tool's top causes): parts, a comma list
+# ("1": every part; "" / "0": off, as before, bit-identical):
+#   fam    the current attack's family union (the family template from its start: every recorded instance of the
+#          family in every state, the precision tool's largest committed cause) is not placed when every node the walk
+#          gives for the current family (its states and its tail) has its own per-state template; the family's later
+#          states then carry no strike-delay floor (the union held their wind-up bodies before it)
+#   chain  a defender's counter exists only if the defender is hit (the person, fix_spec sec. 7): while a Reed in
+#          RE_DEFEND / a Minister in MI_PARRY is in its stance (not yet hit), its hit-triggered states (DEFENDERS: the
+#          block from the hit, the counter from the hit + the block's shortest dwell) are entered no earlier than the
+#          first look-ahead frame a hit of the hero or an ally can reach it (RCLIP=2's hit trigger, _hero_hit_k), and
+#          not at all when the walk's window for them ends before that; the family union is then not placed either
+#          (it holds every recorded counter), when the per-state templates allow it (as with fam)
+# The kinematic re-anchoring of fix_spec F1 (per-state templates in the frame of the state's entry, re-anchored on
+# every observation) needs templates the build does not make (frames anchor / world only): not a part yet.
+REANCHOR_PARTS = ("fam", "chain")
+
+
+def reanchor_parts(v: str | None) -> frozenset:
+    """The parts of an SSBOT_FORUM_REANCHOR value ("" / "0": none, "1": all, else a comma list)."""
+    v = (v or "").strip()
+    out = frozenset() if v in ("", "0") else frozenset(REANCHOR_PARTS) if v == "1" else         frozenset(p.strip() for p in v.split(",") if p.strip())
+    if out - set(REANCHOR_PARTS):
+        raise ValueError(f"SSBOT_FORUM_REANCHOR: unknown part(s) {sorted(out - set(REANCHOR_PARTS))}")
+    return out
+
+
+REANCHOR = reanchor_parts(os.environ.get("SSBOT_FORUM_REANCHOR"))
+# defender families: (type, family) -> (the state a hit sends it to, the hit-triggered states) (Reed.json /
+# Minister.json attacks.<family>.states; Block 0.483-0.5 s, Parry Block 0.558-0.567 s)
+DEFENDERS = {
+    ("Song Reed", "RE_DEFEND"): ("Block", frozenset({"Block", "Parry Y Aim", "Parry Slash", "Parry Slash End",
+                                                     "Multihit", "Multihit End", "Multihit Clashed"})),
+    ("Song Administrator", "MI_PARRY"): ("Parry Block", frozenset({"Parry Block", "Parry Slash 1", "Parry Slash 2",
+                                                                   "Parry Slash 3", "Parry Slash 4",
+                                                                   "Parry Slash End"})),
+}
 PRESTRIKE_FAMS = frozenset({("Song Reed", "RE_STAB"), ("Song Reed", "RE_DEFEND")})
 PRESTRIKE_F = 13          # frames after the start: the body moves before the first own attack collider
 BOX_KINDS = ("death", "arena", "idle", "collider", "hazard", "prestrike")
@@ -506,6 +542,7 @@ class MultiForecaster:
         self.reach = REACH                    # SSBOT_FORUM_RCLIP: each enemy's support clipped to its real reach
         self.reach_hit = REACH_HIT            # SSBOT_FORUM_RCLIP=2: ... widened from a hero hit's first reach on
         self.prestrike = PRESTRIKE            # SSBOT_FORUM_PRESTRIKE: the pre-strike reach of a not-started root
+        self.reanchor = REANCHOR              # SSBOT_FORUM_REANCHOR: its parts (fam, chain)
         self.react: ReactConfig | None = None   # reactive support (ReactConfig; None: as before)
         self.model = _Shim._Model()
         self.query_c = None
@@ -1127,7 +1164,19 @@ class _Builder:
                                    tr.iid, cur.family, True, 1.0)
             else:
                 aim_tid = None
-        if committed_now and anc is not None and not thrown and aim_tid is None:
+        ra = getattr(self.fc, "reanchor", frozenset())
+        chain = None                              # SSBOT_FORUM_REANCHOR chain: (trigger, its states, the earliest hit)
+        drop_union = False
+        if ra and committed_now and anc is not None and not thrown and aim_tid is None:
+            if "chain" in ra and (tt.tk, cur.family) in DEFENDERS and tr.state not in DEFENDERS[(tt.tk, cur.family)][1]:
+                trig, cst = DEFENDERS[(tt.tk, cur.family)]
+                chain = (trig, cst, self._hero_hit_k(tr) * BIN, tt.dwell.get(trig, (0.0, 0.0))[0])
+            if "fam" in ra or chain is not None:
+                fam_nodes = [nd for nd in cur_nodes if nd.family == cur.family]
+                drop_union = bool(fam_nodes) and all(
+                    tables.key_id(nd.family, TAIL if nd.state == TAIL else nd.state, "anchor") is not None
+                    for nd in fam_nodes)
+        if committed_now and anc is not None and not thrown and aim_tid is None and not drop_union:
             # the current attack's family template from its start (the family-wide union)
             fid = tables.key_id(cur.family, None, "anchor")
             if fid is not None:
@@ -1147,12 +1196,17 @@ class _Builder:
                     lo = hi = tr.t_entry - T          # the current state: its entry
                 else:
                     lo, hi = max(ref + nd.lo - T, BIN), max(ref + nd.hi - T, BIN)
+                if chain is not None and not nd.current and nd.family == cur.family and nd.state in chain[1]:
+                    # a hit-triggered state: entered at the hit (the trigger) or after the block (the rest)
+                    lo = max(lo, chain[2] + (0.0 if nd.state == chain[0] else chain[3]) - DWELL_SLACK_S)
+                    if lo > hi + 1e-9:
+                        continue
                 if lo > H + BIN:
                     continue
                 key_state = TAIL if nd.state == TAIL else nd.state
                 tid = tables.key_id(nd.family, key_state, "anchor")
                 if tid is not None:
-                    ton = c_ton if not nd.current and nd.state != TAIL and nd.family == cur.family else -math.inf
+                    ton = c_ton if not nd.current and nd.state != TAIL and nd.family == cur.family                         and not drop_union else -math.inf
                     self._place_anchor(tid, lo, hi, anc, tr.iid, nd.family, nd.family != sp.idle_family, nd.p, ton)
                 if nd.family == sp.entry_family:
                     wid = tables.key_id(nd.family, key_state, "world_all")
