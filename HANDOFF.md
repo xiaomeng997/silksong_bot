@@ -3500,3 +3500,9 @@ A), -073-3 (6a556db, track B).
 - Machine load: another agent's `forum_escape_search` (4 below-normal workers) ran alongside; the first chunks had
   late ticks 0.42-0.75 (round 5: ~0.13) and tick p50 17-18 ms (round 5: ~14 ms). The re-scores were stopped (they
   had started with the live run) and moved after it.
+- Part 1 (21:17-22:20, 62 chunks; the drivers stopped between chunks on the person's DEMO_SOON at 22:18): N 99, R 96,
+  R1 96 episodes, all QUIT, 0 WOULD_DIE / HARNESS_FAIL, support-outside 0. Summary
+  `C:\ssbot\data\m2_forum_fp2\ab_part1.json` (`forum_ab_summary --landed C:/ssbot/data/m2_forum_fp2/rh`); forum.md 28.3:
+  N worse than R on every main metric (hits / masks a minute 8.51 / 9.70 vs 7.17 / 8.23, hitless waves 0 vs 6, eff.
+  mask loss 4.92 vs 3.42 / min, wave-0 clears 3 vs 14, kills 0.55 vs 0.84, paired survival R - N +9.4 s, CI 0.4..18.7);
+  R1 vs R: more landed (21.3 vs 19.2 / min) and kills (1.25 vs 0.84, paired CI -0.05..0.93), hits equal.
