@@ -446,21 +446,26 @@ def j_terms(pl, cap: dict, box, flags, mode, latched) -> np.ndarray:
     rx = prefs.risk_x if len(prefs.risk_x) else np.zeros(1)
     rv = prefs.risk if len(prefs.risk) else np.zeros(1)
     vr, vl, st, win = pl.shapes
+    real = np.array([not t.hazard for t in keep], np.bool_)
     out = np.zeros((n, len(TERMS)))
     for t in range(len(TERMS)):
         wv = np.zeros(8)
         wv[t] = 1.0
         J = np.zeros(n)
+        # the kernel's target weights are [K, 4] by slash kind (track A, GoalPrefs.hit_kw) and it counts the hits
+        # landed (nh); the J terms track A adds after the kernel (under, eml, whip) are not in TERMS
         _forum_score_kernel(np.ascontiguousarray(box, np.float64), np.ascontiguousarray(flags),
                             np.ascontiguousarray(mode), np.ascontiguousarray(latched, np.int64), face0,
                             tbox if len(keep) else np.zeros((0, T1, 4)), tok if len(keep) else np.zeros((0, T1), bool),
-                            tw, vr, vl, st, win, WALL_L, WALL_R, wv, float(prefs.stance_x),
+                            np.ascontiguousarray(tw, np.float64), vr, vl, st, win, WALL_L, WALL_R, wv,
+                            float(prefs.stance_x),
                             np.ascontiguousarray(rx, np.float64), np.ascontiguousarray(rv, np.float64),
                             prefs.boss_x if prefs.boss_x is not None else np.nan,
                             float(prefs.max_hits) if prefs.max_hits is not None else np.inf,
                             J, np.zeros(n), np.full(n, -1, np.int64), np.full(n, -1, np.int64), np.zeros(n, np.int64),
                             np.zeros(n, np.int64), np.zeros(n), np.zeros(n, np.bool_), pl.down_slash, pl.combo_f,
-                            np.full(n, -1, np.int64), np.zeros(n, np.int64), np.zeros(n, np.int64))
+                            np.full(n, -1, np.int64), np.zeros(n, np.int64), np.zeros(n, np.int64), real,
+                            np.zeros(n))
         out[:, t] = J
     return out
 

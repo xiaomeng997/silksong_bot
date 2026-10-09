@@ -302,6 +302,25 @@ def test_edge_spot_for_rush():
     assert t._ta_rules(world(20.0), WinFc([s]), GoalPrefs(RUSH, 28.2, {}), g, s, 20.0)[1] == []
 
 
+def test_human_score_j_terms_use_the_kernel_signature(params, arena):
+    """tools.forum_human_score.j_terms calls the score kernel itself: its hits term equals _score_forum's hits."""
+    from ssbot.tools.forum_human_score import j_terms
+    mf = _reed_forecaster(None, frames=3, x=30.0)
+    f = mf.forecast(0.8)
+    pl = ForumPlanner(params, arena, PlannerConfig(T=36, threads=2, variants="bounds_lo"), ForumConfig())
+    start = kin.initial_state(params, 27.6, FLOOR + params.foot)
+    cmd = np.zeros((3, 36), np.int64)
+    cmd[1, 1:3] = kin.B_ATTACK | kin.B_RIGHT
+    cmd[2, 1:3] = kin.B_ATTACK | kin.B_UP
+    roll = kin.rollout(start, cmd, params, arena, threads=2)
+    prefs = GoalPrefs("ENGAGE", 27.6, {}, hit_w={7: 2.0})
+    ws = _world(27.6)
+    tk = np.arange(cmd.shape[1] + 1) * params.frame_time
+    sc = pl._score_forum(ws, roll, cmd, start, f, prefs, tk, _ctx())
+    jt = j_terms(pl, {"args": (ws, start, None, None, f, prefs, _ctx())}, roll.box, roll.flags, roll.mode, cmd)
+    assert np.allclose(jt[:, 0], sc["hits"])
+
+
 # ---- the measurement tool (tools.forum_knockback) ----
 
 def test_forum_knockback_measures_the_whip_frame_and_a_push():
