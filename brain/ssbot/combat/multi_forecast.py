@@ -1578,6 +1578,10 @@ class _Builder:
             if not s.alive or tr is None or tr.dead or not tr.in_play or tr.parked or tr.hidden or tr.pos is None \
                     or tr.state is None:
                 continue
+            if tr.cur is not None and (tr.tk, tr.cur.family) in REACH_KEEP:
+                # in a throw: its body tube and templates also stand for what it throws (a Reed's pin at its release,
+                # R2 fresh recall 20261003_074533 i2 ep34: the pin met the hero 2.5 u from the Reed 2 frames later)
+                continue
             age = self.origin - tr.seen_T
             if not -1e-9 <= age <= REACH_SEEN_S + 1e-9:
                 continue
