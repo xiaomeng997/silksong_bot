@@ -572,8 +572,9 @@ def family_zone(t, hq3: tuple, face: float, fam: str, libs: dict, params, lat: i
             P = np.concatenate(pts)
             Z = np.concatenate(inesc)
             SV = np.concatenate(survs)
-            res.setdefault("_arrays", {})[(lock, round(hq, 2))] = (xx, np.asarray(hs, np.float64), np.stack(inesc),
-                                                                   dy0)
+            res.setdefault("_arrays", {})[(lock, round(hq, 2))] = (
+                xx, np.asarray(hs, np.float64), np.stack(inesc), dy0,
+                np.stack(inesc) & (np.stack(survs) >= lat + LATE_F))
             # the body at the start points: their cell in the commit-time mask
             ix = np.floor(P[:, 0] / c).astype(np.int64) - t.ix0
             iy = np.floor(P[:, 1] / c).astype(np.int64) - t.iy0
@@ -714,9 +715,11 @@ def cmd_zones(a) -> int:
         body[ok] = bm[iy, ix[ok]]
         r["row_free"] = ascii_row(xs, z & ~body, body)
         for tag in ("_arrays", "_arrays_aimed"):
-            for (lock, hq), (xx, hs, zg, dy0) in (r.pop(tag, None) or {}).items():
+            for (lock, hq), (xx, hs, zg, dy0, *zl) in (r.pop(tag, None) or {}).items():
                 key = f"{tk}|{fam}|{lock}|{hq:.2f}|{'aimed' if tag == '_arrays_aimed' else 'ub'}"
                 arrays[key + "|x"], arrays[key + "|h"], arrays[key + "|z"] = xx, hs, np.packbits(zg, axis=1)
+                # the late part (the attack itself, not the cells already there at the commit): Zones' default
+                arrays[key + "|zl"] = np.packbits(zl[0] if zl else zg, axis=1)
                 arrays[key + "|meta"] = np.array([dy0, zg.shape[1], float(r["both_mirrors"])])
         res["families"][f"{tk}/{fam}"] = r
         lk = r["locks"]
@@ -752,7 +755,7 @@ class Zones:
     """The zones file of cmd_zones as lookups: per (type, family) the ub (or the aimed model's) inescapable zone per
     lock state and anchor height."""
 
-    def __init__(self, path: Path):
+    def __init__(self, path: Path, late: bool = True):
         z = np.load(path)
         groups = defaultdict(dict)
         for f in z.files:
@@ -765,7 +768,7 @@ class Zones:
             if kind == "ub" and (tk, fam) in aimed:
                 continue
             nx = int(d["meta"][1])
-            Z = np.unpackbits(d["z"], axis=1, count=nx).astype(bool)
+            Z = np.unpackbits(d["zl" if late and "zl" in d else "z"], axis=1, count=nx).astype(bool)
             self.fams[tk].setdefault(fam, {}).setdefault(lock, []).append(
                 (float(hq), d["x"], d["h"], Z, float(d["meta"][0]), bool(d["meta"][2])))
 
@@ -855,8 +858,10 @@ def idle_maps(pol, fcast, vs, groups, ws_hero) -> list:
         cats = {c: np.zeros(x.shape, bool) for c in IDLE_CATS}
         fn = {"pm": fcast._fine_occ, "wm": fcast._win_occ, "bb": fcast._bbox_occ}
         meta = {"pm": fcast.pm, "wm": fcast.wm, "bb": fcast.bb}
+        # a Tiny group row stands for every Tiny of its cluster (MultiForecast.meta_group)
+        owners = [s.iid] + [o for o, mem in (getattr(fcast, "meta_group", None) or {}).items() if s.iid in mem]
         for key, kind, sel in groups:
-            own = sel & (np.asarray(meta[kind]["owner"]) == s.iid)
+            own = sel & np.isin(np.asarray(meta[kind]["owner"]), owners)
             if not own.any():
                 continue
             cats[CAT.get(key[0], "other") if CAT.get(key[0]) in IDLE_CATS else "other"] |= fn[kind](x, y, tk_f, own)
