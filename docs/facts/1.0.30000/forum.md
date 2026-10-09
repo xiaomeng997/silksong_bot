@@ -3245,3 +3245,66 @@ cd brain
 **回放里的精度标量**：`viewer <session> --zones --precision [--k 0,12]` 每只怪每个 k 记 `metrics/precision/<名字>/k<k>/{committed, com_all, not_started, total}`（RATIO；0 = 没有预测，−1 = 预测了但没有真伤害）和 `.../error`（你的规则，1 = 错），右边多一个时间序列视图。试跑：`C:\ssbot\data\m2_forum_precision\20261009_085824_f10300-10460_precision.rrd`（10427 帧附近）。
 
 **没做**：任何支撑本身的改动（这一节只量）。
+
+### 29.13 精度推进 S0：多段伤害进真值、精度工具修正、基线（2026-10-09，task "precision push" S0；分支 worktree-wf_de8bf451-06d-1 = main + 区域修正 / RCLIP 83423a3 + 精度工具 18848cb；离线，没有开游戏）
+
+**P0 多段伤害算真伤害**：规则 `zone_overlay.hurts(c, src)`：启用并且 dealt > 0，或者 dealt = 0、eff ≠ 0、实体带 multi_wounder 源位（8）。用在红色、黄色（已出招）、`world/colliders` 和每只怪的 `colliders`（都走 `damage_colliders`）、`viewer` 的红色、精度工具的真值、`forum_aim`（`instances(threat=True)`）。证明（`C:\ssbot\data\m2_forum_push\p0\mw_proof.json`、`mw_proof_raw.json`，脚本同目录）：
+- 开发 + fresh 的 142 场缓存：dealt = 0 的碰撞体只有 8 种，全部带 multi_wounder 位、eff = 2：Minister `Slash Collider`、Reed `ParrySlash Hit`、Choristor `Whip Hit 1`–`6`。伤害事件的来源正是它们：`Slash Collider` 1,090 次、`ParrySlash Hit` 299、`Whip Hit 1`–`6` 214 / 187 / 48 / 100 / 13 / 1。
+- 原始录像（你的 3 次会话 + bot 两个 run 各 3 场）里另有三种 dealt = 0：被打回去的钟 `Throwing Bell`（512 帧）、Reed 的针（9 帧）、Clawmaiden 身体（285 帧）。它们 eff = 0、没有 multi_wounder 位；没有一个伤害事件只对得上 dealt = 0 的碰撞体。所以它们不算。
+- 瞄准模板按 `threat=True` 只用开发集重建（98 个；R2 fresh 不再进余量 r，变成留出）。变化：CH_WHIP `Whip 1` r 2.4 → 2.3；EN_JUMPSLASH 新选了 3 个状态；RE_DEFEND `Multihit End` 1.95 → 1.35；CC_JUMP_CAST 加 `Cast Slam Antic 2`。AIM 仍默认关（规划器）；叠加层默认 AIM=1。
+
+**精度工具的修正**（验证者的 F1–F5，`tools/support_precision.py`）：
+- 投掷物的主人取**预测那一帧当时**的主人（每个投掷物一个指派历史，不再用整场最后的表）。
+- 指派：投掷物出现时和每次重新武装时，给 THROW_F = 120 帧内处在"会扔它的家族"状态的同类怪（几只时取最近的），都没有才取最近的同类怪。你的 3 次会话 + bot 第 0 波：全部指派都是按投掷状态（例如 231544 第 1 次 183 次全是）。
+- t + k 按累计**游戏时间**取（第一帧游戏时间 ≥ t + k/60），顿帧不再让参考提前。
+- not_started 另按你的字面规则判一遍（层名 `ns_any`：参考 = 这只怪在那里的任何真伤害）。
+- 没有在场怪认领的支撑（死掉的投掷者的投掷物、后面波次的入场）单独一行 `unattributed`。Tiny 的群组行算给群里每一只（和 `occupied_only` 一致）。
+- 新子命令：后见召回 `run --ks hindsight --lite` + `hindsight`（k = 0..12 和 36；按家族；自己的支撑 / 所有支撑；"被打过"的行分开）。
+
+**基线**（`C:\ssbot\data\m2_forum_push`；冻结检出 `C:\ssbot\hs_push_d08b738`；配置 base = seen_cf + escape+n+g + 按状态余量 + kill，AIM=0，所有修正开关关；rclip = base + RCLIP=1；"之前" = 精度工具第一版的 AIM=0 基线）。错误占比 / RATIO 中位：
+
+| | 之前 | base | rclip |
+|---|---|---|---|
+| 你的会话 k0 committed | 99.61 % / 13.3 | 99.60 % / 12.3 | 96.37 % / 2.6 |
+| 你的会话 k12 committed | 99.36 % / 15.5 | 99.38 % / 14.9 | 98.89 % / 7.0 |
+| 你的会话 k12 com_all | 99.82 % / 21.9 | 99.81 % / 20.4 | 99.39 % / 7.6 |
+| 你的会话 k0 / k12 ns_any（字面规则） | – | 99.94 % / 100 % | 96.19 % / 99.50 % |
+| 你的会话 k0 body（p99） | 8.97 %（5.35） | 6.61 %（1.77） | 5.26 %（1.55） |
+| 你的会话几何召回 k0 / k12（行） | 99.17 / 99.18 % | 100 / 99.46 % | 100 / 99.07 % |
+| bot 第 0 波 k0 / k12 committed | 99.41 / 99.14 % | 99.40 / 99.45 % | 94.20 / 98.64 % |
+| bot 第 0 波几何召回 k12（行） | 98.20 % | 98.40 % | 98.22 % |
+| 无主支撑（你的会话 k0 / k12） | – | 1,174 / 508 行，几乎全错 | 同左 |
+
+无主支撑主要是投掷者已死（或还没命名）的投掷物：k0 haz_tube 569、haz_path 290、死亡尾 133；k12 haz_path 397、后面波次入场 64。
+
+- k0 召回 99.17 → 100 %：验证者说对了，以前 k0 漏的是"用整场最后的投掷者表"造成的假漏。
+- k0 body 的 p99 5.35 → 1.77：同一个原因（别人的针算到了这只怪头上）。
+- RCLIP 把倍数中位降到 2.6（k0）/ 7.0（k12），但 committed 仍然 96–99 % 判错；它让 k12 的几何召回从 99.46 降到 99.07 %（你的会话）。
+
+**后见召回**（每帧每只怪：它在 t + k 的真伤害格子（多段伤害、它扔出去的东西都算，严格那一帧）是否全在 k 的支撑里；"自己" = 它自己的支撑，"全部" = 所有支撑；不算 t 前 30 帧内被打过或 (t, t + k] 被打断的行）：
+
+| 干净行全覆盖 自己 / 全部 | base | rclip |
+|---|---|---|
+| 你的会话 k0 / k6 | 100 / 100 %，99.86 / 99.95 % | 100 / 100 %，99.86 / 99.90 % |
+| 你的会话 k12 | 99.61 / 99.83 %（17,105 行） | 99.60 / 99.75 % |
+| 你的会话 k36 | 95.85 / 98.97 % | 95.80 / 97.65 % |
+| bot 第 0 波 k12 | 98.50 / 99.56 %（12,674 行） | 98.50 / 99.11 % |
+| bot 第 0 波 k36 | 83.88 / 99.19 % | 83.88 / 93.77 % |
+
+- base 本身就不是 100 %：k12 漏得最多的是 Envoy 的入场伏击 EN_AMBUSH（你的会话 59 %、bot 64 %）、Choristor 入场 CH_ENTRY（95 %）、Envoy 的 EN_SLASH / EN_JUMPSLASH（98–99 %）。k36 还有 Choristor 在 `Hop Back` / `Hop Forward` 之后 0.6 s 的出招整块没盖到（CH_IDLE 86 %）。所以以后的门槛比"开关前后"，不是要求 100 %。
+- RCLIP 让"全部"降（k12 你的会话 99.83 → 99.75 %，bot 99.56 → 99.11 %；被打过的行 k12 99.55 → 97.92 %）：它剪掉的格子以前盖住了别的怪的真伤害。按门槛它不能默认开。
+
+**半屏规则**（zone_share，超过半个屏幕的帧占比；括号是中位占比）：你的会话 k0 44.9 %（0.45）→ rclip 23.9 %（0.14），k12 70.2 %（0.62）→ 33.6 %（0.30）；bot 第 0 波 k0 32.7 % → 1.0 %，k12 72.6 % → 12.7 %。黄色（必死区）两者都没有一帧过半。
+
+PNG（真伤害填红，多段伤害现在在里面）：`C:\ssbot\data\m2_forum_push\{base,rclip}\png\`（5690 鞭子、7939 Bellbearer / Reed、9380 矛在飞、10427 Reed 反击；k0 和 k12）。例：10427 Reed 2 的真伤害从 8.0 u² 变成 18.0 u²（`ParrySlash Hit` 进来了），window 的倍数从 38 降到 17——支撑没变，是参考终于对了。
+
+**门槛命令**（每个门槛一条，换配置或换数据集只改参数；新的干净录像加一个 `sets\<名字>.cmd` 就能重跑）：
+```
+C:\ssbot\data\m2_forum_push\gate.cmd <precision|hindsight|share|recall|rescore|png|all> <config> <dataset> [<输出名>]
+  config:  configs\base.cmd（全关）、rclip.cmd、aim1.cmd；新开关复制一个
+  dataset: sets\seen.cmd（你的 3 次会话 + bot 第 0 波）、sets\r2.cmd（R2 fresh 的 run，留出）
+  输出:    C:\ssbot\data\m2_forum_push\<输出名>\<gate>_<dataset>[_h|_bot|_held].json，日志同名 .log
+  代码:    GATE_ROOT（默认 C:\ssbot\hs_push_d08b738，换提交就重新冻结一份）
+..\scripts\uv.cmd run python C:\ssbot\data\m2_forum_push\compare.py old_aim0=之前 base rclip --set seen --md <out>.md
+```
+重打分（门槛 4）不受 S0 影响：规划器的 AIM 默认关，P0 只改了显示、真值和瞄准模板；基线仍是 0.60 % = 32（`C:\ssbot\data\m2_forum_hs\rclip_base_d51b216_summary.json`）。

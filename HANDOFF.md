@@ -3871,3 +3871,103 @@ area is margin, the support is "about 100x". Until now the acceptance only check
    prediction, -1 = false alarm) and `.../error`; sample `C:\ssbot\data\m2_forum_precision\20261009_085824_f10300-10460_precision.rrd`.
    A full-session replay with it was not made.
 3. Geometric recall is not 100 % (above); the gate should compare before / after, plus R2's contact recall.
+
+## Task precision push (branch worktree-wf_de8bf451-06d-1, 2026-10-09; forum.md §29.13)
+
+Goal: a hitless Forum clear; the person's rules (forum_planner_plan.md sec. 5) as gates. Plan: fix_spec
+(`C:\ssbot\data\m2_forum_cases\fix_spec.md`: P0 -> F3 -> F1 -> P1 -> F2 -> F5 -> F4). Offline only.
+Fit only on R0 dev; R2 fresh is held out (the aim templates are now built on dev only); the person's sessions are
+"seen" (diagnosis only, reported apart).
+
+### S0: tooling, prerequisites, baselines
+- Merged worktree-wf_0469f4be-4ea-1 (83423a3: zone fix + RCLIP) and worktree-wf_3821c41a-c3d-1 (18848cb: precision
+  tool); forum.md 29.11 (reach) / 29.12 (precision, renumbered). The git-ignored `knowledge/1.0.30000/enemies/forum/`
+  `*_hitboxes.npz`, `aim_templates.npz`, `reach_clip.npz` must be copied into any new worktree / frozen copy.
+- P0 multi-hit truth: `zone_overlay.hurts(c, src)` = enabled and (dealt > 0, or dealt 0 with eff != 0 on an entity
+  with the multi_wounder src bit 8). Used by `damage_colliders` (red, committed yellow, world/colliders, per-enemy
+  colliders), `viewer._is_damaging`, the precision reference (`Truth`, `_armed`), and `forum_aim` (`instances(...,
+  threat=True)`). Proof: `C:\ssbot\data\m2_forum_push\p0\mw_proof.json` (142 cached fights: the only dealt-0 colliders
+  are the Minister's Slash Collider, the Reed's ParrySlash Hit and the Choristor's Whip Hit 1-6, all mw bit + eff 2,
+  and they are the named source of 1,090 / 299 / 563 damage events) and `mw_proof_raw.json` (raw recordings: the
+  hit-back bell, a parried pin and the Handmaiden body also export dealt 0 but with eff 0 and no mw bit; no damage
+  event matches only a dealt-0 collider). Scripts beside them.
+- `forum_aim build`: dev only by default (`--fresh <dir>` restores the old fresh margin); rebuilt (98 templates,
+  `aim_templates.json` committed, npz git-ignored; old report `p0\aim_templates_old_83423a3.json`). AIM stays off in
+  the planner (the overlay's default is AIM=1).
+- `support_precision` fixes (the verifier's F1-F5): hazard owner as of the forecast frame (`Truth.hist`,
+  `owner(o, j)`); thrower = the same-type enemy in a throwing family's state within THROW_F = 120 frames (nearest of
+  them), nearest only as fallback (`assign_how`; the seen data: all by throw state); t + k by game time
+  (`Truth.at`); `ns_any` = not_started judged against any real damage of the enemy (the person's literal rule);
+  UNATTR row for support no named enemy owns (reported apart in `summary["unattributed"]`); Tiny group rows go to
+  every member (as `occupied_only`); `hit_ago` per row; `Ia` = reference cells covered by every owner's support.
+  New: `run --ks hindsight --lite` + `hindsight` (k 0..12 and 36, per family, own / all owners, clean vs hit-near).
+- zone_share `_jobs`: a bot run spec `C:/<run dir>:<n>` was taken for a human spec (two colons); fixed.
+- Gates: `C:\ssbot\data\m2_forum_push\gate.cmd <gate> <config> <dataset> [<tag>]` (configs\, sets\, GATE_ROOT =
+  frozen checkout, default `C:\ssbot\hs_push_d08b738`); `compare.py` prints the before / after tables.
+
+### S0 results (frozen d08b738; seen = the person's 3 sessions + bot wave 0)
+
+| error % / RATIO p50 / p99 | before (18848cb, AIM 0) | base (AIM 0) | rclip | aim1 (AIM 1, dev-only templates) |
+|---|---|---|---|---|
+| person k0 committed | 99.61 % / 13.33 / 140.81 | 99.6 % / 12.28 / 140.81 | 96.37 % / 2.63 / 140.81 | 99.54 % / 12.02 / 140.81 |
+| person k0 com_all | 99.79 % / 19.16 / 142.7 | 99.77 % / 17.33 / 142.7 | 97.16 % / 2.71 / 142.7 | 99.7 % / 16.08 / 142.7 |
+| person k0 ns_any | - | 99.94 % / 9.07 / 200.11 | 96.19 % / 3.9 / 200.11 | 99.94 % / 9.07 / 200.11 |
+| person k0 body | 8.97 % / 0.89 / 5.35 | 6.61 % / 0.89 / 1.77 | 5.26 % / 0.89 / 1.55 | 6.61 % / 0.89 / 1.77 |
+| person k0 total | 91.86 % / 15.5 / 181.05 | 93.1 % / 15.03 / 185.46 | 91.83 % / 2.82 / 185.46 | 93.08 % / 13.99 / 185.46 |
+| person k12 committed | 99.36 % / 15.54 / 148.61 | 99.38 % / 14.93 / 145.24 | 98.89 % / 6.99 / 145.66 | 99.42 % / 15.69 / 143.47 |
+| person k12 com_all | 99.82 % / 21.87 / 142.43 | 99.81 % / 20.39 / 140.81 | 99.39 % / 7.61 / 140.81 | 99.8 % / 20.14 / 140.83 |
+| person k12 ns_any | - | 100.0 % / 28.72 / 200.11 | 99.5 % / 12.69 / 200.11 | 100.0 % / 28.72 / 200.11 |
+| person k12 body | 99.45 % / 6.7 / 11.12 | 99.51 % / 6.7 / 11.12 | 99.33 % / 5.33 / 10.26 | 99.51 % / 6.7 / 11.12 |
+| person k12 total | 99.99 % / 26.84 / 185.46 | 100.0 % / 27.08 / 190.1 | 99.89 % / 8.53 / 190.1 | 100.0 % / 26.98 / 190.1 |
+| bot w0 k0 committed | 99.41 % / 8.53 / 52.06 | 99.4 % / 7.9 / 52.06 | 94.2 % / 2.02 / 5.6 | 99.27 % / 9.21 / 59.0 |
+| bot w0 k0 com_all | 99.68 % / 14.38 / 56.24 | 99.67 % / 12.67 / 56.24 | 95.72 % / 2.05 / 6.32 | 99.49 % / 12.36 / 59.17 |
+| bot w0 k0 ns_any | - | 100.0 % / 7.81 / 24.76 | 99.16 % / 2.23 / 24.76 | 100.0 % / 7.81 / 24.76 |
+| bot w0 k0 body | 6.37 % / 0.92 / 5.43 | 4.45 % / 0.92 / 1.61 | 4.28 % / 0.92 / 1.61 | 4.45 % / 0.92 / 1.61 |
+| bot w0 k0 total | 80.61 % / 7.99 / 56.24 | 80.59 % / 7.74 / 56.24 | 78.33 % / 2.04 / 22.07 | 80.49 % / 8.06 / 56.24 |
+| bot w0 k12 committed | 99.14 % / 9.2 / 52.59 | 99.45 % / 9.39 / 52.68 | 98.64 % / 3.75 / 14.95 | 99.53 % / 12.42 / 60.74 |
+| bot w0 k12 com_all | 99.46 % / 17.65 / 57.95 | 99.93 % / 15.74 / 57.95 | 99.28 % / 4.13 / 18.38 | 99.85 % / 16.36 / 60.56 |
+| bot w0 k12 ns_any | - | 100.0 % / 25.8 / 36.53 | 99.99 % / 7.1 / 36.08 | 100.0 % / 25.8 / 36.53 |
+| bot w0 k12 body | 100.0 % / 6.79 / 11.12 | 100.0 % / 6.79 / 11.12 | 99.94 % / 4.43 / 8.75 | 100.0 % / 6.79 / 11.12 |
+| bot w0 k12 total | 99.7 % / 16.43 / 57.95 | 99.96 % / 15.39 / 57.95 | 99.58 % / 4.89 / 33.85 | 99.92 % / 15.95 / 57.95 |
+
+Geometric recall (rows / cells %), person k0: before 99.17 / 99.63, base 100 / 100, rclip 100 / 100; k12: 99.18 /
+99.69, 99.46 / 99.78, 99.07 / 99.70. Bot k12: 98.20 / 98.76, 98.40 / 99.16, 98.22 / 99.10. Unattributed (person):
+k0 1,174 rows (1,111 errors, p50 4.4 u^2), k12 508 rows (481 errors, p50 27 u^2); bot 24 / 0 rows.
+
+| hindsight clean rows fully covered, own / all owners % | base | rclip |
+|---|---|---|
+| person k0 | 100.0 / 100.0 (n 18067; hit-near all 100.0) | 100.0 / 100.0 (n 18067; hit-near all 100.0) |
+| person k6 | 99.858 / 99.949 (n 17566; hit-near all 99.859) | 99.858 / 99.898 (n 17566; hit-near all 99.462) |
+| person k12 | 99.614 / 99.83 (n 17105; hit-near all 99.549) | 99.597 / 99.749 (n 17105; hit-near all 97.92) |
+| person k36 | 95.854 / 98.97 (n 15436; hit-near all 97.004) | 95.796 / 97.648 (n 15436; hit-near all 94.639) |
+| bot w0 k0 | 100.0 / 100.0 (n 14079; hit-near all 100.0) | 100.0 / 100.0 (n 14079; hit-near all 100.0) |
+| bot w0 k6 | 99.525 / 99.852 (n 12853; hit-near all 99.904) | 99.525 / 99.673 (n 12853; hit-near all 98.748) |
+| bot w0 k12 | 98.501 / 99.558 (n 12674; hit-near all 99.343) | 98.501 / 99.108 (n 12674; hit-near all 96.631) |
+| bot w0 k36 | 83.879 / 99.186 (n 11916; hit-near all 99.896) | 83.879 / 93.765 (n 11916; hit-near all 92.72) |
+
+Worst families at k12 (base, clean, all owners): Envoy EN_AMBUSH 59 % (person) / 64 % (bot), Choristor CH_ENTRY 95 %,
+Envoy EN_SLASH 98.3 %, EN_JUMPSLASH 98.6 %; at k36 Choristor CH_IDLE 86 % (the attack after Hop Back / Hop Forward).
+RCLIP lowers "all" (it clips cells that covered other enemies' damage) and the hit-near rows (k12 99.55 -> 97.92 %).
+
+| zone_share frames over half the screen (p50 share) | base | rclip |
+|---|---|---|
+| person s0 | 44.949 % (0.4469) | 23.851 % (0.1358) |
+| person s12 | 70.205 % (0.6215) | 33.55 % (0.3015) |
+| person yellow | 0.0 % (0.0418) | 0.0 % (0.0418) |
+| bot w0 s0 | 32.712 % (0.4062) | 1.012 % (0.0969) |
+| bot w0 s12 | 72.553 % (0.5758) | 12.707 % (0.2242) |
+| bot w0 yellow | 0.0 % (0.0301) | 0.0 % (0.0301) |
+
+Files: `C:\ssbot\data\m2_forum_push\{base,rclip,aim1}\<gate>_seen_{h,bot}.json`, rows under `<tag>\seen\`,
+`compare_seen.{md,json}`, PNGs `{base,rclip}\png\` (5690, 7939, 9380 spear, 10427; k0 / k12). Re-score: unchanged by
+S0 (planner AIM off; P0 is display / truth / aim templates): baseline 0.60 % = 32 misses (rclip_base_d51b216).
+
+### S0 open issues
+1. The UNATTR row (person k0 1,174 rows: haz_tube 569, haz_path 290, death 133; k12 508 rows, p50 27 u^2: haz_path
+   397, entry_later 64, tail 26): mostly hazards whose thrower is dead or not yet named; in no enemy's RATIO.
+2. RCLIP lowers the k12 geometric recall (person 99.46 -> 99.07 % of rows) and its re-score fails (Reed body 31 -> 68
+   misses, fix_spec P1); it stays default off.
+3. The hindsight / precision gates ran on "seen" data only; the R2 hindsight (`gate.cmd hindsight <cfg> r2`) and the
+   multi_recall gate (`gate.cmd recall <cfg> seen`) were not run in S0 (no planner switch changed). A clean set of
+   new recordings needs a `sets\<name>.cmd`.
+4. HeroBox (0.4554 x 2.2498, offset -0.38) vs the exported Bounds box (0.50 x 2.079) in the references: unchanged.
