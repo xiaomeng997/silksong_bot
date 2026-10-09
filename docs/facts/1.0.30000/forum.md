@@ -2572,3 +2572,35 @@ scripts\forum_human_rescore.cmd best <名字>      &rem 或 default；输出 C:\
 cd brain
 ..\scripts\uv.cmd run python -m ssbot.tools.forum_human_score summary C:/ssbot/data/m2_forum_hs/best_v2 C:/ssbot/data/m2_forum_hs/default_v2 --json C:/ssbot/data/m2_forum_hs/v2_summary.json
 ```
+
+## 26. 高庭第二轮推进 B 轨：只用身体的家族、锁定、针、定时行、受击归属（2026-10-08 晚，task forum push 2 track B，分支 worktree-wf_c8fb34ca-073-3；离线 + 实例 1 的 10 场冒烟；规划器的改动全部在开关后面，默认关）
+
+任务（plan §5 的修正顺序和 §24.5 的原因表）：① 还没开始、只用身体的家族改成反应窗口的够距，可逃检查把它们当威胁；② 候选行加"等 3 / 6 / 9 / 12 帧再跳 / 冲"和定时拼刀行；③ 冲刺 / 出刀的锁定进可逃检查，查 Bind 的提交漏洞；④ Reed 的针为什么还打得中；⑤ `hit_log` 认错实例。开关都进 `SSBOT_FORUM_REACT` 的串（`+b` / `+br` / `+k` / `+s`）或 `SSBOT_FORUM_WAITS=1`，不设就和合并前逐位相同；Bell Beast 不经过任何改动的代码路径（`source_id` 只有 Forum 的策略读）。
+
+### 26.1 改了什么（开关）
+
+| 开关 | 做什么 | 代码 |
+|---|---|---|
+| `+b`（要 `+n`） | 待机中的怪（待机身体管在放）还没开始的**只用身体的家族**（strikes.json 里没有一次带自己攻击碰撞体的：闪避 RE / CC / CB / MI_EVADE、Clawmaiden 瞬移 CM_TELE、Tiny 的 AT_FIRE / DEFEND / LEAVE、Maestro 的 MA_DEFEND / SUMMON、Envoy 的 EN_AMBUSH）不放家族模板；它们在反应窗口里的够距由**碰撞体管**承担（最后看到的身体框按该类型的最高速度长 5 帧：Reed 51.6、Minister 54.4、Tiny 50.8、Clapper 49.9、Bellbearer 47.7、Clawmaiden 45.4、Maestro 26.6 u/s），以后才开始的由可逃检查承担（威胁，无前摇：从检查点起）。**Reed 的保留**（`BODYREACH_KEEP`：现有漏报 32 次里 31 次是 Reed 本体） | `multi_forecast.ReactConfig.bodyreach`、`body_only_families()`；`ForumPlanner._threats` |
+| `+br` | 同上，Reed 的也去掉 | `ReactConfig.bodyreach_all` |
+| `+k` | 可逃检查的锁定点加上进入冲刺 / sprint（出刀、无控制的模式本来就是）；`+n` 时 Bind 宏另查：Bind 锁住的 1.37 s + 0.15 s 里任何时刻开始的、可逃检查管的招（还没开始、不在支撑里）碰得到主角就不 Bind | `ForumPlanner._escape_fail`、`_bind`、`_bind_threatened`；审计 `bind_threat` |
+| `+s` | FORCED_RISK 的 seen 键：≥ 15 u/s 的碰撞体（飞着的针）前后各再试一帧；碰到瞄准的针（还没放手）的行也记一次 seen 接触 | `seen_contacts_swept`、`pin_contacts_kernel` |
+| `SSBOT_FORUM_WAITS=1` | 定时行：WAIT 之后等 3 / 6 / 9 / 12 帧再向左 / 右跳或冲刺（16 行）；出刀的首段之后在 Reed 反击（续段第 26 帧）/ Minister 冲刺斩（第 30 帧）的时刻再按一刀（横 / 上），给 A 轨的规则用（地面 / 空中各 +32 行，墙 +24；地面带拼刀续段 507 行，≤ 512） | `candidates.build_forum(waits=True)`、`ForumConfig.waits` |
+
+另外（没有开关，不改行为）：瞄准的针的逐行检查改成 numba（`pin_contacts_kernel`，和原来的 numpy 循环逐位相同，有测试），新内核进 `warm_kernels`。
+
+### 26.2 受击归属（`hit_log` 认错实例，§24.3）
+
+原因：oracle 后端按路径找实体时，同类型有几只就取**离主角最近的身体**；鞭够 8 u，最近的常是另一只（还在睡的）。而且路径里带编号的实例（`Song Pilgrim 03 (2)/Spin Hit`）根本对不上类型，记成没有来源。改成（`OracleBackend._resolve_source`）：先按路径里的 GameObject 名找实例（实体的名字取它那个名字等于类型的碰撞体），再按路径末尾的碰撞体名找"这个碰撞体离主角框最近（重叠为 0、生效的优先）"的那只，都不行才退回最近的身体。核对（第 5 轮的录像回放，每个受击看归到的那只当时在不在出招动画里）：鞭的受击 13 / 13 归到正在 `Whip Multihit` 的 Choristor（旧规则 8 / 13，其余 5 次归到在 `Ambush Jump` / `Whip Antic` 的另一只）；连斩 22 / 22 有碰撞体可对的都归对（旧 12 / 22）；跳旋 36 / 36（旧 34 / 36）；Reed 65 / 65 两种规则一样。
+
+### 26.3 Reed 的针为什么还打得中（第 5 轮 fix 臂 = `+n`，瞄准的针开着；41 次针受击，决策日志）
+
+- **39 / 41 次受击前 10 帧全是 FORCED_RISK**（n_safe = 0）。瞄准的针在 `+n` 下只做一件事：把碰到它的行标 S = 1；FORCED_RISK 时所有行本来就是 S = 1，排序的键（seen > seen_cf > P_cm > P_f > 首次接触 > J）里没有它——**瞄准的针在 FORCED_RISK 里不起作用**。
+- 放手（`Throw` 第 0 帧出针）到受击的帧数：≥ 10 帧 23 次（针早就在飞、路径确定）、4–9 帧 9 次、≤ 3 帧 9 次（近身，出针当场就碰到，只能靠放手前的瞄准）。
+- 针在飞的时候，选中的行 seen 键多是 0：规划器按"现在看得见的碰撞体按速度平移"判这一行碰不到针，可还是被打了。逐帧核对一例（`163337_…_2` i3 ep4）：针 −15 帧出现，速度 (30.4, 6.1) u/s，判定框生效，seen_polys 里有它；它按速度外推到受击那一帧的位置差约 0.3 u（导出时不时重复一帧，针一帧飞 0.5 u），而选中的行正好擦着外推的针尖——零余量的键让规划器专挑擦边的行。
+- 冒烟 1 里 FORCED_RISK + 扔针前摇的 tick 每个 54 ms（p50，其余 10 ms）：`+s` 的瞄准针检查原来是 numpy，对整组约 400 行太慢，改成 numba 之后见 26.7。
+- 修正就是 `+s`：快的碰撞体前后各多试一帧，瞄准的针进 seen 键。开环回放比较见 26.6。
+
+### 26.4 Bind 的提交漏洞（§24.3：21 格在 `BindCharge` / `BindBurst` 里挨）
+
+Bind 宏的检查（`Planner._bind`）把 Bind 的整段推演对支撑查一遍；`+n` 把**还没开始的招**全从支撑里拿掉了（交给可逃检查），而 Bind 宏不过可逃检查，所以 Bind 期间才开始的招没有任何一层管。第 5 轮（两臂 160 场）50 次 Bind 提交里 6 次在 1.52 s 内挨打，都是 67–87 帧之后、提交时离 6–8 u、处于收招 / 前摇（Envoy `Slash1 Recover`、Choristor `Hop Antic`）的怪在 Bind 期间出的新招。`+k` 的 `_bind_threatened` 正是查这件事：可逃检查的每个威胁（同样的类型 × 家族表、同样的航位推算）在 Bind 锁定期间每 2 帧开始一次，它的家族模板碰到 Bind 推演里的主角就拒绝 Bind。代价是 Bind 更少（怪在附近时几乎不 Bind；你的回血打法本来就是跑到房间另一侧），实战里看审计 `bind_threat`。
