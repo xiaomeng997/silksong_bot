@@ -405,7 +405,7 @@ PlayMaker 的 `SendEvent`（delay < 0.001、目标 Self）在 OnEnter 里直接 
 
   - 选中比例和 R0 一样（这是敌人的性质）；每小时的增益来自**专场把 Envoy 一直留着**、BAIT 把主角放在边界附近（Envoy 普通斩的 BAIT 样本 43,059 帧），和波次起点把时间集中在少数敌人上：Envoy / Choristor 6–40 倍，Clawmaiden 斩 1.5 倍、Minister 闪避 2.5 倍，Clapper 锤反而只有 R0 的 0.37 倍（口袋）。远距离家族（边界 > 15 u）在 R1 里很少碰到边界（Bellbearer、Maestro、Tiny 每小时与 R0 相近）。
 - 家族计数（首轮两个运行）：Envoy 专场 EN_SLASH 2407、EN_JUMPSLASH 946、EN_CHARGE 327、**EN_AMBUSH 106（每局一次）**；Choristor 斩 / 鞭 / 跳 1166 / 704 / 476；Reed 刺 / 扔 / 防御 / 闪避 1212 / 1412 / 713 / 615。波次 36 局：Clawmaiden 斩 / 旋转 / 瞬移 312 / 287 / 23；Minister 冲刺 / 格挡 / 闪避 383 / 800 / 307；Clapper 施法 / 跳 / 锤 / 后撤 / 跳施法 209 / 172 / 107 / 339 / 169；Bellbearer 扔 / 闪避 919 / 318；Maestro 斩 / 防御 / 召唤 556 / 238 / 33；Tiny 防御 / 开火 711 / 555。Envoy 的每个家族都已 ≥ 200（伏击 R0 107 + 106 = 213）；HopSlash 和 Wake 入场不可达（13.2）。
-- 长跑：修复轮 13:13 起（冻结代码 `C:\ssbot\live_fo_r1f_8a03afb`；实例 2 先跑 40 局受保护的 Envoy 专场核对保护，再跑波次起点；实例 3 波次起点；轮换 w4、w6、w7、w8、w9、w11、w12、w13、w3、w5、w10，每局 180 s），13:36 `DEMO_SOON`（你要 0.5x 练 Forum）后两个运行各在当前一局后停下：实例 2 专场 23 局、实例 3 波次 8 局（`20261004_131323_Forum_A_w4_mix_data2`）。演示后用 `C:\ssbot\sandboxo_r1f_run.cmd i2w` / `i3` 重新开始（HANDOFF R1）。
+- 长跑：修复轮 13:13 起（冻结代码 `C:\ssbot\live_fo_r1f_8a03afb`；实例 2 先跑 40 局受保护的 Envoy 专场核对保护，再跑波次起点；实例 3 波次起点；轮换 w4、w6、w7、w8、w9、w11、w12、w13、w3、w5、w10，每局 180 s），13:36 `DEMO_SOON`（你要 0.5x 练 Forum）后两个运行各在当前一局后停下：实例 2 专场 23 局、实例 3 波次 8 局（`20261004_131323_Forum_A_w4_mix_data2`）。演示后用 `C:\ssbot\sandbox\fo_r1f_run.cmd i2w` / `i3` 重新开始（HANDOFF R1）。
 
 ### 13.5 加速检查（R1 ④）：**没有跑成，2x 不采用**
 
@@ -934,3 +934,1302 @@ cd brain   # 冻结检出（git archive，没有 .git）：behaviour_build 要�
 - **记账**：(1) 来源 iid 按调用路径配对（以前按下标配，被格挡的 damage 事件会错位）；(2) 多段链的钩子按实例找（FSM 事件的 `ent`；以前按物体名，两只同名 Reed 会串，`Wave 1/Song Reed/...` 这种嵌套路径找不到钩子），没有 iid 或找不到时按路径里的物体名回退；(3) Multihit tick（special_damage 掉血）在自己那一帧判，不在支撑里就等 70 帧看有没有本链的 Final Hit（有就随链在钩子判），没有或场次先结束就计为支撑外（以前只通过 Final Hit 判，没有 Final Hit 的 tick 根本不判）；(4) Cogfly 第二帧在 FORCED_RISK、暂停待定或监督器接管按键时丢掉（以前照按）。
 - **报告**：`forum_a0_report` 按 damage 事件计受击，tick 单独计，类型按调用路径解析（投射物归投掷者：针 → Reed、钟 → Bellbearer、rune bomb / slam → Clapper、矛 → Clawmaiden）；旧记录没有 kind / path，从录像的 events.jsonl 读。修正后的 A0 / 波次起点数字见 §16.2 / §16.3（`C:\ssbot\data\m2_forum_r4\fixer\a0_report_v2.json`、`ws_report_v2.json`）。
 - **复测**（波次起点批次重跑一次：`20261005_054233_Forum_A_w2_mix_eval_planner_oracle`，冻结检出 `C:\ssbot\live_r4f_0f517a0`，实例 0、1 各 12 场，种子 170000+，eval、无真退出；报告 `C:\ssbot\data\m2_forum_r4\fixer\ws_report_fix.json`）：QUIT 24 / 24（Q1 12、Q3 12：Reed 6、Minister 4、Choristor 2）；每场 3.33 次受击（80 个 damage 事件）+ 6 个 Multihit tick（全部在自己那一帧就在支撑内）；**支撑外 0、未知 0**（4 个 Final Hit 按钩子判，钩子都找到了，包括 iid 解析不出来的 `Song Reed (1)` / `Song Administrator (1)`，靠物体名回退）；来源 Clawmaiden 27、Tiny 16、Clapper 13、Reed 9、Bellbearer 7、Minister 3、Choristor 3、未解析 2；FORCED_RISK 90.5 %（各波 69–100 %）；EVADE 98 %、HOLD 2 %；YELLOW 下 `kill_prims` 含钉子攻击的 tick 被拿掉攻击（日志里 1,480 个 YELLOW tick）；击杀 0（上一批 2）；Cogfly 2 次；tick p50 中位数 7.4 ms、p99 中位数 14.0 ms（最大 18.9），> 16.7 ms 0.45 %；WaveTracker 29,522 / 29,970（98.5 %，同 §16.3 的波次起点偏移）；包络审计：选中 S = 0 的 2,794 次全部包络，core_not_enveloped 0、overrun 0。结论：修正没有改变基线的样子（还是 EVADE、还是第一波里 3 下左右退出），记账现在每个掉血事件都判。
+
+## 17. R8：拼刀（2026-10-08，forum_planner_plan.md §5 R8；分支 worktree-wf_814dfeea-b10-4；离线 + 实例 2、3）
+
+### 17.1 Wanderer 的刀（你 10-05：拼刀用 Wanderer 不用 Reaper）
+
+- `knowledge/1.0.30000/attacks/wanderer.json`（`attack_table_build --crest Wanderer`，P17 的 slash.dump，**还没有实测帧**）：横砍 / 交替横砍 / 上挑 / 贴墙砍都在出刀那一帧生效、到 0.12 s（剪辑第一个动画事件 0/24 s，和 Hunter 一样，不是 Reaper 的 0.083 s），下劈 0.04–0.16 s；够距：横砍 x 0.19–3.12 u（拼刀盒 0.19–2.92）、上挑 y 0–3.39 u、下劈 y −2.16–0.13 u。所以**按导出 Wanderer 连拼是无缝的**：拼中后 0.1 s `NailParryRecover` 把攻击冷却和这一刀都清掉，新一刀立即生效，同一碰撞体 0.117 s 后能再拼，无敌到 0.15 s，0.117–0.15 s 之间再出刀就接上。**实测（2026-10-08，实例 2，`kin_excite_forum --attack-frames 60`，fo_W，种子 320000，录像 `C:\ssbot\data\runs\m2\kn_excite_forum_wanderer\2026-10-08\TRAIN\kn_excite_forum_s320000`，551 个采样帧）**：横砍（285 帧）/ 交替横砍（91）/ 上挑（111）的伤害碰撞体在出刀后第 1–7 帧开着（0.017–0.117 s），下劈（64）第 3–9 帧（0.05–0.15 s）；多边形和导出一致（偏移 0.000 u）；贴墙砍没采到（沿用导出 0–0.12 s）。写进 `attacks/wanderer.json` 的 `frames`。所以**连拼无缝成立**：拼中帧 c 之后 c+6 `NailParryRecover`，这时按下的新一刀第 c+7 帧起生效，同一碰撞体 c+7（0.1 s + 1 帧）起可再拼，无敌到 c+9，重叠 3 帧；Reaper 实测第 5–12 帧生效，新一刀 c+11 才生效，空档 2 帧（0.033 s），和计划里的推算一致。（采样的是伤害碰撞体；拼刀盒 `Clash Tink` 是同一个 NailSlash 下的子碰撞体，按同一组动画事件开关，没单独采样。）`attack_table_build --live` 修了一个问题：探针第二次按键（+31 帧）的同槽位刀（Wanderer 的第二下上挑 / 横砍）以前算到第一刀的窗口里（得出 1–38 帧），现在减掉按键偏移。
+- 纹章配置（crests.json）：持续 0.25 s、冷却 0.3 s、后摇 0.1 s，下劈类型 `Slash`（`HeroController.DownAttack`：就是一刀 `downSlash`，`cState.attacking`，没有 Hunter 的俯冲、没有 Reaper 的 FSM）；`DASHCOMBO_WINDOW_TIME` 0.15 s：冲刺（Sprint FSM 打开窗口）后 0.15 s 内按攻击是 `WANDERER DASH COMBO`，不是普通一刀（规划器不建模，否决这样的行）。
+- 运动学：`hero_wanderer_forum.json` = Reaper 的 Forum 配装参数换成 Wanderer 的计时，能力位去掉 reaper_down、加新的 `down_slash`（kin_jit）；**没在 Wanderer 录像上拟合**，kin_check 在你的 fo_W 练习录像上核对中（HANDOFF R8）。
+
+### 17.2 可拼层（静态表，按行为表里每个家族伤害碰撞体的 parry 位）
+
+- 有可拼碰撞体的家族 13 个：Choristor 斩（`Slash 1/2`、`ComboSlash 1`）、鞭（`Whip 1–6`）、跳（`Jump Spin`、`Spin Slash`）；Clawmaiden 斩（`Slash 1/2/4/5`）；Envoy 普通斩（`Slash1`、`Slash1 2`）、跳斩（`JumpSlash 2/3`）、冲锋（`Charge`）；Maestro 斩（`Slash 1/2`）；Minister 冲刺（`Attack`）、格挡反击（`Parry Slash 1–4`）；Reed 刺（`Stab 1/3/5`）、扔针（`Song Reed Pin Projectile`）、防御反击（`Parry Slash`）。
+- 永远不拼（照旧要躲）：所有本体（待机 / 入场 / 闪避 / 瞬移家族）、Clapper 全部（本体和锤 canClashTink 0）、Clawmaiden 旋转（矛和矛爆炸 canClashTink 0）、Bellbearer（钟只有 counter 位：只能打改向）、Tiny（用本体撞）。
+
+### 17.3 拼刀成败（录像统计，`ssbot.tools.forum_clash_stats`）
+
+- 两种口径：**拼刀局面**（出刀生效窗口里，主角的拼刀盒先碰到敌人的可拼碰撞体，之前敌人任何伤害碰撞体都没碰到主角受伤框（放大 0.3 u））和**接触局面**（规划器的规则：敌人第一次碰到放大的受伤框落在出刀生效窗口里，本体也算）。结果：拼中（NailClashEffect，最近的可拼碰撞体是它的）/ 挨打（12 帧内它打中主角）/ 都没有。
+- 你的 5 次练习（4,439 刀、239 次拼刀；Reaper 1,059 刀、Wanderer 3,380 刀）：拼刀局面几乎不挨打（例：Wanderer 上挑拼 Minister 冲刺 10 次里 7 拼中、0 挨打；Reaper 横砍拼 Choristor 鞭 13 次 12 拼中）；接触局面会：Choristor 斩横砍 14 次 7 拼中、3 挨打，Reed 刺横砍 11 次 3 拼中、4 挨打。也就是"刀在接触时已经出来"不够，要在它的判定碰到身体之前先碰到刀。拼完之后 0.2 s 内被无敌挡掉的伤害 30 次（29 次来自同类型）；拼完 0.5 s 内同一只再拼 1 次、再挨打 0 次。
+- **`clash.json`（2026-10-08 提交，`forum_clash_stats --table`，R1 v2 的 36 个 data2 运行 + 你的 5 次练习，两种口径的并集，两种纹章合并，n ≥ 10，Wilson 95 % 上界）：33 个键，失败概率 ≤ 0.25 的 18 个、≤ 0.5 的 29 个**（另 75 个 n 不够或不可拼，列在 `left_out`）。（n / 拼中 / 挨打 / 失败概率）：Minister 冲刺 横 2493 / 1872 / 22 / 0.013、上 308 / 178 / 7 / 0.046、下 139 / 20 / 9 / 0.12；Minister 格挡反击 横 492 / 209 / 93 / 0.23、上 0.37、下 0.56；Clawmaiden 斩 横 504 / 195 / 67 / 0.17、上 0.15、下 0.34；Envoy 冲锋 横 42 / 35 / 2 / 0.16、下 16 / 5 / 0 / 0.19；Envoy 斩 下 108 / 63 / 2 / 0.065、横 46 / 26 / 7 / 0.28；Envoy 跳斩 下 0.25、横 0.28；Choristor 鞭 横 57 / 36 / 2 / 0.12、下 0.24；Choristor 斩 横 140 / 68 / 13 / 0.15、下 0.29；Choristor 跳 横 0.28、下 0.33、上 0.43；Maestro 斩 上 115 / 33 / 5 / 0.098、横 0.21；Maestro 防御 上 0.35；Reed 防御反击 下 0.13、横 183 / 73 / 26 / 0.20、上 0.48；Reed 刺 上 139 / 45 / 15 / 0.17、横 580 / 217 / 151 / 0.30、下 0.52；Reed 扔针 横 0.52、上 0.54（针是投射物，拼刀分支不归属它）。第一版（只用接触口径，`clash_table_v1.json`）比并集少很多拼中：接触口径漏掉了“刀先碰到判定、判定没碰到身体”的那些拼刀。
+
+### 17.4 规划器里的 EV_CLASH（`ForumConfig.clash`，默认关 = R3 / R4 的规划器）
+
+- 只在没有安全行的 tick 跑（普通安全行永远排在前面）；按 J 取最多 16 行"有接触、有出刀"的行：包络上第一次接触落在某一刀的生效窗口里，接触按敌人归属（每只敌人自己的支撑在外壳中心查一次），每只都要是 `clash.json` 里有的（类型 × 当前攻击家族 × 刀向）且在刀的那一侧（横砍在面朝方向、上挑在上面、下劈在下面）；拼刀放在接触前一帧（拼刀盒在受伤框外面）。
+- 成功分支：从拼刀帧起 9 帧（0.15 s）不受任何敌人伤害（两侧规则：背后那刀在无敌里就吃掉）、按刀向后坐（横砍反向、上挑 RecoilDown、下劈弹起、贴墙砍不动）、6 帧后 `EV_PARRY_RECOVER`（下一刀马上能出）；之后的接触可以再拼（多段招的下一段、另一侧），最多 3 次；整条成功分支干净 → 失败概率 1 − ∏(1 − p_k) ≤ 0.25 且 h ≥ 2 时这一行算安全（排在普通安全行之后，按失败概率排）。拼刀开着时候选里加"一直出刀"的续段（每 8 帧一刀：不按方向 / 按左 / 按右 / 上挑），给第二次拼、转身拼和 Minister 正下方连续上挑用。
+- 开环回放（A0b i1 ep0，648 tick，483 个 FORCED_RISK；机器忙）：拼刀分支在 483 个 tick 上跑，看了 7,200 行，234 行接触时刀在生效窗口里、都能归属，59 行归属的怪可拼且在刀那一侧，7 行成功分支干净（3 次被选中）；没有"一直出刀"的续段时 0 行干净（0.15 s 后支撑还罩着主角）。分支每个 FORCED_RISK tick 2.4 ms。
+
+### 17.5 被拼中就收招的两招：拼完之后它们还会怎么动（2026-10-08，`scratchpad/r8/parried_motion.py`，R1 v2 的 4 个 Envoy 运行 `*_Forum_A_w0_data2_envoy`）
+
+- Forum 里只有 Envoy 冲锋（`Charge` / `Reset` 收到 `PARRIED` → `Deflect`（瞬时）→ `Charge End` 0.42 s → `Attack Wait` → `Walker`）和 Reed 防御反击（`Parry Slash` → `Multihit Clashed` 0.39 s → `Parry Slash End` 0.33 s → `Alert`）被拼中会收招。这两招拼中（拼刀冻结开始后 4 帧内进入收招状态）后的 60 帧：Envoy 55 次、Reed 21 次；60 帧内挨它打：Envoy 1 次（第 56 帧），Reed 0 次。
+- 按游戏时间（STATE `dt` 累加；拼刀冻结 0.25 s 实时里游戏时间不走，按帧数算会多出约 15 帧"不动"）它的伤害碰撞体外框朝主角那边多伸出的最大值：Envoy 3 帧 0.37 u、6 帧 0.60、9 帧 0.70、12 帧 0.80、18 帧 0.89、24 帧起 0.93 u（`Charge End` 里还往前滑），竖直几乎不动；Reed 3 帧 0.36 u、6 帧 0.60、9 帧起 0.96 u，竖直 0.31 / 0.62 / 0.83 u，27 帧起 1.2–3.95 u（`Parry Slash End` 后飞走）。拼中时主角到 Envoy 碰撞体外框的距离中位 3.76 u。
+- 收招之后最早的下一次出手：Envoy `Charge End` 结束马上可以 `Slash Antic`（55 次里多数在 43–49 帧，含冻结），第一下最早约 0.41 s 后（strikes.json 跳斩 p5）；Reed 要等 `Parry Slash End` 结束再 `Alert`，0.72 s 之后才有刺。规划器视野 36–48 帧内都打不到。
+
+### 17.6 规划器里的拼刀分支，第二版（2026-10-08，`forum_planner.py`，commit 895137b）
+
+- **收招的两招**（`PARRY_STOPS`）：拼中后这只敌人的支撑在拼刀帧冻结（不再沿冲锋路径往前推），主角外框按上面的实测按帧放大（`PARRY_STOP_GROW`，每 3 帧取那一段结束时的最大值），其他敌人照常。其余招拼中后照常打完（和第一版一样）。
+- **一只就够**：第一次接触那一帧只要有一只"当前正在出可拼的招、在刀那一侧"的敌人就可以拼；同一帧碰到的别的敌人只要不在出招（待机：它的支撑是身体管和"可能开始的招"，最快的招也要 0.4 s 才打到）就不挡（拼刀无敌 0.15 s 盖住所有敌人伤害，之后它的接触在下一层再查）；同一帧有别的敌人在出自己的招则不拼。第一版要求所有归属都可拼，wave 0 三只的支撑互相重叠，几乎没有行能过。
+- **部分拼刀**：拼了一次或多次之后仍有拼不掉的接触（别的敌人的支撑、表里没有的招），这一行还是 S = 1，但 FORCED_RISK 的排序用它的成功分支：在接触中的帧占比 = 失败概率 × 不拼时的占比 + (1 − 失败概率) × 成功分支的占比，第一次接触取成功分支剩下的那次；部分拼刀的失败概率门槛 0.5（`clash_partial_max_fail`），干净的拼刀（算安全行）仍是 0.25。
+- 没有任何敌人在出可拼的招时整个分支跳过（不做推演）。决策日志里选中的拼刀写 `clash: [失败概率, 拼刀次数, 是否部分]`。
+- **开环回放**（A0b i1 ep0，648 tick，483 个 FORCED_RISK，Wanderer，机器很忙）：第一版用 `clash.json` 时 0 行干净、0 次选中（拼中的只有 Reed 上挑防御反击，失败概率 0.48 > 0.25，其后其他敌人的支撑紧接着就碰上）；去掉被拼的敌人之后的全部支撑（上界）也是 0 行干净；第二版 81 次拼刀被接受（其中 39 次收招），66 行部分拼刀，**11 个 tick 选中部分拼刀**（Envoy 斩 / 跳斩 横 0.28、Choristor 跳 横 0.28 为主，成功分支剩下的接触在视野第 33–38 帧）；干净的仍是 0。拼刀分支每个 FORCED_RISK tick 约 2.4 ms（忙的机器；不开拼刀 plan p50 6.3 ms，开 9.8 ms）。另一局（i4 ep0，272 个 FORCED_RISK）0 次被接受。
+
+### 17.7 Minister 正下方连续上挑（2026-10-08，实例 3，`Forum_W_w4` = `fo_r8_w4w`（`fo_r1_w4` + Wanderer，`ssbot.probes.forum_states wanderer`），`--policy minister_below`，data 模式，30 场 × 20 s，种子 321000+，运行 `C:\ssbot\data\runs\m2\20261008_032228_Forum_W_w4_data_minister_below_oracle`）
+
+- 策略（`forum_policy.MinisterBelowPolicy`）：走到最近那只 Minister 正下方（|dx| < 0.35 u 就不走），一直按住上，每 4 帧按 2 帧攻击；不跳不冲刺。只在地面上挑，它飞高了够不着。
+- 结果：1,364 次上挑、110 次拼中；**拼刀口径**（刀先碰到判定）冲刺 114 次：65 拼中、0 挨打；格挡反击 17 次：6 拼中、0 挨打；**并集口径**（规划器的规则）冲刺在前方 101 次：55 拼中、1 挨打，在后方 24 次：11 拼中、0 挨打；格挡反击在前方 27 次：4 拼中、3 挨打，后方 6 次：2 拼中、1 挨打。冲刺拼中后 0.5 s 内同一判定再拼 9 次、挨打 1 次。所以**上挑碰上冲刺不挨打**（拼刀口径 0 / 114，挨打上界 0.03），但**拼中只有 57 %**（65 / 114，其余 49 次既没拼中也没挨打：判定没碰到身体），格挡反击明显差。（复核更正：第二轮汇报和 HANDOFF 里写的"65 / 65 拼中"是错的，应为 114 次里 65 次。）
+- 但整体并不"不挨打"：主角只有 28 % 的时间在它正下方（它飞得快），按"第 5 波开始之前"的时间（下一波在死掉一只或两只后开始；之后活着那只打的也算进下数，两边同一口径）算每分钟挨 Minister 14.9 下（87 下：冲刺 `Slash Collider` 38、格挡姿态的身体 `Collider ParryAntic` / `ParryStance` 33、身体 11、飞行身体 4、出招前摇 1）。对照：R1 v2 的 data2 随机策略（Reaper，205 场 w4 起点）每分钟 20.2 下（冲刺 2,584、格挡身体 1,475、飞行身体 461）。上挑一直出刀杀得快：30 场里 20 场 20 s 内两只都死（第 5 波开始时刻中位 10.7 s；data2 是 71 s）。**只比每分钟**：这里每场限 20 s（10 场到结束都没进第 5 波），data2 每场 180 s，按场比总下数（2.8 对 26.3）有偏，不用。挨打大头是冲刺不在正下方时从侧面来、和上挑砍到格挡姿态时碰到它的身体（你说的"砍到格挡姿态会触发反击、身体会碰到你"）。
+- 规划器给它的是上挑续段（`clashrepU`）和 `clash.json` 里 Minister 冲刺上挑 0.046 / 格挡反击上挑 0.37，不按"正下方安全"的规则走。
+
+### 17.8 实战 A/B（2026-10-08，实例 2、3，A0b 的协议：eval、规划器、oracle、真退出 0.2，整场连战，每臂 25 + 25 场；报告 `C:\ssbot\data\m2_forum_r8\live\report_<臂>.json`、实战拼刀统计 `clash_live_<臂>.json`、一致性 `check_<臂>.json`）
+
+- **第一轮 Wanderer 臂作废的原因**：Forum 配装的 Cogwork Flier 和 Wallcling 不在 `hero_damage.KNOWN_NEUTRAL` 里，按"未知道具"给刀加了附魔和倒刺的上界（9 → 16），Wanderer 暴击 ×3 → 48 ≥ wave 0 每只的血（Envoy 38）；杀招规则（YELLOW / RED、Forum 的击杀不认证）于是在 YELLOW（87 % 的 tick）收走所有出刀：R8W / W0 只有 0.16 % 的 tick 按了攻击（A0b 6 %），`kill_prims` 100 % 含刀（A0b 17 %）。录像里装着这两个道具的刀伤：Reaper 9（对有伤害缩放的怪 10），Wanderer 9、暴击 27，从没更大；603fc7b 把两者列为不改刀伤，Wanderer 的上界回到 27（暴击仍按 ×3 算，暴击率约 1 %：Minister 实验 403 刀里 4 次）。修好后重跑 W1 / R8W1（同种子 320800 配对）。**这个修复也改了 Forum 默认的 Reaper**（复核指出，第二轮汇报漏了）：Reaper 的上界从 16 降到 9（对缩放的怪 10），YELLOW 里 kill_prims 收刀的 tick 变少；A0b、R0、R8R 都是按 16 跑的（决策日志里 kill_prims 含刀时 ykill 最大 11、从没到 19），所以下表 R0 / R8R 与 W1 / R8W1 不同上界，"R0 对 W1"不可比；"Reaper 17 % 的 tick kill_prims 含刀"也是上界 16 时量的。按新上界重跑的 Reaper 臂见 17.9。
+- 结果（代码 895137b，Wanderer 重跑 603fc7b；全部 50 / 50 在 wave 0 QUIT（Q1），支撑外受击 0，0 次击杀）：
+
+| 臂 | 纹章 | 拼刀 | 运行 | 存活中位 s | 受击 / 场 | 受击 / 分 | Envoy 冲锋受击 / 场 | 选中拼刀 tick（干净 / 部分） | 实战拼中 | tick p50 / p99 ms | plan p50 ms | 迟到 tick |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| A0b | Reaper | 关 | 205437 + 205857（f8c0c62） | 12.81 | 4.30 | 19.1 | 1.08 | — | — | 5.9 / 11.8 | 2.4 | 0.2 % |
+| R0 | Reaper | 关 | `C:\ssbot\data\runs\m2\20261008_042706_Forum_A_eval_planner_oracle` | 11.92 | 4.22 | 19.7 | 1.10 | — | 104 | 11.2 / 21.7 | 4.5 | 7.0 % |
+| R8R | Reaper | 开 | `C:\ssbot\data\runs\m2\20261008_041514_Forum_A_eval_planner_oracle_clash` | 13.75 | 4.04 | 18.0 | 0.60 | 18 / 218 | 151 | 15.8 / 27.5 | 8.8 | 36.5 % |
+| W1 | Wanderer | 关 | `C:\ssbot\data\runs\m2\20261008_044219_Forum_W_eval_planner_oracle` | 11.98 | 4.32 | 20.8 | 0.78 | — | 109 | 9.8 / 19.6 | 4.1 | 3.7 % |
+| R8W1 | Wanderer | 开 | `C:\ssbot\data\runs\m2\20261008_045259_Forum_W_eval_planner_oracle_clash` | 11.72 | 4.38 | 21.6 | 0.82 | 88 / 930 | 117 | 9.8 / 19.6 | 5.3 | 4.9 % |
+| W0 / R8W（作废：刀被收走） | Wanderer | 关 / 开 | `20261008_040450` / `20261008_035419` | 10.21 / 10.55 | 4.42 / 4.42 | 24.7 / 25.0 | 1.08 / 1.16 | —；49 / 0 | 3 / 11（出刀 7 / 24 次） | 10.7 / 11.9（p50） | 4.5 / 5.3 | 7.7 % / 9.9 % |
+
+- **复核结论（2026-10-08）：这组 A/B 不能说明 Reaper 开拼刀活得更久**：置换检验中位差 p = 0.073、均值差 p = 0.28（均值只差 +0.68 s，R8R 的均值 13.51 s 和 A0b 13.50 s 一样，中位的差主要来自 R0 比 A0b 低）；两臂种子不配对（320400 对 320600），`--forum-clash` 同时加了每个 tick 都在的"一直出刀"续段（出刀 827 对 718 次，日志里按攻击 14.3 % 对 6.0 % 的 tick），迟到 tick 36.5 % 对 7.0 %，两臂都是旧上界 16，每臂 50 场（计划要 ≥ 200）。Envoy 冲锋受击少 45 % 是真的（55 对 30 次，置换 p ≈ 0.002），但属于"拼刀开"这一整套配置（分支 + 续段），总受击没变（4.22 对 4.04 / 场：Choristor 从 60 升到 79）。下面是原来的写法，留作记录；配对、≥ 200 场、单独的续段臂见 17.9。
+- **Reaper 开拼刀**（原写法）：存活中位比 R0 长 1.83 s（自助法 95 % 区间约 0.0–3.0 s，P(R8R 更长) 0.58），受击 / 分 18.0 对 19.7；变化几乎全在 Envoy 冲锋（0.60 对 1.10 次 / 场，−45 %），Choristor 跳旋（0.44 对 0.22）、Reed 的针（0.50 对 0.18）多了一些。实战拼中 151 次对 104 次。**Wanderer 开拼刀**：和 W1 没有差别（11.72 对 11.98 s，区间约 −0.6–+1.6 s），Envoy 冲锋 0.82 对 0.78。两种纹章不开拼刀时一样（R0 对 W1：−0.06 s）。和 A0b 比：R0 / W1 短约 0.9 s、R8R 长约 0.9 s，都在区间内；但这几臂跑的时候机器同时有别的轨道的实战和离线任务（tick p50 10–16 ms，A0b 6 ms），不是同负载，主要看同一时段的配对臂。
+- **一致性**（选中靠拼刀的计划：连续的拼刀 tick 算一次，看从第一 tick 到最后一 tick 后 36 帧里录像发生了什么）：R8R 18 次，拼中 4、挨打 5（都在拼之前），预测失败概率均值 0.26；R8W1 82 次，拼中 14、挨打 19（16 次在拼之前），预测 0.29、实际 0.23；作废的 R8W 13 次，0 拼中、0 挨打。多数时候计划在拼刀发生前就被下一 tick 换掉（每 tick 重新规划），挨打率和预测的失败概率同一量级，没有发现"选了拼刀反而挨打更多"的迹象。
+- **算力**：拼刀分支只在没有安全行、且有敌人正在出可拼的招的 tick 跑；R8W1 对 W1 plan p50 +1.2 ms、tick p50 不变；R8R 对 R0 plan p50 +4.3 ms、迟到 tick 36.5 % 对 7.0 %（原写法说"R8R 那 12 分钟机器最忙"，**复核否定了这个归因**：R0 紧接着在同一实例上跑，11 分钟里有 10 分钟和同一个忙的实例 0 运行 `20261008_042143`（40 % 迟到）重叠，自己仍只有 7 % 迟到；R8R 只重叠约 5.5 分钟。迟到来自拼刀分支本身：R8R 里每个拼刀 tick 2.2 ms，且分支没有截止时间检查）。部分拼刀把 16 行都推演到 3 层，是主要开销；要用就该限到 8 行或 2 层再量。
+- **和诊断轨道（forum.md §19，worktree-wf_fa16f06f-127-8）的结论对上**：wave 0 的支撑饱和，FORCED_RISK 的占比全是 1、排序落到 J。拼刀的部分拼刀只在"有敌人正在出可拼的招"的 tick 起作用（拼刀无敌那 9 帧把饱和的占比压下去），所以它能改的主要是 Envoy 冲锋这一招，改不了 wave 0 的整体结局；诊断轨道的 `forced_rank = "seen"`（按眼前看到的伤害碰撞体排序，存活 +5.0 s）是更大的一步。两者合并时要注意：`seen` 把"刀会拼掉的那个判定"也算成接触，会把拼刀行排到后面；合并应让拼刀分支的成功分支替换 `seen` 的接触（集成步骤的事）。
+
+### 17.9 复核之后的修正与配对 A/B（2026-10-08 05:30–08:30，修正代理；代码 d24ef17；实例 2、3）
+
+- **统计口径修正**（`forum_clash_stats`，532f8e2）：并集局面按敌人当时的 Control 状态分开记，并记下它属于哪一次出招（敌人连续处在同一家族的那一段帧）；两种口径不一致时取更坏的（挨打 > 拼中 > 拼中别人 > 都没有：以前接触口径先挨打、后来才拼中的记成拼中）；Multihit 特殊伤害归给最近的有伤害碰撞体的敌人（以前类型是 `?multihit`，从来不算挨打）；Reaper 下劈窗口改成规划器的 [9, 19]。
+- **`clash.json` 重建**（d24ef17；R1 v2 的 36 个 data2 运行 + 你的 5 次练习 + 第二轮的实战臂和 A0b；输出 `C:\ssbot\data\m2_forum_r8\fix\clash_*.json`）：每个家族的**可拼状态** = 它的拼中发生过的状态（≥ 2 次且 ≥ 5 %）：Envoy 冲锋 {Charge}、Reed 防御反击 {Parry Slash}、Reed 刺 {Stab 1, 3, 5}、Minister 冲刺 {Attack}、Minister 格挡反击 {Parry Slash 1}、Choristor 斩 {Slash 1, 2, ComboSlash 1}、鞭 {Whip 1–4} 等；成功率只在可拼状态里算；**`p_clash_lb`** = 拼中占比的 Wilson 下界、`p_fail` = 挨打占比的上界，样本量按**出招次数**算（同一次出招的几刀高度相关）；按纹章各自有一行（Wanderer 有 10 个键 n ≥ 10）。31 个键，p_fail ≤ 0.25 的 19 个，p_clash_lb ≥ 0.5 的 10 个，没有一个 ≥ 0.75（最好：Minister 冲刺横 0.74 / 0.044，Envoy 冲锋横 0.72 / 0.047）。"都没有"的占比不小（Reed 刺横 577 次里 197 次），以前的 p_fail 把它们都算成功，成功分支却给了拼刀的无敌和后坐。
+- **规划器拼刀分支第三版**（f1f2fb1、d997bc7）：分支权重 w = ∏ p_clash_lb（每次拼刀都发生的概率）；干净的分支只在 w ≥ 0.75 且挨打 ≤ 0.25 时算安全行（现在的表里没有键做得到），其余（w ≥ 0.25）进 FORCED_RISK 排序，接触占比 = w × 成功分支 + (1 − w) × 不拼时（第一次接触仍按不拼的算）；**按状态**：用行为表的停留时间和后继推出这只敌人在拼刀那一帧能不能处在可拼状态（`clash_windows`），收招中的（Charge End、Stab Recover、JumpSlash 4……）不拼，`PARRY_STOPS` 也按状态（Envoy Charge / Reset、Reed Parry Slash）；**DESIGN 3.5.6**：默认只在 GREEN、没有暂停待发时拼（`ForumConfig.clash_tiers`；`--forum-clash yellow` 是实验开关，要不要在 YELLOW 拼需要你决定）；每层前查截止时间（默认 deadline_ms + 2 = 10 ms），最多 8 行 2 层；无敌 9 帧（拼刀帧和之后 8 帧），起点取"拼刀盒最早能碰到它的支撑"的那一帧（下界），只保留不管哪一帧拼中都在无敌里的那几帧；同一帧碰到的别的敌人**不再挡**拼刀（拼刀无敌挡所有敌人伤害，它们之后的接触在分支里照算）。`--forum-clash cont`：只加"一直出刀"续段、不跑分支（A/B 的对照）。
+- **开环回放**（A0b i1 ep0，483 个 FORCED_RISK，`--clash yellow`）：210 行接触时刀在生效窗口里，166 个归属的敌人那时不在可拼状态（多是 Envoy JumpSlash 4、Choristor Slash Recover），38 次拼刀被接受（全是 Envoy 冲锋 / Reed 防御反击的收招），38 行进排序，4 次选中；8 层被截止时间截掉；plan p50 5.3 ms（第二版 9.8 ms），分支每个 FORCED_RISK tick 0.96 ms。
+- **配对 A/B**（`C:\ssbot\sandbox\r8f_live.ps1`，A0b 协议，Reaper（新上界 9），4 组 × 3 臂轮换顺序，每组每臂同一种子 322000 + 100 × 组 → 每臂 200 场、按种子一一配对；清单 `C:\ssbot\data\m2_forum_r8\fix\ab_manifest.txt`，分析 `C:\ssbot\data\m2_forum_r8\fix\ab.py` → `ab.json`；全部 200 / 200 在 wave 0 QUIT（Q1），WOULD_DIE 0）：
+
+| 臂 | 设置 | 存活中位 / 均值 s | 受击 / 场 | 受击 / 分 | 掉血 / 分 | Envoy 冲锋受击 / 场 | 击杀 | 按攻击 / s | plan p50 ms | tick p50 ms | 迟到 tick |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| R0 | 拼刀关 | 13.76 / 14.16 | 4.19 | 17.8 | 21.1 | 1.02 | 0 | 1.56 | 4.0 | 9.7 | 2.4 % |
+| RC | 只加续段 | 13.25 / 13.37 | 4.01 | 18.0 | 22.4 | 0.68 | 2 | 4.25 | 4.4 | 10.3 | 2.8 % |
+| RY | 分支（GREEN + YELLOW）+ 续段 | 12.93 / 13.69 | 4.04 | 17.7 | 21.9 | 0.63 | 1 | 4.19 | 5.2 | 10.2 | 2.9 % |
+
+- 配对差（200 对，符号翻转置换检验，自助法 95 % 区间）：**RC − R0 存活 −0.79 s（p 0.003，区间 −1.31 到 −0.27）**、受击 −0.18 / 场（p 0.01）、Envoy 冲锋 −0.35 / 场（p < 0.0001）；**RY − R0 存活 −0.47 s（p 0.11，−1.03 到 +0.09）**、受击 −0.15（p 0.047）、Envoy 冲锋 −0.40（p < 0.0001）；**RY − RC 存活 +0.32 s（p 0.22，−0.18 到 +0.84）**、Envoy 冲锋 −0.05（p 0.50）。
+- **结论**：(1) 第二轮"Envoy 冲锋受击少 45 %"来自"一直出刀"的续段行，不是拼刀分支：只加续段就少 0.35 次 / 场（刀一直在外面，冲锋自己撞上刀就被拼掉），分支在续段之上没有可测的作用（−0.05，p 0.5）；(2) 续段让主角更常出刀（4.2 对 1.6 次 / s）、更少躲，伤害转到 Choristor（286 → 323 / 337 次）和 2 格的招上，**存活反而短 0.5–0.8 s**（每分钟掉血 22.4 / 21.9 对 21.1）。计划的字面验收（受击 / 场和退出数不更多）RY 是过的（4.04 对 4.19，退出都是 200），但 wave 0 里每场都是掉 5 格血后 Q1 退出，这两项几乎由构造决定；看存活时间和每分钟掉血两组都更差（RC 显著），所以**两组都没写进 `Forum.yaml`**，要不要用由你定；(3) 分支本身在 wave 0 几乎无事可做：开环和实战里多数"刀在窗口里"的接触来自收招中的敌人（不可拼），按状态和出招次数修正后没有一个键的 w 到 0.75，只能以混合占比进 FORCED_RISK 排序（RY 里 2,724 个选中 tick）；(4) 算力问题解决：RY 迟到 2.9 % 对 R0 2.4 %，分支每个拼刀 tick 1.12 ms，截止时间截掉 2 % 的拼刀 tick。
+- **一致性**（RY 4 个运行，选中拼刀计划的连续 tick 算一次，看之后 36 帧）：207 次，48 % 拼中、19 % 挨打（39 次里 36 次在拼之前），预测 w 均值 0.58；所有 FORCED_RISK tick 的基线是 36 帧内 46 % 挨打、11 % 拼中。日志是按事件抽样的、计划每 tick 都会换，这只说明"选了拼刀的时候挨打不比平常多"，不是 w 的校准。
+- 两次 A/B 的对照（17.8 的 R0 / R8R）：新上界下 R0 存活中位 13.76 s（旧上界 11.92 s、A0b 12.81 s），这一项比拼刀的任何一臂都大，但不同时段不同负载，不是配对比较。
+
+## 18. R5 行为模型：感知时刻、冷却、分支历史、Tiny 一只一只、身体触发（2026-10-08，forum_planner_plan.md §5 R5 的行为模型半；离线，没有连接游戏）
+
+代码：`combat/branch_model.py`（SENSING 表、触发形状 RANGES、BranchMemory、BranchModel、运行时 BranchView、身体触发 REACTIVE）、`combat/tiny_orbit.py`、`knowledge/forum_branch.py`（扫描、选择、校准）；工具 `forum_branch`（scan / study / build / parity）、`tiny_orbit`；`multi_recall --branch`。产品 `knowledge/1.0.30000/enemies/forum/branch_model.json`（复核后 243 KB：分支帧表 `types`、预报表 `ahead`、分段 `segmentation`）、`tiny_orbit.json`。测试 `tests/test_branch_model.py`（21 个，含录像逐帧核对）。**全部只进打分（P / J、O / BAIT），支撑、放置、监督器都不读它**；接线：`MultiForecaster(branch=BranchModel.load())` 时每个 EnemyTracker 带一个 BranchMemory，`Subject.next_p` = 下一招家族的概率（**预报表 `ahead`**，§18.11；复核前用的是分支帧表，中途查询时严重失准），`branch_probs(iid)` / `next_attack_probs(iid)` / `BranchView.reactive` / `entry_prob`；`ForumPlannerPolicy(branch_model=True)` 打开，默认关（规划器还没有消费者，R5 终点价值 / R6 的 O、BAIT 用）。
+
+数据：DEV = R0 的 142 场完整连战（`m2_forum_r0\cache` 107 + `cache_fresh` 35，随机数据策略），按场两折交替；**TEST = R1 收尾的 202 场**（`m2_forum_r1c\cache_fresh`：w7 / w2 波次起点、154609 / 154612 完整连战，data2 / idle 策略），选择和调参时没有看过，表在 DEV 全部上拟合后只评估一次。决策 = 控制 FSM 离开一个决策状态的一次转移：DEV 428,997 个、TEST 253,222 个（61 个决策状态，n ≥ 60 且至少两个后继）。主角的丝从录像读（`hero.silk`，每场约 2 s，缓存在 `C:\ssbot\data\m2_forum_r5m\hero\`）。
+
+### 18.1 FSM 静态：每个决策读主角的什么、在哪一刻（场景包 `hang_04_boss` 控制 FSM，`reactive_scripts\out\*.txt` 逐动作解码）
+
+PlayMaker 的三条规则决定了"哪一刻"：(1) 动作在 OnEnter 里发出有出边的事件会**当场**换状态，后面的动作不再执行（13.2 已用过）；(2) 状态里的动作全部结束（没有 everyFrame）时自动发 FINISHED；(3) `SendRandomEventV4`（反编译 `SendRandomEventV4.cs`）每个动作实例有两个计数：`trackingInts[i]`（i 连着出了几次）和 `trackingIntsMissed[i]`（多少次没出 i）；先看有没有 `missed ≥ missedMax` 的事件（有就强制出它），否则按权重抽、抽到已连出 `eventMax` 次的就重抽。`activeBool` 为假时整个动作不跑、计数不动。所以 V4 的"冷却"完全由这个状态自己过去的选择决定——这就是 `last_choice` / `prev2_choice` / `choice_run` / `miss_<后继>` 这些历史量。
+
+| 类型 | 决策状态 | 读什么（FSM 动作） | 何时 |
+|---|---|---|---|
+| Clapper | Idle | 每帧：Slam Range ∧ Will Evade（进入时 RandomBool）∧ Can Evade（≥ 0.25 s）→ Evade Scuttle；进入时：另一只 |x| < 4 → Avoid Type；TOOK DAMAGE → Dmg Attack；0.65 / 1.15 s（无伴 / 有伴）→ Walk | 分支帧（每帧） |
+| | Walk | 每帧：≥ 0.25 s ∧ Slam Range → Close Range；WaitRandom 0.25–2 s → Far Range | 分支帧 |
+| | Close Range / Far Range | 瞬时：伴在出招 → Idle；片段 Walk B → SLAM；V4（Close：SLAM / EVADE / CAST 各 1/3、eventMax 1；Evaded 时只 SLAM / CAST。Far：JUMP 0.5 / CAST 0.25 / JUMP CAST 0.25） | 分支帧 |
+| | After Scuttle / Dmg Attack | 瞬时 Slam Range | 分支帧 |
+| | Escape Jump | V4 1:1、eventMax 1、missedMax 1（严格交替） | — |
+| | Avoid Type | 瞬时：主角和伴在同一侧 → Evade | 分支帧 |
+| | Evade Scuttle | 进入时：背后 6 u 有墙 → Escape Jump，否则 0.35 s → After Scuttle | **进入** |
+| Clawmaiden | Fly | 每帧：Slash Range → Slash；≥ 0.5 s ∧ Suck Start Range ∧ 吸丝计时到 ∧ 没被锁 → Spin Antic；距离 > 20 → Tele Out；WaitRandom 1–2 s → Tele? | 分支帧 |
+| | Spin Antic | 进入时：主角丝 < 3 ∧ 硬币 → Fly To Slash；丝 < 2 → Fly；否则动画完 → Spin 0 | **进入** |
+| | Spin 0 / 1 / 2 | Silk Suck FSM 每 1.1 s 一次 tick 拿 1 丝，主角丝为 0 → NO SILK | 主角丝 |
+| | Tele? | 瞬时：距离 > 22 → 瞬移；V4 TELEPORT / FINISHED（eventMax 1 / 2） | 分支帧 |
+| | Fly To Slash | 每帧 Slash Range；1.0 s → Fly | 分支帧 |
+| Minister | Chase | 每帧：攻击计时到 ∧ Attack Range（圆 r 7，圆心下 1 u）→ Attack Choice；TOOK DAMAGE → Range Check（计时夹到 ≤ 0.5 s） | 分支帧 |
+| | Attack Choice | V4 CHARGE / PARRY 1:1、eventMax 2、missedMax 2：**同一招最多连两次** | 历史 |
+| | Evade? | 瞬时：V4 FINISHED / 空 1:1（eventMax 2），抽到空且主角在 Evade Range（r 4.955）→ Evade Antic，否则动作完 → Retreat? | 分支帧 |
+| | Retreat? | 进入时 V4 FINISHED / 空，否则 WaitRandom 0.5–1 s；TOOK DAMAGE → Range Check | 进入 |
+| | Parry Stance | 0.85 s 或主角越过身后 1 u → End；BLOCKED HIT → Parry Block | 分支帧 |
+| Maestro | Attack Choice | 死 Tiny > 1 → FIRE；V4 FIRE 0.75 / DEFEND 0.25（FIRE 最多连 3 次、DEFEND 不连） | 历史 |
+| | Summon? | 死 Tiny 0 → Attack Choice、3 → Call；1：V4 空 0.65 / SUMMON 0.35；2：再一个 V4 SUMMON 0.65 | 历史 |
+| | Forum Fly | 计时 U(1.15, 1.45) s 或 TOOK DAMAGE → Summon?；**不读主角位置** | — |
+| Reed | Alert | 每帧：已上膛的 Evade Range → Evade Antic；Will Defend（进入时硬币）∧ Defend Range（r 7.65）∧ ¬Just Did Defend → Defend Start；WaitRandom 1–1.75 s（Move Cancel 之后 0.75 s）→ Choice；TOOK DAMAGE → Stab Pos | 分支帧 |
+| | Choice | 瞬时：Throw Range 外 → 扔；V4 THROW 0.35 / STAB 0.65（eventMax 2） | 分支帧 |
+| | Evade End | SendRandomEvent 0.5（无记忆）→ Alert，否则 Throw Range 内 → 扔 | 分支帧 |
+| | Throw Antic Anim → Throw Antic（0.25 s）→ Throw Aim（0.4 s）→ Throw Lock → Lock R High / Throwing Up? → Throw Up / Down | Throw Antic Anim 进入时存"向上瞄"；Throw Aim 进入时存到主角的角度；Lock / Throwing Up? / Throw Up / Down 读存下来的值 | **存储（更早的状态）** |
+| | Stab Pos | 每帧 Stab Range；1.5 s → Move Cancel | 分支帧 |
+| Envoy | Walker | 每帧：Attack Range → 斩；Alerted ∧ Charge Range（场景加载时就开着；一次斩之后开；一次 Walker 待满 1.5 s 时开（`ActivateGameObjectDelay` 1.5 s、resetOnExit 0：离开 Walker 后仍开着，没待满就不开）；Charge Antic 关）→ 冲锋；TOOK DAMAGE → Leader? | 分支帧 |
+| | Combo? | 瞬时：没面对主角 → Attack End；V4 1:1（eventMax 2） | 分支帧 |
+| Choristor | Hop Antic | 进入时：Close Range → Attack Choice；否则 0.2 s → Hop Check | **进入** |
+| | Hop Check | 瞬时 \|x 距离\| ≤ Hop Distance（Move Start 时抽 U(6, 10)，这一串跳共用）→ 后跳 | 分支帧 + 历史 |
+| | Hop Land | Hops（Move Start 时抽 1–3）用完或前面有墙 → Attack Choice | 历史 |
+| | Attack Choice | 瞬时：Attack Range 外 → Battle Idle；Close Range → 斩；V4 SLASH / JUMP / WHIP（eventMax 2、missedMax 3） | 分支帧 |
+| Bellbearer | In Range | 每帧：Throw Range 外 → Out of Range；Evade Range ∧ 背后 3 u 无墙 ∧ ≥ 0.5 s ∧ ¬Evade Cooldown → Evade；WaitRandom 0.8–1.5 s → 扔 | 分支帧 |
+| | Insta Throw? | 瞬时闪避测试一次，然后 V4 FINISHED 0.65 / ATTACK 0.35 | 分支帧 |
+| | Evade End | 瞬时 Throw Range；V4 1:1（eventMax 2） | 分支帧 |
+| 各类 | Check Pos | 瞬时 GetDistance < 6（Maestro 8）→ Shift（换出生点） | 分支帧 |
+
+Tiny 的控制 FSM 在别的包里（Maestro 用 `CreateObject` 生成的预制体，场景包外部文件 45），这次没有解码；它的 Ready → Fire Ready / Defend Ready 由 Maestro 的事件指挥（§18.6）。机器可读的表在 `branch_model.SENSING`（类型 → 状态 → (时刻, 说明)）。
+
+### 18.2 冷却：FSM 里的历史，换成看得见的条件（`BranchMemory`，从控制状态的进入和看到的命中推出）
+
+- **门**（布尔变量 + 哪个状态设 / 清，`branch_model._GATES`）：Bellbearer `Evade Cooldown`（Evade 设、只有 Throw Antic 清：扔一次钟补一发闪避；`can_evade` = 上一次 In Range 待够 0.5 s，带到 Insta Throw?）；Reed `armed`（Evade Antic 关、Defend Start / Stab Antic 开）、`jdd` = Just Did Defend（Defend Start 设、Stab Antic / Throw Antic 清）；Clapper `evaded`（Evade Scuttle 设、任何招的前摇清）；Envoy `charge_armed`（初值开：Charge Range 物体在场景里 active；Charge Antic 关、Slash Antic 开；一次 Walker 待满 1.5 s 时开且离开后保持）和 `alerted`（Slash Antic / Ambush Ready 设，从不清；CHARGE 要它）。**复核修正**：第一版初值关、只在 Walker 里按时间开，于是 Walker → Charge Antic 时门是关的 DEV 131 次、TEST 34 次（FSM 里不可能）。
+- **计数 / 计时**：Choristor 这一串跳的第几跳和上一跳方向（`hops`、`last_hop`）；Clawmaiden 吸丝计时（Startle 设 U(1, 3)、Spear Fire Recover 设 U(1.5, 2)，只在 Fly 里减）→ 在 Fly 里累计的时间 `suck_age`；Maestro 自己的死 Tiny 数 `dead_tinies`（Tiny 归属 `TinyOwners`：每一帧 Tiny 在 Ready 且这一帧看得见时，归给 0.25 s 内看得见的最近一只 Maestro（< 8 u），最后一次归属有效；扫描和运行时同一条规则、都只用过去的帧——第一版扫描按整场投票，用到了未来的帧）。
+- **防重复**：这个状态以前的选择 `last_choice` / `prev2_choice` / `choice_run` / `miss_<后继>`，上一次各家族之后过了几招 `since_<家族>`（V4 的两个计数就是它们；第一版 `since_` / `miss_` 只在离线扫描里算，运行时没有，§18.11）。
+- **分支拆开的历史**（你 10-04）：上一招和它最后一个状态 `prev_end`（例 `MI_PARRY:Parry Stance End` 没被打 vs `MI_PARRY:Parry Slash End` 被打后反击）、离上一招结束多久 `since_end`、从哪个状态进来 `from`、在这个状态里待了多久 `age`、到这一帧为止的最近一次命中 `hit`（< 0.25 s / < 1 s / 更早）。**复核修正**：第一版写"决策当帧的命中是 TOOK DAMAGE 出边的原因、不算历史"，实际几乎用不上：TOOK DAMAGE 出边（DEV 22 场，1,011 次）和同一帧的记录命中重合只有 1 次；Clapper Idle → Dmg Attack 194 / 568、Minister Chase → Range Check 84 / 299 在一次记录命中之后 12–18 帧（多数 18 帧 = 0.3 s），Reed Alert → Stab Pos 只有 7 / 176，其余前 0.35 s 内没有记录到的命中（中位数 1.9–4 s 前）。所以 `hit` 带的是看得见的过去信息（不是泄漏），现在当帧的命中也算。
+- 跨敌人：Clapper 的伴在不在、在不在出招、x 距离 < 4（`buddy*`，`clapper_context`：伴的控制状态不在等待集合里、0.25 s 内看得见）；主角的丝（Clawmaiden）。分段（哪个状态开始哪一招）运行时也用扫描的 `FORUM_SPECS`：运行时走子表少 Maestro 的 MA_POINT、Envoy 的 EN_HOPSLASH / EN_ENTRY，第一版运行时的 `prev` / `run` / `since_*` 因此和训练不一样。
+- 全部看得见：状态及其进入时刻（oracle 的 FSM / 视觉的阶段）、看到的命中、位置、主角自己的丝；不读 FSM 变量。
+
+**数据核对**（DEV，`C:\ssbot\data\m2_forum_r5m\branch_gap.json`；"下一招"= 上一招结束后的第一招，不算入场 / 待机）：Bellbearer 闪过之后下一招 **2,229 / 2,229 是扔钟**（Evade Cooldown）；Maestro 防御之后 89 % 斩、11 % 召唤、**0 防御**（V4 eventMax 1），斩之后 53 % 斩 / 39 % 防御 / 8 % 召唤。
+
+### 18.3 结果：分支帧模型的留出对数损失与校准（复核后重建，代码 2f5b96a；第一版的数字和它错在哪见 §18.11）
+
+"分支帧模型"（`branch_model.json` 的 `types` 表）估的是 **P(后继 | 这个决策就在这一帧发生)**：拟合和评估都只用状态离开的那一帧。它回答"如果它现在决定，走哪一支"——瞬时决策（进入的同一帧就离开）和候选路径的"假如"；**它不是状态中途的预报**（中途查询要用 `ahead` 表，§18.11.3）。"无条件" = 每次访问的边际（运行时走子今天的 `p_succ`）；"R0 重拟" = R0 表的协变量名在这些记录上用同一套回退平滑重拟（**不是**发布的 R0 表；R0 表在运行时只以无条件 `p_succ` 出现）；"新" = 本节模型，所有协变量都是运行时 `BranchView` 逐帧算得出来的（§18.11.2：7 场逐帧核对 0 差）。DEV 列两折交叉验证，TEST 列 DEV 全部拟合后在 202 场上一次评估。nats / 决策，按决策数加权：
+
+| | 无条件 | R0 重拟 | 新 |
+|---|---|---|---|
+| DEV（428,997，交叉验证） | 0.740 | 0.538 | **0.279** |
+| TEST（253,222，留出） | 0.695 | 0.511 | **0.284** |
+
+逐个决策（ECE = 所有（决策, 后继）对按预测概率分 10 档的期望校准误差，TEST；时刻见 §18.4）：
+
+| 类型 | 决策 | DEV n | 无条件 | R0 重拟 | 新 | 时刻 | 协变量 | TEST n | 无条件 | R0 重拟 | 新 | ECE 前 → 后 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| Bellbearer | Check Pos | 710 | 0.253 | 0.176 | 0.153 | branch | dx,in_Throw Range,dist_visible | 318 | 0.146 | 0.096 | 0.084 | 0.028→0.013 |
+| Bellbearer | Evade End | 4466 | 0.693 | 0.581 | 0.534 | branch | prev2_choice,in_Throw Range,side | 2947 | 0.693 | 0.547 | 0.514 | 0.004→0.012 |
+| Bellbearer | In Range | 15679 | 1.064 | 0.420 | 0.107 | branch | dx,since_end,in_Evade Range,dist | 9928 | 1.044 | 0.402 | 0.117 | 0.015→0.005 |
+| Bellbearer | Insta Throw? | 6196 | 0.667 | 0.323 | 0.318 | branch | prev2_choice | 3601 | 0.665 | 0.298 | 0.298 | 0.000→0.002 |
+| Choristor | Attack Choice | 5678 | 1.300 | 1.051 | 0.674 | branch | in_Attack Range,in_Close Range,prev2_choice,since_CH_JUMP | 1626 | 1.276 | 0.984 | 0.622 | 0.013→0.005 |
+| Choristor | Combo? | 1715 | 0.628 | 0.610 | 0.013 | branch | front,hit | 564 | 0.637 | 0.631 | 0.021 | 0.008→0.002 |
+| Choristor | Hop Antic | 9906 | 0.355 | 0.169 | 0.001 | branch | age | 2786 | 0.410 | 0.201 | 0.000 | 0.018→0.000 |
+| Choristor | Hop Check | 8776 | 0.693 | 0.236 | 0.190 | branch | dx,last_hop | 2394 | 0.694 | 0.247 | 0.205 | 0.016→0.006 |
+| Choristor | Hop Land | 8745 | 0.692 | 0.606 | 0.557 | lead0.2 | hops,side,hero_x | 2380 | 0.692 | 0.612 | 0.563 | 0.001→0.005 |
+| Choristor | Slash Check | 2463 | 0.591 | 0.226 | 0.023 | branch | in_Slash Range,hit,dy | 757 | 0.509 | 0.181 | 0.050 | 0.029→0.001 |
+| Choristor | Unalert Tick? | 5739 | 0.403 | 0.251 | 0.144 | branch | in_Attack Range,dist,dist_visible,hero_x | 1659 | 0.416 | 0.301 | 0.145 | 0.005→0.012 |
+| Clapper | After Scuttle | 10014 | 0.385 | 0.159 | 0.006 | branch | in_Slam Range,dx | 4758 | 0.397 | 0.188 | 0.009 | 0.004→0.000 |
+| Clapper | Avoid Type | 9734 | 0.675 | 0.623 | 0.597 | lead0.3 | dx,since_end,prev | 4338 | 0.677 | 0.629 | 0.594 | 0.005→0.009 |
+| Clapper | Close Range | 14839 | 1.222 | 1.175 | 0.710 | lead0.2 | buddy_attacking,prev,since_end,dist | 7096 | 1.210 | 1.155 | 0.696 | 0.010→0.004 |
+| Clapper | Dmg Attack | 3656 | 0.693 | 0.329 | 0.007 | branch | in_Slam Range,dy | 1185 | 0.698 | 0.331 | 0.020 | 0.048→0.001 |
+| Clapper | Escape Jump | 413 | 0.692 | 0.414 | 0.377 | lead0.5 | last_choice,dy,buddy_attacking,since_CC_SLAM | 267 | 0.693 | 0.290 | 0.300 | 0.007→0.018 |
+| Clapper | Evade Scuttle | 10486 | 0.201 | 0.090 | 0.024 | branch | age,side | 5044 | 0.234 | 0.093 | 0.013 | 0.006→0.003 |
+| Clapper | Far Range | 13876 | 1.274 | 0.974 | 0.596 | branch | buddy_attacking,prev2_choice,miss_Cast Slam Antic,miss_Jump Antic | 6563 | 1.339 | 0.921 | 0.505 | 0.026→0.002 |
+| Clapper | Idle | 28014 | 1.319 | 1.054 | 0.152 | branch | age,buddy,in_Slam Range,buddy_close | 13416 | 1.287 | 1.042 | 0.148 | 0.010→0.003 |
+| Clapper | Walk | 15094 | 0.543 | 0.387 | 0.038 | branch | in_Slam Range,age | 7733 | 0.579 | 0.459 | 0.037 | 0.016→0.000 |
+| Clawmaiden | Fly | 6623 | 1.160 | 0.767 | 0.158 | branch | age,in_Slash Range,in_Suck Start Range,suck_age | 4457 | 1.097 | 0.743 | 0.125 | 0.019→0.010 |
+| Clawmaiden | Fly To Slash | 1543 | 0.776 | 0.608 | 0.036 | branch | age,in_Slash Range,in_Tele Escape Range | 1094 | 0.705 | 0.508 | 0.034 | 0.052→0.002 |
+| Clawmaiden | Spin 0 | 1018 | 0.233 | - | 0.074 | lead0.2 | silk,age,suck_set,dy | 631 | 0.192 | - | 0.184 | 0.005→0.024 |
+| Clawmaiden | Spin 1 | 968 | 0.233 | - | 0.034 | lead0.1 | age,silk,choice_run,in_Slash Range | 605 | 0.188 | - | 0.412 | 0.007→0.066 |
+| Clawmaiden | Spin 2 | 919 | 0.686 | 0.668 | 0.136 | lead0.1 | silk,age | 582 | 0.669 | 0.653 | 0.250 | 0.013→0.044 |
+| Clawmaiden | Spin Antic | 3736 | 1.098 | 1.007 | 0.449 | entry | age,silk | 2609 | 1.081 | 0.964 | 0.473 | 0.013→0.001 |
+| Clawmaiden | Tele? | 935 | 0.679 | 0.481 | 0.474 | branch | prev2_choice,since_CM_SPIN,last_seen_x,in_Suck Start Range | 475 | 0.681 | 0.464 | 0.484 | 0.005→0.046 |
+| Envoy | Charge | 568 | 1.322 | 0.895 | 0.733 | lead0.1 | front,hero_x,last_seen_x,dy | 118 | 1.312 | 0.760 | 0.909 | 0.004→0.046 |
+| Envoy | Combo? | 842 | 0.663 | 0.639 | 0.486 | branch | front,prev2_choice,miss_JumpSlash Antic | 201 | 0.651 | 0.633 | 0.475 | 0.016→0.027 |
+| Envoy | Walker | 1408 | 0.748 | 0.133 | 0.040 | branch | dist_visible,charge_armed,in_Attack Range | 326 | 0.674 | 0.068 | 0.033 | 0.016→0.005 |
+| Maestro | Attack Choice | 15278 | 0.608 | 0.318 | 0.331 | branch | miss_Defend Start | 10901 | 0.610 | 0.312 | 0.324 | 0.002→0.005 |
+| Maestro | Check Pos | 426 | 0.695 | 0.215 | 0.118 | branch | dx,dist,dist_visible,dy | 255 | 0.661 | 0.202 | 0.115 | 0.121→0.010 |
+| Maestro | Fly | 4460 | 0.846 | 0.169 | 0.037 | branch | last_choice,dx,since_end,in_Attack Range | 2599 | 0.781 | 0.169 | 0.038 | 0.056→0.002 |
+| Maestro | Slash Recover | 10501 | 0.537 | 0.029 | 0.007 | branch | age | 7539 | 0.543 | 0.019 | 0.003 | 0.005→0.000 |
+| Maestro | Summon? | 16694 | 0.290 | 0.272 | 0.177 | branch | dead_tinies,since_MA_SUMMON | 11300 | 0.173 | 0.186 | 0.079 | 0.033→0.006 |
+| Minister | Attack | 3309 | 0.634 | 0.407 | 0.088 | branch | age,dist,dx,front | 3131 | 0.680 | 0.421 | 0.121 | 0.043→0.009 |
+| Minister | Attack Choice | 6932 | 0.693 | 0.518 | 0.493 | branch | prev2_choice | 6460 | 0.693 | 0.495 | 0.480 | 0.002→0.007 |
+| Minister | Chase | 8804 | 0.518 | 0.374 | 0.167 | branch | in_Attack Range,dist,age,from | 7172 | 0.369 | 0.266 | 0.131 | 0.076→0.010 |
+| Minister | Check Pos | 568 | 0.314 | 0.050 | 0.002 | branch | last_seen_x,dy | 308 | 0.239 | 0.022 | 0.000 | 0.023→0.000 |
+| Minister | Evade? | 5525 | 0.543 | 0.433 | 0.311 | branch | in_Evade Range,prev2_choice,choice_run | 5033 | 0.605 | 0.477 | 0.355 | 0.035→0.001 |
+| Minister | Parry Stance | 3404 | 0.550 | 0.530 | 0.242 | branch | age,front,dist | 3208 | 0.442 | 0.416 | 0.210 | 0.062→0.030 |
+| Minister | Retreat? | 4243 | 0.297 | 0.276 | 0.150 | branch | age,dist | 3594 | 0.211 | 0.199 | 0.097 | 0.024→0.018 |
+| Reed | Alert | 9806 | 1.426 | 0.906 | 0.384 | branch | age,dist,in_Evade Range,last_choice | 5482 | 1.359 | 0.833 | 0.286 | 0.018→0.010 |
+| Reed | Check Pos | 710 | 0.276 | 0.236 | 0.098 | branch | hero_x,last_seen_x,dist_visible,in_Defend Range | 284 | 0.264 | 0.264 | 0.191 | 0.004→0.021 |
+| Reed | Choice | 3551 | 0.693 | 0.624 | 0.480 | branch | in_Throw Range,prev2_choice | 2178 | 0.693 | 0.580 | 0.469 | 0.005→0.008 |
+| Reed | Defend | 2483 | 0.655 | 0.592 | 0.052 | lead0.3 | age,in_Defend Range | 1439 | 0.574 | 0.524 | 0.069 | 0.049→0.002 |
+| Reed | Evade End | 2212 | 0.693 | - | 0.673 | branch | in_Throw Range,dist | 1291 | 0.692 | - | 0.674 | 0.013→0.004 |
+| Reed | Lock R High | 1151 | 0.448 | - | 0.146 | stored | dy,in_Evade Range,in_Defend Range,since_end | 778 | 0.358 | - | 0.147 | 0.037→0.026 |
+| Reed | Stab Pos | 2858 | 0.231 | 0.186 | 0.023 | branch | age,in_Stab Range,from,hit | 1441 | 0.177 | 0.138 | 0.011 | 0.007→0.001 |
+| Reed | Throw Down | 2526 | 0.128 | - | 0.028 | stored | dy | 1545 | 0.106 | - | 0.027 | 0.004→0.003 |
+| Reed | Throw Lock | 2837 | 0.675 | 0.146 | 0.000 | lead0.4 | side,front | 1717 | 0.693 | 0.158 | 0.007 | 0.032→0.001 |
+| Reed | Throw Up | 311 | 0.692 | - | 0.182 | stored | dy,in_Stab Range,silk,choice_run | 172 | 0.689 | - | 0.318 | 0.000→0.040 |
+| Reed | Throwing Up? | 2837 | 0.346 | 0.336 | 0.067 | lead0.4 | dy,dist_visible,from | 1717 | 0.326 | 0.320 | 0.061 | 0.006→0.005 |
+| Tiny | Brake | 7782 | 0.736 | 0.422 | 0.170 | branch | dx,age,front,hero_x | 5511 | 0.710 | 0.391 | 0.149 | 0.011→0.003 |
+| Tiny | Defend Buzz | 12595 | 0.207 | 0.201 | 0.065 | branch | age,dist | 9402 | 0.103 | 0.102 | 0.025 | 0.015→0.003 |
+| Tiny | Defend Ready | 12767 | 0.080 | 0.080 | 0.017 | branch | age,dist | 9534 | 0.047 | - | 0.009 | 0.003→0.001 |
+| Tiny | Fire | 10501 | 0.791 | 0.528 | 0.320 | branch | dx,front,dy,last_seen_x | 7531 | 0.778 | 0.519 | 0.291 | 0.006→0.007 |
+| Tiny | Fire Ready | 10744 | 0.120 | 0.106 | 0.033 | branch | age,front | 7617 | 0.065 | 0.060 | 0.016 | 0.007→0.001 |
+| Tiny | Pull Up | 6246 | 0.704 | 0.368 | 0.160 | lead0.4 | age,dist_visible,hero_x,side | 4478 | 0.650 | 0.297 | 0.163 | 0.022→0.003 |
+| Tiny | Ready | 52160 | 1.061 | 0.934 | 0.623 | branch | age,front,from,miss_Defend Ready | 31813 | 1.105 | 1.059 | 0.836 | 0.027→0.028 |
+| Tiny | Return | 10017 | 0.730 | 0.667 | 0.400 | branch | front,age,dy,dist | 7334 | 0.626 | 0.610 | 0.313 | 0.014→0.012 |
+
+读法：(1) 由距离 / 范围决定的瞬时或每帧决策，换成**精确的触发形状**后几乎确定（Clapper After Scuttle / Dmg Attack TEST 0.009 / 0.020、Walk 0.037，Choristor Slash Check 0.050）。(2) 新加的 `age`（在这个状态里待了多久）被 25 个决策选中：计时出边直接由它看出（Clapper Idle 的 0.65 / 1.15 s → Walk：0.425 → 0.152；Reed Defend 的 1.0 s → Defend End：0.360 → 0.052；Choristor Hop Antic 进入当帧 Close Range → Attack Choice、否则 0.2 s → Hop Check：`age` 一个量就 0.001；Minister Attack、Parry Stance、Retreat?、Maestro Slash Recover 同理）。在分支帧模型里这是合法的条件（"它在这个年龄决定"），但正因如此它不能在中途当预报用（§18.11.3）。(3) 防重复和门：Bellbearer In Range 1.06 → 0.11、Minister Attack Choice 0.693 → 0.493（`prev2_choice`）、Envoy Walker 0.748 → 0.040（`charge_armed` 修正后，§18.11.1）、Maestro Summon? 0.29 → 0.18（`dead_tinies`）。(4) DEV 好、TEST 不稳的：Clawmaiden Spin 1（TEST 0.412，比无条件 0.188 差，ECE 0.066）、Spin 0（0.184 vs 0.192）、Envoy Charge（0.909，R0 重拟 0.760）、Reed Throw Up（n 172，0.318）、Maestro Attack Choice（0.324 vs R0 重拟 0.312）：小样本、DEV（R0 随机策略）和 TEST（R1 data2 / idle、波次起点）的主角行为不同（丝的多少、站位）；Tiny Ready 0.836 是 Maestro 那边的随机选择。
+
+### 18.4 感知时刻：分支帧 / FSM 的感知时刻 / 固定提前 0.1–0.5 s（DEV 交叉验证，几何 + 历史一起选；最后一列只用几何）
+
+| 类型 | 决策 | 分支帧 | 进入 | 存储 | 提前 0.1 | 0.2 | 0.3 | 0.4 | 0.5 | 只用几何：分支帧 / 最好 |
+|---|---|---|---|---|---|---|---|---|---|---|
+| Bellbearer | Check Pos | 0.153 | 0.153 | - | 0.246 | 0.246 | 0.246 | 0.247 | 0.247 | 0.153 / 0.153 |
+| Bellbearer | Evade End | 0.534 | 0.534 | - | 0.542 | 0.546 | 0.546 | 0.546 | 0.546 | 0.686 / 0.686 |
+| Bellbearer | In Range | 0.107 | 0.374 | - | 0.241 | 0.284 | 0.320 | 0.356 | 0.366 | 0.183 / 0.183 |
+| Bellbearer | Insta Throw? | 0.318 | 0.318 | - | 0.318 | 0.318 | 0.318 | 0.318 | 0.318 | 0.664 / 0.662 |
+| Choristor | Attack Choice | 0.674 | 0.674 | - | 0.844 | 0.892 | 0.927 | 0.955 | 0.981 | 0.710 / 0.710 |
+| Choristor | Combo? | 0.013 | 0.013 | - | 0.242 | 0.317 | 0.386 | 0.431 | 0.472 | 0.018 / 0.018 |
+| Choristor | Hop Antic | 0.001 | 0.001 | - | 0.001 | 0.001 | 0.001 | 0.001 | 0.001 | 0.081 / 0.006 |
+| Choristor | Hop Check | 0.190 | 0.190 | - | 0.241 | 0.313 | 0.370 | 0.420 | 0.455 | 0.191 / 0.191 |
+| Choristor | Hop Land | 0.560 | 0.560 | - | 0.559 | 0.557 | 0.558 | 0.559 | 0.561 | 0.692 / 0.692 |
+| Choristor | Slash Check | 0.023 | 0.023 | - | 0.159 | 0.222 | 0.292 | 0.339 | 0.355 | 0.028 / 0.028 |
+| Choristor | Unalert Tick? | 0.144 | 0.144 | - | 0.162 | 0.179 | 0.195 | 0.212 | 0.224 | 0.144 / 0.144 |
+| Clapper | After Scuttle | 0.006 | 0.006 | - | 0.105 | 0.159 | 0.196 | 0.228 | 0.261 | 0.006 / 0.006 |
+| Clapper | Avoid Type | 0.604 | 0.604 | - | 0.605 | 0.605 | 0.597 | 0.605 | 0.616 | 0.607 / 0.607 |
+| Clapper | Close Range | 0.732 | 0.732 | - | 0.714 | 0.710 | 0.716 | 0.721 | 0.722 | 1.185 / 1.170 |
+| Clapper | Dmg Attack | 0.007 | 0.007 | - | 0.182 | 0.258 | 0.281 | 0.323 | 0.352 | 0.007 / 0.007 |
+| Clapper | Escape Jump | 0.393 | 0.393 | - | 0.388 | 0.390 | 0.395 | 0.381 | 0.377 | 0.692 / 0.687 |
+| Clapper | Evade Scuttle | 0.024 | 0.024 | - | 0.024 | 0.024 | 0.025 | 0.025 | 0.025 | 0.095 / 0.092 |
+| Clapper | Far Range | 0.596 | 0.596 | - | 0.596 | 0.596 | 0.596 | 0.596 | 0.596 | 1.262 / 1.261 |
+| Clapper | Idle | 0.152 | 0.194 | - | 0.176 | 0.182 | 0.187 | 0.191 | 0.195 | 1.028 / 1.028 |
+| Clapper | Walk | 0.038 | 0.427 | - | 0.371 | 0.384 | 0.414 | 0.421 | 0.420 | 0.047 / 0.047 |
+| Clawmaiden | Fly | 0.158 | 0.287 | - | 0.237 | 0.264 | 0.273 | 0.275 | 0.280 | 0.480 / 0.480 |
+| Clawmaiden | Fly To Slash | 0.036 | 0.114 | - | 0.114 | 0.114 | 0.114 | 0.114 | 0.114 | 0.169 / 0.169 |
+| Clawmaiden | Spin 0 | 0.079 | 0.137 | - | 0.080 | 0.074 | 0.098 | 0.109 | 0.112 | 0.140 / 0.140 |
+| Clawmaiden | Spin 1 | 0.077 | 0.064 | - | 0.034 | 0.047 | 0.060 | 0.059 | 0.058 | 0.193 / 0.151 |
+| Clawmaiden | Spin 2 | 0.496 | 0.253 | - | 0.136 | 0.159 | 0.187 | 0.217 | 0.203 | 0.526 / 0.169 |
+| Clawmaiden | Spin Antic | 0.449 | 0.449 | - | 0.452 | 0.454 | 0.455 | 0.457 | 0.459 | 0.603 / 0.593 |
+| Clawmaiden | Tele? | 0.474 | 0.474 | - | 0.478 | 0.480 | 0.480 | 0.480 | 0.480 | 0.679 / 0.679 |
+| Envoy | Charge | 0.777 | 1.151 | - | 0.733 | 0.827 | 1.034 | 0.913 | 0.904 | 0.786 / 0.733 |
+| Envoy | Combo? | 0.486 | 0.486 | - | 0.519 | 0.532 | 0.552 | 0.562 | 0.578 | 0.531 / 0.531 |
+| Envoy | Walker | 0.040 | 0.229 | - | 0.173 | 0.274 | 0.326 | 0.383 | 0.409 | 0.087 / 0.087 |
+| Maestro | Attack Choice | 0.331 | 0.331 | - | 0.331 | 0.331 | 0.331 | 0.331 | 0.331 | 0.594 / 0.585 |
+| Maestro | Check Pos | 0.118 | 0.118 | - | 0.137 | 0.154 | 0.201 | 0.272 | 0.319 | 0.118 / 0.118 |
+| Maestro | Fly | 0.037 | 0.099 | - | 0.068 | 0.076 | 0.081 | 0.087 | 0.090 | 0.372 / 0.372 |
+| Maestro | Slash Recover | 0.007 | 0.007 | - | 0.007 | 0.007 | 0.007 | 0.007 | 0.007 | 0.363 / 0.317 |
+| Maestro | Summon? | 0.177 | 0.177 | - | 0.177 | 0.177 | 0.177 | 0.177 | 0.177 | 0.290 / 0.290 |
+| Minister | Attack | 0.088 | 0.157 | - | 0.119 | 0.139 | 0.148 | 0.151 | 0.150 | 0.205 / 0.205 |
+| Minister | Attack Choice | 0.493 | 0.493 | - | 0.493 | 0.493 | 0.493 | 0.493 | 0.493 | 0.693 / 0.693 |
+| Minister | Chase | 0.167 | 0.372 | - | 0.284 | 0.314 | 0.334 | 0.360 | 0.377 | 0.252 / 0.252 |
+| Minister | Check Pos | 0.002 | 0.002 | - | 0.301 | 0.302 | 0.310 | 0.311 | 0.310 | 0.002 / 0.002 |
+| Minister | Evade? | 0.311 | 0.311 | - | 0.400 | 0.447 | 0.479 | 0.505 | 0.520 | 0.333 / 0.333 |
+| Minister | Parry Stance | 0.242 | 0.383 | - | 0.334 | 0.349 | 0.373 | 0.382 | 0.397 | 0.450 / 0.450 |
+| Minister | Retreat? | 0.150 | 0.158 | - | 0.152 | 0.151 | 0.153 | 0.155 | 0.158 | 0.259 / 0.259 |
+| Reed | Alert | 0.384 | 0.581 | - | 0.519 | 0.567 | 0.597 | 0.616 | 0.630 | 0.835 / 0.835 |
+| Reed | Check Pos | 0.098 | 0.098 | - | 0.219 | 0.226 | 0.230 | 0.240 | 0.239 | 0.098 / 0.098 |
+| Reed | Choice | 0.480 | 0.480 | - | 0.527 | 0.552 | 0.569 | 0.578 | 0.584 | 0.569 / 0.569 |
+| Reed | Defend | 0.053 | 0.053 | - | 0.052 | 0.053 | 0.052 | 0.052 | 0.053 | 0.520 / 0.520 |
+| Reed | Evade End | 0.673 | 0.673 | - | 0.682 | 0.689 | 0.687 | 0.691 | 0.689 | 0.673 / 0.673 |
+| Reed | Lock R High | 0.360 | 0.360 | 0.146 | 0.314 | 0.254 | 0.175 | 0.147 | 0.189 | 0.365 / 0.147 |
+| Reed | Stab Pos | 0.023 | 0.037 | - | 0.067 | 0.059 | 0.067 | 0.065 | 0.073 | 0.116 / 0.116 |
+| Reed | Throw Down | 0.120 | 0.120 | 0.028 | 0.121 | 0.123 | 0.123 | 0.098 | 0.068 | 0.120 / 0.028 |
+| Reed | Throw Lock | 0.000 | 0.000 | - | 0.001 | 0.001 | 0.001 | 0.000 | 0.027 | 0.001 / 0.000 |
+| Reed | Throw Up | 0.638 | 0.638 | 0.182 | 0.633 | 0.638 | 0.627 | 0.574 | 0.456 | 0.677 / 0.185 |
+| Reed | Throwing Up? | 0.195 | 0.195 | 0.069 | 0.174 | 0.141 | 0.096 | 0.067 | 0.102 | 0.245 / 0.069 |
+| Tiny | Brake | 0.170 | 0.497 | - | 0.398 | 0.441 | 0.423 | 0.327 | 0.517 | 0.260 / 0.260 |
+| Tiny | Defend Buzz | 0.065 | 0.069 | - | 0.068 | 0.069 | 0.069 | 0.069 | 0.069 | 0.182 / 0.182 |
+| Tiny | Defend Ready | 0.017 | 0.021 | - | 0.020 | 0.024 | 0.024 | 0.024 | 0.024 | 0.049 / 0.049 |
+| Tiny | Fire | 0.320 | 0.508 | - | 0.416 | 0.472 | 0.484 | 0.478 | 0.539 | 0.320 / 0.320 |
+| Tiny | Fire Ready | 0.033 | 0.036 | - | 0.035 | 0.036 | 0.036 | 0.036 | 0.036 | 0.101 / 0.101 |
+| Tiny | Pull Up | 0.204 | 0.176 | - | 0.195 | 0.172 | 0.163 | 0.160 | 0.198 | 0.333 / 0.208 |
+| Tiny | Ready | 0.623 | 0.734 | - | 0.734 | 0.734 | 0.734 | 0.734 | 0.734 | 0.850 / 0.850 |
+| Tiny | Return | 0.400 | 0.541 | - | 0.551 | 0.546 | 0.542 | 0.541 | 0.545 | 0.451 / 0.451 |
+
+- **选中的时刻**（重建后）：61 个决策里分支帧 45、进入 1（Clawmaiden Spin Antic）、存储 3（Reed Lock R High、Throw Up、Throw Down）、固定提前 12。第一版的"进入 3"里 Choristor Hop Antic、Clapper Evade Scuttle 现在由分支帧 + `age` 表达（进入当帧就离开 = 进入时读的那一支），Reed Throwing Up? 选提前 0.4 s（= Throw Aim 的存储时刻，0.067 vs 存储 0.069）；其余提前与分支帧相差多在 0.005–0.02 nats，在噪声里。
+- **和 FSM 静态一致**：FSM 说"进入时读"的，进入时刻的几何明显更好（只用几何：Hop Antic 分支帧 0.081 → 进入 0.006；Spin Antic 0.603 → 0.593，加历史后 0.449（`age`、丝）；"存储"的，存储时刻好（只用几何：Throwing Up? 0.245 → 0.069、Throw Up 0.677 → 0.185、Lock R High 0.365 → 0.147；固定提前 0.4 s 几乎一样好，因为 Throw Aim 正好 0.4 s）；"每帧 / 瞬时"的，分支帧最好，越往前越差（Clapper Dmg Attack 0.007 → 提前 0.1 s 0.182、Choristor Combo? 0.013 → 0.242、Minister Evade? 0.311 → 0.400；数字是重建后的）。
+- **诱招（O、BAIT）用哪个**：`BranchModel.timing(tk, state)`；`BranchView` 按它取主角 / 敌人的位置（提前量用保留 1 s 的逐帧记录；进入 / 存储用每次进入状态时的快照；敌人位置只取看得见的帧、最多 0.25 s 旧；主角用 transform `pos_transform`，与扫描的 STATE hero.pos 相同——第一版用的是受击盒中心，低 0.17–0.84 u）。
+
+### 18.5 防御两支的冷却（你 10-04：被打 → 反击 和 没被打 两支）
+
+上一招结束到下一招开始的时间（DEV，`branch_gap.json`，中间没有被打；p10 / p50 / p90 s）和下一招的分布：
+
+| 类型 | 上一招的结束 | n | 间隔 p10 / p50 / p90 | 下一招 |
+|---|---|---|---|---|
+| Minister | 格挡没被打（`Parry Stance End`） | 2,001 | 0.00 / 0.97 / 2.48 | 冲刺 46 %、闪避 31 %、格挡 23 % |
+| | 被打后反击（`Parry Slash End`） | 641 | 0.00 / 1.11 / 2.55 | 冲刺 47 %、闪避 27 %、格挡 26 % |
+| | 冲刺（`Attack End`） | 1,751 | 0.00 / 1.00 / 2.30 | 格挡 47 %、闪避 28 %、冲刺 26 % |
+| Reed | 举盾没被打（`Defend End`） | 1,666 | 0.00 / 0.67 / 1.55 | 闪避 49 %、刺 31 %、扔 20 % |
+| | 被打后反击没钩住（`Parry Slash End`） | 409 | 0.00 / 0.80 / 1.57 | 闪避 48 %、刺 33 %、扔 19 % |
+| | 反击钩住了（`Multihit End`） | 292 | 0.10 / 1.10 / 1.58 | 刺 47 %、闪避 29 %、扔 25 % |
+| Bellbearer | 闪避（`Evade End`） | 2,087 | 0.00 / 0.85 / 1.45 | **扔 100 %** |
+| Maestro | 防御（`Slash Recover F`） | 4,426 | 1.15 / 1.27 / 1.41 | 斩 89 %、召唤 11 %、防御 0 |
+
+结论：Minister 的两支差别小（都经 `Evade?` → `Retreat?` → `Set Attack Time` U(0.5, 1.5)，FSM 里没有按分支的冷却）；Reed 反击**钩住**之后下一招明显晚（p50 1.10 vs 0.67 s）、闪避少（主角被打飞，不在它的闪避盒里）；两支的差别作为 `prev_end` 进了模型（Minister Parry Stance、Reed Alert 都选了 `since_end` / `prev_end`）。格挡没被打、之后中间又被打（`hit`，n 498）时 Minister 的间隔反而长（p50 1.47 s）：被打把攻击计时夹到 ≤ 0.5 s，但出招还要主角在 Attack Range 里。
+
+### 18.6 Tiny 一只一只（`tiny_orbit`，DEV 拟合、TEST 评估）
+
+- **静态**：Maestro `Defend Start` 给三只发 DEFEND READY；`Defending`（1.75 s）把子物体 Defense Formation（局部 (0, −0.22)）转 −180°/s、缩放 0.5 → 2.5（0.75 s，easeOutSine），三个 Defense Point 在局部半径 2、90° / −30° / 210°：轨道半径 1 → 5 u、120° 间隔。`Fire Antic` 用 `GetRandomChild(Ready Flies)` 挑一只，**当场**发 FIRE READY，0.7 s 后（Slash 1）发 FIRE。
+- **实测角速度**：±216°/s（DEV 中位数 −216.2 / +216.2，p25–p75 176–242），**方向跟 Maestro 的朝向**（flipX 0 顺时针、1 逆时针：Formation 是它的子物体，Rotate 在本地空间转）。半径：防御开始约 1.25 s 后中位数 5.07 u（p1–p99 约 3.8–5.4，6 场抽查），之前在成形（Tiny 从头顶飞过来）。
+- **逐只预测的误差**（中心距离，TEST 207,764 个起点；"稳定" = 防御开始 ≥ 1 s 且在 Defend Buzz）：
+
+| 提前 | 0.1 s | 0.2 s | 0.3 s | 0.4 s | 0.6 s | 0.8 s |
+|---|---|---|---|---|---|---|
+| 稳定 p50 / p99 / 最大（u） | 0.33 / 4.0 / 20.7 | 0.67 / 6.3 / 21.7 | 1.00 / 7.9 / 23.7 | 1.32 / 8.9 / 25.7 | 1.95 / 9.5 / 26.3 | 2.54 / 9.9 / 27.7 |
+| 成形 p50 / p99 | 1.77 / 19.6 | 2.64 / 20.2 | 3.00 / 20.9 | 3.16 / 20.9 | 3.76 / 19.8 | 4.59 / 18.0 |
+
+  尾巴来自：轨道低于地面时 Tiny 被地形挡住、停在半径约 3.8 u 不转（之后再追上）、被打退、Maestro 自己移动。**结论：逐只轨道作打分用够了（中位数 0.3–2.5 u），但离"留出全包"差得远（0.1 s 就要 20 u 余量），不能替换 R2 的整团并集**；要替换得先把"跟着防御点走、被地形挡住"的跟随模型做出来再认证。`TinyOrbit.predict` 已按地形边界（数据的 0.05–99.95 % 位置）夹住。
+- **冲锋**（TEST 7,638 次）：FIRE READY → Fire **0.717 s**（p1 0.692、p99 0.733）；方向 **斜下约 52°**（前 0.1 s 位移，p5–p95 48.7–52.4°），**朝主角那一侧 99.7 %**（7,473 / 7,495）；挑哪只：被挑中的是离主角最近那只 3,050 次，随机期望 3,042（**就是随机，不看与主角的连线**）。站在地上被撞的比例（相对 FIRE READY 时 Maestro 的 x，冲锋方向为正）：身后 2–8 u 0.8–0.9 %、**正下方 7.1 %**、前方 3 u 31 %、6 u 56 %、8–10 u 约 59 %（DEV 同：0.4 % / 6.2 % / 27 % / 52 % / 58–60 %）——和你说的"站在指挥家正下方、走到另一侧"一致，也和 R0 逐只回放（7.1 % / 34 % / 58 %）一致。
+- 所以对规划器：Fire Ready 一出现就知道是哪只、0.7 s 后冲、往主角那一侧斜下 52°；走到 Maestro 身后 2 u 以外就基本不会被这一冲撞到。
+
+### 18.7 身体触发的反应分支（forum_reactive_moves.md 的 3.2 落到代码里，只进 J / P）
+
+- `branch_model.REACTIVE`：Bellbearer In Range → Evade（Evade Range、≥ 0.5 s、¬Evade Cooldown，每次 0.97）；Clapper Idle → Evade Scuttle（Slam Range、≥ 0.25 s、硬币 0.49）；Reed Alert → Evade Antic（已上膛，0.95；它进 Alert 时已在盒里约 0.8）、→ Defend Start（Defend Range、¬Just Did Defend、硬币 0.45）。门从 BranchMemory 来（§18.2）；**硬币已亮出反面**（这一次访问里主角已在盒里、门开着两帧以上它没反应）→ 这次访问 p = 0。
+- `BranchView.reactive(tr, T)`：现在开着的触发和 p；`entry_prob(tr, T, path)`：候选的主角盒路径第一次在门开之后进盒的时刻和 p（敌人按最后看到的位置不动：这些源状态都是悬停 / 站着）。规划器（R6 / R7）把它当成和命中分支同类的 J / P 分支用；**S / Hz / U 不变**。
+- 行为表里，同一件事由精确的触发形状协变量表达：Bellbearer In Range 选 `in_Evade Range`、Reed Alert 选 `in_Evade Range` + `in_Defend Range`、Clapper Idle 选 `in_Slam Range`、Minister Evade? 选 `in_Evade Range`（§18.3）。
+
+### 18.8 支撑、召回、Bell Beast、算力
+
+- **支撑不动**：BranchMemory 挂在 EnemyTracker 上（只在 `enter` / `_hit` 里各多一行），放置、`occupied`、`prob`、`support_set` 都不读它；测试 `test_multi_forecaster_branch_view_is_scoring_only` 在合成 Reed 上逐帧比较有 / 没有分支模型的占据、概率图、支撑集：完全相同。
+- **留出召回（R2 / R3 的协议，分支模型打开：`multi_recall fresh --tables 0 --branch`，冻结检出 `C:\ssbot\live_r5m_092e3e2`）**：R0 的 35 场留出、fold 0 的表：L2 / L3 / L4 各 74,585 / 74,585（全部由预报本身盖住，钩 465 / 465，按类型 100 %），与 R3 认证（2a10a0d，`C:\ssbot\data\m2_forum_r3\recall_fresh_2a10a0d.json` 的 fresh/tables0）逐项相同（`C:\ssbot\data\m2_forum_r5m\recall_fresh_t0_branch_092e3e2.json`）。
+- **Bell Beast**：它不走 EnemyTracker（`MultiForecaster(boss=...)` 包装时 `bv` 为 None，所以这项检查走的是分支模型关闭的路径——这正是回归规则要的"Forum 开关关着时逐位相同"；它不检验分支模型本身）；`multi_recall bellbeast`（20261003_144536 i4_000 4,001 帧 + 892 次铃区检查、20261004_095304 i0_001 4,001 帧 + 1,333 次）放置、occupied、prob、support_set、committed、战术、规划器决策、铃区八项全部 **0 差**；全部测试（冻结检出 092e3e2）1,146 passed、3 skipped、1 xfailed（第一遍有 15 个规划器 / 运动学测试只因为环境里 NUMBA_NUM_THREADS = 3 报线程数错，按 4 线程重跑 73 / 73 通过），之后的提交（反应分支、换行）`test_branch_model.py` 19 / 19。
+- **算力**：第一版 `scratchpad bench_bv.py`（20261003_074719 i3 ep0，51,823 帧）每帧 p50 0.17 ms、p99 1.05 ms、最大 7.8 ms。复核后的数字（预报表、快照、每帧对每个活着的敌人算 `next_attack_probs`）见 §18.11.5。
+
+### 18.9 没做完 / 未核实
+
+- Tiny 的控制 FSM 没解码（预制体在场景包外）；冲锋 52° 和"贴地段"只来自录像。
+- 逐只轨道的跟随模型（防御点 + 地形阻挡 + 速度上限）没做，所以还不能替换支撑。
+- 时刻比较里几个"提前"胜出的差距在噪声内（§18.4），模型照选中的用；小样本决策（Envoy Charge、Reed Throw Up、Escape Jump）校准变差，可以把协变量数按 n 限制（现在一律 ≤ 4）。
+- 反应分支的 p 是 R0 的每次访问比例（forum_reactive_moves §2.2），没有按距离 / 进盒方式细分；规划器还没接 `entry_prob`。
+- V4 的计数在结果看不见时（例 Minister Evade? 主角在盒外两种抽法都去 Retreat?）是隐藏的，现在用看得见的历史近似，没有做隐状态滤波。
+
+- （复核后）预报表在 DEV → TEST 有的不迁移：Tiny Ready（TEST 1.19，比每次访问表 0.98 差）；它是 Maestro 那边的选择，要看 Maestro 的状态才有用，现在消费方对 Tiny Ready 的 `next_p` 不要当真。分支帧模型里小样本的 Clawmaiden Spin 0 / 1、Envoy Charge 在 TEST 上不稳（§18.3）。
+- （复核后）预报表是"按数据里主角的走法平均"的：它不随候选路径变。要给候选算"沿这条路下一招是什么"，得把分支帧模型和"何时触发"（每帧状态的危险率）沿候选的主角路径积分，没做。
+
+### 18.10 复现
+
+```
+cd brain   # 低优先级，NUMBA_NUM_THREADS 4；复核后的完整流程：C:\ssbot\data\m2_forum_r5m\fix\pipeline_f1.cmd <rev>（冻结检出 C:\ssbot\live_r5mf_<rev>）
+..\scripts\uv.cmd run python -m ssbot.tools.forum_branch scan C:\ssbot\data\m2_forum_r0\cache C:\ssbot\data\m2_forum_r0\cache_fresh --out recs_dev.pkl --ahead-out ahead_dev.pkl --extra-dir C:\ssbot\data\m2_forum_r5m\hero --workers 3
+..\scripts\uv.cmd run python -m ssbot.tools.forum_branch scan C:\ssbot\data\m2_forum_r1c\cache_fresh --out recs_test.pkl --ahead-out ahead_test.pkl --extra-dir C:\ssbot\data\m2_forum_r5m\hero --workers 3
+..\scripts\uv.cmd run python -m ssbot.tools.forum_branch study recs_dev.pkl --json study_dev.json
+..\scripts\uv.cmd run python -m ssbot.tools.forum_branch study ahead_dev.pkl --json study_ahead_dev.json
+..\scripts\uv.cmd run python -m ssbot.tools.forum_branch build recs_dev.pkl --study study_dev.json --ahead ahead_dev.pkl --ahead-study study_ahead_dev.json --test recs_test.pkl --ahead-test ahead_test.pkl --out ..\knowledge\1.0.30000\enemies\forum\branch_model.json --report holdout_test.json
+..\scripts\uv.cmd run python -m ssbot.tools.forum_branch parity <cache.npz ...> --model ..\knowledge\1.0.30000\enemies\forum\branch_model.json --extra-dir C:\ssbot\data\m2_forum_r5m\hero --json parity.json
+..\scripts\uv.cmd run python -m ssbot.tools.tiny_orbit --fit C:\ssbot\data\m2_forum_r0\cache --fit C:\ssbot\data\m2_forum_r0\cache_fresh --test C:\ssbot\data\m2_forum_r1c\cache_fresh --out ..\knowledge\1.0.30000\enemies\forum\tiny_orbit.json --json C:\ssbot\data\m2_forum_r5m\tiny_orbit_report.json
+# 召回 / Bell Beast / 全部测试 / 逐帧核对：C:\ssbot\data\m2_forum_r5m\fix\val_f1.cmd <rev>
+```
+扫描 142 场约 5 min、202 场约 2 min（3 个进程，带预报样本：DEV 1,341,860 个、TEST 893,979 个）；study 分支帧约 5 min、预报约 5 min；build 约 3.5 min；逐帧核对每场约 1–3 min；tiny_orbit 约 10 min。分支帧表要的生成文件 `knowledge/.../forum/*_hitboxes.npz`（git 忽略）只有 parity / 召回用到。
+
+### 18.11 复核之后的修正（fixer 轮，2026-10-08；代码 2f5b96a → dd5cbff，分支 worktree-wf_814dfeea-b10-1；离线，没有连接游戏）
+
+核查（第一轮 week push 的 verifier）推翻了三条说法、给了两条高、一条中、四条低的问题。这一节说第一版错在哪、改了什么、重测的数字。输出在 `C:\ssbot\data\m2_forum_r5m\fix\`（`v_2f5b96a\`：重扫、选择、重建、留出报告 `holdout_test.json`、表 `tables.md`；`val_7db1c2d\`：7 场逐帧核对、召回、Bell Beast；`val_dd5cbff\`：全部测试、2 场整场核对）。
+
+#### 18.11.1 第一版错在哪
+
+1. **训练 / 运行不一致（高）**。第一版选择的候选里有只在离线扫描里算的 R0 协变量（`dist_visible`、`side_visible`、`last_seen_x`、`hero_x`、`since_<家族>`、`miss_<后继>`），61 个决策里 26 个选了至少一个；运行时的 `BranchView` 算不出来，回退在第一个缺的协变量处停下。例：Maestro Attack Choice 唯一的协变量是 `miss_Defend Start`，运行时就成了无条件表，还会在 DEFEND 之后给 DEFEND 概率（FSM 不允许）。核查者只用运行时算得出的协变量重算 TEST：0.340，不是 0.315。这次逐帧核对又找出四处：运行时的 `BranchMemory` 用的是走子表的分段（少 Maestro 的 MA_POINT、Envoy 的 EN_HOPSLASH / EN_ENTRY，`prev` / `run` / `since_*` 和训练不同）；主角参考点（运行时用受击盒中心，扫描用 transform）；敌人位置（运行时用 `tr.pos`，可能是很久以前的，扫描只要 0.25 s 内看得见的）；Tiny 归属（扫描按整场投票，用到了未来的帧）。
+2. **只在分支帧拟合，却当预报用（高）**。每条记录都是状态离开的那一帧，所以模型是 P(后继 | 它就在这一帧决定)；第一版的 `next_attack_probs` / `Subject.next_p` 在敌人还没决定的每一帧都拿它当"下一招"的预报。核查者在 68 场 TEST 上提前 0.2 / 0.5 s 查：2.31 / 2.92 nats，无条件表 0.70 / 0.71（Clapper Idle 4.69 / 7.68、Reed Alert 2.65 / 7.00、Minister Chase 4.17 / 4.70）。第一版的 0.695 → 0.315 比的是"在分支帧条件下"的模型和每次访问的边际，**不是预报能力**。
+3. **Envoy 的 Charge Range 门（中）**。FSM：Charge Range 物体在场景里一开始就 active；Walker 的 `ActivateGameObjectDelay`（1.5 s，resetOnExit 0：反编译 `ActivateGameObjectDelay.cs`，只在待满时激活，离开不复位）待满 1.5 s 才打开、离开后保持；Slash Antic 打开，Charge Antic 关；CHARGE 还要 `Alerted`（Slash Antic / Ambush Ready 设）。第一版初值关、只在 Walker 里按时间算，于是 Walker → Charge Antic 时门是关的 DEV 131 次、TEST 34 次。
+4. 低：当帧命中的排除规则几乎用不上（§18.2 已改，见 18.11.4）；"R0" 基线其实是 R0 协变量名重拟（现在叫"R0 重拟"，§18.3）；Tiny 归属用未来的帧；主角参考点。
+
+#### 18.11.2 改了什么；运行时 = 扫描，逐帧核对
+
+- **一套函数**：R0 时代的几何（`dist_visible`、`last_seen_x`、`hero_x`；`side_visible` 就是 `side`）进 `geometry()`，`since_<家族>`（没出过 = "none"）/ `miss_<后继>` 进 `BranchMemory.features`，Clapper 的伴 `clapper_context`、Tiny 归属 `TinyOwners`（每帧、只用过去）在运行时和扫描里是同一段代码；`BranchMemory` 在两边都用 `FORUM_SPECS` 的分段（离线 `memory_for`；运行时从 `branch_model.json` 的 `segmentation` 取，它在 build 时从 FORUM_SPECS 写进去——combat 包不能 import `knowledge.gauntlet_tables`，`test_import_firewall` 管着）。新加 `age`（在这个状态里待了多久）。
+- **位置**：主角用 transform（`HeroState.pos_transform`，= STATE `hero.pos`）；敌人只取它被看见的帧、最多 0.25 s 旧；"进入" / "存储"时刻用每次进入状态时的快照（第一版只留 1 s 的记录，长状态的进入时刻会取不到）。
+- **扫描按帧走**，和运行时一样：一帧里的事件按顺序，再到帧末（Tiny 归属、预报样本）。
+- **逐帧核对** `forum_branch parity`：把缓存那一场的录像经 `OracleBackend` → `MultiForecaster(branch=...)` 回放，在每一帧、每个处在模型决策状态里的敌人上（Tiny 的 Dead 除外），比较 `BranchView` 算的全部协变量（now / entry / stored 三个时刻的几何 + 全部历史、门、跨敌人）和扫描在同一帧算的。7 场（R0 DEV 3 场、R1 TEST 4 场）：705,805 行（帧 × 敌人）逐项比较，**0 差**（`val_7db1c2d\parity.json`；修正过程中分段还没统一时，第一场前 12,000 帧里 Envoy 的 `since_*` 有 350 处不同，就是这样找出来的）。dd5cbff（分段改从模型里取之后）再核 2 场整场：331,979 行 0 差。测试 `test_runtime_covariates_equal_the_scans_on_a_recording`（录像在本机时跑，6,000 帧，0 差）。说明：分支帧记录是在状态离开那一帧的事件处理中取的，运行时从不在那一刻查询（它查的是帧末、敌人已在下一个状态），所以核对比较的是规划器真正查询的帧末；分支帧表和预报表在帧末用的是同一套函数。
+- **门的数据核对**（重扫的记录，`v_2f5b96a\gates_check.txt`）：Envoy Walker → Charge Antic DEV 465 / 465、TEST 104 / 104 都是 `charge_armed` ∧ `alerted`；Bellbearer 有 Evade Cooldown 时 0 次闪避（DEV 1,378 / TEST 935 次决策）、闪过之后的 In Range 0 次再闪避；Reed 没上膛 0 次 Evade Antic、Just Did Defend 时 0 次 Defend Start；Clapper Evaded 时 0 次 Evade Scuttle；Maestro 防御之后的 Attack Choice 4,412 / 4,412（TEST 3,172 / 3,172）是 Fire Antic。
+
+#### 18.11.3 预报表（`ahead`）：中途查询用的
+
+- **样本**：敌人在一个决策状态里的每一帧都是规划器的一次查询；每次访问从进入那一帧起每 0.1 s 取一个样本（Tiny 0.25 s；Tiny 的 Dead 是等 Maestro 召唤的 30 s 等待，不取），协变量是那一帧看得见的（几何取 now / entry / stored，历史含 `age`），标签是这次访问最后去了哪个后继。瞬时决策（进入当帧就离开）没有样本：规划器从来不会看到它是"当前状态"，链里用分支帧表。DEV 1,341,860 个、TEST 893,979 个样本；29 个决策状态有预报表。同样的贪心选择（两折、按场）。
+- **用法**：`BranchView.next_attack_probs`（= `Subject.next_p`）：当前状态用它的预报表，链到的下一个决策按"现在进入"用它的预报表（瞬时的用分支帧表）；`branch_probs(..., ahead=True)` 直接给。分支帧表仍是 `branch_probs` 的默认（"如果现在决定"）。
+- **TEST 留出**（202 场的样本；"每次访问表" = 今天运行时的 `p_succ`；"分支帧模型（中途查）" = 第一版 next_p 的做法：分支帧表在样本那一帧查，只对分支帧表时刻是 branch / entry / stored 的决策）：
+
+| | 样本 | 每次访问表 | 按样本的无条件 | 分支帧模型（中途查） | **预报表** |
+|---|---|---|---|---|---|
+| 全部 | 889,333 | 0.716 | 0.603 | — | **0.581** |
+| 分支帧模型能查的决策 | 849,049 | 0.729 | 0.612 | 4.995 | **0.596** |
+| 退出前 0.2–0.3 s | 97,553 | 0.639 | 0.554 | 4.378（94,043 个） | **0.427** |
+| 退出前 0.5–0.6 s | 58,428 | 0.767 | 0.630 | 5.364（55,266 个） | **0.576** |
+
+  核查者的结论成立：分支帧模型中途查询比无条件表差得多（这里 4.4–5.4 nats；核查者用第一版的表、68 场、精确的提前帧得 2.31 / 2.92；重建后的分支帧表有 25 个决策用了 `age`，它只在决定那一刻有意义，中途查询多半因此更差）。预报表在规划器真正查询的帧上比今天的 `p_succ` 好（0.716 → 0.581），但这 0.135 nats 里 0.113 来自"按样本的无条件"（0.603：长状态占的帧多，按帧加权的边际本身就不同），全部协变量（`age`、几何、历史）只再降 0.022——中途的下一招主要取决于主角之后怎么走，表里只能按数据里的走法平均。
+
+- **逐个决策**（DEV 交叉验证、TEST 留出，nats / 样本；后两列 n / 每次访问表 / 分支帧模型 / 预报表）：
+
+| 类型 | 决策 | DEV 样本 | DEV CV 无条件 → 预报 | 时刻 | 协变量 | TEST 样本 | 每次访问表 | 分支帧模型（中途查） | 预报 | 退出前 0.2–0.3 s：n / 每次访问表 / 分支帧模型 / 预报 | 0.5–0.6 s：n / 每次访问表 / 分支帧模型 / 预报 | ECE 预报 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| Bellbearer | In Range | 124740 | 0.793 → 0.608 | now | dx,evade_cd,age,dist | 81962 | 0.931 | 3.800 | 0.572 | 8345 / 0.985 / 2.530 / 0.529 | 8124 / 0.970 / 4.457 / 0.645 | 0.007 |
+| Clapper | Evade Scuttle | 40165 | 0.019 → 0.019 | now |  | 19042 | 0.054 | 3.131 | 0.011 | 4741 / 0.048 / 2.301 / 0.005 | 0 / - / - / - | 0.001 |
+| Clapper | Idle | 136026 | 0.748 → 0.561 | now | age,dist,in_Slam Range,hit | 68164 | 1.249 | 14.605 | 0.510 | 8462 / 1.352 / 17.653 / 0.576 | 5827 / 1.185 / 15.580 / 0.468 | 0.023 |
+| Clapper | Walk | 84628 | 0.625 → 0.530 | now | dist,age,dy,last_seen_x | 43719 | 0.762 | 4.265 | 0.584 | 7346 / 0.581 / 4.418 / 0.437 | 2718 / 0.905 / 4.781 / 0.732 | 0.047 |
+| Clawmaiden | Fly | 44708 | 0.937 → 0.609 | now | suck_age,dist,age | 27369 | 1.042 | 7.935 | 0.570 | 3674 / 0.886 / 7.639 / 0.449 | 3252 / 0.841 / 10.394 / 0.456 | 0.005 |
+| Clawmaiden | Fly To Slash | 11255 | 0.775 → 0.622 | now | dist,since_end,age | 6987 | 0.760 | 4.576 | 0.537 | 881 / 0.712 / 4.310 / 0.457 | 646 / 0.783 / 5.041 / 0.629 | 0.019 |
+| Clawmaiden | Spin 0 | 9532 | 0.177 → 0.122 | now | silk,in_Suck Start Range,miss_Spin 1,age | 5601 | 0.154 | - | 0.123 | 609 / 0.164 / - / 0.110 | 579 / 0.140 / - / 0.141 | 0.003 |
+| Clawmaiden | Spin 1 | 10860 | 0.159 → 0.100 | now | silk,prev_end | 6534 | 0.150 | - | 0.111 | 600 / 0.179 / - / 0.156 | 601 / 0.140 / - / 0.082 | 0.002 |
+| Clawmaiden | Spin 2 | 10682 | 0.649 → 0.226 | now | silk,in_Suck Start Range | 6188 | 0.637 | - | 0.148 | 583 / 0.661 / - / 0.135 | 580 / 0.638 / - / 0.144 | 0.009 |
+| Clawmaiden | Spin Antic | 2048 | 0.040 → 0.037 | now | suck_age | 1265 | 1.304 | 4.755 | 0.013 | 76 / 1.300 / 9.503 / 0.006 | 0 / - / - / - | 0.003 |
+| Envoy | Charge | 5836 | 1.266 → 1.076 | now | hero_x,front,side,last_seen_x | 1310 | 1.294 | - | 1.064 | 108 / 1.296 / - / 0.931 | 95 / 1.301 / - / 0.984 | 0.021 |
+| Envoy | Walker | 2799 | 0.910 → 0.755 | now | dx | 720 | 0.710 | 3.025 | 0.507 | 73 / 0.650 / 3.594 / 0.452 | 46 / 0.728 / 3.701 / 0.502 | 0.050 |
+| Maestro | Fly | 31893 | 0.132 → 0.097 | now | dist,since_end | 21979 | 0.509 | 0.237 | 0.081 | 1779 / 0.521 / 0.314 / 0.084 | 1787 / 0.506 / 0.247 / 0.082 | 0.002 |
+| Maestro | Slash Recover | 6986 | 0.020 → 0.020 | now |  | 5222 | 1.514 | 4.781 | 0.009 | 1741 / 1.515 / 9.130 / 0.010 | 0 / - / - / - | 0.001 |
+| Minister | Attack | 18568 | 0.445 → 0.344 | now | age,dist,front,dist_visible | 16967 | 0.555 | 3.700 | 0.411 | 2472 / 0.566 / 5.236 / 0.422 | 2116 / 0.474 / 6.017 / 0.373 | 0.018 |
+| Minister | Chase | 94854 | 0.413 → 0.393 | now | age,dist,last_choice | 83260 | 0.306 | 4.680 | 0.238 | 5877 / 0.358 / 3.916 / 0.264 | 5201 / 0.314 / 4.583 / 0.252 | 0.063 |
+| Minister | Parry Stance | 25059 | 0.414 → 0.380 | now | age,dist | 25872 | 0.368 | 3.808 | 0.283 | 3058 / 0.405 / 0.566 / 0.290 | 2793 / 0.346 / 6.746 / 0.254 | 0.040 |
+| Minister | Retreat? | 14942 | 0.309 → 0.274 | now | dist,age | 13360 | 0.222 | 2.367 | 0.216 | 1739 / 0.270 / 2.095 / 0.216 | 1596 / 0.168 / 3.688 / 0.207 | 0.034 |
+| Reed | Alert | 69796 | 0.952 → 0.758 | now | dist,last_choice,age,armed | 39947 | 1.163 | 5.479 | 0.642 | 3347 / 1.234 / 2.138 / 0.679 | 2978 / 1.172 / 2.859 / 0.624 | 0.015 |
+| Reed | Defend | 21271 | 0.526 → 0.484 | now | age,dist | 12879 | 0.500 | - | 0.404 | 1333 / 0.556 / - / 0.421 | 1307 / 0.492 / - / 0.402 | 0.034 |
+| Reed | Stab Pos | 10376 | 0.412 → 0.292 | now | dx,age | 4542 | 0.457 | 1.264 | 0.236 | 637 / 0.250 / 0.125 / 0.128 | 339 / 0.433 / 1.417 / 0.227 | 0.005 |
+| Tiny | Brake | 17541 | 0.729 → 0.533 | now | hero_x,front,last_seen_x,dist_visible | 11338 | 0.714 | 4.182 | 0.496 | 1850 / 0.713 / 5.377 / 0.510 | 780 / 0.714 / 2.123 / 0.572 | 0.007 |
+| Tiny | Defend Buzz | 86520 | 0.138 → 0.133 | now | since_AT_ENTRY | 65361 | 0.078 | 4.104 | 0.067 | 9303 / 0.066 / 0.013 / 0.054 | 2561 / 0.102 / 5.398 / 0.093 | 0.011 |
+| Tiny | Defend Ready | 12651 | 0.031 → 0.028 | now | dist | 9485 | 0.023 | 5.370 | 0.015 | 9476 / 0.018 / 5.374 / 0.010 | 0 / - / - / - | 0.001 |
+| Tiny | Fire | 20086 | 0.762 → 0.553 | entry | dx,hero_x,side,dist | 13905 | 0.759 | 2.221 | 0.497 | 3185 / 0.756 / 2.314 / 0.459 | 648 / 0.699 / 2.590 / 0.508 | 0.009 |
+| Tiny | Fire Ready | 31710 | 0.044 → 0.044 | now |  | 22705 | 0.038 | 3.908 | 0.025 | 1252 / 0.042 / 0.084 / 0.030 | 3 / 4.858 / 1.277 / 5.879 | 0.002 |
+| Tiny | Pull Up | 10521 | 0.587 → 0.259 | entry | hero_x,side,dx,age | 7772 | 0.578 | - | 0.192 | 277 / 1.253 / - / 0.579 | 0 / - / - / - | 0.004 |
+| Tiny | Ready | 328312 | 0.871 → 0.772 | now | from,age,miss_Defend Ready,prev | 237586 | 0.975 | 3.915 | 1.191 | 12157 / 1.076 / 1.213 / 1.255 | 11673 / 1.030 / 1.587 / 1.176 | 0.044 |
+| Tiny | Return | 39943 | 0.549 → 0.471 | now | age,from,prev_end | 28292 | 0.536 | 6.235 | 0.445 | 2572 / 0.636 / 6.537 / 0.529 | 2178 / 0.585 / 5.888 / 0.457 | 0.006 |
+
+  读法：Clapper Idle 1.249 → 0.510、Reed Alert 1.163 → 0.642、Clawmaiden Fly 1.042 → 0.570、Bellbearer In Range 0.931 → 0.572（每次访问表 → 预报表）；Maestro Slash Recover、Clawmaiden Spin Antic 这类"进入后几乎确定"的状态每次访问表很差（1.5 / 1.3：瞬时离开的那一支在中途已经不可能）而预报表 0.01。**Tiny Ready 不迁移**：DEV 交叉验证 0.871 → 0.772，TEST 1.191，比每次访问表 0.975 还差（ECE 0.044）：它的出边是 Maestro 那边的选择，R1 的波次起点 / 策略改变了它的时间分布；消费方对 Tiny 的 Ready 先别信 `next_p`（18.9）。
+
+#### 18.11.4 其它数字的重测
+
+- **分支帧模型**（§18.3）：TEST 0.695 → **0.284**（第一版说 0.315，而运行时实际只有核查者的 0.340）；R0 重拟 0.511。感知时刻（§18.4）：只用几何时 Choristor Hop Antic 分支帧 0.081 / 进入 0.006、Reed Throwing Up? 0.245 / 存储 0.069，和第一版相同。
+- **当帧命中**（DEV 22 场，`fix\lag_s.txt`）：5 种 TOOK DAMAGE 出边共 1,100 次，和同一帧的记录命中重合的只有 1 次；Clapper Idle → Dmg Attack 194 / 568、Minister Chase → Range Check 84 / 299 在一次记录命中之后 12–18 帧（多数 18 帧 = 0.3 s）；Reed Alert → Stab Pos 只有 7 / 176；其余前 0.35 s 内没有记录到的命中（中位数 1.9–4 s 前；Clapper 20、Minister 36、Reed 29 次之前根本没有记录命中）。`hit` 现在含当帧（过去的、看得见的信息）。
+- 没重测（代码没动）：Tiny 轨道 / 冲锋（§18.6）、防御两支的间隔（§18.5）、Bellbearer 2,229 / 2,229（核查者核了等价的 In Range 条件：0 次再闪避，上面重扫的记录同样 0）。
+
+#### 18.11.5 支撑、召回、Bell Beast、算力、测试（召回 / Bell Beast / 7 场逐帧核对：冻结检出 `C:\ssbot\live_r5mf_7db1c2d`；全部测试和 2 场整场逐帧核对：`live_r5mf_dd5cbff`，只改了分段从哪里取）
+
+- **支撑不动**：放置、`occupied`、`prob`、支撑集都不读分支模型（测试 `test_multi_forecaster_branch_view_is_scoring_only`）。留出召回（`multi_recall fresh --tables 0 --branch`，新模型打开）：R0 的 35 场 L2 / L3 / L4 各 74,585 / 74,585、钩 465 / 465，和第一版（092e3e2）、R3 认证逐项相同（只有耗时：每次预报 1.42 vs 1.34 ms）。
+- **Bell Beast**（`MultiForecaster(boss=...)` 没有 BranchView，走的是分支模型关着的路径，正是回归规则要的）：20261003_144536 i4_000、20261004_095304 i0_001 各 4,001 帧、铃区 892 / 1,333 次检查，放置 / occupied / prob / 支撑集 / committed / 战术 / 规划器决策 / 铃区八项 **0 差**。
+- **算力**（逐帧核对时每帧对每个活着的敌人算 `next_attack_probs`，= `Subject.next_p` 的工作；低优先级、和别的作业并行，偏保守）：第一版量的那一场（20261003_074719 i3 ep0，51,823 帧）每帧 p50 0.13 ms、p99 1.07 ms、最大 5.0 ms（第一版 0.17 / 1.05 / 7.8）；7 场的 p99 0.58–1.14 ms、最大 8.8 ms；dd5cbff 上同一场（并行作业少时）p50 0.11 / p99 0.80 / 最大 3.1 ms。`ForumPlannerPolicy(branch_model=True)` 仍默认关。
+- **测试**：dd5cbff 全部 1,150 passed、2 skipped、1 xfailed（NUMBA_NUM_THREADS 4，`val_dd5cbff	ests.log`）。7db1c2d 那一遍有 1 个失败：`test_import_firewall`（combat → knowledge.gauntlet_tables → ipc：运行时的 `memory_for` 直接读了 FORUM_SPECS），所以分段改成存在模型里、从模型取（dd5cbff）。
+
+## 19. 第 0 波受击取证：为什么规划器 13 s 挨 4 下就退出（2026-10-08，task wave-0 forensics；离线 + 实例 0 的短实战）
+
+对象：到目前为止全部 Forum 规划器实战（都在第 0 波退出）：A0b（`20261005_205437` / `205857`，冻结 f8c0c62，50 场 QUIT + 1 HARNESS_FAIL）和昨晚的 7 组（R5 价值 `20261008_015959` / `021002` / `022115`，R6 v0 `015904` / `020919` / `021942` / `022951`，各 25 场）= 225 场、949 个 damage 受击 + 176 个 Multihit tick；R5 的 `015907` 只有 1 场 HARNESS_FAIL，不计。工具（本节新增）：`ssbot.tools.forum_hit_forensics`（逐场开环回放 + 逐 tick 后见之明）、`ssbot.tools.forum_attack_outcomes`（第 0 波每个出招实例和主角的应对，bot 与你的录像并排）。
+
+### 19.1 方法
+
+- **开环回放**：把录像的 STATE 逐帧喂给 `ForumPlannerPolicy`（同 `forum_policy_replay`，监督器不接管按键；每个 tick 的前缀用录像里实际生效的按键，所以每个 tick 都从真实发生的状态出发规划），`ForumPlanner.debug` 保留这一 tick 的全部候选行（名义盒、无敌帧、J、ok / known、t_hit）。截止时间 inf（决定与机器快慢无关）；回放的选择和实战日志的选择按名字比对，A0b 98.5 % 一致（A0b 的代码 = main 的 Forum 规划器，f8c0c62 之后没改过）；R5 / R6 的组用 main 的规划器回放（按代码，它们改的是 J、目标权重和战术，S / Hz / U / FORCED_RISK 与 main 相同，它们自己的测试也这么说；但这一点没有用它们自己的代码回放验证过），和它们实战的选择一致 64 %（R5 全开 `015959`）、83 %（R6 L2 开 `015904`）、98.5 %（R6 L2 关 `020919`），不一致的 tick 上回放的选择是反事实的。
+- **支撑覆盖**：每个受击在 L = 2 / 3 / 4 帧前的预报下判（同 R2 召回的配对：受击帧或前一帧的主角盒中心）；多段链的 Final Hit 在钩子判（同实战记账 `_hook_of`）；"own" = 只用来源类型的敌人和它扔的投射物的支撑。
+- **后见之明（hindsight）**：每个分析 tick 上，每个已知 S 的候选行（ok & known）的名义盒逐帧对录像里接下来 0.6 s 的真实伤害碰撞体（`support_threat` 或 multi_wounder 碰撞体，录像多边形；一帧里被打掉的投射物带到下一帧、按速度移动），无敌帧跳过；"不碰（clear）" = 整个视野里不碰。这是**开环**的：敌人对另一个主角的反应没有建模，0.6 s 内多数招已经承诺；它度量的是排序有没有信息，不是真实结果。核对：把录像里主角真实的路径也这样判，直接受击（非 Final Hit）里 96 % 在受击前 12 帧内找到接触（漏的是 Reed 本体 7、针 6、刺 1：碰撞发生在两帧之间）。
+- 分析的 tick：战斗中每 3 帧一个，外加每次受击前 1–90 帧的 16 个时刻。
+- 样本：实战日志和 attempt 记录（19.2、19.4）用全部 225 场；逐 tick 回放（19.3、19.5、19.6、19.9）用其中 115 场（A0b 50、R6 v0 两组 40、R5 价值 25 场；489 个受击），其余 110 场的回放在其它轨道的实战开着时没有跑完（离线批会拖慢同机实战的 tick，19.11 第 5 条），比例在三组之间一致（A0b / R5 / R6 的"0.15 s 前还有出路"80 % / 79 % / 76 %）。
+
+### 19.2 打中主角的是什么（949 个 damage 受击，按碰撞体）
+
+| 来源 | 次数 | 说明 |
+|---|---|---|
+| Envoy 冲锋（`Charge Damager`） | 205 | 第一大来源；冲锋本体 + 前方伤害框高速平移 |
+| Choristor 鞭链（`Whip Hit 1–4`，2 格链） | 143 | Final Hit 按钩子判 |
+| Envoy 横斩（`P2 Damager`，`Slash1 2`） | 100 | 前摇 `Slash Antic` 之后才开碰撞体 |
+| Reed 针（`Song Reed Pin Projectile`） | 88 | 飞行中的投射物 |
+| Reed 本体（`Wave 1/Song Reed`） | 80 | 突刺 / 防御 / 闪避时的身体 |
+| Choristor 跳旋（`Spin Hit`、`Spin Slash Hit`） | 73 | |
+| Envoy 本体 | 63 | 多是在左墙边被它连续压住（19.5 的例子） |
+| Choristor 连斩（`Slash Hit 1–3`） | 63 | |
+| Choristor 本体（`Body Damager`） | 51 | |
+| Reed 突刺（`Stab Hit 1–3`） | 48 | |
+| Envoy 跳斩（`JumpSlash Damager 2`） | 24 | |
+| Reed 招架反击（`ParrySlash Hit`） | 11 | |
+
+- 每场 4.2 次（225 场里 113 场 4 次、81 场 5 次、30 场 3 次）；第一下的中位时刻是开战后 2.4 s；两次受击的间隔中位 1.94 s，22 % 在 1.3 s 内（受击无敌一结束就再挨）。225 场击杀 0 次。
+
+### 19.3 支撑覆盖：全部在支撑内
+
+- 949 个 damage 受击全部在支撑里（实战记账按 L 3 / 4 / 2 判；回放逐 L 判的 489 个在 L = 2 / 3 / 4 都在，union 和 own 都是；Final Hit 在钩子判）。**支撑外 0**：问题不是预报漏了，而是预报太宽（19.5）。
+
+### 19.4 规划器当时的状态
+
+- 949 个受击的前一个 tick **全部是 FORCED_RISK**；594 个在受击前 1.6 s 里没有一个 tick 有安全行（n_safe = 0），其余的最后一次有安全行是在 0.65–1.38 s（中位 0.92 s）之前。
+- 模式：EVADE 830、RUSH 119（R6 的 L2 组）；目标：Envoy 496、Choristor 283、Reed 170。实战日志里 108,200 个 tick（偏向受击前后）FORCED_RISK 75 %；FORCED_RISK tick 上，选中和日志列出的 5 个备选**全部 P = 1.0**（FORCED_RISK 的"接触帧占比"）的占 77 %（62,684 / 81,462）。
+- tick 用时不是原因：受击前 30 个 tick 里规划本身（决策日志的 `ms`）> 16.7 ms 的 3 / 28,561；9 组的全部决策日志里规划 > 16.7 ms 14 / 107,964（0.013 %）；整个 tick（`policy.late_ticks`：读状态 + 规划 + 发键）> 16.7 ms 412 / 168,164（0.25 %）。（以上不含 `015907`；初版把 0.25 % 写成了"规划 > 16.7 ms"，那是整个 tick 的迟到率。）
+
+### 19.5 主要原因：支撑在第 0 波饱和，FORCED_RISK 的排序没有信息，选择落到 J 上
+
+- **饱和**：回放的受击前最后一个分析 tick 上，**全部受击（489 / 489）**的候选行都在支撑里：每一行在每一个非无敌帧（含第 1 帧）都被盖住（share_min = 1）。受击前 6 帧、同时有"事后不碰"和"事后被打"的行时，两类行的支撑占比**完全相同**（274 / 274）：支撑对"哪一行会被打"没有任何区分力。全部分析 tick（每 3 帧）里 60 % 是这种全饱和。
+- **谁盖住的**（`decompose`：按"同一敌人、放置种类、家族、是否已承诺"分组，单组单独的覆盖率）：A0b i1 ep0 五次受击前，Reed 的 RE_THROW / RE_STAB / RE_IDLE / RE_DEFEND 外包盒（以后才可能开始的招）、Envoy 的 EN_CHARGE / EN_IDLE / EN_SLASH 外包盒、已承诺的 RE_THROW / EN_CHARGE / CH_JUMP 窗口放置、一根 Reed 针的自模板窗口——**每一组单独就盖住 100 % 的候选单元**。在回放的 115 场里受击前 1 / 6 / 12 / 24 / 36 帧分解了 2,871 个 tick，其中 17 个分解为空（受击无敌中、非 FORCED_RISK，没有活的候选单元），下面的计数都在 2,854 个非空 tick 上：单独盖住 ≥ 99 % 候选单元的组，Reed 以后才开始的 RE_STAB 外包盒 2,854 次（每一个非空 tick）、RE_THROW 2,852、RE_IDLE 2,835、Envoy EN_CHARGE 外包盒 2,615、RE_DEFEND 1,786、EN_IDLE 1,359、已承诺的 EN_CHARGE 窗口 1,117……；每个非空 tick 至少 2 组、中位 8 组各自就能盖满。Reed 是飞的：起点框 = 位置按速度外推 + 该类的待机扩张（`_start_boxes`），再并上家族模板（针飞过全场、突刺冲得远）。所以只收紧一类（例如 R5 价值轮发现的 RE_STAB / RE_THROW / EN_CHARGE 外包盒，HANDOFF "Task R5 value"）不够；`MultiForecast.committed()`（只留当前招、尾巴、投射物）也常常饱和：已承诺的窗口放置（入场时刻是一个区间，模板按区间并起来）常常单独盖满（EN_CHARGE 窗口 1,117 / 2,854 个 tick），在受击前的 tick 上它和全支撑一样分不出行（19.9 的 `committed` 排序只比原排序好一点）。
+- **于是**：FORCED_RISK 的排序键（占比 Pc、首次接触 t_c、t_hit）全部打平，预选（p_k 16 行）和最后的顺序都落到 J；EVADE 的站位来自同样饱和的风险图（`ForumTactics.risk_map`），所以站位 = 原地；J 里留下的是目标命中、朝向目标（boss_x）、少跳。**第 0 波的 bot 实际上是"以为每个计划都一样危险、按 J 去够目标"**。"排序没有信息"的证据是上面的饱和与打平（排序键本身分不出行），不是事后不碰的比例：
+  - 每 3 帧一个分析 tick、不管离受击多远：选中计划事后不碰 75.9 %，随机挑一行 75.0 %。这个数也有偏，而且两个方向都有：选中的基本就是实战执行的计划，临近受击的 tick 上它几乎注定被打（下一条），远离受击的 tick 上它前几帧就是真实的、没被打的路径（只看 FORCED_RISK、有出路的 tick：实战日志没记的 tick 离下一次受击中位 147 帧、0.6 s 内的只有 0.1 %，那里选中 89.5 %、随机 82.1 %；日志记下的 tick 中位 49 帧、36 % 在 0.6 s 内，那里 63.1 % 对 66.2 %）。
+  - **受击前的 tick 上不能拿选中的计划和随机比**。回放的选中就是实战执行的计划（A0b 98.5 %；R6 L2 开 83 %、R5 全开 64 %：这两组用 main 的规划器回放，见 19.1），而这些 tick 是按"后来被打中"挑出来的，执行的那条路径被打中几乎是定义；开环的后见之明又偏向没执行的行（敌人不会对另一个主角重新瞄准）。初版写的"受击前 6 帧选中 9.4 %、随机 24.3 %、比随机还差"主要量的是"主角确实在那条路上挨了打"（那 276 个 tick 里选中 = 执行 80 %），不是排序比随机差的证据。
+  - 拆开看（受击前 1–12 帧、有出路的 tick，钩子为锚，按计划名比对）：选中 = 执行的 1,603 个 tick，选中 14.2 %、随机 32.7 %；选中 ≠ 执行的 316 个 tick（多是 R5 / R6 的组），选中 21.8 %、实际执行的 17.7 %、随机 31.8 %，已承诺支撑的占比（`committed`）26.6 %，录像碰撞体的键（`dr`，19.9）52.5 %。不是执行的那条也比随机低，说明"按 J 往目标凑"可能确实把计划往危险里拉；但 J 选出的行和执行的行常常走相近的路（同样朝目标），开环偏差在这里没有完全去掉，所以这部分到底有多少是真的，这些数据分不出来。能确定的是：排序键打平（上一条）；同一批 tick 上，不是执行计划的排序之间可以比（`dr` 52.5 % 对随机 31.8 %，19.9）；换掉 FORCED_RISK 的第一键之后实战结果变了（19.10）。
+- **几乎每一下都还躲得开（事后看）**：从真实状态出发，受击前最后一个还有"事后不碰"行的时刻：≤ 3 帧 60、4–9 帧 323、12–18 帧 88、24–36 帧 16、45–90 帧 2（回放的 489 个受击，Final Hit 以钩子为准）。也就是 78 % 的受击在 0.15 s 前还有出路，99.6 % 在 0.6 s 前还有；"被困 ≥ 0.6 s"几乎没有。
+- 例（A0b i1 ep0）：第 3–5 下都是 Envoy 本体（`Slash Antic` / `JumpSlash Antic`），主角在左墙边 x 16.6–17.9：每次无敌一结束，所有行（含 `MOVE(R)` 跑开）在支撑里的占比相同，按 J 选了 `MOVE(L)+runR16_attack` / `CONTINUE`（贴着它出刀），受击前 12–36 帧还有 35–348 行事后不碰。
+
+### 19.6 执行：按键和运动学不是原因
+
+- 受击前 12 帧的**真实按键**从当时估计的状态推演（kin_check 的估计器、规划器的计时），和录像的位置比（分母：回放的 115 场里非 Final Hit 的直接受击 413 个）：受击帧误差 中位 0.00 u、p90 0.17 u、> 0.3 u 8.5 %；录像路径碰到、模型路径不碰（运动学漏判）15 / 413（3.6 %）。
+- 从受击前 24 帧推演，漂移大得多：p90 0.67 u、> 0.3 u 17 %、> 1 u 8 %，运动学漏判 25 / 413（6.1 %）（全部 489 个 damage 受击、Final Hit 在伤害帧推演：p90 0.95 u、> 0.3 u 22 %、漏判同样 25）。说"运动学不是原因"用的是 12 帧：tick ≈ 帧，规划器每个 tick 都从观测到的状态重新规划，计划平均 1.6–1.8 个 tick 就换（本节最后一条），受击前最后 0.2 s 里执行的路径碰不碰和模型一致，所以受击不是推演错了造成的。但 FORCED_RISK 的排序看的是整个 T = 36 帧的视野，24 帧的漂移说明视野后半段的推演并不准：排序的后半段（以及以后要开环执行得更久的计划）要另外核对。
+- 计划翻来覆去：每 tick 的计划改动率 0.55–0.63（A0b 0.61），因为打平之后 J 每帧都在变；这是 19.5 的结果，不是独立原因。
+
+### 19.7 你在同样的局面下做了什么（`forum_attack_outcomes`，第 0 波、出招时主角在 8 u 内）
+
+| 家族 | bot（225 场）被打中 | 你 1x（46 次）| 你 0.5x（17 次）| 你躲开时的做法 vs bot |
+|---|---|---|---|---|
+| EN_CHARGE | 43 % (101) | 17 % (29) | 1 / 4 | 你 75 % 起跳越过（bot 41 %），空中占 62 % |
+| EN_SLASH | 26 % (500) | 14 % (171) | 0 / 26 | 起手时你 70 % 已在空中（bot 38 %），退开 2.7 u |
+| CH_WHIP | 38 % (110) | 21 % (57) | 1 / 11 | 你中位后退 5.9 u、60 % 冲刺；bot 原地（−0.3 u） |
+| CH_SLASH | 39 % (203) | 35 % (99) | 1 / 15 | |
+| CH_JUMP | 20 % (114) | 24 % (59) | 1 / 16 | |
+| EN_JUMPSLASH | 24 % (141) | 26 % (39) | 0 / 4 | |
+| RE_STAB | 21 % (325) | 18 % (201) | 5 / 34 | |
+| RE_DEFEND / RE_EVADE | 9 % / 12 % | 12 % / 16 % | 0 / 7 % | |
+
+- 第 0 波整体：bot 0 / 225 打完、每分钟 19.3 次受击、中位 12.9 s 退出、击杀 0；你 1x 24 / 46 打完、11.4 次 / min（Envoy 一般第一个死，中位 17.5 s）；你 0.5x 17 / 17 打完、3.7 次 / min、中位 17.9 s。bot 每分钟面对 8 u 内的出招 41 次，你 33–34 次（它一直贴着目标）。
+- 结论：每个出招实例的被打中率，bot 在多数家族上和你 1x 差不多；差在 **Envoy 冲锋（43 % vs 17 %：你跳过去）、Envoy 横斩（26 % vs 14 %：你在空中）、Choristor 鞭（38 % vs 21 %：你退开）**，加上 bot 离得近、面对的出招更多、从不击杀（第 0 波永远不结束）。（RE_THROW 的起手状态在 STATE 里多数一帧都看不到，这张表里没有针；针的受击见 19.2。）
+
+### 19.8 原因排序
+
+1. **支撑饱和 → FORCED_RISK 排序打平 → 按 J 选**（根因）：受击前一个 tick 全部 FORCED_RISK（949 / 949），回放的全部（489 / 489）在最后一个 tick 全饱和；下面几条是它的表现。
+2. **出路一直到最后都在，按 J 选的计划没有往出路走**：78 % 的受击在 0.15 s 前还有事后不碰的行（开环后见之明）。受击前的选中计划几乎就是被打的那条执行路径，所以"选中 9.4 % 对随机 24.3 %"不能当作"比随机差"（19.5）；在选中 ≠ 执行的 tick 上（受击前 1–12 帧，316 个），选中 21.8 %、随机 31.8 %、录像碰撞体的键 52.5 %：J 的选择没有用上这些出路，而一个只看"现在看得见的碰撞体"的键能找到一半。
+3. **贴近目标、不击杀、站在墙边**（J 的目标项 + 原地站位）：每分钟 8 u 内出招 41 次（你 33）；Envoy 本体在左墙边连续压 63 次；击杀 0。
+4. 运动学漏判 15 / 413（3.6 %）、规划超时 ≈ 0：不是原因。
+5. R5 价值 / R6 v0 为什么没改变结果：**这是从代码推断的，没有用它们自己的代码回放验证**。代码上，R5 价值（35e5fe6）给 J 加了终点价值项、给目标权重乘了击杀价值（T48 那组还把视野拉长到 48 帧）；R6 v0（ef036d5）改的是战术（目标、站位、L2 的 RUSH），到规划器只是 GoalPrefs（只影响分数）；FORCED_RISK 的排序键 Pc / t_c / t_hit 在每一组里都来自同样饱和的支撑。所以在打平的排序里它们只换了"按什么去够目标"。本节对这些组的回放用的是 main 的规划器，和它们实战的选择只有部分一致（按计划名：R5 全开 `015959` 64 %、R6 L2 开 `015904` 83 %、R6 L2 关 `020919` 98.5 %），不一致的 tick 上是反事实的选择。实战结果和"没有作用"一致：七组退出中位 11.8–16.5 s（A0b 12.7–12.9 s），每场 4.0–4.4 次受击。
+
+### 19.9 修正：FORCED_RISK 先看"现在看得见的伤害碰撞体"（`ForumConfig.forced_rank = "seen"`，开关 `SSBOT_FORUM_FR=seen`，默认 `share` = 原样）
+
+- 做法：只在 FORCED_RISK 的 tick 上，对每个已知行，数它的名义盒（无敌帧跳过）在第 1 … T 帧碰到"此刻已开的伤害碰撞体、按所属实体的速度平移"的帧数（`seen_contacts`；不预报、不加余量，只看已经在那儿、正往哪儿去的东西；oracle 视图下 = `Entity.dmg_boxes` 的 active 多边形，视觉视图下对应检测框 + 跟踪速度）；这个计数（再加首次接触帧）排在原来的占比之前，预选的 16 行也按它挑。安全 tick（有 S = 0 的行）上全是 0，顺序不变；Bell Beast 不经过 ForumPlanner。核心 0.14 ms p50 / 0.54 ms p99（420 行 × 38 帧 × 12 个多边形，4 线程）。
+- 区分力（回放）：按录像碰撞体算的同一个键（`dr`：录像里的伤害多边形，含多段碰撞体；不是生产的 `seen_polys`，但在 `fx_seen` 的子集上两者受击前 6 帧的结果相同，都是 40.8 %），不碰的行事后 89 % 不碰，碰到的行事后 20 % 不碰（支撑：两者占比相同）。受击前 6 帧、有出路时，按它挑的行事后不碰 45.7 %，随机 24.3 %（它和执行的计划只有 20 % 相同；原排序的 9.4 % 是执行的计划，有偏，不比，见 19.5）；在选中 ≠ 执行的 tick 上（受击前 1–12 帧）52.5 % 对随机 31.8 %。全部分析 tick 上 80.8 %（原排序 75.9 %、随机 75.0 %）。按碰撞体：冲锋、本体、针、跳旋大幅改善；**Envoy 横斩 / 跳斩、Choristor 连斩、鞭、Reed 突刺**这些前摇之后才开碰撞体的招，"看得见"的键看不到（19.11）。
+- 只换支撑口径不够：受击前 12 帧内、有出路的 tick 上（伤害帧为锚，回放的 115 场，2,035 个 tick），按已承诺支撑的占比挑（`committed`）事后不碰 35 %、再加管和死亡尾巴（`near`）35 %，按"看得见"的键 57 %，随机 44 %。`committed` / `near` 的选择约 70 % 就是执行的计划（它们也常常打平、落到同样的 J），所以只在选中 ≠ 执行的 274 个 tick 上比才干净：`committed` 26 %、`near` 26 %、原排序 23 %、`dr` 51 %、随机 31 %。
+- 用生产代码回放（`--forced-rank seen`，A0b `205857` + R6 对照组 `020919`，50 场、204 个受击）：选中计划事后不碰 74.8 %（随机 69.9 %）；受击前 12 帧内、有出路时 58 %（随机 45 %），30 帧内 57 %（随机 52 %）。同一回放里按原排序挑是 34 % / 34 %，但 A0b 那组的原排序基本就是执行的计划，不能直接比。
+- 实战：19.10。
+
+### 19.10 实战核对（A0b 协议：fo_A、eval、planner、oracle、真退出 0.2；种子 340000；seen / share 在实例 0、冻结检出 `C:\ssbot\live_w0f_3608489`，seen_cf 在实例 1、`C:\ssbot\live_w0f_cf`；复核修正轮的 seen_cf / seen 成对重跑在实例 0、种子 340100、`C:\ssbot\live_w0f_cf`）
+
+先跑修正、再跑对照的话负载不一样（第一次修正组同时开着本节的离线批，tick 27 % 迟到，6 场后第 5 场 "paused unasked" 退出，不计），所以按"对照先、修正后"重跑。**两组的负载并不相同**（初版说相同，是错的）：两组都和其它轨道在实例 1–4 上的实战同时跑，但对照组的 tick 迟到 12.8 %（tick p50 中位 12.05 ms），修正组 5.4 %（11.34 ms），对照组多 2.4 倍。结果不是负载造成的：之前 9 组同类对照（A0b 两组、R5 三组、R6 四组，迟到 0.06–0.4 %、tick p50 中位 5.8–7.9 ms）退出中位 11.8–16.5 s，这组高负载的对照 14.0 s 落在其中；seen 的 19.1 s 和 seen_cf 的 25.2 s 都在这个范围之外。
+
+| | seen（`20261008_040149`，04:01–04:15） | share 对照（`20261008_034918`，03:49–04:00） |
+|---|---|---|
+| 结果 | QUIT 24 + HARNESS_FAIL 1（第 24 场 paused unasked） | QUIT 25 |
+| 退出时刻中位 / 均值 | **19.1 / 19.4 s** | 14.0 / 14.4 s |
+| 同种子成对（24 对） | **+5.0 s（95 % CI 3.4–6.6），23 / 24 对更久** | |
+| 每场受击 / 每分钟 | 3.88 / **12.0** | 3.96 / 16.5 |
+| 每场受击来源 | 鞭 0.75、Reed 本体 0.58、Envoy 横斩 0.58、Choristor 本体 0.38、突刺 0.33、跳旋 0.25、连斩 0.21、针 0.21、Envoy 本体 0.21、招架反击 0.17、跳斩 0.12、**冲锋 0.04** | **冲锋 0.92**、鞭 0.68、针 0.44、Envoy 本体 0.32、突刺 0.28、连斩 0.28、跳旋 0.28、Reed 本体 0.24、Envoy 横斩 0.24、Choristor 本体 0.12 |
+| FORCED_RISK 时新计划的起手 | 跳 36 %、走 31 %、等 16 %、出刀 11 %、冲刺 6 % | 走 57 %、等 20 %、出刀 11 %、冲刺 7 %、跳 5 % |
+| tick > 16.7 ms（`policy.late_ticks`）/ tick p50 中位 | 5.4 % / 11.34 ms | **12.8 %** / 12.05 ms |
+| 击杀 | 0 | 0 |
+
+- seen 组那场 HARNESS_FAIL（"paused unasked"）是通用的 harness 失败，不是 seen 造成的：同样的失败出现在 48 个 attempts 文件里（Bell Beast 的 oracle / dust / inject、Lace1、早先的 Forum，代码 e10c2b8、6ab67e1、3fdd8af 等）；share 和 seen_cf 各 25 场没有遇到，但按这个基率说明不了什么。
+- 按出招实例（`forum_attack_outcomes`，8 u 内）：EN_CHARGE 被打中 5 %（20 次）对 29 %（14 次）——比你 1x 的 17 % 还低；其余家族基本不变（CH_WHIP 39 % / 30 %、CH_SLASH 38 % / 53 %、EN_SLASH 18 % / 19 %、RE_STAB 24 % / 25 %）。
+- 结论：修正做到了取证预测的事——Envoy 冲锋的受击几乎没了（−96 %）、针和 Envoy 本体减半，FORCED_RISK 时会跳（像你跳过冲锋），退出晚了 5 s、每分钟受击 −27 %。**但第 0 波仍然 100 % 退出**：剩下的是前摇之后才开碰撞体的招（鞭、Envoy 横斩、突刺、连斩）和 Reed 的本体（跳得多了，空中撞上飞着的 Reed 多了：0.24 → 0.58，你 1x 的 Reed 受击 2 / 3 也在空中），而且仍然 0 击杀。
+
+**`seen_cf` 的实战**（`20261008_045005_Forum_A_eval_planner_oracle`，04:50–05:05，冻结检出 `C:\ssbot\live_w0f_cf`（82e94fa），实例 1——实例 0 当时被 r5value 占着；同一个种子基数 340000，但 `combat_run` 的种子带实例前缀（实例 1 = 1340000+），所以随机开局和上面两组**不成对**，下面是不成对比较；那段时间机器负载较轻，tick 迟到 1.3 %）：
+
+| | seen_cf | seen | share |
+|---|---|---|---|
+| 结果 | QUIT 25 | QUIT 24 + HF 1 | QUIT 25 |
+| 退出时刻中位 / 均值 | **25.2 / 25.5 s** | 19.1 / 19.4 s | 14.0 / 14.4 s |
+| 每分钟受击 | **10.1** | 12.0 | 16.5 |
+| 每场受击来源（前几项） | 鞭 0.64、Envoy 横斩 0.56、跳斩 0.52、Reed 本体 0.40、突刺 0.40、跳旋 0.36、针 0.32、Envoy `P1 Damager` 0.20、冲锋 0.12 | 见上 | 见上 |
+| 击杀 | 0 | 0 | 0 |
+
+- seen_cf − seen：+6.2 s（自助法 95 % CI 3.1–9.4；随机挑一对 seen_cf 更久的概率 0.78）；seen_cf − share：+11.1 s（8.4–14.1；0.94）。每分钟受击 10.1 已和你 1x 的 11.4 相当（但你会击杀、第 0 波会结束）。负载不同是个混杂（迟到 seen_cf 1.3 %、seen 5.4 %、share 12.8 %），但低负载下的 9 组对照最长也只有 16.5 s，差距比负载能解释的大；同一实例、同一种子、交替时段的成对重跑见下（+4.6 s）。
+- 仍然 25 / 25 在第 0 波退出、0 击杀：要打完第 0 波，bot 必须出手（19.11 第 4 条）。
+
+**seen_cf 与 seen 成对重跑**（复核修正轮，2026-10-08 05:57–06:32，`C:\ssbot\sandbox\w0f_pair.ps1`；实例 0，冻结检出 `C:\ssbot\live_w0f_cf`（82e94fa = 最终代码），A0b 协议，种子 340100–340124；每 5 个种子一块，ABBA 交替（偶数块 seen_cf 先、奇数块 seen 先），两组在同一实例、同样的种子、交替的时段里跑，负载相同：迟到 1.8 % 对 1.4 %；06:17 起 r8 在实例 2、3 上开跑，之后的块两组大致各占一半）：
+
+| | seen_cf | seen |
+|---|---|---|
+| 运行 | `20261008_055737` / `060704` / `061017` / `062102` / `062440` | `060111` / `060410` / `061410` / `061752` / `062846` |
+| 结果 | QUIT 25 | QUIT 25 |
+| 退出时刻中位 / 均值 | **24.1 / 25.0 s** | 19.4 / 20.4 s |
+| 同种子成对（25 对） | **均值 +4.6 s（自助法 95 % CI 2.1–7.2），中位差 +2.3 s（0.7–8.1），18 / 25 对更久（符号检验 p = 0.043）** | |
+| 每场受击 / 每分钟 | 3.92 / **9.4** | 4.20 / 12.3 |
+| 每场受击来源（前几项） | Envoy 横斩 0.60、Reed 本体 0.48、跳旋 0.40、Envoy 本体 0.32、鞭 2 0.32、鞭 4 0.28、连斩 1 0.24、跳斩 0.20 | **Envoy 横斩 1.00**、跳旋 0.44、Reed 本体 0.44、鞭 1 0.28、鞭 2 0.28、Choristor 本体 0.24、Envoy 本体 0.24、跳斩 0.24 |
+| tick 迟到 | 1.8 % | 1.4 % |
+| 波次 / 击杀 | 50 场全部第 0 波、0 击杀 | |
+
+- 两组都复现了之前的数：seen 19.4 s（之前 19.1 s），seen_cf 24.1 s（之前不成对的 25.2 s）。seen_cf 比 seen 成对多 4.6 s，和之前不成对的 +6.2 s 方向一致、略小；每分钟受击 −24 %。差异主要在 Envoy 横斩（1.00 → 0.60 次 / 场；推断：已承诺的横斩放置在碰撞体打开前就被 seen_cf 的第二键看到）。
+- 仍然 50 / 50 在第 0 波退出、0 击杀（19.11 第 4 条）。
+
+### 19.11 下一步
+
+1. **合并 `forced_rank`（"seen" / "seen_cf"）**（默认仍 `share`；整合后的 Forum A/B 建议用 `SSBOT_FORUM_FR=seen_cf`：同一实例、同一种子上和 `seen` 成对已确认 +4.6 s，19.10）：它和 R5 / R6 / R8 都正交（只改 FORCED_RISK 时的前几个排序键），R6 的目标、R5 的终点价值在"打平"消失之后才有机会起作用。
+2. **前摇招**（鞭、横斩、突刺、连斩、跳斩，修正后占剩余受击的一半以上）："看得见"的键在碰撞体打开前看不到它们。离线（`--forced-rank seen` 的回放）比较了两个补充键：`seen_cf`（看得见之后，再看落在已承诺精细放置里的帧占比）明显更好，`seen_cm`（再看已承诺支撑的占比，含会饱和的窗口）次之：受击前 12 帧、有出路时事后不碰 seen 60 %、seen_cm 63 %、seen_cf 73 %、随机 45 %（伤害帧为锚，862 个 tick；全部 tick 75 / 77 / 79 %）。这三个都是回放里的反事实选择，但 seen 的键全为 0 时它退回原排序，那时它的选择常常就是执行的计划（被打的路径），对 seen 不利；只看 seen 的选择 ≠ 实战选择的 437 个 tick（按计划名比对，回放里 CONTINUE 的含义和实战不完全一样，只作参考）：seen 62 %、seen_cm 65 %、seen_cf 78 %、随机 40 %，差距还在；按碰撞体（受击前 12 帧）鞭 35 % → 68 %、Choristor 连斩 0 → 33 %、跳旋 44 % → 67 %、冲锋 63 % → 78 %，Envoy 横斩 19 % → 24 % 仍然最难。已实现为 `forced_rank = "seen_cf"`（`SSBOT_FORUM_FR=seen_cf`，`committed_fine_share`：不含窗口和以后才开始的外包盒），实战比 seen 再晚退出 6 s（19.10，不成对）；剩下最多的是 Envoy 横斩 / 跳斩和鞭。更根本的是给已承诺的招一个按名义时刻（中位驻留）放的模板，不再按入场区间并成窗口。
+3. **支撑去饱和**（R2 / R3 的人）：Reed 的"以后才开始"外包盒（RE_STAB / RE_THROW / RE_IDLE）单独就盖满全部候选，几乎每个 tick；Envoy EN_CHARGE 92 %。可做的收紧：以后才开始的招在前摇最短驻留之前不出伤害（起点 + 最短前摇之前的时间格去掉打击段）、飞行类的待机扩张按实测最大速度封顶。改了要重新认证。
+4. **出手**：225 + 49 场击杀 0。你在第 0 波先杀 Envoy（1x 中位 17.5 s），第 0 波才会结束；FORCED_RISK 时 J 里的目标项只让 bot 贴近目标，从不形成"安全出刀窗口"。R6 的惩罚窗口（冲锋结束、`Charge End`；横斩 `Slash1 Recover`）要在 seen 键下重新测。
+5. 这台机器同时跑几个实战时，tick p50 从 7 ms 涨到 12–15 ms、迟到 5–28 %；比较必须同负载成对（本节的做法），离线批不要和实战一起跑（本节第一次修正组就是这样被拖坏的）。
+
+### 19.12 复现
+
+```
+cd brain
+# 逐场取证（每场一个 JSON；--forced-rank seen 用修正回放）
+..\scripts\uv.cmd run python -m ssbot.tools.forum_hit_forensics <run dir> [...] --out <dir> --workers 3 --threads 4 [--forced-rank seen]
+# 出招实例：bot 与你的录像
+..\scripts\uv.cmd run python -m ssbot.tools.forum_attack_outcomes --bot <run dir> [...] --human C:/ssbot/data/human/20261004_002749@human-1x C:/ssbot/data/human/20261004_012300@human-1x C:/ssbot/data/human/20261004_091214@human-0.5x C:/ssbot/data/human/20261004_133855@human-0.5x C:/ssbot/data/human/20261005_160435@human-0.5x --cache <dir> --json <out>
+```
+驱动与输出：`C:\ssbot\data\m2_forum_w0f\`（`fx_run.cmd` → `fx\`，`fx_seen_run.cmd` → `fx_seen\`，`ao_run.cmd` → `ao_all.json`）；实战 `C:\ssbot\sandbox\w0f_live.ps1`。汇总脚本（会话临时目录）`causes.py`、`summ.py`；复核修正轮（会话临时目录 `w0fx\`）：`split.py` / `split3.py`（按"选中 = 执行"拆开、钩子或伤害帧为锚，19.5 / 19.9）、`kin.py`（12 / 24 帧推演，19.6）、`late2.py`（迟到、规划用时，19.4 / 19.10）、`med.py`（各组退出中位）、`dec.py`（分解计数）、`match.py`（回放与实战选择一致率）、`pair2.py`（seen_cf 与 seen 的成对重跑，19.10；驱动 `C:\ssbot\sandbox\w0f_pair.ps1`）。
+
+## 20. R5 终点价值（2026-10-08，forum_planner_plan.md §5 R5 的"终点价值"一半；分支 worktree-wf_814dfeea-b10-2；离线 + 实例 0 的 A/B）
+
+代码：`combat/terminal.py`（新：支撑场 `EnemyFields.build`、身体场 `EnemyFields.from_bodies`、可达模板 `reach_templates`、`TerminalValue.rows`、击杀价值 `kill_value`）、`combat/forum_planner.py`（`ForumConfig.terminal` 与权重，`_terminal` / `_score_forum`）、`core/worldstate.py` + `backends/oracle_backend.py`（`Entity.hit_polys`）、`combat/enemy_tracker.py`（命中目标用 `hit_polys`）、`train/forum_planner_policy.py`（T 取 `ForumConfig().T`，日志和 stats 记终点价值）；可达模板文件 `knowledge/1.0.30000/kinematics/forum_reach.npz`（`python -m ssbot.combat.terminal` 重建）；测试 `tests/test_terminal.py`（8 项）。开关（A/B 用，写进 config_fp）：`SSBOT_FORUM_TV=0` 关终点价值（第 3 轮起默认关，`SSBOT_FORUM_TV=1` 开，20.11）、`SSBOT_FORUM_T=48` 视野 48 帧、`SSBOT_FORUM_HITBODY=0` 恢复 R4 的命中目标。Bell Beast 路径（`Planner`、`Forecaster`、`PlannerPolicy`）一行没改：它不读 `hit_polys`，Forum 开关是胶水层用哪个类。
+
+### 20.1 计划里的场（支撑场）：做了、保守，但第 0 波完全饱和
+
+- **做法**：0.5 u × 1 u 栅格（x 14–49、y 3.5–18.5，主角受击盒中心，1 050 格），时间格 0.1 s 从 0.6 s 到预报视野（2 s：14 格）；每个 owner（敌人 iid、Tiny 群的簇、投射物、波次入场）一张位图，值 = 该 owner 覆盖这一格的放置里最大的路径概率（×255；管、盒、投射物 255）。细 / 窗口 / 外包盒放置都换成模板粗底的逐 bin 外包盒（稀疏表两次查找，时间格内所有入场时刻 ± 1 个模板 bin）；管和盒取 bin 两端的盒子按 bin 末的增长放大；投射物按 10 ms 采样（含 slack 副本和分支）取外包；后两者再按主角受击盒膨胀。所以"场空 ⇒ 格内任何点、bin 内任何帧的细查询都空"（计划 §4.4 第 5 条）。轮转没有做：每 tick 全部 owner 重建（下面的耗时），场永远不过期。
+- **保守性**：合成 Reed（`tests/test_terminal.py`，每个 bin 每一帧、每格 3 个随机点）0 违反；A0b 录像 `20261005_205437` i1 ep0（648 tick，每 10 tick 一次、14 个 bin × 4 200 个随机点）：全集场 0 违反，但空格数为 0（见下），所以这一段录像对全集场的检验是空的；承诺场（`MultiForecast.committed()`）检查了 967 492 个空点，0 违反。
+- **耗时**（同一录像，整机 5 个游戏实例在采集、低优先级）：每 tick 建场 p50 1.5–2.0 ms、p99 3.3–4.1 ms。
+- **饱和**（同一录像，每 20 tick 一次）：并集场在 0.6–2.0 s 的每个 bin、每个采样 tick 都是 **100 %**；单个 owner 也是：Reed、Envoy、Choristor 各自 100 %。细查询本身也一样：主角站在地面任何 x，**t = 0 起**就在 Reed（Alert）和 Envoy（Charge）的支撑里。原因（逐类拆开）：之后才可能开始的实例用家族行走模板的外包盒放置（`bb` 行），`RE_STAB` / `RE_THROW` / `EN_CHARGE` 的入场窗 0.02–0.1 s 那几行在 t = 0 就盖住整条地面（`RE_THROW` 外包盒宽 50–93 u，锚盒 hx 4.7–13.9 u）；路径概率加权也救不回来：p = 1 的行（当前实例的窗口放置、Choristor 待机家族的外包盒 `CH_IDLE` 宽 92 u、全场盒）让 1 − Π(1 − p_i) 处处为 1；承诺场在 0.6 s 也有 80 %，0.9 s 起 100 %。**结论**：在第 0 波，用支撑（或其概率）做的 E 恒为 0、trapped 恒为真，不含信息；这同时说明 A0 / A0b 的 87 % FORCED_RISK 有结构性来源——地面行在第 1 帧就在支撑里，只有空中行可能安全。要改的是 R2 / R3 的放置（外包盒行的时间展开），需要重新认证，不在本轮。
+
+### 20.2 命中目标的 bug（R3 / R4 起就有）
+
+`EnemyTracker.body`（规划器的命中目标、`targets()`、`_nearest`）取的是实体**所有**启用碰撞体的外包盒，其中包括第 13 层的范围触发器（Alert / Throw / Attack / Patrol / Stab / Defend Range，5–47 u）、第 27 层的物理推挤体和第 14 层的 Terrain Block。A0b 录像里：Envoy 的"身体"108 u 宽、Choristor 30 u、Reed 24 u。于是任何一刀在规划器里都"打得到"它们：J 的命中项、第一下命中、命中分支（后坐 + 受击反应）在几乎所有攻击行上都成立（开环回放 ep3：命中分支 325 次、被上限截掉 160 行）。改：`Entity.hit_polys`（oracle 专用字段：启用且不在 13 / 14 / 27 层的碰撞体），`EnemyTracker` 有它就用它（`SSBOT_FORUM_HITBODY=0` 恢复旧的）。改后同一 tick：Reed 1.1 × 2.8 u、Envoy 1.2 × 2.0 u、Choristor 1.5 × 2.9 u。支撑不受影响（待机管用的是 `seen_box` / 伤害盒，不是 `body`）。
+
+### 20.3 实际上线的终点价值：身体场
+
+因为支撑场饱和，J 里的终点项改用**身体场**（敌人身体的可分辨结构，只进打分）：每个在场活敌的身体盒（`hit_polys` 外包）按速度航位推算最多 0.3 s、按主角受击盒膨胀；"区" = 离它 ≤ 1.5 u + 1.5 u/s × t 的格（`BODY_REACH_U`、`BODY_APPROACH_U_S`，启发式，不是认证量）；"余量" = clip((到最近身体的距离 − 1.5) / 4, 0, 1)。可达模板：Forum 运动学（`hero_reaper_forum.json`）从 4 类终点（地面、空中上升 / 顶点 / 下落，按 vy ±3）出发，135 条原语（站 / 左 / 右跑、0.5 s 时转向、5 种跳、2 个时刻的冲刺）在 0.2 / 0.5 / 0.9 / 1.4 s（± 半个 bin）的受击盒中心偏移，运行时按竞技场墙 / 地面截断、量化到一格（每类每时刻 27–149 个偏移）。每行（标称一条的最后一帧）：
+
+- E = Σ_t w_t · R_t 上余量的平均（w_t = 1 / (1 + t) 归一）；trapped = 某个 t ≤ 1.4 s 时 R_t 全在区内；overlap = R_t 在 ≥ 2 个区内的比例；H_exp = t ≤ 0.9 s 时 R_t 在"有 2 格招或多段连击"的敌人（按类型：任一家族 damage ≥ 2 或 chains.json 的整链 > 1 下）区内的比例。
+- J += 4.0·E − 3.0·trapped − 1.5·overlap − 2.0·H_W[h]·H_exp（H_W：h ≤ 2 为 1、h = 3 为 0.6、h ≥ 4 为 0.3、未知 0.5）。
+- 击杀价值：主角周围 ±8 u × ±5 u、所有 bin 里"只有它盖住"的余量下降（留一法）÷ 还需几刀（hp_est / 一刀，默认 9）；目标的命中权重 × (1 + 3.0 × 击杀价值)。
+- 只动 J 和命中权重：`tests/test_terminal.py::test_the_terminal_value_moves_j_only`（确定模式，开 / 关时每行的 Hz、U 和 FORCED_RISK 相同）；字典序不变。
+
+### 20.4 开环回放（`forum_policy_replay`，A0b 录像 i1 ep0 / ep3，同一负载下依次跑四种配置；开环：主角位置是录像的，FORCED_RISK 不是闭环比例）
+
+| 配置 | ep | tick p50 / p99（ms） | 规划 p50 / p99 | 终点价值 p50 / p99 | 命中分支 / 被上限截掉 | 选中行 E / trapped / overlap / H_exp |
+|---|---|---|---|---|---|---|
+| base（R4：`TV=0 HITBODY=0`） | 0 | 13.8 / 103.1 | 5.84 / 64.9 | — | 212 / 0 | — |
+| hitbody（`TV=0`） | 0 | 14.8 / 90.2 | 6.32 / 58.2 | — | 193 / 1 | — |
+| tv（默认，偏移未粗化） | 0 | 14.7 / 27.4 | 7.68 / 19.4 | 1.65 / 4.52 | 185 / 1 | 0.35 / 0.20 / 0.31 / 0.42 |
+| t48（`T=48`） | 0 | 16.3 / 27.3 | 8.96 / 17.6 | 1.77 / 5.06 | 0 / 0 | 0.37 / 0.17 / 0.32 / 0.43 |
+| base | 3 | 13.4 / 76.9 | 4.92 / 36.3 | — | 325 / 160 | — |
+| hitbody | 3 | 12.5 / 24.1 | 4.85 / 17.0 | — | 290 / 97 | — |
+| tv（偏移按格粗化，35e5fe6） | 3 | 13.7 / 26.0 | 6.27 / 19.0 | **1.30 / 3.65** | 219 / 0 | 0.24 / 0.16 / 0.25 / 0.53 |
+
+- 负载很重（这一段整机 5 个游戏实例在采集、其他代理在跑），四种配置的 tick p50 都在 12.5–16.3 ms（A0 实战 7.4 ms），只能互相比；base 的 p99（77–103 ms）是个别慢 tick，不可比。终点价值每 tick 多 1.3 ms（p50）/ 3.7 ms（p99），在规划的打分阶段（包络之前），所以截止时间 8 ms 下包络少查约一块。
+- 开环下 FORCED_RISK 四种配置相同（ep0 483 / 648、ep3 608 / 781；T48 ep0 531）：开环里主角位置是录像的，S 不受打分影响；命中目标修正后命中分支和被截行减少（ep3 325 / 160 → 290 / 97 → 219 / 0）。T48 的 FORCED_RISK 更高（开环）、tick 更贵。闭环效果看 20.5 的 A/B。
+- 审计：所有配置选中 S = 0 的计划全部包络过、core_not_enveloped 0、overrun 0。
+
+### 20.5 A/B（实例 0，2026-10-08 01:59–02:33；**终点价值、只修目标、T48 都没有改变第 0 波的结果**）
+
+驱动 `C:\ssbot\sandbox\r5v_ab.ps1`（隐藏窗口，冻结检出 `C:\ssbot\live_r5v_35e5fe6`）在 Trobbio 采集结束后拿 inst0 锁，按 A0b 的协议（fo_A、eval、planner、oracle、真退出 0.2、4 线程）跑完。种子 300000 那一批只跑了 1 场就 HARNESS_FAIL（"paused unasked"，和 A0b 那一场同类），所以 TV 臂用 300100 的 25 场（加 300000 的 1 场失败）。`forum_a0_report`（会话临时目录 `r5v2/rep_*.json`）：
+
+| 臂 | 运行 | 场 | 结果 | 每场受击 | 每分钟受击（95 % bootstrap） | 波次 | 局内时长 p50 / 均值（s） | FORCED_RISK 比例 | 支撑外命中 | tick p50 / p99（ms，每场的中位） | 终点价值 p50 / p99（ms） |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| A0b（f8c0c62） | 20261005_205437 + 205857 | 51 | QUIT 50（Q1）、HARNESS_FAIL 1 | 4.27 | 19.1（17.9–20.4） | 全部第 0 波 | 12.7 / 13.5 | 0.803 | 1 | 5.9 / 11.8 | — |
+| TV（终点价值 + 修目标，默认） | 20261008_015907 + 015959 | 26 | QUIT 25、HARNESS_FAIL 1 | 4.0 | 18.4（16.9–20.1） | 全部第 0 波 | 13.9 / 13.3 | 0.824 | 0 | 7.4 / 13.6 | 0.88 / 1.50 |
+| HB（只修目标，`TV=0`） | 20261008_021002 | 25 | QUIT 25 | 4.16 | 18.4（16.9–20.2） | 全部第 0 波 | 12.7 / 13.6 | 0.810 | 0 | 6.6 / 12.5 | — |
+| T48（`T=48`） | 20261008_022115 | 25 | QUIT 25 | 4.4 | 16.6（14.8–18.4） | 全部第 0 波 | 16.5 / 15.9 | 0.887 | 0 | 7.9 / 13.3 | 0.90 / 1.52 |
+
+- 每一场都是第 0 波里 Q1 退出（`hits_to_death 1`，开局 7 血，Choristor 一下 2 格），0 WOULD_DIE，0 次击杀（`kills_by_src` 空）。每场受击、每分钟受击、FORCED_RISK 比例都在 A0b 的误差范围内；T48 每分钟受击略低、局内时长略长，但 FORCED_RISK 更高（0.887），25 场的置信区间和 A0b 只差一点点重叠，不算结论。
+- 受击来源变了：Envoy 105 / 51 场（A0b）→ 30 / 26（TV）、35 / 25（HB）、41 / 25（T48）；Choristor 56 → 45、39、43；Reed 57 → 29、30、26。修目标后不再把 108 u 宽的 Envoy"身体"当成能打中，少往 Envoy 身上撞，但换成了更多 Choristor 的受击，总数不变。
+- 决策日志（`C:\ssbot\data\m2_forum_r5v\round2\declog_stats.py`，EVADE tick）：FORCED_RISK 占 0.736（A0b）/ 0.755（TV）/ 0.743（HB）/ 0.864（T48）；FORCED_RISK tick 里选中行的 P = 1 占 77–79 %，和排第二的行 P 相同的 100 %；**所有受击都发生在 FORCED_RISK tick**（215 / 102 / 104 / 110 次）；受击前离最近一次有安全行的 tick 中位 2.1–2.6 s（四分位 1.0–8.0 s），即主角在挨打前已经连续好几秒没有安全行。为什么终点价值没起作用，见 20.7。
+
+### 20.6 没做 / 未核实（第 1 轮；第 2 轮的见 20.9）
+
+- 计划 R5 行的"先做"部分（决策感知时刻、FSM 冷却、身体触发反应分支、Tiny 轨道模型）不在本轨（终点价值一半）。
+- 身体场的半径与速度、各项权重是手设的启发式，没有拟合（R9）；击杀价值的"一刀伤害"用 9（Reaper 钉子），没有读装备。
+- 支撑场的饱和要靠 R2 / R3 的放置修正（外包盒行的时间展开）才能变得有用；那之后终点价值可以换回支撑场（代码保留，属性测试在）。
+- 命中目标修正改变了命中分支和 J，对 FORCED_RISK 的影响要看闭环 A/B（20.5）；视觉视图没有 `hit_polys`，回落到全部碰撞体（Forum 的视觉视图是 M3）。
+
+### 20.7 为什么终点价值没改变第 0 波（第 2 轮，`tools/forum_tv_audit`）
+
+做法：把录像开环回放进当前代码的 ForumPlannerPolicy（终点价值开、T 36），`ForumConfig.p_all` 让 FORCED_RISK 的 P / 首次接触对每个允许且已知的行都算（选择仍在 p_k = 16 个预选行里，所以决策和实战同一种），`ForumPlanner.last_sel` 交出选择用的每一列。每个 EVADE tick 记：选中行和第二名在哪一个键上分出先后；换一种排序会不会选别的（前 6 帧按键不同才算）；**事后**：每个允许的行的标称受击盒和录像里同一帧的威胁碰撞体（启用、能伤人；外包盒）比，跳过该行的无敌帧，整段视野不碰 = "事后安全"（敌人是录像里的敌人，它们针对的是录像里的主角，不是这一行，所以是估计）；每个键对"事后安全"的组内 AUC（同一 tick 内的行两两比，0.5 = 没信息）。样本：TV 臂录像 `20261008_015959` i0 的 25 场（19 943 个 EVADE tick：FORCED_RISK 15 863、有安全行 4 080；受击前 36 帧内 3 671）和 A0b 录像 `20261005_205437` i1 的 9 场（FORCED_RISK 5 036、安全 1 925、受击前 1 476）。输出和逐 tick 的转储在 `C:\ssbot\data\m2_forum_r5v\round2\`（`aud_tv.json`、`aud_a0.json`、`*.pkl.gz`；离线排序 `rank_eval.py`）。
+
+| | TV 录像 | A0b 录像 |
+|---|---|---|
+| FORCED_RISK tick 里选中行 P = 1 | 81.6 % | 77.4 % |
+| 选中行与第二名第一个不同的键：J / 全部相同 / 其他 | 82.7 % / 16.2 % / 1 % | 74.6 % / 24.7 % / 0.7 % |
+| AUC：P、首次接触（标称 / 包络）、`MultiForecast.prob` | 0.500 | 0.500 |
+| 去掉终点价值（J0）选择会变的 tick：FORCED_RISK / 安全 | 18.4 % / 25.3 % | 19.0 % / 20.3 % |
+| FORCED_RISK：存在事后安全行 / 选中行事后安全 / J0 的选择事后安全 | 90.3 / **68.4** / 67.4 % | 89.7 / **64.9** / 64.0 % |
+| 受击前 36 帧：存在 / 选中 / J0 | 72.7 / **30.4** / 27.8 % | 73.0 / **32.7** / 30.8 % |
+| 基线（第 3 轮补，20.11）：随机一个允许行事后安全，FORCED_RISK / 受击前（只算 FORCED_RISK tick） | 66.9 / 36.8 % | 65.5 / 39.1 % |
+| AUC（FORCED_RISK）：E / overlap / H_exp / trapped / 终点价值合计 / J0 / J | 0.645 / 0.629 / 0.601 / 0.523 / 0.645 / 0.577 / 0.636 | 0.550 / 0.579 / 0.542 / 0.502 / 0.560 / 0.560 / 0.579 |
+| AUC（受击前）：终点价值合计 / J0 | 0.600 / 0.462 | 0.488 / 0.519 |
+
+结论：
+
+1. **FORCED_RISK 里决定选择的就是 J**。支撑在第 0 波饱和（20.1），P 几乎处处为 1、首次接触都在第一帧，三个支撑键的 AUC 正好 0.5（概率版 `prob` 也是）；字典序落到 J，而 FORCED_RISK 占 EVADE tick 的 3/4。所以终点价值不是"被字典序挡住了"：它确实改了 18–25 % 的选择（选择不同 = 前 6 帧按键不同）。
+2. **但它对"会不会挨打"几乎没帮助**：选中行事后安全只多 0.9–1.0 个百分点（受击前多 1.9–2.6 个）。终点价值的各项有一点信息（TV 录像上 AUC 0.60–0.65），但它是加在 J0（命中、站位、浪费、跳跃等目标项）上的几个单位，J0 在受击前没有信息（AUC 0.46；**这个"低于 0.5"不能读成"J0 反着来"**：开环重放里实战的选择基本就是录像里走的那条，而录像里的威胁是冲着录像里的主角去的，和录像路径相近的行事后判不安全的偏多，见 20.11 的选择偏差；它说明的是 J0 和录像路径相关，不是因果）；把终点价值放大 4–8 倍或只用终点价值排序，在 TV 录像上能到 70.5–72.6 %（受击前 42.8–46.4 %），在 A0b 录像上没有提高（64.6–65.0 %、34.1–36.5 %），不稳。身体场（身体 + 1.5 u + 1.5 u/s·t）描述的是"离敌人身体多远"，第 0 波打中主角的是已经起手的招（Reed `Stab Antic` → `Stab`、Envoy `Charge`、Choristor `ComboSlash`），伸出身体好几 u。
+3. **有信息的是"已经承诺的招"**：把支撑的承诺部分（当前的招、招尾、死亡尾、投射物：`MultiForecast.committed()`）和其中入场已知的细放置（当前招的状态）分别在阶段 1 的帧上算接触比例 P_cm、P_f，作为 P 之后的次级键：选中行事后安全 74.3 % / 70.9 %（比实战 +5.9 / +6.0 个百分点，比随机一个允许行 +7.4 / +5.4），受击前 41.5 % / 42.3 %（比实战 +11.1 / +9.6，但实战的选中行受击前比随机行还差 6.6 / 7.4 个点——选择偏差，20.11——**比随机行只 +4.7 / +3.2**），两份录像方向一致；只用 P_f 73.3 / 69.4 %，只用 P_cm 71.1 / 68.2 %；再叠终点价值 ×2 只多 0–1.6 个点，不稳，不加。离存在事后安全行（90 %）还差约 16 个点：剩下的是还没起手的招（之后的实例，正是支撑饱和的部分）。
+4. **R5 模型的分支概率（`Subject.next_p`）没有用**：核对者的结论是运行时的 next_p 不是评估的那个模型（61 个决策里 26 个用到运行时算不出的协变量）、而且只在出招那一帧拟合，提前 0.2 / 0.5 s 查询时对数损失 2.31 / 2.92，比无条件表（0.70）差得多；那个分支也没合进 main。第 0 波缺的信息是"当前已经起手的招"，不是"下一招是哪个分支"；等分支模型按提前量重新拟合后，可以给之后的实例（饱和的外包盒行）配概率，再看 P 能不能分开。
+
+### 20.8 FORCED_RISK 用承诺支撑细分 P（`ForumConfig.commit_rank`，737048f；A/B 后默认开，`SSBOT_FORUM_PC=0` 关，3797b3e）
+
+- 只在 FORCED_RISK 时：对每个允许且已知的行，标称受击盒中心在阶段 1 的帧上（跳过无敌帧）和承诺支撑接触的比例 P_cm、和当前招细放置接触的比例 P_f；预选 16 行按 (P_cm, P_f, 最晚首次接触, J)，排序 `hz > hz_soft > U > S > 保持的跳 > 宏 > V > P > P_cm > P_f > 首次接触（包络 / 标称）> J`。有安全行的 tick 不算（P_cm = P_f = 0），S / Hz / U、FORCED_RISK 与否都不变（`tests/test_forum_planner.py::test_commit_rank_refines_forced_risk_by_the_committed_support`）；关掉时与之前逐位相同（预选和排序多的键全是 0）。Bell Beast 不经过 ForumPlanner。
+- 开销（开环 `forum_policy_replay`，TV 录像 ep3 960 帧，关 / 开各两次交替，整机中等负载）：规划 p50 7.0–7.3 → 8.0–8.7 ms，p99 17.4–18.8 → 16.5–17.5 ms；FORCED_RISK 754 / 960、包络审计、截止次数不变。
+- **和 wave-0 取证轨（diag，§19）的 "seen" 键比**：取证轨独立得出同一个原因（支撑饱和，选择落到 J），做了 `forced_rank = "seen"`（`SSBOT_FORUM_FR=seen`）：每行标称受击盒和"现在看到的伤害碰撞体按其实体速度平移"相碰的帧数（再按首次接触），放在 P **之前**。在同一批 tick 上（`forum_tv_audit` 用规划器的 `seen_contacts` 算这个分数，`aud2_*`）：seen 的 AUC 0.72–0.75（P_f 0.56–0.58、P_cm 0.51–0.54），说明"已经在场上的判定"信息最多；但两者互补：
+
+| 排序（FORCED_RISK，选中行事后安全；括号里是比随机一个允许行，第 3 轮补，20.11） | TV 录像：全部 / 受击前 | A0b 录像：全部 / 受击前 |
+|---|---|---|
+| 随机一个允许行（基线） | 66.9 / 36.8 % | 65.5 / 39.1 % |
+| 实战（P、首次接触、J） | 68.4（+1.5）/ 30.2（−6.6）% | 64.9（−0.6）/ 31.8（−7.4）% |
+| seen（取证轨） | 71.8（+4.9）/ 37.5（+0.7）% | 71.7（+6.1）/ 41.7（+2.5）% |
+| commit_rank（本轨） | 74.3（+7.4）/ 41.5（+4.7）% | 70.9（+5.4）/ 42.3（+3.2）% |
+| **seen > P > P_cm > P_f（叠加）** | **78.7（+11.8）/ 48.7（+11.9）%** | **76.3（+10.7）/ 51.0（+11.9）%** |
+| 存在事后安全行（上限） | 90.3 / 72.7 % | 89.7 / 72.6 % |
+
+  （受击前一列只算 FORCED_RISK tick，和第 2 轮的 30.4 / 32.7 差 0.2–0.9 个点。）以随机行为基线，单独的 seen 在受击前几乎没有增益（+0.7 / +2.5），commit_rank +4.7 / +3.2；叠加 +11.9 / +11.9，比两者之和还多。叠加比任何一个单独都好（两份录像一致），所以本分支把取证轨 3608489 的规划器部分（`seen_contacts`、`seen_polys`、`warm_kernels`、`SSBOT_FORUM_FR`、它的测试）原样移植过来、和 commit_rank 叠在一起（8617aa6：预选和排序都是 seen > P > P_cm > P_f；两个开关都关时与之前逐位相同）。
+- A/B（实例 0，按 A0b 的协议，种子 300400–300799）：驱动 `C:\ssbot\sandbox\r5v_ab2.ps1`（冻结检出 `C:\ssbot\live_r5v2_8617aa6`），等取证轨在实例 0 上的 seen / share 对照跑完后：SPC（seen + commit_rank）25 场（300400）→ PC 25 场（300500）→ 当场对照 TV 25 场（300600，都关）→ SPC 25 场（300700）；一批因真退出后的 HARNESS_FAIL 提前结束时用种子 + 50 补齐。结果见 20.10。
+
+### 20.9 没做 / 未核实（第 2 轮）
+
+- 事后安全是开环估计：敌人对另一条路线的反应（Reed 刺的瞄准、Envoy 冲锋方向）没有模拟；它只用于比较排序，闭环效果看 A/B。
+- 终点价值的权重和身体场的半径仍是手设的；20.7 说明在第 0 波它不是瓶颈，没有再调。
+- P_cm / P_f 只在 FORCED_RISK 时算、只用标称一条（阶段 1 的帧，和 P 一样）；没有做概率加权。
+- **叠加后剩下的差距**（`round2\gap_eval.py`，FORCED_RISK 且存在事后安全行的 tick）：叠加排序的选择仍不安全的占 8–10 %（受击前 30–33 %）；其中 68–79 % 有一个事后安全的行和选中行在 seen、P、P_cm、P_f 上**完全相同**（只能靠 J 分），选中行 seen = 0 的占 92–98 %。也就是剩下的受击主要来自"现在还没出现、也还没起手"的招——正是支撑饱和的那部分（之后实例的外包盒行）；要缩小它得有按时间展开的之后实例放置（R2 / R3，需重新认证）或按提前量拟合的分支概率（R5 模型的下一步），不是 J 的权重。
+
+### 20.10 第 2 轮 A/B（实例 0，2026-10-08 04:20–05:18，冻结检出 `C:\ssbot\live_r5v2_8617aa6`；**承诺支撑细分和叠加都显著减少每分钟受击，但第 0 波仍然全部 Q1 退出**）
+
+协议同 A0b（fo_A、eval、planner、oracle、真退出 0.2、4 线程）。**更正（第 3 轮，核对者）**：三臂不是交替跑的，而是**按批次依次跑**，每臂一个连续时间段：SPC 300400 / 300450（04:20–04:37）→ PC（04:37–04:51）→ TV 对照（04:51–05:03）→ SPC 300700（05:03–05:18）；各批次期间机器负载差别很大（实例 1 在跑 L2 A/B，实例 2 / 3 在跑 320600，加上其他轨的离线任务）。所以下表的 tick 时间和迟到比例主要反映各批次的负载，不能当成代码的开销（见表后和 20.11）；受击率的结论不受影响（两批 SPC 都约 10.3，而且迟到更多的那批不比另一批差）。终点价值开、T 36。种子 300400 那一批第 1 场就因真退出后的"paused unasked" HARNESS_FAIL 停了（和 A0b、第 1 轮 TV 300000 同类），驱动用 300450 补齐 25 场。`forum_a0_report`（`round2\rep_TVc.json`、`rep_PC.json`、`rep_SPC.json`）+ `round2\ab2_report.py`：
+
+| 臂 | 运行（20261008_） | 场 | 每场受击 | 每分钟受击（95 % bootstrap） | 局内时长 p50 / 均值 / 最长（s） | FORCED_RISK | 支撑外命中 | tick p50 / p99（ms；随批次负载） | 迟到 tick（随批次负载） |
+|---|---|---|---|---|---|---|---|---|---|
+| TV（当场对照：两个开关都关） | 045158（300600） | 25 | 4.32 | **19.0（17.1–21.0）** | 12.4 / 13.7 / 21.1 | 0.813 | 0 | 9.8 / 19.0 | 3.5 % |
+| PC（commit_rank） | 043725（300500） | 25 | 4.40 | **12.4（11.3–13.7）** | 21.4 / 21.3 / 30.6 | 0.885 | 0 | 12.8 / 21.2 | 17.6 % |
+| SPC（seen + commit_rank） | 042011 + 042143 + 050303（300400 / 300450 / 300700） | 50（+1 HARNESS_FAIL） | 4.18 | **10.3（9.5–11.3）** | 23.5 / 24.4 / 43.1 | 0.915 | 0 | 12.0 / 20.2（两批：16.2 / 24.9、10.0 / 18.2） | 23.8 %（两批：40.1 %、5.8 %） |
+| 参照：A0b / 第 1 轮 TV | 20.5 | 50 / 25 | 4.27 / 4.0 | 19.1 / 18.4 | 12.7 / 13.5、13.9 / 13.3 | 0.80 / 0.82 | 1 / 0 | 5.9 / 11.8、7.4 / 13.6 | — |
+
+- 当场对照和第 1 轮、A0b 一致（每分钟 19 次受击、活 13–14 s）。**commit_rank 单独：每分钟受击 −35 %、平均存活 +55 %；叠加 seen：−46 %、+78 %**；两个 SPC 批次各 25 场一致（10.31 / 10.34，核对者重算）。95 % 区间互不重叠。取证轨自己的 seen / share 配对（种子 340000）见 §19。
+- 但**每一场仍是第 0 波 Q1 退出**（hits_to_death 1），0 WOULD_DIE、0 次击杀、没有一场进第 1 波：活得更久，但受击数（约 4.2–4.4 次就到 Q1）没变，只是被拉长到 21–24 s。下一个瓶颈是把敌人杀掉（R6 的目标、R8 的拼刀），而不是躲。
+- FORCED_RISK 比例上升（0.81 → 0.89 / 0.92）：活得久的那部分时间仍在 FORCED_RISK 里，改的是 FORCED_RISK 里怎么选。
+- 计算（**更正**，`round3\ab3_report.py`，`round3\ab2_batches.txt`）：按批次看，迟到比例（> 16.7 ms 的 tick）/ tick p50 / 规划 p50 是 SPC 300450 **40.1 %** / 16.2 / 8.8 ms、PC 17.6 % / 12.8 / 6.7 ms、TV 对照 3.5 % / 9.8 / 4.9 ms、SPC 300700 **5.8 %** / 10.0 / 5.4 ms。同样的 SPC 代码两批差 7 倍，所以原来写的"PC / SPC 迟到 18 % / 24 %（对照 3.5 %）、满载时多约 3 ms 是代码开销"不成立：负载最接近的一对（SPC 300700 紧接在 TV 对照之后）是 5.8 % 对 3.5 %、规划 p50 5.4 对 4.9 ms。代码本身的开销见 20.11（同一进程逐 tick 配对测）：旧的 commit_rank 实现在 FORCED_RISK tick 上多约 1 ms（p99 3 ms 以上），第 3 轮改成从阶段 1 的查询顺带算出来以后约 0.3 ms。
+- 默认：commit_rank 改为默认开（3797b3e，`SSBOT_FORUM_PC=0` 关）；seen 的默认（`share`）是取证轨的开关，本轨不改。叠加（SPC）比只开 seen 好这一点目前只有离线证据（20.8）；实战里取证轨只开 seen 的 11.9（10.5–13.4，种子 340000、3608489、另一时段）和这里 SPC 的 10.3 区间重叠，所以第 3 轮在同一批里逐场交替四组再比（20.11）。
+
+### 20.11 第 3 轮（核对者意见之后，2026-10-08 06:00 起；代码 2ef6383、b96559f）
+
+**1. commit_rank 的两个键改成从阶段 1 的支撑查询顺带算出（`MultiForecast.occupied_split`，2ef6383）**
+
+- 原来（核对者：中）：FORCED_RISK 时在包络之后，对所有允许的行（第 0 波约 410 行）再查两次支撑（`_union_occ(committed_only=True)` + `_fine_occ`），不在 8 ms 截止时间里，只会拉长 tick。
+- 现在：阶段 1 本来就对每一行、在同一组帧、同一个标称受击盒中心上查一次支撑并集。`occupied_split` 把这次查询的每个部件（细放置、窗口、外包盒、路径、各类盒子）按放置的"承诺"标记拆成两半分别查：并集和 `occupied()` 逐位相同（S1 不变），承诺那一半就是 P_cm 要的，细放置那部分就是 P_f 要的。FORCED_RISK 时只剩两次求均值。阶段 1 在包络之前，它多出来的时间算在包络的截止预算里（截止时间从 tick 开始计）。没有改变任何选择：键值和旧的两次查询逐位相同。
+- 核验：`tests/test_multi_forecast.py::test_occupied_split_is_the_union_and_its_committed_and_fine_parts`（并集 = `occupied()`，两部分 = 旧的两个查询）；`test_commit_rank_refines_forced_risk_by_the_committed_support` 加了"规划器的 P_cm / P_f 等于旧的两次查询"；在真实录像上逐 tick 比（下表的 1,907 个 FORCED_RISK tick）全部逐位相等。
+- 配对测量（`round3\pc_bench.py`）：同一进程里每臂一个 ForumPlannerPolicy（共享表），每个录像 STATE 轮流喂给四臂（每帧换先后），开环；四臂同一时刻承受同一负载（整机重负载：其他轨的 4 个游戏实例 + 离线任务）。C = 都关，PC = commit_rank，S = seen，SPC = 两者；时间单位 ms：
+
+| 录像 | 规划 p50（C / PC / S / SPC） | 阶段 1 支撑 p50 | FORCED_RISK 排序段 p50 | policy tick p50 | 迟到 tick（> 16.7 ms） | 旧实现那两次查询 p50 / p99 |
+|---|---|---|---|---|---|---|
+| 第 0 波（`20261008_015959` i0 ep3，960 帧，FORCED_RISK 754） | 4.74 / 5.02 / 5.00 / 5.33 | 1.00 / 1.13 / 1.00 / 1.16 | 0.16 / 0.26 / 0.31 / 0.43 | 11.3 / 11.4 / 11.4 / 11.7 | 3.0 / 2.6 / 2.9 / 2.4 % | 0.78 / 2.7 |
+| 第 7 波（`20261008_052126` i1 ep0，960 帧，849） | 3.90 / 4.29 / 4.16 / 4.48 | 0.75 / 0.83 / 0.76 / 0.83 | 0.15 / 0.27 / 0.26 / 0.39 | 8.7 / 9.0 / 9.0 / 9.1 | 1.1 / 0.8 / 0.8 / 0.8 % | 0.60 / 2.8 |
+| 第 13 波（同一运行 ep1，522 帧，304；和全套测试同时跑） | 6.83 / 7.08 / 6.70 / 7.21 | 1.06 / 1.15 / 1.09 / 1.15 | 0.19 / 0.32 / 0.31 / 0.44 | 12.4 / 12.7 / 12.4 / 12.7 | 17.4 / 19.9 / 19.4 / 19.5 % | 0.93 / 4.8 |
+
+  commit_rank 现在合计多 0.25–0.4 ms 规划 p50（阶段 1 +0.1，排序段 +0.1，其余是开环下选择不同带来的差异），旧实现单是那两次查询就 0.6–0.9 ms p50、2.7–4.8 ms p99；seen 的 `seen_contacts` p50 0.09–0.12 ms、p99 0.4–1.0 ms。迟到比例在同一负载下没有可分辨的差别（第 0 / 7 波 PC、SPC 反而略低；第 13 波 522 帧里 91 对 101–104 个，在泊松误差内）。
+
+**2. 终点价值默认关**（2ef6383 起，`SSBOT_FORUM_TV=1` 开；核对者：低）：闭环没有收益（20.5：TV 18.41 对只修目标 18.42 次/分钟），离线只多约 1 个点（20.7），而它在包络之前、占包络的截止预算（0.9–1.3 ms p50，满载 p99 到 3 ms）。代码、权重和开关都留着，等有闭环收益再开。
+
+**3. 事后判定的选择偏差（核对者：低；`round3\base_eval.py`，round2 的转储）**：开环重放时实战排序选的基本就是录像里实际走的那条（重放和实际选择 99.5–99.8 % 一致），而录像里的威胁是冲着录像里的主角去的，所以靠近录像路径的行事后判"不安全"偏多：和选中行前 6 帧按键相同的行，受击前事后安全只有 30.8 % / 33.0 %，低于随机一个允许行的 36.8 % / 39.1 %。因此：
+
+- 排序之间的比较以"随机一个允许行"为基线（20.7 / 20.8 的表已补）：受击前 commit_rank +4.7 / +3.2 个百分点、seen +0.7 / +2.5、叠加 +11.9 / +11.9；全部 FORCED_RISK tick 上 +7.4 / +5.4、+4.9 / +6.1、+11.8 / +10.7。原来写的"比实战 +11 / +10"有一半来自实战本身被偏差压低。
+- J0 在受击前 AUC 0.46 不是"反着来"，而是 J0 和录像路径相关（20.7 第 2 条已改）。
+- `forum_tv_audit` 的输出多了 `clear.random`（每个 tick 允许行里事后安全的比例，再按 tick 平均），文档里说明要和它比、不要和实战选择比。
+- 取证轨（§19.5）独立得出同样的结论（"开环事后判定偏向没执行的行"），它的结论只靠支撑饱和 / 打平的证据，不靠"比随机差"。
+
+**4. 第 2 轮 A/B 的执行方式和开销归因（核对者：驳回两条）**：20.10 已更正——四批是依次跑的，迟到比例主要是各批的负载（同样的 SPC 代码 40.1 % 对 5.8 %），代码开销按上面第 1 条的配对测量。
+
+**5. 逐场交替的 A/B（`SSBOT_FORUM_AB`）**：ForumPlannerPolicy 读 `SSBOT_FORUM_AB="名:pc=0|1,fr=share|seen;..."`，第 k 场用第 k mod n 组（`ForumConfig` 覆盖 commit_rank / forced_rank），本场的组名记在 attempts 的 `policy.ab_arm`；同一个 combat_run 批次里各组轮流，同一时段、同一负载。驱动 `C:\ssbot\sandbox\r5v_ab3.ps1`（冻结检出 `C:\ssbot\live_r5v3_2ef6383`，实例 0，A0b 协议，终点价值关、T 36，种子 300800 起，每组 25 场，真退出后的 HARNESS_FAIL 让批次提前结束时用种子 + 100 补齐、缺得多的组排前面），四组 = 2×2：C（都关）、PC、S（seen）、SPC。报告 `round3\ab3_report.py`。
+
+**6. 第 3 轮 A/B 结果（实例 0，2026-10-08 06:34–07:26，运行 `20261008_063420`，种子 300900 起；第一批 300800 的第 1 场就是真退出后的 "paused unasked" HARNESS_FAIL，驱动换种子重来）**：100 场，四组各 25 场，**同一批里逐场轮换**（C、PC、S、SPC、C、…），所以四组承受同一负载（整批迟到 1.4 %）。终点价值关、T 36、代码 2ef6383。`round3\ab3_report.txt`：
+
+| 组 | 每场受击 | 每分钟受击（95 % bootstrap） | 局内时长 p50 / 均值（s） | FORCED_RISK / EVADE | 规划 p50（ms） | tick p50 / p99（ms） | 迟到 tick | 击杀 |
+|---|---|---|---|---|---|---|---|---|
+| C（都关） | 4.16 | **18.9（17.1–20.8）** | 12.7 / 13.2 | 0.808 | 4.11 | 9.9 / 17.4 | 1.9 % | 0 |
+| PC（commit_rank） | 4.48 | **13.7（12.5–15.2）** | 19.6 / 19.7 | 0.863 | 4.49 | 9.8 / 17.2 | 1.3 % | 0 |
+| S（seen） | 4.20 | **13.8（12.5–15.3）** | 16.9 / 18.3 | 0.879 | 4.29 | 10.1 / 16.8 | 1.3 % | 1（Envoy） |
+| SPC（seen + commit_rank） | 4.44 | **10.2（9.1–11.6）** | 27.0 / 26.1 | 0.910 | 4.61 | 10.2 / 17.1 | 1.3 % | 1（Choristor） |
+
+每分钟受击之比（两组各自重抽，4000 次）：PC / C 0.72（0.63–0.83），S / C 0.73（0.64–0.84），**SPC / S 0.74（0.64–0.87）**，SPC / PC 0.75（0.64–0.88）；2×2 主效应 commit_rank 0.73（0.66–0.82）、seen 0.74（0.67–0.83），两者大致相乘（0.72 × 0.73 = 0.53，SPC / C = 0.54），没有交互。平均存活 commit_rank +7.1 s（5.0–9.3），seen +5.7 s（3.5–7.9）。
+
+- **commit_rank 在 seen 之上也有显著收益**（SPC / S 0.74，区间不含 1）：第 2 轮"叠加比只开 seen 好"只有离线证据（核对者：信息），现在有了同一时段、逐场交替的实战证据。数值和第 2 轮一致（C 18.9 对 19.0，PC 13.7 对 12.4，SPC 10.2 对 10.3）。
+- **迟到没有变多**：同一负载下 C 1.9 %、PC / S / SPC 1.3 %（活得久的组 tick 更多、FORCED_RISK 更多，迟到比例反而略低）；规划 p50 commit_rank +0.38 ms、seen +0.18 ms、两者 +0.50 ms，和第 1 条的配对测量一致。第 2 轮的 18–24 %（以及 40 %）是批次负载。
+- 仍然**每一场都是第 0 波 Q1 退出**（0 WOULD_DIE、没有一场进第 1 波），但这条轨第一次有了击杀：S 一场杀了 Envoy（22.9 s），SPC 一场杀了 Choristor（29.8 s），都是 Slash。活得越久越有机会，但瓶颈仍然是进攻。
+- 和取证轨对照（§19；它的 seen 对 seen_cf ABBA 配对，种子 340100–340124，实例 0，05:57–06:32，迟到 1.4–1.8 %，本轨用 `ab3_report.py` 重算）：seen 12.4（11.4–13.5），seen_cf 9.4（8.7–10.2），之比 0.76；本轨 SPC / S 0.74。seen_cf（seen 之后按"承诺的细放置"接触比例排）和 SPC（seen > P > P_cm > P_f）机制几乎相同、效果相同（不同时段，区间重叠：9.4（8.7–10.2）对 10.2（9.1–11.6））。开销不同：seen_cf 在包络之后对所有允许行再查一次细放置（它的配对里规划 p50 5.06 对 seen 4.35 ms），本轨从阶段 1 的拆分查询顺带得到（SPC 4.61 对 S 4.29 ms）。集成时二选一即可；若取 seen_cf，它的键可以直接用 `occupied_split` 里承诺的细放置那一半（拆分时 `com` 在并入窗口等之前就是它），不必再查。
+
+结论：commit_rank 保持默认开；终点价值默认关；seen 的默认值仍是取证轨的开关——实战配对数据支持集成时打开（seen 或 seen_cf 再叠承诺的招，两条轨的数字一致）。剩下的受击（20.9）和"杀不掉"不是这条轨的排序能解决的。
+
+## 21. R6 v0：你的规则作 L2 目标层 + Clapper 控制器（2026-10-08，forum_planner_plan.md §5 R6；分支 worktree-wf_814dfeea-b10-3；离线 + 实例 1 的 A/B（21.5）；第 2 轮 2026-10-08 早上（21.6））
+
+### 21.1 做了什么（`combat/tactics/gauntlet.py` `GauntletTactics`，`Forum.yaml` `forum.l2`）
+
+- 每 tick 先跑 LOCAL（R4 的 `ForumTactics`，HEAL / LEAVE 照旧优先），再由 L2 选目标：每 6 tick（10 Hz）重选一次，目标死了 / 出场 / 换了招式家族 / PUNISH 窗口过了就立即重选；新目标得分要是旧的 1.25 倍才换（滞回）。只改打分（站位 stance_x、朝向 boss_x、每个敌人的命中权重、按目标的权重系数），**规划器的 S / Hz / U 不看 prefs**（§4.4 第 2 条），安全仍由支撑检查、过滤器、监督器负责。
+- 目标规则（按顺序，第一个成立的）：
+  - **PUNISH（远处目标）**：每个候选敌人一个"接敌点"，一次批量查询 `MultiForecast.occupied`（所有敌人、投射物、入场）得到窗口 = **主角到达（t_run）之后**这个点第一次被支撑覆盖的时刻；t_run = 0.05 + |dx| / 17.5（冲刺 + 疾跑，你说的约 17.5 u/s）；窗口 ≥ t_run + 0.25（出刀到收割者横砍有效段结束 0.208 s）+ 0.10 余量 才去；多个可去时按（窗口 − 需要）× 类型优先级挑。这就是计划 R6 行的远处目标场景：近处待机的（下一招随时可起，窗口短）对远处长后摇的（窗口长）→ 窗口够就去远的，不够就不去。
+  - **RUSH**：有落单的（8 u 内没有别的在场敌人）就冲上去；全都分散时先打"最快追上来的"（ETA = max(0, 距离 − 1.8) / 追击速度）。
+  - **KITE**：没有落单的：站在最快那只的另一侧 8 u（远离其他敌人那一侧），让它单独先到；有 Tiny 时改站最近的 Maestro 正下方（below.json：Tiny 冲撞正下方 7.1 % 对前方 34 / 58 %）。LOCAL 判 EVADE（主角位置 0.6 s 内被覆盖）时 KITE 让给 EVADE；PUNISH / RUSH 不让（支撑检查是安全）。
+  - 优先级：Clawmaiden 在场时只选它（`first`，权重 3）；**Minister 只在没有别的敌人时才选**（`last`）。
+- 接敌点：飞行怪（Bellbearer、Reed、Minister、Maestro）在它正下方（你的"在它下面更安全"；Minister 冲刺斩往前两个身位，所以从下面开始最后在它身后）；其他类型在主角这一侧 1.8 u（LOCAL 的 engage_reach）；Clapper 用下面的控制器。
+- **Clapper 控制器**（不能拼刀；§10、clapper_face.md）：Idle / Walk / 施法 / 后撤：在主角这一侧的脸上 3.0 u（它每招起手 FaceObject 面向主角）；**锤（CC_SLAM）**：主角在它前面 → 退到前方 13 u（12.5 u 2.3 %、13 u 0）；主角已在它背后 → 背后 3.5 u（3 u 0.2 %）；前方没地方时也去背后；下劈踩头（你练习 15 / 22）留给规划器自己的行去选；**跳砸 / 跳施法**：钻到它下面、站到落点背后 2.5 u：落点 = 起跳点 + 0.92 × clamp(瞄准 − 起跳点, ±12)，瞄准 = Jump Aim 那一帧的主角 x ∓ 5（它这一侧）；Jump Aim 之前按当前主角位置估，之后用存下的瞄准（`jump_landing`）；它在空中时对它的命中权重再 ×1.5（顺路上挑）；大符文在落点前方 6.62 u、r 7.19，只伸到落点后 0.58 u，所以落点背后 2.5 u 在圆外；**两只不同时出招**（Buddy Is Attacking）：一只在出招时另一只的优先级 ×2；**施法（CC_CAST，约 1.25 s 原地）**：脸上照砍，`vocab` 里放 `GLIDE_SPIKE` 钩子（R7 的锯齿环 glide_spike 还没进规划器，目前没人读）。
+- **Clapper 朝向的修正**：oracle 后端的 `Entity.facing` 是速度的符号，不动时取 `-1 if flipX else 1`，而 Forum 的精灵不翻转时朝 −x（`enemy_tracker.FACES_LEFT`）：站着的 Clapper 朝向是反的。R0 缓存 15 场核对：Slam Antic 帧 flipX = 1 且主角在它右边 1,564 / 1,631、flipX = 0 且主角在左边 5,414 / 5,434；Idle 6,507 / 6,623、39,630 / 39,651。新函数 `clapper_facing`（flipX 1 = 朝右）给 L2 和 R4 的口袋规则 (2)（以前用的是反的朝向；A0 / A0b 从没到终局，不影响基线）。
+- **追击速度**（`pursuit_u_s`，R0 缓存 20 场，敌人速度在"指向主角"方向上的分量，只算在场、距离 > 4 u、正在靠近（> 0.5 u/s）的帧的均值；数据策略的主角）：Choristor 9.69、Clapper 9.38、Envoy 8.14、Tiny 7.02、Minister 5.64、Reed 4.63、Clawmaiden 4.39、Bellbearer 3.99、Maestro 3.12 u/s（p90：Envoy 12.9、Tiny 8.0、Clapper 7.7、Minister 7.2、Reed 6.7、Clawmaiden 6.4、Bellbearer 5.2、Maestro 4.5、Choristor 1.3——Choristor 多数时间原地鞭，靠近时是跳，所以用"靠近时的均值"）。
+- 失效 → LOCAL（§4.4 第 4 条）：异常或注入失败（`fail_p`）原样返回 LOCAL 的 prefs；开关 `SSBOT_FORUM_L2`（0 / off = A0 的 LOCAL，fail:<p> = 注入），combat_run 把它记进 config.json 和每行。
+- 记账：`stats()["l2"]`（目标按 tick、目标变化 / 换目标、PUNISH 次数与"窗口内打中目标"次数、L2 用时），决策日志多了 `goal`、`goal_why`、`goal_t_end`、`l2_cands`（每次重选时每个候选：iid、类型、窗口、需要、是否落单、ETA、优先级、此刻是否已被覆盖）——目标仲裁逐条可查；`forum_a0_report` 加了 L2 一节、每场受击和击杀数。
+
+### 21.2 离线核对
+
+- 单元测试 `tests/test_forum_l2.py`（13 项）：远处目标（近处待机的 Choristor 在 2 u、远处后摇里的 Envoy 在 13 u：远处接敌点到达后 1.4 s 内不被覆盖 → PUNISH 远的、站位 31.2；只有 0.8 s → 不去，改 RUSH 近的；近处自己的窗口够 → PUNISH 近的）、落单 / 分散 / 扎堆、Tiny 时站 Maestro 下方、Clawmaiden 先 / Minister 后、Clapper 控制器各招、两只 Clapper 互锁、朝向、失效三种（注入、异常、关闭）逐字段等于 LOCAL、开关解析、PUNISH 窗口内命中计数。`test_forum_tactics.py` 照旧 5 项通过。
+- **§4.4 第 4 条整条决策逐位相同**：`forum_policy_replay`（`074719` i3 ep0 第 0 波，600 tick，截止时间 inf）`SSBOT_FORUM_L2=fail:1` 对 `=0`：600 / 600 tick 的计划名、S、FORCED_RISK、按键、J 0 处不同。
+- 开环回放（同一录像，数据策略的主角位置，所以计划不被执行；机器负载高：5 个游戏实例 + 其他代理）：L2 每 tick p50 0.014–0.047 ms、p99 1.4–3.3 ms（批量查询只在重选的 tick 跑）；异常 0；支撑外命中 0。目标分布：第 0 波 KITE(EVADE) 63 %、RUSH 31 %；第 3 波 Clawmaiden 91 %（first）；第 6 波 KITE(EVADE)（在 Maestro 下方）89 %；第 7 波（单只 Clapper）RUSH 94 %；第 13 波（两只 Clapper）RUSH 48 %、KITE(EVADE) 46 %。
+- **PUNISH 在多敌波次里不成立**：第 0 / 3 / 6 波 1,000 tick 的重选里（Envoy / Choristor / Reed / Bellbearer / Clawmaiden / Tiny / Maestro 共 2,331 个候选），接敌点**此刻就被支撑覆盖的占 99.7 %**，到达之后的空闲时间中位 0.017 s、p90 0.030 s、最长 0.168 s，**≥ 0.35 s（够一刀）的 0 次**：待机敌人的支撑（下一招随时可起 + 待机身体管）一直盖着它身边，与 A0 的 87 % FORCED_RISK 同一个原因（§16.4 第 1 条）。接敌点从 1.8 u 改到 3.0 u（收割者横砍够 3.6 u）重跑一次：同样 0 次（没有采用）。第 7 波单只 Clapper 时有 1 次 PUNISH（Tiny）。第一版把"到达前就被覆盖"也算进窗口（窗口全是 0），已改成从到达算起。
+- Clapper 控制器在录像上各分支都触发（开环，2,000 tick / 波，按 tick 计）：第 7 波（单只）脸上 1,099、跳（钻到落点背后）513、锤：退到前方 110 / 前方没地方改去背后 82 / 已在背后留在背后 71、PUNISH 12（Tiny）；第 13 波（两只）脸上 790、锤 84 / 83 / 4、KITE(EVADE) 917（两只相距 < 8 u 时没有落单的）。落点公式在实战里的误差没有逐次核对（clapper_face.md 的拟合残差 p50 0、IQR ±0.13 u）。Clapper 朝向检查见 21.1。
+
+### 21.3 远处目标场景（计划 R6 行的验收）
+
+- 合成局面：通过（21.2 第一条）。
+- 录像切片：上面的开环回放里这种局面（远处有到达后够一刀的窗口）在第 0 / 3 / 6 波没有出现，所以录像上只能验证"窗口不够时不去"（全部候选都没去），"窗口够时去"只有合成局面和第 7 波的 1 次。闭环实战里 PUNISH 的次数和"窗口内打中"的次数由 A/B 记（`punish_goals` / `punish_landed`）。
+
+### 21.4 没做 / 未核实
+
+- 接敌点只是一个点（离敌人 1.8 u 或正下方），窗口按"站着的主角"查；收割者横砍够距 3.6 u，换成"够得着的最远点"窗口会长一些（未测）。
+- 跑过去的路上会不会被别的敌人挡住只由规划器逐帧查（L2 不查路径）。
+- 落单判据只用水平距离 8 u，不是计划里的"危险区和危险时段是否重叠"。
+- 下劈踩 Clapper 头（命中无敌 0.16 s）在运动学里有没有建模没查；规划器只会在它的行恰好安全时选。
+- "在 Reed 下面更安全"与 R1 的数据（飞行怪下方对 Reed 无效：3.5 对 3.1 次 / 分）不一致，按你的规则做了，由 A/B 看。
+
+### 21.5 第 1 轮 A/B（实例 1，2026-10-08 01:59–02:40，冻结检出 `C:\ssbot\live_r6_ef036d5`）
+
+驱动 `C:\ssbot\sandbox\r6_ab.ps1`（日志 `r6_ab.log`）等路线 Boss 采集结束后在实例 1 上按 A0b 的协议（fo_A、eval、planner、oracle、线程 4、真退出 0.2）跑了同种子成对的四块，每块 25 场：L2 开 `20261008_015904`（种子 310000）、`021942`（310025）；L2 关（`SSBOT_FORUM_L2=0`，即 A0b 的 LOCAL 战术）`020919`（310000）、`022951`（310025）。报告：`forum_a0_report`（会话临时目录 `r6\ab\on.json`、`off.json`、`a0b.json`）；按种子配对、按目标 / 受击的分析 `r6\ab\ab_anal.py` → `ab_anal.json`。A0b = `20261005_205437` + `205857`（种子 180000 / 180100，不成对）。
+
+| 指标 | L2 开（50 场） | L2 关（50 场，成对） | A0b（51 场，不成对） |
+|---|---|---|---|
+| 结果 | QUIT 50（全是 Q1：h = 1） | QUIT 50（全是 Q1） | QUIT 50 + HARNESS_FAIL 1 |
+| 到达的波 | 50 场全在第 0 波 | 同 | 同 |
+| 受击 / 场（damage 事件） | 4.26：Envoy 94、Choristor 77、Reed 42 | 4.10：89 / 73 / 43 | 4.27：105 / 56 / 57 |
+| Multihit tick | 37 | 45 | 35 |
+| 存活（开战到退出）p50 / 最长 | 12.6 / 20.5 s | 13.3 / 18.4 s | 12.7 / 19.9 s |
+| 钉子打中敌人 / 场（录像 `hit` 事件，每下 9） | 4.56（Envoy 107、Choristor 75、Reed 46 下） | 5.08（129 / 63 / 62） | — |
+| 击杀 | 0 | 0 | 0 |
+| FORCED_RISK（tick） | 79.0 % | 80.5 % | 80.3 % |
+| 支撑外命中 / 未知 | **0 / 0** | 0 / 0 | 1 / 1（i4 ep0 f 905007，来源 iid 9655958；A0b 自己的，未查） |
+| tick p50 / p99 的中位、p99 最大 | 6.7 / 13.3 / 17.5 ms | 6.2 / 12.0 / 17.3 ms | 5.9 / 11.8 / 1,471.6 ms（一次卡顿） |
+| L2 自身 p50 / p99（中位） | 0.026 / 0.89 ms | — | — |
+| 每秒按键（锁存按键 / 游戏时间，每场中位） | 7.28 | 7.18 | 7.75 |
+| 计划改动率（每场中位） | 0.555 | 0.620 | 0.615 |
+| 目标变化 | L2 目标（换目标或换规则）**33.0 次 / 分**；决策日志里目标 iid 的变化 37.5 次 / 分 | LOCAL 的目标 iid 变化 71.7 次 / 分 | — |
+| 真退出 | 9 次：暂停 9、到主菜单 9、错误确认 0 | 9 / 9 / 9 / 0 | 7 / 7 / 7 / 0 |
+
+按种子配对（50 对，开 − 关）：受击 +0.16 次（sd 0.98，se 0.14）、存活 −0.71 s（sd 3.03，se 0.43；开活得更久的 20 对、关活得更久的 30 对）、钉子命中 −0.52 下。**R6 v0 没有改变结果**，差异都在噪声以内。
+
+L2 在第 0 波做了什么、受击从哪来（决策日志，L2 开 24,945 个决策 tick）：
+
+- **L2 确实在工作**：RUSH 55 %、KITE(EVADE) 43 %（KITE 时 LOCAL 的 EVADE 成立，原样用 LOCAL 的打分）、其余 2 %（暂停等）；**PUNISH 0 次**（21.2 的原因：待机敌人的支撑一直盖着接敌点）。RUSH 的理由："落单" 9,310 tick、"都分散：最快追来的" 4,449 tick——第 0 波三只敌人在 35 u 的场地里多数时候相距 ≥ 8 u，按 8 u 的水平判据几乎总有落单的。目标：Envoy 42 %、Reed 31 %、Choristor 25 %。
+- RUSH 把主角带到了目标身边：主角到目标的 |dx| 中位 2.5 u（KITE(EVADE) 3.8 u，L2 关 3.7 u），站位离主角中位 1.3 u；但出刀的计划占比几乎不变（13 % 对 L2 关 12 %），钉子命中反而略少。
+- **受击和 L2 选了什么无关**：按受击前 0.2 s 的目标分，RUSH 时 122 次（69 次来自正在冲的目标本身、53 次来自别的）、KITE(EVADE) 时 91 次（45 / 46）；每个决策 tick 的受击率 RUSH 0.0089、KITE(EVADE) 0.0085、L2 关 0.0085——同一个速率（约每 3 s 一下），不管 L2 选谁、站哪。受击时的主角–来源距离中位 4.5 u（关 4.9 u）。受击来源的比例和 A0b 一样（Envoy 冲锋最多）。**（第 3 轮更正，核对者）**：这里的分母是决策日志的 tick，它是按事件触发采样的（L2 开 24,945 个，全部 tick 33,701 个），有偏；按全部 tick（`policy.ticks`）算，第 1、2 轮的三对运行合计 75 对：L2 开 0.00612、关 0.00565 次 / tick（+8 %），每分钟 19.95 对 18.57（不显著：成对受击 +0.11，se 0.11）；但**受击来源变了**：Choristor 的 `Body Damager` 开 28 次、关 8 次（成对 +0.27 / 场，se 0.08，显著），存活成对 −0.62 s（se 0.36，约 1.7 se）。所以"受击和 L2 选什么无关"只对总数大致成立，见 21.7.4。
+- 原因（与 diag 轨道的早期结论一致，HANDOFF 'Task wave-0 forensics'、forum.md §19）：FORCED_RISK 的 tick（74 %）里规划器按"候选在支撑里的接触帧占比 → 最晚接触 → J"排序（`forum_planner` 的 FORCED_RISK 选择），而第 0 波的支撑饱和：diag 查到 77 % 的 FORCED_RISK tick 上所选行和它的 5 个备选 P 都是 1.0（每个 stage-1 帧都在支撑里），前几项全部并列，选择落到 J（p_k 预选也按 J）——所以第 0 波里 L2 的打分其实决定了计划（J 贪心：跑向目标、出刀），只是不管 J 来自 RUSH 的站位 / 命中权重还是 LOCAL 的 EVADE，规划器都"以为每个计划一样危险"，受击速率一样。diag 的事后核对：A0b 两场里所选计划在事后（录像里的伤害碰撞体）不碰的比例 70 %，随机一行 77 %。第 0 波的瓶颈不是"打谁"，而是 FORCED_RISK 在支撑饱和时没有可用的排序键（diag 试 `SSBOT_FORUM_FR=seen`：按此刻看得见的伤害碰撞体排序；R5 的终点价值、R8 的拼刀分支也在这一层）。
+- 验收里的两条：每秒按键、计划改动率不高于 A0b（7.28 对 7.75、0.555 对 0.615）✓；**目标变化 ≤ 10 / 分 ✗**（33 / 分）：KITE 的"ETA 最小"目标随主角移动来回换，而且目标每换一招（招式家族变化）旧目标就作废、不经滞回重选。第 2 轮修正见 21.6。
+
+### 21.6 第 2 轮（2026-10-08 03:10–05:40，分支同上；实例 1）
+
+#### 21.6.1 目标保持（21.5 的 33 次 / 分）
+
+- **规则和目标分开保持**（`gauntlet.py` `_pick` / `_choose`，`Forum.yaml` `forum.l2`）：规则（PUNISH / RUSH / KITE）要跑满 `goal_dwell_s` 1 s 才换（换进 PUNISH 不等）；同一规则下，原目标只要还"合格"（RUSH：落单，原目标的落单判据放宽到 8 − 2 = 6 u；KITE：任何一只）就留着，除非另一只得分 ≥ 1.5 倍且原目标已经当了 `dwell_s` 4 s 目标；**被冲的目标身边来了别的敌人**时先对它 KITE（目标不换），到 4 s 后 RUSH 才换到别的落单敌人；立即换目标的只有：原目标死了 / 出场、PUNISH 开窗、`first` 类型（Clawmaiden）进场、两只 Clapper 中另一只"轮到"（见 21.6.3）。目标换招不再让目标作废，只触发一次重选（可能留着原目标）。每场的统计多了 `tgt_switches` 和按原因分的 `switch_kinds`（gone / ineligible / better / turn / punish）；`forum_a0_report` 多了 `tgt_switches_per_min`、每秒按键（锁存按键 / 游戏时间）和计划改动率。
+- **顺带修了 PUNISH 的一个错**：接敌点远到"跑过去 + 一刀"超过 2 s 查询长度的（|dx| ≳ 28 u），到达之后根本没查，窗口记成 inf，于是总是"可去"；开环回放里两只这样的远处目标每 0.1 s 互相 PUNISH 切换（窗口封顶后得分为负，1.25 倍的滞回对负数反而放行）。现在查询里装不下的窗口记为查询终点（不够一刀）。21.2 的"≥ 0.35 s 的窗口 0 次"不受影响（那里没有这么远的候选被计入）。
+- 开环回放（21.5 的 L2 开两个运行各前 10 场，第 0 波，主角位置是录像里的；`l2_switch_replay.py`，会话临时目录 `r6\sw_*.json`）：目标切换（换了一只敌人）每分钟：第 1 轮代码 23.8；只加停留 2 s 19.6；加"换招不作废" + 停留 3 s（×1.25）10.3、×1.5 9.6、×2.0 9.2；采用 ×1.5、4 s、规则 1 s。按原因（×1.25、3 s）：better 34、ineligible 10。**（第 3 轮更正）**：这几个数的样本和配置不同：23.8 是 10 场（`sw_old`），9.6 是 20 场、停留 3 s；最终采用的 4 s 在同样 20 场上是 8.22（核对者重跑），而且这只是"换敌人"（`tgt_switches`）；同一回放里"目标或规则变化"（`changes`，第 1 轮判不过用的口径）是 23.0 次 / 分。
+
+#### 21.6.2 实战：先是负载
+
+- 第一次实战（驱动 `C:\ssbot\sandbox\r6_ws.ps1`，冻结检出 `live_r6_6d2f457`，03:45）在机器满载下跑不了：CPU 100 %（其他轨道的取证、回放、行为表、三套全量测试，大多是低优先级）；每场迟到 tick 34–172（第 1 轮 0–2）、tick p99 22–38 ms；7 场后一次 "paused unasked"（大脑 14 帧没发 ACTION，oracle 看门狗按了暂停，HARNESS_FAIL，一次就结束整个运行），L2 关那一块第 1 场就失败。同一时段别的轨道的实战也一样（迟到 100–350 / 场）。
+- 第二个驱动 `r6_ws2.ps1`（冻结检出 `live_r6_171cf28`）：实例 1 的 combat_run worker 启动后提到 AboveNormal（两臂一样），某一块被 HARNESS_FAIL 截断时从失败那一场起用同样的种子和轮换补跑。之后波次起点每场迟到 tick 8–60（偶尔 142）、p99 16–26 ms，完整连战迟到 2.6–5.4 % 的 tick；r6_ws2–ws4 共 178 场（波次起点 128 + 完整连战 50）0 次 HARNESS_FAIL。**协议差异**：第 1 轮是普通优先级、负载低；第 2 轮的绝对数字（尤其是受击）在更差的时序下得到，两臂之间仍然成对可比。
+
+#### 21.6.3 Clapper 控制器实战（波次起点 `Forum_A_w7`（一只）/ `Forum_A_w13`（两只），eval、planner、oracle、无真退出；按局轮换，种子 310100–310131，L2 开 / 关成对）
+
+v2 = 171cf28（21.1 的控制器 + 脸上 4 u + 跳的时序判断，见下）。运行：L2 开 `20261008_035906`、`040911`；L2 关 `040451`、`041508`（各 16 场）。分析 `r6\ws_anal.py` → `ws_ab.json`。
+
+| 指标 | w7 L2 开 | w7 L2 关 | w13 L2 开 | w13 L2 关 |
+|---|---|---|---|---|
+| 场数 / 结果 | 16 / 全 QUIT（Q1） | 16 / 全 QUIT | 16 / 全 QUIT | 16 / 全 QUIT |
+| 存活（开波到退出）均值 / p50 | **19.7 / 18.6 s** | 11.1 / 10.9 s | **11.1 / 10.3 s** | 9.2 / 8.7 s |
+| 受击 / 场、/ 分 | 3.31、**10.1** | 3.06、16.6 | 3.50、**19.0** | 3.12、20.4 |
+| 受击来源 | 符文 24、本体 14、大符文 9、锤 6 | 锤 21、符文 11、本体 11、大符文 6 | 符文 25、锤 14、本体 12、大符文 5 | 锤 19、本体 17、符文 13、大符文 1 |
+| 钉子打中 Clapper / 场、/ 分 | **6.4、19.6** | 2.1、11.5 | **10.9、59.0** | 5.7、37.1 |
+| FORCED_RISK | 83.5 % | 71.3 % | 69.3 % | 65.0 % |
+| 换目标 / 分 | 0 | — | 13.2（轮到 36、更好的 3） | — |
+
+按种子配对（每波 16 对，开 − 关）：w7 存活 **+8.6 s**（se 1.5）、受击 +0.25（se 0.14）、打中 +4.3 下；w13 存活 **+1.9 s**（se 0.8）、受击 +0.38（se 0.18）、打中 +5.2 下。两波都没有击杀（Clapper 230 HP，收割者一下 9，要 26 下），都在挨 3 下左右（h = 1）时 Q1 退出——"每场受击"相同是退出规则决定的，比较看存活时间和受击 / 分钟。**控制器明显好于 LOCAL**：锤（`Slam Collider`）的命中从 21 → 6（w7）、19 → 14（w13），对 Clapper 的输出每分钟 +70 % / +59 %。
+
+L2 开的受击按当时的控制器分支（受击前 0.2 s）：
+
+- **脸上 ← 小符文 44 次（w7 24、w13 20）**：施法（CC_CAST）时站在脸上，`rune bomb` 1 颗 + 9 对、间距 4.2、r 2.17，**地面上没有安全格**（clapper_face.md §2），只能在近处那颗亮的 5–7 帧里人在空中；这是规划器选跳的时机问题：第 0 波一样的支撑饱和（21.5）下它分不出哪一行能躲（diag 的 `SSBOT_FORUM_FR=seen` 按此刻看得见的碰撞体排序，符文炸前 0.33–0.35 s 就画出来）。
+- **跳 ← 本体 14 次（w7：退开时 10、钻过去时 4）**：逐场看（`ep 0/2/4/6/8/14`）都是同一个样子：Clapper 在左墙边起跳，"落点后方"被墙夹到 21.1（并不在落点后方），主角往那里钻；半空中剩余时间不够了，判断翻成"退开"，主角在它正下方掉头，被落地的本体砸中。
+- **锤：钻到背后（前方没地方）← 本体 7 次（w13）**：前方没有 13 u 的地方时去背后，就是在地面上穿过它的身体。
+- 锤：往外 ← 锤 5 次（w7，起手 0.8 s 内没跑到 13 u 外：站位差中位 3.4 u）。
+
+由此的 **v3（716b539）**：跳的走法在它的 Jump Aim（落点确定）那一刻定下，整个跳都不改；落点后方要在场内（不被墙夹）才钻；锤在前方没地方时**往外退到墙边**（不穿过身体；锤够 12 u，离得越远越可能落空）；另外 w13 里"轮到另一只"只在另一只的接敌点能在这一招结束（`Subject.t_free`）之前跑到时才换（a637d77）——**（第 3 轮更正）这条实际没有生效**：`MultiForecast` 给每个 Subject 的 t_free 都是 0，于是"跑得到"永远不成立，"轮到"整条规则从 a637d77 起就关掉了（21.7.2）。v2 里已经有的：脸上 3 u → 4 u（本体前沿在 2.25 u，3 u 只留 0.5 u：第一次实战里冲过头撞上本体）；跳：钻过去只在"跑到落点后方 ≤ 落地前 0.25 s"（起跳到落地 1.415 s / 跳施法 1.85 s）且不在它落地前穿过它的身体时，否则退到落点前方跳砸 8.5 u / 跳施法 14.5 u 外（clapper_face.md §R6 的"往外 3.5 u / 9.2 u"）。
+
+#### 21.6.4 完整连战复测（v2 171cf28，A0b 协议：fo_A、eval、planner、oracle、真退出 0.2；种子 310200，L2 开 `20261008_041945` / 关 `043128` 各 25 场，成对）
+
+| 指标 | L2 开 | L2 关 |
+|---|---|---|
+| 结果 | QUIT 25（全 Q1），全在第 0 波 | 同 |
+| 受击 / 场 | 4.48（Envoy 57、Choristor 36、Reed 19）+ Multihit tick 13 | 4.48（54 / 32 / 26）+ 13 |
+| 存活 p50 / 最长 | 14.2 / 17.7 s | 13.9 / 18.2 s |
+| FORCED_RISK | 80.4 % | 80.1 % |
+| 支撑外命中 / 未知 | 0 / 0 | 0 / 0 |
+| tick p50 / p99（中位）/ p99 最大 | 11.3 / 22.3 / 24.8 ms（迟到 5.4 %） | 10.3 / 19.1 / 22.3 ms（2.6 %） |
+| 每秒按键 / 计划改动率（每场中位） | 6.97 / 0.582 | 6.89 / 0.625 |
+| 换目标 / 分（`tgt_switches`） | **7.65**（44 次：原目标不再合格 26、更好的 18；目标或规则变化 25.9 / 分） | — |
+| L2 | 目标 tick：KITE(EVADE) 9,703、RUSH 8,086、PUNISH 0；错误 0；每 tick p99 中位 1.3 ms | — |
+| 真退出 | 7 次：暂停 7、到主菜单 7、错误确认 0 | 7 / 7 / 7 / 0 |
+
+成对（25 对，开 − 关）：受击 0.00（se 0.15）、存活 −0.45 s（se 0.66；开更久 13 对、关更久 12 对）。和第 1 轮一样没有差别（21.5 的原因）。验收里能在第 0 波核对的三条：~~换目标 ≤ 10 / 分 ✓（7.65）~~、每秒按键不高于 A0b ✓（6.97 对 7.75）、计划改动率不高于 A0b ✓（0.582 对 0.615）。**（第 3 轮更正，核对者）**：7.65 是"换敌人"（`tgt_switches`），第 1 轮判"不过"用的 33.0 是"目标或规则变化"（`changes`）；同一口径这里是 **25.9 次 / 分，仍然不过**（计划 R6 行的"目标切换"指 GoalArbiter 的 goal 切换，换规则也算）；第 3 轮的处理和复测见 21.7.3。tick 时间比第 1 轮高约一倍是机器负载（21.6.2）。
+
+#### 21.6.5 v3、v4 的实战（只跑 L2 开这一臂：同一组种子 310100–310131、同一轮换；L2 关不跑任何 L2 代码，21.6.3 的 `040451` / `041508` 仍是对照）
+
+（第 3 轮注，核对者：v3 / v4 和对照**不是交错跑的**：L2 关在 04:04–04:15，v3 在 05:06、v4 在 05:21；对照组的时序更差（w7 每场迟到的 state 1.5 对 v4 0.6，w13 2.4 对 0.2）。w7 的 +19.5 s（16 / 16 对）不受影响，w13 +1.0 s（se 0.8）这样的小效应可能受负载差异影响。第 3 轮的复测按块交错，21.7.5。）
+
+| 指标 | w7 v2 | w7 v3 | w7 v4 | w13 v2 | w13 v3 | w13 v4 |
+|---|---|---|---|---|---|---|
+| 运行 | `035906` + `040911` | `050637` | `052126` | 同左 | 同左 | 同左 |
+| 存活均值 / p50 | 19.7 / 18.6 s | 19.3 / 18.3 s | **30.6 / 28.0 s** | 11.1 / 10.3 s | 10.1 / 9.8 s | 10.2 / 10.0 s |
+| 对 L2 关成对（存活，se） | +8.6（1.5） | +8.2（1.7） | **+19.5（1.9）** | +1.9（0.8） | +0.9（0.5） | +1.0（0.8） |
+| 受击 / 分 | 10.1 | 10.9 | **7.3** | 19.0 | 19.2 | 19.5 |
+| 受击来源 | 符文 24、本体 14、大符文 9、锤 6 | 符文 24、锤 19、大符文 12、本体 1 | 符文 36、大符文 20、锤 4、本体 0 | 符文 25、锤 14、本体 12、大符文 5 | 符文 18、锤 17、本体 15、大符文 2 | 符文 21、本体 16、锤 10、大符文 6 |
+| 打中 Clapper / 场 | 6.4 | 5.75 | 8.7 | 10.9 | 9.4 | 9.1 |
+| 换目标 / 分 | 0 | 0 | 0 | 13.2（轮到） | 4.4 | 3.7 |
+
+- **v3（716b539：跳的走法在 Jump Aim 定下、落点后方要有地方、锤在前方没地方时退到墙边、"轮到另一只"要来得及）**：w7 的本体受击 14 → 1（~~掉头钻回落点下方的情况没了~~ **第 3 轮更正**：这个归因不成立。Jump Aim 是零时长状态，tick 从来不会停在它上面，所以瞄准没存、走法从没被固定，v3 开的决策日志里同一跳内分支翻转 102 次；本体受击的下降应来自同一提交里"落点后方要在场内"的条件（被墙夹住时不再钻过去）。修正见 21.7.1），但锤 / 落地锤的受击 6 → 19：退开（`jump: back off`）时被落地锤打 9 次、往外（`slam: step out`）时被锤打 9 次。v3 − v2 成对（同种子）：w7 存活 −0.33 s（se 2.3）、w13 −0.92 s（se 0.7）——没有分别，受击只是换了来源。看决策日志：退开 / 往外的分支里目标的命中权重还是 3（跳时还 ×1.5，原意是"钻过去时顺路上挑"），支撑饱和、选择落到 J 时，命中权重把人往它那边拉，站位往外推。
+- **v4（8754008）**：控制器"走开"的分支（锤往外、锤退到墙边、跳退开）里目标的命中权重置 0；上挑的 ×1.5 只在"钻到落点后方"时给。结果：**w7 存活 30.6 s**（v4 − v2 成对 +11.0 s，se 2.8；对 L2 关 +19.5 s），受击 7.3 次 / 分（L2 关 16.6），锤的受击 4（L2 关 21），本体 0；打中 Clapper 每场 8.7 下（每分钟 17.0，与 v2 的 19.6 相近：活得久、打得一样快）。剩下的受击几乎全是施法：小符文 36、跳施法的大符文 20（都在"脸上"分支：大符文落地后约 3.3 s 才炸，这时跳已结束、控制器回到脸上 4 u，人站在半径 7.19 的圆里）。w13 没有变化（10.2 s，v4 − v2 −0.85 s，se 1.1）：两只靠在一起时没有落单的，KITE 让给 LOCAL 的 EVADE（受击 20 次在这里），被墙夹住的锤往墙边退仍被本体撞 7 次。
+- 换目标：w13 3.7 次 / 分（v2 13.2：轮到 36、更好的 3）。~~可达性门控之后少了~~ **第 3 轮更正**：少了是因为"轮到"这条规则整个失效了（t_free 恒为 0，v3 / v4 的 32 场 w13 里 turn 0 次，10 次换目标全是 better），不是门控的效果（21.7.2）。
+- 每秒按键（第 3 轮补，核对者指出没报）：w7 / w13 上 L2 开 7.64（v4）/ 7.71（v2），成对的 L2 关 6.48，高 18 %（它对 Clapper 出刀多了 3–4 倍）；计划改动率 0.46 / 0.53 对 0.50。验收"不高于 A0"的 A0 是完整连战，这里不是同类比较，但按键数在 Clapper 波次上确实更高。
+
+#### 21.6.6 没做 / 未核实
+
+- 施法的小符文（v4 开的受击里最多的一类）是规划器选跳的时机问题（支撑饱和下 FORCED_RISK 并列），L2 只能给站位；diag 的 `SSBOT_FORUM_FR=seen` 上线后要在 w7 / w13 上重跑这一对。
+- **跳施法的大符文**（v4 w7 20 次）：落地后约 3.3 s 才炸，那时控制器已回到"脸上"；应当在 CC_JUMP_CAST 落地后到大符文炸之前把站位放在圆外（落点后方 ≥ 1.6 u 或前方 13.8 u 外），下一步。
+- w13：两只靠在一起时 KITE 让给 LOCAL 的 EVADE，那里的受击没有控制器管；被墙夹住的锤往墙边退还是被本体撞（7 次）。
+- 锤在前方没地方时"退到墙边"（v3）是按几何推的：锤够 12 u（12 u 处 38 %），离墙近时仍会被打；你练习里的踩头下劈（15 / 22）规划器从没选过。
+- 两波都没打死 Clapper（230 HP，收割者 26 下；v2 开每场打中 6–11 下就因为挨了 3 下退出）；控制器的下一道门是第 13 波 CLEAR，不是存活时间。
+- 落单判据仍只看水平距离（加了原目标 2 u 的滞回），不是计划里的"危险区和危险时段重叠"；L2 不查跑过去的路线。
+- 第 2 轮的实战在高负载下跑（21.6.2），worker 提到 AboveNormal；和第 1 轮的绝对数字不能直接比。
+
+### 21.7 第 3 轮（2026-10-08 06:00 起，核对者意见之后；分支同上；实例 1）
+
+核对者对第 2 轮（ba7dddb）的意见：一条 high（跳的瞄准从没存下）、两条 medium（"轮到另一只"失效、"目标切换 ≤ 10"换了口径）、三条 low（v3 / v4 不交错、第 0 波受击率的分母、几处数字）。21.5 / 21.6 里错的地方已就地标"第 3 轮更正"。
+
+#### 21.7.1 跳的瞄准（high）
+
+- **问题**：`Jump Aim`（和 `Cast Jump`）是零时长状态：同一帧里 `Jump Antic` / `Cast Slam Antic 2` → `Jump Aim` → `Jump`（`Jump` 只停 1 帧，然后 `Air` 约 0.9 s；ChoirClapper.json dwell：Jump Aim、Cast Jump 都是 instant，n 4,037 / 1,950）。EnemyTracker 按顺序处理 FSM 事件，一帧结束时的状态是 `Jump`，所以 tick 从来不会停在 `Jump Aim` 上。第 2 轮的代码只在 `s.state == "Jump Aim"` 时存瞄准，实战里一次也没存，走法也就从没被固定（核对者：v3 / v4 决策日志里同一跳内分支翻转 102 / 103 次）；空中的落点是按当前主角位置和 Clapper 的空中位置当起跳点重算的。测试都手工给了 `state="Jump Aim"`，测不出来。
+- **第一次修正**（23e56af，实战推翻，见下）：起跳前（`Jump Antic`、`Cast Slam Antic`、`Cast Slam Antic 2`、`Cast Jump`）每个 tick 记下它站的 x（起跳点）；过了前摇的第一个 tick（通常是 `Jump` 那一帧，晚了就是 `Air`）存瞄准 =（这时的主角 x，前摇里的 x，这时的朝向：Jump Aim 先 FaceObject，空中不转身），走法在这一刻定下。`CC_AIR_STATES` 去掉了 `Cast Jump`（它在地面上，零时长）。新测试按 tracker 的真实顺序喂 `Jump Antic` ×5 → `Jump` → `Air` ×5（中间没有 Jump Aim），断言瞄准已存、落点不随主角漂移、分支不翻转；另一条测试是第一次就在空中看到它。
+- 开环核对（v4 的 w7 / w13 录像 `052126` 第 0–5 场，23e56af；会话临时目录 `r6\r3\jc.json`）：8 次跳里 7 次存了瞄准、定了走法（另 1 次是这一场在前摇里结束），**瞄准之后分支翻转 0 次**（3 次"翻转"是瞄准那一刻从前摇里的估计换成真实落点）；瞄准之前（前摇里，落点跟着主角走）翻转 1–10 次 / 跳。
+- **实战推翻了第一次修正**：第 3 轮第一次实战（冻结 4a0c212，`20261008_064118`，种子 310300–310307，8 场）w7 存活 15.7 / 15.4 / 16.2 / 9.8 s，同种子的 v4（`064410`）45.0 / 34.3 / 10.9 / 17.1 s；w7 的 Clapper 本体受击 8 次（v4 同块 2 次）。逐跳看（决策日志里目标 Clapper 在跳的各状态的 tick；`r6\r3\jump_live.py`）：
+
+| 运行 | w7 的跳 | 主角在它空中时从它下面穿过 | 跳期间本体受击 | 跳期间锤（落地锤）受击 |
+|---|---|---|---|---|
+| v2 `035906` + `040911` | 28 | 6 | 14 | 6 |
+| v3 `050637` | 32 | 0 | 0 | 19 |
+| v4 `052126` | 25 | 1 | 0 | 4 |
+| 第 3 轮 4a0c212 `064118` | 8 | **8** | **8** | 0 |
+
+  原因：它在 Jump Aim 先转身面向主角，所以起跳时主角几乎总在它前面；"落点后方"在它的飞行路线上（短跳时就在起跳点后面），去那里就是从它身下穿过，落下的本体砸中。v3 / v4 的判断每个 tick 按主角当前位置和它的空中位置重算，钻过去的站位跟着主角跑，实际上很少真的去钻（v4 只穿过 1 次），本体受击 0 是这么来的；走法一旦在瞄准时定死，就每一跳都钻。
+- **第二次修正（afb89a8，也被实战推翻）**：瞄准照旧存下（落点用真实的），但不从它身下穿过：只有主角在它背后（相对它的朝向）才去落点后方，否则一律退到落点前方（跳砸 8.5 u、跳施法 14.5 u，到墙为止）。实战两块（`065514`、`070132`，种子 310300–310315，与 v4 的 `064410` / `065752` 同种子成对）：w7 跳期间穿过 0 次、本体 0 次，但**存活 16.0 对 28.0 s**（8 对，成对 −12.0 s，se 4.3；开更久 2 对、v4 更久 6 对），锤 / 落地锤受击 9 对 4：它朝主角跳、落在主角前方 5 u，"退到落点前方 8.5 u"在 28.8 u 宽的场地里常常就是墙边（站位 45.9 = 右墙 − 2.5），主角被逼进角落，落地锤（落点前 0.67–7.76 u）照样打到。w13 −0.6 s（se 1.2）。
+- **最后的处理（fd57819）：跳的站位退回 v4 实战验证过的规则**——每个 tick 按主角和它**此刻**的位置估一个"落点"（`jump_landing(它的 x, 主角 x, 朝向)`，不是真实落点的预报，是一条站位规则），能在落地前 0.25 s 跑到它后方 2.5 u、且不在它落地前穿过它的身体（地面上）、后方在场内时"钻到后方"，否则退开（前方没地方时仍可钻）。v4 的 25 次跳里这条规则只真正从它身下穿过 1 次、本体 0 次：落点估计跟着主角漂，钻过去的站位基本在它前面一侧，主角很少真的去钻。顺路上挑的 ×1.5、时序判断都恢复。不再存瞄准（Jump Aim 停不到 tick 上，真实落点只对跳施法的大符文有用，那里改用它落地后站的位置，21.7.6）。所以核对者 high 的那一条，处理是：第 2 轮文档里"走法在 Jump Aim 定下、整个跳都不改"的说法撤回（实战从没生效），v4 的实际行为就是上面这条每 tick 重判的规则，实测比"真的定下"和"不钻"都好；代码和文档改成与实际一致。测试 `test_clapper_jump_judged_from_now`（来得及：钻到后方；1 s 后来不及：退开；贴脸在地面：退开；跳施法靠墙：钻），`test_clapper_controller` 的跳的部分按此刻位置判断。复测见 21.7.5。
+
+#### 21.7.2 "轮到另一只"（medium）
+
+- **问题**：`MultiForecast._subject_row` 给每个 Subject 的 `t_free` 都传 0.0，所以 L2 的"另一只的接敌点在这一招能结束之前跑得到"（`c.t_run <= t_free`）永远不成立，a637d77 起"轮到"整条规则失效。v3 / v4 的 32 场 w13 里 turn 0 次；21.6.5 里 w13 换目标从 13.2 降到 3.7 是规则关掉了，不是门控。测试里的 Subject 都是手工给的 `t_free=1.0`。
+- **修正**（23e56af）：`t_free` = 这一招的开始时刻 + 这个家族记录的时长 p0.5 − 预报原点（`enemy_tables.Family.dur`，来自行为表 `duration_s`；空闲为 0）。为什么不用支撑漫游自己的最早结束：漫游按 min / max 停留取包络，罕见的中断也算（`Jump Antic → Start Battle?` 最短 0.0 s，29 / 2,116 次），最早结束几乎总是 0。Clapper 各招的 p0.5：CC_SLAM 1.258 s、CC_JUMP 1.544 s、CC_JUMP_CAST 1.965 s、CC_CAST 1.225 s、CC_EVADE 0。只有 L2 读 `t_free`，Bell Beast 不经过这里（逐位相同测试照旧）。
+- 测试：`test_multi_forecast.py` 用合成的 Reed 表（RE_STAB p0.5 0.45 s）核对 t_free = 开始 + 0.45 − 原点、空闲为 0；`test_forum_l2.py` 用**生产表和真实的 MultiForecaster**：两只 Clapper，一只进 `Slam Antic` 0.1 s 后，它的 t_free = 1.258 − 0.1，另一只（6 u 外，0.39 s 跑到）轮到、换目标（turn）；进锤 1.0 s 后（剩 0.26 s）不换。
+
+#### 21.7.3 "目标切换 ≤ 10 / 分"：口径和规则的滞回（medium，核对者驳回的那一条）
+
+- **口径**。计划 R6 行和 §6 的"目标切换"指 GoalArbiter 的 goal 切换；L2 的 goal =（规则，目标），所以换规则也算。L2 的计数（每场 `stats.l2`）：`changes` = 每场第一个目标 + 换敌人（`tgt_switches`，按原因 `switch_kinds`）+ 同一目标换规则（第 3 轮新加的 `rule_changes`，按"旧 > 新"）。第 1 轮判"不过"的 33.0 和第 2 轮的 25.9 都是 `changes`；第 2 轮报告的 7.65 只是 `tgt_switches`，不能拿来宣布通过。**第 3 轮的验收口径：切换 = `tgt_switches` + `rule_changes`**（从一个已有的目标换走；不含每场的第一个目标，那不是"切换"：第 0 波每场只有 13–15 s，光是它就占 4.2 次 / 分）。两个数都报，`forum_a0_report` 的 L2 一节加了 `switch_kinds` 和 `rule_changes`。
+- **从哪来**（开环，第 2 轮完整连战 `041945` + `043128` 各前 13 场的第 0 波，26 场、6.23 分钟，主角位置是录像里的；会话临时目录 `r6\r3\l2_sw3.py` → `sw_*.json`）：第 2 轮的设置（规则 1 s、目标 4 s ×1.5）`changes` 24.1 / 分 = 第一个目标 4.2 + 换敌人 7.7 + 换规则 12.2；换规则里 RUSH > KITE 58 次、KITE > RUSH 18 次——落单判据在 8 u 边上来回，加上"被冲的目标身边来人先 KITE"之后再换人，一次局面变化常常是两次切换。
+- **改动**（4a0c212）：规则也加滞回 `rule_hyst_u`：保持 KITE 时，RUSH 要有一只落单到 8 + 2 = 10 u（RUSH 时原目标照旧放宽到 6 u，形成 6–10 u 的带）；"先对被冲的目标 KITE"只用于原规则是 RUSH 的目标（之前原规则是 KITE 时也会拦着 RUSH 到 dwell_s，不是本意）；参数网格（开环、同 26 场，每分钟）：
+
+| 规则保持 | 规则滞回 | 目标保持 | 换人倍数 | 切换（不含第一个） | 其中换敌人 / 换规则 | changes |
+|---|---|---|---|---|---|---|
+| 1 s | 0 | 4 s | 1.5 | 19.9 | 7.7 / 12.2 | 24.1 |
+| 1 s | 2 u | 4 s | 1.5 | 18.2 | 7.9 / 10.3 | 22.3 |
+| 2 s | 2 u | 4 s | 1.5 | 15.1 | 7.6 / 7.6 | 19.3 |
+| 3 s | 2 u | 4 s | 1.5 | 12.9 | 7.6 / 5.3 | 17.0 |
+| 3 s | 2 u | 6 s | 1.5 | 9.8 | 4.7 / 5.1 | 14.0 |
+| 4 s | 2 u | 6 s | 2.0 | 9.3 | 4.7 / 4.7 | 13.5 |
+| 3 s | 2 u | 8 s | 2.0 | 10.1 | 4.3 / 5.8 | 14.3 |
+| **4 s** | **2 u** | **8 s** | **2.0** | **8.2** | 3.9 / 4.3 | 12.4 |
+
+  采用最后一行（`Forum.yaml`：`goal_dwell_s` 4、`rule_hyst_u` 2、`dwell_s` 8、`switch_x` 2.0；第 2 轮的机制测试固定用第 2 轮的参数，新测试 `test_round3_holding_rule_hysteresis` 核对 KITE 时 9 u 不换、11 u 换，RUSH 的规则保持 4 s）。剩下的换规则几乎都是 RUSH > KITE（26 次：被冲的目标身边来了人）。代价：规则一旦定下要跑满 4 s（换进 PUNISH 除外），目标 8 s；第 0 波 L2 的选择不改变受击（21.5），Clapper 的"轮到"和 Clawmaiden 不受这两个保持时间限制。`changes` 含第一个目标仍是 12.4，只要第 0 波的场次这么短就降不到 10 以下。实战见 21.7.5。
+
+#### 21.7.4 第 0 波的受击：按全部 tick 算（low）
+
+21.5 的"每个决策 tick 的受击率"用的是决策日志的 tick（按事件触发采样，有偏）。按全部 tick（`policy.ticks`）重算第 1、2 轮的三对完整连战（L2 开 `015904` + `021942` + `041945`，关 `020919` + `022951` + `043128`，各 75 场，按种子成对；会话临时目录 `r6\r3\w0_hits.py` → `w0_hits_r12.json`）：
+
+| | L2 开 | L2 关 | 成对（开 − 关，75 对） |
+|---|---|---|---|
+| 受击（damage）/ tick | 0.00612（325 / 53,124） | 0.00565（317 / 56,063） | 受击 +0.11 / 场（se 0.11） |
+| 受击 / 分钟 | 19.95 | 18.57 | 存活 −0.62 s（se 0.36） |
+| Choristor `Body Damager` | **28** | 8 | **+0.27 / 场（se 0.08）** |
+
+总受击的差别不显著，但来源变了：Choristor 的身体接触多了 20 次，存活有约 1.7 se 的负向趋势。28 次按受击前 0.2 s 的 L2 目标分：RUSH 冲的正是这只 Choristor 6 次、RUSH 冲别的 8 次、KITE(EVADE)（LOCAL 的打分）14 次——一半发生在 LOCAL 自己的 EVADE 下，所以不是 RUSH 的接敌点离它本体太近这么简单，而是 L2 让主角更多地待在敌群附近（RUSH 时到目标的距离中位 2.5 u，关 3.7 u，21.5）。和 FORCED_RISK 在支撑饱和时的并列是同一个瓶颈（规划器分不出哪一行能躲开它的冲撞），没有改 L2；diag 的 `SSBOT_FORUM_FR=seen` 上线后在同一对 A/B 上复查这一项。第 3 轮完整连战的数字见 21.7.5。
+
+#### 21.7.5 实战复测（实例 1，2026-10-08 06:41–；驱动 `C:\ssbot\sandbox\r6_ws5.ps1`，每块一个运行、按块交错，`r6_ws5_runs.txt` 一行一块）
+
+协议同 21.6（eval、planner、oracle；worker 提到 AboveNormal，两臂一样；机器负载比第 2 轮低：CPU 约 50 %）。中途换了两次代码（21.7.1）：4a0c212 跑了 1 块、afb89a8 跑了 2 块，都按停止文件在块之间停下、换新的冻结检出重启；下面是最终代码 **fd57819** 的结果。
+
+**波次起点**（`Forum_A_w7` / `Forum_A_w13` 按局轮换，无真退出；种子 310300–310331，每块 8 场；fd57819 `070851`、`071230`、`071658`、`072800`，v4（8754008）`064410`、`065752`、`072118`、`072437`；交错：v4 的前两块在被撤回的代码之间跑，后两块和 fd57819 轮流先跑；分析 `r6\r3\ws_anal3.py` → `ws_final.json`，`jump_live.py` → `jump_final.txt`）：
+
+| 指标 | w7 fd57819 | w7 v4 | w13 fd57819 | w13 v4 |
+|---|---|---|---|---|
+| 场数 / 结果 | 16 / 全 QUIT（Q1） | 16 / 全 QUIT | 16 / 全 QUIT | 16 / 全 QUIT |
+| 存活均值 / p50 | **37.4 / 39.8 s** | 26.9 / 26.4 s | 9.4 / 9.0 s | 9.9 / 9.5 s |
+| 成对（新 − v4，16 对） | **+10.6 s（se 4.0），新更久 12 对** | | −0.51 s（se 0.52），新更久 5 对 | |
+| 受击 / 分 | 6.9 | 8.1 | 20.5 | 20.5 |
+| 受击来源 | 小符文 55、锤 11、大符文 **2**、本体 1 | 小符文 30、大符文 **20**、锤 6、本体 2 | 锤 19、小符文 17、本体 13、大符文 2 | 小符文 25、本体 14、锤 13、大符文 2 |
+| 打中 Clapper / 场、/ 分 | 9.9、15.8 | 6.5、14.5 | 8.1、52.1 | 9.2、55.9 |
+| 跳（w7）：次数 / 从它身下穿过 / 本体 / 锤 | 20 / 0 / 1 / 11 | 28 / 0 / 0 / 6 | — | — |
+| 切换 / 分（换敌人 + 换规则） | 0 | 0 | **10.0**（轮到 12、RUSH > KITE 12、KITE > RUSH 1） | 3.4（更好的 9；v4 不记换规则） |
+| changes / 分（含第一个目标） | 1.6 | 2.2 | 16.4 | 21.3 |
+| 每秒按键（中位）/ FORCED_RISK | 8.79 / 90 % | 8.54 / 87 % | 6.20 / 65 % | 6.23 / 66 % |
+| 每场迟到 state | 0.88 | 0.56 | 0.44 | 0.25 |
+
+- **w7：大符文 20 → 2**（21.7.6 的站位起作用），存活 +10.6 s；剩下的受击几乎全是施法的小符文（55，按分钟 5.5 对 v4 的 4.2：活得久、站在脸上的时间长）和落地锤（11 对 6，跳期间）。跳的站位和 v4 相同规则，0 次从身下穿过。
+- **w13：没有改善**（−0.5 s，se 0.5）。"轮到另一只"现在真的触发了（12 次），但两只的情形下存活没有变好：锤 19 对 13 多了，小符文 17 对 25 少了。轮到的门控（另一只在这一招最早能结束之前跑得到）本身是对的，问题是跑过去以后马上又被另一只的下一招追上（"FOCUS 一只、把另一只留在背后"是下一步，21.7.8）。w13 的切换 10.0 次 / 分，正好在线上。
+- 每秒按键两臂相同（都是 L2 开；和 L2 关比见 21.6.5 的补注）。
+
+**完整连战**（A0b 协议：fo_A、eval、planner、oracle、真退出 0.2；种子 310400–310424，每块 5 场，L2 开 / 关（同一冻结检出 fd57819，`SSBOT_FORUM_L2=0`）按块交错、轮流先跑；开 `073208`、`074014`、`074246`、`075109`、`075408`，关 `073432`、`073649` + `073758`、`074531`、`074824`、`075636`；`forum_a0_report` → `r6\r3\full_on.json` / `full_off.json`，`w0_hits.py` → `w0_hits_r3.json`）：
+
+| 指标 | L2 开 | L2 关 |
+|---|---|---|
+| 结果 | QUIT 25（全 Q1），全在第 0 波 | QUIT 25 + HARNESS_FAIL 1（"paused unasked"，`073649` 第 2 场，同种子在 `073758` 补跑） |
+| 受击 / 场（damage）、/ tick、/ 分 | 4.16、0.00533、18.0 | 4.44、0.00605、20.4 |
+| 受击来源 | Envoy 45、Choristor 38（`Body Damager` 5）、Reed 21 | Envoy 42、Choristor 41（`Body Damager` 5）、Reed 28 |
+| 存活 p50 / 最长 | 13.2 / 21.4 s | 12.5 / 17.6 s |
+| 成对（开 − 关，25 对） | 受击 −0.28（se 0.19），存活 +0.78 s（se 0.71），Choristor 身体接触 0.00（se 0.13） | |
+| FORCED_RISK | 82.2 % | 80.0 % |
+| 支撑外命中 / 未知 | 0 / 0 | 0 / 0 |
+| tick p50 / p99（中位）/ p99 最大 | 10.5 / 19.8 / 24.9 ms | 9.3 / 18.3 / 25.0 ms |
+| 每秒按键 / 计划改动率（每场中位） | 7.88 / 0.575 | 7.31 / 0.634 |
+| L2 | 目标 tick：KITE(EVADE) 10,604、RUSH 8,396、PUNISH 0；错误 0；每 tick p99 中位 1.07 ms | — |
+| **目标切换**（换敌人 + 换规则，不含每场第一个目标） | **8.1 次 / 分**（换敌人 19：更好的 15、不再合格 4；换规则 28：RUSH > KITE 25、KITE > RUSH 3）；`changes` 含第一个目标 12.5 | — |
+| 真退出 | 3 次：暂停 3、到主菜单 3、错误确认 0 | 3 / 3 / 3 / 0 |
+
+- **验收**：目标切换 ≤ 10 / 分 **✓（8.1）**（按 goal 切换的口径；含每场第一个目标的 `changes` 是 12.5，第 0 波每场 13 s，第一个目标就占 4.3）；计划改动率不高于 A0b ✓（0.575 对 0.615）；**每秒按键 7.88，比 A0b 的 7.75 高 1.7 %、比同时跑的 L2 关高 8 %，✗（小幅）**——第 2 轮是 6.97（当时 RUSH / KITE 来回换得多）；规则保持 4 s 后 RUSH 的 tick 更连续，冲上去出刀的按键多了，不是抖动（计划改动率反而降了）。Choristor 身体接触这次两臂一样（5 对 5），21.7.4 的差别没有重现。受击、存活的成对差别都在噪声里（受击 −0.28，se 0.19；存活 +0.78 s，se 0.71），第 0 波仍然全部 QUIT（21.5 的原因）。
+
+
+#### 21.7.6 跳施法的大符文（第 2 轮"下一步"第 1 条）
+
+v4 的 w7 有 20 次受击是跳施法的大符文（`rune slam`）。行为表（ChoirClapper.json `CC_JUMP_CAST`）：大符文在落地那帧出现在落点前方 6.62 u（r 7.19，从落点后 0.58 u 到前方 13.8 u），这一招在承诺后约 2.18 s 结束，而大符文在这一招结束后 0.75 s（`_tail` 的 `t_on_state` p5 / p50 0.749 s，p95 2.67 s）才炸、0.87 s（p50）关；那时控制器已经回到"脸上 4 u"，正在圈里。改动（04dcad8）：跳施法结束后 `rune_hold_s` 1 s 内，站位留在落点后方 2.5 u（这一跳的走法是钻到它下面、且现在过去不穿过它的身体时）或圈外前方 14.5 u（`rune: out`，这时对它的命中权重为 0，和其他"走开"的分支一样）；锤（CC_SLAM）照旧优先。测试 `test_jump_cast_rune_circle_kept_out_of_after_the_move`（退开时圈外、1 s 后回到脸上；钻过去时留在落点后方）。fd57819 起圈心按它落地后（这一招结束那个 tick）站的位置算，不用瞄准估的落点。**实战（21.7.5）：w7 的大符文受击 20 → 2**（16 对，同种子交错）。
+
+#### 21.7.7 §4.4 第 4 条在最终代码上复跑
+
+核对者指出 600 tick 的逐位比对是第 1 轮做的。第 3 轮在 4a0c212 上重跑：`forum_policy_replay` 074719 i3 ep0、600 tick、`--deadline-ms inf`，`SSBOT_FORUM_L2=fail:1` 对 `=0`：模式、目标、计划、S、FORCED_RISK、mask、J 600 个 tick 全部相同（只有记录里的 goal 标签不同："LOCAL" 对空）。单元测试 `test_l2_failure_is_local_bit_for_bit` 的 3 种情况照旧通过。
+
+#### 21.7.8 没做 / 未核实（第 3 轮）
+
+- **第 0 波的结果仍不受 L2 影响**：支撑饱和时 FORCED_RISK 的排序并列（diag 轨道），L2 的打分只决定 J；要等 diag 的 `SSBOT_FORUM_FR=seen`、R5 或 R8。第 1、2 轮 L2 开时 Choristor 身体接触多（21.7.4），第 3 轮 5 对 5 没有重现，仍要在 FR=seen 后复查。
+- **w13 没有改善**：两只 Clapper 时"轮到另一只"现在会触发，但存活没变好（21.7.5）；下一步是终局的 FOCUS 目标（clapper_face.md：选一只、把另一只留在它背后），以及两只靠在一起时 KITE 让给 LOCAL 的 EVADE 的那部分。
+- **施法的小符文**（w7 剩下的受击里最多）：要在近处那颗亮的 5–7 帧里人在空中，是规划器选跳的时机问题；diag 的 FR=seen 上线后在 w7 / w13 上重跑这一对。
+- **跳的站位**：v4 的"每 tick 按此刻位置重判"实测最好，但它为什么很少真的钻到身下（落点估计跟着主角漂）只是事后解释，没有单独做实验；落地锤在跳期间仍有 11 次（v4 6 次）。前摇里的站位每跳翻转 1–10 次（21.7.1 开环），没有加滞回。
+- 目标切换：实战完整连战 8.1 次 / 分 ✓，w13 10.0；按 `changes`（含每场第一个目标）完整连战 12.5，第 0 波这么短的场次里降不到 10 以下（21.7.3）。每秒按键比 A0b 高 1.7 %（21.7.5），没有再调。
+- 两波都没打死 Clapper（w7 最长 54 s、打中 9.9 下 / 场，要 26 下）。
+- PUNISH 在多敌波次里仍不触发；落单判据仍只看水平距离；L2 不查跑过去的路线。
+- 被撤回的两版代码的冻结检出 `C:\ssbot\live_r6_4a0c212`、`live_r6_afb89a8` 可删（按安全规则我没删）。
+
+## 22. 反应式支撑（`SSBOT_FORUM_REACT`；2026-10-08，task reactive support，分支 worktree-wf_08175c18-693-1 到 8b1dd82；离线 + 实例 0–3。这条轨道在做 `forum_react_audit` 的细分解（groups2）时被打断，没有写本节；本节是集成步骤按它的代码和 A/B 汇总文件补写的）
+
+起因（你 2026-10-08）：怪的前摇很长，前摇开始了再躲也不晚；第 0 波的危险区被"还没开始的招"盖满（§19.5）。
+
+### 22.1 做了什么（`multi_forecast.ReactConfig`、`ForumPlanner._escape_pick`；默认 off = 支撑逐位不变，`tests/test_reactive_support.py`）
+
+- **delay**：以后才可能开始的攻击实例（攻击家族的 walk 根），最早在"最早开始时刻 − 1 帧 + 该家族的出手延迟 − 视图的感知延迟"之后才放它的 walk 模板，之前只放家族模板（前摇时的身体，按开始后的时间分辨）。出手延迟 = `strikes.json` 里 commit → 第一个攻击碰撞体（或扔出的危险物）的最小值；感知延迟 oracle 1 帧、视觉等价 3 帧（DESIGN §3.9.5 的 33 ms）。例外：钟（CB_THROW）、Reed 针（RE_THROW）、符文弹（CC_CAST）的 commit 可能重新武装之前实例的东西，默认不延迟（`+p5`：按 p5 延迟）；只有身体的家族（闪避、Clawmaiden 瞬移、Tiny 冲撞，可以贴脸开始）不延迟。
+- 扩展：`+c` 当前招之后的状态也按"开始 + 延迟 − 感知延迟"放（当前状态和尾巴照旧）；`+i` 有待机身体管的敌人去掉 idle 家族的根（管里已有它的身体）。
+- **escape** = delay + 规划器的可逃检查：有安全行时，在排序的前 `esc_k` = 4 行里选第一条"计划结束时（或晚锁定时），对任何敌人可能开始的招都还能逃出它的够距"的行（尾检查只再看这一行）；FORCED_RISK 时在排序前 `esc_k_forced` = 8 行里、与第一行在份额之上的每个键都打平的行中选第一条有逃路的（29835a0）。每批 4 行；`esc_deadline_ms`（默认 deadline_ms + 2，从 tick 开始算）之后不再开新批（8b1dd82，计数 `esc_cut`）。审计 `ssbot.tools.forum_react_audit`（`--crest`：Wanderer 录像）。
+
+### 22.2 实战 A/B（Forum_W = fo_A 换 Wanderer，A0b 协议：eval、planner、oracle、真退出 0.2；实例 0–3，种子 350100–350514，每块 5 场、臂的顺序按块轮换；代码 29835a0 与 8b1dd82 两轮合在一起；驱动 `C:\ssbot\sandbox\react2_live.ps1`，清单 `C:\ssbot\data\m2_forum_react2\manifest_29835a0.txt` / `manifest_8b1dd82.txt`，汇总 `ab_pooled_vs_share.json` / `ab_pooled_vs_seencf.json`）
+
+| 臂（FR : REACT : 拼刀） | 场 | 退出中位 s | 每分钟受击 | FORCED_RISK | late_mean | plan p50 ms | 对 share:off:off 成对（s，95 % 区间） | 对 seen_cf:off:off 成对 |
+|---|---|---|---|---|---|---|---|---|
+| share : off : off | 60 | 12.0 | 20.4 | 0.778 | 0.75 | 3.3 | — | |
+| share : delay : off | 30 | 12.4 | 19.5 | 0.775 | 0.93 | 3.2 | −0.6（−1.6…0.4） | |
+| share : escape : off | 60 | 14.2 | 19.0 | 0.792 | 4.55 | 6.2 | +1.7（0.8…2.6） | |
+| seen_cf : off : off | 60 | 22.9 | 10.9 | 0.883 | 0.56 | 3.8 | +10.3（8.8…11.9） | — |
+| seen_cf : escape : off | 60 | 23.9 | 10.1 | 0.886 | 7.71 | 6.6 | +12.4（10.2…14.6） | +2.0（−0.5…4.7），35 / 60 更久 |
+| seen_cf : off : on | 30 | 21.6 | 11.4 | 0.876 | 0.58 | 4.2 | +9.2（6.9…11.4） | **−3.2（−6.1…−0.5）**，12 / 30 |
+| seen_cf : escape : on | 30 | 23.4 | 10.3 | 0.885 | 8.43 | 6.9 | +11.1（8.7…13.5） | −1.2（−4.5…1.8），17 / 30 |
+
+- 全部臂每场都在第 0 波退出（QUIT），0 击杀、0 WOULD_DIE、支撑外命中 0。
+- 只做 delay 没有作用；escape 在 share 上 +1.7 s（显著）、在 seen_cf 上 +2.0 s（区间含 0）；拼刀（`--forum-clash on`，只在 GREEN）在 seen_cf 上短 3.2 s（显著），和 escape 一起 −1.2 s（不显著）。escape 让 plan p50 多约 3 ms、late_mean 从 0.6–0.9 升到 4.6–8.4（汇总脚本的迟到指标）。
+- **FORCED_RISK 的比例开了反应式支撑之后没有降（0.78–0.89）**：去掉"还没开始的招"没有让第 0 波的支撑不再饱和，盖住主角选项的是别的东西。集成任务说明列的候选（未核实）：支撑的余量（`support_margins.json`：Reed 钉、Minister 招架、Tiny 冲撞、钟、符文弹到 3.0 u 的搜索上限，Envoy 冲锋 2.96 u，主角只有 0.5 u 宽）、敌人的身体管、按时间窗放置的已承诺招（入场时刻不确定，0.25 u 粗金字塔）、死亡尾巴、导出的 ±1 bin 延迟。逐组分解（groups2）没有结果。
+
+### 22.3 集成之后的冒烟（2026-10-08 10:45–10:54，分支 forum-integration-1008，冻结检出 `C:\ssbot\live_int_6c160ac`；只证明合并后的代码能跑，不是 A/B）
+
+Forum_W（漫游），A0b 协议，实例 0 13 场 + 实例 1 12 场，种子 360000；`SSBOT_FORUM_FR=seen_cf`、`SSBOT_FORUM_REACT=escape`、`--forum-clash on`，其余用合并后的默认值（commit_rank 开、L2 开、终点价值关、T 36）。运行 `C:\ssbot\data\runs\m2\20261008_104557_Forum_W_eval_planner_oracle_clash`、`20261008_104618_…_clash`，报告 `C:\ssbot\data\runs\m2\int_smoke_report_6c160ac.json`。
+
+- 25 / 25 第 0 波退出（Q1 23 场；QS 僵持 2 场：漫游 ×3 暴击上界让最后一击规则 20 s 不出刀，R8 的未决问题），0 WOULD_DIE、0 击杀、支撑外命中 0；没有崩溃、没有 HARNESS_FAIL。
+- 局内时长中位 23.3 s（均值 25.6 s），每场受击 4.2、每分钟 9.8；FORCED_RISK 0.917；包络审计干净；tick p50 10.2 ms、plan p50 / p99 6.2 / 11.1 ms、迟到 tick 1.5 %。
+- 拼刀分支在 33,684 个 FORCED_RISK tick 里有 33,633 个被档位门（只在 GREEN）跳过：第 0 波里"拼刀开"实际上只是"一直出刀"的续段行。
+- 和 22.2 的数字不成对（不同种子、不同代码、时长的定义可能不同），只作参照：seen_cf + escape + 拼刀开 23.4 s / 10.3 次每分钟，seen_cf + escape 23.9 s / 10.1。
+
+## 23. 第 0 波去饱和：支撑分层分解、三层支撑、击杀冻结的修正（2026-10-08，task wave-0 de-saturation，分支 worktree-wf_34e9717f-fa3-2；离线 + 实例 0–3）
+
+起因：集成之后所有 Forum A/B 都是第 0 波 100 % 退出、0 击杀；开了反应式支撑（§22）FORCED_RISK 仍占 0.78–0.89。本节先量"是哪一层、哪个余量把候选行盖满"，再按你的三层支撑（plan §5 2026-10-08 的"下一轮"三条）和光锥改，最后实战。
+
+### 23.1 分解的方法（`ssbot.tools.forum_layer_audit`）
+
+- 录像：反应式 A/B 第 2 轮 seen_cf + escape 的 6 个运行（`20261008_092135` / `092227` / `092922` / `093102` / `094735` / `094847`，Forum_W，30 场），开环回放（同 §19.1：录像的 STATE 驱动策略，前缀是录下的按键），合并后的代码、seen_cf + escape；每 6 个战斗 tick 一个，共 7,112 个 tick，其中 FORCED_RISK 6,307 个。
+- 每个 tick：规划器的已知、允许的候选行（`ForumPlanner.debug`），名义盒中心在第 1 … T 帧（无敌帧不算）对这个 tick 的预报按"层 × 类型 × 家族"分组查询。层：身体（待机身体管）、碰撞体管（只在前 5 帧）、已承诺细放置（入场时刻 ≤ 3 格）、已承诺窗口放置（入场是区间：0.25 u 粗金字塔）、当前招的家族并集（从开始起，窗口放置）、重锚 / 锚点未知的家族行走（外包盒）、尾巴、多段链、以后才开始的攻击 / 待机实例（外包盒）、入场、危险物（自模板 / 确定路径 / 危险物管）、死亡尾巴、全场盒。
+- 第 0 级 = 整个支撑；第 1 级 = 去掉"还没开始的"（以后才开始的攻击和待机实例、下一波入场：反应式支撑的理想情况，交给可逃检查）。在第 1 级上做留一法（去掉一层 / 一组后有没有一行整段干净）、组合、变体（每个家族余量 ×0 / ×0.5、待机增长 ×0 / ×0.5：用另一套表 / 管对同一个 tick 重做预报）和 ±1 格导出延迟（模板层在 t − 1 格、t、t + 1 格三处查询取与：从里面逼近"去掉烘进模板的 ±1 格"），以及贪心剥离（每步去掉清出最多行的组）。另记每行在录像未来里是否真的不碰（事后，开环：别的主角时敌人不会改招，§19.1 的偏差同样在这里），用来看去掉一层后多出来的"干净行"有多少是真的。
+
+### 23.2 结果（FORCED_RISK 的 6,307 个 tick；括号里是前 18 帧）
+
+- **第 0 级 0 % 有干净行；第 1 级（还没开始的全部去掉）也只有 3.5 %（11.2 %）**：§22 已经说过"去掉没开始的招解不开"，这里的数更低，因为 FORCED_RISK tick 本来就是最饱和的那些（全部 tick：第 0 级 11.3 %、第 1 级 14.4 %）。
+- **单独一层就盖住每一行**的 tick 比例：以后才开始的攻击 100 %、以后的待机实例 100 %、已承诺窗口 63.6 %、当前招的家族并集 56.1 %、尾巴 54.6 %、已承诺细放置 49.8 %、碰撞体管（前 5 帧）38.9 %、危险物自模板 36.0 %、重锚外包盒 28.7 %、身体管 27.3 %、多段链窗口 19.8 %、危险物管 15.0 %。冗余：在第 1 级上单去掉任何一层，有干净行的 tick 最多多出身体 5.3 %、进行中的入场 3.7 %、链窗口 2.6 %、针的自模板 2.4 %，其余 ≤ 1.4 %。贪心剥离要去掉 3 组以上才出现干净行的 tick 占多数，去掉 8 组仍没有的 7 %。
+- 组合（第 1 级）：只留身体和危险物（已承诺的全去掉）29.7 %（41.3 %）；只留已承诺的（身体、危险物去掉）14.6 %；去掉窗口和尾巴 10.7 %。
+- 变体：**余量**全为 0 时第 1 级 6.2 %（×0.5：4.2 %），只留身体和危险物时 33.7 %——余量不是饱和的主因；**待机增长**为 0 时第 1 级 7.3 %，只留身体和危险物时 58.8 %（×0.5：48.9 %）——身体层里饱和的是增长；**±1 格延迟**：去掉之后看不出变化（这个逼近只能从里面去，量不出更多）。
+- 盖满最多的组（单独盖住每一行的 tick 比例）：Reed 针的自模板 36.0 %、Envoy 冲锋的尾巴 29.4 %、冲锋的窗口 25.5 %、Choristor 待机身体管 23.1 %、Envoy 碰撞体管 19.5 %、Reed 扔针的尾巴 19.3 % / 窗口 18.0 %、冲锋细放置 17.7 %、Reed 刺的外包盒 / 家族并集 / 窗口 15–16 %、Reed 防御的链窗口 16.3 %。
+- **去掉一层之后的"干净行"有多少真的不碰**（事后；同一批 tick 里随机一行事后不碰 **63.8 %**（行合计；逐 tick 的中位数 72.4 %，初版写的"约 72 %"是这个中位数，审阅指出后改正））。该变体下**全部干净行**（含第 1 级原有的 21,886 行）：第 1 级 95.3 %；余量为 0 时 96.4 %；增长为 0 时 92.6 %；去掉窗口和尾巴 87.0 %；只留身体和危险物 77.4 %。**只算多出来的行**（变体的干净行减去第 1 级的）：余量为 0 时 98.7 %（10,739 行）、增长为 0 时 91.7 %（65,060）、去掉窗口和尾巴 84.4 %（68,706）、只留身体和危险物 76.2 %（334,635）（`scratchpad` `w0d/extra_prec.py`；初版摘要把前一组数写成了"多出来的行"）。结论不变：余量和增长去掉得起，已承诺层去不起。
+
+### 23.3 饱和来自哪里（模板一级的原因）
+
+- **余量由少数接触、少数状态定**（R0 的 `contacts.jsonl.gz` 里每个接触对另一折的留出残差，按控制状态分开；`scratchpad` `resid.py`）：EN_CHARGE 的 2.96 u 全部来自 `Charge` 状态（4,156 个接触里 45 个 > 0.3 u，p99 0.55 u；`Charge End` 最大 0.40、`Reset` 0）；RE_DEFEND 的 2.62 u 全部来自 `Multihit Clashed`（391 个里 19 个 > 0.3 u；`Defend` 最大 0.10、`Parry Slash` 0）；RE_STAB 的 1.37 u 来自 `Stab 3` / `Stab End` / `Stab 5`；CH_JUMP 的 1.61 u 来自 `Jump Spin` 的 2 个接触；针的 3.0 u 来自 3 个接触。家族余量把同一家族所有状态都膨胀这么多：冲锋前摇、防御姿态都按 2.6–3.0 u 放大。
+- **Envoy 冲锋的 `Charge` 模板在进入那一刻就横跨 38 u**（x −7.6 … 30.7，锚点系）：`Reset → Charge` 的再次冲锋（63 次）从离锚点很远的地方开始，和第一次冲锋并在同一个按状态的模板里；余量 2.96 u 再加上去，竖直方向 −6.5 … 3.7 u，跳过冲锋的行也在里面（你 75 % 是跳过去的，§19.7）。
+- **Reed 扔针的模板里有针**：RE_THROW 每个状态的伤害来源包括 `Song Reed Pin Projectile`，所以 `Throw` / `Throw Recover` / 尾巴的模板是所有方向扔出去的针的并集（x −14 … 30、y −15 … 15）；oracle 视图里针一飞起来就有确定路径（§14.2），这是重复计算。
+- **针在手里**（`Throw Effect` 不是休息状态，算已武装）按自模板放：所有方向扔过的针 + 3.0 u 余量。
+- **Choristor 的待机增长** 0.6 s 时 14.9 u（`Hop Back` 的瞬间后跳进了 g），Reed 6.1 u：0.6 s 视野里待机身体管就盖住半个场地。
+- **击杀冻结规则把刀全收走**（这是 0 击杀的直接原因，和支撑无关）：`kill_freeze_s` 把"击杀那一帧开始的任何冻结"都算成该类的击杀冻结，取最大值；第 0 波三类的击杀从来没有自己的冻结（§12.3：只有 Clapper 有），但击杀同帧常有主角自己的 `NailClashEffect`（0.4 s）或 `StartRecoil`（0.25 s），于是 Envoy、Choristor、Reed 都成了"击杀冻结 0.4 s"的类型；YELLOW 的击杀规则（`forum_yellow_kill_hp` → `HeroDamage.kill_prims`）在任何一只的 hp_est − 3σ ≤ 漫游一刀的上界（暴击 27）时收走所有出刀，而 FORCED_RISK 让 tier 86 % 的时间是 YELLOW。集成冒烟的决策日志：46 % 的 tick `kill_prims` 含三种出刀，2 / 25 场以"QS 僵持：杀招规则 20 s 不出刀"结束。
+
+### 23.4 改了什么（开关；默认值照旧，击杀冻结的修正除外）
+
+- **击杀冻结只算击杀自己的冻结**（`KILL_FREEZE_KINDS`：`BigEnemyDeathSlow` / `EnemyBattleEndSlow` / `EnemyDeath`；默认；`SSBOT_FORUM_KF=any` 恢复原样）：第 0 波三类的击杀冻结变成 0，YELLOW 不再因为它们收刀；Clapper 照旧（1.9–2.5 s 的终局慢动作、0.165 s 的击杀减速）。
+- **反应式支撑的新扩展**（`SSBOT_FORUM_REACT=escape+n+g+l`，§22 的开关之上）：
+  - `+n`（还没开始的那一层）：有出手时间的家族（strikes.json）以后才开始的实例、以后的待机实例都不放（入场家族和只用身体的家族——闪避、瞬移、Tiny 冲撞——照旧）；可逃检查从"计划末和末尾一个延迟内的锁定"扩到计划里每一个锁定点（攻击、无控制、冲刺斩、硬着陆）。还没扔出去的针 / 钟（不在确定路径上）只放反应窗口（5 帧）内的够距（当前框按 40 u/s 长）；oracle 视图里扔针 / 扔钟的家族（Reed RE_THROW、Bellbearer CB_THROW）不放模板，改成本体管 + 扔出去之后的确定路径，它们的尾巴和可逃检查的威胁也去掉。
+  - `+g`：待机身体管只在反应窗口（5 帧）里按待机增长长，之后保持那个大小、按速度平移（你的第 ⑤ 条：不出招的怪不会走到你脸上）。R2 的召回只查 2–4 帧前的预报：这两条在 4 帧内不改变支撑（还没开始的、有出手时间的招 4 帧内打不到；身体管 4 帧内照样长）。
+  - `+l`（光锥，只在可逃检查里）：计划末的状态还要对"已承诺、时间确定、不能拼刀的放置"（拼刀表里没有的家族的细放置、危险物的确定路径、死亡尾巴）在视野之后有出路：用可逃检查的 7 种逃法从计划末推演 72 帧，全部碰到就算失败。**这不是"按可达集腐蚀"**（初版写成"腐蚀的模拟版、问的是同一个问题"，审阅驳回）：它只从计划末试 7 种固定逃法，是可达集的欠近似，比腐蚀更严——出路在 7 种之外（例如先等一下再冲刺）的行会被判失败；它只会多判失败、不会放过伤害。§23.12 之前它只在不否决的可逃检查里；之后在 `+n` 下它的失败也让这一行 S = 1。
+- **拼刀作主逻辑**（`combat_run --forum-clash main`）：拼刀分支在 GREEN 和"h ≥ 3 的 YELLOW"（来自上一计划 S = 1 的 YELLOW，不是 h = 2）都跑；干净的拼刀行（刀的生效窗口里先碰到、在刀那一侧、在可拼状态里，拼完之后不再碰）只要拼刀表的"仍然挨打"上界之积 ≤ 0.3 就算安全（不再要求拼中率下界之积 ≥ 0.75），排在普通安全行之后、按挨打上界排；FORCED_RISK 的 seen 键跳过拼刀行的拼刀无敌帧（R8 留下的问题：会被拼掉的判定不算接触）；最多连拼 3 次。h = 2、RED、等暂停时仍然不拼（DESIGN 3.5.6）。
+- **按状态的余量**（`SSBOT_FORUM_MARGIN=state`，`ssbot.tools.forum_state_margins` → `support_margins_state.json`）：每个控制状态用自己接触的最大留出残差（同 R0 的规则，接触 < 100 的状态用家族余量）；家族并集、尾巴、世界系模板和危险物自模板照旧用家族余量。第 0 波：EN_CHARGE 的 `Charge End` 2.96 → 0.40 u（`Charge`、`Reset` 不变），RE_DEFEND 除 `Multihit Clashed` 外 ≤ 0.59 u（`Defend` 0.10），RE_STAB 的 `Stab 1` 0.01、`Stab 4` 0.17、`Stab Antic` 0，CH_JUMP 的 `Jump Rise` / `Spin Slash` 0。
+- **打回去的钟**（默认）：钟进入 `Tink L / R / U` 或 `Nail Hit` 之后不再是主角的危险物（新的一次扔出 `Init` 才算回去）；规划器自己打钟（`bell_redirected`）时从打中那一步起无害。**砍来袭的钟算防御**（`ForumConfig.bell_hits`，默认开）：射程内的钟作为权重 0 的命中目标，刀先碰到钟的行（即使阶段 1 已经接触）走命中分支，分支里的支撑把那只钟从打中起拿掉。第 0 波没有钟，A/B 里不起作用。这两条当时**没有运行时开关**、所有臂都开着（包括 23.6–23.10 的对照臂 int / intk：它们和新臂跑的是同一个冻结检出）；§23.12 加了 `SSBOT_FORUM_BELLS=off`（两条一起关）。第 3 波以后的效果没有测过。
+- 工具：`forum_layer_audit`（本节的分解）、`forum_state_margins`、`multi_recall --react / --state-margins`（R2 的留出召回在新支撑上重跑）。
+
+### 23.5 离线回放（开环，同 §19.1；10 场：`092135`、`094847` 两个运行；每 3 个 tick 一个；截止时间 inf）
+
+| 配置 | FORCED_RISK | 有安全行 | 选中计划事后不碰（安全 tick / FORCED_RISK tick） | 安全行事后不碰 | plan ms p50 / p99 |
+|---|---|---|---|---|---|
+| seen_cf + escape（集成的最好臂） | 90.3 % | 9.7 % | 78.3 %（100 / 75.9） | 100 % | 9.9 / 23.1 |
+| + `+n+g` | 89.6 % | 10.4 % | 78.7 %（98.9 / 76.4） | 99.7 % | 9.6 / 21.2 |
+| + `+n+g` + 拼刀主逻辑 | 89.5 % | 10.5 % | 78.4 % | 99.7 % | 11.7 / 24.1 |
+| `+n+g`（含扔针替换）+ 按状态余量（只 `092135` 的 5 场；同 5 场集成臂 90.5 % / 9.5 %） | 88.4 % | 11.6 % | 80.0 % | 99.7 % | 11.4 / 27.9 |
+
+开环里这些改动只让安全 tick 多 1–2 个百分点：已承诺层（23.3）没动，饱和的主体还在；拼刀主逻辑在 12,655 个 FORCED_RISK tick 里只多出 11 个干净的拼刀行（522 个部分拼刀行进 FORCED_RISK 排序）。
+
+### 23.6 实战第 1 轮（2026-10-08 11:45–12:46；冻结检出 `C:\ssbot\live_w0d_016417b`；实例 0–3 每个 12 块 × 5 场、三臂按块和实例轮换，同实例同种子配对；Forum_W，eval、planner、oracle、真退出 0.2；种子 361000；驱动 `C:\ssbot\sandbox\w0d_live.ps1`，清单 `w0d_manifest_a.txt`，汇总 `C:\ssbot\data\m2_forum_w0d\ab_round1.json`）
+
+三臂：**int** = 集成的"seen_cf + 拼刀开 + escape"、击杀冻结照旧（`SSBOT_FORUM_KF=any`：集成本身）；**intk** = int + 击杀冻结的修正；**new** = intk + `escape+n+g+l` + 拼刀主逻辑（家族余量；这一版的 `+n` 还没有扔针替换，拼刀主逻辑还没有 seen 跳过无敌帧）。
+
+| | int | intk | new |
+|---|---|---|---|
+| 场 | 80 | 80 | 79 |
+| 结果 | QUIT 80 | QUIT 80 | QUIT 79 |
+| 打完第 0 波（到第 1 波或更后） | **0** | 11（14 %） | **15（19 %）**，最远到第 5 波 |
+| 存活（局内）中位 / 均值 s | 24.1 / 25.4 | 25.4 / 31.0 | **31.9 / 52.3** |
+| 击杀 / 场（有击杀的场） | 0（0） | 0.80（31） | **1.42（42）** |
+| 第一次击杀中位 s | — | 23.1 | 22.9 |
+| 打出的命中 / 场、/ 分 | 4.9 / 11.5 | 12.0 / 23.2 | 17.3 / 19.9 |
+| 受击 / 场、/ 分 | 4.29 / 10.1 | 4.26 / 8.3 | 5.09 / **5.8** |
+| FORCED_RISK 占比 | 0.893 | 0.891 | **0.796** |
+| 迟到 tick（> 16.7 ms） | 15.2 % | 15.8 % | 10.9 % |
+| tick p50 / plan p50 中位 ms | 13.3 / 7.8 | 13.7 / 7.8 | 13.2 / 8.4 |
+| 支撑外受击 | 0 | 0 | 0 |
+
+- 同实例同种子配对：intk − int 存活 **+5.6 s**（自助 95 % 区间 1.0–10.5），击杀 +0.80（0.51–1.14）；new − int **+26.9 s**（16.4–38.6），击杀 +1.42（0.96–1.92）；**new − intk +21.4 s（10.1–33.6）**，击杀 +0.65（0.08–1.23），45 / 79 对更久。
+- 击杀冻结的修正一个人就把 0 击杀变成 0.8 只每场、第 0 波开始被打完；三层支撑的开关在它之上再加 21 s 存活和 0.65 只击杀：受击率降到 5.8 次 / 分（你 1x 11.4），FORCED_RISK 降到 0.80。int 臂又有 QS 僵持（杀招规则 20 s 不出刀）和 Q5，intk / new 没有。
+- 受击来源（new，前几项）：Multihit 链（Choristor 鞭 / Reed 反击的钩子）67、Envoy 横斩 56、Choristor 跳旋 38、Reed 本体 36、Reed 针 26、Envoy 本体 20。
+- 迟到 tick 偏高（11–16 %）：4 个实例同时跑，11:45–11:58 还和本节的离线回放、召回同时跑（之后停了）；三臂同负载、按块轮换。
+- 拼刀主逻辑在 new 里：167,099 个拼刀 tick（档位门跳过 27,826：h = 2、RED、等暂停），219 行拼刀后干净（117 次选中），4,296 行部分拼刀（422 次选中）；拼刀不是 new 胜出的主要来源。
+
+### 23.7 实战第 2 轮（2026-10-08 12:37–13:30；冻结检出 `C:\ssbot\live_w0d_fca0416`；实例 0–3 各 4 块 × 2 臂 × 5 场，ABBA，种子 362000；清单 `w0d_manifest_b.txt`，汇总 `C:\ssbot\data\m2_forum_w0d\ab_round2.json`；同时在跑 23.8 的召回）
+
+两臂：**intk**（同第 1 轮）对 **newS** = `escape+n+g+l`（`+n` 含扔针替换）+ 拼刀主逻辑（含 seen 跳过拼刀无敌帧、连拼 3 次）+ 按状态余量。（初版这里还写了"+ 砍钟作防御"：错了。`bell_hits` 和打回去的钟当时没有开关，两臂跑同一个 fca0416，intk 也开着；两臂在钟上没有区别，第 0 波也没有钟。）
+
+| | intk | newS |
+|---|---|---|
+| 场 | 80 | 80 |
+| 打完第 0 波 | 16（20 %） | 15（19 %），9 场到第 3 波 |
+| 存活中位 / 均值 s | 29.9 / 35.9 | 32.8 / **54.1** |
+| 击杀 / 场（有击杀的场） | 1.18（43） | 1.19（39） |
+| 第一次击杀中位 s | 21.3 | 24.2 |
+| 打出的命中 / 场、/ 分 | 14.3 / 23.9 | 15.4 / 17.1 |
+| 受击 / 分 | 7.25 | **5.92** |
+| FORCED_RISK 占比 | 0.903 | **0.770** |
+| 迟到 tick | 18.8 % | 14.7 % |
+| 支撑外受击 | 0 | 0 |
+
+- 配对：newS − intk 存活 **+18.2 s**（6.5–31.1），49 / 80 对更久；击杀 +0.01（−0.51–0.56）。第 1 轮的 new − intk 是 +21.4 s、击杀 +0.65。两轮合起来：三层支撑的开关让存活长 18–21 s、受击率降 20–30 %，**打完第 0 波的比例没有变**（new / newS 30 / 159 = 19 %，intk 27 / 160 = 17 %）：活得更久但每分钟打出的伤害少了约 30 %（17 对 24 次命中 / 分），每场击杀一样。
+- 受击来源：Reed 的针（`hit_log` 路径 `Song Reed Pin Projectile`）newS 46 次 / 80 场，intk 27（第 1 轮 new 26）。初版说这是"扔针替换的代价"：**按分钟看不出来**（审阅：几轮合起来，替换后的臂 195 次 / 366 分 = 0.53 次 / 分，intk 46 次 / 89 分 = 0.52；newS 活得更久，场均自然多），撤回。§23.12 的新汇总：这两臂的针受击几乎都发生在 Reed 扔针已经开始（受击前 12–30 帧 Reed 在放手前的状态）时：newS 45 / 46、intk 24 / 27——所以"前摇已开始的扔针"是对的问题，`+n` 下确实没有一层管它（§23.12 修）。其余（Multihit 链 70、Reed 本体 41、Envoy 横斩 38、Choristor 跳旋 37、跳斩 32）和 intk 相当。
+- 针的瞄准（第 2 轮 6 个运行、115 支针，`scratchpad` `pinaim.py`）：针在 Reed 进入 `Throw` 的那一帧飞出（115 支里 108 支能对上 Reed 的状态，全部是 `Throw` 第 0 帧），出生点离 Reed 约 1.6 u，31 u/s；方向对准的是**放手前约 20 帧（0.33 s）**主角所在的位置：夹角中位 5°、p90 18°、最大 55°（放手那一帧的主角位置：中位 13°、p90 46°）。所以针在手里时，它将来的路径由"主角 0.33 s 前在哪"决定——按计划行各自的位置可以算出来（下一步）。
+
+### 23.8 R2 留出召回：新支撑在 4 帧内没有漏（`multi_recall fresh --react escape+n+g --state-margins`，冻结检出 fca0416，`C:\ssbot\data\m2_forum_w0d\recall_fresh_ngS_fca0416.json`）
+
+- R0 的 35 场新数据 + R1 的运行，两折的表，444 个对局任务：每个滞后 375,940 个接触，**L2 / L3 / L4 全部覆盖（100 %），按类型也 100 %**；多段链的钩 1,802 / 1,802。和集成前的认证（`recall_fresh_e516f22.json`，同样 375,940 / 375,940）比，靠待机身体管覆盖的接触从 838 升到 1,044（扔针 / 扔钟家族改成本体管），新增 30 个靠危险物管、1 个靠碰撞体管（手里的针改成反应窗口的管）。
+- 所以按状态的余量没有让任何留出接触变成没覆盖（任务要求：缩余量要说出代价——这里代价为 0 个接触）；`+n` / `+g` 在 2–4 帧的预报里也没有漏。注意这个检验只看 2–4 帧前的预报：`+n` 拿掉的是更远的部分（还没开始的招在视野里晚些时候的伤害），那部分的安全由可逃检查（每个锁定点）承担，不在召回的口径里。
+
+### 23.9 实战第 3 轮：光锥开 / 关（2026-10-08 13:30–14:32；冻结检出 fca0416；ABBA，种子 363000；清单 `w0d_manifest_c.txt`，汇总 `ab_round3.json`）
+
+| | newS（`escape+n+g+l`） | noL（`escape+n+g`，其余同 newS） |
+|---|---|---|
+| 场 | 80 | 80 |
+| 打完第 0 波 | 11（14 %） | **17（21 %）**，最远第 5 波 |
+| 存活中位 / 均值 s | 35.5 / 47.8 | 31.0 / 53.0 |
+| 击杀 / 场 | 0.86 | **1.30** |
+| 第一次击杀中位 s | 27.4 | 25.2 |
+| 受击 / 分 | 6.13 | 5.67 |
+| FORCED_RISK 占比 | 0.814 | 0.784 |
+| 迟到 tick | 9.6 % | 10.1 % |
+| 支撑外受击 | 0 | 0 |
+
+- 配对 noL − newS：存活 +5.2 s（−9.5–19.8），击杀 +0.44（−0.14–1.03），40 / 80 对更久：都不显著，但方向一致——**光锥（这一版：计划末对已承诺、不能拼刀的细放置按 7 种逃法模拟）没有帮上忙**，可能还略减了出手（它让可逃检查多否决一些贴近敌人的计划）。第 0 波的已承诺放置在视野之后的部分很短（招在 1 s 内打完），光锥的用处在后面几波的延迟范围伤害（符文圈、rune slam、矛的爆炸），第 0 波量不出来；建议实战默认不开 `+l`，到后几波再单独量。
+- 同一个 newS 配置在第 2 轮打完 15 / 80、击杀 1.19，第 3 轮 11 / 80、0.86：轮与轮之间（不同种子、不同负载）的差别和臂之间的差别一样大，单轮 80 场只看得出 ±15 s、±0.5 只击杀量级的效应。
+
+### 23.10 实战第 4 轮：瞄准的针（`+a`；2026-10-08 14:32–15:22；冻结检出 `C:\ssbot\live_w0d_33762ee`；ABBA，种子 364000；清单 `w0d_manifest_d.txt`，汇总 `ab_round4.json`）
+
+`+a`：Reed 扔针还没放手时（`RE_THROW`、还没到 `Throw`），对每个计划行单独查：在 `Throw` 的可能进入时刻（行走给的区间，每 2 帧一个）放一支从 Reed 旁 1.6 u 出发、31 u/s、对准"这一行在放手前 20 帧所在位置"（±15° 三条）的针，碰到就是 S = 1（23.7 的瞄准测量）。离线回放（`092135` 的 5 场）：829 个 tick 有这样的针，3,693 行因此不安全，有安全行的 tick 从 11.6 % 到 11.4 %。
+
+| | newS | newSa（+ `+a`） |
+|---|---|---|
+| 场 | 80 | 80 |
+| 打完第 0 波 | **23（29 %）** | 17（21 %），最远第 5 波 |
+| 存活中位 / 均值 s | 33.7 / 60.8 | 31.1 / 59.1 |
+| 击杀 / 场 | 1.66 | 1.55 |
+| 受击 / 分 | 5.25 | 5.23 |
+| Reed 针的受击 | 28 | 29 |
+| 迟到 tick | 20.6 % | 23.6 % |
+| 支撑外受击 | 0（另 2 次"未判"，见下） | 0 |
+
+- 配对 newSa − newS：−1.7 s（−20.0–17.2），击杀 −0.11（−0.84–0.61）：**瞄准的针没有作用**，针的受击也没少（第 2 轮 newS 的 46 次多半是那一轮的随机性：这一轮 newS 只有 28，和 intk 的 27 一样）。保持默认关。
+- **两次"未判"的受击**（newS，`unpredicted_unknown`：受击前 2–4 帧那几帧没有留下预报——这一轮迟到 tick 20 % 以上，跳过的帧没有预报，不是"在支撑外"）：`20261008_144952` 实例 0 第 4 场 f15121164 Envoy 本体（第 0 波），`20261008_151441` 实例 3 第 2 场 f15208118 钟（第 3 波）。用同样的配置开环回放判（`scratchpad` `unk.py`，即 `forum_react_audit` 的判法）：两次在 L = 2 / 3 / 4 / 12 / 24 / 36 帧前的预报里都被覆盖（全体和来源类型都是）。四轮 640 场里支撑外受击 0。
+
+### 23.11 结论与建议
+
+- **第 0 波开始被打完**：集成的最好臂（seen_cf + 拼刀开 + escape）80 场 0 击杀、0 次打完；修正击杀冻结之后 17 %（27 / 160）打完——**打完第 0 波靠的是击杀冻结的修正**。三层支撑的开关之后各轮 18–29 %（newS 49 / 240 = 20 %，noL 17 / 80，newSa 17 / 80），但同一轮配对比只是持平（第 1、2 轮合起来 new / newS 30 / 159 对 intk 27 / 160）：开关的收益在存活（均值从 25–36 s 到 48–61 s，配对 +18–21 s）和受击率（10.1 → 5.2–6.1 次 / 分；你 1x 11.4），不在打完率。最远打到第 5 波。四轮支撑外受击 0——但这只是 2–4 帧口径（§23.12：受击前 30 帧内有 S = 0 计划的受击，新臂约是 intk 的 3–6 倍）。
+- 推荐的实战配置（各开关仍默认关，击杀冻结的修正默认开）：`SSBOT_FORUM_FR=seen_cf`、`SSBOT_FORUM_REACT=escape+n+g`、`--forum-clash main`、`SSBOT_FORUM_MARGIN=state`（第 3 轮的 noL）。光锥 `+l`、瞄准的针 `+a` 在第 0 波量不出好处，先不开。
+- 还没解决的：① 已承诺层的模板本身（23.3）——FORCED_RISK 仍占 75–80 % 的 tick；要按状态重新锚定（可重入的 `Charge` 以进入时的位置为锚、扔出物不进扔者的模板）并重新认证（R2 的重建），这是去饱和的根本一步。② 打得慢：三层支撑让 bot 活得久但每分钟打出的命中少约 25 %（18 对 24），第一次击杀中位 21–27 s（你 17.5 s）；要在安全的 tick 里更主动地出手（安全 tick 里起手是攻击的只有 2–4 %，大多是 CONTINUE），这是 J / 惩罚窗口（R5 / R6）的事。③ 打完第 0 波之后的主要受击：第 1 波两只 Choristor 的跳旋（`Spin Hit`）和鞭、第 3 波的钟和矛的爆炸。
+- 复现：分解 `python -m ssbot.tools.forum_layer_audit <runs> --out <dir> --every 6 --workers 3`（汇总 `scratchpad` `agg.py` / `prec.py`）；按状态余量 `python -m ssbot.tools.forum_state_margins`；召回 `python -m ssbot.tools.multi_recall fresh --fresh C:/ssbot/data/m2_forum_r0/fresh --fresh C:/ssbot/data/m2_forum_r2/r1 --react escape+n+g --state-margins ../knowledge/1.0.30000/enemies/forum/support_margins_state.json`；实战 `C:\ssbot\sandbox\w0d_live.ps1`（`-Arms "<名>:<FR>:<REACT>:<拼刀>:<KF>[:<MARGIN>]"`）与 `w0d_chain.ps1`，汇总 `scratchpad` `ab.py <清单> --dealt`（§23.12 之后用仓库里的 `python -m ssbot.tools.forum_ab_summary <清单>`，含受击前 12 / 24 / 30 帧的计划和可逃检查的统计）。
+
+### 23.12 审阅之后的修正（2026-10-08 晚，提交 5506b86；实战第 5 轮）
+
+同日的审阅提了三个中等问题和几条小的。逐条改了、重新量了。
+
+**① `+n` 下，前摇已经开始的扔针 / 扔钟没有任何一层管。** `+n` 把 Reed 的 RE_THROW、Bellbearer 的 CB_THROW 从支撑里拿掉（模板、尾巴），也从可逃检查的威胁里拿掉；针 / 钟还在手里时只放 5 帧反应窗口的够距。推荐配置又不开 `+a`。新汇总证实这是对的问题：针的受击几乎全部发生在 Reed 扔针已经开始时（受击前 12–30 帧有 Reed 处在放手前的状态）：newS 各轮 45 / 46、40 / 44、28 / 28，noL 36 / 36，intk 24 / 27（intk 那时扔针模板还在支撑里，这些受击发生在 FORCED_RISK 里）。改法：
+- `+n` 在 oracle 视图里自动开瞄准的针（`ForumConfig.pin_aim` = `+a` 或 `+n`）：Reed 扔针的前摇里逐行查（§23.10 的做法）。第 4 轮 newSa 对 newS 没有可测的损失。
+- Bellbearer 的扔钟在放手之前（`Throw Evade` / `Roof Avoid` / `Throw Antic`，`REACT_KEEP_UNTIL_THROWN`）保留扔钟的模板，也就是 `+n` 之前的支撑：所有方向扔过的钟。进入 `Throw` 之后才换成本体管加钟的确定路径。钟没有瞄准模型，所以这里取保守的做法；多出来的覆盖只在前摇那约 0.66 s 里。
+- 还没开始的扔针 / 扔钟仍然不进可逃检查：模板里有所有方向，谈不上出路。从开始（commit）到第一次伤害最少 0.66 s（strikes.json 的 p5：CB 0.658 s，RE 0.667 s），开始之后由上面两条接管。
+- R2 召回：只在支撑上加了东西（CB_THROW 前摇的模板），§23.8 的 100 % 不会下降，没有重跑。
+
+**② `+n` 下，可逃检查只是排序偏好，不是安全保证。** 还没开始的招只有可逃检查管，但检查不否决，还常被截止时间切断。第 1–4 轮的新臂里，经过检查的非 FORCED_RISK tick 有 37–42 % 选中的行没通过检查（newS 0.42 / 0.40 / 0.37，noL 0.40，newSa 0.38），这些 tick 照样是 S = 0、GREEN；截断约每 tick 0.27–0.56 次。改法（`ForumConfig.esc_veto`：escape 且 `+n`）：两种情况下选中的行记 S = 1。一是选中的行没通过检查（所查的行全部失败，取失败最少的那行）。二是有威胁在够距内，但截止时间前一行都没查到。S = 1 的后果：下一个 tick 是 YELLOW，不能认证击杀，不算 QS 的安全帧。延续（CONTINUE）这样一行时也保持 S = 1。`+l` 打开时，光锥的失败同样算。审计字段是 `esc_unsafe` / `esc_failed` / `esc_unchecked` / `esc_carried`。不开 `+n` 时，检查照旧只用来排序。
+
+**③ "支撑外受击 0"的口径看不到新开关担的风险。** 2–4 帧的判法（UNPRED_LAGS）按构造看不到这部分：`+n` 拿掉的是 4 帧内打不到的招，`+g` 的身体管 5 帧之后才不长。所以加了计划层面的指标：
+- 策略：每个 tick 的选中计划放进一个环形缓冲。每次受击记下受击前 12 / 24 / 30 帧的选中计划，包括 S、FORCED_RISK、是否干净的拼刀行、是否被可逃检查判 S = 1、有没有瞄准针的威胁；另记"受击前 30 帧内有没有选过 S = 0 的计划"。这些写进 `hit_log` 的 `lag` / `safe30` / `clash30`，统计字段是 `planned_safe`。
+- 汇总工具 `python -m ssbot.tools.forum_ab_summary <清单>` 放进了仓库，替代 scratchpad 里的 `ab.py`。它从决策日志算同样的数（每次受击前 90 个 tick 的日志都留着，所以旧版本的运行也能算），并按来源归因。另外还报：可逃检查的失败率和截断率、针受击里扔针已经开始的份数、配对差的 bootstrap CI。
+- 第 1–4 轮重算的结果（`C:\ssbot\data\m2_forum_w0d\fix\sum_round1..4.json`）。"30 帧内"指受击前 30 帧内有 S = 0 的选中计划；@12 / @24 / @30 指受击前那么多帧时的选中计划是 S = 0：
+
+| 轮 | 臂 | 受击 | 30 帧内（次 / 分） | @12 | @24 | @30 | 其中针 |
+|---|---|---|---|---|---|---|---|
+| 1 | int | 391 | 2（0.06） | 0 | 2 | 1 | 0 |
+| 1 | intk | 403 | 0（0） | 0 | 0 | 0 | 0 |
+| 1 | new | 462 | 7（0.10） | 0 | 4 | 7 | 0 |
+| 2 | intk | 403 | 2（0.04） | 0 | 1 | 2 | 0 |
+| 2 | newS | 483 | 13（0.18） | 1 | 6 | 7 | 3 |
+| 3 | newS | 447 | 7（0.11） | 0 | 4 | 6 | 1 |
+| 3 | noL | 470 | 14（0.20） | 5 | 8 | 14 | 5 |
+| 4 | newS | 482 | 19（0.23） | 1 | 10 | 9 | 4 |
+| 4 | newSa | 482 | 12（0.15） | 2 | 10 | 8 | 1 |
+
+  新臂的这类受击是对照的 3–6 倍。占全部受击的比例仍然小（2–4 %），其余都发生在 FORCED_RISK 里，没有一次是"30 帧内有干净拼刀行"（`clash30` 各臂都是 0）。来源分散：Choristor 的跳旋和本体、Envoy 的横斩和跳斩、Reed 的针和刺。
+
+**④ 拼刀作主逻辑的阈值（低）。** `CLASH_MODES["main"]` 有两处和 DESIGN 3.5.6 的"只在 GREEN"不同：干净的拼刀行只要"仍然挨打"的上界之积不超过 0.3 就算安全；h ≥ 3 的 YELLOW 也拼。按审阅的统计，在 main 下第 0 波 / Forum 有 13 个槽能算安全，其中 9 个用的是收割（Reaper）的数据，没有漫游自己的行，例如 EN_JUMPSLASH down（p_fail 0.246）、CH_WHIP down（0.270）、MI_PARRY side（0.196）。实测：各臂约 110–145 个 tick 选中了干净拼刀行，之后 30 帧内受击 0 次（第 1–5 轮的 `clash30` 全是 0）。这两条（0.3 的阈值、YELLOW h ≥ 3）**要 lead / 你来定**，它们都在 `--forum-clash main` 后面，默认关。"拼刀安全要求漫游自己的数据（n_eff ≥ min_n）"这条这一轮没有做，因为读拼刀表代码的那一步被权限分类器拒了。
+
+**⑤ 钟的开关（低）。** 加了 `SSBOT_FORUM_BELLS=off`，同时关掉 `ForumConfig.bell_hits` 和 HazardTracker 的打回去规则；默认 on，行为和以前一样。第 3 波以后的 A/B 还没做。
+
+**⑥ 文字更正。** 已改在原处：§23.2（随机一行的基线 63.8 %；"多出来的行"的精度）、§23.4（光锥不是腐蚀；钟当时没有开关）、§23.7（两臂都开着钟；针的受击按分钟看没有差别）、§23.11（打完第 0 波靠的是击杀冻结的修正）。
+
+**Bell Beast。** 改动的文件里，Bell Beast 的代码路径（`forecast.py`、`planner.py`、`planner_policy.py`）一个都不导入；`forecast.py` 只在注释里提到 multi_forecast。所以 Bell Beast 按构造逐 tick 不变，没有再跑逐 tick 对比。
+
+**实战第 5 轮**（2026-10-08 16:30–17:35）。两臂各用一个冻结检出：rec = `C:\ssbot\live_w0d_33762ee`（第 3 轮 noL 的推荐配置），fix = `C:\ssbot\live_w0d_5506b86`（本节的修正）。两臂的环境变量相同：`SSBOT_FORUM_FR=seen_cf`、`SSBOT_FORUM_REACT=escape+n+g`、`--forum-clash main`、`SSBOT_FORUM_MARGIN=state`。实例 0–3 各跑 4 块 × 2 臂 × 5 场，ABBA，第一块的先后按实例交替；种子 365000；Forum_W，eval、planner、oracle、真退出 0.2。驱动 `C:\ssbot\sandbox\w0d_live2.ps1`（每臂自己的检出），清单 `w0d_manifest_e.txt`，汇总 `C:\ssbot\data\m2_forum_w0d\fix\sum_round5.json`。
+
+| | rec（33762ee） | fix（5506b86） |
+|---|---|---|
+| 场 | 80（全部 QUIT） | 80（全部 QUIT） |
+| 打完第 0 波 | 18（23 %），最远第 5 波 | 19（24 %），最远第 6 波 |
+| 存活中位 / 均值 s | 35.3 / 64.2 | 34.0 / 64.9 |
+| 击杀 / 场 | 1.45 | 1.59 |
+| 受击 / 分 | 4.86 | 4.89 |
+| FORCED_RISK 占比 | 0.773 | 0.774 |
+| 迟到 tick | 9.5 % | 10.6 % |
+| 支撑外受击（2–4 帧）/ 未判 | 0 / 0 | 0 / 0 |
+| 受击前 30 帧内有 S = 0 计划（次 / 分） | 15（0.175） | **9（0.104）** |
+| ……受击前 24 / 30 帧时是 S = 0 | 8 / 14 | 4 / 5 |
+| ……其中针 | 2 | 3 |
+| 受击前 12 / 24 / 30 帧时是"可逃检查判的 S = 1" | — | 2 / 4 / 4 |
+| Reed 针的受击（扔针已开始） | 32（30） | 41（37） |
+| 可逃检查：非 FORCED_RISK 的检查 tick / 失败率 / 截断每 tick | 47,441 / 0.48 / 0.24 | 44,528 / 0.45 / 0.29 |
+| 判为 S = 1（失败 / 没查到 / 延续） | — | 61,929（20,122 / 11,671 / 30,310） |
+| 选中干净拼刀行后 30 帧内受击 | 0 | 0 |
+
+- 配对 fix − rec（80 对）：存活 +0.8 s（−20.1–21.6），击杀 +0.14（−0.63–0.91），受击率 −0.23 次 / 分（−1.74–1.25）。**都不显著：这些修正没有可测的代价。**
+- 受击前 30 帧内有 S = 0 计划的受击从 15 降到 9。受击前 30 帧时还是 S = 0 的，从 14 降到 5。剩下的 9 次是：Envoy 跳斩 3、针 3、Choristor 本体 2、Reed 刺 1。另有 4 次受击，可逃检查在受击前 24–30 帧已经把那一行判成 S = 1，也就是新规则提前看到了。
+- 针的受击 41 对 32：按分钟算是 0.47 对 0.37，单轮里不显著；瞄准的针第 4 轮也没让针的受击变少。37 / 41 次发生在扔针已经开始时，但其中只有 3 次在受击前 30 帧内有 S = 0 的计划，其余都发生在 FORCED_RISK 里。针的问题主要在已承诺层的饱和：没有干净的行可选。这不是"没有一层管"造成的。
+- 结论：这一轮修的是安全的口径，不是战绩。S = 0 现在包含可逃检查的结果；`+n` 前摇里的针 / 钟有了覆盖；新指标能看到 2–4 帧口径之外的风险。打完率、存活、击杀和 rec 持平。推荐配置不变（`escape+n+g` 加拼刀主逻辑加按状态余量），但 `+n` 现在自带上面三条修正。

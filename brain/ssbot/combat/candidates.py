@@ -217,17 +217,38 @@ def _forum_continuations(T: int) -> list[Piece]:
     return out
 
 
-def build_forum(T: int = 36, posture: str = "ground") -> tuple[CandidateSet, np.ndarray]:
+CLASH_REP = 8                  # frames between the presses of a clash continuation (a clash's NailParryRecover comes
+#                                0.1 s = 6 frames after it: the next press swings at once, without a clash it queues)
+
+
+def _clash_continuations(T: int) -> list[Piece]:
+    """Forum plan R8: keep swinging (every CLASH_REP frames from the continuation's third frame), the direction only
+    on the press frames: N keeps the facing, L / R turn to that side (the two-sided rule: clash one side, then the
+    other), U swings up (the person's continuous up slashes under the Minister). Without a clash these are plain
+    repeated swings at the crest's cooldown."""
+    n = T - FIRST
+    out = []
+    for d, bits in (("N", 0), ("L", B_LEFT), ("R", B_RIGHT), ("U", B_UP)):
+        m = _seq(n)
+        for k in range(2, n, CLASH_REP):
+            m[k:k + 2] = B_ATTACK | bits
+        prim = Prim.ATTACK_UP if d == "U" else Prim.ATTACK_SIDE
+        out.append(Piece(f"clashrep{d}", m, frozenset({prim} | ({Prim.MOVE} if d in "LR" else set()))))
+    return out
+
+
+def build_forum(T: int = 36, posture: str = "ground", clash: bool = False) -> tuple[CandidateSet, np.ndarray]:
     """The Forum set of one posture family (forum_planner_plan §4.1: posture families + the core evasion set): the
     core first pieces (CORE_FIRST: wait, move, jumps 3 holds x 3 ways, dash either way) and the posture's attack pieces,
-    each with every continuation (the Bell Beast library plus dash / dash-then-slash). Returns (set, core [N] bool): the
+    each with every continuation (the Bell Beast library plus dash / dash-then-slash; clash: the R8 clash
+    continuations too, after the others so the R3 rows keep their indices). Returns (set, core [N] bool): the
     core evasion rows (CORE_FIRST x CORE_CONT), the same commands in every posture family, so their S / Hz / U never
     depend on the posture's other rows or on the tactics (§4.4 item 2)."""
     if posture not in POSTURES:
         raise ValueError(f"posture {posture!r}")
     fp = {p.name: p for p in _forum_first_pieces()}
     firsts = [fp[n] for n in CORE_FIRST] + [fp[n] for n in POSTURE_FIRST[posture]]
-    conts = _forum_continuations(T)
+    conts = _forum_continuations(T) + (_clash_continuations(T) if clash else [])
     N = len(firsts) * len(conts)
     cmd = np.zeros((N, T), np.int64)
     first = np.zeros(N, np.int64)
