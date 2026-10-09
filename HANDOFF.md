@@ -4004,3 +4004,15 @@ S0 (planner AIM off; P0 is display / truth / aim templates): baseline 0.60 % = 3
 - Still running (detached): `gate.cmd recall rclip2 r2` (f7b58a5; started under load, ~15 min per fight table) then
   `hindsight rclip2 r2`; chain s1\gates_rclip2p.cmd (rclip2a / rclip2p: png, R2 hindsight; writes
   s1\gates_rclip2p.done); the S0 base R2 hindsight.
+- Re-score so far (per tick, the segments every run finished; `s1\partial.py`): on 16 common segments the old base
+  d51b216 had 35 misses, ALL "Song Reed"; with the truth fix the base has 0 (so S0's baseline 0.60 % = 32, Reed body
+  31, was the parked Reed too). RCLIP=1: 6 (pin 5, Tiny 1); RCLIP=2 (f7b58a5, no allies): 4 (pin 4). With the escape
+  check (rb runs, 13 common segments): RCLIP=2's one pin miss there fails the escape check, misses_esc 0; PRESTRIKE
+  identical to RCLIP=2. Verdict: RCLIP=2 fails gate (4) on the support alone (Reed pin 0 -> 4 so far: the aimed pin
+  check misses them, base held them with the Envoy's charge box), so it stays default off; with the escape check it
+  adds no miss so far: the integration stage decides once all 32 segments are in.
+- S1 open issues: the aimed pin check (`forum_planner._pin_contacts`) misses the 5 pin rows (20261004_002749 a4
+  f21318-21324, a15 f71084-71087); the Bellbearer's flying bells credited to it without a path (20261008_231544 a1
+  f26467, f42427: base held them with its own clipped boxes); a Reed in Block dropped 0.4 u below the every-frame
+  reach (f39847); allies' reach uses the hero's speeds and swing; the recall gate run for RCLIP=2 is implied (superset
+  of RCLIP=1's 100 %) and was 81 / 444 fight tables, all 0 misses, at 15:41.

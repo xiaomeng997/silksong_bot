@@ -3355,3 +3355,18 @@ C:\ssbot\data\m2_forum_push\gate.cmd <precision|hindsight|share|recall|rescore|p
   - Clapper 三帧：差 1–3 格。
 - k36 时，"所有支撑"那一列比 base 低（bot 干净行 99.19 → 95.77）。少掉的都是别的怪的框顺带盖住的部分；"自己的支撑"一列和 base 一样（83.88）。
 - **召回**（multi_recall fresh，L2–L4，自己的 + 钩子）：RCLIP=1 在 R2 的 444 张表上是 100 %（`C:\ssbot\data\m2_forum_reach\recall_fresh_rclip.json`），用的是同一张 reach 表（md5 相同）。RCLIP=2 的剪切框是它的超集，PRESTRIKE 只加支撑，所以两者都是 100 %。直接跑的 `gate.cmd recall rclip2 r2` 在机器过载时开始，还没跑完。
+- **重打分**：真值修正后重跑。机器过载，到 15:45 只跑完一部分段，下面按"各 run 都跑完的段"逐 tick 数（`s1\partial.py`）。
+
+  | 16 段相同（共 32） | 旧 base d51b216 | 旧 RCLIP b5e9072 | base（真值修正） | RCLIP=1 | RCLIP=2（无盟友） |
+  |---|---|---|---|---|---|
+  | 安全行 | 5,809 | 9,082 | 5,809 | 9,082 | 7,852 |
+  | 漏报 | 35（全是 Reed） | 80（Reed 74、针 5、Tiny 1） | **0** | 6（针 5、Tiny 1） | 4（针 4） |
+
+  - **旧基线的 Reed 漏报几乎全是停放的 Reed**：旧 base 这 16 段的 35 个漏报，真值修正后一个不剩（S0 基线 0.60 % = 32，其中 Reed 身体 31）。
+  - 加上逃生检查看（rb 变体，13 段相同）：RCLIP=2 剩下的那个针漏报，那一行逃生检查判不过，所以"安全且逃生检查通过"的漏报是 0。PRESTRIKE 的安全行和漏报与 RCLIP=2 完全一样。
+
+**结论**
+- RCLIP=2 按"只看支撑"的规则仍不过门槛 4：Reed 的针 0 → 4（到目前为止）。这些针是"+n"下瞄准针检查漏掉、base 里只靠 Envoy 冲锋的框顺带盖住的。所以 RCLIP=2 **保持默认关**。
+- 如果按"支撑 + 逃生检查"（规划器在 escape+n+g 下真正的判断）计漏报，到目前为止 RCLIP=2 不增加漏报，可以考虑默认开。由集成阶段决定，等全部 32 段跑完再定。
+- PRESTRIKE 在 seen 数据和重打分里没有可测的作用，保持关。
+- 下一步要修的是瞄准针检查（那 5 行针），以及 Bellbearer 那两帧飞着的钟（没有路径）。
