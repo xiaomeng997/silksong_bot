@@ -37,7 +37,8 @@ apart; kills, presses) with bootstrap intervals; unpaired bootstrap differences 
 difference in differences against a same-round control (--did); per source the masks per minute and an exact Poisson
 test against --base; for the --focus arms each hit's mechanisms and primary cause (MECHS: the first that holds) by
 family, joined to forum_hit_forensics outputs (--hindsight: the open-loop hindsight of forum.md 19.1, the last tick
-before the contact with a row the recorded future left clear; avoidable = 4-36 frames before); and the episodes per arm
+before the contact with a row the recorded future left clear; avoidable = some tick 4-36 frames before had one, react =
+4-6 frames before, _g with the 0.25 u margin); and the episodes per arm
 an A/B needs for a 10 % / 20 % change (unpaired; paired by round, instance, chunk seed and episode), log survival too.
 """
 import argparse
@@ -846,19 +847,32 @@ def hindsight_index(dirs: list[str]) -> dict:
                 continue
             idx[(r["run"], int(r["inst"]), int(r["ep"]))] = {
                 int(t["f"]): (int(t.get("hs_clear") or 0), ((t.get("picks") or {}).get("replay") or [None, None])[1],
-                              bool(t.get("forced")), int(t.get("seen_clear_hs") or 0))
+                              bool(t.get("forced")), int(t.get("seen_clear_hs") or 0), int(t.get("hs_clear_g") or 0))
                 for t in r.get("ticks") or () if "hs_clear" in t}
     return idx
 
 
+AVOID_K = (4, 36)       # avoidable: some analysed tick 4 .. 36 frames before the contact had a row left clear
+REACT_K = (4, 6)        # the reactable band (a reaction a few frames before the contact)
+
+
 def hindsight_of(h: dict, ticks: dict) -> dict | None:
-    """The last analysed tick before the contact that had a row the recorded future left clear (forum.md 19.1)."""
+    """The analysed ticks before the contact that had a row the recorded future left clear (forum.md 19.1): the last
+    such tick (last_clear_k), whether any tick in AVOID_K / REACT_K had one (avoid / react), and the same with the
+    0.25 u margin of forum_hit_forensics' hs_clear_g (avoid_g / react_g). forum.md 24.3: avoidable is any tick in the
+    band, not the last one (a hit still clear 1-3 frames before was clear earlier too)."""
     have = [k for k in K_SET if (h["f_c"] - k) in ticks]
     if not have:
         return None
     clear = [k for k in have if ticks[h["f_c"] - k][0] > 0]
+    clear_g = [k for k in have if len(ticks[h["f_c"] - k]) > 4 and ticks[h["f_c"] - k][4] > 0]
     k6 = ticks.get(h["f_c"] - 6)
+
+    def band(ks, lo_hi):
+        return any(lo_hi[0] <= k <= lo_hi[1] for k in ks)
     return {"last_clear_k": min(clear) if clear else None, "n_ticks": len(have),
+            "avoid": band(clear, AVOID_K), "react": band(clear, REACT_K),
+            "avoid_g": band(clear_g, AVOID_K), "react_g": band(clear_g, REACT_K),
             "pick_clear_6": None if k6 is None else (k6[1] is not None and k6[1] < 0),
             "seen_clear_6": None if k6 is None else k6[3] > 0}
 
@@ -992,10 +1006,12 @@ def report(a) -> int:
     tot = sum(h.get("masks") or 1 for _, _, h in H)
     res["focus"] = {"arms": focus, "hits": len(H), "masks": tot,
                     "minutes": round(sum(sum(_mins(e) for e in by.get(x, [])) for x in focus), 1)}
-    mech = defaultdict(lambda: {"hits": 0, "masks": 0, "hs_n": 0, "hs_avoid": 0, "families": Counter()})
+    HS = ("avoid", "react", "avoid_g", "react_g")
+    mech = defaultdict(lambda: {"hits": 0, "masks": 0, "hs_n": 0, "families": Counter(), **{k: 0 for k in HS}})
     fam = defaultdict(lambda: {"hits": 0, "masks": 0, "primary": Counter(), "flags": Counter(), "hs_n": 0,
-                               "hs_avoid": 0, "d0": [], "wind": []})
+                               "d0": [], "wind": [], **{k: 0 for k in HS}})
     kb = Counter()
+    hs_tot = Counter()
     for arm, e, h in H:
         m = h.get("masks") or 1
         pm = primary(h)
@@ -1003,13 +1019,17 @@ def report(a) -> int:
         key = (e["run"], int(e["inst"]), int(e["ep"]))
         if key in hidx:
             hs = hindsight_of(h, hidx[key])
-        avoid = None if hs is None else (hs["last_clear_k"] is not None and 4 <= hs["last_clear_k"] <= 36)
         for d_ in (mech[pm], fam[label(h)]):
             d_["hits"] += 1
             d_["masks"] += m
-            if avoid is not None:
+            if hs is not None:
                 d_["hs_n"] += 1
-                d_["hs_avoid"] += bool(avoid)
+                for k in HS:
+                    d_[k] += bool(hs[k])
+        if hs is not None:
+            hs_tot["n"] += 1
+            for k in HS:
+                hs_tot[k] += bool(hs[k])
         mech[pm]["families"][label(h)] += m
         f_ = fam[label(h)]
         f_["primary"][pm] += m
@@ -1022,9 +1042,10 @@ def report(a) -> int:
             f_["wind"].append(h["wind_s"])
         if hs is not None:
             kb[_kbin(hs["last_clear_k"])] += 1
+    def hs_shares(v):
+        return {k: round(v[k] / v["hs_n"], 3) if v["hs_n"] else None for k in HS}
     res["mechanisms"] = {k: {"hits": v["hits"], "masks": v["masks"], "share": round(v["masks"] / max(tot, 1), 3),
-                             "hindsight_n": v["hs_n"],
-                             "avoidable": round(v["hs_avoid"] / v["hs_n"], 3) if v["hs_n"] else None,
+                             "hindsight_n": v["hs_n"], **hs_shares(v),
                              "families": dict(v["families"].most_common(6))}
                          for k, v in sorted(mech.items(), key=lambda z: -z[1]["masks"])}
     res["families"] = {k: {"hits": v["hits"], "masks": v["masks"], "share": round(v["masks"] / max(tot, 1), 3),
@@ -1032,12 +1053,12 @@ def report(a) -> int:
                            "flags": {n: round(c / v["masks"], 2) for n, c in v["flags"].most_common()},
                            "d0_med": round(float(np.median(v["d0"])), 2) if v["d0"] else None,
                            "wind_med": round(float(np.median(v["wind"])), 2) if v["wind"] else None,
-                           "hindsight_n": v["hs_n"],
-                           "avoidable": round(v["hs_avoid"] / v["hs_n"], 3) if v["hs_n"] else None}
+                           "hindsight_n": v["hs_n"], **hs_shares(v)}
                        for k, v in sorted(fam.items(), key=lambda z: -z[1]["masks"]) if v["masks"] >= 10}
     res["hindsight"] = {"episodes": sum(1 for arm in focus for e in by.get(arm, [])
                                         if (e["run"], int(e["inst"]), int(e["ep"])) in hidx),
-                        "last_clear": dict(kb.most_common())}
+                        "last_clear": dict(kb.most_common()), "hits": hs_tot["n"],
+                        **{k: round(hs_tot[k] / hs_tot["n"], 3) if hs_tot["n"] else None for k in HS}}
     res["power"] = power(by, arms, a.pairs or [])
     txt = json.dumps(res, indent=1, ensure_ascii=False)
     if a.json:
