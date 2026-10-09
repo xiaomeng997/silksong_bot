@@ -3967,7 +3967,9 @@ S0 (planner AIM off; P0 is display / truth / aim templates): baseline 0.60 % = 3
    397, entry_later 64, tail 26): mostly hazards whose thrower is dead or not yet named; in no enemy's RATIO.
 2. RCLIP lowers the k12 geometric recall (person 99.46 -> 99.07 % of rows) and its re-score fails (Reed body 31 -> 68
    misses, fix_spec P1); it stays default off.
-3. The hindsight / precision gates ran on "seen" data only; the R2 hindsight (`gate.cmd hindsight <cfg> r2`) and the
-   multi_recall gate (`gate.cmd recall <cfg> seen`) were not run in S0 (no planner switch changed). A clean set of
-   new recordings needs a `sets\<name>.cmd`.
+3. The precision / share gates ran on "seen" data only. The held-out R2 hindsight baseline (`gate.cmd hindsight base
+   r2`, 13 run dirs judged whole) was launched detached at 13:05 on 2026-10-09 (log
+   `C:\ssbot\data\m2_forum_pushase\hindsight_r2.log`, DONE at the end; JSON `base\hindsight_r2_held.json`); not
+   checked in S0. The multi_recall gate (`gate.cmd recall <cfg> seen`) was not run (no planner switch changed). A clean
+   set of new recordings needs a `sets\<name>.cmd`.
 4. HeroBox (0.4554 x 2.2498, offset -0.38) vs the exported Bounds box (0.50 x 2.079) in the references: unchanged.
