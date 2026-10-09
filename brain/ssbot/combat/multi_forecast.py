@@ -130,13 +130,25 @@ REANCHOR_PARTS = ("fam", "chain")
 def reanchor_parts(v: str | None) -> frozenset:
     """The parts of an SSBOT_FORUM_REANCHOR value ("" / "0": none, "1": all, else a comma list)."""
     v = (v or "").strip()
-    out = frozenset() if v in ("", "0") else frozenset(REANCHOR_PARTS) if v == "1" else         frozenset(p.strip() for p in v.split(",") if p.strip())
+    out = frozenset() if v in ("", "0") else frozenset(REANCHOR_PARTS) if v == "1" else \
+        frozenset(p.strip() for p in v.split(",") if p.strip())
     if out - set(REANCHOR_PARTS):
         raise ValueError(f"SSBOT_FORUM_REANCHOR: unknown part(s) {sorted(out - set(REANCHOR_PARTS))}")
     return out
 
 
 REANCHOR = reanchor_parts(os.environ.get("SSBOT_FORUM_REANCHOR"))
+# SSBOT_FORUM_RTHROW (task precision push S2, with RCLIP on; default off): a throw family (REACH_KEEP: its templates
+# also hold every hazard it ever threw, so RCLIP leaves it unclipped) is clipped like any other family until one frame
+# before the earliest look-ahead at which it can enter its release state (THROW_RELEASE: the state its hazard is armed
+# in, the tables' entities.<hazard>.armed_at_boss_state: Bell Throw 8,682 / 8,737, Reed pin Throw 2,139 / 2,153,
+# Clawmaiden spear Spear Fire Recover 492 / 496, Spear Fire is instant before it; the walk's earliest entry), unclipped
+# from then on. Before the release its hazard does not exist; one thrown earlier is its own entity (path / self
+# template). The Clapper's rune bombs and rune slam arm long after the cast (at Idle, Walk, ...): not here
+RTHROW = os.environ.get("SSBOT_FORUM_RTHROW", "0") not in ("", "0")
+THROW_RELEASE = {("Pilgrim 03 Song", "CB_THROW"): frozenset({"Throw"}),
+                 ("Song Reed", "RE_THROW"): frozenset({"Throw"}),
+                 ("Song Handmaiden", "CM_SPIN"): frozenset({"Spear Fire", "Spear Fire Recover"})}
 # defender families: (type, family) -> (the state a hit sends it to, the hit-triggered states) (Reed.json /
 # Minister.json attacks.<family>.states; Block 0.483-0.5 s, Parry Block 0.558-0.567 s)
 DEFENDERS = {
@@ -543,6 +555,7 @@ class MultiForecaster:
         self.reach_hit = REACH_HIT            # SSBOT_FORUM_RCLIP=2: ... widened from a hero hit's first reach on
         self.prestrike = PRESTRIKE            # SSBOT_FORUM_PRESTRIKE: the pre-strike reach of a not-started root
         self.reanchor = REANCHOR              # SSBOT_FORUM_REANCHOR: its parts (fam, chain)
+        self.rthrow = RTHROW                  # SSBOT_FORUM_RTHROW: a throw family clipped until its release
         self.react: ReactConfig | None = None   # reactive support (ReactConfig; None: as before)
         self.model = _Shim._Model()
         self.query_c = None
@@ -949,6 +962,8 @@ class _Builder:
         self._maestro: bool | None = None    # a Maestro in play (lazily)
         self._summon_t: float | None = None  # the earliest a Maestro in play can enter Summon (lazily)
         self.react_box: dict = {}            # iid -> (cx, cy, hx, hy): a hit reaction's anchor box (forecast_reaction)
+        self.release: dict = {}              # iid -> its throw's earliest release, s from the origin (RTHROW)
+        self.clip_fam: dict = {}             # iid -> its throw family clipped until the release (RTHROW)
         self.react = fc.react                # reactive support (ReactConfig) or None
         self.delays = strike_delays(fc.react) if fc.react is not None else {}
         self.body_only = body_only_families() if fc.react is not None and fc.react.bodyreach else frozenset()
@@ -1188,6 +1203,13 @@ class _Builder:
             d = self.delays.get((tt.tk, cur.family))
             if d is not None:
                 c_ton = cur.t_start - T + d - self.lat
+        if committed_now and getattr(self.fc, "rthrow", False) and (tt.tk, cur.family) in THROW_RELEASE:
+            rel_st = THROW_RELEASE[(tt.tk, cur.family)]
+            rel = 0.0 if tr.state in rel_st else math.inf
+            for nd in cur_nodes:
+                if nd.family == cur.family and nd.state in rel_st:
+                    rel = min(rel, 0.0 if nd.current else max(ref + nd.lo - T, 0.0))
+            self.release[tr.iid] = rel
         if anc is not None and not (idle_tube and cur.family == sp.idle_family) and not thrown:
             for nd in cur_nodes:
                 if aim_tid is not None and nd.family == cur.family and nd.state != TAIL                         and nd.state not in AIM_AFTER.get((tt.tk, cur.family), ()):
@@ -1206,7 +1228,8 @@ class _Builder:
                 key_state = TAIL if nd.state == TAIL else nd.state
                 tid = tables.key_id(nd.family, key_state, "anchor")
                 if tid is not None:
-                    ton = c_ton if not nd.current and nd.state != TAIL and nd.family == cur.family                         and not drop_union else -math.inf
+                    ton = c_ton if not nd.current and nd.state != TAIL and nd.family == cur.family \
+                        and not drop_union else -math.inf
                     self._place_anchor(tid, lo, hi, anc, tr.iid, nd.family, nd.family != sp.idle_family, nd.p, ton)
                 if nd.family == sp.entry_family:
                     wid = tables.key_id(nd.family, key_state, "world_all")
@@ -1664,6 +1687,7 @@ class _Builder:
         out.groups = self.meta_group
         out.clusters = self.clusters
         out.clip = self._clip()
+        out.clip_fam = self.clip_fam
         return out
 
     def _clip(self) -> dict:
@@ -1681,10 +1705,14 @@ class _Builder:
             if not s.alive or tr is None or tr.dead or not tr.in_play or tr.parked or tr.hidden or tr.pos is None \
                     or tr.state is None:
                 continue
+            rel = None
             if tr.cur is not None and (tr.tk, tr.cur.family) in REACH_KEEP:
                 # in a throw: its body tube and templates also stand for what it throws (a Reed's pin at its release,
-                # R2 fresh recall 20261003_074533 i2 ep34: the pin met the hero 2.5 u from the Reed 2 frames later)
-                continue
+                # R2 fresh recall 20261003_074533 i2 ep34: the pin met the hero 2.5 u from the Reed 2 frames later);
+                # SSBOT_FORUM_RTHROW: clipped until one frame before its earliest release
+                rel = self.release.get(s.iid)
+                if rel is None:
+                    continue
             age = self.origin - tr.seen_T
             if not -1e-9 <= age <= REACH_SEEN_S + 1e-9:
                 continue
@@ -1698,6 +1726,10 @@ class _Builder:
                     A = rc.world(*args, 0, tr.pos, FACES_LEFT[tr.flip], int(round(age / BIN)))
                     W[k:, :2] = np.minimum(W[k:, :2], A[k:, :2])
                     W[k:, 2:] = np.maximum(W[k:, 2:], A[k:, 2:])
+            if rel is not None:
+                kr = len(W) if not math.isfinite(rel) else max(0, int(math.floor(rel / BIN + 1e-9)) - 1)
+                W[kr:] = (-np.inf, -np.inf, np.inf, np.inf)
+                self.clip_fam[s.iid] = tr.cur.family
             out[s.iid] = W
         return out
 
@@ -1896,6 +1928,7 @@ class MultiForecast:
         self.groups: dict = {}               # Tiny group owner -> the other Tinies of its cluster
         self.clusters: list = []             # Tiny cluster index (bb["gcl"]) -> the Tinies its group rows stand for
         self.clip: dict = {}                 # owner -> its reach clip boxes by look-ahead (SSBOT_FORUM_RCLIP)
+        self.clip_fam: dict = {}             # owner -> its throw family clipped until the release (RTHROW)
 
     def __getattr__(self, name):
         # the wrapped boss forecast answers everything this class does not define (boss_box, body_polys, det, ...)
@@ -1999,8 +2032,10 @@ class MultiForecast:
             own = np.asarray(meta["owner"], np.int64)
             r = np.full(len(own), NOCLIP, np.int64)
             gcl = meta.get("gcl")
+            cf = self.__dict__.get("clip_fam") or {}
             for i, o in enumerate(own.tolist()):
-                if o in clip and (tk_of.get(o), str(meta["family"][i])) not in REACH_KEEP \
+                fam = str(meta["family"][i])
+                if o in clip and ((tk_of.get(o), fam) not in REACH_KEEP or cf.get(o) == fam) \
                         and (gcl is None or not len(gcl) or gcl[i] < 0):
                     r[i] = o
             c[kind] = r
@@ -2362,6 +2397,7 @@ class MultiForecast:
         out.known = self.known
         out.groups, out.clusters = self.groups, self.clusters
         out.clip = self.__dict__.get("clip") or {}
+        out.clip_fam = self.__dict__.get("clip_fam") or {}
         return out
 
     def support_set(self, ws: WorldState | None = None, t1: float = SUP_HORIZON_S) -> SupportSet:

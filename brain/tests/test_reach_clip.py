@@ -220,3 +220,34 @@ def test_prestrike_places_the_reach_of_a_dropped_stab(monkeypatch):
     inside = (X >= W[j, 0]) & (X <= W[j, 2]) & (Y >= W[j, 1]) & (Y <= W[j, 3])
     assert np.array_equal(o[:, j], inside)        # the hero-centre reach box at that look-ahead
     assert np.array_equal(f.occupied(Xr, Yr, tk) | o, f.occupied(Xr, Yr, tk))
+
+
+def test_rthrow_clips_a_throw_family_until_its_release(monkeypatch):
+    """SSBOT_FORUM_RTHROW (task precision push S2): a family in REACH_KEEP (its templates hold its hazards) is clipped
+    until one frame before the walk's earliest entry into its release state, unclipped from then on; off: never."""
+    monkeypatch.setattr(reach_table, "R_FLOOR", 0.0)
+    monkeypatch.setattr(mfm, "REACH_KEEP", frozenset({(REED, "RE_STAB")}))
+    monkeypatch.setattr(mfm, "THROW_RELEASE", {(REED, "RE_STAB"): frozenset({"Stab 1"})})
+    rc = _clip(MultiForecaster(_tables(), ORACLE, waves=False).half)
+    monkeypatch.setattr(mfm, "reach_clip", lambda half: rc)
+    tk = np.arange(0, 31) * BIN
+    got = {}
+    for on in (False, True):
+        b = MultiForecaster(_tables(), ORACLE, waves=False)
+        b.reach, b.rthrow = True, on
+        _run(b, _script_stab()[:13])                  # f 12: Stab Pos 2 frames in; Stab 1 (the "release") at f 16
+        f = b.forecast(0.8)
+        got[on] = f
+        if not on:
+            assert 7 not in f.clip and f.clip_fam == {}
+            continue
+        W = f.clip[7]
+        kr = int(np.flatnonzero(~np.isfinite(W[:, 0]))[0])
+        assert 1 <= kr <= 4 and np.isfinite(W[:kr]).all()   # the release no earlier than f 16 less the slack
+        assert f.clip_fam == {7: "RE_STAB"}
+        r = f._clip_rows("pm")
+        fam = np.asarray(f.pm["family"])
+        assert (r[fam == "RE_STAB"] == 7).all()
+    o0 = _occ(got[False], tk)[0]
+    o1 = _occ(got[True], tk)[0]
+    assert not (o1 & ~o0).any() and (o0 & ~o1)[:, :4].any() and np.array_equal(o0[:, 6:], o1[:, 6:])
