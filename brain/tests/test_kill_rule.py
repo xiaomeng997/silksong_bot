@@ -549,3 +549,14 @@ def test_kill_hit_events_place_the_killing_hits_effect():
     assert ev[0, 2, 6 - 1] == kin.EV_POGO and ev[1, 2, 9 - 1] == kin.EV_POGO
     assert ev[0, 3, 0] == kin.EV_RECOIL_R                # facing left: recoil to the right
     assert (ev != 0).sum() == 8
+
+
+def test_forum_loadout_tools_leave_the_nail_alone():
+    # R8 (forum.md 17.8): the Forum loadout's Cogwork Flier and Wallcling do not change a nail hit; unlisted, they added
+    # the imbuement and Barbed Wire bounds, and the Wanderer's crit took the nail bound to 48 >= every wave-0 enemy's
+    # HP (the Envoy's 38): the killing-blow rule withheld every swing in YELLOW
+    from ssbot.combat.hero_damage import HeroDamage
+    tools = ["Silk Spear", "Cogwork Flier", None, None, None, "Wallcling", None]
+    assert HeroDamage.from_loadout("Reaper", 1, tools).nail == 9.0
+    assert HeroDamage.from_loadout("Wanderer", 1, tools).nail == 27.0     # the crit x 3 stays
+    assert HeroDamage.from_loadout("Wanderer", 1, tools + ["Barbed Wire"]).nail > 27.0
