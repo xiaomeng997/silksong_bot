@@ -3286,3 +3286,36 @@ Main 70f8324 + `forum-integration-1008` (6dce435) merged first. Facts: forum.md 
    matching; not recomputed.
 6. `hit_log` attributes 43 % of whip chains to another Choristor (policy bookkeeping; not fixed).
 7. Frozen checkout `C:\ssbot\hs_da8d104` can go after review.
+
+## Task forum push 2 track B (support / candidates / locks; branch worktree-wf_c8fb34ca-073-3, 2026-10-08 evening)
+
+Base: main fa43977 + worktree-wf_c8fb34ca-073-1 (0cac216) merged first. Facts: forum.md §26 (Chinese).
+
+### Done (committed)
+
+- Hit source attribution (b2d44cc, oracle backend; no switch: only the Forum policy reads `source_id`): a damage
+  event's source is the instance the path's GameObject name names ("Song Pilgrim 03 (2)/Spin Hit" resolved to no type
+  before), else the owner of the path's collider nearest the hero box, else the nearest body as before.
+- Switches (all off by default; the react tokens go in `SSBOT_FORUM_REACT` / `ForumConfig.react`):
+  - `+b` / `+br` (with `+n`; `ReactConfig.bodyreach`): the body-only families not started (evades, the Clawmaiden's
+    teleport, the Tiny's ram / orbit, the Maestro's defend / summon, the Envoy's ambush; `body_only_families()` from
+    strikes.json) out of the support when the enemy's collider tube (its body seen last, grown at the type's top speed
+    over 5 frames) is placed; the escape check takes them as threats (no wind-up). `+b` keeps the Reed's
+    (`BODYREACH_KEEP`: its body was 31 of the 32 misses), `+br` drops those too.
+  - `+k` (escape): dash / sprint entries are lock-ins of the escape check; the Bind macro is refused while an attack
+    the escape check holds may start and reach the hero in the Bind's lock (`ForumPlanner._bind_threatened`; audit
+    `bind_threat`; with `+n` only: the hole was `+n` taking the not-started attacks out of the support the Bind check
+    reads).
+  - `+s`: FORCED_RISK's seen key tests a polygon >= 15 u/s a frame early and late (`seen_contacts_swept`), and a row
+    meeting an aimed pin (not thrown yet) counts as a seen contact.
+  - `SSBOT_FORUM_WAITS=1` (`ForumConfig.waits`): timing rows, WAIT then a jump / dash either way after 3 / 6 / 9 / 12
+    frames, and the attack first pieces then one press at the Reed's (cont. frame 26) / Minister's (30) counter (the
+    person's timed clash rows for track A); +32 rows ground / air, +24 wall (ground with clash 507).
+- Tools: `forum_human_score --variants rb,rbr` (false / true alarms removed on the person's rows, misses, the escape
+  check's veto under each variant), `forum_layer_audit --variants rb,rbr`, `scripts/forum_human_rescore.cmd best|default
+  <name> ["<variants>"]` (+ `SSBOT_RESCORE_REACT` to replace the arm's react string).
+
+### Running
+
+- (filled in below)
+
