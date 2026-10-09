@@ -3813,3 +3813,46 @@ they stood 11.65 u in front of a Choristor 0.7 s into Whip Antic; never hit.
    cluster members' boxes.
 3. The scans' reference reach (reach60_all.json) uses dev + fresh fights; the clip table is dev only.
 4. A stopped copy of this agent wrote `ssbot/combat/reach_clip.py` (other API, unused); moved out of the tree.
+
+## Task aim ICS (branch worktree-wf_b8c4d3d3-280-3, 2026-10-09; forum.md §30)
+
+The person's method for aimed attacks: an inescapable zone at the decision moment, computed offline per hero
+state and only looked up at run time. Built for the Reed's pin (RE_THROW). Not wired into the planner:
+`multi_forecast.py` is untouched, and integration behind a switch is a later stage.
+
+- `brain/ssbot/tools/aim_ics.py`:
+  - `scan`: per hero state, an event-complete escape library (measurer B's design, two-speed start grid, 42
+    frames, then ballistic), and a numba kernel that tests it against the pin. The pin is the measured one:
+    aim at the hero transform at the Throw Aim entry, fan clamp [-70, +45] deg, spawn offsets, release 24/25
+    frames later, 31 u/s, collider 2.03 x 0.10, swept per frame, sticks at the floor / wall. Worst case over
+    aim error +-0.5 deg, release frame and Reed drift. Hit test with the real HeroBox (0.4554 x 2.2498 at
+    transform (0, -0.38)).
+  - `pack`: writes `knowledge/1.0.30000/enemies/forum/aim_ics_Reed.npz` (54 KB, force-added past the `forum/*.npz` ignore rule because a rebuild takes about 75 min per phase) and a `.json` summary.
+  - Reader: `AimICS().zone(family, state, lat)` and `.inescapable(...)`, `zone(type, ...)`,
+    `hero_state_key(...)`.
+  - Families: `measured` and `person` (release 0.1 s after the decision).
+  - Latencies: 0 (first key at decision + 1) and 2 (the bot reacting to the observed Throw Aim entry).
+  - 38 states: ground (4 + 2 with a wall behind), air (4 heights x rest / rise / fall x dash), air with a wall
+    behind (8).
+  - Tests: `brain/tests/test_aim_ics.py`.
+- Results:
+  - **With the measured timing every state's zone is empty** at latency 0 and 2. The release comes 0.40 s after
+    the decision.
+  - A zone first appears when the first key comes 18-19 frames late (0.32 s), and is about 5.5 u2 at 22 frames.
+  - With the person's 0.1 s timing, their order holds. Areas per fan, lat0: ground 0 < air with dash 0.04-1.3
+    < air without dash 3.2-17. The largest is about 1 u above standing height.
+  - Validation on all 12,405 recorded throws: the geometric model reproduces 2,022 of 2,080 pin hits from the
+    real path. 58 misses: 8 remain with the HeroBox +0.25 u. Every hit outside the (empty) zone is a hero who
+    stood still (567) or moved but stayed in the line (1,455).
+  - The planner's RE_THROW `not_started` support before the decision on the person's sessions is p50 68-77 u2 at
+    k0 and about 300 u2 at k18. The zone says 0.
+- Data, scripts and PNGs: `C:\ssbot\data\m2_forum_aimics`:
+  - `scan/`, `scan_lat/`
+  - `aim_validate.py`, `aim_png.py`, `png/`
+  - `generalise.md` (other aimed attacks: spec only)
+- Open:
+  - Physics phases: only phase 0 is packed. Phase 0.33 ran for 3 states in `scan/`, not packed; rerun `scan` with --phases 0.33 0.67, then `pack`.
+  - Not modelled: the Reed body, the far wall, i-frames / clash.
+  - The 58 geometric misses are not explained.
+  - Generalisation needs per-attack measurement (decision frame and aim target) before the kernel can take a
+    path template.
