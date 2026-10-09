@@ -83,7 +83,7 @@ from ssbot.knowledge.attack_shapes import AttackTable
 from ssbot.knowledge.knockback import knockback_hull
 from ssbot.knowledge.kinematics import (B_ATTACK, B_DASH, B_DOWN, B_JUMP, B_QUICKCAST, B_UP, F_ATTACKING, F_GROUND, F_INVULN,
                                         M_DASH, M_NORMAL, M_RPR_DS, M_SPRINT, HeroParams, HoldState, Terrain2D)
-from ssbot.safety.supervisor import GREEN, YELLOW
+from ssbot.safety.supervisor import DELTA_B_S, GREEN, T_BIND_S, YELLOW
 
 R_UNMOD = 6                       # veto reason: presses a move the model does not have (the dash stab)
 ESC_LOCK_MODES = NO_CONTROL_MODES + (kin.M_RPR_DS, kin.M_DS_ANTIC, kin.M_DS_SPIKE, kin.M_HARD_LAND)
@@ -263,6 +263,22 @@ class ForumConfig:
         return self.escape and self.notstarted
 
     @property
+    def body_reach(self) -> tuple[bool, bool]:
+        """"+b" / "+br" (with "+n"; multi_forecast.ReactConfig.bodyreach): the body-only families not started are out
+        of the support (but BODYREACH_KEEP's types with "+b"), so the escape check takes them as threats (no wind-up:
+        from the check point on). (on, every type)."""
+        toks = self.react.strip().lower().split("+")[1:]
+        return ("b" in toks or "br" in toks) and "n" in toks, "br" in toks
+
+    @property
+    def lock_check(self) -> bool:
+        """"+k" (escape only; task forum push 2 track B, forum.md 24.5 item 4): a dash or a sprint entered is a lock-in
+        the escape check looks at like an attack pressed or a mode without control; the Bind macro is not taken while
+        an attack the escape check holds (one not started, "+n") may start and reach the hero in the Bind's lock
+        (ForumPlanner._bind_threatened)."""
+        return self.escape and "k" in self.react.strip().lower().split("+")[1:]
+
+    @property
     def light_cone(self) -> bool:
         """"+l" (escape only): the escape check also asks that the plan's end has a way out of the committed
         must-escape placements with a known timing past the horizon (ForumPlanner._light_cone_occ, forum.md §23)."""
@@ -318,6 +334,7 @@ class EnvelopeAudit:
     esc_failed: int = 0           # ... it failed the check (every checked row failed: the fewest failures chosen)
     esc_unchecked: int = 0        # ... no row checked before esc_deadline_ms with threats in reach
     esc_carried: int = 0          # ... a carried CONTINUE of such a row
+    bind_threat: int = 0          # Bind macros the support passed and "+k"'s lock check refused (_bind_threatened)
 
     def as_dict(self) -> dict:
         return dict(self.__dict__)
@@ -956,7 +973,8 @@ class ForumPlanner(Planner):
         -> first own damage, the p5 for REACT_EXCEPT): (t_strike, family template id, frames from a commit to its
         first damage less the view's latency, its position, velocity and age). The family template (the logged
         instances' union over the time since their start, coarse) is the attack's reach, wind-up body included."""
-        from ssbot.combat.multi_forecast import REACT_EXCEPT, REACT_LATENCY_S, REACT_THROW_FAMS, strike_table
+        from ssbot.combat.multi_forecast import (BODYREACH_KEEP, REACT_EXCEPT, REACT_LATENCY_S, REACT_THROW_FAMS,
+                                                 body_only_families, strike_table)
         from ssbot.core.worldstate import ORACLE
         mf = getattr(f, "_fc", None)
         if mf is None or not hasattr(mf, "trackers"):
@@ -964,12 +982,19 @@ class ForumPlanner(Planner):
         thrown_out = self.fcfg.notstarted and mf.view == ORACLE
         dt = self.params.frame_time
         lat = REACT_LATENCY_S.get(mf.view, 3 * dt)
-        by_type = getattr(self, "_strike_by_type", None)
+        cached = getattr(self, "_strike_by_type", None)          # (the config it was built for, by type)
+        by_type = cached[1] if cached is not None and cached[0] == self.fcfg.body_reach else None
         if by_type is None:
             by_type = {}
             for (tk, fam), (lo, p5) in strike_table().items():
                 by_type.setdefault(tk, []).append((fam, p5 if fam in REACT_EXCEPT else lo))
-            self._strike_by_type = by_type
+            br, br_all = self.fcfg.body_reach
+            if br:
+                # "+b": the body-only families out of the support strike from their commit on (no wind-up)
+                for tk, fam in sorted(body_only_families()):
+                    if br_all or tk not in BODYREACH_KEEP:
+                        by_type.setdefault(tk, []).append((fam, 0.0))
+            self._strike_by_type = (self.fcfg.body_reach, by_type)
         reach = getattr(self, "_esc_reach", None)
         if reach is None:
             reach = self._esc_reach = {}
@@ -1040,7 +1065,10 @@ class ForumPlanner(Planner):
         L = ESC_MAX_F if lc else int(min(ESC_MAX_F, math.ceil(dmax) + self.fcfg.esc_after_f))
         E = self._esc_cmds(L)
         nE = len(E)
-        lock = np.isin(r1.mode[rows], ESC_LOCK_MODES) | ((r1.flags[rows] & F_ATTACKING) != 0)
+        # "+k": a dash / sprint entered is a lock-in too (forum.md 24.5 item 4: ~30 % of the hits taken with the hero
+        # locked at the attack's start came in Air Dash / Sprint Air)
+        lock = np.isin(r1.mode[rows], ESC_LOCK_MODES + ((kin.M_DASH, kin.M_SPRINT) if self.fcfg.lock_check else ())) \
+            | ((r1.flags[rows] & F_ATTACKING) != 0)
         rise = lock[:, 1:] & ~lock[:, :-1]
         # every lock-in when the not-started attacks are out of the support ("+n"); else the late ones (inside the
         # horizon the delayed support already checks the earlier ones against every start)
@@ -1118,6 +1146,60 @@ class ForumPlanner(Planner):
                     fail[cps[m][0]] += 1
                     labels[cps[m][0]].append("light cone")
         return fail, labels
+
+    # ---- the Bind's lock ("+k", forum.md 24.5 item 4) ----
+
+    def _bind(self, ws, start, hold, prefix, f, ctx):
+        """Planner._bind, and with "+k" and "+n" no attack the escape check holds (not started, so not in the
+        support) may start and reach the hero while the Bind locks it (_bind_threatened): 21 masks were taken in
+        BindCharge / BindBurst with the attack starting in the Bind (forum.md 24.3)."""
+        ok, box = super()._bind(ws, start, hold, prefix, f, ctx)
+        if ok and self.fcfg.lock_check and self.fcfg.notstarted:
+            hero = (0.0, 0.0) if ws is None or ws.hero is None else (float(ws.hero.pos.v[0]), float(ws.hero.pos.v[1]))
+            if self._bind_threatened(f, box, len(prefix), hero):
+                self.audit.bind_threat += 1
+                return False, box
+        return ok, box
+
+    def _bind_threatened(self, f, box: np.ndarray, P: int, hero: tuple[float, float], step: int = 2,
+                         free_f: int = 6) -> bool:
+        """box [P + T + 1, 4]: the Bind macro's rollout (prefix P frames, then the Bind). True when an escape-check
+        threat (_threats) starting at any frame from now to the Bind's end (every `step` frames, from its earliest
+        start) puts the hero's box centre in its family template before the hero is free again: the Bind's end
+        (P + T_BIND_S + DELTA_B_S) plus free_f frames to get out. Both facings, the enemy dead-reckoned to the
+        start (the escape check's placement)."""
+        from ssbot.combat.enemy_tables import WinBatch
+        mf = getattr(f, "_fc", None)
+        if mf is None or not hasattr(mf, "tables"):
+            return False
+        threats = self._threats(f, hero)
+        if not threats:
+            return False
+        dt = self.params.frame_time
+        k_end = min(len(box) - 1, P + int(math.ceil((T_BIND_S + DELTA_B_S) / dt)) + free_f)
+        cx = 0.5 * (box[:k_end + 1, 0] + box[:k_end + 1, 2])
+        cy = 0.5 * (box[:k_end + 1, 1] + box[:k_end + 1, 3])
+        store = mf.tables.store
+        ks = np.arange(0, k_end, step)
+        L = k_end
+        j = np.arange(L + 1)
+        idx = ks[:, None] + j[None, :]
+        live = idx <= k_end
+        idx = np.minimum(idx, k_end)
+        for t_strike, ftid, d_f, pos, vel, age, lat, label in threats:
+            app = ks * dt >= t_strike - dt
+            if not app.any():
+                continue
+            s_ = ks[app] * dt
+            ax = pos[0] + vel[0] * (age + s_)
+            ay = pos[1] + vel[1] * (age + s_)
+            x = np.where(live[app], cx[idx[app]] - ax[:, None], np.nan)
+            y = np.where(live[app], cy[idx[app]] - ay[:, None], np.nan)
+            W = WinBatch(np.array([ftid, ftid], np.int64), np.array([-lat, -lat]), np.zeros(2), np.zeros(2),
+                         np.zeros(2), np.array([1, -1], np.int64))
+            if store.query_win(W, x, y, j * dt).any():
+                return True
+        return False
 
     # ---- the aimed pins (pin_aim, forum.md §23.7) ----
 

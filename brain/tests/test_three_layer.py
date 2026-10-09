@@ -334,3 +334,63 @@ def test_planned_safe_counts_the_hits_a_safe_plan_did_not_avoid():
     assert p["hits"] == 2 and p["12"] == 1 and p["24"] == 1 and p["30"] == 1 and p["unknown_30"] == 1
     assert p["esc_12"] == 1 and p["pin_12"] == 1 and p["any30"] == 2 and p["clash30"] == 1
     assert p["by_src"] == {"a": 1, "b": 1}
+
+
+@pytest.fixture
+def body_only(monkeypatch):
+    """The test Reed's stab as a body-only family (no strike time), its defence a strike."""
+    monkeypatch.setattr(mfm, "_STRIKE_TAB", {(REED, "RE_DEFEND"): (0.6, 0.62)})
+    monkeypatch.setattr(mfm, "body_only_families", lambda path=None: frozenset({(REED, "RE_STAB")}))
+
+
+def test_parse_body_reach_and_lock_check():
+    assert ReactConfig.parse("escape+n+g+b").bodyreach and not ReactConfig.parse("escape+n+b").bodyreach_all
+    assert ReactConfig.parse("escape+n+br").bodyreach_all and ReactConfig.parse("escape+n+k") == \
+        ReactConfig.parse("escape+n")
+    with pytest.raises(ValueError):
+        ReactConfig.parse("escape+b")                     # needs +n
+    assert ForumConfig(react="escape+n+b").body_reach == (True, False)
+    assert ForumConfig(react="escape+n+br").body_reach == (True, True)
+    assert ForumConfig(react="escape+n").body_reach == (False, False)
+    assert ForumConfig(react="escape+n+k").lock_check and not ForumConfig(react="delay+n+k").lock_check
+
+
+def test_body_reach_leaves_body_only_families_to_the_tube(body_only):
+    """+b / +br: a body-only family not started is not placed when the collider tube holds its reaction window (the
+    Reed's only with +br, BODYREACH_KEEP); +n alone keeps it; an enemy not seen lately keeps it (no tube)."""
+    def later(rc, frames=2, origin=None):
+        mf = MultiForecaster(_tables(), ORACLE, waves=False)
+        _idle_reed(mf, frames)
+        mf.react = rc
+        f = mf.forecast(0.8) if origin is None else mf.forecast(0.8, origin_t=origin)
+        return {fam for fam, c in zip(f.bb["family"], f.bb["committed"]) if not c}, f
+    fams, _ = later(ReactConfig(notstarted=True))
+    assert "RE_STAB" in fams and "RE_DEFEND" not in fams
+    fams, _ = later(ReactConfig(notstarted=True, bodyreach=True))
+    assert "RE_STAB" in fams                            # the Reed's body is kept with +b
+    fams, f = later(ReactConfig(notstarted=True, bodyreach=True, bodyreach_all=True))
+    assert "RE_STAB" not in fams and any(b[1] == "collider" for b in f.boxes)
+    fams, _ = later(ReactConfig(notstarted=True, bodyreach=True, bodyreach_all=True), origin=0.6 + 2 * BIN)
+    assert "RE_STAB" in fams                            # last seen 0.6 s ago: no collider tube, kept
+
+
+def test_body_reach_threats_and_the_bind_lock(params, arena, body_only):
+    """The escape check takes "+br"'s body-only families as threats (no wind-up); "+k": a Bind is threatened when an
+    attack not started may start and reach the hero during the Bind's lock, not when the hero is far."""
+    from tests.test_forum_planner import _reed_forecaster
+    mf = _reed_forecaster(None, frames=3, x=25.0)
+    mf.react = ReactConfig.parse("escape+n+br")
+    pl = ForumPlanner(params, arena, PlannerConfig(T=36, threads=2, variants="bounds_lo"),
+                      ForumConfig(deadline_ms=math.inf, react="escape+n+br+k"))
+    f = mf.forecast(2.0)
+    th = {t[-1]: t for t in pl._threats(f, (24.0, 5.0))}
+    assert f"{REED}/RE_STAB" in th and th[f"{REED}/RE_STAB"][2] == 1.0
+    pl.fcfg.react = "escape+n"
+    assert f"{REED}/RE_STAB" not in {t[-1] for t in pl._threats(f, (24.0, 5.0))}
+    pl.fcfg.react = "escape+n+br+k"
+
+    def stand(x):
+        b = np.array([x - 0.3, 4.0, x + 0.3, 6.0])
+        return np.tile(b, (101, 1))
+    assert pl._bind_threatened(f, stand(23.0), 1, (23.0, 5.0))
+    assert not pl._bind_threatened(f, stand(4.0), 1, (4.0, 5.0))

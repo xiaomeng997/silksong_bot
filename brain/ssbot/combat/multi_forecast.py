@@ -123,6 +123,13 @@ REACT_THROW_FAMS = frozenset((tk, fam) for tk, sp in FORUM_TYPES.items() for hz,
 # keep the throw's templates (every bell ever thrown, the support as before "+n"); the Reed's pin is the planner's
 # aimed check from its wind-up on (ForumConfig.pin_aim, on with "+n")
 REACT_KEEP_UNTIL_THROWN = {("Pilgrim 03 Song", "CB_THROW"): frozenset(("Throw Evade", "Roof Avoid", "Throw Antic"))}
+# ReactConfig.bodyreach ("+b"; task forum push 2 track B, the person's wins under the planner, forum.md 25.8 fix 1): the
+# body-only families (no own attack collider: evades, the Clawmaiden's teleport, the Tiny's ram / orbit, the Maestro's
+# defend / summon, the Envoy's ambush) not started are left out like the strikes of "+n": the current-collider tube
+# (the body seen last, grown at the type's top speed over COLLIDER_TUBE_S) is their reach over the reaction window,
+# the escape check holds their later starts. The Reed's are kept (its body was 31 of the 32 misses, forum.md 25.11)
+# unless "+br"
+BODYREACH_KEEP = frozenset({"Song Reed"})
 
 
 @dataclass(frozen=True)
@@ -146,29 +153,54 @@ class ReactConfig:
     hold       ("+g") the idle body tube grows by the type's idle growth over the reaction window (REACT_HOLD_S) only,
                then keeps that size while it moves along its velocity: an enemy that is not attacking does not come
                to the hero (the person's note 5 of 2026-10-08: 152 Envoy body hits, none in its walk); a start or a
-               dash shows within the window and the next ticks see it (the R2 recall checks 2-4 frames: unchanged)."""
+               dash shows within the window and the next ticks see it (the R2 recall checks 2-4 frames: unchanged);
+    bodyreach  ("+b", with "+n") the body-only families not started out of the support as well (BODYREACH_KEEP's types
+               kept; "+br": none kept) when the enemy's current-collider tube holds its reaction-window reach (seen
+               within TUBE_MAX_AGE_S); the planner's escape check takes them as threats."""
     strikes: bool = True
     committed: bool = False
     idle: bool = False
     exceptions: str = "keep"
     notstarted: bool = False
     hold: bool = False
+    bodyreach: bool = False
+    bodyreach_all: bool = False
 
     @classmethod
     def parse(cls, s: str | None) -> "ReactConfig | None":
         """'off' / '' -> None; 'delay' (or 'escape': the planner's layer over the same support) with '+'-joined
-        extensions c (committed), i (idle), p5 (exceptions), n (not-started out), g (idle growth held); l (the
-        planner's light cone in its escape check, ForumConfig.light_cone) and a (the planner's aimed pins,
-        ForumConfig.pin_aim): no change to the support."""
+        extensions c (committed), i (idle), p5 (exceptions), n (not-started out), g (idle growth held), b / br (body-
+        only families not started out, with n); l (the planner's light cone in its escape check,
+        ForumConfig.light_cone), a (the planner's aimed pins, ForumConfig.pin_aim) and k (the planner's lock checks,
+        ForumConfig.lock_check): no change to the support."""
         toks = [t for t in (s or "").strip().lower().split("+") if t]
         if not toks or toks[0] == "off":
             return None
         if toks[0] not in ("delay", "escape"):
-            raise ValueError(f"reactive support {s!r}: off | delay | escape [+c][+i][+p5][+n][+g][+l][+a]")
-        bad = set(toks[1:]) - {"c", "i", "p5", "n", "g", "l", "a"}
+            raise ValueError(f"reactive support {s!r}: off | delay | escape [+c][+i][+p5][+n][+g][+b|+br][+l][+a][+k]")
+        bad = set(toks[1:]) - {"c", "i", "p5", "n", "g", "l", "a", "b", "br", "k"}
         if bad:
             raise ValueError(f"reactive support {s!r}: unknown extension(s) {sorted(bad)}")
-        return cls(True, "c" in toks, "i" in toks, "p5" if "p5" in toks else "keep", "n" in toks, "g" in toks)
+        if ("b" in toks or "br" in toks) and "n" not in toks:
+            raise ValueError(f"reactive support {s!r}: +b / +br need +n")
+        return cls(True, "c" in toks, "i" in toks, "p5" if "p5" in toks else "keep", "n" in toks, "g" in toks,
+                   "b" in toks or "br" in toks, "br" in toks)
+
+
+def body_only_families(path=None) -> frozenset:
+    """{(type key, family)} of the body-only families (strikes.json: logged instances, none with an own attack
+    collider or a thrown hazard), not the types' idle / entry families."""
+    p = path or FORUM_DIR / "strikes.json"
+    out = set()
+    if p.exists():
+        for key, v in json.loads(p.read_text("utf-8")).get("strikes", {}).items():
+            tk, fam = key.split("/", 1)
+            sp = FORUM_TYPES.get(tk)
+            if sp is None or fam in (sp.idle_family, sp.entry_family):
+                continue
+            if not int(v.get("instances_with_attack_colliders") or 0) and int(v.get("instances_without") or 0):
+                out.add((tk, fam))
+    return frozenset(out)
 
 
 _STRIKE_TAB: dict | None = None
@@ -821,6 +853,7 @@ class _Builder:
         self.react_box: dict = {}            # iid -> (cx, cy, hx, hy): a hit reaction's anchor box (forecast_reaction)
         self.react = fc.react                # reactive support (ReactConfig) or None
         self.delays = strike_delays(fc.react) if fc.react is not None else {}
+        self.body_only = body_only_families() if fc.react is not None and fc.react.bodyreach else frozenset()
         self.lat = REACT_LATENCY_S.get(fc.view, 3 * BIN)
 
     # ---- placements ----
@@ -1064,6 +1097,10 @@ class _Builder:
         t_strike = math.inf
         rc = self.react
         ns = strike_table() if rc is not None and rc.notstarted else None
+        # (the collider tube below exists: seen lately, a box or a hull at its position, not waiting for its wave)
+        body_reach = (ns is not None and rc.bodyreach and (rc.bodyreach_all or tt.tk not in BODYREACH_KEEP)
+                      and self.fc.collider_tube and T - tr.seen_T <= TUBE_MAX_AGE_S and wake is None
+                      and (tr.seen_box is not None or (tr.pos is not None and tt.tk in tubes.hull)))
         for nd in roots:
             lo, hi = max(ref + nd.lo - T, BIN), max(ref + nd.hi - T, BIN)
             if lo > H + BIN:
@@ -1075,6 +1112,9 @@ class _Builder:
             if ns is not None and nd.family != sp.entry_family and (nd.family == sp.idle_family
                                                                     or (tt.tk, nd.family) in ns):
                 continue                              # reactive support, not started: the escape check holds it
+            if body_reach and nd.family != sp.idle_family and (tt.tk, nd.family) in self.body_only:
+                continue                              # "+b": the collider tube holds its reaction window, the escape
+                #                                       check its later starts
             fid = self.fc.family_walk_id(tt, nd.family, nd.start, "anchor")
             if fid is not None:
                 d = self.delays.get((tt.tk, nd.family)) if rc is not None and rc.strikes else None
