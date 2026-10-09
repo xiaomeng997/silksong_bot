@@ -80,6 +80,7 @@ REASONS = {0: "", R_ALLOW: "supervisor allowlist", R_SILK: "silk reserve", R_BIN
            R_DOWN: "down-slash over a hazard", R_KILL: "uncertified killing blow"}
 KILL_WINDOW_S = 0.17        # game s from the killing hit to the first pausable frame (measured max 0.167 s)
 KILL_MARGIN_S = 0.15        # the support "empty for the freeze plus margin"
+FREE_KILL_MAX_S = 0.5      # free mode (h >= 2) may enter a kill slow motion uncertified only up to this long
 LANE_SLACK_F = 4            # attack onsets of the other timing lanes around the nominal one
 QUEUE_F = 10                # a press that cannot act waits in the attack queue (attack_queue_steps 8 at 50 Hz) + 1
 HIT_END_F = (6, 8, 16, 20)  # a hit lands at most this many frames after the onset: side, up, down spike, Silkspear
@@ -182,8 +183,12 @@ def hazard_flags(kb_hull: np.ndarray | None, kb_flags: np.ndarray | None, ctx: F
 
 def i3_kill_allowed(ctx: FilterContext) -> bool:
     """I3 lets the hero enter the boss-death slow motion uncertified: GREEN, full HP and h >= 3; or the supervisor's
-    free mode (FilterContext.free: h >= 2, one more event cannot kill; the DESIGN 3.5.6 revision of 2026-10-08)."""
-    if getattr(ctx, "free", False) and ctx.h is not None and ctx.h >= 2:
+    free mode (FilterContext.free: h >= 2, one more event cannot kill; the DESIGN 3.5.6 revision of 2026-10-08) for a
+    kill whose slow motion is short (kill_window_s <= FREE_KILL_MAX_S). A long one (the Forum's final blow:
+    EnemyBattleEndSlow / BigEnemyDeathSlow, 1.85-2.47 s with no pause while the dying enemy's body, a rune slam, bells
+    and the other enemies still hurt) keeps the I3 rule (review of forum push 2, task "zone fix" item 4)."""
+    if getattr(ctx, "free", False) and ctx.h is not None and ctx.h >= 2 \
+            and getattr(ctx, "kill_window_s", KILL_WINDOW_S) <= FREE_KILL_MAX_S:
         return True
     return ctx.tier == GREEN and ctx.max_hp > 0 and ctx.hp >= ctx.max_hp and ctx.h is not None and ctx.h >= 3
 

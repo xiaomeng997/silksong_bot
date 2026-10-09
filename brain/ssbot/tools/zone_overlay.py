@@ -80,11 +80,20 @@ FORCE_RED_TYPES = frozenset({"Song Heavy Sentry"})       # the Clapper: no move 
 CLASH_BITS = 1 | 2                                        # ipc.ents PARRY_BITS clash | force
 PARKED_STATES = r"Ready|Dormant|Sleep|Wait"                # with no render: a member parked before its entry
 FREEZE_SCALE = 1e-4
+SHORT_NAMES = {"Song Reed": "Reed", "Song Pilgrim 01": "Envoy", "Song Administrator": "Minister",
+               "Song Pilgrim 03": "Choristor", "Song Handmaiden": "Clawmaiden", "Pilgrim 03 Song": "Bellbearer",
+               "Song Heavy Sentry": "Clapper", "Song Automaton Tiny": "Tiny", "Song Pilgrim Maestro": "Maestro"}
+CERTAIN_P = 0.999                 # yellow: only the placements of branches the walk takes for sure
+LOCK_LAT = {0: LAT_F, 1: LAT_F + 6, 2: LAT_F + 6, 3: LAT_F}   # not-started yellow: free / attack / dash / air
+NS_U = 24.0                       # the not-started lower bound's half width (u) around the anchor
+# a distinct colour per enemy (BGR) for its outlines, by name order
+ENEMY_COLORS = ((255, 120, 60), (60, 200, 255), (120, 255, 120), (255, 90, 220), (90, 140, 255), (255, 255, 90),
+                (180, 120, 255), (60, 255, 200), (200, 200, 255), (255, 170, 170))
 # the round-5 recommended configuration (forum.md, the lead 2026-10-08); the environment wins
 DEFAULT_ENV = {"SSBOT_FORUM_FR": "seen_cf", "SSBOT_FORUM_REACT": "escape+n+g", "SSBOT_FORUM_MARGIN": "state",
-               "SSBOT_FORUM_KF": "kill"}
+               "SSBOT_FORUM_KF": "kill", "SSBOT_FORUM_AIM": "1"}
 DEFAULT_CLASH = "main"
-SWITCHES = ("FR", "REACT", "MARGIN", "KF", "PC", "TV", "T", "BELLS", "L2", "AB")
+SWITCHES = ("FR", "REACT", "MARGIN", "KF", "AIM", "PARK", "PC", "TV", "T", "BELLS", "L2", "AB")
 
 LAYERS = ("body", "committed", "window", "not_started", "hazard", "death", "margins")
 LAYER_OF = {"body": "body", "collider": "body", "idle_now": "body", "idle": "body",
@@ -151,14 +160,20 @@ def scene_of(s: dict) -> str | None:
 
 # ------------------------------------------------------------------------------------------------ colliders (red)
 
+def parked(e: dict) -> bool:
+    """A later wave's member parked off-stage before its entry (e.g. a Reed in "Fly In Ready": not rendered, its body
+    collider reported enabled, but the hero overlapped it for 136 frames of 20261008_230220 with no damage)."""
+    if e.get("render_aabb") is not None:
+        return False
+    return any(re.search(PARKED_STATES, str(f.get("state") or "")) for f in e.get("fsms") or ())
+
+
 def damage_colliders(s: dict):
-    """[(poly [n, 2], clashable, label, entity velocity)] of every enabled collider with damage dealt > 0."""
+    """[(poly [n, 2], clashable, label, entity velocity, owner iid)] of every enabled collider with damage dealt > 0
+    (parked entities skipped)."""
     out = []
     for e in s.get("ents") or ():
-        # a later wave's member parked off-stage before its entry (e.g. a Reed in "Fly In Ready": not rendered, its body
-        # collider reported enabled, but the hero overlapped it for 136 frames of 20261008_230220 with no damage)
-        sts = [str(f.get("state") or "") for f in e.get("fsms") or ()]
-        if e.get("render_aabb") is None and any(re.search(PARKED_STATES, st) for st in sts):
+        if parked(e):
             continue
         tk = str(e.get("type_key") or e.get("name") or "")
         vel = e.get("vel") or (0.0, 0.0)
@@ -169,7 +184,7 @@ def damage_colliders(s: dict):
                 continue
             clash = bool(int(d.get("parry") or 0) & CLASH_BITS) and tk not in FORCE_RED_TYPES
             out.append((np.asarray(v, np.float64).reshape(-1, 2), clash, f"{tk}/{c.get('name')}",
-                        (float(vel[0]), float(vel[1]))))
+                        (float(vel[0]), float(vel[1])), int(e.get("iid") or -1)))
     return out
 
 
@@ -183,18 +198,23 @@ def sweep_hull(poly: np.ndarray, vel, frames: int = SWEEP_F) -> np.ndarray:
 
 # ------------------------------------------------------------------------------------------------ erosion (yellow)
 
-def erode_back(D: np.ndarray, ax: int, up: int, dn: int, lat: int = LAT_F) -> np.ndarray:
+def erode_back(D: np.ndarray, ax: int, up: int, dn: int, lat: int = LAT_F, solid: np.ndarray | None = None,
+               walls: bool = True) -> np.ndarray:
     """D [K+1, ny, nx] bool (row 0 = the lowest hero centre, standing) -> Z [K+1, ny, nx]: Z_K = D_K;
     Z_k = D_k | erode(Z_k+1) for k >= lat (a cell is doomed when every one-frame move, dx in [-ax, ax] cells,
     dy in [-dn, up] cells, lands in a doomed cell); Z_k = D_k | Z_k+1 below lat (the hero has not reacted). The floor
-    (below row 0) and the walls (left of column 0, right of the last) are solid, i.e. doomed; above is free."""
+    (below row 0), the walls (left of column 0, right of the last; walls=False: open) and `solid` [ny, nx] (the sky
+    above the dome) are solid, i.e. doomed (no escape into them; the caller masks them out); above is free."""
     import cv2
     K1, ny, nx = D.shape
     p = max(ax, up, dn) + 1
     S = np.zeros((ny + 2 * p, nx + 2 * p), np.uint8)
     S[:p, :] = 1
-    S[:, :p] = 1
-    S[:, -p:] = 1
+    if walls:
+        S[:, :p] = 1
+        S[:, -p:] = 1
+    if solid is not None:
+        S[p:p + ny, p:p + nx] |= solid.astype(np.uint8)
     kern = np.ones((up + dn + 1, 2 * ax + 1), np.uint8)
     Z = np.zeros((K1, ny, nx), bool)
     cur = S.copy()
@@ -232,6 +252,11 @@ class Grid:
         GX, GY = np.meshgrid(self.xs, self.ys)
         self.gx = np.ascontiguousarray(GX.reshape(-1, 1))
         self.gy = np.ascontiguousarray(GY.reshape(-1, 1))
+        # the hero centres inside the arena: the hurtbox's top under the dome (core.forum.DOME, the roof colliders);
+        # above it is the sky (solid for the escape, never drawn)
+        from ssbot.core.forum import dome_y
+        top = np.array([dome_y(float(x)) for x in self.xs]) - hb.HERO_HALF_U[1]
+        self.inside = self.ys[:, None] <= top[None, :]
 
     @property
     def shape(self) -> tuple[int, int]:
@@ -268,6 +293,9 @@ class ZoneEngine:
                       int(math.ceil(p.max_fall * FT / cell)))
         self.running = False
         self.ws = None
+        self.names: dict[int, str] = {}
+        self.counts: dict[str, int] = {}
+        self._lb: dict = {}
         self.raw: dict | None = None
         self.fcast = None
         self.f_fed = None
@@ -283,6 +311,7 @@ class ZoneEngine:
         self.pol.reset(random.Random(0), ENCOUNTERS["Forum"])
         self.running = True
         self.ws = self.raw = self.fcast = None
+        self.names, self.counts = {}, {}
 
     def feed(self, s: dict) -> bool:
         """One game-frame STATE (frames numbered consecutively): the forecast-only part of ForumPlannerPolicy.act."""
@@ -293,6 +322,7 @@ class ZoneEngine:
             del pol.raw[old]
         self.raw = s
         self.f_fed = f
+        self._names_of(s)
         ws = pol.backend.feed(s)
         if ws is None:
             return False
@@ -305,6 +335,25 @@ class ZoneEngine:
         pol.fc.update(ws)
         self.ws = ws
         return True
+
+    def _names_of(self, s: dict) -> None:
+        """Stable short names: the type's short name + a number in order of first appearance in play ('Reed 1')."""
+        from ssbot.core.forum import FORUM_TYPES
+        for e in s.get("ents") or ():
+            tk = str(e.get("type_key") or "")
+            iid = e.get("iid")
+            if iid is None or tk not in FORUM_TYPES or int(iid) in self.names or parked(e):
+                continue
+            short = SHORT_NAMES.get(tk, tk.split()[-1])
+            self.counts[short] = self.counts.get(short, 0) + 1
+            self.names[int(iid)] = f"{short} {self.counts[short]}"
+
+    def name(self, iid: int) -> str:
+        return self.names.get(int(iid), f"#{iid}")
+
+    def state_of(self, iid: int) -> str | None:
+        tr = self.pol.fc.trackers.get(iid)
+        return tr.state if tr is not None else None
 
     def forecast(self):
         from ssbot.train.planner_policy import HORIZON_S
@@ -331,7 +380,7 @@ class ZoneEngine:
         for key, o in occ.items():
             lay = LAYER_OF.get(key[0], "death")
             for j, k in enumerate(ks):
-                m = o[:, j].reshape(g.shape)
+                m = o[:, j].reshape(g.shape) & g.inside
                 out[k][lay] = out[k][lay] | m if lay in out[k] else m
             tot |= o
         if self.vs is not None:
@@ -361,6 +410,43 @@ class ZoneEngine:
         return bool(fl["onGround"]), bool(fl["dashing"] or fl["airDashing"]), bool(fl["attacking"]), \
             int(h.get("facing") or 0)
 
+    @staticmethod
+    def aim_families() -> set:
+        """(type key, family) of the aimed families (tools.forum_aim; loaded with SSBOT_FORUM_AIM)."""
+        from ssbot.combat.enemy_tracker import AIM_STATES
+        return set(AIM_STATES)
+
+    def _ns_lb(self, fam: str, lat: int, a_h: float) -> np.ndarray | None:
+        """The commit-now inescapable zone's LOWER bound of one family ([ny, 2 NS_U / cell + 1] on the grid's rows,
+        columns u = (x - anchor x) x mirror from -NS_U): the family template (the planner's coarse base, hero-centre
+        space) placed with its start now at an anchor a_h above the floor, eroded back with the one-frame reach box,
+        the floor solid, no walls (cached per family, latency, anchor height to 0.5 u)."""
+        from ssbot.core.forum import FLOOR_Y
+        key = (fam, lat, round(a_h * 2.0) / 2.0)
+        if key in self._lb:
+            return self._lb[key]
+        tables = self.pol.fc.tables
+        tid = tables.key_id(fam, None, "anchor")
+        out = None
+        if tid is not None:
+            t = tables.template(tid)
+            g = self.grid
+            us = np.arange(-NS_U, NS_U + 1e-9, g.cell)
+            ix = np.floor(us / t.cell).astype(np.int64) - t.ix0
+            iy = np.floor((g.ys - FLOOR_Y - key[2]) / t.cell).astype(np.int64) - t.iy0
+            okx, oky = (ix >= 0) & (ix < t.nx), (iy >= 0) & (iy < t.ny)
+            D = np.zeros((YELLOW_F + 1, g.ny, len(us)), bool)
+            if okx.any() and oky.any():
+                for k in range(YELLOW_F + 1):
+                    b = int(round((k * FT - t.t0) / t.bin_s))
+                    if 0 <= b < t.nt:
+                        D[k][np.ix_(oky, okx)] = t.plane(b)[np.ix_(iy[oky], ix[okx])]
+            nz = np.flatnonzero(D.reshape(len(D), -1).any(axis=1))
+            if len(nz):
+                out = erode_back(D[:nz[-1] + 1], *self.reach, lat=lat, walls=False)[0]
+        self._lb[key] = out
+        return out
+
     def yellow(self, ks, fcast=None) -> tuple[dict, dict, dict]:
         """({k: committed-attack zone}, {k: not-started zone}, info) on the hero-centre grid."""
         from ssbot.core.forum import FLOOR_Y, FORUM_TYPES
@@ -368,12 +454,19 @@ class ZoneEngine:
         g = self.grid
         com = {k: np.zeros(g.shape, bool) for k in ks}
         ns = {k: np.zeros(g.shape, bool) for k in ks}
-        info = {"committed": [], "not_started": []}
+        info = {"committed": [], "not_started": [], "ycom_by": {k: {} for k in ks}, "yns_by": {k: {} for k in ks}}
         if fcast is None:
             return com, ns, info
         pm = fcast.pm
-        owner = np.asarray(pm["owner"]) if len(pm["owner"]) else np.zeros(0, np.int64)
-        commit = np.asarray(pm["committed"], bool) if len(pm["owner"]) else np.zeros(0, bool)
+        n = len(pm["owner"])
+        owner = np.asarray(pm["owner"]) if n else np.zeros(0, np.int64)
+        commit = np.asarray(pm["committed"], bool) if n else np.zeros(0, bool)
+        # only the branches the walk takes for sure: a cell is inescapable when every branch dooms it, and a union of
+        # branches (or of the recorded instances of an aimed attack) is not that
+        certain = np.asarray(pm["prob"], np.float64) >= CERTAIN_P if n else np.zeros(0, bool)
+        fams = np.asarray(pm["family"], object) if n else np.zeros(0, object)
+        aimed = self.aim_families()
+        mf = self.pol.fc
         K = YELLOW_F
         tkK = np.arange(K + 1, dtype=np.float64) * FT
         GX = GY = None
@@ -381,7 +474,13 @@ class ZoneEngine:
         for s in fcast.subjects:
             if not s.alive or not s.committed:
                 continue
-            sel = (owner == s.iid) & commit
+            sel = (owner == s.iid) & commit & certain
+            tr = mf.trackers.get(s.iid)
+            cur = tr.cur if tr is not None else None
+            if cur is not None and (s.type_key, cur.family) in aimed and cur.aim_anchor is None:
+                # an aimed family before its aim state: where it strikes follows the hero, nothing is certain yet (the
+                # planner keeps the family's union; its body is red)
+                sel &= fams != cur.family
             if not sel.any():
                 continue
             if GX is None:
@@ -392,17 +491,15 @@ class ZoneEngine:
                 continue
             D = occ.T.reshape(K + 1, *g.shape)
             last = int(np.flatnonzero(D.reshape(K + 1, -1).any(axis=1)).max())
-            Z = erode_back(D[:last + 1], ax_, up, dn)
+            Z = erode_back(D[:last + 1], ax_, up, dn, solid=~g.inside)
             for k in ks:
                 if k <= last:
-                    com[k] |= Z[k]
+                    z = Z[k] & g.inside
+                    com[k] |= z
+                    info["ycom_by"][k][s.iid] = z
             info["committed"].append([s.iid, s.type_key, s.family, last])
-        if self.zones is None:
-            return com, ns, info
         hc = self.hero()
         ground, dashing, attacking, facing = self.lock()
-        mf = self.pol.fc
-        hrel = (g.gy[:, 0] - g.y0)
         for s in fcast.subjects:
             if not (s.alive and s.in_play) or s.committed or not math.isfinite(s.t_strike):
                 continue
@@ -410,6 +507,10 @@ class ZoneEngine:
             sp = FORUM_TYPES.get(s.type_key)
             if tr is None or tr.pos is None or sp is None:
                 continue
+            # the commit-now lower bound of every attack family it can start (the aimed ones excluded: where they
+            # strike follows the hero); its thrown hazards (bells, pins, runes) are the hazard layer's, not here
+            fl = sorted(set(tr.table.attack_starts.values()) - {sp.idle_family, sp.entry_family}
+                        - {f for t_, f in aimed if t_ == s.type_key})
             age = fcast.origin_t - tr.seen_T
             shown = False
             for k in ks:
@@ -422,13 +523,20 @@ class ZoneEngine:
                 ay = tr.pos[1] + tr.vel[1] * (age + t)
                 toward = hc is not None and facing != 0 and np.sign(ax - hc[0]) == facing
                 code = 3 if not ground else 2 if (dashing and toward) else 1 if attacking else 0
-                dx = g.gx[:, 0] - ax
-                lock = np.where(hrel > 0.25, 3, code).astype(np.int64)
-                m = np.abs(dx) < 45.0
-                z = np.zeros(len(dx), bool)
-                z[m] = self.zones.occ(s.type_key, sp.idle_family, sp.entry_family, float(ay - FLOOR_Y), dx[m],
-                                      hrel[m], lock[m])
-                ns[k] |= z.reshape(g.shape)
+                mir = 1 if hc is None or hc[0] >= ax else -1      # the attack faces the hero at its commit
+                col = np.rint(((g.xs - ax) * mir + NS_U) / g.cell).astype(np.int64)
+                z = np.zeros(g.shape, bool)
+                for fam in fl:
+                    lb = self._ns_lb(fam, LOCK_LAT[code], float(ay - FLOOR_Y))
+                    if lb is None:
+                        continue
+                    ok = (col >= 0) & (col < lb.shape[1])
+                    z[:, ok] |= lb[:, col[ok]]
+                z &= g.inside
+                if not z.any():
+                    continue
+                ns[k] |= z
+                info["yns_by"][k][s.iid] = z
                 shown = True
             if shown:
                 info["not_started"].append([s.iid, s.type_key, round(float(s.t_strike), 3)])
@@ -445,7 +553,9 @@ class ZoneEngine:
         t3 = time.perf_counter()
         s = self.raw or {}
         return {"f": s.get("f"), "f_raw": s.get("_f_raw", s.get("f")), "hero": self.hero(), "ks": tuple(ks),
-                "support": sup, "ycom": com, "yns": ns, "info": info, "cols": damage_colliders(s),
+                "support": sup, "ycom": com, "yns": ns, "ycom_by": info.pop("ycom_by", {}),
+                "yns_by": info.pop("yns_by", {}), "info": info, "cols": damage_colliders(s),
+                "names": dict(self.names), "states": {i: self.state_of(i) for i in self.names},
                 "cam": s.get("cam"), "running": fc is not None,
                 "ms": {"forecast": round((t1 - t0) * 1e3, 1), "support": round((t2 - t1) * 1e3, 1),
                        "yellow": round((t3 - t2) * 1e3, 1)}}
@@ -565,7 +675,7 @@ def render(fr: dict, grid: Grid, out_size: tuple[int, int], view: View, legend: 
                     cv2.polylines(img, pl, True, (*dark, 255), th, cv2.LINE_AA)
         if view.show("red"):
             th = max(1, int(round(1.5 * H / 1080)))
-            for poly, clash, _, vel in fr.get("cols") or ():
+            for poly, clash, _, vel, *_ in fr.get("cols") or ():
                 if clash:
                     continue
                 hull = sweep_hull(poly, vel)

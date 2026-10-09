@@ -36,6 +36,9 @@ from ssbot.core.worldstate import ORACLE, Entity, Ev, WorldState
 FACES_LEFT = (-1, 1)              # flipX False faces -x: mirror -1 (ssbot.knowledge.gauntlet_tables.FACES_LEFT)
 TAIL_KEEP_S = 7.0                 # tail_max_s (6 s) + 1 s
 HIT_BODY = os.environ.get("SSBOT_FORUM_HITBODY", "1") != "0"   # 0: the R4 hit targets (every collider, A/B)
+# (type key, family) -> its aim state (tools.forum_aim), filled by EnemyTables when SSBOT_FORUM_AIM loads the aim
+# templates; empty: no instance is ever aimed
+AIM_STATES: dict = {}
 # Damage per hit by the attacking object (HitDealt.src, else .attack) in the Forum loadout (fo_A: Reaper, needle 1;
 # forum.md §9.2: Hornet's nail 9, Silk Spear 27, Garmond 5, Cogfly 3-4, a redirected bell 9); the vision view's HP
 # counts these (the oracle view takes HitDealt.amount when it has one)
@@ -63,6 +66,13 @@ class Instance:
     re_anchor: tuple[float, float] | None = None
     re_mirror: int = 1
     re_sd: float = 0.0
+    # aim (SSBOT_FORUM_AIM, tools.forum_aim): the instance entered its family's aim state (AIM_STATES), where the
+    # place and facing of the rest of it are fixed: anchored where the enemy is then, t from that entry
+    aim_state: str | None = None
+    aim_t: float = 0.0
+    aim_anchor: tuple[float, float] | None = None
+    aim_mirror: int = 1
+    aim_sd: float = 0.0
 
 
 @dataclass(slots=True)
@@ -92,6 +102,7 @@ class EnemyTracker:
     hits: int = 0
     t: float = 0.0
     in_play: bool = False                          # its Control state is not a waiting one
+    rendered: bool = True                          # its sprite was rendered when last exported (Entity.render_box)
     _var: float = 0.0
     mem: object | None = None                      # combat.branch_model.BranchMemory (the branch model's history)
 
@@ -101,6 +112,13 @@ class EnemyTracker:
     @property
     def tk(self) -> str:
         return self.table.spec.type_key
+
+    @property
+    def parked(self) -> bool:
+        """A later wave's member parked off-stage before its entry: not rendered, in a waiting / pre-entry state
+        (Fly In Ready, Dormant, Sleep, Wait ...). Its body collider can be reported enabled, but it never hurt in the
+        recordings (forum.md §29.4): SSBOT_FORUM_PARK (default on) leaves it out of the support."""
+        return not self.rendered and not self.in_play and self.state is not None
 
     # ---- the walk's segmentation ----
 
@@ -142,6 +160,11 @@ class EnemyTracker:
                 self._end(T)
             if not self.dead and self.cur is None:
                 self._start(idle, to, T)
+        c = self.cur
+        if c is not None and c.aim_state is None and AIM_STATES.get((sp.type_key, c.family)) == to:
+            c.aim_state, c.aim_t, c.aim_anchor = to, T, None
+            if not self.hidden and self.pos is not None and self.seen_T == T:
+                c.aim_anchor, c.aim_mirror, c.aim_sd = self.pos, FACES_LEFT[self.flip], self.pos_sd
 
     def _die(self, T: float) -> None:
         if not self.dead:
@@ -193,6 +216,7 @@ class EnemyTracker:
             if ctl is not None and ctl[1]:       # first seen before any Control event: its exported state
                 self.enter(ctl[1], T - float(ctl[2] or 0.0))
         self.hidden = bool(e.hidden) or (self.view != ORACLE and e.pos.conf <= 0.0)
+        self.rendered = getattr(e, "render_box", None) is not None or self.view != ORACLE
         self.box = _box_of(e)
         if self.hidden:
             return
@@ -220,6 +244,8 @@ class EnemyTracker:
             self.cur.anchor, self.cur.mirror, self.cur.sd = self.pos, FACES_LEFT[self.flip], self.pos_sd
         if self.cur is not None and self.cur.re_state is not None and self.cur.re_anchor is None:
             self.cur.re_anchor, self.cur.re_mirror, self.cur.re_sd = self.pos, FACES_LEFT[self.flip], self.pos_sd
+        if self.cur is not None and self.cur.aim_state is not None and self.cur.aim_anchor is None:
+            self.cur.aim_anchor, self.cur.aim_mirror, self.cur.aim_sd = self.pos, FACES_LEFT[self.flip], self.pos_sd
 
     def _hit(self, d) -> None:
         """HP from the hits seen: the oracle's amount (an O field: None in the vision view), else the price of the

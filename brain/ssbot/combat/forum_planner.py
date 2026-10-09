@@ -1164,7 +1164,9 @@ class ForumPlanner(Planner):
                 by_kb.setdefault((iid, key), []).append(n)
             for (iid, _), ns in by_kb.items():
                 ns = np.array(ns, np.int64)
-                o = self._contacts(f, rh.bound[ns], tk, skip[ns], exclude=int(iid))
+                # both the pushed and the unpushed support of the hit enemy: the push is the median knockback (no lower
+                # bound) and a wall can stop it (review of forum push 2, task "zone fix" item 4)
+                o = self._contacts(f, rh.bound[ns], tk, skip[ns])
                 o |= self._contacts_only(f, bnd[ns], tk, skip[ns], [int(iid)])
                 occ[ns] = o
             self.audit.kb_rows += len(kbs)
@@ -1218,6 +1220,8 @@ class ForumPlanner(Planner):
             for key, ns in by_rf.items():
                 ns = np.array(ns, np.int64)
                 occ[ns] |= self._contacts(cache[key], bnd[ns], tk, skip[ns])     # the reaction moves with the push
+                if kbs and moved[ns].any():                                       # ... or not (a wall, a weak push)
+                    occ[ns] |= self._contacts(cache[key], rh.bound[ns], tk, skip[ns])
             s = occ.any(axis=1) | capped
         return s, occ, capped
 

@@ -70,6 +70,14 @@ def test_free_mode_reaches_i3_and_the_clash_gate(params, arena):
     assert not i3_kill_allowed(ctx)
     ctx.free, ctx.h = True, 1
     assert not i3_kill_allowed(ctx)
+    # a long kill slow motion (the Forum's final blow, EnemyBattleEndSlow 1.85 s): free never lets it go uncertified;
+    # only the I3 rule (GREEN, full HP, h >= 3) does
+    ctx.h, ctx.kill_window_s = 2, 1.85
+    assert not i3_kill_allowed(ctx)
+    ctx.h = 3
+    assert not i3_kill_allowed(ctx)
+    ctx.tier, ctx.hp = "GREEN", 5
+    assert i3_kill_allowed(ctx)
     pl = ForumPlanner(params, arena, PlannerConfig(T=36, threads=2, variants="bounds_lo"), ForumConfig(clash=True))
     assert not pl.clash_allowed(_ctx(h=2, tier="YELLOW"))
     assert pl.clash_allowed(_ctx(h=2, tier="YELLOW", free=True))
@@ -173,8 +181,10 @@ def test_knockback_moves_the_hit_enemy_in_the_hit_branch(params, arena):
         occ[ta] = (o[0].copy(), f.calls, pl.audit.kb_rows)
     plain, kb = occ[""], occ["kb"]
     assert plain[2] == 0 and plain[1] == ["all"] and kb[2] == 1
-    assert ("without", 7) in kb[1] and ("only", (7,)) in kb[1]
-    assert plain[0].any() and kb[0].sum() < plain[0].sum()
+    # the review of forum push 2: the push is the median knockback with no lower bound and no wall, so the hit enemy's
+    # unpushed support stays (the whole support unmoved) and its pushed one is added
+    assert "all" in kb[1] and ("only", (7,)) in kb[1] and ("without", 7) not in kb[1]
+    assert plain[0].any() and (kb[0] | plain[0] == kb[0]).all()
     assert (kb[0][:9] == plain[0][:9]).all()                  # before the hit (frame 8 on) nothing moved
 
 

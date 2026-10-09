@@ -59,6 +59,7 @@ counts the request in MultiForecaster.comfort_requests).
 import copy
 import json
 import math
+import os
 from collections import defaultdict
 from dataclasses import dataclass
 
@@ -79,6 +80,8 @@ from ssbot.knowledge import hitbox_tables as hb
 from ssbot.safety.hits_to_death import SupportEvent, SupportSet
 
 MIN_HORIZON_S = 0.8
+# a parked later-wave member (not rendered, waiting: EnemyTracker.parked) gets no support (0: the old behaviour)
+PARK = os.environ.get("SSBOT_FORUM_PARK", "1") != "0"
 SUP_HORIZON_S = 0.8
 DWELL_SLACK_S = BIN               # logged dwell ranges are frame-quantised
 WALK_CAP_S = 6.0                  # memoised walks reach this far past the state's entry
@@ -1012,6 +1015,11 @@ class _Builder:
             self.boxes.append((tr.iid, "death", *tr.death_box, 0.0, 0.0, None, -BIN, tr.t_dead + DEATH_TAIL_S - T,
                                0.0))
         self._tails(tr)
+        if PARK and tr.parked and not tr.dead:
+            # parked off-stage before its entry (not rendered, waiting): no collider tube at the parked spot, no walk
+            # (the person 2026-10-09: a Reed in Fly In Ready drew a fixed box with no enemy; forum.md §29.4)
+            self.subjects.append(self._subject_row(tr, False, math.inf))
+            return
         # a killed Tiny comes back only through a Maestro's summon: walked on after its death only while one is in play
         if tr.dead and (not sp.pooled or not self._maestro_in_play()) or tr.state is None or tr.t_entry is None:
             # unknown: an enemy that had a state and lost it. One whose Control FSM never ran is parked, not in play
@@ -1056,7 +1064,18 @@ class _Builder:
         # reactive support, not started, oracle view: a throw (its templates hold every pin / bell ever thrown, in every
         # direction: forum.md §23) is its body (the tube) while what it throws is on its path once thrown
         thrown = self._thrown(tr) and committed_now
-        if committed_now and anc is not None and not thrown:
+        # aimed (SSBOT_FORUM_AIM, tools.forum_aim): the instance reached its family's aim state; the rest of it is the
+        # aim template anchored where the enemy was then, in place of the family's committed union (the family
+        # template from the start, the family's per-state nodes, a re-anchor); its tail nodes stay
+        aim_tid = None
+        if committed_now and not thrown and cur.aim_anchor is not None:
+            aim_tid = tables.key_id(cur.family, f"aim@{cur.aim_state}", "anchor")
+            if aim_tid is not None and aim_tid >= 0:
+                self._place_anchor(aim_tid, cur.aim_t - T, cur.aim_t - T, (cur.aim_anchor, cur.aim_mirror, cur.aim_sd),
+                                   tr.iid, cur.family, True, 1.0)
+            else:
+                aim_tid = None
+        if committed_now and anc is not None and not thrown and aim_tid is None:
             # the current attack's family template from its start (the family-wide union)
             fid = tables.key_id(cur.family, None, "anchor")
             if fid is not None:
@@ -1070,6 +1089,8 @@ class _Builder:
                 c_ton = cur.t_start - T + d - self.lat
         if anc is not None and not (idle_tube and cur.family == sp.idle_family) and not thrown:
             for nd in cur_nodes:
+                if aim_tid is not None and nd.family == cur.family and nd.state != TAIL:
+                    continue
                 if nd.current:
                     lo = hi = tr.t_entry - T          # the current state: its entry
                 else:
@@ -1086,7 +1107,8 @@ class _Builder:
                     if wid is not None:
                         self._window(wid, lo, hi, None, 1, tr.iid, nd.family, True, nd.p)
         rb = self.react_box.get(tr.iid)
-        if committed_now and not thrown and cur.re_state is not None and (cur.re_anchor is not None or rb is not None):
+        if committed_now and not thrown and aim_tid is None and cur.re_state is not None \
+                and (cur.re_anchor is not None or rb is not None):
             # re-anchored (forum.md 15.1): an attack that moved since its start (the anchor frame's templates hold the
             # logged travel only) is also the family walk of an instance starting at the start state it entered,
             # anchored where the enemy was then (13.13: the Clawmaiden's lunge after a 3.3 u flight); a hit
@@ -1099,7 +1121,8 @@ class _Builder:
                                True, 1.0)
                 else:
                     self._bbox(rid, cur.re_t - T, cur.re_t - T, *rb, 0, tr.iid, cur.family, True, 1.0)
-        if cur is not None and anc is None and not (idle_tube and cur.family == sp.idle_family) and not thrown:
+        if cur is not None and anc is None and not (idle_tube and cur.family == sp.idle_family) and not thrown \
+                and aim_tid is None:
             # the current instance's anchor is not known (not exported at its start): its family walk from the
             # start, anchored where the enemy is dead-reckoned to then (a hit reaction: its anchor box)
             self._place_family(tr, cur.family, cur.start, cur.t_start - T, cur.t_start - T, 1.0, committed_now,

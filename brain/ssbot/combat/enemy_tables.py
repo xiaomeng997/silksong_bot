@@ -26,6 +26,7 @@ and npz files here, and the static type facts from ssbot.core.forum.
 """
 import json
 import math
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -685,6 +686,34 @@ def load_type_templates(npz: Path, spec: ForumType, margins: dict, base: float =
             yield k, t.dilated(rx=hb.HERO_HALF_U[0] + m, ry=hb.HERO_HALF_U[1] + m, key=k)
 
 
+AIM_FILE = "aim_templates.npz"
+
+
+def aim_on() -> bool:
+    """SSBOT_FORUM_AIM (task "zone fix" item 1): the aim-conditioned committed templates (default off)."""
+    return os.environ.get("SSBOT_FORUM_AIM", "0") not in ("", "0")
+
+
+def load_aim_templates(spec: ForumType, margins: dict, base: float = 0.0, path: Path | None = None):
+    """(key, template) of one type's aim-conditioned templates (tools.forum_aim: support/<family>/aim@<state>/anchor,
+    t from the aim state's entry, anchored and mirrored where the enemy was then), dilated by the hero hurtbox
+    half-extents + the held-out residual r of the build + the family's margin + base; registers each family's aim
+    state for the trackers (enemy_tracker.AIM_STATES)."""
+    from ssbot.combat import enemy_tracker
+    p = Path(path) if path else FORUM_DIR / AIM_FILE
+    if not p.exists():
+        return
+    tpls, extra = hb.load_templates(p)
+    for k, t in tpls.items():
+        _, fam, aim, _frame = k.split("/")
+        r = extra.get(f"aim/{spec.type_key}|{fam}")
+        if r is None:
+            continue
+        enemy_tracker.AIM_STATES[(spec.type_key, fam)] = aim[len("aim@"):]
+        m = margins.get((spec.type_key, fam), 0.0) + base + float(r[0])
+        yield k, t.dilated(rx=hb.HERO_HALF_U[0] + m, ry=hb.HERO_HALF_U[1] + m, key=k)
+
+
 def parse_state_margins(by_state: dict) -> dict:
     """{"<type>/<family>/<state>": u} -> {(type, family, state): u}."""
     out = {}
@@ -801,6 +830,8 @@ class EnemyTables:
                 d = json.loads((root / f"{spec.enemy}.json").read_text("utf-8"))
                 tts[tk] = type_table(d, spec)
                 yield load_type_templates(root / d["templates"]["file"], spec, margins, base, family_wide, sm)
+                if aim_on():
+                    yield load_aim_templates(spec, margins, base, root / AIM_FILE)
         store = cls._store(per_type())
         return cls(tts, store, tubes, margins, bool(md.get("certified")),
                    f"production:{root}" + ("" if sm is None else "+state_margins"), load_chains(root / "chains.json"))
@@ -827,7 +858,11 @@ class EnemyTables:
                         "succ": (w.get("succ") or {}).get(str(fold), {})}
                 tts[tk] = type_table(d, spec, walk)
                 npz = extra / f"{spec.enemy}_support_fold{fold}.npz"
-                yield load_type_templates(npz, spec, margins, base, family_wide, state_margins) if npz.exists()                     else {}
+                yield load_type_templates(npz, spec, margins, base, family_wide, state_margins) if npz.exists() \
+                    else {}
+                if aim_on():
+                    # built from the dev fights only (tools.forum_aim): held out for the fresh recall
+                    yield load_aim_templates(spec, margins, base, root / AIM_FILE)
         store = cls._store(per_type())
         return cls(tts, store, tubes, margins, True, f"fold{fold}:{extra}", load_chains(root / "chains.json"))
 
