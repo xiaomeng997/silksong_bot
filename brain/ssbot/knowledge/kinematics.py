@@ -259,6 +259,9 @@ NO_INPUT = (M_HURT_FREEZE, M_HURT_RECOIL)                             # hero_sta
 # contact events (bit flags per frame; applied after the frame's physics steps, before its Update)
 EV_RECOIL_L, EV_RECOIL_R, EV_POGO, EV_HURT_L, EV_HURT_R, EV_LOCK, EV_UNLOCK, EV_CATCH, EV_SILK, EV_RECOIL_DOWN, \
     EV_FZ_BOSS_DEATH, EV_FZ_BOSS_STUN, EV_FZ_QUICK, EV_FZ_ENEMY_DEATH, EV_FZ_BIND_BREAK = (1 << i for i in range(15))
+# a nail clash 0.1 s ago (HeroController.NailParryRecover for the clash's own swing: attackDuration and attack_cooldown
+# 0, the attack cancelled): the planner's EV_CLASH branch puts it 6 frames after the clash (kin_jit only)
+EV_PARRY_RECOVER = 1 << 15
 # world freezes a rollout can be told about (the threat layer predicts them: a killing blow, a stun, a small enemy's
 # death; BindBreak also starts by itself on a hit during the Bind charge): GameManager.FreezeMoment presets
 # (rampDown, wait, rampUp, target speed; GameManager.cs 5092-5141)
@@ -273,7 +276,8 @@ EVENT_NAMES = {EV_RECOIL_L: "recoil_l", EV_RECOIL_R: "recoil_r", EV_POGO: "pogo"
                EV_HURT_R: "hurt_r", EV_LOCK: "lock", EV_UNLOCK: "unlock", EV_CATCH: "catch", EV_SILK: "silk",
                EV_RECOIL_DOWN: "recoil_down", EV_FZ_BOSS_DEATH: "freeze_boss_death",
                EV_FZ_BOSS_STUN: "freeze_boss_stun", EV_FZ_QUICK: "freeze_quick",
-               EV_FZ_ENEMY_DEATH: "freeze_enemy_death", EV_FZ_BIND_BREAK: "freeze_bind_break"}
+               EV_FZ_ENEMY_DEATH: "freeze_enemy_death", EV_FZ_BIND_BREAK: "freeze_bind_break",
+               EV_PARRY_RECOVER: "parry_recover"}
 
 # rollout flags
 F_GROUND, F_JUMPING, F_ATTACKING, F_RECOIL, F_RELINQ, F_INVULN, F_NO_INPUT = (1 << i for i in range(7))
@@ -288,9 +292,12 @@ B_JUMP, B_ATTACK, B_DASH, B_BIND, B_QUICKCAST = 1 << 0, 1 << 1, 1 << 2, 1 << 3, 
 # and collision with sloped terrain edges (Terrain2D.slopes)
 AB_WALL, AB_CLING, AB_DASH, AB_BROLLY, AB_RPR_DOWN, AB_WALLSLASH_SLOW, AB_HARD_LAND, AB_THUNK, AB_SLOPES = \
     (1 << i for i in range(9))
+# the down attack is a slash (HeroControllerConfig.DownSlashTypes.Slash, the Wanderer crest: HeroController.DownAttack
+# swings downSlash with cState.attacking for AttackDuration; no DownSpike dive, no FSM): kin_jit only
+AB_DOWN_SLASH = 1 << 9
 ABILITY_NAMES = {AB_WALL: "walljump", AB_CLING: "wallcling", AB_DASH: "dash", AB_BROLLY: "brolly",
                  AB_RPR_DOWN: "reaper_down", AB_WALLSLASH_SLOW: "wallslash_slowdown", AB_HARD_LAND: "hard_landing",
-                 AB_THUNK: "slash_thunk", AB_SLOPES: "slopes"}
+                 AB_THUNK: "slash_thunk", AB_SLOPES: "slopes", AB_DOWN_SLASH: "down_slash"}
 THUNK_SLOTS = ("normal", "alt", "up")   # ATK_KIND 1, 2, 3: their damage polygons (the thunker copies the collider)
 THUNK_MAXV = 12                         # vertices per polygon in the parameter vector's tail
 ALT_ATTACK_RESET = 0.5                  # HeroController.ALT_ATTACK_RESET (hero_constants.json)
