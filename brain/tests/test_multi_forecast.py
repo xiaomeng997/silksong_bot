@@ -207,9 +207,9 @@ def _production():
 
 # ---- tracker and forecast ----------------------------------------------------------------------------------------
 
-def _script_stab():
+def _script_stab(iid: int = 7):
     """A Reed idles in Alert at x 20, starts a stab at f 10 (Stab Pos, then Stab 1 at f 16), is hit at f 20 and killed
-    at f 24."""
+    at f 24 (iid: its entity id; the pooled Tinies' are negative)."""
     out = []
     t = 0.0
     for f in range(0, 30):
@@ -217,17 +217,17 @@ def _script_stab():
         evs = []
         st = "Alert" if f < 10 else "Stab Pos" if f < 16 else "Stab 1"
         if f == 0:
-            evs.append(_go(7, "Alert", f, t))
+            evs.append(_go(iid, "Alert", f, t))
         if f == 10:
-            evs.append(_go(7, "Stab Pos", f, t))
+            evs.append(_go(iid, "Stab Pos", f, t))
         if f == 16:
-            evs.append(_go(7, "Stab 1", f, t))
+            evs.append(_go(iid, "Stab 1", f, t))
         if f == 20:
-            evs.append(Event(Ev.HIT_DEALT, f, t, HitDealt(7, REED, 9.0, 46.0, attack="Nail", src="Slash")))
+            evs.append(Event(Ev.HIT_DEALT, f, t, HitDealt(iid, REED, 9.0, 46.0, attack="Nail", src="Slash")))
         if f == 24:
-            evs.append(Event(Ev.HIT_DEALT, f, t, HitDealt(7, REED, 50.0, -4.0, killing=True)))
-            evs.append(Event(Ev.ENEMY_KILLED, f, t, EnemyKilled(7, REED)))
-        ents = [] if f > 24 else [_ent(7, 20.0 + (0.05 * (f - 10) if f >= 10 else 0.0), 5.0, st, 0.0, flip=True,
+            evs.append(Event(Ev.HIT_DEALT, f, t, HitDealt(iid, REED, 50.0, -4.0, killing=True)))
+            evs.append(Event(Ev.ENEMY_KILLED, f, t, EnemyKilled(iid, REED)))
+        ents = [] if f > 24 else [_ent(iid, 20.0 + (0.05 * (f - 10) if f >= 10 else 0.0), 5.0, st, 0.0, flip=True,
                                        box=(19.5, 4.0, 20.5, 6.0), hp=999)]
         out.append((f, t, ents, evs))
     return out
@@ -282,6 +282,27 @@ def test_forecast_covers_the_attack_drops_the_dead_and_answers_the_interface():
     f2 = mf.forecast(0.8)
     near = f2.occupied(np.full((1, 31), 20.0), np.full((1, 31), 5.0), tk)[0]
     assert near[:2].any() and not near[5:].any()
+
+
+def test_subject_t_free_is_the_attacks_earliest_end():
+    """Subject.t_free (L2's Buddy rule; forum.md 21.7: it was 0 for everyone): an attack's start + its family's logged
+    duration p0.5, from the origin; 0 while idle or with no duration logged."""
+    d = _reed_table()
+    d["attacks"]["RE_STAB"]["duration_s"] = {"p0_5": 0.45, "p99_5": 0.6, "n": 9}
+    tabs = _tables()
+    tabs.types[REED] = type_table(d, FORUM_TYPES[REED])
+    assert tabs.types[REED].families["RE_STAB"].dur == (0.45, 0.6)
+    assert tabs.types[REED].families["RE_DEFEND"].dur == (0.0, math.inf)
+    mf = MultiForecaster(tabs, ORACLE, waves=False)
+    script = _script_stab()
+    _run(mf, script[:6])
+    assert [(s.committed, s.t_free) for s in mf.forecast(0.8).subjects] == [(False, 0.0)]
+    _run(mf, script[6:14])                                 # the stab started at f 10; the origin f 13
+    (s,) = mf.forecast(0.8).subjects
+    assert s.committed and s.t_free == pytest.approx(0.45 - 3 * BIN)
+    _run(mf, script[14:21])                                # f 20: 10 bins into it
+    (s,) = mf.forecast(0.8).subjects
+    assert s.t_free == pytest.approx(0.45 - 10 * BIN)
 
 
 def test_a_zero_dwell_loop_never_enters_before_the_root():
@@ -496,6 +517,31 @@ def test_coarse_and_bounding_box_forms_are_supersets():
         want = t.contains(np.full(300, 0.3) - e, xs[:300], ys[:300], tol_bins=0)
         got = store.query_win(W, xq, yq, np.array([0.3]))[:, 0]
         assert not (want & ~got).any()
+
+
+def test_occupied_split_is_the_union_and_its_committed_and_fine_parts():
+    """occupied_split (ForumPlanner's commit_rank keys from stage 1's query, forum.md 20.11): the union is occupied()
+    bit for bit, the parts are _union_occ(committed_only=True) and _fine_occ() on the same points; idle, attacking
+    and dead enemies (body tubes, fine placements, death boxes)."""
+    tabs = _tables()
+    script = _script_stab()
+    tk = np.arange(0, 25) * BIN
+    rng = np.random.default_rng(7)
+    X = rng.uniform(15.0, 26.0, (300, len(tk)))
+    Y = rng.uniform(2.0, 8.0, (300, len(tk)))
+    mf = MultiForecaster(tabs, ORACLE, waves=False)
+    n_com = n_rest = prev = 0
+    for k in (2, 12, 17, 22, 26):
+        _run(mf, script[prev:k])
+        prev = k
+        f = mf.forecast(0.8)
+        u, com, fine = f.occupied_split(X, Y, tk)
+        assert np.array_equal(u, f.occupied(X, Y, tk))
+        assert np.array_equal(com, f._union_occ(X, Y, tk, committed_only=True))
+        assert np.array_equal(fine, f._fine_occ(X, Y, tk))
+        n_com += int(com.sum())
+        n_rest += int((u & ~com).sum())
+    assert n_com > 0 and n_rest > 0
 
 
 def test_forecasters_sharing_tables_agree():

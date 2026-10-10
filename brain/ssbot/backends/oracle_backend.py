@@ -236,6 +236,9 @@ def type_key_of(name: str) -> str:
     return name if end == 0 else name[:end]
 
 
+NOT_HITTABLE_LAYERS = (13, 14, 27)   # range triggers, terrain blocks, the physics pusher (Entity.hit_polys)
+
+
 def _pts(flat: Sequence[float]) -> list[tuple[float, float]]:
     return list(zip(flat[0::2], flat[1::2]))
 
@@ -333,6 +336,7 @@ class _Memory:
     tracks: dict[int, _Track] = field(default_factory=dict)
     killed: set[int] = field(default_factory=set)      # iids ENEMY_KILLED was reported for (with or without a track)
     fsm_entry: dict[tuple[int, str], float] = field(default_factory=dict)
+    obj_name: dict[int, str] = field(default_factory=dict)    # iid -> GameObject name (its collider named so)
 
 
 class OracleBackend:
@@ -403,15 +407,17 @@ class OracleBackend:
             self._hero_clip = ((hd or {}).get("anim") or {}).get("clip")    # by the action before (a spear in flight)
         hero_xy = hero.pos.v if hd else None
         ents, by_type = self._entities(s.get("ents") or (), f, hero_xy, derived)
-        oracle_events = self._events(evs, f, hero_xy, ents, by_type, taken, cs)
+        oracle_events = self._events(evs, f, hero_xy, ents, by_type, taken, cs, (hd or {}).get("box"))
         game = self._game(s, g, p, hd, f, t_real, derived)
 
         cam = self._cam(s.get("cam"))
         stamp = Stamp(frame=f, t_sample_qpc_ns=t_ns, t_pub_qpc_ns=self.clock() if self.clock else t_ns,
                       t_game_s=m.t_game, backend=self.backend, config_fp=self.config_fp)
+        allies = [(str(a.get("name")), float(a["pos"][0]), float(a["pos"][1])) for a in s.get("allies") or ()
+                  if a.get("pos") is not None and len(a["pos"]) >= 2]
         return WorldState(stamp=stamp, game=game, cam=cam, hero=hero, res=res, entities=ents, threats=[],
                           terrain=self._terrain(scene, s.get("room")), events=oracle_events + derived,
-                          perception=PerceptionHealth(dropped_frames=gap))
+                          perception=PerceptionHealth(dropped_frames=gap), allies=allies)
 
     # ---- hero --------------------------------------------------------------------------------------------------
 
@@ -683,6 +689,8 @@ class OracleBackend:
                 E(-1 if flip else 1, conf=0.3, src=Src.PREDICTED)
 
             body = [_pts(c["verts_world"]) for c in e.get("colliders") or () if c.get("enabled")]
+            hit = [_pts(c["verts_world"]) for c in e.get("colliders") or ()
+                   if c.get("enabled") and c.get("layer") not in NOT_HITTABLE_LAYERS]
             boxes = damage_boxes(e)
 
             fsm = []
@@ -709,7 +717,7 @@ class OracleBackend:
             anim = e.get("anim")
             ra = e.get("render_aabb")
             ent = Entity(id=iid, kind=kind, type_key=E(tk), pos=E((px, py)), vel=vel, acc=acc, facing=facing,
-                         body_polys=body, dmg_boxes=boxes, phase=phase,
+                         body_polys=body, hit_polys=hit, dmg_boxes=boxes, phase=phase,
                          hp_est=E(float(hp)) if hp is not None else None, fsm=fsm,
                          visible_frac=0.0 if hidden else 1.0,
                          anim=(str(anim.get("clip")), int(anim.get("frame") or 0)) if anim else None,
@@ -717,8 +725,14 @@ class OracleBackend:
                          flip_x=flip, hidden=hidden, pos_transform=(float(e["pos"][0]), float(e["pos"][1])))
             result.append(ent)
             by_type.setdefault(tk, []).append(ent)
+            # the instance's GameObject name ("Song Pilgrim 03 (2)"): its collider named after its type
+            on = next((c.get("name") for c in e.get("colliders") or ()
+                       if c.get("name") and type_key_of(c["name"]) == tk), None)
+            if on is not None:
+                m.obj_name[iid] = on
         for iid in [i for i, tr in m.tracks.items() if i not in seen and t - tr.t > self.TRACK_TTL_S]:
             del m.tracks[iid]
+            m.obj_name.pop(iid, None)
             for key in [key for key in m.fsm_entry if key[0] == iid]:
                 del m.fsm_entry[key]
         return result, by_type
@@ -726,13 +740,31 @@ class OracleBackend:
     # ---- oracle events -----------------------------------------------------------------------------------------
 
     def _resolve_source(self, path: str | None, by_type: dict[str, list[Entity]],
-                        hero_xy: tuple[float, float] | None) -> tuple[str | None, int | None]:
+                        hero_xy: tuple[float, float] | None, hero_box=None) -> tuple[str | None, int | None]:
         """("Boss Scene/BoneBeast AtkBell R", ...) -> the type_key it names and the nearest such entity's id;
-        (None, None) when no part of the path names a known entity type (the path stays in caller_path, O)."""
+        (None, None) when no part of the path names a known entity type (the path stays in caller_path, O).
+        Several entities of the part's type (suffixes stripped): the one whose GameObject name the part is, else the
+        one whose damage collider named like the path's end lies nearest the hero's box (overlap: 0; active ones
+        first), not the nearest body (a Choristor's whip reaches 8 u: the nearest body was often another, sleeping
+        one; forum.md 24.3; "Song Pilgrim 03 (2)/..." paths resolved to no type); else the nearest body as before."""
         if not path:
             return None, None
-        for part in reversed(path.split("/")):
+        parts = path.split("/")
+        for j in range(len(parts) - 1, -1, -1):
+            part = parts[j]
             cands = [c for c in by_type.get(part, ()) if not c.hidden]
+            # several of the type (the Forum's waves): the instance the path names by its GameObject name ("Song
+            # Pilgrim 03 (2)/Spin Hit", which the type lookup missed), else the owner of the collider the path ends in
+            tk_part = type_key_of(part)
+            many = [c for c in by_type.get(tk_part, ()) if not c.hidden]
+            if len(many) > 1:
+                named = [c for c in many if self.m.obj_name.get(c.id) == part]
+                if len(named) == 1:
+                    return tk_part, named[0].id
+                if hero_box is not None and j + 1 < len(parts):
+                    by_col = self._collider_owner(named or many, parts[-1], hero_box)
+                    if by_col is not None:
+                        return tk_part, by_col
             if cands:
                 if hero_xy is None or len(cands) == 1:
                     return part, cands[0].id
@@ -742,6 +774,26 @@ class OracleBackend:
                 if tr.type_key == part:
                     return part, tr_iid
         return None, None
+
+    @staticmethod
+    def _collider_owner(cands: list[Entity], name: str, hero_box) -> int | None:
+        """The id of the entity in cands whose damage collider `name` is nearest the hero box (x0, y0, x1, y1):
+        active colliders first, then the gap between the collider's bounds and the box (0 when they overlap); None
+        when no candidate has a collider of that name."""
+        hx0, hy0, hx1, hy1 = (float(v) for v in hero_box)
+        best, key = None, None
+        for c in cands:
+            for b in c.dmg_boxes:
+                if b.name != name or not b.poly:
+                    continue
+                xs = [v[0] for v in b.poly]
+                ys = [v[1] for v in b.poly]
+                gx = max(0.0, min(xs) - hx1, hx0 - max(xs))
+                gy = max(0.0, min(ys) - hy1, hy0 - max(ys))
+                k = (not b.active, gx * gx + gy * gy)
+                if key is None or k < key:
+                    best, key = c.id, k
+        return best
 
     @staticmethod
     def _hit_amount(evs: Sequence[dict], i: int, n_hits: int, hp_prev: int | None, hp_now: int | None) -> int:
@@ -781,7 +833,8 @@ class OracleBackend:
         return {i: a for i, a in amounts.items() if a > 0 or zero_ok or evs[i].get("k") == "special_damage"}
 
     def _events(self, evs: Sequence[dict], f: int, hero_xy: tuple[float, float] | None, ents: list[Entity],
-                by_type: dict[str, list[Entity]], taken: dict[int, int], cs: dict[str, bool]) -> list[Event]:
+                by_type: dict[str, list[Entity]], taken: dict[int, int], cs: dict[str, bool],
+                hero_box=None) -> list[Event]:
         m = self.m
         t = m.t_game
         out: list[Event] = []
@@ -796,7 +849,7 @@ class OracleBackend:
                     "source": d.get("source"), "hazard": d.get("hazard"), "why": why, "n": 1,
                     "amount": d.get("amount"), "end": "rejected"})))
             elif k == "damage":
-                st, sid = self._resolve_source(d.get("source"), by_type, hero_xy)
+                st, sid = self._resolve_source(d.get("source"), by_type, hero_xy, hero_box)
                 raw = d.get("amount")
                 out.append(Event(Ev.HIT_TAKEN, fe, t, HitTaken(
                     amount=taken[i], hazard=HAZARD_OF.get(str(d.get("hazard")), Hazard.OTHER),

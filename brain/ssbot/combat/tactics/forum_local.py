@@ -40,6 +40,8 @@ GRID_U = 0.5
 WALL_ROOM = 3.0
 WALL_PEN = 1.0
 HOLD_PULL = 0.15
+EVADE_HIT_X = 0.3                  # EVADE / LEAVE: the hit weight's factor
+EVADE_RISK_X = 2.0                 # EVADE: the risk weight's factor
 CLAPPER = "Song Heavy Sentry"
 
 
@@ -107,6 +109,18 @@ def _facing(e) -> int | None:
     return 1 if fa.v > 0 else -1
 
 
+def clapper_facing(e) -> int | None:
+    """A Choir Clapper's facing (+1 right, -1 left) from its sprite's flipX: the Forum's sprites face -x unflipped
+    (enemy_tracker.FACES_LEFT; R0 caches, 15 fights: flipX 1 with the hero on its right in 1,564 / 1,631 Slam Antic
+    and 6,507 / 6,623 Idle frames, flipX 0 with the hero on its left 5,414 / 5,434 and 39,630 / 39,651). The oracle
+    backend's Entity.facing is the velocity's sign, else `-1 if flipX else 1` (the other convention), so it is wrong
+    for a standing Clapper; it is the fallback only for an entity without flip_x (tests)."""
+    fl = getattr(e, "flip_x", None)
+    if fl is None:
+        return _facing(e)
+    return 1 if fl else -1
+
+
 class ForumTactics:
     def __init__(self, pb: Playbook, rules: ForumRules, floor_y: float):
         self.pb, self.rules, self.floor_y = pb, rules, floor_y
@@ -130,7 +144,7 @@ class ForumTactics:
             if tk == CLAPPER and not getattr(e, "hidden", False):
                 x = _ent_x(e)
                 if x is not None:
-                    out.append((x, _facing(e)))
+                    out.append((x, clapper_facing(e)))
         return out
 
     def in_pocket(self, hx: float, hy: float) -> bool:
@@ -217,15 +231,15 @@ class ForumTactics:
         if in_veto and self.in_pocket(hx, hy):
             prefs.mode = LEAVE
             prefs.stance_x = float(self.xs[int(np.argmin(risk + wall + 0.05 * np.abs(self.xs - 24.0)))])
-            wts["hit"] *= 0.3
+            wts["hit"] *= EVADE_HIT_X
             return prefs
         soon = fc.t_min(hx, self.floor_y if hy < self.floor_y + 1.0 else hy, t_max=r.evade_s)
         if soon < r.evade_s:
             near = self.risk_map(fc, (0.0, r.evade_s))
             prefs.mode = EVADE
             prefs.stance_x = float(self.xs[int(np.argmin(near + 0.5 * risk + 0.1 * np.abs(self.xs - hx) + wall))])
-            wts["hit"] *= 0.3
-            wts["risk"] *= 2.0
+            wts["hit"] *= EVADE_HIT_X
+            wts["risk"] *= EVADE_RISK_X
             return prefs
         if tgt is not None:
             tx = float(tgt.pos[0])
