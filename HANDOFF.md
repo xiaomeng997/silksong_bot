@@ -4089,3 +4089,22 @@ S0 (planner AIM off; P0 is display / truth / aim templates): baseline 0.60 % = 3
   (115 fights in common), and the Tiny fix loses 0 against S1's RCLIP=2 + PRESTRIKE (rclip2p). RCLIP=2 itself still
   loses hit rows against base (k12 29 rows of 194,736: Choristor CH_JUMP, Reed, Envoy; clean own % identical), S1's
   known RCLIP issue.
+- Re-score (gate 4), so far: on the 4 segments every run has finished (`s1\partial.py s1rb_base_1b8c69a
+  s1rb_rclip2_1b8c69a s2rb_rclip2t_1cd56a3 s2rb_reanchor_3424008`) 0 misses for all, also with the escape check; the
+  Tiny fix's safe rows 2,644 -> 2,656. Baseline for the full set: S1's truth-fixed base 1 miss (a Reed pin) on 32
+  segments, RCLIP=2 6 (pin 5, Envoy 1), 0 with the escape check.
+- STILL RUNNING, detached, below normal (read when done): re-scores `C:\ssbot\data\m2_forum_hs\s2rb_rclip2t_1cd56a3`
+  (RCLIP=2 + Tiny fix), `s2rb_reanchor_3424008` (REANCHOR=1, RCLIP off), `s2rb_rclip2best3d_671e639` (the final
+  candidate: RCLIP=2 + Tiny fix + REANCHOR=chain + RTHROW), each writes `<name>_summary.json`; compare with
+  `s1\partial.py <runs...>`. Recall (gate 1) for the final candidate: `m2_forum_push\rclip2best3\recall_r2.log` /
+  `recall_fresh.json` (started 18:17, ~4 h on the loaded machine; S1's RCLIP=2 recall was 0 misses at 421 / 444).
+  Orphans of stopped runs: `s2rb_rclip2best3_671e639`, `s2rb_rclip2best_4e31a83`, `s2rb_rclip2ra_3424008` (empty).
+- Proposal for the integration stage: the Tiny fix is a bug fix inside RCLIP (it applies whenever RCLIP is on);
+  REANCHOR fam stays off (fails gate 1); REANCHOR=chain and RTHROW stay default off until the final candidate's
+  re-score and recall are in; if both pass, turn them on together with RCLIP=2 (seen: share s0 23.9 -> 18.9 %, the
+  Clawmaiden's spin 28.8x -> 2.5x, no hindsight row lost on seen or R2).
+- Next: the Tiny's k12 clip box (RATIO 21.5: the 39 u/s dive from Fire Ready) and the clip rectangle generally (every
+  type is still above 1.5x; a per-k polygon or a per-continuation union would be the next step); the Clapper's casts
+  (rune bombs arm long after the cast: clip until the cast state with the bombs' own paths); F1 proper needs
+  entry-frame per-state templates (a build change); the Envoy's post-charge body is covered in base only by its
+  family union (Charge End 0.40-0.43 s, no tail cover): a recall fragility to fix before any fam-like change.
