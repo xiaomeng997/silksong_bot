@@ -4016,3 +4016,44 @@ S0 (planner AIM off; P0 is display / truth / aim templates): baseline 0.60 % = 3
   f26467, f42427: base held them with its own clipped boxes); a Reed in Block dropped 0.4 u below the every-frame
   reach (f39847); allies' reach uses the hero's speeds and swing; the recall gate run for RCLIP=2 is implied (superset
   of RCLIP=1's 100 %) and was 81 / 444 fight tables, all 0 misses, at 15:41.
+
+### S2: the largest excess - RCLIP's Tiny bug, REANCHOR (fam, chain), RTHROW (2026-10-09, offline; forum.md §29.15)
+- Commits: 1cd56a3 (RCLIP Tiny fix), 3424008 (`SSBOT_FORUM_REANCHOR`), 4e31a83 / 654a5c1 / 671e639
+  (`SSBOT_FORUM_RTHROW` and its two fixes). Frozen: `C:\ssbot\hs_s2_<commit>` (`s2\freeze.sh <commit> <dir>`). Gate
+  outputs `C:\ssbot\data\m2_forum_push\<tag>\`, scripts and tables in `m2_forum_push\s2\` (per_type.py: the per-type
+  table of fix_spec sec. 8; hind_fam.py / hind_lost.py: hindsight losses by family / by row; compare tables
+  cmp_*.md). New configs: `configs\{reanchor,chain,rclip2ra,rclip2rt,rclip2all,rclip2best}.cmd`; base.cmd now also
+  clears SSBOT_FORUM_RTHROW.
+- **RCLIP bug (fixed, 1cd56a3)**: `MultiForecast._clip_rows` marked "not clipped" with -1 and `_clip_groups` /
+  `_bbox_occ` clipped only owners >= 0. The pooled Tinies' iids are negative, so a Tiny's own placements were NEVER
+  clipped: with RCLIP=2 the Tinies were 74 % of the person's committed excess (k0), RATIO p50 69.6. Now a sentinel
+  NOCLIP (int64 min). Person committed, Tiny: p50 69.6 -> 2.7 (k0), 69.8 -> 21.5 (k12); pooled p99 140.8 -> 57.6;
+  the person's committed excess area k0 2.80 M -> 0.79 M cell-k. Hindsight identical to S1's RCLIP=2 (seen, every
+  k, own and all). This changes RCLIP=1/2 themselves: S1's RCLIP numbers had the Tinies unclipped.
+- **REANCHOR** (default off; parts `fam`, `chain`, "1" = both): fam drops the current attack's family union when every
+  walk node of the family has a per-state template (later states then without the strike-delay floor); chain places a
+  defender's hit-triggered states (Reed RE_DEFEND Block .. Multihit, Minister MI_PARRY Parry Block .. Parry Slash End)
+  no earlier than the first frame a hero / ally hit can reach it (RCLIP=2's `_hero_hit_k`), the counter + the block's
+  shortest dwell, none when the walk window ends before that, and drops the defender's union too.
+  - REANCHOR=1 (RCLIP off): committed layer unchanged (the union is mostly coarse, i.e. a window placement), com_all
+    p50 k0 17.3 -> 15.1, window rows halved; share person s0 44.9 -> 43.3 %, bot 32.7 -> 28.2 %. **fam FAILS gate
+    (1)**: seen hindsight own k12 person 99.61 -> 99.23 %, bot 98.50 -> 97.10 % (320 rows at k12: Envoy EN_CHARGE
+    Charge End 124 - the post-charge body was covered only by the union (other instances' longer charges): Charge End
+    0.40-0.43 s, the tail does not cover it; Choristor CH_JUMP Spin Slash End 114, CH_ENTRY Enter Land 38, CH_SLASH
+    Slash Recover 33). fam stays off. chain alone: no lost row in the seen hindsight (no Reed / Minister row in the
+    lost list); its own gates: tag `chain` (see below).
+- **RTHROW** (default off, needs RCLIP): a throw family (REACH_KEEP: CB_THROW, RE_THROW, CM_SPIN; its templates also
+  hold its hazards, so RCLIP left it unclipped) is clipped until one frame before the walk's earliest entry into its
+  release state (the hazard's arming state from the tables: Throw / Throw / Spear Fire, Spear Fire Recover), not at all
+  once the instance has entered it (`Instance.visited`), and only the current throw's committed rows (a later throw's
+  roots keep their hazards). The Clapper's casts are left out (bombs arm long after the cast). On RCLIP=2 + Tiny fix:
+  Clawmaiden committed p50 32.5 -> 2.7 (k0), 35.0 -> 13.6 (k12); Bellbearer 5.0 -> 2.4 (k0). The first version lost
+  one seen hindsight row (Bellbearer in Recover, 20261008_231544 a1 f26455: the bell just thrown has no path yet, S1's
+  open issue) -> 671e639 does not clip after the release.
+- Not done: F1's kinematic / decision-frame re-anchoring needs per-state templates in the frame of the state's entry
+  (the build makes anchor / world frames only; `forum_aim build` is the closest: it already re-aims at every state
+  with a certified direction-binned template, and AIM=1 gave committed p50 12.3 -> 12.0 in S0). With RCLIP=2 the
+  clipped families are already near the honest box (10427: 488 cells vs real 288).
+- Runs I stopped (superseded, mine): the rb re-scores of rclip2ra (fam on) and of rclip2best on 4e31a83 (RTHROW v1),
+  and the gate chains gates_ra / gates_rt after their seen gates. Afterwards the classifier refused launching new
+  detached runs; the last gates and re-score ran in this session's background (see the result block).

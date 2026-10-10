@@ -3370,3 +3370,38 @@ C:\ssbot\data\m2_forum_push\gate.cmd <precision|hindsight|share|recall|rescore|p
 - 如果按"支撑 + 逃生检查"（规划器在 escape+n+g 下真正的判断）计漏报，到目前为止 RCLIP=2 不增加漏报，可以考虑默认开。由集成阶段决定，等全部 32 段跑完再定。
 - PRESTRIKE 在 seen 数据和重打分里没有可测的作用，保持关。
 - 下一步要修的是瞄准针检查（那 5 行针），以及 Bellbearer 那两帧飞着的钟（没有路径）。
+
+### 29.15 精度推进 S2：最大的多余（RCLIP 漏剪 Tiny、REANCHOR、RTHROW）（2026-10-09，task "precision push" S2；同一分支；离线，没有开游戏）
+
+**RCLIP 的 bug：Tiny 自己的框从来没被剪过**（已修，1cd56a3）
+- `MultiForecast._clip_rows` 用 -1 表示"不剪"，`_clip_groups` / `_bbox_occ` 只剪 owner >= 0 的行。Maestro 召出来的 Tiny 是对象池克隆，iid 是负数，所以 Tiny 自己的 committed / window / bbox 行一直没剪。
+- 后果：RCLIP=2 下你的会话里 committed 多出来的面积，k0 有 74 % 是 Tiny 的（倍数中位 69.6，整个场地）。例：20261008_231544 第 1 次 f30379，一只 Tiny 在 `Fire Ready`，committed k0 7,604 格（真伤害 78 格）。
+- 改成专门的哨兵 NOCLIP（int64 最小值）。同一帧 k0 7,604 → 300 格，k12 7,604 → 2,202 格（真 91）。
+- 你的会话 committed 倍数（Tiny）：k0 中位 69.6 → 2.7，k12 69.8 → 21.5。合计 p99 140.8 → 57.6。k0 多余面积 2.80 M → 0.79 M（格·k）。
+- 后见召回（seen，所有 k，自己 / 全部）和 S1 的 RCLIP=2 完全一样，没有丢。
+- 注意：这改的是 RCLIP=1/2 本身。S1 报的 RCLIP 数字里 Tiny 是没剪的。
+
+**`SSBOT_FORUM_REANCHOR`**（默认关；分两部分 `fam`、`chain`，"1" = 两个都开）
+- fam：当前这招的"家族并集"（家族模板从起手算，所有录到的实例、所有状态）在走图给出的每个节点（各状态和收尾）都有自己的按状态模板时就不放；后面状态的出招延迟下限也去掉（以前它们起手前的身体靠并集盖）。
+- chain：你说的"防守的怪没被打就没有反击框"。Reed 的 RE_DEFEND、Minister 的 MI_PARRY 在架势里（还没被打）时，被打才会进的状态（Block → Parry Y Aim → Parry Slash → Multihit…；Parry Block → Parry Slash 1–4 → End）最早只能从"主角或盟友的一次命中最早能打到它"的那一帧开始（RCLIP=2 的 `_hero_hit_k`）；反击再加上格挡的最短时长（Block 0.483 s、Parry Block 0.558 s）；走图给的时间窗在那之前就结束了，就不放。这时这个防守家族的并集也不放。
+- 结果（RCLIP 关）：committed 层没变（并集大多是粗模板，算 window 层）；com_all 倍数中位 k0 17.3 → 15.1；超过半屏的帧，你的会话 k0 44.9 → 43.3 %，bot 32.7 → 28.2 %。
+- **fam 不过门槛 1**：后见召回（seen，自己，k12）你的会话 99.61 → 99.23 %，bot 98.50 → 97.10 %。k12 丢的 320 行：
+  - Envoy EN_CHARGE `Charge End` 124 行。冲锋结束后的身体只有并集盖着（别的实例冲得更久，碰巧盖到）；`Charge End` 0.40–0.43 s，收尾模板盖不到。
+  - Choristor CH_JUMP `Spin Slash End` 114 行、CH_ENTRY `Enter Land` 38 行、CH_SLASH `Slash Recover` 33 行。
+  - 所以 fam 保持关。
+- chain 单独：seen 后见召回里没有丢一行 Reed / Minister。它在 committed 层上看不出变化（反击是窗口放置）。
+
+**`SSBOT_FORUM_RTHROW`**（默认关，要和 RCLIP 一起开）
+- 投掷家族（CB_THROW、RE_THROW、CM_SPIN）的模板里也装着它扔出去的东西，所以 RCLIP 一直不剪它们。
+- 现在：在它"最早能进入出手状态"的前一帧之前，按可达框剪；之后不剪。出手状态 = 表里投射物"武装"时 Boss 所在的状态：钟 `Throw`（8,682 / 8,737），Reed 的针 `Throw`（2,139 / 2,153），Clawmaiden 的矛 `Spear Fire Recover`（492 / 496；`Spear Fire` 是它前面的瞬时状态）。
+- 这一招已经进过出手状态（`Instance.visited`）就完全不剪：刚扔出去的东西可能还没有路径（S1 说的"飞着的钟没有路径"，20261008_231544 第 1 次 f26455 / f26467）。只剪当前这一招自己的（committed）行；后面再扔的根行留着它们自己的投射物。
+- Clapper 的施法不在内：rune bomb 在施法后很久才武装（在 Idle、Walk……里）。
+- 结果（RCLIP=2 + Tiny 修正之上，你的会话 committed 倍数中位）：Clawmaiden k0 32.5 → 2.7、k12 35.0 → 13.6；Bellbearer k0 5.0 → 2.4。
+- 第一版只剪不看"已出手"，seen 后见召回丢了 1 行（就是上面那只 Bellbearer 在 `Recover`），已修（671e639）。
+
+**没做：F1 的"在决定动作的状态重新锚定"**
+- 要按每个状态入口重新锚定，需要"以状态入口为原点"的按状态模板；现在的表只有 anchor（起手）和 world 两种坐标。
+- 最接近的是 `forum_aim build`：它已经在每个有认证方向分箱模板的状态重新瞄准；S0 里 AIM=1 只把 committed 中位从 12.3 降到 12.0。
+- RCLIP=2 下被剪的怪已经接近真框（10427：488 格对真 288 格）。
+
+**门槛**：见下表和 HANDOFF 的 S2 结果。
