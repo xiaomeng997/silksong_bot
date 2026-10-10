@@ -26,6 +26,10 @@ from ssbot.train.wave_start import BOOST, STATE_PREFIX
 
 ALLY_WAVES = {1}                      # wave 1's "Call Ally": Garmond joins the fight (attacks the enemies)
 PROTECT_FRAC = 0.5
+# stage B: the kept type's own summons are part of its attack and stay in play (the Maestro's Tinies); a summoned type
+# is practised with its summoner (--solo "Song Automaton Tiny" = one Maestro and its Tinies)
+COMPANIONS = {"Song Pilgrim Maestro": ("Song Automaton Tiny",)}
+HOSTS = {"Song Automaton Tiny": "Song Pilgrim Maestro"}
 
 
 @dataclass(frozen=True)
@@ -38,7 +42,9 @@ class SoloPlan:
 
 
 def plan_for(tk: str, waves=FORUM_WAVES, prefix: str = STATE_PREFIX) -> SoloPlan:
-    """The wave holding type tk with the fewest other members (an ally wave counts one more), earliest first."""
+    """The wave holding type tk (or its summoner, HOSTS) with the fewest other members (an ally wave counts one more),
+    earliest first."""
+    tk = HOSTS.get(tk, tk)
     best = None
     for w in waves:
         members = [type_key(m) for m in w.types]
@@ -65,7 +71,7 @@ class SoloController:
     controller then says so once and carries on without that part."""
 
     def __init__(self, tk: str, debug, rpc, protect: bool = True, log=print):
-        self.tk = tk
+        self.tk = HOSTS.get(tk, tk)
         self._debug_factory = debug
         self.rpc = rpc
         self.protect = protect
@@ -131,7 +137,8 @@ class SoloController:
             self.keep = None
         if self.keep is None and mine:
             self.keep = int(mine[0].get("iid", 0))
-        others = [e for e in live if int(e.get("iid", 0)) != self.keep]
+        comp = COMPANIONS.get(self.tk, ())
+        others = [e for e in live if int(e.get("iid", 0)) != self.keep and type_key(e.get("type_key")) not in comp]
         if others:
             if self.phase != "clear" or not self.boosted:
                 if self.phase != "clear":

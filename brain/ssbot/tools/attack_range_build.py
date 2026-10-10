@@ -42,9 +42,9 @@ from pathlib import Path
 
 import numpy as np
 
-from ssbot.combat.attack_range import (CELL, CHORISTOR, FT, SPECS, Mask, RangeTable, Segmenter, Template, bin_of,
-                                       circle_poly, hazards_at, hero_space, hurts, load_table, on_canvas, poly_mask,
-                                       save_table, table_path, union)
+from ssbot.combat.attack_range import (CELL, CHORISTOR, FT, SPECS, CustomView, Mask, RangeTable, Segmenter, Template,
+                                       bin_of, circle_poly, hazards_at, hero_space, hurts, load_table, on_canvas,
+                                       poly_mask, save_table, table_path, union)
 
 ARE = Path(r"C:\ssbot\data\m2_forum_are")
 OUT = ARE / "choristor"
@@ -137,7 +137,8 @@ def tracks_from_cache(c: dict, type_key: str, source: str) -> list[dict]:
             y=c["e_y"][rows].astype(np.float64), flip=c["e_flip"][rows].astype(np.int8),
             hidden=c["e_hidden"][rows].astype(np.int8), hx=c["hx"][fr].astype(np.float64),
             hy=c["hy"][fr].astype(np.float64), cols=cols, hits=sorted(hits.get(int(iid), [])), clash=sorted(clash),
-            fi=np.asarray(fr, np.int64), vx=c["e_vx"][rows].astype(np.float64)))
+            fi=np.asarray(fr, np.int64), vx=c["e_vx"][rows].astype(np.float64),
+            vy=c["e_vy"][rows].astype(np.float64) if "e_vy" in c else None))
     return out
 
 
@@ -169,6 +170,8 @@ def load_tracks(name: str, type_key: str | None = None, cache_dir: Path | None =
                 t["f"] = np.asarray(c["f_raw"][t["fi"]], np.int64)
         if spec.hazards and trs:
             attach_hazards(c, trs, spec)
+        if spec.attach is not None and trs:
+            spec.attach(c, trs)
         out += trs
     return out
 
@@ -425,6 +428,8 @@ def build(tracks: list[dict], spec=None, shapes: dict | None = None) -> tuple[Ra
                 "landing_err_p95": round(float(np.percentile(err, 95)), 3) if len(err) else None,
                 "landing_err_max": round(float(err.max()), 3) if len(err) else None,
                 "facing_agrees": round(float(np.mean(flips)), 4) if flips else None}
+            if not spec.decide[fam].scale:          # a decided side only: the median displacement since the decision
+                ratio = None
         sst = order = None
         if spec.state_gate:
             med = {st: float(np.median(v)) for st, v in first.items()}
@@ -593,12 +598,14 @@ def eval_track(tr: dict, tab: RangeTable, shapes: dict, every: int = 2, idle_eve
                               st_now=tr["st"][j])
                 base = {"fam": inst.fam, "br": inst.branch, "known": br is not None, "k": k, "b": b,
                         "t": round(bt * FT, 4), "next": bool(nxt), "int": bool(r["interrupted"]),
-                        "f": int(tr["f"][j]), "fight": tr["fight"], "iid": tr["iid"]}
+                        "f": int(tr["f"][j]), "fight": tr["fight"], "iid": tr["iid"], "st": tr["st"][j]}
                 if spec.decide.get(inst.fam) is not None:
                     base["dec"] = dec is not None
                 Eh = hz_rows(j, jt, k, inst, base)
                 if Eh is not None:
                     E = union([E, Eh])
+                if spec.custom is not None:
+                    E = custom_rows(tab, tr, j, jt, k, _active_view(inst, float(T[j])), E, Eh, shapes, base, rows)
                 R = poly_mask(frame_polys(tr, jt, shapes))
                 c = compare(E, R, inst.s)
                 rows.append({**base, **c})
@@ -621,13 +628,55 @@ def eval_track(tr: dict, tab: RangeTable, shapes: dict, every: int = 2, idle_eve
                 continue
             nxt = bool((idx[j:jt + 1] >= 0).any())
             base = {"fam": IDLE, "br": st, "known": True, "k": k, "b": 0, "t": round(k * FT, 4), "next": nxt,
-                    "int": hit, "f": int(tr["f"][j]), "fight": tr["fight"], "iid": tr["iid"]}
+                    "int": hit, "f": int(tr["f"][j]), "fight": tr["fight"], "iid": tr["iid"], "st": tr["st"][j]}
             Eh = hz_rows(j, jt, k, None, base)
             Ek = E if Eh is None else union([E, Eh])
+            if spec.custom is not None:
+                Ek = custom_rows(tab, tr, j, jt, k, None, Ek, Eh, shapes, base, rows)
             R = poly_mask(frame_polys(tr, jt, shapes))
             c = compare(Ek, R, s)
             rows.append({**base, **c})
     return rows
+
+
+def custom_view(tab: RangeTable, tr: dict, j: int, jt: int | None, k: int, inst) -> CustomView:
+    """The offline CustomView of track frame j at look-ahead k (inst: the instance as of T[j], or None)."""
+    f1 = int(tab.meta.get("face_flip1", 1))
+    T = tr["T"]
+    vy = tr.get("vy")
+    return CustomView(tab=tab, inst=inst, k=k, T=float(T[j]), t=float(T[jt]) if jt is not None else float(T[j]) + k * FT,
+                      x=float(tr["x"][j]), y=float(tr["y"][j]), vx=float(tr["vx"][j]) if "vx" in tr else None,
+                      vy=None if vy is None else float(vy[j]), s=f1 if tr["flip"][j] else -f1, st=tr["st"][j],
+                      tin=float(tr["tin"][j]), hero=(float(tr["hx"][j]), float(tr["hy"][j])), iid=int(tr["iid"]),
+                      body=frame_polys(tr, j, tab.meta.get("shapes") or {}, tab.spec.body_names), track=tr, j=j)
+
+
+def custom_estimate(tab: RangeTable, tr: dict, j: int, jt: int | None, k: int, inst, E: Mask, Eh: Mask | None):
+    """(estimate, its custom add part or None) of an EnemySpec.custom type: the hook's replace / add on E (the
+    template estimate with its hazards Eh)."""
+    rep, add = tab.spec.custom(custom_view(tab, tr, j, jt, k, inst)) or (None, None)
+    if rep is not None:
+        E = union([rep, Eh]) if Eh is not None else rep
+    if add is not None and add.m.size and add.m.any():
+        E = union([E, add])
+    else:
+        add = None
+    return E, add
+
+
+def custom_rows(tab: RangeTable, tr: dict, j: int, jt: int, k: int, inst, E: Mask, Eh: Mask | None, shapes: dict,
+                base: dict, rows: list) -> Mask:
+    """eval_track with EnemySpec.custom: the estimate with the hook applied, and the rows of its add part ("HZ extra":
+    the projectiles it owns, against the "HZ:" cols the attach hook put on the track) when either is non-empty."""
+    E, add = custom_estimate(tab, tr, j, jt, k, inst, E, Eh)
+    own = {f"HZ:{hz.name}" for hz in tab.spec.hazards}
+    R = poly_mask([p for nm, p in ((nm, poly_of(nm, bx, int(tr["flip"][jt]), shapes)) for nm, bx in tr["cols"][jt])
+                   if nm.startswith("HZ:") and nm not in own])
+    if add is not None or (R.m.size and R.m.any()):
+        rows.append({**base, "fam": "HZ extra", "br": base["fam"],
+                     **compare(add if add is not None else Mask(np.zeros((0, 0), bool), 0, 0), R,
+                               inst.s if inst is not None else 1)})
+    return E
 
 
 def summarize(rows: list[dict], ks=KS, limit: float = 1.5) -> dict:

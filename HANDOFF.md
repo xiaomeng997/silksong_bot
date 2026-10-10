@@ -4487,3 +4487,66 @@ idle = the body now; group 2 not drawn). Offline only (no game instance started)
   - Walk: carry the walking body (8 u/s) or keep "body now" (the person's call).
   - The wall-zone limits are R0 dev measurements; no terrain model. Overlap-without-damage windows unexplained.
   - Live overlay / --solo not run in the game.
+
+## Task attack range: all types, stage B - Bellbearer, Maestro, Tiny (branch worktree-wf_2fe0d0c5-18e-4, 2026-10-10; forum.md §34)
+
+= stage A (worktree-wf_2fe0d0c5-18e-1, 77ccb1e) + three type modules and the smallest hooks they needed. Same rules
+(no margin; idle = the body now; group 2 / pending aims not drawn; build from R0 dev only). Offline only.
+
+- Hooks (all default-off; the Choristor placement hash test still passes, the Clapper is untouched):
+  - `EnemySpec.custom(view) -> (replace, add)` (`are_spec.CustomView`): a type computes this frame's estimate itself;
+    `replace` takes the template part's place, `add` is unioned and counted as a hazard. Called by
+    `RangeTracker.estimate` (live: `view.ents` = the frame's entities, `view.mem` = a per-type dict kept across
+    frames; `attack_range.apply_custom`) and offline by `attack_range_build.custom_estimate` (eval_track family and
+    idle rows, and the PNGs): `view.track` / `view.j`. `view.body` = its body colliders now, filled by the caller
+    (a type module must not import the builder: tests/test_import_firewall.py, combat -> forum_cache -> ipc).
+  - `EnemySpec.attach(cache, tracks)`: builder only (`load_tracks`), adds what `custom` needs offline and the real
+    colliders of owned projectiles as "HZ:<name>" cols. Eval rows "HZ extra" compare the `add` part alone with them.
+  - `Decision.scale` (False: only a side is decided; the u displacement after the decision is the template median,
+    ratio None).
+  - `RangeTracker.feed` keeps `self.ents` / `self.mem`; `_parked(e, spec.parked)` uses the type's parked words (the
+    default PARKED contains "Ready", which is the Tiny's in-play formation flight).
+  - Tracks carry `vy`; eval rows carry `st` (the state at the row's frame). `ssbot/tools/are_rows_report.py`: per family
+    x k tables split by decided / pending and by state (`report.json`).
+  - `solo_practice`: `COMPANIONS` (the Maestro's Tinies stay in play, not "others") and `HOSTS` (`--solo "Song
+    Automaton Tiny"` = the Maestro wave with its Tinies).
+  - PNG info line: "(side)" for scale-False decisions.
+- Bellbearer (`are_types/bellbearer.py`, table 4 KB): CB_THROW / CB_EVADE / CB_ENTRY templates; Evade state replaced
+  by the body carried by its velocity decaying x0.9 per frame (R0 dev k12 position error p50 0.16 / p90 0.47 u). The
+  bell via custom: in flight on its simulated real path from the observed position/velocity (50 Hz semi-implicit
+  Euler, g 60, one floor bounce at centre y 3.53 to vy 20, the second contact ends it after <= 2 steps at y 3.43, walls
+  14.435 / 48.565 return it at 10 u/s; not drawn once it does not hurt: Nail Hit); before the release (Throw Antic,
+  no bell of this throw yet) the decided arc: vx = clamp(1.15 (hero x - x at the antic start) + U, +-15), abs >= 4,
+  vy 20, spawn + (0.94 toward vx, -0.5), release 0.649-0.683 s (R0 dev first 20 fights), union over U in 5 values and
+  every release frame. Attribution offline: Throw entry within 3 frames and spawn point <= 1.5 u; live: the nearest
+  Bellbearer when the bell is first seen (`mem`). Case PNG: 085824 f7939 (the person's evade frame).
+- Maestro (`are_types/maestro.py`, 11 KB): MA_SLASH decided at Slash 1 (side = the hero's side; scale False; pending
+  in Fire Antic = only the antic body and recoil); MA_DEFEND via custom = the body carried by its velocity (template
+  median k12 79 % -> 91 %); MA_SUMMON, MA_ENTRY templates. State-gated.
+- Tiny (`are_types/tiny.py`, 9 KB): families AT_FIRE_READY / AT_DIVE / AT_DEFEND / AT_ENTRY / AT_LEAVE; parked =
+  Dead / Dormant / Sleep / Wait. attach drops not-in-play rows (Dead / no state / hidden) and splits each pooled
+  object's track into one track per life (else the look-ahead compared a Tiny with its next life 33 u away), and gives
+  each frame the nearest Maestro. custom: Defend Buzz = orbit around the nearest Maestro (centre + its velocity, the
+  R0 dev angular-speed and radius profiles over the time in state, the current turn direction; k12 error p50 0.67 u);
+  Fire Ready / Fire / Pull Up / Return = velocity + last-frame acceleration (|a| > 150 u/s^2 = a wall / floor
+  collision, dropped), Brake / Wall Bonk / Defend Ready / Leave Pause = velocity; floor y >= 4.7 for Fire / Brake /
+  Pull Up; x in [14.5, 48.5].
+- Error (forum.md §34.5; fresh / R2 / person): k0 coverage 98.5-100 %, area ratio 0.99-1.01; k12: bells 95.7-96.9 % (ratio 1.10, p90 1.47-1.49), CB_THROW 95.8-96.4 %, CB_EVADE 92.1-92.8 %,
+  MA_SLASH decided 91.1-92.2 % (pending 68-69 % by the group-2 rule), MA_DEFEND 90.8-91.1 %, MA_SUMMON 94.9-97.7 %,
+  AT_DIVE 69.9-70.4 % (Fire 65-66 %, Brake 72-74 %, Return 74-76 %; its template median path: 32 %), AT_FIRE_READY 87.0-87.6 %, AT_DEFEND 52.6-55.8 % (the orbit), AT_ENTRY 80.5-86.2 %, AT_LEAVE 63.8-82.9 %; idle (body now): Bellbearer 55-59 %, Maestro 71-74 %, Tiny 42-43 % (all fly while idle; velocity
+  carry would give k12 errors p50 0.40 / 0.16 / 0.32 u vs 1.10 / 0.61 / 1.21 frozen: the person's call). No family
+  above area ratio 1.5.
+- Earlier variants kept: `maestro\prev_template_defend\`, `bellbearer\prev_bell_end\` (before the 2-step end hold),
+  `bellbearer\prev_evade_template\`, `tiny\prev_template_dive\` (AT_DIVE template: 32 % k12), `tiny\prev_acc_uncapped\`.
+- PNGs: `C:\ssbot\data\m2_forum_are\{bellbearer (35), maestro (41), tiny (52)}\png` + `index.json`.
+- Solo: Bellbearer `--solo "Pilgrim 03 Song"` -> `fo_r1_w2` (a Reed is cleared first); Maestro / Tiny `--solo "Song
+  Pilgrim Maestro"` / `"Song Automaton Tiny"` -> `fo_r1_w6` (the other Maestro is cleared first; the kept Maestro's
+  Tinies stay). Not run in the game.
+- Tests: `tests/test_attack_range_bmt.py` (11: registry, bell physics / spit rule / live in-flight + owner + Nail Hit /
+  pre-release arc / builder attribution, Tiny orbit / parked / live orbit / kinematics + wall-hit acceleration, Maestro
+  pending -> decided side, solo companions) + `test_attack_range.py`, `test_attack_range_types.py`,
+  `test_zone_overlay.py` pass.
+- Open: Tiny orbit k12 only 52-56 % (needs its formation slot); Tiny Pull Up timing unknown (up-miss p95 5-7 u in
+  Fire); bell release window from 20 R0 dev fights; idle velocity carry (the person); live overlay / --solo not run in
+  the game; the hooks are this branch's - other stage B branches may have added their own (merge: one `custom` /
+  `attach` per spec).

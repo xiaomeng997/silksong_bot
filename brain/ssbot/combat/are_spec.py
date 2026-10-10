@@ -18,6 +18,8 @@ class Decision:
     states: frozenset
     rule: Callable
     branch: Callable | None = None     # (x, s, L) -> the family's branch, known from the decision on (or None)
+    scale: bool = True                 # False: only the side is decided (the Maestro's slash): the u displacement
+    #                                    after the decision is the template's median, not ratio x L
 
 
 @dataclass(frozen=True)
@@ -70,7 +72,41 @@ class EnemySpec:
     state_gate: bool = False   # templates keep each bin's shape per state: k = 0 draws the state it is in now, k > 0
     #                            the states at or after it (attack_range.RangeTable._shape); a state is kept at a bin
     #                            when at least 2 R0 dev instances were in it there (tools.attack_range_build)
+    # stage B hooks (None: unused; the Choristor and the Clapper do not set them):
+    custom: Callable | None = None   # custom(CustomView) -> (replace, add): a Mask replacing the template's estimate
+    #                                  of this frame (or None: keep it) and a Mask added to it (or None; drawn as a
+    #                                  hazard part): moves a template cannot hold (an orbit around another enemy, a
+    #                                  projectile on its real path)
+    attach: Callable | None = None   # attach(cache, tracks) (builder only): adds what `custom` needs offline to each
+    #                                  track (another entity's path, owned projectiles) and their real damage colliders
+    #                                  as "HZ:<name>" cols (the truth)
 
     @property
     def body_names(self) -> tuple:
         return (self.body,) if isinstance(self.body, str) else tuple(self.body)
+
+
+@dataclass
+class CustomView:
+    """What EnemySpec.custom sees for one enemy at one frame, live (attack_range.RangeTracker.estimate: `ents` = that
+    frame's entity dicts, `mem` = a dict kept per type across frames) or offline (tools.attack_range_build: `track`
+    and `j` = the track and its frame index, as the type's attach hook prepared it). Times are game times (s)."""
+    tab: object                # the attack_range.RangeTable
+    inst: object | None        # the family instance as of now (attack_range.Inst; decisions / triggers up to T) or None
+    k: int
+    T: float                   # now
+    t: float                   # the time estimated (T + k frames; offline the real frame compared)
+    x: float
+    y: float
+    vx: float | None
+    vy: float | None
+    s: int                     # its facing now (+1 / -1)
+    st: str | None
+    tin: float
+    hero: tuple | None         # (x, y) of the hero transform now
+    iid: int = -1
+    body: list | None = None   # its body colliders now (world polygons; the caller fills it from EnemySpec.body)
+    ents: tuple | None = None  # live
+    mem: dict | None = None    # live
+    track: dict | None = None  # offline
+    j: int | None = None       # offline
