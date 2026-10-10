@@ -143,6 +143,10 @@ class EnemyTracker:
     rendered: bool = True                          # its sprite was rendered when last exported (Entity.render_box)
     _var: float = 0.0
     mem: object | None = None                      # combat.branch_model.BranchMemory (the branch model's history)
+    # FSM history (SSBOT_FORUM_GATES), replaced, never mutated (hit-reaction forecasts copy the tracker shallowly)
+    last_start: dict = field(default_factory=dict)  # family -> game time of its latest instance start
+    last_entry: dict = field(default_factory=dict)  # state -> game time of its latest entry
+    t_odd: float = -math.inf                         # the latest transition its table does not know
 
     def __post_init__(self) -> None:
         self.hp_est = float(self.table.spec.hp)
@@ -170,6 +174,7 @@ class EnemyTracker:
 
     def _start(self, fam: str, state: str, T: float) -> None:
         self.cur = Instance(fam, state, T)
+        self.last_start = {**self.last_start, fam: T}
         if not self.hidden and self.pos is not None and self.seen_T == T:
             self.cur.anchor, self.cur.mirror, self.cur.sd = self.pos, FACES_LEFT[self.flip], self.pos_sd
 
@@ -179,6 +184,10 @@ class EnemyTracker:
         sp = tb.spec
         if self.mem is not None:
             self.mem.enter(self.state, to, T)
+        succ = getattr(tb, "succ", None)
+        if succ is not None and self.state is not None and to not in succ.get(self.state, ()):
+            self.t_odd = T
+        self.last_entry = {**self.last_entry, to: T}
         self.state, self.t_entry = to, T
         self.in_play = to not in sp.waiting
         cur, idle = self.cur, sp.idle_family

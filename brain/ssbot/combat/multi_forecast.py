@@ -159,8 +159,58 @@ DEFENDERS = {
                                                                    "Parry Slash 3", "Parry Slash 4",
                                                                    "Parry Slash End"})),
 }
+# SSBOT_FORUM_WALKFLOOR (task precision push S3, fix_spec F3; default off): nothing after the walk's root is entered
+# before the root state's earliest exit (its logged dwell minimum - DWELL_SLACK_S after its entry; BIN from the origin
+# when overdue). Without it a non-root node's earliest entry is only floored at -DWELL_SLACK_S, and the zero-dwell idle
+# loop loses one bin of slack per hop down to that floor: at 20261009_085824 f7939 the Bellbearer's next Evade Antic /
+# Throw Antic roots sat at -1 bin while its Evade can end only 0.3167 s after its entry
+WALKFLOOR = os.environ.get("SSBOT_FORUM_WALKFLOOR", "0") not in ("", "0")
+# SSBOT_FORUM_NSBOX (task precision push S3, fix_spec F2; default off): parts, a comma list ("1" = all). bin: a later
+# instance (a not-started root) is placed from its earliest start on, not one bin before it (_emit_bbox's activity
+# start): before its start the enemy's body is the idle / collider tubes' and the current instance's job (the Reed's
+# k0 not-started box at f7939 was 13.9 % of the screen, all of it before any start)
+NSBOX_PARTS = ("bin",)
+
+
+def nsbox_parts(v: str | None) -> frozenset:
+    """The parts of an SSBOT_FORUM_NSBOX value ("" / "0": none, "1": all, else a comma list)."""
+    v = (v or "").strip().lower()
+    if v in ("", "0"):
+        return frozenset()
+    out = frozenset(NSBOX_PARTS) if v == "1" else frozenset(p.strip() for p in v.split(",") if p.strip())
+    if out - set(NSBOX_PARTS):
+        raise ValueError(f"SSBOT_FORUM_NSBOX: unknown part(s) {sorted(out - set(NSBOX_PARTS))}")
+    return out
+
+
+NSBOX = nsbox_parts(os.environ.get("SSBOT_FORUM_NSBOX"))
+# SSBOT_FORUM_GATES (task precision push S3, fix_spec F5; default off): FSM history gates (fsm_gates.json, mined on R0
+# dev by tools.fsm_gates): once an instance of a gated family starts, no other instance of it starts before the gate's
+# lift state is entered (the Bellbearer: no Evade after an Evade before a Throw Antic). A gated root starts no earlier
+# than one frame after the walk's earliest entry into the lift state, and is dropped when the walk does not reach it;
+# the gate lifts on its lift state, on a transition its table does not know, on death and after its time-out (twice the
+# longest recorded start -> lift gap)
+GATES = os.environ.get("SSBOT_FORUM_GATES", "0") not in ("", "0")
+_FSM_GATES: dict | None = None
+
+
+def fsm_gates(path=None) -> dict:
+    """{(type key, family): (lift state, time-out s)} from fsm_gates.json ({} without it). Read once."""
+    global _FSM_GATES
+    if path is None and _FSM_GATES is not None:
+        return _FSM_GATES
+    p = path or FORUM_DIR / "fsm_gates.json"
+    out = {}
+    if p.exists():
+        for g in json.loads(p.read_text("utf-8")).get("gates", []):
+            out[(g["type"], g["family"])] = (g["lift"], float(g["timeout_s"]))
+    if path is None:
+        _FSM_GATES = out
+    return out
+
+
 PRESTRIKE_FAMS = frozenset({("Song Reed", "RE_STAB"), ("Song Reed", "RE_DEFEND")})
-PRESTRIKE_F = 13          # frames after the start: the body moves before the first own attack collider
+PRESTRIKE_F = 13         # frames after the start: the body moves before the first own attack collider
 BOX_KINDS = ("death", "arena", "idle", "collider", "hazard", "prestrike")
 REACH_SEEN_S = 2 * BIN
 REACH_KEEP = frozenset((tk, fam) for tk, sp in FORUM_TYPES.items() for _hz, fams in sp.spawns for fam in fams)
@@ -365,12 +415,20 @@ class WalkNode:
 
 
 def walk(tt: TypeTable, state: str, ctx: tuple | None, dead: bool, overdue: bool, cap: float = WALK_CAP_S,
-         instance_only: bool = False) -> list[WalkNode]:
+         instance_only: bool = False, floor: bool | None = None) -> list[WalkNode]:
     """The support walk (ssbot.knowledge.forum_support.SubjectRecall._walk) from `state` entered at 0 (overdue: the
     state can end at any time from the next frame: entries relative to the origin). ctx: (family, start state) of the
     current instance. Hull of entry times per (state, family, start, kind, dead) node. instance_only: the states of
-    the root's instance and its tail only (a family walk template)."""
+    the root's instance and its tail only (a family walk template). floor (default SSBOT_FORUM_WALKFLOOR): no node
+    after the root is entered before the root's earliest exit."""
     sp = tt.spec
+    lo_min = -DWELL_SLACK_S
+    if WALKFLOOR if floor is None else floor:
+        dw0 = tt.dwell.get(state)
+        if overdue:
+            lo_min = BIN
+        elif dw0 is not None:
+            lo_min = max(exit_interval(0.0, 0.0, dw0, False, DWELL_SLACK_S)[0], -DWELL_SLACK_S)
     idle = sp.idle_family
     nodes: dict[tuple, list] = {}
     todo: list[tuple] = []
@@ -383,7 +441,7 @@ def walk(tt: TypeTable, state: str, ctx: tuple | None, dead: bool, overdue: bool
             # nothing after the walk's root is entered before it: a zero-dwell loop (the Tiny's Ready -> Ready) took
             # one bin of slack per pass down to -333 s at the step cap (forum.md 15.2), so every Tiny's idle family
             # walk spanned 333 s before its start (an arena-wide box over the whole horizon)
-            lo = max(lo, -DWELL_SLACK_S)
+            lo = max(lo, lo_min)
         k = (st, c, d, current)
         iv = nodes.get(k)
         if iv is None:
@@ -396,7 +454,7 @@ def walk(tt: TypeTable, state: str, ctx: tuple | None, dead: bool, overdue: bool
                 if hi > iv[1] + 1e-9:
                     hi = cap
                 if lo < iv[0] - 1e-9:
-                    lo = min(lo, 0.0) if not current else lo
+                    lo = max(min(lo, 0.0), lo_min) if not current else lo
             iv[0], iv[1], iv[2] = min(iv[0], lo), max(iv[1], hi), max(iv[2], p)
         else:
             iv[2] = max(iv[2], p)     # a likelier path alone does not re-walk (scoring only)
@@ -451,18 +509,19 @@ def walk(tt: TypeTable, state: str, ctx: tuple | None, dead: bool, overdue: bool
 class _WalkCache:
     """Memoised walks, split for the placements: the current instance's nodes and the roots of later instances."""
 
-    def __init__(self):
+    def __init__(self, floor: bool | None = None):
+        self.floor = WALKFLOOR if floor is None else floor      # SSBOT_FORUM_WALKFLOOR (walk's floor)
         self.d: dict = {}
         self.s: dict = {}                    # the same key -> {state: its earliest entry} (every state reached)
         self.hits = 0
         self.misses = 0
 
     def get(self, tt: TypeTable, state: str, ctx, dead: bool, overdue: bool) -> tuple[list, list]:
-        k = (tt.tk, state, ctx, dead, overdue)
+        k = (tt.tk, state, ctx, dead, overdue, self.floor)
         r = self.d.get(k)
         if r is None:
             self.misses += 1
-            nodes = walk(tt, state, ctx, dead, overdue)
+            nodes = walk(tt, state, ctx, dead, overdue, floor=self.floor)
             r = self.d[k] = ([n for n in nodes if n.kind == "cur"],
                              [n for n in nodes if n.kind == "new" and n.state == n.start])
             st: dict = {}
@@ -477,7 +536,7 @@ class _WalkCache:
     def states(self, tt: TypeTable, state: str, ctx, dead: bool, overdue: bool) -> dict[str, float]:
         """Every state the walk reaches, current instance or later ones: its earliest entry (relative to the walk's
         reference time)."""
-        k = (tt.tk, state, ctx, dead, overdue)
+        k = (tt.tk, state, ctx, dead, overdue, self.floor)
         if k not in self.s:
             self.get(tt, state, ctx, dead, overdue)
         return self.s[k]
@@ -557,6 +616,8 @@ class MultiForecaster:
         self.prestrike = PRESTRIKE            # SSBOT_FORUM_PRESTRIKE: the pre-strike reach of a not-started root
         self.reanchor = REANCHOR              # SSBOT_FORUM_REANCHOR: its parts (fam, chain)
         self.rthrow = RTHROW                  # SSBOT_FORUM_RTHROW: a throw family clipped until its release
+        self.nsbox = NSBOX                    # SSBOT_FORUM_NSBOX: its parts (bin)
+        self.gates = GATES                    # SSBOT_FORUM_GATES: FSM history gates on the walk's roots
         self.react: ReactConfig | None = None   # reactive support (ReactConfig; None: as before)
         self.model = _Shim._Model()
         self.query_c = None
@@ -702,17 +763,18 @@ class MultiForecaster:
         """A bbox-only id: per time bin since the instance's start, the bounding box of every state the instance
         can reach from `start` and its tail (walk instance_only), each per-state template's box table time-dilated
         over its entry interval (sparse-table window unions). Built once."""
-        key = (tt.tk, fam, start, frame)
+        fl = self.walks.floor
+        key = (tt.tk, fam, start, frame, fl)
         if key in self._fwalk:
             return self._fwalk[key]
         store = self.tables.store
-        skey = f"fwalk/{tt.tk}/{fam}/{start}/{frame}"
+        skey = f"fwalk{'+wf' if fl else ''}/{tt.tk}/{fam}/{start}/{frame}"
         i = store.coarse_keys.get(skey)
         if i is not None and i in store._bb:          # built by an earlier forecaster on these tables
             self._fwalk[key] = i
             return i
         parts = []
-        for nd in walk(tt, start, (fam, start), False, False, instance_only=True):
+        for nd in walk(tt, start, (fam, start), False, False, instance_only=True, floor=fl):
             tid = self.tables.key_id(fam, TAIL if nd.state == TAIL else nd.state, frame)
             if tid is None:
                 continue
@@ -733,7 +795,7 @@ class MultiForecaster:
             acc[:, 1] = np.minimum(acc[:, 1], b[:, 1])
             acc[:, 2] = np.maximum(acc[:, 2], b[:, 2])
             acc[:, 3] = np.maximum(acc[:, 3], b[:, 3])
-        i = store.add_coarse_base(f"fwalk/{tt.tk}/{fam}/{start}/{frame}", None)
+        i = store.add_coarse_base(skey, None)
         store.add_bbox(i, acc, u0 * BIN)
         self._fwalk[key] = i
         return i
@@ -1273,8 +1335,14 @@ class _Builder:
                       and idle_tube and self.fc.collider_tube and T - tr.seen_T <= TUBE_MAX_AGE_S and wake is None
                       and (tr.seen_box is not None or (tr.pos is not None and tt.tk in tubes.hull)))
         pre = None                                    # SSBOT_FORUM_PRESTRIKE: [earliest, latest] start dropped
+        gate = self._gate_floor(tr, ctx, overdue, ref) if getattr(self.fc, "gates", False) else None
         for nd in roots:
             lo, hi = max(ref + nd.lo - T, BIN), max(ref + nd.hi - T, BIN)
+            if gate and nd.family in gate:
+                # SSBOT_FORUM_GATES: not before its lift state is entered (inf: the walk does not reach it)
+                lo = max(lo, gate[nd.family])
+                if lo > hi + 1e-9:
+                    continue
             if lo > H + BIN:
                 continue
             if nd.family != sp.idle_family:
@@ -1315,6 +1383,25 @@ class _Builder:
                 self.boxes.append((tr.iid, "collider", *b, 0.0, 0.0, ("speed", tubes.speed.get(tt.tk, 60.0)),
                                    -BIN, COLLIDER_TUBE_S, tr.seen_T - T))
         self.subjects.append(self._subject_row(tr, True, t_strike))
+
+    def _gate_floor(self, tr: EnemyTracker, ctx, overdue: bool, ref: float) -> dict:
+        """SSBOT_FORUM_GATES: {gated family: its roots' earliest start (s from the origin)} of the enemy's active gates
+        (fsm_gates: its family started, its lift state not entered since, no unknown transition since, within the
+        time-out): one frame after the walk's earliest entry into the lift state, inf when the walk does not reach
+        it. The oracle view only (the vision view's states can miss the lift state's entry)."""
+        if self.fc.view != ORACLE or tr.dead:
+            return {}
+        T = self.origin
+        out = {}
+        for (tk, fam), (lift, tmo) in fsm_gates().items():
+            ts = tr.last_start.get(fam) if tk == tr.tk else None
+            if ts is None or T - ts > tmo or tr.t_odd >= ts or tr.last_entry.get(lift, -math.inf) >= ts:
+                continue
+            st = self.fc.walks.states(tr.table, tr.state, ctx, tr.dead, overdue)
+            s_lo = st.get(lift)
+            g = math.inf if s_lo is None else ref + s_lo - T + BIN
+            out[fam] = max(out.get(fam, -math.inf), g)
+        return out
 
     def _subject_row(self, tr: EnemyTracker, alive: bool, t_strike: float) -> Subject:
         c = tr.cur
@@ -1568,6 +1655,8 @@ class _Builder:
             gcl = np.full(len(tid), -1, np.int64)
         if ton is None:
             ton = np.full(len(tid), -np.inf)
+        if "bin" in getattr(self.fc, "nsbox", ()):
+            ton = np.maximum(ton, e0)           # SSBOT_FORUM_NSBOX bin: nothing before its earliest start
         cx, cy = 0.5 * (x0 + x1), 0.5 * (y0 + y1)
         hx, hy = 0.5 * (x1 - x0), 0.5 * (y1 - y0)
         ut, inv = np.unique(tid, return_inverse=True)
