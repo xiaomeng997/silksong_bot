@@ -147,6 +147,13 @@ REANCHOR = reanchor_parts(os.environ.get("SSBOT_FORUM_REANCHOR"))
 # yet). Before the release its hazard does not exist; one thrown earlier is its own entity (path / self
 # template). The Clapper's rune bombs and rune slam arm long after the cast (at Idle, Walk, ...): not here
 RTHROW = os.environ.get("SSBOT_FORUM_RTHROW", "0") not in ("", "0")
+# SSBOT_FORUM_TINYCLIP (task precision push S4 (c), with RCLIP on; default off): a Tiny group row (3+ Tinies, one
+# row per cluster and family walk; it stands for every Tiny of its cluster) is clipped by the UNION of its members'
+# reach clips (one copy of the row per member, each cut by that member's clip box), not left unclipped. A cluster with
+# a member without a clip (dead, parked, hidden, not seen for REACH_SEEN_S, a throw) stays unclipped. The precision
+# tool's k12 committed p50 for the Tiny was 69x with RCLIP on (fix_spec sec. 8); the group rows were 14 % of the
+# person's frames beyond the half-screen and in every over-half frame after RCLIP (fix_spec sec. 6 item 10)
+TINYCLIP = os.environ.get("SSBOT_FORUM_TINYCLIP", "0") not in ("", "0")
 THROW_RELEASE = {("Pilgrim 03 Song", "CB_THROW"): frozenset({"Throw"}),
                  ("Song Reed", "RE_THROW"): frozenset({"Throw"}),
                  ("Song Handmaiden", "CM_SPIN"): frozenset({"Spear Fire", "Spear Fire Recover"})}
@@ -219,6 +226,7 @@ REACH_SEEN_S = 2 * BIN
 REACH_KEEP = frozenset((tk, fam) for tk, sp in FORUM_TYPES.items() for _hz, fams in sp.spawns for fam in fams)
 KB_FREE_F = 20            # frames without a hit seen: the no-knockback reach (combat.reach_table.KB_FREE_F)
 NOCLIP = np.iinfo(np.int64).min   # _clip_rows: a row not clipped (iids can be negative: the pooled Tinies)
+CLUSTER0 = NOCLIP + 1             # _clip_rows: CLUSTER0 + c, a Tiny group row of cluster c (SSBOT_FORUM_TINYCLIP)
 _REACH_CLIP: dict = {}
 
 
@@ -619,6 +627,7 @@ class MultiForecaster:
         self.prestrike = PRESTRIKE            # SSBOT_FORUM_PRESTRIKE: the pre-strike reach of a not-started root
         self.reanchor = REANCHOR              # SSBOT_FORUM_REANCHOR: its parts (fam, chain)
         self.rthrow = RTHROW                  # SSBOT_FORUM_RTHROW: a throw family clipped until its release
+        self.tinyclip = TINYCLIP              # SSBOT_FORUM_TINYCLIP: a Tiny group row cut by its members' clips
         self.nsbox = NSBOX                    # SSBOT_FORUM_NSBOX: its parts (bin, bin0)
         self.gates = GATES                    # SSBOT_FORUM_GATES: FSM history gates on the walk's roots
         self.react: ReactConfig | None = None   # reactive support (ReactConfig; None: as before)
@@ -1790,6 +1799,7 @@ class _Builder:
         out.clusters = self.clusters
         out.clip = self._clip()
         out.clip_fam = self.clip_fam
+        out.tinyclip = bool(getattr(self.fc, "tinyclip", False))
         return out
 
     def _clip(self) -> dict:
@@ -2137,13 +2147,27 @@ class MultiForecast:
             cf = self.__dict__.get("clip_fam") or {}
             # RTHROW: only the current throw's own (committed) rows; a later throw's roots hold their own hazards
             com = np.asarray(meta["committed"], bool)
+            # TINYCLIP: a group row's code is CLUSTER0 + its cluster (_clip_members) when every member has a clip
+            cls = (self.__dict__.get("clusters") or []) if self.__dict__.get("tinyclip") else []
             for i, o in enumerate(own.tolist()):
                 fam = str(meta["family"][i])
-                if o in clip and ((tk_of.get(o), fam) not in REACH_KEEP or (cf.get(o) == fam and com[i])) \
-                        and (gcl is None or not len(gcl) or gcl[i] < 0):
+                if gcl is not None and len(gcl) and gcl[i] >= 0:
+                    g = int(gcl[i])
+                    if g < len(cls) and cls[g] and all(m in clip and (tk_of.get(m), fam) not in REACH_KEEP
+                                                       for m in cls[g]):
+                        r[i] = CLUSTER0 + g
+                    continue
+                if o in clip and ((tk_of.get(o), fam) not in REACH_KEEP or (cf.get(o) == fam and com[i])):
                     r[i] = o
             c[kind] = r
         return r
+
+    def _clip_members(self, co: int) -> tuple:
+        """The owners whose clips bound a clip code: a Tiny group row's (TINYCLIP: CLUSTER0 + cluster) are its
+        cluster's Tinies (the union of their clips), any other code is one owner."""
+        if CLUSTER0 <= co < CLUSTER0 + (1 << 20):
+            return tuple(sorted(self.clusters[co - CLUSTER0]))
+        return (co,)
 
     def _clip_groups(self, kind: str, idx: np.ndarray) -> list:
         """idx (rows) split into [(rows, None)] not clipped and [(rows, owner)] per clipped owner."""
@@ -2165,11 +2189,14 @@ class MultiForecast:
         return out
 
     def _clip_xy(self, x, y, tk, owner: int):
-        """x, y with the points outside the owner's clip box (on the last axis: tk) NaN (the queries skip them)."""
-        b = self._clip_boxes(owner, tk)
+        """x, y with the points outside the owner's clip box (on the last axis: tk) NaN (the queries skip them); a
+        cluster code (TINYCLIP): outside every member's box."""
         x = np.asarray(x, np.float64)
         y = np.asarray(y, np.float64)
-        inside = (x >= b[:, 0]) & (x <= b[:, 2]) & (y >= b[:, 1]) & (y <= b[:, 3])
+        inside = np.zeros(np.broadcast(x, y).shape, bool)
+        for o in self._clip_members(owner):
+            b = self._clip_boxes(o, tk)
+            inside |= (x >= b[:, 0]) & (x <= b[:, 2]) & (y >= b[:, 1]) & (y <= b[:, 3])
         return np.where(inside, x, np.nan), np.where(inside, y, np.nan)
 
     def _fine_occ(self, x, y, tk, sel=None) -> np.ndarray:
@@ -2224,15 +2251,31 @@ class MultiForecast:
         cr = self._clip_rows("bb")
         if cr is not None:
             ro = cr[idx]
+            extra = []
             for co in np.unique(ro[ro != NOCLIP]).tolist():
                 # a box and the owner's clip box intersect in a box (the templates are already in hero-centre space)
                 sub = np.flatnonzero(ro == co)
-                cb = self._clip_boxes(int(co), tk)
-                bx[0][sub] = np.maximum(bx[0][sub], cb[None, :, 0])
-                bx[1][sub] = np.maximum(bx[1][sub], cb[None, :, 1])
-                bx[2][sub] = np.minimum(bx[2][sub], cb[None, :, 2])
-                bx[3][sub] = np.minimum(bx[3][sub], cb[None, :, 3])
-                bx[4][sub] &= (bx[0][sub] <= bx[2][sub]) & (bx[1][sub] <= bx[3][sub])
+                mem = self._clip_members(int(co))
+                # a Tiny group row (TINYCLIP): one copy per member, each cut by its clip (their union)
+                parts = [tuple(b[sub] for b in bx)] * (len(mem) - 1)
+                for j, o in enumerate(mem):
+                    cb = self._clip_boxes(o, tk)
+                    if j == 0:
+                        b0, b1, b2, b3, ok = (b[sub] for b in bx)
+                    else:
+                        b0, b1, b2, b3, ok = (b.copy() for b in parts[j - 1])
+                    b0 = np.maximum(b0, cb[None, :, 0])
+                    b1 = np.maximum(b1, cb[None, :, 1])
+                    b2 = np.minimum(b2, cb[None, :, 2])
+                    b3 = np.minimum(b3, cb[None, :, 3])
+                    ok = ok & (b0 <= b2) & (b1 <= b3)
+                    if j == 0:
+                        bx[0][sub], bx[1][sub], bx[2][sub], bx[3][sub], bx[4][sub] = b0, b1, b2, b3, ok
+                    else:
+                        extra.append((b0, b1, b2, b3, ok))
+            if extra:
+                bx = tuple(np.ascontiguousarray(np.concatenate([bx[i]] + [e[i] for e in extra]))
+                           for i in range(5))
         T = shp[-1]
         x2 = np.ascontiguousarray(x.reshape(-1, T))
         y2 = np.ascontiguousarray(np.asarray(y, np.float64).reshape(-1, T))
@@ -2502,6 +2545,7 @@ class MultiForecast:
         out.groups, out.clusters = self.groups, self.clusters
         out.clip = self.__dict__.get("clip") or {}
         out.clip_fam = self.__dict__.get("clip_fam") or {}
+        out.tinyclip = bool(self.__dict__.get("tinyclip", False))
         return out
 
     def support_set(self, ws: WorldState | None = None, t1: float = SUP_HORIZON_S) -> SupportSet:

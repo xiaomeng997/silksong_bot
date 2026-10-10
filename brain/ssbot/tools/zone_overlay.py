@@ -97,7 +97,7 @@ DEFAULT_ENV = {"SSBOT_FORUM_FR": "seen_cf", "SSBOT_FORUM_REACT": "escape+n+g", "
                "SSBOT_FORUM_KF": "kill", "SSBOT_FORUM_AIM": "1"}
 DEFAULT_CLASH = "main"
 SWITCHES = ("FR", "REACT", "MARGIN", "KF", "AIM", "PARK", "RCLIP", "PRESTRIKE", "REANCHOR", "RTHROW", "WALKFLOOR",
-            "NSBOX", "GATES", "PC", "TV", "T", "BELLS", "L2", "AB")
+            "NSBOX", "GATES", "TINYCLIP", "PC", "TV", "T", "BELLS", "L2", "AB")
 
 LAYERS = ("body", "committed", "window", "not_started", "hazard", "death", "margins")
 LAYER_OF = {"body": "body", "collider": "body", "idle_now": "body", "idle": "body",
