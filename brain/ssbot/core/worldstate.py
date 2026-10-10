@@ -377,6 +377,9 @@ class Entity:
     acc: Vec2 = fld(D, (0.0, 0.0))
     facing: E[int] = fld(V, factory=lambda: unknown(1))
     body_polys: list[list[Vec2]] = fld(V, factory=list)
+    # the colliders a nail can hit: body_polys less the range triggers (layer 13), the physics pusher (27) and
+    # terrain blocks (14), whose boxes span 5-47 u in the Forum (forum.md §20); oracle only (the Forum's hit targets)
+    hit_polys: list[list[Vec2]] | None = fld(O, None)
     dmg_boxes: list[DamageBox] = fld(D, factory=list)
     phase: PhasePost | None = fld(D, None)          # A-class bosses / arena enemies only
     keepout: list[Vec2] | None = fld(D, None)       # ordinary enemies: reach union from the tables
@@ -610,6 +613,9 @@ class WorldState:
     events: list[Event] = fld(V, factory=list)
     ledger_rev: int = fld(D, 0)
     perception: PerceptionHealth = fld(V, factory=PerceptionHealth)
+    # the oracle's allies export (Garmond Fighter, Shakra Fighter: name, x, y; on screen when near): their hits knock
+    # enemies back like the hero's (multi_forecast SSBOT_FORUM_RCLIP=2, task precision push S1)
+    allies: list[tuple[str, float, float]] = fld(V, factory=list)
 
     def view(self, profile: str) -> "WorldState":
         """ORACLE: self. VISION_EQUIVALENT: a copy with every O field None, O-only events dropped and O payload

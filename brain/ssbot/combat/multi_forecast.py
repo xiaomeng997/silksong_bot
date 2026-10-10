@@ -59,6 +59,7 @@ counts the request in MultiForecaster.comfort_requests).
 import copy
 import json
 import math
+import os
 from collections import defaultdict
 from dataclasses import dataclass
 
@@ -67,17 +68,215 @@ import numpy as np
 
 from ssbot.combat.enemy_tables import BIN, EMPTY, FORUM_DIR, JMAX, TAIL, EnemyTables, PlaceBatch, TypeTable, \
     WinBatch
-from ssbot.combat.enemy_tracker import TAIL_KEEP_S, EnemyTracker, body_offsets
+from ssbot.combat.branch_model import BranchModel, BranchView, memory_for_table
+from ssbot.combat.enemy_tracker import AIM_AFTER, FACES_LEFT, TAIL_KEEP_S, EnemyTracker, body_offsets
 from ssbot.combat.fastquery import circle_hits
 from ssbot.combat.forecast import active_within, entry_grid, exit_interval
 from ssbot.combat.projectiles import BELL, HAZARD_DV_U_S, RUNE, SKIN_U, HazardPath, HazardTracker, hazard_type
 from ssbot.combat.wave_tracker import WaveTracker
 from ssbot.core.forum import FORUM_TYPES, FORUM_WAVES, HAZARD_ALIASES, HAZARD_OWNER, WAVE_TYPES, _type_key
-from ssbot.core.worldstate import ORACLE, Ev, WorldState
+from ssbot.core.worldstate import ORACLE, VISION_EQUIVALENT, Ev, WorldState
 from ssbot.knowledge import hitbox_tables as hb
 from ssbot.safety.hits_to_death import SupportEvent, SupportSet
 
 MIN_HORIZON_S = 0.8
+# SSBOT_FORUM_TIGHT=1 (task precision push S5, forum.md §29.13): the tight-support bundle, one switch for the precision
+# push's candidate (S1-S4; = the gate config s4tb): every member not set (or set empty) in the environment gets its
+# bundle value, a member set explicitly keeps its own (SSBOT_FORUM_BODYCLIP=0 drops BODYCLIP from the bundle). Not the
+# default: it may become one only when its held-out recall (gate 1) stays 100 % and its re-score (gate 4) adds no miss
+# in total or per enemy type (forum.md §29.13). Applied here, before any switch below is read
+TIGHT_BUNDLE = (("SSBOT_FORUM_RCLIP", "2"), ("SSBOT_FORUM_REANCHOR", "chain"), ("SSBOT_FORUM_RTHROW", "1"),
+                ("SSBOT_FORUM_PRESTRIKE", "1"), ("SSBOT_FORUM_NSBOX", "bin0"), ("SSBOT_FORUM_GATES", "1"),
+                ("SSBOT_FORUM_TINYCLIP", "1"), ("SSBOT_FORUM_BODYCLIP", "1"))
+
+
+def apply_tight(env=os.environ) -> list:
+    """With SSBOT_FORUM_TIGHT on, set every unset (or empty) TIGHT_BUNDLE member of `env`; the names it set."""
+    if env.get("SSBOT_FORUM_TIGHT", "0") in ("", "0"):
+        return []
+    done = []
+    for k, v in TIGHT_BUNDLE:
+        if env.get(k, "") == "":
+            env[k] = v
+            done.append(k)
+    return done
+
+
+TIGHT_SET = apply_tight()
+# a parked later-wave member (not rendered, waiting: EnemyTracker.parked) gets no support (0: the old behaviour)
+PARK = os.environ.get("SSBOT_FORUM_PARK", "1") != "0"
+# SSBOT_FORUM_RCLIP (task "support reach", forum.md §29.11; the person 2026-10-09: a Choristor's whip support 11.7 u
+# away in its wind-up): each enemy's own placements (fine, window, bounding box) and idle body tube are clipped to its
+# real reach from where it is now, in the state it is in now (combat.reach_table: the box its colliders stayed in k
+# frames later in the dev recordings, by its time in that state; without a hit seen for KB_FREE_F frames the
+# no-knockback reach, else every recorded frame's; + the held-out r + the hero half extents); only in the
+# oracle view, for an enemy seen within REACH_SEEN_S, not in a hit-reaction forecast; the families whose templates hold
+# thrown hazards (ForumType.spawns) are not clipped. Off (default): as before, bit-identical
+REACH = os.environ.get("SSBOT_FORUM_RCLIP", "0") not in ("", "0")
+# SSBOT_FORUM_RCLIP=2 (task precision push S1, fix_spec P2: the no-hit reach assumes no hit after the origin either):
+# from the first look-ahead frame at which a hit of the hero CAN reach the enemy (any plan row: the gap between the
+# hero box and the enemy's body closed at the dash / fall speed plus the enemy's own speed, less the swing's reach
+# HIT_REACH_U), the clip box also holds the every-frame reach (knockbacks, a defender's counter after a hit); a hit
+# already seen within KB_FREE_F frames takes the every-frame reach throughout, as with 1. 1: the no-hit reach while no
+# hit was seen (before S1)
+REACH_HIT = os.environ.get("SSBOT_FORUM_RCLIP", "0") == "2"
+# u past the hero box a hero hit reaches (x, y): the Reaper's slash 2.35 (hero_reaper_forum.json rpr_thunk_reach1)
+# + 1.65 slack
+HIT_REACH_U = (4.0, 4.0)
+HERO_V_MAX = (28.0, 30.0)  # u/s: the hero's dash speed (kinematics.dash_speed) and its fall cap (max_fall)
+# SSBOT_FORUM_PRESTRIKE (task precision push S1, fix_spec P1): with "+n" an attack root of PRESTRIKE_FAMS not started is
+# out of the support, and nothing but another family's not-started box held the enemy's own body in the attack's
+# first frames (the Reed's RE_STAB: 21 u/s in Stab Antic while the exported velocity is about 4 u/s; 4.42 u toward
+# the hero, 5.20 u up / down; RE_DEFEND 5.37 u away, 4.63 u up; its own attack collider only 35-39 frames after the
+# start). On: from the root's earliest start to its latest start + PRESTRIKE_F frames, the enemy's real reach from its
+# current state and time in state (combat.reach_table, built on the dev fights: every recorded continuation's
+# colliders k frames later, + the held-out r + the hero half extents; the every-frame part, hits included), as a box
+# of kind "prestrike" (the not_started layer); the oracle view only (the table's reach needs the transform)
+PRESTRIKE = os.environ.get("SSBOT_FORUM_PRESTRIKE", "0") not in ("", "0")
+# SSBOT_FORUM_REANCHOR (task precision push S2, fix_spec F1 / the precision tool's top causes): parts, a comma list
+# ("1": every part; "" / "0": off, as before, bit-identical):
+#   fam    the current attack's family union (the family template from its start: every recorded instance of the
+#          family in every state, the precision tool's largest committed cause) is not placed when every node the walk
+#          gives for the current family (its states and its tail) has its own per-state template; the family's later
+#          states then carry no strike-delay floor (the union held their wind-up bodies before it)
+#   chain  a defender's counter exists only if the defender is hit (the person, fix_spec sec. 7): while a Reed in
+#          RE_DEFEND / a Minister in MI_PARRY is in its stance (not yet hit), its hit-triggered states (DEFENDERS: the
+#          block from the hit, the counter from the hit + the block's shortest dwell) are entered no earlier than the
+#          first look-ahead frame a hit of the hero or an ally can reach it (RCLIP=2's hit trigger, _hero_hit_k), and
+#          not at all when the walk's window for them ends before that; the family union is then not placed either
+#          (it holds every recorded counter), when the per-state templates allow it (as with fam)
+# The kinematic re-anchoring of fix_spec F1 (per-state templates in the frame of the state's entry, re-anchored on
+# every observation) needs templates the build does not make (frames anchor / world only): not a part yet.
+REANCHOR_PARTS = ("fam", "chain")
+
+
+def reanchor_parts(v: str | None) -> frozenset:
+    """The parts of an SSBOT_FORUM_REANCHOR value ("" / "0": none, "1": all, else a comma list)."""
+    v = (v or "").strip()
+    out = frozenset() if v in ("", "0") else frozenset(REANCHOR_PARTS) if v == "1" else \
+        frozenset(p.strip() for p in v.split(",") if p.strip())
+    if out - set(REANCHOR_PARTS):
+        raise ValueError(f"SSBOT_FORUM_REANCHOR: unknown part(s) {sorted(out - set(REANCHOR_PARTS))}")
+    return out
+
+
+REANCHOR = reanchor_parts(os.environ.get("SSBOT_FORUM_REANCHOR"))
+# SSBOT_FORUM_RTHROW (task precision push S2, with RCLIP on; default off): a throw family (REACH_KEEP: its templates
+# also hold every hazard it ever threw, so RCLIP leaves it unclipped) is clipped like any other family until one frame
+# before the earliest look-ahead at which it can enter its release state (THROW_RELEASE: the state its hazard is armed
+# in, the tables' entities.<hazard>.armed_at_boss_state: Bell Throw 8,682 / 8,737, Reed pin Throw 2,139 / 2,153,
+# Clawmaiden spear Spear Fire Recover 492 / 496, Spear Fire is instant before it; the walk's earliest entry), unclipped
+# from then on, and not at all once the instance has entered its release state (a hazard just thrown may have no path
+# yet). Before the release its hazard does not exist; one thrown earlier is its own entity (path / self
+# template). The Clapper's rune bombs and rune slam arm long after the cast (at Idle, Walk, ...): not here
+RTHROW = os.environ.get("SSBOT_FORUM_RTHROW", "0") not in ("", "0")
+# SSBOT_FORUM_TINYCLIP (task precision push S4 (c), with RCLIP on; default off): a Tiny group row (3+ Tinies, one
+# row per cluster and family walk; it stands for every Tiny of its cluster) is clipped by the UNION of its members'
+# reach clips (one copy of the row per member, each cut by that member's clip box), not left unclipped. A cluster with
+# a member without a clip (dead, parked, hidden, not seen for REACH_SEEN_S, a throw) stays unclipped. The precision
+# tool's k12 committed p50 for the Tiny was 69x with RCLIP on (fix_spec sec. 8); the group rows were 14 % of the
+# person's frames beyond the half-screen and in every over-half frame after RCLIP (fix_spec sec. 6 item 10)
+TINYCLIP = os.environ.get("SSBOT_FORUM_TINYCLIP", "0") not in ("", "0")
+# SSBOT_FORUM_BODYCLIP (task precision push S4 (b), with RCLIP on; default off): the idle body tube (dead reckoned and
+# grown by the type's idle growth, past its calibration by the type's top speed, in every direction: 6.7x the real body
+# at k = 12 by the precision tool) is also cut by the body's own reach by (type, state, time in state, part, k)
+# (reach_table BODY_FILE, tools.support_reach clip-build --body, R0 dev only, certified 2-fold like the reach clip,
+# the same no-hit part and hero-hit widening): the body hull at the transform k frames after a frame in that state,
+# whatever followed (attacks included). Only where the reach clip is, and cut like it (a throw's idle tube also
+# stands for what it throws at the release: unclipped from one frame before it with RTHROW, else not clipped)
+BODYCLIP = os.environ.get("SSBOT_FORUM_BODYCLIP", "0") not in ("", "0")
+THROW_RELEASE = {("Pilgrim 03 Song", "CB_THROW"): frozenset({"Throw"}),
+                 ("Song Reed", "RE_THROW"): frozenset({"Throw"}),
+                 ("Song Handmaiden", "CM_SPIN"): frozenset({"Spear Fire", "Spear Fire Recover"})}
+# defender families: (type, family) -> (the state a hit sends it to, the hit-triggered states) (Reed.json /
+# Minister.json attacks.<family>.states; Block 0.483-0.5 s, Parry Block 0.558-0.567 s)
+DEFENDERS = {
+    ("Song Reed", "RE_DEFEND"): ("Block", frozenset({"Block", "Parry Y Aim", "Parry Slash", "Parry Slash End",
+                                                     "Multihit", "Multihit End", "Multihit Clashed"})),
+    ("Song Administrator", "MI_PARRY"): ("Parry Block", frozenset({"Parry Block", "Parry Slash 1", "Parry Slash 2",
+                                                                   "Parry Slash 3", "Parry Slash 4",
+                                                                   "Parry Slash End"})),
+}
+# SSBOT_FORUM_WALKFLOOR (task precision push S3, fix_spec F3; default off): nothing after the walk's root is entered
+# before the root state's earliest exit (its logged dwell minimum - DWELL_SLACK_S after its entry; BIN from the origin
+# when overdue). Without it a non-root node's earliest entry is only floored at -DWELL_SLACK_S, and the zero-dwell idle
+# loop loses one bin of slack per hop down to that floor: at 20261009_085824 f7939 the Bellbearer's next Evade Antic /
+# Throw Antic roots sat at -1 bin while its Evade can end only 0.3167 s after its entry
+WALKFLOOR = os.environ.get("SSBOT_FORUM_WALKFLOOR", "0") not in ("", "0")
+# SSBOT_FORUM_NSBOX (task precision push S3, fix_spec F2; default off): parts, a comma list ("1" = all). bin: a later
+# instance (a not-started root) is placed from its earliest start on, not one bin before it (_emit_bbox's activity
+# start): before its start the enemy's body is the idle / collider tubes' and the current instance's job (the Reed's
+# k0 not-started box at f7939 was 13.9 % of the screen, all of it before any start); bin0: the pre-start bin kept but
+# never at the origin (k0: no not-started box at all; the person's rule "a not-started attack cannot hurt before its
+# antic ends"). bin loses one seen hindsight row at k12 (20261008_231544 a1 f44707, a Minister in Chase whose body ran
+# 6 of 236 cells past the "+g" held idle tube; the pre-start bin of an evade root starting at 0.2 s covered them)
+NSBOX_PARTS = ("bin", "bin0")
+
+
+def nsbox_parts(v: str | None) -> frozenset:
+    """The parts of an SSBOT_FORUM_NSBOX value ("" / "0": none, "1": all, else a comma list)."""
+    v = (v or "").strip().lower()
+    if v in ("", "0"):
+        return frozenset()
+    out = frozenset(NSBOX_PARTS) if v == "1" else frozenset(p.strip() for p in v.split(",") if p.strip())
+    if out - set(NSBOX_PARTS):
+        raise ValueError(f"SSBOT_FORUM_NSBOX: unknown part(s) {sorted(out - set(NSBOX_PARTS))}")
+    return out
+
+
+NSBOX = nsbox_parts(os.environ.get("SSBOT_FORUM_NSBOX"))
+# SSBOT_FORUM_GATES (task precision push S3, fix_spec F5; default off): FSM history gates (fsm_gates.json, mined on R0
+# dev by tools.fsm_gates): once an instance of a gated family starts, no other instance of it starts before the gate's
+# lift state is entered (the Bellbearer: no Evade after an Evade before a Throw Antic). A gated root starts no earlier
+# than one frame after the walk's earliest entry into the lift state, and is dropped when the walk does not reach it;
+# the gate lifts on its lift state, on a transition its table does not know, on death and after its time-out (twice the
+# longest recorded start -> lift gap)
+GATES = os.environ.get("SSBOT_FORUM_GATES", "0") not in ("", "0")
+_FSM_GATES: dict | None = None
+
+
+def fsm_gates(path=None) -> dict:
+    """{(type key, family): (lift state, time-out s)} from fsm_gates.json ({} without it). Read once."""
+    global _FSM_GATES
+    if path is None and _FSM_GATES is not None:
+        return _FSM_GATES
+    p = path or FORUM_DIR / "fsm_gates.json"
+    out = {}
+    if p.exists():
+        for g in json.loads(p.read_text("utf-8")).get("gates", []):
+            out[(g["type"], g["family"])] = (g["lift"], float(g["timeout_s"]))
+    if path is None:
+        _FSM_GATES = out
+    return out
+
+
+PRESTRIKE_FAMS = frozenset({("Song Reed", "RE_STAB"), ("Song Reed", "RE_DEFEND")})
+PRESTRIKE_F = 13         # frames after the start: the body moves before the first own attack collider
+BOX_KINDS = ("death", "arena", "idle", "collider", "hazard", "prestrike")
+REACH_SEEN_S = 2 * BIN
+REACH_KEEP = frozenset((tk, fam) for tk, sp in FORUM_TYPES.items() for _hz, fams in sp.spawns for fam in fams)
+KB_FREE_F = 20            # frames without a hit seen: the no-knockback reach (combat.reach_table.KB_FREE_F)
+NOCLIP = np.iinfo(np.int64).min   # _clip_rows: a row not clipped (iids can be negative: the pooled Tinies)
+CLUSTER0 = NOCLIP + 1             # _clip_rows: CLUSTER0 + c, a Tiny group row of cluster c (SSBOT_FORUM_TINYCLIP)
+_REACH_CLIP: dict = {}
+
+
+def reach_clip(half: tuple[float, float]):
+    """The ReachClip of the table (knowledge/.../forum/reach_clip.npz), None without it; one per half."""
+    key = (round(half[0], 6), round(half[1], 6))
+    if key not in _REACH_CLIP:
+        from ssbot.combat.reach_table import CLIP_FILE, ReachClip
+        _REACH_CLIP[key] = ReachClip.load(FORUM_DIR / CLIP_FILE, half)
+    return _REACH_CLIP[key]
+
+
+def body_clip(half: tuple[float, float]):
+    """The ReachClip of the body table (knowledge/.../forum/body_reach.npz, SSBOT_FORUM_BODYCLIP), None without it."""
+    key = ("body", round(half[0], 6), round(half[1], 6))
+    if key not in _REACH_CLIP:
+        from ssbot.combat.reach_table import BODY_FILE, ReachClip
+        _REACH_CLIP[key] = ReachClip.load(FORUM_DIR / BODY_FILE, half)
+    return _REACH_CLIP[key]
 SUP_HORIZON_S = 0.8
 DWELL_SLACK_S = BIN               # logged dwell ranges are frame-quantised
 WALK_CAP_S = 6.0                  # memoised walks reach this far past the state's entry
@@ -98,6 +297,152 @@ TINY_CLUSTER_U = 4.0              # Tinies in one cell of this grid share one pl
 ENTRY_LAG_S = 1.0                 # a wave's activation -> its member's entry family start (upper bound)
 ENTRY_OWNER = -(1 << 50)          # placement owner of wave w's entries: ENTRY_OWNER - w
 PIECES_S = ((0.4, 6 * BIN), (1.0, 12 * BIN), (math.inf, 24 * BIN))   # start-time piece length by distance
+# Reactive support (task "reactive support", forum.md §22; the person 2026-10-08: the wind-ups are long, dodging once
+# one starts is not too late): an attack that has not started cannot strike before its wind-up. The view's sensing
+# latency: the oracle sees a commit one frame late; the vision view adds the M3 attack-start target (33 ms, DESIGN
+# §3.9.5).
+REACT_LATENCY_S = {ORACLE: BIN, VISION_EQUIVALENT: 3 * BIN}
+# families whose least commit -> first damage is not the wind-up of a new instance (strikes.json): an earlier
+# instance's bell / Reed pin re-armed on the commit, a rune bomb of an earlier cast; their delay is their p5 when
+# ReactConfig.exceptions is "p5", none ("keep") otherwise. Body-only families (no own attack collider: evades, the
+# Clawmaiden's teleport, the Tiny's ram, which can commit point-blank) have no delay.
+REACT_EXCEPT = frozenset({"CB_THROW", "RE_THROW", "CC_CAST"})
+REACT_HOLD_S = COLLIDER_TUBE_S    # ReactConfig.hold: the idle tube grows over this window only (the reaction lag the
+#                                   certification's tubes cover)
+# ReactConfig.notstarted: thrown hazards that fly from where they arm (a deterministic path once thrown, forum.md
+# 14.2): not thrown yet, only their reach over the reaction window; half extents (u) when no box was seen (the pin's
+# 2.0 x 0.1 box in any rotation, the bell's r 0.425 circle)
+REACT_THROWN = {"Song Reed Pin Projectile": (1.0, 1.0), "Throwing Bell": (0.45, 0.45)}
+# ... and the families that throw them (ssbot.core.forum ForumType.spawns): their templates hold every one ever thrown
+REACT_THROW_FAMS = frozenset((tk, fam) for tk, sp in FORUM_TYPES.items() for hz, fams in sp.spawns
+                             if hz in REACT_THROWN for fam in fams)
+# ... except a throw under way whose hazard is not out yet and that no aimed check covers (forum.md §23.12, the review
+# of 2026-10-08: with "+n" nothing else holds the wind-up's bell): the Bellbearer's states before its release (Throw)
+# keep the throw's templates (every bell ever thrown, the support as before "+n"); the Reed's pin is the planner's
+# aimed check from its wind-up on (ForumConfig.pin_aim, on with "+n")
+REACT_KEEP_UNTIL_THROWN = {("Pilgrim 03 Song", "CB_THROW"): frozenset(("Throw Evade", "Roof Avoid", "Throw Antic"))}
+# ReactConfig.bodyreach ("+b"; task forum push 2 track B, the person's wins under the planner, forum.md 25.8 fix 1): the
+# body-only families (no own attack collider: evades, the Clawmaiden's teleport, the Tiny's ram / orbit, the Maestro's
+# defend / summon, the Envoy's ambush) not started are left out like the strikes of "+n": the current-collider tube
+# (the body seen last, grown at the type's top speed over COLLIDER_TUBE_S) is their reach over the reaction window,
+# the escape check holds their later starts. The Reed's are kept (its body was 31 of the 32 misses, forum.md 25.11)
+# unless "+br"
+BODYREACH_KEEP = frozenset({"Song Reed"})
+
+
+@dataclass(frozen=True)
+class ReactConfig:
+    """What the reactive support changes (MultiForecaster.react; None: the support as before, bit-identical).
+    strikes    an attack instance that may start later (a walk root of an attack family with a strike delay) strikes
+               no earlier than its earliest start - one frame + its delay - the view's latency: its family walk
+               template is placed from then on, before it the family template (the logged instances' union over the
+               time since their start: the wind-up's body, time-resolved) at the same start boxes;
+    committed  the current attack instance's later states (not its current state, not its tail) likewise from its
+               start + its delay - the latency (its family template from the start is placed as before);
+    idle       an enemy with its idle body tube: its idle-family roots are left out (the tube holds its idle body; the
+               attack roots' walk templates hold their tails);
+    exceptions REACT_EXCEPT: "keep" (no delay) or "p5";
+    notstarted ("+n", the not-started layer of the person's three-layer support, forum.md §23): instances that have
+               not started are left out of the support altogether when their family has a strike time (strikes.json:
+               an own attack collider or a thrown hazard after a wind-up of at least its least commit -> first
+               damage) and every later idle instance; the escape check holds them (the planner checks an escape from
+               every lock-in of the plan, not only the late ones). Body-only families (evades, the Clawmaiden's
+               teleport, the Tiny's ram: no wind-up to see) stay;
+    hold       ("+g") the idle body tube grows by the type's idle growth over the reaction window (REACT_HOLD_S) only,
+               then keeps that size while it moves along its velocity: an enemy that is not attacking does not come
+               to the hero (the person's note 5 of 2026-10-08: 152 Envoy body hits, none in its walk); a start or a
+               dash shows within the window and the next ticks see it (the R2 recall checks 2-4 frames: unchanged);
+    bodyreach  ("+b", with "+n") the body-only families not started out of the support as well (BODYREACH_KEEP's types
+               kept; "+br": none kept) when the enemy's current-collider tube holds its reaction-window reach (seen
+               within TUBE_MAX_AGE_S); the planner's escape check takes them as threats."""
+    strikes: bool = True
+    committed: bool = False
+    idle: bool = False
+    exceptions: str = "keep"
+    notstarted: bool = False
+    hold: bool = False
+    bodyreach: bool = False
+    bodyreach_all: bool = False
+
+    @classmethod
+    def parse(cls, s: str | None) -> "ReactConfig | None":
+        """'off' / '' -> None; 'delay' (or 'escape': the planner's layer over the same support) with '+'-joined
+        extensions c (committed), i (idle), p5 (exceptions), n (not-started out), g (idle growth held), b / br (body-
+        only families not started out, with n); l (the planner's light cone in its escape check,
+        ForumConfig.light_cone), a (the planner's aimed pins, ForumConfig.pin_aim), k (the planner's lock checks,
+        ForumConfig.lock_check) and s (FORCED_RISK's swept seen key, ForumConfig.seen_sweep): no change to the
+        support."""
+        toks = [t for t in (s or "").strip().lower().split("+") if t]
+        if not toks or toks[0] == "off":
+            return None
+        if toks[0] not in ("delay", "escape"):
+            raise ValueError(f"reactive support {s!r}: off | delay | escape [+c][+i][+p5][+n][+g][+b|+br][+l][+a][+k]"
+                             f"[+s]")
+        bad = set(toks[1:]) - {"c", "i", "p5", "n", "g", "l", "a", "b", "br", "k", "s"}
+        if bad:
+            raise ValueError(f"reactive support {s!r}: unknown extension(s) {sorted(bad)}")
+        if ("b" in toks or "br" in toks) and "n" not in toks:
+            raise ValueError(f"reactive support {s!r}: +b / +br need +n")
+        return cls(True, "c" in toks, "i" in toks, "p5" if "p5" in toks else "keep", "n" in toks, "g" in toks,
+                   "b" in toks or "br" in toks, "br" in toks)
+
+
+_BODY_ONLY: frozenset | None = None
+
+
+def body_only_families(path=None) -> frozenset:
+    """{(type key, family)} of the body-only families (strikes.json: logged instances, none with an own attack
+    collider or a thrown hazard), not the types' idle / entry families. Read once (every forecast asks)."""
+    global _BODY_ONLY
+    if path is None and _BODY_ONLY is not None:
+        return _BODY_ONLY
+    p = path or FORUM_DIR / "strikes.json"
+    out = set()
+    if p.exists():
+        for key, v in json.loads(p.read_text("utf-8")).get("strikes", {}).items():
+            tk, fam = key.split("/", 1)
+            sp = FORUM_TYPES.get(tk)
+            if sp is None or fam in (sp.idle_family, sp.entry_family):
+                continue
+            if not int(v.get("instances_with_attack_colliders") or 0) and int(v.get("instances_without") or 0):
+                out.add((tk, fam))
+    if path is None:
+        _BODY_ONLY = frozenset(out)
+    return frozenset(out)
+
+
+_STRIKE_TAB: dict | None = None
+
+
+def strike_table(path=None) -> dict:
+    """{(type key, family): (least, p5) commit -> first own attack collider or thrown hazard, s} from strikes.json
+    (forum_products Strikes: instances with attack colliders; body-only families are not in it)."""
+    global _STRIKE_TAB
+    if _STRIKE_TAB is None or path is not None:
+        p = path or FORUM_DIR / "strikes.json"
+        out = {}
+        if p.exists():
+            for key, v in json.loads(p.read_text("utf-8")).get("strikes", {}).items():
+                q = v.get("commit_to_first_attack_collider_s") or {}
+                if q.get("n") and q.get("min") is not None and q.get("p5") is not None:
+                    tk, fam = key.split("/", 1)
+                    out[(tk, fam)] = (float(q["min"]), float(q["p5"]))
+        if path is not None:
+            return out
+        _STRIKE_TAB = out
+    return _STRIKE_TAB
+
+
+def strike_delays(rc: ReactConfig, path=None) -> dict:
+    """{(type key, family): delay s} of the families the reactive support delays (ReactConfig docstring)."""
+    out = {}
+    for (tk, fam), (lo, p5) in strike_table(path).items():
+        if fam in REACT_EXCEPT:
+            if rc.exceptions == "p5":
+                out[(tk, fam)] = p5
+        else:
+            out[(tk, fam)] = lo
+    return out
 
 
 def _piece_len(t: float) -> float:
@@ -121,12 +466,20 @@ class WalkNode:
 
 
 def walk(tt: TypeTable, state: str, ctx: tuple | None, dead: bool, overdue: bool, cap: float = WALK_CAP_S,
-         instance_only: bool = False) -> list[WalkNode]:
+         instance_only: bool = False, floor: bool | None = None) -> list[WalkNode]:
     """The support walk (ssbot.knowledge.forum_support.SubjectRecall._walk) from `state` entered at 0 (overdue: the
     state can end at any time from the next frame: entries relative to the origin). ctx: (family, start state) of the
     current instance. Hull of entry times per (state, family, start, kind, dead) node. instance_only: the states of
-    the root's instance and its tail only (a family walk template)."""
+    the root's instance and its tail only (a family walk template). floor (default SSBOT_FORUM_WALKFLOOR): no node
+    after the root is entered before the root's earliest exit."""
     sp = tt.spec
+    lo_min = -DWELL_SLACK_S
+    if WALKFLOOR if floor is None else floor:
+        dw0 = tt.dwell.get(state)
+        if overdue:
+            lo_min = BIN
+        elif dw0 is not None:
+            lo_min = max(exit_interval(0.0, 0.0, dw0, False, DWELL_SLACK_S)[0], -DWELL_SLACK_S)
     idle = sp.idle_family
     nodes: dict[tuple, list] = {}
     todo: list[tuple] = []
@@ -139,7 +492,7 @@ def walk(tt: TypeTable, state: str, ctx: tuple | None, dead: bool, overdue: bool
             # nothing after the walk's root is entered before it: a zero-dwell loop (the Tiny's Ready -> Ready) took
             # one bin of slack per pass down to -333 s at the step cap (forum.md 15.2), so every Tiny's idle family
             # walk spanned 333 s before its start (an arena-wide box over the whole horizon)
-            lo = max(lo, -DWELL_SLACK_S)
+            lo = max(lo, lo_min)
         k = (st, c, d, current)
         iv = nodes.get(k)
         if iv is None:
@@ -152,7 +505,7 @@ def walk(tt: TypeTable, state: str, ctx: tuple | None, dead: bool, overdue: bool
                 if hi > iv[1] + 1e-9:
                     hi = cap
                 if lo < iv[0] - 1e-9:
-                    lo = min(lo, 0.0) if not current else lo
+                    lo = max(min(lo, 0.0), lo_min) if not current else lo
             iv[0], iv[1], iv[2] = min(iv[0], lo), max(iv[1], hi), max(iv[2], p)
         else:
             iv[2] = max(iv[2], p)     # a likelier path alone does not re-walk (scoring only)
@@ -207,18 +560,19 @@ def walk(tt: TypeTable, state: str, ctx: tuple | None, dead: bool, overdue: bool
 class _WalkCache:
     """Memoised walks, split for the placements: the current instance's nodes and the roots of later instances."""
 
-    def __init__(self):
+    def __init__(self, floor: bool | None = None):
+        self.floor = WALKFLOOR if floor is None else floor      # SSBOT_FORUM_WALKFLOOR (walk's floor)
         self.d: dict = {}
         self.s: dict = {}                    # the same key -> {state: its earliest entry} (every state reached)
         self.hits = 0
         self.misses = 0
 
     def get(self, tt: TypeTable, state: str, ctx, dead: bool, overdue: bool) -> tuple[list, list]:
-        k = (tt.tk, state, ctx, dead, overdue)
+        k = (tt.tk, state, ctx, dead, overdue, self.floor)
         r = self.d.get(k)
         if r is None:
             self.misses += 1
-            nodes = walk(tt, state, ctx, dead, overdue)
+            nodes = walk(tt, state, ctx, dead, overdue, floor=self.floor)
             r = self.d[k] = ([n for n in nodes if n.kind == "cur"],
                              [n for n in nodes if n.kind == "new" and n.state == n.start])
             st: dict = {}
@@ -233,7 +587,7 @@ class _WalkCache:
     def states(self, tt: TypeTable, state: str, ctx, dead: bool, overdue: bool) -> dict[str, float]:
         """Every state the walk reaches, current instance or later ones: its earliest entry (relative to the walk's
         reference time)."""
-        k = (tt.tk, state, ctx, dead, overdue)
+        k = (tt.tk, state, ctx, dead, overdue, self.floor)
         if k not in self.s:
             self.get(tt, state, ctx, dead, overdue)
         return self.s[k]
@@ -252,8 +606,12 @@ class Subject:
     hp_est: float
     hp_sd: float
     pos: tuple | None
-    t_free: float                 # earliest time its current attack can end (s from the origin; 0 when idle)
+    t_free: float                 # earliest time its current attack can end (s from the origin: its start + the
+                                  # family's duration p0.5; 0 when idle)
     t_strike: float               # earliest time it may start a new attack (s from the origin; inf: none in H)
+    # the branch model (MultiForecaster(branch=...)): {next family or "wait:<state>": p} when it is in a modelled
+    # decision state (scoring only: P / J, O / BAIT; never the support)
+    next_p: dict | None = None
 
 
 @dataclass(slots=True)
@@ -290,8 +648,10 @@ class MultiForecaster:
 
     def __init__(self, tables: EnemyTables | None = None, view: str = ORACLE, boss=None, margin: float = 0.0,
                  waves: bool = True, collider_tube: bool = True, self_templates: str = "auto",
-                 tiny_group: int = TINY_GROUP):
+                 tiny_group: int = TINY_GROUP, branch: BranchModel | None = None):
         self.tables = tables
+        # the branch model (R5): history per enemy and Subject.next_p; scoring only, the placements do not see it
+        self.bv = BranchView(branch) if branch is not None and boss is None else None
         self.view = view
         self.boss = boss
         self.margin = margin
@@ -302,6 +662,16 @@ class MultiForecaster:
         # for every hazard in the vision view; "all": self templates for every hazard too; "none": paths only
         self.self_templates = self_templates
         self.tiny_group = tiny_group
+        self.reach = REACH                    # SSBOT_FORUM_RCLIP: each enemy's support clipped to its real reach
+        self.reach_hit = REACH_HIT            # SSBOT_FORUM_RCLIP=2: ... widened from a hero hit's first reach on
+        self.prestrike = PRESTRIKE            # SSBOT_FORUM_PRESTRIKE: the pre-strike reach of a not-started root
+        self.reanchor = REANCHOR              # SSBOT_FORUM_REANCHOR: its parts (fam, chain)
+        self.rthrow = RTHROW                  # SSBOT_FORUM_RTHROW: a throw family clipped until its release
+        self.tinyclip = TINYCLIP              # SSBOT_FORUM_TINYCLIP: a Tiny group row cut by its members' clips
+        self.bodyclip = BODYCLIP              # SSBOT_FORUM_BODYCLIP: the idle body tube cut by the body's reach
+        self.nsbox = NSBOX                    # SSBOT_FORUM_NSBOX: its parts (bin, bin0)
+        self.gates = GATES                    # SSBOT_FORUM_GATES: FSM history gates on the walk's roots
+        self.react: ReactConfig | None = None   # reactive support (ReactConfig; None: as before)
         self.model = _Shim._Model()
         self.query_c = None
         self.targets = _Shim._Targets()
@@ -379,6 +749,8 @@ class MultiForecaster:
                 self.had_state.add(iid)
             if was_dead and not tr.dead and tr.table.spec.pooled:
                 tr.revive()
+        if self.bv is not None:
+            self.bv.observe(T, ws, self.trackers)
         self.hazards.update(ws)
         self._self_hazards(ws, T)
         if self.use_waves:
@@ -387,7 +759,24 @@ class MultiForecaster:
             self.waves.update(ws)
 
     def _new(self, iid: int, tk: str) -> None:
-        self.trackers[iid] = EnemyTracker(self.tables.types[tk], self.view, iid, self.offsets.get(tk))
+        tr = self.trackers[iid] = EnemyTracker(self.tables.types[tk], self.view, iid, self.offsets.get(tk))
+        if self.bv is not None:
+            tr.mem = memory_for_table(self.tables.types[tk], self.bv.model)
+
+    def branch_probs(self, iid: int, state: str | None = None) -> dict[str, float] | None:
+        """The branch model's {successor: p} for enemy iid's decision `state` (default: its current state) taken now
+        (None: no branch model, unknown enemy or a state the model does not cover). Scoring only."""
+        tr = self.trackers.get(iid)
+        if self.bv is None or tr is None:
+            return None
+        return self.bv.branch_probs(tr, self.t, self.trackers, state)
+
+    def next_attack_probs(self, iid: int) -> dict[str, float] | None:
+        """{next attack family or "wait:<state>": p} for enemy iid in a modelled decision state (Subject.next_p)."""
+        tr = self.trackers.get(iid)
+        if self.bv is None or tr is None:
+            return None
+        return self.bv.next_attack_probs(tr, self.t, self.trackers)
 
     def _self_hazards(self, ws: WorldState, T: float) -> None:
         """Thrown hazards placed by their self templates (forum_support.SubjectTracker.hazard): armed when a damage
@@ -427,17 +816,18 @@ class MultiForecaster:
         """A bbox-only id: per time bin since the instance's start, the bounding box of every state the instance
         can reach from `start` and its tail (walk instance_only), each per-state template's box table time-dilated
         over its entry interval (sparse-table window unions). Built once."""
-        key = (tt.tk, fam, start, frame)
+        fl = self.walks.floor
+        key = (tt.tk, fam, start, frame, fl)
         if key in self._fwalk:
             return self._fwalk[key]
         store = self.tables.store
-        skey = f"fwalk/{tt.tk}/{fam}/{start}/{frame}"
+        skey = f"fwalk{'+wf' if fl else ''}/{tt.tk}/{fam}/{start}/{frame}"
         i = store.coarse_keys.get(skey)
         if i is not None and i in store._bb:          # built by an earlier forecaster on these tables
             self._fwalk[key] = i
             return i
         parts = []
-        for nd in walk(tt, start, (fam, start), False, False, instance_only=True):
+        for nd in walk(tt, start, (fam, start), False, False, instance_only=True, floor=fl):
             tid = self.tables.key_id(fam, TAIL if nd.state == TAIL else nd.state, frame)
             if tid is None:
                 continue
@@ -458,7 +848,7 @@ class MultiForecaster:
             acc[:, 1] = np.minimum(acc[:, 1], b[:, 1])
             acc[:, 2] = np.maximum(acc[:, 2], b[:, 2])
             acc[:, 3] = np.maximum(acc[:, 3], b[:, 3])
-        i = store.add_coarse_base(f"fwalk/{tt.tk}/{fam}/{start}/{frame}", None)
+        i = store.add_coarse_base(skey, None)
         store.add_bbox(i, acc, u0 * BIN)
         self._fwalk[key] = i
         return i
@@ -532,6 +922,8 @@ class MultiForecaster:
                     continue
                 t2 = copy.copy(tr)
                 t2.cur = copy.copy(tr.cur)
+                if t2.cur is not None:
+                    t2.cur.visited = set(tr.cur.visited)    # enter() adds to it (RTHROW)
                 t2.ends = list(tr.ends)
                 t2.kill(T)
                 self.trackers[i] = t2
@@ -600,6 +992,8 @@ class MultiForecaster:
         for to in ([to_state] if isinstance(to_state, str) else to_state):
             t2 = copy.copy(tr)
             t2.cur = copy.copy(tr.cur)
+            if t2.cur is not None:
+                t2.cur.visited = set(tr.cur.visited)    # enter() adds to it (RTHROW)
             t2.ends = list(tr.ends)
             t2.enter(to, t_react)
             b.subject(t2)
@@ -688,53 +1082,62 @@ class _Builder:
         self._maestro: bool | None = None    # a Maestro in play (lazily)
         self._summon_t: float | None = None  # the earliest a Maestro in play can enter Summon (lazily)
         self.react_box: dict = {}            # iid -> (cx, cy, hx, hy): a hit reaction's anchor box (forecast_reaction)
+        self.release: dict = {}              # iid -> its throw's earliest release, s from the origin (RTHROW)
+        self.clip_fam: dict = {}             # iid -> its throw family clipped until the release (RTHROW)
+        self.body_clip: dict = {}            # iid -> its body reach clip boxes by look-ahead (BODYCLIP)
+        self.react = fc.react                # reactive support (ReactConfig) or None
+        self.delays = strike_delays(fc.react) if fc.react is not None else {}
+        self.body_only = body_only_families() if fc.react is not None and fc.react.bodyreach else frozenset()
+        self.lat = REACT_LATENCY_S.get(fc.view, 3 * BIN)
 
     # ---- placements ----
 
-    def _fine(self, tid, e_lo: float, e_hi: float, anchor, mirror: int, owner: int, fam, committed: bool, p: float):
-        """Fine placements, one per entry bin (the template's own +-1 bin covers between them)."""
+    def _fine(self, tid, e_lo: float, e_hi: float, anchor, mirror: int, owner: int, fam, committed: bool, p: float,
+              ton: float = -math.inf):
+        """Fine placements, one per entry bin (the template's own +-1 bin covers between them). ton: no contact
+        before it (s from the origin; the reactive support's strike delay)."""
         if tid < 0:                               # kept only coarse
-            self._window(tid, e_lo, e_hi, anchor, mirror, owner, fam, committed, p)
+            self._window(tid, e_lo, e_hi, anchor, mirror, owner, fam, committed, p, ton)
             return
         tpl = self.store.tpls[tid]
         t0, t1 = tpl.t0, tpl.t1
         ax, ay = (anchor if anchor is not None else (math.nan, math.nan))
         for e in entry_grid(e_lo, e_hi):
-            if active_within(e + t0, e + t1, self.H):
+            if active_within(max(e + t0, ton), e + t1, self.H):
                 self.fine.append((tid, -e, ax, ay, mirror))
-                self.fine_m.append((owner, fam, committed, p, e + t0, e + t1))
+                self.fine_m.append((owner, fam, committed, p, max(e + t0, ton), e + t1, ton))
 
     def _window(self, tid, e_lo: float, e_hi: float, anchor, mirror: int, owner: int, fam, committed: bool,
-                p: float):
+                p: float, ton: float = -math.inf):
         """One window placement: every entry in [e_lo, e_hi] at once (the coarse base's time pyramid)."""
         t0, t1 = self.store.span(tid)
         lo, hi = max(e_lo, -BIN - t1), min(e_hi, self.H + BIN - t0)
-        if hi < lo - 1e-9:
+        if hi < lo - 1e-9 or ton > hi + t1 + 1e-9 or ton > self.H + BIN:
             return
         ax, ay = (anchor if anchor is not None else (math.nan, math.nan))
         self.win.append((tid, lo, hi, ax, ay, mirror))
-        self.win_m.append((owner, fam, committed, p, lo + t0, hi + t1))
+        self.win_m.append((owner, fam, committed, p, max(lo + t0, ton), hi + t1, ton))
 
     def _bbox(self, tid, e_lo: float, e_hi: float, cx: float, cy: float, hx: float, hy: float, mir: int,
-              owner: int, fam, committed: bool, p: float):
+              owner: int, fam, committed: bool, p: float, ton: float = -math.inf):
         """Entries in [e_lo, e_hi] at anchors in the box (cx +- hx, cy +- hy): the template's per-bin bounding box
         over the window, grown by the anchor box; mir 0: both mirrors."""
         self._bbox_rows(tid, np.array([e_lo]), np.array([e_hi]), np.array([[cx, cy, hx, hy]]), mir, owner, fam,
-                        committed, p)
+                        committed, p, ton)
 
     def _bbox_rows(self, tid, e0: np.ndarray, e1: np.ndarray, boxes: np.ndarray, mir: int, owner: int, fam,
-                   committed: bool, p: float):
+                   committed: bool, p: float, ton: float = -math.inf):
         """_bbox for n entry windows at once (boxes [n, 4]: cx, cy, hx, hy); an anchor box wider than COARSE_MAX_U
         places an arena-wide box instead."""
         t0, t1 = self.store.span(tid)
         lo = np.maximum(e0, -BIN - t1)
         hi = np.minimum(e1, self.H + BIN - t0)
-        ok = hi >= lo - 1e-9
+        ok = (hi >= lo - 1e-9) & (ton <= hi + t1 + BIN)
         if not ok.any():
             return
         big = ok & (np.maximum(boxes[:, 2], boxes[:, 3]) > COARSE_MAX_U)
         for i in np.flatnonzero(big):
-            self._arena(owner, lo[i] + t0 - BIN, hi[i] + t1 + BIN)
+            self._arena(owner, max(lo[i] + t0 - BIN, ton), hi[i] + t1 + BIN)
         sel = ok & ~big
         n = int(sel.sum())
         if not n:
@@ -743,8 +1146,8 @@ class _Builder:
         code = self.fam_code.setdefault(fam, len(self.fam_code))
         self.bb_chunks.append((np.full(n, owner, np.int64), np.full(n, code, np.int64), np.full(n, committed),
                                np.full(n, p), np.full(n, tid, np.int64), lo[sel], hi[sel], boxes[sel],
-                               np.full(n, mir, np.int64), lo[sel] + t0 - BIN, hi[sel] + t1 + BIN,
-                               np.full(n, -1, np.int64)))
+                               np.full(n, mir, np.int64), np.maximum(lo[sel] + t0 - BIN, ton), hi[sel] + t1 + BIN,
+                               np.full(n, -1, np.int64), np.full(n, ton)))
 
     def _arena(self, owner: int, t_from: float, t_to: float) -> None:
         """An arena-wide box of owner over [t_from, t_to]: the union of its windows, overlapping ones merged (forum.md
@@ -752,14 +1155,14 @@ class _Builder:
         horizon, and every plan of a Maestro wave in contact at frame 0)."""
         self.arena.setdefault(owner, []).append((float(t_from), float(t_to)))
 
-    def _place_anchor(self, tid, lo, hi, anc, owner, fam, committed, p):
+    def _place_anchor(self, tid, lo, hi, anc, owner, fam, committed, p, ton: float = -math.inf):
         (ax, ay), m, sd = anc
         if sd > 1e-9:                             # an anchor known to a box (the vision view's offset spread)
-            self._bbox(tid, lo, hi, ax, ay, sd, sd, m, owner, fam, committed, p)
+            self._bbox(tid, lo, hi, ax, ay, sd, sd, m, owner, fam, committed, p, ton)
         elif tid >= 0 and hi - lo <= FINE_MAX_BINS * BIN + 1e-9:
-            self._fine(tid, lo, hi, (ax, ay), m, owner, fam, committed, p)
+            self._fine(tid, lo, hi, (ax, ay), m, owner, fam, committed, p, ton)
         else:
-            self._window(tid, lo, hi, (ax, ay), m, owner, fam, committed, p)
+            self._window(tid, lo, hi, (ax, ay), m, owner, fam, committed, p, ton)
 
     # ---- one enemy ----
 
@@ -833,6 +1236,13 @@ class _Builder:
             self.boxes.append((tr.iid, "death", *tr.death_box, 0.0, 0.0, None, -BIN, tr.t_dead + DEATH_TAIL_S - T,
                                0.0))
         self._tails(tr)
+        wk = self._wave_wake(tr) if PARK and tr.parked and not tr.dead else None
+        if PARK and tr.parked and not tr.dead and (wk is None or wk - T > H + BIN):
+            # parked off-stage before its entry (not rendered, waiting) and its wave not activating within the horizon:
+            # no collider tube at the parked spot, no walk (the person 2026-10-09: a Reed in Fly In Ready drew a fixed
+            # box with no enemy; forum.md §29.4); its wave queued: walked from the activation as before
+            self.subjects.append(self._subject_row(tr, False, math.inf))
+            return
         # a killed Tiny comes back only through a Maestro's summon: walked on after its death only while one is in play
         if tr.dead and (not sp.pooled or not self._maestro_in_play()) or tr.state is None or tr.t_entry is None:
             # unknown: an enemy that had a state and lost it. One whose Control FSM never ran is parked, not in play
@@ -874,29 +1284,83 @@ class _Builder:
                      and T - tr.seen_T <= TUBE_MAX_AGE_S and tt.tk in tubes.growth)
         anc = (cur.anchor, cur.mirror, cur.sd) if cur is not None and cur.anchor is not None else None
         committed_now = cur is not None and cur.family != sp.idle_family
-        if committed_now and anc is not None:
+        # reactive support, not started, oracle view: a throw (its templates hold every pin / bell ever thrown, in every
+        # direction: forum.md §23) is its body (the tube) while what it throws is on its path once thrown
+        thrown = self._thrown(tr) and committed_now
+        # aimed (SSBOT_FORUM_AIM, tools.forum_aim): the instance reached its family's aim state; the rest of it is the
+        # aim template anchored where the enemy was then, in place of the family's committed union (the family
+        # template from the start, the family's per-state nodes, a re-anchor); its tail nodes stay
+        aim_tid = None
+        if committed_now and not thrown and cur.aim_anchor is not None:
+            # its direction bin's template; a bin without one (too few instances, or not certified held out): the
+            # family's union as before
+            aim_tid = tables.key_id(cur.family, f"aim@{cur.aim_state}#{cur.aim_bin}", "anchor")
+            if aim_tid is not None and aim_tid >= 0:
+                self._place_anchor(aim_tid, cur.aim_t - T, cur.aim_t - T, (cur.aim_anchor, cur.aim_mirror, cur.aim_sd),
+                                   tr.iid, cur.family, True, 1.0)
+            else:
+                aim_tid = None
+        ra = getattr(self.fc, "reanchor", frozenset())
+        chain = None                              # SSBOT_FORUM_REANCHOR chain: (trigger, its states, the earliest hit)
+        drop_union = False
+        if ra and committed_now and anc is not None and not thrown and aim_tid is None:
+            if "chain" in ra and (tt.tk, cur.family) in DEFENDERS and tr.state not in DEFENDERS[(tt.tk, cur.family)][1]:
+                trig, cst = DEFENDERS[(tt.tk, cur.family)]
+                chain = (trig, cst, self._hero_hit_k(tr) * BIN, tt.dwell.get(trig, (0.0, 0.0))[0])
+            if "fam" in ra or chain is not None:
+                fam_nodes = [nd for nd in cur_nodes if nd.family == cur.family]
+                drop_union = bool(fam_nodes) and all(
+                    tables.key_id(nd.family, TAIL if nd.state == TAIL else nd.state, "anchor") is not None
+                    for nd in fam_nodes)
+        if committed_now and anc is not None and not thrown and aim_tid is None and not drop_union:
             # the current attack's family template from its start (the family-wide union)
             fid = tables.key_id(cur.family, None, "anchor")
             if fid is not None:
                 self._place_anchor(fid, cur.t_start - T, cur.t_start - T, anc, tr.iid, cur.family, True, 1.0)
-        if anc is not None and not (idle_tube and cur.family == sp.idle_family):
+        # reactive support, committed: the current attack's later states strike no earlier than its start + its delay
+        # - the latency (the family template from its start above holds its wind-up)
+        c_ton = -math.inf
+        if committed_now and self.react is not None and self.react.committed:
+            d = self.delays.get((tt.tk, cur.family))
+            if d is not None:
+                c_ton = cur.t_start - T + d - self.lat
+        if committed_now and getattr(self.fc, "rthrow", False) and (tt.tk, cur.family) in THROW_RELEASE:
+            rel_st = THROW_RELEASE[(tt.tk, cur.family)]
+            # released already (this state or an earlier one of the instance): not clipped at all, a hazard just
+            # thrown may have no path yet (S1: a bell in flight with no path, 20261008_231544 a1 f26455 / f26467)
+            rel = 0.0 if tr.state in rel_st or cur.start in rel_st or cur.visited & rel_st else math.inf
             for nd in cur_nodes:
+                if nd.family == cur.family and nd.state in rel_st:
+                    rel = min(rel, 0.0 if nd.current else max(ref + nd.lo - T, 0.0))
+            self.release[tr.iid] = rel
+        if anc is not None and not (idle_tube and cur.family == sp.idle_family) and not thrown:
+            for nd in cur_nodes:
+                if aim_tid is not None and nd.family == cur.family and nd.state != TAIL                         and nd.state not in AIM_AFTER.get((tt.tk, cur.family), ()):
+                    continue
                 if nd.current:
                     lo = hi = tr.t_entry - T          # the current state: its entry
                 else:
                     lo, hi = max(ref + nd.lo - T, BIN), max(ref + nd.hi - T, BIN)
+                if chain is not None and not nd.current and nd.family == cur.family and nd.state in chain[1]:
+                    # a hit-triggered state: entered at the hit (the trigger) or after the block (the rest)
+                    lo = max(lo, chain[2] + (0.0 if nd.state == chain[0] else chain[3]) - DWELL_SLACK_S)
+                    if lo > hi + 1e-9:
+                        continue
                 if lo > H + BIN:
                     continue
                 key_state = TAIL if nd.state == TAIL else nd.state
                 tid = tables.key_id(nd.family, key_state, "anchor")
                 if tid is not None:
-                    self._place_anchor(tid, lo, hi, anc, tr.iid, nd.family, nd.family != sp.idle_family, nd.p)
+                    ton = c_ton if not nd.current and nd.state != TAIL and nd.family == cur.family \
+                        and not drop_union else -math.inf
+                    self._place_anchor(tid, lo, hi, anc, tr.iid, nd.family, nd.family != sp.idle_family, nd.p, ton)
                 if nd.family == sp.entry_family:
                     wid = tables.key_id(nd.family, key_state, "world_all")
                     if wid is not None:
                         self._window(wid, lo, hi, None, 1, tr.iid, nd.family, True, nd.p)
         rb = self.react_box.get(tr.iid)
-        if committed_now and cur.re_state is not None and (cur.re_anchor is not None or rb is not None):
+        if committed_now and not thrown and aim_tid is None and cur.re_state is not None \
+                and (cur.re_anchor is not None or rb is not None):
             # re-anchored (forum.md 15.1): an attack that moved since its start (the anchor frame's templates hold the
             # logged travel only) is also the family walk of an instance starting at the start state it entered,
             # anchored where the enemy was then (13.13: the Clawmaiden's lunge after a 3.3 u flight); a hit
@@ -909,26 +1373,59 @@ class _Builder:
                                True, 1.0)
                 else:
                     self._bbox(rid, cur.re_t - T, cur.re_t - T, *rb, 0, tr.iid, cur.family, True, 1.0)
-        if cur is not None and anc is None and not (idle_tube and cur.family == sp.idle_family):
+        if cur is not None and anc is None and not (idle_tube and cur.family == sp.idle_family) and not thrown \
+                and aim_tid is None:
             # the current instance's anchor is not known (not exported at its start): its family walk from the
             # start, anchored where the enemy is dead-reckoned to then (a hit reaction: its anchor box)
             self._place_family(tr, cur.family, cur.start, cur.t_start - T, cur.t_start - T, 1.0, committed_now,
                                boxes_of=None if rb is None else (lambda e0, e1: np.tile(rb, (len(e0), 1))))
         t_strike = math.inf
+        rc = self.react
+        ns = strike_table() if rc is not None and rc.notstarted else None
+        # (an idle enemy, its idle body tube placed: "+n" leaves the later idle instances out, so after an attack the
+        # roots that may follow it hold its body (R2 recall, the Clapper's Idle after Slam Recover: forum.md §27); and
+        # the collider tube below exists: seen lately, a box or a hull at its position, not waiting for its wave)
+        body_reach = (ns is not None and rc.bodyreach and (rc.bodyreach_all or tt.tk not in BODYREACH_KEEP)
+                      and idle_tube and self.fc.collider_tube and T - tr.seen_T <= TUBE_MAX_AGE_S and wake is None
+                      and (tr.seen_box is not None or (tr.pos is not None and tt.tk in tubes.hull)))
+        pre = None                                    # SSBOT_FORUM_PRESTRIKE: [earliest, latest] start dropped
+        gate = self._gate_floor(tr, ctx, overdue, ref) if getattr(self.fc, "gates", False) else None
         for nd in roots:
             lo, hi = max(ref + nd.lo - T, BIN), max(ref + nd.hi - T, BIN)
+            if gate and nd.family in gate:
+                # SSBOT_FORUM_GATES: not before its lift state is entered (inf: the walk does not reach it)
+                lo = max(lo, gate[nd.family])
+                if lo > hi + 1e-9:
+                    continue
             if lo > H + BIN:
                 continue
             if nd.family != sp.idle_family:
                 t_strike = min(t_strike, lo)
+            elif rc is not None and rc.idle and idle_tube:
+                continue                              # reactive support, idle: the tube holds its idle body
+            if ns is not None and nd.family != sp.entry_family and (nd.family == sp.idle_family
+                                                                    or (tt.tk, nd.family) in ns):
+                if (tt.tk, nd.family) in PRESTRIKE_FAMS:
+                    pre = (lo, hi) if pre is None else (min(pre[0], lo), max(pre[1], hi))
+                continue                              # reactive support, not started: the escape check holds it
+            if body_reach and nd.family != sp.idle_family and (tt.tk, nd.family) in self.body_only:
+                continue                              # "+b": the collider tube holds its reaction window, the escape
+                #                                       check its later starts
             fid = self.fc.family_walk_id(tt, nd.family, nd.start, "anchor")
             if fid is not None:
-                self.root_buf.append((tr, fid, lo, min(hi, H + BIN), nd.p, nd.family))
+                d = self.delays.get((tt.tk, nd.family)) if rc is not None and rc.strikes else None
+                if d is None:
+                    self.root_buf.append((tr, fid, lo, min(hi, H + BIN), nd.p, nd.family))
+                else:
+                    ftid = tables.key_id(nd.family, None, "anchor")
+                    self.root_buf.append((tr, fid, lo, min(hi, H + BIN), nd.p, nd.family, d, ftid))
             if nd.family == sp.entry_family:
                 wid = self.fc.family_walk_id(tt, nd.family, nd.start, "world_all")
                 if wid is not None:
                     self._bbox(wid, lo, hi, 0.0, 0.0, 0.0, 0.0, 1, tr.iid, nd.family, False, nd.p)
-        if idle_tube:
+        if pre is not None and getattr(self.fc, "prestrike", False):
+            self._prestrike(tr, *pre)
+        if idle_tube or thrown:
             self._idle_tube(tr)
         # (a waiting wave member's collider cannot move before its wave is activated)
         if self.fc.collider_tube and T - tr.seen_T <= TUBE_MAX_AGE_S and (wake is None or wake - T <= COLLIDER_TUBE_S):
@@ -941,17 +1438,57 @@ class _Builder:
                                    -BIN, COLLIDER_TUBE_S, tr.seen_T - T))
         self.subjects.append(self._subject_row(tr, True, t_strike))
 
+    def _gate_floor(self, tr: EnemyTracker, ctx, overdue: bool, ref: float) -> dict:
+        """SSBOT_FORUM_GATES: {gated family: its roots' earliest start (s from the origin)} of the enemy's active gates
+        (fsm_gates: its family started, its lift state not entered since, no unknown transition since, within the
+        time-out): one frame after the walk's earliest entry into the lift state, inf when the walk does not reach
+        it. The oracle view only (the vision view's states can miss the lift state's entry)."""
+        if self.fc.view != ORACLE or tr.dead:
+            return {}
+        T = self.origin
+        out = {}
+        for (tk, fam), (lift, tmo) in fsm_gates().items():
+            ts = tr.last_start.get(fam) if tk == tr.tk else None
+            if ts is None or T - ts > tmo or tr.t_odd >= ts or tr.last_entry.get(lift, -math.inf) >= ts:
+                continue
+            st = self.fc.walks.states(tr.table, tr.state, ctx, tr.dead, overdue)
+            s_lo = st.get(lift)
+            g = math.inf if s_lo is None else ref + s_lo - T + BIN
+            out[fam] = max(out.get(fam, -math.inf), g)
+        return out
+
     def _subject_row(self, tr: EnemyTracker, alive: bool, t_strike: float) -> Subject:
         c = tr.cur
         committed = c is not None and c.family != tr.table.spec.idle_family
+        t_free = 0.0
+        if committed:
+            # its current attack's earliest end: the start + the family's logged duration p0.5 (the walk's own
+            # earliest exit is the rare abort's ~0: a Jump Antic -> Start Battle? at 0.0 s; used by L2's Buddy rule)
+            f = tr.table.families.get(c.family)
+            if f is not None and c.t_start is not None:
+                t_free = max(0.0, c.t_start + f.dur[0] - self.origin)
+        bv = self.fc.bv
+        nxt = None if bv is None or not alive or tr.dead else bv.next_attack_probs(tr, self.fc.t, self.fc.trackers)
         return Subject(tr.iid, tr.tk, alive and not tr.dead, tr.in_play, committed, None if c is None else c.family,
-                       tr.state, tr.hp_est, tr.hp_sd, tr.pos, 0.0, t_strike)
+                       tr.state, tr.hp_est, tr.hp_sd, tr.pos, t_free, t_strike, nxt)
+
+    def _thrown(self, tr: EnemyTracker) -> bool:
+        """ReactConfig.notstarted in the oracle view (where a thrown pin / bell is on its path): the enemy's throw
+        family (REACT_THROW_FAMS) is its body plus its hazards' paths, not its templates; a Bellbearer's throw before
+        its release keeps them (REACT_KEEP_UNTIL_THROWN)."""
+        if not (self.react is not None and self.react.notstarted and self.fc.view == ORACLE
+                and tr.cur is not None and (tr.tk, tr.cur.family) in REACT_THROW_FAMS):
+            return False
+        return tr.state not in REACT_KEEP_UNTIL_THROWN.get((tr.tk, tr.cur.family), ())
 
     def _tails(self, tr: EnemyTracker) -> None:
         T = self.origin
+        ns = self.react is not None and self.react.notstarted and self.fc.view == ORACLE
         for inst in tr.ends:
             if inst.t_end is None or T - inst.t_end > TAIL_KEEP_S or inst.anchor is None:
                 continue
+            if ns and (tr.tk, inst.family) in REACT_THROW_FAMS:
+                continue                      # the pins / bells it threw are on their paths
             tid = self.tables.key_id(inst.family, TAIL, "anchor")
             if tid is not None:
                 e = inst.t_end - T
@@ -1003,6 +1540,24 @@ class _Builder:
         if wid is not None:
             self._bbox(wid, float(e0s[0]), float(e1s[-1]), 0.0, 0.0, 0.0, 0.0, 1, owner, fam, committed, p)
 
+    def _prestrike(self, tr: EnemyTracker, lo: float, hi: float) -> None:
+        """SSBOT_FORUM_PRESTRIKE: the enemy's real reach from its current state (reach_table, every-frame part) over
+        [lo, hi + PRESTRIKE_F frames] (look-ahead s), a "prestrike" box; nothing without the table, its transform, a
+        state, or outside the oracle view."""
+        fc = self.fc
+        if fc.view != ORACLE or tr.pos is None or tr.state is None or tr.flip is None:
+            return
+        rc = reach_clip(fc.half)
+        if rc is None:
+            return
+        age = max(self.origin - tr.seen_T, 0.0)
+        tis = (tr.seen_T - tr.t_entry) if tr.t_entry is not None else 0.0
+        W = rc.world(tr.tk, tr.state, tis, 0, tr.pos, FACES_LEFT[tr.flip], int(round(age / BIN)))
+        if not np.isfinite(W).all(axis=1).any():
+            return
+        self.boxes.append((tr.iid, "prestrike", 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, ("boxes", W), lo - BIN,
+                           hi + PRESTRIKE_F * BIN, 0.0))
+
     def _idle_tube(self, tr: EnemyTracker) -> None:
         tubes = self.tables.tubes
         b = tr.seen_box
@@ -1011,7 +1566,10 @@ class _Builder:
             if h is None or tr.pos is None:
                 return
             b = (tr.pos[0] + h[0], tr.pos[1] + h[1], tr.pos[0] + h[2], tr.pos[1] + h[3])
-        self.boxes.append((tr.iid, "idle", *b, tr.vel[0], tr.vel[1], ("idle", tr.tk), -BIN, self.H + BIN,
+        # reactive support, hold: the growth stops at the reaction window's end (dt since the sighting)
+        grow = ("idle", tr.tk) if self.react is None or not self.react.hold else \
+            ("idle", tr.tk, (self.origin - tr.seen_T) + REACT_HOLD_S)
+        self.boxes.append((tr.iid, "idle", *b, tr.vel[0], tr.vel[1], grow, -BIN, self.H + BIN,
                            tr.seen_T - self.origin))
 
     def groups(self) -> None:
@@ -1075,6 +1633,18 @@ class _Builder:
         y1 = py[s] + vy[s] * mid + np.abs(vy[s]) * half + g
         owner = np.array([t.iid for t in tlist], np.int64)[s]
         fam_c = np.array([self.fam_code.setdefault(b[5], len(self.fam_code)) for b in buf], np.int64)[ri]
+        ton = None
+        if any(len(b) > 6 for b in buf):
+            # reactive support, strikes: a delayed root's walk template from its earliest start - a frame + its
+            # delay - the latency on; before that its family template (the wind-up, time-resolved) at the same boxes
+            d = np.array([b[6] if len(b) > 6 else np.nan for b in buf], np.float64)[ri]
+            ton = np.where(np.isnan(d), -np.inf, np.maximum(e0 - BIN, 0.0) + d - self.lat)
+            ft = [b[7] if len(b) > 7 else None for b in buf]
+            fm = np.array([x is not None for x in ft])[ri] & ~np.isnan(d)
+            if fm.any():
+                ftid = np.array([0 if x is None else x for x in ft], np.int64)[ri]
+                self._emit_bbox(ftid[fm], e0[fm], e1[fm], x0[fm], y0[fm], x1[fm], y1[fm], owner[fm], fam_c[fm],
+                                p[ri][fm])
         # Tiny clusters
         tiny = np.array([t.table.spec.pooled for t in tlist])
         if self.fc.tiny_group and int(tiny.sum()) >= self.fc.tiny_group:
@@ -1126,15 +1696,24 @@ class _Builder:
                                 np.concatenate([x1[rest], G["x1"]]), np.concatenate([y1[rest], G["y1"]]),
                                 np.concatenate([owner[rest], g_owner]), np.concatenate([fam_c[rest], fam_c[first]]),
                                 np.concatenate([p[ri[rest]], G["p"]]),
-                                np.concatenate([np.full(int(rest.sum()), -1, np.int64), ukey[:, 0]]))
+                                np.concatenate([np.full(int(rest.sum()), -1, np.int64), ukey[:, 0]]),
+                                None if ton is None else np.concatenate([ton[rest], np.full(n, -np.inf)]))
                 return
-        self._emit_bbox(fid[ri], e0, e1, x0, y0, x1, y1, owner, fam_c, p[ri])
+        self._emit_bbox(fid[ri], e0, e1, x0, y0, x1, y1, owner, fam_c, p[ri], None, ton)
 
-    def _emit_bbox(self, tid, e0, e1, x0, y0, x1, y1, owner, fam_c, p, gcl=None) -> None:
+    def _emit_bbox(self, tid, e0, e1, x0, y0, x1, y1, owner, fam_c, p, gcl=None, ton=None) -> None:
         """Bounding-box rows of later instances (both mirrors, not committed): anchor boxes from their edges; an
-        anchor box wider than COARSE_MAX_U is an arena-wide box. gcl: a Tiny group row's cluster (-1: one enemy's)."""
+        anchor box wider than COARSE_MAX_U is an arena-wide box. gcl: a Tiny group row's cluster (-1: one enemy's).
+        ton: no contact before it (s from the origin; -inf: none)."""
         if gcl is None:
             gcl = np.full(len(tid), -1, np.int64)
+        if ton is None:
+            ton = np.full(len(tid), -np.inf)
+        nsb = getattr(self.fc, "nsbox", ())
+        if "bin" in nsb:
+            ton = np.maximum(ton, e0)           # SSBOT_FORUM_NSBOX bin: nothing before its earliest start
+        elif "bin0" in nsb:
+            ton = np.maximum(ton, 0.5 * BIN)    # SSBOT_FORUM_NSBOX bin0: nothing at the origin (k0)
         cx, cy = 0.5 * (x0 + x1), 0.5 * (y0 + y1)
         hx, hy = 0.5 * (x1 - x0), 0.5 * (y1 - y0)
         ut, inv = np.unique(tid, return_inverse=True)
@@ -1142,14 +1721,14 @@ class _Builder:
         t0, t1 = spans[inv, 0], spans[inv, 1]
         lo = np.maximum(e0, -BIN - t1)
         hi = np.minimum(e1, self.H + BIN - t0)
-        ok = hi >= lo - 1e-9
+        ok = (hi >= lo - 1e-9) & (ton <= hi + t1 + BIN)
         big = ok & (np.maximum(hx, hy) > COARSE_MAX_U)
         if big.any():
             # one arena box per owner over its rows' hull (a dead Tiny walked for a summon: ~160 rows a tick in wave
             # 6); the boxes are filtered by owner: a group row's once per Tiny of its cluster
             # the window where the template holds a box (not its whole span: forum.md 15.2)
             act = np.array([self.store.active_span(int(t)) for t in ut])
-            a0, a1 = lo + act[inv, 0] - BIN, hi + act[inv, 1] + BIN
+            a0, a1 = np.maximum(lo + act[inv, 0] - BIN, ton), hi + act[inv, 1] + BIN
             for grp_rows in (False, True):
                 m = big & ((gcl >= 0) == grp_rows)
                 if not m.any():
@@ -1170,7 +1749,8 @@ class _Builder:
             self.store.bbox_table(int(t))
         self.bb_chunks.append((owner[sel], fam_c[sel], np.zeros(n, bool), p[sel], tid[sel], lo[sel], hi[sel],
                                np.stack([cx[sel], cy[sel], hx[sel], hy[sel]], axis=1), np.zeros(n, np.int64),
-                               lo[sel] + t0[sel] - BIN, hi[sel] + t1[sel] + BIN, gcl[sel]))
+                               np.maximum(lo[sel] + t0[sel] - BIN, ton[sel]), hi[sel] + t1[sel] + BIN, gcl[sel],
+                               ton[sel]))
 
     # ---- hazards ----
 
@@ -1183,11 +1763,24 @@ class _Builder:
                 self.paths.append(p)
                 if not p.predicted and fc.view == ORACLE:
                     det.add(p.iid)
+        ns = self.react is not None and self.react.notstarted
         for iid, h in fc.self_haz.items():
             tk, armed, arm_T, arm_pos, last_T, pos, rel, vel = h
             if T - last_T > HAZARD_GONE_S:
                 continue
             use_self = iid not in det and fc.self_templates != "none"
+            if use_self and ns and fc.view == ORACLE and tk in REACT_THROWN:
+                # reactive support, not started: a pin / bell not on its path yet (in the thrower's hand, its throw
+                # effect: its self template is every direction one was ever thrown, over the whole horizon, margin
+                # 3 u) is its owner's throw that has not started; once it flies the oracle view has its path
+                # (projectiles: det). Here: its reach over the reaction window only
+                if T - last_T <= 2.5 * BIN:
+                    hx_, hy_ = REACT_THROWN[tk]
+                    b = (pos[0] - hx_, pos[1] - hy_, pos[0] + hx_, pos[1] + hy_) if rel is None else \
+                        (pos[0] + rel[0], pos[1] + rel[1], pos[0] + rel[2], pos[1] + rel[3])
+                    self.boxes.append((iid, "hazard", *b, 0.0, 0.0, ("speed", HAZARD_DV_U_S), -BIN,
+                                       COLLIDER_TUBE_S, 0.0))
+                continue
             if use_self:
                 sid = self.tables.self_id(tk)
                 if sid is not None:
@@ -1246,13 +1839,98 @@ class _Builder:
         out.unknown = self.unknown
         out.groups = self.meta_group
         out.clusters = self.clusters
+        out.clip = self._clip()
+        out.clip_fam = self.clip_fam
+        out.body_clip = self.body_clip
+        out.tinyclip = bool(getattr(self.fc, "tinyclip", False))
         return out
+
+    def _clip(self) -> dict:
+        """{owner: [kmax + 1, 4] hero-centre boxes by look-ahead} of the enemies whose support is clipped to their
+        real reach (SSBOT_FORUM_RCLIP); {} when off, in the vision view or in a hit-reaction forecast."""
+        fc = self.fc
+        if not getattr(fc, "reach", False) or fc.view != ORACLE or self.react_box:
+            return {}
+        rc = reach_clip(fc.half)
+        if rc is None:
+            return {}
+        rcb = body_clip(fc.half) if getattr(fc, "bodyclip", False) else None
+        out = {}
+        for s in self.subjects:
+            tr = fc.trackers.get(s.iid)
+            if not s.alive or tr is None or tr.dead or not tr.in_play or tr.parked or tr.hidden or tr.pos is None \
+                    or tr.state is None:
+                continue
+            age = self.origin - tr.seen_T
+            if not -1e-9 <= age <= REACH_SEEN_S + 1e-9:
+                continue
+            # no knockback in sight (no hit seen for KB_FREE_F frames): the no-hit reach, else every recorded frame's
+            part = 1 if self.origin - tr.t_hit > KB_FREE_F * BIN + 1e-9 else 0
+            args = (tr.tk, tr.state, (tr.seen_T - tr.t_entry) if tr.t_entry is not None else 0.0)
+            rel = None
+            if tr.cur is not None and (tr.tk, tr.cur.family) in REACH_KEEP:
+                # in a throw: its body tube and templates also stand for what it throws (a Reed's pin at its release,
+                # R2 fresh recall 20261003_074533 i2 ep34: the pin met the hero 2.5 u from the Reed 2 frames later);
+                # SSBOT_FORUM_RTHROW: clipped until one frame before its earliest release
+                rel = self.release.get(s.iid)
+                if rel is None:
+                    continue
+            W = self._reach_world(rc, tr, args, part, age)
+            # BODYCLIP: the body's own reach, on the idle tube where the reach clip is (a throw's tube also stands
+            # for what it throws at its release: cut the same way)
+            Wb = self._reach_world(rcb, tr, args, part, age) if rcb is not None else None
+            if rel is not None:
+                kr = len(W) if not math.isfinite(rel) else max(0, int(math.floor(rel / BIN + 1e-9)) - 1)
+                W[kr:] = (-np.inf, -np.inf, np.inf, np.inf)
+                if Wb is not None:
+                    Wb[kr:] = (-np.inf, -np.inf, np.inf, np.inf)
+                self.clip_fam[s.iid] = tr.cur.family
+            out[s.iid] = W
+            if Wb is not None:
+                self.body_clip[s.iid] = Wb
+        return out
+
+    def _reach_world(self, rc, tr: EnemyTracker, args: tuple, part: int, age: float) -> np.ndarray:
+        """[kmax + 1, 4] an enemy's clip boxes from a reach table (rc.world); RCLIP=2: the no-hit part widened to
+        every recorded frame's from the first look-ahead a hit of the hero or an ally can reach it."""
+        W = rc.world(*args, part, tr.pos, FACES_LEFT[tr.flip], int(round(age / BIN)))
+        if part == 1 and getattr(self.fc, "reach_hit", False):
+            k = self._hero_hit_k(tr)
+            if k < len(W):
+                A = rc.world(*args, 0, tr.pos, FACES_LEFT[tr.flip], int(round(age / BIN)))
+                W[k:, :2] = np.minimum(W[k:, :2], A[k:, :2])
+                W[k:, 2:] = np.maximum(W[k:, 2:], A[k:, 2:])
+        return W
+
+    def _hero_hit_k(self, tr: EnemyTracker) -> int:
+        """The first look-ahead frame at which a hit of the hero or of an ally (the oracle's allies export: Garmond's
+        WildSlash / Stomp hit a Maestro 14-23 u from the hero, 20261009_085824 f25585, f26989) can reach the enemy
+        (SSBOT_FORUM_RCLIP=2): the gap between the hitter's box (an ally: the hero's size) and the enemy's body (its
+        last collider box, else its hull at its position) less HIT_REACH_U, closed at HERO_V_MAX plus the enemy's own
+        speed; 0 when the enemy's box or the hero is unknown."""
+        ws = getattr(self.fc, "_ws", None)
+        b = tr.body if tr.body is not None else tr.seen_box
+        if b is None and tr.pos is not None and tr.tk in self.tables.tubes.hull:
+            h = self.tables.tubes.hull[tr.tk]
+            b = (tr.pos[0] + h[0], tr.pos[1] + h[1], tr.pos[0] + h[2], tr.pos[1] + h[3])
+        if ws is None or b is None:
+            return 0
+        ax, ay = self.fc.half
+        vx, vy = HERO_V_MAX[0] + abs(float(tr.vel[0])), HERO_V_MAX[1] + abs(float(tr.vel[1]))
+        t = math.inf
+        for hx, hy in [tuple(float(v) for v in ws.hero.pos.v[:2])] + [(a[1], a[2]) for a in
+                                                                       getattr(ws, "allies", None) or ()]:
+            gx = max(0.0, b[0] - (hx + ax), (hx - ax) - b[2]) - HIT_REACH_U[0]
+            gy = max(0.0, b[1] - (hy + ay), (hy - ay) - b[3]) - HIT_REACH_U[1]
+            t = min(t, max(max(gx, 0.0) / vx, max(gy, 0.0) / vy))
+        return int(math.floor(t / BIN + 1e-9))
 
 
 def _meta_arrays(m: list[tuple]) -> dict:
     return {"owner": np.array([x[0] for x in m], np.int64), "family": [x[1] for x in m],
             "committed": np.array([x[2] for x in m], bool), "prob": np.array([x[3] for x in m], np.float64),
-            "on": np.array([x[4] for x in m], np.float64), "off": np.array([x[5] for x in m], np.float64)}
+            "on": np.array([x[4] for x in m], np.float64), "off": np.array([x[5] for x in m], np.float64),
+            "ton": np.array([x[6] if len(x) > 6 else -np.inf for x in m], np.float64)}
 
 
 def _bb_arrays(chunks: list, store, fam_code: dict | None = None) -> dict:
@@ -1263,7 +1941,7 @@ def _bb_arrays(chunks: list, store, fam_code: dict | None = None) -> dict:
         z = np.zeros(0)
         zi = np.zeros(0, np.int64)
         return {"owner": zi, "family": [], "committed": np.zeros(0, bool), "prob": z, "tid": zi, "e0": z, "e1": z,
-                "cx": z, "cy": z, "hx": z, "hy": z, "mir": zi, "on": z, "off": z, "gcl": zi,
+                "cx": z, "cy": z, "hx": z, "hy": z, "mir": zi, "on": z, "off": z, "gcl": zi, "ton": z,
                 "loff": np.zeros((0, JMAX + 1), np.int64), "nt": zi, "t0": z}
     cat = [np.concatenate([c[i] for c in chunks]) for i in range(len(chunks[0]))]
     names = np.empty(max(len(fam_code or {}), 1), object)          # family code -> name
@@ -1279,14 +1957,14 @@ def _bb_arrays(chunks: list, store, fam_code: dict | None = None) -> dict:
     return {"owner": cat[0], "family": names[cat[1]], "committed": cat[2], "prob": cat[3],
             "tid": tid, "e0": cat[5], "e1": cat[6], "cx": box[:, 0].copy(), "cy": box[:, 1].copy(),
             "hx": box[:, 2].copy(), "hy": box[:, 3].copy(), "mir": cat[8], "on": cat[9], "off": cat[10],
-            "gcl": cat[11], "loff": np.ascontiguousarray(loff), "nt": nt, "t0": t0}
+            "gcl": cat[11], "ton": cat[12], "loff": np.ascontiguousarray(loff), "nt": nt, "t0": t0}
 
 
 @numba.njit(cache=True)
-def _bbox_boxes(tk, rows, loff, nt, t0, e0, e1, cx, cy, hx, hy, mir, bin_s):
+def _bbox_boxes(tk, rows, loff, nt, t0, e0, e1, cx, cy, hx, hy, mir, ton, bin_s):
     """World boxes [K, T] of bounding-box placements: the union of the template's per-bin boxes over the template
     times an entry in [e0, e1] gives at tk (the sparse table's two lookups; mirrored: both mirrors when mir is 0),
-    grown by the anchor box."""
+    grown by the anchor box; none before ton (the reactive support's strike delay; -inf: none)."""
     K = loff.shape[0]
     T = tk.shape[0]
     jmax = loff.shape[1] - 1
@@ -1297,6 +1975,8 @@ def _bbox_boxes(tk, rows, loff, nt, t0, e0, e1, cx, cy, hx, hy, mir, bin_s):
     ok = np.zeros((K, T), np.bool_)
     for k in range(K):
         for t in range(T):
+            if tk[t] < ton[k] - 1e-9:
+                continue
             b_lo = int(np.rint((tk[t] - e1[k] - t0[k]) / bin_s))
             b_hi = int(np.rint((tk[t] - e0[k] - t0[k]) / bin_s))
             if b_hi < 0 or b_lo >= nt[k]:
@@ -1416,6 +2096,8 @@ class MultiForecast:
         self.unknown: list = []
         self.groups: dict = {}               # Tiny group owner -> the other Tinies of its cluster
         self.clusters: list = []             # Tiny cluster index (bb["gcl"]) -> the Tinies its group rows stand for
+        self.clip: dict = {}                 # owner -> its reach clip boxes by look-ahead (SSBOT_FORUM_RCLIP)
+        self.clip_fam: dict = {}             # owner -> its throw family clipped until the release (RTHROW)
 
     def __getattr__(self, name):
         # the wrapped boss forecast answers everything this class does not define (boss_box, body_polys, det, ...)
@@ -1474,6 +2156,107 @@ class MultiForecast:
         act = (meta["off"] >= tk.min() - BIN) & (meta["on"] <= tk.max() + BIN)
         return act if sel is None else act & sel
 
+    @staticmethod
+    def _ton_groups(meta: dict, act: np.ndarray, tk: np.ndarray):
+        """The active placements split by their strike delay (meta "ton", the reactive support's committed
+        extension): (indices, None) for those without one inside tk, then (indices, ton) per delay value."""
+        ton = meta.get("ton")
+        idx = np.flatnonzero(act)
+        if ton is None or not len(idx):
+            return [(idx, None)]
+        tv = ton[idx]
+        late = tv > float(tk.min()) + 1e-9
+        if not late.any():
+            return [(idx, None)]
+        out = [(idx[~late], None)] if (~late).any() else []
+        for v in np.unique(tv[late]):
+            out.append((idx[late & (tv == v)], float(v)))
+        return out
+
+    @staticmethod
+    def _masked(x, y, tk, ton):
+        """x, y with the points before ton (on the last axis) NaN (the queries skip NaN points)."""
+        m = np.asarray(tk) < ton - 1e-9
+        x2 = np.array(x, np.float64, copy=True)
+        y2 = np.array(y, np.float64, copy=True)
+        x2[..., m] = np.nan
+        y2[..., m] = np.nan
+        return x2, y2
+
+    # ---- the reach clip (SSBOT_FORUM_RCLIP) ----
+
+    def _clip_rows(self, kind: str) -> np.ndarray | None:
+        """[rows] the clipped owner of each placement row of a component ("pm", "wm", "bb"; NOCLIP: not clipped: no
+        clip for its owner, a family holding thrown hazards, a Tiny group row), None without a clip. (Until S2 the
+        sentinel was -1 and only owners >= 0 were clipped: the pooled Tinies' iids are negative, so a Tiny's own
+        rows were never clipped, about 3 / 4 of the person's committed excess with RCLIP on.)"""
+        clip = self.__dict__.get("clip")
+        if not clip:
+            return None
+        c = self.__dict__.setdefault("_crow", {})
+        r = c.get(kind)
+        if r is None:
+            meta = {"pm": self.pm, "wm": self.wm, "bb": self.bb}[kind]
+            tk_of = {s.iid: s.type_key for s in self.subjects}
+            own = np.asarray(meta["owner"], np.int64)
+            r = np.full(len(own), NOCLIP, np.int64)
+            gcl = meta.get("gcl")
+            cf = self.__dict__.get("clip_fam") or {}
+            # RTHROW: only the current throw's own (committed) rows; a later throw's roots hold their own hazards
+            com = np.asarray(meta["committed"], bool)
+            # TINYCLIP: a group row's code is CLUSTER0 + its cluster (_clip_members) when every member has a clip
+            cls = (self.__dict__.get("clusters") or []) if self.__dict__.get("tinyclip") else []
+            for i, o in enumerate(own.tolist()):
+                fam = str(meta["family"][i])
+                if gcl is not None and len(gcl) and gcl[i] >= 0:
+                    g = int(gcl[i])
+                    if g < len(cls) and cls[g] and all(m in clip and (tk_of.get(m), fam) not in REACH_KEEP
+                                                       for m in cls[g]):
+                        r[i] = CLUSTER0 + g
+                    continue
+                if o in clip and ((tk_of.get(o), fam) not in REACH_KEEP or (cf.get(o) == fam and com[i])):
+                    r[i] = o
+            c[kind] = r
+        return r
+
+    def _clip_members(self, co: int) -> tuple:
+        """The owners whose clips bound a clip code: a Tiny group row's (TINYCLIP: CLUSTER0 + cluster) are its
+        cluster's Tinies (the union of their clips), any other code is one owner."""
+        if CLUSTER0 <= co < CLUSTER0 + (1 << 20):
+            return tuple(sorted(self.clusters[co - CLUSTER0]))
+        return (co,)
+
+    def _clip_groups(self, kind: str, idx: np.ndarray) -> list:
+        """idx (rows) split into [(rows, None)] not clipped and [(rows, owner)] per clipped owner."""
+        r = self._clip_rows(kind)
+        if r is None:
+            return [(idx, None)]
+        ro = r[idx]
+        out = [(idx[ro == NOCLIP], None)] if (ro == NOCLIP).any() else []
+        for o in np.unique(ro[ro != NOCLIP]).tolist():
+            out.append((idx[ro == o], int(o)))
+        return out
+
+    def _clip_boxes(self, owner: int, tk, table: dict | None = None) -> np.ndarray:
+        """[T, 4] the owner's clip boxes (x0, y0, x1, y1) at tk (s from the origin; past the table: no clip); table:
+        another owner -> boxes dict (BODYCLIP's body_clip) in place of the reach clip."""
+        W = (self.clip if table is None else table)[owner]
+        k = np.rint(np.asarray(tk, np.float64) / BIN).astype(np.int64)
+        out = W[np.clip(k, 0, len(W) - 1)].copy()
+        out[k >= len(W)] = (-np.inf, -np.inf, np.inf, np.inf)
+        return out
+
+    def _clip_xy(self, x, y, tk, owner: int):
+        """x, y with the points outside the owner's clip box (on the last axis: tk) NaN (the queries skip them); a
+        cluster code (TINYCLIP): outside every member's box."""
+        x = np.asarray(x, np.float64)
+        y = np.asarray(y, np.float64)
+        inside = np.zeros(np.broadcast(x, y).shape, bool)
+        for o in self._clip_members(owner):
+            b = self._clip_boxes(o, tk)
+            inside |= (x >= b[:, 0]) & (x <= b[:, 2]) & (y >= b[:, 1]) & (y <= b[:, 3])
+        return np.where(inside, x, np.nan), np.where(inside, y, np.nan)
+
     def _fine_occ(self, x, y, tk, sel=None) -> np.ndarray:
         out = np.zeros(np.shape(x), bool)
         if not len(self.P):
@@ -1481,8 +2264,16 @@ class MultiForecast:
         act = self._active(self.pm, tk, sel)
         if not act.any():
             return out
-        P = self.P if act.all() else self.P.take(np.flatnonzero(act))
-        return self._fc.tables.store.query(P, x, y, tk, out)
+        store = self._fc.tables.store
+        for idx0, ton in self._ton_groups(self.pm, act, np.asarray(tk, np.float64)):
+            for idx, co in self._clip_groups("pm", idx0):
+                P = self.P if len(idx) == len(self.P) else self.P.take(idx)
+                xx, yy = (x, y) if co is None else self._clip_xy(x, y, tk, co)
+                if ton is None:
+                    store.query(P, xx, yy, tk, out)
+                else:
+                    store.query(P, *self._masked(xx, yy, tk, ton), tk, out)
+        return out
 
     def _win_occ(self, x, y, tk, sel=None) -> np.ndarray:
         out = np.zeros(np.shape(x), bool)
@@ -1491,8 +2282,16 @@ class MultiForecast:
         act = self._active(self.wm, tk, sel)
         if not act.any():
             return out
-        W = self.W if act.all() else self.W.take(np.flatnonzero(act))
-        return self._fc.tables.store.query_win(W, x, y, tk, out)
+        store = self._fc.tables.store
+        for idx0, ton in self._ton_groups(self.wm, act, np.asarray(tk, np.float64)):
+            for idx, co in self._clip_groups("wm", idx0):
+                W = self.W if len(idx) == len(self.W) else self.W.take(idx)
+                xx, yy = (x, y) if co is None else self._clip_xy(x, y, tk, co)
+                if ton is None:
+                    store.query_win(W, xx, yy, tk, out)
+                else:
+                    store.query_win(W, *self._masked(xx, yy, tk, ton), tk, out)
+        return out
 
     def _bbox_occ(self, x, y, tk, sel=None) -> np.ndarray:
         x = np.asarray(x, np.float64)
@@ -1506,7 +2305,35 @@ class MultiForecast:
         rows = self._fc.tables.store.bb_rows()
         g = lambda k: np.ascontiguousarray(bb[k][idx])  # noqa: E731
         bx = _bbox_boxes(np.ascontiguousarray(tk, np.float64), rows, g("loff"), g("nt"), g("t0"), g("e0"), g("e1"),
-                         g("cx"), g("cy"), g("hx"), g("hy"), g("mir"), BIN)
+                         g("cx"), g("cy"), g("hx"), g("hy"), g("mir"), g("ton"), BIN)
+        cr = self._clip_rows("bb")
+        if cr is not None:
+            ro = cr[idx]
+            extra = []
+            for co in np.unique(ro[ro != NOCLIP]).tolist():
+                # a box and the owner's clip box intersect in a box (the templates are already in hero-centre space)
+                sub = np.flatnonzero(ro == co)
+                mem = self._clip_members(int(co))
+                # a Tiny group row (TINYCLIP): one copy per member, each cut by its clip (their union)
+                parts = [tuple(b[sub] for b in bx)] * (len(mem) - 1)
+                for j, o in enumerate(mem):
+                    cb = self._clip_boxes(o, tk)
+                    if j == 0:
+                        b0, b1, b2, b3, ok = (b[sub] for b in bx)
+                    else:
+                        b0, b1, b2, b3, ok = (b.copy() for b in parts[j - 1])
+                    b0 = np.maximum(b0, cb[None, :, 0])
+                    b1 = np.maximum(b1, cb[None, :, 1])
+                    b2 = np.minimum(b2, cb[None, :, 2])
+                    b3 = np.minimum(b3, cb[None, :, 3])
+                    ok = ok & (b0 <= b2) & (b1 <= b3)
+                    if j == 0:
+                        bx[0][sub], bx[1][sub], bx[2][sub], bx[3][sub], bx[4][sub] = b0, b1, b2, b3, ok
+                    else:
+                        extra.append((b0, b1, b2, b3, ok))
+            if extra:
+                bx = tuple(np.ascontiguousarray(np.concatenate([bx[i]] + [e[i] for e in extra]))
+                           for i in range(5))
         T = shp[-1]
         x2 = np.ascontiguousarray(x.reshape(-1, T))
         y2 = np.ascontiguousarray(np.asarray(y, np.float64).reshape(-1, T))
@@ -1526,16 +2353,39 @@ class MultiForecast:
             if exclude and owner in exclude or only is not None and owner not in only:
                 continue
             dt = tk - t_seen
+            ok = (tk >= t_from - 1e-9) & (tk <= t_to + 1e-9)
+            if grow is not None and grow[0] == "boxes":
+                # hero-centre boxes by look-ahead frame (a "prestrike" reach): the collider box the query grows
+                W = grow[1]
+                k = np.rint(np.asarray(tk, np.float64) / BIN).astype(np.int64)
+                w = W[np.clip(k, 0, len(W) - 1)]
+                hx, hy = self._fc.half
+                fin = np.isfinite(w).all(axis=1) & (k < len(W))
+                w = np.where(fin[:, None], w, 0.0)
+                rows.append((w[:, 0] + hx, w[:, 1] + hy, w[:, 2] - hx, w[:, 3] - hy, ok & fin))
+                continue
             if grow is None:
                 g = np.zeros(len(tk))
             elif grow[0] == "idle":
-                g = tubes.g(grow[1], dt)
+                g = tubes.g(grow[1], dt if len(grow) < 3 else np.minimum(dt, grow[2]))
             else:
                 g = grow[1] * np.maximum(dt, 0.0)
-            ok = (tk >= t_from - 1e-9) & (tk <= t_to + 1e-9)
             if kind == "idle":
                 ok &= dt >= 0
-            rows.append((x0 + vx * dt - g, y0 + vy * dt - g, x1 + vx * dt + g, y1 + vy * dt + g, ok))
+            bx = (x0 + vx * dt - g, y0 + vy * dt - g, x1 + vx * dt + g, y1 + vy * dt + g)
+            clip = self.__dict__.get("clip")
+            bclip = self.__dict__.get("body_clip")
+            if kind == "idle" and clip and owner in clip:
+                # the reach clip (hero-centre boxes) on the collider box the query grows by the hero half extents
+                cbs = [self._clip_boxes(owner, tk)]
+                if bclip and owner in bclip:
+                    cbs.append(self._clip_boxes(owner, tk, bclip))   # BODYCLIP: and the body's own reach
+                hx, hy = self._fc.half
+                for cb in cbs:
+                    bx = (np.maximum(bx[0], cb[:, 0] + hx), np.maximum(bx[1], cb[:, 1] + hy),
+                          np.minimum(bx[2], cb[:, 2] - hx), np.minimum(bx[3], cb[:, 3] - hy))
+                ok = ok & (bx[0] <= bx[2]) & (bx[1] <= bx[3])
+            rows.append((*bx, ok))
         r = None if not rows else tuple(
             np.ascontiguousarray(np.stack([q[i] for q in rows]), np.float64 if i < 4 else np.bool_) for i in range(5))
         if len(self._cache) > 64:
@@ -1602,13 +2452,13 @@ class MultiForecast:
         if not committed_only and not parts:
             # the boxes of every kind at once: the same union as the parts below, one array build and one kernel call
             # (each kind on its own rebuilt its arrays per query: ~0.45 ms of a wave-6 tick's support query, R3 fix)
-            return f | self._box_occ(x, y, tk, kinds=("death", "arena", "idle", "collider", "hazard"), exclude=ids,
-                                     only=only)
+            return f | self._box_occ(x, y, tk, kinds=BOX_KINDS, exclude=ids, only=only)
         f |= self._box_occ(x, y, tk, kinds=("death", "arena"), exclude=ids, only=only)
         if committed_only:
             return f
         tubes = {k: self._box_occ(x, y, tk, kinds=(k,), exclude=ids, only=only) for k in ("idle", "collider",
                                                                                            "hazard")}
+        f |= self._box_occ(x, y, tk, kinds=("prestrike",), exclude=ids, only=only)
         return {"forecast": f, "idle body tube": tubes["idle"], "collider tube": tubes["collider"],
                 "hazard tube": tubes["hazard"]}
 
@@ -1628,6 +2478,36 @@ class MultiForecast:
         """occupied() split by what covers (the recall's accounting): "forecast" (placements, hazard paths, death
         tails, the arena-wide boxes), "idle body tube", "collider tube", "hazard tube"."""
         return self._union_occ(x, y, tk, parts=True)
+
+    def occupied_split(self, x, y, tk):
+        """(occupied(), its committed part, its fine part) from one pass: the same component queries, each split by
+        the placements' committed flag, so the union is occupied()'s array bit for bit and the parts are
+        _union_occ(committed_only=True) (current attacks, tails, death tails, hazard paths, arena boxes) and
+        _fine_occ() (every fine placement) on the same points: ForumPlanner's commit_rank keys without a second
+        query (forum.md 20.11). A wrapped boss: (occupied(), None, None)."""
+        if self.boss_fc is not None:
+            return self.boss_fc.occupied(x, y, tk), None, None
+        x = np.asarray(x, np.float64)
+        y = np.asarray(y, np.float64)
+        tk = np.asarray(tk, np.float64)
+        cp = self.pm["committed"] if len(self.P) else None
+        fine = self._fine_occ(x, y, tk, cp)
+        com = fine.copy()
+        if cp is not None:
+            fine |= self._fine_occ(x, y, tk, ~cp)
+        rest = np.zeros(x.shape, bool)
+        if len(self.W):
+            cw = self.wm["committed"]
+            com |= self._win_occ(x, y, tk, cw)
+            rest |= self._win_occ(x, y, tk, ~cw)
+        if self.n_bbox:
+            cb = self.bb["committed"]
+            com |= self._bbox_occ(x, y, tk, cb)
+            rest |= self._bbox_occ(x, y, tk, ~cb)
+        com |= self._path_occ(x, y, tk)
+        com |= self._box_occ(x, y, tk, kinds=("death", "arena"))
+        rest |= self._box_occ(x, y, tk, kinds=("idle", "collider", "hazard", "prestrike"))
+        return com | fine | rest, com, fine
 
     def occupied_without(self, x, y, tk, exclude, comfort: bool = False) -> np.ndarray:
         """occupied() without the support of `exclude`: an enemy iid (a kill: its tails, tubes and the instances it
@@ -1725,6 +2605,10 @@ class MultiForecast:
         out.subjects = self.subjects
         out.known = self.known
         out.groups, out.clusters = self.groups, self.clusters
+        out.clip = self.__dict__.get("clip") or {}
+        out.clip_fam = self.__dict__.get("clip_fam") or {}
+        out.tinyclip = bool(self.__dict__.get("tinyclip", False))
+        out.body_clip = self.__dict__.get("body_clip") or {}
         return out
 
     def support_set(self, ws: WorldState | None = None, t1: float = SUP_HORIZON_S) -> SupportSet:
