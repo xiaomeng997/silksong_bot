@@ -4460,3 +4460,95 @@ cd <checkout>\brain
 ..\scripts\uv.cmd run python -m ssbot.tools.are_rows_report --type tiny --by-state AT_DIVE,AT_DEFEND
 ..\scripts\uv.cmd run python -m pytest -q tests\test_attack_range_bmt.py tests\test_attack_range.py tests\test_attack_range_types.py tests\test_zone_overlay.py
 ```
+
+## 37. 攻击范围估计（ARE）阶段 C：10 类合在一起（2026-10-10，task "attack range: all types" 阶段 C，分支 worktree-wf_2fe0d0c5-18e-5 = main f910fda + 阶段 A 77ccb1e + 阶段 B f310c20（Envoy / Clawmaiden / 矛）、efcc2ef（Reed / Minister）、1399528（Bellbearer / Maestro / Tiny）；汇总工具 `ssbot/tools/are_summary.py`；数据 `C:\ssbot\data\m2_forum_are\stage_c`、`summary.md`、`index.md`）
+
+离线做的，没有开 / 关任何游戏实例。规则不变（§32 / §33）：不加余量；待机 = 现在的身体；还没决定的分支画并集；还没开始的招（第 2 组）不画；只用 R0 dev 建；误差在 R0 fresh、R2、你的录像上分开报。
+
+### 37.1 合并
+
+- 三个阶段 B 分支各加了一套钩子，全部保留，都是按类型开的（不设就不用）：
+  - Envoy / Clawmaiden / 矛：`EnemySpec.on_step`、`place_fn`（`place()` 的 `ctx`）。
+  - Reed / Minister：`coast`、`hit_started`、可调用的分支值、`Decision` 规则返回 extras；类型模块的 `extra` / `OBJ_TYPES` / `OBJ_NAME`（真值是 "OBJ:" 碰撞体）。
+  - Bellbearer / Maestro / Tiny：`custom` / `attach` + `CustomView`、`Decision.scale`、每类自己的 `parked`、单练的 `COMPANIONS` / `HOSTS`。
+- 冲突只在接口上：`RangeTable.place()` 现在同时收 `vel`（Reed 的 coast）和 `ctx`（place_fn）；构建时每类只调一次 attach（`_attach`：先 `EnemySpec.attach`，没有就用模块的 `attach`，两个或三个参数都行）；`RangeTracker.estimate` 依次加：危险物 → 模块的 `extra`（针）→ `custom`（铃、Tiny 转圈 / 俯冲、Maestro 防御、Bellbearer 闪避）。
+- 小节重新编号：§34 Envoy / Clawmaiden / 矛，§35 Reed / Minister，§36 Bellbearer / Maestro / Tiny，§37 这一节。
+- 核对：
+  - 10 类的表用合并后的代码从 R0 dev 重建，和各分支提交的表**逐字节相同**（10 / 10，`stage_c\tables`）。
+  - 30 次评估（10 类 × fresh / R2 / 你的录像）在合并后的代码上重跑，summary 和阶段 A / B 的**完全一样**（旧的留在 `<类型>\prev_stageB\`）。
+  - 攻击范围的 7 个测试文件全过（77 个，含新加的 `tests/test_attack_range_merge.py`：10 类都注册了、每种钩子都在、`place()` 收 vel 和 ctx、attach 两种写法都调对）。
+  - 实时路径（叠加层和 viewer 用的 `RangeTracker`）在你 085824 第 2 次尝试上跑（7,229 个 STATE 帧，10 类都出场）：没有异常，每类都有估计；k 0 时所有真伤害碰撞体被所有估计的并集盖住 99.3 %（每 3 帧取一帧，主角中心区）。
+  - 矛、铃、针不是 HealthManager 实体（缓存里没有 health_manager 位，也没有血量），所以 `--solo` 不会把它们当成"别的怪"去清（阶段 B 留下的问题）。
+
+### 37.2 每类的精度（主行：没被打断、t + k 之前没开始下一招；三个数依次是 R0 fresh / R2 / 你的录像）
+
+"招" = 这一类所有攻击家族合在一起（包括按第 2 组规则不画的待定行）；"危险物 / 投射物" = Clapper 的符文、Reed 的针、Bellbearer 的铃；"待机" = 现在的身体（批准的规则）。面积比 = 估计 / 真实（主角中心区），写的是逐行的中位数和 ≤ 1.5 的行占比。漏 p95 只算在那一边确实漏了的行（fresh）。完整的按家族的表：`C:\ssbot\data\m2_forum_are\summary.md`。
+
+| 类型 | 部分 | k0 覆盖 % | k12 覆盖 % | k0 面积比 p50 / ≤1.5 | k12 面积比 p50 / ≤1.5 | k12 漏 p95（前 / 后 / 上 / 下，u） |
+|---|---|---|---|---|---|---|
+| Clapper | 招 | 99.6 / 99.6 / 99.6 | 95.4 / 94.6 / 94.9 | 1.00/97% / 1.00/97% / 1.00/94% | 1.01/93% / 1.01/93% / 1.01/92% | 2.1 / 0.9 / 5.8 / 0.9 |
+| Clapper | 危险物 | 99.8 / 99.9 / 99.7 | 99.9 / 99.9 / 99.6 | 1.00/92% / 1.00/94% / 1.00/86% | 1.00/92% / 1.00/94% / 1.00/84% | 0.3 / 0.3 / - / - |
+| Clapper | 待机 | 100.0 / 100.0 / 99.9 | 87.9 / 84.2 / 88.0 | 1.00/92% / 1.00/92% / 1.00/90% | 1.00/91% / 1.00/92% / 1.00/89% | 2.1 / 1.9 / 1.0 / - |
+| Choristor | 招 | 99.8 / 99.7 / 99.7 | 96.9 / 97.2 / 96.8 | 1.00/97% / 1.00/96% / 1.00/98% | 1.01/84% / 1.00/88% / 1.01/85% | 0.4 / 0.8 / 0.5 / 0.6 |
+| Choristor | 待机 | 100.0 / 100.0 / 100.0 | 100.0 / 99.2 / 98.7 | 1.00/100% ×3 | 1.00/100% ×3 | - / 0.1 / - / - |
+| Envoy | 招 | 99.4 / 99.4 / 99.4 | 94.7 / 97.0 / 94.3 | 1.00/100% ×3 | 1.00/96% / 1.00/94% / 1.00/97% | 0.4 / 2.3 / 0.2 / 0.1 |
+| Envoy | 待机 | 100.0 ×3 | 75.5 / 75.4 / 75.5 | 1.00/100% ×3 | 1.00/100% ×3 | 0.5 / - / - / - |
+| Clawmaiden | 招 | 99.9 / 99.9 / 99.8 | 81.9 / 83.0 / 87.1 | 1.00/100% ×3 | 1.00/93% / 1.00/90% / 1.00/96% | 0.8 / 0.7 / 0.9 / 0.7 |
+| 矛 | 招 | 99.0 / 99.1 / 98.9 | 80.2 / 82.3 / 85.9 | 1.00/100% ×3 | 1.00/92% / 1.01/94% / 1.01/95% | 3.0 / 1.8 / 3.2 / 3.0 |
+| Reed | 招 | 98.8 / 98.8 / 98.9 | 88.6 / 87.0 / 91.3 | 0.99/100% ×3 | 1.00/93% / 1.00/94% / 1.00/94% | 3.2 / 1.1 / 0.5 / 0.6 |
+| Reed | 针 | 100.0 ×3 | 99.7 / 99.6 / 99.6 | 1.00/100% ×3 | 1.28/93% / 1.26/93% / 1.24/93% | 0.1 / 0.1 / 0.1 / 0.3 |
+| Reed | 待机 | 100.0 ×3 | 44.9 / 51.2 / 41.9 | 1.00/100% ×3 | 1.00/100% ×3 | 2.0 / 1.8 / 1.9 / 1.9 |
+| Minister | 招 | 99.7 / 99.8 / 99.7 | 94.0 / 93.5 / 92.7 | 1.30/96% / 1.32/97% / 1.08/96% | 1.33/92% / 1.33/92% / 1.18/94% | 1.1 / 1.4 / 1.0 / 0.7 |
+| Minister | 待机 | 100.0 ×3 | 58.5 / 61.1 / 58.0 | 1.00/100% ×3 | 1.00/100% ×3 | 2.0 / 1.7 / 1.9 / 1.9 |
+| Bellbearer | 招 | 98.7 / 98.7 / 98.9 | 95.7 / 95.5 / 95.2 | 0.99/100% ×3 | 0.99/99% / 0.99/99% / 0.99/97% | 0.4 / 0.4 / 0.5 / 0.3 |
+| Bellbearer | 铃 | 100.0 ×3 | 95.7 / 95.8 / 96.9 | 1.00/100% ×3 | 1.00/91% / 1.00/90% / 1.00/91% | 0.5 / 0.5 / 0.6 / 0.8 |
+| Bellbearer | 待机 | 100.0 ×3 | 55.1 / 58.6 / 54.8 | 1.00/100% ×3 | 1.00/92% / 1.00/91% / 1.00/95% | 1.5 / 1.5 / 1.5 / 1.5 |
+| Maestro | 招 | 99.3 / 99.3 / 99.1 | 84.1 / 83.4 / 84.2 | 1.00/100% ×3 | 1.00/100% ×3 | 4.7 / 0.6 / 1.4 / 0.4 |
+| Maestro | 待机 | 100.0 ×3 | 71.4 / 73.2 / 73.9 | 1.00/100% ×3 | 1.00/100% ×3 | 1.2 / 1.4 / 1.0 / 0.9 |
+| Tiny | 招 | 100.0 ×3 | 65.0 / 63.9 / 65.0 | 1.00/100% ×3 | 1.00/100% ×3 | 2.4 / 2.2 / 2.2 / 2.3 |
+| Tiny | 待机 | 100.0 ×3 | 41.7 / 41.7 / 43.1 | 1.00/100% ×3 | 1.00/100% ×3 | 1.4 / 1.4 / 1.4 / 1.3 |
+
+按家族看，k 12 面积比没到目标（p50 > 1.5，或 ≤ 1.5 的行不到九成）的只有这几个：
+- Choristor 小跳 CH_HOP：p50 2.00 / 1.86 / 1.04，≤ 1.5 的行 44 / 44 / 62 %（前跳还是后跳要到起跳才知道，之前两种一起画；身体小，所以比值大）。这是已批准的版本，没改。
+- Clawmaiden 抓 CM_SLASH：p50 1.50 / 1.46 / 1.43，≤ 1.5 的 50–54 %（朝向在 Slash 1、Slash 4 两次决定，之前几种一起画，§34）。
+- Clapper 后撤 CC_EVADE：p50 1.05，≤ 1.5 的 72–78 %（单撤还是连撤两次要到第二次才知道）。
+- Reed 闪避 RE_EVADE：p50 1.08，≤ 1.5 的 68–70 %。
+- Minister 冲刺 / 闪避：p50 1.33，≤ 1.5 的 89–94 %（斜着的碰撞体在缓存里是外接框，估计和真值都偏大，§35）。
+
+k 12 覆盖低的地方都是"12 帧后它在哪"推得不准，不是画得太小：待定的招按第 2 组规则不画（Reed 刺的起手 47.5 %、Maestro Fire Antic 68–69 %、Clapper 跳起前 78–84 %），Tiny 转圈 53–56 % / 俯冲 70 %，矛 80–86 %，以及会飞的怪待机时只画现在的身体（Reed 42–51 %、Tiny 42 %、Bellbearer 55–59 %、Minister 58–61 %）。
+
+### 37.3 给你看的
+
+- PNG 索引：`C:\ssbot\data\m2_forum_are\index.md`（每类：你录像里的帧 → 每种招两张 → 误差最大的几张；Clapper 在最前）。图例：橙色填充 = k 0 估计，浅蓝轮廓 = k 12 估计，细黄 = 主角中心区，粗红 = 现在的真伤害，细红 = 之后 12 帧的真伤害（+12 那一帧品红）。
+- 回放：`C:\ssbot\data\m2_forum_overlay\all_range.rrd`（356 MB）：你 085824 的第 2 次尝试，原始帧 15163–29619，从第 0 波到第 7 波，10 类都出场；k 0 和 12；视频缩到 0.35。命令在 `stage_c\rrd.cmd`。
+- 单练（实时叠加层，1–5 选 k；都是 `human_session --instance 8 --solo "<类型>" --speed 0.5 --overlay --overlay-range --display borderless`）：
+
+| 类型 | `--solo` | 存档 | 同一波先清掉的（清的时候无敌 + 钉子 4 级） |
+|---|---|---|---|
+| Choristor | `"Song Pilgrim 03"` | `fo_r1_w0` | Reed、Envoy |
+| Envoy | `"Song Pilgrim 01"` | `fo_r1_w0` | Reed、Choristor（Envoy 从埋伏入场） |
+| Reed（+ 针） | `"Song Reed"` | `fo_r1_w2` | 一只 Bellbearer |
+| Bellbearer（+ 铃） | `"Pilgrim 03 Song"` | `fo_r1_w2` | 一只 Reed |
+| Clawmaiden（+ 矛） | `"Song Handmaiden"` | `fo_r1_w3` | 没有，只有她 |
+| Minister | `"Song Administrator"` | `fo_r1_w4` | 另一只 Minister |
+| Maestro（+ Tiny） | `"Song Pilgrim Maestro"` | `fo_r1_w6` | 另一只 Maestro（留下那只的 Tiny 不清） |
+| Tiny | `"Song Automaton Tiny"` | `fo_r1_w6` | 同 Maestro |
+| Clapper | `"Song Heavy Sentry"` | `fo_r1_w7` | 没有，只有它 |
+
+- Clapper 的启动器：`C:\ssbot\sandbox\start_overlay_solo_clapper.ps1`（从这个工作区跑，日志 `overlay_solo_clapper2.log`；阶段 A 那个复制成了 `start_overlay_solo_clapper_stageA.ps1`）。没有跑。在游戏里跑过的只有 Choristor 和 Clapper（阶段 A 之前的工作区）。
+
+### 37.4 没做的 / 等你定的
+
+- 待机（会飞的怪、Clapper 走路）要不要按速度往前推：你定。Clawmaiden 的 Fly / 飞向抓 / 转已经按速度推（`clawmaiden.CARRY_ON`，§34），和规则不一样，也等你定。
+- 第 2 组（还没决定的瞄准）这一轮不画：Reed 刺的起手、Maestro Fire Antic、Tiny Fire Ready、Clapper 跳起前（Jump Antic、Cast Slam Antic）、Clawmaiden 瞬移落点、矛的起手、所有待机之后的下一招。
+- 其余各节留下的：Tiny 转圈要队形目标格、Pull Up 时刻；Reed 刺有 5 % 停得很短；针 / 矛 / 符文没有平台地形；丝弹时间窗口偏宽；部署的 oracle 有没有 `enemy.hp` 没核实。
+
+复现：
+```
+cd <checkout>\brain
+..\scripts\uv.cmd run python -m ssbot.tools.attack_range_build --type <类型> build --out <文件>     (和提交的表比)
+..\scripts\uv.cmd run python -m ssbot.tools.attack_range_build --type <类型> eval --set fresh --every 2 --idle-every 6 --threads 4   (r2 / person；Tiny 用 --every 6 --idle-every 30)
+..\scripts\uv.cmd run python -m ssbot.tools.are_summary
+..\scripts\uv.cmd run python -m ssbot.tools.viewer C:\ssbot\data\human\20261009_085824 --zones --range-only --k 0,12 --video --video-scale 0.35 --from 15163 --to 29619 --save C:\ssbot\data\m2_forum_overlay\all_range.rrd
+..\scripts\uv.cmd run python -m pytest -q tests\test_attack_range.py tests\test_attack_range_types.py tests\test_attack_range_envoy_clawmaiden.py tests\test_attack_range_reed_minister.py tests\test_attack_range_bmt.py tests\test_zone_overlay.py
+```

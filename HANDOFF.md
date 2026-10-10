@@ -4669,3 +4669,37 @@ entry); the Reed's pin drawn on its decided line before the release and on its r
   Fire); bell release window from 20 R0 dev fights; idle velocity carry (the person); live overlay / --solo not run in
   the game; the hooks are this branch's - other stage B branches may have added their own (merge: one `custom` /
   `attach` per spec).
+
+## Task attack range: all types, stage C - integration (branch worktree-wf_2fe0d0c5-18e-5, 2026-10-10; forum.md §37)
+
+= main (f910fda) + stage A (77ccb1e) + stage B ground (f310c20, Envoy / Clawmaiden / Spear), fliers (efcc2ef, Reed /
+Minister) and heavyrest (1399528, Bellbearer / Maestro / Tiny). Offline only (no game instance started or stopped).
+- Merge: every stage B hook kept side by side (all opt-in, per spec): `on_step` / `place_fn` (place() `ctx`),
+  `coast` / `hit_started` / callable branch values / Decision extras / module `extra` + `OBJ_TYPES` ("OBJ:" truth),
+  `custom` / `attach` + `CustomView` / `Decision.scale` / per-type `parked` / solo `COMPANIONS` / `HOSTS`.
+  `RangeTable.place()` takes both `vel` (coast) and `ctx` (place_fn); the builder calls one attach hook per type
+  (`_attach`: `EnemySpec.attach`, else the module's `attach`, with 2 or 3 parameters); `RangeTracker.estimate` adds
+  hazards, then the module `extra` (pins), then `custom` (bells, orbit, kinematics). forum.md sections renumbered: §34
+  Envoy / Clawmaiden / Spear, §35 Reed / Minister, §36 Bellbearer / Maestro / Tiny, §37 this.
+- Verified: all 10 tables rebuilt from R0 dev with the merged code are byte-identical to the committed ones
+  (`C:\ssbot\data\m2_forum_are\stage_c\tables`); the 30 evals (10 types x fresh / R2 / person) re-run on the merged
+  code give summaries identical to the stage A / B ones (kept in `<type>\prev_stageB\`); attack-range tests (7 files,
+  77, with the new `tests/test_attack_range_merge.py`: registry, hooks, place() vel + ctx, _attach) pass. Live path: `RangeTracker` over the person's 085824 attempt 1 (7,229 STATE frames, all 10 types in play): no
+  error, every type estimated, k0 coverage of every real damage collider by the union of the estimates 99.3 %.
+- The Spear, the bells and the pins are not HealthManager entities (no health_manager src bit, no hp in the caches), so
+  `--solo` does not try to clear them (stage B's open question).
+- New: `ssbot/tools/are_summary.py` (every type's rows -> `C:\ssbot\data\m2_forum_are\summary.md` / `.json`: per type
+  moves pooled / hazards / idle and per family, k0 / k12 coverage, ratio p50 / share <= 1.5, miss p95 per side);
+  `C:\ssbot\data\m2_forum_are\index.md` (the PNGs to look at first, per type, the Clapper first); replay
+  `C:\ssbot\data\m2_forum_overlay\all_range.rrd` (085824 attempt 1, raw 15163-29619, every type, k 0 / 12, video
+  0.35; `stage_c\rrd.cmd`); `C:\ssbot\sandbox\start_overlay_solo_clapper.ps1` now runs from this worktree (log
+  `overlay_solo_clapper2.log`; the stage A copy is `start_overlay_solo_clapper_stageA.ps1`), not run.
+- Solo per type (`human_session --instance 8 --solo "<type key>" --speed 0.5 --overlay --overlay-range --display
+  borderless`): Choristor "Song Pilgrim 03" (fo_r1_w0), Envoy "Song Pilgrim 01" (fo_r1_w0), Reed "Song Reed" /
+  Bellbearer "Pilgrim 03 Song" (fo_r1_w2), Clawmaiden + Spear "Song Handmaiden" (fo_r1_w3), Minister "Song
+  Administrator" (fo_r1_w4), Maestro "Song Pilgrim Maestro" / Tiny "Song Automaton Tiny" (fo_r1_w6), Clapper "Song
+  Heavy Sentry" (fo_r1_w7). Only the Choristor and the Clapper were run in the game (stage A worktrees).
+- Open (unchanged from the stages): idle = the body now for every type (velocity carry is the person's call; the
+  Clawmaiden's flying families already carry it, CARRY_ON); pending aims (group 2) not drawn; CM_SLASH k12 area ratio
+  1.8 by the side union; Tiny orbit / dive k12 53-70 %; Reed stab short stops; Minister rotated colliders as AABBs; no
+  terrain model for pins / spear / bombs; bomb timing windows wide; deployed oracle's `enemy.hp` unverified.
