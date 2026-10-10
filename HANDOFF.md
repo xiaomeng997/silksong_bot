@@ -4057,3 +4057,35 @@ S0 (planner AIM off; P0 is display / truth / aim templates): baseline 0.60 % = 3
 - Runs I stopped (superseded, mine): the rb re-scores of rclip2ra (fam on) and of rclip2best on 4e31a83 (RTHROW v1),
   and the gate chains gates_ra / gates_rt after their seen gates. Afterwards the classifier refused launching new
   detached runs; the last gates and re-score ran in this session's background (see the result block).
+
+### S2 gates (seen = the person's 3 sessions + bot wave 0; `m2_forum_push\s2\compare_seen_s2.md`, `compare_chain.md`, per type `per_type_{h,bot}.md`)
+
+| gate | base | RCLIP=2 (S1, dd96ea9) | RCLIP=2 + Tiny fix (1cd56a3) | REANCHOR=1, RCLIP off | REANCHOR=chain, RCLIP off | RCLIP=2 + Tiny + chain + RTHROW (671e639) |
+|---|---|---|---|---|---|---|
+| person committed k0 err / p50 / p99 | 99.6 / 12.28 / 140.8 | 97.18 / 2.82 / 140.8 | 97.09 / 2.51 / 57.6 | 99.6 / 12.28 / 140.8 | 99.6 / 12.28 / 140.8 | 96.98 / 2.45 / 15.9 |
+| person committed k12 | 99.38 / 14.93 / 145.2 | 99.31 / 9.32 / 145.5 | 99.31 / 9.21 / 57.6 | 99.38 / 14.93 / 145.2 | 99.38 / 14.93 / 145.2 | 99.31 / 9.03 / 45.7 |
+| person com_all k0 p50 | 17.33 | 2.90 | 2.56 | 15.05 | 17.01 | 2.50 |
+| bot committed k0 / k12 p50 | 7.90 / 9.39 | 2.31 / 6.09 | 2.31 / 6.09 | 7.90 / 9.39 | 7.90 / 9.39 | 2.31 / 6.09 |
+| hindsight own / all, person k12 | 99.614 / 99.830 | 99.602 / 99.801 | 99.602 / 99.801 | **99.228** / 99.725 | 99.614 / 99.830 | 99.602 / 99.801 |
+| hindsight own / all, person k36 | 95.854 / 98.970 | 95.808 / 98.134 | 95.808 / 98.134 | 95.407 / 98.918 | 95.854 / 98.970 | 95.808 / 98.134 |
+| hindsight own / all, bot k12 | 98.501 / 99.558 | 98.501 / 99.369 | 98.501 / 99.369 | **97.104** / 99.211 | 98.501 / 99.558 | 98.501 / 99.369 |
+| hindsight own / all, bot k36 | 83.879 / 99.186 | 83.879 / 95.770 | 83.879 / 95.770 | 81.479 / 99.043 | 83.879 / 99.186 | 83.879 / 95.770 |
+| share > half, person s0 / s12 % | 44.9 / 70.2 | 23.9 / 38.9 | 23.8 / 38.9 | 43.3 / 69.6 | 44.7 / 70.1 | **18.9 / 35.1** |
+| share > half, bot s0 / s12 % | 32.7 / 72.6 | 1.0 / 15.9 | 1.0 / 15.9 | 28.2 / 70.8 | 31.3 / 72.2 | 1.0 / 15.9 |
+
+- Hindsight rows lost against the column it builds on (`s2\hind_lost.py`): Tiny fix 0; chain 0; the final candidate
+  0 (against RCLIP=2 + Tiny fix, k 6 / 12 / 36); REANCHOR=1 320 at k12 (fam: Envoy / Choristor, above).
+- Per type, person committed RATIO p50 k0 / k12 (final candidate vs S1's RCLIP=2): Tiny 69.6 / 69.8 -> 2.7 / 21.5,
+  Clawmaiden 32.5 / 35.0 -> 2.7 / 13.6, Bellbearer 5.0 / 8.5 -> 2.4 / 7.7; the rest unchanged (Clapper 5.9 / 5.9,
+  Reed 2.5 / 8.3, Minister 2.4 / 7.6, Envoy 2.0 / 5.5, Maestro 2.1 / 6.9, Choristor 2.4 / 6.4). No type is at the
+  1.5x target; under RCLIP the remainder is the clip rectangle itself (every continuation's box, + r + hero half).
+- PNGs (gate 5): the flagged frames 5689 / 7939 / 9379 / 10427 are byte-identical between RCLIP=2 + Tiny fix and the
+  final candidate (no Tiny, no pre-release throw, no defender stance there); `rclip2best3\png` vs `base\png` shows
+  RCLIP's change. Extra before / after (`s2\png_extra\{before,after}`, before = S1's RCLIP=2): a Clawmaiden in Spin 1
+  (20261008_230220 a0 f8441): committed k0 351.2 u^2 (28.8x) -> 30.0 u^2 (2.5x); six Tinies at 20261008_231544 a1
+  f30379.
+- R2 held-out hindsight (`s2\r2_partial.py`, the fights every tag has finished; R2's 0.1 s recall horizon is why the
+  hindsight is the k <= 36 check): the final candidate loses 0 rows against RCLIP=2 + Tiny fix at k 0 / 6 / 12 / 36
+  (115 fights in common), and the Tiny fix loses 0 against S1's RCLIP=2 + PRESTRIKE (rclip2p). RCLIP=2 itself still
+  loses hit rows against base (k12 29 rows of 194,736: Choristor CH_JUMP, Reed, Envoy; clean own % identical), S1's
+  known RCLIP issue.
