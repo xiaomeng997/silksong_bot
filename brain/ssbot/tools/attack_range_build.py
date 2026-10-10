@@ -44,7 +44,7 @@ import numpy as np
 
 from ssbot.combat.attack_range import (CELL, CHORISTOR, FT, SPECS, Mask, RangeTable, Segmenter, Template, bin_of,
                                        circle_poly, hazards_at, hero_space, hurts, load_table, on_canvas, poly_mask,
-                                       save_table, table_path, union)
+                                       save_table, table_path, type_extra, union)
 
 ARE = Path(r"C:\ssbot\data\m2_forum_are")
 OUT = ARE / "choristor"
@@ -169,6 +169,9 @@ def load_tracks(name: str, type_key: str | None = None, cache_dir: Path | None =
                 t["f"] = np.asarray(c["f_raw"][t["fi"]], np.int64)
         if spec.hazards and trs:
             attach_hazards(c, trs, spec)
+        att = getattr(_module(spec), "attach", None)
+        if att is not None and trs:       # stage B: the type's projectiles (tr["objs"] per frame, "OBJ:" cols)
+            att(c, trs, spec)
         out += trs
     return out
 
@@ -214,8 +217,9 @@ def frame_polys(tr: dict, j: int, shapes: dict, only=None, hz: bool | None = Non
     """The damage polygons of frame j: all, only those named `only` (a name or names), hz True / False: only the
     hazards' / only the enemy's own."""
     names = None if only is None else ((only,) if isinstance(only, str) else tuple(only))
+    # "OBJ:<name>" (stage B): a type module's projectile pieces (attach), hazards like "HZ:" but drawn as AABBs
     return [poly_of(nm, bx, int(tr["flip"][j]), shapes) for nm, bx in tr["cols"][j]
-            if (names is None or nm in names) and (hz is None or nm.startswith("HZ:") == hz)]
+            if (names is None or nm in names) and (hz is None or nm.startswith(("HZ:", "OBJ:")) == hz)]
 
 
 # ------------------------------------------------------------------------------------------------ segmentation
@@ -242,12 +246,15 @@ def segment(tr: dict, spec, face_flip1: int) -> tuple[list, np.ndarray]:
             last = inst
         insts[-1]["frames"].append(j)
         idx[j] = len(insts) - 1
+    hs = getattr(spec, "hit_started", frozenset())
     for r in insts:
         r["j1"] = r["frames"][-1]
         inst = r["inst"]
         t1 = float(tr["T"][r["j1"]])
-        r["interrupted"] = any(inst.t0 - 0.05 <= h <= t1 + 0.05 for h in tr["hits"]) or \
-            any(inst.t0 - 0.05 <= h <= t1 + 0.05 for h in tr["clash"])
+        # a hit-started family (stage B: counters) is not interrupted by the hit that starts it
+        lo = inst.t0 + 0.05 if inst.fam in hs else inst.t0 - 0.05
+        r["interrupted"] = any(lo <= h <= t1 + 0.05 for h in tr["hits"]) or \
+            any(lo <= h <= t1 + 0.05 for h in tr["clash"])
     return insts, idx
 
 
@@ -424,6 +431,7 @@ def build(tracks: list[dict], spec=None, shapes: dict | None = None) -> tuple[Ra
                 "landing_err_p50": round(float(np.median(err)), 3) if len(err) else None,
                 "landing_err_p95": round(float(np.percentile(err, 95)), 3) if len(err) else None,
                 "landing_err_max": round(float(err.max()), 3) if len(err) else None,
+                "L_p50": round(float(np.median(L[fin])), 3) if fin.any() else None,     # stage B: the measured extent
                 "facing_agrees": round(float(np.mean(flips)), 4) if flips else None}
         sst = order = None
         if spec.state_gate:
@@ -557,9 +565,12 @@ def eval_track(tr: dict, tab: RangeTable, shapes: dict, every: int = 2, idle_eve
     rows = []
     spawned = sorted(((hz, *r["inst"].trig[hz.name]) for r in insts for hz in spec.hazards
                       if hz.name in r["inst"].trig), key=lambda q: q[1])
+    ex = type_extra(spec)
+    ex_name = getattr(_module(spec), "OBJ_NAME", "extra") if ex is not None else None
+    objs = tr.get("objs")
 
     def hz_rows(j, jt, k, inst, base: dict):
-        if not spec.hazards:
+        if not spec.hazards and ex is None:
             return None
         view = _active_view(inst, float(T[j]))
         pos = (float(tr["x"][j]), float(tr["y"][j]))
@@ -573,6 +584,13 @@ def eval_track(tr: dict, tab: RangeTable, shapes: dict, every: int = 2, idle_eve
             if (Eh.m.size and Eh.m.any()) or (Rh.m.size and Rh.m.any()):
                 rows.append({**base, "fam": f"HZ {hz.name}", "br": base["fam"], **compare(Eh, Rh, inst.s if inst
                                                                                           else 1)})
+        if ex is not None:              # stage B: the type's own part (the Reed's pin) vs its "OBJ:" colliders
+            Eh = ex(tab, view, float(T[j]), pos, tt, (objs[j] if objs is not None else ()))
+            Rh = poly_mask(frame_polys(tr, jt, shapes, only=f"OBJ:{ex_name}"))
+            tot.append(Eh)
+            if (Eh.m.size and Eh.m.any()) or (Rh.m.size and Rh.m.any()):
+                rows.append({**base, "fam": f"HZ {ex_name}", "br": base["fam"], **compare(Eh, Rh, inst.s if inst
+                                                                                         else 1)})
         return union(tot)
     for n, r in enumerate(insts):
         inst = r["inst"]

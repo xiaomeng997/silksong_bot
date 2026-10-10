@@ -70,6 +70,12 @@ class EnemySpec:
     state_gate: bool = False   # templates keep each bin's shape per state: k = 0 draws the state it is in now, k > 0
     #                            the states at or after it (attack_range.RangeTable._shape); a state is kept at a bin
     #                            when at least 2 R0 dev instances were in it there (tools.attack_range_build)
+    hit_started: frozenset = frozenset()   # stage B: families a hit starts (counters, HIT_COND: the Reed's Block, the
+    #                                        Minister's Parry Block): the hit / clash that starts one does not count
+    #                                        as interrupting it (tools.attack_range_build.segment); later ones do
+    # stage B: the spec's branch values may be callables (x=, y=, s=, vx=, hero_x=, hero_y=) -> branch, picked at
+    # that state's first frame (attack_range.Segmenter); a Decision rule may return (s, L, extras): s 0 = the
+    # observed facing at the decision frame, extras are kept in the decision (Inst.dec)
 
     @property
     def body_names(self) -> tuple:
