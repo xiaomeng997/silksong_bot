@@ -4297,3 +4297,166 @@ cd <checkout>\brain
 ..\scripts\uv.cmd run python -m ssbot.tools.attack_range_build --type reed png
 ..\scripts\uv.cmd run python -m pytest -q tests\test_attack_range_reed_minister.py tests\test_attack_range_types.py tests\test_attack_range.py tests\test_zone_overlay.py
 ```
+
+## 36. 攻击范围估计（ARE）阶段 B：Bellbearer（和它的铃）、Maestro、Tiny（2026-10-10，task "attack range: all types" 阶段 B，分支 worktree-wf_2fe0d0c5-18e-4 = 阶段 A 77ccb1e + 这三个类型；代码 `ssbot/combat/are_types/bellbearer.py`、`maestro.py`、`tiny.py`；表 `knowledge/1.0.30000/enemies/forum/attack_range_{bellbearer,maestro,tiny}.npz` + `.json`；数据 `C:\ssbot\data\m2_forum_are\{bellbearer,maestro,tiny}`）
+
+规则和 §32 / §33 一样：**不加任何余量**（只有画主角中心区时的受伤框膨胀）；待机 = 现在的身体；招从起手到收招，只用 R0 dev 建；还没开始的招和还没定的瞄准（第 2 组）不画。误差分 R0 fresh / R2 / 你的录像三组报。离线，没有开游戏。
+
+### 36.1 给框架加的钩子（阶段 A 的框架不够的地方；Choristor 和 Clapper 都没用，结果不变）
+
+- `EnemySpec.custom(view) -> (replace, add)`：类型文件自己算这一帧的估计。`replace` 取代模板的那一部分（例：Tiny 绕 Maestro 转圈、按速度走的身体），`add` 加进去并算作危险物（例：Bellbearer 的铃）。`view`（`are_spec.CustomView`）里有现在的位置、速度、状态、实例、主角；实时还有这一帧所有实体和一个跨帧的小内存，离线有轨迹和帧号。实时在 `RangeTracker.estimate` 调，离线在 `eval_track` 和 PNG 里调（同一个函数）。身体的多边形由调用的一方放进 `view.body`（类型文件不能 import 构建工具：导入防火墙 `test_import_firewall` 不许 combat 经 forum_cache 碰到 ipc）。
+- `EnemySpec.attach(cache, tracks)`：只在构建 / 评估时用，给轨迹加上 custom 需要的东西（别的实体的路径、自己扔出去的东西），并把扔出去的东西的真碰撞体记成 "HZ:<名字>"（真伤害的一部分）。评估里多一组行 "HZ extra"（只比这些东西）。
+- `Decision.scale = False`：只定"哪一边"的决定（Maestro 的斩）。决定以后的横向位移用模板的中位数，不按 L 缩放。
+- 实时跳过"不在场"的成员时用类型自己的 `parked`（以前写死成通用的 PARKED，里面有 "Ready"；Tiny 的 Ready 是跟队形飞，是在场的）。
+- 评估的每一行多记了当时的状态（`st`），新工具 `ssbot/tools/are_rows_report.py` 按家族 × 决定 / 状态出表（`report.json`）。
+- 单怪练习（`solo_practice.py`）：Maestro 自己召唤的 Tiny 不算"别的怪"（不让你清掉）；`--solo "Song Automaton Tiny"` 等于练 Maestro + 它的 Tiny。
+- 单测 `tests/test_attack_range_bmt.py`（11 个）；Choristor 逐位不变（`test_choristor_placements_are_bit_identical` 照样过）。
+
+### 36.2 Bellbearer（Pilgrim 03 Song）和铃
+
+| 家族 | 状态 | R0 dev 实例 | 时长 p50 / 最长 | 画什么 |
+|---|---|---|---|---|
+| CB_THROW 扔铃 | Throw Antic（第一帧就定了瞄准）> Throw（出手，起手后 0.649–0.683 s）> Recover | 7,403 | 1.17 / 1.22 s | 身体（起手时往后 0.94 / 往上 0.47 u，p95），被打不取消；铃见下 |
+| CB_EVADE 闪避 | Evade Antic（4–5 帧，转向你）> Evade | 3,083 | 0.40 / 0.40 s | **按它现在的朝向往后** 32 u/s、每帧 ×0.9（4.3 u），同时往下 8 u/s（下沉 1.25 u，最大 3.46）。朝向来自 flipX：背对你开始闪避时就是往你身上撞；你在它正下方时下沉的那一段会碰到你。Evade 状态里用"现在的速度 × 每帧 0.9 衰减"推（FSM 自己的减速规则；R0 dev 12 帧后位置误差 p50 0.16 u、p90 0.47 u），Evade Antic 用模板 |
+| CB_ENTRY 入场 | Fly In | 532 | 0.8 s | 身体（入场时不伤人，落定后的身体） |
+| 待机 | In Range / Out of Range | | | 现在的身体（1.32 × 1.53） |
+
+**铃**（"Throwing Bell" 实体，圆 r 0.425）：
+- **在飞的铃按它的真路径画**：从它现在的位置和速度往后推：50 Hz 半隐式欧拉，g 60（每步 vy −1.2）；第一次落地（中心 y 3.53）弹起 vy 20；第二次落地后在地上再伤 1–2 帧就消失；墙（x 14.435 / 48.565）把它以 10 u/s 弹回。被你的钉子打回去的铃（Nail Hit，从此 dealt 0）不画。R0 dev 12 帧后的位置误差：p50 0.0 u、p90 0.42、p95 0.61（50 Hz 物理和 60 帧画面的相位差 + 弹跳）。
+- **还没出手时画已经定了的抛物线**（Throw Antic 里、这次的铃还没出现）：Spit X = clamp(1.15 × (你的 x − 它的 x) + U(−1, 1), ±15)，|vx| ≥ 4，vy 20（你的 x 取起手那一帧）；出生点 = 它现在的位置 + (朝 vx 方向 0.94 u, −0.5 u)（R0 dev 1,648 / 1,660 次）；出手时刻在 R0 dev 的窗口 0.649–0.683 s 里。画的是 U 取 5 个值 × 窗口里每一帧的并集——U 和出手帧是唯一不知道的东西，不是余量。
+- 离线的真伤害：每个铃的一段飞行按"出生时刻 = 某只 Bellbearer 的 Throw 进入（±3 帧）且出生点最近（≤ 1.5 u）"归给那只；实时按"第一次看到时离它最近的那只 Bellbearer"。
+
+### 36.3 Maestro（Song Pilgrim Maestro）
+
+| 家族 | 状态 | R0 dev 实例 | 时长 p50 | 画什么 |
+|---|---|---|---|---|
+| MA_SLASH 斩 | Fire Antic（0.68–0.73 s，往后退正好 2.37 u；同一帧叫一只 Tiny 俯冲）> Slash 1 > Slash 2 > Slash End > Slash Recover F / Slash Recover | 6,226 | 1.32 s | **哪一边在 Slash 1 进入时定**（第一下伤害的那一帧：你当时在哪一边，7922 / 7922；Fire Antic 开始时只有 95.4 %）。之前是待定瞄准（第 2 组）：只画起手的身体和它的后退；Slash 1 起画定了那一边的斩（Slash Hit 1 / 2 的真多边形），锚在 Slash 1 那一帧 |
+| MA_DEFEND 防御 | Defend Start > Defending > Defend End | 2,656 | 2.28 s | 身体。Defending 跟你保持 4 u（≤ 5 u/s，你近了它就退），模板的中位路径不对（k 12 覆盖 79 %，后方漏 p95 1.95 u），改成"身体按现在的速度走"（R0 dev 12 帧后误差 p50 0.11 u、p90 0.53）→ k 12 覆盖 91 % |
+| MA_SUMMON 召唤 | Call > Summon > Summon Recover | 1,112 | 1.02 s | 身体（没有攻击碰撞体），召出 Tiny |
+| MA_ENTRY 入场 | Fly In | 318 | 0.8 s | 入场时身体不伤人 |
+| 待机 | Forum Fly / Fly / Chase | | | 现在的身体（1.76 × 1.95） |
+
+- 被打时它会去 Summon?（一个出招决定，不是反击碰撞体），所以没有 HIT_COND 一类要画的。
+
+### 36.4 Tiny（Song Automaton Tiny，Maestro 的小机器）
+
+只有身体伤人（1.00 × 1.08）；Swoop In Pause / Swoop In（入场）、Leave、Die、Dead 时不伤人。一次最多 6 只，每只单独跟踪。池化对象：同一个 iid 死了会在别处重新出现，所以离线按"每一条命"切成单独的轨迹（不然 12 帧后会比到它下一条命的位置）。
+
+| 家族 | 状态 | R0 dev 实例 | 画什么 |
+|---|---|---|---|
+| AT_FIRE_READY 俯冲准备 | Fire Ready（0.70–0.77 s，和 Maestro 的 Fire Antic 同步） | 7,676 | 俯冲的方向和起点要到 Fire 才定（第 2 组），只画身体：按现在的速度和上一帧的加速度走 |
+| AT_DIVE 俯冲 | Fire > Brake > Pull Up / Wall Bonk > Return | 5,236 | Fire 进入时就定了（方向 = 它的朝向，1,114 / 1,117）：(±24, −36.9) u/s 起，越来越平，到地面（y 5.0：Brake 滑行 1–23 u）、撞墙（Wall Bonk）或 Pull Up；Return 飞回队形。模板的中位路径只有 32 % 的 k 12 覆盖，改成按状态的运动学：身体按现在的速度（Fire / Pull Up / Return / Fire Ready 再加上一帧的加速度，撞墙那一帧速度被清零时不算加速度），不穿地面（Fire / Brake / Pull Up：y ≥ 4.7），不出墙（x 14.5–48.5）。R0 dev 12 帧后位置误差 p50 / p90：Fire 0.61 / 1.67 u（不动的身体 5.82 / 7.36），Brake 0.80 / 1.19，Pull Up 0.75 / 1.75，Wall Bonk 0.45 / 1.01，Return 0.26 / 1.46 |
+| AT_DEFEND 防御 | Defend Ready > Defend Buzz | 7,713 | **绕最近的 Maestro 转圈**：圆心 = Maestro 现在的位置 + 它的速度 × t；角度按 R0 dev 量的角速度曲线转（Defend Buzz 开始 0.3 s 内从 0 加到约 210–350 °/s，之后 180–215 °/s），方向 = 它现在转的方向；半径从现在的半径按曲线变（5.0 → 0.3 s 时 2.2 → 5.05）。R0 dev 12 帧后误差 p50 0.67 u（不动的身体 3.65，按速度 1.78）。Defend Ready 按速度走（p50 0.33） |
+| AT_ENTRY 入场 | Swoop In Pause > Swoop In | 2,225 | 不伤人；入场后的身体 |
+| AT_LEAVE 离场 | Leave Pause > Leave | 728 | Leave Pause 的身体（按速度走），Leave 不伤人 |
+| 待机 | Ready（跟队形飞，6 u/s） | | 现在的身体 |
+
+### 36.5 估计误差（k = 0 和 12；不含被打的行和 t+k 前已经开始下一招的行；覆盖 = 真伤害格子被估计盖住的比例，面积比 = 估计 / 真，主角中心区）
+
+Tiny 评估每 6 帧取一行（待机每 30 帧），Bellbearer / Maestro 每 2 帧（待机每 6 帧）。
+
+| 家族 | 集合 | k 0：覆盖 / 面积比 / ≤1.5 的行 | k 12：覆盖 / 面积比 / p90 / ≤1.5 的行 | k 12 漏 p95（前/后/上/下/洞，u） | 行数 |
+|---|---|---|---|---|---|
+| Bellbearer CB_ENTRY | fresh | - / None / - | 86.5 % / 0.983 / 1.0 / 100.0 % | 0.63/0.56/0.6/0.6/- | 4350 |
+| Bellbearer CB_ENTRY | R2 | - / None / - | 85.9 % / 0.983 / 1.0 / 100.0 % | 0.63/0.49/0.46/0.53/- | 815 |
+| Bellbearer CB_ENTRY | 你 | - / None / - | 85.9 % / 0.977 / 1.0 / 100.0 % | 0.62/0.56/0.53/0.6/99.0 | 2485 |
+| Bellbearer CB_EVADE | fresh | 99.7 % / 1.004 / 100.0 % | 92.8 % / 1.051 / 1.12 / 96.6 % | 0.91/0.49/0.45/0.51/0.85 | 8643 |
+| Bellbearer CB_EVADE | R2 | 99.7 % / 1.001 / 100.0 % | 92.1 % / 1.047 / 1.12 / 96.9 % | 1.65/0.51/0.39/0.44/0.4 | 2978 |
+| Bellbearer CB_EVADE | 你 | 99.7 % / 1.004 / 100.0 % | 92.5 % / 1.065 / 1.14 / 93.6 % | 5.06/0.49/0.48/0.49/0.4 | 1649 |
+| Bellbearer CB_THROW | fresh | 98.6 % / 0.986 / 100.0 % | 96.0 % / 1.032 / 1.17 / 98.8 % | 0.32/0.32/0.53/0.25/0.56 | 86601 |
+| Bellbearer CB_THROW | R2 | 98.6 % / 0.986 / 100.0 % | 95.8 % / 1.025 / 1.15 / 99.5 % | 0.35/0.35/0.49/0.39/0.63 | 37159 |
+| Bellbearer CB_THROW | 你 | 98.6 % / 0.986 / 100.0 % | 96.4 % / 1.038 / 1.18 / 97.7 % | 0.32/0.35/0.53/0.28/0.49 | 7357 |
+| Bellbearer 待机 | fresh | 100.0 % / 1.0 / 100.0 % | 55.1 % / 1.037 / 1.03 / 92.4 % | 1.54/1.48/1.51/1.51/1.51 | 29297 |
+| Bellbearer 待机 | R2 | 100.0 % / 1.0 / 100.0 % | 58.6 % / 1.043 / 1.04 / 91.0 % | 1.54/1.42/1.51/1.39/1.4 | 11601 |
+| Bellbearer 待机 | 你 | 100.0 % / 1.0 / 100.0 % | 54.8 % / 1.025 / 1.03 / 95.0 % | 1.54/1.47/1.48/1.51/1.48 | 3582 |
+| Bellbearer 铃（HZ extra） | fresh | 100.0 % / 1.0 / 100.0 % | 95.7 % / 1.107 / 1.49 / 90.6 % | 0.53/0.53/0.62/0.77/0.18 | 71621 |
+| Bellbearer 铃（HZ extra） | R2 | 100.0 % / 1.0 / 100.0 % | 95.8 % / 1.106 / 1.49 / 90.5 % | 0.46/0.98/0.56/1.25/0.18 | 30217 |
+| Bellbearer 铃（HZ extra） | 你 | 100.0 % / 1.0 / 100.0 % | 96.9 % / 1.098 / 1.47 / 91.1 % | 0.49/0.46/0.54/0.71/0.18 | 6695 |
+| Maestro 待机 | fresh | 100.0 % / 1.0 / 100.0 % | 71.4 % / 1.0 / 1.02 / 100.0 % | 1.21/1.37/1.02/0.95/- | 46494 |
+| Maestro 待机 | R2 | 100.0 % / 1.0 / 100.0 % | 73.2 % / 1.0 / 1.02 / 100.0 % | 1.17/1.31/0.95/0.88/- | 16985 |
+| Maestro 待机 | 你 | 100.0 % / 1.0 / 100.0 % | 73.9 % / 1.0 / 1.02 / 100.0 % | 1.28/1.4/1.02/1.23/- | 2869 |
+| Maestro MA_DEFEND | fresh | 100.0 % / 1.0 / 100.0 % | 91.0 % / 1.0 / 1.02 / 100.0 % | 0.6/0.7/0.46/0.53/- | 65550 |
+| Maestro MA_DEFEND | R2 | 100.0 % / 1.0 / 100.0 % | 91.1 % / 1.0 / 1.02 / 100.0 % | 0.61/0.7/0.46/0.51/- | 27841 |
+| Maestro MA_DEFEND | 你 | 100.0 % / 1.0 / 100.0 % | 90.8 % / 1.0 / 1.02 / 100.0 % | 0.6/0.75/0.53/0.51/- | 2046 |
+| Maestro MA_ENTRY | fresh | - / None / - | - / None / None / - | -/-/-/-/- | 1875 |
+| Maestro MA_ENTRY | R2 | - / None / - | - / None / None / - | -/-/-/-/- | 704 |
+| Maestro MA_ENTRY | 你 | - / None / - | - / None / None / - | -/-/-/-/- | 944 |
+| Maestro MA_SLASH | fresh | 98.9 % / 1.001 / 100.0 % | 78.3 % / 0.89 / 1.04 / 100.0 % | 4.85/0.32/1.48/0.25/- | 87730 |
+| Maestro MA_SLASH | R2 | 98.9 % / 1.001 / 100.0 % | 78.1 % / 0.887 / 1.04 / 100.0 % | 4.8/0.32/1.48/0.25/- | 39474 |
+| Maestro MA_SLASH | 你 | 98.8 % / 1.0 / 100.0 % | 77.7 % / 0.879 / 1.04 / 100.0 % | 4.9/0.28/1.45/0.25/- | 3851 |
+| Maestro MA_SLASH decided | fresh | 98.9 % / 1.007 / 100.0 % | 91.9 % / 1.03 / 1.04 / 100.0 % | 1.35/0.35/0.39/0.31/- | 41004 |
+| Maestro MA_SLASH decided | R2 | 99.0 % / 1.006 / 100.0 % | 91.1 % / 1.03 / 1.04 / 100.0 % | 1.26/0.35/0.4/0.32/- | 18410 |
+| Maestro MA_SLASH decided | 你 | 98.9 % / 1.006 / 100.0 % | 92.2 % / 1.029 / 1.04 / 100.0 % | 0.9/0.29/0.39/0.26/- | 1734 |
+| Maestro MA_SLASH pending | fresh | 98.8 % / 0.994 / 100.0 % | 68.8 % / 0.792 / 1.0 / 100.0 % | 4.95/0.28/1.49/0.16/- | 46726 |
+| Maestro MA_SLASH pending | R2 | 98.8 % / 0.994 / 100.0 % | 69.1 % / 0.788 / 1.0 / 100.0 % | 4.9/0.28/1.49/0.16/- | 21064 |
+| Maestro MA_SLASH pending | 你 | 98.8 % / 0.994 / 100.0 % | 68.4 % / 0.782 / 1.0 / 100.0 % | 4.95/0.28/1.48/0.15/- | 2117 |
+| Maestro MA_SUMMON | fresh | 98.6 % / 0.993 / 100.0 % | 94.9 % / 0.993 / 1.0 / 100.0 % | 0.46/0.48/0.29/0.05/- | 11485 |
+| Maestro MA_SUMMON | R2 | 98.6 % / 0.992 / 100.0 % | 97.0 % / 0.992 / 1.0 / 100.0 % | 0.5/0.21/0.22/0.05/- | 1614 |
+| Maestro MA_SUMMON | 你 | 98.5 % / 0.99 / 100.0 % | 97.7 % / 0.991 / 1.0 / 100.0 % | 0.58/0.14/0.24/0.05/- | 1131 |
+| Tiny AT_DEFEND | fresh | 100.0 % / 1.0 / 100.0 % | 55.8 % / 1.0 / 1.01 / 100.0 % | 3.22/3.08/2.91/3.34/- | 56394 |
+| Tiny AT_DEFEND | R2 | 100.0 % / 1.0 / 100.0 % | 54.4 % / 1.0 / 1.01 / 100.0 % | 3.35/3.18/2.99/3.47/- | 26013 |
+| Tiny AT_DEFEND | 你 | 100.0 % / 1.0 / 100.0 % | 52.6 % / 1.0 / 1.01 / 100.0 % | 3.49/3.33/3.55/3.53/- | 4698 |
+| Tiny AT_DIVE | fresh | 100.0 % / 1.0 / 100.0 % | 69.9 % / 1.001 / 1.01 / 100.0 % | 1.26/1.46/2.12/1.23/- | 36989 |
+| Tiny AT_DIVE | R2 | 100.0 % / 1.0 / 100.0 % | 70.4 % / 1.001 / 1.01 / 100.0 % | 1.28/1.4/2.12/1.23/- | 18692 |
+| Tiny AT_DIVE | 你 | 100.0 % / 1.0 / 100.0 % | 70.2 % / 1.001 / 1.01 / 100.0 % | 1.2/1.54/2.15/1.37/- | 3061 |
+| Tiny AT_DIVE st=Brake | fresh | 100.0 % / 1.0 / 100.0 % | 73.8 % / 1.001 / 1.01 / 100.0 % | 0.32/1.75/1.51/0.82/- | 6567 |
+| Tiny AT_DIVE st=Brake | R2 | 100.0 % / 1.0 / 100.0 % | 73.1 % / 1.001 / 1.01 / 100.0 % | 0.35/1.99/1.51/0.89/- | 3326 |
+| Tiny AT_DIVE st=Brake | 你 | 100.0 % / 1.0 / 100.0 % | 71.8 % / 1.001 / 1.01 / 100.0 % | 0.22/2.02/1.61/0.8/- | 435 |
+| Tiny AT_DIVE st=Fire | fresh | 100.0 % / 1.0 / 100.0 % | 65.3 % / 1.003 / 1.01 / 100.0 % | 0.35/1.37/2.58/0.95/- | 7831 |
+| Tiny AT_DIVE st=Fire | R2 | 100.0 % / 1.0 / 100.0 % | 65.9 % / 1.003 / 1.01 / 100.0 % | 0.42/1.24/2.58/0.96/- | 3984 |
+| Tiny AT_DIVE st=Fire | 你 | 100.0 % / 1.0 / 100.0 % | 65.4 % / 1.002 / 1.01 / 100.0 % | 0.23/1.39/2.58/0.86/- | 740 |
+| Tiny AT_DIVE st=Return | fresh | 100.0 % / 1.0 / 100.0 % | 74.1 % / 1.0 / 1.01 / 100.0 % | 1.61/1.09/1.06/1.29/- | 15634 |
+| Tiny AT_DIVE st=Return | R2 | 100.0 % / 1.0 / 100.0 % | 74.3 % / 1.0 / 1.01 / 100.0 % | 1.57/1.1/1.02/1.34/- | 7822 |
+| Tiny AT_DIVE st=Return | 你 | 100.0 % / 1.0 / 100.0 % | 75.9 % / 1.0 / 1.01 / 100.0 % | 1.5/1.04/0.88/1.52/- | 1231 |
+| Tiny AT_ENTRY | fresh | - / None / - | 84.7 % / 1.004 / 1.01 / 100.0 % | 0.28/0.32/0.95/1.6/- | 4617 |
+| Tiny AT_ENTRY | R2 | - / None / - | 86.2 % / 1.004 / 1.01 / 100.0 % | 0.28/0.36/0.95/0.81/- | 857 |
+| Tiny AT_ENTRY | 你 | - / None / - | 80.5 % / 1.003 / 1.01 / 100.0 % | 0.28/0.35/1.1/2.4/- | 1106 |
+| Tiny AT_FIRE_READY | fresh | 100.0 % / 1.0 / 100.0 % | 87.1 % / 1.0 / 1.01 / 100.0 % | 0.56/0.62/0.32/0.6/- | 13218 |
+| Tiny AT_FIRE_READY | R2 | 100.0 % / 1.0 / 100.0 % | 87.6 % / 1.0 / 1.01 / 100.0 % | 0.56/0.6/0.36/0.56/- | 5108 |
+| Tiny AT_FIRE_READY | 你 | 100.0 % / 1.0 / 100.0 % | 87.0 % / 1.0 / 1.01 / 100.0 % | 0.7/0.63/0.39/0.61/- | 1242 |
+| Tiny AT_LEAVE | fresh | 100.0 % / 1.0 / 100.0 % | 82.9 % / 1.0 / 1.01 / 100.0 % | 0.6/0.97/0.68/0.93/- | 3256 |
+| Tiny AT_LEAVE | R2 | 100.0 % / 1.0 / 100.0 % | 63.8 % / 1.0 / 1.01 / 100.0 % | 0.56/1.68/1.17/1.36/- | 40 |
+| Tiny AT_LEAVE | 你 | 100.0 % / 1.0 / 100.0 % | 80.9 % / 1.0 / 1.01 / 100.0 % | 0.84/0.93/0.83/1.03/- | 1777 |
+| Tiny 待机 | fresh | 100.0 % / 1.0 / 100.0 % | 41.7 % / 1.0 / 1.01 / 100.0 % | 1.39/1.4/1.39/1.3/- | 37279 |
+| Tiny 待机 | R2 | 100.0 % / 1.0 / 100.0 % | 41.7 % / 1.0 / 1.01 / 100.0 % | 1.39/1.4/1.38/1.25/- | 14333 |
+| Tiny 待机 | 你 | 100.0 % / 1.0 / 100.0 % | 43.1 % / 1.0 / 1.01 / 100.0 % | 1.4/1.39/1.39/1.23/- | 2854 |
+
+（"HZ extra" = 铃自己的行。家族 / 待机的行里估计和真伤害都包含当时的铃。"CH_IDLE" = 待机。MA_SLASH "pending" = Fire Antic 里还没定边的行，"decided" = Slash 1 以后。）
+
+要点：
+- **k 0**：Bellbearer 98.6–100 %、Maestro 98.5–100 %、Tiny 100 %，面积比 0.99–1.01：画出来的就是现在真有的碰撞体（斩是真多边形，铃是真圆）。
+- **铃**：k 12 覆盖 95.7–96.9 %，面积比 1.10（p90 1.47–1.49；比较大的是出手前那几帧画的抛物线带：U 和出手帧的并集）。
+- **Bellbearer**：扔铃 k 12 96 %（面积比 1.03），闪避 92–93 %（改成按衰减速度推之前 85–87 %），入场 86 %。
+- **Maestro**：斩定了边以后 k 12 91–92 %（面积比 1.03）；Fire Antic 里（待定，按规则不画斩）69 %，漏的就是还没定边的斩（前方 p95 4.9 u）。防御 91 %，召唤 95–98 %。
+- **Tiny**：俯冲 k 12 70 %（Fire 65–66 %、Brake 72–74 %、Return 74–76 %；用模板中位路径时只有 32 %），俯冲准备 87 %，入场 81–86 %，离场 64–83 %，转圈（防御）53–56 %（误差 p50 0.67 u，而身体只有 1 u 宽）。面积比都是 1.00：Tiny 只有身体，画得不大，问题全在 12 帧后的位置
+- **待机 k 12**（规则 = 现在的身体，不往前推）：Bellbearer 55–59 %、Maestro 71–74 %、Tiny 42–43 %。它们待机时都在飞：Bellbearer In Range 按现在的速度推 12 帧，位置误差 p50 0.40 u（不推 1.10），Maestro Forum Fly 0.16（不推 0.61），Tiny Ready 0.32（不推 1.21）。和 Clapper 的 Walk 一样：要不要按速度往前推是你的决定（这算预测，不算余量；改起来就是在 custom 里加这几个状态）。
+- 面积比全部 ≤ 1.11（铃 p90 1.49），没有一类超过 1.5：这三个类型主要是"位置推得准不准"，不是"画得太大"。
+
+### 36.6 怎么看
+
+- **图**（颜色同 §32.4：橙色填充 = k 0 估计，浅蓝 = k 12，细黄 = 主角中心区，红 = 现在的真碰撞体，细红 = 之后 1–11 帧，紫红 = +12 帧，白框 = 大黄蜂；标题里 "+ projectiles" = 画进了铃）：
+  - `C:\ssbot\data\m2_forum_are\bellbearer\png\`（35 张 + `index.json`）：你指出的 **085824 第 7939 帧**（`20261009_085824_f7939_Evade.png`：闪避，k 0 覆盖 100 %、面积比 1.00，k 12 覆盖 97 %、面积比 1.00——以前这一帧画成了一圈圈的框）；出手前 6 / 3 帧的抛物线（`20261005_160435_f22420_*`、`f22426_*`）；在飞的铃（`20261005_160435_f22444_Throw.png`：k 12 的圆正好落在 +12 帧的真圆上）；每个家族 2 个实例；误差最大的帧（`worst_`）。
+  - `C:\ssbot\data\m2_forum_are\maestro\png\`（41 张）：斩（例 `20261005_160435_f16780_Slash_2.png`：k 0 面积比 1.00、覆盖 99 %）、Fire Antic（待定的斩不画）、防御、召唤、误差最大的帧（都是 Fire Antic 里还没定边的斩）。
+  - `C:\ssbot\data\m2_forum_are\tiny\png\`（52 张）：俯冲、转圈、准备、入场 / 离场、误差最大的帧。
+- **单怪练习**（实时叠加：`--overlay --overlay-range`，1–5 选 k；都没在游戏里跑过）：
+  - Bellbearer：`human_session --solo "Pilgrim 03 Song" --overlay --overlay-range` → 第 3 波（`fo_r1_w2`）：还有一只 Reed，先清掉（清的时候无敌 + 钉子 4 级），然后只剩 Bellbearer。
+  - Maestro：`--solo "Song Pilgrim Maestro"` → 第 7 波（`fo_r1_w6`，两只 Maestro）：先清掉另一只，留下的那只和它的 Tiny 一起练（Tiny 不算"别的怪"）。
+  - Tiny：`--solo "Song Automaton Tiny"` → 和 Maestro 一样（Tiny 只跟着 Maestro 出现）。
+  - 保护（加血）同 §32.5；部署的 oracle 有没有 `enemy.hp` 没核实。
+
+### 36.7 这一轮不画的（第 2 组 / 待定）和没做的
+
+- 不画：Maestro Fire Antic 里的斩（边要到 Slash 1 才定）；Tiny Fire Ready 里的俯冲（方向和起点到 Fire 才定）；所有待机状态之后的下一招（In Range / Out of Range、Forum Fly / Fly / Chase、Ready：0 秒决定或由 Maestro 叫）。
+- 没有 HIT_COND（反击）类：这三个被打都不出反击碰撞体（Bellbearer / Tiny 被打只是被推，Maestro 被打会去 Summon?）。
+- 没做：Tiny 转圈只有 55 % 的 k 12 覆盖（误差 p50 0.67 u，身体只有 1 u 宽），要更准得知道它在队形里的目标格；Tiny Fire 里 Pull Up（中途拉起）什么时候发生不知道（上方漏 p95 5–7 u）；铃出手时刻用的是 R0 dev 前 20 场量的窗口；待机按速度推（等你定）；实时叠加层和 --solo 没在游戏里跑过。
+
+复现：
+```
+cd <checkout>\brain
+..\scripts\uv.cmd run python -m ssbot.tools.attack_range_build --type bellbearer shapes        (maestro / tiny 同)
+..\scripts\uv.cmd run python -m ssbot.tools.attack_range_build --type bellbearer build
+..\scripts\uv.cmd run python -m ssbot.tools.attack_range_build --type bellbearer eval --set fresh --threads 3      (r2 / person；Tiny 加 --every 6 --idle-every 30)
+..\scripts\uv.cmd run python -m ssbot.tools.attack_range_build --type bellbearer png
+..\scripts\uv.cmd run python -m ssbot.tools.are_rows_report --type tiny --by-state AT_DIVE,AT_DEFEND
+..\scripts\uv.cmd run python -m pytest -q tests\test_attack_range_bmt.py tests\test_attack_range.py tests\test_attack_range_types.py tests\test_zone_overlay.py
+```

@@ -226,8 +226,9 @@ def _estimate(tr, insts, idx, tab, shapes, j: int, k: int):
                 f"facing {'+x' if inst.s > 0 else '-x'}" + (f"  hero du {inst.hero_du:.2f}" if inst.fam in spec.aim
                                                           else ""))
         if inst.fam in spec.decide:
-            info += (f"  decided at bin {dec['b']}: s {dec['s']:+d}, landing u {dec['L']:.2f}" if dec else
-                     "  aim PENDING (not drawn past its decision)")
+            info += ((f"  decided at bin {dec['b']}: s {dec['s']:+d}" + (f", landing u {dec['L']:.2f}"
+                                                                        if spec.decide[inst.fam].scale else " (side)"))
+                     if dec else "  aim PENDING (not drawn past its decision)")
         s = inst.s
     else:
         E = poly_mask(frame_polys(tr, j, shapes, spec.body_names))
@@ -251,6 +252,12 @@ def _estimate(tr, insts, idx, tab, shapes, j: int, k: int):
             info += "  + " + getattr(type_module(spec), "OBJ_NAME", "extra")
             H = X if H is None else union([H, X])
             E = union([E, X])
+    if spec.custom is not None:
+        from ssbot.tools.attack_range_build import custom_estimate
+        E, add = custom_estimate(tab, tr, j, jt, k, _active_view(inst, float(T[j])), E, H)
+        if add is not None:
+            info += "  + projectiles"
+            H = add if H is None else union([H, add])
     return E, H, info, s
 
 

@@ -47,7 +47,7 @@ from pathlib import Path
 
 import numpy as np
 
-from ssbot.combat.are_spec import PARKED, Decision, EnemySpec, HazardSpec  # noqa: F401 (re-exported)
+from ssbot.combat.are_spec import PARKED, CustomView, Decision, EnemySpec, HazardSpec  # noqa: F401 (re-exported)
 
 REPO = Path(__file__).resolve().parents[3]
 FORUM = REPO / "knowledge" / "1.0.30000" / "enemies" / "forum"
@@ -596,14 +596,16 @@ def _first_state(e: dict) -> tuple[str | None, float]:
     return None, 0.0
 
 
-def _parked(e: dict) -> bool:
+def _parked(e: dict, parked: tuple = PARKED) -> bool:
+    """Not in play: hidden, dead, off-stage or in a parked state (the type's EnemySpec.parked: the Tiny's "Ready" is
+    its formation flight, not a wait)."""
     if e.get("hidden") or e.get("is_dead"):
         return True
     p = e.get("pos") or (0.0, 0.0, 0.0)
     if len(p) > 2 and abs(float(p[2])) > 5.0:      # the waiting later-wave members sit at z -15
         return True
     st, _ = _first_state(e)
-    return st is None or any(w in str(st) for w in PARKED)
+    return st is None or any(w in str(st) for w in parked)
 
 
 def body_polys(e: dict, name) -> list[np.ndarray]:
@@ -649,17 +651,20 @@ class RangeTracker:
         self.hero: tuple | None = None
         self.objs: dict = {}        # stage B: owner iid -> its projectiles in flight now (type_extra)
         self.obj_owner: dict = {}   # projectile iid -> (owner iid: the nearest enemy of the owning type, first sight T)
+        self.ents: tuple = ()       # the frame's entities (EnemySpec.custom: other entities, projectiles)
+        self.mem: dict = {}         # type key -> the custom hook's memory across frames
 
     def feed(self, s: dict) -> None:
         dt = s.get("dt")
         self.T += FT if dt is None else float(dt)
         h = (s.get("hero") or {}).get("pos")
         self.hero = (float(h[0]), float(h[1])) if h else None
+        self.ents = tuple(s.get("ents") or ())
         now = {}
-        for e in s.get("ents") or ():
+        for e in self.ents:
             tk = e.get("type_key")
             tab = self.tables.get(tk)
-            if tab is None or _parked(e):
+            if tab is None or _parked(e, tab.spec.parked):
                 continue
             iid = int(e.get("iid") or -1)
             st, tin = _first_state(e)
@@ -752,10 +757,32 @@ class RangeTracker:
             if xm.m.size and xm.m.any():
                 est.haz = xm if est.haz is None else union([est.haz, xm])
                 est.raw = union([est.raw, xm])
+        if tab.spec.custom is not None:
+            st, tin = _first_state(e)
+            vel = e.get("vel") or (None, None)
+            h = self.hero
+            view = CustomView(tab=tab, inst=inst, k=k, T=self.T, t=self.T + k * FT, x=float(p[0]), y=float(p[1]),
+                              vx=None if vel[0] is None else float(vel[0]),
+                              vy=None if len(vel) < 2 or vel[1] is None else float(vel[1]),
+                              s=tab.facing(e.get("flipX")), st=st, tin=tin, hero=h, iid=iid,
+                              body=body_polys(e, tab.spec.body), ents=self.ents, mem=self.mem.setdefault(tk, {}))
+            apply_custom(est, tab.spec.custom(view))
         return est
 
     def estimates(self, k: int) -> list[Estimate]:
         return [x for x in (self.estimate(i, k) for i in sorted(self.now)) if x is not None]
+
+
+def apply_custom(est: Estimate, out) -> Estimate:
+    """An EnemySpec.custom result (replace, add) applied to an estimate: replace takes the place of its template part
+    (its hazards stay), add is unioned in and counted with the hazards."""
+    rep, add = out if out is not None else (None, None)
+    if rep is not None:
+        est.raw = union([rep, est.haz]) if est.haz is not None else rep
+    if add is not None and add.m.size and add.m.any():
+        est.haz = add if est.haz is None else union([est.haz, add])
+        est.raw = union([est.raw, add])
+    return est
 
 
 def hazards_at(tab: RangeTable, spawned, inst: Inst | None, T: float, pos: tuple, t: float,
