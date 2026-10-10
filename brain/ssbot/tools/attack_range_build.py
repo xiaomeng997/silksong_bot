@@ -63,6 +63,7 @@ KS = (0, 6, 12)
 U_RANGE = (-12.0, 16.0)          # the template canvas around the body (u forward, v up)
 V_RANGE = (-10.0, 10.0)
 NB_MAX = 240                     # 4 s
+STATE_MIN = 2                    # state-gated: a state is kept at a bin when >= 2 R0 dev instances were in it there
 SIDES = ("front", "back", "up", "down", "inner")
 TBIN = 0.2                       # s: the time buckets of the error tables
 IDLE = "CH_IDLE"
@@ -328,9 +329,13 @@ def build(tracks: list[dict], spec=None, shapes: dict | None = None) -> tuple[Ra
         nb = min(max(ends) + 1, NB_MAX)
         cnt = np.zeros((nb, nv, nu), np.uint16)
         D = np.full((len(items), nb, 2), np.nan)
+        sacc: dict = {}                          # state-gated: (bin, state) -> occupancy
+        scnt: dict = defaultdict(set)            # ... and the instances in it
+        first: dict = defaultdict(list)          # state -> the first bin of each instance in it
         for n, (tr, r) in enumerate(items):
             inst = r["inst"]
             last_j = r["j1"]
+            seen_st: set = set()
             for j in r["frames"]:
                 b, post = tbin(tr, r, j)
                 if b >= nb or b < 0 or (decided and not post and b >= b_dec):
@@ -339,9 +344,19 @@ def build(tracks: list[dict], spec=None, shapes: dict | None = None) -> tuple[Ra
                     sd, ax, ay = inst.dec["s"], inst.dec["x"], inst.dec["y"]
                 else:
                     sd, ax, ay = inst.s, inst.x0, inst.y0
-                polys = _rel(frame_polys(tr, j, shapes), tr["x"][j], tr["y"][j], sd)
+                polys = _rel(frame_polys(tr, j, shapes, hz=False), tr["x"][j], tr["y"][j], sd)   # own colliders
                 _add(cnt[b], polys, iu_lo, iv_lo)
                 D[n, b] = ((tr["x"][j] - ax) * sd, tr["y"][j] - ay)
+                if spec.state_gate:
+                    st = str(tr["st"][j])
+                    a_ = sacc.get((b, st))
+                    if a_ is None:
+                        a_ = sacc[(b, st)] = np.zeros((nv, nu), bool)
+                    _add(a_, polys, iu_lo, iv_lo)
+                    scnt[(b, st)].add(n)
+                    if st not in seen_st:
+                        seen_st.add(st)
+                        first[st].append(b)
             b_end, post = tbin(tr, r, last_j)
             sd, ax, ay = (inst.dec["s"], inst.dec["x"], inst.dec["y"]) if post else (inst.s, inst.x0, inst.y0)
             last_d = ((tr["x"][last_j] - ax) * sd, tr["y"][last_j] - ay)
@@ -349,6 +364,12 @@ def build(tracks: list[dict], spec=None, shapes: dict | None = None) -> tuple[Ra
                 for b in range(b_end + 1, nb):
                     _add(cnt[b], body_rel, iu_lo, iv_lo)
                     D[n, b] = last_d
+                    if spec.state_gate:
+                        a_ = sacc.get((b, "<end>"))
+                        if a_ is None:
+                            a_ = sacc[(b, "<end>")] = np.zeros((nv, nu), bool)
+                        _add(a_, body_rel, iu_lo, iv_lo)
+                        scnt[(b, "<end>")].add(n)
         shape, origin = [], np.zeros((nb, 2), np.int32)
         for b in range(nb):
             m = cnt[b] > 0
@@ -396,7 +417,7 @@ def build(tracks: list[dict], spec=None, shapes: dict | None = None) -> tuple[Ra
                 for j in r["frames"]:
                     if float(tr["T"][j]) >= inst.dec["t"] + 2 * FT:
                         flips.append((f1 if tr["flip"][j] else -f1) == inst.dec["s"])
-            report.setdefault("decisions", {})[fam] = {
+            report.setdefault("decisions", {})[f"{fam}|{br}"] = {
                 "n": int(len(items)), "b_dec": b_dec,
                 "b_dec_range": [int(min(r["inst"].dec["b"] for _, r in items)),
                                 int(max(r["inst"].dec["b"] for _, r in items))],
@@ -404,8 +425,26 @@ def build(tracks: list[dict], spec=None, shapes: dict | None = None) -> tuple[Ra
                 "landing_err_p95": round(float(np.percentile(err, 95)), 3) if len(err) else None,
                 "landing_err_max": round(float(err.max()), 3) if len(err) else None,
                 "facing_agrees": round(float(np.mean(flips)), 4) if flips else None}
+        sst = order = None
+        if spec.state_gate:
+            med = {st: float(np.median(v)) for st, v in first.items()}
+            ranked = sorted(med, key=lambda q: (med[q], q))
+            order = {st: i for i, st in enumerate(ranked)}
+            order["<end>"] = len(ranked)
+            sst = [dict() for _ in range(nb)]
+            dropped = 0
+            for (b, st), a_ in sacc.items():
+                if len(scnt[(b, st)]) < STATE_MIN:     # one instance alone (a jump cut short under a ledge): not
+                    dropped += 1                       # drawn at k > 0; the k = 0 lookup takes the nearest bin
+                    continue
+                rr, cc = np.nonzero(a_)
+                if len(rr):
+                    sst[b][st] = (a_[rr.min():rr.max() + 1, cc.min():cc.max() + 1] > 0,
+                                  int(iu_lo + cc.min()), int(iv_lo + rr.min()))
+            report.setdefault("state_order", {})[f"{fam}|{br}"] = {st: round(med[st] * FT, 3) for st in ranked}
+            report.setdefault("state_dropped", {})[f"{fam}|{br}"] = dropped
         tps[(fam, br)] = Template(nb=nb, shape=shape, origin=origin, disp=disp, ratio=ratio, n=len(items),
-                                  b_dec=b_dec)
+                                  b_dec=b_dec, sst=sst, order=order)
         report["families"][f"{fam}|{br}"] = _shape_report(tps[(fam, br)], ends)
     # CH_HOP's direction (Hop Check: forward only when the hero is farther than Hop Distance 6-10 u): certain outside
     # the range of the hero's offsets at the antic start where both directions were recorded
@@ -550,7 +589,8 @@ def eval_track(tr: dict, tab: RangeTable, shapes: dict, every: int = 2, idle_eve
                 # a frame later: comparing bin b + k with it would count that frame-sampling jitter as error)
                 bt = bin_of(float(T[jt]) - inst.t0)
                 E = tab.place(inst.fam, br, bt, (inst.x0, inst.y0), inst.s, inst.hero_du,
-                              now=None if antic_anchor else (float(tr["x"][j]), float(tr["y"][j])), b_now=b, dec=dec)
+                              now=None if antic_anchor else (float(tr["x"][j]), float(tr["y"][j])), b_now=b, dec=dec,
+                              st_now=tr["st"][j])
                 base = {"fam": inst.fam, "br": inst.branch, "known": br is not None, "k": k, "b": b,
                         "t": round(bt * FT, 4), "next": bool(nxt), "int": bool(r["interrupted"]),
                         "f": int(tr["f"][j]), "fight": tr["fight"], "iid": tr["iid"]}
@@ -964,51 +1004,54 @@ def cmd_hazcheck(a) -> int:
                                              "events": 0, "events_matched": 0, "gap_min": [], "none_cases": []})
                 hev = [e for e in evs if hz.name in str(e[2].get("source", ""))]
                 R["events"] += len(hev)
-                used = set()
+                wins = []                   # (track, episode, {cache frame: hurtbox gap}, first / last cache frame)
                 for tr in trs:
                     for ep in tr.get("hz_eps", ()):
-                        if ep["hz"] != hz.name:
+                        if ep["hz"] != hz.name or not ep["frames"]:
                             continue
                         js = ep["frames"]
-                        if not js:
+                        gaps = {int(fnum[tr["fi"][j]]): _hero_gap(ep["cx"], ep["cy"], hz.radius, float(tr["hx"][j]),
+                                                                  float(tr["hy"][j])) for j in js}
+                        wins.append((tr, ep, gaps, int(fnum[tr["fi"][js[0]]]), int(fnum[tr["fi"][js[-1]]])))
+                got: dict = defaultdict(list)
+                for ef0, kind, d in hev:
+                    # a blocked contact is logged when it ends: its first frame is when it touched
+                    ef = int(d.get("first_f") or ef0) if kind == "damage_blocked" else ef0
+                    best = None
+                    for n, (tr, ep, gaps, f_on, f_off) in enumerate(wins):
+                        if not (f_on - 1 <= ef <= f_off + 2):
                             continue
-                        R["windows"] += 1
-                        R["frames"] += len(js)
-                        f_on, f_off = int(tr["f"][js[0]]), int(tr["f"][js[-1]])
-                        fi_on = int(tr["fi"][js[0]])
-                        fc_on, fc_off = int(fnum[tr["fi"][js[0]]]), int(fnum[tr["fi"][js[-1]]])
-                        gaps = [_hero_gap(ep["cx"], ep["cy"], hz.radius, float(tr["hx"][j]), float(tr["hy"][j]))
-                                for j in js]
-                        gmin = min(gaps)
-                        R["gap_min"].append(gmin)
-                        got = None
-                        for n, (ef, kind, d) in enumerate(hev):
-                            if n in used or not (fc_on - 1 <= ef <= fc_off + 2):
-                                continue
-                            used.add(n)
-                            R["events_matched"] += 1
-                            if kind == "damage":
-                                got = "damage"
-                                k = int(np.searchsorted(fnum, ef))
-                                # the frame the hit is decided: the event's frame or the one before it
-                                jj = [j for j in js if int(fnum[tr["fi"][j]]) in (ef, ef - 1)] or [js[-1]]
-                                R["hit_gap"].append(min(_hero_gap(ep["cx"], ep["cy"], hz.radius, float(tr["hx"][j]),
-                                                                  float(tr["hy"][j])) for j in jj))
-                                R["hit_off"].append(ef - fc_on)
-                            else:
-                                got = got or f"blocked {d.get('why')}"
-                                R["blocked"][str(d.get("why"))] += 1
-                        band = "overlap>0.3" if gmin < -0.3 else ("overlap" if gmin < 0 else "clear")
-                        R["outcome"][f"{band}: {got or 'none'}"] += 1
-                        if band == "overlap>0.3" and got is None and len(R["none_cases"]) < 12:
-                            R["none_cases"].append({"fight": tr["fight"], "f_on": f_on, "f_off": f_off,
-                                                    "gap": round(gmin, 3),
-                                                    "fi": fi_on})
-                R["unmatched_events"] = R.get("unmatched_events", 0) + (len(hev) - len(used))
-                for n, (ef, kind, d) in enumerate(hev):
-                    if n not in used and len(R.setdefault("unmatched", [])) < 12:
-                        R["unmatched"].append({"fight": c["meta"].get("id"), "f": ef, "kind": kind,
-                                               "why": d.get("why")})
+                        g = min(gaps.get(x, 99.0) for x in (ef, ef - 1, ef - 2))
+                        g = g if g < 99.0 else min(gaps.values())
+                        if best is None or g < best[0]:
+                            best = (g, n)   # simultaneous windows (a row of bombs): the one nearest the hero
+                    if best is None:
+                        R["unmatched_events"] = R.get("unmatched_events", 0) + 1
+                        if len(R.setdefault("unmatched", [])) < 12:
+                            R["unmatched"].append({"fight": c["meta"].get("id"), "f": ef, "kind": kind,
+                                                   "why": d.get("why")})
+                        continue
+                    R["events_matched"] += 1
+                    got[best[1]].append((kind, d, ef, best[0]))
+                for n, (tr, ep, gaps, f_on, f_off) in enumerate(wins):
+                    R["windows"] += 1
+                    R["frames"] += len(gaps)
+                    gmin = min(gaps.values())
+                    R["gap_min"].append(gmin)
+                    out_ = None
+                    for kind, d, ef, g in got.get(n, ()):
+                        if kind == "damage":
+                            out_ = "damage"
+                            R["hit_gap"].append(g)
+                            R["hit_off"].append(ef - f_on)
+                        else:
+                            out_ = out_ or f"blocked {d.get('why')}"
+                            R["blocked"][str(d.get("why"))] += 1
+                    band = "overlap>0.3" if gmin < -0.3 else ("overlap" if gmin < 0 else "clear")
+                    R["outcome"][f"{band}: {out_ or 'none'}"] += 1
+                    if band == "overlap>0.3" and out_ is None and len(R["none_cases"]) < 12:
+                        R["none_cases"].append({"fight": tr["fight"], "f_on": int(tr["f"][ep["frames"][0]]),
+                                                "f_off": int(tr["f"][ep["frames"][-1]]), "gap": round(gmin, 3)})
         print(f"{set_name} done", flush=True)
     out = {}
     for name, R in res.items():

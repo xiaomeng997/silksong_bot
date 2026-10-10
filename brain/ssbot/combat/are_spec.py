@@ -17,6 +17,7 @@ class Decision:
     the decision frame's position, mirrored by s). Before the decision the estimate stops at the last bin before it."""
     states: frozenset
     rule: Callable
+    branch: Callable | None = None     # (x, s, L) -> the family's branch, known from the decision on (or None)
 
 
 @dataclass(frozen=True)
@@ -59,9 +60,16 @@ class EnemySpec:
     table: str                 # the table's file stem under FORUM
     face_names: tuple = ()     # attack collider name prefixes whose side of the body gives the facing (build)
     decide: dict = field(default_factory=dict)      # family -> Decision
+    branch_dur: dict = field(default_factory=dict)  # family -> (state, frames, short, long): a branch decided by how
+    #                                                 long the state runs (long once it is entered again - its time
+    #                                                 in state restarts - or runs over `frames` of game time since
+    #                                                 first seen; short when it is left before); the union until then
     hazards: tuple = ()        # HazardSpec
     parked: tuple = PARKED     # state name parts of a member not in play
     left_out: tuple = ()       # (state, why): what this round does not draw (pending aims, counters)
+    state_gate: bool = False   # templates keep each bin's shape per state: k = 0 draws the state it is in now, k > 0
+    #                            the states at or after it (attack_range.RangeTable._shape); a state is kept at a bin
+    #                            when at least 2 R0 dev instances were in it there (tools.attack_range_build)
 
     @property
     def body_names(self) -> tuple:

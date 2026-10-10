@@ -74,8 +74,24 @@ def _clapper_table():
         "rune bomb small": {"win": [[21 + 10 * m, 26 + 10 * m] for m in range(10)], "dx": 0.0, "dv": -3.8,
                             "x_ok": [[7.5, 47.5]], "trig": {"CC_CAST": [48, 55]}},
         "rune slam": {"win": [[65, 72]], "du": 6.48, "dv": -3.27, "trig": {"CC_JUMP_CAST": [100, 112]}}}}
-    return ar.RangeTable(spec=spec, templates={("CC_JUMP", "main"): jump, ("CC_JUMP_CAST", "main"): jump,
-                                               ("CC_CAST", "main"): cast}, meta=meta)
+    return ar.RangeTable(spec=spec, templates={("CC_JUMP", "open"): jump, ("CC_JUMP", "wall"): jump,
+                                               ("CC_JUMP_CAST", "open"): jump, ("CC_CAST", "main"): cast}, meta=meta)
+
+
+def test_evade_entered_again_is_the_double_branch():
+    spec = ar.SPECS[CLAPPER]
+    for tins, want in (([i * ar.FT for i in range(21)], "single"),
+                       ([i * ar.FT for i in range(21)] + [i * ar.FT for i in range(21)], "double")):
+        seg = ar.Segmenter(spec)
+        insts = []
+        for i, tin in enumerate(tins + [0.0]):
+            st = "Evade Scuttle" if i < len(tins) else "Idle"
+            inst = seg.step(st, i * ar.FT, 30.0, 7.45, -1, 20.0, tin)
+            if inst is not None and (not insts or insts[-1] is not inst):
+                insts.append(inst)
+            if i < 21:
+                assert insts[-1].branch is None             # one evade so far: open (the union)
+        assert len(insts) == 1 and insts[0].branch == want
 
 
 def _cl(st, x=30.0, flip=False, iid=3, tin=0.0, vx=0.0):
@@ -99,6 +115,7 @@ def test_clapper_jump_is_pending_until_decided_then_placed_at_the_landing():
                   "ents": [_cl("Jump Antic" if i < 5 else "Jump", tin=0.0, vx=-10.0)]})
     inst = trk.now[3][2]
     assert inst.dec is not None and inst.dec["s"] == -1 and inst.dec["L"] == pytest.approx(JUMP_GAIN * 10.0)
+    assert inst.branch == "open"                             # lands at 20.84: inside the wall zone limits
     e = trk.estimate(3, 30)                                  # 30 bins after the decision: ratio 1, at the landing
     xl = 30.0 - JUMP_GAIN * 10.0
     x0, _, x1, _ = e.raw.bbox()
@@ -170,3 +187,36 @@ def test_builder_attributes_hazard_episodes_by_the_spawn_rule():
     ep = trs[0]["hz_eps"][0]
     assert ep["ring"] == 1 and ep["t"] == pytest.approx(T[cast2[1]])
     assert any(nm == "HZ:rune bomb small" for nm, _ in trs[0]["cols"][on])
+
+
+def test_state_gate_draws_the_state_now_at_k0_and_what_can_still_come():
+    """A bin whose union holds the body (instances still in Air) and a big slam (instances already landed): k = 0 in
+    Air draws the body only, k > 0 from Air both, k > 0 from Slam Recover not the slam it has left."""
+    body = np.ones((80, 40), bool)
+    slam = np.ones((40, 200), bool)
+    nb = 10
+    sst = [{"Air": (body, -20, 0), "Slam 2": (slam, 0, 0)} for _ in range(nb)]
+    full = np.ones((80, 220), bool)
+    tp = ar.Template(nb=nb, shape=[full] * nb, origin=np.tile(np.array([[-20, 0]], np.int32), (nb, 1)),
+                     disp=np.zeros((nb, 2)), n=2, sst=sst, order={"Air": 0, "Slam 2": 1, "Slam Recover": 2, "<end>": 3})
+    tab = ar.RangeTable(spec=ar.SPECS[CLAPPER], templates={("CC_SLAM", "main"): tp}, meta={"walls": [0.0, 99.0]})
+    a0 = tab.place("CC_SLAM", "main", 5, (30.0, 7.0), 1, now=(30.0, 7.0), b_now=5, st_now="Air")
+    assert a0.area() == pytest.approx(body.sum() * C * C, rel=0.01)
+    a6 = tab.place("CC_SLAM", "main", 6, (30.0, 7.0), 1, now=(30.0, 7.0), b_now=5, st_now="Air")
+    assert a6.area() > slam.sum() * C * C
+    r6 = tab.place("CC_SLAM", "main", 6, (30.0, 7.0), 1, now=(30.0, 7.0), b_now=5, st_now="Slam Recover")
+    assert r6.area() == pytest.approx(full.sum() * C * C, rel=0.01)       # nothing at or after it: the whole union
+    assert tab.place("CC_SLAM", "main", 6, (30.0, 7.0), 1, now=(30.0, 7.0), b_now=5).area() == r6.area()
+
+
+def test_family_templates_take_the_own_colliders_only():
+    """The hazards attached to a track (HZ:<name>, circles) are the hazards' truth, never part of a family template
+    (build uses frame_polys(hz=False)); poly_of draws them as the AABB's inscribed circle."""
+    from ssbot.tools.attack_range_build import frame_polys
+    tr = {"flip": np.zeros(1, np.int8),
+          "cols": [[("Slam Collider 1", np.array([1.0, 3.0, 4.0, 5.0])),
+                    ("HZ:rune bomb small", np.array([10.0, 1.5, 14.332, 5.832]))]]}
+    own = frame_polys(tr, 0, {}, hz=False)
+    haz = frame_polys(tr, 0, {}, hz=True)
+    assert len(own) == 1 and len(haz) == 1 and len(frame_polys(tr, 0, {})) == 2
+    assert ar.poly_mask(haz).area() == pytest.approx(math.pi * 2.166 ** 2, rel=0.02)

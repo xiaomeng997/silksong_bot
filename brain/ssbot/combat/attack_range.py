@@ -196,6 +196,8 @@ class Template:
     n: int = 0
     b_dec: int | None = None          # decided families: the bin of the decision (bins from it are aligned to it:
     #                                   b_dec + frames since the decision; disp v and ratio from the decision frame)
+    sst: list | None = None           # state-gated types: per bin {state: (shape, iu0, iv0)} (the union per state)
+    order: dict | None = None         # ... and each state's rank in the family (its median first bin; "<end>" last)
 
 
 @dataclass
@@ -234,19 +236,54 @@ class RangeTable:
         return float(min(max(a * hero_du + b, -lm), lm))
 
     def place(self, fam: str, branch: str | None, b: int, anchor: tuple, s: int, hero_du: float = 0.0,
-              now: tuple | None = None, b_now: int | None = None, dec: dict | None = None) -> Mask:
+              now: tuple | None = None, b_now: int | None = None, dec: dict | None = None,
+              st_now: str | None = None) -> Mask:
         """The raw estimate of bin b of an instance anchored at anchor = (x, y) with facing s: the union over the
         family's branches when branch is None. With now = the enemy's observed position at bin b_now, the position is
         re-anchored there: now + (the template's displacement at b - at b_now), so only the displacement still to
         come is predicted (what has happened is observed). dec: the instance's decision (Inst.dec) once seen; a
-        decided family without it stops at the last bin before its decision (the pending aim is not drawn)."""
+        decided family without it stops at the last bin before its decision (the pending aim is not drawn).
+        st_now: the state it is in now (state-gated templates: re-anchored at the observed state too)."""
         brs = self.spec.branches.get(fam, ("main",))
         if branch is None:
             branch = self.branch_by_rule(fam, hero_du)
         if branch is not None and (fam, branch) in self.templates:
             brs = (branch,)
-        return union([self._place1(self.templates[(fam, br)], b, anchor, s, hero_du, fam, now, b_now, dec)
+        return union([self._place1(self.templates[(fam, br)], b, anchor, s, hero_du, fam, now, b_now, dec, st_now)
                       for br in brs if (fam, br) in self.templates])
+
+    def _shape(self, tp: Template, bb: int, k0: bool, st_now: str | None) -> tuple:
+        """(shape, iu0, iv0) of bin bb: the union over the instances; state-gated (tp.sst): at k = 0 the union over
+        the instances in the state it is in now (the nearest bin within 8 that has it), at k > 0 over the states at or
+        after it (what it has left cannot come back); the whole union when that leaves nothing."""
+        full = (tp.shape[bb], int(tp.origin[bb, 0]), int(tp.origin[bb, 1]))
+        if tp.sst is None or st_now is None:
+            return full
+
+        def nearest():
+            for d in range(9):
+                for q in ((bb,) if d == 0 else (bb - d, bb + d)):
+                    if 0 <= q < tp.nb and st_now in tp.sst[q]:
+                        return tp.sst[q][st_now]
+            return full
+        if k0:
+            return nearest()
+        o = (tp.order or {}).get(st_now)
+        if o is None:
+            return full
+        parts = [v for k, v in tp.sst[bb].items() if (tp.order or {}).get(k, 1 << 30) >= o]
+        if not parts:                           # it is ahead of every R0 dev instance: its state's nearest shape
+            return nearest()
+        if len(parts) == 1:
+            return parts[0]
+        iu0 = min(p[1] for p in parts)
+        iv0 = min(p[2] for p in parts)
+        nu = max(p[1] + p[0].shape[1] for p in parts) - iu0
+        nv = max(p[2] + p[0].shape[0] for p in parts) - iv0
+        out = np.zeros((nv, nu), bool)
+        for sh, u0, v0 in parts:
+            out[v0 - iv0:v0 - iv0 + sh.shape[0], u0 - iu0:u0 - iu0 + sh.shape[1]] |= sh
+        return out, iu0, iv0
 
     def position(self, tp: Template, b: int, anchor: tuple, s: int, hero_du: float, fam: str) -> tuple:
         bb = min(max(b, 0), tp.nb - 1)
@@ -264,16 +301,18 @@ class RangeTable:
         return min(max(dec["x"] + dec["s"] * du, lo), hi), dec["y"] + float(tp.disp[bb, 1])
 
     def _place1(self, tp: Template, b: int, anchor: tuple, s: int, hero_du: float, fam: str,
-                now: tuple | None = None, b_now: int | None = None, dec: dict | None = None) -> Mask:
+                now: tuple | None = None, b_now: int | None = None, dec: dict | None = None,
+                st_now: str | None = None) -> Mask:
+        k0 = b_now is not None and b <= b_now
         if tp.b_dec is not None:
             if dec is None:                     # pending aim: nothing of the undecided move is drawn
                 b = min(b, tp.b_dec - 1)
                 if b_now is not None:
                     b_now = min(b_now, tp.b_dec - 1)
             elif b >= dec["b"]:
-                return self._place_dec(tp, b, dec, now, b_now)
+                return self._place_dec(tp, b, dec, now, b_now, st_now)
         bb = min(max(b, 0), tp.nb - 1)
-        sh = tp.shape[bb]
+        sh, iu0, iv0 = self._shape(tp, bb, k0, st_now)
         if sh is None or not sh.size:
             return empty_mask()
         px, py = self.position(tp, b, anchor, s, hero_du, fam)
@@ -281,14 +320,15 @@ class RangeTable:
             qx, qy = self.position(tp, b_now, anchor, s, hero_du, fam)
             lo, hi = self.walls
             px, py = min(max(now[0] + px - qx, lo), hi), now[1] + py - qy
-        return place_shape(sh, int(tp.origin[bb, 0]), int(tp.origin[bb, 1]), px, py, s, self.cell)
+        return place_shape(sh, iu0, iv0, px, py, s, self.cell)
 
-    def _place_dec(self, tp: Template, b: int, dec: dict, now: tuple | None, b_now: int | None) -> Mask:
+    def _place_dec(self, tp: Template, b: int, dec: dict, now: tuple | None, b_now: int | None,
+                   st_now: str | None = None) -> Mask:
         """Bin b (since the antic start) of a decided move: aligned bin b_dec + (b - the decision's bin), anchored at
         the decision frame in its facing, re-anchored at the observed position like the rest."""
         ba = tp.b_dec + b - int(dec["b"])
         bb = min(max(ba, 0), tp.nb - 1)
-        sh = tp.shape[bb]
+        sh, iu0, iv0 = self._shape(tp, bb, b_now is not None and b <= b_now, st_now)
         if sh is None or not sh.size:
             return empty_mask()
         px, py = self.position_dec(tp, ba, dec)
@@ -296,7 +336,7 @@ class RangeTable:
             qx, qy = self.position_dec(tp, tp.b_dec + max(b_now - int(dec["b"]), 0), dec)
             lo, hi = self.walls
             px, py = min(max(now[0] + px - qx, lo), hi), now[1] + py - qy
-        return place_shape(sh, int(tp.origin[bb, 0]), int(tp.origin[bb, 1]), px, py, int(dec["s"]), self.cell)
+        return place_shape(sh, iu0, iv0, px, py, int(dec["s"]), self.cell)
 
     # -------------------------------------------------------------------------------------------- hazards
 
@@ -377,6 +417,17 @@ def save_table(t: RangeTable, path: Path) -> Path:
         arrs[f"{key}/disp"] = tp.disp.astype(np.float32)
         if tp.ratio is not None:
             arrs[f"{key}/ratio"] = tp.ratio.astype(np.float32)
+        if tp.sst is not None:
+            sts = sorted(tp.order or {}, key=lambda q: (tp.order[q], q))
+            rows, bl = [], []
+            for b, d in enumerate(tp.sst):
+                for st, (sh, u0, v0) in sorted(d.items()):
+                    rows.append((b, sts.index(st), sh.shape[0], sh.shape[1], u0, v0))
+                    bl.append(np.packbits(sh.reshape(-1)) if sh.size else np.zeros(0, np.uint8))
+            arrs[f"{key}/sst_rows"] = np.array(rows, np.int32).reshape(-1, 6)
+            arrs[f"{key}/sst_bits"] = np.concatenate(bl) if bl else np.zeros(0, np.uint8)
+            keys[-1]["states"] = sts
+            keys[-1]["order"] = [int(tp.order[q]) for q in sts]
     meta = dict(t.meta, keys=keys, cell=t.cell, type_key=t.spec.type_key)
     arrs["meta"] = np.frombuffer(json.dumps(meta).encode("utf-8"), np.uint8)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -402,9 +453,21 @@ def load_table(path: Path | None = None, spec: EnemySpec | None = None) -> Range
             shapes.append(np.unpackbits(bits[o:o + nbytes])[:n].reshape(int(ny), int(nx)).astype(bool))
             o += nbytes
         ratio = z[f"{key}/ratio"] if f"{key}/ratio" in z.files else None
+        sst = order = None
+        if f"{key}/sst_rows" in z.files:
+            sts = k["states"]
+            order = {st: int(o) for st, o in zip(sts, k["order"])}
+            sst = [dict() for _ in range(int(k["nb"]))]
+            bits, o = z[f"{key}/sst_bits"], 0
+            for b, si, ny, nx, u0, v0 in z[f"{key}/sst_rows"]:
+                n = int(ny) * int(nx)
+                nbytes = (n + 7) // 8
+                sh = np.unpackbits(bits[o:o + nbytes])[:n].reshape(int(ny), int(nx)).astype(bool)
+                o += nbytes
+                sst[int(b)][sts[int(si)]] = (sh, int(u0), int(v0))
         fam, br = key.split("|")
         tps[(fam, br)] = Template(nb=int(k["nb"]), shape=shapes, origin=z[f"{key}/origin"], disp=z[f"{key}/disp"],
-                                  ratio=ratio, n=int(k.get("n", 0)), b_dec=k.get("b_dec"))
+                                  ratio=ratio, n=int(k.get("n", 0)), b_dec=k.get("b_dec"), sst=sst, order=order)
     return RangeTable(spec=spec, templates=tps, meta=meta, cell=float(meta.get("cell", CELL)))
 
 
@@ -423,6 +486,7 @@ class Inst:
     branch_t: float | None = None
     states: list = field(default_factory=list)
     dec: dict | None = None    # the decision (EnemySpec.decide): t, b (its bin), x, y, s, L
+    st_t0: float = 0.0         # the game time the current state was first seen (back-dated by its time in state)
     trig: dict = field(default_factory=dict)        # hazard name -> its trigger (t, x, y, s) in this instance
 
 
@@ -436,6 +500,7 @@ class Segmenter:
         self.cur: Inst | None = None
         self.prev: str | None = None
         self.spawned: list = []    # every hazard trigger of this enemy: (HazardSpec, t, x, y, s)
+        self.prev_tin = 0.0
 
     def step(self, st: str | None, T: float, x: float, y: float, s: int, hero_x: float | None,
              tin: float = 0.0, vx: float | None = None, hero_y: float | None = None) -> Inst | None:
@@ -449,6 +514,9 @@ class Segmenter:
             fs = sp.fam_states[cur.fam]
             restart = st == sp.primary.get(cur.fam) and self.prev != st
             if st not in fs or restart:
+                bd = sp.branch_dur.get(cur.fam) if sp.branch_dur else None
+                if bd is not None and cur.branch is None and self.prev == bd[0]:
+                    cur.branch, cur.branch_t = bd[2], T      # its timed state was left within the frames: short
                 self.cur = cur = None
         if cur is None and st in sp.start and self.prev != st:
             fam = sp.start[st]
@@ -457,20 +525,34 @@ class Segmenter:
         if cur is not None:
             if not cur.states or cur.states[-1] != st:
                 cur.states.append(st)
+                cur.st_t0 = T - max(float(tin or 0.0), 0.0)
             br = sp.branch.get(cur.fam, {}).get(st)
             if cur.branch is None and br is not None:
                 cur.branch, cur.branch_t = br, T
+            bd = sp.branch_dur.get(cur.fam) if sp.branch_dur else None
+            if bd is not None and cur.branch is None:
+                state, frames, short, long_ = bd
+                again = self.prev == state and float(tin or 0.0) < self.prev_tin - 1e-6
+                if st == state and (again or T - cur.st_t0 > frames * FT + 1e-6):
+                    cur.branch, cur.branch_t = long_, T
+                elif st != state and self.prev == state and state in cur.states:
+                    cur.branch, cur.branch_t = short, T
             d = sp.decide.get(cur.fam) if sp.decide else None
             if d is not None and cur.dec is None and st in d.states:
                 sd, L = d.rule(x, y, vx, hero_x, hero_y)
                 td = T - max(float(tin or 0.0), 0.0)
                 cur.dec = {"t": td, "b": bin_of(td - cur.t0), "x": x, "y": y, "s": int(sd), "L": float(L)}
+                if d.branch is not None and cur.branch is None:
+                    br_d = d.branch(x, int(sd), float(L))
+                    if br_d is not None:
+                        cur.branch, cur.branch_t = br_d, td
             for hz in sp.hazards:
                 if st == hz.state and self.prev != st and cur.fam in hz.fams and hz.name not in cur.trig:
                     tt = T - max(float(tin or 0.0), 0.0)
                     cur.trig[hz.name] = (tt, x, y, s)
                     self.spawned.append((hz, tt, x, y, s))
         self.prev = st
+        self.prev_tin = float(tin or 0.0)
         return cur
 
 
@@ -578,7 +660,7 @@ class RangeTracker:
             b = bin_of(self.T - inst.t0)
             now = (float(p[0]), float(p[1]))
             m = tab.place(inst.fam, inst.branch, b + k, (inst.x0, inst.y0), inst.s, inst.hero_du, now=now, b_now=b,
-                          dec=inst.dec)
+                          dec=inst.dec, st_now=inst.states[-1] if inst.states else None)
             est = Estimate(iid, k, m, inst.fam, inst.branch, b, now)
         if tab.spec.hazards:
             seg = self.segs.get(iid)

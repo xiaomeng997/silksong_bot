@@ -19,12 +19,12 @@ FAM_COLOR = (60, 160, 255)        # BGR orange: the estimate
 K12_COLOR = (255, 220, 80)        # BGR light blue: the estimate at k = 12
 
 
-def _find(tracks, sess: str, f: int):
+def _find(tracks, sess: str, f: int, iid: int | None = None):
     """(track, frame index) of the enemy in play nearest to frame f of the session / fight (the one in a family
-    instance first)."""
+    instance first; that enemy when iid is given: several of the type can be in play)."""
     best = None
     for tr in tracks:
-        if not str(tr["fight"]).startswith(sess):
+        if not str(tr["fight"]).startswith(sess) or (iid is not None and int(tr["iid"]) != int(iid)):
             continue
         j = int(np.searchsorted(tr["f"], f))
         for jj in (j - 1, j):
@@ -148,18 +148,18 @@ def pick_frames(tracks, tab, sessions=("20261009_085824", "20261009_161454"), pe
             if tab.spec.short == "Choristor" and sess == "20261009_085824" and \
                     any(abs(int(tr["f"][q]) - 5690) <= 1 for q in fr):
                 for q in fr[::max(1, len(fr) // 8)]:
-                    out.append((sess, int(tr["f"][q]), f"the whip after 5690 ({tr['st'][q]})"))
+                    out.append((sess, int(tr["f"][q]), f"the whip after 5690 ({tr['st'][q]})", tr["iid"]))
                 continue
             if seen.get(inst.fam, 0) >= per_fam or r["interrupted"]:
                 continue
             seen[inst.fam] = seen.get(inst.fam, 0) + 1
             for q in (fr[0], fr[len(fr) // 3], fr[2 * len(fr) // 3], fr[-1]):
-                out.append((sess, int(tr["f"][q]), f"{inst.fam} #{seen[inst.fam]} ({tr['st'][q]})"))
+                out.append((sess, int(tr["f"][q]), f"{inst.fam} #{seen[inst.fam]} ({tr['st'][q]})", tr["iid"]))
             if (inst.fam == "CH_SLASH" or tab.spec.hazards) and r["j1"] + 1 < len(tr["f"]):
                 for d in (1, 6, 12) if inst.fam == "CH_SLASH" else (12, 30):
                     q = min(r["j1"] + d, len(tr["f"]) - 1)
                     if idx[q] < 0:
-                        out.append((sess, int(tr["f"][q]), f"after {inst.fam} +{d} f ({tr['st'][q]})"))
+                        out.append((sess, int(tr["f"][q]), f"after {inst.fam} +{d} f ({tr['st'][q]})", tr["iid"]))
     return out
 
 
@@ -175,15 +175,15 @@ def cmd_png(a) -> int:
     tracks = load_tracks("person", spec=spec, sessions=sessions)
     out = Path(a.out) if getattr(a, "out", None) else out_dir(spec) / "png"
     out.mkdir(parents=True, exist_ok=True)
-    frames = list(getattr(mod, "CASES", ())) + pick_frames(tracks, tab, sessions)
+    frames = [tuple(c) + (None,) for c in getattr(mod, "CASES", ())] + pick_frames(tracks, tab, sessions)
     worst = worst_frames(out_dir(spec) / "rows_person.pkl", getattr(a, "worst", 8))
-    frames += [(fi, f, why) for fi, f, why in worst if fi.split("/")[0] in sessions]
+    frames += [w for w in worst if w[0].split("/")[0] in sessions]
     fresh = worst_frames(out_dir(spec) / "rows_fresh.pkl", getattr(a, "worst", 8) // 2)
     ftracks = load_tracks("fresh", spec=spec) if fresh else []
     index = []
     for pool, items in ((tracks, frames), (ftracks, fresh)):
-        for sess, f, why in items:
-            tr, j = _find(pool, sess, f)
+        for sess, f, why, iid in items:
+            tr, j = _find(pool, sess, f, iid)
             if tr is None:
                 print(f"{sess} f {f}: no {spec.short} in play")
                 continue
@@ -216,7 +216,7 @@ def _estimate(tr, insts, idx, tab, shapes, j: int, k: int):
         br = inst.branch if (inst.branch_t is not None and inst.branch_t <= T[j] + 1e-9) else None
         dec = inst.dec if (inst.dec is not None and inst.dec["t"] <= T[j] + 1e-9) else None
         E = tab.place(inst.fam, br, bt, (inst.x0, inst.y0), inst.s, inst.hero_du,
-                      now=(float(tr["x"][j]), float(tr["y"][j])), b_now=b, dec=dec)
+                      now=(float(tr["x"][j]), float(tr["y"][j])), b_now=b, dec=dec, st_now=tr["st"][j])
         info = (f"{inst.fam} branch {br or 'pending (union)'}{' -> ' + str(inst.branch) if br is None else ''}  "
                 f"bin {b} ({b * FT:.2f} s since the antic start)  anchor ({inst.x0:.2f}, {inst.y0:.2f}) "
                 f"facing {'+x' if inst.s > 0 else '-x'}" + (f"  hero du {inst.hero_du:.2f}" if inst.fam in spec.aim
@@ -257,7 +257,7 @@ def worst_frames(rows_path: Path, n: int = 8) -> list:
         if key in seen:
             return
         seen.add(key)
-        out.append((str(r["fight"]), int(r["f"]), why))
+        out.append((str(r["fight"]), int(r["f"]), why, r["iid"]))
     miss = sorted(main, key=lambda r: -max([v[0] for v in r["miss"].values()] or [0.0]))
     for r in miss[:n]:
         if r["miss"]:

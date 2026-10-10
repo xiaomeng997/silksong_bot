@@ -3,11 +3,12 @@ zone was far too big"). Families and rules from the v2 classification (docs/plan
 C:/ssbot/data/m2_forum_v2/workflow_result.json) and the first-FSM states the tracker sees:
 
   CC_SLAM       Slam Antic (0.8 s, turns to the hero) > Slam 0 > Slam 1 > Slam 2 > Slam Recover: 30 u/s lunge 2.1-4.8 u
-  CC_EVADE      Evade Scuttle: 15 u/s backward for 0.35 s, body only, no antic
+  CC_EVADE      Evade Scuttle: 15 u/s backward for 0.35 s, body only; single, or double (entered again at once: 0.7 s)
   CC_CAST       Spell Antic > Cast 1 > Cast 2: no collider of its own; Cast 2 spawns the rune bombs (hazard below)
   CC_JUMP       Jump Antic > (Jump Aim) Jump > Air > Slam 2 > Slam Recover: the landing is decided at Jump Aim
                 (0.48-0.52 s; the tracker sees Jump, 1 frame, then Air): x_land = x + 0.916 vx,
-                vx = clamp(hero x - 5 s - x, +-12) facing the hero; vy 38
+                vx = clamp(hero x - 5 s - x, +-12) facing the hero; vy 38; a landing predicted beyond x 19.5 / 45.5
+                runs into the wall and lands early and short (the "wall" branch, known at the decision)
   CC_JUMP_CAST  Cast Slam Antic > Cast Slam Antic 2 > Jump > Air > Slam 2 > Slam Recover: the same jump (decided at
                 0.88-0.93 s), then the rune slam (hazard below)
   CC_ENTRY      Drop In > Enter Land > Roar > Roar End: the body
@@ -41,7 +42,17 @@ def jump_rule(x: float, y: float, vx, hero_x, hero_y) -> tuple[int, float]:
     return s, JUMP_GAIN * min(max(du - JUMP_SHORT, -JUMP_VX_MAX), JUMP_VX_MAX)
 
 
-JUMP_DECISION = Decision(states=frozenset({"Jump", "Air"}), rule=jump_rule)
+# a predicted landing beyond these x (u) runs into a wall: R0 dev, 41 of the 42 jumps that landed 2-13 frames early
+# (and short) had it, against 29 of the 1,186 others; the "wall" branch is built from those 70, "open" from the rest
+WALL_ZONE = (19.5, 45.5)
+
+
+def jump_branch(x: float, s: int, L: float) -> str:
+    xl = x + s * L
+    return "wall" if (xl < WALL_ZONE[0] or xl > WALL_ZONE[1]) else "open"
+
+
+JUMP_DECISION = Decision(states=frozenset({"Jump", "Air"}), rule=jump_rule, branch=jump_branch)
 
 SPEC = EnemySpec(
     type_key="Song Heavy Sentry", short="Clapper",
@@ -58,8 +69,13 @@ SPEC = EnemySpec(
     primary={"CC_SLAM": "Slam Antic", "CC_EVADE": "Evade Scuttle", "CC_CAST": "Spell Antic", "CC_JUMP": "Jump Antic",
              "CC_JUMP_CAST": "Cast Slam Antic", "CC_ENTRY": "Drop In"},
     branch={},
-    branches={"CC_SLAM": ("main",), "CC_EVADE": ("main",), "CC_CAST": ("main",), "CC_JUMP": ("main",),
-              "CC_JUMP_CAST": ("main",), "CC_ENTRY": ("main",)},
+    branches={"CC_SLAM": ("main",), "CC_EVADE": ("single", "double"), "CC_CAST": ("main",),
+              "CC_JUMP": ("open", "wall"), "CC_JUMP_CAST": ("open", "wall"), "CC_ENTRY": ("main",)},
+    # Evade Scuttle runs 21-22 frames (5.1 u); in 7 % of R0 dev it is entered again at once (a second evade, 40-44
+    # frames, 10.8 u): known when its time in state restarts (or it runs over 26 frames), single when it is left
+    branch_dur={"CC_EVADE": ("Evade Scuttle", 26, "single", "double")},
+    # each bin's shape is kept per state: the rare early landings' slam collider is not drawn while it is in the air
+    state_gate=True,
     aim=frozenset(),
     body=("Song Heavy Sentry", "Song Heavy Sentry (2)", "Song Heavy Sentry (3)"),
     table="attack_range_clapper",

@@ -4413,3 +4413,77 @@ Offline only (no game instance started).
   - The live overlay and --solo are not run in the game.
   - Hop Up has no data.
   - A margin decision from these error tables (the person's next step after reviewing the PNGs / replay).
+
+## Task attack range: all types (stage A: framework + the Clapper; branch worktree-wf_2fe0d0c5-18e-1, 2026-10-10; forum.md §33)
+
+= main (6f123b1) + worktree-wf_f6746725-345-1 (344c812, the approved Choristor). The person: "very accurate; do every
+other enemy, the Clapper first, its danger zone was far too big". Same rules as the Choristor (no margin of any kind;
+idle = the body now; group 2 not drawn). Offline only (no game instance started). Stage B developers branch from here.
+
+- Framework (`ssbot/combat/are_spec.py`, `ssbot/combat/are_types/`):
+  - One file per type, `are_types/<name>.py`, defining `SPEC = EnemySpec(...)` (+ optional `SESSIONS`, `CASES` for
+    the PNGs). The registry discovers the modules; `attack_range.SPECS` / `CHORISTOR` come from it. Adding a type
+    touches no shared line. `are_spec` has no imports of the estimate, so a type module imports alone.
+  - New `EnemySpec` options (all off for the Choristor):
+    - `decide`: `Decision(states, rule, branch)`: an aim decided inside a family. Before the decision the estimate
+      stops at the bin before it (pending aim = group 2, not drawn). After it the template is aligned to the decision
+      (b_dec + frames since it), anchored at the decision frame (position, facing s), u = ratio x L. `branch` may
+      pick the family's branch at the decision.
+    - `hazards`: `HazardSpec` ("row" of circles or one "circle"), spawned at the entry of a trigger state in given
+      families, drawn in the measured per-ring hurt window (table meta["hazards"]), while idle too; `pre` predicts it
+      from the family start with the trigger's measured time window. Truth: other entities' AABBs of width box_w
+      (the pooled "damager" objects), attributed to the owner by the spawn rule (`on0 + on_step x ring` within
+      `on_tol` frames; else the latest trigger) in `attack_range_build.attach_hazards`; named "HZ:<name>" in the
+      track cols, drawn as the AABB's inscribed circle.
+    - `branch_dur`: a branch decided by how long a state runs (re-entered = its tin restarts, or > frames; short when
+      left before).
+    - `state_gate`: per bin, the shape per state; k = 0 draws the state it is in now (nearest bin within 8 that has
+      it), k > 0 the states at or after it (rank = median first bin); a (bin, state) with < 2 R0 dev instances is
+      dropped (`STATE_MIN`).
+  - `attack_range_build --type <name>`: build / eval (`--threads`, `--every`, `--idle-every`) / png (`--worst`) /
+    hazcheck (`--sets`, quote comma lists in cmd) / tracks. Outputs `C:\ssbot\data\m2_forum_are\<name>\`.
+  - The person's sessions are decoded once into per-attempt Forum caches `C:\ssbot\data\m2_forum_are\person_cache`
+    (`person_caches()`, all 9 sessions done; `f_raw` = raw frame); every type reads them.
+  - The eval rows of a type with hazards also get rows "HZ <name>" (the hazard alone vs its real colliders); family
+    and idle rows include the hazards on both sides.
+  - Choristor bit-identical: placement hash test (`test_choristor_placements_are_bit_identical`) and the R0 fresh
+    eval-row hash (first 6 tracks, 9,128 rows) unchanged. Its table was not rebuilt.
+- Clapper (`are_types/clapper.py`, table `attack_range_clapper.npz` 36 KB + `.json`, force-added like the
+  Choristor's):
+  - Families: CC_SLAM, CC_EVADE (single / double: Evade Scuttle entered again in 7 %), CC_CAST, CC_JUMP and
+    CC_JUMP_CAST (decided at Jump / Air: L = 0.916 vx observed, else 0.916 clamp(hero du - 5, +-12), s = toward the
+    hero; branch "wall" when the predicted landing x < 19.5 or > 45.5: those jumps hit the wall and land 2-13 frames
+    early), CC_ENTRY. Idle / Walk = the 3 body boxes now. State-gated.
+  - Hazards: rune bomb small (Cast 2; r 2.166, x_c + 4.2 m, |m| <= 9, x in [5.27, 56.59], dv -3.8, per-ring windows
+    20-26 ... 109-116 frames; pre from Spell Antic, Cast 2 at bins 48-55) and rune slam (Slam 2 of CC_JUMP_CAST;
+    r 7.187, du 6.48, dv -3.27, frames 65-73).
+  - Hazard truth check (`hazcheck.json` dev, `hazcheck_fresh_r2_person.json`): no hit outside the circles (rune slam
+    max gap -0.04 / -0.05 u, bombs +0.09 u = one cell), hits 0-8 frames after lighting; windows overlapping > 0.3 u
+    with no damage / blocked event: rune slam 5.6-5.9 %, bombs 3.3-3.4 % (cause not checked).
+  - Error (k0 / k12 coverage; fresh, R2, person in forum.md §33.4): k0 99.3-99.97 %, area ratio 1.00-1.14 (person
+    evade 1.24); k12 SLAM 96.6-97.2 % (ratio 1.13), EVADE 98.1-98.8 % (1.27-1.37), CAST 98.2-98.3 % (1.08-1.09),
+    JUMP 90.2-91.7 % (1.08-1.16), JUMP_CAST 90.4-91.6 % (1.15-1.19), ENTRY 96.6-96.8 %, idle 84-88 % (Walk 63-66 %:
+    8 u/s, idle = body now), bombs 99.97-99.99 %, rune slam 99.2-99.8 %. Jumps: decided rows 94.8-97.6 %, pending
+    (Jump Antic / Cast Slam Antic) rows 77.6-83.7 % by the group-2 rule.
+  - Earlier variants kept for comparison: `prev_nogate\`, `prev_gate_nowall\`, `prev_gate_wall\` (eval_*.json).
+  - PNGs: `C:\ssbot\data\m2_forum_are\clapper\png` (73 + `index.json`; per family, after-move frames, worst rows).
+    Replay: `C:\ssbot\data\m2_forum_overlay\clapper_range.rrd` (46 MB, 085824 attempt 2 raw 46500-49100, wave 7
+    Clapper alone).
+  - Solo: `human_session --solo "Song Heavy Sentry" --overlay --overlay-range` -> wave 7 (`fo_r1_w7`), the Clapper
+    alone (no other member, no ally): no clearing needed. Not run in the game.
+- Overlay: range labels add "+ hazards" when an enemy's hazards are drawn (zone_overlay range_polys / rerun_range).
+- Tests: `tests/test_attack_range_types.py` (registry, Choristor hash, jump rule / decision / pending, bombs predicted
+  then spawned, rune slam circle, spawn-rule attribution, double evade, state gate, hazards not in templates) +
+  `test_attack_range.py` + `test_zone_overlay.py` pass. Full suite: all pass except `test_harness_recovery.py` (3
+  worker tests stop at once because `C:\ssbot\sandbox\DEMO_SOON` exists since 10-08; environment, not this change).
+- Stage B (other types): copy `are_types/clapper.py` / `choristor.py`; aims and hazards of the other types are in
+  `C:\ssbot\data\m2_forum_v2\workflow_result.json`, `m2_forum_aimics` (Reed pin, Clawmaiden spear),
+  `m2_forum_cases` (Reed counter, Bellbearer evade). New hazard shapes (pin line, homing spear, ballistic bell) need
+  a `HazardSpec.shape` each in `RangeTable.hazard_mask` (one `elif`; or a callable shape) and their in-flight
+  re-anchoring on the real object; counters (HIT_COND) need a trigger on the hit (Block entry).
+- Open:
+  - Bomb timing: re-sync each bomb on its visible spawn (21 frames before it hurts) would cut the window union
+    (7-11 frames per ring vs 6 lit) and drop the pool-side bombs (x > 47.5 spawn in 2-10 % of casts, drawn always).
+  - Walk: carry the walking body (8 u/s) or keep "body now" (the person's call).
+  - The wall-zone limits are R0 dev measurements; no terrain model. Overlap-without-damage windows unexplained.
+  - Live overlay / --solo not run in the game.
