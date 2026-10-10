@@ -257,3 +257,22 @@ def test_rthrow_clips_a_throw_family_until_its_release(monkeypatch):
     o0 = _occ(got[False], tk)[0]
     o1 = _occ(got[True], tk)[0]
     assert not (o1 & ~o0).any() and (o0 & ~o1)[:, :4].any() and np.array_equal(o0[:, 6:], o1[:, 6:])
+
+
+def test_rthrow_does_not_clip_after_the_release(monkeypatch):
+    """Once the instance has entered its release state, a hazard just thrown may have no path yet: no clip at all (the
+    instance's visited states; a copy for a hit-reaction forecast keeps its own set)."""
+    monkeypatch.setattr(reach_table, "R_FLOOR", 0.0)
+    monkeypatch.setattr(mfm, "REACH_KEEP", frozenset({(REED, "RE_STAB")}))
+    monkeypatch.setattr(mfm, "THROW_RELEASE", {(REED, "RE_STAB"): frozenset({"Stab 1"})})
+    rc = _clip(MultiForecaster(_tables(), ORACLE, waves=False).half)
+    monkeypatch.setattr(mfm, "reach_clip", lambda half: rc)
+    b = MultiForecaster(_tables(), ORACLE, waves=False)
+    b.reach, b.rthrow = True, True
+    _run(b, _script_stab()[:19])                  # f 18: Stab 1 (the "release") entered at f 16
+    assert "Stab 1" in b.trackers[7].cur.visited
+    f = b.forecast(0.8)
+    assert np.isinf(f.clip[7]).all()
+    before = set(b.trackers[7].cur.visited)
+    b.forecast_reaction(7, "Stab Recover", f.origin_t if hasattr(f, "origin_t") else 18 * BIN)
+    assert b.trackers[7].cur.visited == before

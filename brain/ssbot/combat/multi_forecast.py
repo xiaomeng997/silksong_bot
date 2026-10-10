@@ -143,7 +143,8 @@ REANCHOR = reanchor_parts(os.environ.get("SSBOT_FORUM_REANCHOR"))
 # before the earliest look-ahead at which it can enter its release state (THROW_RELEASE: the state its hazard is armed
 # in, the tables' entities.<hazard>.armed_at_boss_state: Bell Throw 8,682 / 8,737, Reed pin Throw 2,139 / 2,153,
 # Clawmaiden spear Spear Fire Recover 492 / 496, Spear Fire is instant before it; the walk's earliest entry), unclipped
-# from then on. Before the release its hazard does not exist; one thrown earlier is its own entity (path / self
+# from then on, and not at all once the instance has entered its release state (a hazard just thrown may have no path
+# yet). Before the release its hazard does not exist; one thrown earlier is its own entity (path / self
 # template). The Clapper's rune bombs and rune slam arm long after the cast (at Idle, Walk, ...): not here
 RTHROW = os.environ.get("SSBOT_FORUM_RTHROW", "0") not in ("", "0")
 THROW_RELEASE = {("Pilgrim 03 Song", "CB_THROW"): frozenset({"Throw"}),
@@ -806,6 +807,8 @@ class MultiForecaster:
                     continue
                 t2 = copy.copy(tr)
                 t2.cur = copy.copy(tr.cur)
+                if t2.cur is not None:
+                    t2.cur.visited = set(tr.cur.visited)    # enter() adds to it (RTHROW)
                 t2.ends = list(tr.ends)
                 t2.kill(T)
                 self.trackers[i] = t2
@@ -874,6 +877,8 @@ class MultiForecaster:
         for to in ([to_state] if isinstance(to_state, str) else to_state):
             t2 = copy.copy(tr)
             t2.cur = copy.copy(tr.cur)
+            if t2.cur is not None:
+                t2.cur.visited = set(tr.cur.visited)    # enter() adds to it (RTHROW)
             t2.ends = list(tr.ends)
             t2.enter(to, t_react)
             b.subject(t2)
@@ -1205,7 +1210,9 @@ class _Builder:
                 c_ton = cur.t_start - T + d - self.lat
         if committed_now and getattr(self.fc, "rthrow", False) and (tt.tk, cur.family) in THROW_RELEASE:
             rel_st = THROW_RELEASE[(tt.tk, cur.family)]
-            rel = 0.0 if tr.state in rel_st else math.inf
+            # released already (this state or an earlier one of the instance): not clipped at all, a hazard just
+            # thrown may have no path yet (S1: a bell in flight with no path, 20261008_231544 a1 f26455 / f26467)
+            rel = 0.0 if tr.state in rel_st or cur.start in rel_st or cur.visited & rel_st else math.inf
             for nd in cur_nodes:
                 if nd.family == cur.family and nd.state in rel_st:
                     rel = min(rel, 0.0 if nd.current else max(ref + nd.lo - T, 0.0))

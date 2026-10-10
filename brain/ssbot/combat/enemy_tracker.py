@@ -98,6 +98,8 @@ class Instance:
     re_t: float = 0.0
     re_anchor: tuple[float, float] | None = None
     re_mirror: int = 1
+    # the states the instance entered after its start (SSBOT_FORUM_RTHROW: a throw that already released its hazard)
+    visited: set = field(default_factory=set)
     re_sd: float = 0.0
     # aim (SSBOT_FORUM_AIM, tools.forum_aim): the instance entered its family's aim state (AIM_STATES), where the
     # place and facing of the rest of it are fixed: anchored where the enemy is then, t from that entry
@@ -197,6 +199,8 @@ class EnemyTracker:
             if not self.dead and self.cur is None:
                 self._start(idle, to, T)
         c = self.cur
+        if c is not None:
+            c.visited.add(to)
         if c is not None and to in aim_states((sp.type_key, c.family)):
             c.aim_pending = (to, T)
             if not self.hidden and self.pos is not None and self.seen_T == T:
