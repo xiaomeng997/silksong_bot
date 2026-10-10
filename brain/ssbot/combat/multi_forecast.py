@@ -2033,9 +2033,11 @@ class MultiForecast:
             r = np.full(len(own), NOCLIP, np.int64)
             gcl = meta.get("gcl")
             cf = self.__dict__.get("clip_fam") or {}
+            # RTHROW: only the current throw's own (committed) rows; a later throw's roots hold their own hazards
+            com = np.asarray(meta["committed"], bool)
             for i, o in enumerate(own.tolist()):
                 fam = str(meta["family"][i])
-                if o in clip and ((tk_of.get(o), fam) not in REACH_KEEP or cf.get(o) == fam) \
+                if o in clip and ((tk_of.get(o), fam) not in REACH_KEEP or (cf.get(o) == fam and com[i])) \
                         and (gcl is None or not len(gcl) or gcl[i] < 0):
                     r[i] = o
             c[kind] = r

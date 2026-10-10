@@ -245,9 +245,15 @@ def test_rthrow_clips_a_throw_family_until_its_release(monkeypatch):
         kr = int(np.flatnonzero(~np.isfinite(W[:, 0]))[0])
         assert 1 <= kr <= 4 and np.isfinite(W[:kr]).all()   # the release no earlier than f 16 less the slack
         assert f.clip_fam == {7: "RE_STAB"}
-        r = f._clip_rows("pm")
-        fam = np.asarray(f.pm["family"])
-        assert (r[fam == "RE_STAB"] == 7).all()
+        for kind in ("pm", "wm", "bb"):
+            meta = {"pm": f.pm, "wm": f.wm, "bb": f.bb}[kind]
+            r = f._clip_rows(kind)
+            fam = np.asarray(meta["family"])
+            com = np.asarray(meta["committed"], bool)
+            assert (r[(fam == "RE_STAB") & com] == 7).all()
+            # a later stab's roots (not committed) keep their hazards: not clipped
+            assert (r[(fam == "RE_STAB") & ~com] == mfm.NOCLIP).all()
+        assert ((np.asarray(f.bb["family"]) == "RE_STAB") & ~np.asarray(f.bb["committed"], bool)).any()
     o0 = _occ(got[False], tk)[0]
     o1 = _occ(got[True], tk)[0]
     assert not (o1 & ~o0).any() and (o0 & ~o1)[:, :4].any() and np.array_equal(o0[:, 6:], o1[:, 6:])
