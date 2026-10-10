@@ -122,7 +122,8 @@ NAMES = {"body": "bodies + idle growth", "committed": "committed fine (+chains, 
 # BGR, light colours
 COLORS = {"body": (200, 200, 200), "committed": (245, 150, 245), "window": (250, 195, 140),
           "not_started": (160, 235, 160), "hazard": (110, 190, 255), "death": (220, 160, 185),
-          "margins": (255, 245, 185), "yellow": (140, 245, 255), "red": (130, 130, 255)}
+          "margins": (255, 245, 185), "yellow": (140, 245, 255), "red": (130, 130, 255),
+          "clash": (60, 180, 255)}
 A_SUPPORT, A_YELLOW, A_RED, A_SWEEP = 0.33, 0.40, 0.42, 0.22
 A_RANGE = 0.30
 KEY_K = {0x31: 0, 0x32: 6, 0x33: 12, 0x34: 18, 0x35: 36}
@@ -773,14 +774,19 @@ def render(fr: dict, grid: Grid, out_size: tuple[int, int], view: View, legend: 
                 for p in hero:
                     q = np.round(_to_px(Hw, p)).astype(np.int32)
                     cv2.polylines(img, [q], True, (*col, 255), 1, cv2.LINE_AA)
-        if view.show("red"):
+        if view.show("red") or view.show("range"):
+            # the range modes compare the prediction with the truth: every real damage collider NOW, the clashable
+            # ones too (orange), no sweep (the person, 2026-10-10)
             th = max(1, int(round(1.5 * H / 1080)))
+            truth = view.show("range")
             for poly, clash, _, vel, *_ in fr.get("cols") or ():
-                if clash:
+                if clash and not truth:
                     continue
-                hull = sweep_hull(poly, vel)
-                _blend_poly(img, _to_px(Hw, hull), COLORS["red"], A_SWEEP)
-                _blend_poly(img, _to_px(Hw, poly), COLORS["red"], A_RED, outline=th)
+                col = COLORS["clash"] if clash else COLORS["red"]
+                if not truth:
+                    hull = sweep_hull(poly, vel)
+                    _blend_poly(img, _to_px(Hw, hull), col, A_SWEEP)
+                _blend_poly(img, _to_px(Hw, poly), col, A_RED, outline=th)
         fs = 0.5 * H / 1080.0
         for iid, name, st, pos, col in fr.get("enemies") or ():
             if view.show("red") or view.show("yellow") or view.show("range"):
@@ -809,6 +815,8 @@ def legend_lines(fr: dict | None, view: View, config: str, extra: str = "") -> l
     if view.show("range"):
         lines.append(("ATTACK RANGE per enemy (its colour; filled = the raw estimate of where its damage colliders can "
                       "be at +k, no margin; thin line = where the hero transform must not be)", None))
+        lines.append(("REAL damage colliders NOW: not clashable", COLORS["red"]))
+        lines.append(("REAL damage colliders NOW: clashable", COLORS["clash"]))
         k = view.k if fr is not None and view.k in fr.get("ks", ()) else None
         for _iid, name, col, _raw, _hero, lab in ((fr or {}).get("range") or {}).get(k, ())[:6]:
             lines.append((f"{name}: {lab}", col))
