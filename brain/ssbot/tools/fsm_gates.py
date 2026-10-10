@@ -11,6 +11,9 @@ from F's start to the lift state's entry.
     ../scripts/uv.cmd run python -m ssbot.tools.fsm_gates mine C:/ssbot/data/m2_forum_r0/cache --out <fsm_gates.json>
     ../scripts/uv.cmd run python -m ssbot.tools.fsm_gates check <fsm_gates.json> C:/ssbot/data/m2_forum_r0/cache_fresh
                                                      # held out: violations (a second start before the lift) per gate
+    ../scripts/uv.cmd run python -m ssbot.tools.fsm_gates dwell C:/ssbot/data/m2_forum_r0/cache_fresh [--json out]
+                                                     # SSBOT_FORUM_WALKFLOOR's premise: states left before their
+                                                     # least dwell - a frame (per type / state, by next state)
 """
 import argparse
 import glob
@@ -136,6 +139,35 @@ def check(gates_path: str, dirs: list) -> dict:
     return res
 
 
+def dwell_check(dirs: list, slack: float = 1.0 / 60.0) -> dict:
+    """SSBOT_FORUM_WALKFLOOR's premise on a data set: every Control state is left no earlier than its table's least
+    dwell (the behaviour JSON's dwell_s min) - slack after its entry. {type/state: n, short, by next state}."""
+    specs = type_specs()
+    mins = {}
+    for tk, sp in FORUM_TYPES.items():
+        p = FORUM_DIR / f"{sp.enemy}.json"
+        if p.exists():
+            d = json.loads(p.read_text("utf-8"))
+            mins[tk] = {st: float(v["min"]) for st, v in (d.get("dwell_s") or {}).items() if v.get("min") is not None}
+    res: dict = defaultdict(lambda: {"n": 0, "short": 0, "worst_s": 0.0, "next": defaultdict(int), "examples": []})
+    for dr in dirs:
+        for fn in sorted(glob.glob(str(Path(dr) / "*.json.gz"))):
+            for tk, s in sequences(fn, specs):
+                for (t0, st), (t1, nxt) in zip(s, s[1:]):
+                    m = mins.get(tk, {}).get(st)
+                    if m is None:
+                        continue
+                    r = res[f"{tk}/{st}"]
+                    r["n"] += 1
+                    if t1 - t0 < m - slack - 1e-6:
+                        r["short"] += 1
+                        r["worst_s"] = max(r["worst_s"], round(m - (t1 - t0), 4))
+                        r["next"][nxt] += 1
+                        if len(r["examples"]) < 3:
+                            r["examples"].append([Path(fn).name, round(t0, 3), round(t1 - t0, 4), nxt])
+    return {k: v for k, v in sorted(res.items())}
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -147,7 +179,20 @@ def main() -> None:
     b.add_argument("gates")
     b.add_argument("dirs", nargs="+")
     b.add_argument("--json")
+    c = sub.add_parser("dwell")
+    c.add_argument("dirs", nargs="+")
+    c.add_argument("--json")
     args = ap.parse_args()
+    if args.cmd == "dwell":
+        res = dwell_check(args.dirs)
+        bad = {k: v for k, v in res.items() if v["short"]}
+        print(f"{sum(v['n'] for v in res.values())} state visits, {sum(v['short'] for v in bad.values())} left "
+              f"before their least dwell - a frame, in {len(bad)} of {len(res)} states")
+        for k, v in sorted(bad.items(), key=lambda kv: -kv[1]["short"]):
+            print(f"  {k}: {v['short']} / {v['n']}, worst {v['worst_s']} s early, next {dict(v['next'])}")
+        if args.json:
+            Path(args.json).write_text(json.dumps(res, indent=1), "utf-8")
+        return
     if args.cmd == "mine":
         out = mine(args.dirs, args.min_pairs)
         Path(args.out).write_text(json.dumps(out, indent=1), "utf-8")
