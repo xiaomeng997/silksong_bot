@@ -4684,7 +4684,8 @@ Minister) and heavyrest (1399528, Bellbearer / Maestro / Tiny). Offline only (no
 - Verified: all 10 tables rebuilt from R0 dev with the merged code are byte-identical to the committed ones
   (`C:\ssbot\data\m2_forum_are\stage_c\tables`); the 30 evals (10 types x fresh / R2 / person) re-run on the merged
   code give summaries identical to the stage A / B ones (kept in `<type>\prev_stageB\`); attack-range tests (7 files,
-  77, with the new `tests/test_attack_range_merge.py`: registry, hooks, place() vel + ctx, _attach) pass. Live path: `RangeTracker` over the person's 085824 attempt 1 (7,229 STATE frames, all 10 types in play): no
+  77, with the new `tests/test_attack_range_merge.py`: registry, hooks, place() vel + ctx, _attach) pass; full suite
+  1400 passed, 1 skipped, 1 xfailed (test_harness_recovery.py left out: C:\ssbot\sandbox\DEMO_SOON). Live path: `RangeTracker` over the person's 085824 attempt 1 (7,229 STATE frames, all 10 types in play): no
   error, every type estimated, k0 coverage of every real damage collider by the union of the estimates 99.3 %.
 - The Spear, the bells and the pins are not HealthManager entities (no health_manager src bit, no hp in the caches), so
   `--solo` does not try to clear them (stage B's open question).
