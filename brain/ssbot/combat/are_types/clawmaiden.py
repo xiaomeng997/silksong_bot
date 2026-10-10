@@ -97,11 +97,10 @@ def slash_place(tab, fam, branch, b, anchor, s, hero_du, now, b_now, dec, st_now
     vel = ctx.get("vel")
     body = ctx.get("body")
     if fam in CARRY and b_now is not None and b >= b_now and body:
-        # the body colliders now (exact at k 0), carried along the velocity now at k > 0
-        from ssbot.combat.attack_range import poly_mask
-        dt = (b - b_now) * FT if (CARRY_ON and vel is not None) else 0.0
-        dx, dy = (vel[0] * dt, vel[1] * dt) if dt else (0.0, 0.0)
-        return poly_mask([p + (dx, dy) for p in body], tab.cell)
+        # the body colliders now (exact at k 0), carried along the velocity now at k > 0, kept inside the arena (the
+        # idle bodies' rule: attack_range.carry_body)
+        from ssbot.combat.attack_range import carry_body
+        return carry_body(body, vel, (b - b_now) * FT, tab.cell, on=CARRY_ON)
     if fam in CARRY and now is not None and b_now is not None and b > b_now and vel is not None:
         tp = tab.templates.get((fam, "main"))
         if tp is None:

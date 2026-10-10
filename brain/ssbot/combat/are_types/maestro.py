@@ -42,13 +42,13 @@ def custom(view):
     """(the body now carried by its velocity, None) in MA_DEFEND; else (None, None)."""
     if view.st not in TRACKING:
         return None, None
-    from ssbot.combat.attack_range import poly_mask
+    from ssbot.combat.attack_range import carry_body
     body = _body(view)
     if not body:
         return None, None
     tau = max(view.t - view.T, 0.0)
-    d = ((view.vx or 0.0) * tau, (view.vy or 0.0) * tau)
-    return poly_mask([p + d for p in body], view.tab.cell), None
+    # kept inside the arena like the idle bodies (attack_range.carry_body; always carried: MA_DEFEND's own rule)
+    return carry_body(body, (view.vx or 0.0, view.vy or 0.0), tau, view.tab.cell, on=True), None
 
 SPEC = EnemySpec(
     type_key="Song Pilgrim Maestro", short="Maestro",

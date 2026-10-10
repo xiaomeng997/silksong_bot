@@ -4704,3 +4704,38 @@ Minister) and heavyrest (1399528, Bellbearer / Maestro / Tiny). Offline only (no
   Clawmaiden's flying families already carry it, CARRY_ON); pending aims (group 2) not drawn; CM_SLASH k12 area ratio
   1.8 by the side union; Tiny orbit / dive k12 53-70 %; Reed stab short stops; Minister rotated colliders as AABBs; no
   terrain model for pins / spear / bombs; bomb timing windows wide; deployed oracle's `enemy.hp` unverified.
+
+## Task idle velocity compensation (branch worktree-wf_9b753b9b-542-1, 2026-10-10; forum.md §38)
+
+= main (f910fda) + stage C (137a6b1, worktree-wf_2fe0d0c5-18e-5) + this. Offline only (no game instance started or
+stopped). The person's decision: an idle / moving non-attack body at +k is the body now carried by its velocity now x
+k / 60 s; margins stay a separate, decision-time choice.
+- `attack_range.IDLE_CARRY` (default True; False = the body now, the comparison), `carry_shift(polys, vel, tau)` (v x
+  tau, the body's box stopped by WALL_L / WALL_R, FLOOR_Y and the dome's lower edge `core.forum.dome_y`; a box already
+  past a bound is not pushed back) and `carry_body(...) -> Mask`. Used by `RangeTracker.estimate` (inst None: the body
+  of `EnemySpec.body` carried k x FT) and `attack_range_build.eval_track` idle rows (carried to the real frame's game
+  time). The Clawmaiden's CARRY families (`slash_place`, `CARRY_ON` kept) and the Maestro's MA_DEFEND custom now use
+  `carry_body` too (only change: the arena clamp). Tiny's KINEMATIC states keep their own model.
+- Velocity: the entity's exported `vel` (Rigidbody2D, as observed, no smoothing). Measured against a 3-frame position
+  difference (worse at every k) and constant acceleration from the 3-frame velocity change (|a| <= 150; +2-8 points at
+  m 0 up to k 12, longer tail from k 18: k30 big p95 Maestro 4.1 vs 2.3 u, Bellbearer 3.8 vs 2.5, Clawmaiden 4.6 vs
+  3.2): not adopted.
+- New tool `ssbot/tools/are_idlevel.py` (run / summary / png; `--part i/n` splits a set's caches over processes, parts
+  merged on load): body-only rows (the enemy's own colliders at the first frame reaching t + k/60; hazards / projectiles
+  keep their own rows), idle frames + the Clawmaiden's CM_FLY, rows dropped when a family starts by then or a hit
+  lands from t - 0.3 s to then; k in (1, 6, 12, 18, 30, 36), m in (0, 0.25, 0.5, 0.75, 1.0, 1.5); variants now / vel /
+  fd / acc. Sets: person every 6 (257,653 rows), R0 fresh every 24 (520,441), R2 every 12 (2 parts, 540,004). Outputs
+  `C:\ssbot\data\m2_forum_are\idlevel\` (`rows_*.pkl`, `summary.md` / `.json`, `png\` 36 before / after PNGs at k30).
+  Runs: person 10 min, fresh 25 min, R2 13 min per part (idle priority; an R2 run at every 6 in one process slowed to
+  ~18 min per 10 files and was stopped).
+- Result (vel + 0.5 u cover, fresh / R2 / person agree within ~3 points except the Clapper): k <= 12 >= 99.3 % for every
+  flier / walker (Clapper 94.7-97.3 %); k18 86-98 % (Minister 99 %); k30 55-88 %, k36 38-78 %. Margin covering 99 %
+  of rows (max over sets): k12 0.57-0.81 u (Minister 1.49: its body collider changes shape with the state), k18
+  1.05-1.67, k30 2.2-3.7, k36 2.7-5.0; Clapper 3.2 / 4.75 / 7.65 / 9.25 (Idle -> Walk at 8 u/s, walk reversals); Envoy /
+  Choristor walkers <= 1.05 at k36. Fliers fit m(k) ~ 0.3 + 11 t^2 u. Area ratio (hero space) vel + 0.5 1.4-2.1, now +
+  1.5 u 2.5-5.1; at k30 vel + 1.0 (1.9-3.4) covers 69-97 % vs now + 1.5 u 50-88 %.
+- Tests: `tests/test_attack_range_idlevel.py` (carry_shift, the arena clamp, the tracker's idle carry and the switch,
+  the measure's margins / sides); attack-range tests + zone overlay pass.
+- Not done: the stage C `summary.md` idle rows (body now, with hazards) were not re-run (the 30 evals); how the margin
+  grows with k is the person's call (fixed / ~t^2 / per type table); better fliers need their target point (DistanceFly
+  to the hero, the Tiny formation slot), not done.

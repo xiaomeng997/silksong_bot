@@ -43,7 +43,7 @@ from pathlib import Path
 import numpy as np
 
 from ssbot.combat.attack_range import (CELL, CHORISTOR, FT, SPECS, CustomView, Mask, RangeTable, Segmenter, Template,
-                                       bin_of, circle_poly, hazards_at, hero_space, hurts, load_table, on_canvas,
+                                       bin_of, carry_body, circle_poly, hazards_at, hero_space, hurts, load_table, on_canvas,
                                        poly_mask, save_table, table_path, type_extra, union)
 
 ARE = Path(r"C:\ssbot\data\m2_forum_are")
@@ -648,7 +648,6 @@ def eval_track(tr: dict, tab: RangeTable, shapes: dict, every: int = 2, idle_eve
         if not body:
             continue
         s = f1 if tr["flip"][j] else -f1
-        E = poly_mask(body)
         hit = any(abs(h - T[j]) < 0.3 for h in tr["hits"])
         for k in ks:
             jt = _target(T, j, k)
@@ -657,6 +656,8 @@ def eval_track(tr: dict, tab: RangeTable, shapes: dict, every: int = 2, idle_eve
             nxt = bool((idx[j:jt + 1] >= 0).any())
             base = {"fam": IDLE, "br": st, "known": True, "k": k, "b": 0, "t": round(k * FT, 4), "next": nxt,
                     "int": hit, "f": int(tr["f"][j]), "fight": tr["fight"], "iid": tr["iid"], "st": tr["st"][j]}
+            # the body now carried by its velocity to the game time of the real frame compared (IDLE_CARRY)
+            E = carry_body(body, _vel(tr, j), float(T[jt] - T[j]))
             Eh = hz_rows(j, jt, k, None, base)
             Ek = E if Eh is None else union([E, Eh])
             if spec.custom is not None:

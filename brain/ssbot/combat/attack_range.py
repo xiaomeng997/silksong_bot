@@ -17,8 +17,11 @@ the family's start state), built from R0 dev only (tools.attack_range_build buil
   branches        CH_SLASH combo / single (decided at Combo?), CH_HOP back / forward / up (Hop Check), CH_WHIP multi /
                   plain: a branch is known once its first state is seen; before that the estimate is the union of the
                   branches' estimates (the classifier's decision points).
-  idle            Battle Idle and every state outside the families: the exact current body (its Body Damager now),
-                  for every k: no growth, and no attack that has not started (group 2 is not part of this round).
+  idle            Battle Idle and every state outside the families: the exact current body (its Body Damager now)
+                  moved by its velocity now x the look-ahead (k / 60 s of game time; IDLE_CARRY, the person
+                  2026-10-10: the walks, flights and chases between attacks), kept inside the arena (carry_shift);
+                  no growth, and no attack that has not started (group 2 is not part of this round). No margin:
+                  a margin (e.g. 0.5 u) is a decision-time choice (tools.are_idlevel measures it per k).
 
 Every type is a module under ssbot.combat.are_types (the registry; SPECS / CHORISTOR below come from it) declaring an
 are_spec.EnemySpec; beyond the Choristor's parts a type can declare (Task "attack range: all types", stage A):
@@ -394,6 +397,49 @@ def coast(now: tuple, vel: tuple, n: int, decay: float, step: float = 0.02) -> t
     return float(now[0]) + float(vel[0]) * k, float(now[1]) + float(vel[1]) * k
 
 
+# The person 2026-10-10: an idle / moving non-attack body (walk, flight, chase) at +k is the body now carried by its
+# velocity now for k / 60 s of game time (True, the default), not the body now (False: the comparison variant).
+# The velocity is the entity's exported velocity of the frame (its Rigidbody2D velocity as observed, no smoothing). On
+# the R0 fresh / R2 / person idle rows (tools.are_idlevel, forum.md §38) a position difference over the last 3 frames
+# is worse at every k, and a constant acceleration (the velocity change over 3 frames) covers a few points more at
+# m 0 up to k 12 but leaves a longer tail from k 18 on: not adopted.
+IDLE_CARRY = True
+
+
+def carry_shift(polys, vel, tau: float) -> tuple:
+    """(dx, dy): a body (world polygons) carried by vel = (vx, vy) for tau s of game time, stopped by the arena: its
+    box does not cross the side walls (core.forum WALL_L / WALL_R), the floor (FLOOR_Y) or the dome's lower edge
+    (dome_y at both box edges); a box already past a bound is not pushed back, only not moved further out."""
+    from ssbot.core.forum import FLOOR_Y, WALL_L, WALL_R, dome_y
+    if vel is None or tau <= 0.0 or not polys:
+        return 0.0, 0.0
+    vx, vy = float(vel[0] or 0.0), float(vel[1] or 0.0)
+    if not (math.isfinite(vx) and math.isfinite(vy)):
+        return 0.0, 0.0
+    dx, dy = vx * tau, vy * tau
+    a = np.vstack([np.asarray(p, np.float64).reshape(-1, 2) for p in polys])
+    x0, y0 = a.min(axis=0)
+    x1, y1 = a.max(axis=0)
+    if dx < 0.0:
+        dx = max(dx, min(0.0, WALL_L - x0))
+    elif dx > 0.0:
+        dx = min(dx, max(0.0, WALL_R - x1))
+    if dy < 0.0:
+        dy = max(dy, min(0.0, FLOOR_Y - y0))
+    elif dy > 0.0:
+        top = min(dome_y(x0 + dx), dome_y(x1 + dx))
+        dy = min(dy, max(0.0, top - y1))
+    return dx, dy
+
+
+def carry_body(polys, vel, tau: float, cell: float = CELL, on: bool | None = None) -> Mask:
+    """The raw mask of a body carried by its velocity for tau s (carry_shift); on False (default: IDLE_CARRY) the body
+    where it is now."""
+    on = IDLE_CARRY if on is None else on
+    dx, dy = carry_shift(polys, vel, tau) if on else (0.0, 0.0)
+    return poly_mask([np.asarray(p, np.float64).reshape(-1, 2) + (dx, dy) for p in polys], cell)
+
+
 def _inside(x: float, intervals) -> bool:
     if not intervals:
         return True
@@ -732,8 +778,10 @@ class RangeTracker:
         tk, e, inst = self.now[iid]
         tab = self.tables[tk]
         p = e.get("pos") or (0.0, 0.0)
-        if inst is None:
-            est = Estimate(iid, k, poly_mask(body_polys(e, tab.spec.body), tab.cell), None, None, None,
+        if inst is None:                # idle: the body now carried by its velocity now (IDLE_CARRY)
+            vel = e.get("vel")
+            v2 = (float(vel[0]), float(vel[1])) if vel and len(vel) > 1 else None
+            est = Estimate(iid, k, carry_body(body_polys(e, tab.spec.body), v2, k * FT, tab.cell), None, None, None,
                            (float(p[0]), float(p[1])))
         else:
             b = bin_of(self.T - inst.t0)

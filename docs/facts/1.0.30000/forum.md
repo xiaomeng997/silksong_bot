@@ -4539,7 +4539,7 @@ k 12 覆盖低的地方都是"12 帧后它在哪"推得不准，不是画得太�
 
 ### 37.4 没做的 / 等你定的
 
-- 待机（会飞的怪、Clapper 走路）要不要按速度往前推：你定。Clawmaiden 的 Fly / 飞向抓 / 转已经按速度推（`clawmaiden.CARRY_ON`，§34），和规则不一样，也等你定。
+- 待机（会飞的怪、Clapper 走路）要不要按速度往前推：你定。Clawmaiden 的 Fly / 飞向抓 / 转已经按速度推（`clawmaiden.CARRY_ON`，§34），和规则不一样，也等你定。（你定了：按速度推，默认开，见 §38。）
 - 第 2 组（还没决定的瞄准）这一轮不画：Reed 刺的起手、Maestro Fire Antic、Tiny Fire Ready、Clapper 跳起前（Jump Antic、Cast Slam Antic）、Clawmaiden 瞬移落点、矛的起手、所有待机之后的下一招。
 - 其余各节留下的：Tiny 转圈要队形目标格、Pull Up 时刻；Reed 刺有 5 % 停得很短；针 / 矛 / 符文没有平台地形；丝弹时间窗口偏宽；部署的 oracle 有没有 `enemy.hp` 没核实。
 
@@ -4551,4 +4551,84 @@ cd <checkout>\brain
 ..\scripts\uv.cmd run python -m ssbot.tools.are_summary
 ..\scripts\uv.cmd run python -m ssbot.tools.viewer C:\ssbot\data\human\20261009_085824 --zones --range-only --k 0,12 --video --video-scale 0.35 --from 15163 --to 29619 --save C:\ssbot\data\m2_forum_overlay\all_range.rrd
 ..\scripts\uv.cmd run python -m pytest -q tests\test_attack_range.py tests\test_attack_range_types.py tests\test_attack_range_envoy_clawmaiden.py tests\test_attack_range_reed_minister.py tests\test_attack_range_bmt.py tests\test_zone_overlay.py
+```
+
+## 38. 待机的身体按此刻的速度往前推（2026-10-10，你提的"按此刻速度补位置 + 一个小的固定余量"；分支 worktree-wf_9b753b9b-542-1 = main + 137a6b1；工具 `ssbot/tools/are_idlevel.py`；数据 `C:\ssbot\data\m2_forum_are\idlevel`：`summary.md` / `summary.json` / `png\`）
+
+### 38.1 做了什么
+
+- 待机（不在任何招式里的状态）的身体在 +k 帧 = 现在的身体整体平移 v × k/60 秒（游戏时间），不长大、不变形。包括：Reed Alert / Stab Pos / Defend / Throw Range，Minister Chase / Retreat? / Parry Stance，Bellbearer In Range / Out of Range，Maestro Forum Fly / Fly / Chase，Tiny Ready（队形飞行），Clapper Idle / Walk，Envoy Walker，Choristor Walker。函数 `attack_range.carry_body` / `carry_shift`，实时 `RangeTracker.estimate` 和离线 `attack_range_build.eval_track` 都用它。
+- v = 这一帧导出的速度（游戏的刚体速度，原值，**不平滑**）。比过两种别的：用最近 3 帧位置差算速度（平滑）——每个 k 都更差（例：Reed k12 m0 覆盖 77.7 % vs 84.7 %）；常加速度（最近 3 帧的速度变化，|a| ≤ 150 u/s²）——k ≤ 12 时 m0 覆盖高 2-8 个点（Envoy 反而低 3 点），但 k ≥ 18 尾巴更长（k30 最大缺口 p95：Maestro 4.1 vs 2.3 u，Bellbearer 3.8 vs 2.5 u，Clawmaiden 4.6 vs 3.2 u），不算"明显更好"，没用。
+- 平移被场地挡住：身体的框不穿左右墙（14.01 / 48.99）、地面（3.0）、穹顶下沿（`core.forum.dome_y`）；已经在外面的（Clapper 从穹顶上方掉进来）不往回推，只是不再往外走。
+- 默认开（`attack_range.IDLE_CARRY = True`，你定的）；改成 False 就是原来的"身体现在的位置"，对比用。Clawmaiden 的 Fly / 飞向抓 / 转（§34，本来就按速度推，`CARRY_ON`）和 Maestro 的 Defend（§36）现在走同一个函数，也加了场地限制。
+- 估计本身仍然没有余量；余量是决策时的选择，下面给每个 k 需要多少。
+
+### 38.2 怎么量的
+
+没用来建表的数据，各自分开：R0 fresh（35 场，每 24 帧取一帧）、R2（181 场，每 12 帧）、你的录像（9 个 session，每 6 帧）。只比身体：真值 = t + k/60 之后第一帧这只怪自己的碰撞体（铃、针、符文这些危险物有它们自己的行，这次没动）；k 之内开始了新招式、或者从 t - 0.3 s 到那一帧之间被打的行不算。都在英雄中心空间（加了受击框）。余量 m = 把估计按半径 m 的圆膨胀。每行记"最大缺口" = 把这一行完全盖住需要的余量。
+
+### 38.3 回答你的问题
+
+对的一半。补偿量确实和时间成正比：v × t。这些怪待机时 5-6 u/s（Reed / Minister / Bellbearer / Tiny / Clawmaiden，p95 7-9 u/s），所以下一帧只补 0.1 u，0.2 s 补 1.2 u，0.5 s 补 3 u。
+
+但是补偿之后剩下的误差也随时间变大，而且比 t 涨得快（大约 ∝ t²）：怪在变速、变向——会飞的按和英雄的距离来回调（DistanceFly），Tiny 的队形飞行来回摆，Clapper 走走停停、会突然起步和掉头。所以：
+
+- **k ≤ 12（≤ 0.2 s）：补偿 + 0.5 u 基本就是 100 %**（会飞的和走的每类 ≥ 99.3 %；Clapper 94.7-97.3 %）。
+- **k 18（0.3 s）**：会飞的 86-98 %（Minister 99 %），要 1-1.7 u。
+- **k 30-36（0.5-0.6 s）**：会飞的只有 38-88 %，要 2.2-5 u 才能盖住 99 % 的行；Clapper 走路要 7-9 u。
+- 匀速走的（Envoy、Choristor Walker，2 u/s）到 0.6 s 也是 ≥ 96 %。
+
+补偿 + 0.5 u 的覆盖（%，R0 fresh / R2 / 你的录像）：
+
+| 类型 | k1（0.02 s） | k6（0.10 s） | k12（0.20 s） | k18（0.30 s） | k30（0.50 s） | k36（0.60 s） |
+|---|---|---|---|---|---|---|
+| Reed | 100 / 100 / 100 | 100 / 100 / 100 | 99.8 / 99.8 / 99.9 | 94.4 / 95 / 95.1 | 67 / 68.7 / 68.4 | 53.8 / 56.2 / 55.4 |
+| Minister | 100 / 100 / 100 | 99.9 / 99.9 / 99.9 | 99.7 / 99.7 / 99.8 | 99.2 / 99.2 / 99.5 | 83.5 / 83.7 / 84.8 | 72.1 / 72.2 / 73.3 |
+| Bellbearer | 100 / 100 / 100 | 100 / 100 / 100 | 99.9 / 99.9 / 100 | 92.4 / 92.5 / 92.7 | 66.1 / 65.5 / 66.1 | 54.6 / 53.5 / 54.1 |
+| Maestro | 100 / 100 / 100 | 100 / 100 / 100 | 99.7 / 99.8 / 99.7 | 97.6 / 98 / 97.4 | 86.1 / 87.6 / 85.6 | 75.9 / 78.2 / 75.9 |
+| Tiny | 100 / 100 / 100 | 100 / 100 / 100 | 99.9 / 99.9 / 99.8 | 94 / 94.2 / 94.6 | 54.8 / 54.8 / 59 | 38.1 / 38 / 43.2 |
+| Clawmaiden Fly | 100 / 100 / 100 | 100 / 100 / 100 | 99.3 / 99.5 / 99.6 | 86.3 / 87.8 / 87.8 | 55.4 / 59.9 / 57.9 | 45.3 / 51.4 / 46.8 |
+| Clapper | 99.9 / 99.9 / 100 | 99.2 / 98.8 / 99.5 | 96.6 / 94.7 / 97.3 | 92.2 / 87.6 / 93 | 82.5 / 71.3 / 80.1 | 77 / 63.5 / 71.8 |
+| Envoy | 100 / 100 / 100 | 100 / 100 / 100 | 100 / 100 / 100 | 100 / 100 / 100 | 100 / 99.8 / 99.8 | 100 / 99.8 / 99.6 |
+| Choristor | 100 / 100 / 100 | 100 / 100 / 100 | 100 / 100 / 100 | - / 99.9 / 100 | - / 97.7 / 98.8 | - / 96.4 / 97.7 |
+
+要多大的余量 m(k) 才能让 99 % 的行完全盖住（u；三个数据集里取最大）：
+
+| 类型 | k1 | k6 | k12 | k18 | k30 | k36 |
+|---|---|---|---|---|---|---|
+| Reed | 0.4 | 0.47 | 0.74 | 1.36 | 2.98 | 3.94 |
+| Minister | 0.18 | 1.05 | 1.49 | 1.67 | 2.22 | 2.67 |
+| Bellbearer | 0.14 | 0.25 | 0.64 | 1.18 | 2.9 | 3.93 |
+| Maestro | 0.13 | 0.28 | 0.81 | 1.5 | 3.28 | 4.05 |
+| Tiny | 0.11 | 0.21 | 0.57 | 1.05 | 2.29 | 3.12 |
+| Clawmaiden Fly | 0.14 | 0.28 | 0.78 | 1.56 | 3.71 | 4.99 |
+| Clapper | 0.79 | 1.6 | 3.2 | 4.75 | 7.65 | 9.25 |
+| Envoy | 0.05 | 0.05 | 0.05 | 0.05 | 0.27 | 0.35 |
+| Choristor | 0 | 0.05 | 0.05 | 0.49 | 0.91 | 1.05 |
+
+- 会飞的大致是 m(k) ≈ 0.3 + 11 t² u（t = k/60 s；k12 0.7，k18 1.3，k30 3.1，k36 4.3），也就是 ½ a t²，它们的速度大约以 20 u/s² 在变。一个固定的 0.5 u 只在 0.2 s 以内够。
+- Minister 在 k6 就要 1 u：它换状态时身体碰撞体换形状（Collider Fly / ParryStance / AttackAntic），不是移动的问题。
+- Clapper：它站着（速度 0）然后突然以 8 u/s 起步，或者走着掉头，速度看不出来（和下一招一样是"还没决定"的事）。
+- 面积（英雄中心空间，真实身体 = 1）：补偿 + 0.5 u 是 1.4-2.1 倍，补偿 + 1.0 u 是 1.9-3.4 倍，"身体现在 + 半个钉子长 1.5 u"是 2.5-5.1 倍。k30 会飞的：补偿 + 1.0 u 覆盖 69-97 %，"身体现在 + 1.5 u" 只有 50-88 %（R0 fresh）；补偿 + 0.5 u 是 55-86 %，和后者差不多但面积只有一半。补偿 + 小余量比一刀切的大余量好。
+- 补偿本身：只按速度（m0）k12 的覆盖 Reed 45 → 85 %，Minister 58 → 90 %，Bellbearer 47 → 84 %，Tiny 42 → 83 %，Maestro 71 → 91 %，Envoy 75 → 99 %，Clapper 85 → 94 %（R0 fresh）。
+
+### 38.4 图
+
+`C:\ssbot\data\m2_forum_are\idlevel\png\`：每类 4 张 k30（0.5 s）的移动待机：红 = t + k 时真实的身体，灰 = 身体现在，蓝 = 按速度推，浅蓝 = 推 + 0.5 u，箭头 = v × t。每类第 0 张是最快的那次，后面 3 张按"推完还差多少"取中位、p90、最差（例：`tiny_2_Ready_k30.png` 队形飞行掉头，推过头 1.7 u；`minister_0_Chase_k30.png` 直线追，推完只差 0.05 u）。
+
+### 38.5 没做的
+
+- §37 的 `summary.md` 里的 idle 行还是"身体现在"的数，而且含危险物；30 个 eval 没重跑（现在重跑 idle 行就是补偿后的）。这一节的表只看身体。
+- 余量随 k 怎么取（固定 / 按 t² 涨 / 每类一个表）是决策时的事，等你定。
+- 匀加速的版本没用（见 38.1）；Tiny 队形、会飞的来回调距离，要更好只能预测它们的目标点（英雄位置 + 距离规则），这一轮没做。
+
+复现：
+```
+cd <checkout>\brain
+..\scripts\uv.cmd run python -m ssbot.tools.are_idlevel run --sets person --threads 4
+..\scripts\uv.cmd run python -m ssbot.tools.are_idlevel run --sets fresh --every 24 --threads 4
+..\scripts\uv.cmd run python -m ssbot.tools.are_idlevel run --sets r2 --every 12 --threads 4 --part 0/2     (和 --part 1/2 同时跑)
+..\scripts\uv.cmd run python -m ssbot.tools.are_idlevel summary
+..\scripts\uv.cmd run python -m ssbot.tools.are_idlevel png --per-type 4
+..\scripts\uv.cmd run python -m pytest -q tests\test_attack_range_idlevel.py tests\test_attack_range.py tests\test_attack_range_envoy_clawmaiden.py tests\test_attack_range_bmt.py
 ```
