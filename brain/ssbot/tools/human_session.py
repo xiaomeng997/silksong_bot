@@ -51,6 +51,13 @@ from ssbot.vision import mask as vmask
 
 GAME = Path(r"C:\ssbot\game\train\Hollow Knight Silksong.exe")
 RENDER = (1920, 1080)       # -screen-width / -screen-height
+# --display: the Unity window mode. "fullscreen" is what every session used (on the 4K desktop it already is a
+# borderless window: meta.json placements show a 3840x2160 client on a 3840x2160 desktop while the render is 1080p);
+# "borderless" says so explicitly (an exclusive-fullscreen game would hide the --overlay window); "popup" is a
+# 1920x1080 borderless window (the video then holds the whole desktop: not training data, mask_mismatch).
+DISPLAY = {"fullscreen": ("-screen-fullscreen", "1"),
+           "borderless": ("-screen-fullscreen", "1", "-window-mode", "borderless"),
+           "popup": ("-screen-fullscreen", "0", "-popupwindow")}
 # Commands from the lead while a person plays (the oracle takes one IPC client at a time, so they go through this
 # session's own link): one per line, "load <savestate>" loads that savestate with save suppression on, e.g. to start
 # or retry the Forum demo (2026-10-03); "speed <x>" scales the game's time (oracle time.scale, e.g. 0.5 for the
@@ -59,8 +66,9 @@ RENDER = (1920, 1080)       # -screen-width / -screen-height
 CMD_FILE = Path(r"C:\ssbot\sandbox\human_cmd.txt")
 
 
-def run_commands(link: OracleLink, log: list) -> None:
-    """Execute and remove CMD_FILE's commands; a load waits until the person is in gameplay (title screen: refused)."""
+def run_commands(link: OracleLink, log: list, overlay=None) -> None:
+    """Execute and remove CMD_FILE's commands; a load waits until the person is in gameplay (title screen: refused).
+    "overlay <k N | mode M | layer L | freeze | step | on | off>" goes to the zone overlay (--overlay)."""
     if not CMD_FILE.exists():
         return
     try:
@@ -84,8 +92,13 @@ def run_commands(link: OracleLink, log: list) -> None:
             try:
                 r = link.rpc("time.scale", scale=float(parts[1]))
                 entry["result"] = f"speed {r.get('scale')}"
+                if overlay is not None:
+                    overlay.command(f"speed {float(parts[1])}")
             except (OracleError, TimeoutError, ValueError) as e:
                 entry["result"] = f"failed: {e}"
+        elif len(parts) >= 2 and parts[0] == "overlay":
+            entry["result"] = overlay.command(line.strip().split(None, 1)[1]) if overlay is not None \
+                else "no overlay (--overlay)"
         elif len(parts) >= 2 and parts[0] == "rpc":
             # "rpc <name> [json args]": any oracle RPC through this link (abilities.grant, crest.equip, ...)
             try:
@@ -204,7 +217,32 @@ def main() -> None:
                     help="load this savestate once the person is in gameplay (save suppression on); later loads "
                          f"through {CMD_FILE}")
     ap.add_argument("--speed", type=float, default=None, help="game speed once in gameplay (time.scale), e.g. 0.5")
+    ap.add_argument("--display", choices=sorted(DISPLAY), default="fullscreen",
+                    help="fullscreen: as before; borderless: Unity -window-mode borderless (a borderless window over "
+                         "the desktop, what an overlay needs); popup: a 1920x1080 borderless window "
+                         "(-screen-fullscreen 0 -popupwindow)")
+    ap.add_argument("--overlay", action="store_true",
+                    help="draw the Forum planner's zones over the game (tools.zone_overlay: inescapable yellow, "
+                         "non-clashable red, support layers; F8-F11, 1-5); not in the video")
+    ap.add_argument("--overlay-crest", default="Wanderer", help="the crest of the overlay's kinematics (fo_W)")
+    ap.add_argument("--overlay-every", type=int, default=3, help="zones recomputed every N game frames")
+    ap.add_argument("--overlay-margins", action="store_true", help="also the margins layer (a second forecast)")
+    ap.add_argument("--overlay-range", action="store_true",
+                    help="the attack-range layer (combat.attack_range: each enemy's estimate, no margin, its own "
+                         "colour); the overlay starts in mode range+red (F9 cycles), 1-5 pick k")
+    ap.add_argument("--solo", default=None, metavar="TYPE",
+                    help='single-enemy practice (tools.solo_practice), e.g. --solo "Song Pilgrim 03": loads the wave '
+                         "savestate holding that type with the fewest others (unless --savestate), boosts the hero "
+                         "until only one enemy of that type is left, then keeps it alive")
+    ap.add_argument("--no-solo-protect", action="store_true", help="--solo: let the kept enemy die")
     args = ap.parse_args()
+    solo_plan = None
+    if args.solo:
+        from ssbot.tools.solo_practice import plan_for
+        solo_plan = plan_for(args.solo)
+        args.savestate = args.savestate or solo_plan.savestate
+        print(f"solo {args.solo}: wave {solo_plan.wave}, savestate {args.savestate}, others to clear "
+              f"{', '.join(solo_plan.others) or '-'}" + (" (+ the ally Garmond)" if solo_plan.ally else ""))
     if args.savestate or args.speed:
         CMD_FILE.write_text((f"load {args.savestate}\n" if args.savestate else "")
                             + (f"speed {args.speed}\n" if args.speed else ""), encoding="utf-8")
@@ -215,7 +253,7 @@ def main() -> None:
     print(f"session: {session}")
 
     game_args = ["-ssbot-human", "-ssbot-instance", str(args.instance), "-logFile", str(session / "player.log"),
-                 "-screen-fullscreen", "1", "-screen-width", str(RENDER[0]), "-screen-height", str(RENDER[1])]
+                 *DISPLAY[args.display], "-screen-width", str(RENDER[0]), "-screen-height", str(RENDER[1])]
     # Register with the training launcher's PrefsGuard, so a human session and bot instances never race on the shared
     # PlayerPrefs: it refuses while other game processes run, and restores the golden snapshot once, when the last
     # registered instance is gone. We also start from the frozen settings, whatever the registry holds now (the
@@ -238,6 +276,19 @@ def main() -> None:
     states = StateWriter(session / "state.raw.zst")
     link.subscribe_raw(states.push)
     print(f"oracle connected: {link.hello['plugin']} on {link.hello['game']}, instance {link.hello['instance']}")
+    overlay = None
+    if args.overlay:
+        # in this process, on this link (the oracle takes one IPC client); its own thread, never the recording's
+        from ssbot.tools.zone_overlay import LiveOverlay
+        overlay = LiveOverlay(link, game.pid, speed=args.speed or 1.0, crest=args.overlay_crest,
+                              every=args.overlay_every, margins=args.overlay_margins, range_layer=args.overlay_range)
+        print("zone overlay: warming up (F8 on/off, F9 mode, F10 freeze, F11 step, 1-5 look-ahead, Ctrl+1-7 layers)")
+    solo = None
+    if args.solo:
+        from ssbot.tools.solo_practice import SoloController
+        from ssbot.train.wave_start import DebugLine
+        solo = SoloController(args.solo, debug=lambda: DebugLine(args.instance), rpc=link.rpc,
+                              protect=not args.no_solo_protect)
 
     video = None
     video_start_qpc = None
@@ -272,7 +323,13 @@ def main() -> None:
             while game.poll() is None:
                 time.sleep(1)
                 if CMD_FILE.exists() and (not (args.savestate or args.speed) or in_gameplay(link.state or {}) or commands):
-                    run_commands(link, commands)
+                    run_commands(link, commands, overlay)
+                if solo is not None:
+                    try:
+                        solo.tick(link.state)
+                    except Exception as e:  # noqa: BLE001 - the recording goes on without the solo helper
+                        print(f"solo stopped: {e!r}")
+                        solo = None
                 p = placement(game.pid)
                 if p is not None and all((p["client"], p["desktop"]) != (q["client"], q["desktop"])
                                          for q in placements):
@@ -287,6 +344,14 @@ def main() -> None:
                 video.communicate(b"q", timeout=20)
             except subprocess.TimeoutExpired:
                 video.kill()
+        overlay_stats = overlay.close() if overlay is not None else None
+        solo_events = None
+        if solo is not None:
+            solo_events = solo.events
+            try:
+                solo.close()                # the boost off, should the person quit while clearing
+            except Exception:  # noqa: BLE001 - the game is gone
+                pass
         if marker["on"]:
             try:
                 marker_off(link)
@@ -317,6 +382,10 @@ def main() -> None:
         {"source": "timestamp", "why": marker["why"]} if not marker["on"] else {"source": "marker", "pending": True},
         "kept_gamepad_prefs": keep,
         "commands": commands,
+        "display": args.display,
+        "overlay": overlay_stats,
+        "solo": None if solo_plan is None else {"type": solo_plan.type_key, "wave": solo_plan.wave,
+                                                "savestate": args.savestate, "events": solo_events},
     }
     write_meta(session, meta)
     print(json.dumps({k: meta[k] for k in ("duration_s", "state_frames_written", "state_frames_dropped_by_recorder",

@@ -28,7 +28,10 @@ Outcomes (AttemptRecord.outcome):
                 when the policy runs a real quit (real_quit_active), the game goes to the main menu and the harness
                 neither checks the scene meanwhile nor unpauses after);
   STUCK         no outcome within the encounter's timebox after the wake;
-  HARNESS_FAIL  the reset, the intro or the link failed, or the game paused or left the scene unasked.
+  HARNESS_FAIL  the reset, the intro or the link failed, or the game paused or left the scene unasked ("paused
+                unasked" names the cause read from the pause's first STATE, train.recovery.pause_cause /
+                PauseWatch; a pause found before the reset is resumed from any pause menu by train.recovery.resume,
+                its taps in start_resume, and one that does not end fails the episode instead of hanging it).
 """
 import os
 import random
@@ -40,6 +43,7 @@ from ssbot.ipc import ents
 from ssbot.ipc.oracle_link import OracleError, OracleLink
 from ssbot.train.encounters import Ctx, Encounter
 from ssbot.train.gauntlet import GauntletTap
+from ssbot.train.recovery import PauseWatch
 
 CLEAR, WOULD_DIE, QUIT, STUCK, HARNESS_FAIL = "CLEAR", "WOULD_DIE", "QUIT", "STUCK", "HARNESS_FAIL"
 POST_CLEAR_FRAMES = 60   # default post-clear window (Encounter.post_clear_s): death animations, late hazards
@@ -78,6 +82,7 @@ class FightTap:
     def __init__(self, link: OracleLink, enc: Encounter):
         self.enc = enc
         self._lock = threading.Lock()
+        self.pause = PauseWatch(link)     # the first STATE of a pause, for its cause (recovery.pause_cause)
         self.reset()
         link.subscribe_state(self._on)
 
@@ -234,6 +239,12 @@ class AttemptRecord:
     tail_hits: int = 0                           # hero hits ("damage") at or after the kill
     tail_hp_lost: int = 0
     tail_end: str | None = None                  # how the tail ended: "quiet", "scene <name>" (None: no tail / cut)
+    loop_gap_ms_max: float | None = None         # the longest wall time between two turns of the fight loop (each
+                                                 # sends one ACTION): the oracle's brain-lost watchdog pauses the game
+                                                 # after 250 ms and 6 frames without one (a game hitch that sends no
+                                                 # STATE for as long shows here too, but does not trip the watchdog)
+    loop_gaps_250: int = 0                       # turns that came 250 ms or more after the one before
+    start_resume: list | None = None             # the taps of the resume a pause found before the reset needed
 
 
 def _rand(link: OracleLink, **args) -> dict:
@@ -267,28 +278,15 @@ def wait_settled(link: OracleLink, scene: str, still_frames: int = 10, tol_u: fl
 
 def unpause(link: OracleLink, tries: int = 4) -> bool:
     """After an emulated quit the game is held in the pause menu with Continue highlighted (safety.pause_quit stops
-    there): Submit (enter) past the 0.3 s real-time lockout until the game runs again. The tap is a one-shot press
-    (hold_frames > 0) and the inputs are released after: a continuous-control ACTION would arm the oracle's brain-lost
-    watchdog, which pauses the game again 250 ms after the last ACTION (ActionScheduler)."""
-    from ssbot.ipc.framing import mask
-    ok = False
-    for _ in range(tries):
-        s = link.state or {}
-        if not (s.get("game") or {}).get("paused"):
-            ok = True
-            break
-        time.sleep(0.5)
-        f = link.frame
-        link.act(f + 2, mask("enter"), hold_frames=3)
-        try:
-            link.wait_state(lambda s: not (s.get("game") or {}).get("paused"), timeout_s=1.5)
-        except TimeoutError:
-            continue
-    try:
-        link.rpc("input.release", timeout_s=10)
-    except (OracleError, TimeoutError, OSError):
-        pass
-    return ok or not ((link.state or {}).get("game") or {}).get("paused")
+    there); after the brain-lost watchdog too. train.recovery.resume: Continue + Submit past the 0.3 s real-time
+    lockout, and from a highlight other than Continue (mouse hover moves it) or a pause sub-menu Up / Back / No first,
+    never a Submit on anything it has not read as Continue, Back or No (the blind Submit this did before opened the
+    Options menu whenever Options was highlighted). One-shot taps (hold_frames > 0) and input.release: a
+    continuous-control ACTION would arm the oracle's brain-lost watchdog, which pauses the game again 250 ms after the
+    last ACTION (ActionScheduler). `tries` is kept for the callers; the recovery bounds itself."""
+    from ssbot.train.recovery import resume
+    ok, _ = resume(link)
+    return ok
 
 
 def boss_entity(s: dict, boss_type: str) -> dict | None:
@@ -323,12 +321,25 @@ def run_episode(link: OracleLink, enc: Encounter, tap: FightTap, policy, cfg: Ep
     return rec
 
 
+def _pause_cause(tap, s: dict) -> str:
+    """recovery.pause_cause from the pause's first STATE (the tap's PauseWatch; a tap without one: from `s`)."""
+    from ssbot.train.recovery import pause_cause
+    w = getattr(tap, "pause", None)
+    return w.cause(s) if w is not None else pause_cause(s)
+
+
 def _run(link: OracleLink, enc: Encounter, tap: FightTap, policy, cfg: EpisodeConfig, rec: AttemptRecord) -> None:
+    from ssbot.train.recovery import is_paused, resume, where
     errors = []
-    if ((link.state or {}).get("game") or {}).get("paused"):
+    if is_paused(link.state):
         # left paused by the last episode (an emulated quit not yet resumed, or the oracle's brain-lost watchdog after
-        # a stall of this worker): resume before the reset, or every episode after it fails "paused unasked"
-        unpause(link)
+        # a stall of this worker), maybe in a pause sub-menu: resume before the reset, or every episode after it fails
+        # "paused unasked"; a pause that does not end is this episode's HARNESS_FAIL, not a hang. Its taps go in the
+        # record (start_resume)
+        ok, steps = resume(link)
+        rec.start_resume = steps
+        if not ok:
+            raise RuntimeError(f"still paused before the reset ({where(link.state)}; taps {steps[-4:]})")
     for attempt in range(3):
         t0 = time.perf_counter()
         try:
@@ -385,8 +396,15 @@ def _run(link: OracleLink, enc: Encounter, tap: FightTap, policy, cfg: EpisodeCo
     in_tail = False
     last = link.frame
     end_after = None
+    t_turn = None
     while True:
         s = link.wait_state(newer_than=last, timeout_s=2.0)
+        now = time.perf_counter()
+        if t_turn is not None:
+            gap_ms = (now - t_turn) * 1000.0
+            rec.loop_gap_ms_max = round(max(rec.loop_gap_ms_max or 0.0, gap_ms), 1)
+            rec.loop_gaps_250 += gap_ms >= 250.0
+        t_turn = now
         if s["f"] > last + 1:
             rec.late_states += 1
         last = s["f"]
@@ -443,7 +461,8 @@ def _run(link: OracleLink, enc: Encounter, tap: FightTap, policy, cfg: EpisodeCo
                 rec.tail_end = "quiet"
                 break
             if game.get("paused") and not getattr(policy, "pause_owned", False):
-                rec.outcome, rec.reason = HARNESS_FAIL, f"paused unasked at frame {last} (post-kill tail)"
+                rec.outcome, rec.reason = HARNESS_FAIL, f"paused unasked at frame {last} (post-kill tail; " \
+                                                        f"{_pause_cause(tap, s)})"
                 break
             if tap.tail_g > enc.tail_max_s or last - tap.death_frame > PAUSE_AFTER_KILL_FRAMES + enc.tail_max_s * 60:
                 rec.outcome, rec.reason = STUCK, f"post-kill tail: damage sources live for {enc.tail_max_s:.0f} s"
@@ -470,7 +489,10 @@ def _run(link: OracleLink, enc: Encounter, tap: FightTap, policy, cfg: EpisodeCo
             continue
         quitting = getattr(policy, "real_quit_active", False)     # a real quit: menus, then the main menu
         if game.get("paused") and not getattr(policy, "pause_owned", False):
-            rec.outcome, rec.reason = HARNESS_FAIL, f"paused unasked at frame {last}"
+            # the reason names the cause (recovery.pause_cause): almost always the oracle's brain-lost watchdog after
+            # this worker sent no ACTION for 250 ms (60 of 61, 2026-10-02 .. 06); the worker resumes the game
+            # (combat_run.after_harness_fail) and the next episode goes on
+            rec.outcome, rec.reason = HARNESS_FAIL, f"paused unasked at frame {last} ({_pause_cause(tap, s)})"
             break
         if game.get("scene") != enc.scene and not quitting:
             rec.outcome, rec.reason = HARNESS_FAIL, f"left the scene: {game.get('scene')}"
