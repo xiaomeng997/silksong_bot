@@ -4264,3 +4264,98 @@ S0 (planner AIM off; P0 is display / truth / aim templates): baseline 0.60 % = 3
 - If the s4tb re-score shows the pin misses as predicted: the fix is the pin check, not the support (S1: the 5 pin rows
   20261004_002749 a4 f21318-21324, a15 f71084-71087; base held them with the Envoy's charge box). A bundle can become
   the default only after that and a full R2 recall.
+
+## Task aim ICS (branch worktree-wf_b8c4d3d3-280-3, 2026-10-09; forum.md §30)
+
+The person's method for aimed attacks: an inescapable zone at the decision moment, computed offline per hero
+state and only looked up at run time. Built for the Reed's pin (RE_THROW). Not wired into the planner:
+`multi_forecast.py` is untouched, and integration behind a switch is a later stage.
+
+- `brain/ssbot/tools/aim_ics.py`:
+  - `scan`: per hero state, an event-complete escape library (measurer B's design, two-speed start grid, 42
+    frames, then ballistic), and a numba kernel that tests it against the pin. The pin is the measured one:
+    aim at the hero transform at the Throw Aim entry, fan clamp [-70, +45] deg, spawn offsets, release 24/25
+    frames later, 31 u/s, collider 2.03 x 0.10, swept per frame, sticks at the floor / wall. Worst case over
+    aim error +-0.5 deg, release frame and Reed drift. Hit test with the real HeroBox (0.4554 x 2.2498 at
+    transform (0, -0.38)).
+  - `pack`: writes `knowledge/1.0.30000/enemies/forum/aim_ics_Reed.npz` (54 KB, force-added past the `forum/*.npz` ignore rule because a rebuild takes about 75 min per phase) and a `.json` summary.
+  - Reader: `AimICS().zone(family, state, lat)` and `.inescapable(...)`, `zone(type, ...)`,
+    `hero_state_key(...)`.
+  - Families: `measured` and `person` (release 0.1 s after the decision).
+  - Latencies: 0 (first key at decision + 1) and 2 (the bot reacting to the observed Throw Aim entry).
+  - 38 states: ground (4 + 2 with a wall behind), air (4 heights x rest / rise / fall x dash), air with a wall
+    behind (8).
+  - Tests: `brain/tests/test_aim_ics.py`.
+- Results:
+  - **With the measured timing every state's zone is empty** at latency 0 and 2. The release comes 0.40 s after
+    the decision.
+  - A zone first appears when the first key comes 18-19 frames late (0.32 s), and is about 5.5 u2 at 22 frames.
+  - With the person's 0.1 s timing, their order holds. Areas per fan, lat0: ground 0 < air with dash 0.04-1.3
+    < air without dash 3.2-17. The largest is about 1 u above standing height.
+  - Validation on all 12,405 recorded throws: the geometric model reproduces 2,022 of 2,080 pin hits from the
+    real path. 58 misses: 8 remain with the HeroBox +0.25 u. Every hit outside the (empty) zone is a hero who
+    stood still (567) or moved but stayed in the line (1,455).
+  - The planner's RE_THROW `not_started` support before the decision on the person's sessions is p50 68-77 u2 at
+    k0 and about 300 u2 at k18. The zone says 0.
+- Data, scripts and PNGs: `C:\ssbot\data\m2_forum_aimics`:
+  - `scan/`, `scan_lat/`
+  - `aim_validate.py`, `aim_png.py`, `png/`
+  - `generalise.md` (other aimed attacks: spec only)
+- Open:
+  - Physics phases: only phase 0 is packed. Phase 0.33 ran for 3 states in `scan/`, not packed; rerun `scan` with --phases 0.33 0.67, then `pack`.
+  - Not modelled: the Reed body, the far wall, i-frames / clash.
+  - The 58 geometric misses are not explained.
+  - Generalisation needs per-attack measurement (decision frame and aim target) before the kernel can take a
+    path template.
+
+### Task aim ICS, part 2: the Clawmaiden spear and the kernel fixes (branch worktree-wf_acbf0b3e-b21-1, 2026-10-09; forum.md §31)
+
+- The spear is aimed and homing. The Spear's Control FSM is decoded in `Song_Handmaiden.txt`; the actions are in
+  `C:\ssbot\decomp`. Measured on 1,321 casts from 7 sets
+  (`C:\ssbot\data\m2_forum_aimics\spear\spear_facts.json`):
+  - Decision: Get Antic Angle, from the spear transform to the hero transform + (0, 0.25). Fan +-45 deg toward
+    the Clawmaiden's facing. Aim error p95 0.0001 deg.
+  - Antic Pause 0.15 s (still), then Antic: 30 u/s back x0.875 per step, 3.645 u in the open.
+  - Fire 0.85-0.95 s after the decision: 37 u/s, then ChaseObjectWisp homing (45, mass 1, speed 37 -> 50.9).
+    Simulated end position matches to p95 0.02 u.
+  - Terrain detector from Fire + 0.1 s.
+  - Explosion: r 3.553, 0.9 u ahead of the transform, on for 0.1 s.
+- `brain/ssbot/tools/aim_ics.py` changes:
+  - Generic `AimedAttack` (kind pin / spear) and `FAMILIES_BY_TYPE`.
+  - The kernel runs on the 50 Hz physics clock, with a continuous swept test of the hero and the projectile and
+    clearance CLEAR 0.1 u.
+  - Zones are the union over phases 0 / 0.33 / 0.67, then over neighbouring h / vy bins (`neighbours`).
+  - `hero_state_key(..., special=...)` returns `locked`. `AimICS.zone` treats it as inescapable everywhere.
+  - 59 states. The wall is kept for ground_nd and for every air bin (`_w0.3`). Wall states mirror the hero library
+    for a hero behind the fan.
+  - 120-frame libraries. The coarse library is a subset of the full one and is scanned first; the full library
+    is built only where a coarse zone is non-empty. The library is sorted lexicographically for prefix pruning.
+  - lat2 uses the lat0 library's 2-frame-latched subset.
+  - `build_library(delay=L)` for latency sweeps.
+  - `pack --type`. `inescapable(..., side=)` takes the Clawmaiden's facing.
+- Results:
+  - The Reed pin (measured family) stays 0 for 59 states x 3 phases x lat0/lat2: no change. `aim_ics_Reed.npz`
+    now holds `measured` only; the person family was not re-scanned (old values in afc4544).
+  - The spear is 0 everywhere (`aim_ics_Clawmaiden.npz`).
+  - Latency sweep (coarse upper bound): the spear zone first appears at L 40 frames near a wall (0.56-0.77 u2)
+    and at L 50 in the open (1-9 u2). For the pin it appears at L 20.
+- Validation (`spear_validate.py`, 1,309 casts):
+  - The model on the real spear and the real path reproduces 496/497 hits. With exact geometry, no clearance:
+    490/497.
+  - Every hit is outside the (empty) zone: 49 still, 375 moved but stayed in the path, 1 counterexample (r1c
+    20261004_154609 i0 ep6 f540705, explosion), plus 72 in locked states.
+  - 248 model hits without damage: 103 were i-frame blocked; the rest come from the conservative margins.
+- Planner support on the person's sessions (CM_SPIN precision rows):
+  - Before the decision (Spear Cast Antic): hazard layer p50 155 u2 at k0, 333 at k18; total 215 / 431.
+  - After the decision: hazard 219 at k0.
+  - The zone says 0.
+- PNGs: `C:\ssbot\data\m2_forum_aimics\spear\png`.
+- Open:
+  - Not wired into the planner. `multi_forecast.py` untouched.
+  - The deterministic spear path for HazardTracker (m2_forum_cases/spear fixes P1) is now fully specified by
+    §31.1.
+  - The runtime `special` detection for locked states is not done. The validation maps it from animation clips.
+  - Antic wall slide is not enumerated (only open / fully blocked).
+  - The Clawmaiden body, the roof and the far wall are not modelled.
+  - 1 counterexample and about 109 exact-geometry false positives are not investigated.
+  - Both npz files are force-added past the `forum/*.npz` ignore rule (40-45 KB).
