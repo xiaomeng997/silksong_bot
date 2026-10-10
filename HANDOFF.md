@@ -4108,3 +4108,76 @@ S0 (planner AIM off; P0 is display / truth / aim templates): baseline 0.60 % = 3
   (rune bombs arm long after the cast: clip until the cast state with the bombs' own paths); F1 proper needs
   entry-frame per-state templates (a build change); the Envoy's post-charge body is covered in base only by its
   family union (Charge End 0.40-0.43 s, no tail cover): a recall fragility to fix before any fam-like change.
+
+### S3: the not-started layer - WALKFLOOR, NSBOX, GATES (2026-10-09, offline; forum.md §29.16)
+- Commits: 012e64e (the three switches, `tools/fsm_gates.py`, `fsm_gates.json`, `tests/test_notstarted_s3.py`),
+  c2fbfb8 (`fsm_gates dwell`), 5c187ec (`SSBOT_FORUM_NSBOX=bin0`). Frozen: `C:\ssbot\hs_s3_012e64e`,
+  `C:\ssbot\hs_s3_5c187ec`. Scripts / tables in `C:\ssbot\data\m2_forum_push\s3\`: master3.cmd (the running queue),
+  hind_cmp.py (hindsight rows lost / gained per type, family, state between two gate dirs), compare_seen_s3.md / .json,
+  attr.cmd with `sets\seenh.cmd` (the person-only quick hindsight). Configs `configs\{s3wf,s3nb,s3gt,s3all,s3best,
+  s3bestp,s3cand,s3cand0,s2p}.cmd`: s3cand0 is the candidate, s2p its "before" (S2 final + PRESTRIKE).
+- Under the replay's arm (escape+n+g) the not-started layer is: body-only family roots ("+n" leaves out the strike
+  families and every later idle instance; the body-only ones in strikes.json: CB_EVADE, MI_EVADE, AT_DEFEND, AT_FIRE,
+  AT_LEAVE, CM_TELE, CC_EVADE, MA_DEFEND, MA_SUMMON, RE_EVADE, EN_AMBUSH), the entries and S1's PRESTRIKE boxes. The
+  person's rule (a not-started attack does no damage before its shortest commit -> first damage, only its body moves)
+  is what "+n" and the escape check's delay already do for the strike families (strikes.json is R0 dev only, the
+  exceptions use p5). For a body-only family the damage IS the body, so the rule leaves its placements; only F2 / F3
+  / F5 shrink them. Not refitted here.
+- `SSBOT_FORUM_WALKFLOOR` (F3, default off): every walk node after the root is floored at the root's earliest exit
+  (dwell min - a bin from its entry; BIN from the origin when overdue); the walk cache and family walk ids carry the
+  floor. Premise on R0 fresh (`fsm_gates dwell`): 171 of 87,714 state visits left before their least dwell - a frame,
+  all cut by a death except 2 Clapper Slam 0 -> Start Battle? (0.03 s). **FAILS gate (1)**: seen hindsight (person,
+  against base) loses 64 rows at k12 (Minister MI_ENTRY Fly In 28, MI_EVADE Evade 20, Maestro MA_DEFEND 14, ...),
+  38 at k6, 70 at k36. Not a dwell error. Example: 20261008_230220 a0 f11105, a Minister 0.29 s into Evade (0.40-0.43
+  s): at k12 it is in Chase, and its body was covered ONLY by a phantom MI_EVADE root starting at the next frame; with
+  the floor the root starts ~0.1 s later and its start box is dead-reckoned at the evade's speed past where the body
+  stopped. The body after an instance ends (Evade, Fly In, Defending) has no owner under "+n" (later idle instances
+  are out, the tail template misses it): the same latent fragility as S2's Envoy Charge End. Stays off; give that body
+  an owner first (F2 part 2: the current instance's end position, no stale dead reckoning).
+- `SSBOT_FORUM_NSBOX` (F2, default off; parts): `bin` = no pre-start bin for a later instance (`_emit_bbox`: ton >= its
+  earliest start); `bin0` = the pre-start bin kept, but nothing at the origin (k0). bin loses 1 seen row at k12
+  (20261008_231544 a1 f44707, a Minister in Chase whose body ran 6 of 236 cells past the "+g" held idle tube; an
+  evade root's pre-start bin at 0.2 s covered them); bin0 loses 0. F2 parts 1-3 (growth by state / time in state, the
+  current instance's end-position anchor instead of dead reckoning, the facing / hero mirror rule) are NOT done: they
+  need new R0 dev tables (idle growth by time-in-state band, per-state displacement, end position by progress,
+  facing-frame evade tables).
+- `SSBOT_FORUM_GATES` (F5, default off; oracle view only): `fsm_gates.json` mined on R0 dev (`fsm_gates mine`: lift
+  states that are attack starts of another family, >= 200 consecutive start pairs, no exception): Bellbearer CB_EVADE
+  lifted by Throw Evade (1,766 dev pairs, time-out 10.2 s = 2 x 5.09 s), Maestro MA_DEFEND lifted by Fire Antic
+  (1,447, 14.8 s). Held out (R0 fresh, `fsm_gates check`): 552 / 501 pairs, 0 violations, 0 over the time-out. The
+  tracker keeps the last start per family, the last entry per state and the last unknown transition (replaced, never
+  mutated: the hit-reaction copies stay safe); a gated root starts a frame after the walk's earliest entry into the
+  lift state at the earliest, none when the walk does not reach it. Seen hindsight: 0 rows lost (person, every k).
+- Gates, seen (`s3\compare_seen_s3.md`; precision error % / RATIO p50 / p99; hindsight own / all):
+
+  | | base | S2 final | S2+P+WF+bin+G | S2+P+bin+G | S2+P+bin0+G (candidate) |
+  |---|---|---|---|---|---|
+  | person k0 not_started rows | 33,831 | 33,831 | 4,801 | 7,620 | 7,620 |
+  | person k0 ns_any | 99.94 / 9.07 / 200 | 96.86 / 3.18 / 200 | 94.33 / 2.14 / 28.1 | 95.89 / 2.38 / 26.6 | 95.89 / 2.38 / 26.6 |
+  | person k0 total | 93.1 / 15.0 / 185 | 92.1 / 2.86 / 185 | 63.9 / 1.98 / 25.4 | 65.5 / 2.03 / 25.5 | 65.5 / 2.03 / 25.5 |
+  | person k12 ns_any | 100 / 28.7 / 200 | 99.78 / 16.4 / 200 | 99.74 / 16.9 / 206 | 99.77 / 16.5 / 200 | 99.78 / 16.4 / 200 |
+  | bot w0 k0 total | 80.6 / 7.74 / 56.2 | 78.9 / 2.25 / 22.1 | 75.3 / 2.08 / 21.5 | 78.9 / 2.16 / 21.6 | 78.9 / 2.16 / 21.6 |
+  | hindsight person k12 | 99.614 / 99.83 | 99.602 / 99.801 | 99.287 / 99.562 | 99.602 / 99.801 | 99.602 / 99.801 |
+  | hindsight bot k12 | 98.501 / 99.558 | 98.501 / 99.369 | 98.501 / 99.353 | 98.501 / 99.369 | 98.501 / 99.369 |
+  | rows lost vs S2 final, person / bot (any k) | | | 68 / 0 at k12 | 1 / 0 | 0 / 0 |
+  | share over half the screen, person k0 / k12 | 44.9 / 70.2 % | 18.9 / 35.1 % | 4.74 / 31.4 % | - | 4.77 / 35.1 % |
+  | share, bot k0 / k12 | 32.7 / 72.6 % | 1.01 / 15.9 % | 0.93 / 12.3 % | - | 0.97 / 15.9 % |
+
+  - The k0 not-started rows left in the candidate are S1's PRESTRIKE boxes (the Reed: Alert 2,089, Defend 536, ...;
+    PRESTRIKE starts a bin before the root and is kept as S1 made it) and the entries (Fly In / Enter Fall).
+    Committed is unchanged (k0 p50 2.45, k12 9.03), also per type: the S3 switches do not touch it.
+- STILL RUNNING, detached, one job at a time: `C:\ssbot\data\m2_forum_push\s3\master3.cmd` (frozen 5c187ec; log
+  `s3\master3.out`, markers `s3\m3_step_<n>.done`): 2 s2p seen gates; 3 PNGs (5690 / 7939 / 9380 / 10427 at k0 / k12 in
+  `s3cand0\png` and `s2p\png`, the spear / Tiny extras in `<tag>\png_extra`); 4 the candidate's re-score
+  `C:\ssbot\data\m2_forum_hs\s3rb_s3cand0_5c187ec_summary.json` (compare per type with the base's 32 misses,
+  `rclip_base_d51b216_summary.json`); 5 recall L2-L4 on R2 `s3cand0\recall_fresh.json`; 6 R2 hindsight
+  `s3cand0\hindsight_r2_held.json`; 7 s3nb / s3gt / s3wf alone on base; 8 s2p's R2 hindsight. Re-run any gate on a new
+  set with `gate.cmd <gate> s3cand0 <set>` and GATE_ROOT=C:\ssbot\hs_s3_5c187ec.
+- Machine: with every job at once (S1 / S2's leftover chains, S2's re-scores and recall, mine) it ran out of memory at
+  ~19:00 (MemoryError in my s3all / s3bestp recalls, a re-score segment and a precision run). I stopped my own runs
+  and queued the rest one at a time. Orphans: `m2_forum_hs\s3rb_{s3all,s3best,s3bestp}_012e64e` (stopped re-scores).
+  Still running from earlier stages: S0's `gate hindsight base r2`, S1's `gates_rclip2` / `gates_rclip2p`, S2's
+  `gates_t` / `gates_best`, re-scores and recall.
+- Decision for the integration stage: WALKFLOOR stays off (fails gate 1); NSBOX=bin stays off (1 seen row). NSBOX=bin0
+  and GATES lose no seen row; turn them on with S2's candidate only if the s3cand0 re-score adds no miss in total or
+  per type and its recall stays 100 %.
