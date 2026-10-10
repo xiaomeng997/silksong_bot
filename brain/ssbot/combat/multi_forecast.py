@@ -80,6 +80,29 @@ from ssbot.knowledge import hitbox_tables as hb
 from ssbot.safety.hits_to_death import SupportEvent, SupportSet
 
 MIN_HORIZON_S = 0.8
+# SSBOT_FORUM_TIGHT=1 (task precision push S5, forum.md §29.13): the tight-support bundle, one switch for the precision
+# push's candidate (S1-S4; = the gate config s4tb): every member not set (or set empty) in the environment gets its
+# bundle value, a member set explicitly keeps its own (SSBOT_FORUM_BODYCLIP=0 drops BODYCLIP from the bundle). Not the
+# default: it may become one only when its held-out recall (gate 1) stays 100 % and its re-score (gate 4) adds no miss
+# in total or per enemy type (forum.md §29.13). Applied here, before any switch below is read
+TIGHT_BUNDLE = (("SSBOT_FORUM_RCLIP", "2"), ("SSBOT_FORUM_REANCHOR", "chain"), ("SSBOT_FORUM_RTHROW", "1"),
+                ("SSBOT_FORUM_PRESTRIKE", "1"), ("SSBOT_FORUM_NSBOX", "bin0"), ("SSBOT_FORUM_GATES", "1"),
+                ("SSBOT_FORUM_TINYCLIP", "1"), ("SSBOT_FORUM_BODYCLIP", "1"))
+
+
+def apply_tight(env=os.environ) -> list:
+    """With SSBOT_FORUM_TIGHT on, set every unset (or empty) TIGHT_BUNDLE member of `env`; the names it set."""
+    if env.get("SSBOT_FORUM_TIGHT", "0") in ("", "0"):
+        return []
+    done = []
+    for k, v in TIGHT_BUNDLE:
+        if env.get(k, "") == "":
+            env[k] = v
+            done.append(k)
+    return done
+
+
+TIGHT_SET = apply_tight()
 # a parked later-wave member (not rendered, waiting: EnemyTracker.parked) gets no support (0: the old behaviour)
 PARK = os.environ.get("SSBOT_FORUM_PARK", "1") != "0"
 # SSBOT_FORUM_RCLIP (task "support reach", forum.md §29.11; the person 2026-10-09: a Choristor's whip support 11.7 u
