@@ -4181,3 +4181,46 @@ S0 (planner AIM off; P0 is display / truth / aim templates): baseline 0.60 % = 3
 - Decision for the integration stage: WALKFLOOR stays off (fails gate 1); NSBOX=bin stays off (1 seen row). NSBOX=bin0
   and GATES lose no seen row; turn them on with S2's candidate only if the s3cand0 re-score adds no miss in total or
   per type and its recall stays 100 %.
+
+### S4: template tightness - TINYCLIP, BODYCLIP; AIM=2 and the spear not done (2026-10-09, offline; forum.md §29.17)
+- Commits: 0d44095 `SSBOT_FORUM_TINYCLIP` (+ `tests/test_tinyclip.py`), 6c944e0 `SSBOT_FORUM_BODYCLIP` (+
+  `support_reach clip-build --body`, `reach_table.BODY_FILE`, `tests/test_bodyclip.py`), d14aa37 (zone_overlay
+  encoding repair). Both switches default off and need RCLIP on. Tests: 95 passed in multi_forecast / notstarted_s3 /
+  reanchor / forum_planner / forum_l2, 12 in reach_clip + tinyclip + bodyclip.
+- (c) `SSBOT_FORUM_TINYCLIP`: a Tiny group row (3+ Tinies; one bb row per cluster x family walk x grid piece, gcl >= 0,
+  standing for every Tiny of its cluster) was never clipped (`_clip_rows` skipped gcl >= 0). Now its clip code is
+  `CLUSTER0 + cluster` when every member has a reach clip; `_bbox_occ` makes one copy of the row per member, each cut
+  by that member's clip box (the exact union; `_clip_xy` keeps points inside any member's box for fine / window rows).
+  A cluster with a member without a clip (dead, parked, hidden, not seen for REACH_SEEN_S) stays unclipped.
+  Expected: the Tiny's committed k12 p50 (69x at the precision tool's first run; Tiny groups 14 % of the person's frames
+  over the half-screen, in every over-half frame after RCLIP, fix_spec sec. 6 item 10). Gates QUEUED (below).
+- (b) `SSBOT_FORUM_BODYCLIP`: the idle body tube (dead reckoned, grown by the type's idle growth and past it by its top
+  speed, in every direction: body k12 p50 6.5x with RCLIP=2, 6.7x without) is also cut by the body's own reach:
+  `support_reach clip-build --body` builds the reach clip table from R0 dev with the body hull at the transform k frames
+  after (production_tubes body_hull, the tube's own box) instead of the threat colliders, same (type, state,
+  time-in-state bin, part nohit / all, k) keys, lookup, 2-fold r and R_FLOOR. Run time: `_reach_world` (shared with
+  RCLIP: the no-hit part and RCLIP=2's hero-hit widening), only where the reach clip is, and cut at a throw's release
+  like it (a throw's idle tube also stands for what it throws). The body table (`knowledge/.../forum/body_reach.npz`,
+  git-ignored, report `body_reach.json`) was being built when the coordinator paused every Python job (20:35, note 12):
+  `C:\ssbot\data\m2_forum_push\s4\body_build.cmd` (log `body_build.out`, marker `body_build.done`; 40 / 107 fights
+  done, the pid is in `C:\ssbot\sandbox\suspended_pids.txt`); it finishes when resumed. Then
+  `C:\ssbot\data\m2_forum_push\s4\body_vs_tube.py` (run from brain: the body reach box against the idle tube area per
+  type at k 0 / 6 / 12 / 36; not run yet).
+- Gates QUEUED (`C:\ssbot\data\m2_forum_push\s4\`, Idle priority, 2 workers x 4 numba threads, each heavy step waits in
+  `wait_slot.ps1` until no ssbot job is paused and fewer than 4 run): `queue4.cmd` (log `queue4_run.out`, markers
+  `q4_step_<n>.done`; frozen `C:\ssbot\hs_s4_0d44095`): s4tc = s3cand0 + TINYCLIP: seen precision / hindsight /
+  share, PNGs (+ the Tiny Fire Ready / Clawmaiden extras), re-score `m2_forum_hs\s4rb_s4tc_0d44095`, R2 recall, R2
+  hindsight. `queue4b.cmd` (log `queue4b.out`, frozen `C:\ssbot\hs_s4_d14aa37`, copies body_reach.npz in when
+  `body_build.done` exists, after q4 step 5): s4tb = s4tc + BODYCLIP, the same gates. "Before" for s4tc is s3cand0
+  (master3); BODYCLIP's own effect is s4tb against s4tc. `gate4.cmd` = gate.cmd with the recall at 2 workers; the
+  frozen copies' forum_human_rescore.cmd run 2 workers. Re-run on a new set: `gate4.cmd <gate> s4tb <set>` with
+  GATE_ROOT=C:\ssbot\hs_s4_d14aa37.
+- (a) AIM=2 NOT done. Already done in S0: aim templates built with threat=True and from dev only. Left: per-bin per-side
+  margins, kinematic re-anchoring on every observation, hit-aware widening, variable durations. Low priority: AIM is
+  off in every candidate, RCLIP takes the aim rows from 23.0 % to 3.2 % of frames, and fix_spec sec. 10 replaces the
+  pre-decision aim model by the inescapable-zone tables (forum-aim-ics workflow; not on a branch yet, so no AIMICS).
+- (d) NOT done: the spear as a deterministic path (fix_spec / spear result) and the self-residual search to 3.0 u in
+  validate (re-certify spear, Reed pin, bell, rune bomb small) - the second needs a production table rebuild (heavy).
+- Decision for integration: TINYCLIP / BODYCLIP only if their re-score adds no miss in total or per type, the R2 recall
+  stays 100 % and the seen hindsight loses no row (compare `s4tc\hindsight_seen_*.json` with `s3cand0\`, `s4tb` with
+  `s4tc`, `s3\hind_cmp.py`).

@@ -3468,3 +3468,27 @@ C:\ssbot\data\m2_forum_push\gate.cmd <precision|hindsight|share|recall|rescore|p
 - committed 层没变（k0 中位 2.45，k12 9.03），每一类也没变：S3 的开关不碰它。
 - 还在后台一个一个地跑（`C:\ssbot\data\m2_forum_push\s3\master3.cmd`，冻结 5c187ec）：候选的"之前"s2p、PNG（5690 / 7939 / 9380 / 10427 和长矛 / Tiny 额外帧）、候选的重打分（`C:\ssbot\data\m2_forum_hs\s3rb_s3cand0_5c187ec`）、R2 召回、R2 后见、三个开关各自单开。
 - 结论：WALKFLOOR 和 NSBOX=bin 保持关。NSBOX=bin0 和 GATES 在 seen 上一行没丢；候选的重打分不增加漏报（总数和每一类）、召回保持 100 % 才打开。
+
+### 29.17 精度推进 S4：模板收紧（TINYCLIP、BODYCLIP；AIM=2 和长矛没做）（2026-10-09，task "precision push" S4；同一分支；离线，没有开游戏）
+
+**`SSBOT_FORUM_TINYCLIP`（S4 (c)，默认关，要 RCLIP 开着）**
+- 3 个以上 Tiny 时，同一格里的 Tiny 共用一行"组"预测（每个格子 × 每个家族走图 × 每段时间一行），代表这一格里每一个 Tiny。以前这种组行从来不剪。
+- 现在：组里每个 Tiny 都有自己的可达范围时，这一行按"成员可达范围的并集"剪：给每个成员复制一份，各用自己的范围剪，合起来就是并集（精确，不是外包框）。
+- 组里有一个成员没有范围（死了、停着、看不见、太久没看到），整组不剪（安全）。
+- 预期影响：Tiny 的 committed k12 倍数中位最早是 69x；Tiny 组行在你的会话里占超过半屏的帧的 14 %，RCLIP 之后每个超过半屏的帧里都有它（fix_spec §6 第 10 条）。数还没出来（见下面的队列）。
+
+**`SSBOT_FORUM_BODYCLIP`（S4 (b)，默认关，要 RCLIP 开着）**
+- 待机的身体管（按速度外推，再按这一类的待机增长、超出标定后按最高速度往四个方向长）在 k12 是真身体的 6.5 倍（RCLIP=2；没有 RCLIP 是 6.7 倍）。
+- 现在再用"身体自己的可达范围"剪：表和 RCLIP 的可达表同一个格式、同一种查法、同一种 2 折留出余量，但记录的是 k 帧后变换位置上的身体外框（production_tubes 的 body_hull，就是身体管自己的框），不是攻击框。按（类型、状态、在状态里的时间、有没有被打、k）。只用 R0 dev。
+- 运行时只在有 RCLIP 剪的地方用，同样的"没被打"部分和"英雄打得到它之后放宽"；投掷到出手那一刻起不剪（投掷时身体管也代表扔出去的东西）。
+- 建表（`support_reach clip-build --body`）跑到 107 场里的 40 场时，协调者在 20:35 暂停了所有 Python 任务（让你用机器），恢复后会自己跑完（`C:\ssbot\data\m2_forum_push\s4\body_build.cmd`）。所以还没有数。
+
+**门槛：排队中**（`C:\ssbot\data\m2_forum_push\s4\queue4.cmd` 和 `queue4b.cmd`）
+- 按协调者的新规矩：最低优先级（Idle），每个任务 2 个进程 × 4 线程；每一步重任务前等到没有被暂停的任务、同时跑的少于 4 个。
+- s4tc = S3 候选 + TINYCLIP（"之前"是 S3 候选 s3cand0）；s4tb = s4tc + BODYCLIP（BODYCLIP 自己的影响 = s4tb 对 s4tc）。
+- 每个都跑：seen 上的精度 / 后见 / 半屏、PNG、你的会话重打分、R2 召回、R2 后见。
+
+**没做的**
+- (a) AIM=2：S0 已经把瞄准模板改成含多段伤害、只用 dev。剩下的（每格每边的余量、每次观察重新定锚、被打时放宽、可变时长）没做。AIM 在所有候选里都关着，RCLIP 已经把瞄准行从 23.0 % 的帧降到 3.2 %；瞄准之前的部分按 §10 换成"逃不掉的区域"表（另一个工作流，还没合进来）。
+- (d) 长矛按确定路径飞、validate 里自残差搜到 3.0 u 再重新认证：没做；后者要重建正式表（重任务）。
+- 结论规则：TINYCLIP / BODYCLIP 只有在重打分总数和每一类都不多漏、R2 召回保持 100 %、seen 后见一行不丢时才打开。
