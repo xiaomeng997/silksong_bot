@@ -4,6 +4,8 @@
     python -m ssbot.tools.viewer runs/.../ep1 --save ep1.rrd --from 1200 --to 5000 --ents-stride 2
     python -m ssbot.tools.viewer C:/ssbot/data/human/<session> --zones [--from F --to F] [--k 0,12] [--video]
                                                        # the Forum planner's zones per frame (tools.zone_overlay)
+    python -m ssbot.tools.viewer C:/ssbot/data/human/<session> --zones --range-only --k 0,12 [--video]
+                                                       # the attack-range estimate alone (combat.attack_range)
 
 Shows, as far as the recording has them:
   world/            hero position + per-scene trajectory, entity collider polygons ("ents"), TERRAIN polygons.
@@ -423,20 +425,33 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--precision", action="store_true",
                     help="--zones: per enemy and k the support's RATIO to its real damage (tools.support_precision) "
                          "as metrics/precision/<enemy>/k<k>/<layer>")
+    ap.add_argument("--range", dest="range_layer", action="store_true",
+                    help="--zones: also each enemy's attack-range estimate (combat.attack_range, no margin) per k "
+                         "as world/enemies/<enemy>/range/k<k>")
+    ap.add_argument("--range-only", action="store_true",
+                    help="--zones: the attack-range layer alone (no planner forecast): the estimate per enemy and k, "
+                         "the real damage colliders, the hero (tools.zone_overlay.rerun_range)")
     a = ap.parse_args(argv)
 
     if a.zones:
-        from ssbot.tools.zone_overlay import rerun_zones, zones_blueprint
+        from ssbot.tools.zone_overlay import rerun_range, rerun_zones, zones_blueprint
         bp = zones_blueprint(a.video, a.precision)
         rec = rr.RecordingStream("ssbot-zones", recording_id=str(Path(a.path).resolve()))
         if a.save:
             rec.save(a.save, default_blueprint=bp)
         else:
             rec.spawn(default_blueprint=bp)
-        stats = rerun_zones(Path(a.path), rec, a.f0, a.f1, ks=tuple(int(x) for x in a.k.split(",") if x),
+        ks = tuple(int(x) for x in a.k.split(",") if x)
+        if a.range_only:
+            stats = rerun_range(Path(a.path), rec, a.f0, a.f1, ks=ks, video=a.video, video_scale=a.video_scale,
+                                demo_cache=Path(a.demo_cache) if a.demo_cache else None)
+            rec.flush()
+            print(f"logged {stats}" + (f" -> {a.save}" if a.save else ""))
+            return 0
+        stats = rerun_zones(Path(a.path), rec, a.f0, a.f1, ks=ks,
                             video=a.video, video_scale=a.video_scale, every=max(1, a.zones_every),
                             margins=a.margins, demo_cache=Path(a.demo_cache) if a.demo_cache else None,
-                            precision=a.precision)
+                            precision=a.precision, range_layer=a.range_layer)
         rec.flush()
         print(f"logged {stats}" + (f" -> {a.save}" if a.save else ""))
         return 0

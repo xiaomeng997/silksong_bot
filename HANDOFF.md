@@ -4359,3 +4359,57 @@ state and only looked up at run time. Built for the Reed's pin (RE_THROW). Not w
   - The Clawmaiden body, the roof and the far wall are not modelled.
   - 1 counterexample and about 109 exact-geometry false positives are not investigated.
   - Both npz files are force-added past the `forum/*.npz` ignore rule (40-45 KB).
+
+## Task attack range: Choristor (branch worktree-wf_f6746725-345-1, 2026-10-10; forum.md §32)
+
+= main + worktree-wf_de8bf451-06d-1 (c564616) + worktree-wf_acbf0b3e-b21-1 (fc31849). The person's decisions
+(forum_planner_plan.md §5): estimate each enemy's attack range accurately first, NO margins (margins are decided later
+from the estimation error or the attack goal), show it to the person before building on it, one enemy at a time.
+Offline only (no game instance started).
+
+- `ssbot/combat/attack_range.py`: the ARE model and runtime.
+  - Per family x branch x time bin (frames since the antic start): the union over clean R0 dev instances of the real
+    damage colliders (attack + body + multi-hit whip), relative to the enemy's own position, in the antic-start facing
+    frame, 0.05 u raster; ended instances contribute their idle body.
+  - Position: median displacement per bin, re-anchored at the observed position (now + disp(b+k) - disp(b)), x clamped
+    to the recorded walls. CH_JUMP: u displacement = ratio(b) x landing L = 1.043 du - 0.04 (du = hero offset at
+    the antic start).
+  - Branches: CH_SLASH combo/single, CH_WHIP plain (Whip 6) / multi (Multiwhip), CH_HOP back/forward; pending = union;
+    CH_HOP rule: du < 4.18 back, du > 11.39 forward (R0 dev extremes).
+  - Idle = the exact body now, every k. Hero-centre space = the HeroBox 0.4554 x 2.2498 at (0, -0.38) dilation only.
+  - `RangeTracker` feeds on game-frame STATEs (Segmenter: the same instance rule offline and live).
+  - Table: `knowledge/1.0.30000/enemies/forum/attack_range_choristor.npz` (17 KB, force-added past the
+    `forum/*.npz` ignore rule) + `.json` (per family/branch: n, duration, raw extent per 0.1 s, jump fit, branch rule).
+- `ssbot/tools/attack_range_build.py`: shapes (collider polygons per name and flip from the person's STATEs, placed in
+  the caches' AABBs), build (R0 dev only), eval (fresh / r2 / person / dev), tracks (decode person sessions).
+  `ssbot/tools/attack_range_png.py`: world-space PNGs.
+- Error (no margin; k12; fresh / R2 / person): coverage of real cells SLASH 97.0 / 97.3 / 96.5 %, WHIP 98.7 / 99.1 /
+  99.1 %, JUMP 95.9 / 96.1 / 95.7 %, HOP 93.2 / 93.5 / 92.5 %, ENTRY 98.0 / 98.5 / 97.3 %, idle 99.95 / 99.2 / 98.7 %.
+  k0 coverage 99.4-100 % everywhere. Miss p95 at k12: SLASH front 0.45 u, WHIP back 0.75 u (hop slide before the
+  whip), JUMP 0.4-0.65 u every side (landing residual), ENTRY up/down 0.45 u.
+  - RATIO (area): 1.0-1.13 except HOP k12 1.56 (direction pending until Hop Check) and WHIP k12 1.24 (Multiwhip
+    pending until the whip connects). Rows <= 1.5: SLASH 94 %, JUMP 95 %, WHIP 89-92 %, HOP 44-62 %.
+  - Group-2 rows (a new family by t+k) and interrupted rows (hit / clash: knockback +-3.6 u not modelled) are
+    reported apart. With interrupted rows, k12 coverage: SLASH 95.7 % (R2) / 88.0 % (person).
+  - Files: `C:\ssbot\data\m2_forum_are\choristor\eval_{fresh,r2,person}.json` (per family x side x 0.2 s),
+    `eval_{fresh,r2}_antic_anchor.json` (the first variant without re-anchoring: k12 coverage 86-94 %).
+- Shown to the person:
+  - zone_overlay range layer: `ZoneEngine(range_layer=True)`, View modes `range+red` / `range` (no planner forecast).
+  - `rerun_range` (viewer `--zones --range-only`), `rerun_zones(range_layer=)` (viewer `--zones --range`).
+  - human_session `--overlay-range`.
+  - PNGs: `C:\ssbot\data\m2_forum_are\choristor\png` (57, `index.json`; incl. 085824 f5690, 161454 f2916, after
+    Slash Recover).
+  - Rerun: `C:\ssbot\data\m2_forum_overlay\choristor_range.rrd` (27.6 MB; 085824 raw 5300-6900, 0.35 video).
+- Single-enemy practice: `human_session --solo "Song Pilgrim 03"` (`ssbot/tools/solo_practice.py`).
+  - Loads `fo_r1_w0` (the wave with the type and the fewest others). Boosts the hero through the debug line
+    (isInvincible, nailUpgrades 4) while any other enemy is in play; the person clears them; then restores PlayerData.
+  - Keeps the one left alive with RPC `enemy.hp` (refill below half). Unknown if the deployed oracle has enemy.hp:
+    if not, it prints "protection off".
+  - Unit-tested offline only.
+- Tests: `tests/test_attack_range.py` (13) + `tests/test_zone_overlay.py` pass.
+- Open:
+  - Group 2 (attacks not started), the other enemies.
+  - Knockback, other-enemy blocking.
+  - The live overlay and --solo are not run in the game.
+  - Hop Up has no data.
+  - A margin decision from these error tables (the person's next step after reviewing the PNGs / replay).

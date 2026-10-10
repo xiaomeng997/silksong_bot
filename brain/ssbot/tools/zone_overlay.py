@@ -40,6 +40,13 @@ the legend). The planner's tick is not run: the support does not depend on its p
                   Clapper moves and runes, Clawmaiden spear / explosion, bells (a hit-back bell deals 0: not drawn),
                   Tiny rams, unclashable projectiles all carry parry 4 in the recordings.
 
+  range           (--range / human_session --overlay-range / viewer --zones --range or --range-only; modes range+red,
+                  range) each enemy's ATTACK-RANGE estimate at k (combat.attack_range, Task "attack range" 2026-10-10:
+                  no margin of any kind), in its own colour: filled = the raw region its damage colliders can occupy
+                  at +k, thin outline = the same in hero-centre space (dilated by the hurtbox 0.4554 x 2.2498 at
+                  (0, -0.38) from the hero TRANSFORM). Idle enemies = their body now. Needs no planner forecast (the
+                  range modes skip it); attacks that have not started are not drawn (group 2, not this round).
+
 Space: the support layers and yellow are HERO-CENTRE configuration space: where the hero's CENTRE (the white dot) must
 not be; the colliders are already grown by the hero hurtbox half extents (0.25 x 1.04 u). Red is the colliders
 themselves (compare with DebugMod's hitbox.show).
@@ -117,6 +124,7 @@ COLORS = {"body": (200, 200, 200), "committed": (245, 150, 245), "window": (250,
           "not_started": (160, 235, 160), "hazard": (110, 190, 255), "death": (220, 160, 185),
           "margins": (255, 245, 185), "yellow": (140, 245, 255), "red": (130, 130, 255)}
 A_SUPPORT, A_YELLOW, A_RED, A_SWEEP = 0.33, 0.40, 0.42, 0.22
+A_RANGE = 0.30
 KEY_K = {0x31: 0, 0x32: 6, 0x33: 12, 0x34: 18, 0x35: 36}
 
 
@@ -290,7 +298,12 @@ class ZoneEngine:
     """ForumPlannerPolicy's forecast path on game-frame STATEs, and the zones of one frame (module docstring)."""
 
     def __init__(self, crest: str = "Wanderer", threads: int = 4, clash: str = DEFAULT_CLASH, cell: float = CELL,
-                 margins: bool = False, zones_path: Path = ZONES_NPZ):
+                 margins: bool = False, zones_path: Path = ZONES_NPZ, range_layer: bool = False):
+        # the attack-range estimate (combat.attack_range, no margin): its own tracker on the same game frames
+        self.rng = None
+        if range_layer:
+            from ssbot.combat.attack_range import RangeTracker
+            self.rng = RangeTracker()
         self.switches = apply_default_env()
         import numba
         numba.set_num_threads(threads)
@@ -332,11 +345,15 @@ class ZoneEngine:
         self.running = True
         self.ws = self.raw = self.fcast = None
         self.names, self.counts = {}, {}
+        if self.rng is not None:
+            self.rng.reset()
 
     def feed(self, s: dict) -> bool:
         """One game-frame STATE (frames numbered consecutively): the forecast-only part of ForumPlannerPolicy.act."""
         pol = self.pol
         f = s["f"]
+        if self.rng is not None:
+            self.rng.feed(s)
         pol.raw[f] = s
         for old in [k for k in pol.raw if k < f - 12]:
             del pol.raw[old]
@@ -594,10 +611,27 @@ class ZoneEngine:
                 info["not_started"].append([s.iid, s.type_key, round(float(s.t_strike), 3)])
         return com, ns, info
 
-    def compute(self, ks=KS, support: bool = True, yellow: bool = True) -> dict:
-        """Everything drawn for the current frame: forecast, support per k, yellow per k, the colliders."""
+    def range_polys(self, ks) -> dict:
+        """{k: [(iid, name, colour, raw outlines, hero-centre outlines, label)]}: the attack-range estimate of every
+        tracked enemy (world polygons), empty without --range."""
+        out: dict = {k: [] for k in ks}
+        if self.rng is None:
+            return out
+        from ssbot.combat.attack_range import contours, hero_space
+        for k in ks:
+            for est in self.rng.estimates(k):
+                lab = (f"{est.fam} {est.branch or ('?' if est.fam else '')} b{est.b}" if est.fam else "idle body")
+                out[k].append((est.iid, self.name(est.iid), self.color(est.iid), contours(est.raw),
+                               contours(hero_space(est.raw)), lab))
+        return out
+
+    def compute(self, ks=KS, support: bool = True, yellow: bool = True, forecast: bool = True) -> dict:
+        """Everything drawn for the current frame: forecast, support per k, yellow per k, the colliders, the attack
+        range (--range). forecast=False (the range layer alone): no planner forecast, no support, no yellow."""
         t0 = time.perf_counter()
-        fc = self.forecast()
+        fc = self.forecast() if forecast else None
+        if not forecast:
+            support = yellow = False
         t1 = time.perf_counter()
         sup = self.support(ks, fc) if support else {k: {} for k in ks}
         t2 = time.perf_counter()
@@ -608,8 +642,8 @@ class ZoneEngine:
                 "support": sup, "ycom": com, "yns": ns, "ycom_by": info.pop("ycom_by", {}),
                 "yns_by": info.pop("yns_by", {}), "info": info, "cols": damage_colliders(s),
                 "names": dict(self.names), "states": {i: self.state_of(i) for i in self.names},
-                "enemies": self.enemies(),
-                "cam": s.get("cam"), "running": fc is not None,
+                "enemies": self.enemies(), "range": self.range_polys(ks),
+                "cam": s.get("cam"), "running": fc is not None or not forecast,
                 "ms": {"forecast": round((t1 - t0) * 1e3, 1), "support": round((t2 - t1) * 1e3, 1),
                        "yellow": round((t3 - t2) * 1e3, 1)}}
 
@@ -618,7 +652,7 @@ class ZoneEngine:
 
 class View:
     """What is drawn (the live keys and the render options)."""
-    MODES = ("yellow+red", "yellow", "red", "support", "all")
+    MODES = ("yellow+red", "yellow", "red", "support", "all", "range+red", "range")
 
     def __init__(self, mode: str = "yellow+red", k: int = 0):
         self.on = True
@@ -632,6 +666,10 @@ class View:
         if what == "support":
             return self.mode in ("support", "all")
         return self.mode == "all" or what in self.mode.split("+")
+
+    def needs_forecast(self) -> bool:
+        """The planner's forecast is drawn (support or yellow); the range layer and red need none."""
+        return self.show("support") or self.show("yellow")
 
     def cycle(self) -> None:
         self.mode = self.MODES[(self.MODES.index(self.mode) + 1) % len(self.MODES)]
@@ -726,6 +764,15 @@ def render(fr: dict, grid: Grid, out_size: tuple[int, int], view: View, legend: 
                 if pl:
                     dark = tuple(int(c * 0.8) for c in col)
                     cv2.polylines(img, pl, True, (*dark, 255), th, cv2.LINE_AA)
+        k = view.k if view.k in fr.get("ks", ()) else (fr.get("ks") or (0,))[0]
+        if view.show("range"):
+            th = max(1, int(round(2 * H / 1080)))
+            for _iid, _name, col, raw, hero, _lab in (fr.get("range") or {}).get(k, ()):
+                for p in raw:
+                    _blend_poly(img, _to_px(Hw, p), col, A_RANGE, outline=th)
+                for p in hero:
+                    q = np.round(_to_px(Hw, p)).astype(np.int32)
+                    cv2.polylines(img, [q], True, (*col, 255), 1, cv2.LINE_AA)
         if view.show("red"):
             th = max(1, int(round(1.5 * H / 1080)))
             for poly, clash, _, vel, *_ in fr.get("cols") or ():
@@ -736,7 +783,7 @@ def render(fr: dict, grid: Grid, out_size: tuple[int, int], view: View, legend: 
                 _blend_poly(img, _to_px(Hw, poly), COLORS["red"], A_RED, outline=th)
         fs = 0.5 * H / 1080.0
         for iid, name, st, pos, col in fr.get("enemies") or ():
-            if view.show("red") or view.show("yellow"):
+            if view.show("red") or view.show("yellow") or view.show("range"):
                 p = _to_px(Hw, np.array([[pos[0], pos[1] + 1.6]]))[0]
                 cv2.putText(img, f"{name} {st or ''}", (int(p[0]) - int(40 * fs * 2), int(p[1])),
                             cv2.FONT_HERSHEY_SIMPLEX, fs, (*col, 255), max(1, int(round(H / 1080))), cv2.LINE_AA)
@@ -759,6 +806,12 @@ def legend_lines(fr: dict | None, view: View, config: str, extra: str = "") -> l
     if view.show("yellow"):
         lines.append((NAMES["yellow"] + " (hero-centre space, lower bound: committed = each attack's own colliders "
                       "along its flight, 12 f; not started: commit-now erosion for the lock now)", COLORS["yellow"]))
+    if view.show("range"):
+        lines.append(("ATTACK RANGE per enemy (its colour; filled = the raw estimate of where its damage colliders can "
+                      "be at +k, no margin; thin line = where the hero transform must not be)", None))
+        k = view.k if fr is not None and view.k in fr.get("ks", ()) else None
+        for _iid, name, col, _raw, _hero, lab in ((fr or {}).get("range") or {}).get(k, ())[:6]:
+            lines.append((f"{name}: {lab}", col))
     if view.show("red"):
         lines.append((NAMES["red"] + " (the colliders themselves)", COLORS["red"]))
     if view.show("support"):
@@ -959,11 +1012,13 @@ class LiveOverlay:
     subscribe_raw: no second IPC client), computing and drawing on its own thread."""
 
     def __init__(self, link, game_pid: int, speed: float = 1.0, crest: str = "Wanderer", threads: int = 4,
-                 every: int = 3, margins: bool = False, log_path: Path | None = None):
+                 every: int = 3, margins: bool = False, log_path: Path | None = None, range_layer: bool = False,
+                 mode: str | None = None, k: int = 0):
         self.link, self.pid = link, game_pid
         self.speed = speed if speed and speed > 0 else 1.0
         self.crest, self.threads, self.every, self.margins = crest, threads, max(1, every), margins
-        self.view = View()
+        self.range_layer = range_layer
+        self.view = View(mode=mode if mode in View.MODES else ("range+red" if range_layer else "yellow+red"), k=k)
         self.q: queue.SimpleQueue = queue.SimpleQueue()
         self.cmds: queue.SimpleQueue = queue.SimpleQueue()
         self.terrain: dict | None = None
@@ -1133,7 +1188,8 @@ class LiveOverlay:
         t_place = 0.0
         hwnd, rect = 0, None
         try:
-            self.eng = ZoneEngine(crest=self.crest, threads=self.threads, margins=self.margins)
+            self.eng = ZoneEngine(crest=self.crest, threads=self.threads, margins=self.margins,
+                                  range_layer=self.range_layer)
             config = self.eng.config_text()
             print(f"overlay ready ({config})")
             while not self.stop_ev.is_set():
@@ -1171,7 +1227,8 @@ class LiveOverlay:
                     t0 = time.perf_counter()
                     if since >= self.every or self.dirty:
                         if self.eng.running and self.eng.ws is not None:   # new frames, or a new k / mode / layer
-                            fr = self.eng.compute(ks=(self.view.k,), support=self.view.show("support"))
+                            fr = self.eng.compute(ks=(self.view.k,), support=self.view.show("support"),
+                                                  forecast=self.view.needs_forecast())
                             self.stats["computed"] += 1
                             self.stats["ms"].append((time.perf_counter() - t0) * 1e3)
                         elif not self.eng.running:
@@ -1293,7 +1350,7 @@ def mask_contours(mask: np.ndarray) -> list[np.ndarray]:
 
 def rerun_zones(session: Path, rec, f0: int | None = None, f1: int | None = None, ks=(0,), video: bool = False,
                 video_scale: float = 0.5, every: int = 1, margins: bool = False, demo_cache: Path | None = None,
-                threads: int = 4, precision: bool = False) -> dict:
+                threads: int = 4, precision: bool = False, range_layer: bool = False) -> dict:
     """Log a human session's Forum attempts with the zone layers per game frame into a Rerun recording ("frame" =
     the raw oracle frame, as the video labels): world/ (y up, as tools.viewer) hero, the real damage colliders
     (colliders/non_clashable, colliders/clashable: the ground truth), zones/red (the non-clashable sweeps),
@@ -1306,9 +1363,10 @@ def rerun_zones(session: Path, rec, f0: int | None = None, f1: int | None = None
     import rerun as rr
     from ssbot.tools.forum_human_score import load_segment, segments
     from ssbot.tools.viewer import closed, polygons_by_key
-    eng = ZoneEngine(crest="Wanderer", threads=threads, margins=margins)
+    eng = ZoneEngine(crest="Wanderer", threads=threads, margins=margins, range_layer=range_layer)
     g = eng.grid
     stats: dict = {"frames": 0, "attempts": [], "config": eng.config_text(), "compute_ms": []}
+    rng_parts = tuple(f"range/k{k:02d}" for k in ks) if range_layer else ()
     segs = [s for s in segments(f"{session}:win", demo_cache)
             if (f1 is None or s["f0"] <= f1) and (f0 is None or s["f1"] >= f0)]
     vidx = _video_index(session) if video else {}
@@ -1409,8 +1467,13 @@ def rerun_zones(session: Path, rec, f0: int | None = None, f1: int | None = None
                         [grid_world(c) for c in mask_contours(m) if len(c) >= 2] if m is not None else [], rgb, lab)
                 rec.log(f"world/enemies/{slug}/label", rr.Points2D([(pos[0], -pos[1] - 1.6)], colors=[rgb],
                                                                    radii=[0.05], labels=[lab]))
+            for k in ks if range_layer else ():             # the attack-range estimate (raw, no margin)
+                for iid, name, col, raw, _hero, rlab in fr["range"].get(k, ()):
+                    slug = name.replace(" ", "_")
+                    now.add(slug)
+                    per[f"enemies/{slug}/range/k{k:02d}"] = (raw, [col[2], col[1], col[0]], f"{name} {rlab}")
             for slug in seen_enemies - now:                 # gone (dead, parked): clear what it drew
-                for k in ("colliders", *(f"{w}/k{k:02d}" for w in ("yellow", "support") for k in ks)):
+                for k in ("colliders", *rng_parts, *(f"{w}/k{k:02d}" for w in ("yellow", "support") for k in ks)):
                     per[f"enemies/{slug}/{k}"] = ([], [0, 0, 0], "")
                 rec.log(f"world/enemies/{slug}/label", rr.Points2D([], radii=[0.05]))
             seen_enemies |= now
@@ -1456,6 +1519,115 @@ def rerun_zones(session: Path, rec, f0: int | None = None, f1: int | None = None
         vf.close()
     ms = stats.pop("compute_ms")
     stats["compute_ms_p50"] = round(float(np.median(ms)), 1) if ms else None
+    return stats
+
+
+def rerun_range(session: Path, rec, f0: int | None = None, f1: int | None = None, ks=(0, 12), video: bool = False,
+                video_scale: float = 0.35, demo_cache: Path | None = None) -> dict:
+    """The attack-range layer alone (no planner forecast; viewer --zones --range-only): per game frame of the human
+    session's Forum attempts in [f0, f1], world/ hero (transform + hurtbox), the real damage colliders
+    (colliders/real), per enemy its estimate at each k (range/<name>/k<k>/raw filled outline, .../hero = where the
+    hero transform must not be) and with video the recorded frame and the same outlines projected (screen/...)."""
+    import cv2
+    import rerun as rr
+    from ssbot.combat.attack_range import HERO_DY, HERO_HALF, RangeTracker, contours, hero_space
+    from ssbot.tools.forum_human_score import load_segment, segments
+    from ssbot.tools.viewer import closed, polygons_by_key
+    trk = RangeTracker()
+    g = Grid(CELL)
+    segs = [s for s in segments(f"{session}:win", demo_cache)
+            if (f1 is None or s["f0"] <= f1) and (f0 is None or s["f1"] >= f0)]
+    vidx = _video_index(session) if video else {}
+    size = (int(RENDER[0] * video_scale), int(RENDER[1] * video_scale))
+    vf = VideoFrames(session, size) if video else None
+    stats: dict = {"frames": 0, "attempts": []}
+    rec.log("legend", rr.TextDocument(
+        "attack range (combat.attack_range, NO margin): per enemy, filled = the raw estimate of where its damage "
+        "colliders can be at +k frames (k = " + ", ".join(map(str, ks)) + "), thin = the same in hero-centre space "
+        "(where the hero TRANSFORM must not be: dilated by the hurtbox 0.4554 x 2.2498 at (0, -0.38)); "
+        "colliders/real = the real damage colliders now (red); hero = transform (dot) + hurtbox. Idle = the body "
+        "now. Attacks not started yet are not drawn (group 2, not this round)."), static=True)
+
+    def wl(pts):
+        return [(float(x), -float(y)) for x, y in pts]
+    names: dict = {}
+    seen: set = set()
+    for seg in segs:
+        terrain, states = load_segment(seg)
+        trk.reset()
+        stats["attempts"].append([seg["attempt"], seg["f0"], seg["f1"]])
+        if terrain is not None:
+            rec.set_time("frame", sequence=max(seg["f0"], f0 or 0))
+            for key, polys in polygons_by_key(terrain).items():
+                rec.log(f"world/terrain/{key}", rr.LineStrips2D([closed(wl(p)) for p in polys],
+                                                                colors=[[120, 120, 120]], radii=[0.04]))
+        for s in states:
+            trk.feed(s)
+            fr_raw = int(s["_f_raw"])
+            if f0 is not None and fr_raw < f0:
+                continue
+            if f1 is not None and fr_raw > f1:
+                break
+            rec.set_time("frame", sequence=fr_raw)
+            rec.set_time("game_frame", sequence=int(s["f"]))
+            h = (s.get("hero") or {}).get("pos")
+            hb = None
+            if h:
+                hx, hy = float(h[0]), float(h[1])
+                hb = [(hx - HERO_HALF[0], hy + HERO_DY - HERO_HALF[1]), (hx + HERO_HALF[0], hy + HERO_DY - HERO_HALF[1]),
+                      (hx + HERO_HALF[0], hy + HERO_DY + HERO_HALF[1]), (hx - HERO_HALF[0], hy + HERO_DY + HERO_HALF[1])]
+                rec.log("world/hero/transform", rr.Points2D([(hx, -hy)], colors=[[255, 255, 255]], radii=[0.08]))
+                rec.log("world/hero/hurtbox", rr.LineStrips2D([closed(wl(hb))], colors=[[255, 255, 255]],
+                                                              radii=[0.03]))
+            cols = damage_colliders(s)
+            real = [p for p, *_ in cols]
+            rec.log("world/colliders/real", rr.LineStrips2D([closed(wl(p)) for p in real], colors=[[255, 60, 60]],
+                                                            radii=[0.04], labels=[lb for _, _, lb, _, _ in cols]))
+            per = {}
+            now = set()
+            for k in ks:
+                for est in trk.estimates(k):
+                    if est.iid not in names:
+                        tk = trk.now[est.iid][0]
+                        n = sum(1 for v in names.values() if v.startswith(SHORT_NAMES.get(tk, tk))) + 1
+                        names[est.iid] = f"{SHORT_NAMES.get(tk, tk)}_{n}"
+                    nm = names[est.iid]
+                    col = ENEMY_COLORS[sorted(names).index(est.iid) % len(ENEMY_COLORS)]
+                    rgb = [col[2], col[1], col[0]]
+                    lab = f"{nm} k{k} " + (f"{est.fam} {est.branch or '?'} b{est.b}" if est.fam else "idle body")
+                    per[f"range/{nm}/k{k:02d}/raw"] = (contours(est.raw), rgb, lab, 0.05)
+                    per[f"range/{nm}/k{k:02d}/hero"] = (contours(hero_space(est.raw)), rgb, lab, 0.02)
+                    now.add(nm)
+            for nm in seen - now:
+                for k in ks:
+                    for part in ("raw", "hero"):
+                        per[f"range/{nm}/k{k:02d}/{part}"] = ([], [0, 0, 0], "", 0.02)
+            seen |= now
+            for path, (polys, rgb, lab, rad) in per.items():
+                rec.log(f"world/{path}", rr.LineStrips2D([closed(wl(p)) for p in polys], colors=[rgb], radii=[rad],
+                                                         labels=[lab] * len(polys) if polys else None))
+            if vf is not None:
+                vi = vidx.get(fr_raw)
+                img = vf.get(vi) if vi is not None else None
+                cam = s.get("cam")
+                if img is not None:
+                    ok, jpg = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, 75])
+                    rec.log("screen/video", rr.EncodedImage(contents=jpg.tobytes(), media_type="image/jpeg"))
+                if cam is not None and cam.get("V"):
+                    Hw, _ = homography(g, cam, size)
+
+                    def sp(pts):
+                        return [tuple(map(float, q)) for q in _to_px(Hw, np.asarray(pts))]
+                    for path, (polys, rgb, lab, rad) in per.items():
+                        rec.log(f"screen/{path}", rr.LineStrips2D([closed(sp(p)) for p in polys], colors=[rgb],
+                                                                  radii=[1.5 if path.endswith("raw") else 0.7]))
+                    rec.log("screen/colliders/real", rr.LineStrips2D([closed(sp(p)) for p in real],
+                                                                     colors=[[255, 60, 60]], radii=[1.0]))
+                    rec.log("screen/hero/hurtbox", rr.LineStrips2D([closed(sp(hb))] if hb else [],
+                                                                   colors=[[255, 255, 255]], radii=[1.0]))
+            stats["frames"] += 1
+    if vf is not None:
+        vf.close()
     return stats
 
 

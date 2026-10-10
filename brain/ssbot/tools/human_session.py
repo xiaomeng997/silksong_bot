@@ -227,7 +227,22 @@ def main() -> None:
     ap.add_argument("--overlay-crest", default="Wanderer", help="the crest of the overlay's kinematics (fo_W)")
     ap.add_argument("--overlay-every", type=int, default=3, help="zones recomputed every N game frames")
     ap.add_argument("--overlay-margins", action="store_true", help="also the margins layer (a second forecast)")
+    ap.add_argument("--overlay-range", action="store_true",
+                    help="the attack-range layer (combat.attack_range: each enemy's estimate, no margin, its own "
+                         "colour); the overlay starts in mode range+red (F9 cycles), 1-5 pick k")
+    ap.add_argument("--solo", default=None, metavar="TYPE",
+                    help='single-enemy practice (tools.solo_practice), e.g. --solo "Song Pilgrim 03": loads the wave '
+                         "savestate holding that type with the fewest others (unless --savestate), boosts the hero "
+                         "until only one enemy of that type is left, then keeps it alive")
+    ap.add_argument("--no-solo-protect", action="store_true", help="--solo: let the kept enemy die")
     args = ap.parse_args()
+    solo_plan = None
+    if args.solo:
+        from ssbot.tools.solo_practice import plan_for
+        solo_plan = plan_for(args.solo)
+        args.savestate = args.savestate or solo_plan.savestate
+        print(f"solo {args.solo}: wave {solo_plan.wave}, savestate {args.savestate}, others to clear "
+              f"{', '.join(solo_plan.others) or '-'}" + (" (+ the ally Garmond)" if solo_plan.ally else ""))
     if args.savestate or args.speed:
         CMD_FILE.write_text((f"load {args.savestate}\n" if args.savestate else "")
                             + (f"speed {args.speed}\n" if args.speed else ""), encoding="utf-8")
@@ -266,8 +281,14 @@ def main() -> None:
         # in this process, on this link (the oracle takes one IPC client); its own thread, never the recording's
         from ssbot.tools.zone_overlay import LiveOverlay
         overlay = LiveOverlay(link, game.pid, speed=args.speed or 1.0, crest=args.overlay_crest,
-                              every=args.overlay_every, margins=args.overlay_margins)
+                              every=args.overlay_every, margins=args.overlay_margins, range_layer=args.overlay_range)
         print("zone overlay: warming up (F8 on/off, F9 mode, F10 freeze, F11 step, 1-5 look-ahead, Ctrl+1-7 layers)")
+    solo = None
+    if args.solo:
+        from ssbot.tools.solo_practice import SoloController
+        from ssbot.train.wave_start import DebugLine
+        solo = SoloController(args.solo, debug=lambda: DebugLine(args.instance), rpc=link.rpc,
+                              protect=not args.no_solo_protect)
 
     video = None
     video_start_qpc = None
@@ -303,6 +324,12 @@ def main() -> None:
                 time.sleep(1)
                 if CMD_FILE.exists() and (not (args.savestate or args.speed) or in_gameplay(link.state or {}) or commands):
                     run_commands(link, commands, overlay)
+                if solo is not None:
+                    try:
+                        solo.tick(link.state)
+                    except Exception as e:  # noqa: BLE001 - the recording goes on without the solo helper
+                        print(f"solo stopped: {e!r}")
+                        solo = None
                 p = placement(game.pid)
                 if p is not None and all((p["client"], p["desktop"]) != (q["client"], q["desktop"])
                                          for q in placements):
@@ -318,6 +345,13 @@ def main() -> None:
             except subprocess.TimeoutExpired:
                 video.kill()
         overlay_stats = overlay.close() if overlay is not None else None
+        solo_events = None
+        if solo is not None:
+            solo_events = solo.events
+            try:
+                solo.close()                # the boost off, should the person quit while clearing
+            except Exception:  # noqa: BLE001 - the game is gone
+                pass
         if marker["on"]:
             try:
                 marker_off(link)
@@ -350,6 +384,8 @@ def main() -> None:
         "commands": commands,
         "display": args.display,
         "overlay": overlay_stats,
+        "solo": None if solo_plan is None else {"type": solo_plan.type_key, "wave": solo_plan.wave,
+                                                "savestate": args.savestate, "events": solo_events},
     }
     write_meta(session, meta)
     print(json.dumps({k: meta[k] for k in ("duration_s", "state_frames_written", "state_frames_dropped_by_recorder",
