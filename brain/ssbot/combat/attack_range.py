@@ -20,8 +20,20 @@ the family's start state), built from R0 dev only (tools.attack_range_build buil
   idle            Battle Idle and every state outside the families: the exact current body (its Body Damager now),
                   for every k: no growth, and no attack that has not started (group 2 is not part of this round).
 
+Every type is a module under ssbot.combat.are_types (the registry; SPECS / CHORISTOR below come from it) declaring an
+are_spec.EnemySpec; beyond the Choristor's parts a type can declare (Task "attack range: all types", stage A):
+  decide          a family's aim decided inside it (Decision: its states and rule -> facing s and u extent L): the
+                  template's bins from the decision are aligned to it (frames since the decision) and anchored at the
+                  decision frame (u = ratio x L); before the decision the estimate stops at the bin before it (a pending
+                  aim, group 2, is not drawn). The Clapper's jumps: decided at Jump Aim, L = 0.916 vx.
+  hazards         objects the enemy spawns that outlive the family (HazardSpec: a row of circles or one circle at the
+                  trigger state's entry, hurting in the measured window per ring): drawn on their rule path at the
+                  game time asked, while idle too; a `pre` hazard is predicted from the family start with the trigger's
+                  measured time window until the trigger is seen. The Clapper's rune bombs (Cast 2) and rune slam.
+
 The estimate at (enemy, k) is shape[b + k] placed at the enemy's predicted position for bin b + k (anchor + disp,
-mirrored by the facing, x clamped by the walls). Hero-centre space (where the hero TRANSFORM must not be): the raw
+mirrored by the facing, x clamped by the walls), plus its hazards at t + k. Hero-centre space (where the hero
+TRANSFORM must not be): the raw
 region dilated by the hero hurtbox (HeroBox 0.4554 x 2.2498 u at (0, -0.38) from the hero transform). Nothing else.
 
 Rasters live on one world lattice: cell ix covers x in [ix CELL, (ix + 1) CELL), row 0 of a mask is its lowest row.
@@ -35,6 +47,8 @@ from pathlib import Path
 
 import numpy as np
 
+from ssbot.combat.are_spec import PARKED, Decision, EnemySpec, HazardSpec  # noqa: F401 (re-exported)
+
 REPO = Path(__file__).resolve().parents[3]
 FORUM = REPO / "knowledge" / "1.0.30000" / "enemies" / "forum"
 FT = 1.0 / 60.0
@@ -42,55 +56,8 @@ CELL = 0.05
 HERO_HALF = (0.2277, 1.1249)          # HeroBox 0.4554 x 2.2498 u (the hurtbox) ...
 HERO_DY = -0.38                       # ... centred 0.38 u below the hero transform
 MW_SRC_BIT = 8                        # ipc.ents SRC_BITS["multi_wounder"]
-PARKED = ("Ready", "Dormant", "Sleep", "Wait")
 
 
-@dataclass(frozen=True)
-class EnemySpec:
-    type_key: str
-    short: str
-    fam_states: dict           # family -> its states (antic start .. end of recovery)
-    start: dict                # state -> family (entering it starts an instance)
-    primary: dict              # family -> the antic state whose re-entry restarts the family
-    branch: dict               # family -> {state: branch} (the first marker seen decides)
-    branches: dict             # family -> the branch names (one name: no branch)
-    aim: frozenset             # families whose u displacement scales with the hero's offset at the antic start
-    body: str                  # the body damager collider's name
-    table: str                 # the table's file stem under FORUM
-
-
-CHORISTOR = EnemySpec(
-    type_key="Song Pilgrim 03", short="Choristor",
-    fam_states={
-        "CH_SLASH": frozenset({"Slash Antic", "Slash Antic Jump", "Slash 1", "Slash 2", "Slash End", "Combo?",
-                               "ComboSlash Antic1", "ComboSlash Antic2", "ComboSlash 1", "ComboSlash 2", "ComboSlash 3",
-                               "Slash Recover"}),
-        "CH_WHIP": frozenset({"Whip Antic", "Whip 1", "Whip 2", "Whip 3", "Whip 4", "Whip 5", "Whip 6", "Whip End",
-                              "Multiwhip"}),
-        "CH_JUMP": frozenset({"Jump Antic", "Wait for Ground", "Jump Launch", "Jump Rise", "Jump Spin", "Spin Slash",
-                              "Spin Slash End", "Quick Land"}),
-        "CH_HOP": frozenset({"Hop Antic", "Hop Back", "Hop Forward", "Hop Up", "Ground Check", "Hop Land",
-                             "Cancel To Hop Back", "Hop Check"}),
-        "CH_ENTRY": frozenset({"Battle Wake", "Enter Antic 2", "Enter Leap 2", "Enter Fall", "Enter Land",
-                               "Enter Idle", "Enter Antic", "Enter Leap"}),
-    },
-    start={"Slash Antic": "CH_SLASH", "Whip Antic": "CH_WHIP", "Jump Antic": "CH_JUMP", "Hop Antic": "CH_HOP",
-           "Cancel To Hop Back": "CH_HOP", "Battle Wake": "CH_ENTRY", "Enter Antic 2": "CH_ENTRY",
-           "Enter Leap 2": "CH_ENTRY"},
-    primary={"CH_SLASH": "Slash Antic", "CH_WHIP": "Whip Antic", "CH_JUMP": "Jump Antic", "CH_HOP": "Hop Antic",
-             "CH_ENTRY": "Battle Wake"},
-    branch={"CH_SLASH": {"ComboSlash Antic1": "combo", "ComboSlash Antic2": "combo", "ComboSlash 1": "combo",
-                         "ComboSlash 2": "combo", "ComboSlash 3": "combo", "Slash Recover": "single"},
-            "CH_HOP": {"Hop Back": "back", "Cancel To Hop Back": "back", "Hop Forward": "forward", "Hop Up": "up"},
-            # Multiwhip follows Whip k only when the whip caught the hero; a whip that runs to Whip 6 is plain
-            "CH_WHIP": {"Multiwhip": "multi", "Whip 6": "plain", "Whip End": "plain"}},
-    branches={"CH_SLASH": ("single", "combo"), "CH_HOP": ("back", "forward", "up"), "CH_WHIP": ("plain", "multi"),
-              "CH_JUMP": ("main",), "CH_ENTRY": ("main",)},
-    aim=frozenset({"CH_JUMP"}),
-    body="Body Damager",
-    table="attack_range_choristor",
-)
-SPECS = {CHORISTOR.type_key: CHORISTOR}
 
 
 def hurts(dealt: int, eff: int, src: int) -> bool:
@@ -225,8 +192,10 @@ class Template:
     shape: list            # [nb] of np.ndarray [nv, nu] bool (row 0 = lowest v)
     origin: np.ndarray     # [nb, 2] int (iu0, iv0)
     disp: np.ndarray       # [nb, 2] float (u, v)
-    ratio: np.ndarray | None = None   # [nb] (aim families)
+    ratio: np.ndarray | None = None   # [nb] (aim families; decided families: the bins from b_dec)
     n: int = 0
+    b_dec: int | None = None          # decided families: the bin of the decision (bins from it are aligned to it:
+    #                                   b_dec + frames since the decision; disp v and ratio from the decision frame)
 
 
 @dataclass
@@ -265,17 +234,18 @@ class RangeTable:
         return float(min(max(a * hero_du + b, -lm), lm))
 
     def place(self, fam: str, branch: str | None, b: int, anchor: tuple, s: int, hero_du: float = 0.0,
-              now: tuple | None = None, b_now: int | None = None) -> Mask:
+              now: tuple | None = None, b_now: int | None = None, dec: dict | None = None) -> Mask:
         """The raw estimate of bin b of an instance anchored at anchor = (x, y) with facing s: the union over the
         family's branches when branch is None. With now = the enemy's observed position at bin b_now, the position is
         re-anchored there: now + (the template's displacement at b - at b_now), so only the displacement still to
-        come is predicted (what has happened is observed)."""
+        come is predicted (what has happened is observed). dec: the instance's decision (Inst.dec) once seen; a
+        decided family without it stops at the last bin before its decision (the pending aim is not drawn)."""
         brs = self.spec.branches.get(fam, ("main",))
         if branch is None:
             branch = self.branch_by_rule(fam, hero_du)
         if branch is not None and (fam, branch) in self.templates:
             brs = (branch,)
-        return union([self._place1(self.templates[(fam, br)], b, anchor, s, hero_du, fam, now, b_now)
+        return union([self._place1(self.templates[(fam, br)], b, anchor, s, hero_du, fam, now, b_now, dec)
                       for br in brs if (fam, br) in self.templates])
 
     def position(self, tp: Template, b: int, anchor: tuple, s: int, hero_du: float, fam: str) -> tuple:
@@ -286,8 +256,22 @@ class RangeTable:
         lo, hi = self.walls
         return min(max(anchor[0] + s * du, lo), hi), anchor[1] + dv
 
+    def position_dec(self, tp: Template, ba: int, dec: dict) -> tuple:
+        """The position at aligned bin ba (>= b_dec) of a decided move: the decision frame + (ratio x L, v)."""
+        bb = min(max(ba, 0), tp.nb - 1)
+        du = float(tp.ratio[bb]) * float(dec["L"]) if tp.ratio is not None else float(tp.disp[bb, 0])
+        lo, hi = self.walls
+        return min(max(dec["x"] + dec["s"] * du, lo), hi), dec["y"] + float(tp.disp[bb, 1])
+
     def _place1(self, tp: Template, b: int, anchor: tuple, s: int, hero_du: float, fam: str,
-                now: tuple | None = None, b_now: int | None = None) -> Mask:
+                now: tuple | None = None, b_now: int | None = None, dec: dict | None = None) -> Mask:
+        if tp.b_dec is not None:
+            if dec is None:                     # pending aim: nothing of the undecided move is drawn
+                b = min(b, tp.b_dec - 1)
+                if b_now is not None:
+                    b_now = min(b_now, tp.b_dec - 1)
+            elif b >= dec["b"]:
+                return self._place_dec(tp, b, dec, now, b_now)
         bb = min(max(b, 0), tp.nb - 1)
         sh = tp.shape[bb]
         if sh is None or not sh.size:
@@ -299,6 +283,71 @@ class RangeTable:
             px, py = min(max(now[0] + px - qx, lo), hi), now[1] + py - qy
         return place_shape(sh, int(tp.origin[bb, 0]), int(tp.origin[bb, 1]), px, py, s, self.cell)
 
+    def _place_dec(self, tp: Template, b: int, dec: dict, now: tuple | None, b_now: int | None) -> Mask:
+        """Bin b (since the antic start) of a decided move: aligned bin b_dec + (b - the decision's bin), anchored at
+        the decision frame in its facing, re-anchored at the observed position like the rest."""
+        ba = tp.b_dec + b - int(dec["b"])
+        bb = min(max(ba, 0), tp.nb - 1)
+        sh = tp.shape[bb]
+        if sh is None or not sh.size:
+            return empty_mask()
+        px, py = self.position_dec(tp, ba, dec)
+        if now is not None and b_now is not None:
+            qx, qy = self.position_dec(tp, tp.b_dec + max(b_now - int(dec["b"]), 0), dec)
+            lo, hi = self.walls
+            px, py = min(max(now[0] + px - qx, lo), hi), now[1] + py - qy
+        return place_shape(sh, int(tp.origin[bb, 0]), int(tp.origin[bb, 1]), px, py, int(dec["s"]), self.cell)
+
+    # -------------------------------------------------------------------------------------------- hazards
+
+    def hazard_params(self, hz: HazardSpec) -> dict:
+        """The measured parameters of a hazard (meta["hazards"][name], from R0 dev) over the spec's defaults:
+        win [[on, off] per ring] frames after the trigger, dx / dv the centre offsets, x_ok the x intervals where it
+        ever stood, trig {family: [lo, hi]} its trigger's bins after the family start."""
+        return (self.meta.get("hazards") or {}).get(hz.name) or {}
+
+    def hazard_mask(self, hz: HazardSpec, t_lo: float, t_hi: float, x: float, y: float, s: int, t: float) -> Mask:
+        """The raw region of one hazard spawned by a trigger at a game time in [t_lo, t_hi] (equal once seen) from
+        (x, y) facing s, at game time t: the circles whose measured hurt window contains t (a pending trigger time
+        widens the window by its spread)."""
+        P = self.hazard_params(hz)
+        win = P.get("win") or []
+        if not win:
+            return empty_mask()
+        polys = []
+        if hz.shape == "row":
+            dx = float(P.get("dx", 0.0))
+            cy = y + float(P.get("dv", hz.dv))
+            for m in range(-hz.m_max, hz.m_max + 1):
+                ring = abs(m)
+                if ring >= len(win) or win[ring] is None:
+                    continue
+                on, off = win[ring]
+                if not (t_lo + on * FT - 1e-6 <= t <= t_hi + off * FT + 1e-6):
+                    continue
+                cx = x + hz.spacing * m + dx
+                if not _inside(cx, P.get("x_ok")):
+                    continue
+                polys.append(circle_poly(cx, cy, hz.radius))
+        else:
+            on, off = win[0]
+            if t_lo + on * FT - 1e-6 <= t <= t_hi + off * FT + 1e-6:
+                polys.append(circle_poly(x + s * float(P.get("du", hz.du)), y + float(P.get("dv", hz.dv)), hz.radius))
+        return poly_mask(polys, self.cell)
+
+
+def _inside(x: float, intervals) -> bool:
+    if not intervals:
+        return True
+    return any(lo <= x <= hi for lo, hi in intervals)
+
+
+def circle_poly(cx: float, cy: float, r: float, n: int = 64) -> np.ndarray:
+    """A circle collider as a polygon whose edges lie outside the circle by at most 0.1 % of r (n 64)."""
+    a = (np.arange(n) + 0.5) * (2.0 * math.pi / n)
+    rr = r / math.cos(math.pi / n)
+    return np.stack([cx + rr * np.cos(a), cy + rr * np.sin(a)], axis=1)
+
 
 def place_shape(sh: np.ndarray, iu0: int, iv0: int, px: float, py: float, s: int, cell: float = CELL) -> Mask:
     """A template-lattice raster (cell iu centre (iu + 0.5) c) at world (px, py), facing s, on the world lattice."""
@@ -309,8 +358,8 @@ def place_shape(sh: np.ndarray, iu0: int, iv0: int, px: float, py: float, s: int
     return Mask(sh[:, ::-1], int(math.floor(px / cell - 0.5)) - iu1, iy0)
 
 
-def table_path(spec: EnemySpec = CHORISTOR, root: Path = FORUM) -> Path:
-    return root / f"{spec.table}.npz"
+def table_path(spec: EnemySpec | None = None, root: Path = FORUM) -> Path:
+    return root / f"{(spec or CHORISTOR).table}.npz"
 
 
 def save_table(t: RangeTable, path: Path) -> Path:
@@ -318,7 +367,8 @@ def save_table(t: RangeTable, path: Path) -> Path:
     keys = []
     for (fam, br), tp in sorted(t.templates.items()):
         key = f"{fam}|{br}"
-        keys.append({"key": key, "nb": tp.nb, "n": tp.n, "aim": tp.ratio is not None})
+        keys.append({"key": key, "nb": tp.nb, "n": tp.n, "aim": tp.ratio is not None,
+                     **({"b_dec": int(tp.b_dec)} if tp.b_dec is not None else {})})
         sizes = np.array([[s.shape[0], s.shape[1]] for s in tp.shape], np.int32)
         bits = np.concatenate([np.packbits(s.reshape(-1)) if s.size else np.zeros(0, np.uint8) for s in tp.shape])
         arrs[f"{key}/sizes"] = sizes
@@ -334,7 +384,8 @@ def save_table(t: RangeTable, path: Path) -> Path:
     return path
 
 
-def load_table(path: Path | None = None, spec: EnemySpec = CHORISTOR) -> RangeTable:
+def load_table(path: Path | None = None, spec: EnemySpec | None = None) -> RangeTable:
+    spec = spec or CHORISTOR
     path = Path(path) if path is not None else table_path(spec)
     z = np.load(path)
     meta = json.loads(bytes(z["meta"]).decode("utf-8"))
@@ -353,7 +404,7 @@ def load_table(path: Path | None = None, spec: EnemySpec = CHORISTOR) -> RangeTa
         ratio = z[f"{key}/ratio"] if f"{key}/ratio" in z.files else None
         fam, br = key.split("|")
         tps[(fam, br)] = Template(nb=int(k["nb"]), shape=shapes, origin=z[f"{key}/origin"], disp=z[f"{key}/disp"],
-                                  ratio=ratio, n=int(k.get("n", 0)))
+                                  ratio=ratio, n=int(k.get("n", 0)), b_dec=k.get("b_dec"))
     return RangeTable(spec=spec, templates=tps, meta=meta, cell=float(meta.get("cell", CELL)))
 
 
@@ -371,6 +422,8 @@ class Inst:
     branch: str | None = None
     branch_t: float | None = None
     states: list = field(default_factory=list)
+    dec: dict | None = None    # the decision (EnemySpec.decide): t, b (its bin), x, y, s, L
+    trig: dict = field(default_factory=dict)        # hazard name -> its trigger (t, x, y, s) in this instance
 
 
 class Segmenter:
@@ -382,11 +435,14 @@ class Segmenter:
         self.spec = spec
         self.cur: Inst | None = None
         self.prev: str | None = None
+        self.spawned: list = []    # every hazard trigger of this enemy: (HazardSpec, t, x, y, s)
 
     def step(self, st: str | None, T: float, x: float, y: float, s: int, hero_x: float | None,
-             tin: float = 0.0) -> Inst | None:
+             tin: float = 0.0, vx: float | None = None, hero_y: float | None = None) -> Inst | None:
         """One frame: st and tin (its time in state) of the enemy's first FSM, game time T. A new instance is
-        anchored here, its time origin back-dated by tin (the state's entry, also when first seen late)."""
+        anchored here, its time origin back-dated by tin (the state's entry, also when first seen late). A decision
+        state (EnemySpec.decide) fixes the instance's decision at its first frame; a hazard's trigger state entered
+        in one of its families spawns it (back-dated by tin)."""
         sp = self.spec
         cur = self.cur
         if cur is not None:
@@ -404,6 +460,16 @@ class Segmenter:
             br = sp.branch.get(cur.fam, {}).get(st)
             if cur.branch is None and br is not None:
                 cur.branch, cur.branch_t = br, T
+            d = sp.decide.get(cur.fam) if sp.decide else None
+            if d is not None and cur.dec is None and st in d.states:
+                sd, L = d.rule(x, y, vx, hero_x, hero_y)
+                td = T - max(float(tin or 0.0), 0.0)
+                cur.dec = {"t": td, "b": bin_of(td - cur.t0), "x": x, "y": y, "s": int(sd), "L": float(L)}
+            for hz in sp.hazards:
+                if st == hz.state and self.prev != st and cur.fam in hz.fams and hz.name not in cur.trig:
+                    tt = T - max(float(tin or 0.0), 0.0)
+                    cur.trig[hz.name] = (tt, x, y, s)
+                    self.spawned.append((hz, tt, x, y, s))
         self.prev = st
         return cur
 
@@ -430,11 +496,12 @@ def _parked(e: dict) -> bool:
     return st is None or any(w in str(st) for w in PARKED)
 
 
-def body_polys(e: dict, name: str) -> list[np.ndarray]:
+def body_polys(e: dict, name) -> list[np.ndarray]:
+    names = (name,) if isinstance(name, str) else tuple(name)
     out = []
     for c in e.get("cols") or e.get("colliders") or ():
         v = c.get("verts_world")
-        if c.get("name") == name and c.get("enabled") and v and len(v) >= 6:
+        if c.get("name") in names and c.get("enabled") and v and len(v) >= 6:
             out.append(np.asarray(v, np.float64).reshape(-1, 2))
     return out
 
@@ -448,6 +515,7 @@ class Estimate:
     branch: str | None
     b: int | None              # the bin of the frame shown (b + k is placed)
     pos: tuple
+    haz: Mask | None = None    # the part of raw from the enemy's hazards (types with hazards)
 
 
 class RangeTracker:
@@ -488,8 +556,10 @@ class RangeTracker:
             seg = self.segs.get(iid)
             if seg is None:
                 seg = self.segs[iid] = Segmenter(tab.spec)
+            vel = e.get("vel")
             inst = seg.step(st, self.T, float(p[0]), float(p[1]), sgn, None if self.hero is None else self.hero[0],
-                            tin)
+                            tin, vx=None if not vel else float(vel[0]),
+                            hero_y=None if self.hero is None else self.hero[1])
             now[iid] = (tk, e, inst)
         self.now = now
         for iid in [i for i in self.segs if i not in now]:
@@ -502,12 +572,51 @@ class RangeTracker:
         tab = self.tables[tk]
         p = e.get("pos") or (0.0, 0.0)
         if inst is None:
-            return Estimate(iid, k, poly_mask(body_polys(e, tab.spec.body), tab.cell), None, None, None,
-                            (float(p[0]), float(p[1])))
-        b = bin_of(self.T - inst.t0)
-        now = (float(p[0]), float(p[1]))
-        m = tab.place(inst.fam, inst.branch, b + k, (inst.x0, inst.y0), inst.s, inst.hero_du, now=now, b_now=b)
-        return Estimate(iid, k, m, inst.fam, inst.branch, b, now)
+            est = Estimate(iid, k, poly_mask(body_polys(e, tab.spec.body), tab.cell), None, None, None,
+                           (float(p[0]), float(p[1])))
+        else:
+            b = bin_of(self.T - inst.t0)
+            now = (float(p[0]), float(p[1]))
+            m = tab.place(inst.fam, inst.branch, b + k, (inst.x0, inst.y0), inst.s, inst.hero_du, now=now, b_now=b,
+                          dec=inst.dec)
+            est = Estimate(iid, k, m, inst.fam, inst.branch, b, now)
+        if tab.spec.hazards:
+            seg = self.segs.get(iid)
+            hm = hazards_at(tab, seg.spawned if seg else (), inst, self.T, (float(p[0]), float(p[1])),
+                            self.T + k * FT)
+            est.haz = hm
+            est.raw = union([est.raw, hm])
+        return est
 
     def estimates(self, k: int) -> list[Estimate]:
         return [x for x in (self.estimate(i, k) for i in sorted(self.now)) if x is not None]
+
+
+def hazards_at(tab: RangeTable, spawned, inst: Inst | None, T: float, pos: tuple, t: float,
+               only: str | None = None) -> Mask:
+    """The raw region at game time t of an enemy's hazards (only: of that hazard): those spawned (seen triggers; the
+    Segmenter's `spawned`) and, while the current instance is in a family whose trigger is still to come
+    (HazardSpec.pre), the predicted ones from its measured trigger window (bins after the antic start) at the enemy's
+    position now."""
+    ms = [tab.hazard_mask(hz, tt, tt, x, y, s, t) for hz, tt, x, y, s in spawned
+          if tt <= T + 1e-9 and (only is None or hz.name == only)]
+    if inst is not None:
+        for hz in tab.spec.hazards:
+            if (only is not None and hz.name != only) or not hz.pre or inst.fam not in hz.fams or hz.name in inst.trig:
+                continue
+            w = (tab.hazard_params(hz).get("trig") or {}).get(inst.fam)
+            if not w:
+                continue
+            t_lo, t_hi = inst.t0 + w[0] * FT, inst.t0 + w[1] * FT
+            if T <= t_hi + FT:
+                ms.append(tab.hazard_mask(hz, max(t_lo, T), max(t_hi, T), pos[0], pos[1], inst.s, t))
+    return union(ms)
+
+
+def _registry() -> dict:
+    from ssbot.combat.are_types import specs
+    return specs()
+
+
+SPECS = _registry()
+CHORISTOR = SPECS["Song Pilgrim 03"]

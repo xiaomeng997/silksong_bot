@@ -1,4 +1,5 @@
-"""World-space pictures of the attack-range estimate on the person's frames (tools.attack_range_build png): per frame
+"""World-space pictures of the attack-range estimate on the person's frames (tools.attack_range_build [--type] png;
+the type module's CASES, a few frames per family, the worst rows of the person / fresh evals): per frame
 the estimate at k = 0 (filled) and k = 12 (outlined), its hero-centre region at k = 0 (thin yellow: where the hero
 transform must not be), the enemy's REAL damage colliders now (thick red) and over the next 12 game frames (thin red,
 the frame at +12 magenta), the hero's hurtbox and transform, a 1 u grid and the numbers of compare() at k 0 / 12."""
@@ -9,19 +10,17 @@ from pathlib import Path
 
 import numpy as np
 
-from ssbot.combat.attack_range import FT, HERO_DY, HERO_HALF, bin_of, contours, hero_space, load_table, poly_mask
+from ssbot.combat.attack_range import (FT, HERO_DY, HERO_HALF, bin_of, contours, hazards_at, hero_space, load_table,
+                                       poly_mask, union)
 from ssbot.tools.attack_range_build import compare, frame_polys, load_tracks, segment
 
-# (session, raw frame, why): the person's own cases first
-CASES = (("20261009_085824", 5690, "whip antic, frame 5690 (the person)"),
-         ("20261009_161454", 2916, "Battle Idle, frame 2916 (the person)"))
 PX_U = 40
 FAM_COLOR = (60, 160, 255)        # BGR orange: the estimate
 K12_COLOR = (255, 220, 80)        # BGR light blue: the estimate at k = 12
 
 
 def _find(tracks, sess: str, f: int):
-    """(track, frame index) of the Choristor in play nearest to raw frame f of the session (the one in a family
+    """(track, frame index) of the enemy in play nearest to frame f of the session / fight (the one in a family
     instance first)."""
     best = None
     for tr in tracks:
@@ -48,26 +47,10 @@ def draw_frame(tr: dict, j: int, tab, shapes: dict, why: str = "") -> np.ndarray
     f1 = int(tab.meta.get("face_flip1", 1))
     insts, idx = segment(tr, tab.spec, f1)
     T = tr["T"]
-    est, info = {}, ""
-    if idx[j] >= 0:
-        r = insts[idx[j]]
-        inst = r["inst"]
-        b = bin_of(float(T[j]) - inst.t0)
-        br = inst.branch if (inst.branch_t is not None and inst.branch_t <= T[j] + 1e-9) else None
-        for k in (0, 12):
-            est[k] = tab.place(inst.fam, br, b + k, (inst.x0, inst.y0), inst.s, inst.hero_du,
-                               now=(float(tr["x"][j]), float(tr["y"][j])), b_now=b)
-        info = (f"{inst.fam} branch {br or 'pending (union)'}{' -> ' + str(inst.branch) if br is None else ''}  "
-                f"bin {b} ({b * FT:.2f} s since the antic start)  anchor ({inst.x0:.2f}, {inst.y0:.2f}) "
-                f"facing {'+x' if inst.s > 0 else '-x'}" + (f"  hero du {inst.hero_du:.2f}" if inst.fam in tab.spec.aim
-                                                          else ""))
-        s = inst.s
-    else:
-        body = frame_polys(tr, j, shapes, tab.spec.body)
-        for k in (0, 12):
-            est[k] = poly_mask(body)
-        info = "idle: the exact body now, for every k (no growth)"
-        s = f1 if tr["flip"][j] else -f1
+    est, info, s = {}, "", 1
+    for k in (0, 12):
+        est[k], _, info0, s = _estimate(tr, insts, idx, tab, shapes, j, k)
+        info = info or info0
     jt = {k: _target(T, j, k) for k in range(13)}
     real = {k: frame_polys(tr, jt[k], shapes) for k in jt if jt[k] is not None}
     cmp_ = {k: compare(est[k], poly_mask(real.get(k, [])), s) for k in (0, 12) if k in real}
@@ -85,7 +68,8 @@ def draw_frame(tr: dict, j: int, tab, shapes: dict, why: str = "") -> np.ndarray
     x0, y0 = allp.min(axis=0) - 2.0
     x1, y1 = allp.max(axis=0) + 2.0
     y0 = min(y0, 2.5)
-    lines = [f"{tr['fight']} raw frame {int(tr['f'][j])}  Choristor iid {tr['iid']}  state {tr['st'][j]}  {why}", info]
+    lines = [f"{tr['fight']} raw frame {int(tr['f'][j])}  {tab.spec.short} iid {tr['iid']}  state {tr['st'][j]}  {why}",
+             info]
     for k, c in cmp_.items():
         ratio = c["aE"] / c["aR"] if c["aR"] > 0 else float("nan")
         miss = ", ".join(f"{sd} {v[0]:.2f} u" for sd, v in c["miss"].items()) or "none"
@@ -150,7 +134,7 @@ def draw_frame(tr: dict, j: int, tab, shapes: dict, why: str = "") -> np.ndarray
 
 def pick_frames(tracks, tab, sessions=("20261009_085824", "20261009_161454"), per_fam: int = 2) -> list:
     """(session, raw f, why): a few frames per family of the person's own fights (antic, middle, end, and the idle
-    frames right after a Slash Recover), and the frames of the whip that follows frame 5690."""
+    frames right after it), and (Choristor) the frames of the whip that follows frame 5690."""
     f1 = int(tab.meta.get("face_flip1", 1))
     out, seen = [], {}
     for tr in tracks:
@@ -161,7 +145,8 @@ def pick_frames(tracks, tab, sessions=("20261009_085824", "20261009_161454"), pe
         for n, r in enumerate(insts):
             inst = r["inst"]
             fr = r["frames"]
-            if sess == "20261009_085824" and any(abs(int(tr["f"][q]) - 5690) <= 1 for q in fr):
+            if tab.spec.short == "Choristor" and sess == "20261009_085824" and \
+                    any(abs(int(tr["f"][q]) - 5690) <= 1 for q in fr):
                 for q in fr[::max(1, len(fr) // 8)]:
                     out.append((sess, int(tr["f"][q]), f"the whip after 5690 ({tr['st'][q]})"))
                 continue
@@ -170,34 +155,114 @@ def pick_frames(tracks, tab, sessions=("20261009_085824", "20261009_161454"), pe
             seen[inst.fam] = seen.get(inst.fam, 0) + 1
             for q in (fr[0], fr[len(fr) // 3], fr[2 * len(fr) // 3], fr[-1]):
                 out.append((sess, int(tr["f"][q]), f"{inst.fam} #{seen[inst.fam]} ({tr['st'][q]})"))
-            if inst.fam == "CH_SLASH" and r["j1"] + 1 < len(tr["f"]):
-                for d in (1, 6, 12):
+            if (inst.fam == "CH_SLASH" or tab.spec.hazards) and r["j1"] + 1 < len(tr["f"]):
+                for d in (1, 6, 12) if inst.fam == "CH_SLASH" else (12, 30):
                     q = min(r["j1"] + d, len(tr["f"]) - 1)
                     if idx[q] < 0:
-                        out.append((sess, int(tr["f"][q]), f"after Slash Recover +{d} f ({tr['st'][q]})"))
+                        out.append((sess, int(tr["f"][q]), f"after {inst.fam} +{d} f ({tr['st'][q]})"))
     return out
 
 
 def cmd_png(a) -> int:
     import cv2
-    tab = load_table()
+    from ssbot.combat.are_types import module_of
+    from ssbot.tools.attack_range_build import out_dir, spec_of
+    spec = spec_of(getattr(a, "type", None))
+    mod = module_of(spec.type_key)
+    tab = load_table(None, spec)
     shapes = tab.meta.get("shapes") or {}
-    tracks = load_tracks("person", sessions=("20261009_085824", "20261009_161454"))
-    out = Path(a.out)
+    sessions = tuple(getattr(mod, "SESSIONS", ()))
+    tracks = load_tracks("person", spec=spec, sessions=sessions)
+    out = Path(a.out) if getattr(a, "out", None) else out_dir(spec) / "png"
     out.mkdir(parents=True, exist_ok=True)
-    frames = list(CASES) + pick_frames(tracks, tab)
+    frames = list(getattr(mod, "CASES", ())) + pick_frames(tracks, tab, sessions)
+    worst = worst_frames(out_dir(spec) / "rows_person.pkl", getattr(a, "worst", 8))
+    frames += [(fi, f, why) for fi, f, why in worst if fi.split("/")[0] in sessions]
+    fresh = worst_frames(out_dir(spec) / "rows_fresh.pkl", getattr(a, "worst", 8) // 2)
+    ftracks = load_tracks("fresh", spec=spec) if fresh else []
     index = []
-    for sess, f, why in frames:
-        tr, j = _find(tracks, sess, f)
-        if tr is None:
-            print(f"{sess} f {f}: no Choristor in play")
-            continue
-        img = draw_frame(tr, j, tab, shapes, why)
-        if img is None:
-            continue
-        fn = out / f"{sess}_f{f}_{str(tr['st'][j]).replace(' ', '_').replace('?', '')}.png"
-        cv2.imwrite(str(fn), img)
-        index.append({"png": fn.name, "session": sess, "f": f, "why": why, "state": tr["st"][j]})
+    for pool, items in ((tracks, frames), (ftracks, fresh)):
+        for sess, f, why in items:
+            tr, j = _find(pool, sess, f)
+            if tr is None:
+                print(f"{sess} f {f}: no {spec.short} in play")
+                continue
+            img = draw_frame(tr, j, tab, shapes, why)
+            if img is None:
+                continue
+            tag = "worst_" if why.startswith("worst") else ""
+            fn = out / (f"{tag}{sess.replace('/', '_')}_f{f}_{str(tr['st'][j]).replace(' ', '_').replace('?', '')}"
+                        ".png")
+            cv2.imwrite(str(fn), img)
+            index.append({"png": fn.name, "fight": sess, "f": f, "why": why, "state": tr["st"][j]})
     (out / "index.json").write_text(json.dumps(index, indent=1), "utf-8")
     print(f"{len(index)} PNGs in {out}")
     return 0
+
+
+def _estimate(tr, insts, idx, tab, shapes, j: int, k: int):
+    """(estimate raw, its hazard part or None, info line, facing) of frame j at look-ahead k, as eval_track makes it
+    (the target time is the frame that reaches t + k / 60)."""
+    from ssbot.tools.attack_range_build import _active_view
+    spec = tab.spec
+    f1 = int(tab.meta.get("face_flip1", 1))
+    T = tr["T"]
+    jt = _target(T, j, k)
+    tt = float(T[jt]) if jt is not None else float(T[j]) + k * FT
+    inst = insts[idx[j]]["inst"] if idx[j] >= 0 else None
+    if inst is not None:
+        b = bin_of(float(T[j]) - inst.t0)
+        bt = bin_of(tt - inst.t0)
+        br = inst.branch if (inst.branch_t is not None and inst.branch_t <= T[j] + 1e-9) else None
+        dec = inst.dec if (inst.dec is not None and inst.dec["t"] <= T[j] + 1e-9) else None
+        E = tab.place(inst.fam, br, bt, (inst.x0, inst.y0), inst.s, inst.hero_du,
+                      now=(float(tr["x"][j]), float(tr["y"][j])), b_now=b, dec=dec)
+        info = (f"{inst.fam} branch {br or 'pending (union)'}{' -> ' + str(inst.branch) if br is None else ''}  "
+                f"bin {b} ({b * FT:.2f} s since the antic start)  anchor ({inst.x0:.2f}, {inst.y0:.2f}) "
+                f"facing {'+x' if inst.s > 0 else '-x'}" + (f"  hero du {inst.hero_du:.2f}" if inst.fam in spec.aim
+                                                          else ""))
+        if inst.fam in spec.decide:
+            info += (f"  decided at bin {dec['b']}: s {dec['s']:+d}, landing u {dec['L']:.2f}" if dec else
+                     "  aim PENDING (not drawn past its decision)")
+        s = inst.s
+    else:
+        E = poly_mask(frame_polys(tr, j, shapes, spec.body_names))
+        info = "idle: the exact body now, for every k (no growth)"
+        s = f1 if tr["flip"][j] else -f1
+    H = None
+    if spec.hazards:
+        sp = sorted(((hz, *r["inst"].trig[hz.name]) for r in insts for hz in spec.hazards
+                     if hz.name in r["inst"].trig and r["inst"].trig[hz.name][0] <= T[j] + 1e-9), key=lambda q: q[1])
+        H = hazards_at(tab, sp, _active_view(inst, float(T[j])), float(T[j]), (float(tr["x"][j]), float(tr["y"][j])),
+                       tt)
+        if H.m.size and H.m.any():
+            info += "  + hazards"
+        E = union([E, H])
+    return E, H, info, s
+
+
+def worst_frames(rows_path: Path, n: int = 8) -> list:
+    """(fight, f, why) of the worst main rows (not next, not interrupted) of an eval: the largest miss distance at
+    k 0 / 12 first, then the largest precision ratio at k 12 (one per instance)."""
+    import pickle
+    if not rows_path.exists():
+        return []
+    with open(rows_path, "rb") as fh:
+        rows = pickle.load(fh)
+    main = [r for r in rows if not r["next"] and not r["int"] and r["k"] in (0, 12)]
+    out, seen = [], set()
+
+    def add(r, why):
+        key = (r["fight"], r["iid"], r["fam"], r["f"] // 30)
+        if key in seen:
+            return
+        seen.add(key)
+        out.append((str(r["fight"]), int(r["f"]), why))
+    miss = sorted(main, key=lambda r: -max([v[0] for v in r["miss"].values()] or [0.0]))
+    for r in miss[:n]:
+        if r["miss"]:
+            add(r, f"worst miss k {r['k']} {r['fam']}: " + ", ".join(f"{k} {v[0]:.2f} u" for k, v in r["miss"].items()))
+    rat = sorted([r for r in main if r["aR"] > 0 and r["k"] == 12], key=lambda r: -r["aE"] / r["aR"])
+    for r in rat[:max(2, n // 2)]:
+        add(r, f"worst ratio k 12 {r['fam']}: {r['aE'] / r['aR']:.2f}")
+    return out

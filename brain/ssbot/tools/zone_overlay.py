@@ -622,6 +622,8 @@ class ZoneEngine:
         for k in ks:
             for est in self.rng.estimates(k):
                 lab = (f"{est.fam} {est.branch or ('?' if est.fam else '')} b{est.b}" if est.fam else "idle body")
+                if est.haz is not None and est.haz.m.size and est.haz.m.any():
+                    lab += " + hazards"
                 out[k].append((est.iid, self.name(est.iid), self.color(est.iid), contours(est.raw),
                                contours(hero_space(est.raw)), lab))
         return out
@@ -1603,6 +1605,8 @@ def rerun_range(session: Path, rec, f0: int | None = None, f1: int | None = None
                     col = ENEMY_COLORS[sorted(names).index(est.iid) % len(ENEMY_COLORS)]
                     rgb = [col[2], col[1], col[0]]
                     lab = f"{nm} k{k} " + (f"{est.fam} {est.branch or '?'} b{est.b}" if est.fam else "idle body")
+                    if est.haz is not None and est.haz.m.size and est.haz.m.any():
+                        lab += " + hazards"           # its rune bombs / rune slam (combat.attack_range hazards)
                     per[f"range/{nm}/k{k:02d}/raw"] = (contours(est.raw), rgb, lab, 0.05)
                     per[f"range/{nm}/k{k:02d}/hero"] = (contours(hero_space(est.raw)), rgb, lab, 0.02)
                     now.add(nm)

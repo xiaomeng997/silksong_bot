@@ -1,13 +1,16 @@
 """Attack-range estimate (ARE) builder and its estimation error (Task "attack range", the person 2026-10-10:
 estimate each enemy's attack range accurately first, with no margin; the margin is a later decision from this error).
-The model is ssbot.combat.attack_range (its docstring); one enemy at a time, the Choristor first.
+The model is ssbot.combat.attack_range (its docstring); one enemy type at a time (a module under
+ssbot.combat.are_types each: --type <short name>, default the Choristor; outputs under
+C:/ssbot/data/m2_forum_are/<short>).
 
     cd brain
-    ../scripts/uv.cmd run python -m ssbot.tools.attack_range_build shapes          # collider polygons (person STATEs)
-    ../scripts/uv.cmd run python -m ssbot.tools.attack_range_build build           # R0 dev only -> the table
-    ../scripts/uv.cmd run python -m ssbot.tools.attack_range_build eval --set fresh|r2|person|dev [--every 2]
-    ../scripts/uv.cmd run python -m ssbot.tools.attack_range_build png             # the person's frames
-    ../scripts/uv.cmd run python -m ssbot.tools.attack_range_build report          # eval_*.json -> report.json
+    ../scripts/uv.cmd run python -m ssbot.tools.attack_range_build [--type clapper] shapes   # collider polygons
+    ../scripts/uv.cmd run python -m ssbot.tools.attack_range_build [--type clapper] build    # R0 dev only -> table
+    ../scripts/uv.cmd run python -m ssbot.tools.attack_range_build [--type ...] eval --set fresh|r2|person|dev
+    ../scripts/uv.cmd run python -m ssbot.tools.attack_range_build [--type ...] png          # PNGs of the frames
+    ../scripts/uv.cmd run python -m ssbot.tools.attack_range_build [--type ...] hazcheck     # hazards: lit vs hurt
+    ../scripts/uv.cmd run python -m ssbot.tools.attack_range_build tracks                    # decode the person's
 
 Data: the per-fight Forum caches (ssbot.knowledge.forum_cache: every enabled damage collider as an AABB with dealt /
 eff) and the person's sessions (their STATEs through forum_cache.extract_states). A cache keeps AABBs only; the
@@ -28,6 +31,7 @@ not this round) or the enemy was hit / clashed (interrupted) are counted apart, 
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import json
 import math
 import os
@@ -38,10 +42,13 @@ from pathlib import Path
 
 import numpy as np
 
-from ssbot.combat.attack_range import (CELL, CHORISTOR, FT, Mask, RangeTable, Segmenter, Template, bin_of, hero_space,
-                                       hurts, load_table, on_canvas, poly_mask, save_table, table_path, union)
+from ssbot.combat.attack_range import (CELL, CHORISTOR, FT, SPECS, Mask, RangeTable, Segmenter, Template, bin_of,
+                                       circle_poly, hazards_at, hero_space, hurts, load_table, on_canvas, poly_mask,
+                                       save_table, table_path, union)
 
-OUT = Path(r"C:\ssbot\data\m2_forum_are\choristor")
+ARE = Path(r"C:\ssbot\data\m2_forum_are")
+OUT = ARE / "choristor"
+PERSON_CACHE = ARE / "person_cache"        # the person's sessions as per-attempt Forum caches (every type reads them)
 SETS = {
     "dev": [Path(r"C:\ssbot\data\m2_forum_r0\cache")],
     "fresh": [Path(r"C:\ssbot\data\m2_forum_r0\cache_fresh")],
@@ -74,8 +81,9 @@ def _idle_priority() -> None:
 # ------------------------------------------------------------------------------------------------ tracks
 
 def tracks_from_cache(c: dict, type_key: str, source: str) -> list[dict]:
-    """Per enemy of type_key in one fight cache: its frames in order with state, time in state, position, flip, the
-    hero position and its damage colliders [(name, AABB, flip)], the game times it was hit and of nail clashes."""
+    """Per enemy of type_key in one fight cache: its frames in order with state, time in state, position, velocity,
+    flip, the hero position and its damage colliders [(name, AABB, flip)], the game times it was hit and of nail
+    clashes (fi: the cache's frame index of each frame)."""
     types = list(c["types"])
     if type_key not in types:
         return []
@@ -127,7 +135,8 @@ def tracks_from_cache(c: dict, type_key: str, source: str) -> list[dict]:
             tin=c["e_tin"][rows].astype(np.float64), x=c["e_x"][rows].astype(np.float64),
             y=c["e_y"][rows].astype(np.float64), flip=c["e_flip"][rows].astype(np.int8),
             hidden=c["e_hidden"][rows].astype(np.int8), hx=c["hx"][fr].astype(np.float64),
-            hy=c["hy"][fr].astype(np.float64), cols=cols, hits=sorted(hits.get(int(iid), [])), clash=sorted(clash)))
+            hy=c["hy"][fr].astype(np.float64), cols=cols, hits=sorted(hits.get(int(iid), [])), clash=sorted(clash),
+            fi=np.asarray(fr, np.int64), vx=c["e_vx"][rows].astype(np.float64)))
     return out
 
 
@@ -142,41 +151,24 @@ def _cache_files(name: str) -> list[Path]:
     return files
 
 
-def load_tracks(name: str, type_key: str = CHORISTOR.type_key, cache_dir: Path | None = None,
-                sessions=PERSON) -> list[dict]:
-    """The tracks of one set (person: pickled under OUT after the first decode)."""
-    from ssbot.knowledge.forum_cache import extract_states, load_cache
-    if name != "person":
-        out = []
-        for f in _cache_files(name):
-            out += tracks_from_cache(load_cache(f), type_key, name)
-        return out
-    from ssbot.tools.forum_human_score import load_segment, segments
-    cache_dir = cache_dir or OUT / "person_tracks"
-    cache_dir.mkdir(parents=True, exist_ok=True)
+def load_tracks(name: str, type_key: str | None = None, cache_dir: Path | None = None, sessions=PERSON,
+                spec=None) -> list[dict]:
+    """The tracks of one set for one type (person: from the shared per-attempt caches, decoded on first use), with
+    the hazards the type owns attached (attach_hazards)."""
+    from ssbot.knowledge.forum_cache import load_cache
+    spec = spec or SPECS.get(type_key or CHORISTOR.type_key, CHORISTOR)
+    files = person_caches(sessions, cache_dir) if name == "person" else _cache_files(name)
     out = []
-    for sess in sessions:
-        p = cache_dir / f"{sess}.pkl"
-        if p.exists():
-            with open(p, "rb") as fh:
-                out += pickle.load(fh)
-            continue
-        tr = []
-        d = HUMAN / sess
-        if (d / "state.raw.zst").exists():
-            for seg in segments(f"{d}:win", None):
-                _, states = load_segment(seg)
-                fmap = {int(s["f"]): int(s.get("_f_raw", s["f"])) for s in states}
-                c = extract_states(states, {"id": f"{sess}/a{seg['attempt']}"})
-                for t in tracks_from_cache(c, type_key, "person"):
-                    # the raw frame as the frame number (the video's labels; game frames merged at 0.5x)
-                    t["f"] = np.array([fmap.get(int(x), int(x)) for x in t["f"]], np.int64)
-                    tr.append(t)
-        tmp = p.with_name(p.name + f".{os.getpid()}.tmp")
-        with open(tmp, "wb") as fh:
-            pickle.dump(tr, fh, protocol=4)
-        os.replace(tmp, p)
-        out += tr
+    for f in files:
+        c = load_cache(f)
+        trs = tracks_from_cache(c, spec.type_key, name)
+        if name == "person" and "f_raw" in c:
+            for t in trs:
+                # the raw frame as the frame number (the video's labels; game frames merged at 0.5x)
+                t["f"] = np.asarray(c["f_raw"][t["fi"]], np.int64)
+        if spec.hazards and trs:
+            attach_hazards(c, trs, spec)
+        out += trs
     return out
 
 
@@ -203,8 +195,11 @@ def shapes_from_states(states, type_key: str = CHORISTOR.type_key) -> dict:
 
 
 def poly_of(name: str, box, flip: int, shapes: dict) -> np.ndarray:
-    """The exact polygon of a rigid collider from its AABB (the AABB itself when its shape is unknown)."""
+    """The exact polygon of a rigid collider from its AABB (the AABB itself when its shape is unknown); a hazard
+    ("HZ:<name>", a circle collider) is its AABB's inscribed circle."""
     x0, y0, x1, y1 = (float(v) for v in box)
+    if name.startswith("HZ:"):
+        return circle_poly(0.5 * (x0 + x1), 0.5 * (y0 + y1), 0.5 * (x1 - x0))
     rel = (shapes.get(name) or {}).get(str(int(flip)))
     if rel is not None:
         r = np.asarray(rel, np.float64)
@@ -214,8 +209,12 @@ def poly_of(name: str, box, flip: int, shapes: dict) -> np.ndarray:
     return np.array([[x0, y0], [x1, y0], [x1, y1], [x0, y1]], np.float64)
 
 
-def frame_polys(tr: dict, j: int, shapes: dict, only: str | None = None) -> list[np.ndarray]:
-    return [poly_of(nm, bx, int(tr["flip"][j]), shapes) for nm, bx in tr["cols"][j] if only is None or nm == only]
+def frame_polys(tr: dict, j: int, shapes: dict, only=None, hz: bool | None = None) -> list[np.ndarray]:
+    """The damage polygons of frame j: all, only those named `only` (a name or names), hz True / False: only the
+    hazards' / only the enemy's own."""
+    names = None if only is None else ((only,) if isinstance(only, str) else tuple(only))
+    return [poly_of(nm, bx, int(tr["flip"][j]), shapes) for nm, bx in tr["cols"][j]
+            if (names is None or nm in names) and (hz is None or nm.startswith("HZ:") == hz)]
 
 
 # ------------------------------------------------------------------------------------------------ segmentation
@@ -226,13 +225,14 @@ def segment(tr: dict, spec, face_flip1: int) -> tuple[list, np.ndarray]:
     insts: list = []
     idx = np.full(len(tr["T"]), -1, np.int32)
     last = None
+    vx = tr.get("vx")
     for j in range(len(tr["T"])):
         st = tr["st"][j]
         s = face_flip1 if tr["flip"][j] else -face_flip1
         if tr["hidden"][j]:
             st = None
         inst = seg.step(st, float(tr["T"][j]), float(tr["x"][j]), float(tr["y"][j]), s, float(tr["hx"][j]),
-                        float(tr["tin"][j]))
+                        float(tr["tin"][j]), vx=None if vx is None else float(vx[j]), hero_y=float(tr["hy"][j]))
         if inst is None:
             last = None
             continue
@@ -250,15 +250,19 @@ def segment(tr: dict, spec, face_flip1: int) -> tuple[list, np.ndarray]:
     return insts, idx
 
 
-def facing_of_flip(tracks: list[dict]) -> int:
-    """+1 when flipX = 1 means facing +x: from where the attack colliders sit relative to the enemy."""
+def facing_of_flip(tracks: list[dict], names=("Slash Hit", "Whip Hit 2"), default: int = 1) -> int:
+    """+1 when flipX = 1 means facing +x: from where the attack colliders (names: prefixes) sit relative to the
+    enemy (default without any)."""
     votes = 0.0
+    names = tuple(names)
     for tr in tracks:
         for j, cols in enumerate(tr["cols"]):
             for nm, bx in cols:
-                if nm.startswith(("Slash Hit", "Whip Hit 2")):
+                if nm.startswith(names):
                     d = 0.5 * (bx[0] + bx[2]) - tr["x"][j]
                     votes += math.copysign(1.0, d) * (1 if tr["flip"][j] else -1)
+    if votes == 0:
+        return default
     return 1 if votes >= 0 else -1
 
 
@@ -274,10 +278,13 @@ def _rel(polys, x: float, y: float, s: int) -> list[np.ndarray]:
     return out
 
 
-def build(tracks: list[dict], spec=CHORISTOR, shapes: dict | None = None) -> tuple[RangeTable, dict]:
-    """The table from the dev tracks (clean instances only) and the build report."""
+def build(tracks: list[dict], spec=None, shapes: dict | None = None) -> tuple[RangeTable, dict]:
+    """The table from the dev tracks (clean instances only) and the build report. A decided family (spec.decide)
+    is aligned at its decision: bins from the median decision bin count frames since the decision, their shapes and
+    displacements are taken in the decision's frame (position, facing s) and the u displacement is ratio x L."""
+    spec = spec or CHORISTOR
     shapes = shapes or {}
-    f1 = facing_of_flip(tracks)
+    f1 = facing_of_flip(tracks, spec.face_names or ("Slash Hit", "Whip Hit 2"))
     per: dict = defaultdict(list)            # (fam, branch) -> [(track, instance record)]
     xs = []
     body_rel = None
@@ -291,10 +298,12 @@ def build(tracks: list[dict], spec=CHORISTOR, shapes: dict | None = None) -> tup
             br = inst.branch if len(spec.branches.get(inst.fam, ())) > 1 else spec.branches[inst.fam][0]
             if br is None:
                 continue
+            if inst.fam in spec.decide and inst.dec is None:
+                continue
             per[(inst.fam, br)].append((tr, r))
             if body_rel is None:
                 for j in r["frames"]:
-                    bp = frame_polys(tr, j, shapes, spec.body)
+                    bp = frame_polys(tr, j, shapes, spec.body_names)
                     if bp:
                         body_rel = _rel(bp, tr["x"][j], tr["y"][j], inst.s)
                         break
@@ -306,24 +315,36 @@ def build(tracks: list[dict], spec=CHORISTOR, shapes: dict | None = None) -> tup
     report: dict = {"face_flip1": f1, "walls": walls, "families": {}}
     jump_fit, jump_lmax = (1.0, 0.0), 15.0
     for (fam, br), items in sorted(per.items()):
-        ends = [bin_of(float(tr["T"][r["j1"]]) - r["inst"].t0) for tr, r in items]
+        decided = fam in spec.decide
+        b_dec = int(np.median([r["inst"].dec["b"] for _, r in items])) if decided else None
+
+        def tbin(tr, r, j):
+            inst = r["inst"]
+            t = float(tr["T"][j])
+            if decided and t >= inst.dec["t"] - 1e-9:
+                return b_dec + bin_of(t - inst.dec["t"]), True
+            return bin_of(t - inst.t0), False
+        ends = [tbin(tr, r, r["j1"])[0] for tr, r in items]
         nb = min(max(ends) + 1, NB_MAX)
         cnt = np.zeros((nb, nv, nu), np.uint16)
         D = np.full((len(items), nb, 2), np.nan)
         for n, (tr, r) in enumerate(items):
             inst = r["inst"]
-            done = set()
-            last_d, last_j = None, r["j1"]
+            last_j = r["j1"]
             for j in r["frames"]:
-                b = bin_of(float(tr["T"][j]) - inst.t0)
-                if b >= nb or b < 0:
+                b, post = tbin(tr, r, j)
+                if b >= nb or b < 0 or (decided and not post and b >= b_dec):
                     continue
-                polys = _rel(frame_polys(tr, j, shapes), tr["x"][j], tr["y"][j], inst.s)
+                if post:
+                    sd, ax, ay = inst.dec["s"], inst.dec["x"], inst.dec["y"]
+                else:
+                    sd, ax, ay = inst.s, inst.x0, inst.y0
+                polys = _rel(frame_polys(tr, j, shapes), tr["x"][j], tr["y"][j], sd)
                 _add(cnt[b], polys, iu_lo, iv_lo)
-                D[n, b] = ((tr["x"][j] - inst.x0) * inst.s, tr["y"][j] - inst.y0)
-                done.add(b)
-            last_d = ((tr["x"][last_j] - inst.x0) * inst.s, tr["y"][last_j] - inst.y0)
-            b_end = bin_of(float(tr["T"][last_j]) - inst.t0)
+                D[n, b] = ((tr["x"][j] - ax) * sd, tr["y"][j] - ay)
+            b_end, post = tbin(tr, r, last_j)
+            sd, ax, ay = (inst.dec["s"], inst.dec["x"], inst.dec["y"]) if post else (inst.s, inst.x0, inst.y0)
+            last_d = ((tr["x"][last_j] - ax) * sd, tr["y"][last_j] - ay)
             if body_rel is not None:                 # ended: the idle body at its end position
                 for b in range(b_end + 1, nb):
                     _add(cnt[b], body_rel, iu_lo, iv_lo)
@@ -357,7 +378,34 @@ def build(tracks: list[dict], spec=CHORISTOR, shapes: dict | None = None) -> tup
             res = L - A @ coef
             report["jump"] = {"fit": jump_fit, "lmax": jump_lmax, "n": int(len(L)),
                               "resid_p95": float(np.percentile(np.abs(res), 95)), "resid_max": float(np.abs(res).max())}
-        tps[(fam, br)] = Template(nb=nb, shape=shape, origin=origin, disp=disp, ratio=ratio, n=len(items))
+        if decided:
+            # the landing: the u displacement from the decision at the end of the move; the rule's L against it
+            L = np.array([D[n, b_dec:, 0][np.isfinite(D[n, b_dec:, 0])][-1]
+                          if np.isfinite(D[n, b_dec:, 0]).any() else np.nan for n in range(len(items))])
+            Lr = np.array([r["inst"].dec["L"] for _, r in items])
+            ok = np.isfinite(L) & (np.abs(L) >= 1.0)
+            ratio = np.zeros(nb)
+            with np.errstate(all="ignore"):
+                ratio[b_dec:] = np.nanmedian(D[ok, b_dec:, 0] / L[ok, None], axis=0)
+            ratio = np.where(np.isfinite(ratio), ratio, 0.0)
+            fin = np.isfinite(L)
+            err = np.abs(L[fin] - Lr[fin])
+            flips = []
+            for tr, r in items:                      # the facing during the move vs the decision's s
+                inst = r["inst"]
+                for j in r["frames"]:
+                    if float(tr["T"][j]) >= inst.dec["t"] + 2 * FT:
+                        flips.append((f1 if tr["flip"][j] else -f1) == inst.dec["s"])
+            report.setdefault("decisions", {})[fam] = {
+                "n": int(len(items)), "b_dec": b_dec,
+                "b_dec_range": [int(min(r["inst"].dec["b"] for _, r in items)),
+                                int(max(r["inst"].dec["b"] for _, r in items))],
+                "landing_err_p50": round(float(np.median(err)), 3) if len(err) else None,
+                "landing_err_p95": round(float(np.percentile(err, 95)), 3) if len(err) else None,
+                "landing_err_max": round(float(err.max()), 3) if len(err) else None,
+                "facing_agrees": round(float(np.mean(flips)), 4) if flips else None}
+        tps[(fam, br)] = Template(nb=nb, shape=shape, origin=origin, disp=disp, ratio=ratio, n=len(items),
+                                  b_dec=b_dec)
         report["families"][f"{fam}|{br}"] = _shape_report(tps[(fam, br)], ends)
     # CH_HOP's direction (Hop Check: forward only when the hero is farther than Hop Distance 6-10 u): certain outside
     # the range of the hero's offsets at the antic start where both directions were recorded
@@ -371,6 +419,8 @@ def build(tracks: list[dict], spec=CHORISTOR, shapes: dict | None = None) -> tup
             "branch_rule": rule,
             "body_rel": [p.tolist() for p in body_rel] if body_rel is not None else None,
             "source": "R0 dev (C:/ssbot/data/m2_forum_r0/cache), clean instances", "hero_box": [0.4554, 2.2498, -0.38]}
+    if spec.hazards:
+        meta["hazards"], report["hazards"] = fit_hazards(tracks, spec, f1)
     return RangeTable(spec=spec, templates=tps, meta=meta), report
 
 
@@ -458,17 +508,39 @@ def _target(T: np.ndarray, j: int, k: int) -> int | None:
 def eval_track(tr: dict, tab: RangeTable, shapes: dict, every: int = 2, idle_every: int = 6, ks=KS,
                antic_anchor: bool = False) -> list[dict]:
     """Error rows of one track; antic_anchor: the position from the antic start alone (no re-anchoring at the
-    observed position, the first variant)."""
+    observed position, the first variant). Types with hazards: the estimate and the truth include the hazards (the
+    rows of the families / idle), and each hazard has its own rows ("HZ <name>": its estimate against its real
+    colliders, whenever either is non-empty)."""
     spec = tab.spec
     f1 = int(tab.meta.get("face_flip1", 1))
     insts, idx = segment(tr, spec, f1)
     T = tr["T"]
     rows = []
+    spawned = sorted(((hz, *r["inst"].trig[hz.name]) for r in insts for hz in spec.hazards
+                      if hz.name in r["inst"].trig), key=lambda q: q[1])
+
+    def hz_rows(j, jt, k, inst, base: dict):
+        if not spec.hazards:
+            return None
+        view = _active_view(inst, float(T[j]))
+        pos = (float(tr["x"][j]), float(tr["y"][j]))
+        sp = [q for q in spawned if q[1] <= T[j] + 1e-9]
+        tt = float(T[jt])
+        tot = []
+        for hz in spec.hazards:
+            Eh = hazards_at(tab, [q for q in sp if q[0] is hz], view, float(T[j]), pos, tt, only=hz.name)
+            Rh = poly_mask(frame_polys(tr, jt, shapes, only=f"HZ:{hz.name}"))
+            tot.append(Eh)
+            if (Eh.m.size and Eh.m.any()) or (Rh.m.size and Rh.m.any()):
+                rows.append({**base, "fam": f"HZ {hz.name}", "br": base["fam"], **compare(Eh, Rh, inst.s if inst
+                                                                                          else 1)})
+        return union(tot)
     for n, r in enumerate(insts):
         inst = r["inst"]
         for j in r["frames"][::every]:
             b = bin_of(float(T[j]) - inst.t0)
             br = inst.branch if (inst.branch_t is not None and inst.branch_t <= T[j] + 1e-9) else None
+            dec = inst.dec if (inst.dec is not None and inst.dec["t"] <= T[j] + 1e-9) else None
             for k in ks:
                 jt = _target(T, j, k)
                 if jt is None:
@@ -478,20 +550,26 @@ def eval_track(tr: dict, tab: RangeTable, shapes: dict, every: int = 2, idle_eve
                 # a frame later: comparing bin b + k with it would count that frame-sampling jitter as error)
                 bt = bin_of(float(T[jt]) - inst.t0)
                 E = tab.place(inst.fam, br, bt, (inst.x0, inst.y0), inst.s, inst.hero_du,
-                              now=None if antic_anchor else (float(tr["x"][j]), float(tr["y"][j])), b_now=b)
+                              now=None if antic_anchor else (float(tr["x"][j]), float(tr["y"][j])), b_now=b, dec=dec)
+                base = {"fam": inst.fam, "br": inst.branch, "known": br is not None, "k": k, "b": b,
+                        "t": round(bt * FT, 4), "next": bool(nxt), "int": bool(r["interrupted"]),
+                        "f": int(tr["f"][j]), "fight": tr["fight"], "iid": tr["iid"]}
+                if spec.decide.get(inst.fam) is not None:
+                    base["dec"] = dec is not None
+                Eh = hz_rows(j, jt, k, inst, base)
+                if Eh is not None:
+                    E = union([E, Eh])
                 R = poly_mask(frame_polys(tr, jt, shapes))
                 c = compare(E, R, inst.s)
-                rows.append({"fam": inst.fam, "br": inst.branch, "known": br is not None, "k": k, "b": b,
-                             "t": round(bt * FT, 4), "next": bool(nxt), "int": bool(r["interrupted"]),
-                             "f": int(tr["f"][j]), "fight": tr["fight"], "iid": tr["iid"], **c})
+                rows.append({**base, **c})
     # idle: the exact body now, for every k
     for j in range(0, len(T), idle_every):
         if idx[j] >= 0 or tr["hidden"][j] or tr["st"][j] is None:
             continue
         st = str(tr["st"][j])
-        if any(w in st for w in ("Ready", "Dormant", "Sleep", "Wait")):
+        if any(w in st for w in spec.parked):
             continue
-        body = frame_polys(tr, j, shapes, spec.body)
+        body = frame_polys(tr, j, shapes, spec.body_names)
         if not body:
             continue
         s = f1 if tr["flip"][j] else -f1
@@ -502,10 +580,13 @@ def eval_track(tr: dict, tab: RangeTable, shapes: dict, every: int = 2, idle_eve
             if jt is None:
                 continue
             nxt = bool((idx[j:jt + 1] >= 0).any())
+            base = {"fam": IDLE, "br": st, "known": True, "k": k, "b": 0, "t": round(k * FT, 4), "next": nxt,
+                    "int": hit, "f": int(tr["f"][j]), "fight": tr["fight"], "iid": tr["iid"]}
+            Eh = hz_rows(j, jt, k, None, base)
+            Ek = E if Eh is None else union([E, Eh])
             R = poly_mask(frame_polys(tr, jt, shapes))
-            c = compare(E, R, s)
-            rows.append({"fam": IDLE, "br": st, "known": True, "k": k, "b": 0, "t": round(k * FT, 4), "next": nxt,
-                         "int": hit, "f": int(tr["f"][j]), "fight": tr["fight"], "iid": tr["iid"], **c})
+            c = compare(Ek, R, s)
+            rows.append({**base, **c})
     return rows
 
 
@@ -580,60 +661,72 @@ def _stats(rs: list[dict], limit: float, brief: bool = False) -> dict:
 
 def cmd_shapes(a) -> int:
     from ssbot.tools.forum_human_score import load_segment, segments
+    spec = spec_of(a.type)
+    mod = _module(spec)
     shapes: dict = {}
-    for sess in SHAPE_SESSIONS:
+    for sess in getattr(mod, "SESSIONS", SHAPE_SESSIONS):
         for seg in segments(f"{HUMAN / sess}:win", None):
             _, states = load_segment(seg)
-            for nm, d in shapes_from_states(states).items():
+            for nm, d in shapes_from_states(states, spec.type_key).items():
                 for fl, p in d.items():
                     shapes.setdefault(nm, {}).setdefault(fl, p)
-    p = OUT / "shapes.json"
+    p = out_dir(spec) / "shapes.json"
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(json.dumps(shapes), "utf-8")
     print(f"{p}: {', '.join(f'{k} {sorted(v)}' for k, v in sorted(shapes.items()))}")
     return 0
 
 
-def _shapes() -> dict:
-    p = OUT / "shapes.json"
+def _shapes(spec=None) -> dict:
+    p = out_dir(spec) / "shapes.json"
     return json.loads(p.read_text("utf-8")) if p.exists() else {}
 
 
 def cmd_build(a) -> int:
     _idle_priority()
+    spec = spec_of(a.type)
     t0 = time.time()
-    tracks = load_tracks("dev")
+    tracks = load_tracks("dev", spec=spec)
     print(f"dev tracks: {len(tracks)} ({time.time() - t0:.0f} s)")
-    tab, rep = build(tracks, CHORISTOR, _shapes())
-    p = save_table(tab, Path(a.out) if a.out else table_path(CHORISTOR))
+    tab, rep = build(tracks, spec, _shapes(spec))
+    p = save_table(tab, Path(a.out) if a.out else table_path(spec))
     rep["table"] = str(p)
     rep["bytes"] = p.stat().st_size
+    rep["left_out"] = [list(x) for x in spec.left_out]
     jp = p.with_suffix(".json")
     jp.write_text(json.dumps(rep, indent=1), "utf-8")
     print(f"{p} ({p.stat().st_size} B), report {jp}; families "
           + ", ".join(f"{k} n {v['n']} dur {v['dur_p50']}/{v['dur_max']} s" for k, v in rep["families"].items()))
-    if "jump" in rep:
-        print("jump", rep["jump"])
+    for k in ("jump", "decisions", "hazards"):
+        if k in rep:
+            print(k, json.dumps(rep[k])[:3000])
     return 0
 
 
 def cmd_eval(a) -> int:
     _idle_priority()
-    tab = load_table(Path(a.table) if a.table else None)
+    spec = spec_of(a.type)
+    out = out_dir(spec)
+    tab = load_table(Path(a.table) if a.table else None, spec)
     shapes = tab.meta.get("shapes") or {}
     t0 = time.time()
-    tracks = load_tracks(a.set)
+    tracks = load_tracks(a.set, spec=spec)
     print(f"{a.set}: {len(tracks)} tracks ({time.time() - t0:.0f} s)", flush=True)
     rows = []
-    for i, tr in enumerate(tracks):
-        rows += eval_track(tr, tab, shapes, every=a.every)
-        if i % 50 == 0:
-            print(f"  {i}/{len(tracks)} rows {len(rows)} ({time.time() - t0:.0f} s)", flush=True)
+    # threads: cv2 / numpy release the GIL; map keeps the track order (the same rows as one thread)
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=max(1, a.threads)) as ex:
+        for i, rr in enumerate(ex.map(lambda tr: eval_track(tr, tab, shapes, every=a.every,
+                                                             idle_every=a.idle_every), tracks)):
+            rows += rr
+            if i % 50 == 0:
+                print(f"  {i}/{len(tracks)} rows {len(rows)} ({time.time() - t0:.0f} s)", flush=True)
     summ = summarize(rows)
-    OUT.mkdir(parents=True, exist_ok=True)
-    (OUT / f"eval_{a.set}.json").write_text(json.dumps({"set": a.set, "rows": len(rows), "summary": summ}, indent=1),
+    out.mkdir(parents=True, exist_ok=True)
+    (out / f"eval_{a.set}.json").write_text(json.dumps({"set": a.set, "rows": len(rows), "every": a.every,
+                                                        "idle_every": a.idle_every, "summary": summ}, indent=1),
                                             "utf-8")
-    with open(OUT / f"rows_{a.set}.pkl", "wb") as fh:
+    with open(out / f"rows_{a.set}.pkl", "wb") as fh:
         pickle.dump(rows, fh, protocol=4)
     for fam, d in summ.items():
         for kk in ("k0", "k12"):
@@ -644,8 +737,298 @@ def cmd_eval(a) -> int:
     return 0
 
 
+def out_dir(spec=None) -> Path:
+    """The type's output folder: C:/ssbot/data/m2_forum_are/<short> (the Choristor's is OUT)."""
+    return ARE / (spec or CHORISTOR).short.lower()
+
+
+def spec_of(name: str | None):
+    """The EnemySpec by short name / module / type key (None: the Choristor)."""
+    if not name:
+        return CHORISTOR
+    from ssbot.combat.are_types import module_of
+    return module_of(name).SPEC
+
+
+def attach_hazards(c: dict, tracks: list[dict], spec, f1: int | None = None) -> dict:
+    """Adds the real colliders of the hazards each enemy of the fight owns to its track's cols, named
+    "HZ:<hazard>" (a circle collider: the AABB's inscribed circle). A hazard collider is an AABB of width and height
+    box_w (+-0.03) dealing damage on an entity of another type (the pooled "damager" objects); its episodes (runs of
+    frames, gaps <= 2) go to the owner whose trigger before the episode puts it there: row - a whole number of
+    spacings from the trigger x (residual <= 0.8 u, abs(m) <= m_max), circle - within 1.5 u of x + s du; both within
+    1.5 u of y + dv and 4 s; with a spawn-rule timing (HazardSpec.on0) the trigger whose timing fits best (within
+    on_tol frames: a bomb still lit from an earlier cast or another Clapper's is not this cast's), else the latest.
+    Records tr["hz_eps"] (per episode: hazard, trigger, ring, centre, frames) and returns the attribution counts."""
+    stats: dict = {hz.name: {"episodes": 0, "attributed": 0} for hz in spec.hazards}
+    if not tracks or not spec.hazards:
+        return stats
+    if f1 is None:
+        f1 = facing_of_flip(tracks, spec.face_names or ("Slash Hit", "Whip Hit 2"))
+    trig = []                                          # (hz name, t, x, y, s, track index)
+    for n, tr in enumerate(tracks):
+        tr.setdefault("hz_eps", [])
+        insts, _ = segment(tr, spec, f1)
+        for r in insts:
+            for name, (t, x, y, s) in r["inst"].trig.items():
+                trig.append((name, t, x, y, s, n))
+    trig.sort(key=lambda q: q[1])
+    types = list(c["types"])
+    own = types.index(spec.type_key) if spec.type_key in types else -1
+    box = c["c_box"]
+    w = box[:, 2] - box[:, 0]
+    h = box[:, 3] - box[:, 1]
+    ei = c["c_ei"]
+    T = c["T"]
+    pos = {n: {int(fi): j for j, fi in enumerate(tr["fi"])} for n, tr in enumerate(tracks)}
+    for hz in spec.hazards:
+        sel = np.nonzero((np.abs(w - hz.box_w) < 0.03) & (np.abs(h - hz.box_w) < 0.03) & (c["c_dealt"] > 0)
+                         & (c["e_tk"][ei] != own))[0]
+        if not len(sel):
+            continue
+        fis = c["e_fi"][ei[sel]]
+        iids = c["e_iid"][ei[sel]]
+        cand = [q for q in trig if q[0] == hz.name]
+        for iid in np.unique(iids):
+            rows = sel[iids == iid]
+            rows = rows[np.argsort(c["e_fi"][ei[rows]], kind="stable")]
+            ff = c["e_fi"][ei[rows]]
+            cuts = np.nonzero(np.diff(ff) > 2)[0] + 1
+            for part in np.split(np.arange(len(rows)), cuts):
+                rr = rows[part]
+                fr = ff[part]
+                stats[hz.name]["episodes"] += 1
+                cx = float(np.median(0.5 * (box[rr, 0] + box[rr, 2])))
+                cy = float(np.median(0.5 * (box[rr, 1] + box[rr, 3])))
+                te = float(T[fr[0]])
+                best = None
+                for name, t, x, y, s, n in cand:
+                    if t > te + 1e-6 or te - t > 4.0 or abs(cy - (y + hz.dv)) > 1.5:
+                        continue
+                    if hz.shape == "row":
+                        m = int(round((cx - x) / hz.spacing))
+                        if abs(m) > hz.m_max or abs(cx - x - hz.spacing * m) > 0.8:
+                            continue
+                        ring = abs(m)
+                    else:
+                        if abs(cx - (x + s * hz.du)) > 1.5:
+                            continue
+                        ring = 0
+                    if hz.on0 is None:
+                        best = (0.0, t, x, y, s, n, ring)        # the latest trigger wins (cand is sorted by t)
+                        continue
+                    res = abs((te - t) / FT - (hz.on0 + hz.on_step * ring))
+                    if res <= hz.on_tol and (best is None or res < best[0]):
+                        best = (res, t, x, y, s, n, ring)       # the trigger that fits the spawn rule's timing
+                if best is None:
+                    continue
+                _, t, x, y, s, n, ring = best
+                tr = tracks[n]
+                js = []
+                for r_, f_ in zip(rr, fr):
+                    j = pos[n].get(int(f_))
+                    if j is not None:
+                        tr["cols"][j].append((f"HZ:{hz.name}", box[r_].astype(np.float64)))
+                        js.append(j)
+                tr["hz_eps"].append({"hz": hz.name, "t": t, "x": x, "y": y, "s": s, "ring": ring, "cx": cx, "cy": cy,
+                                     "t_on": te, "t_off": float(T[fr[-1]]), "n": len(fr), "frames": js})
+                stats[hz.name]["attributed"] += 1
+    return stats
+
+
+def person_caches(sessions=PERSON, root: Path | None = None) -> list[Path]:
+    """The per-attempt Forum caches of the person's sessions (decoded once into PERSON_CACHE; every type reads
+    them; f_raw = the raw frame of each game frame: the video's labels)."""
+    from ssbot.knowledge.forum_cache import extract_states, save_cache
+    root = root or PERSON_CACHE
+    root.mkdir(parents=True, exist_ok=True)
+    out = []
+    for sess in sessions:
+        done = root / f"{sess}.done"
+        if done.exists():
+            out += [root / x for x in json.loads(done.read_text("utf-8"))]
+            continue
+        from ssbot.tools.forum_human_score import load_segment, segments
+        d = HUMAN / sess
+        names = []
+        if (d / "state.raw.zst").exists():
+            for seg in segments(f"{d}:win", None):
+                _, states = load_segment(seg)
+                fmap = {int(s["f"]): int(s.get("_f_raw", s["f"])) for s in states}
+                c = extract_states(states, {"id": f"{sess}/a{seg['attempt']}"})
+                c["f_raw"] = np.array([fmap.get(int(x), int(x)) for x in c["f"]], np.int64)
+                p = root / f"{sess}_a{seg['attempt']}.npz"
+                save_cache(c, p)
+                names.append(p.name)
+        done.write_text(json.dumps(names), "utf-8")
+        out += [root / x for x in names]
+    return out
+
+
+def fit_hazards(tracks: list[dict], spec, f1: int) -> tuple[dict, dict]:
+    """The hazards' measured parameters from the dev tracks' attributed episodes (attach_hazards): per ring the
+    window [first, last] frame it hurt after its trigger (the union over R0 dev), the centre offsets (median), the x
+    intervals where a row hazard ever stood (gaps > 1.5 u split them), and each trigger family's trigger bins after
+    its antic start (the pre-trigger prediction)."""
+    params, rep = {}, {}
+    for hz in spec.hazards:
+        eps = [e for tr in tracks for e in tr.get("hz_eps", ()) if e["hz"] == hz.name]
+        if not eps:
+            continue
+        nring = (hz.m_max + 1) if hz.shape == "row" else 1
+        on = [[] for _ in range(nring)]
+        off = [[] for _ in range(nring)]
+        dur = []
+        for e in eps:
+            on[e["ring"]].append((e["t_on"] - e["t"]) / FT)
+            off[e["ring"]].append((e["t_off"] - e["t"]) / FT)
+            dur.append(e["n"])
+        win = [[int(math.floor(min(a) + 1e-6)), int(math.ceil(max(b) - 1e-6))] if a else None
+               for a, b in zip(on, off)]
+        P: dict = {"win": win, "dv": float(np.median([e["cy"] - e["y"] for e in eps]))}
+        R: dict = {"episodes": len(eps), "lit_frames": _q(dur, (5, 50, 95, 100)),
+                   "rings": [{"ring": i, "n": len(on[i]), "on": _q(on[i], (0, 50, 100)),
+                              "off": _q(off[i], (0, 50, 100))}
+                             for i in range(nring) if on[i]]}
+        if hz.shape == "row":
+            res = [e["cx"] - e["x"] - hz.spacing * round((e["cx"] - e["x"]) / hz.spacing) for e in eps]
+            P["dx"] = float(np.median(res))
+            R["dx"] = _q(res, (0, 50, 100))
+            xs = np.sort([e["cx"] for e in eps])
+            cuts = np.nonzero(np.diff(xs) > 1.5)[0] + 1
+            P["x_ok"] = [[float(p[0]), float(p[-1])] for p in np.split(xs, cuts)]
+        else:
+            du = [(e["cx"] - e["x"]) * e["s"] for e in eps]
+            P["du"] = float(np.median(du))
+            R["du"] = _q(du, (0, 50, 100))
+        R["dv"] = _q([e["cy"] - e["y"] for e in eps], (0, 50, 100))
+        trig: dict = defaultdict(list)
+        for tr in tracks:
+            insts, _ = segment(tr, spec, f1)
+            for r in insts:
+                tt = r["inst"].trig.get(hz.name)
+                if tt is not None:
+                    trig[r["inst"].fam].append(bin_of(tt[0] - r["inst"].t0))
+        P["trig"] = {fam: [int(min(v)), int(max(v))] for fam, v in trig.items()}
+        R["trig"] = {fam: _q(v, (0, 50, 100)) for fam, v in trig.items()}
+        params[hz.name] = P
+        rep[hz.name] = R
+    return params, rep
+
+
+def _active_view(inst, t: float):
+    """The instance as the tracker saw it at game time t (its decision and hazard triggers up to t)."""
+    if inst is None:
+        return None
+    dec = inst.dec if inst.dec is not None and inst.dec["t"] <= t + 1e-9 else None
+    return dataclasses.replace(inst, dec=dec, trig={k: v for k, v in inst.trig.items() if v[0] <= t + 1e-9})
+
+
+def _module(spec):
+    from ssbot.combat.are_types import module_of
+    return module_of(spec.type_key)
+
+
+def _hero_gap(cx: float, cy: float, r: float, hx: float, hy: float) -> float:
+    """Distance from the hero hurtbox (HeroBox at the transform) to a circle collider: < 0 = they overlap (by how
+    much, along the nearest axis when the centre is outside the box)."""
+    from ssbot.combat.attack_range import HERO_DY, HERO_HALF
+    dx = abs(cx - hx) - HERO_HALF[0]
+    dy = abs(cy - (hy + HERO_DY)) - HERO_HALF[1]
+    if dx <= 0 and dy <= 0:
+        return -r + max(dx, dy)
+    return math.hypot(max(dx, 0.0), max(dy, 0.0)) - r
+
+
+def cmd_hazcheck(a) -> int:
+    """The hazards' real colliders checked against the damage they did (as the spear explosion was): per lit window
+    (the exported collider dealing damage) the hero hurtbox's distance to the circle each frame, and the damage /
+    damage_blocked events whose source names the hazard: do hits happen only while it is lit and only when the
+    hurtbox overlaps, and what happened in the windows where it overlapped without a hit."""
+    from ssbot.knowledge.forum_cache import load_cache
+    _idle_priority()
+    spec = spec_of(a.type)
+    res: dict = {}
+    for set_name in a.sets.split(","):
+        files = person_caches() if set_name == "person" else _cache_files(set_name)
+        for f in files:
+            c = load_cache(f)
+            trs = tracks_from_cache(c, spec.type_key, set_name)
+            if not trs:
+                continue
+            attach_hazards(c, trs, spec)
+            fnum = c["f"]
+            evs = [(int(ev[0]), ev[1], ev[2]) for ev in c["events"] if ev[1] in ("damage", "damage_blocked")]
+            for hz in spec.hazards:
+                R = res.setdefault(hz.name, {"windows": 0, "frames": 0, "hits": [], "blocked": defaultdict(int),
+                                             "outcome": defaultdict(int), "hit_gap": [], "hit_off": [],
+                                             "events": 0, "events_matched": 0, "gap_min": [], "none_cases": []})
+                hev = [e for e in evs if hz.name in str(e[2].get("source", ""))]
+                R["events"] += len(hev)
+                used = set()
+                for tr in trs:
+                    for ep in tr.get("hz_eps", ()):
+                        if ep["hz"] != hz.name:
+                            continue
+                        js = ep["frames"]
+                        if not js:
+                            continue
+                        R["windows"] += 1
+                        R["frames"] += len(js)
+                        f_on, f_off = int(tr["f"][js[0]]), int(tr["f"][js[-1]])
+                        fi_on = int(tr["fi"][js[0]])
+                        fc_on, fc_off = int(fnum[tr["fi"][js[0]]]), int(fnum[tr["fi"][js[-1]]])
+                        gaps = [_hero_gap(ep["cx"], ep["cy"], hz.radius, float(tr["hx"][j]), float(tr["hy"][j]))
+                                for j in js]
+                        gmin = min(gaps)
+                        R["gap_min"].append(gmin)
+                        got = None
+                        for n, (ef, kind, d) in enumerate(hev):
+                            if n in used or not (fc_on - 1 <= ef <= fc_off + 2):
+                                continue
+                            used.add(n)
+                            R["events_matched"] += 1
+                            if kind == "damage":
+                                got = "damage"
+                                k = int(np.searchsorted(fnum, ef))
+                                # the frame the hit is decided: the event's frame or the one before it
+                                jj = [j for j in js if int(fnum[tr["fi"][j]]) in (ef, ef - 1)] or [js[-1]]
+                                R["hit_gap"].append(min(_hero_gap(ep["cx"], ep["cy"], hz.radius, float(tr["hx"][j]),
+                                                                  float(tr["hy"][j])) for j in jj))
+                                R["hit_off"].append(ef - fc_on)
+                            else:
+                                got = got or f"blocked {d.get('why')}"
+                                R["blocked"][str(d.get("why"))] += 1
+                        band = "overlap>0.3" if gmin < -0.3 else ("overlap" if gmin < 0 else "clear")
+                        R["outcome"][f"{band}: {got or 'none'}"] += 1
+                        if band == "overlap>0.3" and got is None and len(R["none_cases"]) < 12:
+                            R["none_cases"].append({"fight": tr["fight"], "f_on": f_on, "f_off": f_off,
+                                                    "gap": round(gmin, 3),
+                                                    "fi": fi_on})
+                R["unmatched_events"] = R.get("unmatched_events", 0) + (len(hev) - len(used))
+                for n, (ef, kind, d) in enumerate(hev):
+                    if n not in used and len(R.setdefault("unmatched", [])) < 12:
+                        R["unmatched"].append({"fight": c["meta"].get("id"), "f": ef, "kind": kind,
+                                               "why": d.get("why")})
+        print(f"{set_name} done", flush=True)
+    out = {}
+    for name, R in res.items():
+        out[name] = {"windows": R["windows"], "lit_frames": R["frames"], "events": R["events"],
+                     "events_in_windows": R["events_matched"], "events_outside": R.get("unmatched_events", 0),
+                     "outcome": dict(R["outcome"]), "blocked": dict(R["blocked"]),
+                     "hit_gap": _q(R["hit_gap"], (0, 50, 95, 100)), "hit_off": _q(R["hit_off"], (0, 50, 95, 100)),
+                     "window_gap_min": _q(R["gap_min"], (0, 5, 50)), "none_cases": R["none_cases"],
+                     "unmatched": R.get("unmatched", [])}
+    p = out_dir(spec) / "hazcheck.json"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps(out, indent=1), "utf-8")
+    print(json.dumps(out, indent=1)[:6000])
+    return 0
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    ap.add_argument("--type", default=None, help="the enemy type (are_types module / short name / type key; "
+                                                 "default the Choristor)")
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("shapes")
     b = sub.add_parser("build")
@@ -653,16 +1036,21 @@ def main(argv=None) -> int:
     e = sub.add_parser("eval")
     e.add_argument("--set", required=True, choices=("dev", "fresh", "r2", "person"))
     e.add_argument("--every", type=int, default=2)
+    e.add_argument("--idle-every", type=int, default=6)
+    e.add_argument("--threads", type=int, default=1)
     e.add_argument("--table", default=None)
     pg = sub.add_parser("png")
-    pg.add_argument("--out", default=str(OUT / "png"))
-    tk = sub.add_parser("tracks", help="decode the person's sessions into OUT/person_tracks (pickles)")
+    pg.add_argument("--out", default=None)
+    pg.add_argument("--worst", type=int, default=8, help="also the worst frames of the person / fresh rows")
+    hc = sub.add_parser("hazcheck")
+    hc.add_argument("--sets", default="dev,fresh,r2")
+    tk = sub.add_parser("tracks", help="decode the person's sessions into the shared per-attempt caches")
     tk.add_argument("--sessions", default=",".join(PERSON))
     a = ap.parse_args(argv)
     if a.cmd == "tracks":
         _idle_priority()
-        tr = load_tracks("person", sessions=[x for x in a.sessions.split(",") if x])
-        print(f"{len(tr)} tracks")
+        fs = person_caches([x for x in a.sessions.split(",") if x])
+        print(f"{len(fs)} attempt caches")
         return 0
     if a.cmd == "shapes":
         return cmd_shapes(a)
@@ -670,6 +1058,8 @@ def main(argv=None) -> int:
         return cmd_build(a)
     if a.cmd == "eval":
         return cmd_eval(a)
+    if a.cmd == "hazcheck":
+        return cmd_hazcheck(a)
     if a.cmd == "png":
         from ssbot.tools.attack_range_png import cmd_png
         return cmd_png(a)
