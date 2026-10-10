@@ -12,7 +12,7 @@ import numpy as np
 
 from ssbot.combat.attack_range import (FT, HERO_DY, HERO_HALF, bin_of, contours, hazards_at, hero_space, load_table,
                                        poly_mask, union)
-from ssbot.tools.attack_range_build import compare, frame_polys, load_tracks, segment
+from ssbot.tools.attack_range_build import compare, frame_ctx, frame_polys, load_tracks, segment
 
 PX_U = 40
 FAM_COLOR = (60, 160, 255)        # BGR orange: the estimate
@@ -216,7 +216,8 @@ def _estimate(tr, insts, idx, tab, shapes, j: int, k: int):
         br = inst.branch if (inst.branch_t is not None and inst.branch_t <= T[j] + 1e-9) else None
         dec = inst.dec if (inst.dec is not None and inst.dec["t"] <= T[j] + 1e-9) else None
         E = tab.place(inst.fam, br, bt, (inst.x0, inst.y0), inst.s, inst.hero_du,
-                      now=(float(tr["x"][j]), float(tr["y"][j])), b_now=b, dec=dec, st_now=tr["st"][j])
+                      now=(float(tr["x"][j]), float(tr["y"][j])), b_now=b, dec=dec, st_now=tr["st"][j],
+                      ctx=frame_ctx(tr, j, inst, spec, shapes))
         info = (f"{inst.fam} branch {br or 'pending (union)'}{' -> ' + str(inst.branch) if br is None else ''}  "
                 f"bin {b} ({b * FT:.2f} s since the antic start)  anchor ({inst.x0:.2f}, {inst.y0:.2f}) "
                 f"facing {'+x' if inst.s > 0 else '-x'}" + (f"  hero du {inst.hero_du:.2f}" if inst.fam in spec.aim

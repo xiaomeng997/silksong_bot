@@ -169,6 +169,9 @@ def load_tracks(name: str, type_key: str | None = None, cache_dir: Path | None =
                 t["f"] = np.asarray(c["f_raw"][t["fi"]], np.int64)
         if spec.hazards and trs:
             attach_hazards(c, trs, spec)
+        attach = getattr(_module(spec), "attach", None)
+        if attach is not None and trs:
+            attach(c, trs)                     # a type's own truth (its colliders as polygons, its explosions)
         out += trs
     return out
 
@@ -197,7 +200,10 @@ def shapes_from_states(states, type_key: str = CHORISTOR.type_key) -> dict:
 
 def poly_of(name: str, box, flip: int, shapes: dict) -> np.ndarray:
     """The exact polygon of a rigid collider from its AABB (the AABB itself when its shape is unknown); a hazard
-    ("HZ:<name>", a circle collider) is its AABB's inscribed circle."""
+    ("HZ:<name>", a circle collider) is its AABB's inscribed circle; a box of more than 4 values is the polygon
+    itself (x0, y0, x1, y1, ...: a type's attach() gives a rotated collider that way)."""
+    if len(box) > 4:
+        return np.asarray(box, np.float64).reshape(-1, 2)
     x0, y0, x1, y1 = (float(v) for v in box)
     if name.startswith("HZ:"):
         return circle_poly(0.5 * (x0 + x1), 0.5 * (y0 + y1), 0.5 * (x1 - x0))
@@ -538,6 +544,15 @@ def compare(E: Mask, R: Mask, s: int, cell: float = CELL) -> dict:
     return out
 
 
+def frame_ctx(tr: dict, j: int, inst, spec=None, shapes: dict | None = None) -> dict:
+    """The place() context of frame j (EnemySpec.place_fn): its game time, the hero, the instance, the velocity and
+    (with spec) the body colliders now."""
+    vy = tr.get("vy")
+    return {"T": float(tr["T"][j]), "hero": (float(tr["hx"][j]), float(tr["hy"][j])), "inst": inst,
+            "vel": (float(tr["vx"][j]), float(vy[j]) if vy is not None else 0.0) if "vx" in tr else None,
+            "body": frame_polys(tr, j, shapes or {}, spec.body_names) if spec is not None else None}
+
+
 def _target(T: np.ndarray, j: int, k: int) -> int | None:
     t = T[j] + k * FT - 1e-6
     jt = int(np.searchsorted(T, t, "left"))
@@ -590,7 +605,7 @@ def eval_track(tr: dict, tab: RangeTable, shapes: dict, every: int = 2, idle_eve
                 bt = bin_of(float(T[jt]) - inst.t0)
                 E = tab.place(inst.fam, br, bt, (inst.x0, inst.y0), inst.s, inst.hero_du,
                               now=None if antic_anchor else (float(tr["x"][j]), float(tr["y"][j])), b_now=b, dec=dec,
-                              st_now=tr["st"][j])
+                              st_now=tr["st"][j], ctx=frame_ctx(tr, j, inst, spec, shapes))
                 base = {"fam": inst.fam, "br": inst.branch, "known": br is not None, "k": k, "b": b,
                         "t": round(bt * FT, 4), "next": bool(nxt), "int": bool(r["interrupted"]),
                         "f": int(tr["f"][j]), "fight": tr["fight"], "iid": tr["iid"]}

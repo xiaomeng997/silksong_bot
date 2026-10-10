@@ -4487,3 +4487,57 @@ idle = the body now; group 2 not drawn). Offline only (no game instance started)
   - Walk: carry the walking body (8 u/s) or keep "body now" (the person's call).
   - The wall-zone limits are R0 dev measurements; no terrain model. Overlap-without-damage windows unexplained.
   - Live overlay / --solo not run in the game.
+
+## Task attack range: all types, stage B - Envoy, Clawmaiden and her Spear (branch worktree-wf_2fe0d0c5-18e-2, 2026-10-10; forum.md §34)
+
+= main + stage A (77ccb1e). Same rules (no margin; idle = body; undecided branches = union; group 2 not drawn); built
+from R0 dev only; errors on R0 fresh / R2 / the person's sessions separately. Offline (no game instance started).
+
+- Framework hooks (the smallest that carried these types; Choristor / Clapper unchanged, their tests pass):
+  - `EnemySpec.on_step(inst, st, prev, T, x, y, s, hero_x, hero_y, tin, vx)`: called by `Segmenter.step` after its
+    own rules; the type records into the new `Inst.extra` (with game times) or sets the branch.
+  - `EnemySpec.place_fn(tab, fam, branch, b, anchor, s, hero_du, now, b_now, dec, st_now, ctx)` -> Mask | None:
+    `RangeTable.place(..., ctx=None)` delegates to it when ctx is given; ctx = {T, hero, inst, vel, body (the body
+    colliders now)}; passed by `RangeTracker.estimate`, `attack_range_build.eval_track` (`frame_ctx`) and
+    `attack_range_png._estimate`.
+  - Builder: a type module may define `attach(c, tracks)` (its own truth: polygons, explosions, tr["vy"]), called by
+    `load_tracks`; `poly_of` accepts a polygon (a box of more than 4 values).
+- Envoy (`are_types/envoy.py`, table `attack_range_envoy.npz` 15 KB + `.json`, force-added; shapes.json from 5
+  person sessions): EN_SLASH (single / jump: Combo? branch known at the state after Slash1 Recover; P1 backswing behind
+  at 0.483 s), EN_JUMPSLASH (from outside; none in R0 dev), EN_CHARGE (`charge_place`: still until bin 30, then
+  13.0 u/s from the observed position to min(hero x NOW + 4 u, wall 17.37 / 45.57), then the Charge End skid = R0 dev
+  median per frame, then the body), EN_AMBUSH. State-gated. Idle (Walker 2.4 u/s) = body now.
+- Clawmaiden (`are_types/clawmaiden.py`, table `attack_range_clawmaiden.npz` 37 KB + `.json`): CM_SLASH with 4
+  branches f/t (Slash 1 facing kept / turned vs the antic) x k/f (Slash 4 kept / flipped), recorded by `on_step`;
+  `slash_place` draws the union of the branches still possible at the row's time (4 / 2 / 1). CM_SPIN (body; incl.
+  Spear Cast Antic / Spear Fire Recover), CM_TELE (before Tele In only the pre-arrival states: the random arrival is
+  not drawn), CM_ENTRY (Tele In from nothing), CM_FLYTOSLASH, CM_FLY (Fly made a family so its body can be carried).
+  CARRY families (FLY, FLYTOSLASH, SPIN): the body colliders now moved by the exported velocity x k/60
+  (`CARRY_ON = False` = the approved idle rule, kept for the comparison).
+- Spear (`are_types/spear.py`, type key "Spear", table `attack_range_spear.npz` 16 KB, template unused): `spear_place`
+  computes every bin from the forum.md §31 rules: aim at the Antic Pause entry (spear -> hero + (0, 0.25), +-45 deg
+  fan on the facing), Antic Pause 0.150-0.167 / Antic 0.700-0.717 s (union of the two ends; once in Antic the
+  observed velocity gives the aim), Fire 37 u/s + ChaseObjectWisp toward the hero's CURRENT position (50 Hz, nearest
+  whole step count), terrain floor y 3.0 / walls x 14.2, 49.1 from Fire + 0.1 s, or the hero box -> explosion r 3.5529
+  at +0.9 u along the last flight direction, 0.108 s. Truth (`attach`): the Fire collider rebuilt as the triangle
+  along the velocity (AABB fit p50 0.15, max 0.31 u), the 7.106 u damager attached at the Explode entry.
+- Error (k0 / k12 coverage, area ratio; forum.md §34.5): k0 98.9-100 %, ratio 0.99-1.02 everywhere. k12: EN_SLASH
+  97.5-98.5 % (1.13-1.15; the single/jump union), EN_CHARGE 90.7-92.3 % (1.00; misses = the hero moving after the
+  estimate: back p95 2.6-2.9 u, front 3.3-3.9 u late), EN_AMBUSH 98.3-99.6 %, Envoy idle 75.4-75.5 % (walking);
+  CM_SLASH 89.5-91.5 % at ratio 1.80-1.85 (the side union before each decision: pending rows 1.82-1.87, decided rows
+  1.02-1.04 at 84-87 %), CM_FLY 80-82 %, CM_FLYTOSLASH 82-89 %, CM_SPIN 74-89 % (body now instead: 32-36 %),
+  CM_ENTRY 99.1-99.6 %; Spear 80.3 / 82.3 / 85.9 % at 1.08-1.11 (floor step count: 77.4 / 79.3 / 83.1 %).
+- PNGs: `C:\ssbot\data\m2_forum_are\{envoy (37), clawmaiden (53), spear (33)}\png` + `index.json` (per family,
+  worst rows; the spear also 4 flights of the person's sessions). The person's frames 085824 f7939 / f10427 hold no
+  Envoy / Clawmaiden.
+- Solo: `human_session --solo "Song Pilgrim 01" --overlay --overlay-range` -> wave 0 (`fo_r1_w0`, with a Reed and a
+  Choristor to clear; the Envoy enters by its ambush). `--solo "Song Handmaiden"` -> wave 3 (`fo_r1_w3`), alone.
+  Not run in the game; whether --solo counts the Spear entity as another enemy is unchecked. The overlay draws the
+  Spear as its own entry (label SP_SPEAR, grey "#iid": zone_overlay names only enemies).
+- Tests: `tests/test_attack_range_envoy_clawmaiden.py` (8: registry, charge to hero + 4 / wall / skid, slash side
+  union 4 -> 2, carried body exact at k0, teleport arrival not drawn, spear aim clamp, flight / homing / floor
+  explosion, tracker antic -> fire triangle, polygon truth) + `test_attack_range_types.py` + `test_attack_range.py`.
+- Open: the charge end and the spear homing use the hero's current position (no hero prediction); the flying body
+  uses the current velocity only (DistanceFly not modelled); the spear terrain is the floor + two walls (no
+  platforms); the 0.15 u triangle-vs-AABB residual (rotation lag?) unexplained; no replay (rrd) made; the carried body
+  (and the Clapper's Walk) vs the approved idle rule is the person's call.
