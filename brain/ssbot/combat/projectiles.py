@@ -31,6 +31,7 @@ predicted centre is the position after the last step before each query time (the
 adds +-SLACK_STEPS steps of time slack and a contact skin.
 """
 import math
+import os
 from dataclasses import dataclass
 
 import numpy as np
@@ -53,6 +54,23 @@ BELL_WALL_VX = 10.0                          # a side wall sends it back at 10 u
 BELL_NAIL_SPEED = 30.0                       # a nail hit's speed (94 of 94: 30.000)
 BELL_NAIL_OFF_S = 0.15                       # Nail Hit lasts 9 frames, collider off
 BELL_STATES_ON = frozenset(("Air", "Bounce"))
+# a nail hit's states (Tink L / R / U -> Nail Hit -> Air): from then on the bell is the hero's projectile (forum.md
+# bell paragraph, R1 v2 data2: of 7,284 thrown bells hit by the nail none hurt the hero afterwards, the 136 hits
+# recorded with them all fell on the nail hit's own frame; the redirected bell hurts enemies, "Enemy Damager"); a new
+# throw (Init) makes it the Bellbearer's again
+BELL_HIT_STATES = frozenset(("Tink L", "Tink R", "Tink U", "Nail Hit"))
+# SSBOT_FORUM_BELLS=off (forum.md §23.12): a hit-back bell stays a hazard on its redirected path (the support before the
+# hit-back rule); with ForumConfig.bell_hits off too (forum_planner_policy) the rule's A/B and rollback switch
+BELLS_ENV = "SSBOT_FORUM_BELLS"
+
+
+def bells_mode() -> str:
+    """SSBOT_FORUM_BELLS: "on" (default: hit-back bells and bells as hit targets) or "off"."""
+    v = os.environ.get(BELLS_ENV, "on").strip().lower() or "on"
+    if v not in ("on", "off"):
+        raise ValueError(f"{BELLS_ENV}={v!r}: on | off")
+    return v
+BELL_THROW_STATE = "Init"
 PIN_STATES_ON = frozenset(("Fly",))
 BOMB_R, RUNE_R = 2.166, 7.187
 BOMB_LEAD_S = (0.335, 0.360)                 # appearance -> armed (game time)
@@ -181,6 +199,7 @@ class _Haz:
     appear_T: float
     rel_box: tuple | None = None    # its damage box relative to it (the last one seen)
     arm_T: float | None = None
+    hit_back: bool = False          # a bell the hero's nail hit (BELL_HIT_STATES): no longer a hazard to the hero
 
 
 def hazard_type(e: Entity) -> str:
@@ -213,8 +232,10 @@ class HazardTracker:
 
     TYPES = frozenset((BELL, PIN, BOMB, RUNE))
 
-    def __init__(self, view: str = ORACLE):
+    def __init__(self, view: str = ORACLE, hit_back: bool | None = None):
         self.view = view
+        # a bell the hero's nail hit is no hazard to the hero (None: SSBOT_FORUM_BELLS, default on)
+        self.hit_back = bells_mode() == "on" if hit_back is None else bool(hit_back)
         self.reset()
 
     def reset(self) -> None:
@@ -260,6 +281,11 @@ class HazardTracker:
                 if st != h.state:
                     h.state, h.state_T = st, T
                 h.pos, h.vel, h.last_T, h.tk, h.on = pos, vel, T, tk, box is not None
+            if tk == BELL:
+                if st in BELL_HIT_STATES:
+                    h.hit_back = True
+                elif st == BELL_THROW_STATE:
+                    h.hit_back = False
             if box is not None:
                 h.rel_box = (box[0] - pos[0], box[1] - pos[1], box[2] - pos[0], box[3] - pos[1])
                 if h.arm_T is None:
@@ -313,6 +339,8 @@ class HazardTracker:
     def _bell(self, h: _Haz, origin: float, n: int, redirect: tuple | None = None) -> HazardPath | None:
         if h.state is not None and h.state not in BELL_STATES_ON and h.state != "Nail Hit":
             return None          # broken or put away (oracle view)
+        if h.hit_back and self.hit_back:
+            return None          # the hero's nail hit it: the hero's projectile now (BELL_HIT_STATES)
         t0 = self.clock.next_step(origin) - origin
         floor = h.vel[1] == 0.0 and abs(h.pos[1] - BELL_FLOOR_Y) < 0.01
         wall = (1 if abs(h.pos[0] - (WALL_L + BELL_R)) < 0.01 else -1 if abs(h.pos[0] - (WALL_R - BELL_R)) < 0.01
@@ -325,6 +353,8 @@ class HazardTracker:
         if redirect is None and h.pos[1] + BELL_R >= dome_y(h.pos[0]) - DOME_NEAR_U:
             tube = 1             # touching the dome now: the FSM's Bounce is still to set its velocity
         on[:, 0] = (h.on or h.state is None) and h.state != "Nail Hit"
+        if redirect is not None:
+            on[:, redirect[0]:] = False      # hit back by the hero: harmless to the hero from the hit on
         return HazardPath(h.tk, h.iid, "circle", BELL_R, 0.0, 0.0, t0, xs, ys, on, 1,
                           tube_from=None if tube is None else t0 + (tube - 1) * STEP_S)
 

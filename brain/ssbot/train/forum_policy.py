@@ -490,3 +490,58 @@ class IdlePolicy:
     def act(self, s: dict, tap) -> int:
         self.acts += 1
         return 0
+
+
+MINISTER = "Song Administrator"
+UNDER_X = 0.35                # |dx| hero - Minister transform inside which the policy stops walking
+PRESS_EVERY = 4               # attack held 2 frames of every PRESS_EVERY: the next swing comes within 4 frames of
+#                               the cooldown's end (Wanderer 0.3 s) or of a clash's NailParryRecover (0.1 s)
+
+
+class MinisterBelowPolicy:
+    """The R8 experiment "Wanderer under the Minister, up-slashing without a break" (forum_planner_plan R8, the person
+    2026-10-05: right under it, keep up-slashing; its charge slash and its counter are mostly clashed). Walks under
+    the nearest Minister in play (|dx| < UNDER_X: no walking), holds up and presses attack every PRESS_EVERY frames;
+    no jump, no dash, no other move. Without a Minister in play: no input. The clash / hit outcomes per Minister move
+    come from the recording (ssbot.tools.forum_clash_stats on the run); stats(): frames under one, frames with one in
+    the up slash's height reach, presses. reset / act / stats as ForumDataPolicyV2."""
+
+    act_after_clear = True
+
+    def __init__(self):
+        self.reset(random.Random(0), None)
+
+    def reset(self, rng: random.Random, enc: Encounter | None) -> None:
+        self.n = 0
+        self.frames_minister = 0
+        self.frames_under = 0
+        self.frames_reach = 0
+        self.presses = 0
+
+    def stats(self) -> dict:
+        return {"minister_below": True, "frames": self.n, "frames_minister": self.frames_minister,
+                "frames_under": self.frames_under, "frames_reach": self.frames_reach, "presses": self.presses}
+
+    def act(self, s: dict, tap) -> int:
+        self.n += 1
+        hero = s.get("hero") or {}
+        hp = hero.get("pos")
+        ms = [e for e in fighting(s) if e.get("type_key") == MINISTER and e.get("pos")]
+        if not hp or not ms:
+            return 0
+        self.frames_minister += 1
+        m = min(ms, key=lambda e: abs(e["pos"][0] - hp[0]))
+        dx = m["pos"][0] - hp[0]
+        out = B["up"]
+        if dx > UNDER_X:
+            out |= B["right"]
+        elif dx < -UNDER_X:
+            out |= B["left"]
+        else:
+            self.frames_under += 1
+        if abs(dx) < 1.0 and body_box(m)[1] - hp[1] < UP_Y[1]:
+            self.frames_reach += 1
+        if self.n % PRESS_EVERY < 2:
+            out |= B["attack"]
+            self.presses += int(self.n % PRESS_EVERY == 0)
+        return out
