@@ -644,7 +644,9 @@ def cmd_zones(a) -> int:
     from ssbot.knowledge import hitbox_tables as hb
     try:
         import psutil
-        psutil.Process().nice(psutil.BELOW_NORMAL_PRIORITY_CLASS)
+        p_ = psutil.Process()   # never raise an Idle job (the person: long runs at Idle)
+        if p_.nice() != getattr(psutil, "IDLE_PRIORITY_CLASS", None):
+            p_.nice(psutil.BELOW_NORMAL_PRIORITY_CLASS)
     except Exception:
         pass
     numba.set_num_threads(a.threads)
@@ -1143,7 +1145,9 @@ def replay_episode(job: dict) -> dict:
 def _rp_init(threads: int) -> None:
     try:
         import psutil
-        psutil.Process().nice(psutil.BELOW_NORMAL_PRIORITY_CLASS)
+        p_ = psutil.Process()   # never raise an Idle job (the person: long runs at Idle)
+        if p_.nice() != getattr(psutil, "IDLE_PRIORITY_CLASS", None):
+            p_.nice(psutil.BELOW_NORMAL_PRIORITY_CLASS)
     except Exception:
         pass
     numba.set_num_threads(threads)

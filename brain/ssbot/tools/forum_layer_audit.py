@@ -408,7 +408,9 @@ _POL: dict = {}
 def _init(threads: int, crest: str, variants: tuple) -> None:
     try:
         import psutil
-        psutil.Process().nice(psutil.BELOW_NORMAL_PRIORITY_CLASS)
+        p_ = psutil.Process()   # never raise an Idle job (the person: long runs at Idle)
+        if p_.nice() != getattr(psutil, "IDLE_PRIORITY_CLASS", None):
+            p_.nice(psutil.BELOW_NORMAL_PRIORITY_CLASS)
     except Exception:
         pass
     import dataclasses
