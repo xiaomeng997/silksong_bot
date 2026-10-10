@@ -753,7 +753,10 @@ def cell_geometry(type_name: str, name: str, p, cells: np.ndarray):
 
 def scan_state(lib: Library, type_name: str, name: str, att: AimedAttack, p, phase: float, lat: int,
                nchunk: int = 64) -> np.ndarray:
-    """int8 [len(grid y), len(grid x)]: 1 inescapable, 0 escapable, -1 impossible origin position."""
+    """int8 [len(grid y), len(grid x)]: 1 inescapable, 0 escapable, -1 impossible origin position. lat 0 or 2 (a
+    latency sweep builds the library with delay=L and scans it at lat 0)."""
+    if lat not in (0, 2):
+        raise ValueError("latency must be 0 or 2; for a sweep use build_library(..., delay=L) and lat 0")
     scan, _ = _kernel()
     gxa, gya = grid(type_name)
     gx, gy = np.meshgrid(gxa, gya)

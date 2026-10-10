@@ -3,30 +3,49 @@
   "type": "Reed",
   "attack": "RE_THROW",
   "grid_dx": 0.1,
-  "coords": "x = |hero HeroBox centre - enemy transform|.x toward the hero's side (= the fan), y up",
+  "coords": "x = (hero HeroBox centre - enemy origin).x toward the fan side, y up; origin: the Reed transform (fan = the hero's side)",
   "hero_box": [
    0.4554,
    2.2498,
    -0.38
   ],
+  "clearance": 0.1,
   "latencies": "first free key on decision + 1 + latency",
-  "values": "1 inescapable, 0 escapable, -1 impossible enemy position"
+  "union": "physics phases, then the neighbouring height / vy bins (aim_ics.neighbours)",
+  "locked": "states outside the alphabet: inescapable wherever the origin is possible",
+  "values": "1 inescapable, 0 escapable, -1 impossible origin position"
  },
  "area_u2": {
+  "measured|air_h0.25_fall_d_w0.3|0": 0.0,
+  "measured|air_h0.25_fall_d_w0.3|2": 0.0,
   "measured|air_h0.25_fall_d|0": 0.0,
   "measured|air_h0.25_fall_d|2": 0.0,
+  "measured|air_h0.25_fall_nd_w0.3|0": 0.0,
+  "measured|air_h0.25_fall_nd_w0.3|2": 0.0,
   "measured|air_h0.25_fall_nd|0": 0.0,
   "measured|air_h0.25_fall_nd|2": 0.0,
+  "measured|air_h0.25_rest_d_w0.3|0": 0.0,
+  "measured|air_h0.25_rest_d_w0.3|2": 0.0,
   "measured|air_h0.25_rest_d|0": 0.0,
   "measured|air_h0.25_rest_d|2": 0.0,
+  "measured|air_h0.25_rest_nd_w0.3|0": 0.0,
+  "measured|air_h0.25_rest_nd_w0.3|2": 0.0,
   "measured|air_h0.25_rest_nd|0": 0.0,
   "measured|air_h0.25_rest_nd|2": 0.0,
+  "measured|air_h0.25_rise_d_w0.3|0": 0.0,
+  "measured|air_h0.25_rise_d_w0.3|2": 0.0,
   "measured|air_h0.25_rise_d|0": 0.0,
   "measured|air_h0.25_rise_d|2": 0.0,
+  "measured|air_h0.25_rise_nd_w0.3|0": 0.0,
+  "measured|air_h0.25_rise_nd_w0.3|2": 0.0,
   "measured|air_h0.25_rise_nd|0": 0.0,
   "measured|air_h0.25_rise_nd|2": 0.0,
+  "measured|air_h1.0_fall_d_w0.3|0": 0.0,
+  "measured|air_h1.0_fall_d_w0.3|2": 0.0,
   "measured|air_h1.0_fall_d|0": 0.0,
   "measured|air_h1.0_fall_d|2": 0.0,
+  "measured|air_h1.0_fall_nd_w0.3|0": 0.0,
+  "measured|air_h1.0_fall_nd_w0.3|2": 0.0,
   "measured|air_h1.0_fall_nd|0": 0.0,
   "measured|air_h1.0_fall_nd|2": 0.0,
   "measured|air_h1.0_rest_d_w0.3|0": 0.0,
@@ -41,12 +60,20 @@
   "measured|air_h1.0_rest_nd_w1.5|2": 0.0,
   "measured|air_h1.0_rest_nd|0": 0.0,
   "measured|air_h1.0_rest_nd|2": 0.0,
+  "measured|air_h1.0_rise_d_w0.3|0": 0.0,
+  "measured|air_h1.0_rise_d_w0.3|2": 0.0,
   "measured|air_h1.0_rise_d|0": 0.0,
   "measured|air_h1.0_rise_d|2": 0.0,
+  "measured|air_h1.0_rise_nd_w0.3|0": 0.0,
+  "measured|air_h1.0_rise_nd_w0.3|2": 0.0,
   "measured|air_h1.0_rise_nd|0": 0.0,
   "measured|air_h1.0_rise_nd|2": 0.0,
+  "measured|air_h2.5_fall_d_w0.3|0": 0.0,
+  "measured|air_h2.5_fall_d_w0.3|2": 0.0,
   "measured|air_h2.5_fall_d|0": 0.0,
   "measured|air_h2.5_fall_d|2": 0.0,
+  "measured|air_h2.5_fall_nd_w0.3|0": 0.0,
+  "measured|air_h2.5_fall_nd_w0.3|2": 0.0,
   "measured|air_h2.5_fall_nd|0": 0.0,
   "measured|air_h2.5_fall_nd|2": 0.0,
   "measured|air_h2.5_rest_d_w0.3|0": 0.0,
@@ -61,26 +88,44 @@
   "measured|air_h2.5_rest_nd_w1.5|2": 0.0,
   "measured|air_h2.5_rest_nd|0": 0.0,
   "measured|air_h2.5_rest_nd|2": 0.0,
+  "measured|air_h2.5_rise_d_w0.3|0": 0.0,
+  "measured|air_h2.5_rise_d_w0.3|2": 0.0,
   "measured|air_h2.5_rise_d|0": 0.0,
   "measured|air_h2.5_rise_d|2": 0.0,
+  "measured|air_h2.5_rise_nd_w0.3|0": 0.0,
+  "measured|air_h2.5_rise_nd_w0.3|2": 0.0,
   "measured|air_h2.5_rise_nd|0": 0.0,
   "measured|air_h2.5_rise_nd|2": 0.0,
+  "measured|air_h5.0_fall_d_w0.3|0": 0.0,
+  "measured|air_h5.0_fall_d_w0.3|2": 0.0,
   "measured|air_h5.0_fall_d|0": 0.0,
   "measured|air_h5.0_fall_d|2": 0.0,
+  "measured|air_h5.0_fall_nd_w0.3|0": 0.0,
+  "measured|air_h5.0_fall_nd_w0.3|2": 0.0,
   "measured|air_h5.0_fall_nd|0": 0.0,
   "measured|air_h5.0_fall_nd|2": 0.0,
+  "measured|air_h5.0_rest_d_w0.3|0": 0.0,
+  "measured|air_h5.0_rest_d_w0.3|2": 0.0,
   "measured|air_h5.0_rest_d|0": 0.0,
   "measured|air_h5.0_rest_d|2": 0.0,
+  "measured|air_h5.0_rest_nd_w0.3|0": 0.0,
+  "measured|air_h5.0_rest_nd_w0.3|2": 0.0,
   "measured|air_h5.0_rest_nd|0": 0.0,
   "measured|air_h5.0_rest_nd|2": 0.0,
+  "measured|air_h5.0_rise_d_w0.3|0": 0.0,
+  "measured|air_h5.0_rise_d_w0.3|2": 0.0,
   "measured|air_h5.0_rise_d|0": 0.0,
   "measured|air_h5.0_rise_d|2": 0.0,
+  "measured|air_h5.0_rise_nd_w0.3|0": 0.0,
+  "measured|air_h5.0_rise_nd_w0.3|2": 0.0,
   "measured|air_h5.0_rise_nd|0": 0.0,
   "measured|air_h5.0_rise_nd|2": 0.0,
   "measured|dash_away|0": 0.0,
   "measured|dash_away|2": 0.0,
   "measured|dash_toward|0": 0.0,
   "measured|dash_toward|2": 0.0,
+  "measured|ground_nd_w0.3|0": 0.0,
+  "measured|ground_nd_w0.3|2": 0.0,
   "measured|ground_nd|0": 0.0,
   "measured|ground_nd|2": 0.0,
   "measured|ground_w0.3|0": 0.0,
@@ -88,99 +133,159 @@
   "measured|ground_w1.5|0": 0.0,
   "measured|ground_w1.5|2": 0.0,
   "measured|ground|0": 0.0,
+  "measured|ground|2": 0.0
+ },
+ "area_u2_before_bin_union": {
+  "measured|air_h0.25_fall_d|0": 0.0,
+  "measured|air_h0.25_fall_d|2": 0.0,
+  "measured|air_h0.25_fall_d_w0.3|0": 0.0,
+  "measured|air_h0.25_fall_d_w0.3|2": 0.0,
+  "measured|air_h0.25_fall_nd|0": 0.0,
+  "measured|air_h0.25_fall_nd|2": 0.0,
+  "measured|air_h0.25_fall_nd_w0.3|0": 0.0,
+  "measured|air_h0.25_fall_nd_w0.3|2": 0.0,
+  "measured|air_h0.25_rest_d|0": 0.0,
+  "measured|air_h0.25_rest_d|2": 0.0,
+  "measured|air_h0.25_rest_d_w0.3|0": 0.0,
+  "measured|air_h0.25_rest_d_w0.3|2": 0.0,
+  "measured|air_h0.25_rest_nd|0": 0.0,
+  "measured|air_h0.25_rest_nd|2": 0.0,
+  "measured|air_h0.25_rest_nd_w0.3|0": 0.0,
+  "measured|air_h0.25_rest_nd_w0.3|2": 0.0,
+  "measured|air_h0.25_rise_d|0": 0.0,
+  "measured|air_h0.25_rise_d|2": 0.0,
+  "measured|air_h0.25_rise_d_w0.3|0": 0.0,
+  "measured|air_h0.25_rise_d_w0.3|2": 0.0,
+  "measured|air_h0.25_rise_nd|0": 0.0,
+  "measured|air_h0.25_rise_nd|2": 0.0,
+  "measured|air_h0.25_rise_nd_w0.3|0": 0.0,
+  "measured|air_h0.25_rise_nd_w0.3|2": 0.0,
+  "measured|air_h1.0_fall_d|0": 0.0,
+  "measured|air_h1.0_fall_d|2": 0.0,
+  "measured|air_h1.0_fall_d_w0.3|0": 0.0,
+  "measured|air_h1.0_fall_d_w0.3|2": 0.0,
+  "measured|air_h1.0_fall_nd|0": 0.0,
+  "measured|air_h1.0_fall_nd|2": 0.0,
+  "measured|air_h1.0_fall_nd_w0.3|0": 0.0,
+  "measured|air_h1.0_fall_nd_w0.3|2": 0.0,
+  "measured|air_h1.0_rest_d|0": 0.0,
+  "measured|air_h1.0_rest_d|2": 0.0,
+  "measured|air_h1.0_rest_d_w0.3|0": 0.0,
+  "measured|air_h1.0_rest_d_w0.3|2": 0.0,
+  "measured|air_h1.0_rest_d_w1.5|0": 0.0,
+  "measured|air_h1.0_rest_d_w1.5|2": 0.0,
+  "measured|air_h1.0_rest_nd|0": 0.0,
+  "measured|air_h1.0_rest_nd|2": 0.0,
+  "measured|air_h1.0_rest_nd_w0.3|0": 0.0,
+  "measured|air_h1.0_rest_nd_w0.3|2": 0.0,
+  "measured|air_h1.0_rest_nd_w1.5|0": 0.0,
+  "measured|air_h1.0_rest_nd_w1.5|2": 0.0,
+  "measured|air_h1.0_rise_d|0": 0.0,
+  "measured|air_h1.0_rise_d|2": 0.0,
+  "measured|air_h1.0_rise_d_w0.3|0": 0.0,
+  "measured|air_h1.0_rise_d_w0.3|2": 0.0,
+  "measured|air_h1.0_rise_nd|0": 0.0,
+  "measured|air_h1.0_rise_nd|2": 0.0,
+  "measured|air_h1.0_rise_nd_w0.3|0": 0.0,
+  "measured|air_h1.0_rise_nd_w0.3|2": 0.0,
+  "measured|air_h2.5_fall_d|0": 0.0,
+  "measured|air_h2.5_fall_d|2": 0.0,
+  "measured|air_h2.5_fall_d_w0.3|0": 0.0,
+  "measured|air_h2.5_fall_d_w0.3|2": 0.0,
+  "measured|air_h2.5_fall_nd|0": 0.0,
+  "measured|air_h2.5_fall_nd|2": 0.0,
+  "measured|air_h2.5_fall_nd_w0.3|0": 0.0,
+  "measured|air_h2.5_fall_nd_w0.3|2": 0.0,
+  "measured|air_h2.5_rest_d|0": 0.0,
+  "measured|air_h2.5_rest_d|2": 0.0,
+  "measured|air_h2.5_rest_d_w0.3|0": 0.0,
+  "measured|air_h2.5_rest_d_w0.3|2": 0.0,
+  "measured|air_h2.5_rest_d_w1.5|0": 0.0,
+  "measured|air_h2.5_rest_d_w1.5|2": 0.0,
+  "measured|air_h2.5_rest_nd|0": 0.0,
+  "measured|air_h2.5_rest_nd|2": 0.0,
+  "measured|air_h2.5_rest_nd_w0.3|0": 0.0,
+  "measured|air_h2.5_rest_nd_w0.3|2": 0.0,
+  "measured|air_h2.5_rest_nd_w1.5|0": 0.0,
+  "measured|air_h2.5_rest_nd_w1.5|2": 0.0,
+  "measured|air_h2.5_rise_d|0": 0.0,
+  "measured|air_h2.5_rise_d|2": 0.0,
+  "measured|air_h2.5_rise_d_w0.3|0": 0.0,
+  "measured|air_h2.5_rise_d_w0.3|2": 0.0,
+  "measured|air_h2.5_rise_nd|0": 0.0,
+  "measured|air_h2.5_rise_nd|2": 0.0,
+  "measured|air_h2.5_rise_nd_w0.3|0": 0.0,
+  "measured|air_h2.5_rise_nd_w0.3|2": 0.0,
+  "measured|air_h5.0_fall_d|0": 0.0,
+  "measured|air_h5.0_fall_d|2": 0.0,
+  "measured|air_h5.0_fall_d_w0.3|0": 0.0,
+  "measured|air_h5.0_fall_d_w0.3|2": 0.0,
+  "measured|air_h5.0_fall_nd|0": 0.0,
+  "measured|air_h5.0_fall_nd|2": 0.0,
+  "measured|air_h5.0_fall_nd_w0.3|0": 0.0,
+  "measured|air_h5.0_fall_nd_w0.3|2": 0.0,
+  "measured|air_h5.0_rest_d|0": 0.0,
+  "measured|air_h5.0_rest_d|2": 0.0,
+  "measured|air_h5.0_rest_d_w0.3|0": 0.0,
+  "measured|air_h5.0_rest_d_w0.3|2": 0.0,
+  "measured|air_h5.0_rest_nd|0": 0.0,
+  "measured|air_h5.0_rest_nd|2": 0.0,
+  "measured|air_h5.0_rest_nd_w0.3|0": 0.0,
+  "measured|air_h5.0_rest_nd_w0.3|2": 0.0,
+  "measured|air_h5.0_rise_d|0": 0.0,
+  "measured|air_h5.0_rise_d|2": 0.0,
+  "measured|air_h5.0_rise_d_w0.3|0": 0.0,
+  "measured|air_h5.0_rise_d_w0.3|2": 0.0,
+  "measured|air_h5.0_rise_nd|0": 0.0,
+  "measured|air_h5.0_rise_nd|2": 0.0,
+  "measured|air_h5.0_rise_nd_w0.3|0": 0.0,
+  "measured|air_h5.0_rise_nd_w0.3|2": 0.0,
+  "measured|dash_away|0": 0.0,
+  "measured|dash_away|2": 0.0,
+  "measured|dash_toward|0": 0.0,
+  "measured|dash_toward|2": 0.0,
+  "measured|ground|0": 0.0,
   "measured|ground|2": 0.0,
-  "person|air_h0.25_fall_d|0": 0.03,
-  "person|air_h0.25_fall_d|2": 1.76,
-  "person|air_h0.25_fall_nd|0": 0.84,
-  "person|air_h0.25_fall_nd|2": 1.93,
-  "person|air_h0.25_rest_d|0": 0.04,
-  "person|air_h0.25_rest_d|2": 2.21,
-  "person|air_h0.25_rest_nd|0": 3.67,
-  "person|air_h0.25_rest_nd|2": 5.11,
-  "person|air_h0.25_rise_d|0": 0.04,
-  "person|air_h0.25_rise_d|2": 2.37,
-  "person|air_h0.25_rise_nd|0": 6.83,
-  "person|air_h0.25_rise_nd|2": 8.79,
-  "person|air_h1.0_fall_d|0": 1.22,
-  "person|air_h1.0_fall_d|2": 2.85,
-  "person|air_h1.0_fall_nd|0": 3.19,
-  "person|air_h1.0_fall_nd|2": 4.29,
-  "person|air_h1.0_rest_d_w0.3|0": 1.34,
-  "person|air_h1.0_rest_d_w0.3|2": 6.38,
-  "person|air_h1.0_rest_d_w1.5|0": 1.93,
-  "person|air_h1.0_rest_d_w1.5|2": 11.57,
-  "person|air_h1.0_rest_d|0": 1.3,
-  "person|air_h1.0_rest_d|2": 5.37,
-  "person|air_h1.0_rest_nd_w0.3|0": 2.11,
-  "person|air_h1.0_rest_nd_w0.3|2": 7.5,
-  "person|air_h1.0_rest_nd_w1.5|0": 9.36,
-  "person|air_h1.0_rest_nd_w1.5|2": 16.43,
-  "person|air_h1.0_rest_nd|0": 11.5,
-  "person|air_h1.0_rest_nd|2": 13.71,
-  "person|air_h1.0_rise_d|0": 1.31,
-  "person|air_h1.0_rise_d|2": 5.5,
-  "person|air_h1.0_rise_nd|0": 16.96,
-  "person|air_h1.0_rise_nd|2": 19.54,
-  "person|air_h2.5_fall_d|0": 0.0,
-  "person|air_h2.5_fall_d|2": 1.73,
-  "person|air_h2.5_fall_nd|0": 3.39,
-  "person|air_h2.5_fall_nd|2": 5.33,
-  "person|air_h2.5_rest_d_w0.3|0": 1.46,
-  "person|air_h2.5_rest_d_w0.3|2": 9.72,
-  "person|air_h2.5_rest_d_w1.5|0": 3.99,
-  "person|air_h2.5_rest_d_w1.5|2": 8.97,
-  "person|air_h2.5_rest_d|0": 0.62,
-  "person|air_h2.5_rest_d|2": 4.86,
-  "person|air_h2.5_rest_nd_w0.3|0": 2.23,
-  "person|air_h2.5_rest_nd_w0.3|2": 11.33,
-  "person|air_h2.5_rest_nd_w1.5|0": 11.32,
-  "person|air_h2.5_rest_nd_w1.5|2": 14.14,
-  "person|air_h2.5_rest_nd|0": 10.98,
-  "person|air_h2.5_rest_nd|2": 14.14,
-  "person|air_h2.5_rise_d|0": 0.62,
-  "person|air_h2.5_rise_d|2": 5.85,
-  "person|air_h2.5_rise_nd|0": 14.42,
-  "person|air_h2.5_rise_nd|2": 19.03,
-  "person|air_h5.0_fall_d|0": 0.0,
-  "person|air_h5.0_fall_d|2": 1.73,
-  "person|air_h5.0_fall_nd|0": 4.48,
-  "person|air_h5.0_fall_nd|2": 8.04,
-  "person|air_h5.0_rest_d|0": 0.39,
-  "person|air_h5.0_rest_d|2": 4.61,
-  "person|air_h5.0_rest_nd|0": 11.16,
-  "person|air_h5.0_rest_nd|2": 15.28,
-  "person|air_h5.0_rise_d|0": 0.39,
-  "person|air_h5.0_rise_d|2": 5.43,
-  "person|air_h5.0_rise_nd|0": 14.42,
-  "person|air_h5.0_rise_nd|2": 20.05,
-  "person|dash_away|0": 0.94,
-  "person|dash_away|2": 0.94,
-  "person|dash_toward|0": 11.96,
-  "person|dash_toward|2": 11.96,
-  "person|ground_nd|0": 1.42,
-  "person|ground_nd|2": 4.15,
-  "person|ground_w0.3|0": 0.19,
-  "person|ground_w0.3|2": 3.03,
-  "person|ground_w1.5|0": 0.0,
-  "person|ground_w1.5|2": 2.34,
-  "person|ground|0": 0.0,
-  "person|ground|2": 1.19
+  "measured|ground_nd|0": 0.0,
+  "measured|ground_nd|2": 0.0,
+  "measured|ground_nd_w0.3|0": 0.0,
+  "measured|ground_nd_w0.3|2": 0.0,
+  "measured|ground_w0.3|0": 0.0,
+  "measured|ground_w0.3|2": 0.0,
+  "measured|ground_w1.5|0": 0.0,
+  "measured|ground_w1.5|2": 0.0
  },
  "max_dist_u": {
+  "measured|air_h0.25_fall_d_w0.3|0": 0.0,
+  "measured|air_h0.25_fall_d_w0.3|2": 0.0,
   "measured|air_h0.25_fall_d|0": 0.0,
   "measured|air_h0.25_fall_d|2": 0.0,
+  "measured|air_h0.25_fall_nd_w0.3|0": 0.0,
+  "measured|air_h0.25_fall_nd_w0.3|2": 0.0,
   "measured|air_h0.25_fall_nd|0": 0.0,
   "measured|air_h0.25_fall_nd|2": 0.0,
+  "measured|air_h0.25_rest_d_w0.3|0": 0.0,
+  "measured|air_h0.25_rest_d_w0.3|2": 0.0,
   "measured|air_h0.25_rest_d|0": 0.0,
   "measured|air_h0.25_rest_d|2": 0.0,
+  "measured|air_h0.25_rest_nd_w0.3|0": 0.0,
+  "measured|air_h0.25_rest_nd_w0.3|2": 0.0,
   "measured|air_h0.25_rest_nd|0": 0.0,
   "measured|air_h0.25_rest_nd|2": 0.0,
+  "measured|air_h0.25_rise_d_w0.3|0": 0.0,
+  "measured|air_h0.25_rise_d_w0.3|2": 0.0,
   "measured|air_h0.25_rise_d|0": 0.0,
   "measured|air_h0.25_rise_d|2": 0.0,
+  "measured|air_h0.25_rise_nd_w0.3|0": 0.0,
+  "measured|air_h0.25_rise_nd_w0.3|2": 0.0,
   "measured|air_h0.25_rise_nd|0": 0.0,
   "measured|air_h0.25_rise_nd|2": 0.0,
+  "measured|air_h1.0_fall_d_w0.3|0": 0.0,
+  "measured|air_h1.0_fall_d_w0.3|2": 0.0,
   "measured|air_h1.0_fall_d|0": 0.0,
   "measured|air_h1.0_fall_d|2": 0.0,
+  "measured|air_h1.0_fall_nd_w0.3|0": 0.0,
+  "measured|air_h1.0_fall_nd_w0.3|2": 0.0,
   "measured|air_h1.0_fall_nd|0": 0.0,
   "measured|air_h1.0_fall_nd|2": 0.0,
   "measured|air_h1.0_rest_d_w0.3|0": 0.0,
@@ -195,12 +300,20 @@
   "measured|air_h1.0_rest_nd_w1.5|2": 0.0,
   "measured|air_h1.0_rest_nd|0": 0.0,
   "measured|air_h1.0_rest_nd|2": 0.0,
+  "measured|air_h1.0_rise_d_w0.3|0": 0.0,
+  "measured|air_h1.0_rise_d_w0.3|2": 0.0,
   "measured|air_h1.0_rise_d|0": 0.0,
   "measured|air_h1.0_rise_d|2": 0.0,
+  "measured|air_h1.0_rise_nd_w0.3|0": 0.0,
+  "measured|air_h1.0_rise_nd_w0.3|2": 0.0,
   "measured|air_h1.0_rise_nd|0": 0.0,
   "measured|air_h1.0_rise_nd|2": 0.0,
+  "measured|air_h2.5_fall_d_w0.3|0": 0.0,
+  "measured|air_h2.5_fall_d_w0.3|2": 0.0,
   "measured|air_h2.5_fall_d|0": 0.0,
   "measured|air_h2.5_fall_d|2": 0.0,
+  "measured|air_h2.5_fall_nd_w0.3|0": 0.0,
+  "measured|air_h2.5_fall_nd_w0.3|2": 0.0,
   "measured|air_h2.5_fall_nd|0": 0.0,
   "measured|air_h2.5_fall_nd|2": 0.0,
   "measured|air_h2.5_rest_d_w0.3|0": 0.0,
@@ -215,26 +328,44 @@
   "measured|air_h2.5_rest_nd_w1.5|2": 0.0,
   "measured|air_h2.5_rest_nd|0": 0.0,
   "measured|air_h2.5_rest_nd|2": 0.0,
+  "measured|air_h2.5_rise_d_w0.3|0": 0.0,
+  "measured|air_h2.5_rise_d_w0.3|2": 0.0,
   "measured|air_h2.5_rise_d|0": 0.0,
   "measured|air_h2.5_rise_d|2": 0.0,
+  "measured|air_h2.5_rise_nd_w0.3|0": 0.0,
+  "measured|air_h2.5_rise_nd_w0.3|2": 0.0,
   "measured|air_h2.5_rise_nd|0": 0.0,
   "measured|air_h2.5_rise_nd|2": 0.0,
+  "measured|air_h5.0_fall_d_w0.3|0": 0.0,
+  "measured|air_h5.0_fall_d_w0.3|2": 0.0,
   "measured|air_h5.0_fall_d|0": 0.0,
   "measured|air_h5.0_fall_d|2": 0.0,
+  "measured|air_h5.0_fall_nd_w0.3|0": 0.0,
+  "measured|air_h5.0_fall_nd_w0.3|2": 0.0,
   "measured|air_h5.0_fall_nd|0": 0.0,
   "measured|air_h5.0_fall_nd|2": 0.0,
+  "measured|air_h5.0_rest_d_w0.3|0": 0.0,
+  "measured|air_h5.0_rest_d_w0.3|2": 0.0,
   "measured|air_h5.0_rest_d|0": 0.0,
   "measured|air_h5.0_rest_d|2": 0.0,
+  "measured|air_h5.0_rest_nd_w0.3|0": 0.0,
+  "measured|air_h5.0_rest_nd_w0.3|2": 0.0,
   "measured|air_h5.0_rest_nd|0": 0.0,
   "measured|air_h5.0_rest_nd|2": 0.0,
+  "measured|air_h5.0_rise_d_w0.3|0": 0.0,
+  "measured|air_h5.0_rise_d_w0.3|2": 0.0,
   "measured|air_h5.0_rise_d|0": 0.0,
   "measured|air_h5.0_rise_d|2": 0.0,
+  "measured|air_h5.0_rise_nd_w0.3|0": 0.0,
+  "measured|air_h5.0_rise_nd_w0.3|2": 0.0,
   "measured|air_h5.0_rise_nd|0": 0.0,
   "measured|air_h5.0_rise_nd|2": 0.0,
   "measured|dash_away|0": 0.0,
   "measured|dash_away|2": 0.0,
   "measured|dash_toward|0": 0.0,
   "measured|dash_toward|2": 0.0,
+  "measured|ground_nd_w0.3|0": 0.0,
+  "measured|ground_nd_w0.3|2": 0.0,
   "measured|ground_nd|0": 0.0,
   "measured|ground_nd|2": 0.0,
   "measured|ground_w0.3|0": 0.0,
@@ -242,540 +373,598 @@
   "measured|ground_w1.5|0": 0.0,
   "measured|ground_w1.5|2": 0.0,
   "measured|ground|0": 0.0,
-  "measured|ground|2": 0.0,
-  "person|air_h0.25_fall_d|0": 2.35,
-  "person|air_h0.25_fall_d|2": 2.75,
-  "person|air_h0.25_fall_nd|0": 2.63,
-  "person|air_h0.25_fall_nd|2": 3.0,
-  "person|air_h0.25_rest_d|0": 2.45,
-  "person|air_h0.25_rest_d|2": 3.35,
-  "person|air_h0.25_rest_nd|0": 3.61,
-  "person|air_h0.25_rest_nd|2": 4.02,
-  "person|air_h0.25_rise_d|0": 2.45,
-  "person|air_h0.25_rise_d|2": 3.55,
-  "person|air_h0.25_rise_nd|0": 4.77,
-  "person|air_h0.25_rise_nd|2": 5.13,
-  "person|air_h1.0_fall_d|0": 4.16,
-  "person|air_h1.0_fall_d|2": 4.66,
-  "person|air_h1.0_fall_nd|0": 4.4,
-  "person|air_h1.0_fall_nd|2": 4.79,
-  "person|air_h1.0_rest_d_w0.3|0": 3.2,
-  "person|air_h1.0_rest_d_w0.3|2": 4.87,
-  "person|air_h1.0_rest_d_w1.5|0": 5.08,
-  "person|air_h1.0_rest_d_w1.5|2": 7.31,
-  "person|air_h1.0_rest_d|0": 4.16,
-  "person|air_h1.0_rest_d|2": 5.16,
-  "person|air_h1.0_rest_nd_w0.3|0": 3.24,
-  "person|air_h1.0_rest_nd_w0.3|2": 4.87,
-  "person|air_h1.0_rest_nd_w1.5|0": 6.18,
-  "person|air_h1.0_rest_nd_w1.5|2": 7.8,
-  "person|air_h1.0_rest_nd|0": 6.76,
-  "person|air_h1.0_rest_nd|2": 7.07,
-  "person|air_h1.0_rise_d|0": 4.16,
-  "person|air_h1.0_rise_d|2": 5.16,
-  "person|air_h1.0_rise_nd|0": 7.65,
-  "person|air_h1.0_rise_nd|2": 7.95,
-  "person|air_h2.5_fall_d|0": 0.0,
-  "person|air_h2.5_fall_d|2": 2.47,
-  "person|air_h2.5_fall_nd|0": 2.71,
-  "person|air_h2.5_fall_nd|2": 2.9,
-  "person|air_h2.5_rest_d_w0.3|0": 3.2,
-  "person|air_h2.5_rest_d_w0.3|2": 4.87,
-  "person|air_h2.5_rest_d_w1.5|0": 4.94,
-  "person|air_h2.5_rest_d_w1.5|2": 5.06,
-  "person|air_h2.5_rest_d|0": 4.1,
-  "person|air_h2.5_rest_d|2": 4.75,
-  "person|air_h2.5_rest_nd_w0.3|0": 3.24,
-  "person|air_h2.5_rest_nd_w0.3|2": 4.87,
-  "person|air_h2.5_rest_nd_w1.5|0": 4.94,
-  "person|air_h2.5_rest_nd_w1.5|2": 5.06,
-  "person|air_h2.5_rest_nd|0": 4.78,
-  "person|air_h2.5_rest_nd|2": 5.06,
-  "person|air_h2.5_rise_d|0": 4.1,
-  "person|air_h2.5_rise_d|2": 5.62,
-  "person|air_h2.5_rise_nd|0": 5.82,
-  "person|air_h2.5_rise_nd|2": 5.86,
-  "person|air_h5.0_fall_d|0": 0.0,
-  "person|air_h5.0_fall_d|2": 2.47,
-  "person|air_h5.0_fall_nd|0": 3.96,
-  "person|air_h5.0_fall_nd|2": 5.3,
-  "person|air_h5.0_rest_d|0": 3.29,
-  "person|air_h5.0_rest_d|2": 4.45,
-  "person|air_h5.0_rest_nd|0": 4.78,
-  "person|air_h5.0_rest_nd|2": 5.19,
-  "person|air_h5.0_rise_d|0": 3.29,
-  "person|air_h5.0_rise_d|2": 5.08,
-  "person|air_h5.0_rise_nd|0": 5.82,
-  "person|air_h5.0_rise_nd|2": 5.86,
-  "person|dash_away|0": 1.98,
-  "person|dash_away|2": 1.98,
-  "person|dash_toward|0": 9.54,
-  "person|dash_toward|2": 9.54,
-  "person|ground_nd|0": 2.76,
-  "person|ground_nd|2": 3.82,
-  "person|ground_w0.3|0": 3.04,
-  "person|ground_w0.3|2": 4.15,
-  "person|ground_w1.5|0": 0.0,
-  "person|ground_w1.5|2": 3.45,
-  "person|ground|0": 0.0,
-  "person|ground|2": 2.41
+  "measured|ground|2": 0.0
  },
  "phases": {
-  "z|measured|air_h0.25_fall_d|0": [
-   0.0
-  ],
-  "z|measured|air_h0.25_fall_d|2": [
-   0.0
-  ],
-  "z|measured|air_h0.25_fall_nd|0": [
-   0.0
-  ],
-  "z|measured|air_h0.25_fall_nd|2": [
-   0.0
-  ],
-  "z|measured|air_h0.25_rest_d|0": [
-   0.0
-  ],
-  "z|measured|air_h0.25_rest_d|2": [
-   0.0
-  ],
-  "z|measured|air_h0.25_rest_nd|0": [
-   0.0
-  ],
-  "z|measured|air_h0.25_rest_nd|2": [
-   0.0
-  ],
-  "z|measured|air_h0.25_rise_d|0": [
-   0.0
-  ],
-  "z|measured|air_h0.25_rise_d|2": [
-   0.0
-  ],
-  "z|measured|air_h0.25_rise_nd|0": [
-   0.0
-  ],
-  "z|measured|air_h0.25_rise_nd|2": [
-   0.0
-  ],
-  "z|measured|air_h1.0_fall_d|0": [
-   0.0
-  ],
-  "z|measured|air_h1.0_fall_d|2": [
-   0.0
-  ],
-  "z|measured|air_h1.0_fall_nd|0": [
-   0.0
-  ],
-  "z|measured|air_h1.0_fall_nd|2": [
-   0.0
-  ],
-  "z|measured|air_h1.0_rest_d|0": [
-   0.0
-  ],
-  "z|measured|air_h1.0_rest_d|2": [
-   0.0
-  ],
-  "z|measured|air_h1.0_rest_d_w0.3|0": [
-   0.0
-  ],
-  "z|measured|air_h1.0_rest_d_w0.3|2": [
-   0.0
-  ],
-  "z|measured|air_h1.0_rest_d_w1.5|0": [
-   0.0
-  ],
-  "z|measured|air_h1.0_rest_d_w1.5|2": [
-   0.0
-  ],
-  "z|measured|air_h1.0_rest_nd|0": [
-   0.0
-  ],
-  "z|measured|air_h1.0_rest_nd|2": [
-   0.0
-  ],
-  "z|measured|air_h1.0_rest_nd_w0.3|0": [
-   0.0
-  ],
-  "z|measured|air_h1.0_rest_nd_w0.3|2": [
-   0.0
-  ],
-  "z|measured|air_h1.0_rest_nd_w1.5|0": [
-   0.0
-  ],
-  "z|measured|air_h1.0_rest_nd_w1.5|2": [
-   0.0
-  ],
-  "z|measured|air_h1.0_rise_d|0": [
-   0.0
-  ],
-  "z|measured|air_h1.0_rise_d|2": [
-   0.0
-  ],
-  "z|measured|air_h1.0_rise_nd|0": [
-   0.0
-  ],
-  "z|measured|air_h1.0_rise_nd|2": [
-   0.0
-  ],
-  "z|measured|air_h2.5_fall_d|0": [
-   0.0
-  ],
-  "z|measured|air_h2.5_fall_d|2": [
-   0.0
-  ],
-  "z|measured|air_h2.5_fall_nd|0": [
-   0.0
-  ],
-  "z|measured|air_h2.5_fall_nd|2": [
-   0.0
-  ],
-  "z|measured|air_h2.5_rest_d|0": [
-   0.0
-  ],
-  "z|measured|air_h2.5_rest_d|2": [
-   0.0
-  ],
-  "z|measured|air_h2.5_rest_d_w0.3|0": [
-   0.0
-  ],
-  "z|measured|air_h2.5_rest_d_w0.3|2": [
-   0.0
-  ],
-  "z|measured|air_h2.5_rest_d_w1.5|0": [
-   0.0
-  ],
-  "z|measured|air_h2.5_rest_d_w1.5|2": [
-   0.0
-  ],
-  "z|measured|air_h2.5_rest_nd|0": [
-   0.0
-  ],
-  "z|measured|air_h2.5_rest_nd|2": [
-   0.0
-  ],
-  "z|measured|air_h2.5_rest_nd_w0.3|0": [
-   0.0
-  ],
-  "z|measured|air_h2.5_rest_nd_w0.3|2": [
-   0.0
-  ],
-  "z|measured|air_h2.5_rest_nd_w1.5|0": [
-   0.0
-  ],
-  "z|measured|air_h2.5_rest_nd_w1.5|2": [
-   0.0
-  ],
-  "z|measured|air_h2.5_rise_d|0": [
-   0.0
-  ],
-  "z|measured|air_h2.5_rise_d|2": [
-   0.0
-  ],
-  "z|measured|air_h2.5_rise_nd|0": [
-   0.0
-  ],
-  "z|measured|air_h2.5_rise_nd|2": [
-   0.0
-  ],
-  "z|measured|air_h5.0_fall_d|0": [
-   0.0
-  ],
-  "z|measured|air_h5.0_fall_d|2": [
-   0.0
-  ],
-  "z|measured|air_h5.0_fall_nd|0": [
-   0.0
-  ],
-  "z|measured|air_h5.0_fall_nd|2": [
-   0.0
-  ],
-  "z|measured|air_h5.0_rest_d|0": [
-   0.0
-  ],
-  "z|measured|air_h5.0_rest_d|2": [
-   0.0
-  ],
-  "z|measured|air_h5.0_rest_nd|0": [
-   0.0
-  ],
-  "z|measured|air_h5.0_rest_nd|2": [
-   0.0
-  ],
-  "z|measured|air_h5.0_rise_d|0": [
-   0.0
-  ],
-  "z|measured|air_h5.0_rise_d|2": [
-   0.0
-  ],
-  "z|measured|air_h5.0_rise_nd|0": [
-   0.0
-  ],
-  "z|measured|air_h5.0_rise_nd|2": [
-   0.0
-  ],
-  "z|measured|dash_away|0": [
-   0.0
-  ],
-  "z|measured|dash_away|2": [
-   0.0
-  ],
-  "z|measured|dash_toward|0": [
-   0.0
-  ],
-  "z|measured|dash_toward|2": [
-   0.0
-  ],
-  "z|measured|ground|0": [
-   0.0
-  ],
-  "z|measured|ground|2": [
-   0.0
-  ],
-  "z|measured|ground_nd|0": [
-   0.0
-  ],
-  "z|measured|ground_nd|2": [
-   0.0
-  ],
-  "z|measured|ground_w0.3|0": [
-   0.0
-  ],
-  "z|measured|ground_w0.3|2": [
-   0.0
-  ],
-  "z|measured|ground_w1.5|0": [
-   0.0
-  ],
-  "z|measured|ground_w1.5|2": [
-   0.0
-  ],
-  "z|person|air_h0.25_fall_d|0": [
-   0.0
-  ],
-  "z|person|air_h0.25_fall_d|2": [
-   0.0
-  ],
-  "z|person|air_h0.25_fall_nd|0": [
-   0.0
-  ],
-  "z|person|air_h0.25_fall_nd|2": [
-   0.0
-  ],
-  "z|person|air_h0.25_rest_d|0": [
-   0.0
-  ],
-  "z|person|air_h0.25_rest_d|2": [
-   0.0
-  ],
-  "z|person|air_h0.25_rest_nd|0": [
-   0.0
-  ],
-  "z|person|air_h0.25_rest_nd|2": [
-   0.0
-  ],
-  "z|person|air_h0.25_rise_d|0": [
-   0.0
-  ],
-  "z|person|air_h0.25_rise_d|2": [
-   0.0
-  ],
-  "z|person|air_h0.25_rise_nd|0": [
-   0.0
-  ],
-  "z|person|air_h0.25_rise_nd|2": [
-   0.0
-  ],
-  "z|person|air_h1.0_fall_d|0": [
-   0.0
-  ],
-  "z|person|air_h1.0_fall_d|2": [
-   0.0
-  ],
-  "z|person|air_h1.0_fall_nd|0": [
-   0.0
-  ],
-  "z|person|air_h1.0_fall_nd|2": [
-   0.0
-  ],
-  "z|person|air_h1.0_rest_d|0": [
-   0.0
-  ],
-  "z|person|air_h1.0_rest_d|2": [
-   0.0
-  ],
-  "z|person|air_h1.0_rest_d_w0.3|0": [
-   0.0
-  ],
-  "z|person|air_h1.0_rest_d_w0.3|2": [
-   0.0
-  ],
-  "z|person|air_h1.0_rest_d_w1.5|0": [
-   0.0
-  ],
-  "z|person|air_h1.0_rest_d_w1.5|2": [
-   0.0
-  ],
-  "z|person|air_h1.0_rest_nd|0": [
-   0.0
-  ],
-  "z|person|air_h1.0_rest_nd|2": [
-   0.0
-  ],
-  "z|person|air_h1.0_rest_nd_w0.3|0": [
-   0.0
-  ],
-  "z|person|air_h1.0_rest_nd_w0.3|2": [
-   0.0
-  ],
-  "z|person|air_h1.0_rest_nd_w1.5|0": [
-   0.0
-  ],
-  "z|person|air_h1.0_rest_nd_w1.5|2": [
-   0.0
-  ],
-  "z|person|air_h1.0_rise_d|0": [
-   0.0
-  ],
-  "z|person|air_h1.0_rise_d|2": [
-   0.0
-  ],
-  "z|person|air_h1.0_rise_nd|0": [
-   0.0
-  ],
-  "z|person|air_h1.0_rise_nd|2": [
-   0.0
-  ],
-  "z|person|air_h2.5_fall_d|0": [
-   0.0
-  ],
-  "z|person|air_h2.5_fall_d|2": [
-   0.0
-  ],
-  "z|person|air_h2.5_fall_nd|0": [
-   0.0
-  ],
-  "z|person|air_h2.5_fall_nd|2": [
-   0.0
-  ],
-  "z|person|air_h2.5_rest_d|0": [
-   0.0
-  ],
-  "z|person|air_h2.5_rest_d|2": [
-   0.0
-  ],
-  "z|person|air_h2.5_rest_d_w0.3|0": [
-   0.0
-  ],
-  "z|person|air_h2.5_rest_d_w0.3|2": [
-   0.0
-  ],
-  "z|person|air_h2.5_rest_d_w1.5|0": [
-   0.0
-  ],
-  "z|person|air_h2.5_rest_d_w1.5|2": [
-   0.0
-  ],
-  "z|person|air_h2.5_rest_nd|0": [
-   0.0
-  ],
-  "z|person|air_h2.5_rest_nd|2": [
-   0.0
-  ],
-  "z|person|air_h2.5_rest_nd_w0.3|0": [
-   0.0
-  ],
-  "z|person|air_h2.5_rest_nd_w0.3|2": [
-   0.0
-  ],
-  "z|person|air_h2.5_rest_nd_w1.5|0": [
-   0.0
-  ],
-  "z|person|air_h2.5_rest_nd_w1.5|2": [
-   0.0
-  ],
-  "z|person|air_h2.5_rise_d|0": [
-   0.0
-  ],
-  "z|person|air_h2.5_rise_d|2": [
-   0.0
-  ],
-  "z|person|air_h2.5_rise_nd|0": [
-   0.0
-  ],
-  "z|person|air_h2.5_rise_nd|2": [
-   0.0
-  ],
-  "z|person|air_h5.0_fall_d|0": [
-   0.0
-  ],
-  "z|person|air_h5.0_fall_d|2": [
-   0.0
-  ],
-  "z|person|air_h5.0_fall_nd|0": [
-   0.0
-  ],
-  "z|person|air_h5.0_fall_nd|2": [
-   0.0
-  ],
-  "z|person|air_h5.0_rest_d|0": [
-   0.0
-  ],
-  "z|person|air_h5.0_rest_d|2": [
-   0.0
-  ],
-  "z|person|air_h5.0_rest_nd|0": [
-   0.0
-  ],
-  "z|person|air_h5.0_rest_nd|2": [
-   0.0
-  ],
-  "z|person|air_h5.0_rise_d|0": [
-   0.0
-  ],
-  "z|person|air_h5.0_rise_d|2": [
-   0.0
-  ],
-  "z|person|air_h5.0_rise_nd|0": [
-   0.0
-  ],
-  "z|person|air_h5.0_rise_nd|2": [
-   0.0
-  ],
-  "z|person|dash_away|0": [
-   0.0
-  ],
-  "z|person|dash_away|2": [
-   0.0
-  ],
-  "z|person|dash_toward|0": [
-   0.0
-  ],
-  "z|person|dash_toward|2": [
-   0.0
-  ],
-  "z|person|ground|0": [
-   0.0
-  ],
-  "z|person|ground|2": [
-   0.0
-  ],
-  "z|person|ground_nd|0": [
-   0.0
-  ],
-  "z|person|ground_nd|2": [
-   0.0
-  ],
-  "z|person|ground_w0.3|0": [
-   0.0
-  ],
-  "z|person|ground_w0.3|2": [
-   0.0
-  ],
-  "z|person|ground_w1.5|0": [
-   0.0
-  ],
-  "z|person|ground_w1.5|2": [
-   0.0
+  "measured|air_h0.25_fall_d|0": [
+   0.0,
+   0.33,
+   0.67
+  ],
+  "measured|air_h0.25_fall_d|2": [
+   0.0,
+   0.33,
+   0.67
+  ],
+  "measured|air_h0.25_fall_d_w0.3|0": [
+   0.0,
+   0.33,
+   0.67
+  ],
+  "measured|air_h0.25_fall_d_w0.3|2": [
+   0.0,
+   0.33,
+   0.67
+  ],
+  "measured|air_h0.25_fall_nd|0": [
+   0.0,
+   0.33,
+   0.67
+  ],
+  "measured|air_h0.25_fall_nd|2": [
+   0.0,
+   0.33,
+   0.67
+  ],
+  "measured|air_h0.25_fall_nd_w0.3|0": [
+   0.0,
+   0.33,
+   0.67
+  ],
+  "measured|air_h0.25_fall_nd_w0.3|2": [
+   0.0,
+   0.33,
+   0.67
+  ],
+  "measured|air_h0.25_rest_d|0": [
+   0.0,
+   0.33,
+   0.67
+  ],
+  "measured|air_h0.25_rest_d|2": [
+   0.0,
+   0.33,
+   0.67
+  ],
+  "measured|air_h0.25_rest_d_w0.3|0": [
+   0.0,
+   0.33,
+   0.67
+  ],
+  "measured|air_h0.25_rest_d_w0.3|2": [
+   0.0,
+   0.33,
+   0.67
+  ],
+  "measured|air_h0.25_rest_nd|0": [
+   0.0,
+   0.33,
+   0.67
+  ],
+  "measured|air_h0.25_rest_nd|2": [
+   0.0,
+   0.33,
+   0.67
+  ],
+  "measured|air_h0.25_rest_nd_w0.3|0": [
+   0.0,
+   0.33,
+   0.67
+  ],
+  "measured|air_h0.25_rest_nd_w0.3|2": [
+   0.0,
+   0.33,
+   0.67
+  ],
+  "measured|air_h0.25_rise_d|0": [
+   0.0,
+   0.33,
+   0.67
+  ],
+  "measured|air_h0.25_rise_d|2": [
+   0.0,
+   0.33,
+   0.67
+  ],
+  "measured|air_h0.25_rise_d_w0.3|0": [
+   0.0,
+   0.33,
+   0.67
+  ],
+  "measured|air_h0.25_rise_d_w0.3|2": [
+   0.0,
+   0.33,
+   0.67
+  ],
+  "measured|air_h0.25_rise_nd|0": [
+   0.0,
+   0.33,
+   0.67
+  ],
+  "measured|air_h0.25_rise_nd|2": [
+   0.0,
+   0.33,
+   0.67
+  ],
+  "measured|air_h0.25_rise_nd_w0.3|0": [
+   0.0,
+   0.33,
+   0.67
+  ],
+  "measured|air_h0.25_rise_nd_w0.3|2": [
+   0.0,
+   0.33,
+   0.67
+  ],
+  "measured|air_h1.0_fall_d|0": [
+   0.0,
+   0.33,
+   0.67
+  ],
+  "measured|air_h1.0_fall_d|2": [
+   0.0,
+   0.33,
+   0.67
+  ],
+  "measured|air_h1.0_fall_d_w0.3|0": [
+   0.0,
+   0.33,
+   0.67
+  ],
+  "measured|air_h1.0_fall_d_w0.3|2": [
+   0.0,
+   0.33,
+   0.67
+  ],
+  "measured|air_h1.0_fall_nd|0": [
+   0.0,
+   0.33,
+   0.67
+  ],
+  "measured|air_h1.0_fall_nd|2": [
+   0.0,
+   0.33,
+   0.67
+  ],
+  "measured|air_h1.0_fall_nd_w0.3|0": [
+   0.0,
+   0.33,
+   0.67
+  ],
+  "measured|air_h1.0_fall_nd_w0.3|2": [
+   0.0,
+   0.33,
+   0.67
+  ],
+  "measured|air_h1.0_rest_d|0": [
+   0.0,
+   0.33,
+   0.67
+  ],
+  "measured|air_h1.0_rest_d|2": [
+   0.0,
+   0.33,
+   0.67
+  ],
+  "measured|air_h1.0_rest_d_w0.3|0": [
+   0.0,
+   0.33,
+   0.67
+  ],
+  "measured|air_h1.0_rest_d_w0.3|2": [
+   0.0,
+   0.33,
+   0.67
+  ],
+  "measured|air_h1.0_rest_d_w1.5|0": [
+   0.0,
+   0.33,
+   0.67
+  ],
+  "measured|air_h1.0_rest_d_w1.5|2": [
+   0.0,
+   0.33,
+   0.67
+  ],
+  "measured|air_h1.0_rest_nd|0": [
+   0.0,
+   0.33,
+   0.67
+  ],
+  "measured|air_h1.0_rest_nd|2": [
+   0.0,
+   0.33,
+   0.67
+  ],
+  "measured|air_h1.0_rest_nd_w0.3|0": [
+   0.0,
+   0.33,
+   0.67
+  ],
+  "measured|air_h1.0_rest_nd_w0.3|2": [
+   0.0,
+   0.33,
+   0.67
+  ],
+  "measured|air_h1.0_rest_nd_w1.5|0": [
+   0.0,
+   0.33,
+   0.67
+  ],
+  "measured|air_h1.0_rest_nd_w1.5|2": [
+   0.0,
+   0.33,
+   0.67
+  ],
+  "measured|air_h1.0_rise_d|0": [
+   0.0,
+   0.33,
+   0.67
+  ],
+  "measured|air_h1.0_rise_d|2": [
+   0.0,
+   0.33,
+   0.67
+  ],
+  "measured|air_h1.0_rise_d_w0.3|0": [
+   0.0,
+   0.33,
+   0.67
+  ],
+  "measured|air_h1.0_rise_d_w0.3|2": [
+   0.0,
+   0.33,
+   0.67
+  ],
+  "measured|air_h1.0_rise_nd|0": [
+   0.0,
+   0.33,
+   0.67
+  ],
+  "measured|air_h1.0_rise_nd|2": [
+   0.0,
+   0.33,
+   0.67
+  ],
+  "measured|air_h1.0_rise_nd_w0.3|0": [
+   0.0,
+   0.33,
+   0.67
+  ],
+  "measured|air_h1.0_rise_nd_w0.3|2": [
+   0.0,
+   0.33,
+   0.67
+  ],
+  "measured|air_h2.5_fall_d|0": [
+   0.0,
+   0.33,
+   0.67
+  ],
+  "measured|air_h2.5_fall_d|2": [
+   0.0,
+   0.33,
+   0.67
+  ],
+  "measured|air_h2.5_fall_d_w0.3|0": [
+   0.0,
+   0.33,
+   0.67
+  ],
+  "measured|air_h2.5_fall_d_w0.3|2": [
+   0.0,
+   0.33,
+   0.67
+  ],
+  "measured|air_h2.5_fall_nd|0": [
+   0.0,
+   0.33,
+   0.67
+  ],
+  "measured|air_h2.5_fall_nd|2": [
+   0.0,
+   0.33,
+   0.67
+  ],
+  "measured|air_h2.5_fall_nd_w0.3|0": [
+   0.0,
+   0.33,
+   0.67
+  ],
+  "measured|air_h2.5_fall_nd_w0.3|2": [
+   0.0,
+   0.33,
+   0.67
+  ],
+  "measured|air_h2.5_rest_d|0": [
+   0.0,
+   0.33,
+   0.67
+  ],
+  "measured|air_h2.5_rest_d|2": [
+   0.0,
+   0.33,
+   0.67
+  ],
+  "measured|air_h2.5_rest_d_w0.3|0": [
+   0.0,
+   0.33,
+   0.67
+  ],
+  "measured|air_h2.5_rest_d_w0.3|2": [
+   0.0,
+   0.33,
+   0.67
+  ],
+  "measured|air_h2.5_rest_d_w1.5|0": [
+   0.0,
+   0.33,
+   0.67
+  ],
+  "measured|air_h2.5_rest_d_w1.5|2": [
+   0.0,
+   0.33,
+   0.67
+  ],
+  "measured|air_h2.5_rest_nd|0": [
+   0.0,
+   0.33,
+   0.67
+  ],
+  "measured|air_h2.5_rest_nd|2": [
+   0.0,
+   0.33,
+   0.67
+  ],
+  "measured|air_h2.5_rest_nd_w0.3|0": [
+   0.0,
+   0.33,
+   0.67
+  ],
+  "measured|air_h2.5_rest_nd_w0.3|2": [
+   0.0,
+   0.33,
+   0.67
+  ],
+  "measured|air_h2.5_rest_nd_w1.5|0": [
+   0.0,
+   0.33,
+   0.67
+  ],
+  "measured|air_h2.5_rest_nd_w1.5|2": [
+   0.0,
+   0.33,
+   0.67
+  ],
+  "measured|air_h2.5_rise_d|0": [
+   0.0,
+   0.33,
+   0.67
+  ],
+  "measured|air_h2.5_rise_d|2": [
+   0.0,
+   0.33,
+   0.67
+  ],
+  "measured|air_h2.5_rise_d_w0.3|0": [
+   0.0,
+   0.33,
+   0.67
+  ],
+  "measured|air_h2.5_rise_d_w0.3|2": [
+   0.0,
+   0.33,
+   0.67
+  ],
+  "measured|air_h2.5_rise_nd|0": [
+   0.0,
+   0.33,
+   0.67
+  ],
+  "measured|air_h2.5_rise_nd|2": [
+   0.0,
+   0.33,
+   0.67
+  ],
+  "measured|air_h2.5_rise_nd_w0.3|0": [
+   0.0,
+   0.33,
+   0.67
+  ],
+  "measured|air_h2.5_rise_nd_w0.3|2": [
+   0.0,
+   0.33,
+   0.67
+  ],
+  "measured|air_h5.0_fall_d|0": [
+   0.0,
+   0.33,
+   0.67
+  ],
+  "measured|air_h5.0_fall_d|2": [
+   0.0,
+   0.33,
+   0.67
+  ],
+  "measured|air_h5.0_fall_d_w0.3|0": [
+   0.0,
+   0.33,
+   0.67
+  ],
+  "measured|air_h5.0_fall_d_w0.3|2": [
+   0.0,
+   0.33,
+   0.67
+  ],
+  "measured|air_h5.0_fall_nd|0": [
+   0.0,
+   0.33,
+   0.67
+  ],
+  "measured|air_h5.0_fall_nd|2": [
+   0.0,
+   0.33,
+   0.67
+  ],
+  "measured|air_h5.0_fall_nd_w0.3|0": [
+   0.0,
+   0.33,
+   0.67
+  ],
+  "measured|air_h5.0_fall_nd_w0.3|2": [
+   0.0,
+   0.33,
+   0.67
+  ],
+  "measured|air_h5.0_rest_d|0": [
+   0.0,
+   0.33,
+   0.67
+  ],
+  "measured|air_h5.0_rest_d|2": [
+   0.0,
+   0.33,
+   0.67
+  ],
+  "measured|air_h5.0_rest_d_w0.3|0": [
+   0.0,
+   0.33,
+   0.67
+  ],
+  "measured|air_h5.0_rest_d_w0.3|2": [
+   0.0,
+   0.33,
+   0.67
+  ],
+  "measured|air_h5.0_rest_nd|0": [
+   0.0,
+   0.33,
+   0.67
+  ],
+  "measured|air_h5.0_rest_nd|2": [
+   0.0,
+   0.33,
+   0.67
+  ],
+  "measured|air_h5.0_rest_nd_w0.3|0": [
+   0.0,
+   0.33,
+   0.67
+  ],
+  "measured|air_h5.0_rest_nd_w0.3|2": [
+   0.0,
+   0.33,
+   0.67
+  ],
+  "measured|air_h5.0_rise_d|0": [
+   0.0,
+   0.33,
+   0.67
+  ],
+  "measured|air_h5.0_rise_d|2": [
+   0.0,
+   0.33,
+   0.67
+  ],
+  "measured|air_h5.0_rise_d_w0.3|0": [
+   0.0,
+   0.33,
+   0.67
+  ],
+  "measured|air_h5.0_rise_d_w0.3|2": [
+   0.0,
+   0.33,
+   0.67
+  ],
+  "measured|air_h5.0_rise_nd|0": [
+   0.0,
+   0.33,
+   0.67
+  ],
+  "measured|air_h5.0_rise_nd|2": [
+   0.0,
+   0.33,
+   0.67
+  ],
+  "measured|air_h5.0_rise_nd_w0.3|0": [
+   0.0,
+   0.33,
+   0.67
+  ],
+  "measured|air_h5.0_rise_nd_w0.3|2": [
+   0.0,
+   0.33,
+   0.67
+  ],
+  "measured|dash_away|0": [
+   0.0,
+   0.33,
+   0.67
+  ],
+  "measured|dash_away|2": [
+   0.0,
+   0.33,
+   0.67
+  ],
+  "measured|dash_toward|0": [
+   0.0,
+   0.33,
+   0.67
+  ],
+  "measured|dash_toward|2": [
+   0.0,
+   0.33,
+   0.67
+  ],
+  "measured|ground|0": [
+   0.0,
+   0.33,
+   0.67
+  ],
+  "measured|ground|2": [
+   0.0,
+   0.33,
+   0.67
+  ],
+  "measured|ground_nd|0": [
+   0.0,
+   0.33,
+   0.67
+  ],
+  "measured|ground_nd|2": [
+   0.0,
+   0.33,
+   0.67
+  ],
+  "measured|ground_nd_w0.3|0": [
+   0.0,
+   0.33,
+   0.67
+  ],
+  "measured|ground_nd_w0.3|2": [
+   0.0,
+   0.33,
+   0.67
+  ],
+  "measured|ground_w0.3|0": [
+   0.0,
+   0.33,
+   0.67
+  ],
+  "measured|ground_w0.3|2": [
+   0.0,
+   0.33,
+   0.67
+  ],
+  "measured|ground_w1.5|0": [
+   0.0,
+   0.33,
+   0.67
+  ],
+  "measured|ground_w1.5|2": [
+   0.0,
+   0.33,
+   0.67
   ]
  }
 }
