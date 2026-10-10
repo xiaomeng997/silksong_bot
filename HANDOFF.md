@@ -4224,3 +4224,11 @@ S0 (planner AIM off; P0 is display / truth / aim templates): baseline 0.60 % = 3
 - Decision for integration: TINYCLIP / BODYCLIP only if their re-score adds no miss in total or per type, the R2 recall
   stays 100 % and the seen hindsight loses no row (compare `s4tc\hindsight_seen_*.json` with `s3cand0\`, `s4tb` with
   `s4tc`, `s3\hind_cmp.py`).
+- Machine rules (COORDINATOR_NOTE 10-12, 2026-10-09 evening): long runs at Idle, at most 4 heavy jobs, workers x numba
+  threads <= 8; the coordinator paused (suspended) every Python job at 20:35 for the person. What S4 did about it:
+  9990959 makes every tool's worker priority helper keep an Idle job at Idle (it raised workers to below normal);
+  applied to the frozen `hs_s4_0d44095`, `hs_s4_d14aa37` and `hs_s3_5c187ec`, whose `forum_human_rescore.cmd` now run
+  2 workers x 4 threads. The S3 queue `master3.cmd` (and its paused step) and my paused body build were set to Idle
+  (priority only; nothing resumed, killed or restarted). master3 still runs its later steps with GATE_WORKERS=3 (12
+  threads; set when it started) and gate.cmd's recall at 3 workers - the coordinator may want to stop and requeue it
+  with `s4\gate4.cmd` / GATE_WORKERS=2. The S4 queues launch nothing while any ssbot job is paused.
