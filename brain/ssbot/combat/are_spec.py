@@ -70,6 +70,15 @@ class EnemySpec:
     state_gate: bool = False   # templates keep each bin's shape per state: k = 0 draws the state it is in now, k > 0
     #                            the states at or after it (attack_range.RangeTable._shape); a state is kept at a bin
     #                            when at least 2 R0 dev instances were in it there (tools.attack_range_build)
+    # the two hooks of a type whose moves the templates alone do not describe (stage B: a charge that ends past the
+    # hero, a side decided twice, a homing spear); None for the template-only types
+    on_step: Callable | None = None    # (inst, st, prev, T, x, y, s, hero_x, hero_y, tin, vx) -> None: the type's own
+    #                                    per-frame record of the current instance (Inst.extra, inst.branch), called
+    #                                    after the Segmenter's own rules
+    place_fn: Callable | None = None   # (tab, fam, branch, b, anchor, s, hero_du, now, b_now, dec, st_now, ctx) -> Mask
+    #                                    or None (the template's placement); ctx = {"T": the game time of b_now,
+    #                                    "hero": (x, y) now, "inst": the Inst, "vel": (vx, vy) now, "body": the
+    #                                    body colliders now (world polygons)}
 
     @property
     def body_names(self) -> tuple:

@@ -237,13 +237,18 @@ class RangeTable:
 
     def place(self, fam: str, branch: str | None, b: int, anchor: tuple, s: int, hero_du: float = 0.0,
               now: tuple | None = None, b_now: int | None = None, dec: dict | None = None,
-              st_now: str | None = None) -> Mask:
+              st_now: str | None = None, ctx: dict | None = None) -> Mask:
         """The raw estimate of bin b of an instance anchored at anchor = (x, y) with facing s: the union over the
         family's branches when branch is None. With now = the enemy's observed position at bin b_now, the position is
         re-anchored there: now + (the template's displacement at b - at b_now), so only the displacement still to
         come is predicted (what has happened is observed). dec: the instance's decision (Inst.dec) once seen; a
         decided family without it stops at the last bin before its decision (the pending aim is not drawn).
-        st_now: the state it is in now (state-gated templates: re-anchored at the observed state too)."""
+        st_now: the state it is in now (state-gated templates: re-anchored at the observed state too). ctx: what a
+        type's own placement (EnemySpec.place_fn) reads (the game time, the hero now, the instance, the velocity)."""
+        if self.spec.place_fn is not None and ctx is not None:
+            m = self.spec.place_fn(self, fam, branch, b, anchor, s, hero_du, now, b_now, dec, st_now, ctx)
+            if m is not None:
+                return m
         brs = self.spec.branches.get(fam, ("main",))
         if branch is None:
             branch = self.branch_by_rule(fam, hero_du)
@@ -488,6 +493,7 @@ class Inst:
     dec: dict | None = None    # the decision (EnemySpec.decide): t, b (its bin), x, y, s, L
     st_t0: float = 0.0         # the game time the current state was first seen (back-dated by its time in state)
     trig: dict = field(default_factory=dict)        # hazard name -> its trigger (t, x, y, s) in this instance
+    extra: dict = field(default_factory=dict)       # the type's own record (EnemySpec.on_step), with game times
 
 
 class Segmenter:
@@ -551,6 +557,8 @@ class Segmenter:
                     tt = T - max(float(tin or 0.0), 0.0)
                     cur.trig[hz.name] = (tt, x, y, s)
                     self.spawned.append((hz, tt, x, y, s))
+            if sp.on_step is not None:
+                sp.on_step(cur, st, self.prev, T, x, y, s, hero_x, hero_y, tin, vx)
         self.prev = st
         self.prev_tin = float(tin or 0.0)
         return cur
@@ -659,8 +667,12 @@ class RangeTracker:
         else:
             b = bin_of(self.T - inst.t0)
             now = (float(p[0]), float(p[1]))
+            vel = e.get("vel")
             m = tab.place(inst.fam, inst.branch, b + k, (inst.x0, inst.y0), inst.s, inst.hero_du, now=now, b_now=b,
-                          dec=inst.dec, st_now=inst.states[-1] if inst.states else None)
+                          dec=inst.dec, st_now=inst.states[-1] if inst.states else None,
+                          ctx={"T": self.T, "hero": self.hero, "inst": inst,
+                               "vel": (float(vel[0]), float(vel[1])) if vel and len(vel) > 1 else None,
+                               "body": body_polys(e, tab.spec.body)})
             est = Estimate(iid, k, m, inst.fam, inst.branch, b, now)
         if tab.spec.hazards:
             seg = self.segs.get(iid)

@@ -4084,3 +4084,111 @@ cd <checkout>\brain
 ..\scripts\uv.cmd run python -m ssbot.tools.viewer C:\ssbot\data\human\20261009_085824 --zones --range-only --k 0,12 --video --video-scale 0.35 --from 46500 --to 49100 --save C:\ssbot\data\m2_forum_overlay\clapper_range.rrd
 ..\scripts\uv.cmd run python -m pytest -q tests\test_attack_range.py tests\test_attack_range_types.py tests\test_zone_overlay.py
 ```
+
+## 34. 攻击范围估计（ARE）阶段 B：Envoy、Clawmaiden 和她的矛（2026-10-10，task "attack range: all types" 阶段 B，分支 worktree-wf_2fe0d0c5-18e-2 = main + 阶段 A 77ccb1e；代码 `ssbot/combat/are_types/envoy.py`、`clawmaiden.py`、`spear.py`；表 `knowledge/1.0.30000/enemies/forum/attack_range_{envoy,clawmaiden,spear}.npz` + `.json`；数据 `C:\ssbot\data\m2_forum_are\{envoy,clawmaiden,spear}`）
+
+规则和 §32 / §33 一样：**不加任何余量**，只有画主角中心区时的受伤框膨胀；招从起手画到收招；还没决定的分支画并集；还没开始的招（第 2 组）不画。全部只用 R0 dev 构建，误差在 R0 fresh、R2、你的录像上分开报。离线，没有开游戏。
+
+### 34.1 框架上加的两个钩子（最小改动，Choristor / Clapper 不受影响）
+
+模板（"相对身体的形状 + 中位位移"）描述不了这三种东西：冲到"主角身后 4 u"才停的冲锋、朝向决定两次的抓、追踪主角的矛。所以 `EnemySpec` 加了两个可选项，Choristor 和 Clapper 都不用（Choristor 1,260 次放置的哈希测试照样通过）：
+
+- `on_step`：每帧在 Segmenter 的规则之后调用，类型自己往实例上记东西（`Inst.extra`，带游戏时间；也可以设分支）。
+- `place_fn`：类型自己算某一格的位置和形状；返回 None 就用模板。`place()` 多了一个参数 `ctx`（现在的游戏时间、主角位置、实例、速度、现在的身体碰撞体），实时的 `RangeTracker`、误差评估 `eval_track` 和画图都传它。
+- 构建工具那边：类型文件可以有 `attach(c, tracks)`，给真伤害加自己的东西（矛的三角形、爆炸圆、竖直速度）；`poly_of` 接受直接给的多边形（矛是旋转的三角形，缓存里只有外接框）。
+
+### 34.2 Envoy（Song Pilgrim 01）
+
+| 家族 | 状态 | R0 dev 实例 | 时长 p50 / 最长 | 画什么 |
+|---|---|---|---|---|
+| EN_SLASH 劈 | Slash Antic > Slash1（0.48 s）> Slash1 2 > Slash1 Recover > Attack End（单次）或 JumpSlash Antic > JumpSlash 1–4（跳劈） | 单次 232；跳劈 110 | 1.47 / 2.17 s | 朝向在起手定。**第一下伤害（P1 Damager，0.483 s）在身体后上方**（回挥），前面的 P2 从 0.683 s 起。Combo?（0 秒、看不见）随机选跳劈（约一半）：看到 Slash1 Recover 之后的下一个状态才知道，之前画两种的并集 |
+| EN_JUMPSLASH | 从劈以外进入的跳劈 | 0（R0 dev 没有） | | 同一套状态 |
+| EN_CHARGE 冲锋 | Charge Antic（0.483–0.517 s 不动）> Charge（13.0 u/s，R0 dev 每一帧都是）> Charge End（滑 0.26–1.3 u，0.42 s） | 196 | 2.07 / 3.12 s | 方向（起手时主角那一侧）和时间是定的，长度不定：游戏在它**过了主角 4 u** 时停（R0 dev 最后一帧冲锋最多过主角 3.997 u）或撞墙（身体 x 17.37 / 45.57）。画法：从它现在的位置以 13 u/s 往前，到"主角**现在**的位置 + 4 u"或墙为止，然后 Charge End 的滑行（R0 dev 每帧的中位）和身体 |
+| EN_AMBUSH 埋伏入场 | Ambush Antic > Ambush 1 > Ambush 2 | 106 | 1.47 s | 第 0 波入场，原地；1.25 s 起身体带伤害 |
+| 待机 | Walker（2.4 u/s 朝你走）、Attack Wait 等 | | | 现在的身体（批准的规则） |
+
+### 34.3 Clawmaiden（Song Handmaiden）
+
+| 家族 | 状态 | R0 dev 实例 | 时长 p50 | 画什么 |
+|---|---|---|---|---|
+| CM_SLASH 抓 | Slash Antic（0.5 s，身体往后飘最多 3 u）> Slash 1 > 2 > 3 > Slash 4 > 5 > Slash Recover | 不转-不转 649，不转-转 139，转-不转 85，转-转 24 | 0.98 s | **朝向决定两次，每次都在出伤害的那一帧**：Slash 1 进入时转向主角（R0 dev 12 % 和起手朝向相反，全部是转向主角），Slash 4 进入时再转一次（20 % 翻转）。按（Slash 1 转没转）×（Slash 4 翻没翻）建 4 个模板；画"现在还可能"的并集：Slash 1 之前 4 个，Slash 1 到 Slash 4 之间 2 个，之后 1 个。R0 dev 里进入那一帧的朝向 = 主角那一侧 = 碰撞体那一侧，没有例外 |
+| CM_SPIN 转 / 放矛 | Spin Antic > Spin 0–2 > Spin Wind Down > Spin End（> Spear Cast Antic > Spear Fire Recover；或 Spin Cancel） | 309 | 4.2 s | 只有在动的身体（吸丝，没有攻击碰撞体）；矛是单独的类型（34.4） |
+| CM_TELE 瞬移 | Tele Out Antic（0.18 s，掉 1.3 u，身体还伤人）> Tele Out > Tele In > Tele In End >（Did Roar? > Roar） | 314 | 1.03 s | Tele Out 起身体不伤人；落点随机（待定），**看到 Tele In 之前不画瞬移后的身体** |
+| CM_ENTRY 入场 | 从无到 Tele In > Tele In End > Did Roar? > Roar | 305 | 1.32 s | 身体 |
+| CM_FLYTOSLASH | Fly To Slash（≤ 1 s，以 ≤ 5 u/s 飞到离主角 4 u） | 1,001 | 0.75 s | 身体；之后 64 % 出抓——那是新的家族（第 2 组，不画） |
+| CM_FLY 飞 | Fly（+ Set Distance、Tele?） | 2,562 | 0.62 s | 身体 |
+
+- **飞的身体（这一轮的任务里写了 "fly / fly-to-slash body motion"）**：Fly、Fly To Slash、转的时候她一直在飞（6–9 u/s），k > 0 时把**现在的身体碰撞体按现在的速度平移**（不加速，不长大；k = 0 就是现在的身体本身）。和批准的待机规则（任何 k 都画现在的身体）不同，所以两种都量了（R0 fresh，k 12 覆盖）：
+
+| | 现在的身体（待机规则） | 按速度平移（现在画的） |
+|---|---|---|
+| CM_FLY | 36.3 % | 80.3 % |
+| CM_FLYTOSLASH | 31.6 % | 83.6 % |
+| CM_SPIN | 32.7 % | 73.9 % |
+
+  面积比两种都是 1.00。用导出的速度比用位置差好（R0 dev k 12 位置误差 p50：速度 0.51 u，一帧位置差 0.65 u，加上加速度 0.88 u，不动 1.31 u）。要不要这样画、Clapper 的 Walk 要不要也这样，是你的决定；`clawmaiden.CARRY_ON = False` 就回到待机规则。
+
+### 34.4 矛（实体类型 "Spear"，单独一个类型文件）
+
+矛是自己的实体（Control FSM：Idle > Antic Pause > Antic > Fire > Explode），按 §31 的规则画它**已经决定的路径**：
+
+- **决定**：Get Antic Angle = 矛进入 Antic Pause 的那一帧（抓丝怪 Spear Cast Antic → Spear Fire）。瞄准：矛 → 主角 transform + (0, 0.25)，在她朝向那一侧夹到 ±45°（主角在她背后时取近的那条边）。矛的 flip 和她的一样（R0 dev 170 / 170）。**决定之前（她的 Spear Cast Antic）是待定瞄准，不画。**
+- Antic Pause 9–10 帧不动；Antic 42–43 帧往瞄准的反方向退（30 u/s，每个 50 Hz 物理步 ×0.875，空地 3.645 u），不伤人。进了 Antic 就用它实际的速度（正好是瞄准的反方向）。开火时间只知道一个窗口，画两端的并集。
+- Fire：37 u/s 沿瞄准，然后追踪（ChaseObjectWisp）——**按主角现在的位置模拟**（主角之后怎么动就是误差，下面报了）。碰撞体：三角形，尖在 transform 前 3.759 u，底在后 1.776 u，宽 1.256 u。物理步按 50 Hz、取最近的整数步（取下整会慢一步，0.74–1.0 u：开火后头两帧实际 p50 46.9 u/s）。
+- Explode：开火 0.1 s 后，接触点（前方 1.45 u）碰到地面（y 3.0）或墙（x 14.2 / 49.1），或者三角形碰到主角，就爆：圆 r 3.5529，中心在 transform 前方 0.9 u（沿最后的飞行方向；R0 dev 170 次：沿速度方向偏差只有 0.065 u 的横向偏移），亮 0.108 s（实测从 Explode 那一帧起 1–5 帧）。
+- 真伤害：缓存里只有三角形的外接框，所以按速度方向重建三角形（和外接框的差 p50 0.15 u、最大 0.31 u）；爆炸是 7.106 u 的 "damager"，按 Explode 那一帧的位置（2.5 u 内）挂到这支矛上。
+
+### 34.5 估计误差（R0 fresh / R2 / 你的录像，分开报；k = 0 和 12；不含被打的行和 t+k 之前已经开始下一招的行）
+
+| 家族 | 集合 | k 0：覆盖 / 面积比 / ≤1.5 的行 | k 12：覆盖 / 面积比 / p90 / ≤1.5 的行 | k 12 漏 p95（前/后/上/下/洞，u） |
+|---|---|---|---|---|
+| EN_SLASH | fresh | 99.2 % / 0.99 / 100 % | 98.5 % / 1.15 / 1.00 / 93 % | 0.15/0.60/-/-/0.30 |
+| | R2 | 99.4 % / 1.00 / 100 % | 98.4 % / 1.13 / 1.00 / 94 % | 0.30/0.60/2.84/-/0.30 |
+| | 你 | 99.1 % / 0.99 / 100 % | 97.5 % / 1.14 / 1.00 / 94 % | 0.30/0.60/2.37/-/0.30 |
+| EN_CHARGE | fresh | 99.6 % / 1.00 / 100 % | 91.5 % / 1.00 / 1.00 / 98 % | 0.75/2.35/-/-/0.30 |
+| | R2 | 99.7 % / 1.00 / 100 % | 90.7 % / 1.00 / 1.00 / 99 % | 1.05/2.70/-/-/0.30 |
+| | 你 | 99.6 % / 1.00 / 100 % | 92.3 % / 1.00 / 1.00 / 99 % | 0.65/2.50/-/-/0.30 |
+| EN_AMBUSH | fresh / R2 / 你 | 99.8 % / 1.00 / 100 % | 99.1 / 98.3 / 99.6 % / 1.00 / 1.00 / 100 % | 0.34/-/0.24/0.10/- |
+| Envoy 待机 | fresh / R2 / 你 | 100 % / 1.00 / 100 % | 75.5 / 75.4 / 75.5 % / 1.00 / 1.03 / 100 % | 0.45 前（走路） |
+| CM_SLASH | fresh | 99.6 % / 1.01 / 100 % | 91.5 % / 1.82 / 2.39 / 50 % | 0.71/0.53/0.57/0.60/0.45 |
+| | R2 | 99.6 % / 1.01 / 100 % | 91.2 % / 1.85 / 2.50 / 53 % | 0.81/0.49/0.58/0.56/0.54 |
+| | 你 | 99.5 % / 1.01 / 100 % | 89.5 % / 1.80 / 2.38 / 54 % | 0.82/0.67/0.57/0.73/0.58 |
+| CM_SPIN | fresh / R2 / 你（8 行） | 100 % / 1.00 / 100 % | 73.9 / 74.7 / 88.6 % / 1.00 / 1.04 / 100 % | 0.84/0.84/1.17/0.74/- |
+| CM_FLY | fresh / R2 / 你 | 100 % / 1.00 / 100 % | 80.3 / 81.5 / 81.8 % / 1.00 / 1.04 / 100 % | 0.74/0.70/0.68/0.68/- |
+| CM_FLYTOSLASH | fresh / R2 / 你（79 行） | 100 % / 1.00 / 100 % | 83.6 / 82.2 / 89.1 % / 1.00 / 1.04 / 100 % | 0.74/0.51/0.95/0.71/- |
+| CM_TELE | fresh / R2 / 你 | 99.5–99.7 % / 1.01–1.02 / 100 % | k 12 的行里真伤害和估计都是空（身体关着） | |
+| CM_ENTRY | fresh / R2 / 你 | 99.2–99.7 % / 1.02 / 100 % | 99.1–99.6 % / 1.02 / 1.04 / 100 % | |
+| 矛 | fresh | 99.0 % / 1.00 / 100 % | 80.3 % / 1.08 / 1.26 / 92 % | 2.98/1.83/3.18/3.01/- |
+| | R2 | 99.1 % / 1.00 / 100 % | 82.3 % / 1.09 / 1.25 / 94 % | 3.31/2.37/2.95/2.27/1.33 |
+| | 你 | 98.9 % / 1.00 / 100 % | 85.9 % / 1.11 / 1.24 / 95 % | 2.66/1.08/0.93/2.64/0.96 |
+
+- **k = 0 每个家族覆盖 98.9–100 %，面积比 0.99–1.02**：画的就是它们现在真有的碰撞体。
+- **Envoy 的劈**：分支已知的行 k 12 覆盖 93.7–96.3 %、面积比 1.16–1.19；Combo? 之前（单次 / 跳劈并集）的行 99.1–99.4 %、1.12–1.14。面积比超过 1.5 的行（6–7 %）就是这个并集。
+- **Envoy 的冲锋**：k 12 覆盖 90.7–92.3 %，面积比 1.00。漏的主要是：冲锋中后 1.0–1.6 s"后面"漏 p95 2.6–2.9 u（主角往它这边走，冲锋比预测早停）和 2.0–2.4 s"前面"漏 p95 3.3–3.9 u（主角顺着它冲的方向跑，冲锋比预测长）——都是"按主角现在的位置算终点"的误差，不是余量能补的那一类。
+- **Clawmaiden 的抓**：面积比 1.8 是规则本身：出伤害前朝向没定，就画两边。分开看：还有一边没定的行覆盖 89.6–91.6 %、面积比 1.82–1.87；两次都定了以后 84.4–86.6 %、1.02–1.04（这一段行很少：fresh 308、你 21）。k = 0 是 1.01。
+- **飞的身体**：按速度平移 k 12 覆盖 74–89 %；用待机规则是 32–36 %（34.3）。
+- **矛**：k 0 99 %；k 12 80–86 %，面积比 1.08–1.11。漏 p95 2–3 u，来自：按主角现在的位置追踪（主角之后会动）、开火时间 ±1 帧、物理步相位（±半步 ≈ 0.4–0.5 u）、爆炸点（地面 / 墙 / 打中主角）。改成"最近整数步"之前是 77.4 / 79.3 / 83.1 %。
+- 详细（每个家族 × 每边 × 每 0.2 s）：`C:\ssbot\data\m2_forum_are\<envoy|clawmaiden|spear>\eval_{fresh,r2,person}.json`，逐行 `rows_*.pkl`；Clawmaiden 待机规则的对照 `clawmaiden\eval_fresh_nocarry.json`。
+
+### 34.6 怎么看
+
+- **图**（颜色同 §32.4：橙色填充 = k 0 估计，浅蓝 = k 12，细黄 = 主角中心区，红 = 现在的真碰撞体，细红 = 之后 1–11 帧，紫红 = +12 帧，白框 = 大黄蜂）：`C:\ssbot\data\m2_forum_are\envoy\png`（37 张）、`clawmaiden\png`（53 张）、`spear\png`（33 张；`index.json` 说明每张）。每个家族 2 个实例的起手 / 中间 / 收招帧 + 误差最大的帧（`worst_`，含 fresh）。矛另外有 4 次飞行（你的 085824、161454、231544、160435）的开火前一帧 / 开火 / 飞行中 / 最后一帧。你指出的 085824 f7939、f10427 这两帧里没有 Envoy 和 Clawmaiden（是 Bellbearer / Reed 的，归别的类型）。例：`clawmaiden\png\20261004_002749_f25804_Slash_Antic.png`（抓的起手：k 12 两边都画，真的在主角那一边；面积比 1.95）；`spear\png\20261009_085824_f13140_Antic.png`（开火前：沿瞄准的两个三角形 = 开火时间窗口的两端）。
+- **单怪练习**：
+  - Envoy：`human_session --solo "Song Pilgrim 01" --overlay --overlay-range` → 第 0 波（`fo_r1_w0`），同一波还有 Reed 和 Choristor，要先清掉（清场时主角会自动加强，几下一只）；Envoy 在这一波是埋伏入场（EN_AMBUSH）。
+  - Clawmaiden（和她的矛）：`human_session --solo "Song Handmaiden" --overlay --overlay-range` → 第 3 波（`fo_r1_w3`），只有她一只，不用清场。矛是另一个实体，叠加层里单独一个标签（"SP_SPEAR"，灰色，名字是 #iid）。
+  - 都没在游戏里跑过；--solo 会不会把矛当成"别的怪"没核实。
+
+### 34.7 这一轮不画的（第 2 组 / 待定）和没做的
+
+- 不画：Envoy 和 Clawmaiden 待机 / 飞的时候下一招是什么（0 秒决定）；Fly To Slash 之后的抓；瞬移的落点（看到 Tele In 之前）；她 Spear Cast Antic 里的矛（Get Antic Angle 之前）。Envoy 走路时挨打会出冲锋（触发，不是反击），从它的 Charge Antic 起画。EN_HOPSLASH 没出现过（490 场 0 次）。
+- 没做：冲锋终点按主角**现在**的位置，没有预测主角；飞的身体只按现在的速度，没用 DistanceFly 的规则；矛的地形只有地面 y 3.0 和两面墙（R0 dev 爆炸点量的），平台没建模；矛三角形和外接框的 0.15 u 差没查（可能是旋转比速度晚一帧）；回放（rrd）没做。
+
+复现：
+```
+cd <checkout>\brain
+..\scripts\uv.cmd run python -m ssbot.tools.attack_range_build --type envoy shapes          (clawmaiden 同样；矛不需要)
+..\scripts\uv.cmd run python -m ssbot.tools.attack_range_build --type envoy build           (clawmaiden / spear)
+..\scripts\uv.cmd run python -m ssbot.tools.attack_range_build --type envoy eval --set fresh --threads 4   (r2 / person)
+..\scripts\uv.cmd run python -m ssbot.tools.attack_range_build --type envoy png
+..\scripts\uv.cmd run python -m pytest -q tests\test_attack_range_envoy_clawmaiden.py tests\test_attack_range_types.py tests\test_attack_range.py
+```
