@@ -70,6 +70,10 @@ class EnemySpec:
     state_gate: bool = False   # templates keep each bin's shape per state: k = 0 draws the state it is in now, k > 0
     #                            the states at or after it (attack_range.RangeTable._shape); a state is kept at a bin
     #                            when at least 2 R0 dev instances were in it there (tools.attack_range_build)
+    coast: dict = field(default_factory=dict)   # stage B: state -> its velocity decay per 50 Hz step (the FSM's
+    #                                             DecelerateV2; 0: velocity set to 0, it holds): in it the position
+    #                                             ahead is the observed velocity coasting (attack_range.coast), not the
+    #                                             template's median displacement (the Reed's Parry Slash 0.95, Multihit 0)
     hit_started: frozenset = frozenset()   # stage B: families a hit starts (counters, HIT_COND: the Reed's Block, the
     #                                        Minister's Parry Block): the hit / clash that starts one does not count
     #                                        as interrupting it (tools.attack_range_build.segment); later ones do

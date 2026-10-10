@@ -4487,3 +4487,68 @@ idle = the body now; group 2 not drawn). Offline only (no game instance started)
   - Walk: carry the walking body (8 u/s) or keep "body now" (the person's call).
   - The wall-zone limits are R0 dev measurements; no terrain model. Overlap-without-damage windows unexplained.
   - Live overlay / --solo not run in the game.
+
+## Task attack range: all types, stage B - Reed + Minister (branch worktree-wf_2fe0d0c5-18e-3, 2026-10-10; forum.md §34)
+
+= stage A (worktree-wf_2fe0d0c5-18e-1, 77ccb1e) + the Reed and the Minister. Same rules (no margin; idle = the body now;
+group 2 not drawn; undecided branches as their union); counters (HIT_COND) drawn from the hit (Block / Parry Block
+entry); the Reed's pin drawn on its decided line before the release and on its real path in flight. Offline only.
+
+- Framework hooks (small; Choristor / Clapper unchanged, `test_choristor_placements_are_bit_identical` passes):
+  - `Segmenter`: a spec's branch value may be a callable `(x=, y=, s=, vx=, hero_x=, hero_y=, s0=)` -> branch, picked
+    at that state's frame (s0 = the instance's facing at its start); a `Decision` rule may return `(s, L, extras)`:
+    s 0 = the observed facing at the decision frame, extras kept in `Inst.dec`.
+  - `EnemySpec.hit_started`: families a hit starts; `attack_range_build.segment` does not count the starting hit /
+    clash as an interruption (later ones do).
+  - Type module extras: `extra(tab, inst, T, pos, t, objs) -> Mask` (its own drawn part), `OBJ_TYPES` (its projectile
+    type keys: `RangeTracker._feed_objs` gives each lit one to the nearest enemy of the type at first sight, as
+    `{x, y, vx, vy, t, t0, cx, cy}`), `OBJ_NAME`, and for the builder `attach(c, tracks, spec)` (per frame
+    `tr["objs"][j]` and the real colliders as "OBJ:<name>" cols: excluded from templates like "HZ:"). `RangeTracker`,
+    `eval_track` (rows "HZ <OBJ_NAME>" + family / idle rows on both sides) and the PNGs call it.
+  - `EnemySpec.coast` (state -> velocity decay per 50 Hz step; 0 = holds): in those states the position ahead is the
+    observed velocity coasting (`attack_range.coast`), not the template's median displacement; `place(..., vel=)`,
+    tracks carry `vy` (optional). The Reed: Parry Slash 0.95, Multihit 0.
+  - Build report: decided families add `L_p50`. PNG `_find` prefers an enemy in play over a parked one (the waiting
+    Reeds keep their body collider in "Fly In Ready").
+- Reed (`are_types/reed.py`, table `attack_range_reed.npz` + `.json`, force-added):
+  - RE_STAB decided at Stab 1 (observed facing, L = 10.0 u: R0 dev median from Stab 1 to the end); Stab Antic =
+    pending start point (body only). RE_THROW decided at Throw Aim (the pin's aim in dec), branch = the Aiming Up
+    flag at the antic start (up / down / open within 0.3 u of hero y = y + 2). RE_COUNTER from Block: branch = Speed Y
+    bin (2 u/s, 10 bins, 10-44 R0 dev instances each) at Parry Y Aim / Parry Slash (clamp(2 (hero y - y), +-10));
+    union before. RE_EVADE: branch same / turned at the Evade entry, "same" from the start when the hero is > 2.22 u in
+    front (R0 dev: all 180 turned evades within it). RE_ENTRY. Idle: Alert, Stab Pos, Defend*, Throw Range.
+  - Pin (exact FSM rule, R0 dev 263 pins: aim error 0, spawn offsets exact, speed 31.0): release 24-25 game frames
+    after Throw Aim, 28-30 with Throw Transition (= Aiming Up differs from elevation >= 10); spawn (1.53, -0.54) /
+    (1.11, +0.48) from the Reed at the release (+ the remaining Throw Aim recoil, x0.85 per frame); 50 Hz steps of
+    0.62 u (floor / ceil of the step count); collider 2.031 x 0.098, axis-aligned on its spawn frame, turned to its
+    flight from the next (the exported AABB fits the turned rectangle) - drawn and attached as 40 pieces; stops
+    beyond the lit-centre extremes x 13.9-48.25, y >= 3.15.
+- Minister (`are_types/minister.py`, table `attack_range_minister.npz` + `.json`):
+  - MI_CHARGE: branch = the aim bin (15 deg, 7 bins, 68-370 instances) at the Attack Antic's first frame (angle to
+    hero + (0, 1.5) in the facing frame, clamped +-45); state-gated. MI_COUNTER from Parry Block (one lunge, four
+    segments). MI_EVADE same / turned (2.09 u). MI_ENTRY. Idle: Chase, Retreat?, Parry Stance*. `face_names` =
+    Slash Collider (the ParrySlash Hits vote the wrong flip).
+  - Its rotated colliders (the charge turns the whole Minister) are AABBs in the caches on both sides of the error.
+- Error (fresh / R2 / person, forum.md §34.5): Reed k12 coverage / area ratio: stab decided 91.6-91.8 % / 1.05,
+  throw (body + pin) 96.0-96.1 % / 1.16-1.17, pin alone 99.6-99.7 % / 1.29-1.36 (k0 99.95-100 % / 1.00), counter
+  85.9-92.6 % / 1.11-1.18 (coasting; was 80.2-85.4 %; frame 10427 k12 ratio 1.00, 99 %), evade 83.0-84.0 % / 1.36-1.38, entry 94.1-95.1 %; pending stab rows 47.5-48.2 %; idle
+  Alert 37-44 %, Stab Pos 16-24 %. Minister: charge 94.2-95.5 % / 1.26-1.28 (k0 99.8 % / 1.18-1.22), counter
+  90.2-91.4 % / 1.10-1.11, evade 89.8-92.0 % / 1.36-1.46, entry 83-92 %; idle Chase 55-57 %.
+- PNGs: `C:\ssbot\data\m2_forum_are\reed\png` (56, incl. 085824 f7939 Bellbearer / Reed and f10427 Reed counter),
+  `C:\ssbot\data\m2_forum_are\minister\png` (39); `index.json` in each.
+- Solo: `human_session --solo "Song Reed" --overlay --overlay-range` -> wave 2 (`fo_r1_w2`; one Bellbearer to clear);
+  `--solo "Song Administrator"` -> wave 4 (`fo_r1_w4`; the other Minister cleared). Not run in the game.
+- Tests: `tests/test_attack_range_reed_minister.py` (19: coast, registry, counter bins and union, hit-started, stab decision
+  facing, pin rule / release windows / Throw Transition / in-flight path / real_pin, tracker pin ownership, charge
+  bins, evade direction, other types untouched). Full suite 1392 passed (`test_harness_recovery.py` left out:
+  `C:\ssbot\sandbox\DEMO_SOON`).
+- Open:
+  - Reed counter: during Block the 10 Speed Y branches are drawn as their union (pending); after Multihit Clashed /
+    Parry Slash End the body follows the template median (k12 miss p95 1.4-1.7 u).
+  - Reed stab: landing error p95 6.4 u (5 %+ stop short; walls clamp, the rest not checked).
+  - Pin: no terrain model for platforms (drawn on until the arena extremes); the 50 Hz phase is not tracked (two
+    step counts at k > 0); a swatted pin (collider off) is not drawn.
+  - Minister charge rule tail (p95 27 deg in v2) absorbed by the bins + re-anchoring, not studied; rotated colliders
+    as AABBs (both sides).
+  - Two duplicate idle-priority `--type reed shapes` processes started at 08:01 / 08:12 (one blocked at start, then
+    both ran); stopping them was refused, they finished on their own.

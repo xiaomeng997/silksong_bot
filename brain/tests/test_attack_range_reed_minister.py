@@ -189,3 +189,12 @@ def test_throw_transition_from_the_aiming_up_flag():
     late = reed.pin_decided(dec, 1.0, (30.0, 8.0), t, aim_up="up")          # flag up, spawn down: 28-30
     both = reed.pin_decided(dec, 1.0, (30.0, 8.0), t, aim_up="open")
     assert len(late) == 1 and len(plain) > 1 and len(both) == len(plain) + len(late)
+
+
+def test_coast_extrapolates_the_observed_velocity():
+    # 12 frames = 10 steps of 0.02 s, the velocity x0.95 per step; Multihit (0) holds
+    x, y = ar.coast((30.0, 6.0), (-7.5, -1.0), 12, 0.95)
+    k = 0.02 * sum(0.95 ** i for i in range(1, 11))
+    assert (x, y) == pytest.approx((30.0 - 7.5 * k, 6.0 - 1.0 * k))
+    assert ar.coast((30.0, 6.0), (-7.5, -1.0), 12, 0.0) == (30.0, 6.0)
+    assert reed.SPEC.coast == {"Parry Slash": 0.95, "Multihit": 0.0}

@@ -141,6 +141,10 @@ SPEC = EnemySpec(
     decide={"RE_STAB": Decision(states=frozenset({"Stab 1"}), rule=stab_rule),
             "RE_THROW": Decision(states=frozenset({"Throw Aim"}), rule=pin_rule)},
     hit_started=frozenset({"RE_COUNTER"}),
+    # the counter's lunge coasts on its velocity (Parry Slash: SetVelocityByScale -22 / Speed Y, DecelerateV2 0.95 per
+    # step) and Multihit holds still (SetVelocity2d 0): there the position ahead is the observed velocity's, not the
+    # template's median (whose instances ended the slash at different times: frame 10427)
+    coast={"Parry Slash": 0.95, "Multihit": 0.0},
     state_gate=True,
     aim=frozenset(),
     body=("Song Reed", "Song Reed (1)", "Song Reed (2)", "Song Reed (3)", "Song Reed (4)"),

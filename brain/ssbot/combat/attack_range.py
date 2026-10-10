@@ -237,7 +237,7 @@ class RangeTable:
 
     def place(self, fam: str, branch: str | None, b: int, anchor: tuple, s: int, hero_du: float = 0.0,
               now: tuple | None = None, b_now: int | None = None, dec: dict | None = None,
-              st_now: str | None = None) -> Mask:
+              st_now: str | None = None, vel: tuple | None = None) -> Mask:
         """The raw estimate of bin b of an instance anchored at anchor = (x, y) with facing s: the union over the
         family's branches when branch is None. With now = the enemy's observed position at bin b_now, the position is
         re-anchored there: now + (the template's displacement at b - at b_now), so only the displacement still to
@@ -249,8 +249,8 @@ class RangeTable:
             branch = self.branch_by_rule(fam, hero_du)
         if branch is not None and (fam, branch) in self.templates:
             brs = (branch,)
-        return union([self._place1(self.templates[(fam, br)], b, anchor, s, hero_du, fam, now, b_now, dec, st_now)
-                      for br in brs if (fam, br) in self.templates])
+        return union([self._place1(self.templates[(fam, br)], b, anchor, s, hero_du, fam, now, b_now, dec, st_now,
+                                   vel) for br in brs if (fam, br) in self.templates])
 
     def _shape(self, tp: Template, bb: int, k0: bool, st_now: str | None) -> tuple:
         """(shape, iu0, iv0) of bin bb: the union over the instances; state-gated (tp.sst): at k = 0 the union over
@@ -302,7 +302,7 @@ class RangeTable:
 
     def _place1(self, tp: Template, b: int, anchor: tuple, s: int, hero_du: float, fam: str,
                 now: tuple | None = None, b_now: int | None = None, dec: dict | None = None,
-                st_now: str | None = None) -> Mask:
+                st_now: str | None = None, vel: tuple | None = None) -> Mask:
         k0 = b_now is not None and b <= b_now
         if tp.b_dec is not None:
             if dec is None:                     # pending aim: nothing of the undecided move is drawn
@@ -320,6 +320,9 @@ class RangeTable:
             qx, qy = self.position(tp, b_now, anchor, s, hero_du, fam)
             lo, hi = self.walls
             px, py = min(max(now[0] + px - qx, lo), hi), now[1] + py - qy
+            if vel is not None and b > b_now and st_now in self.spec.coast:     # stage B: coasting on its velocity
+                px, py = coast(now, vel, b - b_now, self.spec.coast[st_now])
+                px = min(max(px, lo), hi)
         return place_shape(sh, iu0, iv0, px, py, s, self.cell)
 
     def _place_dec(self, tp: Template, b: int, dec: dict, now: tuple | None, b_now: int | None,
@@ -374,6 +377,16 @@ class RangeTable:
             if t_lo + on * FT - 1e-6 <= t <= t_hi + off * FT + 1e-6:
                 polys.append(circle_poly(x + s * float(P.get("du", hz.du)), y + float(P.get("dv", hz.dv)), hz.radius))
         return poly_mask(polys, self.cell)
+
+
+def coast(now: tuple, vel: tuple, n: int, decay: float, step: float = 0.02) -> tuple:
+    """Stage B: the position n game frames ahead of an enemy coasting from now at velocity vel whose velocity decays
+    by `decay` per 50 Hz physics step (0: it holds): now + vel x step x sum(decay^i, i = 1..m), m = n x 50 / 60."""
+    m = n * FT / step
+    if decay <= 0.0:
+        return float(now[0]), float(now[1])
+    k = step * (decay * (1.0 - decay ** m) / (1.0 - decay) if decay < 1.0 else m)
+    return float(now[0]) + float(vel[0]) * k, float(now[1]) + float(vel[1]) * k
 
 
 def _inside(x: float, intervals) -> bool:
@@ -712,8 +725,10 @@ class RangeTracker:
         else:
             b = bin_of(self.T - inst.t0)
             now = (float(p[0]), float(p[1]))
+            v = e.get("vel")
             m = tab.place(inst.fam, inst.branch, b + k, (inst.x0, inst.y0), inst.s, inst.hero_du, now=now, b_now=b,
-                          dec=inst.dec, st_now=inst.states[-1] if inst.states else None)
+                          dec=inst.dec, st_now=inst.states[-1] if inst.states else None,
+                          vel=(float(v[0]), float(v[1])) if v and len(v) > 1 else None)
             est = Estimate(iid, k, m, inst.fam, inst.branch, b, now)
         if tab.spec.hazards:
             seg = self.segs.get(iid)

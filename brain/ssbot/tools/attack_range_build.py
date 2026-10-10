@@ -137,7 +137,8 @@ def tracks_from_cache(c: dict, type_key: str, source: str) -> list[dict]:
             y=c["e_y"][rows].astype(np.float64), flip=c["e_flip"][rows].astype(np.int8),
             hidden=c["e_hidden"][rows].astype(np.int8), hx=c["hx"][fr].astype(np.float64),
             hy=c["hy"][fr].astype(np.float64), cols=cols, hits=sorted(hits.get(int(iid), [])), clash=sorted(clash),
-            fi=np.asarray(fr, np.int64), vx=c["e_vx"][rows].astype(np.float64)))
+            fi=np.asarray(fr, np.int64), vx=c["e_vx"][rows].astype(np.float64),
+            vy=c["e_vy"][rows].astype(np.float64) if "e_vy" in c else None))
     return out
 
 
@@ -608,7 +609,7 @@ def eval_track(tr: dict, tab: RangeTable, shapes: dict, every: int = 2, idle_eve
                 bt = bin_of(float(T[jt]) - inst.t0)
                 E = tab.place(inst.fam, br, bt, (inst.x0, inst.y0), inst.s, inst.hero_du,
                               now=None if antic_anchor else (float(tr["x"][j]), float(tr["y"][j])), b_now=b, dec=dec,
-                              st_now=tr["st"][j])
+                              st_now=tr["st"][j], vel=_vel(tr, j))
                 base = {"fam": inst.fam, "br": inst.branch, "known": br is not None, "k": k, "b": b,
                         "t": round(bt * FT, 4), "next": bool(nxt), "int": bool(r["interrupted"]),
                         "f": int(tr["f"][j]), "fight": tr["fight"], "iid": tr["iid"]}
@@ -646,6 +647,11 @@ def eval_track(tr: dict, tab: RangeTable, shapes: dict, every: int = 2, idle_eve
             c = compare(Ek, R, s)
             rows.append({**base, **c})
     return rows
+
+
+def _vel(tr: dict, j: int) -> tuple | None:
+    """The enemy's velocity at frame j (stage B: EnemySpec.coast states), None when the track has no vy."""
+    return (float(tr["vx"][j]), float(tr["vy"][j])) if tr.get("vy") is not None else None
 
 
 def summarize(rows: list[dict], ks=KS, limit: float = 1.5) -> dict:
