@@ -4232,3 +4232,35 @@ S0 (planner AIM off; P0 is display / truth / aim templates): baseline 0.60 % = 3
   (priority only; nothing resumed, killed or restarted). master3 still runs its later steps with GATE_WORKERS=3 (12
   threads; set when it started) and gate.cmd's recall at 3 workers - the coordinator may want to stop and requeue it
   with `s4\gate4.cmd` / GATE_WORKERS=2. The S4 queues launch nothing while any ssbot job is paused.
+
+### S5: integration - the tight bundle SSBOT_FORUM_TIGHT (2026-10-09 night, offline; forum.md §29.13 "最终数字")
+- `SSBOT_FORUM_TIGHT=1` (fa6c11a, default off): one switch for the push's candidate bundle = gate config s4tb
+  (RCLIP=2, REANCHOR=chain, RTHROW, PRESTRIKE, NSBOX=bin0, GATES, TINYCLIP, BODYCLIP; `multi_forecast.TIGHT_BUNDLE`,
+  applied before any switch is read; unset / empty members take the bundle value, explicit ones keep theirs, e.g.
+  `SSBOT_FORUM_BODYCLIP=0` drops one); zone_overlay lists TIGHT; tests/test_tight.py (4 passed). Gate config
+  `m2_forum_push\configs\tight.cmd` (base + TIGHT=1; clears base's RCLIP=0). Frozen copy `C:\ssbot\hs_s5_fa6c11a`
+  (knowledge npz copied; body_reach.npz is copied in by queue5 when the body build is done).
+- Verdict: the bundle is NOT made the default; every switch stays default off. (4) RCLIP=2, the bundle's base, raises
+  the support-alone re-score misses per type on all 32 segments: same-truth base s1rb_base_1b8c69a 1 (Reed pin) ->
+  s1rb_rclip2_1b8c69a 6 (pin 5, Envoy "Song Pilgrim 01" 1); against the task baseline rclip_base_d51b216 (old truth,
+  53 per tick: Reed 52 + pin 1) the total falls but pin 1 -> 5 and Envoy 0 -> 1 rise. All 6 fail the escape check
+  (pass-escape 0 -> 0). No later member touches the pin check (forum_planner._pin_contacts), so the bundle very
+  likely inherits them; its own re-score (m2_forum_hs\s4rb_s4tb_d14aa37) confirms. (1) R2 recall: not finished for any
+  candidate (paused since 20:35; RCLIP=2 alone 81 / 444 tables 0 misses, S2 final 49 / 444 0 misses).
+- Seen numbers base -> s3cand0 (the bundle without TINYCLIP / BODYCLIP; s4tb's are queued) are in forum.md §29.13
+  "最终数字" (share person s0 44.95 -> 4.77 %, s12 70.2 -> 35.1 %; committed RATIO p50 k0 12.28 -> 2.45, k12 14.93 ->
+  9.03; hindsight 0 rows lost against s2p). Every type is still over 1.5x (s5\per_type_{h,bot}_s3cand0.md); frames
+  over half at k0 are now mostly the hazard layer (454 of 853 person frames; base: window 3,775, committed 2,851).
+- Decision tool (light, json only): `python C:\ssbot\data\m2_forum_push\s5\decide.py [--seen <set>]` -> s5\
+  bundle_gates.md, verdict.json, compare_seen_s5.md: per nested candidate (s3cand0 -> s4tc -> s4tb) recall L2-L4 /
+  own / hooks, hindsight rows lost vs the previous candidate (seen person, seen bot, R2 held; k 0,3,6,9,12,36),
+  re-score per type vs the same-truth base (support alone and escape-filtered); bundle = last passing candidate.
+  Re-run on a new set: gate4.cmd <gate> s4tb <set> (GATE_ROOT=C:\ssbot\hs_s4_d14aa37), rescore3.cmd, then decide.py.
+- Queued (waits; starts nothing while any ssbot job is paused): `s5\queue5.cmd` (launched by s5\launch5.cmd at Idle,
+  log s5\queue5.out, markers s5\q5_step_<n>.done): 1 after s4\body_build.done and a slot (wait_slot -Max 3): the
+  person's replay `C:\ssbot\data\m2_forum_overlay\20261009_085824_zones_tight.rrd` (tight.cmd, AIM 0 as in the gates,
+  --zones --k 0,12 --precision, half scale; log rrd_tight_085824.log; 500 GB free); 2 after s4\q4b_step_5.done:
+  decide.py -> s5\decide.out.
+- If the s4tb re-score shows the pin misses as predicted: the fix is the pin check, not the support (S1: the 5 pin rows
+  20261004_002749 a4 f21318-21324, a15 f71084-71087; base held them with the Envoy's charge box). A bundle can become
+  the default only after that and a full R2 recall.

@@ -3309,6 +3309,67 @@ C:\ssbot\data\m2_forum_push\gate.cmd <precision|hindsight|share|recall|rescore|p
 ```
 重打分（门槛 4）不受 S0 影响：规划器的 AIM 默认关，P0 只改了显示、真值和瞄准模板；基线仍是 0.60 % = 32（`C:\ssbot\data\m2_forum_hs\rclip_base_d51b216_summary.json`）。
 
+#### 29.13 最终数字（S5 集成：一个开关 `SSBOT_FORUM_TIGHT`；2026-10-09 夜；同一分支 fa6c11a；离线，没有开游戏）
+
+**一个开关**：`SSBOT_FORUM_TIGHT=1` 把精度推进的整个候选包一起打开 = 门槛配置 s4tb：RCLIP=2、REANCHOR=chain、RTHROW、PRESTRIKE、NSBOX=bin0、GATES、TINYCLIP、BODYCLIP（`multi_forecast.TIGHT_BUNDLE`，在读任何开关之前生效；没设或设成空的成员取包里的值，显式设的保留自己的值，例如 `SSBOT_FORUM_BODYCLIP=0` 把 BODYCLIP 拿掉；单测 `tests/test_tight.py`）。门槛配置 `C:\ssbot\data\m2_forum_push\configs\tight.cmd`（= base + TIGHT=1）。不在包里：WALKFLOOR（门槛 1 失败）、NSBOX=bin（seen 丢 1 行）、REANCHOR fam（门槛 1 失败）、AIM（所有候选都关）。
+
+**结论：包不做默认，所有开关保持默认关。** 具体卡在：
+1. 门槛 4（你的胜局重打分）：包的底座 RCLIP=2 单独跑完了全部 32 段，"只看支撑"的漏报按类型上升。同一真值的基线 `s1rb_base_1b8c69a`：1 个（Reed 的针）→ 6 个（针 5、Envoy（`Song Pilgrim 01`）1）。对任务给的基线 `rclip_base_d51b216`（旧真值，按 tick 数是 53：Reed 本体 52 + 针 1）总数是降的，但针 1 → 5、Envoy 0 → 1 是升的。规划器的逃生检查把这 6 个全部拦下（过了逃生检查的漏报 0 → 0）。包里后加的开关都不碰针的检查（`forum_planner._pin_contacts`，S1 的未决问题），所以包大概率带着这 5 个针；包自己的重打分 `C:\ssbot\data\m2_forum_hs\s4rb_s4tb_d14aa37` 在排队，出来后 `decide.py` 给最终判定。
+2. 门槛 1（R2 召回 L2-L4）：包和每个嵌套候选都还没跑完——20:35 起协调者把所有 Python 任务暂停了。到暂停时：RCLIP=2 单独 81 / 444 张表 0 漏；S2 最终组合 49 / 444 张表 0 漏。
+
+**现在能报的数字**（seen = 你的 3 次会话 + bot 第 0 波；"候选" = s3cand0 = 包去掉 TINYCLIP / BODYCLIP；包本身 s4tb 的同一套数在 s4 队列里）
+
+| 门槛 | base（全关） | 候选 s3cand0 |
+|---|---|---|
+| 精度：你，committed 倍数中位 k0 / k12 | 12.28 / 14.93 | 2.45 / 9.03 |
+| 精度：你，committed 错误率 k0 | 99.6 % | 96.98 % |
+| 精度：你，body k12 中位 | 6.7 | 6.5 |
+| 精度：你，ns_any k12 中位 | 28.72 | 16.38 |
+| 精度：你，total k12 中位 | 27.08 | 13.88 |
+| 精度：bot，committed k0 / k12 | 7.9 / 9.39 | 2.31 / 6.09 |
+| 精度：bot，total k12 | 15.39 | 8.67 |
+| 半屏：你 k0 / k12 | 44.95 % / 70.2 % | 4.77 % / 35.1 % |
+| 半屏：bot k0 / k12 | 32.7 % / 72.6 % | 0.97 % / 15.9 % |
+| 后见（自己 / 所有主人）你 k12 | 99.614 / 99.83 | 99.602 / 99.801 |
+| 后见 你 k36 | 95.854 / 98.97 | 95.808 / 98.134 |
+| 后见 bot k12 | 98.501 / 99.558 | 98.501 / 99.369 |
+| 后见 bot k36 | 83.879 / 99.186 | 83.879 / 95.77 |
+| 重打分（32 段，只看支撑 / 过逃生检查） | 1 / 0（旧真值 53） | 排队（RCLIP=2 单独 6 / 0） |
+| R2 召回 L2-L4 | 100 % | 排队 |
+
+- 后见对它的前一步（s2p → s3cand0）seen 上 k 0..36 一行不丢（你和 bot）。对 base：RCLIP=2 丢了 k12 194,736 行里的 29 个被打行（Choristor CH_JUMP、Reed、Envoy；S2 已记），bot k36 所有主人 99.19 → 95.77 也是这个。
+- 按类型（你，committed，k0 / k12 倍数中位，base → 候选）：Tiny 69.6 / 69.8 → 2.7 / 21.5，Clawmaiden 32.9 / 34.3 → 2.7 / 13.6，Reed 14.2 / 13.6 → 2.5 / 8.3，Minister 9.9 / 10.5 → 2.4 / 7.6，Maestro 11.0 / 12.2 → 2.1 / 6.9，Envoy 10.3 / 16.5 → 2.0 / 5.5，Choristor 6.6 / 7.3 → 2.4 / 6.4，Clapper 6.1 / 6.0 → 5.9 / 5.9，Bellbearer 7.0 / 8.8 → 2.4 / 7.7（表 `C:\ssbot\data\m2_forum_push\s5\per_type_{h,bot}_s3cand0.md`）。
+
+**还超 1.5 倍的（每一类都还超）和原因**
+- 所有类型 k12：剪框是每个（状态、状态内时间格、k）一个轴对齐矩形 = 所有后续分支的并，k 越大分支越多矩形越大。下一步是每个 k 的多边形或按后续分支分开的并（S2 已记）。
+- Tiny k12 21.5：Fire Ready 之后 39 u/s 的俯冲，矩形要盖住所有俯冲方向。
+- Clapper k0 也有 5.9：施法不剪（符文炸弹在施法后很久、在 Idle / Walk 里才武装），要按炸弹自己的路径剪。
+- 无主行（51 / 46 行）26.2 / 31.0：没归到任何怪的预测。
+
+**还超半屏的帧**（候选，你的会话：k0 853 帧 = 4.77 %，k12 6,277 帧 = 35.1 %；bot k0 0.97 %）
+- 最大的几帧（份额 0.813）：20261008_231544 第 1 次 f27283 / f31999 / f33349 / f36967 / f46453，20261008_230220 第 0 次 f8825，20261009_085824 第 2 次 f45116（全表在 `C:\ssbot\data\m2_forum_push\s3cand0\share_seen_h.json` 的 worst）。
+- k0 超半屏时面积最大的层（853 帧）：飞行物 hazard 454、committed 169、window 160、未开始 39、身体 31。base 是 window 3,775、committed 2,851、未开始 923。也就是说剩下的主要是飞行物（铃、矛、符文炸弹的管子没剪），不再是 window。bot 的 108 帧是未开始层 104 + 身体 4。
+- k12 的 35 %：未开始层（ns_any 中位 16.4 倍）和 k12 的大矩形。
+
+**给你的说明：标出的框现在是什么**（PNG：base `C:\ssbot\data\m2_forum_push\base\png\`，S2 最终组合 `...\rclip2best3\png\`；包的 PNG 排在 s4 队列 `...\s4tb\png\`）
+- 5690，Choristor 的鞭子（紫框够到 11.7 u 外）：RCLIP 把它剪到"从现在的状态、在这个状态里待了多久"录到过的范围；鞭子的 Whip Hit 1-6 现在算真伤害（红）。Choristor k0 倍数中位 6.6 → 2.4。
+- 7939，Bellbearer / Reed：Bellbearer 的投掷由 RTHROW 剪（出手前不放铃的路径），k0 7.0 → 2.4；Reed k0 14.2 → 2.5。
+- 10427，Reed 反击：真伤害从 8.0 u² 变 18.0 u²（`ParrySlash Hit` 进了真值）；RCLIP=2 下预测 488 格对真 288 格，约 1.7 倍。反击只在 Reed 被打时存在（fix_spec 第 7 节），按行条件的反击还没做。
+- 长矛飞行：红八角是真的爆炸圆（r 3.553，亮 0.1 s）；规划器的 ent/Spear/self 是所有方向的并再加 3.0 u（搜索上限的产物），S4 (d) 没做，所以没变。
+
+**你的回放**：`C:\ssbot\data\m2_forum_overlay\20261009_085824_zones_tight.rrd`（包、AIM 0 和所有门槛一样、k 0 和 12、多段伤害红色、每只怪的精度标量、半分辨率；磁盘剩 500 GB）。排在 `C:\ssbot\data\m2_forum_push\s5\queue5.cmd` 里：等 BODYCLIP 的表建完、没有任务被暂停、少于 3 个重任务时才开始，日志 `C:\ssbot\data\m2_forum_overlay\rrd_tight_085824.log`。
+
+**复现 / 新数据集上重跑**
+```
+rem 每个门槛（冻结 C:\ssbot\hs_s4_d14aa37；包 = s4tb，和 tight.cmd 同一套开关）
+set GATE_ROOT=C:\ssbot\hs_s4_d14aa37
+C:\ssbot\data\m2_forum_push\s4\gate4.cmd <precision|hindsight|share|recall|png|all> s4tb <数据集>
+C:\ssbot\data\m2_forum_push\s3\rescore3.cmd %GATE_ROOT% s4tb <输出名>
+rem 判定（只读 json，几秒）：前后表、每个候选过没过、包 = 嵌套链里最后一个全过的
+python C:\ssbot\data\m2_forum_push\s5\decide.py [--seen <数据集>]
+```
+`decide.py` 写 `s5\bundle_gates.md`、`s5\verdict.json`、`s5\compare_seen_s5.md`。默认改开的条件：R2 召回 L2-L4 100 %（自己和 hooks）、seen / R2 后见对前一步一行不丢、重打分总数和每一类都不多漏。
+
 ### 29.14 精度推进 S1：RCLIP 重打分多出来的漏报、P1 / P2（2026-10-09，task "precision push" S1；同一分支；离线，没有开游戏）
 
 **RCLIP 重打分多出来的 70 个漏报，逐帧查**（b5e9072 对 d51b216，按 tick 比；`C:\ssbot\data\m2_forum_push\s1\miss_diff_rclip.json`、`who.log`、`diag_{base,rclip}.json`）：
