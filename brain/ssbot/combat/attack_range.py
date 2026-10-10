@@ -237,7 +237,7 @@ class RangeTable:
 
     def place(self, fam: str, branch: str | None, b: int, anchor: tuple, s: int, hero_du: float = 0.0,
               now: tuple | None = None, b_now: int | None = None, dec: dict | None = None,
-              st_now: str | None = None, ctx: dict | None = None) -> Mask:
+              st_now: str | None = None, vel: tuple | None = None, ctx: dict | None = None) -> Mask:
         """The raw estimate of bin b of an instance anchored at anchor = (x, y) with facing s: the union over the
         family's branches when branch is None. With now = the enemy's observed position at bin b_now, the position is
         re-anchored there: now + (the template's displacement at b - at b_now), so only the displacement still to
@@ -254,8 +254,8 @@ class RangeTable:
             branch = self.branch_by_rule(fam, hero_du)
         if branch is not None and (fam, branch) in self.templates:
             brs = (branch,)
-        return union([self._place1(self.templates[(fam, br)], b, anchor, s, hero_du, fam, now, b_now, dec, st_now)
-                      for br in brs if (fam, br) in self.templates])
+        return union([self._place1(self.templates[(fam, br)], b, anchor, s, hero_du, fam, now, b_now, dec, st_now,
+                                   vel) for br in brs if (fam, br) in self.templates])
 
     def _shape(self, tp: Template, bb: int, k0: bool, st_now: str | None) -> tuple:
         """(shape, iu0, iv0) of bin bb: the union over the instances; state-gated (tp.sst): at k = 0 the union over
@@ -307,7 +307,7 @@ class RangeTable:
 
     def _place1(self, tp: Template, b: int, anchor: tuple, s: int, hero_du: float, fam: str,
                 now: tuple | None = None, b_now: int | None = None, dec: dict | None = None,
-                st_now: str | None = None) -> Mask:
+                st_now: str | None = None, vel: tuple | None = None) -> Mask:
         k0 = b_now is not None and b <= b_now
         if tp.b_dec is not None:
             if dec is None:                     # pending aim: nothing of the undecided move is drawn
@@ -325,6 +325,9 @@ class RangeTable:
             qx, qy = self.position(tp, b_now, anchor, s, hero_du, fam)
             lo, hi = self.walls
             px, py = min(max(now[0] + px - qx, lo), hi), now[1] + py - qy
+            if vel is not None and b > b_now and st_now in self.spec.coast:     # stage B: coasting on its velocity
+                px, py = coast(now, vel, b - b_now, self.spec.coast[st_now])
+                px = min(max(px, lo), hi)
         return place_shape(sh, iu0, iv0, px, py, s, self.cell)
 
     def _place_dec(self, tp: Template, b: int, dec: dict, now: tuple | None, b_now: int | None,
@@ -379,6 +382,16 @@ class RangeTable:
             if t_lo + on * FT - 1e-6 <= t <= t_hi + off * FT + 1e-6:
                 polys.append(circle_poly(x + s * float(P.get("du", hz.du)), y + float(P.get("dv", hz.dv)), hz.radius))
         return poly_mask(polys, self.cell)
+
+
+def coast(now: tuple, vel: tuple, n: int, decay: float, step: float = 0.02) -> tuple:
+    """Stage B: the position n game frames ahead of an enemy coasting from now at velocity vel whose velocity decays
+    by `decay` per 50 Hz physics step (0: it holds): now + vel x step x sum(decay^i, i = 1..m), m = n x 50 / 60."""
+    m = n * FT / step
+    if decay <= 0.0:
+        return float(now[0]), float(now[1])
+    k = step * (decay * (1.0 - decay ** m) / (1.0 - decay) if decay < 1.0 else m)
+    return float(now[0]) + float(vel[0]) * k, float(now[1]) + float(vel[1]) * k
 
 
 def _inside(x: float, intervals) -> bool:
@@ -533,6 +546,9 @@ class Segmenter:
                 cur.states.append(st)
                 cur.st_t0 = T - max(float(tin or 0.0), 0.0)
             br = sp.branch.get(cur.fam, {}).get(st)
+            if callable(br):        # a branch picked by a rule at that state's first frame (stage B: the Reed's
+                br = None if cur.branch is not None else br(x=x, y=y, s=s, vx=vx, hero_x=hero_x, hero_y=hero_y,
+                                                            s0=cur.s)
             if cur.branch is None and br is not None:
                 cur.branch, cur.branch_t = br, T
             bd = sp.branch_dur.get(cur.fam) if sp.branch_dur else None
@@ -545,9 +561,13 @@ class Segmenter:
                     cur.branch, cur.branch_t = short, T
             d = sp.decide.get(cur.fam) if sp.decide else None
             if d is not None and cur.dec is None and st in d.states:
-                sd, L = d.rule(x, y, vx, hero_x, hero_y)
+                res = d.rule(x, y, vx, hero_x, hero_y)
+                sd, L = res[0], res[1]
+                sd = sd or s            # stage B: s 0 = the observed facing at the decision frame
                 td = T - max(float(tin or 0.0), 0.0)
                 cur.dec = {"t": td, "b": bin_of(td - cur.t0), "x": x, "y": y, "s": int(sd), "L": float(L)}
+                if len(res) > 2 and res[2]:     # stage B: the rule's extras (the Reed's pin aim) kept in dec
+                    cur.dec.update(res[2])
                 if d.branch is not None and cur.branch is None:
                     br_d = d.branch(x, int(sd), float(L))
                     if br_d is not None:
@@ -627,6 +647,8 @@ class RangeTracker:
         self.segs: dict = {}
         self.now: dict = {}         # iid -> (type key, entity dict, inst or None)
         self.hero: tuple | None = None
+        self.objs: dict = {}        # stage B: owner iid -> its projectiles in flight now (type_extra)
+        self.obj_owner: dict = {}   # projectile iid -> (owner iid: the nearest enemy of the owning type, first sight T)
 
     def feed(self, s: dict) -> None:
         dt = s.get("dt")
@@ -654,6 +676,50 @@ class RangeTracker:
         self.now = now
         for iid in [i for i in self.segs if i not in now]:
             del self.segs[iid]
+        self._feed_objs(s.get("ents") or ())
+
+    def _feed_objs(self, ents) -> None:
+        """Stage B: the projectiles in flight of the types whose module lists them (OBJ_TYPES) and draws them
+        (extra): {x, y, vx, vy, t, t0 (first seen), cx, cy (its collider's centre)} of each one whose damage collider
+        is on, given to its owner."""
+        kinds = {}
+        for tk, tab in self.tables.items():
+            mod = type_module(tab.spec)
+            for ot in getattr(mod, "OBJ_TYPES", ()) if mod is not None else ():
+                kinds[ot] = tk
+        self.objs = {}
+        if not kinds:
+            return
+        seen = set()
+        for e in ents:
+            tk = kinds.get(e.get("type_key"))
+            if tk is None:
+                continue
+            oid = int(e.get("iid") or -1)
+            seen.add(oid)
+            if not any(c.get("enabled") and c.get("damage") for c in e.get("cols") or e.get("colliders") or ()):
+                continue
+            p = e.get("pos") or (0.0, 0.0)
+            v = e.get("vel") or (0.0, 0.0)
+            own, t0 = self.obj_owner.get(oid, (None, self.T))
+            if own is None or own not in self.now:
+                cand = [(math.hypot(float(p[0]) - float((x[1].get("pos") or (0, 0))[0]),
+                                    float(p[1]) - float((x[1].get("pos") or (0, 0))[1])), i)
+                        for i, x in self.now.items() if x[0] == tk]
+                if not cand:
+                    continue
+                own = min(cand)[1]
+                self.obj_owner[oid] = (own, t0)
+            o = {"x": float(p[0]), "y": float(p[1]), "vx": float(v[0]), "vy": float(v[1]), "t": self.T, "t0": t0}
+            vs = [q for c in e.get("cols") or e.get("colliders") or () if c.get("enabled") and c.get("damage")
+                  for q in [c.get("verts_world")] if q and len(q) >= 6]
+            if vs:                          # its collider's centre (the pin's turns to its flight)
+                a = np.asarray(vs[0], np.float64).reshape(-1, 2)
+                o["cx"] = 0.5 * float(a[:, 0].min() + a[:, 0].max())
+                o["cy"] = 0.5 * float(a[:, 1].min() + a[:, 1].max())
+            self.objs.setdefault(own, []).append(o)
+        for oid in [o for o in self.obj_owner if o not in seen]:
+            del self.obj_owner[oid]
 
     def estimate(self, iid: int, k: int) -> Estimate | None:
         if iid not in self.now:
@@ -668,10 +734,10 @@ class RangeTracker:
             b = bin_of(self.T - inst.t0)
             now = (float(p[0]), float(p[1]))
             vel = e.get("vel")
+            v2 = (float(vel[0]), float(vel[1])) if vel and len(vel) > 1 else None
             m = tab.place(inst.fam, inst.branch, b + k, (inst.x0, inst.y0), inst.s, inst.hero_du, now=now, b_now=b,
-                          dec=inst.dec, st_now=inst.states[-1] if inst.states else None,
-                          ctx={"T": self.T, "hero": self.hero, "inst": inst,
-                               "vel": (float(vel[0]), float(vel[1])) if vel and len(vel) > 1 else None,
+                          dec=inst.dec, st_now=inst.states[-1] if inst.states else None, vel=v2,
+                          ctx={"T": self.T, "hero": self.hero, "inst": inst, "vel": v2,
                                "body": body_polys(e, tab.spec.body)})
             est = Estimate(iid, k, m, inst.fam, inst.branch, b, now)
         if tab.spec.hazards:
@@ -680,6 +746,12 @@ class RangeTracker:
                             self.T + k * FT)
             est.haz = hm
             est.raw = union([est.raw, hm])
+        ex = type_extra(tab.spec)
+        if ex is not None:
+            xm = ex(tab, inst, self.T, (float(p[0]), float(p[1])), self.T + k * FT, self.objs.get(iid, ()))
+            if xm.m.size and xm.m.any():
+                est.haz = xm if est.haz is None else union([est.haz, xm])
+                est.raw = union([est.raw, xm])
         return est
 
     def estimates(self, k: int) -> list[Estimate]:
@@ -705,6 +777,27 @@ def hazards_at(tab: RangeTable, spawned, inst: Inst | None, T: float, pos: tuple
             if T <= t_hi + FT:
                 ms.append(tab.hazard_mask(hz, max(t_lo, T), max(t_hi, T), pos[0], pos[1], inst.s, t))
     return union(ms)
+
+
+# ------------------------------------------------------------------------------------------------ stage B hooks
+
+def type_module(spec: EnemySpec):
+    """The are_types module of a spec (for its optional stage B functions), or None."""
+    from ssbot.combat.are_types import module_of
+    try:
+        return module_of(spec.type_key)
+    except KeyError:
+        return None
+
+
+def type_extra(spec: EnemySpec):
+    """A type module's own drawn part (stage B), or None: extra(tab, inst, T, pos, t, objs) -> Mask, the raw region at
+    game time t of what neither the templates nor a HazardSpec model (the Reed's pin: its decided line before the
+    release, its real path in flight). inst: the instance as seen at T (or None: idle), pos: the enemy now, objs: its
+    projectiles in flight now ([{x, y, vx, vy, t}], the module's OBJ_TYPES; the tracker gives each to the nearest
+    enemy of the owning type at its first sight, the builder by the module's attach)."""
+    mod = type_module(spec)
+    return getattr(mod, "extra", None) if mod is not None else None
 
 
 def _registry() -> dict:

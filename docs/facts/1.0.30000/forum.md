@@ -4192,3 +4192,108 @@ cd <checkout>\brain
 ..\scripts\uv.cmd run python -m ssbot.tools.attack_range_build --type envoy png
 ..\scripts\uv.cmd run python -m pytest -q tests\test_attack_range_envoy_clawmaiden.py tests\test_attack_range_types.py tests\test_attack_range.py
 ```
+
+## 35. 攻击范围估计（ARE）：Reed + Minister（2026-10-10，task "attack range: all types" 阶段 B，分支 worktree-wf_2fe0d0c5-18e-3 = 阶段 A 77ccb1e + 这一轮；代码 `ssbot/combat/are_types/reed.py`、`minister.py`，框架上加的钩子在 `attack_range.py`、`are_spec.py`、`tools/attack_range_build.py`、`attack_range_png.py`；表 `knowledge/1.0.30000/enemies/forum/attack_range_reed.npz`、`attack_range_minister.npz` + `.json`；数据 `C:\ssbot\data\m2_forum_are\reed`、`minister`）
+
+规则和 §32 / §33 一样：**不加任何余量**（只有画主角中心区时的受伤框膨胀）；待机 = 现在的身体；每一招从起手到收招，按看到的位置重新锚定；还没决定的瞄准（第 2 组）不画；没决定的分支画并集。新的两类：**反击**（被打了才有：从 Block / Parry Block 进入那一帧起画）和**飞行物**（Reed 的针：决定了就画它的直线，飞出去以后按它真实的位置和速度画）。只用 R0 dev 构建；误差在 R0 fresh、R2、你的录像上分开报。离线，没有开游戏。
+
+### 35.1 框架上加的东西（都很小，Choristor / Clapper 不受影响）
+
+- `Segmenter`：分支表里的值可以是一个函数（在那个状态的第一帧按位置 / 主角位置 / 朝向算出分支；参数里有招开始时的朝向 `s0`）；`Decision` 的规则可以返回 `(s, L, extras)`：`s = 0` 表示用决定那一帧看到的朝向，`extras` 存进决定里（针的仰角）。
+- `EnemySpec.hit_started`：被打才开始的家族（反击）。开始它的那一下不算"被打断"，之后再挨打才算。
+- 类型文件可以自己画额外的东西：`extra(tab, inst, T, pos, t, objs)`（Reed 的针）；`OBJ_TYPES` 是它的飞行物的类型（实时追踪器把每根飞着的针给第一次看到它时离它最近的那只 Reed）；构建器里 `attach(c, tracks, spec)` 把缓存里的针按出生点归给扔它的那只 Reed，真碰撞体在轨迹里叫 "OBJ:pin"（和 "HZ:" 一样不进模板）。叠加层、PNG、误差都自动带上它。
+- `EnemySpec.coast`：在这些状态里，往后的位置 = 现在的位置 + 看到的速度按 FSM 的衰减滑行（每个 50 Hz 物理步 × 衰减；0 = 速度设成 0、不动），而不是模板的位移中位数（模板里的实例结束早晚不同）。Reed 的 Parry Slash（×0.95）和 Multihit（0）。轨迹里多存了 vy。
+- 决定的报告多了 `L_p50`（量到的位移中位数）。PNG 找你说的帧时先找在场的那只（等着入场的 Reed 在 Fly In Ready 里也有身体碰撞体，之前会找错）。
+- 单测 `tests/test_attack_range_types.py`（Choristor 逐位不变的哈希）照样通过。
+
+### 35.2 Reed（Song Reed）的家族（R0 dev 里没被打断的实例）
+
+| 家族 | 状态 | 实例 | 画什么 |
+|---|---|---|---|
+| RE_STAB 刺 | Stab Antic（0.63–0.67 s，身体**跟着你移动**：DistanceFly 到你前后 5 u、高 2.5 u）> Stab 1–5 > Stab End > Stab Recover | 626 | 起点是待定的瞄准（第 2 组）：起手期间只画起手的身体。**Stab 1 进入那一帧决定**：锚在那里、用那时看到的朝向；三段 −20 u/s 前冲、每段往下 −6，从 Stab 1 到收招 u 方向位移中位 10.0 u（撞墙就停在墙边：x 夹在 R0 dev 的 14.85–48.15） |
+| RE_THROW 扔针 | Throw Antic > Throw Aim（0.25–0.28 s，**决定**）> Throw（Transition）> Throw Recover | 1,648（Aiming Up：down 1,511、up 103、open 34） | 自己只有身体（后坐 0.155 u）；针见 34.3。分支 = 起手那一帧的 Aiming Up（主角比它高 2 u 以上 = up，离这条线 0.3 u 以内 = open），用来算出针什么时候出手 |
+| RE_COUNTER 反击 | Block（你打中了它：**从这一帧起画**）> Parry Y Aim > Parry Slash > Multihit / Multihit Clashed / Parry Slash End | 252 | 方向 = Block 时的朝向（= 挨打时你在哪一边，1300/1300）。竖直方向在 Parry Slash 进入时（Block 后 30–31 帧）定：Speed Y = clamp(2 ×（你的 y − 它的 y），±10)，按 2 u/s 分 10 个分支（每个 10–44 个实例）；定之前画 10 个分支的并集。前冲 −22 u/s 加 Speed Y，每个物理步 ×0.95：**Parry Slash 里按看到的速度往前推**，Multihit（撞到你）里不动；ParrySlash Hit（多段，导出 dealt 0）只在 Parry Slash 里 |
+| RE_EVADE 闪避 | Evade Antic > Evade（> Evade End） | 1,716 | 30 u/s 往后 + 5 往上，只有身体。Evade 进入时它会重新面向你再往后飞：起手时你在它前面 2.22 u 以外 = 方向确定（R0 dev 里转过身的 180 次全在 2.22 u 以内）；以内就画"同向 / 转身"两个分支的并集，到 Evade 进入再定 |
+| RE_ENTRY 入场 | Fly In | 519 | 落下来的身体 |
+| 待机 | Alert、Stab Pos、Defend Start / Defend / Defend End、Throw Range、0 秒的选择状态 | | 现在的身体（Song Reed、(1)…(3) 的身体碰撞体）。Defend 没有自己的攻击碰撞体：反击只在你打中它（进入 Block）以后才画 |
+
+### 35.3 Reed 的针（Song Reed Pin Projectile，池化）
+
+- **决定**：Throw Aim 进入那一帧，Reed → 你的 transform 的仰角，夹在 [−70°, +45°]（朝它面向的一边）。R0 dev 263 根针：误差 0。
+- **出手**：决定后 24–25 帧（游戏时间，1,995 次）；有 Throw Transition 时 28–30 帧（158 次）。Throw Transition 发生在"起手时的 Aiming Up"和"针的上 / 下出手"不一致的时候，所以起手时就知道用哪个窗口（离线那 0.3 u 的带子里两个都画）。
+- **出生点**：出手时 Reed 的位置 + 朝向坐标 (1.53, −0.54)；仰角 ≥ 10° 时 (1.11, +0.48)。全部 263 根完全一致。决定之后它还在后坐（每帧 ×0.85），所以出生点 = 现在的位置 + 决定时 vx × 剩下的后坐。
+- **飞行**：直线 31.0 u/s（全部 263 根），按 50 Hz 物理步走（每步 0.62 u；60 帧里有一帧不动），所以 k 帧以后走了 floor / ceil(k × 50 / 60) 步，两个都画。
+- **碰撞体**：2.031 × 0.098 的长条。**出生那一帧是水平的，从第二帧起转到飞行方向**（导出的 AABB 正好等于转过的长条的外接框）。缓存只存外接框，所以真值和估计都把转过的长条拆成 40 小段（每段的外接框；离真长条 0.02 u 以内），两边画法一样。我第一次只看了出生帧，以为一直是水平的：那一版 k0 覆盖只有 77 %，改了以后 100 %。
+- **停下**：钉进地 / 墙以后碰撞体关掉。按 R0 dev 亮着的针中心的范围（x 13.9–48.25，y ≥ 3.15）停；平台上提前钉住的不知道（多画，不会漏）。被你的钉子拍飞（62 u/s）的针碰撞体是关的，不画。
+- 实时：每根亮着的针给第一次看到它时最近的那只 Reed；已经出手的针按它自己的位置和速度画，还没出手的按决定画。
+
+### 35.4 Minister（Song Administrator）的家族
+
+| 家族 | 状态 | 实例 | 画什么 |
+|---|---|---|---|
+| MI_CHARGE 冲刺 | Attack Antic（0.48–0.52 s；起手第一帧面向你、瞄准你 + (0, 1.5)，夹在 ±45°；沿瞄准线 −14 u/s 后坐；碰撞体变成 Collider AttackAntic）> Attack（沿瞄准线 33 u/s，Slash Collider 多段）> Multihit（撞到你：停 0.4 s）或 Attack End | 1,649 | 瞄准在**起手第一帧**就定了，所以按 15° 分 7 个分支（−45、−30、−15、0、+15、+30、+45；每个 68–370 个实例），各用各的模板，按状态分开（Attack / Multihit / Attack End） |
+| MI_COUNTER 格挡反击 | Parry Block（格挡架势里被你打中：**从这一帧起画**；面向你，20 u/s 往后、−4 往下，再往上）> Parry Slash 1–4（一次 −45 u/s 前冲、−20 往下，分四段，ParrySlash Hit 1–4）> Parry Slash End | 324 | 方向 = Parry Block 时的朝向；没有竖直瞄准 |
+| MI_EVADE 闪避 | Evade Antic > Evade（25 u/s 往后 + 5 往上，0.4 s） | 1,486 | 同 Reed：起手时你在前面 2.09 u 以外方向确定（转身的 59 次全在 2.09 u 以内），以内画两个方向的并集 |
+| MI_ENTRY 入场 | Fly In | 423 | 落下来的身体 |
+| 待机 | Chase、Retreat?、Parry Stance Antic / Parry Stance / Parry Stance End、0 秒的选择状态 | | 现在的身体：所有亮着的身体碰撞体（Song Administrator 本体，和按状态换的 Collider Fly / Evade / ParryStance / ParryAntic / AttackAntic）。格挡架势本身不出伤害，反击只在 Parry Block 以后画 |
+
+- 冲刺时整只 Minister 转到瞄准方向，所以它的碰撞体（身体、Slash Collider）是斜的；缓存只存外接框，估计和真值两边都是外接框，比真实的斜框大。k0 面积比 1.18–1.22 主要是这个（加上同一个 15° 分支里不同实例的并集）。
+- `face_names` 用 Slash Collider（在前面）：ParrySlash Hit 投的票是反的（第一次构建所有冲刺都被夹到 ±45°）；R0 dev 2,625 次 Attack Antic 进入时 flipX 1 都是面向 +x 的你。
+
+### 35.5 估计误差（R0 fresh 35 场 / R2 / 你的录像，分开报；覆盖 = 真伤害格子被估计盖住的比例；面积比 = 估计 / 真实（主角中心区）；不含被打断的行和 t+k 前已经开始下一招的行）
+
+Reed：
+
+| 家族 | k0 覆盖 | k0 面积比 | k12 覆盖 | k12 面积比 | 说明 |
+|---|---|---|---|---|---|
+| RE_STAB（Stab 1 决定之后） | 98.4 / 98.5 / 98.5 % | 1.00 | 91.7 / 91.6 / 91.8 % | 1.05 / 1.05 / 1.06 | 96–97 % 的行面积比 ≤ 1.5 |
+| RE_STAB（Stab Antic，待定） | 98.4 / 98.4 / 98.4 % | 0.98 | 47.5 / 47.5 / 48.2 % | 0.88 | 起点待定，刺不画（第 2 组） |
+| RE_THROW（身体 + 针） | 99.2 / 99.1 / 99.2 % | 1.05 / 1.06 / 1.05 | 96.0 / 96.1 / 96.0 % | 1.17 / 1.16 / 1.16 | Throw Aim 之后的行 k12 96.8–96.9 %、1.12–1.14 |
+| 针（单独的行） | 99.99 / 99.95 / 100 % | 1.00 | 99.7 / 99.6 / 99.6 % | 1.36 / 1.32 / 1.29 | 93 % 的行 ≤ 1.5；多出来的是出手时刻（24 或 25 帧）和物理步数（floor / ceil）各有两种 |
+| RE_COUNTER | 98.8 / 98.8 / 98.9 % | 1.00 / 1.04 / 1.00 | 85.9 / 88.2 / 92.6 % | 1.18 / 1.16 / 1.11 | 漏 p95 1.4–1.7 u。你说的第 10427 帧：k0 和 k12 都是面积比 1.00、覆盖 99 % |
+| RE_EVADE | 98.7 / 98.7 / 98.8 % | 1.03 | 83.3 / 84.0 / 83.0 % | 1.38 / 1.38 / 1.36 | 漏 p95 1.0–1.1 u（不分方向时 3.8 u） |
+| RE_ENTRY | 98.5 / 98.7 / 98.4 % | 0.99 | 94.3 / 95.1 / 94.1 % | 0.98–0.99 | |
+| 待机 Alert | 100 % | 1.00 | 38 / 44 / 37 % | 1.00 | 现在的身体；它以约 6 u/s 飞（规则如此） |
+| 待机 Stab Pos | 100 % | 1.00 | 16 / 24 / 18 % | 1.00 | 同上（往你那里靠的定位飞行） |
+| 待机 Defend | 100 % | 1.00 | 68 / 68 / 67 % | 1.00 | |
+
+这一轮改过的地方（都在 R0 fresh 上看到的，改了以后三个集合一起重跑）：针的碰撞体从第二帧起是斜的（k0 覆盖 77 % → 100 %）；闪避在 Evade 进入时可能转身（k12 漏 p95 3.8 u → 1.0–1.1 u，覆盖 77 % → 83 %）；针出手时刻按起手时的 Aiming Up 选窗口（针 k12 面积比 1.61–1.71 → 1.29–1.36）；反击在 Parry Slash 里按看到的速度滑行、Multihit 里不动（k12 覆盖 80–85 % → 86–93 %，漏 p95 2.0–2.2 → 1.4–1.7 u；第 10427 帧 k12 从漏 2.1 u 变成面积比 1.00、覆盖 99 %）。
+
+Minister：
+
+| 家族 | k0 覆盖 | k0 面积比 | k12 覆盖 | k12 面积比 | 说明 |
+|---|---|---|---|---|---|
+| MI_CHARGE | 99.8 / 99.8 / 99.8 % | 1.20 / 1.22 / 1.18 | 95.5 / 94.2 / 95.5 % | 1.26 / 1.28 / 1.26 | 90–92 % 的行面积比 ≤ 1.5 |
+| MI_COUNTER | 99.4 / 99.4 / 99.4 % | 1.06 / 1.06 / 1.05 | 90.2 / 91.4 / 91.4 % | 1.11 / 1.10 / 1.10 | |
+| MI_EVADE | 99.7 / 99.7 / 99.6 % | 1.28 / 1.29 / 1.28 | 91.5 / 92.0 / 89.8 % | 1.46 / 1.44 / 1.36 | k0 大：本体碰撞体只在一部分闪避里亮（Parry Slash 之后），模板是并集 |
+| MI_ENTRY | 没有伤害碰撞体 | | 91.8 / 91.9 / 83.0 % | 1.02 / 1.02 / 0.93 | 你的录像里有些行估计是空的（入场比 R0 dev 慢） |
+| 待机 Chase | 100 % | 1.00 | 55 / 57 / 55 % | 0.99 | 现在的身体；它以 ≤ 7 u/s 飞，k12 漏掉的是它飞走的部分（规则如此） |
+| 待机 Parry Stance | 100 % | 1.00 | 64 / 68 / 64 % | 1.00 | 同上 |
+
+### 35.6 怎么看
+
+- 图：`C:\ssbot\data\m2_forum_are\reed\png`（56 张 + `index.json`：每个家族几帧、你说的 085824 第 7939 帧（Bellbearer / Reed）和第 10427 帧（Reed 反击）、误差最大的帧）；`C:\ssbot\data\m2_forum_are\minister\png`（39 张）。橙色填充 = k0 估计，浅蓝 = k12 估计，红 = 真碰撞体，品红 = +12 帧的真碰撞体。
+- 叠加层：`viewer --zones --range` / `human_session --overlay-range` 自动带上这两类（针算在 "+ pin"）。
+- 单练：
+  - Reed：`human_session --solo "Song Reed" --overlay --overlay-range` → 第 2 波（`fo_r1_w2`），同一波还有一只 Bellbearer（Pilgrim 03 Song），solo 会先帮你清掉它。
+  - Minister：`human_session --solo "Song Administrator" --overlay --overlay-range` → 第 4 波（`fo_r1_w4`），这一波有两只 Minister，solo 先清掉另一只。
+  - 都没在游戏里跑过。
+
+### 35.7 这一轮不画的（第 2 组 / 待定）和没做的
+
+- Reed Stab Antic：刺的起点在起手期间跟着你走（待定的瞄准），只画起手的身体；这些行 k12 覆盖只有 47.5–48.2 %。Throw Antic：针的方向到 Throw Aim 才定，之前只画身体。
+- 待机（Alert、Stab Pos、Throw Range、Chase、Retreat?、格挡架势）只画现在的身体：Reed 在 Alert / Stab Pos 以约 6 u/s 飞，k12 覆盖 16–44 %；Minister Chase 55–57 %。要不要按速度往前推，是你来定。
+- Reed 反击：Block 期间（Parry Slash 之前）画 10 个竖直分支的并集（定之前就是待定的）；Multihit Clashed、Parry Slash End 之后的身体仍按模板中位走，k12 漏 p95 1.4–1.7 u。
+- Reed 刺：从 Stab 1 到收招的 u 位移中位 10.0 u，但 p95 误差 6.4 u（5 % 以上的刺比中位短很多）；撞墙的由 x 夹到墙边接住，其余原因（撞地？）没查。k12 决定之后的行仍有 91.6–91.8 % 覆盖。
+- 针：平台上提前钉住的没有地形模型；被拍飞的针（62 u/s，碰撞体关）不画；物理步的相位（这一帧动不动）没跟踪，所以 k > 0 时画两个步数。
+- Minister：斜的碰撞体在缓存里是外接框，估计和真值都偏大。冲刺瞄准规则误差 p95 27°（v2 分类里的未解释尾巴）这里由 15° 分支 + 按看到的位置重新锚定吸收，没单独查。
+
+复现：
+```
+cd <checkout>\brain
+..\scripts\uv.cmd run python -m ssbot.tools.attack_range_build --type reed shapes        (minister 同理)
+..\scripts\uv.cmd run python -m ssbot.tools.attack_range_build --type reed build
+..\scripts\uv.cmd run python -m ssbot.tools.attack_range_build --type reed eval --set fresh --threads 3   (r2 / person)
+..\scripts\uv.cmd run python -m ssbot.tools.attack_range_build --type reed png
+..\scripts\uv.cmd run python -m pytest -q tests\test_attack_range_reed_minister.py tests\test_attack_range_types.py tests\test_attack_range.py tests\test_zone_overlay.py
+```

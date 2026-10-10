@@ -10,8 +10,8 @@ from pathlib import Path
 
 import numpy as np
 
-from ssbot.combat.attack_range import (FT, HERO_DY, HERO_HALF, bin_of, contours, hazards_at, hero_space, load_table,
-                                       poly_mask, union)
+from ssbot.combat.attack_range import (FT, HERO_DY, HERO_HALF, PARKED, bin_of, contours, hazards_at, hero_space,
+                                       load_table, poly_mask, type_extra, type_module, union)
 from ssbot.tools.attack_range_build import compare, frame_ctx, frame_polys, load_tracks, segment
 
 PX_U = 40
@@ -30,7 +30,9 @@ def _find(tracks, sess: str, f: int, iid: int | None = None):
         for jj in (j - 1, j):
             if 0 <= jj < len(tr["f"]) and abs(int(tr["f"][jj]) - f) <= 2 and not tr["hidden"][jj] \
                     and tr["st"][jj] and abs(tr["x"][jj]) < 200:
-                score = (0 if tr["cols"][jj] else 1, abs(int(tr["f"][jj]) - f))
+                # stage B: an enemy in play before a parked one (the Reeds waiting in "Fly In Ready" keep their body)
+                parked = any(w in str(tr["st"][jj]) for w in PARKED)
+                score = (parked, 0 if tr["cols"][jj] else 1, abs(int(tr["f"][jj]) - f))
                 if best is None or score < best[0]:
                     best = (score, tr, jj)
     return (best[1], best[2]) if best else (None, None)
@@ -215,9 +217,10 @@ def _estimate(tr, insts, idx, tab, shapes, j: int, k: int):
         bt = bin_of(tt - inst.t0)
         br = inst.branch if (inst.branch_t is not None and inst.branch_t <= T[j] + 1e-9) else None
         dec = inst.dec if (inst.dec is not None and inst.dec["t"] <= T[j] + 1e-9) else None
+        from ssbot.tools.attack_range_build import _vel
         E = tab.place(inst.fam, br, bt, (inst.x0, inst.y0), inst.s, inst.hero_du,
                       now=(float(tr["x"][j]), float(tr["y"][j])), b_now=b, dec=dec, st_now=tr["st"][j],
-                      ctx=frame_ctx(tr, j, inst, spec, shapes))
+                      vel=_vel(tr, j), ctx=frame_ctx(tr, j, inst, spec, shapes))
         info = (f"{inst.fam} branch {br or 'pending (union)'}{' -> ' + str(inst.branch) if br is None else ''}  "
                 f"bin {b} ({b * FT:.2f} s since the antic start)  anchor ({inst.x0:.2f}, {inst.y0:.2f}) "
                 f"facing {'+x' if inst.s > 0 else '-x'}" + (f"  hero du {inst.hero_du:.2f}" if inst.fam in spec.aim
@@ -239,6 +242,15 @@ def _estimate(tr, insts, idx, tab, shapes, j: int, k: int):
         if H.m.size and H.m.any():
             info += "  + hazards"
         E = union([E, H])
+    ex = type_extra(spec)
+    if ex is not None:                  # stage B: the type's own part (the Reed's pin line / pins in flight)
+        objs = tr.get("objs")
+        X = ex(tab, _active_view(inst, float(T[j])), float(T[j]), (float(tr["x"][j]), float(tr["y"][j])), tt,
+               objs[j] if objs is not None else ())
+        if X.m.size and X.m.any():
+            info += "  + " + getattr(type_module(spec), "OBJ_NAME", "extra")
+            H = X if H is None else union([H, X])
+            E = union([E, X])
     return E, H, info, s
 
 

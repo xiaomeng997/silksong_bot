@@ -79,6 +79,16 @@ class EnemySpec:
     #                                    or None (the template's placement); ctx = {"T": the game time of b_now,
     #                                    "hero": (x, y) now, "inst": the Inst, "vel": (vx, vy) now, "body": the
     #                                    body colliders now (world polygons)}
+    coast: dict = field(default_factory=dict)   # stage B: state -> its velocity decay per 50 Hz step (the FSM's
+    #                                             DecelerateV2; 0: velocity set to 0, it holds): in it the position
+    #                                             ahead is the observed velocity coasting (attack_range.coast), not the
+    #                                             template's median displacement (the Reed's Parry Slash 0.95, Multihit 0)
+    hit_started: frozenset = frozenset()   # stage B: families a hit starts (counters, HIT_COND: the Reed's Block, the
+    #                                        Minister's Parry Block): the hit / clash that starts one does not count
+    #                                        as interrupting it (tools.attack_range_build.segment); later ones do
+    # stage B: the spec's branch values may be callables (x=, y=, s=, vx=, hero_x=, hero_y=) -> branch, picked at
+    # that state's first frame (attack_range.Segmenter); a Decision rule may return (s, L, extras): s 0 = the
+    # observed facing at the decision frame, extras are kept in the decision (Inst.dec)
 
     @property
     def body_names(self) -> tuple:
