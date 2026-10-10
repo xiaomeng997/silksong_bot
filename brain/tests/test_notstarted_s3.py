@@ -54,6 +54,7 @@ def test_walk_cache_keys_the_floor():
 def test_nsbox_parts_parse():
     assert nsbox_parts(None) == frozenset() and nsbox_parts("0") == frozenset()
     assert nsbox_parts("1") == frozenset(mfm.NSBOX_PARTS) and nsbox_parts("bin") == {"bin"}
+    assert nsbox_parts("bin0") == {"bin0"}
     with pytest.raises(ValueError):
         nsbox_parts("bin,nope")
 
@@ -71,7 +72,7 @@ def test_nsbox_bin_places_nothing_before_the_earliest_start():
     X = np.repeat(X.reshape(-1)[:, None], len(tk), 1)
     Y = np.repeat(Y.reshape(-1)[:, None], len(tk), 1)
     occ = {}
-    for parts in ((), ("bin",)):
+    for parts in ((), ("bin",), ("bin0",)):
         mf = MultiForecaster(_tables(), ORACLE, waves=False, collider_tube=False)
         mf.nsbox = frozenset(parts)
         _run(mf, _idle_script())
@@ -83,6 +84,9 @@ def test_nsbox_bin_places_nothing_before_the_earliest_start():
     first_on = int(np.flatnonzero(occ[("bin",)].any(axis=0))[0])
     first_off = int(np.flatnonzero(occ[()].any(axis=0))[0])
     assert first_on == first_off + 1
+    # bin0: only the origin (k0) loses the pre-start bin
+    assert not (occ[("bin0",)] & ~occ[()]).any() and not occ[("bin0",)][:, 0].any()
+    assert (occ[("bin0",)][:, 1:] == occ[()][:, 1:]).all()
 
 
 def test_gate_floors_a_gated_root_at_its_lift_states_walk_entry(monkeypatch):

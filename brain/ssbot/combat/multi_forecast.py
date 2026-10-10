@@ -168,8 +168,11 @@ WALKFLOOR = os.environ.get("SSBOT_FORUM_WALKFLOOR", "0") not in ("", "0")
 # SSBOT_FORUM_NSBOX (task precision push S3, fix_spec F2; default off): parts, a comma list ("1" = all). bin: a later
 # instance (a not-started root) is placed from its earliest start on, not one bin before it (_emit_bbox's activity
 # start): before its start the enemy's body is the idle / collider tubes' and the current instance's job (the Reed's
-# k0 not-started box at f7939 was 13.9 % of the screen, all of it before any start)
-NSBOX_PARTS = ("bin",)
+# k0 not-started box at f7939 was 13.9 % of the screen, all of it before any start); bin0: the pre-start bin kept but
+# never at the origin (k0: no not-started box at all; the person's rule "a not-started attack cannot hurt before its
+# antic ends"). bin loses one seen hindsight row at k12 (20261008_231544 a1 f44707, a Minister in Chase whose body ran
+# 6 of 236 cells past the "+g" held idle tube; the pre-start bin of an evade root starting at 0.2 s covered them)
+NSBOX_PARTS = ("bin", "bin0")
 
 
 def nsbox_parts(v: str | None) -> frozenset:
@@ -616,7 +619,7 @@ class MultiForecaster:
         self.prestrike = PRESTRIKE            # SSBOT_FORUM_PRESTRIKE: the pre-strike reach of a not-started root
         self.reanchor = REANCHOR              # SSBOT_FORUM_REANCHOR: its parts (fam, chain)
         self.rthrow = RTHROW                  # SSBOT_FORUM_RTHROW: a throw family clipped until its release
-        self.nsbox = NSBOX                    # SSBOT_FORUM_NSBOX: its parts (bin)
+        self.nsbox = NSBOX                    # SSBOT_FORUM_NSBOX: its parts (bin, bin0)
         self.gates = GATES                    # SSBOT_FORUM_GATES: FSM history gates on the walk's roots
         self.react: ReactConfig | None = None   # reactive support (ReactConfig; None: as before)
         self.model = _Shim._Model()
@@ -1655,8 +1658,11 @@ class _Builder:
             gcl = np.full(len(tid), -1, np.int64)
         if ton is None:
             ton = np.full(len(tid), -np.inf)
-        if "bin" in getattr(self.fc, "nsbox", ()):
+        nsb = getattr(self.fc, "nsbox", ())
+        if "bin" in nsb:
             ton = np.maximum(ton, e0)           # SSBOT_FORUM_NSBOX bin: nothing before its earliest start
+        elif "bin0" in nsb:
+            ton = np.maximum(ton, 0.5 * BIN)    # SSBOT_FORUM_NSBOX bin0: nothing at the origin (k0)
         cx, cy = 0.5 * (x0 + x1), 0.5 * (y0 + y1)
         hx, hy = 0.5 * (x1 - x0), 0.5 * (y1 - y0)
         ut, inv = np.unique(tid, return_inverse=True)
