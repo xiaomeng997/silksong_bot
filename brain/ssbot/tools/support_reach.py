@@ -507,15 +507,17 @@ def cmd_reach(a) -> int:
 # ------------------------------------------------------------------------------------------------ the clip table
 
 from ssbot.combat.reach_table import (CLIP_BANDS, CLIP_FILE, CLIP_KMAX, CLIP_MIN_ROWS, NT, PARTS,  # noqa: E402
-                                      KB_FREE_F as CLIP_KB_F, ClipTable, empty_boxes, merge_boxes, save_clip,
-                                      tau_bin, unclipped_states)
+                                      BODY_FILE, KB_FREE_F as CLIP_KB_F, ClipTable, empty_boxes, merge_boxes,
+                                      save_clip, tau_bin, unclipped_states)
 
 
-def _fight_reach_all(path: str, kmax: int = CLIP_KMAX) -> dict:
+def _fight_reach_all(path: str, kmax: int = CLIP_KMAX, body: dict | None = None) -> dict:
     """{(tk, state): [B [NT + 1, 2, kmax + 1, 4], N [NT + 1, 2, kmax + 1]]} of one fight cache (combat.reach_table):
     the threat colliders (e_box) of an enemy k frames after a row, relative to its transform at the row (x by its
     facing then), by the row's time-in-state bin (NT: every bin) and part (0 all, 1 nohit: not hit from CLIP_KB_F
-    frames before the row to k after); hidden rows skipped."""
+    frames before the row to k after); hidden rows skipped. body ({type: hull}, SSBOT_FORUM_BODYCLIP's table): the
+    body hull at the transform k frames after (production_tubes body_hull, the idle tube's box) instead of the
+    colliders; a type without a hull is skipped."""
     from ssbot.knowledge.forum_cache import load_cache
     c = load_cache(Path(path))
     e_iid = np.asarray(c["e_iid"], np.int64)
@@ -543,6 +545,11 @@ def _fight_reach_all(path: str, kmax: int = CLIP_KMAX) -> dict:
         tb = tau_bin(np.nan_to_num(np.asarray(c["e_tin"][rows], np.float64), nan=0.0))
         hid = np.asarray(c["e_hidden"][rows]) != 0
         bx = box[rows]
+        if body is not None:
+            h = body.get(tk)
+            if h is None:
+                continue
+            bx = np.stack([x + h[0], y + h[1], x + h[2], y + h[3]], 1)
         has = np.isfinite(bx[:, 0]) & ~hid
         ok0 = ~hid & (st >= 0)
         codes = np.unique(st[ok0])
@@ -588,6 +595,14 @@ def _fight_reach_all(path: str, kmax: int = CLIP_KMAX) -> dict:
     return acc
 
 
+def body_hulls() -> dict:
+    """{type key: (x0, y0, x1, y1)} the body hull relative to the transform (support_margins.json production_tubes
+    body_hull: the idle tube's box)."""
+    from ssbot.tools.forum_aim import FORUM_DIR
+    md = json.loads((FORUM_DIR / "support_margins.json").read_text("utf-8"))
+    return {k: tuple(map(float, v)) for k, v in ((md.get("production_tubes") or {}).get("body_hull") or {}).items()}
+
+
 def fam_of_states() -> dict:
     from ssbot.core.forum import FORUM_TYPES
     from ssbot.tools.forum_aim import FORUM_DIR
@@ -611,12 +626,14 @@ def cmd_clip_build(a) -> int:
     from concurrent.futures import ProcessPoolExecutor
     from ssbot.core.forum import FORUM_TYPES
     from ssbot.tools.forum_aim import FORUM_DIR, _low_priority
+    from functools import partial
     paths = sorted(glob.glob(str(Path(a.dev) / "*.npz")))
     if a.limit:
         paths = paths[:a.limit]
+    body = body_hulls() if getattr(a, "body", False) else None
     folds: list[dict] = [{}, {}]
     with ProcessPoolExecutor(max_workers=a.workers, initializer=_low_priority) as ex:
-        for i, got in enumerate(ex.map(_fight_reach_all, paths, chunksize=1)):
+        for i, got in enumerate(ex.map(partial(_fight_reach_all, body=body), paths, chunksize=1)):
             acc = folds[i % 2]
             for key, (B, N) in got.items():
                 r = acc.get(key)
@@ -670,9 +687,10 @@ def cmd_clip_build(a) -> int:
                                                                round(v, 3), f]
                     lo = band + 1
     r = {k: float(np.ceil(v * 20.0) / 20.0) for k, v in r.items()}
-    out = Path(a.out) if a.out else FORUM_DIR / CLIP_FILE
+    out = Path(a.out) if a.out else FORUM_DIR / (BODY_FILE if body is not None else CLIP_FILE)
     save_clip(out, allB, allN, fam_of, r)
     rep = {"desc": cmd_clip_build.__doc__.split("\n")[0], "fights": len(paths), "dev": str(a.dev),
+           "what": "body hull (SSBOT_FORUM_BODYCLIP)" if body is not None else "threat colliders (SSBOT_FORUM_RCLIP)",
            "kmax": CLIP_KMAX, "min_rows": CLIP_MIN_ROWS, "tau_bins": NT, "kb_free_f": CLIP_KB_F,
            "bands": list(CLIP_BANDS), "states": len(allB),
            "r_type": {f"{k[0]}|{PARTS[k[3]]}|{k[4]}": v for k, v in sorted(r.items(), key=str) if k[1] == "*"},
@@ -1005,6 +1023,7 @@ def main(argv=None) -> int:
     cb.add_argument("--out")
     cb.add_argument("--workers", type=int, default=4)
     cb.add_argument("--limit", type=int, default=0)
+    cb.add_argument("--body", action="store_true", help="the body hull's reach (SSBOT_FORUM_BODYCLIP: body_reach.npz)")
     q = sub.add_parser("summary")
     q.add_argument("dirs", nargs="+")
     q.add_argument("--json")

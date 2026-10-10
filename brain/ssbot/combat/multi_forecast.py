@@ -154,6 +154,14 @@ RTHROW = os.environ.get("SSBOT_FORUM_RTHROW", "0") not in ("", "0")
 # tool's k12 committed p50 for the Tiny was 69x with RCLIP on (fix_spec sec. 8); the group rows were 14 % of the
 # person's frames beyond the half-screen and in every over-half frame after RCLIP (fix_spec sec. 6 item 10)
 TINYCLIP = os.environ.get("SSBOT_FORUM_TINYCLIP", "0") not in ("", "0")
+# SSBOT_FORUM_BODYCLIP (task precision push S4 (b), with RCLIP on; default off): the idle body tube (dead reckoned and
+# grown by the type's idle growth, past its calibration by the type's top speed, in every direction: 6.7x the real body
+# at k = 12 by the precision tool) is also cut by the body's own reach by (type, state, time in state, part, k)
+# (reach_table BODY_FILE, tools.support_reach clip-build --body, R0 dev only, certified 2-fold like the reach clip,
+# the same no-hit part and hero-hit widening): the body hull at the transform k frames after a frame in that state,
+# whatever followed (attacks included). Only where the reach clip is, and cut like it (a throw's idle tube also
+# stands for what it throws at the release: unclipped from one frame before it with RTHROW, else not clipped)
+BODYCLIP = os.environ.get("SSBOT_FORUM_BODYCLIP", "0") not in ("", "0")
 THROW_RELEASE = {("Pilgrim 03 Song", "CB_THROW"): frozenset({"Throw"}),
                  ("Song Reed", "RE_THROW"): frozenset({"Throw"}),
                  ("Song Handmaiden", "CM_SPIN"): frozenset({"Spear Fire", "Spear Fire Recover"})}
@@ -236,6 +244,15 @@ def reach_clip(half: tuple[float, float]):
     if key not in _REACH_CLIP:
         from ssbot.combat.reach_table import CLIP_FILE, ReachClip
         _REACH_CLIP[key] = ReachClip.load(FORUM_DIR / CLIP_FILE, half)
+    return _REACH_CLIP[key]
+
+
+def body_clip(half: tuple[float, float]):
+    """The ReachClip of the body table (knowledge/.../forum/body_reach.npz, SSBOT_FORUM_BODYCLIP), None without it."""
+    key = ("body", round(half[0], 6), round(half[1], 6))
+    if key not in _REACH_CLIP:
+        from ssbot.combat.reach_table import BODY_FILE, ReachClip
+        _REACH_CLIP[key] = ReachClip.load(FORUM_DIR / BODY_FILE, half)
     return _REACH_CLIP[key]
 SUP_HORIZON_S = 0.8
 DWELL_SLACK_S = BIN               # logged dwell ranges are frame-quantised
@@ -628,6 +645,7 @@ class MultiForecaster:
         self.reanchor = REANCHOR              # SSBOT_FORUM_REANCHOR: its parts (fam, chain)
         self.rthrow = RTHROW                  # SSBOT_FORUM_RTHROW: a throw family clipped until its release
         self.tinyclip = TINYCLIP              # SSBOT_FORUM_TINYCLIP: a Tiny group row cut by its members' clips
+        self.bodyclip = BODYCLIP              # SSBOT_FORUM_BODYCLIP: the idle body tube cut by the body's reach
         self.nsbox = NSBOX                    # SSBOT_FORUM_NSBOX: its parts (bin, bin0)
         self.gates = GATES                    # SSBOT_FORUM_GATES: FSM history gates on the walk's roots
         self.react: ReactConfig | None = None   # reactive support (ReactConfig; None: as before)
@@ -1043,6 +1061,7 @@ class _Builder:
         self.react_box: dict = {}            # iid -> (cx, cy, hx, hy): a hit reaction's anchor box (forecast_reaction)
         self.release: dict = {}              # iid -> its throw's earliest release, s from the origin (RTHROW)
         self.clip_fam: dict = {}             # iid -> its throw family clipped until the release (RTHROW)
+        self.body_clip: dict = {}            # iid -> its body reach clip boxes by look-ahead (BODYCLIP)
         self.react = fc.react                # reactive support (ReactConfig) or None
         self.delays = strike_delays(fc.react) if fc.react is not None else {}
         self.body_only = body_only_families() if fc.react is not None and fc.react.bodyreach else frozenset()
@@ -1799,6 +1818,7 @@ class _Builder:
         out.clusters = self.clusters
         out.clip = self._clip()
         out.clip_fam = self.clip_fam
+        out.body_clip = self.body_clip
         out.tinyclip = bool(getattr(self.fc, "tinyclip", False))
         return out
 
@@ -1811,12 +1831,19 @@ class _Builder:
         rc = reach_clip(fc.half)
         if rc is None:
             return {}
+        rcb = body_clip(fc.half) if getattr(fc, "bodyclip", False) else None
         out = {}
         for s in self.subjects:
             tr = fc.trackers.get(s.iid)
             if not s.alive or tr is None or tr.dead or not tr.in_play or tr.parked or tr.hidden or tr.pos is None \
                     or tr.state is None:
                 continue
+            age = self.origin - tr.seen_T
+            if not -1e-9 <= age <= REACH_SEEN_S + 1e-9:
+                continue
+            # no knockback in sight (no hit seen for KB_FREE_F frames): the no-hit reach, else every recorded frame's
+            part = 1 if self.origin - tr.t_hit > KB_FREE_F * BIN + 1e-9 else 0
+            args = (tr.tk, tr.state, (tr.seen_T - tr.t_entry) if tr.t_entry is not None else 0.0)
             rel = None
             if tr.cur is not None and (tr.tk, tr.cur.family) in REACH_KEEP:
                 # in a throw: its body tube and templates also stand for what it throws (a Reed's pin at its release,
@@ -1825,25 +1852,32 @@ class _Builder:
                 rel = self.release.get(s.iid)
                 if rel is None:
                     continue
-            age = self.origin - tr.seen_T
-            if not -1e-9 <= age <= REACH_SEEN_S + 1e-9:
-                continue
-            # no knockback in sight (no hit seen for KB_FREE_F frames): the no-hit reach, else every recorded frame's
-            part = 1 if self.origin - tr.t_hit > KB_FREE_F * BIN + 1e-9 else 0
-            args = (tr.tk, tr.state, (tr.seen_T - tr.t_entry) if tr.t_entry is not None else 0.0)
-            W = rc.world(*args, part, tr.pos, FACES_LEFT[tr.flip], int(round(age / BIN)))
-            if part == 1 and getattr(fc, "reach_hit", False):
-                k = self._hero_hit_k(tr)
-                if k < len(W):
-                    A = rc.world(*args, 0, tr.pos, FACES_LEFT[tr.flip], int(round(age / BIN)))
-                    W[k:, :2] = np.minimum(W[k:, :2], A[k:, :2])
-                    W[k:, 2:] = np.maximum(W[k:, 2:], A[k:, 2:])
+            W = self._reach_world(rc, tr, args, part, age)
+            # BODYCLIP: the body's own reach, on the idle tube where the reach clip is (a throw's tube also stands
+            # for what it throws at its release: cut the same way)
+            Wb = self._reach_world(rcb, tr, args, part, age) if rcb is not None else None
             if rel is not None:
                 kr = len(W) if not math.isfinite(rel) else max(0, int(math.floor(rel / BIN + 1e-9)) - 1)
                 W[kr:] = (-np.inf, -np.inf, np.inf, np.inf)
+                if Wb is not None:
+                    Wb[kr:] = (-np.inf, -np.inf, np.inf, np.inf)
                 self.clip_fam[s.iid] = tr.cur.family
             out[s.iid] = W
+            if Wb is not None:
+                self.body_clip[s.iid] = Wb
         return out
+
+    def _reach_world(self, rc, tr: EnemyTracker, args: tuple, part: int, age: float) -> np.ndarray:
+        """[kmax + 1, 4] an enemy's clip boxes from a reach table (rc.world); RCLIP=2: the no-hit part widened to
+        every recorded frame's from the first look-ahead a hit of the hero or an ally can reach it."""
+        W = rc.world(*args, part, tr.pos, FACES_LEFT[tr.flip], int(round(age / BIN)))
+        if part == 1 and getattr(self.fc, "reach_hit", False):
+            k = self._hero_hit_k(tr)
+            if k < len(W):
+                A = rc.world(*args, 0, tr.pos, FACES_LEFT[tr.flip], int(round(age / BIN)))
+                W[k:, :2] = np.minimum(W[k:, :2], A[k:, :2])
+                W[k:, 2:] = np.maximum(W[k:, 2:], A[k:, 2:])
+        return W
 
     def _hero_hit_k(self, tr: EnemyTracker) -> int:
         """The first look-ahead frame at which a hit of the hero or of an ally (the oracle's allies export: Garmond's
@@ -2180,9 +2214,10 @@ class MultiForecast:
             out.append((idx[ro == o], int(o)))
         return out
 
-    def _clip_boxes(self, owner: int, tk) -> np.ndarray:
-        """[T, 4] the owner's clip boxes (x0, y0, x1, y1) at tk (s from the origin; past the table: no clip)."""
-        W = self.clip[owner]
+    def _clip_boxes(self, owner: int, tk, table: dict | None = None) -> np.ndarray:
+        """[T, 4] the owner's clip boxes (x0, y0, x1, y1) at tk (s from the origin; past the table: no clip); table:
+        another owner -> boxes dict (BODYCLIP's body_clip) in place of the reach clip."""
+        W = (self.clip if table is None else table)[owner]
         k = np.rint(np.asarray(tk, np.float64) / BIN).astype(np.int64)
         out = W[np.clip(k, 0, len(W) - 1)].copy()
         out[k >= len(W)] = (-np.inf, -np.inf, np.inf, np.inf)
@@ -2316,12 +2351,16 @@ class MultiForecast:
                 ok &= dt >= 0
             bx = (x0 + vx * dt - g, y0 + vy * dt - g, x1 + vx * dt + g, y1 + vy * dt + g)
             clip = self.__dict__.get("clip")
+            bclip = self.__dict__.get("body_clip")
             if kind == "idle" and clip and owner in clip:
                 # the reach clip (hero-centre boxes) on the collider box the query grows by the hero half extents
-                cb = self._clip_boxes(owner, tk)
+                cbs = [self._clip_boxes(owner, tk)]
+                if bclip and owner in bclip:
+                    cbs.append(self._clip_boxes(owner, tk, bclip))   # BODYCLIP: and the body's own reach
                 hx, hy = self._fc.half
-                bx = (np.maximum(bx[0], cb[:, 0] + hx), np.maximum(bx[1], cb[:, 1] + hy),
-                      np.minimum(bx[2], cb[:, 2] - hx), np.minimum(bx[3], cb[:, 3] - hy))
+                for cb in cbs:
+                    bx = (np.maximum(bx[0], cb[:, 0] + hx), np.maximum(bx[1], cb[:, 1] + hy),
+                          np.minimum(bx[2], cb[:, 2] - hx), np.minimum(bx[3], cb[:, 3] - hy))
                 ok = ok & (bx[0] <= bx[2]) & (bx[1] <= bx[3])
             rows.append((*bx, ok))
         r = None if not rows else tuple(
@@ -2546,6 +2585,7 @@ class MultiForecast:
         out.clip = self.__dict__.get("clip") or {}
         out.clip_fam = self.__dict__.get("clip_fam") or {}
         out.tinyclip = bool(self.__dict__.get("tinyclip", False))
+        out.body_clip = self.__dict__.get("body_clip") or {}
         return out
 
     def support_set(self, ws: WorldState | None = None, t1: float = SUP_HORIZON_S) -> SupportSet:

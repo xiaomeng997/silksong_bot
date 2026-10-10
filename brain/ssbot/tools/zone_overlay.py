@@ -1,4 +1,4 @@
-"""Zone overlay (task "zone overlay", the person 2026-10-08): the Forum planner's danger regions drawn over the game,
+﻿"""Zone overlay (task "zone overlay", the person 2026-10-08): the Forum planner's danger regions drawn over the game,
 live (human_session --overlay) or over a recording (render / viewer --zones), so the person can check by eye whether
 they are computed right. It shows what the bot ACTUALLY computes, not an idealised version.
 
@@ -23,7 +23,7 @@ the legend). The planner's tick is not run: the support does not depend on its p
                   (fine placements, chains, tails), window placements (windows, family unions, re-anchor bboxes), not
                   started (later attacks / idle instances / entries), projectiles (hazards), death tails (+ arena),
                   margins (the area only the margins add: the same tick on tables with every margin x 0; --margins).
-  yellow          INESCAPABLE, the person's definition (forum.md §26): (a) every enemy with a committed attack: its own
+  yellow          INESCAPABLE, the person's definition (forum.md Â§26): (a) every enemy with a committed attack: its own
                   committed fine placements (owner filter) on the grid for frames 0 .. YELLOW_F, then from the last
                   frame back to now Z_k = D_k | erode(Z_k+1, one-frame reach box) (forum_ics.zone_lb's box: dash speed
                   sideways, jump speed up, max fall down, ceil to cells), the floor and the walls solid (a cell from
@@ -97,7 +97,7 @@ DEFAULT_ENV = {"SSBOT_FORUM_FR": "seen_cf", "SSBOT_FORUM_REACT": "escape+n+g", "
                "SSBOT_FORUM_KF": "kill", "SSBOT_FORUM_AIM": "1"}
 DEFAULT_CLASH = "main"
 SWITCHES = ("FR", "REACT", "MARGIN", "KF", "AIM", "PARK", "RCLIP", "PRESTRIKE", "REANCHOR", "RTHROW", "WALKFLOOR",
-            "NSBOX", "GATES", "TINYCLIP", "PC", "TV", "T", "BELLS", "L2", "AB")
+            "NSBOX", "GATES", "TINYCLIP", "BODYCLIP", "PC", "TV", "T", "BELLS", "L2", "AB")
 
 LAYERS = ("body", "committed", "window", "not_started", "hazard", "death", "margins")
 LAYER_OF = {"body": "body", "collider": "body", "idle_now": "body", "idle": "body",
@@ -526,7 +526,7 @@ class ZoneEngine:
         # along its velocity for KIN_F frames (its flight: the Reed's stab slides along one line with the needle ahead,
         # the person 2026-10-09: "a thin diagonal strip below it"), in hero-centre space (the Minkowski sum with the hero
         # box), eroded back with the one-frame reach, the sky above the dome solid; the family templates (the union of
-        # every recorded instance of the family, forum.md §29.2) are the planner's upper bound, not certain cells
+        # every recorded instance of the family, forum.md Â§29.2) are the planner's upper bound, not certain cells
         cols: dict = {}
         for poly, _clash, _label, vel, iid in damage_colliders(self.raw or {}):
             cols.setdefault(iid, []).append((poly, vel))

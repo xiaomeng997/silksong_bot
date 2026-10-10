@@ -27,6 +27,10 @@ CLIP_KMAX = 126          # frames: the planner's horizon (2 s) + the sighting's 
 CLIP_MIN_ROWS = 120      # rows (within +-K_SLACK) a box needs, else the next coarser level
 CLIP_BANDS = (3, 6, 9, 12, 15, 18, 24, 30, 36, 48, 60, 72, 96, CLIP_KMAX)   # the held-out margin per look-ahead band
 CLIP_FILE = "reach_clip.npz"
+# SSBOT_FORUM_BODYCLIP (task precision push S4 (b)): the same table, certification and lookup for the BODY alone (the
+# body hull at the transform k frames after: tools.support_reach clip-build --body); it bounds the idle body tube,
+# which otherwise grows by the type's top speed in every direction (6.7x the real body at k = 12)
+BODY_FILE = "body_reach.npz"
 TAU_BIN_S = 0.05         # time-in-state bins (s); the last bin holds everything from (NT - 1) x TAU_BIN_S on
 NT = 21
 PARTS = ("all", "nohit")
