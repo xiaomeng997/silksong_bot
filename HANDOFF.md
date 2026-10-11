@@ -4940,8 +4940,10 @@ wf_999712d4-d19-1 worktree (its CC_JUMP / CC_JUMP_CAST tables are the re-scanned
 
 - The Wanderer dash stab (dash combo) is not in the kinematics: still vetoed (R_UNMOD); its hit-bounce / miss-lunge
   branches are not built.
-- Multi-enemy cost (above): try SSBOT_FORUM_V2_EVERY=2 (implemented, not benched), an idle-body fast path (shift the
-  k = 0 body instead of estimate() per sample), fewer samples for far enemies.
+- Multi-enemy cost (above). SSBOT_FORUM_V2_EVERY=2 (`bench_v2e2.json`): act p50 / p95 8.5 / 17.1 and 8.3 / 16.9 ms, 5.7 /
+  5.5 % late (one enemy 7.9-8.3 / 11.6-13.3 ms, 6+ enemies 31-33 % late), FORCED_RISK / S = 1 shares unchanged; not
+  the default (a new antic / decision is seen up to 1 frame later; its hindsight not re-run). Next savings: an idle-body
+  fast path (shift the k = 0 body instead of estimate() per sample), fewer samples for far enemies.
 - The margin for the Clapper (`rule` gives it the fliers' curve, its measured 99 % row margin is 3.2 u at k 12) and the
   escape check's 0.5 u for idle bodies are my approximations: the person's call.
 - Bells: "without this bell" under v2 removes the Bellbearer too (one estimate layer per owner).
