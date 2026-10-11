@@ -250,3 +250,19 @@ def test_escape_reads_its_own_danger_when_given():
     ls.add_esc(0, b, ib, jb)
     assert not ls.occupied_esc(x, y, tk).any() and ls.occupied_esc(np.array([[35.0]]), y, tk).all()
     assert ls.occupied(x, y, tk).all()               # the safe test still reads the full support
+
+
+def test_grouped_dilation_equals_the_union_of_each_enemys():
+    cv = v2.Canvas()
+    raws = [(_cell_mask(25.0, 5.0), 0.5), (_cell_mask(26.0, 7.0), 0.5), (_cell_mask(40.0, 5.0), 1.3)]
+    a = v2.LayerSupport(cv, (0,))
+    b = v2.LayerSupport(cv, (0,))
+    for i, (r, m) in enumerate(raws):
+        d, ix0, iy0 = v2.dilate(r, 0.05, m)
+        a.add(0, i, d, ix0, iy0)
+        c, jx0, jy0 = v2.coarse(r, 0.05)
+        b.add_raw(0, i, c, jx0, jy0, m, 0.5)
+    b.finish()
+    assert np.array_equal(a.stack, b.stack) and a.stack.any()
+    assert np.array_equal(a._stack_of(lambda i: i != 2), b._stack_of(lambda i: i != 2))
+    assert b.stack_esc is not None and b.stack_esc.sum() < b.stack.sum()      # the 1.3 u enemy at 0.5 u

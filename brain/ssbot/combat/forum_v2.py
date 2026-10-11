@@ -53,8 +53,9 @@ CANVAS = (WALL_L - 2.0, FLOOR_Y - 3.0, WALL_R + 2.0, 27.0)      # x0, y0, x1, y1
 BOUNDS_HALF = (0.25, 1.0394)          # the kinematics box half extents (STATE hero.box)
 HB_HX, HB_HY = 0.2277, 1.1249         # HeroBox half extents
 HB_DY = 0.133                         # HeroBox centre - Bounds centre (y)
-# look-ahead samples (frames): every 2 to 12, every 3 to 36, every 4 to 64 (the escape check reads past the horizon)
-SAMPLE_KS = tuple(list(range(0, 13, 2)) + list(range(15, 37, 3)) + list(range(40, 65, 4)))
+# look-ahead samples (frames; the escape check reads past the horizon): 16 (forum_v2_bench: 23 cost 5.5 / 19.5 ms p50
+# with all / 6+ enemies)
+SAMPLE_KS = (0, 2, 4, 6, 9, 12, 15, 18, 22, 26, 31, 36, 42, 48, 55, 62)
 ESC_F = 24                            # frames past the row's end an escape must stay clear
 ESC_FROM_K = 30                       # samples from this planner frame on get the escape check's rasters
 ESC_IDLE_M = 0.5                      # the escape check's margin of an idle body (the estimate's k <= 12 margin)
@@ -172,6 +173,26 @@ class Canvas:
         return row, col, ok
 
 
+def dilate_group(parts, m: float, cell: float = CELL) -> tuple[np.ndarray, int, int]:
+    """Coarse rasters [(mask, ix0, iy0)] on the CELL lattice, one dilation for all (the same margin m)."""
+    import cv2
+    parts = [p for p in parts if p[0].size]
+    if not parts:
+        return np.zeros((0, 0), bool), 0, 0
+    x0 = min(p[1] for p in parts)
+    y0 = min(p[2] for p in parts)
+    x1 = max(p[1] + p[0].shape[1] for p in parts)
+    y1 = max(p[2] + p[0].shape[0] for p in parts)
+    k, (axn, ayn) = box_kernel(m, cell)
+    kh, kw = k.shape
+    img = np.zeros((y1 - y0 + 2 * kh, x1 - x0 + 2 * kw), np.uint8)
+    for c, ix0, iy0 in parts:
+        r, q = iy0 - y0 + kh, ix0 - x0 + kw
+        img[r:r + c.shape[0], q:q + c.shape[1]] |= c.view(np.uint8)
+    d = cv2.dilate(img, k, anchor=(axn, ayn), borderType=cv2.BORDER_CONSTANT, borderValue=0)
+    return d.view(bool), x0 - kw, y0 - kh
+
+
 def dilate(raw: Mask, from_cell: float, m: float, cell: float = CELL) -> tuple[np.ndarray, int, int]:
     """A raw estimate (from_cell lattice) in Bounds-centre space on the CELL lattice with margin m: (mask, ix0, iy0)."""
     import cv2
@@ -209,6 +230,7 @@ class LayerSupport:
         self.samples = tuple(int(k) for k in samples)
         self.k_shift = int(k_shift)
         self.layers: dict = {i: [] for i in range(len(self.samples))}
+        self.raw: dict = {i: [] for i in range(len(self.samples))}     # add_raw: (iid, coarse, ix0, iy0, m, esc_m)
         self.pend: list = []        # pending aims (RangeSupport.build: pending_aims)
         self.stack_esc: np.ndarray | None = None    # the escape check's danger (add_esc), None: the stack
         self.stack = np.zeros((len(self.samples), canvas.ny, canvas.nx), bool)
@@ -226,12 +248,36 @@ class LayerSupport:
         self.layers[si].append((iid, mask, ix0, iy0))
         self.cv.paste(self.stack[si], mask, ix0, iy0)
 
+    def add_raw(self, si: int, iid: int, c: np.ndarray, ix0: int, iy0: int, m: float | None,
+                esc_m: float | None = None) -> None:
+        """A coarse raw raster (CELL lattice, not dilated) of enemy iid at sample si, dilated by m into the stack and
+        by esc_m into the escape check's stack (None: not in that one) when finish() runs: one dilation per (sample,
+        margin) for all enemies."""
+        if c.size and c.any():
+            self.raw[si].append((iid, c, ix0, iy0, m, esc_m))
+
+    def finish(self) -> None:
+        for si, parts in self.raw.items():
+            for which, idx in ((0, 4), (1, 5)):
+                by_m: dict = {}
+                for p in parts:
+                    if p[idx] is not None:
+                        by_m.setdefault(round(float(p[idx]), 4), []).append((p[1], p[2], p[3]))
+                for m, ps in by_m.items():
+                    d, x0, y0 = dilate_group(ps, m, self.cv.cell)
+                    if which == 0:
+                        self.cv.paste(self.stack[si], d, x0, y0)
+                    else:
+                        if self.stack_esc is None:
+                            self.stack_esc = np.zeros(self.stack.shape, bool)
+                        self.cv.paste(self.stack_esc[si], d, x0, y0)
+
     def add_esc(self, si: int, mask: np.ndarray, ix0: int, iy0: int) -> None:
         """A raster of the escape check's danger (occupied_esc; without any, the escape reads the full support)."""
         if not mask.size:
             return
         if self.stack_esc is None:
-            self.stack_esc = np.zeros_like(self.stack)
+            self.stack_esc = np.zeros(self.stack.shape, bool)
         self.cv.paste(self.stack_esc[si], mask, ix0, iy0)
 
     def occupied_esc(self, x, y, tk) -> np.ndarray:
@@ -266,11 +312,19 @@ class LayerSupport:
         return self._occ_stack(self._stack_of(lambda iid: iid in ids), x, y, tk)
 
     def _stack_of(self, keep) -> np.ndarray:
-        st = np.zeros_like(self.stack)
+        st = np.zeros(self.stack.shape, bool)
         for si, ls in self.layers.items():
             for iid, m, ix0, iy0 in ls:
                 if keep(iid):
                     self.cv.paste(st[si], m, ix0, iy0)
+        for si, parts in self.raw.items():
+            by_m: dict = {}
+            for iid, c, ix0, iy0, m, _ in parts:
+                if m is not None and keep(iid):
+                    by_m.setdefault(round(float(m), 4), []).append((c, ix0, iy0))
+            for m, ps in by_m.items():
+                d, x0, y0 = dilate_group(ps, m, self.cv.cell)
+                self.cv.paste(st[si], d, x0, y0)
         return st
 
     def area(self, si: int) -> float:
@@ -355,20 +409,20 @@ class RangeSupport(LayerSupport):
                 e = trk.estimate(iid, k)
                 if e is None:
                     continue
+                if not e.raw.m.size or not e.raw.m.any():
+                    continue
                 n_est += 1
-                m, ix0, iy0 = dilate(e.raw, tab.cell, margin(tk_name, k, margin_mode), cv.cell)
-                rs.add(si, iid, m, ix0, iy0)
-                if k + k_shift >= ESC_FROM_K:
-                    # the escape check's danger: an idle body with ESC_IDLE_M only (idle enemies have no inescapable
-                    # zone: the margin's growth is the replanning's business), moves and hazards as above
-                    if e.fam is None:
-                        m2, jx0, jy0 = dilate(e.raw, tab.cell, ESC_IDLE_M, cv.cell)
-                        rs.add_esc(si, m2, jx0, jy0)
-                        if e.haz is not None and e.haz.m.size and e.haz.m.any():
-                            m3, hx0, hy0 = dilate(e.haz, tab.cell, margin(tk_name, k, margin_mode), cv.cell)
-                            rs.add_esc(si, m3, hx0, hy0)
-                    else:
-                        rs.add_esc(si, m, ix0, iy0)
+                m = margin(tk_name, k, margin_mode)
+                c, ix0, iy0 = coarse(e.raw, tab.cell, cv.cell)
+                esc = k + k_shift >= ESC_FROM_K
+                # the escape check's danger: an idle body with ESC_IDLE_M only (idle enemies have no inescapable zone:
+                # the margin's growth is the replanning's business), moves and hazards with their margin
+                idle = e.fam is None
+                rs.add_raw(si, iid, c, ix0, iy0, m, (ESC_IDLE_M if idle else m) if esc else None)
+                if esc and idle and e.haz is not None and e.haz.m.size and e.haz.m.any():
+                    ch, hx0, hy0 = coarse(e.haz, tab.cell, cv.cell)
+                    rs.add_raw(si, iid, ch, hx0, hy0, None, m)
+        rs.finish()
         rs.n_est = n_est
         rs.pend = pending_aims(trk)
         rs.ms = (time.perf_counter() - t0) * 1e3
