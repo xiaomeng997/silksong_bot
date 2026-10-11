@@ -154,7 +154,13 @@ def test_clapper_controller():
     assert p.stance_x == pytest.approx(land + 2.5) and t.last["goal_why"].endswith("jump: under and behind")
     s = [subj(9, CC, 33.0, y=12.0, state="Air", family="CC_JUMP", committed=True)]
     p = t.decide(world(30.0, ents=[clapper(9, 33.0, False)]), WinFc(s), None, 3)
-    assert p.stance_x == pytest.approx(jump_landing(33.0, 30.0, -1.0) + 2.5)    # from where both are now
+    # from where both are now: behind its landing (37.34) leaves 11.7 u to the right wall, under corner_room_u
+    # (13 u, forum.md 44): back off in front of the landing instead
+    assert p.stance_x == pytest.approx(jump_landing(33.0, 30.0, -1.0) - 8.5)
+    assert t.last["goal_why"].endswith("jump: back off")
+    t.rules.corner_room_u = 0.0                                   # the rule off: under it and behind
+    p = t.decide(world(30.0, ents=[clapper(9, 33.0, False)]), WinFc(s), None, 3)
+    assert p.stance_x == pytest.approx(jump_landing(33.0, 30.0, -1.0) + 2.5)
     assert p.hit_w[9] == pytest.approx(3.0 * 1.5)                 # up slashes on the way under it
     # the cast: face it, the glide-spike hook on
     t = l2()
