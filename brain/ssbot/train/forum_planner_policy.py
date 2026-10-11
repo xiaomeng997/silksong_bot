@@ -865,6 +865,9 @@ class ForumPlannerPolicy(PlannerPolicy):
         self._emit(rec, event)
 
     def stats(self) -> dict:
+        if not hasattr(self, "_pending_ticks"):
+            # never reset: the first episode's intro failed (a solo_clear timeout) before the policy ran
+            return {"reset": False}
         self._flush_ticks(None)
         self.flush_log()
         keys = self.flush_keys()
