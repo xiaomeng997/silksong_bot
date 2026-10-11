@@ -275,6 +275,29 @@ FORUM_W_CLAPPER = tuple(replace(FORUM_WAVE_STARTS[i], name=f"Forum_W_w{i}", save
                                 end_wave=i if i < 13 else None) for i in (7, 13))
 
 
+def forum_solo_intro(wave: int, keep: str) -> Callable[[Ctx], int]:
+    """A wave-start intro (forum_wave_intro) followed by wave_start.solo_clear: the hero, boosted, kills the wave's
+    other members without touching the `keep` enemy; the battle start moves to the first frame with the kept enemy
+    alone (a 1v1 out of a wave: task 1v1 S3, the Choristor)."""
+    base = forum_wave_intro(wave)
+
+    def intro(ctx: Ctx) -> int:
+        from ssbot.train.wave_start import solo_clear
+        base(ctx)
+        r = solo_clear(ctx.link, keep)
+        ctx.tap.rebase_start(r["f"], f"solo {keep}")
+        ctx.log.append({"solo": r})
+        return ctx.tap.wake_frame
+    return intro
+
+
+# The Choristor 1v1 (task 1v1 S3): wave 0 (the Choristor, a Reed and an Envoy) with the Wanderer crest,
+# fo_cl_w0w = fo_r1_w0 + crest.equip Wanderer (ssbot.probes.forum_states wanderer); the Reed and the Envoy are killed
+# in the intro (forum_solo_intro), the episode ends when wave 1 starts (the Choristor's kill)
+FORUM_W_CHORISTOR = replace(FORUM_WAVE_STARTS[0], name="Forum_W_w0c", savestate="fo_cl_w0w",
+                            intro=forum_solo_intro(0, "Song Pilgrim 03"), end_wave=0)
+
+
 # ---- route bosses (Task route bosses, 2026-10-06; docs/facts/1.0.30000/route_bosses.md) ----------------------------
 # Training savestates rb_* (ssbot.probes.route_bosses save): a community "Boss - <name>" savestate (vichisuki
 # BellRoute-LP, pinned 0557f703fa25; copies vs_p6_* / vs_p7_*) loaded, the encounter flag set where the first meeting
@@ -392,4 +415,4 @@ ROUTE_BOSSES_LOW = tuple(replace(e, name=f"{e.name}_low", start_boss_hp=(0.25, 0
 
 ENCOUNTERS = {e.name: e for e in (BELL_BEAST, BELL_BEAST_REAPER, *ROUTE_BOSSES, *ROUTE_BOSSES_LOW, FORUM,
                                   *(forum_variant(a) for a in ("A", "B", "C", "A5", "W")), *FORUM_WAVE_STARTS,
-                                  FORUM_W_W4, *FORUM_W_CLAPPER)}
+                                  FORUM_W_W4, *FORUM_W_CLAPPER, FORUM_W_CHORISTOR)}

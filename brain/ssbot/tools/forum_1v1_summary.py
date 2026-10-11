@@ -1,4 +1,4 @@
-"""Clapper 1v1 live summary (task 1v1, forum.md 44): per arm over `forum_remaining_hits collect` episode files.
+"""Clapper / Choristor 1v1 live summary (task 1v1, forum.md 44 / 45; --end-wave 0 for the Choristor): per arm over `forum_remaining_hits collect` episode files.
 
     cd brain
     ../scripts/uv.cmd run python -m ssbot.tools.forum_remaining_hits collect --manifest s2=C:/ssbot/sandbox/1v1_manifest.txt
@@ -22,6 +22,7 @@ import numpy as np
 
 
 RUNS = Path("C:/ssbot/data/runs/m2")
+END_WAVE = 7                 # the 1v1's wave (--end-wave): Forum_W_w7 the Clapper, Forum_W_w0c the Choristor (0)
 
 
 def _f_kill(run: str, inst: int, ep: int, cache: dict) -> int | None:
@@ -53,7 +54,7 @@ def load(out: Path) -> dict[str, list[dict]]:
 
 
 def _killed(e: dict) -> bool:
-    return int(e.get("wave") or 0) >= 8 or str(e.get("outcome")) == "CLEAR"
+    return int(e.get("wave") or 0) > END_WAVE or str(e.get("outcome")) == "CLEAR"
 
 
 def _pct(xs, q):
@@ -63,7 +64,7 @@ def _pct(xs, q):
 def arm_summary(eps: list[dict]) -> dict:
     n = len(eps)
     kills = [e for e in eps if _killed(e)]
-    kt = [float((e.get("per_wave") or {}).get("7", {}).get("t") or e["t"]) for e in kills]
+    kt = [float((e.get("per_wave") or {}).get(str(END_WAVE), {}).get("t") or e["t"]) for e in kills]
     lps = [e["landed"] / e["t"] for e in eps if e["t"] > 0]
     t_sum = sum(e["t"] for e in eps)
     ticks = sum(e.get("ticks") or 0 for e in eps)
@@ -112,7 +113,10 @@ def main(argv=None) -> int:
     ap.add_argument("--json", type=Path, default=None)
     ap.add_argument("--hits", action="store_true")
     ap.add_argument("--arms", default=None)
+    ap.add_argument("--end-wave", type=int, default=7, help="the 1v1's wave: 7 the Clapper, 0 the Choristor (w0c)")
     a = ap.parse_args(argv)
+    global END_WAVE
+    END_WAVE = a.end_wave
     by = load(a.out)
     keep = set(a.arms.split(",")) if a.arms else None
     res = {}

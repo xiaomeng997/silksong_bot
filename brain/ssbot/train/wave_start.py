@@ -41,6 +41,10 @@ BOOST = (("nailUpgrades", "4"), ("isInvincible", "True"))
 # x -0.25..3.60, y -0.42..2.69; up slash x -2.12..0.81, y -0.63..3.77), a little inside so the swing lands
 SIDE_X, SIDE_Y = (0.0, 3.2), (-0.4, 2.5)
 UP_X, UP_Y = (-1.6, 0.6), (0.4, 3.5)
+# the full reach of each swing (side / up as above, unshrunk; the down slash's box under the hero, generous) for the
+# spared-enemy check (WaveSkipPolicy spare), facing +x, and the margin around it
+SPARE_REACH = {"side": (-0.25, -0.42, 3.6, 2.69), "up": (-2.12, -0.63, 0.81, 3.77), "down": (-1.6, -3.2, 1.6, 0.4)}
+SPARE_MARGIN = 0.8
 
 
 class DebugLine:
@@ -120,10 +124,15 @@ def overlaps(lo: float, hi: float, a: float, b: float) -> bool:
 class WaveSkipPolicy:
     """Kills the live wave members as fast as a hero can: nearest first, side slash in reach, up slash under a flier,
     down slash over one, Silk Spear on the level, dash to close the distance. Hold times are game seconds turned into
-    frames with the STATE dt, so it plays the same at any time scale. Not a data policy: only for skip_to_wave."""
+    frames with the STATE dt, so it plays the same at any time scale. Not a data policy: only for skip_to_wave and
+    solo_clear. `spare`: types never to hit (solo_clear's kept enemy): no swing whose reach (SPARE_REACH grown by
+    SPARE_MARGIN) touches one of them, and no Silk Spear while any is in play."""
 
-    def __init__(self, wave_types: set[str]):
+    def __init__(self, wave_types: set[str], spare: set[str] = frozenset()):
         self.wave_types = wave_types
+        self.spare = set(spare)
+        self.spared: list[tuple[float, float, float, float]] = []
+        self.held_back = 0
         self.hold = {k: 0 for k in B}
         self.rest = {k: 0 for k in B}
         self.frames = 0
@@ -136,6 +145,17 @@ class WaveSkipPolicy:
         if self.hold[k] == 0 and self.rest[k] == 0:
             self.hold[k] = max(2, n)
 
+    def _strike(self, kind: str, hx: float, hy: float, side: int) -> None:
+        """Press attack unless the swing's reach (facing `side`) touches a spared enemy."""
+        rx0, ry0, rx1, ry1 = SPARE_REACH[kind]
+        x0, x1 = (hx + rx0, hx + rx1) if side > 0 else (hx - rx1, hx - rx0)
+        m = SPARE_MARGIN
+        for bx0, by0, bx1, by1 in self.spared:
+            if overlaps(x0 - m, x1 + m, bx0, bx1) and overlaps(hy + ry0 - m, hy + ry1 + m, by0, by1):
+                self.held_back += 1
+                return
+        self._press("attack", 2)
+
     def act(self, s: dict) -> int:
         self.frames += 1
         h = s.get("hero") or {}
@@ -143,7 +163,9 @@ class WaveSkipPolicy:
             return 0
         hx, hy = h["pos"][0], h["pos"][1]
         facing = 1 if (h.get("facing") or 1) > 0 else -1
-        live = [e for e in live_enemies(s) if type_key(e.get("type_key")) in self.wave_types]
+        everyone = live_enemies(s)
+        live = [e for e in everyone if type_key(e.get("type_key")) in self.wave_types]
+        self.spared = [body_box(e) for e in everyone if type_key(e.get("type_key")) in self.spare]
         move = None
         if live:
             def gap(e):
@@ -164,11 +186,11 @@ class WaveSkipPolicy:
                 if facing != side:
                     move = "right" if side > 0 else "left"
                 else:
-                    self._press("attack", 2)
+                    self._strike("side", hx, hy, side)
             elif in_up:
                 move = "right" if side > 0 else "left"
                 self._press("up", self._frames(s, 0.15))
-                self._press("attack", 2)
+                self._strike("up", hx, hy, side)
             elif y0 > hy + 2.2 and gx < 1.6:
                 # a flier above: jump under it, up-slash on the way
                 if not airborne:
@@ -177,13 +199,13 @@ class WaveSkipPolicy:
             elif y1 < hy - 1.0 and airborne and gx < 1.2:
                 move = "right" if side > 0 else "left"
                 self._press("down", self._frames(s, 0.2))
-                self._press("attack", 2)
+                self._strike("down", hx, hy, side)
             else:
                 move = "right" if side > 0 else "left"
                 if gx > 7.0 and not airborne:
                     self._press("dash", 2)
             # Silk Spear along the floor line: silk is topped up by the skip loop
-            if (h.get("silk") or 0) >= 4 and facing == side and abs((y0 + y1) / 2.0 - (hy + 0.5)) < 1.6 and gx < 14.0:
+            if not self.spared and (h.get("silk") or 0) >= 4 and facing == side and abs((y0 + y1) / 2.0 - (hy + 0.5)) < 1.6 and gx < 14.0:
                 self._press("quickcast", 2)
         m = 0
         for k in B:
@@ -391,3 +413,75 @@ def _skip_by_policy(link: OracleLink, enc, wave: int, instance: int, timeout_s: 
         dbg.close()
     return {"method": "policy", "game_s": round(game_s, 2), "acts": pol.frames, "restored": saved,
             **({"on_wave": calls} if on_wave is not None else {})}
+
+
+def link_instance(link: OracleLink) -> int:
+    """The game instance an OracleLink talks to (its port - framing.port(0))."""
+    from ssbot.ipc.framing import port
+    return int(link.sock.getpeername()[1]) - port(0)
+
+
+def solo_clear(link: OracleLink, keep: str, timeout_s: float = 90.0, battle: str = "Battle Scene",
+               settle_s: float = 4.0) -> dict:
+    """A 1v1 out of a wave (task 1v1 S3: the Choristor of wave 0, which also holds a Reed and an Envoy; the oracle
+    has no RPC that removes one enemy, enemy.hp is not deployed): with the boost on (isInvincible, nail 4, as the
+    skip) WaveSkipPolicy kills every live enemy that is not of type `keep` and never swings at a `keep` one (spare),
+    then the PlayerData values are put back and the input released. Done at the first STATE with a `keep` enemy and
+    none of the others in play after at least one other was seen (or after `settle_s` game seconds without any).
+    Returns {f (that frame), game_s, kept {iid, hp, hp_max}, killed, held_back (swings not pressed for it)}.
+    Raises RuntimeError when the kept enemy dies, the battle's wave moves on or the time runs out."""
+    inst = link_instance(link)
+    dbg = DebugLine(inst)
+    pol = None
+    saved: dict[str, str] = {}
+    game_s = 0.0
+    seen: dict[int, str] = {}
+    f_only = None
+    wave0 = None
+    try:
+        for k, v in BOOST:
+            saved[k] = dbg.pdget(k)
+            dbg.pdset(k, v)
+        deadline = time.monotonic() + timeout_s
+        last = link.frame
+        while True:
+            s = link.wait_state(newer_than=last, timeout_s=3.0)
+            last = s["f"]
+            dt = float(s.get("dt") or 0.0)
+            game_s += dt
+            b = battle_of(s, battle) or {}
+            if wave0 is None and b.get("started"):
+                wave0 = b.get("wave")
+            if wave0 is not None and b.get("wave") != wave0 or b.get("completed"):
+                raise RuntimeError(f"solo_clear: the battle moved on (wave {b.get('wave')}, kept {keep} gone?)")
+            live = live_enemies(s)
+            mine = [e for e in live if type_key(e.get("type_key")) == keep]
+            others = [e for e in live if type_key(e.get("type_key")) != keep]
+            for e in others:
+                seen[int(e.get("iid", 0))] = type_key(e.get("type_key"))
+            if pol is None or {type_key(e.get("type_key")) for e in others} - pol.wave_types:
+                pol = WaveSkipPolicy({type_key(e.get("type_key")) for e in others} | set(seen.values()),
+                                     spare={keep})
+            if mine and not others and (seen or game_s >= settle_s):
+                f_only = s["f"]
+                break
+            if time.monotonic() > deadline:
+                raise RuntimeError(f"solo_clear: others still in play after {timeout_s:.0f} s "
+                                   f"({sorted(type_key(e.get('type_key')) for e in others)})")
+            link.act(last + 2, pol.act(s), hold_frames=0)
+        link.act(link.frame + 2, 0, hold_frames=0)
+    finally:
+        try:
+            for k, v in saved.items():
+                dbg.pdset(k, v.split(None, 1)[1] if v.strip().lower().startswith("ok ") else v.strip())
+        except (OracleError, OSError):
+            pass
+        dbg.close()
+    try:
+        link.rpc("input.release", timeout_s=10)
+    except OracleError:
+        pass
+    e = sorted(mine, key=lambda e: int(e.get("iid", 0)))[0]
+    return {"f": f_only, "game_s": round(game_s, 2), "settle_s": settle_s, "restored": saved,
+            "kept": {"iid": int(e.get("iid", 0)), "hp": e.get("hp"), "hp_max": e.get("hp_max")},
+            "killed": sorted(set(seen.values())), "held_back": pol.held_back if pol else 0}

@@ -67,6 +67,25 @@ def test_wave_skip_policy_slashes_in_reach_and_dashes_far():
     assert m & mask("right") and not m & A
 
 
+def test_wave_skip_policy_spares_the_kept_type():
+    # the Reed in reach, the Choristor (spared) right behind it inside the side slash's reach: no swing, no spear
+    reed = _ent(1, "Song Reed", 31.5, 4.6, cols=[_box(31, 3.5, 32, 6)])
+    cho = _ent(2, "Song Pilgrim 03", 33.0, 4.6, cols=[_box(32.6, 3.5, 33.6, 6)])
+    pol = WaveSkipPolicy({"Song Reed"}, spare={"Song Pilgrim 03"})
+    m = pol.act(_state(30, 4.57, ents=[reed, cho], silk=9))
+    assert not m & A and not m & mask("quickcast") and pol.held_back == 1
+    # the Choristor out of reach (behind the hero, past the margin): the swing goes
+    cho_far = _ent(2, "Song Pilgrim 03", 25.0, 4.6, cols=[_box(24.6, 3.5, 25.6, 6)])
+    pol2 = WaveSkipPolicy({"Song Reed"}, spare={"Song Pilgrim 03"})
+    m2 = pol2.act(_state(30, 4.57, ents=[reed, cho_far], silk=9))
+    assert m2 & A and not m2 & mask("quickcast")
+
+
+def test_forum_w_choristor_encounter():
+    e = ENCOUNTERS["Forum_W_w0c"]
+    assert e.savestate == "fo_cl_w0w" and e.end_wave == 0 and e.name.startswith("Forum_W_w")
+
+
 def _cs(**flags):
     from ssbot.tools.cstate import encode
     from ssbot.train import wave_start
