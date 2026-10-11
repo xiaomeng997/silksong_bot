@@ -140,6 +140,94 @@ def test_reader_bins_mirror_and_placement(tmp_path):
     assert np.allclose([q[:, 1].min(), q[:, 1].max()], [7.0 - 0.8, 7.0 - 0.7], atol=0.026)
 
 
+def test_hazard_path_skip_is_exact():
+    """The walk that skips rows whose late path meets the hazard (hazard_paths) finds the same escapes as the plain
+    walk, and a row that only fails at the hazard is skipped (the 2026-10-11 full-library CC_JUMP_CAST scan)."""
+    T, J = 40, 41
+    rng = np.random.default_rng(3)
+    paths = [np.zeros((T, 2))]
+    for _ in range(60):                                   # random walks with plateaus (shared late paths)
+        v = rng.normal(0, 0.25, (T, 2))
+        v[rng.integers(5, T):] = 0.0
+        paths.append(np.cumsum(v, 0))
+    lib = _lib(paths)
+    fr = az.Frames(np.zeros(1, np.uint8), np.zeros((1, J, 5), np.int64), np.zeros((1, J, 2)),
+                   np.array([J], np.int64), np.zeros(1, np.int64), np.array([[2.0, 12, 40, 0.0, 0.0, 0]]),
+                   (-1e9, 1e9))
+    cells = [[x, y] for x in np.arange(-4.0, 4.01, 0.5) for y in (-1.0, 0.0, 1.5)]
+    import ssbot.tools.aim_zones as m
+    sc = SimpleNamespace(fr=fr, var=np.array([[0.0, 1.0]]), nchunk=2, mv=SimpleNamespace(j_max=40))
+    cells = np.asarray(cells, np.float64)
+    cf = np.zeros((len(cells), az.C_NF))
+    cf[:, az.C_EXLO], cf[:, az.C_EXHI], cf[:, az.C_EYMIN] = -1e9, 1e9, -1e9
+    cf[:, az.C_HXLO], cf[:, az.C_HXHI], cf[:, az.C_HYHI] = -1e9, 1e9, 1e9
+    ci = np.zeros((len(cells), 2), np.int64)
+    ci[:, 1] = 1
+    a = m.Scanner.run(sc, lib, az.lib_ext(lib), cells, cf, ci, 0, use_hazard_paths=True)
+    b = m.Scanner.run(sc, lib, az.lib_ext(lib), cells, cf, ci, 0, use_hazard_paths=False)
+    assert np.array_equal(a >= 0, b >= 0)
+    assert (a < 0).any() and (a >= 0).any()               # the circle r 2 at the origin: both kinds of cells
+    hp, hi = az.hazard_paths(lib, 12)
+    assert hp.shape[1] == T - 12 + 1 and len(hi) == len(lib) and len(hp) <= len(lib)
+
+
+def test_jump_frames_put_an_early_landing_on_the_floor():
+    """A jump's bin before the median landing: the in-flight states stay at the flight's height, an early landing's
+    slam (Slam 2) moves down to the landing height (no 9 u slam box in mid-air; 2026-10-11)."""
+    air = np.ones((4, 4), bool)
+    slam = np.ones((10, 20), bool)
+    tp = SimpleNamespace(
+        sst=[{"Air": (air, 0, 0)}, {"Air": (air, 0, 0), "Slam 2": (slam, 0, -10)}, {"Slam 2": (slam, 0, -10)}],
+        disp=np.array([[0.0, 3.0], [1.0, 2.0], [1.5, 0.0]]), shape=[air, air, slam],
+        origin=np.array([[0, 0], [0, 0], [0, -10]]))
+    sh, u0, v0 = az.landed_shape(tp, 1, 2, 0.05)
+    assert (u0, v0) == (0, -50) and sh.shape == (54, 20)          # the slam 2 u (40 cells) lower, the body as is
+    assert sh[-4:, :4].all() and sh[:10].all()
+    assert az.landed_shape(tp, 2, 2, 0.05)[2] == -10              # at the landing: as recorded
+
+
+def test_cling_state_holds_on_the_wall():
+    """The aim zones' wall column state (aim_ics "cling_h5.0"): clinging after the settle, and holding toward the
+    wall keeps the hero still (the person clinging at the wall top)."""
+    from ssbot.knowledge import kinematics as km
+    from ssbot.tools.aim_ics import hero_params, start_state, state_spec, terrain
+    p = hero_params(False)
+    S, latched = start_state("cling_h5.0", p)
+    assert S[km.ROW_NAMES.index("cling")] == 1.0 and latched == km.B_RIGHT
+    tr = terrain(p, state_spec("cling_h5.0")[4])
+    c = km.rollout(S, np.full((1, 120), km.B_RIGHT, np.int64), p, tr).centre[0]
+    assert np.abs(c - c[0]).max() < 1e-6
+    assert set(az.CLING_STATES).isdisjoint(az.STATES)    # not aim_ics table states
+
+
+def test_reader_wall_column_at_the_actual_wall(tmp_path):
+    """The wall column (cling) values replace the zone in the grid columns against the ACTUAL wall, not the bin's."""
+    gx = np.round(np.arange(260) * 0.1 + 0.05, 3)
+    gy = np.round(np.arange(20) * 0.1 - 0.95, 3)
+    nx = len(gx)
+    keys = [az.bin_name(b) for b in az.x_bin_keys()]
+    # every cell of rows 10..19 high-air zone in the open floor (stored whole) for both lats
+    zc = {(lat, "open"): [[r * nx + c, 3] for r in range(10, 20) for c in range(nx)] for lat in az.LATS}
+    p = tmp_path / "aim_zones_CC_JUMP_CAST.npz"
+    _write_table(p, gx, gy, zc)
+    z = dict(np.load(p))
+    cling = np.full((len(az.LATS), 1, len(keys), 2, len(gy)), -1, np.int8)
+    bi = keys.index("x30.5R")
+    cling[:, 0, bi, 0, 12:18] = 0                          # escapable while clinging to the wall ahead
+    cling[:, 0, bi, 0, 18] = 3                             # but not at row 18
+    np.savez_compressed(p, **z, cling=cling)
+    r = az.AimZones(p)
+    x = 30.13                                              # bin 30.5R; the actual wall ahead is 18.86 u away
+    zz = r.zone(x, 7.0, 1, lat=2)
+    W = 48.99 - x
+    col = int(np.argmin(np.abs(gx - (W - az.CLING_DX))))
+    assert zz[12:18, col].max() == 0 and zz[18, col] == 3 and zz[19, col] == 3
+    assert zz[12:18, col - 2].min() == 3                   # 0.2 u off the wall: the air as before
+    assert (zz[:, gx > W - az.HB_HW] == 0).all()           # beyond the wall: outside the arena
+    assert r.inescapable((48.73, 7.0 + gy[14]), (x, 7.0), 1) == 0
+    assert r.inescapable((48.43, 7.0 + gy[14]), (x, 7.0), 1) == 3
+
+
 def test_pending_moves():
     assert az.pending_move("Song Reed", "Stab Antic") == "RE_STAB"
     assert az.pending_move("Song Automaton Tiny", "Fire Ready") == "AT_DIVE"
