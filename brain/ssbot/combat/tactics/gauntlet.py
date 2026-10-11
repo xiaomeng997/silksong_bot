@@ -141,7 +141,7 @@ class L2Rules:
     jump_cast_land_s: float = 1.85                        # CC_JUMP_CAST
     land_margin_s: float = 0.25                           # behind the landing this long before it lands
     jump_out_u: float = 8.5                               # CC_JUMP: in front of the landing past its slam (7.76 u)
-    corner_room_u: float = 0.0                            # CC_JUMP: "under and behind" only with this much room to
+    corner_room_u: float = 13.0                           # CC_JUMP: "under and behind" only with this much room to
     #                                                       the wall behind the hero there (1v1 live, forum.md 44: a
     #                                                       slam with < 8 u behind the hero hit 61 %; 0: off)
     cast_out_u: float = 14.5                              # CC_JUMP_CAST: past the rune circle (6.62 + 7.19 u)
@@ -336,7 +336,8 @@ class GauntletTactics:
             through = s.state not in CC_AIR_STATES and (behind - x) * (hx - x) < 0
             back = -front                                 # the hero ends past the landing on its back side
             wall_room = (behind - xa) if back < 0 else (xb - behind)
-            cornered = r.corner_room_u > 0 and wall_room < r.corner_room_u
+            # a jump cast's rune circle covers the landing's front (-0.7 to 13.8 u): behind it stays the way round
+            cornered = r.corner_room_u > 0 and fam == CC_JUMP and wall_room < r.corner_room_u
             if room(behind) and t_run <= t_land - r.land_margin_s and not through and not cornered:
                 how = "under and behind"
             elif room(out) or not room(behind):
