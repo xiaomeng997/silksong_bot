@@ -66,6 +66,9 @@ class Encounter:
     # training-only late-phase start: after the wake the boss's HP is multiplied by a seeded draw from this range
     # (oracle RPC enemy.hp; ssbot.train.episode). None: the boss keeps its HP
     start_boss_hp: tuple[float, float] | None = None
+    # a gauntlet's wave-start A/B: the battle counts as finished (CLEAR) when the wave after this one starts
+    # (ssbot.train.gauntlet.GauntletTap; the Clapper rules' wave 7, forum.md §26.6). None: the BattleScene's end
+    end_wave: int | None = None
 
 
 @dataclass
@@ -265,6 +268,11 @@ FORUM_WAVE_STARTS = tuple(replace(FORUM, name=f"Forum_A_w{i}", savestate=f"fo_r1
 # (the two Ministers alone) with the Wanderer crest, fo_r8_w4w = fo_r1_w4 + crest.equip Wanderer
 # (ssbot.probes.forum_states wanderer); 20 s: the first try killed both in 9.3 s (wave 5 after that)
 FORUM_W_W4 = replace(FORUM_WAVE_STARTS[4], name="Forum_W_w4", savestate="fo_r8_w4w", timebox_s=20.0)
+# The Clapper waves with the Wanderer crest (forum.md §24, the slam pogo's A/B): wave 7 (one Clapper) and 13 (the two),
+# fo_cl_w<i>w = fo_r1_w<i> + crest.equip Wanderer (ssbot.probes.forum_states wanderer)
+# (the wave-7 one ends at wave 8's start: end_wave, the A/B's target wave only)
+FORUM_W_CLAPPER = tuple(replace(FORUM_WAVE_STARTS[i], name=f"Forum_W_w{i}", savestate=f"fo_cl_w{i}w",
+                                end_wave=i if i < 13 else None) for i in (7, 13))
 
 
 # ---- route bosses (Task route bosses, 2026-10-06; docs/facts/1.0.30000/route_bosses.md) ----------------------------
@@ -384,4 +392,4 @@ ROUTE_BOSSES_LOW = tuple(replace(e, name=f"{e.name}_low", start_boss_hp=(0.25, 0
 
 ENCOUNTERS = {e.name: e for e in (BELL_BEAST, BELL_BEAST_REAPER, *ROUTE_BOSSES, *ROUTE_BOSSES_LOW, FORUM,
                                   *(forum_variant(a) for a in ("A", "B", "C", "A5", "W")), *FORUM_WAVE_STARTS,
-                                  FORUM_W_W4)}
+                                  FORUM_W_W4, *FORUM_W_CLAPPER)}

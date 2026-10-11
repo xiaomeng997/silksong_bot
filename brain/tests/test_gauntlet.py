@@ -247,3 +247,17 @@ def test_gauntlet_policy_takes_the_pocket_when_only_clappers_are_left():
     s["hero"]["pos"][1] = 10.0
     acts = [pol.act(s, None) for _ in range(300)]
     assert any(a & mask("jump") for a in acts)
+
+
+def test_end_wave_finishes_the_battle_when_the_next_wave_starts():
+    from ssbot.train.encounters import ENCOUNTERS
+    enc = ENCOUNTERS["Forum_W_w7"]
+    assert enc.end_wave == 7 and ENCOUNTERS["Forum_W_w13"].end_wave is None and FORUM.end_wave is None
+    link = _Link()
+    tap = GauntletTap(link, enc)
+    b = {"name": "Battle Scene", "id": 5, "wave": 7, "waves": 14, "started": True, "completed": False,
+         "enemies": 1, "to_next": 0}
+    link.feed({"f": 20, "room": {"battles": [dict(b)]}})
+    assert tap.wake_frame == 20 and tap.death_frame is None
+    link.feed({"f": 90, "room": {"battles": [dict(b, wave=8)]}})
+    assert tap.death_frame == 90 and tap.end_source == "end_wave 7" and tap.waves == [(7, 20), (8, 90)]

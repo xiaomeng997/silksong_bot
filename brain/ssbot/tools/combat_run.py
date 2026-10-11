@@ -393,7 +393,8 @@ def worker(a: argparse.Namespace) -> int:
     tap = make_tap(link, enc)
     policy = make_policy(a.policy, a.view, run_dir, a.instance, a.threads, a.real_quit, a.inject_hits,
                          gauntlet=bool(enc.waves), key_cost=tuple(a.key_cost) if a.key_cost else None,
-                         crest="Wanderer" if enc.savestate == "fo_W" else "Reaper", clash=a.forum_clash)
+                         crest="Wanderer" if enc.savestate == "fo_W" or enc.name.startswith("Forum_W_w") else "Reaper",
+                         clash=a.forum_clash)
     if a.silk_reserve:
         pb = getattr(getattr(policy, "inner", policy), "pb", None)
         if pb is not None:

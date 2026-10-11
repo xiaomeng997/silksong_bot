@@ -245,6 +245,9 @@ class GauntletTap:
                             self.waves_exact.append((b["wave"], f))
                     if b["completed"]:
                         self._end(f, "room.battles")
+                    ew = getattr(self.enc, "end_wave", None)
+                    if ew is not None and b["started"] and int(b["wave"]) > ew:
+                        self._end(f, f"end_wave {ew}")    # the wave-start A/B's target wave is over
             for a in allies or ():
                 # "Away": Shakra Fighter's state when she was not called (every Forum load with the Garmond flag;
                 # forum.md §4), counted as a helper before 2026-10-04 (R1: the wave-start records)
