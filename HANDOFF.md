@@ -4883,3 +4883,67 @@ the Clapper's big rune antic the range drawn covers a wall-top cling that no Cla
 - Next: re-scan RE_STAB / MA_SLASH / AT_DIVE for their wall columns (~4 h); a per-frame wall-slide hurtbox for a cling
   (0.59 u conservative now); the live checkout `C:\ssbot\live_ov_combined` still has the old CC tables (copy
   `tables_after` there after the person's check).
+
+## Task 1v1 - stage S1: planner v2-lite behind SSBOT_FORUM_V2 (branch worktree-wf_f1846551-5f9-1, 2026-10-11; forum.md §43)
+
+= main b9559e5 + live-combined-1010 (8f8f483) + worktree-wf_999712d4-d19-1 (eee387f, the Clapper wall-top tables).
+The git-ignored `knowledge/1.0.30000/enemies/forum/*.npz` and the untracked `aim_zones_*.json` were copied from the
+wf_999712d4-d19-1 worktree (its CC_JUMP / CC_JUMP_CAST tables are the re-scanned ones; the rest are byte-identical to
+`C:\ssbot\live_ov_combined`). Offline only: no game instance started, DEMO_SOON untouched.
+
+- `ssbot/combat/forum_v2.py` (new): `margin(type, k)` (MARGIN_MODE `rule` default / `table` / `flat:x` / `zero`;
+  SSBOT_FORUM_V2_MARGIN), `box_kernel` / `coarse` / `dilate` / `dilate_group` (0.05 u estimate -> 0.1 u any-pooled ->
+  HeroBox + margin rect dilation, Bounds-centre space: HeroBox centre = Bounds centre + 0.133 u), `Canvas`,
+  `LayerSupport` (sampled stacks, bracket union between samples, k_shift alignment, occupied / occupied_without /
+  occupied_only, the escape stack `occupied_esc`, `aim_fail` for pending aims), `RangeSupport.build(trk)` (16 samples
+  SAMPLE_KS, one dilation per (sample, margin), escape rasters from k 30 with idle bodies at ESC_IDLE_M 0.5,
+  `pending_aims`, `reaction()` = hit-branch counters from the ARE templates), `V2Forecast` (wraps the MultiForecast:
+  the safe-test reads from the RangeSupport, everything else delegated), `V2Feed` (the policy's tracker, fed every
+  frame; SSBOT_FORUM_V2_EVERY=n rebuilds every n frames and shifts the last one in between).
+- `combat/forum_planner.py`: `ForumConfig.v2` (env SSBOT_FORUM_V2, default off) and `v2_esc_k` 16; under v2 (and a
+  V2Forecast): the timing rows (waits) in the set (enveloped last = the extension search), pending-aim zone check per
+  stage-2 chunk (`_v2_locked` extends through locks), hit-branch reactions via `RangeSupport.reaction`, knockback
+  branch always on, no clash pass, the escape check = `_escape_fail_v2` from every chosen row's end (7 escapes x 24
+  frames against `occupied_esc`) and a failing chosen row is S = 1, safe rows ordered by landed hits (sc["nh"]) then
+  the first hit's frame before J (keys 0 when off / on unsafe rows). Audit counters v2_aim_rows / v2_react /
+  v2_esc_rows. Off: decisions bit-identical (the extra lexsort keys are constant; tests pass unchanged).
+- `train/forum_planner_policy.py`: V2Feed built at reset when fcfg.v2, fed in act, the planner gets the V2Forecast
+  (everything else keeps the plain forecast); stats fcfg.v2 / v2_margin, v2_support_ms_p50 / p99.
+- `tools/forum_v2_bench.py` (new): per-tick cost of ForumPlannerPolicy.act with live deadlines on recorded segments.
+- `tools/forum_human_score.py`: per tick "safe_rows" [n, clear] and the summary's all_rows safe_rows / safe_hit /
+  ticks_any_safe_hit (open-loop hindsight of the planner's safe rows). `tools/zone_overlay.py`: V2 / V2_MARGIN listed
+  in SWITCHES.
+- Tests: `tests/test_forum_v2.py` (16); the Forum planner / clash / human score / integration / policy hits / track A /
+  L2 / aim zones / attack range files pass (156).
+
+### Measured (forum.md 43.5 / 43.6; data `C:\ssbot\data\m2_forum_v2lite`)
+
+- Cost (`bench_v0.json`, `bench_v2b.json`; first 150 game s of 20261004_133855 a1 and 20261011_051105 a0, open loop,
+  live deadlines, quiet machine): act p50 / p95 v0 5.1 / 7.9 ms, v2 11.6 / 19.6 and 10.7 / 17.9 ms (14 % / 9.6 % over
+  16.7 ms). One enemy: 9.2-10.5 / 12.2-15.3 ms (0.2-1.5 % late; support 2.4-3.1 / 4.5-6.6); 6+ enemies 16.9-17.9 /
+  20.7-22.4 (58-75 % late; support ~9.4 ms, 60 % of it the estimates, the Tiny hooks the most). The first version (23
+  samples, one dilation per enemy) was 29.8 ms p95.
+- Re-score (`hs_v0best`, `hs_v2`, `compare.json`; the fixed set: 8 wins + 24 1x wave-0 + the Clapper solo session
+  20261011_051105 a0 / a1): FORCED_RISK 84 / 79 / 88 % -> 22 / 19 / 24 %; the person's matched row safe 13 / 14 / 9 % ->
+  41 / 52 / 35 %, false alarms of clear rows 86 / 84 / 91 % -> 57 / 41 / 62 %, the person's safe-judged rows hit 0 /
+  0.05 / 0 % -> 0.13 / 0.40 / 0.17 %; planner-safe rows hit 0.06 % -> 0.44-0.85 %; the pick clear in hindsight overall
+  93.5 / 89.5 / 93.6 % -> 95.6 / 92.3 / 96.5 %, when safe 99.98 / 99.6 / 99.9 % -> 99.0 / 97.8 / 99.4 %; predicted hits
+  of the pick (ticks where it differs from the person's safe row) 0.14 / 0.11 / 0.11 -> 0.48 / 0.32 / 0.45. Of 681
+  safe picks with a hindsight contact (of 50,608), 46 (0.09 %) touch within 18 frames (nearest enemy: Envoy Attack
+  Wait 18, Reed Stab Antic 13 - an open-loop artifact of the aimed stab -, Clawmaiden idle 6), the rest at 18-36+.
+- Margin `table` (every type's measured 99 % row margin, `hs_v2table`): FORCED_RISK 27 / 17 / 28 % (rule 22 / 19 /
+  24), safe picks clear 99.57 / 97.66 / 99.39 % (rule 99.03 / 97.77 / 99.42), all picks 94.4 / 92.3 / 95.4 % (rule 95.6
+  / 92.3 / 96.5), safe picks touched within 18 frames 61 (rule 46): not better (the Clapper's big margin forces more,
+  the walkers' 0.05 u at k <= 12 lets more through early); `rule` stays the default.
+
+### Not done / open
+
+- The Wanderer dash stab (dash combo) is not in the kinematics: still vetoed (R_UNMOD); its hit-bounce / miss-lunge
+  branches are not built.
+- Multi-enemy cost (above): try SSBOT_FORUM_V2_EVERY=2 (implemented, not benched), an idle-body fast path (shift the
+  k = 0 body instead of estimate() per sample), fewer samples for far enemies.
+- The margin for the Clapper (`rule` gives it the fliers' curve, its measured 99 % row margin is 3.2 u at k 12) and the
+  escape check's 0.5 u for idle bodies are my approximations: the person's call.
+- Bells: "without this bell" under v2 removes the Bellbearer too (one estimate layer per owner).
+- Open-loop hindsight cannot tell "would have escaped" from "missed": the next stage is the live 1v1 (Clapper, clp2
+  setup / fo_r1_w7) with SSBOT_FORUM_V2=1, judged on hitless + landed hits per second.
