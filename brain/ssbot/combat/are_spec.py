@@ -129,3 +129,4 @@ class CustomView:
     mem: dict | None = None    # live
     track: dict | None = None  # offline
     j: int | None = None       # offline
+    dt: float | None = None    # live: the game time of the last fed frame (1/60 s at 1x, 1/120 at 0.5x)

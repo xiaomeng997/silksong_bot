@@ -4806,3 +4806,46 @@ terrain.
   `zones3\rescan_done.txt`. Until then knowledge/ holds the first scan's tables (open-floor bins are unaffected).
 - Tests: `tests/test_aim_zones.py` (bands, hero-space dilation, kernel escape / wall pruning / in-frame sweep, reader
   bins / mirror / placement, pending states, overlay draw / legend / View, live command).
+
+## Task Tiny dive from the Maestro's antic (branch worktree-wf_19fa72dc-053-1, 2026-10-10; forum.md §40)
+
+The person (live, after §39): the Tinies' whole dash path shows, but only once the dash has started; the bugs are
+directed during the Maestro's antic, so the path should be known half a second earlier. Branch = main 58db3f1 + merge
+of 8257114 (§39 overlay); git-ignored forum npz copied from C:\ssbot\live_ov_8257114. Offline only, no game touched.
+
+- FSM: the Tiny is a prefab spawned by the Maestro (not in the scene bundle): `Song Automaton Tiny` in
+  `localpoolprefabs_assets_areahang.bundle` (scene hang_04_boss externals[44] = CAB-3e9ed2e4...). Dump (Control FSM,
+  all states) made with a copy of reactive_scripts/dump_enemies.py: `C:/ssbot/sandbox/reactive_scripts/out/Song_Automaton_Tiny.txt`; the chain is
+  written out in `combat/are_types/tiny.py` (comment block above FIXED_DT) and forum.md §40.1.
+- `combat/are_types/tiny.py`: `simulate(phase, ...)` the whole chain on the 50 Hz physics step (Fire Ready flight to
+  the Maestro's Slash Point with the Maestro's 0.9-decay recoil, FIRE at antic + 0.7 s + 0.8 game frame, the dive,
+  Brake at y 5.0, the 5 u pass, Pull Up, Wall Bonk, Return); `variants` (sure = the hero held; maybe = the other side
+  while |hero x - FIRE x| <= HERO_REACH 9 u/s x time to FIRE, and the longer slide); `dive_paths` (Fire Ready) /
+  `dive_rest` (Fire / Brake / Pull Up); `early` = the k estimate from them (EARLY, env SSBOT_TINY_EARLY=0 restores the
+  old kinematic rule for comparisons); `path(view)` = (sure, maybe) masks to the end of Pull Up; `_cached` per enemy
+  and frame; `_frame_dt` (live CustomView.dt, offline the track's shortest time in state: the person's caches merge two
+  0.5x game frames per row); `antic_state` (t0, the Maestro, its antic facing = the hero's side at the antic entry);
+  attach now gives a Fire Ready frame the Maestro whose Fire Antic started with it. AT_FIRE_READY now spans Fire Ready
+  .. Return (a look-ahead from the antic into the dive is the same family's, not "next").
+- `combat/attack_range.py`: `RangeTracker._view` (factored out of estimate), `RangeTracker.path(iid)` (a type module's
+  optional `path(view)` hook), `ladder` fills `self.paths` {iid: (sure, maybe)} when sweeping, `self.dt` (the last feed
+  step). `combat/are_spec.py`: CustomView.dt.
+- `tools/zone_overlay.py`: range_layer adds "dive" / "dive if hero moves" outlines to range_swept (drawn with key 9);
+  Rerun: `enemies/<e>/range/dive|dive_maybe` and `range/<e>/dive|dive_maybe`, cleared when over.
+- `tools/attack_range_build.py`: eval `--ks` (e.g. 0,12,36) and `--out`.
+- `tools/tiny_early.py`: `chain --set dev|fresh|r2|person` (timing, decisions, FIRE point / side / path residuals per
+  time since the antic entry) and `rows` (eval before / after split antic vs dive, antic rows by time since the entry);
+  `tools/tiny_early_png.py` (4-panel strips). Data: `C:\ssbot\data\m2_forum_are\tiny_early` (chain_<set>.json/log,
+  eval_before|after/, rows_summary.json, png/).
+- Key numbers (R0 dev, not hit, 3,843): FIRE 0.716-0.717 s after the antic entry (7,769 / 7,769); FIRE point from the
+  antic entry p50 0.21 / p90 0.62 / p95 1.69 u (the Tiny then 4.65 u from it), from 0.4 s 0.15 / 0.15 / 0.30; side
+  right 95.8 % at the entry -> 99.1 % at 0.6 s, right or both drawn 99.7 %; both sides drawn 17 % -> 2 %; path error
+  (nearest drawn variant) p50 0.23-0.35 u to 1.2 s after the entry. Eval (R0 fresh, antic rows): k 12 cover 67 -> 88 %,
+  k 36 6.5 -> 68 % (ratio 1.08, p95 2.0 = both sides); dive rows k 36 14 -> 37 %. Person: antic k 36 5 -> 75 %.
+- Launcher (not run): `C:\ssbot\sandbox\start_overlay_forum_tiny.ps1` (as start_overlay_forum_allk.ps1, this
+  worktree), log `C:\ssbot\sandbox\overlay_forum_tiny.log`.
+- Tests: `tests/test_tiny_early.py` (dive phases, wall bonk, the Slash Point, the early k estimate, ladder paths with
+  and without the other side, the rest of a dive, overlay outlines); the attack-range / overlay tests pass.
+- Next: the Return drawn early (needs the Maestro's Forum Fly after the slash); a +-1 physics step streak along the
+  dive if the margin step wants the phase jitter covered (k 36 cover stops at 65-75 %); the planner could use "the dive
+  goes the way the hero is at FIRE" (stand on one side to send it the other way).
