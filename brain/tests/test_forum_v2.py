@@ -284,3 +284,15 @@ def test_v2_feed_reuses_the_support_between_rebuilds_shifted_to_the_origin():
     ls.add(1, 1, d, ix0, iy0)
     # planner frame 1 one frame after the build = the build's look-ahead 2
     assert ls.occupied(np.array([[25.0, 25.0]]), np.array([[5.0, 5.0]]), np.array([0, 1]) / 60.0).tolist() ==         [[True, True]]
+
+
+def test_corner_zones_between_a_clapper_and_a_near_wall():
+    from types import SimpleNamespace as NS
+    from ssbot.combat import forum_v2 as v
+    tab = NS(type_key=v.CLAPPER)
+    fc = NS(trackers={1: NS(dead=False, pos=(20.0, 7.45), table=tab),            # 6 u from the left wall
+                      2: NS(dead=False, pos=(31.0, 7.45), table=tab),            # mid-arena: no corner
+                      3: NS(dead=True, pos=(46.0, 7.45), table=tab),             # dead: none
+                      4: NS(dead=False, pos=(46.0, 7.45), table=NS(type_key="Song Reed"))})
+    z = v.corner_zones(fc)
+    assert z == [(v.WALL_L - 1.0, 20.0)]

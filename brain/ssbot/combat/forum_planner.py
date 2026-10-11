@@ -404,6 +404,7 @@ class EnvelopeAudit:
     v2_aim_rows: int = 0          # v2: rows a pending aim's zone set S = 1
     v2_react: int = 0             # v2: hit-branch counters placed from the estimate's templates
     v2_esc_rows: int = 0          # v2: rows the escape check (from the row's end) looked at
+    v2_corner_rows: int = 0       # v2: safe rows ranked last for ending in a Clapper's corner (forum_v2.corner_zones)
 
     def as_dict(self) -> dict:
         return dict(self.__dict__)
@@ -2393,6 +2394,18 @@ class ForumPlanner(Planner):
             # v2: of the safe rows, the most landed hits on real enemies, then the earliest first hit (0 on every row
             # otherwise and on every unsafe row: the order is unchanged)
             v2_nh = np.where(safe, -sc["nh"], 0.0) if v2 else np.zeros(N)
+            if v2:
+                # the Clapper's corner (forum_v2.corner_zones): safe rows ending in it after the others
+                zones = forum_v2.corner_zones(f)
+                if zones:
+                    end = r1.box[:, -1, :]
+                    cxe = 0.5 * (end[:, 0] + end[:, 2])
+                    cye = 0.5 * (end[:, 1] + end[:, 3])
+                    corner = np.zeros(N, bool)
+                    for x0, x1 in zones:
+                        corner |= (cxe >= x0) & (cxe <= x1) & (cye < forum_v2.CORNER_TOP_Y)
+                    v2_nh = v2_nh + np.where(safe & corner, 1000.0, 0.0)
+                    self.audit.v2_corner_rows += int((safe & corner).sum())
             v2_ff = np.where(safe & (sc["first_f"] >= 0), sc["first_f"], np.where(safe, T1, 0)) if v2                 else np.zeros(N, np.int64)
             order = np.lexsort((-J, eml_k, -t_hit, -t_c, Pf, Pcm, Pc, sk_c, -sk_f, sk_n, ~V, v2_ff, v2_nh, ~mkeep,
                                 ~keep, clash_p, S, U, hz_soft, hz))

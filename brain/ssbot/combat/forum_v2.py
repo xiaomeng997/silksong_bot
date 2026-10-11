@@ -52,6 +52,29 @@ MARGIN_MODE = os.environ.get("SSBOT_FORUM_V2_MARGIN", "rule").strip().lower() or
 # the escape check runs on a carried CONTINUE row too (1v1 live, forum.md 44: a row chosen with an escape kept running
 # into a Slam Antic's reach unchecked until no row had one; SSBOT_FORUM_V2_ESC_CARRIED=0: the old skip)
 ESC_CARRIED = os.environ.get("SSBOT_FORUM_V2_ESC_CARRIED", "1").strip() != "0"
+# the Clapper's corner (1v1 live, forum.md 44: 16 of 26 slam hits): with its body this close to a wall (u) the strip
+# between them is a trap - a slam it starts facing the wall reaches 12 u, so the antic leaves no way out but the wall
+# top (y >= 11.8, never hit; forum.md 42). A safe row ending there ranks after every safe row ending elsewhere
+# (SSBOT_FORUM_V2_CORNER=0: off)
+CORNER_U = float(os.environ.get("SSBOT_FORUM_V2_CORNER", "13") or 0.0)
+CORNER_TOP_Y = 11.15                  # the hero's Bounds centre at a wall-top cling (transform y 11.8)
+CLAPPER = "Song Heavy Sentry"
+
+
+def corner_zones(fc) -> list[tuple[float, float]]:
+    """[(x0, x1)] the strips between a live Clapper's transform and a wall closer than CORNER_U (hero x)."""
+    if CORNER_U <= 0:
+        return []
+    out = []
+    for tr in (getattr(fc, "trackers", None) or {}).values():
+        if tr.dead or tr.pos is None or getattr(getattr(tr, "table", None), "type_key", None) != CLAPPER:
+            continue
+        x = float(tr.pos[0])
+        if x - WALL_L < CORNER_U:
+            out.append((WALL_L - 1.0, x))
+        if WALL_R - x < CORNER_U:
+            out.append((x, WALL_R + 1.0))
+    return out
 
 CELL = 0.1
 CANVAS = (WALL_L - 2.0, FLOOR_Y - 3.0, WALL_R + 2.0, 27.0)      # x0, y0, x1, y1 (u)
