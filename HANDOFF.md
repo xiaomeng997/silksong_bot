@@ -5006,3 +5006,57 @@ to DEMO_SOON.paused for the runs and put back at the end; the instances were lef
   most ~1 hit predicted per 36-frame row.
 - Rune bombs / rune circle and idle-body contacts: a few per arm. Late ticks 20 % with two instances at EVERY=1.
 - Margin flat 0.5 for every type is my choice for the 1v1 (the person's call; 43.2).
+
+## Task 1v1 - stage S3: live Choristor 1v1 (branch worktree-wf_f1846551-5f9-1, 2026-10-11 evening; forum.md §45)
+
+Live runs on game instances 0 and 1 (no oracle deploy, no --restore, no process killed). DEMO_SOON was renamed to
+DEMO_SOON.paused for the runs and put back at the end. Both instances were left quiet (`clp2_quiet.py <inst>
+kn_forum_floor`: keys released, no enemies). They are still running and need the person to close them (PlayerPrefs
+restore pending from the S2 `launcher --detach`).
+
+- `Forum_W_w0c` (encounters.FORUM_W_CHORISTOR): savestate `fo_cl_w0w` = fo_r1_w0 + the Wanderer crest (made on
+  instance 0 with `probes.forum_states wanderer`), `end_wave` 0, intro `forum_solo_intro(0, "Song Pilgrim 03")` =
+  forum_wave_intro + `wave_start.solo_clear`. solo_clear turns on the boost (isInvincible, nail 4) and runs
+  WaveSkipPolicy on the others with `spare={keep}`. A spared enemy within the facing side's union of every swing's reach
+  (+ SPARE_MARGIN 0.6) holds the swing back and steps away from it. Silk Spear is off while a spared enemy is in play.
+  Then it restores the PlayerData, releases the input and rebases the battle start to the first frame with the kept
+  enemy alone. Timeout 60 s (RuntimeError -> HARNESS_FAIL).
+- The deployed oracle has no `enemy.hp`, so a stray hit on the Choristor during the clear stays. The intro records
+  the kept enemy's HP. `forum_1v1_summary` reports it (kept_hp) and has a new `--end-wave` (0 for the Choristor).
+- `ForumPlannerPolicy.stats()` before any reset returns `{reset: False}`. Before this, a first-episode intro failure
+  crashed the worker.
+- Harness: `C:\ssbot\sandbox\1v1_live.ps1` has new `-Encounter`, `-Timebox` and `-Manifest` parameters (defaults
+  Forum_W_w7, 150, 1v1_manifest.txt). The Choristor manifest is `1v1c_manifest.txt`. New arms in `1v1_arms.txt`:
+  v2r, cw, ce, cm3.
+- Tests: test_forum_r1 (+2: the spared type, the encounter) 33 passed; test_gauntlet passes.
+
+### Measured (forum.md 45.2; collect `C:\ssbot\data\m2_1v1c\col`, summary `s2.json`)
+
+Landed hits/s are per fight second ((f_kill - f_wake) / 60), counted only in episodes where the Choristor had full
+HP at the handover.
+
+| arm | episodes | hitless kills | hits / ep | landed / s p50 | kill p50 |
+|---|---|---|---|---|---|
+| v0 best | 26 | 30.8 % | 1.15 | 0.14 | 61 s |
+| tj2 (S2 recommended, flat 0.5) | 76 | 90.8 % | 0.09 | 1.42 | 8.4 s |
+| v2r (v2 + the rule margin, the code default) | 62 | 88.7 % | 0.13 | 1.51 | 7.9 s |
+| cm3 (flat 0.3) | 39 | 89.7 % | 0.10 | 1.49 | 8.0 s |
+| cw / ce (tj2 + track A whip / edge) | 16 / 16 | 87.5 % | 0.13 | 1.48 / 1.44 | 8.2 / 7.5 s |
+
+- Every episode in the table is a kill. The v2 arms do not differ measurably.
+- tj2's 7 hits:
+  - Jump Antic body 2 and Hop Back body 1: the hero turning (Sprint Turn) within 1 u.
+  - ComboSlash 1, Slash End, Multiwhip and Jump Spin, 1 each: the hero airborne or locked at 3.6-3.8 u.
+- Late ticks 1-2 %, FORCED_RISK 2.2 %.
+- The clear itself (c42d834, 196 episodes): no timeouts, 8 stray hits on the Choristor (4 %), 1 brain-lost watchdog
+  pause in a cold checkout's first episode.
+- The Clapper for comparison (S2 tj2 on the same per-fight basis): 0.66 landed/s, kill 36 s, 68 % hitless kills.
+
+### Not done / open
+
+- Landed hits/s is 1.4-1.5, against the person's 2.0 (best 10 s windows) and about 2.5 under knockback. Margin 0.3,
+  track A edge and track A whip did not raise it.
+- The next steps are the Reed 1v1 and then the full waves:
+  - The Reed is in waves 0, 2, 8 and 12. Wave 0 can reuse solo_clear with keep "Song Reed".
+  - The Reed's parry / counter needs the tink-vs-defender rule.
+- The Clapper slam answer (the hammer pogo) from S2 is still open.
