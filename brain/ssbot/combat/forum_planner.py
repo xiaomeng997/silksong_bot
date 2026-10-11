@@ -404,6 +404,7 @@ class EnvelopeAudit:
     v2_aim_rows: int = 0          # v2: rows a pending aim's zone set S = 1
     v2_react: int = 0             # v2: hit-branch counters placed from the estimate's templates
     v2_esc_rows: int = 0          # v2: rows the escape check (from the row's end) looked at
+    v2_esc_tail: int = 0          # v2: chosen rows whose passing escape became the plan's tail (forum_v2.ESC_TAIL)
     v2_corner_rows: int = 0       # v2: safe rows ranked last for ending in a Clapper's corner (forum_v2.corner_zones)
 
     def as_dict(self) -> dict:
@@ -1496,7 +1497,11 @@ class ForumPlanner(Planner):
         occ = (rs.occupied_esc(cx, cy, tq) if rs is not None and hasattr(rs, "occupied_esc") else
                f.occupied(cx, cy, tq)) & ((re.flags & F_INVULN) == 0)
         occ[:, 0] = False
-        esc = (~occ.any(axis=1)).reshape(len(rows), nE).any(axis=1)
+        ok_e = (~occ.any(axis=1)).reshape(len(rows), nE)
+        esc = ok_e.any(axis=1)
+        # the first escape that passed, per row (forum_v2.ESC_TAIL: the chosen row's plan keeps it as its tail)
+        first = np.argmax(ok_e, axis=1)
+        self._v2_esc_first.update({int(r): int(first[j]) for j, r in enumerate(rows) if esc[j]})
         return (~esc).astype(np.int64), [[] if e else ["v2 end"] for e in esc]
 
     @staticmethod
@@ -2278,6 +2283,8 @@ class ForumPlanner(Planner):
             keep = ((wj & B_JUMP) != 0).all(axis=1) & ((wj & B_QUICKCAST) == 0).all(axis=1)
         bind_res = None
         self.last_sel = None
+        esc_tail = None
+        self._v2_esc_first = {}
         if prefs.want_bind and ctx.want_bind:
             bind_res = self._bind(ws, start, hold, prefix, f, ctx)
         forced = not safe.any() and not (bind_res is not None and bind_res[0])
@@ -2445,6 +2452,8 @@ class ForumPlanner(Planner):
                     a.esc_cut += int(self.esc_cut)
                     esc_info.update(fail=nf, checked=nchk, threats=nth, forced=bool(forced), cut=self.esc_cut,
                                     ms=round((time.perf_counter() - te) * 1e3, 3), why=sorted(set(lab)))
+                    if v2 and forum_v2.ESC_TAIL and esc_row is not None and nf == 0 and esc_row in self._v2_esc_first:
+                        esc_tail = (int(esc_row), self._esc_cmds(forum_v2.ESC_F)[self._v2_esc_first[esc_row]])
                     if esc_row is not None:
                         a.esc_ticks += int(not forced)
                         a.esc_pass += int(not forced and nf == 0)
@@ -2517,6 +2526,11 @@ class ForumPlanner(Planner):
         elif res.name != "CONTINUE":
             self.macro_until = -1
         self.prev_cmd = sel_cmd
+        if esc_tail is not None and esc_tail[0] == res.idx:
+            # v2: the escape that kept this row safe is its plan's tail: the next tick's CONTINUE runs into it
+            # (forum_v2.ESC_TAIL) instead of idling where the row ends
+            self.prev_cmd = np.concatenate([np.asarray(sel_cmd, np.int64), esc_tail[1]])
+            a.v2_esc_tail += 1
         self.prev_name = res.name
         self.ticks += 1
         t6 = time.perf_counter()
