@@ -371,9 +371,10 @@ def _kernel():
     return scan
 
 
-def lib_ext(lib) -> np.ndarray:
-    """Per trajectory: min / max x and max y displacement (quant units) over its frames."""
-    q = lib.q
+def lib_ext(lib, n: int | None = None) -> np.ndarray:
+    """Per trajectory: min / max x and max y displacement (quant units) over its frames 1..n (the move's frames: a
+    wall or the dome met after the move has ended does not matter)."""
+    q = lib.q[:, :n]
     return np.ascontiguousarray(np.stack([q[:, :, 0].min(1), q[:, :, 0].max(1), q[:, :, 1].max(1)], 1)
                                 .astype(np.float64))
 
@@ -503,6 +504,7 @@ def scan_state(out: Path, state: str, moves: list, p, lats=LATS, bins=None, log=
         sc = Scanner(name)
         mv = sc.mv
         coarse_only = cls != "ground" and not mv.refine_air
+        cext, fext = lib_ext(co, mv.j_max), lib_ext(fu, mv.j_max)
         fl, fx = (co, cext) if coarse_only else (fu, fext)
         arrs = {}
         n_cells = 0
@@ -552,7 +554,8 @@ def scan_state(out: Path, state: str, moves: list, p, lats=LATS, bins=None, log=
                         s3w = s3[near_wall(cf[s3], cells[s3])]
                         z[np.setdiff1d(s3, s3w)] = True
                         if len(s3w):
-                            lib, ext = wall_lib(coarse_only)
+                            lib, _ = wall_lib(coarse_only)
+                            ext = lib_ext(lib, mv.j_max)
                             cf2, ci2 = cell_params(mv, sc.fr, cells[s3w], ye, b, wall_lib=True)
                             r = sc.run(lib, ext, cells[s3w], cf2, ci2, lat)
                             z[s3w[r < 0]] = True
@@ -790,8 +793,15 @@ def cmd_png(args) -> None:
     out.mkdir(parents=True, exist_ok=True)
     rd = readers(args.npz_dir)
     moves = {m: PNG_AT[m] for m in args.moves if m in rd}
-    ct = (class_tables(moves, args.lat, coarse=True, log=lambda q: print(q, flush=True)) if args.class_tables
-          else {})
+    ct = {}
+    if args.class_tables:
+        cache = out / f"class_tables_lat{args.lat}.npz"
+        if cache.exists():
+            z = np.load(cache)
+            ct = {tuple(k.split("|")): z[k] for k in z.files}
+        if any((m, c) not in ct for m in moves for c in CLASSES):
+            ct = class_tables(moves, args.lat, coarse=True, log=lambda q: print(q, flush=True))
+            np.savez_compressed(cache, **{f"{m}|{c}": v for (m, c), v in ct.items()})
     cm = ListedColormap(["#ffffff", "#d62728", "#ff9f1c", "#1f77b4"])
     summary = {}
     for name, ye in moves.items():

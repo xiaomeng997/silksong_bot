@@ -4773,3 +4773,36 @@ tells me". No frame-by-frame checks, no PNGs.
   attack-range and zone overlay tests pass.
 - Dropped: the stopped attempt's untracked `tools/are_path_check.py` (frame-by-frame check; the person declined).
 - Not done: the aim zones (aimed attacks' inescapable zone per cell height class) are a separate step.
+
+## Task aim zones: composite terrain-aware inescapable zones of the pending aimed moves (branch worktree-wf_c7b7336a-868-1, 2026-10-10; forum.md §40)
+
+The person: "瞄准区你需要做"; draw them by the height of the ZONE around the enemy (each cell its own class), follow the
+terrain.
+- `tools/aim_zones.py` (new): moves RE_STAB (Stab 1, side fixed at the antic, L 10 +-1), MA_SLASH (Slash 1, hero
+  side), CC_JUMP / CC_JUMP_CAST (Jump Aim, L = 0.916 clamp(dx - 5, +-12), wall branch; the cast adds the rune slam),
+  AT_DIVE (Fire, hero side, the template path stopped at y 5.0); the move after the decision = the attack-range
+  template from b_dec (hero-space rasters, HeroBox + 0.1 u). Numba kernel swept in-frame (first half vs frame j - 1,
+  second half vs frame j, both moved with the enemy), aim_ics libraries (coarse, then full), lat0 / lat2 (lat2 reuses
+  lat0's zone). Classes by each cell's own height: ground band +-0.25 u (ground, dash), low air 0.25-1.5 (h 0.25 /
+  1.0 x vy, no dash), high air (h 2.5 / 5.0 x vy, no dash), worst case. Terrain precomputed over enemy x bins (1 u x
+  side) and y bins: escapes pruned when they leave the arena / hit the dome during the move, the wall library within
+  0.9 u of a wall, the enemy clamped (walls, Reed y >= 4.6, Tiny y >= 5.0); wall bins stored as extras over the open
+  zone, the reader clears cells outside the arena. Reader `AimZones` (zone / area / inescapable / world_polys),
+  `readers()`, `pending_move()`. CLI scan / pack / png (`uv run --with matplotlib`) / validate.
+- `tools/zone_overlay.py`: `aim_zones_of(trk)`, `ZoneEngine.aim_layer`, `compute(aim=)`, `draw_aim`, key 8 /
+  "overlay aim", legend; Rerun `enemies/<enemy>/aim/<class>` (--range) and `range/<enemy>/aim/<class>`
+  (--range-only). `tools/human_session.py`: `--overlay-aim`. Launcher `start_overlay_forum_all2.ps1` passes it (not
+  run).
+- Tables `knowledge/1.0.30000/enemies/forum/aim_zones_<move>.npz` (+ .json areas; git-ignored, generated).
+- Sizes (lat2, open floor, u2, ground / low / high): RE_STAB (y 7) 1.87 / 8.3 / 30.5; MA_SLASH (y 6) 1.72 / 7.1 /
+  25.6; CC_JUMP 1.35 (its own body) / 3.5 / 23.2; CC_JUMP_CAST high 94.8 (coarse only, too big); AT_DIVE (y 14) 0 /
+  0 / 38 (ground 2.35 when diving from y 6-7, 0 from y 10).
+- Validation (R0 dev, first tables): in the zone at the decision and hit by that enemy: RE_STAB 496 / 579, MA_SLASH
+  104 / 155, AT_DIVE 347 / 458; the undisturbed misses are mostly high air (no air dash in the table, by the rule).
+- KNOWN BUG FIXED AFTER THE FIRST SCAN: walls / dome were pruned over all 120 library frames instead of the move's
+  frames (over-conservative wall bins, e.g. RE_STAB mid-arena high 46 vs open 30.5 u2). `lib_ext(lib, j_max)` fixes
+  it; the unattended re-scan `C:\ssbot\sandbox\aim_zones_rescan.ps1` (started 2026-10-10 about 22:00, two Idle
+  processes, about 4 h) writes `zones3\scan2`, packs into knowledge/, redraws the PNGs, re-validates and writes
+  `zones3\rescan_done.txt`. Until then knowledge/ holds the first scan's tables (open-floor bins are unaffected).
+- Tests: `tests/test_aim_zones.py` (bands, hero-space dilation, kernel escape / wall pruning / in-frame sweep, reader
+  bins / mirror / placement, pending states, overlay draw / legend / View, live command).
