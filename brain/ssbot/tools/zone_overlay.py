@@ -628,7 +628,8 @@ class ZoneEngine:
         one pass (RangeTracker.ladder):
           range        {k: [(iid, name, colour, raw outlines, hero-centre outlines ([] when not hero), label)]}
           range_same   {k: {iid: the earlier k of ks whose estimate is the same set of cells}} (drawn once)
-          range_swept  [(iid, name, colour, outlines of the union over 0..sweep, label)] ([] without sweep)
+          range_swept  [(iid, name, colour, outlines of the union over 0..sweep, label)] ([] without sweep), and
+                       a type's whole path beyond it (RangeTracker.paths: labels "dive" / "dive if hero moves")
           range_sweep  sweep"""
         out: dict = {k: [] for k in ks}
         same: dict = {k: {} for k in ks}
@@ -655,6 +656,12 @@ class ZoneEngine:
                                contours(hero_space(est.raw)) if hero else [], lab))
         for iid, m in swept.items():
             swept_out.append((iid, self.name(iid), self.color(iid), contours(m), f"path 0-{sweep}"))
+        for iid, (sure, maybe) in (getattr(self.rng, "paths", None) or {}).items():
+            # a move known beyond the sweep (the Tiny's dive from the Maestro's antic): what follows if the hero
+            # holds, and what it can still change (the other side, a longer slide)
+            for m, lab in ((sure, "dive"), (maybe, "dive if hero moves")):
+                if m.m.size and m.m.any():
+                    swept_out.append((iid, self.name(iid), self.color(iid), contours(m), lab))
         return res
 
     def compute(self, ks=KS, support: bool = True, yellow: bool = True, forecast: bool = True,
@@ -1545,7 +1552,8 @@ def rerun_zones(session: Path, rec, f0: int | None = None, f1: int | None = None
     eng = ZoneEngine(crest="Wanderer", threads=threads, margins=margins, range_layer=range_layer)
     g = eng.grid
     stats: dict = {"frames": 0, "attempts": [], "config": eng.config_text(), "compute_ms": []}
-    rng_parts = (*(f"range/k{k:02d}" for k in ks), "range/swept") if range_layer else ()
+    rng_parts = (*(f"range/k{k:02d}" for k in ks), "range/swept", "range/dive", "range/dive_maybe") \
+        if range_layer else ()
     segs = [s for s in segments(f"{session}:win", demo_cache)
             if (f1 is None or s["f0"] <= f1) and (f0 is None or s["f1"] >= f0)]
     vidx = _video_index(session) if video else {}
@@ -1654,7 +1662,11 @@ def rerun_zones(session: Path, rec, f0: int | None = None, f1: int | None = None
             for iid, name, col, polys, rlab in fr["range_swept"] if range_layer else ():
                 slug = name.replace(" ", "_")             # the swept path over 0..max k (the person 2026-10-10)
                 now.add(slug)
-                per[f"enemies/{slug}/range/swept"] = (polys, [col[2], col[1], col[0]], f"{name} {rlab}")
+                part = "swept" if rlab.startswith("path") else "dive_maybe" if "moves" in rlab else "dive"
+                per[f"enemies/{slug}/range/{part}"] = (polys, [col[2], col[1], col[0]], f"{name} {rlab}")
+            for slug in now if range_layer else ():        # a dive drawn earlier and over now: cleared
+                for part in ("dive", "dive_maybe"):
+                    per.setdefault(f"enemies/{slug}/range/{part}", ([], [0, 0, 0], ""))
             for slug in seen_enemies - now:                 # gone (dead, parked): clear what it drew
                 for k in ("colliders", *rng_parts, *(f"{w}/k{k:02d}" for w in ("yellow", "support") for k in ks)):
                     per[f"enemies/{slug}/{k}"] = ([], [0, 0, 0], "")
@@ -1797,11 +1809,16 @@ def rerun_range(session: Path, rec, f0: int | None = None, f1: int | None = None
                     col = ENEMY_COLORS[sorted(names).index(iid) % len(ENEMY_COLORS)]
                     per[f"range/{names[iid]}/swept"] = (contours(m), [col[2], col[1], col[0]],
                                                         f"{names[iid]} path 0-{max(ks)}", 0.03)
+                    sure, maybe = trk.paths.get(iid, (None, None))       # the Tiny's dive from the antic
+                    for part, m2, lab in (("dive", sure, "dive"), ("dive_maybe", maybe, "dive if hero moves")):
+                        per[f"range/{names[iid]}/{part}"] = (contours(m2) if m2 is not None else [],
+                                                             [col[2], col[1], col[0]], f"{names[iid]} {lab}", 0.03)
             for nm in seen - now:
                 for k in ks:
                     for part in ("raw", "hero"):
                         per[f"range/{nm}/k{k:02d}/{part}"] = ([], [0, 0, 0], "", 0.02)
-                per[f"range/{nm}/swept"] = ([], [0, 0, 0], "", 0.02)
+                for part in ("swept", "dive", "dive_maybe"):
+                    per[f"range/{nm}/{part}"] = ([], [0, 0, 0], "", 0.02)
             seen |= now
             for path, (polys, rgb, lab, rad) in per.items():
                 rec.log(f"world/{path}", rr.LineStrips2D([closed(wl(p)) for p in polys], colors=[rgb], radii=[rad],

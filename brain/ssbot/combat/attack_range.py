@@ -713,6 +713,7 @@ class RangeTracker:
         self.obj_owner: dict = {}   # projectile iid -> (owner iid: the nearest enemy of the owning type, first sight T)
         self.ents: tuple = ()       # the frame's entities (EnemySpec.custom: other entities, projectiles)
         self.mem: dict = {}         # type key -> the custom hook's memory across frames
+        self.paths: dict = {}       # the last ladder's whole-path hooks: iid -> (sure, maybe) (RangeTracker.path)
 
     def feed(self, s: dict) -> None:
         dt = s.get("dt")
@@ -820,16 +821,32 @@ class RangeTracker:
                 est.haz = xm if est.haz is None else union([est.haz, xm])
                 est.raw = union([est.raw, xm])
         if tab.spec.custom is not None:
-            st, tin = _first_state(e)
-            vel = e.get("vel") or (None, None)
-            h = self.hero
-            view = CustomView(tab=tab, inst=inst, k=k, T=self.T, t=self.T + k * FT, x=float(p[0]), y=float(p[1]),
-                              vx=None if vel[0] is None else float(vel[0]),
-                              vy=None if len(vel) < 2 or vel[1] is None else float(vel[1]),
-                              s=tab.facing(e.get("flipX")), st=st, tin=tin, hero=h, iid=iid,
-                              body=body_polys(e, tab.spec.body), ents=self.ents, mem=self.mem.setdefault(tk, {}))
-            apply_custom(est, tab.spec.custom(view))
+            apply_custom(est, tab.spec.custom(self._view(iid, k)))
         return est
+
+    def _view(self, iid: int, k: int) -> CustomView:
+        """What a type's own hooks (EnemySpec.custom, the module's path) see of a tracked enemy at look-ahead k."""
+        tk, e, inst = self.now[iid]
+        tab = self.tables[tk]
+        p = e.get("pos") or (0.0, 0.0)
+        st, tin = _first_state(e)
+        vel = e.get("vel") or (None, None)
+        return CustomView(tab=tab, inst=inst, k=k, T=self.T, t=self.T + k * FT, x=float(p[0]), y=float(p[1]),
+                          vx=None if vel[0] is None else float(vel[0]),
+                          vy=None if len(vel) < 2 or vel[1] is None else float(vel[1]),
+                          s=tab.facing(e.get("flipX")), st=st, tin=tin, hero=self.hero, iid=iid,
+                          body=body_polys(e, tab.spec.body), ents=self.ents, mem=self.mem.setdefault(tk, {}))
+
+    def path(self, iid: int) -> tuple | None:
+        """A type's whole-path hook (its module's `path(view) -> (sure Mask, maybe Mask) | None`): the rest of a move
+        whose path is known beyond the swept window, drawn with it (the Tiny's dive from the Maestro's antic entry, 0.7
+        s before it starts: the person 2026-10-10); maybe = what the hero can still change. None: no such move."""
+        tab = self.tables.get(self.now[iid][0]) if iid in self.now else None
+        if tab is None:
+            return None
+        mod = type_module(tab.spec)
+        fn = getattr(mod, "path", None) if mod is not None else None
+        return None if fn is None else fn(self._view(iid, 0))
 
     def estimates(self, k: int) -> list[Estimate]:
         return [x for x in (self.estimate(i, k) for i in sorted(self.now)) if x is not None]
@@ -846,7 +863,8 @@ class RangeTracker:
     def ladder(self, ks, sweep: int | None = None, step: int = 1) -> tuple[dict, dict]:
         """Every look-ahead of one frame in one pass (the overlay's all-k and swept modes, the person 2026-10-10):
         ({k: [Estimate] in iid order} for each k in ks, {iid: the swept Mask over 0..sweep} ({} without sweep)).
-        Each (enemy, look-ahead) is estimated once: the ks inside 0..sweep come from the sweep's own estimates."""
+        Each (enemy, look-ahead) is estimated once: the ks inside 0..sweep come from the sweep's own estimates. With a
+        sweep, self.paths gets the type path hooks' (sure, maybe) per enemy (RangeTracker.path)."""
         ks = [max(int(k), 0) for k in ks]
         js = set(ks)
         sw = None if sweep is None else max(int(sweep), 0)
@@ -854,6 +872,7 @@ class RangeTracker:
             js |= set(range(0, sw + 1, max(int(step), 1))) | {sw}
         out: dict = {k: [] for k in ks}
         swept: dict = {}
+        self.paths = {}             # iid -> (sure, maybe) of the type path hooks (with a sweep; RangeTracker.path)
         for iid in sorted(self.now):
             parts = []
             for j in sorted(js):
@@ -866,6 +885,9 @@ class RangeTracker:
                     parts.append(e.raw)
             if sw is not None:
                 swept[iid] = union(parts)
+                pa = self.path(iid)
+                if pa is not None:
+                    self.paths[iid] = pa
         return out, swept
 
 

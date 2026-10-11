@@ -829,7 +829,8 @@ def cmd_build(a) -> int:
 def cmd_eval(a) -> int:
     _idle_priority()
     spec = spec_of(a.type)
-    out = out_dir(spec)
+    out = Path(a.out) if a.out else out_dir(spec)
+    ks = tuple(int(k) for k in a.ks.split(","))
     tab = load_table(Path(a.table) if a.table else None, spec)
     shapes = tab.meta.get("shapes") or {}
     t0 = time.time()
@@ -840,19 +841,19 @@ def cmd_eval(a) -> int:
     from concurrent.futures import ThreadPoolExecutor
     with ThreadPoolExecutor(max_workers=max(1, a.threads)) as ex:
         for i, rr in enumerate(ex.map(lambda tr: eval_track(tr, tab, shapes, every=a.every,
-                                                             idle_every=a.idle_every), tracks)):
+                                                             idle_every=a.idle_every, ks=ks), tracks)):
             rows += rr
             if i % 50 == 0:
                 print(f"  {i}/{len(tracks)} rows {len(rows)} ({time.time() - t0:.0f} s)", flush=True)
-    summ = summarize(rows)
+    summ = summarize(rows, ks=ks)
     out.mkdir(parents=True, exist_ok=True)
-    (out / f"eval_{a.set}.json").write_text(json.dumps({"set": a.set, "rows": len(rows), "every": a.every,
+    (out / f"eval_{a.set}.json").write_text(json.dumps({"set": a.set, "rows": len(rows), "every": a.every, "ks": ks,
                                                         "idle_every": a.idle_every, "summary": summ}, indent=1),
                                             "utf-8")
     with open(out / f"rows_{a.set}.pkl", "wb") as fh:
         pickle.dump(rows, fh, protocol=4)
     for fam, d in summ.items():
-        for kk in ("k0", "k12"):
+        for kk in (f"k{k}" for k in ks):
             x = d.get(kk) or {}
             print(f"{fam:9s} {kk:3s} main {x.get('main')} ratio_area {x.get('ratio_area')} ratio {x.get('ratio')} "
                   f"ok {x.get('ratio_ok')} cover {x.get('cover')} miss_rows {x.get('miss_rows')}")
@@ -1175,6 +1176,8 @@ def main(argv=None) -> int:
     e.add_argument("--idle-every", type=int, default=6)
     e.add_argument("--threads", type=int, default=1)
     e.add_argument("--table", default=None)
+    e.add_argument("--ks", default=",".join(map(str, KS)), help="the look-aheads (frames), e.g. 0,12,36")
+    e.add_argument("--out", default=None, help="the output folder (default the type's)")
     pg = sub.add_parser("png")
     pg.add_argument("--out", default=None)
     pg.add_argument("--worst", type=int, default=8, help="also the worst frames of the person / fresh rows")
