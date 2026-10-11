@@ -1,0 +1,708 @@
+{
+ "face_flip1": 1,
+ "walls": [
+  15.183940887451172,
+  47.80636215209961
+ ],
+ "families": {
+  "MA_DEFEND|main": {
+   "n": 2656,
+   "bins": 150,
+   "dur_p50": 2.283,
+   "dur_max": 2.483,
+   "extent": [
+    {
+     "t": 0.0,
+     "front": 0.85,
+     "back": 0.95,
+     "up": 1.15,
+     "down": 0.85,
+     "area": 3.6,
+     "disp": [
+      0.0,
+      0.0
+     ]
+    },
+    {
+     "t": 0.1,
+     "front": 0.81,
+     "back": 0.99,
+     "up": 1.22,
+     "down": 0.78,
+     "area": 3.6,
+     "disp": [
+      -0.04,
+      0.07
+     ]
+    },
+    {
+     "t": 0.2,
+     "front": 0.79,
+     "back": 1.01,
+     "up": 1.26,
+     "down": 0.74,
+     "area": 3.6,
+     "disp": [
+      -0.06,
+      0.11
+     ]
+    },
+    {
+     "t": 0.3,
+     "front": 0.8,
+     "back": 1.0,
+     "up": 1.3,
+     "down": 0.7,
+     "area": 3.6,
+     "disp": [
+      -0.05,
+      0.15
+     ]
+    },
+    {
+     "t": 0.4,
+     "front": 0.99,
+     "back": 0.81,
+     "up": 1.51,
+     "down": 0.49,
+     "area": 3.6,
+     "disp": [
+      0.14,
+      0.36
+     ]
+    },
+    {
+     "t": 0.5,
+     "front": 1.31,
+     "back": 0.49,
+     "up": 1.81,
+     "down": 0.19,
+     "area": 3.6,
+     "disp": [
+      0.46,
+      0.66
+     ]
+    },
+    {
+     "t": 0.6,
+     "front": 1.69,
+     "back": 0.11,
+     "up": 1.98,
+     "down": 0.02,
+     "area": 3.6,
+     "disp": [
+      0.84,
+      0.83
+     ]
+    },
+    {
+     "t": 0.7,
+     "front": 2.09,
+     "back": -0.29,
+     "up": 2.07,
+     "down": -0.07,
+     "area": 3.6,
+     "disp": [
+      1.24,
+      0.92
+     ]
+    },
+    {
+     "t": 0.8,
+     "front": 2.53,
+     "back": -0.73,
+     "up": 2.11,
+     "down": -0.11,
+     "area": 3.6,
+     "disp": [
+      1.68,
+      0.96
+     ]
+    },
+    {
+     "t": 0.9,
+     "front": 2.98,
+     "back": -1.18,
+     "up": 2.06,
+     "down": -0.06,
+     "area": 3.6,
+     "disp": [
+      2.13,
+      0.91
+     ]
+    },
+    {
+     "t": 1.0,
+     "front": 3.44,
+     "back": -1.64,
+     "up": 2.04,
+     "down": -0.04,
+     "area": 3.6,
+     "disp": [
+      2.59,
+      0.89
+     ]
+    },
+    {
+     "t": 1.1,
+     "front": 3.89,
+     "back": -2.09,
+     "up": 2.02,
+     "down": -0.02,
+     "area": 3.6,
+     "disp": [
+      3.04,
+      0.87
+     ]
+    },
+    {
+     "t": 1.2,
+     "front": 4.35,
+     "back": -2.55,
+     "up": 2.01,
+     "down": -0.01,
+     "area": 3.6,
+     "disp": [
+      3.5,
+      0.86
+     ]
+    },
+    {
+     "t": 1.3,
+     "front": 4.79,
+     "back": -2.99,
+     "up": 2.01,
+     "down": -0.01,
+     "area": 3.6,
+     "disp": [
+      3.94,
+      0.86
+     ]
+    },
+    {
+     "t": 1.4,
+     "front": 5.24,
+     "back": -3.44,
+     "up": 2.0,
+     "down": -0.0,
+     "area": 3.6,
+     "disp": [
+      4.39,
+      0.85
+     ]
+    },
+    {
+     "t": 1.5,
+     "front": 5.67,
+     "back": -3.87,
+     "up": 2.0,
+     "down": -0.0,
+     "area": 3.6,
+     "disp": [
+      4.82,
+      0.85
+     ]
+    },
+    {
+     "t": 1.6,
+     "front": 6.07,
+     "back": -4.27,
+     "up": 2.0,
+     "down": 0.0,
+     "area": 3.6,
+     "disp": [
+      5.22,
+      0.85
+     ]
+    },
+    {
+     "t": 1.7,
+     "front": 6.47,
+     "back": -4.67,
+     "up": 2.0,
+     "down": 0.0,
+     "area": 3.6,
+     "disp": [
+      5.62,
+      0.85
+     ]
+    },
+    {
+     "t": 1.8,
+     "front": 6.89,
+     "back": -5.09,
+     "up": 2.0,
+     "down": 0.0,
+     "area": 3.6,
+     "disp": [
+      6.04,
+      0.85
+     ]
+    },
+    {
+     "t": 1.9,
+     "front": 7.2,
+     "back": -5.4,
+     "up": 2.0,
+     "down": 0.0,
+     "area": 3.6,
+     "disp": [
+      6.35,
+      0.85
+     ]
+    },
+    {
+     "t": 2.0,
+     "front": 7.61,
+     "back": -5.81,
+     "up": 2.0,
+     "down": 0.0,
+     "area": 3.6,
+     "disp": [
+      6.76,
+      0.85
+     ]
+    },
+    {
+     "t": 2.1,
+     "front": 8.05,
+     "back": -6.25,
+     "up": 2.0,
+     "down": 0.0,
+     "area": 3.6,
+     "disp": [
+      7.2,
+      0.85
+     ]
+    },
+    {
+     "t": 2.2,
+     "front": 8.49,
+     "back": -6.69,
+     "up": 2.0,
+     "down": 0.0,
+     "area": 3.6,
+     "disp": [
+      7.64,
+      0.85
+     ]
+    },
+    {
+     "t": 2.3,
+     "front": 8.71,
+     "back": -6.91,
+     "up": 2.0,
+     "down": 0.0,
+     "area": 3.6,
+     "disp": [
+      7.86,
+      0.85
+     ]
+    },
+    {
+     "t": 2.4,
+     "front": 8.71,
+     "back": -6.91,
+     "up": 2.0,
+     "down": 0.0,
+     "area": 3.6,
+     "disp": [
+      7.86,
+      0.85
+     ]
+    }
+   ]
+  },
+  "MA_ENTRY|main": {
+   "n": 318,
+   "bins": 49,
+   "dur_p50": 0.8,
+   "dur_max": 0.8,
+   "extent": [
+    {
+     "t": 0.8,
+     "front": 0.85,
+     "back": 0.95,
+     "up": -8.85,
+     "down": 10.85,
+     "area": 3.6,
+     "disp": [
+      0.0,
+      -10.0
+     ]
+    }
+   ]
+  },
+  "MA_SLASH|main": {
+   "n": 6226,
+   "bins": 80,
+   "dur_p50": 1.317,
+   "dur_max": 1.317,
+   "extent": [
+    {
+     "t": 0.0,
+     "front": 0.85,
+     "back": 0.95,
+     "up": 1.15,
+     "down": 0.85,
+     "area": 3.6,
+     "disp": [
+      0.0,
+      0.0
+     ]
+    },
+    {
+     "t": 0.1,
+     "front": -0.15,
+     "back": 1.95,
+     "up": 1.09,
+     "down": 0.91,
+     "area": 3.6,
+     "disp": [
+      -1.0,
+      -0.06
+     ]
+    },
+    {
+     "t": 0.2,
+     "front": -0.73,
+     "back": 2.53,
+     "up": 1.06,
+     "down": 0.94,
+     "area": 3.6,
+     "disp": [
+      -1.58,
+      -0.09
+     ]
+    },
+    {
+     "t": 0.3,
+     "front": -1.08,
+     "back": 2.88,
+     "up": 1.04,
+     "down": 0.96,
+     "area": 3.6,
+     "disp": [
+      -1.93,
+      -0.11
+     ]
+    },
+    {
+     "t": 0.4,
+     "front": -1.28,
+     "back": 3.08,
+     "up": 1.03,
+     "down": 0.97,
+     "area": 3.6,
+     "disp": [
+      -2.13,
+      -0.12
+     ]
+    },
+    {
+     "t": 0.5,
+     "front": -1.41,
+     "back": 3.21,
+     "up": 1.02,
+     "down": 0.98,
+     "area": 3.6,
+     "disp": [
+      -2.26,
+      -0.13
+     ]
+    },
+    {
+     "t": 0.6,
+     "front": -1.48,
+     "back": 3.28,
+     "up": 1.02,
+     "down": 0.98,
+     "area": 3.6,
+     "disp": [
+      -2.33,
+      -0.13
+     ]
+    },
+    {
+     "t": 0.7,
+     "front": -1.52,
+     "back": 3.32,
+     "up": 1.01,
+     "down": 0.99,
+     "area": 3.6,
+     "disp": [
+      -2.37,
+      -0.14
+     ]
+    },
+    {
+     "t": 0.8,
+     "front": 5.35,
+     "back": 0.15,
+     "up": 1.91,
+     "down": 0.89,
+     "area": 8.4,
+     "disp": [
+      0.8,
+      -0.04
+     ]
+    },
+    {
+     "t": 0.9,
+     "front": 2.3,
+     "back": -0.5,
+     "up": 1.08,
+     "down": 0.92,
+     "area": 3.6,
+     "disp": [
+      1.45,
+      -0.07
+     ]
+    },
+    {
+     "t": 1.0,
+     "front": 2.66,
+     "back": -0.86,
+     "up": 1.06,
+     "down": 0.94,
+     "area": 3.6,
+     "disp": [
+      1.81,
+      -0.09
+     ]
+    },
+    {
+     "t": 1.1,
+     "front": 2.96,
+     "back": -1.06,
+     "up": 1.05,
+     "down": 0.95,
+     "area": 3.8,
+     "disp": [
+      2.01,
+      -0.1
+     ]
+    },
+    {
+     "t": 1.2,
+     "front": 3.09,
+     "back": -1.19,
+     "up": 1.04,
+     "down": 0.96,
+     "area": 3.8,
+     "disp": [
+      2.14,
+      -0.11
+     ]
+    },
+    {
+     "t": 1.3,
+     "front": 3.16,
+     "back": -1.26,
+     "up": 1.04,
+     "down": 0.96,
+     "area": 3.8,
+     "disp": [
+      2.21,
+      -0.11
+     ]
+    }
+   ]
+  },
+  "MA_SUMMON|main": {
+   "n": 1112,
+   "bins": 62,
+   "dur_p50": 1.017,
+   "dur_max": 1.017,
+   "extent": [
+    {
+     "t": 0.0,
+     "front": 0.85,
+     "back": 0.95,
+     "up": 1.15,
+     "down": 0.85,
+     "area": 3.6,
+     "disp": [
+      0.0,
+      0.0
+     ]
+    },
+    {
+     "t": 0.1,
+     "front": 0.84,
+     "back": 0.96,
+     "up": 1.22,
+     "down": 0.78,
+     "area": 3.6,
+     "disp": [
+      -0.01,
+      0.07
+     ]
+    },
+    {
+     "t": 0.2,
+     "front": 0.84,
+     "back": 0.96,
+     "up": 1.26,
+     "down": 0.74,
+     "area": 3.6,
+     "disp": [
+      -0.01,
+      0.11
+     ]
+    },
+    {
+     "t": 0.3,
+     "front": 0.83,
+     "back": 0.97,
+     "up": 1.28,
+     "down": 0.72,
+     "area": 3.6,
+     "disp": [
+      -0.02,
+      0.13
+     ]
+    },
+    {
+     "t": 0.4,
+     "front": 0.83,
+     "back": 0.97,
+     "up": 1.29,
+     "down": 0.71,
+     "area": 3.6,
+     "disp": [
+      -0.02,
+      0.14
+     ]
+    },
+    {
+     "t": 0.5,
+     "front": 0.83,
+     "back": 0.97,
+     "up": 1.3,
+     "down": 0.7,
+     "area": 3.6,
+     "disp": [
+      -0.02,
+      0.15
+     ]
+    },
+    {
+     "t": 0.6,
+     "front": 0.83,
+     "back": 0.97,
+     "up": 1.31,
+     "down": 0.69,
+     "area": 3.6,
+     "disp": [
+      -0.02,
+      0.16
+     ]
+    },
+    {
+     "t": 0.7,
+     "front": 0.83,
+     "back": 0.97,
+     "up": 1.31,
+     "down": 0.69,
+     "area": 3.6,
+     "disp": [
+      -0.02,
+      0.16
+     ]
+    },
+    {
+     "t": 0.8,
+     "front": 0.83,
+     "back": 0.97,
+     "up": 1.32,
+     "down": 0.68,
+     "area": 3.6,
+     "disp": [
+      -0.02,
+      0.17
+     ]
+    },
+    {
+     "t": 0.9,
+     "front": 0.83,
+     "back": 0.97,
+     "up": 1.32,
+     "down": 0.68,
+     "area": 3.6,
+     "disp": [
+      -0.02,
+      0.17
+     ]
+    },
+    {
+     "t": 1.0,
+     "front": 0.83,
+     "back": 0.97,
+     "up": 1.33,
+     "down": 0.67,
+     "area": 3.6,
+     "disp": [
+      -0.02,
+      0.18
+     ]
+    }
+   ]
+  }
+ },
+ "state_order": {
+  "MA_DEFEND|main": {
+   "Defend Start": 0.0,
+   "Defending": 0.267,
+   "Defend End": 2.033
+  },
+  "MA_ENTRY|main": {
+   "Fly In": 0.0
+  },
+  "MA_SLASH|main": {
+   "Fire Antic": 0.0,
+   "Slash 1": 0.717,
+   "Slash 2": 0.8,
+   "Slash End": 0.883,
+   "Slash Recover": 1.067,
+   "Slash Recover F": 1.067
+  },
+  "MA_SUMMON|main": {
+   "Call": 0.0,
+   "Summon": 0.517,
+   "Summon Recover": 0.783
+  }
+ },
+ "state_dropped": {
+  "MA_DEFEND|main": 24,
+  "MA_ENTRY|main": 0,
+  "MA_SLASH|main": 0,
+  "MA_SUMMON|main": 0
+ },
+ "decisions": {
+  "MA_SLASH|main": {
+   "n": 6226,
+   "b_dec": 43,
+   "b_dec_range": [
+    42,
+    43
+   ],
+   "landing_err_p50": 1.213,
+   "landing_err_p95": 1.738,
+   "landing_err_max": 4.538,
+   "facing_agrees": 0.9778
+  }
+ },
+ "table": "C:\\modeling\\silksong_bot\\.claude\\worktrees\\wf_2fe0d0c5-18e-4\\knowledge\\1.0.30000\\enemies\\forum\\attack_range_maestro.npz",
+ "bytes": 10779,
+ "left_out": [
+  [
+   "Fire Antic",
+   "MA_SLASH's side is pending until the Slash 1 entry (its first damage frame, 0.68-0.73 s): only the antic body and its 2.37 u recoil are drawn, the slash from Slash 1 on"
+  ],
+  [
+   "Forum Fly / Fly / Chase / Summon? / Attack Choice",
+   "the next attack is picked at 0 s (group 2)"
+  ]
+ ]
+}

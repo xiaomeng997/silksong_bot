@@ -166,9 +166,13 @@ def main_fresh_dev(a, mode: str) -> int:
             for j in a.tables:
                 cfg = {"kind": "fold", "extra": str(a.extra), "fold": j, "margins": md["by_family"],
                        "tubes": {k: prod[k] for k in ("idle_growth", "tube_speed", "body_hull")},
-                       "name": f"{fdir.name}/tables{j}"}
+                       "name": f"{fdir.name}/tables{j}",
+                       "state_margins": json.loads(a.state_margins.read_text("utf-8"))["by_state"]
+                       if a.state_margins else None}
                 for f in fl:
                     jobs.append(_job(f["id"], f, byf.get(f["id"], []), cfg, cfg["name"], a))
+    if a.only:
+        jobs = [j for j in jobs if any(o in j["id"] for o in a.only)]
     if a.max_fights:
         keep = []
         per: Counter = Counter()
@@ -184,21 +188,24 @@ def _job(fid: str, f: dict, contacts: list, cfg: dict, label: str, a) -> dict:
     if a.types:
         contacts = [c for c in contacts if c["type"] in a.types]
     return {"id": fid, "path": f["path"], "f0": int(f["f0"]), "f1": int(f["f1"]), "contacts": contacts,
-            "config": cfg, "label": label, "view": a.view, "horizon": a.horizon}
+            "config": cfg, "label": label, "view": a.view, "horizon": a.horizon,
+            "branch": None if a.branch is None else str(a.branch), "react": a.react}
 
 
 _TABLES: dict = {}
 
 
 def _tables(cfg: dict):
-    from ssbot.combat.enemy_tables import EnemyTables, Tubes, parse_margins
+    from ssbot.combat.enemy_tables import EnemyTables, Tubes, parse_margins, parse_state_margins
+    sm = cfg.get("state_margins")
     key = json.dumps({k: cfg[k] for k in ("kind", "extra", "fold")}, sort_keys=True) + json.dumps(
-        cfg["margins"], sort_keys=True)
+        cfg["margins"], sort_keys=True) + json.dumps(sm, sort_keys=True)
     t = _TABLES.get(key)
     if t is None:
         _TABLES.clear()
         t = _TABLES[key] = EnemyTables.fold(Path(cfg["extra"]), int(cfg["fold"]), parse_margins(cfg["margins"]),
-                                            Tubes.from_doc(cfg["tubes"]))
+                                            Tubes.from_doc(cfg["tubes"]),
+                                            state_margins=parse_state_margins(sm) if sm else None)
     return t
 
 
@@ -236,7 +243,9 @@ def run_jobs(a, jobs: list, mode: str) -> int:
         cov = sum(v["covered"] for (tk, L), v in stats.items() if L)
         print(f"[{done}/{len(jobs)}] {j['label']} {j['id']} covered {cov}/{n} misses {len(misses)} "
               f"({res['forecast_ms']} ms/forecast, {time.perf_counter() - t0:.0f} s)", flush=True)
-    out = {"mode": mode, "view": a.view, "lags": list(LAGS), "fights": done, "horizon_s": a.horizon,
+    out = {"mode": mode, "view": a.view, "react": a.react,
+           "state_margins": None if a.state_margins is None else str(a.state_margins), "lags": list(LAGS),
+           "fights": done, "horizon_s": a.horizon,
            "summary": summarise(stats), "by_group": {k: summarise(v)["recall"] for k, v in by_label.items()},
            "misses": misses[:500], "n_misses": len(misses), "own_misses": own_misses[:300],
            "n_own_misses": len(own_misses),
@@ -276,7 +285,9 @@ def summarise(stats: dict) -> dict:
 def _init_worker() -> None:
     try:
         import psutil
-        psutil.Process().nice(psutil.BELOW_NORMAL_PRIORITY_CLASS)
+        p_ = psutil.Process()   # never raise an Idle job (the person: long runs at Idle)
+        if p_.nice() != getattr(psutil, "IDLE_PRIORITY_CLASS", None):
+            p_.nice(psutil.BELOW_NORMAL_PRIORITY_CLASS)
     except Exception:
         pass
 
@@ -299,7 +310,14 @@ def run_fight2(job: dict) -> dict:
     from ssbot.record.recorder import RecordingReader
     tables = _tables(job["config"])
     view = job.get("view", "oracle")
-    mf = MultiForecaster(tables, ORACLE if view == "oracle" else VISION_EQUIVALENT)
+    branch = None
+    if job.get("branch"):
+        from ssbot.combat.branch_model import BranchModel
+        branch = BranchModel.load(Path(job["branch"]))      # R5: the branch model on (it must not move the recall)
+    mf = MultiForecaster(tables, ORACLE if view == "oracle" else VISION_EQUIVALENT, branch=branch)
+    if job.get("react"):
+        from ssbot.combat.multi_forecast import ReactConfig
+        mf.react = ReactConfig.parse(job["react"])            # the reactive support (forum.md §22 / §23)
     bosses = placeholder_specs() if view != "oracle" else []
     backend = OracleBackend(bosses=bosses)
     filt = None
@@ -546,10 +564,19 @@ def main(argv=None) -> int:
     ap.add_argument("--workers", type=int, default=1)
     ap.add_argument("--max-fights", type=int, default=0, help="per group")
     ap.add_argument("--types", nargs="+", default=None, help="only these types' contacts (a quicker partial check)")
+    ap.add_argument("--only", nargs="+", default=None, help="only the fights whose id contains one of these")
     ap.add_argument("--frames", type=int, default=4000)
     ap.add_argument("--start", type=int, default=None)
     ap.add_argument("--threads", type=int, default=4)
     ap.add_argument("--json", type=Path, default=None)
+    ap.add_argument("--branch", type=Path, default=None,
+                    help="fresh / dev: run with this branch model on (R5: scoring only, the recall must not change)")
+    ap.add_argument("--state-margins", type=Path, default=None,
+                    help="fresh: per-state margins (support_margins_state.json, tools.forum_state_margins) on top of "
+                         "the family ones")
+    ap.add_argument("--react", default=None,
+                    help="fresh / dev: the reactive support (multi_forecast.ReactConfig, e.g. escape+n+g: forum.md "
+                         "23; default off)")
     a = ap.parse_args(argv)
     if a.mode == "bellbeast":
         if a.recording is None:

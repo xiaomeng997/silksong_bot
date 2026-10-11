@@ -2,6 +2,10 @@
 
     python -m ssbot.tools.viewer runs/2026-09-30/TRAIN/ep1              # spawn the Rerun viewer
     python -m ssbot.tools.viewer runs/.../ep1 --save ep1.rrd --from 1200 --to 5000 --ents-stride 2
+    python -m ssbot.tools.viewer C:/ssbot/data/human/<session> --zones [--from F --to F] [--k 0,12] [--video]
+                                                       # the Forum planner's zones per frame (tools.zone_overlay)
+    python -m ssbot.tools.viewer C:/ssbot/data/human/<session> --zones --range-only --k 0,12 [--video]
+                                                       # the attack-range estimate alone (combat.attack_range)
 
 Shows, as far as the recording has them:
   world/            hero position + per-scene trajectory, entity collider polygons ("ents"), TERRAIN polygons.
@@ -189,9 +193,13 @@ def color_for(name: str) -> tuple[int, int, int]:
     return 80 + h % 150, 80 + (h >> 8) % 150, 80 + (h >> 16) % 150
 
 
-def _is_damaging(c: dict) -> bool:
+def _is_damaging(c: dict, src: int = 0) -> bool:
+    """Damage dealt > 0, or a multi-hit collider exported with dealt 0 (eff != 0 on an entity with the multi_wounder
+    src bit: the Choristor's whip, the ParrySlash Hit, the Minister's Slash Collider; zone_overlay.hurts)."""
     d = c.get("damage") or c.get("dmg")
     if isinstance(d, dict):
+        if "dealt" in d and not d.get("dealt"):
+            return (d.get("eff") or 0) != 0 and bool(int(src or 0) & 8)
         return bool(d.get("dealt", d.get("amount", 1)))
     return bool(d)
 
@@ -339,7 +347,7 @@ def build(reader: RecordingReader, rec: rr.RecordingStream, *, f0: int | None = 
                     center_labels.append(label)
                 for poly, meta in colliders(e):
                     strips.append(closed(flip(poly)))
-                    colors.append((255, 40, 40) if _is_damaging(meta) else color_for(
+                    colors.append((255, 40, 40) if _is_damaging(meta, e.get("src") or 0) else color_for(
                         str(e.get("category") or e.get("layer") or label)))
                     labels.append(label)
             rec.log("world/ents/colliders", rr.LineStrips2D(strips, colors=colors, radii=[0.03], labels=labels))
@@ -405,7 +413,50 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--ents-stride", type=int, default=1, help="log entity polygons every N frames")
     ap.add_argument("--series", action="append", default=[], help="extra series NAME=dotted.path")
     ap.add_argument("--save", help="write an .rrd file instead of spawning the viewer")
+    ap.add_argument("--zones", action="store_true",
+                    help="a human session (C:/ssbot/data/human/<session>): its Forum attempts replayed through the "
+                         "planner's forecast, the zone layers per game frame (tools.zone_overlay.rerun_zones)")
+    ap.add_argument("--k", default="0", help="--zones: look-ahead frames of the support / yellow layers, e.g. 0,12,36")
+    ap.add_argument("--video", action="store_true", help="--zones: the recorded video frame with the outlines")
+    ap.add_argument("--video-scale", type=float, default=0.5)
+    ap.add_argument("--zones-every", type=int, default=1, help="--zones: every N-th game frame")
+    ap.add_argument("--margins", action="store_true", help="--zones: also the margins layer")
+    ap.add_argument("--demo-cache", default=None, help="--zones: tools.forum_demo scan cache directory")
+    ap.add_argument("--precision", action="store_true",
+                    help="--zones: per enemy and k the support's RATIO to its real damage (tools.support_precision) "
+                         "as metrics/precision/<enemy>/k<k>/<layer>")
+    ap.add_argument("--range", dest="range_layer", action="store_true",
+                    help="--zones: also each enemy's attack-range estimate (combat.attack_range, no margin) per k "
+                         "as world/enemies/<enemy>/range/k<k>, and its swept path over 0..max k (the union of the "
+                         "estimate over every frame) as world/enemies/<enemy>/range/swept")
+    ap.add_argument("--range-only", action="store_true",
+                    help="--zones: the attack-range layer alone (no planner forecast): the estimate per enemy and k, "
+                         "its swept path over 0..max k (range/<enemy>/swept), the real damage colliders, the hero "
+                         "(tools.zone_overlay.rerun_range)")
     a = ap.parse_args(argv)
+
+    if a.zones:
+        from ssbot.tools.zone_overlay import rerun_range, rerun_zones, zones_blueprint
+        bp = zones_blueprint(a.video, a.precision)
+        rec = rr.RecordingStream("ssbot-zones", recording_id=str(Path(a.path).resolve()))
+        if a.save:
+            rec.save(a.save, default_blueprint=bp)
+        else:
+            rec.spawn(default_blueprint=bp)
+        ks = tuple(int(x) for x in a.k.split(",") if x)
+        if a.range_only:
+            stats = rerun_range(Path(a.path), rec, a.f0, a.f1, ks=ks, video=a.video, video_scale=a.video_scale,
+                                demo_cache=Path(a.demo_cache) if a.demo_cache else None)
+            rec.flush()
+            print(f"logged {stats}" + (f" -> {a.save}" if a.save else ""))
+            return 0
+        stats = rerun_zones(Path(a.path), rec, a.f0, a.f1, ks=ks,
+                            video=a.video, video_scale=a.video_scale, every=max(1, a.zones_every),
+                            margins=a.margins, demo_cache=Path(a.demo_cache) if a.demo_cache else None,
+                            precision=a.precision, range_layer=a.range_layer)
+        rec.flush()
+        print(f"logged {stats}" + (f" -> {a.save}" if a.save else ""))
+        return 0
 
     reader = RecordingReader(a.path)
     rec = rr.RecordingStream("ssbot-viewer", recording_id=str(Path(a.path).resolve()))
