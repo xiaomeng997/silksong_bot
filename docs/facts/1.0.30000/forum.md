@@ -5033,3 +5033,39 @@ k = 估计往前看的帧数（从 tracker 最新一帧算，最多算到 36，�
 - 符文炸弹 / 符文圈仍有零星挨打；身体接触（待机的 Clapper，冲刺 / 挥刀撞上）零星。
 - 晚 tick 20 %：两个实例 + 每帧重建；单实例没测。
 - 出刀/秒离你差很远（见 44.4）。
+
+## 45. 一对一 Choristor 实战（2026-10-11 傍晚；同一分支；数据 `C:\ssbot\data\m2_1v1c`；冻结检出 `C:\ssbot\live_1v1_c42d834`）
+
+### 45.1 设置
+
+- 遭遇 `Forum_W_w0c`：存档 `fo_cl_w0w` = `fo_r1_w0` + Wanderer 纹章（`ssbot.probes.forum_states wanderer`，实例 0 上做的）。第 0 波是 Choristor + Reed + Envoy。
+- 开场（`encounters.forum_solo_intro`）：照常等第 0 波激活，然后 `wave_start.solo_clear`：调试线开增强（无敌、nailUpgrades 4，和跳波一样），`WaveSkipPolicy` 只打 Reed 和 Envoy；Choristor 在任何一刀的范围里（朝向那一侧所有刀型的并集，外加 0.6 u）就不出刀，往离开它的方向走，也不放丝矛。只剩 Choristor 的那一帧还原增强、松键，战斗起点移到这一帧（`rebase_start`），之后才交给规划器。第 1 波开始（= 击杀）结束这一局（`end_wave` 0）。
+- 部署的 oracle 没有 `enemy.hp`，清场时误伤的 Choristor 补不回血。所以记下交接时它的血（`forum_1v1_summary` 的 kept_hp）；算每秒出刀时只用满血（55）的局。
+- 清场的几个版本：
+  - 第一版只查当时那一刀的范围：2 局里有 1 局误伤（按着上的时候横砍变成了上挑，打了 Choristor 17 血）。
+  - 第二版查两个朝向的并集 + 0.8 u：52 局里 11 局 HARNESS_FAIL，基本是清场 90 s 超时（Choristor 贴着 Reed，一直出不了刀）。
+  - 现版（c42d834）：朝向一侧的并集 + 0.6 u，不出刀时往外走，60 s 超时。196 局：清场没有超时；1 局 HARNESS_FAIL 是冷检出第一局的 brain-lost 看门狗；8 局（4 %）交接时 Choristor 只剩 38 血。
+- 其余同 §44：两个实例，每个实例一个驱动（`1v1_live.ps1` 加了 `-Encounter` / `-Timebox` / `-Manifest` 参数；清单 `C:\ssbot\sandbox\1v1c_manifest.txt`）；eval、planner、oracle、`--real-quit 0`、`--forum-clash main`，timebox 150 s。
+- 顺手修了一个崩溃：第一局开场就失败时 `ForumPlannerPolicy.stats()` 读不到 `_pending_ticks`，整个 worker 退出。现在返回 `{reset: False}`。
+
+### 45.2 结果（`s2.json`；每秒出刀按"击杀帧 − 交接帧"算，只用满血交接的局）
+
+| 臂 | 局 | 击杀 | 无伤击杀 | 每局挨打 | 出刀/秒 p50（合计） | 击杀用时 p50（p10–p90） |
+|---|---|---|---|---|---|---|
+| v0 best（`SSBOT_FORUM_V2=0`） | 26 | 26 | 30.8 % | 1.15 | 0.14（0.14） | 61 s（39–92） |
+| tj2（§44 推荐：flat 0.5） | 76 | 76 | 90.8 % | 0.09 | 1.42（1.42） | 8.4 s（6.3–9.7） |
+| v2r（v2 + 代码默认的 rule 余量） | 62 | 62 | 88.7 % | 0.13 | 1.51（1.48） | 7.9 s（6.4–10.1） |
+| cm3（flat 0.3） | 39 | 39 | 89.7 % | 0.10 | 1.49（1.54） | 8.0 s（6.3–9.2） |
+| cw（tj2 + track A whip） | 16 | 16 | 87.5 % | 0.13 | 1.48（1.45） | 8.2 s |
+| ce（tj2 + track A edge） | 16 | 16 | 87.5 % | 0.13 | 1.44（1.40） | 7.5 s |
+
+- v2 的几臂之间分不出差别。对 Choristor，rule 余量就是步行怪的曲线（k36 时 1.05 u），所以和 flat 0.5 差不多。这一点和 Clapper 不一样：Clapper 拿 rule 时用的是飞行怪曲线，一局也杀不死（§44）。
+- v0 挨打主要是 Multiwhip 13 次、Slash Antic 身体 6 次；v2 把这些基本消掉了。
+- tj2 剩下的 7 次挨打：Jump Antic 身体 2 次（主角 Sprint Turn 转身时 1 u 内撞上）、Hop Back 身体 1 次、ComboSlash 1、Slash End、Multiwhip、Jump Spin 各 1 次（主角在空中或锁在动作里，离它 3.6–3.8 u）。
+- 晚 tick 1–2 %（一只怪，两个实例同时跑）；FORCED_RISK 2.2 %。
+- 对照 Clapper（§44 tj2，同样按击杀帧算）：出刀 0.66 次/秒、击杀 36 s、无伤击杀 68 %。
+
+### 45.3 还没做 / 已知问题
+
+- 每秒出刀 1.4–1.5，你的最好 10 s 窗口是 2.0，击退限制下的上限约 2.5。几个调整（余量 0.3、站在边缘 edge、躲鞭 whip）都没有提高出刀率。
+- 清场时误伤 Choristor 约 4 %。要彻底解决，需要部署带 `enemy.hp` 的 oracle 把血补回去。
