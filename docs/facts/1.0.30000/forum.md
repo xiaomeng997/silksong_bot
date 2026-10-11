@@ -4632,3 +4632,35 @@ cd <checkout>\brain
 ..\scripts\uv.cmd run python -m ssbot.tools.are_idlevel png --per-type 4
 ..\scripts\uv.cmd run python -m pytest -q tests\test_attack_range_idlevel.py tests\test_attack_range.py tests\test_attack_range_envoy_clawmaiden.py tests\test_attack_range_bmt.py
 ```
+
+## 39. 叠加层：五个提前量同时画 + 整条路径（2026-10-10，你 0.5 倍全波实战后提的："0 / 6 / 12 / 18 / 36 能不能同时显示"、小飞虫冲刺只看到停点、飞针怪三连刺只看到最后一刀闪；"做出来我看一眼就知道对不对"。分支 worktree-wf_c7b7336a-868-1；不做逐帧核对、不出 PNG）
+
+### 39.1 按键（范围模式 range+red / range 里）
+
+- **0**：五个提前量同时画（开 / 关）。每只怪用它自己的颜色：+0 填充，+6 实线，+12 / +18 虚线，+36 点线，越往后越淡；每块旁边标 +k。某个 k 的估计和更早的 k 是同一块区域时只画一次，标成 +0=6=12（待机不动的怪常见）。
+- **9**：整条路径（开 / 关）：估计在第 0 帧到第 K 帧每一帧的并集（同时画时 K = 36，单个 k 时 K = 那个 k），浅色虚线 + 很淡的填充，标 "path 0-K"。小飞虫俯冲 / 冲刺的去程和回程、Reed 突刺、Minister 冲刺都是一整条带子。
+- **1–5** 还是单个提前量（0 / 6 / 12 / 18 / 36），和原来一样（填充 + 细线 = 主角中心区）；同时画的时候不画主角中心区的细线，太乱。
+- 此刻真实的伤害框照旧：不能拼刀红色、能拼刀橙色。F8 / F9 / F10 / F11 不变。
+- 命令文件：`overlay all`（切换）/ `overlay all on|off`，`overlay swept` / `overlay swept on|off`。启动参数：`human_session --overlay --overlay-range --overlay-all-k --overlay-swept`（一开始就打开这两个）。
+
+### 39.2 启动器
+
+`C:\ssbot\sandbox\start_overlay_forum_all2.ps1`：和 `start_overlay_forum_all.ps1` 一样（第 8 实例、存档 fo_W 全波、0.5 倍、无边框），换成这个工作区，一开始就是"五个同时 + 整条路径"；日志 `C:\ssbot\sandbox\overlay_forum_all2.log`。会先等所有游戏窗口关掉再启动。没有跑。
+
+看三连刺：开着 0（不开 9），Reed 三连刺时，每一刀的红框出来之前，同一个位置应该已经有一块标着 +6 或 +12 的轮廓。看小飞虫：开 9，俯冲 / 冲刺时那条浅色带子应该盖住它出去和回来的整条路。
+
+### 39.3 回放（Rerun）
+
+- `viewer <session> --zones --range-only --k 0,6,12,18,36`：每只怪 `range/<怪>/k<k>/raw|hero`（和原来一样）+ 新的 `range/<怪>/swept` = 0..最大 k 的路径；某个 k 和更早的 k 一样时标签里写 (=k0)。
+- `viewer <session> --zones --range --k ...`：`enemies/<怪>/range/k<k>` + 新的 `enemies/<怪>/range/swept`。
+
+### 39.4 开销（你 20261010_165427 第 0 次尝试，11,224 个游戏帧，每 3 帧算一次，和实时叠加层一样）
+
+- 计算（五个 k + 0..36 每一帧的路径，一次过：`RangeTracker.ladder`，每只怪每个提前量只估一次）：中位 2.9 ms、p95 11.8 ms、最多 34 ms；单个 k 是 0.4 / 1.0 ms。
+- 画（1080p，整次尝试）：五个同时 + 路径中位 11 ms、p95 22 ms、最多 37 ms（4K 43 / 54 ms）；单个 k 中位 8.7 ms、p95 14 ms（旧的画法）。只看 5 只怪以上的帧（第 6 波 Tiny 群）：五个同时 + 路径中位 18 ms、p95 27 ms，单个 k 8 ms。实时叠加层本来就最多按 1920×1080 画再放大，0.5 倍时够用。
+- 为了这个把半透明填充改成 cv2 混合、虚线改成一次画完（单个 k 的画也从 10 ms 降到 8 ms）。
+
+### 39.5 没做的
+
+- 没有逐帧核对、没有 PNG（你说看一眼就知道）。上次中途停掉的逐帧检查工具 `are_path_check.py` 删了。
+- 瞄准类招的不可逃逸区（每个格子按自己的高度选表）不在这一步。

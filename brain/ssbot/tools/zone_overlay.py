@@ -46,6 +46,12 @@ the legend). The planner's tick is not run: the support does not depend on its p
                   at +k, thin outline = the same in hero-centre space (dilated by the hurtbox 0.4554 x 2.2498 at
                   (0, -0.38) from the hero TRANSFORM). Idle enemies = their body now. Needs no planner forecast (the
                   range modes skip it); attacks that have not started are not drawn (group 2, not this round).
+                  ALL K (key 0 / human_session --overlay-all-k, the person 2026-10-10): every look-ahead 0 / 6 / 12 /
+                  18 / 36 at once, +0 filled, the later ones as outlines (solid, dashed, dotted, fainter as k grows)
+                  labelled +k; a k whose estimate is the same region as an earlier one is drawn once (+0=6=...).
+                  SWEPT (key 9 / --overlay-swept): the union of the estimate over every frame 0..k (0..36 with all
+                  k): the whole path of a lunge or a dive, out and back, a light dashed outline over a faint fill.
+                  Both come from one pass (RangeTracker.ladder). The real damage colliders stay drawn (red / orange).
 
 Space: the support layers and yellow are HERO-CENTRE configuration space: where the hero's CENTRE (the white dot) must
 not be; the colliders are already grown by the hero hurtbox half extents (0.25 x 1.04 u). Red is the colliders
@@ -54,8 +60,9 @@ themselves (compare with DebugMod's hitbox.show).
 Live keys (polled, only while the game window has the focus; the game still gets them): F8 overlay on / off, F9 cycles
 yellow+red / yellow / red / support / all, F10 freeze / unfreeze (time.scale 0.0001: the oracle refuses 0), F11 one
 game frame forward while frozen (about one: the RPC lands a render frame or two later), 1-5 look-ahead now / +6 / +12 /
-+18 / +36, Ctrl+1-7 toggles a support layer. The same through the session's command file: "overlay k 12",
-"overlay mode all", "overlay layer window", "overlay freeze", "overlay step", "overlay off" / "overlay on".
++18 / +36, 0 every look-ahead at once (range), 9 the swept path (range), Ctrl+1-7 toggles a support layer. The same
+through the session's command file: "overlay k 12", "overlay mode all", "overlay layer window", "overlay all",
+"overlay swept on", "overlay freeze", "overlay step", "overlay off" / "overlay on".
 """
 import argparse
 import ctypes
@@ -127,6 +134,10 @@ COLORS = {"body": (200, 200, 200), "committed": (245, 150, 245), "window": (250,
 A_SUPPORT, A_YELLOW, A_RED, A_SWEEP = 0.33, 0.40, 0.42, 0.22
 A_RANGE = 0.30
 KEY_K = {0x31: 0, 0x32: 6, 0x33: 12, 0x34: 18, 0x35: 36}
+KEY_ALL_K, KEY_SWEPT = 0x30, 0x39   # 0: every look-ahead at once, 9: the swept path (range modes)
+# the range layer's all-k mode, by the look-ahead's rank in KS: (line, px at 1080p, opacity); rank 0 is also filled
+RANGE_STYLE = (("solid", 2.0, 1.0), ("solid", 2.0, 0.95), ("dash", 2.0, 0.85), ("dash", 1.5, 0.7), ("dot", 1.5, 0.6))
+A_SWEPT = 0.10
 
 
 def apply_default_env() -> dict:
@@ -612,25 +623,46 @@ class ZoneEngine:
                 info["not_started"].append([s.iid, s.type_key, round(float(s.t_strike), 3)])
         return com, ns, info
 
-    def range_polys(self, ks) -> dict:
-        """{k: [(iid, name, colour, raw outlines, hero-centre outlines, label)]}: the attack-range estimate of every
-        tracked enemy (world polygons), empty without --range."""
+    def range_layer(self, ks, sweep: int | None = None, hero: bool = True) -> dict:
+        """The attack-range estimate of every tracked enemy (world polygons; all empty without --range), every k in
+        one pass (RangeTracker.ladder):
+          range        {k: [(iid, name, colour, raw outlines, hero-centre outlines ([] when not hero), label)]}
+          range_same   {k: {iid: the earlier k of ks whose estimate is the same set of cells}} (drawn once)
+          range_swept  [(iid, name, colour, outlines of the union over 0..sweep, label)] ([] without sweep)
+          range_sweep  sweep"""
         out: dict = {k: [] for k in ks}
+        same: dict = {k: {} for k in ks}
+        swept_out: list = []
+        res = {"range": out, "range_same": same, "range_swept": swept_out, "range_sweep": sweep}
         if self.rng is None:
-            return out
-        from ssbot.combat.attack_range import contours, hero_space
-        for k in ks:
-            for est in self.rng.estimates(k):
+            return res
+        from ssbot.combat.attack_range import contours, hero_space, same_mask
+        per, swept = self.rng.ladder(ks, sweep)
+        seen: dict = {}                       # iid -> [(k, raw mask)] of the distinct estimates so far
+        for k in sorted(ks):
+            for est in per[k]:
                 lab = (f"{est.fam} {est.branch or ('?' if est.fam else '')} b{est.b}" if est.fam else "idle body")
                 if est.haz is not None and est.haz.m.size and est.haz.m.any():
                     lab += " + hazards"
+                prev = seen.setdefault(est.iid, [])
+                for k0, m0 in prev:
+                    if same_mask(m0, est.raw):
+                        same[k][est.iid] = k0
+                        break
+                else:
+                    prev.append((k, est.raw))
                 out[k].append((est.iid, self.name(est.iid), self.color(est.iid), contours(est.raw),
-                               contours(hero_space(est.raw)), lab))
-        return out
+                               contours(hero_space(est.raw)) if hero else [], lab))
+        for iid, m in swept.items():
+            swept_out.append((iid, self.name(iid), self.color(iid), contours(m), f"path 0-{sweep}"))
+        return res
 
-    def compute(self, ks=KS, support: bool = True, yellow: bool = True, forecast: bool = True) -> dict:
+    def compute(self, ks=KS, support: bool = True, yellow: bool = True, forecast: bool = True,
+                range_ks=None, sweep: int | None = None, range_hero: bool = True) -> dict:
         """Everything drawn for the current frame: forecast, support per k, yellow per k, the colliders, the attack
-        range (--range). forecast=False (the range layer alone): no planner forecast, no support, no yellow."""
+        range (--range; at range_ks (default ks), with sweep its swept path over 0..sweep, range_hero=False: no
+        hero-centre outlines).
+        forecast=False (the range layer alone): no planner forecast, no support, no yellow."""
         t0 = time.perf_counter()
         fc = self.forecast() if forecast else None
         if not forecast:
@@ -640,15 +672,17 @@ class ZoneEngine:
         t2 = time.perf_counter()
         com, ns, info = self.yellow(ks, fc) if yellow else ({}, {}, {})
         t3 = time.perf_counter()
+        rng = self.range_layer(ks if range_ks is None else range_ks, sweep, range_hero)
+        t4 = time.perf_counter()
         s = self.raw or {}
         return {"f": s.get("f"), "f_raw": s.get("_f_raw", s.get("f")), "hero": self.hero(), "ks": tuple(ks),
                 "support": sup, "ycom": com, "yns": ns, "ycom_by": info.pop("ycom_by", {}),
                 "yns_by": info.pop("yns_by", {}), "info": info, "cols": damage_colliders(s),
                 "names": dict(self.names), "states": {i: self.state_of(i) for i in self.names},
-                "enemies": self.enemies(), "range": self.range_polys(ks),
+                "enemies": self.enemies(), **rng,
                 "cam": s.get("cam"), "running": fc is not None or not forecast,
                 "ms": {"forecast": round((t1 - t0) * 1e3, 1), "support": round((t2 - t1) * 1e3, 1),
-                       "yellow": round((t3 - t2) * 1e3, 1)}}
+                       "yellow": round((t3 - t2) * 1e3, 1), "range": round((t4 - t3) * 1e3, 1)}}
 
 
 # ------------------------------------------------------------------------------------------------ drawing
@@ -657,10 +691,12 @@ class View:
     """What is drawn (the live keys and the render options)."""
     MODES = ("yellow+red", "yellow", "red", "support", "all", "range+red", "range")
 
-    def __init__(self, mode: str = "yellow+red", k: int = 0):
+    def __init__(self, mode: str = "yellow+red", k: int = 0, all_k: bool = False, swept: bool = False):
         self.on = True
         self.mode = mode
         self.k = k
+        self.all_k = all_k          # range: every look-ahead of KS at once (key 0)
+        self.swept = swept          # range: the swept path over 0..k (0..max KS with all_k; key 9)
         self.layers = {lay: True for lay in LAYERS}
         self.frozen = False
         self.note = ""
@@ -676,6 +712,16 @@ class View:
 
     def cycle(self) -> None:
         self.mode = self.MODES[(self.MODES.index(self.mode) + 1) % len(self.MODES)]
+
+    def range_ks(self) -> tuple:
+        """The look-aheads of the range layer: every k of KS at once (all_k) or the k shown."""
+        return tuple(KS) if self.all_k and self.show("range") else (self.k,)
+
+    def range_sweep(self) -> int | None:
+        """The swept path's last look-ahead (None: no swept path)."""
+        if not (self.swept and self.show("range")):
+            return None
+        return max(KS) if self.all_k else self.k
 
 
 def homography(grid: Grid, cam: dict, out_size: tuple[int, int]) -> tuple[np.ndarray, np.ndarray]:
@@ -712,12 +758,112 @@ def _blend_poly(img: np.ndarray, pts: np.ndarray, color, alpha: float, outline: 
     roi = img[y0:y1, x0:x1]
     m = np.zeros(roi.shape[:2], np.uint8)
     cv2.fillPoly(m, [p - [x0, y0]], 1)
-    sel = m.astype(bool)
+    sel = m.view(bool)
     if sel.any():
-        src = np.array([*color, 255.0]) * alpha
-        roi[sel] = (roi[sel] * (1.0 - alpha) + src).astype(np.uint8)
+        # roi * (1 - alpha) + colour * alpha where the polygon is (cv2 on the box, then copied through the mask)
+        src = np.empty_like(roi)
+        src[:] = np.array([*color, 255.0]) * alpha
+        np.copyto(roi, cv2.addWeighted(roi, 1.0 - alpha, src, 1.0, 0.0), where=sel[..., None])
     if outline:
         cv2.polylines(img, [p], True, (*[int(c * 0.75) for c in color], 255), outline, cv2.LINE_AA)
+
+
+def _dashed(img: np.ndarray, pts: np.ndarray, color, th: int, dash: float, gap: float) -> None:
+    """A closed dashed outline (px points): a straight dash from every (dash + gap) px along its length to dash px
+    further (a dash over a corner cuts it), all in one polylines call."""
+    import cv2
+    p = np.asarray(pts, np.float64).reshape(-1, 2)
+    if len(p) < 2:
+        return
+    p = np.vstack([p, p[:1]])
+    cum = np.concatenate([[0.0], np.cumsum(np.hypot(*np.diff(p, axis=0).T))])
+    if cum[-1] <= 0:
+        return
+    t0 = np.arange(0.0, cum[-1], dash + gap)
+    t = np.stack([t0, np.minimum(t0 + max(dash, 1.0), cum[-1])], axis=1).ravel()
+    q = np.stack([np.interp(t, cum, p[:, 0]), np.interp(t, cum, p[:, 1])], axis=1)
+    cv2.polylines(img, list(np.round(q).astype(np.int32).reshape(-1, 2, 2)), False, color, th, cv2.LINE_AA)
+
+
+def _outline(img: np.ndarray, q: np.ndarray, col, style: tuple, s: float) -> None:
+    """One range outline in a RANGE_STYLE (line, px at 1080p, opacity) on the premultiplied image."""
+    import cv2
+    line, px, a = style
+    c = (*[int(v * a) for v in col], int(255 * a))
+    th = max(1, int(round(px * s)))
+    if line == "solid":
+        cv2.polylines(img, [np.round(q).astype(np.int32)], True, c, th, cv2.LINE_AA)
+    else:
+        _dashed(img, q, c, th, (12.0 if line == "dash" else 3.0) * s, (7.0 if line == "dash" else 5.0) * s)
+
+
+def _tag(img: np.ndarray, text: str, at: tuple, col, s: float, placed: list) -> None:
+    """A small label at px `at` (its top left), moved down past the labels already placed (no overlap)."""
+    import cv2
+    fs = 0.42 * s
+    (w, h), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, fs, 1)
+    x, y = int(at[0]), int(at[1])
+    for _ in range(8):
+        if not any(x < bx + bw + 4 and bx < x + w + 4 and y < by + bh + 2 and by < y + h + 2
+                   for bx, by, bw, bh in placed):
+            break
+        y += h + 3
+    placed.append((x, y, w, h))
+    th = max(1, int(round(s)))
+    cv2.putText(img, text, (x, y + h), cv2.FONT_HERSHEY_SIMPLEX, fs, (0, 0, 0, 255), th + 2, cv2.LINE_AA)
+    cv2.putText(img, text, (x, y + h), cv2.FONT_HERSHEY_SIMPLEX, fs, (*col, 255), th, cv2.LINE_AA)
+
+
+def draw_range(img: np.ndarray, fr: dict, Hw: np.ndarray, view: View) -> None:
+    """The attack-range layer. Single k: the estimate at view.k filled (+ its hero-centre outline thin). All k
+    (view.all_k, the person 2026-10-10): every look-ahead at once per enemy in its colour, +0 filled and the later
+    ones as outlines by RANGE_STYLE (solid, dashed, dotted, fainter as k grows), each labelled +k; a look-ahead
+    whose estimate is the same set of cells as an earlier one is drawn once, labelled +0=6=... Swept (view.swept):
+    the union of the estimate over 0..K, a light dashed outline over a faint fill, labelled "path 0-K"."""
+    import cv2
+    H = img.shape[0]
+    s = H / 1080.0
+    rng = fr.get("range") or {}
+    same = fr.get("range_same") or {}
+    placed: list = []
+    for _iid, _name, col, polys, lab in (fr.get("range_swept") or ()) if view.swept else ():
+        light = tuple(int(c + (255 - c) * 0.4) for c in col)
+        qs = [_to_px(Hw, p) for p in polys]
+        for q in qs:
+            _blend_poly(img, q, light, A_SWEPT)
+            _dashed(img, q, (*light, 255), max(1, int(round(2 * s))), 6.0 * s, 4.0 * s)
+        if qs:
+            q = max(qs, key=len)
+            j = int(np.lexsort((q[:, 0], -q[:, 1]))[0])        # its lowest point (the leftmost of those)
+            _tag(img, lab, (q[j, 0], q[j, 1] + 2), light, s, placed)
+    if view.all_k:
+        ks = sorted(rng)
+    else:
+        k = view.k if view.k in rng else (sorted(rng) or [None])[0]
+        ks = [] if k is None else [k]
+    th = max(1, int(round(2 * s)))
+    for rank, k in enumerate(ks):
+        for iid, _name, col, raw, hero, _lab in rng.get(k, ()):
+            if not view.all_k:
+                for p in raw:
+                    _blend_poly(img, _to_px(Hw, p), col, A_RANGE, outline=th)
+                for p in hero:
+                    q = np.round(_to_px(Hw, p)).astype(np.int32)
+                    cv2.polylines(img, [q], True, (*col, 255), 1, cv2.LINE_AA)
+                continue
+            if iid in same.get(k, {}):
+                continue                     # drawn with the earlier k
+            style = RANGE_STYLE[min(rank, len(RANGE_STYLE) - 1)]
+            qs = [_to_px(Hw, p) for p in raw]
+            for q in qs:
+                if rank == 0:
+                    _blend_poly(img, q, col, A_RANGE)
+                _outline(img, q, col, style, s)
+            if qs:
+                grp = [k] + [k2 for k2 in ks if same.get(k2, {}).get(iid) == k]
+                q = max(qs, key=len)
+                j = int(np.lexsort((-q[:, 0], q[:, 1]))[0])     # its highest point (the rightmost of those)
+                _tag(img, "+" + "=".join(map(str, grp)), (q[j, 0] + 3, q[j, 1] - 14 * s), col, s, placed)
 
 
 def zone_masks(fr: dict, view: View) -> list[tuple[str, np.ndarray, tuple, float]]:
@@ -767,15 +913,8 @@ def render(fr: dict, grid: Grid, out_size: tuple[int, int], view: View, legend: 
                 if pl:
                     dark = tuple(int(c * 0.8) for c in col)
                     cv2.polylines(img, pl, True, (*dark, 255), th, cv2.LINE_AA)
-        k = view.k if view.k in fr.get("ks", ()) else (fr.get("ks") or (0,))[0]
         if view.show("range"):
-            th = max(1, int(round(2 * H / 1080)))
-            for _iid, _name, col, raw, hero, _lab in (fr.get("range") or {}).get(k, ()):
-                for p in raw:
-                    _blend_poly(img, _to_px(Hw, p), col, A_RANGE, outline=th)
-                for p in hero:
-                    q = np.round(_to_px(Hw, p)).astype(np.int32)
-                    cv2.polylines(img, [q], True, (*col, 255), 1, cv2.LINE_AA)
+            draw_range(img, fr, Hw, view)
         if view.show("red") or view.show("range"):
             # the range modes compare the prediction with the truth: every real damage collider NOW, the clashable
             # ones too (orange), no sweep (the person, 2026-10-10)
@@ -809,27 +948,40 @@ def render(fr: dict, grid: Grid, out_size: tuple[int, int], view: View, legend: 
 
 def legend_lines(fr: dict | None, view: View, config: str, extra: str = "") -> list[tuple[str, tuple | None]]:
     k = view.k
-    lines = [(f"ZONES  k=+{k} f ({k / 60:.2f} s)  mode {view.mode}" + ("  FROZEN" if view.frozen else "")
+    kt = (f"range k=+{'/'.join(map(str, KS))} at once" if view.all_k and view.show("range")
+          else f"k=+{k} f ({k / 60:.2f} s)")
+    lines = [(f"ZONES  {kt}  mode {view.mode}" + ("  FROZEN" if view.frozen else "")
               + (f"  {extra}" if extra else ""), None)]
     if view.show("yellow"):
         lines.append((NAMES["yellow"] + " (hero-centre space, lower bound: committed = each attack's own colliders "
                       "along its flight, 12 f; not started: commit-now erosion for the lock now)", COLORS["yellow"]))
     if view.show("range"):
-        lines.append(("ATTACK RANGE per enemy (its colour; filled = the raw estimate of where its damage colliders can "
-                      "be at +k, no margin; thin line = where the hero transform must not be)", None))
+        if view.all_k:
+            lines.append(("ATTACK RANGE at EVERY look-ahead (enemy colour, no margin): +0 filled, +6 solid, "
+                          "+12/+18 dashed, +36 dotted; +0=6 = same region", None))
+        else:
+            lines.append(("ATTACK RANGE per enemy (its colour; filled = the raw estimate of where its damage colliders "
+                          "can be at +k, no margin; thin line = where the hero transform must not be)", None))
+        if view.swept:
+            K = max(KS) if view.all_k else view.k
+            lines.append((f"SWEPT path 0-{K} (light dashed + faint fill): the union of the estimate over every frame "
+                          f"0..{K}, out and back", None))
         lines.append(("REAL damage colliders NOW: not clashable", COLORS["red"]))
         lines.append(("REAL damage colliders NOW: clashable", COLORS["clash"]))
-        k = view.k if fr is not None and view.k in fr.get("ks", ()) else None
-        for _iid, name, col, _raw, _hero, lab in ((fr or {}).get("range") or {}).get(k, ())[:6]:
+        rng = (fr or {}).get("range") or {}
+        k = min(rng) if view.all_k and rng else (view.k if view.k in rng else None)
+        for _iid, name, col, _raw, _hero, lab in rng.get(k, ())[:6]:
             lines.append((f"{name}: {lab}", col))
+        lines.append((f"0 all look-aheads ({'on' if view.all_k else 'off'})   9 swept path "
+                      f"({'on' if view.swept else 'off'})   1-5 single k", None))
     if view.show("red"):
         lines.append((NAMES["red"] + " (the colliders themselves)", COLORS["red"]))
     if view.show("support"):
         for i, lay in enumerate(LAYERS):
             on = view.layers.get(lay)
             lines.append((f"Ctrl+{i + 1} {NAMES[lay]}{'' if on else '  (off)'}", COLORS[lay] if on else (90, 90, 90)))
-    lines.append(("white dot = hero centre   F8 on/off  F9 mode  F10 freeze  F11 step  1-5 k  Ctrl+1-7 layers",
-                  None))
+    lines.append(("white dot = hero centre   F8 on/off  F9 mode  F10 freeze  F11 step  1-5 k  0 all k  9 swept  "
+                  "Ctrl+1-7 layers", None))
     lines.append((config, None))
     if fr is not None and fr.get("info"):
         inf = fr["info"]
@@ -1023,17 +1175,18 @@ class LiveOverlay:
 
     def __init__(self, link, game_pid: int, speed: float = 1.0, crest: str = "Wanderer", threads: int = 4,
                  every: int = 3, margins: bool = False, log_path: Path | None = None, range_layer: bool = False,
-                 mode: str | None = None, k: int = 0):
+                 mode: str | None = None, k: int = 0, all_k: bool = False, swept: bool = False):
         self.link, self.pid = link, game_pid
         self.speed = speed if speed and speed > 0 else 1.0
         self.crest, self.threads, self.every, self.margins = crest, threads, max(1, every), margins
         self.range_layer = range_layer
-        self.view = View(mode=mode if mode in View.MODES else ("range+red" if range_layer else "yellow+red"), k=k)
+        self.view = View(mode=mode if mode in View.MODES else ("range+red" if range_layer else "yellow+red"), k=k,
+                         all_k=all_k, swept=swept)
         self.q: queue.SimpleQueue = queue.SimpleQueue()
         self.cmds: queue.SimpleQueue = queue.SimpleQueue()
         self.terrain: dict | None = None
         self.stop_ev = threading.Event()
-        self.stats = {"computed": 0, "fed": 0, "ms": [], "upd_ms": [], "max_backlog": 0, "errors": [],
+        self.stats = {"computed": 0, "fed": 0, "ms": [], "range_ms": [], "upd_ms": [], "max_backlog": 0, "errors": [],
                       "excluded_from_capture": None, "starts": 0}
         self.log_path = log_path
         from ssbot.tools.launcher import set_dpi_aware
@@ -1063,6 +1216,9 @@ class LiveOverlay:
         self.stop_ev.set()
         self.thread.join(timeout=10)
         st = dict(self.stats)
+        rm = st.pop("range_ms", [])
+        if rm:
+            st["range_ms_p50"], st["range_ms_p95"] = float(np.percentile(rm, 50)), float(np.percentile(rm, 95))
         ms = st.pop("ms")
         um = st.pop("upd_ms")
         if ms:
@@ -1098,6 +1254,10 @@ class LiveOverlay:
             self.view.k = int(p[1])
         elif p[0] == "mode" and len(p) > 1 and p[1] in View.MODES:
             self.view.mode = p[1]
+        elif p[0] == "all":
+            self.view.all_k = not self.view.all_k if len(p) < 2 else p[1] == "on"
+        elif p[0] == "swept":
+            self.view.swept = not self.view.swept if len(p) < 2 else p[1] == "on"
         elif p[0] == "layer" and len(p) > 1 and p[1] in LAYERS:
             self.view.layers[p[1]] = not self.view.layers[p[1]]
         elif p[0] in ("on", "off"):
@@ -1136,6 +1296,12 @@ class LiveOverlay:
         if keys.pressed(0x7A):
             self._step()
         ctrl = keys.held(0x11)
+        if keys.pressed(KEY_ALL_K) and not ctrl:
+            self.view.all_k = not self.view.all_k
+            self.dirty = True
+        if keys.pressed(KEY_SWEPT) and not ctrl:
+            self.view.swept = not self.view.swept
+            self.dirty = True
         for vk, k in KEY_K.items():
             if keys.pressed(vk):
                 if ctrl:
@@ -1238,8 +1404,11 @@ class LiveOverlay:
                     if since >= self.every or self.dirty:
                         if self.eng.running and self.eng.ws is not None:   # new frames, or a new k / mode / layer
                             fr = self.eng.compute(ks=(self.view.k,), support=self.view.show("support"),
-                                                  forecast=self.view.needs_forecast())
+                                                  forecast=self.view.needs_forecast(),
+                                                  range_ks=self.view.range_ks(), sweep=self.view.range_sweep(),
+                                                  range_hero=not self.view.all_k)
                             self.stats["computed"] += 1
+                            self.stats["range_ms"].append(fr["ms"]["range"])
                             self.stats["ms"].append((time.perf_counter() - t0) * 1e3)
                         elif not self.eng.running:
                             fr = None
@@ -1376,7 +1545,7 @@ def rerun_zones(session: Path, rec, f0: int | None = None, f1: int | None = None
     eng = ZoneEngine(crest="Wanderer", threads=threads, margins=margins, range_layer=range_layer)
     g = eng.grid
     stats: dict = {"frames": 0, "attempts": [], "config": eng.config_text(), "compute_ms": []}
-    rng_parts = tuple(f"range/k{k:02d}" for k in ks) if range_layer else ()
+    rng_parts = (*(f"range/k{k:02d}" for k in ks), "range/swept") if range_layer else ()
     segs = [s for s in segments(f"{session}:win", demo_cache)
             if (f1 is None or s["f0"] <= f1) and (f0 is None or s["f1"] >= f0)]
     vidx = _video_index(session) if video else {}
@@ -1423,7 +1592,7 @@ def rerun_zones(session: Path, rec, f0: int | None = None, f1: int | None = None
             if s["f"] % every:
                 continue
             t0 = time.perf_counter()
-            fr = eng.compute(ks=ks, support=True)
+            fr = eng.compute(ks=ks, support=True, sweep=max(ks) if range_layer else None)
             stats["compute_ms"].append((time.perf_counter() - t0) * 1e3)
             rec.set_time("frame", sequence=int(fr_raw))
             rec.set_time("game_frame", sequence=int(s["f"]))
@@ -1482,6 +1651,10 @@ def rerun_zones(session: Path, rec, f0: int | None = None, f1: int | None = None
                     slug = name.replace(" ", "_")
                     now.add(slug)
                     per[f"enemies/{slug}/range/k{k:02d}"] = (raw, [col[2], col[1], col[0]], f"{name} {rlab}")
+            for iid, name, col, polys, rlab in fr["range_swept"] if range_layer else ():
+                slug = name.replace(" ", "_")             # the swept path over 0..max k (the person 2026-10-10)
+                now.add(slug)
+                per[f"enemies/{slug}/range/swept"] = (polys, [col[2], col[1], col[0]], f"{name} {rlab}")
             for slug in seen_enemies - now:                 # gone (dead, parked): clear what it drew
                 for k in ("colliders", *rng_parts, *(f"{w}/k{k:02d}" for w in ("yellow", "support") for k in ks)):
                     per[f"enemies/{slug}/{k}"] = ([], [0, 0, 0], "")
@@ -1540,7 +1713,7 @@ def rerun_range(session: Path, rec, f0: int | None = None, f1: int | None = None
     hero transform must not be) and with video the recorded frame and the same outlines projected (screen/...)."""
     import cv2
     import rerun as rr
-    from ssbot.combat.attack_range import HERO_DY, HERO_HALF, RangeTracker, contours, hero_space
+    from ssbot.combat.attack_range import HERO_DY, HERO_HALF, RangeTracker, contours, hero_space, same_mask
     from ssbot.tools.forum_human_score import load_segment, segments
     from ssbot.tools.viewer import closed, polygons_by_key
     trk = RangeTracker()
@@ -1556,7 +1729,9 @@ def rerun_range(session: Path, rec, f0: int | None = None, f1: int | None = None
         "colliders can be at +k frames (k = " + ", ".join(map(str, ks)) + "), thin = the same in hero-centre space "
         "(where the hero TRANSFORM must not be: dilated by the hurtbox 0.4554 x 2.2498 at (0, -0.38)); "
         "colliders/real = the real damage colliders now (red); hero = transform (dot) + hurtbox. Idle = the body "
-        "now. Attacks not started yet are not drawn (group 2, not this round)."), static=True)
+        "now. Attacks not started yet are not drawn (group 2, not this round). range/<enemy>/swept = the union of "
+        "the estimate over every frame 0.." + str(max(ks)) + " (the whole path of a lunge or a dive, out and back); "
+        "a k whose estimate is the same region as an earlier k says so in its label (=k...)."), static=True)
 
     def wl(pts):
         return [(float(x), -float(y)) for x, y in pts]
@@ -1595,8 +1770,10 @@ def rerun_range(session: Path, rec, f0: int | None = None, f1: int | None = None
                                                             radii=[0.04], labels=[lb for _, _, lb, _, _ in cols]))
             per = {}
             now = set()
-            for k in ks:
-                for est in trk.estimates(k):
+            ests, swept = trk.ladder(ks, max(ks))       # every k and the swept path in one pass
+            prev: dict = {}
+            for k in sorted(ks):
+                for est in ests[k]:
                     if est.iid not in names:
                         tk = trk.now[est.iid][0]
                         n = sum(1 for v in names.values() if v.startswith(SHORT_NAMES.get(tk, tk))) + 1
@@ -1607,13 +1784,24 @@ def rerun_range(session: Path, rec, f0: int | None = None, f1: int | None = None
                     lab = f"{nm} k{k} " + (f"{est.fam} {est.branch or '?'} b{est.b}" if est.fam else "idle body")
                     if est.haz is not None and est.haz.m.size and est.haz.m.any():
                         lab += " + hazards"           # its rune bombs / rune slam (combat.attack_range hazards)
+                    k0 = next((j for j, m in prev.get(est.iid, ()) if same_mask(m, est.raw)), None)
+                    if k0 is None:
+                        prev.setdefault(est.iid, []).append((k, est.raw))
+                    else:
+                        lab += f" (=k{k0})"
                     per[f"range/{nm}/k{k:02d}/raw"] = (contours(est.raw), rgb, lab, 0.05)
                     per[f"range/{nm}/k{k:02d}/hero"] = (contours(hero_space(est.raw)), rgb, lab, 0.02)
                     now.add(nm)
+            for iid, m in swept.items():
+                if iid in names:
+                    col = ENEMY_COLORS[sorted(names).index(iid) % len(ENEMY_COLORS)]
+                    per[f"range/{names[iid]}/swept"] = (contours(m), [col[2], col[1], col[0]],
+                                                        f"{names[iid]} path 0-{max(ks)}", 0.03)
             for nm in seen - now:
                 for k in ks:
                     for part in ("raw", "hero"):
                         per[f"range/{nm}/k{k:02d}/{part}"] = ([], [0, 0, 0], "", 0.02)
+                per[f"range/{nm}/swept"] = ([], [0, 0, 0], "", 0.02)
             seen |= now
             for path, (polys, rgb, lab, rad) in per.items():
                 rec.log(f"world/{path}", rr.LineStrips2D([closed(wl(p)) for p in polys], colors=[rgb], radii=[rad],
@@ -1679,14 +1867,14 @@ def zones_blueprint(video: bool, precision: bool = False):
 def cmd_render(a) -> int:
     import cv2
     session = Path(a.session)
-    eng = ZoneEngine(crest="Wanderer", threads=a.threads, margins=a.margins)
+    eng = ZoneEngine(crest="Wanderer", threads=a.threads, margins=a.margins, range_layer=a.range_layer)
     seg, terrain, states = attempt_states(session, a.attempt, Path(a.demo_cache) if a.demo_cache else None)
     eng.crest = seg.get("crest") or eng.crest
     vidx = _video_index(session)
     vf = VideoFrames(session)
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
-    view = View(mode=a.mode, k=a.k)
+    view = View(mode=a.mode, k=a.k, all_k=a.all_k, swept=a.swept)
     eng.start(terrain)
     writer = None
     n_png = 0
@@ -1701,7 +1889,8 @@ def cmd_render(a) -> int:
         if (s["f"] % a.every) and not a.clip:
             continue
         t0 = time.perf_counter()
-        fr = eng.compute(ks=(a.k,), support=view.show("support"))
+        fr = eng.compute(ks=(a.k,), support=view.show("support"), forecast=view.needs_forecast(),
+                         range_ks=view.range_ks(), sweep=view.range_sweep(), range_hero=not view.all_k)
         ms.append((time.perf_counter() - t0) * 1e3)
         vi = vidx.get(fr_raw)
         img = vf.get(vi) if vi is not None else None
@@ -1730,12 +1919,13 @@ def cmd_bench(a) -> int:
     """Per game frame: feed (every frame) and compute (every `every`-th, one k) cost on a recorded attempt, and the
     full-size render (+ the 4K one the live window draws)."""
     session = Path(a.session)
-    eng = ZoneEngine(crest="Wanderer", threads=a.threads, margins=a.margins)
+    eng = ZoneEngine(crest="Wanderer", threads=a.threads, margins=a.margins, range_layer=a.range_layer)
     seg, terrain, states = attempt_states(session, a.attempt, Path(a.demo_cache) if a.demo_cache else None)
     if a.limit_s:
         states = states[:int(a.limit_s * 60)]
     eng.start(terrain)
-    view = View(mode="all", k=a.k)
+    # --range: the live range+red mode (no forecast), with --all-k / --swept as keys 0 / 9 set them
+    view = View(mode="range+red" if a.range_layer else "all", k=a.k, all_k=a.all_k, swept=a.swept)
     feed, comp, rend, rend4k, parts = [], [], [], [], []
     for s in states:
         t0 = time.perf_counter()
@@ -1744,7 +1934,8 @@ def cmd_bench(a) -> int:
         if s["f"] % a.every or s["f"] < 30:
             continue
         t0 = time.perf_counter()
-        fr = eng.compute(ks=(a.k,), support=True)
+        fr = eng.compute(ks=(a.k,), support=view.show("support"), forecast=view.needs_forecast(),
+                         range_ks=view.range_ks(), sweep=view.range_sweep(), range_hero=not view.all_k)
         comp.append((time.perf_counter() - t0) * 1e3)
         parts.append(fr["ms"])
         t0 = time.perf_counter()
@@ -1761,7 +1952,9 @@ def cmd_bench(a) -> int:
     res = {"session": str(session), "attempt": a.attempt, "game_frames": len(states), "every": a.every,
            "feed_ms": q(feed), "compute_ms": q(comp), "render_1080_ms": q(rend), "render_2160_ms": q(rend4k),
            "forecast_ms": q([p["forecast"] for p in parts]), "support_ms": q([p["support"] for p in parts]),
-           "yellow_ms": q([p["yellow"] for p in parts]), "config": eng.config_text()}
+           "yellow_ms": q([p["yellow"] for p in parts]), "range_ms": q([p["range"] for p in parts]),
+           "view": {"mode": view.mode, "k": view.k, "all_k": view.all_k, "swept": view.swept},
+           "config": eng.config_text()}
     print(json.dumps(res, indent=1))
     if a.json:
         Path(a.json).write_text(json.dumps(res, indent=1), "utf-8")
@@ -1779,6 +1972,9 @@ def main(argv=None) -> int:
         p.add_argument("--threads", type=int, default=4)
         p.add_argument("--margins", action="store_true")
         p.add_argument("--demo-cache", default=None)
+        p.add_argument("--range", dest="range_layer", action="store_true", help="the attack-range layer")
+        p.add_argument("--all-k", action="store_true", help="range: every look-ahead at once (live key 0)")
+        p.add_argument("--swept", action="store_true", help="range: the swept path (live key 9)")
         if name == "render":
             p.add_argument("--from", dest="f0", type=int)
             p.add_argument("--to", dest="f1", type=int)

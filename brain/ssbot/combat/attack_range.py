@@ -128,6 +128,20 @@ def union(masks) -> Mask:
     return Mask(out, ix0, iy0)
 
 
+def same_mask(a: Mask, b: Mask) -> bool:
+    """The same set cells (whatever the raster's padding)."""
+    ra, rb = a.m.any(axis=1), b.m.any(axis=1)
+    if not ra.any() or not rb.any():
+        return not ra.any() and not rb.any()
+    ca, cb = a.m.any(axis=0), b.m.any(axis=0)
+    ya, yb, xa, xb = int(ra.argmax()), int(rb.argmax()), int(ca.argmax()), int(cb.argmax())
+    ha, hb = len(ra) - int(ra[::-1].argmax()), len(rb) - int(rb[::-1].argmax())
+    wa, wb = len(ca) - int(ca[::-1].argmax()), len(cb) - int(cb[::-1].argmax())
+    if (a.iy0 + ya, a.ix0 + xa, ha - ya, wa - xa) != (b.iy0 + yb, b.ix0 + xb, hb - yb, wb - xb):
+        return False
+    return bool(np.array_equal(a.m[ya:ha, xa:wa], b.m[yb:hb, xb:wb]))
+
+
 def on_canvas(m: Mask, ix0: int, iy0: int, shape) -> np.ndarray:
     """m on the canvas whose cell (0, 0) is (ix0, iy0) (cut where it leaves it)."""
     out = np.zeros(shape, bool)
@@ -819,6 +833,40 @@ class RangeTracker:
 
     def estimates(self, k: int) -> list[Estimate]:
         return [x for x in (self.estimate(i, k) for i in sorted(self.now)) if x is not None]
+
+    def swept(self, iid: int, k: int, step: int = 1) -> Mask:
+        """The union of the estimate over the look-aheads 0..k (every `step` frames, k itself always): the whole path
+        a lunge or a dive takes within k frames, out and back (the overlay's swept outline, the person 2026-10-10);
+        empty for an enemy not tracked."""
+        if iid not in self.now:
+            return empty_mask()
+        js = sorted(set(range(0, max(int(k), 0) + 1, max(int(step), 1))) | {max(int(k), 0)})
+        return union([e.raw for e in (self.estimate(iid, j) for j in js) if e is not None])
+
+    def ladder(self, ks, sweep: int | None = None, step: int = 1) -> tuple[dict, dict]:
+        """Every look-ahead of one frame in one pass (the overlay's all-k and swept modes, the person 2026-10-10):
+        ({k: [Estimate] in iid order} for each k in ks, {iid: the swept Mask over 0..sweep} ({} without sweep)).
+        Each (enemy, look-ahead) is estimated once: the ks inside 0..sweep come from the sweep's own estimates."""
+        ks = [max(int(k), 0) for k in ks]
+        js = set(ks)
+        sw = None if sweep is None else max(int(sweep), 0)
+        if sw is not None:
+            js |= set(range(0, sw + 1, max(int(step), 1))) | {sw}
+        out: dict = {k: [] for k in ks}
+        swept: dict = {}
+        for iid in sorted(self.now):
+            parts = []
+            for j in sorted(js):
+                e = self.estimate(iid, j)
+                if e is None:
+                    continue
+                if j in out:
+                    out[j].append(e)
+                if sw is not None and j <= sw:
+                    parts.append(e.raw)
+            if sw is not None:
+                swept[iid] = union(parts)
+        return out, swept
 
 
 def apply_custom(est: Estimate, out) -> Estimate:

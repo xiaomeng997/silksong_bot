@@ -427,10 +427,12 @@ def main(argv: list[str] | None = None) -> int:
                          "as metrics/precision/<enemy>/k<k>/<layer>")
     ap.add_argument("--range", dest="range_layer", action="store_true",
                     help="--zones: also each enemy's attack-range estimate (combat.attack_range, no margin) per k "
-                         "as world/enemies/<enemy>/range/k<k>")
+                         "as world/enemies/<enemy>/range/k<k>, and its swept path over 0..max k (the union of the "
+                         "estimate over every frame) as world/enemies/<enemy>/range/swept")
     ap.add_argument("--range-only", action="store_true",
                     help="--zones: the attack-range layer alone (no planner forecast): the estimate per enemy and k, "
-                         "the real damage colliders, the hero (tools.zone_overlay.rerun_range)")
+                         "its swept path over 0..max k (range/<enemy>/swept), the real damage colliders, the hero "
+                         "(tools.zone_overlay.rerun_range)")
     a = ap.parse_args(argv)
 
     if a.zones:

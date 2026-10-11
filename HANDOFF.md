@@ -4739,3 +4739,37 @@ k / 60 s; margins stay a separate, decision-time choice.
 - Not done: the stage C `summary.md` idle rows (body now, with hazards) were not re-run (the 30 evals); how the margin
   grows with k is the person's call (fixed / ~t^2 / per type table); better fliers need their target point (DistanceFly
   to the hero, the Tiny formation slot), not done.
+
+## Task overlay: every look-ahead at once + swept paths (branch worktree-wf_c7b7336a-868-1, 2026-10-10; forum.md §39)
+
+The person, after the 0.5x all-waves session: "can 0 / 6 / 12 / 18 / 36 be shown at the same time?", the Tinies' dash
+shows only its stop point, only the last of the Reed's three stabs seemed to flash; "just make the overlay, one look
+tells me". No frame-by-frame checks, no PNGs.
+
+- `combat/attack_range.py`: `RangeTracker.ladder(ks, sweep=None, step=1) -> ({k: [Estimate]}, {iid: swept Mask})`
+  estimates every (enemy, look-ahead) once in one pass (the ks inside 0..sweep come from the sweep);
+  `RangeTracker.swept(iid, k, step)` (the union over 0..k, from the stopped attempt, kept); `same_mask(a, b)` (same set
+  cells whatever the padding). The custom hooks' per-frame memory (Tiny velocity, Bellbearer bells) is keyed on T, so
+  extra estimates per frame are safe.
+- `tools/zone_overlay.py`: `ZoneEngine.range_layer(ks, sweep, hero)` replaces `range_polys` and adds `range_same`
+  ({k: {iid: earlier k with the same region}}), `range_swept` and `range_sweep` to the frame; `compute(...,
+  range_ks=None, sweep=None, range_hero=True)` (ms["range"] timed). `View(all_k, swept)`, `range_ks()` /
+  `range_sweep()`; `draw_range` (single k as before; all k: +0 filled, RANGE_STYLE outlines solid / dashed / dotted
+  fading with k, +k labels at each outline's top placed without overlap, a repeated region drawn once as +0=6=...;
+  swept: light dashed outline + A_SWEPT fill, "path 0-K" at its bottom). Live keys 0 (KEY_ALL_K) and 9 (KEY_SWEPT),
+  commands "overlay all [on|off]" / "overlay swept [on|off]", LiveOverlay(all_k, swept), stats range_ms_p50 / p95.
+  Real colliders stay drawn (red / orange). `render` / `bench` take `--range --all-k --swept`. Rerun: `rerun_range`
+  uses `ladder` and logs `range/<enemy>/swept` (0..max k) and "(=k0)" in repeated labels; `rerun_zones --range` logs
+  `enemies/<enemy>/range/swept`. `_blend_poly` blends with cv2 through the mask and `_dashed` draws straight dashes in
+  one polylines call (render 1080p single k 10 -> 8 ms on 5+ enemy frames).
+- `tools/human_session.py`: `--overlay-all-k`, `--overlay-swept`. `tools/viewer.py`: help text.
+- Launcher (not run): `C:\ssbot\sandbox\start_overlay_forum_all2.ps1` (instance 8, fo_W, 0.5x, borderless, all k +
+  swept on at start), log `C:\ssbot\sandbox\overlay_forum_all2.log`.
+- Cost (20261010_165427 attempt 0, 11,224 game frames, every 3, `zone_overlay bench --range --all-k --swept`): range
+  compute p50 2.9 / p95 11.8 / max 34 ms (single k 0.4 / 1.0); render 1080p p50 11.1 / p95 22.3 / max 37 ms (before the cv2 blend 18.9 / 39.2; single k 8.7 / 14.1), 2160p 43 / 54; on frames with >= 5
+  enemies (offline profile) all k + swept 18 / 27 ms vs single k 8 ms.
+- Tests: `tests/test_range_overlay_allk.py` (ladder once per look-ahead and the out-and-back sweep, same_mask,
+  range_layer's repeated regions, draw_range all k / swept / colliders kept, dashed gaps, View, live commands); the
+  attack-range and zone overlay tests pass.
+- Dropped: the stopped attempt's untracked `tools/are_path_check.py` (frame-by-frame check; the person declined).
+- Not done: the aim zones (aimed attacks' inescapable zone per cell height class) are a separate step.
