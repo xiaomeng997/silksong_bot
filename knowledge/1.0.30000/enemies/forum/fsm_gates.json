@@ -1,0 +1,53 @@
+{
+ "product": "fsm_gates",
+ "sources": [
+  "C:/ssbot/data/m2_forum_r0/cache"
+ ],
+ "min_pairs": 200,
+ "gates": [
+  {
+   "type": "Pilgrim 03 Song",
+   "family": "CB_EVADE",
+   "lift": "Throw Evade",
+   "pairs": 1766,
+   "longest_gap_s": 5.0916,
+   "timeout_s": 10.1832
+  },
+  {
+   "type": "Song Pilgrim Maestro",
+   "family": "MA_DEFEND",
+   "lift": "Fire Antic",
+   "pairs": 1447,
+   "longest_gap_s": 7.3999,
+   "timeout_s": 14.7998
+  }
+ ],
+ "pairs": {
+  "Pilgrim 03 Song/CB_EVADE": 1766,
+  "Pilgrim 03 Song/CB_THROW": 4951,
+  "Song Administrator/MI_CHARGE": 1114,
+  "Song Administrator/MI_EVADE": 712,
+  "Song Administrator/MI_PARRY": 2452,
+  "Song Handmaiden/CM_SLASH": 2605,
+  "Song Handmaiden/CM_SPIN": 2445,
+  "Song Handmaiden/CM_TELE": 339,
+  "Song Heavy Sentry/CC_CAST": 754,
+  "Song Heavy Sentry/CC_EVADE": 1187,
+  "Song Heavy Sentry/CC_JUMP": 316,
+  "Song Heavy Sentry/CC_JUMP_CAST": 271,
+  "Song Heavy Sentry/CC_SLAM": 1061,
+  "Song Pilgrim 01/EN_CHARGE": 279,
+  "Song Pilgrim 01/EN_JUMPSLASH": 138,
+  "Song Pilgrim 01/EN_SLASH": 585,
+  "Song Pilgrim 03/CH_JUMP": 184,
+  "Song Pilgrim 03/CH_SLASH": 330,
+  "Song Pilgrim 03/CH_WHIP": 306,
+  "Song Pilgrim Maestro/MA_DEFEND": 1447,
+  "Song Pilgrim Maestro/MA_SLASH": 3730,
+  "Song Pilgrim Maestro/MA_SUMMON": 541,
+  "Song Reed/RE_DEFEND": 566,
+  "Song Reed/RE_EVADE": 509,
+  "Song Reed/RE_STAB": 1571,
+  "Song Reed/RE_THROW": 1258
+ }
+}

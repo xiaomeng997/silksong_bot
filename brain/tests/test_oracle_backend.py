@@ -620,3 +620,30 @@ def test_hero_without_state_is_unknown():
     assert np.isfinite(w.cam.x)
 
 
+def _fake_ent(iid: int, tk: str, x: float, boxes=()):
+    from ssbot.core.worldstate import E, Entity
+    return Entity(id=iid, type_key=E(tk), pos=E((x, 0.0)), dmg_boxes=list(boxes))
+
+
+def test_hit_source_by_object_name_and_collider():
+    """forum.md 24.3: a Choristor's whip hit was credited to the nearest Choristor body (often a sleeping one); the
+    path's GameObject name picks the instance ("Song Pilgrim 03 (2)/..." resolved to no type before), and the owner of
+    the path's collider nearest the hero box picks it when the name does not."""
+    from ssbot.core.worldstate import DamageBox
+    ob = OracleBackend()
+    tk = "Song Pilgrim 03"
+    whip = DamageBox(poly=[(9.0, 0.0), (11.0, 0.0), (11.0, 1.0), (9.0, 1.0)], active=True, name="Whip Hit 3")
+    near, far = _fake_ent(1, tk, 0.5), _fake_ent(2, tk, 17.0, [whip])
+    by_type = {tk: [near, far]}
+    hero_box = (9.5, 0.0, 10.5, 2.0)
+    ob.m.obj_name.update({1: tk, 2: tk + " (2)"})
+    assert ob._resolve_source(tk + " (2)/Spin Hit", by_type, (10.0, 1.0), hero_box) == (tk, 2)
+    assert ob._resolve_source(tk + "/Whip Hit 3", by_type, (10.0, 1.0), hero_box) == (tk, 1)
+    ob.m.obj_name.update({2: tk})          # two of one name: the collider's owner
+    assert ob._resolve_source("Wave 1/" + tk + "/Whip Hit 3", by_type, (10.0, 1.0), hero_box) == (tk, 2)
+    ob.m.obj_name.clear()                  # no names: the collider's owner, else the nearest body as before
+    assert ob._resolve_source(tk + "/Whip Hit 3", by_type, (1.0, 1.0), hero_box) == (tk, 2)
+    assert ob._resolve_source(tk + "/Slash Hit 1", by_type, (1.0, 1.0), hero_box) == (tk, 1)
+    assert ob._resolve_source(tk + "/Slash Hit 1", {tk: [far]}, (1.0, 1.0), hero_box) == (tk, 2)
+
+

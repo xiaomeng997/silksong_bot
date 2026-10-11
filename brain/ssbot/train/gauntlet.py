@@ -24,6 +24,7 @@ import threading
 from dataclasses import dataclass
 
 from ssbot.ipc.ents import SRC_BITS
+from ssbot.train.recovery import PauseWatch
 
 
 def type_key(name: str | None) -> str:
@@ -160,6 +161,7 @@ class GauntletTap:
         # only wave members count for DecrementEnemy: the Maestro's summoned "Song Automaton Tiny" also die with a
         # "hit" event (run 20261002_221727 i2 ep0: 6 of 28 kills), and counting them ended the sim's last wave early
         self._wave_types = {t for w in enc.waves for t in w.types}
+        self.pause = PauseWatch(link)     # the first STATE of a pause, for its cause (recovery.pause_cause)
         self.reset()
         link.subscribe_state(self._on)
 
