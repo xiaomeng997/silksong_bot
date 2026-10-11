@@ -44,7 +44,7 @@ UP_X, UP_Y = (-1.6, 0.6), (0.4, 3.5)
 # the full reach of each swing (side / up as above, unshrunk; the down slash's box under the hero, generous) for the
 # spared-enemy check (WaveSkipPolicy spare), facing +x, and the margin around it
 SPARE_REACH = {"side": (-0.25, -0.42, 3.6, 2.69), "up": (-2.12, -0.63, 0.81, 3.77), "down": (-1.6, -3.2, 1.6, 0.4)}
-SPARE_MARGIN = 0.8
+SPARE_MARGIN = 0.6
 
 
 class DebugLine:
@@ -145,19 +145,28 @@ class WaveSkipPolicy:
         if self.hold[k] == 0 and self.rest[k] == 0:
             self.hold[k] = max(2, n)
 
-    def _strike(self, kind: str, hx: float, hy: float, side: int) -> None:
-        """Press attack unless a swing's reach touches a spared enemy: the union of every swing's reach, both facings
+    def _strike(self, kind: str, hx: float, hy: float, side: int) -> bool:
+        """Press attack unless a swing's reach touches a spared enemy: the union of every swing's reach facing `side`
         (the first live 1v1 clear, 2026-10-11: a held up press turned a checked side slash into an up slash that hit
-        the spared Choristor), so `kind` and `side` do not narrow it."""
-        rx = max(max(abs(r[0]), abs(r[2])) for r in SPARE_REACH.values())
+        the spared Choristor), so `kind` does not narrow it. False when held back (the caller steps away)."""
+        rx0 = min(r[0] for r in SPARE_REACH.values())
+        rx1 = max(r[2] for r in SPARE_REACH.values())
         ry0, ry1 = min(r[1] for r in SPARE_REACH.values()), max(r[3] for r in SPARE_REACH.values())
-        x0, x1 = hx - rx, hx + rx
+        x0, x1 = (hx + rx0, hx + rx1) if side > 0 else (hx - rx1, hx - rx0)
         m = SPARE_MARGIN
         for bx0, by0, bx1, by1 in self.spared:
             if overlaps(x0 - m, x1 + m, bx0, bx1) and overlaps(hy + ry0 - m, hy + ry1 + m, by0, by1):
                 self.held_back += 1
-                return
+                return False
         self._press("attack", 2)
+        return True
+
+    def _away(self, hx: float) -> str | None:
+        """Away from the nearest spared enemy (a held-back swing: the target and the spared one apart)."""
+        if not self.spared:
+            return None
+        bx0, _, bx1, _ = min(self.spared, key=lambda b: abs((b[0] + b[2]) / 2.0 - hx))
+        return "left" if (bx0 + bx1) / 2.0 >= hx else "right"
 
     def act(self, s: dict) -> int:
         self.frames += 1
@@ -188,12 +197,13 @@ class WaveSkipPolicy:
             if in_side:
                 if facing != side:
                     move = "right" if side > 0 else "left"
-                else:
-                    self._strike("side", hx, hy, side)
+                elif not self._strike("side", hx, hy, side):
+                    move = self._away(hx)
             elif in_up:
                 move = "right" if side > 0 else "left"
                 self._press("up", self._frames(s, 0.15))
-                self._strike("up", hx, hy, side)
+                if not self._strike("up", hx, hy, side):
+                    move = self._away(hx)
             elif y0 > hy + 2.2 and gx < 1.6:
                 # a flier above: jump under it, up-slash on the way
                 if not airborne:
@@ -202,7 +212,8 @@ class WaveSkipPolicy:
             elif y1 < hy - 1.0 and airborne and gx < 1.2:
                 move = "right" if side > 0 else "left"
                 self._press("down", self._frames(s, 0.2))
-                self._strike("down", hx, hy, side)
+                if not self._strike("down", hx, hy, side):
+                    move = self._away(hx)
             else:
                 move = "right" if side > 0 else "left"
                 if gx > 7.0 and not airborne:
@@ -424,7 +435,7 @@ def link_instance(link: OracleLink) -> int:
     return int(link.sock.getpeername()[1]) - port(0)
 
 
-def solo_clear(link: OracleLink, keep: str, timeout_s: float = 90.0, battle: str = "Battle Scene",
+def solo_clear(link: OracleLink, keep: str, timeout_s: float = 60.0, battle: str = "Battle Scene",
                settle_s: float = 4.0) -> dict:
     """A 1v1 out of a wave (task 1v1 S3: the Choristor of wave 0, which also holds a Reed and an Envoy; the oracle
     has no RPC that removes one enemy, enemy.hp is not deployed): with the boost on (isInvincible, nail 4, as the

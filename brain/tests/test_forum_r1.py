@@ -74,6 +74,7 @@ def test_wave_skip_policy_spares_the_kept_type():
     pol = WaveSkipPolicy({"Song Reed"}, spare={"Song Pilgrim 03"})
     m = pol.act(_state(30, 4.57, ents=[reed, cho], silk=9))
     assert not m & A and not m & mask("quickcast") and pol.held_back == 1
+    assert m & mask("left")                          # steps away from the spared one
     # the Choristor out of every swing's reach (past the margin): the swing goes
     cho_far = _ent(2, "Song Pilgrim 03", 24.0, 4.6, cols=[_box(23.6, 3.5, 24.6, 6)])
     pol2 = WaveSkipPolicy({"Song Reed"}, spare={"Song Pilgrim 03"})

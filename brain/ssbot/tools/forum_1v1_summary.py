@@ -25,13 +25,18 @@ RUNS = Path("C:/ssbot/data/runs/m2")
 END_WAVE = 7                 # the 1v1's wave (--end-wave): Forum_W_w7 the Clapper, Forum_W_w0c the Choristor (0)
 
 
-def _f_kill(run: str, inst: int, ep: int, cache: dict) -> int | None:
+def _row(run: str, inst: int, ep: int, cache: dict) -> dict:
     key = (run, inst)
     if key not in cache:
         p = RUNS / run / f"attempts_i{inst}.jsonl"
         cache[key] = {int(r["episode"]): r for r in map(json.loads, p.read_text("utf-8").splitlines()) if r}             if p.exists() else {}
-    r = cache[key].get(int(ep)) or {}
-    return r.get("f_kill")
+    return cache[key].get(int(ep)) or {}
+
+
+def _kept_hp(row: dict):
+    """The kept enemy's HP when a solo intro (encounters.forum_solo_intro) handed over, else None."""
+    return next((x["solo"]["kept"].get("hp") for x in row.get("intro") or () if isinstance(x, dict) and "solo" in x),
+                None)
 
 
 def load(out: Path) -> dict[str, list[dict]]:
@@ -44,7 +49,9 @@ def load(out: Path) -> dict[str, list[dict]]:
         e = {**d["episode"], "hits": d.get("hits") or []}
         if e.get("outcome") == "HARNESS_FAIL":
             continue
-        fk = _f_kill(e["run"], int(e["inst"]), int(e["ep"]), cache)
+        row = _row(e["run"], int(e["inst"]), int(e["ep"]), cache)
+        fk = row.get("f_kill")
+        e["kept_hp"] = _kept_hp(row)
         e["f_kill"] = fk
         e["tail"] = [h for h in e["hits"] if fk is not None and int(h.get("f") or 0) > fk]
         e["hits"] = [h for h in e["hits"] if fk is None or int(h.get("f") or 0) <= fk]
@@ -83,6 +90,7 @@ def arm_summary(eps: list[dict]) -> dict:
         "t_p50": _pct([e["t"] for e in eps], 50),
         "forced_share": round(sum(e.get("forced") or 0 for e in eps) / ticks, 4) if ticks else None,
         "late_share": round(sum(e.get("late") or 0 for e in eps) / ticks, 4) if ticks else None,
+        "kept_hp": dict(Counter(e.get("kept_hp") for e in eps if e.get("kept_hp") is not None)),
         "hit_states": dict(Counter(f"{h.get('family')}|{h.get('state')}" for e in eps for h in e.get("hits") or ())
                            .most_common()),
     }
