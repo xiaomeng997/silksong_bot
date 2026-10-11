@@ -4949,3 +4949,59 @@ wf_999712d4-d19-1 worktree (its CC_JUMP / CC_JUMP_CAST tables are the re-scanned
 - Bells: "without this bell" under v2 removes the Bellbearer too (one estimate layer per owner).
 - Open-loop hindsight cannot tell "would have escaped" from "missed": the next stage is the live 1v1 (Clapper, clp2
   setup / fo_r1_w7) with SSBOT_FORUM_V2=1, judged on hitless + landed hits per second.
+
+## Task 1v1 - stage S2: live Clapper 1v1 with v2-lite (branch worktree-wf_f1846551-5f9-1, 2026-10-11 afternoon; forum.md §44)
+
+Live runs on game instances 0 and 1 (`launcher -n 2 --detach`, no oracle deploy, no --restore). DEMO_SOON was renamed
+to DEMO_SOON.paused for the runs and put back at the end; the instances were left quiet (keys released,
+`kn_forum_floor` loaded by `C:\ssbot\sandbox\clp2_quiet.py`).
+
+- Ported from worktree-wf_e8f28bf6-e60-1 (dd308d9, ef52e06): `Forum_W_w7` / `Forum_W_w13` (fo_cl_w<i>w, Wanderer),
+  `Encounter.end_wave` (w7 ends at wave 8's start), combat_run's Wanderer crest for them.
+- Harness: `C:\ssbot\sandbox\1v1_freeze.ps1 -rev <sha>` (frozen checkout `C:\ssbot\live_1v1_<sha>`: git archive +
+  CODE_REV + the whole Forum knowledge dir, untracked aim_zones_*.json and ignored npz included), `1v1_live.ps1 -Rev
+  -Inst -Arms a,b -Chunk -Blocks -Seed [-NoWarm]` (one driver per instance, ABBA blocks, arms' SSBOT_* switches in
+  `1v1_arms.txt`, manifest `1v1_manifest.txt`, stop file `1v1_live.stop`, also stops on STOP_AGENTS / DEMO_SOON).
+- Tools: `ssbot/tools/forum_1v1_summary.py` (per arm over `forum_remaining_hits collect` files: kills, hitless kills,
+  hits before the kill / tail, landed hits per second, kill time, late / FORCED shares, hits by state; --hits lists
+  each hit with the planner at the attack start and at the contact) and `ssbot/tools/forum_1v1_rows.py` (open-loop
+  replay: per Clapper state the landed hits of the allowed / safe rows and why hitting rows fail).
+  Collect output: `C:\ssbot\data\m2_1v1\col`, summaries `s0..s9.json`.
+- Code (all under SSBOT_FORUM_V2=1 unless noted):
+  - `SSBOT_FORUM_V2_ESC_CARRIED` (default on): the escape check runs on a carried CONTINUE row too.
+  - `SSBOT_FORUM_V2_ESC_TAIL` (default on): the escape that passed for the chosen row is appended to its plan.
+  - `SSBOT_FORUM_V2_CORNER` (13 u, default on): safe rows ending between a Clapper and a wall closer than 13 u rank
+    after the others (audit v2_corner_rows). No measurable effect by itself.
+  - `SSBOT_FORUM_V2_ESC_MORE` (default 0): escape search past the first v2_esc_k rows. 48 was worse (retreats into
+    corners).
+  - `SSBOT_FORUM_V2_VSLAM` (default off): a virtual slam of a Clapper outside its slam / jumps in the escape danger.
+    Much worse (the hero backs into the walls); contradicts "idle enemies have no inescapable zone".
+  - `L2Rules.corner_room_u` 13 (Clapper controller, plain CC_JUMP only): no "under and behind" when the spot behind
+    the landing has under 13 u to the wall behind it (back off instead). `SSBOT_FORUM_L2_SET="k=v,..."` sets
+    numeric L2Rules fields for A/Bs.
+  - Tests: test_forum_v2 (+1 corner test), test_forum_l2 (the jump with / without the corner rule); forum v2 /
+    planner / L2 / tactics files 78 passed.
+
+### Measured (forum.md 44.2; 2 instances, ~23 episodes per arm unless noted)
+
+- v0 best: 0/2 kills (QUIT after 3 hits, ~28 s, FORCED_RISK 88 %). v2 with the `rule` margin: 0/3 kills, 0.15 landed
+  hits/s (the Clapper's flier curve keeps the hero 6-14 u away).
+- v2 + `SSBOT_FORUM_V2_MARGIN=flat:0.5`: ~95 % kills in 32-38 s, 50-67 % hitless kills, 0.4-0.9 hits per episode,
+  0.55-0.69 landed hits/s.
+- Recommended (arm tj2 = commit f2e30f9 defaults + `SSBOT_FORUM_V2=1 SSBOT_FORUM_V2_MARGIN=flat:0.5
+  SSBOT_FORUM_V2_EVERY=1 SSBOT_FORUM_V2_CORNER=13`): 24 episodes, 23 kills, 15 hitless kills (62.5 %), 0.42 hits
+  before the kill per episode (control t0 + t0b, 46 episodes: 52 %, 0.76), landed 0.60 / s p50, kill 35.5 s p50
+  (p10 28.5, p90 47.4), late ticks 20 %.
+- Slam analysis (all v2 arms, ~300 Slam Antic starts with the hero within 9 u): 14 % hit; with < 8 u from the hero
+  to the wall behind it 61 % (22 / 36), 8-13 u 2 %, >= 13 u 9 %. The corners came from the controller's jump
+  "under and behind" and the slam's step out to the wall; corner_room_u cut corner slams 13-17 -> 5 per arm.
+
+### Not done / open
+
+- The person's slam answer (jump + down slash on the hammer, the pogo bounce) is not in the v2 kinematics / hit
+  branches: from 4-7 u in front, often airborne or locked, the hero cannot clear the 12 u hammer once the slam's
+  active frames enter the 36-frame horizon (all rows unsafe ~42-47 frames before the contact). Main remaining cause.
+- Landed hits/s 0.6 vs the person's 2.0 (best 10 s windows): median distance 6-9 u, the slam step-out to 13 u, at
+  most ~1 hit predicted per 36-frame row.
+- Rune bombs / rune circle and idle-body contacts: a few per arm. Late ticks 20 % with two instances at EVERY=1.
+- Margin flat 0.5 for every type is my choice for the 1v1 (the person's call; 43.2).
