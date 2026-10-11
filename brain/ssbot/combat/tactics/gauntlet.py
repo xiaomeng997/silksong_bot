@@ -209,6 +209,14 @@ def load_l2_rules(path=None, env: str | None = None) -> L2Rules:
         r.fail_p = float(sw[5:])
     elif sw not in ("", "1", "on", "true"):
         raise ValueError(f"SSBOT_FORUM_L2={env!r}: 0 / off, 1 / on or fail:<p>")
+    # SSBOT_FORUM_L2_SET="face_u=3,slam_out_u=8": numeric rule fields for an A/B (the 1v1 runs, forum.md 44)
+    import os
+    for kv in os.environ.get("SSBOT_FORUM_L2_SET", "").replace(";", ",").split(","):
+        if "=" in kv:
+            k, v = (x.strip() for x in kv.split("=", 1))
+            if not isinstance(getattr(r, k, None), (int, float)) or isinstance(getattr(r, k), bool):
+                raise ValueError(f"SSBOT_FORUM_L2_SET: {k!r} is not a numeric L2Rules field")
+            setattr(r, k, type(getattr(r, k))(float(v)))
     return r
 
 
