@@ -53,6 +53,10 @@ MARGIN_MODE = os.environ.get("SSBOT_FORUM_V2_MARGIN", "focus").strip().lower() o
 # at it (then its "rule" margin), every other unit its "rule" margin. The focus unit is the L2 controller's target
 # (GoalPrefs.target) when it is in play, else the only enemy in play, else none (RangeSupport.build's `focus`).
 FOCUS_M = 0.5
+# the dash exception (SSBOT_FORUM_V2_FOCUS_DASH): "1" (default) a row dashing at the focus unit reads it with its "rule"
+# margin; "0" off (focus = flat FOCUS_M for every row); "audit" the dash copy is built (also under other margin modes,
+# for the controller's focus) and the planner only records which rows it would make unsafe (last_info["dash_only"])
+FOCUS_DASH = os.environ.get("SSBOT_FORUM_V2_FOCUS_DASH", "1").strip().lower() or "1"
 # the escape check runs on a carried CONTINUE row too (1v1 live, forum.md 44: a row chosen with an escape kept running
 # into a Slam Antic's reach unchecked until no row had one; SSBOT_FORUM_V2_ESC_CARRIED=0: the old skip)
 ESC_CARRIED = os.environ.get("SSBOT_FORUM_V2_ESC_CARRIED", "1").strip() != "0"
@@ -282,7 +286,8 @@ class LayerSupport:
         self.pend: list = []        # pending aims (RangeSupport.build: pending_aims)
         self.stack_esc: np.ndarray | None = None    # the escape check's danger (add_esc), None: the stack
         self.stack_dash: np.ndarray | None = None   # the focus unit with its "rule" margin (rows dashing at it)
-        self.focus: int | None = None
+        self.focus: int | None = None               # the unit with FOCUS_M (MARGIN_MODE "focus")
+        self.dash_focus: int | None = None          # the unit stack_dash holds (FOCUS_DASH)
         self.stack = np.zeros((len(self.samples), canvas.ny, canvas.nx), bool)
         self.fc = _Half(inner_fc, BOUNDS_HALF)
         smax = self.samples[-1] if self.samples else 0
@@ -483,7 +488,9 @@ class RangeSupport(LayerSupport):
         rs = cls(cv, samples, k_shift, inner_fc)
         rs.trk = trk
         rs.margin_mode = margin_mode
-        rs.focus = focus_iid(trk, focus) if (margin_mode or MARGIN_MODE) == "focus" else None
+        mode_ = margin_mode or MARGIN_MODE
+        rs.focus = focus_iid(trk, focus) if mode_ == "focus" else None
+        rs.dash_focus = focus_iid(trk, focus) if (FOCUS_DASH == "audit" or (mode_ == "focus" and FOCUS_DASH == "1"))             else None
         rs.n_vslam = 0
         n_est = 0
         dash_parts: dict = {}
@@ -499,7 +506,7 @@ class RangeSupport(LayerSupport):
                 n_est += 1
                 m = rs.m_of(iid, tk_name, k)
                 c, ix0, iy0 = coarse(e.raw, tab.cell, cv.cell)
-                if iid == rs.focus:
+                if iid == rs.dash_focus:
                     md = round(margin(tk_name, k, "rule"), 4)
                     if md > m + 1e-6:
                         dash_parts.setdefault((si, md), []).append((c, ix0, iy0))

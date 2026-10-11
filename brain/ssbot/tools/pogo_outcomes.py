@@ -36,6 +36,8 @@ PRE_F = 60             # frames of enemy FSM history kept before the press
 # the slash box relative to the hero position: the union of DownSlash / DownSlashAlt, both facings (wanderer.json)
 SLASH_BOX = (-1.75, 1.75, -2.17, 0.15)
 NEAR_U = 9.0           # Clappers within this distance of the hero at the press are followed
+BOUNCE_S = 0.45        # game s from the press searched for pogo onsets (vy >= 15)
+LOSS_S = 1.0           # game s from the press a health loss counts against the slash
 CLAPPER = "Song Heavy Sentry"
 
 
@@ -80,7 +82,7 @@ def contacts(s: dict, x: float, y: float, box=SLASH_BOX) -> list[dict]:
 def _hero(s: dict) -> dict:
     h = s.get("hero") or {}
     return {"f": s["f"], "pos": (h.get("pos") or [0, 0])[:2], "vel": h.get("vel"), "clip": (h.get("anim") or {}).get("clip"),
-            "facing": h.get("facing"), "cs": h.get("cstate"), "inv": h.get("invulnerable"),
+            "facing": h.get("facing"), "cs": h.get("cstate"), "inv": h.get("invulnerable"), "hp": h.get("health"),
             "mask": (s.get("input") or {}).get("mask", 0), "act": (s.get("act") or {}).get("mask", 0), "dt": s.get("dt")}
 
 
@@ -152,8 +154,47 @@ def analyse(buf: list[dict], i0: int, session: str) -> dict:
         st, tin = _control(e)
         claps.append({"iid": iid, "state": st, "t": round(tin, 3), "pos": e["pos"][:2], "flipX": e.get("flipX"),
                       "fsm": tr, "path": path})
+    # game time from the press (human sessions run at 0.5x: dt 1/120), the pogo by velocity (the bounce sets vy -10
+    # for a step on the contact, then the pogo vy 17.4: kinematics EV_POGO), every rising onset within BOUNCE_S
+    # (a second one: the same slash meeting something else), the masks lost within LOSS_S (the 'damage' events
+    # include hits the downspike i-frames then drop: health is the truth)
+    t, ts = 0.0, {}
+    for s in post:
+        ts[s["f"]] = t
+        t += float(s.get("dt") or 0.0)
+    ups, prev_vy = [], None
+    for s in post[1:]:
+        if ts[s["f"]] > BOUNCE_S:
+            break
+        vy = float(((s.get("hero") or {}).get("vel") or [0, 0])[1])
+        if vy >= 15.0 and (prev_vy is None or prev_vy < 15.0):
+            ups.append(s["f"])
+        prev_vy = vy
+    contact_f = []
+    for u in ups:
+        g = u
+        for s in reversed([x for x in post if x["f"] < u]):
+            if abs(float(((s.get("hero") or {}).get("vel") or [0, 0])[1]) + 10.0) < 0.05:
+                g = s["f"]
+            else:
+                break
+        contact_f.append(g)
+    hp0 = (pre.get("hero") or {}).get("health")
+    loss_f, loss_src = None, None
+    for s in post:
+        if ts[s["f"]] > LOSS_S:
+            break
+        hp = (s.get("hero") or {}).get("health")
+        if hp0 is not None and hp is not None and hp < hp0:
+            loss_f = s["f"]
+            loss_src = next((ev.get("d", {}).get("source") for x in post if loss_f - 3 <= x["f"] <= loss_f
+                             for ev in x.get("ev") or () if ev.get("k") == "hp" and (ev.get("d") or {}).get("delta", 0) < 0),
+                            None)
+            break
     return {"session": session, "f0": f0, "clip": clip0, "hero0": h0, "bounce_f": fb, "hits": hits, "contacts": con,
-            "freeze": frz, "damage": dmg, "blocked": blk, "clappers": claps, "hero": hero}
+            "freeze": frz, "damage": dmg, "blocked": blk, "clappers": claps, "hero": hero,
+            "up_f": ups, "contact_f": contact_f, "t_of": {str(k): round(v, 4) for k, v in ts.items()},
+            "hp0": hp0, "loss_f": loss_f, "loss_t": None if loss_f is None else round(ts[loss_f], 4), "loss_src": loss_src}
 
 
 def recordings(paths: list[Path]) -> list[Path]:
@@ -233,7 +274,9 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
     a1 = sub.add_parser("scan")
-    a1.add_argument("sessions", nargs="+", type=Path)
+    a1.add_argument("sessions", nargs="*", type=Path)
+    a1.add_argument("--glob", nargs=2, metavar=("BASE", "PATTERN"), action="append", default=[],
+                    help="also every directory BASE/PATTERN (a long run list)")
     a1.add_argument("--out", type=Path, required=True)
     a2 = sub.add_parser("summary")
     a2.add_argument("jsonl", nargs="+", type=Path)
@@ -241,7 +284,8 @@ def main(argv: list[str] | None = None) -> int:
     if a.cmd == "scan":
         a.out.parent.mkdir(parents=True, exist_ok=True)
         with a.out.open("w", encoding="utf-8") as fo:
-            for ses in recordings(a.sessions):
+            extra = [d for base, pat in a.glob for d in sorted(Path(base).glob(pat)) if d.is_dir()]
+            for ses in recordings(list(a.sessions) + extra):
                 rows = scan(ses)
                 for r in rows:
                     fo.write(json.dumps(r) + "\n")

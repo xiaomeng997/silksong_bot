@@ -12,6 +12,7 @@ import argparse
 import json
 import random
 import time
+import zlib
 from collections import defaultdict
 from pathlib import Path
 
@@ -28,6 +29,7 @@ def main(argv=None) -> int:
     ap.add_argument("--frames", type=int, default=2400)
     ap.add_argument("--out", type=Path, required=True)
     ap.add_argument("--ticks-out", type=Path, default=None)
+    ap.add_argument("--det", action="store_true", help="infinite planner deadlines (decisions independent of speed)")
     a = ap.parse_args(argv)
     import dataclasses
     from ssbot.record.recorder import RecordingReader
@@ -43,6 +45,9 @@ def main(argv=None) -> int:
             pol.terrain_msg = m
     pol.reset(random.Random(0), ENCOUNTERS[row["unit"]])
     pol.planner.fcfg.deadline_ms = float("inf")
+    if a.det:
+        pol.planner.fcfg.esc_deadline_ms = float("inf")
+        pol.planner.fcfg.clash_deadline_ms = float("inf")
     step0 = pol.sc.step
 
     def step(*args, **kw):
@@ -60,6 +65,8 @@ def main(argv=None) -> int:
             break
         n += 1
         pol.planner.last_sel = None
+        dash0 = getattr(pol.planner.audit, "v2_dash_rows", 0)
+        dashu0 = getattr(pol.planner.audit, "v2_dash_unsafe", 0)
         pol.act(s, None)
         ls = getattr(pol.planner, "last_sel", None)
         trk = None
@@ -99,7 +106,16 @@ def main(argv=None) -> int:
             ticks.append({"f": s["f"], "st": st, "dx": None if dx is None else round(dx, 2),
                           "nh_max": float(nh[allowed].max()) if allowed.any() else 0.0,
                           "nh_safe": float(nh[safe].max()) if safe.any() else 0.0, "nh_ch": float(nh[ls["first"]]),
-                          "n_safe": int(safe.sum()), "hit_S": int((hit & S).sum()), "hit": int(hit.sum())})
+                          "n_safe": int(safe.sum()), "hit_S": int((hit & S).sum()), "hit": int(hit.sum()),
+                          # the margin-mode comparison (forum.md 46.1): the pick and digests of the safe test
+                          "first": int(ls["first"]), "plan": getattr(pol.planner_last, "name", None),
+                          "mask": int(getattr(pol.planner_last, "mask", 0)),
+                          "safe_h": zlib.crc32(np.packbits(safe).tobytes()),
+                          "S_h": zlib.crc32(np.packbits(S).tobytes()),
+                          "dash": int(pol.planner.audit.v2_dash_rows - dash0),
+                          "dash_unsafe": int(pol.planner.audit.v2_dash_unsafe - dashu0),
+                          "pick_dash_only": int(ls["first"]) in set(int(x) for x in
+                                                                    pol.planner.last_info.get("dash_only", ()))})
     out = {"run": str(a.run), "episode": a.episode, "ticks": n, "s": round(time.perf_counter() - t0, 1),
            "by_state": {k: {kk: (round(vv / v["ticks"], 3) if kk not in ("ticks",) else int(vv))
                             for kk, vv in v.items()} for k, v in sorted(agg.items(), key=lambda z: -z[1]["ticks"])}}

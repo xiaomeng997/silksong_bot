@@ -2053,18 +2053,23 @@ class ForumPlanner(Planner):
         """The focus margin (forum_v2 MARGIN_MODE "focus", the person 2026-10-11): a row that dashes at the focus
         unit reads that unit with its "rule" margin (occupied_dash) on stage 1's frames; every other row keeps
         FOCUS_M. The envelope, the hit branches and the escapes read the plain support."""
+        self.last_info.pop("dash_only", None)
         rs = getattr(f, "rs", None)
-        if rs is None or getattr(rs, "stack_dash", None) is None or rs.focus not in getattr(rs.trk, "now", {}):
+        if rs is None or getattr(rs, "stack_dash", None) is None or rs.dash_focus not in getattr(rs.trk, "now", {}):
             return o
-        p = rs.trk.now[rs.focus][1].get("pos")
+        p = rs.trk.now[rs.dash_focus][1].get("pos")
         if not p:
             return o
         dr = forum_v2.dash_at(r1.mode, r1.vel, r1.centre, float(p[0]))
         if not dr.any():
             return o
         od = rs.occupied_dash(cx[dr], cy[dr], tq)
+        only = od.any(axis=1) & ~o[dr].any(axis=1)
         self.audit.v2_dash_rows += int(dr.sum())
-        self.audit.v2_dash_unsafe += int((od.any(axis=1) & ~o[dr].any(axis=1)).sum())
+        self.audit.v2_dash_unsafe += int(only.sum())
+        self.last_info["dash_only"] = np.flatnonzero(dr)[only]
+        if forum_v2.FOCUS_DASH != "1":
+            return o                                   # "audit": recorded only
         o = o.copy()
         o[dr] |= od
         return o

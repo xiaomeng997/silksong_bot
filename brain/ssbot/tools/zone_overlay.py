@@ -1038,6 +1038,8 @@ def render(fr: dict, grid: Grid, out_size: tuple[int, int], view: View, legend: 
             c = (int(round(p[0])), int(round(p[1])))
             cv2.circle(img, c, r + 2, (0, 0, 0, 255), -1, cv2.LINE_AA)
             cv2.circle(img, c, r, (255, 255, 255, 255), -1, cv2.LINE_AA)
+        if fr.get("pogo"):
+            draw_pogo(img, fr["pogo"], Hw, H)
     if legend is not None:
         draw_legend(img, legend, view)
     return img
@@ -1274,14 +1276,89 @@ class Keys:
         return bool(user32.GetAsyncKeyState(vk) & 0x8000)
 
 
+# ---- the down-slash eye check (task 1v1 T1(c), forum.md 46.5; --overlay-pogo) ----
+POGO_T = 36                 # frames of each predicted branch
+POGO_SHOW_S = 3.0           # wall seconds a press's frozen prediction and real path stay on the screen
+POGO_COLS = {"miss": (255, 210, 60), "hit": (90, 230, 90), "real": (255, 255, 255), "contact": (40, 220, 255),
+             "frozen_miss": (200, 140, 40), "frozen_hit": (40, 160, 40)}    # BGR
+
+
+def pogo_predict(eng, s: dict) -> dict | None:
+    """A down slash pressed on the next frame from the hero's state now (ssbot.combat.pogo_model): the miss branch,
+    the first contact with an enemy hurtbox / clashable collider of this frame (held still) and the bounce branch
+    from it. The held horizontal input is kept for the whole branch."""
+    from ssbot.combat.pogo_model import PogoModel, slash_poly
+    from ssbot.knowledge.kinematics import B_ATTACK, B_DOWN, B_LEFT, B_RIGHT
+    from ssbot.tools.pogo_check import targets_of
+    pol = eng.pol
+    try:
+        start = pol.trk.state().copy()
+    except Exception:  # noqa: BLE001  (no state yet)
+        return None
+    h = s.get("hero") or {}
+    held = int((s.get("input") or {}).get("mask", 0) or 0) & (B_LEFT | B_RIGHT)
+    masks = np.full(POGO_T, held, np.int64)
+    masks[0] |= B_DOWN | B_ATTACK
+    masks[1:3] |= B_DOWN
+    pm = getattr(eng, "_pogo_pm", None)
+    if pm is None or pm.params is not pol.params or pm.terrain is not pol.terrain:
+        pm = eng._pogo_pm = PogoModel(pol.params, pol.terrain)
+    facing = 1 if float(h.get("facing") or 1) >= 0 else -1
+    tg = targets_of(s)
+    br = pm.branches(start, masks, 1, lambda j: tg, facing)
+    out = {"miss": br.miss.pos[0].copy(), "hit": None if br.hit is None else br.hit.pos[0].copy(), "j": br.contact_j,
+           "kind": br.kind, "ground": bool(int(br.miss.flags[0, 0]) & 1)}
+    if br.contact_j >= 0:
+        out["slash"] = slash_poly(facing) + br.miss.pos[0, br.contact_j]
+    return out
+
+
+def draw_pogo(img: np.ndarray, pg: dict, Hw: np.ndarray, H: int) -> None:
+    """Now: the miss branch (light blue) and the bounce branch (green) of a press on the next frame, the slash where it
+    first meets something (yellow outline). After a press: the prediction frozen at the press (darker) and the real
+    path (white)."""
+    import cv2
+    th = max(2, int(round(2.5 * H / 1080)))
+
+    def line(pts, col, w):
+        if pts is None or len(pts) < 2:
+            return
+        q = np.round(_to_px(Hw, np.asarray(pts, float))).astype(np.int32)
+        cv2.polylines(img, [q], False, (0, 0, 0, 255), w + 2, cv2.LINE_AA)
+        cv2.polylines(img, [q], False, (*col, 255), w, cv2.LINE_AA)
+
+    fz = pg.get("frozen")
+    if fz is not None:
+        line(fz.get("miss"), POGO_COLS["frozen_miss"], th)
+        line(fz.get("hit"), POGO_COLS["frozen_hit"], th)
+        line(pg.get("real"), POGO_COLS["real"], th)
+        if fz.get("slash") is not None:
+            q = np.round(_to_px(Hw, fz["slash"])).astype(np.int32)
+            cv2.polylines(img, [q], True, (*POGO_COLS["contact"], 255), max(1, th - 1), cv2.LINE_AA)
+    now = pg.get("now")
+    if now is not None and fz is None:
+        line(now.get("miss"), POGO_COLS["miss"], th)
+        line(now.get("hit"), POGO_COLS["hit"], th)
+        if now.get("slash") is not None:
+            q = np.round(_to_px(Hw, now["slash"])).astype(np.int32)
+            cv2.polylines(img, [q], True, (*POGO_COLS["contact"], 255), max(1, th - 1), cv2.LINE_AA)
+
+
 class LiveOverlay:
     """The overlay inside the human session process: fed by the session's own OracleLink (subscribe_state /
     subscribe_raw: no second IPC client), computing and drawing on its own thread."""
 
     def __init__(self, link, game_pid: int, speed: float = 1.0, crest: str = "Wanderer", threads: int = 4,
                  every: int = 3, margins: bool = False, log_path: Path | None = None, range_layer: bool = False,
-                 mode: str | None = None, k: int = 0, all_k: bool = False, swept: bool = False, aim: bool = False):
+                 mode: str | None = None, k: int = 0, all_k: bool = False, swept: bool = False, aim: bool = False,
+                 pogo: bool = False):
         self.link, self.pid = link, game_pid
+        self.pogo = pogo                    # the down-slash eye check (draw_pogo)
+        self.pogo_now = None
+        self.pogo_frozen = None
+        self.pogo_real: list = []
+        self.pogo_t = 0.0
+        self.pogo_clip = None
         self.speed = speed if speed and speed > 0 else 1.0
         self.crest, self.threads, self.every, self.margins = crest, threads, max(1, every), margins
         self.range_layer = range_layer
@@ -1452,13 +1529,37 @@ class LiveOverlay:
         m = merge_states(self.group, self.f_next, max(self.speed, 0.1))
         self.group = []
         self.f_next += 1
-        self.eng.feed(m)
+        fed = self.eng.feed(m)
         self.stats["fed"] += 1
+        if self.pogo and fed:
+            self._pogo_frame(m)
         if self.stepping:
             self.stepping = 0
             self._rpc_scale(FREEZE_SCALE)
             self.dirty = True
         return True
+
+    def _pogo_frame(self, m: dict) -> None:
+        """One fed game frame for the eye check: a press (the clip turning DownSlash / DownSlashAlt) freezes the
+        prediction made on the frame before; the real path is collected for POGO_T frames; then a new prediction."""
+        h = m.get("hero") or {}
+        clip = (h.get("anim") or {}).get("clip")
+        down = clip in ("DownSlash", "DownSlashAlt")
+        if down and self.pogo_clip not in ("DownSlash", "DownSlashAlt") and self.pogo_now is not None:
+            self.pogo_frozen = self.pogo_now
+            self.pogo_real = [list((self.pogo_now.get("miss") or [[0, 0]])[0])]
+            self.pogo_t = time.perf_counter()
+            self.stats["pogo_presses"] = self.stats.get("pogo_presses", 0) + 1
+        self.pogo_clip = clip
+        if self.pogo_frozen is not None and len(self.pogo_real) <= POGO_T and h.get("pos"):
+            self.pogo_real.append(list(h["pos"][:2]))
+        if self.pogo_frozen is not None and time.perf_counter() - self.pogo_t > POGO_SHOW_S * max(1.0, 0.5 / self.speed):
+            self.pogo_frozen, self.pogo_real = None, []
+        try:
+            self.pogo_now = pogo_predict(self.eng, m)
+        except Exception as e:  # noqa: BLE001
+            self.pogo_now = None
+            self.stats["errors"].append(f"pogo: {e!r}"[:300])
 
     def _run(self) -> None:
         self.eng = None
@@ -1534,8 +1635,14 @@ class LiveOverlay:
                         # the colliders and the camera of the newest STATE (what is on the screen now)
                         shown = dict(shown, cols=damage_colliders(self.last_raw), cam=self.last_raw.get("cam"),
                                      hero=self.eng.hero(self.last_raw))
+                    if self.pogo and shown is not None:
+                        shown = dict(shown, pogo={"now": self.pogo_now, "frozen": self.pogo_frozen,
+                                                  "real": self.pogo_real})
                     lines = legend_lines(fr, self.view, config,
                                          "" if self.eng.running else "(no battle: red only)")
+                    if self.pogo and self.view.on:
+                        lines = lines + [("DOWN SLASH now: light blue = miss, green = bounce, yellow = where it "
+                                          "lands; after a press: darker = predicted at the press, white = real", None)]
                     # drawn at most at the render size and scaled up nearest (a 4K window: 3 ms instead of 55)
                     W, H = rect[2], rect[3]
                     sc = min(1.0, RENDER[0] / W, RENDER[1] / H)
