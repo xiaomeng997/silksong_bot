@@ -56,8 +56,9 @@ ESC_CARRIED = os.environ.get("SSBOT_FORUM_V2_ESC_CARRIED", "1").strip() != "0"
 # instead of idling where the row ends (1v1 live: rows that approached a Slam Antic with an escape were all unsafe a
 # few ticks later, none of them carrying that escape; SSBOT_FORUM_V2_ESC_TAIL=0: off)
 ESC_TAIL = os.environ.get("SSBOT_FORUM_V2_ESC_TAIL", "1").strip() != "0"
-# rows the escape check may look at past the first v2_esc_k when none of those had an escape (SSBOT_FORUM_V2_ESC_MORE)
-ESC_MORE = int(os.environ.get("SSBOT_FORUM_V2_ESC_MORE", "48") or 0)
+# rows the escape check may look at past the first v2_esc_k when none of those had an escape (SSBOT_FORUM_V2_ESC_MORE;
+# off: live 1v1 with 48, hitless kills 42 % vs 65 %, the retreats ran into the corners)
+ESC_MORE = int(os.environ.get("SSBOT_FORUM_V2_ESC_MORE", "0") or 0)
 # the Clapper's corner (1v1 live, forum.md 44: 16 of 26 slam hits): with its body this close to a wall (u) the strip
 # between them is a trap - a slam it starts facing the wall reaches 12 u, so the antic leaves no way out but the wall
 # top (y >= 11.8, never hit; forum.md 42). A safe row ending there ranks after every safe row ending elsewhere
