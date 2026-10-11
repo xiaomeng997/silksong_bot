@@ -120,10 +120,12 @@ class Probe:
             m = hmask(s)
             if k < j_hold:
                 m |= M_J
-            if k == a_delay:
-                m |= M_D | M_A
-            elif a_delay < k <= a_delay + 2:
+            # down held from 3 frames before the attack (pressed on the same frame the swing reads no direction yet:
+            # round 1 got a side slash on 53 % of the presses) to 2 after
+            if a_delay - 3 <= k <= a_delay + 2:
                 m |= M_D
+            if k == a_delay:
+                m |= M_A
             s = self.step(m, dump=a_delay <= k <= a_delay + 12)
             if k == 0:
                 f_jump = s["f"] + 2
@@ -175,7 +177,7 @@ class Probe:
         near = e is not None and abs(hx(s) - float(e["pos"][0])) <= 3.5 and control(e) in READY
         horiz = 1 if near else rng.choice((0, 1, -1))
         j_hold = rng.randint(6, 16)
-        a_delay = rng.randint(8, 26)
+        a_delay = rng.randint(8, 22)
         cx = float(e["pos"][0]) if e is not None else None
         if not near and cx is not None:       # far from it: jump away (nothing to hit)
             horiz = -1

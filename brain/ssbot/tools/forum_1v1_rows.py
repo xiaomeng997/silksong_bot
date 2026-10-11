@@ -114,8 +114,9 @@ def main(argv=None) -> int:
                           "S_h": zlib.crc32(np.packbits(S).tobytes()),
                           "dash": int(pol.planner.audit.v2_dash_rows - dash0),
                           "dash_unsafe": int(pol.planner.audit.v2_dash_unsafe - dashu0),
-                          "pick_dash_only": int(ls["first"]) in set(int(x) for x in
-                                                                    pol.planner.last_info.get("dash_only", ()))})
+                          "chosen": int(ls.get("chosen", -1)),
+                          "pick_dash_only": int(ls.get("chosen", -1)) in set(int(x) for x in
+                                                                             pol.planner.last_info.get("dash_only", ()))})
     out = {"run": str(a.run), "episode": a.episode, "ticks": n, "s": round(time.perf_counter() - t0, 1),
            "by_state": {k: {kk: (round(vv / v["ticks"], 3) if kk not in ("ticks",) else int(vv))
                             for kk, vv in v.items()} for k, v in sorted(agg.items(), key=lambda z: -z[1]["ticks"])}}

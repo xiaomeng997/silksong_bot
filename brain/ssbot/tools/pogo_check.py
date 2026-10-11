@@ -68,15 +68,16 @@ def targets_of(s: dict):
     return out
 
 
-def run(recs: list[Path], rows_by: dict, ev_off: int, split: str) -> list[dict]:
+def run(recs: list[Path], rows_by: dict, ev_offs: tuple, split: str) -> dict:
     from ssbot.combat.pogo_model import PogoModel
     from ssbot.knowledge import kinematics as kin
     from ssbot.record.recorder import RecordingReader
+    from ssbot.tools.pogo_outcomes import rec_name
     from ssbot.train.forum_planner_policy import CREST_PARAMS
     params = kin.HeroParams.load(CREST_PARAMS["Wanderer"])
-    res = []
+    res = {o: [] for o in ev_offs}
     for rec in recs:
-        name = f"{rec.parents[2].name}/{rec.name}"
+        name = rec_name(rec)
         if split != "all" and split_of(name) != split:
             continue
         rows = {r["f0"]: r for r in rows_by.get(name, [])}
@@ -87,7 +88,7 @@ def run(recs: list[Path], rows_by: dict, ev_off: int, split: str) -> list[dict]:
         for _, m in rd.terrain():
             terrain = kin.Terrain2D.from_message(m, params.scene("Hang_04"))
             break
-        pm = PogoModel(params, terrain, ev_off=ev_off)
+        pms = {o: PogoModel(params, terrain, ev_off=o) for o in ev_offs}
         trk = kin.StateTracker(params, terrain or kin.Terrain2D.empty())
         buf: deque = deque(maxlen=T + 8)
         starts = {}
@@ -105,7 +106,9 @@ def run(recs: list[Path], rows_by: dict, ev_off: int, split: str) -> list[dict]:
                 S = [x for x in buf if f0 - 1 <= x["f"] <= f0 - 1 + T]
                 if len(S) != T + 1 or S[0]["f"] != f0 - 1:
                     continue
-                res.append(one(pm, starts.pop(f0), S, rows[f0], name))
+                st = starts.pop(f0)
+                for o, pm in pms.items():
+                    res[o].append(one(pm, st, S, rows[f0], name))
     return res
 
 
@@ -119,6 +122,7 @@ def one(pm, start, S: list[dict], r: dict, name: str) -> dict:
     hp = [(x.get("hero") or {}).get("health") for x in S]
     lost = next((j for j in range(1, len(S)) if hp[j] is not None and hp[0] is not None and hp[j] < hp[0]), len(S))
     act_c = (r["contact_f"][0] - (f0 - 1)) if r.get("up_f") else -1
+    geo_j, _ = pm.contact(real, facing, 1, lambda j: tg.get(j, ()))     # the contact rule on the real path
     pick = br.hit if br.hit is not None else br.miss
     timed = pm.rollout(start, masks, act_c) if act_c >= 0 else None
     err, err_t = {}, {}
@@ -130,6 +134,7 @@ def one(pm, start, S: list[dict], r: dict, name: str) -> dict:
         if timed is not None:
             err_t[d] = float(np.hypot(*(timed.pos[0, j] - real[j])))
     return {"rec": name, "f0": f0, "case": case_of(r), "pred_j": br.contact_j, "pred_kind": br.kind, "act_j": act_c,
+            "geo_j": geo_j,
             "err": err, "err_timed": err_t, "lost_j": lost if lost < len(S) else None}
 
 
@@ -149,7 +154,13 @@ def summary(res: list[dict]) -> dict:
         pred = [x for x in xs if x["pred_j"] >= 0]
         both = [x for x in xs if x["act_j"] >= 0 and x["pred_j"] >= 0]
         dt = [x["pred_j"] - x["act_j"] for x in both]
+        geo = [x for x in xs if x.get("geo_j", -1) >= 0]
+        gb = [x for x in xs if x["act_j"] >= 0 and x.get("geo_j", -1) >= 0]
+        gdt = [x["geo_j"] - x["act_j"] for x in gb]
         o = {"n": len(xs), "bounce": len(bounce), "pred_contact": len(pred),
+             "geo_recall": round(len(gb) / len(bounce), 3) if bounce else None,
+             "geo_precision": round(len(gb) / len(geo), 3) if geo else None,
+             "geo_timing": dict(sorted({str(v): gdt.count(v) for v in set(gdt)}.items(), key=lambda z: int(z[0]))),
              "recall": round(len(both) / len(bounce), 3) if bounce else None,
              "precision": round(len(both) / len(pred), 3) if pred else None,
              "timing_err_frames": dict(sorted({str(v): dt.count(v) for v in set(dt)}.items(), key=lambda z: int(z[0]))),
@@ -169,7 +180,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--rows", type=Path, nargs="+", required=True)
     ap.add_argument("--recs", type=Path, nargs="+", required=True)
     ap.add_argument("--split", default="all", choices=("all", "calib", "test"))
-    ap.add_argument("--ev-off", type=int, default=None)
+    ap.add_argument("--ev-off", default=None, help="EV_POGO offsets to compare, e.g. -1,0,1 (default pogo_model.EV_OFF)")
     ap.add_argument("--out", type=Path, required=True)
     a = ap.parse_args(argv)
     from ssbot.combat import pogo_model
@@ -180,12 +191,12 @@ def main(argv: list[str] | None = None) -> int:
             if line.strip():
                 r = json.loads(line)
                 rows_by[r["session"]].append(r)
-    ev_off = pogo_model.EV_OFF if a.ev_off is None else a.ev_off
-    res = run(recordings(a.recs), rows_by, ev_off, a.split)
-    out = {"split": a.split, "ev_off": ev_off, "n": len(res), "cases": summary(res)}
+    offs = (pogo_model.EV_OFF,) if a.ev_off is None else tuple(int(x) for x in str(a.ev_off).split(","))
+    res = run(recordings(a.recs), rows_by, offs, a.split)
+    out = {"split": a.split, "by_ev_off": {str(o): {"n": len(r), "cases": summary(r)} for o, r in res.items()}}
     a.out.parent.mkdir(parents=True, exist_ok=True)
     a.out.write_text(json.dumps(out, indent=1), "utf-8")
-    a.out.with_suffix(".rows.jsonl").write_text("".join(json.dumps(x) + "\n" for x in res), "utf-8")
+    a.out.with_suffix(".rows.jsonl").write_text("".join(json.dumps(dict(x, ev_off=o)) + "\n" for o, r in res.items() for x in r), "utf-8")
     print(json.dumps(out, indent=1)[:6000])
     return 0
 

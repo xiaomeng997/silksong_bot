@@ -208,6 +208,14 @@ def recordings(paths: list[Path]) -> list[Path]:
     return out
 
 
+def rec_name(rec: Path) -> str:
+    """A recording's id in the rows: the human session's name, else <run dir or probe dir>/<recording>."""
+    if (rec / "state.raw.zst").exists():
+        return rec.name
+    up = rec.parents[3] if rec.parents[2].name == "rec" else rec.parents[2]
+    return f"{up.name}/{rec.name}"
+
+
 def _states(rec: Path):
     if (rec / "state.raw.zst").exists():
         from ssbot.tools.raw_session import states
@@ -221,7 +229,7 @@ def scan(session: Path) -> list[dict]:
     pending: list[int] = []        # press frames waiting for their window
     rows = []
     prev_clip = None
-    name = session.name if (session / "state.raw.zst").exists() else f"{session.parents[2].name}/{session.name}"
+    name = rec_name(session)
     for s in _states(session):
         buf.append(s)
         c = ((s.get("hero") or {}).get("anim") or {}).get("clip")
